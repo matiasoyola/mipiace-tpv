@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>Mi Piace TPV</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden;font-family:'Inter',system-ui,sans-serif}
+body{background:#111;color:#eee}
+
+.app{display:grid;grid-template-columns:48px 1fr 360px;grid-template-rows:48px 1fr;height:100vh;overflow:hidden}
+
+/* TOPBAR */
+.topbar{grid-column:1/-1;background:#1a1a1a;border-bottom:1px solid #2a2a2a;display:flex;align-items:center;padding:0 12px 0 0;gap:0}
+.tb-logo{width:48px;height:48px;display:flex;align-items:center;justify-content:center;border-right:1px solid #2a2a2a;flex-shrink:0}
+.tb-dot{width:8px;height:8px;border-radius:50%;background:#5DCAA5;box-shadow:0 0 0 3px rgba(93,202,165,.2)}
+.tb-name{font-size:12px;font-weight:700;color:#eee;padding:0 12px;border-right:1px solid #2a2a2a;white-space:nowrap}
+.tb-caja{font-size:10px;color:#666;padding:0 12px;font-family:monospace}
+.tb-gap{flex:1}
+.tb-sync{display:flex;align-items:center;gap:5px;font-size:10px;color:#666;font-family:monospace;padding:0 12px}
+.sdot{width:6px;height:6px;border-radius:50%;background:#5DCAA5}
+.sdot.busy{animation:blink .8s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+.tb-clock{font-size:11px;font-family:monospace;color:#888;padding:0 12px;border-left:1px solid #2a2a2a}
+.tb-user{display:flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid #2a2a2a;border-radius:6px;font-size:11px;color:#888;margin:0 6px}
+.uav{width:20px;height:20px;border-radius:50%;background:rgba(93,202,165,.2);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:#5DCAA5}
+.tb-cierre{padding:5px 11px;background:rgba(224,85,85,.15);border:1px solid rgba(224,85,85,.3);border-radius:6px;font-size:10px;font-weight:600;color:#e05555;cursor:pointer;font-family:'Inter',sans-serif}
+
+/* SIDENAV */
+.sidenav{background:#1a1a1a;border-right:1px solid #2a2a2a;display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:3px;overflow:hidden}
+.ni{width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#555}
+.ni:hover{background:#252525;color:#888}
+.ni.active{background:rgba(93,202,165,.15);color:#5DCAA5}
+.ni svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.ni-gap{flex:1}
+
+/* CATALOG */
+.catalog{display:flex;flex-direction:column;height:100%;overflow:hidden;background:#111}
+
+.search-bar{flex-shrink:0;padding:8px 10px;background:#1a1a1a;border-bottom:1px solid #2a2a2a;display:flex;gap:6px;align-items:center}
+.sw{flex:1;display:flex;align-items:center;gap:8px;background:#252525;border:1px solid #333;border-radius:8px;padding:7px 11px}
+.sw:focus-within{border-color:#5DCAA5}
+.sw svg{width:12px;height:12px;fill:none;stroke:#555;stroke-width:1.5;flex-shrink:0}
+.si{border:none;background:none;outline:none;font-family:'Inter',sans-serif;font-size:12px;color:#eee;flex:1}
+.si::placeholder{color:#444}
+.sc{font-size:10px;color:#555;cursor:pointer;display:none}
+.scan-btn{display:flex;align-items:center;gap:4px;padding:7px 10px;background:#252525;border:1px solid #333;border-radius:8px;font-size:10px;font-weight:600;color:#888;cursor:pointer;white-space:nowrap}
+.scan-btn.on{background:rgba(93,202,165,.1);border-color:#5DCAA5;color:#5DCAA5}
+.scan-btn svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:1.5}
+
+.cats-bar{flex-shrink:0;padding:6px 10px;display:flex;gap:4px;background:#1a1a1a;border-bottom:1px solid #2a2a2a;overflow-x:auto}
+.cats-bar::-webkit-scrollbar{display:none}
+.cat{padding:3px 10px;border-radius:20px;font-size:10px;font-weight:600;cursor:pointer;border:1px solid #333;color:#666;background:transparent;white-space:nowrap}
+.cat:hover{border-color:#444;color:#888}
+.cat.active{background:#5DCAA5;color:#000;border-color:transparent;font-weight:700}
+
+/* GRID */
+.grid{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:10px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:7px;align-content:start;background:#111}
+.grid::-webkit-scrollbar{width:3px}
+.grid::-webkit-scrollbar-thumb{background:#333;border-radius:2px}
+.gempty{grid-column:1/-1;padding:40px;text-align:center;color:#444;font-size:12px}
+
+/* CARDS */
+.pc{background:#1e1e1e;border:1px solid #2d2d2d;border-radius:9px;cursor:pointer;display:flex;flex-direction:column;overflow:hidden;transition:border-color .12s,transform .12s;min-height:130px}
+.pc:hover{border-color:#444;transform:translateY(-1px)}
+.pc:active{transform:scale(.97)}
+.pc.agotado{opacity:.6;cursor:pointer}
+.pc.agotado:hover{border-color:#444;transform:translateY(-1px)}
+.pc.flash{border-color:#5DCAA5}
+.pc-img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;border-bottom:1px solid #2d2d2d;background:#252525}
+.pc-body{padding:12px;display:flex;flex-direction:column;gap:5px;flex:1}
+.pc-cat{font-size:8px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;padding:2px 5px;border-radius:3px;align-self:flex-start;margin-bottom:2px}
+.pc-name{font-size:12px;font-weight:600;color:#ddd;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.pc-ean{font-size:8px;color:#555;font-family:monospace;margin-top:1px}
+.pc-foot{display:flex;align-items:baseline;justify-content:space-between;margin-top:auto;padding-top:5px}
+.pc-price{font-size:15px;font-weight:700;color:#eee;font-family:monospace}
+.pc-stock{font-size:9px;font-weight:600}
+.stock-ok{color:#5DCAA5}
+.stock-low{color:#f0a050}
+.stock-out{color:#e05555}
+
+/* TICKET */
+.ticket{border-left:1px solid #2a2a2a;display:flex;flex-direction:column;height:100%;overflow:hidden;background:#1a1a1a}
+.tk-head{flex-shrink:0;padding:10px 13px 8px;border-bottom:1px solid #2a2a2a;display:flex;align-items:center;gap:6px}
+.tk-title{font-size:12px;font-weight:700;color:#eee}
+.tk-num{font-size:10px;color:#555;font-family:monospace}
+.tk-gap{flex:1}
+.tk-cnt{font-size:10px;color:#666;background:#252525;padding:2px 7px;border-radius:20px}
+.tk-clear{font-size:9px;color:#555;cursor:pointer;padding:3px 7px;border:1px solid #333;border-radius:5px}
+.tk-clear:hover{color:#e05555;border-color:rgba(224,85,85,.4);background:rgba(224,85,85,.1)}
+
+.cart{flex:1;min-height:0;overflow-y:auto}
+.cart::-webkit-scrollbar{width:2px}
+.cart::-webkit-scrollbar-thumb{background:#333;border-radius:2px}
+.cart-empty{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:30px}
+.ce-ico{width:40px;height:40px;border:1.5px dashed #333;border-radius:8px;display:flex;align-items:center;justify-content:center}
+.ce-ico svg{width:16px;height:16px;fill:none;stroke:#444;stroke-width:1.5}
+.ce-txt{font-size:11px;color:#444;text-align:center;line-height:1.5}
+.cart-cli{padding:6px 13px;border-bottom:1px solid #2a2a2a;background:rgba(93,202,165,.08);display:flex;align-items:center;gap:6px}
+.cart-cli svg{width:11px;height:11px;fill:none;stroke:#5DCAA5;stroke-width:1.5}
+.cc-name{font-size:10px;color:#5DCAA5;flex:1;font-weight:600}
+.cc-rm{font-size:9px;color:#555;cursor:pointer}
+.cc-rm:hover{color:#e05555}
+
+.cl{padding:8px 13px;display:grid;grid-template-columns:1fr auto;gap:2px;border-bottom:1px solid #252525}
+.cl:hover{background:#222}
+.cl-name{font-size:11px;font-weight:600;color:#ddd;line-height:1.3}
+.cl-ean{font-size:8px;color:#555;font-family:monospace;margin-top:1px}
+.cl-ctrls{display:flex;align-items:center;gap:4px;margin-top:5px}
+.qb{width:20px;height:20px;border-radius:4px;background:#252525;border:1px solid #333;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;color:#888;user-select:none;line-height:1}
+.qb:hover{background:#2d2d2d;color:#eee}
+.qb.m:hover{background:rgba(224,85,85,.15);border-color:rgba(224,85,85,.4);color:#e05555}
+.qv{font-size:12px;font-weight:600;color:#eee;min-width:18px;text-align:center;font-family:monospace}
+.cl-r{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.cl-unit{font-size:9px;color:#555;font-family:monospace}
+.cl-tot{font-size:13px;font-weight:700;color:#eee;font-family:monospace}
+.cl-del{font-size:9px;color:#444;cursor:pointer}
+.cl-del:hover{color:#e05555}
+
+.totals{flex-shrink:0;border-top:1px solid #2a2a2a;padding:10px 13px 6px}
+.tr{display:flex;justify-content:space-between;font-size:11px;color:#666;padding:1px 0;font-family:monospace}
+.tr.main{font-size:19px;font-weight:700;color:#eee;padding:7px 0 0;margin-top:4px;border-top:1px solid #2d2d2d}
+.tr.main .tl{font-family:'Inter',sans-serif;font-size:12px;font-weight:500;color:#666;align-self:flex-end;margin-bottom:1px}
+
+.iva-row{flex-shrink:0;display:flex;align-items:center;gap:5px;padding:6px 13px;border-top:1px solid #2a2a2a}
+.iva-lbl{font-size:10px;color:#555}
+.iva-pills{display:flex;gap:3px;flex:1}
+.ivp{padding:2px 7px;border-radius:20px;font-size:9px;font-weight:600;font-family:monospace;border:1px solid #333;color:#555;cursor:pointer;background:transparent}
+.ivp.active{background:rgba(93,202,165,.15);border-color:#5DCAA5;color:#5DCAA5}
+
+.cli-btn{flex-shrink:0;margin:4px 13px 0;padding:6px 10px;background:#252525;border:1px solid #333;border-radius:6px;font-size:10px;color:#666;cursor:pointer;display:flex;align-items:center;gap:5px}
+.cli-btn:hover{border-color:#444;background:#2d2d2d}
+.cli-btn.assigned{border-color:#5DCAA5;color:#5DCAA5;background:rgba(93,202,165,.08)}
+.cli-btn svg{width:10px;height:10px;fill:none;stroke:currentColor;stroke-width:1.5}
+
+.pay-zone{flex-shrink:0;padding:8px 13px 11px;border-top:1px solid #2a2a2a}
+.pay-lbl{font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#555;margin-bottom:5px}
+.pay-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:7px}
+.po{padding:8px 3px;border:1px solid #333;border-radius:8px;text-align:center;cursor:pointer;background:#252525}
+.po:hover{border-color:#444;background:#2d2d2d}
+.po.active{background:rgba(93,202,165,.1);border-color:#5DCAA5}
+.po-ico{width:15px;height:15px;display:block;margin:0 auto 2px;fill:none;stroke:#555;stroke-width:1.5}
+.po.active .po-ico{stroke:#5DCAA5}
+.po-txt{font-size:9px;font-weight:600;color:#666;display:block}
+.po.active .po-txt{color:#5DCAA5}
+.mixto-row{display:none;gap:5px;margin-bottom:7px}
+.mixto-row.show{display:flex}
+.mf{flex:1}
+.mf label{font-size:9px;color:#555;display:block;margin-bottom:2px}
+.mf input{width:100%;background:#252525;border:1px solid #333;border-radius:6px;padding:6px 8px;font-family:monospace;font-size:12px;color:#eee;outline:none}
+.mf input:focus{border-color:#5DCAA5}
+
+.cobrar{width:100%;padding:13px;background:#5DCAA5;color:#000;border:none;border-radius:8px;font-family:'Inter',sans-serif;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:space-between}
+.cobrar:hover:not(:disabled){background:#4db894}
+.cobrar:disabled{background:#252525;color:#444;cursor:not-allowed;font-size:12px;justify-content:center}
+.cobrar-amt{font-family:monospace;font-size:13px;font-weight:700;opacity:.85}
+.hstatus{margin-top:5px;text-align:center;font-size:9px;color:#444;display:flex;align-items:center;justify-content:center;gap:4px;font-family:monospace}
+.hd{width:4px;height:4px;border-radius:50%;background:#5DCAA5}
+
+/* MODALS */
+.mbg{position:fixed;inset:0;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;z-index:100;opacity:0;pointer-events:none;transition:opacity .15s}
+.mbg.open{opacity:1;pointer-events:all}
+.modal{background:#1e1e1e;border:1px solid #333;border-radius:12px;padding:20px;width:320px;box-shadow:0 8px 32px rgba(0,0,0,.5)}
+.m-title{font-size:15px;font-weight:700;color:#eee;margin-bottom:2px}
+.m-sub{font-size:10px;color:#555;margin-bottom:15px;font-family:monospace}
+.m-amount{font-size:28px;font-weight:700;color:#eee;text-align:center;padding:14px;background:#252525;border-radius:8px;margin-bottom:10px;font-family:monospace}
+.m-detail{background:#252525;border-radius:8px;padding:8px 11px;margin-bottom:14px;display:flex;flex-direction:column;gap:3px}
+.mdr{display:flex;justify-content:space-between;font-size:11px;color:#888;font-family:monospace}
+.m-btns{display:flex;gap:6px}
+.m-cancel{flex:1;padding:9px;background:none;border:1px solid #333;border-radius:8px;font-family:'Inter',sans-serif;font-size:12px;color:#666;cursor:pointer}
+.m-cancel:hover{background:#252525}
+.m-confirm{flex:2;padding:9px;background:#5DCAA5;border:none;border-radius:8px;font-family:'Inter',sans-serif;font-size:12px;font-weight:700;color:#000;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px}
+.m-confirm:hover{background:#4db894}
+.m-confirm.loading{background:#252525;color:#444;pointer-events:none}
+.csi{width:100%;background:#252525;border:1px solid #333;border-radius:8px;padding:8px 11px;font-family:'Inter',sans-serif;font-size:12px;color:#eee;outline:none;margin-bottom:8px}
+.csi:focus{border-color:#5DCAA5}
+.cres{display:flex;flex-direction:column;gap:3px;max-height:180px;overflow-y:auto}
+.cr{padding:8px 10px;border-radius:6px;background:#252525;border:1px solid #2d2d2d;cursor:pointer}
+.cr:hover{border-color:#333;background:#2d2d2d}
+.cr-name{font-size:12px;font-weight:600;color:#ddd}
+.cr-email{font-size:10px;color:#555;font-family:monospace}
+.cload{font-size:11px;color:#444;text-align:center;padding:15px;font-family:monospace}
+.cs-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:14px}
+.cs-card{background:#252525;border-radius:8px;padding:10px}
+.cs-lbl{font-size:9px;color:#555;letter-spacing:.06em;text-transform:uppercase;margin-bottom:2px}
+.cs-val{font-size:17px;font-weight:700;color:#eee;font-family:monospace}
+.cs-val.ac{color:#5DCAA5}
+.toast{position:fixed;top:56px;left:50%;transform:translateX(-50%) translateY(-10px);background:#1e1e1e;border:1px solid #333;color:#eee;padding:8px 14px;border-radius:8px;font-size:12px;font-weight:600;opacity:0;pointer-events:none;transition:all .2s;white-space:nowrap;z-index:200;box-shadow:0 4px 16px rgba(0,0,0,.5)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.ok{border-color:#5DCAA5;color:#5DCAA5}
+.toast.err{border-color:#e05555;color:#e05555}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <div class="tb-logo"><div class="tb-dot"></div></div>
+    <span class="tb-name" id="tb-nombre">TPV</span>
+    <span class="tb-caja" id="tb-caja"></span>
+    <div class="tb-gap"></div>
+    <div class="tb-sync"><div class="sdot" id="sdot"></div><span id="stxt">Holded</span></div>
+    <div class="tb-clock" id="clock">--:--</div>
+    <div class="tb-user"><div class="uav" id="uav">?</div><span id="uname"></span></div>
+    <button class="tb-cierre" onclick="openCierre()">Cerrar caja</button>
+  </div>
+
+  <div class="sidenav">
+    <div class="ni active"><svg viewBox="0 0 16 16"><path d="M2 2h2l2 7h6l1.5-5H5"/><circle cx="7" cy="13" r="1"/><circle cx="12" cy="13" r="1"/></svg></div>
+    <div class="ni-gap"></div>
+    <div class="ni"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.5"/><path d="M8 2v1M8 13v1M2 8h1M13 8h1"/></svg></div>
+  </div>
+
+  <div class="catalog">
+    <div class="search-bar">
+      <div class="sw">
+        <svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L13 13"/></svg>
+        <input class="si" id="si" type="text" placeholder="Buscar o escanear codigo..." oninput="onSearch()" autocomplete="off" autofocus>
+        <span class="sc" id="sc" onclick="clearSearch()">x</span>
+      </div>
+      <button class="scan-btn" id="scanBtn" onclick="toggleScan()">
+        <svg viewBox="0 0 18 18"><rect x="1" y="4" width="2" height="10" rx=".5"/><rect x="4" y="3" width="1" height="12" rx=".5"/><rect x="6" y="4" width="2" height="10" rx=".5"/><rect x="9" y="3" width="1" height="12" rx=".5"/><rect x="11" y="4" width="3" height="10" rx=".5"/><rect x="15" y="4" width="2" height="10" rx=".5"/></svg>
+        <span id="scanLbl">Escanear</span>
+      </button>
+    </div>
+    <div class="cats-bar" id="catsBar"></div>
+    <div class="grid" id="grid"><div class="gempty">Cargando productos...</div></div>
+  </div>
+
+  <div class="ticket">
+    <div class="tk-head">
+      <span class="tk-title">Ticket</span>
+      <span class="tk-num" id="tkNum">#0001</span>
+      <div class="tk-gap"></div>
+      <span class="tk-cnt" id="tkCnt">0 art.</span>
+      <button class="tk-clear" onclick="clearCart()">Vaciar</button>
+    </div>
+    <div class="cart" id="cart"></div>
+    <div class="iva-row">
+      <span class="iva-lbl">IVA</span>
+      <div class="iva-pills" id="ivaPills"></div>
+    </div>
+    <button class="cli-btn" id="cliBt" onclick="openClientSearch()">
+      <svg viewBox="0 0 16 16"><circle cx="8" cy="5" r="3"/><path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6"/></svg>
+      <span id="cliTxt">Asignar cliente</span>
+    </button>
+    <div class="totals">
+      <div class="tr"><span>Subtotal</span><span id="tSub">0,00 EUR</span></div>
+      <div class="tr"><span id="tIvaLbl">IVA (4%)</span><span id="tIva">0,00 EUR</span></div>
+      <div class="tr main"><span class="tl">Total</span><span id="tTot">0,00 EUR</span></div>
+    </div>
+    <div class="pay-zone">
+      <div class="pay-lbl">Metodo de pago</div>
+      <div class="pay-grid" id="payGrid"></div>
+      <div class="mixto-row" id="mixtoRow">
+        <div class="mf"><label for="mEf">Efectivo</label><input id="mEf" type="number" placeholder="0.00" min="0" step="0.01" oninput="calcMixto()"></div>
+        <div class="mf"><label for="mTa">Tarjeta</label><input id="mTa" type="number" placeholder="0.00" min="0" step="0.01" oninput="calcMixto()"></div>
+      </div>
+      <button class="cobrar" id="cobrar" onclick="openCobrar()" disabled>Cobrar</button>
+      <div class="hstatus"><div class="hd"></div><span>Holded  <span id="vTxt">0 ventas hoy</span></span></div>
+    </div>
+  </div>
+</div>
+
+<div class="mbg" id="mCobrar"><div class="modal">
+  <div class="m-title">Confirmar cobro</div>
+  <div class="m-sub" id="mItems"></div>
+  <div class="m-amount" id="mAmt"></div>
+  <div class="m-detail" id="mDetail"></div>
+  <div class="m-btns">
+    <button class="m-cancel" onclick="closeModal('mCobrar')">Cancelar</button>
+    <button class="m-confirm" id="mOk" onclick="confirmarCobro()">Confirmar y registrar</button>
+  </div>
+</div></div>
+
+<div class="mbg" id="mCliente"><div class="modal">
+  <div class="m-title">Buscar cliente</div>
+  <div class="m-sub">Contactos Holded</div>
+  <input class="csi" id="csi" type="text" placeholder="Nombre, email o NIF..." oninput="searchClients()">
+  <div class="cres" id="cres"><div class="cload">Escribe para buscar...</div></div>
+  <div class="m-btns" style="margin-top:10px">
+    <button class="m-cancel" onclick="closeModal('mCliente')">Cancelar</button>
+  </div>
+</div></div>
+
+<div class="mbg" id="mCierre"><div class="modal">
+  <div class="m-title">Cierre de caja</div>
+  <div class="m-sub" id="cFecha"></div>
+  <div class="cs-grid" id="csGrid"></div>
+  <div class="m-btns">
+    <button class="m-cancel" onclick="closeModal('mCierre')">Cancelar</button>
+    <button class="m-confirm" onclick="confirmarCierre()">Enviar a Holded</button>
+  </div>
+</div></div>
+
+<div class="toast" id="toastEl"></div>
+
+<script>
+const CFG=__CONFIG__;
+let PRODS=[],cart={},catA='todos',payM='efectivo';
+let ivaA=CFG.iva.find(t=>t.def)||CFG.iva[0];
+let cliente=null,tkNum=1,ventasH=0,totalH=0,efH=0,taH=0;
+let scanning=false,scanBuf='',scanT=null,cliT=null;
+
+const CATS={
+  'Libros':'rgba(56,132,255,.2)',
+  'Papeleria':'rgba(93,202,165,.2)',
+  'Papelera':'rgba(93,202,165,.2)',
+  'Varios':'rgba(240,160,80,.2)',
+  'Manualidades':'rgba(180,80,240,.2)',
+  'Pinturas':'rgba(255,100,100,.2)',
+  'Bolis':'rgba(100,180,255,.2)',
+  'Cartulinas':'rgba(255,200,50,.2)',
+  'Fotocopias':'rgba(150,150,150,.2)',
+  'Subrayadores':'rgba(255,230,0,.2)',
+};
+const CATC={
+  'Libros':'#5b9cf6','Papeleria':'#5DCAA5','Papelera':'#5DCAA5',
+  'Varios':'#f0a050','Manualidades':'#b450f0','Pinturas':'#ff6464',
+  'Bolis':'#64b4ff','Cartulinas':'#ffc832','Fotocopias':'#999',
+  'Subrayadores':'#ffe600','simple':'#888','variants':'#aaa',
+};
+
+async function init(){
+  document.getElementById('tb-nombre').textContent=CFG.negocio.nombre;
+  document.getElementById('tb-caja').textContent=CFG.caja;
+  document.getElementById('uname').textContent=CFG.caja;
+  document.getElementById('uav').textContent=CFG.caja.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2)||'C';
+  document.title=CFG.negocio.nombre+' TPV';
+  setSyncState(true,'Cargando...');
+  try{
+    const r=await fetch('/api/productos');
+    if(!r.ok)throw new Error(r.status);
+    PRODS=await r.json();
+    setSyncState(false,'Holded');
+    toast(PRODS.length+' productos','ok');
+  }catch(e){
+    setSyncState(false,'Error');
+    toast('Error: '+e.message,'err');
+  }
+  renderCats();renderGrid();renderIVA();renderPay();renderCart();
+  updateClock();setInterval(updateClock,15000);
+}
+
+function setSyncState(b,t){
+  document.getElementById('sdot').classList.toggle('busy',b);
+  document.getElementById('stxt').textContent=t;
+}
+function updateClock(){
+  const n=new Date();
+  document.getElementById('clock').textContent=pad(n.getHours())+':'+pad(n.getMinutes());
+}
+function pad(n){return String(n).padStart(2,'0')}
+
+function renderCats(){
+  const raw=[...new Set(PRODS.map(p=>p.cat).filter(Boolean))].sort();
+  const cats=['Todos',...raw];
+  document.getElementById('catsBar').innerHTML=cats.map(c=>
+    '<button class="cat'+(c==='Todos'?' active':'')+'" onclick="filterCat(this,\''+c+'\')">'+c+'</button>'
+  ).join('');
+}
+function filterCat(el,c){
+  catA=c==='Todos'?'todos':c;
+  document.querySelectorAll('.cat').forEach(x=>x.classList.remove('active'));
+  el.classList.add('active');
+  renderGrid();
+}
+
+let PAGE=0;const PER_PAGE=48;
+function renderGrid(){
+  PAGE=0;renderGridPage();
+}
+function renderGridPage(){
+  const q=document.getElementById('si').value.toLowerCase().trim();
+  let prods=PRODS;
+  if(catA!=='todos')prods=prods.filter(p=>p.cat===catA);
+  if(q)prods=prods.filter(p=>p.name.toLowerCase().includes(q)||(p.ean&&p.ean.includes(q)));
+  const g=document.getElementById('grid');
+  if(!prods.length){g.innerHTML='<div class="gempty">Sin resultados</div>';return}
+  const total=prods.length,pages=Math.ceil(total/PER_PAGE);
+  prods=prods.slice(PAGE*PER_PAGE,(PAGE+1)*PER_PAGE);
+  const bg=CATS,tc=CATC;
+  g.innerHTML=prods.map(p=>{
+    const catbg=bg[p.cat]||'rgba(255,255,255,.08)';
+    const catc=tc[p.cat]||'#888';
+    const sc=p.stock<=0?'stock-out':p.stock<=2?'stock-low':'stock-ok';
+    const st=p.stock<=0?'Agotado':p.stock===1?'1 ud':p.stock+' uds';
+    const hasImg=p.img&&p.img.length>5;
+    return '<div class="pc'+(p.stock<=0?' agotado':'')+'" onclick="addToCart(\''+p.id+'\')" id="pc-'+p.id+'">'
+      +(hasImg?'<img class="pc-img" src="'+p.img+'" loading="lazy" onerror="this.style.display=\'none\'">'  :'')
+      +'<div class="pc-body">'
+      +'<span class="pc-cat" style="background:'+catbg+';color:'+catc+'">'+( p.cat||'General')+'</span>'
+      +'<div class="pc-name">'+p.name+'</div>'
+      +'<div class="pc-ean">'+(p.ean||'')+'</div>'
+      +'<div class="pc-foot">'
+      +'<span class="pc-price">'+fmt(p.precio)+' EUR</span>'
+      +'<span class="pc-stock '+sc+'">'+st+'</span>'
+      +'</div></div></div>';
+  }).join('');
+  // Paginacin
+  const q2=document.getElementById('si').value.toLowerCase().trim();
+  let all=PRODS;
+  if(catA!=='todos')all=all.filter(p=>p.cat===catA);
+  if(q2)all=all.filter(p=>p.name.toLowerCase().includes(q2)||(p.ean&&p.ean.includes(q2)));
+  const pages2=Math.ceil(all.length/PER_PAGE);
+  if(pages2>1){
+    let pag='<div style="grid-column:1/-1;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px 0">';
+    if(PAGE>0)pag+='<button onclick="PAGE--;renderGridPage()" style="padding:6px 14px;background:#252525;border:1px solid #333;border-radius:6px;color:#888;cursor:pointer;font-size:11px"> Anterior</button>';
+    pag+='<span style="font-size:11px;color:#555;font-family:monospace">Pg '+(PAGE+1)+' / '+pages2+' ('+all.length+' productos)</span>';
+    if(PAGE<pages2-1)pag+='<button onclick="PAGE++;renderGridPage()" style="padding:6px 14px;background:#252525;border:1px solid #333;border-radius:6px;color:#888;cursor:pointer;font-size:11px">Siguiente </button>';
+    pag+='</div>';
+    g.innerHTML+=pag;
+  }
+}
+
+function renderIVA(){
+  document.getElementById('ivaPills').innerHTML=CFG.iva.map(t=>
+    '<button class="ivp'+(t===ivaA?' active':'')+'" onclick="setIVA('+t.v+')">'+t.n+'</button>'
+  ).join('');
+}
+function setIVA(v){
+  ivaA=CFG.iva.find(t=>t.v===v)||ivaA;
+  renderIVA();
+  document.getElementById('tIvaLbl').textContent='IVA ('+v+'%)';
+  updateTotals();
+}
+
+const PICO={
+  efectivo:'<svg class="po-ico" viewBox="0 0 16 16"><rect x="2" y="5" width="12" height="8" rx="1"/><path d="M5 5V4a3 3 0 016 0v1"/><circle cx="8" cy="9" r="1.5"/></svg>',
+  tarjeta:'<svg class="po-ico" viewBox="0 0 16 16"><rect x="1" y="4" width="14" height="10" rx="2"/><path d="M1 8h14M4 11h3"/></svg>',
+  mixto:'<svg class="po-ico" viewBox="0 0 16 16"><circle cx="6" cy="8" r="4"/><circle cx="10" cy="8" r="4"/></svg>',
+};
+const PLBL={efectivo:'Efectivo',tarjeta:'Tarjeta',mixto:'Mixto'};
+function renderPay(){
+  document.getElementById('payGrid').innerHTML=Object.keys(CFG.pagos).filter(k=>CFG.pagos[k]).map(k=>
+    '<div class="po'+(k===payM?' active':'')+'" id="po-'+k+'" onclick="setPay(\''+k+'\')">'+PICO[k]+'<span class="po-txt">'+PLBL[k]+'</span></div>'
+  ).join('');
+}
+function setPay(m){
+  payM=m;
+  document.querySelectorAll('.po').forEach(o=>o.classList.remove('active'));
+  const el=document.getElementById('po-'+m);if(el)el.classList.add('active');
+  document.getElementById('mixtoRow').classList.toggle('show',m==='mixto');
+  if(m!=='mixto')updateCobrar();
+}
+function calcMixto(){
+  const ef=parseFloat(document.getElementById('mEf').value)||0;
+  const ta=parseFloat(document.getElementById('mTa').value)||0;
+  const tot=getTotal(),diff=tot-ef-ta,btn=document.getElementById('cobrar');
+  if(Math.abs(diff)<0.01){
+    btn.disabled=false;
+    btn.innerHTML='<span>Cobrar</span><span class="cobrar-amt">'+fmtC(tot)+'</span>';
+  }else{
+    btn.disabled=true;
+    btn.innerHTML='<span>'+(diff>0?'Faltan '+fmtC(diff):'Exceso '+fmtC(-diff))+'</span>';
+  }
+}
+
+function addToCart(id){
+  const p=PRODS.find(x=>x.id===id);
+  if(!p)return; // stock control is informational only
+  cart[id]=(cart[id]||0)+1;
+  const card=document.getElementById('pc-'+id);
+  if(card){card.classList.add('flash');setTimeout(()=>card.classList.remove('flash'),200)}
+  renderCart();
+}
+function removeOne(id){if(!cart[id])return;if(--cart[id]===0)delete cart[id];renderCart()}
+function removeLine(id){delete cart[id];renderCart()}
+function clearCart(){cart={};cliente=null;renderCliBt();renderCart()}
+
+function renderCart(){
+  const ids=Object.keys(cart),count=ids.reduce((a,id)=>a+cart[id],0);
+  document.getElementById('tkCnt').textContent=count+' art.';
+  const el=document.getElementById('cart');
+  if(!ids.length){
+    el.innerHTML='<div class="cart-empty"><div class="ce-ico"><svg viewBox="0 0 16 16"><path d="M2 2h2l2 7h6l1.5-5H5"/><circle cx="7" cy="13" r="1"/><circle cx="12" cy="13" r="1"/></svg></div><div class="ce-txt">Aade productos<br>o escanea un codigo</div></div>';
+    updateTotals();updateCobrar();return;
+  }
+  let html='';
+  if(cliente)html+='<div class="cart-cli"><svg viewBox="0 0 16 16"><circle cx="8" cy="5" r="3"/><path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6"/></svg><span class="cc-name">'+cliente.name+'</span><span class="cc-rm" onclick="quitarCliente()">x</span></div>';
+  html+=ids.map(id=>{
+    const p=PRODS.find(x=>x.id===id);if(!p)return'';
+    const line=p.precio*cart[id];
+    return '<div class="cl">'
+      +'<div><div class="cl-name">'+p.name+'</div>'
+      +'<div class="cl-ean">'+(p.ean||'')+'</div>'
+      +'<div class="cl-ctrls">'
+      +'<div class="qb m" onclick="removeOne(\''+id+'\')">-</div>'
+      +'<div class="qv">'+cart[id]+'</div>'
+      +'<div class="qb" onclick="addToCart(\''+id+'\')">+</div>'
+      +'</div></div>'
+      +'<div class="cl-r">'
+      +'<div class="cl-unit">'+fmt(p.precio)+' EUR/ud</div>'
+      +'<div class="cl-tot">'+fmt(line)+' EUR</div>'
+      +'<div class="cl-del" onclick="removeLine(\''+id+'\')">eliminar</div>'
+      +'</div></div>';
+  }).join('');
+  el.innerHTML=html;
+  updateTotals();updateCobrar();
+}
+
+function updateTotals(){
+  let sub=0;
+  Object.keys(cart).forEach(id=>{const p=PRODS.find(x=>x.id===id);if(p)sub+=p.precio*cart[id]});
+  const iva=sub*(ivaA.v/100),tot=sub+iva;
+  document.getElementById('tSub').textContent=fmtC(sub);
+  document.getElementById('tIva').textContent=fmtC(iva);
+  document.getElementById('tTot').textContent=fmtC(tot);
+}
+function getTotal(){
+  let s=0;Object.keys(cart).forEach(id=>{const p=PRODS.find(x=>x.id===id);if(p)s+=p.precio*cart[id]});
+  return s*(1+ivaA.v/100);
+}
+function updateCobrar(){
+  const btn=document.getElementById('cobrar'),tot=getTotal(),has=Object.keys(cart).length>0;
+  if(!has){btn.disabled=true;btn.innerHTML='Cobrar';return}
+  if(payM==='mixto'){calcMixto();return}
+  btn.disabled=false;
+  btn.innerHTML='<span>Cobrar</span><span class="cobrar-amt">'+fmtC(tot)+'</span>';
+}
+
+function renderCliBt(){
+  const btn=document.getElementById('cliBt'),txt=document.getElementById('cliTxt');
+  if(cliente){txt.textContent=cliente.name;btn.classList.add('assigned')}
+  else{txt.textContent='Asignar cliente';btn.classList.remove('assigned')}
+}
+function quitarCliente(){cliente=null;renderCliBt();renderCart()}
+function openClientSearch(){
+  document.getElementById('csi').value='';
+  document.getElementById('cres').innerHTML='<div class="cload">Escribe para buscar...</div>';
+  openModal('mCliente');
+  setTimeout(()=>document.getElementById('csi').focus(),100);
+}
+function searchClients(){
+  const q=document.getElementById('csi').value.trim(),el=document.getElementById('cres');
+  if(q.length<2){el.innerHTML='<div class="cload">Al menos 2 caracteres...</div>';return}
+  clearTimeout(cliT);
+  cliT=setTimeout(async()=>{
+    el.innerHTML='<div class="cload">Buscando...</div>';
+    try{
+      const r=await fetch('/api/contactos?q='+encodeURIComponent(q));
+      const d=await r.json();
+      if(!d.length){el.innerHTML='<div class="cload">Sin resultados</div>';return}
+      el.innerHTML=d.map(c=>'<div class="cr" onclick="selCliente(\''+c.id+'\',\''+c.name.replace(/'/g,"\\'")+'\',\''+(c.email||'')+'\')"><div class="cr-name">'+c.name+'</div><div class="cr-email">'+(c.email||'Sin email')+'</div></div>').join('');
+    }catch{el.innerHTML='<div class="cload">Error al buscar</div>'}
+  },300);
+}
+function selCliente(id,name,email){
+  cliente={id,name,email};renderCliBt();renderCart();closeModal('mCliente');toast('Cliente: '+name,'ok');
+}
+
+function openCobrar(){
+  const tot=getTotal(),count=Object.values(cart).reduce((a,b)=>a+b,0);
+  document.getElementById('mItems').textContent=count+' articulo'+(count!==1?'s':'');
+  document.getElementById('mAmt').textContent=fmtC(tot);
+  let det='<div class="mdr"><span>Metodo</span><span>'+PLBL[payM]+'</span></div>'
+    +'<div class="mdr"><span>IVA</span><span>'+ivaA.v+'%</span></div>';
+  if(cliente)det+='<div class="mdr"><span>Cliente</span><span>'+cliente.name+'</span></div>';
+  document.getElementById('mDetail').innerHTML=det;
+  const btn=document.getElementById('mOk');btn.classList.remove('loading');btn.textContent='Confirmar y registrar';
+  openModal('mCobrar');
+}
+async function confirmarCobro(){
+  const btn=document.getElementById('mOk');
+  btn.classList.add('loading');btn.textContent='Registrando...';
+  const items=Object.keys(cart).map(id=>{const p=PRODS.find(x=>x.id===id);return{name:p.name,units:cart[id],price:p.precio,tax:ivaA.v}});
+  try{
+    await fetch('/api/ventas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contactId:cliente&&cliente.id,date:Math.floor(Date.now()/1000),notes:'Ticket #'+String(tkNum).padStart(4,'0'),items,paymentMethod:payM,numSerie:CFG.holded.serie})});
+    ventasH++;totalH+=getTotal();
+    if(payM==='efectivo')efH+=getTotal();else if(payM==='tarjeta')taH+=getTotal();
+    document.getElementById('vTxt').textContent=ventasH+' venta'+(ventasH!==1?'s':'')+' hoy';
+    tkNum++;document.getElementById('tkNum').textContent='#'+String(tkNum).padStart(4,'0');
+    closeModal('mCobrar');toast('Venta registrada en Holded','ok');
+    cart={};cliente=null;renderCliBt();renderCart();
+  }catch{
+    btn.classList.remove('loading');btn.textContent='Reintentar';
+    toast('Error al conectar con Holded','err');
+  }
+}
+
+function openCierre(){
+  const n=new Date();
+  document.getElementById('cFecha').textContent=n.toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'long'});
+  document.getElementById('csGrid').innerHTML='<div class="cs-card"><div class="cs-lbl">Ventas</div><div class="cs-val ac">'+ventasH+'</div></div>'
+    +'<div class="cs-card"><div class="cs-lbl">Recaudado</div><div class="cs-val ac">'+fmtC(totalH)+'</div></div>'
+    +'<div class="cs-card"><div class="cs-lbl">Efectivo</div><div class="cs-val">'+fmtC(efH)+'</div></div>'
+    +'<div class="cs-card"><div class="cs-lbl">Tarjeta</div><div class="cs-val">'+fmtC(taH)+'</div></div>';
+  openModal('mCierre');
+}
+function confirmarCierre(){closeModal('mCierre');toast('Cierre registrado','ok')}
+
+function onSearch(){
+  const v=document.getElementById('si').value;
+  document.getElementById('sc').style.display=v?'inline':'none';
+  renderGrid();
+}
+function clearSearch(){
+  document.getElementById('si').value='';
+  document.getElementById('sc').style.display='none';
+  renderGrid();
+}
+function toggleScan(){
+  scanning=!scanning;
+  document.getElementById('scanBtn').classList.toggle('on',scanning);
+  document.getElementById('scanLbl').textContent=scanning?'Escaneando...':'Escanear';
+  if(scanning)window.addEventListener('keydown',handleScan);
+  else{window.removeEventListener('keydown',handleScan);scanBuf=''}
+}
+function handleScan(e){
+  if(e.key==='Enter'){
+    if(scanBuf.length>3){
+      const p=PRODS.find(x=>x.ean===scanBuf);
+      if(p){addToCart(p.id);toast(p.name,'ok')}
+      else toast('No encontrado: '+scanBuf,'err');
+    }
+    scanBuf='';return;
+  }
+  if(e.key.length===1)scanBuf+=e.key;
+  clearTimeout(scanT);scanT=setTimeout(()=>{scanBuf=''},350);
+}
+function openModal(id){document.getElementById(id).classList.add('open')}
+function closeModal(id){document.getElementById(id).classList.remove('open')}
+let tT;
+function toast(msg,type){
+  const el=document.getElementById('toastEl');
+  el.textContent=msg;el.className='toast show'+(type?' '+type:'');
+  clearTimeout(tT);tT=setTimeout(()=>el.classList.remove('show'),2500);
+}
+function fmt(n){return n.toFixed(2).replace('.',',')}
+function fmtC(n){return n.toFixed(2).replace('.',',')+' EUR'}
+init();
+</script>
+</body>
+</html>
