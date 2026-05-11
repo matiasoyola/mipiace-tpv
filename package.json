@@ -1,0 +1,17 @@
+{
+  "name": "mipiacetpv",
+  "version": "0.0.0",
+  "private": true,
+  "description": "TPV web multi-tenant integrado con Holded",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "spike:05": "pnpm --filter @mipiacetpv/spike-holded run 05-final-flow",
+    "spike:06": "pnpm --filter @mipiacetpv/spike-holded run 06-pay-pdf-freeline",
+    "db:generate": "pnpm --filter @mipiacetpv/db run generate",
+    "db:migrate": "pnpm --filter @mipiacetpv/db run migrate",
+    "db:studio": "pnpm --filter @mipiacetpv/db run studio"
+  }
+}

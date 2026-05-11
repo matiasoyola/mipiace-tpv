@@ -1,0 +1,29 @@
+node_modules/
+dist/
+build/
+.next/
+.turbo/
+.cache/
+
+.env
+.env.*
+!.env.example
+
+*.log
+logs/
+
+.DS_Store
+.idea/
+.vscode/
+
+coverage/
+
+spike/**/fixtures/*
+!spike/**/fixtures/.gitkeep
+
+packages/db/node_modules/.prisma/
+
+# Mirror local del repo legacy (matiasoyola/mipiace-tpv). Lo tenemos en
+# local como referencia. El histórico vive en GitHub; en nuestro repo
+# capturamos los hallazgos en docs/00-analisis-legacy.md.
+legacy/
