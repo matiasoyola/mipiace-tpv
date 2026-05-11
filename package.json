@@ -10,6 +10,7 @@
   "scripts": {
     "spike:05": "pnpm --filter @mipiacetpv/spike-holded run 05-final-flow",
     "spike:06": "pnpm --filter @mipiacetpv/spike-holded run 06-pay-pdf-freeline",
+    "spike:07": "pnpm --filter @mipiacetpv/spike-holded run 07-test-productid",
     "db:generate": "pnpm --filter @mipiacetpv/db run generate",
     "db:migrate": "pnpm --filter @mipiacetpv/db run migrate",
     "db:studio": "pnpm --filter @mipiacetpv/db run studio"

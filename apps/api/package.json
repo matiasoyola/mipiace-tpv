@@ -1,19 +1,22 @@
 {
-  "name": "@mipiacetpv/spike-holded",
+  "name": "@mipiacetpv/api",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "05-final-flow": "tsx src/05-final-flow.ts",
-    "06-pay-pdf-freeline": "tsx src/06-pay-pdf-freeline.ts",
-    "07-test-productid": "tsx src/07-test-productid.ts"
+    "dev": "nodemon --watch src --ext ts --exec \"tsx src/server.ts\"",
+    "start": "tsx src/server.ts"
   },
   "dependencies": {
+    "@fastify/cors": "^10.0.1",
     "dotenv": "^16.4.5",
+    "fastify": "^5.1.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^20.16.10",
+    "nodemon": "^3.1.7",
+    "pino-pretty": "^11.3.0",
     "tsx": "^4.19.1",
     "typescript": "^5.6.3"
   }

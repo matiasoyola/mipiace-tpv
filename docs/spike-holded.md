@@ -926,6 +926,88 @@ inicial del 05.B "para productos sin sku, enviar línea libre" era
   en el admin con la lista (link al producto en Holded) para que el
   propietario los complete.
 
+### Script 07 · Sondeo `productId` solo (post-cierre)
+
+> Ejecutado tras cerrar el spike, antes de arrancar el super-mini-MVP.
+> Pregunta abierta: si Holded ignora `productId` cuando se envía junto
+> con `sku` (§03.D), ¿lo respeta cuando es lo **único** que se envía?
+> Si lo respetase, el TPV podría vender los 961 productos del catálogo,
+> no sólo el subconjunto con sku rellenado.
+
+#### 07.A — Holded ignora `productId` también cuando se omite `sku`
+
+**Payload probado** (con `productId`, SIN `sku`, sobre "Forro Libro
+Adhesivo 1.5x0.50" del fixture, `id: 68d50ecfd24138c0cf089d2b`,
+`price: 1.40496`, sku vacío en catálogo):
+
+```json
+{
+  "approveDoc": true,
+  "date": 1778523974,
+  "notes": "TPV-uuid: 1ea2b09e-da03-4eed-ab38-8643b7279c71",
+  "items": [{
+    "name": "Forro Libro Adhesivo 1.5x0.50",
+    "units": 1,
+    "price": 1.40496,
+    "tax": 21,
+    "discount": 0,
+    "productId": "68d50ecfd24138c0cf089d2b"
+  }]
+}
+```
+
+**Documento guardado** (extracto, fixture `07-stored.json`):
+- `id: 6a021f46694d0f4207065010`
+- `docNumber: "T260533"` ✓ aprobado
+- `approvedAt: 1778523974` ✓
+- `draft: null`
+- `total: 0`, `subtotal: 0`, `tax: 0` ✗
+- Línea[0] guardada:
+  - `name: "Forro Libro Adhesivo 1.5x0.50"` ✓
+  - `price: 0` ✗ (enviado 1.40496)
+  - `sku: 0` ✗ (marcador de "no matcheado")
+  - `productId: undefined` ✗ (Holded lo descarta, no aparece en la respuesta)
+
+**Conclusión:** **hipótesis refutada**. Holded descarta silenciosamente
+el `productId` aunque sea el único identificador de línea presente. La
+línea queda con `price: 0`, exactamente el mismo patrón que la línea
+libre de §06.C. **`sku` es la única vía operativa para que Holded
+matchee la línea con un producto del catálogo.**
+
+#### 07.B — Implicación para el TPV (super-mini-MVP y Fase 1)
+
+- **El TPV sólo puede vender productos con `sku` no vacío en Holded.**
+  Sin sku → línea inválida → ticket aprobado pero a 0 €.
+- En la cuenta sandbox del spike, **prácticamente todos los productos
+  del fixture 01 tienen `sku: ""`** (probado: Forro, MILAN 430,
+  MILAN 624, MILAN 445, Goma de borrar STAEDTLER…). Sólo "Precinto de
+  embalaje" tenía sku rellenado (§05.run1). El catálogo de un cliente
+  típico de Holded sin TPV puede tener un % alto de productos sin sku.
+- La regla **"No enviar `productId`"** de `docs/03-integracion-holded.md`
+  §3.5 sigue vigente y se refuerza: aunque sea el único campo
+  identificador, Holded lo descarta. **No es un alias por defecto de
+  `sku`** — es un campo distinto que Holded sólo expone para lectura,
+  no acepta en escritura.
+
+#### 07.C — Recomendaciones reforzadas para Fase 1
+
+(Las §05.B y §06.C ya recogían lo esencial; §07 las **confirma** y
+suma matices operativos.)
+
+- **Wizard "Auditar catálogo"** al onboarding del propietario: contar
+  productos con `sku` vacío, mostrar lista con enlaces directos a la
+  ficha de cada producto en Holded para que los rellene antes de
+  empezar a vender.
+- **Filtro defensivo en el sync inicial:** marcar como
+  `sellable_via_tpv: false` cualquier producto con `sku == ""` o
+  `sku == null`. El grid del TPV no muestra esos productos (o los
+  muestra grisados con tooltip "Falta SKU en Holded · no se puede
+  vender hasta rellenarlo").
+- **Para "Otros / Venta libre":** comodín por IVA (`TPV-OTROS-21`,
+  `TPV-OTROS-10`, `TPV-OTROS-4`, `TPV-OTROS-0`) creado en Holded
+  durante el onboarding, tal como ya recogía §06.C. El campo
+  `productId` no rescata el caso.
+
 ---
 
 ## Fase 0 cerrada · Resumen ejecutivo
@@ -1036,8 +1118,9 @@ inicial del 05.B "para productos sin sku, enviar línea libre" era
 | `6a020deaa1b0a3d96d03256f` | 05.run1 | **aprobado, total=2.75 €, pagado**, docNumber `T260530` — ancla del 06 |
 | `6a020f6b65f3336fd70157da` | 05.run2 | aprobado, total=0 (caso `barcode != sku`), docNumber `T260531` |
 | `6a0210fb7529bb6c3506e944` | 06.5 | aprobado, total=0 (caso línea libre sin sku), docNumber `T260532` |
+| `6a021f46694d0f4207065010` | 07.A | aprobado, total=0 (caso `productId` sin sku), docNumber `T260533` |
 
-7 documentos en total. Mientras Veri\*factu siga desactivado en la
+8 documentos en total. Mientras Veri\*factu siga desactivado en la
 cuenta, todos son borrables sin consecuencias fiscales. Se recomienda
 borrarlos antes de pasar la cuenta a producción.
 
