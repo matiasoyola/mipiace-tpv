@@ -21,9 +21,9 @@ import { fileURLToPath } from "node:url";
 import {
   ApiKeyClient,
   HoldedApiError,
-  HoldedEnv,
   HoldedInvalidResponseError,
-} from "./holded-client.js";
+} from "@mipiacetpv/holded-client";
+import { HoldedEnv } from "./env.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixturesDir = resolve(here, "..", "fixtures");
@@ -412,7 +412,7 @@ async function step4Pdf(env: HoldedEnv, documentId: string): Promise<void> {
 async function main() {
   const env = HoldedEnv.parse(process.env);
   mkdirSync(fixturesDir, { recursive: true });
-  const holded = new ApiKeyClient(env.HOLDED_API_KEY, env.HOLDED_BASE_URL);
+  const holded = new ApiKeyClient(env.HOLDED_API_KEY, { baseUrl: env.HOLDED_BASE_URL });
 
   console.log("Spike 05 · Flujo final completo (paymentmethods + POST + /pay + /pdf)");
   console.log(`Base URL: ${env.HOLDED_BASE_URL}\n`);

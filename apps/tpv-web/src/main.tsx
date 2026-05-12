@@ -1,11 +1,16 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import App from "./App.tsx";
+import { registerSW } from "virtual:pwa-register";
+
+import { App } from "./App.js";
 import "./index.css";
 
-const root = document.getElementById("root");
-if (!root) throw new Error("#root no encontrado en index.html");
+// `vite-plugin-pwa` inyecta este módulo virtual. autoUpdate => al
+// detectar nueva versión, recarga sin pedir confirmación.
+registerSW({ immediate: true });
 
+const root = document.getElementById("root");
+if (!root) throw new Error("Falta #root en index.html");
 createRoot(root).render(
   <StrictMode>
     <App />

@@ -9,6 +9,7 @@
     "07-test-productid": "tsx src/07-test-productid.ts"
   },
   "dependencies": {
+    "@mipiacetpv/holded-client": "workspace:*",
     "dotenv": "^16.4.5",
     "zod": "^3.23.8"
   },

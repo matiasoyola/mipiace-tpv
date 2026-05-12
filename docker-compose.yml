@@ -1,0 +1,42 @@
+# Infra local de mipiacetpv para desarrollo.
+#
+# En producción el VPS Hostinger correrá un compose con servicios api,
+# worker, caddy adicionales (ADR-009); este compose es sólo dependencias
+# locales para `pnpm dev`.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mipiacetpv-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mipiacetpv
+      POSTGRES_USER: mipiacetpv
+      POSTGRES_PASSWORD: mipiacetpv_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - mipiacetpv_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mipiacetpv -d mipiacetpv"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: mipiacetpv-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - mipiacetpv_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mipiacetpv_postgres:
+  mipiacetpv_redis:

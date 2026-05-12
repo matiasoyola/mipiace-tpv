@@ -61,32 +61,85 @@ enum SyncOutboxStatus {
   DEAD
 }
 
+enum HoldedUploadKind {
+  TICKET
+  REFUND
+}
+
+enum HoldedUploadStatus {
+  PENDING
+  DONE
+  FAILED
+}
+
+enum InitialSyncStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+}
+
 // ── Multi-tenant raíz ─────────────────────────────────────────────────
 
 model Tenant {
-  id                     String          @id @default(uuid()) @db.Uuid
+  id                     String            @id @default(uuid()) @db.Uuid
   name                   String
-  holdedAccountId        String?         @map("holded_account_id")
-  holdedAuthMode         HoldedAuthMode  @default(API_KEY) @map("holded_auth_mode")
+  holdedAccountId        String?           @map("holded_account_id")
+  holdedAuthMode         HoldedAuthMode    @default(API_KEY) @map("holded_auth_mode")
   // Tokens y API keys siempre cifrados con AES-GCM antes de persistir.
-  holdedApiKeyCiphertext String?         @map("holded_api_key_ciphertext")
-  holdedOauthAccess      String?         @map("holded_oauth_access")
-  holdedOauthRefresh     String?         @map("holded_oauth_refresh")
-  holdedOauthExpiresAt   DateTime?       @map("holded_oauth_expires_at") @db.Timestamptz()
-  createdAt              DateTime        @default(now()) @map("created_at") @db.Timestamptz()
-  updatedAt              DateTime        @updatedAt @map("updated_at") @db.Timestamptz()
+  holdedApiKeyCiphertext String?           @map("holded_api_key_ciphertext")
+  holdedOauthAccess      String?           @map("holded_oauth_access")
+  holdedOauthRefresh     String?           @map("holded_oauth_refresh")
+  holdedOauthExpiresAt   DateTime?         @map("holded_oauth_expires_at") @db.Timestamptz()
+  // Datos fiscales agregados (NIF, razón social, dirección) extraídos
+  // del almacén default o introducidos por el propietario. Van al pie
+  // de cada ticket impreso.
+  fiscalProfile          Json?             @map("fiscal_profile")
+  // Estado del sync inicial post-onboarding. El admin pollea
+  // GET /onboarding/sync-status para mostrar la barra de progreso.
+  initialSyncStatus      InitialSyncStatus @default(PENDING) @map("initial_sync_status")
+  initialSyncStartedAt   DateTime?         @map("initial_sync_started_at") @db.Timestamptz()
+  initialSyncCompletedAt DateTime?         @map("initial_sync_completed_at") @db.Timestamptz()
+  // Stats acumulados: productsCount, servicesCount, warehousesCount,
+  // taxesCount, autoSkuFixed, autoSkuNeedsReview, wildcardsCreated,
+  // wildcardsReused, errors[]. Estructura libre; el admin la pinta.
+  initialSyncStats       Json?             @map("initial_sync_stats")
+  createdAt              DateTime          @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt              DateTime          @updatedAt @map("updated_at") @db.Timestamptz()
 
-  users        User[]
-  stores       Store[]
-  devices      Device[]
-  pairingCodes PairingCode[]
-  products     Product[]
-  warehouses   Warehouse[]
-  tickets      Ticket[]
-  refunds      Refund[]
-  syncOutbox   SyncOutbox[]
+  users         User[]
+  stores        Store[]
+  devices       Device[]
+  pairingCodes  PairingCode[]
+  products      Product[]
+  warehouses    Warehouse[]
+  taxes         TenantTax[]
+  tickets       Ticket[]
+  refunds       Refund[]
+  syncOutbox    SyncOutbox[]
+  holdedUploads HoldedUpload[]
 
   @@map("tenants")
+}
+
+// Tipos de IVA del catálogo Holded del tenant. Spike §03.A: array de 103
+// elementos en sandbox, indexamos por holded_tax_id (string tipo
+// "s_iva_21") y por rate numérico. Permite mapeo bidireccional al
+// construir el payload de líneas.
+model TenantTax {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  holdedTaxId String   @map("holded_tax_id")
+  rate        Decimal? @db.Decimal(5, 2)
+  name        String?
+  raw         Json?
+  syncedAt    DateTime @default(now()) @map("synced_at") @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, holdedTaxId])
+  @@index([tenantId, rate])
+  @@map("tenant_taxes")
 }
 
 model User {
@@ -100,22 +153,22 @@ model User {
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz()
 
-  tenant        Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  shifts        Shift[]
-  tickets       Ticket[]
-  pairingCodes  PairingCode[]
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  shifts       Shift[]
+  tickets      Ticket[]
+  pairingCodes PairingCode[]
 
   @@index([tenantId])
   @@map("users")
 }
 
 model Store {
-  id                 String   @id @default(uuid()) @db.Uuid
-  tenantId           String   @map("tenant_id") @db.Uuid
-  name               String
-  fiscalAddress      Json?    @map("fiscal_address")
-  warehouseHoldedId  String?  @map("warehouse_holded_id")
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  id                String   @id @default(uuid()) @db.Uuid
+  tenantId          String   @map("tenant_id") @db.Uuid
+  name              String
+  fiscalAddress     Json?    @map("fiscal_address")
+  warehouseHoldedId String?  @map("warehouse_holded_id")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz()
 
   tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   registers Register[]
@@ -128,16 +181,16 @@ model Store {
 // dispositivo: para vender necesita además uno o más `device`
 // emparejados (§3.2).
 model Register {
-  id              String  @id @default(uuid()) @db.Uuid
-  storeId         String  @map("store_id") @db.Uuid
-  name            String
+  id             String   @id @default(uuid()) @db.Uuid
+  storeId        String   @map("store_id") @db.Uuid
+  name           String
   // Serie Holded para los salesreceipt de esta caja. Permite numeración
   // fiscal separada por caja. Nullable: puede crearse sin asignarla y
   // configurarla después.
-  numSerieHolded  String? @map("num_serie_holded")
-  ticketCounter   Int     @default(0) @map("ticket_counter")
-  printerConfig   Json?   @map("printer_config")
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  numSerieHolded String?  @map("num_serie_holded")
+  ticketCounter  Int      @default(0) @map("ticket_counter")
+  printerConfig  Json?    @map("printer_config")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz()
 
   store        Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
   devices      Device[]
@@ -152,21 +205,21 @@ model Register {
 // Navegador físico emparejado a una caja. El token de larga duración
 // vive en localStorage del navegador; aquí guardamos sólo su hash.
 model Device {
-  id               String    @id @default(uuid()) @db.Uuid
-  tenantId         String    @map("tenant_id") @db.Uuid
-  registerId       String    @map("register_id") @db.Uuid
-  name             String?
-  pairedAt         DateTime  @default(now()) @map("paired_at") @db.Timestamptz()
-  lastSeenAt       DateTime? @map("last_seen_at") @db.Timestamptz()
-  userAgent        String?   @map("user_agent")
-  deviceTokenHash  String    @unique @map("device_token_hash")
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  registerId      String    @map("register_id") @db.Uuid
+  name            String?
+  pairedAt        DateTime  @default(now()) @map("paired_at") @db.Timestamptz()
+  lastSeenAt      DateTime? @map("last_seen_at") @db.Timestamptz()
+  userAgent       String?   @map("user_agent")
+  deviceTokenHash String    @unique @map("device_token_hash")
   // Si está revocado, la PWA detecta el rechazo y vuelve a la pantalla
   // de emparejamiento.
-  revokedAt        DateTime? @map("revoked_at") @db.Timestamptz()
+  revokedAt       DateTime? @map("revoked_at") @db.Timestamptz()
 
-  tenant            Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  register          Register      @relation(fields: [registerId], references: [id], onDelete: Cascade)
-  consumedPairings  PairingCode[] @relation("PairingCodeConsumedBy")
+  tenant           Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  register         Register      @relation(fields: [registerId], references: [id], onDelete: Cascade)
+  consumedPairings PairingCode[] @relation("PairingCodeConsumedBy")
 
   @@index([tenantId])
   @@index([registerId])
@@ -177,15 +230,15 @@ model Device {
 // nuevo. 6 dígitos; vida útil típica 1h. Unique compound (tenantId,
 // code) para evitar colisiones del RNG dentro del mismo tenant.
 model PairingCode {
-  id                  String    @id @default(uuid()) @db.Uuid
-  tenantId            String    @map("tenant_id") @db.Uuid
-  registerId          String    @map("register_id") @db.Uuid
-  code                String
-  createdByUserId     String    @map("created_by_user_id") @db.Uuid
-  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz()
-  expiresAt           DateTime  @map("expires_at") @db.Timestamptz()
-  consumedAt          DateTime? @map("consumed_at") @db.Timestamptz()
-  consumedByDeviceId  String?   @map("consumed_by_device_id") @db.Uuid
+  id                 String    @id @default(uuid()) @db.Uuid
+  tenantId           String    @map("tenant_id") @db.Uuid
+  registerId         String    @map("register_id") @db.Uuid
+  code               String
+  createdByUserId    String    @map("created_by_user_id") @db.Uuid
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  expiresAt          DateTime  @map("expires_at") @db.Timestamptz()
+  consumedAt         DateTime? @map("consumed_at") @db.Timestamptz()
+  consumedByDeviceId String?   @map("consumed_by_device_id") @db.Uuid
 
   tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   register         Register @relation(fields: [registerId], references: [id], onDelete: Cascade)
@@ -201,18 +254,28 @@ model PairingCode {
 // ── Catálogo (cache local de Holded) ──────────────────────────────────
 
 model Product {
-  id               String      @id @default(uuid()) @db.Uuid
-  tenantId         String      @map("tenant_id") @db.Uuid
-  holdedProductId  String      @map("holded_product_id")
-  name             String
-  sku              String?
-  barcode          String?
-  basePrice        Decimal     @map("base_price") @db.Decimal(10, 2)
-  taxRate          Decimal     @map("tax_rate") @db.Decimal(5, 2)
-  kind             ProductKind @default(PRODUCT)
-  active           Boolean     @default(true)
-  lastSyncedAt     DateTime    @default(now()) @map("last_synced_at") @db.Timestamptz()
-  raw              Json?
+  id                String      @id @default(uuid()) @db.Uuid
+  tenantId          String      @map("tenant_id") @db.Uuid
+  holdedProductId   String      @map("holded_product_id")
+  name              String
+  sku               String?
+  barcode           String?
+  basePrice         Decimal     @map("base_price") @db.Decimal(10, 2)
+  taxRate           Decimal     @map("tax_rate") @db.Decimal(5, 2)
+  kind              ProductKind @default(PRODUCT)
+  active            Boolean     @default(true)
+  // True si el SKU lo asignó el script auto-SKU (patrón AUTO-<8>).
+  // Permite distinguirlos del SKU manual del propietario.
+  skuAutoAssignedAt DateTime?   @map("sku_auto_assigned_at") @db.Timestamptz()
+  // True si el auto-SKU envió el PUT pero el GET-back demostró que
+  // Holded silenció el cambio (ADR-010). Sale en la bandeja de
+  // revisión del admin. El producto NO es vendible hasta resolverlo.
+  needsSkuReview    Boolean     @default(false) @map("needs_sku_review")
+  // True si el TPV puede vender este ítem (sku no vacío y bajos
+  // demás filtros). Spike §07.B: producto sin sku → línea inválida.
+  sellableViaTpv    Boolean     @default(true) @map("sellable_via_tpv")
+  lastSyncedAt      DateTime    @default(now()) @map("last_synced_at") @db.Timestamptz()
+  raw               Json?
 
   tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   variants ProductVariant[]
@@ -221,6 +284,7 @@ model Product {
   @@unique([tenantId, holdedProductId])
   @@index([tenantId, barcode])
   @@index([tenantId, sku])
+  @@index([tenantId, needsSkuReview])
   @@map("products")
 }
 
@@ -311,19 +375,19 @@ model Ticket {
 }
 
 model TicketLine {
-  id            String  @id @default(uuid()) @db.Uuid
-  ticketId      String  @map("ticket_id") @db.Uuid
-  productId     String? @map("product_id") @db.Uuid
-  variantId     String? @map("variant_id") @db.Uuid
+  id           String  @id @default(uuid()) @db.Uuid
+  ticketId     String  @map("ticket_id") @db.Uuid
+  productId    String? @map("product_id") @db.Uuid
+  variantId    String? @map("variant_id") @db.Uuid
   // Copia del nombre en el momento del cobro: cambiar el producto en
   // Holded no debe alterar tickets históricos.
-  nameSnapshot  String  @map("name_snapshot")
-  units         Decimal @db.Decimal(10, 3)
-  unitPrice     Decimal @map("unit_price") @db.Decimal(10, 2)
-  discountPct   Decimal @default(0) @map("discount_pct") @db.Decimal(5, 2)
-  taxRate       Decimal @map("tax_rate") @db.Decimal(5, 2)
-  subtotal      Decimal @db.Decimal(10, 2)
-  total         Decimal @db.Decimal(10, 2)
+  nameSnapshot String  @map("name_snapshot")
+  units        Decimal @db.Decimal(10, 3)
+  unitPrice    Decimal @map("unit_price") @db.Decimal(10, 2)
+  discountPct  Decimal @default(0) @map("discount_pct") @db.Decimal(5, 2)
+  taxRate      Decimal @map("tax_rate") @db.Decimal(5, 2)
+  subtotal     Decimal @db.Decimal(10, 2)
+  total        Decimal @db.Decimal(10, 2)
 
   ticket      Ticket          @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   product     Product?        @relation(fields: [productId], references: [id])
@@ -348,15 +412,15 @@ model TicketPayment {
 }
 
 model Refund {
-  id                String       @id @default(uuid()) @db.Uuid
-  tenantId          String       @map("tenant_id") @db.Uuid
-  originalTicketId  String       @map("original_ticket_id") @db.Uuid
-  internalNumber    String       @map("internal_number")
-  externalId        String       @unique @map("external_id") @db.Uuid
-  status            TicketStatus @default(DRAFT)
-  reason            String?
-  holdedDocumentId  String?      @map("holded_document_id")
-  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+  id               String       @id @default(uuid()) @db.Uuid
+  tenantId         String       @map("tenant_id") @db.Uuid
+  originalTicketId String       @map("original_ticket_id") @db.Uuid
+  internalNumber   String       @map("internal_number")
+  externalId       String       @unique @map("external_id") @db.Uuid
+  status           TicketStatus @default(DRAFT)
+  reason           String?
+  holdedDocumentId String?      @map("holded_document_id")
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz()
 
   tenant         Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   originalTicket Ticket       @relation(fields: [originalTicketId], references: [id], onDelete: Restrict)
@@ -367,11 +431,11 @@ model Refund {
 }
 
 model RefundLine {
-  id            String  @id @default(uuid()) @db.Uuid
-  refundId      String  @map("refund_id") @db.Uuid
-  ticketLineId  String  @map("ticket_line_id") @db.Uuid
-  units         Decimal @db.Decimal(10, 3)
-  total         Decimal @db.Decimal(10, 2)
+  id           String  @id @default(uuid()) @db.Uuid
+  refundId     String  @map("refund_id") @db.Uuid
+  ticketLineId String  @map("ticket_line_id") @db.Uuid
+  units        Decimal @db.Decimal(10, 3)
+  total        Decimal @db.Decimal(10, 2)
 
   refund     Refund     @relation(fields: [refundId], references: [id], onDelete: Cascade)
   ticketLine TicketLine @relation(fields: [ticketLineId], references: [id], onDelete: Restrict)
@@ -383,20 +447,43 @@ model RefundLine {
 // ── Cola de sync (espejo en BD por si Redis se cae) ───────────────────
 
 model SyncOutbox {
-  id             BigInt           @id @default(autoincrement())
-  tenantId       String           @map("tenant_id") @db.Uuid
-  kind           SyncOutboxKind
-  payload        Json
-  attempts       Int              @default(0)
-  nextAttemptAt  DateTime         @default(now()) @map("next_attempt_at") @db.Timestamptz()
-  lastError      Json?            @map("last_error")
-  status         SyncOutboxStatus @default(PENDING)
-  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz()
-  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz()
+  id            BigInt           @id @default(autoincrement())
+  tenantId      String           @map("tenant_id") @db.Uuid
+  kind          SyncOutboxKind
+  payload       Json
+  attempts      Int              @default(0)
+  nextAttemptAt DateTime         @default(now()) @map("next_attempt_at") @db.Timestamptz()
+  lastError     Json?            @map("last_error")
+  status        SyncOutboxStatus @default(PENDING)
+  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt     DateTime         @updatedAt @map("updated_at") @db.Timestamptz()
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([status, nextAttemptAt])
   @@index([tenantId, status])
   @@map("sync_outbox")
+}
+
+// Idempotencia de subidas a Holded (spike §04.F). Holded NO deduplica
+// por contenido de `notes` y NO expone búsqueda por externalId — toda
+// la idempotencia vive aquí. Antes de POSTear el doc, el worker
+// consulta esta tabla por externalId; si ya hay holded_document_id,
+// no reintenta.
+model HoldedUpload {
+  externalId       String             @id @map("external_id") @db.Uuid
+  tenantId         String             @map("tenant_id") @db.Uuid
+  kind             HoldedUploadKind
+  holdedDocumentId String?            @map("holded_document_id")
+  attempts         Int                @default(0)
+  lastAttemptAt    DateTime?          @map("last_attempt_at") @db.Timestamptz()
+  status           HoldedUploadStatus @default(PENDING)
+  lastError        Json?              @map("last_error")
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+  @@map("holded_uploads")
 }
