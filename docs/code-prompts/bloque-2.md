@@ -16,6 +16,20 @@ Holded sandbox. Lee primero `docs/blocks/B1-done.md` entero — incluye las
 las **8 dudas** que dejaste abiertas. Mis respuestas a esas dudas viven
 incrustadas en el alcance de abajo.
 
+**Sistema de diseño v1 disponible.** Antes de tocar UI en este bloque
+(pantalla "Mi cuenta" del admin), lee `docs/design/tokens.md` —
+contiene paleta, tipografía, escala de componentes y reglas. Los
+archivos de referencia están en `docs/design/`:
+
+- `tokens.md` — contrato visual.
+- `tailwind.config.reference.js` — configuración Tailwind con tokens
+  `mipiace.*` para copiar a `apps/admin/`.
+- `index.reference.css` — fuente DM Sans + CSS variables.
+- `reference-app.tsx` — código fuente de los 9 mockups v1; copia
+  patrones literales para "Mi cuenta" (la pantalla 9 del mockup ya
+  está diseñada).
+- `mockups/tpv-v1-pantallas.html` — preview navegable.
+
 Vuelve a leer cuando sea necesario:
 
 - `docs/07-nucleo-comun.md` §2 (onboarding y sync), §3 (emparejamiento —
