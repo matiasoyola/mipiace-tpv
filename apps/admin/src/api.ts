@@ -1,9 +1,14 @@
-// Cliente HTTP del admin. Lee/escribe sesión en sessionStorage (no
-// localStorage: si el propietario cierra la pestaña, sale; preferimos
-// eso a riesgo de robo del token persistente).
+// Cliente HTTP del admin.
+//
+// Almacenamiento de sesión:
+//   - Por defecto, sessionStorage: el propietario cierra pestaña → sale.
+//   - Con "Recuérdame" en login, localStorage: persiste hasta logout o
+//     hasta que /auth/refresh rechace el token. El backend rota el TTL
+//     del refresh según el flag remember (B2 §4.3).
 
 const ACCESS_KEY = "mipiacetpv-admin-access";
 const REFRESH_KEY = "mipiacetpv-admin-refresh";
+const REMEMBER_KEY = "mipiacetpv-admin-remember";
 
 export interface AuthTokens {
   accessToken: string;
@@ -11,17 +16,53 @@ export interface AuthTokens {
 }
 
 export function readTokens(): AuthTokens | null {
-  const a = sessionStorage.getItem(ACCESS_KEY);
-  const r = sessionStorage.getItem(REFRESH_KEY);
+  // Preferimos localStorage si existe (sesiones "Recuérdame"). Si no,
+  // fallback a sessionStorage para sesiones del browser actual.
+  const a = localStorage.getItem(ACCESS_KEY) ?? sessionStorage.getItem(ACCESS_KEY);
+  const r = localStorage.getItem(REFRESH_KEY) ?? sessionStorage.getItem(REFRESH_KEY);
   return a && r ? { accessToken: a, refreshToken: r } : null;
 }
 
-export function storeTokens(tokens: AuthTokens): void {
-  sessionStorage.setItem(ACCESS_KEY, tokens.accessToken);
-  sessionStorage.setItem(REFRESH_KEY, tokens.refreshToken);
+export function isRemembered(): boolean {
+  return localStorage.getItem(REMEMBER_KEY) === "1";
+}
+
+export function storeTokens(tokens: AuthTokens, options: { remember?: boolean } = {}): void {
+  const remember = options.remember === true;
+  // Limpiar el otro storage para evitar tokens duplicados en sitios
+  // distintos (si en login pasamos de remember=true a remember=false).
+  if (remember) {
+    sessionStorage.removeItem(ACCESS_KEY);
+    sessionStorage.removeItem(REFRESH_KEY);
+    localStorage.setItem(ACCESS_KEY, tokens.accessToken);
+    localStorage.setItem(REFRESH_KEY, tokens.refreshToken);
+    localStorage.setItem(REMEMBER_KEY, "1");
+  } else {
+    localStorage.removeItem(ACCESS_KEY);
+    localStorage.removeItem(REFRESH_KEY);
+    localStorage.removeItem(REMEMBER_KEY);
+    sessionStorage.setItem(ACCESS_KEY, tokens.accessToken);
+    sessionStorage.setItem(REFRESH_KEY, tokens.refreshToken);
+  }
+}
+
+// Refresh-on-rotation: cuando el /auth/refresh nos da tokens nuevos,
+// los guardamos en el mismo storage del original (no cambiamos el
+// modo Recuérdame en pleno vuelo).
+function refreshTokens(tokens: AuthTokens): void {
+  if (isRemembered()) {
+    localStorage.setItem(ACCESS_KEY, tokens.accessToken);
+    localStorage.setItem(REFRESH_KEY, tokens.refreshToken);
+  } else {
+    sessionStorage.setItem(ACCESS_KEY, tokens.accessToken);
+    sessionStorage.setItem(REFRESH_KEY, tokens.refreshToken);
+  }
 }
 
 export function clearTokens(): void {
+  localStorage.removeItem(ACCESS_KEY);
+  localStorage.removeItem(REFRESH_KEY);
+  localStorage.removeItem(REMEMBER_KEY);
   sessionStorage.removeItem(ACCESS_KEY);
   sessionStorage.removeItem(REFRESH_KEY);
 }
@@ -41,7 +82,6 @@ export class ApiError extends Error {
 interface ApiOptions {
   method?: string;
   body?: unknown;
-  // Si true (default), si el access token caducó intenta refresh + retry.
   retryOnUnauthorized?: boolean;
 }
 
@@ -62,7 +102,7 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
   if (res.status === 401 && options.retryOnUnauthorized !== false && tokens) {
     const refreshed = await tryRefresh(tokens.refreshToken);
     if (refreshed) {
-      storeTokens(refreshed);
+      refreshTokens(refreshed);
       return api<T>(path, { ...options, retryOnUnauthorized: false });
     }
     clearTokens();

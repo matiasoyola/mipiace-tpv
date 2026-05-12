@@ -5,6 +5,7 @@ import {
   INITIAL_SYNC_QUEUE_NAME,
   type InitialSyncJob,
 } from "../queues/initial-sync.js";
+import { registerTenantRepeatable } from "../queues/catalog-incremental.js";
 import { runInitialSync } from "../onboarding/initial-sync.js";
 
 export function startInitialSyncWorker(): Worker<InitialSyncJob> {
@@ -14,6 +15,10 @@ export function startInitialSyncWorker(): Worker<InitialSyncJob> {
       const { tenantId } = job.data;
       const prisma = getPrisma();
       const stats = await runInitialSync({ tenantId, prisma });
+      // Sync inicial OK → arrancar el cron de 15 min para este tenant
+      // (B2 §2.1). El jobId determinista evita duplicación si por
+      // alguna razón este worker corre dos veces.
+      await registerTenantRepeatable(tenantId);
       return stats;
     },
     {

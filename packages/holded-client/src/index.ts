@@ -41,15 +41,22 @@ export {
 export { listTaxes, parseTaxRateFromId, type HoldedTax } from "./taxes.js";
 
 export {
+  createContactWithGetBack,
+  getContact,
+  listContactsByCustomIds,
+  listContactsByMobile,
+  listContactsByPhone,
+  type CreateContactBody,
+  type CreateContactWithGetBackOptions,
+  type HoldedContact,
+  type HoldedContactAddress,
+} from "./contacts.js";
+
+export {
   listWarehouses,
   type HoldedAddress,
   type HoldedWarehouse,
 } from "./warehouses.js";
-
-export {
-  tryGetAccountInfo,
-  type HoldedAccountInfo,
-} from "./account.js";
 
 export {
   createSalesreceiptApproved,

@@ -19,7 +19,9 @@
     "db:studio": "pnpm --filter @mipiacetpv/db run studio",
     "spike:05": "pnpm --filter @mipiacetpv/spike-holded run 05-final-flow",
     "spike:06": "pnpm --filter @mipiacetpv/spike-holded run 06-pay-pdf-freeline",
-    "spike:07": "pnpm --filter @mipiacetpv/spike-holded run 07-test-productid"
+    "spike:07": "pnpm --filter @mipiacetpv/spike-holded run 07-test-productid",
+    "spike:08": "pnpm --filter @mipiacetpv/spike-holded run 08-account-info",
+    "spike:09": "pnpm --filter @mipiacetpv/spike-holded run 09-webhooks-probe"
   },
   "devDependencies": {
     "vitest": "^2.1.4"

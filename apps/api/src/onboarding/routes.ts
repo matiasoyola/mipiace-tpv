@@ -12,18 +12,13 @@
 
 import type { FastifyInstance } from "fastify";
 
-import {
-  ApiKeyClient,
-  HoldedApiError,
-  HoldedInvalidResponseError,
-  HoldedSubscriptionSuspendedError,
-  listProductsPage,
-} from "@mipiacetpv/holded-client";
+import { Prisma } from "@mipiacetpv/db";
 
 import { requireOwner } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
 import { encryptSecret } from "../crypto.js";
 import { loadEnv } from "../env.js";
+import { probeFailureToHttpStatus, probeHoldedKey } from "../holded/probe.js";
 import { enqueueInitialSync } from "../queues/initial-sync.js";
 
 export async function registerOnboardingRoutes(app: FastifyInstance): Promise<void> {
@@ -48,39 +43,17 @@ export async function registerOnboardingRoutes(app: FastifyInstance): Promise<vo
       const env = loadEnv();
 
       // 1. Validar contra Holded.
-      const probeClient = new ApiKeyClient(apiKey, { baseUrl: env.HOLDED_BASE_URL });
-      try {
-        await listProductsPage(probeClient, 1);
-      } catch (err) {
-        if (err instanceof HoldedSubscriptionSuspendedError) {
-          return reply.code(402).send({
-            error: "HOLDED_SUSPENDED",
-            message:
-              "Tu cuenta de Holded está suspendida por impago. Regulariza el pago en Holded y vuelve a intentarlo.",
-          });
+      const probe = await probeHoldedKey(apiKey);
+      if (!probe.ok) {
+        if (probe.code === "HOLDED_UNREACHABLE") {
+          request.log.error(
+            { tenantId: auth.tenantId, apiKey: "<REDACTED>" },
+            `connect-holded falló: ${probe.code}`,
+          );
         }
-        if (err instanceof HoldedApiError && (err.status === 401 || err.status === 403)) {
-          return reply.code(401).send({
-            error: "INVALID_HOLDED_KEY",
-            message: "Holded rechaza la API Key. Genera una nueva desde tu admin y reintenta.",
-          });
-        }
-        if (err instanceof HoldedInvalidResponseError) {
-          return reply.code(502).send({
-            error: "HOLDED_INVALID_RESPONSE",
-            message:
-              "Holded ha devuelto una respuesta que no es JSON. Es posible que estén con incidencia.",
-          });
-        }
-        // Cualquier otro fallo: 502.
-        request.log.error(
-          { tenantId: auth.tenantId, apiKey: "<REDACTED>" },
-          `connect-holded falló: ${err instanceof Error ? err.message : String(err)}`,
-        );
-        return reply.code(502).send({
-          error: "HOLDED_UNREACHABLE",
-          message: "No hemos podido contactar con Holded. Reintenta en unos minutos.",
-        });
+        return reply
+          .code(probeFailureToHttpStatus(probe.code))
+          .send({ error: probe.code, message: probe.message });
       }
 
       // 2. Cifrar + persistir.
@@ -92,7 +65,7 @@ export async function registerOnboardingRoutes(app: FastifyInstance): Promise<vo
           holdedApiKeyCiphertext: ciphertext,
           holdedAuthMode: "API_KEY",
           initialSyncStatus: "PENDING",
-          initialSyncStats: null,
+          initialSyncStats: Prisma.JsonNull,
         },
       });
 

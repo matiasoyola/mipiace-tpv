@@ -153,6 +153,87 @@ Holded hace el registro fiscal correspondiente.
 
 ---
 
+## ADR-011 · Portabilidad de hardware y sistema operativo
+
+**Contexto:** el TPV se desplegará inicialmente en terminales Android
+todo-en-uno (Smart-tpv AP12-1506) con impresora externa. El negocio no
+debe quedar atado a esa decisión: mañana puede aparecer un cliente con
+iPad, otro con Sunmi T2 de printer embebido, otro con mini-PC + monitor
+táctil. Si la base de código asume "Android + impresora red Epson", cada
+vertical nuevo cuesta semanas de adaptación.
+
+**Decisión:** el TPV es una **PWA web pura** y los periféricos hablan
+**protocolos estándar**, no SDKs propietarios.
+
+1. **El núcleo (`apps/tpv-web`, `apps/admin`, `apps/api`) NUNCA depende
+   de Android, iOS, Windows, macOS, ChromeOS, ni de un fabricante
+   concreto.** Cualquier navegador moderno (Chrome 100+, Safari 16+,
+   Edge) con HTTPS + Service Worker debe ejecutarlo idénticamente.
+
+2. **Periféricos por estándares industriales abiertos:**
+   - **Impresora**: ESC/POS sobre TCP (puerto 9100) o ESC/POS sobre
+     Bluetooth — ambos estándares de Epson de facto. Cualquier impresora
+     térmica que los implemente correctamente sirve.
+   - **Cajón portamonedas**: comando ESC/POS estándar `ESC p m t1 t2`.
+     Se conecta a la impresora por RJ11 (también estándar). Cualquier
+     cajón APG-compatible vale.
+   - **Lector de código de barras**: USB-HID. El escáner emula teclado.
+     Plug-and-play en cualquier OS sin driver.
+   - **Almacenamiento offline**: IndexedDB + Service Worker (W3C).
+     Nunca APIs propietarias de plataforma.
+
+3. **Cero SDK propietario en la base.** Ni Sunmi, ni iMin, ni Smart-tpv,
+   ni Epson Java SDK, ni Android Printer SDK. Si en el futuro un cliente
+   necesita hardware exótico (printer embebido, lector NFC propietario,
+   báscula de marca X), se construye un **adaptador opcional** en
+   `packages/*-adapters/` que implemente una interfaz abstracta. El
+   núcleo nunca aprende de ese hardware.
+
+4. **Interfaces abstractas por familia de periférico.** Cuando llegue
+   B5, la PWA recibirá un `PrinterClient` por inyección con una
+   interfaz mínima:
+
+   ```ts
+   interface PrinterClient {
+     printTicket(escpos: Uint8Array): Promise<PrintResult>
+     openCashDrawer(): Promise<void>
+     getStatus(): Promise<PrinterStatus>
+   }
+   ```
+
+   Implementaciones iniciales: `NetworkEscPosClient` (HTTP a IP local),
+   `BluetoothEscPosClient` (WebBluetooth), o ambas conviviendo. Si en
+   v2/v3 aparece `EmbeddedAndroidPrinterClient` o `AirPrintClient`, se
+   enchufa sin tocar el resto.
+
+5. **El hardware actual (AP12-1506) es hardware probado y soportado, no
+   contrato eterno.** El código NUNCA hace `if (deviceModel === 'AP12')`
+   ni equivalentes. La configuración hardware-específica vive en
+   `store` / `register` de cada tenant (IP de impresora, modo BT/red,
+   etc.).
+
+**Consecuencias:**
+
+- Pro: cualquier cambio futuro de hardware no requiere reescribir el
+  TPV.
+- Pro: código más limpio y fácil de testear (mock del `PrinterClient`
+  en lugar de emulador de Sunmi).
+- Pro: producto vendible al mercado europeo entero, no sólo a clientes
+  con hardware específico español.
+- Contra: requiere disciplina al codear, especialmente en B5. Code y
+  Pedro revisan este ADR antes de tocar hardware.
+- Contra: perdemos la opción de aprovechar features "premium" de un
+  fabricante concreto (p.ej. el customer-display embebido del Sunmi T2)
+  en MVP. Se mitiga con los adaptadores opcionales del punto 3.
+
+> **Nota sobre ADR-006:** la decisión concreta entre impresora de red
+> (Epson LAN) vs impresora Bluetooth (más barata, ~50-90 €) se difiere
+> hasta B5, cuando tengamos hardware real en mano del primer cliente
+> piloto. La interfaz `PrinterClient` del punto 4 permite soportar
+> ambas vías sin recodificar la PWA.
+
+---
+
 ## ADR-010 · Verificar siempre con GET tras escritura (PUT/POST 2xx mentiroso)
 
 **Contexto:** En el spike Fase 0 (`docs/spike-holded.md` §04.D, §03.D)

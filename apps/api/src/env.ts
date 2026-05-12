@@ -27,7 +27,15 @@ const Schema = z.object({
   JWT_ACCESS_SECRET: z.string().min(32),
   JWT_REFRESH_SECRET: z.string().min(32),
   JWT_ACCESS_TTL: z.string().default("15m"),
+  // TTL del refresh por defecto. Se usa cuando el propietario hace
+  // login SIN marcar "Recuérdame": la sesión sobrevive cierres de
+  // pestaña sólo si el cliente lo guarda en localStorage; con el
+  // default (sessionStorage) se pierde al cerrar pestaña.
   JWT_REFRESH_TTL: z.string().default("30d"),
+  // TTL del refresh cuando el propietario marca "Recuérdame en este
+  // dispositivo" en el login. El front guarda el refresh en
+  // localStorage en lugar de sessionStorage y respeta este TTL.
+  JWT_REFRESH_TTL_REMEMBER: z.string().default("90d"),
 
   // ── Cifrado de API Keys de Holded ─────────────────────────────────
   // Base64 de 32 bytes. AES-256-GCM.

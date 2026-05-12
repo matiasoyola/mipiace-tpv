@@ -3,6 +3,9 @@ import type { FastifyInstance } from "fastify";
 import { Prisma } from "@mipiacetpv/db";
 
 import { getPrisma } from "../context.js";
+import { decryptSecret, encryptSecret } from "../crypto.js";
+import { loadEnv } from "../env.js";
+import { probeFailureToHttpStatus, probeHoldedKey } from "../holded/probe.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
 import { requireOwner } from "./middleware.js";
 import {
@@ -66,10 +69,10 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         tid: result.tenant.id,
         role: "OWNER",
       });
-      const refreshToken = signRefreshToken({
-        sub: result.user.id,
-        tid: result.tenant.id,
-      });
+      const refreshToken = signRefreshToken(
+        { sub: result.user.id, tid: result.tenant.id },
+        { tv: result.user.tokenVersion },
+      );
       return reply.code(201).send({ accessToken, refreshToken });
     },
   );
@@ -85,12 +88,20 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
           properties: {
             email: { type: "string", pattern: emailFormat },
             password: { type: "string", minLength: 1, maxLength: 256 },
+            // "Recuérdame en este dispositivo" — alarga el TTL del
+            // refresh y el front lo guarda en localStorage. Opcional;
+            // por defecto la sesión muere al cerrar pestaña.
+            remember: { type: "boolean" },
           },
         },
       },
     },
     async (request, reply) => {
-      const { email, password } = request.body as { email: string; password: string };
+      const { email, password, remember } = request.body as {
+        email: string;
+        password: string;
+        remember?: boolean;
+      };
       const prisma = getPrisma();
       const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
       // Mensaje genérico — no filtramos si el email existe.
@@ -113,10 +124,10 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         tid: user.tenantId,
         role: user.role,
       });
-      const refreshToken = signRefreshToken({
-        sub: user.id,
-        tid: user.tenantId,
-      });
+      const refreshToken = signRefreshToken(
+        { sub: user.id, tid: user.tenantId },
+        { tv: user.tokenVersion, remember: remember === true },
+      );
       return { accessToken, refreshToken };
     },
   );
@@ -142,17 +153,47 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         if (!user || user.tenantId !== payload.tid) {
           return reply.code(401).send({ error: "INVALID_REFRESH", message: "Sesión inválida" });
         }
+        // tokenVersion mismatch → el usuario hizo logout-everywhere o
+        // bumpó la versión por otra vía. Rechazar.
+        if (payload.tv !== user.tokenVersion) {
+          return reply.code(401).send({ error: "INVALID_REFRESH", message: "Sesión revocada" });
+        }
         return {
           accessToken: signAccessToken({
             sub: user.id,
             tid: user.tenantId,
             role: user.role,
           }),
-          refreshToken: signRefreshToken({ sub: user.id, tid: user.tenantId }),
+          refreshToken: signRefreshToken(
+            { sub: user.id, tid: user.tenantId },
+            { tv: user.tokenVersion, remember: payload.rmb === 1 },
+          ),
         };
       } catch {
         return reply.code(401).send({ error: "INVALID_REFRESH", message: "Refresh inválido" });
       }
+    },
+  );
+
+  app.post(
+    "/auth/logout-everywhere",
+    {
+      preHandler: requireOwner,
+      schema: { body: { type: "object", additionalProperties: false, properties: {} } },
+    },
+    async (request, reply) => {
+      const auth = request.auth!;
+      const prisma = getPrisma();
+      // Incremento atómico: cualquier refresh en vuelo con el `tv`
+      // anterior queda invalidado al siguiente intento de refresh.
+      // Los access tokens vivos (≤15 min) siguen valiendo hasta
+      // expirar — coste aceptado a cambio de no llevar blacklist.
+      const updated = await prisma.user.update({
+        where: { id: auth.userId },
+        data: { tokenVersion: { increment: 1 } },
+        select: { tokenVersion: true },
+      });
+      return reply.code(200).send({ tokenVersion: updated.tokenVersion });
     },
   );
 
@@ -175,8 +216,171 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
           name: tenant.name,
           hasHoldedKey: tenant.holdedApiKeyCiphertext != null,
           initialSyncStatus: tenant.initialSyncStatus,
+          fiscalProfile: tenant.fiscalProfile ?? null,
+          lastIncrementalSyncAt: tenant.lastIncrementalSyncAt?.toISOString() ?? null,
         },
       };
+    },
+  );
+
+  // Edita el perfil fiscal del tenant (B2 §4.1). El sync inicial lo
+  // pre-rellena con datos del almacén default (B1), pero el propietario
+  // los reescribe aquí. NO re-sincroniza con Holded: la dirección del
+  // ticket es la que el propietario marca, no la que Holded conozca.
+  // Spike §08 confirmó que Holded no expone endpoint de account info,
+  // así que NIF + razón social son SIEMPRE manuales.
+  app.put(
+    "/auth/me/fiscal-profile",
+    {
+      preHandler: requireOwner,
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            businessName: { type: "string", minLength: 1, maxLength: 200 },
+            nif: { type: "string", minLength: 1, maxLength: 32 },
+            address: { type: "string", maxLength: 200 },
+            postalCode: { type: "string", maxLength: 16 },
+            city: { type: "string", maxLength: 80 },
+            province: { type: "string", maxLength: 80 },
+            country: { type: "string", maxLength: 80 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const auth = request.auth!;
+      const body = request.body as Record<string, string | undefined>;
+      const prisma = getPrisma();
+      // Mantenemos los campos previos no enviados (merge superficial).
+      // El cliente del admin manda el form completo al guardar, así que
+      // en la práctica esto siempre sobreescribe todo.
+      const current = await prisma.tenant.findUniqueOrThrow({
+        where: { id: auth.tenantId },
+        select: { fiscalProfile: true },
+      });
+      const previous =
+        current.fiscalProfile && typeof current.fiscalProfile === "object"
+          ? (current.fiscalProfile as Record<string, unknown>)
+          : {};
+      const merged: Record<string, unknown> = { ...previous };
+      // Sobreescribir sólo los que vinieron. La fuente queda marcada
+      // como "manual" cuando hay edición (vs "warehouse_default" del
+      // sync inicial).
+      for (const [k, v] of Object.entries(body)) {
+        if (v !== undefined) merged[k] = v;
+      }
+      merged.source = "manual";
+      merged.updatedAt = new Date().toISOString();
+
+      const updated = await prisma.tenant.update({
+        where: { id: auth.tenantId },
+        data: { fiscalProfile: merged as Prisma.InputJsonValue },
+        select: { fiscalProfile: true },
+      });
+      return reply.code(200).send({ fiscalProfile: updated.fiscalProfile });
+    },
+  );
+
+  // Rotación de API Key de Holded (B2 §4.2). Mismo schema de body que
+  // /onboarding/connect-holded: el front del admin reutiliza el modal.
+  // Sólo sobreescribe el ciphertext si la nueva clave valida — si
+  // falla, la antigua se mantiene intacta y devolvemos el error
+  // mapeado con el mismo HTTP que el onboarding inicial.
+  app.post(
+    "/auth/me/rotate-holded-key",
+    {
+      preHandler: requireOwner,
+      schema: {
+        body: {
+          type: "object",
+          required: ["apiKey"],
+          additionalProperties: false,
+          properties: {
+            apiKey: { type: "string", minLength: 10, maxLength: 512 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const auth = request.auth!;
+      const { apiKey } = request.body as { apiKey: string };
+
+      const probe = await probeHoldedKey(apiKey);
+      if (!probe.ok) {
+        // NUNCA loguear la apiKey ni su longitud. El log identifica el
+        // tenant y el motivo del rechazo; el front muestra el message.
+        if (probe.code === "HOLDED_UNREACHABLE") {
+          request.log.error(
+            { tenantId: auth.tenantId, apiKey: "<REDACTED>" },
+            `rotate-holded-key falló: ${probe.code}`,
+          );
+        }
+        return reply
+          .code(probeFailureToHttpStatus(probe.code))
+          .send({ error: probe.code, message: probe.message });
+      }
+
+      const env = loadEnv();
+      const ciphertext = encryptSecret(apiKey, env.HOLDED_KEY_ENCRYPTION_SECRET);
+      const prisma = getPrisma();
+      const now = new Date();
+      await prisma.tenant.update({
+        where: { id: auth.tenantId },
+        data: {
+          holdedApiKeyCiphertext: ciphertext,
+          holdedAuthMode: "API_KEY",
+        },
+      });
+      // No tocamos initialSyncStatus ni encolamos sync — la rotación
+      // típica (clave comprometida → nueva clave de la MISMA cuenta
+      // Holded) no necesita resync. Si el propietario cambia de cuenta
+      // Holded, puede forzar manualmente con POST /catalog/sync-now.
+      // No hay cache en memoria de la API key descifrada — cada job
+      // descifra al arrancar, así que la rotación es efectiva sin
+      // acción extra del runtime.
+      return reply.code(200).send({
+        ok: true,
+        validatedAt: now.toISOString(),
+      });
+    },
+  );
+
+  // "Probar conexión" en admin (B2 §4.2). Reusa la API Key cifrada en
+  // BD y devuelve un resultado equivalente al de la rotación, sin
+  // tocar nada.
+  app.post(
+    "/auth/me/test-holded-connection",
+    {
+      preHandler: requireOwner,
+      schema: { body: { type: "object", additionalProperties: false, properties: {} } },
+    },
+    async (request, reply) => {
+      const auth = request.auth!;
+      const prisma = getPrisma();
+      const tenant = await prisma.tenant.findUnique({
+        where: { id: auth.tenantId },
+        select: { holdedApiKeyCiphertext: true },
+      });
+      if (!tenant?.holdedApiKeyCiphertext) {
+        return reply.code(409).send({
+          error: "NO_HOLDED_KEY",
+          message: "No hay una API Key configurada todavía.",
+        });
+      }
+      const env = loadEnv();
+      const apiKey = decryptSecret(
+        tenant.holdedApiKeyCiphertext,
+        env.HOLDED_KEY_ENCRYPTION_SECRET,
+      );
+      const probe = await probeHoldedKey(apiKey);
+      if (!probe.ok) {
+        return reply
+          .code(probeFailureToHttpStatus(probe.code))
+          .send({ error: probe.code, message: probe.message });
+      }
+      return reply.code(200).send({ ok: true, validatedAt: new Date().toISOString() });
     },
   );
 }

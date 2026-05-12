@@ -6,7 +6,9 @@
   "scripts": {
     "05-final-flow": "tsx src/05-final-flow.ts",
     "06-pay-pdf-freeline": "tsx src/06-pay-pdf-freeline.ts",
-    "07-test-productid": "tsx src/07-test-productid.ts"
+    "07-test-productid": "tsx src/07-test-productid.ts",
+    "08-account-info": "tsx src/08-account-info.ts",
+    "09-webhooks-probe": "tsx src/09-webhooks-probe.ts"
   },
   "dependencies": {
     "@mipiacetpv/holded-client": "workspace:*",

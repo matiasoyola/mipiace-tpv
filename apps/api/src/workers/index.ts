@@ -8,14 +8,22 @@ import "dotenv/config";
 
 import { loadEnv } from "../env.js";
 import { startInitialSyncWorker } from "./initial-sync-worker.js";
+import {
+  registerAllExistingRepeatables,
+  startCatalogIncrementalWorker,
+} from "./catalog-incremental-worker.js";
 
 async function main() {
   loadEnv();
-  const worker = startInitialSyncWorker();
+  const initialWorker = startInitialSyncWorker();
+  const incrementalWorker = startCatalogIncrementalWorker();
   console.log("[workers] initial-sync worker listo");
+  console.log("[workers] catalog-incremental worker listo");
+  const count = await registerAllExistingRepeatables();
+  console.log(`[workers] ${count} repeatable(s) registrados para tenants existentes`);
   process.on("SIGINT", async () => {
     console.log("[workers] SIGINT — cerrando…");
-    await worker.close();
+    await Promise.all([initialWorker.close(), incrementalWorker.close()]);
     process.exit(0);
   });
 }

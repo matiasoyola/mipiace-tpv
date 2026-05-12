@@ -1124,3 +1124,296 @@ suma matices operativos.)
 cuenta, todos son borrables sin consecuencias fiscales. Se recomienda
 borrarlos antes de pasar la cuenta a producción.
 
+---
+
+## Hallazgos Fase 1 (B2+)
+
+A partir de aquí los sondeos ya no son Fase 0 — el spike base está
+cerrado y firmado. Cada vez que un bloque posterior necesite probar un
+endpoint nuevo o entender un comportamiento no observado en Fase 0, se
+añade aquí una sección numerada con el formato `§NN`, los fixtures
+relevantes en `spike/holded/fixtures/NN-*.json`, y la recomendación de
+implementación.
+
+### §08 · Endpoint de "account info" del propietario (B2)
+
+> **Pregunta:** ¿qué endpoint de Holded expone NIF + razón social +
+> dirección de la cuenta del propietario (para pre-rellenar el form de
+> "Mi cuenta" del admin)?
+>
+> **Resultado:** **ninguno de los 12 paths probados** devuelve datos
+> fiscales por API Key. Holded responde 200+HTML (caso 01.B) en 11 de
+> los 12 y `{status:0, info:"not found"}` en 1. La pantalla "Mi cuenta"
+> se llena con datos del almacén default (B1) + edición manual del
+> propietario. **No hay endpoint de refresco** desde Holded.
+
+#### 08.A — Matriz de endpoints probados
+
+Script: `spike/holded/src/08-account-info.ts` (`pnpm run 08-account-info`).
+Fixtures: `08-<slug>.json` por endpoint + `08-summary.json`.
+
+| Path | HTTP | Content-Type | Resultado |
+|---|---|---|---|
+| `/invoicing/v1/me`            | 200 | `text/html` | 200+HTML (404 disfrazado) |
+| `/invoicing/v1/account`       | 200 | `text/html` | 200+HTML |
+| `/invoicing/v1/company`       | 200 | `text/html` | 200+HTML |
+| `/invoicing/v1/users/me`      | 200 | `text/html` | 200+HTML |
+| `/invoicing/v1/users`         | 200 | `text/html` | 200+HTML |
+| `/invoicing/v1/profile`       | 200 | `text/html` | 200+HTML |
+| `/invoicing/v1/businessinfo`  | 200 | `text/html` | 200+HTML |
+| `/invoicing/v1/myaccount`     | 200 | `text/html` | 200+HTML |
+| `/invoicing/v1/contacts/me`   | 400 | `application/json` | `{"status":0,"info":"not found"}` |
+| `/users/v1/me`                | 200 | `text/html` | 200+HTML |
+| `/account/v1/me`              | 200 | `text/html` | 200+HTML |
+| `/v1/me`                      | 200 | `text/html` | 200+HTML |
+
+Los 4 candidatos del prompt B2 (`/me`, `/account`, `/company`,
+`/users/me`) **descartados con certeza**. Los 8 adicionales (variantes
+de namespace + nombres habituales en otros ERPs) también descartados.
+
+#### 08.B — Confirmaciones laterales
+
+Dos observaciones que refuerzan hallazgos previos:
+
+1. **200+HTML como "404 disfrazado" es la respuesta canónica de Holded
+   para endpoints inexistentes bajo cualquier namespace.** Confirmamos
+   01.B también para `/users/v1/*`, `/account/v1/*`, `/v1/*`. Refuerza
+   la regla operativa: **sólo `/invoicing/v1/*` es API pública por API
+   Key**. Cualquier otro namespace es SPA de Holded.
+2. **`/invoicing/v1/contacts/me` → envelope `{status:0,info:"not found"}`** —
+   confirma que `/invoicing/v1/contacts/:id` existe como ruta válida (la
+   usaremos para contactos en B2.3), pero `me` no es un id válido. El
+   envelope `{status,info}` (§04.A) sigue siendo la única señal JSON
+   limpia para errores de "ruta válida pero recurso inexistente".
+
+#### 08.C — Recomendación implementada en B2
+
+- **`packages/holded-client/src/account.ts` se borra.** La función
+  `tryGetAccountInfo` apuntaba a `/invoicing/v1/me` sin validar y
+  habría producido `HoldedInvalidResponseError` en producción (200+HTML
+  filtrado por `ApiKeyClient`). El re-export en `index.ts` también se
+  retira. Si Holded añade el endpoint en el futuro, se vuelve a meter.
+- **Form de "Mi cuenta" en admin** (B2.4.1) se rellena con:
+  1. `tenant.fiscalProfile` (poblado en B1 desde el almacén default
+     `address`, `city`, `postalCode`, `province`, `country`).
+  2. Edición manual del propietario, que persiste en
+     `tenant.fiscalProfile`. **NIF + razón social SIEMPRE manuales** —
+     ni el almacén ni Holded los exponen.
+- **NO hay botón "Refrescar desde Holded"** en B2. El prompt sugería
+  uno condicional al spike; al ser negativo, se omite.
+- **`tenant.holdedAccountId` sigue null.** B1-dudas §3 proponía
+  derivarlo del hash de la API key. Como id interno sirve, pero hasta
+  que haya un caso de uso (multi-cuenta, switching, etc.) se deja como
+  TODO de bloques posteriores.
+
+#### 08.D — Reglas defensivas para el `HoldedClient`
+
+Una rareza derivada del sondeo: **`/account/v1/me` y `/users/v1/me`
+devolvieron 200+HTML aunque sus namespaces no están documentados**. No
+podemos asumir que un 200+HTML siempre signifique "endpoint
+inexistente" — la SPA de Holded se monta también en namespaces
+desconocidos. La regla operativa para el cliente sigue siendo: **2xx
+con `Content-Type != application/json` → `HoldedInvalidResponseError`,
+no reintentar**. Validar con env-tested la URL antes de pasarla al
+cliente.
+
+### §09 · Webhooks de Holded (B2) — sondeo de descubrimiento
+
+> **Pregunta:** ¿expone Holded webhooks que avisen de cambios en
+> catálogo (productos/contactos), de modo que podamos invalidar la
+> cache local en tiempo real en lugar de hacer cron cada 15 min?
+>
+> **Resultado:** **documentación de terceros dice que sí**
+> (`POST /webhooks/v1/create`), **pero ese endpoint NO es alcanzable con
+> nuestra API Key sandbox** — devuelve 200+HTML como cualquier ruta
+> inexistente. La causa probable es permisos de API Key (similar a §04
+> H1) o requerimiento de credenciales OAuth.
+>
+> **Decisión B2:** documentamos el findings y **no implementamos**
+> receptor de webhooks en este bloque. El cron de 15 min cubre el MVP.
+> Reabrir cuando tengamos OAuth o cuando un cliente de producción nos
+> dé acceso a una cuenta donde el endpoint responda.
+
+#### 09.A — Lo que dice la doc oficial y los integradores
+
+La doc oficial de Holded (`developers.holded.com/reference`) **no
+incluye una sección de webhooks** en la home, y la búsqueda de "webhook"
+no surge ningún endpoint dentro de su referencia API pública por API
+Key.
+
+Sin embargo, los integradores comerciales **sí los anuncian**:
+
+- **Rollout** (`rollout.com/integration-guides/holded/quick-guide-to-implementing-webhooks-in-holded`)
+  describe el endpoint con shape concreto:
+
+  ```
+  POST https://api.holded.com/api/webhooks/v1/create
+  Headers: { key: <API_KEY> }
+  Body: { "url": "https://your-domain.com/webhook", "event": "invoice.created" }
+  ```
+
+  Y el payload recibido (descrito como ejemplo):
+
+  ```
+  POST <your-url>
+  Headers: { x-holded-signature: <hex-sha256-hmac> }
+  Body: { "event": "invoice.created", "data": { "id": "..." } }
+  ```
+
+  Firma: HMAC-SHA256 del body JSON-stringify-eado con el "webhook
+  secret" del cliente. **Rollout no especifica de dónde sale ese
+  secret** (¿lo devuelve el create?, ¿se configura en otra parte?).
+
+- **Zapier** (`zapier.com/apps/holded/integrations/webhook`) y
+  **Integrately** anuncian triggers tipo "New Invoice", "Updated
+  Contact", "New Customer". Ninguno publica la lista exhaustiva de
+  eventos. **No hemos confirmado eventos específicos de productos**
+  (`product.created`, `product.updated`) por escrito.
+
+#### 09.B — Sondeo directo · resultado negativo
+
+Script: `spike/holded/src/09-webhooks-probe.ts`. Probamos 13 paths con
+GET/OPTIONS en namespaces típicos (`/invoicing/v1/webhooks`,
+`/webhooks/v1`, `/v1/webhooks`, etc.). Todos 200+HTML salvo dos que
+caen bajo `/invoicing/v1/<resource>/:id` y devuelven envelope `{status:0,
+info:"not found"}`. Mismo patrón que §08.
+
+Adicionalmente, sondeo manual al endpoint que Rollout dice que existe:
+
+| Método | Path | HTTP | Content-Type | Body |
+|---|---|---|---|---|
+| GET     | `/webhooks/v1/create` | 200 | `text/html` | SPA |
+| OPTIONS | `/webhooks/v1/create` | 200 | `text/html` | SPA |
+| HEAD    | `/webhooks/v1/create` | 200 | `text/html` | 0 B |
+| GET     | `/webhooks/v1/list`   | 200 | `text/html` | SPA |
+| GET     | `/webhooks/v1`        | 200 | `text/html` | SPA |
+| POST    | `/webhooks/v1/create` (body `{}`) | 200 | `text/html` | SPA |
+
+**Crítico:** ni siquiera el POST documentado por Rollout devuelve
+envelope JSON. Por contraste, todos los demás endpoints de
+`/invoicing/v1/*` que existen pero rechazan input devuelven `{status:0,
+info: "..."}` (§04.A). Que `/webhooks/v1/create` devuelva 200+HTML
+indica que el namespace `/webhooks/v1` **no está montado** para esta
+API Key — no existe la ruta a nivel de routing.
+
+#### 09.C — Hipótesis sobre por qué no funciona
+
+Tres lecturas plausibles, en orden de probabilidad subjetiva:
+
+1. **Permisos de API Key restringidos.** El comportamiento es coherente
+   con §04 H1: API Keys públicas tienen scope limitado y los webhooks
+   están reservados a apps OAuth o a integraciones con acuerdo
+   comercial. Rollout, Zapier e Integrately probablemente usan OAuth
+   detrás de la cortina y publican el shape REST para developers que
+   migren a OAuth.
+2. **Cuenta sandbox sin acceso a webhooks.** Nuestra cuenta de pruebas
+   podría no tener el módulo de webhooks activado (similar a cómo
+   Veri\*factu está desactivado). En cuenta de producción con plan
+   apropiado podría montarse.
+3. **Endpoint movido / discontinuado.** La doc de Rollout pudo
+   reflejar un endpoint que Holded retiró. Sin doc oficial actual no
+   podemos saber.
+
+**Para resolverlo en una Fase posterior** (no en B2):
+- Abrir ticket a Holded soporte preguntando explícitamente si la API
+  Key habilita webhooks y, si no, qué scope hace falta.
+- Si la respuesta es "necesitas OAuth", esperar a que decidamos pasar a
+  OAuth (ADR-004) antes de invertir en el receptor.
+
+#### 09.D — Si en el futuro el endpoint responde · shape esperado
+
+Cuando podamos hacer `POST /webhooks/v1/create` y obtener un JSON real
+(no SPA), la implementación de B2.4 propuesta inicialmente es viable:
+
+- **Registro** desde el backend al arrancar el tenant: una llamada por
+  cada evento que nos interese (al menos `product.created`,
+  `product.updated`, `contact.created`, `contact.updated`). URL:
+  `https://<api-host>/webhooks/holded/<tenantId>`. Guardar el secret
+  devuelto en `tenant.holdedWebhookSecret` (cifrado, igual que la API
+  Key).
+- **Receptor** Fastify: `POST /webhooks/holded/:tenantId` con
+  preHandler que valide `x-holded-signature` contra
+  `HMAC-SHA256(rawBody, decrypt(tenant.holdedWebhookSecret))`. Si la
+  firma no cuadra → 401 sin más. Si cuadra → encolar un sync
+  incremental dirigido (sólo el `data.id` afectado).
+- **Idempotencia del receptor.** Holded podría reintentar; el receptor
+  hace upsert por `data.id` igual que el cron y se mantiene idempotente.
+- **Fallback siempre activo.** Aun con webhooks operativos, mantener el
+  cron de 15 min como "barrida de seguridad" por si Holded pierde un
+  evento o el receptor cae.
+
+#### 09.E — Recomendación firme para B2
+
+- **No implementar receptor de webhooks en B2.** Confirmado por dos
+  vías (sondeo y ausencia de doc oficial).
+- **Cron de 15 min en BullMQ.repeatable es la única vía** para
+  invalidar cache de catálogo en este bloque.
+- **Re-evaluar cuando** (a) Holded confirme por soporte que el endpoint
+  está disponible para nuestra API Key, **o** (b) decidamos migrar a
+  OAuth.
+
+Fuentes externas consultadas (todas accedidas 2026-05-12):
+
+- `https://developers.holded.com/reference` — doc oficial, sin sección
+  de webhooks.
+- `https://rollout.com/integration-guides/holded/quick-guide-to-implementing-webhooks-in-holded`
+  — shape del POST y de la firma HMAC.
+- `https://integrately.com/integrations/holded/webhook-api` y
+  `https://zapier.com/apps/holded/integrations/webhook` — confirmación
+  de existencia y nombres de triggers ("New Invoice", "Updated
+  Contact", "New Customer"), sin detalles técnicos.
+
+### §10 · Endpoint `/invoicing/v1/contacts` — filtros server-side (B2)
+
+> **Pregunta:** ¿podemos buscar contactos server-side por nombre,
+> email o NIF — los criterios típicos del cajero al cobrar?
+>
+> **Resultado:** **NO**. La doc oficial sólo expone tres query params
+> en `GET /invoicing/v1/contacts`: `phone`, `mobile` (ambos match
+> exacto) y `customId` (array). No hay filtro por nombre, email ni NIF.
+
+#### 10.A — Lo que documenta la API oficial
+
+Consultado en `https://developers.holded.com/reference/list-contacts-1`:
+
+| Query param | Tipo | Semántica |
+|---|---|---|
+| `phone`    | string | Match **exacto**, incluyendo `+`, `#`, `-`. |
+| `mobile`   | string | Idem. |
+| `customId` | array  | Devuelve sólo contactos con esos `customId`. |
+
+Es decir: el caso de uso "el cajero teclea las tres primeras letras
+del nombre del cliente" **no es servible desde el lado de Holded**.
+
+#### 10.B — Implementación elegida en B2 §3
+
+- **Sync inicial completo de contactos: NO.** Sería bajar miles de
+  registros por tenant en cada onboarding sin justificación clara.
+- **Cache local `Contact` con índices por `name`, `nif`, `email`.** Se
+  va llenando lazy a medida que el TPV ve contactos (vía teléfono
+  match o creación on-the-fly).
+- **`GET /contacts/search?q=<query>`:**
+  1. LIKE local case-insensitive sobre `name`, `email`, `nif`, `phone`.
+  2. Si local devuelve 0 resultados **y** la query parece teléfono
+     (heurística `^[+\d\s.-]+$` con ≥6 dígitos) → llama a
+     `GET /invoicing/v1/contacts?phone=<q>` en vivo, upserta lo que
+     llegue y lo devuelve marcado `source: "holded"`.
+  3. Si local devuelve 0 y la query NO parece teléfono → devuelve
+     `[]` con `holdedFallback: "name_search_not_supported"`. El front
+     puede mostrar "ningún contacto local · pulsa +Nuevo para crear".
+- **`POST /contacts`:** crea on-the-fly con `createContactWithGetBack`
+  (ADR-010). Mapeo: `nif` del payload → `code` de Holded; `type` fijo
+  en `"client"` (el TPV crea clientes finales).
+
+#### 10.C — Implicaciones operativas que documentar al cliente
+
+- **El cajero NO puede buscar contactos del histórico por nombre** la
+  primera vez que ese contacto aparece. La búsqueda por nombre sólo
+  funciona contra contactos ya cacheados localmente (los creados desde
+  el TPV o los encontrados por teléfono).
+- **Búsqueda por teléfono es el flujo canónico.** El front debe pedir
+  el teléfono primero si el cliente no existe en la cache.
+- **Si Holded añadiera filtro por nombre en el futuro** (deuda
+  técnica), basta con extender el fallback en
+  `apps/api/src/contacts/routes.ts` sin tocar el schema.
+

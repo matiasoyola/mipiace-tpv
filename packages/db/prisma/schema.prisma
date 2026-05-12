@@ -82,36 +82,46 @@ enum InitialSyncStatus {
 // ── Multi-tenant raíz ─────────────────────────────────────────────────
 
 model Tenant {
-  id                     String            @id @default(uuid()) @db.Uuid
-  name                   String
-  holdedAccountId        String?           @map("holded_account_id")
-  holdedAuthMode         HoldedAuthMode    @default(API_KEY) @map("holded_auth_mode")
+  id                       String            @id @default(uuid()) @db.Uuid
+  name                     String
+  holdedAccountId          String?           @map("holded_account_id")
+  holdedAuthMode           HoldedAuthMode    @default(API_KEY) @map("holded_auth_mode")
   // Tokens y API keys siempre cifrados con AES-GCM antes de persistir.
-  holdedApiKeyCiphertext String?           @map("holded_api_key_ciphertext")
-  holdedOauthAccess      String?           @map("holded_oauth_access")
-  holdedOauthRefresh     String?           @map("holded_oauth_refresh")
-  holdedOauthExpiresAt   DateTime?         @map("holded_oauth_expires_at") @db.Timestamptz()
+  holdedApiKeyCiphertext   String?           @map("holded_api_key_ciphertext")
+  holdedOauthAccess        String?           @map("holded_oauth_access")
+  holdedOauthRefresh       String?           @map("holded_oauth_refresh")
+  holdedOauthExpiresAt     DateTime?         @map("holded_oauth_expires_at") @db.Timestamptz()
   // Datos fiscales agregados (NIF, razón social, dirección) extraídos
   // del almacén default o introducidos por el propietario. Van al pie
   // de cada ticket impreso.
-  fiscalProfile          Json?             @map("fiscal_profile")
+  fiscalProfile            Json?             @map("fiscal_profile")
   // Estado del sync inicial post-onboarding. El admin pollea
   // GET /onboarding/sync-status para mostrar la barra de progreso.
-  initialSyncStatus      InitialSyncStatus @default(PENDING) @map("initial_sync_status")
-  initialSyncStartedAt   DateTime?         @map("initial_sync_started_at") @db.Timestamptz()
-  initialSyncCompletedAt DateTime?         @map("initial_sync_completed_at") @db.Timestamptz()
+  initialSyncStatus        InitialSyncStatus @default(PENDING) @map("initial_sync_status")
+  initialSyncStartedAt     DateTime?         @map("initial_sync_started_at") @db.Timestamptz()
+  initialSyncCompletedAt   DateTime?         @map("initial_sync_completed_at") @db.Timestamptz()
   // Stats acumulados: productsCount, servicesCount, warehousesCount,
   // taxesCount, autoSkuFixed, autoSkuNeedsReview, wildcardsCreated,
   // wildcardsReused, errors[]. Estructura libre; el admin la pinta.
-  initialSyncStats       Json?             @map("initial_sync_stats")
-  createdAt              DateTime          @default(now()) @map("created_at") @db.Timestamptz()
-  updatedAt              DateTime          @updatedAt @map("updated_at") @db.Timestamptz()
+  initialSyncStats         Json?             @map("initial_sync_stats")
+  // Última vez que el sync incremental (B2 §2) corrió con éxito sobre
+  // este tenant. El cron de 15 min lo actualiza; el admin lo muestra
+  // como "última sincronización hace X min".
+  lastIncrementalSyncAt    DateTime?         @map("last_incremental_sync_at") @db.Timestamptz()
+  // Stats del último sync incremental: { productsSeen, productsUpdated,
+  // orphansMarked, autoSkuFixed, autoSkuNeedsReview, durationMs,
+  // errors[] }. Mismo enfoque que `initialSyncStats` — estructura
+  // libre, el admin la renderiza.
+  lastIncrementalSyncStats Json?             @map("last_incremental_sync_stats")
+  createdAt                DateTime          @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt                DateTime          @updatedAt @map("updated_at") @db.Timestamptz()
 
   users         User[]
   stores        Store[]
   devices       Device[]
   pairingCodes  PairingCode[]
   products      Product[]
+  contacts      Contact[]
   warehouses    Warehouse[]
   taxes         TenantTax[]
   tickets       Ticket[]
@@ -150,6 +160,11 @@ model User {
   // PIN sólo lo tienen cajeros/encargados que tocan el TPV físico.
   pinHash      String?   @map("pin_hash")
   role         UserRole
+  // Incrementa con `POST /auth/logout-everywhere` (B2 §4.3). Los
+  // refresh tokens llevan este `tv` en su payload; si no coincide con
+  // el de BD, el refresh se rechaza. Permite invalidación masiva sin
+  // mantener una blacklist por jti.
+  tokenVersion Int       @default(0) @map("token_version")
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz()
 
@@ -316,6 +331,31 @@ model Warehouse {
 
   @@unique([tenantId, holdedWarehouseId])
   @@map("warehouses")
+}
+
+// Cache local de contactos de Holded. A diferencia de Product, NO hay
+// sync inicial completo (B2 §3): los contactos del tenant pueden ser
+// miles. El endpoint `GET /contacts/search` busca primero aquí; si no
+// encuentra resultados, llama a Holded en vivo y upserta. El endpoint
+// `POST /contacts` crea contacto on-the-fly desde el TPV con GET-back.
+model Contact {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  holdedContactId String   @map("holded_contact_id")
+  name            String
+  nif             String?
+  email           String?
+  phone           String?
+  raw             Json?
+  lastSyncedAt    DateTime @default(now()) @map("last_synced_at") @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, holdedContactId])
+  @@index([tenantId, email])
+  @@index([tenantId, nif])
+  @@index([tenantId, name])
+  @@map("contacts")
 }
 
 // ── Operativa de ventas ───────────────────────────────────────────────
