@@ -11,10 +11,10 @@ import {
   iterateAllServices,
   listTaxes,
   listWarehouses,
-  parseTaxRateFromId,
   type HoldedContact,
   type HoldedProduct,
   type HoldedService,
+  type HoldedTax,
 } from "@mipiacetpv/holded-client";
 
 import { decryptSecret } from "../crypto.js";
@@ -90,20 +90,21 @@ export async function runInitialSync(options: RunInitialSyncOptions): Promise<Sy
       stats.taxesCount = taxes.length;
       resolveTaxRate = buildTaxRateResolver(taxes);
       for (const t of taxes) {
-        const rate = typeof t.rate === "number" ? t.rate : parseTaxRateFromId(t.id);
+        const key = pickHoldedTaxKey(t);
+        if (!key) continue; // tax sin key estable: no persistible
         await prisma.tenantTax.upsert({
           where: {
-            tenantId_holdedTaxId: { tenantId, holdedTaxId: t.id },
+            tenantId_holdedTaxId: { tenantId, holdedTaxId: key },
           },
           create: {
             tenantId,
-            holdedTaxId: t.id,
-            rate: rate ?? null,
+            holdedTaxId: key,
+            rate: t.rate ?? null,
             name: t.name ?? null,
             raw: t as unknown as object,
           },
           update: {
-            rate: rate ?? null,
+            rate: t.rate ?? null,
             name: t.name ?? null,
             raw: t as unknown as object,
             syncedAt: new Date(),
@@ -414,4 +415,15 @@ function consoleLogger(): NonNullable<RunInitialSyncOptions["logger"]> {
     warn: (m, e) => console.warn(`[initial-sync] ${m}`, e ?? ""),
     error: (m, e) => console.error(`[initial-sync] ${m}`, e ?? ""),
   };
+}
+
+// B7.5: el campo estable que `Product.taxes[]` referencia es `key`. Para
+// taxes del catálogo estándar de Holded (`s_iva_*`, `s_rec_*`) el `id`
+// viene vacío; sólo los custom del dueño llevan `id` UUID. Persistimos
+// el `key` en `holdedTaxId` y caemos al `id` sólo si por alguna razón
+// `key` viniera vacío (defensivo).
+export function pickHoldedTaxKey(t: HoldedTax): string | null {
+  if (typeof t.key === "string" && t.key.length > 0) return t.key;
+  if (typeof t.id === "string" && t.id.length > 0) return t.id;
+  return null;
 }

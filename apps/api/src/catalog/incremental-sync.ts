@@ -35,7 +35,6 @@ import {
   iterateAllServices,
   listTaxes,
   listWarehouses,
-  parseTaxRateFromId,
   type HoldedProduct,
   type HoldedService,
 } from "@mipiacetpv/holded-client";
@@ -43,7 +42,7 @@ import {
 import { decryptSecret } from "../crypto.js";
 import { loadEnv } from "../env.js";
 import { runAutoSku, type AutoSkuResult } from "../onboarding/auto-sku.js";
-import { upsertContact } from "../onboarding/initial-sync.js";
+import { pickHoldedTaxKey, upsertContact } from "../onboarding/initial-sync.js";
 import { createTpvOtrosWildcards, type WildcardResult } from "../onboarding/tpv-otros.js";
 
 export interface IncrementalSyncStats {
@@ -132,21 +131,22 @@ export async function runIncrementalSync(
     // ── Taxes ────────────────────────────────────────────────────────
     const taxes = await listTaxes(client);
     stats.taxesSeen = taxes.length;
-    // Resolver `taxId → rate` para el resto del sync (§1.1).
+    // Resolver `taxId → rate` para el resto del sync (§1.1 + B7.5).
     const resolveTaxRate = buildTaxRateResolver(taxes);
     for (const t of taxes) {
-      const rate = typeof t.rate === "number" ? t.rate : parseTaxRateFromId(t.id);
+      const key = pickHoldedTaxKey(t);
+      if (!key) continue;
       await prisma.tenantTax.upsert({
-        where: { tenantId_holdedTaxId: { tenantId, holdedTaxId: t.id } },
+        where: { tenantId_holdedTaxId: { tenantId, holdedTaxId: key } },
         create: {
           tenantId,
-          holdedTaxId: t.id,
-          rate: rate ?? null,
+          holdedTaxId: key,
+          rate: t.rate ?? null,
           name: t.name ?? null,
           raw: t as unknown as object,
         },
         update: {
-          rate: rate ?? null,
+          rate: t.rate ?? null,
           name: t.name ?? null,
           raw: t as unknown as object,
           syncedAt: new Date(),

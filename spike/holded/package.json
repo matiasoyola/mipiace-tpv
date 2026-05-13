@@ -8,7 +8,8 @@
     "06-pay-pdf-freeline": "tsx src/06-pay-pdf-freeline.ts",
     "07-test-productid": "tsx src/07-test-productid.ts",
     "08-account-info": "tsx src/08-account-info.ts",
-    "09-webhooks-probe": "tsx src/09-webhooks-probe.ts"
+    "09-webhooks-probe": "tsx src/09-webhooks-probe.ts",
+    "11-taxes-detail": "tsx src/11-taxes-detail.ts"
   },
   "dependencies": {
     "@mipiacetpv/holded-client": "workspace:*",

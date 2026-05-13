@@ -1417,3 +1417,141 @@ del nombre del cliente" **no es servible desde el lado de Holded**.
   técnica), basta con extender el fallback en
   `apps/api/src/contacts/routes.ts` sin tocar el schema.
 
+### §11 · Estructura real de `/invoicing/v1/taxes` y mapping con `Product.taxes[]` (B7.5)
+
+> **Pregunta:** ¿qué campos devuelve realmente `/invoicing/v1/taxes`, y
+> cuál de ellos es el que los productos referencian en `Product.taxes[]`?
+> El sync de B5 dejaba `tenant_taxes.rate = NULL` y forzaba `sellable_via_tpv=false`
+> para todo producto de la cuenta sandbox piloto. La hipótesis era que
+> nuestro deserializador leía `id`/`rate` cuando Holded en realidad
+> expone `key`/`amount`.
+>
+> **Resultado:** confirmado. El identificador estable es `key` (no
+> `id`); el rate viene como string en `amount` (no como number en
+> `rate`). `id` puede venir VACÍO para taxes del catálogo estándar
+> Holded. No existe endpoint detalle individual (`GET /invoicing/v1/taxes/:id`
+> devuelve 200+HTML, caso §01.B). Tampoco las variantes
+> `?include=details` ni `?expand=items` añaden datos.
+
+#### 11.A — Shape real del JSON
+
+Script: `spike/holded/src/11-taxes-detail.ts` (`pnpm run 11-taxes-detail`).
+Fixtures: `11-taxes-list.json` (103 elementos), `11-summary.json`,
+`11-products-sample.json`.
+
+Ejemplo crudo (un tax estándar y uno custom):
+
+```json
+[
+  {
+    "id": "",
+    "name": "IVA 21%",
+    "amount": "21",
+    "scope": "sales",
+    "key": "s_iva_21",
+    "group": "iva",
+    "type": "percentage",
+    "items": [],
+    "status": true,
+    "visible": true
+  },
+  {
+    "id": "69b7f6b4170c9d1c8c042921",
+    "name": "Impuesto 49",
+    "amount": "49",
+    "scope": "sales",
+    "key": "tax_49_sales",
+    "group": "iva",
+    "type": "percentage",
+    "items": [],
+    "status": true,
+    "visible": true
+  }
+]
+```
+
+Observaciones clave (con datos empíricos de la cuenta piloto):
+
+| Campo | Tipo | Observado | Comentario |
+|---|---|---|---|
+| `id`      | string  | `""` o UUID-like 24 hex | **VACÍO para taxes estándar Holded** (`s_iva_*`, `s_rec_*`). Sólo poblado para taxes custom creados por el dueño. NO se puede usar como clave primaria. |
+| `key`     | string  | siempre poblado | Slug estable (`s_iva_21`, `tax_49_sales`, `s_rec_0`). **El que `Product.taxes[]` referencia.** Cross-match `key = 1/1` en el spike. |
+| `amount`  | string  | `"21"`, `"5.2"`, `"0"` | Porcentaje numérico **como STRING**. Hay que parsear (`Number(amount)`). |
+| `name`    | string  | "IVA 21%", "Impuesto 49" | Etiqueta humana. |
+| `scope`   | string  | `"sales"` \| `"purchases"` | Algunos taxes son sólo de compras (RECs) — filtrables si quisiéramos sólo IVA de venta. |
+| `group`   | string  | `"iva"` \| `"receq"` | RE = Recargo de equivalencia. |
+| `type`    | string  | `"percentage"` | No se observaron otros valores. |
+| `items`   | array   | `[]` | Vacío en todos los observados. Posible composición para taxes anidados. |
+| `status`  | boolean | `true` | Tax habilitado. |
+| `visible` | boolean | `true` | Tax visible en la UI de Holded. |
+
+#### 11.B — Endpoint detalle individual NO existe
+
+| Path probado | HTTP | Content-Type | Resultado |
+|---|---|---|---|
+| `GET /invoicing/v1/taxes/<id>`             | 200 | `text/html` | 200+HTML (caso §01.B, ruta inexistente) |
+| `GET /invoicing/v1/taxes?include=details`  | 200 | JSON | mismo payload del listado base (parámetro ignorado) |
+| `GET /invoicing/v1/taxes?expand=items`     | 200 | JSON | mismo payload (parámetro ignorado) |
+
+Conclusión: para enriquecer un tax hay que iterar el listado y
+cachearlo. No hay vía detalle.
+
+#### 11.C — Implementación en B7.5
+
+`packages/holded-client/src/taxes.ts`:
+
+- `HoldedTax` interface refleja shape real (`id`, `key`, `name`,
+  `amount`, `scope`, `group`, `type`, `status`, `visible`). `rate`
+  queda como campo **derivado** que `listTaxes` calcula parseando
+  `amount` (compatibilidad con callers anteriores).
+- `listTaxes` normaliza una vez: `rate = Number(amount) | null`.
+- `buildTaxRateResolver` indexa por `key` Y por `id` (cuando id ≠ "");
+  fallback regex `parseTaxRateFromId` para `s_iva_<rate>` sin
+  listado; null si nada matchea (gate `sellableViaTpv=false`).
+
+`apps/api/src/onboarding/initial-sync.ts` y
+`apps/api/src/catalog/incremental-sync.ts`:
+
+- Persisten `tenant_taxes.holded_tax_id = tax.key` (no `tax.id`). El
+  nombre de la columna pasa a ser semánticamente engañoso (sigue
+  llamándose `holded_tax_id` pero guarda el `key`) — documentado en
+  los comentarios. Renombrar es invasivo y la semántica interna no se
+  exporta.
+- `tenant_taxes.rate = tax.rate` (ya parseado por `listTaxes`).
+- Helper `pickHoldedTaxKey(t)` centraliza la selección defensiva
+  (key → id → null).
+
+Migración `20260513220000_b7_5_tenant_taxes_use_key`:
+
+- Repuebla rows existentes: `holded_tax_id = raw->>'key'`,
+  `rate = (raw->>'amount')::numeric`.
+- Resuelve colisiones borrando los rows perdedores (la siguiente
+  ejecución del sync los recreará con el shape correcto).
+
+#### 11.D — Validación E2E sobre la cuenta sandbox piloto
+
+Tras aplicar el fix + re-correr `runIncrementalSync`:
+
+| Métrica | Antes (B6 cierre) | Después (B7.5) |
+|---|---|---|
+| `tenant_taxes` total                  | 9 (con colisiones)  | 108 (catálogo completo Holded) |
+| `tenant_taxes` con `rate` poblado     | **0**               | **98** (los 10 sin rate son taxes raros sin `amount` numérico) |
+| `products` total                      | 101                 | 101 |
+| `products.sellable_via_tpv = true`    | **1** (wildcard)    | **74** |
+| Productos del prompt (Camisa basic logo, Gorra logo frontal/lateral) | `tax_rate=0`, `sellable=false` | `tax_rate=49/28/24`, `sellable=true` ✓ |
+
+Los 27 productos que siguen no-vendibles son **services** sin SKU
+(comportamiento correcto: `sku !== null && resolvedTaxRate !== null`
+es el gate, B5 §1.1) o productos sin tax válido. Ningún producto con
+`s_iva_21` y SKU queda excluido tras el fix.
+
+#### 11.E — Nota sobre la cuenta sandbox piloto
+
+La cuenta sandbox piloto contiene una mezcla de productos creados con
+el catálogo estándar Holded (`taxes: ["s_iva_21"]`) y productos con
+taxes custom del dueño (`taxes: ["tax_49_sales"]`, `"tax_120_sales"`,
+etc., porcentajes 24-170% — claramente pruebas manuales, no IVA
+real). El fix resuelve **ambos casos** correctamente. En la cuenta
+del primer piloto productivo, donde sólo habrá `s_iva_*` estándares,
+el comportamiento será idéntico (`s_iva_21` → 21 → vendible).
+

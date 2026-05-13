@@ -22,7 +22,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // ── Estado mockeado de Holded ────────────────────────────────────────
 let holdedProducts: Array<{ id: string; name: string; sku?: string; price?: number; barcode?: string; taxes?: string[]; forSale?: number }> = [];
 let holdedServices: typeof holdedProducts = [];
-let holdedTaxes = [{ id: "s_iva_21", name: "IVA 21%", rate: 21 }];
+// B7.5: el shape real de /invoicing/v1/taxes viene con `key` (slug
+// estable que matchea Product.taxes[]) + `amount` string. `id` puede
+// venir vacío para taxes del catálogo estándar. Los tests usan el
+// shape real para que cubran el bug que B7.5 arregla.
+let holdedTaxes: Array<{ id: string; key: string; name: string; amount?: string; rate?: number | null }> = [
+  { id: "", key: "s_iva_21", name: "IVA 21%", amount: "21" },
+];
 let holdedWarehouses = [{ id: "wh-1", name: "Default", default: true }];
 
 vi.mock("@mipiacetpv/holded-client", async () => {
@@ -32,7 +38,19 @@ vi.mock("@mipiacetpv/holded-client", async () => {
   return {
     ...actual,
     ApiKeyClient: vi.fn().mockImplementation(() => ({})) as any,
-    listTaxes: vi.fn(async () => holdedTaxes),
+    // Simulamos el normalizado de listTaxes: si `rate` no está, lo
+    // parseamos de `amount` igual que el código real.
+    listTaxes: vi.fn(async () =>
+      holdedTaxes.map((t) => ({
+        ...t,
+        rate:
+          typeof t.rate === "number"
+            ? t.rate
+            : typeof t.amount === "string" && t.amount.length > 0
+              ? Number(t.amount)
+              : null,
+      })),
+    ),
     listWarehouses: vi.fn(async () => holdedWarehouses),
     iterateAllProducts: vi.fn(async function* () {
       yield { page: 1, products: holdedProducts };
@@ -45,8 +63,6 @@ vi.mock("@mipiacetpv/holded-client", async () => {
     iterateAllContacts: vi.fn(async function* () {
       yield { page: 1, contacts: [] as unknown[] };
     }),
-    parseTaxRateFromId: (id: string) =>
-      id?.startsWith("s_iva_") ? Number(id.slice(6)) : null,
   };
 });
 
@@ -224,7 +240,7 @@ beforeEach(() => {
   resetTenant("DONE");
   holdedProducts = [];
   holdedServices = [];
-  holdedTaxes = [{ id: "s_iva_21", name: "IVA 21%", rate: 21 }];
+  holdedTaxes = [{ id: "", key: "s_iva_21", name: "IVA 21%", amount: "21" }];
   holdedWarehouses = [{ id: "wh-1", name: "Default", default: true }];
 });
 
@@ -322,10 +338,10 @@ describe("runIncrementalSync", () => {
 
   it("resuelve taxRate vía /invoicing/v1/taxes (s_iva_21 → 21, s_iva_10 → 10)", async () => {
     holdedTaxes = [
-      { id: "s_iva_21", name: "IVA 21%", rate: 21 },
-      { id: "s_iva_10", name: "IVA 10%", rate: 10 },
-      { id: "s_iva_4", name: "IVA 4%", rate: 4 },
-      { id: "s_iva_0", name: "Sin IVA", rate: 0 },
+      { id: "", key: "s_iva_21", name: "IVA 21%", amount: "21" },
+      { id: "", key: "s_iva_10", name: "IVA 10%", amount: "10" },
+      { id: "", key: "s_iva_4", name: "IVA 4%", amount: "4" },
+      { id: "", key: "s_iva_0", name: "Sin IVA", amount: "0" },
     ];
     holdedProducts = [
       { id: "p-21", name: "21%", sku: "S21", price: 1, taxes: ["s_iva_21"], forSale: 1 },
@@ -345,6 +361,33 @@ describe("runIncrementalSync", () => {
     }
   });
 
+  it("B7.5: resuelve productos que referencian tax `key` (caso shape real Holded)", async () => {
+    // Shape exacto de /invoicing/v1/taxes confirmado por spike §11:
+    // id puede venir vacío; key matchea Product.taxes[]; amount es
+    // string. Productos del piloto referencian "tax_49_sales" (custom)
+    // y "s_iva_21" (estándar). Ambos deben resolverse.
+    holdedTaxes = [
+      { id: "", key: "s_iva_21", name: "IVA 21%", amount: "21" },
+      {
+        id: "69b7f6b4170c9d1c8c042921",
+        key: "tax_49_sales",
+        name: "Impuesto 49",
+        amount: "49",
+      },
+    ];
+    holdedProducts = [
+      { id: "p-std", name: "Estándar", sku: "S21", price: 1, taxes: ["s_iva_21"], forSale: 1 },
+      { id: "p-cst", name: "Custom", sku: "S49", price: 1, taxes: ["tax_49_sales"], forSale: 1 },
+    ];
+
+    await runIncrementalSync({ tenantId: TENANT_ID, prisma: fakePrisma as any });
+
+    expect(productStore.get(`${TENANT_ID}|p-std`)!.taxRate).toBe(21);
+    expect(productStore.get(`${TENANT_ID}|p-std`)!.sellableViaTpv).toBe(true);
+    expect(productStore.get(`${TENANT_ID}|p-cst`)!.taxRate).toBe(49);
+    expect(productStore.get(`${TENANT_ID}|p-cst`)!.sellableViaTpv).toBe(true);
+  });
+
   it("tax id desconocido → sellableViaTpv=false + warning estructurado", async () => {
     const warnings: Array<{ msg: string; extra?: unknown }> = [];
     const logger = {
@@ -352,7 +395,7 @@ describe("runIncrementalSync", () => {
       warn: (msg: string, extra?: unknown) => warnings.push({ msg, extra }),
       error: () => undefined,
     };
-    holdedTaxes = [{ id: "s_iva_21", name: "IVA 21%", rate: 21 }];
+    holdedTaxes = [{ id: "", key: "s_iva_21", name: "IVA 21%", amount: "21" }];
     holdedProducts = [
       // taxId que no está en /invoicing/v1/taxes y tampoco encaja con el regex.
       { id: "p-mystery", name: "Tax desconocido", sku: "M01", price: 1, taxes: ["foo_bar_99"], forSale: 1 },
@@ -374,7 +417,7 @@ describe("runIncrementalSync", () => {
 
   it("producto existente que pierde tax válido → sellableViaTpv pasa a false", async () => {
     seedProduct("p-loses-tax", { sku: "OK", sellableViaTpv: true, taxRate: 21 });
-    holdedTaxes = [{ id: "s_iva_21", name: "IVA 21%", rate: 21 }];
+    holdedTaxes = [{ id: "", key: "s_iva_21", name: "IVA 21%", amount: "21" }];
     holdedProducts = [
       { id: "p-loses-tax", name: "loses tax", sku: "OK", price: 1, taxes: ["zz_unknown"], forSale: 1 },
     ];
