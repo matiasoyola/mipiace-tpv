@@ -48,9 +48,12 @@ export {
 export {
   createContactWithGetBack,
   getContact,
+  HOLDED_CONTACTS_PAGE_SIZE,
+  iterateAllContacts,
   listContactsByCustomIds,
   listContactsByMobile,
   listContactsByPhone,
+  listContactsPage,
   type CreateContactBody,
   type CreateContactWithGetBackOptions,
   type HoldedContact,

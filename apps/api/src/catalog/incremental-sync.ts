@@ -30,6 +30,7 @@ import type { PrismaClient } from "@mipiacetpv/db";
 import {
   ApiKeyClient,
   buildTaxRateResolver,
+  iterateAllContacts,
   iterateAllProducts,
   iterateAllServices,
   listTaxes,
@@ -42,6 +43,7 @@ import {
 import { decryptSecret } from "../crypto.js";
 import { loadEnv } from "../env.js";
 import { runAutoSku, type AutoSkuResult } from "../onboarding/auto-sku.js";
+import { upsertContact } from "../onboarding/initial-sync.js";
 import { createTpvOtrosWildcards, type WildcardResult } from "../onboarding/tpv-otros.js";
 
 export interface IncrementalSyncStats {
@@ -54,6 +56,8 @@ export interface IncrementalSyncStats {
   autoSkuNeedsReview: number;
   wildcardsCreated: number;
   wildcardsReused: number;
+  contactsSeen: number;
+  contactsOrphansMarked: number;
   durationMs: number;
   errors: Array<{ step: string; message: string }>;
 }
@@ -69,6 +73,8 @@ function emptyStats(): IncrementalSyncStats {
     autoSkuNeedsReview: 0,
     wildcardsCreated: 0,
     wildcardsReused: 0,
+    contactsSeen: 0,
+    contactsOrphansMarked: 0,
     durationMs: 0,
     errors: [],
   };
@@ -202,6 +208,42 @@ export async function runIncrementalSync(
     // ── Comodines TPV-OTROS (idempotente) ───────────────────────────
     const wildcards = await createTpvOtrosWildcards({ tenantId, prisma, client, logger: log });
     mergeWildcards(stats, wildcards);
+
+    // ── Contactos completos (B7 §8) ─────────────────────────────────
+    // Holded no expone `updatedSince` para contactos (spike §10).
+    // Refrescamos el catálogo entero cada cron: 1000-5000 contactos
+    // tardan ~3-5s, asumible. Si en algún piloto el volumen pasa de
+    // 20.000, B7.5 introducirá un schedule horario en lugar de cada
+    // 15 min.
+    try {
+      for await (const { contacts } of iterateAllContacts(client)) {
+        for (const c of contacts) {
+          await upsertContact(prisma, tenantId, c, syncStartedAt);
+          stats.contactsSeen += 1;
+        }
+      }
+      // Huérfanos: misma mecánica que productos.
+      const orphans = await prisma.contact.updateMany({
+        where: {
+          tenantId,
+          active: true,
+          OR: [
+            { lastSeenInSyncAt: null },
+            { lastSeenInSyncAt: { lt: syncStartedAt } },
+          ],
+        },
+        data: { active: false },
+      });
+      stats.contactsOrphansMarked = orphans.count;
+      await prisma.tenant.update({
+        where: { id: tenantId },
+        data: { lastContactsSyncAt: new Date() },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      stats.errors.push({ step: "contacts", message });
+      log.warn("incremental-sync contactos falló", { tenantId, message });
+    }
 
     stats.durationMs = Date.now() - start;
     await persistDone(prisma, tenantId, stats);

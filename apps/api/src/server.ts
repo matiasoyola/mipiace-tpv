@@ -2,6 +2,7 @@ import "dotenv/config";
 
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import websocket from "@fastify/websocket";
 
 import { registerManagerAuthorizationRoutes } from "./admin/manager-authorize.js";
 import { registerAdminTenantSettingsRoutes } from "./admin/tenant-settings.js";
@@ -19,6 +20,10 @@ import { registerOnboardingRoutes } from "./onboarding/routes.js";
 import { registerCashierAuthRoutes } from "./shift/cashier-auth.js";
 import { registerShiftRoutes } from "./shift/routes.js";
 import { registerStoresRoutes } from "./stores/routes.js";
+import { registerStoreWebSocketRoute } from "./realtime/ws-route.js";
+import { registerTableGroupingRoutes } from "./tables/grouping.js";
+import { registerTableOperativaRoutes } from "./tables/operativa.js";
+import { registerTablesRoutes } from "./tables/routes.js";
 import {
   registerAllExistingRepeatables,
   startCatalogIncrementalWorker,
@@ -51,6 +56,11 @@ async function main() {
     },
   });
 
+  // WebSocket plugin para el bus multi-terminal del vertical bar (B7
+  // §6). Registramos antes de las rutas para que el `websocket: true`
+  // en la route opt sea reconocido.
+  await app.register(websocket);
+
   await app.register(cors, {
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
@@ -73,6 +83,10 @@ async function main() {
   await registerCashierAuthRoutes(app);
   await registerShiftRoutes(app);
   await registerStoresRoutes(app);
+  await registerTablesRoutes(app);
+  await registerTableOperativaRoutes(app);
+  await registerTableGroupingRoutes(app);
+  await registerStoreWebSocketRoute(app);
   await registerTicketRoutes(app);
   await registerTpvCatalogRoutes(app);
   await registerAdminTicketsErrorsRoutes(app);

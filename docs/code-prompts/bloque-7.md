@@ -38,7 +38,9 @@ discrepancias. Sin luz verde no empieces.
 
 ### Resumen del alcance
 
-Siete frentes en orden de dependencia:
+Nueve frentes en orden de dependencia (frente 8 añadido durante la
+revisión de B6 — sync de contactos detectado como necesario para
+piloto bar/retail):
 
 1. **Modelo de datos** — `Table` (mesa lógica), agrupación,
    reutilización de `Ticket` con `status=DRAFT` para mesa abierta.
@@ -437,7 +439,100 @@ Cuando la WebSocket vuelve a conectar:
   (cobrada por otro device, agrupada, etc.), pierde las
   ediciones locales con notificación clara al cajero.
 
-### 8. Edge case heredado · tenant sin MANAGER
+### 8. Sync completo de contactos + búsqueda por nombre
+
+Heredado de B2 como deuda y detectado al validar B6: el cajero no
+puede buscar clientes por nombre porque Holded sólo expone filtros
+server-side `phone`/`mobile`/`customId`. Lo arreglamos sincronizando
+todo el catálogo de contactos a la tabla local `Contact` que ya
+existe desde B2.
+
+#### 8.1 Cliente Holded
+
+`packages/holded-client/src/contacts.ts` añadir:
+
+- `listContactsPage(client, page: number)`: paginación estándar
+  `?page=N`, igual que productos (spike §02.B mismo patrón).
+- `iterateAllContacts(client)`: async iterator yield por página
+  hasta array vacío.
+
+#### 8.2 Sync inicial
+
+`apps/api/src/onboarding/initial-sync.ts` añade un paso nuevo
+**después de productos+servicios+auto-SKU+wildcards**:
+
+- Itera `iterateAllContacts`.
+- Upsert en `Contact` por `(tenantId, holdedContactId)`.
+- Persiste stats `contactsCount` en `tenant.initialSyncStats`.
+
+#### 8.3 Sync incremental
+
+`apps/api/src/catalog/incremental-sync.ts` añade un paso nuevo
+**al final**:
+
+- Itera `iterateAllContacts` igual que el inicial (sin diff
+  incremental porque Holded no expone `updatedSince`).
+- Upsert por `(tenantId, holdedContactId)`.
+- Marca huérfanos como inactivos (mismo patrón que productos
+  con `lastSeenInSyncAt` + `active=false` al final).
+- Persiste stats.
+
+Esto significa que en cada cron de 15 min se refresca el catálogo
+completo de contactos. Para 1000-5000 contactos por tenant es
+trivial (~3-5s adicionales). Si en algún piloto el volumen sube
+mucho (>20000), B7.5 introduciría `lastContactsRefreshAt` con
+política horaria en lugar de cada 15 min.
+
+#### 8.4 Schema mínimo
+
+Añadir a `Contact` (si no estaba ya desde B2):
+
+```prisma
+active             Boolean   @default(true)
+lastSeenInSyncAt   DateTime? @map("last_seen_in_sync_at") @db.Timestamptz()
+```
+
+Misma semántica que productos.
+
+Añadir a `Tenant`:
+
+```prisma
+lastContactsSyncAt DateTime? @map("last_contacts_sync_at") @db.Timestamptz()
+```
+
+Migración: incluida en `b7_bar_tables` o `b7_contacts_sync`
+separada según prefieras (sugerencia: la separada es más limpia,
+permite rollback aislado).
+
+#### 8.5 Eliminar fallback `name_search_not_supported`
+
+`apps/api/src/contacts/routes.ts` `GET /contacts/search`:
+
+- La búsqueda local ya cubre name/email/nif/phone con `LIKE`
+  case-insensitive (desde B2).
+- **Quitar la rama** que devolvía `holdedFallback:
+  "name_search_not_supported"` cuando query es texto. Ahora todos
+  los contactos están en local.
+- Mantener el fallback de teléfono → consulta Holded → upsert si
+  un cliente nuevo se asocia in-fly (caso de cliente que nunca ha
+  estado en local pero el cajero tiene su teléfono).
+
+#### 8.6 UI TPV
+
+Cuando el cajero teclea "Pepe" en el sheet de cliente, la
+búsqueda devuelve resultados locales reales. **Quitar el mensaje
+"Holded no permite buscar por nombre"**. Si la búsqueda no
+devuelve nada → "Sin coincidencias · ¿crear contacto nuevo?".
+
+#### 8.7 UI admin (opcional, ahorrable)
+
+Si te apetece, añade botón **"Refrescar contactos ahora"** en
+`/admin/settings` o en `Mi cuenta` que dispare el sync incremental
+manual (`POST /catalog/sync-now` ya existe pero hoy sólo trae
+catálogo de productos — extenderlo o crear endpoint paralelo
+`POST /contacts/sync-now`).
+
+### 9. Edge case heredado · tenant sin MANAGER
 
 B6 dejó pendiente que si un tenant no tiene MANAGER con PIN, el
 cajero queda bloqueado al cerrar con SYNC_FAILED y al aplicar

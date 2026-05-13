@@ -6,11 +6,13 @@ import { PrismaClient } from "@mipiacetpv/db";
 import {
   ApiKeyClient,
   buildTaxRateResolver,
+  iterateAllContacts,
   iterateAllProducts,
   iterateAllServices,
   listTaxes,
   listWarehouses,
   parseTaxRateFromId,
+  type HoldedContact,
   type HoldedProduct,
   type HoldedService,
 } from "@mipiacetpv/holded-client";
@@ -31,6 +33,8 @@ export interface SyncStats {
   wildcardsReused: number;
   productPagesProcessed: number;
   servicePagesProcessed: number;
+  contactsCount: number;
+  contactPagesProcessed: number;
   currentStep?: string;
   errors: Array<{ step: string; message: string }>;
 }
@@ -47,6 +51,8 @@ function emptyStats(): SyncStats {
     wildcardsReused: 0,
     productPagesProcessed: 0,
     servicePagesProcessed: 0,
+    contactsCount: 0,
+    contactPagesProcessed: 0,
     errors: [],
   };
 }
@@ -168,6 +174,36 @@ export async function runInitialSync(options: RunInitialSyncOptions): Promise<Sy
     await step(stats, "Comodines de línea libre", async () => {
       const result = await createTpvOtrosWildcards({ tenantId, prisma, client, logger: log });
       mergeWildcards(stats, result);
+    }, prisma, tenantId);
+
+    await step(stats, "Contactos", async () => {
+      const now = new Date();
+      for await (const { page, contacts } of iterateAllContacts(client)) {
+        stats.contactPagesProcessed = page;
+        for (const c of contacts) {
+          await upsertContact(prisma, tenantId, c, now);
+          stats.contactsCount += 1;
+        }
+        await persistProgress(prisma, tenantId, stats);
+      }
+      // Marcamos huérfanos al final del sync inicial igual que en
+      // productos: cualquier contacto que existía localmente y no se
+      // ha refrescado en este sync pasa a active=false (no debería
+      // ocurrir en un sync inicial sobre BD vacía, pero por defensa).
+      await prisma.contact.updateMany({
+        where: {
+          tenantId,
+          OR: [
+            { lastSeenInSyncAt: null },
+            { lastSeenInSyncAt: { lt: now } },
+          ],
+        },
+        data: { active: false },
+      });
+      await prisma.tenant.update({
+        where: { id: tenantId },
+        data: { lastContactsSyncAt: now },
+      });
     }, prisma, tenantId);
 
     await markDone(prisma, tenantId, stats);
@@ -324,6 +360,52 @@ async function markFailed(prisma: PrismaClient, tenantId: string, stats: SyncSta
 
 function serializeStats(stats: SyncStats): object {
   return { ...stats };
+}
+
+// Upsert de un contacto Holded a la tabla local (B7 §8). El sync
+// completo lo llama desde initial-sync y desde incremental-sync —
+// misma semántica: si existe (tenantId, holdedContactId) lo
+// actualizamos; si no, lo creamos. Marca `lastSeenInSyncAt = now`.
+export async function upsertContact(
+  prisma: PrismaClient,
+  tenantId: string,
+  raw: HoldedContact,
+  now: Date,
+): Promise<void> {
+  const name = raw.name?.trim() ?? "";
+  if (!name || !raw.id) return; // contacto sin nombre/id → no almacenable
+  const nif = raw.code ? raw.code.trim() : null;
+  const email = raw.email ? raw.email.trim().toLowerCase() : null;
+  const phone = raw.phone ? raw.phone.trim() : raw.mobile ? raw.mobile.trim() : null;
+  await prisma.contact.upsert({
+    where: {
+      tenantId_holdedContactId: {
+        tenantId,
+        holdedContactId: raw.id,
+      },
+    },
+    create: {
+      tenantId,
+      holdedContactId: raw.id,
+      name,
+      nif,
+      email,
+      phone,
+      raw: raw as unknown as object,
+      active: true,
+      lastSeenInSyncAt: now,
+    },
+    update: {
+      name,
+      nif,
+      email,
+      phone,
+      raw: raw as unknown as object,
+      active: true,
+      lastSeenInSyncAt: now,
+      lastSyncedAt: now,
+    },
+  });
 }
 
 function consoleLogger(): NonNullable<RunInitialSyncOptions["logger"]> {

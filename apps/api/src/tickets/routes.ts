@@ -17,6 +17,7 @@ import type { FastifyInstance } from "fastify";
 
 import { verifyManagerAuthorization } from "../auth/manager-authorization.js";
 import { getPrisma } from "../context.js";
+import { getStoreEventBus } from "../realtime/store-event-bus.js";
 import { enqueueTicketUpload } from "../queues/ticket-upload.js";
 import { enqueueRefundUpload } from "../queues/refund-upload.js";
 import { enqueueTicketEmail } from "../queues/ticket-email.js";
@@ -278,7 +279,11 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           });
         }
         const manager = await prisma.user.findFirst({
-          where: { id: authPayload.sub, tenantId: cashier.tid, role: "MANAGER" },
+          where: {
+            id: authPayload.sub,
+            tenantId: cashier.tid,
+            role: { in: ["MANAGER", "OWNER"] },
+          },
           select: { email: true },
         });
         if (!manager) {
@@ -417,6 +422,319 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       return reply.code(201).send({
         ticket: serializeTicket(ticket),
         syncStatus: ticket.status,
+      });
+    },
+  );
+
+  // ── POST /tickets/:id/checkout ──────────────────────────────────────
+  // Transición DRAFT → PENDING_SYNC para tickets de mesa (B7 §4.1). El
+  // body lleva los pagos y los intents (print/email/gift). Reutiliza
+  // las validaciones de descuento y la cola de Holded del POST /tickets
+  // original. El internalNumber se asigna AHORA (no al crear el DRAFT)
+  // para que un ticket cancelado no consuma serie fiscal.
+  app.post(
+    "/tickets/:ticketId/checkout",
+    {
+      preHandler: requireCashierSession,
+      schema: {
+        params: {
+          type: "object",
+          required: ["ticketId"],
+          properties: { ticketId: { type: "string", format: "uuid" } },
+        },
+        body: {
+          type: "object",
+          required: ["payments"],
+          additionalProperties: false,
+          properties: {
+            contactHoldedId: { type: "string", maxLength: 64 },
+            notes: { type: "string", maxLength: 1000 },
+            cashAmount: { type: "number", minimum: 0 },
+            printIntent: { type: "boolean" },
+            emailIntent: { type: "string", maxLength: 320 },
+            giftReceiptIntent: { type: "boolean" },
+            authorizationToken: { type: "string", minLength: 1, maxLength: 2048 },
+            payments: {
+              type: "array",
+              minItems: 1,
+              items: {
+                type: "object",
+                required: ["method", "amount"],
+                additionalProperties: false,
+                properties: {
+                  method: {
+                    type: "string",
+                    enum: ["CASH", "CARD", "BIZUM", "VOUCHER", "OTHER"],
+                  },
+                  amount: { type: "number", minimum: 0, maximum: 1_000_000 },
+                  meta: { type: "object", additionalProperties: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const cashier = request.cashier!;
+      const { ticketId } = request.params as { ticketId: string };
+      const body = request.body as Omit<CreateTicketBody, "externalId" | "registerId" | "shiftId" | "lines"> & {
+        payments: TicketPaymentBody[];
+      };
+      const prisma = getPrisma();
+
+      const draft = await prisma.ticket.findFirst({
+        where: { id: ticketId, tenantId: cashier.tid },
+        include: ticketInclude(),
+      });
+      if (!draft) {
+        return reply
+          .code(404)
+          .send({ error: "TICKET_NOT_FOUND", message: "Ticket no encontrado" });
+      }
+      if (draft.registerId !== cashier.rid) {
+        return reply.code(403).send({
+          error: "REGISTER_MISMATCH",
+          message: "El ticket no pertenece a tu caja.",
+        });
+      }
+      if (draft.status !== "DRAFT") {
+        // Si el ticket ya está PAID o SYNCED, el cobro ya pasó. F6
+        // (WebSockets) ya habrá notificado a este device; pero por si
+        // dos cajeros pulsaron Cobrar al mismo tiempo, último gana en
+        // backend con un 409 limpio.
+        return reply.code(409).send({
+          error: "TICKET_ALREADY_PAID",
+          message: "Este ticket ya fue cobrado por otro dispositivo.",
+        });
+      }
+      if (draft.lines.length === 0) {
+        return reply.code(400).send({
+          error: "TICKET_EMPTY",
+          message: "No se puede cobrar un ticket sin líneas.",
+        });
+      }
+      for (const l of draft.lines) {
+        if (!l.sku || l.sku.trim() === "") {
+          return reply.code(400).send({
+            error: "LINE_WITHOUT_SKU",
+            message:
+              "Una línea sin SKU no es vendible vía Holded. Edita la línea o usa el comodín.",
+            line: l.nameSnapshot,
+          });
+        }
+      }
+
+      const totals = computeTicket(
+        draft.lines.map((l) => ({
+          units: Number(l.units),
+          unitPrice: Number(l.unitPrice),
+          discountPct: Number(l.discountPct),
+          taxRate: Number(l.taxRate),
+        })),
+      );
+      const paymentsSum = body.payments.reduce((acc, p) => acc + p.amount, 0);
+      if (paymentsSum + PAYMENT_TOLERANCE_EUR < totals.total) {
+        return reply.code(400).send({
+          error: "PAYMENTS_MISMATCH",
+          message: `Σ payments (${paymentsSum.toFixed(2)}) menor que total (${totals.total.toFixed(2)})`,
+          tolerance: PAYMENT_TOLERANCE_EUR,
+        });
+      }
+
+      // Validación de descuento (idéntica a POST /tickets B6 §2).
+      const tenantForDiscount = await prisma.tenant.findUniqueOrThrow({
+        where: { id: cashier.tid },
+        select: { discountThresholdPct: true },
+      });
+      const grossSubtotal = totals.subtotal + totals.discount;
+      const effectiveDiscountPct =
+        grossSubtotal > 0
+          ? Math.round((totals.discount / grossSubtotal) * 10000) / 100
+          : 0;
+      const thresholdPct = Number(tenantForDiscount.discountThresholdPct);
+      let discountAuthorizedBy: string | null = null;
+      if (effectiveDiscountPct > thresholdPct + 1e-6) {
+        if (!body.authorizationToken) {
+          return reply.code(403).send({
+            error: "MANAGER_AUTHORIZATION_REQUIRED",
+            message: `El descuento del ${effectiveDiscountPct.toFixed(2)}% supera el umbral del tenant (${thresholdPct.toFixed(2)}%). Pide al encargado que autorice con su PIN.`,
+            effectiveDiscountPct,
+            thresholdPct,
+          });
+        }
+        let authPayload;
+        try {
+          authPayload = verifyManagerAuthorization(body.authorizationToken);
+        } catch {
+          return reply.code(403).send({
+            error: "MANAGER_AUTHORIZATION_INVALID",
+            message:
+              "La autorización del encargado ha caducado o no es válida.",
+          });
+        }
+        if (
+          authPayload.tid !== cashier.tid ||
+          authPayload.purpose !== "discount-override"
+        ) {
+          return reply.code(403).send({
+            error: "MANAGER_AUTHORIZATION_INVALID",
+            message: "La autorización no es válida para este descuento.",
+          });
+        }
+        if (effectiveDiscountPct > authPayload.context.maxDiscountPct + 1e-6) {
+          return reply.code(403).send({
+            error: "MANAGER_AUTHORIZATION_INSUFFICIENT",
+            message: `La autorización cubre hasta ${authPayload.context.maxDiscountPct.toFixed(2)}% pero el descuento aplicado es del ${effectiveDiscountPct.toFixed(2)}%.`,
+          });
+        }
+        const manager = await prisma.user.findFirst({
+          where: {
+            id: authPayload.sub,
+            tenantId: cashier.tid,
+            role: { in: ["MANAGER", "OWNER"] },
+          },
+          select: { email: true },
+        });
+        if (!manager) {
+          return reply.code(403).send({
+            error: "MANAGER_AUTHORIZATION_INVALID",
+            message:
+              "El encargado autorizante ya no está activo en el tenant.",
+          });
+        }
+        discountAuthorizedBy = manager.email;
+      }
+
+      // internalNumber atómico — sólo al cobrar (B7 §4: los DRAFT no
+      // consumen serie). Patrón idéntico al POST /tickets.
+      const next = await prisma.register.update({
+        where: { id: cashier.rid },
+        data: { ticketCounter: { increment: 1 } },
+        select: { ticketCounter: true },
+      });
+      const internalNumber = String(next.ticketCounter).padStart(6, "0");
+
+      const updated = await prisma.$transaction(async (tx) => {
+        const t = await tx.ticket.update({
+          where: { id: draft.id },
+          data: {
+            status: TicketStatus.PENDING_SYNC,
+            internalNumber,
+            contactHoldedId: body.contactHoldedId ?? draft.contactHoldedId,
+            notes: body.notes ?? draft.notes,
+            cashAmount:
+              body.cashAmount != null
+                ? new Prisma.Decimal(body.cashAmount)
+                : draft.cashAmount,
+            printIntent: body.printIntent ?? draft.printIntent,
+            emailIntent: body.emailIntent ?? draft.emailIntent,
+            giftReceiptIntentAt: body.giftReceiptIntent
+              ? new Date()
+              : draft.giftReceiptIntentAt,
+            discountAuthorizedBy,
+            total: new Prisma.Decimal(totals.total),
+            totalTax: new Prisma.Decimal(totals.tax),
+            totalDiscount: new Prisma.Decimal(totals.discount),
+            paidAt: new Date(),
+            payments: {
+              deleteMany: {},
+              create: body.payments.map((p) => ({
+                method: p.method,
+                amount: new Prisma.Decimal(p.amount),
+                meta: p.meta ? (p.meta as object) : Prisma.JsonNull,
+              })),
+            },
+          },
+          include: ticketInclude(),
+        });
+        // Si la mesa estaba absorbida por una principal (grupo), la
+        // liberamos: el ticket principal absorbió las líneas en su día
+        // y al cobrarse, las absorbidas vuelven a libre (B7 §5.4).
+        if (draft.tableId) {
+          await tx.table.updateMany({
+            where: { groupedIntoTableId: draft.tableId },
+            data: { groupedIntoTableId: null },
+          });
+        }
+        await tx.shift.update({
+          where: { id: draft.shiftId },
+          data: { lastActivityAt: new Date() },
+        });
+        await tx.holdedUpload.upsert({
+          where: { externalId: draft.externalId },
+          create: {
+            externalId: draft.externalId,
+            tenantId: cashier.tid,
+            kind: "TICKET",
+            status: "PENDING",
+          },
+          update: {},
+        });
+        return t;
+      });
+
+      try {
+        await enqueueTicketUpload(draft.externalId);
+      } catch (err) {
+        request.log.error(
+          { externalId: draft.externalId },
+          `enqueue ticket upload (mesa) falló: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+
+      if (body.emailIntent) {
+        try {
+          await prisma.ticketEmailJob.create({
+            data: {
+              id: randomUUID(),
+              ticketId: updated.id,
+              toEmail: body.emailIntent,
+              requestedByUserId: cashier.sub,
+              status: "PENDING",
+            },
+          });
+        } catch (err) {
+          request.log.warn(
+            { ticketId: updated.id },
+            `no se pudo registrar email intent: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
+      if (draft.tableId) {
+        const storeForBroadcast = await prisma.register.findUnique({
+          where: { id: cashier.rid },
+          select: { storeId: true },
+        });
+        if (storeForBroadcast) {
+          getStoreEventBus().broadcast(storeForBroadcast.storeId, {
+            type: "table.paid",
+            tableId: draft.tableId,
+            ticketId: updated.id,
+            holdedDocNumber: updated.holdedDocNumber ?? null,
+            at: new Date().toISOString(),
+          });
+        }
+      }
+
+      request.log.info(
+        {
+          event: "ticket.checkout",
+          tenantId: cashier.tid,
+          registerId: cashier.rid,
+          cashierId: cashier.sub,
+          ticketId: updated.id,
+          tableId: draft.tableId,
+          externalId: draft.externalId,
+          totalEur: totals.total,
+        },
+        "Mesa cobrada (DRAFT → PENDING_SYNC)",
+      );
+
+      return reply.code(200).send({
+        ticket: serializeTicket(updated),
+        syncStatus: updated.status,
       });
     },
   );

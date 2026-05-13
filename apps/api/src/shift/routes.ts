@@ -317,8 +317,15 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
             reason: needSyncFailedPin ? "sync_failed" : "force_close",
           });
         }
+        // B7 §9: aceptamos PIN de OWNER (auto-generado al login admin)
+        // además del de MANAGER. Desbloquea el caso "1 dueño + 1
+        // cajero" sin necesidad de crear un MANAGER de respaldo.
         const managers = await prisma.user.findMany({
-          where: { tenantId: cashier.tid, role: "MANAGER", pinHash: { not: null } },
+          where: {
+            tenantId: cashier.tid,
+            role: { in: ["MANAGER", "OWNER"] },
+            pinHash: { not: null },
+          },
           select: { id: true, email: true, pinHash: true },
         });
         let authorized: { id: string; email: string } | null = null;

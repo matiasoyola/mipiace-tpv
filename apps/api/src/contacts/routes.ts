@@ -121,9 +121,15 @@ export async function registerContactsRoutes(app: FastifyInstance): Promise<void
 
       // BD local: LIKE por name/email/nif/phone. Limitamos a 25
       // resultados — el front filtra incremental conforme escribe.
+      // Desde B7 §8 la BD local tiene TODOS los contactos del tenant
+      // (sync completo cada 15 min), así que la búsqueda por nombre
+      // ya no necesita fallback: lo que no está aquí, no existe en
+      // Holded. Mantenemos `active=true` por defecto para no listar
+      // huérfanos.
       const local = await prisma.contact.findMany({
         where: {
           tenantId: auth.tenantId,
+          active: true,
           OR: [
             { name: { contains: trimmed, mode: "insensitive" } },
             { email: { contains: trimmed, mode: "insensitive" } },
@@ -147,13 +153,16 @@ export async function registerContactsRoutes(app: FastifyInstance): Promise<void
         return { results: local, source: "local", holdedFallback: null };
       }
 
-      // Local vacío. Sólo intentamos fallback a Holded si la query
-      // parece un teléfono (único filtro server-side soportado).
+      // Local vacío. Si la query parece teléfono probamos Holded por
+      // si es un cliente creado entre el último cron y ahora (15 min).
+      // Para cualquier otro tipo de query devolvemos vacío sin
+      // `name_search_not_supported` — el cajero ve "Sin coincidencias ·
+      // ¿crear contacto nuevo?" en el TPV.
       if (!looksLikePhone(trimmed)) {
         return {
           results: [],
           source: "local",
-          holdedFallback: "name_search_not_supported",
+          holdedFallback: null,
         };
       }
 

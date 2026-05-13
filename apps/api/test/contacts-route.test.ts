@@ -191,7 +191,7 @@ describe("GET /contacts/search", () => {
     await app.close();
   });
 
-  it("local vacío + query no-teléfono → holdedFallback name_search_not_supported", async () => {
+  it("local vacío + query no-teléfono → vacío sin fallback (B7 §8 desactivó name_search_not_supported)", async () => {
     const app = await buildApp();
     const res = await app.inject({
       method: "GET",
@@ -202,7 +202,7 @@ describe("GET /contacts/search", () => {
     const body = res.json();
     expect(body.results).toEqual([]);
     expect(body.source).toBe("local");
-    expect(body.holdedFallback).toBe("name_search_not_supported");
+    expect(body.holdedFallback).toBeNull();
     await app.close();
   });
 

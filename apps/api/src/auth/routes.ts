@@ -1,3 +1,5 @@
+import { randomInt } from "node:crypto";
+
 import type { FastifyInstance } from "fastify";
 
 import { Prisma } from "@mipiacetpv/db";
@@ -189,7 +191,26 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         { sub: user.id, tid: user.tenantId },
         { tv: user.tokenVersion, remember: remember === true },
       );
-      return { accessToken, refreshToken };
+      // B7 §9: OWNER sin PIN al primer login → auto-generamos uno de 4
+      // dígitos para que pueda autorizar descuentos y cierres
+      // SYNC_FAILED desde el TPV cuando no hay MANAGER. Se devuelve
+      // una sola vez en este response — el front lo muestra en un
+      // modal "Tu PIN de respaldo es 1234".
+      let ownerPinGenerated: string | null = null;
+      if (user.role === "OWNER" && !user.pinHash) {
+        ownerPinGenerated = generateOwnerPin();
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { pinHash: await hashPassword(ownerPinGenerated) },
+        });
+        request.log.info(
+          { event: "owner.pin_auto_generated", userId: user.id, tenantId: user.tenantId },
+          "OWNER PIN de respaldo generado automáticamente en login",
+        );
+      }
+      return ownerPinGenerated
+        ? { accessToken, refreshToken, ownerPinGenerated }
+        : { accessToken, refreshToken };
     },
   );
 
@@ -693,4 +714,37 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         .send({ accessToken, refreshToken, usedRecoveryCode: usedRecovery });
     },
   );
+
+  // B7 §9: el OWNER puede regenerar su PIN de respaldo desde "Mi
+  // cuenta". Devuelve el nuevo PIN en plano una sola vez. El antiguo
+  // queda invalidado.
+  app.post(
+    "/auth/me/regenerate-owner-pin",
+    { preHandler: requireOwner },
+    async (request) => {
+      const auth = request.auth!;
+      const prisma = getPrisma();
+      const pin = generateOwnerPin();
+      await prisma.user.update({
+        where: { id: auth.userId },
+        data: { pinHash: await hashPassword(pin) },
+      });
+      request.log.info(
+        { event: "owner.pin_regenerated", userId: auth.userId, tenantId: auth.tenantId },
+        "OWNER PIN de respaldo regenerado manualmente",
+      );
+      return { pin };
+    },
+  );
+}
+
+// Genera un PIN numérico de 4 dígitos al estilo del PIN del cajero
+// (B3): suficiente para una autorización de respaldo, fácil de
+// teclear, no se confunde con MFA. Usa `crypto.randomInt` para evitar
+// sesgos del modulo en 10000.
+function generateOwnerPin(): string {
+  // 4 dígitos: cubre 10.000 combinaciones. Para piloto con rate-limit
+  // en `manager-authorize` es suficiente. Si quisiéramos 6 dígitos
+  // (estilo Google), basta cambiar el rango.
+  return randomInt(0, 10_000).toString().padStart(4, "0");
 }

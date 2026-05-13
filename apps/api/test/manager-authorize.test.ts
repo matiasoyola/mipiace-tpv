@@ -37,7 +37,13 @@ const fakePrisma = {
       for (const u of users.values()) {
         if (where.tenantId && u.tenantId !== where.tenantId) continue;
         if (where.email && u.email !== where.email) continue;
-        if (where.role && u.role !== where.role) continue;
+        if (where.role) {
+          if (typeof where.role === "string") {
+            if (u.role !== where.role) continue;
+          } else if (Array.isArray(where.role.in)) {
+            if (!where.role.in.includes(u.role)) continue;
+          }
+        }
         return u;
       }
       return null;

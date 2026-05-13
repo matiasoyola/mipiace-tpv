@@ -7,17 +7,18 @@
 //
 // La venta llega en B4 y reemplaza ShiftActiveScreen.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 
-import { apiWithCashier } from "./api.js";
+import { apiWithCashier, ApiError } from "./api.js";
 import { useDeviceBootstrap } from "./hooks/useDeviceBootstrap.js";
 import { useInactivityLogout } from "./hooks/useInactivityLogout.js";
 import { PairScreen } from "./pages/PairScreen.js";
 import { PinScreen, type CashierLoginResponse } from "./pages/PinScreen.js";
-import { SalePage } from "./pages/SalePage.js";
+import { SalePage, type TableContext } from "./pages/SalePage.js";
 import { ShiftForceCloseScreen } from "./pages/ShiftForceCloseScreen.js";
 import { ShiftOpenScreen } from "./pages/ShiftOpenScreen.js";
+import { TableMapScreen, type ApiTable } from "./pages/TableMapScreen.js";
 import { clearCashierSession } from "./storage.js";
 
 type CashierUser = CashierLoginResponse["user"] & { sessionTtlMinutes: number };
@@ -102,10 +103,9 @@ export function App() {
           }}
         />
       ) : cashier.kind === "active" ? (
-        <SalePage
+        <TpvHome
+          cashier={cashier.cashier}
           shiftId={cashier.shift.id}
-          cashierEmail={cashier.cashier.email}
-          cashierRole={cashier.cashier.role}
           registerName={register.name}
           registerId={register.id}
           storeName={store.name}
@@ -118,12 +118,7 @@ export function App() {
             clearCashierSession();
             setCashier({ kind: "needsLogin" });
           }}
-          onCloseShift={async () => {
-            // El cierre real va por `ShiftActiveScreen` que sigue
-            // sirviendo de fallback con modal. Aquí simplemente
-            // delegamos: rebotar al sub-flujo "needsShiftOpen" deja al
-            // cajero en pantalla de apertura del siguiente turno, que
-            // es exactamente lo que el cierre normal produce.
+          onCloseShift={() => {
             setCashier({ kind: "needsShiftOpen", cashier: cashier.cashier });
           }}
         />
@@ -168,6 +163,112 @@ function LoggedInWrapper({
 }) {
   useInactivityLogout(true, autoLogoutMinutes, onAutoLogout);
   return <>{children}</>;
+}
+
+// Cuando hay sesión + turno abierto, el cajero entra al "home" del TPV.
+// En modo bar (la tienda tiene al menos una mesa), el home es el mapa
+// de sala y la venta rápida se accede con botón superior derecha. En
+// modo retail puro (tienda sin mesas), seguimos directos a SalePage
+// como en B4-B6 — sin coste para los clientes que no usan bar.
+function TpvHome(props: {
+  cashier: CashierUser;
+  shiftId: string;
+  registerName: string;
+  registerId: string;
+  storeName: string;
+  onLogoutCashier: () => void | Promise<void>;
+  onCloseShift: () => void;
+}) {
+  const [hasTables, setHasTables] = useState<boolean | null>(null);
+  const [view, setView] = useState<
+    | { kind: "map" }
+    | { kind: "sale"; tableContext: TableContext | null }
+  >({ kind: "map" });
+
+  useEffect(() => {
+    let cancelled = false;
+    apiWithCashier<{ tables: ApiTable[] }>("/tpv/tables")
+      .then((res) => {
+        if (cancelled) return;
+        const any = res.tables.length > 0;
+        setHasTables(any);
+        if (!any) setView({ kind: "sale", tableContext: null });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        // Si el endpoint falla (offline al arrancar, register sin store
+        // accesible), caemos al flujo retail. F7 trata el degradado.
+        if (err instanceof ApiError && err.status >= 500) {
+          setHasTables(false);
+          setView({ kind: "sale", tableContext: null });
+        } else {
+          setHasTables(false);
+          setView({ kind: "sale", tableContext: null });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (hasTables === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-mipiace-stone">
+        <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+      </div>
+    );
+  }
+
+  if (view.kind === "map") {
+    return (
+      <TableMapScreen
+        cashierEmail={props.cashier.email}
+        storeName={props.storeName}
+        registerName={props.registerName}
+        onPickTable={(table) => {
+          setView({
+            kind: "sale",
+            tableContext: tableContextFromApi(table),
+          });
+        }}
+        onQuickSale={() => {
+          setView({ kind: "sale", tableContext: null });
+        }}
+        onLogoutCashier={props.onLogoutCashier}
+        onCloseShift={props.onCloseShift}
+      />
+    );
+  }
+
+  return (
+    <SalePage
+      shiftId={props.shiftId}
+      cashierEmail={props.cashier.email}
+      cashierRole={props.cashier.role}
+      registerName={props.registerName}
+      registerId={props.registerId}
+      storeName={props.storeName}
+      tableContext={view.tableContext}
+      onBackToMap={
+        hasTables ? () => setView({ kind: "map" }) : null
+      }
+      onLogoutCashier={props.onLogoutCashier}
+      onCloseShift={props.onCloseShift}
+    />
+  );
+}
+
+function tableContextFromApi(table: ApiTable): TableContext {
+  return {
+    id: table.id,
+    name: table.name,
+    zone: table.zone,
+    capacity: table.capacity,
+    diners: table.activeTicket?.diners ?? null,
+    openedAt: table.activeTicket?.openedAt ?? null,
+    openedByEmail: table.activeTicket?.openedByEmail ?? null,
+    activeTicketId: table.activeTicket?.id ?? null,
+  };
 }
 
 export default App;

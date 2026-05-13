@@ -23,7 +23,7 @@ persistencia.
 
 ---
 
-## ADR-002 · Backend: Node 20 + Fastify
+## ADR-002 · Backend: Node 20 + Fastify (+ WebSockets obligatorios en B7)
 
 **Contexto:** API REST con multi-tenant, integración HTTP intensiva con
 Holded, websockets opcionales para empujar cambios de catálogo al TPV.
@@ -43,6 +43,25 @@ Holded, websockets opcionales para empujar cambios de catálogo al TPV.
   trivial.
 - Contra: hay que disciplinar el tipado y los esquemas (JSON Schema en
   Fastify ayuda).
+
+**Actualización B7 (2026-05-13) — WebSockets pasan de opcional a
+obligatorios para el vertical bar.** El multi-terminal en tiempo real
+(`docs/verticals/bar.md` §6) es imprescindible: dos camareros tienen
+que ver el estado de la misma mesa al instante. Implementación:
+- Plugin `@fastify/websocket` ≥11.
+- Endpoint `GET /ws/store/:storeId?token=<cashier-session-jwt>`. La
+  autenticación va por query string porque el WebSocket nativo del
+  browser no permite cabeceras personalizadas; el JWT es de TTL corto
+  (B3) y se redacta en logs cuando es razonable.
+- Bus en memoria por `storeId` (`apps/api/src/realtime/`). Para piloto
+  con una sola instancia de la API (ADR-009) basta. Si en producción
+  escalamos a varias instancias, sustituimos el bus por Redis pub/sub
+  manteniendo la misma firma.
+- Conflictos: **last-writer-wins por operación**. Si dos camareros
+  añaden línea a la vez, ambas se aceptan (operaciones aditivas
+  distintas). Si uno modifica y otro elimina la misma línea, gana la
+  última en llegar al backend. Un cobro bloquea el ticket (DRAFT →
+  PAID): cualquier mutación posterior responde 409 `TICKET_ALREADY_PAID`.
 
 ---
 

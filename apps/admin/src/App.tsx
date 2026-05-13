@@ -124,6 +124,12 @@ function LoginPage() {
   // Paso 2 cuando el backend pide código TOTP / recovery code.
   const [pendingToken, setPendingToken] = useState<string | null>(null);
   const [twoFactorCode, setTwoFactorCode] = useState("");
+  // B7 §9: si el OWNER no tenía PIN, el backend lo auto-genera y lo
+  // devuelve UNA VEZ en el login response. Lo mostramos en un modal
+  // antes de navegar; el cajero pega el PIN en el TPV para autorizar.
+  const [ownerPinJustGenerated, setOwnerPinJustGenerated] = useState<
+    string | null
+  >(null);
 
   // Banner verde post-reset, si venimos de `/admin/reset?token=...` OK.
   const justReset = location.state && (location.state as { justReset?: boolean }).justReset;
@@ -134,7 +140,11 @@ function LoginPage() {
     setBusy(true);
     try {
       const res = await api<
-        | { accessToken: string; refreshToken: string }
+        | {
+            accessToken: string;
+            refreshToken: string;
+            ownerPinGenerated?: string;
+          }
         | { requires2fa: true; pendingToken: string }
       >("/auth/login", {
         method: "POST",
@@ -144,9 +154,19 @@ function LoginPage() {
         setPendingToken(res.pendingToken);
         return;
       }
-      storeTokens(res as { accessToken: string; refreshToken: string }, {
-        remember,
-      });
+      const tokens = res as {
+        accessToken: string;
+        refreshToken: string;
+        ownerPinGenerated?: string;
+      };
+      storeTokens(
+        { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken },
+        { remember },
+      );
+      if (tokens.ownerPinGenerated) {
+        setOwnerPinJustGenerated(tokens.ownerPinGenerated);
+        return;
+      }
       navigate("/", { replace: true });
     } catch (err) {
       if (err instanceof ApiError) setError(err.message);
@@ -178,6 +198,38 @@ function LoginPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (ownerPinJustGenerated) {
+    return (
+      <CenteredCard>
+        <h1 className="text-[22px] font-semibold text-mipiace-ink tracking-tight">
+          Tu PIN de respaldo
+        </h1>
+        <p className="text-[13.5px] text-slate-500 mt-1 mb-6">
+          Como propietario, te hemos asignado un PIN de respaldo de 4
+          dígitos. Lo usarás para autorizar descuentos o cierres con
+          incidencia desde el TPV cuando no haya encargado disponible.
+          Apúntalo: <strong>sólo se muestra una vez</strong>. Si lo
+          pierdes, puedes regenerarlo en "Mi cuenta".
+        </p>
+        <div className="rounded-2xl bg-mipiace-stone py-6 mb-5 text-center">
+          <div className="text-[44px] font-semibold tracking-[0.3em] text-mipiace-ink tabular-nums">
+            {ownerPinJustGenerated}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setOwnerPinJustGenerated(null);
+            navigate("/", { replace: true });
+          }}
+          className="w-full h-12 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[14.5px] font-medium"
+        >
+          He apuntado mi PIN, continuar
+        </button>
+      </CenteredCard>
+    );
   }
 
   if (pendingToken) {
@@ -662,6 +714,8 @@ function AccountPage() {
           ))}
       </section>
 
+      {canEdit && <OwnerPinSection />}
+
       {showRotateModal && (
         <RotateKeyModal
           onClose={() => setShowRotateModal(false)}
@@ -675,6 +729,68 @@ function AccountPage() {
       )}
 
     </AdminShell>
+  );
+}
+
+function OwnerPinSection() {
+  const [busy, setBusy] = useState(false);
+  const [newPin, setNewPin] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function regenerate() {
+    if (
+      !window.confirm(
+        "¿Generar un PIN de respaldo nuevo? El anterior dejará de funcionar.",
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api<{ pin: string }>(
+        "/auth/me/regenerate-owner-pin",
+        { method: "POST", body: {} },
+      );
+      setNewPin(res.pin);
+    } catch (err) {
+      if (err instanceof ApiError) setError(err.message);
+      else setError("Error inesperado");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="bg-white rounded-2xl border border-slate-200 p-6 md:p-7 mb-5">
+      <div className="flex items-start justify-between gap-4 mb-1">
+        <div>
+          <h2 className="text-[17px] font-semibold text-mipiace-ink tracking-tight">
+            PIN de respaldo del propietario
+          </h2>
+          <p className="text-[13px] text-slate-500 mt-1 max-w-xl">
+            Sirve para autorizar descuentos y cierres con incidencia
+            desde el TPV cuando no hay encargado. Generamos uno
+            automáticamente al primer login. Si lo olvidas, regenéralo
+            aquí — el anterior dejará de funcionar.
+          </p>
+        </div>
+        <OutlineButton onClick={regenerate} busy={busy} className="!h-9">
+          Regenerar PIN
+        </OutlineButton>
+      </div>
+      {newPin && (
+        <div className="rounded-2xl bg-mipiace-stone py-5 mt-4 text-center">
+          <div className="text-[12px] uppercase tracking-wider text-slate-500 mb-1">
+            Nuevo PIN (sólo se muestra una vez)
+          </div>
+          <div className="text-[34px] font-semibold tracking-[0.25em] text-mipiace-ink tabular-nums">
+            {newPin}
+          </div>
+        </div>
+      )}
+      {error && <FieldError message={error} />}
+    </section>
   );
 }
 

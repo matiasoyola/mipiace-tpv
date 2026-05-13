@@ -130,11 +130,10 @@ export function ContactSheet({
                 Resultados de Holded (sólo búsqueda por teléfono).
               </div>
             )}
-            {fallback === "name_search_not_supported" && (
-              <div className="text-[12.5px] text-amber-700 bg-amber-50 rounded-xl p-3 mb-3">
-                Holded no permite buscar por nombre. Prueba con NIF o teléfono.
-              </div>
-            )}
+            {/* `name_search_not_supported` desapareció en B7 §8:
+                ahora el sync incremental trae todos los contactos
+                del tenant a BD local, así que la búsqueda local cubre
+                el caso por completo. */}
             {fallback === "no_holded_key" && (
               <div className="text-[12.5px] text-red-700 bg-red-50 rounded-xl p-3 mb-3">
                 Holded no está conectado.

@@ -40,6 +40,11 @@ vi.mock("@mipiacetpv/holded-client", async () => {
     iterateAllServices: vi.fn(async function* () {
       yield { page: 1, services: holdedServices };
     }),
+    // B7 §8: el incremental sync ahora itera contactos al final. Para
+    // este test el catálogo de contactos está vacío.
+    iterateAllContacts: vi.fn(async function* () {
+      yield { page: 1, contacts: [] as unknown[] };
+    }),
     parseTaxRateFromId: (id: string) =>
       id?.startsWith("s_iva_") ? Number(id.slice(6)) : null,
   };
@@ -154,6 +159,13 @@ const fakePrisma = {
       }
       return { count };
     }),
+  },
+  // B7 §8: el incremental sync ahora upserta contactos al final. En
+  // este test el iterador yield-ea vacío, así que sólo se llama a
+  // updateMany para huérfanos.
+  contact: {
+    upsert: vi.fn(async () => ({})),
+    updateMany: vi.fn(async () => ({ count: 0 })),
   },
 } as const;
 

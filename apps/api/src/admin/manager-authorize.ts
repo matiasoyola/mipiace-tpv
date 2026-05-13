@@ -97,13 +97,17 @@ export async function registerManagerAuthorizationRoutes(
       }
 
       const prisma = getPrisma();
+      // B7 §9: aceptamos OWNER además de MANAGER. El caso "1 dueño +
+      // 1 cajero" usa el PIN auto-generado del OWNER (ver auth/routes
+      // POST /auth/login). Mantenemos la misma respuesta genérica
+      // para no revelar qué rol pertenece a cada email.
       const manager = await prisma.user.findFirst({
         where: {
           tenantId: session.tid,
           email: lowerEmail,
-          role: "MANAGER",
+          role: { in: ["MANAGER", "OWNER"] },
         },
-        select: { id: true, email: true, pinHash: true },
+        select: { id: true, email: true, pinHash: true, role: true },
       });
       // Mensaje genérico — no revelamos si el email existe ni si el rol
       // es el correcto. El cajero pide al encargado que reintroduzca.

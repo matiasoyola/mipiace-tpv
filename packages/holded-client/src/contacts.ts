@@ -60,6 +60,42 @@ export interface CreateContactBody {
 
 // ── Listado / búsqueda ───────────────────────────────────────────────
 
+// Paginación de /contacts: mismo patrón que productos (spike §02.B).
+// `page=N`, tamaño fijo 500, fin = array vacío.
+export const HOLDED_CONTACTS_PAGE_SIZE = 500;
+
+export async function listContactsPage(
+  client: HoldedClient,
+  page: number,
+): Promise<HoldedContact[]> {
+  if (!Number.isInteger(page) || page < 1) {
+    throw new RangeError(`listContactsPage: page debe ser entero ≥1 (got ${page})`);
+  }
+  const result = await client.request<unknown>(
+    `/invoicing/v1/contacts?page=${page}`,
+  );
+  if (!Array.isArray(result)) {
+    throw new TypeError(
+      `GET /invoicing/v1/contacts?page=${page} devolvió algo que no es array`,
+    );
+  }
+  return result as HoldedContact[];
+}
+
+// Iterador async que devuelve cada página de contactos hasta array
+// vacío. Lo usa el sync inicial y el cron incremental (B7 §8).
+export async function* iterateAllContacts(
+  client: HoldedClient,
+): AsyncGenerator<{ page: number; contacts: HoldedContact[] }, void, void> {
+  let page = 1;
+  while (true) {
+    const contacts = await listContactsPage(client, page);
+    if (contacts.length === 0) return;
+    yield { page, contacts };
+    page += 1;
+  }
+}
+
 // La doc oficial de developers.holded.com sólo documenta filtros por
 // `phone`, `mobile` y `customId`. El listado plano descargaría miles
 // de contactos por tenant, así que el caller decide cuándo usarlo.

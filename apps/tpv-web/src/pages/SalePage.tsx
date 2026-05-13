@@ -48,6 +48,7 @@ import { CheckoutOverlay } from "./CheckoutPage.js";
 import { CloseShiftModal } from "./CloseShiftModal.js";
 import { LineSheet } from "./SalePage.lineSheet.js";
 import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
+import { useElapsedTime } from "../hooks/useElapsedTime.js";
 
 const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
 
@@ -65,6 +66,22 @@ interface HealthStatus {
   syncFailedCount: number;
 }
 
+// Resumen mínimo de la mesa abierta cuando el TPV viene del mapa
+// de sala (B7 §4). Define el header del panel de ticket y oculta el
+// botón "Suspender" (la mesa abierta YA es "venta suspendida" por
+// naturaleza). La conexión real con los endpoints `POST /tables/...` y
+// la persistencia se cablea en F4.
+export interface TableContext {
+  id: string;
+  name: string;
+  zone: "SALON" | "TERRAZA" | "BARRA" | "RESERVADO";
+  capacity: number;
+  diners: number | null;
+  openedAt: string | null;
+  openedByEmail: string | null;
+  activeTicketId: string | null;
+}
+
 export interface SalePageProps {
   shiftId: string;
   cashierEmail: string;
@@ -72,6 +89,13 @@ export interface SalePageProps {
   registerName: string;
   registerId: string;
   storeName: string;
+  // Si la pantalla se abre desde el mapa de sala (B7), recibe el
+  // contexto de la mesa. Si es venta rápida (retail o "café para
+  // llevar" en bar), queda null/undefined.
+  tableContext?: TableContext | null;
+  // Sólo provisto cuando la tienda tiene mesas configuradas — permite
+  // al cajero volver al mapa con un toque. Null en modo retail puro.
+  onBackToMap?: (() => void) | null;
   onLogoutCashier: () => void;
   onCloseShift: () => void;
 }
@@ -424,6 +448,8 @@ export function SalePage(props: SalePageProps) {
             notes={notes}
             totals={totals}
             cashierRole={props.cashierRole}
+            tableContext={props.tableContext ?? null}
+            onBackToMap={props.onBackToMap ?? null}
             onClickProduct={addProduct}
             onClickFreeLine={() => setOpenSheet({ kind: "freeLine" })}
             onClickLine={(line) => setOpenSheet({ kind: "line", line })}
@@ -629,6 +655,8 @@ function SaleWorkspace({
   notes,
   totals,
   cashierRole: _cashierRole,
+  tableContext,
+  onBackToMap,
   onClickProduct,
   onClickFreeLine,
   onClickLine,
@@ -647,6 +675,8 @@ function SaleWorkspace({
   notes: string;
   totals: ReturnType<typeof computeCart>;
   cashierRole: "MANAGER" | "CASHIER";
+  tableContext: TableContext | null;
+  onBackToMap: (() => void) | null;
   onClickProduct: (p: CatalogProduct) => void;
   onClickFreeLine: () => void;
   onClickLine: (line: CartLine) => void;
@@ -735,14 +765,34 @@ function SaleWorkspace({
           (no el panel) se scrollea normal. */}
       <aside className="bg-white rounded-3xl border border-slate-200 flex flex-col order-1 lg:order-2 self-start">
         <div className="flex items-center justify-between px-5 md:px-7 pt-5 md:pt-6 pb-4 md:pb-5 border-b border-slate-100">
-          <div>
-            <h2 className="text-[18px] md:text-[20px] font-semibold text-mipiace-ink tracking-tight">
-              Ticket de venta
+          <div className="min-w-0">
+            <h2 className="text-[18px] md:text-[20px] font-semibold text-mipiace-ink tracking-tight truncate">
+              {tableContext ? `Mesa ${tableContext.name}` : "Ticket de venta"}
             </h2>
             <div className="text-[12.5px] text-slate-500 mt-0.5">
-              {totals.itemCount} {totals.itemCount === 1 ? "unidad" : "unidades"}
+              {tableContext ? (
+                <TableContextLine
+                  table={tableContext}
+                  itemCount={totals.itemCount}
+                />
+              ) : (
+                <>
+                  {totals.itemCount}{" "}
+                  {totals.itemCount === 1 ? "unidad" : "unidades"}
+                </>
+              )}
             </div>
           </div>
+          {onBackToMap && (
+            <button
+              type="button"
+              onClick={onBackToMap}
+              className="h-9 px-3 text-[12.5px] rounded-lg bg-mipiace-stone hover:bg-slate-100 text-mipiace-ink"
+              title="Volver al mapa de sala"
+            >
+              Mapa
+            </button>
+          )}
         </div>
         <div className="px-5 md:px-7 py-1">
           {lines.length === 0 ? (
@@ -816,15 +866,25 @@ function SaleWorkspace({
               {formatEur(totals.total)}
             </span>
           </div>
-          <div className="grid grid-cols-[120px_1fr] md:grid-cols-[160px_1fr] gap-2 md:gap-3">
-            <button
-              onClick={onSuspend}
-              disabled={lines.length === 0}
-              className="h-14 md:h-16 border border-mipiace-coral/30 text-mipiace-coral-dark hover:bg-mipiace-coral-soft hover:border-mipiace-coral/50 disabled:opacity-50 font-medium text-[14px] md:text-[15px] gap-2 rounded-2xl flex items-center justify-center"
-            >
-              <Bookmark className="w-[16px] md:w-[17px] h-[16px] md:h-[17px]" strokeWidth={2.25} />
-              Guardar
-            </button>
+          <div
+            className={
+              tableContext
+                ? "grid grid-cols-1 gap-2 md:gap-3"
+                : "grid grid-cols-[120px_1fr] md:grid-cols-[160px_1fr] gap-2 md:gap-3"
+            }
+          >
+            {/* En modo mesa, "Suspender" no aplica: la mesa abierta ya
+                es "venta suspendida" por naturaleza (bar.md §4.4). */}
+            {!tableContext && (
+              <button
+                onClick={onSuspend}
+                disabled={lines.length === 0}
+                className="h-14 md:h-16 border border-mipiace-coral/30 text-mipiace-coral-dark hover:bg-mipiace-coral-soft hover:border-mipiace-coral/50 disabled:opacity-50 font-medium text-[14px] md:text-[15px] gap-2 rounded-2xl flex items-center justify-center"
+              >
+                <Bookmark className="w-[16px] md:w-[17px] h-[16px] md:h-[17px]" strokeWidth={2.25} />
+                Guardar
+              </button>
+            )}
             <button
               onClick={onClickCheckout}
               disabled={lines.length === 0}
@@ -1101,4 +1161,22 @@ function SheetWrap({
       </div>
     </div>
   );
+}
+
+function TableContextLine({
+  table,
+  itemCount,
+}: {
+  table: TableContext;
+  itemCount: number;
+}) {
+  const elapsed = useElapsedTime(table.openedAt);
+  const parts: string[] = [];
+  if (table.diners != null && table.diners > 0) {
+    parts.push(`${table.diners} comensales`);
+  }
+  if (elapsed) parts.push(elapsed);
+  if (table.openedByEmail) parts.push(table.openedByEmail.split("@")[0]!);
+  parts.push(`${itemCount} ${itemCount === 1 ? "ud." : "uds."}`);
+  return <>{parts.join(" · ")}</>;
 }

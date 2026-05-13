@@ -72,6 +72,13 @@ enum HoldedUploadStatus {
   FAILED
 }
 
+enum TableZone {
+  SALON
+  TERRAZA
+  BARRA
+  RESERVADO
+}
+
 enum InitialSyncStatus {
   PENDING
   RUNNING
@@ -108,6 +115,11 @@ model Tenant {
   // este tenant. El cron de 15 min lo actualiza; el admin lo muestra
   // como "última sincronización hace X min".
   lastIncrementalSyncAt          DateTime?         @map("last_incremental_sync_at") @db.Timestamptz()
+  // Última vez que el catálogo de contactos se refrescó (B7 §8). Se
+  // actualiza al final del sync incremental tras descargar todos los
+  // contactos de Holded. Sirve para que el admin distinga entre un
+  // sync "completo" y uno parcial.
+  lastContactsSyncAt             DateTime?         @map("last_contacts_sync_at") @db.Timestamptz()
   // Stats del último sync incremental: { productsSeen, productsUpdated,
   // orphansMarked, autoSkuFixed, autoSkuNeedsReview, durationMs,
   // errors[] }. Mismo enfoque que `initialSyncStats` — estructura
@@ -224,9 +236,48 @@ model Store {
 
   tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   registers Register[]
+  tables    Table[]
 
   @@index([tenantId])
   @@map("stores")
+}
+
+// Mesa lógica del vertical bar/hostelería (B7). El estado (libre /
+// ocupada / cobrando) NO se persiste — se deriva en runtime de la
+// presencia de un `Ticket` con `status=DRAFT` apuntando a esta mesa.
+model Table {
+  id                 String    @id @default(uuid()) @db.Uuid
+  storeId            String    @map("store_id") @db.Uuid
+  name               String
+  capacity           Int       @default(2)
+  zone               TableZone @default(SALON)
+  // Posición opcional en el canvas del admin. Si todas son NULL, el
+  // TPV renderiza la zona en grid auto. El canvas drag-and-drop se
+  // difiere a un evolutivo; el schema queda preparado.
+  positionX          Int?      @map("position_x")
+  positionY          Int?      @map("position_y")
+  width              Int?
+  height             Int?
+  // Para zona BARRA: orden del puesto dentro de la barra (B1=1,
+  // B2=2, ...). Permite renderizar la barra como array de mini-mesas.
+  // NULL fuera de la zona BARRA.
+  barSeatIndex       Int?      @map("bar_seat_index")
+  // Si esta mesa ha sido absorbida por otra dentro de un grupo (§5.2
+  // del prompt B7), apunta a la mesa principal. NULL = mesa autónoma.
+  // Se limpia automáticamente al cobrar el ticket principal del grupo.
+  groupedIntoTableId String?   @map("grouped_into_table_id") @db.Uuid
+  deletedAt          DateTime? @map("deleted_at") @db.Timestamptz()
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+
+  store          Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  tickets        Ticket[]
+  groupedInto    Table?   @relation("TableGrouping", fields: [groupedIntoTableId], references: [id])
+  absorbedTables Table[]  @relation("TableGrouping")
+
+  @@unique([storeId, name])
+  @@index([storeId, zone])
+  @@index([groupedIntoTableId])
+  @@map("tables")
 }
 
 // Caja LÓGICA. Un punto de venta dentro de una tienda. No es un
@@ -391,15 +442,22 @@ model Warehouse {
 // encuentra resultados, llama a Holded en vivo y upserta. El endpoint
 // `POST /contacts` crea contacto on-the-fly desde el TPV con GET-back.
 model Contact {
-  id              String   @id @default(uuid()) @db.Uuid
-  tenantId        String   @map("tenant_id") @db.Uuid
-  holdedContactId String   @map("holded_contact_id")
-  name            String
-  nif             String?
-  email           String?
-  phone           String?
-  raw             Json?
-  lastSyncedAt    DateTime @default(now()) @map("last_synced_at") @db.Timestamptz()
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  holdedContactId  String    @map("holded_contact_id")
+  name             String
+  nif              String?
+  email            String?
+  phone            String?
+  raw              Json?
+  // Si false, el contacto fue marcado como huérfano en el último sync
+  // incremental (B7 §8): ya no existe en Holded. Lo conservamos por si
+  // hay tickets históricos que apuntan a él. La UI del TPV lo oculta.
+  active           Boolean   @default(true)
+  // Marca temporal del último sync que vio este contacto en Holded.
+  // El cron incremental marca `active=false` cuando NOT seen >24h.
+  lastSeenInSyncAt DateTime? @map("last_seen_in_sync_at") @db.Timestamptz()
+  lastSyncedAt     DateTime  @default(now()) @map("last_synced_at") @db.Timestamptz()
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -442,46 +500,57 @@ model Shift {
 }
 
 model Ticket {
-  id                  String       @id @default(uuid()) @db.Uuid
-  tenantId            String       @map("tenant_id") @db.Uuid
-  registerId          String       @map("register_id") @db.Uuid
-  shiftId             String       @map("shift_id") @db.Uuid
-  userId              String       @map("user_id") @db.Uuid
-  internalNumber      String       @map("internal_number")
+  id                   String       @id @default(uuid()) @db.Uuid
+  tenantId             String       @map("tenant_id") @db.Uuid
+  registerId           String       @map("register_id") @db.Uuid
+  shiftId              String       @map("shift_id") @db.Uuid
+  userId               String       @map("user_id") @db.Uuid
+  internalNumber       String       @map("internal_number")
   // UUID v4 generado en el front al cobrar. Llave de idempotencia hacia
   // Holded. Nunca se regenera.
-  externalId          String       @unique @map("external_id") @db.Uuid
-  contactHoldedId     String?      @map("contact_holded_id")
-  status              TicketStatus @default(DRAFT)
-  total               Decimal      @db.Decimal(10, 2)
-  totalTax            Decimal      @map("total_tax") @db.Decimal(10, 2)
-  totalDiscount       Decimal      @map("total_discount") @db.Decimal(10, 2)
+  externalId           String       @unique @map("external_id") @db.Uuid
+  contactHoldedId      String?      @map("contact_holded_id")
+  status               TicketStatus @default(DRAFT)
+  total                Decimal      @db.Decimal(10, 2)
+  totalTax             Decimal      @map("total_tax") @db.Decimal(10, 2)
+  totalDiscount        Decimal      @map("total_discount") @db.Decimal(10, 2)
   // Texto libre de la venta. Se imprime en el ticket y se concatena a
   // las `notes` Holded después del marcador `TPV-uuid:` (§1.3).
-  notes               String?
+  notes                String?
   // Efectivo recibido (para cálculo de cambio en histórico). Nullable
   // si no hubo efectivo en el cobro.
-  cashAmount          Decimal?     @map("cash_amount") @db.Decimal(10, 2)
-  holdedDocumentId    String?      @map("holded_document_id")
+  cashAmount           Decimal?     @map("cash_amount") @db.Decimal(10, 2)
+  holdedDocumentId     String?      @map("holded_document_id")
   // Numeración fiscal asignada por Holded tras el `approveDoc:true`.
   // Cara visible al cliente; se imprime en el ticket cuando llega.
-  holdedDocNumber     String?      @map("holded_doc_number")
-  holdedPdfUrl        String?      @map("holded_pdf_url")
+  holdedDocNumber      String?      @map("holded_doc_number")
+  holdedPdfUrl         String?      @map("holded_pdf_url")
   // Intents post-cobro. La impresión real es B5; en B4 sólo persistimos
   // la decisión del cajero.
-  printIntent         Boolean      @default(true) @map("print_intent")
-  emailIntent         String?      @map("email_intent")
+  printIntent          Boolean      @default(true) @map("print_intent")
+  emailIntent          String?      @map("email_intent")
   // Timestamp del momento en que el cajero pulsa "Imprimir ticket
   // regalo" (§5.2). Nullable; sólo se rellena si se solicitó.
-  giftReceiptIntentAt DateTime?    @map("gift_receipt_intent_at") @db.Timestamptz()
+  giftReceiptIntentAt  DateTime?    @map("gift_receipt_intent_at") @db.Timestamptz()
   // Email del MANAGER que autorizó este ticket con descuento superior
   // al umbral (B6 §2). Sólo se rellena si el descuento efectivo del
   // ticket supera `tenant.discountThresholdPct`. NULL en el caso normal.
-  discountAuthorizedBy String?    @map("discount_authorized_by")
-  createdAt           DateTime     @default(now()) @map("created_at") @db.Timestamptz()
-  paidAt              DateTime?    @map("paid_at") @db.Timestamptz()
-  syncedAt            DateTime?    @map("synced_at") @db.Timestamptz()
-  syncError           Json?        @map("sync_error")
+  discountAuthorizedBy String?      @map("discount_authorized_by")
+  // Mesa abierta a la que pertenece este ticket (B7). NULL para tickets
+  // de venta rápida (retail). El estado de la mesa se deriva: si existe
+  // un ticket con `tableId=X, status=DRAFT` la mesa X está ocupada.
+  tableId              String?      @map("table_id") @db.Uuid
+  table                Table?       @relation(fields: [tableId], references: [id])
+  // Si este ticket nació como absorción de otra mesa en un grupo (§5),
+  // se conserva el origen para histórico.
+  originalTableId      String?      @map("original_table_id") @db.Uuid
+  // Nº de comensales introducido al abrir la mesa. Informativo (no
+  // bloquea capacidad).
+  diners               Int?
+  createdAt            DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+  paidAt               DateTime?    @map("paid_at") @db.Timestamptz()
+  syncedAt             DateTime?    @map("synced_at") @db.Timestamptz()
+  syncError            Json?        @map("sync_error")
 
   tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   register  Register         @relation(fields: [registerId], references: [id], onDelete: Restrict)
@@ -498,6 +567,7 @@ model Ticket {
   @@index([registerId, createdAt])
   @@index([shiftId])
   @@index([externalId])
+  @@index([tableId, status])
   @@map("tickets")
 }
 
@@ -529,6 +599,10 @@ model TicketLine {
   // Holded (núcleo §6.2). Si el ticket se reimprime, se vuelven a
   // mostrar; si se devuelve, se reusan en el RefundLine.
   modifiers       Json?
+  // Si esta línea proviene de otra mesa (mover líneas o agrupar),
+  // queda registrado el origen. Permite desagrupar reversiblemente
+  // (B7 §5.3).
+  originalTableId String? @map("original_table_id") @db.Uuid
 
   ticket      Ticket          @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   product     Product?        @relation(fields: [productId], references: [id])
