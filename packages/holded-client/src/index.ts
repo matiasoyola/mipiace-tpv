@@ -38,7 +38,12 @@ export {
   type HoldedService,
 } from "./services.js";
 
-export { listTaxes, parseTaxRateFromId, type HoldedTax } from "./taxes.js";
+export {
+  buildTaxRateResolver,
+  listTaxes,
+  parseTaxRateFromId,
+  type HoldedTax,
+} from "./taxes.js";
 
 export {
   createContactWithGetBack,

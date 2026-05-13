@@ -137,6 +137,45 @@ describe("runAutoSku", () => {
     expect(row?.sku).toBeFalsy();
   });
 
+  it("Holded 404 → producto marcado inactivo + sellableViaTpv=false (B5 §1.2)", async () => {
+    const prisma = makePrisma([
+      {
+        id: "local-orphan",
+        holdedProductId: "69b7f8be522458c48a0ef621",
+        name: "Borrado en Holded",
+        kind: "PRODUCT",
+        sku: null,
+        needsSkuReview: false,
+        sellableViaTpv: true,
+      },
+    ]);
+    const client = {
+      request: vi.fn(async () => {
+        throw new HoldedApiError(
+          404,
+          "/invoicing/v1/products/69b7f8be522458c48a0ef621",
+          { status: 0, info: "Not found" },
+        );
+      }),
+    };
+    const result = await runAutoSku({
+      tenantId: "t1",
+      prisma: prisma as unknown as Parameters<typeof runAutoSku>[0]["prisma"],
+      client,
+      logger: silentLogger,
+      throttleMs: 0,
+      sleep: () => Promise.resolve(),
+    });
+    expect(result.fixed).toBe(0);
+    expect(result.needsReview).toBe(0);
+    // El 404 NO contamina `errors` porque ya está gestionado: el siguiente
+    // sync no lo procesará y dejaremos de generar ruido cada 15 min.
+    expect(result.errors).toEqual([]);
+    const row = prisma.rows.get("local-orphan") as ProductRow & { active?: boolean };
+    expect(row?.active).toBe(false);
+    expect(row?.sellableViaTpv).toBe(false);
+  });
+
   it("HoldedApiError NO marca needs_review (lo deja para reintento manual)", async () => {
     const prisma = makePrisma([
       {

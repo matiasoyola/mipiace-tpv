@@ -1,9 +1,9 @@
 # `apps/api`
 
 Fastify + TypeScript. Backend del TPV: auth del propietario, onboarding de
-Holded, worker BullMQ del sync inicial, y los endpoints legacy del
-super-mini-MVP del spike (`/products`, `/tickets`) cuando hay una
-`HOLDED_API_KEY` definida en el entorno.
+Holded, workers BullMQ (sync inicial/incremental, upload de tickets,
+upload de refunds, email de PDF), endpoints de cajeros/turnos/ventas y
+bandeja de errores de sync con Holded.
 
 ## Arrancar en local
 
@@ -60,12 +60,6 @@ super-mini-MVP del spike (`/products`, `/tickets`) cuando hay una
   Mapeo de errores: 401 (Holded rechaza key), 402 (cuenta suspendida),
   502 (Holded respondió HTML / inalcanzable), 503 (Redis no responde).
 - `GET /onboarding/sync-status` → estado del sync + stats.
-
-### Legacy del spike (sólo si `HOLDED_API_KEY` está en el .env)
-
-- `GET /products` — primeras 5 entradas vendibles.
-- `POST /tickets { lines, cashAmount? }` — crea `salesreceipt` aprobado
-  + `/pay` + GET-back. Usado por `apps/tpv-web-spike`.
 
 ## Tests
 

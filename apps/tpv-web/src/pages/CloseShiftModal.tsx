@@ -7,6 +7,15 @@ import { AlertCircle, Loader2 } from "lucide-react";
 
 import { ApiError, apiWithCashier } from "../api.js";
 
+interface FailedDoc {
+  id: string;
+  kind: "ticket" | "refund";
+  internalNumber: string;
+  total: number;
+  createdAt: string;
+  errorSummary: string;
+}
+
 export function CloseShiftModal({
   shiftId,
   cashierRole,
@@ -22,6 +31,8 @@ export function CloseShiftModal({
   const [syncFailureAccepted, setSyncFailureAccepted] = useState(false);
   const [managerPin, setManagerPin] = useState("");
   const [needsManager, setNeedsManager] = useState(false);
+  const [pinReason, setPinReason] = useState<"sync_failed" | "force_close" | null>(null);
+  const [failedDocs, setFailedDocs] = useState<FailedDoc[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,8 +58,21 @@ export function CloseShiftModal({
       if (err instanceof ApiError) {
         if (err.code === "MANAGER_PIN_REQUIRED") {
           setNeedsManager(true);
-          setError("Este cierre requiere PIN de encargado.");
+          const reason = (err.data as { reason?: string } | undefined)?.reason;
+          setPinReason(reason === "sync_failed" ? "sync_failed" : "force_close");
+          setError(
+            reason === "sync_failed"
+              ? "Hay tickets rechazados por Holded. Pide al encargado que introduzca su PIN para cerrar el turno."
+              : "Este cierre requiere PIN de encargado.",
+          );
         } else if (err.code === "SYNC_PENDING") {
+          const detail = err.data as
+            | {
+                failedTickets?: FailedDoc[];
+                failedRefunds?: FailedDoc[];
+              }
+            | undefined;
+          setFailedDocs([...(detail?.failedTickets ?? []), ...(detail?.failedRefunds ?? [])]);
           setError(
             "Hay tickets sin sincronizar. Marca el aviso para autorizar el cierre.",
           );
@@ -87,8 +111,37 @@ export function CloseShiftModal({
           className="w-full h-14 mb-4 px-4 text-[20px] font-semibold tracking-tight bg-mipiace-stone border border-transparent rounded-2xl focus:ring-2 focus:ring-mipiace-coral/40 focus:border-mipiace-coral/30 focus:bg-white tabular-nums text-right focus:outline-none"
         />
 
-        <label className="flex items-start gap-2 text-[12.5px] text-slate-600 mb-4 cursor-pointer">
+        {failedDocs.length > 0 && (
+          <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-3 py-3">
+            <div className="flex items-center gap-2 text-[13px] font-semibold text-red-800 mb-2">
+              <AlertCircle className="w-4 h-4" />
+              {failedDocs.length} documento{failedDocs.length === 1 ? "" : "s"} rechazado{failedDocs.length === 1 ? "" : "s"} por Holded en este turno
+            </div>
+            <ul className="space-y-1.5 max-h-40 overflow-y-auto">
+              {failedDocs.map((d) => (
+                <li
+                  key={`${d.kind}-${d.id}`}
+                  className="flex items-center justify-between gap-2 text-[12.5px] text-red-900 bg-white/60 rounded-lg px-2.5 py-1.5"
+                >
+                  <span className="tabular-nums font-medium shrink-0">
+                    {d.kind === "refund" ? "↩ " : ""}
+                    {d.internalNumber}
+                  </span>
+                  <span className="truncate flex-1 text-red-700">{d.errorSummary}</span>
+                  <span className="tabular-nums shrink-0">{d.total.toFixed(2)} €</span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-[11.5px] text-red-700">
+              Avisa al encargado. Si cierra, tendrá que introducir su PIN.
+            </p>
+          </div>
+        )}
+
+        <label htmlFor="syncFailureAccepted" className="flex items-start gap-2 text-[12.5px] text-slate-600 mb-4 cursor-pointer">
           <input
+            id="syncFailureAccepted"
+            name="syncFailureAccepted"
             type="checkbox"
             checked={syncFailureAccepted}
             onChange={(e) => setSyncFailureAccepted(e.target.checked)}
@@ -99,12 +152,16 @@ export function CloseShiftModal({
           </span>
         </label>
 
-        {(needsManager || cashierRole === "CASHIER") && (
+        {(needsManager || cashierRole === "CASHIER" || pinReason === "sync_failed") && (
           <>
-            <label className="block text-[13px] font-medium text-mipiace-ink mb-2">
-              PIN de encargado (si aplica)
+            <label htmlFor="managerPin" className="block text-[13px] font-medium text-mipiace-ink mb-2">
+              {pinReason === "sync_failed"
+                ? "PIN de encargado (requerido por tickets fallados)"
+                : "PIN de encargado (si aplica)"}
             </label>
             <input
+              id="managerPin"
+              name="managerPin"
               value={managerPin}
               onChange={(e) => setManagerPin(e.target.value.replace(/\D/g, "").slice(0, 8))}
               inputMode="numeric"

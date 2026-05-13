@@ -84,7 +84,10 @@ export function CheckoutOverlay(props: {
     [payments],
   );
   const change = cashAmount > 0 ? Math.max(0, paymentsSum - total) : 0;
-  const ready = Math.abs(paymentsSum - total) < 0.011;
+  // B5 §3.2: el botón se habilita siempre que Σ payments ≥ total (con
+  // tolerancia 0.01€). Antes exigíamos match exacto y eso bloqueaba
+  // overpayments en efectivo (el cambio se calcula aparte).
+  const ready = paymentsSum >= total - 0.01;
 
   // ── atajos teclado ─────────────────────────────────────────────────
   useEffect(() => {

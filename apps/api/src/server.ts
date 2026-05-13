@@ -3,6 +3,7 @@ import "dotenv/config";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 
+import { registerAdminTicketsErrorsRoutes } from "./admin/tickets-errors.js";
 import { registerAuthRoutes } from "./auth/routes.js";
 import { registerPasswordResetRoutes } from "./auth/password-reset.js";
 import { registerCashiersRoutes } from "./cashiers/routes.js";
@@ -14,7 +15,6 @@ import { loadEnv } from "./env.js";
 import { registerOnboardingRoutes } from "./onboarding/routes.js";
 import { registerCashierAuthRoutes } from "./shift/cashier-auth.js";
 import { registerShiftRoutes } from "./shift/routes.js";
-import { registerSpikeRoutes } from "./spike/routes.js";
 import { registerStoresRoutes } from "./stores/routes.js";
 import {
   registerAllExistingRepeatables,
@@ -72,14 +72,7 @@ async function main() {
   await registerStoresRoutes(app);
   await registerTicketRoutes(app);
   await registerTpvCatalogRoutes(app);
-
-  // Endpoints del super-mini-MVP (tpv-web-spike). Sólo se activan si la
-  // env trae HOLDED_API_KEY single-tenant. En producción nadie configura
-  // esa env — el TPV usa claves cifradas por tenant.
-  if (env.HOLDED_API_KEY && env.HOLDED_API_KEY.length > 0) {
-    await registerSpikeRoutes(app, env.HOLDED_API_KEY, env.HOLDED_BASE_URL);
-    app.log.info("Spike routes habilitadas (/products, /tickets) — modo single-tenant");
-  }
+  await registerAdminTicketsErrorsRoutes(app);
 
   // Conexión perezosa: forzamos un primer query para fallar pronto si la
   // BD no está accesible (mejor mensaje que esperar al primer login).

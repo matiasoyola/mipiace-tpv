@@ -98,6 +98,19 @@ export async function runAutoSku(options: AutoSkuOptions): Promise<AutoSkuResult
           newSku,
           mismatches: err.mismatches,
         });
+      } else if (err instanceof HoldedApiError && err.status === 404) {
+        // B5 §1.2: el producto existía cuando lo bajamos pero fue
+        // borrado en Holded. Lo marcamos inactivo para que el siguiente
+        // sync incremental NO lo procese y dejemos de generar errores
+        // cada 15 min. Si reaparece en Holded, el upsert del sync lo
+        // reactiva automáticamente.
+        await prisma.product.update({
+          where: { id: product.id },
+          data: { active: false, sellableViaTpv: false },
+        });
+        log.warn("auto-sku producto huérfano en Holded (404), marcado inactivo", {
+          holdedProductId: product.holdedProductId,
+        });
       } else if (err instanceof HoldedApiError || err instanceof HoldedInvalidResponseError) {
         result.errors.push(
           `${product.holdedProductId} (${product.name}): ${err.message}`,

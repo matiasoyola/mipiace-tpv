@@ -3,7 +3,7 @@
 // Cajeros / Seguridad + modal de confirmación al cerrar sesión en
 // todos los dispositivos).
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Building2,
@@ -17,6 +17,8 @@ import {
   X,
 } from "lucide-react";
 
+import { api, ApiError } from "./api.js";
+
 import { LogoutEverywhereModal } from "./components/LogoutEverywhereModal.js";
 import { Logo } from "./Logo.js";
 import { clearTokens } from "./api.js";
@@ -26,20 +28,51 @@ interface NavItem {
   label: string;
   icon: typeof User;
   disabled?: boolean;
+  // Si está presente, se pinta un punto rojo en la nav cuando el badge
+  // sea > 0. Se usa en B5 para la bandeja de tickets `SYNC_FAILED`.
+  badge?: "syncErrors";
 }
 
 const NAV_ITEMS: NavItem[] = [
-  // B4 activa Tiendas. Holded sigue grisado — su contenido (config
-  // de num_serie por caja, payment methods) se reparte ahora entre la
-  // sección Tiendas y la página Mi cuenta.
+  // B5 activa Holded como sección "Sync errors" — la pestaña
+  // dedicada a tickets / refunds que Holded rechazó. El resto del
+  // mantenimiento de la conexión (key, conexión, fiscal) sigue
+  // viviendo en "Mi cuenta" y "Tiendas".
   { to: "/admin/stores", label: "Tiendas", icon: Building2 },
   { to: "/admin/devices", label: "Dispositivos", icon: Calculator },
   { to: "/admin/cashiers", label: "Cajeros", icon: Users },
   { to: "/admin/products", label: "Productos", icon: Package },
   { to: "/admin/account", label: "Mi cuenta", icon: User },
   { to: "/admin/security", label: "Seguridad", icon: Shield },
-  { to: "/admin/holded", label: "Holded", icon: KeyRound, disabled: true },
+  { to: "/admin/tickets-errors", label: "Holded", icon: KeyRound, badge: "syncErrors" },
 ];
+
+// Hook compartido entre desktop sidebar y mobile drawer: pollea el
+// contador de tickets con error cada 60s mientras la pestaña esté
+// abierta. Silencioso a errores 401 (se gestionan en api.ts).
+function useSyncErrorsCount(): number {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    async function tick() {
+      try {
+        const res = await api<{ items: unknown[]; pendingCount: number }>(
+          "/admin/tickets/sync-errors?limit=1",
+        );
+        if (!cancelled) setCount(res.pendingCount ?? 0);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) return;
+        // Silencio el resto: si el backend está mal, el badge no se mueve.
+      }
+      if (!cancelled) setTimeout(tick, 60_000);
+    }
+    tick();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return count;
+}
 
 export function AdminShell({
   title,
@@ -174,6 +207,7 @@ function NavList({
   currentPath: string;
   onNavigate?: () => void;
 }) {
+  const syncErrorsCount = useSyncErrorsCount();
   return (
     <nav className="space-y-1.5">
       {NAV_ITEMS.map((item) => {
@@ -194,6 +228,7 @@ function NavList({
             </button>
           );
         }
+        const badgeCount = item.badge === "syncErrors" ? syncErrorsCount : 0;
         return (
           <Link
             key={item.label}
@@ -214,6 +249,14 @@ function NavList({
               strokeWidth={2.1}
             />
             <span>{item.label}</span>
+            {badgeCount > 0 && (
+              <span
+                aria-label={`${badgeCount} pendiente${badgeCount === 1 ? "" : "s"}`}
+                className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[11px] font-medium tabular-nums"
+              >
+                {badgeCount > 99 ? "99+" : badgeCount}
+              </span>
+            )}
           </Link>
         );
       })}

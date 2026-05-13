@@ -187,10 +187,12 @@ export function PinScreen({
             )}
 
             <div className="mt-4">
-              <label className="block text-[13px] font-medium text-mipiace-ink-soft mb-1.5">
+              <label htmlFor="cashierEmail" className="block text-[13px] font-medium text-mipiace-ink-soft mb-1.5">
                 {recent.length === 0 ? "Email del cajero" : "O usar otro cajero"}
               </label>
               <input
+                id="cashierEmail"
+                name="email"
                 type="email"
                 autoComplete="username"
                 inputMode="email"

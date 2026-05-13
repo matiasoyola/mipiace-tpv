@@ -24,6 +24,10 @@ export interface ZReportInput {
   refundsCount: number;
   syncIssues: { pendingSync: number; failed: number };
   acceptedSyncFailures: boolean;
+  // Email del encargado que autorizó el cierre con SYNC_FAILED. Audit
+  // trail (B5 §2.3). Null si no hubo SYNC_FAILED o si autorizó un
+  // MANAGER directamente sin PIN.
+  managerAuthorizationEmail: string | null;
 }
 
 const STORAGE_ROOT =
@@ -94,6 +98,9 @@ export async function generateZReportPdf(input: ZReportInput): Promise<string> {
     line(`  Fallidas:   ${input.syncIssues.failed}`);
     if (input.acceptedSyncFailures) {
       line("Cierre autorizado con incidencias.", { bold: true });
+    }
+    if (input.managerAuthorizationEmail) {
+      line(`Autorizado por: ${input.managerAuthorizationEmail}`);
     }
   }
   hr();

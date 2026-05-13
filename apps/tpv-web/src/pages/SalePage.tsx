@@ -711,7 +711,11 @@ function SaleWorkspace({
         </div>
       </section>
 
-      <aside className="bg-white rounded-3xl border border-slate-200 flex flex-col order-1 lg:order-2 max-h-[60vh] lg:max-h-none">
+      {/* B5 §3.1: el panel del ticket se ajusta al contenido (no
+          sticky-bottom). Con pocas líneas el botón Cobrar queda cerca
+          del foco visual; si hay muchas, el panel crece y la PÁGINA
+          (no el panel) se scrollea normal. */}
+      <aside className="bg-white rounded-3xl border border-slate-200 flex flex-col order-1 lg:order-2 self-start">
         <div className="flex items-center justify-between px-5 md:px-7 pt-5 md:pt-6 pb-4 md:pb-5 border-b border-slate-100">
           <div>
             <h2 className="text-[18px] md:text-[20px] font-semibold text-mipiace-ink tracking-tight">
@@ -722,7 +726,7 @@ function SaleWorkspace({
             </div>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 md:px-7 py-1">
+        <div className="px-5 md:px-7 py-1">
           {lines.length === 0 ? (
             <div className="py-10 text-center text-[13px] text-slate-400">
               Pulsa un producto o escanea un código para empezar.

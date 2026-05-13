@@ -67,10 +67,8 @@ const Schema = z.object({
   // password reset (`${PUBLIC_ADMIN_URL}/admin/reset?token=…`).
   PUBLIC_ADMIN_URL: z.string().url().default("http://localhost:5173"),
 
-  // ── Spike legacy (apps/tpv-web-spike) ─────────────────────────────
-  // Opcionales. Si están presentes el server expone /products y
-  // /tickets bajo el modo single-tenant single-key.
-  HOLDED_API_KEY: z.string().optional(),
+  // Base URL de la API de Holded. Lo usan los clientes ApiKeyClient
+  // creados desde tenants reales (cifrado por tenant).
   HOLDED_BASE_URL: z.string().url().default("https://api.holded.com/api"),
 });
 

@@ -216,7 +216,36 @@ describe("POST /tickets", () => {
     expect(second.json().duplicate).toBe(true);
   });
 
-  it("rechaza pagos no cuadrados (PAYMENTS_MISMATCH)", async () => {
+  it("acepta overpayment en efectivo (B5 §3.2): Σ payments > total es válido", async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/tickets",
+      headers: { authorization: `Bearer ${cashierToken()}` },
+      payload: {
+        externalId: randomUUID(),
+        registerId: REGISTER,
+        shiftId: SHIFT,
+        lines: [
+          {
+            nameSnapshot: "Cafe",
+            sku: "CAFE-1",
+            units: 1,
+            unitPrice: 1.4,
+            discountPct: 0,
+            taxRate: 10,
+          },
+        ],
+        // Total esperado: 1.54. Cajero recibe 5.00€ en efectivo → cambio 3.46.
+        payments: [{ method: "CASH", amount: 5 }],
+        cashAmount: 5,
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().ticket.status).toBe("PENDING_SYNC");
+  });
+
+  it("rechaza pagos no cuadrados (PAYMENTS_MISMATCH) si Σ < total", async () => {
     const app = await buildApp();
     const res = await app.inject({
       method: "POST",

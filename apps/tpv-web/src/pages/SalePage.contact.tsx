@@ -113,6 +113,8 @@ export function ContactSheet({
         ) : (
           <>
             <input
+              id="contactSearch"
+              name="contactSearch"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Buscar por nombre, NIF o teléfono…"
@@ -247,10 +249,17 @@ function Input({
   onChange: (v: string) => void;
   required?: boolean;
 }) {
+  // id determinístico a partir del label para asociar label↔input y
+  // dar autofill nativo (B5 §3.3).
+  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   return (
     <div>
-      <label className="block text-[12.5px] text-slate-500 mb-1">{label}</label>
+      <label htmlFor={`contact-${slug}`} className="block text-[12.5px] text-slate-500 mb-1">
+        {label}
+      </label>
       <input
+        id={`contact-${slug}`}
+        name={slug}
         value={value}
         required={required}
         onChange={(e) => onChange(e.target.value)}

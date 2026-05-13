@@ -8,6 +8,7 @@ import { DevicesPage } from "./pages/DevicesPage.js";
 import { ForgotPasswordPage, ResetPasswordPage } from "./pages/PasswordResetPages.js";
 import { SecurityPage } from "./pages/SecurityPage.js";
 import { StoreDetailPage, StoresPage } from "./pages/StoresPage.js";
+import { TicketsErrorsPage } from "./pages/TicketsErrorsPage.js";
 import { api, ApiError, clearTokens, readTokens, storeTokens } from "./api.js";
 import {
   CenteredCard,
@@ -56,6 +57,7 @@ export function App() {
       <Route path="/admin/security" element={<SecurityPage />} />
       <Route path="/admin/stores" element={<StoresPage />} />
       <Route path="/admin/stores/:storeId" element={<StoreDetailPage />} />
+      <Route path="/admin/tickets-errors" element={<TicketsErrorsPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/admin/reset" element={<ResetPasswordPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
@@ -234,8 +236,10 @@ function LoginPage() {
           required
         />
         <div className="flex items-start justify-between gap-3">
-          <label className="flex items-center gap-2.5 text-[13.5px] text-mipiace-ink-soft cursor-pointer select-none">
+          <label htmlFor="loginRemember" className="flex items-center gap-2.5 text-[13.5px] text-mipiace-ink-soft cursor-pointer select-none">
             <input
+              id="loginRemember"
+              name="remember"
               type="checkbox"
               checked={remember}
               onChange={(e) => setRemember(e.target.checked)}

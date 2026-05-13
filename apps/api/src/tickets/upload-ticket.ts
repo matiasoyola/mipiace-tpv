@@ -15,6 +15,7 @@ import {
   createSalesreceiptApproved,
   registerPaymentWithGetBack,
   type SalesreceiptItem,
+  type SalesreceiptPayload,
 } from "@mipiacetpv/holded-client";
 
 import { decryptSecret } from "../crypto.js";
@@ -86,28 +87,12 @@ export async function uploadTicket(
 
   // FASE 1: si no hay documentId, POST salesreceipt + GET-back.
   if (!documentId) {
-    const items: SalesreceiptItem[] = ticket.lines.map((l) => ({
-      name: l.nameSnapshot,
-      units: Number(l.units),
-      price: Number(l.unitPrice),
-      tax: Number(l.taxRate),
-      discount: Number(l.discountPct),
-      sku: l.sku,
-    }));
-
-    const notes = composeNotes(externalId, ticket.notes);
-    const numSerieId = ticket.register.numSerieHolded ?? undefined;
+    const payload = buildTicketSalesreceiptPayload(ticket);
 
     try {
       const result = await createSalesreceiptApproved(
         client,
-        {
-          approveDoc: true,
-          date: Math.floor((ticket.paidAt ?? new Date()).getTime() / 1000),
-          notes,
-          items,
-          ...(numSerieId ? { numSerieId } : {}),
-        },
+        payload,
         { externalId, expectedTotal: Number(ticket.total) },
       );
       documentId = result.documentId;
@@ -229,6 +214,44 @@ function composeNotes(externalId: string, userNotes: string | null): string {
   const tag = `TPV-uuid: ${externalId}`;
   if (!userNotes) return tag;
   return `${tag}\n${userNotes}`;
+}
+
+// Payload exacto que el worker enviará a Holded. Reutilizado por el
+// preview endpoint de la bandeja (B5 §2.1: GET
+// /admin/tickets/:id/holded-payload-preview) para que el propietario
+// vea ANTES de reintentar qué se va a mandar — sin drift entre worker
+// y preview.
+export function buildTicketSalesreceiptPayload(ticket: {
+  externalId: string;
+  notes: string | null;
+  paidAt: Date | null;
+  lines: Array<{
+    nameSnapshot: string;
+    units: { toString(): string } | number;
+    unitPrice: { toString(): string } | number;
+    taxRate: { toString(): string } | number;
+    discountPct: { toString(): string } | number;
+    sku: string;
+  }>;
+  register: { numSerieHolded: string | null };
+}): SalesreceiptPayload {
+  const items: SalesreceiptItem[] = ticket.lines.map((l) => ({
+    name: l.nameSnapshot,
+    units: Number(l.units),
+    price: Number(l.unitPrice),
+    tax: Number(l.taxRate),
+    discount: Number(l.discountPct),
+    sku: l.sku,
+  }));
+  const notes = composeNotes(ticket.externalId, ticket.notes);
+  const numSerieId = ticket.register.numSerieHolded ?? undefined;
+  return {
+    approveDoc: true,
+    date: Math.floor((ticket.paidAt ?? new Date()).getTime() / 1000),
+    notes,
+    items,
+    ...(numSerieId ? { numSerieId } : {}),
+  };
 }
 
 function composePayDesc(payments: Array<{ method: string; amount: { toString(): string } }>): string {

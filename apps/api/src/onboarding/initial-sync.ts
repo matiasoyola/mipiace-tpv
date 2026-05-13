@@ -5,6 +5,7 @@
 import { PrismaClient } from "@mipiacetpv/db";
 import {
   ApiKeyClient,
+  buildTaxRateResolver,
   iterateAllProducts,
   iterateAllServices,
   listTaxes,
@@ -73,11 +74,15 @@ export async function runInitialSync(options: RunInitialSyncOptions): Promise<Sy
 
   const stats = emptyStats();
   await markRunning(prisma, tenantId);
+  // Resolver `taxId → rate` que se construye en el paso de "Tipos de IVA"
+  // y se reutiliza para productos/servicios (§1.1 del prompt B5).
+  let resolveTaxRate: (taxId: string | undefined) => number | null = () => null;
 
   try {
     await step(stats, "Tipos de IVA", async () => {
       const taxes = await listTaxes(client);
       stats.taxesCount = taxes.length;
+      resolveTaxRate = buildTaxRateResolver(taxes);
       for (const t of taxes) {
         const rate = typeof t.rate === "number" ? t.rate : parseTaxRateFromId(t.id);
         await prisma.tenantTax.upsert({
@@ -136,7 +141,7 @@ export async function runInitialSync(options: RunInitialSyncOptions): Promise<Sy
         stats.productPagesProcessed = page;
         for (const p of products) {
           if (p.forSale === 0) continue;
-          await upsertCatalogEntry(prisma, tenantId, p, "PRODUCT");
+          await upsertCatalogEntry(prisma, tenantId, p, "PRODUCT", resolveTaxRate, log);
           stats.productsCount += 1;
         }
         await persistProgress(prisma, tenantId, stats);
@@ -148,7 +153,7 @@ export async function runInitialSync(options: RunInitialSyncOptions): Promise<Sy
         stats.servicePagesProcessed = page;
         for (const s of services) {
           if (s.forSale === 0) continue;
-          await upsertCatalogEntry(prisma, tenantId, s, "SERVICE");
+          await upsertCatalogEntry(prisma, tenantId, s, "SERVICE", resolveTaxRate, log);
           stats.servicesCount += 1;
         }
         await persistProgress(prisma, tenantId, stats);
@@ -199,15 +204,29 @@ async function upsertCatalogEntry(
   tenantId: string,
   raw: HoldedProduct | HoldedService,
   kind: "PRODUCT" | "SERVICE",
+  resolveTaxRate: (taxId: string | undefined) => number | null,
+  log: NonNullable<RunInitialSyncOptions["logger"]>,
 ): Promise<void> {
   const sku = typeof raw.sku === "string" && raw.sku.length > 0 ? raw.sku : null;
   const taxId = raw.taxes?.[0];
-  const taxRate = parseTaxRateFromId(taxId) ?? 0;
+  const resolvedTaxRate = resolveTaxRate(taxId);
+  const taxRate = resolvedTaxRate ?? 0;
+  if (resolvedTaxRate === null) {
+    // B5 §1.1: producto con tax sin resolver. Lo persistimos como NO
+    // vendible vía TPV — si saliera el silent reject por mismatch de
+    // total. El propietario tendrá que corregir el tipo de IVA en
+    // Holded; el siguiente sync lo reactivará.
+    log.warn("producto con tax sin resolver, marcado como no vendible", {
+      holdedProductId: raw.id,
+      taxId,
+      name: raw.name,
+    });
+  }
   const basePrice = typeof raw.price === "number" ? raw.price : 0;
   const barcodeRaw = (raw as { barcode?: unknown }).barcode;
   const barcode =
     typeof barcodeRaw === "string" && barcodeRaw.length > 0 ? barcodeRaw : null;
-  const sellable = sku !== null;
+  const sellable = sku !== null && resolvedTaxRate !== null;
 
   await prisma.product.upsert({
     where: {
@@ -237,7 +256,12 @@ async function upsertCatalogEntry(
       taxRate,
       kind,
       active: true,
-      sellableViaTpv: sellable || undefined,
+      // Si el tax está sin resolver, FORZAMOS sellableViaTpv=false aunque
+      // el sku exista — vender con tax=0 cuando Holded espera 21 provoca
+      // silent reject (§1.1). Si el sku falta pero el tax sí está, no
+      // bajamos (auto-sku puede subirlo a true tras asignar SKU).
+      sellableViaTpv:
+        resolvedTaxRate === null ? false : sellable || undefined,
       raw: raw as unknown as object,
       lastSyncedAt: new Date(),
     },

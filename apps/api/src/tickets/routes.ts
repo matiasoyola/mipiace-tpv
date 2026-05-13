@@ -24,7 +24,6 @@ import {
   PAYMENT_TOLERANCE_EUR,
   TOTAL_TOLERANCE_EUR,
   computeTicket,
-  paymentsClose,
   totalsClose,
 } from "./totals.js";
 
@@ -184,10 +183,15 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         })),
       );
       const paymentsSum = body.payments.reduce((acc, p) => acc + p.amount, 0);
-      if (!paymentsClose(paymentsSum, totals.total)) {
+      // B5 §3.2: aceptamos overpayment en efectivo (la diferencia es el
+      // cambio). Holded recibe siempre `total` exacto en /pay; los
+      // payments[] del TPV reflejan el dinero recibido. Para
+      // payment_methods != CASH no debería haber overpayment; si lo hay,
+      // lo aceptamos igual y queda como descuadre de caja.
+      if (paymentsSum + PAYMENT_TOLERANCE_EUR < totals.total) {
         return reply.code(400).send({
           error: "PAYMENTS_MISMATCH",
-          message: `Σ payments (${paymentsSum.toFixed(2)}) no coincide con total (${totals.total.toFixed(2)})`,
+          message: `Σ payments (${paymentsSum.toFixed(2)}) menor que total (${totals.total.toFixed(2)})`,
           tolerance: PAYMENT_TOLERANCE_EUR,
         });
       }

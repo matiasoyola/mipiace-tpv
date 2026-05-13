@@ -179,74 +179,140 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
 
       const isOwnerOfShift = shift.userId === cashier.sub;
 
-      // Cierre forzado: si el actor != owner del shift, exigir PIN
-      // encargado salvo que el actor ya sea MANAGER (o tenant haya
-      // desactivado la exigencia).
-      if (!isOwnerOfShift) {
-        const tenant = await prisma.tenant.findUniqueOrThrow({
-          where: { id: cashier.tid },
-          select: { requireManagerPinForForceClose: true },
-        });
-        const actorIsManager = cashier.role === "MANAGER";
-        if (tenant.requireManagerPinForForceClose && !actorIsManager) {
-          if (!body.managerPin) {
-            return reply.code(403).send({
-              error: "MANAGER_PIN_REQUIRED",
-              message: "Este cierre forzado requiere PIN de encargado.",
-            });
-          }
-          const manager = await prisma.user.findFirst({
-            where: {
-              tenantId: cashier.tid,
-              role: "MANAGER",
-            },
-            select: { id: true, pinHash: true },
-          });
-          // Probamos contra cualquier manager del tenant: si el PIN
-          // matchea con alguno, autoriza.
-          const managers = await prisma.user.findMany({
-            where: { tenantId: cashier.tid, role: "MANAGER", pinHash: { not: null } },
-            select: { pinHash: true },
-          });
-          let authorized = false;
-          for (const m of managers) {
-            if (m.pinHash && (await verifyPassword(m.pinHash, body.managerPin))) {
-              authorized = true;
-              break;
-            }
-          }
-          if (!authorized) {
-            return reply.code(403).send({
-              error: "INVALID_MANAGER_PIN",
-              message: "PIN de encargado incorrecto.",
-            });
-          }
-          // referencia para typecheck — evita unused var en algunos linters.
-          void manager;
-        }
-      }
-
-      // Health-check de sync. Cuenta tickets del shift con sync
-      // pendiente o fallida. En B3 todavía no hay POST de tickets;
-      // por tanto siempre vendrá 0. Dejamos la lógica para B5+ y la
-      // expone el endpoint para que el front la consuma.
-      const issues = await prisma.ticket.groupBy({
+      // Health-check de sync. Cuenta tickets+refunds del shift con sync
+      // pendiente o fallida.
+      const ticketIssues = await prisma.ticket.groupBy({
+        by: ["status"],
+        where: { shiftId: shift.id, status: { in: ["PENDING_SYNC", "SYNC_FAILED"] } },
+        _count: true,
+      });
+      const refundIssues = await prisma.refund.groupBy({
         by: ["status"],
         where: { shiftId: shift.id, status: { in: ["PENDING_SYNC", "SYNC_FAILED"] } },
         _count: true,
       });
       const pendingSync =
-        issues.find((i) => i.status === "PENDING_SYNC")?._count ?? 0;
-      const failed = issues.find((i) => i.status === "SYNC_FAILED")?._count ?? 0;
+        (ticketIssues.find((i) => i.status === "PENDING_SYNC")?._count ?? 0) +
+        (refundIssues.find((i) => i.status === "PENDING_SYNC")?._count ?? 0);
+      const failed =
+        (ticketIssues.find((i) => i.status === "SYNC_FAILED")?._count ?? 0) +
+        (refundIssues.find((i) => i.status === "SYNC_FAILED")?._count ?? 0);
       const hasSyncIssues = pendingSync > 0 || failed > 0;
       if (hasSyncIssues && !body.syncFailureAccepted) {
+        // Devolvemos también la lista breve de tickets/refunds fallados
+        // para que el modal de cierre muestre la tabla con badge rojo
+        // (B5 §2.3). Sólo los SYNC_FAILED; los PENDING_SYNC son
+        // técnicamente transitorios y no requieren intervención manual.
+        const failedTickets = await prisma.ticket.findMany({
+          where: { shiftId: shift.id, status: "SYNC_FAILED" },
+          select: {
+            id: true,
+            internalNumber: true,
+            total: true,
+            syncError: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: "desc" },
+          take: 50,
+        });
+        const failedRefunds = await prisma.refund.findMany({
+          where: { shiftId: shift.id, status: "SYNC_FAILED" },
+          select: {
+            id: true,
+            internalNumber: true,
+            total: true,
+            syncError: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: "desc" },
+          take: 50,
+        });
         return reply.code(409).send({
           error: "SYNC_PENDING",
           message:
             "Hay tickets sin sincronizar con Holded. Pide autorización del encargado y vuelve a confirmar.",
           pendingSync,
           failed,
+          failedTickets: failedTickets.map((t) => ({
+            id: t.id,
+            kind: "ticket" as const,
+            internalNumber: t.internalNumber,
+            total: Number(t.total.toString()),
+            createdAt: t.createdAt.toISOString(),
+            errorSummary: brieflyDescribeError(t.syncError),
+          })),
+          failedRefunds: failedRefunds.map((r) => ({
+            id: r.id,
+            kind: "refund" as const,
+            internalNumber: r.internalNumber,
+            total: Number(r.total.toString()),
+            createdAt: r.createdAt.toISOString(),
+            errorSummary: brieflyDescribeError(r.syncError),
+          })),
         });
+      }
+
+      // PIN encargado: lo exigimos en dos escenarios distintos.
+      //   (a) Cierre forzado (actor != owner del shift): la política
+      //       histórica de B3 — requireManagerPinForForceClose.
+      //   (b) B5 §2.3: si hay SYNC_FAILED en el turno aunque el actor
+      //       sea el propio cajero. El encargado debe confirmar que
+      //       conoce los errores y se hace cargo (queda en log y en
+      //       el Z PDF como audit trail).
+      const tenant = await prisma.tenant.findUniqueOrThrow({
+        where: { id: cashier.tid },
+        select: { requireManagerPinForForceClose: true },
+      });
+      const actorIsManager = cashier.role === "MANAGER";
+      const needForceClosePin =
+        !isOwnerOfShift && tenant.requireManagerPinForForceClose && !actorIsManager;
+      const needSyncFailedPin = failed > 0 && !actorIsManager;
+      let managerEmail: string | null = null;
+      if (needForceClosePin || needSyncFailedPin) {
+        if (!body.managerPin) {
+          return reply.code(403).send({
+            error: "MANAGER_PIN_REQUIRED",
+            message: needSyncFailedPin
+              ? "Hay tickets rechazados por Holded en este turno. Necesitas el PIN del encargado para cerrarlo."
+              : "Este cierre forzado requiere PIN de encargado.",
+            reason: needSyncFailedPin ? "sync_failed" : "force_close",
+          });
+        }
+        const managers = await prisma.user.findMany({
+          where: { tenantId: cashier.tid, role: "MANAGER", pinHash: { not: null } },
+          select: { id: true, email: true, pinHash: true },
+        });
+        let authorized: { id: string; email: string } | null = null;
+        for (const m of managers) {
+          if (m.pinHash && (await verifyPassword(m.pinHash, body.managerPin))) {
+            authorized = { id: m.id, email: m.email };
+            break;
+          }
+        }
+        if (!authorized) {
+          return reply.code(403).send({
+            error: "INVALID_MANAGER_PIN",
+            message: "PIN de encargado incorrecto.",
+          });
+        }
+        managerEmail = authorized.email;
+      }
+      // Audit trail estructurado (B5 §2.3). Cuando montemos la tabla
+      // audit_log dedicada, lo movemos allí; hoy basta con que quede
+      // en pino para reconstrucción forense.
+      if (managerEmail && needSyncFailedPin) {
+        request.log.info(
+          {
+            event: "shift.close.sync_failed_accepted",
+            shiftId: shift.id,
+            registerId: shift.register.id,
+            cashierUserId: cashier.sub,
+            managerUserEmail: managerEmail,
+            failedCount: failed,
+            pendingSyncCount: pendingSync,
+          },
+          "encargado autorizó cierre con SYNC_FAILED",
+        );
       }
 
       // Cálculo de teóricos a partir de los ticket_payments del turno
@@ -317,6 +383,7 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
           refundsCount: 0, // los Refund se contarán cuando lleguen en B6.
           syncIssues: { pendingSync, failed },
           acceptedSyncFailures: body.syncFailureAccepted === true,
+          managerAuthorizationEmail: managerEmail,
         });
       } catch (err) {
         request.log.error(err, "Z report generation failed");
@@ -348,4 +415,20 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
       });
     },
   );
+}
+
+// Resumen humano del syncError persistido por el worker. El frontend
+// del cierre lo pinta en la tabla de tickets fallados; el endpoint de
+// la bandeja admin tiene su propio formato más completo.
+function brieflyDescribeError(syncError: unknown): string {
+  if (!syncError || typeof syncError !== "object") return "error desconocido";
+  const obj = syncError as { reason?: string; message?: string };
+  if (obj.reason === "silent_reject" || obj.reason === "pay_silent_reject") {
+    return "Holded descartó el documento (silent reject)";
+  }
+  if (obj.reason === "holded_4xx" || obj.reason === "pay_4xx") {
+    return obj.message ? `${obj.reason}: ${obj.message}` : obj.reason;
+  }
+  if (obj.reason === "no_holded_key") return "Falta API Key";
+  return obj.reason ?? "error desconocido";
 }

@@ -11,7 +11,6 @@
     "dev:api": "pnpm --filter @mipiacetpv/api dev",
     "dev:admin": "pnpm --filter @mipiacetpv/admin dev",
     "dev:tpv": "pnpm --filter @mipiacetpv/tpv-web dev",
-    "dev:spike": "pnpm --filter @mipiacetpv/tpv-web-spike dev",
     "test": "vitest run",
     "test:watch": "vitest",
     "db:generate": "pnpm --filter @mipiacetpv/db run generate",

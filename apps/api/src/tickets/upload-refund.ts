@@ -12,6 +12,7 @@ import {
   createSalesreceiptApproved,
   registerPaymentWithGetBack,
   type SalesreceiptItem,
+  type SalesreceiptPayload,
 } from "@mipiacetpv/holded-client";
 
 import { decryptSecret } from "../crypto.js";
@@ -81,29 +82,13 @@ export async function uploadRefund(
     // no probó ninguno explícitamente — esta decisión sigue la
     // convención del prompt B4 §5.1 ("importes en negativo") y se
     // confirmará con el primer refund real en sandbox.
-    const items: SalesreceiptItem[] = refund.lines.map((l) => ({
-      name: l.nameSnapshot,
-      units: -Math.abs(Number(l.units)),
-      price: Number(l.unitPrice),
-      tax: Number(l.taxRate),
-      discount: Number(l.discountPct),
-      sku: l.sku,
-    }));
-    const refundNotes = `TPV-refund-uuid: ${externalId} · original: ${
-      refund.originalTicket.holdedDocNumber ?? refund.originalTicket.holdedDocumentId ?? "unknown"
-    }`;
+    const payload = buildRefundSalesreceiptPayload(refund);
     const expectedTotal = -Math.abs(Number(refund.total));
 
     try {
       const result = await createSalesreceiptApproved(
         client,
-        {
-          approveDoc: true,
-          date: Math.floor(refund.createdAt.getTime() / 1000),
-          notes: refundNotes,
-          items,
-          ...(refund.register?.numSerieHolded ? { numSerieId: refund.register.numSerieHolded } : {}),
-        },
+        payload,
         { externalId, expectedTotal },
       );
       documentId = result.documentId;
@@ -187,6 +172,49 @@ export async function uploadRefund(
   ]);
 
   return { kind: "success", documentId, docNumber: "" };
+}
+
+// Payload exacto que el worker enviará a Holded para una devolución.
+// Reutilizado por el preview endpoint del admin (B5 §2.1).
+export function buildRefundSalesreceiptPayload(refund: {
+  externalId: string;
+  createdAt: Date;
+  total: { toString(): string } | number;
+  lines: Array<{
+    nameSnapshot: string;
+    units: { toString(): string } | number;
+    unitPrice: { toString(): string } | number;
+    taxRate: { toString(): string } | number;
+    discountPct: { toString(): string } | number;
+    sku: string;
+  }>;
+  originalTicket: {
+    holdedDocumentId: string | null;
+    holdedDocNumber: string | null;
+  };
+  register: { numSerieHolded: string | null } | null;
+}): SalesreceiptPayload {
+  const items: SalesreceiptItem[] = refund.lines.map((l) => ({
+    name: l.nameSnapshot,
+    units: -Math.abs(Number(l.units)),
+    price: Number(l.unitPrice),
+    tax: Number(l.taxRate),
+    discount: Number(l.discountPct),
+    sku: l.sku,
+  }));
+  const notes = `TPV-refund-uuid: ${refund.externalId} · original: ${
+    refund.originalTicket.holdedDocNumber ??
+    refund.originalTicket.holdedDocumentId ??
+    "unknown"
+  }`;
+  const numSerieId = refund.register?.numSerieHolded ?? undefined;
+  return {
+    approveDoc: true,
+    date: Math.floor(refund.createdAt.getTime() / 1000),
+    notes,
+    items,
+    ...(numSerieId ? { numSerieId } : {}),
+  };
 }
 
 async function markFailed(

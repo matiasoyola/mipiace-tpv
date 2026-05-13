@@ -75,11 +75,13 @@ export function ShiftOpenScreen({
             Cuenta el efectivo del cajón antes de empezar el turno y anótalo
             aquí. Aparecerá como fondo inicial en el arqueo de cierre.
           </p>
-          <label className="block text-[13px] font-medium text-mipiace-ink mb-2">
+          <label htmlFor="cashOpening" className="block text-[13px] font-medium text-mipiace-ink mb-2">
             Fondo de caja inicial
           </label>
           <div className="relative mb-6">
             <input
+              id="cashOpening"
+              name="cashOpening"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               inputMode="decimal"

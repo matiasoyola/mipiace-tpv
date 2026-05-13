@@ -308,6 +308,71 @@ describe("runIncrementalSync", () => {
     ).rejects.toBeInstanceOf(IncrementalSyncSkippedError);
   });
 
+  it("resuelve taxRate vía /invoicing/v1/taxes (s_iva_21 → 21, s_iva_10 → 10)", async () => {
+    holdedTaxes = [
+      { id: "s_iva_21", name: "IVA 21%", rate: 21 },
+      { id: "s_iva_10", name: "IVA 10%", rate: 10 },
+      { id: "s_iva_4", name: "IVA 4%", rate: 4 },
+      { id: "s_iva_0", name: "Sin IVA", rate: 0 },
+    ];
+    holdedProducts = [
+      { id: "p-21", name: "21%", sku: "S21", price: 1, taxes: ["s_iva_21"], forSale: 1 },
+      { id: "p-10", name: "10%", sku: "S10", price: 1, taxes: ["s_iva_10"], forSale: 1 },
+      { id: "p-4", name: "4%", sku: "S04", price: 1, taxes: ["s_iva_4"], forSale: 1 },
+      { id: "p-0", name: "0%", sku: "S00", price: 1, taxes: ["s_iva_0"], forSale: 1 },
+    ];
+
+    await runIncrementalSync({ tenantId: TENANT_ID, prisma: fakePrisma as any });
+
+    expect(productStore.get(`${TENANT_ID}|p-21`)!.taxRate).toBe(21);
+    expect(productStore.get(`${TENANT_ID}|p-10`)!.taxRate).toBe(10);
+    expect(productStore.get(`${TENANT_ID}|p-4`)!.taxRate).toBe(4);
+    expect(productStore.get(`${TENANT_ID}|p-0`)!.taxRate).toBe(0);
+    for (const sku of ["p-21", "p-10", "p-4", "p-0"]) {
+      expect(productStore.get(`${TENANT_ID}|${sku}`)!.sellableViaTpv).toBe(true);
+    }
+  });
+
+  it("tax id desconocido → sellableViaTpv=false + warning estructurado", async () => {
+    const warnings: Array<{ msg: string; extra?: unknown }> = [];
+    const logger = {
+      info: () => undefined,
+      warn: (msg: string, extra?: unknown) => warnings.push({ msg, extra }),
+      error: () => undefined,
+    };
+    holdedTaxes = [{ id: "s_iva_21", name: "IVA 21%", rate: 21 }];
+    holdedProducts = [
+      // taxId que no está en /invoicing/v1/taxes y tampoco encaja con el regex.
+      { id: "p-mystery", name: "Tax desconocido", sku: "M01", price: 1, taxes: ["foo_bar_99"], forSale: 1 },
+    ];
+
+    await runIncrementalSync({
+      tenantId: TENANT_ID,
+      prisma: fakePrisma as any,
+      logger,
+    });
+
+    const stored = productStore.get(`${TENANT_ID}|p-mystery`)!;
+    expect(stored.sellableViaTpv).toBe(false);
+    // taxRate cae a 0 como valor por defecto pero NO se vende porque el flag
+    // sellableViaTpv lo bloquea — el upload-ticket no construirá payload.
+    expect(stored.taxRate).toBe(0);
+    expect(warnings.some((w) => w.msg.includes("tax sin resolver"))).toBe(true);
+  });
+
+  it("producto existente que pierde tax válido → sellableViaTpv pasa a false", async () => {
+    seedProduct("p-loses-tax", { sku: "OK", sellableViaTpv: true, taxRate: 21 });
+    holdedTaxes = [{ id: "s_iva_21", name: "IVA 21%", rate: 21 }];
+    holdedProducts = [
+      { id: "p-loses-tax", name: "loses tax", sku: "OK", price: 1, taxes: ["zz_unknown"], forSale: 1 },
+    ];
+
+    await runIncrementalSync({ tenantId: TENANT_ID, prisma: fakePrisma as any });
+
+    const stored = productStore.get(`${TENANT_ID}|p-loses-tax`)!;
+    expect(stored.sellableViaTpv).toBe(false);
+  });
+
   it("ignora productos con forSale=0", async () => {
     holdedProducts = [
       {
