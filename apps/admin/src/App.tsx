@@ -7,6 +7,7 @@ import { CashiersPage } from "./pages/CashiersPage.js";
 import { DevicesPage } from "./pages/DevicesPage.js";
 import { ForgotPasswordPage, ResetPasswordPage } from "./pages/PasswordResetPages.js";
 import { SecurityPage } from "./pages/SecurityPage.js";
+import { StoreDetailPage, StoresPage } from "./pages/StoresPage.js";
 import { api, ApiError, clearTokens, readTokens, storeTokens } from "./api.js";
 import {
   CenteredCard,
@@ -53,6 +54,8 @@ export function App() {
       <Route path="/admin/devices" element={<DevicesPage />} />
       <Route path="/admin/cashiers" element={<CashiersPage />} />
       <Route path="/admin/security" element={<SecurityPage />} />
+      <Route path="/admin/stores" element={<StoresPage />} />
+      <Route path="/admin/stores/:storeId" element={<StoreDetailPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/admin/reset" element={<ResetPasswordPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />

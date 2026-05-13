@@ -15,11 +15,17 @@ import { registerOnboardingRoutes } from "./onboarding/routes.js";
 import { registerCashierAuthRoutes } from "./shift/cashier-auth.js";
 import { registerShiftRoutes } from "./shift/routes.js";
 import { registerSpikeRoutes } from "./spike/routes.js";
+import { registerStoresRoutes } from "./stores/routes.js";
 import {
   registerAllExistingRepeatables,
   startCatalogIncrementalWorker,
 } from "./workers/catalog-incremental-worker.js";
 import { startInitialSyncWorker } from "./workers/initial-sync-worker.js";
+import { startTicketUploadWorker } from "./workers/ticket-upload-worker.js";
+import { startRefundUploadWorker } from "./workers/refund-upload-worker.js";
+import { startTicketEmailWorker } from "./workers/ticket-email-worker.js";
+import { registerTicketRoutes } from "./tickets/routes.js";
+import { registerTpvCatalogRoutes } from "./tpv-catalog/routes.js";
 
 async function main() {
   const env = loadEnv();
@@ -63,6 +69,9 @@ async function main() {
   await registerCashiersRoutes(app);
   await registerCashierAuthRoutes(app);
   await registerShiftRoutes(app);
+  await registerStoresRoutes(app);
+  await registerTicketRoutes(app);
+  await registerTpvCatalogRoutes(app);
 
   // Endpoints del super-mini-MVP (tpv-web-spike). Sólo se activan si la
   // env trae HOLDED_API_KEY single-tenant. En producción nadie configura
@@ -82,9 +91,15 @@ async function main() {
   // producción se separan con `pnpm worker:dev` (otro contenedor del compose).
   let initialWorker: ReturnType<typeof startInitialSyncWorker> | null = null;
   let incrementalWorker: ReturnType<typeof startCatalogIncrementalWorker> | null = null;
+  let ticketWorker: ReturnType<typeof startTicketUploadWorker> | null = null;
+  let refundWorker: ReturnType<typeof startRefundUploadWorker> | null = null;
+  let emailWorker: ReturnType<typeof startTicketEmailWorker> | null = null;
   if (env.NODE_ENV !== "production") {
     initialWorker = startInitialSyncWorker();
     incrementalWorker = startCatalogIncrementalWorker();
+    ticketWorker = startTicketUploadWorker();
+    refundWorker = startRefundUploadWorker();
+    emailWorker = startTicketEmailWorker();
     const count = await registerAllExistingRepeatables();
     app.log.info(`workers arrancados embedded · ${count} repeatable(s) registrados`);
   }
@@ -94,6 +109,9 @@ async function main() {
     await app.close();
     if (initialWorker) await initialWorker.close();
     if (incrementalWorker) await incrementalWorker.close();
+    if (ticketWorker) await ticketWorker.close();
+    if (refundWorker) await refundWorker.close();
+    if (emailWorker) await emailWorker.close();
     await shutdown();
     process.exit(0);
   };

@@ -21,7 +21,7 @@ export function ShiftOpenScreen({
   cashierEmail: string;
   registerName: string;
   storeName: string;
-  onOpened: () => void;
+  onOpened: (shift: { id: string; openedAt: string; cashOpening: string }) => void;
   onBack: () => void;
 }) {
   const [amount, setAmount] = useState<string>("0,00");
@@ -36,11 +36,11 @@ export function ShiftOpenScreen({
     setBusy(true);
     setError(null);
     try {
-      await apiWithCashier<ShiftOpenResponse>("/shift/open", {
+      const res = await apiWithCashier<ShiftOpenResponse>("/shift/open", {
         method: "POST",
         body: { cashOpening: parsed },
       });
-      onOpened();
+      onOpened(res.shift);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Error inesperado");
     } finally {

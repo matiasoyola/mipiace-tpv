@@ -19,6 +19,39 @@ interface MethodTotalsBody {
 }
 
 export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
+  // Devuelve el turno abierto en la caja del cajero, si existe. Lo usa
+  // la PWA en B4 para resolver `shiftId` cuando vuelve a la SalePage
+  // tras abrir/reanudar el turno — sin él, B3 pintaba "pending-refresh".
+  app.get(
+    "/shift/current",
+    { preHandler: requireCashierSession },
+    async (request) => {
+      const cashier = request.cashier!;
+      const prisma = getPrisma();
+      const shift = await prisma.shift.findFirst({
+        where: { registerId: cashier.rid, closedAt: null },
+        orderBy: { openedAt: "desc" },
+        select: {
+          id: true,
+          openedAt: true,
+          lastActivityAt: true,
+          cashOpening: true,
+          userId: true,
+        },
+      });
+      if (!shift) return { shift: null };
+      return {
+        shift: {
+          id: shift.id,
+          openedAt: shift.openedAt.toISOString(),
+          lastActivityAt: shift.lastActivityAt.toISOString(),
+          cashOpening: shift.cashOpening.toString(),
+          userId: shift.userId,
+        },
+      };
+    },
+  );
+
   app.post(
     "/shift/open",
     {
@@ -216,13 +249,39 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
-      // Cálculo de teóricos. En B3 los tickets aún no existen — todo a 0.
-      const cashTheoretical = 0; // se completa en B4 con ticket_payments.
+      // Cálculo de teóricos a partir de los ticket_payments del turno
+      // (B4). B3 los dejaba en 0 porque no había tickets reales; ahora
+      // sí. El descuadre = real − teórico aplica sólo a CASH; el resto
+      // se reporta como "diferencia frente al teórico" en el Z, sin
+      // bloquear el cierre.
+      const paymentTotals = await prisma.ticketPayment.groupBy({
+        by: ["method"],
+        where: { ticket: { shiftId: shift.id } },
+        _sum: { amount: true },
+      });
+      const theoreticalByMethod = new Map<string, number>();
+      for (const row of paymentTotals) {
+        theoreticalByMethod.set(row.method, Number(row._sum.amount ?? 0));
+      }
+      const cashTheoretical =
+        (theoreticalByMethod.get("CASH") ?? 0) + Number(shift.cashOpening);
       const methodTotals = [
-        { method: "CASH", theoretical: 0, counted: body.cashCounted },
-        { method: "CARD", theoretical: 0, counted: body.methodTotals.CARD },
-        { method: "BIZUM", theoretical: 0, counted: body.methodTotals.BIZUM },
-        { method: "VOUCHER", theoretical: 0, counted: body.methodTotals.VOUCHER },
+        { method: "CASH", theoretical: cashTheoretical, counted: body.cashCounted },
+        {
+          method: "CARD",
+          theoretical: theoreticalByMethod.get("CARD") ?? 0,
+          counted: body.methodTotals.CARD,
+        },
+        {
+          method: "BIZUM",
+          theoretical: theoreticalByMethod.get("BIZUM") ?? 0,
+          counted: body.methodTotals.BIZUM,
+        },
+        {
+          method: "VOUCHER",
+          theoretical: theoreticalByMethod.get("VOUCHER") ?? 0,
+          counted: body.methodTotals.VOUCHER,
+        },
       ];
 
       const closedAt = new Date();

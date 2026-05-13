@@ -253,22 +253,18 @@ function GenerateCodeModal({
   const [generated, setGenerated] = useState<{ code: string; expiresAt: string } | null>(null);
 
   useEffect(() => {
-    // El admin no tiene endpoint público de `/admin/registers` aún.
-    // Mientras tanto, derivamos de los dispositivos actuales — cada
-    // device referencia un register. Cuando B4 traiga gestión de
-    // tiendas, este modal usará el endpoint dedicado.
-    api<{ devices: DeviceRow[] }>("/admin/devices").then((res) => {
-      const seen = new Map<string, RegisterRow>();
-      for (const d of res.devices) {
-        if (!seen.has(d.registerId)) {
-          seen.set(d.registerId, {
-            id: d.registerId,
-            name: d.registerName,
-            storeName: d.storeName,
-          });
-        }
-      }
-      const arr = Array.from(seen.values());
+    // B4 introdujo `/admin/registers` con la gestión de Tiendas. Antes
+    // (B3) derivábamos del listado de devices; eso queda obsoleto porque
+    // permitía crear pairings sólo para cajas que ya tenían device, y
+    // no servía para emparejar la primera tablet.
+    api<{
+      registers: Array<{ id: string; name: string; storeName: string }>;
+    }>("/admin/registers").then((res) => {
+      const arr = res.registers.map((r) => ({
+        id: r.id,
+        name: r.name,
+        storeName: r.storeName,
+      }));
       setRegisters(arr);
       if (arr.length === 1) setRegisterId(arr[0]!.id);
     });
@@ -353,8 +349,11 @@ function GenerateCodeModal({
               <div className="text-[13px] text-slate-400 mb-5">Cargando…</div>
             ) : registers.length === 0 ? (
               <div className="text-[13px] text-slate-500 bg-mipiace-stone rounded-xl p-4 mb-5">
-                No hay cajas creadas todavía. La gestión de tiendas llega en B4 —
-                mientras tanto, los registers se crean durante el sync inicial.
+                No hay cajas creadas todavía. Crea una desde{" "}
+                <a className="text-mipiace-coral-dark font-medium hover:underline" href="/admin/stores">
+                  Tiendas
+                </a>{" "}
+                antes de emparejar dispositivos.
               </div>
             ) : (
               <div className="relative mb-5">

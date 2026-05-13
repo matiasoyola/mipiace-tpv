@@ -29,9 +29,10 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  // B3 activa Dispositivos / Cajeros / Seguridad. Tiendas y Holded
-  // siguen pendientes — son B4+.
-  { to: "/admin/stores", label: "Tiendas", icon: Building2, disabled: true },
+  // B4 activa Tiendas. Holded sigue grisado — su contenido (config
+  // de num_serie por caja, payment methods) se reparte ahora entre la
+  // sección Tiendas y la página Mi cuenta.
+  { to: "/admin/stores", label: "Tiendas", icon: Building2 },
   { to: "/admin/devices", label: "Dispositivos", icon: Calculator },
   { to: "/admin/cashiers", label: "Cajeros", icon: Users },
   { to: "/admin/products", label: "Productos", icon: Package },

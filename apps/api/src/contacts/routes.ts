@@ -28,7 +28,7 @@ import {
   type HoldedContact,
 } from "@mipiacetpv/holded-client";
 
-import { requireOwner } from "../auth/middleware.js";
+import { requireOwnerOrCashier } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
 import { decryptSecret } from "../crypto.js";
 import { loadEnv } from "../env.js";
@@ -103,7 +103,7 @@ export async function registerContactsRoutes(app: FastifyInstance): Promise<void
   app.get(
     "/contacts/search",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrCashier,
       schema: {
         querystring: {
           type: "object",
@@ -198,7 +198,7 @@ export async function registerContactsRoutes(app: FastifyInstance): Promise<void
   app.post(
     "/contacts",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrCashier,
       schema: {
         body: {
           type: "object",

@@ -15,7 +15,7 @@ import { useDeviceBootstrap } from "./hooks/useDeviceBootstrap.js";
 import { useInactivityLogout } from "./hooks/useInactivityLogout.js";
 import { PairScreen } from "./pages/PairScreen.js";
 import { PinScreen, type CashierLoginResponse } from "./pages/PinScreen.js";
-import { ShiftActiveScreen } from "./pages/ShiftActiveScreen.js";
+import { SalePage } from "./pages/SalePage.js";
 import { ShiftForceCloseScreen } from "./pages/ShiftForceCloseScreen.js";
 import { ShiftOpenScreen } from "./pages/ShiftOpenScreen.js";
 import { clearCashierSession } from "./storage.js";
@@ -89,18 +89,11 @@ export function App() {
           cashierEmail={cashier.cashier.email}
           registerName={register.name}
           storeName={store.name}
-          onOpened={() => {
-            // B4 traerá GET /shift/current; hasta entonces marcamos
-            // como activo con datos provisionales que la pantalla
-            // de venta refrescará al montarse.
+          onOpened={(shift) => {
             setCashier({
               kind: "active",
               cashier: cashier.cashier,
-              shift: {
-                id: "pending-refresh",
-                openedAt: new Date().toISOString(),
-                cashOpening: "0,00",
-              },
+              shift,
             });
           }}
           onBack={() => {
@@ -109,27 +102,29 @@ export function App() {
           }}
         />
       ) : cashier.kind === "active" ? (
-        <ShiftActiveScreen
+        <SalePage
           shiftId={cashier.shift.id}
-          cashOpening={cashier.shift.cashOpening}
-          openedAt={cashier.shift.openedAt}
           cashierEmail={cashier.cashier.email}
           cashierRole={cashier.cashier.role}
           registerName={register.name}
+          registerId={register.id}
           storeName={store.name}
-          autoLogoutMinutes={tenant.cashierAutoLogoutMinutes}
-          onClosed={() =>
-            setCashier({ kind: "needsShiftOpen", cashier: cashier.cashier })
-          }
           onLogoutCashier={async () => {
             try {
               await apiWithCashier("/shift/cashier-logout", { method: "POST", body: {} });
             } catch {
-              // El backend invalida la sesión al expirar el token; si
-              // falla en red ignoramos. Lo importante es limpiar local.
+              /* token expira solo */
             }
             clearCashierSession();
             setCashier({ kind: "needsLogin" });
+          }}
+          onCloseShift={async () => {
+            // El cierre real va por `ShiftActiveScreen` que sigue
+            // sirviendo de fallback con modal. Aquí simplemente
+            // delegamos: rebotar al sub-flujo "needsShiftOpen" deja al
+            // cajero en pantalla de apertura del siguiente turno, que
+            // es exactamente lo que el cierre normal produce.
+            setCashier({ kind: "needsShiftOpen", cashier: cashier.cashier });
           }}
         />
       ) : null}

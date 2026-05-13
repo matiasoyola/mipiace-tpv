@@ -189,24 +189,30 @@ model User {
   createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   lastLoginAt            DateTime? @map("last_login_at") @db.Timestamptz()
 
-  tenant       Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  shifts       Shift[]              @relation("ShiftOpenedBy")
-  closedShifts Shift[]              @relation("ShiftClosedBy")
-  tickets      Ticket[]
-  pairingCodes PairingCode[]
-  resetTokens  PasswordResetToken[]
+  tenant         Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  shifts         Shift[]              @relation("ShiftOpenedBy")
+  closedShifts   Shift[]              @relation("ShiftClosedBy")
+  tickets        Ticket[]
+  pairingCodes   PairingCode[]
+  resetTokens    PasswordResetToken[]
+  refunds        Refund[]
+  emailJobsAsked TicketEmailJob[]
 
   @@index([tenantId])
   @@map("users")
 }
 
 model Store {
-  id                String   @id @default(uuid()) @db.Uuid
-  tenantId          String   @map("tenant_id") @db.Uuid
+  id                String    @id @default(uuid()) @db.Uuid
+  tenantId          String    @map("tenant_id") @db.Uuid
   name              String
-  fiscalAddress     Json?    @map("fiscal_address")
-  warehouseHoldedId String?  @map("warehouse_holded_id")
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  fiscalAddress     Json?     @map("fiscal_address")
+  warehouseHoldedId String?   @map("warehouse_holded_id")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  // Soft-delete (B4 §0.2). Las FKs a Register/Shift/Ticket son Restrict
+  // — borrar duro rompería histórico fiscal. `deletedAt != null` saca la
+  // tienda del listado pero preserva todo lo demás.
+  deletedAt         DateTime? @map("deleted_at") @db.Timestamptz()
 
   tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   registers Register[]
@@ -219,22 +225,25 @@ model Store {
 // dispositivo: para vender necesita además uno o más `device`
 // emparejados (§3.2).
 model Register {
-  id             String   @id @default(uuid()) @db.Uuid
-  storeId        String   @map("store_id") @db.Uuid
+  id             String    @id @default(uuid()) @db.Uuid
+  storeId        String    @map("store_id") @db.Uuid
   name           String
   // Serie Holded para los salesreceipt de esta caja. Permite numeración
   // fiscal separada por caja. Nullable: puede crearse sin asignarla y
   // configurarla después.
-  numSerieHolded String?  @map("num_serie_holded")
-  ticketCounter  Int      @default(0) @map("ticket_counter")
-  printerConfig  Json?    @map("printer_config")
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  numSerieHolded String?   @map("num_serie_holded")
+  ticketCounter  Int       @default(0) @map("ticket_counter")
+  printerConfig  Json?     @map("printer_config")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  // Soft-delete (B4 §0.2). Igual que Store.
+  deletedAt      DateTime? @map("deleted_at") @db.Timestamptz()
 
   store        Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
   devices      Device[]
   pairingCodes PairingCode[]
   shifts       Shift[]
   tickets      Ticket[]
+  refunds      Refund[]
 
   @@index([storeId])
   @@map("registers")
@@ -417,6 +426,7 @@ model Shift {
   user     User     @relation("ShiftOpenedBy", fields: [userId], references: [id], onDelete: Restrict)
   closedBy User?    @relation("ShiftClosedBy", fields: [closedByUserId], references: [id], onDelete: Restrict)
   tickets  Ticket[]
+  refunds  Refund[]
 
   @@index([registerId, openedAt])
   @@index([registerId, closedAt])
@@ -424,55 +434,89 @@ model Shift {
 }
 
 model Ticket {
-  id               String       @id @default(uuid()) @db.Uuid
-  tenantId         String       @map("tenant_id") @db.Uuid
-  registerId       String       @map("register_id") @db.Uuid
-  shiftId          String       @map("shift_id") @db.Uuid
-  userId           String       @map("user_id") @db.Uuid
-  internalNumber   String       @map("internal_number")
+  id                  String       @id @default(uuid()) @db.Uuid
+  tenantId            String       @map("tenant_id") @db.Uuid
+  registerId          String       @map("register_id") @db.Uuid
+  shiftId             String       @map("shift_id") @db.Uuid
+  userId              String       @map("user_id") @db.Uuid
+  internalNumber      String       @map("internal_number")
   // UUID v4 generado en el front al cobrar. Llave de idempotencia hacia
   // Holded. Nunca se regenera.
-  externalId       String       @unique @map("external_id") @db.Uuid
-  contactHoldedId  String?      @map("contact_holded_id")
-  status           TicketStatus @default(DRAFT)
-  total            Decimal      @db.Decimal(10, 2)
-  totalTax         Decimal      @map("total_tax") @db.Decimal(10, 2)
-  totalDiscount    Decimal      @map("total_discount") @db.Decimal(10, 2)
-  holdedDocumentId String?      @map("holded_document_id")
-  holdedPdfUrl     String?      @map("holded_pdf_url")
-  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz()
-  paidAt           DateTime?    @map("paid_at") @db.Timestamptz()
-  syncedAt         DateTime?    @map("synced_at") @db.Timestamptz()
-  syncError        Json?        @map("sync_error")
+  externalId          String       @unique @map("external_id") @db.Uuid
+  contactHoldedId     String?      @map("contact_holded_id")
+  status              TicketStatus @default(DRAFT)
+  total               Decimal      @db.Decimal(10, 2)
+  totalTax            Decimal      @map("total_tax") @db.Decimal(10, 2)
+  totalDiscount       Decimal      @map("total_discount") @db.Decimal(10, 2)
+  // Texto libre de la venta. Se imprime en el ticket y se concatena a
+  // las `notes` Holded después del marcador `TPV-uuid:` (§1.3).
+  notes               String?
+  // Efectivo recibido (para cálculo de cambio en histórico). Nullable
+  // si no hubo efectivo en el cobro.
+  cashAmount          Decimal?     @map("cash_amount") @db.Decimal(10, 2)
+  holdedDocumentId    String?      @map("holded_document_id")
+  // Numeración fiscal asignada por Holded tras el `approveDoc:true`.
+  // Cara visible al cliente; se imprime en el ticket cuando llega.
+  holdedDocNumber     String?      @map("holded_doc_number")
+  holdedPdfUrl        String?      @map("holded_pdf_url")
+  // Intents post-cobro. La impresión real es B5; en B4 sólo persistimos
+  // la decisión del cajero.
+  printIntent         Boolean      @default(true) @map("print_intent")
+  emailIntent         String?      @map("email_intent")
+  // Timestamp del momento en que el cajero pulsa "Imprimir ticket
+  // regalo" (§5.2). Nullable; sólo se rellena si se solicitó.
+  giftReceiptIntentAt DateTime?    @map("gift_receipt_intent_at") @db.Timestamptz()
+  createdAt           DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+  paidAt              DateTime?    @map("paid_at") @db.Timestamptz()
+  syncedAt            DateTime?    @map("synced_at") @db.Timestamptz()
+  syncError           Json?        @map("sync_error")
 
-  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  register Register        @relation(fields: [registerId], references: [id], onDelete: Restrict)
-  shift    Shift           @relation(fields: [shiftId], references: [id], onDelete: Restrict)
-  user     User            @relation(fields: [userId], references: [id], onDelete: Restrict)
-  lines    TicketLine[]
-  payments TicketPayment[]
-  refunds  Refund[]
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  register  Register         @relation(fields: [registerId], references: [id], onDelete: Restrict)
+  shift     Shift            @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Restrict)
+  lines     TicketLine[]
+  payments  TicketPayment[]
+  refunds   Refund[]
+  emailJobs TicketEmailJob[]
 
   @@unique([registerId, internalNumber])
   @@index([tenantId, status])
   @@index([tenantId, createdAt])
+  @@index([registerId, createdAt])
+  @@index([shiftId])
+  @@index([externalId])
   @@map("tickets")
 }
 
 model TicketLine {
-  id           String  @id @default(uuid()) @db.Uuid
-  ticketId     String  @map("ticket_id") @db.Uuid
-  productId    String? @map("product_id") @db.Uuid
-  variantId    String? @map("variant_id") @db.Uuid
+  id              String  @id @default(uuid()) @db.Uuid
+  ticketId        String  @map("ticket_id") @db.Uuid
+  productId       String? @map("product_id") @db.Uuid
+  variantId       String? @map("variant_id") @db.Uuid
+  // Snapshot del `holdedProductId` del catálogo en el momento del cobro.
+  // El worker NO toca `Product` para construir el payload: lee el
+  // snapshot de aquí, así si Holded ha borrado el producto entre cobro
+  // y envío al menos sabemos qué intentó vender. Nullable para líneas
+  // libres (TPV-OTROS-*).
+  holdedProductId String? @map("holded_product_id")
+  // SKU canónico que se envía a Holded en el item. Spike §05.B: es la
+  // llave de resolución del producto. NUNCA enviar productId aquí.
+  sku             String
   // Copia del nombre en el momento del cobro: cambiar el producto en
   // Holded no debe alterar tickets históricos.
-  nameSnapshot String  @map("name_snapshot")
-  units        Decimal @db.Decimal(10, 3)
-  unitPrice    Decimal @map("unit_price") @db.Decimal(10, 2)
-  discountPct  Decimal @default(0) @map("discount_pct") @db.Decimal(5, 2)
-  taxRate      Decimal @map("tax_rate") @db.Decimal(5, 2)
-  subtotal     Decimal @db.Decimal(10, 2)
-  total        Decimal @db.Decimal(10, 2)
+  nameSnapshot    String  @map("name_snapshot")
+  units           Decimal @db.Decimal(10, 3)
+  unitPrice       Decimal @map("unit_price") @db.Decimal(10, 2)
+  discountPct     Decimal @default(0) @map("discount_pct") @db.Decimal(5, 2)
+  taxRate         Decimal @map("tax_rate") @db.Decimal(5, 2)
+  subtotal        Decimal @db.Decimal(10, 2)
+  total           Decimal @db.Decimal(10, 2)
+  // Array de strings con los modificadores aplicados (bar/cafetería:
+  // "Sin azúcar", "Sin postre"). Vive sólo en el TPV — NO se envía a
+  // Holded (núcleo §6.2). Si el ticket se reimprime, se vuelven a
+  // mostrar; si se devuelve, se reusan en el RefundLine.
+  modifiers       Json?
 
   ticket      Ticket          @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   product     Product?        @relation(fields: [productId], references: [id])
@@ -497,21 +541,38 @@ model TicketPayment {
 }
 
 model Refund {
-  id               String       @id @default(uuid()) @db.Uuid
-  tenantId         String       @map("tenant_id") @db.Uuid
-  originalTicketId String       @map("original_ticket_id") @db.Uuid
-  internalNumber   String       @map("internal_number")
-  externalId       String       @unique @map("external_id") @db.Uuid
-  status           TicketStatus @default(DRAFT)
+  id               String         @id @default(uuid()) @db.Uuid
+  tenantId         String         @map("tenant_id") @db.Uuid
+  originalTicketId String         @map("original_ticket_id") @db.Uuid
+  userId           String?        @map("user_id") @db.Uuid
+  registerId       String?        @map("register_id") @db.Uuid
+  shiftId          String?        @map("shift_id") @db.Uuid
+  internalNumber   String         @map("internal_number")
+  externalId       String         @unique @map("external_id") @db.Uuid
+  status           TicketStatus   @default(DRAFT)
   reason           String?
-  holdedDocumentId String?      @map("holded_document_id")
-  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+  // Método de reembolso (por defecto, el mismo del cobro original).
+  method           PaymentMethod?
+  // Snapshot del total devuelto (con IVA). Se calcula sumando las
+  // refund_lines. Se persiste explícito para que el worker no necesite
+  // re-calcular ni el front re-pedir las líneas para listar.
+  total            Decimal        @db.Decimal(10, 2)
+  totalTax         Decimal        @map("total_tax") @db.Decimal(10, 2)
+  holdedDocumentId String?        @map("holded_document_id")
+  holdedDocNumber  String?        @map("holded_doc_number")
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz()
+  syncedAt         DateTime?      @map("synced_at") @db.Timestamptz()
+  syncError        Json?          @map("sync_error")
 
   tenant         Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   originalTicket Ticket       @relation(fields: [originalTicketId], references: [id], onDelete: Restrict)
+  user           User?        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  register       Register?    @relation(fields: [registerId], references: [id], onDelete: Restrict)
+  shift          Shift?       @relation(fields: [shiftId], references: [id], onDelete: Restrict)
   lines          RefundLine[]
 
   @@index([originalTicketId])
+  @@index([tenantId, status])
   @@map("refunds")
 }
 
@@ -519,6 +580,15 @@ model RefundLine {
   id           String  @id @default(uuid()) @db.Uuid
   refundId     String  @map("refund_id") @db.Uuid
   ticketLineId String  @map("ticket_line_id") @db.Uuid
+  // Snapshot del nombre/sku/precio de la línea original. El worker
+  // construye el payload con estos valores; si la línea original
+  // cambia o el producto desaparece de Holded, la devolución
+  // sigue siendo reproducible.
+  nameSnapshot String  @map("name_snapshot")
+  sku          String
+  unitPrice    Decimal @map("unit_price") @db.Decimal(10, 2)
+  taxRate      Decimal @map("tax_rate") @db.Decimal(5, 2)
+  discountPct  Decimal @default(0) @map("discount_pct") @db.Decimal(5, 2)
   units        Decimal @db.Decimal(10, 3)
   total        Decimal @db.Decimal(10, 2)
 
@@ -571,6 +641,33 @@ model HoldedUpload {
 
   @@index([tenantId, status])
   @@map("holded_uploads")
+}
+
+// Cola de envío del PDF del ticket por email (§4 del prompt B4).
+// El endpoint `POST /tickets/:id/resend-email` crea una fila y encola
+// un job BullMQ; el worker descarga el PDF de Holded (cuando el ticket
+// esté `SYNCED`), lo manda al `to_email` y marca `sent_at`. Reintento
+// exponencial; ante fallo persistente, queda `status=FAILED` con
+// `last_error` poblado.
+model TicketEmailJob {
+  id                String    @id @default(uuid()) @db.Uuid
+  ticketId          String    @map("ticket_id") @db.Uuid
+  toEmail           String    @map("to_email")
+  requestedByUserId String    @map("requested_by_user_id") @db.Uuid
+  attempts          Int       @default(0)
+  lastError         Json?     @map("last_error")
+  // PENDING | DONE | FAILED. String libre — sin enum porque va a la cola
+  // BullMQ y se desacopla del ciclo de Prisma migrate.
+  status            String    @default("PENDING")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  sentAt            DateTime? @map("sent_at") @db.Timestamptz()
+
+  ticket          Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  requestedByUser User   @relation(fields: [requestedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([ticketId])
+  @@index([status])
+  @@map("ticket_email_jobs")
 }
 
 // Token de recuperación de contraseña del propietario (§17.6). El token

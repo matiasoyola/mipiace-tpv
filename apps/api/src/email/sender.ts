@@ -11,6 +11,11 @@ export interface SentEmail {
   subject: string;
   text: string;
   html?: string;
+  attachments?: Array<{
+    filename: string;
+    content: Buffer;
+    contentType?: string;
+  }>;
 }
 
 export interface EmailSender {
@@ -20,9 +25,14 @@ export interface EmailSender {
 export class ConsoleEmailSender implements EmailSender {
   async send(email: SentEmail): Promise<void> {
     const banner = "─".repeat(64);
+    const attach = email.attachments?.length
+      ? `\nattachments: ${email.attachments
+          .map((a) => `${a.filename} (${a.content.length}B)`)
+          .join(", ")}`
+      : "";
     // eslint-disable-next-line no-console
     console.log(
-      `\n${banner}\n[email] to=${email.to}\nsubject=${email.subject}\n${banner}\n${email.text}\n${banner}\n`,
+      `\n${banner}\n[email] to=${email.to}\nsubject=${email.subject}${attach}\n${banner}\n${email.text}\n${banner}\n`,
     );
   }
 }
@@ -54,6 +64,11 @@ export class SmtpEmailSender implements EmailSender {
       subject: email.subject,
       text: email.text,
       html: email.html,
+      attachments: email.attachments?.map((a) => ({
+        filename: a.filename,
+        content: a.content,
+        contentType: a.contentType,
+      })),
     });
   }
 }
