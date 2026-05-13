@@ -76,9 +76,46 @@ const fakePrisma = {
   },
 } as const;
 
+// Fake Redis para soportar el rate-limit del login (B3 §17.1).
+const redisStore = new Map<string, { value: string; expiresAt: number }>();
+const fakeRedis = {
+  ping: async () => "PONG",
+  incr: vi.fn(async (key: string) => {
+    const existing = redisStore.get(key);
+    const fresh = !existing || existing.expiresAt <= Date.now();
+    const value = fresh ? 1 : Number(existing!.value) + 1;
+    redisStore.set(key, {
+      value: String(value),
+      expiresAt: existing?.expiresAt ?? Date.now() + 24 * 60 * 60 * 1000,
+    });
+    return value;
+  }),
+  expire: vi.fn(async () => 1),
+  ttl: vi.fn(async (key: string) => {
+    const e = redisStore.get(key);
+    if (!e) return -2;
+    const ms = e.expiresAt - Date.now();
+    return ms <= 0 ? -2 : Math.ceil(ms / 1000);
+  }),
+  set: vi.fn(async (key: string, value: string, _ex: string, seconds: number) => {
+    redisStore.set(key, { value, expiresAt: Date.now() + seconds * 1000 });
+    return "OK";
+  }),
+  get: vi.fn(async (key: string) => {
+    const e = redisStore.get(key);
+    if (!e || e.expiresAt <= Date.now()) return null;
+    return e.value;
+  }),
+  del: vi.fn(async (...keys: string[]) => {
+    let c = 0;
+    for (const k of keys) if (redisStore.delete(k)) c++;
+    return c;
+  }),
+};
+
 vi.mock("../src/context.js", () => ({
   getPrisma: () => fakePrisma,
-  getRedis: () => ({ ping: async () => "PONG" }),
+  getRedis: () => fakeRedis,
   shutdown: async () => undefined,
 }));
 

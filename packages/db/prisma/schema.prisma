@@ -82,39 +82,50 @@ enum InitialSyncStatus {
 // ── Multi-tenant raíz ─────────────────────────────────────────────────
 
 model Tenant {
-  id                       String            @id @default(uuid()) @db.Uuid
-  name                     String
-  holdedAccountId          String?           @map("holded_account_id")
-  holdedAuthMode           HoldedAuthMode    @default(API_KEY) @map("holded_auth_mode")
+  id                             String            @id @default(uuid()) @db.Uuid
+  name                           String
+  holdedAccountId                String?           @map("holded_account_id")
+  holdedAuthMode                 HoldedAuthMode    @default(API_KEY) @map("holded_auth_mode")
   // Tokens y API keys siempre cifrados con AES-GCM antes de persistir.
-  holdedApiKeyCiphertext   String?           @map("holded_api_key_ciphertext")
-  holdedOauthAccess        String?           @map("holded_oauth_access")
-  holdedOauthRefresh       String?           @map("holded_oauth_refresh")
-  holdedOauthExpiresAt     DateTime?         @map("holded_oauth_expires_at") @db.Timestamptz()
+  holdedApiKeyCiphertext         String?           @map("holded_api_key_ciphertext")
+  holdedOauthAccess              String?           @map("holded_oauth_access")
+  holdedOauthRefresh             String?           @map("holded_oauth_refresh")
+  holdedOauthExpiresAt           DateTime?         @map("holded_oauth_expires_at") @db.Timestamptz()
   // Datos fiscales agregados (NIF, razón social, dirección) extraídos
   // del almacén default o introducidos por el propietario. Van al pie
   // de cada ticket impreso.
-  fiscalProfile            Json?             @map("fiscal_profile")
+  fiscalProfile                  Json?             @map("fiscal_profile")
   // Estado del sync inicial post-onboarding. El admin pollea
   // GET /onboarding/sync-status para mostrar la barra de progreso.
-  initialSyncStatus        InitialSyncStatus @default(PENDING) @map("initial_sync_status")
-  initialSyncStartedAt     DateTime?         @map("initial_sync_started_at") @db.Timestamptz()
-  initialSyncCompletedAt   DateTime?         @map("initial_sync_completed_at") @db.Timestamptz()
+  initialSyncStatus              InitialSyncStatus @default(PENDING) @map("initial_sync_status")
+  initialSyncStartedAt           DateTime?         @map("initial_sync_started_at") @db.Timestamptz()
+  initialSyncCompletedAt         DateTime?         @map("initial_sync_completed_at") @db.Timestamptz()
   // Stats acumulados: productsCount, servicesCount, warehousesCount,
   // taxesCount, autoSkuFixed, autoSkuNeedsReview, wildcardsCreated,
   // wildcardsReused, errors[]. Estructura libre; el admin la pinta.
-  initialSyncStats         Json?             @map("initial_sync_stats")
+  initialSyncStats               Json?             @map("initial_sync_stats")
   // Última vez que el sync incremental (B2 §2) corrió con éxito sobre
   // este tenant. El cron de 15 min lo actualiza; el admin lo muestra
   // como "última sincronización hace X min".
-  lastIncrementalSyncAt    DateTime?         @map("last_incremental_sync_at") @db.Timestamptz()
+  lastIncrementalSyncAt          DateTime?         @map("last_incremental_sync_at") @db.Timestamptz()
   // Stats del último sync incremental: { productsSeen, productsUpdated,
   // orphansMarked, autoSkuFixed, autoSkuNeedsReview, durationMs,
   // errors[] }. Mismo enfoque que `initialSyncStats` — estructura
   // libre, el admin la renderiza.
-  lastIncrementalSyncStats Json?             @map("last_incremental_sync_stats")
-  createdAt                DateTime          @default(now()) @map("created_at") @db.Timestamptz()
-  updatedAt                DateTime          @updatedAt @map("updated_at") @db.Timestamptz()
+  lastIncrementalSyncStats       Json?             @map("last_incremental_sync_stats")
+  // Minutos sin actividad antes de que la PWA cierre la sesión del cajero
+  // (§17.2). El turno sigue abierto; sólo se cae la sesión. Rango sensato
+  // 5–60 min.
+  cashierAutoLogoutMinutes       Int               @default(10) @map("cashier_auto_logout_minutes")
+  // Si true, el cierre forzado de un turno colgado de otro cajero exige
+  // PIN de encargado cuando el cajero actual no lo es. Default true.
+  requireManagerPinForForceClose Boolean           @default(true) @map("require_manager_pin_for_force_close")
+  // Si true, se envía email al propietario cuando un device nuevo se
+  // empareja o cuando un device conocido aparece desde un país distinto
+  // (§17.4). Default true.
+  deviceNewLoginAlertEnabled     Boolean           @default(true) @map("device_new_login_alert_enabled")
+  createdAt                      DateTime          @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt                      DateTime          @updatedAt @map("updated_at") @db.Timestamptz()
 
   users         User[]
   stores        Store[]
@@ -153,25 +164,37 @@ model TenantTax {
 }
 
 model User {
-  id           String    @id @default(uuid()) @db.Uuid
-  tenantId     String    @map("tenant_id") @db.Uuid
-  email        String    @unique
-  passwordHash String?   @map("password_hash")
+  id                     String    @id @default(uuid()) @db.Uuid
+  tenantId               String    @map("tenant_id") @db.Uuid
+  email                  String    @unique
+  passwordHash           String?   @map("password_hash")
   // PIN sólo lo tienen cajeros/encargados que tocan el TPV físico.
-  pinHash      String?   @map("pin_hash")
-  role         UserRole
+  pinHash                String?   @map("pin_hash")
+  role                   UserRole
   // Incrementa con `POST /auth/logout-everywhere` (B2 §4.3). Los
   // refresh tokens llevan este `tv` en su payload; si no coincide con
   // el de BD, el refresh se rechaza. Permite invalidación masiva sin
   // mantener una blacklist por jti.
-  tokenVersion Int       @default(0) @map("token_version")
-  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz()
-  lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz()
+  tokenVersion           Int       @default(0) @map("token_version")
+  // 2FA TOTP (§17.3). Secret AES-GCM versionado (`v1:` prefix) con la
+  // misma clave que la API key Holded. `twoFactorEnabledAt` actúa como
+  // flag y timestamp: NULL → 2FA off; valor → on.
+  twoFactorSecret        String?   @map("two_factor_secret")
+  twoFactorEnabledAt     DateTime? @map("two_factor_enabled_at") @db.Timestamptz()
+  // Array JSON de objetos `{ hash: <argon2id>, usedAt: ISO|null }`.
+  // Códigos de un solo uso; cuando se usa uno se marca `usedAt` (no se
+  // borra para que el contador del admin pueda mostrar "X/10 sin
+  // usar").
+  twoFactorRecoveryCodes Json?     @map("two_factor_recovery_codes")
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  lastLoginAt            DateTime? @map("last_login_at") @db.Timestamptz()
 
-  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  shifts       Shift[]
+  tenant       Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  shifts       Shift[]              @relation("ShiftOpenedBy")
+  closedShifts Shift[]              @relation("ShiftClosedBy")
   tickets      Ticket[]
   pairingCodes PairingCode[]
+  resetTokens  PasswordResetToken[]
 
   @@index([tenantId])
   @@map("users")
@@ -220,17 +243,24 @@ model Register {
 // Navegador físico emparejado a una caja. El token de larga duración
 // vive en localStorage del navegador; aquí guardamos sólo su hash.
 model Device {
-  id              String    @id @default(uuid()) @db.Uuid
-  tenantId        String    @map("tenant_id") @db.Uuid
-  registerId      String    @map("register_id") @db.Uuid
-  name            String?
-  pairedAt        DateTime  @default(now()) @map("paired_at") @db.Timestamptz()
-  lastSeenAt      DateTime? @map("last_seen_at") @db.Timestamptz()
-  userAgent       String?   @map("user_agent")
-  deviceTokenHash String    @unique @map("device_token_hash")
+  id                 String    @id @default(uuid()) @db.Uuid
+  tenantId           String    @map("tenant_id") @db.Uuid
+  registerId         String    @map("register_id") @db.Uuid
+  name               String?
+  pairedAt           DateTime  @default(now()) @map("paired_at") @db.Timestamptz()
+  lastSeenAt         DateTime? @map("last_seen_at") @db.Timestamptz()
+  userAgent          String?   @map("user_agent")
+  deviceTokenHash    String    @unique @map("device_token_hash")
   // Si está revocado, la PWA detecta el rechazo y vuelve a la pantalla
   // de emparejamiento.
-  revokedAt       DateTime? @map("revoked_at") @db.Timestamptz()
+  revokedAt          DateTime? @map("revoked_at") @db.Timestamptz()
+  // ISO 3166-1 alfa-2 del país de la última IP vista (geoip-lite). Se
+  // usa para detectar saltos de país y disparar alerta email (§17.4).
+  lastKnownIpCountry String?   @map("last_known_ip_country")
+  // Timestamp del último email de alerta enviado para este device. Sirve
+  // de antispam — si la IP fluctúa de provincia no se reenvía. Sólo se
+  // dispara primer login, cambio de país y re-aparición tras 30d.
+  lastEmailAlertAt   DateTime? @map("last_email_alert_at") @db.Timestamptz()
 
   tenant           Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   register         Register      @relation(fields: [registerId], references: [id], onDelete: Cascade)
@@ -286,6 +316,11 @@ model Product {
   // Holded silenció el cambio (ADR-010). Sale en la bandeja de
   // revisión del admin. El producto NO es vendible hasta resolverlo.
   needsSkuReview    Boolean     @default(false) @map("needs_sku_review")
+  // Contador de intentos de asignar SKU vía la bandeja (POST
+  // /catalog/sku-review/:id/assign). Se incrementa tanto en éxito como
+  // en silent reject — sirve para mostrar el contador "ha fallado N
+  // veces" en el admin y para escalar a soporte (badge ámbar ≥3).
+  skuReviewAttempts Int         @default(0) @map("sku_review_attempts")
   // True si el TPV puede vender este ítem (sku no vacío y bajos
   // demás filtros). Spike §07.B: producto sin sku → línea inválida.
   sellableViaTpv    Boolean     @default(true) @map("sellable_via_tpv")
@@ -366,15 +401,25 @@ model Shift {
   userId         String    @map("user_id") @db.Uuid
   openedAt       DateTime  @default(now()) @map("opened_at") @db.Timestamptz()
   closedAt       DateTime? @map("closed_at") @db.Timestamptz()
+  // Última actividad observada en el turno. Se actualiza a `now()` en
+  // cada cobro y al hacer cashier-login con `reanudar`. Sirve para
+  // diferenciar "turno reanudable" (mismo día) de "turno colgado" (día
+  // anterior) en la lógica de login (§4 nucleus).
+  lastActivityAt DateTime  @default(now()) @map("last_activity_at") @db.Timestamptz()
   cashOpening    Decimal   @map("cash_opening") @db.Decimal(10, 2)
   cashCounted    Decimal?  @map("cash_counted") @db.Decimal(10, 2)
+  // Quién ejecutó el cierre. Puede ser distinto al `userId` cuando un
+  // cajero cierra un turno colgado de un compañero (§3.5 del prompt).
+  closedByUserId String?   @map("closed_by_user_id") @db.Uuid
   zReportPdfPath String?   @map("z_report_pdf_path")
 
   register Register @relation(fields: [registerId], references: [id], onDelete: Restrict)
-  user     User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  user     User     @relation("ShiftOpenedBy", fields: [userId], references: [id], onDelete: Restrict)
+  closedBy User?    @relation("ShiftClosedBy", fields: [closedByUserId], references: [id], onDelete: Restrict)
   tickets  Ticket[]
 
   @@index([registerId, openedAt])
+  @@index([registerId, closedAt])
   @@map("shifts")
 }
 
@@ -526,4 +571,23 @@ model HoldedUpload {
 
   @@index([tenantId, status])
   @@map("holded_uploads")
+}
+
+// Token de recuperación de contraseña del propietario (§17.6). El token
+// plano se envía sólo por email; en BD guardamos sólo su hash argon2id.
+// TTL 1h, un solo uso. La revocación masiva al confirmar el reset se
+// hace vía `user.tokenVersion += 1`.
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @map("token_hash")
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz()
+  usedAt    DateTime? @map("used_at") @db.Timestamptz()
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
 }

@@ -439,6 +439,55 @@ un rango geográfico distinto al habitual (cambio de provincia / país).
 Es **detección a posteriori**, no preventiva — pero permite al
 propietario reaccionar en minutos.
 
+### 17.6 Recuperación de contraseña
+
+Flujo estándar de password reset para el propietario (no aplica al
+PIN del cajero — el PIN se reasigna desde el admin).
+
+**Backend:**
+
+- Tabla `PasswordResetToken` con `id`, `userId`, `tokenHash` (argon2id
+  del token plano), `expiresAt` (TTL 1 hora), `usedAt` (nullable,
+  single-use).
+- **`POST /auth/password-reset/request`** body `{ email }`. Rate
+  limit 5 intentos / 5 min por email. Genera token aleatorio 32 bytes
+  base64, hash en BD, envía email con link
+  `https://admin.mipiacetpv.tech/admin/reset?token=<plain>`.
+  **Respuesta neutra siempre**: "Si el email existe en nuestra base,
+  te hemos enviado un enlace de recuperación." Nunca revelar si el
+  email existe (evita enumeración de cuentas).
+- **`POST /auth/password-reset/confirm`** body `{ token, newPassword }`.
+  Valida que `tokenHash` matchea, no caducado, no usado. Exige
+  `newPassword.length >= 8`. Actualiza `user.passwordHash` + bumpa
+  `user.tokenVersion` (invalida todas las sesiones existentes — el
+  propietario tendrá que hacer login en todos sus dispositivos tras
+  reset). Marca el token como `usedAt = now()`.
+
+**Frontend admin (3 pantallas nuevas):**
+
+- **`/forgot-password`** — form de email con un único input + botón
+  "Enviar enlace de recuperación". Accesible desde el link
+  "¿Olvidaste tu contraseña?" del login.
+- **Confirmación** — tras pulsar enviar, pantalla "Revisa tu email"
+  con instrucciones. NUNCA confirma ni niega si el email existía.
+- **`/admin/reset?token=...`** — form con `newPassword` +
+  `confirmPassword`. Valida que coincidan y cumplen la longitud
+  mínima. Botón "Actualizar contraseña". En éxito, redirige a
+  `/login` con banner "Contraseña actualizada · inicia sesión de
+  nuevo".
+
+**Email:** mismo `EmailSender` que §17.4 (nodemailer SMTP).
+Plantilla mínima con logo, mensaje en castellano, y link al reset
+con disclaimer "Si no has solicitado este cambio, ignora este email."
+
+**Edge cases:**
+
+- Token caducado → 410 Gone + mensaje "Enlace caducado, solicita
+  uno nuevo."
+- Token ya usado → 410 Gone + mismo mensaje.
+- Email no existe en BD → la `/request` responde igual de neutral, NO
+  envía email pero tampoco lo dice.
+
 ### 17.5 Location lock — diferido a v2
 
 Capa adicional opcional para activar a futuro: el propietario marca las

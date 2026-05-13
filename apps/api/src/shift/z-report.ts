@@ -1,0 +1,107 @@
+import { promises as fs } from "node:fs";
+import path from "node:path";
+
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+
+// Generador minimal del informe Z (PDF). Plantilla rudimentaria: una
+// sola página con cabecera, datos del turno, totales por método de
+// pago, descuadre. Se afinará cuando veamos el primer Z real (decisión
+// pendiente §19.2.3).
+
+export interface ZReportInput {
+  shiftId: string;
+  storeName: string;
+  registerName: string;
+  cashierLabel: string;
+  closedByLabel: string | null;
+  openedAt: Date;
+  closedAt: Date;
+  cashOpening: number;
+  cashCounted: number;
+  cashTheoretical: number;
+  methodTotals: Array<{ method: string; theoretical: number; counted?: number }>;
+  ticketsCount: number;
+  refundsCount: number;
+  syncIssues: { pendingSync: number; failed: number };
+  acceptedSyncFailures: boolean;
+}
+
+const STORAGE_ROOT =
+  process.env.Z_REPORT_STORAGE_ROOT ??
+  path.resolve(process.cwd(), "storage", "z-reports");
+
+function fmtEur(n: number): string {
+  return `${n.toFixed(2).replace(".", ",")} €`;
+}
+
+export async function generateZReportPdf(input: ZReportInput): Promise<string> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([420, 600]); // tamaño aproximado ticket A6-ish.
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+
+  let y = 570;
+  const left = 30;
+  const line = (text: string, opts?: { bold?: boolean; size?: number }) => {
+    page.drawText(text, {
+      x: left,
+      y,
+      size: opts?.size ?? 10,
+      font: opts?.bold ? bold : font,
+      color: rgb(0.1, 0.15, 0.2),
+    });
+    y -= (opts?.size ?? 10) + 4;
+  };
+  const hr = () => {
+    page.drawLine({
+      start: { x: left, y: y + 2 },
+      end: { x: 390, y: y + 2 },
+      thickness: 0.5,
+      color: rgb(0.75, 0.78, 0.82),
+    });
+    y -= 8;
+  };
+
+  line("INFORME Z · MIPIACETPV", { bold: true, size: 14 });
+  hr();
+  line(`Tienda: ${input.storeName}`);
+  line(`Caja: ${input.registerName}`);
+  line(`Cajero: ${input.cashierLabel}`);
+  if (input.closedByLabel && input.closedByLabel !== input.cashierLabel) {
+    line(`Cerrado por: ${input.closedByLabel} (cierre forzado)`, { bold: true });
+  }
+  line(`Apertura: ${input.openedAt.toISOString()}`);
+  line(`Cierre:   ${input.closedAt.toISOString()}`);
+  hr();
+  line(`Fondo inicial:  ${fmtEur(input.cashOpening)}`);
+  line(`Cash teórico:   ${fmtEur(input.cashTheoretical)}`);
+  line(`Cash contado:   ${fmtEur(input.cashCounted)}`);
+  const descuadre = input.cashCounted - input.cashTheoretical;
+  line(`Descuadre:      ${fmtEur(descuadre)}`, { bold: true });
+  hr();
+  line("Totales por método de pago", { bold: true });
+  for (const m of input.methodTotals) {
+    const real = m.counted != null ? ` (contado ${fmtEur(m.counted)})` : "";
+    line(`  ${m.method.padEnd(8)} ${fmtEur(m.theoretical)}${real}`);
+  }
+  hr();
+  line(`Tickets emitidos: ${input.ticketsCount}`);
+  line(`Devoluciones:     ${input.refundsCount}`);
+  if (input.syncIssues.pendingSync > 0 || input.syncIssues.failed > 0) {
+    hr();
+    line("Incidencias de sincronización Holded", { bold: true });
+    line(`  Pendientes: ${input.syncIssues.pendingSync}`);
+    line(`  Fallidas:   ${input.syncIssues.failed}`);
+    if (input.acceptedSyncFailures) {
+      line("Cierre autorizado con incidencias.", { bold: true });
+    }
+  }
+  hr();
+  line(`Shift ID: ${input.shiftId}`, { size: 8 });
+
+  const bytes = await doc.save();
+  await fs.mkdir(STORAGE_ROOT, { recursive: true });
+  const filePath = path.join(STORAGE_ROOT, `${input.shiftId}.pdf`);
+  await fs.writeFile(filePath, bytes);
+  return filePath;
+}

@@ -54,6 +54,19 @@ const Schema = z.object({
     },
   ),
 
+  // ── Email (B3 §17.4 + §17.6) ───────────────────────────────────────
+  // SMTP del remitente de avisos del propietario (nuevo dispositivo,
+  // password reset). En NODE_ENV=development se aceptan vacíos y el
+  // EmailSender cae al ConsoleEmailSender (log a stdout).
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().positive().optional(),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  SMTP_FROM: z.string().optional(),
+  // URL pública del admin. Se usa para construir el link del email de
+  // password reset (`${PUBLIC_ADMIN_URL}/admin/reset?token=…`).
+  PUBLIC_ADMIN_URL: z.string().url().default("http://localhost:5173"),
+
   // ── Spike legacy (apps/tpv-web-spike) ─────────────────────────────
   // Opcionales. Si están presentes el server expone /products y
   // /tickets bajo el modo single-tenant single-key.

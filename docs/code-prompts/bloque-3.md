@@ -10,9 +10,24 @@ Hola Code. Arrancamos B3.
 ## Contexto
 
 B1 (multi-tenant + onboarding + sync inicial) y B2 (sync incremental +
-contactos + Mi cuenta + bandeja SKU) están en producción local y
-mergeados. Lee primero `docs/blocks/B1-done.md` y `docs/blocks/B2-done.md`
-para entender qué tienes ya construido.
+contactos + Mi cuenta + bandeja SKU) están commiteados y pusheados
+(commits `5a43aad` y `535b3e1`). Lee primero `docs/blocks/B1-done.md`
+y `docs/blocks/B2-done.md` para entender qué tienes ya construido.
+
+**Decisiones extras tomadas en la revisión de B2 (incorporadas a este
+bloque):**
+
+- Modal de confirmación al "Cerrar sesión en todos los dispositivos".
+- Sidebar admin con drawer en móvil (< md).
+- Bug fix: `AccountPage` muestra `[object Object]` cuando
+  `fiscalProfile.direccion` viene como objeto del almacén default
+  Holded. Hay que serializarlo a string en el render (objeto →
+  `"calle, cp, ciudad, provincia, país"`; string → tal cual).
+- Migración para añadir `Product.skuReviewAttempts` (Int default 0).
+  Bandeja SKU muestra el contador junto a cada producto con silent
+  reject ("ha fallado 3 veces, contacta soporte").
+- **Password recovery del propietario** — sección nueva al núcleo
+  §17.6, incluida en este bloque.
 
 Vuelve a leer cuando sea necesario:
 
@@ -40,7 +55,7 @@ con tus discrepancias / dudas.
 
 ### Resumen del alcance
 
-Cuatro frentes, en este orden (hay dependencias):
+Seis frentes, en este orden (hay dependencias):
 
 1. **Emparejamiento de dispositivo** — admin genera código, PWA del
    TPV lo consume, queda device token en localStorage.
@@ -49,7 +64,11 @@ Cuatro frentes, en este orden (hay dependencias):
 3. **Gestión de turno** con apertura (fondo inicial), reanudación
    misma sesión, cierre forzado de turnos colgados de días previos.
 4. **Capas extra de seguridad** del propietario — 2FA opcional
-   (§17.3), alerta email por nuevo dispositivo (§17.4).
+   (§17.3), alerta email por nuevo dispositivo (§17.4),
+   **password recovery (§17.6)**.
+5. **Mini-fixes y mejoras menores del review de B2** — modal logout
+   everywhere, sidebar drawer en móvil, fix `[object Object]`,
+   `Product.skuReviewAttempts` con UI.
 
 Fuera de B3: venta, cobro, impresión (todo B4-B5). Location lock
 (diferido a v2).
@@ -261,6 +280,106 @@ Nueva sección "Seguridad" en el menú del admin:
 - **Notificaciones**: checkbox "Enviar email cuando un dispositivo
   nuevo se vincule" (default on).
 
+### 4.3 Password recovery del propietario (§17.6 del núcleo)
+
+Implementación completa del flujo de recuperación de contraseña.
+
+**Schema (migración nueva `add-password-reset`):**
+
+```prisma
+model PasswordResetToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  tokenHash String   @map("token_hash")
+  expiresAt DateTime @map("expires_at") @db.Timestamptz()
+  usedAt    DateTime? @map("used_at") @db.Timestamptz()
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
+}
+```
+
+Y añadir a `User`: `passwordResetTokens PasswordResetToken[]`.
+
+**Backend endpoints:**
+
+- **`POST /auth/password-reset/request`** — body `{ email }`. Rate
+  limit 5 intentos / 5 min por email (clave Redis
+  `pwd-reset-req:{email}`).
+  - Si el email existe: genera token plano de 32 bytes base64, hash
+    argon2id en BD, expira en 1 hora, envía email con
+    `https://<PUBLIC_URL>/admin/reset?token=<plain>`.
+  - **Respuesta SIEMPRE neutra** (200 OK con mensaje genérico):
+    `{ message: "Si el email existe, te hemos enviado un enlace." }`.
+    Nunca revelar si el email existe.
+  - Si el email NO existe: misma respuesta neutra, no envía nada.
+
+- **`POST /auth/password-reset/confirm`** — body `{ token, newPassword }`.
+  - Busca todos los `PasswordResetToken` no caducados, no usados.
+    Compara `argon2.verify(tokenHash, token)` con cada uno hasta
+    matchear. Si ninguno → 410 Gone.
+  - Si match: valida `newPassword.length >= 8`. Actualiza
+    `user.passwordHash` (argon2id), bumpa `user.tokenVersion`
+    (invalida todas las sesiones), marca el token como
+    `usedAt = now()`.
+  - Devuelve `{ ok: true }` para que el front redirija a `/login`.
+
+**Email sender** — reutiliza el `EmailSender` interface de §17.4:
+- Plantilla mínima en HTML + texto plano.
+- Castellano. Logo de mipiacetpv como inline SVG o data-uri.
+- Link directo al reset con disclaimer "Si no has solicitado este
+  cambio, ignora este email."
+
+**Frontend admin (3 pantallas nuevas):**
+
+- **`/forgot-password`** — accesible desde el link "¿Olvidaste tu
+  contraseña?" del login actual (que hoy es placeholder sin
+  funcionalidad). Form con un único input email + botón "Enviar
+  enlace". Tras submit, redirige a pantalla de confirmación.
+- **Pantalla de confirmación** — "Revisa tu email" con instrucciones.
+  Mensaje genérico independientemente de si el email existía.
+- **`/admin/reset?token=...`** — form con `newPassword` y
+  `confirmPassword`. Valida coincidencia + longitud ≥ 8 chars en
+  cliente. Botón "Actualizar contraseña". Manejo de errores:
+  - Token inválido / caducado → mensaje "Enlace caducado o ya usado.
+    Solicita un nuevo enlace." + link a `/forgot-password`.
+  - Éxito → redirige a `/login` con banner verde "Contraseña
+    actualizada · inicia sesión de nuevo".
+
+### 4.4 Mini-fixes del review de B2
+
+**Bug `[object Object]` en `AccountPage`:** cuando
+`fiscalProfile.direccion` viene como objeto del almacén default
+(estructura `{ calle, cp, ciudad, provincia, país }`), el render lo
+pinta como `[object Object]`. Fix: helper `formatDireccion(value)`
+que si es objeto lo concatena como `"calle, cp ciudad, provincia
+(país)"`; si es string lo devuelve tal cual; si es null muestra "—".
+
+**Modal de confirmación logout-everywhere:** hoy el botón "Cerrar
+sesión en todos los dispositivos" del sidebar dispara la acción
+directamente. Cambiar a modal con:
+- Título: "¿Cerrar sesión en todos los dispositivos?"
+- Cuerpo: "Esto cerrará tu sesión en este dispositivo y en cualquier
+  otro donde hayas iniciado sesión. Tendrás que volver a entrar."
+- Botones: "Cancelar" (outline) + "Sí, cerrar todas" (coral primary).
+
+**Sidebar móvil drawer:** hoy en `< md` el sidebar está
+`hidden md:flex`. Añadir botón hamburguesa en la cabecera del admin
+que abre un drawer slide-in desde la izquierda con la misma
+navegación. Backdrop semi-transparente, swipe-to-close o click fuera
+para cerrar. Mantener desktop `md+` con sidebar persistente.
+
+**`Product.skuReviewAttempts`:** migración mini con `Int @default(0)`.
+El endpoint `POST /catalog/sku-review/:productId/assign` incrementa
+en cada intento, ya sea éxito o silent reject. La bandeja
+`/admin/products` muestra el contador junto a cada producto. Si
+`skuReviewAttempts >= 3`, badge ámbar "Necesita atención de soporte"
+y se muestra un botón secundario "Marcar como no vendible" que pone
+`sellableViaTpv = false` permanentemente (para sacarlo de la
+bandeja sin asignar SKU manual).
+
 ### 6. Tests
 
 - **Emparejamiento**: código válido, código caducado, código consumido,
@@ -273,6 +392,20 @@ Nueva sección "Seguridad" en el menú del admin:
   recovery code valida y se consume, disable requiere TOTP actual.
 - **Alerta email**: mock del `EmailSender`, primer login dispara email,
   cambio de país dispara email, IP en mismo país no dispara.
+- **Password recovery**:
+  - request con email existente envía email (verificado vía mock
+    EmailSender).
+  - request con email inexistente NO envía pero devuelve misma
+    respuesta neutra.
+  - rate limit dispara tras 5 intentos en 5 min.
+  - confirm con token válido actualiza password + bumpa
+    tokenVersion + marca usedAt.
+  - confirm con token caducado → 410.
+  - confirm con token ya usado → 410.
+  - confirm con newPassword < 8 chars → 400.
+- **Mini-fixes**:
+  - `formatDireccion` con objeto / string / null.
+  - skuReviewAttempts incrementa en cada intento (éxito o fallo).
 
 ### 7. Restricciones
 

@@ -4,11 +4,16 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 
 import { registerAuthRoutes } from "./auth/routes.js";
+import { registerPasswordResetRoutes } from "./auth/password-reset.js";
+import { registerCashiersRoutes } from "./cashiers/routes.js";
 import { registerCatalogRoutes } from "./catalog/routes.js";
 import { registerContactsRoutes } from "./contacts/routes.js";
 import { getPrisma, getRedis, shutdown } from "./context.js";
+import { registerDeviceRoutes } from "./devices/routes.js";
 import { loadEnv } from "./env.js";
 import { registerOnboardingRoutes } from "./onboarding/routes.js";
+import { registerCashierAuthRoutes } from "./shift/cashier-auth.js";
+import { registerShiftRoutes } from "./shift/routes.js";
 import { registerSpikeRoutes } from "./spike/routes.js";
 import {
   registerAllExistingRepeatables,
@@ -50,9 +55,14 @@ async function main() {
   app.get("/health", async () => ({ ok: true }));
 
   await registerAuthRoutes(app);
+  await registerPasswordResetRoutes(app);
   await registerOnboardingRoutes(app);
   await registerCatalogRoutes(app);
   await registerContactsRoutes(app);
+  await registerDeviceRoutes(app);
+  await registerCashiersRoutes(app);
+  await registerCashierAuthRoutes(app);
+  await registerShiftRoutes(app);
 
   // Endpoints del super-mini-MVP (tpv-web-spike). Sólo se activan si la
   // env trae HOLDED_API_KEY single-tenant. En producción nadie configura

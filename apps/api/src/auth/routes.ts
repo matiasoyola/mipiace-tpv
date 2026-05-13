@@ -9,10 +9,29 @@ import { probeFailureToHttpStatus, probeHoldedKey } from "../holded/probe.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
 import { requireOwner } from "./middleware.js";
 import {
+  inspect as inspectRateLimit,
+  ownerLoginRateLimit,
+  registerFailure as registerRateLimitFailure,
+  reset as resetRateLimit,
+} from "./rate-limit.js";
+import {
   signAccessToken,
   signRefreshToken,
   verifyRefreshToken,
 } from "./tokens.js";
+import {
+  consumeRecoveryCode,
+  decryptTwoFactorSecret,
+  encryptTwoFactorSecret,
+  generateEnrollment,
+  hashRecoveryCodes,
+  isRecoveryCode,
+  isTotpCode,
+  readStoredRecoveryCodes,
+  signPending2faToken,
+  verifyPending2faToken,
+  verifyTotp,
+} from "./two-factor.js";
 
 const emailFormat = "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$";
 
@@ -102,23 +121,57 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         password: string;
         remember?: boolean;
       };
+      const lowerEmail = email.toLowerCase();
       const prisma = getPrisma();
-      const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+      const rlKey = ownerLoginRateLimit(lowerEmail);
+      const pre = await inspectRateLimit(rlKey);
+      if (pre.locked) {
+        return reply.code(429).send({
+          error: "RATE_LIMITED",
+          message: `Demasiados intentos. Vuelve a probar en ${Math.ceil(
+            pre.retryAfterSeconds / 60,
+          )} min.`,
+          retryAfterSeconds: pre.retryAfterSeconds,
+        });
+      }
+      const user = await prisma.user.findUnique({ where: { email: lowerEmail } });
       // Mensaje genérico — no filtramos si el email existe.
       const GENERIC = { error: "INVALID_CREDENTIALS", message: "Email o contraseña incorrectos" };
-      if (!user || !user.passwordHash) return reply.code(401).send(GENERIC);
+      if (!user || !user.passwordHash) {
+        await registerRateLimitFailure(rlKey);
+        return reply.code(401).send(GENERIC);
+      }
       const ok = await verifyPassword(user.passwordHash, password);
-      if (!ok) return reply.code(401).send(GENERIC);
+      if (!ok) {
+        await registerRateLimitFailure(rlKey);
+        return reply.code(401).send(GENERIC);
+      }
       if (user.role !== "OWNER") {
+        // No es un fallo de credenciales (PIN correcto) — no aplicamos
+        // rate-limit. Igual devolvemos forbidden para no revelar más.
         return reply.code(403).send({
           error: "NOT_OWNER",
           message: "Sólo el propietario entra al admin",
         });
       }
+      await resetRateLimit(rlKey);
       await prisma.user.update({
         where: { id: user.id },
         data: { lastLoginAt: new Date() },
       });
+
+      // Si el propietario tiene 2FA activado, no emitimos access/refresh
+      // todavía: devolvemos `requires2fa` + `pendingToken` y el front
+      // pasa al segundo paso vía POST /auth/login/2fa.
+      if (user.twoFactorEnabledAt != null) {
+        const pendingToken = signPending2faToken({
+          sub: user.id,
+          tid: user.tenantId,
+          remember: remember === true,
+        });
+        return reply.code(200).send({ requires2fa: true, pendingToken });
+      }
+
       const accessToken = signAccessToken({
         sub: user.id,
         tid: user.tenantId,
@@ -209,8 +262,15 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         prisma.user.findUniqueOrThrow({ where: { id: auth.userId } }),
         prisma.tenant.findUniqueOrThrow({ where: { id: auth.tenantId } }),
       ]);
+      const recovery = readStoredRecoveryCodes(user.twoFactorRecoveryCodes);
       return {
-        user: { id: user.id, email: user.email, role: user.role },
+        user: {
+          id: user.id,
+          email: user.email,
+          role: user.role,
+          twoFactorEnabled: user.twoFactorEnabledAt != null,
+          recoveryCodesRemaining: recovery.filter((c) => c.usedAt == null).length,
+        },
         tenant: {
           id: tenant.id,
           name: tenant.name,
@@ -381,6 +441,248 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
           .send({ error: probe.code, message: probe.message });
       }
       return reply.code(200).send({ ok: true, validatedAt: new Date().toISOString() });
+    },
+  );
+
+  // ── 2FA TOTP (B3 §17.3) ────────────────────────────────────────────
+
+  // Genera un secret + QR + recovery codes. NO persiste todavía: el
+  // cliente debe confirmar con un código TOTP en `/confirm`.
+  app.post(
+    "/auth/me/2fa/enable",
+    {
+      preHandler: requireOwner,
+      schema: { body: { type: "object", additionalProperties: false, properties: {} } },
+    },
+    async (request, reply) => {
+      const auth = request.auth!;
+      const prisma = getPrisma();
+      const user = await prisma.user.findUniqueOrThrow({
+        where: { id: auth.userId },
+        select: { email: true, twoFactorEnabledAt: true },
+      });
+      if (user.twoFactorEnabledAt) {
+        return reply.code(409).send({
+          error: "TWO_FACTOR_ALREADY_ENABLED",
+          message: "El 2FA ya está activado. Desactívalo antes de re-emparejar.",
+        });
+      }
+      const enrollment = await generateEnrollment(user.email);
+      // Persistimos el secret cifrado y los recovery hasheados — pero
+      // `twoFactorEnabledAt` queda NULL hasta `/confirm`. Si el
+      // usuario abandona el enroll, los datos sobran pero no afectan
+      // (login sigue siendo sin 2FA mientras enabled_at == NULL).
+      const recoveryHashed = await hashRecoveryCodes(enrollment.recoveryCodes);
+      await prisma.user.update({
+        where: { id: auth.userId },
+        data: {
+          twoFactorSecret: encryptTwoFactorSecret(enrollment.secret),
+          twoFactorRecoveryCodes: recoveryHashed as unknown as Prisma.InputJsonValue,
+          twoFactorEnabledAt: null,
+        },
+      });
+      return reply.code(200).send({
+        qrDataUrl: enrollment.qrDataUrl,
+        secret: enrollment.secret,
+        recoveryCodes: enrollment.recoveryCodes,
+      });
+    },
+  );
+
+  app.post(
+    "/auth/me/2fa/confirm",
+    {
+      preHandler: requireOwner,
+      schema: {
+        body: {
+          type: "object",
+          required: ["code"],
+          additionalProperties: false,
+          properties: { code: { type: "string", pattern: "^[0-9]{6}$" } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const auth = request.auth!;
+      const { code } = request.body as { code: string };
+      const prisma = getPrisma();
+      const user = await prisma.user.findUniqueOrThrow({
+        where: { id: auth.userId },
+        select: { twoFactorSecret: true, twoFactorEnabledAt: true },
+      });
+      if (!user.twoFactorSecret) {
+        return reply.code(409).send({
+          error: "TWO_FACTOR_NOT_ENROLLING",
+          message: "No has iniciado el alta de 2FA.",
+        });
+      }
+      if (user.twoFactorEnabledAt) {
+        return reply.code(409).send({
+          error: "TWO_FACTOR_ALREADY_ENABLED",
+          message: "El 2FA ya está activo.",
+        });
+      }
+      const secret = decryptTwoFactorSecret(user.twoFactorSecret);
+      if (!verifyTotp(secret, code)) {
+        return reply
+          .code(401)
+          .send({ error: "INVALID_TOTP", message: "Código incorrecto" });
+      }
+      await prisma.user.update({
+        where: { id: auth.userId },
+        data: { twoFactorEnabledAt: new Date() },
+      });
+      return reply.code(200).send({ ok: true });
+    },
+  );
+
+  app.post(
+    "/auth/me/2fa/disable",
+    {
+      preHandler: requireOwner,
+      schema: {
+        body: {
+          type: "object",
+          required: ["password", "code"],
+          additionalProperties: false,
+          properties: {
+            password: { type: "string", minLength: 1 },
+            code: { type: "string", minLength: 6, maxLength: 16 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const auth = request.auth!;
+      const { password, code } = request.body as {
+        password: string;
+        code: string;
+      };
+      const prisma = getPrisma();
+      const user = await prisma.user.findUniqueOrThrow({
+        where: { id: auth.userId },
+        select: {
+          passwordHash: true,
+          twoFactorSecret: true,
+          twoFactorEnabledAt: true,
+          twoFactorRecoveryCodes: true,
+        },
+      });
+      if (!user.twoFactorEnabledAt || !user.twoFactorSecret) {
+        return reply.code(409).send({
+          error: "TWO_FACTOR_NOT_ENABLED",
+          message: "El 2FA no está activo.",
+        });
+      }
+      if (!user.passwordHash || !(await verifyPassword(user.passwordHash, password))) {
+        return reply
+          .code(401)
+          .send({ error: "INVALID_PASSWORD", message: "Contraseña incorrecta" });
+      }
+      const secret = decryptTwoFactorSecret(user.twoFactorSecret);
+      let authorized = false;
+      if (isTotpCode(code) && verifyTotp(secret, code)) authorized = true;
+      if (!authorized && isRecoveryCode(code)) {
+        const stored = readStoredRecoveryCodes(user.twoFactorRecoveryCodes);
+        const consumed = await consumeRecoveryCode(stored, code);
+        if (consumed) authorized = true;
+      }
+      if (!authorized) {
+        return reply
+          .code(401)
+          .send({ error: "INVALID_2FA_CODE", message: "Código incorrecto" });
+      }
+      await prisma.user.update({
+        where: { id: auth.userId },
+        data: {
+          twoFactorSecret: null,
+          twoFactorEnabledAt: null,
+          twoFactorRecoveryCodes: Prisma.JsonNull,
+        },
+      });
+      return reply.code(200).send({ ok: true });
+    },
+  );
+
+  // Paso 2 del login con 2FA: el cliente envía `pendingToken` (5 min
+  // de TTL) emitido por POST /auth/login + el código del autenticador
+  // (6 dígitos) o un recovery code (10 alfanum).
+  app.post(
+    "/auth/login/2fa",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["pendingToken", "code"],
+          additionalProperties: false,
+          properties: {
+            pendingToken: { type: "string", minLength: 1 },
+            code: { type: "string", minLength: 6, maxLength: 16 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { pendingToken, code } = request.body as {
+        pendingToken: string;
+        code: string;
+      };
+      let payload;
+      try {
+        payload = verifyPending2faToken(pendingToken);
+      } catch {
+        return reply.code(401).send({
+          error: "INVALID_PENDING_TOKEN",
+          message: "Sesión de 2FA caducada. Vuelve a iniciar sesión.",
+        });
+      }
+      const prisma = getPrisma();
+      const user = await prisma.user.findUnique({ where: { id: payload.sub } });
+      if (!user || !user.twoFactorEnabledAt || !user.twoFactorSecret) {
+        return reply.code(401).send({
+          error: "INVALID_PENDING_TOKEN",
+          message: "Sesión de 2FA inválida.",
+        });
+      }
+
+      let authorized = false;
+      let usedRecovery = false;
+      if (isTotpCode(code)) {
+        const secret = decryptTwoFactorSecret(user.twoFactorSecret);
+        authorized = verifyTotp(secret, code);
+      }
+      if (!authorized && isRecoveryCode(code)) {
+        const stored = readStoredRecoveryCodes(user.twoFactorRecoveryCodes);
+        const consumed = await consumeRecoveryCode(stored, code);
+        if (consumed) {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: {
+              twoFactorRecoveryCodes: consumed as unknown as Prisma.InputJsonValue,
+            },
+          });
+          authorized = true;
+          usedRecovery = true;
+        }
+      }
+      if (!authorized) {
+        return reply
+          .code(401)
+          .send({ error: "INVALID_2FA_CODE", message: "Código incorrecto" });
+      }
+
+      const accessToken = signAccessToken({
+        sub: user.id,
+        tid: user.tenantId,
+        role: user.role,
+      });
+      const refreshToken = signRefreshToken(
+        { sub: user.id, tid: user.tenantId },
+        { tv: user.tokenVersion, remember: payload.rmb === 1 },
+      );
+      return reply
+        .code(200)
+        .send({ accessToken, refreshToken, usedRecoveryCode: usedRecovery });
     },
   );
 }

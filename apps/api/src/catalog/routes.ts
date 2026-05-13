@@ -96,6 +96,7 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
           taxRate: true,
           sku: true,
           sellableViaTpv: true,
+          skuReviewAttempts: true,
         },
       });
       return {
@@ -110,6 +111,7 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
           // propietario puede aceptarla o escribir uno propio.
           suggestedSku: buildAutoSku(p.holdedProductId),
           sellableViaTpv: p.sellableViaTpv,
+          skuReviewAttempts: p.skuReviewAttempts,
         })),
       };
     },
@@ -165,6 +167,10 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
       const apiKey = decryptSecret(tenant.holdedApiKeyCiphertext, env.HOLDED_KEY_ENCRYPTION_SECRET);
       const client = new ApiKeyClient(apiKey, { baseUrl: env.HOLDED_BASE_URL });
 
+      // Incrementamos `skuReviewAttempts` en cada intento (éxito o
+      // silent reject) — el contador alimenta el badge ámbar de la
+      // bandeja para que el propietario pueda escalar a soporte
+      // cuando Holded persiste en silenciar.
       try {
         await updateProductWithGetBack(
           client,
@@ -178,14 +184,19 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
             sku,
             needsSkuReview: false,
             sellableViaTpv: true,
-            // Limpia el marcador de auto-asignación: ahora es manual.
             skuAutoAssignedAt: null,
+            skuReviewAttempts: { increment: 1 },
           },
         });
         return reply.code(200).send({ ok: true, sku });
       } catch (err) {
         if (err instanceof HoldedSilentRejectError) {
-          // Holded volvió a silenciar. Mantén needsSkuReview=true.
+          // Holded volvió a silenciar. Mantén needsSkuReview=true y
+          // bumpa el contador.
+          await prisma.product.update({
+            where: { id: product.id },
+            data: { skuReviewAttempts: { increment: 1 } },
+          });
           request.log.warn(
             { tenantId: auth.tenantId, productId },
             "asignación manual de SKU silenciada por Holded",
@@ -218,6 +229,46 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
           message: "No hemos podido contactar con Holded.",
         });
       }
+    },
+  );
+
+  // Marca el producto como no-vendible vía TPV permanentemente. El
+  // propietario lo usa cuando Holded persiste en silenciar el SKU
+  // (skuReviewAttempts >= 3) y no quiere seguir intentándolo. El
+  // producto sale de la bandeja (needsSkuReview = false) pero NO se
+  // borra: queda como referencia histórica si Holded lo arregla más
+  // tarde.
+  app.post(
+    "/catalog/sku-review/:productId/mark-unsellable",
+    {
+      preHandler: requireOwner,
+      schema: {
+        params: {
+          type: "object",
+          required: ["productId"],
+          properties: { productId: { type: "string", format: "uuid" } },
+        },
+        body: { type: "object", additionalProperties: false, properties: {} },
+      },
+    },
+    async (request, reply) => {
+      const auth = request.auth!;
+      const { productId } = request.params as { productId: string };
+      const prisma = getPrisma();
+      const product = await prisma.product.findFirst({
+        where: { id: productId, tenantId: auth.tenantId },
+        select: { id: true },
+      });
+      if (!product) {
+        return reply
+          .code(404)
+          .send({ error: "PRODUCT_NOT_FOUND", message: "Producto no encontrado." });
+      }
+      await prisma.product.update({
+        where: { id: product.id },
+        data: { sellableViaTpv: false, needsSkuReview: false },
+      });
+      return reply.code(200).send({ ok: true });
     },
   );
 

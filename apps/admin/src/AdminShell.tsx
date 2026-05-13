@@ -1,20 +1,25 @@
-// Layout reutilizable de las pantallas autenticadas del admin (B2 §4).
-// Sigue el mockup pantalla 9 de docs/design/reference-app.tsx:
-// sidebar 240px + header 72px + main scrollable.
+// Layout reutilizable de las pantallas autenticadas del admin (B2 §4,
+// ampliado en B3 con drawer móvil + activación de Dispositivos /
+// Cajeros / Seguridad + modal de confirmación al cerrar sesión en
+// todos los dispositivos).
 
+import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Building2,
   Calculator,
   KeyRound,
+  Menu,
   Package,
   Shield,
   User,
   Users,
+  X,
 } from "lucide-react";
 
+import { LogoutEverywhereModal } from "./components/LogoutEverywhereModal.js";
 import { Logo } from "./Logo.js";
-import { api, clearTokens } from "./api.js";
+import { clearTokens } from "./api.js";
 
 interface NavItem {
   to: string;
@@ -24,15 +29,14 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  // En B2 sólo "Mi cuenta" y "Productos" (bandeja SKU) están vivos.
-  // El resto aparece grisado para que el propietario sepa qué viene
-  // en B3+.
+  // B3 activa Dispositivos / Cajeros / Seguridad. Tiendas y Holded
+  // siguen pendientes — son B4+.
   { to: "/admin/stores", label: "Tiendas", icon: Building2, disabled: true },
-  { to: "/admin/devices", label: "Dispositivos", icon: Calculator, disabled: true },
-  { to: "/admin/cashiers", label: "Cajeros", icon: Users, disabled: true },
+  { to: "/admin/devices", label: "Dispositivos", icon: Calculator },
+  { to: "/admin/cashiers", label: "Cajeros", icon: Users },
   { to: "/admin/products", label: "Productos", icon: Package },
   { to: "/admin/account", label: "Mi cuenta", icon: User },
-  { to: "/admin/security", label: "Seguridad", icon: Shield, disabled: true },
+  { to: "/admin/security", label: "Seguridad", icon: Shield },
   { to: "/admin/holded", label: "Holded", icon: KeyRound, disabled: true },
 ];
 
@@ -46,82 +50,40 @@ export function AdminShell({
   initials?: string;
 }) {
   const navigate = useNavigate();
-  const location = useLocation();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [logoutAllOpen, setLogoutAllOpen] = useState(false);
 
-  async function onLogout() {
-    clearTokens();
-    navigate("/login", { replace: true });
-  }
-
-  async function onLogoutEverywhere() {
-    try {
-      await api("/auth/logout-everywhere", { method: "POST", body: {} });
-    } catch {
-      // Aunque falle el backend, limpiamos local. El siguiente refresh
-      // fallará y la sesión queda cerrada.
-    }
+  function onLogout() {
     clearTokens();
     navigate("/login", { replace: true });
   }
 
   return (
     <div className="min-h-screen bg-mipiace-stone flex font-sans">
-      <aside className="hidden md:flex w-[240px] shrink-0 border-r border-slate-200 bg-white flex-col px-5 py-6">
-        <div className="mb-8">
-          <Logo />
-        </div>
-        <nav className="space-y-1.5">
-          {NAV_ITEMS.map((item) => {
-            const Icon = item.icon;
-            const active = location.pathname.startsWith(item.to);
-            const base =
-              "w-full h-11 flex items-center gap-3 px-4 rounded-xl text-[14px] font-medium transition-colors";
-            if (item.disabled) {
-              return (
-                <button
-                  key={item.label}
-                  disabled
-                  title="Disponible en bloques posteriores"
-                  className={`${base} text-slate-300 cursor-not-allowed`}
-                >
-                  <Icon className="w-[17px] h-[17px] text-slate-300" strokeWidth={2.1} />
-                  <span>{item.label}</span>
-                </button>
-              );
-            }
-            return (
-              <Link
-                key={item.label}
-                to={item.to}
-                className={
-                  active
-                    ? `${base} bg-mipiace-coral-soft text-mipiace-coral-dark`
-                    : `${base} text-slate-600 hover:bg-slate-50 hover:text-mipiace-ink`
-                }
-              >
-                <Icon
-                  className={
-                    active
-                      ? "w-[17px] h-[17px] text-mipiace-coral"
-                      : "w-[17px] h-[17px] text-slate-500"
-                  }
-                  strokeWidth={2.1}
-                />
-                <span>{item.label}</span>
-              </Link>
-            );
-          })}
-        </nav>
-        <button
-          onClick={onLogoutEverywhere}
-          className="mt-auto text-[12px] text-slate-400 hover:text-mipiace-coral-dark font-medium text-left px-4 py-2"
-        >
-          Cerrar sesión en todos los dispositivos
-        </button>
-      </aside>
+      <DesktopSidebar onAskLogoutAll={() => setLogoutAllOpen(true)} />
+
+      {drawerOpen && (
+        <MobileDrawer
+          onClose={() => setDrawerOpen(false)}
+          onAskLogoutAll={() => {
+            setDrawerOpen(false);
+            setLogoutAllOpen(true);
+          }}
+        />
+      )}
+
       <main className="flex-1 min-w-0 overflow-y-auto">
-        <header className="h-[72px] border-b border-slate-200 bg-white flex items-center px-5 md:px-8 sticky top-0 z-10">
-          <h1 className="text-[20px] font-semibold text-mipiace-ink tracking-tight">{title}</h1>
+        <header className="h-[72px] border-b border-slate-200 bg-white flex items-center px-4 md:px-8 sticky top-0 z-10 gap-3">
+          <button
+            onClick={() => setDrawerOpen(true)}
+            className="md:hidden h-10 w-10 rounded-xl hover:bg-slate-50 text-slate-600 flex items-center justify-center"
+            aria-label="Abrir menú"
+          >
+            <Menu className="w-5 h-5" strokeWidth={2.1} />
+          </button>
+          <h1 className="text-[18px] md:text-[20px] font-semibold text-mipiace-ink tracking-tight">
+            {title}
+          </h1>
           <div className="ml-auto flex items-center gap-2.5">
             <button
               onClick={onLogout}
@@ -136,6 +98,124 @@ export function AdminShell({
         </header>
         <div className="p-5 md:p-8 max-w-3xl">{children}</div>
       </main>
+
+      <LogoutEverywhereModal
+        open={logoutAllOpen}
+        onClose={() => setLogoutAllOpen(false)}
+      />
     </div>
+  );
+}
+
+function DesktopSidebar({ onAskLogoutAll }: { onAskLogoutAll: () => void }) {
+  const location = useLocation();
+  return (
+    <aside className="hidden md:flex w-[240px] shrink-0 border-r border-slate-200 bg-white flex-col px-5 py-6">
+      <div className="mb-8">
+        <Logo />
+      </div>
+      <NavList currentPath={location.pathname} />
+      <button
+        onClick={onAskLogoutAll}
+        className="mt-auto text-[12px] text-slate-400 hover:text-mipiace-coral-dark font-medium text-left px-4 py-2"
+      >
+        Cerrar sesión en todos los dispositivos
+      </button>
+    </aside>
+  );
+}
+
+function MobileDrawer({
+  onClose,
+  onAskLogoutAll,
+}: {
+  onClose: () => void;
+  onAskLogoutAll: () => void;
+}) {
+  const location = useLocation();
+  return (
+    <div
+      className="fixed inset-0 z-40 md:hidden"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className="absolute inset-0 bg-mipiace-ink/40 animate-in fade-in"
+        onClick={onClose}
+      />
+      <aside className="absolute inset-y-0 left-0 w-[260px] bg-white border-r border-slate-200 flex flex-col px-5 py-6 shadow-xl animate-in slide-in-from-left">
+        <div className="flex items-center justify-between mb-8">
+          <Logo />
+          <button
+            onClick={onClose}
+            className="h-9 w-9 rounded-xl hover:bg-slate-50 text-slate-500 flex items-center justify-center"
+            aria-label="Cerrar menú"
+          >
+            <X className="w-4 h-4" strokeWidth={2.25} />
+          </button>
+        </div>
+        <NavList currentPath={location.pathname} onNavigate={onClose} />
+        <button
+          onClick={onAskLogoutAll}
+          className="mt-auto text-[12.5px] text-slate-400 hover:text-mipiace-coral-dark font-medium text-left px-4 py-2"
+        >
+          Cerrar sesión en todos los dispositivos
+        </button>
+      </aside>
+    </div>
+  );
+}
+
+function NavList({
+  currentPath,
+  onNavigate,
+}: {
+  currentPath: string;
+  onNavigate?: () => void;
+}) {
+  return (
+    <nav className="space-y-1.5">
+      {NAV_ITEMS.map((item) => {
+        const Icon = item.icon;
+        const active = currentPath.startsWith(item.to);
+        const base =
+          "w-full h-11 flex items-center gap-3 px-4 rounded-xl text-[14px] font-medium transition-colors";
+        if (item.disabled) {
+          return (
+            <button
+              key={item.label}
+              disabled
+              title="Disponible en bloques posteriores"
+              className={`${base} text-slate-300 cursor-not-allowed`}
+            >
+              <Icon className="w-[17px] h-[17px] text-slate-300" strokeWidth={2.1} />
+              <span>{item.label}</span>
+            </button>
+          );
+        }
+        return (
+          <Link
+            key={item.label}
+            to={item.to}
+            onClick={onNavigate}
+            className={
+              active
+                ? `${base} bg-mipiace-coral-soft text-mipiace-coral-dark`
+                : `${base} text-slate-600 hover:bg-slate-50 hover:text-mipiace-ink`
+            }
+          >
+            <Icon
+              className={
+                active
+                  ? "w-[17px] h-[17px] text-mipiace-coral"
+                  : "w-[17px] h-[17px] text-slate-500"
+              }
+              strokeWidth={2.1}
+            />
+            <span>{item.label}</span>
+          </Link>
+        );
+      })}
+    </nav>
   );
 }

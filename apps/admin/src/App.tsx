@@ -1,19 +1,40 @@
 import { useEffect, useState } from "react";
-import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
-import { AlertCircle, Check, Eye, EyeOff, KeyRound, Loader2, RotateCcw } from "lucide-react";
+import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { Check, Eye, EyeOff, KeyRound, RotateCcw } from "lucide-react";
 
 import { AdminShell } from "./AdminShell.js";
-import { Logo } from "./Logo.js";
+import { CashiersPage } from "./pages/CashiersPage.js";
+import { DevicesPage } from "./pages/DevicesPage.js";
+import { ForgotPasswordPage, ResetPasswordPage } from "./pages/PasswordResetPages.js";
+import { SecurityPage } from "./pages/SecurityPage.js";
 import { api, ApiError, clearTokens, readTokens, storeTokens } from "./api.js";
+import {
+  CenteredCard,
+  CenteredLoader,
+  FieldError,
+  formatDireccion,
+  formatRelative,
+  OutlineButton,
+  PrimaryButton,
+  ReadOnlyField,
+  SuccessBanner,
+  TextField,
+} from "./ui.js";
 
 interface MeResponse {
-  user: { id: string; email: string; role: string };
+  user: {
+    id: string;
+    email: string;
+    role: string;
+    twoFactorEnabled?: boolean;
+    recoveryCodesRemaining?: number;
+  };
   tenant: {
     id: string;
     name: string;
     hasHoldedKey: boolean;
     initialSyncStatus: "PENDING" | "RUNNING" | "DONE" | "FAILED";
-    fiscalProfile: Record<string, string> | null;
+    fiscalProfile: Record<string, unknown> | null;
     lastIncrementalSyncAt: string | null;
   };
 }
@@ -29,6 +50,11 @@ export function App() {
       <Route path="/onboarding/done" element={<SyncSummaryPage />} />
       <Route path="/admin/account" element={<AccountPage />} />
       <Route path="/admin/products" element={<SkuReviewPage />} />
+      <Route path="/admin/devices" element={<DevicesPage />} />
+      <Route path="/admin/cashiers" element={<CashiersPage />} />
+      <Route path="/admin/security" element={<SecurityPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/admin/reset" element={<ResetPasswordPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
@@ -66,164 +92,67 @@ function RootRouter() {
   return <CenteredLoader label="Cargando…" />;
 }
 
-// ── Centered helpers ─────────────────────────────────────────────────
-
-function CenteredCard({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-mipiace-stone font-sans px-4">
-      <div className="w-full max-w-md">
-        <div className="flex justify-center mb-8">
-          <Logo size={32} />
-        </div>
-        <div className="bg-white rounded-3xl border border-slate-200 p-7 md:p-8">{children}</div>
-      </div>
-    </div>
-  );
-}
-
-function CenteredLoader({ label }: { label: string }) {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-mipiace-stone font-sans">
-      <div className="flex flex-col items-center gap-3 text-slate-500">
-        <Loader2 className="w-5 h-5 animate-spin" />
-        <span className="text-[13.5px]">{label}</span>
-      </div>
-    </div>
-  );
-}
-
-// Inputs y botones siguen los tokens de docs/design/tokens.md §5.
-function TextField({
-  id,
-  label,
-  type = "text",
-  value,
-  onChange,
-  autoComplete,
-  required,
-  minLength,
-  spellCheck,
-}: {
-  id: string;
-  label: string;
-  type?: string;
-  value: string;
-  onChange: (v: string) => void;
-  autoComplete?: string;
-  required?: boolean;
-  minLength?: number;
-  spellCheck?: boolean;
-}) {
-  return (
-    <div>
-      <label
-        htmlFor={id}
-        className="block text-[13px] font-medium text-mipiace-ink-soft mb-1.5"
-      >
-        {label}
-      </label>
-      <input
-        id={id}
-        type={type}
-        autoComplete={autoComplete}
-        spellCheck={spellCheck}
-        required={required}
-        minLength={minLength}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full h-12 px-3.5 rounded-xl bg-mipiace-stone border border-transparent text-[14.5px] text-mipiace-ink focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none"
-      />
-    </div>
-  );
-}
-
-function PrimaryButton({
-  children,
-  busy,
-  disabled,
-  type = "submit",
-  onClick,
-}: {
-  children: React.ReactNode;
-  busy?: boolean;
-  disabled?: boolean;
-  type?: "submit" | "button";
-  onClick?: () => void;
-}) {
-  return (
-    <button
-      type={type}
-      onClick={onClick}
-      disabled={busy || disabled}
-      className="w-full h-12 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[14.5px] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-    >
-      {busy && <Loader2 className="w-4 h-4 animate-spin" />}
-      {children}
-    </button>
-  );
-}
-
-function OutlineButton({
-  children,
-  onClick,
-  busy,
-  className = "",
-}: {
-  children: React.ReactNode;
-  onClick?: () => void;
-  busy?: boolean;
-  className?: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={busy}
-      className={`h-11 px-4 rounded-2xl border border-slate-200 hover:bg-slate-50 text-[13.5px] text-mipiace-ink-soft font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50 ${className}`}
-    >
-      {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-      {children}
-    </button>
-  );
-}
-
-function FieldError({ message }: { message: string | null }) {
-  if (!message) return null;
-  return (
-    <div className="mt-3 flex items-start gap-2 text-[13px] text-red-700 bg-red-50 rounded-xl px-3.5 py-2.5">
-      <AlertCircle className="w-4 h-4 mt-px shrink-0" />
-      <span>{message}</span>
-    </div>
-  );
-}
-
-function SuccessBanner({ message }: { message: string }) {
-  return (
-    <div className="mt-3 flex items-start gap-2 text-[13px] text-emerald-700 bg-emerald-50 rounded-xl px-3.5 py-2.5">
-      <Check className="w-4 h-4 mt-px shrink-0" />
-      <span>{message}</span>
-    </div>
-  );
-}
+// Componentes UI compartidos viven en `./ui.tsx`. CenteredCard,
+// PrimaryButton, OutlineButton, etc. se importan desde allí.
 
 // ── Login / Signup ───────────────────────────────────────────────────
 
 function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Paso 2 cuando el backend pide código TOTP / recovery code.
+  const [pendingToken, setPendingToken] = useState<string | null>(null);
+  const [twoFactorCode, setTwoFactorCode] = useState("");
+
+  // Banner verde post-reset, si venimos de `/admin/reset?token=...` OK.
+  const justReset = location.state && (location.state as { justReset?: boolean }).justReset;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setBusy(true);
     try {
-      const tokens = await api<{ accessToken: string; refreshToken: string }>("/auth/login", {
+      const res = await api<
+        | { accessToken: string; refreshToken: string }
+        | { requires2fa: true; pendingToken: string }
+      >("/auth/login", {
         method: "POST",
         body: { email, password, remember },
+      });
+      if ("requires2fa" in res && res.requires2fa) {
+        setPendingToken(res.pendingToken);
+        return;
+      }
+      storeTokens(res as { accessToken: string; refreshToken: string }, {
+        remember,
+      });
+      navigate("/", { replace: true });
+    } catch (err) {
+      if (err instanceof ApiError) setError(err.message);
+      else throw err;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function on2faSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!pendingToken) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const tokens = await api<{
+        accessToken: string;
+        refreshToken: string;
+        usedRecoveryCode: boolean;
+      }>("/auth/login/2fa", {
+        method: "POST",
+        body: { pendingToken, code: twoFactorCode.trim().toUpperCase() },
       });
       storeTokens(tokens, { remember });
       navigate("/", { replace: true });
@@ -235,13 +164,54 @@ function LoginPage() {
     }
   }
 
+  if (pendingToken) {
+    return (
+      <CenteredCard>
+        <h1 className="text-[22px] font-semibold text-mipiace-ink tracking-tight">
+          Verificación en dos pasos
+        </h1>
+        <p className="text-[13.5px] text-slate-500 mt-1 mb-6">
+          Introduce el código de 6 dígitos de tu app autenticadora. Si no la
+          tienes a mano, puedes usar uno de tus códigos de recuperación.
+        </p>
+        <form onSubmit={on2faSubmit} className="space-y-4">
+          <TextField
+            id="twoFactor"
+            label="Código"
+            value={twoFactorCode}
+            onChange={setTwoFactorCode}
+            autoComplete="one-time-code"
+            required
+            placeholder="123456 o XXXXXXXXXX"
+          />
+          <PrimaryButton busy={busy}>Verificar</PrimaryButton>
+          <FieldError message={error} />
+        </form>
+        <button
+          type="button"
+          onClick={() => {
+            setPendingToken(null);
+            setTwoFactorCode("");
+            setError(null);
+          }}
+          className="mt-5 text-[13px] text-slate-500 hover:text-mipiace-coral-dark font-medium"
+        >
+          Volver al inicio de sesión
+        </button>
+      </CenteredCard>
+    );
+  }
+
   return (
     <CenteredCard>
       <h1 className="text-[22px] font-semibold text-mipiace-ink tracking-tight">
         Entra a mipiacetpv
       </h1>
       <p className="text-[13.5px] text-slate-500 mt-1 mb-6">Acceso del propietario.</p>
-      <form onSubmit={onSubmit} className="space-y-4">
+      {justReset && (
+        <SuccessBanner message="Contraseña actualizada · inicia sesión de nuevo" />
+      )}
+      <form onSubmit={onSubmit} className="space-y-4 mt-3">
         <TextField
           id="email"
           label="Email"
@@ -260,20 +230,28 @@ function LoginPage() {
           onChange={setPassword}
           required
         />
-        <label className="flex items-center gap-2.5 text-[13.5px] text-mipiace-ink-soft cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={remember}
-            onChange={(e) => setRemember(e.target.checked)}
-            className="h-4 w-4 rounded border-slate-300 text-mipiace-coral focus:ring-mipiace-coral/30"
-          />
-          <span>
-            Recuérdame en este dispositivo
-            <span className="block text-[12px] text-slate-400">
-              La sesión sobrevive al cierre del navegador.
+        <div className="flex items-start justify-between gap-3">
+          <label className="flex items-center gap-2.5 text-[13.5px] text-mipiace-ink-soft cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-mipiace-coral focus:ring-mipiace-coral/30"
+            />
+            <span>
+              Recuérdame en este dispositivo
+              <span className="block text-[12px] text-slate-400">
+                La sesión sobrevive al cierre del navegador.
+              </span>
             </span>
-          </span>
-        </label>
+          </label>
+          <a
+            href="/forgot-password"
+            className="text-[13px] text-mipiace-coral-dark hover:underline font-medium whitespace-nowrap mt-1"
+          >
+            ¿Olvidaste tu contraseña?
+          </a>
+        </div>
         <PrimaryButton busy={busy}>{busy ? "Entrando…" : "Entrar"}</PrimaryButton>
         <FieldError message={error} />
       </form>
@@ -542,6 +520,11 @@ function SyncSummaryPage() {
 type FiscalProfile = {
   businessName?: string;
   nif?: string;
+  // Cuando viene del almacén default Holded, `direccion` puede ser un
+  // objeto `{ calle, cp, ciudad, provincia, pais }`. Cuando es manual,
+  // los campos vienen separados (`address`, `postalCode`, `city`,
+  // `province`, `country`). `formatDireccion` cubre ambos.
+  direccion?: unknown;
   address?: string;
   postalCode?: string;
   city?: string;
@@ -792,40 +775,19 @@ function FiscalProfileSection({
           <ReadOnlyField
             label="Dirección"
             value={
-              [form.address, form.postalCode, form.city, form.province]
-                .filter(Boolean)
-                .join(", ") || "—"
+              // Si hay address en string (manual), úsalo. Si no, intenta
+              // serializar `direccion` (objeto del almacén default).
+              form.address
+                ? [form.address, form.postalCode, form.city, form.province]
+                    .filter(Boolean)
+                    .join(", ")
+                : formatDireccion(form.direccion)
             }
             wide
           />
         </div>
       )}
     </section>
-  );
-}
-
-function ReadOnlyField({
-  label,
-  value,
-  tabular,
-  wide,
-}: {
-  label: string;
-  value: string;
-  tabular?: boolean;
-  wide?: boolean;
-}) {
-  return (
-    <div className={wide ? "sm:col-span-2" : ""}>
-      <div className="text-[11.5px] uppercase tracking-wider text-slate-400 font-medium mb-1">
-        {label}
-      </div>
-      <div
-        className={`text-[14.5px] text-mipiace-ink font-medium ${tabular ? "tabular-nums" : ""}`}
-      >
-        {value}
-      </div>
-    </div>
   );
 }
 
@@ -929,6 +891,7 @@ interface SkuReviewItem {
   currentSku: string | null;
   suggestedSku: string;
   sellableViaTpv: boolean;
+  skuReviewAttempts: number;
 }
 
 function SkuReviewPage() {
@@ -949,7 +912,7 @@ function SkuReviewPage() {
       });
   }, [navigate]);
 
-  function onAssigned(productId: string) {
+  function onResolved(productId: string) {
     setItems((curr) => (curr ?? []).filter((it) => it.id !== productId));
   }
 
@@ -974,7 +937,12 @@ function SkuReviewPage() {
       ) : (
         <div className="space-y-2.5">
           {items.map((item) => (
-            <SkuReviewRow key={item.id} item={item} onAssigned={() => onAssigned(item.id)} />
+            <SkuReviewRow
+              key={item.id}
+              item={item}
+              onAssigned={() => onResolved(item.id)}
+              onMarkedUnsellable={() => onResolved(item.id)}
+            />
           ))}
         </div>
       )}
@@ -985,12 +953,15 @@ function SkuReviewPage() {
 function SkuReviewRow({
   item,
   onAssigned,
+  onMarkedUnsellable,
 }: {
   item: SkuReviewItem;
   onAssigned: () => void;
+  onMarkedUnsellable: () => void;
 }) {
   const [sku, setSku] = useState(item.currentSku ?? item.suggestedSku);
   const [busy, setBusy] = useState(false);
+  const [busyUnsellable, setBusyUnsellable] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function onSubmit() {
@@ -1010,6 +981,25 @@ function SkuReviewRow({
     }
   }
 
+  async function onMarkUnsellable() {
+    setBusyUnsellable(true);
+    setError(null);
+    try {
+      await api(`/catalog/sku-review/${item.id}/mark-unsellable`, {
+        method: "POST",
+        body: {},
+      });
+      onMarkedUnsellable();
+    } catch (err) {
+      if (err instanceof ApiError) setError(err.message);
+      else throw err;
+    } finally {
+      setBusyUnsellable(false);
+    }
+  }
+
+  const attemptsBadge = item.skuReviewAttempts >= 3;
+
   return (
     <div className="bg-white rounded-2xl border border-slate-200 p-5">
       <div className="flex items-start justify-between gap-4 mb-3">
@@ -1018,6 +1008,20 @@ function SkuReviewRow({
           <div className="text-[12.5px] text-slate-500 mt-0.5 tabular-nums">
             {item.basePrice.toFixed(2)} € · IVA {item.taxRate}% · ID Holded {item.holdedProductId.slice(0, 8)}…
           </div>
+          {item.skuReviewAttempts > 0 && (
+            <div className="mt-2 flex items-center gap-2">
+              <span
+                className={
+                  attemptsBadge
+                    ? "inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-50 text-amber-700 text-[11.5px] font-medium"
+                    : "inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-50 text-slate-500 text-[11.5px] font-medium"
+                }
+              >
+                {item.skuReviewAttempts} {item.skuReviewAttempts === 1 ? "intento" : "intentos"}
+                {attemptsBadge && " · necesita atención de soporte"}
+              </span>
+            </div>
+          )}
         </div>
       </div>
       <div className="flex flex-col sm:flex-row gap-2.5">
@@ -1027,28 +1031,29 @@ function SkuReviewRow({
           placeholder={item.suggestedSku}
           className="flex-1 h-11 px-3.5 rounded-xl bg-mipiace-stone border border-transparent text-[14px] focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none tabular-nums"
         />
-        <button
+        <PrimaryButton
+          type="button"
           onClick={onSubmit}
-          disabled={busy || sku.trim().length === 0}
-          className="h-11 px-5 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[13.5px] font-medium disabled:opacity-50 flex items-center justify-center gap-2 transition-colors"
+          busy={busy}
+          disabled={sku.trim().length === 0}
+          className="!w-auto !h-11 px-5 !text-[13.5px]"
         >
-          {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
           Asignar y subir
-        </button>
+        </PrimaryButton>
       </div>
+      {attemptsBadge && (
+        <OutlineButton
+          onClick={onMarkUnsellable}
+          busy={busyUnsellable}
+          className="mt-3 !w-full !h-10 !text-[13px] !text-amber-700 hover:!bg-amber-50 !border-amber-200"
+        >
+          Marcar como no vendible
+        </OutlineButton>
+      )}
       <FieldError message={error} />
     </div>
   );
 }
 
 // ── Utilidades ───────────────────────────────────────────────────────
-
-function formatRelative(iso: string): string {
-  const diffMin = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
-  if (diffMin < 1) return "hace un momento";
-  if (diffMin < 60) return `hace ${diffMin} min`;
-  const diffHr = Math.round(diffMin / 60);
-  if (diffHr < 24) return `hace ${diffHr} h`;
-  const diffDays = Math.round(diffHr / 24);
-  return `hace ${diffDays} día${diffDays === 1 ? "" : "s"}`;
-}
+// (formatRelative + formatDireccion viven en ./ui.tsx)
