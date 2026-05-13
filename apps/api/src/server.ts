@@ -3,6 +3,9 @@ import "dotenv/config";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 
+import { registerManagerAuthorizationRoutes } from "./admin/manager-authorize.js";
+import { registerAdminTenantSettingsRoutes } from "./admin/tenant-settings.js";
+import { registerAdminGiftReceiptRoutes } from "./admin/gift-receipts.js";
 import { registerAdminTicketsErrorsRoutes } from "./admin/tickets-errors.js";
 import { registerAuthRoutes } from "./auth/routes.js";
 import { registerPasswordResetRoutes } from "./auth/password-reset.js";
@@ -73,6 +76,9 @@ async function main() {
   await registerTicketRoutes(app);
   await registerTpvCatalogRoutes(app);
   await registerAdminTicketsErrorsRoutes(app);
+  await registerManagerAuthorizationRoutes(app);
+  await registerAdminTenantSettingsRoutes(app);
+  await registerAdminGiftReceiptRoutes(app);
 
   // Conexión perezosa: forzamos un primer query para fallar pronto si la
   // BD no está accesible (mejor mensaje que esperar al primer login).

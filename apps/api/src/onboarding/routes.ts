@@ -14,7 +14,7 @@ import type { FastifyInstance } from "fastify";
 
 import { Prisma } from "@mipiacetpv/db";
 
-import { requireOwner } from "../auth/middleware.js";
+import { requireOwner, requireOwnerOrManager } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
 import { encryptSecret } from "../crypto.js";
 import { loadEnv } from "../env.js";
@@ -89,7 +89,7 @@ export async function registerOnboardingRoutes(app: FastifyInstance): Promise<vo
 
   app.get(
     "/onboarding/sync-status",
-    { preHandler: requireOwner },
+    { preHandler: requireOwnerOrManager },
     async (request) => {
       const auth = request.auth!;
       const prisma = getPrisma();

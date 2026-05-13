@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 import { Prisma, TicketStatus } from "@mipiacetpv/db";
 import type { FastifyInstance } from "fastify";
 
+import { verifyManagerAuthorization } from "../auth/manager-authorization.js";
 import { getPrisma } from "../context.js";
 import { enqueueTicketUpload } from "../queues/ticket-upload.js";
 import { enqueueRefundUpload } from "../queues/refund-upload.js";
@@ -61,6 +62,9 @@ interface CreateTicketBody {
   printIntent?: boolean;
   emailIntent?: string;
   giftReceiptIntent?: boolean;
+  // B6 §2: si el descuento efectivo del ticket supera el umbral del
+  // tenant, exigimos un token emitido por POST /admin/auth/manager-authorize.
+  authorizationToken?: string;
 }
 
 export async function registerTicketRoutes(app: FastifyInstance): Promise<void> {
@@ -84,6 +88,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             printIntent: { type: "boolean" },
             emailIntent: { type: "string", maxLength: 320 },
             giftReceiptIntent: { type: "boolean" },
+            authorizationToken: { type: "string", minLength: 1, maxLength: 2048 },
             lines: {
               type: "array",
               minItems: 1,
@@ -212,6 +217,94 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         }
       }
 
+      // 4.b B6 §2: descuento efectivo vs umbral del tenant. El % se
+      // calcula sobre el subtotal bruto SIN IVA (antes de aplicar
+      // descuentos), porque es la métrica que entiende el comercio:
+      // "le estoy regalando un X% del precio de tarifa". Si supera el
+      // umbral, exigimos `authorizationToken` válido del encargado.
+      const tenantForDiscount = await prisma.tenant.findUniqueOrThrow({
+        where: { id: cashier.tid },
+        select: { discountThresholdPct: true },
+      });
+      const grossSubtotal = totals.subtotal + totals.discount;
+      const effectiveDiscountPct =
+        grossSubtotal > 0
+          ? Math.round((totals.discount / grossSubtotal) * 10000) / 100
+          : 0;
+      const thresholdPct = Number(tenantForDiscount.discountThresholdPct);
+      let discountAuthorizedBy: string | null = null;
+
+      if (effectiveDiscountPct > thresholdPct + 1e-6) {
+        if (!body.authorizationToken) {
+          return reply.code(403).send({
+            error: "MANAGER_AUTHORIZATION_REQUIRED",
+            message: `El descuento del ${effectiveDiscountPct.toFixed(
+              2,
+            )}% supera el umbral del tenant (${thresholdPct.toFixed(
+              2,
+            )}%). Pide al encargado que autorice con su PIN.`,
+            effectiveDiscountPct,
+            thresholdPct,
+          });
+        }
+        let authPayload;
+        try {
+          authPayload = verifyManagerAuthorization(body.authorizationToken);
+        } catch {
+          return reply.code(403).send({
+            error: "MANAGER_AUTHORIZATION_INVALID",
+            message:
+              "La autorización del encargado ha caducado o no es válida. Pide al encargado que vuelva a introducir su PIN.",
+          });
+        }
+        if (authPayload.tid !== cashier.tid) {
+          return reply.code(403).send({
+            error: "MANAGER_AUTHORIZATION_INVALID",
+            message: "La autorización no pertenece a este tenant.",
+          });
+        }
+        if (authPayload.purpose !== "discount-override") {
+          return reply.code(403).send({
+            error: "MANAGER_AUTHORIZATION_INVALID",
+            message: "La autorización no aplica a descuentos.",
+          });
+        }
+        if (effectiveDiscountPct > authPayload.context.maxDiscountPct + 1e-6) {
+          return reply.code(403).send({
+            error: "MANAGER_AUTHORIZATION_INSUFFICIENT",
+            message: `La autorización cubre hasta ${authPayload.context.maxDiscountPct.toFixed(
+              2,
+            )}% pero el descuento aplicado es del ${effectiveDiscountPct.toFixed(2)}%.`,
+          });
+        }
+        const manager = await prisma.user.findFirst({
+          where: { id: authPayload.sub, tenantId: cashier.tid, role: "MANAGER" },
+          select: { email: true },
+        });
+        if (!manager) {
+          // El manager fue borrado entre la emisión del token y el cobro
+          // (caso poco probable pero defendible). Rechazamos.
+          return reply.code(403).send({
+            error: "MANAGER_AUTHORIZATION_INVALID",
+            message: "El encargado autorizante ya no está activo en el tenant.",
+          });
+        }
+        discountAuthorizedBy = manager.email;
+        request.log.info(
+          {
+            event: "ticket.discount_authorized",
+            tenantId: cashier.tid,
+            registerId: cashier.rid,
+            cashierId: cashier.sub,
+            managerEmail: manager.email,
+            effectiveDiscountPct,
+            thresholdPct,
+            externalId: body.externalId,
+          },
+          "Ticket cobrado con descuento autorizado por encargado",
+        );
+      }
+
       // 5. Internal number atómico (incrementa register.ticketCounter).
       const next = await prisma.register.update({
         where: { id: cashier.rid },
@@ -241,6 +334,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             printIntent: body.printIntent ?? true,
             emailIntent: body.emailIntent ?? null,
             giftReceiptIntentAt: body.giftReceiptIntent ? new Date() : null,
+            discountAuthorizedBy,
             paidAt: new Date(),
             lines: {
               create: body.lines.map((l, i) => ({

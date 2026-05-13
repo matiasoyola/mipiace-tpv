@@ -67,6 +67,29 @@ export function clearTokens(): void {
   sessionStorage.removeItem(REFRESH_KEY);
 }
 
+export type AdminRole = "OWNER" | "MANAGER" | "CASHIER";
+
+// Lee el rol del JWT actual (B6 §1). El admin filtra sidebar y oculta
+// botones de mutación a MANAGER en función de este valor. Cuando no
+// hay sesión o el token está corrupto devolvemos null — la app fuerza
+// re-login.
+export function readCurrentRole(): AdminRole | null {
+  const tokens = readTokens();
+  if (!tokens) return null;
+  try {
+    const parts = tokens.accessToken.split(".");
+    if (parts.length !== 3) return null;
+    const payload = JSON.parse(atob(parts[1]!.replace(/-/g, "+").replace(/_/g, "/")));
+    const role = payload?.role;
+    if (role === "OWNER" || role === "MANAGER" || role === "CASHIER") {
+      return role;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,

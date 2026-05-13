@@ -131,12 +131,110 @@ const ERROR_TYPES: Array<{ value: string; label: string }> = [
   { value: "no_holded_key", label: "Sin API Key" },
 ];
 
+interface MeTenant {
+  tenant: {
+    lastIncrementalSyncAt: string | null;
+    hasHoldedKey: boolean;
+  };
+}
+
+interface TenantHealth {
+  level: "ok" | "warning" | "blocked";
+  reason: string;
+  hoursSinceSync: number | null;
+}
+
+function computeTenantHealth(tenant: MeTenant["tenant"]): TenantHealth {
+  if (!tenant.hasHoldedKey) {
+    return { level: "blocked", reason: "no_api_key", hoursSinceSync: null };
+  }
+  if (!tenant.lastIncrementalSyncAt) {
+    return { level: "warning", reason: "no_sync_ever", hoursSinceSync: null };
+  }
+  const ageMs = Date.now() - new Date(tenant.lastIncrementalSyncAt).getTime();
+  const hours = ageMs / 3_600_000;
+  if (hours >= 48) {
+    return { level: "blocked", reason: "no_sync_48h", hoursSinceSync: hours };
+  }
+  if (hours >= 24) {
+    return { level: "warning", reason: "no_sync_24h", hoursSinceSync: hours };
+  }
+  return { level: "ok", reason: "ok", hoursSinceSync: hours };
+}
+
+function HealthBanner({
+  tenant,
+}: {
+  tenant: MeTenant["tenant"];
+}) {
+  const health = computeTenantHealth(tenant);
+  if (health.level === "ok") return null;
+  const isBlocked = health.level === "blocked";
+  const title = isBlocked
+    ? "TPV bloqueado · Holded no responde"
+    : "Sincronización pendiente";
+  const desc =
+    health.reason === "no_api_key"
+      ? "La API Key de Holded no está configurada. Conéctala en Mi cuenta para reanudar la operativa."
+      : health.reason === "no_sync_ever"
+      ? "Todavía no hemos completado el primer sync incremental. Espera unos minutos o revisa el sync inicial."
+      : `Llevamos ${health.hoursSinceSync?.toFixed(0)} h sin contacto con Holded. Prueba la conexión en Mi cuenta o contacta soporte.`;
+  return (
+    <div
+      className={
+        isBlocked
+          ? "mb-5 flex items-start gap-3 bg-red-50 border border-red-200 rounded-2xl px-4 py-3"
+          : "mb-5 flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3"
+      }
+    >
+      <AlertCircle
+        className={isBlocked ? "w-4 h-4 mt-0.5 text-red-600" : "w-4 h-4 mt-0.5 text-amber-700"}
+      />
+      <div className="flex-1 min-w-0">
+        <div
+          className={
+            isBlocked
+              ? "text-[13.5px] font-semibold text-red-800"
+              : "text-[13.5px] font-semibold text-amber-800"
+          }
+        >
+          {title}
+        </div>
+        <div
+          className={
+            isBlocked ? "text-[12.5px] text-red-700 mt-0.5" : "text-[12.5px] text-amber-700 mt-0.5"
+          }
+        >
+          {desc}
+        </div>
+      </div>
+      <a
+        href="/admin/account"
+        className={
+          isBlocked
+            ? "shrink-0 h-9 inline-flex items-center px-3 rounded-lg bg-white border border-red-200 text-[12.5px] font-medium text-red-700 hover:bg-red-50"
+            : "shrink-0 h-9 inline-flex items-center px-3 rounded-lg bg-white border border-amber-200 text-[12.5px] font-medium text-amber-800 hover:bg-amber-50"
+        }
+      >
+        Probar conexión
+      </a>
+    </div>
+  );
+}
+
 export function TicketsErrorsPage() {
   const [items, setItems] = useState<SyncErrorEntry[] | null>(null);
   const [pendingCount, setPendingCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [selected, setSelected] = useState<SyncErrorEntry | null>(null);
+  const [me, setMe] = useState<MeTenant | null>(null);
+
+  useEffect(() => {
+    api<MeTenant>("/auth/me").then(setMe).catch(() => {
+      /* Si /auth/me falla, no pintamos banner. */
+    });
+  }, []);
 
   const load = useCallback(async (f: Filters) => {
     const qs = new URLSearchParams();
@@ -170,6 +268,8 @@ export function TicketsErrorsPage() {
         cuando hayas resuelto la causa (e.g. corregir SKU, contactar a soporte
         Holded). Hasta entonces, el ticket sigue cobrado en el TPV.
       </p>
+
+      {me && <HealthBanner tenant={me.tenant} />}
 
       {pendingCount > 0 && (
         <div className="mb-5 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-[13.5px] text-amber-800">

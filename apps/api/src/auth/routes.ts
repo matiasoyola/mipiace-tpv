@@ -7,7 +7,7 @@ import { decryptSecret, encryptSecret } from "../crypto.js";
 import { loadEnv } from "../env.js";
 import { probeFailureToHttpStatus, probeHoldedKey } from "../holded/probe.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
-import { requireOwner } from "./middleware.js";
+import { requireOwner, requireOwnerOrManager } from "./middleware.js";
 import {
   inspect as inspectRateLimit,
   ownerLoginRateLimit,
@@ -146,12 +146,20 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         await registerRateLimitFailure(rlKey);
         return reply.code(401).send(GENERIC);
       }
-      if (user.role !== "OWNER") {
-        // No es un fallo de credenciales (PIN correcto) — no aplicamos
-        // rate-limit. Igual devolvemos forbidden para no revelar más.
+      if (user.role === "CASHIER") {
+        // No es un fallo de credenciales (password correcto) — no aplicamos
+        // rate-limit. El cajero entra al TPV con PIN, no al admin con
+        // password.
         return reply.code(403).send({
-          error: "NOT_OWNER",
-          message: "Sólo el propietario entra al admin",
+          error: "CASHIER_NOT_ALLOWED_IN_ADMIN",
+          message:
+            "Los cajeros sólo pueden acceder desde el TPV con su PIN.",
+        });
+      }
+      if (user.role !== "OWNER" && user.role !== "MANAGER") {
+        return reply.code(403).send({
+          error: "NOT_OWNER_OR_MANAGER",
+          message: "Sólo propietarios o encargados pueden entrar al admin.",
         });
       }
       await resetRateLimit(rlKey);
@@ -231,7 +239,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     "/auth/logout-everywhere",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrManager,
       schema: { body: { type: "object", additionalProperties: false, properties: {} } },
     },
     async (request, reply) => {
@@ -253,7 +261,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     "/auth/me",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrManager,
     },
     async (request) => {
       const auth = request.auth!;
@@ -413,7 +421,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     "/auth/me/test-holded-connection",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrManager,
       schema: { body: { type: "object", additionalProperties: false, properties: {} } },
     },
     async (request, reply) => {
@@ -451,7 +459,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     "/auth/me/2fa/enable",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrManager,
       schema: { body: { type: "object", additionalProperties: false, properties: {} } },
     },
     async (request, reply) => {
@@ -492,7 +500,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     "/auth/me/2fa/confirm",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrManager,
       schema: {
         body: {
           type: "object",
@@ -539,7 +547,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     "/auth/me/2fa/disable",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrManager,
       schema: {
         body: {
           type: "object",

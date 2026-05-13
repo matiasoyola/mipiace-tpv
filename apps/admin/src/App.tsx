@@ -5,8 +5,10 @@ import { Check, Eye, EyeOff, KeyRound, RotateCcw } from "lucide-react";
 import { AdminShell } from "./AdminShell.js";
 import { CashiersPage } from "./pages/CashiersPage.js";
 import { DevicesPage } from "./pages/DevicesPage.js";
+import { GiftReceiptsPage } from "./pages/GiftReceiptsPage.js";
 import { ForgotPasswordPage, ResetPasswordPage } from "./pages/PasswordResetPages.js";
 import { SecurityPage } from "./pages/SecurityPage.js";
+import { SettingsPage } from "./pages/SettingsPage.js";
 import { StoreDetailPage, StoresPage } from "./pages/StoresPage.js";
 import { TicketsErrorsPage } from "./pages/TicketsErrorsPage.js";
 import { api, ApiError, clearTokens, readTokens, storeTokens } from "./api.js";
@@ -58,6 +60,8 @@ export function App() {
       <Route path="/admin/stores" element={<StoresPage />} />
       <Route path="/admin/stores/:storeId" element={<StoreDetailPage />} />
       <Route path="/admin/tickets-errors" element={<TicketsErrorsPage />} />
+      <Route path="/admin/settings" element={<SettingsPage />} />
+      <Route path="/admin/gift-receipts" element={<GiftReceiptsPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/admin/reset" element={<ResetPasswordPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
@@ -77,6 +81,13 @@ function RootRouter() {
       try {
         const me = await api<MeResponse>("/auth/me");
         if (cancelled) return;
+        // B6 §1: el MANAGER nunca pasa por onboarding (no puede conectar
+        // Holded ni mover el sync inicial). Va directo a la bandeja de
+        // tickets-errors, que es su pantalla operativa principal.
+        if (me.user.role === "MANAGER") {
+          navigate("/admin/tickets-errors", { replace: true });
+          return;
+        }
         if (!me.tenant.hasHoldedKey) navigate("/onboarding", { replace: true });
         else if (me.tenant.initialSyncStatus === "DONE")
           navigate("/admin/account", { replace: true });
@@ -586,11 +597,13 @@ function AccountPage() {
     .map((s) => s[0])
     .filter(Boolean)
     .join("");
+  const canEdit = me.user.role === "OWNER";
 
   return (
     <AdminShell title="Mi cuenta" initials={initials}>
       <FiscalProfileSection
         initial={fp}
+        readOnly={!canEdit}
         onSaved={(updated) => {
           setMe({ ...me, tenant: { ...me.tenant, fiscalProfile: updated } });
         }}
@@ -628,11 +641,19 @@ function AccountPage() {
             <RotateCcw className="w-3.5 h-3.5" />
             Probar conexión
           </OutlineButton>
-          <OutlineButton onClick={() => setShowRotateModal(true)}>
-            <KeyRound className="w-3.5 h-3.5" />
-            Cambiar API Key
-          </OutlineButton>
+          {canEdit && (
+            <OutlineButton onClick={() => setShowRotateModal(true)}>
+              <KeyRound className="w-3.5 h-3.5" />
+              Cambiar API Key
+            </OutlineButton>
+          )}
         </div>
+        {!canEdit && (
+          <p className="mt-3 text-[12px] text-slate-400">
+            Sólo el propietario puede rotar la API Key o editar los datos
+            fiscales.
+          </p>
+        )}
         {testMessage &&
           (testMessage.ok ? (
             <SuccessBanner message={testMessage.text} />
@@ -660,9 +681,11 @@ function AccountPage() {
 function FiscalProfileSection({
   initial,
   onSaved,
+  readOnly,
 }: {
   initial: FiscalProfile;
   onSaved: (fp: FiscalProfile) => void;
+  readOnly?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -713,7 +736,7 @@ function FiscalProfileSection({
             Estos datos van impresos al pie de cada ticket.
           </p>
         </div>
-        {!editing && (
+        {!editing && !readOnly && (
           <OutlineButton onClick={() => setEditing(true)} className="!h-9 text-[13px]">
             Editar
           </OutlineButton>

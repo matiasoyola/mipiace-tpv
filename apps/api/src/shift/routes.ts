@@ -4,6 +4,7 @@ import { Prisma } from "@mipiacetpv/db";
 
 import { getPrisma } from "../context.js";
 import { verifyPassword } from "../auth/passwords.js";
+import { getTenantHealthStatus } from "../tickets/health.js";
 import { requireCashierSession } from "./cashier-session.js";
 import { generateZReportPdf } from "./z-report.js";
 
@@ -72,6 +73,24 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
       const { cashOpening } = request.body as { cashOpening: number };
       const prisma = getPrisma();
       const now = new Date();
+
+      // B6 §3.2: si el tenant está bloqueado (sin API key o >48h sin
+      // sync), no permitimos abrir turno. El cobro local sigue funcionando
+      // (en turnos ya abiertos antes del bloqueo), pero no se abren
+      // nuevos hasta que el propietario reconecte Holded.
+      const health = await getTenantHealthStatus(prisma, cashier.tid, now);
+      if (health.level === "blocked") {
+        return reply.code(409).send({
+          error: "TENANT_BLOCKED",
+          message:
+            health.reason === "no_api_key"
+              ? "Falta la API Key de Holded. Avisa al propietario para reconectarla."
+              : "Llevamos más de 48h sin sincronizar con Holded. Contacta soporte.",
+          reason: health.reason,
+          blockedAt: health.blockedAt,
+          lastSuccessfulSyncAt: health.lastSuccessfulSyncAt,
+        });
+      }
 
       // Sanity-check: no permitir abrir si ya hay uno abierto en la caja.
       const open = await prisma.shift.findFirst({
@@ -148,6 +167,26 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
         managerPin?: string;
       };
       const prisma = getPrisma();
+
+      // B6 §3.2: cerrar turno también requiere health no bloqueado. Si
+      // estamos en `blocked`, el cierre dispararía la generación del Z
+      // y la marcación de tickets sin posibilidad de sync — preferimos
+      // que el cajero llame a soporte. Cuando el tenant vuelva a `ok` o
+      // `warning`, el cierre fluye normal.
+      const health = await getTenantHealthStatus(prisma, cashier.tid);
+      if (health.level === "blocked") {
+        return reply.code(409).send({
+          error: "TENANT_BLOCKED",
+          message:
+            health.reason === "no_api_key"
+              ? "Falta la API Key de Holded. El propietario debe reconectarla antes de cerrar el turno."
+              : "Llevamos más de 48h sin sincronizar con Holded. Contacta soporte antes de cerrar el turno.",
+          reason: health.reason,
+          blockedAt: health.blockedAt,
+          lastSuccessfulSyncAt: health.lastSuccessfulSyncAt,
+        });
+      }
+
       const shift = await prisma.shift.findFirst({
         where: { id: shiftId, register: { storeId: { not: undefined } } },
         select: {

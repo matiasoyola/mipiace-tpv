@@ -70,6 +70,20 @@ export function CheckoutOverlay(props: {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState<TicketResponse | null>(null);
+  // B6 §2: si el descuento del ticket supera el umbral del tenant, el
+  // backend devuelve 403 MANAGER_AUTHORIZATION_REQUIRED en el primer
+  // intento. Abrimos el modal de autorización; al validar el PIN del
+  // encargado guardamos `authorizationToken` y reintentamos la misma
+  // request con el token adjunto.
+  const [authPrompt, setAuthPrompt] = useState<
+    | null
+    | {
+        effectiveDiscountPct: number;
+        thresholdPct: number;
+      }
+  >(null);
+  const [authToken, setAuthToken] = useState<string | null>(null);
+  const [authorizedBy, setAuthorizedBy] = useState<string | null>(null);
 
   const total = props.totals.total;
   const paymentsSum = useMemo(
@@ -120,7 +134,7 @@ export function CheckoutOverlay(props: {
     setPayments((curr) => curr.filter((_, j) => j !== i));
   }
 
-  async function submit() {
+  async function submit(overrideToken?: string) {
     setSubmitting(true);
     setError(null);
     try {
@@ -155,12 +169,36 @@ export function CheckoutOverlay(props: {
           printIntent,
           emailIntent: emailEnabled && emailIntent ? emailIntent : undefined,
           giftReceiptIntent: giftReceipt,
+          authorizationToken: overrideToken ?? authToken ?? undefined,
         },
       });
       setConfirmed(res);
     } catch (err) {
-      if (err instanceof ApiError) setError(err.message);
-      else setError("Error inesperado");
+      if (err instanceof ApiError) {
+        if (err.code === "MANAGER_AUTHORIZATION_REQUIRED") {
+          const data = err.data as
+            | { effectiveDiscountPct?: number; thresholdPct?: number }
+            | null;
+          setAuthPrompt({
+            effectiveDiscountPct: data?.effectiveDiscountPct ?? 0,
+            thresholdPct: data?.thresholdPct ?? 0,
+          });
+          setSubmitting(false);
+          return;
+        }
+        if (
+          err.code === "MANAGER_AUTHORIZATION_INVALID" ||
+          err.code === "MANAGER_AUTHORIZATION_INSUFFICIENT"
+        ) {
+          // Token caducó o no cubre el descuento. Limpia y vuelve a pedir.
+          setAuthToken(null);
+          setAuthorizedBy(null);
+          setError(err.message);
+          setSubmitting(false);
+          return;
+        }
+        setError(err.message);
+      } else setError("Error inesperado");
     } finally {
       setSubmitting(false);
     }
@@ -308,8 +346,14 @@ export function CheckoutOverlay(props: {
               {error}
             </div>
           )}
+          {authorizedBy && (
+            <div className="text-[12px] text-emerald-700 bg-emerald-50 rounded-xl px-3 py-2 mb-3 flex items-center gap-2">
+              <Check className="w-3.5 h-3.5" />
+              Descuento autorizado por {authorizedBy}
+            </div>
+          )}
           <button
-            onClick={submit}
+            onClick={() => submit()}
             disabled={!ready || submitting}
             className="mt-auto w-full h-16 bg-mipiace-coral hover:bg-mipiace-coral-dark text-white font-medium text-[16px] rounded-2xl flex items-center justify-between px-6 disabled:opacity-50"
           >
@@ -321,6 +365,148 @@ export function CheckoutOverlay(props: {
           </button>
         </div>
       </div>
+      {authPrompt && (
+        <ManagerAuthorizationModal
+          context={authPrompt}
+          onClose={() => setAuthPrompt(null)}
+          onAuthorized={(token, managerEmail) => {
+            setAuthToken(token);
+            setAuthorizedBy(managerEmail);
+            setAuthPrompt(null);
+            // Reintentamos automáticamente — el cajero no debe pulsar
+            // dos veces. Pasamos el token explícitamente para evitar
+            // condicionar la llamada al state ya en vuelo.
+            submit(token);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ManagerAuthorizationModal({
+  context,
+  onClose,
+  onAuthorized,
+}: {
+  context: { effectiveDiscountPct: number; thresholdPct: number };
+  onClose: () => void;
+  onAuthorized: (token: string, managerEmail: string) => void;
+}) {
+  const [email, setEmail] = useState("");
+  const [pin, setPin] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await apiWithCashier<{
+        authorizationToken: string;
+        managerEmail: string;
+      }>("/admin/auth/manager-authorize", {
+        method: "POST",
+        body: {
+          managerEmail: email,
+          managerPin: pin,
+          reason: "discount_over_threshold",
+          ticketContext: {
+            discountPct: context.effectiveDiscountPct,
+          },
+        },
+      });
+      onAuthorized(res.authorizationToken, res.managerEmail);
+    } catch (err) {
+      if (err instanceof ApiError) setError(err.message);
+      else setError("Error inesperado");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] bg-mipiace-ink/70 flex items-center justify-center p-4">
+      <form
+        onSubmit={onSubmit}
+        className="bg-white w-full max-w-md rounded-3xl p-6 md:p-7"
+      >
+        <h2 className="text-[18px] font-semibold text-mipiace-ink mb-1">
+          Autorización del encargado
+        </h2>
+        <p className="text-[13px] text-slate-500 mb-5">
+          El descuento aplicado del{" "}
+          <strong className="text-mipiace-ink">
+            {context.effectiveDiscountPct.toFixed(2)}%
+          </strong>{" "}
+          supera el umbral del tenant ({context.thresholdPct.toFixed(2)}%).
+          Pide al encargado que introduzca su PIN para autorizar este cobro.
+        </p>
+        <div className="space-y-3">
+          <div>
+            <label
+              htmlFor="managerEmail"
+              className="block text-[13px] font-medium text-mipiace-ink-soft mb-1"
+            >
+              Email del encargado
+            </label>
+            <input
+              id="managerEmail"
+              name="managerEmail"
+              type="email"
+              autoComplete="username"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              className="w-full h-12 px-3.5 rounded-xl bg-mipiace-stone border border-transparent text-[14.5px] focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="managerPin"
+              className="block text-[13px] font-medium text-mipiace-ink-soft mb-1"
+            >
+              PIN
+            </label>
+            <input
+              id="managerPin"
+              name="managerPin"
+              type="password"
+              autoComplete="off"
+              inputMode="numeric"
+              value={pin}
+              onChange={(e) => setPin(e.target.value)}
+              required
+              minLength={4}
+              maxLength={16}
+              className="w-full h-12 px-3.5 rounded-xl bg-mipiace-stone border border-transparent text-[14.5px] tabular-nums tracking-widest focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none"
+            />
+          </div>
+        </div>
+        {error && (
+          <div className="text-[12.5px] text-red-700 bg-red-50 rounded-xl p-3 mt-4">
+            {error}
+          </div>
+        )}
+        <div className="flex gap-2.5 mt-5">
+          <button
+            type="submit"
+            disabled={busy || !email || !pin}
+            className="flex-1 h-12 bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[14px] font-medium rounded-2xl disabled:opacity-50"
+          >
+            {busy ? "Validando…" : "Autorizar"}
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="h-12 px-5 bg-mipiace-stone hover:bg-slate-100 text-mipiace-ink text-[14px] font-medium rounded-2xl disabled:opacity-50"
+          >
+            Cancelar
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

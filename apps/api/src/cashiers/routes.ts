@@ -1,13 +1,16 @@
 import type { FastifyInstance } from "fastify";
 
 import { getPrisma } from "../context.js";
-import { requireOwner } from "../auth/middleware.js";
+import { requireOwner, requireOwnerOrManager } from "../auth/middleware.js";
 import { hashPassword } from "../auth/passwords.js";
 
 // CRUD mínimo de cajeros/encargados (B3 §1.4 ampliado). Sólo el OWNER
 // crea o revoca cajeros (§15 nucleus). El alta exige un PIN inicial —
 // el propietario lo comunica al cajero por canal seguro, y el cajero
 // puede pedir reset al propietario si lo olvida.
+//
+// B6 §1: MANAGER puede listar cajeros y resetear su PIN (operativa diaria),
+// pero NO crearlos ni borrarlos (eso queda en el OWNER).
 //
 // Roles aceptados: MANAGER y CASHIER. OWNER se crea sólo vía /signup.
 
@@ -17,7 +20,7 @@ const pinFormat = "^[0-9]{4,8}$";
 export async function registerCashiersRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     "/cashiers",
-    { preHandler: requireOwner },
+    { preHandler: requireOwnerOrManager },
     async (request) => {
       const auth = request.auth!;
       const prisma = getPrisma();
@@ -109,7 +112,7 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
   app.patch(
     "/cashiers/:cashierId/pin",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrManager,
       schema: {
         params: {
           type: "object",

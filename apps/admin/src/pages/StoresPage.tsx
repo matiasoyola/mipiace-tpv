@@ -8,7 +8,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Building2, Calculator, ChevronRight } from "lucide-react";
 
 import { AdminShell } from "../AdminShell.js";
-import { api, ApiError, clearTokens } from "../api.js";
+import { api, ApiError, clearTokens, readCurrentRole } from "../api.js";
 import {
   CenteredLoader,
   FieldError,
@@ -105,13 +105,15 @@ export function StoresPage() {
         <h2 className="text-[16px] font-semibold text-mipiace-ink">
           {stores.length} {stores.length === 1 ? "tienda" : "tiendas"}
         </h2>
-        <PrimaryButton
-          type="button"
-          onClick={() => setShowNewModal(true)}
-          className="!w-auto !h-10 !px-4 !text-[13.5px]"
-        >
-          + Nueva tienda
-        </PrimaryButton>
+        {readCurrentRole() === "OWNER" && (
+          <PrimaryButton
+            type="button"
+            onClick={() => setShowNewModal(true)}
+            className="!w-auto !h-10 !px-4 !text-[13.5px]"
+          >
+            + Nueva tienda
+          </PrimaryButton>
+        )}
       </div>
       {stores.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200 p-7 text-center">
@@ -122,15 +124,19 @@ export function StoresPage() {
             Aún no tienes tiendas
           </h2>
           <p className="text-[13.5px] text-slate-500 mt-1 mb-4">
-            Crea la primera tienda para empezar a dar de alta cajas.
+            {readCurrentRole() === "OWNER"
+              ? "Crea la primera tienda para empezar a dar de alta cajas."
+              : "El propietario debe crear la primera tienda."}
           </p>
-          <PrimaryButton
-            type="button"
-            onClick={() => setShowNewModal(true)}
-            className="!w-auto !h-10 !px-4 !text-[13.5px]"
-          >
-            + Nueva tienda
-          </PrimaryButton>
+          {readCurrentRole() === "OWNER" && (
+            <PrimaryButton
+              type="button"
+              onClick={() => setShowNewModal(true)}
+              className="!w-auto !h-10 !px-4 !text-[13.5px]"
+            >
+              + Nueva tienda
+            </PrimaryButton>
+          )}
         </div>
       ) : (
         <div className="space-y-2.5">

@@ -97,6 +97,18 @@ const fakePrisma = {
       return { id: data.id };
     }),
   },
+  tenant: {
+    // B6 §2.4: el handler de POST /tickets lee el umbral de descuento
+    // del tenant. Por defecto devolvemos 10% (mismo default que la
+    // migración) — los tests que necesiten variar el umbral pueden
+    // sobreescribir esta función.
+    findUniqueOrThrow: vi.fn(async () => ({
+      discountThresholdPct: { toString: () => "10" },
+    })),
+  },
+  user: {
+    findFirst: vi.fn(async () => null),
+  },
   $transaction: vi.fn(async (fn: any) => {
     if (typeof fn === "function") return await fn(fakePrisma);
     return await Promise.all(fn);
@@ -338,5 +350,137 @@ describe("POST /tickets", () => {
     });
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toBe("SHIFT_NOT_OPEN");
+  });
+
+  // ── B6 §2: descuento sobre umbral exige authorizationToken ────────────
+  it("descuento ≤ umbral → 201 sin token", async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/tickets",
+      headers: { authorization: `Bearer ${cashierToken()}` },
+      payload: {
+        externalId: randomUUID(),
+        registerId: REGISTER,
+        shiftId: SHIFT,
+        // 10% descuento sobre 1.40 = exactamente el umbral (10%).
+        lines: [
+          {
+            nameSnapshot: "Cafe",
+            sku: "CAFE-1",
+            units: 1,
+            unitPrice: 1.4,
+            discountPct: 10,
+            taxRate: 10,
+          },
+        ],
+        payments: [{ method: "CASH", amount: 1.39 }],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
+  it("descuento > umbral sin token → 403 MANAGER_AUTHORIZATION_REQUIRED", async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/tickets",
+      headers: { authorization: `Bearer ${cashierToken()}` },
+      payload: {
+        externalId: randomUUID(),
+        registerId: REGISTER,
+        shiftId: SHIFT,
+        lines: [
+          {
+            nameSnapshot: "Cafe",
+            sku: "CAFE-1",
+            units: 1,
+            unitPrice: 10,
+            discountPct: 50, // 50% > 10%
+            taxRate: 10,
+          },
+        ],
+        payments: [{ method: "CASH", amount: 5.5 }],
+      },
+    });
+    expect(res.statusCode).toBe(403);
+    const body = res.json();
+    expect(body.error).toBe("MANAGER_AUTHORIZATION_REQUIRED");
+    expect(body.effectiveDiscountPct).toBe(50);
+    expect(body.thresholdPct).toBe(10);
+  });
+
+  it("descuento > umbral con token válido → 201 + discountAuthorizedBy persistido", async () => {
+    // Stub temporal: el handler busca el MANAGER en BD para validar el
+    // token. Le dejamos a uno con email conocido.
+    (fakePrisma.user.findFirst as any).mockImplementationOnce(async () => ({
+      email: "encargado@test.com",
+    }));
+    const { signManagerAuthorization } = await import(
+      "../src/auth/manager-authorization.js"
+    );
+    const authToken = signManagerAuthorization({
+      sub: "00000000-0000-0000-0000-0000000000aa",
+      tid: TENANT,
+      purpose: "discount-override",
+      reason: "discount_over_threshold",
+      context: { maxDiscountPct: 100 },
+    });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/tickets",
+      headers: { authorization: `Bearer ${cashierToken()}` },
+      payload: {
+        externalId: randomUUID(),
+        registerId: REGISTER,
+        shiftId: SHIFT,
+        lines: [
+          {
+            nameSnapshot: "Cafe",
+            sku: "CAFE-1",
+            units: 1,
+            unitPrice: 10,
+            discountPct: 50,
+            taxRate: 10,
+          },
+        ],
+        payments: [{ method: "CASH", amount: 5.5 }],
+        authorizationToken: authToken,
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    // El campo discountAuthorizedBy quedó persistido en el ticket. El
+    // mock guarda el row en `tickets` Map indexado por externalId.
+    const stored = [...tickets.values()].pop()!;
+    expect(stored.discountAuthorizedBy).toBe("encargado@test.com");
+  });
+
+  it("descuento > umbral con token inválido → 403 MANAGER_AUTHORIZATION_INVALID", async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/tickets",
+      headers: { authorization: `Bearer ${cashierToken()}` },
+      payload: {
+        externalId: randomUUID(),
+        registerId: REGISTER,
+        shiftId: SHIFT,
+        lines: [
+          {
+            nameSnapshot: "Cafe",
+            sku: "CAFE-1",
+            units: 1,
+            unitPrice: 10,
+            discountPct: 50,
+            taxRate: 10,
+          },
+        ],
+        payments: [{ method: "CASH", amount: 5.5 }],
+        authorizationToken: "garbage.token.value",
+      },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("MANAGER_AUTHORIZATION_INVALID");
   });
 });

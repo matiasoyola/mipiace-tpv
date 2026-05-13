@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { ChevronDown, Users } from "lucide-react";
 
 import { AdminShell } from "../AdminShell.js";
-import { api, ApiError, clearTokens } from "../api.js";
+import { api, ApiError, clearTokens, readCurrentRole } from "../api.js";
 import {
   CenteredLoader,
   FieldError,
@@ -68,12 +68,15 @@ export function CashiersPage() {
   }
 
   if (!cashiers) return <CenteredLoader label="Cargando cajeros…" />;
+  const isOwner = readCurrentRole() === "OWNER";
 
   return (
     <AdminShell title="Cajeros">
       <p className="text-[13.5px] text-slate-500 mb-5 -mt-2">
         Cajeros (rol CASHIER) y encargados (rol MANAGER) que operan el TPV.
-        Sólo tú creas y revocas estos accesos.
+        {isOwner
+          ? " Sólo tú creas y revocas estos accesos."
+          : " Sólo el propietario crea o revoca accesos. Los encargados podéis cambiar PINs."}
       </p>
 
       {success && <SuccessBanner message={success} />}
@@ -85,13 +88,15 @@ export function CashiersPage() {
             ? "Sin cajeros activos"
             : `${cashiers.length} cajero${cashiers.length === 1 ? "" : "s"}`}
         </h2>
-        <PrimaryButton
-          type="button"
-          onClick={() => setShowCreate(true)}
-          className="!w-auto !h-10 !px-4 !text-[13.5px]"
-        >
-          Añadir cajero
-        </PrimaryButton>
+        {isOwner && (
+          <PrimaryButton
+            type="button"
+            onClick={() => setShowCreate(true)}
+            className="!w-auto !h-10 !px-4 !text-[13.5px]"
+          >
+            Añadir cajero
+          </PrimaryButton>
+        )}
       </div>
 
       {cashiers.length === 0 ? (
@@ -108,6 +113,7 @@ export function CashiersPage() {
             <CashierCard
               key={c.id}
               cashier={c}
+              canRevoke={isOwner}
               onResetPin={() => setResetting(c)}
               onRevoke={() => onRevoke(c)}
             />
@@ -142,10 +148,12 @@ export function CashiersPage() {
 
 function CashierCard({
   cashier,
+  canRevoke,
   onResetPin,
   onRevoke,
 }: {
   cashier: CashierRow;
+  canRevoke: boolean;
   onResetPin: () => void;
   onRevoke: () => void;
 }) {
@@ -169,12 +177,14 @@ function CashierCard({
       <OutlineButton onClick={onResetPin} className="!h-9 !text-[12.5px]">
         Cambiar PIN
       </OutlineButton>
-      <OutlineButton
-        onClick={onRevoke}
-        className="!h-9 !text-[12.5px] !text-mipiace-coral-dark hover:!bg-mipiace-coral-soft !border-mipiace-coral/30"
-      >
-        Revocar
-      </OutlineButton>
+      {canRevoke && (
+        <OutlineButton
+          onClick={onRevoke}
+          className="!h-9 !text-[12.5px] !text-mipiace-coral-dark hover:!bg-mipiace-coral-soft !border-mipiace-coral/30"
+        >
+          Revocar
+        </OutlineButton>
+      )}
     </div>
   );
 }

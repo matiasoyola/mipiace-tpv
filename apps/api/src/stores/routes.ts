@@ -16,7 +16,7 @@
 
 import type { FastifyInstance } from "fastify";
 
-import { requireOwner } from "../auth/middleware.js";
+import { requireOwner, requireOwnerOrManager } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
 
 export async function registerStoresRoutes(app: FastifyInstance): Promise<void> {
@@ -25,7 +25,7 @@ export async function registerStoresRoutes(app: FastifyInstance): Promise<void> 
   // cache local poblado por el sync inicial — no llama a Holded en vivo.
   app.get(
     "/admin/warehouses",
-    { preHandler: requireOwner },
+    { preHandler: requireOwnerOrManager },
     async (request) => {
       const auth = request.auth!;
       const prisma = getPrisma();
@@ -40,7 +40,7 @@ export async function registerStoresRoutes(app: FastifyInstance): Promise<void> 
 
   app.get(
     "/admin/stores",
-    { preHandler: requireOwner },
+    { preHandler: requireOwnerOrManager },
     async (request) => {
       const auth = request.auth!;
       const prisma = getPrisma();
@@ -200,7 +200,7 @@ export async function registerStoresRoutes(app: FastifyInstance): Promise<void> 
   app.get(
     "/admin/stores/:storeId",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrManager,
       schema: {
         params: {
           type: "object",
@@ -490,7 +490,7 @@ export async function registerStoresRoutes(app: FastifyInstance): Promise<void> 
   // devices; en B4 ya tenemos creación explícita.
   app.get(
     "/admin/registers",
-    { preHandler: requireOwner },
+    { preHandler: requireOwnerOrManager },
     async (request) => {
       const auth = request.auth!;
       const prisma = getPrisma();

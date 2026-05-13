@@ -20,7 +20,7 @@ import {
   updateProductWithGetBack,
 } from "@mipiacetpv/holded-client";
 
-import { requireOwner } from "../auth/middleware.js";
+import { requireOwnerOrManager } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
 import { decryptSecret } from "../crypto.js";
 import { loadEnv } from "../env.js";
@@ -31,7 +31,7 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
   app.post(
     "/catalog/sync-now",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrManager,
       schema: { body: { type: "object", additionalProperties: false, properties: {} } },
     },
     async (request, reply) => {
@@ -81,7 +81,7 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
   // auto-sku no pudo resolver (Holded silenció el PUT, ADR-010).
   app.get(
     "/catalog/sku-review",
-    { preHandler: requireOwner },
+    { preHandler: requireOwnerOrManager },
     async (request) => {
       const auth = request.auth!;
       const prisma = getPrisma();
@@ -123,7 +123,7 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
   app.post(
     "/catalog/sku-review/:productId/assign",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrManager,
       schema: {
         params: {
           type: "object",
@@ -241,7 +241,7 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
   app.post(
     "/catalog/sku-review/:productId/mark-unsellable",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrManager,
       schema: {
         params: {
           type: "object",
@@ -274,7 +274,7 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
 
   app.get(
     "/catalog/sync-status",
-    { preHandler: requireOwner },
+    { preHandler: requireOwnerOrManager },
     async (request) => {
       const auth = request.auth!;
       const prisma = getPrisma();

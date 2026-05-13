@@ -52,8 +52,15 @@ import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
 const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
 
 interface HealthStatus {
+  // B6 §3: el backend devuelve `level` + `reason` calculados (no
+  // recalculamos en el cliente para mantener el cliente "tonto" y
+  // consistente entre admin/TPV).
+  level: "ok" | "warning" | "blocked";
+  reason: string;
   hasHoldedKey: boolean;
   lastIncrementalSyncAt: string | null;
+  lastSyncAgeMs: number | null;
+  blockedAt: string | null;
   pendingSyncCount: number;
   syncFailedCount: number;
 }
@@ -562,20 +569,31 @@ export function SalePage(props: SalePageProps) {
 
 function HealthBanner({ health }: { health: HealthStatus | null }) {
   if (!health) return null;
-  const ageMin = health.lastIncrementalSyncAt
-    ? Math.round((Date.now() - new Date(health.lastIncrementalSyncAt).getTime()) / 60_000)
-    : null;
-  if (!health.hasHoldedKey) {
+  // Rojo bloqueante (B6 §3.3): >48h sin sync o sin API key. Abrir/cerrar
+  // turno está deshabilitado en backend (409 TENANT_BLOCKED) y la UI lo
+  // anuncia aquí. La venta sigue operativa: el cobro local nunca se
+  // bloquea para no dejar al negocio sin caja.
+  if (health.level === "blocked") {
+    const hours = health.lastSyncAgeMs
+      ? Math.round(health.lastSyncAgeMs / 3_600_000)
+      : null;
     return (
       <Banner color="red">
-        Holded no está conectado. La venta seguirá funcionando offline; el cierre se bloqueará hasta que el propietario rotee la API Key.
+        <strong>TPV bloqueado · </strong>
+        {health.reason === "no_api_key"
+          ? "La cuenta de Holded no está conectada. Contacta al propietario para reanudar la operativa."
+          : `Llevamos ${hours ?? "+48"} h sin sincronizar con Holded. Abrir y cerrar turno está deshabilitado. Contacta soporte.`}
       </Banner>
     );
   }
-  if (ageMin != null && ageMin > 60 * 24) {
+  // Ámbar de aviso (B6 §3.3): >24h sin sync. Operativa normal.
+  if (health.level === "warning") {
+    const hours = health.lastSyncAgeMs
+      ? Math.round(health.lastSyncAgeMs / 3_600_000)
+      : null;
     return (
-      <Banner color="red">
-        Holded no ha respondido en más de 24h. Cierra el turno cuando se recupere la conexión.
+      <Banner color="amber">
+        Sincronización pendiente · llevamos {hours ?? "—"} h sin contacto con Holded.
       </Banner>
     );
   }

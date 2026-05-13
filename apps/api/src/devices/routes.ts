@@ -3,7 +3,7 @@ import { randomInt } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 
 import { getPrisma } from "../context.js";
-import { requireOwner } from "../auth/middleware.js";
+import { requireOwnerOrManager } from "../auth/middleware.js";
 import { evaluateDeviceAlert } from "./alerts.js";
 import {
   generateDeviceToken,
@@ -20,16 +20,13 @@ function newSixDigitCode(): string {
 }
 
 export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> {
-  // Genera código de emparejamiento (owner o manager). Por ahora
-  // requireOwner cubre OWNER; tras B3 los MANAGER tendrán access token
-  // con role = MANAGER y reusaremos un `requireOwnerOrManager` (lo
-  // dejo como TODO documentado en B3-done.md). Como B3 sólo activa el
-  // alta de cajeros con role=MANAGER por defecto, el caso del MANAGER
-  // generando códigos llega en B4 con la pantalla de "Operativa".
+  // Genera código de emparejamiento (owner o manager — B6 §1 cierra el
+  // TODO heredado de B3/B4: el MANAGER puede generar códigos desde la
+  // pantalla de Dispositivos).
   app.post(
     "/admin/registers/:registerId/pairing-codes",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrManager,
       schema: {
         params: {
           type: "object",
@@ -111,7 +108,7 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
   // Lista de dispositivos del tenant + sus pairing codes activos.
   app.get(
     "/admin/devices",
-    { preHandler: requireOwner },
+    { preHandler: requireOwnerOrManager },
     async (request) => {
       const auth = request.auth!;
       const prisma = getPrisma();
@@ -151,7 +148,7 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
   // Pairing codes activos (no consumidos, no caducados).
   app.get(
     "/admin/pairing-codes",
-    { preHandler: requireOwner },
+    { preHandler: requireOwnerOrManager },
     async (request) => {
       const auth = request.auth!;
       const prisma = getPrisma();
@@ -338,7 +335,7 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
   app.post(
     "/admin/devices/:deviceId/revoke",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrManager,
       schema: {
         params: {
           type: "object",

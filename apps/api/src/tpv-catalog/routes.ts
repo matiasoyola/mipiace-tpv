@@ -6,6 +6,7 @@ import type { FastifyInstance } from "fastify";
 
 import { requireCashierSession } from "../shift/cashier-session.js";
 import { getPrisma } from "../context.js";
+import { getTenantHealthStatus } from "../tickets/health.js";
 
 export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<void> {
   // Catálogo paginado. El TPV cachea el resultado en IndexedDB la primera
@@ -115,21 +116,17 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
 
   // Health del sync con Holded para el banner "Sincronizando…" / "Sin
   // conexión" / "Holded no accesible" (§5 modo degradado). El TPV pollea
-  // este endpoint cada ~30 s.
+  // este endpoint cada ~30 s. B6 §3.1 amplía la respuesta con `level`,
+  // `reason`, `lastSuccessfulSyncAt` y `blockedAt` para que el cliente
+  // pinte tres estados (oculto/ámbar/rojo) sin recalcular umbrales.
   app.get(
     "/tpv/health/holded",
     { preHandler: requireCashierSession },
     async (request) => {
       const cashier = request.cashier!;
       const prisma = getPrisma();
-      const [tenant, pendingCount, failedCount] = await Promise.all([
-        prisma.tenant.findUniqueOrThrow({
-          where: { id: cashier.tid },
-          select: {
-            lastIncrementalSyncAt: true,
-            holdedApiKeyCiphertext: true,
-          },
-        }),
+      const [health, pendingCount, failedCount] = await Promise.all([
+        getTenantHealthStatus(prisma, cashier.tid),
         prisma.ticket.count({
           where: { tenantId: cashier.tid, status: "PENDING_SYNC" },
         }),
@@ -137,13 +134,14 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
           where: { tenantId: cashier.tid, status: "SYNC_FAILED" },
         }),
       ]);
-      const lastSyncAgeMs = tenant.lastIncrementalSyncAt
-        ? Date.now() - tenant.lastIncrementalSyncAt.getTime()
-        : null;
       return {
-        hasHoldedKey: !!tenant.holdedApiKeyCiphertext,
-        lastIncrementalSyncAt: tenant.lastIncrementalSyncAt?.toISOString() ?? null,
-        lastSyncAgeMs,
+        level: health.level,
+        reason: health.reason,
+        hasHoldedKey: health.hasHoldedKey,
+        lastIncrementalSyncAt: health.lastSuccessfulSyncAt,
+        lastSuccessfulSyncAt: health.lastSuccessfulSyncAt,
+        lastSyncAgeMs: health.lastSyncAgeMs,
+        blockedAt: health.blockedAt,
         pendingSyncCount: pendingCount,
         syncFailedCount: failedCount,
       };

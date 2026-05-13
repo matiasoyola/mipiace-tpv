@@ -124,6 +124,14 @@ model Tenant {
   // empareja o cuando un device conocido aparece desde un país distinto
   // (§17.4). Default true.
   deviceNewLoginAlertEnabled     Boolean           @default(true) @map("device_new_login_alert_enabled")
+  // Umbral de descuento (%) que el cajero puede aplicar sin autorización
+  // del encargado (B6 §2). Si supera este porcentaje, el TPV pide PIN
+  // encargado y el backend exige `authorizationToken` en POST /tickets.
+  discountThresholdPct           Decimal           @default(10) @map("discount_threshold_pct") @db.Decimal(5, 2)
+  // Si true, el cajero puede buscar contactos Holded desde el TPV. Si
+  // false, sólo OWNER/MANAGER puede asociar contacto a un ticket. Por
+  // defecto true para no romper el flujo actual.
+  cashierSearchableContacts      Boolean           @default(true) @map("cashier_searchable_contacts")
   createdAt                      DateTime          @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt                      DateTime          @updatedAt @map("updated_at") @db.Timestamptz()
 
@@ -466,6 +474,10 @@ model Ticket {
   // Timestamp del momento en que el cajero pulsa "Imprimir ticket
   // regalo" (§5.2). Nullable; sólo se rellena si se solicitó.
   giftReceiptIntentAt DateTime?    @map("gift_receipt_intent_at") @db.Timestamptz()
+  // Email del MANAGER que autorizó este ticket con descuento superior
+  // al umbral (B6 §2). Sólo se rellena si el descuento efectivo del
+  // ticket supera `tenant.discountThresholdPct`. NULL en el caso normal.
+  discountAuthorizedBy String?    @map("discount_authorized_by")
   createdAt           DateTime     @default(now()) @map("created_at") @db.Timestamptz()
   paidAt              DateTime?    @map("paid_at") @db.Timestamptz()
   syncedAt            DateTime?    @map("synced_at") @db.Timestamptz()

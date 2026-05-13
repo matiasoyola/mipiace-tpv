@@ -2,7 +2,8 @@
 //
 // Cubre tickets y refunds en la misma vista — para el propietario es
 // la misma incidencia: "Holded rechazó un documento, ¿qué hago?".
-// Todos los endpoints son `requireOwner`.
+// Desde B6 §1 todos los endpoints son `requireOwnerOrManager`: el
+// MANAGER también gestiona la bandeja (retry / mark-resolved / edit-sku).
 //
 //   GET  /admin/tickets/sync-errors                — lista combinada.
 //   GET  /admin/tickets/:id/holded-payload-preview — diagnostico.
@@ -14,7 +15,7 @@
 import { Prisma, TicketStatus } from "@mipiacetpv/db";
 import type { FastifyInstance } from "fastify";
 
-import { requireOwner } from "../auth/middleware.js";
+import { requireOwnerOrManager } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
 import { enqueueRefundUpload } from "../queues/refund-upload.js";
 import { enqueueTicketUpload } from "../queues/ticket-upload.js";
@@ -32,7 +33,7 @@ export async function registerAdminTicketsErrorsRoutes(
   app.get(
     "/admin/tickets/sync-errors",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrManager,
       schema: {
         querystring: {
           type: "object",
@@ -200,7 +201,7 @@ export async function registerAdminTicketsErrorsRoutes(
   app.get(
     "/admin/tickets/:id/holded-payload-preview",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrManager,
       schema: {
         params: {
           type: "object",
@@ -226,7 +227,7 @@ export async function registerAdminTicketsErrorsRoutes(
   app.get(
     "/admin/refunds/:id/holded-payload-preview",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrManager,
       schema: {
         params: {
           type: "object",
@@ -257,7 +258,7 @@ export async function registerAdminTicketsErrorsRoutes(
   app.post(
     "/admin/tickets/:id/retry-sync",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrManager,
       schema: {
         params: {
           type: "object",
@@ -290,7 +291,7 @@ export async function registerAdminTicketsErrorsRoutes(
   app.post(
     "/admin/refunds/:id/retry-sync",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrManager,
       schema: {
         params: {
           type: "object",
@@ -329,7 +330,7 @@ export async function registerAdminTicketsErrorsRoutes(
   app.post(
     "/admin/tickets/:id/mark-resolved",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrManager,
       schema: {
         params: {
           type: "object",
@@ -384,7 +385,7 @@ export async function registerAdminTicketsErrorsRoutes(
   app.post(
     "/admin/refunds/:id/mark-resolved",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrManager,
       schema: {
         params: {
           type: "object",
@@ -446,7 +447,7 @@ export async function registerAdminTicketsErrorsRoutes(
   app.post(
     "/admin/tickets/:id/edit-line-sku",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrManager,
       schema: {
         params: {
           type: "object",
@@ -507,7 +508,7 @@ export async function registerAdminTicketsErrorsRoutes(
   app.post(
     "/admin/refunds/:id/edit-line-sku",
     {
-      preHandler: requireOwner,
+      preHandler: requireOwnerOrManager,
       schema: {
         params: {
           type: "object",

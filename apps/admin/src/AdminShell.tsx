@@ -8,16 +8,18 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Building2,
   Calculator,
+  Gift,
   KeyRound,
   Menu,
   Package,
+  Settings,
   Shield,
   User,
   Users,
   X,
 } from "lucide-react";
 
-import { api, ApiError } from "./api.js";
+import { api, ApiError, readCurrentRole } from "./api.js";
 
 import { LogoutEverywhereModal } from "./components/LogoutEverywhereModal.js";
 import { Logo } from "./Logo.js";
@@ -31,20 +33,25 @@ interface NavItem {
   // Si está presente, se pinta un punto rojo en la nav cuando el badge
   // sea > 0. Se usa en B5 para la bandeja de tickets `SYNC_FAILED`.
   badge?: "syncErrors";
+  // B6 §1: si está restringido a OWNER, el MANAGER no ve el ítem en su
+  // sidebar. Las páginas restringidas también validan el rol en cliente,
+  // pero ocultarlo del sidebar evita confusión.
+  ownerOnly?: boolean;
 }
 
 const NAV_ITEMS: NavItem[] = [
-  // B5 activa Holded como sección "Sync errors" — la pestaña
-  // dedicada a tickets / refunds que Holded rechazó. El resto del
-  // mantenimiento de la conexión (key, conexión, fiscal) sigue
-  // viviendo en "Mi cuenta" y "Tiendas".
+  // B5 activa Holded como sección "Sync errors". B6 añade Ajustes y
+  // Tickets regalo. "Ajustes" sólo lo ve el OWNER (es donde edita los
+  // flags del tenant); "Tickets regalo" lo ven ambos.
   { to: "/admin/stores", label: "Tiendas", icon: Building2 },
   { to: "/admin/devices", label: "Dispositivos", icon: Calculator },
   { to: "/admin/cashiers", label: "Cajeros", icon: Users },
   { to: "/admin/products", label: "Productos", icon: Package },
+  { to: "/admin/gift-receipts", label: "Tickets regalo", icon: Gift },
   { to: "/admin/account", label: "Mi cuenta", icon: User },
   { to: "/admin/security", label: "Seguridad", icon: Shield },
   { to: "/admin/tickets-errors", label: "Holded", icon: KeyRound, badge: "syncErrors" },
+  { to: "/admin/settings", label: "Ajustes", icon: Settings, ownerOnly: true },
 ];
 
 // Hook compartido entre desktop sidebar y mobile drawer: pollea el
@@ -208,9 +215,13 @@ function NavList({
   onNavigate?: () => void;
 }) {
   const syncErrorsCount = useSyncErrorsCount();
+  const role = readCurrentRole();
+  const visibleItems = NAV_ITEMS.filter((item) =>
+    item.ownerOnly ? role === "OWNER" : true,
+  );
   return (
     <nav className="space-y-1.5">
-      {NAV_ITEMS.map((item) => {
+      {visibleItems.map((item) => {
         const Icon = item.icon;
         const active = currentPath.startsWith(item.to);
         const base =
