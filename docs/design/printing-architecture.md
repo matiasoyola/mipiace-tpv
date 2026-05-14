@@ -6,20 +6,52 @@ proyecto, con pros/cons claros, para que la decisión sea informada.
 
 ## TL;DR
 
-**B-Print fase 1** soporta **tres arquitecturas en paralelo** porque
-comparten el mismo serializer ESC/POS y sólo cambia el transporte:
+**Posicionamiento del producto:** mipiacetpv es un TPV digital. El
+ticket nativo es **digital (PDF + email + visualización en
+pantalla)**. La impresión térmica es un **complemento opcional**
+que añadimos cuando el cliente lo pida — nunca un requisito para
+operar ni un gatekeeper del lanzamiento.
 
-1. **A · Agente local en Docker** (primaria, multi-puesto): default
-   para bares con varias cajas, restaurantes, retail con varias
-   tiendas. Hardware: AP12 + Epson TM-T20III LAN + cajón APG + RPi
-   pre-configurada. Coste piloto: ~530€/tienda.
-2. **H · Bluetooth directo** (secundaria, single-puesto): default
-   para Thalia, peluquería, food truck, catering, mercadillo y
-   cualquier escenario 1 AP12 + 1 impresora sin LAN. Coste piloto:
-   ~290€/tienda. **Sin host extra.**
-3. **D · WebUSB directo** (terciaria): para cliente que quiere
-   impresora cableada USB sin host extra y acepta Chrome como
-   navegador único.
+**B-Print fase 1 = sólo P (PDF + email).** ~2-3 días Code. Sale a
+piloto inmediatamente. Sin hardware. Sin cables. Sin agente. Sin
+pairing.
+
+1. **P · PDF client-side + email** (PRIMARIA, ÚNICA REQUERIDA para
+   piloto): render del modelo abstracto de ticket a PDF 80mm vía
+   `jsPDF`/`pdf-lib` dentro de la PWA. La PWA ofrece descarga,
+   envío por email al cliente (alimenta worker `ticket-email`),
+   visualización en pantalla, y QR de descarga para que el cliente
+   escanee con su móvil. **Sin hardware. Funciona offline. Coste:
+   1-2 días.**
+
+**Complementos opcionales (B-Print fase 2, on-demand por piloto):**
+
+2. **H · Bluetooth directo** — para cliente que pida ticket físico
+   y tenga 1 puesto + 1 impresora. Coste cliente: ~150€ (impresora
+   TM-P20 BT). Coste dev: 3-4 días.
+3. **A · Agente local Docker** — para multi-puesto (bares,
+   restaurantes). Coste cliente: ~530€. Coste dev: 1 semana.
+4. **D · WebUSB directo** — para AP12 con impresora USB cableada.
+   Coste cliente: bajo. Coste dev: 2-3 días.
+
+Los tres complementos comparten el `EscPosRenderer` del modelo de
+ticket que P ya implementa, por lo que el coste marginal de
+añadirlos uno a uno cuando un piloto los pida es bajo.
+
+**Implicación estratégica:**
+
+- Thalia (y los 5 pilotos) pueden arrancar **HOY** con AP12 + PWA +
+  PDF/email. Sin esperar hardware, sin configurar nada físico.
+- Comercial: "TPV sin cables. Tu cliente recibe el ticket en su
+  móvil al instante." Pricing SaaS fee + hardware mínimo (AP12).
+- Onboarding sin fricción. Soporte mínimo (nada de "no imprime").
+- Coherente con la tendencia digital del mercado (España todavía
+  habitualmente entrega ticket físico, pero la ley no lo obliga
+  salvo casos específicos; el ticket digital es legal si el cliente
+  lo acepta).
+- Si un piloto insiste en impresora física, le añadimos el
+  transporte específico en 3-7 días — pero no bloqueamos el resto
+  por esa minoría.
 
 **Variantes futuras** (NO en B-Print fase 1):
 - **A1 · Agente Android empotrado** para TPVs all-in-one con
@@ -356,6 +388,73 @@ similar).
 
 ---
 
+### Arquitectura P · PDF client-side (fallback universal y output canónico)
+
+**Descripción:** la PWA contiene un renderer `TicketPdfRenderer`
+que toma el mismo modelo abstracto de ticket que alimenta A/H/D y
+produce un PDF de 80mm de ancho (mismo formato visual que el
+térmico) vía `jsPDF` o `pdf-lib`. No interviene el diálogo nativo
+de impresión del sistema operativo en ningún momento.
+
+**Comunicación:**
+```
+Modelo Ticket ──TicketPdfRenderer──► Blob PDF en memoria
+                                          │
+                                          ├──► Download local (a)
+                                          ├──► Email cliente (b)
+                                          └──► Vista pantalla (c)
+```
+
+**Tres usos del PDF en B-Print fase 1:**
+
+(a) **Descarga local** si no hay transporte físico configurado o si
+el cajero decide "no imprimir" — el PDF se guarda en el dispositivo
+del cliente final (móvil) vía share API o como adjunto al email.
+
+(b) **Envío por email al cliente** automático cuando el ticket
+tiene `customer.email` poblado. Alimenta el worker `ticket-email`
+existente (planificado en B5/B6), elimina la necesidad de un
+template HTML duplicado del ticket.
+
+(c) **Visualización en pantalla** para que el cajero muestre el
+ticket al cliente sin imprimir (showroom, reposición de copia,
+"el cliente no quiere ticket pero pide ver el total").
+
+**Pros:**
+- **Sin hardware extra**: no requiere impresora, agente, BT ni USB.
+- **Funciona offline** (render client-side, respeta ADR-007).
+- **Resilencia universal**: si A/H/D fallan o no están configurados,
+  el cobro siempre completa con PDF.
+- **Onboarding inmediato**: cliente puede vender el día 1 sin haber
+  configurado nada de impresión física.
+- **Output canónico para email + factura A4 futura**: el mismo
+  renderer (con variante "modo factura") alimenta la conversión
+  ticket→factura del v2.
+- **Coste dev muy bajo**: 1-2 días Code porque reutiliza 100% del
+  modelo de ticket abstracto y `jsPDF`/`pdf-lib` son librerías
+  maduras y estables.
+- **Auditoría**: re-impresión de cualquier ticket histórico desde
+  admin sin necesidad de hardware.
+
+**Cons:**
+- **No es impresión térmica real**: el cliente final tiene PDF
+  digital, no papel. Para casos legales que exijan ticket físico
+  (España: cualquier venta a consumidor final si pide ticket), no
+  sustituye al térmico — es complemento, no reemplazo.
+- **Necesita pantalla o canal digital del cliente**: si el cliente
+  no tiene móvil/email, la copia digital es inútil para él. Sigue
+  útil para nosotros como auditoría.
+- **`jsPDF` añade ~150KB al bundle** de la PWA. Aceptable.
+
+**Veredicto:** **transporte universal en B-Print fase 1**, no
+fallback secundario. Siempre disponible, siempre funciona. Los
+transportes físicos (A/H/D) son lo que el cliente final llamará
+"imprimir el ticket"; P es lo que mantiene el flujo de cobro
+intacto cuando esos fallan o no están configurados, y alimenta los
+canales digitales del ticket.
+
+---
+
 ### Arquitectura H · Bluetooth printer via WebBluetooth
 
 **Descripción:** impresora térmica con Bluetooth. PWA (Chrome
@@ -611,6 +710,7 @@ stockear hardware. Diferenciador serio frente a competencia.
 | **F · Bridge appliance** | Medio (kit 50€) | 1-2 sem | ✓ | ✓ | ✓ | ✓ | Total |
 | **G · Cloud print** | Recurrente $10-30/mes | 3d | ✓ | ✓ | ✓ | ✓ | Alto |
 | **H · Bluetooth** | Muy bajo (BT 40-150€, sin host) | 3-4d | △ (vía BT) | △ (vía BT) | ✗ | ✗ | Alto |
+| **P · PDF client-side** | 0€ (sin hardware) | 1-2d | N/A | N/A | ✓ | ✓ | Total |
 
 ## 5. Decisión de hardware impresora
 
@@ -656,80 +756,120 @@ sin driver propio.
 
 ## 6. Propuesta concreta para piloto
 
-### 6.1 Mapeo de los 5 pilotos a arquitecturas
+### 6.1 Mapeo de los 5 pilotos al producto digital
 
-| Piloto | Tipo | Arquitectura | Hardware | Coste aprox |
+| Piloto | Tipo | Setup piloto | Hardware | Coste aprox |
 |---|---|---|---|---|
-| **Librería Thalia** | Retail unipersonal | **H · Bluetooth** | AP12 + Epson TM-P20 BT 80mm (~150€) + cajón APG con cable Y a impresora BT | ~290€ |
-| **Tienda 1** | Retail pequeño | **H · Bluetooth** (default) o A si pide multi-puesto | AP12 + Epson BT o LAN + cajón | 290-530€ |
-| **Tienda 2** | Retail pequeño | **H · Bluetooth** (default) | igual que Tienda 1 | 290-530€ |
-| **Bar 1** | Hostelería multi-puesto | **A · Agente Docker** | AP12s (uno por puesto) + Epson TM-T20III LAN + cajón + RPi5 | ~530€ por puesto + 280€ infra común |
-| **Bar 2** | Hostelería multi-puesto | **A · Agente Docker** | igual que Bar 1 | igual |
-| **Peluquería** | Servicios cita | **H · Bluetooth** | AP12 + Epson BT + cajón | ~290€ |
+| **Librería Thalia** | Retail unipersonal | **P · ticket digital** (PDF + email + QR) | AP12 que ya tiene | 0€ adicional |
+| **Tienda 1** | Retail pequeño | **P · ticket digital** | AP12 | 0€ adicional |
+| **Tienda 2** | Retail pequeño | **P · ticket digital** | AP12 | 0€ adicional |
+| **Bar 1** | Hostelería multi-puesto | **P · ticket digital** para clientes, evaluar **A** si necesitan comanda física en cocina | AP12 por puesto | 0€ adicional |
+| **Bar 2** | Hostelería multi-puesto | **P · ticket digital** + **A** opcional | AP12 por puesto | 0€ adicional inicial |
+| **Peluquería** | Servicios cita | **P · ticket digital** | AP12 | 0€ adicional |
 
 **Implicaciones operativas:**
-- **4 de 5 pilotos arrancan con H** (sin host extra, sin Pi, sin LAN
-  configurada). Solo los 2 bares requieren A completo con Pi.
-- Sólo necesitamos **2 RPi5** para piloto (uno por bar), no 5.
-- AP12 actuales (3 unidades) cubren Thalia + Bar 1 (1 puesto inicial)
-  + 1 tienda. Comprar 2-3 más para Bar 2 (multi-puesto) y resto.
 
-### 6.2 Setup recomendado tipo (arquitectura A · multi-puesto bar)
+- **Los 5 pilotos arrancan con cero hardware adicional** más allá
+  del AP12 que ya tenemos (3 unidades) + 2-3 que compraremos según
+  necesite Bar 2 y resto.
+- **Nada de Pi, nada de cajón, nada de impresora** para el primer
+  despliegue.
+- **Hardware térmico se introduce on-demand** sólo si un piloto lo
+  pide explícitamente tras probar el digital. Caso más probable:
+  comanda de cocina en bares — pero eso se decide tras pilotar el
+  flujo digital con el cliente.
+
+### 6.2 Setup tipo (P · ticket digital, único requerido para piloto)
 
 **Hardware:**
 - 1 AP12-1506 por puesto.
-- 1 Epson TM-T20III LAN por local (~200€).
-- 1 cajón APG-compatible RJ11 (~70€).
+- **Nada más.**
+
+**Software:**
+- PWA mipiacetpv en el AP12.
+- TicketPdfRenderer genera el PDF al confirmar cobro.
+- 4 acciones disponibles tras cada cobro (configurables por
+  tienda):
+  - **Email automático** si `customer.email` poblado.
+  - **QR en pantalla** que el cliente escanea con su móvil para
+    descargar el PDF.
+  - **Descarga directa** al dispositivo del cajero (luego AirDrop /
+    WhatsApp / lo que prefiera).
+  - **Visualización en pantalla** para que el cliente vea el ticket
+    sin descargarlo.
+
+### 6.3 Complemento opcional A (multi-puesto bar, on-demand)
+
+**Cuándo se añade:** si un bar piloto, tras pilotar el digital,
+pide ticket físico para el cliente final O comanda física para
+cocina.
+
+**Hardware:**
+- 1 Epson TM-T20III LAN (~200€).
+- 1 cajón APG-compatible RJ11 (~70€, opcional).
 - 1 Raspberry Pi 5 (~80€) ejecutando el agente local — o
   reutilizar Mac mini / mini-PC si el cliente ya tiene.
 
 **Software:**
-- PWA mipiacetpv en cada AP12.
-- Print-agent Docker en el Raspberry Pi.
-- Conectados a la WiFi del local + Ethernet para impresora.
+- Print-agent Docker en el Raspberry Pi (workspace
+  `packages/print-agent/`, B-Print fase 2).
 
-### 6.3 Setup recomendado tipo (arquitectura H · single-puesto)
+### 6.4 Complemento opcional H (single-puesto, on-demand)
+
+**Cuándo se añade:** si un retail/peluquería piloto, tras pilotar
+el digital, pide ticket físico para el cliente final.
 
 **Hardware:**
-- 1 AP12-1506.
-- 1 Epson TM-T20III Bluetooth (~150€) o **TM-m30III** premium
-  (~280€, BT+LAN+USB en un solo equipo, recomendada si presupuesto
-  lo permite porque facilita migración futura a A).
-- 1 cajón APG-compatible con cable Y al puerto DK de la impresora
-  (~70€).
+- 1 Epson TM-P20 Bluetooth (~150€) o **TM-m30III** premium
+  (~280€, BT+LAN+USB en un solo equipo).
+- 1 cajón APG-compatible (~70€, opcional, con cable Y al puerto DK
+  de la impresora).
 - **Cero host extra. Cero cables LAN.**
 
 **Software:**
-- PWA mipiacetpv en el AP12. Pairing BT desde la PWA al instalar.
+- Implementación H (WebBluetooth) en la PWA — workspace
+  `packages/bluetooth-transport/`, B-Print fase 2.
 
-### 6.4 Roadmap de implementación B-Print
+### 6.5 Roadmap de implementación B-Print
 
-**B-Print fase 1 (~10 días Code):**
+**B-Print fase 1 (~2-3 días Code): SÓLO P · ticket digital**
 
-1. Workspace nuevo `packages/escpos/` con el serializer compartido
-   (cabecera fiscal, líneas, IVA, cierre de cajón). Reutilizado por
-   todas las arquitecturas.
-2. Workspace `packages/print-agent/` (Node + TypeScript) para A.
-3. Endpoints HTTP del agente: `/print`, `/cash-drawer/open`,
-   `/printer/status`, `/health`.
-4. Imagen Docker `mipiacetpv/print-agent` publicada en GHCR.
-5. Cliente PWA con **transporte enchufable** (`AgentTransport`,
-   `BluetoothTransport`, `WebUsbTransport`) seleccionable por
-   tienda en admin.
-6. Implementación H (WebBluetooth) con UX de pairing + estado de
-   conexión + botón reconectar.
-7. Implementación D (WebUSB) como tercer transporte.
-8. Endpoint admin `/admin/print-agents` para registrar agentes por
-   tienda + asignar transporte/IP/MAC BT.
-9. Test de impresión desde admin con botón "Imprimir prueba".
-10. Estado tiempo real en header TPV (icono impresora verde/
-    ámbar/rojo) que conoce el transporte activo.
+Único bloque requerido para piloto. Sin hardware. Sin esperas.
 
-**B-Print fase 2 (~3-4 días Code, sólo si piloto lo pide):**
+1. Workspace nuevo `packages/ticket-model/` con el modelo abstracto
+   de ticket (cabecera fiscal, líneas, IVA, totales, footer) que
+   alimentará a todos los renderers presentes y futuros.
+2. Workspace `packages/ticket-pdf/` con `TicketPdfRenderer` que
+   serializa el modelo a PDF 80mm vía `jsPDF` / `pdf-lib`.
+3. Worker `ticket-email` enriquecido para adjuntar el PDF
+   generado (ya estaba planificado en B5/B6 sin PDF concreto;
+   ahora se cierra).
+4. UI PWA "Tras cobro" con 4 acciones:
+   - Email automático si `customer.email` poblado.
+   - QR generado on-the-fly que apunta a un endpoint público
+     temporal `/tickets/:publicId/pdf` (signed URL TTL 24h).
+   - Descarga directa al dispositivo del cajero.
+   - Visualización en pantalla (modal).
+5. Admin: panel "Comunicación de ticket" por tienda (qué acciones
+   están habilitadas por defecto, plantilla de email, copy del QR).
+6. Tests E2E del flujo digital: PDF generado tiene los campos
+   correctos, email se manda, QR resuelve a PDF correcto, signed
+   URL caduca.
 
-- Auto-discovery mDNS del agente para A (ahora mismo IP manual con
-  DHCP reservation).
-- Auto-update del container Docker.
+**B-Print fase 2 (on-demand, sólo cuando un piloto lo pida):**
+
+Cada complemento se construye contra el hardware específico del
+piloto que lo solicita.
+
+- **H · WebBluetooth** (~3-4 días): cuando un retail/peluquería
+  pida ticket físico.
+- **A · Agente Docker** (~1 semana): cuando un bar pida comanda
+  física en cocina o ticket físico para cliente final.
+- **D · WebUSB** (~2-3 días): si algún piloto tiene impresora USB
+  cableada al AP12.
+
+Comparten `EscPosRenderer` (nuevo workspace `packages/escpos/`)
+que serializa el mismo `ticket-model` a bytes ESC/POS.
 
 **B-Print fase 3 (futura, v2):**
 
@@ -738,61 +878,78 @@ sin driver propio.
   primero, Imin segundo).
 - E · WebSocket reverso del agente al backend para gestión de
   flotas multi-tenant.
+- mDNS auto-discovery del agente A.
+- Auto-update del container Docker.
 
 ## 7. Decisiones cerradas (criterio CTO)
 
-Cerradas con criterio propio sobre las preguntas que tenía abiertas.
-Si en algún punto Matías prefiere otra cosa, lo cambiamos.
+Cerradas con criterio propio. Si en algún punto Matías prefiere otra
+cosa, lo cambiamos.
 
-1. **Host del agente para clientes A** → opción mixta. Para los 2
-   bares piloto vendemos **Raspberry Pi 5 pre-configurada** como
-   parte del kit (~80€, control total, sin depender de equipo del
-   cliente). Para clientes futuros que ya tengan Mac mini / mini-PC,
-   ofrecemos instalación remota como opción. **Razón:** los bares
-   son escenario crítico (caer la impresora = caer el servicio),
-   queremos control. Para retail solo H, no aplica.
+1. **Impresión térmica no es bloqueante para piloto.** El producto
+   es TPV digital, ticket digital es nativo, térmica es
+   complemento on-demand. **Razón:** el mundo va hacia el ticket
+   digital, hardware = fricción + coste + soporte. Bloquear el
+   lanzamiento del piloto por una impresora es estratégicamente
+   absurdo.
 
-2. **Kit completo vs cliente compra** → **kit completo "Mipiacetpv
-   Starter"** con margen pequeño nuestro. **Razón:** simplifica
-   comercial (un precio cerrado), reduce soporte (sabemos qué tiene
-   cada cliente), y los 5 pilotos están esperando — fricción de
-   "compra estas 4 cosas en estos 4 sitios" mata conversión.
+2. **B-Print fase 1 = sólo P (PDF + email + QR + visualización).**
+   ~2-3 días Code. **Razón:** desbloquea piloto inmediato, sin
+   compras, sin esperas, sin pairing. Los 5 pilotos pueden arrancar
+   esta semana.
 
-3. **WebUSB en fase 1 o v2** → **en fase 1**, junto a H. **Razón:**
-   el coste marginal es ~2-3 días Code porque el serializer ESC/POS
-   ya está compartido, sólo cambia el transporte. Cubre el caso de
-   "cliente con AP12 y Epson USB conectada directa" sin tener que
-   comprar BT ni Pi.
+3. **Hardware térmico se introduce on-demand por piloto.** Cuando
+   un piloto pruebe el digital y pida físico, escribimos B-Print
+   fase 2 contra su hardware. **Razón:** validamos demanda real
+   antes de invertir tiempo y dinero. Posible que ningún piloto
+   pida físico tras probar el digital. Posible también que la
+   comanda de cocina sí lo requiera en bares — lo veremos.
 
-4. **Agent por tenant o por tienda** → **por tienda**. Cada
-   `Store` tiene un `printAgentId` opcional + transporte
-   configurado. **Razón:** modelo más simple, escala mejor cuando
-   un tenant tiene varias tiendas, alineado con el modelo Store/
-   Register de B4.
+4. **Cuando se añada A (multi-puesto bar):** RPi5 pre-configurada
+   como parte del kit (~80€, control total) + Epson TM-T20III LAN
+   + cajón APG opcional. **Razón:** los bares son escenario crítico,
+   queremos control del host.
 
-5. **mDNS o IP manual** → **IP manual con DHCP reservation** en
-   fase 1, mDNS en fase 2 si los pilotos se quejan. **Razón:**
-   mDNS en Chrome Android es flaky, IP manual con DHCP
-   reservation en el router del cliente es ~5 min de setup y
-   100% fiable.
+5. **Cuando se añada H (single-puesto):** Epson TM-P20 BT (~150€)
+   o TM-m30III premium si quieren versatilidad futura. Sin host
+   extra.
+
+6. **Agent A: por tienda**, no por tenant. Cada `Store` tiene un
+   `printTransport` configurable. **Razón:** modelo más simple,
+   alineado con Store/Register de B4.
+
+7. **Cuando se añada A: IP manual con DHCP reservation** en el
+   router del cliente, no mDNS. **Razón:** mDNS en Chrome Android
+   es flaky, IP manual es 5 min de setup y 100% fiable.
+
+8. **Cuando se añada D: ningún cliente piloto lo necesita hoy.**
+   Sólo si aparece caso concreto.
+
+9. **Posicionamiento comercial:** "TPV sin cables. Ticket digital
+   instantáneo en el móvil de tu cliente. Impresora opcional."
 
 ## 8. Próximos pasos
 
-1. **B7.5 (taxes fix)** sigue en curso por Code — bloqueante
-   anterior a B-Print.
-2. Cuando B7.5 cierre, escribo el prompt **B-Print** (B8) con el
-   alcance de arriba: serializer compartido + agente Docker + BT
-   + WebUSB + admin de transportes.
-3. Antes de empezar B-Print **comprar 1 Epson TM-T20III LAN + 1
-   Epson TM-P20 BT + 1 cajón APG + 1 RPi5** para validación
-   física. Coste validación: ~500€.
-4. Code construye B-Print contra el hardware real. Validamos los
-   3 transportes (A, H, D) E2E.
-5. Script de instalación de cliente A en RPi5 + manual breve para
-   pairing H + manual breve para WebUSB.
-6. Desplegamos al primer piloto. Recomendado **Thalia primero**
-   porque H es la arquitectura más simple y la valida sin depender
-   del setup de bares.
+1. **B7.5 (taxes fix) cerrado y pusheado** (commit `10ba9db`,
+   2026-05-13). Sin bloqueantes.
+2. **Escribo el prompt B-Print fase 1** (B8) con alcance acotado:
+   `packages/ticket-model/` + `packages/ticket-pdf/` + worker
+   `ticket-email` enriquecido + UI "Tras cobro" con 4 acciones +
+   admin de comunicación de ticket. ~2-3 días Code.
+3. **Cero hardware nuevo a comprar.** Los 3 AP12 actuales bastan
+   para arrancar los primeros 3 pilotos. Se compran 2 AP12 más si
+   los 5 pilotos avanzan en paralelo y los bares quieren
+   multi-puesto.
+4. Code construye B-Print fase 1. Validación E2E del flujo
+   digital completo sin necesidad de hardware térmico.
+5. **Desplegamos al primer piloto inmediatamente.** Recomendado
+   **Thalia primero**: 1 puesto, retail, flujo de cobro simple,
+   ideal para validar la experiencia digital antes de añadir
+   complejidad.
+6. **Tras 2-3 semanas con pilotos en digital**, evaluamos qué
+   complementos térmicos pide cada cliente. Sólo entonces
+   escribimos B-Print fase 2 contra el hardware específico que el
+   piloto solicite.
 
 ---
 
@@ -801,38 +958,57 @@ Si en algún punto Matías prefiere otra cosa, lo cambiamos.
 Reescritura propuesta de ADR-006 en `docs/04-stack-y-decisiones.md`:
 
 ```
-ADR-006 · Impresión multi-transporte con serializer ESC/POS compartido
+ADR-006 · Ticket digital nativo + impresión térmica como complemento opcional
 
-Decisión: implementamos B-Print con tres transportes en paralelo y
-un único serializer ESC/POS compartido:
+Decisión: mipiacetpv es un TPV de ticket digital. El producto nativo
+entrega el ticket vía PDF + email + QR + visualización en pantalla,
+todo client-side desde la PWA. La impresión térmica es un
+complemento opcional on-demand, NO un requisito para operar ni un
+gatekeeper del lanzamiento.
 
-- A · Agente local Docker en LAN del cliente, vía HTTP local. Default
-  para escenarios multi-puesto (bares, restaurantes, retail con
-  varias cajas).
-- H · WebBluetooth directo desde la PWA a impresora BT. Default para
-  escenarios single-puesto sin LAN configurada (Thalia, peluquería,
-  food truck, catering).
+B-Print fase 1 entrega únicamente el ticket digital (P):
+`packages/ticket-model/` + `packages/ticket-pdf/` + worker
+`ticket-email` enriquecido. ~2-3 días Code. Cero hardware. Cero
+configuración por cliente. Desbloquea el piloto inmediatamente.
+
+B-Print fase 2 (cuando un piloto pida físico tras probar el digital)
+añade transportes térmicos compartiendo el `EscPosRenderer` del
+mismo modelo de ticket:
+
+- A · Agente local Docker en LAN del cliente, vía HTTP local.
+  Cuando un bar/restaurante pida comanda física o ticket físico
+  multi-puesto.
+- H · WebBluetooth directo desde la PWA a impresora BT. Cuando un
+  retail/peluquería single-puesto pida ticket físico.
 - D · WebUSB directo desde la PWA a impresora USB conectada al
-  AP12. Caso minoritario, coste marginal por compartir serializer.
+  AP12. Caso minoritario.
 
-Cada Store tiene un `printTransport` configurable (A/H/D) + datos
-del transporte (IP del agente, MAC de la BT, o vendor/product USB).
+Cada Store tiene un `printTransport` configurable (default = solo P,
+sin transporte físico). Cuando se añade físico, se elige A, H o D +
+datos específicos. P sigue activo como fallback siempre.
 
-Razón: el backend en VPS Hostinger NO puede abrir TCP al rango
-privado del cliente, así que cualquier solución requiere
-ejecución en el lado cliente. Soportar A+H+D en paralelo cuesta
-~10 días Code (vs ~7 días sólo A) y cubre el 100% de los escenarios
-de los 5 pilotos esperando, evitando que clientes pequeños paguen
-por hardware host (Pi) que no necesitan. Cumple ADR-011 (PWA pura,
-ESC/POS estándar, cero SDK propietario).
+Razón estratégica: el mundo va hacia el ticket digital. Hardware
+térmico es fricción + coste + soporte. Bloquear el lanzamiento del
+piloto por una impresora va contra la tendencia del mercado y
+contra los intereses comerciales del proyecto (los 5 pilotos están
+esperando). El producto debe poder operar sin impresora; quien la
+quiera, la añade como complemento.
+
+Razón técnica: el backend en VPS Hostinger NO puede abrir TCP al
+rango privado del cliente, así que cualquier transporte físico
+requiere ejecución en el lado cliente. P (PDF client-side) sí
+ejecuta 100% en la PWA y respeta ADR-007 (offline-friendly) y
+ADR-011 (PWA pura, ESC/POS estándar, cero SDK propietario).
 
 Alternativas descartadas (con razón):
 - App Android nativa wrapping PWA (viola ADR-011).
 - IPP directo (sin formato ticket ESC/POS, descartado tras §03.B).
 - Cloud print (coste recurrente, dependencia externa).
 - WS reverso (más complejo, reservado para v2 con gestión flotas).
+- "Imprimir → guardar como PDF" del diálogo nativo del sistema
+  (UX rota, inconsistente entre versiones Android, márgenes A4).
 
-Variantes futuras (no en B-Print fase 1):
+Variantes futuras (no en B-Print fase 1 ni 2):
 - A1 · Agente Android empotrado para TPVs all-in-one con impresora
   integrada (Sunmi/Imin/PAX). Activado cuando entre cliente con ese
   hardware o cuando v2 venda SKU integrado.
