@@ -7,6 +7,7 @@ import websocket from "@fastify/websocket";
 import { registerManagerAuthorizationRoutes } from "./admin/manager-authorize.js";
 import { registerAdminTenantSettingsRoutes } from "./admin/tenant-settings.js";
 import { registerAdminGiftReceiptRoutes } from "./admin/gift-receipts.js";
+import { registerAdminTicketDeliveryRoutes } from "./admin/ticket-delivery.js";
 import { registerAdminTicketsErrorsRoutes } from "./admin/tickets-errors.js";
 import { registerAuthRoutes } from "./auth/routes.js";
 import { registerPasswordResetRoutes } from "./auth/password-reset.js";
@@ -33,6 +34,8 @@ import { startTicketUploadWorker } from "./workers/ticket-upload-worker.js";
 import { startRefundUploadWorker } from "./workers/refund-upload-worker.js";
 import { startTicketEmailWorker } from "./workers/ticket-email-worker.js";
 import { registerTicketRoutes } from "./tickets/routes.js";
+import { registerTicketDigitalRoute } from "./tickets/digital-route.js";
+import { registerPublicTicketPdfRoute } from "./tickets/public-pdf-route.js";
 import { registerTpvCatalogRoutes } from "./tpv-catalog/routes.js";
 
 async function main() {
@@ -87,12 +90,15 @@ async function main() {
   await registerTableOperativaRoutes(app);
   await registerTableGroupingRoutes(app);
   await registerStoreWebSocketRoute(app);
+  await registerPublicTicketPdfRoute(app);
   await registerTicketRoutes(app);
+  await registerTicketDigitalRoute(app);
   await registerTpvCatalogRoutes(app);
   await registerAdminTicketsErrorsRoutes(app);
   await registerManagerAuthorizationRoutes(app);
   await registerAdminTenantSettingsRoutes(app);
   await registerAdminGiftReceiptRoutes(app);
+  await registerAdminTicketDeliveryRoutes(app);
 
   // Conexión perezosa: forzamos un primer query para fallar pronto si la
   // BD no está accesible (mejor mensaje que esperar al primer login).

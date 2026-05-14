@@ -23,6 +23,7 @@ import {
 import { ApiError, apiWithCashier } from "../api.js";
 import type { ContactRef } from "./SalePage.contact.js";
 import type { CartLine, CartTotals } from "../lib/cart.js";
+import { SuccessOverlay } from "./CheckoutPage.successOverlay.js";
 
 const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
 
@@ -665,90 +666,6 @@ function Checkbox({
       </div>
       {right}
     </label>
-  );
-}
-
-function SuccessOverlay({
-  ticketId,
-  internalNumber,
-  onDone,
-}: {
-  ticketId: string;
-  internalNumber: string;
-  onDone: () => void;
-}) {
-  const [docNumber, setDocNumber] = useState<string | null>(null);
-  const [status, setStatus] = useState("PENDING_SYNC");
-
-  useEffect(() => {
-    let cancelled = false;
-    let attempts = 0;
-    async function tick() {
-      attempts += 1;
-      try {
-        const res = await apiWithCashier<{ ticket: { holdedDocNumber: string | null; status: string } }>(
-          `/tickets/${ticketId}`,
-        );
-        if (cancelled) return;
-        setStatus(res.ticket.status);
-        if (res.ticket.holdedDocNumber) {
-          setDocNumber(res.ticket.holdedDocNumber);
-        }
-      } catch {
-        /* ignore — seguimos polleando */
-      }
-      if (!cancelled && attempts < 60 && status !== "SYNCED" && status !== "SYNC_FAILED") {
-        setTimeout(tick, 1000);
-      }
-    }
-    tick();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ticketId]);
-
-  return (
-    <div className="fixed inset-0 z-50 bg-mipiace-ink/95 flex items-center justify-center p-5 font-sans">
-      <div className="bg-white rounded-3xl border border-slate-200 w-full max-w-md p-8 text-center">
-        <div className="h-16 w-16 mx-auto rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-4">
-          <Check className="w-8 h-8" strokeWidth={2.5} />
-        </div>
-        <h1 className="text-[22px] font-semibold text-mipiace-ink tracking-tight">
-          Ticket cobrado
-        </h1>
-        <div className="text-[14px] text-slate-500 mt-1">
-          Número interno <span className="tabular-nums">#{internalNumber}</span>
-        </div>
-        <div className="mt-5 bg-mipiace-stone rounded-xl p-4">
-          {docNumber ? (
-            <>
-              <div className="text-[12px] uppercase tracking-wider text-slate-400">
-                Número fiscal Holded
-              </div>
-              <div className="text-[24px] font-semibold tabular-nums text-mipiace-ink mt-1">
-                {docNumber}
-              </div>
-            </>
-          ) : status === "SYNC_FAILED" ? (
-            <div className="text-[13px] text-red-700">
-              Holded rechazó el envío. El ticket queda en la bandeja de errores.
-            </div>
-          ) : (
-            <div className="text-[13px] text-slate-500 flex items-center justify-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin text-mipiace-coral" />
-              Sincronizando con Holded…
-            </div>
-          )}
-        </div>
-        <button
-          onClick={onDone}
-          className="mt-6 w-full h-12 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white font-medium text-[14px]"
-        >
-          Nueva venta
-        </button>
-      </div>
-    </div>
   );
 }
 

@@ -22,6 +22,8 @@ import { enqueueTicketUpload } from "../queues/ticket-upload.js";
 import { enqueueRefundUpload } from "../queues/refund-upload.js";
 import { enqueueTicketEmail } from "../queues/ticket-email.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
+import { maybeEnqueueAutoEmail } from "./email-trigger.js";
+import { generatePublicSlug } from "./public-slug.js";
 import {
   PAYMENT_TOLERANCE_EUR,
   TOTAL_TOLERANCE_EUR,
@@ -328,6 +330,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             userId: cashier.sub,
             internalNumber,
             externalId: body.externalId,
+            publicSlug: generatePublicSlug(),
             contactHoldedId: body.contactHoldedId ?? null,
             status: TicketStatus.PENDING_SYNC,
             total: new Prisma.Decimal(totals.total),
@@ -397,26 +400,26 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         );
       }
 
-      // Si el cajero introdujo un email, encolamos el reenvío al
-      // confirmar la sync (el worker upload-ticket dispara el email job
-      // tras pasar a SYNCED). Lo dejamos PENDING aquí.
-      if (body.emailIntent) {
-        try {
-          await prisma.ticketEmailJob.create({
-            data: {
-              id: randomUUID(),
-              ticketId: ticket.id,
-              toEmail: body.emailIntent,
-              requestedByUserId: cashier.sub,
-              status: "PENDING",
-            },
-          });
-        } catch (err) {
-          request.log.warn(
-            { ticketId: ticket.id },
-            `no se pudo registrar email intent: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
+      // Encolado de email auto (B-Print fase 1). Si el cajero introdujo
+      // email manual → respetar. Si no y el contacto vinculado tiene
+      // email + la tienda permite emailAutoIfCustomerHasEmail → enviar
+      // a esa dirección. El PDF se genera local con `ticket-pdf` —
+      // no espera a Holded.
+      try {
+        await maybeEnqueueAutoEmail({
+          prisma,
+          ticketId: ticket.id,
+          registerId: cashier.rid,
+          contactHoldedId: body.contactHoldedId ?? null,
+          manualEmailIntent: body.emailIntent ?? null,
+          requestedByUserId: cashier.sub,
+          logger: { warn: (msg, extra) => request.log.warn(extra ?? {}, msg) },
+        });
+      } catch (err) {
+        request.log.warn(
+          { ticketId: ticket.id },
+          `auto-email enqueue falló: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
 
       return reply.code(201).send({
@@ -683,23 +686,21 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         );
       }
 
-      if (body.emailIntent) {
-        try {
-          await prisma.ticketEmailJob.create({
-            data: {
-              id: randomUUID(),
-              ticketId: updated.id,
-              toEmail: body.emailIntent,
-              requestedByUserId: cashier.sub,
-              status: "PENDING",
-            },
-          });
-        } catch (err) {
-          request.log.warn(
-            { ticketId: updated.id },
-            `no se pudo registrar email intent: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
+      try {
+        await maybeEnqueueAutoEmail({
+          prisma,
+          ticketId: updated.id,
+          registerId: cashier.rid,
+          contactHoldedId: body.contactHoldedId ?? draft.contactHoldedId ?? null,
+          manualEmailIntent: body.emailIntent ?? null,
+          requestedByUserId: cashier.sub,
+          logger: { warn: (msg, extra) => request.log.warn(extra ?? {}, msg) },
+        });
+      } catch (err) {
+        request.log.warn(
+          { ticketId: updated.id },
+          `auto-email enqueue falló: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
 
       if (draft.tableId) {

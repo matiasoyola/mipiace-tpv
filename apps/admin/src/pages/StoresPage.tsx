@@ -10,6 +10,7 @@ import { ArrowLeft, Building2, Calculator, ChevronRight } from "lucide-react";
 import { AdminShell } from "../AdminShell.js";
 import { api, ApiError, clearTokens, readCurrentRole } from "../api.js";
 import { TablesSection } from "./StoreDetailPage.tables.js";
+import { TicketDeliverySection } from "./StoreDetailPage.ticketDelivery.js";
 import {
   CenteredLoader,
   FieldError,
@@ -411,6 +412,8 @@ export function StoreDetailPage() {
       </section>
 
       <TablesSection storeId={store.id} role={readCurrentRole()} />
+
+      <TicketDeliverySection storeId={store.id} role={readCurrentRole()} />
 
       <DeleteStoreSection
         storeId={store.id}

@@ -16,6 +16,7 @@ import type { FastifyInstance } from "fastify";
 import { getPrisma } from "../context.js";
 import { getStoreEventBus } from "../realtime/store-event-bus.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
+import { generatePublicSlug } from "../tickets/public-slug.js";
 import { computeTicket } from "../tickets/totals.js";
 
 export async function registerTableGroupingRoutes(
@@ -128,6 +129,7 @@ export async function registerTableGroupingRoutes(
               userId: cashier.sub,
               internalNumber: `D-${randomUUID()}`,
               externalId: randomUUID(),
+              publicSlug: generatePublicSlug(),
               status: "DRAFT",
               total: new Prisma.Decimal(0),
               totalTax: new Prisma.Decimal(0),
@@ -291,6 +293,7 @@ export async function registerTableGroupingRoutes(
               userId: cashier.sub,
               internalNumber: `D-${randomUUID()}`,
               externalId: randomUUID(),
+              publicSlug: generatePublicSlug(),
               status: "DRAFT",
               total: new Prisma.Decimal(0),
               totalTax: new Prisma.Decimal(0),
@@ -451,6 +454,7 @@ export async function registerTableGroupingRoutes(
               userId: cashier.sub,
               internalNumber: `D-${randomUUID()}`,
               externalId: randomUUID(),
+              publicSlug: generatePublicSlug(),
               status: "DRAFT",
               total: new Prisma.Decimal(0),
               totalTax: new Prisma.Decimal(0),

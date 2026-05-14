@@ -66,6 +66,11 @@ const Schema = z.object({
   // URL pública del admin. Se usa para construir el link del email de
   // password reset (`${PUBLIC_ADMIN_URL}/admin/reset?token=…`).
   PUBLIC_ADMIN_URL: z.string().url().default("http://localhost:5173"),
+  // URL pública del backend para los enlaces de ticket digital
+  // (`${PUBLIC_TICKET_URL}/tickets/{slug}/pdf`). En dev apunta a la
+  // API local; en prod, al dominio expuesto detrás del proxy.
+  // B-Print fase 1.
+  PUBLIC_TICKET_URL: z.string().url().default("http://localhost:3001"),
 
   // Base URL de la API de Holded. Lo usan los clientes ApiKeyClient
   // creados desde tenants reales (cifrado por tenant).

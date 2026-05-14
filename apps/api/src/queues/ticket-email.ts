@@ -18,7 +18,10 @@ export function getTicketEmailQueue(): Queue<TicketEmailJob> {
     _queue = new Queue<TicketEmailJob>(TICKET_EMAIL_QUEUE_NAME, {
       connection: getRedis(),
       defaultJobOptions: {
-        attempts: 5,
+        // B-Print fase 1: 3 reintentos con backoff exponencial. Si tras
+        // el 3º sigue rojo, el worker marca Ticket.emailFailedAt para
+        // que admin lo vea en bandeja.
+        attempts: 3,
         backoff: { type: "exponential", delay: 60_000 },
         removeOnComplete: 100,
         removeOnFail: 500,

@@ -24,6 +24,7 @@ import type { FastifyInstance } from "fastify";
 import { getPrisma } from "../context.js";
 import { getStoreEventBus } from "../realtime/store-event-bus.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
+import { generatePublicSlug } from "../tickets/public-slug.js";
 import { computeTicket } from "../tickets/totals.js";
 
 const UUID_V4 =
@@ -584,6 +585,9 @@ async function getOrCreateDraftTicket(
       // que usamos un valor único por DRAFT con prefijo "D-<uuid>".
       internalNumber: `D-${randomUUID()}`,
       externalId: randomUUID(),
+      // publicSlug fijado al crear el DRAFT para que el endpoint
+      // público pueda renderizar PDF al instante (404 si DRAFT igualmente).
+      publicSlug: generatePublicSlug(),
       status: "DRAFT",
       total: new Prisma.Decimal(0),
       totalTax: new Prisma.Decimal(0),

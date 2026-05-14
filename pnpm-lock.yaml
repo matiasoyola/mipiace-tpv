@@ -69,6 +69,12 @@ importers:
       '@mipiacetpv/holded-client':
         specifier: workspace:*
         version: link:../../packages/holded-client
+      '@mipiacetpv/ticket-model':
+        specifier: workspace:*
+        version: link:../../packages/ticket-model
+      '@mipiacetpv/ticket-pdf':
+        specifier: workspace:*
+        version: link:../../packages/ticket-pdf
       argon2:
         specifier: ^0.41.1
         version: 0.41.1
@@ -142,9 +148,18 @@ importers:
 
   apps/tpv-web:
     dependencies:
+      '@mipiacetpv/ticket-model':
+        specifier: workspace:*
+        version: link:../../packages/ticket-model
+      '@mipiacetpv/ticket-pdf':
+        specifier: workspace:*
+        version: link:../../packages/ticket-pdf
       lucide-react:
         specifier: ^1.14.0
         version: 1.14.0(react@19.2.6)
+      qrcode:
+        specifier: ^1.5.4
+        version: 1.5.4
       react:
         specifier: ^19.0.0
         version: 19.2.6
@@ -158,6 +173,9 @@ importers:
         specifier: ^7.4.1
         version: 7.4.1
     devDependencies:
+      '@types/qrcode':
+        specifier: ^1.5.6
+        version: 1.5.6
       '@types/react':
         specifier: ^19.0.0
         version: 19.2.14
@@ -207,6 +225,41 @@ importers:
       '@types/node':
         specifier: ^20.16.10
         version: 20.19.40
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
+        version: 2.1.9(@types/node@20.19.40)(terser@5.47.1)
+
+  packages/ticket-model:
+    dependencies:
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+    devDependencies:
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
+        version: 2.1.9(@types/node@20.19.40)(terser@5.47.1)
+
+  packages/ticket-pdf:
+    dependencies:
+      '@mipiacetpv/ticket-model':
+        specifier: workspace:*
+        version: link:../ticket-model
+      pdf-lib:
+        specifier: ^1.17.1
+        version: 1.17.1
+    devDependencies:
+      '@types/node':
+        specifier: ^20.16.10
+        version: 20.19.40
+      pdf-parse:
+        specifier: ^1.1.1
+        version: 1.1.4
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
@@ -2561,6 +2614,9 @@ packages:
     resolution: {integrity: sha512-9MdFxmkKaOYVTV+XVRG8ArDwwQ77XIgIPyKASB1k3JPq3M8fGQQQE3YpMOrKm6g//Ktx8ivZr8xo1Qmtqub+GA==}
     engines: {node: ^18 || ^20 || >= 21}
 
+  node-ensure@0.0.0:
+    resolution: {integrity: sha512-DRI60hzo2oKN1ma0ckc6nQWlHU69RH6xN0sjQTjMpChPfTYvKZdcQFfdYK2RWbJcKyUizSIy/l8OTGxMAM1QDw==}
+
   node-gyp-build-optional-packages@5.2.2:
     resolution: {integrity: sha512-s+w+rBWnpTMwSFbaE0UXsRlg7hU4FjekKU4eyAih5T8nJuNZT1nNsskXpxmeqSK9UzkBl6UgRlnKc8hz8IEqOw==}
     hasBin: true
@@ -2661,6 +2717,10 @@ packages:
 
   pdf-lib@1.17.1:
     resolution: {integrity: sha512-V/mpyJAoTsN4cnP31vc0wfNA1+p20evqqnap0KLoRUN0Yk/p3wN52DOEsL4oBFcLdb76hlpKPtzJIgo67j/XLw==}
+
+  pdf-parse@1.1.4:
+    resolution: {integrity: sha512-XRIRcLgk6ZnUbsHsYXExMw+krrPE81hJ6FQPLdBNhhBefqIQKXu/WeTgNBGSwPrfU0v+UCEwn7AoAUOsVKHFvQ==}
+    engines: {node: '>=6.8.1'}
 
   pend@1.2.0:
     resolution: {integrity: sha512-F3asv42UuXchdzt+xXqfW1OGlVBe+mxa2mqI0pg5yAHZPvFmY3Y6drSf/GQ1A86WgWEN9Kzh/WrgKa6iGcHXLg==}
@@ -5872,6 +5932,8 @@ snapshots:
 
   node-addon-api@8.7.0: {}
 
+  node-ensure@0.0.0: {}
+
   node-gyp-build-optional-packages@5.2.2:
     dependencies:
       detect-libc: 2.1.2
@@ -5964,6 +6026,10 @@ snapshots:
       '@pdf-lib/upng': 1.0.1
       pako: 1.0.11
       tslib: 1.14.1
+
+  pdf-parse@1.1.4:
+    dependencies:
+      node-ensure: 0.0.0
 
   pend@1.2.0: {}
 

@@ -228,6 +228,19 @@ model Store {
   name              String
   fiscalAddress     Json?     @map("fiscal_address")
   warehouseHoldedId String?   @map("warehouse_holded_id")
+  // Config de entrega del ticket digital (B-Print fase 1):
+  //   {
+  //     emailAutoIfCustomerHasEmail: boolean,
+  //     showQrButton: boolean,
+  //     showDownloadButton: boolean,
+  //     showViewButton: boolean,
+  //     emailSubject: string,
+  //     emailBody: string,
+  //     qrCaption: string
+  //   }
+  // Defaults sensatos al crear (todo true, plantillas ES). El TPV lo
+  // lee al cobrar para mostrar los botones correctos en post-cobro.
+  ticketDelivery    Json?     @map("ticket_delivery")
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   // Soft-delete (B4 §0.2). Las FKs a Register/Shift/Ticket son Restrict
   // — borrar duro rompería histórico fiscal. `deletedAt != null` saca la
@@ -509,6 +522,15 @@ model Ticket {
   // UUID v4 generado en el front al cobrar. Llave de idempotencia hacia
   // Holded. Nunca se regenera.
   externalId           String       @unique @map("external_id") @db.Uuid
+  // Capability slug público (16 hex = 8 bytes random ≈ 96 bits) que
+  // alimenta el QR, el email y el botón "Ver ticket". Permite al
+  // cliente final descargar el PDF sin auth — la entropía es el secreto.
+  // B-Print fase 1.
+  publicSlug           String       @unique @map("public_slug")
+  // Timestamp del último fallo persistente del email auto-enviado.
+  // El bandeja admin lo muestra para que el propietario sepa que el
+  // cliente no recibió su ticket pese a que la sync con Holded fue OK.
+  emailFailedAt        DateTime?    @map("email_failed_at") @db.Timestamptz()
   contactHoldedId      String?      @map("contact_holded_id")
   status               TicketStatus @default(DRAFT)
   total                Decimal      @db.Decimal(10, 2)
