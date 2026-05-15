@@ -9,18 +9,81 @@
 const ACCESS_KEY = "mipiacetpv-admin-access";
 const REFRESH_KEY = "mipiacetpv-admin-refresh";
 const REMEMBER_KEY = "mipiacetpv-admin-remember";
+// B-SuperAdmin: cuando el super-admin abre una pestaña de impersonación,
+// el token efímero se guarda aquí (sessionStorage por pestaña — no
+// contamina las demás pestañas ni la sesión normal). El AdminShell
+// detecta este key y monta el banner rojo + countdown. NO hay
+// refresh — al caducar, hay que reabrir desde la consola super-admin.
+const IMPERSONATION_KEY = "mipiacetpv-admin-impersonation-access";
 
 export interface AuthTokens {
   accessToken: string;
   refreshToken: string;
 }
 
+export function readImpersonationToken(): string | null {
+  return sessionStorage.getItem(IMPERSONATION_KEY);
+}
+
+export function storeImpersonationToken(token: string): void {
+  sessionStorage.setItem(IMPERSONATION_KEY, token);
+}
+
+export function clearImpersonationToken(): void {
+  sessionStorage.removeItem(IMPERSONATION_KEY);
+}
+
 export function readTokens(): AuthTokens | null {
+  // Impersonation siempre gana cuando existe (sólo vive en sessionStorage
+  // de esta pestaña). Devolvemos un par sintético con el mismo token en
+  // accessToken y refreshToken: el refresh sería rechazado por el
+  // backend, pero el cliente nunca intenta refresh con un JWT
+  // impersonation porque al caducar el banner pide reabrir.
+  const imp = readImpersonationToken();
+  if (imp) return { accessToken: imp, refreshToken: imp };
   // Preferimos localStorage si existe (sesiones "Recuérdame"). Si no,
   // fallback a sessionStorage para sesiones del browser actual.
   const a = localStorage.getItem(ACCESS_KEY) ?? sessionStorage.getItem(ACCESS_KEY);
   const r = localStorage.getItem(REFRESH_KEY) ?? sessionStorage.getItem(REFRESH_KEY);
   return a && r ? { accessToken: a, refreshToken: r } : null;
+}
+
+export interface JwtPayloadView {
+  role?: "OWNER" | "MANAGER" | "CASHIER";
+  purpose?: string;
+  readOnly?: boolean;
+  tid?: string;
+  exp?: number;
+}
+
+export function decodeJwtPayload(token: string): JwtPayloadView | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    return JSON.parse(
+      atob(parts[1]!.replace(/-/g, "+").replace(/_/g, "/")),
+    ) as JwtPayloadView;
+  } catch {
+    return null;
+  }
+}
+
+export interface ImpersonationState {
+  active: true;
+  expiresAt: number; // epoch ms
+  tenantId: string | null;
+}
+
+export function readImpersonationState(): ImpersonationState | null {
+  const imp = readImpersonationToken();
+  if (!imp) return null;
+  const payload = decodeJwtPayload(imp);
+  if (!payload || payload.purpose !== "impersonation") return null;
+  return {
+    active: true,
+    expiresAt: (payload.exp ?? 0) * 1000,
+    tenantId: payload.tid ?? null,
+  };
 }
 
 export function isRemembered(): boolean {
@@ -65,6 +128,8 @@ export function clearTokens(): void {
   localStorage.removeItem(REMEMBER_KEY);
   sessionStorage.removeItem(ACCESS_KEY);
   sessionStorage.removeItem(REFRESH_KEY);
+  // NO limpiamos el impersonation token aquí — su ciclo de vida lo
+  // gestiona el banner (botón "Salir de impersonación") o caducidad.
 }
 
 export type AdminRole = "OWNER" | "MANAGER" | "CASHIER";
@@ -111,6 +176,7 @@ interface ApiOptions {
 export async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const method = options.method ?? "GET";
   const tokens = readTokens();
+  const impersonation = readImpersonationToken();
   const headers: Record<string, string> = {
     Accept: "application/json",
   };
@@ -122,13 +188,23 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
     headers,
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
   });
-  if (res.status === 401 && options.retryOnUnauthorized !== false && tokens) {
+  if (
+    res.status === 401 &&
+    options.retryOnUnauthorized !== false &&
+    tokens &&
+    !impersonation
+  ) {
     const refreshed = await tryRefresh(tokens.refreshToken);
     if (refreshed) {
       refreshTokens(refreshed);
       return api<T>(path, { ...options, retryOnUnauthorized: false });
     }
     clearTokens();
+  }
+  if (res.status === 401 && impersonation) {
+    // El JWT impersonation caducó (no hay refresh). Limpiamos para que
+    // el banner detecte y muestre el aviso.
+    clearImpersonationToken();
   }
   const text = await res.text();
   const parsed = text

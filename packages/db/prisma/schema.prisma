@@ -144,6 +144,15 @@ model Tenant {
   // false, sólo OWNER/MANAGER puede asociar contacto a un ticket. Por
   // defecto true para no romper el flujo actual.
   cashierSearchableContacts      Boolean           @default(true) @map("cashier_searchable_contacts")
+  // B-SuperAdmin: bloqueo global del tenant. NULL = activo. NOT NULL =
+  // bloqueado por super-admin. El middleware `requireTenantNotBlocked`
+  // corta TODAS las requests per-tenant con 423 Locked cuando esto está
+  // set, independientemente del rol del solicitante.
+  blockedAt                      DateTime?         @map("blocked_at") @db.Timestamptz()
+  blockedReason                  String?           @map("blocked_reason")
+  // Plan operativo (gestionado manualmente por el super-admin). String
+  // libre — no enum — para no requerir migración al añadir tiers.
+  plan                           String?
   createdAt                      DateTime          @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt                      DateTime          @updatedAt @map("updated_at") @db.Timestamptz()
 
@@ -208,6 +217,11 @@ model User {
   twoFactorRecoveryCodes Json?     @map("two_factor_recovery_codes")
   createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   lastLoginAt            DateTime? @map("last_login_at") @db.Timestamptz()
+  // B-SuperAdmin: cuando un super-admin crea un OWNER, su password
+  // temporal viene marcada con must_change_password_at = now(). El
+  // siguiente login redirige obligatoriamente a /change-password-initial.
+  // Al cambiarla se pone a NULL y se incrementa tokenVersion.
+  mustChangePasswordAt   DateTime? @map("must_change_password_at") @db.Timestamptz()
 
   tenant         Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   shifts         Shift[]              @relation("ShiftOpenedBy")
@@ -795,4 +809,55 @@ model PasswordResetToken {
   @@index([userId])
   @@index([expiresAt])
   @@map("password_reset_tokens")
+}
+
+// ── Super-admin (B-SuperAdmin) ────────────────────────────────────────
+//
+// Identidad ortogonal a `User` (per-tenant). Razón: que un User
+// escalable nunca pueda derivar en permisos super. Aislamiento limpio.
+// El alta se hace exclusivamente vía CLI seed
+// (`apps/api/src/scripts/create-super-admin.ts`) — no hay UI para
+// invitar nuevos super-admins. Decisión defensiva.
+
+model SuperAdminUser {
+  id              String    @id @default(uuid()) @db.Uuid
+  email           String    @unique
+  passwordHash    String    @map("password_hash")
+  // Igual que User.tokenVersion: logout-everywhere lo bumpea, los
+  // refresh tokens viejos pasan a ser inválidos sin tabla blacklist.
+  tokenVersion    Int       @default(0) @map("token_version")
+  // 2FA TOTP. Mismo patrón cifrado AES-GCM (`v1:`) que User.
+  totpSecret      String?   @map("totp_secret")
+  totpEnabledAt   DateTime? @map("totp_enabled_at") @db.Timestamptz()
+  // Array de `{ hash, usedAt }` (mismo shape que User.twoFactorRecoveryCodes).
+  recoveryCodes   Json?     @map("recovery_codes")
+  lastLoginAt     DateTime? @map("last_login_at") @db.Timestamptz()
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
+
+  audits SuperAdminAudit[]
+
+  @@map("super_admin_users")
+}
+
+// Auditoría inmutable de toda acción super-admin. Sin retención
+// automática — se conserva indefinidamente para histórico.
+model SuperAdminAudit {
+  id           String         @id @default(uuid()) @db.Uuid
+  superAdminId String         @map("super_admin_id") @db.Uuid
+  superAdmin   SuperAdminUser @relation(fields: [superAdminId], references: [id], onDelete: Restrict)
+  // "create_tenant" | "update_tenant" | "block_tenant" | "unblock_tenant"
+  // | "force_logout" | "resync" | "impersonate". Validado con zod en la
+  // capa de servicio antes de persistir.
+  action       String
+  tenantId     String?        @map("tenant_id") @db.Uuid
+  // Shape estricto por acción (ver docs/blocks/B-SuperAdmin-done.md).
+  // Siempre incluye `ipAddress` y `userAgent`.
+  metadata     Json?
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz()
+
+  @@index([superAdminId, createdAt])
+  @@index([tenantId, createdAt])
+  @@index([action, createdAt])
+  @@map("super_admin_audits")
 }

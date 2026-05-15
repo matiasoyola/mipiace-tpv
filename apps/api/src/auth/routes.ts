@@ -11,6 +11,10 @@ import { probeFailureToHttpStatus, probeHoldedKey } from "../holded/probe.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
 import { requireOwner, requireOwnerOrManager } from "./middleware.js";
 import {
+  signMustChangePasswordToken,
+  verifyMustChangePasswordToken,
+} from "./must-change-password.js";
+import {
   inspect as inspectRateLimit,
   ownerLoginRateLimit,
   registerFailure as registerRateLimitFailure,
@@ -169,6 +173,23 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         where: { id: user.id },
         data: { lastLoginAt: new Date() },
       });
+
+      // B-SuperAdmin: si el OWNER fue creado por un super-admin con
+      // password temporal, mustChangePasswordAt está set y forzamos el
+      // cambio antes de emitir sesión real. Sin esto, la temporal
+      // seguiría siendo válida indefinidamente.
+      if (user.mustChangePasswordAt != null) {
+        const pendingPasswordChangeToken = signMustChangePasswordToken({
+          sub: user.id,
+          tid: user.tenantId,
+          role: user.role,
+          tv: user.tokenVersion,
+        });
+        return reply.code(200).send({
+          mustChangePassword: true,
+          pendingPasswordChangeToken,
+        });
+      }
 
       // Si el propietario tiene 2FA activado, no emitimos access/refresh
       // todavía: devolvemos `requires2fa` + `pendingToken` y el front
@@ -712,6 +733,86 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       return reply
         .code(200)
         .send({ accessToken, refreshToken, usedRecoveryCode: usedRecovery });
+    },
+  );
+
+  // B-SuperAdmin: cambia la password temporal entregada por el super-admin
+  // al crear el OWNER. Sólo acepta el JWT especial `must-change-password`
+  // emitido por /auth/login cuando user.mustChangePasswordAt != null.
+  // Tras cambiarla emitimos una sesión normal (access + refresh).
+  app.post(
+    "/auth/change-password-initial",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["pendingPasswordChangeToken", "newPassword"],
+          additionalProperties: false,
+          properties: {
+            pendingPasswordChangeToken: { type: "string", minLength: 1 },
+            newPassword: { type: "string", minLength: 12, maxLength: 256 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { pendingPasswordChangeToken, newPassword } = request.body as {
+        pendingPasswordChangeToken: string;
+        newPassword: string;
+      };
+      let payload;
+      try {
+        payload = verifyMustChangePasswordToken(pendingPasswordChangeToken);
+      } catch {
+        return reply.code(401).send({
+          error: "INVALID_PENDING_TOKEN",
+          message: "Token caducado. Vuelve a iniciar sesión.",
+        });
+      }
+      const prisma = getPrisma();
+      const user = await prisma.user.findUnique({ where: { id: payload.sub } });
+      if (!user || user.tenantId !== payload.tid || user.tokenVersion !== payload.tv) {
+        return reply.code(401).send({
+          error: "INVALID_PENDING_TOKEN",
+          message: "Token inválido.",
+        });
+      }
+      if (!user.mustChangePasswordAt) {
+        // El flujo ya se completó previamente.
+        return reply.code(409).send({
+          error: "PASSWORD_ALREADY_CHANGED",
+          message: "La contraseña inicial ya fue cambiada. Inicia sesión normalmente.",
+        });
+      }
+      // Defensa: rechazar si la nueva password coincide con la temporal.
+      if (user.passwordHash) {
+        const sameAsTemp = await verifyPassword(user.passwordHash, newPassword);
+        if (sameAsTemp) {
+          return reply.code(400).send({
+            error: "PASSWORD_SAME_AS_TEMPORARY",
+            message: "La nueva contraseña debe ser distinta de la temporal.",
+          });
+        }
+      }
+      const newHash = await hashPassword(newPassword);
+      const updated = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          passwordHash: newHash,
+          mustChangePasswordAt: null,
+          tokenVersion: { increment: 1 },
+        },
+      });
+      const accessToken = signAccessToken({
+        sub: updated.id,
+        tid: updated.tenantId,
+        role: updated.role,
+      });
+      const refreshToken = signRefreshToken(
+        { sub: updated.id, tid: updated.tenantId },
+        { tv: updated.tokenVersion },
+      );
+      return reply.code(200).send({ accessToken, refreshToken });
     },
   );
 

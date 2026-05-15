@@ -19,8 +19,9 @@ import {
   X,
 } from "lucide-react";
 
-import { api, ApiError, readCurrentRole } from "./api.js";
+import { api, ApiError, readCurrentRole, readImpersonationState } from "./api.js";
 
+import { ImpersonationBanner } from "./components/ImpersonationBanner.js";
 import { LogoutEverywhereModal } from "./components/LogoutEverywhereModal.js";
 import { Logo } from "./Logo.js";
 import { clearTokens } from "./api.js";
@@ -99,8 +100,12 @@ export function AdminShell({
     navigate("/login", { replace: true });
   }
 
+  const impersonating = readImpersonationState() != null;
+
   return (
-    <div className="min-h-screen bg-mipiace-stone flex font-sans">
+    <div className="min-h-screen bg-mipiace-stone flex flex-col font-sans">
+      {impersonating && <ImpersonationBanner />}
+      <div className="flex flex-1 min-h-0">
       <DesktopSidebar onAskLogoutAll={() => setLogoutAllOpen(true)} />
 
       {drawerOpen && (
@@ -144,6 +149,7 @@ export function AdminShell({
         open={logoutAllOpen}
         onClose={() => setLogoutAllOpen(false)}
       />
+      </div>
     </div>
   );
 }

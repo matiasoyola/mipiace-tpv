@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-
 import { Check, Eye, EyeOff, KeyRound, RotateCcw } from "lucide-react";
 
 import { AdminShell } from "./AdminShell.js";
+import { ImpersonationBootstrap } from "./components/ImpersonationBootstrap.js";
 import { CashiersPage } from "./pages/CashiersPage.js";
 import { DevicesPage } from "./pages/DevicesPage.js";
 import { GiftReceiptsPage } from "./pages/GiftReceiptsPage.js";
@@ -11,6 +12,13 @@ import { SecurityPage } from "./pages/SecurityPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 import { StoreDetailPage, StoresPage } from "./pages/StoresPage.js";
 import { TicketsErrorsPage } from "./pages/TicketsErrorsPage.js";
+import { AuditLogPage } from "./superadmin/AuditLogPage.js";
+import { CreateTenantPage } from "./superadmin/CreateTenantPage.js";
+import { SuperAdminGate } from "./superadmin/SuperAdminGate.js";
+import { SuperAdminLoginPage } from "./superadmin/SuperAdminLoginPage.js";
+import { SuperAdminMePage } from "./superadmin/SuperAdminMePage.js";
+import { TenantDetailPage } from "./superadmin/TenantDetailPage.js";
+import { TenantsListPage } from "./superadmin/TenantsListPage.js";
 import { api, ApiError, clearTokens, readTokens, storeTokens } from "./api.js";
 import {
   CenteredCard,
@@ -45,27 +53,39 @@ interface MeResponse {
 
 export function App() {
   return (
-    <Routes>
-      <Route path="/" element={<RootRouter />} />
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/signup" element={<SignupPage />} />
-      <Route path="/onboarding" element={<ConnectHoldedPage />} />
-      <Route path="/onboarding/sync" element={<SyncProgressPage />} />
-      <Route path="/onboarding/done" element={<SyncSummaryPage />} />
-      <Route path="/admin/account" element={<AccountPage />} />
-      <Route path="/admin/products" element={<SkuReviewPage />} />
-      <Route path="/admin/devices" element={<DevicesPage />} />
-      <Route path="/admin/cashiers" element={<CashiersPage />} />
-      <Route path="/admin/security" element={<SecurityPage />} />
-      <Route path="/admin/stores" element={<StoresPage />} />
-      <Route path="/admin/stores/:storeId" element={<StoreDetailPage />} />
-      <Route path="/admin/tickets-errors" element={<TicketsErrorsPage />} />
-      <Route path="/admin/settings" element={<SettingsPage />} />
-      <Route path="/admin/gift-receipts" element={<GiftReceiptsPage />} />
-      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-      <Route path="/admin/reset" element={<ResetPasswordPage />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <>
+      <ImpersonationBootstrap />
+      <Routes>
+        <Route path="/" element={<RootRouter />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/signup" element={<SignupPage />} />
+        <Route path="/change-password-initial" element={<ChangePasswordInitialPage />} />
+        <Route path="/onboarding" element={<ConnectHoldedPage />} />
+        <Route path="/onboarding/sync" element={<SyncProgressPage />} />
+        <Route path="/onboarding/done" element={<SyncSummaryPage />} />
+        <Route path="/admin/account" element={<AccountPage />} />
+        <Route path="/admin/products" element={<SkuReviewPage />} />
+        <Route path="/admin/devices" element={<DevicesPage />} />
+        <Route path="/admin/cashiers" element={<CashiersPage />} />
+        <Route path="/admin/security" element={<SecurityPage />} />
+        <Route path="/admin/stores" element={<StoresPage />} />
+        <Route path="/admin/stores/:storeId" element={<StoreDetailPage />} />
+        <Route path="/admin/tickets-errors" element={<TicketsErrorsPage />} />
+        <Route path="/admin/settings" element={<SettingsPage />} />
+        <Route path="/admin/gift-receipts" element={<GiftReceiptsPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/admin/reset" element={<ResetPasswordPage />} />
+        {/* B-SuperAdmin: consola super-admin (shell propio, sesión separada) */}
+        <Route path="/superadmin/login" element={<SuperAdminLoginPage />} />
+        <Route path="/superadmin" element={<SuperAdminGate><Navigate to="/superadmin/tenants" replace /></SuperAdminGate>} />
+        <Route path="/superadmin/tenants" element={<SuperAdminGate><TenantsListPage /></SuperAdminGate>} />
+        <Route path="/superadmin/tenants/new" element={<SuperAdminGate><CreateTenantPage /></SuperAdminGate>} />
+        <Route path="/superadmin/tenants/:id" element={<SuperAdminGate><TenantDetailPage /></SuperAdminGate>} />
+        <Route path="/superadmin/audit" element={<SuperAdminGate><AuditLogPage /></SuperAdminGate>} />
+        <Route path="/superadmin/me" element={<SuperAdminGate><SuperAdminMePage /></SuperAdminGate>} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </>
   );
 }
 
@@ -146,10 +166,20 @@ function LoginPage() {
             ownerPinGenerated?: string;
           }
         | { requires2fa: true; pendingToken: string }
+        | { mustChangePassword: true; pendingPasswordChangeToken: string }
       >("/auth/login", {
         method: "POST",
         body: { email, password, remember },
       });
+      // B-SuperAdmin: OWNER recién creado por consola super-admin con
+      // password temporal — debe cambiarla antes de obtener sesión real.
+      if ("mustChangePassword" in res && res.mustChangePassword) {
+        navigate("/change-password-initial", {
+          state: { pendingPasswordChangeToken: res.pendingPasswordChangeToken },
+          replace: true,
+        });
+        return;
+      }
       if ("requires2fa" in res && res.requires2fa) {
         setPendingToken(res.pendingToken);
         return;
@@ -331,6 +361,98 @@ function LoginPage() {
           Crea tu negocio
         </a>
       </p>
+    </CenteredCard>
+  );
+}
+
+// B-SuperAdmin: el OWNER recién creado por la consola super-admin tiene
+// must_change_password_at != null y al hacer login recibe sólo un
+// pendingPasswordChangeToken. Esta pantalla cambia la temporal y emite
+// la sesión real (access + refresh).
+function ChangePasswordInitialPage() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const pendingToken =
+    (location.state as { pendingPasswordChangeToken?: string } | null)
+      ?.pendingPasswordChangeToken ?? null;
+
+  const [newPassword, setNewPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!pendingToken) navigate("/login", { replace: true });
+  }, [pendingToken, navigate]);
+
+  async function onSubmit(e: React.FormEvent): Promise<void> {
+    e.preventDefault();
+    setError(null);
+    if (newPassword !== confirm) {
+      setError("Las contraseñas no coinciden.");
+      return;
+    }
+    if (newPassword.length < 12) {
+      setError("La nueva contraseña debe tener al menos 12 caracteres.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const tokens = await api<{ accessToken: string; refreshToken: string }>(
+        "/auth/change-password-initial",
+        {
+          method: "POST",
+          body: {
+            pendingPasswordChangeToken: pendingToken,
+            newPassword,
+          },
+        },
+      );
+      storeTokens(tokens);
+      navigate("/", { replace: true });
+    } catch (err) {
+      if (err instanceof ApiError) setError(err.message);
+      else throw err;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!pendingToken) return null;
+
+  return (
+    <CenteredCard>
+      <h1 className="text-[22px] font-semibold text-mipiace-ink tracking-tight">
+        Cambia tu contraseña inicial
+      </h1>
+      <p className="text-[13.5px] text-slate-500 mt-1 mb-6">
+        Por seguridad, define una contraseña personal antes de continuar. La
+        contraseña temporal que recibiste por email queda desactivada.
+      </p>
+      <form onSubmit={onSubmit} className="space-y-4">
+        <TextField
+          id="newPassword"
+          label="Nueva contraseña (mín. 12 caracteres)"
+          type="password"
+          autoComplete="new-password"
+          minLength={12}
+          value={newPassword}
+          onChange={setNewPassword}
+          required
+        />
+        <TextField
+          id="confirmPassword"
+          label="Repite la contraseña"
+          type="password"
+          autoComplete="new-password"
+          minLength={12}
+          value={confirm}
+          onChange={setConfirm}
+          required
+        />
+        <PrimaryButton busy={busy}>Guardar y continuar</PrimaryButton>
+        <FieldError message={error} />
+      </form>
     </CenteredCard>
   );
 }

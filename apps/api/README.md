@@ -95,3 +95,46 @@ arreglar manualmente productos en revisión):
 ```bash
 pnpm --filter @mipiacetpv/api autosku -- <tenantId>
 ```
+
+## Post-deploy setup · crear el primer super-admin (B-SuperAdmin)
+
+La consola super-admin vive en `/superadmin`. El primer super-admin
+se crea exclusivamente vía CLI con acceso al servidor (no hay UI
+pública para invitar super-admins — decisión defensiva).
+
+1. Genera el secret JWT del super-admin (separado del per-tenant):
+
+   ```bash
+   openssl rand -base64 48
+   ```
+
+   Añádelo al `.env` como `SUPER_ADMIN_JWT_SECRET`. **Producción no
+   arranca si esta variable mantiene el placeholder por defecto.**
+
+2. Configura el remitente del email de bienvenida al OWNER:
+
+   ```
+   SUPER_ADMIN_FROM_EMAIL=noreply@mipiacetpv.tech
+   SUPER_ADMIN_REPLY_TO_EMAIL=soporte@mipiacetpv.tech
+   ```
+
+3. Aplica la migración `b9_super_admin_users`:
+
+   ```bash
+   pnpm db:migrate
+   ```
+
+4. Crea el primer super-admin (interactivo):
+
+   ```bash
+   pnpm --filter @mipiacetpv/api super-admin:create
+   ```
+
+   Pide email + password (≥12 chars). Idempotente — si el email ya
+   existe, falla con error claro.
+
+5. Inicia sesión en `${PUBLIC_ADMIN_URL}/superadmin/login` y activa
+   2FA inmediatamente desde "Mi cuenta".
+
+Para crear super-admins adicionales en el futuro, repite el paso 4
+desde la consola del servidor.

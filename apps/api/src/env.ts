@@ -75,6 +75,26 @@ const Schema = z.object({
   // Base URL de la API de Holded. Lo usan los clientes ApiKeyClient
   // creados desde tenants reales (cifrado por tenant).
   HOLDED_BASE_URL: z.string().url().default("https://api.holded.com/api"),
+
+  // ── Super-admin (B-SuperAdmin) ─────────────────────────────────────
+  // JWT secret separado del per-tenant — un compromiso de uno NO da
+  // acceso al otro. 40+ chars, generar con `openssl rand -base64 48`.
+  // En dev/test va un placeholder; producción debe setearlo (el server
+  // arroja al arrancar si NODE_ENV=production y mantiene el placeholder).
+  SUPER_ADMIN_JWT_SECRET: z
+    .string()
+    .min(40)
+    .default(
+      "dev-only-super-admin-secret-replace-in-production-with-openssl-rand-base64-48",
+    ),
+  SUPER_ADMIN_ACCESS_TTL: z.string().default("15m"),
+  SUPER_ADMIN_REFRESH_TTL: z.string().default("12h"),
+  // TTL del JWT de impersonación. Sin refresh — al caducar, abrir de nuevo.
+  SUPER_ADMIN_IMPERSONATION_TTL: z.string().default("30m"),
+  // Remitente / reply-to del email de bienvenida al OWNER de un tenant
+  // nuevo creado desde la consola super-admin.
+  SUPER_ADMIN_FROM_EMAIL: z.string().default("noreply@mipiacetpv.tech"),
+  SUPER_ADMIN_REPLY_TO_EMAIL: z.string().default("soporte@mipiacetpv.tech"),
 });
 
 export type AppEnv = z.infer<typeof Schema>;

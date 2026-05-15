@@ -22,6 +22,10 @@ import { registerCashierAuthRoutes } from "./shift/cashier-auth.js";
 import { registerShiftRoutes } from "./shift/routes.js";
 import { registerStoresRoutes } from "./stores/routes.js";
 import { registerStoreWebSocketRoute } from "./realtime/ws-route.js";
+import {
+  registerSuperAdminRoutes,
+  registerTenantBlockGuard,
+} from "./superadmin/routes.js";
 import { registerTableGroupingRoutes } from "./tables/grouping.js";
 import { registerTableOperativaRoutes } from "./tables/operativa.js";
 import { registerTablesRoutes } from "./tables/routes.js";
@@ -76,6 +80,24 @@ async function main() {
   // Health primero — útil para probes Hostinger.
   app.get("/health", async () => ({ ok: true }));
 
+  if (
+    env.NODE_ENV === "production" &&
+    env.SUPER_ADMIN_JWT_SECRET.startsWith("dev-only-super-admin-secret")
+  ) {
+    throw new Error(
+      "SUPER_ADMIN_JWT_SECRET no está configurado en producción. " +
+        "Setéalo con `openssl rand -base64 48` antes de arrancar.",
+    );
+  }
+
+  // B-SuperAdmin: guard global de tenants bloqueados. Se registra ANTES
+  // de cualquier ruta per-tenant. Las rutas exentas (/super-admin/*,
+  // /auth/login, /auth/password-reset/*, /health) pasan de largo; el
+  // resto, si lleva Bearer de un tenant con blocked_at != null, recibe
+  // 423 Locked. Cubre CASHIER tanto como OWNER/MANAGER.
+  registerTenantBlockGuard(app);
+
+  await registerSuperAdminRoutes(app);
   await registerAuthRoutes(app);
   await registerPasswordResetRoutes(app);
   await registerOnboardingRoutes(app);
