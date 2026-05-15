@@ -88,9 +88,37 @@ model SuperAdminAudit {
 }
 ```
 
-Migración `b9_super_admin_users`. Sin backfill (la tabla nace
-vacía; el primer super-admin se crea con el seed script del
-Frente 6).
+Migración `b9_super_admin_users` también incluye en el mismo SQL
+(misma transacción atómica) dos cambios al modelo per-tenant:
+
+```sql
+-- Para forzar cambio de password en el primer login del OWNER
+-- recién creado por super-admin.
+ALTER TABLE users ADD COLUMN must_change_password_at TIMESTAMPTZ NULL;
+
+-- Para bloquear el tenant globalmente. NULL = activo. NOT NULL = bloqueado.
+ALTER TABLE tenants ADD COLUMN blocked_at TIMESTAMPTZ NULL;
+ALTER TABLE tenants ADD COLUMN blocked_reason TEXT NULL;
+```
+
+Y en el schema Prisma:
+
+```prisma
+model User {
+  // ...
+  mustChangePasswordAt DateTime? @map("must_change_password_at") @db.Timestamptz()
+}
+
+model Tenant {
+  // ...
+  blockedAt     DateTime? @map("blocked_at") @db.Timestamptz()
+  blockedReason String?   @map("blocked_reason")
+}
+```
+
+Sin backfill (los registros existentes nacen con valores null;
+todo sigue funcionando igual hasta que un super-admin bloquee o
+cree).
 
 ### Frente 2 · Auth super-admin
 
@@ -116,6 +144,64 @@ de uno no permita el otro.
   `purpose === "super-admin"` y `tv` matches DB. Rechaza con 401
   cualquier otro token (incluso un OWNER válido).
 - Rate limit 5 intentos/15min por email + IP.
+
+**Middleware base `requireTenantNotBlocked(req)`** — gating global
+del bloqueo de tenant. Razón: la comprobación tiene que estar
+ANTES de cualquier middleware per-tenant (requireOwner,
+requireOwnerOrManager, requireAnyRole, requireCashierSession) para
+que TODOS los roles del tenant — incluido CASHIER — queden cortados
+cuando un super-admin bloquea la cuenta.
+
+- Se ejecuta como preHandler global en el plugin de auth
+  per-tenant. Lee `tenantId` del JWT, hace `SELECT blocked_at FROM
+  tenants WHERE id = $1`.
+- Si `blocked_at != null` → responde **423 Locked** con
+  `{ code: "TENANT_BLOCKED", reason: tenant.blocked_reason ?? null }`.
+- Rutas exentas (no aplica el middleware): `/super-admin/*`,
+  `/auth/login`, `/auth/password-reset/*`, `/health`.
+- El cliente TPV al recibir 423 debe mostrar pantalla full-screen
+  "Cuenta bloqueada · Contacta con soporte" sin opción de
+  continuar. El admin per-tenant idem.
+
+**Comportamiento de `mustChangePasswordAt`** en el login per-tenant
+(actualización del flujo de B1/B3):
+
+- `POST /auth/login` valida password normalmente. Si OK y
+  `user.mustChangePasswordAt != null`, emite un JWT especial con
+  payload `{ sub, tid, role, purpose: "must-change-password", tv }`
+  y TTL 15 min — NO el JWT normal de sesión. El frontend al
+  detectar `purpose: "must-change-password"` redirige
+  obligatoriamente a `/change-password-initial`.
+- `POST /auth/change-password-initial` requiere el JWT
+  `must-change-password`, valida nueva password (mín 12 chars,
+  no igual a temporal anterior), hashea, actualiza `passwordHash`,
+  pone `mustChangePasswordAt = null`, incrementa `tokenVersion`
+  (invalida el JWT temporal), y devuelve un par
+  accessToken/refreshToken normales de sesión.
+- Cualquier otro endpoint que reciba el JWT `must-change-password`
+  responde **403 PASSWORD_CHANGE_REQUIRED** — sólo el endpoint de
+  cambio inicial lo acepta.
+
+**Aceptación de JWT impersonation por middlewares per-tenant.**
+
+Los middlewares `requireOwner`, `requireOwnerOrManager` y
+`requireAnyRole` se amplían para aceptar JWT con
+`purpose === "impersonation"` SI:
+
+- `role` en el payload es `OWNER` (la impersonación siempre se
+  hace como OWNER del tenant impersonado).
+- `tid` del payload coincide con el tenantId del recurso accedido.
+- `readOnly === true` (siempre en este flujo).
+
+Cuando un middleware acepta un JWT impersonation con
+`readOnly:true`:
+- Si el método HTTP es `GET` → pasa.
+- Si es `POST` / `PATCH` / `PUT` / `DELETE` → responde **403
+  IMPERSONATION_READONLY** con `{ code: "IMPERSONATION_READONLY",
+  message: "Sesión de impersonación es sólo lectura" }`.
+
+El JWT impersonation tiene TTL 30 min, **sin refresh**. Al
+caducar el super-admin tiene que volver a abrir impersonación.
 
 ### Frente 3 · Endpoints super-admin
 
@@ -166,31 +252,128 @@ Body:
 ```
 
 Transacción:
-1. Crea `Tenant` con `fiscalProfile = { legalName, nif, address }`.
-2. Genera password temporal random 16 chars
-   (`generateTemporaryPassword()` helper).
-3. Crea `User` con `role=OWNER`, email, password hasheado,
-   `mustChangePasswordAt = now` (campo nuevo en `User` — añadir
-   migración en este frente o piggyback en `b9_super_admin_users`).
-4. Manda email al OWNER con el patrón existente (
-   `getEmailSender().send(...)`) con el link de login y la
-   password temporal. Template HTML simple, copy en español.
-5. Devuelve `{ tenant, ownerEmail, tempPassword }` — el frontend
+1. Valida `fiscalNif` con `validateSpanishTaxId` (ver helper más
+   abajo). Si inválido → 400.
+2. Crea `Tenant` con `fiscalProfile = { legalName, nif, address }`.
+3. Genera password temporal random 16 chars
+   (`generateTemporaryPassword()` helper, charset definido abajo).
+4. Crea `User` con `role=OWNER`, email, password hasheado argon2id,
+   `mustChangePasswordAt = now`. (La migración añade la columna —
+   ver Frente 1.)
+5. Manda email al OWNER vía `getEmailSender().send(...)` con la
+   plantilla definida abajo.
+6. Devuelve `{ tenant, ownerEmail, tempPassword }` — el frontend
    lo muestra UNA vez en pantalla por si el email se pierde.
-6. Audit log `create_tenant`.
+7. Audit log `create_tenant` (ver shape abajo).
 
-Validaciones: NIF formato español básico, email unique en User,
-nombre tenant unique.
+Validaciones: email unique global en User, nombre tenant unique.
+
+**Helper `validateSpanishTaxId(taxId): { valid, type }`**
+
+Vive en `packages/util-validation/src/spanish-tax-id.ts` (nuevo
+workspace si no existe ya algo equivalente). Implementa los tres
+formatos con checksum real, no sólo regex:
+
+- **NIF persona física**: 8 dígitos + letra. La letra es
+  `"TRWAGMYFPDXBNJZSQVHLCKE"[dni % 23]`.
+- **NIE**: empieza por X/Y/Z (que se mapean a 0/1/2) + 7 dígitos +
+  letra (misma tabla que NIF, sobre el número resultante).
+- **CIF**: letra inicial de A/B/C/D/E/F/G/H/J/N/P/Q/R/S/U/V/W +
+  7 dígitos + dígito o letra de control. El control se calcula
+  sumando alternativamente pares (suma directa) e impares
+  (multiplica por 2 y suma dígitos), módulo 10, complemento a 10.
+  Para letras inicial J/A/B/E/H el control es dígito; para
+  K/P/Q/S es letra; para el resto puede ser cualquiera de los
+  dos formatos.
+
+Devuelve `{ valid: true, type: "NIF" | "CIF" | "NIE" }` o
+`{ valid: false, type: null }`. Tests con casos reales conocidos +
+casos inválidos.
+
+**Helper `generateTemporaryPassword()`**
+
+`packages/util-validation/src/temporary-password.ts`. 16 chars
+generados con `crypto.randomBytes`. Charset sin caracteres
+ambiguos:
+
+```
+abcdefghjkmnpqrstuvwxyz   (sin l/i/o)
+ABCDEFGHJKLMNPQRSTUVWXYZ  (sin I/O)
+23456789                  (sin 0/1)
+#$%*+=?@                  (sin caracteres problemáticos en
+                           shells/copy-paste como /, \, ", ', `)
+```
+
+Total alfabeto = 64 caracteres (≈ 96 bits de entropía en 16 chars).
+Test que verifica que el output no contiene ninguno de los
+ambiguos `0OoIl1\"\`'/\\ `.
+
+**Email al OWNER — plantilla canónica**
+
+Subject:
+```
+Bienvenido a Mipiacetpv · Tu cuenta está lista
+```
+
+Body (text + HTML equivalente):
+```
+Hola {ownerName},
+
+Te damos la bienvenida a Mipiacetpv. Tu cuenta de propietario ya
+está lista.
+
+Datos de acceso:
+  · URL: {PUBLIC_ADMIN_URL}/login
+  · Email: {ownerEmail}
+  · Contraseña temporal: {tempPassword}
+
+Por seguridad te pediremos cambiarla en el primer inicio de
+sesión.
+
+Para empezar a operar, conecta tu cuenta de Holded en
+"Mi cuenta" tras el primer login. El catálogo se sincroniza
+automáticamente en 2-5 minutos.
+
+Si necesitas ayuda, responde a este email.
+
+— El equipo de Mipiacetpv
+```
+
+Remitente: variable de entorno `SUPER_ADMIN_FROM_EMAIL` con
+default `noreply@mipiacetpv.tech`. Reply-to: variable
+`SUPER_ADMIN_REPLY_TO_EMAIL` con default `soporte@mipiacetpv.tech`.
+
+**Editar tenant** — `PATCH /super-admin/tenants/:id`
+
+Body parcial:
+```json
+{
+  "name": "Librería Thalia SL (renombrada)",
+  "fiscalProfile": { "legalName": "...", "nif": "...", "address": "..." },
+  "plan": "paid"
+}
+```
+
+Validaciones equivalentes a `POST` (NIF, name unique). Si
+`fiscalProfile.nif` cambia, validar el nuevo con
+`validateSpanishTaxId`. Audit log `update_tenant` con diff
+(`{ changes: { field: { before, after } } }`).
 
 **Bloquear / desbloquear tenant** —
 `PATCH /super-admin/tenants/:id/status` con `{ blockedAt: Date | null, reason?: string }`.
 
-Cuando un tenant está bloqueado, **el middleware
-`requireOwnerOrManager` lo rechaza con 423 Locked** y mensaje
-"Cuenta bloqueada. Contacta con soporte". Esto cubre casos
-"cliente dejó de pagar" o "fraude detectado".
+Cuando se bloquea (`blockedAt != null`), persiste `blocked_at` +
+`blocked_reason` en `tenants`. El middleware base
+`requireTenantNotBlocked` (definido en Frente 2) rechaza con
+**423 Locked** TODAS las requests per-tenant (admin + tpv), no
+sólo `requireOwnerOrManager`. Cubre casos "cliente dejó de
+pagar", "fraude detectado", "soporte solicitó pausa".
 
-Audit log con razón.
+Desbloqueo: PATCH con `blockedAt: null` y `reason: "..."`. El
+`blocked_reason` previo se preserva en el audit log
+`unblock_tenant` para histórico.
+
+Audit log obligatorio con razón.
 
 **Force logout de un tenant** —
 `POST /super-admin/tenants/:id/force-logout`
@@ -208,14 +391,59 @@ de `incremental-sync` con `force=true`). Responde 202 con
 `POST /super-admin/tenants/:id/impersonate`
 
 Genera un JWT efímero con payload
-`{ sub: ownerUserId, role: "OWNER", tid: tenantId, purpose: "impersonation", readOnly: true, tv }`
-TTL 30 min. El middleware `requireOwner` etc. acepta este JWT,
-PERO si el JWT tiene `readOnly: true`, cualquier mutación
-(POST/PATCH/DELETE) se rechaza con 403 "Impersonación de sólo
-lectura". El frontend al detectar `readOnly: true` muestra un
-banner rojo "Sesión de impersonación · sólo lectura".
+`{ sub: ownerUserId, role: "OWNER", tid: tenantId, purpose: "impersonation", readOnly: true, tv, exp: now + 30min }`.
+**Sin refresh token** — al caducar hay que reabrir.
 
-Audit log obligatorio con tenant + super-admin + IP.
+Aceptación en middlewares per-tenant + comportamiento read-only:
+ver Frente 2 "Aceptación de JWT impersonation por middlewares
+per-tenant".
+
+Audit log obligatorio con `{ expiresAt, ipAddress, userAgent }` —
+ver shape completo en sub-sección "metadata del audit" abajo.
+
+**Cómo abrir impersonación desde la UI super-admin (Frente 4):**
+
+1. Super-admin pulsa botón "Impersonar (sólo lectura)" en
+   `/superadmin/tenants/:id`.
+2. La UI hace `POST /super-admin/tenants/:id/impersonate`,
+   recibe el JWT efímero.
+3. Abre `${PUBLIC_ADMIN_URL}/?impersonationToken=<jwt>` en
+   **pestaña nueva** (`window.open` con `noopener`).
+4. La nueva pestaña, al detectar `?impersonationToken=` en la URL,
+   guarda el token en **sessionStorage** (key
+   `admin_access_token` — la misma que usa el flujo normal pero
+   en sessionStorage, no localStorage; NO contamina la sesión del
+   super-admin en el resto de pestañas) y limpia el query param.
+5. El AdminShell al cargar, si detecta que el token tiene
+   `purpose: "impersonation"` y `readOnly: true`, monta un banner
+   rojo persistente arriba con:
+   - Texto: "Impersonando a [tenant.name] · sólo lectura · caduca
+     en NN min" (countdown).
+   - Botón "Salir de impersonación" que limpia sessionStorage y
+     cierra la pestaña (`window.close()`).
+6. La pestaña impersonation es independiente: no puede acceder al
+   localStorage del super-admin (sessionStorage es por pestaña).
+   La sesión real del super-admin en otras pestañas sigue intacta.
+
+**Contrato del `SuperAdminAudit.metadata` por acción**
+
+Cada acción super-admin escribe una fila de audit con un shape
+estricto. Todos los shapes incluyen `ipAddress: string | null` y
+`userAgent: string | null` (extraídos de la request del super-admin).
+
+| `action` | `metadata` (además de IP/UA) |
+|---|---|
+| `create_tenant` | `{ tenantName, ownerEmail, plan, fiscalNif }` |
+| `update_tenant` | `{ changes: Record<string, { before: unknown, after: unknown }> }` |
+| `block_tenant` | `{ reason: string, blockedAt: ISO8601 }` |
+| `unblock_tenant` | `{ previousReason: string \| null }` |
+| `force_logout` | `{ usersAffected: number }` |
+| `resync` | `{ syncJobId: string }` |
+| `impersonate` | `{ expiresAt: ISO8601, asUserId: uuid }` |
+
+El backend valida estos shapes con `zod` antes de persistir.
+Si la metadata no encaja, el audit se rechaza (preferimos perder
+una operación con metadata defectuosa que persistir basura).
 
 ### Frente 4 · UI super-admin
 
@@ -283,15 +511,22 @@ Documentar en `apps/api/README.md` como paso post-deploy.
 
 ## Restricciones
 
-- **NO** tocar el flujo per-tenant (OWNER/MANAGER/CASHIER) existente.
-  El middleware super-admin es ortogonal.
+- **NO** tocar el flujo per-tenant (OWNER/MANAGER/CASHIER) existente
+  más allá de los puntos explícitos en Frente 2 (aceptación de JWT
+  impersonation + `must-change-password` + `requireTenantNotBlocked`
+  base).
 - **NO** incluir billing/Stripe ni subscriptions automáticas. El
   plan se guarda como string libre (`"pilot" | "free" | "paid"`)
   por ahora; lo gestionamos manualmente.
 - **NO** incluir self-service signup público. Eso es post-v1.
 - **NO** romper sesiones existentes de OWNER/MANAGER al desplegar.
-  Las migraciones deben ser idempotentes y no afectar User
-  existentes.
+  Las migraciones deben ser idempotentes — las columnas nuevas
+  nacen con NULL y todo el flujo existente sigue igual hasta que
+  un super-admin haga algo que las cambie.
+- **NO** incluir UI para invitar/crear nuevos super-admins. El
+  alta de super-admins adicionales se hace exclusivamente vía CLI
+  seed (Frente 5). Decisión defensiva: que la creación de cuentas
+  con privilegios totales requiera acceso al servidor.
 - Mantener ADR-007 (offline-friendly per-tenant) — el super-admin
   no necesita offline, sólo se usa desde la oficina.
 
@@ -309,6 +544,13 @@ Documentar en `apps/api/README.md` como paso post-deploy.
 
 - Billing/Stripe.
 - Self-service signup público.
+- **DELETE tenant.** Block (`PATCH .../status` con `blockedAt: now`)
+  es la operación correcta — preserva auditoría, histórico fiscal,
+  registros en Holded, y permite reactivación. La eliminación
+  física no entra y probablemente nunca lo haga (legalmente
+  conviene retención mínima de varios años de registros fiscales).
+- UI para invitar otros super-admins (sólo CLI seed, ver
+  Restricciones).
 - Multi-region / multi-AZ.
 - Backup automatizado (eso lo gestionamos a nivel infra, no app).
 - OAuth con Holded (B1 actual usa API key manual, lo refinaremos
