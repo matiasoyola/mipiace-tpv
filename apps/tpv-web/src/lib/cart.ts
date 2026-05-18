@@ -2,6 +2,19 @@
 // persiste suspender/recuperar en localStorage, y CheckoutPage lo
 // transforma al payload para POST /tickets.
 
+// B-Bar-Modifiers: cada selección estructurada lleva el desnormalizado
+// completo. El TPV lo calcula a partir del catálogo en memoria al
+// confirmar el modal — no se vuelve a consultar al cobrar. El backend
+// re-valida groupId/modifierId contra el catálogo del tenant y persiste
+// el mismo snapshot en TicketLine.modifiers para auditoría inmutable.
+export interface ModifierSelection {
+  groupId: string;
+  groupName: string;
+  modifierId: string;
+  label: string;
+  priceDeltaCents: number;
+}
+
 export interface CartLine {
   // ID local — UUID v4 por línea (independiente del producto, porque la
   // misma referencia puede aparecer dos veces con modificadores distintos).
@@ -12,11 +25,17 @@ export interface CartLine {
   sku: string;
   nameSnapshot: string;
   units: number;
-  unitPrice: number; // bruto antes de descuento (sin IVA)
-  priceGross: number; // unitPrice * (1 + taxRate/100)
+  // BASE sin deltas — los suplementos de modificadores viven en
+  // `modifierSelections` y `computeLine` los suma a runtime. Mantener
+  // `unitPrice` "limpio" hace fácil renderizar el desglose "X € + delta".
+  unitPrice: number;
+  priceGross: number; // unitPrice * (1 + taxRate/100) — sin modifiers
   discountPct: number;
   taxRate: number;
+  // Modificadores ad-hoc tipeados por el cajero ("Sin azúcar").
   modifiers: string[];
+  // Modificadores estructurados (selección desde el modal).
+  modifierSelections?: ModifierSelection[];
 }
 
 export interface SuspendedCart {
@@ -40,8 +59,14 @@ export interface LineTotals {
   totalGross: number;
 }
 
-export function computeLine(line: Pick<CartLine, "units" | "unitPrice" | "discountPct" | "taxRate">): LineTotals {
-  const grossPerUnit = line.unitPrice * (1 - line.discountPct / 100);
+export function computeLine(
+  line: Pick<
+    CartLine,
+    "units" | "unitPrice" | "discountPct" | "taxRate"
+  > & { modifierSelections?: ModifierSelection[] },
+): LineTotals {
+  const deltaPerUnit = sumModifierDeltas(line.modifierSelections) / 100;
+  const grossPerUnit = (line.unitPrice + deltaPerUnit) * (1 - line.discountPct / 100);
   const subtotalNet = round2(grossPerUnit * line.units);
   const totalGross = round2(subtotalNet * (1 + line.taxRate / 100));
   return {
@@ -49,6 +74,15 @@ export function computeLine(line: Pick<CartLine, "units" | "unitPrice" | "discou
     tax: round2(totalGross - subtotalNet),
     totalGross,
   };
+}
+
+export function sumModifierDeltas(
+  selections: ModifierSelection[] | undefined,
+): number {
+  if (!selections) return 0;
+  let sum = 0;
+  for (const s of selections) sum += s.priceDeltaCents;
+  return sum;
 }
 
 export interface CartTotals {
@@ -70,7 +104,10 @@ export function computeCart(lines: CartLine[]): CartTotals {
     subtotalNet += t.subtotalNet;
     tax += t.tax;
     total += t.totalGross;
-    grossNoDiscount += round2(l.unitPrice * l.units);
+    // "Bruto sin descuento" para el cálculo del % global de descuento
+    // incluye los deltas de modificadores — son parte del precio "lista".
+    const deltaPerUnit = sumModifierDeltas(l.modifierSelections) / 100;
+    grossNoDiscount += round2((l.unitPrice + deltaPerUnit) * l.units);
     itemCount += l.units;
   }
   return {

@@ -187,18 +187,19 @@ model Tenant {
   createdAt                      DateTime          @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt                      DateTime          @updatedAt @map("updated_at") @db.Timestamptz()
 
-  users         User[]
-  stores        Store[]
-  devices       Device[]
-  pairingCodes  PairingCode[]
-  products      Product[]
-  contacts      Contact[]
-  warehouses    Warehouse[]
-  taxes         TenantTax[]
-  tickets       Ticket[]
-  refunds       Refund[]
-  syncOutbox    SyncOutbox[]
-  holdedUploads HoldedUpload[]
+  users          User[]
+  stores         Store[]
+  devices        Device[]
+  pairingCodes   PairingCode[]
+  products       Product[]
+  contacts       Contact[]
+  warehouses     Warehouse[]
+  taxes          TenantTax[]
+  tickets        Ticket[]
+  refunds        Refund[]
+  syncOutbox     SyncOutbox[]
+  holdedUploads  HoldedUpload[]
+  modifierGroups ModifierGroup[]
 
   @@map("tenants")
 }
@@ -467,9 +468,10 @@ model Product {
   lastSyncedAt      DateTime    @default(now()) @map("last_synced_at") @db.Timestamptz()
   raw               Json?
 
-  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  variants ProductVariant[]
-  lines    TicketLine[]
+  tenant         Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  variants       ProductVariant[]
+  lines          TicketLine[]
+  modifierGroups ProductModifierGroup[]
 
   @@unique([tenantId, holdedProductId])
   @@index([tenantId, barcode])
@@ -675,10 +677,25 @@ model TicketLine {
   taxRate         Decimal @map("tax_rate") @db.Decimal(5, 2)
   subtotal        Decimal @db.Decimal(10, 2)
   total           Decimal @db.Decimal(10, 2)
-  // Array de strings con los modificadores aplicados (bar/cafetería:
-  // "Sin azúcar", "Sin postre"). Vive sólo en el TPV — NO se envía a
-  // Holded (núcleo §6.2). Si el ticket se reimprime, se vuelven a
-  // mostrar; si se devuelve, se reusan en el RefundLine.
+  // Snapshot inmutable de modificadores aplicados al cobrar
+  // (B-Bar-Modifiers). Dos shapes históricos soportados por el
+  // renderer del TPV — ambos viven en este Json?:
+  //   1. Legacy (pre-B-Bar-Modifiers): `string[]` ad-hoc tipeado por
+  //      el cajero ("Sin azúcar", "Sin postre"). No tiene precio ni
+  //      grupo. Se conserva por compatibilidad de tickets históricos
+  //      y porque el "modificador rápido tipeado" sigue siendo útil
+  //      en barras pequeñas.
+  //   2. Estructurado (post-B-Bar-Modifiers): array de objetos
+  //      `{ groupId, groupName, modifierId, label, priceDeltaCents }`.
+  //      Producido por el modal <ModifierSelector> a partir de los
+  //      ModifierGroup/Modifier del catálogo. Desnormalizado a propósito:
+  //      cambios futuros en el catálogo no alteran el ticket histórico
+  //      (auditoría fiscal inmutable).
+  //
+  // El cálculo del subtotal de la línea ya incluye los priceDeltas
+  // antes de persistir — `unitPrice` no se modifica, los deltas viven
+  // sólo en este snapshot. Lo que se envía a Holded es el precio
+  // rolled-up + el desglose textual en `description`/`notes` del item.
   modifiers       Json?
   // Si esta línea proviene de otra mesa (mover líneas o agrupar),
   // queda registrado el origen. Permite desagrupar reversiblemente
@@ -854,6 +871,81 @@ model PasswordResetToken {
   @@index([userId])
   @@index([expiresAt])
   @@map("password_reset_tokens")
+}
+
+// ── Modificadores de producto (B-Bar-Modifiers) ────────────────────────
+//
+// Caso B confirmado (spike §14): Holded no expone modificadores
+// nativamente. El CRUD vive entera en mipiacetpv y es per-tenant. El
+// cajero los selecciona en el modal <ModifierSelector> al añadir una
+// línea del producto; el snapshot inmutable acaba en `TicketLine.modifiers`.
+// A Holded llega un precio "rolled up" + desglose textual en la
+// description del item — Holded sólo ve el precio total y la nota.
+
+model ModifierGroup {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  // Nombre del grupo visible al cajero ("Tipo de leche", "Tamaño").
+  name      String
+  // Si true, sólo se puede seleccionar 1 modifier del grupo (radio).
+  // Si false, se pueden seleccionar varios (checkbox). Default true.
+  exclusive Boolean  @default(true)
+  // Si true, es obligatorio seleccionar al menos un modifier antes
+  // de añadir la línea. Útil para "Tamaño" donde no hay default.
+  required  Boolean  @default(false)
+  // Orden de presentación en el modal del TPV (asc).
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  // Soft-delete para preservar histórico de TicketLine.modifiers que
+  // referencian este groupId tras quitar la variante del menú.
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz()
+
+  modifiers Modifier[]
+  products  ProductModifierGroup[]
+
+  @@index([tenantId, deletedAt])
+  @@map("modifier_groups")
+}
+
+model Modifier {
+  id              String        @id @default(uuid()) @db.Uuid
+  modifierGroupId String        @map("modifier_group_id") @db.Uuid
+  modifierGroup   ModifierGroup @relation(fields: [modifierGroupId], references: [id], onDelete: Cascade)
+  // Etiqueta visible ("Sin leche", "Con leche desnatada", "Grande").
+  label           String
+  // Suplemento o descuento al precio del producto. Puede ser
+  // negativo (descuento) o cero (sin coste). En céntimos para evitar
+  // floats, igual que el resto del modelo (Decimal del producto se
+  // convierte a céntimos en runtime).
+  priceDeltaCents Int           @default(0) @map("price_delta_cents")
+  sortOrder       Int           @default(0) @map("sort_order")
+  // Si true, este modifier está pre-seleccionado al abrir el grupo.
+  // Sólo tiene efecto en grupos exclusive=true.
+  isDefault       Boolean       @default(false) @map("is_default")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+  // Soft-delete (mismo motivo que ModifierGroup.deletedAt).
+  deletedAt       DateTime?     @map("deleted_at") @db.Timestamptz()
+
+  @@index([modifierGroupId, deletedAt])
+  @@map("modifiers")
+}
+
+// Tabla puente N:N entre productos y grupos de modificadores. Un grupo
+// puede aplicar a varios productos ("Tipo de leche" sirve para café,
+// té, chocolate) y un producto puede tener varios grupos ("Café" tiene
+// "Tipo de leche" + "Tamaño" + "Azúcar"). El borrado del producto o
+// del grupo elimina la fila puente sin tocar al otro lado.
+model ProductModifierGroup {
+  productId       String        @map("product_id") @db.Uuid
+  product         Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  modifierGroupId String        @map("modifier_group_id") @db.Uuid
+  modifierGroup   ModifierGroup @relation(fields: [modifierGroupId], references: [id], onDelete: Cascade)
+  sortOrder       Int           @default(0) @map("sort_order")
+
+  @@id([productId, modifierGroupId])
+  @@index([modifierGroupId])
+  @@map("product_modifier_groups")
 }
 
 // ── Super-admin (B-SuperAdmin) ────────────────────────────────────────

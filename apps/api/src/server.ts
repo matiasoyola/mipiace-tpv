@@ -7,6 +7,7 @@ import websocket from "@fastify/websocket";
 import { registerManagerAuthorizationRoutes } from "./admin/manager-authorize.js";
 import { registerAdminTenantSettingsRoutes } from "./admin/tenant-settings.js";
 import { registerAdminGiftReceiptRoutes } from "./admin/gift-receipts.js";
+import { registerAdminModifierGroupRoutes } from "./admin/modifier-groups.js";
 import { registerAdminTicketDeliveryRoutes } from "./admin/ticket-delivery.js";
 import { registerAdminTicketsErrorsRoutes } from "./admin/tickets-errors.js";
 import { registerAuthRoutes } from "./auth/routes.js";
@@ -120,6 +121,7 @@ async function main() {
   await registerManagerAuthorizationRoutes(app);
   await registerAdminTenantSettingsRoutes(app);
   await registerAdminGiftReceiptRoutes(app);
+  await registerAdminModifierGroupRoutes(app);
   await registerAdminTicketDeliveryRoutes(app);
 
   // Conexión perezosa: forzamos un primer query para fallar pronto si la

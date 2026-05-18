@@ -251,17 +251,30 @@ export function buildTicketSalesreceiptPayload(ticket: {
     taxRate: { toString(): string } | number;
     discountPct: { toString(): string } | number;
     sku: string;
+    // Snapshot de modificadores (B-Bar-Modifiers). Puede ser:
+    //   - null               → línea sin modifiers
+    //   - string[] legacy    → ad-hoc tipeados; van a description literal
+    //   - object[] B-Bar-Mod → desnormalizados con label + priceDelta;
+    //                          se serializan como "(Grupo: Label; ...)"
+    // Holded recibe el precio ROLLED-UP (unitPrice + sum deltas / 100)
+    // porque el TPV ya ajustó subtotal/total al cobrar. El desglose
+    // textual va en `description` para que el cliente final lo lea.
+    modifiers?: unknown;
   }>;
   register: { numSerieHolded: string | null };
 }): SalesreceiptPayload {
-  const items: SalesreceiptItem[] = ticket.lines.map((l) => ({
-    name: l.nameSnapshot,
-    units: Number(l.units),
-    price: Number(l.unitPrice),
-    tax: Number(l.taxRate),
-    discount: Number(l.discountPct),
-    sku: l.sku,
-  }));
+  const items: SalesreceiptItem[] = ticket.lines.map((l) => {
+    const { rolledUpUnitPrice, description } = formatLineForHolded(l);
+    return {
+      name: l.nameSnapshot,
+      units: Number(l.units),
+      price: rolledUpUnitPrice,
+      tax: Number(l.taxRate),
+      discount: Number(l.discountPct),
+      sku: l.sku,
+      ...(description ? { desc: description } : {}),
+    };
+  });
   const notes = composeNotes(ticket.externalId, ticket.notes);
   const numSerieId = ticket.register.numSerieHolded ?? undefined;
   return {
@@ -271,6 +284,60 @@ export function buildTicketSalesreceiptPayload(ticket: {
     items,
     ...(numSerieId ? { numSerieId } : {}),
   };
+}
+
+// Construye precio rolled-up + descripción para una línea con modifiers.
+// El precio enviado a Holded incluye los deltas; Holded ve un solo
+// número por línea. El detalle textual va en `desc` (campo aceptado por
+// Holded en el item del salesreceipt, observado en fixtures Fase 0).
+function formatLineForHolded(line: {
+  unitPrice: { toString(): string } | number;
+  modifiers?: unknown;
+}): { rolledUpUnitPrice: number; description: string | null } {
+  const baseUnitPrice = Number(line.unitPrice);
+  if (!Array.isArray(line.modifiers) || line.modifiers.length === 0) {
+    return { rolledUpUnitPrice: baseUnitPrice, description: null };
+  }
+  // Detección por tipo del primer elemento (mismo patrón que el renderer
+  // del TPV). string[] → ad-hoc; object[] → snapshot estructurado.
+  const first = line.modifiers[0];
+  if (typeof first === "string") {
+    const labels = (line.modifiers as string[]).filter((s) => typeof s === "string");
+    if (labels.length === 0) {
+      return { rolledUpUnitPrice: baseUnitPrice, description: null };
+    }
+    return {
+      rolledUpUnitPrice: baseUnitPrice,
+      description: `(${labels.join("; ")})`,
+    };
+  }
+  // Snapshot estructurado.
+  let deltaCents = 0;
+  const parts: string[] = [];
+  for (const entry of line.modifiers as unknown[]) {
+    if (
+      entry &&
+      typeof entry === "object" &&
+      "groupName" in entry &&
+      "label" in entry
+    ) {
+      const e = entry as {
+        groupName: string;
+        label: string;
+        priceDeltaCents?: number;
+      };
+      parts.push(`${e.groupName}: ${e.label}`);
+      if (typeof e.priceDeltaCents === "number") deltaCents += e.priceDeltaCents;
+    }
+  }
+  return {
+    rolledUpUnitPrice: round2(baseUnitPrice + deltaCents / 100),
+    description: parts.length > 0 ? `(${parts.join("; ")})` : null,
+  };
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
 }
 
 function composePayDesc(payments: Array<{ method: string; amount: { toString(): string } }>): string {

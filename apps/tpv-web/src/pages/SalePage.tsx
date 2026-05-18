@@ -47,8 +47,15 @@ import { ContactSheet, type ContactRef } from "./SalePage.contact.js";
 import { CheckoutOverlay } from "./CheckoutPage.js";
 import { CloseShiftModal } from "./CloseShiftModal.js";
 import { LineSheet } from "./SalePage.lineSheet.js";
+import { ModifierSelector } from "./SalePage.modifierSelector.js";
 import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
 import { useElapsedTime } from "../hooks/useElapsedTime.js";
+import type { ModifierSelection } from "../lib/cart.js";
+import {
+  buildGroupsByProduct,
+  loadModifierGroups,
+  type CatalogModifierGroup,
+} from "../lib/modifiers.js";
 
 const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
 
@@ -124,6 +131,21 @@ export function SalePage(props: SalePageProps) {
     | null
   >(null);
 
+  // B-Bar-Modifiers · catálogo de grupos. Se descarga en paralelo al
+  // catálogo principal. Si falla, el TPV sigue funcionando — los
+  // productos con modifiers simplemente se añaden directamente sin
+  // pasar por el modal (degradación graceful).
+  const [modifierGroups, setModifierGroups] = useState<CatalogModifierGroup[]>(
+    [],
+  );
+  const groupsByProduct = useMemo(
+    () => buildGroupsByProduct(modifierGroups),
+    [modifierGroups],
+  );
+  const [selectorState, setSelectorState] = useState<
+    { product: CatalogProduct; groups: CatalogModifierGroup[] } | null
+  >(null);
+
   const searchRef = useRef<HTMLInputElement | null>(null);
 
   // ── Carga inicial del catálogo ─────────────────────────────────────
@@ -150,6 +172,12 @@ export function SalePage(props: SalePageProps) {
         if (!cancelled) setWildcards(w);
       } catch {
         /* sin comodines: ignoramos, el cajero no podrá hacer línea libre */
+      }
+      try {
+        const mods = await loadModifierGroups();
+        if (!cancelled) setModifierGroups(mods);
+      } catch {
+        /* sin modifiers: el TPV sigue añadiendo líneas directo (B-Bar-Modifiers) */
       }
     })();
     return () => {
@@ -193,7 +221,11 @@ export function SalePage(props: SalePageProps) {
   }, []);
 
   // ── Scanner barcode: si el texto pegado termina en Enter y matchea
-  //    un barcode, añadir y vaciar.
+  //    un barcode, añadir y vaciar. En este flujo NO interceptamos con
+  //    el modal de modifiers — el cajero está escaneando, querrá la
+  //    línea directa. Si el producto requiere selección, abrimos el
+  //    modal igual (no podemos asumir cuándo es "scan" vs "fuzzy
+  //    teclado").
   const onSearchKey = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key !== "Enter") return;
@@ -212,7 +244,7 @@ export function SalePage(props: SalePageProps) {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [query, catalog],
+    [query, catalog, groupsByProduct],
   );
 
   // ── Operaciones sobre el carrito ───────────────────────────────────
@@ -220,12 +252,30 @@ export function SalePage(props: SalePageProps) {
     return crypto.randomUUID();
   }
 
-  function addProduct(p: CatalogProduct, units = 1): void {
+  // Inserta el producto en el carrito sin pasar por el modal de modifiers.
+  // Usado por barcode scan, fuzzy search Enter, y por el confirm del modal.
+  function pushProductLine(
+    p: CatalogProduct,
+    options: {
+      units?: number;
+      modifierSelections?: ModifierSelection[];
+    } = {},
+  ): void {
+    const units = options.units ?? 1;
+    const sels = options.modifierSelections ?? [];
     setLines((curr) => {
-      // Si ya existe la línea sin modifiers, sumamos unidades.
-      const existing = curr.find(
-        (l) => l.productId === p.id && l.modifiers.length === 0,
-      );
+      // Agrupar con línea previa sólo si NINGUNA tiene modifiers — dos
+      // cafés "Con leche desnatada" pueden agruparse, pero un "Con
+      // desnatada" y uno "Con entera" no.
+      const existing =
+        sels.length === 0
+          ? curr.find(
+              (l) =>
+                l.productId === p.id &&
+                l.modifiers.length === 0 &&
+                (!l.modifierSelections || l.modifierSelections.length === 0),
+            )
+          : null;
       if (existing) {
         return curr.map((l) =>
           l.id === existing.id ? { ...l, units: l.units + units } : l,
@@ -244,9 +294,23 @@ export function SalePage(props: SalePageProps) {
         discountPct: 0,
         taxRate: p.taxRate,
         modifiers: [],
+        modifierSelections: sels.length > 0 ? sels : undefined,
       };
       return [...curr, newLine];
     });
+  }
+
+  // Punto de entrada general: si el producto tiene grupos asociados,
+  // abre el modal; si no, añade directo. Para barcode scans y atajos
+  // del teclado preferimos no interrumpir el flow, así que ahí se
+  // llama a `pushProductLine` directo.
+  function addProduct(p: CatalogProduct, units = 1): void {
+    const groups = groupsByProduct.get(p.id);
+    if (groups && groups.length > 0) {
+      setSelectorState({ product: p, groups });
+      return;
+    }
+    pushProductLine(p, { units });
   }
 
   function addFreeLine(input: {
@@ -589,6 +653,19 @@ export function SalePage(props: SalePageProps) {
       {showHistory && (
         <TicketsHistoryPage onClose={() => setShowHistory(false)} />
       )}
+      {selectorState && (
+        <ModifierSelector
+          product={selectorState.product}
+          groups={selectorState.groups}
+          onCancel={() => setSelectorState(null)}
+          onConfirm={(selections) => {
+            pushProductLine(selectorState.product, {
+              modifierSelections: selections,
+            });
+            setSelectorState(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -632,6 +709,40 @@ function HealthBanner({ health }: { health: HealthStatus | null }) {
     );
   }
   return null;
+}
+
+// Desglose visual del carrito para una línea con modifiers
+// estructurados. Cada selección sale en una sub-línea con sangría —
+// formato `└ Grupo · Etiqueta   + 0,50 €`.
+function ModifierBreakdown({ selections }: { selections: ModifierSelection[] }) {
+  return (
+    <div className="text-[12.5px] text-slate-500 mt-0.5 space-y-0.5">
+      {selections.map((s, i) => {
+        const sign = s.priceDeltaCents > 0 ? "+" : "−";
+        const delta =
+          s.priceDeltaCents !== 0
+            ? ` ${sign} ${formatEur(Math.abs(s.priceDeltaCents) / 100)}`
+            : "";
+        return (
+          <div key={`${s.groupId}-${s.modifierId}-${i}`} className="flex items-baseline gap-1">
+            <span className="text-slate-300">└</span>
+            <span className="flex-1 truncate">
+              {s.groupName} · {s.label}
+            </span>
+            {delta && (
+              <span
+                className={`tabular-nums shrink-0 ${
+                  s.priceDeltaCents > 0 ? "text-slate-500" : "text-mipiace-coral"
+                }`}
+              >
+                {delta}
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function Banner({ color, children }: { color: "amber" | "red"; children: React.ReactNode }) {
@@ -816,7 +927,9 @@ function SaleWorkspace({
                       <div className="text-[14px] md:text-[14.5px] font-medium text-mipiace-ink leading-tight">
                         {l.nameSnapshot}
                       </div>
-                      {l.modifiers.length > 0 ? (
+                      {l.modifierSelections && l.modifierSelections.length > 0 ? (
+                        <ModifierBreakdown selections={l.modifierSelections} />
+                      ) : l.modifiers.length > 0 ? (
                         <div className="text-[12.5px] text-slate-500 mt-0.5">
                           {l.modifiers.join(" · ")}
                         </div>

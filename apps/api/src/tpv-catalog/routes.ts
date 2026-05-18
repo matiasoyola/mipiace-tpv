@@ -76,6 +76,54 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
     },
   );
 
+  // B-Bar-Modifiers · catálogo de modificadores para el TPV. El cajero
+  // tap-ea un producto: si el producto tiene grupos asociados, el TPV
+  // abre el modal <ModifierSelector>. Se descarga una vez por sesión y
+  // se cachea en memoria — el dataset típico de un bar son <50 modifiers.
+  app.get(
+    "/tpv/catalog/modifier-groups",
+    { preHandler: requireCashierSession },
+    async (request) => {
+      const cashier = request.cashier!;
+      const prisma = getPrisma();
+      const groups = await prisma.modifierGroup.findMany({
+        where: { tenantId: cashier.tid, deletedAt: null },
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+        include: {
+          modifiers: {
+            where: { deletedAt: null },
+            orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+            select: {
+              id: true,
+              label: true,
+              priceDeltaCents: true,
+              sortOrder: true,
+              isDefault: true,
+            },
+          },
+          products: { select: { productId: true, sortOrder: true } },
+        },
+      });
+      return {
+        groups: groups.map((g) => ({
+          id: g.id,
+          name: g.name,
+          exclusive: g.exclusive,
+          required: g.required,
+          sortOrder: g.sortOrder,
+          productIds: g.products.map((p) => p.productId),
+          modifiers: g.modifiers.map((m) => ({
+            id: m.id,
+            label: m.label,
+            priceDeltaCents: m.priceDeltaCents,
+            sortOrder: m.sortOrder,
+            isDefault: m.isDefault,
+          })),
+        })),
+      };
+    },
+  );
+
   // Comodines TPV-OTROS-{IVA} accesibles para el cajero al pulsar
   // "Línea libre" (núcleo §6.1). El front filtra por nombre que empieza
   // con "TPV-OTROS-".

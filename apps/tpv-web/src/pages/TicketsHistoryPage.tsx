@@ -22,6 +22,27 @@ import { RefundOverlay } from "./RefundPage.js";
 
 const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
 
+// Renderiza el `modifiers` jsonb del backend en una sola línea de texto.
+// El campo puede ser string[] (legacy ad-hoc) o object[] estructurado
+// (B-Bar-Modifiers). Discrimina por tipo del primer elemento.
+function formatModifierBreadcrumb(raw: unknown[]): string {
+  if (raw.length === 0) return "";
+  const first = raw[0];
+  if (typeof first === "string") {
+    return (raw as string[]).join(" · ");
+  }
+  return raw
+    .map((entry) => {
+      if (entry && typeof entry === "object" && "label" in entry) {
+        const e = entry as { groupName?: string; label: string };
+        return e.groupName ? `${e.groupName}: ${e.label}` : e.label;
+      }
+      return null;
+    })
+    .filter((s): s is string => s != null)
+    .join(" · ");
+}
+
 interface TicketRow {
   id: string;
   internalNumber: string;
@@ -55,7 +76,10 @@ interface TicketRow {
     total: number;
     discountPct: number;
     taxRate: number;
-    modifiers: string[];
+    // Mixto: array de strings (legacy ad-hoc) o array de
+    // ModifierSnapshotEntry (B-Bar-Modifiers). El renderer del histórico
+    // discrimina por tipo del primer elemento.
+    modifiers: unknown[];
   }>;
   payments: Array<{
     id: string;
@@ -360,7 +384,7 @@ function TicketDetailDrawer({
               <div className="flex-1 min-w-0">
                 <div className="text-[14px] text-mipiace-ink truncate">{l.nameSnapshot}</div>
                 {l.modifiers.length > 0 && (
-                  <div className="text-[12px] text-slate-500">{l.modifiers.join(" · ")}</div>
+                  <div className="text-[12px] text-slate-500">{formatModifierBreadcrumb(l.modifiers)}</div>
                 )}
               </div>
               <div className="text-[13.5px] font-medium tabular-nums">{formatEur(l.total)}</div>

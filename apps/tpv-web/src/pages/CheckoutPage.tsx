@@ -150,6 +150,16 @@ export function CheckoutOverlay(props: {
         discountPct: l.discountPct,
         taxRate: l.taxRate,
         modifiers: l.modifiers.length > 0 ? l.modifiers : undefined,
+        // B-Bar-Modifiers · selecciones estructuradas. El backend valida
+        // y re-snapshotsea — el front sólo envía groupId/modifierId, los
+        // labels y precios los resuelve el backend desde el catálogo.
+        modifierSelections:
+          l.modifierSelections && l.modifierSelections.length > 0
+            ? l.modifierSelections.map((s) => ({
+                groupId: s.groupId,
+                modifierId: s.modifierId,
+              }))
+            : undefined,
       }));
       const paymentsPayload = payments.map((p) => ({
         method: p.method,

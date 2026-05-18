@@ -108,6 +108,39 @@ export function LineSheet({
           <label className="block text-[13px] font-medium text-mipiace-ink-soft mb-2">
             Modificadores
           </label>
+          {/* Modifiers estructurados (catálogo) — sólo lectura. Para cambiar
+              la selección hay que quitar la línea y volver a añadir el
+              producto desde el grid. */}
+          {line.modifierSelections && line.modifierSelections.length > 0 && (
+            <div className="mb-2 space-y-1 bg-mipiace-stone rounded-xl p-2">
+              {line.modifierSelections.map((s, i) => (
+                <div
+                  key={`${s.groupId}-${s.modifierId}-${i}`}
+                  className="text-[12.5px] text-mipiace-ink flex items-baseline gap-2"
+                >
+                  <span className="text-slate-400">└</span>
+                  <span className="flex-1">
+                    {s.groupName} · {s.label}
+                  </span>
+                  {s.priceDeltaCents !== 0 && (
+                    <span
+                      className={`tabular-nums text-[12px] ${
+                        s.priceDeltaCents > 0
+                          ? "text-slate-500"
+                          : "text-mipiace-coral"
+                      }`}
+                    >
+                      {s.priceDeltaCents > 0 ? "+" : "−"}{" "}
+                      {(Math.abs(s.priceDeltaCents) / 100)
+                        .toFixed(2)
+                        .replace(".", ",")}{" "}
+                      €
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           <div className="flex flex-wrap gap-1.5 mb-2">
             {line.modifiers.map((m, i) => (
               <span
@@ -128,15 +161,16 @@ export function LineSheet({
                 </button>
               </span>
             ))}
-            {line.modifiers.length === 0 && (
-              <span className="text-[12.5px] text-slate-400">Sin modificadores.</span>
-            )}
+            {line.modifiers.length === 0 &&
+              (!line.modifierSelections || line.modifierSelections.length === 0) && (
+                <span className="text-[12.5px] text-slate-400">Sin modificadores.</span>
+              )}
           </div>
           <div className="flex gap-2">
             <input
               value={modifierDraft}
               onChange={(e) => setModifierDraft(e.target.value)}
-              placeholder="Ej.: sin azúcar"
+              placeholder="Nota ad-hoc (ej.: sin azúcar)"
               className="flex-1 h-10 px-3 rounded-xl bg-mipiace-stone border border-transparent text-[13px] focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none"
             />
             <button
@@ -153,7 +187,8 @@ export function LineSheet({
             </button>
           </div>
           <p className="text-[11.5px] text-slate-400 mt-1.5">
-            Los modificadores se imprimen en el ticket pero no se envían a Holded.
+            Las notas ad-hoc aparecen en el ticket y en la descripción del
+            item enviada a Holded.
           </p>
         </div>
 

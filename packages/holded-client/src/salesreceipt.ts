@@ -11,6 +11,10 @@ export interface SalesreceiptItem {
   tax: number;
   discount?: number;
   sku: string; // SKU canónico Holded (spike §05.B). NO enviar `productId`.
+  // Descripción libre del item. B-Bar-Modifiers la usa para mostrar el
+  // desglose textual de modificadores ("(Tipo de leche: Desnatada; ...)").
+  // Holded la persiste y la imprime debajo del nombre en la factura.
+  desc?: string;
 }
 
 export interface SalesreceiptPayload {

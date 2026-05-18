@@ -24,6 +24,12 @@ import type { FastifyInstance } from "fastify";
 import { getPrisma } from "../context.js";
 import { getStoreEventBus } from "../realtime/store-event-bus.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
+import {
+  resolveModifierSelectionsForLines,
+  type ModifierSelectionInput,
+  type ModifierSnapshotEntry,
+  type ResolveResult,
+} from "../tickets/modifier-selection.js";
 import { generatePublicSlug } from "../tickets/public-slug.js";
 import { computeTicket } from "../tickets/totals.js";
 
@@ -40,7 +46,11 @@ interface LineBody {
   unitPrice: number;
   discountPct: number;
   taxRate: number;
+  // Legacy ad-hoc strings tipeados por el cajero ("Sin azúcar").
   modifiers?: string[];
+  // B-Bar-Modifiers: selección del modal del TPV. El backend valida y
+  // suma `priceDeltaCents` al unitPrice antes de calcular el subtotal.
+  modifierSelections?: ModifierSelectionInput[];
   lineExternalId?: string;
 }
 
@@ -131,6 +141,19 @@ export async function registerTableOperativaRoutes(
               items: { type: "string", maxLength: 80 },
               maxItems: 10,
             },
+            modifierSelections: {
+              type: "array",
+              maxItems: 20,
+              items: {
+                type: "object",
+                required: ["groupId", "modifierId"],
+                additionalProperties: false,
+                properties: {
+                  groupId: { type: "string", format: "uuid" },
+                  modifierId: { type: "string", format: "uuid" },
+                },
+              },
+            },
             lineExternalId: { type: "string", pattern: UUID_V4 },
           },
         },
@@ -165,11 +188,34 @@ export async function registerTableOperativaRoutes(
         }
       }
 
+      // Resolver modificadores estructurados antes del cálculo.
+      const [modifierResult] = await resolveModifierSelectionsForLines(
+        prisma,
+        cashier.tid,
+        [
+          {
+            productId: body.productId ?? null,
+            selections: body.modifierSelections ?? [],
+          },
+        ],
+      );
+      if (modifierResult && !modifierResult.ok) {
+        return reply
+          .code(400)
+          .send(buildModifierErrorReply(modifierResult, body.nameSnapshot));
+      }
+      const modifierSnapshot = modifierResult?.ok
+        ? modifierResult.resolved.snapshot
+        : [];
+      const unitPriceDeltaCents = modifierResult?.ok
+        ? modifierResult.resolved.unitPriceDeltaCents
+        : 0;
+
       const lineId = body.lineExternalId ?? randomUUID();
       const lineSnapshot = computeTicket([
         {
           units: body.units,
-          unitPrice: body.unitPrice,
+          unitPrice: body.unitPrice + unitPriceDeltaCents / 100,
           discountPct: body.discountPct,
           taxRate: body.taxRate,
         },
@@ -185,18 +231,21 @@ export async function registerTableOperativaRoutes(
             sku: body.sku,
             nameSnapshot: body.nameSnapshot,
             units: new Prisma.Decimal(body.units),
+            // unitPrice persistido = BASE (sin deltas). Los deltas viven
+            // como datos desnormalizados dentro de `modifiers` y ya están
+            // reflejados en `subtotal`/`total`.
             unitPrice: new Prisma.Decimal(body.unitPrice),
             discountPct: new Prisma.Decimal(body.discountPct),
             taxRate: new Prisma.Decimal(body.taxRate),
             subtotal: new Prisma.Decimal(lineSnapshot.subtotal),
             total: new Prisma.Decimal(lineSnapshot.total),
-            modifiers:
-              body.modifiers && body.modifiers.length > 0
-                ? (body.modifiers as unknown as object)
-                : Prisma.JsonNull,
+            modifiers: buildModifiersSnapshotForLine(
+              body.modifiers,
+              modifierSnapshot,
+            ),
           },
         });
-        return recomputeTicketTotals(tx, draft.id);
+        return recomputeTicketTotalsWithModifiers(tx, draft.id);
       });
       getStoreEventBus().broadcast(ctx.storeId, {
         type: "table.lineAdded",
@@ -614,6 +663,18 @@ async function recomputeTicketTotals(
   tx: Prisma.TransactionClient,
   ticketId: string,
 ) {
+  return recomputeTicketTotalsWithModifiers(tx, ticketId);
+}
+
+// Recalcula los totales del ticket teniendo en cuenta los priceDeltas
+// estructurados del snapshot de modifiers. El unitPrice persistido es
+// siempre el BASE; los deltas vienen de `modifiers` cuando tiene el
+// shape estructurado (B-Bar-Modifiers). Las strings legacy y null se
+// tratan como "sin delta" — comportamiento legacy intacto.
+async function recomputeTicketTotalsWithModifiers(
+  tx: Prisma.TransactionClient,
+  ticketId: string,
+) {
   const lines = await tx.ticketLine.findMany({
     where: { ticketId },
     select: {
@@ -621,12 +682,13 @@ async function recomputeTicketTotals(
       unitPrice: true,
       discountPct: true,
       taxRate: true,
+      modifiers: true,
     },
   });
   const totals = computeTicket(
     lines.map((l) => ({
       units: Number(l.units),
-      unitPrice: Number(l.unitPrice),
+      unitPrice: Number(l.unitPrice) + readUnitPriceDelta(l.modifiers) / 100,
       discountPct: Number(l.discountPct),
       taxRate: Number(l.taxRate),
     })),
@@ -640,6 +702,88 @@ async function recomputeTicketTotals(
     },
     include: DRAFT_INCLUDE,
   });
+}
+
+// Lee el delta total de unitPrice (céntimos) del snapshot estructurado.
+// Para strings legacy y null devuelve 0 (no afectaban al precio).
+function readUnitPriceDelta(raw: unknown): number {
+  if (!Array.isArray(raw)) return 0;
+  let sum = 0;
+  for (const entry of raw) {
+    if (
+      entry &&
+      typeof entry === "object" &&
+      "priceDeltaCents" in entry &&
+      typeof (entry as { priceDeltaCents?: unknown }).priceDeltaCents === "number"
+    ) {
+      sum += (entry as { priceDeltaCents: number }).priceDeltaCents;
+    }
+  }
+  return sum;
+}
+
+// Igual que en tickets/routes — prioriza snapshot estructurado, cae a
+// legacy strings, o null si ambos están vacíos.
+function buildModifiersSnapshotForLine(
+  legacyStrings: string[] | undefined,
+  structuredSnapshot: ModifierSnapshotEntry[],
+): typeof Prisma.JsonNull | object {
+  if (structuredSnapshot.length > 0) {
+    return structuredSnapshot as unknown as object;
+  }
+  if (legacyStrings && legacyStrings.length > 0) {
+    return legacyStrings as unknown as object;
+  }
+  return Prisma.JsonNull;
+}
+
+function buildModifierErrorReply(
+  result: Extract<ResolveResult, { ok: false }>,
+  lineName: string,
+): {
+  error: string;
+  code: string;
+  message: string;
+  line: string;
+  groupId: string;
+  modifierId?: string;
+} {
+  const err = result.error;
+  switch (err.kind) {
+    case "GROUP_NOT_FOUND":
+      return {
+        error: "MODIFIER_GROUP_NOT_FOUND",
+        code: "MODIFIER_GROUP_NOT_FOUND",
+        message: `El grupo de modificadores no existe o ha sido eliminado: ${err.groupId}`,
+        line: lineName,
+        groupId: err.groupId,
+      };
+    case "MODIFIER_NOT_FOUND":
+      return {
+        error: "MODIFIER_NOT_FOUND",
+        code: "MODIFIER_NOT_FOUND",
+        message: `El modificador no pertenece al grupo indicado o ha sido eliminado.`,
+        line: lineName,
+        groupId: err.groupId,
+        modifierId: err.modifierId,
+      };
+    case "EXCLUSIVE_VIOLATION":
+      return {
+        error: "MODIFIER_EXCLUSIVE_VIOLATION",
+        code: "MODIFIER_EXCLUSIVE_VIOLATION",
+        message: `El grupo es exclusivo y solo admite un modificador seleccionado.`,
+        line: lineName,
+        groupId: err.groupId,
+      };
+    case "REQUIRED_VIOLATION":
+      return {
+        error: "MODIFIER_REQUIRED_VIOLATION",
+        code: "MODIFIER_REQUIRED_VIOLATION",
+        message: `El grupo es obligatorio y requiere al menos una selección.`,
+        line: lineName,
+        groupId: err.groupId,
+      };
+  }
 }
 
 interface SerializedDraft {
@@ -663,7 +807,9 @@ interface SerializedDraft {
     taxRate: string;
     subtotal: string;
     total: string;
-    modifiers: string[] | null;
+    // Mixto: array de strings (legacy) o array de ModifierSnapshotEntry
+    // (B-Bar-Modifiers). El TPV discrimina por tipo del primer elemento.
+    modifiers: unknown[] | null;
   }>;
 }
 
@@ -699,7 +845,7 @@ function serializeDraft(
       subtotal: l.subtotal.toString(),
       total: l.total.toString(),
       modifiers: Array.isArray(l.modifiers)
-        ? (l.modifiers as string[])
+        ? (l.modifiers as unknown[])
         : null,
     })),
   };

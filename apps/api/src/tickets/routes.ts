@@ -23,6 +23,12 @@ import { enqueueRefundUpload } from "../queues/refund-upload.js";
 import { enqueueTicketEmail } from "../queues/ticket-email.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
 import { maybeEnqueueAutoEmail } from "./email-trigger.js";
+import {
+  resolveModifierSelectionsForLines,
+  type ModifierSelectionInput,
+  type ModifierSnapshotEntry,
+  type ResolveResult,
+} from "./modifier-selection.js";
 import { generatePublicSlug } from "./public-slug.js";
 import {
   PAYMENT_TOLERANCE_EUR,
@@ -44,7 +50,15 @@ interface TicketLineBody {
   unitPrice: number;
   discountPct: number;
   taxRate: number;
+  // Legacy: array de strings tipeados ad-hoc por el cajero ("Sin azúcar").
+  // No tiene precio asociado; el cálculo de subtotal ignora estos.
   modifiers?: string[];
+  // B-Bar-Modifiers · estructurado: selección del modal <ModifierSelector>.
+  // El backend valida groupId/modifierId contra el catálogo del tenant,
+  // suma `priceDeltaCents` al precio unitario antes de calcular subtotal,
+  // y persiste el snapshot desnormalizado en TicketLine.modifiers (caso
+  // que reemplaza el shape legacy string[] cuando ambos vienen).
+  modifierSelections?: ModifierSelectionInput[];
 }
 
 interface TicketPaymentBody {
@@ -114,6 +128,19 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
                     items: { type: "string", maxLength: 80 },
                     maxItems: 10,
                   },
+                  modifierSelections: {
+                    type: "array",
+                    maxItems: 20,
+                    items: {
+                      type: "object",
+                      required: ["groupId", "modifierId"],
+                      additionalProperties: false,
+                      properties: {
+                        groupId: { type: "string", format: "uuid" },
+                        modifierId: { type: "string", format: "uuid" },
+                      },
+                    },
+                  },
                 },
               },
             },
@@ -181,11 +208,36 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         });
       }
 
-      // 3. Validaciones de totales y pagos.
-      const totals = computeTicket(
+      // 3.a Resolver selecciones de modificadores (B-Bar-Modifiers) antes
+      //     de calcular totales — los priceDeltas afectan al unitPrice
+      //     efectivo de la línea (céntimos por unidad).
+      const modifierResults = await resolveModifierSelectionsForLines(
+        prisma,
+        cashier.tid,
         body.lines.map((l) => ({
+          productId: l.productId ?? null,
+          selections: l.modifierSelections ?? [],
+        })),
+      );
+      for (let i = 0; i < modifierResults.length; i++) {
+        const result = modifierResults[i]!;
+        if (!result.ok) {
+          return reply
+            .code(400)
+            .send(buildModifierErrorReply(result, body.lines[i]!.nameSnapshot));
+        }
+      }
+      const lineModifierResolutions = modifierResults.map((r) =>
+        r.ok ? r.resolved : { unitPriceDeltaCents: 0, snapshot: [] },
+      );
+
+      // 3.b Validaciones de totales y pagos. unitPrice efectivo incluye
+      //     los priceDeltas en céntimos / 100 (por unidad).
+      const totals = computeTicket(
+        body.lines.map((l, i) => ({
           units: l.units,
-          unitPrice: l.unitPrice,
+          unitPrice:
+            l.unitPrice + lineModifierResolutions[i]!.unitPriceDeltaCents / 100,
           discountPct: l.discountPct,
           taxRate: l.taxRate,
         })),
@@ -352,15 +404,19 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
                 sku: l.sku,
                 nameSnapshot: l.nameSnapshot,
                 units: new Prisma.Decimal(l.units),
+                // unitPrice persistido es el BASE sin deltas. El subtotal
+                // ya incluye los deltas (computado arriba). Mantenemos
+                // unitPrice "limpio" para que la auditoría sea legible y
+                // los modifiers expliquen explícitamente el suplemento.
                 unitPrice: new Prisma.Decimal(l.unitPrice),
                 discountPct: new Prisma.Decimal(l.discountPct),
                 taxRate: new Prisma.Decimal(l.taxRate),
                 subtotal: new Prisma.Decimal(totals.lines[i]!.subtotal),
                 total: new Prisma.Decimal(totals.lines[i]!.total),
-                modifiers:
-                  l.modifiers && l.modifiers.length > 0
-                    ? (l.modifiers as unknown as object)
-                    : Prisma.JsonNull,
+                modifiers: buildModifiersSnapshot(
+                  l.modifiers,
+                  lineModifierResolutions[i]!.snapshot,
+                ),
               })),
             },
             payments: {
@@ -528,10 +584,15 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         }
       }
 
+      // Recalcula totales: el unitPrice persistido es el BASE; los
+      // deltas estructurados de modifiers (B-Bar-Modifiers) se aplican
+      // aquí para que el cobro coincida con lo que el cajero ve en
+      // pantalla del TPV.
       const totals = computeTicket(
         draft.lines.map((l) => ({
           units: Number(l.units),
-          unitPrice: Number(l.unitPrice),
+          unitPrice:
+            Number(l.unitPrice) + readUnitPriceDeltaCents(l.modifiers) / 100,
           discountPct: Number(l.discountPct),
           taxRate: Number(l.taxRate),
         })),
@@ -1174,6 +1235,100 @@ function ticketInclude() {
   } as const;
 }
 
+// Suma de `priceDeltaCents` del snapshot estructurado de modifiers.
+// Devuelve 0 si el campo es null, string[] legacy, o no es array.
+function readUnitPriceDeltaCents(raw: unknown): number {
+  if (!Array.isArray(raw)) return 0;
+  let sum = 0;
+  for (const entry of raw) {
+    if (
+      entry &&
+      typeof entry === "object" &&
+      "priceDeltaCents" in entry &&
+      typeof (entry as { priceDeltaCents?: unknown }).priceDeltaCents === "number"
+    ) {
+      sum += (entry as { priceDeltaCents: number }).priceDeltaCents;
+    }
+  }
+  return sum;
+}
+
+// Serializa el JSON de TicketLine.modifiers tal cual lo verá el frontend.
+// El campo puede contener tres formas: null (sin modifiers), string[]
+// (legacy ad-hoc) u object[] con shape ModifierSnapshotEntry (B-Bar-
+// Modifiers). El renderer del TPV se basa en el tipo del primer elemento.
+function serializeLineModifiers(raw: unknown): unknown[] {
+  if (!Array.isArray(raw)) return [];
+  return raw as unknown[];
+}
+
+// Construye el valor para TicketLine.modifiers (JSONB nullable).
+// Prioriza el snapshot estructurado del modal — si está vacío, cae a
+// las strings legacy ad-hoc. Si ambos están vacíos → JsonNull.
+function buildModifiersSnapshot(
+  legacyStrings: string[] | undefined,
+  structuredSnapshot: ModifierSnapshotEntry[],
+): typeof Prisma.JsonNull | object {
+  if (structuredSnapshot.length > 0) {
+    return structuredSnapshot as unknown as object;
+  }
+  if (legacyStrings && legacyStrings.length > 0) {
+    return legacyStrings as unknown as object;
+  }
+  return Prisma.JsonNull;
+}
+
+// Mapea un error de validación de modifier a una respuesta 400 con
+// shape compatible con el resto de endpoints (error + code + message).
+function buildModifierErrorReply(
+  result: Extract<ResolveResult, { ok: false }>,
+  lineName: string,
+): {
+  error: string;
+  code: string;
+  message: string;
+  line: string;
+  groupId: string;
+  modifierId?: string;
+} {
+  const err = result.error;
+  switch (err.kind) {
+    case "GROUP_NOT_FOUND":
+      return {
+        error: "MODIFIER_GROUP_NOT_FOUND",
+        code: "MODIFIER_GROUP_NOT_FOUND",
+        message: `El grupo de modificadores no existe o ha sido eliminado: ${err.groupId}`,
+        line: lineName,
+        groupId: err.groupId,
+      };
+    case "MODIFIER_NOT_FOUND":
+      return {
+        error: "MODIFIER_NOT_FOUND",
+        code: "MODIFIER_NOT_FOUND",
+        message: `El modificador no pertenece al grupo indicado o ha sido eliminado.`,
+        line: lineName,
+        groupId: err.groupId,
+        modifierId: err.modifierId,
+      };
+    case "EXCLUSIVE_VIOLATION":
+      return {
+        error: "MODIFIER_EXCLUSIVE_VIOLATION",
+        code: "MODIFIER_EXCLUSIVE_VIOLATION",
+        message: `El grupo es exclusivo y solo admite un modificador seleccionado.`,
+        line: lineName,
+        groupId: err.groupId,
+      };
+    case "REQUIRED_VIOLATION":
+      return {
+        error: "MODIFIER_REQUIRED_VIOLATION",
+        code: "MODIFIER_REQUIRED_VIOLATION",
+        message: `El grupo es obligatorio y requiere al menos una selección.`,
+        line: lineName,
+        groupId: err.groupId,
+      };
+  }
+}
+
 function refundInclude() {
   return {
     lines: true,
@@ -1286,7 +1441,7 @@ function serializeTicket(t: DbTicket): Record<string, unknown> {
       taxRate: Number(l.taxRate.toString()),
       subtotal: Number(l.subtotal.toString()),
       total: Number(l.total.toString()),
-      modifiers: Array.isArray(l.modifiers) ? (l.modifiers as string[]) : [],
+      modifiers: serializeLineModifiers(l.modifiers),
     })),
     payments: ticket.payments.map((p) => ({
       id: p.id,

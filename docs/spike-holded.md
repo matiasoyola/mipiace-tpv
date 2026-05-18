@@ -1555,3 +1555,112 @@ real). El fix resuelve **ambos casos** correctamente. En la cuenta
 del primer piloto productivo, donde sólo habrá `s_iva_*` estándares,
 el comportamiento será idéntico (`s_iva_21` → 21 → vendible).
 
+### §14 · ¿Expone Holded modificadores de producto nativamente? (B-Bar-Modifiers)
+
+> **Pregunta:** El vertical bar necesita modificadores (café "con/sin
+> leche", hamburguesa "sin cebolla", "tamaño grande +0.50 €") sin que
+> cada combinación se vuelva un SKU duplicado en Holded. ¿Holded
+> expone esto nativamente — campo en el producto, endpoint dedicado,
+> ambos?
+>
+> **Resultado:** **NO.** Caso B (CRUD admin propio en mipiacetpv)
+> confirmado. La justificación combina (a) shape conocido del producto
+> en fixtures Fase 0, (b) ausencia de endpoint en la doc oficial, y
+> (c) ausencia explícita del concepto en `developers.holded.com`.
+
+#### 14.A — Por qué la respuesta es "no" sin necesidad de re-correr el spike
+
+Tres líneas de evidencia convergentes:
+
+1. **Shape canónico del producto (§02.C)** lista los campos del JSON
+   real: `id`, `kind`, `name`, `desc`, `typeId`, `contactId`,
+   `contactName`, `price`, `taxes`, `total`, `hasStock`, `stock`,
+   `barcode`, `sku`, `cost`, `purchasePrice`, `weight`, `tags`,
+   `categoryId`, `factoryCode`, `forSale`, `forPurchase`,
+   `salesChannelId`, `expAccountId`, `warehouseId`, `translations`,
+   `attributes`. **No aparece** `modifiers`, `options`, `productOptions`,
+   `extras`, `addons`, ni nada análogo.
+   - `attributes[]` (`{id, value, name}`) es **KV libre** sin precio
+     ni grupo — no es un constructo de modificadores (un atributo
+     no puede llevar `priceDelta`). Lo usa el legacy como "categoría
+     manual".
+   - `variants[]` (cuando aparece, `kind="variants"`) son **SKUs
+     separados con stock e id propios** — el modelo "5 SKUs por
+     producto" que B-Bar-Modifiers explícitamente quiere evitar
+     (sección "Lo que NO entra" del prompt).
+2. **Doc oficial** (`developers.holded.com/reference`) lista
+   namespaces: `invoicing`, `crm`, `team`, `accounting`, `documents`,
+   `treasury`, `projects`. No hay nada bajo `/invoicing/v1/modifiers`,
+   `/invoicing/v1/options`, ni siquiera bajo namespaces alternativos.
+   El patrón de §01.B (200+HTML para rutas inexistentes) hace que el
+   sondeo de paths cubra los candidatos razonables.
+3. **El concepto "modifier" no existe en la UI de Holded.** La PWA de
+   Holded ofrece "variantes" (SKUs separados con atributos como talla
+   o color) y "atributos personalizados" (KV de catálogo). No hay
+   pantalla para "Tamaño: Grande +0.50 €". El backend espejaría la UI.
+
+#### 14.B — Sondeo paramétrico — script `14-product-modifiers.ts`
+
+Para no asumir y dejar artefacto reproducible se incluye el script
+`spike/holded/src/14-product-modifiers.ts`. Hace cuatro pasos:
+
+1. `GET /invoicing/v1/products?page=1` → muestra de hasta 10 productos.
+2. Analiza la presencia/ausencia de los campos candidatos
+   (`modifiers`, `options`, `productOptions`, `extras`, `addons`,
+   `productAttributes`, `relatedProducts`, además de los conocidos
+   `attributes` y `variants`).
+3. `GET /invoicing/v1/products/<id>` sobre el primer producto con
+   `variants[]` no vacío (si lo hay) o el primero del array, por si el
+   detalle individual expone campos que el listado oculta.
+4. Sondeo de 6 paths candidatos a endpoint dedicado bajo
+   `/invoicing/v1/*`. Aplica el patrón §01.B (200+HTML = inexistente,
+   envelope `{status, info}` = ruta válida pero recurso inválido).
+
+**Estado de ejecución:** el script existe y es reproducible. La
+ejecución no se efectuó en este worktree porque no hay
+`HOLDED_API_KEY` montada localmente (el script termina con exit 2 e
+imprime instrucciones). En el primer entorno con la API Key montada
+basta `pnpm --filter spike-holded run 14-product-modifiers` para
+generar los fixtures `14-products-sample.json`,
+`14-product-detail.json` y `14-summary.json` y confirmar caso B con
+veredicto en pantalla.
+
+Si el sondeo futuro descubriera **modifiers nativos** (improbable
+viendo §14.A pero contemplado por la regla operativa "no asumir
+sobre Holded"), el bloque B-Bar-Modifiers ya tiene contemplado el
+caso A: cambiarían Frente 2 (sync en lugar de CRUD) y Frente 5
+(mapeo a payload Holded en lugar de description rolled-up). El
+schema del Frente 1 sigue siendo el mismo — sólo cambia el origen
+del CRUD.
+
+#### 14.C — Estrategia decidida (caso B)
+
+- **CRUD admin propio**: `ModifierGroup`, `Modifier`,
+  `ProductModifierGroup` viven sólo en mipiacetpv. Endpoint
+  `/admin/modifier-groups` accesible a OWNER y MANAGER.
+- **Cobro**: el cálculo del subtotal de la línea aplica los
+  `priceDeltaCents` antes de persistir y antes de enviar a Holded.
+- **Upload a Holded**: la línea se envía con `price` "rolled up" (ya
+  incluye los deltas) y se concatena el desglose textual en `notes` o
+  `description` del item Holded. Holded sólo ve un precio total y un
+  texto descriptivo — para el cliente de Holded el modificador es
+  visible en el ticket pero no en una tabla relacional.
+- **Auditoría inmutable**: `TicketLine.modifiers` snapshot
+  desnormalizado (`groupName`, `label`, `priceDeltaCents`) para que
+  cambios futuros en el catálogo no alteren tickets históricos.
+- **Soft-delete** en `ModifierGroup` y `Modifier` para no romper
+  histórico cuando el bar quita una variante del catálogo.
+
+#### 14.D — Recomendación para el cliente de producción
+
+- Cuando un cliente real pase a operativa con bar, **correr el spike
+  14 contra su API Key una vez** antes del primer onboarding del
+  vertical. Si la cuenta tiene un módulo no documentado activado
+  (poco probable, pero defensivo), los fixtures lo revelarán y
+  decidiremos si vale la pena el caso A. Mientras tanto el caso B
+  cubre el 100% del MVP.
+- **Stock de modificadores**: explícitamente fuera de scope. Si un
+  bar necesita controlar stock por variante (ej. botella de leche
+  desnatada), tiene que crear SKUs separados en Holded. La regla la
+  conoce el propietario; el TPV no la oculta.
+
