@@ -1,19 +1,24 @@
 # Caddyfile · mipiacetpv producción
 #
 # Topología de dominios (en VPS 3, IP 76.13.142.28):
-#   mipiacetpv.tech           → PWA del TPV (estáticos /srv/tpv) + /api/* → api:3001
-#   admin.mipiacetpv.tech     → consola admin per-tenant + super-admin (estáticos /srv/admin) + /api/* → api:3001
-#   api.mipiacetpv.tech       → backend API directo (proxy a api:3001)
+#
+#   Canónico (.com — registrado 2026-05-18):
+#     mipiacetpv.com           → PWA del TPV (estáticos /srv/tpv) + /api/* → api:3001
+#     admin.mipiacetpv.com     → consola admin per-tenant + super-admin (estáticos /srv/admin) + /api/* → api:3001
+#     api.mipiacetpv.com       → backend API directo (proxy a api:3001)
+#
+#   Legacy (.tech): 301 → .com preservando path. Se mantienen mientras
+#   los pilotos antiguos no migren. Decisión 2026-05-18: marca única .com.
 #
 # Las PWAs hacen fetch a paths relativos `/api/*` para evitar problemas
 # CORS y simplificar `PUBLIC_API_URL` en build. El backend también queda
-# expuesto en `api.mipiacetpv.tech` para herramientas externas (curl,
+# expuesto en `api.mipiacetpv.com` para herramientas externas (curl,
 # Postman) y para WebSockets cuando se conectan desde otros orígenes.
 #
 # SSL: Caddy obtiene certificados Let's Encrypt automáticamente al primer
-# acceso. Los DNS A records de los 3 dominios tienen que apuntar a
-# 76.13.142.28 ANTES de levantar el stack (si no, Let's Encrypt falla
-# y Caddy se queda reintentando cada minuto).
+# acceso. Los DNS A records de los 6 dominios (.com + .tech) tienen que
+# apuntar a 76.13.142.28 ANTES de levantar el stack (si no, Let's
+# Encrypt falla y Caddy se queda reintentando cada minuto).
 
 {
 	email {$CADDY_ACME_EMAIL}
@@ -26,8 +31,12 @@
 	}
 }
 
+# ═══════════════════════════════════════════════════════════════════════
+# CANÓNICO · .com
+# ═══════════════════════════════════════════════════════════════════════
+
 # ── PWA del TPV ──────────────────────────────────────────────────────
-mipiacetpv.tech, www.mipiacetpv.tech {
+mipiacetpv.com, www.mipiacetpv.com {
 	# /api/* se proxea al backend. handle_path elimina el prefijo /api
 	# antes de reenviar (la API escucha en rutas sin prefijo).
 	handle_path /api/* {
@@ -78,7 +87,7 @@ mipiacetpv.tech, www.mipiacetpv.tech {
 }
 
 # ── Consola admin (per-tenant + super-admin en /superadmin) ──────────
-admin.mipiacetpv.tech {
+admin.mipiacetpv.com {
 	handle_path /api/* {
 		reverse_proxy api:3001
 	}
@@ -113,7 +122,7 @@ admin.mipiacetpv.tech {
 # ── Backend API directo ──────────────────────────────────────────────
 # WebSockets de B7 (mesas multi-terminal) pasan por aquí. Caddy detecta
 # el Upgrade header y proxea WS transparentemente.
-api.mipiacetpv.tech {
+api.mipiacetpv.com {
 	encode gzip zstd
 	reverse_proxy api:3001
 
@@ -121,4 +130,22 @@ api.mipiacetpv.tech {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
 	}
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# LEGACY · .tech → 301 al .com (preserva path + query string).
+# Mantener mientras los pilotos antiguos no migren. Eliminar cuando
+# Google Search Console confirme que ya no hay tráfico al .tech.
+# ═══════════════════════════════════════════════════════════════════════
+
+mipiacetpv.tech, www.mipiacetpv.tech {
+	redir https://mipiacetpv.com{uri} permanent
+}
+
+admin.mipiacetpv.tech {
+	redir https://admin.mipiacetpv.com{uri} permanent
+}
+
+api.mipiacetpv.tech {
+	redir https://api.mipiacetpv.com{uri} permanent
 }

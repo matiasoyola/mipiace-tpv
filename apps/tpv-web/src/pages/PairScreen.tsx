@@ -164,7 +164,7 @@ export function PairScreen({ onPaired }: { onPaired: () => void }) {
         </div>
       </div>
       <div className="text-center mt-6 text-[11.5px] text-slate-400">
-        mipiacetpv · Conectado a mipiacetpv.tech
+        mipiacetpv · Conectado a mipiacetpv.com
       </div>
     </Centered>
   );

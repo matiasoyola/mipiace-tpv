@@ -122,8 +122,8 @@ export const EnvSchema = z.object({
   SUPER_ADMIN_IMPERSONATION_TTL: z.string().default("30m"),
   // Remitente / reply-to del email de bienvenida al OWNER de un tenant
   // nuevo creado desde la consola super-admin.
-  SUPER_ADMIN_FROM_EMAIL: z.string().default("noreply@mipiacetpv.tech"),
-  SUPER_ADMIN_REPLY_TO_EMAIL: z.string().default("soporte@mipiacetpv.tech"),
+  SUPER_ADMIN_FROM_EMAIL: z.string().default("noreply@mipiacetpv.com"),
+  SUPER_ADMIN_REPLY_TO_EMAIL: z.string().default("soporte@mipiacetpv.com"),
 });
 
 export type AppEnv = z.infer<typeof EnvSchema>;
