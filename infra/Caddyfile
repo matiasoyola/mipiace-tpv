@@ -59,7 +59,7 @@ mipiacetpv.com, www.mipiacetpv.com {
 	}
 
 	handle {
-		root * /srv/tpv
+		root * /srv/static/tpv
 		encode gzip zstd
 		# La PWA usa client-side routing (react-router) — todo lo que no sea
 		# un archivo se rebota a index.html para que React maneje la ruta.
@@ -102,7 +102,7 @@ admin.mipiacetpv.com {
 	}
 
 	handle {
-		root * /srv/admin
+		root * /srv/static/admin
 		encode gzip zstd
 		try_files {path} /index.html
 		file_server

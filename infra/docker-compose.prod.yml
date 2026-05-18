@@ -186,7 +186,11 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-      - static_files:/srv:ro
+      # Submount obligatorio: si montamos static_files en /srv (root),
+      # Docker no puede crear el subdir /srv/product-images porque el
+      # padre quedaría read-only y falla con `make mountpoint`. Anidamos
+      # bajo /srv/static. El Caddyfile ya apunta a /srv/static/{tpv,admin}.
+      - static_files:/srv/static:ro
       # B-ProductImages: imágenes de producto en read-only para Caddy.
       # El worker es quien escribe; Caddy sólo sirve con cache HTTP de
       # 30 días (ver Caddyfile, bloque handle_path /product-images/*).
