@@ -43,6 +43,18 @@ RUN pnpm --filter @mipiacetpv/db run generate
 # ─────────────────────────────────────────────────────────────────────
 FROM deps AS build
 
+# B-SuperAdmin-Shortcuts: URLs canónicas de TPV y API expuestas a la
+# build de admin para que conozca dónde redirigir los atajos (sidebar
+# de super-admin + botón "TPV modo prueba" en TenantDetailPage). Vite
+# inyecta cualquier var que empiece por VITE_ en `import.meta.env`.
+# Defaults apuntan a producción `.com`; sobreescribibles desde compose
+# vía `build.args` si el entorno necesita otros valores (staging,
+# preview…).
+ARG VITE_TPV_URL=https://mipiacetpv.com
+ARG VITE_API_URL=https://api.mipiacetpv.com
+ENV VITE_TPV_URL=${VITE_TPV_URL}
+ENV VITE_API_URL=${VITE_API_URL}
+
 # Builds de frontend (Vite produce apps/<x>/dist/)
 RUN pnpm --filter @mipiacetpv/admin build
 RUN pnpm --filter @mipiacetpv/tpv-web build

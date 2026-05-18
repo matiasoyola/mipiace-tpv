@@ -3,7 +3,16 @@
 // para que sea obvio en qué pantalla estás.
 
 import { useNavigate, Link, useLocation } from "react-router-dom";
-import { Building2, FileClock, Shield, ShieldAlert } from "lucide-react";
+import {
+  Activity,
+  Building2,
+  ExternalLink,
+  FileClock,
+  Home,
+  Shield,
+  ShieldAlert,
+  ShoppingCart,
+} from "lucide-react";
 
 import { clearSuperAdminTokens } from "./api.js";
 
@@ -17,6 +26,44 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/superadmin/tenants", label: "Tenants", icon: Building2 },
   { to: "/superadmin/audit", label: "Auditoría", icon: FileClock },
   { to: "/superadmin/me", label: "Mi cuenta", icon: Shield },
+];
+
+// B-SuperAdmin-Shortcuts: atajos a otras URLs del proyecto. Abren en
+// pestaña nueva (no rompemos la sesión super-admin actual). Las URLs
+// son inyectadas en build por Vite desde `infra/Dockerfile`:
+//   VITE_TPV_URL  → PWA pública del TPV
+//   VITE_API_URL  → backend Fastify directo
+// Defaults defensivos por si la build no las define (dev local).
+const TPV_URL = (import.meta.env.VITE_TPV_URL as string | undefined) ?? "/";
+const API_URL =
+  (import.meta.env.VITE_API_URL as string | undefined) ?? "/api";
+
+interface ExternalLinkItem {
+  href: string;
+  label: string;
+  icon: typeof Building2;
+  hint: string;
+}
+
+const EXTERNAL_LINKS: ExternalLinkItem[] = [
+  {
+    href: "/",
+    label: "Admin (login)",
+    icon: Home,
+    hint: "Login per-tenant en este mismo dominio",
+  },
+  {
+    href: TPV_URL,
+    label: "TPV público",
+    icon: ShoppingCart,
+    hint: "PWA del TPV — abrir para inspección o pruebas",
+  },
+  {
+    href: `${API_URL.replace(/\/$/, "")}/health`,
+    label: "API health",
+    icon: Activity,
+    hint: "Ping al backend directo · debe devolver 200",
+  },
 ];
 
 export function SuperAdminShell({
@@ -64,6 +111,37 @@ export function SuperAdminShell({
             );
           })}
         </nav>
+
+        {/* B-SuperAdmin-Shortcuts: separador + bloque de enlaces externos.
+            Visualmente atenuado para no competir con la nav principal. */}
+        <div className="mt-6 pt-4 border-t border-slate-800">
+          <div className="px-3 mb-2 text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold">
+            Enlaces externos
+          </div>
+          <div className="space-y-1">
+            {EXTERNAL_LINKS.map((item) => {
+              const Icon = item.icon;
+              return (
+                <a
+                  key={item.label}
+                  href={item.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={item.hint}
+                  className="w-full h-9 flex items-center gap-3 px-3 rounded-lg text-[13px] text-slate-400 hover:bg-slate-800 hover:text-white transition-colors group"
+                >
+                  <Icon className="w-[15px] h-[15px]" strokeWidth={2} />
+                  <span className="flex-1">{item.label}</span>
+                  <ExternalLink
+                    className="w-[12px] h-[12px] opacity-0 group-hover:opacity-60"
+                    strokeWidth={2}
+                  />
+                </a>
+              );
+            })}
+          </div>
+        </div>
+
         <button
           onClick={onLogout}
           className="mt-auto text-[12px] text-slate-400 hover:text-amber-400 font-medium text-left px-3 py-2"
