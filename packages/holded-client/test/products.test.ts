@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  extractImageUrl,
   HoldedSilentRejectError,
   iterateAllProducts,
   listProductsPage,
@@ -93,5 +94,66 @@ describe("updateProductWithGetBack", () => {
         { expect: { sku: "AUTO-cafebabe" } },
       ),
     ).rejects.toBeInstanceOf(HoldedSilentRejectError);
+  });
+});
+
+describe("extractImageUrl (B-ProductImages spike §13)", () => {
+  function p(extra: Partial<HoldedProduct>): HoldedProduct {
+    return { id: "x", name: "n", ...extra } as HoldedProduct;
+  }
+
+  it("mainImage string http(s) → la devuelve tal cual", () => {
+    expect(
+      extractImageUrl(p({ mainImage: "https://cdn.holded.com/foo.jpg" })),
+    ).toBe("https://cdn.holded.com/foo.jpg");
+  });
+
+  it("mainImage como objeto { url } → extrae la URL anidada", () => {
+    expect(
+      extractImageUrl(p({ mainImage: { url: "https://x.example/a.png" } })),
+    ).toBe("https://x.example/a.png");
+  });
+
+  it("pictures[] array de strings → primera entrada válida", () => {
+    expect(
+      extractImageUrl(
+        p({ pictures: ["", "https://cdn.holded.com/p1.jpg", "https://x/p2"] }),
+      ),
+    ).toBe("https://cdn.holded.com/p1.jpg");
+  });
+
+  it("images[] array de objetos → URL anidada", () => {
+    expect(
+      extractImageUrl(
+        p({ images: [{ url: "https://cdn.holded.com/p1.jpg" }] }),
+      ),
+    ).toBe("https://cdn.holded.com/p1.jpg");
+  });
+
+  it("ningún campo → null", () => {
+    expect(extractImageUrl(p({}))).toBeNull();
+  });
+
+  it("campo vacío / array vacío → null", () => {
+    expect(extractImageUrl(p({ mainImage: "" }))).toBeNull();
+    expect(extractImageUrl(p({ images: [] }))).toBeNull();
+    expect(extractImageUrl(p({ pictures: [""] }))).toBeNull();
+  });
+
+  it("string no http (path relativo) → null (defensivo)", () => {
+    expect(extractImageUrl(p({ mainImage: "/uploads/foo.jpg" }))).toBeNull();
+  });
+
+  it("prioridad: mainImage gana sobre image/thumbnail/pictures", () => {
+    expect(
+      extractImageUrl(
+        p({
+          mainImage: "https://main.example/m.jpg",
+          image: "https://other.example/i.jpg",
+          thumbnail: "https://other.example/t.jpg",
+          pictures: ["https://other.example/p.jpg"],
+        }),
+      ),
+    ).toBe("https://main.example/m.jpg");
   });
 });

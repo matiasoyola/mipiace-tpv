@@ -98,12 +98,18 @@ services:
       SMTP_FROM: ${SMTP_FROM}
       SUPER_ADMIN_FROM_EMAIL: ${SUPER_ADMIN_FROM_EMAIL}
       SUPER_ADMIN_REPLY_TO_EMAIL: ${SUPER_ADMIN_REPLY_TO_EMAIL}
+      PRODUCT_IMAGE_CACHE_DIR: /var/cache/mipiacetpv/product-images
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3001/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 30s
+    volumes:
+      # B-ProductImages: el API expone `/api/admin/product-images/...` u
+      # otros endpoints internos que tocan el disco; el worker hace la
+      # escritura primaria. Compartimos el volumen en RW para ambos.
+      - product_images:/var/cache/mipiacetpv/product-images
     deploy:
       resources:
         limits:
@@ -137,6 +143,11 @@ services:
       SMTP_FROM: ${SMTP_FROM}
       SUPER_ADMIN_FROM_EMAIL: ${SUPER_ADMIN_FROM_EMAIL}
       SUPER_ADMIN_REPLY_TO_EMAIL: ${SUPER_ADMIN_REPLY_TO_EMAIL}
+      PRODUCT_IMAGE_CACHE_DIR: /var/cache/mipiacetpv/product-images
+    volumes:
+      # Worker primario para B-ProductImages: descarga, valida y escribe
+      # los binarios. Mismo volumen que el API y Caddy.
+      - product_images:/var/cache/mipiacetpv/product-images
     deploy:
       resources:
         limits:
@@ -176,6 +187,10 @@ services:
       - caddy_data:/data
       - caddy_config:/config
       - static_files:/srv:ro
+      # B-ProductImages: imágenes de producto en read-only para Caddy.
+      # El worker es quien escribe; Caddy sólo sirve con cache HTTP de
+      # 30 días (ver Caddyfile, bloque handle_path /product-images/*).
+      - product_images:/srv/product-images:ro
     deploy:
       resources:
         limits:
@@ -189,6 +204,11 @@ volumes:
   caddy_data:
   caddy_config:
   static_files:
+  # B-ProductImages: cache local de imágenes de producto desde Holded.
+  # Compartido entre api (escribe ocasional), worker (escribe primario)
+  # y caddy (lee). Persiste reinicios; el sync incremental detecta URLs
+  # nuevas y el worker re-descarga.
+  product_images:
 
 networks:
   mipiacetpv:

@@ -34,6 +34,21 @@ mipiacetpv.tech, www.mipiacetpv.tech {
 		reverse_proxy api:3001
 	}
 
+	# B-ProductImages: imágenes de producto cacheadas localmente desde
+	# Holded. El worker (mipiacetpv-worker) descarga y escribe a
+	# /srv/product-images/<tenantId>/<productId>.<ext>. El path lleva
+	# UUID v4 (≈122 bits) — adivinar otro tenant+producto es inviable.
+	# Cache HTTP de 30 días: si la URL cambia en Holded, el sync
+	# incremental invalida `imageCachedAt` y el worker sobrescribe el
+	# archivo atomicamente. El service worker de la PWA hace
+	# StaleWhileRevalidate sobre estas URLs (B-ProductImages F5).
+	handle_path /product-images/* {
+		root * /srv/product-images
+		file_server
+		encode gzip zstd
+		header Cache-Control "public, max-age=2592000, immutable"
+	}
+
 	handle {
 		root * /srv/tpv
 		encode gzip zstd
@@ -66,6 +81,15 @@ mipiacetpv.tech, www.mipiacetpv.tech {
 admin.mipiacetpv.tech {
 	handle_path /api/* {
 		reverse_proxy api:3001
+	}
+
+	# B-ProductImages: el admin también pinta el catálogo con imágenes
+	# (vista de productos / bandeja de revisión). Mismo volumen RO.
+	handle_path /product-images/* {
+		root * /srv/product-images
+		file_server
+		encode gzip zstd
+		header Cache-Control "public, max-age=2592000, immutable"
 	}
 
 	handle {

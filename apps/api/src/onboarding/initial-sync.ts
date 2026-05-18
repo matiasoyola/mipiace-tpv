@@ -6,6 +6,7 @@ import { PrismaClient } from "@mipiacetpv/db";
 import {
   ApiKeyClient,
   buildTaxRateResolver,
+  extractImageUrl,
   iterateAllContacts,
   iterateAllProducts,
   iterateAllServices,
@@ -19,6 +20,7 @@ import {
 
 import { decryptSecret } from "../crypto.js";
 import { loadEnv } from "../env.js";
+import { enqueueProductImageCache } from "../queues/product-image-cache.js";
 import { runAutoSku, type AutoSkuResult } from "./auto-sku.js";
 import { createTpvOtrosWildcards, type WildcardResult } from "./tpv-otros.js";
 
@@ -35,6 +37,10 @@ export interface SyncStats {
   servicePagesProcessed: number;
   contactsCount: number;
   contactPagesProcessed: number;
+  // B-ProductImages: jobs encolados al cache worker tras el sync.
+  // Visible en el admin (`initialSyncStats.imageJobsEnqueued`) para
+  // que el propietario sepa que la descarga sigue activa en background.
+  imageJobsEnqueued: number;
   currentStep?: string;
   errors: Array<{ step: string; message: string }>;
 }
@@ -53,6 +59,7 @@ function emptyStats(): SyncStats {
     servicePagesProcessed: 0,
     contactsCount: 0,
     contactPagesProcessed: 0,
+    imageJobsEnqueued: 0,
     errors: [],
   };
 }
@@ -177,6 +184,10 @@ export async function runInitialSync(options: RunInitialSyncOptions): Promise<Sy
       mergeWildcards(stats, result);
     }, prisma, tenantId);
 
+    await step(stats, "Imágenes de producto", async () => {
+      stats.imageJobsEnqueued = await enqueueAllProductImages(prisma, tenantId, log);
+    }, prisma, tenantId);
+
     await step(stats, "Contactos", async () => {
       const now = new Date();
       for await (const { page, contacts } of iterateAllContacts(client)) {
@@ -264,7 +275,16 @@ async function upsertCatalogEntry(
   const barcode =
     typeof barcodeRaw === "string" && barcodeRaw.length > 0 ? barcodeRaw : null;
   const sellable = sku !== null && resolvedTaxRate !== null;
+  // B-ProductImages: extrae la URL canónica de imagen. Si no hay,
+  // imageUrl queda null y el TPV pintará placeholder. Servicios usan
+  // el mismo helper (raw es HoldedProduct | HoldedService, ambos con
+  // los campos de imagen como opcionales).
+  const imageUrl = extractImageUrl(raw as HoldedProduct);
 
+  // Sync inicial: BD vacía para este tenant, así que el upsert siempre
+  // es create. No leemos previo para decidir invalidación del cache —
+  // el worker descargará en cuanto vea imageUrl != null && cachedAt
+  // null. (En incremental-sync sí comparamos URL previa.)
   await prisma.product.upsert({
     where: {
       tenantId_holdedProductId: { tenantId, holdedProductId: raw.id },
@@ -280,6 +300,8 @@ async function upsertCatalogEntry(
       kind,
       active: true,
       sellableViaTpv: sellable,
+      imageUrl,
+      // imageMime + imageCachedAt nacen NULL — el worker los rellena.
       raw: raw as unknown as object,
     },
     update: {
@@ -299,10 +321,41 @@ async function upsertCatalogEntry(
       // bajamos (auto-sku puede subirlo a true tras asignar SKU).
       sellableViaTpv:
         resolvedTaxRate === null ? false : sellable || undefined,
+      imageUrl,
       raw: raw as unknown as object,
       lastSyncedAt: new Date(),
     },
   });
+}
+
+// Tras el sync inicial, encola un job por cada producto que tenga
+// imageUrl asignada pero no descarga válida. Concurrencia 4 en el
+// worker → 500 productos se descargan en background sin saturar.
+// Idempotente: el job mismo es no-op si imageCachedAt llegó a no-null
+// entre el enqueue y la ejecución (carrera improbable pero defensiva).
+async function enqueueAllProductImages(
+  prisma: PrismaClient,
+  tenantId: string,
+  log: NonNullable<RunInitialSyncOptions["logger"]>,
+): Promise<number> {
+  const pending = await prisma.product.findMany({
+    where: { tenantId, imageUrl: { not: null }, imageCachedAt: null },
+    select: { id: true },
+  });
+  for (const p of pending) {
+    try {
+      await enqueueProductImageCache(p.id);
+    } catch (err) {
+      // No bloqueamos el sync por fallos del cache de imagen — son
+      // cosméticos. Si Redis está caído, el siguiente incremental los
+      // reintenta.
+      log.warn("no pude encolar image-cache job", {
+        productId: p.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return pending.length;
 }
 
 function mergeAutoSku(stats: SyncStats, result: AutoSkuResult): void {

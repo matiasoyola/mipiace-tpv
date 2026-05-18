@@ -37,8 +37,10 @@ import {
 import {
   findByBarcode,
   fuzzySearch,
+  getCachedTenantId,
   loadCatalogFromCache,
   loadWildcards,
+  productImageUrl,
   refreshCatalog,
   type CatalogProduct,
   type Wildcard,
@@ -687,6 +689,10 @@ function SaleWorkspace({
   onSuspend: () => void;
   onCancel: () => void;
 }) {
+  // B-ProductImages: tenantId cacheado tras el último refresh del
+  // catálogo. Si por alguna razón viene null (primer arranque y aún
+  // sin sync), todos los tiles caen al placeholder — no rompe.
+  const tenantId = getCachedTenantId();
   return (
     <div className="flex-1 grid lg:grid-cols-[1fr_460px] gap-4 lg:gap-6 p-4 md:p-7 min-h-0">
       <section className="flex flex-col min-w-0 order-2 lg:order-1">
@@ -702,25 +708,42 @@ function SaleWorkspace({
           </div>
         )}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-3.5 mb-5 md:mb-6">
-          {products.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => onClickProduct(p)}
-              className="group bg-white rounded-2xl border border-slate-200 overflow-hidden text-left hover:border-mipiace-coral/50 hover:shadow-sm transition-all"
-            >
-              <div className="aspect-[5/4] flex items-center justify-center bg-stone-100 text-stone-600">
-                <Coffee className="w-10 h-10 md:w-12 md:h-12 opacity-80" strokeWidth={1.4} />
-              </div>
-              <div className="px-3 md:px-3.5 py-2.5 md:py-3">
-                <div className="text-[13px] md:text-[13.5px] font-medium text-mipiace-ink truncate">
-                  {p.name}
+          {products.map((p) => {
+            const imgSrc = tenantId ? productImageUrl(p, tenantId) : null;
+            return (
+              <button
+                key={p.id}
+                onClick={() => onClickProduct(p)}
+                className="group bg-white rounded-2xl border border-slate-200 overflow-hidden text-left hover:border-mipiace-coral/50 hover:shadow-sm transition-all"
+              >
+                <div className="aspect-[5/4] flex items-center justify-center bg-stone-100 text-stone-600 overflow-hidden">
+                  {imgSrc ? (
+                    <img
+                      src={imgSrc}
+                      alt=""
+                      loading="lazy"
+                      decoding="async"
+                      draggable={false}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <Coffee
+                      className="w-10 h-10 md:w-12 md:h-12 opacity-80"
+                      strokeWidth={1.4}
+                    />
+                  )}
                 </div>
-                <div className="text-[12.5px] md:text-[13px] text-slate-500 mt-0.5 tabular-nums">
-                  {formatEur(p.priceGross)}
+                <div className="px-3 md:px-3.5 py-2.5 md:py-3">
+                  <div className="text-[13px] md:text-[13.5px] font-medium text-mipiace-ink truncate">
+                    {p.name}
+                  </div>
+                  <div className="text-[12.5px] md:text-[13px] text-slate-500 mt-0.5 tabular-nums">
+                    {formatEur(p.priceGross)}
+                  </div>
                 </div>
-              </div>
-            </button>
-          ))}
+              </button>
+            );
+          })}
           <button
             onClick={onClickFreeLine}
             className="bg-transparent rounded-2xl border-2 border-dashed border-slate-300 hover:border-mipiace-coral/50 hover:bg-mipiace-coral-soft/40 flex flex-col items-center justify-center gap-2 text-slate-400 hover:text-mipiace-coral-dark text-[13px] font-medium min-h-[140px] md:min-h-[180px]"

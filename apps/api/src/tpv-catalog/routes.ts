@@ -50,6 +50,7 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
           basePrice: true,
           taxRate: true,
           kind: true,
+          imageMime: true,
         },
       });
       const hasMore = products.length > limit;
@@ -68,10 +69,18 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
           ) / 100,
         taxRate: Number(p.taxRate),
         kind: p.kind,
+        // B-ProductImages: si el worker ya cacheó la imagen, devolvemos
+        // el MIME. El TPV usa este campo como gate para renderizar
+        // `<img>`; null → placeholder. El tenantId va en el JWT del
+        // cajero, así que el front construye la URL final.
+        imageMime: p.imageMime,
       }));
       return {
         items,
         nextCursor: hasMore ? items[items.length - 1]!.id : null,
+        // tenantId aquí para que el TPV no tenga que decodificar el
+        // JWT en cliente (lo hace el backend en validación).
+        tenantId: cashier.tid,
       };
     },
   );

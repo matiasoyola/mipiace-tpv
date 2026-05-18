@@ -419,6 +419,21 @@ model Product {
   // True si el TPV puede vender este ítem (sku no vacío y bajos
   // demás filtros). Spike §07.B: producto sin sku → línea inválida.
   sellableViaTpv    Boolean     @default(true) @map("sellable_via_tpv")
+  // B-ProductImages: URL canónica de la imagen del producto tal como la
+  // expone Holded (campo identificado en spike §13). NULL si el producto
+  // no tiene imagen en Holded → el TPV cae al placeholder embebido. El
+  // worker `image-cache-worker` descarga la imagen y la sirve cacheada
+  // desde Caddy en `/product-images/<tenantId>/<productId>.<ext>`.
+  imageUrl          String?     @map("image_url")
+  // MIME del binario una vez descargado y validado por el worker
+  // (`image/jpeg`, `image/png`, `image/webp`). NULL hasta que el worker
+  // confirme una descarga válida; el TPV usa este campo como gate para
+  // renderizar `<img>` vs. placeholder.
+  imageMime         String?     @map("image_mime")
+  // Cuándo el worker guardó por última vez el archivo en disco. Si la
+  // URL cambia en un sync (Holded la rota), el sync pone `imageCachedAt
+  // = null` para forzar re-descarga; el worker la detecta como pendiente.
+  imageCachedAt     DateTime?   @map("image_cached_at") @db.Timestamptz()
   lastSyncedAt      DateTime    @default(now()) @map("last_synced_at") @db.Timestamptz()
   raw               Json?
 

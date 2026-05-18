@@ -1555,3 +1555,79 @@ real). El fix resuelve **ambos casos** correctamente. En la cuenta
 del primer piloto productivo, donde sólo habrá `s_iva_*` estándares,
 el comportamiento será idéntico (`s_iva_21` → 21 → vendible).
 
+### §13 · Imagen del producto en Holded (B-ProductImages)
+
+> **Pregunta:** ¿qué campo de `/invoicing/v1/products` contiene la URL
+> (o binario) de la imagen del producto? ¿Requiere `key:` para
+> descargar? ¿Qué `Content-Type` / `Cache-Control` devuelve?
+>
+> **Resultado:** **pendiente de ejecutar contra la cuenta sandbox
+> piloto.** El script de sondeo queda preparado en
+> `spike/holded/src/13-product-image.ts` y se corre con
+> `pnpm --filter @mipiacetpv/holded-spike exec tsx src/13-product-image.ts`
+> antes de subir a producción cualquier piloto que vaya a usar
+> imágenes. El sondeo es **idempotente y no-destructivo** (sólo lee).
+> Los hallazgos preliminares se incorporan abajo y el flag
+> `sellableViaTpv` no se ve afectado por este bloque.
+
+#### 13.A — Plan de sondeo
+
+Script: `spike/holded/src/13-product-image.ts`. Sondea, en este orden:
+
+1. `GET /invoicing/v1/products?page=1`, escanea 8 productos buscando
+   campos candidatos: `mainImage`, `mainImageUrl`, `image`, `imageUrl`,
+   `thumbnail`, `thumbnailUrl`, `photo`, `photoUrl`, `pictures[]`,
+   `images[]`, `media`. El primero con URL extraíble (string http(s)
+   directa o anidada en array/objeto) gana.
+2. Si la muestra del listado no contiene URL extraíble (Holded a veces
+   omite campos pesados en colecciones), reintenta sobre
+   `GET /invoicing/v1/products/<id>` para el primer producto con id.
+3. Sondea la URL con header `key:` y sin él, comparando `Content-Type`,
+   `Cache-Control` y `httpStatus`. Permite decidir si el worker tiene
+   que enviar la API key al descargar.
+4. Sondea `GET /invoicing/v1/products/<id>/image` por si Holded expone
+   un endpoint dedicado que devuelva el binario directamente (más
+   defensivo: si Holded rota CDN, no rompemos).
+
+Salidas: `fixtures/13-products-sample.json`, `13-image-headers.json`,
+`13-summary.json` con la recomendación final.
+
+#### 13.B — Implementación defensiva en B-ProductImages
+
+Independiente de qué campo concreto devuelva el sondeo, el código de
+B-ProductImages aplica las siguientes salvaguardas (mismo patrón que
+B7.5 con `pickHoldedTaxKey`):
+
+- `packages/holded-client/src/products.ts` declara `mainImage?: string`
+  como campo opcional en `HoldedProduct`. Si la cuenta usa otro nombre
+  (`image`, `mainImageUrl`…), el sondeo lo confirma y se ajusta la
+  declaración + el helper `extractImageUrl(raw)` antes de cerrar el
+  bloque.
+- `extractImageUrl(raw)` centraliza la selección (con prioridad fija
+  por la lista del §13.A) y normaliza a `string | null`. Devuelve
+  null si el campo es `""`, array vacío, u objeto sin URL anidada.
+- El worker de imagen valida `Content-Type` empieza por `image/`
+  (jpeg|png|webp) **independientemente** de lo que diga Holded.
+  Cualquier 200+HTML cae en la rama de "URL inválida, no guardar"
+  (consistente con §01.B).
+- Si la URL exige `key:`, el worker lo añade — la API key del tenant
+  está cifrada en `Tenant.holdedApiKeyCiphertext`. Si NO lo exige,
+  igual descargamos vía fetch plano (sin enviar la key — minimiza
+  exposición).
+
+#### 13.C — Pendiente de cerrar tras correr el sondeo en piloto
+
+Una vez ejecutado el sondeo contra la cuenta sandbox del primer
+piloto, actualizar esta sección con:
+
+- Campo canónico observado y un par de URLs de muestra (ofuscadas).
+- Decisión auth (sí/no header `key:`).
+- Content-Type y Cache-Control observados.
+- Si existe endpoint dedicado `/products/<id>/image` y si conviene
+  usarlo en lugar del campo del listado.
+
+Si el sondeo revela que Holded **no expone** la imagen por API Key
+(equivalente a §08), B-ProductImages se replantea: el TPV cae al
+placeholder embebido y aparcamos el bloque hasta que Holded añada el
+campo. **No** se intenta scrapear el backoffice.
+

@@ -83,6 +83,14 @@ vi.mock("../src/onboarding/tpv-otros.js", () => ({
   })),
 }));
 
+// B-ProductImages: el sync incremental encola el cache worker para
+// productos con URL de imagen nueva o cambiada. En este test no nos
+// importa Redis; sólo verificamos que se llame por cada candidato.
+const enqueueSpy = vi.fn(async (_productId: string) => undefined);
+vi.mock("../src/queues/product-image-cache.js", () => ({
+  enqueueProductImageCache: (id: string) => enqueueSpy(id),
+}));
+
 // ── Prisma en memoria ────────────────────────────────────────────────
 interface FakeTenantRow {
   id: string;
@@ -104,6 +112,9 @@ interface FakeProductRow {
   kind: "PRODUCT" | "SERVICE";
   active: boolean;
   sellableViaTpv: boolean;
+  imageUrl: string | null;
+  imageMime: string | null;
+  imageCachedAt: Date | null;
   lastSyncedAt: Date;
   needsSkuReview: boolean;
 }
@@ -135,6 +146,30 @@ const fakePrisma = {
     upsert: vi.fn(async () => ({})),
   },
   product: {
+    findUnique: vi.fn(async ({ where }: any) => {
+      const tenantId = where.tenantId_holdedProductId?.tenantId;
+      const holdedProductId = where.tenantId_holdedProductId?.holdedProductId;
+      if (!tenantId || !holdedProductId) return null;
+      const row = [...productStore.values()].find(
+        (p) => p.tenantId === tenantId && p.holdedProductId === holdedProductId,
+      );
+      return row ?? null;
+    }),
+    findMany: vi.fn(async ({ where }: any) => {
+      // Usado por initial-sync.enqueueAllProductImages.
+      return [...productStore.values()].filter((p) => {
+        if (where.tenantId && p.tenantId !== where.tenantId) return false;
+        if (where.imageUrl?.not === null && p.imageUrl === null) return false;
+        if (
+          Object.prototype.hasOwnProperty.call(where, "imageCachedAt") &&
+          where.imageCachedAt === null &&
+          p.imageCachedAt !== null
+        ) {
+          return false;
+        }
+        return true;
+      });
+    }),
     upsert: vi.fn(async ({ where, create, update }: any) => {
       const key = `${where.tenantId_holdedProductId.tenantId}|${where.tenantId_holdedProductId.holdedProductId}`;
       const existing = [...productStore.values()].find(
@@ -158,6 +193,9 @@ const fakePrisma = {
         kind: create.kind,
         active: create.active ?? true,
         sellableViaTpv: create.sellableViaTpv ?? true,
+        imageUrl: create.imageUrl ?? null,
+        imageMime: create.imageMime ?? null,
+        imageCachedAt: create.imageCachedAt ?? null,
         lastSyncedAt: new Date(),
         needsSkuReview: false,
       };
@@ -229,6 +267,9 @@ function seedProduct(holdedId: string, opts: Partial<FakeProductRow> = {}) {
     kind: opts.kind ?? "PRODUCT",
     active: opts.active ?? true,
     sellableViaTpv: opts.sellableViaTpv ?? true,
+    imageUrl: opts.imageUrl ?? null,
+    imageMime: opts.imageMime ?? null,
+    imageCachedAt: opts.imageCachedAt ?? null,
     lastSyncedAt: opts.lastSyncedAt ?? new Date(Date.now() - 60_000),
     needsSkuReview: false,
   };
@@ -242,6 +283,7 @@ beforeEach(() => {
   holdedServices = [];
   holdedTaxes = [{ id: "", key: "s_iva_21", name: "IVA 21%", amount: "21" }];
   holdedWarehouses = [{ id: "wh-1", name: "Default", default: true }];
+  enqueueSpy.mockClear();
 });
 
 describe("runIncrementalSync", () => {
@@ -451,5 +493,135 @@ describe("runIncrementalSync", () => {
     expect(stats.productsSeen).toBe(1);
     expect(productStore.has(`${TENANT_ID}|p-yes`)).toBe(true);
     expect(productStore.has(`${TENANT_ID}|p-no`)).toBe(false);
+  });
+});
+
+// ── B-ProductImages: persistencia de imageUrl + encolado del worker ──
+//
+// Confirma que el sync incremental:
+//   - extrae `mainImage` del payload Holded y lo persiste en imageUrl.
+//   - sin imagen en payload → imageUrl null + no encola.
+//   - URL nueva o cambiada → encola job de cache + invalida cachedAt.
+//   - URL igual y imageCachedAt poblado → no encola (no-op).
+describe("runIncrementalSync · B-ProductImages", () => {
+  it("producto con mainImage → persiste imageUrl y encola cache job", async () => {
+    holdedProducts = [
+      {
+        id: "p-img",
+        name: "Camiseta",
+        sku: "SKU-1",
+        price: 10,
+        taxes: ["s_iva_21"],
+        forSale: 1,
+        // mainImage en payload del listado.
+        mainImage: "https://cdn.holded.com/p-img.jpg",
+      } as any,
+    ];
+
+    await runIncrementalSync({ tenantId: TENANT_ID, prisma: fakePrisma as any });
+
+    const row = productStore.get(`${TENANT_ID}|p-img`)!;
+    expect(row.imageUrl).toBe("https://cdn.holded.com/p-img.jpg");
+    expect(enqueueSpy).toHaveBeenCalledWith(row.id);
+  });
+
+  it("producto sin imagen en payload → imageUrl null, no encola", async () => {
+    holdedProducts = [
+      {
+        id: "p-no-img",
+        name: "Sin foto",
+        sku: "SKU-2",
+        price: 5,
+        taxes: ["s_iva_21"],
+        forSale: 1,
+      },
+    ];
+
+    await runIncrementalSync({ tenantId: TENANT_ID, prisma: fakePrisma as any });
+
+    const row = productStore.get(`${TENANT_ID}|p-no-img`)!;
+    expect(row.imageUrl).toBeNull();
+    expect(enqueueSpy).not.toHaveBeenCalled();
+  });
+
+  it("URL cambiada → invalida imageCachedAt y encola re-descarga", async () => {
+    seedProduct("p-rotated", {
+      sku: "SKU-3",
+      imageUrl: "https://cdn.holded.com/old.jpg",
+      imageMime: "image/jpeg",
+      imageCachedAt: new Date(Date.now() - 3_600_000),
+    });
+    holdedProducts = [
+      {
+        id: "p-rotated",
+        name: "Misma foto cambiada",
+        sku: "SKU-3",
+        price: 10,
+        taxes: ["s_iva_21"],
+        forSale: 1,
+        mainImage: "https://cdn.holded.com/new.jpg",
+      } as any,
+    ];
+
+    await runIncrementalSync({ tenantId: TENANT_ID, prisma: fakePrisma as any });
+
+    const row = productStore.get(`${TENANT_ID}|p-rotated`)!;
+    expect(row.imageUrl).toBe("https://cdn.holded.com/new.jpg");
+    expect(row.imageCachedAt).toBeNull();
+    expect(row.imageMime).toBeNull();
+    expect(enqueueSpy).toHaveBeenCalledWith(row.id);
+  });
+
+  it("URL igual y cacheado → NO encola (idempotente)", async () => {
+    seedProduct("p-cached", {
+      sku: "SKU-4",
+      imageUrl: "https://cdn.holded.com/same.jpg",
+      imageMime: "image/jpeg",
+      imageCachedAt: new Date(Date.now() - 3_600_000),
+    });
+    holdedProducts = [
+      {
+        id: "p-cached",
+        name: "Cacheado y sin cambios",
+        sku: "SKU-4",
+        price: 10,
+        taxes: ["s_iva_21"],
+        forSale: 1,
+        mainImage: "https://cdn.holded.com/same.jpg",
+      } as any,
+    ];
+
+    await runIncrementalSync({ tenantId: TENANT_ID, prisma: fakePrisma as any });
+
+    const row = productStore.get(`${TENANT_ID}|p-cached`)!;
+    expect(row.imageUrl).toBe("https://cdn.holded.com/same.jpg");
+    expect(row.imageMime).toBe("image/jpeg");
+    expect(row.imageCachedAt).toBeInstanceOf(Date);
+    expect(enqueueSpy).not.toHaveBeenCalled();
+  });
+
+  it("URL igual pero imageCachedAt null (descarga previa falló) → reintenta", async () => {
+    seedProduct("p-retry", {
+      sku: "SKU-5",
+      imageUrl: "https://cdn.holded.com/x.jpg",
+      imageMime: null,
+      imageCachedAt: null,
+    });
+    holdedProducts = [
+      {
+        id: "p-retry",
+        name: "Pendiente",
+        sku: "SKU-5",
+        price: 10,
+        taxes: ["s_iva_21"],
+        forSale: 1,
+        mainImage: "https://cdn.holded.com/x.jpg",
+      } as any,
+    ];
+
+    await runIncrementalSync({ tenantId: TENANT_ID, prisma: fakePrisma as any });
+
+    const row = productStore.get(`${TENANT_ID}|p-retry`)!;
+    expect(enqueueSpy).toHaveBeenCalledWith(row.id);
   });
 });
