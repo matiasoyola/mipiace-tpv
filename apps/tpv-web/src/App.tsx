@@ -11,8 +11,10 @@ import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import { apiWithCashier, ApiError } from "./api.js";
+import { TestModeBanner } from "./components/TestModeBanner.js";
 import { useDeviceBootstrap } from "./hooks/useDeviceBootstrap.js";
 import { useInactivityLogout } from "./hooks/useInactivityLogout.js";
+import { clearTestMode, isTestModeActive } from "./lib/test-mode.js";
 import { PairScreen } from "./pages/PairScreen.js";
 import { PinScreen, type CashierLoginResponse } from "./pages/PinScreen.js";
 import { SalePage, type TableContext } from "./pages/SalePage.js";
@@ -45,6 +47,83 @@ type CashierState =
 export function App() {
   const { state, refresh, unpair } = useDeviceBootstrap();
   const [cashier, setCashier] = useState<CashierState>({ kind: "needsLogin" });
+  const testMode = isTestModeActive();
+  // En modo prueba, hacemos un bootstrap único contra el backend para
+  // obtener user/shift/store/register sin pasar por PinScreen.
+  const [testBootstrap, setTestBootstrap] = useState<TestBootstrap | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!testMode || testBootstrap) return;
+    let cancelled = false;
+    apiWithCashier<TestBootstrap>("/shift/cashier-bootstrap")
+      .then((res) => {
+        if (cancelled) return;
+        setTestBootstrap(res);
+        if (res.shift) {
+          setCashier({
+            kind: "active",
+            cashier: {
+              ...res.user,
+              sessionTtlMinutes: res.tenant.cashierAutoLogoutMinutes,
+            },
+            shift: res.shift,
+          });
+        } else {
+          setCashier({
+            kind: "needsShiftOpen",
+            cashier: {
+              ...res.user,
+              sessionTtlMinutes: res.tenant.cashierAutoLogoutMinutes,
+            },
+          });
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        const message =
+          err instanceof ApiError ? err.message : "Bootstrap modo prueba falló";
+        setTestError(message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [testMode, testBootstrap]);
+
+  if (testMode) {
+    if (testError) {
+      return (
+        <div className="min-h-screen bg-mipiace-stone">
+          <TestModeBanner tenantName={null} />
+          <div className="p-8 text-center text-red-700 text-[14px]">
+            {testError}
+          </div>
+        </div>
+      );
+    }
+    if (!testBootstrap) {
+      return (
+        <div className="min-h-screen flex flex-col bg-mipiace-stone">
+          <TestModeBanner tenantName={null} />
+          <div className="flex-1 flex items-center justify-center">
+            <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="min-h-screen flex flex-col bg-mipiace-stone">
+        <TestModeBanner tenantName={testBootstrap.tenant.name} />
+        <div className="flex-1">
+          <TestModeTpv
+            cashier={cashier}
+            setCashier={setCashier}
+            bootstrap={testBootstrap}
+          />
+        </div>
+      </div>
+    );
+  }
 
   if (state.kind === "loading") {
     return (
@@ -269,6 +348,90 @@ function tableContextFromApi(table: ApiTable): TableContext {
     openedByEmail: table.activeTicket?.openedByEmail ?? null,
     activeTicketId: table.activeTicket?.id ?? null,
   };
+}
+
+// ─── Modo prueba (B-OnboardingV2) ──────────────────────────────────
+
+interface TestBootstrap {
+  user: { id: string; email: string; role: "MANAGER" | "CASHIER" };
+  tenant: { id: string; name: string; cashierAutoLogoutMinutes: number };
+  register: { id: string; name: string; numSerieHolded: string | null };
+  store: { id: string; name: string };
+  shift: { id: string; openedAt: string; cashOpening: string } | null;
+}
+
+function TestModeTpv({
+  cashier,
+  setCashier,
+  bootstrap,
+}: {
+  cashier: CashierState;
+  setCashier: (s: CashierState) => void;
+  bootstrap: TestBootstrap;
+}) {
+  if (cashier.kind === "needsLogin") {
+    // No debería ocurrir en modo prueba — bootstrap siempre rellena.
+    return null;
+  }
+  return (
+    <LoggedInWrapper
+      autoLogoutMinutes={bootstrap.tenant.cashierAutoLogoutMinutes}
+      onAutoLogout={() => {
+        // En modo prueba no cerramos sesión por inactividad — la
+        // pestaña es supervisada por el super-admin. No-op.
+      }}
+    >
+      {cashier.kind === "needsShiftOpen" ? (
+        <ShiftOpenScreen
+          cashierEmail={bootstrap.user.email}
+          registerName={bootstrap.register.name}
+          storeName={bootstrap.store.name}
+          onOpened={(shift) => {
+            setCashier({
+              kind: "active",
+              cashier: cashier.cashier,
+              shift,
+            });
+          }}
+          onBack={() => {
+            clearTestMode();
+            window.location.reload();
+          }}
+        />
+      ) : cashier.kind === "active" ? (
+        <TpvHome
+          cashier={cashier.cashier}
+          shiftId={cashier.shift.id}
+          registerName={bootstrap.register.name}
+          registerId={bootstrap.register.id}
+          storeName={bootstrap.store.name}
+          onLogoutCashier={async () => {
+            // "Salir" en el banner es la salida canónica del modo
+            // prueba. El cashier-logout aquí cierra el shift no
+            // bloquea — los tickets generados son TEST.
+            try {
+              await apiWithCashier("/shift/cashier-logout", { method: "POST", body: {} });
+            } catch {
+              /* sin sesión real */
+            }
+            clearTestMode();
+            window.close();
+          }}
+          onCloseShift={() => {
+            setCashier({ kind: "needsShiftOpen", cashier: cashier.cashier });
+          }}
+        />
+      ) : (
+        <ShiftForceCloseScreen
+          shift={cashier.shift}
+          cashierRole={cashier.cashier.role}
+          onClosed={() =>
+            setCashier({ kind: "needsShiftOpen", cashier: cashier.cashier })
+          }
+        />
+      )}
+    </LoggedInWrapper>
+  );
 }
 
 export default App;

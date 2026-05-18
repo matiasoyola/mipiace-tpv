@@ -38,21 +38,30 @@ interface NavItem {
   // sidebar. Las páginas restringidas también validan el rol en cliente,
   // pero ocultarlo del sidebar evita confusión.
   ownerOnly?: boolean;
+  // B-OnboardingV2 (Frente 7): secciones que dejaron de pertenecer al
+  // propietario y pasaron al equipo mipiacetpv (super-admin). Se ocultan
+  // del sidebar para OWNER/MANAGER. Las rutas backend siguen activas
+  // para impersonation read-only del super-admin; ningún usuario
+  // per-tenant las verá en su admin.
+  superAdminOnly?: boolean;
 }
 
 const NAV_ITEMS: NavItem[] = [
   // B5 activa Holded como sección "Sync errors". B6 añade Ajustes y
-  // Tickets regalo. "Ajustes" sólo lo ve el OWNER (es donde edita los
-  // flags del tenant); "Tickets regalo" lo ven ambos.
+  // Tickets regalo. B-OnboardingV2 quita del OWNER las secciones
+  // técnicas: la gestión de Holded, los dispositivos, los ajustes
+  // técnicos y la bandeja de errores de sync ahora son responsabilidad
+  // del equipo mipiacetpv (super-admin). El OWNER mantiene la operativa
+  // de negocio: tiendas, cajeros, tickets regalo, su cuenta, seguridad.
   { to: "/admin/stores", label: "Tiendas", icon: Building2 },
-  { to: "/admin/devices", label: "Dispositivos", icon: Calculator },
+  { to: "/admin/devices", label: "Dispositivos", icon: Calculator, superAdminOnly: true },
   { to: "/admin/cashiers", label: "Cajeros", icon: Users },
   { to: "/admin/products", label: "Productos", icon: Package },
   { to: "/admin/gift-receipts", label: "Tickets regalo", icon: Gift },
   { to: "/admin/account", label: "Mi cuenta", icon: User },
   { to: "/admin/security", label: "Seguridad", icon: Shield },
-  { to: "/admin/tickets-errors", label: "Holded", icon: KeyRound, badge: "syncErrors" },
-  { to: "/admin/settings", label: "Ajustes", icon: Settings, ownerOnly: true },
+  { to: "/admin/tickets-errors", label: "Holded", icon: KeyRound, badge: "syncErrors", superAdminOnly: true },
+  { to: "/admin/settings", label: "Ajustes", icon: Settings, superAdminOnly: true },
 ];
 
 // Hook compartido entre desktop sidebar y mobile drawer: pollea el
@@ -222,9 +231,12 @@ function NavList({
 }) {
   const syncErrorsCount = useSyncErrorsCount();
   const role = readCurrentRole();
-  const visibleItems = NAV_ITEMS.filter((item) =>
-    item.ownerOnly ? role === "OWNER" : true,
-  );
+  const impersonating = readImpersonationState() != null;
+  const visibleItems = NAV_ITEMS.filter((item) => {
+    if (item.superAdminOnly) return impersonating;
+    if (item.ownerOnly) return role === "OWNER";
+    return true;
+  });
   return (
     <nav className="space-y-1.5">
       {visibleItems.map((item) => {

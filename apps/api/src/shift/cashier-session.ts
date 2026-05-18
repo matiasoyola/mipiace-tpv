@@ -14,6 +14,15 @@ import { loadEnv } from "../env.js";
 // no se confunda con un access token del owner. TTL inicial = ventana
 // de auto-logout del tenant (default 10m); cada acción del cajero
 // renueva el sessionToken de facto vía cookie/local-storage refresh.
+//
+// B-OnboardingV2: `purpose: "test-cashier"` marca un JWT emitido por el
+// super-admin para que el equipo mipiacetpv pruebe el TPV antes de
+// activar el tenant. TTL 24h, sin refresh, sin device check (el handler
+// X-Device-Token también lo acepta), mutaciones permitidas. Los workers
+// detectan los tickets generados por estos usuarios vía
+// `User.isTestCashier` y los marcan TEST sin subirlos a Holded.
+export type CashierSessionPurpose = "cashier" | "test-cashier";
+
 export interface CashierSessionPayload {
   sub: string; // userId
   tid: string; // tenantId
@@ -21,6 +30,7 @@ export interface CashierSessionPayload {
   rid: string; // registerId
   role: "MANAGER" | "CASHIER";
   type: "cashier";
+  purpose?: CashierSessionPurpose;
 }
 
 export function signCashierSession(
@@ -42,6 +52,7 @@ export function verifyCashierSession(token: string): CashierSessionPayload {
 
 export interface CashierContext extends CashierSessionPayload {
   userId: string;
+  isTest: boolean;
 }
 
 declare module "fastify" {
@@ -61,7 +72,11 @@ export async function requireCashierSession(
   }
   try {
     const payload = verifyCashierSession(header.slice(7));
-    request.cashier = { ...payload, userId: payload.sub };
+    request.cashier = {
+      ...payload,
+      userId: payload.sub,
+      isTest: payload.purpose === "test-cashier",
+    };
   } catch {
     reply
       .code(401)

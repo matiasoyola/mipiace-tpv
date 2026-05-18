@@ -186,7 +186,11 @@ export async function requireOwnerOrCashier(
       isImpersonation: false,
       impersonatedBy: null,
     };
-    request.cashier = { ...cashier, userId: cashier.sub };
+    request.cashier = {
+      ...cashier,
+      userId: cashier.sub,
+      isTest: cashier.purpose === "test-cashier",
+    };
     return;
   } catch {
     // sigue

@@ -58,13 +58,32 @@ export async function uploadTicket(
 
   const ticket = await prisma.ticket.findUnique({
     where: { externalId },
-    include: { lines: true, payments: true, tenant: { select: { id: true, holdedApiKeyCiphertext: true } }, register: { select: { numSerieHolded: true } } },
+    include: {
+      lines: true,
+      payments: true,
+      tenant: { select: { id: true, holdedApiKeyCiphertext: true } },
+      register: { select: { numSerieHolded: true } },
+      user: { select: { isTestCashier: true } },
+    },
   });
   if (!ticket) {
     return { kind: "skipped", reason: "ticket_not_found" };
   }
   if (ticket.status === TicketStatus.SYNCED) {
     return { kind: "skipped", reason: "already_synced" };
+  }
+  // B-OnboardingV2: tickets emitidos por el cajero técnico durante el
+  // modo prueba se marcan TEST y NO se suben a Holded. El estado TEST
+  // gana sobre el PENDING_SYNC habitual.
+  if (ticket.status === TicketStatus.TEST || ticket.user?.isTestCashier === true) {
+    if (ticket.status !== TicketStatus.TEST) {
+      await prisma.ticket.update({
+        where: { externalId },
+        data: { status: TicketStatus.TEST },
+      });
+    }
+    log.info("ticket en modo prueba — skip upload", { externalId });
+    return { kind: "skipped", reason: "test_cashier" };
   }
   if (!ticket.tenant.holdedApiKeyCiphertext) {
     await markFailed(prisma, externalId, "no_holded_key");

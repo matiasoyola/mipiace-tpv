@@ -2,13 +2,23 @@ import type { FastifyInstance } from "fastify";
 
 import { Prisma } from "@mipiacetpv/db";
 import {
+  ApiKeyClient,
+  HoldedApiError,
+  HoldedInvalidResponseError,
+  HoldedSubscriptionSuspendedError,
+  listWarehouses,
+  type HoldedWarehouse,
+} from "@mipiacetpv/holded-client";
+import {
   generateTemporaryPassword,
   validateSpanishTaxId,
 } from "@mipiacetpv/util-validation";
 
 import { hashPassword } from "../auth/passwords.js";
 import { getPrisma } from "../context.js";
+import { encryptSecret } from "../crypto.js";
 import { loadEnv } from "../env.js";
+import { enqueueInitialSync } from "../queues/initial-sync.js";
 import { enqueueManualSync } from "../queues/catalog-incremental.js";
 
 import {
@@ -17,6 +27,8 @@ import {
   type SuperAdminAction,
 } from "./audit.js";
 import { requireSuperAdmin } from "./middleware.js";
+import { computeOnboardingHealth } from "./onboarding-health.js";
+import { issueTestCashierSession, purgeTestData } from "./test-cashier.js";
 import { signImpersonationToken } from "./tokens.js";
 import { sendOwnerWelcomeEmail } from "./welcome-email.js";
 
@@ -38,8 +50,27 @@ interface TenantMetrics {
 function fiscalNifFromProfile(profile: Prisma.JsonValue | null): string | null {
   if (!profile || typeof profile !== "object" || Array.isArray(profile)) return null;
   const obj = profile as Record<string, unknown>;
-  const nif = obj.nif ?? obj.fiscalNif;
+  const nif = obj.taxId ?? obj.nif ?? obj.fiscalNif;
   return typeof nif === "string" ? nif : null;
+}
+
+function serializeDraftTenant(t: {
+  id: string;
+  name: string;
+  plan: string | null;
+  fiscalProfile: Prisma.JsonValue;
+  onboardingState: "DRAFT" | "ACTIVE";
+  createdAt: Date;
+}) {
+  return {
+    id: t.id,
+    name: t.name,
+    plan: t.plan,
+    fiscalProfile: t.fiscalProfile,
+    fiscalNif: fiscalNifFromProfile(t.fiscalProfile),
+    onboardingState: t.onboardingState,
+    createdAt: t.createdAt.toISOString(),
+  };
 }
 
 function fiscalLegalName(profile: Prisma.JsonValue | null): string | null {
@@ -178,7 +209,8 @@ export async function registerSuperAdminTenantsRoutes(
           take: pageSize,
           include: {
             users: {
-              where: { role: "OWNER" },
+              // El cajero técnico es MANAGER — descartamos por flag.
+              where: { role: "OWNER", deletedAt: null, isTestCashier: false },
               orderBy: { createdAt: "asc" },
               take: 1,
               select: { email: true, lastLoginAt: true },
@@ -190,6 +222,12 @@ export async function registerSuperAdminTenantsRoutes(
       const items = await Promise.all(
         rows.map(async (t) => {
           const metrics = await computeMetrics(prisma, t.id);
+          // En listado calculamos `ready` para que la UI pinte el badge
+          // "Listo para activar" en los DRAFT que ya pasan la heurística.
+          const onboardingReady =
+            t.onboardingState === "DRAFT"
+              ? (await computeOnboardingHealth(prisma, t.id)).ready
+              : null;
           return {
             id: t.id,
             name: t.name,
@@ -201,6 +239,8 @@ export async function registerSuperAdminTenantsRoutes(
             blockedAt: t.blockedAt?.toISOString() ?? null,
             blockedReason: t.blockedReason,
             plan: t.plan,
+            onboardingState: t.onboardingState,
+            onboardingReady,
             metrics,
           };
         }),
@@ -250,6 +290,8 @@ export async function registerSuperAdminTenantsRoutes(
               lastLoginAt: true,
               twoFactorEnabledAt: true,
               mustChangePasswordAt: true,
+              isTestCashier: true,
+              deletedAt: true,
             },
           },
           stores: {
@@ -271,6 +313,10 @@ export async function registerSuperAdminTenantsRoutes(
         });
       }
       const metrics = await computeMetrics(prisma, tenant.id);
+      // B-OnboardingV2: la salud del onboarding sólo tiene sentido en
+      // tenants DRAFT — un ACTIVE ya pasó el filtro. Calculamos en
+      // ambos pero el front sólo lo pinta en DRAFT.
+      const onboardingHealth = await computeOnboardingHealth(prisma, tenant.id);
       const ownerUser = tenant.users.find((u) => u.role === "OWNER") ?? null;
       return {
         id: tenant.id,
@@ -278,6 +324,7 @@ export async function registerSuperAdminTenantsRoutes(
         fiscalProfile: tenant.fiscalProfile,
         fiscalNif: fiscalNifFromProfile(tenant.fiscalProfile),
         plan: tenant.plan,
+        onboardingState: tenant.onboardingState,
         holdedConnected: tenant.holdedApiKeyCiphertext != null,
         holdedAuthMode: tenant.holdedAuthMode,
         initialSyncStatus: tenant.initialSyncStatus,
@@ -287,14 +334,18 @@ export async function registerSuperAdminTenantsRoutes(
         blockedAt: tenant.blockedAt?.toISOString() ?? null,
         blockedReason: tenant.blockedReason,
         ownerEmail: ownerUser?.email ?? null,
-        users: tenant.users.map((u) => ({
-          id: u.id,
-          email: u.email,
-          role: u.role,
-          lastLoginAt: u.lastLoginAt?.toISOString() ?? null,
-          twoFactorEnabled: u.twoFactorEnabledAt != null,
-          mustChangePassword: u.mustChangePasswordAt != null,
-        })),
+        users: tenant.users
+          // No exponer al cajero técnico al super-admin como si fuera
+          // un usuario real — sale en el panel de modo prueba aparte.
+          .filter((u) => !u.isTestCashier && u.deletedAt == null)
+          .map((u) => ({
+            id: u.id,
+            email: u.email,
+            role: u.role,
+            lastLoginAt: u.lastLoginAt?.toISOString() ?? null,
+            twoFactorEnabled: u.twoFactorEnabledAt != null,
+            mustChangePassword: u.mustChangePasswordAt != null,
+          })),
         stores: tenant.stores.map((s) => ({
           id: s.id,
           name: s.name,
@@ -302,11 +353,23 @@ export async function registerSuperAdminTenantsRoutes(
           ticketDelivery: s.ticketDelivery,
         })),
         metrics,
+        onboardingHealth,
       };
     },
   );
 
-  // ── Crear tenant + OWNER en transacción + email + audit ─────────────
+  // ── Crear tenant DRAFT sólo con API key Holded (B-OnboardingV2) ─────
+  //
+  // Reemplaza al POST viejo que pedía razón social/NIF/dirección a mano.
+  // Ahora el super-admin sólo introduce la API key + (opcionalmente)
+  // taxId. Validamos la key contra Holded (GET /invoicing/v1/warehouses),
+  // extraemos los datos fiscales del almacén default y persistimos un
+  // Tenant DRAFT sin OWNER user. Encolamos el sync inicial.
+  //
+  // Nota: Holded NO expone endpoint público de "account info" (spike
+  // §08). Caemos al fallback documentado: leer el warehouse default
+  // para razón social/dirección y, si el super-admin lo conoce, pedir
+  // el taxId como input mínimo.
   app.post(
     "/super-admin/tenants",
     {
@@ -314,14 +377,18 @@ export async function registerSuperAdminTenantsRoutes(
       schema: {
         body: {
           type: "object",
-          required: ["name", "fiscalNif", "ownerEmail", "ownerName"],
+          required: ["holdedApiKey"],
           additionalProperties: false,
           properties: {
-            name: { type: "string", minLength: 1, maxLength: 200 },
-            fiscalNif: { type: "string", minLength: 1, maxLength: 32 },
-            fiscalAddress: { type: "string", maxLength: 300 },
-            ownerEmail: { type: "string", pattern: emailFormat, maxLength: 320 },
-            ownerName: { type: "string", minLength: 1, maxLength: 200 },
+            holdedApiKey: { type: "string", minLength: 10, maxLength: 512 },
+            // Opcional: si el super-admin lo conoce, lo introduce
+            // manualmente para arrancar la operativa fiscal completa.
+            // Si no se pasa, fiscalProfile.taxId queda null y el
+            // propietario lo completará tras activar.
+            taxId: { type: "string", minLength: 1, maxLength: 32 },
+            // Opcional: forzar razón social si la del almacén default
+            // no coincide con la legal.
+            legalName: { type: "string", minLength: 1, maxLength: 200 },
             plan: { type: "string", maxLength: 32 },
           },
         },
@@ -329,116 +396,174 @@ export async function registerSuperAdminTenantsRoutes(
     },
     async (request, reply) => {
       const body = request.body as {
-        name: string;
-        fiscalNif: string;
-        fiscalAddress?: string;
-        ownerEmail: string;
-        ownerName: string;
+        holdedApiKey: string;
+        taxId?: string;
+        legalName?: string;
         plan?: string;
       };
       const ctx = request.superAdmin!;
+      const env = loadEnv();
       const prisma = getPrisma();
 
-      // 1. Validar NIF/CIF/NIE.
-      const nifResult = validateSpanishTaxId(body.fiscalNif);
-      if (!nifResult.valid) {
+      // 1. Validar taxId si viene.
+      let normalizedTaxId: string | null = null;
+      if (body.taxId !== undefined) {
+        const result = validateSpanishTaxId(body.taxId);
+        if (!result.valid) {
+          return reply.code(400).send({
+            error: "INVALID_HOLDED_FISCAL_PROFILE",
+            message:
+              "El identificador fiscal introducido no es un NIF/NIE/CIF válido.",
+          });
+        }
+        normalizedTaxId = body.taxId.toUpperCase().replace(/[-\s]/g, "");
+      }
+
+      // 2. Validar la API key contra Holded vía /warehouses. El spike
+      //    §08 confirmó que NO existe endpoint de "account info"; el
+      //    almacén default es la mejor fuente de datos fiscales que
+      //    la API por API Key ofrece (legalName desde `name`, address
+      //    estructurada). Lo usamos también como prueba de vida de la
+      //    key (igual que el probe legacy hace contra /products).
+      const client = new ApiKeyClient(body.holdedApiKey, {
+        baseUrl: env.HOLDED_BASE_URL,
+      });
+      let warehouses: HoldedWarehouse[];
+      try {
+        warehouses = await listWarehouses(client);
+      } catch (err) {
+        if (
+          err instanceof HoldedApiError &&
+          (err.status === 401 || err.status === 403)
+        ) {
+          return reply.code(400).send({
+            error: "HOLDED_API_KEY_INVALID",
+            message: "Holded rechaza la API Key. Genera una nueva y reintenta.",
+          });
+        }
+        if (err instanceof HoldedSubscriptionSuspendedError) {
+          return reply.code(400).send({
+            error: "HOLDED_SUSPENDED",
+            message:
+              "La cuenta Holded está suspendida por impago. Regulariza el pago y reintenta.",
+          });
+        }
+        if (err instanceof HoldedInvalidResponseError) {
+          return reply.code(502).send({
+            error: "HOLDED_INVALID_RESPONSE",
+            message:
+              "Holded ha devuelto una respuesta no-JSON. Es posible que estén con incidencia.",
+          });
+        }
+        request.log.error(
+          { event: "super_admin.create_tenant_holded_failed", err },
+          "Validación de API Holded falló en POST /super-admin/tenants",
+        );
+        return reply.code(502).send({
+          error: "HOLDED_UNREACHABLE",
+          message: "No hemos podido contactar con Holded. Reintenta en unos minutos.",
+        });
+      }
+
+      // 3. Construir fiscalProfile desde el warehouse default (ver spike §08).
+      const def = warehouses.find((w) => w.default) ?? warehouses[0] ?? null;
+      const derivedLegalName =
+        body.legalName ?? (def?.name && def.name.trim().length > 0 ? def.name : null);
+      if (!derivedLegalName) {
         return reply.code(400).send({
-          error: "INVALID_FISCAL_NIF",
-          message: "El identificador fiscal no es válido (NIF/NIE/CIF español).",
+          error: "INVALID_HOLDED_FISCAL_PROFILE",
+          message:
+            "No hemos podido extraer una razón social de Holded. Crea un almacén con nombre en la cuenta Holded del cliente o introduce `legalName` manualmente.",
         });
       }
+      const fiscalProfile: Record<string, unknown> = {
+        legalName: derivedLegalName,
+        nif: normalizedTaxId,
+        taxId: normalizedTaxId,
+        address: def?.address ?? null,
+        source: "super_admin_draft",
+        warehouseHoldedId: def?.id ?? null,
+        updatedAt: new Date().toISOString(),
+      };
 
-      const lowerEmail = body.ownerEmail.toLowerCase();
-
-      // 2. Comprobar unicidad fuera de la transacción (rápido fallar).
-      const [existingUser, existingTenant] = await Promise.all([
-        prisma.user.findUnique({ where: { email: lowerEmail } }),
-        prisma.tenant.findFirst({ where: { name: body.name } }),
-      ]);
-      if (existingUser) {
-        return reply.code(409).send({
-          error: "EMAIL_TAKEN",
-          message: "Ya existe un usuario con ese email.",
-        });
+      // 4. Unicidad opcional por taxId (sólo si lo conocemos). El campo
+      //    `fiscalProfile` es Json — usamos $queryRaw para chequear sin
+      //    arrastrar un index nuevo. Best-effort; si falla por entorno
+      //    (sqlite en tests), lo capturamos y seguimos.
+      if (normalizedTaxId) {
+        try {
+          const collisions = await prisma.$queryRaw<Array<{ id: string }>>`
+            SELECT id::text AS id FROM tenants
+            WHERE fiscal_profile ->> 'taxId' = ${normalizedTaxId}
+            LIMIT 1
+          `;
+          if (collisions.length > 0) {
+            return reply.code(409).send({
+              error: "TENANT_NIF_TAKEN",
+              message: "Ya existe un tenant con ese identificador fiscal.",
+            });
+          }
+        } catch (err) {
+          request.log.warn(
+            { event: "super_admin.create_tenant_nif_check_skipped", err },
+            "comprobación de unicidad por taxId omitida (entorno sin JSON path)",
+          );
+        }
       }
-      if (existingTenant) {
-        return reply.code(409).send({
-          error: "TENANT_NAME_TAKEN",
-          message: "Ya existe un tenant con ese nombre.",
-        });
-      }
 
-      // 3. Generar password temporal + hash.
-      const tempPassword = generateTemporaryPassword();
-      const passwordHash = await hashPassword(tempPassword);
-
-      // 4. Transacción atómica.
+      // 5. Crear Tenant DRAFT + cifrar API key + audit.
+      const ciphertext = encryptSecret(
+        body.holdedApiKey,
+        env.HOLDED_KEY_ENCRYPTION_SECRET,
+      );
       const created = await prisma.$transaction(async (tx) => {
         const tenant = await tx.tenant.create({
           data: {
-            name: body.name,
+            name: derivedLegalName,
             holdedAuthMode: "API_KEY",
+            holdedApiKeyCiphertext: ciphertext,
             plan: body.plan ?? "pilot",
-            fiscalProfile: {
-              legalName: body.name,
-              nif: body.fiscalNif.toUpperCase().replace(/[-\s]/g, ""),
-              address: body.fiscalAddress ?? null,
-              source: "super_admin_create",
-              updatedAt: new Date().toISOString(),
-            } as Prisma.InputJsonValue,
-          },
-        });
-        const owner = await tx.user.create({
-          data: {
-            tenantId: tenant.id,
-            email: lowerEmail,
-            passwordHash,
-            role: "OWNER",
-            mustChangePasswordAt: new Date(),
+            fiscalProfile: fiscalProfile as Prisma.InputJsonValue,
+            onboardingState: "DRAFT",
+            initialSyncStatus: "PENDING",
           },
         });
         const signals = extractRequestSignals(request);
         await writeAudit({
           prisma: tx,
           superAdminId: ctx.superAdminId,
-          action: "create_tenant",
+          action: "create_tenant_draft",
           tenantId: tenant.id,
           metadata: {
             ...signals,
             tenantName: tenant.name,
-            ownerEmail: owner.email,
-            plan: tenant.plan,
-            fiscalNif: body.fiscalNif.toUpperCase().replace(/[-\s]/g, ""),
+            fiscalNif: normalizedTaxId ?? "",
+            source: def ? "holded_account" : "manual",
           },
         });
-        return { tenant, owner };
+        return tenant;
       });
 
-      // 5. Email al OWNER. Si falla, NO revertimos la transacción —
-      //    el tenant queda creado y el front muestra la tempPassword en
-      //    pantalla por si el email no llegó. Loguemos el error.
+      // 6. Encolar sync inicial. Si Redis está caído, devolvemos 503 —
+      //    el tenant queda creado y el super-admin puede reintentar
+      //    desde la consola con "Re-sync".
       try {
-        await sendOwnerWelcomeEmail({
-          ownerEmail: created.owner.email,
-          ownerName: body.ownerName,
-          tempPassword,
-        });
+        await enqueueInitialSync(created.id);
       } catch (err) {
         request.log.error(
-          { event: "super_admin.welcome_email_failed", tenantId: created.tenant.id, err },
-          "Email de bienvenida falló — la temporal queda visible en la response",
+          { event: "super_admin.create_tenant_enqueue_failed", tenantId: created.id, err },
+          "no se pudo encolar initial-sync tras crear el tenant",
         );
+        return reply.code(503).send({
+          error: "QUEUE_UNAVAILABLE",
+          message: "Tenant creado pero el sync no se pudo programar. Reintenta desde Re-sync.",
+          tenant: serializeDraftTenant(created),
+        });
       }
 
       return reply.code(201).send({
-        tenant: {
-          id: created.tenant.id,
-          name: created.tenant.name,
-          plan: created.tenant.plan,
-          fiscalNif: fiscalNifFromProfile(created.tenant.fiscalProfile),
-        },
-        ownerEmail: created.owner.email,
-        tempPassword, // ← devolvemos en plano UNA vez (no se loguea)
+        tenant: serializeDraftTenant(created),
+        syncJobId: `tenant-${created.id}`,
       });
     },
   );
@@ -814,6 +939,326 @@ export async function registerSuperAdminTenantsRoutes(
         expiresAt: expiresAt.toISOString(),
         tenant: { id: tenant.id, name: tenant.name },
         owner: { id: owner.id, email: owner.email },
+      });
+    },
+  );
+
+  // ── Rotar API key Holded del tenant (B-OnboardingV2 · Frente 7) ─────
+  //
+  // Antes B2: PATCH /auth/me/rotate-holded-key (OWNER per-tenant).
+  // Tras B-OnboardingV2: la rotación es responsabilidad del super-admin
+  // — el propietario no ve la API key, ni la gestión técnica de la
+  // integración. Esta ruta valida la key contra Holded antes de
+  // sobreescribir el ciphertext; si falla, la antigua se mantiene
+  // intacta.
+  app.patch(
+    "/super-admin/tenants/:id/holded-api-key",
+    {
+      preHandler: requireSuperAdmin,
+      schema: {
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", format: "uuid" } },
+        },
+        body: {
+          type: "object",
+          required: ["holdedApiKey"],
+          additionalProperties: false,
+          properties: {
+            holdedApiKey: { type: "string", minLength: 10, maxLength: 512 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const { holdedApiKey } = request.body as { holdedApiKey: string };
+      const ctx = request.superAdmin!;
+      const env = loadEnv();
+      const prisma = getPrisma();
+      const tenant = await prisma.tenant.findUnique({
+        where: { id },
+        select: { id: true, name: true },
+      });
+      if (!tenant) {
+        return reply.code(404).send({
+          error: "TENANT_NOT_FOUND",
+          message: "Tenant no existe",
+        });
+      }
+      const client = new ApiKeyClient(holdedApiKey, {
+        baseUrl: env.HOLDED_BASE_URL,
+      });
+      try {
+        await listWarehouses(client);
+      } catch (err) {
+        if (
+          err instanceof HoldedApiError &&
+          (err.status === 401 || err.status === 403)
+        ) {
+          return reply.code(400).send({
+            error: "HOLDED_API_KEY_INVALID",
+            message: "Holded rechaza la API Key. Genera una nueva y reintenta.",
+          });
+        }
+        if (err instanceof HoldedSubscriptionSuspendedError) {
+          return reply.code(400).send({
+            error: "HOLDED_SUSPENDED",
+            message: "La cuenta Holded está suspendida por impago.",
+          });
+        }
+        if (err instanceof HoldedInvalidResponseError) {
+          return reply.code(502).send({
+            error: "HOLDED_INVALID_RESPONSE",
+            message: "Holded ha devuelto una respuesta no-JSON.",
+          });
+        }
+        request.log.error(
+          { event: "super_admin.rotate_holded_key_failed", tenantId: id, err },
+          "Rotación de API key Holded falló",
+        );
+        return reply.code(502).send({
+          error: "HOLDED_UNREACHABLE",
+          message: "No hemos podido contactar con Holded.",
+        });
+      }
+      const ciphertext = encryptSecret(holdedApiKey, env.HOLDED_KEY_ENCRYPTION_SECRET);
+      await prisma.tenant.update({
+        where: { id },
+        data: {
+          holdedApiKeyCiphertext: ciphertext,
+          holdedAuthMode: "API_KEY",
+        },
+      });
+      const signals = extractRequestSignals(request);
+      // Audit como "update_tenant" con el campo `holdedApiKey: rotated`
+      // (no persistimos la clave en metadata, sólo señalamos la rotación).
+      await writeAudit({
+        prisma,
+        superAdminId: ctx.superAdminId,
+        action: "update_tenant",
+        tenantId: id,
+        metadata: {
+          ...signals,
+          changes: {
+            holdedApiKey: { before: "<redacted>", after: "<rotated>" },
+          },
+        },
+      });
+      return reply.code(200).send({ ok: true, validatedAt: new Date().toISOString() });
+    },
+  );
+
+  // ── Probar TPV: emitir JWT cashier técnico + device token ───────────
+  //
+  // Frente 5 del prompt B-OnboardingV2. Disponible sólo para tenants
+  // DRAFT (un tenant ACTIVE ya tiene OWNER y operación real — no
+  // queremos contaminar). El token viene en pareja: el JWT cashier
+  // session (purpose=test-cashier) y el deviceToken del device interno
+  // que provisionamos en el sync inicial. El TPV los recibe en query
+  // params, los guarda en sessionStorage y arranca directo en modo
+  // logged-in con shift abierto.
+  app.post(
+    "/super-admin/tenants/:id/test-cashier-token",
+    {
+      preHandler: requireSuperAdmin,
+      schema: {
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", format: "uuid" } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const ctx = request.superAdmin!;
+      const prisma = getPrisma();
+      const tenant = await prisma.tenant.findUnique({
+        where: { id },
+        select: { id: true, onboardingState: true, name: true },
+      });
+      if (!tenant) {
+        return reply.code(404).send({
+          error: "TENANT_NOT_FOUND",
+          message: "Tenant no existe",
+        });
+      }
+      if (tenant.onboardingState !== "DRAFT") {
+        return reply.code(409).send({
+          error: "TENANT_NOT_DRAFT",
+          message:
+            "Sólo se puede probar el TPV mientras el tenant está en DRAFT.",
+        });
+      }
+      const result = await issueTestCashierSession(prisma, id);
+      const signals = extractRequestSignals(request);
+      await writeAudit({
+        prisma,
+        superAdminId: ctx.superAdminId,
+        action: "test_cashier_session",
+        tenantId: id,
+        metadata: {
+          ...signals,
+          expiresAt: result.expiresAt.toISOString(),
+          registerId: result.resources.registerId,
+          storeName: result.resources.storeName,
+        },
+      });
+      return reply.code(200).send({
+        cashierSessionToken: result.cashierSessionToken,
+        deviceToken: result.deviceToken,
+        expiresAt: result.expiresAt.toISOString(),
+        tenant: { id: tenant.id, name: tenant.name },
+        register: {
+          id: result.resources.registerId,
+          name: result.resources.registerName,
+        },
+        store: {
+          id: result.resources.storeId,
+          name: result.resources.storeName,
+        },
+        shiftId: result.shiftId,
+      });
+    },
+  );
+
+  // ── Activar tenant: crear OWNER, mandar email, purgar pruebas ───────
+  //
+  // Frente 6 del prompt B-OnboardingV2. Valida health=ready, crea el
+  // OWNER user con password temporal, transiciona el tenant a ACTIVE y
+  // borra los rastros del modo prueba. Devolvemos la tempPassword una
+  // sola vez para que el super-admin la copie al cliente offline si el
+  // email no llegara.
+  app.post(
+    "/super-admin/tenants/:id/activate",
+    {
+      preHandler: requireSuperAdmin,
+      schema: {
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", format: "uuid" } },
+        },
+        body: {
+          type: "object",
+          required: ["ownerEmail", "ownerName"],
+          additionalProperties: false,
+          properties: {
+            ownerEmail: { type: "string", pattern: emailFormat, maxLength: 320 },
+            ownerName: { type: "string", minLength: 1, maxLength: 200 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = request.body as { ownerEmail: string; ownerName: string };
+      const ctx = request.superAdmin!;
+      const prisma = getPrisma();
+
+      const tenant = await prisma.tenant.findUnique({
+        where: { id },
+        select: { id: true, onboardingState: true, name: true },
+      });
+      if (!tenant) {
+        return reply.code(404).send({
+          error: "TENANT_NOT_FOUND",
+          message: "Tenant no existe",
+        });
+      }
+      if (tenant.onboardingState !== "DRAFT") {
+        return reply.code(409).send({
+          error: "TENANT_NOT_DRAFT",
+          message: "Sólo los tenants DRAFT pueden activarse.",
+        });
+      }
+      const health = await computeOnboardingHealth(prisma, id);
+      if (!health.ready) {
+        const failing = health.readinessChecks
+          .filter((c) => !c.ok)
+          .map((c) => c.label);
+        return reply.code(400).send({
+          error: "ONBOARDING_NOT_READY",
+          message: "El tenant no pasa las comprobaciones de salud.",
+          failing,
+        });
+      }
+      const lowerEmail = body.ownerEmail.toLowerCase();
+      const emailTaken = await prisma.user.findUnique({
+        where: { email: lowerEmail },
+        select: { id: true },
+      });
+      if (emailTaken) {
+        return reply.code(409).send({
+          error: "EMAIL_TAKEN",
+          message: "Ya existe un usuario con ese email.",
+        });
+      }
+
+      const tempPassword = generateTemporaryPassword();
+      const passwordHash = await hashPassword(tempPassword);
+      const signals = extractRequestSignals(request);
+
+      const activated = await prisma.$transaction(async (tx) => {
+        const owner = await tx.user.create({
+          data: {
+            tenantId: id,
+            email: lowerEmail,
+            passwordHash,
+            role: "OWNER",
+            mustChangePasswordAt: new Date(),
+          },
+          select: { id: true, email: true },
+        });
+        const purge = await purgeTestData(tx, id);
+        const t = await tx.tenant.update({
+          where: { id },
+          data: { onboardingState: "ACTIVE" },
+        });
+        await writeAudit({
+          prisma: tx,
+          superAdminId: ctx.superAdminId,
+          action: "activate_tenant",
+          tenantId: id,
+          metadata: {
+            ...signals,
+            ownerEmail: owner.email,
+            ownerName: body.ownerName,
+            ticketsTestPurged: purge.ticketsTestPurged,
+            emailJobsPurged: purge.emailJobsPurged,
+          },
+        });
+        return { owner, tenant: t, purge };
+      });
+
+      try {
+        await sendOwnerWelcomeEmail({
+          ownerEmail: activated.owner.email,
+          ownerName: body.ownerName,
+          tempPassword,
+        });
+      } catch (err) {
+        request.log.error(
+          { event: "super_admin.activate_email_failed", tenantId: id, err },
+          "Email de bienvenida falló al activar — temporal visible en response",
+        );
+      }
+
+      return reply.code(200).send({
+        tenant: {
+          id: activated.tenant.id,
+          name: activated.tenant.name,
+          onboardingState: activated.tenant.onboardingState,
+        },
+        owner: {
+          id: activated.owner.id,
+          email: activated.owner.email,
+          name: body.ownerName,
+        },
+        tempPassword,
+        purge: activated.purge,
       });
     },
   );

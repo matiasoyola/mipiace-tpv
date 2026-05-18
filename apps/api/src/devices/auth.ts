@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
 
 import { getPrisma } from "../context.js";
+import { verifyCashierSession } from "../shift/cashier-session.js";
 
 // Contexto que dejamos en el request cuando el header `X-Device-Token`
 // valida. Lo decora `requireDeviceToken` para que las rutas del TPV
@@ -12,6 +13,12 @@ export interface DeviceContext {
   deviceId: string;
   tenantId: string;
   registerId: string;
+  // B-OnboardingV2: true cuando el "device token" no es realmente un
+  // device emparejado sino un JWT test-cashier que el super-admin emitió
+  // desde la consola. En ese caso el flag `isTest` viaja con el contexto
+  // para que los handlers que dispersan tickets, abrir shift, etc. los
+  // marquen como TEST.
+  isTest?: boolean;
 }
 
 declare module "fastify" {
@@ -52,6 +59,28 @@ export async function requireDeviceToken(
       .code(401)
       .send({ error: "DEVICE_TOKEN_REQUIRED", message: "Falta X-Device-Token" });
     return;
+  }
+  // B-OnboardingV2: si el token parece un JWT (tres segmentos
+  // base64url), intentamos validarlo como cashier session con purpose
+  // "test-cashier". Esto permite al super-admin operar el TPV completo
+  // (incluido el endpoint /devices/me que arranca la PWA) sin tener
+  // emparejado un device físico. Si la verificación falla, caemos al
+  // flujo normal (lookup en la tabla `devices`).
+  if (token.split(".").length === 3) {
+    try {
+      const payload = verifyCashierSession(token);
+      if (payload.purpose === "test-cashier") {
+        request.device = {
+          deviceId: payload.did,
+          tenantId: payload.tid,
+          registerId: payload.rid,
+          isTest: true,
+        };
+        return;
+      }
+    } catch {
+      // No es un JWT test-cashier válido; sigue con el lookup normal.
+    }
   }
   const prisma = getPrisma();
   const device = await prisma.device.findUnique({

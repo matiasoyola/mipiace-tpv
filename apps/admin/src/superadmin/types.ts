@@ -9,6 +9,8 @@ export interface TenantMetrics {
   activeShifts: number;
 }
 
+export type OnboardingState = "DRAFT" | "ACTIVE";
+
 export interface TenantListItem {
   id: string;
   name: string;
@@ -20,6 +22,10 @@ export interface TenantListItem {
   blockedAt: string | null;
   blockedReason: string | null;
   plan: string | null;
+  onboardingState: OnboardingState;
+  // null cuando el tenant está ACTIVE (no aplica). En DRAFT, true si la
+  // heurística onboardingHealth.ready es verde.
+  onboardingReady: boolean | null;
   metrics: TenantMetrics;
 }
 
@@ -46,12 +52,37 @@ export interface TenantStore {
   ticketDelivery: unknown;
 }
 
+export interface ReadinessCheck {
+  id: string;
+  label: string;
+  ok: boolean;
+  value?: string;
+}
+
+export interface OnboardingHealth {
+  initialSync: {
+    status: string;
+    lastRunAt: string | null;
+    errorMessage: string | null;
+  };
+  taxes: { total: number; withValidRate: number; withoutRate: number };
+  products: { total: number; sellable: number; withSku: number; withoutSku: number };
+  services: { total: number; sellable: number };
+  contacts: { total: number };
+  ticketsTest: { total: number; lastAt: string | null };
+  ticketsSyncFailed: number;
+  testCashierProvisioned: boolean;
+  readinessChecks: ReadinessCheck[];
+  ready: boolean;
+}
+
 export interface TenantDetail {
   id: string;
   name: string;
   fiscalProfile: unknown;
   fiscalNif: string | null;
   plan: string | null;
+  onboardingState: OnboardingState;
   holdedConnected: boolean;
   holdedAuthMode: string;
   initialSyncStatus: string;
@@ -63,12 +94,42 @@ export interface TenantDetail {
   users: TenantUser[];
   stores: TenantStore[];
   metrics: TenantMetrics;
+  onboardingHealth: OnboardingHealth;
 }
 
-export interface CreateTenantResponse {
-  tenant: { id: string; name: string; plan: string | null; fiscalNif: string | null };
-  ownerEmail: string;
+export interface CreateTenantDraftResponse {
+  tenant: {
+    id: string;
+    name: string;
+    plan: string | null;
+    fiscalProfile: unknown;
+    fiscalNif: string | null;
+    onboardingState: OnboardingState;
+    createdAt: string;
+  };
+  syncJobId: string;
+}
+
+export interface TestCashierTokenResponse {
+  cashierSessionToken: string;
+  deviceToken: string;
+  expiresAt: string;
+  tenant: { id: string; name: string };
+  register: { id: string; name: string };
+  store: { id: string; name: string };
+  shiftId: string;
+}
+
+export interface ActivateTenantResponse {
+  tenant: { id: string; name: string; onboardingState: OnboardingState };
+  owner: { id: string; email: string; name: string };
   tempPassword: string;
+  purge: {
+    ticketsTestPurged: number;
+    emailJobsPurged: number;
+    cashierDeleted: boolean;
+    deviceRevoked: boolean;
+  };
 }
 
 export interface ImpersonateResponse {

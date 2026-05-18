@@ -1,6 +1,20 @@
 # B-SuperAdmin · resumen del entregable
 
-Estado: cerrado pendiente de revisión por Matías.
+Estado: cerrado pendiente de revisión por Matías. **Superado parcialmente
+por B-OnboardingV2 en los frentes de "crear tenant" y "permisos OWNER"
+(ver `docs/blocks/B-OnboardingV2-done.md`).**
+
+> Cambios introducidos por B-OnboardingV2:
+> - `POST /super-admin/tenants` ahora pide sólo `holdedApiKey` (+ taxId
+>   opcional). Crea tenant DRAFT sin OWNER. No envía email — eso ocurre
+>   en `POST /super-admin/tenants/:id/activate`. El email duplicado se
+>   detecta en activate, no en create.
+> - El OWNER per-tenant deja de ver las secciones técnicas (Holded,
+>   Dispositivos, Ajustes). El super-admin opera esas vía consola
+>   `/superadmin/tenants/:id/*` (frontend) + impersonation read-only para
+>   visualizar.
+> - Nuevo endpoint `PATCH /super-admin/tenants/:id/holded-api-key` que
+>   reemplaza la rotación del OWNER en el flujo super-admin.
 
 Mini-bloque acotado. Foco único: dar a Matías una consola super-admin
 operativa para dar de alta los 5 pilotos sin tocar SQL ni SSH. Cubre

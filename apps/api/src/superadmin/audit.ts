@@ -20,6 +20,33 @@ const CreateTenantMeta = Base.extend({
   fiscalNif: z.string(),
 });
 
+// B-OnboardingV2: tenant creado sólo con API key Holded, en estado
+// DRAFT. Sin OWNER user todavía — el email del propietario se introduce
+// más tarde al activar.
+const CreateTenantDraftMeta = Base.extend({
+  tenantName: z.string(),
+  fiscalNif: z.string(),
+  source: z.enum(["holded_account", "manual"]),
+});
+
+// B-OnboardingV2: super-admin pulsó "Probar TPV", emisión del JWT
+// test-cashier (24h, sin refresh).
+const TestCashierSessionMeta = Base.extend({
+  expiresAt: z.string(),
+  registerId: z.string(),
+  storeName: z.string(),
+});
+
+// B-OnboardingV2: tenant activado. Crea OWNER user, manda email, purga
+// los datos de prueba. Una transición irreversible — no hay vuelta a
+// DRAFT (eso es block + crear tenant nuevo).
+const ActivateTenantMeta = Base.extend({
+  ownerEmail: z.string(),
+  ownerName: z.string(),
+  ticketsTestPurged: z.number().int().nonnegative(),
+  emailJobsPurged: z.number().int().nonnegative(),
+});
+
 const UpdateTenantMeta = Base.extend({
   changes: z.record(
     z.object({
@@ -53,12 +80,15 @@ const ImpersonateMeta = Base.extend({
 
 const META_SCHEMAS = {
   create_tenant: CreateTenantMeta,
+  create_tenant_draft: CreateTenantDraftMeta,
   update_tenant: UpdateTenantMeta,
   block_tenant: BlockTenantMeta,
   unblock_tenant: UnblockTenantMeta,
   force_logout: ForceLogoutMeta,
   resync: ResyncMeta,
   impersonate: ImpersonateMeta,
+  test_cashier_session: TestCashierSessionMeta,
+  activate_tenant: ActivateTenantMeta,
 } as const;
 
 export type SuperAdminAction = keyof typeof META_SCHEMAS;

@@ -34,6 +34,11 @@ enum TicketStatus {
   SYNCED
   SYNC_FAILED
   VOIDED
+  // B-OnboardingV2: ticket creado por un cajero técnico interno (modo
+  // prueba). El worker `ticket-upload-worker` lo identifica y NO sube a
+  // Holded (skip silencioso). Al activar el tenant los tickets TEST se
+  // purgan junto con el cajero técnico.
+  TEST
 }
 
 enum PaymentMethod {
@@ -84,6 +89,26 @@ enum InitialSyncStatus {
   RUNNING
   DONE
   FAILED
+}
+
+// B-OnboardingV2: ciclo de vida del onboarding supervisado del tenant.
+//
+//   DRAFT  → tenant creado con API key Holded, sync inicial corriendo
+//            o terminada. Sin OWNER. El equipo mipiacetpv prueba el TPV
+//            con un cajero técnico. Los tickets generados no suben a
+//            Holded ni se envían por email.
+//   ACTIVE → el equipo ha validado salud, el super-admin ha introducido
+//            email + nombre del propietario. Se ha creado el OWNER user,
+//            enviado el email de bienvenida y purgado los datos de
+//            prueba. A partir de aquí operación productiva real.
+//
+// READY se calcula on-the-fly desde `onboardingHealth.ready` (Frente 3
+// del prompt): es un check de heurística sobre el sync inicial,
+// productos sellable, taxes, etc. No es un valor persistido — el
+// listado super-admin lo pinta cuando `state=DRAFT` y `ready=true`.
+enum OnboardingState {
+  DRAFT
+  ACTIVE
 }
 
 // ── Multi-tenant raíz ─────────────────────────────────────────────────
@@ -153,6 +178,12 @@ model Tenant {
   // Plan operativo (gestionado manualmente por el super-admin). String
   // libre — no enum — para no requerir migración al añadir tiers.
   plan                           String?
+  // B-OnboardingV2: estado del onboarding supervisado. DRAFT al crear
+  // sólo con API key Holded (sin OWNER user todavía). ACTIVE tras pasar
+  // por POST /super-admin/tenants/:id/activate (crea OWNER, manda email,
+  // purga datos de prueba). El backfill de la migración pone ACTIVE en
+  // todos los tenants existentes para no romper el flujo legacy.
+  onboardingState                OnboardingState   @default(DRAFT) @map("onboarding_state")
   createdAt                      DateTime          @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt                      DateTime          @updatedAt @map("updated_at") @db.Timestamptz()
 
@@ -222,6 +253,20 @@ model User {
   // siguiente login redirige obligatoriamente a /change-password-initial.
   // Al cambiarla se pone a NULL y se incrementa tokenVersion.
   mustChangePasswordAt   DateTime? @map("must_change_password_at") @db.Timestamptz()
+  // B-OnboardingV2: marca el cajero técnico que el equipo mipiacetpv usa
+  // para probar el TPV antes de que el cliente toque nada. El worker
+  // `ticket-upload-worker` mira este flag (a través de `ticket.user`)
+  // para NO subir el ticket a Holded; el worker de email lo skipea para
+  // no mandar correos a clientes reales. Al activar el tenant
+  // (POST /super-admin/tenants/:id/activate), los tickets TEST se
+  // borran y este user queda soft-deleted (deletedAt poblado abajo).
+  isTestCashier          Boolean   @default(false) @map("is_test_cashier")
+  // B-OnboardingV2: soft-delete del cajero técnico tras activar el
+  // tenant. Permite conservar histórico ligero sin que la UI lo liste.
+  // Sólo se aplica a usuarios `isTestCashier=true`; los OWNER/MANAGER/
+  // CASHIER reales se bloquean vía `Tenant.blockedAt` o
+  // `User.tokenVersion`. No se reutiliza para borrado de usuarios reales.
+  deletedAt              DateTime? @map("deleted_at") @db.Timestamptz()
 
   tenant         Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   shifts         Shift[]              @relation("ShiftOpenedBy")

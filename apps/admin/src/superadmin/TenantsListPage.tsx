@@ -27,6 +27,38 @@ function StatusBadge({ state }: { state: "ok" | "warning" | "blocked" }) {
   );
 }
 
+// B-OnboardingV2: badge del onboardingState + flag ready. Cuando un
+// tenant DRAFT pasa la heurística de salud, lo marcamos en ámbar
+// "Listo para activar"; mientras no, gris "En configuración". Tenants
+// ACTIVE se ven en verde "Operativo".
+function OnboardingBadge({
+  state,
+  ready,
+}: {
+  state: "DRAFT" | "ACTIVE";
+  ready: boolean | null;
+}) {
+  if (state === "ACTIVE") {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11.5px] font-medium border bg-emerald-100 text-emerald-700 border-emerald-200">
+        Operativo
+      </span>
+    );
+  }
+  if (ready) {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11.5px] font-medium border bg-amber-100 text-amber-800 border-amber-200">
+        Listo para activar
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11.5px] font-medium border bg-slate-100 text-slate-600 border-slate-200">
+      En configuración
+    </span>
+  );
+}
+
 export function TenantsListPage() {
   const [items, setItems] = useState<TenantListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -106,6 +138,7 @@ export function TenantsListPage() {
             <thead className="bg-slate-50 text-slate-600 text-[11.5px] uppercase tracking-wide">
               <tr>
                 <th className="text-left px-4 py-3 font-medium">Tenant</th>
+                <th className="text-left px-4 py-3 font-medium">Onboarding</th>
                 <th className="text-left px-4 py-3 font-medium">Owner</th>
                 <th className="text-left px-4 py-3 font-medium">Holded</th>
                 <th className="text-left px-4 py-3 font-medium">7d</th>
@@ -127,6 +160,9 @@ export function TenantsListPage() {
                       {t.fiscalNif ?? "Sin NIF"}
                       {t.plan ? ` · ${t.plan}` : ""}
                     </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <OnboardingBadge state={t.onboardingState} ready={t.onboardingReady} />
                   </td>
                   <td className="px-4 py-3 text-slate-600">
                     {t.ownerEmail ?? "—"}

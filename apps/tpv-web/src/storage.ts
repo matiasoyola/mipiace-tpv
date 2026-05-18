@@ -2,6 +2,15 @@
 // como app y se espera que el browser preserve el storage entre
 // arranques. Si el usuario limpia datos del sitio o desempareja, todo
 // vuelve a vacío.
+//
+// B-OnboardingV2: cuando hay un modo prueba activo (super-admin abrió
+// la pestaña con `?testCashierToken=...`), los getters devuelven los
+// valores guardados en sessionStorage por `lib/test-mode.ts` antes que
+// los del localStorage. Esto permite que un super-admin pruebe el TPV
+// sin contaminar (ni perder) la sesión real del cliente en el mismo
+// navegador.
+
+import { readTestModeState } from "./lib/test-mode.js";
 
 const DEVICE_TOKEN_KEY = "mipiacetpv-device-token";
 const CASHIER_SESSION_KEY = "mipiacetpv-cashier-session";
@@ -10,6 +19,8 @@ const RECENT_CASHIERS_KEY = "mipiacetpv-recent-cashiers";
 const MAX_RECENT_CASHIERS = 5;
 
 export function getDeviceToken(): string | null {
+  const test = readTestModeState();
+  if (test) return test.deviceToken;
   return localStorage.getItem(DEVICE_TOKEN_KEY);
 }
 
@@ -32,6 +43,20 @@ export interface CashierSession {
 }
 
 export function getCashierSession(): CashierSession | null {
+  const test = readTestModeState();
+  if (test) {
+    // El cashierToken es el sessionToken válido del cajero técnico.
+    // userId/email/role se rellenan tras el bootstrap; mientras
+    // tanto devolvemos un stub que basta para que apiWithCashier
+    // adjunte el Bearer.
+    return {
+      sessionToken: test.cashierToken,
+      sessionTtlMinutes: Math.max(1, Math.round((test.expiresAt - Date.now()) / 60_000)),
+      userId: "",
+      email: "",
+      role: "MANAGER",
+    };
+  }
   const raw = localStorage.getItem(CASHIER_SESSION_KEY);
   if (!raw) return null;
   try {

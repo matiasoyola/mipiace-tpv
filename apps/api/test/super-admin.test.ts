@@ -559,7 +559,11 @@ describe("super-admin · isolation", () => {
   });
 });
 
-describe("super-admin · crear tenant", () => {
+// B-OnboardingV2 refactorizó POST /super-admin/tenants (apiKey-only DRAFT
+// + activate aparte). Los tests del flow legacy quedan skipped — su
+// cobertura se traslada a `onboarding-v2.test.ts` con mocks de
+// listWarehouses y del computeOnboardingHealth.
+describe.skip("super-admin · crear tenant (legacy flow B-SuperAdmin)", () => {
   it("rechaza NIF inválido con 400", async () => {
     const app = await buildApp();
     const sa = await loginSA(app);
@@ -796,22 +800,31 @@ describe("super-admin · auditoría", () => {
 });
 
 describe("super-admin · must-change-password en login del OWNER", () => {
-  it("OWNER creado por super-admin: login devuelve pendingPasswordChangeToken; tras cambiar emite tokens normales", async () => {
+  it("OWNER con mustChangePasswordAt: login devuelve pendingPasswordChangeToken; tras cambiar emite tokens normales", async () => {
     const app = await buildApp();
-    const sa = await loginSA(app);
-    const create = await app.inject({
-      method: "POST",
-      url: "/super-admin/tenants",
-      headers: { authorization: `Bearer ${sa}` },
-      payload: {
-        name: "ChangeMe SL",
-        fiscalNif: "12345678Z",
-        ownerEmail: "change@me.com",
-        ownerName: "Maria",
-      },
+    // B-OnboardingV2: el OWNER ya no se crea en POST /super-admin/tenants
+    // (ahora DRAFT sin OWNER). Lo creamos directamente en el seed con
+    // mustChangePasswordAt poblado — el flow real lo crea en
+    // POST /super-admin/tenants/:id/activate y el resto del comportamiento
+    // (login → pending → change) es idéntico, así que con este fixture
+    // cubrimos la lógica de auth.
+    const tempPassword = "TempPw-Init-2026!";
+    const { hashPassword } = await import("../src/auth/passwords.js");
+    const passwordHash = await hashPassword(tempPassword);
+    users.set("user-change", {
+      id: "user-change",
+      tenantId: TENANT_ID,
+      email: "change@me.com",
+      passwordHash,
+      role: "OWNER",
+      tokenVersion: 0,
+      mustChangePasswordAt: new Date(),
+      lastLoginAt: null,
+      createdAt: new Date(),
+      twoFactorSecret: null,
+      twoFactorEnabledAt: null,
+      twoFactorRecoveryCodes: null,
     });
-    expect(create.statusCode).toBe(201);
-    const tempPassword = create.json().tempPassword as string;
 
     // Login con temporal → mustChangePassword.
     const step1 = await app.inject({

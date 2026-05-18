@@ -132,4 +132,75 @@ export async function registerCashierAuthRoutes(
       return { ok: true };
     },
   );
+
+  // B-OnboardingV2: bootstrap del TPV en modo prueba. El super-admin
+  // emite el JWT cashier-session (purpose=test-cashier) desde su
+  // consola; el TPV lo guarda en sessionStorage y llama a este
+  // endpoint para obtener el perfil del cajero, el shift abierto y
+  // los datos de tenant/register/store sin pasar por PinScreen.
+  app.get(
+    "/shift/cashier-bootstrap",
+    { preHandler: requireCashierSession },
+    async (request, reply) => {
+      const ctx = request.cashier!;
+      if (!ctx.isTest) {
+        return reply.code(403).send({
+          error: "TEST_CASHIER_ONLY",
+          message: "Este endpoint sólo acepta JWTs test-cashier.",
+        });
+      }
+      const prisma = getPrisma();
+      const [user, register, tenant, shift] = await Promise.all([
+        prisma.user.findUnique({
+          where: { id: ctx.sub },
+          select: { id: true, email: true, role: true },
+        }),
+        prisma.register.findUnique({
+          where: { id: ctx.rid },
+          select: {
+            id: true,
+            name: true,
+            numSerieHolded: true,
+            store: { select: { id: true, name: true } },
+          },
+        }),
+        prisma.tenant.findUnique({
+          where: { id: ctx.tid },
+          select: { id: true, name: true, cashierAutoLogoutMinutes: true },
+        }),
+        prisma.shift.findFirst({
+          where: { registerId: ctx.rid, userId: ctx.sub, closedAt: null },
+          orderBy: { openedAt: "desc" },
+          select: { id: true, openedAt: true, cashOpening: true },
+        }),
+      ]);
+      if (!user || !register || !tenant) {
+        return reply.code(404).send({
+          error: "TEST_CASHIER_RESOURCES_MISSING",
+          message: "Faltan recursos para el modo prueba (re-provision necesaria).",
+        });
+      }
+      return reply.code(200).send({
+        user: { id: user.id, email: user.email, role: user.role },
+        tenant: {
+          id: tenant.id,
+          name: tenant.name,
+          cashierAutoLogoutMinutes: tenant.cashierAutoLogoutMinutes,
+        },
+        register: {
+          id: register.id,
+          name: register.name,
+          numSerieHolded: register.numSerieHolded,
+        },
+        store: { id: register.store.id, name: register.store.name },
+        shift: shift
+          ? {
+              id: shift.id,
+              openedAt: shift.openedAt.toISOString(),
+              cashOpening: shift.cashOpening.toString(),
+            }
+          : null,
+      });
+    },
+  );
 }

@@ -1,42 +1,42 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Copy, CheckCircle2 } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, KeyRound } from "lucide-react";
 
 import { superApi, SuperAdminApiError } from "./api.js";
 import { SuperAdminShell } from "./SuperAdminShell.js";
-import type { CreateTenantResponse } from "./types.js";
+import type { CreateTenantDraftResponse } from "./types.js";
 
+// B-OnboardingV2 · Frente 8.
+//
+// Form simplificado al máximo: el super-admin sólo introduce la API key
+// Holded del cliente. Opcionalmente, taxId si lo conoce. El backend
+// extrae razón social/dirección del warehouse default (Holded no expone
+// /account/me, spike §08) y crea un tenant DRAFT sin OWNER todavía.
+// El equipo mipiacetpv probará el TPV antes de activar al propietario.
 export function CreateTenantPage() {
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<CreateTenantResponse | null>(null);
-  const [copied, setCopied] = useState(false);
 
-  const [name, setName] = useState("");
-  const [fiscalNif, setFiscalNif] = useState("");
-  const [fiscalAddress, setFiscalAddress] = useState("");
-  const [ownerEmail, setOwnerEmail] = useState("");
-  const [ownerName, setOwnerName] = useState("");
-  const [plan, setPlan] = useState("pilot");
+  const [holdedApiKey, setHoldedApiKey] = useState("");
+  const [showKey, setShowKey] = useState(false);
+  const [taxId, setTaxId] = useState("");
+  const [legalName, setLegalName] = useState("");
 
   async function onSubmit(e: React.FormEvent): Promise<void> {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      const res = await superApi<CreateTenantResponse>("/super-admin/tenants", {
+      const res = await superApi<CreateTenantDraftResponse>("/super-admin/tenants", {
         method: "POST",
         body: {
-          name,
-          fiscalNif,
-          fiscalAddress: fiscalAddress || undefined,
-          ownerEmail,
-          ownerName,
-          plan,
+          holdedApiKey: holdedApiKey.trim(),
+          taxId: taxId.trim() || undefined,
+          legalName: legalName.trim() || undefined,
         },
       });
-      setResult(res);
+      navigate(`/superadmin/tenants/${res.tenant.id}`, { replace: true });
     } catch (err) {
       setError(err instanceof SuperAdminApiError ? err.message : "Error inesperado");
     } finally {
@@ -44,139 +44,73 @@ export function CreateTenantPage() {
     }
   }
 
-  async function copyPassword(): Promise<void> {
-    if (!result) return;
-    try {
-      await navigator.clipboard.writeText(result.tempPassword);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
-    } catch {
-      /* clipboard puede fallar en contextos no-secure */
-    }
-  }
-
-  if (result) {
-    return (
-      <SuperAdminShell title="Tenant creado">
-        <div className="max-w-xl bg-white rounded-xl border border-emerald-200 p-6 shadow-sm">
-          <div className="flex items-center gap-2 mb-3">
-            <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-            <h2 className="font-semibold text-slate-900 text-[15px]">
-              Tenant {result.tenant.name} creado correctamente
-            </h2>
-          </div>
-          <div className="space-y-3 text-[13.5px]">
-            <div>
-              <div className="text-[11.5px] uppercase tracking-wide text-slate-500 mb-1">
-                Email del OWNER
-              </div>
-              <div className="font-mono text-slate-900">{result.ownerEmail}</div>
-            </div>
-            <div>
-              <div className="text-[11.5px] uppercase tracking-wide text-slate-500 mb-1">
-                Contraseña temporal
-              </div>
-              <div className="flex items-center gap-2">
-                <code className="font-mono bg-slate-900 text-white rounded-lg px-3 py-2 text-[14px] tracking-wide">
-                  {result.tempPassword}
-                </code>
-                <button
-                  onClick={copyPassword}
-                  className="inline-flex items-center gap-1 h-9 px-3 border border-slate-300 rounded-lg text-[12.5px] hover:bg-slate-50"
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                  {copied ? "Copiado" : "Copiar"}
-                </button>
-              </div>
-              <p className="text-[12px] text-slate-500 mt-2">
-                Esta es la única vez que se muestra. Se la hemos enviado por
-                email al OWNER. El OWNER deberá cambiarla en su primer login.
-              </p>
-            </div>
-          </div>
-          <div className="flex gap-2 mt-6">
-            <button
-              onClick={() => navigate(`/superadmin/tenants/${result.tenant.id}`)}
-              className="h-10 px-4 bg-slate-900 text-white rounded-lg text-[13px] font-medium hover:bg-slate-800"
-            >
-              Ver detalle
-            </button>
-            <button
-              onClick={() => navigate("/superadmin/tenants")}
-              className="h-10 px-4 border border-slate-300 rounded-lg text-[13px] hover:bg-slate-50"
-            >
-              Volver al listado
-            </button>
-          </div>
-        </div>
-      </SuperAdminShell>
-    );
-  }
-
   return (
-    <SuperAdminShell title="Crear tenant">
+    <SuperAdminShell title="Conectar Holded">
       <form
         onSubmit={onSubmit}
         className="max-w-xl bg-white rounded-xl border border-slate-200 p-6 shadow-sm space-y-4"
       >
-        <Field
-          label="Nombre del tenant"
-          value={name}
-          onChange={setName}
-          required
-          maxLength={200}
-        />
-        <Field
-          label="NIF / CIF / NIE"
-          value={fiscalNif}
-          onChange={(v) => setFiscalNif(v.toUpperCase())}
-          required
-          maxLength={32}
-          help="NIF (8 dígitos+letra), CIF (letra+7 dígitos+control), NIE (X/Y/Z+7 dígitos+letra)"
-        />
-        <Field
-          label="Dirección fiscal (opcional)"
-          value={fiscalAddress}
-          onChange={setFiscalAddress}
-          maxLength={300}
-        />
-        <Field
-          label="Email del OWNER"
-          type="email"
-          value={ownerEmail}
-          onChange={(v) => setOwnerEmail(v.toLowerCase())}
-          required
-        />
-        <Field
-          label="Nombre del OWNER"
-          value={ownerName}
-          onChange={setOwnerName}
-          required
-          maxLength={200}
-        />
+        <p className="text-[13px] text-slate-600">
+          Conecta la cuenta Holded del cliente con su API key. El equipo
+          probará el TPV en modo prueba; el propietario sólo recibirá email
+          cuando hayamos validado que todo funciona.
+        </p>
         <div>
           <label className="block text-[12.5px] font-medium text-slate-700 mb-1.5">
-            Plan
+            API Key Holded
+            <span className="text-red-500"> *</span>
           </label>
-          <select
-            value={plan}
-            onChange={(e) => setPlan(e.target.value)}
-            className="w-full h-11 px-3 border border-slate-300 rounded-lg text-[14px] bg-white"
-          >
-            <option value="pilot">Piloto</option>
-            <option value="free">Free</option>
-            <option value="paid">Paid</option>
-          </select>
+          <div className="relative">
+            <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type={showKey ? "text" : "password"}
+              value={holdedApiKey}
+              onChange={(e) => setHoldedApiKey(e.target.value)}
+              required
+              minLength={10}
+              maxLength={512}
+              autoComplete="off"
+              className="w-full h-11 pl-10 pr-10 border border-slate-300 rounded-lg text-[14px] focus:outline-none focus:border-slate-500 font-mono"
+              placeholder="abc123…"
+            />
+            <button
+              type="button"
+              onClick={() => setShowKey((v) => !v)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-slate-400 hover:text-slate-600"
+              aria-label={showKey ? "Ocultar clave" : "Mostrar clave"}
+            >
+              {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </div>
+          <p className="text-[11.5px] text-slate-500 mt-1.5">
+            Validamos contra Holded antes de guardar (GET /invoicing/v1/warehouses).
+            La key se cifra con AES-GCM en BD.
+          </p>
         </div>
+        <Field
+          label="NIF / CIF / NIE (opcional)"
+          value={taxId}
+          onChange={(v) => setTaxId(v.toUpperCase())}
+          maxLength={32}
+          help="Si lo conoces. Si lo dejas vacío, el propietario lo completa tras activar."
+        />
+        <Field
+          label="Razón social (opcional)"
+          value={legalName}
+          onChange={setLegalName}
+          maxLength={200}
+          help="Sobrescribe la del almacén default de Holded si necesitas la legal exacta."
+        />
         {error && (
           <p className="text-[12.5px] text-red-600 font-medium">{error}</p>
         )}
         <button
           type="submit"
-          disabled={busy}
-          className="w-full h-11 bg-slate-900 text-white text-[14px] font-medium rounded-lg hover:bg-slate-800 disabled:opacity-50"
+          disabled={busy || !holdedApiKey.trim()}
+          className="w-full h-11 bg-slate-900 text-white text-[14px] font-medium rounded-lg hover:bg-slate-800 disabled:opacity-50 inline-flex items-center justify-center gap-2"
         >
-          {busy ? "Creando…" : "Crear tenant y enviar email"}
+          {busy ? "Validando con Holded…" : "Conectar y crear tenant DRAFT"}
+          {!busy && <ArrowRight className="w-4 h-4" />}
         </button>
       </form>
     </SuperAdminShell>
@@ -187,16 +121,12 @@ function Field({
   label,
   value,
   onChange,
-  type = "text",
-  required = false,
   maxLength,
   help,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
-  type?: string;
-  required?: boolean;
   maxLength?: number;
   help?: string;
 }) {
@@ -204,13 +134,11 @@ function Field({
     <div>
       <label className="block text-[12.5px] font-medium text-slate-700 mb-1.5">
         {label}
-        {required && <span className="text-red-500"> *</span>}
       </label>
       <input
-        type={type}
+        type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        required={required}
         maxLength={maxLength}
         className="w-full h-11 px-3 border border-slate-300 rounded-lg text-[14px] focus:outline-none focus:border-slate-500"
       />

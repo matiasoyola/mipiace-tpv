@@ -7,6 +7,7 @@ import {
 } from "../queues/initial-sync.js";
 import { registerTenantRepeatable } from "../queues/catalog-incremental.js";
 import { runInitialSync } from "../onboarding/initial-sync.js";
+import { provisionTestCashier } from "../superadmin/test-cashier.js";
 
 export function startInitialSyncWorker(): Worker<InitialSyncJob> {
   const worker = new Worker<InitialSyncJob>(
@@ -19,6 +20,29 @@ export function startInitialSyncWorker(): Worker<InitialSyncJob> {
       // (B2 §2.1). El jobId determinista evita duplicación si por
       // alguna razón este worker corre dos veces.
       await registerTenantRepeatable(tenantId);
+
+      // B-OnboardingV2: si el tenant está en DRAFT, auto-provisionar
+      // el cajero técnico para que el equipo mipiacetpv pueda probar
+      // el TPV. Idempotente — re-provision sobre el mismo tenant es
+      // seguro. Lo aislamos del flujo legacy (ACTIVE) para no tocar
+      // tenants productivos.
+      const tenant = await prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { onboardingState: true },
+      });
+      if (tenant?.onboardingState === "DRAFT") {
+        try {
+          await provisionTestCashier(prisma, tenantId);
+        } catch (err) {
+          // Que falle la provisión del cashier técnico no debe romper
+          // el sync. Lo log oramos y dejamos al super-admin
+          // reaprovisionar manualmente (re-sync).
+          console.error(
+            `[initial-sync] provisión cashier técnico falló para tenant ${tenantId}:`,
+            err instanceof Error ? err.message : err,
+          );
+        }
+      }
       return stats;
     },
     {

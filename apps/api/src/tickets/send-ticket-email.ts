@@ -63,12 +63,25 @@ export async function sendTicketEmail(
               store: { select: { ticketDelivery: true, name: true } },
             },
           },
+          user: { select: { isTestCashier: true } },
         },
       },
     },
   });
   if (!job) return { kind: "skipped", reason: "job_not_found" };
   if (job.status !== "PENDING") return { kind: "skipped", reason: "not_pending" };
+
+  // B-OnboardingV2: en modo prueba no enviamos emails — el ticket es
+  // un fantasma del equipo mipiacetpv, no un cliente real. Marcamos el
+  // job como SKIPPED_TEST para que el panel super-admin pueda contar
+  // los tickets fantasma y la bandeja de errores no se contamine.
+  if (job.ticket.status === "TEST" || job.ticket.user?.isTestCashier === true) {
+    await prisma.ticketEmailJob.update({
+      where: { id: emailJobId },
+      data: { status: "SKIPPED_TEST", sentAt: new Date() },
+    });
+    return { kind: "skipped", reason: "test_cashier" };
+  }
 
   // Ticket en DRAFT → no hay nada que mandar todavía (aún no cobrado).
   // Diferimos: cuando pase a PAID, el endpoint de checkout encolará
