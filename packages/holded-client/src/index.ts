@@ -23,6 +23,7 @@ export {
 export {
   HOLDED_PRODUCTS_PAGE_SIZE,
   createProduct,
+  extractImageUrl,
   getProduct,
   iterateAllProducts,
   listProductsPage,

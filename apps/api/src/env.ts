@@ -89,6 +89,22 @@ export const EnvSchema = z.object({
   // creados desde tenants reales (cifrado por tenant).
   HOLDED_BASE_URL: z.string().url().default("https://api.holded.com/api"),
 
+  // ── Cache local de imágenes de producto (B-ProductImages) ──────────
+  // Directorio compartido con Caddy vía volumen Docker. En dev cae al
+  // tmpdir del SO; en producción el compose lo monta a
+  // `/var/cache/mipiacetpv/product-images` y Caddy lo expone bajo
+  // `/product-images/*` (read-only).
+  PRODUCT_IMAGE_CACHE_DIR: z
+    .string()
+    .default("/var/cache/mipiacetpv/product-images"),
+  // Tamaño máximo aceptado por imagen (bytes). Holded raramente sirve
+  // más de 1-2 MB pero defensivo: superar este límite → log + skip.
+  PRODUCT_IMAGE_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(5 * 1024 * 1024),
+
   // ── Super-admin (B-SuperAdmin) ─────────────────────────────────────
   // JWT secret separado del per-tenant — un compromiso de uno NO da
   // acceso al otro. 40+ chars, generar con `openssl rand -base64 48`.

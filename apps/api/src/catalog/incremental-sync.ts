@@ -30,6 +30,7 @@ import type { PrismaClient } from "@mipiacetpv/db";
 import {
   ApiKeyClient,
   buildTaxRateResolver,
+  extractImageUrl,
   iterateAllContacts,
   iterateAllProducts,
   iterateAllServices,
@@ -44,6 +45,7 @@ import { loadEnv } from "../env.js";
 import { runAutoSku, type AutoSkuResult } from "../onboarding/auto-sku.js";
 import { pickHoldedTaxKey, upsertContact } from "../onboarding/initial-sync.js";
 import { createTpvOtrosWildcards, type WildcardResult } from "../onboarding/tpv-otros.js";
+import { enqueueProductImageCache } from "../queues/product-image-cache.js";
 
 export interface IncrementalSyncStats {
   productsSeen: number;
@@ -57,6 +59,9 @@ export interface IncrementalSyncStats {
   wildcardsReused: number;
   contactsSeen: number;
   contactsOrphansMarked: number;
+  // B-ProductImages: cuántos productos pasaron por enqueue del cache
+  // de imagen porque su URL cambió o porque nunca se descargó.
+  imageJobsEnqueued: number;
   durationMs: number;
   errors: Array<{ step: string; message: string }>;
 }
@@ -74,6 +79,7 @@ function emptyStats(): IncrementalSyncStats {
     wildcardsReused: 0,
     contactsSeen: 0,
     contactsOrphansMarked: 0,
+    imageJobsEnqueued: 0,
     durationMs: 0,
     errors: [],
   };
@@ -166,10 +172,22 @@ export async function runIncrementalSync(
     }
 
     // ── Productos ────────────────────────────────────────────────────
+    // Acumulamos ids cuyo cache de imagen hay que (re)disparar. El
+    // enqueue real se hace en bloque al final, para que Redis caído
+    // no aborte el sync.
+    const imageCacheTargets: string[] = [];
     for await (const { products } of iterateAllProducts(client)) {
       for (const p of products) {
         if (p.forSale === 0) continue;
-        await upsertCatalogEntry(prisma, tenantId, p, "PRODUCT", resolveTaxRate, log);
+        const r = await upsertCatalogEntry(
+          prisma,
+          tenantId,
+          p,
+          "PRODUCT",
+          resolveTaxRate,
+          log,
+        );
+        if (r.needsImageCache) imageCacheTargets.push(r.id);
         stats.productsSeen += 1;
       }
     }
@@ -178,7 +196,15 @@ export async function runIncrementalSync(
     for await (const { services } of iterateAllServices(client)) {
       for (const s of services) {
         if (s.forSale === 0) continue;
-        await upsertCatalogEntry(prisma, tenantId, s, "SERVICE", resolveTaxRate, log);
+        const r = await upsertCatalogEntry(
+          prisma,
+          tenantId,
+          s,
+          "SERVICE",
+          resolveTaxRate,
+          log,
+        );
+        if (r.needsImageCache) imageCacheTargets.push(r.id);
         stats.servicesSeen += 1;
       }
     }
@@ -208,6 +234,24 @@ export async function runIncrementalSync(
     // ── Comodines TPV-OTROS (idempotente) ───────────────────────────
     const wildcards = await createTpvOtrosWildcards({ tenantId, prisma, client, logger: log });
     mergeWildcards(stats, wildcards);
+
+    // ── Imágenes de producto (cache asíncrono, B-ProductImages) ─────
+    // Encolamos a Redis los productos con imagen nueva o URL cambiada.
+    // El upsert de arriba ya invalidó `imageCachedAt = null` para los
+    // que cambiaron, así que el worker los detecta como pendientes.
+    // No bloqueamos el sync por fallos de Redis aquí — el siguiente
+    // incremental reintentará.
+    for (const productId of imageCacheTargets) {
+      try {
+        await enqueueProductImageCache(productId);
+        stats.imageJobsEnqueued += 1;
+      } catch (err) {
+        log.warn("no pude encolar image-cache job", {
+          productId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
 
     // ── Contactos completos (B7 §8) ─────────────────────────────────
     // Holded no expone `updatedSince` para contactos (spike §10).
@@ -259,10 +303,10 @@ export async function runIncrementalSync(
   }
 }
 
-// Misma lógica de upsert que el sync inicial. Se duplica
-// intencionalmente: extraerla a un helper compartido es trivial
-// pero hoy la diferencia entre inicial/incremental es nula. Si
-// divergen, refactorizamos.
+// Misma lógica de upsert que el sync inicial pero con detección de
+// cambio de URL de imagen: si la URL nueva difiere de la previa,
+// invalidamos `imageCachedAt = null` para que el worker re-descargue
+// y devolvemos `needsImageCache=true` para que el caller lo encole.
 async function upsertCatalogEntry(
   prisma: PrismaClient,
   tenantId: string,
@@ -270,7 +314,7 @@ async function upsertCatalogEntry(
   kind: "PRODUCT" | "SERVICE",
   resolveTaxRate: (taxId: string | undefined) => number | null,
   log: NonNullable<RunIncrementalSyncOptions["logger"]>,
-): Promise<void> {
+): Promise<{ id: string; needsImageCache: boolean }> {
   const sku = typeof raw.sku === "string" && raw.sku.length > 0 ? raw.sku : null;
   const taxId = raw.taxes?.[0];
   const resolvedTaxRate = resolveTaxRate(taxId);
@@ -291,8 +335,30 @@ async function upsertCatalogEntry(
   const barcode =
     typeof barcodeRaw === "string" && barcodeRaw.length > 0 ? barcodeRaw : null;
   const sellable = sku !== null && resolvedTaxRate !== null;
+  const newImageUrl = extractImageUrl(raw as HoldedProduct);
 
-  await prisma.product.upsert({
+  // Leemos el estado previo para decidir si invalidamos el cache. Una
+  // query extra por producto es asumible (1ms en el bench piloto: 500
+  // productos × 1ms ≈ 0.5s sobre un sync que de por sí tarda 30s+).
+  const existing = await prisma.product.findUnique({
+    where: { tenantId_holdedProductId: { tenantId, holdedProductId: raw.id } },
+    select: { id: true, imageUrl: true, imageCachedAt: true },
+  });
+
+  // ¿Hay que volver a descargar la imagen?
+  //   - producto nuevo con imagen: sí.
+  //   - URL cambió respecto a la previa: sí (e invalidamos imageCachedAt).
+  //   - URL igual pero `imageCachedAt` sigue null (intento previo
+  //     falló): sí — el worker reintenta hasta que cuelgue válido.
+  //   - URL sigue igual y `imageCachedAt` ya está poblado: no.
+  const urlChanged = existing != null && existing.imageUrl !== newImageUrl;
+  const needsImageCache =
+    newImageUrl !== null &&
+    (existing == null ||
+      urlChanged ||
+      existing.imageCachedAt === null);
+
+  const row = await prisma.product.upsert({
     where: {
       tenantId_holdedProductId: { tenantId, holdedProductId: raw.id },
     },
@@ -307,6 +373,7 @@ async function upsertCatalogEntry(
       kind,
       active: true,
       sellableViaTpv: sellable,
+      imageUrl: newImageUrl,
       raw: raw as unknown as object,
     },
     update: {
@@ -327,10 +394,21 @@ async function upsertCatalogEntry(
       // re-activará tras asignar SKU).
       sellableViaTpv:
         resolvedTaxRate === null ? false : sellable || undefined,
+      imageUrl: newImageUrl,
+      // Si la URL cambió, también invalidamos mime + cachedAt para que
+      // el TPV deje de pintar el archivo antiguo en cuanto el worker
+      // confirme la nueva descarga. Si la URL es igual, no tocamos
+      // estos campos (mantenemos el cache válido).
+      ...(urlChanged
+        ? { imageMime: null, imageCachedAt: null }
+        : {}),
       raw: raw as unknown as object,
       lastSyncedAt: new Date(),
     },
+    select: { id: true },
   });
+
+  return { id: row.id, needsImageCache };
 }
 
 function mergeAutoSku(stats: IncrementalSyncStats, result: AutoSkuResult): void {

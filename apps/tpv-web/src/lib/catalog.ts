@@ -15,17 +15,42 @@ export interface CatalogProduct {
   priceGross: number;
   taxRate: number;
   kind: "PRODUCT" | "SERVICE";
+  // B-ProductImages: MIME del binario cacheado por el worker. Null si
+  // Holded no expone imagen o si el worker aún no descargó. El TPV usa
+  // este flag como gate para renderizar `<img>` vs. placeholder.
+  imageMime: string | null;
 }
 
 const DB_NAME = "mipiacetpv-catalog";
 const STORE = "products";
-const VERSION = 1;
+// Bump por el campo imageMime. IndexedDB sobrevive con onupgradeneeded.
+const VERSION = 2;
 const LS_KEY = "mipiacetpv-catalog-fallback";
 const META_KEY = "mipiacetpv-catalog-meta";
+const TENANT_ID_KEY = "mipiacetpv-catalog-tenant";
 
 interface CatalogMeta {
   lastFetchedAt: string;
   count: number;
+}
+
+// Mapa MIME → extensión usado al construir la URL del binario en el
+// volumen `product_images`. Tiene que estar alineado con el worker
+// (apps/api/src/workers/image-cache-worker.ts `extFromMime`).
+export function extFromImageMime(mime: string): string {
+  if (mime === "image/jpeg") return "jpg";
+  if (mime === "image/png") return "png";
+  if (mime === "image/webp") return "webp";
+  return "bin";
+}
+
+export function getCachedTenantId(): string | null {
+  return localStorage.getItem(TENANT_ID_KEY);
+}
+
+export function productImageUrl(p: CatalogProduct, tenantId: string): string | null {
+  if (!p.imageMime) return null;
+  return `/product-images/${tenantId}/${p.id}.${extFromImageMime(p.imageMime)}`;
 }
 
 function openDb(): Promise<IDBDatabase | null> {
@@ -104,19 +129,23 @@ export async function loadCatalogFromCache(): Promise<CatalogProduct[]> {
 export async function refreshCatalog(): Promise<CatalogProduct[]> {
   const acc: CatalogProduct[] = [];
   let cursor: string | undefined;
+  let lastTenantId: string | null = null;
   for (let safety = 0; safety < 200; safety++) {
     const res = await apiWithCashier<{
       items: CatalogProduct[];
       nextCursor: string | null;
+      tenantId: string;
     }>(
       `/tpv/catalog/products${cursor ? `?cursor=${cursor}&limit=500` : "?limit=500"}`,
     );
     acc.push(...res.items);
+    lastTenantId = res.tenantId;
     if (!res.nextCursor) break;
     cursor = res.nextCursor;
   }
   await writeAll(acc);
   setCatalogMeta({ lastFetchedAt: new Date().toISOString(), count: acc.length });
+  if (lastTenantId) localStorage.setItem(TENANT_ID_KEY, lastTenantId);
   return acc;
 }
 

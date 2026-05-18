@@ -24,8 +24,66 @@ export interface HoldedProduct {
   warehouseId?: string | null;
   attributes?: Array<{ id: string; value: string; name: string }>;
   variants?: HoldedProductVariant[];
+  // B-ProductImages (spike §13): URL/array de imagen(es) del producto.
+  // Declaramos los campos candidatos como opcionales; el helper
+  // `extractImageUrl` decide cuál usar con prioridad fija. Si el spike
+  // contra la cuenta piloto muestra que Holded usa otro nombre, se
+  // añade aquí y se actualiza el helper — sin migración.
+  mainImage?: string | { url?: string; [k: string]: unknown } | null;
+  image?: string | { url?: string; [k: string]: unknown } | null;
+  thumbnail?: string | null;
+  pictures?: Array<string | { url?: string; [k: string]: unknown }>;
+  images?: Array<string | { url?: string; [k: string]: unknown }>;
   // Campos que Holded pueda añadir y no quieran perderse en raw.
   [extra: string]: unknown;
+}
+
+// Extrae la URL canónica de imagen de un producto Holded.
+//
+// Spike §13: el campo exacto depende de la cuenta (Holded ha mutado
+// históricamente entre `mainImage`, `image` y arrays anidados). Probamos
+// en orden de mayor confianza y devolvemos la primera URL válida.
+// Devuelve null si:
+//   - ningún campo candidato está presente,
+//   - el campo está pero es array vacío / string vacío / objeto sin
+//     URL anidada.
+//
+// La validación del MIME real (image/jpeg|png|webp) se hace en el
+// worker tras descargar — aquí sólo extraemos el string http(s).
+export function extractImageUrl(raw: HoldedProduct): string | null {
+  const candidates: Array<unknown> = [
+    raw.mainImage,
+    raw.image,
+    raw.thumbnail,
+    raw.pictures,
+    raw.images,
+  ];
+  for (const c of candidates) {
+    const url = firstHttpUrl(c);
+    if (url) return url;
+  }
+  return null;
+}
+
+function firstHttpUrl(v: unknown): string | null {
+  if (typeof v === "string") {
+    const t = v.trim();
+    return t.startsWith("http://") || t.startsWith("https://") ? t : null;
+  }
+  if (Array.isArray(v)) {
+    for (const it of v) {
+      const u = firstHttpUrl(it);
+      if (u) return u;
+    }
+    return null;
+  }
+  if (v && typeof v === "object") {
+    for (const val of Object.values(v as Record<string, unknown>)) {
+      const u = firstHttpUrl(val);
+      if (u) return u;
+    }
+  }
+  return null;
 }
 
 export interface HoldedProductVariant {

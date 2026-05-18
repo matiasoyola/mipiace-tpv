@@ -31,6 +31,25 @@ export default defineConfig({
       workbox: {
         globPatterns: ["**/*.{js,css,html,svg,woff2}"],
         // El catálogo va a IndexedDB (Dexie) en B4 — no por workbox.
+        // B-ProductImages: imágenes de producto bajo /product-images/*
+        // se cachean on-demand con StaleWhileRevalidate (7d). El TPV
+        // pinta la versión cacheada inmediatamente y revalida en
+        // background — ADR-007 offline-friendly se respeta porque la
+        // primera vez que se ve un producto ya queda guardado.
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }) => url.pathname.startsWith("/product-images/"),
+            handler: "StaleWhileRevalidate",
+            options: {
+              cacheName: "product-images",
+              expiration: {
+                maxEntries: 1000,
+                maxAgeSeconds: 7 * 24 * 60 * 60,
+              },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+        ],
       },
     }),
   ],
