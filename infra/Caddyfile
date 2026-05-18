@@ -1,9 +1,14 @@
 # Caddyfile · mipiacetpv producción
 #
 # Topología de dominios (en VPS 3, IP 76.13.142.28):
-#   mipiacetpv.tech           → PWA del TPV (estáticos /srv/tpv)
-#   admin.mipiacetpv.tech     → consola admin per-tenant + super-admin (estáticos /srv/admin)
-#   api.mipiacetpv.tech       → backend API (proxy a api:3001)
+#   mipiacetpv.tech           → PWA del TPV (estáticos /srv/tpv) + /api/* → api:3001
+#   admin.mipiacetpv.tech     → consola admin per-tenant + super-admin (estáticos /srv/admin) + /api/* → api:3001
+#   api.mipiacetpv.tech       → backend API directo (proxy a api:3001)
+#
+# Las PWAs hacen fetch a paths relativos `/api/*` para evitar problemas
+# CORS y simplificar `PUBLIC_API_URL` en build. El backend también queda
+# expuesto en `api.mipiacetpv.tech` para herramientas externas (curl,
+# Postman) y para WebSockets cuando se conectan desde otros orígenes.
 #
 # SSL: Caddy obtiene certificados Let's Encrypt automáticamente al primer
 # acceso. Los DNS A records de los 3 dominios tienen que apuntar a
@@ -23,62 +28,70 @@
 
 # ── PWA del TPV ──────────────────────────────────────────────────────
 mipiacetpv.tech, www.mipiacetpv.tech {
-	root * /srv/tpv
-	encode gzip zstd
-	# La PWA usa client-side routing (react-router) — todo lo que no sea
-	# un archivo se rebota a index.html para que React maneje la ruta.
-	try_files {path} /index.html
-	file_server
+	# /api/* se proxea al backend. handle_path elimina el prefijo /api
+	# antes de reenviar (la API escucha en rutas sin prefijo).
+	handle_path /api/* {
+		reverse_proxy api:3001
+	}
 
-	# Service worker no se cachea: tiene que llegar siempre fresco para
-	# que el cliente reciba versiones nuevas.
-	@sw path /sw.js /service-worker.js /workbox-*.js
-	header @sw Cache-Control "no-cache, no-store, must-revalidate"
+	handle {
+		root * /srv/tpv
+		encode gzip zstd
+		# La PWA usa client-side routing (react-router) — todo lo que no sea
+		# un archivo se rebota a index.html para que React maneje la ruta.
+		try_files {path} /index.html
+		file_server
 
-	# Resto de assets con hash: cache largo.
-	@assets path /assets/*
-	header @assets Cache-Control "public, max-age=31536000, immutable"
+		# Service worker no se cachea: tiene que llegar siempre fresco para
+		# que el cliente reciba versiones nuevas.
+		@sw path /sw.js /service-worker.js /workbox-*.js
+		header @sw Cache-Control "no-cache, no-store, must-revalidate"
 
-	# Security headers
-	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		X-Content-Type-Options "nosniff"
-		X-Frame-Options "DENY"
-		Referrer-Policy "strict-origin-when-cross-origin"
-		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+		# Resto de assets con hash: cache largo.
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+
+		# Security headers
+		header {
+			Strict-Transport-Security "max-age=31536000; includeSubDomains"
+			X-Content-Type-Options "nosniff"
+			X-Frame-Options "DENY"
+			Referrer-Policy "strict-origin-when-cross-origin"
+			Permissions-Policy "geolocation=(), microphone=(), camera=()"
+		}
 	}
 }
 
 # ── Consola admin (per-tenant + super-admin en /superadmin) ──────────
 admin.mipiacetpv.tech {
-	root * /srv/admin
-	encode gzip zstd
-	try_files {path} /index.html
-	file_server
+	handle_path /api/* {
+		reverse_proxy api:3001
+	}
 
-	@assets path /assets/*
-	header @assets Cache-Control "public, max-age=31536000, immutable"
+	handle {
+		root * /srv/admin
+		encode gzip zstd
+		try_files {path} /index.html
+		file_server
 
-	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		X-Content-Type-Options "nosniff"
-		X-Frame-Options "DENY"
-		Referrer-Policy "strict-origin-when-cross-origin"
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+
+		header {
+			Strict-Transport-Security "max-age=31536000; includeSubDomains"
+			X-Content-Type-Options "nosniff"
+			X-Frame-Options "DENY"
+			Referrer-Policy "strict-origin-when-cross-origin"
+		}
 	}
 }
 
-# ── Backend API ──────────────────────────────────────────────────────
+# ── Backend API directo ──────────────────────────────────────────────
+# WebSockets de B7 (mesas multi-terminal) pasan por aquí. Caddy detecta
+# el Upgrade header y proxea WS transparentemente.
 api.mipiacetpv.tech {
 	encode gzip zstd
-
-	# WebSockets de B7 (mesas multi-terminal): pasan por aquí. Caddy
-	# detecta el Upgrade header y proxea WS transparentemente.
-	reverse_proxy api:3001 {
-		header_up Host {host}
-		header_up X-Real-IP {remote_host}
-		header_up X-Forwarded-For {remote_host}
-		header_up X-Forwarded-Proto {scheme}
-	}
+	reverse_proxy api:3001
 
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"

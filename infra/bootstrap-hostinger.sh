@@ -48,6 +48,17 @@ if ! docker compose version >/dev/null 2>&1; then
   fail "Docker compose v2 no disponible. ¿Instalación de docker antigua?"
 fi
 
+# ─── 1.5. Liberar puerto 80 si hay nginx system corriendo ────────
+# El template Ubuntu 24.04 LTS de Hostinger viene con nginx pre-instalado
+# y activo bindeando 0.0.0.0:80 → Caddy no puede arrancar
+# (`address already in use`). Hotfix post-deploy 2026-05-18.
+if systemctl is-active --quiet nginx 2>/dev/null; then
+  warn "nginx system activo en puerto 80, parando para que Caddy pueda usarlo…"
+  systemctl stop nginx
+  systemctl disable nginx
+  log "nginx system parado y deshabilitado."
+fi
+
 # ─── 2. Repo ────────────────────────────────────────────────────────
 if [ ! -d "$REPO_DIR/.git" ]; then
   log "Clonando $REPO_URL en $REPO_DIR…"

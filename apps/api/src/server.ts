@@ -160,7 +160,7 @@ async function main() {
   process.on("SIGTERM", close);
 
   try {
-    await app.listen({ port: env.PORT, host: "127.0.0.1" });
+    await app.listen({ port: env.PORT, host: env.HOST });
   } catch (err) {
     app.log.error(err);
     process.exit(1);

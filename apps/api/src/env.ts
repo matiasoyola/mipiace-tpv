@@ -4,7 +4,7 @@ import { z } from "zod";
 // variable nueva pasa primero por aquí; el resto del código sólo importa
 // `env`, nunca `process.env` directamente.
 
-const Schema = z.object({
+export const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 
   // ── Base de datos / Redis ──────────────────────────────────────────
@@ -13,6 +13,11 @@ const Schema = z.object({
 
   // ── HTTP ───────────────────────────────────────────────────────────
   PORT: z.coerce.number().int().positive().default(3001),
+  // En desarrollo, Fastify escucha sólo en loopback (127.0.0.1) para no
+  // exponer el API en la LAN. En producción Docker hay que ponerlo a
+  // 0.0.0.0 (vía env del compose) para que Caddy lo alcance dentro del
+  // bridge network. Hotfix post-deploy 2026-05-18.
+  HOST: z.string().default("127.0.0.1"),
   CORS_ORIGINS: z
     .string()
     .default("http://localhost:5173,http://localhost:5174,http://localhost:5175")
@@ -59,7 +64,15 @@ const Schema = z.object({
   // password reset). En NODE_ENV=development se aceptan vacíos y el
   // EmailSender cae al ConsoleEmailSender (log a stdout).
   SMTP_HOST: z.string().optional(),
-  SMTP_PORT: z.coerce.number().int().positive().optional(),
+  // Docker Compose interpola `${SMTP_PORT}` como string vacío cuando la
+  // var no está definida en el `.env.production`. Zod `.coerce.number()`
+  // convierte `""` a `0`, que falla `.positive()` → API no arranca. El
+  // preprocess normaliza `""` a `undefined` antes de la coerción.
+  // Hotfix post-deploy 2026-05-18.
+  SMTP_PORT: z.preprocess(
+    (v) => (v === "" || v === undefined ? undefined : v),
+    z.coerce.number().int().positive().optional(),
+  ),
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
   SMTP_FROM: z.string().optional(),
@@ -97,11 +110,11 @@ const Schema = z.object({
   SUPER_ADMIN_REPLY_TO_EMAIL: z.string().default("soporte@mipiacetpv.tech"),
 });
 
-export type AppEnv = z.infer<typeof Schema>;
+export type AppEnv = z.infer<typeof EnvSchema>;
 
 let cached: AppEnv | null = null;
 export function loadEnv(): AppEnv {
   if (cached) return cached;
-  cached = Schema.parse(process.env);
+  cached = EnvSchema.parse(process.env);
   return cached;
 }

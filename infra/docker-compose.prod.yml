@@ -81,6 +81,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3001
+      HOST: 0.0.0.0
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379
       CORS_ORIGINS: ${CORS_ORIGINS}
@@ -98,7 +99,7 @@ services:
       SUPER_ADMIN_FROM_EMAIL: ${SUPER_ADMIN_FROM_EMAIL}
       SUPER_ADMIN_REPLY_TO_EMAIL: ${SUPER_ADMIN_REPLY_TO_EMAIL}
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3001/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3001/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -120,6 +121,7 @@ services:
     command: ["pnpm", "--filter", "@mipiacetpv/api", "exec", "tsx", "src/workers/index.ts"]
     environment:
       NODE_ENV: production
+      HOST: 0.0.0.0
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
