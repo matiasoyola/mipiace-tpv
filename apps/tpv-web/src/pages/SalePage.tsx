@@ -11,7 +11,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bookmark,
+  Briefcase,
   CircleAlert,
+  Coffee,
   Package,
   Plus,
   RotateCw,
@@ -37,11 +39,13 @@ import {
 import {
   findByBarcode,
   fuzzySearch,
+  getCachedBusinessType,
   getCachedTenantId,
   loadCatalogFromCache,
   loadWildcards,
   productImageUrl,
   refreshCatalog,
+  type BusinessType,
   type CatalogProduct,
   type Wildcard,
 } from "../lib/catalog.js";
@@ -60,6 +64,20 @@ import {
 } from "../lib/modifiers.js";
 
 const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
+
+// B-Multi-Vertical SB3: icono del placeholder según vertical. Fallback
+// a Package (retail genérico) si el tenant aún no ha refrescado el
+// catálogo desde el deploy de SB3.
+const PLACEHOLDER_ICON_BY_TYPE: Record<BusinessType, typeof Package> = {
+  HOSPITALITY: Coffee,
+  RETAIL: Package,
+  SERVICES: Briefcase,
+};
+
+function placeholderIconFor(type: BusinessType | null): typeof Package {
+  if (!type) return Package;
+  return PLACEHOLDER_ICON_BY_TYPE[type] ?? Package;
+}
 
 interface HealthStatus {
   // B6 §3: el backend devuelve `level` + `reason` calculados (no
@@ -804,6 +822,11 @@ function SaleWorkspace({
   // catálogo. Si por alguna razón viene null (primer arranque y aún
   // sin sync), todos los tiles caen al placeholder — no rompe.
   const tenantId = getCachedTenantId();
+  // B-Multi-Vertical SB3: icono del placeholder según vertical del
+  // tenant. Cache que se llena al primer refresh del catálogo; si aún
+  // está vacío (sesión preexistente al deploy), Package es el default
+  // — mismo comportamiento que B-UX-Pulido F3.
+  const PlaceholderIcon = placeholderIconFor(getCachedBusinessType());
   return (
     <div className="flex-1 grid lg:grid-cols-[1fr_360px] gap-4 lg:gap-6 p-4 md:p-7 min-h-0">
       <section className="flex flex-col min-w-0 order-2 lg:order-1">
@@ -838,10 +861,11 @@ function SaleWorkspace({
                       className="w-full h-full object-cover"
                     />
                   ) : (
-                    // B-UX-Pulido F3: icono neutro (Package) en vez
-                    // de la taza de café — vale para librería, retail
-                    // y bar por igual sin sesgar la vertical.
-                    <Package
+                    // B-Multi-Vertical SB3: icono según vertical
+                    // (Coffee HOSPITALITY, Package RETAIL, Briefcase
+                    // SERVICES). Fallback Package para sesiones sin
+                    // businessType cacheado.
+                    <PlaceholderIcon
                       className="w-10 h-10 md:w-12 md:h-12 opacity-80"
                       strokeWidth={1.4}
                     />

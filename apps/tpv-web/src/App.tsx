@@ -14,6 +14,7 @@ import { apiWithCashier, ApiError } from "./api.js";
 import { TestModeBanner } from "./components/TestModeBanner.js";
 import { useDeviceBootstrap } from "./hooks/useDeviceBootstrap.js";
 import { useInactivityLogout } from "./hooks/useInactivityLogout.js";
+import { getCachedBusinessType } from "./lib/catalog.js";
 import { clearTestMode, isTestModeActive } from "./lib/test-mode.js";
 import { PairScreen } from "./pages/PairScreen.js";
 import { PinScreen, type CashierLoginResponse } from "./pages/PinScreen.js";
@@ -258,13 +259,23 @@ function TpvHome(props: {
   onLogoutCashier: () => void | Promise<void>;
   onCloseShift: () => void;
 }) {
-  const [hasTables, setHasTables] = useState<boolean | null>(null);
+  // B-Multi-Vertical SB3: el vertical manda sobre `hasTables`. Si el
+  // tenant es RETAIL o SERVICES no entramos al mapa aunque la tienda
+  // tenga mesas legacy (Thalia no debería tener, pero defensivo).
+  // Sólo HOSPITALITY (o un cliente sin businessType cacheado aún, p.ej.
+  // primera sesión post-deploy) pregunta a /tpv/tables.
+  const businessType = getCachedBusinessType();
+  const skipTables = businessType !== null && businessType !== "HOSPITALITY";
+  const [hasTables, setHasTables] = useState<boolean | null>(
+    skipTables ? false : null,
+  );
   const [view, setView] = useState<
     | { kind: "map" }
     | { kind: "sale"; tableContext: TableContext | null }
-  >({ kind: "map" });
+  >(skipTables ? { kind: "sale", tableContext: null } : { kind: "map" });
 
   useEffect(() => {
+    if (skipTables) return;
     let cancelled = false;
     apiWithCashier<{ tables: ApiTable[] }>("/tpv/tables")
       .then((res) => {
@@ -288,7 +299,7 @@ function TpvHome(props: {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [skipTables]);
 
   if (hasTables === null) {
     return (
