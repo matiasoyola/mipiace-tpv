@@ -89,12 +89,21 @@ mipiacetpv.com, www.mipiacetpv.com {
 		header @assets Cache-Control "public, max-age=31536000, immutable"
 
 		# Security headers
+		# B-Hardening A · S1 + S7:
+		#   - CSP defensiva: scripts/conexiones/imágenes acotadas al
+		#     propio dominio + el host de la API. 'unsafe-inline' sólo
+		#     en style-src porque Tailwind lo necesita. wss para los
+		#     WebSockets futuros de mesas multi-terminal.
+		#   - Permissions-Policy ampliada: bloquea cohort FLoC, deja
+		#     payment/usb/bluetooth en 'self' para futuras integraciones
+		#     de lector USB-HID / pago contactless.
 		header {
 			Strict-Transport-Security "max-age=31536000; includeSubDomains"
 			X-Content-Type-Options "nosniff"
 			X-Frame-Options "DENY"
 			Referrer-Policy "strict-origin-when-cross-origin"
-			Permissions-Policy "geolocation=(), microphone=(), camera=()"
+			Permissions-Policy "geolocation=(), microphone=(), camera=(), interest-cohort=(), payment=(self), usb=(self), bluetooth=(self)"
+			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https://api.mipiacetpv.com wss://api.mipiacetpv.com; font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
 		}
 	}
 }
@@ -123,11 +132,18 @@ admin.mipiacetpv.com {
 		@assets path /assets/*
 		header @assets Cache-Control "public, max-age=31536000, immutable"
 
+		# B-Hardening A · S1 + S7: CSP + Permissions-Policy ampliada
+		# en el admin. Mismo razonamiento que el bloque del TPV. El
+		# admin también consume la API directa (admin.mipiacetpv.com
+		# hace fetch a /api/* y a api.mipiacetpv.com en algunos flujos),
+		# por eso connect-src incluye ambos hosts.
 		header {
 			Strict-Transport-Security "max-age=31536000; includeSubDomains"
 			X-Content-Type-Options "nosniff"
 			X-Frame-Options "DENY"
 			Referrer-Policy "strict-origin-when-cross-origin"
+			Permissions-Policy "geolocation=(), microphone=(), camera=(), interest-cohort=(), payment=(self), usb=(self), bluetooth=(self)"
+			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https://api.mipiacetpv.com wss://api.mipiacetpv.com; font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
 		}
 	}
 }
