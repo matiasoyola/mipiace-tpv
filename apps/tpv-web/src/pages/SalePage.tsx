@@ -14,8 +14,10 @@ import {
   Briefcase,
   CircleAlert,
   Coffee,
+  Lock,
   Package,
   Plus,
+  PowerOff,
   RotateCw,
   Search,
   ShoppingBag,
@@ -426,6 +428,9 @@ export function SalePage(props: SalePageProps) {
               <Logo size={28} />
             </div>
           </div>
+          {/* Report D · Cerrar turno y Bloquear pasan a items del sidebar
+              con icono, mismo estilo que "Venta". Antes vivían como
+              texto pequeño abajo izquierda, casi invisibles. */}
           <nav className="space-y-1.5">
             <button
               title="Venta"
@@ -437,21 +442,29 @@ export function SalePage(props: SalePageProps) {
               />
               <span className="hidden xl:inline">Venta</span>
             </button>
-          </nav>
-          <div className="mt-auto hidden xl:block">
             <button
               onClick={() => setShowCloseShift(true)}
-              className="text-[12px] text-slate-400 hover:text-mipiace-coral-dark font-medium text-left w-full px-2 py-2"
+              title="Cerrar turno"
+              className="w-full h-12 flex items-center xl:gap-3 px-3 xl:px-4 rounded-xl text-slate-600 hover:bg-slate-50 text-[14.5px] font-medium justify-center xl:justify-start"
             >
-              Cerrar turno
+              <PowerOff
+                className="w-[19px] h-[19px] text-slate-500 shrink-0"
+                strokeWidth={2.1}
+              />
+              <span className="hidden xl:inline">Cerrar turno</span>
             </button>
             <button
               onClick={props.onLogoutCashier}
-              className="text-[12px] text-slate-400 hover:text-mipiace-coral-dark font-medium text-left w-full px-2 py-2"
+              title={`Bloquear (${props.cashierEmail})`}
+              className="w-full h-12 flex items-center xl:gap-3 px-3 xl:px-4 rounded-xl text-slate-600 hover:bg-slate-50 text-[14.5px] font-medium justify-center xl:justify-start"
             >
-              Bloquear ({props.cashierEmail})
+              <Lock
+                className="w-[19px] h-[19px] text-slate-500 shrink-0"
+                strokeWidth={2.1}
+              />
+              <span className="hidden xl:inline truncate">Bloquear</span>
             </button>
-          </div>
+          </nav>
         </aside>
 
         <div className="flex-1 flex flex-col min-w-0">
@@ -895,44 +908,26 @@ function SaleWorkspace({
             Línea libre
           </button>
         </div>
-        <div className="grid grid-cols-4 gap-2 md:gap-3 mt-auto">
-          <button
-            onClick={onClickDiscountGlobal}
-            className="h-12 md:h-14 bg-mipiace-stone hover:bg-slate-100 rounded-2xl flex items-center justify-center gap-2 text-[13px] md:text-[14px] font-medium text-mipiace-ink"
-          >
-            <span>Descuento</span>
-          </button>
-          <button
-            onClick={onClickNotes}
-            className="h-12 md:h-14 bg-mipiace-stone hover:bg-slate-100 rounded-2xl flex items-center justify-center gap-2 text-[13px] md:text-[14px] font-medium text-mipiace-ink"
-          >
-            <span>Nota{notes ? " ●" : ""}</span>
-          </button>
-          <button
-            onClick={onClickContact}
-            className="h-12 md:h-14 bg-mipiace-stone hover:bg-slate-100 rounded-2xl flex items-center justify-center gap-2 text-[13px] md:text-[14px] font-medium text-mipiace-ink truncate"
-          >
-            <span className="truncate">
-              {contact ? `Cliente: ${contact.name.split(" ")[0]}` : "Cliente"}
-            </span>
-          </button>
-          <button
-            onClick={onCancel}
-            className="h-12 md:h-14 bg-mipiace-stone hover:bg-slate-100 rounded-2xl flex items-center justify-center gap-2 text-[13px] md:text-[14px] font-medium text-mipiace-ink"
-          >
-            <span>Cancelar</span>
-          </button>
-        </div>
+        {/* Report D: la antigua fila de 4 botones (Descuento / Nota /
+            Cliente / Cancelar) se ha mudado al panel del ticket de la
+            derecha como chips secundarios agrupados con el resto de
+            acciones del ticket. El workspace izquierdo queda solo con
+            el grid de productos. */}
       </section>
 
-      {/* Mejora-01: panel del ticket en layout fijo con scroll interno
-          en las líneas. Total y Cobrar quedan SIEMPRE visibles abajo
-          (patrón sticky-footer estándar de TPVs Square/Lightspeed).
-          Antes (B5 §3.1) el panel crecía con el contenido y la PÁGINA
-          scrolleaba — con catálogos grandes el cajero tenía que
-          scrollear para llegar al botón Cobrar. */}
+      {/* Report A+D · Rediseño v2 del panel del ticket. Layout en bloques:
+          1. Header compacto (título + número, sin "unidades")
+          2. Chips de acciones secundarias del ticket (Cliente · Descuento
+             · Observaciones · Cancelar) — ya no viven en el workspace
+             izquierdo, son parte del contexto del ticket.
+          3. Total grande + Guardar/Cobrar — arriba (Report A rectifica
+             Mejora-01 sticky-bottom: el user prefiere ver el botón al
+             empezar y mantenerlo accesible sin que dependa del scroll).
+          4. Lista de líneas (flex-1, scroll interno).
+          5. Subtotal/IVA al pie como info detallada. */}
       <aside className="bg-white rounded-3xl border border-slate-200 flex flex-col order-1 lg:order-2 lg:h-full lg:overflow-hidden">
-        <div className="flex items-center justify-between px-5 md:px-7 pt-5 md:pt-6 pb-4 md:pb-5 border-b border-slate-100">
+        {/* 1 · Header */}
+        <div className="flex items-center justify-between px-5 md:px-7 pt-5 md:pt-6 pb-3 md:pb-4 border-b border-slate-100">
           <div className="min-w-0">
             <h2 className="text-[18px] md:text-[20px] font-semibold text-mipiace-ink tracking-tight truncate">
               {tableContext ? `Mesa ${tableContext.name}` : "Ticket de venta"}
@@ -944,10 +939,7 @@ function SaleWorkspace({
                   itemCount={totals.itemCount}
                 />
               ) : (
-                <>
-                  {totals.itemCount}{" "}
-                  {totals.itemCount === 1 ? "unidad" : "unidades"}
-                </>
+                <>Ticket · {totals.itemCount}</>
               )}
             </div>
           </div>
@@ -962,10 +954,79 @@ function SaleWorkspace({
             </button>
           )}
         </div>
-        {/* Mejora-01: la lista de líneas es la única zona que scrollea
-            interno al panel. flex-1 ocupa el espacio entre el header y
-            el footer; overflow-y-auto activa el scroll cuando la lista
-            es más alta que el espacio disponible. */}
+
+        {/* 2 · Chips de acciones del ticket. "Cancelar" en último
+             lugar con estilo destructivo más suave para no competir
+             visualmente con "Cobrar". */}
+        <div className="px-5 md:px-7 py-3 border-b border-slate-100 flex flex-wrap gap-1.5">
+          <button
+            onClick={onClickContact}
+            className="h-8 px-3 rounded-lg bg-mipiace-stone hover:bg-slate-100 text-[12.5px] font-medium text-mipiace-ink max-w-[180px] truncate"
+            title={contact ? `Cliente: ${contact.name}` : "Asignar cliente al ticket"}
+          >
+            {contact ? `Cliente: ${contact.name.split(" ")[0]}` : "Cliente"}
+          </button>
+          <button
+            onClick={onClickDiscountGlobal}
+            className="h-8 px-3 rounded-lg bg-mipiace-stone hover:bg-slate-100 text-[12.5px] font-medium text-mipiace-ink"
+            title="Aplicar descuento global al ticket"
+          >
+            Descuento
+          </button>
+          <button
+            onClick={onClickNotes}
+            className="h-8 px-3 rounded-lg bg-mipiace-stone hover:bg-slate-100 text-[12.5px] font-medium text-mipiace-ink"
+            title="Observaciones internas del ticket"
+          >
+            Observaciones{notes ? " ●" : ""}
+          </button>
+          <button
+            onClick={onCancel}
+            disabled={lines.length === 0 && !contact && !notes}
+            className="h-8 px-3 rounded-lg bg-red-50 hover:bg-red-100 text-[12.5px] font-medium text-red-700 disabled:opacity-50 disabled:cursor-not-allowed ml-auto"
+            title="Cancelar y vaciar el ticket"
+          >
+            Cancelar
+          </button>
+        </div>
+
+        {/* 3 · Total grande + acciones principales (Report A) */}
+        <div className="px-5 md:px-7 pt-4 md:pt-5 pb-5 md:pb-6 border-b border-slate-100">
+          <div className="flex items-baseline justify-between mb-3 md:mb-4">
+            <span className="text-[15px] md:text-[16px] font-semibold text-mipiace-ink">Total</span>
+            <span className="text-[28px] md:text-[34px] font-semibold text-mipiace-ink tabular-nums tracking-tight">
+              {formatEur(totals.total)}
+            </span>
+          </div>
+          <div
+            className={
+              tableContext
+                ? "grid grid-cols-1 gap-2"
+                : "grid grid-cols-[110px_1fr] md:grid-cols-[140px_1fr] gap-2"
+            }
+          >
+            {!tableContext && (
+              <button
+                onClick={onSuspend}
+                disabled={lines.length === 0}
+                className="h-12 md:h-14 border border-mipiace-coral/30 text-mipiace-coral-dark hover:bg-mipiace-coral-soft hover:border-mipiace-coral/50 disabled:opacity-50 font-medium text-[13.5px] md:text-[14.5px] gap-2 rounded-2xl flex items-center justify-center"
+              >
+                <Bookmark className="w-[15px] md:w-[16px] h-[15px] md:h-[16px]" strokeWidth={2.25} />
+                Guardar
+              </button>
+            )}
+            <button
+              onClick={onClickCheckout}
+              disabled={lines.length === 0}
+              className="h-12 md:h-14 bg-mipiace-coral hover:bg-mipiace-coral-dark disabled:opacity-50 text-white font-medium text-[14px] md:text-[15px] flex items-center justify-between px-4 md:px-5 rounded-2xl"
+            >
+              <span>Cobrar</span>
+              <span className="tabular-nums">{formatEur(totals.total)}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 4 · Lista de líneas (zona scrolleable) */}
         <div className="px-5 md:px-7 py-1 flex-1 min-h-0 overflow-y-auto">
           {lines.length === 0 ? (
             <div className="py-10 text-center text-[13px] text-slate-400">
@@ -1015,58 +1076,24 @@ function SaleWorkspace({
             </div>
           )}
         </div>
-        <div className="px-5 md:px-7 py-4 md:py-5 border-t border-slate-100 space-y-2">
-          <div className="flex justify-between text-[13.5px] md:text-[14px]">
+        {/* 5 · Subtotal / Descuento / IVA al fondo, sólo lectura. El
+             Total y los botones de cobrar/guardar ya están arriba. */}
+        <div className="px-5 md:px-7 py-3 md:py-4 border-t border-slate-100 space-y-1.5 shrink-0">
+          <div className="flex justify-between text-[12.5px] md:text-[13px]">
             <span className="text-slate-500">Subtotal</span>
-            <span className="text-mipiace-ink tabular-nums">{formatEur(totals.subtotalNet)}</span>
+            <span className="text-slate-700 tabular-nums">{formatEur(totals.subtotalNet)}</span>
           </div>
           {totals.discount > 0 && (
-            <div className="flex justify-between text-[13.5px] md:text-[14px]">
+            <div className="flex justify-between text-[12.5px] md:text-[13px]">
               <span className="text-slate-500">Descuento</span>
               <span className="text-mipiace-coral tabular-nums font-medium">
                 −{formatEur(totals.discount)}
               </span>
             </div>
           )}
-          <div className="flex justify-between text-[13.5px] md:text-[14px]">
+          <div className="flex justify-between text-[12.5px] md:text-[13px]">
             <span className="text-slate-500">IVA</span>
-            <span className="text-mipiace-ink tabular-nums">{formatEur(totals.tax)}</span>
-          </div>
-        </div>
-        <div className="px-5 md:px-7 pt-4 md:pt-5 pb-5 md:pb-6 border-t border-slate-200">
-          <div className="flex items-baseline justify-between mb-4 md:mb-5">
-            <span className="text-[17px] md:text-[18px] font-semibold text-mipiace-ink">Total</span>
-            <span className="text-[30px] md:text-[36px] font-semibold text-mipiace-ink tabular-nums tracking-tight">
-              {formatEur(totals.total)}
-            </span>
-          </div>
-          <div
-            className={
-              tableContext
-                ? "grid grid-cols-1 gap-2 md:gap-3"
-                : "grid grid-cols-[120px_1fr] md:grid-cols-[160px_1fr] gap-2 md:gap-3"
-            }
-          >
-            {/* En modo mesa, "Suspender" no aplica: la mesa abierta ya
-                es "venta suspendida" por naturaleza (bar.md §4.4). */}
-            {!tableContext && (
-              <button
-                onClick={onSuspend}
-                disabled={lines.length === 0}
-                className="h-14 md:h-16 border border-mipiace-coral/30 text-mipiace-coral-dark hover:bg-mipiace-coral-soft hover:border-mipiace-coral/50 disabled:opacity-50 font-medium text-[14px] md:text-[15px] gap-2 rounded-2xl flex items-center justify-center"
-              >
-                <Bookmark className="w-[16px] md:w-[17px] h-[16px] md:h-[17px]" strokeWidth={2.25} />
-                Guardar
-              </button>
-            )}
-            <button
-              onClick={onClickCheckout}
-              disabled={lines.length === 0}
-              className="h-14 md:h-16 bg-mipiace-coral hover:bg-mipiace-coral-dark disabled:opacity-50 text-white font-medium text-[14px] md:text-[15px] flex items-center justify-between px-4 md:px-5 rounded-2xl"
-            >
-              <span>Cobrar</span>
-              <span className="tabular-nums">{formatEur(totals.total)}</span>
-            </button>
+            <span className="text-slate-700 tabular-nums">{formatEur(totals.tax)}</span>
           </div>
         </div>
       </aside>
@@ -1227,13 +1254,13 @@ function NotesSheet({
 }) {
   const [text, setText] = useState(value);
   return (
-    <SheetWrap onClose={onClose} title="Notas de venta">
+    <SheetWrap onClose={onClose} title="Observaciones del ticket">
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
         rows={5}
         className="w-full px-3.5 py-2.5 rounded-xl bg-mipiace-stone border border-transparent text-[14px] focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none"
-        placeholder="Comentarios visibles en el ticket impreso y en Holded."
+        placeholder="Observaciones internas (cliente alérgico, reserva pendiente, instrucciones de cocina, etc.). Visibles en el ticket impreso y en Holded."
       />
       <div className="flex gap-2.5 mt-5">
         <button
@@ -1246,7 +1273,7 @@ function NotesSheet({
           onClick={() => onSave(text)}
           className="flex-1 h-12 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[14px] font-medium"
         >
-          Guardar nota
+          Guardar observaciones
         </button>
       </div>
     </SheetWrap>
