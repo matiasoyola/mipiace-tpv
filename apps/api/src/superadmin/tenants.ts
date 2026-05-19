@@ -60,6 +60,7 @@ function serializeDraftTenant(t: {
   plan: string | null;
   fiscalProfile: Prisma.JsonValue;
   onboardingState: "DRAFT" | "ACTIVE";
+  businessType: "HOSPITALITY" | "RETAIL" | "SERVICES";
   createdAt: Date;
 }) {
   return {
@@ -69,6 +70,7 @@ function serializeDraftTenant(t: {
     fiscalProfile: t.fiscalProfile,
     fiscalNif: fiscalNifFromProfile(t.fiscalProfile),
     onboardingState: t.onboardingState,
+    businessType: t.businessType,
     createdAt: t.createdAt.toISOString(),
   };
 }
@@ -241,6 +243,7 @@ export async function registerSuperAdminTenantsRoutes(
             plan: t.plan,
             onboardingState: t.onboardingState,
             onboardingReady,
+            businessType: t.businessType,
             metrics,
           };
         }),
@@ -325,6 +328,7 @@ export async function registerSuperAdminTenantsRoutes(
         fiscalNif: fiscalNifFromProfile(tenant.fiscalProfile),
         plan: tenant.plan,
         onboardingState: tenant.onboardingState,
+        businessType: tenant.businessType,
         holdedConnected: tenant.holdedApiKeyCiphertext != null,
         holdedAuthMode: tenant.holdedAuthMode,
         initialSyncStatus: tenant.initialSyncStatus,
@@ -390,6 +394,13 @@ export async function registerSuperAdminTenantsRoutes(
             // no coincide con la legal.
             legalName: { type: "string", minLength: 1, maxLength: 200 },
             plan: { type: "string", maxLength: 32 },
+            // B-Multi-Vertical: vertical operativo del tenant. Si no se
+            // pasa, default RETAIL (ver schema.prisma). El super-admin
+            // puede editarlo después desde el detalle.
+            businessType: {
+              type: "string",
+              enum: ["HOSPITALITY", "RETAIL", "SERVICES"],
+            },
           },
         },
       },
@@ -400,6 +411,7 @@ export async function registerSuperAdminTenantsRoutes(
         taxId?: string;
         legalName?: string;
         plan?: string;
+        businessType?: "HOSPITALITY" | "RETAIL" | "SERVICES";
       };
       const ctx = request.superAdmin!;
       const env = loadEnv();
@@ -526,6 +538,9 @@ export async function registerSuperAdminTenantsRoutes(
             fiscalProfile: fiscalProfile as Prisma.InputJsonValue,
             onboardingState: "DRAFT",
             initialSyncStatus: "PENDING",
+            // B-Multi-Vertical: si no viene en el body, el default
+            // del schema (RETAIL) se aplica automáticamente.
+            ...(body.businessType ? { businessType: body.businessType } : {}),
           },
         });
         const signals = extractRequestSignals(request);
@@ -594,6 +609,13 @@ export async function registerSuperAdminTenantsRoutes(
                 address: { type: "string", maxLength: 300 },
               },
             },
+            // B-Multi-Vertical: el super-admin puede cambiar el
+            // vertical de un tenant existente (p. ej. si Thalia
+            // se creó como RETAIL pero quisiéramos forzar HOSPITALITY).
+            businessType: {
+              type: "string",
+              enum: ["HOSPITALITY", "RETAIL", "SERVICES"],
+            },
           },
         },
       },
@@ -604,6 +626,7 @@ export async function registerSuperAdminTenantsRoutes(
         name?: string;
         plan?: string;
         fiscalProfile?: { legalName?: string; nif?: string; address?: string };
+        businessType?: "HOSPITALITY" | "RETAIL" | "SERVICES";
       };
       const ctx = request.superAdmin!;
       const prisma = getPrisma();
@@ -664,6 +687,10 @@ export async function registerSuperAdminTenantsRoutes(
         merged.source = "super_admin_update";
         changes.fiscalProfile = { before: current, after: merged };
         data.fiscalProfile = merged as Prisma.InputJsonValue;
+      }
+      if (body.businessType !== undefined && body.businessType !== tenant.businessType) {
+        changes.businessType = { before: tenant.businessType, after: body.businessType };
+        data.businessType = body.businessType;
       }
 
       if (Object.keys(changes).length === 0) {

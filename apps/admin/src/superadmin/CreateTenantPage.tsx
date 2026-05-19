@@ -1,10 +1,22 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, Eye, EyeOff, KeyRound } from "lucide-react";
+import {
+  ArrowRight,
+  Briefcase,
+  Coffee,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Package,
+} from "lucide-react";
 
 import { superApi, SuperAdminApiError } from "./api.js";
 import { SuperAdminShell } from "./SuperAdminShell.js";
-import type { CreateTenantDraftResponse } from "./types.js";
+import type { BusinessType, CreateTenantDraftResponse } from "./types.js";
+import {
+  BUSINESS_TYPE_DESCRIPTION,
+  BUSINESS_TYPE_LABEL,
+} from "./types.js";
 
 // B-OnboardingV2 · Frente 8.
 //
@@ -22,6 +34,10 @@ export function CreateTenantPage() {
   const [showKey, setShowKey] = useState(false);
   const [taxId, setTaxId] = useState("");
   const [legalName, setLegalName] = useState("");
+  // B-Multi-Vertical: default RETAIL (alineado con el default del
+  // schema). El implantador lo cambia si la cuenta es de hostelería
+  // o servicios. Afecta TPV (mapa de mesas, placeholder, modificadores).
+  const [businessType, setBusinessType] = useState<BusinessType>("RETAIL");
 
   async function onSubmit(e: React.FormEvent): Promise<void> {
     e.preventDefault();
@@ -34,6 +50,7 @@ export function CreateTenantPage() {
           holdedApiKey: holdedApiKey.trim(),
           taxId: taxId.trim() || undefined,
           legalName: legalName.trim() || undefined,
+          businessType,
         },
       });
       navigate(`/superadmin/tenants/${res.tenant.id}`, { replace: true });
@@ -43,6 +60,12 @@ export function CreateTenantPage() {
       setBusy(false);
     }
   }
+
+  const BUSINESS_ICONS: Record<BusinessType, typeof Coffee> = {
+    HOSPITALITY: Coffee,
+    RETAIL: Package,
+    SERVICES: Briefcase,
+  };
 
   return (
     <SuperAdminShell title="Conectar Holded">
@@ -87,6 +110,40 @@ export function CreateTenantPage() {
             La key se cifra con AES-GCM en BD.
           </p>
         </div>
+        {/* B-Multi-Vertical: 3 chips visuales para escoger el tipo de
+            negocio. Necesario para que el TPV pinte el placeholder
+            correcto y muestre/oculte el mapa de mesas. */}
+        <div>
+          <label className="block text-[12.5px] font-medium text-slate-700 mb-1.5">
+            Tipo de negocio <span className="text-red-500">*</span>
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            {(["HOSPITALITY", "RETAIL", "SERVICES"] as BusinessType[]).map((t) => {
+              const Icon = BUSINESS_ICONS[t];
+              const active = businessType === t;
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setBusinessType(t)}
+                  className={
+                    active
+                      ? "border-2 border-slate-900 bg-slate-50 rounded-lg p-3 text-left"
+                      : "border border-slate-200 hover:border-slate-400 bg-white rounded-lg p-3 text-left"
+                  }
+                >
+                  <Icon className="w-5 h-5 mb-1.5 text-slate-700" strokeWidth={1.7} />
+                  <div className="text-[13px] font-medium text-slate-900">
+                    {BUSINESS_TYPE_LABEL[t]}
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-0.5 leading-tight">
+                    {BUSINESS_TYPE_DESCRIPTION[t]}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
         <Field
           label="NIF / CIF / NIE (opcional)"
           value={taxId}
@@ -109,7 +166,7 @@ export function CreateTenantPage() {
           disabled={busy || !holdedApiKey.trim()}
           className="w-full h-11 bg-slate-900 text-white text-[14px] font-medium rounded-lg hover:bg-slate-800 disabled:opacity-50 inline-flex items-center justify-center gap-2"
         >
-          {busy ? "Validando con Holded…" : "Conectar y crear tenant DRAFT"}
+          {busy ? "Validando con Holded…" : "Crear cuenta"}
           {!busy && <ArrowRight className="w-4 h-4" />}
         </button>
       </form>

@@ -111,6 +111,23 @@ enum OnboardingState {
   ACTIVE
 }
 
+// B-Multi-Vertical: vertical de negocio del tenant. Define
+// comportamientos del TPV:
+//   - HOSPITALITY: mapa de mesas activo, modificadores tipo bar, placeholder
+//                  icono café (vertical original — Thalia, bares).
+//   - RETAIL:      sin mapa de mesas, modificadores opcionales (variantes
+//                  de producto), placeholder icono paquete (librería,
+//                  ropa, etc.).
+//   - SERVICES:    sin mapa de mesas, sin modificadores, placeholder
+//                  icono maletín (consultorías, talleres, peluquerías).
+// Default RETAIL porque al introducir el campo el piloto inicial
+// (Librería Thalia) ya es retail; los tenants futuros lo eligen al alta.
+enum BusinessType {
+  HOSPITALITY
+  RETAIL
+  SERVICES
+}
+
 // ── Multi-tenant raíz ─────────────────────────────────────────────────
 
 model Tenant {
@@ -184,6 +201,10 @@ model Tenant {
   // purga datos de prueba). El backfill de la migración pone ACTIVE en
   // todos los tenants existentes para no romper el flujo legacy.
   onboardingState                OnboardingState   @default(DRAFT) @map("onboarding_state")
+  // B-Multi-Vertical: vertical operativo del tenant. Default RETAIL
+  // para no asumir hostelería en tenants nuevos (el piloto inicial es
+  // librería). Editable desde la consola super-admin.
+  businessType                   BusinessType      @default(RETAIL) @map("business_type")
   createdAt                      DateTime          @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt                      DateTime          @updatedAt @map("updated_at") @db.Timestamptz()
 

@@ -23,7 +23,7 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { to: "/superadmin/tenants", label: "Tenants", icon: Building2 },
+  { to: "/superadmin/tenants", label: "Cuentas", icon: Building2 },
   { to: "/superadmin/audit", label: "Auditoría", icon: FileClock },
   { to: "/superadmin/me", label: "Mi cuenta", icon: Shield },
 ];

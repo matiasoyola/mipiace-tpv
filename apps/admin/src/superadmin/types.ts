@@ -11,6 +11,22 @@ export interface TenantMetrics {
 
 export type OnboardingState = "DRAFT" | "ACTIVE";
 
+// B-Multi-Vertical: tipo de negocio del tenant. Define comportamientos
+// del TPV (mapa de mesas, placeholder, modificadores).
+export type BusinessType = "HOSPITALITY" | "RETAIL" | "SERVICES";
+
+export const BUSINESS_TYPE_LABEL: Record<BusinessType, string> = {
+  HOSPITALITY: "Hostelería",
+  RETAIL: "Retail",
+  SERVICES: "Servicios",
+};
+
+export const BUSINESS_TYPE_DESCRIPTION: Record<BusinessType, string> = {
+  HOSPITALITY: "Bar, restaurante, cafetería. Mapa de mesas y modificadores.",
+  RETAIL: "Comercio, librería, tienda. Venta directa sin mesas.",
+  SERVICES: "Servicios profesionales, talleres. Lista de servicios.",
+};
+
 export interface TenantListItem {
   id: string;
   name: string;
@@ -26,6 +42,7 @@ export interface TenantListItem {
   // null cuando el tenant está ACTIVE (no aplica). En DRAFT, true si la
   // heurística onboardingHealth.ready es verde.
   onboardingReady: boolean | null;
+  businessType: BusinessType;
   metrics: TenantMetrics;
 }
 
@@ -83,6 +100,7 @@ export interface TenantDetail {
   fiscalNif: string | null;
   plan: string | null;
   onboardingState: OnboardingState;
+  businessType: BusinessType;
   holdedConnected: boolean;
   holdedAuthMode: string;
   initialSyncStatus: string;
@@ -105,6 +123,7 @@ export interface CreateTenantDraftResponse {
     fiscalProfile: unknown;
     fiscalNif: string | null;
     onboardingState: OnboardingState;
+    businessType: BusinessType;
     createdAt: string;
   };
   syncJobId: string;

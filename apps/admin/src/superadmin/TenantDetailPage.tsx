@@ -19,10 +19,12 @@ import { superApi, SuperAdminApiError } from "./api.js";
 import { SuperAdminShell } from "./SuperAdminShell.js";
 import type {
   ActivateTenantResponse,
+  BusinessType,
   ImpersonateResponse,
   TenantDetail,
   TestCashierTokenResponse,
 } from "./types.js";
+import { BUSINESS_TYPE_LABEL } from "./types.js";
 
 // B-OnboardingV2 · Frente 8 · Detalle de tenant con onboarding supervisado.
 //
@@ -81,7 +83,7 @@ export function TenantDetailPage() {
       });
       setShowBlockModal(false);
       setBlockReason("");
-      setActionMessage("Tenant bloqueado. Sus usuarios reciben 423 en su próxima request.");
+      setActionMessage("Cuenta bloqueada. Sus usuarios reciben 423 en su próxima request.");
       await reload();
     } catch (err) {
       setActionError(err instanceof SuperAdminApiError ? err.message : "Error inesperado");
@@ -100,7 +102,7 @@ export function TenantDetailPage() {
         method: "PATCH",
         body: { blocked: false },
       });
-      setActionMessage("Tenant desbloqueado.");
+      setActionMessage("Cuenta desbloqueada.");
       await reload();
     } catch (err) {
       setActionError(err instanceof SuperAdminApiError ? err.message : "Error inesperado");
@@ -111,7 +113,7 @@ export function TenantDetailPage() {
 
   async function onForceLogout(): Promise<void> {
     if (!id) return;
-    if (!confirm("Cerrará la sesión de TODOS los usuarios del tenant. ¿Continuar?")) return;
+    if (!confirm("Cerrará la sesión de TODOS los usuarios de la cuenta. ¿Continuar?")) return;
     setBusy(true);
     setActionError(null);
     setActionMessage(null);
@@ -236,7 +238,7 @@ export function TenantDetailPage() {
 
   if (loading || !tenant) {
     return (
-      <SuperAdminShell title="Tenant">
+      <SuperAdminShell title="Cuenta">
         {loading ? (
           <div className="text-slate-500 text-[13.5px]">Cargando…</div>
         ) : (
@@ -291,7 +293,7 @@ export function TenantDetailPage() {
         <div className="mb-5 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
           <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5" />
           <div className="flex-1">
-            <p className="font-medium text-red-900 text-[13.5px]">Tenant bloqueado</p>
+            <p className="font-medium text-red-900 text-[13.5px]">Cuenta bloqueada</p>
             <p className="text-[12.5px] text-red-700 mt-0.5">
               Razón: {tenant.blockedReason ?? "Sin razón"}. Bloqueado{" "}
               {new Date(tenant.blockedAt!).toLocaleString()}.
@@ -330,6 +332,16 @@ export function TenantDetailPage() {
           <div>
             <dt className="text-[11.5px] uppercase text-slate-500">Plan</dt>
             <dd className="text-slate-900">{tenant.plan ?? "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-[11.5px] uppercase text-slate-500">Tipo de negocio</dt>
+            <dd>
+              <BusinessTypeEditor
+                tenantId={tenant.id}
+                current={tenant.businessType}
+                onChange={(bt) => setTenant({ ...tenant, businessType: bt })}
+              />
+            </dd>
           </div>
           <div>
             <dt className="text-[11.5px] uppercase text-slate-500">Creado</dt>
@@ -385,7 +397,7 @@ export function TenantDetailPage() {
         </h3>
         {tenant.users.length === 0 ? (
           <p className="text-[12.5px] text-slate-500">
-            Sin usuarios reales. El propietario se crea al activar el tenant.
+            Sin usuarios reales. El propietario se crea al activar la cuenta.
           </p>
         ) : (
           <table className="w-full text-[13px]">
@@ -433,9 +445,9 @@ export function TenantDetailPage() {
 
       {showBlockModal && (
         <Modal onClose={() => setShowBlockModal(false)}>
-          <h3 className="font-semibold text-slate-900 mb-2">Bloquear tenant</h3>
+          <h3 className="font-semibold text-slate-900 mb-2">Bloquear cuenta</h3>
           <p className="text-[13px] text-slate-600 mb-4">
-            Todos los usuarios del tenant recibirán 423 Locked en sus
+            Todos los usuarios de la cuenta recibirán 423 Locked en sus
             requests. Indica la razón (queda registrada en auditoría).
           </p>
           <textarea
@@ -468,7 +480,7 @@ export function TenantDetailPage() {
 
       {showActivateModal && (
         <Modal onClose={() => setShowActivateModal(false)}>
-          <h3 className="font-semibold text-slate-900 mb-2">Activar tenant</h3>
+          <h3 className="font-semibold text-slate-900 mb-2">Activar cuenta</h3>
           <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-[12.5px] text-amber-900">
             Al confirmar: se creará la cuenta del propietario y se le enviará
             email con sus credenciales. Los tickets de prueba se borrarán y el
@@ -534,7 +546,7 @@ function StateHeader({ state }: { state: "DRAFT" | "ACTIVE" }) {
         </p>
         <p className="text-[12.5px] text-slate-600 mt-0.5">
           Sin propietario todavía. Tu equipo prueba el TPV con un cajero
-          técnico. Cuando todo pase, "Activar tenant" crea el OWNER y le
+          técnico. Cuando todo pase, "Activar cuenta" crea el OWNER y le
           envía el email.
         </p>
       </div>
@@ -558,7 +570,7 @@ function HealthPanel({
         <div>
           <h3 className="font-semibold text-slate-900">Validación de onboarding</h3>
           <p className="text-[12px] text-slate-500 mt-0.5">
-            Cuando todos los checks pasen, podrás activar el tenant.
+            Cuando todos los checks pasen, podrás activar la cuenta.
           </p>
         </div>
         <button
@@ -630,7 +642,7 @@ function TestPanel({
       <h3 className="font-semibold text-slate-900 mb-2">Modo prueba</h3>
       <p className="text-[12.5px] text-slate-500 mb-4">
         Abre el TPV con un cajero técnico interno. Los tickets generados
-        aquí NO se suben a Holded ni mandan email. Al activar el tenant se
+        aquí NO se suben a Holded ni mandan email. Al activar la cuenta se
         purgan.
       </p>
       <div className="flex items-center gap-3">
@@ -675,7 +687,7 @@ function ActivatePanel({
   const ready = tenant.onboardingHealth.ready;
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6">
-      <h3 className="font-semibold text-slate-900 mb-2">Activar tenant</h3>
+      <h3 className="font-semibold text-slate-900 mb-2">Activar cuenta</h3>
       <p className="text-[12.5px] text-slate-500 mb-4">
         Crea la cuenta del propietario y envía email con credenciales.
         Borra los datos de prueba. <strong>Irreversible.</strong>
@@ -686,7 +698,7 @@ function ActivatePanel({
         className="inline-flex items-center gap-2 h-10 px-4 bg-emerald-600 text-white rounded-lg text-[13px] font-medium hover:bg-emerald-700 disabled:opacity-40"
       >
         <Power className="w-4 h-4" />
-        Activar tenant
+        Activar cuenta
       </button>
       {!ready && (
         <p className="mt-3 text-[12px] text-slate-500">
@@ -847,6 +859,67 @@ function Modal({ children, onClose }: { children: React.ReactNode; onClose: () =
       >
         {children}
       </div>
+    </div>
+  );
+}
+
+// B-Multi-Vertical: editor inline del tipo de negocio. 3 chips
+// pequeños; click dispara PATCH /super-admin/tenants/:id con el
+// nuevo businessType. El componente padre actualiza el state local
+// vía onChange para evitar refetch completo.
+function BusinessTypeEditor({
+  tenantId,
+  current,
+  onChange,
+}: {
+  tenantId: string;
+  current: BusinessType;
+  onChange: (bt: BusinessType) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save(bt: BusinessType): Promise<void> {
+    if (bt === current || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await superApi(`/super-admin/tenants/${tenantId}`, {
+        method: "PATCH",
+        body: { businessType: bt },
+      });
+      onChange(bt);
+    } catch (e) {
+      setErr(e instanceof SuperAdminApiError ? e.message : "Error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex gap-1">
+        {(["HOSPITALITY", "RETAIL", "SERVICES"] as BusinessType[]).map((bt) => {
+          const active = bt === current;
+          return (
+            <button
+              key={bt}
+              type="button"
+              onClick={() => save(bt)}
+              disabled={busy}
+              className={
+                "px-2.5 py-1 rounded-md text-[12px] font-medium border transition-colors " +
+                (active
+                  ? "bg-slate-900 text-white border-slate-900"
+                  : "bg-white text-slate-700 border-slate-200 hover:border-slate-400 disabled:opacity-50")
+              }
+            >
+              {BUSINESS_TYPE_LABEL[bt]}
+            </button>
+          );
+        })}
+      </div>
+      {err && <div className="text-[11px] text-red-600">{err}</div>}
     </div>
   );
 }

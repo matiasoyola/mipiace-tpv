@@ -97,7 +97,7 @@ export function TenantsListPage() {
   }, [search, statusFilter]);
 
   return (
-    <SuperAdminShell title="Tenants">
+    <SuperAdminShell title="Cuentas">
       <div className="flex items-center gap-3 mb-6">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -122,7 +122,7 @@ export function TenantsListPage() {
           to="/superadmin/tenants/new"
           className="ml-auto inline-flex items-center gap-1.5 h-10 px-4 bg-slate-900 text-white rounded-lg text-[13px] font-medium hover:bg-slate-800"
         >
-          <Plus className="w-4 h-4" /> Crear tenant
+          <Plus className="w-4 h-4" /> Crear cuenta
         </Link>
       </div>
 
@@ -131,13 +131,13 @@ export function TenantsListPage() {
       ) : error ? (
         <div className="text-red-600 text-[13.5px]">{error}</div>
       ) : items.length === 0 ? (
-        <div className="text-slate-500 text-[13.5px]">No hay tenants.</div>
+        <div className="text-slate-500 text-[13.5px]">No hay cuentas.</div>
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <table className="w-full text-[13px]">
             <thead className="bg-slate-50 text-slate-600 text-[11.5px] uppercase tracking-wide">
               <tr>
-                <th className="text-left px-4 py-3 font-medium">Tenant</th>
+                <th className="text-left px-4 py-3 font-medium">Cuenta</th>
                 <th className="text-left px-4 py-3 font-medium">Onboarding</th>
                 <th className="text-left px-4 py-3 font-medium">Owner</th>
                 <th className="text-left px-4 py-3 font-medium">Holded</th>

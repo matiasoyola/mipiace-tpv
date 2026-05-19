@@ -6,8 +6,8 @@ import type { AuditLogItem, AuditLogResponse } from "./types.js";
 
 const ACTIONS = [
   { value: "", label: "Todas" },
-  { value: "create_tenant", label: "Crear tenant" },
-  { value: "update_tenant", label: "Editar tenant" },
+  { value: "create_tenant", label: "Crear cuenta" },
+  { value: "update_tenant", label: "Editar cuenta" },
   { value: "block_tenant", label: "Bloquear" },
   { value: "unblock_tenant", label: "Desbloquear" },
   { value: "force_logout", label: "Force logout" },
