@@ -105,6 +105,13 @@ export function TicketsHistoryPage(props: { onClose: () => void }) {
   // Filtros
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<string>("");
+  // Mejora-03: filtro por rango de fechas. Estado en formato
+  // YYYY-MM-DD (lo que da el <input type="date">). Vacío = sin filtro.
+  // El backend acepta `from` y `to` en formato ISO date-time; los
+  // convertimos al enviar para que `from` sea inicio del día (00:00)
+  // y `to` sea final del día (23:59:59) en la zona local del cajero.
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
   const [selected, setSelected] = useState<TicketRow | null>(null);
   const [refunding, setRefunding] = useState<TicketRow | null>(null);
 
@@ -115,6 +122,14 @@ export function TicketsHistoryPage(props: { onClose: () => void }) {
       const params = new URLSearchParams();
       if (q) params.set("q", q.trim());
       if (status) params.set("status", status);
+      if (dateFrom) {
+        // Inicio del día local → ISO UTC
+        params.set("from", new Date(`${dateFrom}T00:00:00`).toISOString());
+      }
+      if (dateTo) {
+        // Final del día local → ISO UTC
+        params.set("to", new Date(`${dateTo}T23:59:59.999`).toISOString());
+      }
       params.set("limit", "50");
       const res = await apiWithCashier<{ items: TicketRow[] }>(
         `/tickets?${params.toString()}`,
@@ -131,7 +146,7 @@ export function TicketsHistoryPage(props: { onClose: () => void }) {
     const t = setTimeout(refresh, 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, status]);
+  }, [q, status, dateFrom, dateTo]);
 
   return (
     <div className="fixed inset-0 z-40 bg-mipiace-stone flex flex-col font-sans">
@@ -180,6 +195,47 @@ export function TicketsHistoryPage(props: { onClose: () => void }) {
           active={status === "SYNC_FAILED"}
           onClick={() => setStatus("SYNC_FAILED")}
         />
+        {/* Mejora-03: rango de fechas. Separador visual + dos inputs
+            date nativos. Si solo se rellena uno, el otro queda
+            abierto (sin tope). Botón "Limpiar fechas" aparece sólo
+            cuando hay al menos un filtro activo. */}
+        <div className="h-7 w-px bg-slate-200 mx-1 shrink-0" />
+        <div className="flex items-center gap-1.5 shrink-0">
+          <label className="text-[12.5px] text-slate-500" htmlFor="ticketsHistoryFrom">
+            Desde
+          </label>
+          <input
+            id="ticketsHistoryFrom"
+            type="date"
+            value={dateFrom}
+            max={dateTo || undefined}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="h-10 px-2.5 rounded-xl bg-mipiace-stone border border-transparent text-[13px] focus:bg-white focus:border-mipiace-coral/30 focus:ring-1 focus:ring-mipiace-coral/30 focus:outline-none"
+          />
+          <label className="text-[12.5px] text-slate-500 ml-1" htmlFor="ticketsHistoryTo">
+            Hasta
+          </label>
+          <input
+            id="ticketsHistoryTo"
+            type="date"
+            value={dateTo}
+            min={dateFrom || undefined}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="h-10 px-2.5 rounded-xl bg-mipiace-stone border border-transparent text-[13px] focus:bg-white focus:border-mipiace-coral/30 focus:ring-1 focus:ring-mipiace-coral/30 focus:outline-none"
+          />
+          {(dateFrom || dateTo) && (
+            <button
+              onClick={() => {
+                setDateFrom("");
+                setDateTo("");
+              }}
+              className="h-10 px-2 text-[12px] rounded-xl text-slate-500 hover:bg-slate-100"
+              title="Limpiar filtro de fechas"
+            >
+              Limpiar
+            </button>
+          )}
+        </div>
       </div>
 
       <main className="flex-1 overflow-y-auto p-5 md:p-8 max-w-4xl w-full mx-auto">
