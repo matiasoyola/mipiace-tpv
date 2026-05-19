@@ -31,6 +31,17 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
       const q = request.query as { cursor?: string; limit?: number };
       const limit = q.limit ?? 500;
       const prisma = getPrisma();
+      // B-Multi-Vertical SB3: el TPV necesita saber el vertical para
+      // decidir si renderiza TableMapScreen y qué icono placeholder
+      // mostrar. Sólo lo leemos en la primera página (cursor vacío) para
+      // no pegarle a la BD en cada cursor de paginación; el TPV cachea
+      // el valor en localStorage al primer pull.
+      const tenant = q.cursor
+        ? null
+        : await prisma.tenant.findUnique({
+            where: { id: cashier.tid },
+            select: { businessType: true },
+          });
       const products = await prisma.product.findMany({
         where: {
           tenantId: cashier.tid,
@@ -81,6 +92,12 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
         // tenantId aquí para que el TPV no tenga que decodificar el
         // JWT en cliente (lo hace el backend en validación).
         tenantId: cashier.tid,
+        // Sólo presente en la primera página. El TPV lo cachea al primer
+        // pull (cursor vacío) y lo reusa hasta el siguiente refresh
+        // completo del catálogo. Si el tenant cambia de vertical desde
+        // el super-admin, basta con que el cajero refresque para que el
+        // valor caché se actualice.
+        ...(tenant ? { businessType: tenant.businessType } : {}),
       };
     },
   );

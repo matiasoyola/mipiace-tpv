@@ -28,6 +28,15 @@ const VERSION = 2;
 const LS_KEY = "mipiacetpv-catalog-fallback";
 const META_KEY = "mipiacetpv-catalog-meta";
 const TENANT_ID_KEY = "mipiacetpv-catalog-tenant";
+// B-Multi-Vertical SB3: vertical del tenant cacheado. El TPV lo usa
+// para decidir icono placeholder y si renderiza el mapa de mesas.
+const BUSINESS_TYPE_KEY = "mipiacetpv-catalog-business-type";
+
+export type BusinessType = "HOSPITALITY" | "RETAIL" | "SERVICES";
+
+function isBusinessType(v: unknown): v is BusinessType {
+  return v === "HOSPITALITY" || v === "RETAIL" || v === "SERVICES";
+}
 
 interface CatalogMeta {
   lastFetchedAt: string;
@@ -46,6 +55,15 @@ export function extFromImageMime(mime: string): string {
 
 export function getCachedTenantId(): string | null {
   return localStorage.getItem(TENANT_ID_KEY);
+}
+
+export function getCachedBusinessType(): BusinessType | null {
+  const raw = localStorage.getItem(BUSINESS_TYPE_KEY);
+  return isBusinessType(raw) ? raw : null;
+}
+
+export function setCachedBusinessType(value: BusinessType): void {
+  localStorage.setItem(BUSINESS_TYPE_KEY, value);
 }
 
 export function productImageUrl(p: CatalogProduct, tenantId: string): string | null {
@@ -130,22 +148,28 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
   const acc: CatalogProduct[] = [];
   let cursor: string | undefined;
   let lastTenantId: string | null = null;
+  let lastBusinessType: BusinessType | null = null;
   for (let safety = 0; safety < 200; safety++) {
     const res = await apiWithCashier<{
       items: CatalogProduct[];
       nextCursor: string | null;
       tenantId: string;
+      businessType?: BusinessType;
     }>(
       `/tpv/catalog/products${cursor ? `?cursor=${cursor}&limit=500` : "?limit=500"}`,
     );
     acc.push(...res.items);
     lastTenantId = res.tenantId;
+    if (res.businessType && isBusinessType(res.businessType)) {
+      lastBusinessType = res.businessType;
+    }
     if (!res.nextCursor) break;
     cursor = res.nextCursor;
   }
   await writeAll(acc);
   setCatalogMeta({ lastFetchedAt: new Date().toISOString(), count: acc.length });
   if (lastTenantId) localStorage.setItem(TENANT_ID_KEY, lastTenantId);
+  if (lastBusinessType) setCachedBusinessType(lastBusinessType);
   return acc;
 }
 

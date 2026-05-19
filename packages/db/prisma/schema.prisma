@@ -995,6 +995,11 @@ model ProductModifierGroup {
 model SuperAdminUser {
   id              String    @id @default(uuid()) @db.Uuid
   email           String    @unique
+  // B-Multi-Vertical SB4: nombre legible mostrado en el panel de
+  // gestión multi-admin. Nullable porque el super-admin original
+  // (Matías, creado vía CLI seed) no tenía nombre — backfill rellena
+  // con split_part(email, '@', 1).
+  name            String?   @db.VarChar(100)
   passwordHash    String    @map("password_hash")
   // Igual que User.tokenVersion: logout-everywhere lo bumpea, los
   // refresh tokens viejos pasan a ser inválidos sin tabla blacklist.
@@ -1005,6 +1010,15 @@ model SuperAdminUser {
   // Array de `{ hash, usedAt }` (mismo shape que User.twoFactorRecoveryCodes).
   recoveryCodes   Json?     @map("recovery_codes")
   lastLoginAt     DateTime? @map("last_login_at") @db.Timestamptz()
+  // B-Multi-Vertical SB4: super-admin invitado por otro super-admin
+  // empieza con password temporal. true → al primer login el front le
+  // pide cambiarla. Se pone false en cuanto se cambia.
+  mustChangePassword Boolean @default(false) @map("must_change_password")
+  // B-Multi-Vertical SB4: soft-delete. Preservamos el row para que la
+  // tabla `super_admin_audits` (que tiene FK Restrict sobre este
+  // modelo) mantenga el histórico aunque se "borre" al super-admin.
+  // El listado y la auth filtran por deletedAt IS NULL.
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz()
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
 

@@ -182,3 +182,22 @@ export interface SuperAdminMe {
   recoveryCodesRemaining: number;
   lastLoginAt: string | null;
 }
+
+// B-Multi-Vertical SB4: super-admin item del listado multi-admin.
+export interface SuperAdminItem {
+  id: string;
+  email: string;
+  name: string | null;
+  twoFactorEnabled: boolean;
+  lastLoginAt: string | null;
+  createdAt: string;
+}
+
+export interface SuperAdminsListResponse {
+  items: SuperAdminItem[];
+}
+
+export interface CreateSuperAdminResponse {
+  admin: SuperAdminItem;
+  tempPassword: string;
+}

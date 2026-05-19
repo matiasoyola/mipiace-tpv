@@ -12,9 +12,11 @@ import {
   Shield,
   ShieldAlert,
   ShoppingCart,
+  Users,
 } from "lucide-react";
 
 import { clearSuperAdminTokens } from "./api.js";
+import { CuentaSelector } from "./CuentaSelector.js";
 
 interface NavItem {
   to: string;
@@ -25,6 +27,8 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: "/superadmin/tenants", label: "Cuentas", icon: Building2 },
   { to: "/superadmin/audit", label: "Auditoría", icon: FileClock },
+  // B-Multi-Vertical SB4: panel multi super-admin.
+  { to: "/superadmin/admins", label: "Super-admins", icon: Users },
   { to: "/superadmin/me", label: "Mi cuenta", icon: Shield },
 ];
 
@@ -151,7 +155,13 @@ export function SuperAdminShell({
       </aside>
 
       <main className="flex-1 min-w-0 overflow-y-auto">
-        <header className="h-[64px] border-b border-slate-200 bg-white flex items-center px-8 sticky top-0 z-10">
+        {/* B-Multi-Vertical SB5: header bar con selector global. La
+            cabecera con el title de cada página queda debajo — el
+            selector es navegacional, el título contextual. */}
+        <div className="h-[52px] border-b border-slate-200 bg-white flex items-center px-8 sticky top-0 z-20">
+          <CuentaSelector />
+        </div>
+        <header className="h-[64px] border-b border-slate-200 bg-white flex items-center px-8 sticky top-[52px] z-10">
           <h1 className="text-[19px] font-semibold text-slate-900 tracking-tight">
             {title}
           </h1>

@@ -89,7 +89,11 @@ export async function registerSuperAdminAuthRoutes(
         message: "Email o contraseña incorrectos",
       };
 
-      if (!sa) {
+      // Soft-deleted super-admin: respondemos GENERIC para no filtrar
+      // existencia. registerRateLimitFailure se ejecuta igualmente para
+      // que el rate limit no diferencie un email "borrado" de uno
+      // inexistente.
+      if (!sa || sa.deletedAt != null) {
         await registerRateLimitFailure(rlKey);
         return reply.code(401).send(GENERIC);
       }
