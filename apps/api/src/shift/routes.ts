@@ -41,6 +41,17 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
         },
       });
       if (!shift) return { shift: null };
+      // Mejora-02: contador de tickets emitidos en este turno. Lo
+      // usa la PWA para mostrar "Ticket #N del turno" en el header
+      // del SalePage sin que el cajero tenga que abrir el historial.
+      // Filtramos por status NO-DRAFT (un ticket DRAFT todavía está
+      // a medio cobrar) y NO-VOIDED (anulados no cuentan como ventas).
+      const ticketsCount = await prisma.ticket.count({
+        where: {
+          shiftId: shift.id,
+          status: { notIn: ["DRAFT", "VOIDED"] },
+        },
+      });
       return {
         shift: {
           id: shift.id,
@@ -48,6 +59,7 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
           lastActivityAt: shift.lastActivityAt.toISOString(),
           cashOpening: shift.cashOpening.toString(),
           userId: shift.userId,
+          ticketsCount,
         },
       };
     },

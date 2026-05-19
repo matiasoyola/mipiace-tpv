@@ -209,6 +209,28 @@ export function SalePage(props: SalePageProps) {
 
   // ── Banner de salud Holded (polling cada 30s) ──────────────────────
   const [health, setHealth] = useState<HealthStatus | null>(null);
+
+  // Mejora-02: contador de tickets del turno actual. Lo refrescamos
+  // junto al polling de salud (cada 30s) para que tras cobrar un
+  // ticket nuevo aparezca el incremento sin recargar la página.
+  // El endpoint /shift/current devuelve `shift.ticketsCount` con el
+  // total NO-DRAFT NO-VOIDED del turno.
+  const [shiftTicketsCount, setShiftTicketsCount] = useState<number | null>(null);
+  const refreshShiftTicketsCount = useCallback(async () => {
+    try {
+      const { apiWithCashier } = await import("../api.js");
+      const res = await apiWithCashier<{
+        shift: { id: string; ticketsCount: number } | null;
+      }>("/shift/current");
+      if (res.shift) setShiftTicketsCount(res.shift.ticketsCount);
+    } catch {
+      /* tolera puntuales — el contador es informativo */
+    }
+  }, []);
+  useEffect(() => {
+    void refreshShiftTicketsCount();
+  }, [refreshShiftTicketsCount]);
+
   useEffect(() => {
     let cancelled = false;
     async function tick() {
@@ -219,7 +241,12 @@ export function SalePage(props: SalePageProps) {
       } catch {
         /* tolera puntuales */
       }
-      if (!cancelled) setTimeout(tick, 30_000);
+      if (!cancelled) {
+        // Refrescamos también el contador de tickets del turno en
+        // cada tick — barato comparado con el polling principal.
+        void refreshShiftTicketsCount();
+        setTimeout(tick, 30_000);
+      }
     }
     tick();
     return () => {
@@ -545,6 +572,7 @@ export function SalePage(props: SalePageProps) {
             notes={notes}
             totals={totals}
             cashierRole={props.cashierRole}
+            shiftTicketsCount={shiftTicketsCount}
             tableContext={props.tableContext ?? null}
             onBackToMap={props.onBackToMap ?? null}
             onClickProduct={addProduct}
@@ -799,6 +827,7 @@ function SaleWorkspace({
   notes,
   totals,
   cashierRole: _cashierRole,
+  shiftTicketsCount,
   tableContext,
   onBackToMap,
   onClickProduct,
@@ -819,6 +848,9 @@ function SaleWorkspace({
   notes: string;
   totals: ReturnType<typeof computeCart>;
   cashierRole: "MANAGER" | "CASHIER";
+  // Mejora-02: contador de tickets emitidos en el turno actual (no
+  // DRAFT, no VOIDED). null si aún no se ha resuelto el primer fetch.
+  shiftTicketsCount: number | null;
   tableContext: TableContext | null;
   onBackToMap: (() => void) | null;
   onClickProduct: (p: CatalogProduct) => void;
@@ -932,7 +964,12 @@ function SaleWorkspace({
             <h2 className="text-[18px] md:text-[20px] font-semibold text-mipiace-ink tracking-tight truncate">
               {tableContext ? `Mesa ${tableContext.name}` : "Ticket de venta"}
             </h2>
-            <div className="text-[12.5px] text-slate-500 mt-0.5">
+            {/* Mejora-02: contador de tickets del turno actual. Aparece
+                a la derecha del subtítulo como "Turno · #N" para que
+                el cajero vea de un vistazo en qué ticket va. shift
+                ticketsCount + 1 = el ticket que está a punto de emitir
+                ahora mismo (lo que tiene en pantalla). */}
+            <div className="text-[12.5px] text-slate-500 mt-0.5 flex items-center gap-1.5">
               {tableContext ? (
                 <TableContextLine
                   table={tableContext}
@@ -940,6 +977,14 @@ function SaleWorkspace({
                 />
               ) : (
                 <>Ticket · {totals.itemCount}</>
+              )}
+              {shiftTicketsCount !== null && (
+                <>
+                  <span className="text-slate-300">·</span>
+                  <span title={`${shiftTicketsCount} ticket${shiftTicketsCount === 1 ? "" : "s"} ya emitido${shiftTicketsCount === 1 ? "" : "s"} en este turno`}>
+                    Turno · #{shiftTicketsCount + 1}
+                  </span>
+                </>
               )}
             </div>
           </div>
