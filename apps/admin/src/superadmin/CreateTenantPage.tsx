@@ -68,7 +68,7 @@ export function CreateTenantPage() {
   };
 
   return (
-    <SuperAdminShell title="Conectar Holded">
+    <SuperAdminShell title="Crear cuenta">
       <form
         onSubmit={onSubmit}
         className="max-w-xl bg-white rounded-xl border border-slate-200 p-6 shadow-sm space-y-4"
@@ -106,8 +106,12 @@ export function CreateTenantPage() {
             </button>
           </div>
           <p className="text-[11.5px] text-slate-500 mt-1.5">
-            Validamos contra Holded antes de guardar (GET /invoicing/v1/warehouses).
-            La key se cifra con AES-GCM en BD.
+            {/* B-Hardening A · U6: lenguaje accesible para implantadores
+                no técnicos. La explicación técnica original queda en
+                el comentario para el desarrollador, pero el user del
+                admin lee algo humano. */}
+            Comprobamos que la API key funciona antes de guardar. Se
+            almacena cifrada en nuestra base de datos.
           </p>
         </div>
         {/* B-Multi-Vertical: 3 chips visuales para escoger el tipo de

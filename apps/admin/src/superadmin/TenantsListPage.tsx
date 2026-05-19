@@ -5,6 +5,7 @@ import { Plus, Search } from "lucide-react";
 import { superApi, SuperAdminApiError } from "./api.js";
 import { SuperAdminShell } from "./SuperAdminShell.js";
 import type { TenantListItem, TenantListResponse } from "./types.js";
+import { BUSINESS_TYPE_LABEL } from "./types.js";
 
 function StatusBadge({ state }: { state: "ok" | "warning" | "blocked" }) {
   const cls =
@@ -156,9 +157,19 @@ export function TenantsListPage() {
                     >
                       {t.name}
                     </Link>
-                    <div className="text-[11.5px] text-slate-500">
-                      {t.fiscalNif ?? "Sin NIF"}
-                      {t.plan ? ` · ${t.plan}` : ""}
+                    {/* B-Hardening A · U11: tipo de negocio como chip
+                        compacto bajo el nombre. Permite identificar
+                        de un vistazo cuáles son hostelería/retail/
+                        servicios sin añadir columna nueva. */}
+                    <div className="text-[11.5px] text-slate-500 flex items-center gap-1.5 mt-0.5">
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-medium text-[10.5px]">
+                        {BUSINESS_TYPE_LABEL[t.businessType]}
+                      </span>
+                      <span>·</span>
+                      <span>
+                        {t.fiscalNif ?? "Sin NIF"}
+                        {t.plan ? ` · ${t.plan}` : ""}
+                      </span>
                     </div>
                   </td>
                   <td className="px-4 py-3">

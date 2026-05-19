@@ -4,16 +4,33 @@ import { superApi, SuperAdminApiError } from "./api.js";
 import { SuperAdminShell } from "./SuperAdminShell.js";
 import type { AuditLogItem, AuditLogResponse } from "./types.js";
 
+// B-Hardening A · U9: traducción humana de los slugs de acción. La
+// columna "ACCIÓN" del listado pinta el slug crudo si no está en
+// este map (defensivo para acciones futuras). Mantenemos el slug en
+// el value del filtro porque es lo que la API espera.
 const ACTIONS = [
   { value: "", label: "Todas" },
   { value: "create_tenant", label: "Crear cuenta" },
+  { value: "create_tenant_draft", label: "Crear cuenta (borrador)" },
   { value: "update_tenant", label: "Editar cuenta" },
-  { value: "block_tenant", label: "Bloquear" },
-  { value: "unblock_tenant", label: "Desbloquear" },
-  { value: "force_logout", label: "Force logout" },
-  { value: "resync", label: "Resync" },
-  { value: "impersonate", label: "Impersonar" },
+  { value: "block_tenant", label: "Bloquear cuenta" },
+  { value: "unblock_tenant", label: "Desbloquear cuenta" },
+  { value: "activate_tenant", label: "Activar cuenta" },
+  { value: "force_logout", label: "Cerrar sesiones del tenant" },
+  { value: "resync", label: "Re-sincronizar" },
+  { value: "impersonate", label: "Impersonar OWNER" },
+  { value: "test_cashier_session", label: "Sesión cajero de prueba" },
+  { value: "create_super_admin", label: "Crear super-admin" },
+  { value: "delete_super_admin", label: "Eliminar super-admin" },
 ];
+
+export const ACTION_LABEL: Record<string, string> = Object.fromEntries(
+  ACTIONS.filter((a) => a.value).map((a) => [a.value, a.label]),
+);
+
+export function actionLabel(slug: string): string {
+  return ACTION_LABEL[slug] ?? slug;
+}
 
 export function AuditLogPage() {
   const [items, setItems] = useState<AuditLogItem[]>([]);
@@ -88,7 +105,7 @@ export function AuditLogPage() {
                     {new Date(row.createdAt).toLocaleString()}
                   </td>
                   <td className="px-4 py-3 font-medium text-slate-900">
-                    {row.action}
+                    {actionLabel(row.action)}
                   </td>
                   <td className="px-4 py-3 text-slate-600">
                     {row.superAdminEmail}
