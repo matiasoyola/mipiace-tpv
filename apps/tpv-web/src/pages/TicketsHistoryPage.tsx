@@ -53,7 +53,14 @@ interface TicketRow {
     | "PENDING_SYNC"
     | "SYNCED"
     | "SYNC_FAILED"
-    | "VOIDED";
+    | "VOIDED"
+    // B-TPV-Bugfix v1 · Bug-01: TEST es el status de los tickets
+    // generados por el cajero técnico en modo prueba (B-OnboardingV2).
+    // Estaba ausente aquí, lo que provocaba un TypeError al
+    // destructurar `map[status]` en StatusBadge y crasheaba toda la
+    // pantalla del historial cuando el tenant tenía algún ticket
+    // emitido en modo prueba.
+    | "TEST";
   total: number;
   totalTax: number;
   totalDiscount: number;
@@ -301,13 +308,20 @@ function StatusBadge({ status }: { status: TicketRow["status"] }) {
     SYNCED: { color: "bg-emerald-100 text-emerald-700", label: "Sincronizado" },
     SYNC_FAILED: { color: "bg-red-100 text-red-700", label: "Error" },
     VOIDED: { color: "bg-slate-100 text-slate-500", label: "Anulado" },
+    // B-TPV-Bugfix v1 · Bug-01: tickets de modo prueba. Amarillo
+    // pastel para distinguirlos visualmente de los reales sin
+    // alarmar (no es un error).
+    TEST: { color: "bg-amber-50 text-amber-700 border border-amber-200", label: "Prueba" },
   };
-  const { color, label } = map[status];
+  // Fallback defensivo: si el backend introduce un nuevo status que
+  // este front aún no conoce, mostramos el slug crudo en gris en
+  // lugar de crashear la pantalla entera con un TypeError.
+  const entry = map[status] ?? { color: "bg-slate-100 text-slate-500", label: status };
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10.5px] font-medium uppercase tracking-wider ${color}`}
+      className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10.5px] font-medium uppercase tracking-wider ${entry.color}`}
     >
-      {label}
+      {entry.label}
     </span>
   );
 }

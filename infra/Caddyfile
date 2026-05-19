@@ -43,6 +43,19 @@ mipiacetpv.com, www.mipiacetpv.com {
 		reverse_proxy api:3001
 	}
 
+	# B-TPV-Bugfix v1 · Bug-04: las URLs del PDF público del ticket
+	# (las que viajan en el QR / email al cliente final) son del tipo
+	# `https://mipiacetpv.com/tickets/<slug>/pdf`. Antes caían a la PWA
+	# del TPV (try_files → index.html → pantalla de pairing). Ahora se
+	# proxean al backend Fastify que sirve el endpoint público sin auth
+	# (ver apps/api/src/tickets/public-pdf-route.ts).
+	# Marca canónica .com en los QR sin tener que pasar por
+	# api.mipiacetpv.com (más fea para los clientes finales del bar).
+	@publicTicketPdf path_regexp ^/tickets/[0-9a-f]{16}/pdf$
+	handle @publicTicketPdf {
+		reverse_proxy api:3001
+	}
+
 	# B-ProductImages: imágenes de producto cacheadas localmente desde
 	# Holded. El worker (mipiacetpv-worker) descarga y escribe a
 	# /srv/product-images/<tenantId>/<productId>.<ext>. El path lleva

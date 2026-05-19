@@ -925,11 +925,13 @@ function SaleWorkspace({
         </div>
       </section>
 
-      {/* B5 §3.1: el panel del ticket se ajusta al contenido (no
-          sticky-bottom). Con pocas líneas el botón Cobrar queda cerca
-          del foco visual; si hay muchas, el panel crece y la PÁGINA
-          (no el panel) se scrollea normal. */}
-      <aside className="bg-white rounded-3xl border border-slate-200 flex flex-col order-1 lg:order-2 self-start">
+      {/* Mejora-01: panel del ticket en layout fijo con scroll interno
+          en las líneas. Total y Cobrar quedan SIEMPRE visibles abajo
+          (patrón sticky-footer estándar de TPVs Square/Lightspeed).
+          Antes (B5 §3.1) el panel crecía con el contenido y la PÁGINA
+          scrolleaba — con catálogos grandes el cajero tenía que
+          scrollear para llegar al botón Cobrar. */}
+      <aside className="bg-white rounded-3xl border border-slate-200 flex flex-col order-1 lg:order-2 lg:h-full lg:overflow-hidden">
         <div className="flex items-center justify-between px-5 md:px-7 pt-5 md:pt-6 pb-4 md:pb-5 border-b border-slate-100">
           <div className="min-w-0">
             <h2 className="text-[18px] md:text-[20px] font-semibold text-mipiace-ink tracking-tight truncate">
@@ -960,7 +962,11 @@ function SaleWorkspace({
             </button>
           )}
         </div>
-        <div className="px-5 md:px-7 py-1">
+        {/* Mejora-01: la lista de líneas es la única zona que scrollea
+            interno al panel. flex-1 ocupa el espacio entre el header y
+            el footer; overflow-y-auto activa el scroll cuando la lista
+            es más alta que el espacio disponible. */}
+        <div className="px-5 md:px-7 py-1 flex-1 min-h-0 overflow-y-auto">
           {lines.length === 0 ? (
             <div className="py-10 text-center text-[13px] text-slate-400">
               Pulsa un producto o escanea un código para empezar.

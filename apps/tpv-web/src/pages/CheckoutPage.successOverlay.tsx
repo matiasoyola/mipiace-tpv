@@ -178,6 +178,17 @@ export function SuccessOverlay({
             <div className="text-[13px] text-red-700">
               Holded rechazó el envío. El ticket queda en la bandeja de errores.
             </div>
+          ) : status === "TEST" ? (
+            // B-TPV-Bugfix v1 · Bug-02: en modo prueba el ticket
+            // nunca llega a SYNCED, así que el spinner anterior se
+            // quedaba indefinido dando sensación de proceso colgado.
+            // Mostramos un mensaje explícito y sin spinner.
+            <div className="text-[13px] text-amber-700 flex items-center justify-center gap-2">
+              <span className="inline-block px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10.5px] font-semibold uppercase tracking-wider">
+                Prueba
+              </span>
+              No se sube a Holded ni se envía email.
+            </div>
           ) : (
             <div className="text-[13px] text-slate-500 flex items-center justify-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin text-mipiace-coral" />
@@ -362,19 +373,36 @@ function ViewModal({
   onClose: () => void;
 }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  // B-TPV-Bugfix v1 · Bug-03: si renderTicketPdf lanza (datos
+  // inesperados, font no carga, lo que sea), antes la promesa
+  // quedaba rejected silenciosamente y el modal se quedaba con
+  // spinner permanente. Ahora capturamos y mostramos el error.
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     let url: string | null = null;
     (async () => {
-      const bytes = await renderTicketPdf(document);
-      if (cancelled) return;
-      // El compilador estrecha Uint8Array<ArrayBufferLike> y exige
-    // ArrayBuffer en BlobPart bajo lib DOM 5.x; clonamos a un
-    // Uint8Array recién creado para asegurar el tipo.
-    const blob = new Blob([new Uint8Array(bytes)], { type: "application/pdf" });
-      url = URL.createObjectURL(blob);
-      setBlobUrl(url);
+      try {
+        const bytes = await renderTicketPdf(document);
+        if (cancelled) return;
+        // El compilador estrecha Uint8Array<ArrayBufferLike> y exige
+        // ArrayBuffer en BlobPart bajo lib DOM 5.x; clonamos a un
+        // Uint8Array recién creado para asegurar el tipo.
+        const blob = new Blob([new Uint8Array(bytes)], { type: "application/pdf" });
+        url = URL.createObjectURL(blob);
+        setBlobUrl(url);
+      } catch (err) {
+        if (cancelled) return;
+        // Log a consola por si el desarrollador quiere debuggear
+        // y mensaje visible al cajero.
+        console.error("ViewModal · renderTicketPdf falló", err);
+        setError(
+          err instanceof Error
+            ? `No se pudo generar el preview: ${err.message}`
+            : "No se pudo generar el preview del ticket.",
+        );
+      }
     })();
     return () => {
       cancelled = true;
@@ -402,6 +430,16 @@ function ViewModal({
             type="application/pdf"
             className="w-full h-[70vh] rounded-xl"
           />
+        ) : error ? (
+          // Bug-03: el spinner ya no se queda infinito en caso de fallo.
+          <div className="h-[70vh] flex items-center justify-center p-6">
+            <div className="text-center max-w-sm">
+              <div className="text-[14px] font-medium text-red-700 mb-2">
+                No se pudo generar el preview
+              </div>
+              <div className="text-[12.5px] text-slate-500">{error}</div>
+            </div>
+          </div>
         ) : (
           <div className="h-[70vh] flex items-center justify-center">
             <Loader2 className="w-6 h-6 animate-spin text-mipiace-coral" />
