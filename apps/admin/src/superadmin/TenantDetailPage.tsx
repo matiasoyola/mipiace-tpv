@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 
 import { superApi, SuperAdminApiError } from "./api.js";
+import { humanizeError } from "./error-messages.js";
 import { SuperAdminShell } from "./SuperAdminShell.js";
 import type {
   ActivateTenantResponse,
@@ -25,6 +26,19 @@ import type {
   TestCashierTokenResponse,
 } from "./types.js";
 import { BUSINESS_TYPE_LABEL } from "./types.js";
+
+// B-Hardening B · U1: helper local para convertir una excepción de
+// superApi en mensaje humano. Si es SuperAdminApiError (lleva code +
+// message de la API), pasamos un objeto a humanizeError(); si es
+// cualquier otra cosa (Error genérico, string, etc.) caemos al
+// fallback "Error inesperado".
+function errToHuman(err: unknown): string {
+  if (err instanceof SuperAdminApiError) {
+    return humanizeError({ error: err.code, message: err.message });
+  }
+  if (err instanceof Error) return err.message;
+  return humanizeError(err);
+}
 
 // B-OnboardingV2 · Frente 8 · Detalle de tenant con onboarding supervisado.
 //
@@ -60,7 +74,7 @@ export function TenantDetailPage() {
       const res = await superApi<TenantDetail>(`/super-admin/tenants/${id}`);
       setTenant(res);
     } catch (err) {
-      setError(err instanceof SuperAdminApiError ? err.message : "Error inesperado");
+      setError(errToHuman(err));
     } finally {
       setLoading(false);
     }
@@ -86,7 +100,7 @@ export function TenantDetailPage() {
       setActionMessage("Cuenta bloqueada. Sus usuarios reciben 423 en su próxima request.");
       await reload();
     } catch (err) {
-      setActionError(err instanceof SuperAdminApiError ? err.message : "Error inesperado");
+      setActionError(errToHuman(err));
     } finally {
       setBusy(false);
     }
@@ -105,7 +119,7 @@ export function TenantDetailPage() {
       setActionMessage("Cuenta desbloqueada.");
       await reload();
     } catch (err) {
-      setActionError(err instanceof SuperAdminApiError ? err.message : "Error inesperado");
+      setActionError(errToHuman(err));
     } finally {
       setBusy(false);
     }
@@ -124,7 +138,7 @@ export function TenantDetailPage() {
       );
       setActionMessage(`Sesión invalidada para ${r.usersAffected} usuario(s).`);
     } catch (err) {
-      setActionError(err instanceof SuperAdminApiError ? err.message : "Error inesperado");
+      setActionError(errToHuman(err));
     } finally {
       setBusy(false);
     }
@@ -144,7 +158,7 @@ export function TenantDetailPage() {
       // Recargamos a los 2 s para reflejar el cambio de status.
       setTimeout(() => void reload(), 2000);
     } catch (err) {
-      setActionError(err instanceof SuperAdminApiError ? err.message : "Error inesperado");
+      setActionError(errToHuman(err));
     } finally {
       setBusy(false);
     }
@@ -168,7 +182,7 @@ export function TenantDetailPage() {
         `Sesión de impersonación abierta. Caduca el ${new Date(r.expiresAt).toLocaleTimeString()}.`,
       );
     } catch (err) {
-      setActionError(err instanceof SuperAdminApiError ? err.message : "Error inesperado");
+      setActionError(errToHuman(err));
     } finally {
       setBusy(false);
     }
@@ -193,7 +207,7 @@ export function TenantDetailPage() {
         `Modo prueba abierto en ${r.store.name} · ${r.register.name}. Caduca el ${new Date(r.expiresAt).toLocaleString()}.`,
       );
     } catch (err) {
-      setActionError(err instanceof SuperAdminApiError ? err.message : "Error inesperado");
+      setActionError(errToHuman(err));
     } finally {
       setBusy(false);
     }
@@ -219,7 +233,7 @@ export function TenantDetailPage() {
       setShowActivateModal(false);
       await reload();
     } catch (err) {
-      setActionError(err instanceof SuperAdminApiError ? err.message : "Error inesperado");
+      setActionError(errToHuman(err));
     } finally {
       setBusy(false);
     }
@@ -302,14 +316,36 @@ export function TenantDetailPage() {
         </div>
       )}
 
+      {/* B-Hardening B · U10: banners dismissables. Antes el banner
+          de error/success se quedaba clavado hasta que cambiabas de
+          página, lo que generaba ruido visual cuando ya habías
+          asimilado el mensaje. Ahora se pueden cerrar con X. */}
       {actionMessage && (
-        <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-900 text-[13px]">
-          {actionMessage}
+        <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-900 text-[13px] flex items-start gap-2">
+          <Check className="w-4 h-4 mt-0.5 flex-shrink-0 text-emerald-700" />
+          <span className="flex-1">{actionMessage}</span>
+          <button
+            type="button"
+            onClick={() => setActionMessage(null)}
+            aria-label="Cerrar"
+            className="text-emerald-700/70 hover:text-emerald-900 flex-shrink-0"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
       {actionError && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-900 text-[13px]">
-          {actionError}
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-900 text-[13px] flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-700" />
+          <span className="flex-1">{actionError}</span>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            aria-label="Cerrar"
+            className="text-red-700/70 hover:text-red-900 flex-shrink-0"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 
@@ -878,19 +914,27 @@ function BusinessTypeEditor({
 }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // B-Hardening B · U3: micro-toast inline para el editor. Antes el
+  // cambio era silencioso (la chip cambia de estilo y ya) — los
+  // implantadores no estaban seguros de si había guardado o no.
+  // Mostramos "✓ Guardado" durante 2.5s y luego limpiamos.
+  const [savedFlash, setSavedFlash] = useState<string | null>(null);
 
   async function save(bt: BusinessType): Promise<void> {
     if (bt === current || busy) return;
     setBusy(true);
     setErr(null);
+    setSavedFlash(null);
     try {
       await superApi(`/super-admin/tenants/${tenantId}`, {
         method: "PATCH",
         body: { businessType: bt },
       });
       onChange(bt);
+      setSavedFlash(`Tipo cambiado a ${BUSINESS_TYPE_LABEL[bt]}`);
+      window.setTimeout(() => setSavedFlash(null), 2500);
     } catch (e) {
-      setErr(e instanceof SuperAdminApiError ? e.message : "Error");
+      setErr(errToHuman(e));
     } finally {
       setBusy(false);
     }
@@ -920,6 +964,12 @@ function BusinessTypeEditor({
         })}
       </div>
       {err && <div className="text-[11px] text-red-600">{err}</div>}
+      {savedFlash && (
+        <div className="text-[11px] text-emerald-700 inline-flex items-center gap-1">
+          <Check className="w-3 h-3" />
+          {savedFlash}
+        </div>
+      )}
     </div>
   );
 }
