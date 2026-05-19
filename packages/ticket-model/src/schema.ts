@@ -15,10 +15,16 @@ export const TicketLineSchema = z.object({
 });
 
 export const TicketDocumentSchema = z.object({
+  // B-TPV-Bugfix v2 · Bug-05: aflojamos la cabecera fiscal porque
+  // en pilotos reales (Librería Thalia, etc.) el tenant llega con
+  // taxId vacío o address sin rellenar todavía. El renderer ya pinta
+  // "—" cuando viene vacío; antes el ticket entero no se generaba.
+  // legalName se mantiene min(1) porque siempre lo derivamos del
+  // tenant.name (no puede faltar).
   fiscal: z.object({
     legalName: z.string().min(1),
-    taxId: z.string().min(1),
-    address: z.string().min(1),
+    taxId: z.string(),
+    address: z.string(),
     phone: z.string().optional(),
   }),
   store: z.object({

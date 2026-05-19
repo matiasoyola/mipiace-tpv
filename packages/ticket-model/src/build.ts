@@ -28,15 +28,54 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+// B-TPV-Bugfix v2 · Bug-05: Holded a veces devuelve la dirección como
+// objeto estructurado (`{ address, city, postalCode, country, ... }`)
+// en lugar de string plano. Aceptamos cualquiera de los dos y dejamos
+// al builder la responsabilidad de serializar a una sola línea legible
+// antes de pasarlo al schema.
+export type FiscalAddressLike =
+  | string
+  | {
+      address?: string | null;
+      city?: string | null;
+      province?: string | null;
+      postalCode?: string | null;
+      country?: string | null;
+      [extra: string]: unknown;
+    }
+  | null
+  | undefined;
+
+export function serializeFiscalAddress(value: FiscalAddressLike): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value !== "object") return "";
+  const parts: string[] = [];
+  const street = (value as { address?: unknown }).address;
+  if (typeof street === "string" && street.trim()) parts.push(street.trim());
+  const cz: string[] = [];
+  const postalCode = (value as { postalCode?: unknown }).postalCode;
+  if (typeof postalCode === "string" && postalCode.trim()) cz.push(postalCode.trim());
+  const city = (value as { city?: unknown }).city;
+  if (typeof city === "string" && city.trim()) cz.push(city.trim());
+  if (cz.length) parts.push(cz.join(" "));
+  const province = (value as { province?: unknown }).province;
+  if (typeof province === "string" && province.trim()) parts.push(province.trim());
+  const country = (value as { country?: unknown }).country;
+  if (typeof country === "string" && country.trim()) parts.push(country.trim());
+  return parts.join(", ");
+}
+
 export interface BuildTenantInput {
   name: string;
   // fiscalProfile: jsonb libre del onboarding/holded. Esperamos legalName,
   // taxId, address, phone (todos opcionales pero los exigimos al
   // renderer porque un ticket sin cabecera fiscal no es ticket).
+  // address acepta string-o-object (Holded a veces devuelve estructurado).
   fiscalProfile?: {
     legalName?: string | null;
     taxId?: string | null;
-    address?: string | null;
+    address?: FiscalAddressLike;
     phone?: string | null;
   } | null;
 }
@@ -44,7 +83,7 @@ export interface BuildTenantInput {
 export interface BuildStoreInput {
   name: string;
   fiscalAddress?: {
-    address?: string | null;
+    address?: FiscalAddressLike;
     phone?: string | null;
   } | null;
 }
@@ -196,12 +235,14 @@ export function buildTicketDocument(input: BuildTicketDocumentInput): TicketDocu
     fiscal: {
       legalName: fiscal.legalName ?? input.tenant.name,
       taxId: fiscal.taxId ?? "",
-      address: fiscal.address ?? "",
+      // Bug-05: serializamos address por si llega como objeto Holded
+      // estructurado ({ address, city, postalCode, country, ... }).
+      address: serializeFiscalAddress(fiscal.address),
       phone: fiscal.phone ?? undefined,
     },
     store: {
       name: input.store.name,
-      address: input.store.fiscalAddress?.address ?? "",
+      address: serializeFiscalAddress(input.store.fiscalAddress?.address),
       phone: input.store.fiscalAddress?.phone ?? undefined,
     },
     ticket: {
