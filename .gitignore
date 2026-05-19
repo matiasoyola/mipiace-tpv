@@ -34,3 +34,4 @@ packages/db/node_modules/.prisma/
 # local como referencia. El histórico vive en GitHub; en nuestro repo
 # capturamos los hallazgos en docs/00-analisis-legacy.md.
 legacy/
+docs/manuales/

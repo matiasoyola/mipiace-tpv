@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bookmark,
   CircleAlert,
-  Coffee,
+  Package,
   Plus,
   RotateCw,
   Search,
@@ -487,11 +487,11 @@ export function SalePage(props: SalePageProps) {
               </button>
               <button
                 onClick={() => setOpenSheet({ kind: "suspended" })}
-                title="Ventas suspendidas"
+                title="Ventas pendientes"
                 className="h-12 md:h-14 px-3 md:px-5 rounded-2xl bg-mipiace-coral-soft border border-mipiace-coral/25 flex items-center gap-2 text-[13.5px] md:text-[14px] font-medium text-mipiace-coral-dark hover:bg-mipiace-coral/15"
               >
                 <Bookmark className="w-[17px] h-[17px]" strokeWidth={2.25} />
-                <span className="hidden sm:inline">Suspendidos ({getSuspendedCarts().length})</span>
+                <span className="hidden sm:inline">Pendientes ({getSuspendedCarts().length})</span>
               </button>
               <button
                 onClick={clearCart}
@@ -805,7 +805,7 @@ function SaleWorkspace({
   // sin sync), todos los tiles caen al placeholder — no rompe.
   const tenantId = getCachedTenantId();
   return (
-    <div className="flex-1 grid lg:grid-cols-[1fr_460px] gap-4 lg:gap-6 p-4 md:p-7 min-h-0">
+    <div className="flex-1 grid lg:grid-cols-[1fr_360px] gap-4 lg:gap-6 p-4 md:p-7 min-h-0">
       <section className="flex flex-col min-w-0 order-2 lg:order-1">
         <div className="flex items-center gap-2 mb-4 md:mb-6 overflow-x-auto">
           <button className="h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-mipiace-coral text-white text-[13.5px] md:text-[14px] font-medium flex items-center gap-2 shrink-0">
@@ -838,14 +838,22 @@ function SaleWorkspace({
                       className="w-full h-full object-cover"
                     />
                   ) : (
-                    <Coffee
+                    // B-UX-Pulido F3: icono neutro (Package) en vez
+                    // de la taza de café — vale para librería, retail
+                    // y bar por igual sin sesgar la vertical.
+                    <Package
                       className="w-10 h-10 md:w-12 md:h-12 opacity-80"
                       strokeWidth={1.4}
                     />
                   )}
                 </div>
                 <div className="px-3 md:px-3.5 py-2.5 md:py-3">
-                  <div className="text-[13px] md:text-[13.5px] font-medium text-mipiace-ink truncate">
+                  {/* B-UX-Pulido F3: dos líneas con line-clamp para
+                      catálogos con nombres largos (Thalia tiene
+                      productos tipo "Abre y descubre el espacio4"
+                      que se truncaban antes). min-h reserva siempre
+                      el alto de 2 líneas para que el grid no salte. */}
+                  <div className="text-[13px] md:text-[13.5px] font-medium text-mipiace-ink line-clamp-2 min-h-[2.6em] leading-tight">
                     {p.name}
                   </div>
                   <div className="text-[12.5px] md:text-[13px] text-slate-500 mt-0.5 tabular-nums">
@@ -1224,9 +1232,9 @@ function SuspendedSheet({
 }) {
   const [carts, setCarts] = useState<SuspendedCart[]>(getSuspendedCarts());
   return (
-    <SheetWrap onClose={onClose} title="Ventas suspendidas">
+    <SheetWrap onClose={onClose} title="Ventas pendientes">
       {carts.length === 0 ? (
-        <p className="text-[13px] text-slate-500">No hay ventas suspendidas.</p>
+        <p className="text-[13px] text-slate-500">No hay ventas pendientes.</p>
       ) : (
         <ul className="space-y-2">
           {carts.map((c) => (

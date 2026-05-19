@@ -261,18 +261,65 @@ export function CheckoutOverlay(props: {
                   onRemove={() => removePayment(i)}
                 />
               ))}
-              <div className="grid grid-cols-4 gap-2">
-                {(["CASH", "CARD", "BIZUM", "VOUCHER"] as Method[]).map((m) => (
+              {/* B-UX-Pulido F4: dos modos.
+                  - Modo simple (1 payment row): los 4 botones son
+                    excluyentes — cambian el método de la única row,
+                    NO añaden otra. Resuelve la confusión que veía el
+                    user: "si marco tarjeta, efectivo sigue activo".
+                  - Modo mixto (≥2 rows): vuelven a ser "+Método" como
+                    siempre y suman al cobro existente.
+                  El botón "Cobro mixto" abajo activa el modo mixto
+                  desde el modo simple. */}
+              {payments.length === 1 && payments[0] ? (
+                <>
+                  <div className="grid grid-cols-4 gap-2">
+                    {(["CASH", "CARD", "BIZUM", "VOUCHER"] as Method[]).map((m) => {
+                      const active = payments[0]!.method === m;
+                      return (
+                        <button
+                          key={m}
+                          onClick={() => setPayment(0, { method: m })}
+                          className={
+                            active
+                              ? "h-11 rounded-xl bg-mipiace-coral-soft border border-mipiace-coral text-[12.5px] font-medium text-mipiace-coral-dark flex items-center justify-center"
+                              : "h-11 rounded-xl bg-mipiace-stone hover:bg-slate-100 text-[12.5px] font-medium text-mipiace-ink flex items-center justify-center"
+                          }
+                        >
+                          {labelFor(m)}
+                        </button>
+                      );
+                    })}
+                  </div>
                   <button
-                    key={m}
-                    onClick={() => addPayment(m)}
-                    className="h-11 rounded-xl bg-mipiace-stone hover:bg-slate-100 text-[12.5px] font-medium text-mipiace-ink flex items-center justify-center gap-1.5"
+                    onClick={() => {
+                      // Modo mixto: añadimos una segunda row con el
+                      // resto pendiente y un método distinto al actual
+                      // (para que el cajero vea claro que son dos).
+                      const current = payments[0]!.method;
+                      const next: Method =
+                        current === "CASH" ? "CARD" : "CASH";
+                      addPayment(next);
+                    }}
+                    className="mt-2 h-9 w-full rounded-xl border border-dashed border-slate-300 hover:border-mipiace-coral/50 hover:bg-mipiace-coral-soft/40 text-[12px] font-medium text-slate-500 hover:text-mipiace-coral-dark flex items-center justify-center gap-1.5"
                   >
                     <Plus className="w-3 h-3" />
-                    {labelFor(m)}
+                    Cobro mixto (partir entre métodos)
                   </button>
-                ))}
-              </div>
+                </>
+              ) : (
+                <div className="grid grid-cols-4 gap-2">
+                  {(["CASH", "CARD", "BIZUM", "VOUCHER"] as Method[]).map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => addPayment(m)}
+                      className="h-11 rounded-xl bg-mipiace-stone hover:bg-slate-100 text-[12.5px] font-medium text-mipiace-ink flex items-center justify-center gap-1.5"
+                    >
+                      <Plus className="w-3 h-3" />
+                      {labelFor(m)}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -652,14 +699,19 @@ function Checkbox({
   hint?: string;
   right?: React.ReactNode;
 }) {
+  // El <label> propaga el click al <input type="checkbox"> anidado
+  // (comportamiento nativo), así que no necesitamos onClick redundante
+  // en el <span> "visual". El bug previo (B-UX-Pulido F0) era
+  // exactamente eso: span.onClick + input.onChange disparaban onChange
+  // dos veces y el estado se quedaba como estaba.
   return (
     <label className="flex items-center gap-3 p-3 bg-white rounded-xl cursor-pointer">
       <span
-        onClick={() => onChange(!checked)}
+        aria-hidden="true"
         className={
           checked
-            ? "w-4 h-4 rounded border-2 border-mipiace-coral bg-mipiace-coral flex items-center justify-center cursor-pointer"
-            : "w-4 h-4 rounded border-2 border-slate-300 cursor-pointer"
+            ? "w-4 h-4 rounded border-2 border-mipiace-coral bg-mipiace-coral flex items-center justify-center"
+            : "w-4 h-4 rounded border-2 border-slate-300"
         }
       >
         {checked && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
@@ -674,7 +726,14 @@ function Checkbox({
         <div className="text-[13.5px] text-mipiace-ink font-medium">{label}</div>
         {hint && <div className="text-[11.5px] text-slate-400">{hint}</div>}
       </div>
-      {right}
+      {/* stopPropagation evita que un click en el input de email
+          (cuando emailEnabled) propague al <label> y toggle el
+          checkbox al intentar escribir. */}
+      {right && (
+        <span onClick={(e) => e.stopPropagation()} className="flex-shrink-0">
+          {right}
+        </span>
+      )}
     </label>
   );
 }
