@@ -179,9 +179,14 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       });
       if (existing) {
         if (existing.tenantId !== cashier.tid) {
+          // B-Hardening A · S5: respuesta genérica que no revela
+          // existencia cross-tenant. El cliente legítimo nunca llega
+          // aquí porque genera UUID v4 por ticket. Si alguien intentara
+          // adivinar externalIds ajenos, el mensaje no le confirma
+          // que el UUID existe en otro tenant.
           return reply.code(409).send({
-            error: "EXTERNAL_ID_CONFLICT",
-            message: "Este externalId ya pertenece a otro tenant.",
+            error: "EXTERNAL_ID_TAKEN",
+            message: "externalId ya en uso. Genera uno nuevo y reintenta.",
           });
         }
         return reply.code(200).send({

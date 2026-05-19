@@ -1,9 +1,10 @@
 // Endpoint público GET /tickets/:publicSlug/pdf (B-Print fase 1, F3).
 //
-// Sin auth — la URL es una capability ~96 bits que viaja en el QR /
-// email. Si el slug no existe o el ticket está DRAFT (no emitido
-// todavía) devolvemos 404 — la misma respuesta para los dos casos
-// evita filtrar la existencia del slug a un escáner.
+// Sin auth — la URL es una capability de 64 bits (16 chars hex) que
+// viaja en el QR / email. Si el slug no existe o el ticket está DRAFT
+// (no emitido todavía) devolvemos 404 — la misma respuesta para los
+// dos casos evita filtrar la existencia del slug a un escáner.
+// B-Hardening A · S4: corregido el comentario que decía "~96 bits".
 //
 // Cache HTTP `private, max-age=3600` porque el PDF es el mismo todo
 // el tiempo y el cliente que lo abrió hace 30 min lo puede volver a
