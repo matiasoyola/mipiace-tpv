@@ -12,6 +12,7 @@ import {
   Shield,
   ShieldAlert,
   ShoppingCart,
+  Users,
 } from "lucide-react";
 
 import { clearSuperAdminTokens } from "./api.js";
@@ -26,6 +27,8 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: "/superadmin/tenants", label: "Cuentas", icon: Building2 },
   { to: "/superadmin/audit", label: "Auditoría", icon: FileClock },
+  // B-Multi-Vertical SB4: panel multi super-admin.
+  { to: "/superadmin/admins", label: "Super-admins", icon: Users },
   { to: "/superadmin/me", label: "Mi cuenta", icon: Shield },
 ];
 

@@ -46,12 +46,22 @@ export async function requireSuperAdmin(
   const prisma = getPrisma();
   const sa = await prisma.superAdminUser.findUnique({
     where: { id: payload.sub },
-    select: { id: true, tokenVersion: true },
+    select: { id: true, tokenVersion: true, deletedAt: true },
   });
   if (!sa) {
     reply
       .code(401)
       .send({ error: "UNAUTHENTICATED", message: "Cuenta super-admin no existe" });
+    return;
+  }
+  // B-Multi-Vertical SB4: super-admin soft-deleted (otro super-admin
+  // lo eliminó). El delete bumpea tokenVersion también, así que la
+  // siguiente request ya fallaría por tokenVersion. Este check es
+  // defensivo por si alguien restaura el row sin reactivar.
+  if (sa.deletedAt != null) {
+    reply
+      .code(401)
+      .send({ error: "UNAUTHENTICATED", message: "Cuenta super-admin desactivada" });
     return;
   }
   if (sa.tokenVersion !== payload.tv) {

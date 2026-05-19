@@ -12,6 +12,7 @@ import { SecurityPage } from "./pages/SecurityPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 import { StoreDetailPage, StoresPage } from "./pages/StoresPage.js";
 import { TicketsErrorsPage } from "./pages/TicketsErrorsPage.js";
+import { AdminsListPage } from "./superadmin/AdminsListPage.js";
 import { AuditLogPage } from "./superadmin/AuditLogPage.js";
 import { CreateTenantPage } from "./superadmin/CreateTenantPage.js";
 import { SuperAdminGate } from "./superadmin/SuperAdminGate.js";
@@ -82,6 +83,7 @@ export function App() {
         <Route path="/superadmin/tenants/new" element={<SuperAdminGate><CreateTenantPage /></SuperAdminGate>} />
         <Route path="/superadmin/tenants/:id" element={<SuperAdminGate><TenantDetailPage /></SuperAdminGate>} />
         <Route path="/superadmin/audit" element={<SuperAdminGate><AuditLogPage /></SuperAdminGate>} />
+        <Route path="/superadmin/admins" element={<SuperAdminGate><AdminsListPage /></SuperAdminGate>} />
         <Route path="/superadmin/me" element={<SuperAdminGate><SuperAdminMePage /></SuperAdminGate>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

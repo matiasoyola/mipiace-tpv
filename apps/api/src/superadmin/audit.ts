@@ -78,6 +78,19 @@ const ImpersonateMeta = Base.extend({
   asUserId: z.string(),
 });
 
+// B-Multi-Vertical SB4: super-admin invitado por otro super-admin.
+const CreateSuperAdminMeta = Base.extend({
+  targetEmail: z.string(),
+  targetName: z.string(),
+  targetSuperAdminId: z.string().uuid(),
+});
+
+// B-Multi-Vertical SB4: super-admin soft-deleted por otro super-admin.
+const DeleteSuperAdminMeta = Base.extend({
+  targetEmail: z.string(),
+  targetSuperAdminId: z.string().uuid(),
+});
+
 const META_SCHEMAS = {
   create_tenant: CreateTenantMeta,
   create_tenant_draft: CreateTenantDraftMeta,
@@ -89,6 +102,8 @@ const META_SCHEMAS = {
   impersonate: ImpersonateMeta,
   test_cashier_session: TestCashierSessionMeta,
   activate_tenant: ActivateTenantMeta,
+  create_super_admin: CreateSuperAdminMeta,
+  delete_super_admin: DeleteSuperAdminMeta,
 } as const;
 
 export type SuperAdminAction = keyof typeof META_SCHEMAS;
