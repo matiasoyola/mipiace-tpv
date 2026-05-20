@@ -185,6 +185,93 @@ export async function getProduct(
   );
 }
 
+// v1.2-Lite · Bug-Imagenes-Holded: el endpoint `/invoicing/v1/products`
+// (listado) NO devuelve campos de imagen en cuentas como Thalia (26
+// campos en raw, ninguno image/picture/photo/thumb/attach). El detalle
+// individual a veces sí los trae (patrón común en Holded). Este helper
+// dispara N llamadas al endpoint individual con concurrencia limitada y
+// devuelve un Map<holdedProductId, imageUrl|null> usando `extractImageUrl`
+// sobre cada detalle. Pensado para llamarse SÓLO sobre los productos
+// donde el listado ya devolvió null — sería desperdicio re-pinchar los
+// que ya traen URL desde la lista.
+export interface FetchProductImageDetailsOptions {
+  // Concurrencia máxima de llamadas en vuelo. 5 da ~25 req/s con
+  // latencia típica de 200ms, dentro de márgenes razonables sin libreria
+  // de token-bucket. Defaultea a 5 si no se pasa.
+  concurrency?: number;
+  // Callback opcional para warnings (mismo patrón que el resto del
+  // sync). Por defecto consola; en tests, mockeable.
+  onWarn?: (message: string, extra?: unknown) => void;
+}
+
+export interface FetchProductImageDetailResult {
+  // Productos cuyo detalle devolvió URL extraíble.
+  resolved: Map<string, string>;
+  // Productos sondeados que SIGUIERON sin URL en el detalle: candidatos
+  // a investigar (¿la cuenta usa otro endpoint? ¿attachments?).
+  stillEmpty: string[];
+  // Productos cuya petición al detalle falló (HTTP, red, etc.). El
+  // caller decide si reintenta en el siguiente sync; no propagamos para
+  // que un fallo aislado no aborte el backfill entero.
+  failed: Array<{ id: string; reason: string }>;
+}
+
+export async function fetchProductImageDetails(
+  client: HoldedClient,
+  holdedProductIds: readonly string[],
+  options: FetchProductImageDetailsOptions = {},
+): Promise<FetchProductImageDetailResult> {
+  const concurrency = Math.max(1, options.concurrency ?? 5);
+  const onWarn = options.onWarn ?? defaultWarn;
+  const resolved = new Map<string, string>();
+  const stillEmpty: string[] = [];
+  const failed: FetchProductImageDetailResult["failed"] = [];
+
+  // Cola simple con N workers. Sin librería externa: una promise pool
+  // basada en índice atómico es suficiente para 5-10 workers.
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    while (cursor < holdedProductIds.length) {
+      const idx = cursor++;
+      const id = holdedProductIds[idx];
+      if (!id) continue;
+      try {
+        const detail = await getProduct(client, id);
+        const url = extractImageUrl(detail);
+        if (url) {
+          resolved.set(id, url);
+        } else {
+          stillEmpty.push(id);
+          const unknownKeys = listUnrecognizedImageKeys(detail);
+          if (unknownKeys.length > 0) {
+            onWarn(
+              "producto sin imagen reconocida tras detalle, pero raw tiene claves image-like",
+              { holdedProductId: id, candidateKeys: unknownKeys },
+            );
+          }
+        }
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        failed.push({ id, reason });
+        onWarn("fetch detalle producto falló durante backfill imagen", {
+          holdedProductId: id,
+          error: reason,
+        });
+      }
+    }
+  }
+
+  const workers: Array<Promise<void>> = [];
+  for (let i = 0; i < concurrency; i += 1) workers.push(worker());
+  await Promise.all(workers);
+
+  return { resolved, stillEmpty, failed };
+}
+
+function defaultWarn(message: string, extra?: unknown): void {
+  console.warn(`[holded-client] ${message}`, extra ?? "");
+}
+
 // PUT /products/{id} y GET-back para validar (ADR-010).
 // Lanza HoldedSilentRejectError si el GET-back demuestra que Holded
 // descartó el campo. Usado por el script auto-SKU.

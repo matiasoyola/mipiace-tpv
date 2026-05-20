@@ -44,7 +44,11 @@ import {
 import { decryptSecret } from "../crypto.js";
 import { loadEnv } from "../env.js";
 import { runAutoSku, type AutoSkuResult } from "../onboarding/auto-sku.js";
-import { pickHoldedTaxKey, upsertContact } from "../onboarding/initial-sync.js";
+import {
+  backfillImagesFromDetail,
+  pickHoldedTaxKey,
+  upsertContact,
+} from "../onboarding/initial-sync.js";
 import { createTpvOtrosWildcards, type WildcardResult } from "../onboarding/tpv-otros.js";
 import { enqueueProductImageCache } from "../queues/product-image-cache.js";
 
@@ -63,6 +67,12 @@ export interface IncrementalSyncStats {
   // B-ProductImages: cuántos productos pasaron por enqueue del cache
   // de imagen porque su URL cambió o porque nunca se descargó.
   imageJobsEnqueued: number;
+  // v1.2-Lite Bug-Imagenes-Holded: productos cuyo imageUrl se rescató
+  // pinchando el endpoint individual `/products/{id}` porque el listado
+  // no incluyó el campo. Por tick incremental sólo se procesan los que
+  // siguen con imageUrl=NULL — no se re-pincha el catálogo entero.
+  productsImageBackfilled: number;
+  productsImageBackfillFailed: number;
   durationMs: number;
   errors: Array<{ step: string; message: string }>;
 }
@@ -81,6 +91,8 @@ function emptyStats(): IncrementalSyncStats {
     contactsSeen: 0,
     contactsOrphansMarked: 0,
     imageJobsEnqueued: 0,
+    productsImageBackfilled: 0,
+    productsImageBackfillFailed: 0,
     durationMs: 0,
     errors: [],
   };
@@ -235,6 +247,41 @@ export async function runIncrementalSync(
     // ── Comodines TPV-OTROS (idempotente) ───────────────────────────
     const wildcards = await createTpvOtrosWildcards({ tenantId, prisma, client, logger: log });
     mergeWildcards(stats, wildcards);
+
+    // ── Backfill de imageUrl desde el detalle (v1.2-Lite) ──────────
+    // Holded no expone campo de imagen en el listado de productos en
+    // algunas cuentas (Thalia: 0/966 en v1.1). Pinchamos el detalle
+    // individual SÓLO para los productos que tras este sync siguen con
+    // imageUrl=NULL. Los que ya tienen URL no se vuelven a pinchar —
+    // el coste por tick crece sólo con el número de productos sin foto.
+    // El backfill encola sus propios image-cache jobs porque imageMime
+    // queda en NULL y el flujo del worker lo recoge en la próxima pasada.
+    try {
+      const backfill = await backfillImagesFromDetail(prisma, tenantId, client, log);
+      stats.productsImageBackfilled = backfill.backfilled;
+      stats.productsImageBackfillFailed = backfill.failed;
+      if (backfill.backfilled > 0) {
+        // Los productos recién backfilleados tienen imageCachedAt=null
+        // (lo deja así backfillImagesFromDetail), así que los añadimos
+        // al set de cache-targets para que el siguiente bloque los
+        // encole. Releemos para no asumir IDs concretos.
+        const justBackfilled = await prisma.product.findMany({
+          where: {
+            tenantId,
+            imageUrl: { not: null },
+            imageCachedAt: null,
+          },
+          select: { id: true },
+        });
+        for (const p of justBackfilled) {
+          if (!imageCacheTargets.includes(p.id)) imageCacheTargets.push(p.id);
+        }
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      stats.errors.push({ step: "image-backfill", message });
+      log.warn("backfill imágenes incremental falló", { tenantId, message });
+    }
 
     // ── Imágenes de producto (cache asíncrono, B-ProductImages) ─────
     // Encolamos a Redis los productos con imagen nueva o URL cambiada.

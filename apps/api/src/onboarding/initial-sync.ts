@@ -7,12 +7,14 @@ import {
   ApiKeyClient,
   buildTaxRateResolver,
   extractImageUrl,
+  fetchProductImageDetails,
   iterateAllContacts,
   iterateAllProducts,
   iterateAllServices,
   listTaxes,
   listUnrecognizedImageKeys,
   listWarehouses,
+  type HoldedClient,
   type HoldedContact,
   type HoldedProduct,
   type HoldedService,
@@ -42,6 +44,13 @@ export interface SyncStats {
   // Visible en el admin (`initialSyncStats.imageJobsEnqueued`) para
   // que el propietario sepa que la descarga sigue activa en background.
   imageJobsEnqueued: number;
+  // v1.2-Lite Bug-Imagenes-Holded: productos cuyo imageUrl se rescató
+  // llamando al endpoint individual `/products/{id}` tras descubrir que
+  // el listado no incluye campos de imagen en algunas cuentas. Si tras
+  // un sync este contador queda en 0 y `productsCount` es alto, el
+  // tenant probablemente no tiene fotos cargadas en Holded.
+  productsImageBackfilled: number;
+  productsImageBackfillFailed: number;
   currentStep?: string;
   errors: Array<{ step: string; message: string }>;
 }
@@ -61,6 +70,8 @@ function emptyStats(): SyncStats {
     contactsCount: 0,
     contactPagesProcessed: 0,
     imageJobsEnqueued: 0,
+    productsImageBackfilled: 0,
+    productsImageBackfillFailed: 0,
     errors: [],
   };
 }
@@ -199,6 +210,17 @@ export async function runInitialSync(options: RunInitialSyncOptions): Promise<Sy
     await step(stats, "Comodines de línea libre", async () => {
       const result = await createTpvOtrosWildcards({ tenantId, prisma, client, logger: log });
       mergeWildcards(stats, result);
+    }, prisma, tenantId);
+
+    await step(stats, "Imágenes de producto (detalle Holded)", async () => {
+      // v1.2-Lite Bug-Imagenes-Holded: el listado de Holded no devuelve
+      // campo de imagen en cuentas como Thalia. Rescatamos las URLs
+      // pinchando el detalle individual sólo para productos que
+      // siguieron con imageUrl=NULL tras el upsert desde la lista.
+      // Concurrencia 5 acota el coste extra a ~40s para 1000 productos.
+      const result = await backfillImagesFromDetail(prisma, tenantId, client, log);
+      stats.productsImageBackfilled = result.backfilled;
+      stats.productsImageBackfillFailed = result.failed;
     }, prisma, tenantId);
 
     await step(stats, "Imágenes de producto", async () => {
@@ -375,6 +397,73 @@ async function upsertCatalogEntry(
       lastSyncedAt: new Date(),
     },
   });
+}
+
+// v1.2-Lite Bug-Imagenes-Holded: rescata las imageUrl que el listado de
+// Holded no entregó pinchando el endpoint individual de cada producto.
+// Sólo procesa productos con imageUrl=NULL en BD (ya cubre los nuevos
+// del sync inicial; el incremental llama al mismo helper para reintentar
+// los que sigan sin URL). Idempotente: si Holded sigue sin devolver
+// imagen, el producto queda como estaba y el siguiente sync lo
+// reintentará.
+export async function backfillImagesFromDetail(
+  prisma: PrismaClient,
+  tenantId: string,
+  client: HoldedClient,
+  log: NonNullable<RunInitialSyncOptions["logger"]>,
+): Promise<{ backfilled: number; failed: number; stillEmpty: number }> {
+  // Sólo productos activos sin imageUrl. Servicios no llevan foto (su
+  // forSale ya las filtra) pero defensivamente filtramos por kind también.
+  const pending = await prisma.product.findMany({
+    where: {
+      tenantId,
+      active: true,
+      kind: "PRODUCT",
+      imageUrl: null,
+    },
+    select: { id: true, holdedProductId: true },
+  });
+  if (pending.length === 0) {
+    return { backfilled: 0, failed: 0, stillEmpty: 0 };
+  }
+  log.info("backfill imagenes desde detalle Holded", {
+    tenantId,
+    pendingCount: pending.length,
+  });
+
+  const idToLocal = new Map<string, string>();
+  const holdedIds: string[] = [];
+  for (const p of pending) {
+    idToLocal.set(p.holdedProductId, p.id);
+    holdedIds.push(p.holdedProductId);
+  }
+
+  const result = await fetchProductImageDetails(client, holdedIds, {
+    concurrency: 5,
+    onWarn: (m, e) => log.warn(m, e),
+  });
+
+  let backfilled = 0;
+  for (const [holdedId, url] of result.resolved.entries()) {
+    const localId = idToLocal.get(holdedId);
+    if (!localId) continue;
+    await prisma.product.update({
+      where: { id: localId },
+      data: {
+        imageUrl: url,
+        // imageMime + imageCachedAt nacen NULL — el worker los rellena.
+        imageMime: null,
+        imageCachedAt: null,
+      },
+    });
+    backfilled += 1;
+  }
+
+  return {
+    backfilled,
+    failed: result.failed.length,
+    stillEmpty: result.stillEmpty.length,
+  };
 }
 
 // Tras el sync inicial, encola un job por cada producto que tenga
