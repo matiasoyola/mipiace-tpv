@@ -336,6 +336,21 @@ async function upsertCatalogEntry(
     typeof barcodeRaw === "string" && barcodeRaw.length > 0 ? barcodeRaw : null;
   const sellable = sku !== null && resolvedTaxRate !== null;
   const newImageUrl = extractImageUrl(raw as HoldedProduct);
+  // B-Categorias-via-Tags: normalizamos los tags Holded igual que en
+  // initial-sync. Filtra vacíos y duplicados defensivamente. Si el
+  // propietario quita tags en Holded, el array queda vacío y el chip
+  // desaparece del filtro del TPV en el siguiente render.
+  const tagsRaw = (raw as { tags?: unknown }).tags;
+  const tags = Array.isArray(tagsRaw)
+    ? Array.from(
+        new Set(
+          tagsRaw
+            .filter((t): t is string => typeof t === "string")
+            .map((t) => t.trim())
+            .filter((t) => t.length > 0),
+        ),
+      )
+    : [];
 
   // Leemos el estado previo para decidir si invalidamos el cache. Una
   // query extra por producto es asumible (1ms en el bench piloto: 500
@@ -374,6 +389,7 @@ async function upsertCatalogEntry(
       active: true,
       sellableViaTpv: sellable,
       imageUrl: newImageUrl,
+      tags,
       raw: raw as unknown as object,
     },
     update: {
@@ -395,6 +411,10 @@ async function upsertCatalogEntry(
       sellableViaTpv:
         resolvedTaxRate === null ? false : sellable || undefined,
       imageUrl: newImageUrl,
+      // B-Categorias-via-Tags: sustitución completa del array. Si el
+      // propietario edita tags en Holded, el siguiente sync los
+      // refleja tal cual (no merge — la verdad es Holded).
+      tags,
       // Si la URL cambió, también invalidamos mime + cachedAt para que
       // el TPV deje de pintar el archivo antiguo en cuanto el worker
       // confirme la nueva descarga. Si la URL es igual, no tocamos

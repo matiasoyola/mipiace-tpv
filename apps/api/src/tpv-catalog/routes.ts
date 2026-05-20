@@ -62,6 +62,10 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
           taxRate: true,
           kind: true,
           imageMime: true,
+          // B-Categorias-via-Tags: el TPV usa los tags para filtrar la
+          // grid de productos con los chips de categoría. Si Holded no
+          // envía tags, el campo llega como [] y los chips quedan vacíos.
+          tags: true,
         },
       });
       const hasMore = products.length > limit;
@@ -85,6 +89,7 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
         // `<img>`; null → placeholder. El tenantId va en el JWT del
         // cajero, así que el front construye la URL final.
         imageMime: p.imageMime,
+        tags: p.tags,
       }));
       return {
         items,

@@ -280,6 +280,22 @@ async function upsertCatalogEntry(
   // el mismo helper (raw es HoldedProduct | HoldedService, ambos con
   // los campos de imagen como opcionales).
   const imageUrl = extractImageUrl(raw as HoldedProduct);
+  // B-Categorias-via-Tags: normalizamos los tags de Holded. Llegan
+  // como string[] pero defensivamente filtramos vacíos y duplicados
+  // (un cliente paranoico podría taguear "Bebidas" dos veces). El
+  // orden no importa porque el TPV los re-ordena alfabéticamente al
+  // construir los chips.
+  const tagsRaw = (raw as { tags?: unknown }).tags;
+  const tags = Array.isArray(tagsRaw)
+    ? Array.from(
+        new Set(
+          tagsRaw
+            .filter((t): t is string => typeof t === "string")
+            .map((t) => t.trim())
+            .filter((t) => t.length > 0),
+        ),
+      )
+    : [];
 
   // Sync inicial: BD vacía para este tenant, así que el upsert siempre
   // es create. No leemos previo para decidir invalidación del cache —
@@ -301,6 +317,7 @@ async function upsertCatalogEntry(
       active: true,
       sellableViaTpv: sellable,
       imageUrl,
+      tags,
       // imageMime + imageCachedAt nacen NULL — el worker los rellena.
       raw: raw as unknown as object,
     },
@@ -322,6 +339,7 @@ async function upsertCatalogEntry(
       sellableViaTpv:
         resolvedTaxRate === null ? false : sellable || undefined,
       imageUrl,
+      tags,
       raw: raw as unknown as object,
       lastSyncedAt: new Date(),
     },

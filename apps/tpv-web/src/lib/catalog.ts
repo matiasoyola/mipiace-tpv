@@ -19,12 +19,20 @@ export interface CatalogProduct {
   // Holded no expone imagen o si el worker aún no descargó. El TPV usa
   // este flag como gate para renderizar `<img>` vs. placeholder.
   imageMime: string | null;
+  // B-Categorias-via-Tags: lista de tags Holded del producto. El TPV
+  // las usa como pseudo-categorías para construir los chips de filtro
+  // arriba de la grid. Si el propietario no tagueó en Holded, el array
+  // viene vacío. Se ordena alfabéticamente al renderizar los chips —
+  // se preserva el orden de Holded en el array.
+  tags: string[];
 }
 
 const DB_NAME = "mipiacetpv-catalog";
 const STORE = "products";
-// Bump por el campo imageMime. IndexedDB sobrevive con onupgradeneeded.
-const VERSION = 2;
+// Bump por el campo tags (B-Categorias-via-Tags). IndexedDB sobrevive
+// con onupgradeneeded; los registros viejos quedan sin tags hasta el
+// próximo refresh, que el banner "Sincronizando" disparará.
+const VERSION = 3;
 const LS_KEY = "mipiacetpv-catalog-fallback";
 const META_KEY = "mipiacetpv-catalog-meta";
 const TENANT_ID_KEY = "mipiacetpv-catalog-tenant";

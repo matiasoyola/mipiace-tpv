@@ -501,6 +501,13 @@ model Product {
   // URL cambia en un sync (Holded la rota), el sync pone `imageCachedAt
   // = null` para forzar re-descarga; el worker la detecta como pendiente.
   imageCachedAt     DateTime?   @map("image_cached_at") @db.Timestamptz()
+  // B-Categorias-via-Tags: tags libres que el propietario asigna a
+  // sus productos en Holded (campo `tags: string[]` en el payload de
+  // /products). El TPV los usa como pseudo-categorías para construir
+  // los chips de filtro arriba de la grid de productos. Si Holded no
+  // envía tags, queda como array vacío. Tiene índice GIN
+  // (products_tags_idx) para futuros filtros server-side @> y &&.
+  tags              String[]    @default([])
   lastSyncedAt      DateTime    @default(now()) @map("last_synced_at") @db.Timestamptz()
   raw               Json?
 

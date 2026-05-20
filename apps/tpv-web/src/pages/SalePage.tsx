@@ -872,14 +872,75 @@ function SaleWorkspace({
   // está vacío (sesión preexistente al deploy), Package es el default
   // — mismo comportamiento que B-UX-Pulido F3.
   const PlaceholderIcon = placeholderIconFor(getCachedBusinessType());
+  // B-Categorias-via-Tags: filtro por tag/pseudo-categoría. null = ver
+  // todos. Se calcula desde los productos actualmente visibles (que
+  // ya pueden venir filtrados por búsqueda) para que los chips
+  // reflejen sólo lo relevante en cada momento. Si el propietario no
+  // tagueó nada en Holded, availableTags queda vacío y los chips no
+  // se renderizan — el espacio del header simplemente se contrae.
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const availableTags = useMemo(
+    () => Array.from(new Set(products.flatMap((p) => p.tags))).sort(),
+    [products],
+  );
+  // Si el tag seleccionado deja de existir en el catálogo (el
+  // propietario lo quitó en Holded y vino un sync), volvemos a "Todos"
+  // automáticamente.
+  useEffect(() => {
+    if (selectedTag && !availableTags.includes(selectedTag)) {
+      setSelectedTag(null);
+    }
+  }, [selectedTag, availableTags]);
+  const visibleProducts = useMemo(
+    () =>
+      selectedTag
+        ? products.filter((p) => p.tags.includes(selectedTag))
+        : products,
+    [products, selectedTag],
+  );
   return (
     <div className="flex-1 grid lg:grid-cols-[1fr_360px] gap-4 lg:gap-6 p-4 md:p-7 min-h-0">
       <section className="flex flex-col min-w-0 order-2 lg:order-1">
         <div className="flex items-center gap-2 mb-4 md:mb-6 overflow-x-auto">
-          <button className="h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-mipiace-coral text-white text-[13.5px] md:text-[14px] font-medium flex items-center gap-2 shrink-0">
-            <Star className="w-3.5 h-3.5 fill-white" strokeWidth={2.5} />
+          {/* B-Categorias-via-Tags: chip "Todos" siempre presente +
+              un chip por cada tag único del catálogo. El estado activo
+              se pinta con el coral del producto; los inactivos con
+              estilo neutro. overflow-x-auto del contenedor permite
+              scroll horizontal cuando hay muchas categorías. */}
+          <button
+            onClick={() => setSelectedTag(null)}
+            className={
+              selectedTag === null
+                ? "h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-mipiace-coral text-white text-[13.5px] md:text-[14px] font-medium flex items-center gap-2 shrink-0"
+                : "h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-white border border-slate-200 text-slate-700 text-[13.5px] md:text-[14px] font-medium flex items-center gap-2 shrink-0 hover:border-mipiace-coral/50"
+            }
+          >
+            <Star
+              className={
+                selectedTag === null
+                  ? "w-3.5 h-3.5 fill-white"
+                  : "w-3.5 h-3.5 text-slate-400"
+              }
+              strokeWidth={2.5}
+            />
             Todos
           </button>
+          {availableTags.map((tag) => {
+            const active = selectedTag === tag;
+            return (
+              <button
+                key={tag}
+                onClick={() => setSelectedTag(tag)}
+                className={
+                  active
+                    ? "h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-mipiace-coral text-white text-[13.5px] md:text-[14px] font-medium shrink-0"
+                    : "h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-white border border-slate-200 text-slate-700 text-[13.5px] md:text-[14px] font-medium shrink-0 hover:border-mipiace-coral/50"
+                }
+              >
+                {tag}
+              </button>
+            );
+          })}
         </div>
         {catalogError && (
           <div className="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 mb-4 text-[13px]">
@@ -887,7 +948,7 @@ function SaleWorkspace({
           </div>
         )}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-3.5 mb-5 md:mb-6">
-          {products.map((p) => {
+          {visibleProducts.map((p) => {
             const imgSrc = tenantId ? productImageUrl(p, tenantId) : null;
             return (
               <button
