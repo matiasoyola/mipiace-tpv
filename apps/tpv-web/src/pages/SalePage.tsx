@@ -58,6 +58,7 @@ import { LineSheet } from "./SalePage.lineSheet.js";
 import { ModifierSelector } from "./SalePage.modifierSelector.js";
 import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
 import { useElapsedTime } from "../hooks/useElapsedTime.js";
+import { useStoreEventStream } from "../hooks/useStoreEventStream.js";
 import type { ModifierSelection } from "../lib/cart.js";
 import {
   buildGroupsByProduct,
@@ -234,6 +235,59 @@ export function SalePage(props: SalePageProps) {
   useEffect(() => {
     void refreshShiftTicketsCount();
   }, [refreshShiftTicketsCount]);
+
+  // Lote 4 v1.1 Thalia: subscripción al bus realtime para que dos
+  // cajas del mismo store vean los tickets cobrados/devueltos por la
+  // otra sin esperar al polling de 30s. Necesitamos el storeId del
+  // cashier — /tpv/tables ya lo devuelve para cualquier vertical.
+  const [storeId, setStoreId] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { apiWithCashier } = await import("../api.js");
+        const res = await apiWithCashier<{ storeId: string | null }>("/tpv/tables");
+        if (!cancelled) setStoreId(res.storeId);
+      } catch {
+        /* sin storeId, el WS no abrirá — degrada a polling */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const [crossCajaToast, setCrossCajaToast] = useState<{
+    text: string;
+    expiresAt: number;
+  } | null>(null);
+  useStoreEventStream(storeId, (ev) => {
+    if (ev.type === "ticket.paid") {
+      // Si soy yo el que cobró, el contador ya se refresca por su
+      // propio camino (polling tras checkout). Ignoramos eco-events.
+      if (ev.registerId === props.registerId) return;
+      void refreshShiftTicketsCount();
+      setCrossCajaToast({
+        text: `Otra caja cobró un ticket (${ev.totalEur.toFixed(2)} €)`,
+        expiresAt: Date.now() + 4_000,
+      });
+    } else if (ev.type === "ticket.refunded") {
+      void refreshShiftTicketsCount();
+      setCrossCajaToast({
+        text: `Devolución registrada en otra caja (${ev.totalEur.toFixed(2)} €)`,
+        expiresAt: Date.now() + 4_000,
+      });
+    }
+  });
+  useEffect(() => {
+    if (!crossCajaToast) return;
+    const remaining = crossCajaToast.expiresAt - Date.now();
+    if (remaining <= 0) {
+      setCrossCajaToast(null);
+      return;
+    }
+    const t = setTimeout(() => setCrossCajaToast(null), remaining);
+    return () => clearTimeout(t);
+  }, [crossCajaToast]);
 
   useEffect(() => {
     let cancelled = false;
@@ -453,6 +507,15 @@ export function SalePage(props: SalePageProps) {
   // ── Render ─────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-mipiace-stone flex flex-col font-sans">
+      {/* Lote 4 v1.1 Thalia: toast cross-caja. Aparece cuando otra
+          caja del mismo store cobra o devuelve, para que el cajero
+          actual no intente cobrar dos veces. Top-right, auto-dismiss
+          en 4s. */}
+      {crossCajaToast && (
+        <div className="fixed top-4 right-4 z-[60] max-w-[320px] bg-slate-900 text-white rounded-xl px-4 py-3 shadow-lg text-[13px] font-medium pointer-events-none">
+          {crossCajaToast.text}
+        </div>
+      )}
       <div className="flex-1 flex max-w-[1680px] w-full mx-auto bg-white">
         <aside className="hidden md:flex w-[88px] xl:w-[240px] shrink-0 border-r border-slate-200 flex-col px-3 xl:px-5 py-5">
           <div className="mb-7 xl:mb-8 flex justify-center xl:justify-start">

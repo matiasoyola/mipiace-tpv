@@ -18,6 +18,7 @@ import type { FastifyInstance } from "fastify";
 import { verifyManagerAuthorization } from "../auth/manager-authorization.js";
 import { getPrisma } from "../context.js";
 import { getStoreEventBus } from "../realtime/store-event-bus.js";
+import { emitTicketPaid, emitTicketRefunded } from "../realtime/emit-helpers.js";
 import { enqueueTicketUpload } from "../queues/ticket-upload.js";
 import { enqueueRefundUpload } from "../queues/refund-upload.js";
 import { enqueueTicketEmail } from "../queues/ticket-email.js";
@@ -483,6 +484,19 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         );
       }
 
+      // Lote 4 v1.1 Thalia: notificar al bus realtime que se cobró
+      // ticket. Otras cajas suscritas al mismo store ven aparecer el
+      // ticket en su contador sin tener que pollear.
+      await emitTicketPaid({
+        prisma,
+        ticketId: ticket.id,
+        internalNumber: ticket.internalNumber ?? null,
+        registerId: cashier.rid,
+        cashierUserId: cashier.sub,
+        tableId: null,
+        totalEur: totals.total,
+      });
+
       return reply.code(201).send({
         ticket: serializeTicket(ticket),
         syncStatus: ticket.status,
@@ -784,6 +798,19 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           });
         }
       }
+
+      // Lote 4 v1.1 Thalia: ticket.paid también se emite en mesa-cobro
+      // para que las cajas suscritas vean el contador subir, no sólo
+      // las que estaban en el mapa de salas.
+      await emitTicketPaid({
+        prisma,
+        ticketId: updated.id,
+        internalNumber: updated.internalNumber ?? null,
+        registerId: cashier.rid,
+        cashierUserId: cashier.sub,
+        tableId: draft.tableId ?? null,
+        totalEur: totals.total,
+      });
 
       request.log.info(
         {
@@ -1225,6 +1252,18 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           `enqueue refund upload falló: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
+
+      // Lote 4 v1.1 Thalia: ticket.refunded → otras cajas se enteran
+      // de la devolución en cuanto se confirma (sin esperar al
+      // próximo polling del historial).
+      await emitTicketRefunded({
+        prisma,
+        refundId: refund.id,
+        originalTicketId: ticket.id,
+        registerId: ticket.registerId,
+        cashierUserId: cashier.sub,
+        totalEur: total,
+      });
 
       return reply.code(201).send({ refund: serializeRefund(refund) });
     },

@@ -80,6 +80,28 @@ export type StoreEvent =
       destinationTableId: string;
       lineIds: string[];
       at: string;
+    }
+  // Lote 4 v1.1 Thalia: eventos ticket-level (no mesa) para
+  // sincronizar el contador del turno y notificaciones de
+  // devoluciones entre dos cajas del mismo store.
+  | {
+      type: "ticket.paid";
+      ticketId: string;
+      internalNumber: string | null;
+      registerId: string;
+      tableId: string | null;
+      byEmail: string;
+      totalEur: number;
+      at: string;
+    }
+  | {
+      type: "ticket.refunded";
+      refundId: string;
+      originalTicketId: string;
+      registerId: string;
+      byEmail: string;
+      totalEur: number;
+      at: string;
     };
 
 export type StreamStatus = "connecting" | "open" | "degraded";

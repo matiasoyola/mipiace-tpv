@@ -20,8 +20,20 @@ export interface BusSubscriber {
   send(payload: WsEvent): void;
 }
 
+// Lote 4 v1.1 Thalia: throttling defensivo. No más de N eventos por
+// canal y ventana — protege a los suscriptores ante una tormenta
+// (cashier spamea click "añadir línea" 30 veces en un segundo). Si
+// se sobrepasa, el evento se descarta silenciosamente (NO se encola
+// para enviar después: la idea es evitar lag perceptible, no
+// garantizar entrega de cada uno).
+const THROTTLE_MAX_PER_WINDOW = 5;
+const THROTTLE_WINDOW_MS = 1_000;
+
 class StoreEventBus {
   private readonly subscribers = new Map<string, Set<BusSubscriber>>();
+  // Timestamps (ms) de los últimos eventos por canal. Ventana
+  // deslizante. Se purga al broadcast.
+  private readonly broadcastTimestamps = new Map<string, number[]>();
 
   subscribe(storeId: string, subscriber: BusSubscriber): () => void {
     let set = this.subscribers.get(storeId);
@@ -39,6 +51,7 @@ class StoreEventBus {
   }
 
   broadcast(storeId: string, event: WsEvent): void {
+    if (this.isThrottled(storeId)) return;
     const set = this.subscribers.get(storeId);
     if (!set) return;
     for (const sub of set) {
@@ -50,6 +63,21 @@ class StoreEventBus {
         // detectará y el lifecycle del WS plugin lo limpiará.
       }
     }
+  }
+
+  private isThrottled(storeId: string): boolean {
+    const now = Date.now();
+    const windowStart = now - THROTTLE_WINDOW_MS;
+    const stamps = this.broadcastTimestamps.get(storeId) ?? [];
+    // Drop timestamps fuera de la ventana actual.
+    const recent = stamps.filter((t) => t >= windowStart);
+    if (recent.length >= THROTTLE_MAX_PER_WINDOW) {
+      this.broadcastTimestamps.set(storeId, recent);
+      return true;
+    }
+    recent.push(now);
+    this.broadcastTimestamps.set(storeId, recent);
+    return false;
   }
 
   // Sólo para tests / debug.

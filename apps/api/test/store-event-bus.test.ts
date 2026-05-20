@@ -76,4 +76,19 @@ describe("StoreEventBus", () => {
     unsub();
     expect(bus.subscriberCount("store-clean")).toBe(0);
   });
+
+  // Lote 4 v1.1 Thalia: throttling defensivo, 5 eventos por ventana de
+  // 1 s por canal. Eventos 6+ dentro de la ventana se descartan.
+  it("throttle: descarta eventos por encima de 5 en 1 s por canal", () => {
+    const bus = getStoreEventBus();
+    const sub = { send: vi.fn() };
+    const unsub = bus.subscribe("store-throttle", sub);
+
+    for (let i = 0; i < 10; i++) {
+      bus.broadcast("store-throttle", sampleEvent);
+    }
+    expect(sub.send).toHaveBeenCalledTimes(5);
+
+    unsub();
+  });
 });
