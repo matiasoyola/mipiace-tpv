@@ -129,6 +129,10 @@ export interface SalePageProps {
   onCloseShift: () => void;
 }
 
+// P-1 (v1.1 peluquería): persistencia del toggle Servicios/Productos
+// para verticales SERVICES.
+const KIND_FILTER_KEY = "mipiacetpv-sale-kind-filter";
+
 export function SalePage(props: SalePageProps) {
   const [showCloseShift, setShowCloseShift] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -872,7 +876,21 @@ function SaleWorkspace({
   // tenant. Cache que se llena al primer refresh del catálogo; si aún
   // está vacío (sesión preexistente al deploy), Package es el default
   // — mismo comportamiento que B-UX-Pulido F3.
-  const PlaceholderIcon = placeholderIconFor(getCachedBusinessType());
+  const businessType = getCachedBusinessType();
+  const PlaceholderIcon = placeholderIconFor(businessType);
+  // P-1 (v1.1 peluquería): para verticales SERVICES, ofrecer un toggle
+  // "Servicios" / "Productos" delante de los chips de tag. Para
+  // RETAIL/HOSPITALITY los items se siguen mezclando (caso típico:
+  // bar que vende botellas de aceite junto con cafés).
+  const showKindToggle = businessType === "SERVICES";
+  const [kindFilter, setKindFilter] = useState<"SERVICE" | "PRODUCT">(() => {
+    if (!showKindToggle) return "SERVICE"; // valor inerte
+    const stored = localStorage.getItem(KIND_FILTER_KEY);
+    return stored === "PRODUCT" ? "PRODUCT" : "SERVICE";
+  });
+  useEffect(() => {
+    if (showKindToggle) localStorage.setItem(KIND_FILTER_KEY, kindFilter);
+  }, [showKindToggle, kindFilter]);
   // B-Categorias-via-Tags: filtro por tag/pseudo-categoría. null = ver
   // todos. Se calcula desde los productos actualmente visibles (que
   // ya pueden venir filtrados por búsqueda) para que los chips
@@ -880,29 +898,64 @@ function SaleWorkspace({
   // tagueó nada en Holded, availableTags queda vacío y los chips no
   // se renderizan — el espacio del header simplemente se contrae.
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  // P-1: si SERVICES, los tags se calculan sobre los productos del kind
+  // seleccionado — no queremos chips de tags que no existan dentro de
+  // la pestaña actual.
+  const productsForTags = useMemo(
+    () =>
+      showKindToggle ? products.filter((p) => p.kind === kindFilter) : products,
+    [products, showKindToggle, kindFilter],
+  );
   const availableTags = useMemo(
-    () => Array.from(new Set(products.flatMap((p) => p.tags))).sort(),
-    [products],
+    () => Array.from(new Set(productsForTags.flatMap((p) => p.tags))).sort(),
+    [productsForTags],
   );
   // Si el tag seleccionado deja de existir en el catálogo (el
-  // propietario lo quitó en Holded y vino un sync), volvemos a "Todos"
-  // automáticamente.
+  // propietario lo quitó en Holded y vino un sync, o el toggle de
+  // kind cambió), volvemos a "Todos" automáticamente.
   useEffect(() => {
     if (selectedTag && !availableTags.includes(selectedTag)) {
       setSelectedTag(null);
     }
   }, [selectedTag, availableTags]);
-  const visibleProducts = useMemo(
-    () =>
-      selectedTag
-        ? products.filter((p) => p.tags.includes(selectedTag))
-        : products,
-    [products, selectedTag],
-  );
+  const visibleProducts = useMemo(() => {
+    let list = products;
+    if (showKindToggle) list = list.filter((p) => p.kind === kindFilter);
+    if (selectedTag) list = list.filter((p) => p.tags.includes(selectedTag));
+    return list;
+  }, [products, selectedTag, showKindToggle, kindFilter]);
   return (
     <div className="flex-1 grid lg:grid-cols-[1fr_360px] gap-4 lg:gap-6 p-4 md:p-7 min-h-0">
       <section className="flex flex-col min-w-0 order-2 lg:order-1">
         <div className="flex items-center gap-2 mb-4 md:mb-6 overflow-x-auto">
+          {/* P-1 (v1.1 peluquería): toggle Servicios/Productos para
+              verticales SERVICES. Va delante de los chips de tag y
+              está separado visualmente por un divisor sutil. */}
+          {showKindToggle && (
+            <>
+              <button
+                onClick={() => setKindFilter("SERVICE")}
+                className={
+                  kindFilter === "SERVICE"
+                    ? "h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-mipiace-ink text-white text-[13.5px] md:text-[14px] font-medium shrink-0"
+                    : "h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-white border border-slate-200 text-slate-700 text-[13.5px] md:text-[14px] font-medium shrink-0 hover:border-mipiace-ink/40"
+                }
+              >
+                Servicios
+              </button>
+              <button
+                onClick={() => setKindFilter("PRODUCT")}
+                className={
+                  kindFilter === "PRODUCT"
+                    ? "h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-mipiace-ink text-white text-[13.5px] md:text-[14px] font-medium shrink-0"
+                    : "h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-white border border-slate-200 text-slate-700 text-[13.5px] md:text-[14px] font-medium shrink-0 hover:border-mipiace-ink/40"
+                }
+              >
+                Productos
+              </button>
+              <div className="w-px h-8 bg-slate-200 mx-1 shrink-0" aria-hidden />
+            </>
+          )}
           {/* B-Categorias-via-Tags: chip "Todos" siempre presente +
               un chip por cada tag único del catálogo. El estado activo
               se pinta con el coral del producto; los inactivos con
@@ -948,6 +1001,15 @@ function SaleWorkspace({
             {catalogError}
           </div>
         )}
+        {showKindToggle &&
+          products.length > 0 &&
+          visibleProducts.length === 0 &&
+          !selectedTag && (
+            <div className="text-[13px] text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4">
+              No hay {kindFilter === "PRODUCT" ? "productos físicos" : "servicios"}{" "}
+              en el catálogo. Crea uno en Holded para verlo aquí.
+            </div>
+          )}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-3.5 mb-5 md:mb-6">
           {visibleProducts.map((p) => {
             const imgSrc = tenantId ? productImageUrl(p, tenantId) : null;
