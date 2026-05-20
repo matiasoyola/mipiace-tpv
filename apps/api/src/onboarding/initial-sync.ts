@@ -11,6 +11,7 @@ import {
   iterateAllProducts,
   iterateAllServices,
   listTaxes,
+  listUnrecognizedImageKeys,
   listWarehouses,
   type HoldedContact,
   type HoldedProduct,
@@ -280,6 +281,20 @@ async function upsertCatalogEntry(
   // el mismo helper (raw es HoldedProduct | HoldedService, ambos con
   // los campos de imagen como opcionales).
   const imageUrl = extractImageUrl(raw as HoldedProduct);
+  // Inv-1 (v1.1 Thalia): si hay claves "image-like" no reconocidas,
+  // emitir warning con la lista para que el siguiente sync nos diga
+  // qué campo Holded usa en esa cuenta. Sin spam: sólo si imageUrl
+  // quedó null.
+  if (imageUrl === null) {
+    const unknownKeys = listUnrecognizedImageKeys(raw as HoldedProduct);
+    if (unknownKeys.length > 0) {
+      log.warn("producto sin imagen reconocida pero raw tiene claves image-like", {
+        holdedProductId: raw.id,
+        name: raw.name,
+        candidateKeys: unknownKeys,
+      });
+    }
+  }
   // B-Categorias-via-Tags: normalizamos los tags de Holded. Llegan
   // como string[] pero defensivamente filtramos vacíos y duplicados
   // (un cliente paranoico podría taguear "Bebidas" dos veces). El

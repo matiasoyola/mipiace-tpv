@@ -34,6 +34,12 @@ export interface HoldedProduct {
   thumbnail?: string | null;
   pictures?: Array<string | { url?: string; [k: string]: unknown }>;
   images?: Array<string | { url?: string; [k: string]: unknown }>;
+  // Inv-1 (v1.1 Thalia): el equipo subió foto desde la app móvil de
+  // Holded y Holded la sirve bajo `attachment` (singular) o
+  // `attachments` (array) en algunas cuentas. Defensivo: probamos
+  // estos campos también antes de declarar "sin imagen".
+  attachment?: string | { url?: string; [k: string]: unknown } | null;
+  attachments?: Array<string | { url?: string; [k: string]: unknown }>;
   // Campos que Holded pueda añadir y no quieran perderse en raw.
   [extra: string]: unknown;
 }
@@ -57,12 +63,50 @@ export function extractImageUrl(raw: HoldedProduct): string | null {
     raw.thumbnail,
     raw.pictures,
     raw.images,
+    raw.attachment,
+    raw.attachments,
   ];
   for (const c of candidates) {
     const url = firstHttpUrl(c);
     if (url) return url;
   }
   return null;
+}
+
+// Inv-1 (v1.1 Thalia): diagnóstico cuando un producto Holded NO devuelve
+// imagen reconocible. Lista las claves del raw cuyo nombre sugiere
+// imagen pero no han pasado `extractImageUrl` (porque Holded los
+// expone con estructura inesperada o son strings no-http). Si Thalia
+// reporta "subí foto y no aparece", grepea estos logs para descubrir
+// el campo que falta declarar arriba — sin tener que pedir un dump de
+// la API por slack.
+export function listUnrecognizedImageKeys(raw: HoldedProduct): string[] {
+  const known = new Set([
+    "mainImage",
+    "image",
+    "thumbnail",
+    "pictures",
+    "images",
+    "attachment",
+    "attachments",
+  ]);
+  const out: string[] = [];
+  for (const key of Object.keys(raw)) {
+    if (known.has(key)) continue;
+    const lower = key.toLowerCase();
+    if (
+      lower.includes("image") ||
+      lower.includes("picture") ||
+      lower.includes("photo") ||
+      lower.includes("thumb") ||
+      lower.includes("attach") ||
+      lower.includes("media") ||
+      lower.includes("foto")
+    ) {
+      out.push(key);
+    }
+  }
+  return out;
 }
 
 function firstHttpUrl(v: unknown): string | null {

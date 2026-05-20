@@ -5,6 +5,7 @@ import {
   HoldedSilentRejectError,
   iterateAllProducts,
   listProductsPage,
+  listUnrecognizedImageKeys,
   updateProductWithGetBack,
   type HoldedClient,
   type HoldedProduct,
@@ -155,5 +156,63 @@ describe("extractImageUrl (B-ProductImages spike §13)", () => {
         }),
       ),
     ).toBe("https://main.example/m.jpg");
+  });
+
+  // Inv-1 (v1.1 Thalia): Holded sirve la foto subida desde móvil bajo
+  // `attachment(s)` en algunas cuentas. Sin estos campos, la foto no
+  // pasaba al TPV.
+  it("attachment string http(s) → la devuelve", () => {
+    expect(
+      extractImageUrl(p({ attachment: "https://cdn.holded.com/a.jpg" })),
+    ).toBe("https://cdn.holded.com/a.jpg");
+  });
+
+  it("attachments[] como objetos → URL anidada", () => {
+    expect(
+      extractImageUrl(
+        p({ attachments: [{ url: "https://cdn.holded.com/a.png" }] }),
+      ),
+    ).toBe("https://cdn.holded.com/a.png");
+  });
+});
+
+describe("listUnrecognizedImageKeys (Inv-1 v1.1 Thalia)", () => {
+  function p(extra: Partial<HoldedProduct> & Record<string, unknown>): HoldedProduct {
+    return { id: "x", name: "n", ...extra } as HoldedProduct;
+  }
+
+  it("ignora las claves conocidas y devuelve [] si no hay raras", () => {
+    expect(
+      listUnrecognizedImageKeys(
+        p({ mainImage: "https://x", image: "https://y" }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("detecta claves nuevas que contienen 'image', 'photo', 'attach', etc.", () => {
+    const keys = listUnrecognizedImageKeys(
+      p({
+        imageMobile: "blah",
+        photo_main: { url: "x" },
+        attachUrl: "y",
+        productMedia: [],
+        fotoPrincipal: "z",
+      }),
+    );
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        "imageMobile",
+        "photo_main",
+        "attachUrl",
+        "productMedia",
+        "fotoPrincipal",
+      ]),
+    );
+  });
+
+  it("no marca campos sin relación con imagen (ej. 'name', 'sku')", () => {
+    expect(
+      listUnrecognizedImageKeys(p({ sku: "S1", price: 10 })),
+    ).toEqual([]);
   });
 });

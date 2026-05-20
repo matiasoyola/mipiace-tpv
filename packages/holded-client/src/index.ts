@@ -27,6 +27,7 @@ export {
   getProduct,
   iterateAllProducts,
   listProductsPage,
+  listUnrecognizedImageKeys,
   updateProductWithGetBack,
   type CreateProductBody,
   type HoldedProduct,
