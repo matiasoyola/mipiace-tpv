@@ -135,16 +135,32 @@ export async function runInitialSync(options: RunInitialSyncOptions): Promise<Sy
         });
       }
       // Datos fiscales mínimos para el pie del ticket: del almacén default.
+      // T-6 (v1.1 Thalia): el warehouse de Holded NO trae taxId/nif —
+      // ese dato vive a nivel de cuenta y no lo expone /warehouses. Si
+      // el super-admin lo metió al crear el DRAFT (fiscalProfile.taxId
+      // + legalName), aquí preservamos esos campos. ANTES pisábamos el
+      // fiscalProfile entero y Thalia perdía su NIF tras el primer
+      // sync.
       const def = warehousesPayload.find((w) => w.default) ?? warehousesPayload[0];
       if (def) {
+        const existing = await prisma.tenant.findUnique({
+          where: { id: tenantId },
+          select: { fiscalProfile: true },
+        });
+        const prev = (existing?.fiscalProfile ?? {}) as Record<string, unknown>;
         await prisma.tenant.update({
           where: { id: tenantId },
           data: {
             fiscalProfile: {
+              ...prev,
               source: "warehouse_default",
               warehouseHoldedId: def.id,
               name: def.name,
               address: def.address ?? null,
+              // legalName/taxId/nif/phone: se preservan vía spread `prev`.
+              // Si el super-admin los puso al crear el tenant, siguen
+              // ahí. Si nunca se pusieron, quedan undefined → build.ts
+              // los tolera (Bug-05).
             } as object,
           },
         });
