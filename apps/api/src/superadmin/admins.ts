@@ -14,6 +14,7 @@
 
 import type { FastifyInstance } from "fastify";
 
+import { Prisma } from "@mipiacetpv/db";
 import { generateTemporaryPassword } from "@mipiacetpv/util-validation";
 
 import { hashPassword } from "../auth/passwords.js";
@@ -159,38 +160,72 @@ export async function registerSuperAdminAdminsRoutes(
         });
       }
       const prisma = getPrisma();
-      // Sólo conflicto entre super-admins activos. Un email de un
-      // super-admin borrado por soft-delete se podría reasignar; en
-      // ese caso desbloqueamos el row reactivándolo en una operación
-      // separada (no es parte de este bloque).
-      const existing = await prisma.superAdminUser.findFirst({
+      // 409 sólo si el row existe ACTIVO (no soft-deleted).
+      const existingActive = await prisma.superAdminUser.findFirst({
         where: { email: lowerEmail, deletedAt: null },
         select: { id: true },
       });
-      if (existing) {
+      if (existingActive) {
         return reply.code(409).send({
           error: "SUPER_ADMIN_EMAIL_TAKEN",
           message: "Ya existe un super-admin con ese email.",
         });
       }
+      // Bug-RehidratarSuperAdmin: si el email pertenece a un row
+      // soft-deleted (deletedAt no nulo), el UNIQUE constraint de la
+      // columna `email` impediría crear uno nuevo con prisma.create.
+      // El bloque SB4 dejó este caso como diferido; lo resolvemos
+      // rehidratando: deletedAt=null, nueva tempPassword, name
+      // actualizado, mustChangePassword=true, tokenVersion+1 (para
+      // invalidar cualquier refresh token previo al borrado). Audit:
+      // queda el "delete_super_admin" previo + "create_super_admin"
+      // nuevo sobre el mismo id — historia trazable.
+      const existingDeleted = await prisma.superAdminUser.findUnique({
+        where: { email: lowerEmail },
+        select: { id: true, deletedAt: true },
+      });
       const tempPassword = generateTemporaryPassword();
       const passwordHash = await hashPassword(tempPassword);
-      const created = await prisma.superAdminUser.create({
-        data: {
-          email: lowerEmail,
-          name: trimmedName,
-          passwordHash,
-          mustChangePassword: true,
-        },
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          totpEnabledAt: true,
-          lastLoginAt: true,
-          createdAt: true,
-        },
-      });
+      const created =
+        existingDeleted && existingDeleted.deletedAt != null
+          ? await prisma.superAdminUser.update({
+              where: { id: existingDeleted.id },
+              data: {
+                deletedAt: null,
+                name: trimmedName,
+                passwordHash,
+                mustChangePassword: true,
+                tokenVersion: { increment: 1 },
+                totpEnabledAt: null,
+                totpSecret: null,
+                recoveryCodes: Prisma.JsonNull,
+                lastLoginAt: null,
+              },
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                totpEnabledAt: true,
+                lastLoginAt: true,
+                createdAt: true,
+              },
+            })
+          : await prisma.superAdminUser.create({
+              data: {
+                email: lowerEmail,
+                name: trimmedName,
+                passwordHash,
+                mustChangePassword: true,
+              },
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                totpEnabledAt: true,
+                lastLoginAt: true,
+                createdAt: true,
+              },
+            });
       await writeAudit({
         prisma,
         superAdminId: ctx.superAdminId,
