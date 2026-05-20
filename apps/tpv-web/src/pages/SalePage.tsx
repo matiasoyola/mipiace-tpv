@@ -417,6 +417,7 @@ export function SalePage(props: SalePageProps) {
       createdAt: new Date().toISOString(),
       lines,
       contactHoldedId: contact?.holdedContactId,
+      contactName: contact?.name,
       notes,
     };
     saveSuspendedCart(cart);
@@ -430,7 +431,7 @@ export function SalePage(props: SalePageProps) {
       setContact({
         id: "recovered",
         holdedContactId: cart.contactHoldedId,
-        name: "Cliente",
+        name: cart.contactName ?? "Cliente",
       });
     }
     removeSuspendedCart(cart.id);
@@ -1407,9 +1408,10 @@ function SuspendedSheet({
             >
               <div className="flex-1 min-w-0">
                 <div className="text-[14px] font-medium text-mipiace-ink truncate">{c.label}</div>
-                <div className="text-[12.5px] text-slate-500">
+                <div className="text-[12.5px] text-slate-500 truncate">
                   {c.lines.length} línea{c.lines.length === 1 ? "" : "s"} ·{" "}
                   {new Date(c.createdAt).toLocaleTimeString("es-ES")}
+                  {c.contactName ? ` · ${c.contactName}` : ""}
                 </div>
               </div>
               <button
