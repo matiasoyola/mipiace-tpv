@@ -65,6 +65,8 @@ export function TenantDetailPage() {
   const [activated, setActivated] = useState<ActivateTenantResponse | null>(null);
   const [copiedPwd, setCopiedPwd] = useState(false);
   const [busy, setBusy] = useState(false);
+  // T-6a (v1.1 Thalia): modal de edición de datos fiscales.
+  const [showFiscalModal, setShowFiscalModal] = useState(false);
 
   async function reload(): Promise<void> {
     if (!id) return;
@@ -213,6 +215,53 @@ export function TenantDetailPage() {
     }
   }
 
+  // T-6a: guarda datos fiscales editados. El endpoint hace el merge
+  // server-side preservando cualquier otro campo no enviado.
+  async function onSaveFiscal(input: {
+    legalName: string;
+    taxId: string;
+    address: string;
+    phone: string;
+  }): Promise<void> {
+    if (!id) return;
+    setBusy(true);
+    setActionError(null);
+    setActionMessage(null);
+    try {
+      const payload: {
+        legalName?: string;
+        taxId?: string;
+        address?: string;
+        phone?: string;
+      } = {};
+      const ln = input.legalName.trim();
+      const tx = input.taxId.trim();
+      const ad = input.address.trim();
+      const ph = input.phone.trim();
+      if (ln) payload.legalName = ln;
+      if (tx) payload.taxId = tx;
+      if (ad) payload.address = ad;
+      if (ph) payload.phone = ph;
+
+      if (Object.keys(payload).length === 0) {
+        setShowFiscalModal(false);
+        return;
+      }
+
+      await superApi(`/super-admin/tenants/${id}`, {
+        method: "PATCH",
+        body: { fiscalProfile: payload },
+      });
+      setActionMessage("Datos fiscales actualizados.");
+      setShowFiscalModal(false);
+      await reload();
+    } catch (err) {
+      setActionError(errToHuman(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onActivate(): Promise<void> {
     if (!id || !ownerEmail.trim() || !ownerName.trim()) return;
     setBusy(true);
@@ -352,9 +401,20 @@ export function TenantDetailPage() {
       <StateHeader state={tenant.onboardingState} />
 
       <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6">
-        <h3 className="font-semibold text-slate-900 mb-4">Datos fiscales</h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-slate-900">Datos fiscales</h3>
+          <button
+            onClick={() => setShowFiscalModal(true)}
+            disabled={busy}
+            className="h-8 px-3 text-[12.5px] border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-700 disabled:opacity-50"
+          >
+            Editar
+          </button>
+        </div>
         <p className="text-[12px] text-slate-500 mb-3">
-          Extraídos de la cuenta Holded del cliente. Read-only.
+          Datos que aparecen en cabecera de ticket. Si Holded los expone,
+          el sync inicial los rellena; aquí puedes editarlos o añadirlos
+          manualmente.
         </p>
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-[13px]">
           <div>
@@ -478,6 +538,15 @@ export function TenantDetailPage() {
           </table>
         )}
       </div>
+
+      {showFiscalModal && (
+        <FiscalProfileModal
+          tenant={tenant}
+          busy={busy}
+          onCancel={() => setShowFiscalModal(false)}
+          onSave={onSaveFiscal}
+        />
+      )}
 
       {showBlockModal && (
         <Modal onClose={() => setShowBlockModal(false)}>
@@ -880,6 +949,122 @@ function Action({
       <Icon className="w-4 h-4" />
       {label}
     </button>
+  );
+}
+
+// T-6a (v1.1 Thalia): edición de datos fiscales del tenant. El backend
+// hace merge server-side preservando cualquier campo no enviado. Si
+// el campo viene vacío, no se envía al PATCH (no pisa valor previo).
+function FiscalProfileModal({
+  tenant,
+  busy,
+  onCancel,
+  onSave,
+}: {
+  tenant: TenantDetail;
+  busy: boolean;
+  onCancel: () => void;
+  onSave: (input: {
+    legalName: string;
+    taxId: string;
+    address: string;
+    phone: string;
+  }) => void;
+}) {
+  // Pre-rellenamos con lo que ya hay. Si el tenant nunca tuvo el
+  // campo, queda vacío y el placeholder ayuda.
+  const fp = (tenant.fiscalProfile ?? {}) as Record<string, unknown>;
+  const initial = {
+    legalName: typeof fp.legalName === "string" ? fp.legalName : "",
+    taxId:
+      (typeof fp.taxId === "string" && fp.taxId) ||
+      (typeof fp.nif === "string" && fp.nif) ||
+      tenant.fiscalNif ||
+      "",
+    address: typeof fp.address === "string" ? fp.address : "",
+    phone: typeof fp.phone === "string" ? fp.phone : "",
+  };
+  const [legalName, setLegalName] = useState(initial.legalName);
+  const [taxId, setTaxId] = useState(initial.taxId);
+  const [address, setAddress] = useState(initial.address);
+  const [phone, setPhone] = useState(initial.phone);
+
+  return (
+    <Modal onClose={onCancel}>
+      <h3 className="font-semibold text-slate-900 mb-2">Editar datos fiscales</h3>
+      <p className="text-[12.5px] text-slate-600 mb-3">
+        Los campos vacíos no se modifican (no pisan el valor previo).
+        Los datos no se envían a Holded.
+      </p>
+      {tenant.holdedConnected && (
+        <div className="mb-3 p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-[11.5px] text-amber-900">
+          ⚠ Holded está conectado. El sync inicial sólo lo lanza una vez;
+          tras él, el fiscalProfile se mantiene tal cual hasta que tú o
+          el propietario lo editen. Si modificas algo en Holded, no se
+          reflejará aquí automáticamente.
+        </div>
+      )}
+      <label className="block text-[12.5px] font-medium text-slate-700 mb-1.5">
+        Razón social
+      </label>
+      <input
+        type="text"
+        value={legalName}
+        onChange={(e) => setLegalName(e.target.value)}
+        placeholder={tenant.name}
+        maxLength={200}
+        className="w-full h-10 px-3 border border-slate-300 rounded-lg text-[14px] mb-3 focus:outline-none focus:border-slate-500"
+      />
+      <label className="block text-[12.5px] font-medium text-slate-700 mb-1.5">
+        NIF / CIF / NIE
+      </label>
+      <input
+        type="text"
+        value={taxId}
+        onChange={(e) => setTaxId(e.target.value)}
+        placeholder="B12345678"
+        maxLength={32}
+        className="w-full h-10 px-3 border border-slate-300 rounded-lg text-[14px] mb-3 font-mono focus:outline-none focus:border-slate-500"
+      />
+      <label className="block text-[12.5px] font-medium text-slate-700 mb-1.5">
+        Dirección
+      </label>
+      <input
+        type="text"
+        value={address}
+        onChange={(e) => setAddress(e.target.value)}
+        placeholder="Calle Mayor 12, 28013 Madrid"
+        maxLength={300}
+        className="w-full h-10 px-3 border border-slate-300 rounded-lg text-[14px] mb-3 focus:outline-none focus:border-slate-500"
+      />
+      <label className="block text-[12.5px] font-medium text-slate-700 mb-1.5">
+        Teléfono
+      </label>
+      <input
+        type="text"
+        value={phone}
+        onChange={(e) => setPhone(e.target.value)}
+        placeholder="+34 912 345 678"
+        maxLength={32}
+        className="w-full h-10 px-3 border border-slate-300 rounded-lg text-[14px] focus:outline-none focus:border-slate-500"
+      />
+      <div className="flex gap-2 mt-4">
+        <button
+          onClick={() => onSave({ legalName, taxId, address, phone })}
+          disabled={busy}
+          className="flex-1 h-10 bg-slate-900 text-white rounded-lg text-[13px] font-medium hover:bg-slate-800 disabled:opacity-50"
+        >
+          {busy ? "Guardando…" : "Guardar"}
+        </button>
+        <button
+          onClick={onCancel}
+          disabled={busy}
+          className="flex-1 h-10 border border-slate-300 rounded-lg text-[13px] hover:bg-slate-50"
+        >
+          Cancelar
+        </button>
+      </div>
+    </Modal>
   );
 }
 

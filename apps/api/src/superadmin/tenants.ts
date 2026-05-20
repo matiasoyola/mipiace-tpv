@@ -605,8 +605,14 @@ export async function registerSuperAdminTenantsRoutes(
               additionalProperties: true,
               properties: {
                 legalName: { type: "string", maxLength: 200 },
+                // T-6a (v1.1 Thalia): acepta `nif` (legacy) y `taxId`
+                // (alias, lo que build.ts mira al construir el ticket).
+                // Si llega `taxId`, lo persistimos en AMBAS claves para
+                // que el ticket y el listado coincidan.
                 nif: { type: "string", minLength: 1, maxLength: 32 },
+                taxId: { type: "string", minLength: 1, maxLength: 32 },
                 address: { type: "string", maxLength: 300 },
+                phone: { type: "string", maxLength: 32 },
               },
             },
             // B-Multi-Vertical: el super-admin puede cambiar el
@@ -625,7 +631,13 @@ export async function registerSuperAdminTenantsRoutes(
       const body = request.body as {
         name?: string;
         plan?: string;
-        fiscalProfile?: { legalName?: string; nif?: string; address?: string };
+        fiscalProfile?: {
+          legalName?: string;
+          nif?: string;
+          taxId?: string;
+          address?: string;
+          phone?: string;
+        };
         businessType?: "HOSPITALITY" | "RETAIL" | "SERVICES";
       };
       const ctx = request.superAdmin!;
@@ -639,15 +651,21 @@ export async function registerSuperAdminTenantsRoutes(
         });
       }
 
-      // Validar NIF nuevo si cambia.
-      if (body.fiscalProfile?.nif !== undefined) {
-        const result = validateSpanishTaxId(body.fiscalProfile.nif);
+      // Validar NIF/taxId nuevo si cambia (T-6a: aceptamos cualquiera
+      // de los dos nombres; tras validar, normalizamos a uppercase y
+      // persistimos en ambos para coherencia ticket↔listado).
+      const incomingTaxId =
+        body.fiscalProfile?.taxId ?? body.fiscalProfile?.nif;
+      let normalizedTaxId: string | undefined;
+      if (incomingTaxId !== undefined) {
+        const result = validateSpanishTaxId(incomingTaxId);
         if (!result.valid) {
           return reply.code(400).send({
             error: "INVALID_FISCAL_NIF",
             message: "El identificador fiscal no es válido.",
           });
         }
+        normalizedTaxId = incomingTaxId.toUpperCase().replace(/[-\s]/g, "");
       }
 
       // Validar name unique si cambia.
@@ -682,6 +700,15 @@ export async function registerSuperAdminTenantsRoutes(
         const merged: Record<string, unknown> = { ...current };
         for (const [k, v] of Object.entries(body.fiscalProfile)) {
           if (v !== undefined) merged[k] = v;
+        }
+        // T-6a: si llegó taxId o nif validado, lo persistimos en ambas
+        // claves. Razón: fiscalNifFromProfile lee `taxId ?? nif ?? fiscalNif`
+        // y build.ts del ticket lee `taxId`. Tener ambos evita pintar el
+        // NIF en el listado pero NO en el ticket por una discrepancia
+        // entre quien guardó qué nombre.
+        if (normalizedTaxId !== undefined) {
+          merged.taxId = normalizedTaxId;
+          merged.nif = normalizedTaxId;
         }
         merged.updatedAt = new Date().toISOString();
         merged.source = "super_admin_update";
