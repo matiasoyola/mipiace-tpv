@@ -13,6 +13,7 @@
 // en la propia fila).
 
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Copy, Plus, Shield } from "lucide-react";
 
 import { superApi, SuperAdminApiError } from "./api.js";
@@ -35,6 +36,7 @@ function formatDate(iso: string | null): string {
 }
 
 export function AdminsListPage() {
+  const navigate = useNavigate();
   const [me, setMe] = useState<SuperAdminMe | null>(null);
   const [items, setItems] = useState<SuperAdminItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -55,6 +57,14 @@ export function AdminsListPage() {
         superApi<SuperAdminMe>("/super-admin/auth/me"),
         superApi<SuperAdminsListResponse>("/super-admin/admins"),
       ]);
+      // Lote 3 v1.1 Thalia: si entras vía URL directa siendo no-root,
+      // te redirigimos al dashboard. El backend YA filtra (devuelve
+      // sólo tu ficha), pero esta página no tiene sentido sin la
+      // capacidad de invitar/eliminar.
+      if (!meRes.isRoot) {
+        navigate("/superadmin/tenants", { replace: true });
+        return;
+      }
       setMe(meRes);
       setItems(listRes.items);
     } catch (err) {
@@ -68,6 +78,7 @@ export function AdminsListPage() {
 
   useEffect(() => {
     void reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function onDelete(target: SuperAdminItem): Promise<void> {

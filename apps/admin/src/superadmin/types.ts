@@ -181,6 +181,10 @@ export interface SuperAdminMe {
   twoFactorEnabled: boolean;
   recoveryCodesRemaining: number;
   lastLoginAt: string | null;
+  // Lote 3 v1.1 Thalia: si true, el frontend muestra el panel de
+  // gestión multi super-admin. Hint UI — la autorización real la
+  // verifica el backend (requireRootSuperAdmin con BD fresca).
+  isRoot: boolean;
 }
 
 // B-Multi-Vertical SB4: super-admin item del listado multi-admin.

@@ -8,8 +8,12 @@ import {
 } from "./tokens.js";
 
 // Contexto super-admin que las rutas leen como `request.superAdmin`.
+// Lote 3 v1.1 Thalia: `isRoot` se lee fresco de BD en cada request
+// (autoritativo). El claim JWT que también lo lleva sirve solo como
+// hint para el frontend.
 export interface SuperAdminContext {
   superAdminId: string;
+  isRoot: boolean;
 }
 
 declare module "fastify" {
@@ -46,7 +50,7 @@ export async function requireSuperAdmin(
   const prisma = getPrisma();
   const sa = await prisma.superAdminUser.findUnique({
     where: { id: payload.sub },
-    select: { id: true, tokenVersion: true, deletedAt: true },
+    select: { id: true, tokenVersion: true, deletedAt: true, isRoot: true },
   });
   if (!sa) {
     reply
@@ -70,5 +74,26 @@ export async function requireSuperAdmin(
       .send({ error: "UNAUTHENTICATED", message: "Sesión super-admin revocada" });
     return;
   }
-  request.superAdmin = { superAdminId: sa.id };
+  request.superAdmin = { superAdminId: sa.id, isRoot: sa.isRoot };
+}
+
+// Lote 3 v1.1 Thalia: middleware adicional para endpoints que sólo
+// puede usar el super-admin root (invitar/eliminar a otros super-admins).
+// Compose: requireSuperAdmin → check isRoot leído de BD. Un super-admin
+// no-root recibe 403 (autenticado pero sin permiso) en lugar de 401
+// (no autenticado).
+export async function requireRootSuperAdmin(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  await requireSuperAdmin(request, reply);
+  if (reply.sent) return;
+  if (!request.superAdmin?.isRoot) {
+    reply.code(403).send({
+      error: "FORBIDDEN_NOT_ROOT",
+      message:
+        "Esta acción requiere ser super-admin root.",
+    });
+    return;
+  }
 }
