@@ -49,6 +49,11 @@ interface TicketLineBody {
   sku: string;
   units: number;
   unitPrice: number;
+  // v1.2-Lite Lote 4.B · T-5: precio modificado puntualmente por el
+  // cajero. Si viene presente, se usa para totales y se envía a Holded
+  // como precio unitario. unitPrice queda como histórico del catálogo
+  // (auditoría: "modificado de X€ a Y€"). Omitido = sin override.
+  unitPriceOverride?: number;
   discountPct: number;
   taxRate: number;
   // Legacy: array de strings tipeados ad-hoc por el cajero ("Sin azúcar").
@@ -122,6 +127,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
                   sku: { type: "string", minLength: 1, maxLength: 64 },
                   units: { type: "number", exclusiveMinimum: 0, maximum: 99999 },
                   unitPrice: { type: "number", minimum: 0, maximum: 100000 },
+                  unitPriceOverride: { type: "number", minimum: 0, maximum: 100000 },
                   discountPct: { type: "number", minimum: 0, maximum: 100 },
                   taxRate: { type: "number", minimum: 0, maximum: 100 },
                   modifiers: {
@@ -237,13 +243,22 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         r.ok ? r.resolved : { unitPriceDeltaCents: 0, snapshot: [] },
       );
 
-      // 3.b Validaciones de totales y pagos. unitPrice efectivo incluye
-      //     los priceDeltas en céntimos / 100 (por unidad).
+      // 3.b Validaciones de totales y pagos. unitPrice efectivo:
+      //   - parte del override del cajero si está presente (Lote 4.B),
+      //     si no del unitPrice base del catálogo;
+      //   - suma los priceDeltas de modificadores en céntimos/100 por
+      //     unidad.
+      // El override SIEMPRE prevalece sobre el base — es el ajuste
+      // explícito del cajero (libro descatalogado, etc.) y entra a
+      // Holded como precio cobrado real.
+      const lineBaseUnitPrice = body.lines.map((l) =>
+        typeof l.unitPriceOverride === "number" ? l.unitPriceOverride : l.unitPrice,
+      );
       const totals = computeTicket(
         body.lines.map((l, i) => ({
           units: l.units,
           unitPrice:
-            l.unitPrice + lineModifierResolutions[i]!.unitPriceDeltaCents / 100,
+            lineBaseUnitPrice[i]! + lineModifierResolutions[i]!.unitPriceDeltaCents / 100,
           discountPct: l.discountPct,
           taxRate: l.taxRate,
         })),
@@ -415,6 +430,14 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
                 // unitPrice "limpio" para que la auditoría sea legible y
                 // los modifiers expliquen explícitamente el suplemento.
                 unitPrice: new Prisma.Decimal(l.unitPrice),
+                // v1.2-Lite Lote 4.B: persistimos el override si el cajero
+                // tocó el lápiz. La línea de venta cobrada usa este valor
+                // (lineBaseUnitPrice ya lo aplicó al computar totals) y
+                // Holded lo recibe como precio unitario en upload-ticket.
+                unitPriceOverride:
+                  typeof l.unitPriceOverride === "number"
+                    ? new Prisma.Decimal(l.unitPriceOverride)
+                    : null,
                 discountPct: new Prisma.Decimal(l.discountPct),
                 taxRate: new Prisma.Decimal(l.taxRate),
                 subtotal: new Prisma.Decimal(totals.lines[i]!.subtotal),

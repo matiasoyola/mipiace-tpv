@@ -716,6 +716,14 @@ model TicketLine {
   nameSnapshot    String  @map("name_snapshot")
   units           Decimal @db.Decimal(10, 3)
   unitPrice       Decimal @map("unit_price") @db.Decimal(10, 2)
+  // v1.2-Lite Lote 4.B · T-5: si el cajero modifica el precio puntualmente
+  // (libro descatalogado, ajuste rápido) se guarda aquí. NULL = sin
+  // override, se cobra el `unitPrice` base. Cuando hay override, los
+  // cálculos de subtotal/total usan este valor; el `unitPrice` queda
+  // como histórico del catálogo para que la auditoría pueda mostrar
+  // "modificado de X€ a Y€". Holded recibe el override (acepta precios
+  // unitarios distintos del producto base).
+  unitPriceOverride Decimal? @map("unit_price_override") @db.Decimal(10, 2)
   discountPct     Decimal @default(0) @map("discount_pct") @db.Decimal(5, 2)
   taxRate         Decimal @map("tax_rate") @db.Decimal(5, 2)
   subtotal        Decimal @db.Decimal(10, 2)

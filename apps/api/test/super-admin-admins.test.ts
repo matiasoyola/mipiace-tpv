@@ -36,6 +36,11 @@ interface FakeSuperAdmin {
   deletedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  // Lote 3 v1.1 + v1.2-Lite Lote 2: super-admins root pueden invitar,
+  // eliminar y reenviar invitaciones. El middleware lo lee fresco de
+  // BD en cada request — el fixture default es root para que los tests
+  // de CRUD funcionen sin tener que crear OWNERs intermedios.
+  isRoot: boolean;
 }
 
 interface FakeAudit {
@@ -111,6 +116,9 @@ const fakePrisma: any = {
         deletedAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
+        // Invitados nacen no-root: el root invita pero no
+        // promociona aquí (separado en otra ruta cuando exista).
+        isRoot: false,
       };
       superAdmins.set(sa.id, sa);
       if (select) {
@@ -126,6 +134,12 @@ const fakePrisma: any = {
       if (data.deletedAt !== undefined) sa.deletedAt = data.deletedAt;
       if (data.tokenVersion?.increment != null)
         sa.tokenVersion += data.tokenVersion.increment;
+      // v1.2-Lite Lote 2: resend-invite actualiza passwordHash +
+      // mustChangePassword. Lo reflejamos en el fake para que los
+      // asserts del test puedan verificarlo.
+      if (typeof data.passwordHash === "string") sa.passwordHash = data.passwordHash;
+      if (data.mustChangePassword !== undefined)
+        sa.mustChangePassword = data.mustChangePassword;
       if (select) {
         const out: Record<string, unknown> = {};
         for (const k of Object.keys(select)) out[k] = (sa as any)[k];
@@ -210,6 +224,7 @@ beforeEach(() => {
     deletedAt: null,
     createdAt: new Date("2026-05-12T10:00:00Z"),
     updatedAt: new Date(),
+    isRoot: true,
   });
 });
 
@@ -404,6 +419,126 @@ describe("DELETE /super-admin/admins/:id", () => {
     const res = await app.inject({
       method: "DELETE",
       url: `/super-admin/admins/${OTHER_ID}`,
+    });
+    expect(res.statusCode).toBe(401);
+    await app.close();
+  });
+});
+
+// v1.2-Lite Lote 2: reenviar invitación.
+describe("POST /super-admin/admins/:id/resend-invite", () => {
+  it("reenvía email + bumpea tokenVersion + nueva tempPassword + audit", async () => {
+    const prevHash = "v1:hash-original";
+    superAdmins.set(OTHER_ID, {
+      ...superAdmins.get(SUPER_ADMIN_ID)!,
+      id: OTHER_ID,
+      email: "needs-resend@holded.com",
+      name: "Needs Resend",
+      passwordHash: prevHash,
+      tokenVersion: 5,
+      mustChangePassword: false,
+      isRoot: false,
+      totpEnabledAt: null,
+    });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/super-admin/admins/${OTHER_ID}/resend-invite`,
+      headers: { authorization: `Bearer ${token()}` },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(typeof body.tempPassword).toBe("string");
+    expect(body.tempPassword.length).toBeGreaterThanOrEqual(8);
+    expect(body.admin.id).toBe(OTHER_ID);
+    expect(body.admin.email).toBe("needs-resend@holded.com");
+
+    const after = superAdmins.get(OTHER_ID)!;
+    expect(after.passwordHash).not.toBe(prevHash);
+    expect(after.tokenVersion).toBe(6);
+    expect(after.mustChangePassword).toBe(true);
+
+    expect(sentEmails).toHaveLength(1);
+    expect(sentEmails[0]!.to).toBe("needs-resend@holded.com");
+    expect(sentEmails[0]!.text).toContain(body.tempPassword);
+
+    expect(audits).toHaveLength(1);
+    expect(audits[0]!.action).toBe("resend_super_admin_invite");
+    expect((audits[0]!.metadata as { targetEmail: string }).targetEmail).toBe(
+      "needs-resend@holded.com",
+    );
+
+    await app.close();
+  });
+
+  it("target soft-deleted → 404 SUPER_ADMIN_NOT_FOUND (no rehidrata)", async () => {
+    superAdmins.set(OTHER_ID, {
+      ...superAdmins.get(SUPER_ADMIN_ID)!,
+      id: OTHER_ID,
+      email: "ghost@holded.com",
+      isRoot: false,
+      deletedAt: new Date("2026-05-15T00:00:00Z"),
+    });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/super-admin/admins/${OTHER_ID}/resend-invite`,
+      headers: { authorization: `Bearer ${token()}` },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toBe("SUPER_ADMIN_NOT_FOUND");
+    expect(sentEmails).toHaveLength(0);
+    expect(audits).toHaveLength(0);
+    await app.close();
+  });
+
+  it("target con 2FA ya activado → 409 ALREADY_ONBOARDED", async () => {
+    superAdmins.set(OTHER_ID, {
+      ...superAdmins.get(SUPER_ADMIN_ID)!,
+      id: OTHER_ID,
+      email: "twofa@holded.com",
+      isRoot: false,
+      totpEnabledAt: new Date("2026-05-18T00:00:00Z"),
+    });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/super-admin/admins/${OTHER_ID}/resend-invite`,
+      headers: { authorization: `Bearer ${token()}` },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("ALREADY_ONBOARDED");
+    expect(sentEmails).toHaveLength(0);
+    await app.close();
+  });
+
+  it("SMTP cae → 201 igual, tempPassword en response (log warn)", async () => {
+    superAdmins.set(OTHER_ID, {
+      ...superAdmins.get(SUPER_ADMIN_ID)!,
+      id: OTHER_ID,
+      email: "smtp-down@holded.com",
+      isRoot: false,
+      totpEnabledAt: null,
+    });
+    throwOnSend = true;
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/super-admin/admins/${OTHER_ID}/resend-invite`,
+      headers: { authorization: `Bearer ${token()}` },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(typeof res.json().tempPassword).toBe("string");
+    expect(sentEmails).toHaveLength(0);
+    expect(audits).toHaveLength(1);
+    await app.close();
+  });
+
+  it("rechaza sin auth → 401", async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/super-admin/admins/${OTHER_ID}/resend-invite`,
     });
     expect(res.statusCode).toBe(401);
     await app.close();

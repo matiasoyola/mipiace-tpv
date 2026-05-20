@@ -408,6 +408,7 @@ export function SalePage(props: SalePageProps) {
         nameSnapshot: p.name,
         units,
         unitPrice: p.basePrice,
+        unitPriceOverride: null,
         priceGross: p.priceGross,
         discountPct: 0,
         taxRate: p.taxRate,
@@ -448,6 +449,7 @@ export function SalePage(props: SalePageProps) {
       nameSnapshot: input.name,
       units: 1,
       unitPrice: Math.round(basePrice * 100) / 100,
+      unitPriceOverride: null,
       priceGross: input.price,
       discountPct: 0,
       taxRate: input.taxRate,
@@ -1366,14 +1368,39 @@ function SaleWorkspace({
                       {l.units}
                     </span>
                     <div className="flex-1 min-w-0">
-                      <div className="text-[14px] md:text-[14.5px] font-medium text-mipiace-ink leading-tight">
-                        {l.nameSnapshot}
+                      <div className="text-[14px] md:text-[14.5px] font-medium text-mipiace-ink leading-tight flex items-center gap-1.5">
+                        <span>{l.nameSnapshot}</span>
+                        {/* v1.2-Lite Lote 4.B: badge "precio modificado"
+                            cuando el cajero tocó el lápiz. Discreto
+                            (no roba el foco) pero visible al revisar. */}
+                        {l.unitPriceOverride != null && (
+                          <span
+                            className="text-[10.5px] font-semibold uppercase tracking-wider bg-amber-100 text-amber-800 rounded px-1.5 py-0.5"
+                            title={`Precio original ${formatEur(l.priceGross)}`}
+                          >
+                            Precio modificado
+                          </span>
+                        )}
                       </div>
                       {l.modifierSelections && l.modifierSelections.length > 0 ? (
                         <ModifierBreakdown selections={l.modifierSelections} />
                       ) : l.modifiers.length > 0 ? (
                         <div className="text-[12.5px] text-slate-500 mt-0.5">
                           {l.modifiers.join(" · ")}
+                        </div>
+                      ) : l.unitPriceOverride != null ? (
+                        // El bruto efectivo difiere del priceGross
+                        // (priceGross fue calculado sobre unitPrice base).
+                        // Mostramos el bruto override con IVA + el del
+                        // catálogo tachado para que el cajero vea el delta.
+                        <div className="text-[12.5px] text-amber-700 mt-0.5 tabular-nums">
+                          {formatEur(
+                            l.unitPriceOverride * (1 + l.taxRate / 100),
+                          )}{" "}
+                          ud.{" "}
+                          <span className="text-slate-400 line-through">
+                            {formatEur(l.priceGross)}
+                          </span>
                         </div>
                       ) : l.discountPct > 0 ? (
                         <div className="text-[12.5px] text-mipiace-coral mt-0.5 tabular-nums">

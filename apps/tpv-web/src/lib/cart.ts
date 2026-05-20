@@ -29,6 +29,12 @@ export interface CartLine {
   // `modifierSelections` y `computeLine` los suma a runtime. Mantener
   // `unitPrice` "limpio" hace fácil renderizar el desglose "X € + delta".
   unitPrice: number;
+  // v1.2-Lite Lote 4.B · T-5: si el cajero modifica el precio puntualmente
+  // con el lápiz, queda aquí. null = sin override. Cuando hay override,
+  // computeLine lo usa como base (los deltas de modificadores se siguen
+  // aplicando encima). El payload del POST /tickets envía este valor y
+  // mantiene unitPrice como histórico del catálogo.
+  unitPriceOverride: number | null;
   priceGross: number; // unitPrice * (1 + taxRate/100) — sin modifiers
   discountPct: number;
   taxRate: number;
@@ -67,10 +73,17 @@ export function computeLine(
   line: Pick<
     CartLine,
     "units" | "unitPrice" | "discountPct" | "taxRate"
-  > & { modifierSelections?: ModifierSelection[] },
+  > & {
+    modifierSelections?: ModifierSelection[];
+    // v1.2-Lite Lote 4.B: override del cajero (lápiz). Si está
+    // presente, prevalece sobre unitPrice del catálogo.
+    unitPriceOverride?: number | null;
+  },
 ): LineTotals {
   const deltaPerUnit = sumModifierDeltas(line.modifierSelections) / 100;
-  const grossPerUnit = (line.unitPrice + deltaPerUnit) * (1 - line.discountPct / 100);
+  const baseUnit =
+    line.unitPriceOverride != null ? line.unitPriceOverride : line.unitPrice;
+  const grossPerUnit = (baseUnit + deltaPerUnit) * (1 - line.discountPct / 100);
   const subtotalNet = round2(grossPerUnit * line.units);
   const totalGross = round2(subtotalNet * (1 + line.taxRate / 100));
   return {
@@ -110,8 +123,11 @@ export function computeCart(lines: CartLine[]): CartTotals {
     total += t.totalGross;
     // "Bruto sin descuento" para el cálculo del % global de descuento
     // incluye los deltas de modificadores — son parte del precio "lista".
+    // Lote 4.B: si la línea tiene override, ese es el "precio cobrado"
+    // efectivo y entra en el grossNoDiscount tal cual.
     const deltaPerUnit = sumModifierDeltas(l.modifierSelections) / 100;
-    grossNoDiscount += round2((l.unitPrice + deltaPerUnit) * l.units);
+    const baseUnit = l.unitPriceOverride != null ? l.unitPriceOverride : l.unitPrice;
+    grossNoDiscount += round2((baseUnit + deltaPerUnit) * l.units);
     itemCount += l.units;
   }
   return {

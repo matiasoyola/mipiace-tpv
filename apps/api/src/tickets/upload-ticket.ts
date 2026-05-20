@@ -248,6 +248,10 @@ export function buildTicketSalesreceiptPayload(ticket: {
     nameSnapshot: string;
     units: { toString(): string } | number;
     unitPrice: { toString(): string } | number;
+    // v1.2-Lite Lote 4.B: si la línea lleva override (el cajero pulsó el
+    // lápiz), Holded recibe ese precio. unitPrice queda como histórico
+    // del catálogo y sirve para auditoría TPV.
+    unitPriceOverride?: { toString(): string } | number | null;
     taxRate: { toString(): string } | number;
     discountPct: { toString(): string } | number;
     sku: string;
@@ -292,9 +296,15 @@ export function buildTicketSalesreceiptPayload(ticket: {
 // Holded en el item del salesreceipt, observado en fixtures Fase 0).
 function formatLineForHolded(line: {
   unitPrice: { toString(): string } | number;
+  unitPriceOverride?: { toString(): string } | number | null;
   modifiers?: unknown;
 }): { rolledUpUnitPrice: number; description: string | null } {
-  const baseUnitPrice = Number(line.unitPrice);
+  // v1.2-Lite Lote 4.B: override del cajero prevalece sobre el unitPrice
+  // del catálogo. Holded recibe lo cobrado realmente.
+  const baseUnitPrice =
+    line.unitPriceOverride != null
+      ? Number(line.unitPriceOverride)
+      : Number(line.unitPrice);
   if (!Array.isArray(line.modifiers) || line.modifiers.length === 0) {
     return { rolledUpUnitPrice: baseUnitPrice, description: null };
   }

@@ -147,6 +147,12 @@ export function CheckoutOverlay(props: {
         sku: l.sku,
         units: l.units,
         unitPrice: l.unitPrice,
+        // v1.2-Lite Lote 4.B: override del cajero, sólo enviar si está
+        // presente. El backend usa este valor como base de cálculo y
+        // lo envía a Holded como precio unitario. unitPrice queda como
+        // histórico del catálogo.
+        unitPriceOverride:
+          l.unitPriceOverride != null ? l.unitPriceOverride : undefined,
         discountPct: l.discountPct,
         taxRate: l.taxRate,
         modifiers: l.modifiers.length > 0 ? l.modifiers : undefined,

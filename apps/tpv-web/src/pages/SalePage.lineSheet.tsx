@@ -3,11 +3,24 @@
 // eliminar. Reutiliza la misma estética de las sheets de SalePage.
 
 import { useState } from "react";
-import { Minus, Plus, Trash2, X } from "lucide-react";
+import { Minus, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
 
 import { computeLine, type CartLine } from "../lib/cart.js";
 
 const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
+
+// v1.2-Lite Lote 4.B: parsea precio escrito por el cajero. Soporta
+// coma o punto como separador decimal. Devuelve null si el input está
+// vacío (= sin override) o si no parsea. NaN o negativo → null
+// también: validamos en commit que se haya pulsado guardar con valor
+// razonable.
+function parsePriceInput(raw: string): number | null {
+  const t = raw.trim().replace(",", ".");
+  if (t.length === 0) return null;
+  const n = Number(t);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n * 100) / 100;
+}
 
 export function LineSheet({
   line,
@@ -23,17 +36,48 @@ export function LineSheet({
   const [units, setUnits] = useState(String(line.units));
   const [discountPct, setDiscountPct] = useState(String(line.discountPct));
   const [modifierDraft, setModifierDraft] = useState("");
+  // v1.2-Lite Lote 4.B · T-5: edición puntual de precio. UX:
+  //   - Por defecto colapsado: muestra el precio base + botón lápiz.
+  //   - Al pulsar el lápiz se despliega un input prellenado con el
+  //     precio actual (override o base).
+  //   - "Restaurar" vuelve al precio del catálogo (limpia el override).
+  // Mantenemos el override en el patch del onChange sólo si difiere
+  // del base (evita persistir overrides "iguales al catálogo" que
+  // confundirían la auditoría).
+  const [showPriceEditor, setShowPriceEditor] = useState(
+    line.unitPriceOverride != null,
+  );
+  const [priceInput, setPriceInput] = useState(
+    line.unitPriceOverride != null
+      ? line.unitPriceOverride.toFixed(2).replace(".", ",")
+      : line.unitPrice.toFixed(2).replace(".", ","),
+  );
+  const effectiveUnitPrice =
+    line.unitPriceOverride != null ? line.unitPriceOverride : line.unitPrice;
+  const previewUnitPrice = showPriceEditor
+    ? (parsePriceInput(priceInput) ?? effectiveUnitPrice)
+    : effectiveUnitPrice;
   const computed = computeLine({
     units: Number(units) || 0,
     unitPrice: line.unitPrice,
+    unitPriceOverride:
+      showPriceEditor && previewUnitPrice !== line.unitPrice
+        ? previewUnitPrice
+        : null,
     discountPct: Number(discountPct) || 0,
     taxRate: line.taxRate,
   });
 
   function commit() {
+    const parsed = showPriceEditor ? parsePriceInput(priceInput) : null;
+    const nextOverride =
+      showPriceEditor && parsed != null && parsed !== line.unitPrice
+        ? parsed
+        : null;
     onChange({
       units: Math.max(0.001, Number(units) || 1),
       discountPct: Math.min(100, Math.max(0, Number(discountPct) || 0)),
+      unitPriceOverride: nextOverride,
     });
     onClose();
   }
@@ -63,6 +107,79 @@ export function LineSheet({
           >
             <X className="w-4 h-4" strokeWidth={2.25} />
           </button>
+        </div>
+
+        {/* v1.2-Lite Lote 4.B · T-5: editor de precio puntual.
+            Colapsado por defecto; al pulsar el lápiz se abre un input
+            prellenado con el precio efectivo. "Restaurar" vuelve al
+            precio del catálogo limpiando el override. Cualquier cajero
+            puede tocarlo — la auditoría queda en BD vía
+            unitPriceOverride. */}
+        <div className="mt-4">
+          <label className="block text-[13px] font-medium text-mipiace-ink-soft mb-2">
+            Precio unitario
+          </label>
+          {!showPriceEditor ? (
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-12 px-3.5 rounded-xl bg-mipiace-stone text-[14.5px] tabular-nums flex items-center">
+                {line.unitPriceOverride != null ? (
+                  <span className="flex items-center gap-2">
+                    <span className="text-amber-700 font-semibold">
+                      {formatEur(line.unitPriceOverride)}
+                    </span>
+                    <span className="text-[11.5px] text-slate-500 line-through">
+                      {formatEur(line.unitPrice)}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="text-mipiace-ink">
+                    {formatEur(line.unitPrice)}
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPriceEditor(true)}
+                className="h-12 px-3.5 rounded-xl bg-mipiace-stone hover:bg-slate-100 text-slate-600 flex items-center gap-1.5 text-[13px] font-medium"
+                aria-label="Modificar precio"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                Modificar
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <input
+                value={priceInput}
+                onChange={(e) => setPriceInput(e.target.value)}
+                inputMode="decimal"
+                className="flex-1 h-12 px-3.5 rounded-xl bg-mipiace-stone border border-transparent text-[14.5px] focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none tabular-nums text-right"
+                placeholder="0,00"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commit();
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPriceEditor(false);
+                  setPriceInput(line.unitPrice.toFixed(2).replace(".", ","));
+                }}
+                className="h-12 px-3 rounded-xl bg-mipiace-stone hover:bg-slate-100 text-slate-600 flex items-center gap-1.5 text-[12.5px] font-medium"
+                aria-label="Restaurar precio del catálogo"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Restaurar
+              </button>
+            </div>
+          )}
+          {showPriceEditor && (
+            <p className="text-[11.5px] text-slate-400 mt-1.5">
+              Pulsa Aplicar para guardar el precio. Se enviará a Holded
+              tal cual lo cobres. Precio del catálogo:{" "}
+              <span className="tabular-nums">{formatEur(line.unitPrice)}</span>.
+            </p>
+          )}
         </div>
 
         <div className="mt-5">
