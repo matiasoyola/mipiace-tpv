@@ -1,3 +1,6 @@
+import { writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
@@ -9,9 +12,48 @@ import { VitePWA } from "vite-plugin-pwa";
 // se añaden en B4 cuando exista identidad visual. Mientras tanto, el
 // navegador usará el favicon SVG generado por Vite.
 
+// v1.2-Lite Lote 3.B · invalidación SW agresiva.
+//
+// Tras detectar que tras un deploy el TPV del cajero seguía sirviendo
+// el bundle viejo (a pesar de registerType:autoUpdate), añadimos un
+// version-check determinista:
+//
+//   1. Build emite un `APP_VERSION` único (timestamp de build) que
+//      queda embebido en el bundle vía Vite `define`.
+//   2. Build emite también `dist/version.json` con el mismo valor.
+//      Caddy lo sirve plano (no precacheado por el SW: ".json" no está
+//      en globPatterns).
+//   3. En arranque, el TPV hace `fetch('/version.json', cache:'no-store')`
+//      y, si la versión del servidor difiere de la embebida, limpia
+//      caches + IDB + SW y recarga.
+//
+// La constante se calcula una sola vez por proceso de Vite (no por
+// archivo importado), así dev y build comparten valor en la misma
+// sesión.
+const APP_VERSION = `${Date.now()}`;
+
+function emitVersionJson(): import("vite").Plugin {
+  return {
+    name: "mipiacetpv-emit-version-json",
+    apply: "build",
+    closeBundle() {
+      const outFile = resolve(__dirname, "dist", "version.json");
+      writeFileSync(
+        outFile,
+        JSON.stringify({ version: APP_VERSION }) + "\n",
+        "utf8",
+      );
+    },
+  };
+}
+
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
+  },
   plugins: [
     react(),
+    emitVersionJson(),
     VitePWA({
       registerType: "autoUpdate",
       includeAssets: ["favicon.svg"],
