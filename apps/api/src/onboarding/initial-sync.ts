@@ -11,6 +11,7 @@ import {
   iterateAllProducts,
   iterateAllServices,
   listTaxes,
+  listUnrecognizedImageKeys,
   listWarehouses,
   type HoldedContact,
   type HoldedProduct,
@@ -134,16 +135,32 @@ export async function runInitialSync(options: RunInitialSyncOptions): Promise<Sy
         });
       }
       // Datos fiscales mínimos para el pie del ticket: del almacén default.
+      // T-6 (v1.1 Thalia): el warehouse de Holded NO trae taxId/nif —
+      // ese dato vive a nivel de cuenta y no lo expone /warehouses. Si
+      // el super-admin lo metió al crear el DRAFT (fiscalProfile.taxId
+      // + legalName), aquí preservamos esos campos. ANTES pisábamos el
+      // fiscalProfile entero y Thalia perdía su NIF tras el primer
+      // sync.
       const def = warehousesPayload.find((w) => w.default) ?? warehousesPayload[0];
       if (def) {
+        const existing = await prisma.tenant.findUnique({
+          where: { id: tenantId },
+          select: { fiscalProfile: true },
+        });
+        const prev = (existing?.fiscalProfile ?? {}) as Record<string, unknown>;
         await prisma.tenant.update({
           where: { id: tenantId },
           data: {
             fiscalProfile: {
+              ...prev,
               source: "warehouse_default",
               warehouseHoldedId: def.id,
               name: def.name,
               address: def.address ?? null,
+              // legalName/taxId/nif/phone: se preservan vía spread `prev`.
+              // Si el super-admin los puso al crear el tenant, siguen
+              // ahí. Si nunca se pusieron, quedan undefined → build.ts
+              // los tolera (Bug-05).
             } as object,
           },
         });
@@ -280,6 +297,20 @@ async function upsertCatalogEntry(
   // el mismo helper (raw es HoldedProduct | HoldedService, ambos con
   // los campos de imagen como opcionales).
   const imageUrl = extractImageUrl(raw as HoldedProduct);
+  // Inv-1 (v1.1 Thalia): si hay claves "image-like" no reconocidas,
+  // emitir warning con la lista para que el siguiente sync nos diga
+  // qué campo Holded usa en esa cuenta. Sin spam: sólo si imageUrl
+  // quedó null.
+  if (imageUrl === null) {
+    const unknownKeys = listUnrecognizedImageKeys(raw as HoldedProduct);
+    if (unknownKeys.length > 0) {
+      log.warn("producto sin imagen reconocida pero raw tiene claves image-like", {
+        holdedProductId: raw.id,
+        name: raw.name,
+        candidateKeys: unknownKeys,
+      });
+    }
+  }
   // B-Categorias-via-Tags: normalizamos los tags de Holded. Llegan
   // como string[] pero defensivamente filtramos vacíos y duplicados
   // (un cliente paranoico podría taguear "Bebidas" dos veces). El

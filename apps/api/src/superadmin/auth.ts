@@ -279,6 +279,11 @@ export async function registerSuperAdminAuthRoutes(
         twoFactorEnabled: sa.totpEnabledAt != null,
         recoveryCodesRemaining: recovery.filter((c) => c.usedAt == null).length,
         lastLoginAt: sa.lastLoginAt?.toISOString() ?? null,
+        // Lote 3 v1.1 Thalia: el frontend usa esto para mostrar/ocultar
+        // el panel de gestión de super-admins. Es un hint UI; la
+        // autorización real la enforza requireRootSuperAdmin en el
+        // backend con BD fresca.
+        isRoot: sa.isRoot,
       };
     },
   );

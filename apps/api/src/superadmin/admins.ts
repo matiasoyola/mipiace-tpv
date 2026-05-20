@@ -23,7 +23,7 @@ import { getPrisma } from "../context.js";
 import { loadEnv } from "../env.js";
 
 import { extractRequestSignals, writeAudit } from "./audit.js";
-import { requireSuperAdmin } from "./middleware.js";
+import { requireRootSuperAdmin, requireSuperAdmin } from "./middleware.js";
 
 const emailFormat = "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$";
 
@@ -114,10 +114,16 @@ export async function registerSuperAdminAdminsRoutes(
   app.get(
     "/super-admin/admins",
     { preHandler: requireSuperAdmin },
-    async () => {
+    async (request) => {
+      const ctx = request.superAdmin!;
       const prisma = getPrisma();
+      // Lote 3 v1.1 Thalia: el no-root sólo ve su propia ficha.
+      // Filtramos en BD (no en memoria) para no exponer ni siquiera el
+      // count del resto de super-admins.
       const rows = await prisma.superAdminUser.findMany({
-        where: { deletedAt: null },
+        where: ctx.isRoot
+          ? { deletedAt: null }
+          : { deletedAt: null, id: ctx.superAdminId },
         orderBy: { createdAt: "asc" },
         select: {
           id: true,
@@ -135,7 +141,8 @@ export async function registerSuperAdminAdminsRoutes(
   app.post(
     "/super-admin/admins",
     {
-      preHandler: requireSuperAdmin,
+      // Lote 3 v1.1 Thalia: invitar nuevos super-admins requiere root.
+      preHandler: requireRootSuperAdmin,
       schema: {
         body: {
           type: "object",
@@ -264,7 +271,8 @@ export async function registerSuperAdminAdminsRoutes(
   app.delete(
     "/super-admin/admins/:id",
     {
-      preHandler: requireSuperAdmin,
+      // Lote 3 v1.1 Thalia: eliminar super-admins requiere root.
+      preHandler: requireRootSuperAdmin,
       schema: {
         params: {
           type: "object",

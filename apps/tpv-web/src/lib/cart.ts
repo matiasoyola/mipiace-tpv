@@ -44,6 +44,10 @@ export interface SuspendedCart {
   createdAt: string;
   lines: CartLine[];
   contactHoldedId?: string;
+  // T-3 (v1.1 Thalia): nombre del cliente snapshotted al suspender,
+  // para que la lista de "Pendientes" lo muestre sin tener que ir a
+  // BD. Opcional: carritos suspendidos antes de v1.1 no lo tienen.
+  contactName?: string;
   notes?: string;
 }
 

@@ -35,6 +35,7 @@ import {
   iterateAllProducts,
   iterateAllServices,
   listTaxes,
+  listUnrecognizedImageKeys,
   listWarehouses,
   type HoldedProduct,
   type HoldedService,
@@ -336,6 +337,19 @@ async function upsertCatalogEntry(
     typeof barcodeRaw === "string" && barcodeRaw.length > 0 ? barcodeRaw : null;
   const sellable = sku !== null && resolvedTaxRate !== null;
   const newImageUrl = extractImageUrl(raw as HoldedProduct);
+  // Inv-1 (v1.1 Thalia): si hay imageUrl null pero el raw tiene claves
+  // que parecen imagen (image_xxx, attachmentUrl, etc.) loguear para
+  // detectar campos nuevos sin tener que pedir un dump por slack.
+  if (newImageUrl === null) {
+    const unknownKeys = listUnrecognizedImageKeys(raw as HoldedProduct);
+    if (unknownKeys.length > 0) {
+      log.warn("producto sin imagen reconocida pero raw tiene claves image-like", {
+        holdedProductId: raw.id,
+        name: raw.name,
+        candidateKeys: unknownKeys,
+      });
+    }
+  }
   // B-Categorias-via-Tags: normalizamos los tags Holded igual que en
   // initial-sync. Filtra vacíos y duplicados defensivamente. Si el
   // propietario quita tags en Holded, el array queda vacío y el chip

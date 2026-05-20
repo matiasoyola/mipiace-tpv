@@ -1021,6 +1021,12 @@ model SuperAdminUser {
   // empieza con password temporal. true → al primer login el front le
   // pide cambiarla. Se pone false en cuanto se cambia.
   mustChangePassword Boolean @default(false) @map("must_change_password")
+  // Lote 3 v1.1 Thalia: sólo el "root" puede invitar/eliminar a otros
+  // super-admins. El resto opera tenants y nada más. El middleware
+  // requireRootSuperAdmin re-lee este flag de BD en cada request — el
+  // claim JWT NO es autoritativo (revoca-root tras emisión de token
+  // funciona en la siguiente request).
+  isRoot          Boolean   @default(false) @map("is_root")
   // B-Multi-Vertical SB4: soft-delete. Preservamos el row para que la
   // tabla `super_admin_audits` (que tiene FK Restrict sobre este
   // modelo) mantenga el histórico aunque se "borre" al super-admin.

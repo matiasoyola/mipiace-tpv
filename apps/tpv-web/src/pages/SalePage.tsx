@@ -58,6 +58,7 @@ import { LineSheet } from "./SalePage.lineSheet.js";
 import { ModifierSelector } from "./SalePage.modifierSelector.js";
 import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
 import { useElapsedTime } from "../hooks/useElapsedTime.js";
+import { useStoreEventStream } from "../hooks/useStoreEventStream.js";
 import type { ModifierSelection } from "../lib/cart.js";
 import {
   buildGroupsByProduct,
@@ -128,6 +129,10 @@ export interface SalePageProps {
   onLogoutCashier: () => void;
   onCloseShift: () => void;
 }
+
+// P-1 (v1.1 peluquería): persistencia del toggle Servicios/Productos
+// para verticales SERVICES.
+const KIND_FILTER_KEY = "mipiacetpv-sale-kind-filter";
 
 export function SalePage(props: SalePageProps) {
   const [showCloseShift, setShowCloseShift] = useState(false);
@@ -230,6 +235,59 @@ export function SalePage(props: SalePageProps) {
   useEffect(() => {
     void refreshShiftTicketsCount();
   }, [refreshShiftTicketsCount]);
+
+  // Lote 4 v1.1 Thalia: subscripción al bus realtime para que dos
+  // cajas del mismo store vean los tickets cobrados/devueltos por la
+  // otra sin esperar al polling de 30s. Necesitamos el storeId del
+  // cashier — /tpv/tables ya lo devuelve para cualquier vertical.
+  const [storeId, setStoreId] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { apiWithCashier } = await import("../api.js");
+        const res = await apiWithCashier<{ storeId: string | null }>("/tpv/tables");
+        if (!cancelled) setStoreId(res.storeId);
+      } catch {
+        /* sin storeId, el WS no abrirá — degrada a polling */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const [crossCajaToast, setCrossCajaToast] = useState<{
+    text: string;
+    expiresAt: number;
+  } | null>(null);
+  useStoreEventStream(storeId, (ev) => {
+    if (ev.type === "ticket.paid") {
+      // Si soy yo el que cobró, el contador ya se refresca por su
+      // propio camino (polling tras checkout). Ignoramos eco-events.
+      if (ev.registerId === props.registerId) return;
+      void refreshShiftTicketsCount();
+      setCrossCajaToast({
+        text: `Otra caja cobró un ticket (${ev.totalEur.toFixed(2)} €)`,
+        expiresAt: Date.now() + 4_000,
+      });
+    } else if (ev.type === "ticket.refunded") {
+      void refreshShiftTicketsCount();
+      setCrossCajaToast({
+        text: `Devolución registrada en otra caja (${ev.totalEur.toFixed(2)} €)`,
+        expiresAt: Date.now() + 4_000,
+      });
+    }
+  });
+  useEffect(() => {
+    if (!crossCajaToast) return;
+    const remaining = crossCajaToast.expiresAt - Date.now();
+    if (remaining <= 0) {
+      setCrossCajaToast(null);
+      return;
+    }
+    const t = setTimeout(() => setCrossCajaToast(null), remaining);
+    return () => clearTimeout(t);
+  }, [crossCajaToast]);
 
   useEffect(() => {
     let cancelled = false;
@@ -417,6 +475,7 @@ export function SalePage(props: SalePageProps) {
       createdAt: new Date().toISOString(),
       lines,
       contactHoldedId: contact?.holdedContactId,
+      contactName: contact?.name,
       notes,
     };
     saveSuspendedCart(cart);
@@ -430,7 +489,7 @@ export function SalePage(props: SalePageProps) {
       setContact({
         id: "recovered",
         holdedContactId: cart.contactHoldedId,
-        name: "Cliente",
+        name: cart.contactName ?? "Cliente",
       });
     }
     removeSuspendedCart(cart.id);
@@ -448,6 +507,15 @@ export function SalePage(props: SalePageProps) {
   // ── Render ─────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-mipiace-stone flex flex-col font-sans">
+      {/* Lote 4 v1.1 Thalia: toast cross-caja. Aparece cuando otra
+          caja del mismo store cobra o devuelve, para que el cajero
+          actual no intente cobrar dos veces. Top-right, auto-dismiss
+          en 4s. */}
+      {crossCajaToast && (
+        <div className="fixed top-4 right-4 z-[60] max-w-[320px] bg-slate-900 text-white rounded-xl px-4 py-3 shadow-lg text-[13px] font-medium pointer-events-none">
+          {crossCajaToast.text}
+        </div>
+      )}
       <div className="flex-1 flex max-w-[1680px] w-full mx-auto bg-white">
         <aside className="hidden md:flex w-[88px] xl:w-[240px] shrink-0 border-r border-slate-200 flex-col px-3 xl:px-5 py-5">
           <div className="mb-7 xl:mb-8 flex justify-center xl:justify-start">
@@ -871,7 +939,21 @@ function SaleWorkspace({
   // tenant. Cache que se llena al primer refresh del catálogo; si aún
   // está vacío (sesión preexistente al deploy), Package es el default
   // — mismo comportamiento que B-UX-Pulido F3.
-  const PlaceholderIcon = placeholderIconFor(getCachedBusinessType());
+  const businessType = getCachedBusinessType();
+  const PlaceholderIcon = placeholderIconFor(businessType);
+  // P-1 (v1.1 peluquería): para verticales SERVICES, ofrecer un toggle
+  // "Servicios" / "Productos" delante de los chips de tag. Para
+  // RETAIL/HOSPITALITY los items se siguen mezclando (caso típico:
+  // bar que vende botellas de aceite junto con cafés).
+  const showKindToggle = businessType === "SERVICES";
+  const [kindFilter, setKindFilter] = useState<"SERVICE" | "PRODUCT">(() => {
+    if (!showKindToggle) return "SERVICE"; // valor inerte
+    const stored = localStorage.getItem(KIND_FILTER_KEY);
+    return stored === "PRODUCT" ? "PRODUCT" : "SERVICE";
+  });
+  useEffect(() => {
+    if (showKindToggle) localStorage.setItem(KIND_FILTER_KEY, kindFilter);
+  }, [showKindToggle, kindFilter]);
   // B-Categorias-via-Tags: filtro por tag/pseudo-categoría. null = ver
   // todos. Se calcula desde los productos actualmente visibles (que
   // ya pueden venir filtrados por búsqueda) para que los chips
@@ -879,29 +961,64 @@ function SaleWorkspace({
   // tagueó nada en Holded, availableTags queda vacío y los chips no
   // se renderizan — el espacio del header simplemente se contrae.
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  // P-1: si SERVICES, los tags se calculan sobre los productos del kind
+  // seleccionado — no queremos chips de tags que no existan dentro de
+  // la pestaña actual.
+  const productsForTags = useMemo(
+    () =>
+      showKindToggle ? products.filter((p) => p.kind === kindFilter) : products,
+    [products, showKindToggle, kindFilter],
+  );
   const availableTags = useMemo(
-    () => Array.from(new Set(products.flatMap((p) => p.tags))).sort(),
-    [products],
+    () => Array.from(new Set(productsForTags.flatMap((p) => p.tags))).sort(),
+    [productsForTags],
   );
   // Si el tag seleccionado deja de existir en el catálogo (el
-  // propietario lo quitó en Holded y vino un sync), volvemos a "Todos"
-  // automáticamente.
+  // propietario lo quitó en Holded y vino un sync, o el toggle de
+  // kind cambió), volvemos a "Todos" automáticamente.
   useEffect(() => {
     if (selectedTag && !availableTags.includes(selectedTag)) {
       setSelectedTag(null);
     }
   }, [selectedTag, availableTags]);
-  const visibleProducts = useMemo(
-    () =>
-      selectedTag
-        ? products.filter((p) => p.tags.includes(selectedTag))
-        : products,
-    [products, selectedTag],
-  );
+  const visibleProducts = useMemo(() => {
+    let list = products;
+    if (showKindToggle) list = list.filter((p) => p.kind === kindFilter);
+    if (selectedTag) list = list.filter((p) => p.tags.includes(selectedTag));
+    return list;
+  }, [products, selectedTag, showKindToggle, kindFilter]);
   return (
     <div className="flex-1 grid lg:grid-cols-[1fr_360px] gap-4 lg:gap-6 p-4 md:p-7 min-h-0">
       <section className="flex flex-col min-w-0 order-2 lg:order-1">
         <div className="flex items-center gap-2 mb-4 md:mb-6 overflow-x-auto">
+          {/* P-1 (v1.1 peluquería): toggle Servicios/Productos para
+              verticales SERVICES. Va delante de los chips de tag y
+              está separado visualmente por un divisor sutil. */}
+          {showKindToggle && (
+            <>
+              <button
+                onClick={() => setKindFilter("SERVICE")}
+                className={
+                  kindFilter === "SERVICE"
+                    ? "h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-mipiace-ink text-white text-[13.5px] md:text-[14px] font-medium shrink-0"
+                    : "h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-white border border-slate-200 text-slate-700 text-[13.5px] md:text-[14px] font-medium shrink-0 hover:border-mipiace-ink/40"
+                }
+              >
+                Servicios
+              </button>
+              <button
+                onClick={() => setKindFilter("PRODUCT")}
+                className={
+                  kindFilter === "PRODUCT"
+                    ? "h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-mipiace-ink text-white text-[13.5px] md:text-[14px] font-medium shrink-0"
+                    : "h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-white border border-slate-200 text-slate-700 text-[13.5px] md:text-[14px] font-medium shrink-0 hover:border-mipiace-ink/40"
+                }
+              >
+                Productos
+              </button>
+              <div className="w-px h-8 bg-slate-200 mx-1 shrink-0" aria-hidden />
+            </>
+          )}
           {/* B-Categorias-via-Tags: chip "Todos" siempre presente +
               un chip por cada tag único del catálogo. El estado activo
               se pinta con el coral del producto; los inactivos con
@@ -947,6 +1064,15 @@ function SaleWorkspace({
             {catalogError}
           </div>
         )}
+        {showKindToggle &&
+          products.length > 0 &&
+          visibleProducts.length === 0 &&
+          !selectedTag && (
+            <div className="text-[13px] text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4">
+              No hay {kindFilter === "PRODUCT" ? "productos físicos" : "servicios"}{" "}
+              en el catálogo. Crea uno en Holded para verlo aquí.
+            </div>
+          )}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-3.5 mb-5 md:mb-6">
           {visibleProducts.map((p) => {
             const imgSrc = tenantId ? productImageUrl(p, tenantId) : null;
@@ -1407,9 +1533,10 @@ function SuspendedSheet({
             >
               <div className="flex-1 min-w-0">
                 <div className="text-[14px] font-medium text-mipiace-ink truncate">{c.label}</div>
-                <div className="text-[12.5px] text-slate-500">
+                <div className="text-[12.5px] text-slate-500 truncate">
                   {c.lines.length} línea{c.lines.length === 1 ? "" : "s"} ·{" "}
                   {new Date(c.createdAt).toLocaleTimeString("es-ES")}
+                  {c.contactName ? ` · ${c.contactName}` : ""}
                 </div>
               </div>
               <button

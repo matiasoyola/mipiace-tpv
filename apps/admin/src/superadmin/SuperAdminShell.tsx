@@ -2,6 +2,7 @@
 // sidebar propio, nada de las navs operativas. Visualmente distinta
 // para que sea obvio en qué pantalla estás.
 
+import { useEffect, useState } from "react";
 import { useNavigate, Link, useLocation } from "react-router-dom";
 import {
   Activity,
@@ -15,8 +16,9 @@ import {
   Users,
 } from "lucide-react";
 
-import { clearSuperAdminTokens } from "./api.js";
+import { clearSuperAdminTokens, superApi } from "./api.js";
 import { CuentaSelector } from "./CuentaSelector.js";
+import type { SuperAdminMe } from "./types.js";
 
 interface NavItem {
   to: string;
@@ -24,11 +26,14 @@ interface NavItem {
   icon: typeof Building2;
 }
 
-const NAV_ITEMS: NavItem[] = [
+// Lote 3 v1.1 Thalia: el item "Super-admins" sólo aparece si el
+// super-admin actual es root. La visibilidad se filtra al renderizar
+// (no en esta constante) leyendo el flag de /super-admin/auth/me.
+const NAV_ITEMS: Array<NavItem & { rootOnly?: boolean }> = [
   { to: "/superadmin/tenants", label: "Cuentas", icon: Building2 },
   { to: "/superadmin/audit", label: "Auditoría", icon: FileClock },
   // B-Multi-Vertical SB4: panel multi super-admin.
-  { to: "/superadmin/admins", label: "Super-admins", icon: Users },
+  { to: "/superadmin/admins", label: "Super-admins", icon: Users, rootOnly: true },
   { to: "/superadmin/me", label: "Mi cuenta", icon: Shield },
 ];
 
@@ -79,6 +84,24 @@ export function SuperAdminShell({
 }) {
   const navigate = useNavigate();
   const location = useLocation();
+  // Lote 3: fetch /me una vez al montar el shell para saber si soy
+  // root. Si la request falla (sesión inválida, etc.), seguimos sin
+  // root — el peor caso es ocultar de más, no exponer. El backend es
+  // la fuente de verdad de la autorización.
+  const [isRoot, setIsRoot] = useState<boolean | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    superApi<SuperAdminMe>("/super-admin/auth/me")
+      .then((me) => {
+        if (!cancelled) setIsRoot(me.isRoot);
+      })
+      .catch(() => {
+        if (!cancelled) setIsRoot(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function onLogout() {
     clearSuperAdminTokens();
@@ -95,7 +118,7 @@ export function SuperAdminShell({
           </span>
         </div>
         <nav className="space-y-1">
-          {NAV_ITEMS.map((item) => {
+          {NAV_ITEMS.filter((item) => !item.rootOnly || isRoot === true).map((item) => {
             const Icon = item.icon;
             const active = location.pathname.startsWith(item.to);
             return (

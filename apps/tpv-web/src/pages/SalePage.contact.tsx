@@ -184,6 +184,9 @@ function CreateContactForm({
   const [nif, setNif] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  // T-7 (v1.1 Thalia): dirección para facturas. Opcional. Una línea
+  // libre — Holded acepta el contenido tal cual.
+  const [address, setAddress] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -195,6 +198,7 @@ function CreateContactForm({
       if (nif) body.nif = nif;
       if (email) body.email = email;
       if (phone) body.phone = phone;
+      if (address.trim()) body.address = address.trim();
       const res = await apiWithCashier<{ contact: ContactRef }>("/contacts", {
         method: "POST",
         body,
@@ -213,6 +217,7 @@ function CreateContactForm({
       <Input label="NIF / CIF" value={nif} onChange={setNif} />
       <Input label="Email" value={email} onChange={setEmail} />
       <Input label="Teléfono" value={phone} onChange={setPhone} />
+      <Input label="Dirección (para facturas)" value={address} onChange={setAddress} />
       {error && (
         <div className="text-[12.5px] text-red-700 bg-red-50 rounded-xl p-3">{error}</div>
       )}
