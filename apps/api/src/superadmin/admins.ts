@@ -268,6 +268,111 @@ export async function registerSuperAdminAdminsRoutes(
     },
   );
 
+  // v1.2-Lite Lote 2: reenviar invitación a un super-admin existente.
+  // Útil cuando el email original se pierde en spam, el SMTP cayó en el
+  // momento del alta, o el target nunca pudo entrar. Genera nueva
+  // tempPassword e invalida tokens previos (tokenVersion++).
+  //
+  // - Root sólo: igual que crear/eliminar. Defensivo: la lista no se
+  //   expone a no-root (filtro BD en GET /admins), pero por si llegan
+  //   por URL directa.
+  // - 404 si el target está soft-deleted (no rehidratamos vía resend; el
+  //   path de rehidratación está en POST /admins).
+  // - 409 ALREADY_ONBOARDED si el target ya tiene 2FA activado: sería
+  //   raro reinvitar a alguien que completó setup. Si el caso real
+  //   aparece, relajamos a warning.
+  app.post(
+    "/super-admin/admins/:id/resend-invite",
+    {
+      preHandler: requireRootSuperAdmin,
+      schema: {
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", format: "uuid" } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const ctx = request.superAdmin!;
+      const params = request.params as { id: string };
+      const prisma = getPrisma();
+      const target = await prisma.superAdminUser.findUnique({
+        where: { id: params.id },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          deletedAt: true,
+          totpEnabledAt: true,
+        },
+      });
+      if (!target || target.deletedAt != null) {
+        return reply.code(404).send({
+          error: "SUPER_ADMIN_NOT_FOUND",
+          message: "Super-admin no encontrado.",
+        });
+      }
+      if (target.totpEnabledAt != null) {
+        return reply.code(409).send({
+          error: "ALREADY_ONBOARDED",
+          message:
+            "Este super-admin ya completó el setup (2FA activado). No procede reenviar invitación.",
+        });
+      }
+      const tempPassword = generateTemporaryPassword();
+      const passwordHash = await hashPassword(tempPassword);
+      const updated = await prisma.superAdminUser.update({
+        where: { id: target.id },
+        data: {
+          passwordHash,
+          mustChangePassword: true,
+          // Invalidar refresh tokens vivos del target — el invitado
+          // anterior (con tempPassword vieja) ya no podrá refrescar.
+          tokenVersion: { increment: 1 },
+        },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          totpEnabledAt: true,
+          lastLoginAt: true,
+          createdAt: true,
+        },
+      });
+      await writeAudit({
+        prisma,
+        superAdminId: ctx.superAdminId,
+        action: "resend_super_admin_invite",
+        tenantId: null,
+        metadata: {
+          ...extractRequestSignals(request),
+          targetEmail: updated.email,
+          targetSuperAdminId: updated.id,
+        },
+      });
+      try {
+        await sendInviteEmail({
+          email: updated.email,
+          name: updated.name ?? updated.email,
+          tempPassword,
+        });
+      } catch (err) {
+        app.log.warn(
+          { err, targetEmail: updated.email },
+          "super-admin resend-invite email falló; password sólo en response",
+        );
+      }
+      // Misma forma que POST /admins: el response devuelve la
+      // tempPassword en plano para que el root la pueda entregar
+      // manualmente si SMTP cayó.
+      return reply.code(201).send({
+        admin: serialize(updated),
+        tempPassword,
+      });
+    },
+  );
+
   app.delete(
     "/super-admin/admins/:id",
     {

@@ -91,6 +91,14 @@ const DeleteSuperAdminMeta = Base.extend({
   targetSuperAdminId: z.string().uuid(),
 });
 
+// v1.2-Lite Lote 2: root reenvía invitación (regenera tempPassword,
+// invalida tokens previos del target). Útil cuando el email original
+// se pierde en spam o el SMTP cayó.
+const ResendSuperAdminInviteMeta = Base.extend({
+  targetEmail: z.string(),
+  targetSuperAdminId: z.string().uuid(),
+});
+
 const META_SCHEMAS = {
   create_tenant: CreateTenantMeta,
   create_tenant_draft: CreateTenantDraftMeta,
@@ -104,6 +112,7 @@ const META_SCHEMAS = {
   activate_tenant: ActivateTenantMeta,
   create_super_admin: CreateSuperAdminMeta,
   delete_super_admin: DeleteSuperAdminMeta,
+  resend_super_admin_invite: ResendSuperAdminInviteMeta,
 } as const;
 
 export type SuperAdminAction = keyof typeof META_SCHEMAS;

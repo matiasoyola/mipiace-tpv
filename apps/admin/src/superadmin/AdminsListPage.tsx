@@ -14,7 +14,7 @@
 
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Copy, Plus, Shield } from "lucide-react";
+import { Copy, Mail, Plus, Shield } from "lucide-react";
 
 import { superApi, SuperAdminApiError } from "./api.js";
 import { SuperAdminShell } from "./SuperAdminShell.js";
@@ -48,6 +48,15 @@ export function AdminsListPage() {
   const [pendingDelete, setPendingDelete] = useState<SuperAdminItem | null>(
     null,
   );
+  // v1.2-Lite Lote 2: reenvío de invitación. La confirmación queda como
+  // modal aparte porque la acción es destructiva (invalida la temp
+  // password anterior y todos los tokens del target). El resultado se
+  // muestra con el mismo TempPasswordModal del alta, para que root
+  // pueda copiar la nueva password si SMTP no entrega.
+  const [pendingResend, setPendingResend] = useState<SuperAdminItem | null>(
+    null,
+  );
+  const [resendBusy, setResendBusy] = useState(false);
 
   async function reload(): Promise<void> {
     setLoading(true);
@@ -91,6 +100,31 @@ export function AdminsListPage() {
       setError(
         err instanceof SuperAdminApiError ? err.message : "Error al eliminar",
       );
+    }
+  }
+
+  async function onResendInvite(target: SuperAdminItem): Promise<void> {
+    setError(null);
+    setResendBusy(true);
+    try {
+      const res = await superApi<CreateSuperAdminResponse>(
+        `/super-admin/admins/${target.id}/resend-invite`,
+        { method: "POST" },
+      );
+      setPendingResend(null);
+      // Re-uso del TempPasswordModal: misma forma de response que el
+      // alta, lo único que cambia es el copy en el modal — el modal
+      // detecta vía prop `mode` si es alta o reenvío para ajustar texto.
+      setCreatedResult(res);
+      await reload();
+    } catch (err) {
+      setError(
+        err instanceof SuperAdminApiError
+          ? err.message
+          : "Error al reenviar invitación",
+      );
+    } finally {
+      setResendBusy(false);
     }
   }
 
@@ -174,13 +208,26 @@ export function AdminsListPage() {
                     </td>
                     <td className="px-4 py-3 text-right">
                       {!isSelf && (
-                        <button
-                          type="button"
-                          onClick={() => setPendingDelete(row)}
-                          className="text-[12.5px] text-red-700 hover:text-red-900 hover:underline"
-                        >
-                          Eliminar
-                        </button>
+                        <div className="flex items-center gap-3 justify-end">
+                          {!row.twoFactorEnabled && (
+                            <button
+                              type="button"
+                              onClick={() => setPendingResend(row)}
+                              className="inline-flex items-center gap-1 text-[12.5px] text-slate-700 hover:text-slate-900 hover:underline"
+                              title="Reenviar invitación con nueva contraseña temporal"
+                            >
+                              <Mail className="w-3.5 h-3.5" />
+                              Reenviar invitación
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setPendingDelete(row)}
+                            className="text-[12.5px] text-red-700 hover:text-red-900 hover:underline"
+                          >
+                            Eliminar
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -214,6 +261,15 @@ export function AdminsListPage() {
           target={pendingDelete}
           onCancel={() => setPendingDelete(null)}
           onConfirm={() => onDelete(pendingDelete)}
+        />
+      )}
+
+      {pendingResend && (
+        <ConfirmResendInviteModal
+          target={pendingResend}
+          busy={resendBusy}
+          onCancel={() => setPendingResend(null)}
+          onConfirm={() => onResendInvite(pendingResend)}
         />
       )}
     </SuperAdminShell>
@@ -390,6 +446,50 @@ function ConfirmDeleteModal({
           type="button"
           onClick={onCancel}
           className="h-10 px-4 border border-slate-300 text-slate-700 rounded-lg text-[13px] font-medium hover:bg-slate-50"
+        >
+          Cancelar
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function ConfirmResendInviteModal({
+  target,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  target: SuperAdminItem;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <ModalShell title="Reenviar invitación" onClose={onCancel}>
+      <p className="text-[13px] text-slate-700 mb-3">
+        Vas a reenviar la invitación a{" "}
+        <strong>{target.name ?? target.email}</strong> ({target.email}).
+      </p>
+      <ul className="text-[12.5px] text-slate-600 mb-4 list-disc pl-5 space-y-1">
+        <li>Se genera una nueva contraseña temporal.</li>
+        <li>La contraseña anterior queda invalidada al instante.</li>
+        <li>Sus sesiones activas se cierran (deberá volver a entrar).</li>
+      </ul>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={onConfirm}
+          disabled={busy}
+          className="h-10 px-4 bg-slate-900 text-white rounded-lg text-[13px] font-medium hover:bg-slate-800 disabled:opacity-50"
+        >
+          {busy ? "Reenviando…" : "Reenviar invitación"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={busy}
+          className="h-10 px-4 border border-slate-300 text-slate-700 rounded-lg text-[13px] font-medium hover:bg-slate-50 disabled:opacity-50"
         >
           Cancelar
         </button>
