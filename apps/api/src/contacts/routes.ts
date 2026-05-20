@@ -219,6 +219,10 @@ export async function registerContactsRoutes(app: FastifyInstance): Promise<void
             email: { type: "string", maxLength: 320 },
             phone: { type: "string", maxLength: 32 },
             mobile: { type: "string", maxLength: 32 },
+            // T-7 (v1.1 Thalia): dirección para facturas. Una línea
+            // libre, lo mete el cajero tal cual. Holded acepta el
+            // string en `billAddress.address` y respeta lo que llegue.
+            address: { type: "string", maxLength: 300 },
           },
         },
       },
@@ -231,6 +235,7 @@ export async function registerContactsRoutes(app: FastifyInstance): Promise<void
         email?: string;
         phone?: string;
         mobile?: string;
+        address?: string;
       };
 
       const client = await buildHoldedClient(auth.tenantId);
@@ -241,6 +246,13 @@ export async function registerContactsRoutes(app: FastifyInstance): Promise<void
         });
       }
 
+      // T-7: si llega address (string libre), la mandamos como
+      // billAddress.address. Holded acepta esto y respeta el contenido
+      // tal cual; otras subkeys (city/postalCode/...) las dejamos
+      // vacías para no inventar datos. Si el field viene vacío, NO
+      // enviamos billAddress (defensivo: nunca pisar una dirección
+      // que Holded ya tuviera de un import previo).
+      const trimmedAddress = body.address?.trim();
       const holdedBody: CreateContactBody = {
         name: body.name,
         type: "client", // TPV crea clientes; suppliers/leads no aplican.
@@ -248,6 +260,9 @@ export async function registerContactsRoutes(app: FastifyInstance): Promise<void
         email: body.email,
         phone: body.phone,
         mobile: body.mobile,
+        ...(trimmedAddress
+          ? { billAddress: { address: trimmedAddress } }
+          : {}),
       };
 
       let remote: HoldedContact;
