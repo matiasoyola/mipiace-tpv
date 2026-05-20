@@ -984,14 +984,35 @@ function SaleWorkspace({
     () => Array.from(new Set(productsForTags.flatMap((p) => p.tags))).sort(),
     [productsForTags],
   );
+  // v1.2-Lite Lote 4.A · T-9 favoritos.
+  //
+  // El tag reservado `favoritos` (lowercase tras Lote 3.A) marca
+  // productos que el propietario quiere ver siempre arriba como atajo.
+  // Aparecen en una sub-grid antes de los chips de categoría, máximo 8.
+  // Excluimos el tag de la lista de chips para no duplicar visualmente
+  // (los favoritos ya están arriba; no tiene sentido un chip "Favoritos"
+  // que filtre a lo mismo).
+  const FAVORITES_TAG = "favoritos";
+  const MAX_FAVORITES = 8;
+  const favoriteProducts = useMemo(
+    () =>
+      productsForTags
+        .filter((p) => p.tags.includes(FAVORITES_TAG))
+        .slice(0, MAX_FAVORITES),
+    [productsForTags],
+  );
+  const displayTags = useMemo(
+    () => availableTags.filter((t) => t !== FAVORITES_TAG),
+    [availableTags],
+  );
   // Si el tag seleccionado deja de existir en el catálogo (el
   // propietario lo quitó en Holded y vino un sync, o el toggle de
   // kind cambió), volvemos a "Todos" automáticamente.
   useEffect(() => {
-    if (selectedTag && !availableTags.includes(selectedTag)) {
+    if (selectedTag && !displayTags.includes(selectedTag)) {
       setSelectedTag(null);
     }
-  }, [selectedTag, availableTags]);
+  }, [selectedTag, displayTags]);
   const visibleProducts = useMemo(() => {
     let list = products;
     if (showKindToggle) list = list.filter((p) => p.kind === kindFilter);
@@ -1001,6 +1022,62 @@ function SaleWorkspace({
   return (
     <div className="flex-1 grid lg:grid-cols-[1fr_360px] gap-4 lg:gap-6 p-4 md:p-7 min-h-0">
       <section className="flex flex-col min-w-0 order-2 lg:order-1">
+        {/* v1.2-Lite Lote 4.A · T-9 Atajos: sub-grid de favoritos arriba.
+            Sólo aparece si hay productos con el tag reservado `favoritos`.
+            Se respeta el toggle Servicios/Productos (productsForTags ya
+            filtra por kind). El usuario pulsa el tile como en el grid
+            principal — mismo handler onClickProduct. */}
+        {favoriteProducts.length > 0 && (
+          <div className="mb-5 md:mb-6">
+            <div className="flex items-center gap-2 mb-2.5">
+              <Star
+                className="w-3.5 h-3.5 text-amber-500 fill-amber-400"
+                strokeWidth={2}
+              />
+              <h3 className="text-[12.5px] font-semibold uppercase tracking-wider text-slate-600">
+                Atajos
+              </h3>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-3.5">
+              {favoriteProducts.map((p) => {
+                const imgSrc = tenantId ? productImageUrl(p, tenantId) : null;
+                return (
+                  <button
+                    key={`fav-${p.id}`}
+                    onClick={() => onClickProduct(p)}
+                    className="group bg-white rounded-2xl border border-amber-200 overflow-hidden text-left hover:border-amber-400 hover:shadow-sm transition-all"
+                  >
+                    <div className="aspect-[5/4] flex items-center justify-center bg-stone-100 text-stone-600 overflow-hidden">
+                      {imgSrc ? (
+                        <img
+                          src={imgSrc}
+                          alt=""
+                          loading="lazy"
+                          decoding="async"
+                          draggable={false}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <PlaceholderIcon
+                          className="w-10 h-10 md:w-12 md:h-12 opacity-80"
+                          strokeWidth={1.4}
+                        />
+                      )}
+                    </div>
+                    <div className="px-3 md:px-3.5 py-2.5 md:py-3">
+                      <div className="text-[13px] md:text-[13.5px] font-medium text-mipiace-ink line-clamp-2 min-h-[2.6em] leading-tight">
+                        {p.name}
+                      </div>
+                      <div className="text-[12.5px] md:text-[13px] text-slate-500 mt-0.5 tabular-nums">
+                        {formatEur(p.priceGross)}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
         <div className="flex items-center gap-2 mb-4 md:mb-6 overflow-x-auto">
           {/* P-1 (v1.1 peluquería): toggle Servicios/Productos para
               verticales SERVICES. Va delante de los chips de tag y
@@ -1053,7 +1130,7 @@ function SaleWorkspace({
             />
             Todos
           </button>
-          {availableTags.map((tag) => {
+          {displayTags.map((tag) => {
             const active = selectedTag === tag;
             return (
               <button
