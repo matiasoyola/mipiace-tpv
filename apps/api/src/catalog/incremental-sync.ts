@@ -401,13 +401,16 @@ async function upsertCatalogEntry(
   // initial-sync. Filtra vacíos y duplicados defensivamente. Si el
   // propietario quita tags en Holded, el array queda vacío y el chip
   // desaparece del filtro del TPV en el siguiente render.
+  // v1.2-Lite Lote 3.A: lowercase para evitar chips duplicados con
+  // casing distinto (auditoría Thalia). Capitalización al renderizar
+  // queda en el TPV.
   const tagsRaw = (raw as { tags?: unknown }).tags;
   const tags = Array.isArray(tagsRaw)
     ? Array.from(
         new Set(
           tagsRaw
             .filter((t): t is string => typeof t === "string")
-            .map((t) => t.trim())
+            .map((t) => t.trim().toLowerCase())
             .filter((t) => t.length > 0),
         ),
       )

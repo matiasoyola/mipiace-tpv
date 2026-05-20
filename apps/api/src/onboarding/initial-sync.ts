@@ -338,13 +338,17 @@ async function upsertCatalogEntry(
   // (un cliente paranoico podría taguear "Bebidas" dos veces). El
   // orden no importa porque el TPV los re-ordena alfabéticamente al
   // construir los chips.
+  // v1.2-Lite Lote 3.A: normalizamos a lowercase tras detectar en
+  // Thalia chips duplicados "Papelería" / "papeleria". El TPV
+  // capitaliza al renderizar, así que el cliente sigue viendo el
+  // chip bonito.
   const tagsRaw = (raw as { tags?: unknown }).tags;
   const tags = Array.isArray(tagsRaw)
     ? Array.from(
         new Set(
           tagsRaw
             .filter((t): t is string => typeof t === "string")
-            .map((t) => t.trim())
+            .map((t) => t.trim().toLowerCase())
             .filter((t) => t.length > 0),
         ),
       )

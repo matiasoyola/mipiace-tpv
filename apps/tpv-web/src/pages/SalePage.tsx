@@ -68,6 +68,17 @@ import {
 
 const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
 
+// v1.2-Lite Lote 3.A: los tags se persisten en lowercase para evitar
+// duplicados visuales (Thalia tenía chips "Papelería"/"papeleria" como
+// dos entradas distintas). Al renderizar capitalizamos la primera letra
+// para que el chip se siga viendo bonito. No usamos toTitleCase porque
+// algunos tags llevan acrónimos (BBQ, IPA) que no queremos partir; con
+// upper-on-first respetamos eso.
+function capitalizeTag(tag: string): string {
+  if (tag.length === 0) return tag;
+  return tag.charAt(0).toUpperCase() + tag.slice(1);
+}
+
 // B-Multi-Vertical SB3: icono del placeholder según vertical. Fallback
 // a Package (retail genérico) si el tenant aún no ha refrescado el
 // catálogo desde el deploy de SB3.
@@ -1054,7 +1065,7 @@ function SaleWorkspace({
                     : "h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-white border border-slate-200 text-slate-700 text-[13.5px] md:text-[14px] font-medium shrink-0 hover:border-mipiace-coral/50"
                 }
               >
-                {tag}
+                {capitalizeTag(tag)}
               </button>
             );
           })}
