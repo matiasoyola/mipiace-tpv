@@ -250,21 +250,39 @@ describe("fetchProductImage", () => {
     expect(result!.bytes).toEqual(JPEG_HEAD);
   });
 
-  it("devuelve null cuando Holded sirve HTML catch-all (producto sin foto)", async () => {
+  it("devuelve null cuando Holded responde 400 (producto sin foto, fix2)", async () => {
+    // fix2 2026-05-22: Holded responde 400 + JSON `{"status":0,...}` para
+    // productos sin imagen. fetchBinary ya no lanza en 4xx; el caller
+    // interpreta status non-2xx como sentinel "sin foto".
     const client = binaryClient(() => ({
-      status: 200,
-      bytes: Buffer.from("<!doctype html><html><body>", "utf8"),
-      contentType: "text/html; charset=UTF-8",
+      status: 400,
+      bytes: Buffer.from('{"status":0,"info":"product has no image"}', "utf8"),
+      contentType: "application/json",
     }));
     const result = await fetchProductImage(client, "abc");
     expect(result).toBeNull();
   });
 
-  it("throw cuando los magic bytes no son ni imagen ni HTML", async () => {
+  it("throw cuando status 200 trae magic bytes no reconocidos como imagen", async () => {
+    // Con fix2: cualquier status 200 con magic bytes que no sean
+    // jpg/png/gif/webp se considera un cambio inesperado en Holded
+    // (HTML catch-all, JSON, AVIF, etc.) y se reporta como FAILED para
+    // investigar.
     const client = binaryClient(() => ({
       status: 200,
       bytes: Buffer.from([0x00, 0x11, 0x22, 0x33, 0x44]),
       contentType: null,
+    }));
+    await expect(fetchProductImage(client, "abc")).rejects.toThrow(
+      /magic bytes no reconocidos/,
+    );
+  });
+
+  it("throw cuando status 200 trae HTML catch-all (caso anómalo tras fix2)", async () => {
+    const client = binaryClient(() => ({
+      status: 200,
+      bytes: Buffer.from("<!doctype html><html><body>", "utf8"),
+      contentType: "text/html; charset=UTF-8",
     }));
     await expect(fetchProductImage(client, "abc")).rejects.toThrow(
       /magic bytes no reconocidos/,
@@ -286,17 +304,18 @@ describe("fetchProductImagesBatch", () => {
         return { status: 200, bytes: JPEG_HEAD, contentType: "text/html" };
       }
       if (path.includes("/p2/")) {
+        // fix2: producto sin foto → 400 + JSON, no 200 + HTML.
         return {
-          status: 200,
-          bytes: Buffer.from("<html>", "utf8"),
-          contentType: "text/html",
+          status: 400,
+          bytes: Buffer.from('{"status":0,"info":"no image"}', "utf8"),
+          contentType: "application/json",
         };
       }
       if (path.includes("/p3/")) {
         return { status: 200, bytes: PNG_HEAD, contentType: "text/html" };
       }
       if (path.includes("/p4/")) {
-        // magic bytes raros → throw → failed
+        // magic bytes raros con status 200 → throw → failed
         return {
           status: 200,
           bytes: Buffer.from([0x00, 0x11, 0x22]),
@@ -341,10 +360,11 @@ describe("fetchProductImagesBatch", () => {
       if (path.includes("/ok/")) {
         return { status: 200, bytes: JPEG_HEAD, contentType: null };
       }
+      // fix2: producto sin foto = 400 + JSON
       return {
-        status: 200,
-        bytes: Buffer.from("<html>", "utf8"),
-        contentType: null,
+        status: 400,
+        bytes: Buffer.from('{"status":0}', "utf8"),
+        contentType: "application/json",
       };
     });
     await fetchProductImagesBatch(client, ["ok", "no"], {

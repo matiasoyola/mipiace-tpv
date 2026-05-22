@@ -273,27 +273,24 @@ function defaultWarn(message: string, extra?: unknown): void {
   console.warn(`[holded-client] ${message}`, extra ?? "");
 }
 
-// v1.2-Lite-fix1 Bug-Imagenes-Holded: el endpoint binario de imágenes.
-// Spike 2026-05-22 (ver `docs/auditorias/bug-imagenes-holded.md`)
-// confirmó que `GET /invoicing/v1/products/{id}/image` devuelve:
+// v1.2-Lite-fix1 + fix2 Bug-Imagenes-Holded: el endpoint binario de
+// imágenes. Spike 2026-05-22 + verificación post-deploy mismo día.
+// `GET /invoicing/v1/products/{id}/image` se comporta así:
 //
-//   - El binario real de la foto (JPEG/PNG/GIF/WEBP) cuando el producto
-//     tiene una en Holded. Status 200, `content-type: text/html` en el
-//     header (sí, Holded miente — HEAD también devuelve text/html con
-//     `content-length: null`), pero los magic bytes son los del binario.
-//   - El HTML catch-all del frontend Next.js cuando el producto NO
-//     tiene foto. Status 200, body que empieza por `<!doctype...`.
+//   - **Producto CON foto** → status 200, body es el binario real
+//     (JPEG/PNG/GIF/WEBP). El header `content-type` miente (Holded lo
+//     varía entre text/html y application/json), por eso confiamos en
+//     magic bytes.
+//   - **Producto SIN foto** → status **400** + body JSON
+//     `{"status":0,"info":"..."}`. NO HTML catch-all como sugirió el
+//     spike inicial (ese spike usó HEAD, que en este endpoint miente).
 //
-// Por eso:
-//   * NO HEAD: el HEAD miente, gastaríamos un round-trip sin sacar
-//     información útil.
-//   * NO confiar en `content-type`: siempre devuelve text/html.
-//   * Detección por magic bytes (`detectImageMime`) y null si HTML.
-//   * Throw si bytes raros (binario que no es imagen reconocida): no
-//     silenciar, es señal de algo cambió en Holded y queremos saberlo.
-//
-// Tamaño máximo y timeout son parámetros — el caller los configura
-// según su contexto (sync usa el mismo límite que el image-cache-worker).
+// Decision tree:
+//   * status 200 + magic bytes imagen → resolved.
+//   * non-2xx (típico 400) → null (sentinel "sin foto"). 402 lo
+//     gestiona `client.fetchBinary` (cuenta suspendida) y propaga.
+//   * status 200 + magic bytes JSON/HTML/raros → throw (algo cambió
+//     en Holded y queremos enterarnos).
 export type FetchedProductImage =
   | { bytes: Buffer; mime: "image/jpeg" | "image/png" | "image/gif" | "image/webp" }
   | null;
@@ -317,28 +314,32 @@ export async function fetchProductImage(
     );
   }
   const path = `/invoicing/v1/products/${holdedProductId}/image`;
-  const { bytes } = await client.fetchBinary(path, {
+  const { status, bytes } = await client.fetchBinary(path, {
     signal: options.signal,
     maxBytes: options.maxBytes,
     timeoutMs: options.timeoutMs ?? 15000,
   });
-  const mime = detectImageMime(bytes);
-  if (mime === "text/html") {
-    // Producto sin foto en Holded — Holded sirve el catch-all del
-    // frontend. Caller distingue por `null`.
+  // fix2: Holded responde 400 + JSON cuando el producto no tiene foto.
+  // Cualquier non-2xx que no haya sido 402 (gestionado en fetchBinary)
+  // se interpreta como "producto sin foto" → null sentinel.
+  if (status < 200 || status >= 300) {
     return null;
   }
-  if (mime === "unknown") {
-    // Magic bytes no reconocidos: ni imagen válida ni HTML. Puede ser
-    // un cambio en Holded (¿AVIF? ¿algún wrapper nuevo?) o un proxy
-    // intermedio interfiriendo. Throw para que el caller lo loguee
-    // como FAILED y el siguiente sync lo reintente.
-    const preview = bytes.subarray(0, 8).toString("hex");
-    throw new Error(
-      `fetchProductImage(${holdedProductId}): magic bytes no reconocidos (${preview})`,
-    );
+  const mime = detectImageMime(bytes);
+  if (mime === "image/jpeg" || mime === "image/png" || mime === "image/gif" || mime === "image/webp") {
+    return { bytes, mime };
   }
-  return { bytes, mime };
+  // Magic bytes no son imagen: con status 200 esto es inesperado (Holded
+  // siempre debería responder binario en 200). Puede ser:
+  //   - HTML catch-all (`<`) o JSON (`{`) servido como 200 por un
+  //     cambio en la API.
+  //   - Bytes raros (¿AVIF? ¿wrapper nuevo?) o proxy interfiriendo.
+  // Throw para que el caller lo loguee como FAILED y reintentemos en el
+  // siguiente sync.
+  const preview = bytes.subarray(0, 16).toString("hex");
+  throw new Error(
+    `fetchProductImage(${holdedProductId}): status 200 con magic bytes no reconocidos (${mime}, first16=${preview})`,
+  );
 }
 
 export interface FetchProductImagesBatchOptions {

@@ -136,18 +136,12 @@ export class ApiKeyClient implements HoldedClient {
         // sync detecte la cuenta sin pago y la deje fuera del ciclo.
         throw new HoldedSubscriptionSuspendedError(url, null);
       }
-      if (!res.ok) {
-        // 404 sería raro en `/products/{id}/image` (Holded responde 200
-        // con HTML para productos sin imagen). Si llega, lo propagamos.
-        let body: unknown = null;
-        try {
-          body = await res.text();
-        } catch {
-          /* body opcional */
-        }
-        throw new HoldedApiError(res.status, url, body);
-      }
-
+      // v1.2-Lite-fix2: NO hacer throw para otros 4xx. Holded responde
+      // **400 + JSON** `{"status":0,"info":"..."}` cuando el producto no
+      // tiene imagen (descubierto post-deploy 2026-05-22: el spike inicial
+      // se basó en HEAD que devolvía text/html catch-all — engaño). El
+      // caller (`fetchProductImage`) interpreta status + magic bytes para
+      // distinguir "sin foto" vs "error real" sin romper el sync.
       const contentType = res.headers.get("content-type");
       const max = opts.maxBytes ?? Number.POSITIVE_INFINITY;
       const reader = res.body?.getReader();
