@@ -91,6 +91,20 @@ vi.mock("../src/queues/product-image-cache.js", () => ({
   enqueueProductImageCache: (id: string) => enqueueSpy(id),
 }));
 
+// v1.2-Lite-fix1 Bug-Imagenes-Holded: el sync incremental ahora pega al
+// endpoint binario de imágenes. En tests aislamos la lógica de disco +
+// red haciendo no-op del backfill — los tests específicos del backfill
+// viven en `image-backfill.test.ts` y en `products.test.ts` (helpers).
+vi.mock("../src/catalog/image-backfill.js", () => ({
+  backfillImagesFromHolded: vi.fn(async () => ({
+    fetched: 0,
+    none: 0,
+    failed: 0,
+    pending: 0,
+    mimeChanged: 0,
+  })),
+}));
+
 // ── Prisma en memoria ────────────────────────────────────────────────
 interface FakeTenantRow {
   id: string;

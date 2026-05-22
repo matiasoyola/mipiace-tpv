@@ -192,3 +192,144 @@ quedaría intacto y el commit nuevo añade la segunda capa de fallback.
 5. **Rate-limit**: no añadimos token-bucket explícito. La concurrencia 5
    con latencia ~200ms por request da ~25 req/s, dentro del umbral típico
    de APIs SaaS (Holded no publica límites exactos).
+
+---
+
+# Post-deploy v1.2-Lite (2026-05-22) · Opción A: negativa empírica
+
+Tras el deploy del backfill por detalle (Opción A) y un resync forzado
+de Thalia desde el super-admin, los stats finales fueron:
+
+```
+pendingCount: 964
+productsImageBackfilled: 0
+productsImageBackfillFailed: 0
+stillEmpty: 964 (todos)
+```
+
+**Conclusión empírica:** `GET /invoicing/v1/products/{id}` tampoco
+incluye campos de imagen en la cuenta de Thalia. La Opción A queda
+descartada definitivamente; los 26 campos del detalle individual son
+los mismos que los del listado (`id, kind, name, desc, typeId,
+contactId, contactName, price, taxes, total, hasStock, stock, barcode,
+sku, cost, purchasePrice, weight, tags, categoryId, factoryCode,
+forSale, forPurchase, salesChannelId, expAccountId, warehouseId,
+translations`). Ninguno apunta a foto, attachment, picture, etc.
+
+---
+
+# Spike empírico 2026-05-22 · rutas binarias candidatas
+
+Matías corrió curls autenticados desde el container API en producción
+(API key descifrada al vuelo) contra Thalia, productId
+`68d51959bec14299c701208f` (sabemos que tiene foto). Resultados:
+
+| Ruta | Status | Tipo | Conclusión |
+|---|---|---|---|
+| `GET /invoicing/v1/products/{id}` | 200 | JSON 26 campos | NINGÚN campo de imagen. Opción A muerta. |
+| `GET /invoicing/v1/products/{id}/attachments` | 200 | `text/html` (catch-all Next.js) | Ruta no existe. |
+| `GET /invoicing/v1/products/{id}/files` | 200 | `text/html` | No existe. |
+| `GET /invoicing/v1/products/{id}/images` | 200 | `text/html` | No existe. |
+| `GET /invoicing/v1/products/{id}/mainimage` | 200 | `text/html` | No existe. |
+| **`GET /invoicing/v1/products/{id}/image`** | **200** | **Binario JPEG** (`JFIF`, `gd-jpeg v1.0 quality=100`) | **Ruta correcta.** |
+
+Notas críticas:
+
+- **HEAD a `/image` MIENTE.** Holded responde `text/html; charset=UTF-8`
+  con `content-length: null`, pero el GET devuelve el binario JPEG real.
+  Por eso usamos siempre **GET + detección por magic bytes**.
+- **Sin campo de imagen ni en lista ni en detalle JSON.** El binario
+  está accesible directamente por convención de URL, no se enumera en
+  ningún payload JSON.
+- **Productos sin foto en Holded** → el GET devuelve el HTML catch-all
+  del frontend Next.js (status 200, `<!doctype...`). Lo detectamos por
+  los primeros bytes (`<` = HTML).
+- **Magic bytes esperados:** `FF D8 FF` (JPEG), `89 50 4E 47` (PNG),
+  `47 49 46 38` (GIF), `52 49 46 46 ... 57 45 42 50` (WEBP).
+
+---
+
+# Solución v1.2-Lite-fix1 · descarga binaria directa
+
+Flujo nuevo (reemplaza al backfill por detalle):
+
+1. **Cliente Holded** (`packages/holded-client/src/client.ts`) gana un
+   método `fetchBinary(path, { maxBytes, timeoutMs, signal })`. No
+   valida Content-Type (al revés que `request<T>`). Aplica límite de
+   tamaño durante el stream para no agotar memoria.
+2. **Detector puro** (`packages/holded-client/src/image-magic.ts`) +
+   re-export en `apps/api/src/catalog/image-magic.ts`. Función
+   `detectImageMime(buf)` devuelve `image/{jpeg,png,gif,webp}`,
+   `text/html` o `unknown`. Tests con buffers sintéticos.
+3. **Helper alto nivel** (`packages/holded-client/src/products.ts`):
+    - `fetchProductImage(client, productId)` → `{ bytes, mime }` o
+      `null` (HTML) o throw (magic bytes raros). Timeout 15 s.
+    - `fetchProductImagesBatch(client, ids, { concurrency: 5, ... })`
+      paraleliza llamadas con clasificación `resolved | none | failed`.
+4. **Sync** (`apps/api/src/catalog/image-backfill.ts`,
+   `backfillImagesFromHolded`):
+    - SELECT productos `active = true AND kind = 'PRODUCT'` con
+      `imageCachedAt IS NULL` OR `imageCachedAt < now() - 24h`.
+    - Llama al batch helper.
+    - Para `resolved`: escritura atómica (tmp + fsync + rename) en
+      `${PRODUCT_IMAGE_CACHE_DIR}/${tenantId}/${productId}.${ext}`.
+      UPDATE `image_mime`, `image_cached_at = now()`.
+    - Para `none` (HTML catch-all): UPDATE `image_mime = NULL`,
+      `image_cached_at = now()`. **Sentinel** "verificado sin foto" —
+      no se vuelve a pinchar hasta 24 h.
+    - Para `failed`: log warn, no toca BD, el próximo sync reintenta.
+5. **Image-cache-worker NO se toca.** Sigue gestionando el flujo
+   legacy `imageUrl → fetch → cache` como fallback (no se encolan jobs
+   nuevos desde el sync de Holded, pero el worker queda disponible si
+   un día aparece una URL externa en algún tenant).
+
+## Stats nuevos en `IncrementalSyncStats` / `SyncStats`
+
+```ts
+imageJobsEnqueued: number;          // legacy URL-based (queda en 0)
+productsImageBackfilled: number;    // Opción A (queda en 0, deprecated)
+productsImageBackfillFailed: number;// idem
+productsImageHoldedFetched: number; // descargas OK desde /image
+productsImageHoldedNone: number;    // sentinel "verificado sin foto"
+productsImageHoldedFailed: number;  // errores transitorios (red, magic raros)
+```
+
+## Verificación post-deploy v1.2-Lite-fix1
+
+1. `git pull && build && force-recreate` (sin migrations nuevas).
+2. Resync forzado de Thalia desde el super-admin.
+3. Esperar 2-3 min (964 productos × ~200ms / concurrencia 5 ≈ 40s).
+4. SQL:
+   ```sql
+   SELECT
+     COUNT(*) FILTER (WHERE image_mime IS NOT NULL) AS con_foto,
+     COUNT(*) FILTER (WHERE image_cached_at IS NOT NULL AND image_mime IS NULL) AS sin_foto,
+     COUNT(*) FILTER (WHERE image_cached_at IS NULL) AS pendientes
+   FROM products
+   WHERE tenant_id IN (SELECT id FROM tenants WHERE name LIKE '%Thalia%');
+   ```
+   Esperamos: con_foto > 0 (probablemente 700+),
+   sin_foto + con_foto ≈ 966, pendientes = 0.
+5. `docker exec mipiacetpv-caddy ls /srv/product-images/<tenantId>/ | wc -l`
+   debe coincidir con `con_foto`.
+6. Abrir TPV de Thalia, ver tiles con imágenes reales en lugar de
+   placeholders.
+
+## Decisiones explícitas
+
+1. **Endpoint elegido:** `GET /invoicing/v1/products/{id}/image`
+   (binario directo).
+2. **Detección por magic bytes**, no por Content-Type (Holded miente).
+3. **Sentinel "verificado sin foto":** `image_cached_at IS NOT NULL AND
+   image_mime IS NULL`. Idempotente, ahorra re-pinchar productos sin
+   foto en cada sync.
+4. **Revalidación cada 24h:** sin etag de Holded, productos con
+   `image_cached_at < now() - 24h` se vuelven a pinchar para detectar
+   fotos nuevas subidas por el cliente. Coste por sync: ~30 s para 700
+   productos.
+5. **Concurrencia 5**, mismo límite que el image-cache-worker. Sin
+   token-bucket: 25 req/s aprox., dentro de márgenes razonables.
+6. **Timeout 15 s** por request (Holded contesta típicamente en
+   200-400 ms pero hay colas largas en horas pico).
+7. **Tamaño máximo:** `PRODUCT_IMAGE_MAX_BYTES` (5 MB por defecto,
+   misma constante que el worker).

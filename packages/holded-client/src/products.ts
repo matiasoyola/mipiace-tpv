@@ -1,6 +1,7 @@
 import type { HoldedClient } from "./client.js";
 import { HoldedSilentRejectError } from "./errors.js";
 import type { SilentRejectMismatch } from "./errors.js";
+import { detectImageMime } from "./image-magic.js";
 
 // Producto en bruto tal como lo expone Holded en /invoicing/v1/products.
 // Sólo declaramos los campos que el TPV consume; el resto va en `raw`
@@ -270,6 +271,150 @@ export async function fetchProductImageDetails(
 
 function defaultWarn(message: string, extra?: unknown): void {
   console.warn(`[holded-client] ${message}`, extra ?? "");
+}
+
+// v1.2-Lite-fix1 Bug-Imagenes-Holded: el endpoint binario de imágenes.
+// Spike 2026-05-22 (ver `docs/auditorias/bug-imagenes-holded.md`)
+// confirmó que `GET /invoicing/v1/products/{id}/image` devuelve:
+//
+//   - El binario real de la foto (JPEG/PNG/GIF/WEBP) cuando el producto
+//     tiene una en Holded. Status 200, `content-type: text/html` en el
+//     header (sí, Holded miente — HEAD también devuelve text/html con
+//     `content-length: null`), pero los magic bytes son los del binario.
+//   - El HTML catch-all del frontend Next.js cuando el producto NO
+//     tiene foto. Status 200, body que empieza por `<!doctype...`.
+//
+// Por eso:
+//   * NO HEAD: el HEAD miente, gastaríamos un round-trip sin sacar
+//     información útil.
+//   * NO confiar en `content-type`: siempre devuelve text/html.
+//   * Detección por magic bytes (`detectImageMime`) y null si HTML.
+//   * Throw si bytes raros (binario que no es imagen reconocida): no
+//     silenciar, es señal de algo cambió en Holded y queremos saberlo.
+//
+// Tamaño máximo y timeout son parámetros — el caller los configura
+// según su contexto (sync usa el mismo límite que el image-cache-worker).
+export type FetchedProductImage =
+  | { bytes: Buffer; mime: "image/jpeg" | "image/png" | "image/gif" | "image/webp" }
+  | null;
+
+export interface FetchProductImageOptions {
+  signal?: AbortSignal;
+  maxBytes?: number;
+  // 15 s por request en el sync (Holded contesta típicamente en
+  // 200-400 ms, pero hay colas largas en horas pico).
+  timeoutMs?: number;
+}
+
+export async function fetchProductImage(
+  client: HoldedClient,
+  holdedProductId: string,
+  options: FetchProductImageOptions = {},
+): Promise<FetchedProductImage> {
+  if (!client.fetchBinary) {
+    throw new Error(
+      "fetchProductImage: el cliente no implementa fetchBinary (mock incompleto en tests?)",
+    );
+  }
+  const path = `/invoicing/v1/products/${holdedProductId}/image`;
+  const { bytes } = await client.fetchBinary(path, {
+    signal: options.signal,
+    maxBytes: options.maxBytes,
+    timeoutMs: options.timeoutMs ?? 15000,
+  });
+  const mime = detectImageMime(bytes);
+  if (mime === "text/html") {
+    // Producto sin foto en Holded — Holded sirve el catch-all del
+    // frontend. Caller distingue por `null`.
+    return null;
+  }
+  if (mime === "unknown") {
+    // Magic bytes no reconocidos: ni imagen válida ni HTML. Puede ser
+    // un cambio en Holded (¿AVIF? ¿algún wrapper nuevo?) o un proxy
+    // intermedio interfiriendo. Throw para que el caller lo loguee
+    // como FAILED y el siguiente sync lo reintente.
+    const preview = bytes.subarray(0, 8).toString("hex");
+    throw new Error(
+      `fetchProductImage(${holdedProductId}): magic bytes no reconocidos (${preview})`,
+    );
+  }
+  return { bytes, mime };
+}
+
+export interface FetchProductImagesBatchOptions {
+  concurrency?: number;
+  // Pasthrough a `fetchProductImage`.
+  maxBytes?: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  onWarn?: (message: string, extra?: unknown) => void;
+  // Callback de progreso: se llama tras cada producto. Útil para que
+  // el sync pueda emitir telemetría intermedia sin esperar al batch
+  // entero.
+  onProgress?: (event: {
+    holdedProductId: string;
+    outcome: "resolved" | "none" | "failed";
+  }) => void;
+}
+
+export interface FetchProductImagesBatchResult {
+  // Productos con imagen descargada y MIME detectado.
+  resolved: Map<string, { bytes: Buffer; mime: string }>;
+  // Productos verificados sin foto en Holded (HTML catch-all). Sentinel:
+  // el caller los marca como "imageCachedAt = now AND imageMime = NULL"
+  // para no re-pinchar en cada sync.
+  none: string[];
+  // Errores de red, timeout, magic bytes raros. Caller decide si reintenta.
+  failed: Array<{ id: string; reason: string }>;
+}
+
+export async function fetchProductImagesBatch(
+  client: HoldedClient,
+  holdedProductIds: readonly string[],
+  options: FetchProductImagesBatchOptions = {},
+): Promise<FetchProductImagesBatchResult> {
+  const concurrency = Math.max(1, options.concurrency ?? 5);
+  const onWarn = options.onWarn ?? defaultWarn;
+  const resolved: FetchProductImagesBatchResult["resolved"] = new Map();
+  const none: string[] = [];
+  const failed: FetchProductImagesBatchResult["failed"] = [];
+
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    while (cursor < holdedProductIds.length) {
+      const idx = cursor++;
+      const id = holdedProductIds[idx];
+      if (!id) continue;
+      try {
+        const result = await fetchProductImage(client, id, {
+          maxBytes: options.maxBytes,
+          timeoutMs: options.timeoutMs,
+          signal: options.signal,
+        });
+        if (result === null) {
+          none.push(id);
+          options.onProgress?.({ holdedProductId: id, outcome: "none" });
+        } else {
+          resolved.set(id, { bytes: result.bytes, mime: result.mime });
+          options.onProgress?.({ holdedProductId: id, outcome: "resolved" });
+        }
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        failed.push({ id, reason });
+        onWarn("fetchProductImage falló durante backfill binario", {
+          holdedProductId: id,
+          error: reason,
+        });
+        options.onProgress?.({ holdedProductId: id, outcome: "failed" });
+      }
+    }
+  }
+
+  const workers: Array<Promise<void>> = [];
+  for (let i = 0; i < concurrency; i += 1) workers.push(worker());
+  await Promise.all(workers);
+
+  return { resolved, none, failed };
 }
 
 // PUT /products/{id} y GET-back para validar (ADR-010).

@@ -16,15 +16,25 @@ export {
 export {
   ApiKeyClient,
   DEFAULT_HOLDED_BASE_URL,
+  type FetchBinaryOptions,
+  type FetchBinaryResult,
   type HoldedClient,
   type HoldedClientOptions,
 } from "./client.js";
 
 export {
+  detectImageMime,
+  extFromDetectedMime,
+  type DetectedImageMime,
+} from "./image-magic.js";
+
+export {
   HOLDED_PRODUCTS_PAGE_SIZE,
   createProduct,
   extractImageUrl,
+  fetchProductImage,
   fetchProductImageDetails,
+  fetchProductImagesBatch,
   getProduct,
   iterateAllProducts,
   listProductsPage,
@@ -33,6 +43,10 @@ export {
   type CreateProductBody,
   type FetchProductImageDetailResult,
   type FetchProductImageDetailsOptions,
+  type FetchProductImageOptions,
+  type FetchProductImagesBatchOptions,
+  type FetchProductImagesBatchResult,
+  type FetchedProductImage,
   type HoldedProduct,
   type HoldedProductVariant,
 } from "./products.js";
