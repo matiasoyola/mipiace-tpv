@@ -82,6 +82,14 @@ export function LineSheet({
     onClose();
   }
 
+  // v1.2-Lite-fix1 Lote 2 (F1-UX): el sheet se rompía en monitores
+  // cortos (Eliminar/Aplicar caían fuera del viewport). Lo
+  // estructuramos en flex column con tres zonas:
+  //   - Header fijo (título + precio bruto + cerrar).
+  //   - Body scrollable (precio override, cantidad, descuento, modifiers).
+  //   - Footer sticky (Eliminar | Cancelar | Aplicar), siempre visible.
+  // Altura tope `min(100vh - 48px, 720px)` para que en mobile use casi
+  // todo el alto y en monitores grandes no haya hueco innecesario.
   return (
     <div
       className="fixed inset-0 z-50 bg-mipiace-ink/40 flex items-end sm:items-center justify-center p-4 font-sans"
@@ -89,9 +97,10 @@ export function LineSheet({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-white w-full max-w-md rounded-3xl border border-slate-200 p-6 md:p-7"
+        className="bg-white w-full max-w-md rounded-3xl border border-slate-200 flex flex-col overflow-hidden"
+        style={{ maxHeight: "min(calc(100vh - 48px), 720px)" }}
       >
-        <div className="flex items-start justify-between mb-1">
+        <div className="flex items-start justify-between px-6 md:px-7 pt-6 md:pt-7 pb-3 shrink-0 border-b border-slate-100">
           <div className="min-w-0 flex-1">
             <div className="text-[18px] font-semibold text-mipiace-ink truncate">
               {line.nameSnapshot}
@@ -102,20 +111,21 @@ export function LineSheet({
           </div>
           <button
             onClick={onClose}
-            className="h-9 w-9 rounded-xl hover:bg-slate-50 text-slate-500 flex items-center justify-center"
+            className="h-9 w-9 rounded-xl hover:bg-slate-50 text-slate-500 flex items-center justify-center shrink-0"
             aria-label="Cerrar"
           >
             <X className="w-4 h-4" strokeWidth={2.25} />
           </button>
         </div>
 
+        <div className="flex-1 min-h-0 overflow-y-auto px-6 md:px-7 pt-4 pb-6">
         {/* v1.2-Lite Lote 4.B · T-5: editor de precio puntual.
             Colapsado por defecto; al pulsar el lápiz se abre un input
             prellenado con el precio efectivo. "Restaurar" vuelve al
             precio del catálogo limpiando el override. Cualquier cajero
             puede tocarlo — la auditoría queda en BD vía
             unitPriceOverride. */}
-        <div className="mt-4">
+        <div>
           <label className="block text-[13px] font-medium text-mipiace-ink-soft mb-2">
             Precio unitario
           </label>
@@ -315,17 +325,28 @@ export function LineSheet({
             {formatEur(computed.totalGross)}
           </span>
         </div>
+        </div>
 
-        <div className="flex gap-2.5 mt-5">
+        {/* Footer sticky: Eliminar a la izquierda con color rojo
+            (acción destructiva, separada), Cancelar outline, Aplicar
+            coral primario. Touch target >= 56px porque la cajera está
+            apresurada y no queremos errores por dedos gordos. */}
+        <div className="shrink-0 border-t border-slate-100 bg-white px-6 md:px-7 py-4 flex items-center gap-2.5">
           <button
             onClick={onRemove}
-            className="h-12 px-4 rounded-2xl border border-slate-200 hover:bg-red-50 hover:text-red-700 text-[13.5px] text-slate-500 font-medium flex items-center gap-2"
+            className="h-14 px-4 rounded-2xl border border-slate-200 hover:bg-red-50 hover:text-red-700 text-[13.5px] text-slate-500 font-medium flex items-center gap-2 min-h-[56px]"
           >
             <Trash2 className="w-4 h-4" /> Eliminar
           </button>
           <button
+            onClick={onClose}
+            className="h-14 px-4 rounded-2xl border border-slate-200 hover:bg-slate-50 text-mipiace-ink-soft text-[13.5px] font-medium min-h-[56px]"
+          >
+            Cancelar
+          </button>
+          <button
             onClick={commit}
-            className="flex-1 h-12 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[14px] font-medium"
+            className="flex-1 h-14 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[14px] font-medium min-h-[56px]"
           >
             Aplicar
           </button>
