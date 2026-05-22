@@ -31,7 +31,6 @@ import { ApiError } from "../api.js";
 import { Logo } from "../Logo.js";
 import {
   computeCart,
-  computeLine,
   getSuspendedCarts,
   removeSuspendedCart,
   saveSuspendedCart,
@@ -51,6 +50,7 @@ import {
   type CatalogProduct,
   type Wildcard,
 } from "../lib/catalog.js";
+import { CartLineItem } from "./CartLineItem.js";
 import { ContactSheet, type ContactRef } from "./SalePage.contact.js";
 import { CheckoutOverlay } from "./CheckoutPage.js";
 import { CloseShiftModal } from "./CloseShiftModal.js";
@@ -659,6 +659,8 @@ export function SalePage(props: SalePageProps) {
             onClickProduct={addProduct}
             onClickFreeLine={() => setOpenSheet({ kind: "freeLine" })}
             onClickLine={(line) => setOpenSheet({ kind: "line", line })}
+            onUpdateLineUnits={(id, units) => updateLine(id, { units })}
+            onRemoveLine={removeLine}
             onClickDiscountGlobal={() => setOpenSheet({ kind: "discountGlobal" })}
             onClickNotes={() => setOpenSheet({ kind: "notes" })}
             onClickContact={() => setOpenSheet({ kind: "contact" })}
@@ -853,39 +855,9 @@ function HealthBanner({ health }: { health: HealthStatus | null }) {
   return null;
 }
 
-// Desglose visual del carrito para una línea con modifiers
-// estructurados. Cada selección sale en una sub-línea con sangría —
-// formato `└ Grupo · Etiqueta   + 0,50 €`.
-function ModifierBreakdown({ selections }: { selections: ModifierSelection[] }) {
-  return (
-    <div className="text-[12.5px] text-slate-500 mt-0.5 space-y-0.5">
-      {selections.map((s, i) => {
-        const sign = s.priceDeltaCents > 0 ? "+" : "−";
-        const delta =
-          s.priceDeltaCents !== 0
-            ? ` ${sign} ${formatEur(Math.abs(s.priceDeltaCents) / 100)}`
-            : "";
-        return (
-          <div key={`${s.groupId}-${s.modifierId}-${i}`} className="flex items-baseline gap-1">
-            <span className="text-slate-300">└</span>
-            <span className="flex-1 truncate">
-              {s.groupName} · {s.label}
-            </span>
-            {delta && (
-              <span
-                className={`tabular-nums shrink-0 ${
-                  s.priceDeltaCents > 0 ? "text-slate-500" : "text-mipiace-coral"
-                }`}
-              >
-                {delta}
-              </span>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
+// `ModifierBreakdown` se extrajo a `SalePage.cartLineHelpers.tsx`
+// (v1.2-Lite-fix1 Lote 3) para compartirlo con `CartLineItem` sin
+// crear un import circular.
 
 function Banner({ color, children }: { color: "amber" | "red"; children: React.ReactNode }) {
   const style =
@@ -914,6 +886,8 @@ function SaleWorkspace({
   onClickProduct,
   onClickFreeLine,
   onClickLine,
+  onUpdateLineUnits,
+  onRemoveLine,
   onClickDiscountGlobal,
   onClickNotes,
   onClickContact,
@@ -937,6 +911,12 @@ function SaleWorkspace({
   onClickProduct: (p: CatalogProduct) => void;
   onClickFreeLine: () => void;
   onClickLine: (line: CartLine) => void;
+  // v1.2-Lite-fix1 Lote 3 (F2-UX): cambios inline desde cada línea
+  // del carrito (stepper +/− y papelera). Los pasamos como callbacks
+  // específicos en lugar de exponer `updateLine` entero para mantener
+  // el contrato del panel acotado.
+  onUpdateLineUnits: (id: string, units: number) => void;
+  onRemoveLine: (id: string) => void;
   onClickDiscountGlobal: () => void;
   onClickNotes: () => void;
   onClickContact: () => void;
@@ -1356,70 +1336,20 @@ function SaleWorkspace({
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
-              {lines.map((l) => {
-                const t = computeLine(l);
-                return (
-                  <button
-                    key={l.id}
-                    onClick={() => onClickLine(l)}
-                    className="group w-full flex items-center gap-3 md:gap-3.5 py-3.5 md:py-4 text-left"
-                  >
-                    <span className="shrink-0 h-9 w-9 rounded-xl bg-mipiace-stone text-mipiace-ink text-[14px] font-semibold tabular-nums flex items-center justify-center">
-                      {l.units}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[14px] md:text-[14.5px] font-medium text-mipiace-ink leading-tight flex items-center gap-1.5">
-                        <span>{l.nameSnapshot}</span>
-                        {/* v1.2-Lite Lote 4.B: badge "precio modificado"
-                            cuando el cajero tocó el lápiz. Discreto
-                            (no roba el foco) pero visible al revisar. */}
-                        {l.unitPriceOverride != null && (
-                          <span
-                            className="text-[10.5px] font-semibold uppercase tracking-wider bg-amber-100 text-amber-800 rounded px-1.5 py-0.5"
-                            title={`Precio original ${formatEur(l.priceGross)}`}
-                          >
-                            Precio modificado
-                          </span>
-                        )}
-                      </div>
-                      {l.modifierSelections && l.modifierSelections.length > 0 ? (
-                        <ModifierBreakdown selections={l.modifierSelections} />
-                      ) : l.modifiers.length > 0 ? (
-                        <div className="text-[12.5px] text-slate-500 mt-0.5">
-                          {l.modifiers.join(" · ")}
-                        </div>
-                      ) : l.unitPriceOverride != null ? (
-                        // El bruto efectivo difiere del priceGross
-                        // (priceGross fue calculado sobre unitPrice base).
-                        // Mostramos el bruto override con IVA + el del
-                        // catálogo tachado para que el cajero vea el delta.
-                        <div className="text-[12.5px] text-amber-700 mt-0.5 tabular-nums">
-                          {formatEur(
-                            l.unitPriceOverride * (1 + l.taxRate / 100),
-                          )}{" "}
-                          ud.{" "}
-                          <span className="text-slate-400 line-through">
-                            {formatEur(l.priceGross)}
-                          </span>
-                        </div>
-                      ) : l.discountPct > 0 ? (
-                        <div className="text-[12.5px] text-mipiace-coral mt-0.5 tabular-nums">
-                          {formatEur(l.priceGross)} ud. · −{l.discountPct}%
-                        </div>
-                      ) : l.units > 1 ? (
-                        <div className="text-[12.5px] text-slate-400 tabular-nums mt-0.5">
-                          {formatEur(l.priceGross)} ud.
-                        </div>
-                      ) : null}
-                    </div>
-                    <div className="text-right shrink-0">
-                      <span className="text-[14px] md:text-[14.5px] font-medium text-mipiace-ink tabular-nums">
-                        {formatEur(t.totalGross)}
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
+              {/* v1.2-Lite-fix1 Lote 3 (F2-UX): cada línea es un
+                  componente extraído con stepper inline y papelera
+                  armada por doble tap. El click central sigue
+                  abriendo el LineSheet para edición avanzada (precio,
+                  descuento, modifiers, nota). */}
+              {lines.map((l) => (
+                <CartLineItem
+                  key={l.id}
+                  line={l}
+                  onClick={() => onClickLine(l)}
+                  onUnitsChange={(units) => onUpdateLineUnits(l.id, units)}
+                  onRemove={() => onRemoveLine(l.id)}
+                />
+              ))}
             </div>
           )}
         </div>
