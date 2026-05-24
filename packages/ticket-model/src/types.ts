@@ -18,12 +18,20 @@ export interface TicketStore {
   phone?: string;
 }
 
+// v1.3-Servicios-Pinta · Lote 2: vertical del tenant emisor. El
+// renderer la usa para decidir el título de cabecera ("TICKET DE
+// VENTA" vs "COMPROBANTE" para SERVICES). Opcional para no romper
+// fixtures viejas: si viene `undefined` el renderer cae al copy de
+// retail/hospitality (comportamiento de hoy).
+export type TicketBusinessType = "HOSPITALITY" | "RETAIL" | "SERVICES";
+
 export interface TicketMeta {
   internalNumber: string;
   publicSlug: string;
   issuedAt: Date;
   cashierName: string;
   registerName: string;
+  businessType?: TicketBusinessType;
 }
 
 export interface TicketCustomer {

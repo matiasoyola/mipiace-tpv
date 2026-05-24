@@ -38,6 +38,7 @@ export const TicketDocumentSchema = z.object({
     issuedAt: z.date(),
     cashierName: z.string().min(1),
     registerName: z.string().min(1),
+    businessType: z.enum(["HOSPITALITY", "RETAIL", "SERVICES"]).optional(),
   }),
   customer: z
     .object({

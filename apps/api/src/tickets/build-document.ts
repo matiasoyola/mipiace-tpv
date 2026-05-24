@@ -32,7 +32,7 @@ export async function loadTicketDocument(
     where,
     include: {
       tenant: {
-        select: { name: true, fiscalProfile: true },
+        select: { name: true, fiscalProfile: true, businessType: true },
       },
       register: {
         select: {
@@ -78,6 +78,9 @@ export async function loadTicketDocument(
       fiscalProfile: ticket.tenant.fiscalProfile as
         | BuildTicketDocumentInput["tenant"]["fiscalProfile"]
         | null,
+      // v1.3-Servicios-Pinta · Lote 2: el renderer rotula la cabecera
+      // según la vertical (SERVICES → COMPROBANTE).
+      businessType: ticket.tenant.businessType,
     },
     store: {
       name: ticket.register.store.name,

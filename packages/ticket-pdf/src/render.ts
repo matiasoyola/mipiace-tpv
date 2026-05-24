@@ -205,12 +205,20 @@ export async function renderTicketPdf(
   }
 
   drawSeparator(s);
-  drawCenteredText(
-    s,
-    doc.refund ? "DEVOLUCIÓN" : "TICKET",
-    FONT_SIZE_TITLE,
-    true,
-  );
+  // v1.3-Servicios-Pinta · Lote 2: vertical determina el título de
+  // cabecera. SERVICES rotula "COMPROBANTE" para que un ticket de
+  // peluquería/clínica/taller no diga literalmente "TICKET DE VENTA".
+  // RETAIL/HOSPITALITY y fixtures legacy sin businessType siguen con
+  // el copy de hoy.
+  const isServices = doc.ticket.businessType === "SERVICES";
+  const headerTitle = doc.refund
+    ? isServices
+      ? "ANULACIÓN"
+      : "DEVOLUCIÓN"
+    : isServices
+      ? "COMPROBANTE"
+      : "TICKET DE VENTA";
+  drawCenteredText(s, headerTitle, FONT_SIZE_TITLE, true);
 
   // ── Store + ticket meta ──────────────────────────────────────────
   drawText(s, truncate(doc.store.name, 38), FONT_SIZE_NORMAL, true);

@@ -108,6 +108,24 @@ describe("renderTicketPdf", () => {
     expect(txtRefund).toContain("000100");
   });
 
+  // v1.3-Servicios-Pinta · Lote 2: tenants SERVICES rotulan la
+  // cabecera como COMPROBANTE / ANULACIÓN en lugar de TICKET DE
+  // VENTA / DEVOLUCIÓN. RETAIL/HOSPITALITY siguen como hoy.
+  it("rotula COMPROBANTE / ANULACIÓN en tenants SERVICES", async () => {
+    const inp = input();
+    inp.tenant.businessType = "SERVICES";
+    const ticket = await renderTicketPdf(buildTicketDocument(inp));
+    const txtTicket = (await pdfParse(Buffer.from(ticket))).text;
+    expect(txtTicket).toContain("COMPROBANTE");
+    expect(txtTicket).not.toContain("TICKET DE VENTA");
+
+    inp.refund = { originalTicketNumber: "000100" };
+    const refundBytes = await renderTicketPdf(buildTicketDocument(inp));
+    const txtRefund = (await pdfParse(Buffer.from(refundBytes))).text;
+    expect(txtRefund).toContain("ANULACIÓN");
+    expect(txtRefund).not.toContain("DEVOLUCIÓN");
+  });
+
   it("incrusta QR PNG cuando se pasa qrPngBytes", async () => {
     const doc = buildTicketDocument(input());
     // PNG mínimo 1x1 generado offline.

@@ -7,6 +7,7 @@
 // o como Decimal (`{ toString(): string }`) y se normalizan aquí.
 
 import type {
+  TicketBusinessType,
   TicketCustomer,
   TicketDocument,
   TicketLine,
@@ -78,6 +79,11 @@ export interface BuildTenantInput {
     address?: FiscalAddressLike;
     phone?: string | null;
   } | null;
+  // v1.3-Servicios-Pinta · Lote 2: vertical del tenant. Decide el
+  // título de cabecera del ticket impreso ("COMPROBANTE" en SERVICES).
+  // Opcional para no romper fixtures legacy — sin valor cae al copy
+  // por defecto (TICKET DE VENTA).
+  businessType?: TicketBusinessType;
 }
 
 export interface BuildStoreInput {
@@ -251,6 +257,7 @@ export function buildTicketDocument(input: BuildTicketDocumentInput): TicketDocu
       issuedAt: input.ticket.paidAt ?? input.ticket.createdAt,
       cashierName: input.cashier.name ?? input.cashier.email,
       registerName: input.register.name,
+      businessType: input.tenant.businessType,
     },
     customer,
     lines,
