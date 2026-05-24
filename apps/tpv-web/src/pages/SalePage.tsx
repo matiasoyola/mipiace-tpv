@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bookmark,
   Briefcase,
+  Calculator,
   CircleAlert,
   Coffee,
   Lock,
@@ -147,6 +148,8 @@ const KIND_FILTER_KEY = "mipiacetpv-sale-kind-filter";
 
 export function SalePage(props: SalePageProps) {
   const [showCloseShift, setShowCloseShift] = useState(false);
+  // v1.3 Lote 4 · arqueo X intermedio. Reusa el mismo modal con `mode="X"`.
+  const [showArqueoX, setShowArqueoX] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [catalog, setCatalog] = useState<CatalogProduct[] | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
@@ -550,6 +553,20 @@ export function SalePage(props: SalePageProps) {
               />
               <span className="hidden xl:inline">Venta</span>
             </button>
+            {/* v1.3 Lote 4 · arqueo X (control intermedio del cajón).
+                Encima de "Cerrar turno" porque es la acción más común:
+                muchos arqueos X durante el turno, un solo Z al final. */}
+            <button
+              onClick={() => setShowArqueoX(true)}
+              title="Arqueo X (control sin cerrar turno)"
+              className="w-full h-12 flex items-center xl:gap-3 px-3 xl:px-4 rounded-xl text-slate-600 hover:bg-slate-50 text-[14.5px] font-medium justify-center xl:justify-start"
+            >
+              <Calculator
+                className="w-[19px] h-[19px] text-slate-500 shrink-0"
+                strokeWidth={2.1}
+              />
+              <span className="hidden xl:inline">Arqueo X</span>
+            </button>
             <button
               onClick={() => setShowCloseShift(true)}
               title="Cerrar turno"
@@ -787,11 +804,23 @@ export function SalePage(props: SalePageProps) {
         <CloseShiftModal
           shiftId={props.shiftId}
           cashierRole={props.cashierRole}
+          mode="Z"
           onClose={() => setShowCloseShift(false)}
           onClosed={() => {
             setShowCloseShift(false);
             props.onCloseShift();
           }}
+        />
+      )}
+      {showArqueoX && (
+        <CloseShiftModal
+          shiftId={props.shiftId}
+          cashierRole={props.cashierRole}
+          mode="X"
+          onClose={() => setShowArqueoX(false)}
+          // El arqueo X no cierra el turno — onClosed nunca se dispara
+          // (el modal sólo enseña el resultado y se cierra manualmente).
+          onClosed={() => setShowArqueoX(false)}
         />
       )}
       {showHistory && (

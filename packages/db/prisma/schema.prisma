@@ -128,6 +128,15 @@ enum BusinessType {
   SERVICES
 }
 
+// v1.3-Thalia Lote 4 · arqueo de caja. El cajero cuenta efectivo por
+// denominaciones (no un total libre como antes). X = control intermedio
+// sin cerrar turno; Z = control de cierre — generamos sólo uno Z por
+// shift, X puede haber varios.
+enum ShiftCashCountKind {
+  X
+  Z
+}
+
 // ── Multi-tenant raíz ─────────────────────────────────────────────────
 
 model Tenant {
@@ -605,15 +614,39 @@ model Shift {
   closedByUserId String?   @map("closed_by_user_id") @db.Uuid
   zReportPdfPath String?   @map("z_report_pdf_path")
 
-  register Register @relation(fields: [registerId], references: [id], onDelete: Restrict)
-  user     User     @relation("ShiftOpenedBy", fields: [userId], references: [id], onDelete: Restrict)
-  closedBy User?    @relation("ShiftClosedBy", fields: [closedByUserId], references: [id], onDelete: Restrict)
-  tickets  Ticket[]
-  refunds  Refund[]
+  register   Register         @relation(fields: [registerId], references: [id], onDelete: Restrict)
+  user       User             @relation("ShiftOpenedBy", fields: [userId], references: [id], onDelete: Restrict)
+  closedBy   User?            @relation("ShiftClosedBy", fields: [closedByUserId], references: [id], onDelete: Restrict)
+  tickets    Ticket[]
+  refunds    Refund[]
+  cashCounts ShiftCashCount[]
 
   @@index([registerId, openedAt])
   @@index([registerId, closedAt])
   @@map("shifts")
+}
+
+// v1.3-Thalia Lote 4 · arqueo por denominaciones. Cada fila representa
+// un conteo puntual de caja: X (intermedio, no cierra) o Z (cierre del
+// turno). El backend es el único que calcula `cashTotal` desde el JSON
+// de denominaciones — el cliente no se cree (auditoría fiscal). El JSON
+// usa strings como llave ("500", "0.01") por compatibilidad JSON; el
+// backend interpreta cada llave como euros.
+model ShiftCashCount {
+  id            String             @id @default(uuid()) @db.Uuid
+  shiftId       String             @map("shift_id") @db.Uuid
+  shift         Shift              @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  kind          ShiftCashCountKind
+  // {"500":0,"200":0,...,"0.01":5} — el server vuelve a calcular el total.
+  denominations Json
+  cashTotal     Decimal            @map("cash_total") @db.Decimal(12, 2)
+  // Quién hizo el arqueo. Distinto al `userId` del shift cuando un
+  // encargado pasa por la caja a hacer un X de control.
+  createdByUserId String           @map("created_by_user_id") @db.Uuid
+  createdAt     DateTime           @default(now()) @map("created_at") @db.Timestamptz()
+
+  @@index([shiftId, createdAt])
+  @@map("shift_cash_counts")
 }
 
 model Ticket {

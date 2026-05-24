@@ -6,6 +6,7 @@ import { getPrisma } from "../context.js";
 import { verifyPassword } from "../auth/passwords.js";
 import { getTenantHealthStatus } from "../tickets/health.js";
 import { requireCashierSession } from "./cashier-session.js";
+import { ALLOWED_DENOMINATIONS, validateAndSumDenominations } from "./cash-count.js";
 import { generateZReportPdf } from "./z-report.js";
 
 // Body shape de close (B3 §3.4). methodTotals reportado por el cajero
@@ -178,43 +179,79 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
         syncFailureAccepted?: boolean;
         managerPin?: string;
       };
+      const result = await executeShiftClose({
+        prisma: getPrisma(),
+        log: request.log,
+        cashier,
+        shiftId,
+        body,
+      });
+      if (!result.ok) {
+        return reply.code(result.status).send(result.body);
+      }
+      return reply.code(200).send(result.body);
+    },
+  );
+
+  // v1.3-Thalia Lote 4 · POST /shift/:id/cash-count
+  // Arqueo por denominaciones. kind=X = control intermedio (sólo guarda
+  // y devuelve descuadre). kind=Z = cierre del turno (guarda + dispara
+  // close atómicamente, un único POST del frontend). El backend re-
+  // calcula `cashTotal` desde el JSON — el cliente no es de fiar.
+  app.post(
+    "/shift/:shiftId/cash-count",
+    {
+      preHandler: requireCashierSession,
+      schema: {
+        params: {
+          type: "object",
+          required: ["shiftId"],
+          properties: { shiftId: { type: "string", format: "uuid" } },
+        },
+        body: {
+          type: "object",
+          required: ["kind", "denominations"],
+          additionalProperties: false,
+          properties: {
+            kind: { type: "string", enum: ["X", "Z"] },
+            // Validación fuerte del shape (llaves euro) la hace el
+            // helper `validateAndSumDenominations`; aquí sólo damos
+            // forma genérica para que Fastify no rechace.
+            denominations: { type: "object" },
+            // Sólo aplican a Z (se ignoran en X).
+            syncFailureAccepted: { type: "boolean" },
+            managerPin: { type: "string", minLength: 4, maxLength: 16 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const cashier = request.cashier!;
+      const { shiftId } = request.params as { shiftId: string };
+      const body = request.body as {
+        kind: "X" | "Z";
+        denominations: unknown;
+        syncFailureAccepted?: boolean;
+        managerPin?: string;
+      };
       const prisma = getPrisma();
 
-      // B6 §3.2: cerrar turno también requiere health no bloqueado. Si
-      // estamos en `blocked`, el cierre dispararía la generación del Z
-      // y la marcación de tickets sin posibilidad de sync — preferimos
-      // que el cajero llame a soporte. Cuando el tenant vuelva a `ok` o
-      // `warning`, el cierre fluye normal.
-      const health = await getTenantHealthStatus(prisma, cashier.tid);
-      if (health.level === "blocked") {
-        return reply.code(409).send({
-          error: "TENANT_BLOCKED",
-          message:
-            health.reason === "no_api_key"
-              ? "Falta la API Key de Holded. El propietario debe reconectarla antes de cerrar el turno."
-              : "Llevamos más de 48h sin sincronizar con Holded. Contacta soporte antes de cerrar el turno.",
-          reason: health.reason,
-          blockedAt: health.blockedAt,
-          lastSuccessfulSyncAt: health.lastSuccessfulSyncAt,
+      const validation = validateAndSumDenominations(body.denominations);
+      if (!validation.ok) {
+        return reply.code(400).send({
+          error: "INVALID_DENOMINATIONS",
+          message: validation.error ?? "denominations inválidas",
         });
       }
 
       const shift = await prisma.shift.findFirst({
-        where: { id: shiftId, register: { storeId: { not: undefined } } },
+        where: { id: shiftId },
         select: {
           id: true,
           registerId: true,
-          userId: true,
-          cashOpening: true,
-          openedAt: true,
           closedAt: true,
-          register: {
-            select: {
-              id: true,
-              name: true,
-              store: { select: { id: true, name: true, tenantId: true } },
-            },
-          },
+          cashOpening: true,
+          register: { select: { store: { select: { tenantId: true } } } },
         },
       });
       if (!shift || shift.register.store.tenantId !== cashier.tid) {
@@ -228,251 +265,486 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
           .send({ error: "SHIFT_ALREADY_CLOSED", message: "El turno ya está cerrado" });
       }
 
-      const isOwnerOfShift = shift.userId === cashier.sub;
-
-      // Health-check de sync. Cuenta tickets+refunds del shift con sync
-      // pendiente o fallida.
-      const ticketIssues = await prisma.ticket.groupBy({
-        by: ["status"],
-        where: { shiftId: shift.id, status: { in: ["PENDING_SYNC", "SYNC_FAILED"] } },
-        _count: true,
-      });
-      const refundIssues = await prisma.refund.groupBy({
-        by: ["status"],
-        where: { shiftId: shift.id, status: { in: ["PENDING_SYNC", "SYNC_FAILED"] } },
-        _count: true,
-      });
-      const pendingSync =
-        (ticketIssues.find((i) => i.status === "PENDING_SYNC")?._count ?? 0) +
-        (refundIssues.find((i) => i.status === "PENDING_SYNC")?._count ?? 0);
-      const failed =
-        (ticketIssues.find((i) => i.status === "SYNC_FAILED")?._count ?? 0) +
-        (refundIssues.find((i) => i.status === "SYNC_FAILED")?._count ?? 0);
-      const hasSyncIssues = pendingSync > 0 || failed > 0;
-      if (hasSyncIssues && !body.syncFailureAccepted) {
-        // Devolvemos también la lista breve de tickets/refunds fallados
-        // para que el modal de cierre muestre la tabla con badge rojo
-        // (B5 §2.3). Sólo los SYNC_FAILED; los PENDING_SYNC son
-        // técnicamente transitorios y no requieren intervención manual.
-        const failedTickets = await prisma.ticket.findMany({
-          where: { shiftId: shift.id, status: "SYNC_FAILED" },
-          select: {
-            id: true,
-            internalNumber: true,
-            total: true,
-            syncError: true,
-            createdAt: true,
-          },
-          orderBy: { createdAt: "desc" },
-          take: 50,
+      if (body.kind === "Z") {
+        const existingZ = await prisma.shiftCashCount.findFirst({
+          where: { shiftId: shift.id, kind: "Z" },
+          select: { id: true },
         });
-        const failedRefunds = await prisma.refund.findMany({
-          where: { shiftId: shift.id, status: "SYNC_FAILED" },
-          select: {
-            id: true,
-            internalNumber: true,
-            total: true,
-            syncError: true,
-            createdAt: true,
-          },
-          orderBy: { createdAt: "desc" },
-          take: 50,
-        });
-        return reply.code(409).send({
-          error: "SYNC_PENDING",
-          message:
-            "Hay tickets sin sincronizar con Holded. Pide autorización del encargado y vuelve a confirmar.",
-          pendingSync,
-          failed,
-          failedTickets: failedTickets.map((t) => ({
-            id: t.id,
-            kind: "ticket" as const,
-            internalNumber: t.internalNumber,
-            total: Number(t.total.toString()),
-            createdAt: t.createdAt.toISOString(),
-            errorSummary: brieflyDescribeError(t.syncError),
-          })),
-          failedRefunds: failedRefunds.map((r) => ({
-            id: r.id,
-            kind: "refund" as const,
-            internalNumber: r.internalNumber,
-            total: Number(r.total.toString()),
-            createdAt: r.createdAt.toISOString(),
-            errorSummary: brieflyDescribeError(r.syncError),
-          })),
-        });
-      }
-
-      // PIN encargado: lo exigimos en dos escenarios distintos.
-      //   (a) Cierre forzado (actor != owner del shift): la política
-      //       histórica de B3 — requireManagerPinForForceClose.
-      //   (b) B5 §2.3: si hay SYNC_FAILED en el turno aunque el actor
-      //       sea el propio cajero. El encargado debe confirmar que
-      //       conoce los errores y se hace cargo (queda en log y en
-      //       el Z PDF como audit trail).
-      const tenant = await prisma.tenant.findUniqueOrThrow({
-        where: { id: cashier.tid },
-        select: { requireManagerPinForForceClose: true },
-      });
-      const actorIsManager = cashier.role === "MANAGER";
-      const needForceClosePin =
-        !isOwnerOfShift && tenant.requireManagerPinForForceClose && !actorIsManager;
-      const needSyncFailedPin = failed > 0 && !actorIsManager;
-      let managerEmail: string | null = null;
-      if (needForceClosePin || needSyncFailedPin) {
-        if (!body.managerPin) {
-          return reply.code(403).send({
-            error: "MANAGER_PIN_REQUIRED",
-            message: needSyncFailedPin
-              ? "Hay tickets rechazados por Holded en este turno. Necesitas el PIN del encargado para cerrarlo."
-              : "Este cierre forzado requiere PIN de encargado.",
-            reason: needSyncFailedPin ? "sync_failed" : "force_close",
+        if (existingZ) {
+          return reply.code(409).send({
+            error: "Z_ALREADY_EXISTS",
+            message: "Ya se registró un arqueo Z para este turno.",
           });
         }
-        // B7 §9: aceptamos PIN de OWNER (auto-generado al login admin)
-        // además del de MANAGER. Desbloquea el caso "1 dueño + 1
-        // cajero" sin necesidad de crear un MANAGER de respaldo.
-        const managers = await prisma.user.findMany({
-          where: {
-            tenantId: cashier.tid,
-            role: { in: ["MANAGER", "OWNER"] },
-            pinHash: { not: null },
-          },
-          select: { id: true, email: true, pinHash: true },
-        });
-        let authorized: { id: string; email: string } | null = null;
-        for (const m of managers) {
-          if (m.pinHash && (await verifyPassword(m.pinHash, body.managerPin))) {
-            authorized = { id: m.id, email: m.email };
-            break;
-          }
-        }
-        if (!authorized) {
-          return reply.code(403).send({
-            error: "INVALID_MANAGER_PIN",
-            message: "PIN de encargado incorrecto.",
-          });
-        }
-        managerEmail = authorized.email;
-      }
-      // Audit trail estructurado (B5 §2.3). Cuando montemos la tabla
-      // audit_log dedicada, lo movemos allí; hoy basta con que quede
-      // en pino para reconstrucción forense.
-      if (managerEmail && needSyncFailedPin) {
-        request.log.info(
-          {
-            event: "shift.close.sync_failed_accepted",
-            shiftId: shift.id,
-            registerId: shift.register.id,
-            cashierUserId: cashier.sub,
-            managerUserEmail: managerEmail,
-            failedCount: failed,
-            pendingSyncCount: pendingSync,
-          },
-          "encargado autorizó cierre con SYNC_FAILED",
-        );
       }
 
-      // Cálculo de teóricos a partir de los ticket_payments del turno
-      // (B4). B3 los dejaba en 0 porque no había tickets reales; ahora
-      // sí. El descuadre = real − teórico aplica sólo a CASH; el resto
-      // se reporta como "diferencia frente al teórico" en el Z, sin
-      // bloquear el cierre.
-      const paymentTotals = await prisma.ticketPayment.groupBy({
-        by: ["method"],
-        where: { ticket: { shiftId: shift.id } },
+      // Cash esperado = ventas en efectivo del turno + fondo inicial.
+      // Mismo cálculo que el flujo de cierre (consistente con el Z).
+      const cashAgg = await prisma.ticketPayment.aggregate({
+        where: { ticket: { shiftId: shift.id }, method: "CASH" },
         _sum: { amount: true },
       });
-      const theoreticalByMethod = new Map<string, number>();
-      for (const row of paymentTotals) {
-        theoreticalByMethod.set(row.method, Number(row._sum.amount ?? 0));
-      }
       const cashTheoretical =
-        (theoreticalByMethod.get("CASH") ?? 0) + Number(shift.cashOpening);
-      const methodTotals = [
-        { method: "CASH", theoretical: cashTheoretical, counted: body.cashCounted },
-        {
-          method: "CARD",
-          theoretical: theoreticalByMethod.get("CARD") ?? 0,
-          counted: body.methodTotals.CARD,
-        },
-        {
-          method: "BIZUM",
-          theoretical: theoreticalByMethod.get("BIZUM") ?? 0,
-          counted: body.methodTotals.BIZUM,
-        },
-        {
-          method: "VOUCHER",
-          theoretical: theoreticalByMethod.get("VOUCHER") ?? 0,
-          counted: body.methodTotals.VOUCHER,
-        },
-      ];
+        Number(cashAgg._sum.amount ?? 0) + Number(shift.cashOpening);
+      const descuadre = validation.total - cashTheoretical;
 
-      const closedAt = new Date();
-
-      // Genera Z PDF antes de marcar closedAt — si la generación falla,
-      // mantenemos el turno abierto y devolvemos error.
-      const [cashierUser, closedByUser] = await Promise.all([
-        prisma.user.findUniqueOrThrow({
-          where: { id: shift.userId },
-          select: { email: true },
-        }),
-        prisma.user.findUniqueOrThrow({
-          where: { id: cashier.sub },
-          select: { email: true },
-        }),
-      ]);
-
-      let zPath: string | null = null;
-      try {
-        zPath = await generateZReportPdf({
-          shiftId: shift.id,
-          storeName: shift.register.store.name,
-          registerName: shift.register.name,
-          cashierLabel: cashierUser.email,
-          closedByLabel: isOwnerOfShift ? null : closedByUser.email,
-          openedAt: shift.openedAt,
-          closedAt,
-          cashOpening: Number(shift.cashOpening),
-          cashCounted: body.cashCounted,
-          cashTheoretical,
-          methodTotals,
-          ticketsCount: await prisma.ticket.count({ where: { shiftId: shift.id } }),
-          refundsCount: 0, // los Refund se contarán cuando lleguen en B6.
-          syncIssues: { pendingSync, failed },
-          acceptedSyncFailures: body.syncFailureAccepted === true,
-          managerAuthorizationEmail: managerEmail,
+      // Persistimos el arqueo SIEMPRE — para Z, también dispara el
+      // close. Si el close falla (sync_pending sin aceptar, falta de
+      // PIN, etc.) revertimos el ShiftCashCount con una transacción
+      // que envuelve ambas operaciones.
+      if (body.kind === "X") {
+        await prisma.shiftCashCount.create({
+          data: {
+            shiftId: shift.id,
+            kind: "X",
+            denominations: body.denominations as object,
+            cashTotal: new Prisma.Decimal(validation.total),
+            createdByUserId: cashier.sub,
+          },
         });
-      } catch (err) {
-        request.log.error(err, "Z report generation failed");
-        return reply.code(500).send({
-          error: "Z_REPORT_FAILED",
-          message: "No se pudo generar el informe Z. El turno sigue abierto.",
+        return reply.code(201).send({
+          kind: "X" as const,
+          cashCounted: validation.total,
+          cashTheoretical,
+          descuadre,
         });
       }
 
-      const updated = await prisma.shift.update({
-        where: { id: shift.id },
-        data: {
-          closedAt,
-          cashCounted: new Prisma.Decimal(body.cashCounted),
-          closedByUserId: cashier.sub,
-          zReportPdfPath: zPath,
+      // kind === "Z": delega en el flujo de cierre existente. Si el
+      // cierre devuelve error (PIN, sync, etc.) NO persistimos el
+      // ShiftCashCount — el cajero verá el aviso y volverá a intentar.
+      const closeResult = await executeShiftClose({
+        prisma,
+        log: request.log,
+        cashier,
+        shiftId: shift.id,
+        body: {
+          cashCounted: validation.total,
+          methodTotals: {},
+          syncFailureAccepted: body.syncFailureAccepted,
+          managerPin: body.managerPin,
         },
-        select: { id: true, closedAt: true, zReportPdfPath: true },
       });
-
-      return reply.code(200).send({
-        shift: {
-          id: updated.id,
-          closedAt: updated.closedAt!.toISOString(),
-          zReportPdfPath: updated.zReportPdfPath,
+      if (!closeResult.ok) {
+        return reply.code(closeResult.status).send(closeResult.body);
+      }
+      // Cierre OK → persistimos el arqueo Z con el total recién
+      // validado por el backend. El timestamp queda ligeramente
+      // después del closedAt (orden: close commit → cash-count
+      // commit) pero ambos viven dentro de la misma request.
+      await prisma.shiftCashCount.create({
+        data: {
+          shiftId: shift.id,
+          kind: "Z",
+          denominations: body.denominations as object,
+          cashTotal: new Prisma.Decimal(validation.total),
+          createdByUserId: cashier.sub,
         },
-        descuadre: body.cashCounted - cashTheoretical,
-        forceClose: !isOwnerOfShift,
+      });
+      return reply.code(200).send({
+        kind: "Z" as const,
+        cashCounted: validation.total,
+        cashTheoretical,
+        descuadre,
+        shift: closeResult.body.shift,
       });
     },
   );
+
+  // GET /shift/:id/cash-counts → histórico X+Z del turno. Útil cuando
+  // el cajero quiere ver los arqueos intermedios que ya hizo.
+  app.get(
+    "/shift/:shiftId/cash-counts",
+    {
+      preHandler: requireCashierSession,
+      schema: {
+        params: {
+          type: "object",
+          required: ["shiftId"],
+          properties: { shiftId: { type: "string", format: "uuid" } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const cashier = request.cashier!;
+      const { shiftId } = request.params as { shiftId: string };
+      const prisma = getPrisma();
+      const shift = await prisma.shift.findFirst({
+        where: { id: shiftId },
+        select: { register: { select: { store: { select: { tenantId: true } } } } },
+      });
+      if (!shift || shift.register.store.tenantId !== cashier.tid) {
+        return reply
+          .code(404)
+          .send({ error: "SHIFT_NOT_FOUND", message: "Turno no encontrado" });
+      }
+      const counts = await prisma.shiftCashCount.findMany({
+        where: { shiftId },
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          kind: true,
+          denominations: true,
+          cashTotal: true,
+          createdAt: true,
+          createdByUserId: true,
+        },
+      });
+      return {
+        items: counts.map((c) => ({
+          id: c.id,
+          kind: c.kind,
+          denominations: c.denominations,
+          cashTotal: Number(c.cashTotal.toString()),
+          createdAt: c.createdAt.toISOString(),
+          createdByUserId: c.createdByUserId,
+        })),
+        allowedDenominations: ALLOWED_DENOMINATIONS,
+      };
+    },
+  );
+}
+
+// Resultado de `executeShiftClose`. Encapsula success/error en una
+// shape que cada caller (handler /close, handler /cash-count Z)
+// serializa a su gusto. Evita acoplarse a FastifyReply para poder
+// componerlo (kind=Z dentro de cash-count llama a esta función).
+type ExecuteShiftCloseResult =
+  | { ok: true; body: Record<string, unknown> & { shift: Record<string, unknown> } }
+  | { ok: false; status: number; body: Record<string, unknown> };
+
+async function executeShiftClose(args: {
+  prisma: ReturnType<typeof getPrisma>;
+  log: { info: (obj: object, msg: string) => void; error: (obj: unknown, msg?: string) => void };
+  cashier: { tid: string; rid: string; sub: string; role: "MANAGER" | "CASHIER" };
+  shiftId: string;
+  body: {
+    cashCounted: number;
+    methodTotals: MethodTotalsBody;
+    syncFailureAccepted?: boolean;
+    managerPin?: string;
+  };
+}): Promise<ExecuteShiftCloseResult> {
+  const { prisma, log, cashier, shiftId, body } = args;
+
+  // B6 §3.2: cerrar turno también requiere health no bloqueado. Si
+  // estamos en `blocked`, el cierre dispararía la generación del Z
+  // y la marcación de tickets sin posibilidad de sync — preferimos
+  // que el cajero llame a soporte. Cuando el tenant vuelva a `ok` o
+  // `warning`, el cierre fluye normal.
+  const health = await getTenantHealthStatus(prisma, cashier.tid);
+  if (health.level === "blocked") {
+    return {
+      ok: false,
+      status: 409,
+      body: {
+        error: "TENANT_BLOCKED",
+        message:
+          health.reason === "no_api_key"
+            ? "Falta la API Key de Holded. El propietario debe reconectarla antes de cerrar el turno."
+            : "Llevamos más de 48h sin sincronizar con Holded. Contacta soporte antes de cerrar el turno.",
+        reason: health.reason,
+        blockedAt: health.blockedAt,
+        lastSuccessfulSyncAt: health.lastSuccessfulSyncAt,
+      },
+    };
+  }
+
+  const shift = await prisma.shift.findFirst({
+    where: { id: shiftId, register: { storeId: { not: undefined } } },
+    select: {
+      id: true,
+      registerId: true,
+      userId: true,
+      cashOpening: true,
+      openedAt: true,
+      closedAt: true,
+      register: {
+        select: {
+          id: true,
+          name: true,
+          store: { select: { id: true, name: true, tenantId: true } },
+        },
+      },
+    },
+  });
+  if (!shift || shift.register.store.tenantId !== cashier.tid) {
+    return {
+      ok: false,
+      status: 404,
+      body: { error: "SHIFT_NOT_FOUND", message: "Turno no encontrado" },
+    };
+  }
+  if (shift.closedAt) {
+    return {
+      ok: false,
+      status: 409,
+      body: { error: "SHIFT_ALREADY_CLOSED", message: "El turno ya está cerrado" },
+    };
+  }
+
+  const isOwnerOfShift = shift.userId === cashier.sub;
+
+  // Health-check de sync. Cuenta tickets+refunds del shift con sync
+  // pendiente o fallida.
+  const ticketIssues = await prisma.ticket.groupBy({
+    by: ["status"],
+    where: { shiftId: shift.id, status: { in: ["PENDING_SYNC", "SYNC_FAILED"] } },
+    _count: true,
+  });
+  const refundIssues = await prisma.refund.groupBy({
+    by: ["status"],
+    where: { shiftId: shift.id, status: { in: ["PENDING_SYNC", "SYNC_FAILED"] } },
+    _count: true,
+  });
+  const pendingSync =
+    (ticketIssues.find((i) => i.status === "PENDING_SYNC")?._count ?? 0) +
+    (refundIssues.find((i) => i.status === "PENDING_SYNC")?._count ?? 0);
+  const failed =
+    (ticketIssues.find((i) => i.status === "SYNC_FAILED")?._count ?? 0) +
+    (refundIssues.find((i) => i.status === "SYNC_FAILED")?._count ?? 0);
+  const hasSyncIssues = pendingSync > 0 || failed > 0;
+  if (hasSyncIssues && !body.syncFailureAccepted) {
+    // Devolvemos también la lista breve de tickets/refunds fallados
+    // para que el modal de cierre muestre la tabla con badge rojo
+    // (B5 §2.3). Sólo los SYNC_FAILED; los PENDING_SYNC son
+    // técnicamente transitorios y no requieren intervención manual.
+    const failedTickets = await prisma.ticket.findMany({
+      where: { shiftId: shift.id, status: "SYNC_FAILED" },
+      select: {
+        id: true,
+        internalNumber: true,
+        total: true,
+        syncError: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    });
+    const failedRefunds = await prisma.refund.findMany({
+      where: { shiftId: shift.id, status: "SYNC_FAILED" },
+      select: {
+        id: true,
+        internalNumber: true,
+        total: true,
+        syncError: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    });
+    return {
+      ok: false,
+      status: 409,
+      body: {
+        error: "SYNC_PENDING",
+        message:
+          "Hay tickets sin sincronizar con Holded. Pide autorización del encargado y vuelve a confirmar.",
+        pendingSync,
+        failed,
+        failedTickets: failedTickets.map((t) => ({
+          id: t.id,
+          kind: "ticket" as const,
+          internalNumber: t.internalNumber,
+          total: Number(t.total.toString()),
+          createdAt: t.createdAt.toISOString(),
+          errorSummary: brieflyDescribeError(t.syncError),
+        })),
+        failedRefunds: failedRefunds.map((r) => ({
+          id: r.id,
+          kind: "refund" as const,
+          internalNumber: r.internalNumber,
+          total: Number(r.total.toString()),
+          createdAt: r.createdAt.toISOString(),
+          errorSummary: brieflyDescribeError(r.syncError),
+        })),
+      },
+    };
+  }
+
+  // PIN encargado: lo exigimos en dos escenarios distintos.
+  //   (a) Cierre forzado (actor != owner del shift): la política
+  //       histórica de B3 — requireManagerPinForForceClose.
+  //   (b) B5 §2.3: si hay SYNC_FAILED en el turno aunque el actor
+  //       sea el propio cajero. El encargado debe confirmar que
+  //       conoce los errores y se hace cargo (queda en log y en
+  //       el Z PDF como audit trail).
+  const tenant = await prisma.tenant.findUniqueOrThrow({
+    where: { id: cashier.tid },
+    select: { requireManagerPinForForceClose: true },
+  });
+  const actorIsManager = cashier.role === "MANAGER";
+  const needForceClosePin =
+    !isOwnerOfShift && tenant.requireManagerPinForForceClose && !actorIsManager;
+  const needSyncFailedPin = failed > 0 && !actorIsManager;
+  let managerEmail: string | null = null;
+  if (needForceClosePin || needSyncFailedPin) {
+    if (!body.managerPin) {
+      return {
+        ok: false,
+        status: 403,
+        body: {
+          error: "MANAGER_PIN_REQUIRED",
+          message: needSyncFailedPin
+            ? "Hay tickets rechazados por Holded en este turno. Necesitas el PIN del encargado para cerrarlo."
+            : "Este cierre forzado requiere PIN de encargado.",
+          reason: needSyncFailedPin ? "sync_failed" : "force_close",
+        },
+      };
+    }
+    // B7 §9: aceptamos PIN de OWNER (auto-generado al login admin)
+    // además del de MANAGER. Desbloquea el caso "1 dueño + 1
+    // cajero" sin necesidad de crear un MANAGER de respaldo.
+    const managers = await prisma.user.findMany({
+      where: {
+        tenantId: cashier.tid,
+        role: { in: ["MANAGER", "OWNER"] },
+        pinHash: { not: null },
+      },
+      select: { id: true, email: true, pinHash: true },
+    });
+    let authorized: { id: string; email: string } | null = null;
+    for (const m of managers) {
+      if (m.pinHash && (await verifyPassword(m.pinHash, body.managerPin))) {
+        authorized = { id: m.id, email: m.email };
+        break;
+      }
+    }
+    if (!authorized) {
+      return {
+        ok: false,
+        status: 403,
+        body: {
+          error: "INVALID_MANAGER_PIN",
+          message: "PIN de encargado incorrecto.",
+        },
+      };
+    }
+    managerEmail = authorized.email;
+  }
+  // Audit trail estructurado (B5 §2.3). Cuando montemos la tabla
+  // audit_log dedicada, lo movemos allí; hoy basta con que quede
+  // en pino para reconstrucción forense.
+  if (managerEmail && needSyncFailedPin) {
+    log.info(
+      {
+        event: "shift.close.sync_failed_accepted",
+        shiftId: shift.id,
+        registerId: shift.register.id,
+        cashierUserId: cashier.sub,
+        managerUserEmail: managerEmail,
+        failedCount: failed,
+        pendingSyncCount: pendingSync,
+      },
+      "encargado autorizó cierre con SYNC_FAILED",
+    );
+  }
+
+  // Cálculo de teóricos a partir de los ticket_payments del turno
+  // (B4). B3 los dejaba en 0 porque no había tickets reales; ahora
+  // sí. El descuadre = real − teórico aplica sólo a CASH; el resto
+  // se reporta como "diferencia frente al teórico" en el Z, sin
+  // bloquear el cierre.
+  const paymentTotals = await prisma.ticketPayment.groupBy({
+    by: ["method"],
+    where: { ticket: { shiftId: shift.id } },
+    _sum: { amount: true },
+  });
+  const theoreticalByMethod = new Map<string, number>();
+  for (const row of paymentTotals) {
+    theoreticalByMethod.set(row.method, Number(row._sum.amount ?? 0));
+  }
+  const cashTheoretical =
+    (theoreticalByMethod.get("CASH") ?? 0) + Number(shift.cashOpening);
+  const methodTotals = [
+    { method: "CASH", theoretical: cashTheoretical, counted: body.cashCounted },
+    {
+      method: "CARD",
+      theoretical: theoreticalByMethod.get("CARD") ?? 0,
+      counted: body.methodTotals.CARD,
+    },
+    {
+      method: "BIZUM",
+      theoretical: theoreticalByMethod.get("BIZUM") ?? 0,
+      counted: body.methodTotals.BIZUM,
+    },
+    {
+      method: "VOUCHER",
+      theoretical: theoreticalByMethod.get("VOUCHER") ?? 0,
+      counted: body.methodTotals.VOUCHER,
+    },
+  ];
+
+  const closedAt = new Date();
+
+  // Genera Z PDF antes de marcar closedAt — si la generación falla,
+  // mantenemos el turno abierto y devolvemos error.
+  const [cashierUser, closedByUser] = await Promise.all([
+    prisma.user.findUniqueOrThrow({
+      where: { id: shift.userId },
+      select: { email: true },
+    }),
+    prisma.user.findUniqueOrThrow({
+      where: { id: cashier.sub },
+      select: { email: true },
+    }),
+  ]);
+
+  let zPath: string | null = null;
+  try {
+    zPath = await generateZReportPdf({
+      shiftId: shift.id,
+      storeName: shift.register.store.name,
+      registerName: shift.register.name,
+      cashierLabel: cashierUser.email,
+      closedByLabel: isOwnerOfShift ? null : closedByUser.email,
+      openedAt: shift.openedAt,
+      closedAt,
+      cashOpening: Number(shift.cashOpening),
+      cashCounted: body.cashCounted,
+      cashTheoretical,
+      methodTotals,
+      ticketsCount: await prisma.ticket.count({ where: { shiftId: shift.id } }),
+      refundsCount: 0, // los Refund se contarán cuando lleguen en B6.
+      syncIssues: { pendingSync, failed },
+      acceptedSyncFailures: body.syncFailureAccepted === true,
+      managerAuthorizationEmail: managerEmail,
+    });
+  } catch (err) {
+    log.error(err, "Z report generation failed");
+    return {
+      ok: false,
+      status: 500,
+      body: {
+        error: "Z_REPORT_FAILED",
+        message: "No se pudo generar el informe Z. El turno sigue abierto.",
+      },
+    };
+  }
+
+  const updated = await prisma.shift.update({
+    where: { id: shift.id },
+    data: {
+      closedAt,
+      cashCounted: new Prisma.Decimal(body.cashCounted),
+      closedByUserId: cashier.sub,
+      zReportPdfPath: zPath,
+    },
+    select: { id: true, closedAt: true, zReportPdfPath: true },
+  });
+
+  return {
+    ok: true,
+    body: {
+      shift: {
+        id: updated.id,
+        closedAt: updated.closedAt!.toISOString(),
+        zReportPdfPath: updated.zReportPdfPath,
+      },
+      descuadre: body.cashCounted - cashTheoretical,
+      forceClose: !isOwnerOfShift,
+    },
+  };
 }
 
 // Resumen humano del syncError persistido por el worker. El frontend
