@@ -1033,6 +1033,71 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
     },
   );
 
+  // ── POST /tickets/:id/reprint ───────────────────────────────────────
+  // v1.3-Thalia Lote 3 · crea un PrintIntent(REPRINT) para el ticket
+  // dado. El bridge B5 lo consumirá cuando se monte; mientras tanto
+  // el intent queda PENDING y el cajero ve toast "Enviado a impresora".
+  // El renderer del PDF pinta "COPIA — no fiscal" al detectar el kind.
+  app.post(
+    "/tickets/:ticketId/reprint",
+    {
+      preHandler: requireCashierSession,
+      schema: {
+        params: {
+          type: "object",
+          required: ["ticketId"],
+          properties: { ticketId: { type: "string", format: "uuid" } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const cashier = request.cashier!;
+      const { ticketId } = request.params as { ticketId: string };
+      const prisma = getPrisma();
+      const ticket = await prisma.ticket.findFirst({
+        where: { id: ticketId, tenantId: cashier.tid },
+        select: { id: true, status: true, internalNumber: true },
+      });
+      if (!ticket) {
+        return reply
+          .code(404)
+          .send({ error: "TICKET_NOT_FOUND", message: "Ticket no encontrado" });
+      }
+      // Reimprimir un DRAFT no tiene sentido (todavía no se cobró). El
+      // resto de estados (PAID/SYNCED/SYNC_FAILED/PENDING_SYNC/TEST/
+      // VOIDED) sí — el cliente puede pedir copia incluso de uno con
+      // fallo de sync.
+      if (ticket.status === "DRAFT") {
+        return reply.code(409).send({
+          error: "TICKET_NOT_REPRINTABLE",
+          message: "Sólo se puede reimprimir un ticket ya cobrado.",
+        });
+      }
+      const intent = await prisma.printIntent.create({
+        data: {
+          ticketId: ticket.id,
+          kind: "REPRINT",
+          requestedByUserId: cashier.sub,
+        },
+        select: { id: true, createdAt: true },
+      });
+      request.log.info(
+        {
+          event: "ticket.reprint",
+          ticketId: ticket.id,
+          internalNumber: ticket.internalNumber,
+          printIntentId: intent.id,
+          cashierUserId: cashier.sub,
+        },
+        "Reimpresión solicitada",
+      );
+      return reply.code(202).send({
+        printIntentId: intent.id,
+        createdAt: intent.createdAt.toISOString(),
+      });
+    },
+  );
+
   // ── POST /tickets/:id/gift-receipt-intent ───────────────────────────
   app.post(
     "/tickets/:ticketId/gift-receipt-intent",

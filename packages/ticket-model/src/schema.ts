@@ -38,6 +38,7 @@ export const TicketDocumentSchema = z.object({
     issuedAt: z.date(),
     cashierName: z.string().min(1),
     registerName: z.string().min(1),
+    isReprint: z.boolean().optional(),
   }),
   customer: z
     .object({

@@ -24,6 +24,12 @@ export interface TicketMeta {
   issuedAt: Date;
   cashierName: string;
   registerName: string;
+  // v1.3-Thalia Lote 3 · marca que este render es una reimpresión a
+  // posteriori. El renderer estampa "COPIA — no fiscal" arriba y una
+  // línea con "REIMPRESIÓN · {fecha original} · operario {nick}". El
+  // ticket fiscal original sigue siendo el primero — esto es sólo
+  // visual para el cliente que pide copia.
+  isReprint?: boolean;
 }
 
 export interface TicketCustomer {

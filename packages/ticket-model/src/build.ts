@@ -122,6 +122,9 @@ export interface BuildTicketInput {
   total: Numericish;
   lines: BuildTicketLineInput[];
   payments: BuildTicketPaymentInput[];
+  // v1.3-Thalia Lote 3 · si se construye el doc para una reimpresión.
+  // Sólo cambia presentación visual del PDF, no la fiscalidad.
+  isReprint?: boolean;
 }
 
 export interface BuildRefundContext {
@@ -251,6 +254,7 @@ export function buildTicketDocument(input: BuildTicketDocumentInput): TicketDocu
       issuedAt: input.ticket.paidAt ?? input.ticket.createdAt,
       cashierName: input.cashier.name ?? input.cashier.email,
       registerName: input.register.name,
+      isReprint: input.ticket.isReprint ?? undefined,
     },
     customer,
     lines,

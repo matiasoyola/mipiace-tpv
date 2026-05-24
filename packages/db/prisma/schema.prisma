@@ -137,6 +137,24 @@ enum ShiftCashCountKind {
   Z
 }
 
+// v1.3-Thalia Lote 3 · intent de impresión persistido. Hasta este
+// lote el TPV sólo tenía `Ticket.printIntent: Boolean` (intención del
+// primer cobro). Ahora hace falta crear un intent por cada reimpresión
+// posterior, así que pasamos a una tabla con `kind`:
+//   - NEW: impresión original al cobrar (la que vivía implícita en el
+//     boolean). El handler de cobro la crea cuando `printIntent=true`.
+//   - REPRINT: el cajero pidió una copia desde el historial. El
+//     renderer del ticket pinta "COPIA — no fiscal" en cabecera.
+//   - GIFT: ticket regalo (el `giftReceiptIntentAt` del Ticket se
+//     mantiene como timestamp informativo, pero el intent vive aquí).
+// Status libre (PENDING|DONE|FAILED) sin enum para no acoplar al
+// ciclo Prisma — el bridge B5 lo consumirá vía BullMQ cuando se monte.
+enum PrintIntentKind {
+  NEW
+  REPRINT
+  GIFT
+}
+
 // ── Multi-tenant raíz ─────────────────────────────────────────────────
 
 model Tenant {
@@ -307,6 +325,7 @@ model User {
   resetTokens    PasswordResetToken[]
   refunds        Refund[]
   emailJobsAsked TicketEmailJob[]
+  printIntents   PrintIntent[]
 
   @@index([tenantId])
   @@map("users")
@@ -711,14 +730,15 @@ model Ticket {
   syncedAt             DateTime?    @map("synced_at") @db.Timestamptz()
   syncError            Json?        @map("sync_error")
 
-  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  register  Register         @relation(fields: [registerId], references: [id], onDelete: Restrict)
-  shift     Shift            @relation(fields: [shiftId], references: [id], onDelete: Restrict)
-  user      User             @relation(fields: [userId], references: [id], onDelete: Restrict)
-  lines     TicketLine[]
-  payments  TicketPayment[]
-  refunds   Refund[]
-  emailJobs TicketEmailJob[]
+  tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  register     Register         @relation(fields: [registerId], references: [id], onDelete: Restrict)
+  shift        Shift            @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  user         User             @relation(fields: [userId], references: [id], onDelete: Restrict)
+  lines        TicketLine[]
+  payments     TicketPayment[]
+  refunds      Refund[]
+  emailJobs    TicketEmailJob[]
+  printIntents PrintIntent[]
 
   @@unique([registerId, internalNumber])
   @@index([tenantId, status])
@@ -1079,6 +1099,36 @@ model SuperAdminUser {
   audits SuperAdminAudit[]
 
   @@map("super_admin_users")
+}
+
+// v1.3-Thalia Lote 3 · cola de intents de impresión. Cada fila
+// representa una orden que el bridge B5 (PWA del navegador o servicio
+// nativo) consume para mandar al hardware. El renderer del PDF puede
+// pintar marcas distintas según `kind` (p.ej. "COPIA — no fiscal"
+// para REPRINT) — la lógica vive en `ticket-pdf`, este modelo sólo
+// guarda el intent.
+model PrintIntent {
+  id                String          @id @default(uuid()) @db.Uuid
+  ticketId          String          @map("ticket_id") @db.Uuid
+  ticket            Ticket          @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  kind              PrintIntentKind
+  // PENDING al crear; el bridge lo marca DONE tras imprimir o FAILED
+  // si la impresora rechazó. String libre — sin enum porque viaja a
+  // BullMQ y se desacopla del ciclo Prisma migrate.
+  status            String          @default("PENDING")
+  // Quién lo solicitó. NEW lo crea el handler de cobro (es el cajero
+  // del shift); REPRINT lo crea el cajero que abre el historial; GIFT
+  // lo crea el cajero del cobro original. Útil para auditoría.
+  requestedByUserId String          @map("requested_by_user_id") @db.Uuid
+  requestedBy       User            @relation(fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz()
+  pickedAt          DateTime?       @map("picked_at") @db.Timestamptz()
+  doneAt            DateTime?       @map("done_at") @db.Timestamptz()
+  lastError         String?         @map("last_error")
+
+  @@index([status, createdAt])
+  @@index([ticketId, kind, createdAt])
+  @@map("print_intents")
 }
 
 // Auditoría inmutable de toda acción super-admin. Sin retención
