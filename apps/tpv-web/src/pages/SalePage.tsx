@@ -786,6 +786,11 @@ export function SalePage(props: SalePageProps) {
           contact={contact}
           notes={notes}
           businessType={businessType}
+          // v1.3-Servicios-Pinta · Lote 4: el nudge "Servicio sin
+          // cliente" salta al modal de búsqueda existente. Cerramos
+          // el overlay (CheckoutOverlay también llama onClose) y
+          // abrimos ContactSheet en su lugar.
+          onRequestAssignContact={() => setOpenSheet({ kind: "contact" })}
           onClose={() => setOpenSheet(null)}
           onConfirmed={() => {
             clearCart();

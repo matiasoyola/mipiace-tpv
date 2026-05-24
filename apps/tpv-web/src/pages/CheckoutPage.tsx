@@ -57,6 +57,10 @@ export function CheckoutOverlay(props: {
   // (Cobrar vs Cerrar servicio, A cobrar vs Importe del servicio) y
   // habilita el campo "Atendido por" + nudge cliente para SERVICES.
   businessType: BusinessType | null;
+  // v1.3-Servicios-Pinta · Lote 4: callback opcional para abrir el
+  // modal de búsqueda de cliente desde el aviso "Servicio sin cliente".
+  // SalePage cierra el overlay y abre el ContactSheet existente.
+  onRequestAssignContact?: () => void;
   onClose: () => void;
   onConfirmed: () => void;
 }) {
@@ -80,6 +84,11 @@ export function CheckoutOverlay(props: {
   // opcional ≤60 chars, sólo visible en SERVICES. El backend ignora el
   // campo si llega vacío.
   const [attendedBy, setAttendedBy] = useState("");
+  // v1.3-Servicios-Pinta · Lote 4: aviso "Servicio sin cliente". El
+  // cajero pulsa Confirmar sin cliente en SERVICES → mostramos el
+  // nudge; si vuelve a pulsar Continuar, el cobro pasa. No bloqueante
+  // — un tap extra y a casa.
+  const [needsClientConfirmation, setNeedsClientConfirmation] = useState(false);
   // B6 §2: si el descuento del ticket supera el umbral del tenant, el
   // backend devuelve 403 MANAGER_AUTHORIZATION_REQUIRED en el primer
   // intento. Abrimos el modal de autorización; al validar el PIN del
@@ -144,7 +153,21 @@ export function CheckoutOverlay(props: {
     setPayments((curr) => curr.filter((_, j) => j !== i));
   }
 
-  async function submit(overrideToken?: string) {
+  async function submit(overrideToken?: string, opts?: { skipClientNudge?: boolean }) {
+    // v1.3-Servicios-Pinta · Lote 4: en SERVICES, cuando no hay cliente
+    // asignado, pedimos confirmación explícita antes de cobrar. El
+    // historial de cliente = ficha de servicios y cerrar sin cliente
+    // pierde esa trazabilidad. No bloqueamos: el cajero puede
+    // continuar con un tap más en "Continuar".
+    if (
+      !opts?.skipClientNudge &&
+      props.businessType === "SERVICES" &&
+      !props.contact &&
+      !needsClientConfirmation
+    ) {
+      setNeedsClientConfirmation(true);
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -453,6 +476,44 @@ export function CheckoutOverlay(props: {
             <div className="text-[12px] text-emerald-700 bg-emerald-50 rounded-xl px-3 py-2 mb-3 flex items-center gap-2">
               <Check className="w-3.5 h-3.5" />
               Descuento autorizado por {authorizedBy}
+            </div>
+          )}
+          {/* v1.3-Servicios-Pinta · Lote 4: nudge cuando el servicio
+              se cierra sin cliente. El historial de cliente es la
+              ficha de servicios en peluquería/clínica/taller, así que
+              le sugerimos vincular uno. No bloquea: "Continuar" cobra
+              tal cual; "Asignar cliente" cierra el overlay y abre el
+              modal de búsqueda que ya existe en SalePage. */}
+          {needsClientConfirmation && (
+            <div className="text-[12.5px] text-amber-900 bg-amber-50 border border-amber-200 rounded-xl px-3 py-3 mb-3">
+              <div className="font-medium mb-2">Servicio sin cliente asignado</div>
+              <div className="text-[12px] text-amber-800 mb-3">
+                El histórico de servicios se asocia al cliente. Sin
+                cliente vinculado este comprobante no aparecerá en su
+                ficha. ¿Continuar de todos modos?
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => submit(undefined, { skipClientNudge: true })}
+                  disabled={submitting}
+                  className="h-9 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[12.5px] font-medium disabled:opacity-50"
+                >
+                  Continuar
+                </button>
+                {props.onRequestAssignContact && (
+                  <button
+                    onClick={() => {
+                      const cb = props.onRequestAssignContact;
+                      if (cb) cb();
+                      props.onClose();
+                    }}
+                    disabled={submitting}
+                    className="h-9 px-3 rounded-lg bg-white border border-amber-300 text-amber-900 text-[12.5px] font-medium hover:bg-amber-100 disabled:opacity-50"
+                  >
+                    Asignar cliente
+                  </button>
+                )}
+              </div>
             </div>
           )}
           <button
