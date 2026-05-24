@@ -23,6 +23,7 @@ import {
 import { ApiError, apiWithCashier } from "../api.js";
 import type { ContactRef } from "./SalePage.contact.js";
 import type { CartLine, CartTotals } from "../lib/cart.js";
+import type { BusinessType } from "../lib/catalog.js";
 import { SuccessOverlay } from "./CheckoutPage.successOverlay.js";
 
 const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
@@ -52,6 +53,10 @@ export function CheckoutOverlay(props: {
   totals: CartTotals;
   contact: ContactRef | null;
   notes: string;
+  // v1.3-Servicios-Pinta · Lote 1: vertical del tenant. Determina copy
+  // (Cobrar vs Cerrar servicio, A cobrar vs Importe del servicio) y
+  // habilita el campo "Atendido por" + nudge cliente para SERVICES.
+  businessType: BusinessType | null;
   onClose: () => void;
   onConfirmed: () => void;
 }) {
@@ -248,7 +253,9 @@ export function CheckoutOverlay(props: {
             </span>
           </div>
           <div className="mb-6">
-            <div className="text-[14px] text-slate-500 mb-1">A cobrar</div>
+            <div className="text-[14px] text-slate-500 mb-1">
+              {props.businessType === "SERVICES" ? "Importe del servicio" : "A cobrar"}
+            </div>
             <div className="text-[56px] md:text-[64px] font-semibold text-mipiace-ink tracking-tight leading-none tabular-nums">
               {formatEur(total)}
             </div>
@@ -423,7 +430,7 @@ export function CheckoutOverlay(props: {
           >
             <span className="flex items-center gap-2">
               {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-              Confirmar cobro
+              {props.businessType === "SERVICES" ? "Confirmar cierre" : "Confirmar cobro"}
             </span>
             <span className="tabular-nums">{formatEur(total)}</span>
           </button>

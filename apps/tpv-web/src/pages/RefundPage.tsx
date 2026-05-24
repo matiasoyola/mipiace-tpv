@@ -6,6 +6,8 @@ import { useMemo, useState } from "react";
 import { ArrowLeft, Loader2, Minus, Plus } from "lucide-react";
 
 import { ApiError, apiWithCashier } from "../api.js";
+import { getCachedBusinessType } from "../lib/catalog.js";
+import { vocab } from "../lib/vocab.js";
 
 const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
 
@@ -47,6 +49,7 @@ export function RefundOverlay(props: {
   onClose: () => void;
   onConfirmed: () => void;
 }) {
+  const businessType = getCachedBusinessType();
   const [unitsByLine, setUnitsByLine] = useState<Record<string, number>>(() =>
     Object.fromEntries(props.ticket.lines.map((l) => [l.id, 0])),
   );
@@ -113,17 +116,17 @@ export function RefundOverlay(props: {
           <ArrowLeft className="w-5 h-5" strokeWidth={2.1} />
         </button>
         <h1 className="text-[20px] font-semibold text-mipiace-ink tracking-tight">
-          Devolución · ticket #{props.ticket.internalNumber}
+          {vocab("refundNoun", businessType)} · {vocab("ticketNoun", businessType).toLowerCase()} #{props.ticket.internalNumber}
         </h1>
       </header>
       <main className="flex-1 overflow-y-auto bg-mipiace-stone p-5 md:p-8">
         <div className="max-w-4xl mx-auto grid lg:grid-cols-[1fr_360px] gap-5">
           <section className="bg-white rounded-3xl border border-slate-200 p-5">
             <h2 className="text-[16px] font-semibold text-mipiace-ink mb-1">
-              Líneas a devolver
+              Líneas a {vocab("refundAction", businessType).toLowerCase()}
             </h2>
             <p className="text-[12.5px] text-slate-500 mb-4">
-              Selecciona cuántas unidades de cada línea quieres devolver.
+              Selecciona cuántas unidades de cada línea quieres {vocab("refundAction", businessType).toLowerCase()}.
             </p>
             <div className="space-y-3">
               {props.ticket.lines.map((l) => (
@@ -212,7 +215,7 @@ export function RefundOverlay(props: {
               className="mt-auto h-14 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[15px] font-medium disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-              Confirmar devolución
+              Confirmar {vocab("refundNoun", businessType).toLowerCase()}
             </button>
           </aside>
         </div>

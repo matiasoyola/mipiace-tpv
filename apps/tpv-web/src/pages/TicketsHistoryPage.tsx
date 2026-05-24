@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 
 import { ApiError, apiWithCashier } from "../api.js";
+import { getCachedBusinessType } from "../lib/catalog.js";
+import { vocab } from "../lib/vocab.js";
 import { RefundOverlay } from "./RefundPage.js";
 
 const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
@@ -98,6 +100,11 @@ interface TicketRow {
 }
 
 export function TicketsHistoryPage(props: { onClose: () => void }) {
+  // v1.3-Servicios-Pinta · Lote 1: vertical del tenant para adaptar el
+  // título de la pantalla, el copy de los filtros y el botón "Iniciar
+  // devolución". El historial es la "ficha del cliente" en servicios,
+  // así que aquí el copy importa más que en RETAIL.
+  const businessType = getCachedBusinessType();
   const [tickets, setTickets] = useState<TicketRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -159,7 +166,9 @@ export function TicketsHistoryPage(props: { onClose: () => void }) {
           <ArrowLeft className="w-5 h-5" strokeWidth={2.1} />
         </button>
         <h1 className="text-[20px] font-semibold text-mipiace-ink tracking-tight">
-          Tickets
+          {businessType === "SERVICES"
+            ? vocab("historyTitle", businessType)
+            : "Tickets"}
         </h1>
         <div className="flex-1 max-w-xl ml-auto">
           <div className="relative">
@@ -250,7 +259,7 @@ export function TicketsHistoryPage(props: { onClose: () => void }) {
           </div>
         ) : tickets.length === 0 ? (
           <div className="bg-white rounded-2xl border border-slate-200 p-7 text-center text-[14px] text-slate-500">
-            No hay tickets que coincidan.
+            No hay {vocab("ticketNoun", businessType).toLowerCase()}s que coincidan.
           </div>
         ) : (
           <ul className="space-y-2.5">
@@ -268,6 +277,7 @@ export function TicketsHistoryPage(props: { onClose: () => void }) {
       {selected && (
         <TicketDetailDrawer
           ticket={selected}
+          businessType={businessType}
           onClose={() => setSelected(null)}
           onRefund={() => {
             setRefunding(selected);
@@ -384,11 +394,13 @@ function StatusBadge({ status }: { status: TicketRow["status"] }) {
 
 function TicketDetailDrawer({
   ticket,
+  businessType,
   onClose,
   onRefund,
   onChanged,
 }: {
   ticket: TicketRow;
+  businessType: import("../lib/catalog.js").BusinessType | null;
   onClose: () => void;
   onRefund: () => void;
   onChanged: () => void;
@@ -516,7 +528,7 @@ function TicketDetailDrawer({
             onClick={() => alert("Impresión real ESC/POS llega en B5.")}
             className="w-full h-11 rounded-xl border border-slate-200 hover:bg-slate-50 text-[13.5px] font-medium text-mipiace-ink flex items-center justify-center gap-2"
           >
-            <Printer className="w-4 h-4" /> Reimprimir ticket
+            <Printer className="w-4 h-4" /> Reimprimir {vocab("ticketNoun", businessType).toLowerCase()}
           </button>
 
           {ticket.status === "SYNCED" && (
@@ -524,7 +536,7 @@ function TicketDetailDrawer({
               onClick={onRefund}
               className="w-full h-11 rounded-xl border border-mipiace-coral/30 text-mipiace-coral-dark hover:bg-mipiace-coral-soft text-[13.5px] font-medium flex items-center justify-center gap-2"
             >
-              <RotateCcw className="w-4 h-4" /> Iniciar devolución
+              <RotateCcw className="w-4 h-4" /> Iniciar {vocab("refundNoun", businessType).toLowerCase()}
             </button>
           )}
 

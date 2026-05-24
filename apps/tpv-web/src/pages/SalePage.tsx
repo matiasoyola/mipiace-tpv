@@ -65,6 +65,7 @@ import {
   loadModifierGroups,
   type CatalogModifierGroup,
 } from "../lib/modifiers.js";
+import { vocab } from "../lib/vocab.js";
 
 const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
 
@@ -146,6 +147,12 @@ export interface SalePageProps {
 const KIND_FILTER_KEY = "mipiacetpv-sale-kind-filter";
 
 export function SalePage(props: SalePageProps) {
+  // v1.3-Servicios-Pinta · Lote 1: vertical del tenant, cacheada al
+  // último refresh del catálogo. Decide el copy del topbar, sheets y
+  // panel del ticket. Si aún no se ha llenado (sesión preexistente al
+  // deploy), `vocab()` cae al copy de RETAIL — comportamiento idéntico
+  // al de hoy.
+  const businessType = getCachedBusinessType();
   const [showCloseShift, setShowCloseShift] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [catalog, setCatalog] = useState<CatalogProduct[] | null>(null);
@@ -541,14 +548,14 @@ export function SalePage(props: SalePageProps) {
               texto pequeño abajo izquierda, casi invisibles. */}
           <nav className="space-y-1.5">
             <button
-              title="Venta"
+              title={vocab("saleNoun", businessType)}
               className="w-full h-12 flex items-center xl:gap-3 px-3 xl:px-4 rounded-xl bg-mipiace-coral-soft text-mipiace-coral-dark text-[14.5px] font-medium justify-center xl:justify-start"
             >
               <ShoppingBag
                 className="w-[19px] h-[19px] text-mipiace-coral shrink-0"
                 strokeWidth={2.1}
               />
-              <span className="hidden xl:inline">Venta</span>
+              <span className="hidden xl:inline">{vocab("saleNoun", businessType)}</span>
             </button>
             <button
               onClick={() => setShowCloseShift(true)}
@@ -626,7 +633,7 @@ export function SalePage(props: SalePageProps) {
               </button>
               <button
                 onClick={() => setOpenSheet({ kind: "suspended" })}
-                title="Ventas pendientes"
+                title={businessType === "SERVICES" ? "Servicios pendientes" : "Ventas pendientes"}
                 className="h-12 md:h-14 px-3 md:px-5 rounded-2xl bg-mipiace-coral-soft border border-mipiace-coral/25 flex items-center gap-2 text-[13.5px] md:text-[14px] font-medium text-mipiace-coral-dark hover:bg-mipiace-coral/15"
               >
                 <Bookmark className="w-[17px] h-[17px]" strokeWidth={2.25} />
@@ -634,7 +641,7 @@ export function SalePage(props: SalePageProps) {
               </button>
               <button
                 onClick={clearCart}
-                title="Nueva venta"
+                title={businessType === "SERVICES" ? "Nuevo servicio" : "Nueva venta"}
                 className="h-12 md:h-14 w-12 md:w-14 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark flex items-center justify-center text-white"
               >
                 <Plus className="w-[20px] h-[20px]" strokeWidth={2.25} />
@@ -667,7 +674,9 @@ export function SalePage(props: SalePageProps) {
             onClickCheckout={() => setOpenSheet({ kind: "checkout" })}
             onSuspend={() => suspendCart("")}
             onCancel={() => {
-              if (lines.length === 0 || confirm("¿Cancelar la venta en curso?")) {
+              const inProgress =
+                businessType === "SERVICES" ? "el servicio" : "la venta";
+              if (lines.length === 0 || confirm(`¿Cancelar ${inProgress} en curso?`)) {
                 clearCart();
               }
             }}
@@ -776,6 +785,7 @@ export function SalePage(props: SalePageProps) {
           totals={totals}
           contact={contact}
           notes={notes}
+          businessType={businessType}
           onClose={() => setOpenSheet(null)}
           onConfirmed={() => {
             clearCart();
@@ -1219,7 +1229,9 @@ function SaleWorkspace({
         <div className="flex items-center justify-between px-5 md:px-7 pt-5 md:pt-6 pb-3 md:pb-4 border-b border-slate-100">
           <div className="min-w-0">
             <h2 className="text-[18px] md:text-[20px] font-semibold text-mipiace-ink tracking-tight truncate">
-              {tableContext ? `Mesa ${tableContext.name}` : "Ticket de venta"}
+              {tableContext
+                ? `Mesa ${tableContext.name}`
+                : `${vocab("ticketNoun", businessType)} de ${vocab("saleNoun", businessType).toLowerCase()}`}
             </h2>
             {/* Mejora-02: contador de tickets del turno actual. Aparece
                 a la derecha del subtítulo como "Turno · #N" para que
@@ -1233,12 +1245,12 @@ function SaleWorkspace({
                   itemCount={totals.itemCount}
                 />
               ) : (
-                <>Ticket · {totals.itemCount}</>
+                <>{vocab("ticketNoun", businessType)} · {totals.itemCount}</>
               )}
               {shiftTicketsCount !== null && (
                 <>
                   <span className="text-slate-300">·</span>
-                  <span title={`${shiftTicketsCount} ticket${shiftTicketsCount === 1 ? "" : "s"} ya emitido${shiftTicketsCount === 1 ? "" : "s"} en este turno`}>
+                  <span title={`${shiftTicketsCount} ${vocab("ticketNoun", businessType).toLowerCase()}${shiftTicketsCount === 1 ? "" : "s"} ya emitido${shiftTicketsCount === 1 ? "" : "s"} en este turno`}>
                     Turno · #{shiftTicketsCount + 1}
                   </span>
                 </>
@@ -1278,7 +1290,7 @@ function SaleWorkspace({
           <button
             onClick={onClickNotes}
             className="h-8 px-3 rounded-lg bg-mipiace-stone hover:bg-slate-100 text-[12.5px] font-medium text-mipiace-ink"
-            title="Observaciones internas del ticket"
+            title={`Observaciones internas del ${vocab("ticketNoun", businessType).toLowerCase()}`}
           >
             Observaciones{notes ? " ●" : ""}
           </button>
@@ -1286,7 +1298,7 @@ function SaleWorkspace({
             onClick={onCancel}
             disabled={lines.length === 0 && !contact && !notes}
             className="h-8 px-3 rounded-lg bg-red-50 hover:bg-red-100 text-[12.5px] font-medium text-red-700 disabled:opacity-50 disabled:cursor-not-allowed ml-auto"
-            title="Cancelar y vaciar el ticket"
+            title={`Cancelar y vaciar el ${vocab("ticketNoun", businessType).toLowerCase()}`}
           >
             Cancelar
           </button>
@@ -1322,7 +1334,7 @@ function SaleWorkspace({
               disabled={lines.length === 0}
               className="h-12 md:h-14 bg-mipiace-coral hover:bg-mipiace-coral-dark disabled:opacity-50 text-white font-medium text-[14px] md:text-[15px] flex items-center justify-between px-4 md:px-5 rounded-2xl"
             >
-              <span>Cobrar</span>
+              <span>{vocab("saleAction", businessType)}</span>
               <span className="tabular-nums">{formatEur(totals.total)}</span>
             </button>
           </div>
@@ -1332,7 +1344,7 @@ function SaleWorkspace({
         <div className="px-5 md:px-7 py-1 flex-1 min-h-0 overflow-y-auto">
           {lines.length === 0 ? (
             <div className="py-10 text-center text-[13px] text-slate-400">
-              Pulsa un producto o escanea un código para empezar.
+              Pulsa un {vocab("itemNoun", businessType).toLowerCase()} o escanea un código para empezar.
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
@@ -1390,10 +1402,11 @@ function DiscountGlobalSheet({
   onClose: () => void;
 }) {
   const [pct, setPct] = useState(String(currentPct));
+  const bt = getCachedBusinessType();
   return (
     <SheetWrap onClose={onClose} title="Descuento global">
       <p className="text-[13px] text-slate-500 mb-4">
-        Aplica un porcentaje a todas las líneas del ticket. El cajero puede llegar al 10% sin autorización (núcleo §6.3).
+        Aplica un porcentaje a todas las líneas del {vocab("ticketNoun", bt).toLowerCase()}. El cajero puede llegar al 10% sin autorización (núcleo §6.3).
       </p>
       <label className="block text-[13px] font-medium text-mipiace-ink mb-2">% sobre el subtotal</label>
       <input
@@ -1530,8 +1543,9 @@ function NotesSheet({
   onSave: (v: string) => void;
 }) {
   const [text, setText] = useState(value);
+  const bt = getCachedBusinessType();
   return (
-    <SheetWrap onClose={onClose} title="Observaciones del ticket">
+    <SheetWrap onClose={onClose} title={`Observaciones del ${vocab("ticketNoun", bt).toLowerCase()}`}>
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -1565,10 +1579,12 @@ function SuspendedSheet({
   onRecover: (cart: SuspendedCart) => void;
 }) {
   const [carts, setCarts] = useState<SuspendedCart[]>(getSuspendedCarts());
+  const bt = getCachedBusinessType();
+  const title = bt === "SERVICES" ? "Servicios pendientes" : "Ventas pendientes";
   return (
-    <SheetWrap onClose={onClose} title="Ventas pendientes">
+    <SheetWrap onClose={onClose} title={title}>
       {carts.length === 0 ? (
-        <p className="text-[13px] text-slate-500">No hay ventas pendientes.</p>
+        <p className="text-[13px] text-slate-500">No hay {title.toLowerCase()}.</p>
       ) : (
         <ul className="space-y-2">
           {carts.map((c) => (

@@ -28,6 +28,8 @@ import {
 import type { TicketDocument } from "@mipiacetpv/ticket-model";
 
 import { apiWithCashier } from "../api.js";
+import { getCachedBusinessType } from "../lib/catalog.js";
+import { vocab } from "../lib/vocab.js";
 
 interface TicketDelivery {
   emailAutoIfCustomerHasEmail: boolean;
@@ -63,6 +65,9 @@ export function SuccessOverlay({
   const [digitalError, setDigitalError] = useState<string | null>(null);
   const [showQr, setShowQr] = useState(false);
   const [showView, setShowView] = useState(false);
+  // v1.3-Servicios-Pinta · Lote 1: vertical para adaptar copy ("Ticket
+  // emitido" → "Comprobante emitido", "Nueva venta" → "Nuevo servicio").
+  const businessType = getCachedBusinessType();
 
   // Polling Holded para pintar el número fiscal cuando llegue.
   useEffect(() => {
@@ -158,7 +163,7 @@ export function SuccessOverlay({
           <Check className="w-8 h-8" strokeWidth={2.5} />
         </div>
         <h1 className="text-[22px] font-semibold text-mipiace-ink tracking-tight">
-          Ticket emitido
+          {vocab("ticketNoun", businessType)} emitido
         </h1>
         <div className="text-[14px] text-slate-500 mt-1">
           Número interno <span className="tabular-nums">#{internalNumber}</span>
@@ -243,7 +248,7 @@ export function SuccessOverlay({
               <ActionButton
                 testId="action-view"
                 icon={<Eye className="w-4 h-4" />}
-                label="Ver ticket"
+                label={`Ver ${vocab("ticketNoun", businessType).toLowerCase()}`}
                 disabled={!documentObj}
                 onClick={() => setShowView(true)}
               />
@@ -255,7 +260,7 @@ export function SuccessOverlay({
           onClick={onDone}
           className="mt-6 w-full h-12 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white font-medium text-[14px]"
         >
-          Nueva venta
+          {businessType === "SERVICES" ? "Nuevo servicio" : "Nueva venta"}
         </button>
       </div>
 
@@ -414,7 +419,9 @@ function ViewModal({
     <div className="fixed inset-0 z-[60] bg-mipiace-ink/80 flex items-center justify-center p-5">
       <div className="bg-white rounded-3xl p-4 max-w-md w-full">
         <div className="flex justify-between items-center mb-2 px-2">
-          <h2 className="text-[16px] font-semibold text-mipiace-ink">Ticket</h2>
+          <h2 className="text-[16px] font-semibold text-mipiace-ink">
+            {vocab("ticketNoun", getCachedBusinessType())}
+          </h2>
           <button
             onClick={onClose}
             className="h-9 w-9 rounded-full bg-mipiace-stone text-slate-500 flex items-center justify-center"
