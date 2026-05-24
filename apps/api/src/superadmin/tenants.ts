@@ -329,6 +329,9 @@ export async function registerSuperAdminTenantsRoutes(
         plan: tenant.plan,
         onboardingState: tenant.onboardingState,
         businessType: tenant.businessType,
+        // v1.3-Thalia Lote 6 · pie de ticket libre para mostrarlo en el
+        // modal de edición. NULL = sin pie custom (default).
+        receiptFooter: tenant.receiptFooter,
         holdedConnected: tenant.holdedApiKeyCiphertext != null,
         holdedAuthMode: tenant.holdedAuthMode,
         initialSyncStatus: tenant.initialSyncStatus,
@@ -622,6 +625,12 @@ export async function registerSuperAdminTenantsRoutes(
               type: "string",
               enum: ["HOSPITALITY", "RETAIL", "SERVICES"],
             },
+            // v1.3-Thalia Lote 6 · pie de ticket libre. 200 caracteres
+            // máx para no descuajeringar el ticket 80mm (~5 líneas).
+            // Aceptamos string vacío y lo persistimos como NULL para
+            // que "limpiar el pie" desde la UI funcione sin endpoint
+            // adicional.
+            receiptFooter: { type: "string", maxLength: 200 },
           },
         },
       },
@@ -639,6 +648,7 @@ export async function registerSuperAdminTenantsRoutes(
           phone?: string;
         };
         businessType?: "HOSPITALITY" | "RETAIL" | "SERVICES";
+        receiptFooter?: string;
       };
       const ctx = request.superAdmin!;
       const prisma = getPrisma();
@@ -718,6 +728,16 @@ export async function registerSuperAdminTenantsRoutes(
       if (body.businessType !== undefined && body.businessType !== tenant.businessType) {
         changes.businessType = { before: tenant.businessType, after: body.businessType };
         data.businessType = body.businessType;
+      }
+      if (body.receiptFooter !== undefined) {
+        // String vacío → NULL (limpiar el pie). Trim para evitar guardar
+        // espacios accidentales que el cajero notaría como línea muda.
+        const trimmed = body.receiptFooter.trim();
+        const nextValue = trimmed === "" ? null : trimmed;
+        if (nextValue !== tenant.receiptFooter) {
+          changes.receiptFooter = { before: tenant.receiptFooter, after: nextValue };
+          data.receiptFooter = nextValue;
+        }
       }
 
       if (Object.keys(changes).length === 0) {

@@ -232,6 +232,12 @@ model Tenant {
   // para no asumir hostelería en tenants nuevos (el piloto inicial es
   // librería). Editable desde la consola super-admin.
   businessType                   BusinessType      @default(RETAIL) @map("business_type")
+  // v1.3-Thalia Lote 6 · pie de ticket personalizado. NULL = no se
+  // pinta nada extra (comportamiento previo). Si está set, el renderer
+  // del ticket lo pinta arriba del QR/CIF tras el "Gracias por tu
+  // visita". Limitado a 200 caracteres en el endpoint admin para no
+  // descuajeringar el layout (~5 líneas en 80mm).
+  receiptFooter                  String?           @map("receipt_footer")
   createdAt                      DateTime          @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt                      DateTime          @updatedAt @map("updated_at") @db.Timestamptz()
 

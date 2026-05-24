@@ -101,6 +101,9 @@ export interface TenantDetail {
   plan: string | null;
   onboardingState: OnboardingState;
   businessType: BusinessType;
+  // v1.3-Thalia Lote 6 · texto libre del pie de ticket. NULL = sin pie
+  // personalizado (default histórico).
+  receiptFooter: string | null;
   holdedConnected: boolean;
   holdedAuthMode: string;
   initialSyncStatus: string;

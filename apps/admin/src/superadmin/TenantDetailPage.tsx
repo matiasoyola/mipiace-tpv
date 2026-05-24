@@ -487,6 +487,13 @@ export function TenantDetailPage() {
         />
       )}
 
+      <ReceiptFooterPanel
+        tenantId={tenant.id}
+        current={tenant.receiptFooter}
+        onSaved={(next) => setTenant({ ...tenant, receiptFooter: next })}
+      />
+
+
       <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6">
         <h3 className="font-semibold text-slate-900 mb-4">
           Usuarios ({tenant.users.length})
@@ -1155,6 +1162,118 @@ function BusinessTypeEditor({
           {savedFlash}
         </div>
       )}
+    </div>
+  );
+}
+
+// v1.3-Thalia Lote 6 · pie de ticket editable. Vive en su propio panel
+// porque conceptualmente es algo del comercio (mensaje al cliente),
+// no de los datos fiscales. Textarea con contador 0/200 + vista
+// previa monoespacio que aproxima cómo se imprimirá (38 caracteres
+// por línea, igual que el renderer del PDF). Botón "Guardar" sólo
+// activo si cambió.
+const RECEIPT_FOOTER_MAX = 200;
+const RECEIPT_FOOTER_LINE = 38;
+
+function ReceiptFooterPanel({
+  tenantId,
+  current,
+  onSaved,
+}: {
+  tenantId: string;
+  current: string | null;
+  onSaved: (next: string | null) => void;
+}) {
+  const [value, setValue] = useState(current ?? "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [savedFlash, setSavedFlash] = useState<string | null>(null);
+
+  const trimmed = value.trim();
+  const nextValue = trimmed === "" ? null : trimmed;
+  const dirty = nextValue !== current;
+
+  async function save(): Promise<void> {
+    if (busy || !dirty) return;
+    setBusy(true);
+    setErr(null);
+    setSavedFlash(null);
+    try {
+      await superApi(`/super-admin/tenants/${tenantId}`, {
+        method: "PATCH",
+        body: { receiptFooter: trimmed },
+      });
+      onSaved(nextValue);
+      setSavedFlash("Pie actualizado. Próximos tickets impresos lo incluirán.");
+      window.setTimeout(() => setSavedFlash(null), 4000);
+    } catch (e) {
+      setErr(errToHuman(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Vista previa: partimos por líneas (38 chars/linea) igual que el
+  // renderer del PDF. No envuelve por palabras — sólo replica el
+  // wrap del renderer que sí lo hace, pero como aprox visual basta.
+  const previewLines: string[] = [];
+  for (const paragraph of trimmed.split(/\n/)) {
+    if (paragraph.length === 0) {
+      previewLines.push("");
+      continue;
+    }
+    let remaining = paragraph;
+    while (remaining.length > RECEIPT_FOOTER_LINE) {
+      previewLines.push(remaining.slice(0, RECEIPT_FOOTER_LINE));
+      remaining = remaining.slice(RECEIPT_FOOTER_LINE);
+    }
+    previewLines.push(remaining);
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6">
+      <h3 className="font-semibold text-slate-900 mb-2">Pie de ticket</h3>
+      <p className="text-[12.5px] text-slate-600 mb-3">
+        Texto libre que se imprime al final de cada ticket, entre
+        "Gracias por tu visita" y el QR. Útil para condiciones de cambio
+        o un mensaje propio del comercio. Vacío = sin pie custom.
+      </p>
+      <textarea
+        value={value}
+        onChange={(e) => setValue(e.target.value.slice(0, RECEIPT_FOOTER_MAX))}
+        rows={3}
+        placeholder="Gracias por su compra. Cambios hasta 14 días con ticket."
+        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-[14px] focus:outline-none focus:border-slate-500 resize-none"
+      />
+      <div className="flex items-center justify-between mt-1.5">
+        <span className="text-[11.5px] text-slate-500">
+          {value.length}/{RECEIPT_FOOTER_MAX}
+        </span>
+        {trimmed.length > 0 && (
+          <span className="text-[11.5px] text-slate-400">Vista previa abajo</span>
+        )}
+      </div>
+      {trimmed.length > 0 && (
+        <pre className="mt-3 bg-slate-50 border border-dashed border-slate-300 rounded-lg p-3 text-[12px] font-mono text-slate-700 whitespace-pre overflow-x-auto">
+          {previewLines.map((l) => l || " ").join("\n")}
+        </pre>
+      )}
+      <div className="flex items-center gap-2 mt-3">
+        <button
+          onClick={save}
+          disabled={busy || !dirty}
+          className="h-9 px-4 bg-slate-900 text-white rounded-lg text-[13px] font-medium hover:bg-slate-800 disabled:opacity-50"
+        >
+          {busy ? "Guardando…" : current === null ? "Guardar pie" : "Actualizar"}
+        </button>
+        {savedFlash && (
+          <span className="text-[12px] text-emerald-700 inline-flex items-center gap-1">
+            <Check className="w-3.5 h-3.5" />
+            {savedFlash}
+          </span>
+        )}
+        {err && <span className="text-[12px] text-red-700">{err}</span>}
+      </div>
     </div>
   );
 }
