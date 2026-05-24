@@ -63,6 +63,18 @@ export function CheckoutOverlay(props: {
   const [payments, setPayments] = useState<PaymentRow[]>([
     { method: "CASH", amount: props.totals.total.toFixed(2) },
   ]);
+  // v1.3 Lote 2 · cobro mixto en 1 tap. Cuando el cajero entra a mixto,
+  // en vez de crear las dos rows con `total/2` y obligar a editar una,
+  // abrimos un mini-step donde elige método primario + importe y al
+  // confirmar generamos las dos rows con sumas correctas. NULL = modo
+  // normal (vista rows o método único).
+  const [mixedSplit, setMixedSplit] = useState<
+    | null
+    | {
+        primaryMethod: Method;
+        primaryAmount: string;
+      }
+  >(null);
   const [printIntent, setPrintIntent] = useState(true);
   const [emailIntent, setEmailIntent] = useState<string>(props.contact?.email ?? "");
   const [emailEnabled, setEmailEnabled] = useState(!!props.contact?.email);
@@ -274,6 +286,28 @@ export function CheckoutOverlay(props: {
             </div>
           </div>
 
+          {mixedSplit && (
+            <MixedSplitStep
+              total={total}
+              state={mixedSplit}
+              onChange={setMixedSplit}
+              onCancel={() => setMixedSplit(null)}
+              onConfirm={(primaryMethod, primaryAmount) => {
+                // El método secundario es el "otro" del par CASH↔CARD.
+                // Si el primario es CARD/BIZUM/VOUCHER, el secundario
+                // es CASH por defecto (es el caso real: "tengo 10 €
+                // sueltos y el resto con tarjeta" o viceversa).
+                const secondary: Method =
+                  primaryMethod === "CASH" ? "CARD" : "CASH";
+                const remaining = Math.max(0, total - primaryAmount);
+                setPayments([
+                  { method: primaryMethod, amount: primaryAmount.toFixed(2) },
+                  { method: secondary, amount: remaining.toFixed(2) },
+                ]);
+                setMixedSplit(null);
+              }}
+            />
+          )}
           <div className="mb-5">
             <div className="text-[13px] font-medium text-mipiace-ink mb-3">Métodos de pago</div>
             <div className="space-y-3">
@@ -335,13 +369,15 @@ export function CheckoutOverlay(props: {
                   </div>
                   <button
                     onClick={() => {
-                      // Modo mixto: añadimos una segunda row con el
-                      // resto pendiente y un método distinto al actual
-                      // (para que el cajero vea claro que son dos).
+                      // v1.3 Lote 2 · entrar a mixto abre el step
+                      // rápido (método primario + importe + atajos),
+                      // no se crean dos rows hasta confirmar. Default:
+                      // el método primario es el opuesto al actual
+                      // para que el cajero sólo escriba el importe.
                       const current = payments[0]!.method;
-                      const next: Method =
+                      const primary: Method =
                         current === "CASH" ? "CARD" : "CASH";
-                      addPayment(next);
+                      setMixedSplit({ primaryMethod: primary, primaryAmount: "" });
                     }}
                     className="mt-2 h-9 w-full rounded-xl border border-dashed border-slate-300 hover:border-mipiace-coral/50 hover:bg-mipiace-coral-soft/40 text-[12px] font-medium text-slate-500 hover:text-mipiace-coral-dark flex items-center justify-center gap-1.5"
                   >
@@ -698,6 +734,106 @@ function PaymentRowEditor({
           Falta {formatEur(missingForThisRow)}
         </div>
       )}
+    </div>
+  );
+}
+
+// v1.3 Lote 2 · step rápido para configurar cobro mixto. Vive dentro
+// del mismo card del modal (no es una librería de modales nueva). Se
+// renderiza arriba de la lista de payment rows mientras `mixedSplit !=
+// null`; al confirmar, el caller crea las dos rows con la suma
+// correcta. Default UX: 3 taps para "tengo 10 € sueltos, el resto con
+// tarjeta" (mixto → input 10 → confirmar) — vs 4 taps del flujo viejo.
+function MixedSplitStep({
+  total,
+  state,
+  onChange,
+  onConfirm,
+  onCancel,
+}: {
+  total: number;
+  state: { primaryMethod: Method; primaryAmount: string };
+  onChange: (next: { primaryMethod: Method; primaryAmount: string }) => void;
+  onConfirm: (primaryMethod: Method, primaryAmount: number) => void;
+  onCancel: () => void;
+}) {
+  const parsed = parseAmount(state.primaryAmount);
+  // Capeamos al total: no tiene sentido que el primario supere el
+  // total (el secundario quedaría 0 o negativo). Si el cajero teclea
+  // más, mostramos un capeado visual al confirmar.
+  const capped = Math.min(Math.max(0, parsed), total);
+  const remaining = Math.max(0, total - capped);
+  function bump(delta: number) {
+    // +20 sobre 0 → 20; +20 sobre 20 → 40; capeado al total para no
+    // pedir al cliente más del importe. Si el cajero quiere
+    // overpayment en efectivo del primario, lo hace en la vista rows.
+    const next = Math.min(total, parsed + delta);
+    onChange({ ...state, primaryAmount: next.toFixed(2) });
+  }
+  return (
+    <div className="mb-5 rounded-2xl border border-mipiace-coral/30 bg-mipiace-coral-soft/40 p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-[13px] font-medium text-mipiace-coral-dark">
+          Partir cobro
+        </div>
+        <button
+          onClick={onCancel}
+          className="h-7 w-7 rounded-lg hover:bg-white text-slate-500 flex items-center justify-center"
+          aria-label="Cancelar mixto"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      <div className="grid grid-cols-[160px_1fr] gap-2 mb-3">
+        <select
+          value={state.primaryMethod}
+          onChange={(e) => onChange({ ...state, primaryMethod: e.target.value as Method })}
+          className="h-12 px-3 rounded-xl bg-white border border-slate-200 text-[13.5px] font-medium text-mipiace-ink focus:outline-none focus:ring-2 focus:ring-mipiace-coral/30"
+        >
+          {(["CASH", "CARD", "BIZUM", "VOUCHER"] as Method[]).map((m) => (
+            <option key={m} value={m}>
+              {labelFor(m)}
+            </option>
+          ))}
+        </select>
+        <input
+          value={state.primaryAmount}
+          onChange={(e) => onChange({ ...state, primaryAmount: e.target.value })}
+          onFocus={(e) => e.target.select()}
+          inputMode="decimal"
+          placeholder="0,00"
+          className="h-12 px-3 text-[18px] font-semibold bg-white border border-slate-200 rounded-xl tabular-nums text-right focus:outline-none focus:ring-2 focus:ring-mipiace-coral/40"
+        />
+      </div>
+      <div className="grid grid-cols-4 gap-2 mb-3">
+        {[5, 10, 20, 50].map((n) => (
+          <button
+            key={n}
+            onClick={() => bump(n)}
+            className="h-10 rounded-xl bg-white hover:bg-slate-50 text-[13px] font-medium text-mipiace-ink border border-slate-200"
+          >
+            +{n}
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center justify-between text-[12.5px] text-slate-600 mb-3">
+        <span>
+          Resto con{" "}
+          <span className="font-medium text-mipiace-ink">
+            {labelFor(state.primaryMethod === "CASH" ? "CARD" : "CASH")}
+          </span>
+        </span>
+        <span className="tabular-nums font-medium text-mipiace-ink">
+          {remaining.toFixed(2).replace(".", ",")} €
+        </span>
+      </div>
+      <button
+        onClick={() => onConfirm(state.primaryMethod, capped)}
+        disabled={capped <= 0}
+        className="w-full h-11 rounded-xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[13.5px] font-medium disabled:opacity-50"
+      >
+        Aplicar mixto
+      </button>
     </div>
   );
 }
