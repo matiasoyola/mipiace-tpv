@@ -605,6 +605,7 @@ function PaymentRowEditor({
       <input
         value={payment.amount}
         onChange={(e) => onChange({ amount: e.target.value })}
+        onFocus={(e) => e.target.select()}
         inputMode="decimal"
         className="w-32 h-14 px-3 text-[18px] font-semibold bg-mipiace-stone border border-transparent rounded-2xl tabular-nums text-right focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/40 focus:outline-none"
       />
