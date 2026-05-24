@@ -673,6 +673,11 @@ model Ticket {
   // Nº de comensales introducido al abrir la mesa. Informativo (no
   // bloquea capacidad).
   diners               Int?
+  // v1.3-Servicios-Pinta · Lote 3: nombre del profesional que atendió
+  // (peluquería/clínica/taller). Texto libre opcional introducido en
+  // checkout. Vacío en RETAIL/HOSPITALITY. Se imprime en el ticket
+  // entre cabecera y líneas si el tenant es SERVICES.
+  attendedBy           String?      @map("attended_by") @db.VarChar(60)
   createdAt            DateTime     @default(now()) @map("created_at") @db.Timestamptz()
   paidAt               DateTime?    @map("paid_at") @db.Timestamptz()
   syncedAt             DateTime?    @map("synced_at") @db.Timestamptz()

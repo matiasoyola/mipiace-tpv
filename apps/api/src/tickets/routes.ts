@@ -88,6 +88,12 @@ interface CreateTicketBody {
   // B6 §2: si el descuento efectivo del ticket supera el umbral del
   // tenant, exigimos un token emitido por POST /admin/auth/manager-authorize.
   authorizationToken?: string;
+  // v1.3-Servicios-Pinta · Lote 3: nombre del profesional que atendió
+  // (peluquería/clínica/taller). Texto libre opcional ≤60 chars; sin
+  // FK contra una tabla de empleados (la agenda formal queda fuera de
+  // scope, próximos evolutivos). El renderer del ticket lo imprime si
+  // está presente y el tenant es SERVICES.
+  attendedBy?: string;
 }
 
 export async function registerTicketRoutes(app: FastifyInstance): Promise<void> {
@@ -112,6 +118,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             emailIntent: { type: "string", maxLength: 320 },
             giftReceiptIntent: { type: "boolean" },
             authorizationToken: { type: "string", minLength: 1, maxLength: 2048 },
+            attendedBy: { type: "string", minLength: 1, maxLength: 60 },
             lines: {
               type: "array",
               minItems: 1,
@@ -416,6 +423,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             emailIntent: body.emailIntent ?? null,
             giftReceiptIntentAt: body.giftReceiptIntent ? new Date() : null,
             discountAuthorizedBy,
+            attendedBy: body.attendedBy?.trim() ? body.attendedBy.trim() : null,
             paidAt: new Date(),
             lines: {
               create: body.lines.map((l, i) => ({
@@ -555,6 +563,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             emailIntent: { type: "string", maxLength: 320 },
             giftReceiptIntent: { type: "boolean" },
             authorizationToken: { type: "string", minLength: 1, maxLength: 2048 },
+            attendedBy: { type: "string", minLength: 1, maxLength: 60 },
             payments: {
               type: "array",
               minItems: 1,
@@ -739,6 +748,9 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
               ? new Date()
               : draft.giftReceiptIntentAt,
             discountAuthorizedBy,
+            attendedBy: body.attendedBy?.trim()
+              ? body.attendedBy.trim()
+              : draft.attendedBy,
             total: new Prisma.Decimal(totals.total),
             totalTax: new Prisma.Decimal(totals.tax),
             totalDiscount: new Prisma.Decimal(totals.discount),
@@ -1430,6 +1442,7 @@ function serializeTicket(t: DbTicket): Record<string, unknown> {
     printIntent: boolean;
     emailIntent: string | null;
     giftReceiptIntentAt: Date | null;
+    attendedBy: string | null;
     syncError: unknown;
     createdAt: Date;
     paidAt: Date | null;
@@ -1484,6 +1497,7 @@ function serializeTicket(t: DbTicket): Record<string, unknown> {
     printIntent: ticket.printIntent,
     emailIntent: ticket.emailIntent,
     giftReceiptIntentAt: ticket.giftReceiptIntentAt?.toISOString() ?? null,
+    attendedBy: ticket.attendedBy,
     syncError: ticket.syncError,
     createdAt: ticket.createdAt.toISOString(),
     paidAt: ticket.paidAt?.toISOString() ?? null,

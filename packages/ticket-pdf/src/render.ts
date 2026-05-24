@@ -78,6 +78,10 @@ function computeLineCount(doc: TicketDocument): number {
   if (doc.store.address) lines += 1;
   lines += 1; // numero + fecha
   lines += 1; // caja + cajero
+  // v1.3-Servicios-Pinta · Lote 3: línea extra "Atendido por: X" en SERVICES.
+  if (doc.ticket.businessType === "SERVICES" && doc.ticket.attendedBy) {
+    lines += 1;
+  }
   if (doc.customer) {
     lines += 1; // separador / cliente
     if (doc.customer.name) lines += 1;
@@ -235,6 +239,15 @@ export async function renderTicketPdf(
     truncate(doc.ticket.cashierName, 18),
     FONT_SIZE_SMALL,
   );
+
+  // v1.3-Servicios-Pinta · Lote 3: profesional que atendió, sólo en
+  // SERVICES. Estilo discreto (fuente pequeña) y línea propia entre
+  // cabecera y líneas para que el cliente pueda decir "pregunta por
+  // María" sin tener que descifrar el ticket. Si falta el campo o el
+  // tenant no es SERVICES, no se imprime.
+  if (isServices && doc.ticket.attendedBy) {
+    drawText(s, `Atendido por: ${truncate(doc.ticket.attendedBy, 30)}`, FONT_SIZE_SMALL);
+  }
 
   if (doc.customer) {
     drawSeparator(s);

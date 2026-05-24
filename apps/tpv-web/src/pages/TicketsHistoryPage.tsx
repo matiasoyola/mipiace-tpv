@@ -71,6 +71,8 @@ interface TicketRow {
   contactHoldedId: string | null;
   emailIntent: string | null;
   notes: string | null;
+  // v1.3-Servicios-Pinta · Lote 3: profesional que atendió (SERVICES).
+  attendedBy: string | null;
   createdAt: string;
   paidAt: string | null;
   syncedAt: string | null;
@@ -267,6 +269,7 @@ export function TicketsHistoryPage(props: { onClose: () => void }) {
               <TicketRowCard
                 key={t.id}
                 ticket={t}
+                showAttendedBy={businessType === "SERVICES"}
                 onOpen={() => setSelected(t)}
               />
             ))}
@@ -326,7 +329,15 @@ function FilterChip({
   );
 }
 
-function TicketRowCard({ ticket, onOpen }: { ticket: TicketRow; onOpen: () => void }) {
+function TicketRowCard({
+  ticket,
+  showAttendedBy,
+  onOpen,
+}: {
+  ticket: TicketRow;
+  showAttendedBy: boolean;
+  onOpen: () => void;
+}) {
   return (
     <li>
       <button
@@ -348,6 +359,12 @@ function TicketRowCard({ ticket, onOpen }: { ticket: TicketRow; onOpen: () => vo
             {ticket.register && ` · ${ticket.register.name}`}
             {ticket.lines.length > 0 &&
               ` · ${ticket.lines.length} línea${ticket.lines.length === 1 ? "" : "s"}`}
+            {/* v1.3-Servicios-Pinta · Lote 3: profesional que atendió.
+                Solo se renderiza si el tenant es SERVICES y el campo
+                tiene valor — el resto de verticales no lo usa. */}
+            {showAttendedBy && ticket.attendedBy && (
+              <> · Atendido por {ticket.attendedBy}</>
+            )}
           </div>
         </div>
         <div className="text-right shrink-0">

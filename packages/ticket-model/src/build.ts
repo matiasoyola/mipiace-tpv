@@ -128,6 +128,9 @@ export interface BuildTicketInput {
   total: Numericish;
   lines: BuildTicketLineInput[];
   payments: BuildTicketPaymentInput[];
+  // v1.3-Servicios-Pinta · Lote 3: profesional que atendió. Pasa al
+  // TicketMeta.attendedBy si está presente.
+  attendedBy?: string | null;
 }
 
 export interface BuildRefundContext {
@@ -258,6 +261,9 @@ export function buildTicketDocument(input: BuildTicketDocumentInput): TicketDocu
       cashierName: input.cashier.name ?? input.cashier.email,
       registerName: input.register.name,
       businessType: input.tenant.businessType,
+      attendedBy: input.ticket.attendedBy?.trim()
+        ? input.ticket.attendedBy.trim()
+        : undefined,
     },
     customer,
     lines,

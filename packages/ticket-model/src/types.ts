@@ -32,6 +32,10 @@ export interface TicketMeta {
   cashierName: string;
   registerName: string;
   businessType?: TicketBusinessType;
+  // v1.3-Servicios-Pinta · Lote 3: profesional que atendió. Texto
+  // libre (≤60 chars), opcional. El renderer lo imprime entre cabecera
+  // y líneas SOLO si está presente y `businessType === "SERVICES"`.
+  attendedBy?: string;
 }
 
 export interface TicketCustomer {

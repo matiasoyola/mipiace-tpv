@@ -76,6 +76,10 @@ export function CheckoutOverlay(props: {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState<TicketResponse | null>(null);
+  // v1.3-Servicios-Pinta · Lote 3: profesional que atendió. Texto libre
+  // opcional ≤60 chars, sólo visible en SERVICES. El backend ignora el
+  // campo si llega vacío.
+  const [attendedBy, setAttendedBy] = useState("");
   // B6 §2: si el descuento del ticket supera el umbral del tenant, el
   // backend devuelve 403 MANAGER_AUTHORIZATION_REQUIRED en el primer
   // intento. Abrimos el modal de autorización; al validar el PIN del
@@ -192,6 +196,10 @@ export function CheckoutOverlay(props: {
           emailIntent: emailEnabled && emailIntent ? emailIntent : undefined,
           giftReceiptIntent: giftReceipt,
           authorizationToken: overrideToken ?? authToken ?? undefined,
+          attendedBy:
+            props.businessType === "SERVICES" && attendedBy.trim()
+              ? attendedBy.trim()
+              : undefined,
         },
       });
       setConfirmed(res);
@@ -382,6 +390,30 @@ export function CheckoutOverlay(props: {
               </div>
             </div>
           </div>
+
+          {/* v1.3-Servicios-Pinta · Lote 3: profesional que atendió.
+              Sólo visible en SERVICES. Texto libre opcional ≤60 chars
+              que se imprime en el ticket como "Atendido por: María".
+              Hint con el `cliente` actual para que el cajero recuerde
+              vincular ambos datos. */}
+          {props.businessType === "SERVICES" && (
+            <div className="bg-white rounded-2xl p-4 mb-4">
+              <label
+                htmlFor="checkoutAttendedBy"
+                className="block text-[12.5px] uppercase tracking-wider font-medium text-slate-400 mb-2"
+              >
+                Atendido por (opcional)
+              </label>
+              <input
+                id="checkoutAttendedBy"
+                value={attendedBy}
+                onChange={(e) => setAttendedBy(e.target.value.slice(0, 60))}
+                maxLength={60}
+                placeholder="Nombre del profesional"
+                className="w-full h-11 px-3 rounded-xl bg-mipiace-stone border border-transparent text-[13.5px] focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none"
+              />
+            </div>
+          )}
 
           <div className="space-y-2 mb-6">
             <Checkbox

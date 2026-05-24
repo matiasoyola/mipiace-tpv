@@ -193,6 +193,64 @@ describe("POST /tickets", () => {
     expect(body.ticket.internalNumber).toBe("000001");
   });
 
+  // v1.3-Servicios-Pinta · Lote 3.
+  it("attendedBy opcional ≤60 chars se persiste y se devuelve serializado", async () => {
+    const app = await buildApp();
+    const externalId = randomUUID();
+    const res = await app.inject({
+      method: "POST",
+      url: "/tickets",
+      headers: { authorization: `Bearer ${cashierToken()}` },
+      payload: {
+        externalId,
+        registerId: REGISTER,
+        shiftId: SHIFT,
+        attendedBy: "  Laura  ",
+        lines: [
+          {
+            nameSnapshot: "Corte de pelo",
+            sku: "SVC-1",
+            units: 1,
+            unitPrice: 15,
+            discountPct: 0,
+            taxRate: 21,
+          },
+        ],
+        payments: [{ method: "CARD", amount: 18.15 }],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.ticket.attendedBy).toBe("Laura");
+  });
+
+  it("attendedBy >60 chars → 400 validación de Fastify", async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/tickets",
+      headers: { authorization: `Bearer ${cashierToken()}` },
+      payload: {
+        externalId: randomUUID(),
+        registerId: REGISTER,
+        shiftId: SHIFT,
+        attendedBy: "X".repeat(61),
+        lines: [
+          {
+            nameSnapshot: "Corte",
+            sku: "SVC-1",
+            units: 1,
+            unitPrice: 10,
+            discountPct: 0,
+            taxRate: 21,
+          },
+        ],
+        payments: [{ method: "CARD", amount: 12.1 }],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it("idempotente: mismo externalId → devuelve el ticket existente (200)", async () => {
     const app = await buildApp();
     const externalId = randomUUID();

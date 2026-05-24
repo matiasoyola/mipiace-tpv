@@ -97,6 +97,8 @@ export async function loadTicketDocument(
       createdAt: ticket.createdAt,
       cashAmount: ticket.cashAmount,
       total: ticket.total,
+      // v1.3-Servicios-Pinta · Lote 3: profesional que atendió.
+      attendedBy: ticket.attendedBy ?? undefined,
       lines: ticket.lines.map((l) => ({
         nameSnapshot: l.nameSnapshot,
         sku: l.sku,

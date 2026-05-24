@@ -39,6 +39,7 @@ export const TicketDocumentSchema = z.object({
     cashierName: z.string().min(1),
     registerName: z.string().min(1),
     businessType: z.enum(["HOSPITALITY", "RETAIL", "SERVICES"]).optional(),
+    attendedBy: z.string().min(1).max(60).optional(),
   }),
   customer: z
     .object({
