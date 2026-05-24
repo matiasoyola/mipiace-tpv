@@ -598,7 +598,11 @@ export function SalePage(props: SalePageProps) {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={onSearchKey}
-                  placeholder="Buscar producto, código de barras o SKU…"
+                  placeholder={
+                    businessType === "SERVICES"
+                      ? "Buscar servicio o cliente…"
+                      : "Buscar producto, código de barras o SKU…"
+                  }
                   className="h-12 md:h-14 w-full pl-11 md:pl-12 pr-4 text-[14px] md:text-[14.5px] bg-mipiace-stone border border-transparent rounded-2xl focus:outline-none focus:ring-2 focus:ring-mipiace-coral/40 focus:bg-white focus:border-mipiace-coral/30"
                 />
               </div>
@@ -953,7 +957,15 @@ function SaleWorkspace({
   // "Servicios" / "Productos" delante de los chips de tag. Para
   // RETAIL/HOSPITALITY los items se siguen mezclando (caso típico:
   // bar que vende botellas de aceite junto con cafés).
-  const showKindToggle = businessType === "SERVICES";
+  //
+  // v1.3-Servicios-Pinta · Lote 5: ocultamos el toggle si el catálogo
+  // sólo tiene servicios (no hay nada que toggle-ar). El pelo a otro
+  // tenant SERVICES que sí venda producto (champús, geles) sí lo verá.
+  const hasAnyProductKind = useMemo(
+    () => products.some((p) => p.kind === "PRODUCT"),
+    [products],
+  );
+  const showKindToggle = businessType === "SERVICES" && hasAnyProductKind;
   const [kindFilter, setKindFilter] = useState<"SERVICE" | "PRODUCT">(() => {
     if (!showKindToggle) return "SERVICE"; // valor inerte
     const stored = localStorage.getItem(KIND_FILTER_KEY);
@@ -1156,6 +1168,38 @@ function SaleWorkspace({
             <div className="text-[13px] text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4">
               No hay {kindFilter === "PRODUCT" ? "productos físicos" : "servicios"}{" "}
               en el catálogo. Crea uno en Holded para verlo aquí.
+            </div>
+          )}
+        {/* v1.3-Servicios-Pinta · Lote 5: empty state general del grid.
+            Aparece cuando NO hay productos cargados todavía y no hay
+            error de catálogo (que ya pinta su propio bloque arriba).
+            Copy adaptado por vertical para que el dueño SERVICES no
+            vea "productos" cuando vende servicios. */}
+        {!catalogError &&
+          products.length === 0 &&
+          (businessType === "SERVICES" ? (
+            <div className="text-[13px] text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4">
+              Aún no has cargado servicios. Configúralos en Holded o
+              sincroniza para verlos aquí.
+            </div>
+          ) : (
+            <div className="text-[13px] text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4">
+              Aún no has cargado productos. Configúralos en Holded o
+              sincroniza para verlos aquí.
+            </div>
+          ))}
+        {/* v1.3-Servicios-Pinta · Lote 5: filtro vacío (búsqueda, tag
+            o ambos) con catálogo no vacío. SERVICES dice "servicios";
+            RETAIL/HOSPITALITY mantienen "productos". */}
+        {!catalogError &&
+          products.length > 0 &&
+          visibleProducts.length === 0 &&
+          favoriteProducts.length === 0 &&
+          !(showKindToggle && !selectedTag) && (
+            <div className="text-[13px] text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4">
+              {businessType === "SERVICES"
+                ? "No hay servicios que coincidan con la búsqueda."
+                : "No hay productos que coincidan con la búsqueda."}
             </div>
           )}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-3.5 mb-5 md:mb-6">

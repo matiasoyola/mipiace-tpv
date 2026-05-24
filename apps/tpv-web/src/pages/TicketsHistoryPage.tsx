@@ -15,6 +15,7 @@ import {
   Printer,
   RotateCcw,
   Search,
+  XCircle,
 } from "lucide-react";
 
 import { ApiError, apiWithCashier } from "../api.js";
@@ -553,7 +554,15 @@ function TicketDetailDrawer({
               onClick={onRefund}
               className="w-full h-11 rounded-xl border border-mipiace-coral/30 text-mipiace-coral-dark hover:bg-mipiace-coral-soft text-[13.5px] font-medium flex items-center justify-center gap-2"
             >
-              <RotateCcw className="w-4 h-4" /> Iniciar {vocab("refundNoun", businessType).toLowerCase()}
+              {/* v1.3-Servicios-Pinta · Lote 5: en SERVICES (anulación)
+                  XCircle comunica mejor "cancelar" que RotateCcw, que
+                  semánticamente es "deshacer" (típico retail). */}
+              {businessType === "SERVICES" ? (
+                <XCircle className="w-4 h-4" />
+              ) : (
+                <RotateCcw className="w-4 h-4" />
+              )}
+              Iniciar {vocab("refundNoun", businessType).toLowerCase()}
             </button>
           )}
 
