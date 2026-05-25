@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bookmark,
   Briefcase,
+  Calculator,
   CircleAlert,
   Coffee,
   Lock,
@@ -19,6 +20,7 @@ import {
   Plus,
   PowerOff,
   RotateCw,
+  ScanLine,
   Search,
   ShoppingBag,
   Star,
@@ -51,6 +53,7 @@ import {
   type Wildcard,
 } from "../lib/catalog.js";
 import { CartLineItem } from "./CartLineItem.js";
+import { CameraScanModal, hasCameraSupport } from "./SalePage.cameraScan.js";
 import { ContactSheet, type ContactRef } from "./SalePage.contact.js";
 import { CheckoutOverlay } from "./CheckoutPage.js";
 import { CloseShiftModal } from "./CloseShiftModal.js";
@@ -154,7 +157,14 @@ export function SalePage(props: SalePageProps) {
   // al de hoy.
   const businessType = getCachedBusinessType();
   const [showCloseShift, setShowCloseShift] = useState(false);
+  // v1.3 Lote 4 · arqueo X intermedio. Reusa el mismo modal con `mode="X"`.
+  const [showArqueoX, setShowArqueoX] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  // v1.3 Lote 5 · modal cámara para escanear barcode. Sólo se monta
+  // tras pulsar el botón porque la inicialización pide permiso de
+  // cámara y abre el LED del iPad — no queremos esto al cargar la
+  // pantalla.
+  const [showCameraScan, setShowCameraScan] = useState(false);
   const [catalog, setCatalog] = useState<CatalogProduct[] | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [wildcards, setWildcards] = useState<Wildcard[]>([]);
@@ -351,14 +361,28 @@ export function SalePage(props: SalePageProps) {
   //    línea directa. Si el producto requiere selección, abrimos el
   //    modal igual (no podemos asumir cuándo es "scan" vs "fuzzy
   //    teclado").
+  // v1.3 Lote 5 · factorizado para que el lector cámara reutilice el
+  // MISMO camino que el USB-HID. Devuelve true si encontró producto.
+  const addByBarcode = useCallback(
+    (code: string): boolean => {
+      const value = code.trim();
+      if (!value || !catalog) return false;
+      const byBarcode = findByBarcode(catalog, value);
+      if (byBarcode) {
+        addProduct(byBarcode);
+        return true;
+      }
+      return false;
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [catalog, groupsByProduct],
+  );
   const onSearchKey = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key !== "Enter") return;
       const value = query.trim();
       if (!value || !catalog) return;
-      const byBarcode = findByBarcode(catalog, value);
-      if (byBarcode) {
-        addProduct(byBarcode);
+      if (addByBarcode(value)) {
         setQuery("");
         return;
       }
@@ -557,6 +581,20 @@ export function SalePage(props: SalePageProps) {
               />
               <span className="hidden xl:inline">{vocab("saleNoun", businessType)}</span>
             </button>
+            {/* v1.3 Lote 4 · arqueo X (control intermedio del cajón).
+                Encima de "Cerrar turno" porque es la acción más común:
+                muchos arqueos X durante el turno, un solo Z al final. */}
+            <button
+              onClick={() => setShowArqueoX(true)}
+              title="Arqueo X (control sin cerrar turno)"
+              className="w-full h-12 flex items-center xl:gap-3 px-3 xl:px-4 rounded-xl text-slate-600 hover:bg-slate-50 text-[14.5px] font-medium justify-center xl:justify-start"
+            >
+              <Calculator
+                className="w-[19px] h-[19px] text-slate-500 shrink-0"
+                strokeWidth={2.1}
+              />
+              <span className="hidden xl:inline">Arqueo X</span>
+            </button>
             <button
               onClick={() => setShowCloseShift(true)}
               title="Cerrar turno"
@@ -608,6 +646,21 @@ export function SalePage(props: SalePageProps) {
               </div>
             </div>
             <div className="flex items-center gap-2 md:gap-2.5 ml-auto">
+              {/* v1.3 Lote 5 · botón "Escanear" para iPad sin USB
+                  scanner. Oculto si el navegador no expone cámara
+                  (no tiene sentido pintar un botón que siempre va a
+                  fallar). El modal full-screen lleva el preview y
+                  cuadro guía; usa `addByBarcode` para mantener una
+                  sola ruta de catalog lookup. */}
+              {hasCameraSupport() && (
+                <button
+                  onClick={() => setShowCameraScan(true)}
+                  title="Escanear con cámara"
+                  className="h-12 md:h-14 w-12 md:w-14 rounded-2xl bg-mipiace-stone hover:bg-slate-100 flex items-center justify-center text-slate-600"
+                >
+                  <ScanLine className="w-[18px] h-[18px]" strokeWidth={2.25} />
+                </button>
+              )}
               <button
                 onClick={async () => {
                   setRefreshing(true);
@@ -806,11 +859,29 @@ export function SalePage(props: SalePageProps) {
         <CloseShiftModal
           shiftId={props.shiftId}
           cashierRole={props.cashierRole}
+          mode="Z"
           onClose={() => setShowCloseShift(false)}
           onClosed={() => {
             setShowCloseShift(false);
             props.onCloseShift();
           }}
+        />
+      )}
+      {showArqueoX && (
+        <CloseShiftModal
+          shiftId={props.shiftId}
+          cashierRole={props.cashierRole}
+          mode="X"
+          onClose={() => setShowArqueoX(false)}
+          // El arqueo X no cierra el turno — onClosed nunca se dispara
+          // (el modal sólo enseña el resultado y se cierra manualmente).
+          onClosed={() => setShowArqueoX(false)}
+        />
+      )}
+      {showCameraScan && (
+        <CameraScanModal
+          onClose={() => setShowCameraScan(false)}
+          onScanned={(code) => addByBarcode(code)}
         />
       )}
       {showHistory && (

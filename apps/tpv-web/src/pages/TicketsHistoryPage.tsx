@@ -339,11 +339,39 @@ function TicketRowCard({
   showAttendedBy: boolean;
   onOpen: () => void;
 }) {
+  // v1.3 Lote 3 · botón compacto de reimprimir en la row. Usamos div+
+  // role="button" arriba para no anidar <button> dentro de <button>
+  // (HTML inválido). El mini-botón hace stopPropagation para no abrir
+  // el detalle cuando el cajero sólo quiere reimprimir desde la lista.
+  const [reprinting, setReprinting] = useState(false);
+  const [hint, setHint] = useState<string | null>(null);
+  const canReprint = ticket.status !== "DRAFT" && ticket.status !== "VOIDED";
+  async function reprint(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (reprinting) return;
+    setReprinting(true);
+    setHint(null);
+    try {
+      await apiWithCashier(`/tickets/${ticket.id}/reprint`, { method: "POST" });
+      setHint("Enviado a impresora");
+      window.setTimeout(() => setHint(null), 2500);
+    } catch (err) {
+      setHint(err instanceof ApiError ? err.message : "Error");
+      window.setTimeout(() => setHint(null), 3500);
+    } finally {
+      setReprinting(false);
+    }
+  }
   return (
     <li>
-      <button
+      <div
+        role="button"
+        tabIndex={0}
         onClick={onOpen}
-        className="w-full bg-white rounded-2xl border border-slate-200 hover:border-mipiace-coral/40 p-4 flex items-center gap-4 text-left"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") onOpen();
+        }}
+        className="w-full bg-white rounded-2xl border border-slate-200 hover:border-mipiace-coral/40 p-4 flex items-center gap-4 text-left cursor-pointer"
       >
         <div className="flex-1 min-w-0">
           <div className="text-[14.5px] font-medium text-mipiace-ink truncate flex items-center gap-2">
@@ -367,6 +395,9 @@ function TicketRowCard({
               <> · Atendido por {ticket.attendedBy}</>
             )}
           </div>
+          {hint && (
+            <div className="text-[11.5px] text-slate-500 mt-1">{hint}</div>
+          )}
         </div>
         <div className="text-right shrink-0">
           <div className="text-[16px] font-semibold tabular-nums text-mipiace-ink">
@@ -378,8 +409,23 @@ function TicketRowCard({
             </div>
           )}
         </div>
-        <ChevronRight className="w-4 h-4 text-slate-300" />
-      </button>
+        {canReprint && (
+          <button
+            type="button"
+            onClick={reprint}
+            disabled={reprinting}
+            title="Reimprimir ticket"
+            className="h-9 w-9 rounded-lg hover:bg-slate-100 disabled:opacity-50 flex items-center justify-center text-slate-500 shrink-0"
+          >
+            {reprinting ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Printer className="w-4 h-4" />
+            )}
+          </button>
+        )}
+        <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
+      </div>
     </li>
   );
 }
@@ -426,6 +472,30 @@ function TicketDetailDrawer({
   const [email, setEmail] = useState(ticket.emailIntent ?? "");
   const [sending, setSending] = useState(false);
   const [sendStatus, setSendStatus] = useState<string | null>(null);
+  // v1.3 Lote 3 · estado de la reimpresión. El intent va a la cola del
+  // bridge B5; el toast inline informa "Enviado a impresora" o error.
+  const [reprinting, setReprinting] = useState(false);
+  const [reprintStatus, setReprintStatus] = useState<string | null>(null);
+  const canReprint =
+    ticket.status !== "DRAFT" && ticket.status !== "VOIDED";
+
+  async function reprint() {
+    if (reprinting) return;
+    setReprinting(true);
+    setReprintStatus(null);
+    try {
+      await apiWithCashier(`/tickets/${ticket.id}/reprint`, {
+        method: "POST",
+      });
+      setReprintStatus("Enviado a impresora. La copia llevará marca COPIA.");
+    } catch (err) {
+      setReprintStatus(
+        err instanceof ApiError ? err.message : "Error al enviar a impresora",
+      );
+    } finally {
+      setReprinting(false);
+    }
+  }
 
   async function resend() {
     if (!email) return;
@@ -542,12 +612,23 @@ function TicketDetailDrawer({
             )}
           </div>
 
-          <button
-            onClick={() => alert("Impresión real ESC/POS llega en B5.")}
-            className="w-full h-11 rounded-xl border border-slate-200 hover:bg-slate-50 text-[13.5px] font-medium text-mipiace-ink flex items-center justify-center gap-2"
-          >
-            <Printer className="w-4 h-4" /> Reimprimir {vocab("ticketNoun", businessType).toLowerCase()}
-          </button>
+          <div>
+            <button
+              onClick={reprint}
+              disabled={!canReprint || reprinting}
+              className="w-full h-11 rounded-xl border border-slate-200 hover:bg-slate-50 disabled:opacity-50 text-[13.5px] font-medium text-mipiace-ink flex items-center justify-center gap-2"
+            >
+              {reprinting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Printer className="w-4 h-4" />
+              )}
+              Reimprimir {vocab("ticketNoun", businessType).toLowerCase()}
+            </button>
+            {reprintStatus && (
+              <div className="text-[12px] text-slate-500 mt-1.5">{reprintStatus}</div>
+            )}
+          </div>
 
           {ticket.status === "SYNCED" && (
             <button

@@ -40,6 +40,7 @@ export const TicketDocumentSchema = z.object({
     registerName: z.string().min(1),
     businessType: z.enum(["HOSPITALITY", "RETAIL", "SERVICES"]).optional(),
     attendedBy: z.string().min(1).max(60).optional(),
+    isReprint: z.boolean().optional(),
   }),
   customer: z
     .object({

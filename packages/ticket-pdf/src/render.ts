@@ -68,6 +68,14 @@ function truncate(s: string, maxChars: number): string {
 // el render asegura que ambos cuentan las mismas líneas.
 function computeLineCount(doc: TicketDocument): number {
   let lines = 0;
+  // v1.3-Thalia Lote 3 · "COPIA — no fiscal" + línea reimpresión arriba
+  // del todo, antes incluso de la cabecera fiscal, porque es lo
+  // primero que el cliente debe ver al recibir la copia.
+  if (doc.ticket.isReprint) {
+    lines += 1; // banner COPIA — no fiscal
+    lines += 1; // línea "REIMPRESIÓN · ..."
+    lines += 1; // separador
+  }
   // Cabecera fiscal: legalName, taxId, address (puede partirse), phone
   lines += 1; // legalName
   lines += 1; // taxId
@@ -196,6 +204,17 @@ export async function renderTicketPdf(
     font,
     fontBold,
   };
+
+  // ── Marca COPIA — no fiscal (sólo si es reimpresión) ────────────
+  if (doc.ticket.isReprint) {
+    drawCenteredText(s, "*** COPIA — no fiscal ***", FONT_SIZE_TITLE, true);
+    drawCenteredText(
+      s,
+      `REIMPRESIÓN · ${formatDate(doc.ticket.issuedAt)} · ${truncate(doc.ticket.cashierName, 16)}`,
+      FONT_SIZE_SMALL,
+    );
+    drawSeparator(s);
+  }
 
   // ── Cabecera fiscal centrada ─────────────────────────────────────
   drawCenteredText(s, truncate(doc.fiscal.legalName, 38), FONT_SIZE_TITLE, true);

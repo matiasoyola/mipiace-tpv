@@ -32,7 +32,7 @@ export async function loadTicketDocument(
     where,
     include: {
       tenant: {
-        select: { name: true, fiscalProfile: true, businessType: true },
+        select: { name: true, fiscalProfile: true, businessType: true, receiptFooter: true },
       },
       register: {
         select: {
@@ -118,6 +118,12 @@ export async function loadTicketDocument(
       customerName || customerEmail || customerTaxId
         ? { name: customerName, email: customerEmail, taxId: customerTaxId }
         : null,
+    // v1.3-Thalia Lote 6 · pie custom del tenant si está poblado.
+    // El renderer ya pinta el "Gracias por tu visita" por defecto; el
+    // returnPolicy aparece justo debajo y antes del QR.
+    footer: ticket.tenant.receiptFooter
+      ? { returnPolicy: ticket.tenant.receiptFooter }
+      : undefined,
   };
 
   return buildTicketDocument(input);
