@@ -56,9 +56,19 @@ export async function runAutoSku(options: AutoSkuOptions): Promise<AutoSkuResult
   // Idempotencia: pillamos productos con sku NULL o "" y SIN haber sido
   // marcados como needs_sku_review (esos ya pasaron por aquí y Holded
   // silenció — no merece la pena reintentar sin intervención manual).
+  //
+  // v1.3-hotfix4 · SÓLO PRODUCT. Los servicios no tienen stock ni
+  // necesitan SKU en Holded — y su endpoint vive en `/invoicing/v1/
+  // services`, no `/products`. Si pasáramos un servicio por aquí
+  // Holded devolvería 404 al PUT `/products/{id}` y la rama 404 de
+  // abajo marcaría el servicio como `active=false + sellableViaTpv=
+  // false` (regresión que dejó invisibles 54 servicios de Peluquería
+  // Sole 2026-05-25). Para SERVICE asignamos un SKU local sintético
+  // tras este bucle, sin tocar Holded.
   const candidates = await prisma.product.findMany({
     where: {
       tenantId,
+      kind: "PRODUCT",
       OR: [{ sku: null }, { sku: "" }],
       needsSkuReview: false,
     },
@@ -130,6 +140,50 @@ export async function runAutoSku(options: AutoSkuOptions): Promise<AutoSkuResult
       }
     }
     await sleep(throttleMs);
+  }
+
+  // v1.3-hotfix4 · pasada separada para SERVICE: asignamos SKU local
+  // sintético sin tocar Holded. Los servicios no tienen stock y su
+  // endpoint vive en `/services` (no `/products`), así que pasarlos
+  // por el PUT remoto provocaba 404 y los marcaba como inactivos.
+  // El SKU local es estable (deriva de holdedProductId), suficiente
+  // para que el endpoint /tpv/catalog/products los devuelva y para
+  // identificarlos a nivel de mipiacetpv.
+  const serviceCandidates = await prisma.product.findMany({
+    where: {
+      tenantId,
+      kind: "SERVICE",
+      OR: [{ sku: null }, { sku: "" }],
+      needsSkuReview: false,
+    },
+    select: { id: true, holdedProductId: true, name: true },
+  });
+  for (const svc of serviceCandidates) {
+    const newSku = buildAutoSku(svc.holdedProductId);
+    try {
+      await prisma.product.update({
+        where: { id: svc.id },
+        data: {
+          sku: newSku,
+          skuAutoAssignedAt: new Date(),
+          sellableViaTpv: true,
+          needsSkuReview: false,
+        },
+      });
+      result.fixed += 1;
+      log.info("auto-sku SERVICE local", {
+        holdedProductId: svc.holdedProductId,
+        newSku,
+      });
+    } catch (err) {
+      result.errors.push(
+        `${svc.holdedProductId} (${svc.name}, SERVICE): ${String(err)}`,
+      );
+      log.error("auto-sku SERVICE error local", {
+        holdedProductId: svc.holdedProductId,
+        error: String(err),
+      });
+    }
   }
 
   return result;
