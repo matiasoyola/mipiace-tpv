@@ -104,6 +104,9 @@ export interface TenantDetail {
   // v1.3-Thalia Lote 6 · texto libre del pie de ticket. NULL = sin pie
   // personalizado (default histórico).
   receiptFooter: string | null;
+  // v1.3-hotfix6 · subvertical para elegir el icono placeholder del
+  // TPV. NULL = icono genérico del businessType.
+  tpvIconPreset: string | null;
   holdedConnected: boolean;
   holdedAuthMode: string;
   initialSyncStatus: string;

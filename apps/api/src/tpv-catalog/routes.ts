@@ -40,7 +40,7 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
         ? null
         : await prisma.tenant.findUnique({
             where: { id: cashier.tid },
-            select: { businessType: true },
+            select: { businessType: true, tpvIconPreset: true },
           });
       const products = await prisma.product.findMany({
         where: {
@@ -102,7 +102,15 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
         // completo del catálogo. Si el tenant cambia de vertical desde
         // el super-admin, basta con que el cajero refresque para que el
         // valor caché se actualice.
-        ...(tenant ? { businessType: tenant.businessType } : {}),
+        ...(tenant
+          ? {
+              businessType: tenant.businessType,
+              // v1.3-hotfix6 · subvertical para que el TPV elija icono
+              // placeholder (peluquería→tijeras, clínica→estetoscopio,
+              // taller→llave inglesa, belleza→sparkles, etc.).
+              tpvIconPreset: tenant.tpvIconPreset ?? null,
+            }
+          : {}),
       };
     },
   );

@@ -117,6 +117,12 @@ export function ContactSheet({
               name="contactSearch"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              type="search"
+              inputMode="search"
+              enterKeyHint="search"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
               placeholder="Buscar por nombre, NIF o teléfono…"
               className="w-full h-12 px-3.5 rounded-xl bg-mipiace-stone border border-transparent text-[14px] focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none mb-3"
             />

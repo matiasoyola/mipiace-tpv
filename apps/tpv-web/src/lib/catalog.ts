@@ -39,6 +39,9 @@ const TENANT_ID_KEY = "mipiacetpv-catalog-tenant";
 // B-Multi-Vertical SB3: vertical del tenant cacheado. El TPV lo usa
 // para decidir icono placeholder y si renderiza el mapa de mesas.
 const BUSINESS_TYPE_KEY = "mipiacetpv-catalog-business-type";
+// v1.3-hotfix6 · subvertical/icon preset del tenant (peluquería,
+// clínica, taller…). null = usar icono genérico del businessType.
+const ICON_PRESET_KEY = "mipiacetpv-catalog-icon-preset";
 
 export type BusinessType = "HOSPITALITY" | "RETAIL" | "SERVICES";
 
@@ -72,6 +75,18 @@ export function getCachedBusinessType(): BusinessType | null {
 
 export function setCachedBusinessType(value: BusinessType): void {
   localStorage.setItem(BUSINESS_TYPE_KEY, value);
+}
+
+export function getCachedIconPreset(): string | null {
+  return localStorage.getItem(ICON_PRESET_KEY);
+}
+
+export function setCachedIconPreset(value: string | null): void {
+  if (value === null || value === "") {
+    localStorage.removeItem(ICON_PRESET_KEY);
+  } else {
+    localStorage.setItem(ICON_PRESET_KEY, value);
+  }
 }
 
 export function productImageUrl(p: CatalogProduct, tenantId: string): string | null {
@@ -157,12 +172,14 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
   let cursor: string | undefined;
   let lastTenantId: string | null = null;
   let lastBusinessType: BusinessType | null = null;
+  let lastIconPreset: string | null | undefined = undefined;
   for (let safety = 0; safety < 200; safety++) {
     const res = await apiWithCashier<{
       items: CatalogProduct[];
       nextCursor: string | null;
       tenantId: string;
       businessType?: BusinessType;
+      tpvIconPreset?: string | null;
     }>(
       `/tpv/catalog/products${cursor ? `?cursor=${cursor}&limit=500` : "?limit=500"}`,
     );
@@ -171,6 +188,12 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
     if (res.businessType && isBusinessType(res.businessType)) {
       lastBusinessType = res.businessType;
     }
+    // v1.3-hotfix6 · sólo viene en la primera página (cursor vacío),
+    // de ahí el check `undefined` para no pisar la cache si vino en
+    // una página posterior por algún motivo.
+    if (res.tpvIconPreset !== undefined) {
+      lastIconPreset = res.tpvIconPreset;
+    }
     if (!res.nextCursor) break;
     cursor = res.nextCursor;
   }
@@ -178,6 +201,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
   setCatalogMeta({ lastFetchedAt: new Date().toISOString(), count: acc.length });
   if (lastTenantId) localStorage.setItem(TENANT_ID_KEY, lastTenantId);
   if (lastBusinessType) setCachedBusinessType(lastBusinessType);
+  if (lastIconPreset !== undefined) setCachedIconPreset(lastIconPreset);
   return acc;
 }
 

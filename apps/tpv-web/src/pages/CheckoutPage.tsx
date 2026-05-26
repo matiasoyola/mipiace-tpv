@@ -543,6 +543,11 @@ export function CheckoutOverlay(props: {
                   <input
                     value={emailIntent}
                     onChange={(e) => setEmailIntent(e.target.value)}
+                    type="email"
+                    inputMode="email"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
                     placeholder="cliente@ejemplo.com"
                     className="h-8 px-2.5 rounded-md bg-mipiace-stone border border-transparent text-[12.5px] focus:bg-white focus:border-mipiace-coral/30 focus:ring-1 focus:ring-mipiace-coral/30 focus:outline-none"
                   />

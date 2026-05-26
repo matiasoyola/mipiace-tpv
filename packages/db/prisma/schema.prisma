@@ -238,6 +238,12 @@ model Tenant {
   // visita". Limitado a 200 caracteres en el endpoint admin para no
   // descuajeringar el layout (~5 líneas en 80mm).
   receiptFooter                  String?           @map("receipt_footer")
+  // v1.3-hotfix6 · subvertical del tenant para elegir el icono
+  // placeholder de la grid del TPV cuando un producto/servicio no
+  // tiene imagen. NULL = icono genérico del businessType. Valores
+  // soportados: "haircut", "medical", "auto_repair", "beauty",
+  // "fitness", "education" (texto libre, el TPV mapea a icono lucide).
+  tpvIconPreset                  String?           @map("tpv_icon_preset")
   createdAt                      DateTime          @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt                      DateTime          @updatedAt @map("updated_at") @db.Timestamptz()
 

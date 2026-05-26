@@ -332,6 +332,9 @@ export async function registerSuperAdminTenantsRoutes(
         // v1.3-Thalia Lote 6 · pie de ticket libre para mostrarlo en el
         // modal de edición. NULL = sin pie custom (default).
         receiptFooter: tenant.receiptFooter,
+        // v1.3-hotfix6 · subvertical del tenant (peluquería, clínica…)
+        // para que el TPV elija el icono placeholder correcto.
+        tpvIconPreset: tenant.tpvIconPreset,
         holdedConnected: tenant.holdedApiKeyCiphertext != null,
         holdedAuthMode: tenant.holdedAuthMode,
         initialSyncStatus: tenant.initialSyncStatus,
@@ -631,6 +634,10 @@ export async function registerSuperAdminTenantsRoutes(
             // que "limpiar el pie" desde la UI funcione sin endpoint
             // adicional.
             receiptFooter: { type: "string", maxLength: 200 },
+            // v1.3-hotfix6 · subvertical para el icono placeholder del
+            // TPV. Texto libre porque queremos añadir presets nuevos
+            // sin migración (sólo render front).
+            tpvIconPreset: { type: "string", maxLength: 32 },
           },
         },
       },
@@ -649,6 +656,7 @@ export async function registerSuperAdminTenantsRoutes(
         };
         businessType?: "HOSPITALITY" | "RETAIL" | "SERVICES";
         receiptFooter?: string;
+        tpvIconPreset?: string;
       };
       const ctx = request.superAdmin!;
       const prisma = getPrisma();
@@ -737,6 +745,14 @@ export async function registerSuperAdminTenantsRoutes(
         if (nextValue !== tenant.receiptFooter) {
           changes.receiptFooter = { before: tenant.receiptFooter, after: nextValue };
           data.receiptFooter = nextValue;
+        }
+      }
+      if (body.tpvIconPreset !== undefined) {
+        const trimmed = body.tpvIconPreset.trim();
+        const nextValue = trimmed === "" ? null : trimmed;
+        if (nextValue !== tenant.tpvIconPreset) {
+          changes.tpvIconPreset = { before: tenant.tpvIconPreset, after: nextValue };
+          data.tpvIconPreset = nextValue;
         }
       }
 

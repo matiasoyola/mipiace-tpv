@@ -493,6 +493,13 @@ export function TenantDetailPage() {
         onSaved={(next) => setTenant({ ...tenant, receiptFooter: next })}
       />
 
+      <IconPresetPanel
+        tenantId={tenant.id}
+        current={tenant.tpvIconPreset}
+        businessType={tenant.businessType}
+        onSaved={(next) => setTenant({ ...tenant, tpvIconPreset: next })}
+      />
+
 
       <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6">
         <h3 className="font-semibold text-slate-900 mb-4">
@@ -1265,6 +1272,108 @@ function ReceiptFooterPanel({
           className="h-9 px-4 bg-slate-900 text-white rounded-lg text-[13px] font-medium hover:bg-slate-800 disabled:opacity-50"
         >
           {busy ? "Guardando…" : current === null ? "Guardar pie" : "Actualizar"}
+        </button>
+        {savedFlash && (
+          <span className="text-[12px] text-emerald-700 inline-flex items-center gap-1">
+            <Check className="w-3.5 h-3.5" />
+            {savedFlash}
+          </span>
+        )}
+        {err && <span className="text-[12px] text-red-700">{err}</span>}
+      </div>
+    </div>
+  );
+}
+
+// v1.3-hotfix6 · panel para elegir el icono placeholder del TPV cuando
+// un servicio/producto no tiene imagen. Aplica sobre todo a SERVICES:
+// la peluquería ve tijeras, la clínica un estetoscopio, el taller una
+// llave inglesa. RETAIL/HOSPITALITY rara vez lo cambian (cafetería ya
+// pinta una taza por defecto). Texto libre en BD para permitir añadir
+// presets desde el TPV sin migración.
+const ICON_PRESETS: Array<{ value: string; label: string; hint: string }> = [
+  { value: "", label: "Genérico (según vertical)", hint: "Café · Caja · Maletín, según businessType" },
+  { value: "haircut", label: "Peluquería · Tijeras", hint: "Corte, barbería, estética del cabello" },
+  { value: "medical", label: "Clínica · Estetoscopio", hint: "Salud, fisioterapia, dental" },
+  { value: "auto_repair", label: "Taller · Llave inglesa", hint: "Mecánico, chapa, reparaciones" },
+  { value: "beauty", label: "Belleza · Sparkles", hint: "Estética, manicura, spa, masajes" },
+  { value: "fitness", label: "Gimnasio · Pesa", hint: "Entrenamiento personal, deporte" },
+  { value: "education", label: "Educación · Birrete", hint: "Academia, formación, clases particulares" },
+];
+
+function IconPresetPanel({
+  tenantId,
+  current,
+  businessType,
+  onSaved,
+}: {
+  tenantId: string;
+  current: string | null;
+  businessType: BusinessType;
+  onSaved: (next: string | null) => void;
+}) {
+  const [value, setValue] = useState(current ?? "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [savedFlash, setSavedFlash] = useState<string | null>(null);
+
+  const nextValue = value === "" ? null : value;
+  const dirty = nextValue !== current;
+
+  async function save(): Promise<void> {
+    if (busy || !dirty) return;
+    setBusy(true);
+    setErr(null);
+    setSavedFlash(null);
+    try {
+      await superApi(`/super-admin/tenants/${tenantId}`, {
+        method: "PATCH",
+        body: { tpvIconPreset: value },
+      });
+      onSaved(nextValue);
+      setSavedFlash("Icono actualizado. El TPV lo verá tras recargar el catálogo.");
+      window.setTimeout(() => setSavedFlash(null), 4000);
+    } catch (e) {
+      setErr(errToHuman(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6">
+      <h3 className="font-semibold text-slate-900 mb-2">Icono del catálogo en el TPV</h3>
+      <p className="text-[12.5px] text-slate-600 mb-3">
+        Cuando un producto o servicio no tiene imagen en Holded, el TPV
+        pinta un icono placeholder. Elige el que mejor encaje con el
+        negocio del cliente. Aplica sobre todo a cuentas SERVICES
+        (peluquería, clínica, taller); en RETAIL/HOSPITALITY el icono
+        genérico ya suele bastar.
+      </p>
+      <select
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        className="w-full h-10 px-3 rounded-lg border border-slate-300 text-[13.5px] bg-white"
+      >
+        {ICON_PRESETS.map((p) => (
+          <option key={p.value || "default"} value={p.value}>
+            {p.label}
+          </option>
+        ))}
+      </select>
+      <p className="text-[11.5px] text-slate-500 mt-1.5">
+        {ICON_PRESETS.find((p) => p.value === value)?.hint ?? ""}
+      </p>
+      <p className="text-[11.5px] text-slate-400 mt-1">
+        Vertical actual: <strong>{businessType}</strong>.
+      </p>
+      <div className="mt-4 flex items-center gap-2">
+        <button
+          onClick={save}
+          disabled={busy || !dirty}
+          className="h-9 px-4 bg-slate-900 text-white rounded-lg text-[13px] font-medium hover:bg-slate-800 disabled:opacity-50"
+        >
+          {busy ? "Guardando…" : "Guardar"}
         </button>
         {savedFlash && (
           <span className="text-[12px] text-emerald-700 inline-flex items-center gap-1">

@@ -17,17 +17,23 @@ import {
   ChevronRight,
   CircleAlert,
   Coffee,
+  Dumbbell,
+  GraduationCap,
   Lock,
   Package,
   Plus,
   PowerOff,
   RotateCw,
   ScanLine,
+  Scissors,
   Search,
   ShoppingBag,
+  Sparkles,
   Star,
+  Stethoscope,
   Wifi,
   WifiOff,
+  Wrench,
   X,
 } from "lucide-react";
 
@@ -45,6 +51,7 @@ import {
   findByBarcode,
   fuzzySearch,
   getCachedBusinessType,
+  getCachedIconPreset,
   getCachedTenantId,
   loadCatalogFromCache,
   loadWildcards,
@@ -115,7 +122,28 @@ const PLACEHOLDER_ICON_BY_TYPE: Record<BusinessType, typeof Package> = {
   SERVICES: Briefcase,
 };
 
-function placeholderIconFor(type: BusinessType | null): typeof Package {
+// v1.3-hotfix6 · presets de subvertical configurables desde super-admin
+// (campo Tenant.tpvIconPreset). Si el cliente elige uno, gana sobre el
+// icono genérico del businessType (peluquería ve tijeras, clínica ve
+// estetoscopio, etc.). Cualquier valor no listado cae al icono del
+// businessType — permite añadir presets futuros sin tocar este código
+// (sólo añadir entrada al map).
+const PLACEHOLDER_ICON_BY_PRESET: Record<string, typeof Package> = {
+  haircut: Scissors,
+  medical: Stethoscope,
+  auto_repair: Wrench,
+  beauty: Sparkles,
+  fitness: Dumbbell,
+  education: GraduationCap,
+};
+
+function placeholderIconFor(
+  type: BusinessType | null,
+  preset: string | null,
+): typeof Package {
+  if (preset && PLACEHOLDER_ICON_BY_PRESET[preset]) {
+    return PLACEHOLDER_ICON_BY_PRESET[preset];
+  }
   if (!type) return Package;
   return PLACEHOLDER_ICON_BY_TYPE[type] ?? Package;
 }
@@ -705,6 +733,12 @@ export function SalePage(props: SalePageProps) {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={onSearchKey}
+                  type="search"
+                  inputMode="search"
+                  enterKeyHint="search"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
                   placeholder={
                     businessType === "SERVICES"
                       ? "Buscar servicio o cliente…"
@@ -1092,7 +1126,9 @@ function SaleWorkspace({
   // está vacío (sesión preexistente al deploy), Package es el default
   // — mismo comportamiento que B-UX-Pulido F3.
   const businessType = getCachedBusinessType();
-  const PlaceholderIcon = placeholderIconFor(businessType);
+  // v1.3-hotfix6 · subvertical para refinar el icono placeholder.
+  const iconPreset = getCachedIconPreset();
+  const PlaceholderIcon = placeholderIconFor(businessType, iconPreset);
   // P-1 (v1.1 peluquería): para verticales SERVICES, ofrecer un toggle
   // "Servicios" / "Productos" delante de los chips de tag. Para
   // RETAIL/HOSPITALITY los items se siguen mezclando (caso típico:

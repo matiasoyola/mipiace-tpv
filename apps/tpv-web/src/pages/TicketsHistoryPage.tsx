@@ -179,6 +179,12 @@ export function TicketsHistoryPage(props: { onClose: () => void }) {
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
+              type="search"
+              inputMode="search"
+              enterKeyHint="search"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
               placeholder="Número interno, fiscal o externalId…"
               className="h-12 w-full pl-11 pr-4 text-[14px] bg-mipiace-stone border border-transparent rounded-2xl focus:outline-none focus:ring-2 focus:ring-mipiace-coral/40 focus:bg-white focus:border-mipiace-coral/30"
             />
