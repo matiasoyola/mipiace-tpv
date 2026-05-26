@@ -215,9 +215,11 @@ export async function runIncrementalSync(
     }
 
     // ── Servicios ────────────────────────────────────────────────────
+    // v1.3-hotfix3 · sin filtro `forSale` para servicios (es el toggle
+    // "Para TPV" del TPV de Holded, irrelevante para mipiacetpv).
+    // Igual que en initial-sync.ts.
     for await (const { services } of iterateAllServices(client)) {
       for (const s of services) {
-        if (s.forSale === 0) continue;
         const r = await upsertCatalogEntry(
           prisma,
           tenantId,

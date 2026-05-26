@@ -208,7 +208,14 @@ export async function runInitialSync(options: RunInitialSyncOptions): Promise<Sy
       for await (const { page, services } of iterateAllServices(client)) {
         stats.servicePagesProcessed = page;
         for (const s of services) {
-          if (s.forSale === 0) continue;
+          // v1.3-hotfix3 · NO filtramos servicios por `forSale`. Ese flag
+          // es el toggle "Para TPV" del TPV propio de Holded, que en
+          // servicios Holded deja apagado por defecto porque su TPV no
+          // los maneja bien. Mipiacetpv es independiente del TPV de
+          // Holded — para nosotros TODO servicio es por definición
+          // vendible. Mantenemos el filtro sólo para productos (donde
+          // los clientes RETAIL sí usan forSale para excluir materia
+          // prima / consumibles internos).
           await upsertCatalogEntry(prisma, tenantId, s, "SERVICE", resolveTaxRate, log);
           stats.servicesCount += 1;
         }
