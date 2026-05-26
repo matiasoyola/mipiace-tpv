@@ -49,6 +49,33 @@ export function App() {
   const { state, refresh, unpair } = useDeviceBootstrap();
   const [cashier, setCashier] = useState<CashierState>({ kind: "needsLogin" });
   const testMode = isTestModeActive();
+
+  // v1.3-hotfix2 · ocultar teclado virtual de Android/iOS al tocar fuera
+  // de un input. Por defecto el navegador mantiene el teclado abierto
+  // mientras el activeElement sea editable, lo que en tablets táctiles
+  // bloquea la mitad inferior del grid del TPV. Cuando el cajero pulsa
+  // un producto, un botón del sidebar o cualquier zona no editable,
+  // forzamos blur del input activo y el teclado se cierra.
+  useEffect(() => {
+    function autoBlur(e: PointerEvent) {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      const isEditable = target.matches(
+        'input, textarea, select, [contenteditable="true"], [contenteditable=""]',
+      );
+      if (isEditable) return;
+      const active = document.activeElement;
+      if (
+        active instanceof HTMLInputElement ||
+        active instanceof HTMLTextAreaElement
+      ) {
+        active.blur();
+      }
+    }
+    document.addEventListener("pointerdown", autoBlur);
+    return () => document.removeEventListener("pointerdown", autoBlur);
+  }, []);
+
   // En modo prueba, hacemos un bootstrap único contra el backend para
   // obtener user/shift/store/register sin pasar por PinScreen.
   const [testBootstrap, setTestBootstrap] = useState<TestBootstrap | null>(null);
