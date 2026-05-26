@@ -81,9 +81,29 @@ const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
 // para que el chip se siga viendo bonito. No usamos toTitleCase porque
 // algunos tags llevan acrónimos (BBQ, IPA) que no queremos partir; con
 // upper-on-first respetamos eso.
+//
+// v1.3-hotfix5: muchos clientes usan prefijo numérico para ordenar las
+// tags en Holded ("01cortesypeinados", "02depilc"…). El número no
+// aporta nada en el TPV — sólo es orden de visualización. Lo quitamos
+// al renderizar. Si el tag tiene separadores (-, _, espacios), se
+// capitaliza palabra a palabra; si no, sólo la primera letra.
 function capitalizeTag(tag: string): string {
   if (tag.length === 0) return tag;
-  return tag.charAt(0).toUpperCase() + tag.slice(1);
+  // 1. Quitar prefijo numérico de orden (con opcional separador después).
+  const withoutPrefix = tag.replace(/^\d+[-_.\s]?/, "");
+  const clean = withoutPrefix.length > 0 ? withoutPrefix : tag;
+  // 2. Si hay separadores, capitalizar cada palabra. Si no, sólo la
+  //    primera letra (caso "cortesypeinados" → "Cortesypeinados", el
+  //    cliente puede editar el tag en Holded a "01-cortes-peinados"
+  //    para que salga "Cortes Peinados" si quiere refinar).
+  if (/[-_.\s]/.test(clean)) {
+    return clean
+      .split(/[-_.\s]+/)
+      .filter((w) => w.length > 0)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" ");
+  }
+  return clean.charAt(0).toUpperCase() + clean.slice(1);
 }
 
 // B-Multi-Vertical SB3: icono del placeholder según vertical. Fallback

@@ -36,15 +36,22 @@ const DEFAULT_VOCAB: Record<VocabKey, string> = {
   historyTitle: "Historial de tickets",
 };
 
+// v1.3-hotfix5 · feedback piloto Peluquería Sole (2026-05-25):
+// el botón principal sigue siendo "Cobrar" (no "Cerrar servicio") y el
+// título del panel sigue siendo "Ticket de venta" (no "Comprobante de
+// servicio") porque el cajero asocia "Cobrar/Ticket" con el acto de
+// venta independientemente del vertical. Mantenemos el copy de SERVICES
+// sólo donde aporta valor (placeholder "Buscar servicio o cliente",
+// historial "Servicios anteriores", anulación en vez de devolución).
 const SERVICES_VOCAB: Record<VocabKey, string> = {
-  saleAction: "Cerrar servicio",
-  saleNoun: "Servicio",
-  saleNounPlural: "Servicios prestados",
+  saleAction: "Cobrar",
+  saleNoun: "Venta",
+  saleNounPlural: "Ventas",
   itemNoun: "Servicio",
   itemNounPlural: "Servicios",
   refundAction: "Anular",
   refundNoun: "Anulación",
-  ticketNoun: "Comprobante",
+  ticketNoun: "Ticket",
   historyTitle: "Servicios anteriores",
 };
 
