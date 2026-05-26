@@ -7,6 +7,7 @@ import { ArrowLeft, Loader2, Minus, Plus } from "lucide-react";
 
 import { ApiError, apiWithCashier } from "../api.js";
 import { getCachedBusinessType } from "../lib/catalog.js";
+import { newId } from "../lib/ids.js";
 import { vocab } from "../lib/vocab.js";
 
 const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
@@ -90,7 +91,7 @@ export function RefundOverlay(props: {
       await apiWithCashier<RefundResponse>("/refunds", {
         method: "POST",
         body: {
-          externalId: crypto.randomUUID(),
+          externalId: newId(),
           originalTicketId: props.ticket.id,
           method,
           reason: reason || undefined,

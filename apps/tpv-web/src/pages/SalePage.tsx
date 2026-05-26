@@ -63,6 +63,7 @@ import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
 import { useElapsedTime } from "../hooks/useElapsedTime.js";
 import { useStoreEventStream } from "../hooks/useStoreEventStream.js";
 import type { ModifierSelection } from "../lib/cart.js";
+import { newId } from "../lib/ids.js";
 import {
   buildGroupsByProduct,
   loadModifierGroups,
@@ -397,9 +398,8 @@ export function SalePage(props: SalePageProps) {
   );
 
   // ── Operaciones sobre el carrito ───────────────────────────────────
-  function newId(): string {
-    return crypto.randomUUID();
-  }
+  // v1.3-hotfix · `crypto.randomUUID` no existe en Chrome < 92 (Android
+  // 11 stock WebView). `newId` ahora vive en `../lib/ids` con fallback.
 
   // Inserta el producto en el carrito sin pasar por el modal de modifiers.
   // Usado por barcode scan, fuzzy search Enter, y por el confirm del modal.
