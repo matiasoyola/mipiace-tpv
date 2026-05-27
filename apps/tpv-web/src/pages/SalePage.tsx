@@ -1312,64 +1312,12 @@ function SaleWorkspace({
           busca productos. En móvil/vertical mantenemos el comportamiento
           actual (apilado, scroll global) porque no hay espacio para
           dos columnas. */}
-      <section className="flex flex-col min-w-0 order-2 lg:order-1 lg:h-full lg:min-h-0 lg:overflow-y-auto">
-        {/* v1.2-Lite Lote 4.A · T-9 Atajos: sub-grid de favoritos arriba.
-            Sólo aparece si hay productos con el tag reservado `favoritos`.
-            Se respeta el toggle Servicios/Productos (productsForTags ya
-            filtra por kind). El usuario pulsa el tile como en el grid
-            principal — mismo handler onClickProduct. */}
-        {favoriteProducts.length > 0 && (
-          <div className="mb-5 md:mb-6">
-            <div className="flex items-center gap-2 mb-2.5">
-              <Star
-                className="w-3.5 h-3.5 text-amber-500 fill-amber-400"
-                strokeWidth={2}
-              />
-              <h3 className="text-[12.5px] font-semibold uppercase tracking-wider text-slate-600">
-                Atajos
-              </h3>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-3.5">
-              {favoriteProducts.map((p) => {
-                const imgSrc = tenantId ? productImageUrl(p, tenantId) : null;
-                return (
-                  <button
-                    key={`fav-${p.id}`}
-                    onClick={() => onClickProduct(p)}
-                    className="group bg-white rounded-2xl border border-amber-200 overflow-hidden text-left hover:border-amber-400 hover:shadow-sm transition-all"
-                  >
-                    <div className="aspect-[5/4] flex items-center justify-center bg-stone-100 text-stone-600 overflow-hidden">
-                      {imgSrc ? (
-                        <img
-                          src={imgSrc}
-                          alt=""
-                          loading="lazy"
-                          decoding="async"
-                          draggable={false}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <PlaceholderIcon
-                          className="w-10 h-10 md:w-12 md:h-12 opacity-80"
-                          strokeWidth={1.4}
-                        />
-                      )}
-                    </div>
-                    <div className="px-3 md:px-3.5 py-2.5 md:py-3">
-                      <div className="text-[13px] md:text-[13.5px] font-medium text-mipiace-ink line-clamp-2 min-h-[2.6em] leading-tight">
-                        {p.name}
-                      </div>
-                      <div className="text-[12.5px] md:text-[13px] text-slate-500 mt-0.5 tabular-nums">
-                        {formatEur(p.priceGross)}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-        <div className="flex items-center gap-2 mb-4 md:mb-6 overflow-x-auto">
+      <section className="flex flex-col min-w-0 order-2 lg:order-1 lg:h-full lg:min-h-0">
+        {/* v1.3-UX-Iteración-fixes Fix 1: la barra de chips va FUERA del
+            área de scroll vertical (antes desaparecía al scrollear el
+            grid). El bloque chips queda fijo arriba; favoritos + grid
+            van en un sub-contenedor con su propio overflow-y. */}
+        <div className="flex items-center gap-2 mb-4 md:mb-6 overflow-x-auto flex-shrink-0">
           {/* P-1 (v1.1 peluquería): toggle Servicios/Productos para
               verticales SERVICES. Va delante de los chips de tag y
               está separado visualmente por un divisor sutil. */}
@@ -1438,6 +1386,66 @@ function SaleWorkspace({
             );
           })}
         </div>
+        {/* Zona scrollable: favoritos + grid + estados vacíos. min-h-0
+            es crítico para que flex-1 + overflow-y funcionen dentro de
+            un flex container. */}
+        <div className="flex-1 min-h-0 lg:overflow-y-auto">
+        {/* v1.2-Lite Lote 4.A · T-9 Atajos: sub-grid de favoritos arriba.
+            Sólo aparece si hay productos con el tag reservado `favoritos`.
+            Se respeta el toggle Servicios/Productos (productsForTags ya
+            filtra por kind). El usuario pulsa el tile como en el grid
+            principal — mismo handler onClickProduct. */}
+        {favoriteProducts.length > 0 && (
+          <div className="mb-5 md:mb-6">
+            <div className="flex items-center gap-2 mb-2.5">
+              <Star
+                className="w-3.5 h-3.5 text-amber-500 fill-amber-400"
+                strokeWidth={2}
+              />
+              <h3 className="text-[12.5px] font-semibold uppercase tracking-wider text-slate-600">
+                Atajos
+              </h3>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-3.5">
+              {favoriteProducts.map((p) => {
+                const imgSrc = tenantId ? productImageUrl(p, tenantId) : null;
+                return (
+                  <button
+                    key={`fav-${p.id}`}
+                    onClick={() => onClickProduct(p)}
+                    className="group bg-white rounded-2xl border border-amber-200 overflow-hidden text-left hover:border-amber-400 hover:shadow-sm transition-all"
+                  >
+                    <div className="aspect-[5/4] flex items-center justify-center bg-stone-100 text-stone-600 overflow-hidden">
+                      {imgSrc ? (
+                        <img
+                          src={imgSrc}
+                          alt=""
+                          loading="lazy"
+                          decoding="async"
+                          draggable={false}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <PlaceholderIcon
+                          className="w-10 h-10 md:w-12 md:h-12 opacity-80"
+                          strokeWidth={1.4}
+                        />
+                      )}
+                    </div>
+                    <div className="px-3 md:px-3.5 py-2.5 md:py-3">
+                      <div className="text-[13px] md:text-[13.5px] font-medium text-mipiace-ink line-clamp-2 min-h-[2.6em] leading-tight">
+                        {p.name}
+                      </div>
+                      <div className="text-[12.5px] md:text-[13px] text-slate-500 mt-0.5 tabular-nums">
+                        {formatEur(p.priceGross)}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
         {catalogError && (
           <div className="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 mb-4 text-[13px]">
             {catalogError}
@@ -1543,6 +1551,7 @@ function SaleWorkspace({
             derecha como chips secundarios agrupados con el resto de
             acciones del ticket. El workspace izquierdo queda solo con
             el grid de productos. */}
+        </div>
       </section>
 
       {/* Report A+D · Rediseño v2 del panel del ticket. Layout en bloques:
