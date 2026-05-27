@@ -149,6 +149,10 @@ export interface ActivateTenantResponse {
   tenant: { id: string; name: string; onboardingState: OnboardingState };
   owner: { id: string; email: string; name: string };
   tempPassword: string;
+  // v1.3-piloto-feedback · Lote 1: PIN del OWNER como cajero por defecto
+  // en el TPV. Mostrado una sola vez para que el super-admin lo pase al
+  // cliente offline como fallback si el email no llega.
+  ownerPin: string;
   purge: {
     ticketsTestPurged: number;
     emailJobsPurged: number;

@@ -65,6 +65,9 @@ export function TenantDetailPage() {
   const [ownerName, setOwnerName] = useState("");
   const [activated, setActivated] = useState<ActivateTenantResponse | null>(null);
   const [copiedPwd, setCopiedPwd] = useState(false);
+  // v1.3-piloto-feedback · Lote 1: feedback separado al copiar el PIN
+  // del OWNER (TPV) — coexiste con el feedback de la contraseña admin.
+  const [copiedPin, setCopiedPin] = useState(false);
   const [busy, setBusy] = useState(false);
   // T-6a (v1.1 Thalia): modal de edición de datos fiscales.
   const [showFiscalModal, setShowFiscalModal] = useState(false);
@@ -331,6 +334,17 @@ export function TenantDetailPage() {
     }
   }
 
+  async function copyPin(): Promise<void> {
+    if (!activated) return;
+    try {
+      await navigator.clipboard.writeText(activated.ownerPin);
+      setCopiedPin(true);
+      setTimeout(() => setCopiedPin(false), 2500);
+    } catch {
+      /* clipboard puede fallar */
+    }
+  }
+
   if (loading || !tenant) {
     return (
       <SuperAdminShell title="Cuenta">
@@ -363,7 +377,7 @@ export function TenantDetailPage() {
             device {activated.purge.deviceRevoked ? "revocado" : "no encontrado"}.
           </p>
           <div className="text-[12px] uppercase tracking-wide text-emerald-700 mb-1">
-            Contraseña temporal del OWNER
+            Contraseña temporal del OWNER (admin)
           </div>
           <div className="flex items-center gap-2">
             <code className="font-mono bg-slate-900 text-white rounded-lg px-3 py-2 text-[14px] tracking-wide">
@@ -377,9 +391,27 @@ export function TenantDetailPage() {
               {copiedPwd ? "Copiado" : "Copiar"}
             </button>
           </div>
+          {/* v1.3-piloto-feedback · Lote 1: PIN del OWNER como cajero
+              en el TPV. Se enseña sólo aquí; el OWNER lo puede regenerar
+              desde "Mi cuenta" cuando entre al admin. */}
+          <div className="text-[12px] uppercase tracking-wide text-emerald-700 mt-4 mb-1">
+            PIN del OWNER (TPV / cajero)
+          </div>
+          <div className="flex items-center gap-2">
+            <code className="font-mono bg-slate-900 text-white rounded-lg px-3 py-2 text-[14px] tracking-wide">
+              {activated.ownerPin}
+            </code>
+            <button
+              onClick={copyPin}
+              className="inline-flex items-center gap-1 h-9 px-3 border border-emerald-300 rounded-lg text-[12.5px] hover:bg-emerald-100 text-emerald-800"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              {copiedPin ? "Copiado" : "Copiar"}
+            </button>
+          </div>
           <p className="text-[11.5px] text-emerald-700 mt-2">
-            Sólo se muestra una vez. Si el email no llega, pásasela al cliente
-            por canal seguro.
+            Contraseña y PIN se muestran una sola vez. Si el email no llega,
+            pásaselos al cliente por canal seguro.
           </p>
         </div>
       )}

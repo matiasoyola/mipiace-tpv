@@ -28,7 +28,11 @@ export interface CashierSessionPayload {
   tid: string; // tenantId
   did: string; // deviceId
   rid: string; // registerId
-  role: "MANAGER" | "CASHIER";
+  // v1.3-piloto-feedback · Lote 1: aceptamos OWNER en el TPV. El OWNER
+  // creado en super-admin/activate también lleva pinHash, así que el
+  // mismo User funciona como cajero por defecto sin necesidad de crear
+  // un CASHIER duplicado en el onboarding.
+  role: "OWNER" | "MANAGER" | "CASHIER";
   type: "cashier";
   purpose?: CashierSessionPurpose;
 }

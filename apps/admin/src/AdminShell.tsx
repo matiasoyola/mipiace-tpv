@@ -56,7 +56,11 @@ const NAV_ITEMS: NavItem[] = [
   // del equipo mipiacetpv (super-admin). El OWNER mantiene la operativa
   // de negocio: tiendas, cajeros, tickets regalo, su cuenta, seguridad.
   { to: "/admin/stores", label: "Tiendas", icon: Building2 },
-  { to: "/admin/devices", label: "Dispositivos", icon: Calculator, superAdminOnly: true },
+  // v1.3-piloto-feedback · Lote 1: Dispositivos era visible sólo a
+  // super-admin por un error histórico — el backend del endpoint de
+  // pairing codes ya acepta OWNER/MANAGER. Lo abrimos al OWNER y al
+  // MANAGER para que generen el pairing sin escalar a soporte.
+  { to: "/admin/devices", label: "Dispositivos", icon: Calculator },
   { to: "/admin/cashiers", label: "Cajeros", icon: Users },
   { to: "/admin/products", label: "Productos", icon: Package },
   // v1.3-Operativa-Extra · Lote 1: editor de aliases de tags. Visible

@@ -1,3 +1,5 @@
+import { randomInt } from "node:crypto";
+
 import type { FastifyInstance } from "fastify";
 
 import { Prisma } from "@mipiacetpv/db";
@@ -1392,6 +1394,14 @@ export async function registerSuperAdminTenantsRoutes(
 
       const tempPassword = generateTemporaryPassword();
       const passwordHash = await hashPassword(tempPassword);
+      // v1.3-piloto-feedback · Lote 1: el OWNER también se loguea en el
+      // TPV como cajero por defecto, así que generamos el pinHash en el
+      // mismo activate y devolvemos el PIN en plano una vez para que el
+      // super-admin lo enseñe offline si el email tarda. El propio
+      // `/auth/login` ya regenera el pinHash si no existe, pero generarlo
+      // aquí evita la primera vuelta admin-login antes de poder usar el TPV.
+      const ownerPin = generateOwnerCashierPin();
+      const pinHash = await hashPassword(ownerPin);
       const signals = extractRequestSignals(request);
 
       const activated = await prisma.$transaction(async (tx) => {
@@ -1400,6 +1410,7 @@ export async function registerSuperAdminTenantsRoutes(
             tenantId: id,
             email: lowerEmail,
             passwordHash,
+            pinHash,
             role: "OWNER",
             mustChangePasswordAt: new Date(),
           },
@@ -1431,6 +1442,7 @@ export async function registerSuperAdminTenantsRoutes(
           ownerEmail: activated.owner.email,
           ownerName: body.ownerName,
           tempPassword,
+          ownerPin,
         });
       } catch (err) {
         request.log.error(
@@ -1451,6 +1463,10 @@ export async function registerSuperAdminTenantsRoutes(
           name: body.ownerName,
         },
         tempPassword,
+        // v1.3-piloto-feedback · Lote 1: PIN del OWNER como cajero. Una
+        // sola vez en la respuesta; el OWNER puede regenerarlo desde
+        // `/auth/me/regenerate-owner-pin` si lo pierde.
+        ownerPin,
         purge: activated.purge,
       });
     },
@@ -1527,6 +1543,15 @@ export async function registerSuperAdminTenantsRoutes(
       };
     },
   );
+}
+
+// v1.3-piloto-feedback · Lote 1: PIN numérico de 4 dígitos para que el
+// OWNER se loguee en el TPV como cajero por defecto. Mismo esquema que
+// `generateOwnerPin` en auth/routes.ts (4 dígitos, sin sesgo de modulo),
+// duplicado aquí para no introducir un import cruzado entre módulos de
+// auth y superadmin.
+function generateOwnerCashierPin(): string {
+  return randomInt(0, 10_000).toString().padStart(4, "0");
 }
 
 // Parsea un TTL estilo JWT ("15m", "30m", "1h") a segundos. Defensivo:

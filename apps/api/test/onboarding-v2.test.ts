@@ -890,6 +890,9 @@ describe("B-OnboardingV2 · POST /super-admin/tenants/:id/activate", () => {
     expect(body.tenant.onboardingState).toBe("ACTIVE");
     expect(body.owner.email).toBe("owner@thalia.es");
     expect(body.tempPassword).toHaveLength(16);
+    // v1.3-piloto-feedback · Lote 1: PIN del OWNER en la respuesta y
+    // pinHash persistido. 4 dígitos numéricos.
+    expect(body.ownerPin).toMatch(/^\d{4}$/);
 
     // Tenant transicionado.
     expect(tenants.get(TENANT_ID)!.onboardingState).toBe("ACTIVE");
@@ -898,13 +901,18 @@ describe("B-OnboardingV2 · POST /super-admin/tenants/:id/activate", () => {
     expect(owner).toBeTruthy();
     expect(owner!.role).toBe("OWNER");
     expect(owner!.mustChangePasswordAt).not.toBeNull();
+    // v1.3-piloto-feedback · Lote 1: el OWNER nace con pinHash ya
+    // poblado, así que puede entrar al TPV sin pasar por la pantalla
+    // admin antes.
+    expect(owner!.pinHash).toBeTruthy();
     // Ticket TEST purgado.
     expect(tickets.size).toBe(0);
     // Cashier técnico soft-deleted.
     expect(users.get("u-test")!.deletedAt).not.toBeNull();
-    // Email enviado.
+    // Email enviado con password Y PIN.
     expect(sentEmails).toHaveLength(1);
     expect(sentEmails[0]!.text).toContain(body.tempPassword);
+    expect(sentEmails[0]!.text).toContain(body.ownerPin);
     // Audit log activate_tenant.
     expect(audits.some((a) => a.action === "activate_tenant")).toBe(true);
 

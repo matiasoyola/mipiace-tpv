@@ -18,7 +18,9 @@ interface FakeUser {
   tenantId: string;
   email: string;
   pinHash: string;
-  role: "MANAGER" | "CASHIER";
+  // v1.3-piloto-feedback · Lote 1: el OWNER también puede entrar al TPV
+  // con su email + PIN como cajero por defecto.
+  role: "OWNER" | "MANAGER" | "CASHIER";
 }
 
 interface FakeTenant {
@@ -241,6 +243,31 @@ describe("POST /shift/cashier-login", () => {
     expect(sixth.statusCode).toBe(429);
     expect(sixth.json().error).toBe("RATE_LIMITED");
     expect(sixth.json().retryAfterSeconds).toBeGreaterThan(0);
+  });
+
+  // v1.3-piloto-feedback · Lote 1: el OWNER también puede loguearse en
+  // el TPV con email + PIN. Antes el filtro se limitaba a MANAGER/CASHIER
+  // y el dueño no podía entrar como cajero default.
+  it("acepta OWNER con email + PIN", async () => {
+    const OWNER_ID = "00000000-0000-0000-0000-0000000000c0";
+    const OWNER_EMAIL = "owner@test.com";
+    const OWNER_PIN = "4242";
+    users.set(OWNER_ID, {
+      id: OWNER_ID,
+      tenantId: TENANT_ID,
+      email: OWNER_EMAIL,
+      pinHash: await hashPassword(OWNER_PIN),
+      role: "OWNER",
+    });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/shift/cashier-login",
+      headers: { "x-device-token": DEVICE_TOKEN },
+      payload: { email: OWNER_EMAIL, pin: OWNER_PIN },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().user.role).toBe("OWNER");
   });
 
   it("rate limit se resetea tras un login exitoso", async () => {
