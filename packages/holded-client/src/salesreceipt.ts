@@ -174,12 +174,35 @@ export interface PayPayload {
 }
 
 // POST .../pay + GET-back validando paymentsPending == 0.
+//
+// v1.3-hotfix10 — idempotencia. Antes de postear, hacemos un GET-back
+// del doc para ver si ya está pagado. Si `paymentsPending` ya está
+// dentro de tolerancia, devolvemos el `stored` SIN volver a postear el
+// pay. Esto cubre el escenario en que un ticket se quedó SYNC_FAILED
+// tras el primer pay (silent_reject de tolerancia, por ejemplo) y al
+// reintentar el documentId ya existe en BD: la fase salesreceipt salta
+// y solo se ejecuta `registerPaymentWithGetBack`. Sin idempotencia, el
+// reintento duplicaba el cobro en Holded (caso real: ticket #000006
+// Peluquería Sole acabó con paymentsPending=-68.98 tras doble pay).
 export async function registerPaymentWithGetBack(
   client: HoldedClient,
   documentId: string,
   payload: PayPayload,
 ): Promise<SalesreceiptStored> {
   const payPath = `${SALESRECEIPT_PATH}/${documentId}/pay`;
+  const PAY_TOLERANCE_EUR = 0.05;
+
+  // Pre-check idempotente: si el doc ya está pagado, no posteamos.
+  const preCheck = await client.request<SalesreceiptStored>(
+    `${SALESRECEIPT_PATH}/${documentId}`,
+  );
+  const prePending = Number(preCheck.paymentsPending ?? -1);
+  if (Number(preCheck.paymentsTotal ?? 0) > 0 && Math.abs(prePending) <= PAY_TOLERANCE_EUR) {
+    // Ya pagado en un intento previo. Devolvemos el estado actual; el
+    // caller no distingue entre "acabo de pagar" y "ya estaba pagado".
+    return preCheck;
+  }
+
   await client.request<{ status?: number; paymentId?: string }>(payPath, {
     method: "POST",
     body: JSON.stringify(payload),
