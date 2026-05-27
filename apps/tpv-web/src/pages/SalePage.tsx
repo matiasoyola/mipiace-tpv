@@ -13,13 +13,12 @@ import {
   Bookmark,
   Briefcase,
   Calculator,
-  ChevronLeft,
-  ChevronRight,
   CircleAlert,
   Coffee,
   Dumbbell,
   GraduationCap,
   Lock,
+  Menu,
   Package,
   Plus,
   PowerOff,
@@ -227,28 +226,23 @@ export function SalePage(props: SalePageProps) {
   // cámara y abre el LED del iPad — no queremos esto al cargar la
   // pantalla.
   const [showCameraScan, setShowCameraScan] = useState(false);
-  // v1.3-hotfix2 · sidebar colapsable. En tablets táctiles el cajero
-  // pidió poder ocultar el menú lateral (Venta, Arqueo X, Cerrar turno,
-  // Bloquear) para tener más espacio para el grid de productos. La
-  // preferencia se persiste en localStorage para que la decisión
-  // sobreviva al refresh del Service Worker.
-  const SIDEBAR_KEY = "mipiacetpv-sidebar-collapsed";
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(SIDEBAR_KEY) === "1";
-    } catch {
-      return false;
-    }
-  });
+  // v1.3-UX-Iteración Lote 1: sidebar reemplazado por drawer off-canvas.
+  // En apaisado tablet la columna fija comía ancho útil del catálogo,
+  // así que ahora el menú lateral aparece desde la izquierda al pulsar
+  // el botón hamburger del topbar y se cierra al pulsar fuera, al
+  // pulsar Esc o al pulsar cualquier acción del drawer. No persiste:
+  // el estado por defecto es cerrado.
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  // Esc cierra el drawer (accesibilidad teclado). Sólo escuchamos
+  // mientras está abierto para no contaminar el resto de listeners.
   useEffect(() => {
-    try {
-      if (sidebarCollapsed) localStorage.setItem(SIDEBAR_KEY, "1");
-      else localStorage.removeItem(SIDEBAR_KEY);
-    } catch {
-      // localStorage puede estar deshabilitado en modo privado de
-      // algunos navegadores — caemos en silencio.
+    if (!drawerOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setDrawerOpen(false);
     }
-  }, [sidebarCollapsed]);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [drawerOpen]);
   const [catalog, setCatalog] = useState<CatalogProduct[] | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [wildcards, setWildcards] = useState<Wildcard[]>([]);
@@ -633,7 +627,7 @@ export function SalePage(props: SalePageProps) {
 
   // ── Render ─────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-mipiace-stone flex flex-col font-sans">
+    <div className="h-screen overflow-hidden bg-mipiace-stone flex flex-col font-sans">
       {/* Lote 4 v1.1 Thalia: toast cross-caja. Aparece cuando otra
           caja del mismo store cobra o devuelve, para que el cajero
           actual no intente cobrar dos veces. Top-right, auto-dismiss
@@ -643,93 +637,18 @@ export function SalePage(props: SalePageProps) {
           {crossCajaToast.text}
         </div>
       )}
-      <div className="flex-1 flex max-w-[1680px] w-full mx-auto bg-white">
-        {sidebarCollapsed ? (
-          /* v1.3-hotfix2 · sidebar colapsado: barra estrecha de 40px
-              con un solo botón para volver a expandir. Reclama ~200px
-              de pantalla para el grid de productos en tablets. */
-          <aside className="hidden md:flex w-[40px] shrink-0 border-r border-slate-200 flex-col items-center py-5">
-            <button
-              onClick={() => setSidebarCollapsed(false)}
-              title="Mostrar menú"
-              className="h-10 w-10 rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-500"
-            >
-              <ChevronRight className="w-4 h-4" strokeWidth={2.1} />
-            </button>
-          </aside>
-        ) : (
-          <aside className="hidden md:flex w-[88px] xl:w-[240px] shrink-0 border-r border-slate-200 flex-col px-3 xl:px-5 py-5">
-            <div className="mb-7 xl:mb-8 flex justify-center xl:justify-start">
-              <div className="hidden xl:block">
-                <Logo size={28} />
-              </div>
-            </div>
-            {/* Report D · Cerrar turno y Bloquear pasan a items del sidebar
-                con icono, mismo estilo que "Venta". Antes vivían como
-                texto pequeño abajo izquierda, casi invisibles. */}
-            <nav className="space-y-1.5">
-              <button
-                title={vocab("saleNoun", businessType)}
-                className="w-full h-12 flex items-center xl:gap-3 px-3 xl:px-4 rounded-xl bg-mipiace-coral-soft text-mipiace-coral-dark text-[14.5px] font-medium justify-center xl:justify-start"
-              >
-                <ShoppingBag
-                  className="w-[19px] h-[19px] text-mipiace-coral shrink-0"
-                  strokeWidth={2.1}
-                />
-                <span className="hidden xl:inline">{vocab("saleNoun", businessType)}</span>
-              </button>
-              {/* v1.3 Lote 4 · arqueo X (control intermedio del cajón).
-                  Encima de "Cerrar turno" porque es la acción más común:
-                  muchos arqueos X durante el turno, un solo Z al final. */}
-              <button
-                onClick={() => setShowArqueoX(true)}
-                title="Arqueo X (control sin cerrar turno)"
-                className="w-full h-12 flex items-center xl:gap-3 px-3 xl:px-4 rounded-xl text-slate-600 hover:bg-slate-50 text-[14.5px] font-medium justify-center xl:justify-start"
-              >
-                <Calculator
-                  className="w-[19px] h-[19px] text-slate-500 shrink-0"
-                  strokeWidth={2.1}
-                />
-                <span className="hidden xl:inline">Arqueo X</span>
-              </button>
-              <button
-                onClick={() => setShowCloseShift(true)}
-                title="Cerrar turno"
-                className="w-full h-12 flex items-center xl:gap-3 px-3 xl:px-4 rounded-xl text-slate-600 hover:bg-slate-50 text-[14.5px] font-medium justify-center xl:justify-start"
-              >
-                <PowerOff
-                  className="w-[19px] h-[19px] text-slate-500 shrink-0"
-                  strokeWidth={2.1}
-                />
-                <span className="hidden xl:inline">Cerrar turno</span>
-              </button>
-              <button
-                onClick={props.onLogoutCashier}
-                title={`Bloquear (${props.cashierEmail})`}
-                className="w-full h-12 flex items-center xl:gap-3 px-3 xl:px-4 rounded-xl text-slate-600 hover:bg-slate-50 text-[14.5px] font-medium justify-center xl:justify-start"
-              >
-                <Lock
-                  className="w-[19px] h-[19px] text-slate-500 shrink-0"
-                  strokeWidth={2.1}
-                />
-                <span className="hidden xl:inline truncate">Bloquear</span>
-              </button>
-            </nav>
-            {/* v1.3-hotfix2 · botón "Ocultar menú" al fondo del sidebar
-                para liberar pantalla en tablets táctiles. */}
-            <button
-              onClick={() => setSidebarCollapsed(true)}
-              title="Ocultar menú"
-              className="mt-auto h-10 flex items-center justify-center xl:justify-start xl:gap-2 px-3 xl:px-4 rounded-xl text-slate-400 hover:bg-slate-50 hover:text-slate-600 text-[13px]"
-            >
-              <ChevronLeft className="w-4 h-4 shrink-0" strokeWidth={2.1} />
-              <span className="hidden xl:inline">Ocultar menú</span>
-            </button>
-          </aside>
-        )}
-
+      <div className="flex-1 min-h-0 flex max-w-[1680px] w-full mx-auto bg-white">
         <div className="flex-1 flex flex-col min-w-0">
           <header className="h-[88px] md:h-[100px] border-b border-slate-200 flex items-center px-4 md:px-7 gap-3 shrink-0">
+            <button
+              type="button"
+              onClick={() => setDrawerOpen(true)}
+              title="Abrir menú"
+              aria-label="Abrir menú"
+              className="h-10 w-10 shrink-0 rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-600"
+            >
+              <Menu className="w-5 h-5" strokeWidth={2.1} />
+            </button>
             <div className="md:hidden">
               <Logo size={24} />
             </div>
@@ -1014,6 +933,99 @@ export function SalePage(props: SalePageProps) {
           }}
         />
       )}
+
+      {/* v1.3-UX-Iteración Lote 1: drawer off-canvas con las acciones
+          que antes vivían en el sidebar fijo. Aparece sólo al pulsar
+          el hamburger; libera ~240px de ancho útil al catálogo en
+          apaisado. Cierra al pulsar fuera, al pulsar cualquier acción
+          o con Esc (gestionado por useEffect). */}
+      <div
+        className={`fixed inset-0 z-50 ${drawerOpen ? "pointer-events-auto" : "pointer-events-none"}`}
+        aria-hidden={!drawerOpen}
+      >
+        <div
+          onClick={() => setDrawerOpen(false)}
+          className={`absolute inset-0 bg-slate-900/40 transition-opacity duration-150 ${
+            drawerOpen ? "opacity-100" : "opacity-0"
+          }`}
+        />
+        <aside
+          role="dialog"
+          aria-modal="true"
+          aria-label="Menú del TPV"
+          className={`absolute inset-y-0 left-0 w-[280px] bg-white shadow-xl flex flex-col px-5 py-5 transition-transform duration-150 ${
+            drawerOpen ? "translate-x-0" : "-translate-x-full"
+          }`}
+        >
+          <div className="mb-7 flex items-center justify-between">
+            <Logo size={28} />
+            <button
+              type="button"
+              onClick={() => setDrawerOpen(false)}
+              title="Cerrar menú"
+              aria-label="Cerrar menú"
+              className="h-9 w-9 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-500"
+            >
+              <X className="w-4 h-4" strokeWidth={2.1} />
+            </button>
+          </div>
+          <nav className="space-y-1.5">
+            <button
+              onClick={() => setDrawerOpen(false)}
+              title={vocab("saleNoun", businessType)}
+              className="w-full h-12 flex items-center gap-3 px-4 rounded-xl bg-mipiace-coral-soft text-mipiace-coral-dark text-[14.5px] font-medium"
+            >
+              <ShoppingBag
+                className="w-[19px] h-[19px] text-mipiace-coral shrink-0"
+                strokeWidth={2.1}
+              />
+              <span>{vocab("saleNoun", businessType)}</span>
+            </button>
+            <button
+              onClick={() => {
+                setDrawerOpen(false);
+                setShowArqueoX(true);
+              }}
+              title="Arqueo X (control sin cerrar turno)"
+              className="w-full h-12 flex items-center gap-3 px-4 rounded-xl text-slate-600 hover:bg-slate-50 text-[14.5px] font-medium"
+            >
+              <Calculator
+                className="w-[19px] h-[19px] text-slate-500 shrink-0"
+                strokeWidth={2.1}
+              />
+              <span>Arqueo X</span>
+            </button>
+            <button
+              onClick={() => {
+                setDrawerOpen(false);
+                setShowCloseShift(true);
+              }}
+              title="Cerrar turno"
+              className="w-full h-12 flex items-center gap-3 px-4 rounded-xl text-slate-600 hover:bg-slate-50 text-[14.5px] font-medium"
+            >
+              <PowerOff
+                className="w-[19px] h-[19px] text-slate-500 shrink-0"
+                strokeWidth={2.1}
+              />
+              <span>Cerrar turno</span>
+            </button>
+            <button
+              onClick={() => {
+                setDrawerOpen(false);
+                props.onLogoutCashier();
+              }}
+              title={`Bloquear (${props.cashierEmail})`}
+              className="w-full h-12 flex items-center gap-3 px-4 rounded-xl text-slate-600 hover:bg-slate-50 text-[14.5px] font-medium"
+            >
+              <Lock
+                className="w-[19px] h-[19px] text-slate-500 shrink-0"
+                strokeWidth={2.1}
+              />
+              <span className="truncate">Bloquear ({props.cashierEmail})</span>
+            </button>
+          </nav>
+        </aside>
+      </div>
     </div>
   );
 }
@@ -1221,8 +1233,14 @@ function SaleWorkspace({
     return list;
   }, [products, selectedTag, showKindToggle, kindFilter]);
   return (
-    <div className="flex-1 grid lg:grid-cols-[1fr_360px] gap-4 lg:gap-6 p-4 md:p-7 min-h-0">
-      <section className="flex flex-col min-w-0 order-2 lg:order-1">
+    <div className="flex-1 grid lg:grid-cols-[1fr_360px] gap-4 lg:gap-6 p-4 md:p-7 min-h-0 lg:overflow-hidden">
+      {/* v1.3-UX-Iteración Lote 1: en apaisado el catálogo tiene su
+          propio scroll interno (lg:overflow-y-auto) para que el ticket
+          de la derecha permanezca fijo en pantalla mientras el cajero
+          busca productos. En móvil/vertical mantenemos el comportamiento
+          actual (apilado, scroll global) porque no hay espacio para
+          dos columnas. */}
+      <section className="flex flex-col min-w-0 order-2 lg:order-1 lg:h-full lg:min-h-0 lg:overflow-y-auto">
         {/* v1.2-Lite Lote 4.A · T-9 Atajos: sub-grid de favoritos arriba.
             Sólo aparece si hay productos con el tag reservado `favoritos`.
             Se respeta el toggle Servicios/Productos (productsForTags ya

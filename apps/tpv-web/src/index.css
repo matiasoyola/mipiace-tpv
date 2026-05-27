@@ -19,6 +19,18 @@
     height: 100%;
   }
 
+  /* v1.3-UX-Iteración Lote 1: bloquea pull-to-refresh y bounce
+     horizontal de Chrome. Sin esto, un scroll hacia abajo desde el
+     tope del catálogo en Chrome Android recarga la PWA y saca al
+     cajero a la PinScreen en mitad de un cobro. El scroll interno
+     de listas (productos, historial, líneas del ticket) no se ve
+     afectado — `contain` sólo desactiva el gesto a nivel raíz. */
+  html,
+  body {
+    overscroll-behavior-x: contain;
+    overscroll-behavior-y: contain;
+  }
+
   body {
     font-family: "DM Sans", -apple-system, BlinkMacSystemFont, system-ui,
       sans-serif;
