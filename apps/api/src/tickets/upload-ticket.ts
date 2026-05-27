@@ -269,13 +269,29 @@ export function buildTicketSalesreceiptPayload(ticket: {
 }): SalesreceiptPayload {
   const items: SalesreceiptItem[] = ticket.lines.map((l) => {
     const { rolledUpUnitPrice, description } = formatLineForHolded(l);
+    // v1.3-hotfix7 · silent_reject en cuentas SERVICES.
+    //
+    // hotfix4 generó SKU local "AUTO-<holdedProductId>" para servicios
+    // (no escritos en Holded). Cuando salesreceipt llega a Holded con
+    // ese SKU, Holded busca un product/service con ese identificador y
+    // al no encontrarlo asigna precio 0 a la línea → total final 0 →
+    // silent_reject. Detectado tras 4 tickets fallidos de Peluquería
+    // Sole (2026-05-27, all expected vs actual=0).
+    //
+    // Fix: si el SKU empieza por "AUTO-" es marca local nuestra. NO lo
+    // mandamos a Holded — Holded toma la línea como "libre" usando
+    // name + price + tax, que sí funciona y respeta el total. Para
+    // productos reales con SKU asignado por el OWNER en Holded el
+    // comportamiento es idéntico al de antes (se manda tal cual).
+    const skuToSend =
+      l.sku && !l.sku.startsWith("AUTO-") ? l.sku : null;
     return {
       name: l.nameSnapshot,
       units: Number(l.units),
       price: rolledUpUnitPrice,
       tax: Number(l.taxRate),
       discount: Number(l.discountPct),
-      sku: l.sku,
+      ...(skuToSend ? { sku: skuToSend } : {}),
       ...(description ? { desc: description } : {}),
     };
   });
