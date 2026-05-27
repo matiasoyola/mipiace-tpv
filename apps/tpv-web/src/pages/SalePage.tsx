@@ -13,10 +13,12 @@ import {
   Bookmark,
   Briefcase,
   Calculator,
+  Check,
   CircleAlert,
   Coffee,
   Dumbbell,
   GraduationCap,
+  Loader2,
   Lock,
   Menu,
   Package,
@@ -78,6 +80,7 @@ import {
   loadModifierGroups,
   type CatalogModifierGroup,
 } from "../lib/modifiers.js";
+import { syncNow } from "../lib/syncNow.js";
 import { vocab } from "../lib/vocab.js";
 
 const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
@@ -243,6 +246,14 @@ export function SalePage(props: SalePageProps) {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [drawerOpen]);
+  // v1.3-UX-Iteración Lote 3 · estado del botón "Sincronizar
+  // catálogo" del drawer. Tres fases: idle (texto normal),
+  // running (spinner), done (check 1.5s). El feedback efímero
+  // confirma al cajero que pulsó el botón sin necesidad de un
+  // toast aparte.
+  const [syncState, setSyncState] = useState<"idle" | "running" | "done">(
+    "idle",
+  );
   const [catalog, setCatalog] = useState<CatalogProduct[] | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [wildcards, setWildcards] = useState<Wildcard[]>([]);
@@ -987,6 +998,60 @@ export function SalePage(props: SalePageProps) {
                 strokeWidth={2.1}
               />
               <span>{vocab("saleNoun", businessType)}</span>
+            </button>
+            {/* v1.3-UX-Iteración Lote 3 · Sincronizar catálogo: borra
+                runtime caches del SW + repuebla IDB desde la red. No
+                cierra el drawer mientras corre — el cajero ve el
+                spinner y el check; cierra automático al volver a
+                idle si quiere seguir trabajando. */}
+            <button
+              onClick={async () => {
+                if (syncState === "running") return;
+                setSyncState("running");
+                try {
+                  const fresh = await (async () => {
+                    let result: CatalogProduct[] = [];
+                    await syncNow(async () => {
+                      result = await refreshCatalog();
+                    });
+                    return result;
+                  })();
+                  setCatalog(fresh);
+                  setSyncState("done");
+                  setTimeout(() => setSyncState("idle"), 1500);
+                } catch {
+                  // Si refreshCatalog falla (sin red, sesión caída),
+                  // mantenemos el catálogo en memoria y volvemos a
+                  // idle. El cajero puede reintentar.
+                  setSyncState("idle");
+                }
+              }}
+              title="Forzar refresco del catálogo y borrar caché del Service Worker"
+              className="w-full h-12 flex items-center gap-3 px-4 rounded-xl text-slate-600 hover:bg-slate-50 text-[14.5px] font-medium"
+            >
+              {syncState === "running" ? (
+                <Loader2
+                  className="w-[19px] h-[19px] text-slate-500 shrink-0 animate-spin"
+                  strokeWidth={2.1}
+                />
+              ) : syncState === "done" ? (
+                <Check
+                  className="w-[19px] h-[19px] text-emerald-600 shrink-0"
+                  strokeWidth={2.1}
+                />
+              ) : (
+                <RotateCw
+                  className="w-[19px] h-[19px] text-slate-500 shrink-0"
+                  strokeWidth={2.1}
+                />
+              )}
+              <span>
+                {syncState === "running"
+                  ? "Sincronizando…"
+                  : syncState === "done"
+                  ? "Catálogo actualizado"
+                  : "Sincronizar catálogo"}
+              </span>
             </button>
             <button
               onClick={() => {

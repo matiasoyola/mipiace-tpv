@@ -8,18 +8,21 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
+  Check,
   ChevronRight,
   ExternalLink,
   Loader2,
   Mail,
   Printer,
   RotateCcw,
+  RotateCw,
   Search,
   XCircle,
 } from "lucide-react";
 
 import { ApiError, apiWithCashier } from "../api.js";
 import { getCachedBusinessType } from "../lib/catalog.js";
+import { syncNow } from "../lib/syncNow.js";
 import { vocab } from "../lib/vocab.js";
 import { RefundOverlay } from "./RefundPage.js";
 
@@ -124,6 +127,11 @@ export function TicketsHistoryPage(props: { onClose: () => void }) {
   const [dateTo, setDateTo] = useState<string>("");
   const [selected, setSelected] = useState<TicketRow | null>(null);
   const [refunding, setRefunding] = useState<TicketRow | null>(null);
+  // v1.3-UX-Iteración Lote 3 · feedback efímero del botón
+  // "Sincronizar" del header: idle → running → done(1.5s) → idle.
+  const [syncState, setSyncState] = useState<"idle" | "running" | "done">(
+    "idle",
+  );
 
   async function refresh() {
     setLoading(true);
@@ -190,6 +198,41 @@ export function TicketsHistoryPage(props: { onClose: () => void }) {
             />
           </div>
         </div>
+        {/* v1.3-UX-Iteración Lote 3 · botón Sincronizar. Borra caches
+            de runtime del SW + recarga la lista del backend sin
+            reiniciar la sesión del cajero. Cierra el caso #81 (historial
+            vacío por caché vieja) y #92 (filtros de tag desactualizados). */}
+        <button
+          type="button"
+          onClick={async () => {
+            if (syncState === "running") return;
+            setSyncState("running");
+            try {
+              await syncNow(refresh);
+              setSyncState("done");
+              setTimeout(() => setSyncState("idle"), 1500);
+            } catch {
+              setSyncState("idle");
+            }
+          }}
+          title="Borrar caché y refrescar tickets"
+          className="ml-2 h-10 px-3 rounded-xl bg-mipiace-stone hover:bg-slate-100 flex items-center gap-2 text-[13px] font-medium text-mipiace-ink shrink-0"
+        >
+          {syncState === "running" ? (
+            <Loader2 className="w-4 h-4 animate-spin text-slate-500" strokeWidth={2.1} />
+          ) : syncState === "done" ? (
+            <Check className="w-4 h-4 text-emerald-600" strokeWidth={2.1} />
+          ) : (
+            <RotateCw className="w-4 h-4 text-slate-500" strokeWidth={2.1} />
+          )}
+          <span className="hidden md:inline">
+            {syncState === "running"
+              ? "Sincronizando…"
+              : syncState === "done"
+              ? "Actualizado"
+              : "Sincronizar"}
+          </span>
+        </button>
       </header>
 
       <div className="px-5 md:px-8 py-3 border-b border-slate-200 bg-white flex items-center gap-2 overflow-x-auto">
