@@ -430,7 +430,21 @@ export function SalePage(props: SalePageProps) {
   }, []);
 
   // ── Foco permanente al input de búsqueda para el scanner USB-HID ───
+  // v1.3-UX-Iteración-fixes Fix 2: en tablets táctiles (Android piloto)
+  // este refocus se disparaba al montar y en cada tap del cajero,
+  // abriendo el IME constantemente. Lo limitamos a dispositivos con
+  // pointer fino (mouse o lector USB-HID, donde el patrón original sí
+  // tiene sentido). En táctil el cajero tiene que tocar el input
+  // explícitamente para escribir, y el scan se hace con cámara
+  // (botón Escanear del header).
   useEffect(() => {
+    if (
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(pointer: coarse)").matches
+    ) {
+      return;
+    }
     function refocus() {
       if (
         document.activeElement === document.body ||
