@@ -11,6 +11,7 @@ import { ForgotPasswordPage, ResetPasswordPage } from "./pages/PasswordResetPage
 import { SecurityPage } from "./pages/SecurityPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 import { StoreDetailPage, StoresPage } from "./pages/StoresPage.js";
+import { TagAliasesPage } from "./pages/TagAliasesPage.js";
 import { TicketsErrorsPage } from "./pages/TicketsErrorsPage.js";
 import { AdminsListPage } from "./superadmin/AdminsListPage.js";
 import { AuditLogPage } from "./superadmin/AuditLogPage.js";
@@ -73,6 +74,7 @@ export function App() {
         <Route path="/admin/stores/:storeId" element={<StoreDetailPage />} />
         <Route path="/admin/tickets-errors" element={<TicketsErrorsPage />} />
         <Route path="/admin/settings" element={<SettingsPage />} />
+        <Route path="/admin/tag-aliases" element={<TagAliasesPage />} />
         <Route path="/admin/gift-receipts" element={<GiftReceiptsPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/admin/reset" element={<ResetPasswordPage />} />

@@ -42,6 +42,11 @@ const BUSINESS_TYPE_KEY = "mipiacetpv-catalog-business-type";
 // v1.3-hotfix6 · subvertical/icon preset del tenant (peluquería,
 // clínica, taller…). null = usar icono genérico del businessType.
 const ICON_PRESET_KEY = "mipiacetpv-catalog-icon-preset";
+// v1.3-Operativa-Extra · Lote 1: alias slug→label editable desde el
+// admin. Se cachea en localStorage para que el TPV resuelva el chip
+// sin esperar a la red; refresca al siguiente pull completo del
+// catálogo (banner "Sincronizando").
+const TAG_ALIASES_KEY = "mipiacetpv-catalog-tag-aliases";
 
 export type BusinessType = "HOSPITALITY" | "RETAIL" | "SERVICES";
 
@@ -87,6 +92,28 @@ export function setCachedIconPreset(value: string | null): void {
   } else {
     localStorage.setItem(ICON_PRESET_KEY, value);
   }
+}
+
+// v1.3-Operativa-Extra · Lote 1: lee el mapa de aliases cacheado en
+// localStorage. Devuelve `{}` si no hay nada cacheado o si el JSON está
+// corrupto — el TPV se comporta entonces como antes (cae al
+// capitalizeTag).
+export function getCachedTagAliases(): Record<string, string> {
+  const raw = localStorage.getItem(TAG_ALIASES_KEY);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, string>;
+    }
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+export function setCachedTagAliases(value: Record<string, string>): void {
+  localStorage.setItem(TAG_ALIASES_KEY, JSON.stringify(value));
 }
 
 export function productImageUrl(p: CatalogProduct, tenantId: string): string | null {
@@ -173,6 +200,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
   let lastTenantId: string | null = null;
   let lastBusinessType: BusinessType | null = null;
   let lastIconPreset: string | null | undefined = undefined;
+  let lastTagAliases: Array<{ slug: string; label: string }> | undefined = undefined;
   for (let safety = 0; safety < 200; safety++) {
     const res = await apiWithCashier<{
       items: CatalogProduct[];
@@ -180,6 +208,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
       tenantId: string;
       businessType?: BusinessType;
       tpvIconPreset?: string | null;
+      tagAliases?: Array<{ slug: string; label: string }>;
     }>(
       `/tpv/catalog/products${cursor ? `?cursor=${cursor}&limit=500` : "?limit=500"}`,
     );
@@ -194,6 +223,12 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
     if (res.tpvIconPreset !== undefined) {
       lastIconPreset = res.tpvIconPreset;
     }
+    // v1.3-Operativa-Extra · Lote 1: mismo patrón — sólo en la primera
+    // página. Si el OWNER añade un alias, el TPV lo verá tras el próximo
+    // refresh completo (banner "Sincronizando").
+    if (res.tagAliases !== undefined) {
+      lastTagAliases = res.tagAliases;
+    }
     if (!res.nextCursor) break;
     cursor = res.nextCursor;
   }
@@ -202,6 +237,11 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
   if (lastTenantId) localStorage.setItem(TENANT_ID_KEY, lastTenantId);
   if (lastBusinessType) setCachedBusinessType(lastBusinessType);
   if (lastIconPreset !== undefined) setCachedIconPreset(lastIconPreset);
+  if (lastTagAliases !== undefined) {
+    const map: Record<string, string> = {};
+    for (const a of lastTagAliases) map[a.slug] = a.label;
+    setCachedTagAliases(map);
+  }
   return acc;
 }
 

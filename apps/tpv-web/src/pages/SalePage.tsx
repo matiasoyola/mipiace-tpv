@@ -52,6 +52,7 @@ import {
   fuzzySearch,
   getCachedBusinessType,
   getCachedIconPreset,
+  getCachedTagAliases,
   getCachedTenantId,
   loadCatalogFromCache,
   loadWildcards,
@@ -111,6 +112,16 @@ function capitalizeTag(tag: string): string {
       .join(" ");
   }
   return clean.charAt(0).toUpperCase() + clean.slice(1);
+}
+
+// v1.3-Operativa-Extra · Lote 1: si el OWNER ha mapeado este slug
+// en /admin/tag-aliases, gana sobre la capitalización automática.
+// El mapa lo refresca refreshCatalog() junto al catálogo, así que
+// alta/edición de alias se ve tras el siguiente "Sincronizando".
+function renderTagLabel(tag: string, aliases: Record<string, string>): string {
+  const aliased = aliases[tag];
+  if (typeof aliased === "string" && aliased.length > 0) return aliased;
+  return capitalizeTag(tag);
 }
 
 // B-Multi-Vertical SB3: icono del placeholder según vertical. Fallback
@@ -1190,6 +1201,11 @@ function SaleWorkspace({
     () => availableTags.filter((t) => t !== FAVORITES_TAG),
     [availableTags],
   );
+  // v1.3-Operativa-Extra · Lote 1: mapa slug→label editable. Se relee
+  // cada vez que cambian los tags (refreshCatalog actualiza ambos), así
+  // que un alias nuevo aparece tras el próximo "Sincronizando" sin tocar
+  // este componente.
+  const tagAliases = useMemo(() => getCachedTagAliases(), [displayTags]);
   // Si el tag seleccionado deja de existir en el catálogo (el
   // propietario lo quitó en Holded y vino un sync, o el toggle de
   // kind cambió), volvemos a "Todos" automáticamente.
@@ -1327,7 +1343,7 @@ function SaleWorkspace({
                     : "h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-white border border-slate-200 text-slate-700 text-[13.5px] md:text-[14px] font-medium shrink-0 hover:border-mipiace-coral/50"
                 }
               >
-                {capitalizeTag(tag)}
+                {renderTagLabel(tag, tagAliases)}
               </button>
             );
           })}

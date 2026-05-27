@@ -5,6 +5,7 @@ import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 
 import { registerManagerAuthorizationRoutes } from "./admin/manager-authorize.js";
+import { registerAdminTagAliasesRoutes } from "./admin/tag-aliases.js";
 import { registerAdminTenantSettingsRoutes } from "./admin/tenant-settings.js";
 import { registerAdminGiftReceiptRoutes } from "./admin/gift-receipts.js";
 import { registerAdminModifierGroupRoutes } from "./admin/modifier-groups.js";
@@ -120,6 +121,7 @@ async function main() {
   await registerAdminTicketsErrorsRoutes(app);
   await registerManagerAuthorizationRoutes(app);
   await registerAdminTenantSettingsRoutes(app);
+  await registerAdminTagAliasesRoutes(app);
   await registerAdminGiftReceiptRoutes(app);
   await registerAdminModifierGroupRoutes(app);
   await registerAdminTicketDeliveryRoutes(app);

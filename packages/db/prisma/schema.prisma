@@ -260,8 +260,29 @@ model Tenant {
   syncOutbox     SyncOutbox[]
   holdedUploads  HoldedUpload[]
   modifierGroups ModifierGroup[]
+  tagAliases     TagAlias[]
 
   @@map("tenants")
+}
+
+// v1.3-Operativa-Extra Lote 1 · mapeo "slug Holded → label TPV" editable
+// por OWNER/MANAGER. El TPV consulta este mapa al renderizar los chips
+// de categoría: si encuentra una entrada para el tag (en lowercase
+// como llega de Holded) usa el `label`, si no cae al `capitalizeTag`
+// del hotfix5. Permite que el cliente renombre "01cortesypeinados" →
+// "Cortes y peinados" sin tocar los productos en Holded.
+model TagAlias {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  slug      String   @db.VarChar(60)
+  label     String   @db.VarChar(80)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, slug])
+  @@map("tag_aliases")
 }
 
 // Tipos de IVA del catálogo Holded del tenant. Spike §03.A: array de 103

@@ -14,6 +14,7 @@ import {
   Package,
   Settings,
   Shield,
+  Tag,
   User,
   Users,
   X,
@@ -57,6 +58,10 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/admin/devices", label: "Dispositivos", icon: Calculator, superAdminOnly: true },
   { to: "/admin/cashiers", label: "Cajeros", icon: Users },
   { to: "/admin/products", label: "Productos", icon: Package },
+  // v1.3-Operativa-Extra · Lote 1: editor de aliases de tags. Visible
+  // a OWNER y MANAGER porque la operativa (renombrar categorías) es de
+  // negocio, no técnica.
+  { to: "/admin/tag-aliases", label: "Etiquetas", icon: Tag },
   { to: "/admin/gift-receipts", label: "Tickets regalo", icon: Gift },
   { to: "/admin/account", label: "Mi cuenta", icon: User },
   { to: "/admin/security", label: "Seguridad", icon: Shield },

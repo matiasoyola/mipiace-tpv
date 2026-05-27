@@ -42,6 +42,16 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
             where: { id: cashier.tid },
             select: { businessType: true, tpvIconPreset: true },
           });
+      // v1.3-Operativa-Extra · Lote 1: mapa slug→label editable desde el
+      // admin. Sólo se devuelve en la primera página para que el TPV lo
+      // cachee junto al businessType/iconPreset; las páginas siguientes
+      // aplican el cache ya cargado.
+      const tagAliases = q.cursor
+        ? null
+        : await prisma.tagAlias.findMany({
+            where: { tenantId: cashier.tid },
+            select: { slug: true, label: true },
+          });
       const products = await prisma.product.findMany({
         where: {
           tenantId: cashier.tid,
@@ -109,6 +119,10 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
               // placeholder (peluquería→tijeras, clínica→estetoscopio,
               // taller→llave inglesa, belleza→sparkles, etc.).
               tpvIconPreset: tenant.tpvIconPreset ?? null,
+              // v1.3-Operativa-Extra · Lote 1: alias editable de tags
+              // (`slug` tal como llega de Holded en lowercase → `label`
+              // a pintar en el chip).
+              tagAliases: tagAliases ?? [],
             }
           : {}),
       };
