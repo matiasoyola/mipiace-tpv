@@ -583,7 +583,7 @@ export function CheckoutOverlay(props: {
           >
             <span className="flex items-center gap-2">
               {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-              {props.businessType === "SERVICES" ? "Confirmar cierre" : "Confirmar cobro"}
+              {props.businessType === "SERVICES" ? "Cobrar" : "Confirmar cobro"}
             </span>
             <span className="tabular-nums">{formatEur(total)}</span>
           </button>
