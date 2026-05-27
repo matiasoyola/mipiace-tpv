@@ -15,6 +15,12 @@ export interface SalesreceiptItem {
   // mipiacetpv para servicios sin SKU en Holded) no se manda y Holded
   // toma la línea como libre con name+price+tax. Antes era obligatorio.
   sku?: string;
+  // v1.3-hotfix8 — identificador para líneas de SERVICIO. Holded NO
+  // resuelve el precio de un servicio con name+price+tax (deja todo en
+  // 0). El único campo que sí funciona en `salesreceipt` es `serviceId`
+  // con el id MongoDB del servicio (confirmado con probe7, 2026-05-27).
+  // Para productos seguimos usando `sku`; ambos campos son exclusivos.
+  serviceId?: string;
   // Descripción libre del item. B-Bar-Modifiers la usa para mostrar el
   // desglose textual de modificadores ("(Tipo de leche: Desnatada; ...)").
   // Holded la persiste y la imprime debajo del nombre en la factura.

@@ -59,7 +59,11 @@ export async function uploadTicket(
   const ticket = await prisma.ticket.findUnique({
     where: { externalId },
     include: {
-      lines: true,
+      // v1.3-hotfix8 — necesitamos product.kind + holdedProductId para decidir
+      // si la línea va como `sku` (PRODUCT) o como `serviceId` (SERVICE).
+      // Holded requiere `serviceId` para que la línea de un servicio resuelva
+      // el precio. Confirmado empíricamente con drafts (probe7).
+      lines: { include: { product: { select: { kind: true, holdedProductId: true } } } },
       payments: true,
       tenant: { select: { id: true, holdedApiKeyCiphertext: true } },
       register: { select: { numSerieHolded: true } },
@@ -255,6 +259,10 @@ export function buildTicketSalesreceiptPayload(ticket: {
     taxRate: { toString(): string } | number;
     discountPct: { toString(): string } | number;
     sku: string;
+    // v1.3-hotfix8 — discriminante producto vs servicio. Holded expone
+    // endpoints/identificadores distintos y `salesreceipt` requiere
+    // `serviceId` para las líneas de servicio (no `sku`).
+    product?: { kind: "PRODUCT" | "SERVICE"; holdedProductId: string | null } | null;
     // Snapshot de modificadores (B-Bar-Modifiers). Puede ser:
     //   - null               → línea sin modifiers
     //   - string[] legacy    → ad-hoc tipeados; van a description literal
@@ -269,29 +277,35 @@ export function buildTicketSalesreceiptPayload(ticket: {
 }): SalesreceiptPayload {
   const items: SalesreceiptItem[] = ticket.lines.map((l) => {
     const { rolledUpUnitPrice, description } = formatLineForHolded(l);
-    // v1.3-hotfix7 · silent_reject en cuentas SERVICES.
+    // v1.3-hotfix8 · silent_reject en cuentas SERVICES — fix definitivo.
     //
-    // hotfix4 generó SKU local "AUTO-<holdedProductId>" para servicios
-    // (no escritos en Holded). Cuando salesreceipt llega a Holded con
-    // ese SKU, Holded busca un product/service con ese identificador y
-    // al no encontrarlo asigna precio 0 a la línea → total final 0 →
-    // silent_reject. Detectado tras 4 tickets fallidos de Peluquería
-    // Sole (2026-05-27, all expected vs actual=0).
+    // Diagnóstico (probe7, 2026-05-27): Holded NO acepta línea libre en
+    // `salesreceipt`. Si no hay identificador reconocido en la línea,
+    // asigna `price=0` → total=0 → silent_reject. El hotfix7 (omitir
+    // SKU "AUTO-*") no arregló el problema porque la línea sin SKU
+    // también caía a 0.
     //
-    // Fix: si el SKU empieza por "AUTO-" es marca local nuestra. NO lo
-    // mandamos a Holded — Holded toma la línea como "libre" usando
-    // name + price + tax, que sí funciona y respeta el total. Para
-    // productos reales con SKU asignado por el OWNER en Holded el
-    // comportamiento es idéntico al de antes (se manda tal cual).
-    const skuToSend =
-      l.sku && !l.sku.startsWith("AUTO-") ? l.sku : null;
+    // Empíricamente, para servicios el campo correcto es `serviceId`
+    // (no `sku` ni `productId`) con el id MongoDB del servicio. Para
+    // productos sigue siendo `sku` con el SKU canónico asignado por
+    // `runAutoSku` durante onboarding.
+    const isService = l.product?.kind === "SERVICE";
+    const holdedId = l.product?.holdedProductId ?? null;
+    let identifierField: { sku?: string; serviceId?: string } = {};
+    if (isService && holdedId) {
+      identifierField = { serviceId: holdedId };
+    } else if (!isService && l.sku && !l.sku.startsWith("AUTO-")) {
+      // PRODUCT con SKU real (asignado por runAutoSku). NO mandamos
+      // sku para productos sin asignar (caso degradado raro).
+      identifierField = { sku: l.sku };
+    }
     return {
       name: l.nameSnapshot,
       units: Number(l.units),
       price: rolledUpUnitPrice,
       tax: Number(l.taxRate),
       discount: Number(l.discountPct),
-      ...(skuToSend ? { sku: skuToSend } : {}),
+      ...identifierField,
       ...(description ? { desc: description } : {}),
     };
   });
