@@ -188,7 +188,12 @@ export async function registerPaymentWithGetBack(
     `${SALESRECEIPT_PATH}/${documentId}`,
   );
   const pending = Number(stored.paymentsPending ?? -1);
-  if (Math.abs(pending) > 0.01) {
+  // v1.3-hotfix9 · tolerancia 5 céntimos (igual que TOTAL_TOLERANCE_EUR).
+  // Antes era 0.01 estrictamente: diferencias de redondeo de 1 céntimo
+  // entre nuestro cálculo (line.price * units con IVA 21%) y el de
+  // Holded provocaban silent_reject de pay (caso real: ticket #000006
+  // Peluquería Sole, 68.99 €, pending=0.0100000000000005 por float64).
+  if (Math.abs(pending) > 0.05) {
     throw new HoldedSilentRejectError(
       "POST salesreceipt/pay",
       payPath,
