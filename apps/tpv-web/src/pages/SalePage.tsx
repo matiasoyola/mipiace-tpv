@@ -627,7 +627,14 @@ export function SalePage(props: SalePageProps) {
 
   // ── Render ─────────────────────────────────────────────────────────
   return (
-    <div className="h-screen overflow-hidden bg-mipiace-stone flex flex-col font-sans">
+    <div
+      className="h-screen overflow-hidden bg-mipiace-stone flex flex-col font-sans"
+      // v1.3-UX-Iteración Lote 2: el padding-bottom dinámico empuja el
+      // contenido hacia arriba cuando aparece el teclado virtual, así
+      // los elementos críticos (footer del ticket, sheets) quedan
+      // visibles en vez de ocultos detrás del teclado.
+      style={{ paddingBottom: "var(--keyboard-offset, 0px)" }}
+    >
       {/* Lote 4 v1.1 Thalia: toast cross-caja. Aparece cuando otra
           caja del mismo store cobra o devuelve, para que el cajero
           actual no intente cobrar dos veces. Top-right, auto-dismiss
@@ -1896,6 +1903,11 @@ function SheetWrap({
     <div
       className="fixed inset-0 z-50 bg-mipiace-ink/40 flex items-end sm:items-center justify-center p-4 font-sans"
       onClick={onClose}
+      // v1.3-UX-Iteración Lote 2: la sheet se centra/abajo según
+      // breakpoint; cuando aparece el teclado en apaisado, el
+      // padding-bottom dinámico empuja la caja hacia arriba para que
+      // los botones de acción no queden ocultos.
+      style={{ paddingBottom: "calc(1rem + var(--keyboard-offset, 0px))" }}
     >
       <div
         onClick={(e) => e.stopPropagation()}

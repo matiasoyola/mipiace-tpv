@@ -25,6 +25,7 @@ import type { ContactRef } from "./SalePage.contact.js";
 import type { CartLine, CartTotals } from "../lib/cart.js";
 import type { BusinessType } from "../lib/catalog.js";
 import { newId } from "../lib/ids.js";
+import { scrollFocusIntoView } from "../lib/visualViewportSync.js";
 import { SuccessOverlay } from "./CheckoutPage.successOverlay.js";
 
 const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
@@ -289,7 +290,15 @@ export function CheckoutOverlay(props: {
   }
 
   return (
-    <div className="fixed inset-0 z-50 min-h-screen bg-mipiace-ink/95 flex items-center justify-center p-4 md:p-7 font-sans overflow-y-auto">
+    <div
+      className="fixed inset-0 z-50 min-h-screen bg-mipiace-ink/95 flex items-center justify-center p-4 md:p-7 font-sans overflow-y-auto"
+      // v1.3-UX-Iteración Lote 2: el bloque "Confirmar cobro" vive al
+      // pie del card derecho. En apaisado tablet el teclado lo tapa
+      // al enfocar "Efectivo recibido" o "Email cliente". El
+      // padding-bottom dinámico empuja el card hacia arriba justo lo
+      // necesario para que el botón quede visible.
+      style={{ paddingBottom: "calc(1rem + var(--keyboard-offset, 0px))" }}
+    >
       <div className="w-full max-w-5xl bg-white rounded-3xl overflow-hidden grid lg:grid-cols-[1fr_460px]">
         <div className="p-7 md:p-10 flex flex-col">
           <div className="flex items-center justify-between mb-6">
@@ -508,6 +517,7 @@ export function CheckoutOverlay(props: {
                 id="checkoutAttendedBy"
                 value={attendedBy}
                 onChange={(e) => setAttendedBy(e.target.value.slice(0, 60))}
+                onFocus={scrollFocusIntoView}
                 maxLength={60}
                 placeholder="Nombre del profesional"
                 className="w-full h-11 px-3 rounded-xl bg-mipiace-stone border border-transparent text-[13.5px] focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none"
@@ -531,6 +541,7 @@ export function CheckoutOverlay(props: {
                   <input
                     value={emailIntent}
                     onChange={(e) => setEmailIntent(e.target.value)}
+                    onFocus={scrollFocusIntoView}
                     type="email"
                     inputMode="email"
                     autoCapitalize="off"
@@ -764,7 +775,10 @@ function PaymentRowEditor({
         <input
           value={payment.amount}
           onChange={(e) => onChange({ amount: e.target.value })}
-          onFocus={(e) => e.target.select()}
+          onFocus={(e) => {
+            e.target.select();
+            scrollFocusIntoView(e);
+          }}
           inputMode="decimal"
           className={
             showShort
@@ -860,7 +874,10 @@ function MixedSplitStep({
         <input
           value={state.primaryAmount}
           onChange={(e) => onChange({ ...state, primaryAmount: e.target.value })}
-          onFocus={(e) => e.target.select()}
+          onFocus={(e) => {
+            e.target.select();
+            scrollFocusIntoView(e);
+          }}
           inputMode="decimal"
           placeholder="0,00"
           className="h-12 px-3 text-[18px] font-semibold bg-white border border-slate-200 rounded-xl tabular-nums text-right focus:outline-none focus:ring-2 focus:ring-mipiace-coral/40"

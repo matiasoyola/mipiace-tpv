@@ -107,7 +107,13 @@ export function RefundOverlay(props: {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-mipiace-ink/95 flex flex-col font-sans">
+    <div
+      className="fixed inset-0 z-50 bg-mipiace-ink/95 flex flex-col font-sans"
+      // v1.3-UX-Iteración Lote 2: empuja el contenido por encima del
+      // teclado virtual en apaisado para que las unidades a devolver
+      // y el botón de confirmar no queden ocultos.
+      style={{ paddingBottom: "var(--keyboard-offset, 0px)" }}
+    >
       <header className="h-[88px] border-b border-slate-200 bg-white flex items-center px-5 md:px-8 gap-3">
         <button
           onClick={props.onClose}

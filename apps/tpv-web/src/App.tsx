@@ -16,6 +16,7 @@ import { useDeviceBootstrap } from "./hooks/useDeviceBootstrap.js";
 import { useInactivityLogout } from "./hooks/useInactivityLogout.js";
 import { getCachedBusinessType } from "./lib/catalog.js";
 import { clearTestMode, isTestModeActive } from "./lib/test-mode.js";
+import { startVisualViewportSync } from "./lib/visualViewportSync.js";
 import { PairScreen } from "./pages/PairScreen.js";
 import { PinScreen, type CashierLoginResponse } from "./pages/PinScreen.js";
 import { SalePage, type TableContext } from "./pages/SalePage.js";
@@ -75,6 +76,13 @@ export function App() {
     document.addEventListener("pointerdown", autoBlur);
     return () => document.removeEventListener("pointerdown", autoBlur);
   }, []);
+
+  // v1.3-UX-Iteración Lote 2: mantener --keyboard-offset sincronizado
+  // con la altura del teclado virtual. Cualquier elemento que necesite
+  // permanecer visible cuando abra el teclado (footer del ticket,
+  // dropdown de búsqueda) usa `padding-bottom: var(--keyboard-offset)`
+  // para empujarse hacia arriba en lugar de quedar oculto.
+  useEffect(() => startVisualViewportSync(), []);
 
   // En modo prueba, hacemos un bootstrap único contra el backend para
   // obtener user/shift/store/register sin pasar por PinScreen.

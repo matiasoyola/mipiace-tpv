@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Loader2, X } from "lucide-react";
 
 import { ApiError, apiWithCashier } from "../api.js";
+import { scrollFocusIntoView } from "../lib/visualViewportSync.js";
 
 export interface ContactRef {
   id: string;
@@ -75,6 +76,10 @@ export function ContactSheet({
     <div
       className="fixed inset-0 z-50 bg-mipiace-ink/40 flex items-end sm:items-center justify-center p-4 font-sans"
       onClick={onClose}
+      // v1.3-UX-Iteración Lote 2: empuja la sheet por encima del
+      // teclado para que el buscador y el dropdown de resultados sigan
+      // visibles cuando el cajero teclea.
+      style={{ paddingBottom: "calc(1rem + var(--keyboard-offset, 0px))" }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -117,6 +122,7 @@ export function ContactSheet({
               name="contactSearch"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              onFocus={scrollFocusIntoView}
               type="search"
               inputMode="search"
               enterKeyHint="search"
@@ -273,6 +279,7 @@ function Input({
         value={value}
         required={required}
         onChange={(e) => onChange(e.target.value)}
+        onFocus={scrollFocusIntoView}
         className="w-full h-11 px-3.5 rounded-xl bg-mipiace-stone border border-transparent text-[14px] focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none"
       />
     </div>
