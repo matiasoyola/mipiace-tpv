@@ -12,6 +12,7 @@ import {
   Power,
   RefreshCw,
   Sparkles,
+  Tags,
   X,
 } from "lucide-react";
 
@@ -159,6 +160,37 @@ export function TenantDetailPage() {
       setActionMessage(`Sync encolado. Job: ${r.syncJobId}`);
       // Recargamos a los 2 s para reflejar el cambio de status.
       setTimeout(() => void reload(), 2000);
+    } catch (err) {
+      setActionError(errToHuman(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // v1.3-Operativa-Extra · Lote 3: dedupe tags duplicados con/sin tilde
+  // (papelería ≡ papeleria). Modifica `products.tags` del tenant in
+  // situ. Confirm dialog porque es una mutación masiva.
+  async function onDedupeTags(): Promise<void> {
+    if (!id) return;
+    if (
+      !confirm(
+        "Esto modifica products.tags del tenant para unificar duplicados (papelería ≡ papeleria). ¿Continuar?",
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setActionError(null);
+    setActionMessage(null);
+    try {
+      const r = await superApi<{
+        productsScanned: number;
+        productsUpdated: number;
+        duplicatesRemoved: number;
+      }>(`/super-admin/tenants/${id}/dedupe-tags`, { method: "POST" });
+      setActionMessage(
+        `Dedupe OK: ${r.productsUpdated}/${r.productsScanned} productos actualizados, ${r.duplicatesRemoved} duplicados eliminados.`,
+      );
     } catch (err) {
       setActionError(errToHuman(err));
     } finally {
@@ -484,6 +516,7 @@ export function TenantDetailPage() {
           onForceLogout={onForceLogout}
           onResync={onResync}
           onImpersonate={onImpersonate}
+          onDedupeTags={onDedupeTags}
         />
       )}
 
@@ -837,6 +870,7 @@ function ActiveTenantActions({
   onForceLogout,
   onResync,
   onImpersonate,
+  onDedupeTags,
 }: {
   blocked: boolean;
   tenant: TenantDetail;
@@ -846,6 +880,7 @@ function ActiveTenantActions({
   onForceLogout: () => void;
   onResync: () => void;
   onImpersonate: () => void;
+  onDedupeTags: () => void;
 }) {
   return (
     <>
@@ -885,6 +920,12 @@ function ActiveTenantActions({
             icon={RefreshCw}
             label="Resync Holded"
             disabled={!tenant.holdedConnected}
+          />
+          <Action
+            onClick={onDedupeTags}
+            busy={busy}
+            icon={Tags}
+            label="Limpiar tags duplicados"
           />
           <Action
             onClick={onImpersonate}

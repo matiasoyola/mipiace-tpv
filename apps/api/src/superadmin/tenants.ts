@@ -47,6 +47,33 @@ interface TenantMetrics {
   activeShifts: number;
 }
 
+// v1.3-Operativa-Extra · Lote 3: normaliza un tag a su forma canónica
+// (minúsculas + sin tildes) para detectar duplicados entre
+// `papelería`/`papeleria` y similares. NFD descompone los acentos y la
+// clase Unicode `\p{M}` (marks) los elimina sin tocar el resto del
+// glifo. Mantenemos el orden de aparición original al construir la
+// lista sin duplicados — el orden importa para que el chip "Favoritos"
+// no salte de posición.
+function normalizeTag(tag: string): string {
+  return tag
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase();
+}
+
+function dedupeTagList(tags: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const tag of tags) {
+    const canonical = normalizeTag(tag);
+    if (canonical.length === 0) continue;
+    if (seen.has(canonical)) continue;
+    seen.add(canonical);
+    out.push(canonical);
+  }
+  return out;
+}
+
 function fiscalNifFromProfile(profile: Prisma.JsonValue | null): string | null {
   if (!profile || typeof profile !== "object" || Array.isArray(profile)) return null;
   const obj = profile as Record<string, unknown>;
@@ -957,6 +984,82 @@ export async function registerSuperAdminTenantsRoutes(
         metadata: { ...signals, syncJobId: job.jobId },
       });
       return reply.code(202).send({ syncJobId: job.jobId });
+    },
+  );
+
+  // ── Dedupe de tags (v1.3-Operativa-Extra · Lote 3) ────────────────────
+  //
+  // Algunos clientes (Thalía) tienen en Holded chips duplicados tipo
+  // `papelería` / `papeleria` o `bolígrafos` / `boligrafos`. El TPV ya
+  // los pinta capitalizados pero los muestra como chips distintos
+  // porque la lista de tags vive en `products.tags`. Este endpoint
+  // recorre todos los productos del tenant, normaliza
+  // `unaccent(lower(tag))` y deja sólo valores únicos. Sin migración —
+  // es un script idempotente.
+  app.post(
+    "/super-admin/tenants/:id/dedupe-tags",
+    {
+      preHandler: requireSuperAdmin,
+      schema: {
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", format: "uuid" } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const ctx = request.superAdmin!;
+      const prisma = getPrisma();
+      const tenant = await prisma.tenant.findUnique({
+        where: { id },
+        select: { id: true },
+      });
+      if (!tenant) {
+        return reply
+          .code(404)
+          .send({ error: "TENANT_NOT_FOUND", message: "Tenant no existe" });
+      }
+
+      const products = await prisma.product.findMany({
+        where: { tenantId: id },
+        select: { id: true, tags: true },
+      });
+
+      let productsUpdated = 0;
+      let duplicatesRemoved = 0;
+      for (const p of products) {
+        const normalized = dedupeTagList(p.tags);
+        if (normalized.length === p.tags.length && normalized.every((t, i) => t === p.tags[i])) {
+          continue;
+        }
+        duplicatesRemoved += p.tags.length - normalized.length;
+        await prisma.product.update({
+          where: { id: p.id },
+          data: { tags: normalized },
+        });
+        productsUpdated++;
+      }
+
+      const signals = extractRequestSignals(request);
+      await writeAudit({
+        prisma,
+        superAdminId: ctx.superAdminId,
+        action: "dedupe_tags",
+        tenantId: id,
+        metadata: {
+          ...signals,
+          productsScanned: products.length,
+          productsUpdated,
+          duplicatesRemoved,
+        },
+      });
+      return reply.code(200).send({
+        productsScanned: products.length,
+        productsUpdated,
+        duplicatesRemoved,
+      });
     },
   );
 

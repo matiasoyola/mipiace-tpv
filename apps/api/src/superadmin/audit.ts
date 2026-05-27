@@ -99,6 +99,16 @@ const ResendSuperAdminInviteMeta = Base.extend({
   targetSuperAdminId: z.string().uuid(),
 });
 
+// v1.3-Operativa-Extra · Lote 3: super-admin lanzó dedupe de tags en
+// products.tags (unifica "papelería"/"papeleria" al lowercase sin
+// acentos). Sirve para distinguir entre cambios manuales del tenant y
+// limpiezas masivas iniciadas desde la consola.
+const DedupeTagsMeta = Base.extend({
+  productsScanned: z.number().int().nonnegative(),
+  productsUpdated: z.number().int().nonnegative(),
+  duplicatesRemoved: z.number().int().nonnegative(),
+});
+
 const META_SCHEMAS = {
   create_tenant: CreateTenantMeta,
   create_tenant_draft: CreateTenantDraftMeta,
@@ -113,6 +123,7 @@ const META_SCHEMAS = {
   create_super_admin: CreateSuperAdminMeta,
   delete_super_admin: DeleteSuperAdminMeta,
   resend_super_admin_invite: ResendSuperAdminInviteMeta,
+  dedupe_tags: DedupeTagsMeta,
 } as const;
 
 export type SuperAdminAction = keyof typeof META_SCHEMAS;
