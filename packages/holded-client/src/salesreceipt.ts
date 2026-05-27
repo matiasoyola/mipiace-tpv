@@ -10,7 +10,11 @@ export interface SalesreceiptItem {
   price: number;
   tax: number;
   discount?: number;
-  sku: string; // SKU canónico Holded (spike §05.B). NO enviar `productId`.
+  // SKU canónico Holded (spike §05.B). NO enviar `productId`.
+  // v1.3-hotfix7 · opcional: si el SKU es "AUTO-*" (marca local de
+  // mipiacetpv para servicios sin SKU en Holded) no se manda y Holded
+  // toma la línea como libre con name+price+tax. Antes era obligatorio.
+  sku?: string;
   // Descripción libre del item. B-Bar-Modifiers la usa para mostrar el
   // desglose textual de modificadores ("(Tipo de leche: Desnatada; ...)").
   // Holded la persiste y la imprime debajo del nombre en la factura.
