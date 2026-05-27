@@ -929,15 +929,17 @@ function CashQuickKeys({
   // v1.3 Lote 1.D · "Justo" se eliminó de esta fila — la acción vive
   // arriba como botón ancho destacado "Importe exacto". Aquí sólo
   // quedan los billetes típicos y la C de borrar.
-  function bump(addEur: number | "C" | "100") {
+  //
+  // v1.3-UX-Iteración-fixes Fix 4: los atajos SOBREESCRIBEN el campo.
+  // Antes 5/10/20/50 sumaban al valor actual (10 + tap "+20" = 30) lo
+  // que confundía al cajero del piloto y dejaba cobros mal calculados.
+  // Sólo 100 ya hacía SET; ahora todos lo hacen. La C sigue siendo
+  // limpiar a 0.
+  function setCash(action: number | "C") {
     onChange(
       payments.map((p, i) => {
         if (i !== cashIdx) return p;
-        const curr = parseAmount(p.amount);
-        let next = curr;
-        if (addEur === "C") next = 0;
-        else if (addEur === "100") next = 100;
-        else next = curr + addEur;
+        const next = action === "C" ? 0 : action;
         return { ...p, amount: next.toFixed(2) };
       }),
     );
@@ -948,23 +950,17 @@ function CashQuickKeys({
         Atajos efectivo
       </div>
       <div className="grid grid-cols-3 gap-2">
-        {[5, 10, 20, 50].map((n) => (
+        {[5, 10, 20, 50, 100].map((n) => (
           <button
             key={n}
-            onClick={() => bump(n)}
+            onClick={() => setCash(n)}
             className="h-12 rounded-xl bg-mipiace-stone hover:bg-slate-100 text-[14px] font-medium text-mipiace-ink"
           >
-            +{n}
+            {n}
           </button>
         ))}
         <button
-          onClick={() => bump("100")}
-          className="h-12 rounded-xl bg-mipiace-stone hover:bg-slate-100 text-[14px] font-medium text-mipiace-ink"
-        >
-          100
-        </button>
-        <button
-          onClick={() => bump("C")}
+          onClick={() => setCash("C")}
           className="h-12 rounded-xl bg-mipiace-stone hover:bg-slate-100 text-[14px] font-medium text-mipiace-ink"
         >
           C
