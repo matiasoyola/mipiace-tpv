@@ -109,6 +109,17 @@ const DedupeTagsMeta = Base.extend({
   duplicatesRemoved: z.number().int().nonnegative(),
 });
 
+// v1.3-piloto-feedback · Lote 2: super-admin cambió el email del OWNER
+// activo de un tenant (modelo "activar con email controlado y entregar
+// al cliente real luego"). previousEmail/newEmail dejan trazabilidad de
+// a quién pertenecía la cuenta y a quién pasa.
+const TransferOwnerMeta = Base.extend({
+  previousEmail: z.string(),
+  newEmail: z.string(),
+  newName: z.string(),
+  passwordReset: z.boolean(),
+});
+
 const META_SCHEMAS = {
   create_tenant: CreateTenantMeta,
   create_tenant_draft: CreateTenantDraftMeta,
@@ -124,6 +135,7 @@ const META_SCHEMAS = {
   delete_super_admin: DeleteSuperAdminMeta,
   resend_super_admin_invite: ResendSuperAdminInviteMeta,
   dedupe_tags: DedupeTagsMeta,
+  transfer_owner: TransferOwnerMeta,
 } as const;
 
 export type SuperAdminAction = keyof typeof META_SCHEMAS;

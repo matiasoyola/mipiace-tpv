@@ -238,6 +238,8 @@ function makeFakePrisma() {
         "passwordHash",
         "isTestCashier",
         "mustChangePasswordAt",
+        // v1.3-piloto-feedback · Lote 2: transfer-owner rota el email.
+        "email",
       ]) {
         if ((data as any)[k] !== undefined) (u as any)[k] = (data as any)[k];
       }
@@ -946,5 +948,156 @@ describe("B-OnboardingV2 · POST /super-admin/tenants/:id/activate", () => {
     });
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toBe("TENANT_NOT_DRAFT");
+  });
+});
+
+// v1.3-piloto-feedback · Lote 2: transferir OWNER de un tenant activo.
+describe("v1.3-piloto-feedback · POST /super-admin/tenants/:id/transfer-owner", () => {
+  function seedActiveTenantWithOwner(ownerEmail: string, ownerId = "owner-1") {
+    tenants.set(TENANT_ID, {
+      id: TENANT_ID,
+      name: "Thalia",
+      plan: "pilot",
+      fiscalProfile: null,
+      holdedApiKeyCiphertext: null,
+      onboardingState: "ACTIVE",
+      blockedAt: null,
+      blockedReason: null,
+      initialSyncStatus: "DONE",
+      initialSyncStartedAt: null,
+      initialSyncCompletedAt: null,
+      initialSyncStats: null,
+      lastIncrementalSyncAt: null,
+      createdAt: new Date(),
+    });
+    users.set(ownerId, {
+      id: ownerId,
+      tenantId: TENANT_ID,
+      email: ownerEmail,
+      passwordHash: "old-hash",
+      pinHash: "old-pin-hash",
+      role: "OWNER",
+      tokenVersion: 0,
+      mustChangePasswordAt: null,
+      isTestCashier: false,
+      deletedAt: null,
+      createdAt: new Date(),
+    });
+  }
+
+  it("cambia email del OWNER, bumpa tokenVersion y devuelve tempPassword", async () => {
+    const app = await buildApp();
+    const sa = signSuperAdminToken();
+    seedActiveTenantWithOwner("m.oyola+thalia@mipiace.es");
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/super-admin/tenants/${TENANT_ID}/transfer-owner`,
+      headers: { authorization: `Bearer ${sa}` },
+      payload: {
+        newOwnerEmail: "sole@peluqueria.es",
+        newOwnerName: "Sole",
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.ownerEmail).toBe("sole@peluqueria.es");
+    expect(body.tempPassword).toHaveLength(16);
+
+    // User actualizado.
+    const owner = users.get("owner-1")!;
+    expect(owner.email).toBe("sole@peluqueria.es");
+    expect(owner.tokenVersion).toBe(1);
+    expect(owner.passwordHash).not.toBe("old-hash");
+    expect(owner.mustChangePasswordAt).not.toBeNull();
+    // Email enviado al nuevo destinatario con la nueva tempPassword.
+    expect(sentEmails).toHaveLength(1);
+    expect(sentEmails[0]!.to).toBe("sole@peluqueria.es");
+    expect(sentEmails[0]!.text).toContain(body.tempPassword);
+    // Audit log con before/after.
+    const a = audits.find((x) => x.action === "transfer_owner");
+    expect(a).toBeTruthy();
+    expect((a!.metadata as any).previousEmail).toBe("m.oyola+thalia@mipiace.es");
+    expect((a!.metadata as any).newEmail).toBe("sole@peluqueria.es");
+  });
+
+  it("rechaza si tenant en DRAFT con 409 TENANT_NOT_ACTIVE", async () => {
+    const app = await buildApp();
+    const sa = signSuperAdminToken();
+    tenants.set(TENANT_ID, {
+      id: TENANT_ID,
+      name: "Thalia",
+      plan: "pilot",
+      fiscalProfile: null,
+      holdedApiKeyCiphertext: null,
+      onboardingState: "DRAFT",
+      blockedAt: null,
+      blockedReason: null,
+      initialSyncStatus: "DONE",
+      initialSyncStartedAt: null,
+      initialSyncCompletedAt: null,
+      initialSyncStats: null,
+      lastIncrementalSyncAt: null,
+      createdAt: new Date(),
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: `/super-admin/tenants/${TENANT_ID}/transfer-owner`,
+      headers: { authorization: `Bearer ${sa}` },
+      payload: { newOwnerEmail: "a@b.es", newOwnerName: "A" },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("TENANT_NOT_ACTIVE");
+  });
+
+  it("rechaza con 409 EMAIL_TAKEN si otro User ya usa el email", async () => {
+    const app = await buildApp();
+    const sa = signSuperAdminToken();
+    seedActiveTenantWithOwner("owner@thalia.es");
+    // Otro user con el email que vamos a intentar usar.
+    users.set("other-user", {
+      id: "other-user",
+      tenantId: "44444444-4444-4444-4444-444444444444",
+      email: "ya@usado.es",
+      passwordHash: null,
+      pinHash: null,
+      role: "OWNER",
+      tokenVersion: 0,
+      mustChangePasswordAt: null,
+      isTestCashier: false,
+      deletedAt: null,
+      createdAt: new Date(),
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: `/super-admin/tenants/${TENANT_ID}/transfer-owner`,
+      headers: { authorization: `Bearer ${sa}` },
+      payload: { newOwnerEmail: "ya@usado.es", newOwnerName: "Z" },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("EMAIL_TAKEN");
+  });
+
+  it("resetPassword=false no manda email ni cambia passwordHash", async () => {
+    const app = await buildApp();
+    const sa = signSuperAdminToken();
+    seedActiveTenantWithOwner("owner@thalia.es");
+    const res = await app.inject({
+      method: "POST",
+      url: `/super-admin/tenants/${TENANT_ID}/transfer-owner`,
+      headers: { authorization: `Bearer ${sa}` },
+      payload: {
+        newOwnerEmail: "owner-v2@thalia.es",
+        newOwnerName: "Same Owner",
+        resetPassword: false,
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().tempPassword).toBeUndefined();
+    expect(users.get("owner-1")!.passwordHash).toBe("old-hash");
+    expect(sentEmails).toHaveLength(0);
+    // tokenVersion sigue incrementándose: invalidar sesiones es el
+    // objetivo principal, independientemente de si rotamos password.
+    expect(users.get("owner-1")!.tokenVersion).toBe(1);
   });
 });
