@@ -12,6 +12,7 @@ import {
   KeyRound,
   Menu,
   Package,
+  RefreshCw,
   Settings,
   Shield,
   Tag,
@@ -62,6 +63,9 @@ const NAV_ITEMS: NavItem[] = [
   // a OWNER y MANAGER porque la operativa (renombrar categorías) es de
   // negocio, no técnica.
   { to: "/admin/tag-aliases", label: "Etiquetas", icon: Tag },
+  // v1.3-Operativa-Extra · Lote 2: panel para que el OWNER fuerce sync
+  // con Holded sin pasar por super-admin.
+  { to: "/admin/holded", label: "Sync Holded", icon: RefreshCw },
   { to: "/admin/gift-receipts", label: "Tickets regalo", icon: Gift },
   { to: "/admin/account", label: "Mi cuenta", icon: User },
   { to: "/admin/security", label: "Seguridad", icon: Shield },

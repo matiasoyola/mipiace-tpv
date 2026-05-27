@@ -21,6 +21,7 @@ import {
 } from "@mipiacetpv/holded-client";
 
 import { requireOwnerOrManager } from "../auth/middleware.js";
+import { throttle } from "../auth/rate-limit.js";
 import { getPrisma } from "../context.js";
 import { decryptSecret } from "../crypto.js";
 import { loadEnv } from "../env.js";
@@ -58,6 +59,20 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
           error: "INITIAL_SYNC_PENDING",
           message:
             "El sync inicial todavía no ha terminado. Espera a que complete para forzar uno nuevo.",
+        });
+      }
+
+      // v1.3-Operativa-Extra · Lote 2: máximo 1 sync manual por minuto
+      // por tenant. Evita que el OWNER pulse el botón en bucle (cada
+      // sync arranca un job real contra Holded, que tarda segundos).
+      // El cron de 15 min queda intacto — sólo limita lo que dispara
+      // este endpoint.
+      const limit = await throttle(`catalog-sync-now:${auth.tenantId}`, 1, 60);
+      if (limit.exceeded) {
+        return reply.code(429).send({
+          error: "TOO_MANY_REQUESTS",
+          message: `Ya hay un sync manual en curso. Vuelve a intentarlo en ${limit.retryAfterSeconds}s.`,
+          retryAfterSeconds: limit.retryAfterSeconds,
         });
       }
 

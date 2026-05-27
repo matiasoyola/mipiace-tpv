@@ -7,6 +7,7 @@ import { ImpersonationBootstrap } from "./components/ImpersonationBootstrap.js";
 import { CashiersPage } from "./pages/CashiersPage.js";
 import { DevicesPage } from "./pages/DevicesPage.js";
 import { GiftReceiptsPage } from "./pages/GiftReceiptsPage.js";
+import { HoldedPage } from "./pages/HoldedPage.js";
 import { ForgotPasswordPage, ResetPasswordPage } from "./pages/PasswordResetPages.js";
 import { SecurityPage } from "./pages/SecurityPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
@@ -75,6 +76,7 @@ export function App() {
         <Route path="/admin/tickets-errors" element={<TicketsErrorsPage />} />
         <Route path="/admin/settings" element={<SettingsPage />} />
         <Route path="/admin/tag-aliases" element={<TagAliasesPage />} />
+        <Route path="/admin/holded" element={<HoldedPage />} />
         <Route path="/admin/gift-receipts" element={<GiftReceiptsPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/admin/reset" element={<ResetPasswordPage />} />
