@@ -25,6 +25,12 @@ export function PairScreen({ onPaired }: { onPaired: () => void }) {
   const [paired, setPaired] = useState<PairResponse | null>(null);
   const refs = useRef<Array<HTMLInputElement | null>>([]);
 
+  // v1.3-UX-Iteración-fixes Fix 5: auto-focus al primer dígito al montar
+  // es uno de los pocos casos legítimos de focus programático en este
+  // TPV. La PairScreen es la PRIMERA pantalla que ve el cajero al
+  // abrir la app sin device token; su única acción posible es teclear
+  // el código de 6 dígitos. Abrir el IME aquí ahorra un tap y no
+  // interfiere con ningún flujo táctil.
   useEffect(() => {
     refs.current[0]?.focus();
   }, []);
