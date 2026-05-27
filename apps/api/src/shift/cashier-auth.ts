@@ -68,7 +68,10 @@ export async function registerCashierAuthRoutes(
         where: {
           tenantId: ctx.tenantId,
           email: lowerEmail,
-          role: { in: ["MANAGER", "CASHIER"] },
+          // v1.3-piloto-feedback · Lote 1: aceptamos OWNER. El activate
+          // ya le coloca pinHash; sin esto, el dueño no podía abrir
+          // turno en el TPV con su propio email.
+          role: { in: ["OWNER", "MANAGER", "CASHIER"] },
         },
         select: { id: true, role: true, pinHash: true, email: true },
       });
@@ -101,7 +104,7 @@ export async function registerCashierAuthRoutes(
           tid: ctx.tenantId,
           did: ctx.deviceId,
           rid: ctx.registerId,
-          role: user.role as "MANAGER" | "CASHIER",
+          role: user.role as "OWNER" | "MANAGER" | "CASHIER",
         },
         tenant.cashierAutoLogoutMinutes,
       );

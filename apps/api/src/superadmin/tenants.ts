@@ -1,3 +1,5 @@
+import { randomInt } from "node:crypto";
+
 import type { FastifyInstance } from "fastify";
 
 import { Prisma } from "@mipiacetpv/db";
@@ -1392,6 +1394,14 @@ export async function registerSuperAdminTenantsRoutes(
 
       const tempPassword = generateTemporaryPassword();
       const passwordHash = await hashPassword(tempPassword);
+      // v1.3-piloto-feedback · Lote 1: el OWNER también se loguea en el
+      // TPV como cajero por defecto, así que generamos el pinHash en el
+      // mismo activate y devolvemos el PIN en plano una vez para que el
+      // super-admin lo enseñe offline si el email tarda. El propio
+      // `/auth/login` ya regenera el pinHash si no existe, pero generarlo
+      // aquí evita la primera vuelta admin-login antes de poder usar el TPV.
+      const ownerPin = generateOwnerCashierPin();
+      const pinHash = await hashPassword(ownerPin);
       const signals = extractRequestSignals(request);
 
       const activated = await prisma.$transaction(async (tx) => {
@@ -1400,6 +1410,7 @@ export async function registerSuperAdminTenantsRoutes(
             tenantId: id,
             email: lowerEmail,
             passwordHash,
+            pinHash,
             role: "OWNER",
             mustChangePasswordAt: new Date(),
           },
@@ -1431,6 +1442,7 @@ export async function registerSuperAdminTenantsRoutes(
           ownerEmail: activated.owner.email,
           ownerName: body.ownerName,
           tempPassword,
+          ownerPin,
         });
       } catch (err) {
         request.log.error(
@@ -1451,7 +1463,162 @@ export async function registerSuperAdminTenantsRoutes(
           name: body.ownerName,
         },
         tempPassword,
+        // v1.3-piloto-feedback · Lote 1: PIN del OWNER como cajero. Una
+        // sola vez en la respuesta; el OWNER puede regenerarlo desde
+        // `/auth/me/regenerate-owner-pin` si lo pierde.
+        ownerPin,
         purge: activated.purge,
+      });
+    },
+  );
+
+  // ── Transferir OWNER ────────────────────────────────────────────────
+  //
+  // v1.3-piloto-feedback · Lote 2. El equipo de implantación activa con
+  // un email controlado (m.oyola+cliente@mipiace.es) y entrega más tarde
+  // al cliente real cambiando el OWNER. No es un cambio de propietario
+  // a otro User — actualizamos el email/nombre del User OWNER existente,
+  // bumpamos tokenVersion para invalidar JWTs en vuelo y opcionalmente
+  // regeneramos password con email de bienvenida.
+  app.post(
+    "/super-admin/tenants/:id/transfer-owner",
+    {
+      preHandler: requireSuperAdmin,
+      schema: {
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", format: "uuid" } },
+        },
+        body: {
+          type: "object",
+          required: ["newOwnerEmail", "newOwnerName"],
+          additionalProperties: false,
+          properties: {
+            newOwnerEmail: { type: "string", pattern: emailFormat, maxLength: 320 },
+            newOwnerName: { type: "string", minLength: 1, maxLength: 200 },
+            resetPassword: { type: "boolean", default: true },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = request.body as {
+        newOwnerEmail: string;
+        newOwnerName: string;
+        resetPassword?: boolean;
+      };
+      const ctx = request.superAdmin!;
+      const prisma = getPrisma();
+      const resetPassword = body.resetPassword !== false;
+
+      const tenant = await prisma.tenant.findUnique({
+        where: { id },
+        select: { id: true, onboardingState: true },
+      });
+      if (!tenant) {
+        return reply.code(404).send({
+          error: "TENANT_NOT_FOUND",
+          message: "Tenant no existe",
+        });
+      }
+      // En DRAFT no aplicamos: basta con activar con el email correcto.
+      if (tenant.onboardingState !== "ACTIVE") {
+        return reply.code(409).send({
+          error: "TENANT_NOT_ACTIVE",
+          message:
+            "Sólo se puede transferir el OWNER cuando la cuenta está ACTIVA. Si está DRAFT, activa directamente con el email correcto.",
+        });
+      }
+
+      const lowerEmail = body.newOwnerEmail.toLowerCase();
+      const owner = await prisma.user.findFirst({
+        where: { tenantId: id, role: "OWNER", deletedAt: null },
+        orderBy: { createdAt: "asc" },
+        select: { id: true, email: true },
+      });
+      if (!owner) {
+        return reply.code(404).send({
+          error: "OWNER_NOT_FOUND",
+          message: "No se encontró un OWNER activo en este tenant.",
+        });
+      }
+
+      // El email puede coincidir con el OWNER actual (rename de nombre),
+      // pero no con otro User. Igual que en activate: el unique es global.
+      const emailClash = await prisma.user.findUnique({
+        where: { email: lowerEmail },
+        select: { id: true },
+      });
+      if (emailClash && emailClash.id !== owner.id) {
+        return reply.code(409).send({
+          error: "EMAIL_TAKEN",
+          message: "Ya existe un usuario con ese email.",
+        });
+      }
+
+      const newTempPassword = resetPassword
+        ? generateTemporaryPassword()
+        : null;
+      const newPasswordHash = newTempPassword
+        ? await hashPassword(newTempPassword)
+        : null;
+      const signals = extractRequestSignals(request);
+
+      // El modelo User no guarda `name` (sí lo guarda el email/audit y
+      // se imprime en el welcome email). Sólo actualizamos email +
+      // password + tokenVersion en el User; el nombre viaja al email y
+      // al audit para que el histórico recuerde a quién se transfirió.
+      await prisma.$transaction(async (tx) => {
+        await tx.user.update({
+          where: { id: owner.id },
+          data: {
+            email: lowerEmail,
+            ...(newPasswordHash
+              ? {
+                  passwordHash: newPasswordHash,
+                  mustChangePasswordAt: new Date(),
+                }
+              : {}),
+            tokenVersion: { increment: 1 },
+          },
+        });
+        await writeAudit({
+          prisma: tx,
+          superAdminId: ctx.superAdminId,
+          action: "transfer_owner",
+          tenantId: id,
+          metadata: {
+            ...signals,
+            previousEmail: owner.email,
+            newEmail: lowerEmail,
+            newName: body.newOwnerName,
+            passwordReset: resetPassword,
+          },
+        });
+      });
+
+      if (newTempPassword) {
+        try {
+          await sendOwnerWelcomeEmail({
+            ownerEmail: lowerEmail,
+            ownerName: body.newOwnerName,
+            tempPassword: newTempPassword,
+          });
+        } catch (err) {
+          request.log.error(
+            { event: "super_admin.transfer_owner_email_failed", tenantId: id, err },
+            "Email de bienvenida tras transfer-owner falló — temporal visible en response",
+          );
+        }
+      }
+
+      return reply.code(200).send({
+        ownerId: owner.id,
+        ownerEmail: lowerEmail,
+        ownerName: body.newOwnerName,
+        ...(newTempPassword ? { tempPassword: newTempPassword } : {}),
       });
     },
   );
@@ -1527,6 +1694,15 @@ export async function registerSuperAdminTenantsRoutes(
       };
     },
   );
+}
+
+// v1.3-piloto-feedback · Lote 1: PIN numérico de 4 dígitos para que el
+// OWNER se loguee en el TPV como cajero por defecto. Mismo esquema que
+// `generateOwnerPin` en auth/routes.ts (4 dígitos, sin sesgo de modulo),
+// duplicado aquí para no introducir un import cruzado entre módulos de
+// auth y superadmin.
+function generateOwnerCashierPin(): string {
+  return randomInt(0, 10_000).toString().padStart(4, "0");
 }
 
 // Parsea un TTL estilo JWT ("15m", "30m", "1h") a segundos. Defensivo:

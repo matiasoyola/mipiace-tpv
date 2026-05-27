@@ -416,7 +416,7 @@ type ExecuteShiftCloseResult =
 async function executeShiftClose(args: {
   prisma: ReturnType<typeof getPrisma>;
   log: { info: (obj: object, msg: string) => void; error: (obj: unknown, msg?: string) => void };
-  cashier: { tid: string; rid: string; sub: string; role: "MANAGER" | "CASHIER" };
+  cashier: { tid: string; rid: string; sub: string; role: "OWNER" | "MANAGER" | "CASHIER" };
   shiftId: string;
   body: {
     cashCounted: number;

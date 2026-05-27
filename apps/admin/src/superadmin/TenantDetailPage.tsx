@@ -65,6 +65,9 @@ export function TenantDetailPage() {
   const [ownerName, setOwnerName] = useState("");
   const [activated, setActivated] = useState<ActivateTenantResponse | null>(null);
   const [copiedPwd, setCopiedPwd] = useState(false);
+  // v1.3-piloto-feedback · Lote 1: feedback separado al copiar el PIN
+  // del OWNER (TPV) — coexiste con el feedback de la contraseña admin.
+  const [copiedPin, setCopiedPin] = useState(false);
   const [busy, setBusy] = useState(false);
   // T-6a (v1.1 Thalia): modal de edición de datos fiscales.
   const [showFiscalModal, setShowFiscalModal] = useState(false);
@@ -331,6 +334,17 @@ export function TenantDetailPage() {
     }
   }
 
+  async function copyPin(): Promise<void> {
+    if (!activated) return;
+    try {
+      await navigator.clipboard.writeText(activated.ownerPin);
+      setCopiedPin(true);
+      setTimeout(() => setCopiedPin(false), 2500);
+    } catch {
+      /* clipboard puede fallar */
+    }
+  }
+
   if (loading || !tenant) {
     return (
       <SuperAdminShell title="Cuenta">
@@ -363,7 +377,7 @@ export function TenantDetailPage() {
             device {activated.purge.deviceRevoked ? "revocado" : "no encontrado"}.
           </p>
           <div className="text-[12px] uppercase tracking-wide text-emerald-700 mb-1">
-            Contraseña temporal del OWNER
+            Contraseña temporal del OWNER (admin)
           </div>
           <div className="flex items-center gap-2">
             <code className="font-mono bg-slate-900 text-white rounded-lg px-3 py-2 text-[14px] tracking-wide">
@@ -377,9 +391,27 @@ export function TenantDetailPage() {
               {copiedPwd ? "Copiado" : "Copiar"}
             </button>
           </div>
+          {/* v1.3-piloto-feedback · Lote 1: PIN del OWNER como cajero
+              en el TPV. Se enseña sólo aquí; el OWNER lo puede regenerar
+              desde "Mi cuenta" cuando entre al admin. */}
+          <div className="text-[12px] uppercase tracking-wide text-emerald-700 mt-4 mb-1">
+            PIN del OWNER (TPV / cajero)
+          </div>
+          <div className="flex items-center gap-2">
+            <code className="font-mono bg-slate-900 text-white rounded-lg px-3 py-2 text-[14px] tracking-wide">
+              {activated.ownerPin}
+            </code>
+            <button
+              onClick={copyPin}
+              className="inline-flex items-center gap-1 h-9 px-3 border border-emerald-300 rounded-lg text-[12.5px] hover:bg-emerald-100 text-emerald-800"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              {copiedPin ? "Copiado" : "Copiar"}
+            </button>
+          </div>
           <p className="text-[11.5px] text-emerald-700 mt-2">
-            Sólo se muestra una vez. Si el email no llega, pásasela al cliente
-            por canal seguro.
+            Contraseña y PIN se muestran una sola vez. Si el email no llega,
+            pásaselos al cliente por canal seguro.
           </p>
         </div>
       )}
@@ -533,6 +565,16 @@ export function TenantDetailPage() {
         onSaved={(next) => setTenant({ ...tenant, tpvIconPreset: next })}
       />
 
+      {/* v1.3-piloto-feedback · Lote 2: cambiar el OWNER de un tenant
+          activo. Sólo visible en ACTIVE; en DRAFT basta con activar
+          directamente con el email correcto. */}
+      {!isDraft && (
+        <TransferOwnerPanel
+          tenantId={tenant.id}
+          currentOwnerEmail={tenant.ownerEmail}
+          onTransferred={() => void reload()}
+        />
+      )}
 
       <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6">
         <h3 className="font-semibold text-slate-900 mb-4">
@@ -1424,6 +1466,216 @@ function IconPresetPanel({
         )}
         {err && <span className="text-[12px] text-red-700">{err}</span>}
       </div>
+    </div>
+  );
+}
+
+// v1.3-piloto-feedback · Lote 2: cambiar el email del OWNER de un
+// tenant activo. Soporta el flow "pre-activar con email controlado y
+// entregar al cliente real luego" del equipo de implantación. Sigue el
+// patrón inline de ReceiptFooterPanel/IconPresetPanel — sin modal
+// pesado, sólo un panel desplegable con confirmación visible antes de
+// pulsar.
+function TransferOwnerPanel({
+  tenantId,
+  currentOwnerEmail,
+  onTransferred,
+}: {
+  tenantId: string;
+  currentOwnerEmail: string | null;
+  onTransferred: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [newName, setNewName] = useState("");
+  const [resetPassword, setResetPassword] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [result, setResult] = useState<
+    | null
+    | {
+        ownerEmail: string;
+        tempPassword?: string;
+      }
+  >(null);
+  const [copiedPwd, setCopiedPwd] = useState(false);
+
+  const trimmedEmail = newEmail.trim().toLowerCase();
+  const trimmedName = newName.trim();
+  const canSubmit =
+    trimmedEmail.length > 0 &&
+    /.+@.+\..+/.test(trimmedEmail) &&
+    trimmedName.length > 0 &&
+    trimmedEmail !== currentOwnerEmail?.toLowerCase();
+
+  async function submit(): Promise<void> {
+    if (busy || !canSubmit) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await superApi<{
+        ownerId: string;
+        ownerEmail: string;
+        ownerName: string;
+        tempPassword?: string;
+      }>(`/super-admin/tenants/${tenantId}/transfer-owner`, {
+        method: "POST",
+        body: {
+          newOwnerEmail: trimmedEmail,
+          newOwnerName: trimmedName,
+          resetPassword,
+        },
+      });
+      setResult({ ownerEmail: r.ownerEmail, tempPassword: r.tempPassword });
+      onTransferred();
+    } catch (e) {
+      setErr(errToHuman(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyPwd(): Promise<void> {
+    if (!result?.tempPassword) return;
+    try {
+      await navigator.clipboard.writeText(result.tempPassword);
+      setCopiedPwd(true);
+      setTimeout(() => setCopiedPwd(false), 2500);
+    } catch {
+      /* clipboard puede fallar */
+    }
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6">
+      <h3 className="font-semibold text-slate-900 mb-2">Propietario de la cuenta</h3>
+      <p className="text-[12.5px] text-slate-600 mb-3">
+        Cambia el email del OWNER cuando entregamos la cuenta al cliente
+        real (por ejemplo, activaste con un email del equipo y ahora la
+        pasas al propietario definitivo). La sesión actual del OWNER se
+        invalida automáticamente.
+      </p>
+      <div className="text-[12.5px] text-slate-700 mb-3">
+        OWNER actual: <code className="font-mono">{currentOwnerEmail ?? "—"}</code>
+      </div>
+      {!open && !result && (
+        <button
+          onClick={() => setOpen(true)}
+          className="h-9 px-4 bg-slate-900 text-white rounded-lg text-[13px] font-medium hover:bg-slate-800"
+        >
+          Cambiar propietario
+        </button>
+      )}
+      {open && !result && (
+        <>
+          <label className="block text-[12.5px] font-medium text-slate-700 mb-1.5 mt-2">
+            Nuevo email <span className="text-red-500">*</span>
+          </label>
+          <input
+            type="email"
+            value={newEmail}
+            onChange={(e) => setNewEmail(e.target.value)}
+            placeholder="cliente@negocio.es"
+            className="w-full h-11 px-3 border border-slate-300 rounded-lg text-[14px] mb-3 focus:outline-none focus:border-slate-500"
+          />
+          <label className="block text-[12.5px] font-medium text-slate-700 mb-1.5">
+            Nombre <span className="text-red-500">*</span>
+          </label>
+          <input
+            type="text"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="María Pérez"
+            maxLength={200}
+            className="w-full h-11 px-3 border border-slate-300 rounded-lg text-[14px] mb-3 focus:outline-none focus:border-slate-500"
+          />
+          <label className="flex items-center gap-2 text-[12.5px] text-slate-700 mb-3">
+            <input
+              type="checkbox"
+              checked={resetPassword}
+              onChange={(e) => setResetPassword(e.target.checked)}
+              className="rounded border-slate-300"
+            />
+            Enviar email con nueva contraseña al nuevo propietario
+          </label>
+          <div className="text-[12px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3">
+            Esto invalida la sesión actual del propietario en admin y TPV.
+            {resetPassword
+              ? " Se generará una nueva contraseña temporal."
+              : " La contraseña actual sigue siendo válida tras el cambio."}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={submit}
+              disabled={busy || !canSubmit}
+              className="h-9 px-4 bg-emerald-600 text-white rounded-lg text-[13px] font-medium hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {busy ? "Cambiando…" : "Confirmar cambio"}
+            </button>
+            <button
+              onClick={() => {
+                setOpen(false);
+                setNewEmail("");
+                setNewName("");
+                setErr(null);
+              }}
+              disabled={busy}
+              className="h-9 px-4 border border-slate-300 rounded-lg text-[13px] hover:bg-slate-50"
+            >
+              Cancelar
+            </button>
+          </div>
+          {err && (
+            <div className="mt-3 text-[12px] text-red-700 bg-red-50 border border-red-200 rounded-lg p-2.5">
+              {err}
+            </div>
+          )}
+        </>
+      )}
+      {result && (
+        <div className="mt-1 p-4 bg-emerald-50 border border-emerald-200 rounded-lg">
+          <div className="flex items-center gap-2 mb-2">
+            <Check className="w-4 h-4 text-emerald-700" />
+            <span className="text-[13px] font-medium text-emerald-900">
+              Propietario cambiado a <code className="font-mono">{result.ownerEmail}</code>
+            </span>
+          </div>
+          {result.tempPassword && (
+            <>
+              <div className="text-[12px] uppercase tracking-wide text-emerald-700 mb-1 mt-2">
+                Nueva contraseña temporal
+              </div>
+              <div className="flex items-center gap-2">
+                <code className="font-mono bg-slate-900 text-white rounded-lg px-3 py-2 text-[14px] tracking-wide">
+                  {result.tempPassword}
+                </code>
+                <button
+                  onClick={copyPwd}
+                  className="inline-flex items-center gap-1 h-9 px-3 border border-emerald-300 rounded-lg text-[12.5px] hover:bg-emerald-100 text-emerald-800"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  {copiedPwd ? "Copiado" : "Copiar"}
+                </button>
+              </div>
+              <p className="text-[11.5px] text-emerald-700 mt-2">
+                Sólo se muestra una vez. Si el email no llega, pásasela al
+                cliente por canal seguro.
+              </p>
+            </>
+          )}
+          <button
+            onClick={() => {
+              setResult(null);
+              setOpen(false);
+              setNewEmail("");
+              setNewName("");
+            }}
+            className="mt-3 h-9 px-4 border border-slate-300 rounded-lg text-[13px] hover:bg-slate-50"
+          >
+            Hecho
+          </button>
+        </div>
+      )}
     </div>
   );
 }

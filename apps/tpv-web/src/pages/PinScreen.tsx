@@ -2,7 +2,7 @@
 // (localStorage) + keypad numérico.
 
 import { useEffect, useRef, useState } from "react";
-import { AlertCircle, ChevronRight, Delete, Loader2, Plus } from "lucide-react";
+import { AlertCircle, ChevronRight, CircleAlert, Delete, Loader2, Plus } from "lucide-react";
 
 import { apiWithDevice, ApiError } from "../api.js";
 import { Logo } from "../Logo.js";
@@ -50,6 +50,14 @@ export function PinScreen({
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // v1.3-piloto-feedback · Lote 4: el backend devuelve `attemptsRemaining`
+  // en 401 INVALID_CREDENTIALS para avisar antes de que entre el rate
+  // limit. NULL = aún no hemos visto un fallo (o ya se reseteó).
+  const [attemptsRemaining, setAttemptsRemaining] = useState<number | null>(null);
+  // Timestamp en ms en el que vence el bloqueo. NULL = no bloqueado.
+  // Tickea 1× por segundo mientras esté activo para mostrar countdown.
+  const [lockedUntilMs, setLockedUntilMs] = useState<number | null>(null);
+  const [nowMs, setNowMs] = useState<number>(Date.now());
 
   useEffect(() => {
     setRecent(getRecentCashiers());
@@ -67,8 +75,30 @@ export function PinScreen({
     };
   }, [pin, selectedEmail, otherEmail]);
 
+  // v1.3-piloto-feedback · Lote 4: tick 1×/s mientras estemos en lock
+  // para refrescar el countdown. En cuanto vence, limpiamos el estado
+  // (el cajero puede volver a probar) y reseteamos attemptsRemaining
+  // — el rate-limit del backend habrá expirado al mismo tiempo.
+  useEffect(() => {
+    if (lockedUntilMs == null) return;
+    const tick = setInterval(() => {
+      const now = Date.now();
+      setNowMs(now);
+      if (now >= lockedUntilMs) {
+        setLockedUntilMs(null);
+        setAttemptsRemaining(null);
+        setError(null);
+      }
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [lockedUntilMs]);
+  const lockSecondsRemaining =
+    lockedUntilMs != null ? Math.max(0, Math.ceil((lockedUntilMs - nowMs) / 1000)) : 0;
+  const isLocked = lockedUntilMs != null && lockSecondsRemaining > 0;
+
   const activeEmail = selectedEmail ?? otherEmail.trim().toLowerCase();
-  const canSubmit = activeEmail.length > 0 && pin.length >= PIN_LENGTH_TARGET;
+  const canSubmit =
+    !isLocked && activeEmail.length > 0 && pin.length >= PIN_LENGTH_TARGET;
 
   async function submit() {
     if (!canSubmit || busy) return;
@@ -91,12 +121,34 @@ export function PinScreen({
         email: res.user.email,
         role: res.user.role,
       });
+      // Login OK → limpiamos cualquier rastro del avisador de intentos
+      // que hubiera quedado de un intento previo en este mismo device.
+      setAttemptsRemaining(null);
+      setLockedUntilMs(null);
       onLoggedIn(res);
     } catch (err) {
       setPin("");
       if (err instanceof ApiError) {
         if (err.code === "DEVICE_REVOKED" || err.status === 401 && err.code === "DEVICE_TOKEN_REQUIRED") {
           onDeviceRevoked();
+          return;
+        }
+        // v1.3-piloto-feedback · Lote 4: extraemos los campos que el
+        // backend manda para avisar antes del bloqueo. ApiError.data
+        // contiene el body JSON completo.
+        const data = err.data as
+          | { attemptsRemaining?: number; retryAfterSeconds?: number }
+          | null;
+        if (err.status === 429 && err.code === "RATE_LIMITED") {
+          const secs = Math.max(1, data?.retryAfterSeconds ?? 0);
+          setLockedUntilMs(Date.now() + secs * 1000);
+          setAttemptsRemaining(0);
+          setError(null); // El bloque de error se renderiza desde lockedUntilMs.
+          return;
+        }
+        if (typeof data?.attemptsRemaining === "number") {
+          setAttemptsRemaining(data.attemptsRemaining);
+          setError(null);
           return;
         }
         setError(err.message);
@@ -283,7 +335,34 @@ export function PinScreen({
               {busy && <Loader2 className="w-4 h-4 animate-spin" />}
               Entrar
             </button>
-            {error && (
+            {/* v1.3-piloto-feedback · Lote 4: tres estados visuales.
+                  isLocked → bloque ámbar con countdown, sin botón.
+                  attemptsRemaining ≤ 3 → aviso slate (suave) con
+                    intentos restantes. No rojo: el primer fallo no
+                    debe asustar.
+                  error (resto) → rojo clásico (auth fallida con
+                    attemptsRemaining=4 cae aquí como mensaje plano si
+                    el backend no manda data). */}
+            {isLocked && (
+              <div className="mt-4 flex items-start gap-2 text-[13px] text-amber-900 bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-2.5">
+                <CircleAlert className="w-4 h-4 mt-px shrink-0 text-amber-600" />
+                <span>
+                  Cuenta bloqueada por demasiados intentos. Vuelve a probar en{" "}
+                  <strong>{formatCountdown(lockSecondsRemaining)}</strong>.
+                </span>
+              </div>
+            )}
+            {!isLocked && attemptsRemaining != null && attemptsRemaining <= 3 && (
+              <div className="mt-4 flex items-start gap-2 text-[13px] text-slate-600 bg-slate-50 rounded-xl px-3.5 py-2.5">
+                <CircleAlert className="w-4 h-4 mt-px shrink-0 text-amber-500" />
+                <span>
+                  Email o PIN incorrecto · Te quedan{" "}
+                  <strong>{attemptsRemaining}</strong>{" "}
+                  intento{attemptsRemaining === 1 ? "" : "s"} antes del bloqueo.
+                </span>
+              </div>
+            )}
+            {!isLocked && error && (
               <div className="mt-4 flex items-start gap-2 text-[13px] text-red-700 bg-red-50 rounded-xl px-3.5 py-2.5">
                 <AlertCircle className="w-4 h-4 mt-px shrink-0" />
                 <span>{error}</span>
@@ -305,6 +384,16 @@ function initialsOf(email: string): string {
     .slice(0, 2)
     .join("")
     .toUpperCase();
+}
+
+// v1.3-piloto-feedback · Lote 4: formato compacto del countdown del
+// rate-limit. < 60 s = "Ns", >= 60 s = "Mmin Ns" para que el cajero
+// entienda de un vistazo cuánto falta sin tener que hacer matemática.
+function formatCountdown(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return s === 0 ? `${m} min` : `${m} min ${s}s`;
 }
 
 function formatShortDate(iso: string): string {
