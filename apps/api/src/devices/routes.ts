@@ -235,6 +235,31 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
       // que sea operacionalmente imposible.
       const target = candidates[0]!;
 
+      // v1.3-hotfix11 · pairing code de un solo uso.
+      //
+      // El SELECT anterior es informativo (para devolver register/store en
+      // la respuesta). El claim atómico se hace AQUÍ con updateMany — si
+      // dos requests llegan con el mismo code en paralelo, sólo la
+      // primera obtiene count===1. La segunda devuelve count===0 →
+      // tratamos como código ya consumido (404). Bug detectado
+      // 2026-05-27: la transacción Prisma por defecto (READ COMMITTED)
+      // permitía que ambas SELECTs viesen consumedAt=null antes del commit
+      // de la primera, creando 2 devices con el mismo code.
+      const claimed = await prisma.pairingCode.updateMany({
+        where: {
+          id: target.id,
+          consumedAt: null,
+          expiresAt: { gt: now },
+        },
+        data: { consumedAt: now },
+      });
+      if (claimed.count === 0) {
+        return reply.code(404).send({
+          error: "INVALID_PAIRING_CODE",
+          message: "Código inválido o caducado",
+        });
+      }
+
       const { plain, hash } = generateDeviceToken();
       const device = await prisma.$transaction(async (tx) => {
         const d = await tx.device.create({
@@ -247,9 +272,11 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
           },
           select: { id: true },
         });
+        // Enlazar el code al device recién creado (consumedAt ya está
+        // marcado por el updateMany de arriba).
         await tx.pairingCode.update({
           where: { id: target.id },
-          data: { consumedAt: now, consumedByDeviceId: d.id },
+          data: { consumedByDeviceId: d.id },
         });
         return d;
       });

@@ -645,7 +645,15 @@ export function SalePage(props: SalePageProps) {
   const filtered = useMemo(() => {
     if (!catalog) return [];
     if (query.trim().length === 0) {
-      return catalog.slice(0, 40);
+      // v1.3-hotfix12 · ANTES había `catalog.slice(0, 40)` "para evitar
+      // renderizar muchos tiles". Con cuentas reales (Peluquería Sole,
+      // 86 productos) recortaba los servicios/productos posteriores a la
+      // M alfabética → bug visible (chips de "Tinte y color" mostraban
+      // 1 de 10 servicios). Devolvemos el catálogo completo; los chips
+      // de categoría y el toggle Servicios/Productos ya limitan el grid
+      // visible. Si en el futuro tenemos cuentas con >500 productos,
+      // virtualizamos el grid en vez de truncar.
+      return catalog;
     }
     return fuzzySearch(catalog, query, 40);
   }, [catalog, query]);
