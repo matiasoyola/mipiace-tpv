@@ -11,6 +11,7 @@ import {
   LogOut,
   Power,
   RefreshCw,
+  Settings,
   Sparkles,
   Tags,
   X,
@@ -23,6 +24,7 @@ import type {
   ActivateTenantResponse,
   BusinessType,
   ImpersonateResponse,
+  ImpersonationMode,
   TenantDetail,
   TestCashierTokenResponse,
 } from "./types.js";
@@ -71,6 +73,9 @@ export function TenantDetailPage() {
   const [busy, setBusy] = useState(false);
   // T-6a (v1.1 Thalia): modal de edición de datos fiscales.
   const [showFiscalModal, setShowFiscalModal] = useState(false);
+  // v1.3-SuperAdmin-Hub Lote 1: modal de confirmación para impersonate
+  // mode=full ("Configurar como OWNER"). El readonly entra directo.
+  const [showConfigureModal, setShowConfigureModal] = useState(false);
 
   async function reload(): Promise<void> {
     if (!id) return;
@@ -201,7 +206,7 @@ export function TenantDetailPage() {
     }
   }
 
-  async function onImpersonate(): Promise<void> {
+  async function onImpersonate(mode: ImpersonationMode): Promise<void> {
     if (!id) return;
     setBusy(true);
     setActionError(null);
@@ -209,19 +214,22 @@ export function TenantDetailPage() {
     try {
       const r = await superApi<ImpersonateResponse>(
         `/super-admin/tenants/${id}/impersonate`,
-        { method: "POST" },
+        { method: "POST", body: { mode } },
       );
       const url = `${window.location.origin}/?impersonationToken=${encodeURIComponent(
         r.impersonationToken,
       )}`;
       window.open(url, "_blank", "noopener,noreferrer");
       setActionMessage(
-        `Sesión de impersonación abierta. Caduca el ${new Date(r.expiresAt).toLocaleTimeString()}.`,
+        mode === "full"
+          ? `Sesión de configuración abierta. Caduca el ${new Date(r.expiresAt).toLocaleTimeString()}. Cada acción quedará en el log.`
+          : `Sesión de impersonación abierta. Caduca el ${new Date(r.expiresAt).toLocaleTimeString()}.`,
       );
     } catch (err) {
       setActionError(errToHuman(err));
     } finally {
       setBusy(false);
+      setShowConfigureModal(false);
     }
   }
 
@@ -547,7 +555,8 @@ export function TenantDetailPage() {
           onUnblock={onUnblock}
           onForceLogout={onForceLogout}
           onResync={onResync}
-          onImpersonate={onImpersonate}
+          onImpersonateReadonly={() => void onImpersonate("readonly")}
+          onAskConfigure={() => setShowConfigureModal(true)}
           onDedupeTags={onDedupeTags}
         />
       )}
@@ -664,6 +673,43 @@ export function TenantDetailPage() {
                 setShowBlockModal(false);
                 setBlockReason("");
               }}
+              className="flex-1 h-10 border border-slate-300 rounded-lg text-[13px] hover:bg-slate-50"
+            >
+              Cancelar
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {showConfigureModal && (
+        <Modal onClose={() => setShowConfigureModal(false)}>
+          <div className="flex items-center gap-2 mb-2">
+            <AlertTriangle className="w-5 h-5 text-amber-600" />
+            <h3 className="font-semibold text-slate-900">
+              Configurar como OWNER
+            </h3>
+          </div>
+          <p className="text-[13px] text-slate-700 mb-3">
+            Vas a entrar al panel del cliente con permisos de escritura.
+            Todo lo que hagas quedará registrado en el log de auditoría.
+            ¿Continuar?
+          </p>
+          <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-[12.5px] text-amber-900">
+            Cada acción se firma con tu identidad de super-admin y queda
+            en <code className="font-mono">impersonate_write</code>. Sal
+            de la sesión cuando termines.
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => void onImpersonate("full")}
+              disabled={busy}
+              className="flex-1 h-10 bg-amber-600 text-white rounded-lg text-[13px] font-medium hover:bg-amber-700 disabled:opacity-50"
+            >
+              {busy ? "Abriendo…" : "Sí, configurar"}
+            </button>
+            <button
+              onClick={() => setShowConfigureModal(false)}
+              disabled={busy}
               className="flex-1 h-10 border border-slate-300 rounded-lg text-[13px] hover:bg-slate-50"
             >
               Cancelar
@@ -911,7 +957,8 @@ function ActiveTenantActions({
   onUnblock,
   onForceLogout,
   onResync,
-  onImpersonate,
+  onImpersonateReadonly,
+  onAskConfigure,
   onDedupeTags,
 }: {
   blocked: boolean;
@@ -921,7 +968,8 @@ function ActiveTenantActions({
   onUnblock: () => void;
   onForceLogout: () => void;
   onResync: () => void;
-  onImpersonate: () => void;
+  onImpersonateReadonly: () => void;
+  onAskConfigure: () => void;
   onDedupeTags: () => void;
 }) {
   return (
@@ -970,10 +1018,18 @@ function ActiveTenantActions({
             label="Limpiar tags duplicados"
           />
           <Action
-            onClick={onImpersonate}
+            onClick={onImpersonateReadonly}
             busy={busy}
             icon={Eye}
             label="Impersonar (sólo lectura)"
+            disabled={!tenant.ownerEmail || blocked}
+          />
+          <Action
+            onClick={onAskConfigure}
+            busy={busy}
+            icon={Settings}
+            label="Configurar como OWNER"
+            tone="warning"
             disabled={!tenant.ownerEmail || blocked}
           />
         </div>
@@ -1028,7 +1084,7 @@ function Action({
   busy: boolean;
   icon: typeof Eye;
   label: string;
-  tone?: "neutral" | "primary" | "danger";
+  tone?: "neutral" | "primary" | "danger" | "warning";
   disabled?: boolean;
 }) {
   const cls =
@@ -1036,7 +1092,9 @@ function Action({
       ? "border-red-300 text-red-700 hover:bg-red-50"
       : tone === "primary"
         ? "border-emerald-300 text-emerald-800 hover:bg-emerald-50"
-        : "border-slate-300 text-slate-700 hover:bg-slate-50";
+        : tone === "warning"
+          ? "border-amber-400 text-amber-800 bg-amber-50 hover:bg-amber-100"
+          : "border-slate-300 text-slate-700 hover:bg-slate-50";
   return (
     <button
       onClick={onClick}

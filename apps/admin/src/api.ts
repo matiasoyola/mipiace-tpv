@@ -52,6 +52,8 @@ export interface JwtPayloadView {
   role?: "OWNER" | "MANAGER" | "CASHIER";
   purpose?: string;
   readOnly?: boolean;
+  // v1.3-SuperAdmin-Hub Lote 1: modo de la sesión de impersonación.
+  mode?: "readonly" | "full";
   tid?: string;
   exp?: number;
 }
@@ -72,6 +74,10 @@ export interface ImpersonationState {
   active: true;
   expiresAt: number; // epoch ms
   tenantId: string | null;
+  // v1.3-SuperAdmin-Hub Lote 1: el banner pinta ámbar+escritura para
+  // `full` y rojo+lectura para `readonly`. Si el JWT legacy sólo trae
+  // `readOnly`, el state lo mapea a "readonly".
+  mode: "readonly" | "full";
 }
 
 export function readImpersonationState(): ImpersonationState | null {
@@ -79,10 +85,19 @@ export function readImpersonationState(): ImpersonationState | null {
   if (!imp) return null;
   const payload = decodeJwtPayload(imp);
   if (!payload || payload.purpose !== "impersonation") return null;
+  const mode: "readonly" | "full" =
+    payload.mode === "full"
+      ? "full"
+      : payload.mode === "readonly"
+        ? "readonly"
+        : payload.readOnly === false
+          ? "full"
+          : "readonly";
   return {
     active: true,
     expiresAt: (payload.exp ?? 0) * 1000,
     tenantId: payload.tid ?? null,
+    mode,
   };
 }
 

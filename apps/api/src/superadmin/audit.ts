@@ -76,6 +76,23 @@ const ResyncMeta = Base.extend({
 const ImpersonateMeta = Base.extend({
   expiresAt: z.string(),
   asUserId: z.string(),
+  // v1.3-SuperAdmin-Hub Lote 1: distinguimos sesión readonly (verla)
+  // de sesión full (configurarla en nombre del cliente). Opcional para
+  // no romper la lectura del histórico previo al lote.
+  mode: z.enum(["readonly", "full"]).optional(),
+});
+
+// v1.3-SuperAdmin-Hub Lote 1: traza por cada mutación ejecutada en
+// modo impersonate=full. El middleware la escribe antes de ejecutar el
+// handler — si el handler falla con 500 el audit queda igualmente, que
+// es exactamente lo que queremos para investigar después.
+const ImpersonateWriteMeta = Base.extend({
+  route: z.string(),
+  method: z.string(),
+  // Resumen del body cuando sirve para entender la acción (e.g.
+  // { fields: ["receiptFooter"] }). Estructura libre — preferimos un
+  // hint corto antes que persistir el body en claro (puede llevar PII).
+  payloadSummary: z.record(z.unknown()).nullable().optional(),
 });
 
 // B-Multi-Vertical SB4: super-admin invitado por otro super-admin.
@@ -129,6 +146,7 @@ const META_SCHEMAS = {
   force_logout: ForceLogoutMeta,
   resync: ResyncMeta,
   impersonate: ImpersonateMeta,
+  impersonate_write: ImpersonateWriteMeta,
   test_cashier_session: TestCashierSessionMeta,
   activate_tenant: ActivateTenantMeta,
   create_super_admin: CreateSuperAdminMeta,

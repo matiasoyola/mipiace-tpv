@@ -738,6 +738,8 @@ describe("super-admin · impersonation read-only", () => {
     expect(imp.statusCode).toBe(200);
     const token = imp.json().impersonationToken as string;
     expect(token).toBeTruthy();
+    // Mode default = readonly (compat con clientes sin body).
+    expect(imp.json().mode).toBe("readonly");
 
     // GET /auth/me funciona con el JWT impersonation.
     const get = await app.inject({
@@ -758,6 +760,93 @@ describe("super-admin · impersonation read-only", () => {
     expect(post.json().code).toBe("IMPERSONATION_READONLY");
 
     // Audit impersonate grabado.
+    expect(audits.some((a) => a.action === "impersonate")).toBe(true);
+  });
+});
+
+// v1.3-SuperAdmin-Hub Lote 1 · 3 casos del modo "full". Cubre el
+// guard que ahora vive en handleImpersonationMutation: readonly+write
+// rebota, full+write registra impersonate_write y deja pasar, full+read
+// no genera ruido en el log.
+describe("super-admin · impersonate mode=full (Lote 1)", () => {
+  async function mintFullToken(app: FastifyInstance): Promise<string> {
+    const sa = await loginSA(app);
+    const imp = await app.inject({
+      method: "POST",
+      url: `/super-admin/tenants/${TENANT_ID}/impersonate`,
+      headers: { authorization: `Bearer ${sa}` },
+      payload: { mode: "full" },
+    });
+    expect(imp.statusCode).toBe(200);
+    expect(imp.json().mode).toBe("full");
+    return imp.json().impersonationToken as string;
+  }
+
+  it("(caso 1) readonly + mutación → 403 IMPERSONATION_READONLY", async () => {
+    const app = await buildApp();
+    const sa = await loginSA(app);
+    const readonly = await app.inject({
+      method: "POST",
+      url: `/super-admin/tenants/${TENANT_ID}/impersonate`,
+      headers: { authorization: `Bearer ${sa}` },
+      payload: { mode: "readonly" },
+    });
+    expect(readonly.statusCode).toBe(200);
+    const token = readonly.json().impersonationToken as string;
+
+    const post = await app.inject({
+      method: "POST",
+      url: "/auth/logout-everywhere",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {},
+    });
+    expect(post.statusCode).toBe(403);
+    expect(post.json().code).toBe("IMPERSONATION_READONLY");
+    // El intento bloqueado NO genera impersonate_write.
+    expect(audits.some((a) => a.action === "impersonate_write")).toBe(false);
+  });
+
+  it("(caso 2) full + mutación → 200 + audit impersonate_write", async () => {
+    const app = await buildApp();
+    const token = await mintFullToken(app);
+
+    const post = await app.inject({
+      method: "POST",
+      url: "/auth/logout-everywhere",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {},
+    });
+    expect(post.statusCode).toBe(200);
+
+    const write = audits.find((a) => a.action === "impersonate_write");
+    expect(write).toBeTruthy();
+    expect(write!.tenantId).toBe(TENANT_ID);
+    expect(write!.superAdminId).toBe(SA_ID);
+    const md = write!.metadata as {
+      route: string;
+      method: string;
+    };
+    expect(md.route).toBe("/auth/logout-everywhere");
+    expect(md.method).toBe("POST");
+
+    // El audit `impersonate` original también lleva mode=full.
+    const issue = audits.find((a) => a.action === "impersonate");
+    expect((issue!.metadata as { mode?: string }).mode).toBe("full");
+  });
+
+  it("(caso 3) full + lectura → 200 sin audit impersonate_write", async () => {
+    const app = await buildApp();
+    const token = await mintFullToken(app);
+
+    const get = await app.inject({
+      method: "GET",
+      url: "/auth/me",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(get.statusCode).toBe(200);
+    // Las lecturas NO ensucian el log con impersonate_write — sólo se
+    // registra el primer "impersonate" al abrir la sesión.
+    expect(audits.some((a) => a.action === "impersonate_write")).toBe(false);
     expect(audits.some((a) => a.action === "impersonate")).toBe(true);
   });
 });

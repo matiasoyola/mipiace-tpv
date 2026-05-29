@@ -1,10 +1,16 @@
-// Banner rojo persistente arriba del AdminShell cuando hay sesión de
+// Banner persistente arriba del AdminShell cuando hay sesión de
 // impersonación activa. Muestra countdown al expiración y un botón
-// "Salir de impersonación" que limpia el sessionStorage y cierra la
-// pestaña (o vuelve a /superadmin/tenants si es la misma ventana).
+// "Salir" que limpia el sessionStorage y cierra la pestaña (o vuelve a
+// /login si es la misma ventana).
+//
+// v1.3-SuperAdmin-Hub Lote 1: el banner distingue dos modos:
+//   - readonly → rojo, "viendo como X · sólo lectura"
+//   - full     → ámbar, "configurando como X · modo escritura"
+// El ámbar comunica que cualquier acción del super-admin queda
+// registrada y modifica datos reales del cliente.
 
 import { useEffect, useState } from "react";
-import { AlertOctagon, X } from "lucide-react";
+import { AlertOctagon, AlertTriangle, X } from "lucide-react";
 
 import {
   clearImpersonationToken,
@@ -40,6 +46,7 @@ export function ImpersonationBanner() {
 
   const msLeft = state.expiresAt - now;
   const expired = msLeft <= 0;
+  const isFull = state.mode === "full";
 
   function onExit(): void {
     clearImpersonationToken();
@@ -53,21 +60,38 @@ export function ImpersonationBanner() {
     }, 50);
   }
 
+  const bg = expired
+    ? "bg-slate-700"
+    : isFull
+      ? "bg-amber-600"
+      : "bg-red-600";
+
+  const Icon = isFull ? AlertTriangle : AlertOctagon;
+
   return (
     <div
       className={
         "sticky top-0 z-50 px-4 py-2.5 flex items-center gap-3 text-white text-[13px] font-medium " +
-        (expired ? "bg-red-800" : "bg-red-600")
+        bg
       }
       role="alert"
     >
-      <AlertOctagon className="w-4 h-4 shrink-0" />
+      <Icon className="w-4 h-4 shrink-0" />
       <span className="flex-1">
-        {expired
-          ? "Sesión de impersonación caducada. Reabre desde la consola super-admin."
-          : "Sesión de impersonación · sólo lectura · caduca en "}
-        {!expired && (
-          <span className="font-mono tabular-nums">{fmtCountdown(msLeft)}</span>
+        {expired ? (
+          "Sesión de impersonación caducada. Reabre desde la consola super-admin."
+        ) : isFull ? (
+          <>
+            Modo super-admin · configurando este tenant ·{" "}
+            <strong>modo escritura</strong> · caduca en{" "}
+            <span className="font-mono tabular-nums">{fmtCountdown(msLeft)}</span>
+          </>
+        ) : (
+          <>
+            Modo super-admin · viendo este tenant ·{" "}
+            <strong>sólo lectura</strong> · caduca en{" "}
+            <span className="font-mono tabular-nums">{fmtCountdown(msLeft)}</span>
+          </>
         )}
       </span>
       <button

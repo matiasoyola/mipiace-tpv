@@ -161,9 +161,15 @@ export interface ActivateTenantResponse {
   };
 }
 
+export type ImpersonationMode = "readonly" | "full";
+
 export interface ImpersonateResponse {
   impersonationToken: string;
   expiresAt: string;
+  // v1.3-SuperAdmin-Hub Lote 1: el backend devuelve el modo emitido para
+  // que el frontend lo refleje en banner/UX sin tener que decodificar el
+  // JWT por separado.
+  mode: ImpersonationMode;
   tenant: { id: string; name: string };
   owner: { id: string; email: string };
 }

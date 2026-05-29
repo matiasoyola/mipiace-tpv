@@ -1,9 +1,12 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 
+import { getPrisma } from "../context.js";
+import { writeAudit } from "../superadmin/audit.js";
 import { verifyAccessToken, type AccessTokenPayload } from "./tokens.js";
 import { verifyCashierSession } from "../shift/cashier-session.js";
 import {
   verifyImpersonationToken,
+  type ImpersonationMode,
   type ImpersonationPayload,
 } from "../superadmin/tokens.js";
 
@@ -21,6 +24,10 @@ export interface AuthContext {
   // ID del super-admin que originó la sesión de impersonación. Null
   // cuando no es impersonación.
   impersonatedBy?: string | null;
+  // v1.3-SuperAdmin-Hub Lote 1: modo de la sesión de impersonación.
+  // `null` cuando la request no es impersonada. `readonly` rechaza
+  // mutaciones; `full` las permite y registra audit por cada una.
+  impersonationMode?: ImpersonationMode | null;
 }
 
 declare module "fastify" {
@@ -30,6 +37,55 @@ declare module "fastify" {
 }
 
 const READONLY_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+function extractRequestSignals(req: FastifyRequest): {
+  ipAddress: string | null;
+  userAgent: string | null;
+} {
+  const fwd = req.headers["x-forwarded-for"];
+  let ip: string | null = null;
+  if (typeof fwd === "string" && fwd.length > 0) {
+    ip = fwd.split(",")[0]!.trim();
+  } else if (req.ip) {
+    ip = req.ip;
+  }
+  const ua = req.headers["user-agent"];
+  const userAgent =
+    typeof ua === "string" && ua.length > 0 ? ua.slice(0, 500) : null;
+  return { ipAddress: ip, userAgent };
+}
+
+// v1.3-SuperAdmin-Hub Lote 1: registra una entrada `impersonate_write`
+// por cada mutación ejecutada en modo full. Awaited — si el audit cae,
+// preferimos que la mutación también falle (trazabilidad por encima de
+// disponibilidad puntual de la consola super-admin).
+async function recordImpersonationWrite(
+  request: FastifyRequest,
+  payload: ImpersonationPayload,
+): Promise<void> {
+  const prisma = getPrisma();
+  const url = request.url.split("?")[0] ?? request.url;
+  const signals = extractRequestSignals(request);
+  // Hint compacto sobre el body: nombres de claves de primer nivel.
+  // Si no hay body, lo dejamos null para no inventar metadata.
+  let payloadSummary: Record<string, unknown> | null = null;
+  const body = request.body;
+  if (body && typeof body === "object" && !Array.isArray(body)) {
+    payloadSummary = { fields: Object.keys(body).slice(0, 20) };
+  }
+  await writeAudit({
+    prisma,
+    superAdminId: payload.by,
+    action: "impersonate_write",
+    tenantId: payload.tid,
+    metadata: {
+      ...signals,
+      route: url,
+      method: request.method.toUpperCase(),
+      payloadSummary,
+    },
+  });
+}
 
 // Intenta interpretar el Bearer token primero como access token per-tenant
 // y, si falla, como JWT de impersonación super-admin. Si ninguno valida,
@@ -52,11 +108,34 @@ function resolveToken(token: string): ResolvedToken | null {
   }
 }
 
-function rejectImpersonationMutation(
+// v1.3-SuperAdmin-Hub Lote 1: el guard pasa a ser asíncrono porque en
+// modo full registra audit antes de dejar pasar la mutación. Sigue
+// siendo idempotente para readonly (devuelve true tras enviar 403).
+async function handleImpersonationMutation(
   request: FastifyRequest,
   reply: FastifyReply,
-): boolean {
+  payload: ImpersonationPayload,
+): Promise<boolean> {
   if (READONLY_METHODS.has(request.method.toUpperCase())) return false;
+  if (payload.mode === "full") {
+    // Audit por cada acción de escritura — falla cerrado.
+    try {
+      await recordImpersonationWrite(request, payload);
+    } catch (err) {
+      request.log.error(
+        { event: "impersonate_write_audit_failed", err },
+        "no se pudo registrar audit impersonate_write — bloqueamos la mutación",
+      );
+      reply.code(500).send({
+        error: "IMPERSONATION_AUDIT_FAILED",
+        code: "IMPERSONATION_AUDIT_FAILED",
+        message:
+          "No se pudo registrar la acción en el log de auditoría. Reintenta o cierra la sesión de configuración.",
+      });
+      return true;
+    }
+    return false;
+  }
   reply.code(403).send({
     error: "IMPERSONATION_READONLY",
     code: "IMPERSONATION_READONLY",
@@ -76,6 +155,7 @@ function applyAuthContext(
       role: "OWNER",
       isImpersonation: true,
       impersonatedBy: resolved.payload.by,
+      impersonationMode: resolved.payload.mode,
     };
   } else {
     request.auth = {
@@ -84,6 +164,7 @@ function applyAuthContext(
       role: resolved.payload.role,
       isImpersonation: false,
       impersonatedBy: null,
+      impersonationMode: null,
     };
   }
 }
@@ -111,7 +192,7 @@ export async function requireOwner(
     return;
   }
   if (resolved.kind === "impersonation") {
-    if (rejectImpersonationMutation(request, reply)) return;
+    if (await handleImpersonationMutation(request, reply, resolved.payload)) return;
   }
   applyAuthContext(request, resolved);
 }
@@ -143,7 +224,7 @@ export async function requireOwnerOrManager(
     return;
   }
   if (resolved.kind === "impersonation") {
-    if (rejectImpersonationMutation(request, reply)) return;
+    if (await handleImpersonationMutation(request, reply, resolved.payload)) return;
   }
   applyAuthContext(request, resolved);
 }
@@ -171,6 +252,7 @@ export async function requireOwnerOrCashier(
       role: access.role,
       isImpersonation: false,
       impersonatedBy: null,
+      impersonationMode: null,
     };
     return;
   } catch {
@@ -185,6 +267,7 @@ export async function requireOwnerOrCashier(
       role: cashier.role,
       isImpersonation: false,
       impersonatedBy: null,
+      impersonationMode: null,
     };
     request.cashier = {
       ...cashier,
@@ -195,22 +278,25 @@ export async function requireOwnerOrCashier(
   } catch {
     // sigue
   }
-  // Intento 3: JWT impersonation (read-only). Read-only impersonation
-  // del OWNER también pasa por aquí: rechazamos mutaciones igual.
+  // Intento 3: JWT impersonation. v1.3-SuperAdmin-Hub Lote 1 admite
+  // mode=full (mutaciones permitidas + audit) o mode=readonly (rechaza
+  // mutaciones con 403).
+  let imp: ImpersonationPayload;
   try {
-    const imp = verifyImpersonationToken(token);
-    if (rejectImpersonationMutation(request, reply)) return;
-    request.auth = {
-      userId: imp.sub,
-      tenantId: imp.tid,
-      role: imp.role,
-      isImpersonation: true,
-      impersonatedBy: imp.by,
-    };
-    return;
+    imp = verifyImpersonationToken(token);
   } catch {
     reply
       .code(401)
       .send({ error: "UNAUTHENTICATED", message: "Token inválido o caducado" });
+    return;
   }
+  if (await handleImpersonationMutation(request, reply, imp)) return;
+  request.auth = {
+    userId: imp.sub,
+    tenantId: imp.tid,
+    role: imp.role,
+    isImpersonation: true,
+    impersonatedBy: imp.by,
+    impersonationMode: imp.mode,
+  };
 }

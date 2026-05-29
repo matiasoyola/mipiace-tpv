@@ -1065,7 +1065,13 @@ export async function registerSuperAdminTenantsRoutes(
     },
   );
 
-  // ── Impersonate read-only ────────────────────────────────────────────
+  // ── Impersonate (readonly | full) ────────────────────────────────────
+  //
+  // v1.3-SuperAdmin-Hub Lote 1: el modo `full` desbloquea mutaciones en
+  // nombre del OWNER (onboarding asistido del cliente). Cada mutación
+  // queda registrada como `impersonate_write` por el middleware. El
+  // default sigue siendo `readonly` para no cambiar el comportamiento de
+  // clientes que no manden el campo.
   app.post(
     "/super-admin/tenants/:id/impersonate",
     {
@@ -1076,9 +1082,24 @@ export async function registerSuperAdminTenantsRoutes(
           required: ["id"],
           properties: { id: { type: "string", format: "uuid" } },
         },
+        // No declaramos body schema: clientes legacy llaman al endpoint
+        // sin payload y queremos default mode="readonly" sin requerir
+        // que envíen `{}` explícito (Fastify rechazaría null body con
+        // un type:"object" estricto). Validamos `mode` manualmente.
       },
     },
     async (request, reply) => {
+      const body = (request.body ?? {}) as { mode?: unknown };
+      const requestedMode = body.mode;
+      let mode: "readonly" | "full" = "readonly";
+      if (requestedMode === "full" || requestedMode === "readonly") {
+        mode = requestedMode;
+      } else if (requestedMode !== undefined) {
+        return reply.code(400).send({
+          error: "INVALID_IMPERSONATION_MODE",
+          message: "mode debe ser 'readonly' o 'full'.",
+        });
+      }
       const { id } = request.params as { id: string };
       const ctx = request.superAdmin!;
       const prisma = getPrisma();
@@ -1116,6 +1137,7 @@ export async function registerSuperAdminTenantsRoutes(
         tid: tenant.id,
         tv: owner.tokenVersion,
         by: ctx.superAdminId,
+        mode,
       });
       const signals = extractRequestSignals(request);
       await writeAudit({
@@ -1127,11 +1149,13 @@ export async function registerSuperAdminTenantsRoutes(
           ...signals,
           expiresAt: expiresAt.toISOString(),
           asUserId: owner.id,
+          mode,
         },
       });
       return reply.code(200).send({
         impersonationToken: token,
         expiresAt: expiresAt.toISOString(),
+        mode,
         tenant: { id: tenant.id, name: tenant.name },
         owner: { id: owner.id, email: owner.email },
       });
