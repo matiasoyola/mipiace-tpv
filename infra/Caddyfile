@@ -71,6 +71,17 @@ mipiacetpv.com, www.mipiacetpv.com {
 		header Cache-Control "public, max-age=2592000, immutable"
 	}
 
+	# v1.4 Lote 1 (Bug-WS): WS multi-terminal de tickets/mesas/turnos.
+	# El path no lleva /api porque el JWT del cashier ya identifica
+	# tenant + register, y porque la CSP de la PWA (más abajo) permite
+	# wss:// en el mismo dominio. reverse_proxy hace upgrade WebSocket
+	# automáticamente — no requiere config extra. Sin esta regla la
+	# conexión cae al handler PWA y devuelve index.html (200 HTML),
+	# rompiendo el realtime en producción.
+	handle /ws/* {
+		reverse_proxy api:3001
+	}
+
 	handle {
 		root * /srv/static/tpv
 		encode gzip zstd
@@ -103,7 +114,7 @@ mipiacetpv.com, www.mipiacetpv.com {
 			X-Frame-Options "DENY"
 			Referrer-Policy "strict-origin-when-cross-origin"
 			Permissions-Policy "geolocation=(), microphone=(), camera=(), interest-cohort=(), payment=(self), usb=(self), bluetooth=(self)"
-			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https://api.mipiacetpv.com wss://api.mipiacetpv.com; font-src 'self' data:; frame-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'self' blob:"
+			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https://api.mipiacetpv.com wss://api.mipiacetpv.com wss://mipiacetpv.com wss://admin.mipiacetpv.com; font-src 'self' data:; frame-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'self' blob:"
 		}
 	}
 }
@@ -121,6 +132,14 @@ admin.mipiacetpv.com {
 		file_server
 		encode gzip zstd
 		header Cache-Control "public, max-age=2592000, immutable"
+	}
+
+	# v1.4 Lote 1 (Bug-WS): mismo handle /ws/* que en mipiacetpv.com
+	# por si en el futuro el admin abre un panel realtime (KDS,
+	# dashboard live de ventas, etc.). Hoy ningún cliente del admin
+	# abre WS, pero dejar la regla evita un segundo deploy de Caddy.
+	handle /ws/* {
+		reverse_proxy api:3001
 	}
 
 	handle {
@@ -143,7 +162,7 @@ admin.mipiacetpv.com {
 			X-Frame-Options "DENY"
 			Referrer-Policy "strict-origin-when-cross-origin"
 			Permissions-Policy "geolocation=(), microphone=(), camera=(), interest-cohort=(), payment=(self), usb=(self), bluetooth=(self)"
-			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https://api.mipiacetpv.com wss://api.mipiacetpv.com; font-src 'self' data:; frame-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'self' blob:"
+			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https://api.mipiacetpv.com wss://api.mipiacetpv.com wss://mipiacetpv.com wss://admin.mipiacetpv.com; font-src 'self' data:; frame-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'self' blob:"
 		}
 	}
 }
