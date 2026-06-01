@@ -228,3 +228,46 @@ export interface CreateSuperAdminResponse {
   admin: SuperAdminItem;
   tempPassword: string;
 }
+
+// v1.3-SuperAdmin-Hub · Lote 2 · payload de GET /super-admin/hub.
+export interface HubTenantCard {
+  id: string;
+  name: string;
+  plan: string | null;
+  onboardingState: OnboardingState;
+  businessType: BusinessType;
+  blocked: boolean;
+  blockedReason: string | null;
+  holdedAccountId: string | null;
+  holdedConnected: boolean;
+  ownerEmail: string | null;
+  lastIncrementalSyncAt: string | null;
+  ticketsLast7d: number;
+  ticketsSyncFailed: number;
+  ticketsEmailFailed: number;
+  activeShifts: number;
+  status: "ok" | "warning" | "blocked";
+  createdAt: string;
+}
+
+export interface HubSystemStatus {
+  redis: { ok: boolean; latencyMs: number | null; error: string | null };
+  tenants: { total: number; active: number; draft: number; blocked: number };
+  globalTicketsSyncFailed: number;
+  lastIncrementalSyncAt: string | null;
+}
+
+export interface HubCommonTask {
+  id: string;
+  label: string;
+  hint: string;
+  href: string;
+  target?: "_blank" | "_self";
+}
+
+export interface HubResponse {
+  cards: HubTenantCard[];
+  system: HubSystemStatus;
+  tasks: HubCommonTask[];
+  generatedAt: string;
+}

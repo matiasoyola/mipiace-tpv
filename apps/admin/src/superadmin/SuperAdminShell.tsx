@@ -10,6 +10,7 @@ import {
   ExternalLink,
   FileClock,
   Home,
+  LayoutDashboard,
   Shield,
   ShieldAlert,
   ShoppingCart,
@@ -30,6 +31,9 @@ interface NavItem {
 // super-admin actual es root. La visibilidad se filtra al renderizar
 // (no en esta constante) leyendo el flag de /super-admin/auth/me.
 const NAV_ITEMS: Array<NavItem & { rootOnly?: boolean }> = [
+  // v1.3-SuperAdmin-Hub Lote 2: hub al inicio de la nav, es la landing
+  // del super-admin desde este lote.
+  { to: "/superadmin/hub", label: "Hub", icon: LayoutDashboard },
   { to: "/superadmin/tenants", label: "Cuentas", icon: Building2 },
   { to: "/superadmin/audit", label: "Auditoría", icon: FileClock },
   // B-Multi-Vertical SB4: panel multi super-admin.

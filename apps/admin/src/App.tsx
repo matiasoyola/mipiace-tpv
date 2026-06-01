@@ -17,6 +17,7 @@ import { TicketsErrorsPage } from "./pages/TicketsErrorsPage.js";
 import { AdminsListPage } from "./superadmin/AdminsListPage.js";
 import { AuditLogPage } from "./superadmin/AuditLogPage.js";
 import { CreateTenantPage } from "./superadmin/CreateTenantPage.js";
+import { HubPage } from "./superadmin/HubPage.js";
 import { SuperAdminGate } from "./superadmin/SuperAdminGate.js";
 import { SuperAdminLoginPage } from "./superadmin/SuperAdminLoginPage.js";
 import { SuperAdminMePage } from "./superadmin/SuperAdminMePage.js";
@@ -82,7 +83,10 @@ export function App() {
         <Route path="/admin/reset" element={<ResetPasswordPage />} />
         {/* B-SuperAdmin: consola super-admin (shell propio, sesión separada) */}
         <Route path="/superadmin/login" element={<SuperAdminLoginPage />} />
-        <Route path="/superadmin" element={<SuperAdminGate><Navigate to="/superadmin/tenants" replace /></SuperAdminGate>} />
+        {/* v1.3-SuperAdmin-Hub Lote 2: el hub es ahora la landing por
+            defecto del super-admin (antes navegaba a /tenants). */}
+        <Route path="/superadmin" element={<SuperAdminGate><Navigate to="/superadmin/hub" replace /></SuperAdminGate>} />
+        <Route path="/superadmin/hub" element={<SuperAdminGate><HubPage /></SuperAdminGate>} />
         <Route path="/superadmin/tenants" element={<SuperAdminGate><TenantsListPage /></SuperAdminGate>} />
         <Route path="/superadmin/tenants/new" element={<SuperAdminGate><CreateTenantPage /></SuperAdminGate>} />
         <Route path="/superadmin/tenants/:id" element={<SuperAdminGate><TenantDetailPage /></SuperAdminGate>} />
