@@ -11,7 +11,8 @@
     "worker:dev": "nodemon --watch src --ext ts --exec \"tsx src/workers/index.ts\"",
     "autosku": "tsx src/scripts/run-auto-sku.ts",
     "resync": "tsx src/scripts/run-incremental-sync.ts",
-    "super-admin:create": "tsx src/scripts/create-super-admin.ts"
+    "super-admin:create": "tsx src/scripts/create-super-admin.ts",
+    "backfill:holded-account-id": "tsx src/scripts/backfill-holded-account-id.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",

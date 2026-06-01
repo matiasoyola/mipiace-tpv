@@ -26,6 +26,11 @@ const CreateTenantMeta = Base.extend({
 const CreateTenantDraftMeta = Base.extend({
   tenantName: z.string(),
   fiscalNif: z.string(),
+  // v1.3-SuperAdmin-Hub Lote 3: persistimos el id de la cuenta Holded
+  // que pasó el implantador al crear, para que el log de auditoría
+  // sirva como historial cuando luego haya que reconciliar errores
+  // (tenant creado con id equivocado, etc.).
+  holdedAccountId: z.string(),
   source: z.enum(["holded_account", "manual"]),
 });
 

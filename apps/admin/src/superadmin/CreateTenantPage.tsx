@@ -34,10 +34,25 @@ export function CreateTenantPage() {
   const [showKey, setShowKey] = useState(false);
   const [taxId, setTaxId] = useState("");
   const [legalName, setLegalName] = useState("");
+  // v1.3-SuperAdmin-Hub Lote 3: id de la cuenta Holded del cliente.
+  // Lo encuentra el implantador mirando la URL del admin Holded
+  // (https://app.holded.com/accounts/<id>/…). Required ahora — sin
+  // él el hub no puede ofrecer el botón "Abrir en Holded" del cliente.
+  const [holdedAccountId, setHoldedAccountId] = useState("");
   // B-Multi-Vertical: default RETAIL (alineado con el default del
   // schema). El implantador lo cambia si la cuenta es de hostelería
   // o servicios. Afecta TPV (mapa de mesas, placeholder, modificadores).
   const [businessType, setBusinessType] = useState<BusinessType>("RETAIL");
+
+  // Si el implantador pega la URL completa del panel Holded, extraemos
+  // el id automáticamente — pasa con suficiente frecuencia como para no
+  // hacer que tenga que recortar a mano. Si lo que pegó ya es sólo el
+  // id, lo dejamos intacto.
+  function normalizeAccountIdInput(raw: string): string {
+    const match = raw.match(/accounts\/([^/?#]+)/i);
+    if (match && match[1]) return match[1];
+    return raw.trim().replace(/\/+$/, "");
+  }
 
   async function onSubmit(e: React.FormEvent): Promise<void> {
     e.preventDefault();
@@ -51,6 +66,7 @@ export function CreateTenantPage() {
           taxId: taxId.trim() || undefined,
           legalName: legalName.trim() || undefined,
           businessType,
+          holdedAccountId: normalizeAccountIdInput(holdedAccountId),
         },
       });
       navigate(`/superadmin/tenants/${res.tenant.id}`, { replace: true });
@@ -114,6 +130,32 @@ export function CreateTenantPage() {
             almacena cifrada en nuestra base de datos.
           </p>
         </div>
+        {/* v1.3-SuperAdmin-Hub Lote 3: id de la cuenta Holded. Required.
+            Si el implantador pega la URL completa del panel Holded, el
+            handler de onSubmit la recorta a sólo el id antes de enviar. */}
+        <div>
+          <label className="block text-[12.5px] font-medium text-slate-700 mb-1.5">
+            ID de cuenta Holded
+            <span className="text-red-500"> *</span>
+          </label>
+          <input
+            type="text"
+            value={holdedAccountId}
+            onChange={(e) => setHoldedAccountId(e.target.value)}
+            required
+            maxLength={300}
+            autoComplete="off"
+            spellCheck={false}
+            className="w-full h-11 px-3 border border-slate-300 rounded-lg text-[14px] focus:outline-none focus:border-slate-500 font-mono"
+            placeholder="65f1234567890abcdef… o pega la URL completa"
+          />
+          <p className="text-[11.5px] text-slate-500 mt-1.5">
+            Lo encuentras en la URL del panel Holded del cliente
+            (<code className="font-mono">app.holded.com/accounts/<strong>&lt;id&gt;</strong>/…</code>).
+            Puedes pegar la URL entera, recortamos al id automáticamente.
+            Lo necesitamos para que el hub abra Holded directamente.
+          </p>
+        </div>
         {/* B-Multi-Vertical: 3 chips visuales para escoger el tipo de
             negocio. Necesario para que el TPV pinte el placeholder
             correcto y muestre/oculte el mapa de mesas. */}
@@ -167,7 +209,7 @@ export function CreateTenantPage() {
         )}
         <button
           type="submit"
-          disabled={busy || !holdedApiKey.trim()}
+          disabled={busy || !holdedApiKey.trim() || !holdedAccountId.trim()}
           className="w-full h-11 bg-slate-900 text-white text-[14px] font-medium rounded-lg hover:bg-slate-800 disabled:opacity-50 inline-flex items-center justify-center gap-2"
         >
           {busy ? "Validando con Holded…" : "Crear cuenta"}

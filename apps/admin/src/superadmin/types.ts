@@ -43,6 +43,8 @@ export interface TenantListItem {
   // heurística onboardingHealth.ready es verde.
   onboardingReady: boolean | null;
   businessType: BusinessType;
+  // v1.3-SuperAdmin-Hub Lote 3: id Holded para enlazar al panel.
+  holdedAccountId: string | null;
   metrics: TenantMetrics;
 }
 
@@ -109,6 +111,11 @@ export interface TenantDetail {
   tpvIconPreset: string | null;
   holdedConnected: boolean;
   holdedAuthMode: string;
+  // v1.3-SuperAdmin-Hub Lote 3: id del panel Holded del cliente. NULL
+  // en tenants pre-existentes hasta que el implantador los repase
+  // desde el detalle. Sirve para construir el deep-link
+  // `https://app.holded.com/accounts/<id>` del hub.
+  holdedAccountId: string | null;
   initialSyncStatus: string;
   lastIncrementalSyncAt: string | null;
   createdAt: string;

@@ -46,6 +46,11 @@ interface FakeTenant {
   plan: string | null;
   fiscalProfile: unknown;
   holdedApiKeyCiphertext: string | null;
+  // v1.3-SuperAdmin-Hub Lote 3: tracking del id Holded para verificar
+  // que el create lo persiste y el serializeDraftTenant lo expone.
+  // Opcional para no tener que añadirlo a cada tenants.set() previo
+  // — projectTenant lo normaliza a `null` al exponerlo.
+  holdedAccountId?: string | null;
   onboardingState: "DRAFT" | "ACTIVE";
   blockedAt: Date | null;
   blockedReason: string | null;
@@ -278,6 +283,7 @@ function makeFakePrisma() {
         plan: data.plan ?? null,
         fiscalProfile: data.fiscalProfile,
         holdedApiKeyCiphertext: data.holdedApiKeyCiphertext ?? null,
+        holdedAccountId: data.holdedAccountId ?? null,
         onboardingState: data.onboardingState ?? "DRAFT",
         blockedAt: null,
         blockedReason: null,
@@ -568,7 +574,10 @@ function projectUser(u: FakeUser, _select?: any) {
   return { ...u };
 }
 function projectTenant(t: FakeTenant, _select?: any) {
-  return { ...t };
+  // v1.3-SuperAdmin-Hub Lote 3: si el tenants.set() del test no fijó
+  // holdedAccountId, lo exponemos como null (igual que devuelve la BD
+  // real cuando la columna está NULL).
+  return { ...t, holdedAccountId: t.holdedAccountId ?? null };
 }
 function projectStore(s: FakeStore, _select?: any) {
   return { ...s };
@@ -658,13 +667,19 @@ describe("B-OnboardingV2 · POST /super-admin/tenants (apiKey-only DRAFT)", () =
       method: "POST",
       url: "/super-admin/tenants",
       headers: { authorization: `Bearer ${sa}` },
-      payload: { holdedApiKey: "abc123abc123", taxId: "12345678Z" },
+      payload: {
+        holdedApiKey: "abc123abc123",
+        taxId: "12345678Z",
+        // v1.3-SuperAdmin-Hub Lote 3: holdedAccountId pasó a required.
+        holdedAccountId: "acc-thalia-001",
+      },
     });
     expect(res.statusCode).toBe(201);
     const body = res.json();
     expect(body.tenant.onboardingState).toBe("DRAFT");
     expect(body.tenant.fiscalNif).toBe("12345678Z");
     expect(body.tenant.name).toBe("Thalia Eventos SL");
+    expect(body.tenant.holdedAccountId).toBe("acc-thalia-001");
     expect(body.syncJobId).toBeTruthy();
     // No se crea OWNER user.
     expect([...users.values()].some((u) => u.role === "OWNER")).toBe(false);
@@ -679,7 +694,11 @@ describe("B-OnboardingV2 · POST /super-admin/tenants (apiKey-only DRAFT)", () =
       method: "POST",
       url: "/super-admin/tenants",
       headers: { authorization: `Bearer ${sa}` },
-      payload: { holdedApiKey: "abc123abc123", taxId: "12345678A" },
+      payload: {
+        holdedApiKey: "abc123abc123",
+        taxId: "12345678A",
+        holdedAccountId: "acc-thalia-001",
+      },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("INVALID_HOLDED_FISCAL_PROFILE");
@@ -693,10 +712,26 @@ describe("B-OnboardingV2 · POST /super-admin/tenants (apiKey-only DRAFT)", () =
       method: "POST",
       url: "/super-admin/tenants",
       headers: { authorization: `Bearer ${sa}` },
-      payload: { holdedApiKey: "bad-key-xxxxx" },
+      payload: {
+        holdedApiKey: "bad-key-xxxxx",
+        holdedAccountId: "acc-thalia-001",
+      },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("HOLDED_API_KEY_INVALID");
+  });
+
+  // v1.3-SuperAdmin-Hub Lote 3: omitir holdedAccountId debe devolver 400.
+  it("rechaza sin holdedAccountId con 400", async () => {
+    const app = await buildApp();
+    const sa = signSuperAdminToken();
+    const res = await app.inject({
+      method: "POST",
+      url: "/super-admin/tenants",
+      headers: { authorization: `Bearer ${sa}` },
+      payload: { holdedApiKey: "abc123abc123", taxId: "12345678Z" },
+    });
+    expect(res.statusCode).toBe(400);
   });
 });
 

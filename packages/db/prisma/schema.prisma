@@ -262,6 +262,11 @@ model Tenant {
   modifierGroups ModifierGroup[]
   tagAliases     TagAlias[]
 
+  // v1.3-SuperAdmin-Hub Lote 3 · el backfill y el hub buscan/listan
+  // tenants por `holded_account_id`. Sin índice eran scans completos
+  // de tabla; con 1 tenant es invisible, pero ya documentamos el
+  // patrón de acceso por si crecemos.
+  @@index([holdedAccountId])
   @@map("tenants")
 }
 

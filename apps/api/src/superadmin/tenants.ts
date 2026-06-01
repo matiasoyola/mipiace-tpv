@@ -90,6 +90,7 @@ function serializeDraftTenant(t: {
   fiscalProfile: Prisma.JsonValue;
   onboardingState: "DRAFT" | "ACTIVE";
   businessType: "HOSPITALITY" | "RETAIL" | "SERVICES";
+  holdedAccountId: string | null;
   createdAt: Date;
 }) {
   return {
@@ -100,6 +101,7 @@ function serializeDraftTenant(t: {
     fiscalNif: fiscalNifFromProfile(t.fiscalProfile),
     onboardingState: t.onboardingState,
     businessType: t.businessType,
+    holdedAccountId: t.holdedAccountId,
     createdAt: t.createdAt.toISOString(),
   };
 }
@@ -273,6 +275,10 @@ export async function registerSuperAdminTenantsRoutes(
             onboardingState: t.onboardingState,
             onboardingReady,
             businessType: t.businessType,
+            // v1.3-SuperAdmin-Hub Lote 3: el hub usa este id para
+            // construir https://app.holded.com/accounts/<id> sin tener
+            // que pedir un fetch extra al detalle del tenant.
+            holdedAccountId: t.holdedAccountId,
             metrics,
           };
         }),
@@ -366,6 +372,9 @@ export async function registerSuperAdminTenantsRoutes(
         tpvIconPreset: tenant.tpvIconPreset,
         holdedConnected: tenant.holdedApiKeyCiphertext != null,
         holdedAuthMode: tenant.holdedAuthMode,
+        // v1.3-SuperAdmin-Hub Lote 3: id de cuenta en Holded para abrir
+        // su panel directamente desde el detalle/hub.
+        holdedAccountId: tenant.holdedAccountId,
         initialSyncStatus: tenant.initialSyncStatus,
         lastIncrementalSyncAt:
           tenant.lastIncrementalSyncAt?.toISOString() ?? null,
@@ -416,7 +425,12 @@ export async function registerSuperAdminTenantsRoutes(
       schema: {
         body: {
           type: "object",
-          required: ["holdedApiKey"],
+          // v1.3-SuperAdmin-Hub Lote 3: holdedAccountId pasa a required.
+          // El implantador siempre tiene acceso al panel Holded del
+          // cliente (es lo primero que mira para sacar la API key) y
+          // necesitamos el id para que el hub pueda enlazar a Holded
+          // directamente sin un fetch extra.
+          required: ["holdedApiKey", "holdedAccountId"],
           additionalProperties: false,
           properties: {
             holdedApiKey: { type: "string", minLength: 10, maxLength: 512 },
@@ -436,6 +450,12 @@ export async function registerSuperAdminTenantsRoutes(
               type: "string",
               enum: ["HOSPITALITY", "RETAIL", "SERVICES"],
             },
+            // v1.3-SuperAdmin-Hub Lote 3: id de la cuenta Holded del
+            // cliente. El implantador lo saca de la URL del panel
+            // Holded (https://app.holded.com/accounts/<id>/…). Va a
+            // BD para que el hub pueda construir el deep-link sin
+            // pedir un fetch extra. Editable después desde el detalle.
+            holdedAccountId: { type: "string", minLength: 1, maxLength: 64 },
           },
         },
       },
@@ -447,6 +467,7 @@ export async function registerSuperAdminTenantsRoutes(
         legalName?: string;
         plan?: string;
         businessType?: "HOSPITALITY" | "RETAIL" | "SERVICES";
+        holdedAccountId: string;
       };
       const ctx = request.superAdmin!;
       const env = loadEnv();
@@ -464,6 +485,21 @@ export async function registerSuperAdminTenantsRoutes(
           });
         }
         normalizedTaxId = body.taxId.toUpperCase().replace(/[-\s]/g, "");
+      }
+
+      // v1.3-SuperAdmin-Hub Lote 3: trim del holdedAccountId. Los
+      // implantadores copian de la URL del panel Holded y suelen
+      // arrastrar el "/" final o un espacio invisible — nos comemos
+      // el caso aquí para no ensuciar BD ni romper el deep-link.
+      const normalizedHoldedAccountId = body.holdedAccountId
+        .trim()
+        .replace(/\/+$/, "");
+      if (normalizedHoldedAccountId.length === 0) {
+        return reply.code(400).send({
+          error: "INVALID_HOLDED_ACCOUNT_ID",
+          message:
+            "holdedAccountId no puede estar vacío (lo encuentras en la URL del panel Holded del cliente).",
+        });
       }
 
       // 2. Validar la API key contra Holded vía /warehouses. El spike
@@ -569,6 +605,9 @@ export async function registerSuperAdminTenantsRoutes(
             name: derivedLegalName,
             holdedAuthMode: "API_KEY",
             holdedApiKeyCiphertext: ciphertext,
+            // v1.3-SuperAdmin-Hub Lote 3: persistimos el id del panel
+            // Holded para el deep-link "Abrir en Holded" del hub.
+            holdedAccountId: normalizedHoldedAccountId,
             plan: body.plan ?? "pilot",
             fiscalProfile: fiscalProfile as Prisma.InputJsonValue,
             onboardingState: "DRAFT",
@@ -588,6 +627,7 @@ export async function registerSuperAdminTenantsRoutes(
             ...signals,
             tenantName: tenant.name,
             fiscalNif: normalizedTaxId ?? "",
+            holdedAccountId: normalizedHoldedAccountId,
             source: def ? "holded_account" : "manual",
           },
         });
@@ -667,6 +707,11 @@ export async function registerSuperAdminTenantsRoutes(
             // TPV. Texto libre porque queremos añadir presets nuevos
             // sin migración (sólo render front).
             tpvIconPreset: { type: "string", maxLength: 32 },
+            // v1.3-SuperAdmin-Hub Lote 3: id del panel Holded. Editable
+            // tras crear el tenant — por si el implantador lo pegó
+            // pegando la URL completa, o si la cuenta Holded cambió de
+            // propietario y migró a otro id. String vacío → null (limpiar).
+            holdedAccountId: { type: "string", maxLength: 64 },
           },
         },
       },
@@ -686,6 +731,7 @@ export async function registerSuperAdminTenantsRoutes(
         businessType?: "HOSPITALITY" | "RETAIL" | "SERVICES";
         receiptFooter?: string;
         tpvIconPreset?: string;
+        holdedAccountId?: string;
       };
       const ctx = request.superAdmin!;
       const prisma = getPrisma();
@@ -782,6 +828,20 @@ export async function registerSuperAdminTenantsRoutes(
         if (nextValue !== tenant.tpvIconPreset) {
           changes.tpvIconPreset = { before: tenant.tpvIconPreset, after: nextValue };
           data.tpvIconPreset = nextValue;
+        }
+      }
+      if (body.holdedAccountId !== undefined) {
+        // Mismo trim defensivo que en create — quitamos trailing "/" y
+        // espacios. String vacío → NULL para poder "limpiar" el campo
+        // si nos equivocamos al guardarlo.
+        const trimmed = body.holdedAccountId.trim().replace(/\/+$/, "");
+        const nextValue = trimmed === "" ? null : trimmed;
+        if (nextValue !== tenant.holdedAccountId) {
+          changes.holdedAccountId = {
+            before: tenant.holdedAccountId,
+            after: nextValue,
+          };
+          data.holdedAccountId = nextValue;
         }
       }
 

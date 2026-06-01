@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Check,
   Copy,
+  ExternalLink,
   Eye,
   FlaskConical,
   LockKeyhole,
@@ -560,6 +561,12 @@ export function TenantDetailPage() {
           onDedupeTags={onDedupeTags}
         />
       )}
+
+      <HoldedAccountIdPanel
+        tenantId={tenant.id}
+        current={tenant.holdedAccountId}
+        onSaved={(next) => setTenant({ ...tenant, holdedAccountId: next })}
+      />
 
       <ReceiptFooterPanel
         tenantId={tenant.id}
@@ -1734,6 +1741,131 @@ function TransferOwnerPanel({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// v1.3-SuperAdmin-Hub Lote 3 · panel para editar el id del panel Holded
+// del cliente. El implantador suele teclearlo al crear, pero a veces
+// se equivoca o lo pega con la URL entera; este panel le permite
+// corregirlo sin tener que crear el tenant de cero. Si está vacío en
+// BD (tenants antiguos sin backfill), pintamos un aviso amarillo para
+// que el implantador sepa que falta — el hub depende de este campo
+// para enlazar a Holded directamente.
+function HoldedAccountIdPanel({
+  tenantId,
+  current,
+  onSaved,
+}: {
+  tenantId: string;
+  current: string | null;
+  onSaved: (next: string | null) => void;
+}) {
+  const [value, setValue] = useState(current ?? "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [savedFlash, setSavedFlash] = useState<string | null>(null);
+
+  // Mismo helper que en CreateTenantPage: extrae el id si pegan la URL
+  // completa, recorta espacios y trailing "/". Lo hacemos en el
+  // onSubmit, no en cada keystroke, para no sobreescribir lo que el
+  // implantador está tecleando manualmente.
+  function normalize(raw: string): string {
+    const match = raw.match(/accounts\/([^/?#]+)/i);
+    if (match && match[1]) return match[1];
+    return raw.trim().replace(/\/+$/, "");
+  }
+
+  const normalized = normalize(value);
+  const nextValue = normalized === "" ? null : normalized;
+  const dirty = nextValue !== current;
+  const deepLink = current
+    ? `https://app.holded.com/accounts/${encodeURIComponent(current)}`
+    : null;
+
+  async function save(): Promise<void> {
+    if (busy || !dirty) return;
+    setBusy(true);
+    setErr(null);
+    setSavedFlash(null);
+    try {
+      await superApi(`/super-admin/tenants/${tenantId}`, {
+        method: "PATCH",
+        body: { holdedAccountId: normalized },
+      });
+      onSaved(nextValue);
+      // Sincronizamos input con valor persistido (por si normalize
+      // recortó algo respecto a lo tecleado).
+      setValue(normalized);
+      setSavedFlash("ID Holded actualizado.");
+      window.setTimeout(() => setSavedFlash(null), 3000);
+    } catch (e) {
+      setErr(errToHuman(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6">
+      <h3 className="font-semibold text-slate-900 mb-2">ID de cuenta Holded</h3>
+      <p className="text-[12.5px] text-slate-600 mb-3">
+        Lo encuentras en la URL del panel Holded del cliente
+        (<code className="font-mono">app.holded.com/accounts/<strong>&lt;id&gt;</strong>/…</code>).
+        El hub usa este id para abrir Holded directamente. Puedes pegar
+        la URL completa: recortamos al id automáticamente.
+      </p>
+      {current === null && (
+        <div className="mb-3 p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-[11.5px] text-amber-900">
+          ⚠ Sin ID de cuenta. El hub no podrá enlazar al panel Holded
+          de este cliente hasta que lo añadas.
+        </div>
+      )}
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        maxLength={300}
+        autoComplete="off"
+        spellCheck={false}
+        placeholder="65f1234567890abcdef… o pega la URL completa"
+        className="w-full h-10 px-3 border border-slate-300 rounded-lg text-[14px] font-mono focus:outline-none focus:border-slate-500"
+      />
+      {/* Si lo tecleado se va a normalizar a un valor distinto, lo
+          mostramos en pequeñito para que el implantador vea qué se
+          guardará realmente. */}
+      {value.trim().length > 0 && normalized !== value.trim() && (
+        <p className="text-[11.5px] text-slate-500 mt-1.5">
+          Se guardará como: <code className="font-mono">{normalized}</code>
+        </p>
+      )}
+      <div className="flex items-center gap-2 mt-3 flex-wrap">
+        <button
+          onClick={save}
+          disabled={busy || !dirty || normalized.length === 0}
+          className="h-9 px-4 bg-slate-900 text-white rounded-lg text-[13px] font-medium hover:bg-slate-800 disabled:opacity-50"
+        >
+          {busy ? "Guardando…" : current === null ? "Guardar ID" : "Actualizar"}
+        </button>
+        {deepLink && (
+          <a
+            href={deepLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="h-9 px-3 inline-flex items-center gap-1.5 border border-slate-300 rounded-lg text-[12.5px] text-slate-700 hover:bg-slate-50"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            Abrir en Holded
+          </a>
+        )}
+        {savedFlash && (
+          <span className="text-[12px] text-emerald-700 inline-flex items-center gap-1">
+            <Check className="w-3.5 h-3.5" />
+            {savedFlash}
+          </span>
+        )}
+        {err && <span className="text-[12px] text-red-700">{err}</span>}
+      </div>
     </div>
   );
 }
