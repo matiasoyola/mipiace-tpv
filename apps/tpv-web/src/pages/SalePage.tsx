@@ -70,6 +70,7 @@ import { CheckoutOverlay } from "./CheckoutPage.js";
 import { CloseShiftModal } from "./CloseShiftModal.js";
 import { LineSheet } from "./SalePage.lineSheet.js";
 import { ModifierSelector } from "./SalePage.modifierSelector.js";
+import { MoveTablePicker } from "./SalePage.movePicker.js";
 import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
 import { useElapsedTime } from "../hooks/useElapsedTime.js";
 import { useStoreEventStream } from "../hooks/useStoreEventStream.js";
@@ -205,6 +206,11 @@ export interface SalePageProps {
   // Sólo provisto cuando la tienda tiene mesas configuradas — permite
   // al cajero volver al mapa con un toque. Null en modo retail puro.
   onBackToMap?: (() => void) | null;
+  // v1.4-Bar-Operativa-MVP Lote 3 · al mover un ticket DRAFT a otra
+  // mesa, el SalePage delega al padre cómo actualizar `tableContext`.
+  // El padre carga `/tpv/tables`, encuentra la mesa destino y vuelve
+  // a renderizar SalePage con el contexto nuevo. Null en retail puro.
+  onTicketMovedToTable?: ((newTableId: string) => void) | null;
   onLogoutCashier: () => void;
   onCloseShift: () => void;
 }
@@ -273,6 +279,11 @@ export function SalePage(props: SalePageProps) {
     revision: number;
   } | null>(null);
   const [kitchenError, setKitchenError] = useState<string | null>(null);
+
+  // v1.4-Bar-Operativa-MVP Lote 3 · estado del mover-mesa.
+  const [showMoveTable, setShowMoveTable] = useState(false);
+  const [moveBusy, setMoveBusy] = useState(false);
+  const [moveError, setMoveError] = useState<string | null>(null);
 
   // Cuando el cajero cambia de mesa o sale del modo mesa, reiniciamos
   // el contador local de comandas. El backend mantiene la verdad
@@ -726,6 +737,42 @@ export function SalePage(props: SalePageProps) {
     }
   }
 
+  // v1.4-Bar-Operativa-MVP Lote 3 · llama al endpoint move-to-table y
+  // delega al padre el cambio de `tableContext`. El padre se encarga
+  // de recargar el listado de mesas y montar SalePage con la nueva.
+  // No limpiamos `lines`/`contact`/`notes` aquí porque el ticket es
+  // el mismo (sólo cambia tableId server-side) y el remontaje del
+  // padre traerá un useEffect que recargue el DRAFT si hace falta.
+  async function moveToTable(destination: { id: string; name: string }) {
+    const ticketId = props.tableContext?.activeTicketId;
+    if (!ticketId) {
+      setMoveError("No hay ticket abierto en esta mesa.");
+      return;
+    }
+    setMoveBusy(true);
+    setMoveError(null);
+    try {
+      const { apiWithCashier } = await import("../api.js");
+      await apiWithCashier<{ ticketId: string; newTableId: string }>(
+        `/tickets/${ticketId}/move-to-table`,
+        { method: "POST", body: { newTableId: destination.id } },
+      );
+      setShowMoveTable(false);
+      if (props.onTicketMovedToTable) {
+        props.onTicketMovedToTable(destination.id);
+      }
+    } catch (err) {
+      // 409 → mesa destino ocupada (carrera con otra tablet).
+      const msg =
+        err instanceof ApiError
+          ? err.message
+          : "No se pudo mover el ticket. Reinténtalo.";
+      setMoveError(msg);
+    } finally {
+      setMoveBusy(false);
+    }
+  }
+
   const totals = useMemo(() => computeCart(lines), [lines]);
   const filtered = useMemo(() => {
     if (!catalog) return [];
@@ -898,6 +945,7 @@ export function SalePage(props: SalePageProps) {
             onSendToKitchen={() => void sendToKitchen()}
             kitchenBusy={kitchenBusy}
             kitchenLastRevision={kitchenRevision}
+            onClickMoveTable={() => setShowMoveTable(true)}
           />
 
           <footer className="h-[56px] md:h-[68px] border-t border-slate-200 grid grid-cols-3 items-center px-4 md:px-7 text-[12px] md:text-[13px] shrink-0">
@@ -1059,6 +1107,21 @@ export function SalePage(props: SalePageProps) {
         <KitchenErrorBanner
           message={kitchenError}
           onClose={() => setKitchenError(null)}
+        />
+      )}
+      {showMoveTable && (
+        <MoveTablePicker
+          currentTableId={props.tableContext?.id ?? null}
+          onClose={() => setShowMoveTable(false)}
+          onPick={(dest) => {
+            if (!moveBusy) void moveToTable(dest);
+          }}
+        />
+      )}
+      {moveError && (
+        <KitchenErrorBanner
+          message={moveError}
+          onClose={() => setMoveError(null)}
         />
       )}
       {selectorState && (
@@ -1308,6 +1371,7 @@ function SaleWorkspace({
   onSendToKitchen,
   kitchenBusy,
   kitchenLastRevision,
+  onClickMoveTable,
 }: {
   products: CatalogProduct[];
   wildcards: Wildcard[];
@@ -1346,6 +1410,9 @@ function SaleWorkspace({
   onSendToKitchen: () => void;
   kitchenBusy: boolean;
   kitchenLastRevision: number;
+  // v1.4-Bar-Operativa-MVP Lote 3 · abre el picker de mesa destino.
+  // Sólo se invoca cuando hay tableContext.
+  onClickMoveTable: () => void;
 }) {
   // B-ProductImages: tenantId cacheado tras el último refresh del
   // catálogo. Si por alguna razón viene null (primer arranque y aún
@@ -1769,6 +1836,17 @@ function SaleWorkspace({
           >
             Observaciones{notes ? " ●" : ""}
           </button>
+          {/* v1.4-Bar-Operativa-MVP Lote 3 · "Mover mesa" sólo en
+              mesa abierta. Mismo tamaño que los demás chips. */}
+          {tableContext && (
+            <button
+              onClick={onClickMoveTable}
+              className="h-8 px-3 rounded-lg bg-mipiace-stone hover:bg-slate-100 text-[12.5px] font-medium text-mipiace-ink"
+              title="Llevar este ticket a otra mesa"
+            >
+              Mover mesa
+            </button>
+          )}
           <button
             onClick={onCancel}
             disabled={lines.length === 0 && !contact && !notes}
