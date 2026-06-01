@@ -12,6 +12,7 @@ import {
   KeyRound,
   Menu,
   Package,
+  Printer,
   RefreshCw,
   Settings,
   Shield,
@@ -67,6 +68,10 @@ const NAV_ITEMS: NavItem[] = [
   // a OWNER y MANAGER porque la operativa (renombrar categorías) es de
   // negocio, no técnica.
   { to: "/admin/tag-aliases", label: "Etiquetas", icon: Tag },
+  // v1.4-Bar-Operativa-MVP Lote 2: mapa tag → sección de cocina/barra.
+  // Sólo lo usan los tenants HOSPITALITY; en otros verticales queda
+  // visible pero vacío sin perjudicar la operativa.
+  { to: "/admin/tag-sections", label: "Comanderas", icon: Printer },
   // v1.3-Operativa-Extra · Lote 2: panel para que el OWNER fuerce sync
   // con Holded sin pasar por super-admin.
   { to: "/admin/holded", label: "Sync Holded", icon: RefreshCw },

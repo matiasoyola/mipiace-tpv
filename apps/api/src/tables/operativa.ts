@@ -449,6 +449,157 @@ export async function registerTableOperativaRoutes(
     },
   );
 
+  // ── Mover ticket entre mesas (v1.4-Bar-Operativa-MVP Lote 3) ───────
+  //
+  // El cliente se cambia de la mesa 4 a la 7. El camarero usa este
+  // endpoint para llevar el ticket DRAFT a la mesa destino — la mesa
+  // origen pasa a libre y la destino pasa a ocupada.
+  //
+  //   POST /tickets/:ticketId/move-to-table { newTableId }
+  //
+  // Validaciones:
+  //   - el ticket existe, es DRAFT, y pertenece al register del cashier
+  //   - la mesa destino existe, en el mismo store, no está borrada
+  //   - la mesa destino NO tiene otro ticket DRAFT (409 con su ticketId
+  //     para que el front pueda ofrecer "fusionar mesas" como evolutivo)
+  //   - origen != destino (no-op queda como 400 evitando broadcasts ruidosos)
+  app.post(
+    "/tickets/:ticketId/move-to-table",
+    {
+      preHandler: requireCashierSession,
+      schema: {
+        params: {
+          type: "object",
+          required: ["ticketId"],
+          properties: { ticketId: { type: "string", format: "uuid" } },
+        },
+        body: {
+          type: "object",
+          required: ["newTableId"],
+          additionalProperties: false,
+          properties: {
+            newTableId: { type: "string", format: "uuid" },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const cashier = request.cashier!;
+      const { ticketId } = request.params as { ticketId: string };
+      const { newTableId } = request.body as { newTableId: string };
+      const prisma = getPrisma();
+
+      const ticket = await prisma.ticket.findFirst({
+        where: { id: ticketId, tenantId: cashier.tid, status: "DRAFT" },
+        select: {
+          id: true,
+          registerId: true,
+          tableId: true,
+          register: { select: { storeId: true } },
+          table: { select: { name: true } },
+        },
+      });
+      if (!ticket) {
+        return reply.code(404).send({
+          error: "TICKET_NOT_FOUND_OR_NOT_DRAFT",
+          message: "Sólo se mueven tickets en DRAFT.",
+        });
+      }
+      if (ticket.registerId !== cashier.rid) {
+        return reply.code(403).send({
+          error: "REGISTER_MISMATCH",
+          message: "El ticket no pertenece a tu caja.",
+        });
+      }
+      if (ticket.tableId === newTableId) {
+        return reply.code(400).send({
+          error: "SAME_TABLE",
+          message: "El ticket ya está en esa mesa.",
+        });
+      }
+
+      const destination = await prisma.table.findFirst({
+        where: {
+          id: newTableId,
+          deletedAt: null,
+          storeId: ticket.register.storeId,
+        },
+        select: { id: true, name: true, storeId: true },
+      });
+      if (!destination) {
+        return reply.code(404).send({
+          error: "TABLE_NOT_FOUND",
+          message: "Mesa destino no encontrada en esta tienda.",
+        });
+      }
+
+      const occupied = await prisma.ticket.findFirst({
+        where: { tableId: newTableId, status: "DRAFT" },
+        select: { id: true },
+      });
+      if (occupied) {
+        return reply.code(409).send({
+          error: "DESTINATION_OCCUPIED",
+          message:
+            "La mesa destino ya tiene una cuenta abierta. Cobra o vacía la otra primero.",
+          occupiedByTicketId: occupied.id,
+        });
+      }
+
+      const oldTableId = ticket.tableId;
+      await prisma.ticket.update({
+        where: { id: ticketId },
+        data: { tableId: newTableId },
+      });
+
+      const storeId = ticket.register.storeId;
+      const at = new Date().toISOString();
+      // Reutilizamos `table.cleared` para la mesa origen (la otra
+      // tablet ya sabe cómo procesarlo: pinta la mesa libre) y
+      // `table.opened` para la destino (idem). Evitamos inventar
+      // un evento extra que cambiaría el contrato del bus.
+      if (oldTableId) {
+        getStoreEventBus().broadcast(storeId, {
+          type: "table.cleared",
+          tableId: oldTableId,
+          ticketId,
+          reason: `MOVED a ${destination.name}`,
+          at,
+        });
+      }
+      const cashierUser = await prisma.user.findUnique({
+        where: { id: cashier.sub },
+        select: { email: true },
+      });
+      getStoreEventBus().broadcast(storeId, {
+        type: "table.opened",
+        tableId: newTableId,
+        ticketId,
+        byEmail: cashierUser?.email ?? "(?)",
+        at,
+      });
+
+      request.log.info(
+        {
+          event: "ticket.move-to-table",
+          tenantId: cashier.tid,
+          cashierId: cashier.sub,
+          ticketId,
+          oldTableId,
+          newTableId,
+        },
+        "Ticket movido entre mesas",
+      );
+
+      return reply.code(200).send({
+        ticketId,
+        oldTableId,
+        newTableId,
+        newTableName: destination.name,
+      });
+    },
+  );
+
   // ── Vaciar mesa (cancela DRAFT con motivo) ─────────────────────────
   app.delete(
     "/tickets/:ticketId",

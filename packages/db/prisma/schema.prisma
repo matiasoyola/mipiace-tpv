@@ -84,6 +84,17 @@ enum TableZone {
   RESERVADO
 }
 
+// v1.4-Bar-Operativa-MVP Lote 2 · sección destino de una comanda
+// (kitchen ticket). Cada tag de producto se mapea a una sección — los
+// no mapeados caen a SALON (camarero). El endpoint
+// `POST /tickets/:id/send-to-kitchen` agrupa las líneas por sección y
+// genera un PDF por cada sección con líneas.
+enum KitchenSection {
+  BARRA
+  COCINA
+  SALON
+}
+
 enum InitialSyncStatus {
   PENDING
   RUNNING
@@ -261,6 +272,7 @@ model Tenant {
   holdedUploads  HoldedUpload[]
   modifierGroups ModifierGroup[]
   tagAliases     TagAlias[]
+  tagSections    TagSection[]
 
   // v1.3-SuperAdmin-Hub Lote 3 · el backfill y el hub buscan/listan
   // tenants por `holded_account_id`. Sin índice eran scans completos
@@ -288,6 +300,27 @@ model TagAlias {
 
   @@unique([tenantId, slug])
   @@map("tag_aliases")
+}
+
+// v1.4-Bar-Operativa-MVP Lote 2 · mapeo `tag → KitchenSection` por
+// tenant. Cuando el cajero pulsa "Enviar comanda" en una mesa abierta,
+// el endpoint busca los tags de cada producto, los cruza con este
+// mapa y agrupa las líneas en BARRA / COCINA / SALON. Una línea
+// cuyos tags no estén mapeados cae a SALON (default razonable: el
+// camarero la sirve directamente). El OWNER/MANAGER mantiene este
+// mapa desde el admin.
+model TagSection {
+  id        String         @id @default(uuid()) @db.Uuid
+  tenantId  String         @map("tenant_id") @db.Uuid
+  slug      String         @db.VarChar(60)
+  section   KitchenSection
+  createdAt DateTime       @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime       @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, slug])
+  @@map("tag_sections")
 }
 
 // Tipos de IVA del catálogo Holded del tenant. Spike §03.A: array de 103
@@ -768,20 +801,33 @@ model Ticket {
   // checkout. Vacío en RETAIL/HOSPITALITY. Se imprime en el ticket
   // entre cabecera y líneas si el tenant es SERVICES.
   attendedBy           String?      @map("attended_by") @db.VarChar(60)
+  // v1.4-Bar-Operativa-MVP Lote 2 · cuándo se imprimió la última
+  // comanda (kitchen ticket) para esta mesa. NULL = nunca enviada.
+  // El TPV pinta "Enviar comanda" cuando hay líneas más nuevas que
+  // este timestamp y "Reenviar comanda" cuando coinciden con
+  // lastSentRevision. Se borra al cobrar/cancelar para no arrastrar
+  // estado a mesas reusadas (la columna sólo existe en DRAFT efectivos).
+  lastSentAt           DateTime?    @map("last_sent_at") @db.Timestamptz()
+  // Revisión del envío: cuántas comandas (1ª, 2ª, 3ª) se han enviado
+  // al ticket. Se imprime en la cabecera del PDF como "Comanda nº N".
+  // Útil cuando una mesa pide más en mitad del servicio y la cocina
+  // recibe un segundo papel: el cocinero ve "Comanda nº 2 · mesa 7".
+  lastSentRevision     Int          @default(0) @map("last_sent_revision")
   createdAt            DateTime     @default(now()) @map("created_at") @db.Timestamptz()
   paidAt               DateTime?    @map("paid_at") @db.Timestamptz()
   syncedAt             DateTime?    @map("synced_at") @db.Timestamptz()
   syncError            Json?        @map("sync_error")
 
-  tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  register     Register         @relation(fields: [registerId], references: [id], onDelete: Restrict)
-  shift        Shift            @relation(fields: [shiftId], references: [id], onDelete: Restrict)
-  user         User             @relation(fields: [userId], references: [id], onDelete: Restrict)
-  lines        TicketLine[]
-  payments     TicketPayment[]
-  refunds      Refund[]
-  emailJobs    TicketEmailJob[]
-  printIntents PrintIntent[]
+  tenant          Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  register        Register                @relation(fields: [registerId], references: [id], onDelete: Restrict)
+  shift           Shift                   @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  user            User                    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  lines           TicketLine[]
+  payments        TicketPayment[]
+  partialPayments TicketPartialPayment[]
+  refunds         Refund[]
+  emailJobs       TicketEmailJob[]
+  printIntents    PrintIntent[]
 
   @@unique([registerId, internalNumber])
   @@index([tenantId, status])
@@ -869,6 +915,39 @@ model TicketPayment {
 
   @@index([ticketId])
   @@map("ticket_payments")
+}
+
+// v1.4-Bar-Operativa-MVP Lote 4 · cobros parciales (split bill,
+// Modo A). El cliente quiere pagar 30 € de un total de 80 €. Cada
+// cobro parcial se registra aquí; los siguientes /checkout y los
+// helpers de remaining suman estos importes para decidir cuándo el
+// ticket queda saldado. Al cobrar el resto (o si la suma de
+// partials llega al total), el ticket pasa a PAID por la ruta
+// normal de /checkout que ya conoce y sincroniza con Holded.
+//
+// No están en TicketPayment para no contaminar el contrato fiscal:
+// el upload a Holded usa los TicketPayment finales del cobro
+// (Holded recibe 1 salesreceipt con N payments), así los partials
+// se acumulan en este modelo sin tocar el flujo de sync existente.
+model TicketPartialPayment {
+  id        String        @id @default(uuid()) @db.Uuid
+  ticketId  String        @map("ticket_id") @db.Uuid
+  amount    Decimal       @db.Decimal(10, 2)
+  method    PaymentMethod
+  // Cajero que tomó el cobro parcial. Nullable porque puede
+  // haberse eliminado el user (poco probable en piloto).
+  cashierId String?       @map("cashier_id") @db.Uuid
+  // Importe efectivo recibido cuando el método es CASH — para
+  // mostrar cambio en el TPV. Nullable en CARD/BIZUM.
+  cashAmount Decimal?     @map("cash_amount") @db.Decimal(10, 2)
+  // Metadata libre del pago (refMov BIZUM, last4 tarjeta, …).
+  meta      Json?
+  paidAt    DateTime      @default(now()) @map("paid_at") @db.Timestamptz()
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@map("ticket_partial_payments")
 }
 
 model Refund {

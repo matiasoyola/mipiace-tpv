@@ -377,6 +377,33 @@ function TpvHome(props: {
       onBackToMap={
         hasTables ? () => setView({ kind: "map" }) : null
       }
+      onTicketMovedToTable={
+        hasTables
+          ? async (newTableId) => {
+              // v1.4-Bar-Operativa-MVP Lote 3 · tras un mover-mesa
+              // exitoso, recargamos `/tpv/tables` y reconstruimos el
+              // tableContext apuntando a la mesa destino. Si la
+              // recarga falla (offline), caemos al mapa: el usuario
+              // verá la mesa nueva ya ocupada y podrá tocarla.
+              try {
+                const res = await apiWithCashier<{ tables: ApiTable[] }>(
+                  "/tpv/tables",
+                );
+                const fresh = res.tables.find((t) => t.id === newTableId);
+                if (fresh) {
+                  setView({
+                    kind: "sale",
+                    tableContext: tableContextFromApi(fresh),
+                  });
+                } else {
+                  setView({ kind: "map" });
+                }
+              } catch {
+                setView({ kind: "map" });
+              }
+            }
+          : null
+      }
       onLogoutCashier={props.onLogoutCashier}
       onCloseShift={props.onCloseShift}
     />

@@ -1374,6 +1374,20 @@ function ticketInclude() {
   return {
     lines: true,
     payments: true,
+    // v1.4-Bar-Operativa-MVP Lote 4 · cobros parciales (Modo A).
+    // Cuando el ticket está DRAFT con partials, el TPV refresca este
+    // ticket tras un reinicio y recupera "X € cobrado, Y € pendiente"
+    // sin tener que mantener todo el estado en localStorage.
+    partialPayments: {
+      select: {
+        id: true,
+        amount: true,
+        method: true,
+        cashAmount: true,
+        paidAt: true,
+      },
+      orderBy: { paidAt: "asc" },
+    },
     refunds: { select: { id: true, externalId: true, total: true, createdAt: true, status: true } },
     register: { select: { id: true, name: true, store: { select: { name: true } } } },
   } as const;
@@ -1533,6 +1547,13 @@ function serializeTicket(t: DbTicket): Record<string, unknown> {
       amount: { toString(): string };
       meta: unknown;
     }>;
+    partialPayments?: Array<{
+      id: string;
+      amount: { toString(): string };
+      method: string;
+      cashAmount: { toString(): string } | null;
+      paidAt: Date;
+    }>;
     refunds: Array<{
       id: string;
       externalId: string;
@@ -1594,6 +1615,17 @@ function serializeTicket(t: DbTicket): Record<string, unknown> {
       method: p.method,
       amount: Number(p.amount.toString()),
       meta: p.meta,
+    })),
+    // v1.4-Bar-Operativa-MVP Lote 4 · cobros parciales acumulados
+    // mientras el ticket está DRAFT. El TPV los pinta como historial
+    // "Cobrado parcialmente · 30 € · TARJETA · 12:34" y los usa al
+    // construir el body de /checkout cuando llega el último cobro.
+    partialPayments: (ticket.partialPayments ?? []).map((p) => ({
+      id: p.id,
+      amount: Number(p.amount.toString()),
+      method: p.method,
+      cashAmount: p.cashAmount ? Number(p.cashAmount.toString()) : null,
+      paidAt: p.paidAt.toISOString(),
     })),
     refunds: ticket.refunds.map((r) => ({
       id: r.id,

@@ -88,4 +88,16 @@ export type WsEvent =
       byEmail: string;
       totalEur: number;
       at: string;
+    }
+  // v1.4-Bar-Operativa-MVP Lote 2: el cajero envía la comanda de una
+  // mesa a barra/cocina/salón. Otras cajas del store ven el badge
+  // "comanda enviada" actualizado en la mesa sin tener que refrescar.
+  | {
+      type: "ticket.sent_to_kitchen";
+      ticketId: string;
+      tableId: string | null;
+      revision: number;
+      sections: Array<{ section: "BARRA" | "COCINA" | "SALON"; lineCount: number }>;
+      byEmail: string;
+      at: string;
     };
