@@ -259,6 +259,33 @@ export function SalePage(props: SalePageProps) {
   const [wildcards, setWildcards] = useState<Wildcard[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
+  // v1.4-Bar-Operativa-MVP Lote 2 · estado del envío de comanda.
+  // `kitchenBusy` deshabilita el botón mientras el backend responde
+  // y se generan los PDFs; `kitchenRevision` arranca a 0 y se sube
+  // tras cada envío exitoso (el TPV no relee el ticket entre
+  // mensajes — los DRAFT no se serializan hacia este componente,
+  // así que mantenemos el contador en memoria mientras dure la mesa).
+  // Al cambiar de mesa o cerrar sesión, el state se reinicializa.
+  const [kitchenBusy, setKitchenBusy] = useState(false);
+  const [kitchenRevision, setKitchenRevision] = useState(0);
+  const [kitchenToast, setKitchenToast] = useState<{
+    sections: Array<{ section: string; lineCount: number }>;
+    revision: number;
+  } | null>(null);
+  const [kitchenError, setKitchenError] = useState<string | null>(null);
+
+  // Cuando el cajero cambia de mesa o sale del modo mesa, reiniciamos
+  // el contador local de comandas. El backend mantiene la verdad
+  // (Ticket.lastSentRevision), pero como SalePage no recarga el
+  // ticket DRAFT entre interacciones, este state es el que decide
+  // si el botón rotula "Enviar" o "Reenviar".
+  const activeTicketId = props.tableContext?.activeTicketId ?? null;
+  useEffect(() => {
+    setKitchenRevision(0);
+    setKitchenToast(null);
+    setKitchenError(null);
+  }, [activeTicketId]);
+
   const [lines, setLines] = useState<CartLine[]>([]);
   const [contact, setContact] = useState<ContactRef | null>(null);
   const [notes, setNotes] = useState<string>("");
@@ -641,6 +668,64 @@ export function SalePage(props: SalePageProps) {
     removeSuspendedCart(cart.id);
   }
 
+  // v1.4-Bar-Operativa-MVP Lote 2 · envía la comanda al backend, que
+  // genera un PDF por sección. Abrimos cada PDF en una pestaña/iframe
+  // nueva — el navegador/PWA lo manda a la impresora del register al
+  // pulsar imprimir. Cuando llegue el agente local (v1.5),
+  // sustituiremos el `window.open` por un POST al daemon que
+  // imprimirá en la térmica de cada sección sin diálogo del SO.
+  async function sendToKitchen(): Promise<void> {
+    const tableContext = props.tableContext;
+    if (!tableContext?.activeTicketId) return;
+    setKitchenBusy(true);
+    setKitchenError(null);
+    try {
+      const { apiWithCashier } = await import("../api.js");
+      const res = await apiWithCashier<{
+        revision: number;
+        sentAt: string;
+        sections: Array<{
+          section: "BARRA" | "COCINA" | "SALON";
+          lineCount: number;
+          pdfBase64: string;
+        }>;
+      }>(`/tickets/${tableContext.activeTicketId}/send-to-kitchen`, {
+        method: "POST",
+      });
+      setKitchenRevision(res.revision);
+      setKitchenToast({
+        sections: res.sections.map((s) => ({
+          section: s.section,
+          lineCount: s.lineCount,
+        })),
+        revision: res.revision,
+      });
+      // Apertura escalonada: el navegador bloquea pop-ups si abrimos
+      // varias ventanas en el mismo tick. Damos 150ms entre cada uno
+      // para que iOS/Safari trate cada open como interacción del
+      // usuario en cadena. Limpiamos las URLs blob al cabo de 60s.
+      res.sections.forEach((section, idx) => {
+        setTimeout(() => {
+          const bytes = base64ToBytes(section.pdfBase64);
+          const blob = new Blob([new Uint8Array(bytes)], {
+            type: "application/pdf",
+          });
+          const url = URL.createObjectURL(blob);
+          window.open(url, "_blank", "noopener,noreferrer");
+          setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        }, idx * 150);
+      });
+    } catch (err) {
+      const msg =
+        err instanceof ApiError
+          ? err.message
+          : "No se pudo enviar la comanda. Reinténtalo.";
+      setKitchenError(msg);
+    } finally {
+      setKitchenBusy(false);
+    }
+  }
+
   const totals = useMemo(() => computeCart(lines), [lines]);
   const filtered = useMemo(() => {
     if (!catalog) return [];
@@ -810,6 +895,9 @@ export function SalePage(props: SalePageProps) {
                 clearCart();
               }
             }}
+            onSendToKitchen={() => void sendToKitchen()}
+            kitchenBusy={kitchenBusy}
+            kitchenLastRevision={kitchenRevision}
           />
 
           <footer className="h-[56px] md:h-[68px] border-t border-slate-200 grid grid-cols-3 items-center px-4 md:px-7 text-[12px] md:text-[13px] shrink-0">
@@ -959,6 +1047,19 @@ export function SalePage(props: SalePageProps) {
       )}
       {showHistory && (
         <TicketsHistoryPage onClose={() => setShowHistory(false)} />
+      )}
+      {kitchenToast && (
+        <KitchenToast
+          sections={kitchenToast.sections}
+          revision={kitchenToast.revision}
+          onClose={() => setKitchenToast(null)}
+        />
+      )}
+      {kitchenError && (
+        <KitchenErrorBanner
+          message={kitchenError}
+          onClose={() => setKitchenError(null)}
+        />
       )}
       {selectorState && (
         <ModifierSelector
@@ -1204,6 +1305,9 @@ function SaleWorkspace({
   onClickCheckout,
   onSuspend,
   onCancel,
+  onSendToKitchen,
+  kitchenBusy,
+  kitchenLastRevision,
 }: {
   products: CatalogProduct[];
   wildcards: Wildcard[];
@@ -1233,6 +1337,15 @@ function SaleWorkspace({
   onClickCheckout: () => void;
   onSuspend: () => void;
   onCancel: () => void;
+  // v1.4-Bar-Operativa-MVP Lote 2 · enviar comanda. Sólo se invoca
+  // cuando hay tableContext y al menos una línea. Si `kitchenBusy`
+  // es true, el botón muestra "Enviando…" deshabilitado. Si
+  // `kitchenLastRevision > 0`, el botón rotula "Reenviar comanda"
+  // y queda discreto (la cocina ya tiene un papel; reenvío es la
+  // operación menos común).
+  onSendToKitchen: () => void;
+  kitchenBusy: boolean;
+  kitchenLastRevision: number;
 }) {
   // B-ProductImages: tenantId cacheado tras el último refresh del
   // catálogo. Si por alguna razón viene null (primer arranque y aún
@@ -1691,6 +1804,33 @@ function SaleWorkspace({
                 Guardar
               </button>
             )}
+            {/* v1.4-Bar-Operativa-MVP Lote 2 · botón "Enviar comanda"
+                sólo en mesa. Primer envío rotula como acción primaria
+                (texto coral suave); reenvíos quedan más discretos
+                (texto gris) porque ya hay una comanda física en la
+                cocina y el caso normal es no reenviar. */}
+            {tableContext && (
+              <button
+                onClick={onSendToKitchen}
+                disabled={lines.length === 0 || kitchenBusy}
+                className={
+                  kitchenLastRevision > 0
+                    ? "h-12 md:h-14 border border-slate-200 hover:bg-slate-50 disabled:opacity-50 text-slate-600 font-medium text-[13.5px] md:text-[14px] rounded-2xl flex items-center justify-center gap-2"
+                    : "h-12 md:h-14 border border-mipiace-coral/40 text-mipiace-coral-dark hover:bg-mipiace-coral-soft disabled:opacity-50 font-medium text-[13.5px] md:text-[14.5px] rounded-2xl flex items-center justify-center gap-2"
+                }
+                title={
+                  kitchenLastRevision > 0
+                    ? `Reenviar la comanda (la cocina ya recibió la nº ${kitchenLastRevision}).`
+                    : "Imprime una comanda por sección (barra/cocina/salón) y la lleva el camarero."
+                }
+              >
+                {kitchenBusy
+                  ? "Enviando…"
+                  : kitchenLastRevision > 0
+                    ? `Reenviar comanda (nº ${kitchenLastRevision + 1})`
+                    : "Enviar comanda"}
+              </button>
+            )}
             <button
               onClick={onClickCheckout}
               disabled={lines.length === 0}
@@ -2041,4 +2181,74 @@ function TableContextLine({
   if (table.openedByEmail) parts.push(table.openedByEmail.split("@")[0]!);
   parts.push(`${itemCount} ${itemCount === 1 ? "ud." : "uds."}`);
   return <>{parts.join(" · ")}</>;
+}
+
+// v1.4-Bar-Operativa-MVP Lote 2 · decodifica el PDF base64 que llega
+// del endpoint a un ArrayBuffer apto para Blob. Implementación
+// mínima — atob da los caracteres, los pasamos a Uint8Array.
+function base64ToBytes(b64: string): Uint8Array {
+  const binary = atob(b64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+const SECTION_LABEL_ES: Record<string, string> = {
+  BARRA: "BARRA",
+  COCINA: "COCINA",
+  SALON: "SALÓN",
+};
+
+function KitchenToast({
+  sections,
+  revision,
+  onClose,
+}: {
+  sections: Array<{ section: string; lineCount: number }>;
+  revision: number;
+  onClose: () => void;
+}) {
+  // Auto-cierre a los 5s — el cajero quiere ver el feedback pero no
+  // que le tape la UI mientras gestiona la mesa.
+  useEffect(() => {
+    const t = setTimeout(onClose, 5_000);
+    return () => clearTimeout(t);
+  }, [onClose]);
+  return (
+    <div className="fixed top-5 right-5 z-50 bg-emerald-50 border border-emerald-300 text-emerald-900 px-4 py-3 rounded-2xl shadow-sm max-w-sm">
+      <div className="text-[13.5px] font-semibold mb-1">
+        Comanda nº {revision} enviada
+      </div>
+      <div className="text-[12.5px] space-y-0.5">
+        {sections.map((s) => (
+          <div key={s.section}>
+            {SECTION_LABEL_ES[s.section] ?? s.section}: {s.lineCount}{" "}
+            {s.lineCount === 1 ? "línea" : "líneas"}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function KitchenErrorBanner({
+  message,
+  onClose,
+}: {
+  message: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const t = setTimeout(onClose, 7_000);
+    return () => clearTimeout(t);
+  }, [onClose]);
+  return (
+    <div className="fixed top-5 right-5 z-50 bg-red-50 border border-red-300 text-red-900 px-4 py-3 rounded-2xl shadow-sm max-w-sm">
+      <div className="text-[13.5px] font-semibold mb-1">
+        No se pudo enviar la comanda
+      </div>
+      <div className="text-[12.5px]">{message}</div>
+    </div>
+  );
 }

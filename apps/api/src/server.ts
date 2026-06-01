@@ -6,6 +6,7 @@ import websocket from "@fastify/websocket";
 
 import { registerManagerAuthorizationRoutes } from "./admin/manager-authorize.js";
 import { registerAdminTagAliasesRoutes } from "./admin/tag-aliases.js";
+import { registerAdminTagSectionsRoutes } from "./admin/tag-sections.js";
 import { registerAdminTenantSettingsRoutes } from "./admin/tenant-settings.js";
 import { registerAdminGiftReceiptRoutes } from "./admin/gift-receipts.js";
 import { registerAdminModifierGroupRoutes } from "./admin/modifier-groups.js";
@@ -42,6 +43,7 @@ import { startTicketEmailWorker } from "./workers/ticket-email-worker.js";
 import { registerTicketRoutes } from "./tickets/routes.js";
 import { registerTicketDigitalRoute } from "./tickets/digital-route.js";
 import { registerPublicTicketPdfRoute } from "./tickets/public-pdf-route.js";
+import { registerSendToKitchenRoute } from "./tickets/send-to-kitchen.js";
 import { registerTpvCatalogRoutes } from "./tpv-catalog/routes.js";
 
 async function main() {
@@ -116,12 +118,14 @@ async function main() {
   await registerStoreWebSocketRoute(app);
   await registerPublicTicketPdfRoute(app);
   await registerTicketRoutes(app);
+  await registerSendToKitchenRoute(app);
   await registerTicketDigitalRoute(app);
   await registerTpvCatalogRoutes(app);
   await registerAdminTicketsErrorsRoutes(app);
   await registerManagerAuthorizationRoutes(app);
   await registerAdminTenantSettingsRoutes(app);
   await registerAdminTagAliasesRoutes(app);
+  await registerAdminTagSectionsRoutes(app);
   await registerAdminGiftReceiptRoutes(app);
   await registerAdminModifierGroupRoutes(app);
   await registerAdminTicketDeliveryRoutes(app);

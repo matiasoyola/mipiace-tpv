@@ -102,6 +102,18 @@ export type StoreEvent =
       byEmail: string;
       totalEur: number;
       at: string;
+    }
+  // v1.4-Bar-Operativa-MVP Lote 2: comanda enviada desde otra tablet.
+  // El mapa de sala lo usa para refrescar el badge "Comanda Nº" en la
+  // mesa correspondiente sin esperar al próximo polling.
+  | {
+      type: "ticket.sent_to_kitchen";
+      ticketId: string;
+      tableId: string | null;
+      revision: number;
+      sections: Array<{ section: "BARRA" | "COCINA" | "SALON"; lineCount: number }>;
+      byEmail: string;
+      at: string;
     };
 
 export type StreamStatus = "connecting" | "open" | "degraded";

@@ -13,6 +13,7 @@ import { SecurityPage } from "./pages/SecurityPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 import { StoreDetailPage, StoresPage } from "./pages/StoresPage.js";
 import { TagAliasesPage } from "./pages/TagAliasesPage.js";
+import { TagSectionsPage } from "./pages/TagSectionsPage.js";
 import { TicketsErrorsPage } from "./pages/TicketsErrorsPage.js";
 import { AdminsListPage } from "./superadmin/AdminsListPage.js";
 import { AuditLogPage } from "./superadmin/AuditLogPage.js";
@@ -76,6 +77,7 @@ export function App() {
         <Route path="/admin/tickets-errors" element={<TicketsErrorsPage />} />
         <Route path="/admin/settings" element={<SettingsPage />} />
         <Route path="/admin/tag-aliases" element={<TagAliasesPage />} />
+        <Route path="/admin/tag-sections" element={<TagSectionsPage />} />
         <Route path="/admin/holded" element={<HoldedPage />} />
         <Route path="/admin/gift-receipts" element={<GiftReceiptsPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
