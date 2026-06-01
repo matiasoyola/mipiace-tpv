@@ -813,15 +813,16 @@ model Ticket {
   syncedAt             DateTime?    @map("synced_at") @db.Timestamptz()
   syncError            Json?        @map("sync_error")
 
-  tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  register     Register         @relation(fields: [registerId], references: [id], onDelete: Restrict)
-  shift        Shift            @relation(fields: [shiftId], references: [id], onDelete: Restrict)
-  user         User             @relation(fields: [userId], references: [id], onDelete: Restrict)
-  lines        TicketLine[]
-  payments     TicketPayment[]
-  refunds      Refund[]
-  emailJobs    TicketEmailJob[]
-  printIntents PrintIntent[]
+  tenant          Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  register        Register                @relation(fields: [registerId], references: [id], onDelete: Restrict)
+  shift           Shift                   @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  user            User                    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  lines           TicketLine[]
+  payments        TicketPayment[]
+  partialPayments TicketPartialPayment[]
+  refunds         Refund[]
+  emailJobs       TicketEmailJob[]
+  printIntents    PrintIntent[]
 
   @@unique([registerId, internalNumber])
   @@index([tenantId, status])
@@ -909,6 +910,39 @@ model TicketPayment {
 
   @@index([ticketId])
   @@map("ticket_payments")
+}
+
+// v1.4-Bar-Operativa-MVP Lote 4 · cobros parciales (split bill,
+// Modo A). El cliente quiere pagar 30 € de un total de 80 €. Cada
+// cobro parcial se registra aquí; los siguientes /checkout y los
+// helpers de remaining suman estos importes para decidir cuándo el
+// ticket queda saldado. Al cobrar el resto (o si la suma de
+// partials llega al total), el ticket pasa a PAID por la ruta
+// normal de /checkout que ya conoce y sincroniza con Holded.
+//
+// No están en TicketPayment para no contaminar el contrato fiscal:
+// el upload a Holded usa los TicketPayment finales del cobro
+// (Holded recibe 1 salesreceipt con N payments), así los partials
+// se acumulan en este modelo sin tocar el flujo de sync existente.
+model TicketPartialPayment {
+  id        String        @id @default(uuid()) @db.Uuid
+  ticketId  String        @map("ticket_id") @db.Uuid
+  amount    Decimal       @db.Decimal(10, 2)
+  method    PaymentMethod
+  // Cajero que tomó el cobro parcial. Nullable porque puede
+  // haberse eliminado el user (poco probable en piloto).
+  cashierId String?       @map("cashier_id") @db.Uuid
+  // Importe efectivo recibido cuando el método es CASH — para
+  // mostrar cambio en el TPV. Nullable en CARD/BIZUM.
+  cashAmount Decimal?     @map("cash_amount") @db.Decimal(10, 2)
+  // Metadata libre del pago (refMov BIZUM, last4 tarjeta, …).
+  meta      Json?
+  paidAt    DateTime      @default(now()) @map("paid_at") @db.Timestamptz()
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@map("ticket_partial_payments")
 }
 
 model Refund {

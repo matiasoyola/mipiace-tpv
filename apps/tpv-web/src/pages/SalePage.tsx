@@ -71,6 +71,7 @@ import { CloseShiftModal } from "./CloseShiftModal.js";
 import { LineSheet } from "./SalePage.lineSheet.js";
 import { ModifierSelector } from "./SalePage.modifierSelector.js";
 import { MoveTablePicker } from "./SalePage.movePicker.js";
+import { SplitBillSheet } from "./SalePage.splitBill.js";
 import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
 import { useElapsedTime } from "../hooks/useElapsedTime.js";
 import { useStoreEventStream } from "../hooks/useStoreEventStream.js";
@@ -284,6 +285,9 @@ export function SalePage(props: SalePageProps) {
   const [showMoveTable, setShowMoveTable] = useState(false);
   const [moveBusy, setMoveBusy] = useState(false);
   const [moveError, setMoveError] = useState<string | null>(null);
+
+  // v1.4-Bar-Operativa-MVP Lote 4 · sheet partir cuenta (Modo A).
+  const [showSplitBill, setShowSplitBill] = useState(false);
 
   // Cuando el cajero cambia de mesa o sale del modo mesa, reiniciamos
   // el contador local de comandas. El backend mantiene la verdad
@@ -946,6 +950,7 @@ export function SalePage(props: SalePageProps) {
             kitchenBusy={kitchenBusy}
             kitchenLastRevision={kitchenRevision}
             onClickMoveTable={() => setShowMoveTable(true)}
+            onClickSplitBill={() => setShowSplitBill(true)}
           />
 
           <footer className="h-[56px] md:h-[68px] border-t border-slate-200 grid grid-cols-3 items-center px-4 md:px-7 text-[12px] md:text-[13px] shrink-0">
@@ -1122,6 +1127,12 @@ export function SalePage(props: SalePageProps) {
         <KitchenErrorBanner
           message={moveError}
           onClose={() => setMoveError(null)}
+        />
+      )}
+      {showSplitBill && props.tableContext?.activeTicketId && (
+        <SplitBillSheet
+          ticketId={props.tableContext.activeTicketId}
+          onClose={() => setShowSplitBill(false)}
         />
       )}
       {selectorState && (
@@ -1372,6 +1383,7 @@ function SaleWorkspace({
   kitchenBusy,
   kitchenLastRevision,
   onClickMoveTable,
+  onClickSplitBill,
 }: {
   products: CatalogProduct[];
   wildcards: Wildcard[];
@@ -1413,6 +1425,8 @@ function SaleWorkspace({
   // v1.4-Bar-Operativa-MVP Lote 3 · abre el picker de mesa destino.
   // Sólo se invoca cuando hay tableContext.
   onClickMoveTable: () => void;
+  // v1.4-Bar-Operativa-MVP Lote 4 · abre el sheet partir cuenta.
+  onClickSplitBill: () => void;
 }) {
   // B-ProductImages: tenantId cacheado tras el último refresh del
   // catálogo. Si por alguna razón viene null (primer arranque y aún
@@ -1845,6 +1859,17 @@ function SaleWorkspace({
               title="Llevar este ticket a otra mesa"
             >
               Mover mesa
+            </button>
+          )}
+          {/* v1.4-Bar-Operativa-MVP Lote 4 · "Partir cuenta" (Modo A):
+              registra cobros parciales sobre el DRAFT de mesa. */}
+          {tableContext && (
+            <button
+              onClick={onClickSplitBill}
+              className="h-8 px-3 rounded-lg bg-mipiace-stone hover:bg-slate-100 text-[12.5px] font-medium text-mipiace-ink"
+              title="Cobrar parte ahora y dejar el resto pendiente"
+            >
+              Partir cuenta
             </button>
           )}
           <button

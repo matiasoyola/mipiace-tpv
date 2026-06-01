@@ -44,6 +44,7 @@ import { registerTicketRoutes } from "./tickets/routes.js";
 import { registerTicketDigitalRoute } from "./tickets/digital-route.js";
 import { registerPublicTicketPdfRoute } from "./tickets/public-pdf-route.js";
 import { registerSendToKitchenRoute } from "./tickets/send-to-kitchen.js";
+import { registerPartialPaymentRoute } from "./tickets/partial-payment.js";
 import { registerTpvCatalogRoutes } from "./tpv-catalog/routes.js";
 
 async function main() {
@@ -119,6 +120,7 @@ async function main() {
   await registerPublicTicketPdfRoute(app);
   await registerTicketRoutes(app);
   await registerSendToKitchenRoute(app);
+  await registerPartialPaymentRoute(app);
   await registerTicketDigitalRoute(app);
   await registerTpvCatalogRoutes(app);
   await registerAdminTicketsErrorsRoutes(app);
