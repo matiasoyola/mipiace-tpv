@@ -17,9 +17,8 @@
 // Aislamiento por tenant: el register en cuestión tiene que pertenecer
 // al tenant del JWT. Lo validamos en cada handler.
 
-import net from "node:net";
-
 import { KitchenSection, PrinterMode } from "@mipiacetpv/db";
+import { buildTestPrint, sendOverTcp } from "@mipiacetpv/escpos-builder";
 import type { FastifyInstance } from "fastify";
 
 import { requireOwnerOrManager } from "../auth/middleware.js";
@@ -449,68 +448,3 @@ async function assertRegisterBelongsToTenant(
   return r != null;
 }
 
-// Binario ESC/POS mínimo para validar conectividad: reset + texto +
-// corte. En Lote 2 reemplazamos por `packages/escpos-builder`
-// `buildTestPrint`, pero hoy lo dejamos inline para que Lote 1 funcione
-// independiente.
-function buildTestPrint(): Uint8Array {
-  const parts: number[] = [];
-  // ESC @ — init
-  parts.push(0x1b, 0x40);
-  // ESC t 2 — code page PC850 (multilingüe español)
-  parts.push(0x1b, 0x74, 0x02);
-  // ESC a 1 — center
-  parts.push(0x1b, 0x61, 0x01);
-  // GS ! 0x11 — width x2 + height x2
-  parts.push(0x1d, 0x21, 0x11);
-  pushAscii(parts, "TEST IMPRESORA\n");
-  // GS ! 0x00 — normal size
-  parts.push(0x1d, 0x21, 0x00);
-  pushAscii(parts, "mipiacetpv\n");
-  pushAscii(parts, new Date().toISOString() + "\n");
-  // Feed + cut: feed 3 lines, then GS V 0 (full cut)
-  parts.push(0x1b, 0x64, 0x03);
-  parts.push(0x1d, 0x56, 0x00);
-  return new Uint8Array(parts);
-}
-
-function pushAscii(buf: number[], s: string): void {
-  for (let i = 0; i < s.length; i++) buf.push(s.charCodeAt(i) & 0xff);
-}
-
-// Envía un payload binario por TCP raw a una impresora ESC/POS. Cierra
-// el socket al terminar; si no se puede conectar, rechaza la promesa.
-// La impresora ESC/POS típica no hace ACK aplicativo, así que damos
-// por buena la entrega cuando se ha drenado el buffer y la conexión
-// se cierra limpiamente.
-export async function sendOverTcp(opts: {
-  host: string;
-  port: number;
-  timeoutMs: number;
-  payload: Uint8Array;
-}): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    const socket = new net.Socket();
-    let settled = false;
-    const finish = (err?: Error) => {
-      if (settled) return;
-      settled = true;
-      socket.destroy();
-      if (err) reject(err);
-      else resolve();
-    };
-    socket.setTimeout(opts.timeoutMs);
-    socket.once("timeout", () => finish(new Error("Timeout TCP")));
-    socket.once("error", (err) => finish(err));
-    socket.once("close", () => finish());
-    socket.connect(opts.port, opts.host, () => {
-      socket.write(Buffer.from(opts.payload), (writeErr) => {
-        if (writeErr) {
-          finish(writeErr);
-          return;
-        }
-        socket.end();
-      });
-    });
-  });
-}

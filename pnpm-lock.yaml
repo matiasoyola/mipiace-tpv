@@ -66,6 +66,9 @@ importers:
       '@mipiacetpv/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@mipiacetpv/escpos-builder':
+        specifier: workspace:*
+        version: link:../../packages/escpos-builder
       '@mipiacetpv/holded-client':
         specifier: workspace:*
         version: link:../../packages/holded-client
@@ -225,6 +228,22 @@ importers:
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
+
+  packages/escpos-builder:
+    dependencies:
+      '@mipiacetpv/ticket-model':
+        specifier: workspace:*
+        version: link:../ticket-model
+    devDependencies:
+      '@types/node':
+        specifier: ^20.16.10
+        version: 20.19.40
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
+        version: 2.1.9(@types/node@20.19.40)(terser@5.47.1)
 
   packages/holded-client:
     devDependencies:
