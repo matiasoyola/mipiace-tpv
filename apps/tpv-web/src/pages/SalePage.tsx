@@ -1782,7 +1782,7 @@ function SaleWorkspace({
           5. Subtotal/IVA al pie como info detallada. */}
       <aside className="bg-white rounded-3xl border border-slate-200 flex flex-col order-1 lg:order-2 lg:h-full lg:overflow-hidden">
         {/* 1 · Header */}
-        <div className="flex items-center justify-between px-5 md:px-7 pt-5 md:pt-6 pb-3 md:pb-4 border-b border-slate-100">
+        <div className="flex items-center justify-between px-5 md:px-7 pt-5 md:pt-6 pb-3 md:pb-4 border-b border-slate-100 shrink-0">
           <div className="min-w-0">
             <h2 className="text-[18px] md:text-[20px] font-semibold text-mipiace-ink tracking-tight truncate">
               {tableContext
@@ -1828,7 +1828,7 @@ function SaleWorkspace({
         {/* 2 · Chips de acciones del ticket. "Cancelar" en último
              lugar con estilo destructivo más suave para no competir
              visualmente con "Cobrar". */}
-        <div className="px-5 md:px-7 py-3 border-b border-slate-100 flex flex-wrap gap-1.5">
+        <div className="px-5 md:px-7 py-3 border-b border-slate-100 flex flex-wrap gap-1.5 shrink-0">
           <button
             onClick={onClickContact}
             className="h-8 px-3 rounded-lg bg-mipiace-stone hover:bg-slate-100 text-[12.5px] font-medium text-mipiace-ink max-w-[180px] truncate"
@@ -1883,7 +1883,7 @@ function SaleWorkspace({
         </div>
 
         {/* 3 · Total grande + acciones principales (Report A) */}
-        <div className="px-5 md:px-7 pt-4 md:pt-5 pb-5 md:pb-6 border-b border-slate-100">
+        <div className="px-5 md:px-7 pt-4 md:pt-5 pb-5 md:pb-6 border-b border-slate-100 shrink-0">
           <div className="flex items-baseline justify-between mb-3 md:mb-4">
             <span className="text-[15px] md:text-[16px] font-semibold text-mipiace-ink">Total</span>
             <span className="text-[28px] md:text-[34px] font-semibold text-mipiace-ink tabular-nums tracking-tight">
