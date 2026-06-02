@@ -10,6 +10,7 @@ import { registerAdminTagSectionsRoutes } from "./admin/tag-sections.js";
 import { registerAdminTenantSettingsRoutes } from "./admin/tenant-settings.js";
 import { registerAdminGiftReceiptRoutes } from "./admin/gift-receipts.js";
 import { registerAdminModifierGroupRoutes } from "./admin/modifier-groups.js";
+import { registerAdminPrinterConfigsRoutes } from "./admin/printer-configs.js";
 import { registerAdminTicketDeliveryRoutes } from "./admin/ticket-delivery.js";
 import { registerAdminTicketsErrorsRoutes } from "./admin/tickets-errors.js";
 import { registerAuthRoutes } from "./auth/routes.js";
@@ -130,6 +131,7 @@ async function main() {
   await registerAdminTagSectionsRoutes(app);
   await registerAdminGiftReceiptRoutes(app);
   await registerAdminModifierGroupRoutes(app);
+  await registerAdminPrinterConfigsRoutes(app);
   await registerAdminTicketDeliveryRoutes(app);
 
   // Conexión perezosa: forzamos un primer query para fallar pronto si la

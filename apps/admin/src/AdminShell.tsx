@@ -62,6 +62,10 @@ const NAV_ITEMS: NavItem[] = [
   // pairing codes ya acepta OWNER/MANAGER. Lo abrimos al OWNER y al
   // MANAGER para que generen el pairing sin escalar a soporte.
   { to: "/admin/devices", label: "Dispositivos", icon: Calculator },
+  // v1.4-Impresoras-Fase-1 Lote 1: gestor de impresoras térmicas
+  // (USB / WIFI) por register. OWNER + MANAGER pueden tocarlo
+  // porque es operativa diaria (cambiar IP del router, etc.).
+  { to: "/admin/printers", label: "Impresoras", icon: Printer },
   { to: "/admin/cashiers", label: "Cajeros", icon: Users },
   { to: "/admin/products", label: "Productos", icon: Package },
   // v1.3-Operativa-Extra · Lote 1: editor de aliases de tags. Visible

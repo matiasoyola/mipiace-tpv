@@ -95,6 +95,14 @@ enum KitchenSection {
   SALON
 }
 
+// v1.4-Impresoras-Fase-1 Lote 1 · modo físico de la impresora térmica.
+// USB la enchufa el cajero a la tablet vía OTG → WebUSB API.
+// WIFI vive en la LAN y el backend abre TCP a ip:port (9100 ESC/POS raw).
+enum PrinterMode {
+  USB
+  WIFI
+}
+
 enum InitialSyncStatus {
   PENDING
   RUNNING
@@ -490,15 +498,51 @@ model Register {
   // Soft-delete (B4 §0.2). Igual que Store.
   deletedAt      DateTime? @map("deleted_at") @db.Timestamptz()
 
-  store        Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  devices      Device[]
-  pairingCodes PairingCode[]
-  shifts       Shift[]
-  tickets      Ticket[]
-  refunds      Refund[]
+  store          Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  devices        Device[]
+  pairingCodes   PairingCode[]
+  shifts         Shift[]
+  tickets        Ticket[]
+  refunds        Refund[]
+  printerConfigs PrinterConfig[]
 
   @@index([storeId])
   @@map("registers")
+}
+
+// v1.4-Impresoras-Fase-1 Lote 1 · una impresora térmica configurada
+// por register. Puede ser USB (la enchufa el cajero a la tablet) o
+// WIFI (el backend manda TCP a ip:port). Cada register puede tener
+// varias: típico HOSPITALITY → BARRA + COCINA + caja; típico SERVICES
+// → un único PrinterConfig USB sin sección.
+model PrinterConfig {
+  id           String      @id @default(uuid()) @db.Uuid
+  registerId   String      @map("register_id") @db.Uuid
+  // Etiqueta para el implantador: "Ticket caja", "Comanda BARRA", etc.
+  name         String
+  mode         PrinterMode
+  // WIFI only:
+  ipAddress    String?     @map("ip_address")
+  port         Int?        @default(9100)
+  // Si WIFI: timeout TCP en ms. Default 5s.
+  timeoutMs    Int         @default(5000) @map("timeout_ms")
+  // Sección lógica para comanderas. NULL = impresora de ticket de
+  // cobro (no comandera, no se filtra por sección).
+  section      KitchenSection?
+  // Si false, no se intenta imprimir (mantenimiento sin borrar).
+  active       Boolean     @default(true)
+  // Última vez que imprimió OK. Útil para "impresora silenciosa hace 3d".
+  lastPrintOkAt DateTime?  @map("last_print_ok_at") @db.Timestamptz()
+  // Último error registrado. NULL si último intento OK.
+  lastErrorAt   DateTime?  @map("last_error_at") @db.Timestamptz()
+  lastErrorMsg  String?    @map("last_error_msg")
+  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz()
+
+  register Register @relation(fields: [registerId], references: [id], onDelete: Cascade)
+
+  @@index([registerId])
+  @@index([section])
+  @@map("printer_configs")
 }
 
 // Navegador físico emparejado a una caja. El token de larga duración
