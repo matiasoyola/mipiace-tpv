@@ -17,6 +17,7 @@ import {
   Eye,
   Loader2,
   Mail,
+  Printer,
   QrCode,
   X,
 } from "lucide-react";
@@ -27,8 +28,16 @@ import {
 } from "@mipiacetpv/ticket-pdf";
 import type { TicketDocument } from "@mipiacetpv/ticket-model";
 
-import { apiWithCashier } from "../api.js";
+import { apiWithCashier, ApiError } from "../api.js";
 import { getCachedBusinessType } from "../lib/catalog.js";
+import {
+  fetchTicketEscposBinary,
+  getPairedUsbPrinter,
+  isWebUsbSupported,
+  pairUsbPrinter,
+  printEscposUsb,
+  printTicketWifi,
+} from "../lib/escposPrint.js";
 import { vocab } from "../lib/vocab.js";
 
 interface TicketDelivery {
@@ -65,6 +74,18 @@ export function SuccessOverlay({
   const [digitalError, setDigitalError] = useState<string | null>(null);
   const [showQr, setShowQr] = useState(false);
   const [showView, setShowView] = useState(false);
+  const [printerInfo, setPrinterInfo] = useState<{
+    mode: "USB" | "WIFI";
+    configId: string;
+    name: string;
+  } | null>(null);
+  const [printState, setPrintState] = useState<
+    | { phase: "idle" }
+    | { phase: "printing" }
+    | { phase: "done" }
+    | { phase: "needs-pairing" }
+    | { phase: "error"; message: string }
+  >({ phase: "idle" });
   // v1.3-Servicios-Pinta · Lote 1: vertical para adaptar copy ("Ticket
   // emitido" → "Comprobante emitido", "Nueva venta" → "Nuevo servicio").
   const businessType = getCachedBusinessType();
@@ -136,6 +157,79 @@ export function SuccessOverlay({
       },
     };
   }, [digital]);
+
+  // v1.4-Impresoras-Fase-1 Lote 3 · carga el PrinterConfig por
+  // defecto (ticket de cobro) del register para decidir flujo USB vs
+  // WIFI. Si no hay impresora configurada, el botón queda oculto.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiWithCashier<{
+          printer: { id: string; name: string; mode: "USB" | "WIFI" } | null;
+        }>("/tpv/printer-info?section=ticket");
+        if (cancelled || !res.printer) return;
+        setPrinterInfo({
+          mode: res.printer.mode,
+          configId: res.printer.id,
+          name: res.printer.name,
+        });
+        if (res.printer.mode === "USB" && isWebUsbSupported()) {
+          // Comprobamos si ya hay impresora emparejada (para no
+          // ofrecer el botón "Empareja" cuando no hace falta). Esto
+          // no abre diálogo — sólo lista las ya autorizadas.
+          const paired = await getPairedUsbPrinter();
+          if (!cancelled && !paired) {
+            setPrintState({ phase: "needs-pairing" });
+          }
+        }
+      } catch {
+        // Sin impresora configurada, sin WebUSB, etc. — el botón
+        // sigue oculto y el cajero usa el flujo digital.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function onPairUsb() {
+    try {
+      await pairUsbPrinter();
+      setPrintState({ phase: "idle" });
+    } catch (err) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : "No se pudo emparejar la impresora.";
+      setPrintState({ phase: "error", message: msg });
+    }
+  }
+
+  async function onPrintTicket() {
+    if (!printerInfo) return;
+    setPrintState({ phase: "printing" });
+    try {
+      if (printerInfo.mode === "USB") {
+        const bytes = await fetchTicketEscposBinary(ticketId);
+        await printEscposUsb(bytes);
+      } else {
+        await printTicketWifi(ticketId, printerInfo.configId);
+      }
+      setPrintState({ phase: "done" });
+      setTimeout(() => {
+        setPrintState((s) => (s.phase === "done" ? { phase: "idle" } : s));
+      }, 2000);
+    } catch (err) {
+      const msg =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Error al imprimir.";
+      setPrintState({ phase: "error", message: msg });
+    }
+  }
 
   async function downloadPdf() {
     if (!documentObj) return;
@@ -221,6 +315,17 @@ export function SuccessOverlay({
           </div>
         )}
 
+        {printerInfo && (
+          <PrintTicketRow
+            mode={printerInfo.mode}
+            name={printerInfo.name}
+            state={printState}
+            onPair={onPairUsb}
+            onPrint={onPrintTicket}
+            onRetry={() => onPrintTicket()}
+          />
+        )}
+
         {(delivery?.showQrButton ||
           delivery?.showDownloadButton ||
           delivery?.showViewButton) && (
@@ -278,6 +383,102 @@ export function SuccessOverlay({
         />
       )}
     </div>
+  );
+}
+
+type PrintState =
+  | { phase: "idle" }
+  | { phase: "printing" }
+  | { phase: "done" }
+  | { phase: "needs-pairing" }
+  | { phase: "error"; message: string };
+
+function PrintTicketRow({
+  mode,
+  name,
+  state,
+  onPair,
+  onPrint,
+  onRetry,
+}: {
+  mode: "USB" | "WIFI";
+  name: string;
+  state: PrintState;
+  onPair: () => void;
+  onPrint: () => void;
+  onRetry: () => void;
+}) {
+  const baseClass =
+    "mt-4 rounded-2xl border px-4 py-3 flex items-center gap-3 text-left";
+  if (state.phase === "needs-pairing") {
+    return (
+      <div
+        data-testid="print-needs-pairing"
+        className={`${baseClass} bg-amber-50 border-amber-200 text-amber-900`}
+      >
+        <Printer className="w-4 h-4 shrink-0" />
+        <div className="flex-1 text-[12.5px]">
+          Empareja la impresora <strong>{name}</strong> para imprimir
+          el ticket.
+        </div>
+        <button
+          type="button"
+          onClick={onPair}
+          className="h-9 px-3 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-[12.5px] font-medium"
+        >
+          Conectar
+        </button>
+      </div>
+    );
+  }
+  if (state.phase === "error") {
+    return (
+      <div
+        data-testid="print-error"
+        className={`${baseClass} bg-red-50 border-red-200 text-red-800`}
+      >
+        <Printer className="w-4 h-4 shrink-0" />
+        <div className="flex-1 text-[12.5px]">
+          No se pudo imprimir: {state.message}
+        </div>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="h-9 px-3 rounded-xl bg-red-600 hover:bg-red-700 text-white text-[12.5px] font-medium"
+        >
+          Reintentar
+        </button>
+      </div>
+    );
+  }
+  if (state.phase === "done") {
+    return (
+      <div
+        data-testid="print-done"
+        className={`${baseClass} bg-emerald-50 border-emerald-200 text-emerald-800`}
+      >
+        <Check className="w-4 h-4 shrink-0" />
+        <div className="flex-1 text-[12.5px]">Ticket impreso.</div>
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      data-testid="action-print"
+      onClick={onPrint}
+      disabled={state.phase === "printing"}
+      className="mt-4 w-full h-12 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 text-[13.5px] font-medium text-mipiace-ink disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+    >
+      {state.phase === "printing" ? (
+        <Loader2 className="w-4 h-4 animate-spin text-mipiace-coral" />
+      ) : (
+        <Printer className="w-4 h-4" />
+      )}
+      {state.phase === "printing"
+        ? "Imprimiendo…"
+        : `Imprimir ticket (${mode})`}
+    </button>
   );
 }
 

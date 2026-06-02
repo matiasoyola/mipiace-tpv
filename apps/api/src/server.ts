@@ -47,6 +47,7 @@ import { registerPublicTicketPdfRoute } from "./tickets/public-pdf-route.js";
 import { registerSendToKitchenRoute } from "./tickets/send-to-kitchen.js";
 import { registerSendToKitchenEscposRoute } from "./tickets/send-to-kitchen-escpos.js";
 import { registerTicketPrintRoute } from "./tickets/print.js";
+import { registerTpvPrinterInfoRoute } from "./tickets/printer-info.js";
 import { registerPartialPaymentRoute } from "./tickets/partial-payment.js";
 import { registerTpvCatalogRoutes } from "./tpv-catalog/routes.js";
 
@@ -125,6 +126,7 @@ async function main() {
   await registerSendToKitchenRoute(app);
   await registerSendToKitchenEscposRoute(app);
   await registerTicketPrintRoute(app);
+  await registerTpvPrinterInfoRoute(app);
   await registerPartialPaymentRoute(app);
   await registerTicketDigitalRoute(app);
   await registerTpvCatalogRoutes(app);

@@ -191,6 +191,9 @@ importers:
       '@types/react-dom':
         specifier: ^19.0.0
         version: 19.2.3(@types/react@19.2.14)
+      '@types/w3c-web-usb':
+        specifier: ^1.0.10
+        version: 1.0.14
       '@vitejs/plugin-react':
         specifier: ^4.3.4
         version: 4.7.0(vite@6.4.2(@types/node@20.19.40)(jiti@1.21.7)(terser@5.47.1)(tsx@4.21.0))
@@ -1664,6 +1667,9 @@ packages:
 
   '@types/trusted-types@2.0.7':
     resolution: {integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==}
+
+  '@types/w3c-web-usb@1.0.14':
+    resolution: {integrity: sha512-Qu3Nn6JFuF4+sHKYl+IcX9vYiI40ogleXzFFSxoE1W94rG98o/kXs8uJ0QSfFzuwBCZWlGfUGpPkgwuuX4PchA==}
 
   '@vitejs/plugin-react@4.7.0':
     resolution: {integrity: sha512-gUu9hwfWvvEDBBmgtAowQCojwZmJ5mcLn3aufeCsitijs3+f2NsrPtlAWIR6OPiqljl96GVCUbLe0HyqIpVaoA==}
@@ -4860,6 +4866,8 @@ snapshots:
       '@types/node': 20.19.40
 
   '@types/trusted-types@2.0.7': {}
+
+  '@types/w3c-web-usb@1.0.14': {}
 
   '@vitejs/plugin-react@4.7.0(vite@6.4.2(@types/node@20.19.40)(jiti@1.21.7)(terser@5.47.1)(tsx@4.21.0))':
     dependencies:

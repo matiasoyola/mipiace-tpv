@@ -689,6 +689,10 @@ export function SalePage(props: SalePageProps) {
   // pulsar imprimir. Cuando llegue el agente local (v1.5),
   // sustituiremos el `window.open` por un POST al daemon que
   // imprimirá en la térmica de cada sección sin diálogo del SO.
+  // v1.4-Impresoras-Fase-1 Lote 3 · llama al endpoint ESC/POS que
+  // manda la comanda por TCP a la impresora WIFI de cada sección.
+  // Sustituye el flujo anterior de PDFs por pestaña (legible pero
+  // requería un clic por sección).
   async function sendToKitchen(): Promise<void> {
     const tableContext = props.tableContext;
     if (!tableContext?.activeTicketId) return;
@@ -701,10 +705,11 @@ export function SalePage(props: SalePageProps) {
         sentAt: string;
         sections: Array<{
           section: "BARRA" | "COCINA" | "SALON";
+          ok: boolean;
           lineCount: number;
-          pdfBase64: string;
+          error?: string;
         }>;
-      }>(`/tickets/${tableContext.activeTicketId}/send-to-kitchen`, {
+      }>(`/tickets/${tableContext.activeTicketId}/send-to-kitchen/escpos`, {
         method: "POST",
       });
       setKitchenRevision(res.revision);
@@ -715,21 +720,16 @@ export function SalePage(props: SalePageProps) {
         })),
         revision: res.revision,
       });
-      // Apertura escalonada: el navegador bloquea pop-ups si abrimos
-      // varias ventanas en el mismo tick. Damos 150ms entre cada uno
-      // para que iOS/Safari trate cada open como interacción del
-      // usuario en cadena. Limpiamos las URLs blob al cabo de 60s.
-      res.sections.forEach((section, idx) => {
-        setTimeout(() => {
-          const bytes = base64ToBytes(section.pdfBase64);
-          const blob = new Blob([new Uint8Array(bytes)], {
-            type: "application/pdf",
-          });
-          const url = URL.createObjectURL(blob);
-          window.open(url, "_blank", "noopener,noreferrer");
-          setTimeout(() => URL.revokeObjectURL(url), 60_000);
-        }, idx * 150);
-      });
+      // Si alguna sección falló pero otras imprimieron, lo flageamos
+      // como error parcial para que el cajero vea qué no llegó.
+      const failed = res.sections.filter((s) => !s.ok);
+      if (failed.length > 0) {
+        setKitchenError(
+          `Comanda no enviada: ${failed
+            .map((f) => `${f.section}${f.error ? ` (${f.error})` : ""}`)
+            .join(", ")}`,
+        );
+      }
     } catch (err) {
       const msg =
         err instanceof ApiError
@@ -2284,17 +2284,6 @@ function TableContextLine({
   if (table.openedByEmail) parts.push(table.openedByEmail.split("@")[0]!);
   parts.push(`${itemCount} ${itemCount === 1 ? "ud." : "uds."}`);
   return <>{parts.join(" · ")}</>;
-}
-
-// v1.4-Bar-Operativa-MVP Lote 2 · decodifica el PDF base64 que llega
-// del endpoint a un ArrayBuffer apto para Blob. Implementación
-// mínima — atob da los caracteres, los pasamos a Uint8Array.
-function base64ToBytes(b64: string): Uint8Array {
-  const binary = atob(b64);
-  const len = binary.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
 }
 
 const SECTION_LABEL_ES: Record<string, string> = {
