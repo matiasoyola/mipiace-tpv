@@ -1,19 +1,13 @@
 // v1.4-Bar-Operativa-MVP Lote 2 · renderer de comanda (kitchen ticket).
 //
-// Una comanda NO es un ticket fiscal — sólo es un papel que llega a
-// barra/cocina/salón con lo que tienen que preparar. Diseño:
-//   - 80mm, mismo ancho que el ticket fiscal para reusar la misma
-//     impresora térmica del register.
-//   - Cabecera grande: sección (BARRA / COCINA / SALON), nº mesa, nº
-//     comanda y hora. Pensada para leerse a 2m sin gafas.
-//   - Bloque de líneas: cantidad + descripción + modificadores (los
-//     destacamos porque el "sin lactosa" es lo que decide si la cocina
-//     no envenena al cliente).
-//   - Sin precios, sin IVA, sin totales — la cocina no los necesita y
-//     simplificar reduce errores de lectura.
-//
-// El endpoint del API construye un `KitchenTicketDocument` por
-// sección con líneas; cada llamada genera un PDF independiente.
+// @deprecated v1.4-Impresoras-Fase-1 Lote 4: la generación PDF ha sido
+// reemplazada por ESC/POS plano en `packages/escpos-builder`
+// (`buildKitchenComanda`). Razón: rasterizar PDF satura el buffer de
+// las impresoras térmicas baratas (spike 2026-06-02 con POS-80 V6.16F).
+// Este renderer se mantiene como red de seguridad para el endpoint
+// `POST /tickets/:id/send-to-kitchen?fallback=pdf` mientras se
+// despliegan impresoras WIFI en los pilotos. Eliminar en una fase
+// posterior cuando todos los pilotos tengan PrinterConfig.
 
 import {
   PDFDocument,

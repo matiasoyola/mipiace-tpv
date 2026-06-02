@@ -71,20 +71,33 @@ A medida que validamos más modelos se añaden aquí con su mode de cableado y c
 
 ---
 
-## Estado actual de la integración (2026-06-02)
+## Estado tras Fase 1: integración nativa LIVE (2026-06-02 → completada)
 
-- **Lote 2 v1.4-Bar-Operativa-MVP** generó "comanderas" como **PDFs por sección** que se abren en pestaña nueva del navegador. El cajero los imprime manual.
-- **No hay integración directa con hardware todavía**. Próximo bloque (`v1-4-impresoras-fase-1`) lo añade.
+Bloque `v1-4-impresoras-fase-1` cierra la integración directa con hardware. Resumen de lo que entró:
 
-Plan de la integración:
+- **Modelo `PrinterConfig`** (migración `b27_printer_configs`): una fila por impresora dada de alta en un register. Campos: `name`, `mode` (USB|WIFI), `ipAddress`+`port` si WIFI, `section` (BARRA/COCINA/SALON o NULL para "ticket de cobro"), `active`, `lastPrintOkAt`, `lastErrorAt`+`Msg`.
+- **Panel admin `/admin/printers`**: el OWNER/MANAGER da de alta, edita, prueba y desactiva impresoras desde el navegador. Botón "Probar" emite un ESC/POS de prueba (USB devuelve binary base64, WIFI manda TCP).
+- **Package `packages/escpos-builder`**: helpers ESC/POS puros (`escInit`, `escCut`, `escQrCode`, codepage PC850 para acentos) + builders de alto nivel:
+  - `buildTicketReceipt` — ticket de cobro con cabecera comercio, líneas, TOTAL, pagos, QR del ticket público y pie.
+  - `buildKitchenComanda` — comanda con tipografía 2x, sin precios, modifiers con sangría.
+  - `buildTestPrint` — print mínimo para el botón "Probar".
+- **Endpoints API**:
+  - `POST /tickets/:id/print/escpos?target=usb|wifi` — ticket de cobro. USB → octet-stream para WebUSB; WIFI → TCP raw.
+  - `POST /tickets/:id/send-to-kitchen/escpos` y `POST /tickets/:id/send-to-kitchen` — comanda por sección a impresoras WIFI. Si falta config para alguna sección → 409 antes de mandar nada. `?fallback=pdf` mantiene la generación legacy para pilotos sin impresoras todavía.
+  - `GET /tpv/printer-info?section=ticket|barra|cocina|salon` — el TPV lo consulta para saber qué impresora propone.
+- **TPV (`apps/tpv-web`)**:
+  - Helper `src/lib/escposPrint.ts` con WebUSB (pair / paired-lookup / transferOut).
+  - SuccessOverlay tras cobro muestra "Imprimir ticket (USB|WIFI)" según el PrinterConfig del register. Si USB y no hay impresora emparejada, ofrece "Conectar".
+  - SalePage "Enviar comanda" ya no abre PDFs en pestaña: llama al endpoint ESC/POS y muestra toast con resumen por sección. Si alguna falla, el motivo aparece en el banner de error.
 
-1. Modelo `PrinterConfig` en BD por register (mode USB|WIFI, IP/puerto si WiFi, nombre lógico).
-2. Endpoint backend `POST /tickets/:id/print` que:
-   - Si mode=WIFI → abre socket TCP a IP:9100 y manda ESC/POS.
-   - Si mode=USB → devuelve el binario ESC/POS al cliente, que lo manda a la impresora vía WebUSB / app puente.
-3. UI admin: panel "Impresoras" donde el implantador configura.
-4. UI TPV: botón "Imprimir ticket" en el cobro + reintento si falla.
-5. Tests + manuales.
+### Lo que NO entró en Fase 1 (próximo bloque)
+
+- **`tenant.autoPrintTicket`** (auto-print sin clic) — diferido. Hace falta migración + endpoint + UI; el botón manual cubre los pilotos actuales.
+- **Tests jsdom + mock `navigator.usb`** en el TPV — diferidos: no hay infra vitest en `apps/tpv-web` todavía (ver `project_b_product_images_carryovers`).
+- **Múltiples impresoras USB simultáneas** en una sola tablet (Fase 2).
+- **Agente local nativo** para Windows/Mac/Linux (Fase 3, si algún cliente lo pide).
+- **Bluetooth**.
+- **Soporte para fonts no-Latin** (chino, árabe).
 
 ---
 
