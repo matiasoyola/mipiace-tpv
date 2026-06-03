@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { apiWithDevice, ApiError } from "../api.js";
+import { apiWithDevice } from "../api.js";
 import {
   clearAllDeviceState,
   getDeviceToken,
 } from "../storage.js";
+import { decideAfterBootstrapError } from "./bootstrap-decision.js";
 
 export interface DeviceMeResponse {
   device: { id: string; name: string | null; pairedAt: string };
@@ -35,15 +36,17 @@ export function useDeviceBootstrap(): {
       const data = await apiWithDevice<DeviceMeResponse>("/devices/me");
       setState({ kind: "paired", data });
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        // Device revocado o token corrupto — limpia todo.
+      if (decideAfterBootstrapError(err) === "purge") {
+        // Sólo borramos cuando el backend confirma que el dispositivo
+        // está revocado o el JWT ha caducado — un 401 sin código (o con
+        // código que no entendemos) probablemente es un proxy o un
+        // restart transitorio y NO debe desemparejar al cliente.
         clearAllDeviceState();
         setState({ kind: "unpaired" });
       } else {
-        // Errores de red: reintentar más adelante. Para no dejar la PWA
-        // colgada en "loading" indefinidamente, asumimos "paired" con
-        // los últimos datos conocidos no es posible (no cacheamos).
-        // Dejamos "loading" y que el caller pueda reintentar.
+        // Errores de red o 401 ambiguos: reintentar más adelante. Para
+        // no dejar la PWA colgada en "loading" indefinidamente, dejamos
+        // "loading" y que el caller pueda reintentar.
         setState({ kind: "loading" });
         setTimeout(refresh, 3000);
       }
