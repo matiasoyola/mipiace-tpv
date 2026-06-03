@@ -9,7 +9,7 @@
 
 import { useEffect, useState } from "react";
 
-import { api, ApiError, type AdminRole } from "../api.js";
+import { api, ApiError, readEffectiveAuth, type AdminRole } from "../api.js";
 import { FieldError, OutlineButton, PrimaryButton, SuccessBanner } from "../ui.js";
 
 interface TicketDeliverySettings {
@@ -35,7 +35,11 @@ export function TicketDeliverySection({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const canEdit = role === "OWNER";
+  // v1.4-Bugs-Operativos Lote 2: durante impersonation readonly el
+  // JWT lleva role=OWNER pero las mutaciones están bloqueadas por el
+  // backend; usamos readEffectiveAuth para no ofrecer botones que
+  // fallarían con IMPERSONATION_READONLY.
+  const canEdit = role === "OWNER" && readEffectiveAuth().canEdit;
 
   useEffect(() => {
     api<{ ticketDelivery: TicketDeliverySettings }>(

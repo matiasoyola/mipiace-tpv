@@ -25,7 +25,14 @@ import { SuperAdminLoginPage } from "./superadmin/SuperAdminLoginPage.js";
 import { SuperAdminMePage } from "./superadmin/SuperAdminMePage.js";
 import { TenantDetailPage } from "./superadmin/TenantDetailPage.js";
 import { TenantsListPage } from "./superadmin/TenantsListPage.js";
-import { api, ApiError, clearTokens, readTokens, storeTokens } from "./api.js";
+import {
+  api,
+  ApiError,
+  clearTokens,
+  readEffectiveAuth,
+  readTokens,
+  storeTokens,
+} from "./api.js";
 import {
   CenteredCard,
   CenteredLoader,
@@ -785,7 +792,10 @@ function AccountPage() {
     .map((s) => s[0])
     .filter(Boolean)
     .join("");
-  const canEdit = me.user.role === "OWNER";
+  // v1.4-Bugs-Operativos Lote 2: la impersonación full del super-admin
+  // debe poder rotar API Key y editar perfil fiscal; readEffectiveAuth
+  // devuelve canEdit=true en ese caso. En `readonly`, canEdit=false.
+  const canEdit = readEffectiveAuth().canEdit;
 
   return (
     <AdminShell title="Mi cuenta" initials={initials}>
