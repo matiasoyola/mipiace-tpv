@@ -1,0 +1,389 @@
+// v1.4-Bugs-Operativos Lote 1 · cierre de turno con PIN del cajero.
+//
+// Cubre la regresión detectada con Peluquería Sole: el cierre exigía PIN
+// de OWNER/MANAGER, lo que bloqueaba a la empleada CASHIER cuando había
+// tickets SYNC_FAILED en el turno. La regla nueva es:
+//   - El PIN del cajero autenticado vale (default).
+//   - El opt-in `requireOwnerPinForCashClose=true` mantiene la política
+//     antigua para tenants que quieran restringir a OWNER/MANAGER.
+
+import { randomBytes } from "node:crypto";
+
+process.env.NODE_ENV = "test";
+process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
+process.env.REDIS_URL = "redis://localhost:6379";
+process.env.JWT_ACCESS_SECRET = "a".repeat(40);
+process.env.JWT_REFRESH_SECRET = "b".repeat(40);
+process.env.HOLDED_KEY_ENCRYPTION_SECRET = randomBytes(32).toString("base64");
+process.env.Z_REPORT_STORAGE_ROOT = "/tmp/z-reports-test";
+
+import Fastify from "fastify";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const TENANT = "00000000-0000-0000-0000-000000000001";
+const STORE = "00000000-0000-0000-0000-000000000002";
+const REGISTER = "00000000-0000-0000-0000-000000000003";
+const DEVICE = "00000000-0000-0000-0000-000000000004";
+const CASHIER = "00000000-0000-0000-0000-000000000005";
+const OWNER = "00000000-0000-0000-0000-000000000006";
+const SHIFT = "00000000-0000-0000-0000-00000000000e";
+
+const CASHIER_PIN = "1234";
+const OWNER_PIN = "9999";
+
+interface FakeTenantRow {
+  id: string;
+  requireManagerPinForForceClose: boolean;
+  requireOwnerPinForCashClose: boolean;
+  lastIncrementalSyncAt: Date | null;
+  holdedApiKeyCiphertext: string | null;
+}
+
+interface FakeUser {
+  id: string;
+  tenantId: string;
+  email: string;
+  role: "OWNER" | "MANAGER" | "CASHIER";
+  pinHash: string | null;
+}
+
+interface FakeShift {
+  id: string;
+  registerId: string;
+  userId: string;
+  closedAt: Date | null;
+  cashOpening: { toString: () => string } & { valueOf: () => number };
+  openedAt: Date;
+  register: {
+    id: string;
+    name: string;
+    store: { id: string; name: string; tenantId: string };
+  };
+}
+
+const state = {
+  tenant: null as FakeTenantRow | null,
+  users: new Map<string, FakeUser>(),
+  shifts: new Map<string, FakeShift>(),
+  tickets: [] as Array<{ shiftId: string; status: string }>,
+  refunds: [] as Array<{ shiftId: string; status: string }>,
+  payments: [] as Array<{ shiftId: string; method: string; amount: number }>,
+  cashCounts: [] as Array<{ shiftId: string; kind: string }>,
+};
+
+function dec(n: number) {
+  return {
+    toString: () => String(n),
+    valueOf: () => n,
+  } as { toString: () => string; valueOf: () => number };
+}
+
+const fakePrisma = {
+  tenant: {
+    findUniqueOrThrow: vi.fn(async ({ where }: any) => {
+      if (!state.tenant || state.tenant.id !== where.id)
+        throw new Error("tenant not found");
+      return state.tenant;
+    }),
+  },
+  shift: {
+    findFirst: vi.fn(async ({ where }: any) => {
+      for (const s of state.shifts.values()) {
+        if (where.id && s.id !== where.id) continue;
+        if (where.registerId && s.registerId !== where.registerId) continue;
+        if (where.closedAt === null && s.closedAt !== null) continue;
+        return s;
+      }
+      return null;
+    }),
+    update: vi.fn(async ({ where, data }: any) => {
+      const s = state.shifts.get(where.id);
+      if (!s) throw new Error("shift not found");
+      if (data.closedAt) s.closedAt = data.closedAt;
+      return {
+        id: s.id,
+        closedAt: s.closedAt,
+        zReportPdfPath: data.zReportPdfPath ?? null,
+      };
+    }),
+  },
+  ticket: {
+    groupBy: vi.fn(async ({ where }: any) => {
+      const filtered = state.tickets.filter(
+        (t) =>
+          t.shiftId === where.shiftId &&
+          (where.status?.in
+            ? where.status.in.includes(t.status)
+            : t.status === where.status),
+      );
+      const map = new Map<string, number>();
+      for (const t of filtered) map.set(t.status, (map.get(t.status) ?? 0) + 1);
+      return [...map.entries()].map(([status, _count]) => ({
+        status,
+        _count,
+      }));
+    }),
+    count: vi.fn(async ({ where }: any) => {
+      return state.tickets.filter((t) => t.shiftId === where.shiftId).length;
+    }),
+    findMany: vi.fn(async ({ where }: any) => {
+      return state.tickets
+        .filter((t) => t.shiftId === where.shiftId && t.status === where.status)
+        .map((t, i) => ({
+          id: `t-${i}`,
+          internalNumber: `T-${i}`,
+          total: dec(0),
+          syncError: { reason: "silent_reject" },
+          createdAt: new Date(),
+        }));
+    }),
+  },
+  refund: {
+    groupBy: vi.fn(async () => []),
+    findMany: vi.fn(async () => []),
+  },
+  ticketPayment: {
+    groupBy: vi.fn(async ({ where }: any) => {
+      const map = new Map<string, number>();
+      for (const p of state.payments) {
+        if (p.shiftId !== where.ticket.shiftId) continue;
+        map.set(p.method, (map.get(p.method) ?? 0) + p.amount);
+      }
+      return [...map.entries()].map(([method, amount]) => ({
+        method,
+        _sum: { amount },
+      }));
+    }),
+    aggregate: vi.fn(async ({ where }: any) => {
+      let total = 0;
+      for (const p of state.payments) {
+        if (p.shiftId === where.ticket.shiftId && p.method === where.method)
+          total += p.amount;
+      }
+      return { _sum: { amount: total } };
+    }),
+  },
+  user: {
+    findMany: vi.fn(async ({ where }: any) => {
+      const out: FakeUser[] = [];
+      for (const u of state.users.values()) {
+        if (where.tenantId && u.tenantId !== where.tenantId) continue;
+        if (where.pinHash?.not === null && u.pinHash === null) continue;
+        const orMatches =
+          !where.OR ||
+          where.OR.some((clause: any) => {
+            if (clause.id && u.id === clause.id) return true;
+            if (clause.role?.in && clause.role.in.includes(u.role)) return true;
+            return false;
+          });
+        if (!orMatches) continue;
+        out.push(u);
+      }
+      return out;
+    }),
+    findUniqueOrThrow: vi.fn(async ({ where }: any) => {
+      const u = state.users.get(where.id);
+      if (!u) throw new Error("user not found");
+      return u;
+    }),
+  },
+  shiftCashCount: {
+    findFirst: vi.fn(async ({ where }: any) => {
+      return (
+        state.cashCounts.find(
+          (c) => c.shiftId === where.shiftId && c.kind === where.kind,
+        ) ?? null
+      );
+    }),
+    create: vi.fn(async ({ data }: any) => {
+      state.cashCounts.push({ shiftId: data.shiftId, kind: data.kind });
+      return data;
+    }),
+  },
+} as const;
+
+vi.mock("../src/context.js", () => ({
+  getPrisma: () => fakePrisma,
+  getRedis: () => ({}) as never,
+  shutdown: async () => undefined,
+}));
+
+// El generador de Z-PDF escribe en disco. Lo mockeamos a un path constante.
+vi.mock("../src/shift/z-report.js", () => ({
+  generateZReportPdf: vi.fn(async () => "/tmp/z-test.pdf"),
+}));
+
+const { registerShiftRoutes } = await import("../src/shift/routes.js");
+const { signCashierSession } = await import("../src/shift/cashier-session.js");
+const { hashPassword } = await import("../src/auth/passwords.js");
+
+function signSession(role: "OWNER" | "MANAGER" | "CASHIER" = "CASHIER") {
+  return signCashierSession(
+    {
+      sub: role === "OWNER" ? OWNER : CASHIER,
+      tid: TENANT,
+      did: DEVICE,
+      rid: REGISTER,
+      role,
+    },
+    10,
+  );
+}
+
+async function buildApp() {
+  const app = Fastify();
+  await registerShiftRoutes(app);
+  return app;
+}
+
+beforeEach(async () => {
+  state.tenant = {
+    id: TENANT,
+    requireManagerPinForForceClose: true,
+    requireOwnerPinForCashClose: false,
+    // sync reciente para que health=ok (lastSyncAgeMs < 24h)
+    lastIncrementalSyncAt: new Date(),
+    holdedApiKeyCiphertext: "fake-cipher",
+  };
+  state.users.clear();
+  state.users.set(CASHIER, {
+    id: CASHIER,
+    tenantId: TENANT,
+    email: "maoysa@gmail.com",
+    role: "CASHIER",
+    pinHash: await hashPassword(CASHIER_PIN),
+  });
+  state.users.set(OWNER, {
+    id: OWNER,
+    tenantId: TENANT,
+    email: "sole@peluqueriasole.es",
+    role: "OWNER",
+    pinHash: await hashPassword(OWNER_PIN),
+  });
+  state.shifts.clear();
+  state.shifts.set(SHIFT, {
+    id: SHIFT,
+    registerId: REGISTER,
+    userId: CASHIER,
+    closedAt: null,
+    cashOpening: dec(100),
+    openedAt: new Date(Date.now() - 60 * 60 * 1000),
+    register: {
+      id: REGISTER,
+      name: "Caja principal",
+      store: { id: STORE, name: "Sole", tenantId: TENANT },
+    },
+  });
+  state.tickets = [];
+  state.refunds = [];
+  state.payments = [];
+  state.cashCounts = [];
+  vi.clearAllMocks();
+});
+
+describe("POST /shift/:id/close · PIN del cajero", () => {
+  it("CASHIER cierra su propio turno sin tickets fallados → 200 sin PIN", async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/shift/${SHIFT}/close`,
+      headers: { authorization: `Bearer ${signSession("CASHIER")}` },
+      payload: {
+        cashCounted: 100,
+        methodTotals: { CASH: 100 },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.shift.id).toBe(SHIFT);
+    expect(body.forceClose).toBe(false);
+  });
+
+  it("CASHIER cierra su propio turno con SYNC_FAILED → 200 si manda SU PIN", async () => {
+    // Sembramos un ticket SYNC_FAILED + syncFailureAccepted=true.
+    state.tickets.push({ shiftId: SHIFT, status: "SYNC_FAILED" });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/shift/${SHIFT}/close`,
+      headers: { authorization: `Bearer ${signSession("CASHIER")}` },
+      payload: {
+        cashCounted: 100,
+        methodTotals: { CASH: 100 },
+        syncFailureAccepted: true,
+        managerPin: CASHIER_PIN,
+      },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("CASHIER con SYNC_FAILED y PIN del OWNER → 200 (back-compat encargado físico)", async () => {
+    state.tickets.push({ shiftId: SHIFT, status: "SYNC_FAILED" });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/shift/${SHIFT}/close`,
+      headers: { authorization: `Bearer ${signSession("CASHIER")}` },
+      payload: {
+        cashCounted: 100,
+        methodTotals: { CASH: 100 },
+        syncFailureAccepted: true,
+        managerPin: OWNER_PIN,
+      },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("CASHIER con SYNC_FAILED y PIN incorrecto → 403 INVALID_MANAGER_PIN", async () => {
+    state.tickets.push({ shiftId: SHIFT, status: "SYNC_FAILED" });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/shift/${SHIFT}/close`,
+      headers: { authorization: `Bearer ${signSession("CASHIER")}` },
+      payload: {
+        cashCounted: 100,
+        methodTotals: { CASH: 100 },
+        syncFailureAccepted: true,
+        managerPin: "0000",
+      },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("INVALID_MANAGER_PIN");
+  });
+
+  it("requireOwnerPinForCashClose=true → PIN del CASHIER rechazado, OWNER aceptado", async () => {
+    state.tenant!.requireOwnerPinForCashClose = true;
+    state.tickets.push({ shiftId: SHIFT, status: "SYNC_FAILED" });
+    const app = await buildApp();
+
+    // Su propio PIN ya NO vale.
+    const denied = await app.inject({
+      method: "POST",
+      url: `/shift/${SHIFT}/close`,
+      headers: { authorization: `Bearer ${signSession("CASHIER")}` },
+      payload: {
+        cashCounted: 100,
+        methodTotals: { CASH: 100 },
+        syncFailureAccepted: true,
+        managerPin: CASHIER_PIN,
+      },
+    });
+    expect(denied.statusCode).toBe(403);
+    expect(denied.json().error).toBe("INVALID_MANAGER_PIN");
+
+    // OWNER sí.
+    const ok = await app.inject({
+      method: "POST",
+      url: `/shift/${SHIFT}/close`,
+      headers: { authorization: `Bearer ${signSession("CASHIER")}` },
+      payload: {
+        cashCounted: 100,
+        methodTotals: { CASH: 100 },
+        syncFailureAccepted: true,
+        managerPin: OWNER_PIN,
+      },
+    });
+    expect(ok.statusCode).toBe(200);
+  });
+});

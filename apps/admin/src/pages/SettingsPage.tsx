@@ -18,6 +18,7 @@ import {
 interface TenantSettings {
   cashierAutoLogoutMinutes: number;
   requireManagerPinForForceClose: boolean;
+  requireOwnerPinForCashClose: boolean;
   deviceNewLoginAlertEnabled: boolean;
   discountThresholdPct: number;
   cashierSearchableContacts: boolean;
@@ -131,6 +132,16 @@ export function SettingsPage() {
             setForm({ ...form, requireManagerPinForForceClose: v })
           }
           help="Cuando un cajero cierra un turno que no abrió (colgado), pedimos PIN del encargado."
+        />
+        <ToggleField
+          id="ownerPinForCashClose"
+          label="Sólo el propietario/encargado puede cerrar caja"
+          checked={form.requireOwnerPinForCashClose}
+          disabled={!canEdit}
+          onChange={(v) =>
+            setForm({ ...form, requireOwnerPinForCashClose: v })
+          }
+          help="Por defecto el cajero cierra con su propio PIN. Actívalo si prefieres que sólo OWNER o MANAGER puedan autorizar el cierre."
         />
         <ToggleField
           id="deviceAlertEmail"

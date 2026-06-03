@@ -569,15 +569,27 @@ async function executeShiftClose(args: {
   //       sea el propio cajero. El encargado debe confirmar que
   //       conoce los errores y se hace cargo (queda en log y en
   //       el Z PDF como audit trail).
+  //
+  // v1.4-Bugs-Operativos Lote 1 · regla nueva: el PIN aceptado por
+  // defecto es el del USER autenticado en la cashierSession. Antes
+  // exigíamos MANAGER/OWNER, lo que obligaba a la propietaria a estar
+  // presente cada vez que un cajero quería cerrar (Peluquería Sole con
+  // empleada fija). El tenant puede opt-in al comportamiento histórico
+  // con `requireOwnerPinForCashClose=true` para restringir a OWNER/MANAGER.
   const tenant = await prisma.tenant.findUniqueOrThrow({
     where: { id: cashier.tid },
-    select: { requireManagerPinForForceClose: true },
+    select: {
+      requireManagerPinForForceClose: true,
+      requireOwnerPinForCashClose: true,
+    },
   });
-  const actorIsManager = cashier.role === "MANAGER";
+  const actorIsManagerOrOwner =
+    cashier.role === "MANAGER" || cashier.role === "OWNER";
   const needForceClosePin =
-    !isOwnerOfShift && tenant.requireManagerPinForForceClose && !actorIsManager;
-  const needSyncFailedPin = failed > 0 && !actorIsManager;
+    !isOwnerOfShift && tenant.requireManagerPinForForceClose && !actorIsManagerOrOwner;
+  const needSyncFailedPin = failed > 0 && !actorIsManagerOrOwner;
   let managerEmail: string | null = null;
+  let pinAuthorizationKind: "self" | "manager" | null = null;
   if (needForceClosePin || needSyncFailedPin) {
     if (!body.managerPin) {
       return {
@@ -586,27 +598,41 @@ async function executeShiftClose(args: {
         body: {
           error: "MANAGER_PIN_REQUIRED",
           message: needSyncFailedPin
-            ? "Hay tickets rechazados por Holded en este turno. Necesitas el PIN del encargado para cerrarlo."
-            : "Este cierre forzado requiere PIN de encargado.",
+            ? "Hay tickets rechazados por Holded en este turno. Necesitas el PIN del cajero (o del encargado) para cerrarlo."
+            : "Este cierre forzado requiere PIN del cajero (o del encargado).",
           reason: needSyncFailedPin ? "sync_failed" : "force_close",
         },
       };
     }
-    // B7 §9: aceptamos PIN de OWNER (auto-generado al login admin)
-    // además del de MANAGER. Desbloquea el caso "1 dueño + 1
-    // cajero" sin necesidad de crear un MANAGER de respaldo.
-    const managers = await prisma.user.findMany({
+    // 1) Default: el PIN del cajero autenticado vale.
+    // 2) Back-compat: si el opt-in `requireOwnerPinForCashClose` está
+    //    OFF (default), también aceptamos un PIN de OWNER/MANAGER
+    //    cualquiera del tenant — útil para "encargado físicamente
+    //    presente" que teclea su PIN en la PWA del cajero.
+    // 3) Opt-in ON: sólo OWNER/MANAGER. Mantiene la política histórica
+    //    para tenants pequeños que quieran este control.
+    const candidates = await prisma.user.findMany({
       where: {
         tenantId: cashier.tid,
-        role: { in: ["MANAGER", "OWNER"] },
+        OR: [
+          { id: cashier.sub },
+          { role: { in: ["MANAGER", "OWNER"] } },
+        ],
         pinHash: { not: null },
       },
-      select: { id: true, email: true, pinHash: true },
+      select: { id: true, email: true, role: true, pinHash: true },
     });
-    let authorized: { id: string; email: string } | null = null;
-    for (const m of managers) {
-      if (m.pinHash && (await verifyPassword(m.pinHash, body.managerPin))) {
-        authorized = { id: m.id, email: m.email };
+    const eligible = tenant.requireOwnerPinForCashClose
+      ? candidates.filter((c) => c.role === "MANAGER" || c.role === "OWNER")
+      : candidates;
+    let authorized: { id: string; email: string; isSelf: boolean } | null = null;
+    for (const c of eligible) {
+      if (c.pinHash && (await verifyPassword(c.pinHash, body.managerPin))) {
+        authorized = {
+          id: c.id,
+          email: c.email,
+          isSelf: c.id === cashier.sub,
+        };
         break;
       }
     }
@@ -616,11 +642,14 @@ async function executeShiftClose(args: {
         status: 403,
         body: {
           error: "INVALID_MANAGER_PIN",
-          message: "PIN de encargado incorrecto.",
+          message: tenant.requireOwnerPinForCashClose
+            ? "PIN de encargado incorrecto."
+            : "PIN incorrecto. Usa tu PIN de cajero o el del encargado.",
         },
       };
     }
     managerEmail = authorized.email;
+    pinAuthorizationKind = authorized.isSelf ? "self" : "manager";
   }
   // Audit trail estructurado (B5 §2.3). Cuando montemos la tabla
   // audit_log dedicada, lo movemos allí; hoy basta con que quede
@@ -632,11 +661,14 @@ async function executeShiftClose(args: {
         shiftId: shift.id,
         registerId: shift.register.id,
         cashierUserId: cashier.sub,
-        managerUserEmail: managerEmail,
+        authorizationEmail: managerEmail,
+        authorizationKind: pinAuthorizationKind,
         failedCount: failed,
         pendingSyncCount: pendingSync,
       },
-      "encargado autorizó cierre con SYNC_FAILED",
+      pinAuthorizationKind === "self"
+        ? "cajero autorizó su propio cierre con SYNC_FAILED"
+        : "encargado autorizó cierre con SYNC_FAILED",
     );
   }
 
