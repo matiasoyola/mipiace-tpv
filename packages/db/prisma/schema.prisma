@@ -220,6 +220,12 @@ model Tenant {
   // Si true, el cierre forzado de un turno colgado de otro cajero exige
   // PIN de encargado cuando el cajero actual no lo es. Default true.
   requireManagerPinForForceClose Boolean           @default(true) @map("require_manager_pin_for_force_close")
+  // v1.4-Bugs-Operativos Lote 1 · capa extra de control para tenants
+  // que quieren mantener la antigua política "sólo OWNER/MANAGER cierra
+  // caja". Default false → la operativa normal acepta el PIN del cajero
+  // autenticado para los cierres que requieran autenticación adicional
+  // (sync_failed, force_close cuando el flag de force_close está on).
+  requireOwnerPinForCashClose    Boolean           @default(false) @map("require_owner_pin_for_cash_close")
   // Si true, se envía email al propietario cuando un device nuevo se
   // empareja o cuando un device conocido aparece desde un país distinto
   // (§17.4). Default true.

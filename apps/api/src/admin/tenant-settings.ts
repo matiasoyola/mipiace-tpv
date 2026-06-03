@@ -5,6 +5,7 @@
 //
 //   - cashierAutoLogoutMinutes (B3, default 10)
 //   - requireManagerPinForForceClose (B3, default true)
+//   - requireOwnerPinForCashClose (v1.4-Bugs-Operativos, default false)
 //   - deviceNewLoginAlertEnabled (B3, default true)
 //   - discountThresholdPct (B6 §2, default 10)
 //   - cashierSearchableContacts (B6 §4, default true)
@@ -31,6 +32,7 @@ export async function registerAdminTenantSettingsRoutes(
         select: {
           cashierAutoLogoutMinutes: true,
           requireManagerPinForForceClose: true,
+          requireOwnerPinForCashClose: true,
           deviceNewLoginAlertEnabled: true,
           discountThresholdPct: true,
           cashierSearchableContacts: true,
@@ -40,6 +42,7 @@ export async function registerAdminTenantSettingsRoutes(
         settings: {
           cashierAutoLogoutMinutes: tenant.cashierAutoLogoutMinutes,
           requireManagerPinForForceClose: tenant.requireManagerPinForForceClose,
+          requireOwnerPinForCashClose: tenant.requireOwnerPinForCashClose,
           deviceNewLoginAlertEnabled: tenant.deviceNewLoginAlertEnabled,
           discountThresholdPct: Number(tenant.discountThresholdPct),
           cashierSearchableContacts: tenant.cashierSearchableContacts,
@@ -59,6 +62,7 @@ export async function registerAdminTenantSettingsRoutes(
           properties: {
             cashierAutoLogoutMinutes: { type: "integer", minimum: 5, maximum: 60 },
             requireManagerPinForForceClose: { type: "boolean" },
+            requireOwnerPinForCashClose: { type: "boolean" },
             deviceNewLoginAlertEnabled: { type: "boolean" },
             // 5 dec.2 — encajamos con la columna Decimal(5,2). El UI
             // lo manda como número entero o con un decimal; aceptamos
@@ -74,6 +78,7 @@ export async function registerAdminTenantSettingsRoutes(
       const body = request.body as {
         cashierAutoLogoutMinutes?: number;
         requireManagerPinForForceClose?: boolean;
+        requireOwnerPinForCashClose?: boolean;
         deviceNewLoginAlertEnabled?: boolean;
         discountThresholdPct?: number;
         cashierSearchableContacts?: boolean;
@@ -84,6 +89,7 @@ export async function registerAdminTenantSettingsRoutes(
         data: {
           cashierAutoLogoutMinutes: body.cashierAutoLogoutMinutes,
           requireManagerPinForForceClose: body.requireManagerPinForForceClose,
+          requireOwnerPinForCashClose: body.requireOwnerPinForCashClose,
           deviceNewLoginAlertEnabled: body.deviceNewLoginAlertEnabled,
           discountThresholdPct: body.discountThresholdPct,
           cashierSearchableContacts: body.cashierSearchableContacts,
@@ -91,6 +97,7 @@ export async function registerAdminTenantSettingsRoutes(
         select: {
           cashierAutoLogoutMinutes: true,
           requireManagerPinForForceClose: true,
+          requireOwnerPinForCashClose: true,
           deviceNewLoginAlertEnabled: true,
           discountThresholdPct: true,
           cashierSearchableContacts: true,
@@ -100,6 +107,7 @@ export async function registerAdminTenantSettingsRoutes(
         settings: {
           cashierAutoLogoutMinutes: updated.cashierAutoLogoutMinutes,
           requireManagerPinForForceClose: updated.requireManagerPinForForceClose,
+          requireOwnerPinForCashClose: updated.requireOwnerPinForCashClose,
           deviceNewLoginAlertEnabled: updated.deviceNewLoginAlertEnabled,
           discountThresholdPct: Number(updated.discountThresholdPct),
           cashierSearchableContacts: updated.cashierSearchableContacts,

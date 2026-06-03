@@ -199,6 +199,12 @@ function DeviceRow({
   onRevoke: () => void;
 }) {
   const revoked = device.revokedAt != null;
+  // v1.4-Bugs-Operativos Lote 3 · badge "Inactivo > 7 días" para que
+  // el OWNER vea de un vistazo qué dispositivos lleva sin usarse más
+  // de una semana (típico: tablet vieja sustituida sin revocar). El
+  // umbral es por ahora 7 días absolutos; cuando haya feedback real
+  // del piloto subiremos/bajaremos sin tocar la API.
+  const inactive = !revoked && isDeviceInactive(device.lastSeenAt, 7);
   return (
     <div
       className={
@@ -211,8 +217,15 @@ function DeviceRow({
         <Calculator className="w-[18px] h-[18px]" strokeWidth={2.1} />
       </span>
       <div className="flex-1 min-w-0">
-        <div className="text-[14px] font-medium text-mipiace-ink truncate">
-          {device.name ?? device.userAgent ?? "Dispositivo sin nombre"}
+        <div className="text-[14px] font-medium text-mipiace-ink truncate flex items-center gap-2">
+          <span className="truncate">
+            {device.name ?? device.userAgent ?? "Dispositivo sin nombre"}
+          </span>
+          {inactive && (
+            <span className="text-[10.5px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 shrink-0">
+              Inactivo &gt; 7 días
+            </span>
+          )}
         </div>
         <div className="text-[12.5px] text-slate-500 mt-0.5 truncate">
           {device.storeName} · {device.registerName}
@@ -237,6 +250,14 @@ function DeviceRow({
       )}
     </div>
   );
+}
+
+function isDeviceInactive(lastSeenAt: string | null, daysThreshold: number): boolean {
+  if (!lastSeenAt) return false;
+  const parsed = Date.parse(lastSeenAt);
+  if (Number.isNaN(parsed)) return false;
+  const ageDays = (Date.now() - parsed) / (24 * 60 * 60 * 1000);
+  return ageDays > daysThreshold;
 }
 
 function GenerateCodeModal({

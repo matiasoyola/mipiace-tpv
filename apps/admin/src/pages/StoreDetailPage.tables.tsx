@@ -15,7 +15,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { Coffee, Sofa, Trash2, Wine } from "lucide-react";
 
-import { api, ApiError, type AdminRole } from "../api.js";
+import { api, ApiError, readEffectiveAuth, type AdminRole } from "../api.js";
 import { FieldError, OutlineButton, PrimaryButton } from "../ui.js";
 
 type TableZone = "SALON" | "TERRAZA" | "BARRA" | "RESERVADO";
@@ -64,7 +64,8 @@ export function TablesSection({
   const [showNewTable, setShowNewTable] = useState(false);
   const [showBarSetup, setShowBarSetup] = useState(false);
   const navigate = useNavigate();
-  const canMutate = role === "OWNER";
+  // v1.4-Bugs-Operativos Lote 2: cap impersonation readonly.
+  const canMutate = role === "OWNER" && readEffectiveAuth().canEdit;
 
   async function refresh() {
     try {

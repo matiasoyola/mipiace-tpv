@@ -6,7 +6,13 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { AdminShell } from "../AdminShell.js";
-import { api, ApiError, clearTokens, readCurrentRole } from "../api.js";
+import {
+  api,
+  ApiError,
+  clearTokens,
+  readEffectiveAuth,
+  readonlyReasonLabel,
+} from "../api.js";
 import {
   CenteredLoader,
   FieldError,
@@ -18,6 +24,7 @@ import {
 interface TenantSettings {
   cashierAutoLogoutMinutes: number;
   requireManagerPinForForceClose: boolean;
+  requireOwnerPinForCashClose: boolean;
   deviceNewLoginAlertEnabled: boolean;
   discountThresholdPct: number;
   cashierSearchableContacts: boolean;
@@ -34,8 +41,13 @@ export function SettingsPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const role = readCurrentRole();
-  const canEdit = role === "OWNER";
+  // v1.4-Bugs-Operativos Lote 2: usamos `readEffectiveAuth` para que la
+  // impersonación full del super-admin pueda editar (canEdit=true) y la
+  // readonly muestre el tooltip explícito en vez de un genérico "sólo
+  // propietario".
+  const effective = readEffectiveAuth();
+  const canEdit = effective.canEdit;
+  const readonlyTip = readonlyReasonLabel(effective.readonlyReason);
 
   useEffect(() => {
     api<{ settings: TenantSettings }>("/admin/tenant/settings")
@@ -85,7 +97,7 @@ export function SettingsPage() {
     <AdminShell title="Ajustes">
       <p className="text-[13.5px] text-slate-500 mb-5 -mt-2">
         Configura cómo opera el TPV. Estos ajustes aplican a todo el negocio.
-        {!canEdit && " Sólo el propietario puede modificar los valores."}
+        {!canEdit && readonlyTip && " " + readonlyTip + "."}
       </p>
 
       {success && <SuccessBanner message={success} />}
@@ -131,6 +143,16 @@ export function SettingsPage() {
             setForm({ ...form, requireManagerPinForForceClose: v })
           }
           help="Cuando un cajero cierra un turno que no abrió (colgado), pedimos PIN del encargado."
+        />
+        <ToggleField
+          id="ownerPinForCashClose"
+          label="Sólo el propietario/encargado puede cerrar caja"
+          checked={form.requireOwnerPinForCashClose}
+          disabled={!canEdit}
+          onChange={(v) =>
+            setForm({ ...form, requireOwnerPinForCashClose: v })
+          }
+          help="Por defecto el cajero cierra con su propio PIN. Actívalo si prefieres que sólo OWNER o MANAGER puedan autorizar el cierre."
         />
         <ToggleField
           id="deviceAlertEmail"

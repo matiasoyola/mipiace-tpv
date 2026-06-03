@@ -170,6 +170,75 @@ export function readCurrentRole(): AdminRole | null {
   }
 }
 
+// v1.4-Bugs-Operativos Lote 2 · estado efectivo de auth para gating de UI.
+//
+// Hasta ahora cada página resolvía `canEdit = role === "OWNER"`. Eso
+// dejaba dos huecos en la sesión de impersonación:
+//   (a) En `readonly`, role=OWNER (impersonación SIEMPRE viene como
+//       OWNER) → `canEdit=true` → la UI ofrecía mutaciones que el
+//       backend rechazaba con 403. Mala UX.
+//   (b) En `full`, role=OWNER → `canEdit=true`. Eso era correcto,
+//       pero alguna página añadía gates ad-hoc por `impersonating` que
+//       lo capaban indebidamente.
+//
+// Esta función centraliza la decisión y deja explícito el motivo
+// (`readonlyReason`) para que la UI muestre el tooltip adecuado.
+export interface EffectiveAuth {
+  role: AdminRole | null;
+  canEdit: boolean;
+  // Cuando canEdit=false, qué se le pinta al usuario. `null` cuando
+  // canEdit=true.
+  readonlyReason: "manager" | "impersonation_readonly" | null;
+  impersonationMode: "readonly" | "full" | null;
+}
+
+export function readEffectiveAuth(): EffectiveAuth {
+  const role = readCurrentRole();
+  const imp = readImpersonationState();
+  if (imp) {
+    // En impersonación el JWT viene con role=OWNER. En modo `full`
+    // permitimos mutaciones (el backend audita cada una). En modo
+    // `readonly` capamos UI para no ofrecer botones que fallarían.
+    if (imp.mode === "full") {
+      return {
+        role: "OWNER",
+        canEdit: true,
+        readonlyReason: null,
+        impersonationMode: "full",
+      };
+    }
+    return {
+      role: "OWNER",
+      canEdit: false,
+      readonlyReason: "impersonation_readonly",
+      impersonationMode: "readonly",
+    };
+  }
+  if (role === "OWNER") {
+    return { role, canEdit: true, readonlyReason: null, impersonationMode: null };
+  }
+  return {
+    role,
+    canEdit: false,
+    readonlyReason: role === "MANAGER" ? "manager" : null,
+    impersonationMode: null,
+  };
+}
+
+// Texto humano para el tooltip de mutaciones bloqueadas. Pensado para
+// pasarse como `title` o como `<span>` debajo del botón deshabilitado.
+export function readonlyReasonLabel(
+  reason: EffectiveAuth["readonlyReason"],
+): string | null {
+  if (reason === "impersonation_readonly") {
+    return "Modo solo lectura — usa Configurar para editar";
+  }
+  if (reason === "manager") {
+    return "Sólo el propietario puede modificar este valor";
+  }
+  return null;
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
