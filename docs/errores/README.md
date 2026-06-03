@@ -120,6 +120,27 @@ docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml
 
 ## Impresoras
 
+### ⚠️ "Failed to execute 'requestDevice' on 'USB': No device selected"
+
+**Síntoma**: el cajero pulsa "Imprimir ticket" y aparece el toast de error con este mensaje en inglés.
+
+**Donde se ve**: TPV → SuccessOverlay tras cobrar, al pulsar "Imprimir ticket" la primera vez.
+
+**Causa raíz**: WebUSB de Chrome abre un popup "Seleccionar dispositivo USB" la primera vez que el TPV intenta acceder a la impresora. Si el cajero cierra el popup sin seleccionar dispositivo, devuelve esa excepción.
+
+**Fix**:
+1. Volver a pulsar "Imprimir ticket" o "Conectar impresora".
+2. Cuando salga el popup, seleccionar la impresora (puede aparecer como "Unknown device") y pulsar Conectar.
+3. Tras emparejar una vez, el TPV recuerda el dispositivo y los siguientes prints van directos.
+
+**Si el popup sale vacío** (sin dispositivos): el cable USB es de solo carga sin pines de datos, o el adaptador OTG (USB-C → USB-A) tampoco transmite datos. Cambiar cable/adaptador.
+
+**Pendiente traducir el mensaje** (política #10) a algo tipo "Conexión cancelada. Vuelve a pulsar Imprimir y elige la impresora en la ventana que aparece."
+
+**Visto el**: 2026-06-02 en TPV de Peluquería Sole.
+
+---
+
 ### ✅ RawBT — "no ACK" en impresiones largas (las cortas sí)
 
 **Síntoma**: el test print de RawBT (texto plano corto) imprime. Pero al mandar un PDF de ticket entero vía "Compartir → RawBT", la impresora pierde ACK y no imprime.
