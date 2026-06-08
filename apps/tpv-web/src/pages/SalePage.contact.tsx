@@ -1,11 +1,21 @@
 // Sheet de cliente del ticket (B4 §2.3). Buscador que tira de
 // `/contacts/search` (B2) + botón "Crear contacto" con form mini.
+//
+// v1.4-Buscador-Contactos · privacidad por defecto en el listado:
+// el cajero ve sólo el nombre y los últimos 4 dígitos del teléfono.
+// NIF, email y dirección quedan ocultos del listado para no exponer
+// datos personales delante del cliente. El contactId completo sigue
+// enviándose al backend cuando se asigna al ticket — los datos se
+// usan en la factura de Holded, simplemente no se renderizan al
+// cajero. Si necesita verlos puntualmente, el botón "Ver datos
+// completos" los revela tras una confirmación explícita.
 
 import { useEffect, useState } from "react";
-import { Loader2, X } from "lucide-react";
+import { Eye, Loader2, X } from "lucide-react";
 
 import { ApiError, apiWithCashier } from "../api.js";
 import { scrollFocusIntoView } from "../lib/visualViewportSync.js";
+import { maskPhone } from "./SalePage.contact.privacy.js";
 
 export interface ContactRef {
   id: string;
@@ -46,6 +56,16 @@ export function ContactSheet({
   const [fallback, setFallback] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  // v1.4-Buscador-Contactos: revelado "data on demand". Por defecto
+  // el listado oculta NIF y email. El cajero puede pulsar "Ver datos
+  // completos" en una fila concreta para mostrarlos puntualmente
+  // (caso raro: confirmar identidad antes de cobrar una factura).
+  // Reseteamos al cambiar la query para que el revelado no persista
+  // entre búsquedas distintas.
+  const [revealedId, setRevealedId] = useState<string | null>(null);
+  useEffect(() => {
+    setRevealedId(null);
+  }, [query]);
 
   useEffect(() => {
     if (query.trim().length === 0) {
@@ -102,7 +122,7 @@ export function ContactSheet({
                 {current.name}
               </div>
               <div className="text-[12.5px] text-mipiace-coral-dark/80">
-                {current.email ?? current.phone ?? current.nif ?? "Asociado al ticket"}
+                {maskPhone(current.phone) ?? "Asociado al ticket"}
               </div>
             </div>
             <button onClick={onClear} className="text-[13px] text-mipiace-coral-dark hover:underline">
@@ -156,20 +176,50 @@ export function ContactSheet({
                 Sin coincidencias.
               </div>
             ) : (
-              <ul className="space-y-1.5 mb-3">
-                {results.map((r) => (
-                  <li key={r.id}>
-                    <button
-                      onClick={() => onSelect(r)}
-                      className="w-full text-left p-3 rounded-xl bg-white border border-slate-200 hover:border-mipiace-coral/40"
-                    >
-                      <div className="text-[14px] font-medium text-mipiace-ink">{r.name}</div>
-                      <div className="text-[12.5px] text-slate-500">
-                        {[r.email, r.phone, r.nif].filter(Boolean).join(" · ") || "—"}
+              <ul className="space-y-1.5 mb-3" data-testid="contact-results">
+                {results.map((r) => {
+                  const isRevealed = revealedId === r.id;
+                  const maskedPhone = maskPhone(r.phone);
+                  return (
+                    <li key={r.id}>
+                      <div className="w-full text-left p-3 rounded-xl bg-white border border-slate-200 hover:border-mipiace-coral/40">
+                        <button
+                          onClick={() => onSelect(r)}
+                          className="w-full text-left"
+                          data-testid="contact-result"
+                        >
+                          <div className="text-[14px] font-medium text-mipiace-ink">
+                            {r.name}
+                          </div>
+                          <div className="text-[12.5px] text-slate-500">
+                            {maskedPhone ?? "Sin teléfono"}
+                          </div>
+                        </button>
+                        {isRevealed && (
+                          <div className="mt-2 pt-2 border-t border-slate-100 text-[12px] text-slate-500 space-y-0.5">
+                            {r.phone && <div>Tel: {r.phone}</div>}
+                            {r.email && <div>Email: {r.email}</div>}
+                            {r.nif && <div>NIF: {r.nif}</div>}
+                          </div>
+                        )}
+                        {!isRevealed && (r.email || r.nif) && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setRevealedId(r.id);
+                            }}
+                            className="mt-1.5 inline-flex items-center gap-1 text-[11.5px] text-slate-400 hover:text-mipiace-coral-dark"
+                            data-testid="contact-reveal"
+                          >
+                            <Eye className="w-3 h-3" strokeWidth={2.25} />
+                            Ver datos completos
+                          </button>
+                        )}
                       </div>
-                    </button>
-                  </li>
-                ))}
+                    </li>
+                  );
+                })}
               </ul>
             )}
             <button

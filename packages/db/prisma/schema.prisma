@@ -147,6 +147,21 @@ enum BusinessType {
   SERVICES
 }
 
+// v1.4-Buscador-Contactos · clasificación de contactos heredada de
+// Holded. Persistida localmente para que el buscador del TPV pueda
+// filtrar sin abrir el `raw` JSON. UNKNOWN cubre el caso edge en el
+// que Holded devuelve un valor que no conocemos o el campo viene
+// vacío — el filtro por defecto incluye UNKNOWN para no esconder
+// contactos legítimos preexistentes a la migración b29.
+enum ContactType {
+  CLIENT
+  SUPPLIER
+  LEAD
+  DEBTOR
+  CREDITOR
+  UNKNOWN
+}
+
 // v1.3-Thalia Lote 4 · arqueo de caja. El cajero cuenta efectivo por
 // denominaciones (no un total libre como antes). X = control intermedio
 // sin cerrar turno; Z = control de cierre — generamos sólo uno Z por
@@ -716,6 +731,12 @@ model Contact {
   email            String?
   phone            String?
   raw              Json?
+  // v1.4-Buscador-Contactos · clasificación heredada de Holded
+  // (`client | supplier | lead | debtor | creditor`). Permite que el
+  // buscador del TPV liste sólo clientes y no proveedores. Nullable
+  // mientras el backfill no ha corrido sobre los Contact preexistentes
+  // a la migración b29; tras el backfill todos quedan poblados.
+  type             ContactType?  @map("type")
   // Si false, el contacto fue marcado como huérfano en el último sync
   // incremental (B7 §8): ya no existe en Holded. Lo conservamos por si
   // hay tickets históricos que apuntan a él. La UI del TPV lo oculta.
@@ -731,6 +752,7 @@ model Contact {
   @@index([tenantId, email])
   @@index([tenantId, nif])
   @@index([tenantId, name])
+  @@index([tenantId, type])
   @@map("contacts")
 }
 

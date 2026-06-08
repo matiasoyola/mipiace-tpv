@@ -118,6 +118,47 @@ docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml
 
 ---
 
+### ✅ Proveedores y autónomos aparecen en el buscador de cliente del TPV
+
+**Síntoma**: la cajera busca a una clienta histórica desde el sheet "Cliente" del ticket y entre los resultados aparecen el distribuidor de tintes, la asesoría fiscal, el casero del local… El cajero no entiende por qué el TPV le sugiere asociar un proveedor a un ticket de venta.
+
+**Dónde se ve**: TPV → SalePage → botón "Cliente" → buscador.
+
+**Causa raíz**: hasta v1.4 el sync de Holded traía cualquier contacto (`type=client | supplier | lead | debtor | creditor`) y la BD local los guardaba sin distinguir. El endpoint `/contacts/search` no filtraba por tipo, así que el listado mezclaba clientes y proveedores.
+
+**Fix definitivo**: `v1.4-Buscador-Contactos` (este bloque).
+
+1. Migración b29 añade `contacts.type ContactType?` con el enum heredado de Holded.
+2. Tanto el sync inicial como el incremental rellenan el campo (`mapHoldedType` en `apps/api/src/contacts/holded-type.ts`).
+3. `GET /contacts/search` filtra por defecto `type IN (CLIENT, UNKNOWN)`. SUPPLIER, LEAD, DEBTOR y CREDITOR se ocultan al cajero.
+4. Para los contactos preexistentes (con `type=null`) existe el backfill `apps/api/src/scripts/backfill-contact-type.ts`. Mientras no corra, esos contactos se siguen viendo como UNKNOWN — el filtro lo permite a propósito para no esconder al cliente histórico.
+5. Si en el futuro un cliente pregunta "¿por qué no aparece mi proveedor X en el TPV?" la respuesta correcta es: **no aparecen a propósito; el TPV sólo lista contactos `type=client`**. Si necesita gestionar el proveedor, lo hace desde Holded; si fue marcado mal en Holded, lo cambia ahí y el siguiente sync (15 min) lo refleja.
+
+**Escape hatch**: la query `?includeAll=1` está habilitada sólo para el OWNER y devuelve todos los tipos. El TPV nunca la usa, pero queda disponible para herramientas internas (Natalia revisando un caso concreto, scripts de soporte).
+
+**Visto el**: 2026-06-08 con Peluquería Sole (la cajera no sabía cuál de las dos "Martas" era la clienta).
+
+---
+
+### ✅ El cajero ve NIF y email de la clienta en pantalla delante de ella
+
+**Síntoma**: la cajera abre el sheet "Cliente" para buscar a la clienta que va a cobrar; en cuanto teclea el nombre aparece toda la PII (nombre + NIF + email + teléfono completo) en una lista visible a quien esté delante de la pantalla.
+
+**Dónde se ve**: TPV → SalePage → botón "Cliente" → buscador.
+
+**Causa raíz**: el componente `SalePage.contact.tsx` renderizaba `[email, phone, nif].filter(Boolean).join(" · ")` por cada resultado. No era necesario operativamente — el cajero usa el NOMBRE para reconocer a la persona; los datos completos sólo aportan ruido.
+
+**Fix definitivo**: `v1.4-Buscador-Contactos` (este bloque). El listado muestra sólo:
+
+- Nombre completo.
+- Últimos 4 dígitos del teléfono (`•••• 3456`).
+
+El NIF, email y dirección quedan ocultos por defecto. Si el cajero necesita verificar la identidad (caso raro — confirmar antes de cobrar una factura grande), pulsa "Ver datos completos" en la fila y aparecen ahí mismo. La selección del contacto (asignación al ticket) sigue mandando el `contactId` completo al backend, así que la factura de Holded incluye los datos íntegros sin que el cajero tenga que verlos.
+
+**Visto el**: 2026-06-08 (auditoría de privacidad post-feedback de Peluquería Sole).
+
+---
+
 ## Impresoras
 
 ### ⚠️ "Failed to execute 'requestDevice' on 'USB': No device selected"
