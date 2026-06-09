@@ -110,27 +110,33 @@ export function CartLineItem({
 
   return (
     <div className="flex items-center gap-2 md:gap-2.5 py-2.5 md:py-3">
-      {/* Stepper: −  units  + */}
-      <div className="flex items-center bg-mipiace-stone rounded-xl shrink-0">
-        <button
-          type="button"
-          onClick={handleDecrement}
-          aria-label={line.units <= 1 ? "Mínimo 1 — usa la papelera para eliminar" : "Restar una unidad"}
-          className="h-11 w-11 flex items-center justify-center text-slate-600 hover:text-mipiace-ink active:bg-slate-200/60 rounded-l-xl"
-        >
-          <Minus className="w-4 h-4" />
-        </button>
-        <span className="min-w-[28px] text-center text-[14px] font-semibold tabular-nums text-mipiace-ink select-none">
+      {/* Stepper vertical: cantidad arriba, − y + en fila debajo.
+          v1.4-hotfix5: cambio del stepper horizontal previo para
+          ganar ~45 px de ancho que iban al título del artículo
+          (problema visto en tablet apaisada de Sole). Mantiene
+          targets táctiles de 44 px en − y +. */}
+      <div className="flex flex-col items-stretch bg-mipiace-stone rounded-xl shrink-0 w-[88px]">
+        <span className="text-center pt-1 pb-0.5 text-[16px] font-semibold tabular-nums text-mipiace-ink select-none">
           {line.units}
         </span>
-        <button
-          type="button"
-          onClick={handleIncrement}
-          aria-label="Sumar una unidad"
-          className="h-11 w-11 flex items-center justify-center text-slate-600 hover:text-mipiace-ink active:bg-slate-200/60 rounded-r-xl"
-        >
-          <Plus className="w-4 h-4" />
-        </button>
+        <div className="flex">
+          <button
+            type="button"
+            onClick={handleDecrement}
+            aria-label={line.units <= 1 ? "Mínimo 1 — usa la papelera para eliminar" : "Restar una unidad"}
+            className="h-9 w-11 flex items-center justify-center text-slate-600 hover:text-mipiace-ink active:bg-slate-200/60 rounded-bl-xl"
+          >
+            <Minus className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={handleIncrement}
+            aria-label="Sumar una unidad"
+            className="h-9 w-11 flex items-center justify-center text-slate-600 hover:text-mipiace-ink active:bg-slate-200/60 rounded-br-xl"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* Zona central clickable → abre LineSheet */}
