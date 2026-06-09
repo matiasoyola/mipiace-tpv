@@ -1780,7 +1780,7 @@ function SaleWorkspace({
              empezar y mantenerlo accesible sin que dependa del scroll).
           4. Lista de líneas (flex-1, scroll interno).
           5. Subtotal/IVA al pie como info detallada. */}
-      <aside className="bg-white rounded-3xl border border-slate-200 flex flex-col order-1 lg:order-2 lg:h-full lg:overflow-y-auto">
+      <aside className="bg-white rounded-3xl border border-slate-200 flex flex-col order-1 lg:order-2 lg:h-full lg:overflow-hidden">
         {/* 1 · Header */}
         <div className="flex items-center justify-between px-5 md:px-7 pt-5 md:pt-6 pb-3 md:pb-4 border-b border-slate-100 shrink-0">
           <div className="min-w-0">
@@ -1882,12 +1882,11 @@ function SaleWorkspace({
           </button>
         </div>
 
-        {/* 3 · Resumen + Cobrar STICKY TOP del aside. v1.4-hotfix3
-             2026-06-04: Matías lo prefiere arriba para que el botón
-             Cobrar esté siempre visible y el listado del desglose
-             quede debajo con scroll si no cabe. El sticky top-0
-             pega este bloque a la cabecera al scrollear el aside. */}
-        <div className="px-5 md:px-7 pt-4 md:pt-5 pb-5 md:pb-6 border-b border-slate-100 shrink-0 sticky top-0 bg-white z-10">
+        {/* 3 · Resumen + Cobrar fijo arriba. shrink-0 dentro del
+             flex-col del aside (aside overflow-hidden), así nunca
+             scrollea: header + chips + este bloque quedan SIEMPRE
+             visibles. v1.4-hotfix4 2026-06-04. */}
+        <div className="px-5 md:px-7 pt-4 md:pt-5 pb-5 md:pb-6 border-b border-slate-100 shrink-0">
           <div className="space-y-1.5 mb-3 md:mb-4">
             <div className="flex justify-between text-[12.5px] md:text-[13px]">
               <span className="text-slate-500">Subtotal</span>
@@ -1967,11 +1966,10 @@ function SaleWorkspace({
           </div>
         </div>
 
-        {/* 4 · Lista de líneas debajo del Cobrar. flex-1 + min-h
-             para garantizar 3-4 líneas visibles en cualquier viewport;
-             el aside ya tiene overflow-y-auto que da scroll natural
-             cuando hay muchas líneas. */}
-        <div className="px-5 md:px-7 py-3 flex-1 min-h-[160px]">
+        {/* 4 · Lista de líneas debajo del Cobrar. flex-1 + min-h-0
+             + overflow-y-auto → SOLO el listado scrollea cuando hay
+             muchas líneas; el resto del aside permanece fijo. */}
+        <div className="px-5 md:px-7 py-3 flex-1 min-h-0 overflow-y-auto">
           {lines.length === 0 ? (
             <div className="py-10 text-center text-[13px] text-slate-400">
               Pulsa un {vocab("itemNoun", businessType).toLowerCase()} o escanea un código para empezar.
