@@ -1780,7 +1780,7 @@ function SaleWorkspace({
              empezar y mantenerlo accesible sin que dependa del scroll).
           4. Lista de líneas (flex-1, scroll interno).
           5. Subtotal/IVA al pie como info detallada. */}
-      <aside className="bg-white rounded-3xl border border-slate-200 flex flex-col order-1 lg:order-2 lg:h-full lg:overflow-hidden">
+      <aside className="bg-white rounded-3xl border border-slate-200 flex flex-col order-1 lg:order-2 lg:h-full lg:overflow-y-auto">
         {/* 1 · Header */}
         <div className="flex items-center justify-between px-5 md:px-7 pt-5 md:pt-6 pb-3 md:pb-4 border-b border-slate-100 shrink-0">
           <div className="min-w-0">
@@ -1890,7 +1890,7 @@ function SaleWorkspace({
              movimos al fondo del aside. El orden ahora es:
              header → chips → LISTA SCROLL → subtotales → Total grande + Cobrar.
              Mismo flujo top→bottom que el nuevo CheckoutPage redesign. */}
-        <div className="px-5 md:px-7 py-1 flex-1 min-h-0 overflow-y-auto">
+        <div className="px-5 md:px-7 py-1 flex-1 min-h-[160px]">
           {lines.length === 0 ? (
             <div className="py-10 text-center text-[13px] text-slate-400">
               Pulsa un {vocab("itemNoun", businessType).toLowerCase()} o escanea un código para empezar.
@@ -1936,9 +1936,10 @@ function SaleWorkspace({
         </div>
 
         {/* 5 · Total grande + acciones principales (Cobrar, Enviar
-             comanda / Guardar) al fondo. shrink-0 → sticky bottom
-             natural. v1.4-hotfix 2026-06-04. */}
-        <div className="px-5 md:px-7 pt-4 md:pt-5 pb-5 md:pb-6 border-t border-slate-100 shrink-0">
+             comanda / Guardar). sticky bottom-0 + bg-white para que
+             siempre esté visible aunque el aside necesite scroll en
+             viewports cortos. v1.4-hotfix 2026-06-04 (#11 cualquier res). */}
+        <div className="px-5 md:px-7 pt-4 md:pt-5 pb-5 md:pb-6 border-t border-slate-100 shrink-0 sticky bottom-0 bg-white">
           <div className="flex items-baseline justify-between mb-3 md:mb-4">
             <span className="text-[15px] md:text-[16px] font-semibold text-mipiace-ink">Total</span>
             <span className="text-[28px] md:text-[34px] font-semibold text-mipiace-ink tabular-nums tracking-tight">
