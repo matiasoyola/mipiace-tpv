@@ -1882,8 +1882,63 @@ function SaleWorkspace({
           </button>
         </div>
 
-        {/* 3 · Total grande + acciones principales (Report A) */}
-        <div className="px-5 md:px-7 pt-4 md:pt-5 pb-5 md:pb-6 border-b border-slate-100 shrink-0">
+        {/* 3 · Lista de líneas (zona scrolleable). v1.4-hotfix
+             2026-06-04: el bloque "Total grande + Cobrar" estaba aquí
+             encima y dejaba el listado con <200px de altura en tablet
+             Android apaisada (1024×600 / 1280×800), haciendo
+             imposible editar líneas o ver más de 1-2 artículos. Lo
+             movimos al fondo del aside. El orden ahora es:
+             header → chips → LISTA SCROLL → subtotales → Total grande + Cobrar.
+             Mismo flujo top→bottom que el nuevo CheckoutPage redesign. */}
+        <div className="px-5 md:px-7 py-1 flex-1 min-h-0 overflow-y-auto">
+          {lines.length === 0 ? (
+            <div className="py-10 text-center text-[13px] text-slate-400">
+              Pulsa un {vocab("itemNoun", businessType).toLowerCase()} o escanea un código para empezar.
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {/* v1.2-Lite-fix1 Lote 3 (F2-UX): cada línea es un
+                  componente extraído con stepper inline y papelera
+                  armada por doble tap. El click central sigue
+                  abriendo el LineSheet para edición avanzada (precio,
+                  descuento, modifiers, nota). */}
+              {lines.map((l) => (
+                <CartLineItem
+                  key={l.id}
+                  line={l}
+                  onClick={() => onClickLine(l)}
+                  onUnitsChange={(units) => onUpdateLineUnits(l.id, units)}
+                  onRemove={() => onRemoveLine(l.id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* 4 · Subtotal / Descuento / IVA · sólo lectura. */}
+        <div className="px-5 md:px-7 py-3 md:py-4 border-t border-slate-100 space-y-1.5 shrink-0">
+          <div className="flex justify-between text-[12.5px] md:text-[13px]">
+            <span className="text-slate-500">Subtotal</span>
+            <span className="text-slate-700 tabular-nums">{formatEur(totals.subtotalNet)}</span>
+          </div>
+          {totals.discount > 0 && (
+            <div className="flex justify-between text-[12.5px] md:text-[13px]">
+              <span className="text-slate-500">Descuento</span>
+              <span className="text-mipiace-coral tabular-nums font-medium">
+                −{formatEur(totals.discount)}
+              </span>
+            </div>
+          )}
+          <div className="flex justify-between text-[12.5px] md:text-[13px]">
+            <span className="text-slate-500">IVA</span>
+            <span className="text-slate-700 tabular-nums">{formatEur(totals.tax)}</span>
+          </div>
+        </div>
+
+        {/* 5 · Total grande + acciones principales (Cobrar, Enviar
+             comanda / Guardar) al fondo. shrink-0 → sticky bottom
+             natural. v1.4-hotfix 2026-06-04. */}
+        <div className="px-5 md:px-7 pt-4 md:pt-5 pb-5 md:pb-6 border-t border-slate-100 shrink-0">
           <div className="flex items-baseline justify-between mb-3 md:mb-4">
             <span className="text-[15px] md:text-[16px] font-semibold text-mipiace-ink">Total</span>
             <span className="text-[28px] md:text-[34px] font-semibold text-mipiace-ink tabular-nums tracking-tight">
@@ -1942,52 +1997,6 @@ function SaleWorkspace({
               <span>{vocab("saleAction", businessType)}</span>
               <span className="tabular-nums">{formatEur(totals.total)}</span>
             </button>
-          </div>
-        </div>
-
-        {/* 4 · Lista de líneas (zona scrolleable) */}
-        <div className="px-5 md:px-7 py-1 flex-1 min-h-0 overflow-y-auto">
-          {lines.length === 0 ? (
-            <div className="py-10 text-center text-[13px] text-slate-400">
-              Pulsa un {vocab("itemNoun", businessType).toLowerCase()} o escanea un código para empezar.
-            </div>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {/* v1.2-Lite-fix1 Lote 3 (F2-UX): cada línea es un
-                  componente extraído con stepper inline y papelera
-                  armada por doble tap. El click central sigue
-                  abriendo el LineSheet para edición avanzada (precio,
-                  descuento, modifiers, nota). */}
-              {lines.map((l) => (
-                <CartLineItem
-                  key={l.id}
-                  line={l}
-                  onClick={() => onClickLine(l)}
-                  onUnitsChange={(units) => onUpdateLineUnits(l.id, units)}
-                  onRemove={() => onRemoveLine(l.id)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-        {/* 5 · Subtotal / Descuento / IVA al fondo, sólo lectura. El
-             Total y los botones de cobrar/guardar ya están arriba. */}
-        <div className="px-5 md:px-7 py-3 md:py-4 border-t border-slate-100 space-y-1.5 shrink-0">
-          <div className="flex justify-between text-[12.5px] md:text-[13px]">
-            <span className="text-slate-500">Subtotal</span>
-            <span className="text-slate-700 tabular-nums">{formatEur(totals.subtotalNet)}</span>
-          </div>
-          {totals.discount > 0 && (
-            <div className="flex justify-between text-[12.5px] md:text-[13px]">
-              <span className="text-slate-500">Descuento</span>
-              <span className="text-mipiace-coral tabular-nums font-medium">
-                −{formatEur(totals.discount)}
-              </span>
-            </div>
-          )}
-          <div className="flex justify-between text-[12.5px] md:text-[13px]">
-            <span className="text-slate-500">IVA</span>
-            <span className="text-slate-700 tabular-nums">{formatEur(totals.tax)}</span>
           </div>
         </div>
       </aside>

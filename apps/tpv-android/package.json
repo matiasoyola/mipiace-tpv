@@ -1,0 +1,25 @@
+{
+  "name": "@mipiacetpv/tpv-android",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shell Capacitor que empaqueta tpv-web como app Android nativa",
+  "scripts": {
+    "build:web": "pnpm --filter @mipiacetpv/tpv-web build",
+    "sync": "pnpm run build:web && cap sync android",
+    "open": "cap open android",
+    "run:android": "pnpm run sync && cap run android",
+    "doctor": "cap doctor"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.0",
+    "@capacitor/app": "^6.0.0",
+    "@capacitor/core": "^6.1.0",
+    "@capacitor/status-bar": "^6.0.0",
+    "@mipiacetpv/escpos-builder": "workspace:*"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.0",
+    "typescript": "^5.6.3"
+  }
+}

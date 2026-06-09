@@ -1,0 +1,25 @@
+# Proyecto nativo generado por `cap add android`. Se versiona el código
+# fuente Android (java/kotlin, AndroidManifest, gradle scripts) pero NO
+# los artefactos de build ni los binarios.
+
+# Build outputs
+android/app/build/
+android/build/
+android/.gradle/
+android/captures/
+android/local.properties
+android/app/release/
+*.apk
+*.aab
+
+# Keystore de firma — NUNCA al repo. Vive en el Mac de Matías + 1Password.
+*.keystore
+*.jks
+keystore.properties
+
+# IDE
+.idea/
+*.iml
+
+# Capacitor copia el dist de tpv-web aquí en cada sync; no versionar.
+android/app/src/main/assets/public/
