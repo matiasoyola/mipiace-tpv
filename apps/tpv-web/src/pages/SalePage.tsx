@@ -1882,64 +1882,30 @@ function SaleWorkspace({
           </button>
         </div>
 
-        {/* 3 · Lista de líneas (zona scrolleable). v1.4-hotfix
-             2026-06-04: el bloque "Total grande + Cobrar" estaba aquí
-             encima y dejaba el listado con <200px de altura en tablet
-             Android apaisada (1024×600 / 1280×800), haciendo
-             imposible editar líneas o ver más de 1-2 artículos. Lo
-             movimos al fondo del aside. El orden ahora es:
-             header → chips → LISTA SCROLL → subtotales → Total grande + Cobrar.
-             Mismo flujo top→bottom que el nuevo CheckoutPage redesign. */}
-        <div className="px-5 md:px-7 py-1 flex-1 min-h-[160px]">
-          {lines.length === 0 ? (
-            <div className="py-10 text-center text-[13px] text-slate-400">
-              Pulsa un {vocab("itemNoun", businessType).toLowerCase()} o escanea un código para empezar.
-            </div>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {/* v1.2-Lite-fix1 Lote 3 (F2-UX): cada línea es un
-                  componente extraído con stepper inline y papelera
-                  armada por doble tap. El click central sigue
-                  abriendo el LineSheet para edición avanzada (precio,
-                  descuento, modifiers, nota). */}
-              {lines.map((l) => (
-                <CartLineItem
-                  key={l.id}
-                  line={l}
-                  onClick={() => onClickLine(l)}
-                  onUnitsChange={(units) => onUpdateLineUnits(l.id, units)}
-                  onRemove={() => onRemoveLine(l.id)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* 4 · Subtotal / Descuento / IVA · sólo lectura. */}
-        <div className="px-5 md:px-7 py-3 md:py-4 border-t border-slate-100 space-y-1.5 shrink-0">
-          <div className="flex justify-between text-[12.5px] md:text-[13px]">
-            <span className="text-slate-500">Subtotal</span>
-            <span className="text-slate-700 tabular-nums">{formatEur(totals.subtotalNet)}</span>
-          </div>
-          {totals.discount > 0 && (
+        {/* 3 · Resumen + Cobrar STICKY TOP del aside. v1.4-hotfix3
+             2026-06-04: Matías lo prefiere arriba para que el botón
+             Cobrar esté siempre visible y el listado del desglose
+             quede debajo con scroll si no cabe. El sticky top-0
+             pega este bloque a la cabecera al scrollear el aside. */}
+        <div className="px-5 md:px-7 pt-4 md:pt-5 pb-5 md:pb-6 border-b border-slate-100 shrink-0 sticky top-0 bg-white z-10">
+          <div className="space-y-1.5 mb-3 md:mb-4">
             <div className="flex justify-between text-[12.5px] md:text-[13px]">
-              <span className="text-slate-500">Descuento</span>
-              <span className="text-mipiace-coral tabular-nums font-medium">
-                −{formatEur(totals.discount)}
-              </span>
+              <span className="text-slate-500">Subtotal</span>
+              <span className="text-slate-700 tabular-nums">{formatEur(totals.subtotalNet)}</span>
             </div>
-          )}
-          <div className="flex justify-between text-[12.5px] md:text-[13px]">
-            <span className="text-slate-500">IVA</span>
-            <span className="text-slate-700 tabular-nums">{formatEur(totals.tax)}</span>
+            {totals.discount > 0 && (
+              <div className="flex justify-between text-[12.5px] md:text-[13px]">
+                <span className="text-slate-500">Descuento</span>
+                <span className="text-mipiace-coral tabular-nums font-medium">
+                  −{formatEur(totals.discount)}
+                </span>
+              </div>
+            )}
+            <div className="flex justify-between text-[12.5px] md:text-[13px]">
+              <span className="text-slate-500">IVA</span>
+              <span className="text-slate-700 tabular-nums">{formatEur(totals.tax)}</span>
+            </div>
           </div>
-        </div>
-
-        {/* 5 · Total grande + acciones principales (Cobrar, Enviar
-             comanda / Guardar). sticky bottom-0 + bg-white para que
-             siempre esté visible aunque el aside necesite scroll en
-             viewports cortos. v1.4-hotfix 2026-06-04 (#11 cualquier res). */}
-        <div className="px-5 md:px-7 pt-4 md:pt-5 pb-5 md:pb-6 border-t border-slate-100 shrink-0 sticky bottom-0 bg-white">
           <div className="flex items-baseline justify-between mb-3 md:mb-4">
             <span className="text-[15px] md:text-[16px] font-semibold text-mipiace-ink">Total</span>
             <span className="text-[28px] md:text-[34px] font-semibold text-mipiace-ink tabular-nums tracking-tight">
@@ -2000,6 +1966,36 @@ function SaleWorkspace({
             </button>
           </div>
         </div>
+
+        {/* 4 · Lista de líneas debajo del Cobrar. flex-1 + min-h
+             para garantizar 3-4 líneas visibles en cualquier viewport;
+             el aside ya tiene overflow-y-auto que da scroll natural
+             cuando hay muchas líneas. */}
+        <div className="px-5 md:px-7 py-3 flex-1 min-h-[160px]">
+          {lines.length === 0 ? (
+            <div className="py-10 text-center text-[13px] text-slate-400">
+              Pulsa un {vocab("itemNoun", businessType).toLowerCase()} o escanea un código para empezar.
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {/* v1.2-Lite-fix1 Lote 3 (F2-UX): cada línea es un
+                  componente extraído con stepper inline y papelera
+                  armada por doble tap. El click central sigue
+                  abriendo el LineSheet para edición avanzada (precio,
+                  descuento, modifiers, nota). */}
+              {lines.map((l) => (
+                <CartLineItem
+                  key={l.id}
+                  line={l}
+                  onClick={() => onClickLine(l)}
+                  onUnitsChange={(units) => onUpdateLineUnits(l.id, units)}
+                  onRemove={() => onRemoveLine(l.id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
       </aside>
     </div>
   );
