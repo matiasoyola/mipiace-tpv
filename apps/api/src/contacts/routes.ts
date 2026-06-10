@@ -16,6 +16,7 @@
 // Ver `docs/spike-holded.md` §10 para el findings.
 
 import type { FastifyInstance } from "fastify";
+import { ContactType } from "@prisma/client";
 
 import {
   ApiKeyClient,
@@ -151,7 +152,7 @@ export async function registerContactsRoutes(app: FastifyInstance): Promise<void
       }
       const typeFilter = wantAll
         ? undefined
-        : { type: { in: ["CLIENT", "UNKNOWN"] as const } };
+        : { type: { in: [ContactType.CLIENT, ContactType.UNKNOWN] } };
 
       // BD local: LIKE por name/email/nif/phone. Limitamos a 25
       // resultados — el front filtra incremental conforme escribe.
