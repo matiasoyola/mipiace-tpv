@@ -20,6 +20,7 @@ import {
 } from "@mipiacetpv/holded-client";
 
 import { backfillImagesFromHolded } from "../catalog/image-backfill.js";
+import { mapHoldedType } from "../contacts/holded-type.js";
 import { decryptSecret } from "../crypto.js";
 import { loadEnv } from "../env.js";
 import { enqueueProductImageCache } from "../queues/product-image-cache.js";
@@ -543,6 +544,9 @@ export async function upsertContact(
   const nif = raw.code ? raw.code.trim() : null;
   const email = raw.email ? raw.email.trim().toLowerCase() : null;
   const phone = raw.phone ? raw.phone.trim() : raw.mobile ? raw.mobile.trim() : null;
+  // v1.4-Buscador-Contactos: clasificamos el contacto para que el TPV
+  // filtre clientes y oculte proveedores/leads/deudores/acreedores.
+  const type = mapHoldedType((raw as { type?: unknown }).type);
   await prisma.contact.upsert({
     where: {
       tenantId_holdedContactId: {
@@ -557,6 +561,7 @@ export async function upsertContact(
       nif,
       email,
       phone,
+      type,
       raw: raw as unknown as object,
       active: true,
       lastSeenInSyncAt: now,
@@ -566,6 +571,7 @@ export async function upsertContact(
       nif,
       email,
       phone,
+      type,
       raw: raw as unknown as object,
       active: true,
       lastSeenInSyncAt: now,

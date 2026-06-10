@@ -63,10 +63,55 @@ GET /invoicing/v1/contacts?email=facturacion@example.com
   - El espejo local se actualiza con webhooks (documentados pero no
     consumidos automáticamente — ver decisiones B2).
 
+## Campo `type` — clasificación heredada
+
+Cada contacto Holded trae `type` con uno de estos valores:
+
+| Valor Holded | Significado | ¿Se ve en el TPV? |
+|---|---|---|
+| `client`   | Cliente final            | Sí — flujo canónico del cajero |
+| `supplier` | Proveedor                | No (oculto por defecto) |
+| `lead`     | Prospecto comercial      | No |
+| `debtor`   | Deudor                   | No |
+| `creditor` | Acreedor                 | No |
+| *(otro / vacío)* | Sin clasificar     | Sí — se trata como UNKNOWN |
+
+### Política mipiacetpv (v1.4-Buscador-Contactos)
+
+- El sync local persiste `type` en la columna `contacts.type` (enum
+  `ContactType` con los valores anteriores en mayúsculas + `UNKNOWN`).
+- `GET /contacts/search` filtra por defecto a `type IN (CLIENT, UNKNOWN)`.
+  El cajero NUNCA ve proveedores ni leads en el buscador, lo que evita
+  confusiones operativas (la cajera busca "Marta" y aparece el
+  distribuidor de tintes que también se llama Marta).
+- `UNKNOWN` se incluye porque los contactos preexistentes a la
+  migración b29 tienen `type=null` hasta que corre el backfill
+  `apps/api/src/scripts/backfill-contact-type.ts`. Ocultar UNKNOWN
+  escondería contactos legítimos durante esa ventana.
+- El parámetro `?includeAll=1` está reservado para el OWNER (admin) y
+  desactiva el filtro. El TPV nunca lo manda — usar sólo desde
+  herramientas internas.
+- En el fallback por teléfono contra Holded en vivo: si el contacto
+  remoto NO es `client` (ni viene sin tipo), se descarta — no se
+  upserta localmente ni se devuelve al cajero. Así un proveedor con
+  el mismo teléfono que una clienta histórica no contamina la BD
+  local.
+
+## Minimización de datos en la UI del TPV (v1.4-Buscador-Contactos)
+
+El buscador del TPV muestra sólo `name` + últimos 4 dígitos del
+teléfono. NIF/DNI, email y dirección quedan ocultos por defecto y
+sólo se revelan tras un click explícito en "Ver datos completos".
+El `contactId` se sigue enviando al backend al asignar al ticket
+(la factura de Holded llega completa); la minimización es puramente
+visual para no exponer datos personales a quien esté delante de la
+pantalla del cajero.
+
 ## Referencias
 
 - Decisiones B2 (contactos search BD local primero).
 - T-6 v1.1 (preservación fiscal data en sync warehouse).
+- v1.4-Buscador-Contactos (filtro por `type` + minimización UI).
 - [endpoints/salesreceipt](salesreceipt.md) — uso de `contactId`.
 
-Last-updated: 2026-06-03
+Last-updated: 2026-06-08

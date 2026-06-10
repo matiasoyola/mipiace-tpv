@@ -32,6 +32,7 @@ import { requireOwnerOrCashier } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
 import { decryptSecret } from "../crypto.js";
 import { loadEnv } from "../env.js";
+import { mapHoldedType } from "./holded-type.js";
 
 // Heurística simple: dígitos + opcional `+`, espacios o guiones, al
 // menos 6 dígitos en total. Suficiente para distinguir un teléfono
@@ -62,12 +63,16 @@ function pickString(value: unknown): string | null {
 async function upsertHoldedContact(
   tenantId: string,
   remote: HoldedContact,
-): Promise<{ id: string; tenantId: string; holdedContactId: string; name: string; nif: string | null; email: string | null; phone: string | null }> {
+): Promise<{ id: string; tenantId: string; holdedContactId: string; name: string; nif: string | null; email: string | null; phone: string | null; type: string | null }> {
   const prisma = getPrisma();
   const name = pickString(remote.name) ?? "(sin nombre)";
   const nif = pickString(remote.code);
   const email = pickString(remote.email);
   const phone = pickString(remote.phone) ?? pickString(remote.mobile);
+  // v1.4-Buscador-Contactos: persistimos el `type` heredado de Holded
+  // para que el buscador del TPV pueda filtrar SUPPLIER/LEAD/DEBTOR/
+  // CREDITOR fuera del listado del cajero.
+  const type = mapHoldedType((remote as { type?: unknown }).type);
   return prisma.contact.upsert({
     where: { tenantId_holdedContactId: { tenantId, holdedContactId: remote.id } },
     create: {
@@ -77,6 +82,7 @@ async function upsertHoldedContact(
       nif,
       email,
       phone,
+      type,
       raw: remote as unknown as object,
     },
     update: {
@@ -84,6 +90,7 @@ async function upsertHoldedContact(
       nif,
       email,
       phone,
+      type,
       raw: remote as unknown as object,
       lastSyncedAt: new Date(),
     },
@@ -95,6 +102,7 @@ async function upsertHoldedContact(
       nif: true,
       email: true,
       phone: true,
+      type: true,
     },
   });
 }
@@ -109,15 +117,41 @@ export async function registerContactsRoutes(app: FastifyInstance): Promise<void
           type: "object",
           required: ["q"],
           additionalProperties: false,
-          properties: { q: { type: "string", minLength: 1, maxLength: 120 } },
+          properties: {
+            q: { type: "string", minLength: 1, maxLength: 120 },
+            // v1.4-Buscador-Contactos: escape hatch SOLO para
+            // admin/owner. Sin este flag el endpoint filtra
+            // SUPPLIER/LEAD/DEBTOR/CREDITOR; con él (y rol OWNER)
+            // devuelve todos los tipos. El TPV nunca lo manda.
+            includeAll: { type: "string", enum: ["0", "1"] },
+          },
         },
       },
     },
     async (request, reply) => {
       const auth = request.auth!;
-      const { q } = request.query as { q: string };
+      const { q, includeAll } = request.query as { q: string; includeAll?: string };
       const prisma = getPrisma();
       const trimmed = q.trim();
+
+      // v1.4-Buscador-Contactos: por defecto el cajero sólo ve
+      // clientes (CLIENT) y contactos sin clasificar (UNKNOWN — son
+      // contactos preexistentes a la migración b29 que todavía no
+      // han pasado por backfill, o casos en los que Holded devolvió
+      // un valor que no conocemos). SUPPLIER, LEAD, DEBTOR y
+      // CREDITOR quedan fuera. El owner puede pasar `?includeAll=1`
+      // para ver todos; cualquier rol distinto a OWNER que intente
+      // ese flag recibe 403.
+      const wantAll = includeAll === "1";
+      if (wantAll && auth.role !== "OWNER") {
+        return reply.code(403).send({
+          error: "FORBIDDEN",
+          message: "Sólo el propietario puede ver contactos no-cliente.",
+        });
+      }
+      const typeFilter = wantAll
+        ? undefined
+        : { type: { in: ["CLIENT", "UNKNOWN"] as const } };
 
       // BD local: LIKE por name/email/nif/phone. Limitamos a 25
       // resultados — el front filtra incremental conforme escribe.
@@ -130,6 +164,7 @@ export async function registerContactsRoutes(app: FastifyInstance): Promise<void
         where: {
           tenantId: auth.tenantId,
           active: true,
+          ...(typeFilter ?? {}),
           OR: [
             { name: { contains: trimmed, mode: "insensitive" } },
             { email: { contains: trimmed, mode: "insensitive" } },
@@ -146,6 +181,7 @@ export async function registerContactsRoutes(app: FastifyInstance): Promise<void
           nif: true,
           email: true,
           phone: true,
+          type: true,
         },
       });
 
@@ -180,6 +216,19 @@ export async function registerContactsRoutes(app: FastifyInstance): Promise<void
         const upserted = [];
         for (const r of remote) {
           if (typeof r.id !== "string") continue;
+          // v1.4-Buscador-Contactos: si el contacto remoto NO es
+          // cliente (proveedor con el teléfono de la cajera, lead
+          // antiguo del CRM, etc.) no lo upserteamos ni lo
+          // devolvemos. Salvo `?includeAll=1` con rol OWNER — caso
+          // admin, no operativa de cajero.
+          const remoteType = mapHoldedType((r as { type?: unknown }).type);
+          if (!wantAll && remoteType !== "CLIENT" && remoteType !== "UNKNOWN") {
+            request.log.info(
+              { tenantId: auth.tenantId, holdedContactId: r.id, remoteType },
+              "fallback Holded: contacto no-cliente descartado en search del TPV",
+            );
+            continue;
+          }
           const row = await upsertHoldedContact(auth.tenantId, r);
           upserted.push({
             id: row.id,
@@ -188,6 +237,7 @@ export async function registerContactsRoutes(app: FastifyInstance): Promise<void
             nif: row.nif,
             email: row.email,
             phone: row.phone,
+            type: row.type,
           });
         }
         return { results: upserted, source: "holded", holdedFallback: null };
