@@ -16,7 +16,7 @@
 // Ver `docs/spike-holded.md` §10 para el findings.
 
 import type { FastifyInstance } from "fastify";
-import { ContactType } from "@prisma/client";
+import { ContactType } from "@mipiacetpv/db";
 
 import {
   ApiKeyClient,
