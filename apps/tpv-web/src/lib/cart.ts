@@ -69,6 +69,13 @@ export interface LineTotals {
   totalGross: number;
 }
 
+// v1.4-Precio-Decimales · b30: el `unitPrice` que llega a esta función
+// es el NET con precisión de 4 decimales (tal como lo persiste Holded
+// internamente, p.ej. `3.8843`). El cálculo intermedio NO redondea hasta
+// el último paso: subtotal neto = units · (base + delta), gross = sub ·
+// (1+IVA). El redondeo a 2 decimales sólo ocurre al devolver el valor
+// que verá el cajero — y `computeCart` reagrega los netos crudos por
+// bucket de IVA antes de redondear (esquema fiscal correcto).
 export function computeLine(
   line: Pick<
     CartLine,
@@ -83,9 +90,14 @@ export function computeLine(
   const deltaPerUnit = sumModifierDeltas(line.modifierSelections) / 100;
   const baseUnit =
     line.unitPriceOverride != null ? line.unitPriceOverride : line.unitPrice;
-  const grossPerUnit = (baseUnit + deltaPerUnit) * (1 - line.discountPct / 100);
-  const subtotalNet = round2(grossPerUnit * line.units);
-  const totalGross = round2(subtotalNet * (1 + line.taxRate / 100));
+  const netPerUnit = (baseUnit + deltaPerUnit) * (1 - line.discountPct / 100);
+  // Mantén los valores crudos hasta el último round2. Si redondeamos
+  // subtotalNet a 2 decimales y luego multiplicamos por (1+IVA) perdemos
+  // los cuatro decimales del NET y reaparece el drift de 1 céntimo.
+  const subtotalNetRaw = netPerUnit * line.units;
+  const totalGrossRaw = subtotalNetRaw * (1 + line.taxRate / 100);
+  const subtotalNet = round2(subtotalNetRaw);
+  const totalGross = round2(totalGrossRaw);
   return {
     subtotalNet,
     tax: round2(totalGross - subtotalNet),
@@ -110,31 +122,48 @@ export interface CartTotals {
   itemCount: number;
 }
 
+// v1.4-Precio-Decimales · b30: para el total del carrito agregamos los
+// netos crudos POR BUCKET DE IVA (sin redondear por línea) y aplicamos
+// el % de IVA al neto agregado del bucket. Esto reproduce la aritmética
+// de Holded y evita el drift de 1 céntimo que aparecía al redondear cada
+// línea por separado.
 export function computeCart(lines: CartLine[]): CartTotals {
-  let subtotalNet = 0;
-  let tax = 0;
-  let total = 0;
+  // bucketNetByRate[taxRate] = suma de netos crudos (4dec) por bucket.
+  const bucketNetByRate = new Map<number, number>();
   let grossNoDiscount = 0;
   let itemCount = 0;
   for (const l of lines) {
-    const t = computeLine(l);
-    subtotalNet += t.subtotalNet;
-    tax += t.tax;
-    total += t.totalGross;
+    const deltaPerUnit = sumModifierDeltas(l.modifierSelections) / 100;
+    const baseUnit =
+      l.unitPriceOverride != null ? l.unitPriceOverride : l.unitPrice;
+    const netPerUnit = (baseUnit + deltaPerUnit) * (1 - l.discountPct / 100);
+    const netLineRaw = netPerUnit * l.units;
+    bucketNetByRate.set(
+      l.taxRate,
+      (bucketNetByRate.get(l.taxRate) ?? 0) + netLineRaw,
+    );
     // "Bruto sin descuento" para el cálculo del % global de descuento
     // incluye los deltas de modificadores — son parte del precio "lista".
-    // Lote 4.B: si la línea tiene override, ese es el "precio cobrado"
-    // efectivo y entra en el grossNoDiscount tal cual.
-    const deltaPerUnit = sumModifierDeltas(l.modifierSelections) / 100;
-    const baseUnit = l.unitPriceOverride != null ? l.unitPriceOverride : l.unitPrice;
-    grossNoDiscount += round2((baseUnit + deltaPerUnit) * l.units);
+    // En precisión 4dec; el redondeo final ocurre abajo.
+    grossNoDiscount += (baseUnit + deltaPerUnit) * l.units;
     itemCount += l.units;
   }
+
+  let subtotalNetRaw = 0;
+  let taxRaw = 0;
+  let totalRaw = 0;
+  for (const [taxRate, netSum] of bucketNetByRate) {
+    const taxBucket = netSum * (taxRate / 100);
+    subtotalNetRaw += netSum;
+    taxRaw += taxBucket;
+    totalRaw += netSum + taxBucket;
+  }
+
   return {
-    subtotalNet: round2(subtotalNet),
-    tax: round2(tax),
-    total: round2(total),
-    discount: round2(grossNoDiscount - subtotalNet),
+    subtotalNet: round2(subtotalNetRaw),
+    tax: round2(taxRaw),
+    total: round2(totalRaw),
+    discount: round2(grossNoDiscount - subtotalNetRaw),
     itemCount,
   };
 }

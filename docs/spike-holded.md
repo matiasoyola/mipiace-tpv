@@ -1740,3 +1740,72 @@ del CRUD.
   desnatada), tiene que crear SKUs separados en Holded. La regla la
   conoce el propietario; el TPV no la oculta.
 
+### §15 · Precisión de `price` en `/invoicing/v1/products` y `/services` — 4 decimales internos
+
+Detectado 2026-06-04 con Peluquería Sole en el servicio "CORTAR UÑAS
+SOLO". El TPV mostraba `4,69 €` mientras Holded facturaba `4,70 €`.
+
+#### 15.A — Lo observado en producción
+
+- En la UI de Holded el campo `price` del producto/servicio muestra
+  **`3,88`** (2 decimales). Esto sugiere — engañosamente — que Holded
+  guarda los precios con la misma precisión `Decimal(_, 2)` que usa
+  cualquier ERP "normal".
+- En el JSON de `GET /invoicing/v1/products/<id>` el campo `price` viene
+  con **4 decimales** reales: `"price": 3.8843`. La UI los trunca para
+  mostrar pero el motor de facturación los usa íntegros: `3.8843 · 1.21
+  = 4.700003 → 4,70 €` (lo que Holded factura).
+- Si mipiacetpv guarda el `basePrice` como `Decimal(10, 2)`, Prisma
+  trunca al sincronizar (`3.8843 → 3.88`) y el TPV calcula `3.88 · 1.21
+  = 4.6948 → 4,69 €`. Drift: 1 céntimo por unidad. En servicios cobrados
+  con cantidad ≥ 2 el drift se multiplica y el cliente paga lo del TPV
+  pero la factura emite otro importe — **bug fiscal**.
+- El bug afecta al **todo el catálogo**, no a un servicio concreto:
+  cualquier producto cuyo gross "real" caiga cerca de un `.5` tras IVA
+  produce el mismo drift.
+
+#### 15.B — Implementación elegida en v1.4-Precio-Decimales
+
+- Migración `b30_money_precision_4`: todos los campos `€` del schema
+  pasan a `Decimal(12, 4)`. Las columnas porcentuales (`tax_rate`,
+  `discount_pct`) y de unidades (`units`) no se tocan.
+- El sync (initial + incremental) ya pasaba `raw.price` como `number`
+  IEEE-754 a Prisma — basta con que la columna acepte la precisión.
+- El cálculo del gross en TPV (`apps/tpv-web/src/lib/cart.ts`) y en
+  backend (`apps/api/src/tickets/totals.ts`) se reescribe para
+  **agregar netos por bucket de IVA en precisión completa**, aplicar el
+  % de IVA al agregado y redondear UNA SOLA VEZ al final. Antes
+  redondeábamos por línea sobre un net truncado a 2 dec, que era la
+  fuente del drift.
+- El payload `salesreceipt` envía `price` con 4 decimales (Holded lo
+  acepta sin silent reject).
+- Script `apps/api/src/scripts/resync-catalog.ts --tenantId=<uuid>`
+  fuerza el re-pull desde Holded para repoblar `basePrice` con los 4
+  decimales reales tras el deploy.
+
+#### 15.C — Implicaciones operativas que documentar al cliente
+
+- **Tickets HISTÓRICOS** (los emitidos antes de la migración) no se
+  recalculan. El drift de 1 céntimo queda en el histórico de Holded y
+  del TPV. Sólo afecta a operativa futura.
+- Tras el deploy, el implantador corre `resync-catalog.ts` para cada
+  tenant. Es idempotente y no destruye datos.
+- Si el cliente edita el `price` desde la UI de Holded, los 4 decimales
+  reales viven en el JSON aunque la UI sólo le permita teclear 2 —
+  Holded sustituye los 2 decimales nuevos en los primeros dos slots y
+  los otros dos vuelven a `0`. Para forzar un valor "limpio" como
+  `3,88 €` exactos hay que entrar a Holded y volver a guardarlo (la
+  primera vez que un servicio se crea con un cálculo derivado de IVA,
+  Holded puede dejar 4 decimales).
+
+#### 15.D — Recomendación para el cliente de producción
+
+- Cuando se onboardea un tenant nuevo, **ejecutar el sync inicial y
+  spot-checkar 3-4 servicios** comparando `basePrice` en BD vs el JSON
+  de Holded. Si algún `basePrice` aparece con `.XY00` y el JSON dice
+  `.XYZW`, el sync no se ejecutó tras b30 o la columna no fue migrada.
+- Para clientes con catálogos grandes (>500 productos), el script
+  `resync-catalog.ts` tarda lo mismo que el sync incremental normal
+  (~30 segundos en cuentas tipo Sole/Thalia).
+
+

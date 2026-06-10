@@ -118,6 +118,20 @@ docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml
 
 ---
 
+### ✅ Desfase de 1 céntimo TPV vs Holded en líneas con cantidad ≥ 2
+
+**Síntoma**: el TPV muestra "CORTAR UÑAS SOLO" como `4,69 €` por unidad y Holded factura el mismo servicio como `4,70 €` por unidad. En tickets con cantidad ≥ 2 del mismo servicio el desfase se multiplica y el cliente paga un importe distinto del que Holded emite en la factura — **bug fiscal**.
+
+**Donde se ve**: TPV (línea y total del ticket) vs documento emitido por Holded tras `salesreceipt`.
+
+**Causa raíz**: la columna `products.base_price` era `Decimal(10, 2)` → Prisma truncaba `3.8843 → 3.88` al sincronizar desde Holded. El TPV calculaba `3.88 · 1.21 = 4.6948 → 4.69`, mientras que Holded usa el NET interno con 4 decimales (`3.8843 · 1.21 = 4.700003 → 4.70`). El bug afecta a **todo el catálogo**, no sólo a este servicio: cualquier producto cuyo gross real termine cerca de un `.5` después del IVA produce drift.
+
+**Fix**: `v1.4-Precio-Decimales` migración `b30` (commit pendiente). Toda la columna monetaria pasa a `Decimal(12, 4)` y el cálculo del gross pasa a redondear **una sola vez al final** sobre el agregado por bucket de IVA. Backfill de `base_price` con 4 decimales tras deploy vía `apps/api/src/scripts/resync-catalog.ts --tenantId=...`. Los tickets HISTÓRICOS ya emitidos quedan como están — el bug sólo se elimina para tickets futuros.
+
+**Visto el**: 2026-06-04 en Peluquería Sole con el servicio "CORTAR UÑAS SOLO" (NET interno Holded = `3.8843`).
+
+---
+
 ## Impresoras
 
 ### ⚠️ "Failed to execute 'requestDevice' on 'USB': No device selected"

@@ -58,6 +58,29 @@ allá de 5 céntimos. Hasta ahora no se ha visto en producción. Si pasa:
 - Recalcular con suma redondeada a 2 decimales por línea ANTES de comparar,
   en lugar de subir la tolerancia global.
 
+## v1.4-Precio-Decimales · precios NET con 4 decimales
+
+Antes de b30 los precios NET se guardaban como `Decimal(10, 2)` y el
+gross se calculaba **línea a línea redondeando a 2 decimales en cada
+paso**. Holded, en cambio, mantiene el NET interno con **4 decimales**
+(p.ej. `3.8843`) y eso producía un drift de 1 céntimo por línea cuando
+el gross "real" caía cerca de un `.5` tras IVA. Caso real Peluquería
+Sole (2026-06-04): "CORTAR UÑAS SOLO" se mostraba en el TPV como
+`4,69 €` y Holded facturaba `4,70 €`.
+
+Tras b30:
+
+- **Precios NET se guardan con 4 decimales** en BD (`Decimal(12, 4)`).
+- **El cálculo del gross redondea AL FINAL, no por línea**: se agregan
+  los netos por bucket de IVA, se aplica el % de IVA al agregado del
+  bucket, y se redondea una sola vez a 2 decimales para mostrar/persistir
+  el total. Esto reproduce la aritmética de Holded.
+
+Esto **NO sustituye** la tolerancia de 5 céntimos: aunque el TPV ya
+calcula el gross con la misma precisión que Holded, sigue habiendo
+casos límite (servicios con NET sin SKU, descuentos manuales, etc.)
+donde un epsilon residual puede aparecer.
+
 ## NO usar para
 
 - Comparar **stock**: el stock es entero, no float. Tolerar diff aquí

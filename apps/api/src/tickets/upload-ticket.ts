@@ -370,14 +370,20 @@ function formatLineForHolded(line: {
       if (typeof e.priceDeltaCents === "number") deltaCents += e.priceDeltaCents;
     }
   }
+  // v1.4-Precio-Decimales · b30: NO redondeamos el precio a 2 decimales
+  // al subir a Holded. Holded acepta 4 decimales en `price` y conservar
+  // la precisión es lo que elimina el drift entre el TPV y el documento
+  // emitido. `deltaCents/100` no añade nuevos decimales (los modifiers
+  // viven en céntimos enteros). Si `baseUnitPrice` tiene 4 decimales del
+  // NET, llegan intactos a Holded.
   return {
-    rolledUpUnitPrice: round2(baseUnitPrice + deltaCents / 100),
+    rolledUpUnitPrice: round4(baseUnitPrice + deltaCents / 100),
     description: parts.length > 0 ? `(${parts.join("; ")})` : null,
   };
 }
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
+function round4(n: number): number {
+  return Math.round(n * 10000) / 10000;
 }
 
 function composePayDesc(payments: Array<{ method: string; amount: { toString(): string } }>): string {

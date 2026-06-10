@@ -14,6 +14,7 @@ asignado, y se referencian por `sku` en los items de `salesreceipt`.
 | `forSale` | "Marca disponibilidad para venta" | Para productos sí lo respetamos: filtramos `forSale=false` del TPV |
 | Imagen en `/products` lista | "Incluida si existe" | NO viene `imageUrl`; hay que pegar a `/products/{id}/image` separado |
 | `PUT` con `sku` | Documentado | Funciona; lo usamos en `runAutoSku` |
+| `price` precisión | Docs no la fija | **4 decimales** internamente (UI los trunca a 2). `3.8843` es un valor real visto en Peluquería Sole — guardarlo como `3.88` produce drift de 1 céntimo en gross |
 
 ## GET `/invoicing/v1/products`
 
@@ -47,6 +48,15 @@ Paginación estándar (ver
   lo respeta filtrando los `forSale=false` del catálogo del TPV.
 - **`stock`** — en mipiacetpv el stock se gestiona en almacén local, no
   en Holded (ver `docs/03-integracion-holded.md` para detalle).
+- **`price`** (NET sin IVA) — Holded lo guarda con **4 decimales** de
+  precisión interna (p.ej. `3.8843` para un servicio cuyo gross con
+  IVA 21% sale `4.7000`). La UI de Holded los trunca a 2 al mostrar
+  (`3,88`), por eso es fácil pensar que sólo hay 2 decimales — pero el
+  cálculo de Holded usa los 4. En mipiacetpv lo persistimos como
+  `Decimal(12, 4)` desde la migración `b30` (v1.4-Precio-Decimales).
+  Antes de b30 truncábamos a 2 decimales y el TPV calculaba un gross
+  con 1 céntimo de drift respecto al de Holded; ver
+  [errores/README.md · "Desfase de 1 céntimo TPV vs Holded"](../../errores/README.md).
 
 ### `runAutoSku`
 
