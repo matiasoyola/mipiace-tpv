@@ -76,8 +76,19 @@ WORKDIR /repo
 # código fuente (la API corre con tsx), y configs.
 COPY --from=build /repo /repo
 
+# v1.5-consistencia-A §5.5 · runtime sin root. El cache de imágenes de
+# producto se crea aquí con ownership de `node` para que el named
+# volume herede los permisos en su primera creación (Docker copia el
+# contenido y ownership del mountpoint cuando el volumen está vacío).
+# OJO deploy: si el volumen `product_images` ya existe poblado como
+# root, hay que hacer chown manual en el VPS (ver done.md del bloque).
+RUN mkdir -p /var/cache/mipiacetpv/product-images \
+  && chown -R node:node /var/cache/mipiacetpv
+
 ENV NODE_ENV=production
 EXPOSE 3001
+
+USER node
 
 # tini como PID 1 para manejar señales correctamente (BullMQ + WebSockets
 # necesitan SIGTERM limpio).

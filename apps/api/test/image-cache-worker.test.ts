@@ -59,7 +59,12 @@ function seedProduct(opts: Partial<FakeProduct> = {}): FakeProduct {
   const p: FakeProduct = {
     id: opts.id ?? randomUUID(),
     tenantId: opts.tenantId ?? randomUUID(),
-    imageUrl: opts.imageUrl ?? "https://cdn.holded.com/products/foo.jpg",
+    // `??` se comía el `null` explícito del test "sin imageUrl" y le
+    // colaba la URL por defecto — distinguir undefined de null.
+    imageUrl:
+      opts.imageUrl === undefined
+        ? "https://cdn.holded.com/products/foo.jpg"
+        : opts.imageUrl,
     imageMime: opts.imageMime ?? null,
     imageCachedAt: opts.imageCachedAt ?? null,
     tenant: opts.tenant ?? { holdedApiKeyCiphertext: "cipher-X" },

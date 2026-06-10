@@ -4,11 +4,19 @@
 # worker, caddy adicionales (ADR-009); este compose es sólo dependencias
 # locales para `pnpm dev`.
 
+# v1.5-consistencia-A §5.1 · rotación de logs (mismo criterio que prod).
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: mipiacetpv-postgres
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_DB: mipiacetpv
       POSTGRES_USER: mipiacetpv
@@ -27,6 +35,10 @@ services:
     image: redis:7-alpine
     container_name: mipiacetpv-redis
     restart: unless-stopped
+    logging: *default-logging
+    # v1.5-consistencia-A §5.2 · AOF también en dev: los jobs BullMQ
+    # encolados sobreviven a un reinicio del contenedor (paridad con prod).
+    command: redis-server --appendonly yes
     ports:
       - "6379:6379"
     volumes:

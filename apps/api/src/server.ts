@@ -21,6 +21,7 @@ import { registerContactsRoutes } from "./contacts/routes.js";
 import { getPrisma, getRedis, shutdown } from "./context.js";
 import { registerDeviceRoutes } from "./devices/routes.js";
 import { loadEnv } from "./env.js";
+import { registerErrorHandler } from "./lib/error-handler.js";
 import { registerOnboardingRoutes } from "./onboarding/routes.js";
 import { registerCashierAuthRoutes } from "./shift/cashier-auth.js";
 import { registerShiftRoutes } from "./shift/routes.js";
@@ -71,6 +72,11 @@ async function main() {
       },
     },
   });
+
+  // Manejador global de errores (v1.5-consistencia-A §4.a): zod/ajv →
+  // 400, holded-client → 502 con código propio, resto → 500 con
+  // requestId y stack sólo en logs.
+  registerErrorHandler(app);
 
   // WebSocket plugin para el bus multi-terminal del vertical bar (B7
   // §6). Registramos antes de las rutas para que el `websocket: true`

@@ -40,9 +40,22 @@ const fakePrisma = {
   },
 } as const;
 
+// throttle() (rate-limit.ts) necesita incr/expire/ttl además de ping.
+const redisCounters = new Map<string, number>();
+const fakeRedis = {
+  ping: async () => "PONG",
+  incr: async (key: string) => {
+    const next = (redisCounters.get(key) ?? 0) + 1;
+    redisCounters.set(key, next);
+    return next;
+  },
+  expire: async () => 1,
+  ttl: async () => 60,
+};
+
 vi.mock("../src/context.js", () => ({
   getPrisma: () => fakePrisma,
-  getRedis: () => ({ ping: async () => "PONG" }),
+  getRedis: () => fakeRedis,
   shutdown: async () => undefined,
 }));
 
@@ -61,6 +74,7 @@ async function buildApp() {
 
 beforeEach(() => {
   tenantStore.clear();
+  redisCounters.clear();
   enqueueManualMock.mockClear();
   tenantStore.set(TENANT_ID, {
     id: TENANT_ID,

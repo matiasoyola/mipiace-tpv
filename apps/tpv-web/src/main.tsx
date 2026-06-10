@@ -3,9 +3,17 @@ import { createRoot } from "react-dom/client";
 import { registerSW } from "virtual:pwa-register";
 
 import { App } from "./App.js";
+import {
+  ErrorBoundary,
+  installGlobalErrorLogging,
+} from "./components/ErrorBoundary.js";
 import { consumeTestModeFromUrl } from "./lib/test-mode.js";
 import { runVersionCheck } from "./lib/version-check.js";
 import "./index.css";
+
+// v1.5-consistencia-A §4.b: promesas rechazadas sin catch → consola
+// estructurada (gancho Sentry v1.5-B).
+installGlobalErrorLogging();
 
 // B-OnboardingV2: si la URL trae `?testCashierToken=...&testDeviceToken=...`,
 // los guardamos en sessionStorage y limpiamos la URL antes de que el
@@ -28,6 +36,8 @@ const root = document.getElementById("root");
 if (!root) throw new Error("Falta #root en index.html");
 createRoot(root).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 );

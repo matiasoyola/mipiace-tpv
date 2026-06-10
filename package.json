@@ -23,6 +23,7 @@
     "spike:09": "pnpm --filter @mipiacetpv/spike-holded run 09-webhooks-probe"
   },
   "devDependencies": {
+    "jsdom": "^25.0.1",
     "vitest": "^2.1.4"
   }
 }

@@ -171,6 +171,17 @@ describe("uploadTicket", () => {
         paymentsPending: 12.1,
         products: [],
       },
+      {
+        // Pre-check idempotente de registerPaymentWithGetBack
+        // (v1.3-hotfix10): doc aún sin pagar → sigue al POST /pay.
+        id: "doc-1",
+        docNumber: "T260530",
+        total: 12.1,
+        paymentsTotal: 0,
+        paymentsPending: 12.1,
+        notes: `TPV-uuid: ${externalId}`,
+        products: [],
+      },
       { status: 1, paymentId: "pay-1" }, // POST /pay
       {
         id: "doc-1",

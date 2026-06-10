@@ -109,9 +109,21 @@ const fakePrisma = {
   user: {
     findFirst: vi.fn(async () => null),
   },
+  // Emula rollback de la transacción para el estado mutable que nos
+  // importa (ticketCounter): si el callback lanza, el contador vuelve
+  // a su valor previo — igual que haría Postgres. Esto permite testear
+  // que el incremento ocurre DENTRO de la tx (v1.5-consistencia-A §3.a):
+  // si el código lo hiciera fuera, el restore no lo cubriría y el
+  // contador quedaría quemado.
   $transaction: vi.fn(async (fn: any) => {
-    if (typeof fn === "function") return await fn(fakePrisma);
-    return await Promise.all(fn);
+    if (typeof fn !== "function") return await Promise.all(fn);
+    const counterSnapshot = ticketCounter;
+    try {
+      return await fn(fakePrisma);
+    } catch (err) {
+      ticketCounter = counterSnapshot;
+      throw err;
+    }
   }),
 } as const;
 
@@ -249,6 +261,50 @@ describe("POST /tickets", () => {
       },
     });
     expect(res.statusCode).toBe(400);
+  });
+
+  // v1.5-consistencia-A §3.a: si la transacción falla (p.ej. violación
+  // de constraint al crear el ticket), el ticketCounter NO avanza — sin
+  // huecos en la numeración interna.
+  it("fallo dentro de la transacción → ticketCounter no avanza", async () => {
+    (fakePrisma.ticket.create as any).mockImplementationOnce(async () => {
+      throw new Error("simulated unique constraint violation");
+    });
+    const app = await buildApp();
+    const payload = {
+      externalId: randomUUID(),
+      registerId: REGISTER,
+      shiftId: SHIFT,
+      lines: [
+        {
+          nameSnapshot: "Cafe",
+          sku: "CAFE-1",
+          units: 1,
+          unitPrice: 1.4,
+          discountPct: 0,
+          taxRate: 10,
+        },
+      ],
+      payments: [{ method: "CASH", amount: 1.54 }],
+    };
+    const failed = await app.inject({
+      method: "POST",
+      url: "/tickets",
+      headers: { authorization: `Bearer ${cashierToken()}` },
+      payload,
+    });
+    expect(failed.statusCode).toBe(500);
+    expect(ticketCounter).toBe(0);
+
+    // El siguiente cobro consume el número que el fallo no quemó.
+    const ok = await app.inject({
+      method: "POST",
+      url: "/tickets",
+      headers: { authorization: `Bearer ${cashierToken()}` },
+      payload: { ...payload, externalId: randomUUID() },
+    });
+    expect(ok.statusCode).toBe(201);
+    expect(ok.json().ticket.internalNumber).toBe("000001");
   });
 
   it("idempotente: mismo externalId → devuelve el ticket existente (200)", async () => {

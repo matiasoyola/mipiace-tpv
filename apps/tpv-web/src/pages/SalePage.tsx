@@ -48,6 +48,7 @@ import {
   type CartLine,
   type SuspendedCart,
 } from "../lib/cart.js";
+import { usePersistedCartLines } from "../lib/persistedCart.js";
 import {
   findByBarcode,
   fuzzySearch,
@@ -301,7 +302,12 @@ export function SalePage(props: SalePageProps) {
     setKitchenError(null);
   }, [activeTicketId]);
 
-  const [lines, setLines] = useState<CartLine[]>([]);
+  // v1.5-consistencia-A §4.b: respaldo en sessionStorage por contexto
+  // (mesa o venta rápida) — el carrito sobrevive a un remount del
+  // ErrorBoundary o a una recarga.
+  const [lines, setLines] = usePersistedCartLines(
+    props.tableContext?.id ?? "quick-sale",
+  );
   const [contact, setContact] = useState<ContactRef | null>(null);
   const [notes, setNotes] = useState<string>("");
 

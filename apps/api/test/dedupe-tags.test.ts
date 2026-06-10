@@ -69,7 +69,8 @@ const fakePrisma: any = {
       });
     }),
     update: vi.fn(async ({ where, data }: any) => {
-      const p = products.get(where.id);
+      // Buscar por campo id, no por clave del Map (las claves son "p1"…).
+      const p = Array.from(products.values()).find((row) => row.id === where.id);
       if (!p) throw new Error("product not found");
       if (data.tags) p.tags = data.tags;
       return p;

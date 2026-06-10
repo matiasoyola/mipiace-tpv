@@ -43,6 +43,9 @@ const fakePrisma = {
   modifierGroup: {
     findMany: vi.fn(async () => []),
   },
+  tagAlias: {
+    findMany: vi.fn(async () => []),
+  },
   ticket: {
     count: vi.fn(async () => 0),
   },

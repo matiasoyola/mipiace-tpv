@@ -107,6 +107,18 @@ const fakePrisma = {
       }
       throw new Error("not found");
     }),
+    // Claim atómico de v1.3-hotfix11 (single-use pairing code).
+    updateMany: vi.fn(async ({ where, data }: any) => {
+      let count = 0;
+      for (const p of pairingCodes.values()) {
+        if (where.id && p.id !== where.id) continue;
+        if (where.consumedAt === null && p.consumedAt != null) continue;
+        if (where.expiresAt?.gt && p.expiresAt <= where.expiresAt.gt) continue;
+        if (data.consumedAt) p.consumedAt = data.consumedAt;
+        count++;
+      }
+      return { count };
+    }),
     delete: vi.fn(async ({ where }: any) => {
       const key = `${where.tenantId_code.tenantId}/${where.tenantId_code.code}`;
       pairingCodes.delete(key);

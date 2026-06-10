@@ -1,0 +1,69 @@
+# CI de mipiacetpv (v1.5-consistencia-A · Lote 2).
+#
+# Replica lo que hace el Dockerfile en build — que es donde hoy
+# revientan los deploys: install congelado, prisma generate, typecheck
+# de todos los targets, suite de tests y builds de Vite.
+#
+# La suite NO necesita servicios (Redis/Postgres van mockeados desde el
+# Lote 1); si algún test futuro necesita Redis real, añadir `services:
+# redis:7` aquí — preferible mantener la suite autocontenida.
+#
+# NO publica imágenes Docker a registry — eso es v1.5-B.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # pnpm 9.12.0 exacto — lo lee del campo `packageManager` del
+      # package.json raíz (misma fuente de verdad que corepack en el
+      # Dockerfile).
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node 20 + cache pnpm store
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Prisma generate
+        run: pnpm --filter @mipiacetpv/db run generate
+
+      - name: Typecheck API
+        run: pnpm --filter @mipiacetpv/api exec tsc --noEmit
+
+      - name: Typecheck packages
+        run: |
+          for pkg in packages/db packages/escpos-builder packages/holded-client packages/ticket-model packages/ticket-pdf packages/util-validation; do
+            echo "== $pkg"
+            (cd "$pkg" && pnpm exec tsc --noEmit)
+          done
+
+      # Los frontends usan project references (`tsc -b`), igual que su
+      # script de build. Caza los errores de tipos antes de la build.
+      - name: Typecheck tpv-web
+        run: pnpm --filter @mipiacetpv/tpv-web exec tsc -b
+
+      - name: Typecheck admin
+        run: pnpm --filter @mipiacetpv/admin exec tsc -b
+
+      - name: Tests
+        run: pnpm test
+
+      - name: Build admin (Vite)
+        run: pnpm --filter @mipiacetpv/admin build
+
+      - name: Build tpv-web (Vite)
+        run: pnpm --filter @mipiacetpv/tpv-web build

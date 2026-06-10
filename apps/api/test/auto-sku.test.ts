@@ -24,12 +24,16 @@ function makePrisma(initial: ProductRow[]) {
       findMany: vi.fn(async (args: {
         where: {
           tenantId: string;
+          kind?: "PRODUCT" | "SERVICE";
           OR: Array<{ sku: null | "" }>;
           needsSkuReview: boolean;
         };
       }) => {
         return Array.from(rows.values())
           .filter((r) => (r.sku == null || r.sku === "") && !r.needsSkuReview)
+          // runAutoSku filtra por kind desde v1.3-hotfix4 (PRODUCT y
+          // SERVICE se procesan en pasadas separadas).
+          .filter((r) => !args.where.kind || r.kind === args.where.kind)
           .map((r) => ({
             id: r.id,
             holdedProductId: r.holdedProductId,

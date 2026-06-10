@@ -21,11 +21,21 @@
 
 name: mipiacetpv
 
+# v1.5-consistencia-A §5.1 · rotación de logs: sin esto, json-file crece
+# sin límite y acaba llenando el disco del VPS. 10 MB × 3 ficheros por
+# servicio (~180 MB peor caso con 6 servicios).
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: mipiacetpv-postgres
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -49,6 +59,7 @@ services:
     image: redis:7-alpine
     container_name: mipiacetpv-redis
     restart: unless-stopped
+    logging: *default-logging
     # appendonly yes → persistencia AOF (jobs en cola sobreviven reinicios).
     command: redis-server --appendonly yes --maxmemory 200mb --maxmemory-policy allkeys-lru
     volumes:
@@ -73,6 +84,7 @@ services:
     image: mipiacetpv/api:latest
     container_name: mipiacetpv-api
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -121,10 +133,25 @@ services:
     image: mipiacetpv/api:latest
     container_name: mipiacetpv-worker
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       api:
         condition: service_healthy
     command: ["pnpm", "--filter", "@mipiacetpv/api", "exec", "tsx", "src/workers/index.ts"]
+    # v1.5-consistencia-A §5.3: el worker escribe `worker:heartbeat` en
+    # Redis cada 30 s (TTL 120 s); este check falla si la key no existe
+    # → Docker detecta worker colgado y lo reinicia.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "/repo/node_modules/.bin/tsx",
+          "/repo/apps/api/src/scripts/check-worker-heartbeat.ts",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
@@ -163,6 +190,7 @@ services:
       dockerfile: infra/Dockerfile
       target: static
     container_name: mipiacetpv-static-publish
+    logging: *default-logging
     volumes:
       - static_files:/output
     command: sh -c "rm -rf /output/admin /output/tpv && cp -r /export/admin /export/tpv /output/ && echo 'estáticos publicados'"
@@ -174,6 +202,7 @@ services:
     image: caddy:2-alpine
     container_name: mipiacetpv-caddy
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       - api
       - static-publish

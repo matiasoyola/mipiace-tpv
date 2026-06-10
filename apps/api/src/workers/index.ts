@@ -16,6 +16,8 @@ import { startTicketUploadWorker } from "./ticket-upload-worker.js";
 import { startRefundUploadWorker } from "./refund-upload-worker.js";
 import { startTicketEmailWorker } from "./ticket-email-worker.js";
 import { startImageCacheWorker } from "./image-cache-worker.js";
+import { startUploadSweeper } from "./upload-sweeper.js";
+import { startWorkerHeartbeat } from "./heartbeat.js";
 
 async function main() {
   loadEnv();
@@ -25,16 +27,21 @@ async function main() {
   const refundWorker = startRefundUploadWorker();
   const emailWorker = startTicketEmailWorker();
   const imageWorker = startImageCacheWorker();
+  const uploadSweeper = startUploadSweeper();
+  const heartbeat = startWorkerHeartbeat();
   console.log("[workers] initial-sync worker listo");
   console.log("[workers] catalog-incremental worker listo");
   console.log("[workers] ticket-upload worker listo");
   console.log("[workers] refund-upload worker listo");
   console.log("[workers] ticket-email worker listo");
   console.log("[workers] image-cache worker listo");
+  console.log("[workers] upload-sweeper listo (cada 5 min)");
   const count = await registerAllExistingRepeatables();
   console.log(`[workers] ${count} repeatable(s) registrados para tenants existentes`);
   process.on("SIGINT", async () => {
     console.log("[workers] SIGINT — cerrando…");
+    uploadSweeper.stop();
+    heartbeat.stop();
     await Promise.all([
       initialWorker.close(),
       incrementalWorker.close(),

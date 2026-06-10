@@ -392,16 +392,17 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         );
       }
 
-      // 5. Internal number atómico (incrementa register.ticketCounter).
-      const next = await prisma.register.update({
-        where: { id: cashier.rid },
-        data: { ticketCounter: { increment: 1 } },
-        select: { ticketCounter: true },
-      });
-      const internalNumber = String(next.ticketCounter).padStart(6, "0");
-
-      // 6. Persiste todo en transacción.
+      // 5+6. Persiste todo en transacción. El incremento de
+      // register.ticketCounter va DENTRO de la tx (v1.5-consistencia-A
+      // §3.a): si la creación del ticket falla, el contador hace
+      // rollback y no quedan huecos en la numeración interna.
       const ticket = await prisma.$transaction(async (tx) => {
+        const next = await tx.register.update({
+          where: { id: cashier.rid },
+          data: { ticketCounter: { increment: 1 } },
+          select: { ticketCounter: true },
+        });
+        const internalNumber = String(next.ticketCounter).padStart(6, "0");
         const t = await tx.ticket.create({
           data: {
             tenantId: cashier.tid,
@@ -722,15 +723,16 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       }
 
       // internalNumber atómico — sólo al cobrar (B7 §4: los DRAFT no
-      // consumen serie). Patrón idéntico al POST /tickets.
-      const next = await prisma.register.update({
-        where: { id: cashier.rid },
-        data: { ticketCounter: { increment: 1 } },
-        select: { ticketCounter: true },
-      });
-      const internalNumber = String(next.ticketCounter).padStart(6, "0");
-
+      // consumen serie). Patrón idéntico al POST /tickets: el
+      // incremento va dentro de la tx para que un fallo posterior no
+      // queme el número (v1.5-consistencia-A §3.a).
       const updated = await prisma.$transaction(async (tx) => {
+        const next = await tx.register.update({
+          where: { id: cashier.rid },
+          data: { ticketCounter: { increment: 1 } },
+          select: { ticketCounter: true },
+        });
+        const internalNumber = String(next.ticketCounter).padStart(6, "0");
         const t = await tx.ticket.update({
           where: { id: draft.id },
           data: {
@@ -1220,8 +1222,24 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
 
       // Validar unidades por línea: nunca exceder unidades originales
       // menos las ya devueltas en refunds previos.
+      //
+      // Criterio v1.5-consistencia-A §3.c — qué cuenta como "ya
+      // devuelto" (enum TicketStatus, compartido con Ticket):
+      //   - PENDING_SYNC / SYNCED / PAID → devolución efectiva (el
+      //     dinero salió de caja; la sync con Holded es asíncrona).
+      //   - SYNC_FAILED → NO cuenta: la auditoría detectó que un refund
+      //     fallido bloqueaba devoluciones legítimas de esas líneas. El
+      //     procedimiento operativo ante SYNC_FAILED es anularlo y
+      //     repetir la devolución, así que no debe consumir cupo.
+      //   - VOIDED / DRAFT / TEST → NO cuentan (anulado / nunca efectivo).
+      const EFFECTIVE_REFUND_STATUSES: ReadonlySet<TicketStatus> = new Set([
+        TicketStatus.PENDING_SYNC,
+        TicketStatus.SYNCED,
+        TicketStatus.PAID,
+      ]);
       const alreadyRefunded = new Map<string, number>();
       for (const r of ticket.refunds) {
+        if (!EFFECTIVE_REFUND_STATUSES.has(r.status)) continue;
         for (const rl of r.lines) {
           alreadyRefunded.set(
             rl.ticketLineId,
@@ -1286,14 +1304,6 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       const methodFromPayment = ticket.payments[0]?.method ?? null;
       const method = body.method ?? methodFromPayment;
 
-      // Internal number del refund: prefijo "R-" + correlativo register.
-      const next = await prisma.register.update({
-        where: { id: ticket.registerId },
-        data: { ticketCounter: { increment: 1 } },
-        select: { ticketCounter: true },
-      });
-      const internalNumber = `R-${String(next.ticketCounter).padStart(6, "0")}`;
-
       // Find an open shift on this register for the actor (refund is
       // attributed to the actor's current shift if there is one).
       const openShift = await prisma.shift.findFirst({
@@ -1301,7 +1311,16 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         select: { id: true },
       });
 
+      // Internal number del refund: prefijo "R-" + correlativo register.
+      // Incremento dentro de la tx — sin huecos si el create falla
+      // (v1.5-consistencia-A §3.a).
       const refund = await prisma.$transaction(async (tx) => {
+        const next = await tx.register.update({
+          where: { id: ticket.registerId },
+          data: { ticketCounter: { increment: 1 } },
+          select: { ticketCounter: true },
+        });
+        const internalNumber = `R-${String(next.ticketCounter).padStart(6, "0")}`;
         const r = await tx.refund.create({
           data: {
             tenantId: cashier.tid,

@@ -138,6 +138,16 @@ describe("createSalesreceiptApproved", () => {
 describe("registerPaymentWithGetBack", () => {
   it("happy path: paymentsPending pasa a 0", async () => {
     const client = mockClient([
+      // Pre-check idempotente (v1.3-hotfix10): doc aún sin pagar.
+      {
+        id: "doc-1",
+        docNumber: "T260530",
+        total: 2.75,
+        paymentsTotal: 0,
+        paymentsPending: 2.75,
+        notes: `TPV-uuid: ${VALID_EXTERNAL_ID}`,
+        products: [],
+      },
       { status: 1, paymentId: "p1" },
       {
         id: "doc-1",
@@ -158,6 +168,14 @@ describe("registerPaymentWithGetBack", () => {
 
   it("lanza HoldedSilentRejectError si paymentsPending sigue > 0", async () => {
     const client = mockClient([
+      // Pre-check idempotente (v1.3-hotfix10): doc aún sin pagar.
+      {
+        id: "doc-1",
+        total: 2.75,
+        paymentsTotal: 0,
+        paymentsPending: 2.75,
+        products: [],
+      },
       { status: 1 },
       {
         id: "doc-1",
