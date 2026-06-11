@@ -15,6 +15,17 @@ interface ForceCloseShift {
   cashOpening: string;
 }
 
+// Subconjunto de la respuesta 409 SYNC_PENDING del close (B5 §2.3).
+// Misma forma que en CloseShiftModal.
+interface FailedDoc {
+  id: string;
+  kind: "ticket" | "refund";
+  internalNumber: string;
+  total: number;
+  createdAt: string;
+  errorSummary: string;
+}
+
 export function ShiftForceCloseScreen({
   shift,
   cashierRole,
@@ -29,10 +40,20 @@ export function ShiftForceCloseScreen({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needsManagerPin, setNeedsManagerPin] = useState(false);
+  // v1.5-hotfix2 · SYNC_PENDING dejaba esta pantalla en bucle: la API
+  // pide reenvío con `syncFailureAccepted: true` (igual que el
+  // CloseShiftModal de B5 §2.3), pero aquí nunca se mandaba ni se
+  // mostraba la lista. Visto el 2026-06-11 en Peluquería Sole: turno
+  // colgado + 1 ticket SYNC_FAILED = imposible abrir caja.
+  const [failedDocs, setFailedDocs] = useState<FailedDoc[] | null>(null);
+  const [syncFailureAccepted, setSyncFailureAccepted] = useState(false);
 
   const counted = parseFloat(cashCounted.replace(",", "."));
   const ready =
-    !busy && !Number.isNaN(counted) && counted >= 0;
+    !busy &&
+    !Number.isNaN(counted) &&
+    counted >= 0 &&
+    (failedDocs === null || syncFailureAccepted);
 
   async function submit() {
     if (!ready) return;
@@ -45,6 +66,7 @@ export function ShiftForceCloseScreen({
           cashCounted: counted,
           methodTotals: {},
           managerPin: managerPin || undefined,
+          syncFailureAccepted: syncFailureAccepted || undefined,
         },
       });
       onClosed();
@@ -52,9 +74,18 @@ export function ShiftForceCloseScreen({
       if (err instanceof ApiError) {
         if (err.code === "MANAGER_PIN_REQUIRED") {
           setNeedsManagerPin(true);
-          setError("Este cierre forzado requiere PIN de encargado.");
+          setError("Este cierre requiere PIN del cajero o del encargado.");
         } else if (err.code === "INVALID_MANAGER_PIN") {
           setError("PIN de encargado incorrecto.");
+        } else if (err.code === "SYNC_PENDING") {
+          const detail = err.data as
+            | { failedTickets?: FailedDoc[]; failedRefunds?: FailedDoc[] }
+            | undefined;
+          setFailedDocs([
+            ...(detail?.failedTickets ?? []),
+            ...(detail?.failedRefunds ?? []),
+          ]);
+          setError(null);
         } else {
           setError(err.message);
         }
@@ -122,6 +153,43 @@ export function ShiftForceCloseScreen({
               €
             </span>
           </div>
+
+          {failedDocs !== null && (
+            <div className="mb-5 bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <div className="flex items-start gap-2 text-[13px] text-amber-800 mb-3">
+                <AlertCircle className="w-4 h-4 mt-px shrink-0" />
+                <span>
+                  Hay {failedDocs.length === 0 ? "tickets" : failedDocs.length}{" "}
+                  {failedDocs.length === 1 ? "ticket pendiente" : "tickets pendientes"} de
+                  sincronizar con Holded. <strong>Puedes cerrar el turno igualmente</strong>:
+                  las ventas de hoy no se ven afectadas y los tickets pendientes se
+                  recuperarán automáticamente.
+                </span>
+              </div>
+              {failedDocs.length > 0 && (
+                <ul className="mb-3 space-y-1 text-[12.5px] text-amber-900 tabular-nums">
+                  {failedDocs.map((d) => (
+                    <li key={d.id} className="flex justify-between gap-3">
+                      <span>
+                        {d.kind === "refund" ? "Devolución" : "Ticket"} #{d.internalNumber}
+                        {d.errorSummary ? ` · ${d.errorSummary}` : ""}
+                      </span>
+                      <span className="font-medium shrink-0">{d.total.toFixed(2)} €</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <label className="flex items-start gap-2.5 text-[13px] text-amber-900 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={syncFailureAccepted}
+                  onChange={(e) => setSyncFailureAccepted(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 accent-amber-600"
+                />
+                <span>Lo entiendo, cerrar el turno igualmente.</span>
+              </label>
+            </div>
+          )}
 
           {(needsManagerPin || cashierRole === "CASHIER") && (
             <>
