@@ -85,6 +85,15 @@ COPY --from=build /repo /repo
 RUN mkdir -p /var/cache/mipiacetpv/product-images \
   && chown -R node:node /var/cache/mipiacetpv
 
+# v1.5-hotfix3 · informes Z persistentes. Antes se escribían en
+# `<cwd>/storage/z-reports` DENTRO del contenedor: se perdían en cada
+# force-recreate y, tras `USER node`, ni siquiera se podía crear la
+# carpeta (EACCES, visto 2026-06-11 cerrando el turno colgado de Sole).
+# Ahora viven en un named volume (compose monta `z_reports` aquí y la
+# env Z_REPORT_STORAGE_ROOT apunta a esta ruta).
+RUN mkdir -p /var/lib/mipiacetpv/z-reports \
+  && chown -R node:node /var/lib/mipiacetpv
+
 ENV NODE_ENV=production
 EXPOSE 3001
 

@@ -111,6 +111,9 @@ services:
       SUPER_ADMIN_FROM_EMAIL: ${SUPER_ADMIN_FROM_EMAIL}
       SUPER_ADMIN_REPLY_TO_EMAIL: ${SUPER_ADMIN_REPLY_TO_EMAIL}
       PRODUCT_IMAGE_CACHE_DIR: /var/cache/mipiacetpv/product-images
+      # v1.5-hotfix3 · los Z van a un named volume (antes: FS del
+      # contenedor → se perdían en cada recreate + EACCES con USER node).
+      Z_REPORT_STORAGE_ROOT: /var/lib/mipiacetpv/z-reports
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3001/health"]
       interval: 30s
@@ -122,6 +125,8 @@ services:
       # otros endpoints internos que tocan el disco; el worker hace la
       # escritura primaria. Compartimos el volumen en RW para ambos.
       - product_images:/var/cache/mipiacetpv/product-images
+      # v1.5-hotfix3 · informes Z persistentes.
+      - z_reports:/var/lib/mipiacetpv/z-reports
     deploy:
       resources:
         limits:
@@ -237,6 +242,8 @@ volumes:
   caddy_data:
   caddy_config:
   static_files:
+  # v1.5-hotfix3 · informes Z (PDF) persistentes entre deploys.
+  z_reports:
   # B-ProductImages: cache local de imágenes de producto desde Holded.
   # Compartido entre api (escribe ocasional), worker (escribe primario)
   # y caddy (lee). Persiste reinicios; el sync incremental detecta URLs
