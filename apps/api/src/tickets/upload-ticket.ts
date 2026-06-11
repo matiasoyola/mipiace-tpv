@@ -294,9 +294,17 @@ export function buildTicketSalesreceiptPayload(ticket: {
     let identifierField: { sku?: string; serviceId?: string } = {};
     if (isService && holdedId) {
       identifierField = { serviceId: holdedId };
-    } else if (!isService && l.sku && !l.sku.startsWith("AUTO-")) {
-      // PRODUCT con SKU real (asignado por runAutoSku). NO mandamos
-      // sku para productos sin asignar (caso degradado raro).
+    } else if (!isService && l.sku) {
+      // PRODUCT con SKU. Incluye los `AUTO-*`: runAutoSku los SUBE a
+      // Holded con GET-back, así que son canónicos allí. La exclusión
+      // anterior (`!l.sku.startsWith("AUTO-")`, resto del hotfix7 para
+      // servicios) hacía que la línea fuera SIN identificador → Holded
+      // la pone a price=0 → silent_reject por mismatch de total.
+      // Visto el 2026-06-10 en Peluquería Sole, ticket 000022 (SPRAY
+      // SALERM con AUTO-6819ba02 descartado: 17,50 € vs 27,40 €).
+      // Si el AUTO-* no llegó a Holded (needs_sku_review=true), mandar
+      // un sku desconocido produce el mismo price=0 que no mandarlo —
+      // no empeora ningún caso y arregla todos los auto-SKU válidos.
       identifierField = { sku: l.sku };
     }
     return {
