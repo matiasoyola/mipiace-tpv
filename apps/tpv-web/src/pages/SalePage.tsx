@@ -803,7 +803,14 @@ export function SalePage(props: SalePageProps) {
   // ── Render ─────────────────────────────────────────────────────────
   return (
     <div
-      className="h-screen overflow-hidden bg-mipiace-stone flex flex-col font-sans"
+      // v1.5-hotfix5 · el candado h-screen+overflow-hidden era
+      // incondicional: en móvil/vertical (catálogo apilado DEBAJO del
+      // ticket y sin scroll interno, que es lg:) dejaba el catálogo
+      // inalcanzable — no se podía scrollear (visto 2026-06-11 en el
+      // móvil de Matías). Mismo criterio que v1.5-hotfix4: el layout
+      // fijo solo donde hay sitio; en pantallas pequeñas, flujo
+      // natural con scroll de página.
+      className="min-h-screen [@media(min-width:1024px)_and_(min-height:700px)]:h-screen [@media(min-width:1024px)_and_(min-height:700px)]:overflow-hidden bg-mipiace-stone flex flex-col font-sans"
       // v1.3-UX-Iteración Lote 2: el padding-bottom dinámico empuja el
       // contenido hacia arriba cuando aparece el teclado virtual, así
       // los elementos críticos (footer del ticket, sheets) quedan
