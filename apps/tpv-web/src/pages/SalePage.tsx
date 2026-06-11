@@ -1527,7 +1527,7 @@ function SaleWorkspace({
     return list;
   }, [products, selectedTag, showKindToggle, kindFilter]);
   return (
-    <div className="flex-1 grid lg:grid-cols-[1fr_360px] gap-4 lg:gap-6 p-4 md:p-7 min-h-0 lg:overflow-hidden">
+    <div className="flex-1 grid lg:grid-cols-[1fr_360px] gap-4 lg:gap-6 p-4 md:p-7 min-h-0 [@media(min-width:1024px)_and_(min-height:700px)]:overflow-hidden">
       {/* v1.3-UX-Iteración Lote 1: en apaisado el catálogo tiene su
           propio scroll interno (lg:overflow-y-auto) para que el ticket
           de la derecha permanezca fijo en pantalla mientras el cajero
@@ -1786,7 +1786,14 @@ function SaleWorkspace({
              empezar y mantenerlo accesible sin que dependa del scroll).
           4. Lista de líneas (flex-1, scroll interno).
           5. Subtotal/IVA al pie como info detallada. */}
-      <aside className="bg-white rounded-3xl border border-slate-200 flex flex-col order-1 lg:order-2 lg:h-full lg:overflow-hidden">
+      {/* v1.5-hotfix4 · el layout "todo fijo + scroll solo en listado"
+          (v1.4-hotfix4) necesita altura real: en ventanas bajas
+          (<700px) los bloques fijos (~416px) estrangulaban el listado
+          a ~0px y el desglose "desaparecía" (visto 2026-06-11 en el
+          Mac de Matías; la tablet 1080p no lo sufre). En viewports
+          bajos el aside vuelve al flujo natural (scrollea la página);
+          el modo fijo se conserva donde hay sitio. */}
+      <aside className="bg-white rounded-3xl border border-slate-200 flex flex-col order-1 lg:order-2 [@media(min-width:1024px)_and_(min-height:700px)]:h-full [@media(min-width:1024px)_and_(min-height:700px)]:overflow-hidden">
         {/* 1 · Header */}
         <div className="flex items-center justify-between px-5 md:px-7 pt-5 md:pt-6 pb-3 md:pb-4 border-b border-slate-100 shrink-0">
           <div className="min-w-0">
