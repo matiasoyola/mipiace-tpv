@@ -12,6 +12,7 @@
   "dependencies": {
     "@mipiacetpv/ticket-model": "workspace:*",
     "@mipiacetpv/ticket-pdf": "workspace:*",
+    "@sentry/react": "^10.57.0",
     "@zxing/browser": "^0.2.0",
     "lucide-react": "^1.14.0",
     "qrcode": "^1.5.4",

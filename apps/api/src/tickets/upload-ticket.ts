@@ -86,6 +86,14 @@ export async function uploadTicket(
         data: { status: TicketStatus.TEST },
       });
     }
+    // v1.5-B §3.a: el HoldedUpload pasa a SKIPPED (terminal). Antes
+    // quedaba PENDING para siempre y el sweeper lo re-encolaba cada
+    // 5 min en bucle (incidente 2026-06-11). updateMany: no-op
+    // silencioso si la fila no existe (tests poblados a medias).
+    await prisma.holdedUpload.updateMany({
+      where: { externalId },
+      data: { status: "SKIPPED", lastError: { skipped: "test_mode" } },
+    });
     log.info("ticket en modo prueba — skip upload", { externalId });
     return { kind: "skipped", reason: "test_cashier" };
   }

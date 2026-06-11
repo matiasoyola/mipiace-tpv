@@ -18,6 +18,8 @@ import {
   HoldedSubscriptionSuspendedError,
 } from "@mipiacetpv/holded-client";
 
+import { captureError } from "./sentry.js";
+
 function isHoldedError(
   err: unknown,
 ): err is
@@ -117,11 +119,17 @@ export function registerErrorHandler(app: FastifyInstance): void {
       });
     }
 
-    // 5. Resto → 500 con requestId. Stack SOLO en logs.
+    // 5. Resto → 500 con requestId. Stack SOLO en logs. Sentry (Lote 2
+    // v1.5-B): captura con tenantId+requestId; no-op sin SENTRY_DSN.
     request.log.error(
       { err, tenantId, requestId: request.id },
       `error no controlado en ${request.method} ${request.url}`,
     );
+    captureError(err, {
+      tenantId,
+      requestId: String(request.id),
+      extra: { method: request.method, url: request.url },
+    });
     return reply.code(500).send({
       error: "INTERNAL_ERROR",
       message:

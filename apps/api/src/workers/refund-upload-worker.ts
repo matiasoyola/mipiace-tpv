@@ -5,6 +5,7 @@
 import { Worker } from "bullmq";
 
 import { getPrisma, getRedis } from "../context.js";
+import { captureError } from "../lib/sentry.js";
 import { REFUND_UPLOAD_QUEUE_NAME, type RefundUploadJob } from "../queues/refund-upload.js";
 import { uploadRefund } from "../tickets/upload-refund.js";
 
@@ -22,6 +23,10 @@ export function startRefundUploadWorker(): Worker<RefundUploadJob> {
   });
   worker.on("failed", (job, err) => {
     console.error(`[refund-upload] job ${job?.id} falló: ${err.message}`);
+    // Sentry (v1.5-B Lote 2). No-op sin SENTRY_DSN.
+    captureError(err, {
+      extra: { queue: "refund-upload", jobId: job?.id, externalId: job?.data.externalId },
+    });
   });
   return worker;
 }

@@ -88,6 +88,7 @@ export {
 export {
   createSalesreceiptApproved,
   getReceiptPdf,
+  getSalesreceipt,
   registerPaymentWithGetBack,
   type CreateSalesreceiptOptions,
   type CreateSalesreceiptResult,

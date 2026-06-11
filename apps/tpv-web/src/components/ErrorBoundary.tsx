@@ -6,6 +6,8 @@
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
+import { captureError } from "../lib/sentry.js";
+
 interface Props {
   children: ReactNode;
 }
@@ -22,12 +24,13 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   override componentDidCatch(error: Error, info: ErrorInfo): void {
-    // Consola estructurada — gancho para Sentry en v1.5-B.
+    // Consola estructurada + Sentry (v1.5-B Lote 2; no-op sin DSN).
     console.error("[error-boundary]", {
       message: error.message,
       stack: error.stack,
       componentStack: info.componentStack,
     });
+    captureError(error, { componentStack: info.componentStack });
   }
 
   override render(): ReactNode {
@@ -54,7 +57,7 @@ export class ErrorBoundary extends Component<Props, State> {
 }
 
 // Captura promesas rechazadas fuera del árbol React (fetch sueltos,
-// listeners). Sólo log estructurado — Sentry llegará en v1.5-B.
+// listeners). Log estructurado + Sentry (v1.5-B; no-op sin DSN).
 export function installGlobalErrorLogging(): void {
   window.addEventListener("unhandledrejection", (event) => {
     const reason = event.reason as unknown;
@@ -62,5 +65,6 @@ export function installGlobalErrorLogging(): void {
       message: reason instanceof Error ? reason.message : String(reason),
       stack: reason instanceof Error ? (reason.stack ?? null) : null,
     });
+    captureError(reason, { source: "unhandledrejection" });
   });
 }

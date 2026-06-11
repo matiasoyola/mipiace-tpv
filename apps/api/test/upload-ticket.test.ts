@@ -87,6 +87,8 @@ const fakePrisma = {
       const u = uploads.get(where.externalId);
       if (!u) return { count: 0 };
       if (data.attempts?.increment != null) u.attempts += data.attempts.increment;
+      if (data.status != null) u.status = data.status;
+      if (data.lastError !== undefined) u.lastError = data.lastError;
       return { count: 1 };
     }),
   },
@@ -203,6 +205,25 @@ describe("uploadTicket", () => {
     expect(tickets.get(externalId)!.holdedDocumentId).toBe("doc-1");
     expect(tickets.get(externalId)!.holdedDocNumber).toBe("T260530");
     expect(uploads.get(externalId)!.status).toBe("DONE");
+  });
+
+  it("ticket TEST → skip y HoldedUpload queda SKIPPED terminal (v1.5-B §3.a)", async () => {
+    // Incidente 2026-06-11: el skip de modo prueba dejaba el upload
+    // PENDING para siempre y el sweeper lo re-encolaba cada 5 min.
+    const externalId = randomUUID();
+    seedTicket(externalId, 5);
+    tickets.get(externalId)!.status = "TEST";
+    const client = mockHoldedClient([]); // no debe tocar Holded
+    const res = await uploadTicket({
+      externalId,
+      prisma: fakePrisma as any,
+      buildClient: () => client,
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    expect(res).toEqual({ kind: "skipped", reason: "test_cashier" });
+    expect(uploads.get(externalId)!.status).toBe("SKIPPED");
+    expect(uploads.get(externalId)!.lastError).toEqual({ skipped: "test_mode" });
+    expect((client.request as any).mock.calls.length).toBe(0);
   });
 
   it("silent reject del salesreceipt → SYNC_FAILED, no se reintenta", async () => {

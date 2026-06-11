@@ -5,6 +5,7 @@
 import { Worker } from "bullmq";
 
 import { getPrisma, getRedis } from "../context.js";
+import { captureError } from "../lib/sentry.js";
 import { TICKET_UPLOAD_QUEUE_NAME, type TicketUploadJob } from "../queues/ticket-upload.js";
 import { uploadTicket } from "../tickets/upload-ticket.js";
 
@@ -29,6 +30,11 @@ export function startTicketUploadWorker(): Worker<TicketUploadJob> {
   });
   worker.on("failed", (job, err) => {
     console.error(`[ticket-upload] job ${job?.id} falló: ${err.message}`);
+    // Sentry (v1.5-B Lote 2): un upload que agota reintentos es dinero
+    // sin contabilizar — alertable. No-op sin SENTRY_DSN.
+    captureError(err, {
+      extra: { queue: "ticket-upload", jobId: job?.id, externalId: job?.data.externalId },
+    });
   });
   return worker;
 }

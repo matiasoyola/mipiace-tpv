@@ -1,0 +1,26 @@
+# Override de build local (v1.5-consistencia-B · Lote 1).
+#
+# El docker-compose.prod.yml referencia imágenes de GHCR (las publica
+# CI); este fichero recupera la vía de build en la máquina local o en
+# el VPS cuando haga falta construir sin registry:
+#
+#   docker compose --env-file infra/.env.production \
+#     -f infra/docker-compose.prod.yml -f infra/docker-compose.build.yml \
+#     build
+#
+# Tras el build, las imágenes quedan etiquetadas con el mismo nombre
+# ghcr.io/... que espera el prod.yml, así `up -d` las usa sin pull.
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+      target: api
+
+  static-publish:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+      target: static
+

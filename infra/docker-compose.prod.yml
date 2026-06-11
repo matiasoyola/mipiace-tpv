@@ -76,12 +76,14 @@ services:
     networks:
       - mipiacetpv
 
+  # v1.5-consistencia-B · Lote 1: las imágenes vienen de GHCR (las
+  # publica CI en cada push a master). IMAGE_TAG selecciona la versión:
+  # sin definir → latest; rollback → IMAGE_TAG=<sha-anterior>.
+  # Los `build:` viven en docker-compose.build.yml (override) para no
+  # perder la vía de build local:
+  #   docker compose -f docker-compose.prod.yml -f docker-compose.build.yml build
   api:
-    build:
-      context: ..
-      dockerfile: infra/Dockerfile
-      target: api
-    image: mipiacetpv/api:latest
+    image: ghcr.io/matiasoyola/mipiacetpv-api:${IMAGE_TAG:-latest}
     container_name: mipiacetpv-api
     restart: unless-stopped
     logging: *default-logging
@@ -114,6 +116,10 @@ services:
       # v1.5-hotfix3 · los Z van a un named volume (antes: FS del
       # contenedor → se perdían en cada recreate + EACCES con USER node).
       Z_REPORT_STORAGE_ROOT: /var/lib/mipiacetpv/z-reports
+      # v1.5-consistencia-B · Lote 2: Sentry. Vacío → no-op absoluto.
+      # Release = tag de la imagen desplegada (sha corto de CI).
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_RELEASE: ${IMAGE_TAG:-latest}
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3001/health"]
       interval: 30s
@@ -135,7 +141,7 @@ services:
       - mipiacetpv
 
   worker:
-    image: mipiacetpv/api:latest
+    image: ghcr.io/matiasoyola/mipiacetpv-api:${IMAGE_TAG:-latest}
     container_name: mipiacetpv-worker
     restart: unless-stopped
     logging: *default-logging
@@ -176,6 +182,9 @@ services:
       SUPER_ADMIN_FROM_EMAIL: ${SUPER_ADMIN_FROM_EMAIL}
       SUPER_ADMIN_REPLY_TO_EMAIL: ${SUPER_ADMIN_REPLY_TO_EMAIL}
       PRODUCT_IMAGE_CACHE_DIR: /var/cache/mipiacetpv/product-images
+      # v1.5-consistencia-B · Lote 2: Sentry (ídem api).
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_RELEASE: ${IMAGE_TAG:-latest}
     volumes:
       # Worker primario para B-ProductImages: descarga, valida y escribe
       # los binarios. Mismo volumen que el API y Caddy.
@@ -190,10 +199,7 @@ services:
   # Init container que extrae los dists del Dockerfile (target=static) al
   # volumen compartido con caddy. Se ejecuta una vez por deploy y termina.
   static-publish:
-    build:
-      context: ..
-      dockerfile: infra/Dockerfile
-      target: static
+    image: ghcr.io/matiasoyola/mipiacetpv-static-publish:${IMAGE_TAG:-latest}
     container_name: mipiacetpv-static-publish
     logging: *default-logging
     volumes:
