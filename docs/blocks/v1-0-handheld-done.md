@@ -81,3 +81,36 @@ Ninguna: sin deps nuevas, sin migraciones, sin env vars, sin cambios de CI. 100%
 - **Sheet sin gesto de arrastre ni animación** — pulir si el feedback de los camareros lo pide.
 - **Modo apaisado del handheld** sin trabajo específico (fuera de alcance del bloque; el layout `lg:` cubre ≥1024px de ancho).
 - **Impresión en la impresora integrada del handheld** → A1/A2 (Android nativo).
+
+## Verificación visual (Chrome real)
+
+Pasada post-commit con Chrome headless real (Playwright `page.route` mockeando toda la API + modo prueba `?testCashierToken`, SW bloqueado) contra el build de producción (`vite preview`). Cubre el criterio de Lote 0 — `document.documentElement.scrollWidth === clientWidth` — en las tres pantallas del bloque, en ambos anchos y con el flujo completo ejecutado de verdad (mapa → mesa → 3 artículos → sheet → checkout, y venta rápida):
+
+| Pantalla | Ancho | scrollWidth | clientWidth | OK |
+|---|---|---|---|---|
+| TableMapScreen | 390 | 390 | 390 | ✅ |
+| SalePage (mesa) | 390 | 390 | 390 | ✅ |
+| SalePage (sheet abierto) | 390 | 390 | 390 | ✅ |
+| CheckoutPage | 390 | 390 | 390 | ✅ |
+| TableMapScreen | 360 | 360 | 360 | ✅ |
+| SalePage (mesa) | 360 | 360 | 360 | ✅ |
+| SalePage (sheet abierto) | 360 | 360 | 360 | ✅ |
+| CheckoutPage | 360 | 360 | 360 | ✅ |
+| SalePage (venta rápida) | 390 | 390 | 390 | ✅ |
+
+**9/9 sin overflow horizontal.** Capturas en [`docs/blocks/handheld-shots/`](handheld-shots/):
+
+- [`390-1-mapa-sala.png`](handheld-shots/390-1-mapa-sala.png) — mapa de sala: 2 columnas, zonas como chips, badge "cuenta".
+- [`390-2-salepage-mesa.png`](handheld-shots/390-2-salepage-mesa.png) — SalePage en mesa: catálogo primero, header a dos filas.
+- [`390-3-salepage-3-articulos.png`](handheld-shots/390-3-salepage-3-articulos.png) — 3 artículos añadidos: barra inferior con "Comanda · Mesa M1 · 3 líneas · 6,00 €".
+- [`390-4-bottom-sheet-ticket.png`](handheld-shots/390-4-bottom-sheet-ticket.png) — bottom-sheet: chips de mesa, totales, Enviar comanda, Cobrar, líneas con stepper.
+- [`390-5-checkout.png`](handheld-shots/390-5-checkout.png) — checkout a pantalla completa con teclado de atajos.
+- [`390-6-venta-rapida.png`](handheld-shots/390-6-venta-rapida.png) — venta rápida sin contexto mesa.
+- [`360-1-mapa-sala.png`](handheld-shots/360-1-mapa-sala.png) / [`360-2-salepage.png`](handheld-shots/360-2-salepage.png) — los mismos estados al ancho mínimo objetivo.
+- [`1280-desktop-salepage.png`](handheld-shots/1280-desktop-salepage.png) — escritorio intacto: header de una fila, aside del ticket a la derecha, sin barra inferior.
+
+Notas de la pasada:
+
+- El banner amarillo de las capturas es el **modo prueba** del harness (no aparece en operación normal).
+- Hallazgo cosmético pre-existente (también en escritorio): en `TableCard`, el badge "CUENTA"/"cobro pendiente" (absoluto, top-right) se solapa con la etiqueta "N PAX" — visible en `390-1-mapa-sala.png` (mesa M3). No se toca en este bloque (frontera "ni un píxel" del layout validado); candidato a micro-fix en el próximo bloque de mesas.
+- Esto **resuelve el carryover** "igualdad scrollWidth === clientWidth real pendiente": queda verificada en Chrome real a 360 y 390px. Sigue pendiente únicamente la pasada en el handheld físico (táctil + teclado virtual real). El harness (Playwright + mocks) vive fuera del repo; si las regresiones de layout móvil se repiten, ese script es la base para automatizarlo en CI.
