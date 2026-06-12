@@ -2,12 +2,18 @@
 // devolver, elige método de reembolso (por defecto el del cobro
 // original), confirma → POST /refunds.
 
-import { useMemo, useState } from "react";
-import { ArrowLeft, Loader2, Minus, Plus } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { ArrowLeft, CloudOff, Loader2, Minus, Plus } from "lucide-react";
 
 import { ApiError, apiWithCashier } from "../api.js";
 import { getCachedBusinessType } from "../lib/catalog.js";
 import { newId } from "../lib/ids.js";
+import {
+  isPermanentRejection,
+  outboxAdd,
+  outboxDelete,
+  outboxReleaseAfterFailure,
+} from "../lib/outbox.js";
 import { vocab } from "../lib/vocab.js";
 
 const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
@@ -59,6 +65,12 @@ export function RefundOverlay(props: {
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // v1.5-consistencia-C: externalId estable por overlay (no por intento)
+  // para que los reintentos del outbox sean idempotentes en /refunds.
+  const externalIdRef = useRef<string>(newId());
+  // true = el POST no confirmó pero la devolución quedó a salvo en el
+  // outbox local; mostramos el aviso y dejamos que el reenvío la suba.
+  const [pendingLocal, setPendingLocal] = useState(false);
 
   function setUnits(lineId: string, value: number, max: number) {
     setUnitsByLine((curr) => ({
@@ -84,26 +96,95 @@ export function RefundOverlay(props: {
   async function submit() {
     setSubmitting(true);
     setError(null);
+    // v1.5-consistencia-C: mismo patrón que el cobro — persistir en el
+    // outbox ANTES del POST; red/5xx → la devolución queda pendiente y
+    // el reenvío en background la sube (idempotente por externalId).
+    let persisted = false;
     try {
       const payloadLines = Object.entries(unitsByLine)
         .filter(([, u]) => u > 0)
         .map(([ticketLineId, units]) => ({ ticketLineId, units }));
+      const body = {
+        externalId: externalIdRef.current,
+        originalTicketId: props.ticket.id,
+        method,
+        reason: reason || undefined,
+        lines: payloadLines,
+      };
+      try {
+        persisted = true;
+        await outboxAdd(
+          {
+            externalId: externalIdRef.current,
+            kind: "refund",
+            path: "/refunds",
+            body,
+            label: `${vocab("refundNoun", businessType)} #${props.ticket.internalNumber}`,
+            total: refundTotal,
+          },
+          { lock: true },
+        );
+      } catch {
+        persisted = false;
+      }
       await apiWithCashier<RefundResponse>("/refunds", {
         method: "POST",
-        body: {
-          externalId: newId(),
-          originalTicketId: props.ticket.id,
-          method,
-          reason: reason || undefined,
-          lines: payloadLines,
-        },
+        body,
       });
+      if (persisted) {
+        await outboxDelete(externalIdRef.current).catch(() => {});
+      }
       props.onConfirmed();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Error inesperado");
+      if (err instanceof ApiError && isPermanentRejection(err)) {
+        // Error de validación con el cajero delante: inline, sin dejar
+        // el item en el outbox (corrige y reintenta).
+        await outboxDelete(externalIdRef.current).catch(() => {});
+        setError(err.message);
+      } else {
+        const saved =
+          persisted &&
+          (await outboxReleaseAfterFailure(
+            externalIdRef.current,
+            err instanceof Error ? err.message : "Error de red desconocido",
+          )
+            .then(() => true)
+            .catch(() => false));
+        if (saved) setPendingLocal(true);
+        else
+          setError(err instanceof ApiError ? err.message : "Error inesperado");
+      }
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (pendingLocal) {
+    return (
+      <div className="fixed inset-0 z-50 bg-mipiace-ink/95 flex items-center justify-center p-5 font-sans">
+        <div className="bg-white rounded-3xl border border-slate-200 w-full max-w-md p-8 text-center">
+          <div className="h-16 w-16 mx-auto rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-4">
+            <CloudOff className="w-7 h-7" strokeWidth={2.25} />
+          </div>
+          <h1 className="text-[20px] font-semibold text-mipiace-ink tracking-tight">
+            {vocab("refundNoun", businessType)} guardada
+          </h1>
+          <div
+            data-testid="pending-refund-pending"
+            className="mt-4 bg-amber-50 rounded-xl p-4 text-[13px] text-amber-800 text-left"
+          >
+            Pendiente de enviar — está guardada en este dispositivo y se
+            sincronizará sola en cuanto vuelva la conexión.
+          </div>
+          <button
+            onClick={props.onConfirmed}
+            className="mt-6 w-full h-12 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white font-medium text-[14px]"
+          >
+            Aceptar
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (

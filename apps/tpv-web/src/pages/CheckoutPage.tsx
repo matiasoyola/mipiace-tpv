@@ -39,8 +39,17 @@ import { computeLine } from "../lib/cart.js";
 import type { CartLine, CartTotals } from "../lib/cart.js";
 import type { BusinessType } from "../lib/catalog.js";
 import { newId } from "../lib/ids.js";
+import {
+  isPermanentRejection,
+  outboxAdd,
+  outboxDelete,
+  outboxReleaseAfterFailure,
+} from "../lib/outbox.js";
 import { scrollFocusIntoView } from "../lib/visualViewportSync.js";
-import { SuccessOverlay } from "./CheckoutPage.successOverlay.js";
+import {
+  PendingSaleOverlay,
+  SuccessOverlay,
+} from "./CheckoutPage.successOverlay.js";
 
 const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
 
@@ -105,7 +114,14 @@ export function CheckoutOverlay(props: {
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [confirmed, setConfirmed] = useState<TicketResponse | null>(null);
+  // v1.5-consistencia-C: "synced" = el POST confirmó; "pendingLocal" =
+  // la venta está a salvo en el outbox local pero el servidor aún no
+  // la tiene (red caída / 5xx) — el reenvío en background la subirá.
+  const [confirmed, setConfirmed] = useState<
+    | null
+    | { kind: "synced"; res: TicketResponse }
+    | { kind: "pendingLocal"; externalId: string }
+  >(null);
   // v1.3-Servicios-Pinta · Lote 3: profesional que atendió. Texto libre
   // opcional ≤60 chars, sólo visible en SERVICES.
   const [attendedBy, setAttendedBy] = useState("");
@@ -220,6 +236,9 @@ export function CheckoutOverlay(props: {
   async function submit(overrideToken?: string, _opts?: { skipClientNudge?: boolean }) {
     setSubmitting(true);
     setError(null);
+    // ¿Quedó la venta persistida en el outbox local? Sólo si es true
+    // podemos prometer "venta guardada" cuando el POST falle.
+    let persisted = false;
     try {
       const linesPayload = props.lines.map((l) => ({
         productId: l.productId ?? undefined,
@@ -247,31 +266,60 @@ export function CheckoutOverlay(props: {
         amount: parseAmount(p.amount),
         meta: p.meta && Object.keys(p.meta).length > 0 ? p.meta : undefined,
       }));
+      const body = {
+        externalId: externalIdRef.current,
+        registerId: props.registerId,
+        shiftId: props.shiftId,
+        lines: linesPayload,
+        payments: paymentsPayload,
+        contactHoldedId: props.contact?.holdedContactId,
+        notes: props.notes || undefined,
+        cashAmount: cashAmount > 0 ? cashAmount : undefined,
+        printIntent,
+        emailIntent: emailEnabled && emailIntent ? emailIntent : undefined,
+        giftReceiptIntent: giftReceipt,
+        authorizationToken: overrideToken ?? authToken ?? undefined,
+        attendedBy:
+          props.businessType === "SERVICES" && attendedBy.trim()
+            ? attendedBy.trim()
+            : undefined,
+      };
+      // v1.5-consistencia-C: persistimos en el outbox ANTES de lanzar
+      // el POST. `lock: true` evita que el flush periódico reenvíe en
+      // paralelo mientras este request está en vuelo. Si IndexedDB no
+      // está disponible (modo privado restrictivo) degradamos al POST
+      // directo de siempre.
+      try {
+        persisted = true;
+        await outboxAdd(
+          {
+            externalId: externalIdRef.current,
+            kind: "ticket",
+            path: "/tickets",
+            body,
+            label:
+              props.businessType === "SERVICES" ? "Servicio" : "Venta",
+            total,
+          },
+          { lock: true },
+        );
+      } catch {
+        persisted = false;
+      }
       const res = await apiWithCashier<TicketResponse>("/tickets", {
         method: "POST",
-        body: {
-          externalId: externalIdRef.current,
-          registerId: props.registerId,
-          shiftId: props.shiftId,
-          lines: linesPayload,
-          payments: paymentsPayload,
-          contactHoldedId: props.contact?.holdedContactId,
-          notes: props.notes || undefined,
-          cashAmount: cashAmount > 0 ? cashAmount : undefined,
-          printIntent,
-          emailIntent: emailEnabled && emailIntent ? emailIntent : undefined,
-          giftReceiptIntent: giftReceipt,
-          authorizationToken: overrideToken ?? authToken ?? undefined,
-          attendedBy:
-            props.businessType === "SERVICES" && attendedBy.trim()
-              ? attendedBy.trim()
-              : undefined,
-        },
+        body,
       });
-      setConfirmed(res);
+      if (persisted) {
+        await outboxDelete(externalIdRef.current).catch(() => {});
+      }
+      setConfirmed({ kind: "synced", res });
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.code === "MANAGER_AUTHORIZATION_REQUIRED") {
+          // La venta no es definitiva hasta que el encargado autorice:
+          // fuera del outbox (si se reenviase sola volvería a dar 403).
+          await outboxDelete(externalIdRef.current).catch(() => {});
           const data = err.data as
             | { effectiveDiscountPct?: number; thresholdPct?: number }
             | null;
@@ -286,24 +334,63 @@ export function CheckoutOverlay(props: {
           err.code === "MANAGER_AUTHORIZATION_INVALID" ||
           err.code === "MANAGER_AUTHORIZATION_INSUFFICIENT"
         ) {
+          await outboxDelete(externalIdRef.current).catch(() => {});
           setAuthToken(null);
           setAuthorizedBy(null);
           setError(err.message);
           setSubmitting(false);
           return;
         }
-        setError(err.message);
-      } else setError("Error inesperado");
+        if (isPermanentRejection(err)) {
+          // Error de validación con el cajero delante: lo ve inline,
+          // corrige y recobra. No dejamos el item en el outbox para no
+          // duplicar cuando reintente con el payload corregido.
+          await outboxDelete(externalIdRef.current).catch(() => {});
+          setError(err.message);
+          setSubmitting(false);
+          return;
+        }
+      }
+      // Red caída, 5xx o sin sesión: la venta YA está a salvo en el
+      // outbox. Soltamos el lock para que el reenvío en background la
+      // suba y mostramos la pantalla de éxito en modo pendiente.
+      const saved =
+        persisted &&
+        (await outboxReleaseAfterFailure(
+          externalIdRef.current,
+          err instanceof Error ? err.message : "Error de red desconocido",
+        )
+          .then(() => true)
+          .catch(() => false));
+      if (saved) {
+        setConfirmed({
+          kind: "pendingLocal",
+          externalId: externalIdRef.current,
+        });
+      } else {
+        setError(
+          err instanceof ApiError ? err.message : "Error inesperado",
+        );
+      }
     } finally {
       setSubmitting(false);
     }
   }
 
   if (confirmed) {
+    if (confirmed.kind === "synced") {
+      return (
+        <SuccessOverlay
+          ticketId={confirmed.res.ticket.id}
+          internalNumber={confirmed.res.ticket.internalNumber}
+          onDone={props.onConfirmed}
+        />
+      );
+    }
     return (
-      <SuccessOverlay
-        ticketId={confirmed.ticket.id}
-        internalNumber={confirmed.ticket.internalNumber}
+      <PendingSaleOverlay
+        externalId={confirmed.externalId}
+        businessType={props.businessType}
         onDone={props.onConfirmed}
       />
     );

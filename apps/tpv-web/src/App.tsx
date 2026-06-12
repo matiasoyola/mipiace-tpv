@@ -15,8 +15,10 @@ import { TestModeBanner } from "./components/TestModeBanner.js";
 import { useDeviceBootstrap } from "./hooks/useDeviceBootstrap.js";
 import { useInactivityLogout } from "./hooks/useInactivityLogout.js";
 import { getCachedBusinessType } from "./lib/catalog.js";
+import { startOutboxSync } from "./lib/outbox.js";
 import { clearTestMode, isTestModeActive } from "./lib/test-mode.js";
 import { startVisualViewportSync } from "./lib/visualViewportSync.js";
+import { OutboxChip } from "./pages/CheckoutPage.outboxChip.js";
 import { PairScreen } from "./pages/PairScreen.js";
 import { PinScreen, type CashierLoginResponse } from "./pages/PinScreen.js";
 import { SalePage, type TableContext } from "./pages/SalePage.js";
@@ -83,6 +85,10 @@ export function App() {
   // dropdown de búsqueda) usa `padding-bottom: var(--keyboard-offset)`
   // para empujarse hacia arriba en lugar de quedar oculto.
   useEffect(() => startVisualViewportSync(), []);
+
+  // v1.5-consistencia-C · reenvío del outbox offline: al arrancar, al
+  // evento `online` y cada N segundos mientras haya pendientes.
+  useEffect(() => startOutboxSync(), []);
 
   // En modo prueba, hacemos un bootstrap único contra el backend para
   // obtener user/shift/store/register sin pasar por PinScreen.
@@ -277,7 +283,14 @@ function LoggedInWrapper({
   children: React.ReactNode;
 }) {
   useInactivityLogout(true, autoLogoutMinutes, onAutoLogout);
-  return <>{children}</>;
+  // v1.5-consistencia-C: el chip de cobros pendientes acompaña a todas
+  // las pantallas con cajero logueado (incluido modo prueba).
+  return (
+    <>
+      {children}
+      <OutboxChip />
+    </>
+  );
 }
 
 // Cuando hay sesión + turno abierto, el cajero entra al "home" del TPV.

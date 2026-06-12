@@ -13,6 +13,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Check,
+  CloudOff,
   Download,
   Eye,
   Loader2,
@@ -30,6 +31,8 @@ import type { TicketDocument } from "@mipiacetpv/ticket-model";
 
 import { apiWithCashier, ApiError } from "../api.js";
 import { getCachedBusinessType } from "../lib/catalog.js";
+import type { BusinessType } from "../lib/catalog.js";
+import { subscribeOutbox } from "../lib/outbox.js";
 import {
   fetchTicketEscposBinary,
   getPairedUsbPrinter,
@@ -382,6 +385,104 @@ export function SuccessOverlay({
           onClose={() => setShowView(false)}
         />
       )}
+    </div>
+  );
+}
+
+// v1.5-consistencia-C · pantalla de éxito cuando el POST no confirmó
+// pero la venta YA está persistida en el outbox local. Discreta, no
+// alarmante: la venta está a salvo y se subirá sola. Si el reenvío en
+// background confirma mientras esta pantalla sigue abierta, saltamos
+// al SuccessOverlay completo sin intervención del cajero; si el
+// servidor la rechaza (error permanente), lo decimos para que actúe
+// desde el chip de pendientes.
+export function PendingSaleOverlay({
+  externalId,
+  businessType,
+  onDone,
+}: {
+  externalId: string;
+  businessType: BusinessType | null;
+  onDone: () => void;
+}) {
+  const [state, setState] = useState<
+    | { phase: "pending" }
+    | { phase: "confirmed"; ticket: { id: string; internalNumber: string } }
+    | { phase: "rejected"; reason: string }
+  >({ phase: "pending" });
+
+  useEffect(
+    () =>
+      subscribeOutbox((e) => {
+        if (e.type === "sent" && e.externalId === externalId) {
+          const res = e.response as {
+            ticket?: { id?: string; internalNumber?: string };
+          } | null;
+          if (res?.ticket?.id && res.ticket.internalNumber) {
+            setState({
+              phase: "confirmed",
+              ticket: {
+                id: res.ticket.id,
+                internalNumber: res.ticket.internalNumber,
+              },
+            });
+          }
+        } else if (e.type === "rejected" && e.externalId === externalId) {
+          setState({ phase: "rejected", reason: e.reason });
+        }
+      }),
+    [externalId],
+  );
+
+  if (state.phase === "confirmed") {
+    return (
+      <SuccessOverlay
+        ticketId={state.ticket.id}
+        internalNumber={state.ticket.internalNumber}
+        onDone={onDone}
+      />
+    );
+  }
+
+  const saleNoun = businessType === "SERVICES" ? "Servicio" : "Venta";
+
+  return (
+    <div className="fixed inset-0 z-50 bg-mipiace-ink/95 flex items-center justify-center p-5 font-sans overflow-y-auto">
+      <div className="bg-white rounded-3xl border border-slate-200 w-full max-w-md p-8 text-center">
+        <div className="h-16 w-16 mx-auto rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-4">
+          <Check className="w-8 h-8" strokeWidth={2.5} />
+        </div>
+        <h1 className="text-[22px] font-semibold text-mipiace-ink tracking-tight">
+          {saleNoun} guardada
+        </h1>
+        {state.phase === "rejected" ? (
+          <div
+            data-testid="pending-sale-rejected"
+            className="mt-5 text-[13px] text-red-700 bg-red-50 rounded-xl p-4 text-left"
+          >
+            El servidor rechazó este cobro: {state.reason}. Revísalo en el
+            panel de pendientes para reintentarlo o descartarlo.
+          </div>
+        ) : (
+          <div
+            data-testid="pending-sale-pending"
+            className="mt-5 bg-amber-50 rounded-xl p-4 flex items-start gap-2.5 text-left"
+          >
+            <CloudOff className="w-4 h-4 mt-0.5 shrink-0 text-amber-700" />
+            <div className="text-[13px] text-amber-800">
+              Pendiente de enviar — el cobro está guardado en este
+              dispositivo y se sincronizará solo en cuanto vuelva la
+              conexión.
+            </div>
+          </div>
+        )}
+        <button
+          onClick={onDone}
+          className="mt-6 w-full h-12 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white font-medium text-[14px]"
+        >
+          {businessType === "SERVICES" ? "Nuevo servicio" : "Nueva venta"}
+        </button>
+      </div>
     </div>
   );
 }
