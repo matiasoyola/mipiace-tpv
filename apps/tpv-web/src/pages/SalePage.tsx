@@ -24,6 +24,7 @@ import {
   Package,
   Plus,
   PowerOff,
+  ReceiptText,
   RotateCw,
   ScanLine,
   Scissors,
@@ -1142,7 +1143,15 @@ export function SalePage(props: SalePageProps) {
       )}
       <div className="flex-1 min-h-0 flex max-w-[1680px] w-full mx-auto bg-white">
         <div className="flex-1 flex flex-col min-w-0">
-          <header className="h-[88px] md:h-[100px] border-b border-slate-200 flex items-center px-4 md:px-7 gap-3 shrink-0">
+          {/* v1.0-handheld · Lote 0+1: en <1024px el header pasa a dos
+              filas (identidad/acciones arriba, buscador+escáner a ancho
+              completo debajo). Causa del overflow horizontal en 360px:
+              el wrapper del buscador era `flex-1` SIN min-w-0 (el input
+              tiene min-width intrínseco ~240px por su size por defecto)
+              y el cluster de botones fijos de la derecha ya sumaba más
+              que el viewport. En ≥1024px (lg:) el header queda EXACTO
+              al validado por Sole: una fila de 100px. */}
+          <header className="border-b border-slate-200 flex flex-wrap items-center px-4 md:px-7 gap-3 py-2.5 lg:py-0 lg:flex-nowrap lg:h-[100px] shrink-0">
             <button
               type="button"
               onClick={() => setDrawerOpen(true)}
@@ -1152,11 +1161,11 @@ export function SalePage(props: SalePageProps) {
             >
               <Menu className="w-5 h-5" strokeWidth={2.1} />
             </button>
-            <div className="md:hidden">
+            <div className="lg:hidden">
               <Logo size={24} />
             </div>
-            <div className="flex-1 max-w-3xl">
-              <div className="relative">
+            <div className="order-last w-full lg:order-none lg:w-auto lg:flex-1 lg:max-w-3xl min-w-0 flex items-center gap-2">
+              <div className="relative flex-1 min-w-0">
                 <Search
                   className="absolute left-4 md:left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"
                   strokeWidth={2.25}
@@ -1177,9 +1186,22 @@ export function SalePage(props: SalePageProps) {
                       ? "Buscar servicio o cliente…"
                       : "Buscar producto, código de barras o SKU…"
                   }
-                  className="h-12 md:h-14 w-full pl-11 md:pl-12 pr-4 text-[14px] md:text-[14.5px] bg-mipiace-stone border border-transparent rounded-2xl focus:outline-none focus:ring-2 focus:ring-mipiace-coral/40 focus:bg-white focus:border-mipiace-coral/30"
+                  className="h-12 md:h-14 w-full min-w-0 pl-11 md:pl-12 pr-4 text-[14px] md:text-[14.5px] bg-mipiace-stone border border-transparent rounded-2xl focus:outline-none focus:ring-2 focus:ring-mipiace-coral/40 focus:bg-white focus:border-mipiace-coral/30"
                 />
               </div>
+              {/* Gemelo del botón Escanear pegado al buscador en la fila
+                  handheld. El original sigue en el cluster de la derecha
+                  (hidden lg:flex) para no mover ni un píxel el escritorio. */}
+              {hasCameraSupport() && (
+                <button
+                  onClick={() => setShowCameraScan(true)}
+                  title="Escanear con cámara"
+                  aria-label="Escanear con cámara"
+                  className="lg:hidden h-12 w-12 shrink-0 rounded-2xl bg-mipiace-stone hover:bg-slate-100 flex items-center justify-center text-slate-600"
+                >
+                  <ScanLine className="w-[18px] h-[18px]" strokeWidth={2.25} />
+                </button>
+              )}
             </div>
             <div className="flex items-center gap-2 md:gap-2.5 ml-auto">
               {/* v1.3 Lote 5 · botón "Escanear" para iPad sin USB
@@ -1192,7 +1214,7 @@ export function SalePage(props: SalePageProps) {
                 <button
                   onClick={() => setShowCameraScan(true)}
                   title="Escanear con cámara"
-                  className="h-12 md:h-14 w-12 md:w-14 rounded-2xl bg-mipiace-stone hover:bg-slate-100 flex items-center justify-center text-slate-600"
+                  className="h-12 md:h-14 w-12 md:w-14 rounded-2xl bg-mipiace-stone hover:bg-slate-100 hidden lg:flex items-center justify-center text-slate-600"
                 >
                   <ScanLine className="w-[18px] h-[18px]" strokeWidth={2.25} />
                 </button>
@@ -1210,7 +1232,10 @@ export function SalePage(props: SalePageProps) {
                   }
                 }}
                 title="Refrescar catálogo"
-                className="h-12 md:h-14 w-12 md:w-14 rounded-2xl bg-mipiace-stone hover:bg-slate-100 flex items-center justify-center text-slate-600"
+                // En handheld el refresco vive en el drawer ("Sincronizar
+                // catálogo") — el header no tiene sitio para dos iconos
+                // redundantes.
+                className="h-12 md:h-14 w-12 md:w-14 rounded-2xl bg-mipiace-stone hover:bg-slate-100 hidden lg:flex items-center justify-center text-slate-600"
               >
                 <RotateCw
                   className={`w-[18px] h-[18px] ${refreshing ? "animate-spin" : ""}`}
@@ -1222,6 +1247,13 @@ export function SalePage(props: SalePageProps) {
                 title="Tickets pasados"
                 className="h-12 md:h-14 px-3 md:px-5 rounded-2xl bg-mipiace-stone hover:bg-slate-100 flex items-center gap-2 text-[13.5px] md:text-[14px] font-medium text-mipiace-ink"
               >
+                {/* v1.0-handheld: en <1024px el botón era invisible (sólo
+                    texto hidden). Icono visible en estrecho; en escritorio
+                    se oculta y queda el rótulo de siempre. */}
+                <ReceiptText
+                  className="w-[18px] h-[18px] lg:hidden"
+                  strokeWidth={2.25}
+                />
                 <span className="hidden sm:inline">Tickets</span>
               </button>
               {/* v1.0-mesas-frontend: en contexto mesa no hay carritos
@@ -1299,7 +1331,9 @@ export function SalePage(props: SalePageProps) {
             onClickUngroup={() => void tableUngroup()}
           />
 
-          <footer className="h-[56px] md:h-[68px] border-t border-slate-200 grid grid-cols-3 items-center px-4 md:px-7 text-[12px] md:text-[13px] shrink-0">
+          {/* v1.0-handheld: en <1024px este footer informativo cede su
+              sitio a la barra inferior fija (líneas + total + Ticket). */}
+          <footer className="h-[56px] md:h-[68px] border-t border-slate-200 hidden lg:grid grid-cols-3 items-center px-4 md:px-7 text-[12px] md:text-[13px] shrink-0">
             <div className="flex items-center gap-2.5">
               <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full" />
               <span className="text-mipiace-ink font-medium hidden sm:inline">
@@ -1938,6 +1972,37 @@ function SaleWorkspace({
     if (selectedTag) list = list.filter((p) => p.tags.includes(selectedTag));
     return list;
   }, [products, selectedTag, showKindToggle, kindFilter]);
+  // v1.0-handheld · Lote 1.3: en <1024px el ticket vive en un
+  // bottom-sheet que se abre desde la barra inferior. El estado es
+  // sólo "abierto/cerrado" — las líneas viven arriba en SalePage, así
+  // que cerrar el sheet nunca pierde nada.
+  const [mobileTicketOpen, setMobileTicketOpen] = useState(false);
+  const ticketPanelProps = {
+    lines,
+    contact,
+    notes,
+    totals,
+    shiftTicketsCount,
+    tableContext,
+    onBackToMap,
+    onClickLine,
+    onUpdateLineUnits,
+    onRemoveLine,
+    onClickDiscountGlobal,
+    onClickNotes,
+    onClickContact,
+    onClickCheckout,
+    onSuspend,
+    onCancel,
+    onSendToKitchen,
+    kitchenBusy,
+    kitchenLastRevision,
+    onClickMoveTable,
+    onClickSplitBill,
+    hasGroupedTables,
+    onClickGroup,
+    onClickUngroup,
+  };
   return (
     <div className="flex-1 grid lg:grid-cols-[1fr_360px] gap-4 lg:gap-6 p-4 md:p-7 min-h-0 [@media(min-width:1024px)_and_(min-height:700px)]:overflow-hidden">
       {/* v1.3-UX-Iteración Lote 1: en apaisado el catálogo tiene su
@@ -1946,7 +2011,10 @@ function SaleWorkspace({
           busca productos. En móvil/vertical mantenemos el comportamiento
           actual (apilado, scroll global) porque no hay espacio para
           dos columnas. */}
-      <section className="flex flex-col min-w-0 order-2 lg:order-1 lg:h-full lg:min-h-0">
+      {/* v1.0-handheld · Lote 1.1: con el aside oculto en <1024px el
+          catálogo es lo primero del flujo vertical (antes el ticket iba
+          order-1 encima). */}
+      <section className="flex flex-col min-w-0 lg:order-1 lg:h-full lg:min-h-0">
         {/* v1.3-UX-Iteración-fixes Fix 1: la barra de chips va FUERA del
             área de scroll vertical (antes desaparecía al scrollear el
             grid). El bloque chips queda fijo arriba; favoritos + grid
@@ -2186,6 +2254,9 @@ function SaleWorkspace({
             acciones del ticket. El workspace izquierdo queda solo con
             el grid de productos. */}
         </div>
+        {/* Hueco para que la barra inferior fija (handheld) no tape
+            las últimas filas del catálogo. */}
+        <div className="h-20 shrink-0 lg:hidden" aria-hidden="true" />
       </section>
 
       {/* Report A+D · Rediseño v2 del panel del ticket. Layout en bloques:
@@ -2205,7 +2276,158 @@ function SaleWorkspace({
           Mac de Matías; la tablet 1080p no lo sufre). En viewports
           bajos el aside vuelve al flujo natural (scrollea la página);
           el modo fijo se conserva donde hay sitio. */}
-      <aside className="bg-white rounded-3xl border border-slate-200 flex flex-col order-1 lg:order-2 [@media(min-width:1024px)_and_(min-height:700px)]:h-full [@media(min-width:1024px)_and_(min-height:700px)]:overflow-hidden">
+      {/* v1.0-handheld: el aside sólo existe en ≥1024px (layout clásico
+          validado por Sole, intacto). En estrecho el MISMO TicketPanel
+          se monta dentro del bottom-sheet de abajo. */}
+      <aside className="bg-white rounded-3xl border border-slate-200 hidden lg:flex flex-col lg:order-2 [@media(min-width:1024px)_and_(min-height:700px)]:h-full [@media(min-width:1024px)_and_(min-height:700px)]:overflow-hidden">
+        <TicketPanel {...ticketPanelProps} />
+      </aside>
+
+      {/* v1.0-handheld · Lote 1.2: barra inferior fija (thumb-zone) en
+          <1024px. Siempre visible: nº de líneas + total grande + abrir
+          ticket; en contexto mesa añade "Comanda" (Lote 2.2). Anclada
+          sobre el teclado virtual vía --keyboard-offset. */}
+      <div
+        className="lg:hidden fixed inset-x-0 z-40 bg-white border-t border-slate-200 px-3 py-2 flex items-center gap-2"
+        style={{ bottom: "var(--keyboard-offset, 0px)" }}
+      >
+        {tableContext && (
+          <button
+            type="button"
+            onClick={onSendToKitchen}
+            disabled={lines.length === 0 || kitchenBusy}
+            title={
+              kitchenLastRevision > 0
+                ? `Reenviar la comanda (la cocina ya recibió la nº ${kitchenLastRevision}).`
+                : "Imprime una comanda por sección (barra/cocina/salón)."
+            }
+            className="h-12 px-3.5 shrink-0 rounded-2xl border border-mipiace-coral/40 text-mipiace-coral-dark disabled:opacity-50 text-[13.5px] font-medium"
+          >
+            {kitchenBusy
+              ? "Enviando…"
+              : kitchenLastRevision > 0
+                ? "Reenviar"
+                : "Comanda"}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => setMobileTicketOpen(true)}
+          aria-label="Abrir ticket"
+          className="flex-1 min-w-0 h-12 rounded-2xl bg-mipiace-ink text-white flex items-center justify-between px-4"
+        >
+          <span className="text-[13px] font-medium truncate">
+            {tableContext ? `Mesa ${tableContext.name} · ` : ""}
+            {lines.length} {lines.length === 1 ? "línea" : "líneas"}
+          </span>
+          <span className="text-[18px] font-semibold tabular-nums">
+            {formatEur(totals.total)}
+          </span>
+        </button>
+      </div>
+
+      {/* v1.0-handheld · Lote 1.3: carrito como bottom-sheet. Reutiliza
+          el TicketPanel del escritorio — re-layout, no re-implementación.
+          Cerrar no toca el estado (las líneas viven en SalePage). Los
+          sheets de edición (LineSheet, descuento, cliente…) y el
+          checkout abren con z-50 POR ENCIMA de este panel (z-40). */}
+      {mobileTicketOpen && (
+        <div className="lg:hidden fixed inset-0 z-40">
+          <div
+            className="absolute inset-0 bg-slate-900/40"
+            onClick={() => setMobileTicketOpen(false)}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Ticket"
+            className="absolute inset-x-0 bottom-0 max-h-[88dvh] bg-white rounded-t-3xl shadow-xl flex flex-col overflow-hidden"
+            style={{ paddingBottom: "var(--keyboard-offset, 0px)" }}
+          >
+            <div className="flex items-center justify-between px-4 pt-3 pb-1 shrink-0">
+              <span className="w-9" aria-hidden="true" />
+              <span
+                className="h-1.5 w-10 rounded-full bg-slate-200"
+                aria-hidden="true"
+              />
+              <button
+                type="button"
+                onClick={() => setMobileTicketOpen(false)}
+                aria-label="Cerrar ticket"
+                className="h-11 w-11 rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-500"
+              >
+                <X className="w-4 h-4" strokeWidth={2.25} />
+              </button>
+            </div>
+            <TicketPanel {...ticketPanelProps} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface TicketPanelProps {
+  lines: CartLine[];
+  contact: ContactRef | null;
+  notes: string;
+  totals: ReturnType<typeof computeCart>;
+  shiftTicketsCount: number | null;
+  tableContext: TableContext | null;
+  onBackToMap: (() => void) | null;
+  onClickLine: (line: CartLine) => void;
+  onUpdateLineUnits: (id: string, units: number) => void;
+  onRemoveLine: (id: string) => void;
+  onClickDiscountGlobal: () => void;
+  onClickNotes: () => void;
+  onClickContact: () => void;
+  onClickCheckout: () => void;
+  onSuspend: () => void;
+  onCancel: () => void;
+  onSendToKitchen: () => void;
+  kitchenBusy: boolean;
+  kitchenLastRevision: number;
+  onClickMoveTable: () => void;
+  onClickSplitBill: () => void;
+  hasGroupedTables: boolean;
+  onClickGroup: () => void;
+  onClickUngroup: () => void;
+}
+
+// v1.0-handheld: contenido del panel del ticket, extraído tal cual del
+// aside de escritorio para poder montarlo también en el bottom-sheet
+// handheld. El wrapper (aside fijo vs sheet deslizante) pone el layout;
+// este componente sólo pinta los 4 bloques (header, chips, totales +
+// Cobrar, listado de líneas).
+function TicketPanel({
+  lines,
+  contact,
+  notes,
+  totals,
+  shiftTicketsCount,
+  tableContext,
+  onBackToMap,
+  onClickLine,
+  onUpdateLineUnits,
+  onRemoveLine,
+  onClickDiscountGlobal,
+  onClickNotes,
+  onClickContact,
+  onClickCheckout,
+  onSuspend,
+  onCancel,
+  onSendToKitchen,
+  kitchenBusy,
+  kitchenLastRevision,
+  onClickMoveTable,
+  onClickSplitBill,
+  hasGroupedTables,
+  onClickGroup,
+  onClickUngroup,
+}: TicketPanelProps) {
+  const businessType = getCachedBusinessType();
+  return (
+    <>
         {/* 1 · Header */}
         <div className="flex items-center justify-between px-5 md:px-7 pt-5 md:pt-6 pb-3 md:pb-4 border-b border-slate-100 shrink-0">
           <div className="min-w-0">
@@ -2438,9 +2660,7 @@ function SaleWorkspace({
             </div>
           )}
         </div>
-
-      </aside>
-    </div>
+    </>
   );
 }
 
