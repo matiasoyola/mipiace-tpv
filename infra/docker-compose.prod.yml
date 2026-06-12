@@ -152,11 +152,15 @@ services:
     # v1.5-consistencia-A §5.3: el worker escribe `worker:heartbeat` en
     # Redis cada 30 s (TTL 120 s); este check falla si la key no existe
     # → Docker detecta worker colgado y lo reinicia.
+    # v1.5-hotfix6: tsx NO está hoisted a la raíz (es devDep de
+    # apps/api) → el bin vive en apps/api/node_modules/.bin. La ruta
+    # antigua hacía que el check fallara SIEMPRE (latente desde v1.5-A;
+    # lo destapó deploy.sh al exigir healthy).
     healthcheck:
       test:
         [
           "CMD",
-          "/repo/node_modules/.bin/tsx",
+          "/repo/apps/api/node_modules/.bin/tsx",
           "/repo/apps/api/src/scripts/check-worker-heartbeat.ts",
         ]
       interval: 30s
