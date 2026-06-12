@@ -87,6 +87,13 @@ export function CheckoutOverlay(props: {
   // v1.3-piloto-feedback · Lote 3: nudge eliminado tras piloto Sole
   // (2026-05-25). Mantenemos la prop por compatibilidad de firma.
   onRequestAssignContact?: () => void;
+  // v1.0-mesas-frontend: si el cobro es de una MESA, el destino es
+  // POST /tickets/:id/checkout (las líneas ya viven en el DRAFT
+  // server-side; aquí sólo van pagos + intents + externalId de
+  // idempotencia). tableId acompaña al item del outbox para que el
+  // mapa local bloquee la mesa mientras el cobro esté en tránsito.
+  tableTicketId?: string | null;
+  tableId?: string | null;
   onClose: () => void;
   onConfirmed: () => void;
 }) {
@@ -266,11 +273,8 @@ export function CheckoutOverlay(props: {
         amount: parseAmount(p.amount),
         meta: p.meta && Object.keys(p.meta).length > 0 ? p.meta : undefined,
       }));
-      const body = {
+      const commonFields = {
         externalId: externalIdRef.current,
-        registerId: props.registerId,
-        shiftId: props.shiftId,
-        lines: linesPayload,
         payments: paymentsPayload,
         contactHoldedId: props.contact?.holdedContactId,
         notes: props.notes || undefined,
@@ -284,6 +288,20 @@ export function CheckoutOverlay(props: {
             ? attendedBy.trim()
             : undefined,
       };
+      // Mesa: el DRAFT ya tiene las líneas en el servidor; el checkout
+      // sólo manda pagos + intents (+ externalId de idempotencia, Lote 2
+      // v1.0-mesas-frontend). Venta rápida: POST /tickets con todo.
+      const path = props.tableTicketId
+        ? `/tickets/${props.tableTicketId}/checkout`
+        : "/tickets";
+      const body = props.tableTicketId
+        ? commonFields
+        : {
+            ...commonFields,
+            registerId: props.registerId,
+            shiftId: props.shiftId,
+            lines: linesPayload,
+          };
       // v1.5-consistencia-C: persistimos en el outbox ANTES de lanzar
       // el POST. `lock: true` evita que el flush periódico reenvíe en
       // paralelo mientras este request está en vuelo. Si IndexedDB no
@@ -295,18 +313,22 @@ export function CheckoutOverlay(props: {
           {
             externalId: externalIdRef.current,
             kind: "ticket",
-            path: "/tickets",
+            path,
             body,
-            label:
-              props.businessType === "SERVICES" ? "Servicio" : "Venta",
+            label: props.tableTicketId
+              ? "Mesa"
+              : props.businessType === "SERVICES"
+                ? "Servicio"
+                : "Venta",
             total,
+            tableId: props.tableId ?? undefined,
           },
           { lock: true },
         );
       } catch {
         persisted = false;
       }
-      const res = await apiWithCashier<TicketResponse>("/tickets", {
+      const res = await apiWithCashier<TicketResponse>(path, {
         method: "POST",
         body,
       });

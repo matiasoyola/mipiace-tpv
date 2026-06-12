@@ -27,11 +27,20 @@ export function LineSheet({
   onClose,
   onChange,
   onRemove,
+  allowPriceOverride = true,
+  onMoveToTable,
 }: {
   line: CartLine;
   onClose: () => void;
   onChange: (patch: Partial<CartLine>) => void;
   onRemove: () => void;
+  // v1.0-mesas-frontend: en contexto mesa la línea vive en el servidor
+  // y el PATCH no admite override de precio puntual — ocultamos el
+  // lápiz para no prometer algo que no se persistiría.
+  allowPriceOverride?: boolean;
+  // v1.0-mesas-frontend: mover ESTA línea a otra mesa (endpoint
+  // /tickets/:id/lines/move). Sólo en contexto mesa.
+  onMoveToTable?: () => void;
 }) {
   const [units, setUnits] = useState(String(line.units));
   const [discountPct, setDiscountPct] = useState(String(line.discountPct));
@@ -125,6 +134,15 @@ export function LineSheet({
             precio del catálogo limpiando el override. Cualquier cajero
             puede tocarlo — la auditoría queda en BD vía
             unitPriceOverride. */}
+        {onMoveToTable && (
+          <button
+            type="button"
+            onClick={onMoveToTable}
+            className="w-full h-12 mb-4 rounded-xl bg-mipiace-stone hover:bg-slate-100 text-[13.5px] font-medium text-mipiace-ink"
+          >
+            Mover esta línea a otra mesa
+          </button>
+        )}
         <div>
           <label className="block text-[13px] font-medium text-mipiace-ink-soft mb-2">
             Precio unitario
@@ -147,15 +165,17 @@ export function LineSheet({
                   </span>
                 )}
               </div>
-              <button
-                type="button"
-                onClick={() => setShowPriceEditor(true)}
-                className="h-12 px-3.5 rounded-xl bg-mipiace-stone hover:bg-slate-100 text-slate-600 flex items-center gap-1.5 text-[13px] font-medium"
-                aria-label="Modificar precio"
-              >
-                <Pencil className="w-3.5 h-3.5" />
-                Modificar
-              </button>
+              {allowPriceOverride && (
+                <button
+                  type="button"
+                  onClick={() => setShowPriceEditor(true)}
+                  className="h-12 px-3.5 rounded-xl bg-mipiace-stone hover:bg-slate-100 text-slate-600 flex items-center gap-1.5 text-[13px] font-medium"
+                  aria-label="Modificar precio"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  Modificar
+                </button>
+              )}
             </div>
           ) : (
             <div className="flex items-center gap-2">

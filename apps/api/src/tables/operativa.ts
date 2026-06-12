@@ -961,6 +961,12 @@ interface SerializedDraft {
   createdAt: string;
   lines: Array<{
     id: string;
+    // v1.0-mesas-frontend: el TPV reconstruye su carrito local desde
+    // este snapshot al retomar una mesa — necesita la referencia de
+    // producto para agrupar unidades del mismo artículo.
+    productId: string | null;
+    variantId: string | null;
+    holdedProductId: string | null;
     sku: string;
     nameSnapshot: string;
     units: string;
@@ -998,6 +1004,9 @@ function serializeDraft(
     createdAt: t.createdAt.toISOString(),
     lines: t.lines.map((l) => ({
       id: l.id,
+      productId: l.productId,
+      variantId: l.variantId,
+      holdedProductId: l.holdedProductId,
       sku: l.sku,
       nameSnapshot: l.nameSnapshot,
       units: l.units.toString(),

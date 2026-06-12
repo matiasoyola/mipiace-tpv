@@ -17,6 +17,12 @@ import { useDeviceBootstrap } from "./hooks/useDeviceBootstrap.js";
 import { useInactivityLogout } from "./hooks/useInactivityLogout.js";
 import { getCachedBusinessType } from "./lib/catalog.js";
 import { startOutboxSync } from "./lib/outbox.js";
+import {
+  mapServerDraftLines,
+  tableErrorMessage,
+  type ServerDraft,
+} from "./lib/tableDraft.js";
+import type { CartLine } from "./lib/cart.js";
 import { clearTestMode, isTestModeActive } from "./lib/test-mode.js";
 import { startVisualViewportSync } from "./lib/visualViewportSync.js";
 import { OutboxChip } from "./pages/CheckoutPage.outboxChip.js";
@@ -359,8 +365,52 @@ function TpvHome(props: {
   );
   const [view, setView] = useState<
     | { kind: "map" }
-    | { kind: "sale"; tableContext: TableContext | null }
+    | {
+        kind: "sale";
+        tableContext: TableContext | null;
+        // v1.0-mesas-frontend: proyección inicial del DRAFT server-side
+        // (las líneas que ya tenía la mesa al retomarla). null en venta
+        // rápida.
+        initialTableLines?: CartLine[];
+      }
   >(skipTables ? { kind: "sale", tableContext: null } : { kind: "map" });
+  // v1.0-mesas-frontend: tocar una mesa abre (o retoma) el DRAFT
+  // server-side ANTES de entrar a SalePage — así la mesa aparece
+  // ocupada en el mapa de las demás cajas desde el primer toque.
+  const [openingTableId, setOpeningTableId] = useState<string | null>(null);
+  const [openTableError, setOpenTableError] = useState<string | null>(null);
+
+  async function pickTable(table: ApiTable): Promise<void> {
+    if (openingTableId) return;
+    setOpeningTableId(table.id);
+    setOpenTableError(null);
+    try {
+      const res = await apiWithCashier<{ ticket: ServerDraft }>(
+        `/tables/${table.id}/open`,
+        { method: "POST", body: {} },
+      );
+      setView({
+        kind: "sale",
+        tableContext: {
+          id: table.id,
+          name: table.name,
+          zone: table.zone,
+          capacity: table.capacity,
+          diners: res.ticket.diners ?? table.activeTicket?.diners ?? null,
+          openedAt: res.ticket.createdAt ?? table.activeTicket?.openedAt ?? null,
+          openedByEmail: table.activeTicket?.openedByEmail ?? null,
+          activeTicketId: res.ticket.id,
+        },
+        initialTableLines: mapServerDraftLines(res.ticket.lines),
+      });
+    } catch (err) {
+      // 409 TABLE_GROUPED / SHIFT_NOT_OPEN llegan con mensaje en
+      // español; un fallo de red es el gate online-only.
+      setOpenTableError(tableErrorMessage(err));
+    } finally {
+      setOpeningTableId(null);
+    }
+  }
 
   useEffect(() => {
     if (skipTables) return;
@@ -403,15 +453,12 @@ function TpvHome(props: {
         cashierEmail={props.cashier.email}
         storeName={props.storeName}
         registerName={props.registerName}
-        onPickTable={(table) => {
-          setView({
-            kind: "sale",
-            tableContext: tableContextFromApi(table),
-          });
-        }}
+        onPickTable={(table) => void pickTable(table)}
         onQuickSale={() => {
           setView({ kind: "sale", tableContext: null });
         }}
+        pickBusyTableId={openingTableId}
+        pickError={openTableError}
         onLogoutCashier={props.onLogoutCashier}
         onCloseShift={props.onCloseShift}
       />
@@ -420,6 +467,7 @@ function TpvHome(props: {
 
   return (
     <SalePage
+      key={view.tableContext?.id ?? "quick-sale"}
       shiftId={props.shiftId}
       cashierEmail={props.cashier.email}
       cashierRole={props.cashier.role}
@@ -427,6 +475,7 @@ function TpvHome(props: {
       registerId={props.registerId}
       storeName={props.storeName}
       tableContext={view.tableContext}
+      initialTableLines={view.initialTableLines}
       onBackToMap={
         hasTables ? () => setView({ kind: "map" }) : null
       }
@@ -435,19 +484,18 @@ function TpvHome(props: {
           ? async (newTableId) => {
               // v1.4-Bar-Operativa-MVP Lote 3 · tras un mover-mesa
               // exitoso, recargamos `/tpv/tables` y reconstruimos el
-              // tableContext apuntando a la mesa destino. Si la
-              // recarga falla (offline), caemos al mapa: el usuario
-              // verá la mesa nueva ya ocupada y podrá tocarla.
+              // tableContext apuntando a la mesa destino (vía pickTable,
+              // que además trae las líneas del DRAFT — el SalePage se
+              // remonta con key nueva). Si la recarga falla (offline),
+              // caemos al mapa: el usuario verá la mesa nueva ya
+              // ocupada y podrá tocarla.
               try {
                 const res = await apiWithCashier<{ tables: ApiTable[] }>(
                   "/tpv/tables",
                 );
                 const fresh = res.tables.find((t) => t.id === newTableId);
                 if (fresh) {
-                  setView({
-                    kind: "sale",
-                    tableContext: tableContextFromApi(fresh),
-                  });
+                  await pickTable(fresh);
                 } else {
                   setView({ kind: "map" });
                 }
@@ -461,19 +509,6 @@ function TpvHome(props: {
       onCloseShift={props.onCloseShift}
     />
   );
-}
-
-function tableContextFromApi(table: ApiTable): TableContext {
-  return {
-    id: table.id,
-    name: table.name,
-    zone: table.zone,
-    capacity: table.capacity,
-    diners: table.activeTicket?.diners ?? null,
-    openedAt: table.activeTicket?.openedAt ?? null,
-    openedByEmail: table.activeTicket?.openedByEmail ?? null,
-    activeTicketId: table.activeTicket?.id ?? null,
-  };
 }
 
 // ─── Modo prueba (B-OnboardingV2) ──────────────────────────────────

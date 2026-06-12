@@ -566,6 +566,12 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           required: ["payments"],
           additionalProperties: false,
           properties: {
+            // v1.0-mesas-frontend · Lote 2: idempotencia del checkout.
+            // Opcional para back-compat (PWAs cachean JS semanas). Si
+            // viene y el ticket ya se cobró con este mismo valor,
+            // devolvemos el ticket existente (GET-back) en vez de 409 —
+            // cubre el reintento de red del outbox.
+            externalId: { type: "string", format: "uuid" },
             contactHoldedId: { type: "string", maxLength: 64 },
             notes: { type: "string", maxLength: 1000 },
             cashAmount: { type: "number", minimum: 0 },
@@ -599,6 +605,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       const cashier = request.cashier!;
       const { ticketId } = request.params as { ticketId: string };
       const body = request.body as Omit<CreateTicketBody, "externalId" | "registerId" | "shiftId" | "lines"> & {
+        externalId?: string;
         payments: TicketPaymentBody[];
       };
       const prisma = getPrisma();
@@ -619,6 +626,19 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         });
       }
       if (draft.status !== "DRAFT") {
+        // v1.0-mesas-frontend · Lote 2: si este mismo checkout ya pasó
+        // (reintento de red con el mismo externalId), GET-back como en
+        // POST /tickets — el outbox borra el item al ver el 200.
+        if (
+          body.externalId &&
+          draft.checkoutExternalId === body.externalId
+        ) {
+          return reply.code(200).send({
+            ticket: serializeTicket(draft),
+            syncStatus: draft.status,
+            duplicate: true,
+          });
+        }
         // Si el ticket ya está PAID o SYNCED, el cobro ya pasó. F6
         // (WebSockets) ya habrá notificado a este device; pero por si
         // dos cajeros pulsaron Cobrar al mismo tiempo, último gana en
@@ -760,6 +780,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             data: {
               status: TicketStatus.PENDING_SYNC,
               internalNumber,
+              checkoutExternalId: body.externalId ?? null,
               contactHoldedId: body.contactHoldedId ?? draft.contactHoldedId,
               notes: body.notes ?? draft.notes,
               cashAmount:
@@ -817,6 +838,22 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         });
       } catch (err) {
         if (err instanceof TicketAlreadyPaidError) {
+          // Carrera: el claim no ganó. Si fue ESTE mismo checkout (un
+          // doble submit con el mismo externalId que entró en paralelo),
+          // GET-back; si fue otra caja, 409.
+          if (body.externalId) {
+            const winner = await prisma.ticket.findFirst({
+              where: { id: draft.id, tenantId: cashier.tid },
+              include: ticketInclude(),
+            });
+            if (winner && winner.checkoutExternalId === body.externalId) {
+              return reply.code(200).send({
+                ticket: serializeTicket(winner),
+                syncStatus: winner.status,
+                duplicate: true,
+              });
+            }
+          }
           return reply.code(409).send({
             error: "TICKET_ALREADY_PAID",
             message: "Este ticket ya fue cobrado por otro dispositivo.",

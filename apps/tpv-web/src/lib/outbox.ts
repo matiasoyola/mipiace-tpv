@@ -44,11 +44,17 @@ export type OutboxStatus = "pending" | "rejected";
 export interface OutboxItem {
   externalId: string;
   kind: OutboxKind;
-  path: "/tickets" | "/refunds";
+  // "/tickets", "/refunds" o "/tickets/:id/checkout" (v1.0-mesas-frontend:
+  // el cobro de mesa también pasa por el outbox).
+  path: string;
   body: Record<string, unknown>;
   // Para pintar el item en el chip de pendientes sin parsear el body.
   label: string;
   total: number;
+  // v1.0-mesas-frontend: presente cuando el item es el checkout de una
+  // mesa. Mientras el item exista (pending o rejected), ESTE dispositivo
+  // bloquea reabrir/editar esa mesa — está "cobrada en tránsito".
+  tableId?: string;
   status: OutboxStatus;
   createdAt: number;
   attempts: number;
@@ -163,10 +169,11 @@ export async function outboxAdd(
   input: {
     externalId: string;
     kind: OutboxKind;
-    path: "/tickets" | "/refunds";
+    path: string;
     body: Record<string, unknown>;
     label: string;
     total: number;
+    tableId?: string;
   },
   opts: { lock?: boolean } = {},
 ): Promise<void> {
@@ -218,6 +225,18 @@ export async function outboxReleaseAfterFailure(
 export async function outboxList(): Promise<OutboxItem[]> {
   const items = await rawGetAll();
   return items.sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/** Mesas con un checkout en tránsito EN ESTE DISPOSITIVO (pending o
+ *  rejected). El mapa local las bloquea hasta que el item se resuelva
+ *  (2xx → borrado) o se descarte a mano desde el chip. */
+export async function outboxBlockedTableIds(): Promise<Set<string>> {
+  const items = await rawGetAll();
+  const ids = new Set<string>();
+  for (const i of items) {
+    if (i.tableId) ids.add(i.tableId);
+  }
+  return ids;
 }
 
 export async function outboxCounts(): Promise<{

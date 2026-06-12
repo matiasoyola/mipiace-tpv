@@ -41,6 +41,13 @@ export interface MoveTablePickerProps {
   // Mesa actual del ticket — se pinta como "origen" para que el
   // camarero distinga visualmente y no la confunda con otra libre.
   currentTableId: string | null;
+  // v1.0-mesas-frontend: al mover LÍNEAS sueltas (no el ticket entero)
+  // el destino puede estar ocupado — las líneas se fusionan en la
+  // cuenta existente. Para mover el ticket completo sigue bloqueado.
+  allowOccupied?: boolean;
+  // Título opcional (por defecto el de mover ticket).
+  title?: string;
+  subtitle?: string;
   onClose: () => void;
   // Se invoca con el id+name de la mesa destino al confirmar la
   // selección. El padre (SalePage) llama al endpoint y maneja error
@@ -98,11 +105,11 @@ export function MoveTablePicker(props: MoveTablePickerProps) {
         <div className="flex items-center justify-between px-5 md:px-7 pt-5 md:pt-6 pb-4 border-b border-slate-100">
           <div>
             <h2 className="text-[18px] md:text-[20px] font-semibold text-mipiace-ink tracking-tight">
-              Mover a otra mesa
+              {props.title ?? "Mover a otra mesa"}
             </h2>
             <p className="text-[13px] text-slate-500 mt-0.5">
-              Elige la mesa destino. Las libres son seleccionables; las
-              ocupadas quedan grises.
+              {props.subtitle ??
+                "Elige la mesa destino. Las libres son seleccionables; las ocupadas quedan grises."}
             </p>
           </div>
           <button
@@ -141,7 +148,8 @@ export function MoveTablePicker(props: MoveTablePickerProps) {
                   <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2.5">
                     {byZone[zone].map((t) => {
                       const isCurrent = t.id === props.currentTableId;
-                      const isOccupied = t.state !== "FREE";
+                      const isOccupied =
+                        t.state !== "FREE" && !props.allowOccupied;
                       const disabled = isCurrent || isOccupied;
                       return (
                         <button

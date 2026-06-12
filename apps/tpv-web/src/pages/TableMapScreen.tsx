@@ -16,12 +16,13 @@
 // El padre decide cómo navegar (SalePage con `tableContext`, etc.).
 
 import { useCallback, useEffect, useState } from "react";
-import { Plus, WifiOff } from "lucide-react";
+import { Loader2, Plus, WifiOff } from "lucide-react";
 
 import { apiWithCashier, ApiError } from "../api.js";
 import { Logo } from "../Logo.js";
 import { useElapsedTime } from "../hooks/useElapsedTime.js";
 import { useStoreEventStream } from "../hooks/useStoreEventStream.js";
+import { outboxBlockedTableIds, subscribeOutbox } from "../lib/outbox.js";
 
 type TableZone = "SALON" | "TERRAZA" | "BARRA" | "RESERVADO";
 
@@ -70,12 +71,42 @@ export interface TableMapScreenProps {
   onQuickSale: () => void;
   onLogoutCashier: () => void;
   onCloseShift: () => void;
+  // v1.0-mesas-frontend: el padre abre la mesa server-side ANTES de
+  // entrar a SalePage. Mientras el POST está en vuelo, la mesa tocada
+  // queda con spinner; si falla, el error se pinta en el banner.
+  pickBusyTableId?: string | null;
+  pickError?: string | null;
 }
 
 export function TableMapScreen(props: TableMapScreenProps) {
   const [data, setData] = useState<ApiResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
+  // v1.0-mesas-frontend · Lote 2: mesas con un checkout en tránsito en
+  // ESTE dispositivo (item en el outbox local). Quedan bloqueadas hasta
+  // que el reenvío confirme (el item desaparece) — reabrirlas podría
+  // duplicar la cuenta que ya está "cobrada" para el cajero.
+  const [blockedTableIds, setBlockedTableIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  useEffect(() => {
+    let cancelled = false;
+    const reload = () => {
+      outboxBlockedTableIds()
+        .then((ids) => {
+          if (!cancelled) setBlockedTableIds(ids);
+        })
+        .catch(() => {
+          /* IndexedDB no disponible (modo privado) — sin bloqueo local */
+        });
+    };
+    reload();
+    const unsubscribe = subscribeOutbox(() => reload());
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -217,6 +248,11 @@ export function TableMapScreen(props: TableMapScreenProps) {
             {error}
           </div>
         )}
+        {props.pickError && (
+          <div className="mb-4 text-[13px] text-red-700 bg-red-50 rounded-xl px-3.5 py-2.5">
+            {props.pickError}
+          </div>
+        )}
 
         {tables.length === 0 ? (
           <EmptyState />
@@ -231,6 +267,8 @@ export function TableMapScreen(props: TableMapScreenProps) {
                 }
                 tables={salonLike}
                 offline={offline}
+                blockedTableIds={blockedTableIds}
+                pickBusyTableId={props.pickBusyTableId ?? null}
                 onPick={props.onPickTable}
               />
             )}
@@ -238,6 +276,8 @@ export function TableMapScreen(props: TableMapScreenProps) {
               <BarStrip
                 tables={bar}
                 offline={offline}
+                blockedTableIds={blockedTableIds}
+                pickBusyTableId={props.pickBusyTableId ?? null}
                 onPick={props.onPickTable}
               />
             )}
@@ -297,11 +337,15 @@ function RoomGrid({
   title,
   tables,
   offline,
+  blockedTableIds,
+  pickBusyTableId,
   onPick,
 }: {
   title: string;
   tables: ApiTable[];
   offline: boolean;
+  blockedTableIds: Set<string>;
+  pickBusyTableId: string | null;
   onPick: (t: ApiTable) => void;
 }) {
   return (
@@ -311,7 +355,15 @@ function RoomGrid({
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
         {tables.map((t) => (
-          <TableCard key={t.id} table={t} offline={offline} onPick={onPick} />
+          <TableCard
+            key={t.id}
+            table={t}
+            offline={offline}
+            pendingCheckout={blockedTableIds.has(t.id)}
+            opening={pickBusyTableId === t.id}
+            anyOpening={pickBusyTableId !== null}
+            onPick={onPick}
+          />
         ))}
       </div>
     </div>
@@ -321,10 +373,18 @@ function RoomGrid({
 function TableCard({
   table,
   offline,
+  pendingCheckout,
+  opening,
+  anyOpening,
   onPick,
 }: {
   table: ApiTable;
   offline: boolean;
+  // v1.0-mesas-frontend: checkout en tránsito en este dispositivo —
+  // la mesa queda bloqueada localmente hasta que el outbox confirme.
+  pendingCheckout: boolean;
+  opening: boolean;
+  anyOpening: boolean;
   onPick: (t: ApiTable) => void;
 }) {
   // v1.0-pilotos · Lote 1: sin conexión, la operativa de mesas se
@@ -332,10 +392,11 @@ function TableCard({
   // mesa pasa por el backend y fallaría igual, pero con errores
   // confusos a mitad de flujo. La venta rápida sí sigue disponible
   // (catálogo cacheado en IndexedDB + carrito local).
-  const disabled = offline;
+  const disabled = offline || pendingCheckout || anyOpening;
   const elapsed = useElapsedTime(table.activeTicket?.openedAt);
-  const stateClass =
-    table.state === "FREE"
+  const stateClass = pendingCheckout
+    ? "bg-slate-100 border-slate-300 text-slate-500"
+    : table.state === "FREE"
       ? "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
       : table.state === "BILLING"
         ? "bg-amber-50 border-amber-300/60 text-amber-800"
@@ -345,7 +406,13 @@ function TableCard({
       type="button"
       onClick={() => onPick(table)}
       disabled={disabled}
-      title={disabled ? "Sin conexión · operativa de mesas bloqueada" : undefined}
+      title={
+        offline
+          ? "Sin conexión · operativa de mesas bloqueada"
+          : pendingCheckout
+            ? "Cobro pendiente de subir · mesa bloqueada en este dispositivo"
+            : undefined
+      }
       className={`relative aspect-[7/6] rounded-2xl border-2 ${stateClass} flex flex-col p-3.5 text-left transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100`}
     >
       <div className="flex justify-between items-start">
@@ -378,9 +445,20 @@ function TableCard({
           </div>
         </div>
       )}
-      {table.state === "BILLING" && (
-        <span className="absolute top-2 right-2 text-[9.5px] font-semibold uppercase tracking-wider bg-amber-200/70 text-amber-900 px-1.5 py-0.5 rounded">
-          cuenta
+      {pendingCheckout ? (
+        <span className="absolute top-2 right-2 text-[9.5px] font-semibold uppercase tracking-wider bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">
+          cobro pendiente
+        </span>
+      ) : (
+        table.state === "BILLING" && (
+          <span className="absolute top-2 right-2 text-[9.5px] font-semibold uppercase tracking-wider bg-amber-200/70 text-amber-900 px-1.5 py-0.5 rounded">
+            cuenta
+          </span>
+        )
+      )}
+      {opening && (
+        <span className="absolute inset-0 flex items-center justify-center bg-white/60 rounded-2xl">
+          <Loader2 className="w-5 h-5 animate-spin text-slate-500" />
         </span>
       )}
     </button>
@@ -390,10 +468,14 @@ function TableCard({
 function BarStrip({
   tables,
   offline,
+  blockedTableIds,
+  pickBusyTableId,
   onPick,
 }: {
   tables: ApiTable[];
   offline: boolean;
+  blockedTableIds: Set<string>;
+  pickBusyTableId: string | null;
   onPick: (t: ApiTable) => void;
 }) {
   const sorted = tables.slice().sort(
@@ -406,7 +488,14 @@ function BarStrip({
       </div>
       <div className="grid grid-cols-4 md:grid-cols-8 gap-2.5">
         {sorted.map((t) => (
-          <BarSeat key={t.id} table={t} offline={offline} onPick={onPick} />
+          <BarSeat
+            key={t.id}
+            table={t}
+            offline={offline}
+            pendingCheckout={blockedTableIds.has(t.id)}
+            anyOpening={pickBusyTableId !== null}
+            onPick={onPick}
+          />
         ))}
       </div>
     </div>
@@ -416,25 +505,36 @@ function BarStrip({
 function BarSeat({
   table,
   offline,
+  pendingCheckout,
+  anyOpening,
   onPick,
 }: {
   table: ApiTable;
   offline: boolean;
+  pendingCheckout: boolean;
+  anyOpening: boolean;
   onPick: (t: ApiTable) => void;
 }) {
-  const stateClass =
-    table.state === "FREE"
+  const stateClass = pendingCheckout
+    ? "bg-slate-100 border-slate-300 text-slate-500"
+    : table.state === "FREE"
       ? "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
       : table.state === "BILLING"
         ? "bg-amber-50 border-amber-300/60 text-amber-800"
         : "bg-mipiace-coral-soft border-mipiace-coral/40 text-mipiace-coral-dark";
-  const disabled = offline;
+  const disabled = offline || pendingCheckout || anyOpening;
   return (
     <button
       type="button"
       onClick={() => onPick(table)}
       disabled={disabled}
-      title={disabled ? "Sin conexión · operativa de mesas bloqueada" : undefined}
+      title={
+        offline
+          ? "Sin conexión · operativa de mesas bloqueada"
+          : pendingCheckout
+            ? "Cobro pendiente de subir · mesa bloqueada en este dispositivo"
+            : undefined
+      }
       className={`aspect-square rounded-xl border-2 ${stateClass} flex flex-col items-center justify-center p-2 transition-all hover:scale-[1.05] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100`}
     >
       <span className="text-[14px] font-semibold">{table.name}</span>

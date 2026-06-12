@@ -69,10 +69,16 @@ import { CameraScanModal, hasCameraSupport } from "./SalePage.cameraScan.js";
 import { ContactSheet, type ContactRef } from "./SalePage.contact.js";
 import { CheckoutOverlay } from "./CheckoutPage.js";
 import { CloseShiftModal } from "./CloseShiftModal.js";
+import { GroupTablesPicker } from "./SalePage.groupPicker.js";
 import { LineSheet } from "./SalePage.lineSheet.js";
 import { ModifierSelector } from "./SalePage.modifierSelector.js";
 import { MoveTablePicker } from "./SalePage.movePicker.js";
 import { SplitBillSheet } from "./SalePage.splitBill.js";
+import {
+  mapServerDraftLines,
+  tableErrorMessage,
+  type ServerDraft,
+} from "../lib/tableDraft.js";
 import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
 import { useElapsedTime } from "../hooks/useElapsedTime.js";
 import { useStoreEventStream } from "../hooks/useStoreEventStream.js";
@@ -205,6 +211,12 @@ export interface SalePageProps {
   // contexto de la mesa. Si es venta rápida (retail o "café para
   // llevar" en bar), queda null/undefined.
   tableContext?: TableContext | null;
+  // v1.0-mesas-frontend: proyección del DRAFT server-side al entrar a
+  // la mesa (App lo abre/retoma con POST /tables/:id/open ANTES de
+  // montar esta pantalla). En contexto mesa la verdad son los
+  // endpoints; el carrito local de sessionStorage queda SOLO para la
+  // venta rápida.
+  initialTableLines?: CartLine[];
   // Sólo provisto cuando la tienda tiene mesas configuradas — permite
   // al cajero volver al mapa con un toque. Null en modo retail puro.
   onBackToMap?: (() => void) | null;
@@ -302,12 +314,202 @@ export function SalePage(props: SalePageProps) {
     setKitchenError(null);
   }, [activeTicketId]);
 
-  // v1.5-consistencia-A §4.b: respaldo en sessionStorage por contexto
-  // (mesa o venta rápida) — el carrito sobrevive a un remount del
-  // ErrorBoundary o a una recarga.
-  const [lines, setLines] = usePersistedCartLines(
-    props.tableContext?.id ?? "quick-sale",
+  // v1.0-mesas-frontend · Lote 1: en contexto mesa el carrito es una
+  // proyección del DRAFT server-side. Cada mutación va contra los
+  // endpoints de líneas con actualización optimista + reconciliación
+  // con el `ticket` de la respuesta; si la API rechaza (403
+  // REGISTER_MISMATCH desde otra caja, 409 TABLE_GROUPED…), se
+  // revierte y se muestra un toast. El respaldo de sessionStorage
+  // queda SOLO para la venta rápida (decisión del bloque: retomar una
+  // mesa SIEMPRE carga el DRAFT del servidor, nunca un carrito local).
+  const isTableMode = props.tableContext != null;
+  const tableContext = props.tableContext ?? null;
+  const [quickLines, setQuickLines] = usePersistedCartLines("quick-sale");
+  const [tableLines, setTableLines] = useState<CartLine[]>(
+    props.initialTableLines ?? [],
   );
+  const lines = isTableMode ? tableLines : quickLines;
+  const setLines = isTableMode ? setTableLines : setQuickLines;
+  // Toast de error de operativa de mesa (mismo banner que comanda).
+  const [tableError, setTableError] = useState<string | null>(null);
+  // v1.0-mesas-frontend: agrupar/desagrupar desde la UI. El chip
+  // "Desagrupar" sólo aparece si esta mesa tiene mesas absorbidas —
+  // se detecta en el fetch de /tpv/tables (abajo) y se mantiene tras
+  // cada group/ungroup local.
+  const [showGroupPicker, setShowGroupPicker] = useState(false);
+  const [groupBusy, setGroupBusy] = useState(false);
+  const [hasGroupedTables, setHasGroupedTables] = useState(false);
+  // Línea seleccionada para mover a otra mesa (desde el LineSheet).
+  const [moveLineTarget, setMoveLineTarget] = useState<CartLine | null>(null);
+
+  // ── Operativa de mesa contra la API ─────────────────────────────────
+
+  // Recarga la proyección local desde el servidor (GET /tickets/:id).
+  // Se usa tras agrupar/desagrupar/mover líneas, donde la respuesta del
+  // endpoint no incluye el ticket completo.
+  async function reloadTableDraft(): Promise<void> {
+    if (!activeTicketId) return;
+    const { apiWithCashier } = await import("../api.js");
+    const res = await apiWithCashier<{ ticket: ServerDraft }>(
+      `/tickets/${activeTicketId}`,
+    );
+    setTableLines(mapServerDraftLines(res.ticket.lines));
+  }
+
+  // Crea la línea en el DRAFT de la mesa. El id local de la CartLine
+  // viaja como `lineExternalId` (idempotencia: un reintento del mismo
+  // toque no duplica) y el servidor lo usa como id de la TicketLine —
+  // la proyección local y la BD comparten ids.
+  async function tableCreateLine(line: CartLine): Promise<void> {
+    if (!tableContext) return;
+    try {
+      const { apiWithCashier } = await import("../api.js");
+      const res = await apiWithCashier<{ ticket: ServerDraft }>(
+        `/tables/${tableContext.id}/lines`,
+        {
+          method: "POST",
+          body: {
+            productId: line.productId ?? undefined,
+            variantId: line.variantId ?? undefined,
+            holdedProductId: line.holdedProductId ?? undefined,
+            nameSnapshot: line.nameSnapshot,
+            sku: line.sku,
+            units: line.units,
+            unitPrice: line.unitPrice,
+            discountPct: line.discountPct,
+            taxRate: line.taxRate,
+            modifiers: line.modifiers.length > 0 ? line.modifiers : undefined,
+            modifierSelections:
+              line.modifierSelections && line.modifierSelections.length > 0
+                ? line.modifierSelections.map((s) => ({
+                    groupId: s.groupId,
+                    modifierId: s.modifierId,
+                  }))
+                : undefined,
+            lineExternalId: line.id,
+          },
+        },
+      );
+      setTableLines(mapServerDraftLines(res.ticket.lines));
+    } catch (err) {
+      // Revertir la línea optimista y avisar.
+      setTableLines((curr) => curr.filter((l) => l.id !== line.id));
+      setTableError(tableErrorMessage(err));
+    }
+  }
+
+  // PATCH de una línea existente (units / discountPct / modifiers
+  // ad-hoc). `before` permite revertir si la API rechaza — p. ej. 403
+  // REGISTER_MISMATCH cuando edita una caja que no abrió el ticket.
+  async function tablePatchLine(
+    lineId: string,
+    patch: { units?: number; discountPct?: number; modifiers?: string[] },
+    before: CartLine,
+  ): Promise<void> {
+    if (!activeTicketId) return;
+    try {
+      const { apiWithCashier } = await import("../api.js");
+      const res = await apiWithCashier<{ ticket: ServerDraft }>(
+        `/tickets/${activeTicketId}/lines/${lineId}`,
+        { method: "PATCH", body: patch },
+      );
+      setTableLines(mapServerDraftLines(res.ticket.lines));
+    } catch (err) {
+      setTableLines((curr) =>
+        curr.map((l) => (l.id === lineId ? before : l)),
+      );
+      setTableError(tableErrorMessage(err));
+    }
+  }
+
+  async function tableDeleteLine(line: CartLine): Promise<void> {
+    if (!activeTicketId) return;
+    try {
+      const { apiWithCashier } = await import("../api.js");
+      const res = await apiWithCashier<{ ticket: ServerDraft }>(
+        `/tickets/${activeTicketId}/lines/${line.id}`,
+        { method: "DELETE" },
+      );
+      setTableLines(mapServerDraftLines(res.ticket.lines));
+    } catch (err) {
+      // Reinsertar la línea borrada optimistamente.
+      setTableLines((curr) =>
+        curr.some((l) => l.id === line.id) ? curr : [...curr, line],
+      );
+      setTableError(tableErrorMessage(err));
+    }
+  }
+
+  // Vaciar la mesa entera: DRAFT → VOIDED y volver al mapa.
+  async function tableVoidTicket(): Promise<void> {
+    if (!activeTicketId) return;
+    try {
+      const { apiWithCashier } = await import("../api.js");
+      await apiWithCashier(
+        `/tickets/${activeTicketId}?reason=${encodeURIComponent("Vaciada desde el TPV")}`,
+        { method: "DELETE" },
+      );
+      setTableLines([]);
+      setContact(null);
+      setNotes("");
+      props.onBackToMap?.();
+    } catch (err) {
+      setTableError(tableErrorMessage(err));
+    }
+  }
+
+  async function tableGroup(tablesToAbsorbIds: string[]): Promise<void> {
+    if (!tableContext) return;
+    setGroupBusy(true);
+    try {
+      const { apiWithCashier } = await import("../api.js");
+      await apiWithCashier(`/tables/${tableContext.id}/group`, {
+        method: "POST",
+        body: { tablesToAbsorbIds },
+      });
+      setShowGroupPicker(false);
+      setHasGroupedTables(true);
+      await reloadTableDraft();
+    } catch (err) {
+      // 409 TABLE_ALREADY_GROUPED llega con mensaje en español.
+      setTableError(tableErrorMessage(err));
+    } finally {
+      setGroupBusy(false);
+    }
+  }
+
+  async function tableUngroup(): Promise<void> {
+    if (!tableContext) return;
+    try {
+      const { apiWithCashier } = await import("../api.js");
+      await apiWithCashier(`/tables/${tableContext.id}/ungroup`, {
+        method: "POST",
+      });
+      setHasGroupedTables(false);
+      await reloadTableDraft();
+    } catch (err) {
+      setTableError(tableErrorMessage(err));
+    }
+  }
+
+  async function tableMoveLine(
+    line: CartLine,
+    destination: { id: string; name: string },
+  ): Promise<void> {
+    if (!activeTicketId) return;
+    try {
+      const { apiWithCashier } = await import("../api.js");
+      await apiWithCashier(`/tickets/${activeTicketId}/lines/move`, {
+        method: "POST",
+        body: { lineIds: [line.id], destinationTableId: destination.id },
+      });
+      setMoveLineTarget(null);
+      setOpenSheet(null);
+      await reloadTableDraft();
+    } catch (err) {
+      setTableError(tableErrorMessage(err));
+    }
+  }
   const [contact, setContact] = useState<ContactRef | null>(null);
   const [notes, setNotes] = useState<string>("");
 
@@ -411,8 +613,21 @@ export function SalePage(props: SalePageProps) {
     void (async () => {
       try {
         const { apiWithCashier } = await import("../api.js");
-        const res = await apiWithCashier<{ storeId: string | null }>("/tpv/tables");
-        if (!cancelled) setStoreId(res.storeId);
+        const res = await apiWithCashier<{
+          storeId: string | null;
+          tables?: Array<{ id: string; groupedIntoTableId: string | null }>;
+        }>("/tpv/tables");
+        if (cancelled) return;
+        setStoreId(res.storeId);
+        // v1.0-mesas-frontend: si esta mesa ya tiene mesas absorbidas
+        // (agrupadas en otra sesión/caja), enseña el chip "Desagrupar".
+        if (tableContext) {
+          setHasGroupedTables(
+            (res.tables ?? []).some(
+              (t) => t.groupedIntoTableId === tableContext.id,
+            ),
+          );
+        }
       } catch {
         /* sin storeId, el WS no abrirá — degrada a polling */
       }
@@ -420,6 +635,7 @@ export function SalePage(props: SalePageProps) {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [crossCajaToast, setCrossCajaToast] = useState<{
     text: string;
@@ -562,6 +778,49 @@ export function SalePage(props: SalePageProps) {
   ): void {
     const units = options.units ?? 1;
     const sels = options.modifierSelections ?? [];
+    if (isTableMode) {
+      // Mesa: misma semántica de agrupado que el carrito local, pero
+      // contra la API. Línea previa del mismo producto sin modifiers →
+      // PATCH units; si no, POST con lineExternalId (optimista).
+      const existing =
+        sels.length === 0
+          ? tableLines.find(
+              (l) =>
+                l.productId === p.id &&
+                l.modifiers.length === 0 &&
+                (!l.modifierSelections || l.modifierSelections.length === 0),
+            )
+          : null;
+      if (existing) {
+        const nextUnits = existing.units + units;
+        setTableLines((curr) =>
+          curr.map((l) =>
+            l.id === existing.id ? { ...l, units: nextUnits } : l,
+          ),
+        );
+        void tablePatchLine(existing.id, { units: nextUnits }, existing);
+        return;
+      }
+      const newLine: CartLine = {
+        id: newId(),
+        productId: p.id,
+        variantId: null,
+        holdedProductId: p.holdedProductId,
+        sku: p.sku,
+        nameSnapshot: p.name,
+        units,
+        unitPrice: p.basePrice,
+        unitPriceOverride: null,
+        priceGross: p.priceGross,
+        discountPct: 0,
+        taxRate: p.taxRate,
+        modifiers: [],
+        modifierSelections: sels.length > 0 ? sels : undefined,
+      };
+      setTableLines((curr) => [...curr, newLine]);
+      void tableCreateLine(newLine);
+      return;
+    }
     setLines((curr) => {
       // Agrupar con línea previa sólo si NINGUNA tiene modifiers — dos
       // cafés "Con leche desnatada" pueden agruparse, pero un "Con
@@ -637,21 +896,76 @@ export function SalePage(props: SalePageProps) {
       modifiers: [],
     };
     setLines((curr) => [...curr, newLine]);
+    if (isTableMode) void tableCreateLine(newLine);
   }
 
   function updateLine(id: string, patch: Partial<CartLine>): void {
+    if (isTableMode) {
+      const before = tableLines.find((l) => l.id === id);
+      if (!before) return;
+      // El PATCH de líneas de mesa sólo admite units / discountPct /
+      // modifiers ad-hoc (el override de precio no existe server-side;
+      // el LineSheet lo oculta en este contexto).
+      const apiPatch: {
+        units?: number;
+        discountPct?: number;
+        modifiers?: string[];
+      } = {};
+      if (patch.units !== undefined) apiPatch.units = patch.units;
+      if (patch.discountPct !== undefined) apiPatch.discountPct = patch.discountPct;
+      if (patch.modifiers !== undefined) apiPatch.modifiers = patch.modifiers;
+      if (Object.keys(apiPatch).length === 0) return;
+      setTableLines((curr) =>
+        curr.map((l) => (l.id === id ? { ...l, ...apiPatch } : l)),
+      );
+      void tablePatchLine(id, apiPatch, before);
+      return;
+    }
     setLines((curr) => curr.map((l) => (l.id === id ? { ...l, ...patch } : l)));
   }
 
   function removeLine(id: string): void {
+    if (isTableMode) {
+      const line = tableLines.find((l) => l.id === id);
+      if (!line) return;
+      setTableLines((curr) => curr.filter((l) => l.id !== id));
+      void tableDeleteLine(line);
+      return;
+    }
     setLines((curr) => curr.filter((l) => l.id !== id));
   }
 
   function applyGlobalDiscount(pct: number): void {
+    const clamped = Math.min(100, Math.max(0, pct));
+    if (isTableMode) {
+      // Un PATCH por línea, en secuencia; si algo falla a mitad, la
+      // recarga del draft deja la proyección consistente con la BD.
+      const targets = [...tableLines];
+      setTableLines((curr) =>
+        curr.map((l) => ({ ...l, discountPct: clamped })),
+      );
+      void (async () => {
+        try {
+          const { apiWithCashier } = await import("../api.js");
+          let last: { ticket: ServerDraft } | null = null;
+          for (const l of targets) {
+            last = await apiWithCashier<{ ticket: ServerDraft }>(
+              `/tickets/${activeTicketId}/lines/${l.id}`,
+              { method: "PATCH", body: { discountPct: clamped } },
+            );
+          }
+          if (last) setTableLines(mapServerDraftLines(last.ticket.lines));
+        } catch (err) {
+          setTableError(tableErrorMessage(err));
+          void reloadTableDraft().catch(() => {});
+        }
+      })();
+      return;
+    }
     setLines((curr) =>
       curr.map((l) => ({
         ...l,
-        discountPct: Math.min(100, Math.max(0, pct)),
+        discountPct: clamped,
       })),
     );
   }
@@ -910,21 +1224,29 @@ export function SalePage(props: SalePageProps) {
               >
                 <span className="hidden sm:inline">Tickets</span>
               </button>
-              <button
-                onClick={() => setOpenSheet({ kind: "suspended" })}
-                title={businessType === "SERVICES" ? "Servicios pendientes" : "Ventas pendientes"}
-                className="h-12 md:h-14 px-3 md:px-5 rounded-2xl bg-mipiace-coral-soft border border-mipiace-coral/25 flex items-center gap-2 text-[13.5px] md:text-[14px] font-medium text-mipiace-coral-dark hover:bg-mipiace-coral/15"
-              >
-                <Bookmark className="w-[17px] h-[17px]" strokeWidth={2.25} />
-                <span className="hidden sm:inline">Pendientes ({getSuspendedCarts().length})</span>
-              </button>
-              <button
-                onClick={clearCart}
-                title={businessType === "SERVICES" ? "Nuevo servicio" : "Nueva venta"}
-                className="h-12 md:h-14 w-12 md:w-14 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark flex items-center justify-center text-white"
-              >
-                <Plus className="w-[20px] h-[20px]" strokeWidth={2.25} />
-              </button>
+              {/* v1.0-mesas-frontend: en contexto mesa no hay carritos
+                  suspendidos (la mesa abierta YA es la venta en pausa)
+                  ni "Nueva venta" (vaciaría la proyección de un DRAFT
+                  que vive en el servidor). */}
+              {!isTableMode && (
+                <button
+                  onClick={() => setOpenSheet({ kind: "suspended" })}
+                  title={businessType === "SERVICES" ? "Servicios pendientes" : "Ventas pendientes"}
+                  className="h-12 md:h-14 px-3 md:px-5 rounded-2xl bg-mipiace-coral-soft border border-mipiace-coral/25 flex items-center gap-2 text-[13.5px] md:text-[14px] font-medium text-mipiace-coral-dark hover:bg-mipiace-coral/15"
+                >
+                  <Bookmark className="w-[17px] h-[17px]" strokeWidth={2.25} />
+                  <span className="hidden sm:inline">Pendientes ({getSuspendedCarts().length})</span>
+                </button>
+              )}
+              {!isTableMode && (
+                <button
+                  onClick={clearCart}
+                  title={businessType === "SERVICES" ? "Nuevo servicio" : "Nueva venta"}
+                  className="h-12 md:h-14 w-12 md:w-14 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark flex items-center justify-center text-white"
+                >
+                  <Plus className="w-[20px] h-[20px]" strokeWidth={2.25} />
+                </button>
+              )}
             </div>
           </header>
 
@@ -953,6 +1275,14 @@ export function SalePage(props: SalePageProps) {
             onClickCheckout={() => setOpenSheet({ kind: "checkout" })}
             onSuspend={() => suspendCart("")}
             onCancel={() => {
+              if (isTableMode) {
+                // Vaciar la mesa: DRAFT → VOIDED en el servidor y las
+                // demás cajas la ven libre (table.cleared).
+                if (confirm("¿Vaciar la mesa? La cuenta se cancela.")) {
+                  void tableVoidTicket();
+                }
+                return;
+              }
               const inProgress =
                 businessType === "SERVICES" ? "el servicio" : "la venta";
               if (lines.length === 0 || confirm(`¿Cancelar ${inProgress} en curso?`)) {
@@ -964,6 +1294,9 @@ export function SalePage(props: SalePageProps) {
             kitchenLastRevision={kitchenRevision}
             onClickMoveTable={() => setShowMoveTable(true)}
             onClickSplitBill={() => setShowSplitBill(true)}
+            hasGroupedTables={hasGroupedTables}
+            onClickGroup={() => setShowGroupPicker(true)}
+            onClickUngroup={() => void tableUngroup()}
           />
 
           <footer className="h-[56px] md:h-[68px] border-t border-slate-200 grid grid-cols-3 items-center px-4 md:px-7 text-[12px] md:text-[13px] shrink-0">
@@ -1006,6 +1339,12 @@ export function SalePage(props: SalePageProps) {
             removeLine(openSheet.line.id);
             setOpenSheet(null);
           }}
+          allowPriceOverride={!isTableMode}
+          onMoveToTable={
+            isTableMode
+              ? () => setMoveLineTarget(openSheet.line)
+              : undefined
+          }
         />
       )}
       {openSheet?.kind === "discountGlobal" && (
@@ -1070,6 +1409,12 @@ export function SalePage(props: SalePageProps) {
           contact={contact}
           notes={notes}
           businessType={businessType}
+          // v1.0-mesas-frontend: cobro de mesa → POST /tickets/:id/checkout
+          // (el DRAFT ya tiene las líneas server-side). tableId viaja al
+          // outbox para bloquear la mesa local si el cobro queda en
+          // tránsito sin red.
+          tableTicketId={isTableMode ? activeTicketId : null}
+          tableId={isTableMode ? tableContext?.id : null}
           // v1.3-Servicios-Pinta · Lote 4: el nudge "Servicio sin
           // cliente" salta al modal de búsqueda existente. Cerramos
           // el overlay (CheckoutOverlay también llama onClose) y
@@ -1077,6 +1422,16 @@ export function SalePage(props: SalePageProps) {
           onRequestAssignContact={() => setOpenSheet({ kind: "contact" })}
           onClose={() => setOpenSheet(null)}
           onConfirmed={() => {
+            if (isTableMode) {
+              // La mesa quedó cobrada (o el cobro en tránsito en el
+              // outbox): proyección local fuera y vuelta al mapa.
+              setTableLines([]);
+              setContact(null);
+              setNotes("");
+              setOpenSheet(null);
+              props.onBackToMap?.();
+              return;
+            }
             clearCart();
             setOpenSheet(null);
           }}
@@ -1146,6 +1501,36 @@ export function SalePage(props: SalePageProps) {
         <SplitBillSheet
           ticketId={props.tableContext.activeTicketId}
           onClose={() => setShowSplitBill(false)}
+        />
+      )}
+      {/* v1.0-mesas-frontend: agrupar mesas ocupadas en esta (la actual
+          es la principal). */}
+      {showGroupPicker && tableContext && (
+        <GroupTablesPicker
+          currentTableId={tableContext.id}
+          currentTableName={tableContext.name}
+          busy={groupBusy}
+          onClose={() => setShowGroupPicker(false)}
+          onConfirm={(ids) => void tableGroup(ids)}
+        />
+      )}
+      {/* v1.0-mesas-frontend: mover UNA línea a otra mesa (desde el
+          LineSheet). El destino puede estar ocupado — se fusiona. */}
+      {moveLineTarget && tableContext && (
+        <MoveTablePicker
+          currentTableId={tableContext.id}
+          allowOccupied
+          title={`Mover "${moveLineTarget.nameSnapshot}"`}
+          subtitle="Elige la mesa destino. Si está ocupada, la línea se suma a su cuenta."
+          onClose={() => setMoveLineTarget(null)}
+          onPick={(dest) => void tableMoveLine(moveLineTarget, dest)}
+        />
+      )}
+      {tableError && (
+        <KitchenErrorBanner
+          title="Operación de mesa rechazada"
+          message={tableError}
+          onClose={() => setTableError(null)}
         />
       )}
       {selectorState && (
@@ -1408,6 +1793,9 @@ function SaleWorkspace({
   kitchenLastRevision,
   onClickMoveTable,
   onClickSplitBill,
+  hasGroupedTables,
+  onClickGroup,
+  onClickUngroup,
 }: {
   products: CatalogProduct[];
   wildcards: Wildcard[];
@@ -1451,6 +1839,12 @@ function SaleWorkspace({
   onClickMoveTable: () => void;
   // v1.4-Bar-Operativa-MVP Lote 4 · abre el sheet partir cuenta.
   onClickSplitBill: () => void;
+  // v1.0-mesas-frontend: agrupar mesas ocupadas en esta (principal) y
+  // deshacer el grupo. "Desagrupar" sólo aparece si la mesa tiene
+  // absorbidas.
+  hasGroupedTables: boolean;
+  onClickGroup: () => void;
+  onClickUngroup: () => void;
 }) {
   // B-ProductImages: tenantId cacheado tras el último refresh del
   // catálogo. Si por alguna razón viene null (primer arranque y aún
@@ -1901,6 +2295,26 @@ function SaleWorkspace({
               title="Cobrar parte ahora y dejar el resto pendiente"
             >
               Partir cuenta
+            </button>
+          )}
+          {/* v1.0-mesas-frontend · agrupar mesas ocupadas en esta
+              (principal) y deshacer el grupo desde la UI. */}
+          {tableContext && (
+            <button
+              onClick={onClickGroup}
+              className="h-8 px-3 rounded-lg bg-mipiace-stone hover:bg-slate-100 text-[12.5px] font-medium text-mipiace-ink"
+              title="Unir las cuentas de otras mesas ocupadas a esta"
+            >
+              Agrupar
+            </button>
+          )}
+          {tableContext && hasGroupedTables && (
+            <button
+              onClick={onClickUngroup}
+              className="h-8 px-3 rounded-lg bg-mipiace-stone hover:bg-slate-100 text-[12.5px] font-medium text-mipiace-ink"
+              title="Separar las mesas agrupadas (cada una recupera sus líneas)"
+            >
+              Desagrupar
             </button>
           )}
           <button
@@ -2361,9 +2775,13 @@ function KitchenToast({
 
 function KitchenErrorBanner({
   message,
+  title,
   onClose,
 }: {
   message: string;
+  // v1.0-mesas-frontend: el banner se reutiliza para errores de
+  // operativa de mesa (revert de optimista, 403/409 de la API).
+  title?: string;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -2373,7 +2791,7 @@ function KitchenErrorBanner({
   return (
     <div className="fixed top-5 right-5 z-50 bg-red-50 border border-red-300 text-red-900 px-4 py-3 rounded-2xl shadow-sm max-w-sm">
       <div className="text-[13.5px] font-semibold mb-1">
-        No se pudo enviar la comanda
+        {title ?? "No se pudo enviar la comanda"}
       </div>
       <div className="text-[12.5px]">{message}</div>
     </div>

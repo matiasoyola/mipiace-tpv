@@ -834,6 +834,12 @@ model Ticket {
   // UUID v4 generado en el front al cobrar. Llave de idempotencia hacia
   // Holded. Nunca se regenera.
   externalId           String       @unique @map("external_id") @db.Uuid
+  // v1.0-mesas-frontend · Lote 2: idempotencia del checkout de mesa.
+  // UUID v4 generado en el front al abrir el overlay de cobro. Un
+  // reintento de red del POST /tickets/:id/checkout con el mismo valor
+  // devuelve el ticket ya cobrado (GET-back) en vez de 409. Nullable:
+  // venta rápida y clientes viejos no lo mandan.
+  checkoutExternalId   String?      @unique @map("checkout_external_id") @db.Uuid
   // Capability slug público (16 hex = 8 bytes random ≈ 96 bits) que
   // alimenta el QR, el email y el botón "Ver ticket". Permite al
   // cliente final descargar el PDF sin auth — la entropía es el secreto.
