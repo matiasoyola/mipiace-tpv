@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">mipiacetpv</string>
+    <string name="title_activity_main">mipiacetpv</string>
+    <string name="package_name">es.mipiace.tpv</string>
+    <string name="custom_url_scheme">es.mipiace.tpv</string>
+</resources>

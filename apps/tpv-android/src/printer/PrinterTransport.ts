@@ -52,7 +52,7 @@ export class PrinterError extends Error {
       | "TIMEOUT"
       | "UNSUPPORTED"
       | "UNKNOWN",
-    public readonly cause?: unknown,
+    public override readonly cause?: unknown,
   ) {
     super(message);
     this.name = "PrinterError";

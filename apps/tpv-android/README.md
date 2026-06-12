@@ -29,16 +29,31 @@ Android a la vez.
 
 ## Estado
 
-Scaffold inicial creado por Cowork (config + contratos + prompts).
-El proyecto nativo `android/` y los plugins los implementa Claude Code
-siguiendo `docs/code-prompts/android/A0..A3`.
+A0 hecho: proyecto nativo `android/` generado y versionado, build debug
+compila, WebView https + landscape + inmersivo. Pendientes A1 (impresión
+USB), A2 (escáner/offline), A3 (identidad/publicación). Detalle en
+`docs/blocks/A0-done.md`.
 
-## Build (cuando A0 esté hecho)
+## Toolchain (este Mac, instalado en A0)
+
+El Android Studio 2.2 / JDK 8 previos del Mac NO sirven. A0 instaló
+toolchain CLI vía Homebrew; los comandos de build necesitan estos env:
+
+```bash
+export JAVA_HOME=/usr/local/opt/openjdk@17
+export ANDROID_HOME=/usr/local/share/android-commandlinetools
+```
+
+(SDK Platform 34, build-tools 34, platform-tools y emulador viven bajo
+ese `ANDROID_HOME`; el SDK viejo de `~/Library/Android/sdk` no se toca.)
+
+## Build
 
 ```bash
 pnpm --filter @mipiacetpv/tpv-web build   # genera dist/
 pnpm --filter @mipiacetpv/tpv-android sync # cap sync (copia dist + plugins)
-pnpm --filter @mipiacetpv/tpv-android open # abre Android Studio
+cd apps/tpv-android/android && ./gradlew assembleDebug  # APK debug
+pnpm --filter @mipiacetpv/tpv-android open # abre Android Studio (si hay GUI moderna)
 ```
 
 ## Lo que NO va aquí

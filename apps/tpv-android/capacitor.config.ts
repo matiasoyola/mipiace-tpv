@@ -18,12 +18,15 @@ const config: CapacitorConfig = {
     // en producción.
     allowMixedContent: false,
   },
-  // Para hot-reload en desarrollo contra la PWA local, descomentar y
-  // poner la IP del Mac en la LAN. NO commitear con esto activo.
-  // server: {
-  //   url: "http://192.168.1.50:5174",
-  //   cleartext: true,
-  // },
+  server: {
+    // Esquema https explícito (es el default de Capacitor 6, pero el SW
+    // y los permisos del TPV dependen de él; no dejarlo implícito).
+    androidScheme: "https",
+    // Para hot-reload en desarrollo contra la PWA local, descomentar y
+    // poner la IP del Mac en la LAN. NO commitear con esto activo.
+    // url: "http://192.168.1.50:5174",
+    // cleartext: true,
+  },
   plugins: {
     // Splash/status bar se afinan en A0 cuando exista identidad visual.
   },
