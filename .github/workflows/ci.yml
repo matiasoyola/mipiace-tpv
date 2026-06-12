@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # pnpm 9.12.0 exacto — lo lee del campo `packageManager` del
       # package.json raíz (misma fuente de verdad que corepack en el
@@ -33,8 +33,13 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
 
+      # v1.5-hotfix7 · runners migran a Node 24 el 2026-06-16: checkout y
+      # setup-node suben a v5 (Node 24); pnpm/action-setup y las docker
+      # actions van con major flotante y migran solas. node-version: 20
+      # se mantiene — es el Node DEL PROYECTO (el del Dockerfile), no el
+      # del runner.
       - name: Setup Node 20 + cache pnpm store
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: pnpm
@@ -85,7 +90,7 @@ jobs:
       packages: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Short SHA
         id: meta
