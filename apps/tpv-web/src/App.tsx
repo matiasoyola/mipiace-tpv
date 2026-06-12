@@ -10,7 +10,8 @@
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 
-import { apiWithCashier, ApiError } from "./api.js";
+import { apiWithCashier, ApiError, registerSessionExpiredHandler } from "./api.js";
+import { ReloginPinModal } from "./components/ReloginPinModal.js";
 import { TestModeBanner } from "./components/TestModeBanner.js";
 import { useDeviceBootstrap } from "./hooks/useDeviceBootstrap.js";
 import { useInactivityLogout } from "./hooks/useInactivityLogout.js";
@@ -52,6 +53,30 @@ export function App() {
   const { state, refresh, unpair } = useDeviceBootstrap();
   const [cashier, setCashier] = useState<CashierState>({ kind: "needsLogin" });
   const testMode = isTestModeActive();
+
+  // v1.0-pilotos · Lote 4 addendum: 401 a mitad de acción → modal de
+  // re-login in situ. Mientras haya cajero logueado, apiWithCashier
+  // delega aquí; el modal pide el PIN sin desmontar nada (carrito y
+  // checkout intactos) y al validar se reintenta la request original.
+  const [reloginPrompt, setReloginPrompt] = useState<{
+    email: string;
+    resolve: (renewed: boolean) => void;
+  } | null>(null);
+  const cashierEmail =
+    cashier.kind !== "needsLogin" ? cashier.cashier.email : null;
+  useEffect(() => {
+    if (!cashierEmail) {
+      registerSessionExpiredHandler(null);
+      return;
+    }
+    registerSessionExpiredHandler(
+      () =>
+        new Promise<boolean>((resolve) => {
+          setReloginPrompt({ email: cashierEmail, resolve });
+        }),
+    );
+    return () => registerSessionExpiredHandler(null);
+  }, [cashierEmail]);
 
   // v1.3-hotfix2 · ocultar teclado virtual de Android/iOS al tocar fuera
   // de un input. Por defecto el navegador mantiene el teclado abierto
@@ -198,6 +223,21 @@ export function App() {
         setCashier({ kind: "needsLogin" });
       }}
     >
+      {reloginPrompt && (
+        <ReloginPinModal
+          email={reloginPrompt.email}
+          onDone={(renewed) => {
+            reloginPrompt.resolve(renewed);
+            setReloginPrompt(null);
+            if (!renewed) {
+              // El cajero canceló: la acción falló con su 401 y
+              // volvemos al PinScreen clásico.
+              clearCashierSession();
+              setCashier({ kind: "needsLogin" });
+            }
+          }}
+        />
+      )}
       {cashier.kind === "forceClose" ? (
         <ShiftForceCloseScreen
           shift={cashier.shift}

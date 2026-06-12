@@ -3,9 +3,12 @@ import path from "node:path";
 
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
+import type { ZBreakdown } from "./z-breakdown.js";
+
 // Generador minimal del informe Z (PDF). Plantilla rudimentaria: una
-// sola página con cabecera, datos del turno, totales por método de
-// pago, descuadre. Se afinará cuando veamos el primer Z real (decisión
+// sola página con cabecera, datos del turno, desglose por método de
+// pago (bruto / devoluciones / neto — v1.0-pilotos Lote 3 #28),
+// descuadre. Se afinará cuando veamos el primer Z real (decisión
 // pendiente §19.2.3).
 
 export interface ZReportInput {
@@ -19,7 +22,7 @@ export interface ZReportInput {
   cashOpening: number;
   cashCounted: number;
   cashTheoretical: number;
-  methodTotals: Array<{ method: string; theoretical: number; counted?: number }>;
+  breakdown: ZBreakdown;
   ticketsCount: number;
   refundsCount: number;
   syncIssues: { pendingSync: number; failed: number };
@@ -83,14 +86,23 @@ export async function generateZReportPdf(input: ZReportInput): Promise<string> {
   const descuadre = input.cashCounted - input.cashTheoretical;
   line(`Descuadre:      ${fmtEur(descuadre)}`, { bold: true });
   hr();
-  line("Totales por método de pago", { bold: true });
-  for (const m of input.methodTotals) {
-    const real = m.counted != null ? ` (contado ${fmtEur(m.counted)})` : "";
-    line(`  ${m.method.padEnd(8)} ${fmtEur(m.theoretical)}${real}`);
+  line("Desglose por método de pago", { bold: true });
+  line("  método    bruto       devol.      neto", { size: 8.5 });
+  for (const m of input.breakdown.methods) {
+    const counted = m.counted != null ? `  (contado ${fmtEur(m.counted)})` : "";
+    line(
+      `  ${m.method.padEnd(8)} ${fmtEur(m.gross).padStart(11)} ${fmtEur(
+        m.refunds === 0 ? 0 : -m.refunds,
+      ).padStart(11)} ${fmtEur(m.net).padStart(11)}${counted}`,
+    );
   }
   hr();
+  line(`Ventas brutas:    ${fmtEur(input.breakdown.grossSales)}`);
+  line(`Devoluciones:     ${fmtEur(-input.breakdown.refundsTotal)}`);
+  line(`Ventas netas:     ${fmtEur(input.breakdown.netSales)}`, { bold: true });
+  hr();
   line(`Tickets emitidos: ${input.ticketsCount}`);
-  line(`Devoluciones:     ${input.refundsCount}`);
+  line(`Devoluciones (nº): ${input.refundsCount}`);
   if (input.syncIssues.pendingSync > 0 || input.syncIssues.failed > 0) {
     hr();
     line("Incidencias de sincronización Holded", { bold: true });

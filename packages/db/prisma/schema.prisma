@@ -237,6 +237,13 @@ model Tenant {
   // (§17.2). El turno sigue abierto; sólo se cae la sesión. Rango sensato
   // 5–60 min.
   cashierAutoLogoutMinutes       Int               @default(10) @map("cashier_auto_logout_minutes")
+  // v1.0-pilotos · Lote 4 (#18): TTL del JWT de sesión del cajero.
+  // Independiente del auto-logout por inactividad: la sesión vive el
+  // turno entero (default 720 min = 12 h) y la PWA la corta antes si el
+  // cajero deja la tablet quieta `cashierAutoLogoutMinutes` minutos.
+  // Antes el JWT se firmaba con el TTL de inactividad (10 min) y el
+  // cajero re-logueaba varias veces al día aunque estuviera trabajando.
+  cashierSessionTtlMinutes       Int               @default(720) @map("cashier_session_ttl_minutes")
   // Si true, el cierre forzado de un turno colgado de otro cajero exige
   // PIN de encargado cuando el cajero actual no lo es. Default true.
   requireManagerPinForForceClose Boolean           @default(true) @map("require_manager_pin_for_force_close")

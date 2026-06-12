@@ -31,7 +31,10 @@ import {
   type ResolveResult,
 } from "../tickets/modifier-selection.js";
 import { generatePublicSlug } from "../tickets/public-slug.js";
-import { computeTicket } from "../tickets/totals.js";
+import {
+  computeTicket,
+  readUnitPriceDeltaCents,
+} from "../tickets/totals.js";
 
 const UUID_V4 =
   "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$";
@@ -524,12 +527,24 @@ export async function registerTableOperativaRoutes(
           deletedAt: null,
           storeId: ticket.register.storeId,
         },
-        select: { id: true, name: true, storeId: true },
+        select: {
+          id: true,
+          name: true,
+          storeId: true,
+          groupedIntoTableId: true,
+        },
       });
       if (!destination) {
         return reply.code(404).send({
           error: "TABLE_NOT_FOUND",
           message: "Mesa destino no encontrada en esta tienda.",
+        });
+      }
+      if (destination.groupedIntoTableId) {
+        return reply.code(409).send({
+          error: "TABLE_GROUPED",
+          message:
+            "La mesa destino forma parte de un grupo. Desagrupa primero.",
         });
       }
 
@@ -701,12 +716,25 @@ async function ensureTableContext(
 > {
   const table = await prisma.table.findFirst({
     where: { id: tableId, deletedAt: null, store: { tenantId: cashier.tid } },
-    select: { id: true, storeId: true },
+    select: { id: true, storeId: true, groupedIntoTableId: true },
   });
   if (!table) {
     return {
       status: 404,
       error: { error: "TABLE_NOT_FOUND", message: "Mesa no encontrada" },
+    };
+  }
+  // v1.0-pilotos · Lote 1: una mesa absorbida por un grupo no admite
+  // operativa directa. Si se abriera un DRAFT aquí, el ungroup crearía
+  // un segundo DRAFT sobre la misma mesa (estado fantasma en el mapa).
+  if (table.groupedIntoTableId) {
+    return {
+      status: 409,
+      error: {
+        error: "TABLE_GROUPED",
+        message:
+          "Esta mesa forma parte de un grupo. Opera sobre la mesa principal o desagrupa primero.",
+      },
     };
   }
   const register = await prisma.register.findFirst({
@@ -839,7 +867,8 @@ async function recomputeTicketTotalsWithModifiers(
   const totals = computeTicket(
     lines.map((l) => ({
       units: Number(l.units),
-      unitPrice: Number(l.unitPrice) + readUnitPriceDelta(l.modifiers) / 100,
+      unitPrice:
+        Number(l.unitPrice) + readUnitPriceDeltaCents(l.modifiers) / 100,
       discountPct: Number(l.discountPct),
       taxRate: Number(l.taxRate),
     })),
@@ -853,24 +882,6 @@ async function recomputeTicketTotalsWithModifiers(
     },
     include: DRAFT_INCLUDE,
   });
-}
-
-// Lee el delta total de unitPrice (céntimos) del snapshot estructurado.
-// Para strings legacy y null devuelve 0 (no afectaban al precio).
-function readUnitPriceDelta(raw: unknown): number {
-  if (!Array.isArray(raw)) return 0;
-  let sum = 0;
-  for (const entry of raw) {
-    if (
-      entry &&
-      typeof entry === "object" &&
-      "priceDeltaCents" in entry &&
-      typeof (entry as { priceDeltaCents?: unknown }).priceDeltaCents === "number"
-    ) {
-      sum += (entry as { priceDeltaCents: number }).priceDeltaCents;
-    }
-  }
-  return sum;
 }
 
 // Igual que en tickets/routes — prioriza snapshot estructurado, cae a

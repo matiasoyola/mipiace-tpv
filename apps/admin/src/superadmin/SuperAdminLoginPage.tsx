@@ -7,6 +7,7 @@ import {
   superApi,
   SuperAdminApiError,
 } from "./api.js";
+import { PasswordField } from "../ui.js";
 
 interface LoginResponse {
   accessToken?: string;
@@ -100,19 +101,14 @@ export function SuperAdminLoginPage() {
                 className="w-full h-11 px-3 border border-slate-300 rounded-lg text-[14px] focus:outline-none focus:border-amber-500"
               />
             </div>
-            <div>
-              <label className="block text-[12.5px] font-medium text-slate-700 mb-1.5">
-                Contraseña
-              </label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-                required
-                className="w-full h-11 px-3 border border-slate-300 rounded-lg text-[14px] focus:outline-none focus:border-amber-500"
-              />
-            </div>
+            <PasswordField
+              id="superAdminPassword"
+              label="Contraseña"
+              autoComplete="current-password"
+              value={password}
+              onChange={setPassword}
+              required
+            />
             {error && (
               <p className="text-[12.5px] text-red-600 font-medium">{error}</p>
             )}

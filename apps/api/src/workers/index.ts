@@ -17,6 +17,7 @@ import { startTicketUploadWorker } from "./ticket-upload-worker.js";
 import { startRefundUploadWorker } from "./refund-upload-worker.js";
 import { startTicketEmailWorker } from "./ticket-email-worker.js";
 import { startImageCacheWorker } from "./image-cache-worker.js";
+import { startContactImportWorker } from "./contact-import-worker.js";
 import { startReconciliationWorker } from "./reconciliation-worker.js";
 import { startUploadSweeper } from "./upload-sweeper.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
@@ -32,6 +33,7 @@ async function main() {
   const refundWorker = startRefundUploadWorker();
   const emailWorker = startTicketEmailWorker();
   const imageWorker = startImageCacheWorker();
+  const contactImportWorker = startContactImportWorker();
   const reconciliationWorker = startReconciliationWorker();
   const uploadSweeper = startUploadSweeper();
   const heartbeat = startWorkerHeartbeat();
@@ -41,6 +43,7 @@ async function main() {
   console.log("[workers] refund-upload worker listo");
   console.log("[workers] ticket-email worker listo");
   console.log("[workers] image-cache worker listo");
+  console.log("[workers] contact-import worker listo");
   console.log("[workers] reconciliation worker listo");
   console.log("[workers] upload-sweeper listo (cada 5 min)");
   const count = await registerAllExistingRepeatables();
@@ -60,6 +63,7 @@ async function main() {
       refundWorker.close(),
       emailWorker.close(),
       imageWorker.close(),
+      contactImportWorker.close(),
       reconciliationWorker.close(),
     ]);
     process.exit(0);

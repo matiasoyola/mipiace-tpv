@@ -18,6 +18,7 @@ import {
   Shield,
   Tag,
   User,
+  UserPlus,
   Users,
   X,
 } from "lucide-react";
@@ -27,6 +28,7 @@ import { api, ApiError, readCurrentRole, readImpersonationState } from "./api.js
 import { ImpersonationBanner } from "./components/ImpersonationBanner.js";
 import { LogoutEverywhereModal } from "./components/LogoutEverywhereModal.js";
 import { Logo } from "./Logo.js";
+import { PRODUCT_VERSION, readBuildHash } from "./version.js";
 import { clearTokens } from "./api.js";
 
 interface NavItem {
@@ -67,6 +69,9 @@ const NAV_ITEMS: NavItem[] = [
   // porque es operativa diaria (cambiar IP del router, etc.).
   { to: "/admin/printers", label: "Impresoras", icon: Printer },
   { to: "/admin/cashiers", label: "Cajeros", icon: Users },
+  // v1.0-pilotos · Lote 6 (#22): importador de clientes desde Excel/CSV.
+  // OWNER-only — crea contactos en Holded, que es la fuente de verdad.
+  { to: "/admin/contacts-import", label: "Importar clientes", icon: UserPlus, ownerOnly: true },
   { to: "/admin/products", label: "Productos", icon: Package },
   // v1.3-Operativa-Extra · Lote 1: editor de aliases de tags. Visible
   // a OWNER y MANAGER porque la operativa (renombrar categorías) es de
@@ -270,7 +275,20 @@ function DesktopSidebar({ onAskLogoutAll }: { onAskLogoutAll: () => void }) {
       >
         Cerrar sesión en todos los dispositivos
       </button>
+      <VersionFooter />
     </aside>
+  );
+}
+
+// v1.0-pilotos · Lote 7: versión de producto visible. Misma constante
+// que /version.json (src/version.ts).
+function VersionFooter() {
+  const hash = readBuildHash();
+  return (
+    <div className="px-4 pt-2 text-[11px] text-slate-300 tabular-nums select-all">
+      mipiacetpv {PRODUCT_VERSION}
+      {hash ? ` · ${hash.slice(0, 7)}` : ""}
+    </div>
   );
 }
 
@@ -310,6 +328,7 @@ function MobileDrawer({
         >
           Cerrar sesión en todos los dispositivos
         </button>
+        <VersionFooter />
       </aside>
     </div>
   );

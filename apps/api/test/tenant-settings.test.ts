@@ -19,6 +19,7 @@ const MANAGER_ID = "00000000-0000-0000-0000-0000000000bb";
 interface FakeTenant {
   id: string;
   cashierAutoLogoutMinutes: number;
+  cashierSessionTtlMinutes: number;
   requireManagerPinForForceClose: boolean;
   deviceNewLoginAlertEnabled: boolean;
   discountThresholdPct: number;
@@ -66,6 +67,7 @@ beforeEach(() => {
   tenants.set(TENANT, {
     id: TENANT,
     cashierAutoLogoutMinutes: 10,
+    cashierSessionTtlMinutes: 720,
     requireManagerPinForForceClose: true,
     deviceNewLoginAlertEnabled: true,
     discountThresholdPct: 10,
@@ -153,5 +155,42 @@ describe("/admin/tenant/settings (B6 §4)", () => {
       payload: { discountThresholdPct: 200 },
     });
     expect(res.statusCode).toBe(400);
+  });
+});
+
+// v1.0-pilotos · Lote 4 (#18): TTL de sesión del cajero configurable.
+describe("cashierSessionTtlMinutes (v1.0-pilotos #18)", () => {
+  it("GET incluye el TTL con su default 720", async () => {
+    const app = await buildApp();
+    const get = await app.inject({
+      method: "GET",
+      url: "/admin/tenant/settings",
+      headers: { authorization: `Bearer ${tokenFor("OWNER", OWNER_ID)}` },
+    });
+    expect(get.statusCode).toBe(200);
+    expect(get.json().settings.cashierSessionTtlMinutes).toBe(720);
+  });
+
+  it("OWNER lo actualiza dentro del rango 30..1440", async () => {
+    const app = await buildApp();
+    const post = await app.inject({
+      method: "POST",
+      url: "/admin/tenant/settings",
+      headers: { authorization: `Bearer ${tokenFor("OWNER", OWNER_ID)}` },
+      payload: { cashierSessionTtlMinutes: 480 },
+    });
+    expect(post.statusCode).toBe(200);
+    expect(post.json().settings.cashierSessionTtlMinutes).toBe(480);
+  });
+
+  it("fuera de rango → 400", async () => {
+    const app = await buildApp();
+    const post = await app.inject({
+      method: "POST",
+      url: "/admin/tenant/settings",
+      headers: { authorization: `Bearer ${tokenFor("OWNER", OWNER_ID)}` },
+      payload: { cashierSessionTtlMinutes: 10 },
+    });
+    expect(post.statusCode).toBe(400);
   });
 });

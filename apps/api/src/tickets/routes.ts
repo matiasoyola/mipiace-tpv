@@ -35,8 +35,17 @@ import {
   PAYMENT_TOLERANCE_EUR,
   TOTAL_TOLERANCE_EUR,
   computeTicket,
+  readUnitPriceDeltaCents,
   totalsClose,
 } from "./totals.js";
+
+// v1.0-pilotos · Lote 1: señal interna de la tx de checkout cuando otro
+// dispositivo reclamó el DRAFT primero (ver POST /tickets/:id/checkout).
+class TicketAlreadyPaidError extends Error {
+  constructor() {
+    super("ticket already paid");
+  }
+}
 
 const UUID_V4 =
   "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$";
@@ -726,73 +735,95 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       // consumen serie). Patrón idéntico al POST /tickets: el
       // incremento va dentro de la tx para que un fallo posterior no
       // queme el número (v1.5-consistencia-A §3.a).
-      const updated = await prisma.$transaction(async (tx) => {
-        const next = await tx.register.update({
-          where: { id: cashier.rid },
-          data: { ticketCounter: { increment: 1 } },
-          select: { ticketCounter: true },
-        });
-        const internalNumber = String(next.ticketCounter).padStart(6, "0");
-        const t = await tx.ticket.update({
-          where: { id: draft.id },
-          data: {
-            status: TicketStatus.PENDING_SYNC,
-            internalNumber,
-            contactHoldedId: body.contactHoldedId ?? draft.contactHoldedId,
-            notes: body.notes ?? draft.notes,
-            cashAmount:
-              body.cashAmount != null
-                ? new Prisma.Decimal(body.cashAmount)
-                : draft.cashAmount,
-            printIntent: body.printIntent ?? draft.printIntent,
-            emailIntent: body.emailIntent ?? draft.emailIntent,
-            giftReceiptIntentAt: body.giftReceiptIntent
-              ? new Date()
-              : draft.giftReceiptIntentAt,
-            discountAuthorizedBy,
-            attendedBy: body.attendedBy?.trim()
-              ? body.attendedBy.trim()
-              : draft.attendedBy,
-            total: new Prisma.Decimal(totals.total),
-            totalTax: new Prisma.Decimal(totals.tax),
-            totalDiscount: new Prisma.Decimal(totals.discount),
-            paidAt: new Date(),
-            payments: {
-              deleteMany: {},
-              create: body.payments.map((p) => ({
-                method: p.method,
-                amount: new Prisma.Decimal(p.amount),
-                meta: p.meta ? (p.meta as object) : Prisma.JsonNull,
-              })),
+      let updated;
+      try {
+        updated = await prisma.$transaction(async (tx) => {
+          // v1.0-pilotos · Lote 1: reclama el DRAFT dentro de la tx. El
+          // check de status de arriba corre fuera de transacción — dos
+          // checkouts simultáneos podían pasar ambos y cobrar dos veces.
+          // El updateMany condicionado garantiza que sólo uno gana; el
+          // otro aborta aquí ANTES de incrementar el contador (no quema
+          // número de serie).
+          const claimed = await tx.ticket.updateMany({
+            where: { id: draft.id, status: "DRAFT" },
+            data: { status: TicketStatus.PENDING_SYNC },
+          });
+          if (claimed.count === 0) throw new TicketAlreadyPaidError();
+          const next = await tx.register.update({
+            where: { id: cashier.rid },
+            data: { ticketCounter: { increment: 1 } },
+            select: { ticketCounter: true },
+          });
+          const internalNumber = String(next.ticketCounter).padStart(6, "0");
+          const t = await tx.ticket.update({
+            where: { id: draft.id },
+            data: {
+              status: TicketStatus.PENDING_SYNC,
+              internalNumber,
+              contactHoldedId: body.contactHoldedId ?? draft.contactHoldedId,
+              notes: body.notes ?? draft.notes,
+              cashAmount:
+                body.cashAmount != null
+                  ? new Prisma.Decimal(body.cashAmount)
+                  : draft.cashAmount,
+              printIntent: body.printIntent ?? draft.printIntent,
+              emailIntent: body.emailIntent ?? draft.emailIntent,
+              giftReceiptIntentAt: body.giftReceiptIntent
+                ? new Date()
+                : draft.giftReceiptIntentAt,
+              discountAuthorizedBy,
+              attendedBy: body.attendedBy?.trim()
+                ? body.attendedBy.trim()
+                : draft.attendedBy,
+              total: new Prisma.Decimal(totals.total),
+              totalTax: new Prisma.Decimal(totals.tax),
+              totalDiscount: new Prisma.Decimal(totals.discount),
+              paidAt: new Date(),
+              payments: {
+                deleteMany: {},
+                create: body.payments.map((p) => ({
+                  method: p.method,
+                  amount: new Prisma.Decimal(p.amount),
+                  meta: p.meta ? (p.meta as object) : Prisma.JsonNull,
+                })),
+              },
             },
-          },
-          include: ticketInclude(),
+            include: ticketInclude(),
+          });
+          // Si la mesa estaba absorbida por una principal (grupo), la
+          // liberamos: el ticket principal absorbió las líneas en su día
+          // y al cobrarse, las absorbidas vuelven a libre (B7 §5.4).
+          if (draft.tableId) {
+            await tx.table.updateMany({
+              where: { groupedIntoTableId: draft.tableId },
+              data: { groupedIntoTableId: null },
+            });
+          }
+          await tx.shift.update({
+            where: { id: draft.shiftId },
+            data: { lastActivityAt: new Date() },
+          });
+          await tx.holdedUpload.upsert({
+            where: { externalId: draft.externalId },
+            create: {
+              externalId: draft.externalId,
+              tenantId: cashier.tid,
+              kind: "TICKET",
+              status: "PENDING",
+            },
+            update: {},
+          });
+          return t;
         });
-        // Si la mesa estaba absorbida por una principal (grupo), la
-        // liberamos: el ticket principal absorbió las líneas en su día
-        // y al cobrarse, las absorbidas vuelven a libre (B7 §5.4).
-        if (draft.tableId) {
-          await tx.table.updateMany({
-            where: { groupedIntoTableId: draft.tableId },
-            data: { groupedIntoTableId: null },
+      } catch (err) {
+        if (err instanceof TicketAlreadyPaidError) {
+          return reply.code(409).send({
+            error: "TICKET_ALREADY_PAID",
+            message: "Este ticket ya fue cobrado por otro dispositivo.",
           });
         }
-        await tx.shift.update({
-          where: { id: draft.shiftId },
-          data: { lastActivityAt: new Date() },
-        });
-        await tx.holdedUpload.upsert({
-          where: { externalId: draft.externalId },
-          create: {
-            externalId: draft.externalId,
-            tenantId: cashier.tid,
-            kind: "TICKET",
-            status: "PENDING",
-          },
-          update: {},
-        });
-        return t;
-      });
+        throw err;
+      }
 
       try {
         await enqueueTicketUpload(draft.externalId);
@@ -1410,24 +1441,6 @@ function ticketInclude() {
     refunds: { select: { id: true, externalId: true, total: true, createdAt: true, status: true } },
     register: { select: { id: true, name: true, store: { select: { name: true } } } },
   } as const;
-}
-
-// Suma de `priceDeltaCents` del snapshot estructurado de modifiers.
-// Devuelve 0 si el campo es null, string[] legacy, o no es array.
-function readUnitPriceDeltaCents(raw: unknown): number {
-  if (!Array.isArray(raw)) return 0;
-  let sum = 0;
-  for (const entry of raw) {
-    if (
-      entry &&
-      typeof entry === "object" &&
-      "priceDeltaCents" in entry &&
-      typeof (entry as { priceDeltaCents?: unknown }).priceDeltaCents === "number"
-    ) {
-      sum += (entry as { priceDeltaCents: number }).priceDeltaCents;
-    }
-  }
-  return sum;
 }
 
 // Serializa el JSON de TicketLine.modifiers tal cual lo verá el frontend.

@@ -7,6 +7,7 @@ import { verifyPassword } from "../auth/passwords.js";
 import { requireCashierSession } from "./cashier-session.js";
 import { ALLOWED_DENOMINATIONS, validateAndSumDenominations } from "./cash-count.js";
 import { generateZReportPdf } from "./z-report.js";
+import { computeZBreakdown, type ZBreakdown } from "./z-breakdown.js";
 
 // Body shape de close (B3 §3.4). methodTotals reportado por el cajero
 // (cash, card, bizum, voucher). En B3 todavía no hay tickets reales →
@@ -267,14 +268,15 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
-      // Cash esperado = ventas en efectivo del turno + fondo inicial.
-      // Mismo cálculo que el flujo de cierre (consistente con el Z).
-      const cashAgg = await prisma.ticketPayment.aggregate({
-        where: { ticket: { shiftId: shift.id }, method: "CASH" },
-        _sum: { amount: true },
+      // v1.0-pilotos · Lote 3 (#28): mismo desglose que el cierre Z —
+      // cash esperado = fondo inicial + efectivo NETO (ventas −
+      // devoluciones en efectivo).
+      const breakdown = computeZBreakdown({
+        cashOpening: Number(shift.cashOpening),
+        ...(await loadShiftBreakdownSums(prisma, shift.id)),
+        counted: { CASH: validation.total },
       });
-      const cashTheoretical =
-        Number(cashAgg._sum.amount ?? 0) + Number(shift.cashOpening);
+      const cashTheoretical = breakdown.cashTheoretical;
       const descuadre = validation.total - cashTheoretical;
 
       // Persistimos el arqueo SIEMPRE — para Z, también dispara el
@@ -296,6 +298,7 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
           cashCounted: validation.total,
           cashTheoretical,
           descuadre,
+          breakdown,
         });
       }
 
@@ -333,8 +336,12 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(200).send({
         kind: "Z" as const,
         cashCounted: validation.total,
-        cashTheoretical,
-        descuadre,
+        // El cierre recalcula el desglose dentro de executeShiftClose;
+        // devolvemos SUS números para que el front pinte exactamente lo
+        // que quedó en el Z PDF.
+        cashTheoretical: closeResult.body.breakdown.cashTheoretical,
+        descuadre: closeResult.body.descuadre,
+        breakdown: closeResult.body.breakdown,
         shift: closeResult.body.shift,
       });
     },
@@ -399,7 +406,14 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
 // serializa a su gusto. Evita acoplarse a FastifyReply para poder
 // componerlo (kind=Z dentro de cash-count llama a esta función).
 type ExecuteShiftCloseResult =
-  | { ok: true; body: Record<string, unknown> & { shift: Record<string, unknown> } }
+  | {
+      ok: true;
+      body: Record<string, unknown> & {
+        shift: Record<string, unknown>;
+        descuadre: number;
+        breakdown: ZBreakdown;
+      };
+    }
   | { ok: false; status: number; body: Record<string, unknown> };
 
 async function executeShiftClose(args: {
@@ -646,39 +660,23 @@ async function executeShiftClose(args: {
   }
 
   // Cálculo de teóricos a partir de los ticket_payments del turno
-  // (B4). B3 los dejaba en 0 porque no había tickets reales; ahora
-  // sí. El descuadre = real − teórico aplica sólo a CASH; el resto
-  // se reporta como "diferencia frente al teórico" en el Z, sin
-  // bloquear el cierre.
-  const paymentTotals = await prisma.ticketPayment.groupBy({
-    by: ["method"],
-    where: { ticket: { shiftId: shift.id } },
-    _sum: { amount: true },
+  // (B4). v1.0-pilotos · Lote 3 (#28): el desglose ahora separa ventas
+  // brutas y devoluciones por método (computeZBreakdown) y el teórico
+  // de CASH resta las devoluciones en efectivo — ese dinero SALE del
+  // cajón y antes el descuadre lo culpaba al cajero.
+  const breakdown = computeZBreakdown({
+    cashOpening: Number(shift.cashOpening),
+    ...(await loadShiftBreakdownSums(prisma, shift.id)),
+    counted: {
+      CASH: body.cashCounted,
+      ...(body.methodTotals.CARD != null ? { CARD: body.methodTotals.CARD } : {}),
+      ...(body.methodTotals.BIZUM != null ? { BIZUM: body.methodTotals.BIZUM } : {}),
+      ...(body.methodTotals.VOUCHER != null
+        ? { VOUCHER: body.methodTotals.VOUCHER }
+        : {}),
+    },
   });
-  const theoreticalByMethod = new Map<string, number>();
-  for (const row of paymentTotals) {
-    theoreticalByMethod.set(row.method, Number(row._sum.amount ?? 0));
-  }
-  const cashTheoretical =
-    (theoreticalByMethod.get("CASH") ?? 0) + Number(shift.cashOpening);
-  const methodTotals = [
-    { method: "CASH", theoretical: cashTheoretical, counted: body.cashCounted },
-    {
-      method: "CARD",
-      theoretical: theoreticalByMethod.get("CARD") ?? 0,
-      counted: body.methodTotals.CARD,
-    },
-    {
-      method: "BIZUM",
-      theoretical: theoreticalByMethod.get("BIZUM") ?? 0,
-      counted: body.methodTotals.BIZUM,
-    },
-    {
-      method: "VOUCHER",
-      theoretical: theoreticalByMethod.get("VOUCHER") ?? 0,
-      counted: body.methodTotals.VOUCHER,
-    },
-  ];
+  const cashTheoretical = breakdown.cashTheoretical;
 
   const closedAt = new Date();
 
@@ -708,9 +706,15 @@ async function executeShiftClose(args: {
       cashOpening: Number(shift.cashOpening),
       cashCounted: body.cashCounted,
       cashTheoretical,
-      methodTotals,
-      ticketsCount: await prisma.ticket.count({ where: { shiftId: shift.id } }),
-      refundsCount: 0, // los Refund se contarán cuando lleguen en B6.
+      breakdown,
+      // Emitidos de verdad: DRAFT (mesa sin cobrar) y VOIDED (vaciada/
+      // agrupada) no son ventas.
+      ticketsCount: await prisma.ticket.count({
+        where: { shiftId: shift.id, status: { notIn: ["DRAFT", "VOIDED"] } },
+      }),
+      refundsCount: await prisma.refund.count({
+        where: { shiftId: shift.id, status: { notIn: ["DRAFT", "VOIDED", "TEST"] } },
+      }),
       syncIssues: { pendingSync, failed },
       acceptedSyncFailures: body.syncFailureAccepted === true,
       managerAuthorizationEmail: managerEmail,
@@ -747,9 +751,45 @@ async function executeShiftClose(args: {
         zReportPdfPath: updated.zReportPdfPath,
       },
       descuadre: body.cashCounted - cashTheoretical,
+      breakdown,
       forceClose: !isOwnerOfShift,
     },
   };
+}
+
+// Σ pagos y Σ devoluciones del turno agrupados por método, en EUR.
+// Input de `computeZBreakdown` — lo usan el cierre Z y el arqueo X.
+async function loadShiftBreakdownSums(
+  prisma: ReturnType<typeof getPrisma>,
+  shiftId: string,
+): Promise<{
+  paymentsByMethod: Record<string, number>;
+  refundsByMethod: Record<string, number>;
+}> {
+  const [paymentTotals, refundTotals] = await Promise.all([
+    prisma.ticketPayment.groupBy({
+      by: ["method"],
+      where: { ticket: { shiftId } },
+      _sum: { amount: true },
+    }),
+    prisma.refund.groupBy({
+      by: ["method"],
+      where: { shiftId, status: { notIn: ["DRAFT", "VOIDED", "TEST"] } },
+      _sum: { total: true },
+    }),
+  ]);
+  const paymentsByMethod: Record<string, number> = {};
+  for (const row of paymentTotals) {
+    paymentsByMethod[row.method] = Number(row._sum.amount ?? 0);
+  }
+  const refundsByMethod: Record<string, number> = {};
+  for (const row of refundTotals) {
+    // method null (no debería darse — el endpoint de refunds siempre lo
+    // fija) cae al bucket OTHER para no perder el importe del desglose.
+    const key = row.method ?? "OTHER";
+    refundsByMethod[key] = (refundsByMethod[key] ?? 0) + Number(row._sum.total ?? 0);
+  }
+  return { paymentsByMethod, refundsByMethod };
 }
 
 // Resumen humano del syncError persistido por el worker. El frontend

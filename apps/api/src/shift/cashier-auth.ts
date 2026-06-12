@@ -93,9 +93,15 @@ export async function registerCashierAuthRoutes(
         data: { lastLoginAt: new Date() },
       });
 
+      // v1.0-pilotos · Lote 4 (#18): el JWT vive el turno entero
+      // (cashierSessionTtlMinutes, default 720 = 12 h). El auto-logout
+      // por inactividad sigue siendo cashierAutoLogoutMinutes y lo
+      // aplica la PWA en cliente — antes el JWT se firmaba con ese TTL
+      // corto (10 min) y el cajero re-logueaba varias veces al día
+      // aunque estuviera trabajando.
       const tenant = await prisma.tenant.findUniqueOrThrow({
         where: { id: ctx.tenantId },
-        select: { cashierAutoLogoutMinutes: true },
+        select: { cashierSessionTtlMinutes: true },
       });
 
       const sessionToken = signCashierSession(
@@ -106,14 +112,14 @@ export async function registerCashierAuthRoutes(
           rid: ctx.registerId,
           role: user.role as "OWNER" | "MANAGER" | "CASHIER",
         },
-        tenant.cashierAutoLogoutMinutes,
+        tenant.cashierSessionTtlMinutes,
       );
 
       const shiftState = await getShiftStateForLogin(ctx.registerId);
 
       return reply.code(200).send({
         sessionToken,
-        sessionTtlMinutes: tenant.cashierAutoLogoutMinutes,
+        sessionTtlMinutes: tenant.cashierSessionTtlMinutes,
         user: {
           id: user.id,
           email: user.email,

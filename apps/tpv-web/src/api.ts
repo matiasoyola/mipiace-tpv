@@ -37,8 +37,14 @@ interface ApiOpts {
 
 async function send<T>(path: string, opts: ApiOpts): Promise<T> {
   const url = path.startsWith("http") ? path : `${BASE_URL}${path}`;
+  // v1.0-pilotos · Lote 2 (#9): Content-Type sólo cuando hay body. Un
+  // POST sin payload con header JSON hacía que Fastify rechazara el
+  // request ("body vacío") antes de llegar al handler — reimprimir,
+  // enviar comanda y gift-receipt fallaban siempre.
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    ...(opts.body !== undefined
+      ? { "Content-Type": "application/json" }
+      : {}),
     ...opts.headers,
   };
   const res = await fetch(url, {
@@ -89,18 +95,69 @@ export function apiWithDevice<T>(path: string, opts: ApiOpts = {}): Promise<T> {
   });
 }
 
-export function apiWithCashier<T>(path: string, opts: ApiOpts = {}): Promise<T> {
+// v1.0-pilotos · Lote 4 addendum: re-login in situ ante un 401.
+//
+// Visto en producción (Peluquería Sole): la sesión caducaba a mitad de
+// un checkout y el TPV sólo mostraba "Sesión inválida o expirada" sin
+// salida, delante de la clienta. Ahora, cuando un request del cajero
+// devuelve 401, el wrapper avisa al handler registrado por App (modal
+// de PIN in situ, sin navegar — el carrito y el checkout no se tocan) y
+// si el re-login tiene éxito reintenta UNA vez la request original con
+// el token nuevo. Si el cajero cancela, propagamos el 401 original.
+//
+// Varias requests con 401 simultáneo comparten el mismo re-login (un
+// solo modal); todas reintentan al resolverse.
+type SessionExpiredHandler = () => Promise<boolean>;
+
+let sessionExpiredHandler: SessionExpiredHandler | null = null;
+let reloginInFlight: Promise<boolean> | null = null;
+
+export function registerSessionExpiredHandler(
+  handler: SessionExpiredHandler | null,
+): void {
+  sessionExpiredHandler = handler;
+}
+
+async function requestRelogin(): Promise<boolean> {
+  if (!sessionExpiredHandler) return false;
+  if (!reloginInFlight) {
+    reloginInFlight = sessionExpiredHandler().finally(() => {
+      reloginInFlight = null;
+    });
+  }
+  return reloginInFlight;
+}
+
+export async function apiWithCashier<T>(
+  path: string,
+  opts: ApiOpts = {},
+): Promise<T> {
   const session = getCashierSession();
   if (!session) {
-    return Promise.reject(
-      new ApiError(401, "Sin sesión de cajero", "UNAUTHENTICATED"),
-    );
+    // Sin sesión previa no hay nada que "renovar" — mismo contrato que
+    // antes (App redirige a PinScreen).
+    throw new ApiError(401, "Sin sesión de cajero", "UNAUTHENTICATED");
   }
-  return send<T>(path, {
-    ...opts,
-    headers: {
-      ...opts.headers,
-      Authorization: `Bearer ${session.sessionToken}`,
-    },
-  });
+  try {
+    return await send<T>(path, {
+      ...opts,
+      headers: {
+        ...opts.headers,
+        Authorization: `Bearer ${session.sessionToken}`,
+      },
+    });
+  } catch (err) {
+    if (!(err instanceof ApiError) || err.status !== 401) throw err;
+    const renewed = await requestRelogin();
+    if (!renewed) throw err;
+    const fresh = getCashierSession();
+    if (!fresh) throw err;
+    return send<T>(path, {
+      ...opts,
+      headers: {
+        ...opts.headers,
+        Authorization: `Bearer ${fresh.sessionToken}`,
+      },
+    });
+  }
 }

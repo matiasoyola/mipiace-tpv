@@ -4,6 +4,7 @@
 // en BD con defaults sensatos:
 //
 //   - cashierAutoLogoutMinutes (B3, default 10)
+//   - cashierSessionTtlMinutes (v1.0-pilotos #18, default 720)
 //   - requireManagerPinForForceClose (B3, default true)
 //   - requireOwnerPinForCashClose (v1.4-Bugs-Operativos, default false)
 //   - deviceNewLoginAlertEnabled (B3, default true)
@@ -31,6 +32,7 @@ export async function registerAdminTenantSettingsRoutes(
         where: { id: auth.tenantId },
         select: {
           cashierAutoLogoutMinutes: true,
+          cashierSessionTtlMinutes: true,
           requireManagerPinForForceClose: true,
           requireOwnerPinForCashClose: true,
           deviceNewLoginAlertEnabled: true,
@@ -41,6 +43,7 @@ export async function registerAdminTenantSettingsRoutes(
       return {
         settings: {
           cashierAutoLogoutMinutes: tenant.cashierAutoLogoutMinutes,
+          cashierSessionTtlMinutes: tenant.cashierSessionTtlMinutes,
           requireManagerPinForForceClose: tenant.requireManagerPinForForceClose,
           requireOwnerPinForCashClose: tenant.requireOwnerPinForCashClose,
           deviceNewLoginAlertEnabled: tenant.deviceNewLoginAlertEnabled,
@@ -61,6 +64,9 @@ export async function registerAdminTenantSettingsRoutes(
           additionalProperties: false,
           properties: {
             cashierAutoLogoutMinutes: { type: "integer", minimum: 5, maximum: 60 },
+            // v1.0-pilotos · Lote 4 (#18): TTL del JWT de sesión del
+            // cajero. 30 min a 24 h — el default 720 cubre un turno.
+            cashierSessionTtlMinutes: { type: "integer", minimum: 30, maximum: 1440 },
             requireManagerPinForForceClose: { type: "boolean" },
             requireOwnerPinForCashClose: { type: "boolean" },
             deviceNewLoginAlertEnabled: { type: "boolean" },
@@ -77,6 +83,7 @@ export async function registerAdminTenantSettingsRoutes(
       const auth = request.auth!;
       const body = request.body as {
         cashierAutoLogoutMinutes?: number;
+        cashierSessionTtlMinutes?: number;
         requireManagerPinForForceClose?: boolean;
         requireOwnerPinForCashClose?: boolean;
         deviceNewLoginAlertEnabled?: boolean;
@@ -88,6 +95,7 @@ export async function registerAdminTenantSettingsRoutes(
         where: { id: auth.tenantId },
         data: {
           cashierAutoLogoutMinutes: body.cashierAutoLogoutMinutes,
+          cashierSessionTtlMinutes: body.cashierSessionTtlMinutes,
           requireManagerPinForForceClose: body.requireManagerPinForForceClose,
           requireOwnerPinForCashClose: body.requireOwnerPinForCashClose,
           deviceNewLoginAlertEnabled: body.deviceNewLoginAlertEnabled,
@@ -96,6 +104,7 @@ export async function registerAdminTenantSettingsRoutes(
         },
         select: {
           cashierAutoLogoutMinutes: true,
+          cashierSessionTtlMinutes: true,
           requireManagerPinForForceClose: true,
           requireOwnerPinForCashClose: true,
           deviceNewLoginAlertEnabled: true,
@@ -106,6 +115,7 @@ export async function registerAdminTenantSettingsRoutes(
       return reply.code(200).send({
         settings: {
           cashierAutoLogoutMinutes: updated.cashierAutoLogoutMinutes,
+          cashierSessionTtlMinutes: updated.cashierSessionTtlMinutes,
           requireManagerPinForForceClose: updated.requireManagerPinForForceClose,
           requireOwnerPinForCashClose: updated.requireOwnerPinForCashClose,
           deviceNewLoginAlertEnabled: updated.deviceNewLoginAlertEnabled,

@@ -66,7 +66,12 @@ const state = {
   users: new Map<string, FakeUser>(),
   shifts: new Map<string, FakeShift>(),
   tickets: [] as Array<{ shiftId: string; status: string }>,
-  refunds: [] as Array<{ shiftId: string; status: string }>,
+  refunds: [] as Array<{
+    shiftId: string;
+    status: string;
+    method?: string;
+    total?: number;
+  }>,
   payments: [] as Array<{ shiftId: string; method: string; amount: number }>,
   cashCounts: [] as Array<{ shiftId: string; kind: string }>,
 };
@@ -158,7 +163,37 @@ const fakePrisma = {
     }),
   },
   refund: {
-    groupBy: vi.fn(async () => []),
+    // Dos usos: sync-health agrupa por status (_count) y el desglose Z
+    // (v1.0-pilotos Lote 3) agrupa por method (_sum.total).
+    groupBy: vi.fn(async ({ by, where }: any) => {
+      const filtered = state.refunds.filter((r) => {
+        if (r.shiftId !== where.shiftId) return false;
+        if (where.status?.in) return where.status.in.includes(r.status);
+        if (where.status?.notIn) return !where.status.notIn.includes(r.status);
+        return true;
+      });
+      if (by.includes("method")) {
+        const map = new Map<string | null, number>();
+        for (const r of filtered) {
+          const key = r.method ?? null;
+          map.set(key, (map.get(key) ?? 0) + (r.total ?? 0));
+        }
+        return [...map.entries()].map(([method, total]) => ({
+          method,
+          _sum: { total },
+        }));
+      }
+      const map = new Map<string, number>();
+      for (const r of filtered) map.set(r.status, (map.get(r.status) ?? 0) + 1);
+      return [...map.entries()].map(([status, _count]) => ({ status, _count }));
+    }),
+    count: vi.fn(async ({ where }: any) =>
+      state.refunds.filter(
+        (r) =>
+          r.shiftId === where.shiftId &&
+          (!where.status?.notIn || !where.status.notIn.includes(r.status)),
+      ).length,
+    ),
     findMany: vi.fn(async () => []),
   },
   ticketPayment: {
@@ -463,5 +498,101 @@ describe("v1.5-B §3.b · health blocked ya no bloquea abrir/cerrar turno", () =
       payload: { cashOpening: 100 },
     });
     expect(res.statusCode).toBe(201);
+  });
+});
+
+// v1.0-pilotos · Lote 3 (#28): el cierre calcula el desglose por método
+// (bruto / devoluciones / neto) y se lo pasa al Z PDF y a la respuesta.
+describe("v1.0-pilotos Lote 3 · desglose Z por método con devoluciones", () => {
+  it("pagos mixtos + devolución en efectivo → teórico de caja resta la devolución", async () => {
+    state.payments.push(
+      { shiftId: SHIFT, method: "CASH", amount: 200 },
+      { shiftId: SHIFT, method: "CARD", amount: 300 },
+      { shiftId: SHIFT, method: "BIZUM", amount: 15 },
+    );
+    state.refunds.push({
+      shiftId: SHIFT,
+      status: "SYNCED",
+      method: "CASH",
+      total: 25.5,
+    });
+    const app = await buildApp();
+    // contado = 100 fondo + 200 cash − 25.50 devolución = 274.50 → descuadre 0.
+    const res = await app.inject({
+      method: "POST",
+      url: `/shift/${SHIFT}/close`,
+      headers: { authorization: `Bearer ${signSession("CASHIER")}` },
+      payload: { cashCounted: 274.5, methodTotals: { CASH: 274.5, CARD: 300 } },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.descuadre).toBeCloseTo(0, 2);
+    expect(body.breakdown.cashTheoretical).toBeCloseTo(274.5, 2);
+    expect(body.breakdown.grossSales).toBeCloseTo(515, 2);
+    expect(body.breakdown.refundsTotal).toBeCloseTo(25.5, 2);
+    expect(body.breakdown.netSales).toBeCloseTo(489.5, 2);
+    const cash = body.breakdown.methods.find((m: any) => m.method === "CASH");
+    expect(cash).toMatchObject({ gross: 200, refunds: 25.5, net: 174.5 });
+    const card = body.breakdown.methods.find((m: any) => m.method === "CARD");
+    expect(card).toMatchObject({ gross: 300, refunds: 0, net: 300, counted: 300 });
+
+    // El Z PDF recibió el mismo desglose + contador real de devoluciones.
+    const { generateZReportPdf } = await import("../src/shift/z-report.js");
+    const zInput = (generateZReportPdf as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0];
+    expect(zInput.breakdown.netSales).toBeCloseTo(489.5, 2);
+    expect(zInput.refundsCount).toBe(1);
+  });
+
+  it("cash-count Z devuelve el desglose del cierre (consistente con el PDF)", async () => {
+    state.payments.push({ shiftId: SHIFT, method: "CASH", amount: 50 });
+    state.refunds.push({
+      shiftId: SHIFT,
+      status: "SYNCED",
+      method: "CARD",
+      total: 10,
+    });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/shift/${SHIFT}/cash-count`,
+      headers: { authorization: `Bearer ${signSession("CASHIER")}` },
+      payload: { kind: "Z", denominations: { "100": 1, "50": 1 } },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    // 100 fondo + 50 cash neto = 150 teórico; contado 150 → descuadre 0.
+    expect(body.cashTheoretical).toBeCloseTo(150, 2);
+    expect(body.descuadre).toBeCloseTo(0, 2);
+    const card = body.breakdown.methods.find((m: any) => m.method === "CARD");
+    expect(card).toMatchObject({ gross: 0, refunds: 10, net: -10 });
+  });
+
+  it("arqueo X intermedio también desglosa y resta devoluciones en efectivo", async () => {
+    state.payments.push({ shiftId: SHIFT, method: "CASH", amount: 80 });
+    state.refunds.push({
+      shiftId: SHIFT,
+      status: "SYNCED",
+      method: "CASH",
+      total: 30,
+    });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/shift/${SHIFT}/cash-count`,
+      headers: { authorization: `Bearer ${signSession("CASHIER")}` },
+      payload: { kind: "X", denominations: { "100": 1, "50": 1 } },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    // 100 fondo + 80 − 30 = 150 → descuadre 0 con 150 contados.
+    expect(body.cashTheoretical).toBeCloseTo(150, 2);
+    expect(body.descuadre).toBeCloseTo(0, 2);
+    expect(body.breakdown.methods[0]).toMatchObject({
+      method: "CASH",
+      gross: 80,
+      refunds: 30,
+      net: 50,
+    });
   });
 });

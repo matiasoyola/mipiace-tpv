@@ -160,11 +160,11 @@ export function TableMapScreen(props: TableMapScreenProps) {
             <WifiOff className="w-5 h-5 mt-0.5 shrink-0" />
             <div className="text-[13.5px] leading-snug">
               <div className="font-semibold">
-                Sin conexión · mesas en modo lectura
+                Sin conexión · operativa de mesas bloqueada
               </div>
               <div className="text-[12.5px] opacity-90 mt-0.5">
-                No se pueden abrir mesas nuevas ni añadir líneas hasta que
-                vuelva la red. La venta rápida sigue funcionando offline.
+                No se pueden abrir, retomar ni cobrar mesas hasta que vuelva
+                la red. La venta rápida sigue disponible.
               </div>
             </div>
           </div>
@@ -327,11 +327,12 @@ function TableCard({
   offline: boolean;
   onPick: (t: ApiTable) => void;
 }) {
-  // Bloqueamos abrir mesa nueva cuando estamos offline (no podemos
-  // reservar de forma coherente en el resto de terminales). Las mesas
-  // ya abiertas siguen clicables → SalePage se encarga del modo
-  // pesimista local.
-  const disabled = offline && table.state === "FREE";
+  // v1.0-pilotos · Lote 1: sin conexión, la operativa de mesas se
+  // bloquea ENTERA (abrir, retomar, mover, cobrar) — toda mutación de
+  // mesa pasa por el backend y fallaría igual, pero con errores
+  // confusos a mitad de flujo. La venta rápida sí sigue disponible
+  // (catálogo cacheado en IndexedDB + carrito local).
+  const disabled = offline;
   const elapsed = useElapsedTime(table.activeTicket?.openedAt);
   const stateClass =
     table.state === "FREE"
@@ -344,7 +345,7 @@ function TableCard({
       type="button"
       onClick={() => onPick(table)}
       disabled={disabled}
-      title={disabled ? "Sin conexión · no se pueden abrir mesas" : undefined}
+      title={disabled ? "Sin conexión · operativa de mesas bloqueada" : undefined}
       className={`relative aspect-[7/6] rounded-2xl border-2 ${stateClass} flex flex-col p-3.5 text-left transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100`}
     >
       <div className="flex justify-between items-start">
@@ -427,13 +428,13 @@ function BarSeat({
       : table.state === "BILLING"
         ? "bg-amber-50 border-amber-300/60 text-amber-800"
         : "bg-mipiace-coral-soft border-mipiace-coral/40 text-mipiace-coral-dark";
-  const disabled = offline && table.state === "FREE";
+  const disabled = offline;
   return (
     <button
       type="button"
       onClick={() => onPick(table)}
       disabled={disabled}
-      title={disabled ? "Sin conexión · no se pueden abrir mesas" : undefined}
+      title={disabled ? "Sin conexión · operativa de mesas bloqueada" : undefined}
       className={`aspect-square rounded-xl border-2 ${stateClass} flex flex-col items-center justify-center p-2 transition-all hover:scale-[1.05] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100`}
     >
       <span className="text-[14px] font-semibold">{table.name}</span>
