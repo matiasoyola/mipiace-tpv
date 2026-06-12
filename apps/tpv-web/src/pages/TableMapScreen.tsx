@@ -178,7 +178,7 @@ export function TableMapScreen(props: TableMapScreenProps) {
           <button
             type="button"
             onClick={props.onLogoutCashier}
-            className="h-9 px-3 rounded-lg bg-mipiace-stone hover:bg-slate-100 text-[12.5px] text-mipiace-ink"
+            className="h-9 px-3 rounded-lg bg-mipiace-stone hover:bg-slate-100 text-[12.5px] text-mipiace-ink max-w-[45vw] truncate"
           >
             {props.cashierEmail.split("@")[0]}
           </button>
@@ -305,7 +305,10 @@ function ZoneStrip({
     { id: "RESERVADO", label: ZONE_LABEL.RESERVADO, count: counts.RESERVADO },
   ];
   return (
-    <div className="flex flex-wrap gap-2 mb-5">
+    // v1.0-handheld · Lote 2.1: en estrecho las zonas son chips en una
+    // sola fila con scroll horizontal (tabs); en ≥1024px vuelven al
+    // flex-wrap de siempre.
+    <div className="flex gap-2 mb-5 overflow-x-auto lg:flex-wrap lg:overflow-x-visible">
       {items.map((item) => {
         if (item.id !== "ALL" && (item.count ?? 0) === 0) return null;
         const active = zoneFilter === item.id;
@@ -314,7 +317,7 @@ function ZoneStrip({
             key={item.id}
             type="button"
             onClick={() => setZoneFilter(item.id)}
-            className={`h-9 px-3.5 rounded-xl text-[13px] font-medium transition-colors ${
+            className={`h-9 px-3.5 shrink-0 rounded-xl text-[13px] font-medium transition-colors ${
               active
                 ? "bg-mipiace-coral-soft text-mipiace-coral-dark"
                 : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
