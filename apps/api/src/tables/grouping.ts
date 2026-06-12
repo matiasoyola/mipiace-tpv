@@ -17,7 +17,10 @@ import { getPrisma } from "../context.js";
 import { getStoreEventBus } from "../realtime/store-event-bus.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
 import { generatePublicSlug } from "../tickets/public-slug.js";
-import { computeTicket } from "../tickets/totals.js";
+import {
+  computeTicket,
+  readUnitPriceDeltaCents,
+} from "../tickets/totals.js";
 
 export async function registerTableGroupingRoutes(
   app: FastifyInstance,
@@ -89,12 +92,19 @@ export async function registerTableGroupingRoutes(
           deletedAt: null,
           store: { tenantId: cashier.tid },
         },
-        select: { id: true, storeId: true },
+        select: { id: true, storeId: true, groupedIntoTableId: true },
       });
       if (!destinationTable) {
         return reply.code(404).send({
           error: "DESTINATION_TABLE_NOT_FOUND",
           message: "La mesa de destino no existe.",
+        });
+      }
+      if (destinationTable.groupedIntoTableId) {
+        return reply.code(409).send({
+          error: "TABLE_GROUPED",
+          message:
+            "La mesa destino forma parte de un grupo. Desagrupa primero.",
         });
       }
 
@@ -271,6 +281,19 @@ export async function registerTableGroupingRoutes(
           error: "TABLE_ALREADY_GROUPED",
           message:
             "Una de las mesas ya forma parte de otro grupo. Desagrúpala primero.",
+        });
+      }
+      // v1.0-pilotos · Lote 1: la mesa principal tampoco puede estar
+      // absorbida en otro grupo — permitirlo creaba grupos anidados que
+      // el ungroup de la mesa raíz no sabía revertir.
+      const mainGrouped = tables.find(
+        (t) => t.id === mainTableId && t.groupedIntoTableId,
+      );
+      if (mainGrouped) {
+        return reply.code(409).send({
+          error: "TABLE_ALREADY_GROUPED",
+          message:
+            "La mesa principal ya forma parte de otro grupo. Desagrúpala primero.",
         });
       }
 
@@ -535,12 +558,18 @@ async function totalsFromLines(tx: Prisma.TransactionClient, ticketId: string) {
       unitPrice: true,
       discountPct: true,
       taxRate: true,
+      modifiers: true,
     },
   });
+  // v1.0-pilotos · Lote 1: el unitPrice persistido es el BASE — hay que
+  // sumar el delta de modifiers como hace la operativa de mesa. Antes
+  // este recálculo lo ignoraba y mover/agrupar líneas con suplementos
+  // (p.ej. "leche de avena +0,30") encogía el total del ticket destino.
   return computeTicket(
     lines.map((l) => ({
       units: Number(l.units),
-      unitPrice: Number(l.unitPrice),
+      unitPrice:
+        Number(l.unitPrice) + readUnitPriceDeltaCents(l.modifiers) / 100,
       discountPct: Number(l.discountPct),
       taxRate: Number(l.taxRate),
     })),

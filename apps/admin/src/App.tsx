@@ -12,6 +12,7 @@ import { ForgotPasswordPage, ResetPasswordPage } from "./pages/PasswordResetPage
 import { PrintersPage } from "./pages/PrintersPage.js";
 import { SecurityPage } from "./pages/SecurityPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
+import { ContactImportPage } from "./pages/ContactImportPage.js";
 import { StoreDetailPage, StoresPage } from "./pages/StoresPage.js";
 import { TagAliasesPage } from "./pages/TagAliasesPage.js";
 import { TagSectionsPage } from "./pages/TagSectionsPage.js";
@@ -40,6 +41,7 @@ import {
   formatDireccion,
   formatRelative,
   OutlineButton,
+  PasswordField,
   PrimaryButton,
   ReadOnlyField,
   SuccessBanner,
@@ -80,6 +82,7 @@ export function App() {
         <Route path="/admin/products" element={<SkuReviewPage />} />
         <Route path="/admin/devices" element={<DevicesPage />} />
         <Route path="/admin/cashiers" element={<CashiersPage />} />
+        <Route path="/admin/contacts-import" element={<ContactImportPage />} />
         <Route path="/admin/security" element={<SecurityPage />} />
         <Route path="/admin/stores" element={<StoresPage />} />
         <Route path="/admin/stores/:storeId" element={<StoreDetailPage />} />
@@ -340,10 +343,9 @@ function LoginPage() {
           onChange={setEmail}
           required
         />
-        <TextField
+        <PasswordField
           id="password"
           label="Contraseña"
-          type="password"
           autoComplete="current-password"
           value={password}
           onChange={setPassword}

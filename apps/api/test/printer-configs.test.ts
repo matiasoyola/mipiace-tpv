@@ -152,6 +152,22 @@ const fakePrisma = {
       }
       return { count };
     }),
+    deleteMany: vi.fn(async ({ where }: any) => {
+      let count = 0;
+      for (const [id, p] of [...state.printers]) {
+        if (where.id && p.id !== where.id) continue;
+        const reg = state.registers.get(p.registerId);
+        if (!reg) continue;
+        if (
+          where.register?.store?.tenantId &&
+          reg.tenantId !== where.register.store.tenantId
+        )
+          continue;
+        state.printers.delete(id);
+        count++;
+      }
+      return { count };
+    }),
   },
 };
 
@@ -374,7 +390,10 @@ describe("PATCH /admin/printer-configs/:id", () => {
 });
 
 describe("DELETE /admin/printer-configs/:id", () => {
-  it("DELETE marca active=false (soft delete)", async () => {
+  // v1.0-pilotos · Lote 5 (#19): el DELETE ahora borra la fila de
+  // verdad. El soft-delete dejaba residuos que hacían "reaparecer" la
+  // impresora en el admin y ensuciaban la re-alta.
+  it("DELETE elimina la fila de BD (borrado real)", async () => {
     const id = "aaaaaaaa-aaaa-aaaa-aaaa-000000000004";
     state.printers.set(id, {
       id,
@@ -398,6 +417,78 @@ describe("DELETE /admin/printer-configs/:id", () => {
       headers: { authorization: ownerToken() },
     });
     expect(res.statusCode).toBe(200);
-    expect(state.printers.get(id)!.active).toBe(false);
+    expect(state.printers.has(id)).toBe(false);
+  });
+
+  it("DELETE de impresora de otro tenant → 404 y no borra", async () => {
+    const id = "aaaaaaaa-aaaa-aaaa-aaaa-000000000005";
+    state.printers.set(id, {
+      id,
+      registerId: REGISTER_OTHER,
+      name: "ajena",
+      mode: "USB",
+      ipAddress: null,
+      port: null,
+      timeoutMs: 5000,
+      section: null,
+      active: true,
+      lastPrintOkAt: null,
+      lastErrorAt: null,
+      lastErrorMsg: null,
+      createdAt: new Date(),
+    });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "DELETE",
+      url: `/admin/printer-configs/${id}`,
+      headers: { authorization: ownerToken() },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(state.printers.has(id)).toBe(true);
+  });
+
+  it("ciclo alta → borrado → re-alta limpia del mismo dispositivo", async () => {
+    const app = await buildApp();
+    const create1 = await app.inject({
+      method: "POST",
+      url: "/admin/printer-configs",
+      headers: { authorization: ownerToken() },
+      payload: { registerId: REGISTER_MINE, name: "POS-80 caja", mode: "USB" },
+    });
+    expect(create1.statusCode).toBe(201);
+    const firstId = create1.json().printerConfig.id;
+
+    const del = await app.inject({
+      method: "DELETE",
+      url: `/admin/printer-configs/${firstId}`,
+      headers: { authorization: ownerToken() },
+    });
+    expect(del.statusCode).toBe(200);
+
+    // Sin residuos: el listado queda vacío tras el borrado.
+    const listAfterDelete = await app.inject({
+      method: "GET",
+      url: `/admin/printer-configs?registerId=${REGISTER_MINE}`,
+      headers: { authorization: ownerToken() },
+    });
+    expect(listAfterDelete.json().items).toHaveLength(0);
+
+    // Re-alta del MISMO dispositivo (mismo nombre/modo) → 201 y el
+    // listado muestra exactamente una impresora.
+    const create2 = await app.inject({
+      method: "POST",
+      url: "/admin/printer-configs",
+      headers: { authorization: ownerToken() },
+      payload: { registerId: REGISTER_MINE, name: "POS-80 caja", mode: "USB" },
+    });
+    expect(create2.statusCode).toBe(201);
+
+    const finalList = await app.inject({
+      method: "GET",
+      url: `/admin/printer-configs?registerId=${REGISTER_MINE}`,
+      headers: { authorization: ownerToken() },
+    });
+    expect(finalList.json().items).toHaveLength(1);
+    expect(finalList.json().items[0].name).toBe("POS-80 caja");
   });
 });

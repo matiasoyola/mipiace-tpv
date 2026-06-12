@@ -118,6 +118,28 @@ export function computeTicket(lines: TicketLineInput[]): TicketTotals {
   };
 }
 
+// Suma de `priceDeltaCents` del snapshot estructurado de modifiers
+// (B-Bar-Modifiers). Devuelve 0 si el campo es null, string[] legacy o
+// no es array. Compartido por POST /tickets, operativa de mesa y
+// grouping — el unitPrice persistido es siempre el BASE y el delta se
+// aplica al recalcular totales.
+export function readUnitPriceDeltaCents(raw: unknown): number {
+  if (!Array.isArray(raw)) return 0;
+  let sum = 0;
+  for (const entry of raw) {
+    if (
+      entry &&
+      typeof entry === "object" &&
+      "priceDeltaCents" in entry &&
+      typeof (entry as { priceDeltaCents?: unknown }).priceDeltaCents ===
+        "number"
+    ) {
+      sum += (entry as { priceDeltaCents: number }).priceDeltaCents;
+    }
+  }
+  return sum;
+}
+
 export function totalsClose(a: number, b: number, tolerance = TOTAL_TOLERANCE_EUR): boolean {
   return Math.abs(a - b) <= tolerance + 1e-9;
 }

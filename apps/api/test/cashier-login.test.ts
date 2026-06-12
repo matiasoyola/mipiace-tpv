@@ -26,6 +26,7 @@ interface FakeUser {
 interface FakeTenant {
   id: string;
   cashierAutoLogoutMinutes: number;
+  cashierSessionTtlMinutes: number;
 }
 
 interface FakeDevice {
@@ -146,7 +147,11 @@ beforeEach(async () => {
     pinHash: await hashPassword(PIN),
     role: "CASHIER",
   });
-  tenants.set(TENANT_ID, { id: TENANT_ID, cashierAutoLogoutMinutes: 10 });
+  tenants.set(TENANT_ID, {
+    id: TENANT_ID,
+    cashierAutoLogoutMinutes: 10,
+    cashierSessionTtlMinutes: 720,
+  });
   devices.set(DEVICE_ID, {
     id: DEVICE_ID,
     tenantId: TENANT_ID,
@@ -176,6 +181,25 @@ describe("POST /shift/cashier-login", () => {
     expect(body.sessionToken).toBeTruthy();
     expect(body.user.email).toBe(EMAIL);
     expect(body.shiftState.kind).toBe("needsShiftOpen");
+  });
+
+  // v1.0-pilotos · Lote 4 (#18): el JWT se firma con el TTL de sesión
+  // del tenant (default 720 min), NO con el auto-logout de inactividad.
+  it("sessionToken usa cashierSessionTtlMinutes (720) — exp ≈ 12 h", async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/shift/cashier-login",
+      headers: { "x-device-token": DEVICE_TOKEN },
+      payload: { email: EMAIL, pin: PIN },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.sessionTtlMinutes).toBe(720);
+    const [, payloadB64] = body.sessionToken.split(".");
+    const claims = JSON.parse(Buffer.from(payloadB64!, "base64url").toString());
+    const ttlSeconds = claims.exp - claims.iat;
+    expect(ttlSeconds).toBe(720 * 60);
   });
 
   it("PIN incorrecto → 401", async () => {

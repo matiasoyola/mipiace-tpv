@@ -2,7 +2,7 @@
 // (localStorage) + keypad numérico.
 
 import { useEffect, useRef, useState } from "react";
-import { AlertCircle, ChevronRight, CircleAlert, Delete, Loader2, Plus } from "lucide-react";
+import { AlertCircle, ChevronRight, CircleAlert, Delete, Eye, EyeOff, Loader2, Plus } from "lucide-react";
 
 import { apiWithDevice, ApiError } from "../api.js";
 import { Logo } from "../Logo.js";
@@ -48,6 +48,8 @@ export function PinScreen({
   const [selectedEmail, setSelectedEmail] = useState<string | null>(null);
   const [otherEmail, setOtherEmail] = useState<string>("");
   const [pin, setPin] = useState("");
+  // v1.0-pilotos · Lote 4 (#6): toggle ojo para ver el PIN tecleado.
+  const [pinVisible, setPinVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // v1.3-piloto-feedback · Lote 4: el backend devuelve `attemptsRemaining`
@@ -275,17 +277,36 @@ export function PinScreen({
                 {activeEmail || "—"}
               </div>
             </div>
-            <div className="flex justify-center gap-3 mb-7">
-              {[0, 1, 2, 3].map((i) => (
-                <div
-                  key={i}
-                  className={
-                    i < pin.length
-                      ? "w-3.5 h-3.5 rounded-full bg-mipiace-coral"
-                      : "w-3.5 h-3.5 rounded-full bg-slate-200"
-                  }
-                />
-              ))}
+            <div className="flex justify-center items-center gap-3 mb-7">
+              {pinVisible ? (
+                <span className="text-[22px] font-semibold tracking-[0.35em] tabular-nums text-mipiace-ink min-w-[96px] text-center">
+                  {pin.length > 0 ? pin : "····"}
+                </span>
+              ) : (
+                [0, 1, 2, 3].map((i) => (
+                  <div
+                    key={i}
+                    className={
+                      i < pin.length
+                        ? "w-3.5 h-3.5 rounded-full bg-mipiace-coral"
+                        : "w-3.5 h-3.5 rounded-full bg-slate-200"
+                    }
+                  />
+                ))
+              )}
+              <button
+                type="button"
+                onClick={() => setPinVisible((v) => !v)}
+                aria-label={pinVisible ? "Ocultar PIN" : "Mostrar PIN"}
+                aria-pressed={pinVisible}
+                className="h-8 w-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-mipiace-ink"
+              >
+                {pinVisible ? (
+                  <EyeOff className="w-[18px] h-[18px]" />
+                ) : (
+                  <Eye className="w-[18px] h-[18px]" />
+                )}
+              </button>
             </div>
             <div className="grid grid-cols-3 gap-2.5 md:gap-3 max-w-xs mx-auto w-full">
               {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((n) => (

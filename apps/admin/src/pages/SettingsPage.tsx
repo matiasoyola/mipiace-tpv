@@ -23,6 +23,7 @@ import {
 
 interface TenantSettings {
   cashierAutoLogoutMinutes: number;
+  cashierSessionTtlMinutes: number;
   requireManagerPinForForceClose: boolean;
   requireOwnerPinForCashClose: boolean;
   deviceNewLoginAlertEnabled: boolean;
@@ -117,6 +118,20 @@ export function SettingsPage() {
             setForm({ ...form, cashierAutoLogoutMinutes: v })
           }
           help="Tras X minutos sin actividad la PWA pide PIN de nuevo. El turno sigue abierto."
+        />
+        <SliderField
+          id="sessionTtl"
+          label="Duración máxima de la sesión del cajero"
+          unit="minutos"
+          min={30}
+          max={1440}
+          step={30}
+          value={form.cashierSessionTtlMinutes}
+          disabled={!canEdit}
+          onChange={(v) =>
+            setForm({ ...form, cashierSessionTtlMinutes: v })
+          }
+          help="Caducidad del login del cajero aunque esté activo. El default (720 = 12 h) cubre el turno entero; antes caducaba a los pocos minutos y el cajero re-logueaba varias veces al día."
         />
         <ToggleField
           id="searchableContacts"

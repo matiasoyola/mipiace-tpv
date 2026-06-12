@@ -79,15 +79,37 @@ describe("StoreEventBus", () => {
 
   // Lote 4 v1.1 Thalia: throttling defensivo, 5 eventos por ventana de
   // 1 s por canal. Eventos 6+ dentro de la ventana se descartan.
-  it("throttle: descarta eventos por encima de 5 en 1 s por canal", () => {
+  // v1.0-pilotos · Lote 1: sólo aplica a eventos line-level (los
+  // spameables); los de transición de estado de mesa nunca se tiran.
+  it("throttle: descarta eventos line-level por encima de 5 en 1 s por canal", () => {
     const bus = getStoreEventBus();
     const sub = { send: vi.fn() };
     const unsub = bus.subscribe("store-throttle", sub);
 
+    const lineEvent: WsEvent = {
+      type: "table.lineAdded",
+      tableId: "11111111-1111-1111-1111-111111111111",
+      ticketId: "22222222-2222-2222-2222-222222222222",
+      line: { id: "33333333-3333-3333-3333-333333333333", sku: "CAFE", nameSnapshot: "Café" },
+      at: new Date().toISOString(),
+    };
     for (let i = 0; i < 10; i++) {
-      bus.broadcast("store-throttle", sampleEvent);
+      bus.broadcast("store-throttle", lineEvent);
     }
     expect(sub.send).toHaveBeenCalledTimes(5);
+
+    unsub();
+  });
+
+  it("throttle: los eventos de estado de mesa (opened/paid/...) no se descartan nunca", () => {
+    const bus = getStoreEventBus();
+    const sub = { send: vi.fn() };
+    const unsub = bus.subscribe("store-no-throttle", sub);
+
+    for (let i = 0; i < 10; i++) {
+      bus.broadcast("store-no-throttle", sampleEvent); // table.opened
+    }
+    expect(sub.send).toHaveBeenCalledTimes(10);
 
     unsub();
   });

@@ -51,13 +51,40 @@ interface FailedDoc {
   errorSummary: string;
 }
 
+// v1.0-pilotos · Lote 3 (#28): desglose por método que devuelve el
+// backend (mismo cálculo que el Z PDF — bruto / devoluciones / neto).
+interface ZBreakdownRow {
+  method: string;
+  gross: number;
+  refunds: number;
+  net: number;
+  counted?: number;
+}
+
+interface ZBreakdownPayload {
+  methods: ZBreakdownRow[];
+  grossSales: number;
+  refundsTotal: number;
+  netSales: number;
+  cashTheoretical: number;
+}
+
 interface CashCountResponse {
   kind: "X" | "Z";
   cashCounted: number;
   cashTheoretical: number;
   descuadre: number;
+  breakdown?: ZBreakdownPayload;
   shift?: { id: string; closedAt: string; zReportPdfPath: string | null };
 }
+
+const METHOD_LABEL: Record<string, string> = {
+  CASH: "Efectivo",
+  CARD: "Tarjeta",
+  BIZUM: "Bizum",
+  VOUCHER: "Vale",
+  OTHER: "Otros",
+};
 
 export function CloseShiftModal(props: {
   shiftId: string;
@@ -79,6 +106,10 @@ export function CloseShiftModal(props: {
   const [error, setError] = useState<string | null>(null);
   // Resultado del POST X — para mostrar el descuadre sin cerrar.
   const [xResult, setXResult] = useState<CashCountResponse | null>(null);
+  // v1.0-pilotos · Lote 3 (#28): resultado del Z. En vez de cerrar el
+  // modal de golpe, mostramos el desglose final (lo mismo que queda en
+  // el PDF) y el cajero pulsa "Hecho".
+  const [zResult, setZResult] = useState<CashCountResponse | null>(null);
 
   // Suma local para feedback inmediato del cajero. El total
   // autoritativo lo calcula el backend (ese va al ShiftCashCount).
@@ -129,7 +160,7 @@ export function CloseShiftModal(props: {
       if (mode === "X") {
         setXResult(res);
       } else {
-        props.onClosed();
+        setZResult(res);
       }
     } catch (err) {
       if (err instanceof ApiError) {
@@ -193,8 +224,18 @@ export function CloseShiftModal(props: {
             : "Cuenta el efectivo del cajón sin cerrar el turno. Útil para arqueos intermedios."}
         </p>
 
-        {xResult ? (
-          <XResultPanel result={xResult} alert={showXDescuadreAlert ?? false} />
+        {zResult ? (
+          <ResultPanel
+            result={zResult}
+            alert={Math.abs(zResult.descuadre) > 5}
+            title="Turno cerrado · informe Z"
+          />
+        ) : xResult ? (
+          <ResultPanel
+            result={xResult}
+            alert={showXDescuadreAlert ?? false}
+            title="Resultado del arqueo"
+          />
         ) : (
           <>
             <div className="rounded-2xl border border-slate-200 overflow-hidden mb-4">
@@ -311,24 +352,36 @@ export function CloseShiftModal(props: {
         )}
 
         <div className="flex gap-2.5 pt-1">
-          <button
-            type="button"
-            onClick={props.onClose}
-            disabled={busy}
-            className="flex-1 h-12 rounded-2xl border border-slate-200 hover:bg-slate-50 text-[13.5px] text-mipiace-ink-soft font-medium"
-          >
-            {xResult ? "Cerrar" : "Cancelar"}
-          </button>
-          {!xResult && (
+          {zResult ? (
             <button
               type="button"
-              onClick={submit}
-              disabled={busy}
-              className="flex-1 h-12 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[14px] font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+              onClick={props.onClosed}
+              className="flex-1 h-12 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[14px] font-medium"
             >
-              {busy && <Loader2 className="w-4 h-4 animate-spin" />}
-              {isZ ? "Cerrar turno" : "Guardar arqueo X"}
+              Hecho
             </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={props.onClose}
+                disabled={busy}
+                className="flex-1 h-12 rounded-2xl border border-slate-200 hover:bg-slate-50 text-[13.5px] text-mipiace-ink-soft font-medium"
+              >
+                {xResult ? "Cerrar" : "Cancelar"}
+              </button>
+              {!xResult && (
+                <button
+                  type="button"
+                  onClick={submit}
+                  disabled={busy}
+                  className="flex-1 h-12 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[14px] font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {busy && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {isZ ? "Cerrar turno" : "Guardar arqueo X"}
+                </button>
+              )}
+            </>
           )}
         </div>
         {error && (
@@ -342,18 +395,70 @@ export function CloseShiftModal(props: {
   );
 }
 
-function XResultPanel({
+function ResultPanel({
   result,
   alert,
+  title,
 }: {
   result: CashCountResponse;
   alert: boolean;
+  title: string;
 }) {
   return (
     <div className="rounded-2xl bg-mipiace-stone p-4 mb-4">
       <div className="text-[12px] uppercase tracking-wider text-slate-500 mb-2">
-        Resultado del arqueo
+        {title}
       </div>
+      {result.breakdown && (
+        <div className="mb-3 rounded-xl bg-white border border-slate-200 overflow-hidden">
+          <table className="w-full text-[12.5px]">
+            <thead className="text-slate-400 text-[10.5px] uppercase tracking-wider">
+              <tr>
+                <th className="text-left py-1.5 px-2.5 font-medium">Método</th>
+                <th className="text-right py-1.5 px-2 font-medium">Bruto</th>
+                <th className="text-right py-1.5 px-2 font-medium">Devol.</th>
+                <th className="text-right py-1.5 px-2.5 font-medium">Neto</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {result.breakdown.methods.map((m) => (
+                <tr key={m.method}>
+                  <td className="py-1.5 px-2.5 text-mipiace-ink">
+                    {METHOD_LABEL[m.method] ?? m.method}
+                  </td>
+                  <td className="py-1.5 px-2 text-right tabular-nums text-slate-600">
+                    {formatEur(m.gross)}
+                  </td>
+                  <td className="py-1.5 px-2 text-right tabular-nums text-slate-600">
+                    {m.refunds > 0 ? `−${formatEur(m.refunds)}` : "—"}
+                  </td>
+                  <td className="py-1.5 px-2.5 text-right tabular-nums font-medium text-mipiace-ink">
+                    {formatEur(m.net)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot className="bg-mipiace-stone/60">
+              <tr className="text-[12.5px]">
+                <td className="py-1.5 px-2.5 font-medium text-mipiace-ink">
+                  Ventas netas
+                </td>
+                <td className="py-1.5 px-2 text-right tabular-nums text-slate-500">
+                  {formatEur(result.breakdown.grossSales)}
+                </td>
+                <td className="py-1.5 px-2 text-right tabular-nums text-slate-500">
+                  {result.breakdown.refundsTotal > 0
+                    ? `−${formatEur(result.breakdown.refundsTotal)}`
+                    : "—"}
+                </td>
+                <td className="py-1.5 px-2.5 text-right tabular-nums font-semibold text-mipiace-ink">
+                  {formatEur(result.breakdown.netSales)}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
       <div className="space-y-1.5 text-[14px]">
         <div className="flex justify-between">
           <span className="text-slate-500">Cash esperado</span>

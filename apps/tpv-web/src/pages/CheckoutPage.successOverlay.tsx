@@ -37,6 +37,7 @@ import {
   pairUsbPrinter,
   printEscposUsb,
   printTicketWifi,
+  syncUsbPairingWithServerConfig,
 } from "../lib/escposPrint.js";
 import { vocab } from "../lib/vocab.js";
 
@@ -168,7 +169,12 @@ export function SuccessOverlay({
         const res = await apiWithCashier<{
           printer: { id: string; name: string; mode: "USB" | "WIFI" } | null;
         }>("/tpv/printer-info?section=ticket");
-        if (cancelled || !res.printer) return;
+        if (cancelled) return;
+        // v1.0-pilotos · Lote 5 (#19): si la impresora fue borrada en
+        // el admin (o pasó a WIFI), limpiamos el pairing USB local —
+        // sin esto la impresora borrada "reaparecía" en este device.
+        syncUsbPairingWithServerConfig(res.printer);
+        if (!res.printer) return;
         setPrinterInfo({
           mode: res.printer.mode,
           configId: res.printer.id,

@@ -7,7 +7,7 @@
 //   GET    /admin/printer-configs?registerId=...       → lista (sólo del tenant).
 //   POST   /admin/printer-configs                      → crea.
 //   PATCH  /admin/printer-configs/:id                  → edita.
-//   DELETE /admin/printer-configs/:id                  → soft delete (active=false).
+//   DELETE /admin/printer-configs/:id                  → borrado real (v1.0-pilotos #19).
 //   POST   /admin/printer-configs/:id/test             → manda un print de prueba.
 //
 // Auth: requireOwnerOrManager (no es sólo super-admin). El MANAGER
@@ -249,9 +249,14 @@ export async function registerAdminPrinterConfigsRoutes(
       const auth = request.auth!;
       const { id } = request.params as { id: string };
       const prisma = getPrisma();
-      const r = await prisma.printerConfig.updateMany({
+      // v1.0-pilotos · Lote 5 (#19): borrado REAL. El soft-delete
+      // (active=false) dejaba la fila en BD: el listado del admin la
+      // seguía mostrando ("reaparece") y la re-alta del mismo
+      // dispositivo acumulaba filas zombi. PrinterConfig no tiene
+      // dependientes, así que el delete es seguro; para "apagar sin
+      // borrar" sigue existiendo PATCH { active: false }.
+      const r = await prisma.printerConfig.deleteMany({
         where: { id, register: { store: { tenantId: auth.tenantId } } },
-        data: { active: false },
       });
       if (r.count === 0) {
         return reply.code(404).send({

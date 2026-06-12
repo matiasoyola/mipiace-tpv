@@ -2,8 +2,8 @@
 // (B1+B2) — extraídos en B3 para que las páginas nuevas (Dispositivos,
 // Cajeros, Seguridad, Forgot/Reset password) los reutilicen.
 
-import type { ReactNode } from "react";
-import { AlertCircle, Check, Loader2 } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { AlertCircle, Check, Eye, EyeOff, Loader2 } from "lucide-react";
 
 import { Logo } from "./Logo.js";
 
@@ -80,6 +80,68 @@ export function TextField({
         onChange={(e) => onChange(e.target.value)}
         className="w-full h-12 px-3.5 rounded-xl bg-mipiace-stone border border-transparent text-[14.5px] text-mipiace-ink focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none"
       />
+    </div>
+  );
+}
+
+// v1.0-pilotos · Lote 4 (#6): campo de contraseña con botón ojo
+// mostrar/ocultar. Componente único — lo usan el login del admin y el
+// del super-admin (el TPV usa keypad de PIN con su propio toggle).
+export function PasswordField({
+  id,
+  label,
+  value,
+  onChange,
+  autoComplete = "current-password",
+  required,
+  minLength,
+  placeholder,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  autoComplete?: string;
+  required?: boolean;
+  minLength?: number;
+  placeholder?: string;
+}) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div>
+      <label
+        htmlFor={id}
+        className="block text-[13px] font-medium text-mipiace-ink-soft mb-1.5"
+      >
+        {label}
+      </label>
+      <div className="relative">
+        <input
+          id={id}
+          type={visible ? "text" : "password"}
+          autoComplete={autoComplete}
+          required={required}
+          minLength={minLength}
+          placeholder={placeholder}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full h-12 pl-3.5 pr-11 rounded-xl bg-mipiace-stone border border-transparent text-[14.5px] text-mipiace-ink focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none"
+        />
+        <button
+          type="button"
+          onClick={() => setVisible((v) => !v)}
+          tabIndex={-1}
+          aria-label={visible ? "Ocultar contraseña" : "Mostrar contraseña"}
+          aria-pressed={visible}
+          className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-mipiace-ink"
+        >
+          {visible ? (
+            <EyeOff className="w-[18px] h-[18px]" />
+          ) : (
+            <Eye className="w-[18px] h-[18px]" />
+          )}
+        </button>
+      </div>
     </div>
   );
 }

@@ -18,10 +18,12 @@ import { registerPasswordResetRoutes } from "./auth/password-reset.js";
 import { registerCashiersRoutes } from "./cashiers/routes.js";
 import { registerCatalogRoutes } from "./catalog/routes.js";
 import { registerContactsRoutes } from "./contacts/routes.js";
+import { registerContactImportRoutes } from "./contacts/import.js";
 import { getPrisma, getRedis, shutdown } from "./context.js";
 import { registerDeviceRoutes } from "./devices/routes.js";
 import { loadEnv } from "./env.js";
 import { registerErrorHandler } from "./lib/error-handler.js";
+import { registerLenientJsonParser } from "./lib/lenient-json.js";
 import { initSentry } from "./lib/sentry.js";
 import { registerOnboardingRoutes } from "./onboarding/routes.js";
 import { registerCashierAuthRoutes } from "./shift/cashier-auth.js";
@@ -83,6 +85,15 @@ async function main() {
   // requestId y stack sólo en logs.
   registerErrorHandler(app);
 
+  // v1.0-pilotos · Lote 2 (#9): el TPV manda `Content-Type:
+  // application/json` también en POSTs sin body (reimprimir, comanda,
+  // gift-receipt) y el parser por defecto de Fastify los rechazaba con
+  // FST_ERR_CTP_EMPTY_JSON_BODY antes de llegar al handler. Tratamos
+  // body vacío como `{}` — los endpoints con body required lo siguen
+  // rechazando vía schema, ahora con un 400 explicable. Importante
+  // hacerlo server-side porque las PWA cachean JS viejo semanas.
+  registerLenientJsonParser(app);
+
   // WebSocket plugin para el bus multi-terminal del vertical bar (B7
   // §6). Registramos antes de las rutas para que el `websocket: true`
   // en la route opt sea reconocido.
@@ -123,6 +134,7 @@ async function main() {
   await registerOnboardingRoutes(app);
   await registerCatalogRoutes(app);
   await registerContactsRoutes(app);
+  await registerContactImportRoutes(app);
   await registerDeviceRoutes(app);
   await registerCashiersRoutes(app);
   await registerCashierAuthRoutes(app);

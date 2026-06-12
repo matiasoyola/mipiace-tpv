@@ -29,6 +29,17 @@ export interface BusSubscriber {
 const THROTTLE_MAX_PER_WINDOW = 5;
 const THROTTLE_WINDOW_MS = 1_000;
 
+// v1.0-pilotos · Lote 1: el throttle sólo aplica a los eventos de alta
+// frecuencia (line-level, los que un cajero puede spamear). Los eventos
+// de transición de estado de mesa (opened/cleared/paid/grouped/...)
+// NUNCA se descartan — perder un `table.paid` dejaba la mesa pintada
+// como ocupada en la otra caja hasta el polling de respaldo (30 s).
+const THROTTLED_EVENT_TYPES = new Set<string>([
+  "table.lineAdded",
+  "table.lineUpdated",
+  "table.lineRemoved",
+]);
+
 class StoreEventBus {
   private readonly subscribers = new Map<string, Set<BusSubscriber>>();
   // Timestamps (ms) de los últimos eventos por canal. Ventana
@@ -51,7 +62,9 @@ class StoreEventBus {
   }
 
   broadcast(storeId: string, event: WsEvent): void {
-    if (this.isThrottled(storeId)) return;
+    if (THROTTLED_EVENT_TYPES.has(event.type) && this.isThrottled(storeId)) {
+      return;
+    }
     const set = this.subscribers.get(storeId);
     if (!set) return;
     for (const sub of set) {

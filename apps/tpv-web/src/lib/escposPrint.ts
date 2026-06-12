@@ -57,6 +57,20 @@ export function forgetPairedUsbPrinter(): void {
   localStorage.removeItem(STORAGE_KEY);
 }
 
+// v1.0-pilotos · Lote 5 (#19): propaga el borrado server-side al
+// estado local. Si el register ya no tiene impresora USB configurada
+// (borrada desde el admin, o cambiada a WIFI), el emparejamiento WebUSB
+// guardado en localStorage es un residuo: hacía "reaparecer" la
+// impresora borrada y dejaba pairings huérfanos que confundían la
+// re-alta. Llamar con el resultado de GET /tpv/printer-info.
+export function syncUsbPairingWithServerConfig(
+  printer: { mode: "USB" | "WIFI" } | null,
+): void {
+  if (!printer || printer.mode !== "USB") {
+    forgetPairedUsbPrinter();
+  }
+}
+
 // Pide al usuario que seleccione la impresora USB. Hay que invocar
 // esta función desde un handler de interacción (click) — el browser
 // rechaza requestDevice fuera de eventos de usuario.
