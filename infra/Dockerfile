@@ -55,6 +55,15 @@ ARG VITE_API_URL=https://api.mipiacetpv.com
 ENV VITE_TPV_URL=${VITE_TPV_URL}
 ENV VITE_API_URL=${VITE_API_URL}
 
+# v1.5-consistencia-B · Lote 2: hash de build (release Sentry + SW
+# determinista; sin él, tpv-web cae al timestamp APP_VERSION porque la
+# imagen no lleva .git) y DSN de Sentry de los frontends (vacío → el
+# init es no-op).
+ARG VITE_BUILD_HASH=""
+ARG VITE_SENTRY_DSN=""
+ENV VITE_BUILD_HASH=${VITE_BUILD_HASH}
+ENV VITE_SENTRY_DSN=${VITE_SENTRY_DSN}
+
 # Builds de frontend (Vite produce apps/<x>/dist/)
 RUN pnpm --filter @mipiacetpv/admin build
 RUN pnpm --filter @mipiacetpv/tpv-web build

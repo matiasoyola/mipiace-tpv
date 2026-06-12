@@ -92,9 +92,18 @@ if grep -q "REPLACE_ME" "$ENV_FILE"; then
   fail "$ENV_FILE todavía contiene placeholders REPLACE_ME. Rellénalos antes de continuar."
 fi
 
-# ─── 4. Build ───────────────────────────────────────────────────────
-log "Construyendo imágenes Docker…"
-docker compose --env-file "$ENV_FILE" -f infra/docker-compose.prod.yml build
+# ─── 4. Imágenes ────────────────────────────────────────────────────
+# v1.5-consistencia-B · Lote 1: el camino normal es pull desde GHCR
+# (CI publica en cada push a master; requiere `docker login ghcr.io`
+# previo). Si el pull falla (registry caído, sin login, primer arranque
+# sin red al registry), caemos al build local vía el override
+# docker-compose.build.yml — mismo resultado, ~10 min en 1 vCPU.
+log "Bajando imágenes desde GHCR…"
+if ! docker compose --env-file "$ENV_FILE" -f infra/docker-compose.prod.yml pull api worker static-publish; then
+  warn "Pull de GHCR falló — construyendo imágenes en local (override build)…"
+  docker compose --env-file "$ENV_FILE" \
+    -f infra/docker-compose.prod.yml -f infra/docker-compose.build.yml build
+fi
 
 # ─── 5. Postgres + Redis ────────────────────────────────────────────
 log "Levantando postgres + redis…"

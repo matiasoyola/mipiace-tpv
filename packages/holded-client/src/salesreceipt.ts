@@ -227,6 +227,18 @@ export async function registerPaymentWithGetBack(
   return stored;
 }
 
+// GET de un salesreceipt almacenado por id (v1.5-consistencia-B Lote 4
+// · conciliación diaria). Mismo GET-back que usa createSalesreceipt-
+// Approved, expuesto suelto para leer documentos ya subidos. 404 →
+// HoldedApiError(status=404) — el caller lo interpreta como "documento
+// desaparecido de Holded".
+export async function getSalesreceipt(
+  client: HoldedClient,
+  documentId: string,
+): Promise<SalesreceiptStored> {
+  return client.request<SalesreceiptStored>(`${SALESRECEIPT_PATH}/${documentId}`);
+}
+
 // GET /pdf devuelve JSON `{status, data: base64}` pese al content-type
 // mentiroso (spike §06.B). El cliente base ya lanza si Content-Type no
 // es JSON — pero Holded en este endpoint manda `text/html` con cuerpo

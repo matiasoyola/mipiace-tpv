@@ -23,6 +23,7 @@
     "@mipiacetpv/ticket-model": "workspace:*",
     "@mipiacetpv/ticket-pdf": "workspace:*",
     "@mipiacetpv/util-validation": "workspace:*",
+    "@sentry/node": "^10.57.0",
     "argon2": "^0.41.1",
     "bullmq": "^5.27.0",
     "dotenv": "^16.4.5",

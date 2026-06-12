@@ -7,10 +7,15 @@ import {
   ErrorBoundary,
   installGlobalErrorLogging,
 } from "./components/ErrorBoundary.js";
+import { initSentry } from "./lib/sentry.js";
 import "./index.css";
 
+// Sentry (v1.5-B Lote 2): gated por VITE_SENTRY_DSN — sin DSN, no-op
+// absoluto.
+initSentry();
+
 // v1.5-consistencia-A §4.b: promesas rechazadas sin catch → consola
-// estructurada (gancho Sentry v1.5-B).
+// estructurada + Sentry.
 installGlobalErrorLogging();
 
 const root = document.getElementById("root");

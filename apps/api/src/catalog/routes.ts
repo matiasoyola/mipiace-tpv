@@ -27,6 +27,7 @@ import { decryptSecret } from "../crypto.js";
 import { loadEnv } from "../env.js";
 import { buildAutoSku } from "../onboarding/auto-sku.js";
 import { enqueueManualSync } from "../queues/catalog-incremental.js";
+import { getTenantHealthStatus } from "../tickets/health.js";
 
 export async function registerCatalogRoutes(app: FastifyInstance): Promise<void> {
   app.post(
@@ -306,10 +307,18 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
           : null;
       const errors =
         stats && Array.isArray(stats.errors) ? (stats.errors as unknown[]) : [];
+      // v1.5-B §3.b: nivel de salud para el banner grande del admin
+      // (sin API key / >48h sin sync). Mismo helper que el TPV.
+      const health = await getTenantHealthStatus(prisma, auth.tenantId);
       return {
         lastIncrementalSyncAt: tenant.lastIncrementalSyncAt?.toISOString() ?? null,
         stats,
         errors,
+        health: {
+          level: health.level,
+          reason: health.reason,
+          lastSyncAgeMs: health.lastSyncAgeMs,
+        },
       };
     },
   );

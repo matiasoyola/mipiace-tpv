@@ -163,18 +163,76 @@ off-site.
 docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml restart api worker
 ```
 
-## 9 · Actualizaciones
+## 9 · Actualizaciones (v1.5-consistencia-B: deploy por registry)
 
-Cualquier deploy posterior:
+Desde v1.5-B, CI construye y publica las imágenes en GHCR en cada push
+a `master` (`ghcr.io/matiasoyola/mipiacetpv-api` y
+`ghcr.io/matiasoyola/mipiacetpv-static-publish`, tags `<sha-corto>` +
+`latest`). El VPS ya no construye nada: sólo hace pull.
+
+### Setup inicial (una sola vez) — `docker login ghcr.io`
+
+**Acción manual de Matías:** crear un Personal Access Token (classic)
+en GitHub → Settings → Developer settings → Tokens (classic) con scope
+`read:packages`, y en el VPS:
+
+```bash
+docker login ghcr.io -u matiasoyola
+# Password: el token read:packages
+```
+
+El login queda persistido en `/root/.docker/config.json` — no hay que
+repetirlo en cada deploy.
+
+### Deploy normal
 
 ```bash
 ssh root@76.13.142.28
 cd /opt/mipiacetpv
-bash infra/bootstrap-hostinger.sh
+bash infra/deploy.sh
 ```
 
-El script hace `git pull` + rebuild + restart. Los datos en
-postgres/redis sobreviven (volúmenes persistentes).
+`deploy.sh` (idempotente): `git pull --ff-only` (compose/Caddyfile/
+migraciones) → `docker compose pull` → `prisma migrate deploy` →
+recreate de `api`, `worker` y `static-publish` (postgres/redis/caddy no
+se tocan) → espera healthchecks → `curl /health` → resumen. Total
+típico: <1 min (antes: ~140 s sólo de build).
+
+### Deploy de una versión concreta
+
+```bash
+IMAGE_TAG=a1b2c3d bash infra/deploy.sh
+```
+
+El sha corto es el del commit en `master`; CI lo usa como tag inmutable.
+
+### Rollback
+
+**El rollback es un deploy del sha anterior:**
+
+```bash
+IMAGE_TAG=<sha-anterior> bash infra/deploy.sh
+```
+
+Los tags publicados se listan en GitHub → Packages, o con
+`docker image ls 'ghcr.io/matiasoyola/*'` (los ya bajados al VPS).
+Ojo: las migraciones Prisma son aditivas, así que volver a una imagen
+anterior con la BD ya migrada es seguro; lo contrario (saltar a una
+imagen que requiere una migración aún no aplicada) lo cubre el propio
+`deploy.sh` al correr `migrate deploy` antes del recreate.
+
+### Build local (fallback sin registry)
+
+La vía vieja sigue disponible con el override de build:
+
+```bash
+docker compose --env-file infra/.env.production \
+  -f infra/docker-compose.prod.yml -f infra/docker-compose.build.yml build
+bash infra/deploy.sh   # detectará las imágenes ya presentes en el pull
+```
+
+`bootstrap-hostinger.sh` (alta de un VPS nuevo) intenta el pull de GHCR
+y, si falla, cae solo a este build local.
 
 ## Comandos útiles para soporte
 

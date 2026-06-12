@@ -22,6 +22,7 @@ import { getPrisma, getRedis, shutdown } from "./context.js";
 import { registerDeviceRoutes } from "./devices/routes.js";
 import { loadEnv } from "./env.js";
 import { registerErrorHandler } from "./lib/error-handler.js";
+import { initSentry } from "./lib/sentry.js";
 import { registerOnboardingRoutes } from "./onboarding/routes.js";
 import { registerCashierAuthRoutes } from "./shift/cashier-auth.js";
 import { registerShiftRoutes } from "./shift/routes.js";
@@ -54,6 +55,10 @@ import { registerTpvCatalogRoutes } from "./tpv-catalog/routes.js";
 
 async function main() {
   const env = loadEnv();
+  // Sentry (v1.5-B Lote 2). No-op absoluto sin SENTRY_DSN. Antes de
+  // crear el server para que las integraciones por defecto (uncaught
+  // exception / unhandled rejection) cubran todo el ciclo de vida.
+  const sentryOn = initSentry("api");
   const app = Fastify({
     logger: {
       transport:
@@ -168,6 +173,7 @@ async function main() {
     const count = await registerAllExistingRepeatables();
     app.log.info(`workers arrancados embedded · ${count} repeatable(s) registrados`);
   }
+  if (sentryOn) app.log.info("Sentry activo (api)");
 
   const close = async () => {
     app.log.info("Apagando…");

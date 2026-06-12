@@ -105,6 +105,26 @@ export const EnvSchema = z.object({
     .positive()
     .default(5 * 1024 * 1024),
 
+  // ── Sentry (v1.5-consistencia-B · Lote 2) ──────────────────────────
+  // Sin DSN, Sentry queda en no-op absoluto (initSentry no llama init).
+  // Compose interpola `""` cuando la var no está en .env.production —
+  // mismo preprocess que SMTP_PORT para tratarla como ausente.
+  SENTRY_DSN: z.preprocess(
+    (v) => (v === "" || v === undefined ? undefined : v),
+    z.string().url().optional(),
+  ),
+  // Release reportado a Sentry. El compose lo fija a IMAGE_TAG (sha
+  // corto del build publicado en GHCR). Opcional: sin él, los eventos
+  // van sin release.
+  SENTRY_RELEASE: z.preprocess(
+    (v) => (v === "" || v === undefined ? undefined : v),
+    z.string().min(1).optional(),
+  ),
+
+  // ── Conciliación diaria TPV↔Holded (v1.5-consistencia-B · Lote 4) ──
+  // Hora local (Europe/Madrid) a la que corre el job diario.
+  RECONCILIATION_HOUR: z.coerce.number().int().min(0).max(23).default(7),
+
   // ── Super-admin (B-SuperAdmin) ─────────────────────────────────────
   // JWT secret separado del per-tenant — un compromiso de uno NO da
   // acceso al otro. 40+ chars, generar con `openssl rand -base64 48`.

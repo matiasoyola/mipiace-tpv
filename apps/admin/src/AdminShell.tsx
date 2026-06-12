@@ -86,6 +86,76 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/admin/settings", label: "Ajustes", icon: Settings, superAdminOnly: true },
 ];
 
+// v1.5-consistencia-B §3.b: salud de la integración Holded para el
+// banner grande del admin. Pollea /catalog/sync-status cada 60s; sólo
+// nos interesa el caso `blocked` (sin API key o >48h sin sync) — el
+// propietario tiene que enterarse aunque el TPV siga operando.
+interface HoldedHealth {
+  level: "ok" | "warning" | "blocked";
+  reason: string;
+  lastSyncAgeMs: number | null;
+}
+
+function useHoldedHealth(): HoldedHealth | null {
+  const [health, setHealth] = useState<HoldedHealth | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function tick() {
+      try {
+        const res = await api<{ health?: HoldedHealth }>("/catalog/sync-status");
+        if (!cancelled) setHealth(res.health ?? null);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) return;
+        // Silencio el resto — el banner simplemente no se pinta.
+      }
+      if (!cancelled) setTimeout(tick, 60_000);
+    }
+    tick();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return health;
+}
+
+// Banner a ancho completo, imposible de pasar por alto (§3.b: "el admin
+// debe mostrarlo en grande"). Sólo nivel blocked; el warning de 24h ya
+// lo cubre el TPV.
+function HoldedHealthBanner() {
+  const health = useHoldedHealth();
+  if (!health || health.level !== "blocked") return null;
+  const noKey = health.reason === "no_api_key";
+  const hours = health.lastSyncAgeMs
+    ? Math.round(health.lastSyncAgeMs / 3_600_000)
+    : null;
+  return (
+    <div
+      role="alert"
+      className="bg-red-600 text-white px-4 md:px-8 py-4 text-[15px] md:text-[16px] font-medium flex items-start gap-3"
+    >
+      <span aria-hidden className="text-[20px] leading-none mt-0.5">⚠</span>
+      <span>
+        {noKey ? (
+          <>
+            <strong>Holded está desconectado.</strong> El TPV sigue cobrando y
+            guarda los tickets, pero NO se están subiendo a Holded. Reconecta
+            la API Key (o avisa a soporte) cuanto antes: al reconectar, los
+            tickets pendientes se subirán solos.
+          </>
+        ) : (
+          <>
+            <strong>
+              Sin conexión con Holded desde hace {hours ?? "+48"} h.
+            </strong>{" "}
+            El TPV sigue operando y los tickets se guardan; se subirán solos
+            al recuperar la conexión. Si persiste, contacta soporte.
+          </>
+        )}
+      </span>
+    </div>
+  );
+}
+
 // Hook compartido entre desktop sidebar y mobile drawer: pollea el
 // contador de tickets con error cada 60s mientras la pestaña esté
 // abierta. Silencioso a errores 401 (se gestionan en api.ts).
@@ -136,6 +206,7 @@ export function AdminShell({
   return (
     <div className="min-h-screen bg-mipiace-stone flex flex-col font-sans">
       {impersonating && <ImpersonationBanner />}
+      <HoldedHealthBanner />
       <div className="flex flex-1 min-h-0">
       <DesktopSidebar onAskLogoutAll={() => setLogoutAllOpen(true)} />
 

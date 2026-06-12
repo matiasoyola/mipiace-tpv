@@ -1314,20 +1314,31 @@ export function SalePage(props: SalePageProps) {
 
 function HealthBanner({ health }: { health: HealthStatus | null }) {
   if (!health) return null;
-  // Rojo bloqueante (B6 §3.3): >48h sin sync o sin API key. Abrir/cerrar
-  // turno está deshabilitado en backend (409 TENANT_BLOCKED) y la UI lo
-  // anuncia aquí. La venta sigue operativa: el cobro local nunca se
-  // bloquea para no dejar al negocio sin caja.
+  // Rojo persistente (v1.5-B §3.b): >48h sin sync o sin API key. Desde
+  // v1.5-B ya NO bloquea nada (decisión de producto 2026-06-11: un
+  // problema de sync nunca cierra el negocio) — el turno se abre y se
+  // cierra, los tickets quedan guardados y el sweeper los sube al
+  // reconectar. El caso sin API key es más severo: requiere acción del
+  // propietario para resolverse.
   if (health.level === "blocked") {
     const hours = health.lastSyncAgeMs
       ? Math.round(health.lastSyncAgeMs / 3_600_000)
       : null;
+    if (health.reason === "no_api_key") {
+      return (
+        <Banner color="red">
+          <strong>Holded desconectado · </strong>
+          La cuenta de Holded no está conectada. Puedes seguir cobrando: los
+          tickets se guardan y se subirán solos cuando el propietario la
+          reconecte. Avísale cuanto antes.
+        </Banner>
+      );
+    }
     return (
       <Banner color="red">
-        <strong>TPV bloqueado · </strong>
-        {health.reason === "no_api_key"
-          ? "La cuenta de Holded no está conectada. Contacta al propietario para reanudar la operativa."
-          : `Llevamos ${hours ?? "+48"} h sin sincronizar con Holded. Abrir y cerrar turno está deshabilitado. Contacta soporte.`}
+        <strong>Sin conexión con Holded desde hace {hours ?? "+48"} h · </strong>
+        Los tickets se guardan y se subirán solos. Puedes abrir y cerrar
+        turno con normalidad.
       </Banner>
     );
   }

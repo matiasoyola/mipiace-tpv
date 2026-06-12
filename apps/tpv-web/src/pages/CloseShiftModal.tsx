@@ -150,8 +150,11 @@ export function CloseShiftModal(props: {
             ...(detail?.failedTickets ?? []),
             ...(detail?.failedRefunds ?? []),
           ]);
+          // v1.5-B §3.c: mismo copy que la pantalla de turno colgado
+          // (ShiftForceCloseScreen, v1.5-hotfix2) — cerrar no es un
+          // problema, sólo requiere aceptación explícita.
           setError(
-            "Hay tickets sin sincronizar. Marca el aviso para autorizar el cierre.",
+            "Hay tickets sin sincronizar con Holded. Puedes cerrar el turno igualmente: las ventas no se ven afectadas y los tickets pendientes se recuperarán automáticamente. Marca el aviso para confirmar.",
           );
         } else {
           setError(err.message);
@@ -279,8 +282,9 @@ export function CloseShiftModal(props: {
                   className="mt-0.5 h-4 w-4 rounded border-slate-300 text-mipiace-coral focus:ring-mipiace-coral/30"
                 />
                 <span>
-                  Autorizo el cierre aunque haya tickets sin sincronizar (la
-                  bandeja de errores los seguirá tratando).
+                  Lo entiendo, cerrar el turno igualmente. Las ventas no se ven
+                  afectadas y los tickets pendientes se recuperarán
+                  automáticamente.
                 </span>
               </label>
             )}

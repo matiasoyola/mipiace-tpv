@@ -7,12 +7,18 @@ import {
   ErrorBoundary,
   installGlobalErrorLogging,
 } from "./components/ErrorBoundary.js";
+import { initSentry } from "./lib/sentry.js";
 import { consumeTestModeFromUrl } from "./lib/test-mode.js";
 import { runVersionCheck } from "./lib/version-check.js";
 import "./index.css";
 
+// Sentry (v1.5-B Lote 2): gated por VITE_SENTRY_DSN — sin DSN, no-op
+// absoluto. Antes de installGlobalErrorLogging para que el primer
+// unhandledrejection ya se capture.
+initSentry();
+
 // v1.5-consistencia-A §4.b: promesas rechazadas sin catch → consola
-// estructurada (gancho Sentry v1.5-B).
+// estructurada + Sentry.
 installGlobalErrorLogging();
 
 // B-OnboardingV2: si la URL trae `?testCashierToken=...&testDeviceToken=...`,

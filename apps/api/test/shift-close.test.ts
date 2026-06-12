@@ -106,6 +106,25 @@ const fakePrisma = {
         zReportPdfPath: data.zReportPdfPath ?? null,
       };
     }),
+    // v1.5-B §3.b: la apertura ya no consulta health — estos tests
+    // ejercitan POST /shift/open con tenant "bloqueado".
+    create: vi.fn(async ({ data }: any) => {
+      const id = "00000000-0000-0000-0000-0000000000ff";
+      state.shifts.set(id, {
+        id,
+        registerId: data.registerId,
+        userId: data.userId,
+        closedAt: null,
+        cashOpening: data.cashOpening,
+        openedAt: data.openedAt,
+        register: {
+          id: REGISTER,
+          name: "Caja principal",
+          store: { id: STORE, name: "Sole", tenantId: TENANT },
+        },
+      });
+      return { id, openedAt: data.openedAt, cashOpening: data.cashOpening };
+    }),
   },
   ticket: {
     groupBy: vi.fn(async ({ where }: any) => {
@@ -385,5 +404,64 @@ describe("POST /shift/:id/close · PIN del cajero", () => {
       },
     });
     expect(ok.statusCode).toBe(200);
+  });
+});
+
+// v1.5-consistencia-B §3.b — decisión de producto (2026-06-11): un
+// problema de sync nunca cierra el negocio. El gate 409 TENANT_BLOCKED
+// de B6 §3.2 desaparece de apertura y cierre: con >48h sin sync o sin
+// API key, el turno se abre/cierra igualmente (el aviso vive en los
+// banners del TPV y del admin).
+describe("v1.5-B §3.b · health blocked ya no bloquea abrir/cerrar turno", () => {
+  it("cierre con >48h sin sync → 200 (antes 409 TENANT_BLOCKED)", async () => {
+    state.tenant!.lastIncrementalSyncAt = new Date(Date.now() - 50 * 3600 * 1000);
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/shift/${SHIFT}/close`,
+      headers: { authorization: `Bearer ${signSession("CASHIER")}` },
+      payload: { cashCounted: 100, methodTotals: { CASH: 100 } },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().shift.id).toBe(SHIFT);
+  });
+
+  it("cierre sin API key de Holded → 200 (antes 409 TENANT_BLOCKED)", async () => {
+    state.tenant!.holdedApiKeyCiphertext = null;
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/shift/${SHIFT}/close`,
+      headers: { authorization: `Bearer ${signSession("CASHIER")}` },
+      payload: { cashCounted: 100, methodTotals: { CASH: 100 } },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("apertura con >48h sin sync → 201 (antes 409 TENANT_BLOCKED)", async () => {
+    state.tenant!.lastIncrementalSyncAt = new Date(Date.now() - 50 * 3600 * 1000);
+    state.shifts.clear(); // sin turno abierto en la caja
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/shift/open",
+      headers: { authorization: `Bearer ${signSession("CASHIER")}` },
+      payload: { cashOpening: 100 },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().shift.id).toBeTruthy();
+  });
+
+  it("apertura sin API key de Holded → 201 (antes 409 TENANT_BLOCKED)", async () => {
+    state.tenant!.holdedApiKeyCiphertext = null;
+    state.shifts.clear();
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/shift/open",
+      headers: { authorization: `Bearer ${signSession("CASHIER")}` },
+      payload: { cashOpening: 100 },
+    });
+    expect(res.statusCode).toBe(201);
   });
 });

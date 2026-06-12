@@ -75,6 +75,11 @@ enum HoldedUploadStatus {
   PENDING
   DONE
   FAILED
+  // v1.5-consistencia-B §3.a · terminal para uploads que NUNCA deben
+  // subirse (tickets TEST del cajero técnico). Sin estado terminal
+  // quedaban PENDING para siempre y el sweeper los re-rescataba cada
+  // 5 min en bucle (visto en prod 2026-06-11: `rescued: 26` constante).
+  SKIPPED
 }
 
 enum TableZone {
@@ -302,6 +307,7 @@ model Tenant {
   modifierGroups ModifierGroup[]
   tagAliases     TagAlias[]
   tagSections    TagSection[]
+  reconciliationRuns ReconciliationRun[]
 
   // v1.3-SuperAdmin-Hub Lote 3 · el backfill y el hub buscan/listan
   // tenants por `holded_account_id`. Sin índice eran scans completos
@@ -1123,6 +1129,24 @@ model HoldedUpload {
 
   @@index([tenantId, status])
   @@map("holded_uploads")
+}
+
+// Conciliación diaria TPV ↔ Holded (v1.5-consistencia-B · Lote 4).
+// Un run por tenant y pasada del cron: para cada ticket SYNCED de las
+// últimas 48h, GET del documento en Holded y comparación de existencia,
+// total y estado de cobro. `mismatches` es un array JSON
+// [{ticket, field, expected, actual}] — vacío en run limpio.
+model ReconciliationRun {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  runAt          DateTime @default(now()) @map("run_at") @db.Timestamptz()
+  ticketsChecked Int      @map("tickets_checked")
+  mismatches     Json
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, runAt])
+  @@map("reconciliation_runs")
 }
 
 // Cola de envío del PDF del ticket por email (§4 del prompt B4).
