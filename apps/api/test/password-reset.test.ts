@@ -152,7 +152,10 @@ beforeEach(async () => {
 });
 
 async function buildApp() {
-  const app = Fastify();
+  // trustProxy: 1 reproduce la config de producción (server.ts): detrás de
+  // Caddy, `request.ip` = último salto del X-Forwarded-For, no el primer
+  // token (controlable por el cliente).
+  const app = Fastify({ trustProxy: 1 });
   await registerPasswordResetRoutes(app);
   return app;
 }
@@ -292,5 +295,39 @@ describe("POST /auth/password-reset/confirm", () => {
       payload: { token, newPassword: "short" },
     });
     expect(res.statusCode).toBe(400);
+  });
+
+  // v1.5-D · Frente 3: el consumo de token también está throttleado
+  // (clave por IP), no sólo la solicitud. Sin esto, el handler hace un
+  // argon2.verify por cada token vivo y la fuerza bruta es viable.
+  //
+  // CLAVE DE SEGURIDAD: la IP del bucket es `request.ip` (último salto del
+  // XFF vía trustProxy), NO el primer token del X-Forwarded-For. Aquí cada
+  // intento manda un PRIMER token distinto (lo que un atacante rotaría para
+  // forjar buckets) pero el último salto real es constante → todos caen en
+  // el mismo bucket → el 11º se bloquea. Con la implementación vieja
+  // (primer token) cada intento habría tenido bucket propio y nunca se
+  // bloquearía.
+  it("throttle de confirm: un X-Forwarded-For con primer token falso NO cambia el bucket", async () => {
+    const app = await buildApp();
+    const REAL_IP = "203.0.113.7"; // último salto que añadiría Caddy
+    for (let i = 0; i < 10; i++) {
+      const res = await app.inject({
+        method: "POST",
+        url: "/auth/password-reset/confirm",
+        headers: { "x-forwarded-for": `10.0.0.${i}, ${REAL_IP}` },
+        payload: { token: `token-falso-${i}`, newPassword: "whatever123!" },
+      });
+      expect(res.statusCode).not.toBe(429);
+    }
+    const blocked = await app.inject({
+      method: "POST",
+      url: "/auth/password-reset/confirm",
+      // Otro primer token forjado, mismo último salto real.
+      headers: { "x-forwarded-for": `198.51.100.99, ${REAL_IP}` },
+      payload: { token: "otro-intento-mas", newPassword: "whatever123!" },
+    });
+    expect(blocked.statusCode).toBe(429);
+    expect(blocked.json().error).toBe("RATE_LIMITED");
   });
 });

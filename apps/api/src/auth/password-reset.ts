@@ -7,7 +7,10 @@ import { getPrisma } from "../context.js";
 import { getEmailSender } from "../email/sender.js";
 import { loadEnv } from "../env.js";
 import { hashPassword } from "./passwords.js";
-import { passwordResetThrottle } from "./rate-limit.js";
+import {
+  passwordResetConfirmThrottle,
+  passwordResetThrottle,
+} from "./rate-limit.js";
 
 const RESET_TTL_HOURS = 1;
 const TOKEN_BYTES = 32;
@@ -118,6 +121,20 @@ export async function registerPasswordResetRoutes(
         token: string;
         newPassword: string;
       };
+      // v1.5-D · Frente 3: throttle del consumo de token. El handler hace
+      // un argon2.verify por cada token vivo, así que la fuerza bruta es
+      // viable sin esto. Clave por IP (el email no se conoce hasta validar
+      // el token). `request.ip` es de confianza vía `trustProxy: 1`.
+      const rl = await passwordResetConfirmThrottle(request.ip);
+      if (rl.exceeded) {
+        return reply.code(429).send({
+          error: "RATE_LIMITED",
+          message: `Demasiados intentos. Vuelve a probar en ${Math.ceil(
+            rl.retryAfterSeconds / 60,
+          )} min.`,
+          retryAfterSeconds: rl.retryAfterSeconds,
+        });
+      }
       const prisma = getPrisma();
       const now = new Date();
       const candidates = await prisma.passwordResetToken.findMany({

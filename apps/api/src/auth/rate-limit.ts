@@ -17,6 +17,14 @@ const LOCK_TTL_SECONDS = 15 * 60;
 const MAX_ATTEMPTS = 5;
 const PWD_RESET_TTL_SECONDS = 5 * 60;
 const PWD_RESET_MAX = 5;
+// v1.5-D · Frente 3: throttle de los endpoints de CONFIRMACIÓN (consumo
+// de token / verificación de código), no sólo de solicitud. Sin esto, el
+// token de reset y el código 2FA de 6 dígitos son fuerza-bruteables
+// dentro de la ventana de validez.
+const PWD_RESET_CONFIRM_TTL_SECONDS = 15 * 60;
+const PWD_RESET_CONFIRM_MAX = 10;
+const TWO_FA_VERIFY_TTL_SECONDS = 15 * 60;
+const TWO_FA_VERIFY_MAX = 5;
 
 export interface RateLimitConfig {
   attemptsKey: string;
@@ -120,4 +128,44 @@ export async function passwordResetThrottle(
   redis: Redis = getRedis(),
 ): Promise<ThrottleState> {
   return throttle(`pwd-reset-req:${email}`, PWD_RESET_MAX, PWD_RESET_TTL_SECONDS, redis);
+}
+
+// Throttle del consumo de token de password-reset. La clave es SÓLO la IP
+// (`request.ip`, que con `trustProxy: 1` en el server es el salto real que
+// añade Caddy, no falsificable por el primer token de X-Forwarded-For). El
+// email no se conoce hasta validar el token, y meter un prefijo del token
+// en la clave la haría inútil (cada intento lleva un token distinto →
+// bucket distinto). El token es de 256 bits (no adivinable), así que aquí
+// el throttle sólo acota el coste del argon2 por token.
+export async function passwordResetConfirmThrottle(
+  ip: string,
+  redis: Redis = getRedis(),
+): Promise<ThrottleState> {
+  return throttle(
+    `pwd-reset-confirm:${ip}`,
+    PWD_RESET_CONFIRM_MAX,
+    PWD_RESET_CONFIRM_TTL_SECONDS,
+    redis,
+  );
+}
+
+// Throttle de la verificación de código 2FA en el login (segundo paso).
+// Clave por (scope, sub) — SIN IP a propósito: el objetivo es acotar la
+// fuerza bruta del código de 6 dígitos contra una cuenta concreta
+// independientemente de la IP de origen (un atacante con IPs rotativas no
+// debe conseguir buckets infinitos). `sub` es estable para la víctima;
+// `scope` separa owner de super-admin. Riesgo asumido: alguien puede
+// quemar los 5 intentos de una víctima (bloqueo 15 min, sólo el paso 2FA;
+// el dueño legítimo acierta a la primera).
+export async function twoFactorVerifyThrottle(
+  scope: "owner" | "super-admin",
+  sub: string,
+  redis: Redis = getRedis(),
+): Promise<ThrottleState> {
+  return throttle(
+    `2fa-verify:${scope}:${sub}`,
+    TWO_FA_VERIFY_MAX,
+    TWO_FA_VERIFY_TTL_SECONDS,
+    redis,
+  );
 }

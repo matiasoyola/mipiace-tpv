@@ -154,7 +154,7 @@ beforeEach(async () => {
 });
 
 async function buildApp() {
-  const app = Fastify();
+  const app = Fastify({ trustProxy: 1 });
   await registerAuthRoutes(app);
   return app;
 }
@@ -289,6 +289,54 @@ describe("2FA enable + confirm flow", () => {
       payload: { pendingToken: pendingToken2, code: recovery },
     });
     expect(reuse.statusCode).toBe(401);
+  });
+
+  // v1.5-D · Frente 3: la verificación del código 2FA en el login está
+  // throttleada por CUENTA (clave por sub, sin IP). El código es de 6
+  // dígitos, fuerza-bruteable dentro de la validez del pendingToken sin
+  // esto. Cada intento llega desde una IP distinta (X-Forwarded-For
+  // rotado) para demostrar que rotar de IP NO crea buckets nuevos: el
+  // bucket es la cuenta, no la IP.
+  it("login + 2FA: 5 códigos erróneos (IP rotada) y el 6º intento devuelve 429", async () => {
+    const app = await buildApp();
+    const enroll = await app.inject({
+      method: "POST",
+      url: "/auth/me/2fa/enable",
+      headers: { authorization: ownerBearer() },
+      payload: {},
+    });
+    const secret = enroll.json().secret as string;
+    await app.inject({
+      method: "POST",
+      url: "/auth/me/2fa/confirm",
+      headers: { authorization: ownerBearer() },
+      payload: { code: speakeasy.totp({ secret, encoding: "base32" }) },
+    });
+
+    const step1 = await app.inject({
+      method: "POST",
+      url: "/auth/login",
+      payload: { email: EMAIL, password: PASSWORD },
+    });
+    const pendingToken = step1.json().pendingToken as string;
+
+    for (let i = 0; i < 5; i++) {
+      const wrong = await app.inject({
+        method: "POST",
+        url: "/auth/login/2fa",
+        headers: { "x-forwarded-for": `45.0.0.${i}, 203.0.113.${i}` },
+        payload: { pendingToken, code: "000000" },
+      });
+      expect(wrong.statusCode).not.toBe(429);
+    }
+    const blocked = await app.inject({
+      method: "POST",
+      url: "/auth/login/2fa",
+      headers: { "x-forwarded-for": "45.0.0.250, 203.0.113.250" },
+      payload: { pendingToken, code: "000000" },
+    });
+    expect(blocked.statusCode).toBe(429);
+    expect(blocked.json().error).toBe("RATE_LIMITED");
   });
 
   it("disable requiere password + código actual", async () => {

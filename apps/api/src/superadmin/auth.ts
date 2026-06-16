@@ -6,6 +6,7 @@ import {
   inspect as inspectRateLimit,
   registerFailure as registerRateLimitFailure,
   reset as resetRateLimit,
+  twoFactorVerifyThrottle,
 } from "../auth/rate-limit.js";
 import { hashPassword, verifyPassword } from "../auth/passwords.js";
 import {
@@ -33,14 +34,6 @@ import {
 
 const emailFormat = "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$";
 
-function clientIp(headers: Record<string, unknown>, fallback: string | null): string {
-  const fwd = headers["x-forwarded-for"];
-  if (typeof fwd === "string" && fwd.length > 0) {
-    return fwd.split(",")[0]!.trim();
-  }
-  return fallback ?? "unknown";
-}
-
 export async function registerSuperAdminAuthRoutes(
   app: FastifyInstance,
 ): Promise<void> {
@@ -65,8 +58,10 @@ export async function registerSuperAdminAuthRoutes(
         password: string;
       };
       const lowerEmail = email.toLowerCase();
-      const ip = clientIp(request.headers, request.ip);
-      const rlKey = superAdminLoginRateLimit(lowerEmail, ip);
+      // `request.ip` es de confianza vía `trustProxy: 1` (Caddy). NO usar
+      // el primer token de X-Forwarded-For: lo controla el cliente y
+      // permitiría buckets de rate-limit infinitos (v1.5-D · Frente 3).
+      const rlKey = superAdminLoginRateLimit(lowerEmail, request.ip);
 
       const pre = await inspectRateLimit(rlKey);
       if (pre.locked) {
@@ -151,6 +146,19 @@ export async function registerSuperAdminAuthRoutes(
         return reply.code(401).send({
           error: "INVALID_PENDING_TOKEN",
           message: "Sesión de 2FA caducada. Vuelve a iniciar sesión.",
+        });
+      }
+      // v1.5-D · Frente 3: throttle de la verificación del código 2FA del
+      // super-admin (código de 6 dígitos, fuerza-bruteable sin esto).
+      // Clave por cuenta (sub), sin IP; separada del owner por el scope.
+      const rl2fa = await twoFactorVerifyThrottle("super-admin", payload.sub);
+      if (rl2fa.exceeded) {
+        return reply.code(429).send({
+          error: "RATE_LIMITED",
+          message: `Demasiados intentos. Vuelve a probar en ${Math.ceil(
+            rl2fa.retryAfterSeconds / 60,
+          )} min.`,
+          retryAfterSeconds: rl2fa.retryAfterSeconds,
         });
       }
       const prisma = getPrisma();

@@ -1262,12 +1262,25 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       };
       const prisma = getPrisma();
 
-      // Idempotencia.
+      // Idempotencia. `Refund.externalId` es UNIQUE global (no por
+      // tenant), así que este findUnique resuelve sin filtro de tenant y
+      // hay que asertar el tenant DESPUÉS del lookup — mismo patrón que la
+      // creación de ticket (~200). v1.5-D · Frente 2.
       const existing = await prisma.refund.findUnique({
         where: { externalId: body.externalId },
         include: refundInclude(),
       });
       if (existing) {
+        if (existing.tenantId !== cashier.tid) {
+          // Respuesta genérica que no revela existencia cross-tenant. El
+          // cliente legítimo nunca llega aquí porque genera UUID v4 por
+          // refund; un atacante con un externalId ajeno no obtiene el
+          // objeto serializado ni confirmación de que el UUID existe.
+          return reply.code(409).send({
+            error: "EXTERNAL_ID_TAKEN",
+            message: "externalId ya en uso. Genera uno nuevo y reintenta.",
+          });
+        }
         return reply.code(200).send({ refund: serializeRefund(existing), duplicate: true });
       }
 
