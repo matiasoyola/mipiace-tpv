@@ -15,7 +15,6 @@ import {
   verifyMustChangePasswordToken,
 } from "./must-change-password.js";
 import {
-  clientIp,
   inspect as inspectRateLimit,
   ownerLoginRateLimit,
   registerFailure as registerRateLimitFailure,
@@ -691,12 +690,9 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       // v1.5-D · Frente 3: throttle de la verificación del código 2FA. El
       // código es de 6 dígitos (10^6 combinaciones) y sin esto sería
       // fuerza-bruteable dentro de la validez del pendingToken. Clave por
-      // (sub, ip): estable para una víctima dada.
-      const ip = clientIp(
-        request.headers as Record<string, unknown>,
-        request.ip,
-      );
-      const rl = await twoFactorVerifyThrottle("owner", payload.sub, ip);
+      // cuenta (sub), sin IP: acota la fuerza bruta contra la cuenta
+      // aunque el atacante rote de IP.
+      const rl = await twoFactorVerifyThrottle("owner", payload.sub);
       if (rl.exceeded) {
         return reply.code(429).send({
           error: "RATE_LIMITED",

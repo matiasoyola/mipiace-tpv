@@ -8,7 +8,6 @@ import { getEmailSender } from "../email/sender.js";
 import { loadEnv } from "../env.js";
 import { hashPassword } from "./passwords.js";
 import {
-  clientIp,
   passwordResetConfirmThrottle,
   passwordResetThrottle,
 } from "./rate-limit.js";
@@ -125,12 +124,8 @@ export async function registerPasswordResetRoutes(
       // v1.5-D · Frente 3: throttle del consumo de token. El handler hace
       // un argon2.verify por cada token vivo, así que la fuerza bruta es
       // viable sin esto. Clave por IP (el email no se conoce hasta validar
-      // el token).
-      const ip = clientIp(
-        request.headers as Record<string, unknown>,
-        request.ip,
-      );
-      const rl = await passwordResetConfirmThrottle(ip);
+      // el token). `request.ip` es de confianza vía `trustProxy: 1`.
+      const rl = await passwordResetConfirmThrottle(request.ip);
       if (rl.exceeded) {
         return reply.code(429).send({
           error: "RATE_LIMITED",

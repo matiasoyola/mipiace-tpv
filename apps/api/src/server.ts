@@ -62,6 +62,13 @@ async function main() {
   // exception / unhandled rejection) cubran todo el ciclo de vida.
   const sentryOn = initSentry("api");
   const app = Fastify({
+    // v1.5-D · Frente 3: detrás de Caddy (un único proxy de confianza).
+    // Sin esto, `request.ip` sería la IP de Caddy y `X-Forwarded-For` lo
+    // controla el cliente en su primer token — falsificable. Con
+    // `trustProxy: 1`, Fastify toma el último salto del XFF (el que añade
+    // Caddy = IP real del cliente) y descarta los tokens inyectados por el
+    // atacante. Las claves de rate-limit por IP dependen de esto.
+    trustProxy: 1,
     logger: {
       transport:
         env.NODE_ENV === "production"

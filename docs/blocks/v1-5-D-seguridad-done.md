@@ -71,12 +71,22 @@ La infraestructura `throttle()` ya existía pero sólo se aplicaba a la **solici
 | Endpoint | Hueco | Fix | Clave | Test |
 |----------|-------|-----|-------|------|
 | `POST /auth/password-reset/confirm` | Hacía un `argon2.verify` por cada token vivo → fuerza bruta del token viable | `passwordResetConfirmThrottle` | **IP** (10/15min) | `password-reset.test.ts` |
-| `POST /auth/login/2fa` (owner) | Código 6 dígitos sin throttle dentro de la validez del pendingToken | `twoFactorVerifyThrottle("owner", …)` | **sub+IP** (5/15min) | `two-factor.test.ts` |
-| `POST /super-admin/auth/login-2fa` | Igual; el paso de password sí tenía rate-limit, el de 2FA no | `twoFactorVerifyThrottle("super-admin", …)` | **sub+IP** (5/15min) | `super-admin-2fa-throttle.test.ts` |
+| `POST /auth/login/2fa` (owner) | Código 6 dígitos sin throttle dentro de la validez del pendingToken | `twoFactorVerifyThrottle("owner", …)` | **cuenta (sub)** (5/15min) | `two-factor.test.ts` |
+| `POST /super-admin/auth/login-2fa` | Igual; el paso de password sí tenía rate-limit, el de 2FA no | `twoFactorVerifyThrottle("super-admin", …)` | **cuenta (sub)** (5/15min) | `super-admin-2fa-throttle.test.ts` |
 
-**Decisión de clave en password-reset/confirm (justificación):** el prompt sugería "IP + prefijo de token". Implementado **sólo por IP**. Meter un prefijo del token en la clave la haría INÚTIL: cada intento de fuerza bruta lleva un token distinto → bucket distinto → sin throttle. La identidad estable disponible antes de validar el token es la IP. Con la IP, un atacante que itere tokens desde una IP queda limitado. (Para los 2FA sí hay identidad estable de víctima: `sub` del pendingToken.)
+### Corrección post-revisión: la IP del throttle era falsificable
 
-Nuevas funciones en `auth/rate-limit.ts`: `clientIp()`, `passwordResetConfirmThrottle()`, `twoFactorVerifyThrottle()`. (`superadmin/auth.ts` conserva su `clientIp` local; no se tocó para minimizar diff.)
+La primera implementación usaba un `clientIp()` que parseaba `X-Forwarded-For` y cogía el **primer** token. Pero Fastify no tenía `trustProxy`, así que ese primer token lo controla el cliente (Caddy añade la IP real al **final**). Como las claves metían esa IP, un atacante rotando la cabecera conseguía **buckets infinitos** y podía fuerza-brutear. Tres cambios:
+
+1. **IP de confianza.** `apps/api/src/server.ts` → `Fastify({ trustProxy: 1, … })` (un único proxy de confianza = Caddy). A partir de ahí `request.ip` es el último salto del XFF (la IP real que añade Caddy), no falsificable. Se eliminó el parseo manual de `X-Forwarded-For`: todas las claves usan `request.ip`. Se borró el `clientIp` local de `superadmin/auth.ts` y se migró su rate-limit de login (`superAdminLoginRateLimit`) a `request.ip` — tenía la misma vulnerabilidad.
+2. **2FA por cuenta, no por IP.** Clave `2fa-verify:<scope>:<sub>` (sin IP). Acota la fuerza bruta del código de 6 dígitos contra una cuenta concreta **independientemente de la IP de origen**. 5 intentos / 15 min. Riesgo asumido (menor): alguien puede quemar los 5 intentos de una víctima → bloqueo de 15 min, sólo el paso 2FA; el dueño legítimo acierta a la primera.
+3. **password-reset/confirm por IP sola.** Con el punto 1 la IP ya es de confianza. El token es de 256 bits (no adivinable), así que el throttle aquí sólo limita el coste del argon2 por token. (Meter un prefijo del token en la clave la haría inútil: cada intento lleva token distinto → bucket distinto.)
+
+**Tests de la corrección:**
+- `password-reset.test.ts`: 10 confirms con un **primer token de XFF falso distinto cada vez** pero el último salto real constante → todos caen en el mismo bucket → el 11º es 429. Con la implementación vieja (primer token) cada intento habría tenido bucket propio y nunca se bloquearía.
+- `two-factor.test.ts` y `super-admin-2fa-throttle.test.ts`: los 5 intentos llegan desde **IPs rotadas** (XFF distinto cada vez) y aun así el 6º es 429 → prueba que el bucket es la cuenta, no la IP.
+
+Nuevas funciones en `auth/rate-limit.ts`: `passwordResetConfirmThrottle()`, `twoFactorVerifyThrottle()`. Los tests de auth montan el Fastify con `trustProxy: 1` para reproducir producción.
 
 ---
 
@@ -128,7 +138,7 @@ Cada uno pasaría a `findFirst`. **El problema de fondo es el login:** en el log
 - **Extender la suite de aislamiento a la familia admin/owner y turnos** (stores, registers, cashiers, settings, tickets-errors, shifts). Hoy cubierta por-diseño (verificada por lectura: todas usan `findFirst {id, tenantId}`), pero no en la suite parametrizada — requiere montar el fake de owner-auth por módulo.
 - **Patrón oro futuro: suite de aislamiento contra Postgres real** (testcontainers). Implicaciones de infra/CI, bloque aparte fuera de esta frontera. Cuando se haga, `tenant-isolation.test.ts` es lo primero que se porta (los casos y aserciones HTTP se reutilizan tal cual; sólo cambia el harness de seed).
 - **Frente 5 (email por-tenant)** — requiere tu visto bueno + diseño del discriminador de tenant en login. Migración escrita arriba, sin aplicar.
-- **Refactor `clientIp` duplicado** — hay copia local en `superadmin/auth.ts` y la nueva exportada en `auth/rate-limit.ts`. Unificar cuando se toque ese módulo (no se hizo para minimizar diff en este bloque).
+- **`trustProxy: 1` asume exactamente un proxy (Caddy).** Si algún día se mete otro hop (un LB delante de Caddy), hay que subir el número o `request.ip` volvería a ser falsificable. Documentado aquí para no olvidarlo en un cambio de infra.
 
 ## Fuera de alcance (confirmado intacto)
 - Marco fiscal sin tocar: Holded sigue siendo el SIF; no se introdujo numeración ni cálculo fiscal.

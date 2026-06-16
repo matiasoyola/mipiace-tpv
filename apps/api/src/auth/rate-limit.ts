@@ -130,26 +130,13 @@ export async function passwordResetThrottle(
   return throttle(`pwd-reset-req:${email}`, PWD_RESET_MAX, PWD_RESET_TTL_SECONDS, redis);
 }
 
-// Extrae la IP del cliente (primer salto de X-Forwarded-For tras Caddy).
-// Usada como clave estable de throttle cuando el identificador del actor
-// no se conoce todavía (p. ej. el email en password-reset/confirm sólo se
-// resuelve tras validar el token).
-export function clientIp(
-  headers: Record<string, unknown>,
-  fallback: string | null,
-): string {
-  const fwd = headers["x-forwarded-for"];
-  if (typeof fwd === "string" && fwd.length > 0) {
-    return fwd.split(",")[0]!.trim();
-  }
-  return fallback ?? "unknown";
-}
-
-// Throttle del consumo de token de password-reset. La clave es SÓLO la IP:
-// el email no se conoce hasta validar el token, y meter un prefijo del
-// token en la clave la haría inútil (cada intento lleva un token distinto
-// → bucket distinto → sin throttle). Con la IP estable, un atacante que
-// itere tokens desde una IP queda limitado.
+// Throttle del consumo de token de password-reset. La clave es SÓLO la IP
+// (`request.ip`, que con `trustProxy: 1` en el server es el salto real que
+// añade Caddy, no falsificable por el primer token de X-Forwarded-For). El
+// email no se conoce hasta validar el token, y meter un prefijo del token
+// en la clave la haría inútil (cada intento lleva un token distinto →
+// bucket distinto). El token es de 256 bits (no adivinable), así que aquí
+// el throttle sólo acota el coste del argon2 por token.
 export async function passwordResetConfirmThrottle(
   ip: string,
   redis: Redis = getRedis(),
@@ -163,17 +150,20 @@ export async function passwordResetConfirmThrottle(
 }
 
 // Throttle de la verificación de código 2FA en el login (segundo paso).
-// Clave por (scope, sub, ip): `sub` es estable para una víctima dada, así
-// que un atacante que itere los 10^6 códigos posibles para ese usuario
-// queda bloqueado tras N intentos. `scope` separa owner de super-admin.
+// Clave por (scope, sub) — SIN IP a propósito: el objetivo es acotar la
+// fuerza bruta del código de 6 dígitos contra una cuenta concreta
+// independientemente de la IP de origen (un atacante con IPs rotativas no
+// debe conseguir buckets infinitos). `sub` es estable para la víctima;
+// `scope` separa owner de super-admin. Riesgo asumido: alguien puede
+// quemar los 5 intentos de una víctima (bloqueo 15 min, sólo el paso 2FA;
+// el dueño legítimo acierta a la primera).
 export async function twoFactorVerifyThrottle(
   scope: "owner" | "super-admin",
   sub: string,
-  ip: string,
   redis: Redis = getRedis(),
 ): Promise<ThrottleState> {
   return throttle(
-    `2fa-verify:${scope}:${sub}:${ip}`,
+    `2fa-verify:${scope}:${sub}`,
     TWO_FA_VERIFY_MAX,
     TWO_FA_VERIFY_TTL_SECONDS,
     redis,

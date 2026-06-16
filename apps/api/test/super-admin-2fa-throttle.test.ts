@@ -1,7 +1,8 @@
 // v1.5-D · Frente 3: la verificación del código 2FA del super-admin en el
-// login (POST /super-admin/auth/login-2fa) está throttleada por (sub, ip).
-// El código es de 6 dígitos y sin esto sería fuerza-bruteable dentro de la
-// validez del pendingToken.
+// login (POST /super-admin/auth/login-2fa) está throttleada por CUENTA
+// (clave por sub, sin IP). El código es de 6 dígitos y sin esto sería
+// fuerza-bruteable dentro de la validez del pendingToken. La IP se rota en
+// cada intento para demostrar que no abre buckets nuevos.
 //
 // Test aislado con un fake Redis que CUENTA de verdad (el super-admin.test
 // usa `incr → 1`, que nunca dispara el límite).
@@ -78,7 +79,7 @@ const { registerSuperAdminAuthRoutes } = await import("../src/superadmin/auth.js
 const { signSuperAdminPending2faToken } = await import("../src/superadmin/tokens.js");
 
 async function buildApp() {
-  const app = Fastify({ logger: false });
+  const app = Fastify({ logger: false, trustProxy: 1 });
   await registerSuperAdminAuthRoutes(app);
   return app;
 }
@@ -89,7 +90,7 @@ beforeEach(() => {
 });
 
 describe("super-admin · throttle de verificación 2FA en login", () => {
-  it("5 códigos erróneos y el 6º intento devuelve 429", async () => {
+  it("5 códigos erróneos (IP rotada) y el 6º intento devuelve 429", async () => {
     const app = await buildApp();
     const pendingToken = signSuperAdminPending2faToken(SA_ID);
 
@@ -97,6 +98,7 @@ describe("super-admin · throttle de verificación 2FA en login", () => {
       const wrong = await app.inject({
         method: "POST",
         url: "/super-admin/auth/login-2fa",
+        headers: { "x-forwarded-for": `45.0.0.${i}, 203.0.113.${i}` },
         payload: { pendingToken, code: "000000" },
       });
       expect(wrong.statusCode).not.toBe(429);
@@ -104,6 +106,7 @@ describe("super-admin · throttle de verificación 2FA en login", () => {
     const blocked = await app.inject({
       method: "POST",
       url: "/super-admin/auth/login-2fa",
+      headers: { "x-forwarded-for": "45.0.0.250, 203.0.113.250" },
       payload: { pendingToken, code: "000000" },
     });
     expect(blocked.statusCode).toBe(429);
