@@ -6,6 +6,7 @@ import {
   inspect as inspectRateLimit,
   registerFailure as registerRateLimitFailure,
   reset as resetRateLimit,
+  twoFactorVerifyThrottle,
 } from "../auth/rate-limit.js";
 import { hashPassword, verifyPassword } from "../auth/passwords.js";
 import {
@@ -151,6 +152,20 @@ export async function registerSuperAdminAuthRoutes(
         return reply.code(401).send({
           error: "INVALID_PENDING_TOKEN",
           message: "Sesión de 2FA caducada. Vuelve a iniciar sesión.",
+        });
+      }
+      // v1.5-D · Frente 3: throttle de la verificación del código 2FA del
+      // super-admin (código de 6 dígitos, fuerza-bruteable sin esto).
+      // Clave por (sub, ip), separada del owner por el scope.
+      const ip2fa = clientIp(request.headers, request.ip);
+      const rl2fa = await twoFactorVerifyThrottle("super-admin", payload.sub, ip2fa);
+      if (rl2fa.exceeded) {
+        return reply.code(429).send({
+          error: "RATE_LIMITED",
+          message: `Demasiados intentos. Vuelve a probar en ${Math.ceil(
+            rl2fa.retryAfterSeconds / 60,
+          )} min.`,
+          retryAfterSeconds: rl2fa.retryAfterSeconds,
         });
       }
       const prisma = getPrisma();

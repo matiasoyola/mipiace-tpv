@@ -293,4 +293,26 @@ describe("POST /auth/password-reset/confirm", () => {
     });
     expect(res.statusCode).toBe(400);
   });
+
+  // v1.5-D · Frente 3: el consumo de token también está throttleado
+  // (clave por IP), no sólo la solicitud. Sin esto, el handler hace un
+  // argon2.verify por cada token vivo y la fuerza bruta es viable.
+  it("throttle a 10 intentos de confirm por IP — el 11º devuelve 429", async () => {
+    const app = await buildApp();
+    for (let i = 0; i < 10; i++) {
+      const res = await app.inject({
+        method: "POST",
+        url: "/auth/password-reset/confirm",
+        payload: { token: "token-falso-de-fuerza-bruta", newPassword: "whatever123!" },
+      });
+      expect(res.statusCode).not.toBe(429);
+    }
+    const blocked = await app.inject({
+      method: "POST",
+      url: "/auth/password-reset/confirm",
+      payload: { token: "otro-intento-mas", newPassword: "whatever123!" },
+    });
+    expect(blocked.statusCode).toBe(429);
+    expect(blocked.json().error).toBe("RATE_LIMITED");
+  });
 });

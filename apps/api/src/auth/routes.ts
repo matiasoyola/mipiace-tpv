@@ -15,10 +15,12 @@ import {
   verifyMustChangePasswordToken,
 } from "./must-change-password.js";
 import {
+  clientIp,
   inspect as inspectRateLimit,
   ownerLoginRateLimit,
   registerFailure as registerRateLimitFailure,
   reset as resetRateLimit,
+  twoFactorVerifyThrottle,
 } from "./rate-limit.js";
 import {
   signAccessToken,
@@ -684,6 +686,24 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(401).send({
           error: "INVALID_PENDING_TOKEN",
           message: "Sesión de 2FA caducada. Vuelve a iniciar sesión.",
+        });
+      }
+      // v1.5-D · Frente 3: throttle de la verificación del código 2FA. El
+      // código es de 6 dígitos (10^6 combinaciones) y sin esto sería
+      // fuerza-bruteable dentro de la validez del pendingToken. Clave por
+      // (sub, ip): estable para una víctima dada.
+      const ip = clientIp(
+        request.headers as Record<string, unknown>,
+        request.ip,
+      );
+      const rl = await twoFactorVerifyThrottle("owner", payload.sub, ip);
+      if (rl.exceeded) {
+        return reply.code(429).send({
+          error: "RATE_LIMITED",
+          message: `Demasiados intentos. Vuelve a probar en ${Math.ceil(
+            rl.retryAfterSeconds / 60,
+          )} min.`,
+          retryAfterSeconds: rl.retryAfterSeconds,
         });
       }
       const prisma = getPrisma();

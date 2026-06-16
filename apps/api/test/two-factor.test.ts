@@ -291,6 +291,49 @@ describe("2FA enable + confirm flow", () => {
     expect(reuse.statusCode).toBe(401);
   });
 
+  // v1.5-D · Frente 3: la verificación del código 2FA en el login está
+  // throttleada (clave por sub+ip). El código es de 6 dígitos, así que
+  // sin esto es fuerza-bruteable dentro de la validez del pendingToken.
+  it("login + 2FA: 5 códigos erróneos y el 6º intento devuelve 429", async () => {
+    const app = await buildApp();
+    const enroll = await app.inject({
+      method: "POST",
+      url: "/auth/me/2fa/enable",
+      headers: { authorization: ownerBearer() },
+      payload: {},
+    });
+    const secret = enroll.json().secret as string;
+    await app.inject({
+      method: "POST",
+      url: "/auth/me/2fa/confirm",
+      headers: { authorization: ownerBearer() },
+      payload: { code: speakeasy.totp({ secret, encoding: "base32" }) },
+    });
+
+    const step1 = await app.inject({
+      method: "POST",
+      url: "/auth/login",
+      payload: { email: EMAIL, password: PASSWORD },
+    });
+    const pendingToken = step1.json().pendingToken as string;
+
+    for (let i = 0; i < 5; i++) {
+      const wrong = await app.inject({
+        method: "POST",
+        url: "/auth/login/2fa",
+        payload: { pendingToken, code: "000000" },
+      });
+      expect(wrong.statusCode).not.toBe(429);
+    }
+    const blocked = await app.inject({
+      method: "POST",
+      url: "/auth/login/2fa",
+      payload: { pendingToken, code: "000000" },
+    });
+    expect(blocked.statusCode).toBe(429);
+    expect(blocked.json().error).toBe("RATE_LIMITED");
+  });
+
   it("disable requiere password + código actual", async () => {
     const app = await buildApp();
     const enroll = await app.inject({
