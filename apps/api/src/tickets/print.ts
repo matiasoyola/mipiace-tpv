@@ -295,7 +295,13 @@ export function ticketToEscposInput(
 
   const issuedAt = ticket.paidAt ?? ticket.createdAt;
 
+  const fiscal = extractFiscal(ticket.tenant.fiscalProfile);
+
   return {
+    legalName: fiscal.legalName,
+    taxId: fiscal.taxId,
+    fiscalAddress: fiscal.address,
+    phone: fiscal.phone,
     businessName:
       ticket.register.store.name && ticket.register.store.name.length > 0
         ? ticket.register.store.name
@@ -345,6 +351,37 @@ function formatAddress(raw: unknown): string | null {
     (s) => s && s.length > 0,
   );
   return parts.length > 0 ? parts.join(", ") : null;
+}
+
+// Extrae la cabecera fiscal del `fiscalProfile` (jsonb libre del
+// onboarding/Holded o editado a mano). `address` puede venir como string
+// o como objeto estructurado (Holded a veces lo devuelve así), igual que
+// en el renderer del PDF. Devuelve null en los campos vacíos para que el
+// builder los omita.
+function extractFiscal(raw: unknown): {
+  legalName: string | null;
+  taxId: string | null;
+  address: string | null;
+  phone: string | null;
+} {
+  if (!raw || typeof raw !== "object") {
+    return { legalName: null, taxId: null, address: null, phone: null };
+  }
+  const fp = raw as Record<string, unknown>;
+  const str = (v: unknown): string | null =>
+    typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
+  let address: string | null = null;
+  if (typeof fp.address === "string") {
+    address = str(fp.address);
+  } else if (fp.address && typeof fp.address === "object") {
+    address = formatAddress(fp.address);
+  }
+  return {
+    legalName: str(fp.legalName),
+    taxId: str(fp.taxId),
+    address,
+    phone: str(fp.phone),
+  };
 }
 
 // Resuelve qué PrinterConfig usar para una impresión WIFI. Si el caller

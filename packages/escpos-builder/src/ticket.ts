@@ -54,6 +54,19 @@ export interface TicketPaymentEscpos {
 
 export interface TicketReceiptInput {
   // Cabecera del comercio.
+  // Razón social fiscal (del fiscalProfile del tenant). Si viene, es el
+  // título en grande y el businessName pasa a línea de establecimiento.
+  // Opcional para no romper callers/fixtures previos.
+  legalName?: string | null;
+  // NIF/CIF fiscal. Se imprime "NIF: ..." sólo si tiene valor (a
+  // diferencia del PDF, que pinta "NIF: " aunque esté vacío).
+  taxId?: string | null;
+  // Dirección fiscal del tenant. Se parte en varias líneas si hace falta.
+  fiscalAddress?: string | null;
+  // Teléfono del comercio. "Tel. ..." si viene.
+  phone?: string | null;
+  // Nombre del establecimiento/tienda (store.name). Cuando hay una
+  // razón social distinta, se imprime como subtítulo bajo ella.
   businessName: string;
   // Dirección formateada en una línea ("c/ Mayor 5, 28001 Madrid").
   businessAddress: string | null;
@@ -87,16 +100,45 @@ export function buildTicketReceipt(input: TicketReceiptInput): Uint8Array {
   parts.push(escInit());
   parts.push(escCodePagePc850());
 
-  // Cabecera comercio.
+  // Cabecera comercio: bloque fiscal (razón social + NIF + dirección
+  // fiscal + teléfono) replicando el del PDF, y debajo el nombre del
+  // establecimiento. Si no hay razón social, el título cae al nombre de
+  // tienda (comportamiento previo).
   parts.push(escAlign("center"));
+
+  const legalName = input.legalName?.trim();
+  const title =
+    legalName && legalName.length > 0 ? legalName : input.businessName;
+
   parts.push(escBold(true));
   parts.push(escSize(2, 2));
-  parts.push(escText(input.businessName));
+  parts.push(escText(title));
   parts.push(escResetSize());
   parts.push(escBold(false));
-  if (input.businessAddress) {
-    parts.push(escText(input.businessAddress));
+
+  // Establecimiento como subtítulo, sólo si la razón social es el título
+  // y el nombre de tienda aporta algo distinto.
+  if (legalName && input.businessName && input.businessName !== legalName) {
+    parts.push(escText(input.businessName));
   }
+
+  const taxId = input.taxId?.trim();
+  if (taxId) {
+    parts.push(escText(`NIF: ${taxId}`));
+  }
+
+  // Dirección: preferimos la fiscal; si no hay, la del establecimiento.
+  const address =
+    (input.fiscalAddress?.trim() || input.businessAddress?.trim()) ?? "";
+  if (address) {
+    for (const l of wrapText(address, COLUMNS)) parts.push(escText(l));
+  }
+
+  const phone = input.phone?.trim();
+  if (phone) {
+    parts.push(escText(`Tel. ${phone}`));
+  }
+
   parts.push(escSeparator(COLUMNS));
 
   // Cuerpo. Volvemos a alinear a la izquierda; el TOTAL se centra
@@ -223,6 +265,36 @@ function padBetween(left: string, right: string, width: number): string {
   }
   const space = width - left.length - right.length;
   return left + " ".repeat(space) + right;
+}
+
+// Parte un texto en líneas de como mucho `width` columnas, por palabras.
+// Si una palabra sola excede el ancho, la corta en duro. Se usa para la
+// dirección fiscal de la cabecera (centrada).
+function wrapText(text: string, width: number): string[] {
+  const words = text.split(/\s+/).filter((w) => w.length > 0);
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    if (word.length > width) {
+      if (current) {
+        lines.push(current);
+        current = "";
+      }
+      for (let i = 0; i < word.length; i += width) {
+        lines.push(word.slice(i, i + width));
+      }
+      continue;
+    }
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length > width) {
+      if (current) lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.length > 0 ? lines : [text];
 }
 
 // Si la URL pasa de 40 chars, recortamos al middle ("https://...iD123/pdf").

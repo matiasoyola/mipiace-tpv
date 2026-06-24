@@ -160,6 +160,78 @@ describe("buildTicketReceipt", () => {
     // PC850 "Cambio" = 0x43 0x61 0x6d 0x62 0x69 0x6f.
     expect(hexContains(bytes, "43 61 6d 62 69 6f")).toBe(true);
   });
+
+  it("imprime cabecera fiscal: razón social, NIF, dirección y teléfono", () => {
+    const bytes = buildTicketReceipt({
+      legalName: "Frutos Secos Cachictos SL",
+      taxId: "B12345678",
+      fiscalAddress: "c/ Mayor 5, 28001 Madrid",
+      phone: "600123456",
+      businessName: "Tienda principal",
+      businessAddress: null,
+      internalNumber: "000006",
+      issuedAt: FIXED_DATE,
+      cashierLabel: "virginia",
+      tableName: null,
+      lines: [{ description: "Agua", units: 1, unitPrice: 0.5, lineTotal: 0.5 }],
+      total: 0.5,
+      payments: [{ label: "Efectivo", amount: 0.5 }],
+      notes: [],
+      publicTicketUrl: null,
+      footer: null,
+    });
+    // "NIF:" = 4e 49 46 3a
+    expect(hexContains(bytes, "4e 49 46 3a")).toBe(true);
+    // "B12345678" = 42 31 32 33 34 35 36 37 38
+    expect(hexContains(bytes, "42 31 32 33 34 35 36 37 38")).toBe(true);
+    // "Tel." = 54 65 6c 2e
+    expect(hexContains(bytes, "54 65 6c 2e")).toBe(true);
+    // Razón social: "Cachictos" = 43 61 63 68 69 63 74 6f 73
+    expect(hexContains(bytes, "43 61 63 68 69 63 74 6f 73")).toBe(true);
+  });
+
+  it("omite la línea NIF cuando taxId está vacío", () => {
+    const bytes = buildTicketReceipt({
+      legalName: "Comercio SL",
+      taxId: "",
+      fiscalAddress: null,
+      phone: null,
+      businessName: "Tienda principal",
+      businessAddress: null,
+      internalNumber: "000007",
+      issuedAt: FIXED_DATE,
+      cashierLabel: "ana",
+      tableName: null,
+      lines: [{ description: "X", units: 1, unitPrice: 1, lineTotal: 1 }],
+      total: 1,
+      payments: [{ label: "Efectivo", amount: 1 }],
+      notes: [],
+      publicTicketUrl: null,
+      footer: null,
+    });
+    // No debe aparecer "NIF:" (4e 49 46 3a).
+    expect(hexContains(bytes, "4e 49 46 3a")).toBe(false);
+  });
+
+  it("sin legalName usa businessName como título (retrocompat)", () => {
+    const bytes = buildTicketReceipt({
+      businessName: "Bar Quevedo",
+      businessAddress: "c/ Sol 1",
+      internalNumber: "T1",
+      issuedAt: FIXED_DATE,
+      cashierLabel: "c",
+      tableName: null,
+      lines: [{ description: "X", units: 1, unitPrice: 1, lineTotal: 1 }],
+      total: 1,
+      payments: [{ label: "Efectivo", amount: 1 }],
+      notes: [],
+      publicTicketUrl: null,
+      footer: null,
+    });
+    // "Bar Quevedo" = 42 61 72 20 51 75 65 76 65 64 6f, sin "NIF:".
+    expect(hexContains(bytes, "42 61 72 20 51 75 65 76 65 64 6f")).toBe(true);
+    expect(hexContains(bytes, "4e 49 46 3a")).toBe(false);
+  });
 });
 
 describe("buildKitchenComanda", () => {
