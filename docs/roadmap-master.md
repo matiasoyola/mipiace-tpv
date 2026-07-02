@@ -152,7 +152,14 @@ Ver `docs/roadmap-post-15-clientes.md` para spec completo.
 
 ### Servicios profesionales
 - **P-2** Agendas peluquería con tiempos por servicio y
-  asignación por empleado.
+  asignación por empleado. **Spec técnico completo en
+  `docs/design/agenda-belleza-spec.md`** (origen: proyecto Raquel
+  Torres Spa, jul-2026; cliente 0 con fase intermedia KoiboxAdapter
+  fuera de este repo). Amplía P-2 a vertical belleza: multi-terapeuta,
+  recursos (cabinas/aparatos), políticas de agenda programables por
+  centro, constraint de exclusión GiST anti-solapes. OJO al traducir:
+  el spec usa convenciones del ecosistema RT (cuid, priceCents, tabla
+  Service propia) — aquí los servicios vienen de Holded con serviceId.
 
 ### Criterio de activación
 - 15 clientes activos sobre mipiacetpv con tickets diarios.
