@@ -5,7 +5,13 @@
 import { useState } from "react";
 import { Minus, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
 
-import { computeLine, type CartLine } from "../lib/cart.js";
+import {
+  computeLine,
+  grossToNet,
+  netToGross,
+  round2,
+  type CartLine,
+} from "../lib/cart.js";
 
 const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
 
@@ -56,33 +62,39 @@ export function LineSheet({
   const [showPriceEditor, setShowPriceEditor] = useState(
     line.unitPriceOverride != null,
   );
-  const [priceInput, setPriceInput] = useState(
-    line.unitPriceOverride != null
-      ? line.unitPriceOverride.toFixed(2).replace(".", ",")
-      : line.unitPrice.toFixed(2).replace(".", ","),
-  );
-  const effectiveUnitPrice =
+  // v1.6-Precio-Sobre-Total: el input se teclea y muestra en BRUTO (IVA
+  // incluido, sin modifiers), coherente con el "X € ud." del header. El
+  // modelo interno sigue en neto: convertimos gross→net al persistir y
+  // net→gross al prellenar.
+  const catalogGross = netToGross(line.unitPrice, line.taxRate);
+  const effectiveNet =
     line.unitPriceOverride != null ? line.unitPriceOverride : line.unitPrice;
-  const previewUnitPrice = showPriceEditor
-    ? (parsePriceInput(priceInput) ?? effectiveUnitPrice)
-    : effectiveUnitPrice;
+  const [priceInput, setPriceInput] = useState(
+    netToGross(effectiveNet, line.taxRate).toFixed(2).replace(".", ","),
+  );
+
+  // Neto derivado del bruto tecleado. null cuando el input no parsea o
+  // cuando el bruto equivale al del catálogo (comparación en céntimos de
+  // bruto, no en floats de neto) → no persistimos overrides "iguales al
+  // catálogo".
+  function overrideNetFromInput(): number | null {
+    const grossTyped = parsePriceInput(priceInput);
+    if (grossTyped == null) return null;
+    if (round2(grossTyped) === catalogGross) return null;
+    return grossToNet(grossTyped, line.taxRate);
+  }
+
+  const previewOverrideNet = showPriceEditor ? overrideNetFromInput() : null;
   const computed = computeLine({
     units: Number(units) || 0,
     unitPrice: line.unitPrice,
-    unitPriceOverride:
-      showPriceEditor && previewUnitPrice !== line.unitPrice
-        ? previewUnitPrice
-        : null,
+    unitPriceOverride: previewOverrideNet,
     discountPct: Number(discountPct) || 0,
     taxRate: line.taxRate,
   });
 
   function commit() {
-    const parsed = showPriceEditor ? parsePriceInput(priceInput) : null;
-    const nextOverride =
-      showPriceEditor && parsed != null && parsed !== line.unitPrice
-        ? parsed
-        : null;
+    const nextOverride = showPriceEditor ? overrideNetFromInput() : null;
     onChange({
       units: Math.max(0.001, Number(units) || 1),
       discountPct: Math.min(100, Math.max(0, Number(discountPct) || 0)),
@@ -145,7 +157,7 @@ export function LineSheet({
         )}
         <div>
           <label className="block text-[13px] font-medium text-mipiace-ink-soft mb-2">
-            Precio unitario
+            Precio unitario (IVA incl.)
           </label>
           {!showPriceEditor ? (
             <div className="flex items-center gap-2">
@@ -153,15 +165,15 @@ export function LineSheet({
                 {line.unitPriceOverride != null ? (
                   <span className="flex items-center gap-2">
                     <span className="text-amber-700 font-semibold">
-                      {formatEur(line.unitPriceOverride)}
+                      {formatEur(netToGross(line.unitPriceOverride, line.taxRate))}
                     </span>
                     <span className="text-[11.5px] text-slate-500 line-through">
-                      {formatEur(line.unitPrice)}
+                      {formatEur(catalogGross)}
                     </span>
                   </span>
                 ) : (
                   <span className="text-mipiace-ink">
-                    {formatEur(line.unitPrice)}
+                    {formatEur(catalogGross)}
                   </span>
                 )}
               </div>
@@ -193,7 +205,7 @@ export function LineSheet({
                 type="button"
                 onClick={() => {
                   setShowPriceEditor(false);
-                  setPriceInput(line.unitPrice.toFixed(2).replace(".", ","));
+                  setPriceInput(catalogGross.toFixed(2).replace(".", ","));
                 }}
                 className="h-12 px-3 rounded-xl bg-mipiace-stone hover:bg-slate-100 text-slate-600 flex items-center gap-1.5 text-[12.5px] font-medium"
                 aria-label="Restaurar precio del catálogo"
@@ -205,9 +217,9 @@ export function LineSheet({
           )}
           {showPriceEditor && (
             <p className="text-[11.5px] text-slate-400 mt-1.5">
-              Pulsa Aplicar para guardar el precio. Se enviará a Holded
-              tal cual lo cobres. Precio del catálogo:{" "}
-              <span className="tabular-nums">{formatEur(line.unitPrice)}</span>.
+              Precio final con IVA incluido. Pulsa Aplicar para guardar;
+              se enviará a Holded tal cual lo cobres. Precio del catálogo:{" "}
+              <span className="tabular-nums">{formatEur(catalogGross)}</span>.
             </p>
           )}
         </div>
