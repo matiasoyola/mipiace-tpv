@@ -63,6 +63,39 @@ export function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+// v1.6-Precio-Sobre-Total: helpers puros de conversión neto↔bruto. El
+// modelo del carrito y el contrato con la API SIGUEN en NETO — estos
+// helpers viven sólo en la capa de entrada/presentación (el cajero de
+// Frutos Secos Cachictos teclea el precio final con IVA incluido).
+
+// Bruto (IVA incl.) a partir del neto, redondeado a céntimo — es el
+// importe que ve el cajero.
+export function netToGross(net: number, taxRate: number): number {
+  return round2(net * (1 + taxRate / 100));
+}
+
+// Neto (4 decimales, precisión Decimal(12,4) de b30) a partir del bruto
+// tecleado por el cajero. Garantiza round-trip: netToGross(grossToNet(g))
+// === round2(g) para los tipos españoles reales. 4 decimales bastan
+// siempre (el error de redondear el neto es < 0,00006 € en bruto, muy
+// lejos del umbral de medio céntimo), pero dejamos una corrección
+// defensiva ±0,0001 por si el punto flotante desvía el borde.
+export function grossToNet(gross: number, taxRate: number): number {
+  const factor = 1 + taxRate / 100;
+  const target = round2(gross);
+  let net = Math.round((target / factor) * 10000) / 10000;
+  if (netToGross(net, taxRate) !== target) {
+    for (const delta of [0.0001, -0.0001, 0.0002, -0.0002]) {
+      const cand = Math.round((net + delta) * 10000) / 10000;
+      if (netToGross(cand, taxRate) === target) {
+        net = cand;
+        break;
+      }
+    }
+  }
+  return net;
+}
+
 export interface LineTotals {
   subtotalNet: number;
   tax: number;
