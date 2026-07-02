@@ -12,13 +12,13 @@ interface ShiftOpenResponse {
 }
 
 export function ShiftOpenScreen({
-  cashierEmail,
+  cashierLabel,
   registerName,
   storeName,
   onOpened,
   onBack,
 }: {
-  cashierEmail: string;
+  cashierLabel: string;
   registerName: string;
   storeName: string;
   onOpened: (shift: { id: string; openedAt: string; cashOpening: string }) => void;
@@ -57,11 +57,11 @@ export function ShiftOpenScreen({
         <div className="bg-white rounded-3xl border border-slate-200 p-7 md:p-9">
           <div className="flex items-center gap-3 mb-1">
             <span className="h-11 w-11 rounded-xl bg-mipiace-coral text-white text-[15px] font-semibold flex items-center justify-center">
-              {initials(cashierEmail)}
+              {initials(cashierLabel)}
             </span>
             <div>
               <div className="text-[15px] font-medium text-mipiace-ink truncate max-w-[260px]">
-                {cashierEmail}
+                {cashierLabel}
               </div>
               <div className="text-[12.5px] text-slate-500">
                 {registerName} · {storeName}

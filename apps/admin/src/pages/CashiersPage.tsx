@@ -19,9 +19,17 @@ import {
 interface CashierRow {
   id: string;
   email: string;
+  // v1.7-alias-cajeros: nombre visible. Null sólo en users legacy
+  // creados antes del bloque (el backfill de la migración lo rellena,
+  // pero el cliente tolera null igualmente).
+  alias: string | null;
   role: "MANAGER" | "CASHIER";
   lastLoginAt: string | null;
   createdAt: string;
+}
+
+function displayName(c: CashierRow): string {
+  return c.alias?.trim() || c.email;
 }
 
 export function CashiersPage() {
@@ -30,6 +38,7 @@ export function CashiersPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
   const [resetting, setResetting] = useState<CashierRow | null>(null);
+  const [editing, setEditing] = useState<CashierRow | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -54,13 +63,13 @@ export function CashiersPage() {
   async function onRevoke(cashier: CashierRow) {
     if (
       !window.confirm(
-        `¿Revocar el acceso de ${cashier.email}? Sus turnos y tickets se preservan.`,
+        `¿Revocar el acceso de ${displayName(cashier)}? Sus turnos y tickets se preservan.`,
       )
     )
       return;
     try {
       await api(`/cashiers/${cashier.id}`, { method: "DELETE" });
-      setSuccess(`Acceso de ${cashier.email} revocado.`);
+      setSuccess(`Acceso de ${displayName(cashier)} revocado.`);
       refresh();
     } catch (err) {
       if (err instanceof ApiError) setError(err.message);
@@ -114,7 +123,9 @@ export function CashiersPage() {
               key={c.id}
               cashier={c}
               canRevoke={isOwner}
+              canEdit={isOwner}
               onResetPin={() => setResetting(c)}
+              onEdit={() => setEditing(c)}
               onRevoke={() => onRevoke(c)}
             />
           ))}
@@ -142,6 +153,18 @@ export function CashiersPage() {
           }}
         />
       )}
+
+      {editing && (
+        <EditAliasModal
+          cashier={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            setSuccess("Alias actualizado.");
+            refresh();
+          }}
+        />
+      )}
     </AdminShell>
   );
 }
@@ -149,24 +172,31 @@ export function CashiersPage() {
 function CashierCard({
   cashier,
   canRevoke,
+  canEdit,
   onResetPin,
+  onEdit,
   onRevoke,
 }: {
   cashier: CashierRow;
   canRevoke: boolean;
+  canEdit: boolean;
   onResetPin: () => void;
+  onEdit: () => void;
   onRevoke: () => void;
 }) {
   return (
     <div className="bg-white rounded-2xl border border-slate-200 p-4 flex items-center gap-4">
       <span className="h-10 w-10 rounded-xl bg-mipiace-stone text-mipiace-ink flex items-center justify-center text-[13px] font-semibold uppercase">
-        {cashier.email.slice(0, 2)}
+        {displayName(cashier).slice(0, 2)}
       </span>
       <div className="flex-1 min-w-0">
+        {/* v1.7-alias-cajeros: alias primero, email secundario en gris. */}
         <div className="text-[14px] font-medium text-mipiace-ink truncate">
-          {cashier.email}
+          {displayName(cashier)}
         </div>
-        <div className="text-[12.5px] text-slate-500 mt-0.5">
+        <div className="text-[12.5px] text-slate-500 mt-0.5 truncate">
+          {cashier.email}
+          {" · "}
           {cashier.role === "MANAGER" ? "Encargado" : "Cajero"}
           {" · "}
           {cashier.lastLoginAt
@@ -174,6 +204,11 @@ function CashierCard({
             : "Sin acceso registrado"}
         </div>
       </div>
+      {canEdit && (
+        <OutlineButton onClick={onEdit} className="!h-9 !text-[12.5px]">
+          Editar
+        </OutlineButton>
+      )}
       <OutlineButton onClick={onResetPin} className="!h-9 !text-[12.5px]">
         Cambiar PIN
       </OutlineButton>
@@ -197,6 +232,7 @@ function CreateCashierModal({
   onCreated: () => void;
 }) {
   const [email, setEmail] = useState("");
+  const [alias, setAlias] = useState("");
   const [role, setRole] = useState<"MANAGER" | "CASHIER">("CASHIER");
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
@@ -204,15 +240,22 @@ function CreateCashierModal({
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const trimmedAlias = alias.trim();
+    if (trimmedAlias.length === 0) {
+      setError("El alias no puede estar vacío");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       await api("/cashiers", {
         method: "POST",
-        body: { email, role, pin },
+        body: { email, alias: trimmedAlias, role, pin },
       });
       onCreated();
     } catch (err) {
+      // El 409 ALIAS_TAKEN llega con mensaje humano ("Ya hay un cajero
+      // llamado María") — se muestra tal cual.
       if (err instanceof ApiError) setError(err.message);
       else setError("Error inesperado");
     } finally {
@@ -238,8 +281,16 @@ function CreateCashierModal({
         </p>
         <form onSubmit={onSubmit} className="space-y-4">
           <TextField
+            id="cashierAlias"
+            label="Alias (nombre visible en TPV y tickets)"
+            autoComplete="off"
+            value={alias}
+            onChange={(v) => setAlias(v.slice(0, 40))}
+            required
+          />
+          <TextField
             id="cashierEmail"
-            label="Email"
+            label="Email (credencial de acceso)"
             type="email"
             autoComplete="off"
             value={email}
@@ -278,6 +329,82 @@ function CreateCashierModal({
               Cancelar
             </OutlineButton>
             <PrimaryButton busy={busy}>Crear</PrimaryButton>
+          </div>
+          <FieldError message={error} />
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// v1.7-alias-cajeros: edición del alias (PATCH /cashiers/:id). El
+// email no se edita — es la credencial.
+function EditAliasModal({
+  cashier,
+  onClose,
+  onSaved,
+}: {
+  cashier: CashierRow;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [alias, setAlias] = useState(cashier.alias ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = alias.trim();
+    if (trimmed.length === 0) {
+      setError("El alias no puede estar vacío");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/cashiers/${cashier.id}`, {
+        method: "PATCH",
+        body: { alias: trimmed },
+      });
+      onSaved();
+    } catch (err) {
+      if (err instanceof ApiError) setError(err.message);
+      else setError("Error inesperado");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-mipiace-ink/40 flex items-end sm:items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white w-full max-w-md rounded-3xl border border-slate-200 p-6 md:p-7"
+      >
+        <h2 className="text-[18px] font-semibold text-mipiace-ink mb-1">
+          Editar alias
+        </h2>
+        <p className="text-[13px] text-slate-500 mb-5">
+          Es el nombre que aparece en el TPV, en los tickets impresos y en
+          las comandas. El email ({cashier.email}) no cambia.
+        </p>
+        <form onSubmit={onSubmit} className="space-y-4">
+          <TextField
+            id="editAlias"
+            label="Alias"
+            autoComplete="off"
+            value={alias}
+            onChange={(v) => setAlias(v.slice(0, 40))}
+            required
+          />
+          <div className="flex gap-2.5">
+            <OutlineButton onClick={onClose} disabled={busy} className="!w-full">
+              Cancelar
+            </OutlineButton>
+            <PrimaryButton busy={busy}>Guardar</PrimaryButton>
           </div>
           <FieldError message={error} />
         </form>
@@ -330,8 +457,8 @@ function ResetPinModal({
           Cambiar PIN
         </h2>
         <p className="text-[13px] text-slate-500 mb-5">
-          Asigna un PIN nuevo para {cashier.email}. El anterior queda inservible
-          inmediatamente.
+          Asigna un PIN nuevo para {displayName(cashier)}. El anterior queda
+          inservible inmediatamente.
         </p>
         <form onSubmit={onSubmit} className="space-y-4">
           <TextField

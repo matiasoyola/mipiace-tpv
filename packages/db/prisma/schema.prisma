@@ -389,6 +389,15 @@ model User {
   id                     String    @id @default(uuid()) @db.Uuid
   tenantId               String    @map("tenant_id") @db.Uuid
   email                  String    @unique
+  // v1.7-alias-cajeros: nombre visible del cajero ("María"). Sustituye
+  // al email en todos los puntos de display (TPV, ticket, comandas,
+  // informe Z, admin); el email queda como credencial y canal.
+  // Nullable en BD por filas legacy de otros roles — la API lo exige
+  // al crear cajeros y hace fallback a la local-part del email al
+  // mostrar. Unicidad por tenant entre cajeros activos validada en la
+  // API (case-insensitive), no como constraint: "María" puede existir
+  // en dos tenants distintos.
+  alias                  String?   @map("alias")
   passwordHash           String?   @map("password_hash")
   // PIN sólo lo tienen cajeros/encargados que tocan el TPV físico.
   pinHash                String?   @map("pin_hash")

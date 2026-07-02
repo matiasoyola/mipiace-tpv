@@ -25,6 +25,7 @@ import type { FastifyInstance } from "fastify";
 
 import { getPrisma } from "../context.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
+import { cashierLabelFrom } from "../users/display.js";
 
 interface PrintQuery {
   target: "usb" | "wifi";
@@ -182,7 +183,7 @@ interface TicketForPrint {
   paidAt: Date | null;
   createdAt: Date;
   table: { name: string } | null;
-  user: { email: string };
+  user: { email: string; alias: string | null };
   register: {
     name: string;
     store: {
@@ -226,7 +227,7 @@ async function loadTicketForPrint(
       paidAt: true,
       createdAt: true,
       table: { select: { name: true } },
-      user: { select: { email: true } },
+      user: { select: { email: true, alias: true } },
       register: {
         select: {
           name: true,
@@ -309,7 +310,7 @@ export function ticketToEscposInput(
     businessAddress: formatAddress(ticket.register.store.fiscalAddress),
     internalNumber: ticket.internalNumber,
     issuedAt,
-    cashierLabel: shortLabel(ticket.user.email),
+    cashierLabel: cashierLabelFrom(ticket.user),
     tableName: ticket.table?.name ?? null,
     lines,
     total: Number(ticket.total.toString()),
@@ -333,12 +334,6 @@ function methodLabel(method: string): string {
     default:
       return "Otro";
   }
-}
-
-function shortLabel(email: string): string {
-  const at = email.indexOf("@");
-  if (at <= 0) return email;
-  return email.slice(0, at);
 }
 
 function formatAddress(raw: unknown): string | null {

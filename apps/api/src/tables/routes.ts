@@ -40,7 +40,10 @@ interface TableSummaryDto {
     total: string;
     diners: number | null;
     openedAt: string;
+    // v1.7-alias-cajeros: email se mantiene por compat con SW viejos;
+    // el TPV muestra alias con fallback a la local-part del email.
     openedByEmail: string | null;
+    openedByAlias: string | null;
     lineCount: number;
   } | null;
   createdAt: string;
@@ -85,9 +88,9 @@ export async function buildTableSnapshot(
       ? []
       : await prisma.user.findMany({
           where: { id: { in: userIds } },
-          select: { id: true, email: true },
+          select: { id: true, email: true, alias: true },
         });
-  const userEmailById = new Map(users.map((u) => [u.id, u.email] as const));
+  const userById = new Map(users.map((u) => [u.id, u] as const));
   const draftByTableId = new Map<string, (typeof drafts)[number]>();
   for (const d of drafts) {
     if (d.tableId) draftByTableId.set(d.tableId, d);
@@ -112,7 +115,8 @@ export async function buildTableSnapshot(
             total: draft.total.toString(),
             diners: draft.diners,
             openedAt: draft.createdAt.toISOString(),
-            openedByEmail: userEmailById.get(draft.userId) ?? null,
+            openedByEmail: userById.get(draft.userId)?.email ?? null,
+            openedByAlias: userById.get(draft.userId)?.alias ?? null,
             lineCount: draft._count.lines,
           }
         : null,

@@ -191,7 +191,7 @@ async function renderSalePage(initialLines: ServerDraftLine[]) {
     root.render(
       <SalePage
         shiftId="shift-1"
-        cashierEmail="caja1@bar.es"
+        cashierLabel="caja1@bar.es"
         cashierRole="CASHIER"
         registerName="Caja 1"
         registerId="reg-1"
@@ -473,7 +473,7 @@ describe("TableMapScreen · checkout en tránsito bloquea la mesa local", () => 
     await act(async () => {
       root.render(
         <TableMapScreen
-          cashierEmail="caja1@bar.es"
+          cashierLabel="caja1@bar.es"
           storeName="Bar Test"
           registerName="Caja 1"
           onPickTable={onPickTable}

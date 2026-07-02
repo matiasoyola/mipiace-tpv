@@ -17,6 +17,9 @@ interface FakeUser {
   id: string;
   tenantId: string;
   email: string;
+  // v1.7-alias-cajeros: null = user legacy sin alias (el cliente hace
+  // fallback al email).
+  alias: string | null;
   pinHash: string;
   // v1.3-piloto-feedback · Lote 1: el OWNER también puede entrar al TPV
   // con su email + PIN como cajero por defecto.
@@ -144,6 +147,7 @@ beforeEach(async () => {
     id: USER_ID,
     tenantId: TENANT_ID,
     email: EMAIL,
+    alias: null,
     pinHash: await hashPassword(PIN),
     role: "CASHIER",
   });
@@ -181,6 +185,38 @@ describe("POST /shift/cashier-login", () => {
     expect(body.sessionToken).toBeTruthy();
     expect(body.user.email).toBe(EMAIL);
     expect(body.shiftState.kind).toBe("needsShiftOpen");
+  });
+
+  // v1.7-alias-cajeros: contrato del bootstrap de sesión. El alias
+  // viaja junto al email; el email NO desaparece del contrato (devices
+  // con SW viejo lo siguen leyendo).
+  it("user con alias → response.user lleva alias Y email", async () => {
+    users.get(USER_ID)!.alias = "Lucía";
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/shift/cashier-login",
+      headers: { "x-device-token": DEVICE_TOKEN },
+      payload: { email: EMAIL, pin: PIN },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.user.alias).toBe("Lucía");
+    expect(body.user.email).toBe(EMAIL);
+  });
+
+  it("user legacy sin alias → response.user.alias null, email intacto", async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/shift/cashier-login",
+      headers: { "x-device-token": DEVICE_TOKEN },
+      payload: { email: EMAIL, pin: PIN },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.user.alias).toBeNull();
+    expect(body.user.email).toBe(EMAIL);
   });
 
   // v1.0-pilotos · Lote 4 (#18): el JWT se firma con el TTL de sesión
@@ -336,6 +372,7 @@ describe("POST /shift/cashier-login", () => {
       id: OWNER_ID,
       tenantId: TENANT_ID,
       email: OWNER_EMAIL,
+      alias: null,
       pinHash: await hashPassword(OWNER_PIN),
       role: "OWNER",
     });

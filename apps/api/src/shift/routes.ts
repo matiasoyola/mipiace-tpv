@@ -4,6 +4,7 @@ import { Prisma } from "@mipiacetpv/db";
 
 import { getPrisma } from "../context.js";
 import { verifyPassword } from "../auth/passwords.js";
+import { cashierLabelFrom } from "../users/display.js";
 import { requireCashierSession } from "./cashier-session.js";
 import { ALLOWED_DENOMINATIONS, validateAndSumDenominations } from "./cash-count.js";
 import { generateZReportPdf } from "./z-report.js";
@@ -576,6 +577,7 @@ async function executeShiftClose(args: {
     !isOwnerOfShift && tenant.requireManagerPinForForceClose && !actorIsManagerOrOwner;
   const needSyncFailedPin = failed > 0 && !actorIsManagerOrOwner;
   let managerEmail: string | null = null;
+  let managerAlias: string | null = null;
   let pinAuthorizationKind: "self" | "manager" | null = null;
   if (needForceClosePin || needSyncFailedPin) {
     if (!body.managerPin) {
@@ -607,17 +609,23 @@ async function executeShiftClose(args: {
         ],
         pinHash: { not: null },
       },
-      select: { id: true, email: true, role: true, pinHash: true },
+      select: { id: true, email: true, alias: true, role: true, pinHash: true },
     });
     const eligible = tenant.requireOwnerPinForCashClose
       ? candidates.filter((c) => c.role === "MANAGER" || c.role === "OWNER")
       : candidates;
-    let authorized: { id: string; email: string; isSelf: boolean } | null = null;
+    let authorized: {
+      id: string;
+      email: string;
+      alias: string | null;
+      isSelf: boolean;
+    } | null = null;
     for (const c of eligible) {
       if (c.pinHash && (await verifyPassword(c.pinHash, body.managerPin))) {
         authorized = {
           id: c.id,
           email: c.email,
+          alias: c.alias,
           isSelf: c.id === cashier.sub,
         };
         break;
@@ -636,6 +644,7 @@ async function executeShiftClose(args: {
       };
     }
     managerEmail = authorized.email;
+    managerAlias = authorized.alias;
     pinAuthorizationKind = authorized.isSelf ? "self" : "manager";
   }
   // Audit trail estructurado (B5 §2.3). Cuando montemos la tabla
@@ -685,11 +694,11 @@ async function executeShiftClose(args: {
   const [cashierUser, closedByUser] = await Promise.all([
     prisma.user.findUniqueOrThrow({
       where: { id: shift.userId },
-      select: { email: true },
+      select: { email: true, alias: true },
     }),
     prisma.user.findUniqueOrThrow({
       where: { id: cashier.sub },
-      select: { email: true },
+      select: { email: true, alias: true },
     }),
   ]);
 
@@ -699,8 +708,10 @@ async function executeShiftClose(args: {
       shiftId: shift.id,
       storeName: shift.register.store.name,
       registerName: shift.register.name,
-      cashierLabel: cashierUser.email,
-      closedByLabel: isOwnerOfShift ? null : closedByUser.email,
+      // v1.7-alias-cajeros: alias en el Z; fallback a la local-part
+      // del email para users legacy sin alias.
+      cashierLabel: cashierLabelFrom(cashierUser),
+      closedByLabel: isOwnerOfShift ? null : cashierLabelFrom(closedByUser),
       openedAt: shift.openedAt,
       closedAt,
       cashOpening: Number(shift.cashOpening),
@@ -718,6 +729,7 @@ async function executeShiftClose(args: {
       syncIssues: { pendingSync, failed },
       acceptedSyncFailures: body.syncFailureAccepted === true,
       managerAuthorizationEmail: managerEmail,
+      managerAuthorizationAlias: managerAlias,
     });
   } catch (err) {
     log.error(err, "Z report generation failed");

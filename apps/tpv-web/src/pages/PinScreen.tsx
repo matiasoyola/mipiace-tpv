@@ -19,7 +19,14 @@ const PIN_LENGTH_TARGET = 4; // visualización mínima — el backend acepta 4-8
 interface CashierLoginResponse {
   sessionToken: string;
   sessionTtlMinutes: number;
-  user: { id: string; email: string; role: "MANAGER" | "CASHIER" };
+  // v1.7-alias-cajeros: alias llega junto al email (que sigue en el
+  // contrato como credencial y por compat con SW viejos).
+  user: {
+    id: string;
+    email: string;
+    alias: string | null;
+    role: "MANAGER" | "CASHIER";
+  };
   shiftState:
     | { kind: "needsShiftOpen" }
     | { kind: "reanudar"; shift: { id: string; openedAt: string; cashOpening: string } }
@@ -113,7 +120,8 @@ export function PinScreen({
       );
       rememberCashier({
         email: res.user.email,
-        initials: initialsOf(res.user.email),
+        alias: res.user.alias,
+        initials: initialsOf(res.user.alias ?? res.user.email),
         lastSeenAt: new Date().toISOString(),
       });
       setCashierSession({
@@ -121,6 +129,7 @@ export function PinScreen({
         sessionTtlMinutes: res.sessionTtlMinutes,
         userId: res.user.id,
         email: res.user.email,
+        alias: res.user.alias,
         role: res.user.role,
       });
       // Login OK → limpiamos cualquier rastro del avisador de intentos
@@ -212,7 +221,7 @@ export function PinScreen({
                           : "h-12 w-12 rounded-xl bg-mipiace-stone text-mipiace-ink text-[15px] font-semibold flex items-center justify-center shrink-0"
                       }
                     >
-                      {c.initials ?? initialsOf(c.email)}
+                      {c.initials ?? initialsOf(c.alias ?? c.email)}
                     </span>
                     <div className="flex-1 min-w-0">
                       <div
@@ -222,9 +231,10 @@ export function PinScreen({
                             : "text-[15px] font-medium text-mipiace-ink truncate"
                         }
                       >
-                        {c.email}
+                        {c.alias ?? c.email}
                       </div>
-                      <div className="text-[12.5px] text-slate-500 mt-0.5">
+                      <div className="text-[12.5px] text-slate-500 mt-0.5 truncate">
+                        {c.alias ? `${c.email} · ` : ""}
                         Último acceso {formatShortDate(c.lastSeenAt)}
                       </div>
                     </div>
@@ -274,7 +284,10 @@ export function PinScreen({
             <div className="text-center mb-6">
               <div className="text-[14px] text-slate-500 mb-1">Introduce el PIN</div>
               <div className="text-[20px] font-semibold text-mipiace-ink tracking-tight truncate">
-                {activeEmail || "—"}
+                {(selectedEmail
+                  ? recent.find((c) => c.email === selectedEmail)?.alias ??
+                    selectedEmail
+                  : activeEmail) || "—"}
               </div>
             </div>
             <div className="flex justify-center items-center gap-3 mb-7">

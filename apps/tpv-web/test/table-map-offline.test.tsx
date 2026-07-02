@@ -74,7 +74,7 @@ const onQuickSale = vi.fn();
 
 function defaultProps() {
   return {
-    cashierEmail: "caja1@bar.es",
+    cashierLabel: "caja1@bar.es",
     storeName: "Bar Test",
     registerName: "Caja 1",
     onPickTable,
