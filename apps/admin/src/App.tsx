@@ -177,6 +177,10 @@ function LoginPage() {
 
   // Banner verde post-reset, si venimos de `/admin/reset?token=...` OK.
   const justReset = location.state && (location.state as { justReset?: boolean }).justReset;
+  // Venimos de /change-password-initial con un token ya inválido: pedimos
+  // reintentar el login con la contraseña del email para emitir uno fresco.
+  const sessionExpired =
+    location.state && (location.state as { sessionExpired?: boolean }).sessionExpired;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -333,6 +337,12 @@ function LoginPage() {
       {justReset && (
         <SuccessBanner message="Contraseña actualizada · inicia sesión de nuevo" />
       )}
+      {sessionExpired && (
+        <div className="mb-4 rounded-xl bg-amber-50 border border-amber-200 px-3.5 py-2.5 text-[13px] text-amber-800">
+          Tu enlace de cambio de contraseña caducó. Inicia sesión con la
+          contraseña temporal del último email y vuelve a definir la tuya.
+        </div>
+      )}
       <form onSubmit={onSubmit} className="space-y-4 mt-3">
         <TextField
           id="email"
@@ -434,8 +444,24 @@ function ChangePasswordInitialPage() {
       storeTokens(tokens);
       navigate("/", { replace: true });
     } catch (err) {
-      if (err instanceof ApiError) setError(err.message);
-      else throw err;
+      if (err instanceof ApiError) {
+        // El pendingPasswordChangeToken dejó de ser válido (tokenVersion
+        // bumpeado por transfer-owner / force-logout / reset durante la
+        // implantación, o la contraseña ya se cambió). No tiene arreglo
+        // en esta pantalla: hay que volver a iniciar sesión con la
+        // contraseña del último email para obtener un token fresco.
+        if (
+          err.code === "INVALID_PENDING_TOKEN" ||
+          err.code === "PASSWORD_ALREADY_CHANGED"
+        ) {
+          navigate("/login", {
+            replace: true,
+            state: { sessionExpired: true },
+          });
+          return;
+        }
+        setError(err.message);
+      } else throw err;
     } finally {
       setBusy(false);
     }
@@ -453,20 +479,18 @@ function ChangePasswordInitialPage() {
         contraseña temporal que recibiste por email queda desactivada.
       </p>
       <form onSubmit={onSubmit} className="space-y-4">
-        <TextField
+        <PasswordField
           id="newPassword"
           label="Nueva contraseña (mín. 12 caracteres)"
-          type="password"
           autoComplete="new-password"
           minLength={12}
           value={newPassword}
           onChange={setNewPassword}
           required
         />
-        <TextField
+        <PasswordField
           id="confirmPassword"
           label="Repite la contraseña"
-          type="password"
           autoComplete="new-password"
           minLength={12}
           value={confirm}
