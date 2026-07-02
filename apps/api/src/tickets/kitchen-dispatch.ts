@@ -15,6 +15,7 @@ import {
 
 import { getPrisma } from "../context.js";
 import { getStoreEventBus } from "../realtime/store-event-bus.js";
+import { cashierLabelFrom } from "../users/display.js";
 
 export interface DispatchCtx {
   tenantId: string;
@@ -152,10 +153,9 @@ export async function dispatchKitchenTicket(
   const issuedAt = new Date();
   const cashierUser = await prisma.user.findUniqueOrThrow({
     where: { id: ctx.cashierId },
-    select: { email: true },
+    select: { email: true, alias: true },
   });
-  const cashierLabel =
-    cashierUser.email.split("@")[0] ?? cashierUser.email;
+  const cashierLabel = cashierLabelFrom(cashierUser);
 
   const sections: DispatchResult["body"]["sections"] = [];
   for (const sec of ["BARRA", "COCINA", "SALON"] as KitchenSection[]) {

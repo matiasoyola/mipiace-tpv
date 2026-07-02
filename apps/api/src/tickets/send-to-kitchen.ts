@@ -31,6 +31,7 @@ import {
 
 import { getPrisma } from "../context.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
+import { cashierLabelFrom } from "../users/display.js";
 import { dispatchKitchenTicket } from "./kitchen-dispatch.js";
 
 interface ProductWithTags {
@@ -187,9 +188,9 @@ async function handleLegacyPdfFallback(
   const issuedAt = new Date();
   const cashierUser = await prisma.user.findUniqueOrThrow({
     where: { id: cashier.sub },
-    select: { email: true },
+    select: { email: true, alias: true },
   });
-  const cashierLabel = cashierUser.email.split("@")[0] ?? cashierUser.email;
+  const cashierLabel = cashierLabelFrom(cashierUser);
 
   const sections: Array<{
     section: KitchenSection;

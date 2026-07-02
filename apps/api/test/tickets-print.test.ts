@@ -40,7 +40,7 @@ interface FakeTicket {
   paidAt: Date | null;
   createdAt: Date;
   table: { name: string } | null;
-  user: { email: string };
+  user: { email: string; alias: string | null };
   register: { name: string; store: { name: string; fiscalAddress: unknown } };
   tenant: { name: string; receiptFooter: string | null; fiscalProfile: unknown };
   lines: Array<{
@@ -167,7 +167,7 @@ function seedTicket(overrides: Partial<FakeTicket> = {}): FakeTicket {
     paidAt: new Date("2026-06-02T12:00:00Z"),
     createdAt: new Date("2026-06-02T11:55:00Z"),
     table: null,
-    user: { email: "ana@bar.es" },
+    user: { email: "ana@bar.es", alias: null },
     register: {
       name: "Caja 1",
       store: {
@@ -228,6 +228,36 @@ beforeEach(() => {
 });
 
 describe("POST /tickets/:id/print/escpos", () => {
+  // v1.7-alias-cajeros: el ticket impreso lleva el alias del cajero;
+  // los users legacy sin alias siguen imprimiendo el email recortado.
+  it("cashierLabel usa el alias cuando existe", async () => {
+    seedTicket({ user: { email: "m.garcia.1987@gmail.com", alias: "Maria" } });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/tickets/${TICKET}/print/escpos?target=usb`,
+      headers: { authorization: `Bearer ${signSession()}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.rawPayload.toString("latin1");
+    expect(body).toContain("Cajero: Maria");
+    expect(body).not.toContain("m.garcia.1987");
+  });
+
+  it("cashierLabel sin alias → fallback al email recortado", async () => {
+    seedTicket({ user: { email: "m.garcia.1987@gmail.com", alias: null } });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/tickets/${TICKET}/print/escpos?target=usb`,
+      headers: { authorization: `Bearer ${signSession()}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.rawPayload.toString("latin1");
+    expect(body).toContain("Cajero: m.garcia.1987");
+    expect(body).not.toContain("@gmail.com");
+  });
+
   it("target=usb devuelve binary octet-stream con ESC @", async () => {
     seedTicket();
     const app = await buildApp();

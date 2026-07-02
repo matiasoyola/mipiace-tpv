@@ -32,7 +32,7 @@ import { SalePage, type TableContext } from "./pages/SalePage.js";
 import { ShiftForceCloseScreen } from "./pages/ShiftForceCloseScreen.js";
 import { ShiftOpenScreen } from "./pages/ShiftOpenScreen.js";
 import { TableMapScreen, type ApiTable } from "./pages/TableMapScreen.js";
-import { clearCashierSession } from "./storage.js";
+import { cashierDisplayLabel, clearCashierSession } from "./storage.js";
 
 type CashierUser = CashierLoginResponse["user"] & { sessionTtlMinutes: number };
 
@@ -66,10 +66,13 @@ export function App() {
   // checkout intactos) y al validar se reintenta la request original.
   const [reloginPrompt, setReloginPrompt] = useState<{
     email: string;
+    alias: string | null;
     resolve: (renewed: boolean) => void;
   } | null>(null);
   const cashierEmail =
     cashier.kind !== "needsLogin" ? cashier.cashier.email : null;
+  const cashierAlias =
+    cashier.kind !== "needsLogin" ? cashier.cashier.alias : null;
   useEffect(() => {
     if (!cashierEmail) {
       registerSessionExpiredHandler(null);
@@ -78,11 +81,11 @@ export function App() {
     registerSessionExpiredHandler(
       () =>
         new Promise<boolean>((resolve) => {
-          setReloginPrompt({ email: cashierEmail, resolve });
+          setReloginPrompt({ email: cashierEmail, alias: cashierAlias, resolve });
         }),
     );
     return () => registerSessionExpiredHandler(null);
-  }, [cashierEmail]);
+  }, [cashierEmail, cashierAlias]);
 
   // v1.3-hotfix2 · ocultar teclado virtual de Android/iOS al tocar fuera
   // de un input. Por defecto el navegador mantiene el teclado abierto
@@ -232,6 +235,7 @@ export function App() {
       {reloginPrompt && (
         <ReloginPinModal
           email={reloginPrompt.email}
+          alias={reloginPrompt.alias}
           onDone={(renewed) => {
             reloginPrompt.resolve(renewed);
             setReloginPrompt(null);
@@ -254,7 +258,7 @@ export function App() {
         />
       ) : cashier.kind === "needsShiftOpen" ? (
         <ShiftOpenScreen
-          cashierEmail={cashier.cashier.email}
+          cashierLabel={cashierDisplayLabel(cashier.cashier)}
           registerName={register.name}
           storeName={store.name}
           onOpened={(shift) => {
@@ -399,6 +403,7 @@ function TpvHome(props: {
           diners: res.ticket.diners ?? table.activeTicket?.diners ?? null,
           openedAt: res.ticket.createdAt ?? table.activeTicket?.openedAt ?? null,
           openedByEmail: table.activeTicket?.openedByEmail ?? null,
+          openedByAlias: table.activeTicket?.openedByAlias ?? null,
           activeTicketId: res.ticket.id,
         },
         initialTableLines: mapServerDraftLines(res.ticket.lines),
@@ -450,7 +455,7 @@ function TpvHome(props: {
   if (view.kind === "map") {
     return (
       <TableMapScreen
-        cashierEmail={props.cashier.email}
+        cashierLabel={cashierDisplayLabel(props.cashier)}
         storeName={props.storeName}
         registerName={props.registerName}
         onPickTable={(table) => void pickTable(table)}
@@ -469,7 +474,7 @@ function TpvHome(props: {
     <SalePage
       key={view.tableContext?.id ?? "quick-sale"}
       shiftId={props.shiftId}
-      cashierEmail={props.cashier.email}
+      cashierLabel={cashierDisplayLabel(props.cashier)}
       cashierRole={props.cashier.role}
       registerName={props.registerName}
       registerId={props.registerId}
@@ -514,7 +519,12 @@ function TpvHome(props: {
 // ─── Modo prueba (B-OnboardingV2) ──────────────────────────────────
 
 interface TestBootstrap {
-  user: { id: string; email: string; role: "MANAGER" | "CASHIER" };
+  user: {
+    id: string;
+    email: string;
+    alias: string | null;
+    role: "MANAGER" | "CASHIER";
+  };
   tenant: { id: string; name: string; cashierAutoLogoutMinutes: number };
   register: { id: string; name: string; numSerieHolded: string | null };
   store: { id: string; name: string };
@@ -544,7 +554,7 @@ function TestModeTpv({
     >
       {cashier.kind === "needsShiftOpen" ? (
         <ShiftOpenScreen
-          cashierEmail={bootstrap.user.email}
+          cashierLabel={cashierDisplayLabel(bootstrap.user)}
           registerName={bootstrap.register.name}
           storeName={bootstrap.store.name}
           onOpened={(shift) => {

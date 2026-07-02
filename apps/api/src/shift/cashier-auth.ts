@@ -73,7 +73,7 @@ export async function registerCashierAuthRoutes(
           // turno en el TPV con su propio email.
           role: { in: ["OWNER", "MANAGER", "CASHIER"] },
         },
-        select: { id: true, role: true, pinHash: true, email: true },
+        select: { id: true, role: true, pinHash: true, email: true, alias: true },
       });
       if (!user || !user.pinHash) {
         const state = await registerFailure(rlKey);
@@ -122,7 +122,10 @@ export async function registerCashierAuthRoutes(
         sessionTtlMinutes: tenant.cashierSessionTtlMinutes,
         user: {
           id: user.id,
+          // v1.7-alias-cajeros: el email se mantiene por compat con
+          // devices con SW viejo — NO quitarlo del contrato.
           email: user.email,
+          alias: user.alias,
           role: user.role,
         },
         shiftState,
@@ -162,7 +165,7 @@ export async function registerCashierAuthRoutes(
       const [user, register, tenant, shift] = await Promise.all([
         prisma.user.findUnique({
           where: { id: ctx.sub },
-          select: { id: true, email: true, role: true },
+          select: { id: true, email: true, alias: true, role: true },
         }),
         prisma.register.findUnique({
           where: { id: ctx.rid },
@@ -190,7 +193,7 @@ export async function registerCashierAuthRoutes(
         });
       }
       return reply.code(200).send({
-        user: { id: user.id, email: user.email, role: user.role },
+        user: { id: user.id, email: user.email, alias: user.alias, role: user.role },
         tenant: {
           id: tenant.id,
           name: tenant.name,

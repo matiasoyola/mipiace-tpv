@@ -11,16 +11,24 @@ import { useState } from "react";
 import { Eye, EyeOff, Loader2, Lock } from "lucide-react";
 
 import { apiWithDevice, ApiError } from "../api.js";
-import { setCashierSession } from "../storage.js";
+import { cashierDisplayLabel, setCashierSession } from "../storage.js";
 
 interface ReloginResponse {
   sessionToken: string;
   sessionTtlMinutes: number;
-  user: { id: string; email: string; role: "MANAGER" | "CASHIER" };
+  user: {
+    id: string;
+    email: string;
+    alias: string | null;
+    role: "MANAGER" | "CASHIER";
+  };
 }
 
 export function ReloginPinModal(props: {
+  // El email sigue siendo la credencial del login; el alias es sólo
+  // lo que se muestra (v1.7-alias-cajeros).
   email: string;
+  alias: string | null;
   // true → sesión renovada (la request original se reintenta).
   // false → el cajero canceló (la acción falla con el 401 original).
   onDone: (renewed: boolean) => void;
@@ -44,6 +52,7 @@ export function ReloginPinModal(props: {
         sessionTtlMinutes: res.sessionTtlMinutes,
         userId: res.user.id,
         email: res.user.email,
+        alias: res.user.alias,
         role: res.user.role,
       });
       props.onDone(true);
@@ -71,7 +80,7 @@ export function ReloginPinModal(props: {
           en curso no se pierde.
         </p>
         <div className="text-[13.5px] font-medium text-mipiace-ink mb-2 truncate">
-          {props.email}
+          {cashierDisplayLabel(props)}
         </div>
         <div className="relative mb-3">
           <input

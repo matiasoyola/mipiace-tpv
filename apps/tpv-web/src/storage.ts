@@ -39,7 +39,21 @@ export interface CashierSession {
   sessionTtlMinutes: number;
   userId: string;
   email: string;
+  // v1.7-alias-cajeros: nombre visible del cajero. Opcional para
+  // tolerar sesiones guardadas antes del bloque (sin alias) — el
+  // display cae al email.
+  alias?: string | null;
   role: "MANAGER" | "CASHIER";
+}
+
+// Label de display del cajero: alias si existe, email si no. Único
+// punto de decisión para header, botón Bloquear, relogin, etc.
+export function cashierDisplayLabel(c: {
+  alias?: string | null;
+  email: string;
+}): string {
+  const alias = c.alias?.trim();
+  return alias && alias.length > 0 ? alias : c.email;
 }
 
 export function getCashierSession(): CashierSession | null {
@@ -54,6 +68,7 @@ export function getCashierSession(): CashierSession | null {
       sessionTtlMinutes: Math.max(1, Math.round((test.expiresAt - Date.now()) / 60_000)),
       userId: "",
       email: "",
+      alias: null,
       role: "MANAGER",
     };
   }
@@ -76,6 +91,10 @@ export function clearCashierSession(): void {
 
 export interface RecentCashier {
   email: string;
+  // v1.7-alias-cajeros: nombre visible. Opcional — las entradas
+  // guardadas antes del bloque no lo tienen y el display cae al email.
+  // Se rellena/actualiza en cada login correcto.
+  alias?: string | null;
   // Opcional — se rellena tras el primer login. Antes sólo email.
   initials?: string;
   // ISO de la última vez que se vio. Se usa para ordenar; sin caducidad.

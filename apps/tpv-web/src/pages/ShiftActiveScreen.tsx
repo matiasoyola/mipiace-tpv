@@ -12,7 +12,7 @@ export function ShiftActiveScreen({
   shiftId,
   cashOpening,
   openedAt,
-  cashierEmail,
+  cashierLabel,
   cashierRole,
   registerName,
   storeName,
@@ -23,7 +23,7 @@ export function ShiftActiveScreen({
   shiftId: string;
   cashOpening: string;
   openedAt: string;
-  cashierEmail: string;
+  cashierLabel: string;
   cashierRole: "MANAGER" | "CASHIER";
   registerName: string;
   storeName: string;
@@ -38,7 +38,7 @@ export function ShiftActiveScreen({
         <Logo size={26} />
         <div className="flex items-center gap-3">
           <div className="text-right">
-            <div className="text-[12.5px] text-slate-500">{cashierEmail}</div>
+            <div className="text-[12.5px] text-slate-500">{cashierLabel}</div>
             <div className="text-[11.5px] text-slate-400">
               Auto-logout: {autoLogoutMinutes} min
             </div>

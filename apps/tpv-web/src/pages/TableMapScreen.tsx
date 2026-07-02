@@ -43,7 +43,10 @@ export interface ApiTable {
     total: string;
     diners: number | null;
     openedAt: string;
+    // v1.7-alias-cajeros: alias preferente para el chip de operador;
+    // el email queda como fallback (users legacy o API vieja).
     openedByEmail: string | null;
+    openedByAlias: string | null;
     lineCount: number;
   } | null;
   createdAt: string;
@@ -64,7 +67,8 @@ const ZONE_LABEL: Record<TableZone | "ALL", string> = {
 };
 
 export interface TableMapScreenProps {
-  cashierEmail: string;
+  // v1.7-alias-cajeros: label de display (alias con fallback a email).
+  cashierLabel: string;
   storeName: string;
   registerName: string;
   onPickTable: (table: ApiTable) => void;
@@ -180,7 +184,7 @@ export function TableMapScreen(props: TableMapScreenProps) {
             onClick={props.onLogoutCashier}
             className="h-9 px-3 rounded-lg bg-mipiace-stone hover:bg-slate-100 text-[12.5px] text-mipiace-ink max-w-[45vw] truncate"
           >
-            {props.cashierEmail.split("@")[0]}
+            {props.cashierLabel.split("@")[0]}
           </button>
         </div>
       </header>
@@ -418,12 +422,28 @@ function TableCard({
       }
       className={`relative aspect-[7/6] rounded-2xl border-2 ${stateClass} flex flex-col p-3.5 text-left transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100`}
     >
+      {/* v1.7-alias-cajeros · rider: los badges CUENTA / COBRO PENDIENTE
+          se solapaban con "N pax" (ambos absolute top-right). Ahora la
+          columna derecha apila pax + badge verticalmente. */}
       <div className="flex justify-between items-start">
         <span className="text-[18px] font-semibold tracking-tight">
           {table.name}
         </span>
-        <span className="text-[10.5px] uppercase tracking-wider font-medium opacity-80">
-          {table.capacity} pax
+        <span className="flex flex-col items-end gap-1">
+          <span className="text-[10.5px] uppercase tracking-wider font-medium opacity-80">
+            {table.capacity} pax
+          </span>
+          {pendingCheckout ? (
+            <span className="text-[9.5px] font-semibold uppercase tracking-wider bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">
+              cobro pendiente
+            </span>
+          ) : (
+            table.state === "BILLING" && (
+              <span className="text-[9.5px] font-semibold uppercase tracking-wider bg-amber-200/70 text-amber-900 px-1.5 py-0.5 rounded">
+                cuenta
+              </span>
+            )
+          )}
         </span>
       </div>
       {table.state !== "FREE" && table.activeTicket && (
@@ -436,10 +456,16 @@ function TableCard({
                 <span>{table.activeTicket.diners}p</span>
               </>
             ) : null}
-            {table.activeTicket.openedByEmail && (
+            {(table.activeTicket.openedByAlias ??
+              table.activeTicket.openedByEmail) && (
               <>
                 <span className="opacity-50">·</span>
-                <span>{initials(table.activeTicket.openedByEmail)}</span>
+                <span>
+                  {initials(
+                    table.activeTicket.openedByAlias ??
+                      table.activeTicket.openedByEmail!,
+                  )}
+                </span>
               </>
             )}
           </div>
@@ -447,17 +473,6 @@ function TableCard({
             {Number(table.activeTicket.total).toFixed(2)} €
           </div>
         </div>
-      )}
-      {pendingCheckout ? (
-        <span className="absolute top-2 right-2 text-[9.5px] font-semibold uppercase tracking-wider bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">
-          cobro pendiente
-        </span>
-      ) : (
-        table.state === "BILLING" && (
-          <span className="absolute top-2 right-2 text-[9.5px] font-semibold uppercase tracking-wider bg-amber-200/70 text-amber-900 px-1.5 py-0.5 rounded">
-            cuenta
-          </span>
-        )
       )}
       {opening && (
         <span className="absolute inset-0 flex items-center justify-center bg-white/60 rounded-2xl">
@@ -570,9 +585,9 @@ function countByZone(tables: ApiTable[]): Record<TableZone, number> {
   return acc;
 }
 
-// Iniciales del cajero a partir del email para los chips de tarjeta.
-// Usamos "MO" para "matias.oyola@..." y "L" para "lucia@..." (un sólo
-// carácter cuando no hay separador).
+// Iniciales del cajero para los chips de tarjeta, a partir del alias
+// (v1.7) o del email como fallback. Usamos "MO" para "matias.oyola@..."
+// y "L" para "lucia@..." (un sólo carácter cuando no hay separador).
 function initials(email: string): string {
   const local = (email.split("@")[0] ?? "").trim();
   const parts = local.split(/[._-]/).filter(Boolean);

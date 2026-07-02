@@ -17,6 +17,30 @@ import { hashPassword } from "../auth/passwords.js";
 const emailFormat = "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$";
 const pinFormat = "^[0-9]{4,8}$";
 
+// v1.7-alias-cajeros: unicidad del alias por tenant entre cajeros
+// activos (case-insensitive), validada aquí y no como constraint de
+// BD — "María" puede existir en dos tenants. Los revocados (email
+// sentinel @revoked.local) no bloquean el alias para nuevos cajeros.
+async function findAliasCollision(
+  prisma: ReturnType<typeof getPrisma>,
+  tenantId: string,
+  alias: string,
+  excludeUserId?: string,
+): Promise<{ id: string } | null> {
+  return prisma.user.findFirst({
+    where: {
+      tenantId,
+      role: { in: ["MANAGER", "CASHIER"] },
+      alias: { equals: alias, mode: "insensitive" },
+      NOT: [
+        { email: { endsWith: "@revoked.local" } },
+        ...(excludeUserId ? [{ id: excludeUserId }] : []),
+      ],
+    },
+    select: { id: true },
+  });
+}
+
 export async function registerCashiersRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     "/cashiers",
@@ -32,6 +56,7 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
         select: {
           id: true,
           email: true,
+          alias: true,
           role: true,
           lastLoginAt: true,
           createdAt: true,
@@ -42,6 +67,7 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
         cashiers: users.map((u) => ({
           id: u.id,
           email: u.email,
+          alias: u.alias,
           role: u.role,
           lastLoginAt: u.lastLoginAt?.toISOString() ?? null,
           createdAt: u.createdAt.toISOString(),
@@ -57,10 +83,11 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
       schema: {
         body: {
           type: "object",
-          required: ["email", "role", "pin"],
+          required: ["email", "alias", "role", "pin"],
           additionalProperties: false,
           properties: {
             email: { type: "string", pattern: emailFormat, maxLength: 320 },
+            alias: { type: "string", minLength: 1, maxLength: 40 },
             role: { type: "string", enum: ["MANAGER", "CASHIER"] },
             pin: { type: "string", pattern: pinFormat },
           },
@@ -69,12 +96,21 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
     },
     async (request, reply) => {
       const auth = request.auth!;
-      const { email, role, pin } = request.body as {
+      const { email, alias, role, pin } = request.body as {
         email: string;
+        alias: string;
         role: "MANAGER" | "CASHIER";
         pin: string;
       };
       const lowerEmail = email.toLowerCase();
+      // El schema garantiza 1..40 chars pero no impide sólo-espacios.
+      const trimmedAlias = alias.trim();
+      if (trimmedAlias.length === 0) {
+        return reply.code(400).send({
+          error: "INVALID_ALIAS",
+          message: "El alias no puede estar vacío",
+        });
+      }
       const prisma = getPrisma();
 
       const collision = await prisma.user.findUnique({
@@ -88,22 +124,111 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
         });
       }
 
+      const aliasCollision = await findAliasCollision(
+        prisma,
+        auth.tenantId,
+        trimmedAlias,
+      );
+      if (aliasCollision) {
+        return reply.code(409).send({
+          error: "ALIAS_TAKEN",
+          message: `Ya hay un cajero llamado ${trimmedAlias}`,
+        });
+      }
+
       const pinHash = await hashPassword(pin);
       const created = await prisma.user.create({
         data: {
           tenantId: auth.tenantId,
           email: lowerEmail,
+          alias: trimmedAlias,
           pinHash,
           role,
         },
-        select: { id: true, email: true, role: true, createdAt: true },
+        select: { id: true, email: true, alias: true, role: true, createdAt: true },
       });
       return reply.code(201).send({
         cashier: {
           id: created.id,
           email: created.email,
+          alias: created.alias,
           role: created.role,
           createdAt: created.createdAt.toISOString(),
+        },
+      });
+    },
+  );
+
+  // v1.7-alias-cajeros: edición del alias. Sólo OWNER (misma política
+  // que alta/revocación). El email no se edita — es la credencial.
+  app.patch(
+    "/cashiers/:cashierId",
+    {
+      preHandler: requireOwner,
+      schema: {
+        params: {
+          type: "object",
+          required: ["cashierId"],
+          properties: { cashierId: { type: "string", format: "uuid" } },
+        },
+        body: {
+          type: "object",
+          required: ["alias"],
+          additionalProperties: false,
+          properties: {
+            alias: { type: "string", minLength: 1, maxLength: 40 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const auth = request.auth!;
+      const { cashierId } = request.params as { cashierId: string };
+      const { alias } = request.body as { alias: string };
+      const trimmedAlias = alias.trim();
+      if (trimmedAlias.length === 0) {
+        return reply.code(400).send({
+          error: "INVALID_ALIAS",
+          message: "El alias no puede estar vacío",
+        });
+      }
+      const prisma = getPrisma();
+      const target = await prisma.user.findFirst({
+        where: {
+          id: cashierId,
+          tenantId: auth.tenantId,
+          role: { in: ["MANAGER", "CASHIER"] },
+        },
+        select: { id: true },
+      });
+      if (!target) {
+        return reply
+          .code(404)
+          .send({ error: "CASHIER_NOT_FOUND", message: "Cajero no encontrado" });
+      }
+      const aliasCollision = await findAliasCollision(
+        prisma,
+        auth.tenantId,
+        trimmedAlias,
+        target.id,
+      );
+      if (aliasCollision) {
+        return reply.code(409).send({
+          error: "ALIAS_TAKEN",
+          message: `Ya hay un cajero llamado ${trimmedAlias}`,
+        });
+      }
+      const updated = await prisma.user.update({
+        where: { id: target.id },
+        data: { alias: trimmedAlias },
+        select: { id: true, email: true, alias: true, role: true },
+      });
+      return reply.code(200).send({
+        cashier: {
+          id: updated.id,
+          email: updated.email,
+          alias: updated.alias,
+          role: updated.role,
         },
       });
     },

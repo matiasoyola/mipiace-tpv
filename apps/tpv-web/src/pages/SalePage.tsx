@@ -197,13 +197,18 @@ export interface TableContext {
   capacity: number;
   diners: number | null;
   openedAt: string | null;
+  // v1.7-alias-cajeros: alias preferente; email se conserva como
+  // fallback para tickets abiertos por users legacy sin alias.
   openedByEmail: string | null;
+  openedByAlias: string | null;
   activeTicketId: string | null;
 }
 
 export interface SalePageProps {
   shiftId: string;
-  cashierEmail: string;
+  // v1.7-alias-cajeros: label de display (alias con fallback a email),
+  // calculado en App con cashierDisplayLabel.
+  cashierLabel: string;
   cashierRole: "MANAGER" | "CASHIER";
   registerName: string;
   registerId: string;
@@ -1341,7 +1346,7 @@ export function SalePage(props: SalePageProps) {
               </span>
             </div>
             <div className="text-center text-slate-600 font-medium truncate">
-              {props.cashierEmail}
+              {props.cashierLabel}
             </div>
             <div className="flex items-center justify-end gap-3 text-slate-500">
               <span className="tabular-nums font-medium hidden sm:inline">
@@ -1715,14 +1720,14 @@ export function SalePage(props: SalePageProps) {
                 setDrawerOpen(false);
                 props.onLogoutCashier();
               }}
-              title={`Bloquear (${props.cashierEmail})`}
+              title={`Bloquear (${props.cashierLabel})`}
               className="w-full h-12 flex items-center gap-3 px-4 rounded-xl text-slate-600 hover:bg-slate-50 text-[14.5px] font-medium"
             >
               <Lock
                 className="w-[19px] h-[19px] text-slate-500 shrink-0"
                 strokeWidth={2.1}
               />
-              <span className="truncate">Bloquear ({props.cashierEmail})</span>
+              <span className="truncate">Bloquear ({props.cashierLabel})</span>
             </button>
           </nav>
         </aside>
@@ -2950,7 +2955,11 @@ function TableContextLine({
     parts.push(`${table.diners} comensales`);
   }
   if (elapsed) parts.push(elapsed);
-  if (table.openedByEmail) parts.push(table.openedByEmail.split("@")[0]!);
+  if (table.openedByAlias) {
+    parts.push(table.openedByAlias);
+  } else if (table.openedByEmail) {
+    parts.push(table.openedByEmail.split("@")[0]!);
+  }
   parts.push(`${itemCount} ${itemCount === 1 ? "ud." : "uds."}`);
   return <>{parts.join(" · ")}</>;
 }

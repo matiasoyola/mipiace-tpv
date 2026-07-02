@@ -31,6 +31,10 @@ export interface ZReportInput {
   // trail (B5 §2.3). Null si no hubo SYNC_FAILED o si autorizó un
   // MANAGER directamente sin PIN.
   managerAuthorizationEmail: string | null;
+  // v1.7-alias-cajeros: alias del autorizador. Se imprime delante del
+  // email — el email se conserva en el PDF como audit trail porque el
+  // alias no es único globalmente.
+  managerAuthorizationAlias: string | null;
 }
 
 const STORAGE_ROOT =
@@ -112,7 +116,12 @@ export async function generateZReportPdf(input: ZReportInput): Promise<string> {
       line("Cierre autorizado con incidencias.", { bold: true });
     }
     if (input.managerAuthorizationEmail) {
-      line(`Autorizado por: ${input.managerAuthorizationEmail}`);
+      const alias = input.managerAuthorizationAlias?.trim();
+      line(
+        alias
+          ? `Autorizado por: ${alias} (${input.managerAuthorizationEmail})`
+          : `Autorizado por: ${input.managerAuthorizationEmail}`,
+      );
     }
   }
   hr();

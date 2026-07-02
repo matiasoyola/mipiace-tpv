@@ -165,7 +165,7 @@ async function renderQuickSale() {
     root.render(
       <SalePage
         shiftId="shift-1"
-        cashierEmail="caja1@bar.es"
+        cashierLabel="caja1@bar.es"
         cashierRole="CASHIER"
         registerName="Caja 1"
         registerId="reg-1"
@@ -184,7 +184,7 @@ async function renderTableSale(initialLines: ServerDraftLine[]) {
     root.render(
       <SalePage
         shiftId="shift-1"
-        cashierEmail="caja1@bar.es"
+        cashierLabel="caja1@bar.es"
         cashierRole="CASHIER"
         registerName="Caja 1"
         registerId="reg-1"
