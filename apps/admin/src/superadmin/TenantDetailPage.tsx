@@ -24,12 +24,40 @@ import { SuperAdminShell } from "./SuperAdminShell.js";
 import type {
   ActivateTenantResponse,
   BusinessType,
+  HoldedConnectionStatus,
   ImpersonateResponse,
   ImpersonationMode,
   TenantDetail,
   TestCashierTokenResponse,
 } from "./types.js";
 import { BUSINESS_TYPE_LABEL } from "./types.js";
+
+// v1.9.1 · presentación del estado de conexión Holded (caso Thalia:
+// key válida pero suscripción suspendida por impago → antes se pintaba
+// "Conectado" con el sync parado).
+const HOLDED_STATUS_LABEL: Record<HoldedConnectionStatus, string> = {
+  CONNECTED: "Conectado",
+  SUSPENDED: "Suscripción suspendida",
+  ERROR: "Error de sync",
+  NOT_CONNECTED: "Sin conectar",
+};
+
+const HOLDED_STATUS_TEXT_CLS: Record<HoldedConnectionStatus, string> = {
+  CONNECTED: "text-slate-900",
+  SUSPENDED: "text-red-700 font-medium",
+  ERROR: "text-amber-700 font-medium",
+  NOT_CONNECTED: "text-slate-900",
+};
+
+const HOLDED_STATUS_ACCENT: Record<
+  HoldedConnectionStatus,
+  "neutral" | "ok" | "warning" | "danger"
+> = {
+  CONNECTED: "ok",
+  SUSPENDED: "danger",
+  ERROR: "warning",
+  NOT_CONNECTED: "warning",
+};
 
 // B-Hardening B · U1: helper local para convertir una excepción de
 // superApi en mensaje humano. Si es SuperAdminApiError (lleva code +
@@ -522,8 +550,17 @@ export function TenantDetailPage() {
           </div>
           <div>
             <dt className="text-[11.5px] uppercase text-slate-500">Holded</dt>
-            <dd className="text-slate-900">
-              {tenant.holdedConnected ? "Conectado" : "Sin conectar"}
+            {/* v1.9.1 · estado real de la conexión. SUSPENDED (402) va
+                en rojo con copy accionable: el sync está parado hasta
+                que el cliente pague su Holded (caso Thalia). */}
+            <dd className={HOLDED_STATUS_TEXT_CLS[tenant.holdedStatus]}>
+              {HOLDED_STATUS_LABEL[tenant.holdedStatus]}
+              {tenant.holdedStatus === "SUSPENDED" && (
+                <div className="text-[11.5px] text-red-600 font-normal mt-0.5">
+                  El cliente debe regularizar el pago en Holded — el sync
+                  está parado.
+                </div>
+              )}
             </dd>
           </div>
         </dl>
@@ -997,8 +1034,8 @@ function ActiveTenantActions({
         <CardMetric label="Turnos abiertos" value={tenant.metrics.activeShifts} />
         <CardMetric
           label="Holded"
-          value={tenant.holdedConnected ? "Conectado" : "Sin conectar"}
-          accent={tenant.holdedConnected ? "ok" : "warning"}
+          value={HOLDED_STATUS_LABEL[tenant.holdedStatus]}
+          accent={HOLDED_STATUS_ACCENT[tenant.holdedStatus]}
         />
       </div>
 
@@ -1052,14 +1089,16 @@ function CardMetric({
 }: {
   label: string;
   value: number | string;
-  accent?: "neutral" | "ok" | "warning";
+  accent?: "neutral" | "ok" | "warning" | "danger";
 }) {
   const tone =
-    accent === "warning"
-      ? "border-amber-200 bg-amber-50"
-      : accent === "ok"
-        ? "border-emerald-200 bg-emerald-50"
-        : "border-slate-200 bg-white";
+    accent === "danger"
+      ? "border-red-200 bg-red-50"
+      : accent === "warning"
+        ? "border-amber-200 bg-amber-50"
+        : accent === "ok"
+          ? "border-emerald-200 bg-emerald-50"
+          : "border-slate-200 bg-white";
   return (
     <div className={`rounded-xl border p-4 ${tone}`}>
       <div className="text-[11.5px] uppercase tracking-wide text-slate-500 mb-1">

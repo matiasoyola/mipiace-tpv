@@ -32,6 +32,7 @@
 import type { PrismaClient } from "@mipiacetpv/db";
 import {
   ApiKeyClient,
+  HoldedSubscriptionSuspendedError,
   buildTaxRateResolver,
   extractImageUrl,
   iterateAllContacts,
@@ -93,7 +94,9 @@ export interface IncrementalSyncStats {
   productsImageHoldedNone: number;
   productsImageHoldedFailed: number;
   durationMs: number;
-  errors: Array<{ step: string; message: string }>;
+  // v1.9.1 · `code` sólo se rellena para errores que el super-admin
+  // necesita distinguir sin parsear el mensaje (hoy: 402 suspensión).
+  errors: Array<{ step: string; message: string; code?: "HOLDED_SUSPENDED" }>;
 }
 
 function emptyStats(): IncrementalSyncStats {
@@ -380,7 +383,16 @@ export async function runIncrementalSync(
     return stats;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    stats.errors.push({ step: "<top>", message });
+    // v1.9.1 · el 402 lleva código propio: el badge "Suscripción
+    // suspendida" del super-admin lo lee de estos stats sin tener que
+    // volver a llamar a Holded.
+    stats.errors.push({
+      step: "<top>",
+      message,
+      ...(err instanceof HoldedSubscriptionSuspendedError
+        ? { code: "HOLDED_SUSPENDED" as const }
+        : {}),
+    });
     stats.durationMs = Date.now() - start;
     await persistDone(prisma, tenantId, stats);
     log.error("incremental-sync falló", { tenantId, message });

@@ -14,6 +14,13 @@
 # Stage 1 · deps  ·  Instala el workspace completo con pnpm
 # ─────────────────────────────────────────────────────────────────────
 FROM node:20-alpine AS deps
+# v1.9.1 · corepack ≥0.19 pregunta "Corepack is about to download… [Y/n]"
+# la primera vez que resuelve pnpm en runtime (docker compose run sin
+# TTY se queda colgado esperando a un humano — visto en los deploys
+# v1.6-v1.9 al aplicar migraciones). ENV en vez de ARG: tiene que
+# persistir en la imagen final para los `compose run/exec` de deploy.sh
+# y bootstrap-hostinger.sh.
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 RUN apk add --no-cache python3 make g++ git openssl ca-certificates
 
@@ -76,6 +83,10 @@ RUN pnpm --filter @mipiacetpv/api exec tsc --noEmit
 # Stage 3 · api  ·  Runtime de la API
 # ─────────────────────────────────────────────────────────────────────
 FROM node:20-alpine AS api
+# v1.9.1 · mismo motivo que en `deps`: sin esto, cualquier `docker
+# compose run api pnpm …` (migraciones en deploy) bloquea con el
+# prompt interactivo de corepack.
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 RUN apk add --no-cache openssl ca-certificates tini
 

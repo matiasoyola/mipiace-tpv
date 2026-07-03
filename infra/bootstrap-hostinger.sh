@@ -128,6 +128,20 @@ docker compose --env-file "$ENV_FILE" -f infra/docker-compose.prod.yml run --rm 
 log "Levantando api + worker + static-publish + caddy…"
 docker compose --env-file "$ENV_FILE" -f infra/docker-compose.prod.yml up -d
 
+# ─── 7.5. Cron de backup Postgres ───────────────────────────────────
+# El restore drill del 2026-07-02 destapó que infra/backup-postgres.sh
+# existía pero el cron NUNCA se llegó a instalar en el VPS (se instaló
+# a mano ese día). Mismo patrón idempotente que el disable de nginx:
+# si la entrada ya está en el crontab de root, no la duplicamos.
+BACKUP_CRON_LINE="0 4 * * * $REPO_DIR/infra/backup-postgres.sh >> /var/log/mipiacetpv-backup.log 2>&1"
+if crontab -l 2>/dev/null | grep -qF "infra/backup-postgres.sh"; then
+  log "Cron de backup ya instalado, no se duplica."
+else
+  log "Instalando cron de backup Postgres (diario 04:00)…"
+  (crontab -l 2>/dev/null; echo "$BACKUP_CRON_LINE") | crontab -
+  log "Cron de backup instalado."
+fi
+
 # ─── 8. Health check ────────────────────────────────────────────────
 log "Esperando a que la API arranque…"
 sleep 5
