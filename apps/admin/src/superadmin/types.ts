@@ -27,6 +27,15 @@ export const BUSINESS_TYPE_DESCRIPTION: Record<BusinessType, string> = {
   SERVICES: "Servicios profesionales, talleres. Lista de servicios.",
 };
 
+// v1.9.1 · estado real de la conexión Holded, derivado del último sync
+// incremental en el backend (caso Thalia: key válida pero suscripción
+// suspendida por impago → HTTP 402 y el sync parado).
+export type HoldedConnectionStatus =
+  | "NOT_CONNECTED"
+  | "CONNECTED"
+  | "SUSPENDED"
+  | "ERROR";
+
 export interface TenantListItem {
   id: string;
   name: string;
@@ -34,6 +43,7 @@ export interface TenantListItem {
   ownerEmail: string | null;
   ownerLastLoginAt: string | null;
   holdedConnected: boolean;
+  holdedStatus: HoldedConnectionStatus;
   createdAt: string;
   blockedAt: string | null;
   blockedReason: string | null;
@@ -110,6 +120,7 @@ export interface TenantDetail {
   // TPV. NULL = icono genérico del businessType.
   tpvIconPreset: string | null;
   holdedConnected: boolean;
+  holdedStatus: HoldedConnectionStatus;
   holdedAuthMode: string;
   // v1.3-SuperAdmin-Hub Lote 3: id del panel Holded del cliente. NULL
   // en tenants pre-existentes hasta que el implantador los repase

@@ -19,6 +19,7 @@ import {
 import { hashPassword } from "../auth/passwords.js";
 import { getPrisma } from "../context.js";
 import { encryptSecret } from "../crypto.js";
+import { holdedConnectionStatus } from "../holded/connection-status.js";
 import { loadEnv } from "../env.js";
 import { enqueueInitialSync } from "../queues/initial-sync.js";
 import { enqueueManualSync } from "../queues/catalog-incremental.js";
@@ -268,6 +269,10 @@ export async function registerSuperAdminTenantsRoutes(
             ownerEmail: t.users[0]?.email ?? null,
             ownerLastLoginAt: t.users[0]?.lastLoginAt?.toISOString() ?? null,
             holdedConnected: t.holdedApiKeyCiphertext != null,
+            // v1.9.1 · estado real de la conexión (caso Thalia: key
+            // válida pero suscripción suspendida por impago → 402).
+            // Derivado del último sync incremental, sin llamar a Holded.
+            holdedStatus: holdedConnectionStatus(t),
             createdAt: t.createdAt.toISOString(),
             blockedAt: t.blockedAt?.toISOString() ?? null,
             blockedReason: t.blockedReason,
@@ -371,6 +376,9 @@ export async function registerSuperAdminTenantsRoutes(
         // para que el TPV elija el icono placeholder correcto.
         tpvIconPreset: tenant.tpvIconPreset,
         holdedConnected: tenant.holdedApiKeyCiphertext != null,
+        // v1.9.1 · CONNECTED / SUSPENDED (402) / ERROR / NOT_CONNECTED,
+        // derivado de lastIncrementalSyncStats (ver connection-status.ts).
+        holdedStatus: holdedConnectionStatus(tenant),
         holdedAuthMode: tenant.holdedAuthMode,
         // v1.3-SuperAdmin-Hub Lote 3: id de cuenta en Holded para abrir
         // su panel directamente desde el detalle/hub.

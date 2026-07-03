@@ -136,6 +136,18 @@ loguearte en `https://admin.mipiacetpv.tech/superadmin/login`.
 
 ## 7 · Configurar backups automáticos
 
+Desde v1.9.1 el cron lo instala `infra/bootstrap-hostinger.sh` de forma
+idempotente (no duplica la entrada si ya existe). Basta con volver a
+correr el bootstrap. Para verificar:
+
+```bash
+crontab -l | grep backup-postgres
+# Debe mostrar:
+# 0 4 * * * /opt/mipiacetpv/infra/backup-postgres.sh >> /var/log/mipiacetpv-backup.log 2>&1
+```
+
+Instalación manual (sólo si no puedes correr el bootstrap):
+
 ```bash
 # Crontab del root: dump diario a las 04:00
 crontab -e

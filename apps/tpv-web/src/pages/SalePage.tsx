@@ -1291,6 +1291,7 @@ export function SalePage(props: SalePageProps) {
 
           <SaleWorkspace
             products={filtered}
+            searchQuery={query}
             wildcards={wildcards}
             catalogError={catalogError}
             lines={lines}
@@ -1807,6 +1808,7 @@ function Banner({ color, children }: { color: "amber" | "red"; children: React.R
 
 function SaleWorkspace({
   products,
+  searchQuery,
   catalogError,
   lines,
   contact,
@@ -1837,6 +1839,11 @@ function SaleWorkspace({
   onClickUngroup,
 }: {
   products: CatalogProduct[];
+  // v1.9.1 · texto de búsqueda activo. `products` llega YA filtrado por
+  // la búsqueda, así que sin esto el empty state no puede distinguir
+  // "catálogo vacío de verdad" de "búsqueda sin coincidencias" (y
+  // mostraba el alarmante "Aún no has cargado productos" al buscar).
+  searchQuery: string;
   wildcards: Wildcard[];
   catalogError: string | null;
   lines: CartLine[];
@@ -2167,13 +2174,27 @@ function SaleWorkspace({
               en el catálogo. Crea uno en Holded para verlo aquí.
             </div>
           )}
+        {/* v1.9.1 · búsqueda sin coincidencias. `products` llega ya
+            filtrado por la búsqueda: antes este caso caía en el empty
+            state de catálogo vacío de abajo ("Aún no has cargado
+            productos…"), alarmante y falso con catálogo poblado. */}
+        {!catalogError &&
+          products.length === 0 &&
+          searchQuery.trim().length > 0 && (
+            <div className="text-[13px] text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4">
+              Sin resultados para «{searchQuery.trim()}». Prueba con otro
+              nombre o escanea el código.
+            </div>
+          )}
         {/* v1.3-Servicios-Pinta · Lote 5: empty state general del grid.
             Aparece cuando NO hay productos cargados todavía y no hay
             error de catálogo (que ya pinta su propio bloque arriba).
             Copy adaptado por vertical para que el dueño SERVICES no
-            vea "productos" cuando vende servicios. */}
+            vea "productos" cuando vende servicios. Desde v1.9.1 exige
+            además que no haya búsqueda activa (ese caso va arriba). */}
         {!catalogError &&
           products.length === 0 &&
+          searchQuery.trim().length === 0 &&
           (businessType === "SERVICES" ? (
             <div className="text-[13px] text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4">
               Aún no has cargado servicios. Configúralos en Holded o

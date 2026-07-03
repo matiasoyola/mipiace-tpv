@@ -4,7 +4,11 @@ import { Plus, Search } from "lucide-react";
 
 import { superApi, SuperAdminApiError } from "./api.js";
 import { SuperAdminShell } from "./SuperAdminShell.js";
-import type { TenantListItem, TenantListResponse } from "./types.js";
+import type {
+  HoldedConnectionStatus,
+  TenantListItem,
+  TenantListResponse,
+} from "./types.js";
 import { BUSINESS_TYPE_LABEL } from "./types.js";
 
 function StatusBadge({ state }: { state: "ok" | "warning" | "blocked" }) {
@@ -26,6 +30,31 @@ function StatusBadge({ state }: { state: "ok" | "warning" | "blocked" }) {
       {label}
     </span>
   );
+}
+
+// v1.9.1 · badge de la columna HOLDED. Antes era un boolean (key
+// guardada sí/no) que mostraba "Conectado" con la suscripción de Holded
+// suspendida por impago (caso Thalia, HTTP 402). SUSPENDED va en rojo
+// con badge porque el sync está parado y requiere acción del cliente.
+function HoldedBadge({ status }: { status: HoldedConnectionStatus }) {
+  if (status === "SUSPENDED") {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11.5px] font-medium border bg-red-100 text-red-700 border-red-200">
+        Suscripción suspendida
+      </span>
+    );
+  }
+  if (status === "ERROR") {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11.5px] font-medium border bg-amber-100 text-amber-700 border-amber-200">
+        Error de sync
+      </span>
+    );
+  }
+  if (status === "CONNECTED") {
+    return <span className="text-emerald-700 text-[12px]">Conectado</span>;
+  }
+  return <span className="text-slate-400 text-[12px]">Sin conectar</span>;
 }
 
 // B-OnboardingV2: badge del onboardingState + flag ready. Cuando un
@@ -184,11 +213,7 @@ export function TenantsListPage() {
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    {t.holdedConnected ? (
-                      <span className="text-emerald-700 text-[12px]">Conectado</span>
-                    ) : (
-                      <span className="text-slate-400 text-[12px]">Sin conectar</span>
-                    )}
+                    <HoldedBadge status={t.holdedStatus} />
                   </td>
                   <td className="px-4 py-3 tabular-nums">{t.metrics.ticketsLast7d}</td>
                   <td className="px-4 py-3">
