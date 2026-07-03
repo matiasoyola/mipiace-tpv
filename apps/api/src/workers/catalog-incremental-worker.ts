@@ -12,6 +12,7 @@
 import { Worker } from "bullmq";
 
 import { getPrisma, getRedis } from "../context.js";
+import { captureError } from "../lib/sentry.js";
 import {
   CATALOG_INCREMENTAL_QUEUE_NAME,
   registerTenantRepeatable,
@@ -48,6 +49,13 @@ export function startCatalogIncrementalWorker(): Worker<CatalogIncrementalJob> {
   );
   worker.on("failed", (job, err) => {
     console.error(`[catalog-incremental] job ${job?.id} falló: ${err.message}`);
+    // v1.9: un sync que casca de forma repetida deja el catálogo (y la
+    // propagación de borrados) congelado — alertable, mismo patrón que
+    // ticket-upload/reconciliation.
+    captureError(err, {
+      tenantId: job?.data.tenantId ?? null,
+      extra: { jobId: job?.id, source: job?.data.source },
+    });
   });
   worker.on("completed", (job) => {
     const tag = job.data.source === "manual" ? "manual" : "cron";

@@ -131,6 +131,7 @@ interface FakeProductRow {
   imageCachedAt: Date | null;
   lastSyncedAt: Date;
   needsSkuReview: boolean;
+  archivedFromHoldedAt: Date | null;
 }
 
 const tenantStore = new Map<string, FakeTenantRow>();
@@ -170,9 +171,17 @@ const fakePrisma = {
       return row ?? null;
     }),
     findMany: vi.fn(async ({ where }: any) => {
-      // Usado por initial-sync.enqueueAllProductImages.
+      // Usado por initial-sync.enqueueAllProductImages y por
+      // archiveMissingProducts (v1.9: candidatos a archivar).
       return [...productStore.values()].filter((p) => {
         if (where.tenantId && p.tenantId !== where.tenantId) return false;
+        if (where.active !== undefined && p.active !== where.active) return false;
+        if (
+          where.holdedProductId?.notIn &&
+          where.holdedProductId.notIn.includes(p.holdedProductId)
+        ) {
+          return false;
+        }
         if (where.imageUrl?.not === null && p.imageUrl === null) return false;
         if (
           Object.prototype.hasOwnProperty.call(where, "imageCachedAt") &&
@@ -183,6 +192,14 @@ const fakePrisma = {
         }
         return true;
       });
+    }),
+    count: vi.fn(async ({ where }: any) => {
+      // v1.9: archiveMissingProducts cuenta activos antes de archivar.
+      return [...productStore.values()].filter((p) => {
+        if (where.tenantId && p.tenantId !== where.tenantId) return false;
+        if (where.active !== undefined && p.active !== where.active) return false;
+        return true;
+      }).length;
     }),
     upsert: vi.fn(async ({ where, create, update }: any) => {
       const key = `${where.tenantId_holdedProductId.tenantId}|${where.tenantId_holdedProductId.holdedProductId}`;
@@ -212,6 +229,7 @@ const fakePrisma = {
         imageCachedAt: create.imageCachedAt ?? null,
         lastSyncedAt: new Date(),
         needsSkuReview: false,
+        archivedFromHoldedAt: null,
       };
       productStore.set(key, row);
       return row;
@@ -222,6 +240,12 @@ const fakePrisma = {
         if (p.tenantId !== where.tenantId) continue;
         if (where.active !== undefined && p.active !== where.active) continue;
         if (where.lastSyncedAt?.lt && p.lastSyncedAt >= where.lastSyncedAt.lt) continue;
+        if (
+          where.holdedProductId?.notIn &&
+          where.holdedProductId.notIn.includes(p.holdedProductId)
+        ) {
+          continue;
+        }
         Object.assign(p, data);
         count += 1;
       }
@@ -286,6 +310,7 @@ function seedProduct(holdedId: string, opts: Partial<FakeProductRow> = {}) {
     imageCachedAt: opts.imageCachedAt ?? null,
     lastSyncedAt: opts.lastSyncedAt ?? new Date(Date.now() - 60_000),
     needsSkuReview: false,
+    archivedFromHoldedAt: opts.archivedFromHoldedAt ?? null,
   };
   productStore.set(`${TENANT_ID}|${holdedId}`, row);
   return row;
@@ -352,8 +377,10 @@ describe("runIncrementalSync", () => {
       name: "Volvió",
       active: false,
       sellableViaTpv: false,
-      // Simulamos que lleva tiempo sin verse.
+      // Simulamos que lleva tiempo sin verse y que la conciliación
+      // v1.9 lo archivó por borrado en Holded.
       lastSyncedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      archivedFromHoldedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
     });
 
     holdedProducts = [
@@ -375,6 +402,8 @@ describe("runIncrementalSync", () => {
     const returning = productStore.get(`${TENANT_ID}|p-returning`)!;
     expect(returning.active).toBe(true);
     expect(returning.sellableViaTpv).toBe(true);
+    // v1.9: el des-archivado limpia la marca de borrado en Holded.
+    expect(returning.archivedFromHoldedAt).toBeNull();
   });
 
   it("rechaza tenant sin sync inicial completo (IncrementalSyncSkippedError)", async () => {
@@ -482,6 +511,75 @@ describe("runIncrementalSync", () => {
 
     const stored = productStore.get(`${TENANT_ID}|p-loses-tax`)!;
     expect(stored.sellableViaTpv).toBe(false);
+  });
+
+  it("v1.9: archivado deja archivedFromHoldedAt + muestra en stats", async () => {
+    seedProduct("p-ghost", { name: "Fotocopia a color" });
+    seedProduct("p-alive", { name: "Sigue vivo" });
+
+    holdedProducts = [
+      { id: "p-alive", name: "Sigue vivo", sku: "SKU-alive", price: 1, taxes: ["s_iva_21"], forSale: 1 },
+    ];
+
+    const stats = await runIncrementalSync({ tenantId: TENANT_ID, prisma: fakePrisma as any });
+
+    expect(stats.orphansMarked).toBe(1);
+    expect(stats.reconcileAborted).toBeNull();
+    expect(stats.reconcileArchivedSample).toEqual([
+      { holdedProductId: "p-ghost", name: "Fotocopia a color" },
+    ]);
+    const ghost = productStore.get(`${TENANT_ID}|p-ghost`)!;
+    expect(ghost.active).toBe(false);
+    expect(ghost.sellableViaTpv).toBe(false);
+    expect(ghost.archivedFromHoldedAt).toBeInstanceOf(Date);
+  });
+
+  it("v1.9 anti-catástrofe: listado vacío con catálogo local vivo → NO archiva nada", async () => {
+    seedProduct("p-1", { name: "Uno" });
+    seedProduct("p-2", { name: "Dos" });
+    holdedProducts = [];
+    holdedServices = [];
+
+    const stats = await runIncrementalSync({ tenantId: TENANT_ID, prisma: fakePrisma as any });
+
+    expect(stats.orphansMarked).toBe(0);
+    expect(stats.reconcileAborted).toBe("empty-live-set");
+    expect(stats.errors.some((e) => e.step === "reconcile")).toBe(true);
+    // El catálogo local queda intacto.
+    expect(productStore.get(`${TENANT_ID}|p-1`)!.active).toBe(true);
+    expect(productStore.get(`${TENANT_ID}|p-2`)!.active).toBe(true);
+  });
+
+  it("v1.9 anti-catástrofe: listado <50% de los activos locales → NO archiva nada", async () => {
+    seedProduct("p-a", { name: "A" });
+    seedProduct("p-b", { name: "B" });
+    seedProduct("p-c", { name: "C" });
+    // Holded devuelve 1 de 3 (33% < 50%): respuesta coja.
+    holdedProducts = [
+      { id: "p-a", name: "A", sku: "SKU-a", price: 1, taxes: ["s_iva_21"], forSale: 1 },
+    ];
+
+    const stats = await runIncrementalSync({ tenantId: TENANT_ID, prisma: fakePrisma as any });
+
+    expect(stats.orphansMarked).toBe(0);
+    expect(stats.reconcileAborted).toBe("live-set-below-ratio");
+    expect(productStore.get(`${TENANT_ID}|p-b`)!.active).toBe(true);
+    expect(productStore.get(`${TENANT_ID}|p-c`)!.active).toBe(true);
+  });
+
+  it("v1.9: servicio borrado en Holded también se archiva (caso Thalia)", async () => {
+    seedProduct("svc-ghost", { name: "Encuadernacion", kind: "SERVICE" });
+    seedProduct("svc-alive", { name: "Fotocopia", kind: "SERVICE" });
+    holdedServices = [
+      { id: "svc-alive", name: "Fotocopia", sku: "SVC-1", price: 1, taxes: ["s_iva_21"] },
+    ];
+
+    const stats = await runIncrementalSync({ tenantId: TENANT_ID, prisma: fakePrisma as any });
+
+    expect(stats.orphansMarked).toBe(1);
+    const ghost = productStore.get(`${TENANT_ID}|svc-ghost`)!;
+    expect(ghost.active).toBe(false);
+    expect(ghost.sellableViaTpv).toBe(false);
   });
 
   it("ignora productos con forSale=0", async () => {

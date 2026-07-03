@@ -159,6 +159,32 @@ describe("GET /tpv/catalog/products · businessType", () => {
     await app.close();
   });
 
+  it("v1.9 Frente 3: sólo sirve productos active + sellableViaTpv + con sku", async () => {
+    // El TPV hace full-replace del IndexedDB con lo que devuelve este
+    // endpoint (catalog.ts: store.clear() + put). Que el WHERE excluya
+    // inactivos garantiza que los borrados en Holded desaparecen de
+    // los dispositivos en el siguiente refresh de catálogo.
+    tenants.set(TENANT, { id: TENANT, businessType: "RETAIL" });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "GET",
+      url: "/tpv/catalog/products",
+      headers: { authorization: `Bearer ${signSession()}` },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(fakePrisma.product.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId: TENANT,
+          active: true,
+          sellableViaTpv: true,
+          sku: { not: null },
+        }),
+      }),
+    );
+    await app.close();
+  });
+
   it("rechaza sin auth de cajero → 401", async () => {
     tenants.set(TENANT, { id: TENANT, businessType: "RETAIL" });
     const app = await buildApp();

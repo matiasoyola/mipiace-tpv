@@ -175,12 +175,57 @@ describe("runAutoSku", () => {
     // El 404 NO contamina `errors` porque ya está gestionado: el siguiente
     // sync no lo procesará y dejaremos de generar ruido cada 15 min.
     expect(result.errors).toEqual([]);
-    const row = prisma.rows.get("local-orphan") as ProductRow & { active?: boolean };
+    const row = prisma.rows.get("local-orphan") as ProductRow & {
+      active?: boolean;
+      archivedFromHoldedAt?: Date;
+    };
     expect(row?.active).toBe(false);
+    expect(row?.sellableViaTpv).toBe(false);
+    // v1.9 Frente 2: el 404 deja timestamp de archivado.
+    expect(row?.archivedFromHoldedAt).toBeInstanceOf(Date);
+  });
+
+  it("v1.9: 400 persistente (TALONARIO CAJA) → bandeja de revisión, sin reintento infinito", async () => {
+    const prisma = makePrisma([
+      {
+        id: "local-talonario",
+        holdedProductId: "68d66b3386a8efc7260acf3a",
+        name: "TALONARIO CAJA",
+        kind: "PRODUCT",
+        sku: null,
+        needsSkuReview: false,
+        sellableViaTpv: true,
+      },
+    ]);
+    const client = {
+      request: vi.fn(async () => {
+        throw new HoldedApiError(
+          400,
+          "/invoicing/v1/products/68d66b3386a8efc7260acf3a",
+          { status: 0, info: "Bad request" },
+        );
+      }),
+    };
+    const result = await runAutoSku({
+      tenantId: "t1",
+      prisma: prisma as unknown as Parameters<typeof runAutoSku>[0]["prisma"],
+      client,
+      logger: silentLogger,
+      throttleMs: 0,
+      sleep: () => Promise.resolve(),
+    });
+    expect(result.fixed).toBe(0);
+    expect(result.needsReview).toBe(1);
+    // Gestionado (bandeja), no contamina errors.
+    expect(result.errors).toEqual([]);
+    const row = prisma.rows.get("local-talonario");
+    // needsSkuReview=true lo saca de los candidatos → el siguiente sync
+    // ya no lo reintenta.
+    expect(row?.needsSkuReview).toBe(true);
     expect(row?.sellableViaTpv).toBe(false);
   });
 
-  it("HoldedApiError NO marca needs_review (lo deja para reintento manual)", async () => {
+  it("HoldedApiError 429 NO marca needs_review (transitorio, reintenta el próximo sync)", async () => {
     const prisma = makePrisma([
       {
         id: "local-3",
