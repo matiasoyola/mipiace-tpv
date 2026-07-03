@@ -39,6 +39,13 @@ enum TicketStatus {
   // Holded (skip silencioso). Al activar el tenant los tickets TEST se
   // purgan junto con el cajero técnico.
   TEST
+  // v1.8-Fiado (variante B) · venta a crédito entregada pero NO cobrada.
+  // Deuda viva (Ticket.creditPending > 0) que NO se sincroniza con
+  // Holded — el gate `shouldEnqueueHoldedUpload` la excluye del encolado.
+  // Transiciones: DRAFT → ON_CREDIT (checkout fiado) y ON_CREDIT → PAID
+  // (al saldarse; desde ahí el ciclo normal → SYNCED lo hace el worker).
+  // Anular un fiado no saldado lo lleva a VOIDED (credit-void).
+  ON_CREDIT
 }
 
 enum PaymentMethod {
@@ -265,6 +272,11 @@ model Tenant {
   // false, sólo OWNER/MANAGER puede asociar contacto a un ticket. Por
   // defecto true para no romper el flujo actual.
   cashierSearchableContacts      Boolean           @default(true) @map("cashier_searchable_contacts")
+  // v1.8-Fiado · habilita la venta a crédito (fiado) en el TPV. Default
+  // OFF: el botón "Fiado" del checkout y la pantalla "Deudas" sólo
+  // aparecen si está ON, y la ruta de cobro rechaza método CREDIT con
+  // 400 si está OFF. Se activa por tenant desde el admin.
+  creditSalesEnabled             Boolean           @default(false) @map("credit_sales_enabled")
   // B-SuperAdmin: bloqueo global del tenant. NULL = activo. NOT NULL =
   // bloqueado por super-admin. El middleware `requireTenantNotBlocked`
   // corta TODAS las requests per-tenant con 423 Locked cuando esto está
@@ -860,6 +872,13 @@ model Ticket {
   emailFailedAt        DateTime?    @map("email_failed_at") @db.Timestamptz()
   contactHoldedId      String?      @map("contact_holded_id")
   status               TicketStatus @default(DRAFT)
+  // v1.8-Fiado (variante B) · deuda viva de un ticket vendido a crédito.
+  //   NULL  = venta normal (no fiado).
+  //   > 0   = deuda pendiente de cobro (status ON_CREDIT).
+  //   0     = fiado ya saldado (histórico "fue fiado"; NO se vuelve a NULL).
+  // Se decrementa en cada cobro (POST /tickets/:id/credit-payments). Al
+  // llegar a 0 el ticket pasa a PAID y se encola la subida a Holded.
+  creditPending        Decimal?     @map("credit_pending") @db.Decimal(12, 4)
   total                Decimal      @db.Decimal(12, 4)
   totalTax             Decimal      @map("total_tax") @db.Decimal(12, 4)
   totalDiscount        Decimal      @map("total_discount") @db.Decimal(12, 4)
@@ -936,6 +955,12 @@ model Ticket {
   @@index([shiftId])
   @@index([externalId])
   @@index([tableId, status])
+  // v1.8-Fiado · el listado de deudas por cliente (GET /credits) filtra
+  // tickets con deuda viva por contacto. El índice PARCIAL real
+  //   (tenant_id, contact_holded_id) WHERE credit_pending > 0
+  // se crea vía SQL manual en la migración v1_8_fiado (Prisma no expresa
+  // índices parciales en el schema). Este @@index no-parcial NO se añade
+  // para no duplicar; ver migration.sql.
   @@map("tickets")
 }
 
@@ -1010,10 +1035,25 @@ model TicketPayment {
   method   PaymentMethod
   amount   Decimal       @db.Decimal(12, 4)
   meta     Json?
+  // v1.8-Fiado · idempotencia del cobro de deuda (patrón outbox). El
+  // front genera un UUID v4 por cobro; el POST /credit-payments lo
+  // persiste aquí (UNIQUE global). Un reintento de red con el mismo
+  // valor devuelve el estado actual en vez de duplicar el cobro. NULL
+  // en los pagos de una venta normal (no lo necesitan).
+  externalId String?     @unique @map("external_id") @db.Uuid
+  // v1.8-Fiado · turno en el que se COBRÓ este pago. Sólo se rellena en
+  // los cobros de deuda (POST /credit-payments): un fiado se vende en el
+  // turno del día 1 pero se cobra en el turno del día N, y el arqueo Z
+  // debe imputar el ingreso al turno del cobro. NULL en pagos de venta
+  // normal → el arqueo los imputa por `ticket.shiftId` como siempre.
+  // Escalar sin relación Prisma a propósito (evita back-relation ruidosa
+  // en Shift); integridad no crítica (los turnos no se borran).
+  collectedInShiftId String? @map("collected_in_shift_id") @db.Uuid
 
   ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   @@index([ticketId])
+  @@index([collectedInShiftId])
   @@map("ticket_payments")
 }
 
