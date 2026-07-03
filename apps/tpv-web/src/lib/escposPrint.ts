@@ -228,6 +228,44 @@ export async function fetchTicketEscposBinary(
   return new Uint8Array(buf);
 }
 
+// v1.8-Fiado · bytes ESC/POS del justificante de cobro de deuda. Igual
+// que fetchTicketEscposBinary pero para el recibo no fiscal del cobro,
+// identificado por el externalId del pago.
+export async function fetchCreditReceiptEscpos(
+  ticketId: string,
+  paymentExternalId: string,
+): Promise<Uint8Array> {
+  const session = readSession();
+  if (!session) {
+    throw new ApiError(401, "Sin sesión de cajero", "UNAUTHENTICATED");
+  }
+  const base = readBaseUrl();
+  const res = await fetch(`${base}/tickets/${ticketId}/credit-receipt/escpos`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${session}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ paymentExternalId }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let parsed: { error?: string; message?: string } | null = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      // no es JSON
+    }
+    throw new ApiError(
+      res.status,
+      parsed?.message ?? res.statusText ?? "fetch failed",
+      parsed?.error,
+      parsed,
+    );
+  }
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 function readSession(): string | null {
   // Reusamos el getter sync de storage — leemos el campo del JSON
   // serializado tal como hace api.ts.

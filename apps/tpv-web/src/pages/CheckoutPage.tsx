@@ -94,6 +94,9 @@ export function CheckoutOverlay(props: {
   // mapa local bloquee la mesa mientras el cobro esté en tránsito.
   tableTicketId?: string | null;
   tableId?: string | null;
+  // v1.8-Fiado · si el tenant tiene la venta a crédito activada, se
+  // muestra el botón "Fiado" (sólo en venta rápida, no en mesa).
+  creditSalesEnabled?: boolean;
   onClose: () => void;
   onConfirmed: () => void;
 }) {
@@ -240,7 +243,18 @@ export function CheckoutOverlay(props: {
 
   // v1.3-piloto-feedback · Lote 3: nudge "Servicio sin cliente" eliminado.
   // Mantenemos el opts en la firma por si vuelve.
-  async function submit(overrideToken?: string, _opts?: { skipClientNudge?: boolean }) {
+  async function submit(
+    overrideToken?: string,
+    _opts?: { skipClientNudge?: boolean; credit?: boolean },
+  ) {
+    const isCredit = _opts?.credit === true;
+    // v1.8-Fiado · un fiado exige deudor. Sin contacto, abrimos el
+    // selector en vez de mandar un POST que el backend rechazaría (400).
+    if (isCredit && !props.contact?.holdedContactId) {
+      setError("Un fiado necesita un cliente (el deudor). Selecciónalo antes de continuar.");
+      props.onRequestAssignContact?.();
+      return;
+    }
     setSubmitting(true);
     setError(null);
     // ¿Quedó la venta persistida en el outbox local? Sólo si es true
@@ -268,14 +282,18 @@ export function CheckoutOverlay(props: {
               }))
             : undefined,
       }));
-      const paymentsPayload = payments.map((p) => ({
-        method: p.method,
-        amount: parseAmount(p.amount),
-        meta: p.meta && Object.keys(p.meta).length > 0 ? p.meta : undefined,
-      }));
+      // v1.8-Fiado · un fiado nace SIN pagos (se cobra luego en Deudas).
+      const paymentsPayload = isCredit
+        ? []
+        : payments.map((p) => ({
+            method: p.method,
+            amount: parseAmount(p.amount),
+            meta: p.meta && Object.keys(p.meta).length > 0 ? p.meta : undefined,
+          }));
       const commonFields = {
         externalId: externalIdRef.current,
         payments: paymentsPayload,
+        ...(isCredit ? { creditSale: true } : {}),
         contactHoldedId: props.contact?.holdedContactId,
         notes: props.notes || undefined,
         cashAmount: cashAmount > 0 ? cashAmount : undefined,
@@ -315,11 +333,13 @@ export function CheckoutOverlay(props: {
             kind: "ticket",
             path,
             body,
-            label: props.tableTicketId
-              ? "Mesa"
-              : props.businessType === "SERVICES"
-                ? "Servicio"
-                : "Venta",
+            label: isCredit
+              ? "Fiado"
+              : props.tableTicketId
+                ? "Mesa"
+                : props.businessType === "SERVICES"
+                  ? "Servicio"
+                  : "Venta",
             total,
             tableId: props.tableId ?? undefined,
           },
@@ -730,6 +750,18 @@ export function CheckoutOverlay(props: {
             {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
             {cobrarLabel}
           </button>
+          {/* v1.8-Fiado · venta a crédito. Sólo venta rápida (no mesa) y
+              sólo con el flag activado. El cliente se lleva el género y
+              paga otro día; la deuda se cobra desde la pantalla Deudas. */}
+          {props.creditSalesEnabled && !props.tableTicketId && (
+            <button
+              onClick={() => submit(undefined, { credit: true })}
+              disabled={submitting}
+              className="mt-2 w-full h-12 bg-white border-2 border-mipiace-coral text-mipiace-coral font-medium text-[14px] rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              Fiado{props.contact?.name ? ` · ${props.contact.name}` : ""}
+            </button>
+          )}
         </footer>
       </div>
 

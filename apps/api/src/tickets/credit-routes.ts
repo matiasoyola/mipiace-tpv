@@ -12,6 +12,7 @@
 // fecha = día del saldo).
 
 import { Prisma, PaymentMethod, TicketStatus } from "@mipiacetpv/db";
+import { buildCreditPaymentReceipt } from "@mipiacetpv/escpos-builder";
 import type { FastifyInstance } from "fastify";
 
 import { verifyManagerAuthorization } from "../auth/manager-authorization.js";
@@ -243,7 +244,14 @@ export async function registerCreditRoutes(app: FastifyInstance): Promise<void> 
 
       const ticket = await prisma.ticket.findFirst({
         where: { id: ticketId, tenantId: cashier.tid },
-        select: { id: true, status: true, creditPending: true, externalId: true },
+        select: {
+          id: true,
+          status: true,
+          creditPending: true,
+          externalId: true,
+          internalNumber: true,
+          contactHoldedId: true,
+        },
       });
       if (!ticket) {
         return reply.code(404).send({ error: "TICKET_NOT_FOUND", message: "Ticket no encontrado." });
@@ -324,14 +332,35 @@ export async function registerCreditRoutes(app: FastifyInstance): Promise<void> 
         }
       }
 
+      // Datos del justificante de cobro (recibo simple no fiscal). El TPV
+      // los usa para imprimir el recibo con buildCreditPaymentReceipt.
+      let debtorName: string | null = null;
+      if (ticket.contactHoldedId) {
+        const contact = await prisma.contact.findFirst({
+          where: { tenantId: cashier.tid, holdedContactId: ticket.contactHoldedId },
+          select: { name: true },
+        });
+        debtorName = contact?.name ?? null;
+      }
+      const remaining = settled ? 0 : round2(newPending);
+
       return reply.code(201).send({
         settled,
         ticket: {
           id: result.id,
           status: result.status,
+          internalNumber: ticket.internalNumber,
           creditPending: numOrNull(result.creditPending),
         },
         payment: { amount: round2(body.amount), method: body.method },
+        receipt: {
+          debtorName,
+          internalNumber: ticket.internalNumber,
+          amount: round2(body.amount),
+          method: body.method,
+          remaining,
+          collectedAt: now.toISOString(),
+        },
       });
     },
   );
@@ -458,7 +487,95 @@ export async function registerCreditRoutes(app: FastifyInstance): Promise<void> 
       return reply.code(200).send({ ticket: { id: ticket.id, status: TicketStatus.VOIDED } });
     },
   );
+
+  // ── POST /tickets/:id/credit-receipt/escpos ─────────────────────────
+  // Justificante de cobro (recibo simple NO fiscal) en bytes ESC/POS para
+  // que el TPV lo mande a la impresora USB. Se construye server-side
+  // (mismo patrón que /print/escpos) por el cobro identificado con su
+  // externalId. El "saldo restante" es el creditPending ACTUAL del ticket
+  // (el recibo se imprime justo tras cobrar, así que coincide).
+  app.post(
+    "/tickets/:ticketId/credit-receipt/escpos",
+    {
+      preHandler: requireCashierSession,
+      schema: {
+        params: {
+          type: "object",
+          required: ["ticketId"],
+          properties: { ticketId: { type: "string", format: "uuid" } },
+        },
+        body: {
+          type: "object",
+          required: ["paymentExternalId"],
+          additionalProperties: false,
+          properties: {
+            paymentExternalId: { type: "string", pattern: UUID_V4 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const cashier = request.cashier!;
+      const prisma = getPrisma();
+      const { ticketId } = request.params as { ticketId: string };
+      const { paymentExternalId } = request.body as { paymentExternalId: string };
+
+      const ticket = await prisma.ticket.findFirst({
+        where: { id: ticketId, tenantId: cashier.tid },
+        select: {
+          id: true,
+          internalNumber: true,
+          creditPending: true,
+          contactHoldedId: true,
+          register: { select: { store: { select: { name: true } } } },
+        },
+      });
+      if (!ticket) {
+        return reply.code(404).send({ error: "TICKET_NOT_FOUND", message: "Ticket no encontrado." });
+      }
+      const payment = await prisma.ticketPayment.findUnique({
+        where: { externalId: paymentExternalId },
+        select: { ticketId: true, amount: true, method: true, meta: true },
+      });
+      if (!payment || payment.ticketId !== ticket.id) {
+        return reply.code(404).send({ error: "PAYMENT_NOT_FOUND", message: "Cobro no encontrado." });
+      }
+
+      let debtorName: string | null = null;
+      if (ticket.contactHoldedId) {
+        const contact = await prisma.contact.findFirst({
+          where: { tenantId: cashier.tid, holdedContactId: ticket.contactHoldedId },
+          select: { name: true },
+        });
+        debtorName = contact?.name ?? null;
+      }
+      const meta = (payment.meta ?? {}) as { collectedAt?: string };
+      const collectedAt = meta.collectedAt ? new Date(meta.collectedAt) : new Date();
+
+      const bytes = buildCreditPaymentReceipt({
+        businessName: ticket.register.store.name,
+        internalNumber: ticket.internalNumber,
+        debtorName,
+        collectedAt,
+        amount: Number(payment.amount),
+        methodLabel: METHOD_LABELS[payment.method] ?? payment.method,
+        remaining: ticket.creditPending != null ? Number(ticket.creditPending) : 0,
+      });
+
+      return reply
+        .header("content-type", "application/octet-stream")
+        .send(Buffer.from(bytes));
+    },
+  );
 }
+
+const METHOD_LABELS: Record<string, string> = {
+  CASH: "Efectivo",
+  CARD: "Tarjeta",
+  BIZUM: "Bizum",
+  VOUCHER: "Vale",
+  OTHER: "Otro",
+};
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;

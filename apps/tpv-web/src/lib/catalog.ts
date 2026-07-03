@@ -47,6 +47,9 @@ const ICON_PRESET_KEY = "mipiacetpv-catalog-icon-preset";
 // sin esperar a la red; refresca al siguiente pull completo del
 // catálogo (banner "Sincronizando").
 const TAG_ALIASES_KEY = "mipiacetpv-catalog-tag-aliases";
+// v1.8-Fiado · flag de venta a crédito del tenant. El TPV lo cachea para
+// mostrar el botón "Fiado" en checkout y la entrada a la pantalla Deudas.
+const CREDIT_SALES_KEY = "mipiacetpv-catalog-credit-sales";
 
 export type BusinessType = "HOSPITALITY" | "RETAIL" | "SERVICES";
 
@@ -76,6 +79,15 @@ export function getCachedTenantId(): string | null {
 export function getCachedBusinessType(): BusinessType | null {
   const raw = localStorage.getItem(BUSINESS_TYPE_KEY);
   return isBusinessType(raw) ? raw : null;
+}
+
+// v1.8-Fiado · true sólo si el tenant tiene la venta a crédito activada.
+export function getCachedCreditSalesEnabled(): boolean {
+  return localStorage.getItem(CREDIT_SALES_KEY) === "1";
+}
+
+export function setCachedCreditSalesEnabled(value: boolean): void {
+  localStorage.setItem(CREDIT_SALES_KEY, value ? "1" : "0");
 }
 
 export function setCachedBusinessType(value: BusinessType): void {
@@ -201,6 +213,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
   let lastBusinessType: BusinessType | null = null;
   let lastIconPreset: string | null | undefined = undefined;
   let lastTagAliases: Array<{ slug: string; label: string }> | undefined = undefined;
+  let lastCreditSales: boolean | undefined = undefined;
   for (let safety = 0; safety < 200; safety++) {
     const res = await apiWithCashier<{
       items: CatalogProduct[];
@@ -209,6 +222,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
       businessType?: BusinessType;
       tpvIconPreset?: string | null;
       tagAliases?: Array<{ slug: string; label: string }>;
+      creditSalesEnabled?: boolean;
     }>(
       `/tpv/catalog/products${cursor ? `?cursor=${cursor}&limit=500` : "?limit=500"}`,
     );
@@ -229,6 +243,9 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
     if (res.tagAliases !== undefined) {
       lastTagAliases = res.tagAliases;
     }
+    if (res.creditSalesEnabled !== undefined) {
+      lastCreditSales = res.creditSalesEnabled;
+    }
     if (!res.nextCursor) break;
     cursor = res.nextCursor;
   }
@@ -237,6 +254,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
   if (lastTenantId) localStorage.setItem(TENANT_ID_KEY, lastTenantId);
   if (lastBusinessType) setCachedBusinessType(lastBusinessType);
   if (lastIconPreset !== undefined) setCachedIconPreset(lastIconPreset);
+  if (lastCreditSales !== undefined) setCachedCreditSalesEnabled(lastCreditSales);
   if (lastTagAliases !== undefined) {
     const map: Record<string, string> = {};
     for (const a of lastTagAliases) map[a.slug] = a.label;

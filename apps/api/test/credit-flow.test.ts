@@ -113,6 +113,7 @@ const fakePrisma: any = {
   },
   contact: {
     findMany: vi.fn(async () => [{ holdedContactId: CONTACT, name: "Juan Deudor" }]),
+    findFirst: vi.fn(async () => ({ name: "Juan Deudor" })),
   },
   register: {
     update: vi.fn(async ({ data }: any) => {

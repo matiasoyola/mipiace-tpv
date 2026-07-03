@@ -40,7 +40,11 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
         ? null
         : await prisma.tenant.findUnique({
             where: { id: cashier.tid },
-            select: { businessType: true, tpvIconPreset: true },
+            select: {
+              businessType: true,
+              tpvIconPreset: true,
+              creditSalesEnabled: true,
+            },
           });
       // v1.3-Operativa-Extra · Lote 1: mapa slug→label editable desde el
       // admin. Sólo se devuelve en la primera página para que el TPV lo
@@ -119,6 +123,9 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
               // placeholder (peluquería→tijeras, clínica→estetoscopio,
               // taller→llave inglesa, belleza→sparkles, etc.).
               tpvIconPreset: tenant.tpvIconPreset ?? null,
+              // v1.8-Fiado · el TPV cachea el flag para mostrar el botón
+              // "Fiado" en checkout y la entrada a la pantalla Deudas.
+              creditSalesEnabled: tenant.creditSalesEnabled,
               // v1.3-Operativa-Extra · Lote 1: alias editable de tags
               // (`slug` tal como llega de Holded en lowercase → `label`
               // a pintar en el chip).

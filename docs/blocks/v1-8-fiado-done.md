@@ -1,4 +1,4 @@
-# v1.8 · Fiado (venta a crédito) — variante B · DONE (parcial)
+# v1.8 · Fiado (venta a crédito) — variante B · DONE
 
 **Rama:** `v1-8-fiado`. Diseño: `docs/design/fiado.md`. Prompt: `docs/code-prompts/bloque-v1-8-fiado.md`.
 
@@ -18,8 +18,8 @@ conmutación").
 | 5 · Z / arqueo | ✅ | secciones "Ventas a crédito (no cobradas)" y "Cobros de deuda"; teórico multi-día. |
 | 6 · Impresión/PDF | ✅ | leyenda **PENDIENTE DE PAGO** + deudor + importe en térmico y PDF. |
 | Admin flag | ✅ | `creditSalesEnabled` en `GET/POST /admin/tenant/settings` + toggle en SettingsPage. |
-| 3 · TPV (React) | ⏳ **pendiente** | botón Fiado en checkout, pantalla Deudas, badge historial. Ver §"Carryover Frente 3". |
-| Justificante de cobro | ⏳ pendiente | recibo simple no fiscal del cobro de deuda (builder + wiring). |
+| 3 · TPV (React) | ✅ | botón Fiado en checkout, pantalla Deudas, badge historial. Flag cacheado vía `/tpv/catalog`. |
+| Justificante de cobro | ✅ | `buildCreditPaymentReceipt` + endpoint `POST /tickets/:id/credit-receipt/escpos` + botón "Imprimir recibo" en Deudas. |
 
 ### Añadidos de esta sesión (fuera del prompt original)
 1. **Migración renombrada** `20260702010000` → `20260703010000_v1_8_fiado`, POSTERIOR a
@@ -80,26 +80,33 @@ cobrar, desde `credit-payments`). Ningún otro sitio decide esto. Detalle en la 
 - `z-breakdown.test.ts` (+4): escenario multi-día día1 fiado / día2 parcial efectivo / día3 resto tarjeta; cobro mixto.
 - `ticket-net-unit-price.test.ts` (3): precio neto en térmico y PDF.
 - `tenant-isolation.test.ts` (+3): A no cobra/anula/ve la deuda de B.
-- `builder.test.ts` (+2, escpos) y `ticket-model.test.ts` (+2): leyenda PENDIENTE DE PAGO.
-- Suite completa API + paquetes: **verde** (575 pass / 3 skip pre-existentes).
+- `builder.test.ts` (+4, escpos: leyenda + justificante) y `ticket-model.test.ts` (+2).
+- `credit-tpv.test.tsx` (5, jsdom): botón Fiado (POST creditSale + guard sin contacto),
+  DebtsScreen (lista + cobro), badge del historial.
+- Suite completa (API + paquetes + admin + tpv-web): **verde** (889 pass / 3 skip · 101 files).
+
+## Frente 3 · TPV (React) — implementado
+
+- **CheckoutPage** (`CheckoutOverlay`): botón "Fiado" visible sólo con el flag cacheado
+  (`getCachedCreditSalesEnabled`) y sólo en venta rápida (no mesa). Sin contacto → error +
+  `onRequestAssignContact` (selector existente). POST `/tickets` con `creditSale:true`,
+  `payments:[]`. Va por el outbox como cualquier venta (funciona offline).
+- **Pantalla "Deudas"** (`DebtsScreen`, overlay desde el header, gated por el flag): lista
+  `GET /credits` por cliente, expandible a tickets; Cobrar (importe prellenado editable,
+  método CASH/CARD/BIZUM) → `POST /credit-payments`. **Online-only** (banner si `!navigator.onLine`).
+  Tras cobrar: panel con saldo + "Imprimir recibo".
+- **Historial** (`TicketsHistoryPage`): badge "Fiado" + "pendiente X €" para `ON_CREDIT`
+  (`serializeTicket` ahora incluye `creditPending`).
+- **Flag al TPV**: `/tpv/catalog` (primera página) devuelve `creditSalesEnabled`; se cachea
+  en localStorage (`catalog.ts`).
+- **Justificante de cobro**: `buildCreditPaymentReceipt` (escpos-builder) + endpoint
+  `POST /tickets/:id/credit-receipt/escpos` (bytes ESC/POS server-side, mismo patrón que
+  `/print/escpos`; el TPV lo imprime con `fetchCreditReceiptEscpos` + `printEscposUsb`).
+- **Validación visual pendiente**: en modo prueba tras el deploy (no bloqueante). Los tests
+  jsdom cubren el contrato; el render físico (impresora, 390px handheld) lo revisa el equipo.
 
 ## Carryovers
 
-### Frente 3 · TPV (React) — el chunk (b) del prompt, pendiente
-- **CheckoutPage**: botón "Fiado" visible sólo con `settings.creditSalesEnabled`. Si el
-  ticket no tiene contacto → selector de contacto inline (búsqueda local existente,
-  `SalePage.contact.tsx`) antes de confirmar. POST `/tickets` con `creditSale:true` y
-  `payments:[]`. Confirmación con el nombre del deudor visible.
-- **Pantalla "Deudas"** (ruta nueva desde menú): lista `GET /credits` por cliente con saldo,
-  expandible a tickets; acción Cobrar (total prellenado, editable para parcial) con selector
-  de método → `POST /credit-payments` con `externalId` (uuid) + `shiftId`. **Online-only**:
-  sin red, avisar y no permitir cobrar (el checkout fiado SÍ va offline por outbox).
-- **Historial** (`TicketsHistoryPage.tsx`): badge "FIADO · pendiente X €" para `ON_CREDIT`.
-- Tests jsdom del TPV diferidos (patrón del proyecto); validar en dispositivo real.
-
-### Otros
-- **Justificante de cobro de deuda**: recibo simple no fiscal (fecha, deudor, importe, saldo
-  restante). Falta el builder + endpoint de impresión.
 - **Checkout de mesa fiado**: `POST /tickets/:id/checkout` (B7) NO soporta `creditSale` aún
   (sólo la venta rápida `POST /tickets`). Si Cachictos vende fiado desde mesa, cablear el mismo
   patrón (gate ya sirve; el body de checkout necesita `creditSale` + relajar `payments.minItems`).

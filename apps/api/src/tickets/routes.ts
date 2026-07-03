@@ -1640,6 +1640,7 @@ function serializeTicket(t: DbTicket): Record<string, unknown> {
     internalNumber: string;
     externalId: string;
     status: TicketStatus;
+    creditPending: { toString(): string } | null;
     total: { toString(): string };
     totalTax: { toString(): string };
     totalDiscount: { toString(): string };
@@ -1702,6 +1703,10 @@ function serializeTicket(t: DbTicket): Record<string, unknown> {
     internalNumber: ticket.internalNumber,
     externalId: ticket.externalId,
     status: ticket.status,
+    // v1.8-Fiado · deuda viva del fiado (null en ventas normales). El
+    // historial del TPV lo usa para el badge "Fiado · pendiente X €".
+    creditPending:
+      ticket.creditPending != null ? Number(ticket.creditPending.toString()) : null,
     total: Number(ticket.total.toString()),
     totalTax: Number(ticket.totalTax.toString()),
     totalDiscount: Number(ticket.totalDiscount.toString()),

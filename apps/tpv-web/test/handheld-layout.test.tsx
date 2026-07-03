@@ -45,6 +45,7 @@ vi.mock("../src/lib/catalog.js", () => {
     findByBarcode: () => null,
     fuzzySearch: () => [CAFE],
     getCachedBusinessType: () => "HOSPITALITY" as const,
+    getCachedCreditSalesEnabled: () => false,
     getCachedIconPreset: () => null,
     getCachedTagAliases: () => ({}),
     getCachedTenantId: () => null,
