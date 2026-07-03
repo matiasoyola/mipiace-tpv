@@ -150,6 +150,14 @@ const fakePrisma = {
     count: vi.fn(async ({ where }: any) => {
       return state.tickets.filter((t) => t.shiftId === where.shiftId).length;
     }),
+    // v1.8-Fiado · agregado de fiados vendidos en el turno (ON_CREDIT).
+    aggregate: vi.fn(async ({ where }: any) => {
+      const filtered = state.tickets.filter(
+        (t) => t.shiftId === where.shiftId && t.status === where.status,
+      );
+      const total = filtered.reduce((acc, t) => acc + Number(t.total ?? 0), 0);
+      return { _count: { _all: filtered.length }, _sum: { total } };
+    }),
     findMany: vi.fn(async ({ where }: any) => {
       return state.tickets
         .filter((t) => t.shiftId === where.shiftId && t.status === where.status)
@@ -200,7 +208,15 @@ const fakePrisma = {
     groupBy: vi.fn(async ({ where }: any) => {
       const map = new Map<string, number>();
       for (const p of state.payments) {
-        if (p.shiftId !== where.ticket.shiftId) continue;
+        if (where.collectedInShiftId) {
+          // v1.8-Fiado · cobros de deuda imputados a este turno.
+          if ((p.collectedInShiftId ?? null) !== where.collectedInShiftId) continue;
+        } else {
+          // Ventas normales: por turno de la venta, excluyendo cobros de
+          // deuda (collectedInShiftId no nulo).
+          if (p.shiftId !== where.ticket.shiftId) continue;
+          if ((p.collectedInShiftId ?? null) !== null) continue;
+        }
         map.set(p.method, (map.get(p.method) ?? 0) + p.amount);
       }
       return [...map.entries()].map(([method, amount]) => ({

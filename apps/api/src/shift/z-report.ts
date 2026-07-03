@@ -105,6 +105,22 @@ export async function generateZReportPdf(input: ZReportInput): Promise<string> {
   line(`Devoluciones:     ${fmtEur(-input.breakdown.refundsTotal)}`);
   line(`Ventas netas:     ${fmtEur(input.breakdown.netSales)}`, { bold: true });
   hr();
+  // v1.8-Fiado · dos secciones nuevas. Las ventas a crédito NO entraron
+  // en caja (informativas); los cobros de deuda SÍ (ya sumados al teórico).
+  const cs = input.breakdown.creditSales;
+  line("Ventas a crédito (no cobradas)", { bold: true });
+  line(`  Nº tickets: ${cs.count}    Importe: ${fmtEur(cs.total)}`);
+  if (input.breakdown.creditCollections.length > 0) {
+    hr();
+    line("Cobros de deuda (este turno)", { bold: true });
+    for (const c of input.breakdown.creditCollections) {
+      line(`  ${c.method.padEnd(8)} ${fmtEur(c.amount).padStart(11)}`);
+    }
+    line(`  Total cobrado: ${fmtEur(input.breakdown.creditCollectionsTotal)}`, {
+      bold: true,
+    });
+  }
+  hr();
   line(`Tickets emitidos: ${input.ticketsCount}`);
   line(`Devoluciones (nº): ${input.refundsCount}`);
   if (input.syncIssues.pendingSync > 0 || input.syncIssues.failed > 0) {

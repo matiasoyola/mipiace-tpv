@@ -46,6 +46,7 @@ import { startTicketUploadWorker } from "./workers/ticket-upload-worker.js";
 import { startRefundUploadWorker } from "./workers/refund-upload-worker.js";
 import { startTicketEmailWorker } from "./workers/ticket-email-worker.js";
 import { registerTicketRoutes } from "./tickets/routes.js";
+import { registerCreditRoutes } from "./tickets/credit-routes.js";
 import { registerTicketDigitalRoute } from "./tickets/digital-route.js";
 import { registerPublicTicketPdfRoute } from "./tickets/public-pdf-route.js";
 import { registerSendToKitchenRoute } from "./tickets/send-to-kitchen.js";
@@ -153,6 +154,7 @@ async function main() {
   await registerStoreWebSocketRoute(app);
   await registerPublicTicketPdfRoute(app);
   await registerTicketRoutes(app);
+  await registerCreditRoutes(app);
   await registerSendToKitchenRoute(app);
   await registerSendToKitchenEscposRoute(app);
   await registerTicketPrintRoute(app);

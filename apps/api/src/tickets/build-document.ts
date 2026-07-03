@@ -103,7 +103,15 @@ export async function loadTicketDocument(
         nameSnapshot: l.nameSnapshot,
         sku: l.sku,
         units: l.units,
-        unitPrice: l.unitPrice,
+        // v1.8-Fiado · el precio unitario impreso debe ser el NETO
+        // efectivamente cobrado (override del cajero ?? precio de
+        // catálogo), no el de catálogo. Sin esto el ticket mostraba
+        // "1 x 5,12 → 4,13" cuando había override: unit del catálogo
+        // pero total con override aplicado. Mismo criterio que el
+        // térmico (tickets/print.ts). El subtotal/IVA se calculan
+        // aparte desde los valores persistidos, así que esto sólo
+        // corrige la columna de precio unitario mostrada.
+        unitPrice: l.unitPriceOverride ?? l.unitPrice,
         discountPct: l.discountPct,
         taxRate: l.taxRate,
         subtotal: l.subtotal,

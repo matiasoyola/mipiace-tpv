@@ -24,6 +24,7 @@ import { enqueueRefundUpload } from "../queues/refund-upload.js";
 import { enqueueTicketEmail } from "../queues/ticket-email.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
 import { maybeEnqueueAutoEmail } from "./email-trigger.js";
+import { shouldEnqueueHoldedUpload } from "./holded-upload-gate.js";
 import {
   resolveModifierSelectionsForLines,
   type ModifierSelectionInput,
@@ -103,6 +104,11 @@ interface CreateTicketBody {
   // scope, próximos evolutivos). El renderer del ticket lo imprime si
   // está presente y el tenant es SERVICES.
   attendedBy?: string;
+  // v1.8-Fiado (variante B) · venta a crédito. Si es true: el ticket se
+  // entrega pero NO se cobra ahora (payments debe venir vacío), queda
+  // ON_CREDIT con creditPending=total y NO se sube a Holded hasta que se
+  // salde. Exige tenant.creditSalesEnabled + contactHoldedId (el deudor).
+  creditSale?: boolean;
 }
 
 export async function registerTicketRoutes(app: FastifyInstance): Promise<void> {
@@ -128,6 +134,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             giftReceiptIntent: { type: "boolean" },
             authorizationToken: { type: "string", minLength: 1, maxLength: 2048 },
             attendedBy: { type: "string", minLength: 1, maxLength: 60 },
+            creditSale: { type: "boolean" },
             lines: {
               type: "array",
               minItems: 1,
@@ -167,9 +174,12 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
                 },
               },
             },
+            // minItems relajado a 0: una venta a crédito (creditSale)
+            // nace sin pago. El guard de código exige >=1 pago cuando NO
+            // es fiado, y exactamente 0 cuando sí lo es.
             payments: {
               type: "array",
-              minItems: 1,
+              minItems: 0,
               items: {
                 type: "object",
                 required: ["method", "amount"],
@@ -192,6 +202,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       const cashier = request.cashier!;
       const body = request.body as CreateTicketBody;
       const prisma = getPrisma();
+      const isCredit = body.creditSale === true;
 
       // 1. Idempotencia: ¿ya existe este externalId? Si sí, devolvemos
       //    el ticket existente con 200 (cliente puede reintentar tras un
@@ -280,12 +291,23 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         })),
       );
       const paymentsSum = body.payments.reduce((acc, p) => acc + p.amount, 0);
-      // B5 §3.2: aceptamos overpayment en efectivo (la diferencia es el
-      // cambio). Holded recibe siempre `total` exacto en /pay; los
-      // payments[] del TPV reflejan el dinero recibido. Para
-      // payment_methods != CASH no debería haber overpayment; si lo hay,
-      // lo aceptamos igual y queda como descuadre de caja.
-      if (paymentsSum + PAYMENT_TOLERANCE_EUR < totals.total) {
+      if (isCredit) {
+        // v1.8-Fiado · la venta a crédito NO cobra ahora: nace sin
+        // TicketPayment. Cualquier pago en el body es un error del
+        // cliente (el dinero entra después, vía POST /credit-payments).
+        if (body.payments.length > 0) {
+          return reply.code(400).send({
+            error: "CREDIT_SALE_WITH_PAYMENTS",
+            message:
+              "Una venta a crédito (fiado) no lleva pagos: se cobra después desde la pantalla Deudas.",
+          });
+        }
+      } else if (paymentsSum + PAYMENT_TOLERANCE_EUR < totals.total) {
+        // B5 §3.2: aceptamos overpayment en efectivo (la diferencia es el
+        // cambio). Holded recibe siempre `total` exacto en /pay; los
+        // payments[] del TPV reflejan el dinero recibido. Para
+        // payment_methods != CASH no debería haber overpayment; si lo hay,
+        // lo aceptamos igual y queda como descuadre de caja.
         return reply.code(400).send({
           error: "PAYMENTS_MISMATCH",
           message: `Σ payments (${paymentsSum.toFixed(2)}) menor que total (${totals.total.toFixed(2)})`,
@@ -316,8 +338,27 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       // umbral, exigimos `authorizationToken` válido del encargado.
       const tenantForDiscount = await prisma.tenant.findUniqueOrThrow({
         where: { id: cashier.tid },
-        select: { discountThresholdPct: true },
+        select: { discountThresholdPct: true, creditSalesEnabled: true },
       });
+
+      // v1.8-Fiado · gate de venta a crédito. El tenant debe tenerlo
+      // activado y el ticket debe llevar deudor (contactHoldedId).
+      if (isCredit) {
+        if (!tenantForDiscount.creditSalesEnabled) {
+          return reply.code(400).send({
+            error: "CREDIT_SALES_DISABLED",
+            message:
+              "La venta a crédito (fiado) no está activada para este comercio. Actívala en Ajustes.",
+          });
+        }
+        if (!body.contactHoldedId) {
+          return reply.code(400).send({
+            error: "CREDIT_SALE_REQUIRES_CONTACT",
+            message:
+              "Un fiado necesita un cliente asociado (el deudor). Selecciona el cliente antes de confirmar.",
+          });
+        }
+      }
       const grossSubtotal = totals.subtotal + totals.discount;
       const effectiveDiscountPct =
         grossSubtotal > 0
@@ -422,7 +463,10 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             externalId: body.externalId,
             publicSlug: generatePublicSlug(),
             contactHoldedId: body.contactHoldedId ?? null,
-            status: TicketStatus.PENDING_SYNC,
+            // v1.8-Fiado · un fiado nace ON_CREDIT con la deuda viva; una
+            // venta normal nace PENDING_SYNC para subir a Holded ya.
+            status: isCredit ? TicketStatus.ON_CREDIT : TicketStatus.PENDING_SYNC,
+            creditPending: isCredit ? new Prisma.Decimal(totals.total) : null,
             total: new Prisma.Decimal(totals.total),
             totalTax: new Prisma.Decimal(totals.tax),
             totalDiscount: new Prisma.Decimal(totals.discount),
@@ -480,27 +524,35 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           where: { id: body.shiftId },
           data: { lastActivityAt: new Date() },
         });
-        await tx.holdedUpload.upsert({
-          where: { externalId: body.externalId },
-          create: {
-            externalId: body.externalId,
-            tenantId: cashier.tid,
-            kind: "TICKET",
-            status: "PENDING",
-          },
-          update: {},
-        });
+        // v1.8-Fiado · el gate único decide si se crea la fila de upload.
+        // Un fiado (ON_CREDIT) NO se sube a Holded hasta saldarse: ni fila
+        // ni job. Al saldar (POST /credit-payments) se crea entonces.
+        if (shouldEnqueueHoldedUpload(t.status)) {
+          await tx.holdedUpload.upsert({
+            where: { externalId: body.externalId },
+            create: {
+              externalId: body.externalId,
+              tenantId: cashier.tid,
+              kind: "TICKET",
+              status: "PENDING",
+            },
+            update: {},
+          });
+        }
         return t;
       });
 
-      // 7. Encolar upload-ticket (idempotente; jobId determinista).
-      try {
-        await enqueueTicketUpload(body.externalId);
-      } catch (err) {
-        request.log.error(
-          { externalId: body.externalId },
-          `enqueue ticket upload falló: ${err instanceof Error ? err.message : String(err)}`,
-        );
+      // 7. Encolar upload-ticket (idempotente; jobId determinista). Mismo
+      // gate: un fiado no encola nada (ver docs/design/fiado.md §7).
+      if (shouldEnqueueHoldedUpload(ticket.status)) {
+        try {
+          await enqueueTicketUpload(body.externalId);
+        } catch (err) {
+          request.log.error(
+            { externalId: body.externalId },
+            `enqueue ticket upload falló: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
       }
 
       // Encolado de email auto (B-Print fase 1). Si el cajero introdujo

@@ -55,9 +55,10 @@ export async function registerManagerAuthorizationRoutes(
             managerPin: { type: "string", minLength: 4, maxLength: 16 },
             reason: {
               type: "string",
-              // Hoy sólo aceptamos un motivo; el enum se ampliará cuando
-              // (force-close, refund-over) reusen el flujo.
-              enum: ["discount_over_threshold"],
+              // v1.8-Fiado añade "credit_void" (anular un fiado). El enum
+              // seguirá creciendo cuando otros flujos (force-close,
+              // refund-over) reusen el mecanismo.
+              enum: ["discount_over_threshold", "credit_void"],
             },
             // Contexto libre — la PWA manda lo que tenga sobre el ticket
             // para que quede en el log estructurado del backend. No es
@@ -79,9 +80,13 @@ export async function registerManagerAuthorizationRoutes(
       const { managerEmail, managerPin, reason } = request.body as {
         managerEmail: string;
         managerPin: string;
-        reason: "discount_over_threshold";
+        reason: "discount_over_threshold" | "credit_void";
         ticketContext?: Record<string, unknown>;
       };
+      // El purpose del token se deriva del motivo: cada ruta consumidora
+      // exige el suyo exacto (un token de descuento no anula fiados).
+      const purpose =
+        reason === "credit_void" ? "credit-void" : "discount-override";
       const lowerEmail = managerEmail.toLowerCase();
       const rlKey = rateLimitKey(session.tid, lowerEmail);
 
@@ -134,7 +139,7 @@ export async function registerManagerAuthorizationRoutes(
       const authorizationToken = signManagerAuthorization({
         sub: manager.id,
         tid: session.tid,
-        purpose: "discount-override",
+        purpose,
         reason,
         // Sin condiciones sobre el descuento: el encargado validó con
         // PIN, así que el ticket puede llevar cualquier %. Si se
