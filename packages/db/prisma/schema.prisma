@@ -706,6 +706,13 @@ model Product {
   // envía tags, queda como array vacío. Tiene índice GIN
   // (products_tags_idx) para futuros filtros server-side @> y &&.
   tags              String[]    @default([])
+  // v1.9-sync-borrados: cuándo la conciliación (o un 404 de detalle)
+  // detectó que la ficha ya no existe en Holded y la soft-archivó
+  // (active=false + sellableViaTpv=false). Distingue "borrado en
+  // Holded" de otras causas de inactividad (forSale=0, tax sin
+  // resolver). NULL mientras el producto viva en Holded; el upsert
+  // del sync lo limpia si la ficha reaparece (des-archivado).
+  archivedFromHoldedAt DateTime? @map("archived_from_holded_at") @db.Timestamptz()
   lastSyncedAt      DateTime    @default(now()) @map("last_synced_at") @db.Timestamptz()
   raw               Json?
 

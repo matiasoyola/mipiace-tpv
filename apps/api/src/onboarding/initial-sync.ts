@@ -427,6 +427,9 @@ async function upsertCatalogEntry(
       taxRate,
       kind,
       active: true,
+      // v1.9: si la ficha estaba archivada por borrado en Holded y
+      // reaparece (re-sync tras des-archivarla), limpiamos la marca.
+      archivedFromHoldedAt: null,
       // Si el tax está sin resolver, FORZAMOS sellableViaTpv=false aunque
       // el sku exista — vender con tax=0 cuando Holded espera 21 provoca
       // silent reject (§1.1). Si el sku falta pero el tax sí está, no

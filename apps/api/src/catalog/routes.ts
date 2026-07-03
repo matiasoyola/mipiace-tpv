@@ -224,6 +224,29 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
             mismatches: err.mismatches,
           });
         }
+        if (err instanceof HoldedApiError && err.status === 404) {
+          // v1.9 Frente 2: la ficha ya no existe en Holded — soft-
+          // archive inmediato y fuera de la bandeja. Si reaparece en
+          // Holded, el sync la reactiva.
+          await prisma.product.update({
+            where: { id: product.id },
+            data: {
+              active: false,
+              sellableViaTpv: false,
+              needsSkuReview: false,
+              archivedFromHoldedAt: new Date(),
+            },
+          });
+          request.log.warn(
+            { tenantId: auth.tenantId, productId },
+            "assign-sku: producto borrado en Holded (404), archivado",
+          );
+          return reply.code(410).send({
+            error: "HOLDED_PRODUCT_DELETED",
+            message:
+              "Este producto ya no existe en Holded. Lo hemos archivado y dejará de aparecer en el TPV.",
+          });
+        }
         if (err instanceof HoldedApiError) {
           return reply.code(502).send({
             error: "HOLDED_ERROR",
