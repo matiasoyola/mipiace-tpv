@@ -109,19 +109,55 @@ export async function runAutoSku(options: AutoSkuOptions): Promise<AutoSkuResult
           mismatches: err.mismatches,
         });
       } else if (err instanceof HoldedApiError && err.status === 404) {
-        // B5 §1.2: el producto existía cuando lo bajamos pero fue
-        // borrado en Holded. Lo marcamos inactivo para que el siguiente
-        // sync incremental NO lo procese y dejemos de generar errores
-        // cada 15 min. Si reaparece en Holded, el upsert del sync lo
-        // reactiva automáticamente.
+        // B5 §1.2 + v1.9 Frente 2: el producto existía cuando lo
+        // bajamos pero fue borrado en Holded. Soft-archive inmediato
+        // (con timestamp) para que el siguiente sync incremental NO lo
+        // procese y dejemos de generar errores cada 15 min. Si
+        // reaparece en Holded, el upsert del sync lo reactiva
+        // automáticamente y limpia archivedFromHoldedAt.
         await prisma.product.update({
           where: { id: product.id },
-          data: { active: false, sellableViaTpv: false },
+          data: {
+            active: false,
+            sellableViaTpv: false,
+            archivedFromHoldedAt: new Date(),
+          },
         });
-        log.warn("auto-sku producto huérfano en Holded (404), marcado inactivo", {
+        log.warn("auto-sku producto huérfano en Holded (404), archivado", {
           holdedProductId: product.holdedProductId,
         });
+      } else if (
+        err instanceof HoldedApiError &&
+        err.status >= 400 &&
+        err.status < 500 &&
+        err.status !== 429
+      ) {
+        // v1.9 Frente 2: un 4xx distinto de 404/429 (caso TALONARIO
+        // CAJA: 400 persistente por ficha corrupta/duplicada) no se
+        // arregla reintentando — antes el producto seguía siendo
+        // candidato y se reintentaba cada 15 min para siempre. Lo
+        // mandamos a la bandeja de revisión (needsSkuReview=true saca
+        // al producto de los candidatos) y el propietario decide desde
+        // el admin (asignar SKU a mano o marcar no-vendible). El 429
+        // (rate limit) sí es transitorio y cae a la rama de reintento.
+        await prisma.product.update({
+          where: { id: product.id },
+          data: { needsSkuReview: true, sellableViaTpv: false },
+        });
+        result.needsReview += 1;
+        log.error(
+          "auto-sku 4xx persistente de Holded, movido a bandeja de revisión (sin más reintentos)",
+          {
+            holdedProductId: product.holdedProductId,
+            name: product.name,
+            status: err.status,
+            error: err.message,
+          },
+        );
       } else if (err instanceof HoldedApiError || err instanceof HoldedInvalidResponseError) {
+        // 5xx o respuesta no-JSON: transitorio o de configuración — el
+        // producto sigue siendo candidato y se reintenta en el próximo
+        // sync.
         result.errors.push(
           `${product.holdedProductId} (${product.name}): ${err.message}`,
         );

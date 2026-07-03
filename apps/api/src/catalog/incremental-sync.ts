@@ -11,10 +11,13 @@
 //   - Refrescar taxes y warehouses (los del catálogo del tenant pueden
 //     cambiar).
 //   - Iterar productos + servicios desde Holded, upsert con
-//     lastSyncedAt = now().
-//   - Huérfanos: UPDATE products SET active=false WHERE
-//     lastSyncedAt < syncStartedAt AND active=true (no borrar — los
-//     tickets históricos referencian).
+//     lastSyncedAt = now(), acumulando el set de ids vivos.
+//   - Borrados (v1.9): archiveMissingProducts() archiva todo producto
+//     activo cuyo holded_product_id no esté en el set vivo (no borrar
+//     — los tickets históricos referencian). Sustituye al antiguo
+//     UPDATE por lastSyncedAt < syncStartedAt: mismo efecto, pero con
+//     protección anti-catástrofe (listado coja → no archiva nada +
+//     alerta Sentry) y muestra de archivados en stats.
 //   - Re-ejecutar auto-SKU sobre productos sin SKU (lógica de B1
 //     reutilizada; ya filtra por sku=null OR "" Y needsSkuReview=false).
 //   - Refrescar comodines TPV-OTROS (idempotente; crea sólo los IVAs
@@ -51,6 +54,10 @@ import {
 import { createTpvOtrosWildcards, type WildcardResult } from "../onboarding/tpv-otros.js";
 import { enqueueProductImageCache } from "../queues/product-image-cache.js";
 import { backfillImagesFromHolded } from "./image-backfill.js";
+import {
+  archiveMissingProducts,
+  type ArchiveMissingResult,
+} from "./reconcile.js";
 
 export interface IncrementalSyncStats {
   productsSeen: number;
@@ -58,6 +65,12 @@ export interface IncrementalSyncStats {
   taxesSeen: number;
   warehousesSeen: number;
   orphansMarked: number;
+  // v1.9-sync-borrados: null = archivado aplicado; si no, motivo del
+  // aborto defensivo ("empty-live-set" | "live-set-below-ratio").
+  reconcileAborted: string | null;
+  // Muestra (≤20) de los archivados en este tick, para diagnóstico
+  // desde /catalog/sync-status sin entrar a la BD.
+  reconcileArchivedSample: Array<{ holdedProductId: string; name: string }>;
   autoSkuFixed: number;
   autoSkuNeedsReview: number;
   wildcardsCreated: number;
@@ -90,6 +103,8 @@ function emptyStats(): IncrementalSyncStats {
     taxesSeen: 0,
     warehousesSeen: 0,
     orphansMarked: 0,
+    reconcileAborted: null,
+    reconcileArchivedSample: [],
     autoSkuFixed: 0,
     autoSkuNeedsReview: 0,
     wildcardsCreated: 0,
@@ -151,8 +166,8 @@ export async function runIncrementalSync(
     : new ApiKeyClient(apiKey, { baseUrl: env.HOLDED_BASE_URL });
 
   const stats = emptyStats();
-  // Ancla para detectar huérfanos: cualquier producto con
-  // lastSyncedAt < syncStartedAt al terminar el sync es huérfano.
+  // Ancla para detectar contactos huérfanos (los productos usan el set
+  // vivo de ids desde v1.9, no el timestamp).
   const syncStartedAt = new Date();
 
   try {
@@ -198,9 +213,16 @@ export async function runIncrementalSync(
     // enqueue real se hace en bloque al final, para que Redis caído
     // no aborte el sync.
     const imageCacheTargets: string[] = [];
+    // v1.9: set de holdedProductId vivos según el listado de este tick.
+    // Alimenta archiveMissingProducts() — los forSale=0 se excluyen a
+    // propósito: no se sincronizan, así que tampoco cuentan como vivos
+    // para el TPV (mismo comportamiento que el huérfano-por-timestamp
+    // anterior).
+    const liveIds = new Set<string>();
     for await (const { products } of iterateAllProducts(client)) {
       for (const p of products) {
         if (p.forSale === 0) continue;
+        liveIds.add(p.id);
         const r = await upsertCatalogEntry(
           prisma,
           tenantId,
@@ -220,6 +242,7 @@ export async function runIncrementalSync(
     // Igual que en initial-sync.ts.
     for await (const { services } of iterateAllServices(client)) {
       for (const s of services) {
+        liveIds.add(s.id);
         const r = await upsertCatalogEntry(
           prisma,
           tenantId,
@@ -233,21 +256,27 @@ export async function runIncrementalSync(
       }
     }
 
-    // ── Huérfanos ────────────────────────────────────────────────────
-    // Reactivar productos que vuelven (puede pasar si Holded los
-    // archiva temporalmente y luego los reactiva). El upsert anterior
-    // ya marca active=true; los que NO se tocaron en este sync siguen
-    // con su valor previo. El UPDATE de abajo sólo afecta a los que
-    // estaban active=true y ya no aparecen.
-    const orphans = await prisma.product.updateMany({
-      where: {
-        tenantId,
-        active: true,
-        lastSyncedAt: { lt: syncStartedAt },
-      },
-      data: { active: false, sellableViaTpv: false },
-    });
-    stats.orphansMarked = orphans.count;
+    // ── Borrados en Holded (v1.9-sync-borrados) ─────────────────────
+    // Todo producto activo que no esté en el set vivo de este tick se
+    // soft-archiva. La reactivación es el upsert de arriba: si el id
+    // reaparece en Holded pone active=true y limpia
+    // archivedFromHoldedAt. Con listado coja la función aborta sin
+    // archivar y alerta a Sentry (protección anti-catástrofe).
+    const reconcile: ArchiveMissingResult = await archiveMissingProducts(
+      prisma,
+      tenantId,
+      liveIds,
+      { logger: log },
+    );
+    stats.orphansMarked = reconcile.archived;
+    stats.reconcileAborted = reconcile.aborted;
+    stats.reconcileArchivedSample = reconcile.archivedSample;
+    if (reconcile.aborted) {
+      stats.errors.push({
+        step: "reconcile",
+        message: `conciliación abortada (${reconcile.aborted}): vivos=${reconcile.liveSeen}, locales activos=${reconcile.localActiveBefore}`,
+      });
+    }
 
     // ── Auto-SKU para los nuevos productos sin SKU ──────────────────
     // runAutoSku filtra por sku=null/"" AND needsSkuReview=false, así
@@ -474,8 +503,10 @@ async function upsertCatalogEntry(
       taxRate,
       kind,
       // El upsert siempre reactiva: si el producto vuelve después de
-      // haber sido marcado huérfano (active=false), lo recuperamos.
+      // haber sido archivado (active=false), lo recuperamos y
+      // limpiamos la marca de borrado en Holded (v1.9).
       active: true,
+      archivedFromHoldedAt: null,
       // Tax sin resolver → FORZAMOS false (vender con tax=0 cuando
       // Holded tiene otro IVA en el SKU provoca silent reject). Si el
       // tax sí está pero falta el sku, no degradamos (auto-sku lo
