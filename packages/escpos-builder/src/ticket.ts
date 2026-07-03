@@ -90,6 +90,11 @@ export interface TicketReceiptInput {
   publicTicketUrl: string | null;
   // Pie configurable del tenant ("Gracias por su compra"). Opcional.
   footer: string | null;
+  // v1.8-Fiado (variante B) · si el ticket es una venta a crédito con
+  // deuda viva, imprimimos una leyenda destacada "PENDIENTE DE PAGO" con
+  // el deudor y el importe adeudado. NO es documento fiscal (no lleva
+  // numeración Holded — aún no existe); el layout no debe aparentarlo.
+  creditNotice?: { debtorName: string | null; amountDue: number } | null;
 }
 
 const COLUMNS = 42;
@@ -182,6 +187,28 @@ export function buildTicketReceipt(input: TicketReceiptInput): Uint8Array {
     if (pay.cashChange != null && pay.cashChange > 0) {
       parts.push(escText(padBetween("  Cambio", eur(pay.cashChange), COLUMNS)));
     }
+  }
+
+  // v1.8-Fiado · leyenda destacada de venta a crédito. Un fiado no lleva
+  // pagos (el bucle de arriba no imprime nada), así que este bloque es lo
+  // que ve el cliente: debe pagar, cuánto y a nombre de quién. Sin
+  // numeración fiscal — este ticket NO es el documento definitivo.
+  if (input.creditNotice) {
+    parts.push(escText(""));
+    parts.push(escSeparator(COLUMNS));
+    parts.push(escAlign("center"));
+    parts.push(escBold(true));
+    parts.push(escSize(1, 2));
+    parts.push(escText("PENDIENTE DE PAGO"));
+    parts.push(escResetSize());
+    if (input.creditNotice.debtorName) {
+      parts.push(escText(`Deudor: ${input.creditNotice.debtorName}`));
+    }
+    parts.push(escText(`Debe: ${eur(input.creditNotice.amountDue)}`));
+    parts.push(escBold(false));
+    parts.push(escText("Este ticket no es el justificante fiscal."));
+    parts.push(escAlign("left"));
+    parts.push(escSeparator(COLUMNS));
   }
 
   if (input.notes.length > 0) {

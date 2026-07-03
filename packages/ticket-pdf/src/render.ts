@@ -111,6 +111,7 @@ function computeLineCount(doc: TicketDocument): number {
   lines += 1; // metodo pago
   if (doc.payment.change && doc.payment.change > 0) lines += 1;
   lines += 1; // separador
+  if (doc.creditNotice) lines += 5; // v1.8-Fiado · bloque PENDIENTE DE PAGO
   lines += 2; // footer thanks
   if (doc.footer.returnPolicy) lines += 2;
   if (doc.ticket.publicSlug) lines += 1;
@@ -321,6 +322,24 @@ export async function renderTicketPdf(
   }
 
   drawSeparator(s);
+
+  // ── v1.8-Fiado · leyenda PENDIENTE DE PAGO ────────────────────────
+  // Venta a crédito con deuda viva. Bloque destacado: no es el documento
+  // fiscal (no lleva numeración Holded — aún no existe).
+  if (doc.creditNotice) {
+    drawCenteredText(s, "PENDIENTE DE PAGO", FONT_SIZE_TOTAL, true);
+    if (doc.creditNotice.debtorName) {
+      drawCenteredText(s, `Deudor: ${doc.creditNotice.debtorName}`, FONT_SIZE_NORMAL, true);
+    }
+    drawCenteredText(
+      s,
+      `Importe adeudado: ${formatEur(doc.creditNotice.amountDue)}`,
+      FONT_SIZE_NORMAL,
+      true,
+    );
+    drawCenteredText(s, "Este ticket no es el justificante fiscal.", FONT_SIZE_SMALL);
+    drawSeparator(s);
+  }
 
   // ── Footer ───────────────────────────────────────────────────────
   drawCenteredText(s, doc.footer.thankYouMessage, FONT_SIZE_NORMAL, true);

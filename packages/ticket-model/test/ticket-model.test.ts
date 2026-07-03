@@ -113,6 +113,18 @@ describe("buildTicketDocument", () => {
     expect(doc.refund?.reason).toBe("Café frío");
   });
 
+  it("v1.8-Fiado · propaga creditNotice (deudor + importe adeudado)", () => {
+    const input = baseInput();
+    input.ticket.creditNotice = { debtorName: "Juan Deudor", amountDue: 12.5 };
+    const doc = buildTicketDocument(input);
+    expect(doc.creditNotice).toEqual({ debtorName: "Juan Deudor", amountDue: 12.5 });
+  });
+
+  it("v1.8-Fiado · sin creditNotice el doc no lo lleva", () => {
+    const doc = buildTicketDocument(baseInput());
+    expect(doc.creditNotice).toBeUndefined();
+  });
+
   it("omite customer si no hay name/taxId/email", () => {
     const input = baseInput();
     input.customer = { name: "", email: "", taxId: "" };

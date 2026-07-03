@@ -134,6 +134,9 @@ export interface BuildTicketInput {
   // v1.3-Thalia Lote 3 · si se construye el doc para una reimpresión.
   // Sólo cambia presentación visual del PDF, no la fiscalidad.
   isReprint?: boolean;
+  // v1.8-Fiado · venta a crédito con deuda viva. Si viene, el renderer
+  // estampa "PENDIENTE DE PAGO" con deudor e importe adeudado.
+  creditNotice?: { debtorName?: string | null; amountDue: number };
 }
 
 export interface BuildRefundContext {
@@ -287,5 +290,11 @@ export function buildTicketDocument(input: BuildTicketDocumentInput): TicketDocu
       returnPolicy: input.footer?.returnPolicy,
       qrCaption: input.footer?.qrCaption,
     },
+    creditNotice: input.ticket.creditNotice
+      ? {
+          debtorName: input.ticket.creditNotice.debtorName ?? undefined,
+          amountDue: round2(input.ticket.creditNotice.amountDue),
+        }
+      : undefined,
   };
 }

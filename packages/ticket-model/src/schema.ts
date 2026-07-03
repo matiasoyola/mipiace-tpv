@@ -77,6 +77,13 @@ export const TicketDocumentSchema = z.object({
     returnPolicy: z.string().optional(),
     qrCaption: z.string().optional(),
   }),
+  // v1.8-Fiado · leyenda de venta a crédito (opcional).
+  creditNotice: z
+    .object({
+      debtorName: z.string().optional(),
+      amountDue: z.number(),
+    })
+    .optional(),
 });
 
 export function assertTicketDocument(doc: unknown): void {
