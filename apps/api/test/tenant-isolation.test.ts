@@ -218,8 +218,20 @@ const fakePrisma = {
     }),
   },
   shift: {
-    findFirst: vi.fn(async () => null),
+    // v1.8-Fiado · devolvemos un turno abierto cuando la ruta lo pide
+    // (closedAt:null) para que el flujo de cobro de deuda llegue hasta la
+    // comprobación de tenant del ticket (y devuelva 404 cross-tenant).
+    findFirst: vi.fn(async ({ where }: any) =>
+      where?.closedAt === null ? { id: where.id ?? "shift-open" } : null,
+    ),
     update: vi.fn(async () => ({})),
+  },
+  ticketPayment: {
+    findUnique: vi.fn(async () => null),
+    create: vi.fn(async ({ data }: any) => ({ id: randomUUID(), ...data })),
+  },
+  contact: {
+    findMany: vi.fn(async () => []),
   },
   register: {
     findUnique: vi.fn(async () => null),
@@ -263,6 +275,8 @@ vi.mock("../src/realtime/emit-helpers.js", () => ({
 }));
 
 import { registerTicketRoutes } from "../src/tickets/routes.js";
+import { registerCreditRoutes } from "../src/tickets/credit-routes.js";
+import { signManagerAuthorization } from "../src/auth/manager-authorization.js";
 
 function tokenFor(t: TenantFixture) {
   return jwt.sign(
@@ -275,6 +289,7 @@ function tokenFor(t: TenantFixture) {
 async function buildApp() {
   const app = Fastify({ logger: false });
   await registerTicketRoutes(app);
+  await registerCreditRoutes(app);
   return app;
 }
 
@@ -410,5 +425,66 @@ describe("Aislamiento multi-tenant · familia cashier-session", () => {
     expect(res.statusCode).not.toBe(200);
     expect(JSON.stringify(res.json())).not.toContain(bRefund.id);
     expect(JSON.stringify(res.json())).not.toContain(bRefund.internalNumber);
+  });
+
+  // ── v1.8-Fiado · aislamiento de los 3 endpoints de deuda ───────────────
+  it("POST /tickets/:id/credit-payments — A no puede cobrar un fiado de B (404)", async () => {
+    const bTicket = makeTicketRow({ tenantId: B.tid, registerId: B.rid });
+    bTicket.status = "ON_CREDIT";
+    bTicket.creditPending = dec(10);
+    db.tickets.push(bTicket);
+    const app = await buildApp();
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/tickets/${bTicket.id}/credit-payments`,
+      headers: { authorization: `Bearer ${tokenFor(A)}` },
+      payload: { externalId: randomUUID(), shiftId: A.rid, amount: 5, method: "CASH" },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(JSON.stringify(res.json())).not.toContain(bTicket.id);
+  });
+
+  it("POST /tickets/:id/credit-void — A no puede anular un fiado de B (404)", async () => {
+    const bTicket = makeTicketRow({ tenantId: B.tid, registerId: B.rid });
+    bTicket.status = "ON_CREDIT";
+    bTicket.creditPending = dec(10);
+    db.tickets.push(bTicket);
+    const app = await buildApp();
+
+    // Token de credit-void válido PARA A (misma cadena de auth); la
+    // barrera es el scoping del ticket por tenant, no el token.
+    const token = signManagerAuthorization({
+      sub: A.sub,
+      tid: A.tid,
+      purpose: "credit-void",
+      reason: "credit_void",
+      context: { maxDiscountPct: 100 },
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: `/tickets/${bTicket.id}/credit-void`,
+      headers: { authorization: `Bearer ${tokenFor(A)}` },
+      payload: { authorizationToken: token, reason: "x" },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(JSON.stringify(res.json())).not.toContain(bTicket.id);
+  });
+
+  it("GET /credits — A nunca ve la deuda de B", async () => {
+    const bTicket = makeTicketRow({ tenantId: B.tid, registerId: B.rid });
+    bTicket.status = "ON_CREDIT";
+    bTicket.creditPending = dec(10);
+    db.tickets.push(bTicket);
+    const app = await buildApp();
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/credits",
+      headers: { authorization: `Bearer ${tokenFor(A)}` },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().contacts).toHaveLength(0);
+    expect(JSON.stringify(res.json())).not.toContain(bTicket.id);
   });
 });
