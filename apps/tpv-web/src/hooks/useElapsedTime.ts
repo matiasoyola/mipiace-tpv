@@ -18,6 +18,23 @@ export function useElapsedTime(startIso: string | null | undefined): string {
   return formatElapsed(Math.max(0, now - start));
 }
 
+// v1.9.3-mapa-visual · variante numérica del hook para decidir la
+// alerta de "mesa olvidada" (>45 min sin cambios). Mismo tick de 30 s
+// que useElapsedTime; devuelve minutos enteros o null si no hay ticket.
+export function useElapsedMinutes(
+  startIso: string | null | undefined,
+): number | null {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  if (!startIso) return null;
+  const start = new Date(startIso).getTime();
+  if (Number.isNaN(start)) return null;
+  return Math.floor(Math.max(0, now - start) / 60_000);
+}
+
 export function formatElapsed(ms: number): string {
   const totalMin = Math.floor(ms / 60_000);
   if (totalMin < 1) return "ahora";
