@@ -49,6 +49,10 @@ vi.mock("../src/lib/catalog.js", () => ({
   fuzzySearch: (catalog: Array<{ name: string }>, q: string) =>
     catalog.filter((p) => p.name.toLowerCase().includes(q.toLowerCase())),
   getCachedBusinessType: () => "HOSPITALITY" as const,
+  // v1.8-fiado añadió este export a catalog.ts DESPUÉS de escribirse
+  // este mock (conflicto semántico del merge v1.9.1 × v1.8, CI #45):
+  // SalePage lo importa, así que el mock debe declararlo.
+  getCachedCreditSalesEnabled: () => false,
   getCachedIconPreset: () => null,
   getCachedTagAliases: () => ({}),
   getCachedTenantId: () => null,
