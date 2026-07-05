@@ -18,6 +18,7 @@ import {
   escFeed,
   escInit,
   escQrCode,
+  type TicketReceiptInput,
 } from "../src/index.js";
 
 function asciiOf(b: Uint8Array): string {
@@ -444,5 +445,61 @@ describe("v1.8-Fiado · buildCreditPaymentReceipt", () => {
       remaining: 0,
     });
     expect(asciiOf(bytes)).toContain("DEUDA SALDADA");
+  });
+});
+
+// v1.9.4 · desglose IVA térmico cuadrado al céntimo. El QR térmico
+// codifica "€" como 0xd5 (no imprimible), así que asciiOf lo vuelve
+// salto de línea; buscamos las cifras ("5,40", "0,56"), no el símbolo.
+describe("buildTicketReceipt · desglose IVA al céntimo (v1.9.4)", () => {
+  function siropeInput(extra: Partial<TicketReceiptInput> = {}): TicketReceiptInput {
+    return {
+      businessName: "Sirope",
+      businessAddress: null,
+      internalNumber: "TICKET 000005",
+      issuedAt: FIXED_DATE,
+      cashierLabel: "sole",
+      tableName: null,
+      lines: [
+        { description: "Item A", units: 1, unitPrice: 1.09, lineTotal: 1.2 },
+        { description: "Item C", units: 1, unitPrice: 2.64, lineTotal: 3.19 },
+      ],
+      total: 5.4,
+      payments: [{ label: "Tarjeta", amount: 5.4 }],
+      notes: [],
+      publicTicketUrl: null,
+      footer: null,
+      ...extra,
+    };
+  }
+
+  it("con taxBreakdown: la suma impresa cuadra con el TOTAL", () => {
+    // Buckets crudos (tax sin redondear): 10% s/2,00 = 0,20 exacto;
+    // 21% s/2,64 = 0,5544. Redondeados por separado sumarían 5,39; el
+    // resto mayor sube el 21% a 0,56 y cuadra 5,40.
+    const bytes = buildTicketReceipt(
+      siropeInput({
+        subtotal: 4.64,
+        taxBreakdown: [
+          { rate: 10, base: 2.0, tax: 0.2 },
+          { rate: 21, base: 2.64, tax: 2.64 * 0.21 },
+        ],
+      }),
+    );
+    const ascii = asciiOf(bytes);
+    expect(ascii).toContain("IVA 10% s/2,00");
+    expect(ascii).toContain("IVA 21% s/2,64");
+    expect(ascii).toContain("Subtotal");
+    expect(ascii).toContain("0,56"); // 21% cuadrado (no 0,55)
+    expect(ascii).not.toContain("0,55");
+    expect(ascii).toContain("4,64"); // subtotal
+    expect(ascii).toContain("5,40"); // total, entrada intacta
+  });
+
+  it("sin taxBreakdown: ticket idéntico a hoy (sin líneas IVA)", () => {
+    const ascii = asciiOf(buildTicketReceipt(siropeInput()));
+    expect(ascii).not.toContain("Subtotal");
+    expect(ascii).not.toContain("IVA ");
+    expect(ascii).toContain("5,40"); // TOTAL sigue imprimiéndose
   });
 });

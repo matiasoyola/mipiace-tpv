@@ -18,6 +18,7 @@ export {
   type TicketLineEscpos,
   type TicketPaymentEscpos,
   type TicketReceiptInput,
+  type TicketTaxBucketEscpos,
 } from "./ticket.js";
 
 export {

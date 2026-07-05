@@ -144,6 +144,33 @@ describe("renderTicketPdf", () => {
     expect(loaded.getPage(0).getHeight()).toBeGreaterThan(150);
   });
 
+  // v1.9.4 · el desglose IVA impreso cuadra al céntimo con el TOTAL.
+  // Caso real Sirope #000005: 10% s/2,00 + 21% s/2,64, subtotal 4,64,
+  // total 5,40. Sin cuadre el papel sumaría 5,39 (0,55 en el 21%); con
+  // el resto mayor el 21% pasa a 0,56 y la suma da 5,40 exacto.
+  it("cuadra el desglose IVA impreso con el TOTAL (caso Sirope)", async () => {
+    const inp = input();
+    inp.ticket.total = 5.4;
+    inp.ticket.lines = [
+      { nameSnapshot: "Item A", units: 1, unitPrice: 1.09, taxRate: 10, subtotal: 1.09 },
+      { nameSnapshot: "Item B", units: 1, unitPrice: 0.91, taxRate: 10, subtotal: 0.91 },
+      { nameSnapshot: "Item C", units: 1, unitPrice: 2.64, taxRate: 21, subtotal: 2.64 },
+    ];
+    inp.ticket.payments = [{ method: "CARD", amount: 5.4 }];
+    const doc = buildTicketDocument(inp);
+    // El modelo redondea cada bucket por separado: 21% cae a 0,55.
+    expect(doc.totals.taxBreakdown.find((b) => b.rate === 21)!.tax).toBeCloseTo(0.55, 5);
+
+    const bytes = await renderTicketPdf(doc);
+    const txt = (await pdfParse(Buffer.from(bytes))).text;
+    // Impreso: el 21% sube a 0,56 para cuadrar; subtotal y total intactos.
+    expect(txt).toContain("0,56 €");
+    expect(txt).not.toContain("0,55 €");
+    expect(txt).toContain("0,20 €"); // 10% s/2,00 no cambia
+    expect(txt).toContain("4,64 €"); // subtotal
+    expect(txt).toContain("5,40 €"); // total (entrada, no se recalcula)
+  });
+
   it("crece la página verticalmente con más líneas", async () => {
     const single = await renderTicketPdf(buildTicketDocument(input()));
     const heavyInput = input();

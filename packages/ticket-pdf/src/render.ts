@@ -20,7 +20,11 @@ import {
   rgb,
 } from "pdf-lib";
 
-import { assertTicketDocument, type TicketDocument } from "@mipiacetpv/ticket-model";
+import {
+  allocateRoundingRemainder,
+  assertTicketDocument,
+  type TicketDocument,
+} from "@mipiacetpv/ticket-model";
 
 const MM = 2.83464567; // 1 mm en puntos
 const PAGE_WIDTH = 80 * MM;
@@ -294,16 +298,36 @@ export async function renderTicketPdf(
   drawSeparator(s);
 
   // ── Desglose IVA ─────────────────────────────────────────────────
-  for (const bucket of doc.totals.taxBreakdown) {
+  // v1.9.4 · cuadramos los importes IMPRESOS (subtotal + cada IVA) contra
+  // el TOTAL con el método del resto mayor, para que sumar el papel a mano
+  // dé exactamente el TOTAL. Las bases mostradas ("s/2,64") no cambian.
+  const printed = allocateRoundingRemainder(
+    [
+      { key: "subtotal", amount: doc.totals.subtotal },
+      ...doc.totals.taxBreakdown.map((b, i) => ({
+        key: `tax:${i}`,
+        amount: (b.base * b.rate) / 100,
+      })),
+    ],
+    doc.totals.total,
+  );
+  const printedByKey = new Map(printed.map((p) => [p.key, p.amount]));
+
+  doc.totals.taxBreakdown.forEach((bucket, i) => {
     drawTwoColumn(
       s,
       `IVA ${bucket.rate}% s/${formatEur(bucket.base)}`,
-      formatEur(bucket.tax),
+      formatEur(printedByKey.get(`tax:${i}`) ?? bucket.tax),
       FONT_SIZE_SMALL,
     );
-  }
+  });
 
-  drawTwoColumn(s, "Subtotal", formatEur(doc.totals.subtotal), FONT_SIZE_NORMAL);
+  drawTwoColumn(
+    s,
+    "Subtotal",
+    formatEur(printedByKey.get("subtotal") ?? doc.totals.subtotal),
+    FONT_SIZE_NORMAL,
+  );
   drawTwoColumn(
     s,
     "TOTAL",

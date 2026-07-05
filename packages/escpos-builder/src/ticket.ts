@@ -18,6 +18,8 @@
 // El binary devuelto va directo a la impresora (USB con WebUSB o WIFI
 // con TCP a :9100).
 
+import { allocateRoundingRemainder } from "@mipiacetpv/ticket-model";
+
 import {
   concatBytes,
   escAlign,
@@ -52,6 +54,16 @@ export interface TicketPaymentEscpos {
   cashChange?: number;
 }
 
+// v1.9.4 · un bucket del desglose IVA para imprimir ("IVA 10% s/2,00").
+// `base` es el neto mostrado (no cambia); `tax` es el IVA sin redondear
+// (base * rate / 100) — el cuadre al céntimo lo hace el builder con
+// `allocateRoundingRemainder`, así que el caller pasa el valor crudo.
+export interface TicketTaxBucketEscpos {
+  rate: number;
+  base: number;
+  tax: number;
+}
+
 export interface TicketReceiptInput {
   // Cabecera del comercio.
   // Razón social fiscal (del fiscalProfile del tenant). Si viene, es el
@@ -80,6 +92,14 @@ export interface TicketReceiptInput {
   tableName: string | null;
   // Líneas que se imprimen — el caller pasa snapshot del cobro.
   lines: TicketLineEscpos[];
+  // v1.9.4 · desglose IVA opcional. Si viene (con al menos un bucket),
+  // imprimimos "IVA X% s/base" por tipo + "Subtotal" antes del TOTAL,
+  // cuadrados al céntimo contra `total`. Si falta (callers/fixtures
+  // previos), el ticket sale igual que hoy: sólo líneas → TOTAL → pagos.
+  taxBreakdown?: TicketTaxBucketEscpos[] | null;
+  // Neto sin IVA a mostrar en la línea "Subtotal". Sólo se usa si hay
+  // `taxBreakdown`. Es entrada: no se recalcula aquí.
+  subtotal?: number | null;
   total: number;
   // Métodos del cobro (puede haber varios — efectivo + tarjeta).
   payments: TicketPaymentEscpos[];
@@ -173,6 +193,39 @@ export function buildTicketReceipt(input: TicketReceiptInput): Uint8Array {
   }
 
   parts.push(escSeparator(COLUMNS));
+
+  // v1.9.4 · desglose IVA cuadrado al céntimo (sólo si el caller lo pasa).
+  // Repartimos el residuo de redondeo entre subtotal + IVAs con el método
+  // del resto mayor para que la suma impresa coincida con el TOTAL. Las
+  // bases mostradas ("s/2,00") no cambian.
+  if (input.taxBreakdown && input.taxBreakdown.length > 0) {
+    const subtotalNet =
+      input.subtotal != null
+        ? input.subtotal
+        : input.taxBreakdown.reduce((acc, b) => acc + b.base, 0);
+    const printed = allocateRoundingRemainder(
+      [
+        { key: "subtotal", amount: subtotalNet },
+        ...input.taxBreakdown.map((b, i) => ({
+          key: `tax:${i}`,
+          amount: b.tax,
+        })),
+      ],
+      input.total,
+    );
+    const printedByKey = new Map(printed.map((p) => [p.key, p.amount]));
+    input.taxBreakdown.forEach((b, i) => {
+      const label = `IVA ${b.rate}% s/${eur(b.base)}`;
+      parts.push(
+        escText(padBetween(label, eur(printedByKey.get(`tax:${i}`) ?? b.tax), COLUMNS)),
+      );
+    });
+    parts.push(
+      escText(
+        padBetween("Subtotal", eur(printedByKey.get("subtotal") ?? subtotalNet), COLUMNS),
+      ),
+    );
+  }
 
   // Total grande + bold + derecha.
   parts.push(escBold(true));
