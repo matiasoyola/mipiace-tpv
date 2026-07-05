@@ -32,6 +32,11 @@ COPY apps/api/package.json apps/api/
 COPY apps/admin/package.json apps/admin/
 COPY apps/tpv-web/package.json apps/tpv-web/
 COPY packages/db/package.json packages/db/
+# v1.9.4-fix: escpos-builder faltaba en esta lista desde su creación.
+# Era inofensivo hasta que su ticket.ts importó @mipiacetpv/ticket-model:
+# sin su manifest en el install, pnpm no crea su node_modules y el
+# typecheck del api (que atraviesa sus fuentes) no resuelve el módulo.
+COPY packages/escpos-builder/package.json packages/escpos-builder/
 COPY packages/holded-client/package.json packages/holded-client/
 COPY packages/ticket-model/package.json packages/ticket-model/
 COPY packages/ticket-pdf/package.json packages/ticket-pdf/
