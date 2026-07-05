@@ -16,13 +16,30 @@
 // El padre decide cómo navegar (SalePage con `tableContext`, etc.).
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, Plus, WifiOff } from "lucide-react";
+import {
+  Calculator,
+  Check,
+  CheckCircle2,
+  Loader2,
+  Lock,
+  Menu,
+  Plus,
+  PowerOff,
+  ReceiptText,
+  RotateCw,
+  WifiOff,
+  X,
+} from "lucide-react";
 
 import { apiWithCashier, ApiError } from "../api.js";
 import { Logo } from "../Logo.js";
 import { useElapsedTime } from "../hooks/useElapsedTime.js";
 import { useStoreEventStream } from "../hooks/useStoreEventStream.js";
+import { refreshCatalog } from "../lib/catalog.js";
 import { outboxBlockedTableIds, subscribeOutbox } from "../lib/outbox.js";
+import { syncNow } from "../lib/syncNow.js";
+import { CloseShiftModal } from "./CloseShiftModal.js";
+import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
 
 type TableZone = "SALON" | "TERRAZA" | "BARRA" | "RESERVADO";
 
@@ -66,6 +83,17 @@ const ZONE_LABEL: Record<TableZone | "ALL", string> = {
   RESERVADO: "Reservados",
 };
 
+// v1.9.2-mesas-concurrencia · Frente 1/2/3: aviso inline que el mapa
+// muestra cuando el cajero es EXPULSADO de una mesa (cobrada/absorbida
+// desde otra caja) o tras cobrar una mesa desde este dispositivo. Se
+// autocierra a los 4 s y es cerrable a mano. `tone` cambia el color;
+// `ticketQuery` (sólo en el banner de éxito) habilita "Ver ticket".
+export interface MapNotice {
+  text: string;
+  tone?: "info" | "success";
+  ticketQuery?: string | null;
+}
+
 export interface TableMapScreenProps {
   // v1.7-alias-cajeros: label de display (alias con fallback a email).
   cashierLabel: string;
@@ -75,6 +103,14 @@ export interface TableMapScreenProps {
   onQuickSale: () => void;
   onLogoutCashier: () => void;
   onCloseShift: () => void;
+  // v1.9.2-mesas-concurrencia · Frente 3.3: el header del mapa ofrece
+  // ahora Arqueo X y Cerrar turno sin pasar por venta rápida. Requiere
+  // el turno y el rol del cajero.
+  shiftId?: string;
+  cashierRole?: "MANAGER" | "CASHIER";
+  // v1.9.2-mesas-concurrencia · banner de expulsión / éxito. El padre
+  // (App) lo setea al navegar de vuelta al mapa por un evento remoto.
+  notice?: MapNotice | null;
   // v1.0-mesas-frontend: el padre abre la mesa server-side ANTES de
   // entrar a SalePage. Mientras el POST está en vuelo, la mesa tocada
   // queda con spinner; si falla, el error se pinta en el banner.
@@ -86,6 +122,38 @@ export function TableMapScreen(props: TableMapScreenProps) {
   const [data, setData] = useState<ApiResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
+  // v1.9.2-mesas-concurrencia · Frente 3.3: menú de caja y Tickets
+  // accesibles desde el mapa (antes exigía pasar por venta rápida).
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyQuery, setHistoryQuery] = useState<string | undefined>(
+    undefined,
+  );
+  const [showCloseShift, setShowCloseShift] = useState(false);
+  const [showArqueoX, setShowArqueoX] = useState(false);
+  const [syncState, setSyncState] = useState<"idle" | "running" | "done">(
+    "idle",
+  );
+  // Aviso inline de expulsión / éxito. Copia local del prop para poder
+  // autocerrarlo a los 4 s sin depender del padre.
+  const [notice, setNotice] = useState<MapNotice | null>(props.notice ?? null);
+  useEffect(() => {
+    setNotice(props.notice ?? null);
+  }, [props.notice]);
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 4_000);
+    return () => clearTimeout(t);
+  }, [notice]);
+  // Esc cierra el drawer del mapa.
+  useEffect(() => {
+    if (!drawerOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setDrawerOpen(false);
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [drawerOpen]);
   // v1.0-mesas-frontend · Lote 2: mesas con un checkout en tránsito en
   // ESTE dispositivo (item en el outbox local). Quedan bloqueadas hasta
   // que el reenvío confirme (el item desaparece) — reabrirlas podría
@@ -161,6 +229,18 @@ export function TableMapScreen(props: TableMapScreenProps) {
     <div className="min-h-screen bg-mipiace-stone flex flex-col font-sans">
       <header className="bg-white border-b border-slate-200 px-5 md:px-7 py-3.5 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
+          {/* v1.9.2-mesas-concurrencia · Frente 3.3: menú de caja
+              (Arqueo X, Cerrar turno, Sincronizar catálogo, Bloquear)
+              accesible desde el mapa. */}
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(true)}
+            title="Abrir menú"
+            aria-label="Abrir menú"
+            className="h-10 w-10 shrink-0 rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-600"
+          >
+            <Menu className="w-5 h-5" strokeWidth={2.1} />
+          </button>
           <Logo />
           <div className="hidden sm:block text-[12.5px] text-slate-500">
             {props.storeName} · {props.registerName}
@@ -172,12 +252,19 @@ export function TableMapScreen(props: TableMapScreenProps) {
               <WifiOff className="w-3.5 h-3.5" /> Sin conexión
             </span>
           )}
+          {/* v1.9.2-mesas-concurrencia · Frente 3.3: "Tickets" en el
+              header del mapa (mismo peso que en venta rápida). */}
           <button
             type="button"
-            onClick={props.onCloseShift}
-            className="hidden md:block h-9 px-3 text-[12.5px] text-slate-500 hover:text-mipiace-ink"
+            onClick={() => {
+              setHistoryQuery(undefined);
+              setShowHistory(true);
+            }}
+            title="Tickets pasados"
+            className="h-9 px-3 rounded-lg bg-mipiace-stone hover:bg-slate-100 flex items-center gap-2 text-[12.5px] font-medium text-mipiace-ink"
           >
-            Cerrar turno
+            <ReceiptText className="w-[17px] h-[17px]" strokeWidth={2.25} />
+            <span className="hidden sm:inline">Tickets</span>
           </button>
           <button
             type="button"
@@ -188,6 +275,49 @@ export function TableMapScreen(props: TableMapScreenProps) {
           </button>
         </div>
       </header>
+
+      {/* v1.9.2-mesas-concurrencia · banner inline de expulsión / éxito.
+          Autocierre 4 s, cerrable a mano. Nada de modales en el flujo. */}
+      {notice && (
+        <div
+          className={`px-5 md:px-7 py-3 border-b flex items-start gap-3 ${
+            notice.tone === "success"
+              ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+              : "bg-amber-50 border-amber-200 text-amber-900"
+          }`}
+          role="status"
+        >
+          {notice.tone === "success" ? (
+            <CheckCircle2 className="w-5 h-5 mt-0.5 shrink-0" />
+          ) : (
+            <WifiOff className="w-5 h-5 mt-0.5 shrink-0 opacity-0" />
+          )}
+          <div className="flex-1 text-[13.5px] font-medium leading-snug">
+            {notice.text}
+          </div>
+          {notice.ticketQuery && (
+            <button
+              type="button"
+              onClick={() => {
+                setHistoryQuery(notice.ticketQuery ?? undefined);
+                setShowHistory(true);
+                setNotice(null);
+              }}
+              className="text-[12.5px] font-semibold underline underline-offset-2 shrink-0"
+            >
+              Ver ticket
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            aria-label="Cerrar aviso"
+            className="h-6 w-6 shrink-0 rounded-md hover:bg-black/5 flex items-center justify-center"
+          >
+            <X className="w-4 h-4" strokeWidth={2.1} />
+          </button>
+        </div>
+      )}
 
       <main className="flex-1 p-4 md:p-7 overflow-y-auto">
         {offline && (
@@ -288,6 +418,140 @@ export function TableMapScreen(props: TableMapScreenProps) {
           </>
         )}
       </main>
+
+      {/* v1.9.2-mesas-concurrencia · Frente 3.3: drawer de caja del mapa,
+          espejo del de SalePage (Sincronizar catálogo, Arqueo X, Cerrar
+          turno, Bloquear). */}
+      <div
+        className={`fixed inset-0 z-50 ${drawerOpen ? "pointer-events-auto" : "pointer-events-none"}`}
+        aria-hidden={!drawerOpen}
+      >
+        <div
+          onClick={() => setDrawerOpen(false)}
+          className={`absolute inset-0 bg-mipiace-ink/30 transition-opacity ${
+            drawerOpen ? "opacity-100" : "opacity-0"
+          }`}
+        />
+        <aside
+          className={`absolute inset-y-0 left-0 w-[280px] max-w-[85vw] bg-white shadow-2xl p-5 transition-transform ${
+            drawerOpen ? "translate-x-0" : "-translate-x-full"
+          }`}
+        >
+          <div className="mb-7 flex items-center justify-between">
+            <Logo size={28} />
+            <button
+              type="button"
+              onClick={() => setDrawerOpen(false)}
+              title="Cerrar menú"
+              aria-label="Cerrar menú"
+              className="h-9 w-9 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-500"
+            >
+              <X className="w-4 h-4" strokeWidth={2.1} />
+            </button>
+          </div>
+          <nav className="space-y-1.5">
+            <button
+              onClick={async () => {
+                if (syncState === "running") return;
+                setSyncState("running");
+                try {
+                  await syncNow(async () => {
+                    await refreshCatalog();
+                  });
+                  setSyncState("done");
+                  setTimeout(() => setSyncState("idle"), 1500);
+                } catch {
+                  setSyncState("idle");
+                }
+              }}
+              title="Forzar refresco del catálogo y borrar caché del Service Worker"
+              className="w-full h-12 flex items-center gap-3 px-4 rounded-xl text-slate-600 hover:bg-slate-50 text-[14.5px] font-medium"
+            >
+              {syncState === "running" ? (
+                <Loader2 className="w-[19px] h-[19px] text-slate-500 shrink-0 animate-spin" strokeWidth={2.1} />
+              ) : syncState === "done" ? (
+                <Check className="w-[19px] h-[19px] text-emerald-600 shrink-0" strokeWidth={2.1} />
+              ) : (
+                <RotateCw className="w-[19px] h-[19px] text-slate-500 shrink-0" strokeWidth={2.1} />
+              )}
+              <span>
+                {syncState === "running"
+                  ? "Sincronizando…"
+                  : syncState === "done"
+                    ? "Catálogo actualizado"
+                    : "Sincronizar catálogo"}
+              </span>
+            </button>
+            {props.shiftId && props.cashierRole && (
+              <button
+                onClick={() => {
+                  setDrawerOpen(false);
+                  setShowArqueoX(true);
+                }}
+                title="Arqueo X (control sin cerrar turno)"
+                className="w-full h-12 flex items-center gap-3 px-4 rounded-xl text-slate-600 hover:bg-slate-50 text-[14.5px] font-medium"
+              >
+                <Calculator className="w-[19px] h-[19px] text-slate-500 shrink-0" strokeWidth={2.1} />
+                <span>Arqueo X</span>
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setDrawerOpen(false);
+                // Con turno/rol conocidos usamos el modal Z in situ; si
+                // no llegaron (defensivo) caemos al callback del padre.
+                if (props.shiftId && props.cashierRole) setShowCloseShift(true);
+                else props.onCloseShift();
+              }}
+              title="Cerrar turno"
+              className="w-full h-12 flex items-center gap-3 px-4 rounded-xl text-slate-600 hover:bg-slate-50 text-[14.5px] font-medium"
+            >
+              <PowerOff className="w-[19px] h-[19px] text-slate-500 shrink-0" strokeWidth={2.1} />
+              <span>Cerrar turno</span>
+            </button>
+            <button
+              onClick={() => {
+                setDrawerOpen(false);
+                props.onLogoutCashier();
+              }}
+              title={`Bloquear (${props.cashierLabel})`}
+              className="w-full h-12 flex items-center gap-3 px-4 rounded-xl text-slate-600 hover:bg-slate-50 text-[14.5px] font-medium"
+            >
+              <Lock className="w-[19px] h-[19px] text-slate-500 shrink-0" strokeWidth={2.1} />
+              <span className="truncate">Bloquear ({props.cashierLabel})</span>
+            </button>
+          </nav>
+        </aside>
+      </div>
+
+      {showHistory && (
+        <TicketsHistoryPage
+          onClose={() => setShowHistory(false)}
+          onGoToMap={() => setShowHistory(false)}
+          initialQuery={historyQuery}
+        />
+      )}
+      {showCloseShift && props.shiftId && props.cashierRole && (
+        <CloseShiftModal
+          shiftId={props.shiftId}
+          cashierRole={props.cashierRole}
+          mode="Z"
+          onClose={() => setShowCloseShift(false)}
+          onClosed={() => {
+            setShowCloseShift(false);
+            props.onCloseShift();
+          }}
+        />
+      )}
+      {showArqueoX && props.shiftId && props.cashierRole && (
+        <CloseShiftModal
+          shiftId={props.shiftId}
+          cashierRole={props.cashierRole}
+          mode="X"
+          onClose={() => setShowArqueoX(false)}
+          onClosed={() => setShowArqueoX(false)}
+        />
+      )}
     </div>
   );
 }

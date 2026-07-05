@@ -18,6 +18,7 @@ import {
   Coffee,
   Dumbbell,
   GraduationCap,
+  LayoutGrid,
   Loader2,
   Lock,
   Menu,
@@ -77,11 +78,13 @@ import { ModifierSelector } from "./SalePage.modifierSelector.js";
 import { MoveTablePicker } from "./SalePage.movePicker.js";
 import { SplitBillSheet } from "./SalePage.splitBill.js";
 import {
+  isDeadDraftError,
   mapServerDraftLines,
   tableErrorMessage,
   type ServerDraft,
 } from "../lib/tableDraft.js";
 import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
+import type { MapNotice } from "./TableMapScreen.js";
 import { DebtsScreen } from "./DebtsScreen.js";
 import { useElapsedTime } from "../hooks/useElapsedTime.js";
 import { useStoreEventStream } from "../hooks/useStoreEventStream.js";
@@ -228,6 +231,11 @@ export interface SalePageProps {
   // Sólo provisto cuando la tienda tiene mesas configuradas — permite
   // al cajero volver al mapa con un toque. Null en modo retail puro.
   onBackToMap?: (() => void) | null;
+  // v1.9.2-mesas-concurrencia · Frente 1/2/3: salida al mapa con un
+  // aviso inline. Se usa cuando la mesa muere bajo los pies del cajero
+  // (cobrada/absorbida desde otra caja) o tras cobrarla desde aquí
+  // (banner de éxito con "Ver ticket"). Null en retail puro.
+  onExitToMap?: ((notice: MapNotice) => void) | null;
   // v1.4-Bar-Operativa-MVP Lote 3 · al mover un ticket DRAFT a otra
   // mesa, el SalePage delega al padre cómo actualizar `tableContext`.
   // El padre carga `/tpv/tables`, encuentra la mesa destino y vuelve
@@ -403,8 +411,19 @@ export function SalePage(props: SalePageProps) {
       );
       setTableLines(mapServerDraftLines(res.ticket.lines));
     } catch (err) {
-      // Revertir la línea optimista y avisar.
+      // Revertir la línea optimista.
       setTableLines((curr) => curr.filter((l) => l.id !== line.id));
+      // v1.9.2-mesas-concurrencia · Frente 2: si el DRAFT ya no está
+      // vivo (cobrado, anulado o absorbido por un grupo desde otra
+      // caja), no es un error puntual: la mesa murió. Banner persistente
+      // con CTA al mapa en vez del toast efímero (evita la "bebida
+      // servida sin comandar" de A5).
+      if (isDeadDraftError(err)) {
+        setDeadTable(
+          "Esta mesa ya no está abierta (cobrada o unida a otra). Vuelve al mapa.",
+        );
+        return;
+      }
       setTableError(tableErrorMessage(err));
     }
   }
@@ -652,8 +671,45 @@ export function SalePage(props: SalePageProps) {
     text: string;
     expiresAt: number;
   } | null>(null);
-  useStoreEventStream(storeId, (ev) => {
+  // v1.9.2-mesas-concurrencia · Frente 2: la mesa murió bajo los pies
+  // del cajero (DRAFT absorbido/cobrado). Banner persistente sobre el
+  // panel con CTA al mapa — no un toast efímero.
+  const [deadTable, setDeadTable] = useState<string | null>(null);
+
+  // Sale al mapa con un aviso inline. Cierra cualquier sheet abierto
+  // (incl. el modal de cobro) antes de navegar. Si el padre no cableó
+  // onExitToMap (retail puro), cae al onBackToMap plano.
+  const exitToMap = useCallback(
+    (notice: MapNotice) => {
+      setOpenSheet(null);
+      if (props.onExitToMap) props.onExitToMap(notice);
+      else props.onBackToMap?.();
+    },
+    // props es estable en la práctica; capturamos las funciones del padre.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [props.onExitToMap, props.onBackToMap],
+  );
+
+  // v1.9.2-mesas-concurrencia · Frente 1: en contexto mesa, la SalePage
+  // escucha los eventos de SU mesa (no sólo el mapa). Líneas remotas →
+  // refetch de la proyección; cobro/absorción remota → expulsión al
+  // mapa con aviso. Reutiliza el mismo WS ya conectado.
+  const wsStatus = useStoreEventStream(storeId, (ev) => {
+    // ── Eventos ticket-level (contador cross-caja) ──────────────────
     if (ev.type === "ticket.paid") {
+      // Si la MESA abierta aquí la cobró OTRA caja → expulsión.
+      if (
+        isTableMode &&
+        tableContext &&
+        ev.tableId === tableContext.id &&
+        ev.registerId !== props.registerId
+      ) {
+        exitToMap({
+          text: `Mesa ${tableContext.name} cobrada desde otra caja`,
+          tone: "info",
+        });
+        return;
+      }
       // Si soy yo el que cobró, el contador ya se refresca por su
       // propio camino (polling tras checkout). Ignoramos eco-events.
       if (ev.registerId === props.registerId) return;
@@ -662,14 +718,70 @@ export function SalePage(props: SalePageProps) {
         text: `Otra caja cobró un ticket (${ev.totalEur.toFixed(2)} €)`,
         expiresAt: Date.now() + 4_000,
       });
-    } else if (ev.type === "ticket.refunded") {
+      return;
+    }
+    if (ev.type === "ticket.refunded") {
       void refreshShiftTicketsCount();
       setCrossCajaToast({
         text: `Devolución registrada en otra caja (${ev.totalEur.toFixed(2)} €)`,
         expiresAt: Date.now() + 4_000,
       });
+      return;
+    }
+
+    // ── Eventos de MI mesa (sólo en contexto mesa) ──────────────────
+    if (!isTableMode || !tableContext) return;
+
+    // Absorbida por un grupo desde otra caja → expulsión.
+    if (
+      ev.type === "table.grouped" &&
+      ev.absorbedTableIds.includes(tableContext.id)
+    ) {
+      exitToMap({
+        text: `Mesa ${tableContext.name} se ha unido a otra mesa`,
+        tone: "info",
+      });
+      return;
+    }
+
+    // Líneas añadidas/quitadas/movidas por otra caja → refetch de la
+    // proyección. El panel (y el modal de cobro, si está abierto)
+    // reflejan la verdad sin toast ni modal.
+    if (
+      (ev.type === "table.lineAdded" ||
+        ev.type === "table.lineRemoved" ||
+        ev.type === "table.lineUpdated") &&
+      ev.tableId === tableContext.id
+    ) {
+      void reloadTableDraft();
+      return;
+    }
+    if (
+      ev.type === "table.linesMoved" &&
+      (ev.sourceTableId === tableContext.id ||
+        ev.destinationTableId === tableContext.id)
+    ) {
+      void reloadTableDraft();
+      return;
     }
   });
+
+  // v1.9.2-mesas-concurrencia · al reconectar el WS (open tras un corte)
+  // refetch de la proyección si hay mesa abierta — pudimos perder
+  // eventos durante la caída.
+  const prevWsStatus = useRef(wsStatus);
+  useEffect(() => {
+    if (
+      prevWsStatus.current !== "open" &&
+      wsStatus === "open" &&
+      isTableMode &&
+      activeTicketId
+    ) {
+      void reloadTableDraft();
+    }
+    prevWsStatus.current = wsStatus;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wsStatus]);
   useEffect(() => {
     if (!crossCajaToast) return;
     const remaining = crossCajaToast.expiresAt - Date.now();
@@ -1252,6 +1364,24 @@ export function SalePage(props: SalePageProps) {
                   strokeWidth={2.25}
                 />
               </button>
+              {/* v1.9.2-mesas-concurrencia · Frente 3.2: "Mesas" fijo en
+                  el header de venta rápida (mismo peso que "Tickets").
+                  El chip "Mapa" enterrado en el panel puede quedarse; el
+                  header manda. En contexto mesa no aparece (el panel ya
+                  lleva "Mapa" y "Nueva venta rápida" nace en el mapa). */}
+              {!isTableMode && props.onBackToMap && (
+                <button
+                  onClick={props.onBackToMap}
+                  title="Ir al mapa de sala"
+                  className="h-12 md:h-14 px-3 md:px-5 rounded-2xl bg-mipiace-stone hover:bg-slate-100 flex items-center gap-2 text-[13.5px] md:text-[14px] font-medium text-mipiace-ink"
+                >
+                  <LayoutGrid
+                    className="w-[18px] h-[18px]"
+                    strokeWidth={2.25}
+                  />
+                  <span className="hidden sm:inline">Mesas</span>
+                </button>
+              )}
               <button
                 onClick={() => setShowHistory(true)}
                 title="Tickets pasados"
@@ -1472,6 +1602,34 @@ export function SalePage(props: SalePageProps) {
           tableTicketId={isTableMode ? activeTicketId : null}
           tableId={isTableMode ? tableContext?.id : null}
           creditSalesEnabled={creditSalesEnabled}
+          // v1.9.2-mesas-concurrencia · Frente 2: si el server rechaza el
+          // cobro con PAYMENTS_MISMATCH (otra caja cambió la cuenta), el
+          // modal refetchea la proyección y recalcula el total in situ.
+          onRefetchTable={isTableMode ? reloadTableDraft : undefined}
+          // 409 TICKET_ALREADY_PAID: doble cobro físico. Cerrar modal y
+          // salir al mapa con banner — nunca dejarlo mudo.
+          onTableClosedElsewhere={
+            isTableMode
+              ? (text) => exitToMap({ text, tone: "info" })
+              : undefined
+          }
+          // Frente 3.1: tras cobrar la mesa, cerrar directo al mapa con
+          // banner de confirmación (sustituye al modal "Ticket emitido"
+          // sólo en contexto mesa). "Ver ticket" abre el detalle.
+          onTablePaidExit={
+            isTableMode
+              ? ({ notice, ticketQuery }) => {
+                  setTableLines([]);
+                  setContact(null);
+                  setNotes("");
+                  exitToMap({
+                    text: notice,
+                    tone: "success",
+                    ticketQuery,
+                  });
+                }
+              : undefined
+          }
           // v1.3-Servicios-Pinta · Lote 4: el nudge "Servicio sin
           // cliente" salta al modal de búsqueda existente. Cerramos
           // el overlay (CheckoutOverlay también llama onClose) y
@@ -1524,7 +1682,20 @@ export function SalePage(props: SalePageProps) {
         />
       )}
       {showHistory && (
-        <TicketsHistoryPage onClose={() => setShowHistory(false)} />
+        <TicketsHistoryPage
+          onClose={() => setShowHistory(false)}
+          // v1.9.2-mesas-concurrencia · Frente 3.2: en venta rápida de
+          // bar, "Mesas" en el historial cierra el overlay y salta al
+          // mapa de un toque. Null en retail puro (sin mesas).
+          onGoToMap={
+            props.onBackToMap
+              ? () => {
+                  setShowHistory(false);
+                  props.onBackToMap?.();
+                }
+              : null
+          }
+        />
       )}
       {showDebts && (
         <DebtsScreen
@@ -1596,6 +1767,32 @@ export function SalePage(props: SalePageProps) {
           message={tableError}
           onClose={() => setTableError(null)}
         />
+      )}
+      {/* v1.9.2-mesas-concurrencia · Frente 2: la mesa murió bajo los
+          pies del cajero. Banner persistente con CTA al mapa (no un
+          toast efímero: el cajero debe SABER que no puede seguir). */}
+      {deadTable && (
+        <div className="fixed inset-x-0 top-0 z-[60] flex justify-center px-4 pt-4">
+          <div className="w-full max-w-md flex items-start gap-3 rounded-2xl border border-amber-300 bg-amber-50 text-amber-900 px-4 py-3 shadow-lg">
+            <CircleAlert className="w-5 h-5 mt-0.5 shrink-0" />
+            <div className="flex-1 text-[13.5px] leading-snug">
+              <div className="font-semibold">Mesa no disponible</div>
+              <div className="mt-0.5">{deadTable}</div>
+            </div>
+            {props.onBackToMap && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDeadTable(null);
+                  props.onBackToMap?.();
+                }}
+                className="shrink-0 h-9 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[12.5px] font-semibold"
+              >
+                Ir al mapa
+              </button>
+            )}
+          </div>
+        </div>
       )}
       {selectorState && (
         <ModifierSelector
@@ -2504,7 +2701,9 @@ function TicketPanel({
                 <>
                   <span className="text-slate-300">·</span>
                   <span title={`${shiftTicketsCount} ${vocab("ticketNoun", businessType).toLowerCase()}${shiftTicketsCount === 1 ? "" : "s"} ya emitido${shiftTicketsCount === 1 ? "" : "s"} en este turno`}>
-                    Turno · #{shiftTicketsCount + 1}
+                    {/* v1.9.2-mesas-concurrencia · Frente 3.4: es un
+                        contador de tickets del turno, no el nº de turno. */}
+                    Ticket {shiftTicketsCount + 1} del turno
                   </span>
                 </>
               )}

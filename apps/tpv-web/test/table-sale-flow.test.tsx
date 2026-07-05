@@ -170,12 +170,14 @@ function backgroundRoutes(
 let container: HTMLDivElement;
 let root: Root;
 const onBackToMap = vi.fn();
+const onExitToMap = vi.fn();
 
 beforeEach(async () => {
   await __resetOutboxForTests();
   (globalThis as Record<string, unknown>).indexedDB = new IDBFactory();
   apiMock.apiWithCashier.mockReset();
   onBackToMap.mockReset();
+  onExitToMap.mockReset();
   sessionStorage.clear();
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -200,6 +202,7 @@ async function renderSalePage(initialLines: ServerDraftLine[]) {
         tableContext={tableContext}
         initialTableLines={mapServerDraftLines(initialLines)}
         onBackToMap={onBackToMap}
+        onExitToMap={onExitToMap}
         onTicketMovedToTable={null}
         onLogoutCashier={vi.fn()}
         onCloseShift={vi.fn()}
@@ -419,12 +422,14 @@ describe("SalePage · mesa cableada a la API", () => {
     expect(checkoutBody!.payments).toEqual([{ method: "CASH", amount: 1.65 }]);
     // El body de mesa NO lleva líneas (viven en el DRAFT server-side).
     expect(checkoutBody!.lines).toBeUndefined();
-    expect(container.textContent).toContain("Ticket emitido");
+    // v1.9.2-mesas-concurrencia · Frente 3.1: en mesa NO hay modal
+    // "Ticket emitido"; se sale directo al mapa con banner de éxito.
+    expect(container.textContent).not.toContain("Ticket emitido");
+    expect(onExitToMap).toHaveBeenCalledWith(
+      expect.objectContaining({ tone: "success", ticketQuery: "000007" }),
+    );
     // 2xx confirmado → el outbox queda limpio (la mesa no se bloquea).
     expect(await outboxList()).toHaveLength(0);
-
-    await click(buttonByText("Nueva venta"));
-    expect(onBackToMap).toHaveBeenCalled();
   });
 });
 
