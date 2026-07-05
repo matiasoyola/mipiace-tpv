@@ -76,6 +76,14 @@ export async function uploadTicket(
   if (ticket.status === TicketStatus.SYNCED) {
     return { kind: "skipped", reason: "already_synced" };
   }
+  // v1.8-Fiado (variante B) · un fiado con deuda viva NO se sube a
+  // Holded. El gate `shouldEnqueueHoldedUpload` ya impide encolarlo, así
+  // que esto es un blindaje defensivo: si por lo que sea existiera un job
+  // (sweeper, reintento manual, migración), lo saltamos sin dejar la
+  // fila en estado raro. Al saldarse el ticket pasa a PAID y ESE sí sube.
+  if (ticket.status === TicketStatus.ON_CREDIT) {
+    return { kind: "skipped", reason: "on_credit" };
+  }
   // B-OnboardingV2: tickets emitidos por el cajero técnico durante el
   // modo prueba se marcan TEST y NO se suben a Holded. El estado TEST
   // gana sobre el PENDING_SYNC habitual.

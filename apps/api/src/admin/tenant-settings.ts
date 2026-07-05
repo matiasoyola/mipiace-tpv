@@ -38,6 +38,7 @@ export async function registerAdminTenantSettingsRoutes(
           deviceNewLoginAlertEnabled: true,
           discountThresholdPct: true,
           cashierSearchableContacts: true,
+          creditSalesEnabled: true,
         },
       });
       return {
@@ -49,6 +50,7 @@ export async function registerAdminTenantSettingsRoutes(
           deviceNewLoginAlertEnabled: tenant.deviceNewLoginAlertEnabled,
           discountThresholdPct: Number(tenant.discountThresholdPct),
           cashierSearchableContacts: tenant.cashierSearchableContacts,
+          creditSalesEnabled: tenant.creditSalesEnabled,
         },
       };
     },
@@ -75,6 +77,8 @@ export async function registerAdminTenantSettingsRoutes(
             // ambos para no obligar al admin a manejar formato.
             discountThresholdPct: { type: "number", minimum: 0, maximum: 100 },
             cashierSearchableContacts: { type: "boolean" },
+            // v1.8-Fiado · activa la venta a crédito para el tenant.
+            creditSalesEnabled: { type: "boolean" },
           },
         },
       },
@@ -89,6 +93,7 @@ export async function registerAdminTenantSettingsRoutes(
         deviceNewLoginAlertEnabled?: boolean;
         discountThresholdPct?: number;
         cashierSearchableContacts?: boolean;
+        creditSalesEnabled?: boolean;
       };
       const prisma = getPrisma();
       const updated = await prisma.tenant.update({
@@ -101,6 +106,7 @@ export async function registerAdminTenantSettingsRoutes(
           deviceNewLoginAlertEnabled: body.deviceNewLoginAlertEnabled,
           discountThresholdPct: body.discountThresholdPct,
           cashierSearchableContacts: body.cashierSearchableContacts,
+          creditSalesEnabled: body.creditSalesEnabled,
         },
         select: {
           cashierAutoLogoutMinutes: true,
@@ -110,6 +116,7 @@ export async function registerAdminTenantSettingsRoutes(
           deviceNewLoginAlertEnabled: true,
           discountThresholdPct: true,
           cashierSearchableContacts: true,
+          creditSalesEnabled: true,
         },
       });
       return reply.code(200).send({
@@ -121,6 +128,7 @@ export async function registerAdminTenantSettingsRoutes(
           deviceNewLoginAlertEnabled: updated.deviceNewLoginAlertEnabled,
           discountThresholdPct: Number(updated.discountThresholdPct),
           cashierSearchableContacts: updated.cashierSearchableContacts,
+          creditSalesEnabled: updated.creditSalesEnabled,
         },
       });
     },

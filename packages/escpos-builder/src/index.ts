@@ -27,6 +27,11 @@ export {
   type KitchenSection,
 } from "./kitchen.js";
 
+export {
+  buildCreditPaymentReceipt,
+  type CreditReceiptInput,
+} from "./credit-receipt.js";
+
 export { sendOverTcp, type SendOverTcpOptions } from "./tcp.js";
 
 export {

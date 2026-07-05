@@ -54,6 +54,7 @@ import {
   findByBarcode,
   fuzzySearch,
   getCachedBusinessType,
+  getCachedCreditSalesEnabled,
   getCachedIconPreset,
   getCachedTagAliases,
   getCachedTenantId,
@@ -81,6 +82,7 @@ import {
   type ServerDraft,
 } from "../lib/tableDraft.js";
 import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
+import { DebtsScreen } from "./DebtsScreen.js";
 import { useElapsedTime } from "../hooks/useElapsedTime.js";
 import { useStoreEventStream } from "../hooks/useStoreEventStream.js";
 import type { ModifierSelection } from "../lib/cart.js";
@@ -250,6 +252,9 @@ export function SalePage(props: SalePageProps) {
   // v1.3 Lote 4 · arqueo X intermedio. Reusa el mismo modal con `mode="X"`.
   const [showArqueoX, setShowArqueoX] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  // v1.8-Fiado · pantalla Deudas + flag de venta a crédito del tenant.
+  const [showDebts, setShowDebts] = useState(false);
+  const creditSalesEnabled = getCachedCreditSalesEnabled();
   // v1.3 Lote 5 · modal cámara para escanear barcode. Sólo se monta
   // tras pulsar el botón porque la inicialización pide permiso de
   // cámara y abre el LED del iPad — no queremos esto al cargar la
@@ -1261,6 +1266,17 @@ export function SalePage(props: SalePageProps) {
                 />
                 <span className="hidden sm:inline">Tickets</span>
               </button>
+              {/* v1.8-Fiado · acceso a la pantalla Deudas (sólo con el flag
+                  del tenant activado). */}
+              {creditSalesEnabled && (
+                <button
+                  onClick={() => setShowDebts(true)}
+                  title="Deudas (fiado)"
+                  className="h-12 md:h-14 px-3 md:px-5 rounded-2xl bg-mipiace-stone hover:bg-slate-100 flex items-center gap-2 text-[13.5px] md:text-[14px] font-medium text-mipiace-ink"
+                >
+                  <span>Deudas</span>
+                </button>
+              )}
               {/* v1.0-mesas-frontend: en contexto mesa no hay carritos
                   suspendidos (la mesa abierta YA es la venta en pausa)
                   ni "Nueva venta" (vaciaría la proyección de un DRAFT
@@ -1455,6 +1471,7 @@ export function SalePage(props: SalePageProps) {
           // tránsito sin red.
           tableTicketId={isTableMode ? activeTicketId : null}
           tableId={isTableMode ? tableContext?.id : null}
+          creditSalesEnabled={creditSalesEnabled}
           // v1.3-Servicios-Pinta · Lote 4: el nudge "Servicio sin
           // cliente" salta al modal de búsqueda existente. Cerramos
           // el overlay (CheckoutOverlay también llama onClose) y
@@ -1508,6 +1525,13 @@ export function SalePage(props: SalePageProps) {
       )}
       {showHistory && (
         <TicketsHistoryPage onClose={() => setShowHistory(false)} />
+      )}
+      {showDebts && (
+        <DebtsScreen
+          shiftId={props.shiftId}
+          storeName={props.storeName}
+          onClose={() => setShowDebts(false)}
+        />
       )}
       {kitchenToast && (
         <KitchenToast

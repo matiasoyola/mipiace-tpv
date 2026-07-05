@@ -99,11 +99,25 @@ export async function loadTicketDocument(
       total: ticket.total,
       // v1.3-Servicios-Pinta · Lote 3: profesional que atendió.
       attendedBy: ticket.attendedBy ?? undefined,
+      // v1.8-Fiado · si hay deuda viva, el renderer estampa PENDIENTE DE
+      // PAGO con el deudor (el contacto ya resuelto) y el importe.
+      creditNotice:
+        ticket.creditPending != null && Number(ticket.creditPending) > 0
+          ? { debtorName: customerName ?? null, amountDue: Number(ticket.creditPending) }
+          : undefined,
       lines: ticket.lines.map((l) => ({
         nameSnapshot: l.nameSnapshot,
         sku: l.sku,
         units: l.units,
-        unitPrice: l.unitPrice,
+        // v1.8-Fiado · el precio unitario impreso debe ser el NETO
+        // efectivamente cobrado (override del cajero ?? precio de
+        // catálogo), no el de catálogo. Sin esto el ticket mostraba
+        // "1 x 5,12 → 4,13" cuando había override: unit del catálogo
+        // pero total con override aplicado. Mismo criterio que el
+        // térmico (tickets/print.ts). El subtotal/IVA se calculan
+        // aparte desde los valores persistidos, así que esto sólo
+        // corrige la columna de precio unitario mostrada.
+        unitPrice: l.unitPriceOverride ?? l.unitPrice,
         discountPct: l.discountPct,
         taxRate: l.taxRate,
         subtotal: l.subtotal,

@@ -182,6 +182,11 @@ interface TicketForPrint {
   notes: string | null;
   paidAt: Date | null;
   createdAt: Date;
+  // v1.8-Fiado · si el ticket es un fiado con deuda viva, imprimimos la
+  // leyenda PENDIENTE DE PAGO. debtorName se hidrata desde el contacto.
+  status: string;
+  creditPending: { toString(): string } | null;
+  debtorName?: string | null;
   table: { name: string } | null;
   user: { email: string; alias: string | null };
   register: {
@@ -214,7 +219,7 @@ async function loadTicketForPrint(
   ticketId: string,
   tenantId: string,
 ): Promise<TicketForPrint | null> {
-  return prisma.ticket.findFirst({
+  const ticket = await prisma.ticket.findFirst({
     where: { id: ticketId, tenantId },
     select: {
       id: true,
@@ -226,6 +231,9 @@ async function loadTicketForPrint(
       notes: true,
       paidAt: true,
       createdAt: true,
+      status: true,
+      creditPending: true,
+      contactHoldedId: true,
       table: { select: { name: true } },
       user: { select: { email: true, alias: true } },
       register: {
@@ -256,6 +264,22 @@ async function loadTicketForPrint(
       },
     },
   });
+  if (!ticket) return null;
+  // v1.8-Fiado · si es un fiado con deuda viva, hidratamos el nombre del
+  // deudor desde el contacto para la leyenda PENDIENTE DE PAGO.
+  let debtorName: string | null = null;
+  if (
+    ticket.creditPending != null &&
+    Number(ticket.creditPending) > 0 &&
+    ticket.contactHoldedId
+  ) {
+    const contact = await prisma.contact.findFirst({
+      where: { tenantId, holdedContactId: ticket.contactHoldedId },
+      select: { name: true },
+    });
+    debtorName = contact?.name ?? null;
+  }
+  return { ...ticket, debtorName } as TicketForPrint;
 }
 
 // Convierte el ticket cargado en input para el builder ESC/POS. Vive
@@ -318,6 +342,14 @@ export function ticketToEscposInput(
     notes: ticket.notes ? [ticket.notes] : [],
     publicTicketUrl: `${publicTicketUrlBase}/tickets/${ticket.publicSlug}/pdf`,
     footer: ticket.tenant.receiptFooter,
+    // v1.8-Fiado · leyenda PENDIENTE DE PAGO si hay deuda viva.
+    creditNotice:
+      ticket.creditPending != null && Number(ticket.creditPending) > 0
+        ? {
+            debtorName: ticket.debtorName ?? null,
+            amountDue: Number(ticket.creditPending.toString()),
+          }
+        : null,
   };
 }
 

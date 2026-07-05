@@ -29,6 +29,7 @@ interface TenantSettings {
   deviceNewLoginAlertEnabled: boolean;
   discountThresholdPct: number;
   cashierSearchableContacts: boolean;
+  creditSalesEnabled: boolean;
 }
 
 const AUTO_LOGOUT_MIN = 5;
@@ -142,6 +143,14 @@ export function SettingsPage() {
             setForm({ ...form, cashierSearchableContacts: v })
           }
           help="Si lo desactivas, sólo encargados y propietario pueden asociar contactos a un ticket."
+        />
+        <ToggleField
+          id="creditSalesEnabled"
+          label="Ventas a crédito (fiado)"
+          checked={form.creditSalesEnabled}
+          disabled={!canEdit}
+          onChange={(v) => setForm({ ...form, creditSalesEnabled: v })}
+          help="Permite cobrar tickets como 'fiado': el cliente se lleva el género y paga otro día. La deuda queda apuntada y se cobra desde la pantalla Deudas del TPV. El ticket no se sube a Holded hasta que se salda. Exige asociar un cliente al ticket."
         />
       </Section>
 

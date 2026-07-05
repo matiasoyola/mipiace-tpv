@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildCreditPaymentReceipt,
   buildKitchenComanda,
   buildTestPrint,
   buildTicketReceipt,
@@ -18,6 +19,12 @@ import {
   escInit,
   escQrCode,
 } from "../src/index.js";
+
+function asciiOf(b: Uint8Array): string {
+  return Array.from(b)
+    .map((x) => (x >= 0x20 && x < 0x7f ? String.fromCharCode(x) : "\n"))
+    .join("");
+}
 
 const FIXED_DATE = new Date("2026-06-02T13:45:00Z");
 
@@ -190,6 +197,52 @@ describe("buildTicketReceipt", () => {
     expect(hexContains(bytes, "43 61 63 68 69 63 74 6f 73")).toBe(true);
   });
 
+  it("v1.8-Fiado · imprime leyenda PENDIENTE DE PAGO con deudor e importe", () => {
+    const bytes = buildTicketReceipt({
+      businessName: "Frutos Secos Cachictos",
+      businessAddress: null,
+      internalNumber: "000010",
+      issuedAt: FIXED_DATE,
+      cashierLabel: "virginia",
+      tableName: null,
+      lines: [{ description: "Saco pipas", units: 1, unitPrice: 10, lineTotal: 10 }],
+      total: 10,
+      payments: [], // un fiado nace sin pagos
+      notes: [],
+      publicTicketUrl: null,
+      footer: null,
+      creditNotice: { debtorName: "Juan Deudor", amountDue: 10 },
+    });
+    const ascii = Array.from(bytes)
+      .map((x) => (x >= 0x20 && x < 0x7f ? String.fromCharCode(x) : "\n"))
+      .join("");
+    expect(ascii).toContain("PENDIENTE DE PAGO");
+    expect(ascii).toContain("Juan Deudor");
+    expect(ascii).toContain("Debe:");
+    expect(ascii).toContain("no es el justificante fiscal");
+  });
+
+  it("sin creditNotice NO imprime la leyenda de fiado", () => {
+    const bytes = buildTicketReceipt({
+      businessName: "Bar",
+      businessAddress: null,
+      internalNumber: "000011",
+      issuedAt: FIXED_DATE,
+      cashierLabel: "ana",
+      tableName: null,
+      lines: [{ description: "X", units: 1, unitPrice: 1, lineTotal: 1 }],
+      total: 1,
+      payments: [{ label: "Efectivo", amount: 1 }],
+      notes: [],
+      publicTicketUrl: null,
+      footer: null,
+    });
+    const ascii = Array.from(bytes)
+      .map((x) => (x >= 0x20 && x < 0x7f ? String.fromCharCode(x) : "\n"))
+      .join("");
+    expect(ascii).not.toContain("PENDIENTE DE PAGO");
+  });
+
   it("omite la línea NIF cuando taxId está vacío", () => {
     const bytes = buildTicketReceipt({
       legalName: "Comercio SL",
@@ -354,5 +407,42 @@ describe("concatBytes", () => {
       new Uint8Array([4, 5]),
     ]);
     expect(Array.from(out)).toEqual([1, 2, 3, 4, 5]);
+  });
+});
+
+describe("v1.8-Fiado · buildCreditPaymentReceipt", () => {
+  const FIXED = new Date("2026-07-03T10:30:00Z");
+
+  it("cobro parcial: importe, método, deudor y saldo restante", () => {
+    const bytes = buildCreditPaymentReceipt({
+      businessName: "Frutos Secos Cachictos",
+      internalNumber: "000010",
+      debtorName: "Juan Deudor",
+      collectedAt: FIXED,
+      amount: 4,
+      methodLabel: "Efectivo",
+      remaining: 6,
+    });
+    const ascii = asciiOf(bytes);
+    expect(ascii).toContain("JUSTIFICANTE DE COBRO");
+    expect(ascii).toContain("no fiscal");
+    expect(ascii).toContain("Juan Deudor");
+    expect(ascii).toContain("COBRADO");
+    expect(ascii).toContain("Saldo restante");
+    expect(ascii).not.toContain("DEUDA SALDADA");
+    expect(Array.from(bytes.slice(0, 2))).toEqual([0x1b, 0x40]); // ESC @
+  });
+
+  it("saldo total (remaining 0) imprime DEUDA SALDADA", () => {
+    const bytes = buildCreditPaymentReceipt({
+      businessName: "Cachictos",
+      internalNumber: "000010",
+      debtorName: "Juan",
+      collectedAt: FIXED,
+      amount: 6,
+      methodLabel: "Tarjeta",
+      remaining: 0,
+    });
+    expect(asciiOf(bytes)).toContain("DEUDA SALDADA");
   });
 });

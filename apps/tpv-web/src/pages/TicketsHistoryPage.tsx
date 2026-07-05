@@ -66,7 +66,12 @@ interface TicketRow {
     // destructurar `map[status]` en StatusBadge y crasheaba toda la
     // pantalla del historial cuando el tenant tenía algún ticket
     // emitido en modo prueba.
-    | "TEST";
+    | "TEST"
+    // v1.8-Fiado · venta a crédito con deuda viva.
+    | "ON_CREDIT";
+  // v1.8-Fiado · deuda pendiente (sólo en ON_CREDIT). Alimenta el badge
+  // "Fiado · pendiente X €".
+  creditPending?: number | null;
   total: number;
   totalTax: number;
   totalDiscount: number;
@@ -431,6 +436,11 @@ function TicketRowCard({
               </span>
             )}
             <StatusBadge status={ticket.status} />
+            {ticket.status === "ON_CREDIT" && ticket.creditPending != null && (
+              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-mipiace-coral/10 text-mipiace-coral whitespace-nowrap">
+                pendiente {formatEur(ticket.creditPending)}
+              </span>
+            )}
           </div>
           <div className="text-[12.5px] text-slate-500 mt-0.5 truncate">
             {new Date(ticket.createdAt).toLocaleString("es-ES")}
@@ -491,6 +501,8 @@ function StatusBadge({ status }: { status: TicketRow["status"] }) {
     // pastel para distinguirlos visualmente de los reales sin
     // alarmar (no es un error).
     TEST: { color: "bg-amber-50 text-amber-700 border border-amber-200", label: "Prueba" },
+    // v1.8-Fiado · fiado con deuda viva.
+    ON_CREDIT: { color: "bg-mipiace-coral/10 text-mipiace-coral", label: "Fiado" },
   };
   // Fallback defensivo: si el backend introduce un nuevo status que
   // este front aún no conoce, mostramos el slug crudo en gris en

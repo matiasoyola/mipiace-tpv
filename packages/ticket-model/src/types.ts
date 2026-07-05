@@ -91,6 +91,14 @@ export interface TicketLine {
   subtotal: number;
 }
 
+// v1.8-Fiado (variante B) · si el ticket es una venta a crédito con deuda
+// viva, el renderer estampa "PENDIENTE DE PAGO" con el deudor y el
+// importe adeudado. NO es documento fiscal (sin numeración Holded aún).
+export interface TicketCreditNotice {
+  debtorName?: string;
+  amountDue: number;
+}
+
 export interface TicketDocument {
   fiscal: TicketFiscal;
   store: TicketStore;
@@ -101,4 +109,5 @@ export interface TicketDocument {
   payment: TicketPayment;
   refund?: TicketRefund;
   footer: TicketFooter;
+  creditNotice?: TicketCreditNotice;
 }

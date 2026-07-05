@@ -15,7 +15,10 @@ import { loadEnv } from "../env.js";
 export interface ManagerAuthorizationPayload {
   sub: string; // manager userId
   tid: string; // tenant id
-  purpose: "discount-override";
+  // v1.8-Fiado añade "credit-void" (anular un fiado no saldado). Cada
+  // ruta consumidora verifica el purpose EXACTO — un token de descuento
+  // no sirve para anular un fiado y viceversa.
+  purpose: "discount-override" | "credit-void";
   reason: string;
   context: {
     // Descuento máximo (%) que este token autoriza. 100 = autorización
