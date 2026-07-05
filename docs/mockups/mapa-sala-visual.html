@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mockup · Mapa de sala visual · Cafetería Sirope</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --coral:#E97058; --coral-dark:#D85C44; --coral-soft:#FBEAE5;
+    --ink:#1F2937; --slate:#64748B; --line:#E2E8F0;
+    --bg:#FAF7F2; --card:#FFFFFF;
+    --amber:#F59E0B; --amber-soft:#FEF3C7;
+    --warn:#B45309;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;font-family:'DM Sans',sans-serif}
+  body{background:var(--bg);color:var(--ink);padding:0}
+  .num{font-variant-numeric:tabular-nums}
+
+  /* ── Header ─────────────────────────────────────── */
+  header{background:#fff;border-bottom:1px solid var(--line);padding:14px 28px;display:flex;align-items:center;gap:18px}
+  .brand{font-weight:700;font-size:17px}.brand span{color:var(--coral)}
+  .ctx{font-size:13px;color:var(--slate)}
+  .hspace{flex:1}
+  .hbtn{height:40px;padding:0 16px;border:1px solid var(--line);border-radius:12px;background:#fff;font-size:13.5px;font-weight:500;display:inline-flex;align-items:center;gap:7px;cursor:pointer;color:var(--ink)}
+  .hbtn.primary{background:var(--coral);border-color:var(--coral);color:#fff}
+
+  /* ── Barra de estado de sala ────────────────────── */
+  .salabar{display:flex;align-items:center;gap:22px;padding:16px 28px 4px}
+  .salabar h1{font-size:22px;font-weight:600;letter-spacing:-.02em}
+  .kpi{font-size:13px;color:var(--slate)}
+  .kpi b{color:var(--ink);font-weight:600}
+  .zonas{margin-left:auto;display:flex;gap:8px}
+  .zchip{height:34px;padding:0 14px;border-radius:999px;border:1px solid var(--line);background:#fff;font-size:13px;display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+  .zchip.on{background:var(--coral-soft);border-color:rgba(233,112,88,.4);color:var(--coral-dark);font-weight:600}
+  .zchip small{color:var(--slate);font-weight:500}
+
+  /* ── Lienzo espacial ────────────────────────────── */
+  .lienzo{margin:14px 28px 28px;display:grid;grid-template-columns:1fr 300px;gap:18px}
+  .zona{border:1.5px dashed #D8DEE9;border-radius:22px;padding:18px;position:relative;background:linear-gradient(180deg,rgba(255,255,255,.5),rgba(255,255,255,0))}
+  .zona>label{position:absolute;top:-9px;left:22px;background:var(--bg);padding:0 8px;font-size:11px;letter-spacing:.12em;font-weight:600;color:var(--slate)}
+  .salon{grid-row:1/3}
+  .salon .mesas{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+  .terraza .mesas{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+
+  /* ── Mesa ───────────────────────────────────────── */
+  .mesa{position:relative;border-radius:18px;border:2px solid var(--line);background:var(--card);min-height:118px;padding:12px 14px;display:flex;flex-direction:column;cursor:pointer;transition:transform .15s}
+  .mesa:hover{transform:scale(1.015)}
+  .mesa .nom{font-size:19px;font-weight:700}
+  .mesa .pax{position:absolute;top:10px;right:12px;font-size:10px;letter-spacing:.08em;color:var(--slate);font-weight:600}
+  .mesa .foot{margin-top:auto;display:flex;align-items:flex-end;justify-content:space-between;gap:8px}
+  .mesa .total{font-size:19px;font-weight:700}
+  .mesa .quien{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--slate)}
+  .avatar{width:20px;height:20px;border-radius:7px;background:var(--ink);color:#fff;font-size:9.5px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+  .tiempo{position:absolute;top:34px;right:12px;font-size:11px;font-weight:600;color:var(--slate)}
+
+  /* estados */
+  .ocupada{background:var(--coral-soft);border-color:rgba(233,112,88,.45)}
+  .ocupada .nom,.ocupada .total{color:var(--coral-dark)}
+  .cuenta{background:var(--amber-soft);border-color:rgba(245,158,11,.5)}
+  .cuenta .nom,.cuenta .total{color:var(--warn)}
+  .olvidada{box-shadow:inset 0 0 0 2px var(--amber)}
+  .olvidada .tiempo{color:var(--warn)}
+  .grupo2{border-style:solid}
+  .puente{position:absolute;left:-18px;top:50%;width:18px;height:3px;background:rgba(233,112,88,.45)}
+  .badge{display:inline-flex;align-items:center;font-size:9px;letter-spacing:.08em;font-weight:700;padding:2px 7px;border-radius:6px;background:rgba(233,112,88,.18);color:var(--coral-dark);margin-left:8px;vertical-align:2px}
+  .badge.amb{background:rgba(245,158,11,.2);color:var(--warn)}
+
+  /* cobro directo desde tarjeta (principio: el cobro nace en la mesa) */
+  .cobrar{height:34px;border:none;border-radius:10px;background:var(--coral);color:#fff;font-size:13px;font-weight:600;padding:0 13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+  .cuenta .cobrar{background:var(--warn)}
+
+  /* ── Barra física ───────────────────────────────── */
+  .barrazona{grid-column:1/3;border:1.5px dashed #D8DEE9;border-radius:22px;padding:16px 22px 20px;position:relative}
+  .barrazona>label{position:absolute;top:-9px;left:22px;background:var(--bg);padding:0 8px;font-size:11px;letter-spacing:.12em;font-weight:600;color:var(--slate)}
+  .mostrador{height:26px;border-radius:10px;background:linear-gradient(180deg,#EADFCE,#DFD0B8);border:1px solid #D5C4A8;margin-bottom:16px}
+  .taburetes{display:flex;gap:22px;padding-left:14px}
+  .tab{width:84px;height:84px;border-radius:50%;border:2px solid var(--line);background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;position:relative}
+  .tab .nom{font-size:15px;font-weight:700}
+  .tab .total{font-size:13px;font-weight:700;color:var(--coral-dark)}
+  .tab.ocupada{background:var(--coral-soft);border-color:rgba(233,112,88,.45)}
+
+  /* leyenda */
+  .leyenda{display:flex;gap:18px;padding:0 28px 6px;font-size:12.5px;color:var(--slate);align-items:center}
+  .dot{width:11px;height:11px;border-radius:4px;border:1px solid var(--line);display:inline-block;margin-right:6px;vertical-align:-1px;background:#fff}
+  .dot.o{background:var(--coral-soft);border-color:rgba(233,112,88,.45)}
+  .dot.c{background:var(--amber-soft);border-color:rgba(245,158,11,.5)}
+  .dot.f{box-shadow:inset 0 0 0 1.5px var(--amber)}
+  .nota{margin:0 28px 24px;font-size:12px;color:var(--slate);border-top:1px solid var(--line);padding-top:12px;max-width:900px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">mipiace<span>tpv</span></div>
+  <div class="ctx">Tienda principal · Caja 1</div>
+  <div class="hspace"></div>
+  <button class="hbtn">Tickets</button>
+  <button class="hbtn">Arqueo</button>
+  <button class="hbtn primary">+ Venta rápida</button>
+</header>
+
+<div class="salabar">
+  <h1>Sala</h1>
+  <div class="kpi num"><b>4</b> abiertas · <b>5</b> libres · <b>38,90 €</b> en sala</div>
+  <div class="zonas">
+    <button class="zchip on">Todas</button>
+    <button class="zchip">Salón <small>4</small></button>
+    <button class="zchip">Terraza <small>2</small></button>
+    <button class="zchip">Barra <small>3</small></button>
+  </div>
+</div>
+
+<div class="leyenda">
+  <span><span class="dot"></span>Libre</span>
+  <span><span class="dot o"></span>Ocupada</span>
+  <span><span class="dot c"></span>Pidiendo cuenta</span>
+  <span><span class="dot f"></span>+45 min sin atender</span>
+</div>
+
+<div class="lienzo">
+
+  <div class="zona salon">
+    <label>SALÓN</label>
+    <div class="mesas">
+      <div class="mesa ocupada grupo2">
+        <div class="nom">M1<span class="badge">+M2</span></div>
+        <div class="pax">8 PAX</div>
+        <div class="tiempo num">23 min</div>
+        <div class="foot">
+          <div class="quien"><span class="avatar">MT</span> Matías</div>
+          <div><span class="total num">24,60 €</span></div>
+        </div>
+      </div>
+      <div class="mesa ocupada grupo2" style="opacity:.55">
+        <div class="puente"></div>
+        <div class="nom">M2</div>
+        <div class="pax">— unida a M1</div>
+      </div>
+      <div class="mesa cuenta olvidada">
+        <div class="nom">M3<span class="badge amb">CUENTA</span></div>
+        <div class="pax">4 PAX</div>
+        <div class="tiempo num">48 min</div>
+        <div class="foot">
+          <div class="quien"><span class="avatar">MT</span> Matías</div>
+          <button class="cobrar num">Cobrar 12,90 €</button>
+        </div>
+      </div>
+      <div class="mesa">
+        <div class="nom">M4</div>
+        <div class="pax">4 PAX</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="zona terraza">
+    <label>TERRAZA</label>
+    <div class="mesas">
+      <div class="mesa ocupada">
+        <div class="nom">T1</div>
+        <div class="pax">4 PAX</div>
+        <div class="tiempo num">6 min</div>
+        <div class="foot">
+          <div class="quien"><span class="avatar">LU</span> Lucía</div>
+          <div><span class="total num">8,90 €</span></div>
+        </div>
+      </div>
+      <div class="mesa">
+        <div class="nom">T2</div>
+        <div class="pax">4 PAX</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="barrazona">
+    <label>BARRA</label>
+    <div class="mostrador"></div>
+    <div class="taburetes">
+      <div class="tab ocupada"><div class="nom">B1</div><div class="total num">2,40 €</div></div>
+      <div class="tab"><div class="nom">B2</div></div>
+      <div class="tab"><div class="nom">B3</div></div>
+    </div>
+  </div>
+
+</div>
+
+<div class="nota">
+  <b>Mockup · propuesta evolutivo mapa visual (post-Sirope).</b> Novedades sobre el mapa actual:
+  zonas como áreas espaciales del lienzo (no listas), barra dibujada como mostrador con taburetes,
+  grupos unidos visualmente (M2 fundida en M1 con puente), estado "pidiendo cuenta" con botón
+  <b>Cobrar X €</b> directo en la tarjeta (principio: el cobro nace en la mesa), alerta de mesa
+  olvidada a los 45 min (halo ámbar), camarero como avatar con alias, y ocupación agregada
+  ("4 abiertas · 38,90 € en sala") en cabecera. Tickets y Arqueo accesibles desde el header del mapa.
+  Fase 2 del evolutivo: posiciones libres arrastrables desde el admin (schema Table.positionX/Y ya
+  preparado desde B7). Tokens: coral #E97058, ink #1F2937, DM Sans, radios 18-22px, sin sombras.
+</div>
+
+</body>
+</html>
