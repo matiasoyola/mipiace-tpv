@@ -57,6 +57,18 @@ export async function uploadRefund(
     },
   });
   if (!refund) return { kind: "skipped", reason: "refund_not_found" };
+  // v1.9.5-formacion · Frente 1: red de seguridad del gate fiscal. Un
+  // refund de prueba (status TEST, heredado del ticket TEST) nunca debe
+  // llegar a Holded. En la práctica no se encola (POST /refunds lo evita),
+  // pero si por lo que sea aterriza aquí, lo marcamos SKIPPED y salimos —
+  // mismo tratamiento que la venta test en upload-ticket.
+  if (refund.status === TicketStatus.TEST) {
+    await prisma.holdedUpload.updateMany({
+      where: { externalId },
+      data: { status: "SKIPPED", lastError: { skipped: "test_mode" } },
+    });
+    return { kind: "skipped", reason: "test_mode" };
+  }
   if (refund.status === TicketStatus.SYNCED) {
     return { kind: "skipped", reason: "already_synced" };
   }

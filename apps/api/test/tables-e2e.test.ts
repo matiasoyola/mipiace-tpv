@@ -703,6 +703,11 @@ describe("E2E mesas · ciclo completo", () => {
     // La línea movida conserva su PRIMER origen (MESA_1): reversible.
     expect(state.lines.get(tostada.id)!.originalTableId).toBe(MESA_1);
     expect(broadcasts.at(-1)?.event.type).toBe("table.grouped");
+    // v1.9.5-formacion · Frente 2: el evento lleva el nombre display de
+    // la mesa principal para el banner «M1 se ha unido a M4».
+    expect(
+      (broadcasts.at(-1)?.event as { mainTableName?: string | null }).mainTableName,
+    ).toBe(state.tables.get(MESA_1)!.name);
 
     // 5 · Desagrupar → Mesa 2 queda libre (la tostada vuelve a su
     // origen histórico, Mesa 1, así que Mesa 2 no recibe ticket).

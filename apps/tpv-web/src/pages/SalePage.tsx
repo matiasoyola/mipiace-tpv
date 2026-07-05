@@ -705,7 +705,12 @@ export function SalePage(props: SalePageProps) {
         ev.registerId !== props.registerId
       ) {
         exitToMap({
-          text: `Mesa ${tableContext.name} cobrada desde otra caja`,
+          // v1.9.5-formacion · Frente 2: nombra la caja real («…desde
+          // Caja 2»). Fallback al copy genérico si el evento en vuelo no
+          // trae registerName (compatibilidad).
+          text: ev.registerName
+            ? `Mesa ${tableContext.name} cobrada desde ${ev.registerName}`
+            : `Mesa ${tableContext.name} cobrada desde otra caja`,
           tone: "info",
         });
         return;
@@ -715,7 +720,10 @@ export function SalePage(props: SalePageProps) {
       if (ev.registerId === props.registerId) return;
       void refreshShiftTicketsCount();
       setCrossCajaToast({
-        text: `Otra caja cobró un ticket (${ev.totalEur.toFixed(2)} €)`,
+        // v1.9.5-formacion · Frente 2: nombra la caja si el evento lo trae.
+        text: ev.registerName
+          ? `${ev.registerName} cobró un ticket (${ev.totalEur.toFixed(2)} €)`
+          : `Otra caja cobró un ticket (${ev.totalEur.toFixed(2)} €)`,
         expiresAt: Date.now() + 4_000,
       });
       return;
@@ -738,7 +746,12 @@ export function SalePage(props: SalePageProps) {
       ev.absorbedTableIds.includes(tableContext.id)
     ) {
       exitToMap({
-        text: `Mesa ${tableContext.name} se ha unido a otra mesa`,
+        // v1.9.5-formacion · Frente 2: nombra la mesa destino («M1 se ha
+        // unido a M4»). Fallback al copy genérico si el evento en vuelo no
+        // trae mainTableName.
+        text: ev.mainTableName
+          ? `${tableContext.name} se ha unido a ${ev.mainTableName}`
+          : `Mesa ${tableContext.name} se ha unido a otra mesa`,
         tone: "info",
       });
       return;

@@ -723,8 +723,13 @@ async function executeShiftClose(args: {
       ticketsCount: await prisma.ticket.count({
         where: { shiftId: shift.id, status: { notIn: ["DRAFT", "VOIDED"] } },
       }),
+      // v1.9.5-formacion · Frente 1: las devoluciones TEST computan en el
+      // Z del turno de prueba igual que las ventas TEST (cuyos pagos ya
+      // entran al desglose sin filtro de status). Coherencia formativa: si
+      // la venta test aparece en el Z, su devolución también. En turnos
+      // reales no hay refunds TEST, así que esto no altera el Z de producción.
       refundsCount: await prisma.refund.count({
-        where: { shiftId: shift.id, status: { notIn: ["DRAFT", "VOIDED", "TEST"] } },
+        where: { shiftId: shift.id, status: { notIn: ["DRAFT", "VOIDED"] } },
       }),
       syncIssues: { pendingSync, failed },
       acceptedSyncFailures: body.syncFailureAccepted === true,
@@ -791,9 +796,12 @@ async function loadShiftBreakdownSums(
         where: { ticket: { shiftId }, collectedInShiftId: null },
         _sum: { amount: true },
       }),
+      // v1.9.5-formacion · Frente 1: incluye refunds TEST en el desglose
+      // (coherente con las ventas TEST, cuyos pagos no se filtran por
+      // status). Sin efecto en turnos reales (no tienen refunds TEST).
       prisma.refund.groupBy({
         by: ["method"],
-        where: { shiftId, status: { notIn: ["DRAFT", "VOIDED", "TEST"] } },
+        where: { shiftId, status: { notIn: ["DRAFT", "VOIDED"] } },
         _sum: { total: true },
       }),
       // v1.8-Fiado · cobros de deuda imputados a ESTE turno (por

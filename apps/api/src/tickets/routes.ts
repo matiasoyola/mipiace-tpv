@@ -1345,7 +1345,18 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           .code(404)
           .send({ error: "TICKET_NOT_FOUND", message: "Ticket original no encontrado" });
       }
-      if (ticket.status !== TicketStatus.SYNCED && ticket.status !== TicketStatus.PAID) {
+      // v1.9.5-formacion · Frente 1: un ticket TEST (venta del cajero
+      // técnico en modo prueba) es devolvible para poder ENSAYAR la
+      // devolución durante la formación de un cliente nuevo. El refund
+      // nace marcado igual que su venta (status TEST → nunca sube a
+      // Holded, ver más abajo). El resto de estados no efectivos siguen
+      // rechazados.
+      const isTestTicket = ticket.status === TicketStatus.TEST;
+      if (
+        !isTestTicket &&
+        ticket.status !== TicketStatus.SYNCED &&
+        ticket.status !== TicketStatus.PAID
+      ) {
         return reply.code(409).send({
           error: "TICKET_NOT_REFUNDABLE",
           message:
@@ -1463,7 +1474,10 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             shiftId: openShift?.id ?? null,
             internalNumber,
             externalId: body.externalId,
-            status: TicketStatus.PENDING_SYNC,
+            // Frente 1: el refund de un ticket TEST hereda el estado TEST
+            // → el gate fiscal lo mantiene fuera de Holded igual que la
+            // venta que lo originó.
+            status: isTestTicket ? TicketStatus.TEST : TicketStatus.PENDING_SYNC,
             reason: body.reason ?? null,
             method,
             total: new Prisma.Decimal(total),
@@ -1489,20 +1503,27 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             externalId: body.externalId,
             tenantId: cashier.tid,
             kind: "REFUND",
-            status: "PENDING",
+            // Refund de prueba → HoldedUpload nace SKIPPED (terminal),
+            // mismo tratamiento que la venta test en upload-ticket.
+            status: isTestTicket ? "SKIPPED" : "PENDING",
+            ...(isTestTicket ? { lastError: { skipped: "test_mode" } } : {}),
           },
           update: {},
         });
         return r;
       });
 
-      try {
-        await enqueueRefundUpload(body.externalId);
-      } catch (err) {
-        request.log.error(
-          { externalId: body.externalId },
-          `enqueue refund upload falló: ${err instanceof Error ? err.message : String(err)}`,
-        );
+      // Gate fiscal sagrado: un refund de prueba JAMÁS se encola contra
+      // Holded. Sólo encolamos los refunds reales.
+      if (!isTestTicket) {
+        try {
+          await enqueueRefundUpload(body.externalId);
+        } catch (err) {
+          request.log.error(
+            { externalId: body.externalId },
+            `enqueue refund upload falló: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
       }
 
       // Lote 4 v1.1 Thalia: ticket.refunded → otras cajas se enteran

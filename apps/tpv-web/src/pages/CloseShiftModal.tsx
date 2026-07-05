@@ -14,10 +14,11 @@
 // el total siempre proviene de la suma por denominación. Aviso visual
 // fuerte si |descuadre| > 5€ cuando se cierra Z.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
 
 import { ApiError, apiWithCashier } from "../api.js";
+import { outboxCounts } from "../lib/outbox.js";
 
 // Mismo orden que `ALLOWED_DENOMINATIONS` del backend (de mayor a
 // menor). Si el backend cambia el set, también hay que tocarlo aquí —
@@ -102,6 +103,15 @@ export function CloseShiftModal(props: {
   const [needsManager, setNeedsManager] = useState(false);
   const [pinReason, setPinReason] = useState<"sync_failed" | "force_close" | null>(null);
   const [failedDocs, setFailedDocs] = useState<FailedDoc[]>([]);
+  // v1.9.5-formacion · Frente 3: el checkbox «cerrar igualmente» sólo
+  // aparece cuando HAY un motivo, y el copy dice CUÁL es. Dos fuentes:
+  //   - syncPendingCount: docs sin sincronizar en el servidor
+  //     (PENDING_SYNC + SYNC_FAILED del turno), que reporta el 409
+  //     SYNC_PENDING del backend.
+  //   - outboxPending: cobros aún en la cola local del dispositivo (no
+  //     han llegado al servidor).
+  const [syncPendingCount, setSyncPendingCount] = useState(0);
+  const [outboxPending, setOutboxPending] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Resultado del POST X — para mostrar el descuadre sin cerrar.
@@ -110,6 +120,23 @@ export function CloseShiftModal(props: {
   // modal de golpe, mostramos el desglose final (lo mismo que queda en
   // el PDF) y el cajero pulsa "Hecho".
   const [zResult, setZResult] = useState<CashCountResponse | null>(null);
+
+  // v1.9.5-formacion · Frente 3: al abrir el cierre Z consultamos la cola
+  // local (outbox). Si hay cobros en vuelo que aún no llegaron al
+  // servidor, es un motivo para mostrar el aviso de cierre. Best-effort:
+  // un fallo de IDB no debe bloquear el modal.
+  useEffect(() => {
+    if (mode !== "Z") return;
+    let alive = true;
+    void outboxCounts()
+      .then((c) => {
+        if (alive) setOutboxPending(c.pending + c.rejected);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [mode]);
 
   // Suma local para feedback inmediato del cajero. El total
   // autoritativo lo calcula el backend (ese va al ShiftCashCount).
@@ -175,12 +202,20 @@ export function CloseShiftModal(props: {
           );
         } else if (err.code === "SYNC_PENDING") {
           const detail = err.data as
-            | { failedTickets?: FailedDoc[]; failedRefunds?: FailedDoc[] }
+            | {
+                failedTickets?: FailedDoc[];
+                failedRefunds?: FailedDoc[];
+                pendingSync?: number;
+                failed?: number;
+              }
             | undefined;
           setFailedDocs([
             ...(detail?.failedTickets ?? []),
             ...(detail?.failedRefunds ?? []),
           ]);
+          // Frente 3: total de docs sin sincronizar en el servidor, para
+          // que el copy del checkbox diga cuántos son.
+          setSyncPendingCount((detail?.pendingSync ?? 0) + (detail?.failed ?? 0));
           // v1.5-B §3.c: mismo copy que la pantalla de turno colgado
           // (ShiftForceCloseScreen, v1.5-hotfix2) — cerrar no es un
           // problema, sólo requiere aceptación explícita.
@@ -205,6 +240,27 @@ export function CloseShiftModal(props: {
   // pintamos para el X que YA tiene resultado.
   const showXDescuadreAlert =
     xResult && Math.abs(xResult.descuadre) > 5;
+
+  // v1.9.5-formacion · Frente 3: motivos concretos por los que ofrecemos
+  // el aviso «cerrar igualmente». Si la lista está vacía, no hay checkbox
+  // (antes aparecía siempre, sin explicar el motivo — bug B3 del mapa de
+  // simulaciones 2026-07-05).
+  const closeReasons: string[] = [];
+  if (syncPendingCount > 0) {
+    closeReasons.push(
+      syncPendingCount === 1
+        ? "1 documento pendiente de subir a Holded"
+        : `${syncPendingCount} documentos pendientes de subir a Holded`,
+    );
+  }
+  if (outboxPending > 0) {
+    closeReasons.push(
+      outboxPending === 1
+        ? "1 cobro en la cola local del dispositivo"
+        : `${outboxPending} cobros en la cola local del dispositivo`,
+    );
+  }
+  const hasCloseReason = closeReasons.length > 0;
 
   return (
     <div
@@ -312,7 +368,9 @@ export function CloseShiftModal(props: {
               </div>
             )}
 
-            {isZ && (
+            {/* v1.9.5-formacion · Frente 3: sólo si hay motivo, y el copy
+                dice cuál. Sin nada pendiente no hay checkbox. */}
+            {isZ && hasCloseReason && (
               <label htmlFor="syncFailureAccepted" className="flex items-start gap-2 text-[12.5px] text-slate-600 mb-4 cursor-pointer">
                 <input
                   id="syncFailureAccepted"
@@ -323,9 +381,9 @@ export function CloseShiftModal(props: {
                   className="mt-0.5 h-4 w-4 rounded border-slate-300 text-mipiace-coral focus:ring-mipiace-coral/30"
                 />
                 <span>
-                  Lo entiendo, cerrar el turno igualmente. Las ventas no se ven
-                  afectadas y los tickets pendientes se recuperarán
-                  automáticamente.
+                  Lo entiendo, cerrar el turno igualmente. Hay{" "}
+                  {closeReasons.join(" y ")}. Las ventas no se ven afectadas y
+                  los tickets pendientes se recuperarán automáticamente.
                 </span>
               </label>
             )}
