@@ -205,10 +205,10 @@ export function TicketsHistoryPage(props: {
             type="button"
             onClick={props.onGoToMap}
             title="Ir al mapa de sala"
-            className="h-11 px-4 rounded-2xl bg-mipiace-stone hover:bg-slate-100 flex items-center gap-2 text-[13.5px] font-medium text-mipiace-ink"
+            className="h-11 px-4 rounded-2xl bg-mipiace-coral-soft border border-mipiace-coral/40 hover:bg-mipiace-coral/20 flex items-center gap-2 text-[13.5px] font-semibold text-mipiace-coral-dark"
           >
             <LayoutGrid className="w-[18px] h-[18px]" strokeWidth={2.25} />
-            <span className="hidden sm:inline">Mesas</span>
+            <span>Mesas</span>
           </button>
         )}
         <div className="flex-1 max-w-xl ml-auto">

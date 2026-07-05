@@ -1296,6 +1296,21 @@ export function SalePage(props: SalePageProps) {
             >
               <Menu className="w-5 h-5" strokeWidth={2.1} />
             </button>
+            {/* v1.9.6 · el botón Mesas estaba camuflado (gris stone) y
+                enterrado en el cluster derecho. Principio de producto:
+                el mapa es el "home" del bar — volver a él es la acción
+                nº1 y vive en cabeza del header, en coral suave (mismo
+                lenguaje que una mesa ocupada) y SIEMPRE con texto. */}
+            {!isTableMode && props.onBackToMap && (
+              <button
+                onClick={props.onBackToMap}
+                title="Ir al mapa de sala"
+                className="h-12 md:h-14 px-4 md:px-5 shrink-0 rounded-2xl bg-mipiace-coral-soft border border-mipiace-coral/40 hover:bg-mipiace-coral/20 flex items-center gap-2 text-[13.5px] md:text-[14px] font-semibold text-mipiace-coral-dark"
+              >
+                <LayoutGrid className="w-[18px] h-[18px]" strokeWidth={2.25} />
+                <span>Mesas</span>
+              </button>
+            )}
             <div className="lg:hidden">
               <Logo size={24} />
             </div>
@@ -1377,24 +1392,8 @@ export function SalePage(props: SalePageProps) {
                   strokeWidth={2.25}
                 />
               </button>
-              {/* v1.9.2-mesas-concurrencia · Frente 3.2: "Mesas" fijo en
-                  el header de venta rápida (mismo peso que "Tickets").
-                  El chip "Mapa" enterrado en el panel puede quedarse; el
-                  header manda. En contexto mesa no aparece (el panel ya
-                  lleva "Mapa" y "Nueva venta rápida" nace en el mapa). */}
-              {!isTableMode && props.onBackToMap && (
-                <button
-                  onClick={props.onBackToMap}
-                  title="Ir al mapa de sala"
-                  className="h-12 md:h-14 px-3 md:px-5 rounded-2xl bg-mipiace-stone hover:bg-slate-100 flex items-center gap-2 text-[13.5px] md:text-[14px] font-medium text-mipiace-ink"
-                >
-                  <LayoutGrid
-                    className="w-[18px] h-[18px]"
-                    strokeWidth={2.25}
-                  />
-                  <span className="hidden sm:inline">Mesas</span>
-                </button>
-              )}
+              {/* v1.9.6: el botón "Mesas" se movió a cabeza del header
+                  (junto al menú) con estilo coral — ver arriba. */}
               <button
                 onClick={() => setShowHistory(true)}
                 title="Tickets pasados"
@@ -2726,9 +2725,10 @@ function TicketPanel({
             <button
               type="button"
               onClick={onBackToMap}
-              className="h-9 px-3 text-[12.5px] rounded-lg bg-mipiace-stone hover:bg-slate-100 text-mipiace-ink"
+              className="h-9 px-3.5 text-[12.5px] font-semibold rounded-lg bg-mipiace-coral-soft border border-mipiace-coral/40 hover:bg-mipiace-coral/20 text-mipiace-coral-dark inline-flex items-center gap-1.5"
               title="Volver al mapa de sala"
             >
+              <LayoutGrid className="w-3.5 h-3.5" strokeWidth={2.25} />
               Mapa
             </button>
           )}
