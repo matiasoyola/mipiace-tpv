@@ -467,6 +467,7 @@ function TpvHome(props: {
         cashierLabel={cashierDisplayLabel(props.cashier)}
         storeName={props.storeName}
         registerName={props.registerName}
+        registerId={props.registerId}
         shiftId={props.shiftId}
         cashierRole={props.cashier.role}
         notice={mapNotice}
