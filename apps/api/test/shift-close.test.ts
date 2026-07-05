@@ -65,14 +65,19 @@ const state = {
   tenant: null as FakeTenantRow | null,
   users: new Map<string, FakeUser>(),
   shifts: new Map<string, FakeShift>(),
-  tickets: [] as Array<{ shiftId: string; status: string }>,
+  tickets: [] as Array<{ shiftId: string; status: string; total?: number }>,
   refunds: [] as Array<{
     shiftId: string;
     status: string;
     method?: string;
     total?: number;
   }>,
-  payments: [] as Array<{ shiftId: string; method: string; amount: number }>,
+  payments: [] as Array<{
+    shiftId: string;
+    method: string;
+    amount: number;
+    collectedInShiftId?: string | null;
+  }>,
   cashCounts: [] as Array<{ shiftId: string; kind: string }>,
 };
 
