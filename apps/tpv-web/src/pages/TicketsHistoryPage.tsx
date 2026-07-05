@@ -24,6 +24,7 @@ import {
 import { ApiError, apiWithCashier } from "../api.js";
 import { getCachedBusinessType } from "../lib/catalog.js";
 import { syncNow } from "../lib/syncNow.js";
+import { isTestModeActive } from "../lib/test-mode.js";
 import { vocab } from "../lib/vocab.js";
 import { RefundOverlay } from "./RefundPage.js";
 
@@ -541,7 +542,9 @@ function StatusBadge({ status }: { status: TicketRow["status"] }) {
   );
 }
 
-function TicketDetailDrawer({
+// Exportado para test (v1.9.5-formacion · Frente 1: visibilidad del
+// botón de devolución sobre tickets TEST en modo prueba).
+export function TicketDetailDrawer({
   ticket,
   businessType,
   onClose,
@@ -715,7 +718,12 @@ function TicketDetailDrawer({
             )}
           </div>
 
-          {ticket.status === "SYNCED" && (
+          {/* v1.9.5-formacion · Frente 1: la devolución se ensaya también
+              sobre tickets TEST, pero SÓLO en modo prueba (misma señal que
+              pinta el badge PRUEBA). El refund test nace SKIPPED en el
+              backend: nunca toca Holded. */}
+          {(ticket.status === "SYNCED" ||
+            (ticket.status === "TEST" && isTestModeActive())) && (
             <button
               onClick={onRefund}
               className="w-full h-11 rounded-xl border border-mipiace-coral/30 text-mipiace-coral-dark hover:bg-mipiace-coral-soft text-[13.5px] font-medium flex items-center justify-center gap-2"

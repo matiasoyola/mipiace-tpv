@@ -24,15 +24,24 @@ export interface EmitTicketPaidParams {
 
 export async function emitTicketPaid(params: EmitTicketPaidParams): Promise<void> {
   try {
-    const [register, user] = await Promise.all([
+    // v1.9.5-formacion · Frente 2: además del storeId, cargamos el
+    // nombre de la caja y (si hay) el de la mesa para que el banner de
+    // concurrencia nombre caja y mesa reales en vez de «otra caja».
+    const [register, user, table] = await Promise.all([
       params.prisma.register.findUnique({
         where: { id: params.registerId },
-        select: { storeId: true },
+        select: { storeId: true, name: true },
       }),
       params.prisma.user.findUnique({
         where: { id: params.cashierUserId },
         select: { email: true },
       }),
+      params.tableId
+        ? params.prisma.table.findUnique({
+            where: { id: params.tableId },
+            select: { name: true },
+          })
+        : Promise.resolve(null),
     ]);
     if (!register || !user) return;
     getStoreEventBus().broadcast(register.storeId, {
@@ -40,7 +49,9 @@ export async function emitTicketPaid(params: EmitTicketPaidParams): Promise<void
       ticketId: params.ticketId,
       internalNumber: params.internalNumber,
       registerId: params.registerId,
+      registerName: register.name ?? null,
       tableId: params.tableId,
+      tableName: table?.name ?? null,
       byEmail: user.email,
       totalEur: params.totalEur,
       at: new Date().toISOString(),

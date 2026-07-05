@@ -48,6 +48,10 @@ export type WsEvent =
   | {
       type: "table.grouped";
       mainTableId: string;
+      // v1.9.5-formacion · Frente 2: nombre display de la mesa principal
+      // para el banner «M1 se ha unido a M4». Aditivo y nullable → los
+      // consumidores viejos y los eventos en vuelo siguen válidos.
+      mainTableName: string | null;
       absorbedTableIds: string[];
       at: string;
     }
@@ -75,7 +79,12 @@ export type WsEvent =
       ticketId: string;
       internalNumber: string | null;
       registerId: string;
+      // v1.9.5-formacion · Frente 2: nombres display para el banner
+      // «Mesa M3 cobrada desde Caja 2». Aditivos y nullable → los
+      // consumidores viejos y los eventos en vuelo siguen válidos.
+      registerName: string | null;
       tableId: string | null;
+      tableName: string | null;
       byEmail: string;
       totalEur: number;
       at: string;

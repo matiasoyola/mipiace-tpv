@@ -258,7 +258,7 @@ export async function registerTableGroupingRoutes(
           deletedAt: null,
           store: { tenantId: cashier.tid },
         },
-        select: { id: true, storeId: true, groupedIntoTableId: true },
+        select: { id: true, storeId: true, groupedIntoTableId: true, name: true },
       });
       if (tables.length !== allIds.length) {
         return reply.code(404).send({
@@ -380,9 +380,14 @@ export async function registerTableGroupingRoutes(
       // Resuelvo storeId para el broadcast (todas comparten el mismo
       // por la validación de §1 de este endpoint).
       const storeId = tables[0]!.storeId;
+      // v1.9.5-formacion · Frente 2: nombre display de la mesa principal
+      // para el banner «M1 se ha unido a M4».
+      const mainTableName =
+        tables.find((t) => t.id === mainTableId)?.name ?? null;
       getStoreEventBus().broadcast(storeId, {
         type: "table.grouped",
         mainTableId,
+        mainTableName,
         absorbedTableIds: result.absorbedTableIds,
         at: new Date().toISOString(),
       });
