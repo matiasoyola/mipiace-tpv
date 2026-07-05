@@ -99,3 +99,15 @@ export function tableErrorMessage(err: unknown): string {
   if (err instanceof ApiError) return err.message;
   return "Sin conexión. La operativa de mesas necesita red — reinténtalo cuando vuelva.";
 }
+
+// v1.9.2-mesas-concurrencia · Frente 2: el DRAFT de la mesa ya no está
+// vivo bajo los pies del cajero — lo cobró/anuló otra caja
+// (TICKET_NOT_FOUND_OR_NOT_DRAFT) o lo absorbió un grupo (TABLE_GROUPED).
+// En ambos casos añadir líneas es imposible y hay que volver al mapa.
+export function isDeadDraftError(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false;
+  return (
+    err.code === "TICKET_NOT_FOUND_OR_NOT_DRAFT" ||
+    err.code === "TABLE_GROUPED"
+  );
+}

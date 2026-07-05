@@ -126,6 +126,20 @@ export function SuccessOverlay({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticketId]);
 
+  // v1.9.2-mesas-concurrencia · Frente 3.1: en venta rápida el modal
+  // "Ticket emitido" se autocierra a los 4 s (el camarero de bar no
+  // debe pensar; las acciones QR/PDF/email siguen en Tickets). Se pausa
+  // mientras hay un sub-modal o una impresión en curso para no cortar
+  // al cajero a mitad de una acción. (En contexto mesa este overlay ni
+  // se monta: la SalePage sale directa al mapa con banner de éxito.)
+  const autoClosePaused =
+    showQr || showView || printState.phase === "printing";
+  useEffect(() => {
+    if (autoClosePaused) return;
+    const t = setTimeout(() => onDone(), 4_000);
+    return () => clearTimeout(t);
+  }, [autoClosePaused, onDone]);
+
   // Carga el payload digital — falla en silencio si la PWA está
   // offline; el QR queda deshabilitado, descargar/ver no se ofrecen
   // hasta que el doc llegue.

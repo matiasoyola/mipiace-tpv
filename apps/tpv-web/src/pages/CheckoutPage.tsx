@@ -97,6 +97,20 @@ export function CheckoutOverlay(props: {
   // v1.8-Fiado · si el tenant tiene la venta a crédito activada, se
   // muestra el botón "Fiado" (sólo en venta rápida, no en mesa).
   creditSalesEnabled?: boolean;
+  // v1.9.2-mesas-concurrencia · Frente 1.4/2: refetch de la proyección
+  // del DRAFT de mesa. Se llama tras PAYMENTS_MISMATCH (otra caja cambió
+  // la cuenta) para recalcular el total del modal in situ.
+  onRefetchTable?: () => Promise<void>;
+  // Frente 2: 409 TICKET_ALREADY_PAID — la mesa la cobró otra caja.
+  // El modal se cierra y el padre sale al mapa con banner.
+  onTableClosedElsewhere?: (notice: string) => void;
+  // Frente 3.1: cobro de mesa OK → salir directo al mapa con banner de
+  // éxito (sustituye al modal "Ticket emitido" sólo en contexto mesa).
+  onTablePaidExit?: (opts: {
+    notice: string;
+    ticketId: string;
+    ticketQuery: string | null;
+  }) => void;
   onClose: () => void;
   onConfirmed: () => void;
 }) {
@@ -124,6 +138,13 @@ export function CheckoutOverlay(props: {
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // v1.9.2-mesas-concurrencia · Frente 1.4/2: el total con el que se
+  // construyeron las filas de pago. Si `props.totals.total` se separa
+  // (otra caja añadió/quitó líneas → refetch en el padre, o el server
+  // rechazó con PAYMENTS_MISMATCH y refetcheamos aquí), pintamos un
+  // aviso inline bajo el total y "Actualizar" recalcula el modal.
+  const [ackTotal, setAckTotal] = useState(props.totals.total);
+  const [serverMismatch, setServerMismatch] = useState(false);
   // v1.5-consistencia-C: "synced" = el POST confirmó; "pendingLocal" =
   // la venta está a salvo en el outbox local pero el servidor aún no
   // la tiene (red caída / 5xx) — el reenvío en background la subirá.
@@ -193,6 +214,20 @@ export function CheckoutOverlay(props: {
   // Antes exigíamos match exacto y bloqueaba overpayments cash.
   const ready = paymentsSum >= total - 0.01;
 
+  // v1.9.2-mesas-concurrencia · Frente 1.4/2: la cuenta cambió desde
+  // otra caja (o el server rechazó por total desactualizado). Mientras
+  // el aviso está activo, "Cobrar" queda bloqueado: el cajero debe
+  // pulsar "Actualizar" para aceptar el total nuevo.
+  const accountChanged =
+    Math.abs(total - ackTotal) > 0.001 || serverMismatch;
+  function acceptNewTotal(): void {
+    setPayments([{ method: "CASH", amount: total.toFixed(2) }]);
+    setMixedSplit(null);
+    setAckTotal(total);
+    setServerMismatch(false);
+    setError(null);
+  }
+
   // ── atajos teclado ─────────────────────────────────────────────────
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -209,6 +244,28 @@ export function CheckoutOverlay(props: {
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [confirmed, ready, submitting]);
+
+  // v1.9.2-mesas-concurrencia · Frente 3.1: en contexto mesa NO mostramos
+  // el modal "Ticket emitido". Al confirmar el cobro salimos directo al
+  // mapa con un banner de éxito ("Ver ticket" abre el detalle). El resto
+  // de acciones (QR/PDF/email) siguen en Tickets.
+  useEffect(() => {
+    if (
+      confirmed?.kind === "synced" &&
+      props.tableTicketId &&
+      props.onTablePaidExit
+    ) {
+      const internal = confirmed.res.ticket.internalNumber;
+      props.onTablePaidExit({
+        notice: internal
+          ? `Mesa cobrada · Ticket ${internal}`
+          : "Mesa cobrada",
+        ticketId: confirmed.res.ticket.id,
+        ticketQuery: internal ?? null,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [confirmed]);
 
   function setPayment(i: number, patch: Partial<PaymentRow>): void {
     setPayments((curr) => curr.map((p, j) => (j === i ? { ...p, ...patch } : p)));
@@ -248,6 +305,10 @@ export function CheckoutOverlay(props: {
     _opts?: { skipClientNudge?: boolean; credit?: boolean },
   ) {
     const isCredit = _opts?.credit === true;
+    // v1.9.2-mesas-concurrencia · Frente 1.4/2: la cuenta cambió desde
+    // otra caja. No dejamos cobrar hasta que el cajero acepte el total
+    // nuevo con "Actualizar".
+    if (accountChanged) return;
     // v1.8-Fiado · un fiado exige deudor. Sin contacto, abrimos el
     // selector en vez de mandar un POST que el backend rechazaría (400).
     if (isCredit && !props.contact?.holdedContactId) {
@@ -358,6 +419,38 @@ export function CheckoutOverlay(props: {
       setConfirmed({ kind: "synced", res });
     } catch (err) {
       if (err instanceof ApiError) {
+        // v1.9.2-mesas-concurrencia · Frente 2: 409 la mesa la cobró otra
+        // caja (doble cobro físico). Cerrar el modal y salir al mapa con
+        // banner — NUNCA dejarlo mudo. El item del outbox se descarta
+        // (el ticket ya existe en el server, no hay que reintentar).
+        if (
+          err.code === "TICKET_ALREADY_PAID" &&
+          props.tableTicketId &&
+          props.onTableClosedElsewhere
+        ) {
+          await outboxDelete(externalIdRef.current).catch(() => {});
+          setSubmitting(false);
+          props.onTableClosedElsewhere(
+            "Esta mesa ya fue cobrada desde otra caja",
+          );
+          return;
+        }
+        // Frente 2: 400 PAYMENTS_MISMATCH — otra caja cambió la cuenta
+        // entre que este cajero abrió el modal y pulsó Cobrar. No cerrar
+        // el modal: refetcheamos la proyección y pintamos el aviso con
+        // "Actualizar" (el efecto de props.totals lo activará; forzamos
+        // el flag por si el total refetcheado coincide).
+        if (
+          err.code === "PAYMENTS_MISMATCH" &&
+          props.tableTicketId &&
+          props.onRefetchTable
+        ) {
+          await outboxDelete(externalIdRef.current).catch(() => {});
+          setServerMismatch(true);
+          await props.onRefetchTable().catch(() => {});
+          setSubmitting(false);
+          return;
+        }
         if (err.code === "MANAGER_AUTHORIZATION_REQUIRED") {
           // La venta no es definitiva hasta que el encargado autorice:
           // fuera del outbox (si se reenviase sola volvería a dar 403).
@@ -421,6 +514,10 @@ export function CheckoutOverlay(props: {
 
   if (confirmed) {
     if (confirmed.kind === "synced") {
+      // Frente 3.1: mesa → sin modal de éxito (el efecto de arriba ya
+      // disparó la salida al mapa con banner). Render vacío mientras el
+      // padre desmonta la SalePage.
+      if (props.tableTicketId && props.onTablePaidExit) return null;
       return (
         <SuccessOverlay
           ticketId={confirmed.res.ticket.id}
@@ -741,10 +838,33 @@ export function CheckoutOverlay(props: {
             </span>
           </div>
 
+          {/* v1.9.2-mesas-concurrencia · Frente 1.4/2: la cuenta cambió
+              desde otra caja. Aviso inline bajo el total con "Actualizar"
+              que recalcula el modal. Bloquea "Cobrar" hasta aceptarlo. */}
+          {accountChanged && (
+            <div className="mb-2.5 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-[12.5px] text-amber-900">
+              <div className="font-semibold">
+                La cuenta ha cambiado desde otra caja.
+              </div>
+              <div className="mt-0.5 flex items-center justify-between gap-3">
+                <span className="tabular-nums">
+                  Total actual: {formatEur(total)}
+                </span>
+                <button
+                  type="button"
+                  onClick={acceptNewTotal}
+                  className="shrink-0 h-8 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[12px] font-semibold"
+                >
+                  Actualizar
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* COBRAR sticky bottom. */}
           <button
             onClick={() => submit()}
-            disabled={!ready || submitting}
+            disabled={!ready || submitting || accountChanged}
             className="w-full h-14 bg-mipiace-coral hover:bg-mipiace-coral-dark text-white font-medium text-[15px] rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50"
           >
             {submitting && <Loader2 className="w-4 h-4 animate-spin" />}

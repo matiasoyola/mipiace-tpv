@@ -31,7 +31,11 @@ import { PinScreen, type CashierLoginResponse } from "./pages/PinScreen.js";
 import { SalePage, type TableContext } from "./pages/SalePage.js";
 import { ShiftForceCloseScreen } from "./pages/ShiftForceCloseScreen.js";
 import { ShiftOpenScreen } from "./pages/ShiftOpenScreen.js";
-import { TableMapScreen, type ApiTable } from "./pages/TableMapScreen.js";
+import {
+  TableMapScreen,
+  type ApiTable,
+  type MapNotice,
+} from "./pages/TableMapScreen.js";
 import { cashierDisplayLabel, clearCashierSession } from "./storage.js";
 
 type CashierUser = CashierLoginResponse["user"] & { sessionTtlMinutes: number };
@@ -383,9 +387,14 @@ function TpvHome(props: {
   // ocupada en el mapa de las demás cajas desde el primer toque.
   const [openingTableId, setOpeningTableId] = useState<string | null>(null);
   const [openTableError, setOpenTableError] = useState<string | null>(null);
+  // v1.9.2-mesas-concurrencia · Frente 1/2/3: aviso que el mapa muestra
+  // cuando el cajero vuelve por una expulsión (mesa cobrada/absorbida
+  // desde otra caja) o tras cobrar una mesa desde este dispositivo.
+  const [mapNotice, setMapNotice] = useState<MapNotice | null>(null);
 
   async function pickTable(table: ApiTable): Promise<void> {
     if (openingTableId) return;
+    setMapNotice(null);
     setOpeningTableId(table.id);
     setOpenTableError(null);
     try {
@@ -458,8 +467,12 @@ function TpvHome(props: {
         cashierLabel={cashierDisplayLabel(props.cashier)}
         storeName={props.storeName}
         registerName={props.registerName}
+        shiftId={props.shiftId}
+        cashierRole={props.cashier.role}
+        notice={mapNotice}
         onPickTable={(table) => void pickTable(table)}
         onQuickSale={() => {
+          setMapNotice(null);
           setView({ kind: "sale", tableContext: null });
         }}
         pickBusyTableId={openingTableId}
@@ -482,7 +495,24 @@ function TpvHome(props: {
       tableContext={view.tableContext}
       initialTableLines={view.initialTableLines}
       onBackToMap={
-        hasTables ? () => setView({ kind: "map" }) : null
+        hasTables
+          ? () => {
+              setMapNotice(null);
+              setView({ kind: "map" });
+            }
+          : null
+      }
+      // v1.9.2-mesas-concurrencia · salida al mapa CON aviso inline:
+      // expulsión por cobro/absorción remota, o confirmación tras
+      // cobrar la mesa desde este dispositivo (banner de éxito con
+      // "Ver ticket"). Reemplaza el modal "Ticket emitido" en mesa.
+      onExitToMap={
+        hasTables
+          ? (notice) => {
+              setMapNotice(notice);
+              setView({ kind: "map" });
+            }
+          : null
       }
       onTicketMovedToTable={
         hasTables

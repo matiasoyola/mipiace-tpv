@@ -11,6 +11,7 @@ import {
   Check,
   ChevronRight,
   ExternalLink,
+  LayoutGrid,
   Loader2,
   Mail,
   Printer,
@@ -110,7 +111,17 @@ interface TicketRow {
   refunds: Array<{ id: string; total: number; createdAt: string; status: string }>;
 }
 
-export function TicketsHistoryPage(props: { onClose: () => void }) {
+export function TicketsHistoryPage(props: {
+  onClose: () => void;
+  // v1.9.2-mesas-concurrencia · Frente 3.2: en modo bar el header del
+  // historial ofrece un salto directo al mapa de sala (mismo peso que
+  // "Tickets" en el resto de pantallas). Null en retail puro.
+  onGoToMap?: (() => void) | null;
+  // v1.9.2-mesas-concurrencia · Frente 3.1: al abrir el historial desde
+  // el banner "Mesa cobrada · Ver ticket", prellenamos el buscador con
+  // el número interno del ticket recién emitido para que aparezca arriba.
+  initialQuery?: string;
+}) {
   // v1.3-Servicios-Pinta · Lote 1: vertical del tenant para adaptar el
   // título de la pantalla, el copy de los filtros y el botón "Iniciar
   // devolución". El historial es la "ficha del cliente" en servicios,
@@ -121,7 +132,7 @@ export function TicketsHistoryPage(props: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
 
   // Filtros
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(props.initialQuery ?? "");
   const [status, setStatus] = useState<string>("");
   // Mejora-03: filtro por rango de fechas. Estado en formato
   // YYYY-MM-DD (lo que da el <input type="date">). Vacío = sin filtro.
@@ -186,6 +197,19 @@ export function TicketsHistoryPage(props: { onClose: () => void }) {
             ? vocab("historyTitle", businessType)
             : "Tickets"}
         </h1>
+        {/* v1.9.2-mesas-concurrencia · Frente 3.2: salto directo al mapa
+            de sala desde el historial (mismo peso visual que "Tickets"). */}
+        {props.onGoToMap && (
+          <button
+            type="button"
+            onClick={props.onGoToMap}
+            title="Ir al mapa de sala"
+            className="h-11 px-4 rounded-2xl bg-mipiace-stone hover:bg-slate-100 flex items-center gap-2 text-[13.5px] font-medium text-mipiace-ink"
+          >
+            <LayoutGrid className="w-[18px] h-[18px]" strokeWidth={2.25} />
+            <span className="hidden sm:inline">Mesas</span>
+          </button>
+        )}
         <div className="flex-1 max-w-xl ml-auto">
           <div className="relative">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
