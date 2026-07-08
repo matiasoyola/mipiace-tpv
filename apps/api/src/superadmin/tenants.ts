@@ -1496,6 +1496,15 @@ export async function registerSuperAdminTenantsRoutes(
       const pinHash = await hashPassword(ownerPin);
       const signals = extractRequestSignals(request);
 
+      // v1.9.7 · La activación no debe abortar por la limpieza de datos
+      // de prueba. Lo CRÍTICO es crear el OWNER y pasar el tenant a ACTIVE
+      // (el cliente tiene que poder entrar). La purga de datos de prueba y
+      // la auditoría van best-effort DESPUÉS del commit: si fallan, se
+      // loguean y quedan pendientes, pero no revierten una activación
+      // buena. Antes iban dentro de la misma transacción y cualquier
+      // excepción en la purga tumbaba TODO con un 500 opaco ("Ha ocurrido
+      // un error inesperado…") dejando el tenant en DRAFT — el fallo de
+      // implantación de Sirope (2026-07-08) y variantes previas.
       const activated = await prisma.$transaction(async (tx) => {
         const owner = await tx.user.create({
           data: {
@@ -1508,26 +1517,49 @@ export async function registerSuperAdminTenantsRoutes(
           },
           select: { id: true, email: true },
         });
-        const purge = await purgeTestData(tx, id);
         const t = await tx.tenant.update({
           where: { id },
           data: { onboardingState: "ACTIVE" },
         });
+        return { owner, tenant: t };
+      });
+
+      // Limpieza best-effort: el tenant ya está ACTIVE y el OWNER creado.
+      let purge = {
+        ticketsTestPurged: 0,
+        emailJobsPurged: 0,
+        cashierDeleted: false,
+        deviceRevoked: false,
+      };
+      try {
+        purge = await purgeTestData(prisma, id);
+      } catch (err) {
+        request.log.error(
+          { event: "super_admin.activate_purge_failed", tenantId: id, err },
+          "Purga de datos de prueba falló tras activar — tenant ACTIVE, limpieza pendiente",
+        );
+      }
+
+      try {
         await writeAudit({
-          prisma: tx,
+          prisma,
           superAdminId: ctx.superAdminId,
           action: "activate_tenant",
           tenantId: id,
           metadata: {
             ...signals,
-            ownerEmail: owner.email,
+            ownerEmail: activated.owner.email,
             ownerName: body.ownerName,
             ticketsTestPurged: purge.ticketsTestPurged,
             emailJobsPurged: purge.emailJobsPurged,
           },
         });
-        return { owner, tenant: t, purge };
-      });
+      } catch (err) {
+        request.log.error(
+          { event: "super_admin.activate_audit_failed", tenantId: id, err },
+          "Auditoría de activación falló — no bloquea la activación",
+        );
+      }
 
       try {
         await sendOwnerWelcomeEmail({
@@ -1559,7 +1591,7 @@ export async function registerSuperAdminTenantsRoutes(
         // sola vez en la respuesta; el OWNER puede regenerarlo desde
         // `/auth/me/regenerate-owner-pin` si lo pierde.
         ownerPin,
-        purge: activated.purge,
+        purge,
       });
     },
   );

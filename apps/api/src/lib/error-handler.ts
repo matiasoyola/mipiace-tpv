@@ -17,6 +17,7 @@ import {
   HoldedSilentRejectError,
   HoldedSubscriptionSuspendedError,
 } from "@mipiacetpv/holded-client";
+import { Prisma } from "@mipiacetpv/db";
 
 import { captureError } from "./sentry.js";
 
@@ -116,6 +117,35 @@ export function registerErrorHandler(app: FastifyInstance): void {
       return reply.code(statusCode).send({
         error: fastifyErr.code ?? "REQUEST_ERROR",
         message: err.message,
+      });
+    }
+
+    // 4.b Errores conocidos de Prisma → mensaje legible con código, nunca
+    // un 500 opaco. Antes cualquier P2002 (unique), P2003 (FK), P2011
+    // (null), P2022 (columna inexistente), etc. caía al genérico "Ha
+    // ocurrido un error inesperado" y las implantaciones se quedaban a
+    // ciegas (fallo de activación de Sirope, 2026-07-08). El `code` de
+    // Prisma viaja al cliente para poder diagnosticar sin abrir el VPS.
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError ||
+      err instanceof Prisma.PrismaClientValidationError
+    ) {
+      const prismaCode =
+        err instanceof Prisma.PrismaClientKnownRequestError ? err.code : "VALIDATION";
+      request.log.error(
+        { err, tenantId, requestId: request.id, prismaCode },
+        `error Prisma ${prismaCode} en ${request.method} ${request.url}`,
+      );
+      captureError(err, {
+        tenantId,
+        requestId: String(request.id),
+        extra: { prismaCode, method: request.method, url: request.url },
+      });
+      return reply.code(500).send({
+        error: "DB_ERROR",
+        message: `Error de base de datos (${prismaCode}). Si persiste, contacta con soporte indicando el identificador.`,
+        prismaCode,
+        requestId: request.id,
       });
     }
 
