@@ -9,14 +9,24 @@
 // táctil 11. El TPV cargaba bien (no usa randomUUID al boot), pero
 // `addProduct → pushProductLine → newId()` reventaba en runtime.
 //
-// El fallback no es criptográficamente seguro — esto NO importa aquí
-// porque los IDs son sólo claves de UI (cartLine.id, externalId del
-// ticket pre-sync). El backend valida unicidad real y no se fía de los
-// IDs del cliente.
+// v1.9.7 · Bug-UUID-Fallback (implantación Sirope, 2026-07-08).
+// El fallback anterior generaba el *shape* 8-4-4-4-12 pero NO fijaba el
+// nibble de versión (`4`) ni el de variante (`[89ab]`), así que no era
+// un UUID v4 válido. La API valida `externalId` y `lineExternalId` con
+//   ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$
+// (ADR-005, idempotencia). Resultado: en cualquier tablet sin
+// `crypto.randomUUID`, TODO `POST /tables/:id/lines` y `POST /tickets`
+// devolvía 400 VALIDATION_ERROR → no se podían añadir productos a una
+// mesa ni cobrar. En equipos modernos no se reproducía nunca.
+//
+// El fallback sigue sin ser criptográficamente seguro — no importa: los
+// IDs son claves de UI e idempotencia pre-sync. Pero ahora es un v4
+// bien formado, que es lo que el contrato exige.
 
-/** Devuelve un UUID v4 si el navegador lo soporta; si no, un id
- *  pseudo-único basado en timestamp + Math.random. Suficiente para
- *  claves de React, externalIds pre-sync y keys de carrito. */
+/** Devuelve un UUID v4 válido (RFC 4122). Usa `crypto.randomUUID` si
+ *  existe; si no, `crypto.getRandomValues`; y como último recurso
+ *  `Math.random`. En los tres casos los nibbles de versión y variante
+ *  son correctos, así que pasa la validación de la API. */
 export function newId(): string {
   if (
     typeof crypto !== "undefined" &&
@@ -24,14 +34,30 @@ export function newId(): string {
   ) {
     return crypto.randomUUID();
   }
-  // Fallback compatible con Chrome <92 / Android stock WebView viejo.
-  // Formato: 8-4-4-4-12 hex tras Date.now + Math.random — no es UUID
-  // v4 real pero respeta el shape para sistemas que lo parseen como
-  // string genérico.
-  const rand = () =>
-    Math.floor(Math.random() * 0x10000)
-      .toString(16)
-      .padStart(4, "0");
-  const ts = Date.now().toString(16).padStart(12, "0");
-  return `${rand()}${rand()}-${rand()}-${rand()}-${rand()}-${ts}`;
+
+  const bytes = new Uint8Array(16);
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.getRandomValues === "function"
+  ) {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < 16; i += 1) {
+      bytes[i] = Math.floor(Math.random() * 256);
+    }
+  }
+
+  // RFC 4122 §4.4: versión 4 en el nibble alto del byte 6, variante
+  // 10xx en los dos bits altos del byte 8.
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0"));
+  return [
+    hex.slice(0, 4).join(""),
+    hex.slice(4, 6).join(""),
+    hex.slice(6, 8).join(""),
+    hex.slice(8, 10).join(""),
+    hex.slice(10, 16).join(""),
+  ].join("-");
 }

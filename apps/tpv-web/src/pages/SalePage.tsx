@@ -2801,11 +2801,21 @@ function TicketPanel({
               Desagrupar
             </button>
           )}
+          {/* v1.9.7 · En modo mesa el botón NUNCA se deshabilita: una mesa
+              con un DRAFT vacío (abierta y sin comandar) figura ocupada, y
+              si Cancelar está gris no hay forma de liberarla desde el TPV.
+              Ese era el caso de la implantación de Sirope (2026-07-08).
+              En venta rápida se mantiene el disabled: sin líneas, cliente
+              ni notas no hay nada que cancelar. */}
           <button
             onClick={onCancel}
-            disabled={lines.length === 0 && !contact && !notes}
+            disabled={!tableContext && lines.length === 0 && !contact && !notes}
             className="h-8 px-3 rounded-lg bg-red-50 hover:bg-red-100 text-[12.5px] font-medium text-red-700 disabled:opacity-50 disabled:cursor-not-allowed ml-auto"
-            title={`Cancelar y vaciar el ${vocab("ticketNoun", businessType).toLowerCase()}`}
+            title={
+              tableContext
+                ? "Vaciar la mesa (cancela la cuenta)"
+                : `Cancelar y vaciar el ${vocab("ticketNoun", businessType).toLowerCase()}`
+            }
           >
             Cancelar
           </button>
