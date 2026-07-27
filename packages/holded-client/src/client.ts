@@ -3,6 +3,13 @@ import {
   HoldedInvalidResponseError,
   HoldedSubscriptionSuspendedError,
 } from "./errors.js";
+import {
+  computeBackoffMs,
+  isRetryableStatus,
+  parseRetryAfterMs,
+  resolveRetryOptions,
+  type RetryOptions,
+} from "./retry.js";
 
 // Interfaz pública del cliente. ApiKeyClient es la implementación de MVP.
 // Cuando se monte OAuth (v2, ADR-004) será un segundo cliente detrás de
@@ -43,6 +50,10 @@ export interface HoldedClientOptions {
   baseUrl?: string;
   // Inyectable para tests. Por defecto usa `globalThis.fetch`.
   fetchImpl?: typeof fetch;
+  // Reintentos ante 429/5xx/red en peticiones GET (bloque v1.9.9). Los
+  // defaults viven en `retry.ts`; la capa de app puede sobreescribirlos
+  // (p. ej. desde env) sin que el paquete lea `process.env`.
+  retry?: Partial<RetryOptions>;
 }
 
 export const DEFAULT_HOLDED_BASE_URL = "https://api.holded.com/api";
@@ -54,6 +65,7 @@ export const DEFAULT_HOLDED_BASE_URL = "https://api.holded.com/api";
 export class ApiKeyClient implements HoldedClient {
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly retry: RetryOptions;
 
   constructor(
     private readonly apiKey: string,
@@ -61,6 +73,7 @@ export class ApiKeyClient implements HoldedClient {
   ) {
     this.baseUrl = options.baseUrl ?? DEFAULT_HOLDED_BASE_URL;
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
+    this.retry = resolveRetryOptions(options.retry);
   }
 
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -73,7 +86,13 @@ export class ApiKeyClient implements HoldedClient {
     }
 
     const method = (init.method ?? "GET").toUpperCase();
-    const res = await this.fetchImpl(url, { ...init, headers });
+    // Solo reintentamos GET: idempotente. Un POST/PUT/DELETE (crear
+    // salesreceipt, registrar pago) NO se reintenta nunca aquí.
+    const res = await this.fetchWithRetry(
+      url,
+      { ...init, headers },
+      method === "GET",
+    );
     const text = await res.text();
 
     if (!res.ok) {
@@ -105,6 +124,56 @@ export class ApiKeyClient implements HoldedClient {
     }
 
     return (text ? JSON.parse(text) : null) as T;
+  }
+
+  // Ejecuta el fetch con reintentos ante fallos transitorios. Solo actúa
+  // si `retryable` (GET). Respeta `Retry-After` en 429; backoff
+  // exponencial con jitter en 429-sin-cabecera y 5xx; y en errores de red.
+  // Devuelve la Response final (sin consumir el body) para que `request`
+  // aplique su manejo de errores/parseo habitual.
+  private async fetchWithRetry(
+    url: string,
+    init: RequestInit,
+    retryable: boolean,
+  ): Promise<Response> {
+    const { maxRetries, maxRetryAfterMs, sleep } = this.retry;
+    let attempt = 0;
+    for (;;) {
+      let res: Response;
+      try {
+        res = await this.fetchImpl(url, init);
+      } catch (networkErr) {
+        // Error de red (fetch lanza): reintentamos si aún quedan intentos.
+        if (retryable && attempt < maxRetries) {
+          await sleep(computeBackoffMs(attempt, this.retry));
+          attempt += 1;
+          continue;
+        }
+        throw networkErr;
+      }
+
+      if (retryable && attempt < maxRetries && isRetryableStatus(res.status)) {
+        const retryAfterMs =
+          res.status === 429 ? parseRetryAfterMs(res.headers) : null;
+        // Si Holded pide esperar más de lo razonable, NO dormimos: dejamos
+        // que el 429 suba (lo lanzará `request`) y que BullMQ reencole.
+        if (retryAfterMs !== null && retryAfterMs > maxRetryAfterMs) {
+          return res;
+        }
+        const waitMs = retryAfterMs ?? computeBackoffMs(attempt, this.retry);
+        // Liberamos el body descartado antes de reintentar.
+        try {
+          await res.body?.cancel();
+        } catch {
+          /* body ya consumido/cerrado */
+        }
+        await sleep(waitMs);
+        attempt += 1;
+        continue;
+      }
+
+      return res;
+    }
   }
 
   async fetchBinary(
