@@ -32,6 +32,7 @@ function makeFetch(thunks: Array<() => Response>) {
   const fn = vi.fn(async () => {
     const t = thunks[Math.min(i, thunks.length - 1)];
     i += 1;
+    if (!t) throw new Error("makeFetch: sin thunk disponible");
     return t();
   });
   return fn as unknown as typeof fetch;
