@@ -22,6 +22,7 @@ import { registerContactImportRoutes } from "./contacts/import.js";
 import { getPrisma, getRedis, shutdown } from "./context.js";
 import { registerDeviceRoutes } from "./devices/routes.js";
 import { loadEnv } from "./env.js";
+import { getAppVersion, SERVER_STARTED_AT } from "./version.js";
 import { registerErrorHandler } from "./lib/error-handler.js";
 import { registerLenientJsonParser } from "./lib/lenient-json.js";
 import { initSentry } from "./lib/sentry.js";
@@ -116,8 +117,14 @@ async function main() {
     credentials: true,
   });
 
-  // Health primero — útil para probes Hostinger.
-  app.get("/health", async () => ({ ok: true }));
+  // Health primero — útil para probes Hostinger. v1.9.8: expone la
+  // versión (sha de la imagen) y el arranque para saber qué corre en
+  // prod de un vistazo (`curl .../health`). getAppVersion nunca lanza.
+  app.get("/health", async () => ({
+    ok: true,
+    version: getAppVersion(),
+    startedAt: SERVER_STARTED_AT,
+  }));
 
   if (
     env.NODE_ENV === "production" &&

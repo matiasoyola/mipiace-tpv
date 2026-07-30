@@ -120,6 +120,17 @@ RUN mkdir -p /var/lib/mipiacetpv/z-reports \
   && chown -R node:node /var/lib/mipiacetpv
 
 ENV NODE_ENV=production
+
+# v1.9.8 · versión visible en /health. El job `publish` de CI pasa
+# --build-arg GIT_SHA=<sha-corto>; lo horneamos como APP_VERSION para
+# que la imagen sepa su propia versión aunque se despliegue como
+# :latest. Vacío por defecto (build local sin arg) → getAppVersion()
+# cae a SENTRY_RELEASE / "unknown". Al final del stage para no
+# invalidar el cache del COPY --from=build en cada commit. El stage
+# `worker` (FROM api) hereda este ENV.
+ARG GIT_SHA=""
+ENV APP_VERSION=${GIT_SHA}
+
 EXPOSE 3001
 
 USER node

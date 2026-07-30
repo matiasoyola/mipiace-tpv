@@ -120,6 +120,7 @@ jobs:
             ghcr.io/matiasoyola/mipiacetpv-api:${{ steps.meta.outputs.sha }}
             ghcr.io/matiasoyola/mipiacetpv-api:latest
           build-args: |
+            GIT_SHA=${{ steps.meta.outputs.sha }}
             VITE_BUILD_HASH=${{ steps.meta.outputs.sha }}
             VITE_SENTRY_DSN=${{ secrets.VITE_SENTRY_DSN }}
           cache-from: type=gha
