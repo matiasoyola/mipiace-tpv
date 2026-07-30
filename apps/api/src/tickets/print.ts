@@ -26,6 +26,8 @@ import type { FastifyInstance } from "fastify";
 import { getPrisma } from "../context.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
 import { cashierLabelFrom } from "../users/display.js";
+import { loadTicketDocument } from "./build-document.js";
+import type { TicketTotals } from "@mipiacetpv/ticket-model";
 
 interface PrintQuery {
   target: "usb" | "wifi";
@@ -76,8 +78,27 @@ export async function registerTicketPrintRoute(
         });
       }
 
+      // v1.9.10 · el desglose de IVA por tipo lo calcula el modelo
+      // compartido (mismo que usa el PDF/ticket digital). Lo cargamos y se
+      // lo pasamos al builder térmico para que imprima "IVA X% s/base" +
+      // Subtotal, cuadrado al céntimo. DEFENSIVO: imprimir el ticket es más
+      // importante que el desglose — si armar el documento falla por lo que
+      // sea, el ticket sale igual que hasta ahora (sin desglose).
+      let ticketTotals: TicketTotals | null = null;
+      try {
+        const doc = await loadTicketDocument({ prisma, ticketId });
+        ticketTotals = doc?.totals ?? null;
+      } catch (err) {
+        request.log.warn(
+          {
+            ticketId,
+            error: err instanceof Error ? err.message : String(err),
+          },
+          "tickets.print.escpos: no se pudo armar el desglose IVA; se imprime sin desglose",
+        );
+      }
       const bytes = buildTicketReceipt(
-        ticketToEscposInput(ticket, env.PUBLIC_TICKET_URL),
+        ticketToEscposInput(ticket, env.PUBLIC_TICKET_URL, ticketTotals),
       );
 
       if (target === "usb") {
@@ -288,6 +309,10 @@ async function loadTicketForPrint(
 export function ticketToEscposInput(
   ticket: TicketForPrint,
   publicTicketUrlBase: string,
+  // v1.9.10 · totales del modelo compartido (con el desglose de IVA por
+  // tipo, idéntico al del PDF). Opcional: si es null el ticket sale sin
+  // desglose, como antes.
+  totals: TicketTotals | null = null,
 ): TicketReceiptInput {
   const lines: TicketLineEscpos[] = ticket.lines.map((l) => {
     const baseUnit = Number(l.unitPrice.toString());
@@ -338,6 +363,10 @@ export function ticketToEscposInput(
     tableName: ticket.table?.name ?? null,
     lines,
     total: Number(ticket.total.toString()),
+    // v1.9.10 · desglose IVA por tipo + neto, del modelo compartido. Los
+    // shapes coinciden: TicketTaxBucket {rate,base,tax} === TicketTaxBucketEscpos.
+    taxBreakdown: totals?.taxBreakdown ?? null,
+    subtotal: totals?.subtotal ?? null,
     payments,
     notes: ticket.notes ? [ticket.notes] : [],
     publicTicketUrl: `${publicTicketUrlBase}/tickets/${ticket.publicSlug}/pdf`,
