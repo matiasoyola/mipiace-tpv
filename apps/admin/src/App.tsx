@@ -394,6 +394,19 @@ function LoginPage() {
           Crea tu negocio
         </a>
       </p>
+      {/* v1.9.11 · pista discreta a la consola super-admin. El mismo
+          dominio (admin.mipiacetpv.com) alberga las dos puertas: esta es
+          la del propietario y /superadmin/login la de la consola. Sin
+          este enlace había que recordar /superadmin de memoria. Muy
+          atenuado para no confundir a los propietarios. */}
+      <p className="mt-4 pt-4 border-t border-slate-100 text-center">
+        <a
+          href="/superadmin/login"
+          className="text-[12px] text-slate-300 hover:text-slate-500 transition-colors"
+        >
+          Consola de administración
+        </a>
+      </p>
     </CenteredCard>
   );
 }
