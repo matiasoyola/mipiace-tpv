@@ -28,6 +28,13 @@ const APP_VERSION: string =
 // Nombre del IDB que el TPV usa para el catálogo. Cualquier otro store
 // que añadamos en el futuro debe sumarse aquí — la limpieza es
 // explícita para no nuclearizar IDBs de otras apps en el mismo origen.
+//
+// FUERA de esta lista a propósito (deben SOBREVIVIR a deploys):
+//   - `mipiacetpv-outbox`  (v1.5-C): cobros pendientes de enviar.
+//   - `mipiacetpv-auth`    (v1.10): paquete offline (roster + pinHash),
+//      sesión de cajero local y estado de turno offline. Si un deploy lo
+//      borrase, un terminal offline se quedaría sin poder loguear ni
+//      recuperar el turno en curso.
 const IDB_NAMES_TO_CLEAR = ["mipiacetpv-catalog"];
 
 const CLEANED_FLAG_KEY = "mipiacetpv:version-cleaned-for";
