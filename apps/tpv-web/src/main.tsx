@@ -10,6 +10,7 @@ import {
 import { initSentry } from "./lib/sentry.js";
 import { consumeTestModeFromUrl } from "./lib/test-mode.js";
 import { runVersionCheck } from "./lib/version-check.js";
+import { bootstrapPrinters } from "./platform/printer/bootstrap.js";
 import "./index.css";
 
 // Sentry (v1.5-B Lote 2): gated por VITE_SENTRY_DSN — sin DSN, no-op
@@ -26,6 +27,12 @@ installGlobalErrorLogging();
 // SW registre nada (el SW podría cachear la URL con tokens en
 // historial). Es síncrono — no añade latencia perceptible.
 consumeTestModeFromUrl();
+
+// A1-Android · Frente 1: registra los transportes de impresión según la
+// plataforma (WebUSB+WiFi en navegador, USB nativo+WiFi en la app
+// Android). Idempotente; el registry también se auto-inicializa perezoso
+// desde lib/escposPrint.ts si esta llamada no corriera.
+bootstrapPrinters();
 
 // v1.2-Lite Lote 3.B: version-check antes de registerSW para que, si
 // hay bundle viejo, la limpieza+reload ocurran ANTES de que el SW
