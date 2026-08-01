@@ -18,7 +18,9 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
 
 import { ApiError, apiWithCashier } from "../api.js";
-import { outboxCounts } from "../lib/outbox.js";
+import { outboxAdd, outboxCounts, outboxList } from "../lib/outbox.js";
+import { closeLocalShift, getLocalShift } from "../lib/offlineShift.js";
+import { newId } from "../lib/ids.js";
 
 // Mismo orden que `ALLOWED_DENOMINATIONS` del backend (de mayor a
 // menor). Si el backend cambia el set, también hay que tocarlo aquí —
@@ -167,10 +169,81 @@ export function CloseShiftModal(props: {
     return out;
   }
 
+  // v1.10-offline-un-terminal §3: cierre/arqueo SIN red. El informe Z se
+  // arma con datos LOCALES (fondo de caja del turno local + efectivo neto
+  // de las ventas que siguen en la cola local) y el POST se encola como
+  // cash-count. Al recuperar la red, el outbox lo sube (idempotente).
+  async function submitOffline() {
+    const local = await getLocalShift().catch(() => null);
+    const cashOpening = local?.cashOpening ?? 0;
+    let cashSales = 0;
+    try {
+      const items = await outboxList();
+      for (const it of items) {
+        const bodyShiftId =
+          typeof it.body.shiftId === "string" ? it.body.shiftId : undefined;
+        const belongs =
+          it.shiftLocalId === props.shiftId || bodyShiftId === props.shiftId;
+        if (!belongs) continue;
+        const payments = Array.isArray(it.body.payments)
+          ? (it.body.payments as Array<{ method?: string; amount?: unknown }>)
+          : [];
+        for (const p of payments) {
+          if (p?.method !== "CASH") continue;
+          const amt =
+            typeof p.amount === "number" ? p.amount : parseFloat(String(p.amount));
+          if (Number.isFinite(amt)) cashSales += it.kind === "refund" ? -amt : amt;
+        }
+      }
+    } catch {
+      /* best-effort: el Z local puede quedar sin el neto de ventas */
+    }
+    const cashTheoretical = Math.round((cashOpening + cashSales) * 100) / 100;
+    const descuadre = Math.round((totalEur - cashTheoretical) * 100) / 100;
+    // Sólo etiquetamos con turno local si aún no resolvió (para que el
+    // outbox reescriba el :id del path local → server al sincronizar).
+    const shiftLocalId =
+      local && local.serverId === null && local.localId === props.shiftId
+        ? local.localId
+        : undefined;
+    await outboxAdd({
+      externalId: newId(),
+      kind: "cash-count",
+      path: `/shift/${props.shiftId}/cash-count`,
+      body: { kind: mode, denominations: buildDenominationsPayload() },
+      label: mode === "Z" ? "Cierre de turno (Z)" : "Arqueo X",
+      total: totalEur,
+      shiftLocalId,
+    });
+    const result: CashCountResponse = {
+      kind: mode,
+      cashCounted: totalEur,
+      cashTheoretical,
+      descuadre,
+    };
+    if (mode === "Z") {
+      await closeLocalShift().catch(() => {});
+      setZResult(result);
+    } else {
+      setXResult(result);
+    }
+  }
+
   async function submit() {
     if (busy) return;
     setBusy(true);
     setError(null);
+    // Sin red: cierre/arqueo offline directo.
+    if (!navigator.onLine) {
+      try {
+        await submitOffline();
+      } catch {
+        setError("No se pudo registrar el cierre offline.");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     try {
       const res = await apiWithCashier<CashCountResponse>(
         `/shift/${props.shiftId}/cash-count`,
@@ -190,7 +263,12 @@ export function CloseShiftModal(props: {
         setZResult(res);
       }
     } catch (err) {
-      if (err instanceof ApiError) {
+      if (err instanceof ApiError && err.code === "UNAUTHENTICATED") {
+        // Sesión offline sin JWT todavía: registramos el cierre en local.
+        await submitOffline().catch(() =>
+          setError("No se pudo registrar el cierre offline."),
+        );
+      } else if (err instanceof ApiError) {
         if (err.code === "MANAGER_PIN_REQUIRED") {
           setNeedsManager(true);
           const reason = (err.data as { reason?: string } | undefined)?.reason;
@@ -226,7 +304,11 @@ export function CloseShiftModal(props: {
           setError(err.message);
         }
       } else {
-        setError("Error inesperado");
+        // Error de red a mitad del cierre (la sesión era online pero cayó
+        // la conexión): degradamos a cierre offline.
+        await submitOffline().catch(() =>
+          setError("No se pudo registrar el cierre offline."),
+        );
       }
     } finally {
       setBusy(false);

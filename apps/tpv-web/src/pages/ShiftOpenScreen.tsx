@@ -6,6 +6,8 @@ import { AlertCircle, Loader2 } from "lucide-react";
 
 import { apiWithCashier, ApiError } from "../api.js";
 import { Logo } from "../Logo.js";
+import { outboxAdd } from "../lib/outbox.js";
+import { openLocalShift } from "../lib/offlineShift.js";
 
 interface ShiftOpenResponse {
   shift: { id: string; openedAt: string; cashOpening: string };
@@ -15,13 +17,20 @@ export function ShiftOpenScreen({
   cashierLabel,
   registerName,
   storeName,
+  offline = false,
   onOpened,
   onBack,
 }: {
   cashierLabel: string;
   registerName: string;
   storeName: string;
-  onOpened: (shift: { id: string; openedAt: string; cashOpening: string }) => void;
+  // v1.10-offline: la sesión se abrió sin red (aún sin JWT). Abrimos el
+  // turno EN LOCAL y encolamos el POST /shift/open.
+  offline?: boolean;
+  onOpened: (
+    shift: { id: string; openedAt: string; cashOpening: string },
+    openedOffline: boolean,
+  ) => void;
   onBack: () => void;
 }) {
   const [amount, setAmount] = useState<string>("0,00");
@@ -31,18 +40,60 @@ export function ShiftOpenScreen({
   const parsed = parseFloat(amount.replace(",", "."));
   const ready = !Number.isNaN(parsed) && parsed >= 0 && !busy;
 
+  // v1.10-offline: abre el turno en local (latencia percibida cero) y
+  // encola el POST /shift/open. El localId es el externalId de
+  // idempotencia; el outbox reescribe los tickets a shiftId real cuando
+  // la apertura sincroniza.
+  async function openOffline() {
+    const shift = await openLocalShift(parsed);
+    await outboxAdd({
+      externalId: shift.localId,
+      kind: "shift-open",
+      path: "/shift/open",
+      body: { cashOpening: parsed },
+      label: "Apertura de turno",
+      total: parsed,
+      shiftLocalId: shift.localId,
+    });
+    onOpened(
+      { id: shift.localId, openedAt: shift.openedAt, cashOpening: String(parsed) },
+      true,
+    );
+  }
+
   async function onSubmit() {
     if (!ready) return;
     setBusy(true);
     setError(null);
+    // Sin red (o sesión offline): directo a local.
+    if (offline || !navigator.onLine) {
+      try {
+        await openOffline();
+      } catch {
+        setError("No se pudo abrir el turno offline.");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     try {
       const res = await apiWithCashier<ShiftOpenResponse>("/shift/open", {
         method: "POST",
         body: { cashOpening: parsed },
       });
-      onOpened(res.shift);
+      onOpened(res.shift, false);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Error inesperado");
+      if (err instanceof ApiError) {
+        setError(err.message);
+      } else {
+        // Error de red a mitad de la apertura (la sesión era online pero
+        // cayó la conexión): degradamos a apertura offline.
+        try {
+          await openOffline();
+        } catch {
+          setError("No se pudo abrir el turno.");
+        }
+      }
     } finally {
       setBusy(false);
     }

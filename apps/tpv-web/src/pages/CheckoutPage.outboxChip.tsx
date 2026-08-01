@@ -34,6 +34,22 @@ export function OutboxChip() {
   const [counts, setCounts] = useState({ pending: 0, rejected: 0 });
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<OutboxItem[]>([]);
+  // v1.10-offline-un-terminal: indicador honesto de "sin conexión". No
+  // rediseñamos el chip; sólo matizamos el copy — los datos están a
+  // salvo en local y se sincronizan solos al volver la red.
+  const [online, setOnline] = useState(
+    typeof navigator === "undefined" ? true : navigator.onLine,
+  );
+  useEffect(() => {
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
+    window.addEventListener("online", up);
+    window.addEventListener("offline", down);
+    return () => {
+      window.removeEventListener("online", up);
+      window.removeEventListener("offline", down);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,7 +112,9 @@ export function OutboxChip() {
         )}
         {counts.rejected > 0
           ? `${counts.rejected} con error · ${counts.pending} por enviar`
-          : `${counts.pending} por enviar`}
+          : online
+            ? `${counts.pending} por enviar`
+            : `Sin conexión · ${counts.pending} guardado${counts.pending === 1 ? "" : "s"}`}
       </button>
 
       {open && (
@@ -104,7 +122,7 @@ export function OutboxChip() {
           <div className="bg-white rounded-3xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden">
             <header className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-slate-100">
               <h2 className="text-[16px] font-semibold text-mipiace-ink">
-                Cobros pendientes de enviar
+                {online ? "Pendientes de sincronizar" : "Sin conexión · datos guardados"}
               </h2>
               <button
                 onClick={() => setOpen(false)}
