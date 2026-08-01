@@ -38,7 +38,14 @@ const STORE = "outbox";
 export const OUTBOX_LOCK_TTL_MS = 30_000;
 export const OUTBOX_FLUSH_INTERVAL_MS = 15_000;
 
-export type OutboxKind = "ticket" | "refund";
+// v1.10-offline-un-terminal §3: el ciclo de turno también pasa por el
+// outbox. shift-open crea el turno; cash-count/shift-close lo cierran.
+export type OutboxKind =
+  | "ticket"
+  | "refund"
+  | "shift-open"
+  | "shift-close"
+  | "cash-count";
 export type OutboxStatus = "pending" | "rejected";
 
 export interface OutboxItem {
@@ -55,6 +62,13 @@ export interface OutboxItem {
   // mesa. Mientras el item exista (pending o rejected), ESTE dispositivo
   // bloquea reabrir/editar esa mesa — está "cobrada en tránsito".
   tableId?: string;
+  // v1.10-offline: localId del turno local al que pertenece este item
+  // (el shift-open que lo establece, o el ticket/arqueo que depende de
+  // él). Mientras el shift-open siga en la cola, los dependientes NO se
+  // envían (llevarían un shiftId local que el server no conoce); cuando
+  // el open sincroniza, se reescribe local → serverId. Undefined para
+  // turnos abiertos con red (camino online intacto).
+  shiftLocalId?: string;
   status: OutboxStatus;
   createdAt: number;
   attempts: number;
@@ -74,6 +88,25 @@ const TAB_ID = newId();
 let dbPromise: Promise<IDBDatabase> | null = null;
 let flushing = false;
 const listeners = new Set<(e: OutboxEvent) => void>();
+
+// v1.10-offline: hooks para el turno local, registrados por
+// lib/offlineShift (evita que el outbox importe offlineShift → sin
+// ciclo de dependencias). El lookup etiqueta un item nuevo con el
+// localId del turno local sin resolver al que pertenece; el callback
+// avisa cuando un shift-open sincroniza (para fijar el serverId real).
+type LocalShiftLookup = (shiftId: string) => Promise<string | null>;
+type ShiftResolvedCallback = (localId: string, serverId: string) => Promise<void>;
+let localShiftLookup: LocalShiftLookup | null = null;
+let shiftResolvedCallback: ShiftResolvedCallback | null = null;
+
+export function registerLocalShiftLookup(fn: LocalShiftLookup | null): void {
+  localShiftLookup = fn;
+}
+export function registerShiftResolvedCallback(
+  fn: ShiftResolvedCallback | null,
+): void {
+  shiftResolvedCallback = fn;
+}
 
 export function subscribeOutbox(fn: (e: OutboxEvent) => void): () => void {
   listeners.add(fn);
@@ -174,12 +207,29 @@ export async function outboxAdd(
     label: string;
     total: number;
     tableId?: string;
+    // v1.10-offline: explícito para las operaciones de turno
+    // (shift-open/cash-count). Para tickets se auto-deduce del
+    // body.shiftId vía el lookup registrado — CheckoutPage no cambia.
+    shiftLocalId?: string;
   },
   opts: { lock?: boolean } = {},
 ): Promise<void> {
   const now = Date.now();
+  let shiftLocalId = input.shiftLocalId;
+  if (!shiftLocalId && localShiftLookup) {
+    const bodyShiftId =
+      typeof input.body.shiftId === "string" ? input.body.shiftId : undefined;
+    if (bodyShiftId) {
+      try {
+        shiftLocalId = (await localShiftLookup(bodyShiftId)) ?? undefined;
+      } catch {
+        /* sin turno local → item online normal */
+      }
+    }
+  }
   const item: OutboxItem = {
     ...input,
+    shiftLocalId,
     status: "pending",
     createdAt: now,
     attempts: 0,
@@ -300,7 +350,46 @@ async function acquireLock(externalId: string): Promise<OutboxItem | null> {
   });
 }
 
-async function sendItem(item: OutboxItem): Promise<void> {
+// v1.10-offline: extrae el id de turno del server de la respuesta del
+// POST /shift/open (`{shift:{id}}`).
+function extractServerShiftId(response: unknown): string | null {
+  if (response && typeof response === "object") {
+    const shift = (response as { shift?: { id?: unknown } }).shift;
+    if (shift && typeof shift.id === "string") return shift.id;
+  }
+  return null;
+}
+
+// v1.10-offline: un shift-open sincronizó. Reescribe el shiftId (local →
+// server) de todos los items dependientes que sigan en la cola y avisa
+// a offlineShift para que fije el serverId.
+async function onShiftResolved(
+  shiftLocalId: string,
+  serverId: string,
+): Promise<void> {
+  await withStore("readwrite", async (store) => {
+    const all = await reqToPromise(store.getAll() as IDBRequest<OutboxItem[]>);
+    for (const it of all) {
+      if (it.shiftLocalId !== shiftLocalId || it.kind === "shift-open") continue;
+      const newBody = { ...it.body };
+      if (newBody.shiftId === shiftLocalId) newBody.shiftId = serverId;
+      // El :id del path de los arqueos también lleva el localId.
+      const newPath = it.path.split(shiftLocalId).join(serverId);
+      await reqToPromise(store.put({ ...it, body: newBody, path: newPath }));
+    }
+  });
+  if (shiftResolvedCallback) {
+    try {
+      await shiftResolvedCallback(shiftLocalId, serverId);
+    } catch {
+      /* offlineShift caído no debe tumbar el flush */
+    }
+  }
+}
+
+async function sendItem(
+  item: OutboxItem,
+): Promise<{ resolvedShiftLocalId?: string } | void> {
   try {
     const response = await apiWithCashier<unknown>(item.path, {
       method: "POST",
@@ -311,7 +400,47 @@ async function sendItem(item: OutboxItem): Promise<void> {
     await rawDelete(item.externalId);
     emit({ type: "sent", externalId: item.externalId, response });
     emit({ type: "change" });
+    if (item.kind === "shift-open" && item.shiftLocalId) {
+      const serverId = extractServerShiftId(response);
+      if (serverId) {
+        await onShiftResolved(item.shiftLocalId, serverId);
+        return { resolvedShiftLocalId: item.shiftLocalId };
+      }
+    }
+    return;
   } catch (err) {
+    // v1.10-offline: idempotencia de las operaciones de turno. El outbox
+    // reintenta; el server puede haber procesado ya el primer envío.
+    if (err instanceof ApiError) {
+      if (
+        item.kind === "shift-open" &&
+        err.status === 409 &&
+        err.code === "SHIFT_ALREADY_OPEN"
+      ) {
+        // El turno ya se abrió (envío previo que no vimos confirmado).
+        // Éxito idempotente: adoptamos el openShiftId del server.
+        const serverId = (err.data as { openShiftId?: string } | null)?.openShiftId;
+        await rawDelete(item.externalId);
+        emit({ type: "sent", externalId: item.externalId, response: err.data });
+        emit({ type: "change" });
+        if (item.shiftLocalId && serverId) {
+          await onShiftResolved(item.shiftLocalId, serverId);
+          return { resolvedShiftLocalId: item.shiftLocalId };
+        }
+        return;
+      }
+      if (
+        (item.kind === "cash-count" || item.kind === "shift-close") &&
+        err.status === 409 &&
+        (err.code === "SHIFT_ALREADY_CLOSED" || err.code === "Z_ALREADY_EXISTS")
+      ) {
+        // El cierre ya se aplicó en un intento anterior — éxito idempotente.
+        await rawDelete(item.externalId);
+        emit({ type: "sent", externalId: item.externalId, response: err.data });
+        emit({ type: "change" });
+        return;
+      }
+    }
     if (err instanceof ApiError && isPermanentRejection(err)) {
       const reason = rejectionReason(err);
       await rawPatch(item.externalId, {
@@ -344,17 +473,52 @@ async function sendItem(item: OutboxItem): Promise<void> {
   }
 }
 
+// v1.10-offline: ¿queda en la cola un shift-open (pending o rejected) de
+// este turno local sin sincronizar? Mientras exista, sus dependientes no
+// se envían.
+function hasUnresolvedShiftOpen(items: OutboxItem[], shiftLocalId: string): boolean {
+  return items.some(
+    (i) => i.kind === "shift-open" && i.shiftLocalId === shiftLocalId,
+  );
+}
+
 /** Reenvía todo lo pending cuyo lock no esté fresco. Reentrante-safe
  *  dentro de la pestaña (no-op si ya hay un flush en curso). */
 export async function flushOutbox(): Promise<void> {
   if (flushing) return;
   flushing = true;
   try {
-    const pending = (await rawGetAll()).filter((i) => i.status === "pending");
+    const all = await rawGetAll();
+    const pending = all.filter((i) => i.status === "pending");
+    // v1.10-offline: shift-open primero, luego por orden de creación. Así
+    // el turno se abre en el server antes que los tickets/arqueos que
+    // dependen de él, y el resto respeta el orden cronológico de siempre.
+    pending.sort((a, b) => {
+      const wa = a.kind === "shift-open" ? 0 : 1;
+      const wb = b.kind === "shift-open" ? 0 : 1;
+      return wa - wb || a.createdAt - b.createdAt;
+    });
+    // Turnos locales resueltos DURANTE este flush (el shift-open acaba de
+    // sincronizar) — desbloquea a sus dependientes en el mismo ciclo.
+    const resolvedThisFlush = new Set<string>();
     for (const item of pending) {
+      // Gate: no enviar un dependiente mientras su shift-open siga en la
+      // cola sin resolver — llevaría un shiftId local desconocido para el
+      // server (SHIFT_NOT_OPEN). Se reintenta al resolver el open.
+      if (
+        item.kind !== "shift-open" &&
+        item.shiftLocalId &&
+        !resolvedThisFlush.has(item.shiftLocalId) &&
+        hasUnresolvedShiftOpen(all, item.shiftLocalId)
+      ) {
+        continue;
+      }
       const locked = await acquireLock(item.externalId);
       if (!locked) continue;
-      await sendItem(locked);
+      const res = await sendItem(locked);
+      if (res?.resolvedShiftLocalId) {
+        resolvedThisFlush.add(res.resolvedShiftLocalId);
+      }
     }
   } catch (err) {
     // IndexedDB inaccesible (modo privado restrictivo) — no hay outbox
@@ -400,4 +564,6 @@ export async function __resetOutboxForTests(): Promise<void> {
   dbPromise = null;
   flushing = false;
   listeners.clear();
+  localShiftLookup = null;
+  shiftResolvedCallback = null;
 }
