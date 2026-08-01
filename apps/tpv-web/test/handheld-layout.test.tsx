@@ -72,6 +72,7 @@ vi.mock("../src/lib/escposPrint.js", () => ({
   pairUsbPrinter: vi.fn(),
   printEscposUsb: vi.fn(),
   printTicketWifi: vi.fn(),
+  openCashDrawerIfAvailable: vi.fn(),
 }));
 vi.mock("qrcode", () => ({
   default: { toDataURL: vi.fn(async () => "data:image/png;base64,") },

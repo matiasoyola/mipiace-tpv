@@ -44,6 +44,7 @@ export {
   escCut,
   escFeed,
   escInit,
+  escOpenCashDrawer,
   escQrCode,
   escResetSize,
   escSeparator,

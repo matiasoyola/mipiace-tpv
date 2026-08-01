@@ -29,6 +29,7 @@ vi.mock("../src/lib/escposPrint.js", () => ({
   pairUsbPrinter: vi.fn(),
   printEscposUsb: vi.fn(),
   printTicketWifi: vi.fn(),
+  openCashDrawerIfAvailable: vi.fn(),
   syncUsbPairingWithServerConfig: vi.fn(async () => {}),
 }));
 vi.mock("@mipiacetpv/ticket-pdf", () => ({

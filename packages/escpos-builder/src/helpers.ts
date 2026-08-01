@@ -154,3 +154,12 @@ export function escTextNoLf(s: string): Uint8Array {
 export function escSeparator(width = 42): Uint8Array {
   return escText("-".repeat(width));
 }
+
+// A1-Android · Frente 3 · pulso "kick" del cajón portamonedas.
+// Comando estándar ESC p m t1 t2: `m`=pin (0 → pin 2, el habitual del
+// conector RJ11 de la impresora), `t1`/`t2` = duración ON/OFF en unidades
+// de 2ms (25→50ms, 250→500ms, valores de fábrica). Definición canónica —
+// los transportes USB (WebUsb/UsbNative) emiten estos mismos bytes.
+export function escOpenCashDrawer(): Uint8Array {
+  return new Uint8Array([ESC, 0x70, 0x00, 0x19, 0xfa]);
+}

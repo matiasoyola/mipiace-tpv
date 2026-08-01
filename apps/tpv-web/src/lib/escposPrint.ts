@@ -85,6 +85,21 @@ export async function openUsbCashDrawer(): Promise<void> {
   await requireUsbTransport().openCashDrawer();
 }
 
+// A1 · Frente 3 · abre el cajón SÓLO si hay impresora USB emparejada.
+// Best-effort: el cajón NUNCA debe bloquear ni romper el cobro. Si no hay
+// transporte USB (WiFi-only), no hay impresora emparejada, o el pulso
+// falla, se ignora en silencio. Se llama al cerrar una venta en efectivo.
+export async function openCashDrawerIfAvailable(): Promise<void> {
+  const t = usbTransport();
+  if (!t || !t.isSupported()) return;
+  try {
+    if (!(await t.isPaired())) return;
+    await t.openCashDrawer();
+  } catch {
+    // el cajón es accesorio; el cobro ya está hecho.
+  }
+}
+
 // Pide el binary ESC/POS al backend (genera buildTicketReceipt sobre
 // el ticket persistido) y lo manda a la impresora USB.
 export async function printTicketUsb(ticketId: string): Promise<void> {

@@ -17,6 +17,7 @@ import {
   escCut,
   escFeed,
   escInit,
+  escOpenCashDrawer,
   escQrCode,
   type TicketReceiptInput,
 } from "../src/index.js";
@@ -45,6 +46,11 @@ describe("helpers ESC/POS", () => {
   });
   it("escFeed emite ESC d n", () => {
     expect(Array.from(escFeed(3))).toEqual([0x1b, 0x64, 0x03]);
+  });
+  it("escOpenCashDrawer emite ESC p 0 25 250 (pulso kick pin 2)", () => {
+    expect(Array.from(escOpenCashDrawer())).toEqual([
+      0x1b, 0x70, 0x00, 0x19, 0xfa,
+    ]);
   });
   it("escCut emite GS V 0", () => {
     expect(Array.from(escCut())).toEqual([0x1d, 0x56, 0x00]);

@@ -45,6 +45,7 @@ import {
   outboxDelete,
   outboxReleaseAfterFailure,
 } from "../lib/outbox.js";
+import { openCashDrawerIfAvailable } from "../lib/escposPrint.js";
 import { scrollFocusIntoView } from "../lib/visualViewportSync.js";
 import {
   PendingSaleOverlay,
@@ -408,6 +409,12 @@ export function CheckoutOverlay(props: {
         );
       } catch {
         persisted = false;
+      }
+      // A1-Android · Frente 3: venta en efectivo → abrir el cajón ya, sin
+      // esperar a la sincronización con Holded (funciona offline). Sólo si
+      // hay impresora USB emparejada; best-effort, no bloquea el cobro.
+      if (!isCredit && cashAmount > 0) {
+        void openCashDrawerIfAvailable();
       }
       const res = await apiWithCashier<TicketResponse>(path, {
         method: "POST",

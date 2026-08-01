@@ -25,6 +25,7 @@ vi.mock("../src/lib/escposPrint.js", () => ({
   pairUsbPrinter: vi.fn(),
   printEscposUsb: vi.fn(),
   printTicketWifi: vi.fn(),
+  openCashDrawerIfAvailable: vi.fn(),
 }));
 vi.mock("../src/lib/catalog.js", async () => {
   const actual = await vi.importActual<typeof import("../src/lib/catalog.js")>(

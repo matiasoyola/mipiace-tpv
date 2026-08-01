@@ -22,6 +22,7 @@ vi.mock("../src/platform/printer/bootstrap.js", () => ({
 import {
   getPairedUsbPrinter,
   isWebUsbSupported,
+  openCashDrawerIfAvailable,
   openUsbCashDrawer,
   pairUsbPrinter,
   printEscposUsb,
@@ -94,5 +95,28 @@ describe("escposPrint delega en el registry (canal USB)", () => {
   it("sin transporte USB → getPairedUsbPrinter devuelve false (no lanza)", async () => {
     transportMock.current = null;
     expect(await getPairedUsbPrinter()).toBe(false);
+  });
+});
+
+describe("openCashDrawerIfAvailable (Frente 3, best-effort)", () => {
+  it("abre el cajón cuando hay impresora USB emparejada", async () => {
+    await openCashDrawerIfAvailable();
+    expect(t.openCashDrawer).toHaveBeenCalledTimes(1);
+  });
+
+  it("no abre si no hay impresora emparejada (isPaired false)", async () => {
+    t.isPaired.mockResolvedValueOnce(false);
+    await openCashDrawerIfAvailable();
+    expect(t.openCashDrawer).not.toHaveBeenCalled();
+  });
+
+  it("no lanza si no hay transporte USB (WiFi-only)", async () => {
+    transportMock.current = null;
+    await expect(openCashDrawerIfAvailable()).resolves.toBeUndefined();
+  });
+
+  it("traga el error del pulso (el cobro no debe romperse)", async () => {
+    t.openCashDrawer.mockRejectedValueOnce(new Error("impresora apagada"));
+    await expect(openCashDrawerIfAvailable()).resolves.toBeUndefined();
   });
 });
