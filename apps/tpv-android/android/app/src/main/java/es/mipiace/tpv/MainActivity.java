@@ -1,6 +1,7 @@
 package es.mipiace.tpv;
 
 import android.os.Build;
+import android.os.Bundle;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -8,6 +9,17 @@ import android.view.WindowInsetsController;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
+
+    /**
+     * A1-Android · Frente 2 · registra el plugin USB Host de impresión
+     * ANTES de super.onCreate (así el bridge lo conoce al cargar el
+     * WebView). Es un plugin local del proyecto, no un paquete npm.
+     */
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(UsbPrinterPlugin.class);
+        super.onCreate(savedInstanceState);
+    }
 
     /**
      * Modo inmersivo: el TPV es una app de caja a pantalla completa; las

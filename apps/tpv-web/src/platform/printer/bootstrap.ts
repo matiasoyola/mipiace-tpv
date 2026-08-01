@@ -12,6 +12,7 @@
 import { getPlatform } from "../index.js";
 import { printerRegistry } from "./registry.js";
 import type { PrinterTransport } from "./PrinterTransport.js";
+import { UsbNativeTransport } from "./UsbNativeTransport.js";
 import { WebUsbTransport } from "./WebUsbTransport.js";
 import { WifiBackendTransport } from "./WifiBackendTransport.js";
 
@@ -24,9 +25,9 @@ export function bootstrapPrinters(): void {
   printerRegistry.register(new WifiBackendTransport());
 
   // Canal USB: WebUSB en navegador, USB Host nativo dentro de Capacitor.
-  // El transporte nativo (UsbNativeTransport) lo añade el Frente 2; hasta
-  // entonces Android sólo tiene WiFi.
-  if (platform !== "android") {
+  if (platform === "android") {
+    printerRegistry.register(new UsbNativeTransport());
+  } else {
     printerRegistry.register(new WebUsbTransport());
   }
 

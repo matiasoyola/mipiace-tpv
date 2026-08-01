@@ -39,4 +39,12 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- A1-Android · Frente 2 · impresión USB Host (impresora térmica ESC/POS
+         del terminal todo-en-uno). No requiere permiso en runtime: el
+         permiso USB es un diálogo del sistema por device. `required=false`
+         para no excluir de Play Store tablets sin puerto USB Host. -->
+    <uses-feature
+        android:name="android.hardware.usb.host"
+        android:required="false" />
 </manifest>
