@@ -20,6 +20,8 @@
 // (tokens de sesión, dispositivo) se preserva para que el cajero no
 // tenga que re-emparejar.
 
+import { isCapacitor } from "../platform/index.js";
+
 const APP_VERSION: string =
   typeof __APP_VERSION__ === "string" && __APP_VERSION__.length > 0
     ? __APP_VERSION__
@@ -36,6 +38,16 @@ export async function runVersionCheck(): Promise<void> {
   // En dev (vite serve) skipamos: no hay version.json estable y queremos
   // que HMR funcione sin bloquearse.
   if (APP_VERSION === "dev") return;
+
+  // A2-Android · Frente 4 · en la app Android (Capacitor) el bundle es
+  // estático y se actualiza vía Play Store, no por cache-busting del SW.
+  // El `/version.json` empaquetado siempre coincide con el embebido, así
+  // que la comprobación sería un no-op — pero la saltamos EXPLÍCITAMENTE
+  // para no arriesgar `purgeAndReload()`: en el WebView no hay origen de
+  // red del que re-descargar el bundle (vive en los assets locales), y
+  // purgar el precache dejaría la app sin recargar. Regresión cero en
+  // web: isCapacitor() es false en el navegador.
+  if (isCapacitor()) return;
 
   let serverVersion: string | null = null;
   try {
