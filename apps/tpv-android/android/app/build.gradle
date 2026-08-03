@@ -1,5 +1,15 @@
 apply plugin: 'com.android.application'
 
+// A3 · firma de release. El keystore vive FUERA del repo (Mac de Matías +
+// 1Password); sus rutas/claves se leen de `keystore.properties` (gitignored,
+// ver keystore.properties.example). Si el fichero no existe, la firma release
+// no se configura y los builds de debug/CI siguen funcionando sin secretos.
+def keystorePropsFile = rootProject.file("keystore.properties")
+def keystoreProps = new Properties()
+if (keystorePropsFile.exists()) {
+    keystoreProps.load(new FileInputStream(keystorePropsFile))
+}
+
 android {
     namespace "es.mipiace.tpv"
     compileSdk rootProject.ext.compileSdkVersion
@@ -20,8 +30,26 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (keystorePropsFile.exists()) {
+                storeFile rootProject.file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
     buildTypes {
         release {
+            // Firma sólo si hay keystore.properties; si no, el .aab sale sin
+            // firmar (Gradle avisa) y no se puede subir a Play — es la señal
+            // de que falta el keystore.
+            if (keystorePropsFile.exists()) {
+                signingConfig signingConfigs.release
+            }
+            // App WebView: el JS ya va minificado en el dist de Vite; R8 sobre
+            // el shell Java fino no aporta y añade riesgo. Se deja desactivado.
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
