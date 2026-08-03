@@ -128,13 +128,19 @@ export function CameraScanModal({
           setError(deniedMessage());
           return;
         }
+        // A2 · Frente 2 · rendimiento de escaneo. Pedimos 1280x720 como
+        // resolución IDEAL (no exact): en el terminal de caja da un frame
+        // más nítido para EAN-13/Code-128 sin sacrificar velocidad, y si
+        // la cámara no lo soporta el navegador cae a lo que tenga en vez
+        // de fallar (OverconstrainedError). No tocamos el framerate.
+        const quality = { width: { ideal: 1280 }, height: { ideal: 720 } };
         // Cámara elegida: si el usuario ya cicló, usamos su deviceId
         // exacto; en el arranque (lista aún vacía) pedimos la trasera por
         // facingMode — la frontal sería absurda para escanear un código.
         const selected = camerasRef.current[camIndex];
         const constraints: MediaStreamConstraints = selected?.deviceId
-          ? { video: { deviceId: { exact: selected.deviceId } } }
-          : { video: { facingMode: { ideal: "environment" } } };
+          ? { video: { deviceId: { exact: selected.deviceId }, ...quality } }
+          : { video: { facingMode: { ideal: "environment" }, ...quality } };
         const controls = await reader.decodeFromConstraints(
           constraints,
           videoRef.current!,
