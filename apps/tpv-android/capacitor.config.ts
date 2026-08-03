@@ -28,7 +28,14 @@ const config: CapacitorConfig = {
     // cleartext: true,
   },
   plugins: {
-    // Splash/status bar se afinan en A0 cuando exista identidad visual.
+    // A3 · identidad visual. La app corre en modo inmersivo (MainActivity,
+    // A0) con las barras ocultas; cuando el usuario las revela con un swipe
+    // deben ser coherentes con el theme_color del TPV (#0F172A slate-900).
+    StatusBar: {
+      style: "DARK", // texto/iconos claros sobre fondo oscuro
+      backgroundColor: "#0F172A",
+      overlaysWebView: false,
+    },
   },
 };
 

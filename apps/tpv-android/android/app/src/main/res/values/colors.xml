@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Colores de marca mipiacetpv (docs/design/tokens.md §2). -->
+<resources>
+    <!-- Fondo del icono adaptativo: superficie clara (mipiace.stone) para
+         contraste con las barras ink. -->
+    <color name="ic_launcher_background">#F8F6F3</color>
+    <!-- Splash / status bar: theme_color del TPV (slate-900). -->
+    <color name="splash_background">#0F172A</color>
+</resources>

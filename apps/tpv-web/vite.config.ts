@@ -92,7 +92,20 @@ export default defineConfig({
         orientation: "landscape",
         start_url: "/",
         scope: "/",
-        // TODO B4: añadir icons reales (192, 512, maskable).
+        // Iconos de marca (docs/design/tokens.md §1). Generados por
+        // `node scripts/gen-pwa-icons.mjs` desde el logo canónico. El mismo
+        // set sirve web (manifest) y assets de marca; el icono nativo Android
+        // es un VectorDrawable aparte.
+        icons: [
+          { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+          { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+          {
+            src: "/icons/maskable-512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable",
+          },
+        ],
       },
       workbox: {
         // v1.3-UX-Iteración Lote 3: cleanupOutdatedCaches limpia caches

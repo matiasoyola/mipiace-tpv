@@ -1,0 +1,11 @@
+<!-- Splash de arranque (Android <12; en 12+ manda values-v31/styles.xml).
+     Fondo #0F172A (theme_color del TPV) + logo reversado centrado.
+     Reemplaza los PNG placeholder del scaffold Capacitor. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/splash_background" />
+    <item
+        android:width="200dp"
+        android:height="200dp"
+        android:drawable="@drawable/splash_logo"
+        android:gravity="center" />
+</layer-list>

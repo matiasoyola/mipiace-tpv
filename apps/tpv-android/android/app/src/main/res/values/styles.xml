@@ -16,7 +16,12 @@
     </style>
 
 
+    <!-- Tema de arranque (Android <12). @drawable/splash pinta #0F172A +
+         logo reversado centrado. En Android 12+ manda values-v31/styles.xml
+         (SplashScreen API). postSplashScreenTheme evita el flash al pasar al
+         WebView. -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
     </style>
 </resources>
