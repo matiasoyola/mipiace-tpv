@@ -18,6 +18,8 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(UsbPrinterPlugin.class);
+        // A2-Android · Frente 1 · permiso nativo de cámara para el escáner.
+        registerPlugin(CameraPermissionPlugin.class);
         super.onCreate(savedInstanceState);
     }
 

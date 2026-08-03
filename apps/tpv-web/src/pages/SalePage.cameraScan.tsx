@@ -18,8 +18,20 @@
 //     disponible. iPad Safari no lo soporta, pero los Android sí.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { X, AlertCircle, ScanLine } from "lucide-react";
+import { X, AlertCircle, ScanLine, SwitchCamera } from "lucide-react";
 import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser";
+
+import { getPlatform } from "../platform/index.js";
+import { ensureCameraPermission } from "../platform/camera/CameraPermission.js";
+
+// Mensaje de permiso denegado, adaptado a la plataforma: en la app
+// Android la ruta de ajustes es distinta a la del navegador/iPad.
+function deniedMessage(): string {
+  if (getPlatform() === "android") {
+    return "Permiso de cámara denegado. Actívalo en Ajustes de Android > Aplicaciones > mipiacetpv > Permisos > Cámara.";
+  }
+  return "Permiso de cámara denegado. Habilítalo en los ajustes del navegador (Cámara) y vuelve a intentarlo.";
+}
 
 export function CameraScanModal({
   onClose,
@@ -40,6 +52,13 @@ export function CameraScanModal({
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string>("Iniciando cámara…");
   const [hint, setHint] = useState<string | null>(null);
+  // A2 · Frente 1 · selección de cámara. Por defecto la trasera
+  // ("environment"); si el terminal tiene varias, `camIndex` deja
+  // ciclarlas. Guardamos la lista en un ref (no re-render al enumerar) y
+  // exponemos sólo el contador para decidir si mostrar el botón.
+  const camerasRef = useRef<MediaDeviceInfo[]>([]);
+  const [cameraCount, setCameraCount] = useState(0);
+  const [camIndex, setCamIndex] = useState(0);
 
   const stopStream = useCallback(() => {
     if (controlsRef.current) {
@@ -100,11 +119,24 @@ export function CameraScanModal({
     const reader = new BrowserMultiFormatReader();
     (async () => {
       try {
-        // Preferimos la cámara trasera ("environment") — la frontal
-        // sería absurda para escanear un libro. Si el dispositivo
-        // sólo tiene una, el browser cae a esa.
+        // A2 · Frente 1 · en la app Android hay que asegurar el permiso
+        // NATIVO antes de abrir el stream. En navegador es no-op ("web") y
+        // el propio getUserMedia gestiona su prompt. Ver platform/camera.
+        const perm = await ensureCameraPermission();
+        if (cancelled) return;
+        if (perm === "denied") {
+          setError(deniedMessage());
+          return;
+        }
+        // Cámara elegida: si el usuario ya cicló, usamos su deviceId
+        // exacto; en el arranque (lista aún vacía) pedimos la trasera por
+        // facingMode — la frontal sería absurda para escanear un código.
+        const selected = camerasRef.current[camIndex];
+        const constraints: MediaStreamConstraints = selected?.deviceId
+          ? { video: { deviceId: { exact: selected.deviceId } } }
+          : { video: { facingMode: { ideal: "environment" } } };
         const controls = await reader.decodeFromConstraints(
-          { video: { facingMode: { ideal: "environment" } } },
+          constraints,
           videoRef.current!,
           (result) => {
             if (!result || cancelled) return;
@@ -117,13 +149,24 @@ export function CameraScanModal({
         }
         controlsRef.current = controls;
         setStatus("Apunta al código de barras");
+        // Enumeramos las cámaras UNA vez, ya con el stream abierto (antes
+        // los labels/deviceId vienen vacíos por privacidad). Sólo para
+        // decidir si ofrecer el botón "cambiar cámara".
+        if (camerasRef.current.length === 0) {
+          try {
+            const devs = await navigator.mediaDevices.enumerateDevices();
+            if (cancelled) return;
+            camerasRef.current = devs.filter((d) => d.kind === "videoinput");
+            setCameraCount(camerasRef.current.length);
+          } catch {
+            /* enumerateDevices no disponible: sin selector, sin drama. */
+          }
+        }
       } catch (err) {
         if (cancelled) return;
         const name = err instanceof Error ? err.name : "";
         if (name === "NotAllowedError" || name === "SecurityError") {
-          setError(
-            "Permiso de cámara denegado. Ajustes > Safari > Cámara para habilitar.",
-          );
+          setError(deniedMessage());
         } else if (name === "NotFoundError" || name === "OverconstrainedError") {
           setError("No se ha encontrado cámara trasera en este dispositivo.");
         } else {
@@ -137,7 +180,7 @@ export function CameraScanModal({
       cancelled = true;
       stopStream();
     };
-  }, [handleDetected, stopStream]);
+  }, [handleDetected, stopStream, camIndex]);
 
   return (
     <div className="fixed inset-0 z-[55] bg-black flex flex-col font-sans">
@@ -170,6 +213,21 @@ export function CameraScanModal({
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="w-[78%] max-w-[420px] aspect-[2/1] border-2 border-white/80 rounded-2xl shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]" />
         </div>
+        {/* A2 · Frente 1 · si el terminal tiene varias cámaras, permitir
+            elegir. El botón cicla por la lista y reinicia el lector
+            (cambia camIndex → re-corre el efecto). */}
+        {cameraCount > 1 && !error && (
+          <button
+            onClick={() =>
+              setCamIndex((i) => (i + 1) % camerasRef.current.length)
+            }
+            aria-label="Cambiar cámara"
+            className="absolute top-3 right-3 h-10 px-3 rounded-xl bg-black/55 text-white text-[13px] flex items-center gap-1.5 hover:bg-black/70"
+          >
+            <SwitchCamera className="w-4 h-4" strokeWidth={2} />
+            Cambiar cámara
+          </button>
+        )}
         <div className="absolute bottom-6 left-0 right-0 text-center text-white text-[14px] px-6">
           {error ? (
             <div className="inline-flex items-center gap-2 bg-red-600/90 px-4 py-2 rounded-xl text-[13.5px]">
