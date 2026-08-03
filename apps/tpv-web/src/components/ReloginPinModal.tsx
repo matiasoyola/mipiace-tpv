@@ -11,6 +11,7 @@ import { useState } from "react";
 import { Eye, EyeOff, Loader2, Lock } from "lucide-react";
 
 import { apiWithDevice, ApiError } from "../api.js";
+import { offlineLogin } from "../lib/offlineSession.js";
 import { cashierDisplayLabel, setCashierSession } from "../storage.js";
 
 interface ReloginResponse {
@@ -58,9 +59,22 @@ export function ReloginPinModal(props: {
       props.onDone(true);
     } catch (err) {
       setPin("");
-      setError(
-        err instanceof ApiError ? err.message : "No se pudo renovar la sesión",
-      );
+      if (err instanceof ApiError) {
+        setError(err.message);
+      } else {
+        // Sin red: verificamos el PIN en local y renovamos la sesión de
+        // cajero local para que el cajero siga operando offline (v1.10).
+        const offline = await offlineLogin(props.email, pin);
+        if (offline.ok) {
+          props.onDone(true);
+          return;
+        }
+        setError(
+          offline.reason === "rate_limited"
+            ? "Demasiados intentos. Espera unos minutos."
+            : "Sin conexión y PIN no válido en local.",
+        );
+      }
     } finally {
       setBusy(false);
     }

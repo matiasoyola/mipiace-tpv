@@ -215,4 +215,72 @@ export async function registerCashierAuthRoutes(
       });
     },
   );
+
+  // v1.10-offline-un-terminal §1: paquete offline de autenticación.
+  //
+  // Un terminal YA bootstrapeado (deviceToken válido) descarga aquí, con
+  // red, todo lo necesario para operar un turno completo sin conexión:
+  //   - roster: usuarios que pueden abrir turno en esta caja (OWNER /
+  //     MANAGER / CASHIER con pinHash != null) con su pinHash argon2id.
+  //   - config: TTL de sesión y auto-logout del tenant.
+  //   - shiftState: estado del último turno de la caja (mismo cálculo
+  //     que el login), para que el arranque offline sepa si reanudar.
+  //
+  // MODELO DE CONFIANZA (documentado en el done.md): enviamos el HASH
+  // argon2id del PIN (nunca el PIN en claro) y sólo a un device ya
+  // emparejado (requireDeviceToken). El hash es de alto coste (64 MB,
+  // t=3) — verificarlo offline es viable pero fuerza-bruteárlo desde el
+  // IndexedDB de un dispositivo robado es igual de caro que atacar la
+  // BD del servidor. El server sigue siendo la red de seguridad:
+  // idempotencia del outbox + re-login real al recuperar red para
+  // obtener el JWT que los POST necesitan.
+  app.get(
+    "/shift/offline-bundle",
+    { preHandler: requireDeviceToken },
+    async (request, reply) => {
+      const ctx = request.device!;
+      // El modo prueba (test-cashier) no tiene device físico ni roster
+      // que cachear: no aplica el paquete offline.
+      if (ctx.isTest) {
+        return reply.code(403).send({
+          error: "OFFLINE_BUNDLE_NOT_FOR_TEST",
+          message: "El paquete offline no aplica al modo prueba.",
+        });
+      }
+      const prisma = getPrisma();
+      const [tenant, users] = await Promise.all([
+        prisma.tenant.findUniqueOrThrow({
+          where: { id: ctx.tenantId },
+          select: {
+            cashierSessionTtlMinutes: true,
+            cashierAutoLogoutMinutes: true,
+          },
+        }),
+        prisma.user.findMany({
+          where: {
+            tenantId: ctx.tenantId,
+            role: { in: ["OWNER", "MANAGER", "CASHIER"] },
+            pinHash: { not: null },
+          },
+          select: { id: true, email: true, alias: true, role: true, pinHash: true },
+        }),
+      ]);
+      const shiftState = await getShiftStateForLogin(ctx.registerId);
+      return reply.code(200).send({
+        registerId: ctx.registerId,
+        config: {
+          cashierSessionTtlMinutes: tenant.cashierSessionTtlMinutes,
+          cashierAutoLogoutMinutes: tenant.cashierAutoLogoutMinutes,
+        },
+        roster: users.map((u) => ({
+          id: u.id,
+          email: u.email,
+          alias: u.alias,
+          role: u.role,
+          pinHash: u.pinHash,
+        })),
+        shiftState,
+      });
+    },
+  );
 }

@@ -10,13 +10,30 @@
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 
-import { apiWithCashier, ApiError, registerSessionExpiredHandler } from "./api.js";
+import {
+  apiWithCashier,
+  apiWithDevice,
+  ApiError,
+  registerSessionExpiredHandler,
+} from "./api.js";
 import { ReloginPinModal } from "./components/ReloginPinModal.js";
 import { TestModeBanner } from "./components/TestModeBanner.js";
 import { useDeviceBootstrap } from "./hooks/useDeviceBootstrap.js";
 import { useInactivityLogout } from "./hooks/useInactivityLogout.js";
 import { getCachedBusinessType } from "./lib/catalog.js";
-import { startOutboxSync } from "./lib/outbox.js";
+import {
+  flushOutbox,
+  registerLocalShiftLookup,
+  registerShiftResolvedCallback,
+  startOutboxSync,
+} from "./lib/outbox.js";
+import { refreshOfflineBundle } from "./lib/offlineSession.js";
+import {
+  clearLocalShift,
+  localShiftIdForOutbox,
+  mirrorServerShift,
+  resolveLocalShift,
+} from "./lib/offlineShift.js";
 import {
   mapServerDraftLines,
   tableErrorMessage,
@@ -36,7 +53,11 @@ import {
   type ApiTable,
   type MapNotice,
 } from "./pages/TableMapScreen.js";
-import { cashierDisplayLabel, clearCashierSession } from "./storage.js";
+import {
+  cashierDisplayLabel,
+  clearCashierSession,
+  setCashierSession,
+} from "./storage.js";
 
 type CashierUser = CashierLoginResponse["user"] & { sessionTtlMinutes: number };
 
@@ -63,6 +84,15 @@ export function App() {
   const { state, refresh, unpair } = useDeviceBootstrap();
   const [cashier, setCashier] = useState<CashierState>({ kind: "needsLogin" });
   const testMode = isTestModeActive();
+
+  // v1.10-offline-un-terminal: credenciales del login offline, SÓLO en
+  // memoria (nunca se persisten). Presente ⇒ la sesión se abrió sin red
+  // y todavía no hay JWT real; al volver la conexión renovamos contra el
+  // server para obtener el JWT que el outbox necesita.
+  const [offlineCreds, setOfflineCreds] = useState<{
+    email: string;
+    pin: string;
+  } | null>(null);
 
   // v1.0-pilotos · Lote 4 addendum: 401 a mitad de acción → modal de
   // re-login in situ. Mientras haya cajero logueado, apiWithCashier
@@ -127,6 +157,67 @@ export function App() {
   // v1.5-consistencia-C · reenvío del outbox offline: al arrancar, al
   // evento `online` y cada N segundos mientras haya pendientes.
   useEffect(() => startOutboxSync(), []);
+
+  // v1.10-offline-un-terminal §3: el outbox etiqueta/reescribe los items
+  // de un turno local a través de estos hooks (evita que outbox importe
+  // offlineShift → sin ciclo de dependencias).
+  useEffect(() => {
+    registerLocalShiftLookup(localShiftIdForOutbox);
+    registerShiftResolvedCallback(resolveLocalShift);
+    return () => {
+      registerLocalShiftLookup(null);
+      registerShiftResolvedCallback(null);
+    };
+  }, []);
+
+  // v1.10-offline-un-terminal §1: en cada arranque online descargamos y
+  // cacheamos el paquete offline (roster + config). Best-effort: sin red
+  // seguimos con el reflejo local anterior.
+  useEffect(() => {
+    if (testMode || state.kind !== "paired") return;
+    void refreshOfflineBundle().catch(() => {});
+  }, [testMode, state.kind]);
+
+  // v1.10-offline-un-terminal §2: al volver la red tras un login offline,
+  // renovamos contra /shift/cashier-login (con el PIN retenido en
+  // memoria) para obtener el JWT real; entonces el outbox puede subir el
+  // turno + ventas. Si la PWA se recarga antes, el PIN se pierde y el
+  // cajero vuelve a loguear online con normalidad.
+  useEffect(() => {
+    if (!offlineCreds) return;
+    let stopped = false;
+    async function renew() {
+      if (stopped || !navigator.onLine) return;
+      try {
+        const res = await apiWithDevice<CashierLoginResponse>(
+          "/shift/cashier-login",
+          { method: "POST", body: { email: offlineCreds!.email, pin: offlineCreds!.pin } },
+        );
+        setCashierSession({
+          sessionToken: res.sessionToken,
+          sessionTtlMinutes: res.sessionTtlMinutes,
+          userId: res.user.id,
+          email: res.user.email,
+          alias: res.user.alias,
+          role: res.user.role,
+        });
+        setOfflineCreds(null);
+        void flushOutbox();
+        void refreshOfflineBundle().catch(() => {});
+      } catch {
+        /* seguimos offline; reintentaremos en el próximo tick/online */
+      }
+    }
+    void renew();
+    const onOnline = () => void renew();
+    window.addEventListener("online", onOnline);
+    const timer = window.setInterval(() => void renew(), 20_000);
+    return () => {
+      stopped = true;
+      window.removeEventListener("online", onOnline);
+      window.clearInterval(timer);
+    };
+  }, [offlineCreds]);
 
   // En modo prueba, hacemos un bootstrap único contra el backend para
   // obtener user/shift/store/register sin pasar por PinScreen.
@@ -218,11 +309,29 @@ export function App() {
 
   const { register, store, tenant } = state.data;
 
+  // v1.10-offline: sincroniza el estado de turno LOCAL con lo que dice el
+  // login, y guarda las credenciales offline (si aplica) para renovar el
+  // JWT al volver la red.
+  async function handleLoggedIn(res: CashierLoginResponse) {
+    if (!res.offline) {
+      // Login online: espejamos el turno del server a local (para que un
+      // cierre posterior sin red pueda leer el fondo de caja) o limpiamos
+      // el turno local viejo si no hay ninguno abierto.
+      if (res.shiftState.kind === "reanudar") {
+        await mirrorServerShift(res.shiftState.shift).catch(() => {});
+      } else if (res.shiftState.kind === "needsShiftOpen") {
+        await clearLocalShift().catch(() => {});
+      }
+    }
+    setOfflineCreds(res.offline && res.pin ? { email: res.user.email, pin: res.pin } : null);
+    applyShiftState(res, setCashier);
+  }
+
   if (cashier.kind === "needsLogin") {
     return (
       <PinScreen
         registerName={`${register.name} · ${store.name}`}
-        onLoggedIn={(res) => onLoggedIn(res, setCashier)}
+        onLoggedIn={(res) => handleLoggedIn(res)}
         onDeviceRevoked={unpair}
       />
     );
@@ -265,7 +374,12 @@ export function App() {
           cashierLabel={cashierDisplayLabel(cashier.cashier)}
           registerName={register.name}
           storeName={store.name}
-          onOpened={(shift) => {
+          offline={offlineCreds !== null}
+          onOpened={(shift, openedOffline) => {
+            // Turno abierto con red → espejamos a local para que un cierre
+            // posterior sin red lea el fondo de caja. Offline: ShiftOpen
+            // ya creó el turno local.
+            if (!openedOffline) void mirrorServerShift(shift).catch(() => {});
             setCashier({
               kind: "active",
               cashier: cashier.cashier,
@@ -302,7 +416,7 @@ export function App() {
   );
 }
 
-function onLoggedIn(
+function applyShiftState(
   res: CashierLoginResponse,
   setCashier: (s: CashierState) => void,
 ) {

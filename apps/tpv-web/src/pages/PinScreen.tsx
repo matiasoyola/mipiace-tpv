@@ -6,6 +6,7 @@ import { AlertCircle, ChevronRight, CircleAlert, Delete, Eye, EyeOff, Loader2, P
 
 import { apiWithDevice, ApiError } from "../api.js";
 import { Logo } from "../Logo.js";
+import { offlineLogin, type OfflineShiftState } from "../lib/offlineSession.js";
 import {
   getRecentCashiers,
   rememberCashier,
@@ -40,6 +41,12 @@ interface CashierLoginResponse {
           ownedByUserId: string;
         };
       };
+  // v1.10-offline-un-terminal: cuando el login se resolvió SIN red
+  // (PIN verificado en local), no hay sessionToken. `offline: true` lo
+  // marca; `pin` viaja SÓLO en memoria para que App renueve el JWT real
+  // al volver la conexión (nunca se persiste).
+  offline?: boolean;
+  pin?: string;
 }
 
 export function PinScreen({
@@ -164,10 +171,60 @@ export function PinScreen({
         }
         setError(err.message);
       } else {
-        setError("Error inesperado");
+        // Sin red (fetch lanza TypeError, no ApiError): intentamos el
+        // login offline contra el paquete cacheado.
+        await tryOfflineLogin();
       }
     } finally {
       setBusy(false);
+    }
+  }
+
+  // v1.10-offline-un-terminal §2: verificación del PIN en local cuando
+  // no hay red. Reutiliza el mismo aviso de intentos/bloqueo que el
+  // camino online (attemptsRemaining / lockedUntilMs).
+  async function tryOfflineLogin() {
+    const res = await offlineLogin(activeEmail, pin);
+    if (res.ok) {
+      rememberCashier({
+        email: res.user.email,
+        alias: res.user.alias,
+        initials: initialsOf(res.user.alias ?? res.user.email),
+        lastSeenAt: new Date().toISOString(),
+      });
+      setAttemptsRemaining(null);
+      setLockedUntilMs(null);
+      onLoggedIn({
+        sessionToken: "",
+        sessionTtlMinutes: res.sessionTtlMinutes,
+        user: {
+          id: res.user.id,
+          email: res.user.email,
+          alias: res.user.alias,
+          role: res.user.role as "MANAGER" | "CASHIER",
+        },
+        shiftState: res.shiftState as OfflineShiftState,
+        offline: true,
+        pin,
+      });
+      return;
+    }
+    if (res.reason === "rate_limited") {
+      setLockedUntilMs(res.lockedUntilMs ?? Date.now() + 15 * 60_000);
+      setAttemptsRemaining(0);
+      setError(null);
+    } else if (res.reason === "invalid") {
+      if (typeof res.attemptsRemaining === "number") {
+        setAttemptsRemaining(res.attemptsRemaining);
+        setError(null);
+      } else {
+        setError("Email o PIN incorrectos");
+      }
+    } else {
+      // no_bundle: nunca se hizo un arranque online con este cajero.
+      setError(
+        "Sin conexión y sin datos guardados para operar offline. Conéctate una vez para habilitar el modo sin conexión.",
+      );
     }
   }
 
