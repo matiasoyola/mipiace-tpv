@@ -183,6 +183,16 @@ enum ShiftCashCountKind {
   Z
 }
 
+// B-koibox-1 (CRM) · tipo de consentimiento RGPD registrado en la ficha
+// del cliente. DATA = tratamiento de datos personales; TREATMENT =
+// consentimiento del tratamiento/servicio (fórmulas de color, parámetros
+// de clínica…). Sólo campos + alta manual en B1; la firma digital es
+// fase 2 (fuera de alcance).
+enum ClientConsentKind {
+  DATA
+  TREATMENT
+}
+
 // v1.3-Thalia Lote 3 · intent de impresión persistido. Hasta este
 // lote el TPV sólo tenía `Ticket.printIntent: Boolean` (intención del
 // primer cobro). Ahora hace falta crear un intent por cada reimpresión
@@ -296,6 +306,13 @@ model Tenant {
   // para no asumir hostelería en tenants nuevos (el piloto inicial es
   // librería). Editable desde la consola super-admin.
   businessType                   BusinessType      @default(RETAIL) @map("business_type")
+  // B-koibox-1 (CRM) · capability flag de la ficha de cliente / CRM
+  // (ADR-K6). OFF por defecto: la sección "Clientes" del TPV y sus
+  // endpoints sólo se activan cuando el tenant lo enciende. Independiente
+  // del businessType — un RETAIL o SERVICES puede encenderlo; Thalia lo
+  // deja apagado. Los futuros flags del módulo (bonos, reservaOnline) se
+  // añadirán como columnas hermanas cuando lleguen B5/B6.
+  crmEnabled                     Boolean           @default(false) @map("crm_enabled")
   // v1.3-Thalia Lote 6 · pie de ticket personalizado. NULL = no se
   // pinta nada extra (comportamiento previo). Si está set, el renderer
   // del ticket lo pinta arriba del QR/CIF tras el "Gracias por tu
@@ -311,22 +328,23 @@ model Tenant {
   createdAt                      DateTime          @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt                      DateTime          @updatedAt @map("updated_at") @db.Timestamptz()
 
-  users          User[]
-  stores         Store[]
-  devices        Device[]
-  pairingCodes   PairingCode[]
-  products       Product[]
-  contacts       Contact[]
-  warehouses     Warehouse[]
-  taxes          TenantTax[]
-  tickets        Ticket[]
-  refunds        Refund[]
-  syncOutbox     SyncOutbox[]
-  holdedUploads  HoldedUpload[]
-  modifierGroups ModifierGroup[]
-  tagAliases     TagAlias[]
-  tagSections    TagSection[]
+  users              User[]
+  stores             Store[]
+  devices            Device[]
+  pairingCodes       PairingCode[]
+  products           Product[]
+  contacts           Contact[]
+  warehouses         Warehouse[]
+  taxes              TenantTax[]
+  tickets            Ticket[]
+  refunds            Refund[]
+  syncOutbox         SyncOutbox[]
+  holdedUploads      HoldedUpload[]
+  modifierGroups     ModifierGroup[]
+  tagAliases         TagAlias[]
+  tagSections        TagSection[]
   reconciliationRuns ReconciliationRun[]
+  clients            Client[]
 
   // v1.3-SuperAdmin-Hub Lote 3 · el backfill y el hub buscan/listan
   // tenants por `holded_account_id`. Sin índice eran scans completos
@@ -571,27 +589,27 @@ model Register {
 // varias: típico HOSPITALITY → BARRA + COCINA + caja; típico SERVICES
 // → un único PrinterConfig USB sin sección.
 model PrinterConfig {
-  id           String      @id @default(uuid()) @db.Uuid
-  registerId   String      @map("register_id") @db.Uuid
+  id            String          @id @default(uuid()) @db.Uuid
+  registerId    String          @map("register_id") @db.Uuid
   // Etiqueta para el implantador: "Ticket caja", "Comanda BARRA", etc.
-  name         String
-  mode         PrinterMode
+  name          String
+  mode          PrinterMode
   // WIFI only:
-  ipAddress    String?     @map("ip_address")
-  port         Int?        @default(9100)
+  ipAddress     String?         @map("ip_address")
+  port          Int?            @default(9100)
   // Si WIFI: timeout TCP en ms. Default 5s.
-  timeoutMs    Int         @default(5000) @map("timeout_ms")
+  timeoutMs     Int             @default(5000) @map("timeout_ms")
   // Sección lógica para comanderas. NULL = impresora de ticket de
   // cobro (no comandera, no se filtra por sección).
-  section      KitchenSection?
+  section       KitchenSection?
   // Si false, no se intenta imprimir (mantenimiento sin borrar).
-  active       Boolean     @default(true)
+  active        Boolean         @default(true)
   // Última vez que imprimió OK. Útil para "impresora silenciosa hace 3d".
-  lastPrintOkAt DateTime?  @map("last_print_ok_at") @db.Timestamptz()
+  lastPrintOkAt DateTime?       @map("last_print_ok_at") @db.Timestamptz()
   // Último error registrado. NULL si último intento OK.
-  lastErrorAt   DateTime?  @map("last_error_at") @db.Timestamptz()
-  lastErrorMsg  String?    @map("last_error_msg")
-  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz()
+  lastErrorAt   DateTime?       @map("last_error_at") @db.Timestamptz()
+  lastErrorMsg  String?         @map("last_error_msg")
+  createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz()
 
   register Register @relation(fields: [registerId], references: [id], onDelete: Cascade)
 
@@ -659,62 +677,62 @@ model PairingCode {
 // ── Catálogo (cache local de Holded) ──────────────────────────────────
 
 model Product {
-  id                String      @id @default(uuid()) @db.Uuid
-  tenantId          String      @map("tenant_id") @db.Uuid
-  holdedProductId   String      @map("holded_product_id")
-  name              String
-  sku               String?
-  barcode           String?
-  basePrice         Decimal     @map("base_price") @db.Decimal(12, 4)
-  taxRate           Decimal     @map("tax_rate") @db.Decimal(5, 2)
-  kind              ProductKind @default(PRODUCT)
-  active            Boolean     @default(true)
+  id                   String      @id @default(uuid()) @db.Uuid
+  tenantId             String      @map("tenant_id") @db.Uuid
+  holdedProductId      String      @map("holded_product_id")
+  name                 String
+  sku                  String?
+  barcode              String?
+  basePrice            Decimal     @map("base_price") @db.Decimal(12, 4)
+  taxRate              Decimal     @map("tax_rate") @db.Decimal(5, 2)
+  kind                 ProductKind @default(PRODUCT)
+  active               Boolean     @default(true)
   // True si el SKU lo asignó el script auto-SKU (patrón AUTO-<8>).
   // Permite distinguirlos del SKU manual del propietario.
-  skuAutoAssignedAt DateTime?   @map("sku_auto_assigned_at") @db.Timestamptz()
+  skuAutoAssignedAt    DateTime?   @map("sku_auto_assigned_at") @db.Timestamptz()
   // True si el auto-SKU envió el PUT pero el GET-back demostró que
   // Holded silenció el cambio (ADR-010). Sale en la bandeja de
   // revisión del admin. El producto NO es vendible hasta resolverlo.
-  needsSkuReview    Boolean     @default(false) @map("needs_sku_review")
+  needsSkuReview       Boolean     @default(false) @map("needs_sku_review")
   // Contador de intentos de asignar SKU vía la bandeja (POST
   // /catalog/sku-review/:id/assign). Se incrementa tanto en éxito como
   // en silent reject — sirve para mostrar el contador "ha fallado N
   // veces" en el admin y para escalar a soporte (badge ámbar ≥3).
-  skuReviewAttempts Int         @default(0) @map("sku_review_attempts")
+  skuReviewAttempts    Int         @default(0) @map("sku_review_attempts")
   // True si el TPV puede vender este ítem (sku no vacío y bajos
   // demás filtros). Spike §07.B: producto sin sku → línea inválida.
-  sellableViaTpv    Boolean     @default(true) @map("sellable_via_tpv")
+  sellableViaTpv       Boolean     @default(true) @map("sellable_via_tpv")
   // B-ProductImages: URL canónica de la imagen del producto tal como la
   // expone Holded (campo identificado en spike §13). NULL si el producto
   // no tiene imagen en Holded → el TPV cae al placeholder embebido. El
   // worker `image-cache-worker` descarga la imagen y la sirve cacheada
   // desde Caddy en `/product-images/<tenantId>/<productId>.<ext>`.
-  imageUrl          String?     @map("image_url")
+  imageUrl             String?     @map("image_url")
   // MIME del binario una vez descargado y validado por el worker
   // (`image/jpeg`, `image/png`, `image/webp`). NULL hasta que el worker
   // confirme una descarga válida; el TPV usa este campo como gate para
   // renderizar `<img>` vs. placeholder.
-  imageMime         String?     @map("image_mime")
+  imageMime            String?     @map("image_mime")
   // Cuándo el worker guardó por última vez el archivo en disco. Si la
   // URL cambia en un sync (Holded la rota), el sync pone `imageCachedAt
   // = null` para forzar re-descarga; el worker la detecta como pendiente.
-  imageCachedAt     DateTime?   @map("image_cached_at") @db.Timestamptz()
+  imageCachedAt        DateTime?   @map("image_cached_at") @db.Timestamptz()
   // B-Categorias-via-Tags: tags libres que el propietario asigna a
   // sus productos en Holded (campo `tags: string[]` en el payload de
   // /products). El TPV los usa como pseudo-categorías para construir
   // los chips de filtro arriba de la grid de productos. Si Holded no
   // envía tags, queda como array vacío. Tiene índice GIN
   // (products_tags_idx) para futuros filtros server-side @> y &&.
-  tags              String[]    @default([])
+  tags                 String[]    @default([])
   // v1.9-sync-borrados: cuándo la conciliación (o un 404 de detalle)
   // detectó que la ficha ya no existe en Holded y la soft-archivó
   // (active=false + sellableViaTpv=false). Distingue "borrado en
   // Holded" de otras causas de inactividad (forSale=0, tax sin
   // resolver). NULL mientras el producto viva en Holded; el upsert
   // del sync lo limpia si la ficha reaparece (des-archivado).
-  archivedFromHoldedAt DateTime? @map("archived_from_holded_at") @db.Timestamptz()
-  lastSyncedAt      DateTime    @default(now()) @map("last_synced_at") @db.Timestamptz()
-  raw               Json?
+  archivedFromHoldedAt DateTime?   @map("archived_from_holded_at") @db.Timestamptz()
+  lastSyncedAt         DateTime    @default(now()) @map("last_synced_at") @db.Timestamptz()
+  raw                  Json?
 
   tenant         Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   variants       ProductVariant[]
@@ -764,9 +782,9 @@ model Warehouse {
 // encuentra resultados, llama a Holded en vivo y upserta. El endpoint
 // `POST /contacts` crea contacto on-the-fly desde el TPV con GET-back.
 model Contact {
-  id               String    @id @default(uuid()) @db.Uuid
-  tenantId         String    @map("tenant_id") @db.Uuid
-  holdedContactId  String    @map("holded_contact_id")
+  id               String       @id @default(uuid()) @db.Uuid
+  tenantId         String       @map("tenant_id") @db.Uuid
+  holdedContactId  String       @map("holded_contact_id")
   name             String
   nif              String?
   email            String?
@@ -777,15 +795,15 @@ model Contact {
   // buscador del TPV liste sólo clientes y no proveedores. Nullable
   // mientras el backfill no ha corrido sobre los Contact preexistentes
   // a la migración b29; tras el backfill todos quedan poblados.
-  type             ContactType?  @map("type")
+  type             ContactType? @map("type")
   // Si false, el contacto fue marcado como huérfano en el último sync
   // incremental (B7 §8): ya no existe en Holded. Lo conservamos por si
   // hay tickets históricos que apuntan a él. La UI del TPV lo oculta.
-  active           Boolean   @default(true)
+  active           Boolean      @default(true)
   // Marca temporal del último sync que vio este contacto en Holded.
   // El cron incremental marca `active=false` cuando NOT seen >24h.
-  lastSeenInSyncAt DateTime? @map("last_seen_in_sync_at") @db.Timestamptz()
-  lastSyncedAt     DateTime  @default(now()) @map("last_synced_at") @db.Timestamptz()
+  lastSeenInSyncAt DateTime?    @map("last_seen_in_sync_at") @db.Timestamptz()
+  lastSyncedAt     DateTime     @default(now()) @map("last_synced_at") @db.Timestamptz()
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -836,17 +854,17 @@ model Shift {
 // usa strings como llave ("500", "0.01") por compatibilidad JSON; el
 // backend interpreta cada llave como euros.
 model ShiftCashCount {
-  id            String             @id @default(uuid()) @db.Uuid
-  shiftId       String             @map("shift_id") @db.Uuid
-  shift         Shift              @relation(fields: [shiftId], references: [id], onDelete: Cascade)
-  kind          ShiftCashCountKind
+  id              String             @id @default(uuid()) @db.Uuid
+  shiftId         String             @map("shift_id") @db.Uuid
+  shift           Shift              @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  kind            ShiftCashCountKind
   // {"500":0,"200":0,...,"0.01":5} — el server vuelve a calcular el total.
-  denominations Json
-  cashTotal     Decimal            @map("cash_total") @db.Decimal(12, 4)
+  denominations   Json
+  cashTotal       Decimal            @map("cash_total") @db.Decimal(12, 4)
   // Quién hizo el arqueo. Distinto al `userId` del shift cuando un
   // encargado pasa por la caja a hacer un X de control.
-  createdByUserId String           @map("created_by_user_id") @db.Uuid
-  createdAt     DateTime           @default(now()) @map("created_at") @db.Timestamptz()
+  createdByUserId String             @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime           @default(now()) @map("created_at") @db.Timestamptz()
 
   @@index([shiftId, createdAt])
   @@map("shift_cash_counts")
@@ -944,10 +962,10 @@ model Ticket {
   syncedAt             DateTime?    @map("synced_at") @db.Timestamptz()
   syncError            Json?        @map("sync_error")
 
-  tenant          Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  register        Register                @relation(fields: [registerId], references: [id], onDelete: Restrict)
-  shift           Shift                   @relation(fields: [shiftId], references: [id], onDelete: Restrict)
-  user            User                    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  tenant          Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  register        Register               @relation(fields: [registerId], references: [id], onDelete: Restrict)
+  shift           Shift                  @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  user            User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
   lines           TicketLine[]
   payments        TicketPayment[]
   partialPayments TicketPartialPayment[]
@@ -972,24 +990,24 @@ model Ticket {
 }
 
 model TicketLine {
-  id              String  @id @default(uuid()) @db.Uuid
-  ticketId        String  @map("ticket_id") @db.Uuid
-  productId       String? @map("product_id") @db.Uuid
-  variantId       String? @map("variant_id") @db.Uuid
+  id                String   @id @default(uuid()) @db.Uuid
+  ticketId          String   @map("ticket_id") @db.Uuid
+  productId         String?  @map("product_id") @db.Uuid
+  variantId         String?  @map("variant_id") @db.Uuid
   // Snapshot del `holdedProductId` del catálogo en el momento del cobro.
   // El worker NO toca `Product` para construir el payload: lee el
   // snapshot de aquí, así si Holded ha borrado el producto entre cobro
   // y envío al menos sabemos qué intentó vender. Nullable para líneas
   // libres (TPV-OTROS-*).
-  holdedProductId String? @map("holded_product_id")
+  holdedProductId   String?  @map("holded_product_id")
   // SKU canónico que se envía a Holded en el item. Spike §05.B: es la
   // llave de resolución del producto. NUNCA enviar productId aquí.
-  sku             String
+  sku               String
   // Copia del nombre en el momento del cobro: cambiar el producto en
   // Holded no debe alterar tickets históricos.
-  nameSnapshot    String  @map("name_snapshot")
-  units           Decimal @db.Decimal(10, 3)
-  unitPrice       Decimal @map("unit_price") @db.Decimal(12, 4)
+  nameSnapshot      String   @map("name_snapshot")
+  units             Decimal  @db.Decimal(10, 3)
+  unitPrice         Decimal  @map("unit_price") @db.Decimal(12, 4)
   // v1.2-Lite Lote 4.B · T-5: si el cajero modifica el precio puntualmente
   // (libro descatalogado, ajuste rápido) se guarda aquí. NULL = sin
   // override, se cobra el `unitPrice` base. Cuando hay override, los
@@ -998,10 +1016,10 @@ model TicketLine {
   // "modificado de X€ a Y€". Holded recibe el override (acepta precios
   // unitarios distintos del producto base).
   unitPriceOverride Decimal? @map("unit_price_override") @db.Decimal(12, 4)
-  discountPct     Decimal @default(0) @map("discount_pct") @db.Decimal(5, 2)
-  taxRate         Decimal @map("tax_rate") @db.Decimal(5, 2)
-  subtotal        Decimal @db.Decimal(12, 4)
-  total           Decimal @db.Decimal(12, 4)
+  discountPct       Decimal  @default(0) @map("discount_pct") @db.Decimal(5, 2)
+  taxRate           Decimal  @map("tax_rate") @db.Decimal(5, 2)
+  subtotal          Decimal  @db.Decimal(12, 4)
+  total             Decimal  @db.Decimal(12, 4)
   // Snapshot inmutable de modificadores aplicados al cobrar
   // (B-Bar-Modifiers). Dos shapes históricos soportados por el
   // renderer del TPV — ambos viven en este Json?:
@@ -1021,11 +1039,11 @@ model TicketLine {
   // antes de persistir — `unitPrice` no se modifica, los deltas viven
   // sólo en este snapshot. Lo que se envía a Holded es el precio
   // rolled-up + el desglose textual en `description`/`notes` del item.
-  modifiers       Json?
+  modifiers         Json?
   // Si esta línea proviene de otra mesa (mover líneas o agrupar),
   // queda registrado el origen. Permite desagrupar reversiblemente
   // (B7 §5.3).
-  originalTableId String? @map("original_table_id") @db.Uuid
+  originalTableId   String?  @map("original_table_id") @db.Uuid
 
   ticket      Ticket          @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   product     Product?        @relation(fields: [productId], references: [id])
@@ -1037,17 +1055,17 @@ model TicketLine {
 }
 
 model TicketPayment {
-  id       String        @id @default(uuid()) @db.Uuid
-  ticketId String        @map("ticket_id") @db.Uuid
-  method   PaymentMethod
-  amount   Decimal       @db.Decimal(12, 4)
-  meta     Json?
+  id                 String        @id @default(uuid()) @db.Uuid
+  ticketId           String        @map("ticket_id") @db.Uuid
+  method             PaymentMethod
+  amount             Decimal       @db.Decimal(12, 4)
+  meta               Json?
   // v1.8-Fiado · idempotencia del cobro de deuda (patrón outbox). El
   // front genera un UUID v4 por cobro; el POST /credit-payments lo
   // persiste aquí (UNIQUE global). Un reintento de red con el mismo
   // valor devuelve el estado actual en vez de duplicar el cobro. NULL
   // en los pagos de una venta normal (no lo necesitan).
-  externalId String?     @unique @map("external_id") @db.Uuid
+  externalId         String?       @unique @map("external_id") @db.Uuid
   // v1.8-Fiado · turno en el que se COBRÓ este pago. Sólo se rellena en
   // los cobros de deuda (POST /credit-payments): un fiado se vende en el
   // turno del día 1 pero se cobra en el turno del día N, y el arqueo Z
@@ -1055,7 +1073,7 @@ model TicketPayment {
   // normal → el arqueo los imputa por `ticket.shiftId` como siempre.
   // Escalar sin relación Prisma a propósito (evita back-relation ruidosa
   // en Shift); integridad no crítica (los turnos no se borran).
-  collectedInShiftId String? @map("collected_in_shift_id") @db.Uuid
+  collectedInShiftId String?       @map("collected_in_shift_id") @db.Uuid
 
   ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
@@ -1077,19 +1095,19 @@ model TicketPayment {
 // (Holded recibe 1 salesreceipt con N payments), así los partials
 // se acumulan en este modelo sin tocar el flujo de sync existente.
 model TicketPartialPayment {
-  id        String        @id @default(uuid()) @db.Uuid
-  ticketId  String        @map("ticket_id") @db.Uuid
-  amount    Decimal       @db.Decimal(12, 4)
-  method    PaymentMethod
+  id         String        @id @default(uuid()) @db.Uuid
+  ticketId   String        @map("ticket_id") @db.Uuid
+  amount     Decimal       @db.Decimal(12, 4)
+  method     PaymentMethod
   // Cajero que tomó el cobro parcial. Nullable porque puede
   // haberse eliminado el user (poco probable en piloto).
-  cashierId String?       @map("cashier_id") @db.Uuid
+  cashierId  String?       @map("cashier_id") @db.Uuid
   // Importe efectivo recibido cuando el método es CASH — para
   // mostrar cambio en el TPV. Nullable en CARD/BIZUM.
-  cashAmount Decimal?     @map("cash_amount") @db.Decimal(12, 4)
+  cashAmount Decimal?      @map("cash_amount") @db.Decimal(12, 4)
   // Metadata libre del pago (refMov BIZUM, last4 tarjeta, …).
-  meta      Json?
-  paidAt    DateTime      @default(now()) @map("paid_at") @db.Timestamptz()
+  meta       Json?
+  paidAt     DateTime      @default(now()) @map("paid_at") @db.Timestamptz()
 
   ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
@@ -1274,20 +1292,20 @@ model PasswordResetToken {
 // description del item — Holded sólo ve el precio total y la nota.
 
 model ModifierGroup {
-  id        String   @id @default(uuid()) @db.Uuid
-  tenantId  String   @map("tenant_id") @db.Uuid
-  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id        String    @id @default(uuid()) @db.Uuid
+  tenantId  String    @map("tenant_id") @db.Uuid
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   // Nombre del grupo visible al cajero ("Tipo de leche", "Tamaño").
   name      String
   // Si true, sólo se puede seleccionar 1 modifier del grupo (radio).
   // Si false, se pueden seleccionar varios (checkbox). Default true.
-  exclusive Boolean  @default(true)
+  exclusive Boolean   @default(true)
   // Si true, es obligatorio seleccionar al menos un modifier antes
   // de añadir la línea. Útil para "Tamaño" donde no hay default.
-  required  Boolean  @default(false)
+  required  Boolean   @default(false)
   // Orden de presentación en el modal del TPV (asc).
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  sortOrder Int       @default(0) @map("sort_order")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   // Soft-delete para preservar histórico de TicketLine.modifiers que
   // referencian este groupId tras quitar la variante del menú.
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz()
@@ -1348,40 +1366,40 @@ model ProductModifierGroup {
 // invitar nuevos super-admins. Decisión defensiva.
 
 model SuperAdminUser {
-  id              String    @id @default(uuid()) @db.Uuid
-  email           String    @unique
+  id                 String    @id @default(uuid()) @db.Uuid
+  email              String    @unique
   // B-Multi-Vertical SB4: nombre legible mostrado en el panel de
   // gestión multi-admin. Nullable porque el super-admin original
   // (Matías, creado vía CLI seed) no tenía nombre — backfill rellena
   // con split_part(email, '@', 1).
-  name            String?   @db.VarChar(100)
-  passwordHash    String    @map("password_hash")
+  name               String?   @db.VarChar(100)
+  passwordHash       String    @map("password_hash")
   // Igual que User.tokenVersion: logout-everywhere lo bumpea, los
   // refresh tokens viejos pasan a ser inválidos sin tabla blacklist.
-  tokenVersion    Int       @default(0) @map("token_version")
+  tokenVersion       Int       @default(0) @map("token_version")
   // 2FA TOTP. Mismo patrón cifrado AES-GCM (`v1:`) que User.
-  totpSecret      String?   @map("totp_secret")
-  totpEnabledAt   DateTime? @map("totp_enabled_at") @db.Timestamptz()
+  totpSecret         String?   @map("totp_secret")
+  totpEnabledAt      DateTime? @map("totp_enabled_at") @db.Timestamptz()
   // Array de `{ hash, usedAt }` (mismo shape que User.twoFactorRecoveryCodes).
-  recoveryCodes   Json?     @map("recovery_codes")
-  lastLoginAt     DateTime? @map("last_login_at") @db.Timestamptz()
+  recoveryCodes      Json?     @map("recovery_codes")
+  lastLoginAt        DateTime? @map("last_login_at") @db.Timestamptz()
   // B-Multi-Vertical SB4: super-admin invitado por otro super-admin
   // empieza con password temporal. true → al primer login el front le
   // pide cambiarla. Se pone false en cuanto se cambia.
-  mustChangePassword Boolean @default(false) @map("must_change_password")
+  mustChangePassword Boolean   @default(false) @map("must_change_password")
   // Lote 3 v1.1 Thalia: sólo el "root" puede invitar/eliminar a otros
   // super-admins. El resto opera tenants y nada más. El middleware
   // requireRootSuperAdmin re-lee este flag de BD en cada request — el
   // claim JWT NO es autoritativo (revoca-root tras emisión de token
   // funciona en la siguiente request).
-  isRoot          Boolean   @default(false) @map("is_root")
+  isRoot             Boolean   @default(false) @map("is_root")
   // B-Multi-Vertical SB4: soft-delete. Preservamos el row para que la
   // tabla `super_admin_audits` (que tiene FK Restrict sobre este
   // modelo) mantenga el histórico aunque se "borre" al super-admin.
   // El listado y la auth filtran por deletedAt IS NULL.
-  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz()
-  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz()
-  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
+  deletedAt          DateTime? @map("deleted_at") @db.Timestamptz()
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
 
   audits SuperAdminAudit[]
 
@@ -1438,4 +1456,91 @@ model SuperAdminAudit {
   @@index([tenantId, createdAt])
   @@index([action, createdAt])
   @@map("super_admin_audits")
+}
+
+// ── CRM / ficha de cliente (B-koibox-1) ───────────────────────────────
+//
+// Capa LOCAL, fuente de verdad propia (ADR-K2). El contacto de Holded se
+// usa sólo para lo fiscal, enlazado perezosamente por `holdedContactId`
+// (nullable) — al crear/editar un cliente NO se crea contacto en Holded;
+// ese enlace lo rellena el camino de cobro existente cuando hace falta
+// factura. No se vuelca historial / ficha técnica / RGPD a Holded.
+//
+// El cliente es único y compartido entre agenda (B4), TPV (carrito) y
+// bonos (B5). Todo lleva `tenantId` con índice (aislamiento por fila).
+
+model Client {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  // UUID v4 generado en el front al dar de alta. Llave de idempotencia
+  // para el alta offline que pasa por el outbox (mismo patrón que
+  // Ticket.externalId): un reintento del POST /clients con el mismo
+  // valor devuelve el cliente ya creado en vez de duplicarlo. Nullable
+  // por si el alta se hace server-side sin pasar por la cola.
+  externalId      String?   @unique @map("external_id") @db.Uuid
+  firstName       String    @map("first_name")
+  lastName        String    @map("last_name")
+  phone           String?
+  email           String?
+  birthdate       DateTime? @db.Date
+  // Enlace fiscal perezoso al contacto de Holded (ADR-K2). NULL hasta
+  // que el camino de cobro lo rellena al necesitar factura. Aquí sólo se
+  // persiste el id; el CRM nunca crea el contacto en Holded.
+  holdedContactId String?   @map("holded_contact_id")
+  marketingOptIn  Boolean   @default(false) @map("marketing_opt_in")
+  notes           String?
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant         Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  consents       ClientConsent[]
+  technicalNotes ClientTechnicalNote[]
+
+  // Búsqueda por teléfono/email y orden alfabético (A–Z) por tenant.
+  @@index([tenantId, phone])
+  @@index([tenantId, email])
+  @@index([tenantId, lastName, firstName])
+  @@index([tenantId, holdedContactId])
+  @@map("clients")
+}
+
+// Consentimientos RGPD del cliente (B1: campos + alta manual; la firma
+// digital es fase 2, fuera de alcance). `tenantId` redundante con el del
+// cliente pero presente por la regla de aislamiento por fila.
+model ClientConsent {
+  id        String            @id @default(uuid()) @db.Uuid
+  tenantId  String            @map("tenant_id") @db.Uuid
+  clientId  String            @map("client_id") @db.Uuid
+  kind      ClientConsentKind
+  grantedAt DateTime          @default(now()) @map("granted_at") @db.Timestamptz()
+  // Referencia opcional al documento firmado (URL / id externo). La
+  // firma digital en sí es fase 2.
+  docRef    String?           @map("doc_ref")
+  createdAt DateTime          @default(now()) @map("created_at") @db.Timestamptz()
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, clientId])
+  @@map("client_consents")
+}
+
+// Ficha técnica mínima: notas por servicio. Vale igual para peluquería
+// (fórmula de color) que para clínica (parámetros de tratamiento). El
+// `serviceId` es el id de servicio de Holded — NO una FK dura (el
+// catálogo es espejo, no se acopla). `createdByUserId` guarda el autor
+// como Uuid plano (auditoría) sin relación dura para no acoplar a User.
+model ClientTechnicalNote {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  clientId        String   @map("client_id") @db.Uuid
+  serviceId       String?  @map("service_id")
+  body            String
+  createdByUserId String   @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, clientId])
+  @@index([clientId, serviceId])
+  @@map("client_technical_notes")
 }

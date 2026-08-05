@@ -19,6 +19,7 @@ import { registerCashiersRoutes } from "./cashiers/routes.js";
 import { registerCatalogRoutes } from "./catalog/routes.js";
 import { registerContactsRoutes } from "./contacts/routes.js";
 import { registerContactImportRoutes } from "./contacts/import.js";
+import { registerCrmRoutes } from "./crm/routes.js";
 import { getPrisma, getRedis, shutdown } from "./context.js";
 import { registerDeviceRoutes } from "./devices/routes.js";
 import { loadEnv } from "./env.js";
@@ -150,6 +151,7 @@ async function main() {
   await registerCatalogRoutes(app);
   await registerContactsRoutes(app);
   await registerContactImportRoutes(app);
+  await registerCrmRoutes(app);
   await registerDeviceRoutes(app);
   await registerCashiersRoutes(app);
   await registerCashierAuthRoutes(app);

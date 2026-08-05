@@ -44,6 +44,7 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
               businessType: true,
               tpvIconPreset: true,
               creditSalesEnabled: true,
+              crmEnabled: true,
             },
           });
       // v1.3-Operativa-Extra · Lote 1: mapa slug→label editable desde el
@@ -126,6 +127,10 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
               // v1.8-Fiado · el TPV cachea el flag para mostrar el botón
               // "Fiado" en checkout y la entrada a la pantalla Deudas.
               creditSalesEnabled: tenant.creditSalesEnabled,
+              // B-koibox-1 (CRM) · capability flag de la sección Clientes.
+              // El TPV lo cachea para mostrar/ocultar la ficha de cliente
+              // y el atajo F1 (ADR-K6).
+              crmEnabled: tenant.crmEnabled,
               // v1.3-Operativa-Extra · Lote 1: alias editable de tags
               // (`slug` tal como llega de Holded en lowercase → `label`
               // a pintar en el chip).

@@ -34,6 +34,7 @@ import {
   Sparkles,
   Star,
   Stethoscope,
+  Users,
   Wifi,
   WifiOff,
   Wrench,
@@ -56,6 +57,7 @@ import {
   fuzzySearch,
   getCachedBusinessType,
   getCachedCreditSalesEnabled,
+  getCachedCrmEnabled,
   getCachedIconPreset,
   getCachedTagAliases,
   getCachedTenantId,
@@ -86,6 +88,9 @@ import {
 import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
 import type { MapNotice } from "./TableMapScreen.js";
 import { DebtsScreen } from "./DebtsScreen.js";
+import { ClientsPage } from "./ClientsPage.js";
+import { useClientPicker } from "../hooks/useClientPicker.js";
+import { clientFullName } from "../lib/clients.js";
 import { useElapsedTime } from "../hooks/useElapsedTime.js";
 import { useStoreEventStream } from "../hooks/useStoreEventStream.js";
 import type { ModifierSelection } from "../lib/cart.js";
@@ -263,6 +268,14 @@ export function SalePage(props: SalePageProps) {
   // v1.8-Fiado · pantalla Deudas + flag de venta a crédito del tenant.
   const [showDebts, setShowDebts] = useState(false);
   const creditSalesEnabled = getCachedCreditSalesEnabled();
+  // B-koibox-1 · sección Clientes (CRM) + picker rápido F1. Sólo con la
+  // capability activa (ADR-K6).
+  const crmEnabled = getCachedCrmEnabled();
+  const [showClients, setShowClients] = useState(false);
+  const clientPicker = useClientPicker();
+  // Aviso transitorio cuando el cliente elegido por F1 aún no tiene
+  // contacto fiscal de Holded (el enlace lo hace el cobro).
+  const [clientPickNote, setClientPickNote] = useState<string | null>(null);
   // v1.3 Lote 5 · modal cámara para escanear barcode. Sólo se monta
   // tras pulsar el botón porque la inicialización pide permiso de
   // cámara y abre el LED del iPad — no queremos esto al cargar la
@@ -542,6 +555,39 @@ export function SalePage(props: SalePageProps) {
   }
   const [contact, setContact] = useState<ContactRef | null>(null);
   const [notes, setNotes] = useState<string>("");
+
+  // B-koibox-1 · atajo F1 → picker de cliente del CRM. Al elegir un
+  // cliente con contacto fiscal de Holded enlazado, se asigna al ticket
+  // por el camino existente (contactHoldedId, intacto). Si aún no tiene
+  // enlace fiscal, se avisa: el enlace lo crea el cobro cuando haga falta
+  // factura (ADR-K2). Sólo activo si la capability CRM está encendida.
+  useEffect(() => {
+    if (!crmEnabled) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "F1") return;
+      e.preventDefault();
+      if (clientPicker.isOpen) return;
+      clientPicker.open((client) => {
+        if (client.holdedContactId) {
+          setContact({
+            id: client.id,
+            holdedContactId: client.holdedContactId,
+            name: clientFullName(client),
+            email: client.email,
+            phone: client.phone,
+            nif: null,
+          });
+        } else {
+          setClientPickNote(
+            `${clientFullName(client)} se enlazará a la factura al cobrar.`,
+          );
+          window.setTimeout(() => setClientPickNote(null), 4000);
+        }
+      });
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [crmEnabled, clientPicker]);
 
   const [query, setQuery] = useState("");
   const [openSheet, setOpenSheet] = useState<
@@ -1419,6 +1465,18 @@ export function SalePage(props: SalePageProps) {
                   <span>Deudas</span>
                 </button>
               )}
+              {/* B-koibox-1 · sección Clientes (CRM). Sólo con la
+                  capability activa del tenant (ADR-K6). */}
+              {crmEnabled && (
+                <button
+                  onClick={() => setShowClients(true)}
+                  title="Clientes (F1)"
+                  className="h-12 md:h-14 px-3 md:px-5 rounded-2xl bg-mipiace-stone hover:bg-slate-100 flex items-center gap-2 text-[13.5px] md:text-[14px] font-medium text-mipiace-ink"
+                >
+                  <Users className="w-[18px] h-[18px] lg:hidden" strokeWidth={2.25} />
+                  <span className="hidden sm:inline">Clientes</span>
+                </button>
+              )}
               {/* v1.0-mesas-frontend: en contexto mesa no hay carritos
                   suspendidos (la mesa abierta YA es la venta en pausa)
                   ni "Nueva venta" (vaciaría la proyección de un DRAFT
@@ -1715,6 +1773,14 @@ export function SalePage(props: SalePageProps) {
           storeName={props.storeName}
           onClose={() => setShowDebts(false)}
         />
+      )}
+      {/* B-koibox-1 · sección Clientes (CRM) + picker rápido F1. */}
+      {showClients && <ClientsPage onClose={() => setShowClients(false)} />}
+      {clientPicker.element}
+      {clientPickNote && (
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[60] bg-mipiace-ink text-white text-[13px] px-4 py-2.5 rounded-2xl shadow-lg max-w-[90vw] text-center">
+          {clientPickNote}
+        </div>
       )}
       {kitchenToast && (
         <KitchenToast

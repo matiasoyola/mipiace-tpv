@@ -50,6 +50,9 @@ const TAG_ALIASES_KEY = "mipiacetpv-catalog-tag-aliases";
 // v1.8-Fiado · flag de venta a crédito del tenant. El TPV lo cachea para
 // mostrar el botón "Fiado" en checkout y la entrada a la pantalla Deudas.
 const CREDIT_SALES_KEY = "mipiacetpv-catalog-credit-sales";
+// B-koibox-1 · capability flag del CRM / ficha de cliente (ADR-K6). El
+// TPV lo cachea para mostrar/ocultar la sección Clientes y el atajo F1.
+const CRM_ENABLED_KEY = "mipiacetpv-catalog-crm-enabled";
 
 export type BusinessType = "HOSPITALITY" | "RETAIL" | "SERVICES";
 
@@ -88,6 +91,15 @@ export function getCachedCreditSalesEnabled(): boolean {
 
 export function setCachedCreditSalesEnabled(value: boolean): void {
   localStorage.setItem(CREDIT_SALES_KEY, value ? "1" : "0");
+}
+
+// B-koibox-1 · true sólo si el tenant tiene el CRM activado (ADR-K6).
+export function getCachedCrmEnabled(): boolean {
+  return localStorage.getItem(CRM_ENABLED_KEY) === "1";
+}
+
+export function setCachedCrmEnabled(value: boolean): void {
+  localStorage.setItem(CRM_ENABLED_KEY, value ? "1" : "0");
 }
 
 export function setCachedBusinessType(value: BusinessType): void {
@@ -214,6 +226,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
   let lastIconPreset: string | null | undefined = undefined;
   let lastTagAliases: Array<{ slug: string; label: string }> | undefined = undefined;
   let lastCreditSales: boolean | undefined = undefined;
+  let lastCrmEnabled: boolean | undefined = undefined;
   for (let safety = 0; safety < 200; safety++) {
     const res = await apiWithCashier<{
       items: CatalogProduct[];
@@ -223,6 +236,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
       tpvIconPreset?: string | null;
       tagAliases?: Array<{ slug: string; label: string }>;
       creditSalesEnabled?: boolean;
+      crmEnabled?: boolean;
     }>(
       `/tpv/catalog/products${cursor ? `?cursor=${cursor}&limit=500` : "?limit=500"}`,
     );
@@ -246,6 +260,9 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
     if (res.creditSalesEnabled !== undefined) {
       lastCreditSales = res.creditSalesEnabled;
     }
+    if (res.crmEnabled !== undefined) {
+      lastCrmEnabled = res.crmEnabled;
+    }
     if (!res.nextCursor) break;
     cursor = res.nextCursor;
   }
@@ -255,6 +272,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
   if (lastBusinessType) setCachedBusinessType(lastBusinessType);
   if (lastIconPreset !== undefined) setCachedIconPreset(lastIconPreset);
   if (lastCreditSales !== undefined) setCachedCreditSalesEnabled(lastCreditSales);
+  if (lastCrmEnabled !== undefined) setCachedCrmEnabled(lastCrmEnabled);
   if (lastTagAliases !== undefined) {
     const map: Record<string, string> = {};
     for (const a of lastTagAliases) map[a.slug] = a.label;

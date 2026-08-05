@@ -39,6 +39,7 @@ export async function registerAdminTenantSettingsRoutes(
           discountThresholdPct: true,
           cashierSearchableContacts: true,
           creditSalesEnabled: true,
+          crmEnabled: true,
         },
       });
       return {
@@ -51,6 +52,7 @@ export async function registerAdminTenantSettingsRoutes(
           discountThresholdPct: Number(tenant.discountThresholdPct),
           cashierSearchableContacts: tenant.cashierSearchableContacts,
           creditSalesEnabled: tenant.creditSalesEnabled,
+          crmEnabled: tenant.crmEnabled,
         },
       };
     },
@@ -79,6 +81,8 @@ export async function registerAdminTenantSettingsRoutes(
             cashierSearchableContacts: { type: "boolean" },
             // v1.8-Fiado · activa la venta a crédito para el tenant.
             creditSalesEnabled: { type: "boolean" },
+            // B-koibox-1 · activa el CRM / ficha de cliente (ADR-K6).
+            crmEnabled: { type: "boolean" },
           },
         },
       },
@@ -94,6 +98,7 @@ export async function registerAdminTenantSettingsRoutes(
         discountThresholdPct?: number;
         cashierSearchableContacts?: boolean;
         creditSalesEnabled?: boolean;
+        crmEnabled?: boolean;
       };
       const prisma = getPrisma();
       const updated = await prisma.tenant.update({
@@ -107,6 +112,7 @@ export async function registerAdminTenantSettingsRoutes(
           discountThresholdPct: body.discountThresholdPct,
           cashierSearchableContacts: body.cashierSearchableContacts,
           creditSalesEnabled: body.creditSalesEnabled,
+          crmEnabled: body.crmEnabled,
         },
         select: {
           cashierAutoLogoutMinutes: true,
@@ -117,6 +123,7 @@ export async function registerAdminTenantSettingsRoutes(
           discountThresholdPct: true,
           cashierSearchableContacts: true,
           creditSalesEnabled: true,
+          crmEnabled: true,
         },
       });
       return reply.code(200).send({
@@ -129,6 +136,7 @@ export async function registerAdminTenantSettingsRoutes(
           discountThresholdPct: Number(updated.discountThresholdPct),
           cashierSearchableContacts: updated.cashierSearchableContacts,
           creditSalesEnabled: updated.creditSalesEnabled,
+          crmEnabled: updated.crmEnabled,
         },
       });
     },

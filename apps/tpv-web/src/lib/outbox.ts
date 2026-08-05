@@ -45,7 +45,11 @@ export type OutboxKind =
   | "refund"
   | "shift-open"
   | "shift-close"
-  | "cash-count";
+  | "cash-count"
+  // B-koibox-1 · alta de cliente CRM creada sin red. POST /clients
+  // idempotente por externalId; el envío genérico (POST path+body,
+  // borrar al 2xx) no necesita casos especiales.
+  | "client";
 export type OutboxStatus = "pending" | "rejected";
 
 export interface OutboxItem {
