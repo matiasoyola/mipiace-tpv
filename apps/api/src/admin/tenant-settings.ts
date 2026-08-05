@@ -40,6 +40,7 @@ export async function registerAdminTenantSettingsRoutes(
           cashierSearchableContacts: true,
           creditSalesEnabled: true,
           crmEnabled: true,
+          agendaEnabled: true,
         },
       });
       return {
@@ -53,6 +54,7 @@ export async function registerAdminTenantSettingsRoutes(
           cashierSearchableContacts: tenant.cashierSearchableContacts,
           creditSalesEnabled: tenant.creditSalesEnabled,
           crmEnabled: tenant.crmEnabled,
+          agendaEnabled: tenant.agendaEnabled,
         },
       };
     },
@@ -83,6 +85,11 @@ export async function registerAdminTenantSettingsRoutes(
             creditSalesEnabled: { type: "boolean" },
             // B-koibox-1 · activa el CRM / ficha de cliente (ADR-K6).
             crmEnabled: { type: "boolean" },
+            // B-koibox-2 · activa la agenda / catálogo extendido (ADR-K6).
+            // Esta columna es propiedad de B-koibox-2 (owner de
+            // `agendaEnabled`); el gate lo consumen el panel de personal
+            // (B3) y la agenda (B4).
+            agendaEnabled: { type: "boolean" },
           },
         },
       },
@@ -99,6 +106,7 @@ export async function registerAdminTenantSettingsRoutes(
         cashierSearchableContacts?: boolean;
         creditSalesEnabled?: boolean;
         crmEnabled?: boolean;
+        agendaEnabled?: boolean;
       };
       const prisma = getPrisma();
       const updated = await prisma.tenant.update({
@@ -113,6 +121,7 @@ export async function registerAdminTenantSettingsRoutes(
           cashierSearchableContacts: body.cashierSearchableContacts,
           creditSalesEnabled: body.creditSalesEnabled,
           crmEnabled: body.crmEnabled,
+          agendaEnabled: body.agendaEnabled,
         },
         select: {
           cashierAutoLogoutMinutes: true,
@@ -124,6 +133,7 @@ export async function registerAdminTenantSettingsRoutes(
           cashierSearchableContacts: true,
           creditSalesEnabled: true,
           crmEnabled: true,
+          agendaEnabled: true,
         },
       });
       return reply.code(200).send({
@@ -137,6 +147,7 @@ export async function registerAdminTenantSettingsRoutes(
           cashierSearchableContacts: updated.cashierSearchableContacts,
           creditSalesEnabled: updated.creditSalesEnabled,
           crmEnabled: updated.crmEnabled,
+          agendaEnabled: updated.agendaEnabled,
         },
       });
     },

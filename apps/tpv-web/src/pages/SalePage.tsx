@@ -58,6 +58,7 @@ import {
   getCachedBusinessType,
   getCachedCreditSalesEnabled,
   getCachedCrmEnabled,
+  getCachedAgendaEnabled,
   getCachedIconPreset,
   getCachedTagAliases,
   getCachedTenantId,
@@ -2288,8 +2289,25 @@ function SaleWorkspace({
   // sólo "abierto/cerrado" — las líneas viven arriba en SalePage, así
   // que cerrar el sheet nunca pierde nada.
   const [mobileTicketOpen, setMobileTicketOpen] = useState(false);
+  // B-koibox-2: mapa productId → duración de servicio para pintar los
+  // minutos informativos por línea del ticket. Sólo se construye si el
+  // tenant tiene la agenda activa; en caso contrario queda vacío y el
+  // ticket no muestra duraciones (base visual para B4).
+  const agendaEnabled = getCachedAgendaEnabled();
+  const durationByProduct = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!agendaEnabled) return map;
+    for (const p of products) {
+      if (p.kind === "SERVICE" && p.durationMin != null && p.durationMin > 0) {
+        map.set(p.id, p.durationMin);
+      }
+    }
+    return map;
+  }, [agendaEnabled, products]);
+
   const ticketPanelProps = {
     lines,
+    durationByProduct,
     contact,
     notes,
     totals,
@@ -2694,6 +2712,9 @@ function SaleWorkspace({
 
 interface TicketPanelProps {
   lines: CartLine[];
+  // B-koibox-2: productId → duración (min) del servicio. Vacío si el
+  // tenant no tiene `agendaEnabled`. Informativo por línea (base para B4).
+  durationByProduct: Map<string, number>;
   contact: ContactRef | null;
   notes: string;
   totals: ReturnType<typeof computeCart>;
@@ -2726,6 +2747,7 @@ interface TicketPanelProps {
 // Cobrar, listado de líneas).
 function TicketPanel({
   lines,
+  durationByProduct,
   contact,
   notes,
   totals,
@@ -2990,6 +3012,11 @@ function TicketPanel({
                 <CartLineItem
                   key={l.id}
                   line={l}
+                  durationMin={
+                    l.productId
+                      ? durationByProduct.get(l.productId)
+                      : undefined
+                  }
                   onClick={() => onClickLine(l)}
                   onUnitsChange={(units) => onUpdateLineUnits(l.id, units)}
                   onRemove={() => onRemoveLine(l.id)}

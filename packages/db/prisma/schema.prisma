@@ -61,6 +61,16 @@ enum ProductKind {
   SERVICE
 }
 
+// B-koibox-2 · tipo de recurso reservable (cabina de spa, box/sala de
+// clínica, aparato). Vocabulario neutro (ADR-K6): un `resource` sirve
+// igual a belleza que a una clínica; el enum evita clavar el módulo a un
+// vertical concreto.
+enum ResourceKind {
+  CABIN
+  ROOM
+  DEVICE
+}
+
 enum SyncOutboxKind {
   UPLOAD_TICKET
   UPLOAD_REFUND
@@ -211,6 +221,20 @@ enum PrintIntentKind {
   GIFT
 }
 
+// B-koibox-3 (Personal) · tipo de turno de un profesional.
+//   REGULAR       — semana tipo estable (el caso normal).
+//   REINFORCEMENT — refuerzo puntual sobre la plantilla base (temporada
+//                   alta, evento). Misma estructura recurrente + validez.
+//   SWAP          — canje/cambio de turno (un profesional cubre a otro un
+//                   tramo). El motor de B4 los expande igual que cualquier
+//                   turno; el `kind` es informativo para la UI y para
+//                   futuras políticas de cobertura.
+enum StaffShiftKind {
+  REGULAR
+  REINFORCEMENT
+  SWAP
+}
+
 // ── Multi-tenant raíz ─────────────────────────────────────────────────
 
 model Tenant {
@@ -313,6 +337,14 @@ model Tenant {
   // deja apagado. Los futuros flags del módulo (bonos, reservaOnline) se
   // añadirán como columnas hermanas cuando lleguen B5/B6.
   crmEnabled                     Boolean           @default(false) @map("crm_enabled")
+  // B-koibox-2 (Catálogo extendido) · capability flag de la agenda
+  // (ADR-K6). OFF por defecto: la extensión de scheduling de servicios,
+  // los recursos y la duración por línea en el TPV sólo se activan cuando
+  // el tenant lo enciende. Independiente del businessType — un RETAIL o
+  // SERVICES puede encenderlo; Thalia lo deja apagado. Este bloque es el
+  // OWNER de esta columna (hermana de `crmEnabled`; vendrán `bonosEnabled`
+  // y `reservaOnlineEnabled` con B5/B6).
+  agendaEnabled                  Boolean           @default(false) @map("agenda_enabled")
   // v1.3-Thalia Lote 6 · pie de ticket personalizado. NULL = no se
   // pinta nada extra (comportamiento previo). Si está set, el renderer
   // del ticket lo pinta arriba del QR/CIF tras el "Gracias por tu
@@ -345,6 +377,11 @@ model Tenant {
   tagSections        TagSection[]
   reconciliationRuns ReconciliationRun[]
   clients            Client[]
+  serviceSchedulings ServiceScheduling[]
+  resources          Resource[]
+  staffProfiles      StaffProfile[]
+  staffSkills        StaffSkill[]
+  staffShifts        StaffShift[]
 
   // v1.3-SuperAdmin-Hub Lote 3 · el backfill y el hub buscan/listan
   // tenants por `holded_account_id`. Sin índice eran scans completos
@@ -478,6 +515,11 @@ model User {
   refunds        Refund[]
   emailJobsAsked TicketEmailJob[]
   printIntents   PrintIntent[]
+  // B-koibox-3 · el `user` ES el profesional (ADR-K1: no tabla Staff
+  // paralela). Perfil de agenda 1:1, matriz de skills y turnos.
+  staffProfile   StaffProfile?
+  staffSkills    StaffSkill[]
+  staffShifts    StaffShift[]
 
   @@index([tenantId])
   @@map("users")
@@ -738,6 +780,15 @@ model Product {
   variants       ProductVariant[]
   lines          TicketLine[]
   modifierGroups ProductModifierGroup[]
+  // B-koibox-2 · capa de extensión local de agenda sobre el producto de
+  // Holded (ADR-K1). NO duplica el catálogo: precio/IVA siguen en Holded.
+  // Sólo aplica a kind=SERVICE; un producto sin fila `scheduling` no es
+  // reservable ni tiene duración → la agenda lo ignora.
+  scheduling     ServiceScheduling?
+  resourceNeeds  ServiceResourceNeed[]
+  // B-koibox-3 · qué profesionales pueden dar este servicio (matriz
+  // profesional × servicio). Sólo tiene sentido para kind=SERVICE.
+  staffSkills    StaffSkill[]
 
   @@unique([tenantId, holdedProductId])
   @@index([tenantId, barcode])
@@ -1543,4 +1594,163 @@ model ClientTechnicalNote {
   @@index([tenantId, clientId])
   @@index([clientId, serviceId])
   @@map("client_technical_notes")
+}
+
+// ─── Catálogo de servicios extendido (B-koibox-2) ────────────────────
+//
+// Capa de EXTENSIÓN local sobre el `product` de Holded (ADR-K1). NO es
+// una tabla `Service` paralela: el precio, el IVA y el alta del servicio
+// siguen en Holded (product.kind=SERVICE, holdedProductId). Aquí sólo
+// vive lo que la agenda necesita y Holded no modela: duración, pausas,
+// nº de profesionales, familia y flags de canal. Un servicio sin fila
+// aquí simplemente no es reservable ni tiene duración → la agenda (B4)
+// lo ignora. Multi-tenant por fila; migración aditiva con backfill vacío.
+model ServiceScheduling {
+  // PK = FK al producto (relación 1:1 con product.kind=SERVICE). No hay
+  // id propio: la extensión ES el producto. `Unsupported`/soft: Prisma no
+  // puede exigir kind=SERVICE a nivel de BD; lo valida el endpoint.
+  productId       String   @id @map("product_id") @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  durationMin     Int      @map("duration_min")
+  bufferBeforeMin Int      @default(0) @map("buffer_before_min")
+  bufferAfterMin  Int      @default(0) @map("buffer_after_min")
+  // Nº de profesionales simultáneos que requiere el servicio (Sinfonía a
+  // 4 manos = 2, a 8 = 4). El motor de disponibilidad (B4) lo usa.
+  staffRequired   Int      @default(1) @map("staff_required")
+  // Contrato para B4/B6: un servicio con onlineBookable=false queda
+  // marcado como NO ofrecible en reserva online.
+  onlineBookable  Boolean  @default(false) @map("online_bookable")
+  // Familia/agrupación libre del servicio (p.ej. "Faciales", "Corte").
+  family          String?
+  // Flags de canal: en qué superficies aparece el servicio. Forma
+  // estable `{caja,ticket,agenda,online}` (jsonb). El front la lee tal
+  // cual; `online` debe ir de la mano de `onlineBookable`.
+  channels        Json     @default("{\"caja\":true,\"ticket\":true,\"agenda\":true,\"online\":false}")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("service_scheduling")
+}
+
+// Recurso reservable genérico (ADR-K6, vocabulario neutro): cabina de
+// spa, box/sala de clínica, aparato. Un servicio requiere N recursos de
+// un TIPO (no uno concreto) vía `ServiceResourceNeed`. Local, sin espejo
+// en Holded.
+model Resource {
+  id        String       @id @default(uuid()) @db.Uuid
+  tenantId  String       @map("tenant_id") @db.Uuid
+  name      String
+  kind      ResourceKind
+  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime     @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, kind])
+  @@map("resources")
+}
+
+// Necesidad de recurso de un servicio: "este servicio requiere `qty`
+// recursos de tipo `resourceKind`". No apunta a un recurso concreto — el
+// motor de disponibilidad (B4) elige uno libre del tipo. `serviceId` es
+// el productId del servicio (kind=SERVICE). PK compuesta: un servicio
+// tiene como mucho una fila por tipo de recurso.
+model ServiceResourceNeed {
+  serviceId    String       @map("service_id") @db.Uuid
+  tenantId     String       @map("tenant_id") @db.Uuid
+  resourceKind ResourceKind @map("resource_kind")
+  qty          Int          @default(1)
+
+  service Product @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@id([serviceId, resourceKind])
+  @@index([tenantId])
+  @@map("service_resource_needs")
+}
+
+// ─── Personal / horarios (B-koibox-3) ────────────────────────────────
+//
+// El personal NO es una entidad nueva: es el `user` existente extendido
+// (ADR-K1, restricción del bloque — no tabla `Staff` paralela). Estas
+// tres tablas cuelgan del `user` y son la base de la agenda multi-
+// profesional (B4). Gate por `Tenant.agendaEnabled` (ADR-K6, columna
+// propiedad de B-koibox-2). Multi-tenant por fila; migración aditiva.
+
+// Perfil de agenda de un profesional. Relación 1:1 con `user`: la PK es
+// el propio `userId` (no hay id propio — el perfil ES el usuario visto
+// como profesional). `displayName` permite un nombre de agenda distinto
+// del alias de caja; `color` pinta su columna en la agenda; `active`
+// saca al profesional de la agenda sin borrar su histórico.
+model StaffProfile {
+  userId      String   @id @map("user_id") @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  displayName String   @map("display_name")
+  active      Boolean  @default(true)
+  color       String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, active])
+  @@map("staff_profiles")
+}
+
+// Matriz profesional × servicio: qué servicios sabe dar cada profesional.
+// `serviceId` = `product.id` (kind=SERVICE) — se alinea con la convención
+// de B-koibox-2 (`ServiceScheduling.productId`, `ServiceResourceNeed`),
+// FK dura al catálogo local para que el motor de B4 cruce skill ∩ servicio
+// por integridad referencial. PK compuesta `(userId, serviceId)`: un
+// profesional tiene como mucho una fila por servicio. `tenantId` presente
+// por la regla de aislamiento por fila.
+model StaffSkill {
+  userId    String   @map("user_id") @db.Uuid
+  serviceId String   @map("service_id") @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  service Product @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@id([userId, serviceId])
+  // "¿qué profesionales pueden dar el servicio X?" (contrato para B4).
+  @@index([tenantId, serviceId])
+  @@index([tenantId, userId])
+  @@map("staff_skills")
+}
+
+// Turno de un profesional como PLANTILLA recurrente + ventana de validez.
+// `rrule` es RFC 5545 estándar (p.ej. `FREQ=WEEKLY;BYDAY=MO,TU`) — se
+// expande con rrule.js, no hay formato propio. `startTime`/`endTime` son
+// horas de pared "HH:MM" (la recurrencia da los días; la hora la ponen
+// estos campos). `validFrom`/`validUntil` acotan desde/hasta cuándo rige
+// la plantilla (una semana tipo puede cambiar por temporada). El motor de
+// B4 cruza la expansión de estos turnos con skill y sin-solape.
+model StaffShift {
+  id         String         @id @default(uuid()) @db.Uuid
+  userId     String         @map("user_id") @db.Uuid
+  tenantId   String         @map("tenant_id") @db.Uuid
+  rrule      String
+  startTime  String         @map("start_time")
+  endTime    String         @map("end_time")
+  validFrom  DateTime       @map("valid_from") @db.Date
+  validUntil DateTime?      @map("valid_until") @db.Date
+  kind       StaffShiftKind @default(REGULAR)
+  createdAt  DateTime       @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt  DateTime       @updatedAt @map("updated_at") @db.Timestamptz()
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, userId])
+  @@index([userId])
+  @@map("staff_shifts")
 }

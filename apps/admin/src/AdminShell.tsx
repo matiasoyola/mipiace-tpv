@@ -8,6 +8,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Building2,
   Calculator,
+  CalendarClock,
   Gift,
   KeyRound,
   Menu,
@@ -49,6 +50,11 @@ interface NavItem {
   // para impersonation read-only del super-admin; ningún usuario
   // per-tenant las verá en su admin.
   superAdminOnly?: boolean;
+  // B-koibox-2 (ADR-K6): la entrada sólo se muestra si el tenant tiene la
+  // capability activada. Hoy sólo "agenda" (`Tenant.agendaEnabled`). El
+  // flag se lee una vez desde /admin/tenant/settings; mientras carga la
+  // entrada permanece oculta para no parpadear.
+  capability?: "agenda";
 }
 
 const NAV_ITEMS: NavItem[] = [
@@ -69,10 +75,27 @@ const NAV_ITEMS: NavItem[] = [
   // porque es operativa diaria (cambiar IP del router, etc.).
   { to: "/admin/printers", label: "Impresoras", icon: Printer },
   { to: "/admin/cashiers", label: "Cajeros", icon: Users },
+  // B-koibox-3: panel de personal (profesionales + skills + turnos) de la
+  // agenda. Sólo visible con la capability `agenda` activada (misma puerta
+  // que el catálogo de agenda); la página además se auto-gatea.
+  {
+    to: "/admin/staff",
+    label: "Personal",
+    icon: CalendarClock,
+    capability: "agenda",
+  },
   // v1.0-pilotos · Lote 6 (#22): importador de clientes desde Excel/CSV.
   // OWNER-only — crea contactos en Holded, que es la fuente de verdad.
   { to: "/admin/contacts-import", label: "Importar clientes", icon: UserPlus, ownerOnly: true },
   { to: "/admin/products", label: "Productos", icon: Package },
+  // B-koibox-2: catálogo de agenda (duración/pausas/canales + recursos).
+  // Sólo visible si el tenant tiene la capability `agenda` activada.
+  {
+    to: "/admin/agenda-catalog",
+    label: "Agenda · Catálogo",
+    icon: CalendarClock,
+    capability: "agenda",
+  },
   // v1.3-Operativa-Extra · Lote 1: editor de aliases de tags. Visible
   // a OWNER y MANAGER porque la operativa (renombrar categorías) es de
   // negocio, no técnica.
@@ -334,6 +357,27 @@ function MobileDrawer({
   );
 }
 
+// B-koibox-2: lee las capabilities del tenant una vez para gatear las
+// entradas del sidebar (hoy sólo `agenda`). null mientras carga → las
+// entradas con capability quedan ocultas hasta saber el valor real.
+function useAgendaEnabled(): boolean | null {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api<{ settings: { agendaEnabled?: boolean } }>("/admin/tenant/settings")
+      .then((res) => {
+        if (!cancelled) setEnabled(res.settings.agendaEnabled ?? false);
+      })
+      .catch(() => {
+        if (!cancelled) setEnabled(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return enabled;
+}
+
 function NavList({
   currentPath,
   onNavigate,
@@ -342,11 +386,13 @@ function NavList({
   onNavigate?: () => void;
 }) {
   const syncErrorsCount = useSyncErrorsCount();
+  const agendaEnabled = useAgendaEnabled();
   const role = readCurrentRole();
   const impersonating = readImpersonationState() != null;
   const visibleItems = NAV_ITEMS.filter((item) => {
     if (item.superAdminOnly) return impersonating;
     if (item.ownerOnly) return role === "OWNER";
+    if (item.capability === "agenda") return agendaEnabled === true;
     return true;
   });
   return (

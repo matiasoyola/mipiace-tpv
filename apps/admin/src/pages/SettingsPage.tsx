@@ -30,6 +30,8 @@ interface TenantSettings {
   discountThresholdPct: number;
   cashierSearchableContacts: boolean;
   creditSalesEnabled: boolean;
+  crmEnabled: boolean;
+  agendaEnabled: boolean;
 }
 
 const AUTO_LOGOUT_MIN = 5;
@@ -151,6 +153,28 @@ export function SettingsPage() {
           disabled={!canEdit}
           onChange={(v) => setForm({ ...form, creditSalesEnabled: v })}
           help="Permite cobrar tickets como 'fiado': el cliente se lleva el género y paga otro día. La deuda queda apuntada y se cobra desde la pantalla Deudas del TPV. El ticket no se sube a Holded hasta que se salda. Exige asociar un cliente al ticket."
+        />
+      </Section>
+
+      <Section
+        title="Módulos del negocio"
+        subtitle="Enciende las capas del módulo de Citas. Cada una añade su sección; apagada, no aparece."
+      >
+        <ToggleField
+          id="crmEnabled"
+          label="Ficha de cliente / CRM"
+          checked={form.crmEnabled}
+          disabled={!canEdit}
+          onChange={(v) => setForm({ ...form, crmEnabled: v })}
+          help="Activa la sección Clientes en el TPV: alta, búsqueda A–Z, historial y ficha técnica."
+        />
+        <ToggleField
+          id="agendaEnabled"
+          label="Agenda de citas"
+          checked={form.agendaEnabled}
+          disabled={!canEdit}
+          onChange={(v) => setForm({ ...form, agendaEnabled: v })}
+          help="Activa el catálogo de servicios con duración, el panel de Personal (profesionales, servicios que da cada uno y turnos) y, más adelante, la agenda."
         />
       </Section>
 

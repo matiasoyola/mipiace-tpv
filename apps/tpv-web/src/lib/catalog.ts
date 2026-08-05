@@ -25,6 +25,11 @@ export interface CatalogProduct {
   // viene vacío. Se ordena alfabéticamente al renderizar los chips —
   // se preserva el orden de Holded en el array.
   tags: string[];
+  // B-koibox-2: duración de agenda (minutos) del servicio. Sólo la traen
+  // los servicios con overlay `service_scheduling`; null en productos y
+  // servicios sin scheduling. El TPV la pinta informativa por línea de
+  // servicio cuando el tenant tiene `agendaEnabled` (base visual para B4).
+  durationMin?: number | null;
 }
 
 const DB_NAME = "mipiacetpv-catalog";
@@ -53,6 +58,9 @@ const CREDIT_SALES_KEY = "mipiacetpv-catalog-credit-sales";
 // B-koibox-1 · capability flag del CRM / ficha de cliente (ADR-K6). El
 // TPV lo cachea para mostrar/ocultar la sección Clientes y el atajo F1.
 const CRM_ENABLED_KEY = "mipiacetpv-catalog-crm-enabled";
+// B-koibox-2 · capability flag de la agenda (ADR-K6). El TPV lo cachea
+// para pintar (o no) la duración por línea de servicio en el ticket.
+const AGENDA_ENABLED_KEY = "mipiacetpv-catalog-agenda-enabled";
 
 export type BusinessType = "HOSPITALITY" | "RETAIL" | "SERVICES";
 
@@ -100,6 +108,15 @@ export function getCachedCrmEnabled(): boolean {
 
 export function setCachedCrmEnabled(value: boolean): void {
   localStorage.setItem(CRM_ENABLED_KEY, value ? "1" : "0");
+}
+
+// B-koibox-2 · true sólo si el tenant tiene la agenda activada (ADR-K6).
+export function getCachedAgendaEnabled(): boolean {
+  return localStorage.getItem(AGENDA_ENABLED_KEY) === "1";
+}
+
+export function setCachedAgendaEnabled(value: boolean): void {
+  localStorage.setItem(AGENDA_ENABLED_KEY, value ? "1" : "0");
 }
 
 export function setCachedBusinessType(value: BusinessType): void {
@@ -227,6 +244,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
   let lastTagAliases: Array<{ slug: string; label: string }> | undefined = undefined;
   let lastCreditSales: boolean | undefined = undefined;
   let lastCrmEnabled: boolean | undefined = undefined;
+  let lastAgendaEnabled: boolean | undefined = undefined;
   for (let safety = 0; safety < 200; safety++) {
     const res = await apiWithCashier<{
       items: CatalogProduct[];
@@ -237,6 +255,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
       tagAliases?: Array<{ slug: string; label: string }>;
       creditSalesEnabled?: boolean;
       crmEnabled?: boolean;
+      agendaEnabled?: boolean;
     }>(
       `/tpv/catalog/products${cursor ? `?cursor=${cursor}&limit=500` : "?limit=500"}`,
     );
@@ -263,6 +282,9 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
     if (res.crmEnabled !== undefined) {
       lastCrmEnabled = res.crmEnabled;
     }
+    if (res.agendaEnabled !== undefined) {
+      lastAgendaEnabled = res.agendaEnabled;
+    }
     if (!res.nextCursor) break;
     cursor = res.nextCursor;
   }
@@ -273,6 +295,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
   if (lastIconPreset !== undefined) setCachedIconPreset(lastIconPreset);
   if (lastCreditSales !== undefined) setCachedCreditSalesEnabled(lastCreditSales);
   if (lastCrmEnabled !== undefined) setCachedCrmEnabled(lastCrmEnabled);
+  if (lastAgendaEnabled !== undefined) setCachedAgendaEnabled(lastAgendaEnabled);
   if (lastTagAliases !== undefined) {
     const map: Record<string, string> = {};
     for (const a of lastTagAliases) map[a.slug] = a.label;

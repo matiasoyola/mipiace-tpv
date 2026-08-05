@@ -28,8 +28,10 @@ import { registerErrorHandler } from "./lib/error-handler.js";
 import { registerLenientJsonParser } from "./lib/lenient-json.js";
 import { initSentry } from "./lib/sentry.js";
 import { registerOnboardingRoutes } from "./onboarding/routes.js";
+import { registerServicesRoutes } from "./services/routes.js";
 import { registerCashierAuthRoutes } from "./shift/cashier-auth.js";
 import { registerShiftRoutes } from "./shift/routes.js";
+import { registerStaffRoutes } from "./staff/routes.js";
 import { registerStoresRoutes } from "./stores/routes.js";
 import { registerStoreWebSocketRoute } from "./realtime/ws-route.js";
 import {
@@ -152,6 +154,8 @@ async function main() {
   await registerContactsRoutes(app);
   await registerContactImportRoutes(app);
   await registerCrmRoutes(app);
+  await registerServicesRoutes(app);
+  await registerStaffRoutes(app);
   await registerDeviceRoutes(app);
   await registerCashiersRoutes(app);
   await registerCashierAuthRoutes(app);
