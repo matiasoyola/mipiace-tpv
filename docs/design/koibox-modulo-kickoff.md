@@ -112,8 +112,9 @@ Lo que se **hereda sin cambios**: el algoritmo de disponibilidad por retícula d
 
 ### ADR-K6 · Activación por capability flag, no por vertical clavado
 - **Contexto:** la agenda no es "peluquería". Sirve a peluquería, belleza, **clínicas**, estética, fisio…
-- **Decisión:** el módulo se activa por **flags de capacidad por tenant** (`capabilities: { agenda, bonos, reservaOnline }`), independientes del `businessType`. Un tenant SERVICES o RETAIL puede encender agenda; Thalía la deja apagada.
-- **Consecuencia:** la UI del TPV muestra/oculta agenda, ficha de cliente y bonos según capabilities. Nada de `if (businessType === 'BEAUTY')`.
+- **Decisión:** el módulo se activa por **flags de capacidad por tenant**, independientes del `businessType`. Un tenant SERVICES o RETAIL puede encender agenda; Thalía la deja apagada.
+- **Patrón (fijado en B1):** cada capability es una **columna booleana en `Tenant`** (`crmEnabled` ya existe desde B1; `agendaEnabled` la crea B2; vendrán `bonosEnabled`, `reservaOnlineEnabled`), NO un jsonb `capabilities`. Columnas explícitas: tipadas, indexables, en migración. B4/B5/B6 siguen el mismo patrón.
+- **Consecuencia:** la UI del TPV muestra/oculta agenda, ficha de cliente y bonos según esos flags. Nada de `if (businessType === 'BEAUTY')`.
 
 ### ADR-K7 · QR de bono/regalo: token opaco firmado, validado por el escáner ya integrado
 - **Decisión:** cada bono/tarjeta lleva un **token único opaco** (firmado, no adivinable) codificado en QR. Se valida en caja **con el lector de código de barras HID que ya existe** (ADR-011) — cero hardware nuevo. El canje comprueba saldo/caducidad server-side.
