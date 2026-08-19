@@ -21,6 +21,8 @@ vi.mock("../src/api.js", async () => {
 });
 vi.mock("../src/lib/catalog.js", () => ({
   getCachedBusinessType: () => "HOSPITALITY" as const,
+  getCachedCrmEnabled: () => false,
+  getCachedAgendaEnabled: () => false,
 }));
 vi.mock("../src/lib/escposPrint.js", () => ({
   fetchTicketEscposBinary: vi.fn(),

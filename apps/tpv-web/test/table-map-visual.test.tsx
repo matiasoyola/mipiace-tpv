@@ -42,6 +42,8 @@ vi.mock("../src/lib/catalog.js", async () => {
   return {
     ...actual,
     getCachedBusinessType: () => "HOSPITALITY",
+    getCachedCrmEnabled: () => false,
+    getCachedAgendaEnabled: () => false,
     getCachedCreditSalesEnabled: () => false,
   };
 });
