@@ -7,6 +7,28 @@ que aquí resolvemos el transporte de impresión nativo detrás de
 
 Pega esto en una sesión NUEVA de Claude Code, tras A0 revisado.
 
+---
+
+## ⚠️ Estado real verificado (2026-08-01) — leer PRIMERO
+
+Auditado el master actual: **A0 dejó SOLO el scaffold de Capacitor
+(`apps/tpv-android`) y el contrato `PrinterTransport.ts`.** Lo que este
+bloque daba por hecho de A0 **NO existe todavía en `tpv-web`** y hay que
+crearlo aquí, en el Frente 1:
+
+- NO existe `apps/tpv-web/src/platform/` ni `getPlatform()` → **créalo en
+  A1** (detección web vs Capacitor: `Capacitor.isNativePlatform()`).
+- NO existe `PrinterRegistry` cableado en `tpv-web` → créalo (el contrato
+  vive en `apps/tpv-android/src/printer/PrinterTransport.ts`).
+- `apps/tpv-web/src/lib/escposPrint.ts` **todavía llama a WebUSB/WiFi
+  directamente** (`printEscposUsb`, `printTicketUsb`, `printTicketWifi`).
+  El refactor a registry es parte de A1, con **regresión CERO en web**.
+
+Es decir: el Frente 1 de abajo es correcto en el QUÉ, pero trátalo como
+trabajo NUEVO (crear adaptador + registry + refactor), no como cableado
+sobre algo preexistente. El resto del bloque (Frente 2 USB nativo) es
+válido.
+
 **Hardware decidido: impresora USB.** Los pilotos (Thalía incluida) usan
 impresora térmica conectada por USB al terminal Android todo-en-uno
 (coherente con ADR-011, terminal Smart-tpv con printer externo USB). El

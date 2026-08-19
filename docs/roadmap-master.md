@@ -119,6 +119,22 @@ real antes de implantación a Thalía.
 - **Conversación con Thalía** sobre Inventario Pro: validar qué
   usa cada semana para decidir si puede prescindir.
 
+### Mejora · Operativa del TPV diferenciada por rol (decisión Matías 2026-07-03)
+- **Principio de producto**: el TPV debe dar a cada rol lo que su
+  operativa necesita — no es lo mismo un OWNER que un cajero. Hoy los
+  roles existen en backend (matriz B6, PIN encargado, permisos admin)
+  pero la UI del TPV es casi plana por rol.
+- **Caso 1 (el que lo destapó)**: arqueos X y Z muestran solo el
+  recuento ciego. Para OWNER/MANAGER, mostrar además "efectivo
+  esperado del turno" DURANTE el recuento; el CASHIER sigue contando
+  a ciegas (anti-fraude) y ve el resultado al cerrar, como hoy. El
+  dato ya existe en la API del turno — es exposición condicionada
+  por rol. Candidato a frente extra de v1.9 o mini-bloque.
+- **Siguiente paso**: auditoría de la UI del TPV con lupa de rol
+  (qué ve/puede cada uno en: arqueos, historial, devoluciones,
+  descuentos, informes, reimprimir, línea libre) y propuesta de
+  matriz operativa TPV por rol. Diseñar antes de implementar.
+
 ---
 
 ## 🟣 v1.3 · Mid-term (~3-4 semanas tras v1.2)

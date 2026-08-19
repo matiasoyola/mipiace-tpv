@@ -15,10 +15,11 @@ destino: publicar en mipiacetpv.com, admin.mipiacetpv.com (enlace en pie de pág
 
 En cumplimiento del art. 10 de la Ley 34/2002 (LSSI-CE):
 
-- **Titular:** `«Razón social / nombre del autónomo»`
-- **NIF:** `«NIF»`
-- **Domicilio:** `«domicilio»`
-- **Correo de contacto:** soporte@mipiacetpv.tech
+- **Titular:** Mi Piace Internet Solutions SL
+- **NIF:** B45902186
+- **Domicilio:** Carretera CM-5100, km 30.500, 45634 Buenaventura (Toledo)
+- **Correo de contacto:** soporte@mipiacetpv.com ⚠️ *verificar que el buzón existe*
+- **Registro Mercantil:** «datos de inscripción — tomo/folio/hoja» ⚠️ *la LSSI art. 10 los exige para SL; pedir al asesor/gestor*
 - **Sitios:** https://mipiacetpv.com (TPV), https://admin.mipiacetpv.com (consola de administración)
 
 ## 2. Objeto y uso

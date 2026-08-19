@@ -12,7 +12,7 @@ base: art. 28 RGPD (Reglamento UE 2016/679) y LOPDGDD 3/2018
 Conforme al artículo 28 del RGPD, entre:
 
 - **RESPONSABLE del tratamiento:** el Cliente identificado en el contrato principal (el comercio que usa mipiacetpv).
-- **ENCARGADO del tratamiento:** `«Razón social / autónomo»`, NIF `«NIF»`, titular de mipiacetpv (el "Encargado").
+- **ENCARGADO del tratamiento:** **Mi Piace Internet Solutions SL**, CIF B45902186, con domicilio en Carretera CM-5100, km 30.500, 45634 Buenaventura (Toledo), titular de mipiacetpv (el "Encargado").
 
 ## 1. Objeto
 

@@ -11,6 +11,25 @@ pasos de la consola de Play.
 
 ---
 
+## ⚠️ Requisito de build CRÍTICO (hallazgo de A2) — no publicar sin esto
+
+El APK empaqueta el build de Vite de `tpv-web`. Si se construye con el
+`VITE_API_URL` por defecto (`/api`), el WebView resuelve contra
+`https://localhost` y **la app queda SIN backend** (no hay login, ni
+catálogo, ni cobros). 
+
+Antes de generar el APK/AAB de release, el build DEBE fijar:
+- `VITE_API_URL=https://api.mipiacetpv.com` (backend de producción)
+- y revisar el resto de `VITE_*` que consume `tpv-web` (p. ej.
+  `VITE_TPV_URL`, `VITE_BUILD_HASH`) para que apunten a producción, no a
+  localhost.
+
+Deja en `A3-done.md` el comando exacto de build del APK con esas env
+fijadas, y documenta cómo cambiarlas si en el futuro hay staging. Esto es
+condición de "funciona en el terminal del cliente".
+
+---
+
 Hola Code. A3 deja la app lista para publicar a los pilotos.
 
 ## Contexto — leer antes de tocar nada

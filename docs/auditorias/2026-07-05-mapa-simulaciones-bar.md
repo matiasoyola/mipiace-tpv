@@ -69,3 +69,7 @@ Venta rápida barra/mesa, mapa tiempo real entre cajas, retomar mesa de otra caj
 5. E1 revisión en código (fuente de verdad del precio) + A6/A7/A8 si da tiempo.
 
 Los fixes se agrupan en un único bloque `v1-9-2-mesas-concurrencia` con TODO lo encontrado (ya incluye: refresco de líneas por WS en mesa abierta, banner ante PAYMENTS_MISMATCH, autocierre del modal Ticket emitido).
+
+## Cierre (2026-07-05 madrugada)
+
+v1.9.2 desplegado y **verificado en vivo** (2 pestañas, Sirope modo prueba): A1 ✅ refetch de líneas remotas; A2 ✅ banner «La cuenta ha cambiado desde otra caja · Total actual X €» + Actualizar; F3.1 ✅ cobro de mesa → mapa directo con banner autocerrable; add-line a mesa muerta ✅ no cuela y el camarero acaba en el mapa; navegación ✅ (Mesas/Tickets/hamburguesa en todos los headers). Pendiente SOLO con 2 cajas físicas (mañana): expulsión pasiva por `ticket.paid` (filtra por registerId distinto) y C1-C4 offline. El 409 del doble cobro queda cubierto por test + red de seguridad del server.

@@ -13,7 +13,7 @@ En `«ciudad»`, a `«fecha»`.
 ## Reunidos
 
 **De una parte, el PRESTADOR:**
-`«Razón social / nombre del autónomo»`, con NIF `«NIF»` y domicilio en `«domicilio»`, titular del servicio **mipiacetpv** (en adelante, "mipiacetpv" o "el Prestador"). Contacto: soporte@mipiacetpv.tech.
+**Mi Piace Internet Solutions SL**, con CIF B45902186 y domicilio en Carretera CM-5100, km 30.500, 45634 Buenaventura (Toledo), titular del servicio **mipiacetpv** (en adelante, "mipiacetpv" o "el Prestador"). Contacto: soporte@mipiacetpv.com. ⚠️ *Verificar que el buzón soporte@ existe antes de firmar.*
 
 **De otra parte, el CLIENTE PILOTO:**
 `«Razón social del comercio»`, con NIF `«NIF»` y domicilio en `«domicilio»`, representada por `«nombre y cargo»` (en adelante, "el Cliente").
@@ -44,7 +44,7 @@ La finalidad del piloto es **validar el producto en condiciones reales** de oper
 - interrupciones del servicio imputables a terceros proveedores (hosting, conectividad, Holded, correo);
 - pérdida de datos cuando el Cliente no haya seguido las indicaciones razonables del Prestador.
 
-3.3. ⚠️ **Límite cuantitativo:** la responsabilidad total del Prestador frente al Cliente por cualquier concepto quedará limitada a `«importe; p. ej. las cantidades efectivamente abonadas por el Cliente en los últimos 3 meses, o un importe simbólico en pilotos gratuitos»`. *A fijar con asesor según haya o no contraprestación.*
+3.3. ⚠️ **Límite cuantitativo:** la responsabilidad total del Prestador frente al Cliente por cualquier concepto quedará limitada a **300 € (importe simbólico, al ser el piloto gratuito)**. ⚠️ *Propuesta del equipo; validar cuantía con asesor.*
 
 3.4. El Cliente conserva la responsabilidad de **realizar el cierre y arqueo** de su caja y de **verificar** que sus ventas se han registrado correctamente en Holded, especialmente durante el piloto.
 
@@ -66,13 +66,13 @@ Ambas partes guardarán confidencialidad sobre la información no pública inter
 
 ## 8. Duración, salida y portabilidad
 
-8.1. El piloto tendrá una duración inicial de `«p. ej. 3 meses»`, prorrogable por acuerdo. Cualquiera de las partes podrá resolverlo con `«15»` días de preaviso.
+8.1. El piloto tendrá una duración de **6 (seis) meses desde la fecha de activación del servicio** (paso del entorno de prueba a operación real, comunicada por el Prestador), prorrogable por acuerdo. Cualquiera de las partes podrá resolverlo con `«15»` días de preaviso.
 
 8.2. A la finalización, el Prestador, a solicitud del Cliente, **exportará los datos del Cliente** en formato reutilizable y procederá a su **borrado o anonimización** conforme al DPA. Los datos de facturación residen en la cuenta de Holded del Cliente, que es de su titularidad.
 
 ## 9. Precio
 
-`«Gratuito durante el piloto»` / `«precio reducido de «importe» €/mes»`. Las condiciones económicas posteriores al piloto se acordarán por escrito antes de su entrada en vigor.
+**Gratuito durante los 6 meses del piloto** (desde la fecha de activación). Las condiciones económicas posteriores al piloto se acordarán por escrito antes de su entrada en vigor; en ausencia de acuerdo, el servicio podrá suspenderse al término del piloto sin penalización para ninguna de las partes.
 
 ## 10. Ley aplicable y jurisdicción
 

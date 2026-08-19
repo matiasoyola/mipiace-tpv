@@ -9,6 +9,38 @@ pero recomendado secuencial para no solapar el wiring de plataforma.
 
 ---
 
+## ⚠️ Estado real verificado (2026-08-01) — leer PRIMERO
+
+**Rama base: parte de `a1-impresion-usb`, NO de master.** El adaptador de
+plataforma `apps/tpv-web/src/platform/index.ts` (`getPlatform()`) y el
+patrón de plugin nativo los creó **A1**, y viven en la rama
+`a1-impresion-usb` (aún sin mergear a master). Si partes de master no
+existen. Crea `a2-escaner-offline` DESDE `a1-impresion-usb`. Consecuencia:
+A2 no se podrá mergear hasta que A1 se mergee — es el mismo stack nativo,
+es lo esperado.
+
+**Frente 3 (offline) — NO reimplementar nada.** El bloque original decía
+"si falta cola de pendientes, impleméntala". Ya NO aplica: el bloque
+**v1.10** (rama `v1-10-offline-un-terminal`) construyó el sistema offline
+completo — outbox de cobros/turno (`apps/tpv-web/src/lib/outbox.ts`),
+login de cajero por PIN offline y ciclo de turno (`offlineAuth.ts`,
+`offlineShift.ts`). **No dupliques esto.** Además v1.10 tampoco está en
+esta rama, así que:
+
+- Reduce el Frente 3 a lo que SÍ es independiente de v1.10: auditar que
+  el **catálogo cacheado** (`lib/catalog.ts`) y el **service worker**
+  sirven la app **dentro del WebView** sin red (eso es anterior a v1.10).
+- La auditoría completa "venta entera sin red → sync sin duplicar" es una
+  **prueba de integración en hardware real** que se hace cuando v1.10 +
+  A1 + A2 estén integrados. Déjala documentada como pendiente de esa
+  integración en `A2-done.md`; NO la implementes aquí.
+
+El resto del bloque (Frente 1 permiso de cámara vía capa de plataforma,
+Frente 2 rendimiento de escaneo, Frente 4 SW dentro de Capacitor) es
+válido tal cual.
+
+---
+
 Hola Code. A2 cubre escáner de cámara nativo + auditoría offline real.
 
 ## Contexto — leer antes de tocar nada
