@@ -97,7 +97,7 @@ Cada bloque tiene su prompt en `docs/code-prompts/bloque-N.md` con:
 
 **Cómo se le pasa a Code en una sesión nueva:**
 
-1. `cd ~/Documents/Claude/Projects/Holded`
+1. `cd ~/Developer/Claude/Projects/mipiacetpv`
 2. `claude`
 3. Cuando arranque la sesión, le pegas exactamente:
    ```
@@ -205,7 +205,7 @@ tmutil status
 
 ### 6.2 Cowork útiles
 
-- Cowork tiene acceso a tu repo en `~/Documents/Claude/Projects/Holded/`
+- Cowork tiene acceso a tu repo en `~/Developer/Claude/Projects/mipiacetpv/`
   y puede leer/escribir archivos directamente.
 - Cowork tiene un sandbox bash separado para git, build, tests. Útil
   para preparar commits limpios sin que Matías abra Terminal.

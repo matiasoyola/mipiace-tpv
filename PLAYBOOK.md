@@ -19,7 +19,7 @@ claude --version
 claude login
 
 # 0.3 — clonar el legacy DENTRO de esta carpeta
-cd "/Users/matiasoyolasanchez/Documents/Claude/Projects/Holded"
+cd "/Users/matiasoyolasanchez/Developer/Claude/Projects/mipiacetpv"
 mkdir -p legacy
 git clone https://github.com/matiasoyola/mipiace-tpv.git legacy/mipiace-tpv
 
@@ -37,7 +37,7 @@ ls legacy/mipiace-tpv
 ## Paso 1 · Abrir Claude Code en la carpeta del proyecto
 
 ```bash
-cd "/Users/matiasoyolasanchez/Documents/Claude/Projects/Holded"
+cd "/Users/matiasoyolasanchez/Developer/Claude/Projects/mipiacetpv"
 claude
 ```
 

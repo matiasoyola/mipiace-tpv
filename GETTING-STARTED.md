@@ -23,7 +23,7 @@ claude login
 ## 2. Abrir Claude Code en esta carpeta
 
 ```bash
-cd "/Users/matiasoyolasanchez/Documents/Claude/Projects/Holded"
+cd "/Users/matiasoyolasanchez/Developer/Claude/Projects/mipiacetpv"
 claude
 ```
 

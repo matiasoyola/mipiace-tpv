@@ -4,7 +4,7 @@
 # NO hace push ni deploy: esos dos pasos los decides tú al final.
 set -uo pipefail
 
-REPO="$HOME/Documents/Claude/Projects/Holded"
+REPO="$HOME/Developer/Claude/Projects/mipiacetpv"
 cd "$REPO" || { echo "❌ No encuentro el repo en $REPO"; exit 1; }
 
 echo "▶ 1/5 · Quito el lock zombie de git (si existe)"
