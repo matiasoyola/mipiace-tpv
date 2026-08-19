@@ -2,13 +2,16 @@
 // Prisma en memoria; valida búsqueda A–Z, alta idempotente, aislamiento
 // por tenant, ficha completa, historial unificado y contratos estables.
 
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 
 process.env.NODE_ENV = "test";
 process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
 process.env.REDIS_URL = "redis://localhost:6379";
 process.env.JWT_ACCESS_SECRET = "a".repeat(40);
 process.env.JWT_REFRESH_SECRET = "b".repeat(40);
+// Sin esto, `loadEnv()` revienta con ZodError en CI (en local lo tapa
+// el .env del entorno de desarrollo). Mismo patrón que contacts-route.
+process.env.HOLDED_KEY_ENCRYPTION_SECRET = randomBytes(32).toString("base64");
 
 import Fastify from "fastify";
 import { beforeEach, describe, expect, it, vi } from "vitest";
