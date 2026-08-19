@@ -35,7 +35,14 @@
 // Vocabulario neutro: "profesional" (peluquero, esteticista, médico…).
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { RRule } from "rrule";
+// `rrule` es CommonJS. El named import ESM (`import { RRule } from "rrule"`)
+// compila, pasa el typecheck y pasa los tests de vitest — pero Node lo
+// rechaza al arrancar: "does not provide an export named 'RRule'". El
+// interop CJS→ESM sólo garantiza el default, así que se desestructura de
+// ahí; el alias de tipo mantiene `RRule` usable como tipo.
+import rrulePkg from "rrule";
+const { RRule } = rrulePkg;
+type RRule = InstanceType<typeof RRule>;
 import type { Prisma } from "@mipiacetpv/db";
 
 import { requireOwnerOrManager } from "../auth/middleware.js";
