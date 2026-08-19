@@ -1,6 +1,6 @@
 # Bloque Reservas-4 · Agenda (motor de reservas + vistas + cita→caja)
 
-> El cuello del módulo. Construye la agenda sobre el **motor de reservas agnóstico cita/mesa (ADR-R8)**, implementando **solo el modo CITA**. Depende de B1 (CRM) + B2 (catálogo) + B3 (personal), los tres ya verdes. **No toca el camino de cobro a Holded.** Gate por `Tenant.agendaEnabled`. Rama `koibox-1-crm`, sin push.
+> El cuello del módulo. Construye la agenda sobre el **motor de reservas agnóstico cita/mesa (ADR-R8)**, implementando **solo el modo CITA**. Depende de B1 (CRM) + B2 (catálogo) + B3 (personal), los tres ya verdes. **No toca el camino de cobro a Holded.** Gate por `Tenant.agendaEnabled`. Rama de trabajo del módulo, sin push.
 
 ## Contexto (leer antes)
 - **`docs/design/adr-r8-motor-reservas-agnostico.md`** — LA spec del motor. Leer entera: es la fuente de verdad de este bloque (modelo de datos §3, BookingEngine §4, cita→caja §5, valla de alcance §7).

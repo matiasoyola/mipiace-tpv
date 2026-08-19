@@ -1,6 +1,6 @@
 # Bloque B-reservas-3 · Personal + horarios — DONE
 
-**Rama:** `koibox-1-crm` (sesión B3). Prompt: `docs/code-prompts/bloque-reservas-3-personal.md`.
+**Rama:** rama de trabajo del módulo Reservas, integrada en `master` el 2026-08-19 (sesión B3). Prompt: `docs/code-prompts/bloque-reservas-3-personal.md`.
 Contexto: `docs/design/reservas-modulo-kickoff.md` (ADR-R1, ADR-R6, §4 modelo de datos),
 `docs/design/agenda-belleza-spec.md` §2/§3, `docs/blocks/B-reservas-1-done.md`, `docs/06-modelo-datos.md`.
 

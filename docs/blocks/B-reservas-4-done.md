@@ -1,6 +1,6 @@
 # Bloque B-reservas-4 · Agenda (motor de reservas + vistas + cita→caja) — DONE
 
-**Rama:** `koibox-1-crm` (sesión B4). Prompt: `docs/code-prompts/bloque-reservas-4-agenda.md`.
+**Rama:** rama de trabajo del módulo Reservas, integrada en `master` el 2026-08-19 (sesión B4). Prompt: `docs/code-prompts/bloque-reservas-4-agenda.md`.
 Contexto: `docs/design/adr-r8-motor-reservas-agnostico.md` (LA spec del motor),
 `docs/design/reservas-modulo-kickoff.md`, `docs/design/agenda-belleza-spec.md`,
 `docs/design/agenda-ux-analisis.md`, `docs/blocks/B-reservas-1/2/3-done.md` (contratos consumidos).
