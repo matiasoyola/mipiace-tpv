@@ -38,7 +38,7 @@ export interface CartLineItemProps {
   onClick: () => void;
   onUnitsChange: (units: number) => void;
   onRemove: () => void;
-  // B-koibox-2: duración de agenda del servicio (minutos), informativa.
+  // B-reservas-2: duración de agenda del servicio (minutos), informativa.
   // Sólo llega cuando el tenant tiene `agendaEnabled` y la línea es un
   // servicio con overlay de scheduling. undefined/null → no se pinta.
   // Base visual para B4 (agenda).
@@ -153,7 +153,7 @@ export function CartLineItem({
       >
         <div className="text-[14px] md:text-[14.5px] font-medium text-mipiace-ink leading-tight flex items-center gap-1.5">
           <span className="truncate">{line.nameSnapshot}</span>
-          {/* B-koibox-2: duración del servicio, informativa. Minutos con
+          {/* B-reservas-2: duración del servicio, informativa. Minutos con
               tabular-nums (UX metodología). Base visual para B4. */}
           {durationMin != null && durationMin > 0 && (
             <span

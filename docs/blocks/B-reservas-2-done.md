@@ -1,7 +1,7 @@
-# Bloque B-koibox-2 · Catálogo de servicios extendido — DONE
+# Bloque B-reservas-2 · Catálogo de servicios extendido — DONE
 
-**Rama:** `koibox-1-crm` (sesión catálogo extendido). Prompt: `docs/code-prompts/bloque-koibox-2-catalogo.md`.
-Contexto: `docs/design/koibox-modulo-kickoff.md` (ADR-K1, ADR-K6, §4 modelo de datos, §7 roadmap), `docs/design/agenda-belleza-spec.md` §2/§3, `docs/blocks/B-koibox-1-done.md` (patrón capability flag), `docs/06-modelo-datos.md`, `docs/holded/endpoints/services.md`.
+**Rama:** `koibox-1-crm` (sesión catálogo extendido). Prompt: `docs/code-prompts/bloque-reservas-2-catalogo.md`.
+Contexto: `docs/design/reservas-modulo-kickoff.md` (ADR-R1, ADR-R6, §4 modelo de datos, §7 roadmap), `docs/design/agenda-belleza-spec.md` §2/§3, `docs/blocks/B-reservas-1-done.md` (patrón capability flag), `docs/06-modelo-datos.md`, `docs/holded/endpoints/services.md`.
 
 Segundo bloque del módulo Citas+Clientes+Bonos. **Aditivo, no toca el sync de
 catálogo de Holded ni el camino de cobro** (ADR-010 intacto). **Owner de la columna
@@ -10,12 +10,12 @@ catálogo de Holded ni el camino de cobro** (ADR-010 intacto). **Owner de la col
 ## Resumen
 
 Capa de **extensión local** sobre el catálogo de servicios que ya viene de Holded
-(`product.kind=SERVICE`), NO una tabla `Service` paralela (ADR-K1): el precio y el IVA
+(`product.kind=SERVICE`), NO una tabla `Service` paralela (ADR-R1): el precio y el IVA
 siguen en Holded y aquí sólo se añaden los datos que la agenda necesita y Holded no
 modela — duración, pausas/buffers, nº de profesionales, familia y flags de canal
 (Caja/Ticket/Agenda/Online). Se añaden los **recursos** genéricos (cabina/sala/aparato,
-vocabulario neutro ADR-K6) y qué tipos de recurso necesita cada servicio. Todo el módulo
-se activa por capability flag `agendaEnabled` por tenant (ADR-K6): apagada → panel oculto
+vocabulario neutro ADR-R6) y qué tipos de recurso necesita cada servicio. Todo el módulo
+se activa por capability flag `agendaEnabled` por tenant (ADR-R6): apagada → panel oculto
 en el admin y sin duración en el TPV. Un servicio sin fila `service_scheduling` no tiene
 duración ni es reservable: la agenda (B4) lo ignora.
 
@@ -95,7 +95,7 @@ Se togglea desde `GET/POST /admin/tenant/settings`.
    patrón fijado en B1 (`crmEnabled`), no un jsonb `capabilities`. B3 (Personal, en
    desarrollo concurrente) ya dejaba el toggle stubeado en el schema de
    `POST /admin/tenant/settings` esperando que **B2 creara la columna** (comentario en su
-   migración: "propiedad de B-koibox-2"); aquí se crea la columna y se cablea de verdad
+   migración: "propiedad de B-reservas-2"); aquí se crea la columna y se cablea de verdad
    (GET select + POST data). B5/B6 añadirán `bonosEnabled`/`reservaOnlineEnabled` como
    columnas hermanas.
 2. **Los endpoints NO enforzan la capability server-side.** Igual que B1: el flag viaja
@@ -103,7 +103,7 @@ Se togglea desde `GET/POST /admin/tenant/settings`.
    independencia del flag. Menos fricción, mismo patrón probado, y evita duplicar el gate
    en cada handler. El panel del admin y el sidebar sí lo consultan.
 3. **`service_scheduling` con PK = `product_id` (relación 1:1, sin id propio).** La
-   extensión ES el producto (ADR-K1). FK `product_id → products.id`; la restricción
+   extensión ES el producto (ADR-R1). FK `product_id → products.id`; la restricción
    `kind=SERVICE` no se exige a nivel de BD (Prisma no puede) sino en el endpoint
    (`loadOwnedService`). Igual para `service_resource_needs.service_id`.
 4. **`tenantId` en `service_scheduling` y `service_resource_needs`** pese a que el boceto

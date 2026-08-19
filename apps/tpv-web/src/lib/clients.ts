@@ -1,6 +1,6 @@
-// CRM / ficha de cliente (B-koibox-1) · caché local + capa de API.
+// CRM / ficha de cliente (B-reservas-1) · caché local + capa de API.
 //
-// El cliente es fuente de verdad LOCAL (ADR-K2). La búsqueda A–Z debe
+// El cliente es fuente de verdad LOCAL (ADR-R2). La búsqueda A–Z debe
 // funcionar sin red (ADR-001 offline-first): se cachea la ficha en
 // IndexedDB (base `mipiacetpv-clients`, separada del catálogo para
 // sobrevivir a los version-check que limpian el catálogo) y se filtra

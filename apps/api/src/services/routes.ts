@@ -1,4 +1,4 @@
-// Catálogo de servicios extendido (B-koibox-2).
+// Catálogo de servicios extendido (B-reservas-2).
 //
 //   GET   /services/scheduling?query=          — servicios (product,
 //                                                kind=SERVICE) con sus
@@ -15,7 +15,7 @@
 //   PATCH /resources/:id                       — edición de recurso.
 //   DELETE /resources/:id                      — baja de recurso.
 //
-// ADR-K1: es una capa de EXTENSIÓN local sobre el `product` espejo de
+// ADR-R1: es una capa de EXTENSIÓN local sobre el `product` espejo de
 // Holded, NO una tabla `Service` paralela. Precio/IVA/alta viven en
 // Holded y aquí NUNCA se tocan — sólo se añade el overlay de agenda.
 // Un servicio sin fila en `service_scheduling` no tiene duración ni es
@@ -26,7 +26,7 @@
 // que el producto es un SERVICE del tenant (`loadOwnedService`).
 //
 // Gate por capability: el flag `agendaEnabled` viaja al front (TPV y
-// admin), que muestra/oculta el módulo (ADR-K6). Los endpoints siguen la
+// admin), que muestra/oculta el módulo (ADR-R6). Los endpoints siguen la
 // convención de B1 (CRM): existen con independencia del flag, el front es
 // quien lo esconde. No se enforce el flag server-side.
 
@@ -180,7 +180,7 @@ export async function registerServicesRoutes(
           name: s.name,
           sku: s.sku,
           // Precio/IVA vienen de Holded; se muestran informativos, NO se
-          // editan aquí (ADR-K1).
+          // editan aquí (ADR-R1).
           basePrice: Number(s.basePrice),
           taxRate: Number(s.taxRate),
           active: s.active,

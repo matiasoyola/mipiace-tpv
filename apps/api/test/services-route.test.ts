@@ -1,4 +1,4 @@
-// Integration test del catálogo de servicios extendido (B-koibox-2).
+// Integration test del catálogo de servicios extendido (B-reservas-2).
 // Prisma en memoria; valida el join servicios + scheduling, el upsert de
 // scheduling (con coerción online↔onlineBookable), el CRUD de recursos,
 // las necesidades de recurso y el aislamiento por tenant.

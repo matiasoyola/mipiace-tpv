@@ -1,4 +1,4 @@
-// Capa de agenda del TPV (B-koibox-4). API + caché offline del día (lectura
+// Capa de agenda del TPV (B-reservas-4). API + caché offline del día (lectura
 // desde IndexedDB) + alta por outbox con `externalId` (mismo patrón que el
 // alta de cliente de B1). Gate por `agendaEnabled` (lo consulta la UI). El
 // motor de disponibilidad y el anti-solape viven en el servidor; aquí sólo
@@ -321,7 +321,7 @@ export const STATUS_LABEL: Record<AppointmentStatus, string> = {
   CANCELLED: "Cancelada",
 };
 
-// Colores por estado (mapeo del mockup agenda-koibox).
+// Colores por estado (mapeo del mockup agenda-reservas).
 export const STATUS_COLOR: Record<AppointmentStatus, string> = {
   PENDING: "#f59e0b", // ámbar
   CONFIRMED: "#3b82f6", // azul

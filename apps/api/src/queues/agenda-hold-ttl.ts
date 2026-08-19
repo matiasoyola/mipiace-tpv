@@ -1,4 +1,4 @@
-// Cola BullMQ del TTL de holds de la agenda (B-koibox-4, ADR-K8 §4).
+// Cola BullMQ del TTL de holds de la agenda (B-reservas-4, ADR-R8 §4).
 //
 // Un único job repeatable GLOBAL (no por tenant): la pasada libera todos los
 // holds PENDING vencidos (pending_until < now) marcándolos CANCELLED e

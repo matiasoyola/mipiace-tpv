@@ -55,7 +55,7 @@ async function main() {
   // hora de RECONCILIATION_HOUR (Europe/Madrid).
   await registerReconciliationRepeatable();
   console.log("[workers] reconciliación diaria registrada");
-  // TTL de holds de agenda (B-koibox-4): repeatable global, cada minuto.
+  // TTL de holds de agenda (B-reservas-4): repeatable global, cada minuto.
   await registerAgendaHoldTtlRepeatable();
   console.log("[workers] agenda hold-ttl registrado (cada minuto)");
   process.on("SIGINT", async () => {

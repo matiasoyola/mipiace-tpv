@@ -83,10 +83,10 @@ export async function registerAdminTenantSettingsRoutes(
             cashierSearchableContacts: { type: "boolean" },
             // v1.8-Fiado · activa la venta a crédito para el tenant.
             creditSalesEnabled: { type: "boolean" },
-            // B-koibox-1 · activa el CRM / ficha de cliente (ADR-K6).
+            // B-reservas-1 · activa el CRM / ficha de cliente (ADR-R6).
             crmEnabled: { type: "boolean" },
-            // B-koibox-2 · activa la agenda / catálogo extendido (ADR-K6).
-            // Esta columna es propiedad de B-koibox-2 (owner de
+            // B-reservas-2 · activa la agenda / catálogo extendido (ADR-R6).
+            // Esta columna es propiedad de B-reservas-2 (owner de
             // `agendaEnabled`); el gate lo consumen el panel de personal
             // (B3) y la agenda (B4).
             agendaEnabled: { type: "boolean" },

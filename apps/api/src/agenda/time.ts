@@ -1,4 +1,4 @@
-// Zona horaria del motor de agenda (B-koibox-4). B4 es el DUEÑO de la tz:
+// Zona horaria del motor de agenda (B-reservas-4). B4 es el DUEÑO de la tz:
 // B3 dejó explícitamente las franjas de turno como hora de pared "HH:MM"
 // por día, sin conversión. Aquí componemos `fecha(local) + hora de pared`
 // en Europe/Madrid → instante UTC, que es lo que se guarda en los
@@ -11,7 +11,7 @@
 
 export const CENTER_TZ = "Europe/Madrid";
 
-// Rejilla de disponibilidad: 15 minutos (ADR-K8 §4).
+// Rejilla de disponibilidad: 15 minutos (ADR-R8 §4).
 export const SLOT_MINUTES = 15;
 
 const OFFSET_FORMATTERS = new Map<string, Intl.DateTimeFormat>();

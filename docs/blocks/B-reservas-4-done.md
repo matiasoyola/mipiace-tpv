@@ -1,13 +1,13 @@
-# Bloque B-koibox-4 · Agenda (motor de reservas + vistas + cita→caja) — DONE
+# Bloque B-reservas-4 · Agenda (motor de reservas + vistas + cita→caja) — DONE
 
-**Rama:** `koibox-1-crm` (sesión B4). Prompt: `docs/code-prompts/bloque-koibox-4-agenda.md`.
-Contexto: `docs/design/adr-k8-motor-reservas-agnostico.md` (LA spec del motor),
-`docs/design/koibox-modulo-kickoff.md`, `docs/design/agenda-belleza-spec.md`,
-`docs/design/agenda-ux-analisis.md`, `docs/blocks/B-koibox-1/2/3-done.md` (contratos consumidos).
+**Rama:** `koibox-1-crm` (sesión B4). Prompt: `docs/code-prompts/bloque-reservas-4-agenda.md`.
+Contexto: `docs/design/adr-r8-motor-reservas-agnostico.md` (LA spec del motor),
+`docs/design/reservas-modulo-kickoff.md`, `docs/design/agenda-belleza-spec.md`,
+`docs/design/agenda-ux-analisis.md`, `docs/blocks/B-reservas-1/2/3-done.md` (contratos consumidos).
 
 El cuello del módulo. Motor de disponibilidad (modo **CITA**), vistas día/semana por
 profesional, estados, bloqueos y **cita→caja pre-poblada**, sobre el núcleo **agnóstico
-cita/mesa** del ADR-K8. Gate `Tenant.agendaEnabled`. **No toca el camino de cobro a Holded**
+cita/mesa** del ADR-R8. Gate `Tenant.agendaEnabled`. **No toca el camino de cobro a Holded**
 (ADR-010 intacto): el checkout de cita **alimenta** ese camino, no lo modifica. **No commit / no push.**
 
 ## Resumen
@@ -145,7 +145,7 @@ sin `agendaEnabled` no ve agenda (nav gated + rutas 403).
 
 - **`MesaMode` / hostelería**: `table_id`, `no_table_overlap`, asiento por party/turno, vista sala. El
   núcleo (tablas, enums con valores TABLE reservados, GiST, engine) ya lo soporta → cae barato.
-- **Reserva online embebible** (B6), **señal/deposit** (ADR-K5b; sólo la columna `depositCents`),
+- **Reserva online embebible** (B6), **señal/deposit** (ADR-R5b; sólo la columna `depositCents`),
   **recordatorios** (B7), **canje de bono como `source`** (B5; sólo la columna `voucherId` y el valor
   `GIFT_REDEMPTION`).
 - **Lista de espera avanzada**; catálogo completo de políticas (sólo el subset de columnas).

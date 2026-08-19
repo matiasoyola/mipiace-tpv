@@ -1,4 +1,4 @@
-// Integration test del CRM (B-koibox-1): /clients y sus sub-recursos.
+// Integration test del CRM (B-reservas-1): /clients y sus sub-recursos.
 // Prisma en memoria; valida búsqueda A–Z, alta idempotente, aislamiento
 // por tenant, ficha completa, historial unificado y contratos estables.
 
@@ -187,7 +187,7 @@ const fakePrisma = {
       return list;
     }),
   },
-  // B-koibox-4: el historial ahora consulta citas del cliente vía la capa
+  // B-reservas-4: el historial ahora consulta citas del cliente vía la capa
   // de agenda (`createAgendaStore().listForClient`), que usa SQL crudo. Este
   // tenant de prueba no tiene citas → devolvemos vacío.
   $queryRawUnsafe: vi.fn(async () => []),

@@ -1,11 +1,11 @@
-# Bloque Koibox-3 · Personal + horarios
+# Bloque Reservas-3 · Personal + horarios
 
 > Modela el personal y sus horarios como base de la agenda multi-profesional. Paralelizable con B1 y B2. Desbloquea la agenda (B4). Depende de `Tenant.agendaEnabled` (owner: B2).
 
 ## Contexto (leer antes)
-- `docs/design/koibox-modulo-kickoff.md` §3 ADR-K6, §4 (Personal), §2 (`Staff` RT → extender `user`).
+- `docs/design/reservas-modulo-kickoff.md` §3 ADR-R6, §4 (Personal), §2 (`Staff` RT → extender `user`).
 - `docs/design/agenda-belleza-spec.md` §2 (`Staff`, `StaffSkill`, `Shift` con `rrule` y `kind`) y §3 (el motor cruza skill ∩ turno ∩ sin-solape).
-- `docs/blocks/B-koibox-1-done.md` (patrón capability flag) · `docs/06-modelo-datos.md` (`user` con role/PIN) · `docs/02-arquitectura.md`.
+- `docs/blocks/B-reservas-1-done.md` (patrón capability flag) · `docs/06-modelo-datos.md` (`user` con role/PIN) · `docs/02-arquitectura.md`.
 
 ## Alcance
 Modelar profesionales y horarios **extendiendo el `user` existente** (no una tabla `Staff` paralela), como base de la agenda multi-profesional. Gate por `agendaEnabled`.
@@ -27,8 +27,8 @@ Modelar profesionales y horarios **extendiendo el `user` existente** (no una tab
 - Vocabulario neutro: **profesional** (peluquero, esteticista, médico, fisio…).
 
 ## Restricciones
-- Extender `user`, **NO** tabla `Staff` paralela (coherente con ADR-K1: no duplicar entidades existentes).
-- **ADR-K6**: columna booleana `Tenant.agendaEnabled`. Cero `if(businessType)`. Vocabulario neutro.
+- Extender `user`, **NO** tabla `Staff` paralela (coherente con ADR-R1: no duplicar entidades existentes).
+- **ADR-R6**: columna booleana `Tenant.agendaEnabled`. Cero `if(businessType)`. Vocabulario neutro.
 - `rrule` **estándar RFC 5545** con librería probada (p.ej. `rrule.js`) — no inventar un formato de recurrencia propio.
 - Multi-tenant por fila. Migración aditiva.
 - **No** implementar aquí el cruce completo de disponibilidad (solape con citas): eso es B4. Aquí solo la expansión del turno a franjas.

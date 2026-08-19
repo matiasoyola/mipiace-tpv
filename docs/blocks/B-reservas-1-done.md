@@ -1,16 +1,16 @@
-# Bloque B-koibox-1 · CRM / Ficha de cliente — DONE
+# Bloque B-reservas-1 · CRM / Ficha de cliente — DONE
 
-**Rama:** `a3-publicacion` (sesión CRM). Prompt: `docs/code-prompts/bloque-koibox-1-crm.md`.
-Contexto: `docs/design/koibox-modulo-kickoff.md` (ADR-K2, ADR-K6, §4 modelo de datos), `docs/design/agenda-belleza-spec.md` §2/§6.
+**Rama:** `a3-publicacion` (sesión CRM). Prompt: `docs/code-prompts/bloque-reservas-1-crm.md`.
+Contexto: `docs/design/reservas-modulo-kickoff.md` (ADR-R2, ADR-R6, §4 modelo de datos), `docs/design/agenda-belleza-spec.md` §2/§6.
 
 Primer bloque del módulo Citas+Clientes+Bonos. **Aditivo, no toca el camino de cobro a
 Holded** (ADR-010 intacto). Desbloquea agenda (B4), bonos (B5) y reserva online (B6).
 
 ## Resumen
 
-Ficha de cliente / CRM como capa **local** (fuente de verdad propia, ADR-K2), enlazada
+Ficha de cliente / CRM como capa **local** (fuente de verdad propia, ADR-R2), enlazada
 opcional y perezosamente a contactos de Holded sólo para lo fiscal. Se activa por capability
-flag `crmEnabled` por tenant (ADR-K6): apagada → nada aparece en el TPV. Vocabulario neutro
+flag `crmEnabled` por tenant (ADR-R6): apagada → nada aparece en el TPV. Vocabulario neutro
 (cliente / profesional / servicio). Búsqueda offline-first sobre Dexie, alta offline vía
 outbox. Hook `useClientPicker` reutilizable (carrito hoy, agenda en B4), cableado al atajo
 **F1**.
@@ -81,7 +81,7 @@ Todos los endpoints: `requireOwnerOrCashier`, aislamiento por `auth.tenantId`.
 
 ## Decisiones tomadas sin preguntar (con justificación)
 
-1. **Capability flag = columna booleana `crmEnabled`, no un JSON `capabilities`.** ADR-K6
+1. **Capability flag = columna booleana `crmEnabled`, no un JSON `capabilities`.** ADR-R6
    bosqueja `capabilities:{agenda,bonos,reservaOnline}`, pero el repo modela cada flag como
    columna propia (`creditSalesEnabled`, `cashierSearchableContacts`…). Seguí esa convención;
    los flags de B5/B6 (bonos, reservaOnline) serán columnas hermanas. Menos fricción, mismo
@@ -114,7 +114,7 @@ Todos los endpoints: `requireOwnerOrCashier`, aislamiento por `auth.tenantId`.
    como atajo previsto). Lo cableé ahora para abrir el picker del CRM. Al elegir un cliente
    **con** `holdedContactId`, se asigna al ticket por el camino fiscal existente (`setContact`
    → `contactHoldedId`, sin tocar checkout). **Sin** enlace fiscal, aviso transitorio: el
-   enlace lo hará el cobro cuando haga falta factura (ADR-K2). El camino de cobro **no se
+   enlace lo hará el cobro cuando haga falta factura (ADR-R2). El camino de cobro **no se
    toca**.
 10. **Sección Clientes = overlay a pantalla completa** lanzado desde un botón del header de
     `SalePage` (gated por `crmEnabled`), como `TicketsHistoryPage`/`DebtsScreen`. El TPV no

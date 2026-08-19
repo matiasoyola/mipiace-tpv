@@ -271,11 +271,11 @@ export function SalePage(props: SalePageProps) {
   // v1.8-Fiado · pantalla Deudas + flag de venta a crédito del tenant.
   const [showDebts, setShowDebts] = useState(false);
   const creditSalesEnabled = getCachedCreditSalesEnabled();
-  // B-koibox-1 · sección Clientes (CRM) + picker rápido F1. Sólo con la
-  // capability activa (ADR-K6).
+  // B-reservas-1 · sección Clientes (CRM) + picker rápido F1. Sólo con la
+  // capability activa (ADR-R6).
   const crmEnabled = getCachedCrmEnabled();
   const [showClients, setShowClients] = useState(false);
-  // B-koibox-4 · Agenda (motor de reservas). Sólo con `agendaEnabled`.
+  // B-reservas-4 · Agenda (motor de reservas). Sólo con `agendaEnabled`.
   const agendaEnabled = getCachedAgendaEnabled();
   const [showAgenda, setShowAgenda] = useState(false);
   const clientPicker = useClientPicker();
@@ -562,11 +562,11 @@ export function SalePage(props: SalePageProps) {
   const [contact, setContact] = useState<ContactRef | null>(null);
   const [notes, setNotes] = useState<string>("");
 
-  // B-koibox-1 · atajo F1 → picker de cliente del CRM. Al elegir un
+  // B-reservas-1 · atajo F1 → picker de cliente del CRM. Al elegir un
   // cliente con contacto fiscal de Holded enlazado, se asigna al ticket
   // por el camino existente (contactHoldedId, intacto). Si aún no tiene
   // enlace fiscal, se avisa: el enlace lo crea el cobro cuando haga falta
-  // factura (ADR-K2). Sólo activo si la capability CRM está encendida.
+  // factura (ADR-R2). Sólo activo si la capability CRM está encendida.
   useEffect(() => {
     if (!crmEnabled) return;
     const onKey = (e: KeyboardEvent) => {
@@ -1471,8 +1471,8 @@ export function SalePage(props: SalePageProps) {
                   <span>Deudas</span>
                 </button>
               )}
-              {/* B-koibox-1 · sección Clientes (CRM). Sólo con la
-                  capability activa del tenant (ADR-K6). */}
+              {/* B-reservas-1 · sección Clientes (CRM). Sólo con la
+                  capability activa del tenant (ADR-R6). */}
               {crmEnabled && (
                 <button
                   onClick={() => setShowClients(true)}
@@ -1483,7 +1483,7 @@ export function SalePage(props: SalePageProps) {
                   <span className="hidden sm:inline">Clientes</span>
                 </button>
               )}
-              {/* B-koibox-4 · Agenda. Sólo con la capability activa. */}
+              {/* B-reservas-4 · Agenda. Sólo con la capability activa. */}
               {agendaEnabled && (
                 <button
                   onClick={() => setShowAgenda(true)}
@@ -1791,9 +1791,9 @@ export function SalePage(props: SalePageProps) {
           onClose={() => setShowDebts(false)}
         />
       )}
-      {/* B-koibox-1 · sección Clientes (CRM) + picker rápido F1. */}
+      {/* B-reservas-1 · sección Clientes (CRM) + picker rápido F1. */}
       {showClients && <ClientsPage onClose={() => setShowClients(false)} />}
-      {/* B-koibox-4 · Agenda. "Cobrar en caja" carga las líneas del ticket
+      {/* B-reservas-4 · Agenda. "Cobrar en caja" carga las líneas del ticket
           pre-poblado en el carrito y cierra la agenda: el cobro sigue por el
           camino existente sin re-teclear (no se toca ADR-010). */}
       {showAgenda && (
@@ -2316,7 +2316,7 @@ function SaleWorkspace({
   // sólo "abierto/cerrado" — las líneas viven arriba en SalePage, así
   // que cerrar el sheet nunca pierde nada.
   const [mobileTicketOpen, setMobileTicketOpen] = useState(false);
-  // B-koibox-2: mapa productId → duración de servicio para pintar los
+  // B-reservas-2: mapa productId → duración de servicio para pintar los
   // minutos informativos por línea del ticket. Sólo se construye si el
   // tenant tiene la agenda activa; en caso contrario queda vacío y el
   // ticket no muestra duraciones (base visual para B4).
@@ -2739,7 +2739,7 @@ function SaleWorkspace({
 
 interface TicketPanelProps {
   lines: CartLine[];
-  // B-koibox-2: productId → duración (min) del servicio. Vacío si el
+  // B-reservas-2: productId → duración (min) del servicio. Vacío si el
   // tenant no tiene `agendaEnabled`. Informativo por línea (base para B4).
   durationByProduct: Map<string, number>;
   contact: ContactRef | null;

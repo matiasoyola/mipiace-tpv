@@ -1,4 +1,4 @@
-// Integration test de Personal + horarios (B-koibox-3): /staff, skills,
+// Integration test de Personal + horarios (B-reservas-3): /staff, skills,
 // turnos y expansión de rrule. Prisma en memoria; valida el gate por
 // `agendaEnabled`, el aislamiento por tenant, la matriz de skills, el CRUD
 // de turnos con validación de rrule RFC 5545 y la expansión de la semana

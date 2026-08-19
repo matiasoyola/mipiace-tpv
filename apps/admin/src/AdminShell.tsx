@@ -50,7 +50,7 @@ interface NavItem {
   // para impersonation read-only del super-admin; ningún usuario
   // per-tenant las verá en su admin.
   superAdminOnly?: boolean;
-  // B-koibox-2 (ADR-K6): la entrada sólo se muestra si el tenant tiene la
+  // B-reservas-2 (ADR-R6): la entrada sólo se muestra si el tenant tiene la
   // capability activada. Hoy sólo "agenda" (`Tenant.agendaEnabled`). El
   // flag se lee una vez desde /admin/tenant/settings; mientras carga la
   // entrada permanece oculta para no parpadear.
@@ -75,7 +75,7 @@ const NAV_ITEMS: NavItem[] = [
   // porque es operativa diaria (cambiar IP del router, etc.).
   { to: "/admin/printers", label: "Impresoras", icon: Printer },
   { to: "/admin/cashiers", label: "Cajeros", icon: Users },
-  // B-koibox-3: panel de personal (profesionales + skills + turnos) de la
+  // B-reservas-3: panel de personal (profesionales + skills + turnos) de la
   // agenda. Sólo visible con la capability `agenda` activada (misma puerta
   // que el catálogo de agenda); la página además se auto-gatea.
   {
@@ -88,7 +88,7 @@ const NAV_ITEMS: NavItem[] = [
   // OWNER-only — crea contactos en Holded, que es la fuente de verdad.
   { to: "/admin/contacts-import", label: "Importar clientes", icon: UserPlus, ownerOnly: true },
   { to: "/admin/products", label: "Productos", icon: Package },
-  // B-koibox-2: catálogo de agenda (duración/pausas/canales + recursos).
+  // B-reservas-2: catálogo de agenda (duración/pausas/canales + recursos).
   // Sólo visible si el tenant tiene la capability `agenda` activada.
   {
     to: "/admin/agenda-catalog",
@@ -357,7 +357,7 @@ function MobileDrawer({
   );
 }
 
-// B-koibox-2: lee las capabilities del tenant una vez para gatear las
+// B-reservas-2: lee las capabilities del tenant una vez para gatear las
 // entradas del sidebar (hoy sólo `agenda`). null mientras carga → las
 // entradas con capability quedan ocultas hasta saber el valor real.
 function useAgendaEnabled(): boolean | null {

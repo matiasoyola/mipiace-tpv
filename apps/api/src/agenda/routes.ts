@@ -1,4 +1,4 @@
-// API de la agenda (B-koibox-4, modo CITA). Aislamiento por tenant + gate
+// API de la agenda (B-reservas-4, modo CITA). Aislamiento por tenant + gate
 // `ensureAgendaEnabled` (403 AGENDA_DISABLED, mismo patrón que B3), a nivel
 // de RUTA (no sólo de UI). Auth `requireOwnerOrCashier`: la agenda la usa el
 // cajero del TPV (buscar hueco, alta, "en sala", cobrar) tanto como el
@@ -30,7 +30,7 @@ import type { AppointmentStatus } from "./types.js";
 // Minutos por defecto del hold PENDING (reserva no presencial).
 const HOLD_TTL_MINUTES = 10;
 
-// Gate por capability flag (ADR-K6). Corre tras la autenticación.
+// Gate por capability flag (ADR-R6). Corre tras la autenticación.
 async function ensureAgendaEnabled(
   request: FastifyRequest,
   reply: FastifyReply,

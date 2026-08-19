@@ -1,8 +1,8 @@
-# Bloque B-koibox-3 · Personal + horarios — DONE
+# Bloque B-reservas-3 · Personal + horarios — DONE
 
-**Rama:** `koibox-1-crm` (sesión B3). Prompt: `docs/code-prompts/bloque-koibox-3-personal.md`.
-Contexto: `docs/design/koibox-modulo-kickoff.md` (ADR-K1, ADR-K6, §4 modelo de datos),
-`docs/design/agenda-belleza-spec.md` §2/§3, `docs/blocks/B-koibox-1-done.md`, `docs/06-modelo-datos.md`.
+**Rama:** `koibox-1-crm` (sesión B3). Prompt: `docs/code-prompts/bloque-reservas-3-personal.md`.
+Contexto: `docs/design/reservas-modulo-kickoff.md` (ADR-R1, ADR-R6, §4 modelo de datos),
+`docs/design/agenda-belleza-spec.md` §2/§3, `docs/blocks/B-reservas-1-done.md`, `docs/06-modelo-datos.md`.
 
 Base de la **agenda multi-profesional** (B4). Paralelizable con B1 y B2 —
 implementado **en paralelo real** con una sesión B2 activa (ver "Nota de concurrencia").
@@ -10,10 +10,10 @@ Aditivo, **no toca el camino de cobro a Holded** (ADR-010 intacto).
 
 ## Resumen
 
-Modela el personal y sus horarios **extendiendo el `user` existente** (ADR-K1 — NO
+Modela el personal y sus horarios **extendiendo el `user` existente** (ADR-R1 — NO
 tabla `Staff` paralela): perfil de agenda 1:1, matriz profesional × servicio y turnos
 como plantillas recurrentes `rrule` (RFC 5545, con **rrule.js**) + ventana de validez.
-Todo gateado por `Tenant.agendaEnabled` (ADR-K6, columna propiedad de B-koibox-2). El
+Todo gateado por `Tenant.agendaEnabled` (ADR-R6, columna propiedad de B-reservas-2). El
 helper `GET /staff/:userId/availability-template` expande la semana tipo a franjas
 concretas para un rango — el contrato que consumirá el motor de B4. Panel de gestión en
 `apps/admin` (profesionales + skills + turnos), gated. Vocabulario neutro (**profesional**).
@@ -49,7 +49,7 @@ concretas para un rango — el contrato que consumirá el motor de B4. Panel de 
 - `staff_shifts` — turno = plantilla `rrule` (RFC 5545) + `start_time`/`end_time` ("HH:MM")
   + `valid_from`/`valid_until?` (`@db.Date`) + `kind` (`StaffShiftKind`). Índices
   `(tenant_id, user_id)` y `(user_id)`.
-- `Tenant.agenda_enabled` **NO se crea aquí** — es propiedad de B-koibox-2 (ver decisión 1).
+- `Tenant.agenda_enabled` **NO se crea aquí** — es propiedad de B-reservas-2 (ver decisión 1).
 
 ## Contrato de la API (para B4 / front)
 
@@ -95,7 +95,7 @@ lunes; con `validUntil=2026-08-17` → sólo 3, 10, 17.
    migración de B2). Si B3 se hubiera corrido en solitario, la habría creado con
    `Boolean @default(false)`.
 2. **`StaffSkill.serviceId` = `products.id` (uuid) con FK dura**, alineado con la convención
-   que B-koibox-2 fijó (`ServiceScheduling.productId` y `ServiceResourceNeed.serviceId` son
+   que B-reservas-2 fijó (`ServiceScheduling.productId` y `ServiceResourceNeed.serviceId` son
    ambos `products.id` uuid con FK). Diverge de la de `ClientTechnicalNote` de B1 (serviceId =
    id Holded string, sin FK). Elegí la de B2 porque el **cluster de agenda** (skill ∩ servicio
    ∩ scheduling ∩ recurso) necesita integridad referencial para el join del motor de B4; y el
@@ -140,7 +140,7 @@ lunes; con `validUntil=2026-08-17` → sólo 3, 10, 17.
 
 ## Nota de concurrencia (B2 en paralelo)
 
-Durante la sesión hubo una sesión **B-koibox-2 activa** editando ficheros compartidos
+Durante la sesión hubo una sesión **B-reservas-2 activa** editando ficheros compartidos
 (`schema.prisma`, `server.ts`, `admin/tenant-settings.ts`, `AdminShell.tsx`, `App.tsx`).
 Los merges coexistieron limpios: B2 aportó `ServiceScheduling`/`Resource`/`ServiceResourceNeed`,
 `agendaEnabled`, `registerServicesRoutes`, la página `AgendaCatalogPage` y el mecanismo
@@ -176,7 +176,7 @@ schema combinado: **válido**.
 
 1. **Migración `20260805000000_b_koibox_3_staff` no aplicada al piloto** — `prisma migrate deploy`
    en el deploy (en dev sólo `generate`). La columna `agenda_enabled` la aporta la migración de
-   B-koibox-2; verificar que ambas migraciones se despliegan juntas.
+   B-reservas-2; verificar que ambas migraciones se despliegan juntas.
 2. **`availability-template` devuelve franjas por día sin tz** — B4 es el dueño de la zona
    horaria y del cruce completo (citas, bloqueos, recursos, multi-profesional).
 3. **Editor de turnos del front cubre `FREQ=WEEKLY;BYDAY=...`** (el caso principal del spec).

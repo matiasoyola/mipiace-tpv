@@ -1,4 +1,4 @@
-// Picker de cliente reutilizable (B-koibox-1). Lo consumen el carrito del
+// Picker de cliente reutilizable (B-reservas-1). Lo consumen el carrito del
 // TPV (asignar cliente a ticket, atajo F1) y — cuando llegue — la agenda
 // (B4, asignar cliente a cita). Búsqueda instantánea sobre el caché local
 // Dexie (feedback <100 ms) con sync en background; alta rápida inline.

@@ -1,4 +1,4 @@
-// BookingEngine + estrategia por ReservationMode (ADR-K8 §4). B4 implementa
+// BookingEngine + estrategia por ReservationMode (ADR-R8 §4). B4 implementa
 // SOLO `CitaMode`. `MesaMode` queda como interfaz no implementada — sin
 // ramas muertas en el núcleo. El motor es agnóstico: lo específico de cita
 // (staff con skill, recursos por tipo, encadenado secuencial) vive aquí; el

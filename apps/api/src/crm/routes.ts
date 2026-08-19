@@ -1,4 +1,4 @@
-// Endpoints del CRM / ficha de cliente (B-koibox-1).
+// Endpoints del CRM / ficha de cliente (B-reservas-1).
 //
 //   GET   /clients?query=&sort=az&cursor=  — búsqueda A–Z por nombre/
 //                                            teléfono/email, paginado.
@@ -19,7 +19,7 @@
 //   POST  /clients/:id/technical-notes     — alta de ficha técnica por
 //                                            servicio.
 //
-// ADR-K2: el CRM es LOCAL, fuente de verdad propia. `holdedContactId` es
+// ADR-R2: el CRM es LOCAL, fuente de verdad propia. `holdedContactId` es
 // sólo un enlace fiscal perezoso — aquí NUNCA se crea contacto en Holded
 // ni se vuelca historial / ficha técnica / RGPD. El enlace lo rellena el
 // camino de cobro existente cuando hace falta factura (ADR-010, intacto).
@@ -216,7 +216,7 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
       }
 
       // Aviso de teléfono duplicado (no bloqueante — familias comparten
-      // número; ADR-K2 no impone unicidad de teléfono). El front decide
+      // número; ADR-R2 no impone unicidad de teléfono). El front decide
       // si mostrar el aviso.
       let phoneWarning: Array<{ id: string; name: string }> | null = null;
       const phone = body.phone?.trim();
@@ -413,7 +413,7 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
         total: Number(t.total),
       }));
 
-      // B-koibox-4: citas del cliente (contrato `kind:"APPOINTMENT"` que B1
+      // B-reservas-4: citas del cliente (contrato `kind:"APPOINTMENT"` que B1
       // dejó reservado). Reutiliza la capa de acceso de la agenda.
       const appts = await createAgendaStore(prisma).listForClient(
         auth.tenantId,

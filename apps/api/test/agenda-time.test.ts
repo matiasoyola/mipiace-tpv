@@ -1,4 +1,4 @@
-// Tests de los helpers de zona horaria (B-koibox-4). B4 es el dueño de la
+// Tests de los helpers de zona horaria (B-reservas-4). B4 es el dueño de la
 // tz: compone fecha(local) + hora de pared en Europe/Madrid → instante UTC.
 
 import { describe, expect, it } from "vitest";

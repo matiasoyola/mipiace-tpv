@@ -1,4 +1,4 @@
-// B-koibox-2 · Catálogo de servicios extendido — panel de edición.
+// B-reservas-2 · Catálogo de servicios extendido — panel de edición.
 //
 // El propietario añade a cada servicio (espejo de Holded, kind=SERVICE)
 // los datos que la agenda necesita y Holded no modela: duración, pausas,
@@ -6,12 +6,12 @@
 // Online). También gestiona los recursos (cabinas/salas/aparatos) y qué
 // tipos de recurso necesita cada servicio.
 //
-// ADR-K1: es una capa de EXTENSIÓN local sobre el producto de Holded, NO
+// ADR-R1: es una capa de EXTENSIÓN local sobre el producto de Holded, NO
 // una tabla de servicios paralela. Precio/IVA vienen de Holded y aquí NO
 // se tocan (se muestran informativos). Un servicio sin duración guardada
 // no es reservable: la agenda (B4) lo ignora.
 //
-// Gate por capability (ADR-K6): si el tenant no tiene `agendaEnabled`, el
+// Gate por capability (ADR-R6): si el tenant no tiene `agendaEnabled`, el
 // panel muestra un aviso y no ofrece edición. La entrada del sidebar
 // también se oculta (AdminShell).
 

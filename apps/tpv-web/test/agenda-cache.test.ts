@@ -1,4 +1,4 @@
-// Tests de la capa de agenda del TPV (B-koibox-4): caché offline del día
+// Tests de la capa de agenda del TPV (B-reservas-4): caché offline del día
 // (round-trip IndexedDB) y alta offline por outbox con externalId. Node-env
 // con fake-indexeddb (misma infra que clients-cache.test.ts; no jsdom).
 

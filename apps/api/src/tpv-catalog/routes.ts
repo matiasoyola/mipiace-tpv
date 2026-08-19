@@ -82,7 +82,7 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
           // grid de productos con los chips de categoría. Si Holded no
           // envía tags, el campo llega como [] y los chips quedan vacíos.
           tags: true,
-          // B-koibox-2: duración de agenda del servicio (overlay local
+          // B-reservas-2: duración de agenda del servicio (overlay local
           // sobre el product de Holded). El TPV la pinta informativa por
           // línea de servicio cuando el tenant tiene `agendaEnabled`. Null
           // si el servicio no tiene fila `service_scheduling`.
@@ -111,7 +111,7 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
         // cajero, así que el front construye la URL final.
         imageMime: p.imageMime,
         tags: p.tags,
-        // B-koibox-2: sólo los servicios con overlay de agenda traen
+        // B-reservas-2: sólo los servicios con overlay de agenda traen
         // duración; el resto (productos, servicios sin scheduling) va
         // como null y el TPV no pinta nada.
         durationMin: p.scheduling?.durationMin ?? null,
@@ -137,13 +137,13 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
               // v1.8-Fiado · el TPV cachea el flag para mostrar el botón
               // "Fiado" en checkout y la entrada a la pantalla Deudas.
               creditSalesEnabled: tenant.creditSalesEnabled,
-              // B-koibox-1 (CRM) · capability flag de la sección Clientes.
+              // B-reservas-1 (CRM) · capability flag de la sección Clientes.
               // El TPV lo cachea para mostrar/ocultar la ficha de cliente
-              // y el atajo F1 (ADR-K6).
+              // y el atajo F1 (ADR-R6).
               crmEnabled: tenant.crmEnabled,
-              // B-koibox-2 · capability flag de la agenda. El TPV lo cachea
+              // B-reservas-2 · capability flag de la agenda. El TPV lo cachea
               // para pintar (o no) la duración por línea de servicio en el
-              // ticket (ADR-K6).
+              // ticket (ADR-R6).
               agendaEnabled: tenant.agendaEnabled,
               // v1.3-Operativa-Extra · Lote 1: alias editable de tags
               // (`slug` tal como llega de Holded en lowercase → `label`

@@ -1,4 +1,4 @@
-# ADR-K8 · Motor de reservas agnóstico cita/mesa — spec de arquitectura (previo a B4)
+# ADR-R8 · Motor de reservas agnóstico cita/mesa — spec de arquitectura (previo a B4)
 
 _2026-08-05. Baja el insight `reservas-horizontal-cita-mesa.md` a una abstracción concreta, anclada en el esquema real de B1/B2/B3 (`schema.prisma`) y la spec heredada `agenda-belleza-spec.md`. Esta es la spec que precede al prompt de B4; el alta de cita queda pendiente de validar con Matías antes de fijar B4 (ver §8)._
 
@@ -12,12 +12,12 @@ Una **reserva** ocupa **uno o más recursos** durante un **intervalo de tiempo**
 
 Igual en los dos dominios, se diseña ahora y no se repinta:
 
-- **Anti-solape por recurso a nivel de BD** (ADR-K4): `tstzrange` + `EXCLUDE USING gist`. Un recurso no se puede doblar; la carrera la resuelve Postgres, no el código.
+- **Anti-solape por recurso a nivel de BD** (ADR-R4): `tstzrange` + `EXCLUDE USING gist`. Un recurso no se puede doblar; la carrera la resuelve Postgres, no el código.
 - **Retícula temporal**: intervalos sobre una rejilla (15 min en cita; turnos/sittings en mesa — siguen siendo intervalos).
 - **Pipeline de políticas** `(slot, contexto) -> allow | deny | annotate`, funciones puras con parámetros por centro en BD (ajustable sin deploy).
 - **Cliente único** (B1) compartido entre agenda, TPV y bonos.
-- **Reserva online embebible marca blanca** (B6, ADR-K5): mismo `BookingEngine`, mismo widget.
-- **Recordatorios** (B7) y **señal anti-no-show** (ADR-K5b).
+- **Reserva online embebible marca blanca** (B6, ADR-R5): mismo `BookingEngine`, mismo widget.
+- **Recordatorios** (B7) y **señal anti-no-show** (ADR-R5b).
 
 ## 2. Lo variable (el *modo*, patrón estrategia)
 
@@ -63,7 +63,7 @@ Un registro = una visita del cliente (puede contener varios servicios encadenado
 - `source ReservationSource @default(PRESENCIAL)`
 - `partySize Int?` — **solo modo mesa** (comensales). Nullable en cita.
 - `voucherId uuid?` — canje de bono (B5).
-- `depositCents Int?` — señal cobrada (ADR-K5b; Redsys/Bizum, **no** Stripe).
+- `depositCents Int?` — señal cobrada (ADR-R5b; Redsys/Bizum, **no** Stripe).
 - `pendingUntil DateTime? @db.Timestamptz` — TTL del hold PENDING (carrera de reserva online).
 - `ticketId` — enlace al ticket cuando se cobra (nullable; el puente cita→caja). Tipo alineado con el `id` de `Ticket` del repo.
 - `notes String?`
@@ -184,7 +184,7 @@ La métrica única del MVP: *nº de citas del día cerradas en caja desde la age
 
 ## 8. Pendiente antes de fijar B4 — validar el alta con Matías
 
-El prompt de B4 congela el flujo de alta, así que se valida **antes**. El mockup v2 (`docs/design/mockups/agenda-koibox.html`) **no cumple del todo** las decisiones de `agenda-ux-analisis.md`:
+El prompt de B4 congela el flujo de alta, así que se valida **antes**. El mockup v2 (`docs/design/mockups/agenda-reservas.html`) **no cumple del todo** las decisiones de `agenda-ux-analisis.md`:
 
 | Decisión del análisis UX | Mockup v2 actual | ¿Gap? |
 |---|---|---|
@@ -198,4 +198,4 @@ Decisión de producto de Matías: (a) ¿el alta de B4 sale ya con **multi-servic
 
 ---
 
-*Mi Piace Internet Solutions · ADR-K8 motor de reservas agnóstico · 2026-08-05. Integrar en `docs/04-stack-y-decisiones.md` una vez aprobado.*
+*Mi Piace Internet Solutions · ADR-R8 motor de reservas agnóstico · 2026-08-05. Integrar en `docs/04-stack-y-decisiones.md` una vez aprobado.*

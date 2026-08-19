@@ -1,4 +1,4 @@
-// Agenda del TPV (B-koibox-4). Tres superficies del mockup en un layout
+// Agenda del TPV (B-reservas-4). Tres superficies del mockup en un layout
 // responsive: TPV/recepción = columnas por profesional (día) + tira de
 // semana; móvil = "mi día" en 1 columna + filtro por profesional. Alta con
 // panel al lado SIN scrim (no tapa el calendario), multi-servicio

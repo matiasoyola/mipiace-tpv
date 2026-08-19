@@ -1,4 +1,4 @@
-// Tests del motor de reservas (B-koibox-4, modo CITA). El harness del repo
+// Tests del motor de reservas (B-reservas-4, modo CITA). El harness del repo
 // es fake-prisma; el GiST es comportamiento de Postgres. Solución: un
 // `AgendaStore` EN MEMORIA que simula el EXCLUDE del assignment (dos altas
 // sobre el mismo profesional/recurso en intervalos solapados → ExclusionError).

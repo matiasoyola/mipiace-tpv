@@ -1,8 +1,8 @@
-// Sección Clientes del TPV (B-koibox-1). Lista A–Z con buscador instantáneo
+// Sección Clientes del TPV (B-reservas-1). Lista A–Z con buscador instantáneo
 // (feedback <100 ms sobre el caché local Dexie; sync en background), ficha
 // de cliente con pestañas Historial / Ficha técnica / Bonos, y alta/edición
 // inline (sin modal bloqueante). Se monta como overlay a pantalla completa
-// desde el TPV, sólo si la capability CRM está activa (ADR-K6).
+// desde el TPV, sólo si la capability CRM está activa (ADR-R6).
 
 import { useEffect, useMemo, useState } from "react";
 import {

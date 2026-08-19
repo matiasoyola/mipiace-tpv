@@ -1,4 +1,4 @@
-// Puente cita → caja (ADR-K8 §5). La métrica única del MVP: nº de citas del
+// Puente cita → caja (ADR-R8 §5). La métrica única del MVP: nº de citas del
 // día cerradas en caja desde la agenda SIN re-teclear el ticket.
 //
 // "Cobrar en caja" abre/enlaza un ticket DRAFT PRE-POBLADO con las líneas de

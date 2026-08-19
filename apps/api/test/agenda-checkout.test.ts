@@ -1,4 +1,4 @@
-// Test del puente cita → caja (B-koibox-4, ADR-K8 §5). Verifica que
+// Test del puente cita → caja (B-reservas-4, ADR-R8 §5). Verifica que
 // "Cobrar en caja" abre un ticket DRAFT PRE-POBLADO con las líneas de
 // servicio del visit (resueltas por serviceId = product.id) SIN re-teclear,
 // que es idempotente (segundo checkout devuelve el mismo ticket) y que

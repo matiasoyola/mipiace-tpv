@@ -1,17 +1,17 @@
-# Bloque Koibox-1 · Ficha de cliente / CRM
+# Bloque Reservas-1 · Ficha de cliente / CRM
 
 > Primer bloque del módulo de Citas+Clientes+Bonos. Aditivo, sin tocar el camino de cobro. Desbloquea agenda (B4), bonos (B5) y reserva online (B6).
 
 ## Contexto (leer antes)
-- `docs/design/koibox-modulo-kickoff.md` — kickoff del módulo, §1 (qué existe), §3 ADR-K2 y ADR-K6, §4 (modelo de datos), §7 (roadmap de bloques).
+- `docs/design/reservas-modulo-kickoff.md` — kickoff del módulo, §1 (qué existe), §3 ADR-R2 y ADR-R6, §4 (modelo de datos), §7 (roadmap de bloques).
 - `docs/design/agenda-belleza-spec.md` §2 y §6 — el cliente es único y compartido entre agenda, TPV y bonos.
 - `docs/06-modelo-datos.md` — convenciones del esquema (uuid, `tenant_id` indexado, multi-tenant por fila).
 - `docs/02-arquitectura.md` §2 — stack front (React+Vite PWA, TanStack Query, Zustand, Dexie) y API (Fastify+Prisma).
-- `docs/04-stack-y-decisiones.md` — ADR-K2 (CRM local, espejo mínimo a Holded), ADR-K6 (capability flag).
+- `docs/04-stack-y-decisiones.md` — ADR-R2 (CRM local, espejo mínimo a Holded), ADR-R6 (capability flag).
 
 ## Alcance
 
-Construir la **ficha de cliente / CRM** como base del módulo. Es una capa **local** (fuente de verdad propia), enlazada opcionalmente a contactos de Holded solo para lo fiscal (ADR-K2). Se activa por capability flag `agenda` (o `crm`) del tenant (ADR-K6); si está apagada, nada de esto aparece en la UI.
+Construir la **ficha de cliente / CRM** como base del módulo. Es una capa **local** (fuente de verdad propia), enlazada opcionalmente a contactos de Holded solo para lo fiscal (ADR-R2). Se activa por capability flag `agenda` (o `crm`) del tenant (ADR-R6); si está apagada, nada de esto aparece en la UI.
 
 ### Datos (API · Prisma · Postgres)
 Modelos nuevos, todos con `tenantId` y aislamiento por fila (extension Prisma existente):
@@ -38,8 +38,8 @@ Modelos nuevos, todos con `tenantId` y aislamiento por fila (extension Prisma ex
 - Persistencia offline en Dexie: tabla `clients` en el caché local para búsqueda sin red (coherente con contrato offline §4 de arquitectura). El alta offline entra en la cola outbox como el resto.
 
 ## Restricciones
-- **ADR-K2**: el CRM es local. No volcar historial/ficha técnica/RGPD a Holded. `holdedContactId` es solo un enlace.
-- **ADR-K6**: gate por capability flag por tenant. Cero `if (businessType === ...)`. Vocabulario neutro (**cliente/profesional/servicio**), nunca estilista/terapeuta/clienta.
+- **ADR-R2**: el CRM es local. No volcar historial/ficha técnica/RGPD a Holded. `holdedContactId` es solo un enlace.
+- **ADR-R6**: gate por capability flag por tenant. Cero `if (businessType === ...)`. Vocabulario neutro (**cliente/profesional/servicio**), nunca estilista/terapeuta/clienta.
 - **Multi-tenant por fila**: todo lleva `tenantId`; usar la extension Prisma existente, nunca query sin tenant.
 - **Offline-first** (ADR-001): búsqueda de clientes debe funcionar sin red desde Dexie; alta offline → outbox.
 - **UX no negociable** (`docs/ux-principles.md` / metodología §4): feedback <100 ms, sin modales en flujo crítico, máx 8–12 elementos accionables por vista, scroll vertical, toda cifra trazable a su origen, deshacer 4 s en banner para borrados en vez de confirmación.

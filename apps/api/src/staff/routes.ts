@@ -1,7 +1,7 @@
-// Endpoints de Personal + horarios (B-koibox-3).
+// Endpoints de Personal + horarios (B-reservas-3).
 //
 // Base de la agenda multi-profesional (B4). El "personal" NO es una
-// entidad nueva: es el `user` existente extendido (ADR-K1 — no hay tabla
+// entidad nueva: es el `user` existente extendido (ADR-R1 — no hay tabla
 // `Staff` paralela). Estas rutas gestionan el perfil de agenda, la matriz
 // profesional × servicio y los turnos (plantillas `rrule` RFC 5545 +
 // ventana de validez).
@@ -28,8 +28,8 @@
 //                                                rango (lo consume el motor
 //                                                de B4; interno).
 //
-// ADR-K6: todo el módulo se gatea por `Tenant.agendaEnabled` (columna
-// propiedad de B-koibox-2). Si está OFF, cada endpoint responde 403.
+// ADR-R6: todo el módulo se gatea por `Tenant.agendaEnabled` (columna
+// propiedad de B-reservas-2). Si está OFF, cada endpoint responde 403.
 // Aislamiento por fila: toda query filtra por `auth.tenantId`; las tablas
 // hijas se acceden SIEMPRE a través de un `user` validado como del tenant.
 // Vocabulario neutro: "profesional" (peluquero, esteticista, médico…).
@@ -49,7 +49,7 @@ const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 // expansiones desmedidas (un año largo es de sobra para la agenda).
 const MAX_RANGE_DAYS = 366;
 
-// ── Gate por capability flag (ADR-K6) ────────────────────────────────
+// ── Gate por capability flag (ADR-R6) ────────────────────────────────
 // Corre DESPUÉS de la autenticación: `request.auth` ya está poblado.
 async function ensureAgendaEnabled(
   request: FastifyRequest,
@@ -244,7 +244,7 @@ export async function registerStaffRoutes(app: FastifyInstance): Promise<void> {
       select: { id: true, name: true },
     });
     // `id` = product.id (uuid) — misma clave que usa `staff_skill.serviceId`
-    // y la extensión de B-koibox-2.
+    // y la extensión de B-reservas-2.
     return { services };
   });
 

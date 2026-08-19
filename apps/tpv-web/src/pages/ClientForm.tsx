@@ -1,4 +1,4 @@
-// Alta / edición de cliente CRM (B-koibox-1). Formulario inline (no modal
+// Alta / edición de cliente CRM (B-reservas-1). Formulario inline (no modal
 // bloqueante en flujo crítico — UX no negociable). Reutilizado por la
 // sección Clientes y por el picker rápido (F1).
 

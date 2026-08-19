@@ -25,7 +25,7 @@ export interface CatalogProduct {
   // viene vacío. Se ordena alfabéticamente al renderizar los chips —
   // se preserva el orden de Holded en el array.
   tags: string[];
-  // B-koibox-2: duración de agenda (minutos) del servicio. Sólo la traen
+  // B-reservas-2: duración de agenda (minutos) del servicio. Sólo la traen
   // los servicios con overlay `service_scheduling`; null en productos y
   // servicios sin scheduling. El TPV la pinta informativa por línea de
   // servicio cuando el tenant tiene `agendaEnabled` (base visual para B4).
@@ -55,10 +55,10 @@ const TAG_ALIASES_KEY = "mipiacetpv-catalog-tag-aliases";
 // v1.8-Fiado · flag de venta a crédito del tenant. El TPV lo cachea para
 // mostrar el botón "Fiado" en checkout y la entrada a la pantalla Deudas.
 const CREDIT_SALES_KEY = "mipiacetpv-catalog-credit-sales";
-// B-koibox-1 · capability flag del CRM / ficha de cliente (ADR-K6). El
+// B-reservas-1 · capability flag del CRM / ficha de cliente (ADR-R6). El
 // TPV lo cachea para mostrar/ocultar la sección Clientes y el atajo F1.
 const CRM_ENABLED_KEY = "mipiacetpv-catalog-crm-enabled";
-// B-koibox-2 · capability flag de la agenda (ADR-K6). El TPV lo cachea
+// B-reservas-2 · capability flag de la agenda (ADR-R6). El TPV lo cachea
 // para pintar (o no) la duración por línea de servicio en el ticket.
 const AGENDA_ENABLED_KEY = "mipiacetpv-catalog-agenda-enabled";
 
@@ -101,7 +101,7 @@ export function setCachedCreditSalesEnabled(value: boolean): void {
   localStorage.setItem(CREDIT_SALES_KEY, value ? "1" : "0");
 }
 
-// B-koibox-1 · true sólo si el tenant tiene el CRM activado (ADR-K6).
+// B-reservas-1 · true sólo si el tenant tiene el CRM activado (ADR-R6).
 export function getCachedCrmEnabled(): boolean {
   return localStorage.getItem(CRM_ENABLED_KEY) === "1";
 }
@@ -110,7 +110,7 @@ export function setCachedCrmEnabled(value: boolean): void {
   localStorage.setItem(CRM_ENABLED_KEY, value ? "1" : "0");
 }
 
-// B-koibox-2 · true sólo si el tenant tiene la agenda activada (ADR-K6).
+// B-reservas-2 · true sólo si el tenant tiene la agenda activada (ADR-R6).
 export function getCachedAgendaEnabled(): boolean {
   return localStorage.getItem(AGENDA_ENABLED_KEY) === "1";
 }

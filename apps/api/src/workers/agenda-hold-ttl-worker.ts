@@ -1,4 +1,4 @@
-// Worker BullMQ del TTL de holds de la agenda (B-koibox-4). Concurrency 1:
+// Worker BullMQ del TTL de holds de la agenda (B-reservas-4). Concurrency 1:
 // una sola pasada a la vez (un UPDATE masivo por id).
 
 import { Worker } from "bullmq";

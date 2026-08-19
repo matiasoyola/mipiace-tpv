@@ -1,4 +1,4 @@
-// Tipos compartidos del motor de reservas (B-koibox-4). Vocabulario neutro
+// Tipos compartidos del motor de reservas (B-reservas-4). Vocabulario neutro
 // (cliente / profesional / servicio / recurso). El núcleo no se clava a
 // "profesional" para que MesaMode caiga encima.
 

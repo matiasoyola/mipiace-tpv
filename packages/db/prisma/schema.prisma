@@ -61,8 +61,8 @@ enum ProductKind {
   SERVICE
 }
 
-// B-koibox-2 · tipo de recurso reservable (cabina de spa, box/sala de
-// clínica, aparato). Vocabulario neutro (ADR-K6): un `resource` sirve
+// B-reservas-2 · tipo de recurso reservable (cabina de spa, box/sala de
+// clínica, aparato). Vocabulario neutro (ADR-R6): un `resource` sirve
 // igual a belleza que a una clínica; el enum evita clavar el módulo a un
 // vertical concreto.
 enum ResourceKind {
@@ -193,7 +193,7 @@ enum ShiftCashCountKind {
   Z
 }
 
-// B-koibox-1 (CRM) · tipo de consentimiento RGPD registrado en la ficha
+// B-reservas-1 (CRM) · tipo de consentimiento RGPD registrado en la ficha
 // del cliente. DATA = tratamiento de datos personales; TREATMENT =
 // consentimiento del tratamiento/servicio (fórmulas de color, parámetros
 // de clínica…). Sólo campos + alta manual en B1; la firma digital es
@@ -221,7 +221,7 @@ enum PrintIntentKind {
   GIFT
 }
 
-// B-koibox-3 (Personal) · tipo de turno de un profesional.
+// B-reservas-3 (Personal) · tipo de turno de un profesional.
 //   REGULAR       — semana tipo estable (el caso normal).
 //   REINFORCEMENT — refuerzo puntual sobre la plantilla base (temporada
 //                   alta, evento). Misma estructura recurrente + validez.
@@ -235,7 +235,7 @@ enum StaffShiftKind {
   SWAP
 }
 
-// ── Motor de reservas agnóstico cita/mesa (B-koibox-4, ADR-K8) ────────
+// ── Motor de reservas agnóstico cita/mesa (B-reservas-4, ADR-R8) ────────
 //
 // Los enums llevan YA los valores de mesa reservados (TABLE, etc.) aunque
 // B4 sólo implemente el modo CITA: así el bloque de hostelería (mesa) cae
@@ -380,15 +380,15 @@ model Tenant {
   // para no asumir hostelería en tenants nuevos (el piloto inicial es
   // librería). Editable desde la consola super-admin.
   businessType                   BusinessType      @default(RETAIL) @map("business_type")
-  // B-koibox-1 (CRM) · capability flag de la ficha de cliente / CRM
-  // (ADR-K6). OFF por defecto: la sección "Clientes" del TPV y sus
+  // B-reservas-1 (CRM) · capability flag de la ficha de cliente / CRM
+  // (ADR-R6). OFF por defecto: la sección "Clientes" del TPV y sus
   // endpoints sólo se activan cuando el tenant lo enciende. Independiente
   // del businessType — un RETAIL o SERVICES puede encenderlo; Thalia lo
   // deja apagado. Los futuros flags del módulo (bonos, reservaOnline) se
   // añadirán como columnas hermanas cuando lleguen B5/B6.
   crmEnabled                     Boolean           @default(false) @map("crm_enabled")
-  // B-koibox-2 (Catálogo extendido) · capability flag de la agenda
-  // (ADR-K6). OFF por defecto: la extensión de scheduling de servicios,
+  // B-reservas-2 (Catálogo extendido) · capability flag de la agenda
+  // (ADR-R6). OFF por defecto: la extensión de scheduling de servicios,
   // los recursos y la duración por línea en el TPV sólo se activan cuando
   // el tenant lo enciende. Independiente del businessType — un RETAIL o
   // SERVICES puede encenderlo; Thalia lo deja apagado. Este bloque es el
@@ -568,7 +568,7 @@ model User {
   refunds        Refund[]
   emailJobsAsked TicketEmailJob[]
   printIntents   PrintIntent[]
-  // B-koibox-3 · el `user` ES el profesional (ADR-K1: no tabla Staff
+  // B-reservas-3 · el `user` ES el profesional (ADR-R1: no tabla Staff
   // paralela). Perfil de agenda 1:1, matriz de skills y turnos.
   staffProfile   StaffProfile?
   staffSkills    StaffSkill[]
@@ -833,13 +833,13 @@ model Product {
   variants       ProductVariant[]
   lines          TicketLine[]
   modifierGroups ProductModifierGroup[]
-  // B-koibox-2 · capa de extensión local de agenda sobre el producto de
-  // Holded (ADR-K1). NO duplica el catálogo: precio/IVA siguen en Holded.
+  // B-reservas-2 · capa de extensión local de agenda sobre el producto de
+  // Holded (ADR-R1). NO duplica el catálogo: precio/IVA siguen en Holded.
   // Sólo aplica a kind=SERVICE; un producto sin fila `scheduling` no es
   // reservable ni tiene duración → la agenda lo ignora.
   scheduling     ServiceScheduling?
   resourceNeeds  ServiceResourceNeed[]
-  // B-koibox-3 · qué profesionales pueden dar este servicio (matriz
+  // B-reservas-3 · qué profesionales pueden dar este servicio (matriz
   // profesional × servicio). Sólo tiene sentido para kind=SERVICE.
   staffSkills    StaffSkill[]
 
@@ -1076,7 +1076,7 @@ model Ticket {
   refunds         Refund[]
   emailJobs       TicketEmailJob[]
   printIntents    PrintIntent[]
-  // B-koibox-4 · cita → caja: el ticket pre-poblado que abre "Cobrar en
+  // B-reservas-4 · cita → caja: el ticket pre-poblado que abre "Cobrar en
   // caja". Como mucho una cita apunta a un ticket (puente 1:0..1).
   appointment     Appointment?
 
@@ -1565,9 +1565,9 @@ model SuperAdminAudit {
   @@map("super_admin_audits")
 }
 
-// ── CRM / ficha de cliente (B-koibox-1) ───────────────────────────────
+// ── CRM / ficha de cliente (B-reservas-1) ───────────────────────────────
 //
-// Capa LOCAL, fuente de verdad propia (ADR-K2). El contacto de Holded se
+// Capa LOCAL, fuente de verdad propia (ADR-R2). El contacto de Holded se
 // usa sólo para lo fiscal, enlazado perezosamente por `holdedContactId`
 // (nullable) — al crear/editar un cliente NO se crea contacto en Holded;
 // ese enlace lo rellena el camino de cobro existente cuando hace falta
@@ -1590,7 +1590,7 @@ model Client {
   phone           String?
   email           String?
   birthdate       DateTime? @db.Date
-  // Enlace fiscal perezoso al contacto de Holded (ADR-K2). NULL hasta
+  // Enlace fiscal perezoso al contacto de Holded (ADR-R2). NULL hasta
   // que el camino de cobro lo rellena al necesitar factura. Aquí sólo se
   // persiste el id; el CRM nunca crea el contacto en Holded.
   holdedContactId String?   @map("holded_contact_id")
@@ -1653,9 +1653,9 @@ model ClientTechnicalNote {
   @@map("client_technical_notes")
 }
 
-// ─── Catálogo de servicios extendido (B-koibox-2) ────────────────────
+// ─── Catálogo de servicios extendido (B-reservas-2) ────────────────────
 //
-// Capa de EXTENSIÓN local sobre el `product` de Holded (ADR-K1). NO es
+// Capa de EXTENSIÓN local sobre el `product` de Holded (ADR-R1). NO es
 // una tabla `Service` paralela: el precio, el IVA y el alta del servicio
 // siguen en Holded (product.kind=SERVICE, holdedProductId). Aquí sólo
 // vive lo que la agenda necesita y Holded no modela: duración, pausas,
@@ -1693,7 +1693,7 @@ model ServiceScheduling {
   @@map("service_scheduling")
 }
 
-// Recurso reservable genérico (ADR-K6, vocabulario neutro): cabina de
+// Recurso reservable genérico (ADR-R6, vocabulario neutro): cabina de
 // spa, box/sala de clínica, aparato. Un servicio requiere N recursos de
 // un TIPO (no uno concreto) vía `ServiceResourceNeed`. Local, sin espejo
 // en Holded.
@@ -1730,13 +1730,13 @@ model ServiceResourceNeed {
   @@map("service_resource_needs")
 }
 
-// ─── Personal / horarios (B-koibox-3) ────────────────────────────────
+// ─── Personal / horarios (B-reservas-3) ────────────────────────────────
 //
 // El personal NO es una entidad nueva: es el `user` existente extendido
-// (ADR-K1, restricción del bloque — no tabla `Staff` paralela). Estas
+// (ADR-R1, restricción del bloque — no tabla `Staff` paralela). Estas
 // tres tablas cuelgan del `user` y son la base de la agenda multi-
-// profesional (B4). Gate por `Tenant.agendaEnabled` (ADR-K6, columna
-// propiedad de B-koibox-2). Multi-tenant por fila; migración aditiva.
+// profesional (B4). Gate por `Tenant.agendaEnabled` (ADR-R6, columna
+// propiedad de B-reservas-2). Multi-tenant por fila; migración aditiva.
 
 // Perfil de agenda de un profesional. Relación 1:1 con `user`: la PK es
 // el propio `userId` (no hay id propio — el perfil ES el usuario visto
@@ -1762,7 +1762,7 @@ model StaffProfile {
 
 // Matriz profesional × servicio: qué servicios sabe dar cada profesional.
 // `serviceId` = `product.id` (kind=SERVICE) — se alinea con la convención
-// de B-koibox-2 (`ServiceScheduling.productId`, `ServiceResourceNeed`),
+// de B-reservas-2 (`ServiceScheduling.productId`, `ServiceResourceNeed`),
 // FK dura al catálogo local para que el motor de B4 cruce skill ∩ servicio
 // por integridad referencial. PK compuesta `(userId, serviceId)`: un
 // profesional tiene como mucho una fila por servicio. `tenantId` presente
@@ -1812,13 +1812,13 @@ model StaffShift {
   @@map("staff_shifts")
 }
 
-// ─── Motor de reservas: núcleo agnóstico (B-koibox-4, ADR-K8) ─────────
+// ─── Motor de reservas: núcleo agnóstico (B-reservas-4, ADR-R8) ─────────
 //
 // Núcleo compartido cita/mesa. B4 implementa el modo CITA; el bloque de
 // mesa (hostelería) cae encima SIN migrar el núcleo. Las columnas/valores
 // específicos de mesa (`partySize`, valores TABLE de los enums) existen ya
 // pero B4 no los usa; la columna `table_id` y el EXCLUDE `no_table_overlap`
-// se DIFIEREN al bloque de mesa (ADR-K8 §7). Vocabulario neutro
+// se DIFIEREN al bloque de mesa (ADR-R8 §7). Vocabulario neutro
 // (cliente/profesional/servicio/recurso), cero `if(businessType)`.
 //
 // Las columnas de rango temporal (`timeslot`, `slot`) son `tstzrange`
@@ -1849,7 +1849,7 @@ model Appointment {
   partySize    Int?                     @map("party_size")
   // Canje de bono (B5, fuera de alcance en B4; sólo la columna).
   voucherId    String?                  @map("voucher_id") @db.Uuid
-  // Señal cobrada (ADR-K5b; fuera de alcance en B4; sólo la columna).
+  // Señal cobrada (ADR-R5b; fuera de alcance en B4; sólo la columna).
   depositCents Int?                     @map("deposit_cents")
   // TTL del hold PENDING (carrera de reserva). El job lo libera al vencer.
   pendingUntil DateTime?                @map("pending_until") @db.Timestamptz()

@@ -1,7 +1,7 @@
-// Panel de Personal + horarios (B-koibox-3). Gestiona los profesionales
-// (extensión del `user` existente — ADR-K1), la matriz de servicios que da
+// Panel de Personal + horarios (B-reservas-3). Gestiona los profesionales
+// (extensión del `user` existente — ADR-R1), la matriz de servicios que da
 // cada uno y sus turnos (semana tipo `rrule` + validez). Gate por
-// `agendaEnabled` (ADR-K6). Vocabulario neutro: "profesional".
+// `agendaEnabled` (ADR-R6). Vocabulario neutro: "profesional".
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";

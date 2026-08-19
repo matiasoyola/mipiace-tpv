@@ -1,4 +1,4 @@
-// Capa de acceso a datos del motor de reservas (B-koibox-4). ES EL ÚNICO
+// Capa de acceso a datos del motor de reservas (B-reservas-4). ES EL ÚNICO
 // sitio con SQL crudo de `tstzrange`: Prisma no escribe/lee esas columnas.
 // El motor (`engine.ts`) y las rutas dependen de la INTERFAZ `AgendaStore`,
 // no de este SQL — así los tests inyectan un store en memoria que simula el

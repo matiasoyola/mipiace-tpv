@@ -1,4 +1,4 @@
-// Tests de la caché local del CRM (B-koibox-1): búsqueda A–Z sin red,
+// Tests de la caché local del CRM (B-reservas-1): búsqueda A–Z sin red,
 // persistencia en IndexedDB y alta offline degradada al outbox.
 //
 // fake-indexeddb aporta IndexedDB en jsdom. La API y el outbox se mockean
