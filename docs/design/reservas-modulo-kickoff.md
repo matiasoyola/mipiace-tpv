@@ -291,7 +291,7 @@ MVP = módulos 3, 4, 5, 6 del spec + ampliaciones de 1 y 2. Traducido a bloques:
 
 ## 10. Siguiente paso inmediato
 
-1. **Revisar las ADRs K1–K7 una a una** (sobre todo K3 fiscal → disparar consulta al asesor, es lo único que puede bloquear B5).
+1. **Revisar las ADRs R1–R7 una a una** (sobre todo R3 fiscal → disparar consulta al asesor, es lo único que puede bloquear B5).
 2. **Lanzar B-reservas-1 (CRM) en Claude Code** con el prompt canónico adjunto (`bloque-reservas-1-crm.md`). Es aditivo, cero riesgo sobre producción, y desbloquea todo lo demás.
 3. En paralelo, producto prepara los mockups de agenda (heredando `agenda-belleza-spec.md`) y el prompt de B2/B3 mientras Code hace B1.
 

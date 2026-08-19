@@ -4,7 +4,7 @@
 
 ## Contexto (leer antes)
 - **`docs/design/adr-r8-motor-reservas-agnostico.md`** — LA spec del motor. Leer entera: es la fuente de verdad de este bloque (modelo de datos §3, BookingEngine §4, cita→caja §5, valla de alcance §7).
-- `docs/design/reservas-modulo-kickoff.md` §3 (ADR-R1/K4/K6), §4 (Agenda), §5 (integración Holded), §6 (grafo de dependencias).
+- `docs/design/reservas-modulo-kickoff.md` §3 (ADR-R1/R4/R6), §4 (Agenda), §5 (integración Holded), §6 (grafo de dependencias).
 - `docs/design/agenda-belleza-spec.md` §3 (motor de disponibilidad), §4 (GiST + concurrencia), §5 (políticas), §6 (encaje TPV).
 - `docs/design/agenda-ux-analisis.md` — decisiones de alta (cliente-first, multi-servicio encadenable, panel al lado, "Reservar y cobrar").
 - `docs/design/mockups/agenda-reservas.html` — 3 superficies (TPV / recepción / móvil). **OJO:** el mockup es una maqueta con atajos; el alta real va según "Front · Alta" de abajo, NO copiando el drawer con scrim ni el select mono-servicio del mockup.
