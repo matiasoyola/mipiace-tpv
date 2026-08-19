@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" width="400" height="400">
+      
+      <circle cx="200" cy="200" r="192" fill="none" stroke="#C75A45" stroke-width="2.5"/>
+      <circle cx="200" cy="200" r="178" fill="none" stroke="#C75A45" stroke-width="1"/>
+      <defs><path id="topstd" d="M63.0 139.0 A150 150 0 0 1 337.0 139.0"/><path id="botstd" d="M78.6 288.2 A150 150 0 0 0 321.4 288.2"/></defs>
+      <text style="font-family:DM Sans,sans-serif;font-size:15px;font-weight:500;letter-spacing:3.2px" fill="#26221E"><textPath href="#topstd" startOffset="50%" text-anchor="middle">LA · MAESTRANZA</textPath></text>
+      <text style="font-family:DM Sans,sans-serif;font-size:15px;font-weight:500;letter-spacing:3.2px" fill="#26221E"><textPath href="#botstd" startOffset="50%" text-anchor="middle">SANTA OLALLA · TOLEDO</textPath></text>
+      <rect x="45.0" y="195.0" width="10" height="10" transform="rotate(45 50.0 200.0)" fill="#C75A45"/><rect x="345.0" y="195.0" width="10" height="10" transform="rotate(45 350.0 200.0)" fill="#C75A45"/>
+      <text x="200" y="212" text-anchor="middle" style="font-family:'DM Serif Display',serif;font-size:78px;letter-spacing:2px" fill="#26221E">LM</text>
+      <line x1="150" y1="238" x2="250" y2="238" stroke="#C75A45" stroke-width="1.5"/>
+      <text x="200" y="262" text-anchor="middle" style="font-family:DM Sans,sans-serif;font-size:15px;font-weight:600;letter-spacing:8px" fill="#C75A45">BAR</text>
+    </svg>

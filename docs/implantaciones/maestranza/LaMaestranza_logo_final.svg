@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="500" height="500" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="200" cy="200" r="200" fill="#E97058"/>
+  <circle cx="200" cy="200" r="193" fill="none" stroke="#FBF7F1" stroke-width="2.4"/>
+  <circle cx="200" cy="200" r="185" fill="none" stroke="#FBF7F1" stroke-width="1"/>
+  <circle cx="200" cy="200" r="128" fill="none" stroke="#FBF7F1" stroke-width="1.3"/>
+  <defs><path id="tp" d="M54.6 138.3 A158 158 0 0 1 345.4 138.3"/><path id="bp" d="M73.8 295.1 A158 158 0 0 0 326.2 295.1"/></defs>
+  <text style="font-family:'DM Sans',sans-serif;font-size:16.5px;font-weight:500;letter-spacing:3px" fill="#FBF7F1"><textPath href="#tp" startOffset="50%" text-anchor="middle">LA · MAESTRANZA</textPath></text>
+  <text style="font-family:'DM Sans',sans-serif;font-size:16.5px;font-weight:500;letter-spacing:3px" fill="#FBF7F1"><textPath href="#bp" startOffset="50%" text-anchor="middle">SANTA OLALLA · TOLEDO</textPath></text>
+  <rect x="22.0" y="193.0" width="14" height="14" transform="rotate(45 29.0 200.0)" fill="#2B211C"/><rect x="364.0" y="193.0" width="14" height="14" transform="rotate(45 371.0 200.0)" fill="#2B211C"/>
+  <!-- interlocked LM: two overlapping serif glyphs, same cream fill -->
+  <g fill="#FBF7F1" style="font-family:'DM Serif Display',serif;font-size:138px">
+    <text x="158" y="228" text-anchor="middle">L</text>
+    <text x="221" y="228" text-anchor="middle">M</text>
+  </g>
+  <line x1="150" y1="250" x2="250" y2="250" stroke="#FBF7F1" stroke-width="1.4"/>
+  <rect x="195.5" y="245.5" width="9.0" height="9.0" transform="rotate(45 200.0 250.0)" fill="#2B211C"/>
+  <text x="200" y="278" text-anchor="middle" style="font-family:'DM Sans',sans-serif;font-size:17px;font-weight:600;letter-spacing:7px" fill="#FBF7F1">BAR</text>
+</svg>
