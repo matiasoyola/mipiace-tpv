@@ -29,6 +29,7 @@ import { registerLenientJsonParser } from "./lib/lenient-json.js";
 import { initSentry } from "./lib/sentry.js";
 import { registerOnboardingRoutes } from "./onboarding/routes.js";
 import { registerServicesRoutes } from "./services/routes.js";
+import { registerAgendaRoutes } from "./agenda/routes.js";
 import { registerCashierAuthRoutes } from "./shift/cashier-auth.js";
 import { registerShiftRoutes } from "./shift/routes.js";
 import { registerStaffRoutes } from "./staff/routes.js";
@@ -49,6 +50,8 @@ import { startInitialSyncWorker } from "./workers/initial-sync-worker.js";
 import { startTicketUploadWorker } from "./workers/ticket-upload-worker.js";
 import { startRefundUploadWorker } from "./workers/refund-upload-worker.js";
 import { startTicketEmailWorker } from "./workers/ticket-email-worker.js";
+import { startAgendaHoldTtlWorker } from "./workers/agenda-hold-ttl-worker.js";
+import { registerAgendaHoldTtlRepeatable } from "./queues/agenda-hold-ttl.js";
 import { registerTicketRoutes } from "./tickets/routes.js";
 import { registerCreditRoutes } from "./tickets/credit-routes.js";
 import { registerTicketDigitalRoute } from "./tickets/digital-route.js";
@@ -156,6 +159,7 @@ async function main() {
   await registerCrmRoutes(app);
   await registerServicesRoutes(app);
   await registerStaffRoutes(app);
+  await registerAgendaRoutes(app);
   await registerDeviceRoutes(app);
   await registerCashiersRoutes(app);
   await registerCashierAuthRoutes(app);
@@ -198,13 +202,16 @@ async function main() {
   let ticketWorker: ReturnType<typeof startTicketUploadWorker> | null = null;
   let refundWorker: ReturnType<typeof startRefundUploadWorker> | null = null;
   let emailWorker: ReturnType<typeof startTicketEmailWorker> | null = null;
+  let agendaHoldTtlWorker: ReturnType<typeof startAgendaHoldTtlWorker> | null = null;
   if (env.NODE_ENV !== "production") {
     initialWorker = startInitialSyncWorker();
     incrementalWorker = startCatalogIncrementalWorker();
     ticketWorker = startTicketUploadWorker();
     refundWorker = startRefundUploadWorker();
     emailWorker = startTicketEmailWorker();
+    agendaHoldTtlWorker = startAgendaHoldTtlWorker();
     const count = await registerAllExistingRepeatables();
+    await registerAgendaHoldTtlRepeatable();
     app.log.info(`workers arrancados embedded · ${count} repeatable(s) registrados`);
   }
   if (sentryOn) app.log.info("Sentry activo (api)");
@@ -217,6 +224,7 @@ async function main() {
     if (ticketWorker) await ticketWorker.close();
     if (refundWorker) await refundWorker.close();
     if (emailWorker) await emailWorker.close();
+    if (agendaHoldTtlWorker) await agendaHoldTtlWorker.close();
     await shutdown();
     process.exit(0);
   };

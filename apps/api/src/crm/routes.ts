@@ -33,6 +33,7 @@ import { ClientConsentKind, type Prisma } from "@mipiacetpv/db";
 
 import { requireOwnerOrCashier } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
+import { createAgendaStore } from "../agenda/store.js";
 
 // Vista pública de un cliente para el TPV. No incluye `raw` ni metadatos
 // internos; el front cachea esto en Dexie para la búsqueda offline.
@@ -400,7 +401,7 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
           })
         : [];
 
-      const entries = purchases.map((t) => ({
+      const purchaseEntries = purchases.map((t) => ({
         kind: "PURCHASE" as const,
         id: t.id,
         at: (t.paidAt ?? t.createdAt).toISOString(),
@@ -412,13 +413,32 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
         total: Number(t.total),
       }));
 
+      // B-koibox-4: citas del cliente (contrato `kind:"APPOINTMENT"` que B1
+      // dejó reservado). Reutiliza la capa de acceso de la agenda.
+      const appts = await createAgendaStore(prisma).listForClient(
+        auth.tenantId,
+        id,
+      );
+      const appointmentEntries = appts.map((a) => ({
+        kind: "APPOINTMENT" as const,
+        id: a.id,
+        at: a.start,
+        end: a.end,
+        status: a.status,
+        ticketId: a.ticketId,
+        serviceIds: a.items.map((it) => it.serviceId),
+      }));
+
+      // Array unificado ordenado por fecha desc (compras + citas).
+      const entries = [...purchaseEntries, ...appointmentEntries].sort((x, y) =>
+        y.at.localeCompare(x.at),
+      );
+
       return {
-        // Array unificado; hoy sólo compras. B4 añade entradas
-        // `kind:"APPOINTMENT"` y B5 `kind:"VOUCHER_MOVEMENT"`.
         entries,
-        // Contratos estables vacíos para que B4/B5 los rellenen sin tocar
-        // el front (que ya itera `entries`).
-        appointments: [] as unknown[],
+        // `appointments[]` estable (además del unificado en `entries`).
+        appointments: appointmentEntries,
+        // Contrato estable vacío hasta B5.
         voucherMovements: [] as unknown[],
       };
     },

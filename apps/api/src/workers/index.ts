@@ -22,6 +22,8 @@ import { startReconciliationWorker } from "./reconciliation-worker.js";
 import { startUploadSweeper } from "./upload-sweeper.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
 import { registerReconciliationRepeatable } from "../queues/reconciliation.js";
+import { startAgendaHoldTtlWorker } from "./agenda-hold-ttl-worker.js";
+import { registerAgendaHoldTtlRepeatable } from "../queues/agenda-hold-ttl.js";
 
 async function main() {
   loadEnv();
@@ -35,6 +37,7 @@ async function main() {
   const imageWorker = startImageCacheWorker();
   const contactImportWorker = startContactImportWorker();
   const reconciliationWorker = startReconciliationWorker();
+  const agendaHoldTtlWorker = startAgendaHoldTtlWorker();
   const uploadSweeper = startUploadSweeper();
   const heartbeat = startWorkerHeartbeat();
   console.log("[workers] initial-sync worker listo");
@@ -52,6 +55,9 @@ async function main() {
   // hora de RECONCILIATION_HOUR (Europe/Madrid).
   await registerReconciliationRepeatable();
   console.log("[workers] reconciliación diaria registrada");
+  // TTL de holds de agenda (B-koibox-4): repeatable global, cada minuto.
+  await registerAgendaHoldTtlRepeatable();
+  console.log("[workers] agenda hold-ttl registrado (cada minuto)");
   process.on("SIGINT", async () => {
     console.log("[workers] SIGINT — cerrando…");
     uploadSweeper.stop();
@@ -65,6 +71,7 @@ async function main() {
       imageWorker.close(),
       contactImportWorker.close(),
       reconciliationWorker.close(),
+      agendaHoldTtlWorker.close(),
     ]);
     process.exit(0);
   });

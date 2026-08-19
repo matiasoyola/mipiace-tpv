@@ -235,6 +235,56 @@ enum StaffShiftKind {
   SWAP
 }
 
+// ── Motor de reservas agnóstico cita/mesa (B-koibox-4, ADR-K8) ────────
+//
+// Los enums llevan YA los valores de mesa reservados (TABLE, etc.) aunque
+// B4 sólo implemente el modo CITA: así el bloque de hostelería (mesa) cae
+// encima del mismo núcleo sin migrar. Coste cero.
+
+// Unidad que se agenda. B4 implementa APPOINTMENT; TABLE es del bloque de
+// mesa (hostelería).
+enum ReservationMode {
+  APPOINTMENT
+  TABLE
+}
+
+// Estado de la reserva. Mapea el mockup: pendiente/confirmada/en_sala
+// (=IN_SERVICE)/finalizada(=COMPLETED)/no_show. `active` del assignment se
+// deriva: NOT IN (CANCELLED, NO_SHOW).
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  IN_SERVICE
+  COMPLETED
+  NO_SHOW
+  CANCELLED
+}
+
+// Canal desde el que entró la reserva. GIFT_REDEMPTION (canje de bono) es
+// contrato para B5; WEB para la reserva online embebible (B6).
+enum ReservationSource {
+  PRESENCIAL
+  WEB
+  PHONE
+  GIFT_REDEMPTION
+}
+
+// Familia de recurso ocupado por un assignment. TABLE reservado para mesa.
+enum ReservableType {
+  STAFF
+  RESOURCE
+  TABLE
+}
+
+// Alcance de un bloqueo estructural (cierre VIP, formación, vacaciones).
+// TABLE reservado para mesa.
+enum BlockScope {
+  CENTER
+  STAFF
+  RESOURCE
+  TABLE
+}
+
 // ── Multi-tenant raíz ─────────────────────────────────────────────────
 
 model Tenant {
@@ -382,6 +432,9 @@ model Tenant {
   staffProfiles      StaffProfile[]
   staffSkills        StaffSkill[]
   staffShifts        StaffShift[]
+  appointments       Appointment[]
+  bookingBlocks      BookingBlock[]
+  bookingPolicies    BookingPolicy[]
 
   // v1.3-SuperAdmin-Hub Lote 3 · el backfill y el hub buscan/listan
   // tenants por `holded_account_id`. Sin índice eran scans completos
@@ -1023,6 +1076,9 @@ model Ticket {
   refunds         Refund[]
   emailJobs       TicketEmailJob[]
   printIntents    PrintIntent[]
+  // B-koibox-4 · cita → caja: el ticket pre-poblado que abre "Cobrar en
+  // caja". Como mucho una cita apunta a un ticket (puente 1:0..1).
+  appointment     Appointment?
 
   @@unique([registerId, internalNumber])
   @@index([tenantId, status])
@@ -1546,6 +1602,7 @@ model Client {
   tenant         Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   consents       ClientConsent[]
   technicalNotes ClientTechnicalNote[]
+  appointments   Appointment[]
 
   // Búsqueda por teléfono/email y orden alfabético (A–Z) por tenant.
   @@index([tenantId, phone])
@@ -1753,4 +1810,170 @@ model StaffShift {
   @@index([tenantId, userId])
   @@index([userId])
   @@map("staff_shifts")
+}
+
+// ─── Motor de reservas: núcleo agnóstico (B-koibox-4, ADR-K8) ─────────
+//
+// Núcleo compartido cita/mesa. B4 implementa el modo CITA; el bloque de
+// mesa (hostelería) cae encima SIN migrar el núcleo. Las columnas/valores
+// específicos de mesa (`partySize`, valores TABLE de los enums) existen ya
+// pero B4 no los usa; la columna `table_id` y el EXCLUDE `no_table_overlap`
+// se DIFIEREN al bloque de mesa (ADR-K8 §7). Vocabulario neutro
+// (cliente/profesional/servicio/recurso), cero `if(businessType)`.
+//
+// Las columnas de rango temporal (`timeslot`, `slot`) son `tstzrange`
+// (`Unsupported`): Prisma no las escribe/lee — TODO acceso a ellas pasa por
+// SQL crudo en `apps/api/src/agenda/store.ts` (INSERT con tstzrange, SELECT
+// con lower()/upper()). El anti-solape NO vive en el código: son los
+// EXCLUDE USING gist sobre `appointment_assignments.slot` (ver migración).
+// Multi-tenant por fila; migración aditiva con backfill vacío.
+
+// La reserva / el "visit": una visita del cliente que puede encadenar
+// varios servicios. Se llama `appointment` para alinear con el contrato ya
+// publicado de B1 (`GET /clients/:id/history` reserva `kind:"APPOINTMENT"`).
+model Appointment {
+  id           String                   @id @default(uuid()) @db.Uuid
+  tenantId     String                   @map("tenant_id") @db.Uuid
+  // Idempotencia del alta offline/online por outbox (mismo patrón que
+  // `Client.externalId` / `Ticket.externalId`).
+  externalId   String?                  @unique @map("external_id") @db.Uuid
+  mode         ReservationMode          @default(APPOINTMENT)
+  // Nullable: walk-in / reserva anónima de teléfono.
+  clientId     String?                  @map("client_id") @db.Uuid
+  // Span [inicio, fin) de la visita (client-facing). El anti-solape real
+  // (con buffers) vive en el assignment. tstzrange → SQL crudo.
+  timeslot     Unsupported("tstzrange")
+  status       AppointmentStatus        @default(PENDING)
+  source       ReservationSource        @default(PRESENCIAL)
+  // Sólo modo mesa (comensales). Nullable en cita.
+  partySize    Int?                     @map("party_size")
+  // Canje de bono (B5, fuera de alcance en B4; sólo la columna).
+  voucherId    String?                  @map("voucher_id") @db.Uuid
+  // Señal cobrada (ADR-K5b; fuera de alcance en B4; sólo la columna).
+  depositCents Int?                     @map("deposit_cents")
+  // TTL del hold PENDING (carrera de reserva). El job lo libera al vencer.
+  pendingUntil DateTime?                @map("pending_until") @db.Timestamptz()
+  // Enlace al ticket cuando se cobra (el puente cita→caja). Al cerrar el
+  // ticket la cita pasa a COMPLETED.
+  ticketId     String?                  @unique @map("ticket_id") @db.Uuid
+  notes        String?
+  createdAt    DateTime                 @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt    DateTime                 @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant      Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client      Client?                 @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  ticket      Ticket?                 @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  items       AppointmentItem[]
+  assignments AppointmentAssignment[]
+
+  // El índice gist (tenant_id, timeslot) para consultas de rango se crea en
+  // SQL (Prisma no expresa gist sobre Unsupported).
+  @@index([tenantId, status])
+  @@index([tenantId, clientId])
+  @@map("appointments")
+}
+
+// Un servicio dentro del visit. Habilita multi-servicio encadenable
+// (corte+tinte en una visita, cada uno con su profesional). Snapshot de
+// duración/buffers/staffRequired al crear: editar el catálogo luego no
+// mueve el histórico. Sólo modo cita. `serviceId` = product.id (kind=
+// SERVICE); FK dura en SQL, sin relación Prisma para no inflar back-refs.
+model AppointmentItem {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  appointmentId   String   @map("appointment_id") @db.Uuid
+  serviceId       String   @map("service_id") @db.Uuid
+  durationMin     Int      @map("duration_min")
+  bufferBeforeMin Int      @default(0) @map("buffer_before_min")
+  bufferAfterMin  Int      @default(0) @map("buffer_after_min")
+  staffRequired   Int      @default(1) @map("staff_required")
+  sortOrder       Int      @map("sort_order")
+  // Offset desde el inicio del visit (encadenado secuencial). El span del
+  // item = [start+offset, start+offset+duration).
+  startOffsetMin  Int      @default(0) @map("start_offset_min")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, appointmentId])
+  @@map("appointment_items")
+}
+
+// Ata la reserva a un recurso concreto. Donde vive el GiST (una Sinfonía a
+// 8 manos = 1 cita con 4 assignments de staff + 1 cabina). `staffUserId` /
+// `resourceId` son Uuid con FK sólo en SQL (sin relación Prisma para no
+// inflar back-refs en User/Resource). `tableId` DIFERIDA al bloque de mesa.
+model AppointmentAssignment {
+  id                String                   @id @default(uuid()) @db.Uuid
+  tenantId          String                   @map("tenant_id") @db.Uuid
+  appointmentId     String                   @map("appointment_id") @db.Uuid
+  // A qué servicio corresponde (nullable: una cabina puede ser del visit
+  // entero; y modo mesa no usa items).
+  appointmentItemId String?                  @map("appointment_item_id") @db.Uuid
+  reservableType    ReservableType           @map("reservable_type")
+  staffUserId       String?                  @map("staff_user_id") @db.Uuid
+  resourceId        String?                  @map("resource_id") @db.Uuid
+  // Intervalo ocupado por ESTE recurso (span del item + buffers para staff;
+  // visita entera para una cabina). tstzrange → SQL crudo. Sobre esta
+  // columna viven los EXCLUDE USING gist (no_staff_overlap /
+  // no_resource_overlap), parciales por `active`.
+  slot              Unsupported("tstzrange")
+  // Se mantiene en sync con appointment.status en la misma tx:
+  // active = status NOT IN (CANCELLED, NO_SHOW). Es la col del WHERE del
+  // EXCLUDE — un hueco cancelado deja de bloquear.
+  active            Boolean                  @default(true)
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, appointmentId])
+  @@map("appointment_assignments")
+}
+
+// Bloqueos estructurales: cierre VIP, formación, vacaciones, "sábado tarde
+// sólo X". B4: bloqueos PUNTUALES (`slot`). El recurrente (`rrule`)
+// reutiliza el expander rrule.js de B3 (lectura); su alta puede ser
+// fast-follow. `tableId` DIFERIDA al bloque de mesa.
+model BookingBlock {
+  id          String                    @id @default(uuid()) @db.Uuid
+  tenantId    String                    @map("tenant_id") @db.Uuid
+  scope       BlockScope
+  staffUserId String?                   @map("staff_user_id") @db.Uuid
+  resourceId  String?                   @map("resource_id") @db.Uuid
+  // Puntual: intervalo concreto (tstzrange → SQL crudo). Nullable porque un
+  // bloqueo recurrente no lo usa.
+  slot        Unsupported("tstzrange")?
+  // Recurrente: plantilla rrule + hora de pared + ventana de validez
+  // (mismo patrón que StaffShift). Nullable para bloqueos puntuales.
+  rrule       String?
+  startTime   String?                   @map("start_time")
+  endTime     String?                   @map("end_time")
+  validFrom   DateTime?                 @map("valid_from") @db.Date
+  validUntil  DateTime?                 @map("valid_until") @db.Date
+  reason      String?
+  createdAt   DateTime                  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt   DateTime                  @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("booking_blocks")
+}
+
+// La consultoría hecha código: parámetros de política por centro,
+// ajustables sin deploy. B4: subset (min/max lead, ventana de cancelación).
+// El catálogo completo (cobertura mínima, rituales simultáneos, mesa) es
+// fast-follow. Cada key = una función pura registrada en código; `value` la
+// parametriza.
+model BookingPolicy {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  key       String
+  value     Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, key])
+  @@map("booking_policies")
 }

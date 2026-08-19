@@ -27,6 +27,7 @@ import {
   PowerOff,
   ReceiptText,
   RotateCw,
+  CalendarDays,
   ScanLine,
   Scissors,
   Search,
@@ -90,6 +91,7 @@ import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
 import type { MapNotice } from "./TableMapScreen.js";
 import { DebtsScreen } from "./DebtsScreen.js";
 import { ClientsPage } from "./ClientsPage.js";
+import { AgendaPage } from "./AgendaPage.js";
 import { useClientPicker } from "../hooks/useClientPicker.js";
 import { clientFullName } from "../lib/clients.js";
 import { useElapsedTime } from "../hooks/useElapsedTime.js";
@@ -273,6 +275,9 @@ export function SalePage(props: SalePageProps) {
   // capability activa (ADR-K6).
   const crmEnabled = getCachedCrmEnabled();
   const [showClients, setShowClients] = useState(false);
+  // B-koibox-4 · Agenda (motor de reservas). Sólo con `agendaEnabled`.
+  const agendaEnabled = getCachedAgendaEnabled();
+  const [showAgenda, setShowAgenda] = useState(false);
   const clientPicker = useClientPicker();
   // Aviso transitorio cuando el cliente elegido por F1 aún no tiene
   // contacto fiscal de Holded (el enlace lo hace el cobro).
@@ -1478,6 +1483,17 @@ export function SalePage(props: SalePageProps) {
                   <span className="hidden sm:inline">Clientes</span>
                 </button>
               )}
+              {/* B-koibox-4 · Agenda. Sólo con la capability activa. */}
+              {agendaEnabled && (
+                <button
+                  onClick={() => setShowAgenda(true)}
+                  title="Agenda"
+                  className="h-12 md:h-14 px-3 md:px-5 rounded-2xl bg-mipiace-stone hover:bg-slate-100 flex items-center gap-2 text-[13.5px] md:text-[14px] font-medium text-mipiace-ink"
+                >
+                  <CalendarDays className="w-[18px] h-[18px] lg:hidden" strokeWidth={2.25} />
+                  <span className="hidden sm:inline">Agenda</span>
+                </button>
+              )}
               {/* v1.0-mesas-frontend: en contexto mesa no hay carritos
                   suspendidos (la mesa abierta YA es la venta en pausa)
                   ni "Nueva venta" (vaciaría la proyección de un DRAFT
@@ -1777,6 +1793,17 @@ export function SalePage(props: SalePageProps) {
       )}
       {/* B-koibox-1 · sección Clientes (CRM) + picker rápido F1. */}
       {showClients && <ClientsPage onClose={() => setShowClients(false)} />}
+      {/* B-koibox-4 · Agenda. "Cobrar en caja" carga las líneas del ticket
+          pre-poblado en el carrito y cierra la agenda: el cobro sigue por el
+          camino existente sin re-teclear (no se toca ADR-010). */}
+      {showAgenda && (
+        <AgendaPage
+          onClose={() => setShowAgenda(false)}
+          onCheckoutLines={(agendaLines) => {
+            setLines((curr) => [...curr, ...agendaLines]);
+          }}
+        />
+      )}
       {clientPicker.element}
       {clientPickNote && (
         <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[60] bg-mipiace-ink text-white text-[13px] px-4 py-2.5 rounded-2xl shadow-lg max-w-[90vw] text-center">

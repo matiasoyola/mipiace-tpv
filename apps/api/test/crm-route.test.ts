@@ -184,6 +184,10 @@ const fakePrisma = {
       return list;
     }),
   },
+  // B-koibox-4: el historial ahora consulta citas del cliente vía la capa
+  // de agenda (`createAgendaStore().listForClient`), que usa SQL crudo. Este
+  // tenant de prueba no tiene citas → devolvemos vacío.
+  $queryRawUnsafe: vi.fn(async () => []),
 } as const;
 
 vi.mock("../src/context.js", () => ({

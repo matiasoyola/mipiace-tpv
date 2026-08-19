@@ -49,7 +49,10 @@ export type OutboxKind =
   // B-koibox-1 · alta de cliente CRM creada sin red. POST /clients
   // idempotente por externalId; el envío genérico (POST path+body,
   // borrar al 2xx) no necesita casos especiales.
-  | "client";
+  | "client"
+  // B-koibox-4 · alta de cita creada sin red. POST /agenda/appointments
+  // idempotente por externalId; mismo envío genérico que "client".
+  | "appointment";
 export type OutboxStatus = "pending" | "rejected";
 
 export interface OutboxItem {
