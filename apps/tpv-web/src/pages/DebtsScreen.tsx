@@ -11,11 +11,8 @@ import { useEffect, useMemo, useState } from "react";
 
 import { ApiError, apiWithCashier } from "../api.js";
 import { newId } from "../lib/ids.js";
-import {
-  fetchCreditReceiptEscpos,
-  getPairedUsbPrinter,
-  printEscposUsb,
-} from "../lib/escposPrint.js";
+import { fetchCreditReceiptEscpos } from "../lib/escposPrint.js";
+import { printUsbBytes } from "../platform/printer/printJob.js";
 
 const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
 
@@ -316,29 +313,29 @@ function ReceiptPanel(props: {
 }) {
   const { receipt } = props;
   const [printing, setPrinting] = useState(false);
+  const [printDone, setPrintDone] = useState(false);
   const [printError, setPrintError] = useState<string | null>(null);
 
+  // v1.10.2-impresion-honesta · el justificante pasa por el mismo
+  // servicio que el resto del TPV: espera al transporte, dice el motivo
+  // real cuando falla (antes se comía la causa con un "No se pudo
+  // imprimir el recibo." a secas) y lo reporta a Sentry.
   async function print(): Promise<void> {
     setPrinting(true);
     setPrintError(null);
-    try {
-      const printer = await getPairedUsbPrinter();
-      if (!printer) {
-        setPrintError("No hay impresora USB emparejada.");
-        return;
-      }
+    const outcome = await printUsbBytes({
+      operation: "credit-receipt",
+      ticketId: receipt.ticketId,
       // El recibo se construye en el backend (ESC/POS) y aquí sólo se
       // manda a la impresora, igual que la reimpresión de tickets.
-      const bytes = await fetchCreditReceiptEscpos(
-        receipt.ticketId,
-        receipt.paymentExternalId,
-      );
-      await printEscposUsb(bytes);
-    } catch {
-      setPrintError("No se pudo imprimir el recibo.");
-    } finally {
-      setPrinting(false);
-    }
+      bytes: () =>
+        fetchCreditReceiptEscpos(receipt.ticketId, receipt.paymentExternalId),
+    });
+    setPrinting(false);
+    setPrintDone(outcome.status === "printed");
+    setPrintError(
+      outcome.status === "printed" ? null : outcome.message,
+    );
   }
 
   return (
@@ -366,6 +363,11 @@ function ReceiptPanel(props: {
         </button>
       </div>
       {printError && <div className="text-[12px] text-red-600 mt-2">{printError}</div>}
+      {printDone && (
+        <div className="text-[12px] text-emerald-700 mt-2">
+          Justificante impreso.
+        </div>
+      )}
     </div>
   );
 }

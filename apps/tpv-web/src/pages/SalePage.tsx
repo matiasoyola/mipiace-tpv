@@ -105,6 +105,9 @@ import {
 } from "../lib/modifiers.js";
 import { syncNow } from "../lib/syncNow.js";
 import { vocab } from "../lib/vocab.js";
+// v1.10.2-impresion-honesta · un fallo de impresión de comanda tiene que
+// llegar a Sentry con transporte y motivo; antes moría en el catch.
+import { reportPrinterFailure } from "../platform/printer/telemetry.js";
 
 const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
 
@@ -330,7 +333,16 @@ export function SalePage(props: SalePageProps) {
     sections: Array<{ section: string; lineCount: number }>;
     revision: number;
   } | null>(null);
-  const [kitchenError, setKitchenError] = useState<string | null>(null);
+  // v1.10.2-impresion-honesta · el fallo de comanda deja de ser un
+  // string suelto: distinguimos "no hay impresora para esa sección"
+  // (nada que reintentar, hay que configurarla) de "la impresora falló"
+  // (motivo + reintento). Antes ambos caían en el mismo banner genérico
+  // que se autocerraba a los 7 s.
+  const [kitchenError, setKitchenError] = useState<
+    | { kind: "no-printer"; message: string }
+    | { kind: "failed"; message: string }
+    | null
+  >(null);
 
   // v1.4-Bar-Operativa-MVP Lote 3 · estado del mover-mesa.
   const [showMoveTable, setShowMoveTable] = useState(false);
@@ -1221,29 +1233,65 @@ export function SalePage(props: SalePageProps) {
         method: "POST",
       });
       setKitchenRevision(res.revision);
-      setKitchenToast({
-        sections: res.sections.map((s) => ({
-          section: s.section,
-          lineCount: s.lineCount,
-        })),
-        revision: res.revision,
-      });
-      // Si alguna sección falló pero otras imprimieron, lo flageamos
-      // como error parcial para que el cajero vea qué no llegó.
+      // v1.10.2-impresion-honesta · el toast de éxito sólo lista las
+      // secciones que la impresora ACEPTÓ. Antes listaba todas: si la
+      // impresora de cocina estaba apagada, el cajero leía "Cocina: 2
+      // líneas" bajo un "Comanda enviada" en verde y daba por hecho que
+      // el pedido estaba en cocina.
+      const printed = res.sections.filter((s) => s.ok);
       const failed = res.sections.filter((s) => !s.ok);
+      if (printed.length > 0) {
+        setKitchenToast({
+          sections: printed.map((s) => ({
+            section: s.section,
+            lineCount: s.lineCount,
+          })),
+          revision: res.revision,
+        });
+      }
       if (failed.length > 0) {
-        setKitchenError(
-          `Comanda no enviada: ${failed
-            .map((f) => `${f.section}${f.error ? ` (${f.error})` : ""}`)
-            .join(", ")}`,
-        );
+        for (const f of failed) {
+          reportPrinterFailure(new Error(f.error ?? "Error desconocido"), {
+            operation: "kitchen",
+            transport: "wifi",
+            ticketId: tableContext.activeTicketId,
+            section: f.section,
+          });
+        }
+        setKitchenError({
+          kind: "failed",
+          message: `No salió por ${failed
+            .map(
+              (f) =>
+                `${SECTION_LABEL_ES[f.section] ?? f.section}${
+                  f.error ? ` (${f.error})` : ""
+                }`,
+            )
+            .join(", ")}.`,
+        });
       }
     } catch (err) {
-      const msg =
-        err instanceof ApiError
-          ? err.message
-          : "No se pudo enviar la comanda. Reinténtalo.";
-      setKitchenError(msg);
+      // 409 del backend: la caja no tiene impresora WIFI activa para esa
+      // sección. No es un fallo de la impresora — no hay ninguna.
+      if (
+        err instanceof ApiError &&
+        err.code === "PRINTER_NOT_CONFIGURED_FOR_SECTION"
+      ) {
+        setKitchenError({ kind: "no-printer", message: err.message });
+        return;
+      }
+      reportPrinterFailure(err, {
+        operation: "kitchen",
+        transport: "wifi",
+        ticketId: tableContext.activeTicketId,
+      });
+      setKitchenError({
+        kind: "failed",
+        message:
+          err instanceof ApiError
+            ? err.message
+            : "No se pudo enviar la comanda.",
+      });
     } finally {
       setKitchenBusy(false);
     }
@@ -1819,7 +1867,29 @@ export function SalePage(props: SalePageProps) {
       )}
       {kitchenError && (
         <KitchenErrorBanner
-          message={kitchenError}
+          message={kitchenError.message}
+          title={
+            kitchenError.kind === "no-printer"
+              ? "Sin impresora configurada"
+              : "La comanda no llegó a imprimirse"
+          }
+          hint={
+            kitchenError.kind === "no-printer"
+              ? "Se configura en el panel de administración → Impresoras."
+              : undefined
+          }
+          // v1.10.2-impresion-honesta · un fallo de impresión no se
+          // autocierra: el cajero tiene que decidir qué hace (reintentar
+          // o cantar el pedido a mano). Sólo se cierra al pulsar.
+          autoDismiss={false}
+          onRetry={
+            kitchenError.kind === "failed"
+              ? () => {
+                  setKitchenError(null);
+                  void sendToKitchen();
+                }
+              : undefined
+          }
           onClose={() => setKitchenError(null)}
         />
       )}
@@ -3392,24 +3462,58 @@ function KitchenToast({
 function KitchenErrorBanner({
   message,
   title,
+  hint,
+  autoDismiss = true,
+  onRetry,
   onClose,
 }: {
   message: string;
   // v1.0-mesas-frontend: el banner se reutiliza para errores de
   // operativa de mesa (revert de optimista, 403/409 de la API).
   title?: string;
+  // v1.10.2-impresion-honesta · qué puede hacer el cajero al respecto.
+  hint?: string;
+  // Los errores de operativa de mesa siguen autocerrándose; los de
+  // impresión no (ver el caller).
+  autoDismiss?: boolean;
+  onRetry?: () => void;
   onClose: () => void;
 }) {
   useEffect(() => {
+    if (!autoDismiss) return;
     const t = setTimeout(onClose, 7_000);
     return () => clearTimeout(t);
-  }, [onClose]);
+  }, [autoDismiss, onClose]);
   return (
-    <div className="fixed top-5 right-5 z-50 bg-red-50 border border-red-300 text-red-900 px-4 py-3 rounded-2xl shadow-sm max-w-sm">
+    <div
+      data-testid="kitchen-error-banner"
+      className="fixed top-5 right-5 z-50 bg-red-50 border border-red-300 text-red-900 px-4 py-3 rounded-2xl shadow-sm max-w-sm"
+    >
       <div className="text-[13.5px] font-semibold mb-1">
         {title ?? "No se pudo enviar la comanda"}
       </div>
       <div className="text-[12.5px]">{message}</div>
+      {hint && <div className="text-[12px] mt-1 opacity-80">{hint}</div>}
+      <div className="mt-2 flex gap-2">
+        {onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="h-8 px-3 rounded-lg bg-red-600 hover:bg-red-700 text-white text-[12px] font-medium"
+          >
+            Reintentar
+          </button>
+        )}
+        {!autoDismiss && (
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-8 px-3 rounded-lg border border-red-300 hover:bg-red-100 text-[12px] font-medium"
+          >
+            Entendido
+          </button>
+        )}
+      </div>
     </div>
   );
 }

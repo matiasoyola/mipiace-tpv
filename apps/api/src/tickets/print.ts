@@ -1,6 +1,6 @@
 // v1.4-Impresoras-Fase-1 Lote 2 · endpoint de impresión ESC/POS.
 //
-//   POST /tickets/:ticketId/print/escpos?target=usb|wifi[&printerConfigId=...]
+//   POST /tickets/:ticketId/print/escpos?target=usb|wifi[&printerConfigId=...][&copy=true]
 //
 //   - target=usb  → devuelve el binary ESC/POS en el body
 //                   (Content-Type: application/octet-stream). El TPV
@@ -9,6 +9,10 @@
 //                   si no se pasa, el primero ACTIVO sin sección del
 //                   register), abre socket TCP a ip:port y manda el
 //                   binary. Devuelve `{ok, printedAt}` o `{ok:false, error}`.
+//
+//   - copy=true   → el papel lleva "COPIA - no fiscal" (v1.10.2). Lo usa
+//                   la reimpresión desde el detalle de ticket, que antes
+//                   pasaba por /reprint (PrintIntent que nadie consumía).
 //
 // Auth: requireCashierSession. Lo dispara el TPV tras cobrar (o por
 // reimpresión manual).
@@ -32,6 +36,8 @@ import type { TicketTotals } from "@mipiacetpv/ticket-model";
 interface PrintQuery {
   target: "usb" | "wifi";
   printerConfigId?: string;
+  // v1.10.2-impresion-honesta · reimpresión: marca el papel como copia.
+  copy?: boolean;
 }
 
 export async function registerTicketPrintRoute(
@@ -53,6 +59,7 @@ export async function registerTicketPrintRoute(
           properties: {
             target: { type: "string", enum: ["usb", "wifi"] },
             printerConfigId: { type: "string", format: "uuid" },
+            copy: { type: "boolean", default: false },
           },
         },
       },
@@ -60,7 +67,7 @@ export async function registerTicketPrintRoute(
     async (request, reply) => {
       const cashier = request.cashier!;
       const { ticketId } = request.params as { ticketId: string };
-      const { target, printerConfigId } = request.query as PrintQuery;
+      const { target, printerConfigId, copy } = request.query as PrintQuery;
       const prisma = getPrisma();
       const env = loadEnv();
 
@@ -98,7 +105,12 @@ export async function registerTicketPrintRoute(
         );
       }
       const bytes = buildTicketReceipt(
-        ticketToEscposInput(ticket, env.PUBLIC_TICKET_URL, ticketTotals),
+        ticketToEscposInput(
+          ticket,
+          env.PUBLIC_TICKET_URL,
+          ticketTotals,
+          copy === true,
+        ),
       );
 
       if (target === "usb") {
@@ -313,6 +325,9 @@ export function ticketToEscposInput(
   // tipo, idéntico al del PDF). Opcional: si es null el ticket sale sin
   // desglose, como antes.
   totals: TicketTotals | null = null,
+  // v1.10.2-impresion-honesta · reimpresión: el papel lleva "COPIA - no
+  // fiscal". El original (impresión tras el cobro) nunca la lleva.
+  isCopy = false,
 ): TicketReceiptInput {
   const lines: TicketLineEscpos[] = ticket.lines.map((l) => {
     const baseUnit = Number(l.unitPrice.toString());
@@ -359,6 +374,7 @@ export function ticketToEscposInput(
     businessAddress: formatAddress(ticket.register.store.fiscalAddress),
     internalNumber: ticket.internalNumber,
     issuedAt,
+    isCopy,
     cashierLabel: cashierLabelFrom(ticket.user),
     tableName: ticket.table?.name ?? null,
     lines,

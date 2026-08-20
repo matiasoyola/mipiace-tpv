@@ -26,9 +26,84 @@ import { getCachedBusinessType } from "../lib/catalog.js";
 import { syncNow } from "../lib/syncNow.js";
 import { isTestModeActive } from "../lib/test-mode.js";
 import { vocab } from "../lib/vocab.js";
+import {
+  printTicket,
+  type PrintOutcome,
+} from "../platform/printer/printJob.js";
 import { RefundOverlay } from "./RefundPage.js";
 
 const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
+
+// v1.10.2-impresion-honesta · estado de una reimpresión.
+//
+// HALLAZGO (Cafetería Sirope, Caja 1, 2026-08-20): con cero impresoras
+// configuradas, este botón respondía «Enviado a impresora. La copia
+// llevará marca COPIA.». No salía papel por ningún sitio.
+//
+// La causa: llamaba a `POST /tickets/:id/reprint`, que sólo crea un
+// `PrintIntent` PENDING para el bridge B5 — un bridge que nunca se llegó
+// a montar. El 202 del backend significaba "he apuntado la intención",
+// y la pantalla lo leía como "ha salido papel". Ahora la reimpresión va
+// por el mismo camino ESC/POS que el resto del TPV, que sí entrega el
+// binario a la impresora y sí devuelve el motivo cuando falla.
+type ReprintState =
+  | { phase: "idle" }
+  | { phase: "printing" }
+  | { phase: "done" }
+  | { phase: "no-printer"; message: string }
+  | { phase: "failed"; message: string };
+
+function reprintStateFrom(outcome: PrintOutcome): ReprintState {
+  switch (outcome.status) {
+    case "printed":
+      return { phase: "done" };
+    case "no-printer":
+      return { phase: "no-printer", message: outcome.message };
+    case "needs-pairing":
+      // Emparejar abre un diálogo del sistema y sólo puede lanzarse
+      // desde un gesto de usuario; aquí lo contamos como fallo con
+      // motivo, y el reintento vuelve a recorrer la ruta completa.
+      return { phase: "failed", message: outcome.message };
+    case "failed":
+      return { phase: "failed", message: outcome.message };
+  }
+}
+
+// Texto corto para el hint de la lista. Nunca dice "enviado": o el
+// papel salió (`done`), o hay un motivo.
+function reprintHint(state: ReprintState): string | null {
+  switch (state.phase) {
+    case "idle":
+      return null;
+    case "printing":
+      return "Imprimiendo…";
+    case "done":
+      return "Copia impresa";
+    case "no-printer":
+      return state.message;
+    case "failed":
+      return `No se pudo imprimir: ${state.message}`;
+  }
+}
+
+// Comparte la reimpresión entre el mini-botón de la lista y el detalle:
+// un solo camino, un solo conjunto de estados. `copy: true` marca el
+// papel como "COPIA - no fiscal", que es lo que el mensaje viejo
+// prometía sin cumplirlo.
+function useReprint(ticketId: string) {
+  const [state, setState] = useState<ReprintState>({ phase: "idle" });
+  async function run(): Promise<void> {
+    if (state.phase === "printing") return;
+    setState({ phase: "printing" });
+    const outcome = await printTicket({
+      ticketId,
+      operation: "reprint",
+      copy: true,
+    });
+    setState(reprintStateFrom(outcome));
+  }
+  return { state, run, reset: () => setState({ phase: "idle" }) };
+}
 
 // Renderiza el `modifiers` jsonb del backend en una sola línea de texto.
 // El campo puede ser string[] (legacy ad-hoc) o object[] estructurado
@@ -422,25 +497,25 @@ function TicketRowCard({
   // role="button" arriba para no anidar <button> dentro de <button>
   // (HTML inválido). El mini-botón hace stopPropagation para no abrir
   // el detalle cuando el cajero sólo quiere reimprimir desde la lista.
-  const [reprinting, setReprinting] = useState(false);
-  const [hint, setHint] = useState<string | null>(null);
+  // v1.10.2-impresion-honesta · mismo camino que el detalle: imprime de
+  // verdad y cuenta lo que pasó. El "hint" ya no puede decir "enviado"
+  // sin que el transporte lo haya confirmado.
+  const { state: reprintState, run: runReprint, reset } = useReprint(ticket.id);
+  const reprinting = reprintState.phase === "printing";
   const canReprint = ticket.status !== "DRAFT" && ticket.status !== "VOIDED";
   async function reprint(e: React.MouseEvent) {
     e.stopPropagation();
-    if (reprinting) return;
-    setReprinting(true);
-    setHint(null);
-    try {
-      await apiWithCashier(`/tickets/${ticket.id}/reprint`, { method: "POST" });
-      setHint("Enviado a impresora");
-      window.setTimeout(() => setHint(null), 2500);
-    } catch (err) {
-      setHint(err instanceof ApiError ? err.message : "Error");
-      window.setTimeout(() => setHint(null), 3500);
-    } finally {
-      setReprinting(false);
-    }
+    await runReprint();
   }
+  // El éxito se autolimpia; los avisos de fallo y de "sin impresora"
+  // NO — un aviso que desaparece solo es igual de inútil que no darlo.
+  useEffect(() => {
+    if (reprintState.phase !== "done") return;
+    const t = window.setTimeout(reset, 2500);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reprintState.phase]);
+  const hint = reprintHint(reprintState);
   return (
     <li>
       <div
@@ -480,7 +555,18 @@ function TicketRowCard({
             )}
           </div>
           {hint && (
-            <div className="text-[11.5px] text-slate-500 mt-1">{hint}</div>
+            <div
+              data-testid={`reprint-hint-${reprintState.phase}`}
+              className={
+                reprintState.phase === "done"
+                  ? "text-[11.5px] text-emerald-700 mt-1"
+                  : reprintState.phase === "failed"
+                    ? "text-[11.5px] text-red-700 mt-1"
+                    : "text-[11.5px] text-slate-500 mt-1"
+              }
+            >
+              {hint}
+            </div>
           )}
         </div>
         <div className="text-right shrink-0">
@@ -560,30 +646,14 @@ export function TicketDetailDrawer({
   const [email, setEmail] = useState(ticket.emailIntent ?? "");
   const [sending, setSending] = useState(false);
   const [sendStatus, setSendStatus] = useState<string | null>(null);
-  // v1.3 Lote 3 · estado de la reimpresión. El intent va a la cola del
-  // bridge B5; el toast inline informa "Enviado a impresora" o error.
-  const [reprinting, setReprinting] = useState(false);
-  const [reprintStatus, setReprintStatus] = useState<string | null>(null);
+  // v1.10.2-impresion-honesta · estado real de la reimpresión: enviando
+  // / impreso / falló-con-motivo-y-reintento. Antes había un único
+  // estado ("Enviado a impresora. La copia llevará marca COPIA.") que se
+  // pintaba con el 202 del PrintIntent, existiera o no una impresora.
+  const { state: reprintState, run: reprint } = useReprint(ticket.id);
+  const reprinting = reprintState.phase === "printing";
   const canReprint =
     ticket.status !== "DRAFT" && ticket.status !== "VOIDED";
-
-  async function reprint() {
-    if (reprinting) return;
-    setReprinting(true);
-    setReprintStatus(null);
-    try {
-      await apiWithCashier(`/tickets/${ticket.id}/reprint`, {
-        method: "POST",
-      });
-      setReprintStatus("Enviado a impresora. La copia llevará marca COPIA.");
-    } catch (err) {
-      setReprintStatus(
-        err instanceof ApiError ? err.message : "Error al enviar a impresora",
-      );
-    } finally {
-      setReprinting(false);
-    }
-  }
 
   async function resend() {
     if (!email) return;
@@ -702,7 +772,7 @@ export function TicketDetailDrawer({
 
           <div>
             <button
-              onClick={reprint}
+              onClick={() => void reprint()}
               disabled={!canReprint || reprinting}
               className="w-full h-11 rounded-xl border border-slate-200 hover:bg-slate-50 disabled:opacity-50 text-[13.5px] font-medium text-mipiace-ink flex items-center justify-center gap-2"
             >
@@ -711,10 +781,49 @@ export function TicketDetailDrawer({
               ) : (
                 <Printer className="w-4 h-4" />
               )}
-              Reimprimir {vocab("ticketNoun", businessType).toLowerCase()}
+              {reprinting
+                ? "Imprimiendo…"
+                : `Reimprimir ${vocab("ticketNoun", businessType).toLowerCase()}`}
             </button>
-            {reprintStatus && (
-              <div className="text-[12px] text-slate-500 mt-1.5">{reprintStatus}</div>
+            {/* v1.10.2-impresion-honesta · tres estados visibles, no uno.
+                "Impreso" sólo aparece cuando el transporte lo confirma;
+                el fallo trae el motivo y un botón de reintentar; y sin
+                impresora se dice justo eso, sin ofrecer reintento (no
+                hay nada que reintentar). */}
+            {reprintState.phase === "done" && (
+              <div
+                data-testid="reprint-done"
+                className="text-[12px] text-emerald-700 mt-1.5 flex items-center gap-1.5"
+              >
+                <Check className="w-3.5 h-3.5 shrink-0" />
+                Copia impresa (lleva la marca COPIA).
+              </div>
+            )}
+            {reprintState.phase === "no-printer" && (
+              <div
+                data-testid="reprint-no-printer"
+                className="text-[12px] text-slate-500 mt-1.5"
+              >
+                {reprintState.message} Se configura en el panel de
+                administración → Impresoras.
+              </div>
+            )}
+            {reprintState.phase === "failed" && (
+              <div
+                data-testid="reprint-failed"
+                className="mt-1.5 flex items-start gap-2"
+              >
+                <div className="flex-1 text-[12px] text-red-700">
+                  No se pudo imprimir: {reprintState.message}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void reprint()}
+                  className="h-8 px-3 shrink-0 rounded-lg bg-red-600 hover:bg-red-700 text-white text-[12px] font-medium"
+                >
+                  Reintentar
+                </button>
+              </div>
             )}
           </div>
 

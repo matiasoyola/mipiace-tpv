@@ -110,6 +110,12 @@ export interface TicketReceiptInput {
   publicTicketUrl: string | null;
   // Pie configurable del tenant ("Gracias por su compra"). Opcional.
   footer: string | null;
+  // v1.10.2-impresion-honesta · reimpresión. Cuando el cajero pide una
+  // copia del ticket, el papel debe decirlo: se imprime un banner
+  // "COPIA - no fiscal" bajo la cabecera. El original nunca lo lleva.
+  // Equivale a la marca que el renderer del PDF ya pintaba para los
+  // PrintIntent(REPRINT).
+  isCopy?: boolean;
   // v1.8-Fiado (variante B) · si el ticket es una venta a crédito con
   // deuda viva, imprimimos una leyenda destacada "PENDIENTE DE PAGO" con
   // el deudor y el importe adeudado. NO es documento fiscal (no lleva
@@ -165,6 +171,17 @@ export function buildTicketReceipt(input: TicketReceiptInput): Uint8Array {
   }
 
   parts.push(escSeparator(COLUMNS));
+
+  // v1.10.2-impresion-honesta · marca de copia. Va arriba del todo (bajo
+  // la cabecera del comercio) para que se lea antes que el importe y
+  // nadie confunda una reimpresión con el ticket fiscal original.
+  if (input.isCopy) {
+    parts.push(escAlign("center"));
+    parts.push(escBold(true));
+    parts.push(escText("*** COPIA - no fiscal ***"));
+    parts.push(escBold(false));
+    parts.push(escSeparator(COLUMNS));
+  }
 
   // Cuerpo. Volvemos a alinear a la izquierda; el TOTAL se centra
   // por la derecha más tarde con padding manual.

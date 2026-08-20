@@ -29,19 +29,21 @@ import {
 } from "@mipiacetpv/ticket-pdf";
 import type { TicketDocument } from "@mipiacetpv/ticket-model";
 
-import { apiWithCashier, ApiError } from "../api.js";
+import { apiWithCashier } from "../api.js";
 import { getCachedBusinessType } from "../lib/catalog.js";
 import type { BusinessType } from "../lib/catalog.js";
 import { subscribeOutbox } from "../lib/outbox.js";
+import { pairUsbPrinter } from "../lib/escposPrint.js";
+// v1.10.2-impresion-honesta · la decisión de "¿hay impresora?" y "¿ha
+// impreso de verdad?" ya no vive en esta pantalla: la resuelve el
+// servicio de impresión y aquí sólo se pinta el resultado.
 import {
-  fetchTicketEscposBinary,
-  getPairedUsbPrinter,
-  isWebUsbSupported,
-  pairUsbPrinter,
-  printEscposUsb,
-  printTicketWifi,
-  syncUsbPairingWithServerConfig,
-} from "../lib/escposPrint.js";
+  lookupPrinter,
+  printTicket,
+  NO_PRINTER_MESSAGE,
+  type ConfiguredPrinter,
+  type PrintOutcome,
+} from "../platform/printer/printJob.js";
 import { vocab } from "../lib/vocab.js";
 
 interface TicketDelivery {
@@ -78,18 +80,15 @@ export function SuccessOverlay({
   const [digitalError, setDigitalError] = useState<string | null>(null);
   const [showQr, setShowQr] = useState(false);
   const [showView, setShowView] = useState(false);
-  const [printerInfo, setPrinterInfo] = useState<{
-    mode: "USB" | "WIFI";
-    configId: string;
-    name: string;
-  } | null>(null);
-  const [printState, setPrintState] = useState<
-    | { phase: "idle" }
-    | { phase: "printing" }
-    | { phase: "done" }
-    | { phase: "needs-pairing" }
-    | { phase: "error"; message: string }
-  >({ phase: "idle" });
+  const [printerInfo, setPrinterInfo] = useState<ConfiguredPrinter | null>(
+    null,
+  );
+  // v1.10.2-impresion-honesta · "todavía no lo he preguntado" y "esta
+  // caja no tiene impresora" son estados distintos. Antes ambos pintaban
+  // lo mismo (nada), así que el cajero no sabía si el botón faltaba por
+  // configuración o porque la pantalla aún estaba cargando.
+  const [printerResolved, setPrinterResolved] = useState(false);
+  const [printState, setPrintState] = useState<PrintState>({ phase: "idle" });
   // v1.3-Servicios-Pinta · Lote 1: vertical para adaptar copy ("Ticket
   // emitido" → "Comprobante emitido", "Nueva venta" → "Nuevo servicio").
   const businessType = getCachedBusinessType();
@@ -132,8 +131,16 @@ export function SuccessOverlay({
   // mientras hay un sub-modal o una impresión en curso para no cortar
   // al cajero a mitad de una acción. (En contexto mesa este overlay ni
   // se monta: la SalePage sale directa al mapa con banner de éxito.)
+  // v1.10.2-impresion-honesta · también se pausa sobre un fallo o sobre
+  // "sin impresora": el modal se autocerraba 4 s después de que la
+  // impresión fallara, así que el aviso desaparecía solo y el cajero se
+  // quedaba igual de ciego que cuando el TPV mentía.
   const autoClosePaused =
-    showQr || showView || printState.phase === "printing";
+    showQr ||
+    showView ||
+    printState.phase === "printing" ||
+    printState.phase === "error" ||
+    printState.phase === "no-printer";
   useEffect(() => {
     if (autoClosePaused) return;
     const t = setTimeout(() => onDone(), 4_000);
@@ -178,38 +185,28 @@ export function SuccessOverlay({
 
   // v1.4-Impresoras-Fase-1 Lote 3 · carga el PrinterConfig por
   // defecto (ticket de cobro) del register para decidir flujo USB vs
-  // WIFI. Si no hay impresora configurada, el botón queda oculto.
+  // WIFI.
+  // v1.10.2-impresion-honesta · si no hay ninguno, ya no se oculta el
+  // botón en silencio: se pinta el estado vacío "esta caja no tiene
+  // impresora configurada". Ocultarlo dejaba al cajero sin saber si el
+  // ticket había salido o si es que ahí nunca sale nada.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        const res = await apiWithCashier<{
-          printer: { id: string; name: string; mode: "USB" | "WIFI" } | null;
-        }>("/tpv/printer-info?section=ticket");
-        if (cancelled) return;
-        // v1.0-pilotos · Lote 5 (#19): si la impresora fue borrada en
-        // el admin (o pasó a WIFI), limpiamos el pairing USB local —
-        // sin esto la impresora borrada "reaparecía" en este device.
-        syncUsbPairingWithServerConfig(res.printer);
-        if (!res.printer) return;
-        setPrinterInfo({
-          mode: res.printer.mode,
-          configId: res.printer.id,
-          name: res.printer.name,
-        });
-        if (res.printer.mode === "USB" && isWebUsbSupported()) {
-          // Comprobamos si ya hay impresora emparejada (para no
-          // ofrecer el botón "Empareja" cuando no hace falta). Esto
-          // no abre diálogo — sólo lista las ya autorizadas.
-          const paired = await getPairedUsbPrinter();
-          if (!cancelled && !paired) {
-            setPrintState({ phase: "needs-pairing" });
-          }
-        }
-      } catch {
-        // Sin impresora configurada, sin WebUSB, etc. — el botón
-        // sigue oculto y el cajero usa el flujo digital.
+      const lookup = await lookupPrinter("ticket");
+      if (cancelled) return;
+      setPrinterResolved(true);
+      if (lookup.status === "none") {
+        setPrintState({ phase: "no-printer", message: NO_PRINTER_MESSAGE });
+        return;
       }
+      if (lookup.status === "unknown") {
+        // No sabemos si hay impresora (PWA sin red). No afirmamos ni
+        // que la hay ni que no: el botón no se ofrece y el cajero tira
+        // del flujo digital, que sí está disponible.
+        return;
+      }
+      setPrinterInfo(lookup.printer);
     })();
     return () => {
       cancelled = true;
@@ -229,28 +226,28 @@ export function SuccessOverlay({
     }
   }
 
+  // v1.10.2-impresion-honesta · "impreso" se pinta DESPUÉS de que el
+  // transporte lo confirme, y sólo si lo confirma. `printTicket` no
+  // lanza: devuelve lo que pasó de verdad y ya ha reportado el fallo a
+  // Sentry con transporte y motivo.
   async function onPrintTicket() {
     if (!printerInfo) return;
     setPrintState({ phase: "printing" });
-    try {
-      if (printerInfo.mode === "USB") {
-        const bytes = await fetchTicketEscposBinary(ticketId);
-        await printEscposUsb(bytes);
-      } else {
-        await printTicketWifi(ticketId, printerInfo.configId);
-      }
-      setPrintState({ phase: "done" });
+    const outcome = await printTicket({
+      ticketId,
+      operation: "ticket",
+      printer: printerInfo,
+    });
+    setPrintState(toPrintState(outcome));
+    if (outcome.status === "printed") {
+      // Vuelve al botón para que quepa una segunda copia si el cliente
+      // la pide. Los estados de fallo NO se auto-limpian: un aviso que
+      // se borra solo es lo mismo que no darlo.
       setTimeout(() => {
-        setPrintState((s) => (s.phase === "done" ? { phase: "idle" } : s));
+        setPrintState((prev) =>
+          prev.phase === "done" ? { phase: "idle" } : prev,
+        );
       }, 2000);
-    } catch (err) {
-      const msg =
-        err instanceof ApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : "Error al imprimir.";
-      setPrintState({ phase: "error", message: msg });
     }
   }
 
@@ -338,16 +335,17 @@ export function SuccessOverlay({
           </div>
         )}
 
-        {printerInfo && (
-          <PrintTicketRow
-            mode={printerInfo.mode}
-            name={printerInfo.name}
-            state={printState}
-            onPair={onPairUsb}
-            onPrint={onPrintTicket}
-            onRetry={() => onPrintTicket()}
-          />
-        )}
+        {(printerInfo || printState.phase === "no-printer") &&
+          printerResolved && (
+            <PrintTicketRow
+              mode={printerInfo?.mode ?? null}
+              name={printerInfo?.name ?? null}
+              state={printState}
+              onPair={onPairUsb}
+              onPrint={onPrintTicket}
+              onRetry={() => onPrintTicket()}
+            />
+          )}
 
         {(delivery?.showQrButton ||
           delivery?.showDownloadButton ||
@@ -512,7 +510,26 @@ type PrintState =
   | { phase: "printing" }
   | { phase: "done" }
   | { phase: "needs-pairing" }
+  // v1.10.2-impresion-honesta · estado vacío honesto: la caja no tiene
+  // impresora, así que no hay nada que reintentar ni éxito que anunciar.
+  | { phase: "no-printer"; message: string }
   | { phase: "error"; message: string };
+
+// v1.10.2-impresion-honesta · el resultado del servicio de impresión se
+// traduce 1:1 a lo que ve el cajero. No hay ninguna rama que produzca
+// "impreso" sin un `status: "printed"` detrás.
+function toPrintState(outcome: PrintOutcome): PrintState {
+  switch (outcome.status) {
+    case "printed":
+      return { phase: "done" };
+    case "no-printer":
+      return { phase: "no-printer", message: outcome.message };
+    case "needs-pairing":
+      return { phase: "needs-pairing" };
+    case "failed":
+      return { phase: "error", message: outcome.message };
+  }
+}
 
 function PrintTicketRow({
   mode,
@@ -522,8 +539,8 @@ function PrintTicketRow({
   onPrint,
   onRetry,
 }: {
-  mode: "USB" | "WIFI";
-  name: string;
+  mode: "USB" | "WIFI" | null;
+  name: string | null;
   state: PrintState;
   onPair: () => void;
   onPrint: () => void;
@@ -531,6 +548,23 @@ function PrintTicketRow({
 }) {
   const baseClass =
     "mt-4 rounded-2xl border px-4 py-3 flex items-center gap-3 text-left";
+  // v1.10.2-impresion-honesta · sin impresora no se ofrece imprimir. El
+  // ticket ya está cobrado y el cliente tiene el digital (QR/email); lo
+  // que no puede pasar es que el TPV diga "enviado a impresora".
+  if (state.phase === "no-printer") {
+    return (
+      <div
+        data-testid="print-no-printer"
+        className={`${baseClass} bg-slate-50 border-slate-200 text-slate-600`}
+      >
+        <Printer className="w-4 h-4 shrink-0 opacity-50" />
+        <div className="flex-1 text-[12.5px]">
+          {state.message} Se configura en el panel de administración →
+          Impresoras.
+        </div>
+      </div>
+    );
+  }
   if (state.phase === "needs-pairing") {
     return (
       <div
@@ -539,8 +573,8 @@ function PrintTicketRow({
       >
         <Printer className="w-4 h-4 shrink-0" />
         <div className="flex-1 text-[12.5px]">
-          Empareja la impresora <strong>{name}</strong> para imprimir
-          el ticket.
+          Empareja la impresora <strong>{name ?? "USB"}</strong> para
+          imprimir el ticket.
         </div>
         <button
           type="button"
@@ -598,7 +632,9 @@ function PrintTicketRow({
       )}
       {state.phase === "printing"
         ? "Imprimiendo…"
-        : `Imprimir ticket (${mode})`}
+        : mode
+          ? `Imprimir ticket (${mode})`
+          : "Imprimir ticket"}
     </button>
   );
 }

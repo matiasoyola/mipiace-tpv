@@ -292,6 +292,55 @@ describe("POST /tickets/:id/print/escpos", () => {
     expect(state.printers.get(PRINTER_TICKET)!.lastPrintOkAt).toBeInstanceOf(Date);
   });
 
+  // v1.10.2-impresion-honesta · la reimpresión pasa por este mismo
+  // endpoint con copy=true (antes iba a /reprint, que sólo apuntaba un
+  // PrintIntent y no imprimía nada). El papel tiene que decir que es
+  // una copia; el original no puede llevar la marca.
+  it("copy=true imprime la marca COPIA; sin copy el ticket sale limpio", async () => {
+    seedTicket();
+    const app = await buildApp();
+
+    const copia = await app.inject({
+      method: "POST",
+      url: `/tickets/${TICKET}/print/escpos?target=usb&copy=true`,
+      headers: { authorization: `Bearer ${signSession()}` },
+    });
+    expect(copia.statusCode).toBe(200);
+    expect(copia.rawPayload.toString("latin1")).toContain("COPIA - no fiscal");
+
+    const original = await app.inject({
+      method: "POST",
+      url: `/tickets/${TICKET}/print/escpos?target=usb`,
+      headers: { authorization: `Bearer ${signSession()}` },
+    });
+    expect(original.statusCode).toBe(200);
+    expect(original.rawPayload.toString("latin1")).not.toContain("COPIA");
+  });
+
+  // v1.10.2-impresion-honesta · el dinero manda (ADR-010) visto desde el
+  // backend: el endpoint de impresión NO toca el ticket. Falle el socket
+  // TCP o no haya impresora, lo único que se escribe es el diagnóstico
+  // en el PrinterConfig. El cobro es intocable desde aquí.
+  it("un fallo de impresión no altera el ticket cobrado", async () => {
+    const ticket = seedTicket();
+    seedWifiPrinter();
+    tcpStub.mode = "throw";
+    const before = JSON.stringify(ticket);
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/tickets/${TICKET}/print/escpos?target=wifi`,
+      headers: { authorization: `Bearer ${signSession()}` },
+    });
+    expect(res.statusCode).toBe(502);
+    // El ticket sale de la impresión exactamente como entró.
+    expect(JSON.stringify(state.tickets.get(TICKET))).toBe(before);
+    // Y el motivo queda registrado donde toca: en la impresora.
+    expect(state.printers.get(PRINTER_TICKET)!.lastErrorMsg).toContain(
+      "ECONNREFUSED",
+    );
+  });
+
   it("target=wifi sin impresora configurada → 409", async () => {
     seedTicket();
     const app = await buildApp();

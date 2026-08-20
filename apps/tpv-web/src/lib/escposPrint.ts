@@ -18,7 +18,10 @@
 
 import { apiWithCashier, ApiError } from "../api.js";
 import { usbTransport } from "../platform/printer/bootstrap.js";
-import { PrinterError } from "../platform/printer/PrinterTransport.js";
+import {
+  PrinterError,
+  type PrintResult,
+} from "../platform/printer/PrinterTransport.js";
 
 // Guard común: el transporte USB de la plataforma. En navegador siempre
 // está registrado (WebUsbTransport); si faltara, error accionable.
@@ -76,8 +79,13 @@ export async function getPairedUsbPrinter(): Promise<boolean> {
 // Envía un binary ESC/POS a la impresora USB emparejada. Si no hay
 // ninguna, lanza `PrinterError("NOT_PAIRED")` que el caller convierte en
 // "empareja primero".
-export async function printEscposUsb(bytes: Uint8Array): Promise<void> {
-  await requireUsbTransport().print(bytes);
+//
+// v1.10.2-impresion-honesta · devuelve el `PrintResult` del transporte en
+// vez de `void`. La UI no puede pintar "impreso" con lo que ella supone:
+// tiene que pintar lo que el transporte confirma (y `printedAt` es esa
+// confirmación). Ensancha el tipo, no rompe callers.
+export async function printEscposUsb(bytes: Uint8Array): Promise<PrintResult> {
+  return requireUsbTransport().print(bytes);
 }
 
 // Abre el cajón portamonedas por la impresora USB (pulso kick ESC/POS).
@@ -102,21 +110,30 @@ export async function openCashDrawerIfAvailable(): Promise<void> {
 
 // Pide el binary ESC/POS al backend (genera buildTicketReceipt sobre
 // el ticket persistido) y lo manda a la impresora USB.
-export async function printTicketUsb(ticketId: string): Promise<void> {
-  const bytes = await fetchTicketEscposBinary(ticketId);
-  await printEscposUsb(bytes);
+export async function printTicketUsb(
+  ticketId: string,
+  opts: { copy?: boolean } = {},
+): Promise<PrintResult> {
+  const bytes = await fetchTicketEscposBinary(ticketId, opts);
+  return printEscposUsb(bytes);
 }
 
 // Llama al endpoint backend que abre TCP a la impresora WIFI configurada
 // para el register. El backend gestiona los reintentos / errores y
 // devuelve `{ok}`. Si la impresora no está configurada, devuelve 409.
+// v1.10.2-impresion-honesta · devuelve el `{ok, printedAt}` del backend
+// (antes lo descartaba). El backend responde 502 si el socket TCP a la
+// impresora falla y 409 si no hay impresora WIFI activa: ambos llegan al
+// caller como `ApiError`, que es lo que permite decir el motivo.
 export async function printTicketWifi(
   ticketId: string,
   printerConfigId?: string,
-): Promise<void> {
+  opts: { copy?: boolean } = {},
+): Promise<{ ok: boolean; printedAt: string }> {
   const params = new URLSearchParams({ target: "wifi" });
   if (printerConfigId) params.set("printerConfigId", printerConfigId);
-  await apiWithCashier<{ ok: boolean; printedAt: string }>(
+  if (opts.copy) params.set("copy", "true");
+  return apiWithCashier<{ ok: boolean; printedAt: string }>(
     `/tickets/${ticketId}/print/escpos?${params.toString()}`,
     { method: "POST" },
   );
@@ -125,8 +142,10 @@ export async function printTicketWifi(
 // Pide al backend el binary ESC/POS del ticket. Recibe octet-stream.
 export async function fetchTicketEscposBinary(
   ticketId: string,
+  opts: { copy?: boolean } = {},
 ): Promise<Uint8Array> {
   const params = new URLSearchParams({ target: "usb" });
+  if (opts.copy) params.set("copy", "true");
   const session = readSession();
   if (!session) {
     throw new ApiError(401, "Sin sesión de cajero", "UNAUTHENTICATED");
