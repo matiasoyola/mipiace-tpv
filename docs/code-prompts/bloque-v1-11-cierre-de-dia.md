@@ -106,3 +106,28 @@ consecuencias — incluida la condición para revisarla: **que un cliente pida c
 Screenshots con Playwright de la pantalla de reanudar y de la tarjeta de resumen: móvil 320 px, móvil 390 px,
 escritorio, un estado de error y la pantalla final. Importes con `tabular-nums`, tap targets ≥ 44 px. Recuerda para
 quién es: alguien de pie, a las diez de la mañana, con la primera clienta esperando.
+
+---
+
+## Addendum · lo que se vio al ejecutar el cierre de verdad (2026-08-20, Sirope)
+
+Se recorrió el ciclo entero en producción sobre Cafetería Sirope. Tres cosas que cambian el bloque:
+
+**1. El resumen que pides YA ESTÁ CONSTRUIDO.** Al cerrar el turno desde el menú, tras teclear las denominaciones,
+aparece exactamente lo que describiste: tabla por método (Efectivo / Tarjeta, bruto · devoluciones · neto), ventas
+netas, **cash esperado vs cash contado** y **descuadre**. No hay que diseñarlo ni calcularlo.
+
+El bloque, entonces, **no es construir el resumen: es invertir el orden**. Hoy el resumen es la recompensa por
+haber contado 15 denominaciones. Debe ser la pantalla, con el efectivo esperado ya puesto, y un botón de
+confirmar. Contar pasa a ser el enlace opcional "cuadrar caja".
+
+**2. Hay dos cierres distintos y sólo uno enseña el Z.** El cierre desde el menú muestra el informe. El cierre del
+"turno colgado" en el login **no muestra nada**: cierras y te planta la pantalla de abrir turno. Es justo el que
+usa Sole cada mañana — el único que ejecuta, y el que no le enseña nada. Unificar: los dos caminos terminan en la
+misma tarjeta de resumen.
+
+**3. La pantalla de turno colgado pide un importe a pelo**, no denominaciones, y el botón está muerto hasta que
+tecleas algo. Incoherente con el cierre del menú, que sí desglosa. Otra razón para unificar los dos caminos.
+
+**Evidencia**: capturas de la sesión del 2026-08-20 (pantalla de turno colgado, arqueo de 15 filas, informe Z con
+descuadre +0,00 €).
