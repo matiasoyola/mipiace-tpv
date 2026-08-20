@@ -24,6 +24,8 @@ import { startWorkerHeartbeat } from "./heartbeat.js";
 import { registerReconciliationRepeatable } from "../queues/reconciliation.js";
 import { startAgendaHoldTtlWorker } from "./agenda-hold-ttl-worker.js";
 import { registerAgendaHoldTtlRepeatable } from "../queues/agenda-hold-ttl.js";
+import { startShiftDayCutWorker } from "./shift-day-cut-worker.js";
+import { registerShiftDayCutRepeatable } from "../queues/shift-day-cut.js";
 
 async function main() {
   loadEnv();
@@ -38,6 +40,7 @@ async function main() {
   const contactImportWorker = startContactImportWorker();
   const reconciliationWorker = startReconciliationWorker();
   const agendaHoldTtlWorker = startAgendaHoldTtlWorker();
+  const shiftDayCutWorker = startShiftDayCutWorker();
   const uploadSweeper = startUploadSweeper();
   const heartbeat = startWorkerHeartbeat();
   console.log("[workers] initial-sync worker listo");
@@ -49,6 +52,7 @@ async function main() {
   console.log("[workers] contact-import worker listo");
   console.log("[workers] reconciliation worker listo");
   console.log("[workers] upload-sweeper listo (cada 5 min)");
+  console.log("[workers] shift-day-cut worker listo");
   const count = await registerAllExistingRepeatables();
   console.log(`[workers] ${count} repeatable(s) registrados para tenants existentes`);
   // Conciliación diaria (v1.5-B Lote 4): repeatable global, cron a la
@@ -58,6 +62,11 @@ async function main() {
   // TTL de holds de agenda (B-reservas-4): repeatable global, cada minuto.
   await registerAgendaHoldTtlRepeatable();
   console.log("[workers] agenda hold-ttl registrado (cada minuto)");
+  // v1.11-cierre-de-dia: corte de día. Repeatable global, cada hora en
+  // punto (Europe/Madrid); la pasada compara cada turno abierto con la
+  // hora de corte de SU tenant.
+  await registerShiftDayCutRepeatable();
+  console.log("[workers] corte de día registrado (cada hora en punto)");
   process.on("SIGINT", async () => {
     console.log("[workers] SIGINT — cerrando…");
     uploadSweeper.stop();
@@ -72,6 +81,7 @@ async function main() {
       contactImportWorker.close(),
       reconciliationWorker.close(),
       agendaHoldTtlWorker.close(),
+      shiftDayCutWorker.close(),
     ]);
     process.exit(0);
   });

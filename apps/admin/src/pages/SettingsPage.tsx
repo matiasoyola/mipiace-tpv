@@ -26,6 +26,9 @@ interface TenantSettings {
   cashierSessionTtlMinutes: number;
   requireManagerPinForForceClose: boolean;
   requireOwnerPinForCashClose: boolean;
+  // v1.11-cierre-de-dia
+  dayCutHour: number;
+  requireCashCountOnClose: boolean;
   deviceNewLoginAlertEnabled: boolean;
   discountThresholdPct: number;
   cashierSearchableContacts: boolean;
@@ -175,6 +178,34 @@ export function SettingsPage() {
           disabled={!canEdit}
           onChange={(v) => setForm({ ...form, agendaEnabled: v })}
           help="Activa el catálogo de servicios con duración, el panel de Personal (profesionales, servicios que da cada uno y turnos) y, más adelante, la agenda."
+        />
+      </Section>
+
+      {/* v1.11-cierre-de-dia · el cierre del día deja de ser un trámite del
+          cajero y pasa a ser una decisión del negocio. */}
+      <Section
+        title="Cierre del día"
+        subtitle="Cerramos los turnos que se quedan abiertos y enseñamos el resumen. Tú decides a qué hora y si hay que contar el cajón."
+      >
+        <SliderField
+          id="dayCutHour"
+          label="Hora del corte de día"
+          unit="h"
+          min={0}
+          max={23}
+          step={1}
+          value={form.dayCutHour}
+          disabled={!canEdit}
+          onChange={(v) => setForm({ ...form, dayCutHour: v })}
+          help="A esta hora (horario local) cerramos solos los turnos que sigan abiertos del día anterior y generamos su informe Z. El cajero se encuentra el día cerrado y su resumen al llegar, en vez de un turno de 70 horas."
+        />
+        <ToggleField
+          id="requireCashCountOnClose"
+          label="Obligar a cuadrar caja para cerrar turno"
+          checked={form.requireCashCountOnClose}
+          disabled={!canEdit}
+          onChange={(v) => setForm({ ...form, requireCashCountOnClose: v })}
+          help="Por defecto está APAGADO: al cerrar, el cajero ve el resumen del día con el efectivo esperado y confirma; contar el cajón por denominaciones es un enlace opcional. Enciéndelo si en tu negocio el arqueo tiene que ser obligatorio."
         />
       </Section>
 

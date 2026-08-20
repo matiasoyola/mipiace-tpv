@@ -234,8 +234,24 @@ export async function outboxAdd(
       }
     }
   }
+  // v1.11-cierre-de-dia · sellamos CUÁNDO ocurrió la venta, aquí y no en
+  // el POST. El corte de día cierra turnos desde el server: si este
+  // terminal estaba sin red a esa hora, sus tickets llegarán con el
+  // `shiftId` de un turno ya cerrado y el server necesita el instante real
+  // para imputarlos al turno que les toca en vez de rechazarlos (409
+  // SHIFT_NOT_OPEN → rechazo permanente → venta perdida). Ver
+  // `apps/api/src/shift/impute.ts`.
+  //
+  // Se sella al ENCOLAR, que es cuando el cajero pulsó Cobrar. Los
+  // reintentos reusan el mismo valor, igual que el externalId.
+  const body =
+    (input.kind === "ticket" || input.kind === "refund") &&
+    input.body.occurredAt == null
+      ? { ...input.body, occurredAt: new Date(now).toISOString() }
+      : input.body;
   const item: OutboxItem = {
     ...input,
+    body,
     shiftLocalId,
     status: "pending",
     createdAt: now,

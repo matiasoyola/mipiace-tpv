@@ -23,6 +23,12 @@ import { enqueueTicketUpload } from "../queues/ticket-upload.js";
 import { enqueueRefundUpload } from "../queues/refund-upload.js";
 import { enqueueTicketEmail } from "../queues/ticket-email.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
+import {
+  markZReportStale,
+  pickShiftForOccurrence,
+  resolveShiftForSale,
+  type ShiftWindow,
+} from "../shift/impute.js";
 import { maybeEnqueueAutoEmail } from "./email-trigger.js";
 import { shouldEnqueueHoldedUpload } from "./holded-upload-gate.js";
 import {
@@ -109,6 +115,13 @@ interface CreateTicketBody {
   // ON_CREDIT con creditPending=total y NO se sube a Holded hasta que se
   // salde. Exige tenant.creditSalesEnabled + contactHoldedId (el deudor).
   creditSale?: boolean;
+  // v1.11-cierre-de-dia · instante REAL en que el cajero pulsó Cobrar,
+  // sellado por el outbox al encolar. Sólo importa cuando el ticket llega
+  // tarde (terminal que estuvo sin red) y el turno que trae en el body ya
+  // lo cerró el corte de día: entonces decide a qué turno se imputa la
+  // venta. Ver `shift/impute.ts`. Opcional — los clientes viejos siguen
+  // funcionando por el camino normal.
+  occurredAt?: string;
 }
 
 export async function registerTicketRoutes(app: FastifyInstance): Promise<void> {
@@ -135,6 +148,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             authorizationToken: { type: "string", minLength: 1, maxLength: 2048 },
             attendedBy: { type: "string", minLength: 1, maxLength: 60 },
             creditSale: { type: "boolean" },
+            occurredAt: { type: "string", format: "date-time" },
             lines: {
               type: "array",
               minItems: 1,
@@ -236,15 +250,37 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           message: "La caja del ticket no coincide con tu sesión.",
         });
       }
-      const shift = await prisma.shift.findFirst({
-        where: { id: body.shiftId, registerId: cashier.rid, closedAt: null },
-        select: { id: true },
+      // v1.11-cierre-de-dia · antes esto era `closedAt: null` a secas y un
+      // 409 si no. Con el corte de día automático eso perdía las ventas de
+      // un terminal que estuvo offline mientras el server cerraba su turno:
+      // el outbox trata el 409 como rechazo permanente. Ahora la venta se
+      // imputa al turno que le toca por su `occurredAt`.
+      const occurredAt = body.occurredAt ? new Date(body.occurredAt) : null;
+      const resolution = await resolveShiftForSale({
+        prisma,
+        registerId: cashier.rid,
+        requestedShiftId: body.shiftId,
+        occurredAt: occurredAt && !Number.isNaN(occurredAt.getTime()) ? occurredAt : null,
       });
-      if (!shift) {
+      if (!resolution.ok) {
         return reply.code(409).send({
           error: "SHIFT_NOT_OPEN",
           message: "El turno no está abierto en esta caja.",
         });
+      }
+      const effectiveShiftId = resolution.shiftId;
+      if (resolution.imputed || resolution.stale) {
+        request.log.info(
+          {
+            event: "ticket.shift_imputed",
+            externalId: body.externalId,
+            requestedShiftId: body.shiftId,
+            effectiveShiftId,
+            occurredAt: body.occurredAt ?? null,
+            stale: resolution.stale,
+          },
+          "venta imputada a un turno distinto del que pedía el terminal",
+        );
       }
 
       // 3.a Resolver selecciones de modificadores (B-Bar-Modifiers) antes
@@ -457,7 +493,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           data: {
             tenantId: cashier.tid,
             registerId: cashier.rid,
-            shiftId: body.shiftId,
+            shiftId: effectiveShiftId,
             userId: cashier.sub,
             internalNumber,
             externalId: body.externalId,
@@ -521,7 +557,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           include: ticketInclude(),
         });
         await tx.shift.update({
-          where: { id: body.shiftId },
+          where: { id: effectiveShiftId },
           data: { lastActivityAt: new Date() },
         });
         // v1.8-Fiado · el gate único decide si se crea la fila de upload.
@@ -590,9 +626,24 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         totalEur: totals.total,
       });
 
+      // v1.11-cierre-de-dia · la venta entró en un turno cuyo Z ya está
+      // archivado. El PDF no se regenera (es un documento emitido); lo que
+      // sí hacemos es dejar de fingir que cuadra.
+      if (resolution.stale) {
+        await markZReportStale(prisma, effectiveShiftId).catch((err) => {
+          request.log.warn(
+            { shiftId: effectiveShiftId },
+            `no se pudo marcar el Z como desfasado: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+      }
+
       return reply.code(201).send({
         ticket: serializeTicket(ticket),
         syncStatus: ticket.status,
+        // El terminal aprende a qué turno fue a parar de verdad. Sólo
+        // viaja cuando NO es el que pidió — el camino normal no cambia.
+        ...(resolution.imputed ? { imputedShiftId: effectiveShiftId } : {}),
       });
     },
   );
@@ -1286,6 +1337,10 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
               enum: ["CASH", "CARD", "BIZUM", "VOUCHER", "OTHER"],
             },
             reason: { type: "string", maxLength: 500 },
+            // v1.11-cierre-de-dia · igual que en POST /tickets: instante
+            // real de la devolución, para imputarla al turno que le toca
+            // si llega tarde desde el outbox.
+            occurredAt: { type: "string", format: "date-time" },
             lines: {
               type: "array",
               minItems: 1,
@@ -1310,6 +1365,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         originalTicketId: string;
         method?: "CASH" | "CARD" | "BIZUM" | "VOUCHER" | "OTHER";
         reason?: string;
+        occurredAt?: string;
         lines: Array<{ ticketLineId: string; units: number }>;
       };
       const prisma = getPrisma();
@@ -1448,12 +1504,40 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       const methodFromPayment = ticket.payments[0]?.method ?? null;
       const method = body.method ?? methodFromPayment;
 
-      // Find an open shift on this register for the actor (refund is
-      // attributed to the actor's current shift if there is one).
-      const openShift = await prisma.shift.findFirst({
-        where: { registerId: ticket.registerId, closedAt: null },
-        select: { id: true },
-      });
+      // v1.11-cierre-de-dia · la devolución va al turno que le toca por su
+      // timestamp, no "al turno abierto en ese momento". Con el corte de
+      // día automático esa diferencia importa: una devolución hecha sin red
+      // a las 23:40 y subida a las 09:05 pertenece al turno de anoche.
+      // Sigue valiendo `null` (devolución sin ningún turno abierto) — nunca
+      // ha sido motivo para rechazarla.
+      const refundOccurredAtRaw = body.occurredAt ? new Date(body.occurredAt) : null;
+      const refundOccurredAt =
+        refundOccurredAtRaw && !Number.isNaN(refundOccurredAtRaw.getTime())
+          ? refundOccurredAtRaw
+          : null;
+      // Sin `occurredAt` (camino online de siempre, o un cliente anterior a
+      // v1.11) no hay nada que imputar: la misma query de una fila que
+      // había antes. Sólo cuando la devolución trae su instante real
+      // miramos la ventana de turnos.
+      let openShift: { id: string; closedAt?: Date | null } | null = null;
+      if (refundOccurredAt) {
+        const refundShifts = await prisma.shift.findMany({
+          where: { registerId: ticket.registerId },
+          orderBy: { openedAt: "desc" },
+          take: 50,
+          select: { id: true, openedAt: true, closedAt: true, closeReason: true },
+        });
+        openShift =
+          pickShiftForOccurrence(refundShifts as ShiftWindow[], refundOccurredAt) ??
+          refundShifts.find((sh) => sh.closedAt === null) ??
+          null;
+      } else {
+        openShift = await prisma.shift.findFirst({
+          where: { registerId: ticket.registerId, closedAt: null },
+          select: { id: true },
+        });
+      }
+      const refundHitsClosedShift = openShift?.closedAt != null;
 
       // Internal number del refund: prefijo "R-" + correlativo register.
       // Incremento dentro de la tx — sin huecos si el create falla
@@ -1537,6 +1621,17 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         cashierUserId: cashier.sub,
         totalEur: total,
       });
+
+      // v1.11-cierre-de-dia · la devolución cayó en un turno ya cerrado
+      // (llegó tarde desde el outbox). Su Z queda marcado desfasado.
+      if (refundHitsClosedShift && openShift) {
+        await markZReportStale(prisma, openShift.id).catch((err) => {
+          request.log.warn(
+            { shiftId: openShift.id },
+            `no se pudo marcar el Z como desfasado: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+      }
 
       return reply.code(201).send({ refund: serializeRefund(refund) });
     },

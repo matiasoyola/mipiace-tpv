@@ -7,6 +7,8 @@
 //   - cashierSessionTtlMinutes (v1.0-pilotos #18, default 720)
 //   - requireManagerPinForForceClose (B3, default true)
 //   - requireOwnerPinForCashClose (v1.4-Bugs-Operativos, default false)
+//   - dayCutHour (v1.11-cierre-de-dia, default 5)
+//   - requireCashCountOnClose (v1.11-cierre-de-dia, default false)
 //   - deviceNewLoginAlertEnabled (B3, default true)
 //   - discountThresholdPct (B6 §2, default 10)
 //   - cashierSearchableContacts (B6 §4, default true)
@@ -35,6 +37,8 @@ export async function registerAdminTenantSettingsRoutes(
           cashierSessionTtlMinutes: true,
           requireManagerPinForForceClose: true,
           requireOwnerPinForCashClose: true,
+          dayCutHour: true,
+          requireCashCountOnClose: true,
           deviceNewLoginAlertEnabled: true,
           discountThresholdPct: true,
           cashierSearchableContacts: true,
@@ -49,6 +53,8 @@ export async function registerAdminTenantSettingsRoutes(
           cashierSessionTtlMinutes: tenant.cashierSessionTtlMinutes,
           requireManagerPinForForceClose: tenant.requireManagerPinForForceClose,
           requireOwnerPinForCashClose: tenant.requireOwnerPinForCashClose,
+          dayCutHour: tenant.dayCutHour,
+          requireCashCountOnClose: tenant.requireCashCountOnClose,
           deviceNewLoginAlertEnabled: tenant.deviceNewLoginAlertEnabled,
           discountThresholdPct: Number(tenant.discountThresholdPct),
           cashierSearchableContacts: tenant.cashierSearchableContacts,
@@ -75,6 +81,12 @@ export async function registerAdminTenantSettingsRoutes(
             cashierSessionTtlMinutes: { type: "integer", minimum: 30, maximum: 1440 },
             requireManagerPinForForceClose: { type: "boolean" },
             requireOwnerPinForCashClose: { type: "boolean" },
+            // v1.11-cierre-de-dia · hora LOCAL del corte de día. 0–23.
+            dayCutHour: { type: "integer", minimum: 0, maximum: 23 },
+            // v1.11-cierre-de-dia · si true, cerrar turno exige contar el
+            // efectivo por denominaciones (el comportamiento de antes de
+            // v1.11). Default false: contar es opcional.
+            requireCashCountOnClose: { type: "boolean" },
             deviceNewLoginAlertEnabled: { type: "boolean" },
             // 5 dec.2 — encajamos con la columna Decimal(5,2). El UI
             // lo manda como número entero o con un decimal; aceptamos
@@ -101,6 +113,8 @@ export async function registerAdminTenantSettingsRoutes(
         cashierSessionTtlMinutes?: number;
         requireManagerPinForForceClose?: boolean;
         requireOwnerPinForCashClose?: boolean;
+        dayCutHour?: number;
+        requireCashCountOnClose?: boolean;
         deviceNewLoginAlertEnabled?: boolean;
         discountThresholdPct?: number;
         cashierSearchableContacts?: boolean;
@@ -116,6 +130,8 @@ export async function registerAdminTenantSettingsRoutes(
           cashierSessionTtlMinutes: body.cashierSessionTtlMinutes,
           requireManagerPinForForceClose: body.requireManagerPinForForceClose,
           requireOwnerPinForCashClose: body.requireOwnerPinForCashClose,
+          dayCutHour: body.dayCutHour,
+          requireCashCountOnClose: body.requireCashCountOnClose,
           deviceNewLoginAlertEnabled: body.deviceNewLoginAlertEnabled,
           discountThresholdPct: body.discountThresholdPct,
           cashierSearchableContacts: body.cashierSearchableContacts,
@@ -128,6 +144,8 @@ export async function registerAdminTenantSettingsRoutes(
           cashierSessionTtlMinutes: true,
           requireManagerPinForForceClose: true,
           requireOwnerPinForCashClose: true,
+          dayCutHour: true,
+          requireCashCountOnClose: true,
           deviceNewLoginAlertEnabled: true,
           discountThresholdPct: true,
           cashierSearchableContacts: true,
@@ -142,6 +160,8 @@ export async function registerAdminTenantSettingsRoutes(
           cashierSessionTtlMinutes: updated.cashierSessionTtlMinutes,
           requireManagerPinForForceClose: updated.requireManagerPinForForceClose,
           requireOwnerPinForCashClose: updated.requireOwnerPinForCashClose,
+          dayCutHour: updated.dayCutHour,
+          requireCashCountOnClose: updated.requireCashCountOnClose,
           deviceNewLoginAlertEnabled: updated.deviceNewLoginAlertEnabled,
           discountThresholdPct: Number(updated.discountThresholdPct),
           cashierSearchableContacts: updated.cashierSearchableContacts,
