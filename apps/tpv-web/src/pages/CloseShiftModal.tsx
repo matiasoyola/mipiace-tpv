@@ -21,6 +21,7 @@ import { ApiError, apiWithCashier } from "../api.js";
 import { outboxAdd, outboxCounts, outboxList } from "../lib/outbox.js";
 import { closeLocalShift, getLocalShift } from "../lib/offlineShift.js";
 import { newId } from "../lib/ids.js";
+import { formatEur } from "../lib/money.js";
 
 // Mismo orden que `ALLOWED_DENOMINATIONS` del backend (de mayor a
 // menor). Si el backend cambia el set, también hay que tocarlo aquí —
@@ -42,8 +43,6 @@ const DENOMINATIONS: readonly { key: string; valueEur: number; label: string }[]
   { key: "0.02", valueEur: 0.02, label: "2 cts" },
   { key: "0.01", valueEur: 0.01, label: "1 ct" },
 ];
-
-const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
 
 interface FailedDoc {
   id: string;
@@ -440,7 +439,7 @@ export function CloseShiftModal(props: {
                         {d.internalNumber}
                       </span>
                       <span className="truncate flex-1 text-red-700">{d.errorSummary}</span>
-                      <span className="tabular-nums shrink-0">{d.total.toFixed(2)} €</span>
+                      <span className="tabular-nums shrink-0">{formatEur(d.total)}</span>
                     </li>
                   ))}
                 </ul>

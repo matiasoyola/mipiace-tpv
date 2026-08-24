@@ -4,8 +4,7 @@
 // import circular SalePage ↔ CartLineItem.
 
 import type { ModifierSelection } from "../lib/cart.js";
-
-const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
+import { formatEur } from "../lib/money.js";
 
 // Desglose visual del carrito para una línea con modifiers
 // estructurados. Cada selección sale en una sub-línea con sangría —

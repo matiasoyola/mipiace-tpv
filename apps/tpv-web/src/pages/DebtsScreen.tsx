@@ -13,8 +13,7 @@ import { ApiError, apiWithCashier } from "../api.js";
 import { newId } from "../lib/ids.js";
 import { fetchCreditReceiptEscpos } from "../lib/escposPrint.js";
 import { printUsbBytes } from "../platform/printer/printJob.js";
-
-const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
+import { formatAmount, formatEur, parseAmount } from "../lib/money.js";
 
 type Method = "CASH" | "CARD" | "BIZUM";
 
@@ -227,7 +226,7 @@ function TicketCollect(props: {
   onCollected: (receipt: CreditReceiptData) => void;
 }) {
   const { ticket } = props;
-  const [amount, setAmount] = useState(ticket.creditPending.toFixed(2));
+  const [amount, setAmount] = useState(formatAmount(ticket.creditPending));
   const [method, setMethod] = useState<Method>("CASH");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -235,7 +234,7 @@ function TicketCollect(props: {
   // timeout, el backend devuelve el estado (idempotencia).
   const externalId = useMemo(() => newId(), []);
 
-  const parsed = Number(amount.replace(",", "."));
+  const parsed = parseAmount(amount);
   const valid = parsed > 0 && parsed <= ticket.creditPending + 0.005;
 
   async function collect(): Promise<void> {

@@ -30,7 +30,6 @@ import {
   Gift,
   Loader2,
   Smartphone,
-  X,
 } from "lucide-react";
 
 import { ApiError, apiWithCashier } from "../api.js";
@@ -46,13 +45,12 @@ import {
   outboxReleaseAfterFailure,
 } from "../lib/outbox.js";
 import { openCashDrawerIfAvailable } from "../lib/escposPrint.js";
+import { formatAmount, formatEur, parseAmount } from "../lib/money.js";
 import { scrollFocusIntoView } from "../lib/visualViewportSync.js";
 import {
   PendingSaleOverlay,
   SuccessOverlay,
 } from "./CheckoutPage.successOverlay.js";
-
-const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
 
 type Method = "CASH" | "CARD" | "BIZUM" | "VOUCHER";
 
@@ -121,17 +119,20 @@ export function CheckoutOverlay(props: {
   const externalIdRef = useRef<string>(newId());
 
   const [payments, setPayments] = useState<PaymentRow[]>([
-    { method: "CASH", amount: props.totals.total.toFixed(2) },
+    { method: "CASH", amount: formatAmount(props.totals.total) },
   ]);
-  // v1.3 Lote 2: mini-step de cobro mixto (método primario + importe).
-  // Al confirmar genera dos rows con sumas correctas. NULL = modo normal.
-  const [mixedSplit, setMixedSplit] = useState<
-    | null
-    | {
-        primaryMethod: Method;
-        primaryAmount: string;
-      }
-  >(null);
+  // v1.10.3-barra · hallazgo #1 de la simulación de hora punta: el
+  // reparto mixto vivía en un mini-step (`MixedSplitStep`) montado al
+  // final del BODY scrollable. Con el panel inferior fijo midiendo más
+  // que el modal, ese bloque quedaba fuera de pantalla: el cajero no
+  // veía el reparto, nunca pulsaba "Aplicar mixto" y la segunda fila de
+  // pago no llegaba a existir → "Falta 4,00 €" eterno. Ahora el cobro
+  // (métodos + filas + atajos) es lo PRIMERO del body, siempre visible
+  // al abrir, y "Mixto" añade la segunda fila ahí mismo.
+  //
+  // `lastRowPinned` = el cajero ha escrito a mano en la última fila, así
+  // que dejamos de autocompletarla con el resto.
+  const [lastRowPinned, setLastRowPinned] = useState(false);
   const [printIntent, setPrintIntent] = useState(true);
   const [emailIntent, setEmailIntent] = useState<string>(props.contact?.email ?? "");
   const [emailEnabled, setEmailEnabled] = useState(!!props.contact?.email);
@@ -169,6 +170,12 @@ export function CheckoutOverlay(props: {
   >(null);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [authorizedBy, setAuthorizedBy] = useState<string | null>(null);
+  // v1.10.3-barra · hallazgo #7: la lista de artículos se cortaba sin
+  // avisar (6 líneas, se veían 2). Ahora tiene alto acotado propio y
+  // decimos cuántas quedan por debajo del pliegue.
+  const linesBoxRef = useRef<HTMLDivElement | null>(null);
+  const bodyRef = useRef<HTMLElement | null>(null);
+  const [linesHidden, setLinesHidden] = useState(0);
 
   const total = props.totals.total;
   const paymentsSum = useMemo(
@@ -193,27 +200,25 @@ export function CheckoutOverlay(props: {
   const exactCashForFirstCashRow = Math.max(0, total - sumNonCash);
   function applyExactCash(): void {
     if (firstCashIdx === -1) return;
-    setPayments((curr) =>
-      curr.map((p, j) =>
-        j === firstCashIdx
-          ? { ...p, amount: exactCashForFirstCashRow.toFixed(2) }
-          : p,
-      ),
-    );
+    setPayment(firstCashIdx, {
+      amount: formatAmount(exactCashForFirstCashRow),
+    });
   }
   // v1.3-UX-Iteración-fixes Fix 4: los atajos SET (no SUM). Antes el
   // piloto se confundía al ver 10 + tap 20 = 30. C = limpiar a 0.
   function setCashTo(amount: number): void {
     if (firstCashIdx === -1) return;
-    setPayments((curr) =>
-      curr.map((p, j) =>
-        j === firstCashIdx ? { ...p, amount: amount.toFixed(2) } : p,
-      ),
-    );
+    setPayment(firstCashIdx, { amount: formatAmount(amount) });
   }
   // B5 §3.2: ready cuando Σ payments ≥ total (con tolerancia 0.01€).
   // Antes exigíamos match exacto y bloqueaba overpayments cash.
   const ready = paymentsSum >= total - 0.01;
+  // v1.10.3-barra · una sola línea de verdad sobre el reparto, debajo
+  // de las filas. Antes cada fila CASH pintaba su propio "Falta X" que
+  // contradecía al resto y no explicaba por qué Cobrar seguía gris.
+  const missing = Math.max(0, total - paymentsSum);
+  const over = Math.max(0, paymentsSum - total);
+  const isMixed = payments.length > 1;
 
   // v1.9.2-mesas-concurrencia · Frente 1.4/2: la cuenta cambió desde
   // otra caja (o el server rechazó por total desactualizado). Mientras
@@ -222,12 +227,51 @@ export function CheckoutOverlay(props: {
   const accountChanged =
     Math.abs(total - ackTotal) > 0.001 || serverMismatch;
   function acceptNewTotal(): void {
-    setPayments([{ method: "CASH", amount: total.toFixed(2) }]);
-    setMixedSplit(null);
+    setPayments([{ method: "CASH", amount: formatAmount(total) }]);
+    setLastRowPinned(false);
     setAckTotal(total);
     setServerMismatch(false);
     setError(null);
   }
+
+  // v1.10.3-barra · cuántas líneas quedan fuera del cuadro. Medimos
+  // contra las <li> reales en vez de estimar altura: las líneas con
+  // modificadores son más altas y una estimación mentiría.
+  function measureHiddenLines(): void {
+    const box = linesBoxRef.current;
+    if (!box) return;
+    // Medimos con rects y no con offsetTop: el cuadro no es
+    // `position: relative`, así que offsetTop apuntaría a un ancestro
+    // cualquiera y contaría como ocultas líneas que se ven de sobra.
+    //
+    // Y el pliegue es el MÁS ALTO de los dos que pueden cortar: el
+    // propio cuadro (muchas líneas) o el borde inferior del body
+    // scrollable (pocas líneas pero el modal no llega). El bug original
+    // era del segundo tipo — 6 líneas, se veían 2 — así que contar sólo
+    // contra el cuadro habría dicho "no falta nada" mintiendo otra vez.
+    const boxBottom = box.getBoundingClientRect().bottom;
+    const bodyBottom =
+      bodyRef.current?.getBoundingClientRect().bottom ?? Number.POSITIVE_INFINITY;
+    const fold = Math.min(boxBottom, bodyBottom);
+    const items = Array.from(box.querySelectorAll("li"));
+    const hidden = items.filter(
+      (li) => li.getBoundingClientRect().bottom > fold + 2,
+    );
+    setLinesHidden(hidden.length);
+  }
+  useEffect(() => {
+    measureHiddenLines();
+    // El pliegue se mueve al girar la tablet, al abrir el teclado
+    // virtual (--keyboard-offset encoge el body) y al pasar de aside a
+    // handheld. Sin volver a medir, el aviso se quedaría contando lo
+    // que sobraba en el layout anterior.
+    const body = bodyRef.current;
+    if (typeof ResizeObserver === "undefined" || !body) return;
+    const ro = new ResizeObserver(() => measureHiddenLines());
+    ro.observe(body);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.lines.length, confirmed]);
 
   // ── atajos teclado ─────────────────────────────────────────────────
   useEffect(() => {
@@ -268,35 +312,74 @@ export function CheckoutOverlay(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [confirmed]);
 
-  function setPayment(i: number, patch: Partial<PaymentRow>): void {
-    setPayments((curr) => curr.map((p, j) => (j === i ? { ...p, ...patch } : p)));
+  // Reparte el resto en la ÚLTIMA fila mientras el cajero no la haya
+  // escrito a mano. Es lo que hace que "Mixto → Efectivo 10" deje
+  // Tarjeta en 4,00 € sin que nadie tenga que restar en la barra.
+  function rebalanceLast(rows: PaymentRow[], pinned: boolean): PaymentRow[] {
+    const last = rows.length - 1;
+    if (last <= 0 || pinned) return rows;
+    const others = rows.reduce(
+      (acc, p, j) => (j === last ? acc : acc + parseAmount(p.amount)),
+      0,
+    );
+    const next = rows.slice();
+    next[last] = {
+      ...next[last]!,
+      amount: formatAmount(Math.max(0, total - others)),
+    };
+    return next;
   }
-  function removePayment(i: number): void {
-    setPayments((curr) => curr.filter((_, j) => j !== i));
+
+  function setPayment(i: number, patch: Partial<PaymentRow>): void {
+    const isLast = i === payments.length - 1;
+    const touchesAmount = patch.amount !== undefined;
+    // Escribir en la última fila la "fija": a partir de ahí manda el
+    // cajero y no volvemos a tocarla.
+    const pinned = lastRowPinned || (touchesAmount && isLast);
+    if (pinned !== lastRowPinned) setLastRowPinned(pinned);
+    setPayments((curr) => {
+      const next = curr.map((p, j) => (j === i ? { ...p, ...patch } : p));
+      return touchesAmount && !isLast ? rebalanceLast(next, pinned) : next;
+    });
   }
 
   function pickMethod(m: Method): void {
     // En modo simple cambia el método de la única row sin perder
     // importe. En modo mixto colapsa a 1 row con el importe = total.
-    setMixedSplit(null);
     if (payments.length === 1) {
       setPayment(0, { method: m });
     } else {
-      setPayments([{ method: m, amount: total.toFixed(2) }]);
+      setLastRowPinned(false);
+      setPayments([{ method: m, amount: formatAmount(total) }]);
     }
   }
 
+  // Cambia el método de una fila concreta (sólo visible en mixto, donde
+  // cada fila lleva su propio selector).
+  function setRowMethod(i: number, m: Method): void {
+    setPayment(i, { method: m });
+  }
+
   function toggleMixed(): void {
-    if (mixedSplit) {
-      setMixedSplit(null);
+    if (payments.length > 1) {
+      // Volver a simple: una fila con el método de la primera.
+      setLastRowPinned(false);
+      setPayments([
+        { method: payments[0]!.method, amount: formatAmount(total) },
+      ]);
       return;
     }
-    // Default: primario opuesto al método actual para que el cajero
-    // sólo escriba el importe (caso típico: "tengo 10€ sueltos, resto
-    // con tarjeta" → primario CASH 10, secundario CARD resto).
+    // El primario arranca VACÍO (el cajero teclea lo que le ponen en la
+    // mano) y el secundario lleva el resto — que con el primario a 0 es
+    // el total entero. En cuanto escribe 10 en efectivo, tarjeta pasa a
+    // 4,00 € sola. Caso típico de barra: "mitad y mitad".
     const current = payments[0]?.method ?? "CASH";
-    const primary: Method = current === "CASH" ? "CARD" : "CASH";
-    setMixedSplit({ primaryMethod: primary, primaryAmount: "" });
+    const secondary: Method = current === "CASH" ? "CARD" : "CASH";
+    setLastRowPinned(false);
+    setPayments([
+      { method: current, amount: "" },
+      { method: secondary, amount: formatAmount(total) },
+    ]);
   }
 
   // v1.3-piloto-feedback · Lote 3: nudge "Servicio sin cliente" eliminado.
@@ -564,9 +647,10 @@ export function CheckoutOverlay(props: {
             <div className="text-[13px] sm:text-[14px] font-medium text-mipiace-ink">
               {headLabel}
             </div>
-            <span className="text-[12px] text-slate-500 w-10 text-right">
-              {lineCount}
-            </span>
+            {/* Contrapeso del botón Volver para que el título quede
+                centrado. El nº de líneas se cuenta en el encabezado de
+                "Artículos" (v1.10.3-barra · hallazgo #7). */}
+            <span className="w-10" aria-hidden="true" />
           </div>
           <div className="bg-mipiace-stone rounded-2xl px-3 py-2.5 grid grid-cols-2 gap-x-4 gap-y-1.5 text-[13px]">
             <div className="flex justify-between">
@@ -593,11 +677,160 @@ export function CheckoutOverlay(props: {
         </header>
 
         {/* ── BODY SCROLLABLE ─────────────────────────────────────── */}
-        <main className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 py-4">
+        <main
+          ref={bodyRef}
+          onScroll={measureHiddenLines}
+          className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 py-4"
+        >
+          {/* ── 1 · COBRO ───────────────────────────────────────────
+              v1.10.3-barra · hallazgo #1. Métodos, filas de pago y
+              atajos son lo PRIMERO del body: al abrir el modal el
+              cajero ve el reparto entero sin scrollear, y "Mixto"
+              añade la segunda fila aquí mismo en vez de en un panel
+              que quedaba debajo del pie fijo. */}
           <div className="text-[11.5px] uppercase tracking-wider font-medium text-slate-400 mb-2.5">
-            Artículos
+            Cobro
           </div>
-          <ul className="space-y-2 mb-5">
+
+          {/* Métodos como tabs horizontales (5 cols: 4 métodos + Mixto). */}
+          <div className="grid grid-cols-5 gap-1.5 mb-2.5">
+            {(["CASH", "CARD", "BIZUM", "VOUCHER"] as Method[]).map((m) => {
+              const active = !isMixed && payments[0]!.method === m;
+              return (
+                <button
+                  key={m}
+                  onClick={() => pickMethod(m)}
+                  className={
+                    active
+                      ? "h-11 rounded-xl bg-mipiace-coral-soft border border-mipiace-coral text-[12px] font-medium text-mipiace-coral-dark"
+                      : "h-11 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[12px] font-medium text-mipiace-ink"
+                  }
+                >
+                  {labelFor(m)}
+                </button>
+              );
+            })}
+            <button
+              onClick={toggleMixed}
+              title="Cobrar la misma cuenta con dos métodos (mitad y mitad)"
+              className={
+                isMixed
+                  ? "h-11 rounded-xl bg-mipiace-coral-soft border border-mipiace-coral text-[12px] font-medium text-mipiace-coral-dark"
+                  : "h-11 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[12px] font-medium text-mipiace-ink"
+              }
+            >
+              Mixto
+            </button>
+          </div>
+
+          {/* Filas de pago. En mixto cada fila lleva su propio selector
+              de método; en simple, el icono del método elegido arriba. */}
+          <div className="space-y-2 mb-2.5">
+            {payments.map((p, i) => (
+              <PaymentRowEditor
+                key={i}
+                payment={p}
+                index={i}
+                showMethodPicker={isMixed}
+                autoFilled={isMixed && i === payments.length - 1 && !lastRowPinned}
+                onChange={(patch) => setPayment(i, patch)}
+                onMethodChange={(m) => setRowMethod(i, m)}
+              />
+            ))}
+          </div>
+
+          {/* Atajos efectivo en 1 fila (5/10/20/50/100/C). Sólo si hay
+              alguna row CASH. SET, no SUM (hotfix Fix 4). */}
+          {firstCashIdx !== -1 && (
+            <div className="grid grid-cols-6 gap-1.5 mb-2">
+              {[5, 10, 20, 50, 100].map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setCashTo(n)}
+                  className="h-11 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[14px] font-medium text-mipiace-ink tabular-nums"
+                >
+                  {n}
+                </button>
+              ))}
+              <button
+                onClick={() => setCashTo(0)}
+                className="h-11 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[14px] font-medium text-slate-500"
+                aria-label="Limpiar importe efectivo"
+              >
+                C
+              </button>
+            </div>
+          )}
+
+          {/* Importe exacto (sólo si hay row CASH). 1 tap → change=0. */}
+          {firstCashIdx !== -1 && (
+            <button
+              onClick={applyExactCash}
+              className="w-full h-11 mb-2.5 rounded-xl bg-mipiace-coral-soft hover:bg-mipiace-coral-soft/70 border border-mipiace-coral/30 text-mipiace-coral-dark text-[12.5px] font-medium flex items-center justify-center gap-2"
+            >
+              <span>Importe exacto</span>
+              <span className="text-slate-400">·</span>
+              <span className="tabular-nums">
+                {formatEur(exactCashForFirstCashRow)}
+              </span>
+            </button>
+          )}
+
+          {/* Estado del reparto: una sola frase, siempre cierta. Es la
+              que explica por qué "Cobrar" está gris. */}
+          <div
+            role="status"
+            className={
+              missing > 0.005
+                ? "mb-5 rounded-xl bg-mipiace-coral-soft border border-mipiace-coral/30 px-3 py-2 text-[12.5px] text-mipiace-coral-dark flex items-baseline justify-between gap-3"
+                : "mb-5 rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-2 text-[12.5px] text-emerald-800 flex items-baseline justify-between gap-3"
+            }
+          >
+            <span className="min-w-0">
+              {isMixed
+                ? payments.map((p) => labelFor(p.method)).join(" + ")
+                : "Pagado"}
+            </span>
+            <span className="tabular-nums font-semibold shrink-0">
+              {missing > 0.005
+                ? `Falta ${formatEur(missing)}`
+                : over > 0.005
+                  ? `${formatEur(paymentsSum)} · sobran ${formatEur(over)}`
+                  : `${formatEur(paymentsSum)} · cuadra`}
+            </span>
+          </div>
+
+          {/* ── 2 · ARTÍCULOS ──────────────────────────────────────
+              v1.10.3-barra · hallazgo #7: caja de alto acotado con
+              scroll propio y contador honesto de lo que queda fuera. */}
+          <div className="flex items-baseline justify-between mb-2.5">
+            <span className="text-[11.5px] uppercase tracking-wider font-medium text-slate-400">
+              Artículos
+            </span>
+            {/* El aviso va en la CABECERA, no debajo del cuadro: debajo
+                caería fuera de pantalla justo cuando hace falta. */}
+            <span className="text-[11.5px] tabular-nums">
+              <span className="text-slate-400">
+                {lineCount} {lineCount === 1 ? "línea" : "líneas"}
+              </span>
+              {linesHidden > 0 && (
+                <span className="text-mipiace-coral-dark font-medium">
+                  {" · ↓ "}
+                  {linesHidden} sin ver
+                </span>
+              )}
+            </span>
+          </div>
+          <div
+            ref={linesBoxRef}
+            onScroll={measureHiddenLines}
+            className={
+              linesHidden > 0
+                ? "max-h-[168px] overflow-y-auto overscroll-contain [mask-image:linear-gradient(to_bottom,black_calc(100%-28px),transparent)]"
+                : "max-h-[168px] overflow-y-auto overscroll-contain"
+            }
+          >
+          <ul className="space-y-2">
             {props.lines.map((l) => {
               const t = computeLine(l);
               const modLabels = [
@@ -629,32 +862,14 @@ export function CheckoutOverlay(props: {
               );
             })}
           </ul>
+          </div>
+          <div className="mb-5" />
 
           {props.notes && (
             <div className="rounded-xl bg-mipiace-stone p-3 text-[12.5px] text-slate-600 mb-4">
               <span className="font-medium text-mipiace-ink">Notas: </span>
               {props.notes}
             </div>
-          )}
-
-          {mixedSplit && (
-            <MixedSplitStep
-              total={total}
-              state={mixedSplit}
-              onChange={setMixedSplit}
-              onCancel={() => setMixedSplit(null)}
-              onConfirm={(primaryMethod, primaryAmount) => {
-                // Secundario = el "otro" del par CASH↔CARD.
-                const secondary: Method =
-                  primaryMethod === "CASH" ? "CARD" : "CASH";
-                const remaining = Math.max(0, total - primaryAmount);
-                setPayments([
-                  { method: primaryMethod, amount: primaryAmount.toFixed(2) },
-                  { method: secondary, amount: remaining.toFixed(2) },
-                ]);
-                setMixedSplit(null);
-              }}
-            />
           )}
 
           {props.businessType === "SERVICES" && (
@@ -732,98 +947,26 @@ export function CheckoutOverlay(props: {
           // Lote 2 v1.3-UX-Iteración).
           style={{ paddingBottom: "calc(1rem + var(--keyboard-offset, 0px))" }}
         >
-          {/* Payment rows (importes + ref tarjeta/bizum) */}
-          <div className="space-y-2 mb-2.5">
-            {payments.map((p, i) => {
-              const sumOthers = payments.reduce(
-                (acc, q, j) => (j === i ? acc : acc + parseAmount(q.amount)),
-                0,
-              );
-              const missingForThisRow = Math.max(
-                0,
-                total - sumOthers - parseAmount(p.amount),
-              );
-              return (
-                <PaymentRowEditor
-                  key={i}
-                  payment={p}
-                  index={i}
-                  canRemove={payments.length > 1}
-                  onChange={(patch) => setPayment(i, patch)}
-                  onRemove={() => removePayment(i)}
-                  missingForThisRow={missingForThisRow}
-                />
-              );
-            })}
-          </div>
+          {/* v1.10.3-barra · el pie se queda SÓLO con lo que nunca
+              puede quedar fuera de pantalla: cambio, total y Cobrar.
+              Métodos, filas de pago y atajos viven arriba del body, que
+              es scrollable de verdad. Antes el pie medía ~360 px y
+              estrangulaba el body hasta dejarlo en 0 (hallazgos #1
+              y #7 de la simulación de hora punta). */}
 
-          {/* Atajos efectivo en 1 fila (5/10/20/50/100/C). Sólo si hay
-              alguna row CASH. SET, no SUM (hotfix Fix 4). */}
-          {firstCashIdx !== -1 && (
-            <div className="grid grid-cols-6 gap-1.5 mb-2">
-              {[5, 10, 20, 50, 100].map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setCashTo(n)}
-                  className="h-11 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[14px] font-medium text-mipiace-ink tabular-nums"
-                >
-                  {n}
-                </button>
-              ))}
-              <button
-                onClick={() => setCashTo(0)}
-                className="h-11 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[14px] font-medium text-slate-500"
-                aria-label="Limpiar importe efectivo"
-              >
-                C
-              </button>
+          {/* Lo que falta, también en el pie: en 320x568 el estado del
+              reparto queda por encima del pliegue, y "Cobrar" en gris
+              sin decir por qué es justo el pecado del hallazgo #1. */}
+          {missing > 0.005 && (
+            <div className="flex items-baseline justify-between mb-1.5">
+              <span className="text-[12.5px] text-mipiace-coral-dark">
+                Falta
+              </span>
+              <span className="text-[15px] font-semibold text-mipiace-coral-dark tabular-nums">
+                {formatEur(missing)}
+              </span>
             </div>
           )}
-
-          {/* Importe exacto (sólo si hay row CASH). 1 tap → change=0. */}
-          {firstCashIdx !== -1 && (
-            <button
-              onClick={applyExactCash}
-              className="w-full h-10 mb-2.5 rounded-xl bg-mipiace-coral-soft hover:bg-mipiace-coral-soft/70 border border-mipiace-coral/30 text-mipiace-coral-dark text-[12.5px] font-medium flex items-center justify-center gap-2"
-            >
-              <span>Importe exacto</span>
-              <span className="text-slate-400">·</span>
-              <span className="tabular-nums">
-                {formatEur(exactCashForFirstCashRow)}
-              </span>
-            </button>
-          )}
-
-          {/* Métodos como tabs horizontales (5 cols: 4 métodos + Mixto). */}
-          <div className="grid grid-cols-5 gap-1.5 mb-3">
-            {(["CASH", "CARD", "BIZUM", "VOUCHER"] as Method[]).map((m) => {
-              const active =
-                payments.length === 1 && payments[0]!.method === m && !mixedSplit;
-              return (
-                <button
-                  key={m}
-                  onClick={() => pickMethod(m)}
-                  className={
-                    active
-                      ? "h-11 rounded-xl bg-mipiace-coral-soft border border-mipiace-coral text-[12px] font-medium text-mipiace-coral-dark"
-                      : "h-11 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[12px] font-medium text-mipiace-ink"
-                  }
-                >
-                  {labelFor(m)}
-                </button>
-              );
-            })}
-            <button
-              onClick={toggleMixed}
-              className={
-                mixedSplit || payments.length > 1
-                  ? "h-11 rounded-xl bg-mipiace-coral-soft border border-mipiace-coral text-[12px] font-medium text-mipiace-coral-dark"
-                  : "h-11 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[12px] font-medium text-mipiace-ink"
-              }
-            >
-              Mixto
-            </button>
-          </div>
 
           {/* Cambio (sólo si hay overpayment efectivo). */}
           {cashAmount > 0 && change > 0 && (
@@ -1040,20 +1183,22 @@ function ManagerAuthorizationModal({
 function PaymentRowEditor({
   payment,
   index,
-  canRemove,
+  showMethodPicker,
+  autoFilled,
   onChange,
-  onRemove,
-  missingForThisRow,
+  onMethodChange,
 }: {
   payment: PaymentRow;
   index: number;
-  canRemove: boolean;
+  // v1.10.3-barra · en mixto cada fila elige su método aquí mismo; en
+  // simple lo eligen los tabs de arriba y la fila sólo lo enseña.
+  showMethodPicker: boolean;
+  // La última fila se autocompleta con el resto mientras el cajero no
+  // la escriba. Lo decimos en voz alta: un importe que se mueve solo
+  // sin explicación asusta más que ayuda.
+  autoFilled: boolean;
   onChange: (patch: Partial<PaymentRow>) => void;
-  onRemove: () => void;
-  // v1.3 Lote 1.C: cuánto falta para cubrir el total con esta row.
-  // Sólo se pinta alerta visual en CASH; en otros métodos el guard
-  // fuerte está en backend.
-  missingForThisRow: number;
+  onMethodChange: (m: Method) => void;
 }) {
   const Icon =
     payment.method === "CASH"
@@ -1063,16 +1208,36 @@ function PaymentRowEditor({
       : payment.method === "BIZUM"
       ? Smartphone
       : Gift;
-  const showShort = payment.method === "CASH" && missingForThisRow > 0.005;
   return (
     <div>
       <div className="flex items-stretch gap-2">
-        <div
-          className="h-12 w-12 shrink-0 rounded-xl bg-mipiace-coral-soft border border-mipiace-coral/25 flex items-center justify-center text-mipiace-coral-dark"
-          aria-label={labelFor(payment.method)}
-        >
-          <Icon className="w-[18px] h-[18px]" strokeWidth={2.1} />
-        </div>
+        {showMethodPicker ? (
+          <div className="relative h-12 w-[96px] sm:w-[108px] shrink-0">
+            <Icon
+              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-[16px] h-[16px] text-mipiace-coral-dark"
+              strokeWidth={2.1}
+            />
+            <select
+              value={payment.method}
+              onChange={(e) => onMethodChange(e.target.value as Method)}
+              aria-label={`Método del pago ${index + 1}`}
+              className="h-12 w-full pl-8 pr-2 rounded-xl bg-mipiace-coral-soft border border-mipiace-coral/25 text-[13px] font-medium text-mipiace-coral-dark appearance-none focus:outline-none focus:ring-2 focus:ring-mipiace-coral/40"
+            >
+              {(["CASH", "CARD", "BIZUM", "VOUCHER"] as Method[]).map((m) => (
+                <option key={m} value={m}>
+                  {labelFor(m)}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <div
+            className="h-12 w-12 shrink-0 rounded-xl bg-mipiace-coral-soft border border-mipiace-coral/25 flex items-center justify-center text-mipiace-coral-dark"
+            aria-label={labelFor(payment.method)}
+          >
+            <Icon className="w-[18px] h-[18px]" strokeWidth={2.1} />
+          </div>
+        )}
         <input
           value={payment.amount}
           onChange={(e) => onChange({ amount: e.target.value })}
@@ -1081,137 +1246,25 @@ function PaymentRowEditor({
             scrollFocusIntoView(e);
           }}
           inputMode="decimal"
+          placeholder="0,00"
           aria-label={`Importe ${labelFor(payment.method)}`}
-          className={
-            showShort
-              ? "flex-1 min-w-0 h-12 px-3 text-[16px] font-semibold bg-white border-2 border-mipiace-coral-dark rounded-xl tabular-nums text-right focus:ring-2 focus:ring-mipiace-coral/40 focus:outline-none"
-              : "flex-1 min-w-0 h-12 px-3 text-[16px] font-semibold bg-white border border-slate-200 rounded-xl tabular-nums text-right focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/40 focus:outline-none"
-          }
+          className="flex-1 min-w-[84px] h-12 px-3 text-[16px] font-semibold bg-white border border-slate-200 rounded-xl tabular-nums text-right focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/40 focus:outline-none"
         />
         {(payment.method === "CARD" || payment.method === "BIZUM") && (
           <input
             value={payment.meta?.reference ?? ""}
             onChange={(e) => onChange({ meta: { reference: e.target.value } })}
             placeholder={payment.method === "CARD" ? "últ. 4" : "ref."}
-            className="w-20 sm:w-24 h-12 px-3 text-[12.5px] bg-white border border-slate-200 rounded-xl focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/40 focus:outline-none"
+            aria-label={`Referencia ${labelFor(payment.method)}`}
+            className="w-16 sm:w-24 shrink-0 h-12 px-2.5 sm:px-3 text-[12.5px] bg-white border border-slate-200 rounded-xl focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/40 focus:outline-none"
           />
         )}
-        {canRemove && index > 0 && (
-          <button
-            onClick={onRemove}
-            aria-label="Quitar pago"
-            className="h-12 w-12 shrink-0 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 flex items-center justify-center text-slate-500"
-          >
-            <X className="w-4 h-4" strokeWidth={2.1} />
-          </button>
-        )}
       </div>
-      {showShort && (
-        <div className="mt-1 text-[11.5px] text-mipiace-coral-dark tabular-nums text-right pr-1">
-          Falta {formatEur(missingForThisRow)}
+      {autoFilled && (
+        <div className="mt-1 text-[11.5px] text-slate-500 text-right pr-1">
+          Resto de la cuenta · escribe encima si no cuadra
         </div>
       )}
-    </div>
-  );
-}
-
-// v1.3 Lote 2: step rápido para configurar cobro mixto. Vive dentro
-// del body (no es una librería de modales nueva). Default UX:
-// 3 taps para "tengo 10€ sueltos, el resto con tarjeta" — vs 4 taps
-// del flujo viejo.
-function MixedSplitStep({
-  total,
-  state,
-  onChange,
-  onConfirm,
-  onCancel,
-}: {
-  total: number;
-  state: { primaryMethod: Method; primaryAmount: string };
-  onChange: (next: { primaryMethod: Method; primaryAmount: string }) => void;
-  onConfirm: (primaryMethod: Method, primaryAmount: number) => void;
-  onCancel: () => void;
-}) {
-  const parsed = parseAmount(state.primaryAmount);
-  // Capeamos al total: no tiene sentido que el primario supere el
-  // total (el secundario quedaría 0 o negativo).
-  const capped = Math.min(Math.max(0, parsed), total);
-  const remaining = Math.max(0, total - capped);
-  function bump(delta: number) {
-    const next = Math.min(total, parsed + delta);
-    onChange({ ...state, primaryAmount: next.toFixed(2) });
-  }
-  return (
-    <div className="mb-4 rounded-2xl border border-mipiace-coral/30 bg-mipiace-coral-soft/40 p-4">
-      <div className="flex items-center justify-between mb-3">
-        <div className="text-[13px] font-medium text-mipiace-coral-dark">
-          Partir cobro
-        </div>
-        <button
-          onClick={onCancel}
-          className="h-7 w-7 rounded-lg hover:bg-white text-slate-500 flex items-center justify-center"
-          aria-label="Cancelar mixto"
-        >
-          <X className="w-3.5 h-3.5" />
-        </button>
-      </div>
-      <div className="grid grid-cols-[140px_1fr] gap-2 mb-3">
-        <select
-          value={state.primaryMethod}
-          onChange={(e) =>
-            onChange({ ...state, primaryMethod: e.target.value as Method })
-          }
-          className="h-12 px-3 rounded-xl bg-white border border-slate-200 text-[13.5px] font-medium text-mipiace-ink focus:outline-none focus:ring-2 focus:ring-mipiace-coral/30"
-        >
-          {(["CASH", "CARD", "BIZUM", "VOUCHER"] as Method[]).map((m) => (
-            <option key={m} value={m}>
-              {labelFor(m)}
-            </option>
-          ))}
-        </select>
-        <input
-          value={state.primaryAmount}
-          onChange={(e) =>
-            onChange({ ...state, primaryAmount: e.target.value })
-          }
-          onFocus={(e) => {
-            e.target.select();
-            scrollFocusIntoView(e);
-          }}
-          inputMode="decimal"
-          placeholder="0,00"
-          className="h-12 px-3 text-[18px] font-semibold bg-white border border-slate-200 rounded-xl tabular-nums text-right focus:outline-none focus:ring-2 focus:ring-mipiace-coral/40"
-        />
-      </div>
-      <div className="grid grid-cols-4 gap-2 mb-3">
-        {[5, 10, 20, 50].map((n) => (
-          <button
-            key={n}
-            onClick={() => bump(n)}
-            className="h-10 rounded-xl bg-white hover:bg-slate-50 text-[13px] font-medium text-mipiace-ink border border-slate-200"
-          >
-            +{n}
-          </button>
-        ))}
-      </div>
-      <div className="flex items-center justify-between text-[12.5px] text-slate-600 mb-3">
-        <span>
-          Resto con{" "}
-          <span className="font-medium text-mipiace-ink">
-            {labelFor(state.primaryMethod === "CASH" ? "CARD" : "CASH")}
-          </span>
-        </span>
-        <span className="tabular-nums font-medium text-mipiace-ink">
-          {remaining.toFixed(2).replace(".", ",")} €
-        </span>
-      </div>
-      <button
-        onClick={() => onConfirm(state.primaryMethod, capped)}
-        disabled={capped <= 0}
-        className="w-full h-11 rounded-xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[13.5px] font-medium disabled:opacity-50"
-      >
-        Aplicar mixto
-      </button>
     </div>
   );
 }
@@ -1271,9 +1324,4 @@ function labelFor(m: Method): string {
   if (m === "CARD") return "Tarjeta";
   if (m === "BIZUM") return "Bizum";
   return "Vale";
-}
-
-function parseAmount(s: string): number {
-  const n = Number(s.replace(",", "."));
-  return Number.isFinite(n) ? n : 0;
 }

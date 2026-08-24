@@ -7,10 +7,15 @@
 //     optimista.
 //   - Click central (nombre + breakdown) → abre el LineSheet completo
 //     (precio, descuento, modificadores, nota).
-//   - Papelera a la derecha con "armado" por doble tap: el primer tap
-//     pone el botón en estado "confirmar" 1.5s; el segundo tap dentro
-//     de esa ventana elimina. Sin segundo tap, vuelve a inerte. Evita
-//     borrados accidentales sin meter un modal de confirmación.
+//   - Papelera a la derecha: borra al primer toque.
+//
+// v1.10.3-barra (hallazgo #2 de la simulación de hora punta del
+// 2026-08-20): la papelera exigía un SEGUNDO toque dentro de 1,5 s y,
+// pasada la ventana, se desarmaba sin decir nada — con la mano ocupada
+// parecía un botón muerto. Se ha sustituido por el patrón UX de la
+// casa: borrado directo + banner "Deshacer" de 4 s, que vive en
+// `SalePage` (es quien tiene las líneas y sabe reponerlas). Un target
+// de 44 px no debería exigir puntería cronometrada.
 //
 // Touch targets ≥ 44 px (Apple HIG / Material). El stepper en `−` con
 // cantidad 1 NO baja a 0 silenciosamente — resalta brevemente la
@@ -21,14 +26,8 @@ import { Minus, Plus, Trash2 } from "lucide-react";
 
 import { computeLine, type CartLine } from "../lib/cart.js";
 import { ModifierBreakdown } from "./SalePage.cartLineHelpers.js";
+import { formatEur } from "../lib/money.js";
 
-const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
-
-// Ventana de tiempo que la papelera permanece "armada" tras el primer
-// tap. 1.5s es el punto medio entre "lo suficientemente largo para que
-// el cajero apunte sin estrés" y "lo suficientemente corto para que no
-// quede una papelera roja zombi en pantalla".
-const TRASH_ARM_WINDOW_MS = 1500;
 // Hint visual cuando el cajero pulsa `−` en cantidad 1: el botón
 // papelera parpadea ese tiempo para sugerirle el flujo correcto.
 const TRASH_HINT_WINDOW_MS = 1200;
@@ -53,24 +52,13 @@ export function CartLineItem({
   durationMin,
 }: CartLineItemProps) {
   const total = computeLine(line);
-  const [trashArmed, setTrashArmed] = useState(false);
   const [trashHint, setTrashHint] = useState(false);
-  const armTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     return () => {
-      if (armTimerRef.current) clearTimeout(armTimerRef.current);
       if (hintTimerRef.current) clearTimeout(hintTimerRef.current);
     };
-  }, []);
-
-  const disarm = useCallback(() => {
-    if (armTimerRef.current) {
-      clearTimeout(armTimerRef.current);
-      armTimerRef.current = null;
-    }
-    setTrashArmed(false);
   }, []);
 
   const triggerHint = useCallback(() => {
@@ -81,7 +69,6 @@ export function CartLineItem({
 
   function handleDecrement(e: React.MouseEvent) {
     e.stopPropagation();
-    disarm();
     if (line.units <= 1) {
       // Cantidad mínima 1: en lugar de bajar a 0 silenciosamente, le
       // recordamos al cajero la papelera. Si REALMENTE quiere eliminar
@@ -94,24 +81,14 @@ export function CartLineItem({
 
   function handleIncrement(e: React.MouseEvent) {
     e.stopPropagation();
-    disarm();
     onUnitsChange(line.units + 1);
   }
 
   function handleTrashClick(e: React.MouseEvent) {
     e.stopPropagation();
-    if (trashArmed) {
-      // Segundo tap dentro de la ventana → eliminamos.
-      disarm();
-      onRemove();
-      return;
-    }
-    setTrashArmed(true);
-    if (armTimerRef.current) clearTimeout(armTimerRef.current);
-    armTimerRef.current = setTimeout(() => {
-      setTrashArmed(false);
-      armTimerRef.current = null;
-    }, TRASH_ARM_WINDOW_MS);
+    // Borrado directo: la red de seguridad es el "Deshacer" de 4 s que
+    // pinta SalePage, no un segundo toque contrarreloj.
+    onRemove();
   }
 
   return (
@@ -210,13 +187,12 @@ export function CartLineItem({
         <button
           type="button"
           onClick={handleTrashClick}
-          aria-label={trashArmed ? "Pulsa de nuevo para eliminar la línea" : "Eliminar línea"}
+          aria-label={`Eliminar ${line.nameSnapshot}`}
+          title="Eliminar la línea (podrás deshacerlo durante 4 s)"
           className={
-            trashArmed
-              ? "h-11 w-11 rounded-xl flex items-center justify-center bg-red-500 text-white scale-105 transition-transform"
-              : trashHint
-                ? "h-11 w-11 rounded-xl flex items-center justify-center bg-red-50 text-red-500 animate-pulse"
-                : "h-11 w-11 rounded-xl flex items-center justify-center text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+            trashHint
+              ? "h-11 w-11 rounded-xl flex items-center justify-center bg-red-50 text-red-500 animate-pulse"
+              : "h-11 w-11 rounded-xl flex items-center justify-center text-slate-400 hover:bg-red-50 hover:text-red-500 active:bg-red-100 transition-colors"
           }
         >
           <Trash2 className="w-4 h-4" strokeWidth={2} />

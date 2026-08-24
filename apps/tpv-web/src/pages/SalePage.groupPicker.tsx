@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { Check, Loader2, X } from "lucide-react";
 
 import { apiWithCashier, ApiError } from "../api.js";
+import { formatEur } from "../lib/money.js";
 
 type TableZone = "SALON" | "TERRAZA" | "BARRA" | "RESERVADO";
 
@@ -150,7 +151,7 @@ export function GroupTablesPicker(props: GroupTablesPickerProps) {
                           key={t.id}
                           type="button"
                           onClick={() => toggle(t.id)}
-                          title={`${t.name} · ${Number(t.activeTicket!.total).toFixed(2)} €`}
+                          title={`${t.name} · ${formatEur(Number(t.activeTicket!.total))}`}
                           className={
                             isSelected
                               ? "relative h-16 rounded-2xl border-2 border-mipiace-coral bg-mipiace-coral-soft text-mipiace-coral-dark text-[14px] font-medium"
@@ -164,7 +165,7 @@ export function GroupTablesPicker(props: GroupTablesPickerProps) {
                           )}
                           <div>{t.name}</div>
                           <div className="text-[11px] opacity-70 mt-0.5 tabular-nums">
-                            {Number(t.activeTicket!.total).toFixed(2)} €
+                            {formatEur(Number(t.activeTicket!.total))}
                           </div>
                         </button>
                       );

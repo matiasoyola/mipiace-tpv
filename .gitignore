@@ -25,6 +25,10 @@ logs/
 coverage/
 *.tsbuildinfo
 
+# Volcados del MCP de Playwright (snapshots y logs de consola del
+# bucle visual). Las capturas que sí se guardan viven en docs/blocks/.
+.playwright-mcp/
+
 spike/**/fixtures/*
 !spike/**/fixtures/.gitkeep
 
