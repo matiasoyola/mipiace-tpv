@@ -56,6 +56,7 @@ import { PinScreen, type CashierLoginResponse } from "./pages/PinScreen.js";
 import { SalePage, type TableContext } from "./pages/SalePage.js";
 import { CloseShiftModal } from "./pages/CloseShiftModal.js";
 import { DaySummaryCard } from "./pages/DaySummaryCard.js";
+import { daySummaryTitle } from "./lib/daySummaryTitle.js";
 import { ShiftResumeScreen } from "./pages/ShiftResumeScreen.js";
 import { ShiftOpenScreen } from "./pages/ShiftOpenScreen.js";
 import {
@@ -740,7 +741,7 @@ function ShiftOpenWithDaySummary({
         <div className="w-full max-w-lg">
           <DaySummaryCard
             summary={pending}
-            title="Así fue el día de ayer"
+            title={daySummaryTitle(pending.shift.closedAt)}
             busy={acking}
             confirmLabel="Confirmar"
             onConfirm={async () => {

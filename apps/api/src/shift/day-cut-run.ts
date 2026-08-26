@@ -96,7 +96,10 @@ export async function runShiftDayCut(args: {
     const tenant = shift.register.store.tenant;
     if (!shiftCrossedDayCut(shift, now, tenant.dayCutHour)) continue;
     try {
-      closed.push(await closeShiftAtDayCut({ prisma, log, shift, now }));
+      const outcome = await closeShiftAtDayCut({ prisma, log, shift, now });
+      // `null` = lo cerró una persona mientras corría la pasada. No es un
+      // fallo y no cuenta como cierre nuestro.
+      if (outcome) closed.push(outcome);
     } catch (err) {
       failed += 1;
       log.error(
@@ -127,9 +130,39 @@ async function closeShiftAtDayCut(args: {
   log: DayCutLog;
   shift: OpenShiftRow;
   now: Date;
-}): Promise<DayCutOutcome> {
+}): Promise<DayCutOutcome | null> {
   const { prisma, log, shift, now } = args;
   const cashOpening = Number(shift.cashOpening.toString());
+
+  // addendum 2 (review 2026-08-26) · RECLAMAR EL TURNO ANTES DE NADA.
+  //
+  // La lista de turnos abiertos se lee al principio de la pasada y
+  // generar el Z lleva segundos. Si en esa ventana un cajero cierra a
+  // mano, escribir el cierre automático al final le pisaba el suyo:
+  // `closedByUserId` a NULL, `closeReason = AUTO_DAY_CUT` y —peor— el
+  // PDF, que se llama `<shiftId>.pdf`, sobrescrito por uno que dice
+  // "descuadre 0,00 €" sobre un turno que esa persona SÍ contó.
+  //
+  // El `updateMany` con `closedAt: null` es la reclamación atómica: o
+  // cerramos nosotros, o cerró alguien y nos apartamos sin tocar nada.
+  const claimed = await prisma.shift.updateMany({
+    where: { id: shift.id, closedAt: null },
+    data: {
+      closedAt: now,
+      // cashCounted se queda NULL a propósito — ver cabecera del módulo.
+      closedByUserId: null,
+      closeReason: "AUTO_DAY_CUT",
+      // El resumen de la mañana está pendiente de enseñarse.
+      summaryAckAt: null,
+    },
+  });
+  if (claimed.count === 0) {
+    log.info(
+      { event: "shift.day_cut.raced", shiftId: shift.id },
+      "corte de día: el turno lo cerró una persona durante la pasada; no se toca",
+    );
+    return null;
+  }
 
   const [sums, ticketsCount, refundsCount, cashierUser, syncIssues] =
     await Promise.all([
@@ -188,18 +221,14 @@ async function closeShiftAtDayCut(args: {
     );
   }
 
-  await prisma.shift.update({
-    where: { id: shift.id },
-    data: {
-      closedAt: now,
-      // cashCounted se queda NULL a propósito — ver cabecera.
-      closedByUserId: null,
-      closeReason: "AUTO_DAY_CUT",
-      zReportPdfPath: zPath,
-      // El resumen de la mañana está pendiente de enseñarse.
-      summaryAckAt: null,
-    },
-  });
+  // El cierre ya está escrito (la reclamación de arriba). Aquí sólo
+  // queda colgarle el Z si se pudo generar.
+  if (zPath) {
+    await prisma.shift.update({
+      where: { id: shift.id },
+      data: { zReportPdfPath: zPath },
+    });
+  }
 
   const outcome: DayCutOutcome = {
     shiftId: shift.id,

@@ -28,6 +28,36 @@
 
 import type { getPrisma } from "../context.js";
 
+// addendum 2 (review 2026-08-26) · tolerancia de reloj hacia adelante.
+//
+// `occurredAt` lo sella el terminal, así que es su reloj. Hacia atrás la
+// imputación ya está acotada (sólo se miran turnos abiertos desde el que
+// pedía el cliente); hacia adelante no lo estaba: un tablet con el reloj
+// adelantado —pasa después de quedarse sin batería— podía caer en la
+// ventana de un turno posterior o salirse de las candidatas.
+//
+// Cinco minutos cubre la deriva normal de un dispositivo sincronizado.
+// Por encima, el instante no es de fiar: se ignora y la venta entra por
+// el camino de siempre. Ignorar NUNCA significa rechazar la venta.
+export const OCCURRED_AT_MAX_SKEW_MS = 5 * 60 * 1000;
+
+/**
+ * Convierte el `occurredAt` del cuerpo en Date, o `null` si no viene, no
+ * parsea, o está tan adelantado que no puede ser cierto.
+ */
+export function parseOccurredAt(
+  raw: string | null | undefined,
+  now: Date = new Date(),
+): { at: Date | null; skewed: boolean } {
+  if (!raw) return { at: null, skewed: false };
+  const at = new Date(raw);
+  if (Number.isNaN(at.getTime())) return { at: null, skewed: false };
+  if (at.getTime() > now.getTime() + OCCURRED_AT_MAX_SKEW_MS) {
+    return { at: null, skewed: true };
+  }
+  return { at, skewed: false };
+}
+
 export interface ShiftWindow {
   id: string;
   openedAt: Date;

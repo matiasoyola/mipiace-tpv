@@ -221,7 +221,9 @@ dashboards, cambiar el modelo de turnos, notificaciones/email del resumen.
 
 ## Tests
 
-`pnpm vitest run` → **135 archivos, 1132 pasan, 3 skipped, 0 fallos.**
+`pnpm vitest run` → **135 archivos, 1136 pasan, 3 skipped, 0 fallos.**
+(Este documento llegó a decir 1132: era la cifra de antes de los +4 de `outbox.test.ts`.
+El addendum 2 añade 14 tests más — la cifra buena es la de la última pasada en el Mac.)
 
 Nuevos:
 - `apps/api/test/shift-day-cut.test.ts` (14) — la conversión de hora local,
@@ -321,3 +323,65 @@ importes y `min-w-0` en las etiquetas. Sin el bucle visual no se ve.
    red. Las ventas de antes del corte aparecen en el turno de ayer, las de
    después en el nuevo, ninguna rechazada, y el turno afectado enseña el aviso
    de Z desfasado.
+
+---
+
+# Addendum 2 · correcciones de la review (2026-08-26)
+
+Review de Matías sobre `049e9eb`. El bloque se acepta —el encuadre, la imputación por `occurredAt` y los
+tests de DST se quedan como estaban—; salieron cuatro cosas. Prompt:
+`docs/code-prompts/bloque-v1-11-cierre-de-dia-addendum-2.md`.
+
+## F1 · "Así fue el día de ayer" era un título fijo
+
+`App.tsx` lo pasaba hardcodeado y `GET /shift/last-closed` no tiene cota temporal. Dos mentiras reales:
+**cualquier negocio con día de cierre** (Sole libra domingo y lunes: cada martes "ayer" era el sábado) y
+**el primer arranque tras desplegar**, porque la migración dejaba `summary_ack_at` NULL en todas las filas
+existentes y Cafetería Sirope tiene turnos cerrados de julio. Es el mismo fallo de copy de la validación
+del 2026-08-20 ("ayer" que eran 41 días).
+
+- `packages/db/prisma/migrations/20260820000000_v1_11_cierre_de_dia/migration.sql` — backfill
+  `summary_ack_at = closed_at` para todo lo ya cerrado. La tarjeta es para los cierres a partir de v1.11.
+- `apps/tpv-web/src/lib/daySummaryTitle.ts` — **nuevo**. `daySummaryTitle(closedAt, now)`: hoy / ayer /
+  "el sábado 22 de agosto" / "el 9 de julio de 2026". La distancia se mide en **días de calendario** por
+  medianoche local, no en horas: el 25/10 dura 25 h y ayer seguiría siendo ayer.
+- `apps/tpv-web/test/day-summary-title.test.ts` — **nuevo** (9): los dos DST, el martes de Sole, el turno de
+  hace semanas, la fecha basura y el reloj atrasado.
+- `GET /shift/last-closed` **no se toca**: si un terminal no abre en tres semanas, el resumen de su último
+  día sí hay que enseñarlo — con su fecha bien dicha.
+
+## F2 · El corte podía pisar un cierre manual
+
+`day-cut-run.ts` leía los turnos abiertos al principio de la pasada y escribía el cierre al final, después de
+generar el Z (segundos). El `update({ where: { id } })` no comprobaba que el turno siguiera abierto: un cajero
+que cerrase en esa ventana perdía su cierre —`closedByUserId` a NULL, `closeReason` a `AUTO_DAY_CUT`— y, peor,
+el PDF (que se llama `<shiftId>.pdf`) quedaba sobrescrito por uno que dice "descuadre 0,00 €" sobre un turno
+que esa persona **sí** contó.
+
+Ahora el turno se **reclama antes de trabajar**: `updateMany` con `where: { closedAt: null }` escribe el
+cierre, y sólo si `count === 1` seguimos (generar el Z y colgarle la ruta con un segundo update). Si
+`count === 0`, `log.info({ event: "shift.day_cut.raced" })` y `closeShiftAtDayCut` devuelve `null`: ni cierre
+nuestro ni fallo. `+1` test con el falso mutando el turno entre el `findMany` y la reclamación.
+
+## F3 · `occurredAt` no estaba acotado hacia adelante
+
+Lo sella el terminal, así que es su reloj. Hacia atrás ya estaba acotado (sólo se miran turnos abiertos desde
+el que pedía el cliente); hacia adelante, un tablet adelantado podía caer en la ventana de un turno posterior.
+`parseOccurredAt` (en `impute.ts`, `OCCURRED_AT_MAX_SKEW_MS = 5 min`) lo ignora y loguea
+`ticket.occurred_at_skew` / `refund.occurred_at_skew`. **Ignorar nunca es rechazar la venta**: entra por el
+camino de siempre. `+4` tests.
+
+## F4 · `imputedShiftId` fuera del contrato
+
+Lo devolvía `POST /tickets` y no lo leía nadie en `apps/tpv-web` (cero referencias). Un campo que no consume
+ningún cliente se pudre e invita a que alguien lo adopte mal —el terminal **no** debe apropiarse de un turno
+que no abrió—. Se quita; la trazabilidad de la imputación está donde tiene que estar, en el log
+`ticket.shift_imputed` del server.
+
+## Tests tras el addendum
+
+`apps/api`: `shift-day-cut.test.ts` (14), `shift-impute-offline.test.ts` (12), `shift-day-cut-run.test.ts`
+(10) → 36 pasan. `tpv-web`: `day-summary-title.test.ts` (9), `shift-resume-screen.test.tsx` (8),
+`outbox.test.ts` (13) pasan. **La pasada completa (`pnpm vitest run`) y el typecheck los tiene que correr
+Matías en el Mac**: la review se hizo desde el mount de Cowork, donde `node_modules` es de macOS y el runner
+se queda colgado a media suite.

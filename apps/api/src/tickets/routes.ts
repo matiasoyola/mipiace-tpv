@@ -25,6 +25,7 @@ import { enqueueTicketEmail } from "../queues/ticket-email.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
 import {
   markZReportStale,
+  parseOccurredAt,
   pickShiftForOccurrence,
   resolveShiftForSale,
   type ShiftWindow,
@@ -255,12 +256,24 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       // un terminal que estuvo offline mientras el server cerraba su turno:
       // el outbox trata el 409 como rechazo permanente. Ahora la venta se
       // imputa al turno que le toca por su `occurredAt`.
-      const occurredAt = body.occurredAt ? new Date(body.occurredAt) : null;
+      const { at: occurredAt, skewed } = parseOccurredAt(body.occurredAt);
+      if (skewed) {
+        // El reloj del terminal va adelantado. No rechazamos la venta:
+        // entra por el camino de siempre, sin imputar.
+        request.log.warn(
+          {
+            event: "ticket.occurred_at_skew",
+            externalId: body.externalId,
+            occurredAt: body.occurredAt,
+          },
+          "occurredAt del futuro: se ignora para la imputación",
+        );
+      }
       const resolution = await resolveShiftForSale({
         prisma,
         registerId: cashier.rid,
         requestedShiftId: body.shiftId,
-        occurredAt: occurredAt && !Number.isNaN(occurredAt.getTime()) ? occurredAt : null,
+        occurredAt,
       });
       if (!resolution.ok) {
         return reply.code(409).send({
@@ -638,12 +651,16 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         });
       }
 
+      // addendum 2 (review 2026-08-26) · aquí viajaba `imputedShiftId` y
+      // no lo leía nadie en `apps/tpv-web`. Un campo del contrato que no
+      // consume ningún cliente se pudre: invita a que alguien lo adopte
+      // mal más adelante (el terminal NO debe apropiarse de un turno que
+      // no abrió). La trazabilidad de la imputación está donde tiene que
+      // estar: el log `ticket.shift_imputed` del server, con el turno
+      // pedido y el efectivo.
       return reply.code(201).send({
         ticket: serializeTicket(ticket),
         syncStatus: ticket.status,
-        // El terminal aprende a qué turno fue a parar de verdad. Sólo
-        // viaja cuando NO es el que pidió — el camino normal no cambia.
-        ...(resolution.imputed ? { imputedShiftId: effectiveShiftId } : {}),
       });
     },
   );
@@ -1510,11 +1527,15 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       // a las 23:40 y subida a las 09:05 pertenece al turno de anoche.
       // Sigue valiendo `null` (devolución sin ningún turno abierto) — nunca
       // ha sido motivo para rechazarla.
-      const refundOccurredAtRaw = body.occurredAt ? new Date(body.occurredAt) : null;
-      const refundOccurredAt =
-        refundOccurredAtRaw && !Number.isNaN(refundOccurredAtRaw.getTime())
-          ? refundOccurredAtRaw
-          : null;
+      const { at: refundOccurredAt, skewed: refundSkewed } = parseOccurredAt(
+        body.occurredAt,
+      );
+      if (refundSkewed) {
+        request.log.warn(
+          { event: "refund.occurred_at_skew", occurredAt: body.occurredAt },
+          "occurredAt del futuro: se ignora para la imputación",
+        );
+      }
       // Sin `occurredAt` (camino online de siempre, o un cliente anterior a
       // v1.11) no hay nada que imputar: la misma query de una fila que
       // había antes. Sólo cuando la devolución trae su instante real

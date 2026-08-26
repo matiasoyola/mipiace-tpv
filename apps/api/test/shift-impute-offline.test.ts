@@ -12,7 +12,12 @@
 
 import { describe, expect, it } from "vitest";
 
-import { pickShiftForOccurrence, type ShiftWindow } from "../src/shift/impute.js";
+import {
+  OCCURRED_AT_MAX_SKEW_MS,
+  parseOccurredAt,
+  pickShiftForOccurrence,
+  type ShiftWindow,
+} from "../src/shift/impute.js";
 
 const AYER: ShiftWindow = {
   id: "shift-ayer",
@@ -86,5 +91,33 @@ describe("pickShiftForOccurrence · a qué turno pertenece una venta", () => {
   it("un turno que sigue abierto acepta cualquier venta posterior a su apertura", () => {
     const dentroDeMucho = new Date("2026-08-11T20:00:00.000Z");
     expect(pickShiftForOccurrence([AYER, HOY], dentroDeMucho)?.id).toBe("shift-hoy");
+  });
+});
+
+// addendum 2 (review 2026-08-26) · el `occurredAt` lo sella el terminal,
+// así que es su reloj. Hacia atrás la búsqueda ya está acotada; hacia
+// adelante no lo estaba.
+describe("parseOccurredAt · reloj del terminal", () => {
+  const now = new Date("2026-08-11T09:00:00.000Z");
+
+  it("un instante normal pasa tal cual", () => {
+    const at = new Date("2026-08-10T21:40:00.000Z");
+    expect(parseOccurredAt(at.toISOString(), now)).toEqual({ at, skewed: false });
+  });
+
+  it("una deriva pequeña se acepta: un reloj sincronizado no es exacto", () => {
+    const at = new Date(now.getTime() + OCCURRED_AT_MAX_SKEW_MS - 1000);
+    expect(parseOccurredAt(at.toISOString(), now).skewed).toBe(false);
+  });
+
+  it("un reloj adelantado horas se ignora, pero NO tumba la venta", () => {
+    const at = new Date(now.getTime() + 6 * 60 * 60 * 1000);
+    // `at: null` = la venta entra por el camino de siempre, sin imputar.
+    expect(parseOccurredAt(at.toISOString(), now)).toEqual({ at: null, skewed: true });
+  });
+
+  it("sin valor o con basura: nada que imputar y nada que avisar", () => {
+    expect(parseOccurredAt(undefined, now)).toEqual({ at: null, skewed: false });
+    expect(parseOccurredAt("no-es-una-fecha", now)).toEqual({ at: null, skewed: false });
   });
 });

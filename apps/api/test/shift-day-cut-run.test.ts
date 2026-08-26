@@ -114,7 +114,36 @@ function fakePrisma(shifts: FakeShiftRow[]) {
           if (s) Object.assign(s, args.data);
           return s;
         }),
-        updateMany: vi.fn(async () => ({ count: 0 })),
+        // addendum 2 · el corte RECLAMA el turno con un updateMany
+        // condicionado a `closedAt: null`. El falso tiene que respetar
+        // esa condición o el test no probaría nada.
+        updateMany: vi.fn(
+          async (args: {
+            where: Record<string, unknown>;
+            data: Record<string, unknown>;
+          }) => {
+            const where = args.where ?? {};
+            const hit = shifts.filter((s) => {
+              if (where.id && s.id !== where.id) return false;
+              if ("closedAt" in where) {
+                if (where.closedAt === null && s.closedAt !== null) return false;
+                const notNull = where.closedAt as { not?: null } | null;
+                if (notNull && typeof notNull === "object" && "not" in notNull) {
+                  if (s.closedAt === null) return false;
+                }
+              }
+              if ("zReportStale" in where && s.zReportStale !== where.zReportStale) {
+                return false;
+              }
+              return true;
+            });
+            for (const s of hit) {
+              updates.push({ id: s.id, data: args.data });
+              Object.assign(s, args.data);
+            }
+            return { count: hit.length };
+          },
+        ),
       },
       ticket: {
         count: vi.fn(async () => 12),
@@ -202,6 +231,46 @@ describe("runShiftDayCut · el turno de ayer se cierra solo", () => {
     });
     expect(res.closed).toHaveLength(0);
     expect(db.updates).toHaveLength(0);
+  });
+
+  // addendum 2 (review 2026-08-26) · la carrera con el cierre manual.
+  it("si una persona cierra el turno durante la pasada, el corte se aparta", async () => {
+    const ayer = makeShift({
+      id: "ayer",
+      openedAt: new Date("2026-08-10T07:00:00.000Z"),
+      cashCounted: 170,
+    });
+    const db = fakePrisma([ayer]);
+    // La pasada lo lee ABIERTO y, mientras genera el Z, la cajera lo
+    // cierra a mano. Cuando llega la reclamación, `closedAt` ya no es
+    // NULL. Eso es exactamente la carrera.
+    db.client.shift.findMany.mockImplementationOnce(async () => {
+      const comoSeLeyo = { ...ayer };
+      ayer.closedAt = new Date("2026-08-11T02:59:00.000Z");
+      ayer.closedByUserId = "user-1";
+      ayer.closeReason = "MANUAL";
+      return [comoSeLeyo];
+    });
+
+    const res = await runShiftDayCut({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      prisma: db.client as any,
+      log,
+      now: new Date("2026-08-11T03:00:30.000Z"),
+    });
+
+    // Ni cerrado por nosotros ni contado como fallo: no era nuestro.
+    expect(res.closed).toHaveLength(0);
+    expect(res.failed).toBe(0);
+    expect(db.updates).toHaveLength(0);
+    // Y el cierre de la persona queda intacto.
+    expect(ayer.closeReason).toBe("MANUAL");
+    expect(ayer.closedByUserId).toBe("user-1");
+    expect(ayer.cashCounted).toBe(170);
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "shift.day_cut.raced" }),
+      expect.any(String),
+    );
   });
 
   it("un turno que falla no impide cerrar los demás", async () => {

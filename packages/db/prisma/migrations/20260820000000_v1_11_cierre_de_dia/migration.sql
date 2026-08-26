@@ -48,3 +48,14 @@ ALTER TABLE "shifts"
 -- El job de corte busca turnos abiertos ordenados por apertura; el
 -- resumen de la mañana busca el último cerrado sin confirmar. El índice
 -- (register_id, closed_at) ya existe y cubre ambos accesos.
+
+-- ── Backfill de summary_ack_at (addendum 2, review 2026-08-26) ───────
+-- Sin esto, TODOS los turnos ya cerrados quedan con `summary_ack_at`
+-- NULL y `GET /shift/last-closed` los considera pendientes: el primer
+-- login después de desplegar enseñaría la tarjeta del resumen sobre el
+-- último turno cerrado, que en Cafetería Sirope es del 9 de julio.
+-- La tarjeta es para los cierres a partir de v1.11; el pasado no se
+-- confirma.
+UPDATE "shifts"
+   SET "summary_ack_at" = "closed_at"
+ WHERE "closed_at" IS NOT NULL;
