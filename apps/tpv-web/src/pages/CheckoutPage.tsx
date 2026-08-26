@@ -210,15 +210,22 @@ export function CheckoutOverlay(props: {
     if (firstCashIdx === -1) return;
     setPayment(firstCashIdx, { amount: formatAmount(amount) });
   }
-  // B5 §3.2: ready cuando Σ payments ≥ total (con tolerancia 0.01€).
-  // Antes exigíamos match exacto y bloqueaba overpayments cash.
-  const ready = paymentsSum >= total - 0.01;
   // v1.10.3-barra · una sola línea de verdad sobre el reparto, debajo
   // de las filas. Antes cada fila CASH pintaba su propio "Falta X" que
   // contradecía al resto y no explicaba por qué Cobrar seguía gris.
   const missing = Math.max(0, total - paymentsSum);
   const over = Math.max(0, paymentsSum - total);
   const isMixed = payments.length > 1;
+  // v1.10.3-addendum (review 2026-08-26) · un exceso SÓLO es legítimo
+  // si sale del cajón: el cambio se devuelve en efectivo. 20 en
+  // efectivo sobre 14 son 6 de cambio; 15 en TARJETA sobre 14 son 1 €
+  // cobrado de más al cliente, y la tarjeta no devuelve cambio. El
+  // server no lo para —sólo rechaza que la suma sea MENOR que el
+  // total— así que lo tiene que parar la caja.
+  const overNotRefundable = over > 0.005 && cashAmount < over - 0.005;
+  // B5 §3.2: ready cuando Σ payments ≥ total (con tolerancia 0.01€).
+  // Antes exigíamos match exacto y bloqueaba overpayments cash.
+  const ready = paymentsSum >= total - 0.01 && !overNotRefundable;
 
   // v1.9.2-mesas-concurrencia · Frente 1.4/2: la cuenta cambió desde
   // otra caja (o el server rechazó por total desactualizado). Mientras
@@ -430,11 +437,21 @@ export function CheckoutOverlay(props: {
       // v1.8-Fiado · un fiado nace SIN pagos (se cobra luego en Deudas).
       const paymentsPayload = isCredit
         ? []
-        : payments.map((p) => ({
-            method: p.method,
-            amount: parseAmount(p.amount),
-            meta: p.meta && Object.keys(p.meta).length > 0 ? p.meta : undefined,
-          }));
+        : payments
+            .map((p) => ({
+              method: p.method,
+              amount: parseAmount(p.amount),
+              meta:
+                p.meta && Object.keys(p.meta).length > 0 ? p.meta : undefined,
+            }))
+            // v1.10.3-addendum (review 2026-08-26) · fuera las filas a
+            // cero. El reparto automático deja la última fila en 0,00 €
+            // en cuanto el cajero teclea en otra un importe ≥ total
+            // (cliente que paga los 14 con un billete de 20 después de
+            // haber pulsado Mixto). Mandar un pago de 0,00 € en tarjeta
+            // ensucia el ticket, el desglose del Z y el recibo de
+            // Holded con un cobro que no existió.
+            .filter((p) => p.amount > 0.005);
       const commonFields = {
         externalId: externalIdRef.current,
         payments: paymentsPayload,
@@ -783,7 +800,9 @@ export function CheckoutOverlay(props: {
             className={
               missing > 0.005
                 ? "mb-5 rounded-xl bg-mipiace-coral-soft border border-mipiace-coral/30 px-3 py-2 text-[12.5px] text-mipiace-coral-dark flex items-baseline justify-between gap-3"
-                : "mb-5 rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-2 text-[12.5px] text-emerald-800 flex items-baseline justify-between gap-3"
+                : overNotRefundable
+                  ? "mb-5 rounded-xl bg-mipiace-coral-soft border border-mipiace-coral/30 px-3 py-2 text-[12.5px] text-mipiace-coral-dark flex items-baseline justify-between gap-3"
+                  : "mb-5 rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-2 text-[12.5px] text-emerald-800 flex items-baseline justify-between gap-3"
             }
           >
             <span className="min-w-0">
@@ -794,9 +813,11 @@ export function CheckoutOverlay(props: {
             <span className="tabular-nums font-semibold shrink-0">
               {missing > 0.005
                 ? `Falta ${formatEur(missing)}`
-                : over > 0.005
-                  ? `${formatEur(paymentsSum)} · sobran ${formatEur(over)}`
-                  : `${formatEur(paymentsSum)} · cuadra`}
+                : overNotRefundable
+                  ? `Sobran ${formatEur(over)} · baja el importe`
+                  : over > 0.005
+                    ? `${formatEur(paymentsSum)} · sobran ${formatEur(over)}`
+                    : `${formatEur(paymentsSum)} · cuadra`}
             </span>
           </div>
 
@@ -964,6 +985,20 @@ export function CheckoutOverlay(props: {
               </span>
               <span className="text-[15px] font-semibold text-mipiace-coral-dark tabular-nums">
                 {formatEur(missing)}
+              </span>
+            </div>
+          )}
+
+          {/* Y el exceso que no se puede devolver, por el mismo motivo:
+              "Cobrar" en gris sin decir por qué es el pecado del
+              hallazgo #1. (addendum de la review 2026-08-26) */}
+          {overNotRefundable && (
+            <div className="flex items-baseline justify-between mb-1.5">
+              <span className="text-[12.5px] text-mipiace-coral-dark">
+                Sobran
+              </span>
+              <span className="text-[15px] font-semibold text-mipiace-coral-dark tabular-nums">
+                {formatEur(over)}
               </span>
             </div>
           )}

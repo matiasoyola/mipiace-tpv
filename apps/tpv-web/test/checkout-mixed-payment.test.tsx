@@ -300,3 +300,62 @@ describe("v1.10.3-barra · cobro mixto", () => {
     expect(container.textContent).not.toMatch(/\d\.\d{2}\s*€/);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// Addendum de la review (2026-08-26): el exceso.
+//
+// El server sólo rechaza que Σ pagos sea MENOR que el total (400
+// PAYMENTS_MISMATCH). Todo lo que sobra pasa. Con una sola fila eso era
+// el cambio en efectivo de toda la vida; desde que el mixto funciona de
+// verdad, también deja cobrar de más con la tarjeta —que no devuelve
+// cambio— y deja colar filas de 0,00 €.
+describe("v1.10.3-addendum · el exceso", () => {
+  it("15 € en TARJETA sobre 14 € no se cobra: no hay de dónde devolver 1 €", async () => {
+    await renderOverlay();
+    await click(buttonByText("Mixto"));
+    // El cajero escribe de más en la fila de tarjeta y deja la de
+    // efectivo vacía.
+    await act(async () => {
+      setInputValue(amountInputs()[1]!, "15");
+    });
+    expect(container.textContent).toContain("Sobran 1,00 €");
+    expect(container.textContent).toContain("baja el importe");
+    expect(buttonByText("Cobrar").disabled).toBe(true);
+  });
+
+  it("20 € en efectivo sobre 14 € sí se cobra: son 6 € de cambio", async () => {
+    await renderOverlay();
+    await click(buttonByText("Mixto"));
+    await act(async () => {
+      setInputValue(amountInputs()[0]!, "20");
+    });
+    expect(container.textContent).toContain("Cambio");
+    expect(container.textContent).not.toContain("baja el importe");
+    expect(buttonByText("Cobrar").disabled).toBe(false);
+  });
+
+  it("la fila que el reparto deja en 0,00 € NO viaja en el POST", async () => {
+    await renderOverlay();
+    await click(buttonByText("Mixto"));
+    // 20 en efectivo sobre 14: el reparto deja la tarjeta en 0,00 €.
+    await act(async () => {
+      setInputValue(amountInputs()[0]!, "20");
+    });
+    expect(amountInputs()[1]!.value).toBe("0,00");
+
+    await click(buttonByText("Cobrar"));
+    await settle();
+
+    const call = apiMock.apiWithCashier.mock.calls.find(
+      (c) => c[0] === "/tickets",
+    );
+    const payments = (
+      call![1] as { body: { payments: { method: string; amount: number }[] } }
+    ).body.payments;
+    // Un cobro con tarjeta de 0,00 € no existió: ni en el ticket, ni en
+    // el desglose del Z, ni en el recibo de Holded.
+    expect(payments).toHaveLength(1);
+    expect(payments[0]).toMatchObject({ method: "CASH", amount: 20 });
+  });
+});
+

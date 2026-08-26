@@ -193,3 +193,54 @@ NUEVO  apps/tpv-web/visual/main.tsx            (sólo dev, fuera del build)
 ## Fuera de alcance, como estaba escrito
 
 Impresión (v1.10.2, ya en master), cierre de día (v1.11), partir cuenta (sólo formato) y el barrido de mesas y turnos zombi — que **siguen ahí**: las cuatro mesas de Sirope (M1, M2, M4 de `gemmamgc72` desde el 9 de julio, y T1) continúan abiertas a 0,00 €. Es un job de servidor y va en bloque aparte. Lo que sí ha cambiado es que ahora la tarjeta de una mesa zombi se lee: pone `43 días`, no `1013 h 28 m`.
+
+---
+
+# Addendum · correcciones de la review (2026-08-26)
+
+Review de Matías sobre `ba44e2b`. El bloque se acepta: el diagnóstico del hallazgo #1 (el mini-step del
+mixto caía fuera del recorte, no era aritmética) es correcto, la regla del reparto —la última fila lleva el
+resto **hasta que el cajero escribe en ella**— es explicable en la barra, y el formateador único con
+`parseAmount` que devuelve 0 en vez de NaN evita envenenar la suma de pagos.
+
+Lo que salió está los dos en el camino del dinero, y los dos aparecen **porque el mixto ahora funciona**:
+antes eran inalcanzables porque la segunda fila no llegaba a existir.
+
+## A · Un exceso en TARJETA dejaba cobrar de más (y en verde)
+
+`ready = paymentsSum >= total - 0.01` viene de B5 §3.2 y estaba pensado para el cambio en efectivo. Con dos
+filas de verdad, 15,00 € en tarjeta sobre una cuenta de 14,00 € daba: caja **verde**,
+*"15,00 € · sobran 1,00 €"*, **Cobrar habilitado** y ningún "Cambio" en el pie —porque no hay efectivo del
+que sacarlo—. El server tampoco lo para: `POST /tickets` sólo rechaza que Σ pagos sea **menor** que el total
+(`PAYMENTS_MISMATCH`). Resultado: 1 € de más cobrado a una tarjeta, sin forma de devolverlo en el momento.
+
+- `overNotRefundable = over > 0 && cashAmount < over` — **el exceso sólo es legítimo si sale del cajón**.
+- Con eso, `ready` deja de habilitar Cobrar, la caja de estado pasa a coral y dice
+  *"Sobran 1,00 € · baja el importe"*, y el pie repite **Sobran** igual que repite **Falta** — porque en
+  320×568 el estado del reparto queda por encima del pliegue y "Cobrar en gris sin decir por qué" es
+  exactamente el pecado que este bloque vino a arreglar.
+- El cambio en efectivo sigue funcionando igual: 20 € sobre 14 € son 6 € de cambio y Cobrar se habilita.
+
+## B · Se enviaban filas de pago de 0,00 €
+
+`rebalanceLast` acota el resto con `Math.max(0, total - others)`. Cliente que ha pedido mixto y al final
+paga los 14,00 € con un billete de 20: el cajero teclea `20` en efectivo → la fila de tarjeta se queda en
+**0,00 €** → el POST llevaba `[{CASH, 20}, {CARD, 0}]`. El esquema de la API acepta `amount: minimum: 0`,
+así que el cobro de 0,00 € entraba en el ticket, en el desglose por método del Z y en el recibo de Holded.
+
+`paymentsPayload` filtra ahora las filas a cero. Un cobro de 0,00 € no es información.
+
+## Tests
+
+`checkout-mixed-payment.test.tsx` pasa de 8 a **11**: tarjeta con exceso bloqueada, efectivo con exceso
+cobrando y con su "Cambio", y el POST sin la fila de 0,00 €. Sin regresiones en `checkout-outbox` (3),
+`cart-line-undo-remove` (4), `money-format` (10), `mesas-concurrencia` (8) y `credit-tpv` (5).
+
+## Observación que NO se toca
+
+`parseAmount("1.240")` devuelve **1.24**: con un solo separador manda como decimal. Es lo correcto para lo
+que teclea un cajero (`10,5`, `10.5`) y para lo que siembra `formatAmount` (que nunca escribe millares),
+pero un importe de cuatro cifras tecleado a la española sale mal. Se queda así a propósito —la alternativa
+("un separador con exactamente 3 dígitos detrás es de millares") rompe casos más comunes— y además la
+pantalla lo delata al instante con un "Falta 1.238,76 €". Si algún día hay cuentas de cuatro cifras
+habituales, el sitio de arreglarlo es `money.ts`, con test.
