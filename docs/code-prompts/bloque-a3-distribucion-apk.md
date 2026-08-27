@@ -97,12 +97,25 @@ Endpoints:
 
 | Método | Ruta | Auth | Qué hace |
 |---|---|---|---|
-| GET | `/superadmin/releases` | super-admin | Lista: versión, fecha, tamaño, sha256, nº de descargas |
-| POST | `/superadmin/releases/:versionCode/download-codes` | super-admin | Crea código de 6 dígitos. `expiresAt` = +60 min, `maxDownloads` = 3, `note` opcional ("Thalía, terminal barra") |
-| GET | `/superadmin/releases/:versionCode/apk` | super-admin | Descarga directa desde la consola |
+| GET | `/super-admin/releases` | super-admin | Lista: versión, fecha, tamaño, sha256, nº de descargas |
+| POST | `/super-admin/releases/:versionCode/download-codes` | super-admin | Crea código de 6 dígitos. `expiresAt` = +60 min, `maxDownloads` = 3, `note` opcional ("Thalía, terminal barra") |
+| GET | `/super-admin/releases/:versionCode/apk` | super-admin | Descarga directa desde la consola |
 | GET | `/apk` | pública | Página HTML Chrome-81-safe con el formulario del código |
 | POST | `/apk` | pública | Valida el código y **responde con el binario**; si falla, re-renderiza la página con el error |
 | GET | `/apk/latest.json` | pública | Metadatos de la última versión (decisión 4) |
+
+**Convención de rutas, verificada en el código (2026-08-27):** la API usa **`/super-admin/...` con
+guion** sin excepción (`/super-admin/tenants`, `/super-admin/audit`, `/super-admin/auth/login`…).
+La consola del admin sí vive en `/superadmin/...` sin guion — son dos espacios de nombres
+distintos y los dos son correctos en su sitio. Las rutas de esta tabla son de API: llevan guion.
+
+**Dos sitios que se olvidan al añadir cosas al super-admin:**
+- Las tarjetas de tareas del hub las genera **`apps/api/src/superadmin/hub.ts`** en el backend
+  (`CommonTask[]`, ids como `review_sync_failures` o `activate_drafts`), no `HubPage.tsx`. Una
+  entrada nueva en el hub se añade ahí, no sólo en el front.
+- **`apps/admin/src/superadmin/AuditLogPage.tsx` tiene una lista `ACTIONS`** (línea 11) que mapea
+  acción → etiqueta legible. Las acciones de auditoría nuevas de este bloque hay que añadirlas o
+  se pintan como slug crudo en el registro.
 
 Reglas:
 
