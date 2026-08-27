@@ -11,7 +11,17 @@
 
 ## Depende de
 
-Mergear **v1.11** antes. Este bloque prueba, entre otras cosas, su corte de día.
+**La base de integración de v1.12** (`v1-12-base` = `master ← v1-10-3 ← v1-11`), no `master`: el corte de
+día que este bloque prueba no existe en master todavía.
+
+Y **v1.12-B (mesas abandonadas) por delante**, no en paralelo: B extiende exactamente el mismo job
+(`day-cut-run.ts`) y toca los mismos tests de api. Sal de la rama de B cuando cierre:
+
+```bash
+git worktree add -b v1-13-e2e-ciclo-de-caja ../mipiacetpv-v1-13 v1-12-b-mesas-abandonadas
+```
+
+El carril A (front, `manos de camarero`) sí es indiferente: no toca `apps/api/`.
 
 ## Contexto (leer antes)
 
@@ -49,6 +59,20 @@ Un solo camino, el que hace Sole cada día, sin mocks de BD:
 5. Abrir el turno siguiente y comprobar que `GET /shift/last-closed` devuelve el resumen del anterior — y
    que después de `ack-summary` ya no lo devuelve.
 6. Cerrar sin contar (`close-day`) y comprobar el descuadre `null`.
+7. **El barrido de mesas de v1.12-B, en la misma pasada**: una mesa con un `Ticket DRAFT` vacío de hace
+   días queda libre y su ticket `VOIDED` con auditoría; una mesa con un draft **con líneas** sigue ocupada
+   pase el tiempo que pase. Es la aserción que impide que un refactor futuro del corte se lleve por delante
+   una comanda de verdad.
+
+## Restricciones
+
+- La suite **no puede** romper `pnpm vitest run` a nadie: sin `DATABASE_URL` de BD desechable, se salta con
+  un mensaje claro.
+- Migraciones reales (`prisma migrate deploy`), nunca `db push`: la migración es parte de lo que se prueba.
+- BD desechable siempre. Este e2e **no apunta jamás** a la BD de producción ni a la de un cliente, ni
+  siquiera en modo lectura.
+- No se reescribe ningún test existente: se **añade** una suite.
+- Commits en la rama del bloque; **no hagas push**.
 
 Cada aserción, contra `SELECT`s. Si el test puede pasar con la BD vacía, no es un e2e.
 
