@@ -11,24 +11,29 @@ $ curl https://api.mipiacetpv.com/health
 ```
 
 Producción lleva **ocho días** con la misma imagen. Entre esa imagen y lo que hay escrito se
-acumulan **cinco bloques**:
+acumulan **seis bloques**:
 
 | Bloque | Dónde está | Qué toca | Migración |
 |---|---|---|---|
 | v1.10.2 impresión honesta | **ya en master** (`fffaddd`) | `api/tickets/print.ts`, `tpv-web`, `escpos-builder` | no |
 | paso de humo en CI | **ya en master** (`a286220`) | `.github/workflows/ci.yml` | no |
+| soporte · cajeros en superadmin | rama `soporte-cajeros-superadmin` (`8baf11d`) | `api/superadmin`, `admin/superadmin` | no |
 | v1.10.3 barra en hora punta | rama, sin mergear | sólo `tpv-web` | no |
 | v1.11 cierre de día | rama, sin mergear | `api`, `tpv-web`, `admin`, **worker** | **sí**, una |
 | v1.12-A manos de camarero | en curso | sólo `tpv-web` | no |
 | v1.12-B mesas abandonadas | en curso | `api`, `admin` | por ver |
 
-**Un lote de cinco bloques no se despliega de una vez.** Se parte en dos.
+**Un lote así no se despliega de una vez.** Se parte en dos.
 
 ## Despliegue 1 · lo que ya está en master (hoy o mañana, sin esperar a nadie)
 
-Sólo v1.10.2 + el paso de humo. Sin migración, sin worker nuevo, sin cambio de operativa: la
-impresión deja de decir "Enviado a impresora" cuando no hay ninguna configurada. Riesgo bajo, y
-sirve para **validar el canal de despliegue después de ocho días sin tocarlo** — que es
+v1.10.2 + el paso de humo + **el bloque de soporte (cajeros en el superadmin)**, que se merge a
+master el 2026-08-27 antes de este despliegue. Entra en D1 y no en D2 a propósito: es un `GET`
+nuevo bajo `requireSuperAdmin`, sin migración y sin ninguna ruta que use un cliente — no puede
+cambiar el comportamiento del TPV de nadie, así que no ensucia la lectura del canal.
+
+Sin migración, sin worker nuevo y sin cambio de operativa para el cliente: la impresión deja de
+decir "Enviado a impresora" cuando no hay ninguna configurada. Riesgo bajo, y sirve para **validar el canal de despliegue después de ocho días sin tocarlo** — que es
 exactamente el momento en que un despliegue falla por algo que no tiene que ver con el código.
 
 ```bash
