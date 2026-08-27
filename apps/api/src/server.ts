@@ -52,6 +52,8 @@ import { startRefundUploadWorker } from "./workers/refund-upload-worker.js";
 import { startTicketEmailWorker } from "./workers/ticket-email-worker.js";
 import { startAgendaHoldTtlWorker } from "./workers/agenda-hold-ttl-worker.js";
 import { registerAgendaHoldTtlRepeatable } from "./queues/agenda-hold-ttl.js";
+import { startShiftDayCutWorker } from "./workers/shift-day-cut-worker.js";
+import { registerShiftDayCutRepeatable } from "./queues/shift-day-cut.js";
 import { registerTicketRoutes } from "./tickets/routes.js";
 import { registerCreditRoutes } from "./tickets/credit-routes.js";
 import { registerTicketDigitalRoute } from "./tickets/digital-route.js";
@@ -203,6 +205,7 @@ async function main() {
   let refundWorker: ReturnType<typeof startRefundUploadWorker> | null = null;
   let emailWorker: ReturnType<typeof startTicketEmailWorker> | null = null;
   let agendaHoldTtlWorker: ReturnType<typeof startAgendaHoldTtlWorker> | null = null;
+  let shiftDayCutWorker: ReturnType<typeof startShiftDayCutWorker> | null = null;
   if (env.NODE_ENV !== "production") {
     initialWorker = startInitialSyncWorker();
     incrementalWorker = startCatalogIncrementalWorker();
@@ -210,8 +213,12 @@ async function main() {
     refundWorker = startRefundUploadWorker();
     emailWorker = startTicketEmailWorker();
     agendaHoldTtlWorker = startAgendaHoldTtlWorker();
+    // v1.11-cierre-de-dia · el corte de día también embebido en dev, si no
+    // no hay forma de probarlo sin levantar el contenedor de workers.
+    shiftDayCutWorker = startShiftDayCutWorker();
     const count = await registerAllExistingRepeatables();
     await registerAgendaHoldTtlRepeatable();
+    await registerShiftDayCutRepeatable();
     app.log.info(`workers arrancados embedded · ${count} repeatable(s) registrados`);
   }
   if (sentryOn) app.log.info("Sentry activo (api)");
@@ -225,6 +232,7 @@ async function main() {
     if (refundWorker) await refundWorker.close();
     if (emailWorker) await emailWorker.close();
     if (agendaHoldTtlWorker) await agendaHoldTtlWorker.close();
+    if (shiftDayCutWorker) await shiftDayCutWorker.close();
     await shutdown();
     process.exit(0);
   };

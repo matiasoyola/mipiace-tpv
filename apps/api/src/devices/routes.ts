@@ -326,6 +326,11 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
               id: true,
               name: true,
               cashierAutoLogoutMinutes: true,
+              // v1.11-cierre-de-dia · el TPV necesita saber si este negocio
+              // obliga a cuadrar caja ANTES de pintar el cierre: con el flag
+              // ON va directo a la tabla de denominaciones; con el flag OFF
+              // (default) enseña la tarjeta de resumen y un botón.
+              requireCashCountOnClose: true,
             },
           },
         },
@@ -353,6 +358,7 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
           id: device.tenant.id,
           name: device.tenant.name,
           cashierAutoLogoutMinutes: device.tenant.cashierAutoLogoutMinutes,
+          requireCashCountOnClose: device.tenant.requireCashCountOnClose,
         },
       };
     },

@@ -38,6 +38,7 @@ import {
 import type { OutboxItem } from "../src/lib/outbox.js";
 
 const EXTERNAL_ID = "11111111-2222-4333-8444-555555555555";
+const OTHER_ID = "11111111-2222-4333-8444-666666666666";
 
 function ticketInput(overrides: Partial<Parameters<typeof outboxAdd>[0]> = {}) {
   return {
@@ -164,6 +165,55 @@ describe("outbox · ciclo de vida", () => {
       expect(await outboxList()).toHaveLength(0);
     });
     expect(apiMock.apiWithCashier).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("outbox · occurredAt (v1.11-cierre-de-dia)", () => {
+  // El corte de día cierra turnos desde el server. Un terminal que estuvo
+  // sin red sube después tickets cuyo turno YA está cerrado: sin el
+  // instante real de la venta, el server no puede imputarla al turno que
+  // le toca y el 409 SHIFT_NOT_OPEN la convertiría en un rechazo
+  // permanente — una venta perdida. Se sella al ENCOLAR, que es cuando el
+  // cajero pulsó Cobrar, no cuando el POST logra salir.
+  it("sella el instante de la venta al encolar un ticket", async () => {
+    await outboxAdd(ticketInput());
+    const [item] = await outboxList();
+    const occurredAt = item!.body.occurredAt as string;
+    expect(typeof occurredAt).toBe("string");
+    expect(Number.isNaN(Date.parse(occurredAt))).toBe(false);
+    expect(Math.abs(Date.parse(occurredAt) - item!.createdAt)).toBeLessThan(2000);
+  });
+
+  it("una devolución también lo lleva", async () => {
+    await outboxAdd(
+      ticketInput({ kind: "refund", path: "/refunds", externalId: OTHER_ID }),
+    );
+    const [item] = await outboxList();
+    expect(typeof item!.body.occurredAt).toBe("string");
+  });
+
+  it("no pisa un occurredAt que ya venía en el body", async () => {
+    const stamped = "2026-08-19T21:40:00.000Z";
+    await outboxAdd(
+      ticketInput({
+        body: { externalId: EXTERNAL_ID, lines: [], payments: [], occurredAt: stamped },
+      }),
+    );
+    const [item] = await outboxList();
+    expect(item!.body.occurredAt).toBe(stamped);
+  });
+
+  it("las operaciones de turno NO lo llevan: no son ventas", async () => {
+    await outboxAdd({
+      externalId: OTHER_ID,
+      kind: "shift-open",
+      path: "/shift/open",
+      body: { cashOpening: 50 },
+      label: "Abrir turno",
+      total: 0,
+    });
+    const [item] = await outboxList();
+    expect(item!.body.occurredAt).toBeUndefined();
   });
 });
 

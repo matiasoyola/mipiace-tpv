@@ -18,6 +18,10 @@ build/
 *.log
 logs/
 
+# Informes Z generados en runtime (y por los tests, que instancian el
+# generador de PDF de verdad). No son fuente.
+storage/
+
 .DS_Store
 .idea/
 .vscode/

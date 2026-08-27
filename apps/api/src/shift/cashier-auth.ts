@@ -254,6 +254,9 @@ export async function registerCashierAuthRoutes(
           select: {
             cashierSessionTtlMinutes: true,
             cashierAutoLogoutMinutes: true,
+            // v1.11-cierre-de-dia · viaja en el paquete offline para que un
+            // terminal sin red sepa si tiene que exigir el arqueo.
+            requireCashCountOnClose: true,
           },
         }),
         prisma.user.findMany({
@@ -271,6 +274,7 @@ export async function registerCashierAuthRoutes(
         config: {
           cashierSessionTtlMinutes: tenant.cashierSessionTtlMinutes,
           cashierAutoLogoutMinutes: tenant.cashierAutoLogoutMinutes,
+          requireCashCountOnClose: tenant.requireCashCountOnClose,
         },
         roster: users.map((u) => ({
           id: u.id,

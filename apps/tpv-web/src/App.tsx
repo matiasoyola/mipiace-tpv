@@ -1,11 +1,14 @@
 // Orquestador de estados del TPV en B3:
 //   1. unpaired → PairScreen
 //   2. paired + no session → PinScreen
-//   3. session + shift forceClose → ShiftForceCloseScreen
-//   4. session + needsShiftOpen → ShiftOpenScreen
-//   5. session + reanudar → ShiftActiveScreen
+//   3. session + shift del día anterior → ShiftResumeScreen
+//   4. session + needsShiftOpen → tarjeta del día (si la hay) → ShiftOpenScreen
+//   5. session + reanudar → TpvHome (venta)
 //
-// La venta llega en B4 y reemplaza ShiftActiveScreen.
+// v1.11-cierre-de-dia · el paso 3 dejó de ser un muro: "Reanudar turno" es
+// la acción primaria y el cajero puede vender antes de arquear. Y el paso 4
+// enseña el resumen del día cerrado —lo cerrase una persona o el corte de
+// día— antes de pedir el fondo de caja del turno nuevo.
 
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
@@ -40,13 +43,21 @@ import {
   type ServerDraft,
 } from "./lib/tableDraft.js";
 import type { CartLine } from "./lib/cart.js";
+import {
+  ackDaySummary,
+  fetchPendingDaySummary,
+  type ShiftDaySummary,
+} from "./lib/shiftSummary.js";
 import { clearTestMode, isTestModeActive } from "./lib/test-mode.js";
 import { startVisualViewportSync } from "./lib/visualViewportSync.js";
 import { OutboxChip } from "./pages/CheckoutPage.outboxChip.js";
 import { PairScreen } from "./pages/PairScreen.js";
 import { PinScreen, type CashierLoginResponse } from "./pages/PinScreen.js";
 import { SalePage, type TableContext } from "./pages/SalePage.js";
-import { ShiftForceCloseScreen } from "./pages/ShiftForceCloseScreen.js";
+import { CloseShiftModal } from "./pages/CloseShiftModal.js";
+import { DaySummaryCard } from "./pages/DaySummaryCard.js";
+import { daySummaryTitle } from "./lib/daySummaryTitle.js";
+import { ShiftResumeScreen } from "./pages/ShiftResumeScreen.js";
 import { ShiftOpenScreen } from "./pages/ShiftOpenScreen.js";
 import {
   TableMapScreen,
@@ -362,15 +373,22 @@ export function App() {
         />
       )}
       {cashier.kind === "forceClose" ? (
-        <ShiftForceCloseScreen
+        <ShiftResumeScreen
           shift={cashier.shift}
           cashierRole={cashier.cashier.role}
+          requireCashCountOnClose={tenant.requireCashCountOnClose === true}
+          onResumed={(shift) => {
+            // v1.11 · reanudar es la acción primaria: a vender, sin arquear.
+            void mirrorServerShift(shift).catch(() => {});
+            setCashier({ kind: "active", cashier: cashier.cashier, shift });
+          }}
           onClosed={() =>
             setCashier({ kind: "needsShiftOpen", cashier: cashier.cashier })
           }
         />
       ) : cashier.kind === "needsShiftOpen" ? (
-        <ShiftOpenScreen
+        <ShiftOpenWithDaySummary
+          cashierRole={cashier.cashier.role}
           cashierLabel={cashierDisplayLabel(cashier.cashier)}
           registerName={register.name}
           storeName={store.name}
@@ -661,6 +679,105 @@ function TpvHome(props: {
   );
 }
 
+// v1.11-cierre-de-dia · antes de pedir el fondo de caja del turno nuevo,
+// enseñamos el resumen del día que se acaba de cerrar — lo cerrase una
+// persona anoche o el corte de día de madrugada. Es la parte del bloque que
+// le devuelve a Sole la información que hasta ahora sólo veía quien cerraba
+// desde el menú (addendum, punto 2: el cierre del turno colgado no enseñaba
+// NADA, y era el único que ella ejecutaba).
+//
+// "Confirmar" sella `summaryAckAt` en el server, así que la tarjeta aparece
+// UNA vez y no todas las mañanas. Sin red no hay resumen que pedir: se pasa
+// derecho a abrir turno, como en v1.10.
+function ShiftOpenWithDaySummary({
+  cashierRole,
+  ...props
+}: React.ComponentProps<typeof ShiftOpenScreen> & {
+  cashierRole: "MANAGER" | "CASHIER";
+}) {
+  const [pending, setPending] = useState<ShiftDaySummary | null>(null);
+  const [checking, setChecking] = useState(() => navigator.onLine);
+  const [acking, setAcking] = useState(false);
+  // "Cuadrar caja" sobre un turno que cerró el corte de día: arqueo a
+  // posteriori (kind X). Opcional y nunca bloqueante — el cajero puede
+  // pulsar Confirmar y abrir caja sin contar nada.
+  const [counting, setCounting] = useState(false);
+
+  useEffect(() => {
+    if (!navigator.onLine) return;
+    let alive = true;
+    void fetchPendingDaySummary()
+      .then((s) => {
+        if (!alive) return;
+        setPending(s);
+        setChecking(false);
+      })
+      .catch(() => {
+        // Sin resumen no bloqueamos la apertura de caja. Nunca.
+        if (alive) setChecking(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (checking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-mipiace-stone">
+        <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+      </div>
+    );
+  }
+
+  if (pending) {
+    // El arqueo a posteriori sólo tiene sentido si lo cerró el corte de día
+    // y nadie ha contado todavía. Si lo cerró una persona, ya tuvo su
+    // momento de contar.
+    const canCount =
+      pending.shift.closeReason === "AUTO_DAY_CUT" &&
+      pending.shift.cashCounted == null;
+    return (
+      <div className="min-h-screen bg-mipiace-stone flex items-center justify-center p-5 font-sans">
+        <div className="w-full max-w-lg">
+          <DaySummaryCard
+            summary={pending}
+            title={daySummaryTitle(pending.shift.closedAt)}
+            busy={acking}
+            confirmLabel="Confirmar"
+            onConfirm={async () => {
+              setAcking(true);
+              // Si el ack falla, la tarjeta reaparecerá mañana: molesto, no
+              // grave. Lo que no puede pasar es que el cajero se quede
+              // atrapado aquí sin poder abrir caja.
+              await ackDaySummary(pending.shift.id).catch(() => undefined);
+              setPending(null);
+              setAcking(false);
+            }}
+            {...(canCount ? { onCountCash: () => setCounting(true) } : {})}
+          />
+        </div>
+        {counting && (
+          <CloseShiftModal
+            shiftId={pending.shift.id}
+            cashierRole={cashierRole}
+            mode="X"
+            onClose={() => {
+              setCounting(false);
+              // Al volver del arqueo, el resumen ya conoce el descuadre.
+              void fetchPendingDaySummary()
+                .then((s) => s && setPending(s))
+                .catch(() => undefined);
+            }}
+            onClosed={() => setCounting(false)}
+          />
+        )}
+      </div>
+    );
+  }
+
+  return <ShiftOpenScreen {...props} />;
+}
+
 // ─── Modo prueba (B-OnboardingV2) ──────────────────────────────────
 
 interface TestBootstrap {
@@ -738,9 +855,12 @@ function TestModeTpv({
           }}
         />
       ) : (
-        <ShiftForceCloseScreen
+        <ShiftResumeScreen
           shift={cashier.shift}
           cashierRole={cashier.cashier.role}
+          onResumed={(shift) =>
+            setCashier({ kind: "active", cashier: cashier.cashier, shift })
+          }
           onClosed={() =>
             setCashier({ kind: "needsShiftOpen", cashier: cashier.cashier })
           }

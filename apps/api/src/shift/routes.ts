@@ -9,6 +9,8 @@ import { requireCashierSession } from "./cashier-session.js";
 import { ALLOWED_DENOMINATIONS, validateAndSumDenominations } from "./cash-count.js";
 import { generateZReportPdf } from "./z-report.js";
 import { computeZBreakdown, type ZBreakdown } from "./z-breakdown.js";
+import { loadShiftBreakdownSums } from "./breakdown-sums.js";
+import { buildShiftDaySummary, SHIFT_SUMMARY_SELECT } from "./summary.js";
 
 // Body shape de close (B3 §3.4). methodTotals reportado por el cajero
 // (cash, card, bizum, voucher). En B3 todavía no hay tickets reales →
@@ -241,6 +243,8 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
           id: true,
           registerId: true,
           closedAt: true,
+          closeReason: true,
+          cashCounted: true,
           cashOpening: true,
           register: { select: { store: { select: { tenantId: true } } } },
         },
@@ -250,7 +254,18 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
           .code(404)
           .send({ error: "SHIFT_NOT_FOUND", message: "Turno no encontrado" });
       }
-      if (shift.closedAt) {
+      // v1.11-cierre-de-dia · el arqueo A POSTERIORI de un turno que cerró
+      // el corte de día. Sole llega por la mañana, ve el resumen y quiere
+      // contar el cajón: sin esto, "Cuadrar caja" en la tarjeta de la
+      // mañana no tendría dónde escribir y el descuadre quedaría
+      // desconocido para siempre. Sólo kind=X y sólo AUTO_DAY_CUT — un
+      // cierre que ejecutó una persona ya tuvo su momento de contar, y un
+      // Z sobre un turno cerrado no tiene sentido (no hay nada que cerrar).
+      const postHocCount =
+        shift.closedAt != null &&
+        body.kind === "X" &&
+        shift.closeReason === "AUTO_DAY_CUT";
+      if (shift.closedAt && !postHocCount) {
         return reply
           .code(409)
           .send({ error: "SHIFT_ALREADY_CLOSED", message: "El turno ya está cerrado" });
@@ -294,6 +309,16 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
             createdByUserId: cashier.sub,
           },
         });
+        // El arqueo a posteriori del turno auto-cerrado SÍ fija el
+        // `cashCounted` del turno: a partir de aquí el descuadre deja de
+        // ser desconocido y el resumen lo enseña. No pisamos un conteo
+        // previo — el primero que contó es el que vale.
+        if (postHocCount && shift.cashCounted == null) {
+          await prisma.shift.update({
+            where: { id: shift.id },
+            data: { cashCounted: new Prisma.Decimal(validation.total) },
+          });
+        }
         return reply.code(201).send({
           kind: "X" as const,
           cashCounted: validation.total,
@@ -400,6 +425,243 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
       };
     },
   );
+
+  // ─── v1.11-cierre-de-dia ────────────────────────────────────────────
+  //
+  // El turno deja de ser un muro. Hasta aquí, la única salida de un turno
+  // colgado era arquearlo: `POST /shift/open` respondía 409 y el TPV
+  // plantaba la tabla de 15 denominaciones antes de la primera clienta.
+  // Estas cuatro rutas son las que permiten el orden nuevo —vender
+  // primero, cuadrar caja si quieres— y las dos que el resumen necesita.
+
+  // POST /shift/:id/resume · reanudar un turno abierto (típicamente el de
+  // ayer). No cierra nada ni pide nada: sólo refresca `lastActivityAt`
+  // para que deje de contar como colgado y devuelve el turno. Es la acción
+  // PRIMARIA de la pantalla de la mañana.
+  app.post(
+    "/shift/:shiftId/resume",
+    {
+      preHandler: requireCashierSession,
+      schema: {
+        params: {
+          type: "object",
+          required: ["shiftId"],
+          properties: { shiftId: { type: "string", format: "uuid" } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const cashier = request.cashier!;
+      const { shiftId } = request.params as { shiftId: string };
+      const prisma = getPrisma();
+      const shift = await prisma.shift.findFirst({
+        where: { id: shiftId, registerId: cashier.rid },
+        select: {
+          id: true,
+          closedAt: true,
+          register: { select: { store: { select: { tenantId: true } } } },
+        },
+      });
+      if (!shift || shift.register.store.tenantId !== cashier.tid) {
+        return reply
+          .code(404)
+          .send({ error: "SHIFT_NOT_FOUND", message: "Turno no encontrado" });
+      }
+      if (shift.closedAt) {
+        return reply.code(409).send({
+          error: "SHIFT_ALREADY_CLOSED",
+          message: "El turno ya está cerrado. Abre uno nuevo.",
+        });
+      }
+      const updated = await prisma.shift.update({
+        where: { id: shift.id },
+        data: { lastActivityAt: new Date() },
+        select: { id: true, openedAt: true, cashOpening: true },
+      });
+      return reply.code(200).send({
+        shift: {
+          id: updated.id,
+          openedAt: updated.openedAt.toISOString(),
+          cashOpening: updated.cashOpening.toString(),
+        },
+      });
+    },
+  );
+
+  // GET /shift/:id/summary · el resumen del día de un turno, abierto o
+  // cerrado. Abierto = previsualización antes de cerrar (lo que el cajero
+  // ve ANTES de decidir si cuenta o no). Cerrado = la tarjeta de la
+  // mañana. Mismo cálculo en los dos casos — ver `shift/summary.ts`.
+  app.get(
+    "/shift/:shiftId/summary",
+    {
+      preHandler: requireCashierSession,
+      schema: {
+        params: {
+          type: "object",
+          required: ["shiftId"],
+          properties: { shiftId: { type: "string", format: "uuid" } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const cashier = request.cashier!;
+      const { shiftId } = request.params as { shiftId: string };
+      const prisma = getPrisma();
+      const shift = await prisma.shift.findFirst({
+        where: { id: shiftId },
+        select: SHIFT_SUMMARY_SELECT,
+      });
+      if (!shift || shift.register.store.tenantId !== cashier.tid) {
+        return reply
+          .code(404)
+          .send({ error: "SHIFT_NOT_FOUND", message: "Turno no encontrado" });
+      }
+      return reply.code(200).send(await buildShiftDaySummary(prisma, shift));
+    },
+  );
+
+  // GET /shift/last-closed · el último turno cerrado de esta caja cuyo
+  // resumen NADIE ha confirmado todavía. Es lo que dispara la tarjeta al
+  // llegar por la mañana, tanto si lo cerró el corte de día como si lo
+  // cerró una persona anoche. Devuelve `{ summary: null }` cuando no hay
+  // nada pendiente — el caso normal a mitad de jornada.
+  app.get(
+    "/shift/last-closed",
+    { preHandler: requireCashierSession },
+    async (request, reply) => {
+      const cashier = request.cashier!;
+      const prisma = getPrisma();
+      const shift = await prisma.shift.findFirst({
+        where: {
+          registerId: cashier.rid,
+          closedAt: { not: null },
+          summaryAckAt: null,
+        },
+        orderBy: { closedAt: "desc" },
+        select: SHIFT_SUMMARY_SELECT,
+      });
+      if (!shift || shift.register.store.tenantId !== cashier.tid) {
+        return reply.code(200).send({ summary: null });
+      }
+      return reply
+        .code(200)
+        .send({ summary: await buildShiftDaySummary(prisma, shift) });
+    },
+  );
+
+  // POST /shift/:id/close-day · cerrar el turno SIN contar el efectivo.
+  //
+  // Es el cierre por defecto de v1.11: el cajero ve el resumen con el
+  // efectivo esperado ya puesto y pulsa "Confirmar". El turno queda con
+  // `cashCounted = NULL` y descuadre `null` (desconocido, que es la
+  // verdad). Quien quiera contar sigue teniendo
+  // `POST /shift/:id/cash-count` con `kind: "Z"`, y el tenant que quiera
+  // OBLIGAR a contar enciende `requireCashCountOnClose` — entonces esta
+  // ruta responde 409 CASH_COUNT_REQUIRED.
+  //
+  // Comparte con el cierre Z todos los guards que importan (turno del
+  // tenant, sync pendiente, PIN): delega en `executeShiftClose`.
+  app.post(
+    "/shift/:shiftId/close-day",
+    {
+      preHandler: requireCashierSession,
+      schema: {
+        params: {
+          type: "object",
+          required: ["shiftId"],
+          properties: { shiftId: { type: "string", format: "uuid" } },
+        },
+        body: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            syncFailureAccepted: { type: "boolean" },
+            managerPin: { type: "string", minLength: 4, maxLength: 16 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const cashier = request.cashier!;
+      const { shiftId } = request.params as { shiftId: string };
+      const body = (request.body ?? {}) as {
+        syncFailureAccepted?: boolean;
+        managerPin?: string;
+      };
+      const prisma = getPrisma();
+      const result = await executeShiftClose({
+        prisma,
+        log: request.log,
+        cashier,
+        shiftId,
+        body: {
+          cashCounted: null,
+          methodTotals: {},
+          syncFailureAccepted: body.syncFailureAccepted,
+          managerPin: body.managerPin,
+        },
+      });
+      if (!result.ok) {
+        return reply.code(result.status).send(result.body);
+      }
+      // Devolvemos el resumen completo, no sólo el desglose: es lo que la
+      // tarjeta pinta justo después de confirmar, sin una segunda vuelta.
+      const closed = await prisma.shift.findFirst({
+        where: { id: shiftId },
+        select: SHIFT_SUMMARY_SELECT,
+      });
+      return reply.code(200).send({
+        ...(closed ? await buildShiftDaySummary(prisma, closed) : {}),
+        forceClose: result.body.forceClose,
+      });
+    },
+  );
+
+  // POST /shift/:id/ack-summary · el cajero pulsó "Confirmar" en la
+  // tarjeta del día. Sella `summaryAckAt` para que la tarjeta no reaparezca
+  // mañana y pasado. Idempotente: confirmar dos veces no cambia nada.
+  app.post(
+    "/shift/:shiftId/ack-summary",
+    {
+      preHandler: requireCashierSession,
+      schema: {
+        params: {
+          type: "object",
+          required: ["shiftId"],
+          properties: { shiftId: { type: "string", format: "uuid" } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const cashier = request.cashier!;
+      const { shiftId } = request.params as { shiftId: string };
+      const prisma = getPrisma();
+      const shift = await prisma.shift.findFirst({
+        where: { id: shiftId },
+        select: {
+          id: true,
+          summaryAckAt: true,
+          register: { select: { store: { select: { tenantId: true } } } },
+        },
+      });
+      if (!shift || shift.register.store.tenantId !== cashier.tid) {
+        return reply
+          .code(404)
+          .send({ error: "SHIFT_NOT_FOUND", message: "Turno no encontrado" });
+      }
+      const ackedAt = shift.summaryAckAt ?? new Date();
+      if (!shift.summaryAckAt) {
+        await prisma.shift.update({
+          where: { id: shift.id },
+          data: { summaryAckAt: ackedAt },
+        });
+      }
+      return reply
+        .code(200)
+        .send({ shiftId: shift.id, summaryAckAt: ackedAt.toISOString() });
+    },
+  );
 }
 
 // Resultado de `executeShiftClose`. Encapsula success/error en una
@@ -411,7 +673,8 @@ type ExecuteShiftCloseResult =
       ok: true;
       body: Record<string, unknown> & {
         shift: Record<string, unknown>;
-        descuadre: number;
+        // null cuando nadie contó el efectivo (v1.11).
+        descuadre: number | null;
         breakdown: ZBreakdown;
       };
     }
@@ -423,10 +686,19 @@ async function executeShiftClose(args: {
   cashier: { tid: string; rid: string; sub: string; role: "OWNER" | "MANAGER" | "CASHIER" };
   shiftId: string;
   body: {
-    cashCounted: number;
+    // v1.11-cierre-de-dia · `null` = nadie contó el efectivo. Es el caso
+    // NORMAL a partir de este bloque: el cierre por defecto es resumen +
+    // "Confirmar", y cuadrar caja pasa a ser un enlace opcional. Un turno
+    // sin contar guarda `cashCounted = NULL` y descuadre `null` — no un
+    // 0,00 € que nadie ha verificado.
+    cashCounted: number | null;
     methodTotals: MethodTotalsBody;
     syncFailureAccepted?: boolean;
     managerPin?: string;
+    // Motivo del cierre. Sólo el job de corte de día usa AUTO_DAY_CUT, y
+    // ése no pasa por aquí (ver `day-cut-run.ts`); queda por si algún día
+    // hace falta un cierre marcado desde una ruta.
+    closeReason?: "MANUAL" | "AUTO_DAY_CUT";
   };
 }): Promise<ExecuteShiftCloseResult> {
   const { prisma, log, cashier, shiftId, body } = args;
@@ -569,8 +841,25 @@ async function executeShiftClose(args: {
     select: {
       requireManagerPinForForceClose: true,
       requireOwnerPinForCashClose: true,
+      requireCashCountOnClose: true,
     },
   });
+  // v1.11-cierre-de-dia · el arqueo obligatorio pasa a ser una opción del
+  // negocio. Default OFF: cerrar sin contar es lo normal. Los tenants que
+  // quieran el arqueo ciego lo encienden y este guard rechaza el cierre
+  // sin conteo — el TPV lo traduce llevando al cajero a la tabla de
+  // denominaciones en vez de a la tarjeta de resumen.
+  if (body.cashCounted == null && tenant.requireCashCountOnClose) {
+    return {
+      ok: false,
+      status: 409,
+      body: {
+        error: "CASH_COUNT_REQUIRED",
+        message:
+          "Este negocio exige cuadrar la caja para cerrar el turno. Cuenta el efectivo del cajón.",
+      },
+    };
+  }
   const actorIsManagerOrOwner =
     cashier.role === "MANAGER" || cashier.role === "OWNER";
   const needForceClosePin =
@@ -677,7 +966,7 @@ async function executeShiftClose(args: {
     cashOpening: Number(shift.cashOpening),
     ...(await loadShiftBreakdownSums(prisma, shift.id)),
     counted: {
-      CASH: body.cashCounted,
+      ...(body.cashCounted != null ? { CASH: body.cashCounted } : {}),
       ...(body.methodTotals.CARD != null ? { CARD: body.methodTotals.CARD } : {}),
       ...(body.methodTotals.BIZUM != null ? { BIZUM: body.methodTotals.BIZUM } : {}),
       ...(body.methodTotals.VOUCHER != null
@@ -715,7 +1004,10 @@ async function executeShiftClose(args: {
       openedAt: shift.openedAt,
       closedAt,
       cashOpening: Number(shift.cashOpening),
-      cashCounted: body.cashCounted,
+      // Sin conteo, el PDF imprime el teórico y un descuadre de 0,00 €:
+      // no afirmamos ni sobrante ni faltante. El resumen del TPV sí
+      // distingue "no se contó" (null) de "se contó y dio cero".
+      cashCounted: body.cashCounted ?? cashTheoretical,
       cashTheoretical,
       breakdown,
       // Emitidos de verdad: DRAFT (mesa sin cobrar) y VOIDED (vaciada/
@@ -752,8 +1044,10 @@ async function executeShiftClose(args: {
     where: { id: shift.id },
     data: {
       closedAt,
-      cashCounted: new Prisma.Decimal(body.cashCounted),
+      cashCounted:
+        body.cashCounted != null ? new Prisma.Decimal(body.cashCounted) : null,
       closedByUserId: cashier.sub,
+      closeReason: body.closeReason ?? "MANUAL",
       zReportPdfPath: zPath,
     },
     select: { id: true, closedAt: true, zReportPdfPath: true },
@@ -767,80 +1061,14 @@ async function executeShiftClose(args: {
         closedAt: updated.closedAt!.toISOString(),
         zReportPdfPath: updated.zReportPdfPath,
       },
-      descuadre: body.cashCounted - cashTheoretical,
+      cashCounted: body.cashCounted,
+      cashTheoretical,
+      descuadre:
+        body.cashCounted != null
+          ? Math.round((body.cashCounted - cashTheoretical) * 100) / 100
+          : null,
       breakdown,
       forceClose: !isOwnerOfShift,
-    },
-  };
-}
-
-// Σ pagos y Σ devoluciones del turno agrupados por método, en EUR.
-// Input de `computeZBreakdown` — lo usan el cierre Z y el arqueo X.
-async function loadShiftBreakdownSums(
-  prisma: ReturnType<typeof getPrisma>,
-  shiftId: string,
-): Promise<{
-  paymentsByMethod: Record<string, number>;
-  refundsByMethod: Record<string, number>;
-  creditCollectionsByMethod: Record<string, number>;
-  creditSales: { count: number; total: number };
-}> {
-  const [paymentTotals, refundTotals, creditCollectionTotals, creditSalesAgg] =
-    await Promise.all([
-      // Ventas normales del turno: pagos de tickets vendidos AQUÍ que NO
-      // son cobros de deuda (collectedInShiftId null). Excluir los cobros
-      // de deuda evita contarlos dos veces (van en su propia sección) y
-      // que un fiado saldado en otro turno contamine el de la venta.
-      prisma.ticketPayment.groupBy({
-        by: ["method"],
-        where: { ticket: { shiftId }, collectedInShiftId: null },
-        _sum: { amount: true },
-      }),
-      // v1.9.5-formacion · Frente 1: incluye refunds TEST en el desglose
-      // (coherente con las ventas TEST, cuyos pagos no se filtran por
-      // status). Sin efecto en turnos reales (no tienen refunds TEST).
-      prisma.refund.groupBy({
-        by: ["method"],
-        where: { shiftId, status: { notIn: ["DRAFT", "VOIDED"] } },
-        _sum: { total: true },
-      }),
-      // v1.8-Fiado · cobros de deuda imputados a ESTE turno (por
-      // collectedInShiftId), sin importar en qué turno se vendió el fiado.
-      prisma.ticketPayment.groupBy({
-        by: ["method"],
-        where: { collectedInShiftId: shiftId },
-        _sum: { amount: true },
-      }),
-      // v1.8-Fiado · fiados VENDIDOS en este turno (deuda viva). No entra
-      // dinero: sección informativa "Ventas a crédito (no cobradas)".
-      prisma.ticket.aggregate({
-        where: { shiftId, status: "ON_CREDIT" },
-        _count: { _all: true },
-        _sum: { total: true },
-      }),
-    ]);
-  const paymentsByMethod: Record<string, number> = {};
-  for (const row of paymentTotals) {
-    paymentsByMethod[row.method] = Number(row._sum.amount ?? 0);
-  }
-  const refundsByMethod: Record<string, number> = {};
-  for (const row of refundTotals) {
-    // method null (no debería darse — el endpoint de refunds siempre lo
-    // fija) cae al bucket OTHER para no perder el importe del desglose.
-    const key = row.method ?? "OTHER";
-    refundsByMethod[key] = (refundsByMethod[key] ?? 0) + Number(row._sum.total ?? 0);
-  }
-  const creditCollectionsByMethod: Record<string, number> = {};
-  for (const row of creditCollectionTotals) {
-    creditCollectionsByMethod[row.method] = Number(row._sum.amount ?? 0);
-  }
-  return {
-    paymentsByMethod,
-    refundsByMethod,
-    creditCollectionsByMethod,
-    creditSales: {
-      count: creditSalesAgg._count._all,
-      total: Number(creditSalesAgg._sum.total ?? 0),
     },
   };
 }
