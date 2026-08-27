@@ -1,4 +1,8 @@
-# Bloque v1.12 · Mesas abandonadas
+# Bloque v1.12-B · Mesas abandonadas
+
+> **Carril B de v1.12.** El carril A es `bloque-v1-12-manos-de-camarero.md` y vive entero en
+> `apps/tpv-web/`; este vive entero en `apps/api/` + `apps/admin/`. **Cero ficheros en común**:
+> los dos carriles se pueden trabajar en paralelo en worktrees distintos.
 
 > **Hallazgo (BD de producción, 2026-08-20 y confirmado el 26).** Cafetería Sirope tiene **cuatro mesas
 > ocupadas desde el 9 de julio** — M1, M2 y M4 de `gemmamgc72`, y T1 —, todas a **0,00 €**. Nadie las abrió
@@ -11,8 +15,20 @@
 
 ## Depende de
 
-**Mergear v1.11 antes** (`v1-11-cierre-de-dia`). Este bloque **extiende su job**, no crea uno nuevo: el corte
-de día ya corre cada hora con la hora local de cada tenant. Si v1.11 no está en master, para y dilo.
+**La base de integración de v1.12**, no `master`. Este bloque **extiende el job de v1.11**, no crea uno
+nuevo: el corte de día ya corre cada hora con la hora local de cada tenant (`Tenant.dayCutHour`,
+`apps/api/src/shift/day-cut-run.ts`, `apps/api/src/queues/shift-day-cut.ts`) — y nada de eso existe en
+`master` todavía.
+
+La base es `master ← v1-10-3-barra-hora-punta ← v1-11-cierre-de-dia`, la misma que construye el paso 0 del
+carril A. Si el carril A ya la ha hecho, esta rama sale de ahí:
+
+```bash
+git branch v1-12-base <sha del commit de merge del carril A>
+git worktree add -b v1-12-b-mesas-abandonadas ../mipiacetpv-v1-12-b v1-12-base
+```
+
+Si al arrancar no existe `apps/api/src/shift/day-cut-run.ts`, **para y dilo**: la base está mal.
 
 ## Contexto (leer antes)
 
@@ -54,6 +70,16 @@ El bug de origen no es el barrido: es que **un toque en el mapa ocupa la mesa pa
 draft vacío se puede no crear hasta la primera línea, o borrarse al salir del detalle sin haber añadido
 nada. Si eso es un cambio grande o toca el camino de cobro, **no lo hagas**: escríbelo en el done.md con lo
 que hayas averiguado y quédate en el barrido. Es más importante entender la causa que arreglarla hoy.
+
+## Restricciones
+
+- Nada de lógica fiscal ni de cálculo de importes: este bloque **libera estado**, no toca dinero.
+- No se anula nunca un ticket con importe sin que lo pulse una persona con PIN de encargado.
+- Se reutiliza el camino de anulación que ya existe en `apps/api/src/tables/routes.ts` y el patrón de
+  aislamiento por tenant de `day-cut-run.ts`: un fallo en un tenant no arrastra al resto.
+- Toda anulación deja auditoría con **por qué**, no sólo que pasó.
+- El admin hereda los tokens del sistema visual; sin dependencias nuevas.
+- Commits en la rama del bloque; **no hagas push**.
 
 ## Entregable
 
