@@ -11,7 +11,12 @@ Estado previo (validado 05-06/07): tenant DRAFT «Listo para activar», Holded C
 
 ## 2 · Primer AP12 encendido (10 min)
 
-- [ ] Chrome/WebView → mipiacetpv.com → login cajero técnico (modo prueba sigue activo hasta activar).
+> **Obsoleto desde el 2026-08-27.** La preparación del terminal se hace **en el taller** y tiene su
+> propio documento: `docs/implantaciones/checklist-terminal.md`. Sobre un terminal de fábrica
+> (Chrome 81) la interfaz se ve rota y el cobro es impracticable. No se sale de casa sin esa
+> checklist en verde.
+
+- [ ] Terminal preparado según `checklist-terminal.md` (APK o Chrome actualizado, densidad 240).
 - [ ] **OSK/autofocus**: ¿salta el teclado en pantalla al entrar en venta? Si tapa catálogo → hotfix 1 línea (quitar autofocus en HOSPITALITY).
 - [ ] Viewport real: ¿caben los chips de categoría? ¿grid a gusto? (simulado OK a 1280 y 1568).
 - [ ] Tacto: objetivos de mesa/producto/cobro cómodos con dedo.
