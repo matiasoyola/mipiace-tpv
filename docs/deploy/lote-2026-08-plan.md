@@ -92,15 +92,23 @@ siguiente.
    saber cuáles son *antes*, no descubrirlo por el resumen de la mañana siguiente:
 
 ```sql
-SELECT t.name, r.id AS register_id, s.opened_at, s.id
+-- OJO: `registers` no tiene `tenant_id`; cuelga de `stores`. La versión
+-- anterior de esta query (JOIN tenants ON t.id = r.tenant_id) fallaba.
+SELECT t.name AS tenant, r.name AS caja, COALESCE(u.alias, u.email) AS cajero,
+       s.opened_at::date AS abierto_el,
+       EXTRACT(DAY FROM now() - s.opened_at)::int AS dias, s.id
   FROM shifts s
   JOIN registers r ON r.id = s.register_id
-  JOIN tenants   t ON t.id = r.tenant_id
+  JOIN stores    st ON st.id = r.store_id
+  JOIN tenants   t ON t.id = st.tenant_id
+  JOIN users     u ON u.id = s.user_id
  WHERE s.closed_at IS NULL
  ORDER BY s.opened_at;
 ```
 
-Guardar el resultado en el done del despliegue. Al día siguiente, esos mismos turnos tienen que
+Ejecutada el 2026-08-27: **cuatro turnos abiertos**, tres de ellos basura de junio/julio y el
+cuarto el turno real de Sole, del 22 de agosto. Resultado y lectura en
+`docs/deploy/2026-08-27-turnos-abiertos-pre-d2.md`. **Esta puerta ya está cumplida.** Al día siguiente, esos mismos turnos tienen que
 aparecer cerrados con `AUTO_DAY_CUT` y ninguno más.
 
 ### Ventana
