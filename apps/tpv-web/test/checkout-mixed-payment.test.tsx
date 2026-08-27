@@ -160,13 +160,32 @@ function amountInputs(): HTMLInputElement[] {
   );
 }
 
-function setInputValue(input: HTMLInputElement, value: string) {
-  const setter = Object.getOwnPropertyDescriptor(
-    HTMLInputElement.prototype,
-    "value",
-  )!.set!;
-  setter.call(input, value);
-  input.dispatchEvent(new Event("input", { bubbles: true }));
+// v1.12-manos-de-camarero · los importes ya no se escriben en el
+// <input> (es `readOnly` + `inputMode="none"` para que el teclado de
+// Android no aparezca nunca). Se teclean con el CashPad del pie: tocar
+// el campo lo activa, y las teclas del pad escriben encima. El test
+// hace exactamente lo que hace el dedo del camarero.
+function padKey(label: string): HTMLButtonElement {
+  const pad = container.querySelector('[data-testid="cash-pad"]');
+  if (!pad) throw new Error("el CashPad no está abierto");
+  const btn = Array.from(pad.querySelectorAll("button")).find(
+    (b) =>
+      b.textContent?.trim() === label ||
+      b.getAttribute("aria-label") === label,
+  );
+  if (!btn) throw new Error(`tecla "${label}" no encontrada en el pad`);
+  return btn as HTMLButtonElement;
+}
+
+async function typeAmount(index: number, value: string) {
+  await act(async () => {
+    amountInputs()[index]!.click();
+  });
+  // C primero: el pad escribe encima de lo que hubiera.
+  await click(padKey("Limpiar importe"));
+  for (const ch of value) {
+    await click(padKey(ch === "," ? "Coma decimal" : ch));
+  }
 }
 
 async function click(btn: HTMLButtonElement) {
@@ -213,9 +232,7 @@ describe("v1.10.3-barra · cobro mixto", () => {
     await renderOverlay();
     await click(buttonByText("Mixto"));
 
-    await act(async () => {
-      setInputValue(amountInputs()[0]!, "10");
-    });
+    await typeAmount(0, "10");
 
     const rows = amountInputs();
     expect(rows[0]!.value).toBe("10");
@@ -230,9 +247,7 @@ describe("v1.10.3-barra · cobro mixto", () => {
   it("el POST lleva los dos pagos y Σ pagos == total", async () => {
     await renderOverlay();
     await click(buttonByText("Mixto"));
-    await act(async () => {
-      setInputValue(amountInputs()[0]!, "10");
-    });
+    await typeAmount(0, "10");
     await click(buttonByText("Cobrar"));
     await settle();
 
@@ -254,12 +269,8 @@ describe("v1.10.3-barra · cobro mixto", () => {
     await renderOverlay();
     await click(buttonByText("Mixto"));
     // El cajero escribe las DOS filas: 6 en efectivo, 8 con tarjeta.
-    await act(async () => {
-      setInputValue(amountInputs()[1]!, "8");
-    });
-    await act(async () => {
-      setInputValue(amountInputs()[0]!, "6");
-    });
+    await typeAmount(1, "8");
+    await typeAmount(0, "6");
     const rows = amountInputs();
     // La última fila queda fijada: no se recalcula por debajo.
     expect(rows[1]!.value).toBe("8");
@@ -270,12 +281,8 @@ describe("v1.10.3-barra · cobro mixto", () => {
   it("un reparto que no llega al total dice cuánto falta y bloquea Cobrar", async () => {
     await renderOverlay();
     await click(buttonByText("Mixto"));
-    await act(async () => {
-      setInputValue(amountInputs()[1]!, "4");
-    });
-    await act(async () => {
-      setInputValue(amountInputs()[0]!, "6");
-    });
+    await typeAmount(1, "4");
+    await typeAmount(0, "6");
     expect(container.textContent).toContain("Falta 4,00 €");
     expect(buttonByText("Cobrar").disabled).toBe(true);
   });
@@ -283,9 +290,7 @@ describe("v1.10.3-barra · cobro mixto", () => {
   it("volver a pulsar «Mixto» deja una sola fila con el total", async () => {
     await renderOverlay();
     await click(buttonByText("Mixto"));
-    await act(async () => {
-      setInputValue(amountInputs()[0]!, "10");
-    });
+    await typeAmount(0, "10");
     await click(buttonByText("Mixto"));
     const rows = amountInputs();
     expect(rows).toHaveLength(1);
@@ -315,9 +320,7 @@ describe("v1.10.3-addendum · el exceso", () => {
     await click(buttonByText("Mixto"));
     // El cajero escribe de más en la fila de tarjeta y deja la de
     // efectivo vacía.
-    await act(async () => {
-      setInputValue(amountInputs()[1]!, "15");
-    });
+    await typeAmount(1, "15");
     expect(container.textContent).toContain("Sobran 1,00 €");
     expect(container.textContent).toContain("baja el importe");
     expect(buttonByText("Cobrar").disabled).toBe(true);
@@ -326,9 +329,7 @@ describe("v1.10.3-addendum · el exceso", () => {
   it("20 € en efectivo sobre 14 € sí se cobra: son 6 € de cambio", async () => {
     await renderOverlay();
     await click(buttonByText("Mixto"));
-    await act(async () => {
-      setInputValue(amountInputs()[0]!, "20");
-    });
+    await typeAmount(0, "20");
     expect(container.textContent).toContain("Cambio");
     expect(container.textContent).not.toContain("baja el importe");
     expect(buttonByText("Cobrar").disabled).toBe(false);
@@ -338,9 +339,7 @@ describe("v1.10.3-addendum · el exceso", () => {
     await renderOverlay();
     await click(buttonByText("Mixto"));
     // 20 en efectivo sobre 14: el reparto deja la tarjeta en 0,00 €.
-    await act(async () => {
-      setInputValue(amountInputs()[0]!, "20");
-    });
+    await typeAmount(0, "20");
     expect(amountInputs()[1]!.value).toBe("0,00");
 
     await click(buttonByText("Cobrar"));

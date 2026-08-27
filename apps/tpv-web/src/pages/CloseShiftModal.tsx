@@ -29,6 +29,9 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, Loader2, WifiOff } from "lucide-react";
 
 import { ApiError, apiWithCashier } from "../api.js";
+import { AmountField } from "../components/AmountField.js";
+import { useBackGuard } from "../hooks/useBackGuard.js";
+import { CashPad } from "../components/CashPad.js";
 import { outboxAdd, outboxCounts, outboxList } from "../lib/outbox.js";
 import { closeLocalShift, getLocalShift } from "../lib/offlineShift.js";
 import { newId } from "../lib/ids.js";
@@ -138,6 +141,15 @@ export function CloseShiftModal(props: {
 
   // Estado: contador por denominación (entero >= 0). Vacío equivale a 0.
   const [counts, setCounts] = useState<Record<string, string>>({});
+  // v1.12-manos-de-camarero · denominación que está tecleando el
+  // CashPad. `null` = pad cerrado. Aquí se cuentan UNIDADES, no euros:
+  // el pad va sin coma (`maxDecimals = 0`).
+  const [padDenom, setPadDenom] = useState<string | null>(null);
+  // v1.12 · el Atrás cierra el pad, y sólo después el modal. En las
+  // pruebas físicas el Atrás durante el arqueo acabó en el escritorio
+  // de Android con el turno abierto (H6).
+  useBackGuard(() => setPadDenom(null), padDenom !== null);
+  useBackGuard(props.onClose, padDenom === null);
   const [syncFailureAccepted, setSyncFailureAccepted] = useState(false);
   const [managerPin, setManagerPin] = useState("");
   const [needsManager, setNeedsManager] = useState(false);
@@ -710,14 +722,19 @@ export function CloseShiftModal(props: {
                       <tr key={d.key} className="hover:bg-slate-50">
                         <td className="py-1.5 px-3 text-mipiace-ink">{d.label}</td>
                         <td className="py-1.5 px-2">
-                          <input
+                          {/* v1.12 · sin `inputMode="numeric"`: 15
+                              denominaciones eran 15 aperturas del
+                              teclado de Android encima del modal
+                              (hallazgos H2 y H7). */}
+                          <AmountField
                             value={counts[d.key] ?? ""}
-                            onChange={(e) => setCount(d.key, e.target.value)}
-                            onFocus={(e) => e.target.select()}
-                            inputMode="numeric"
+                            active={padDenom === d.key}
+                            onActivate={() => setPadDenom(d.key)}
                             placeholder="0"
-                            aria-label={`Cantidad de ${d.label}`}
-                            className="w-full h-11 px-2 text-center tabular-nums bg-mipiace-stone border border-transparent rounded-lg focus:bg-white focus:border-mipiace-coral/30 focus:ring-1 focus:ring-mipiace-coral/40 focus:outline-none"
+                            suffix={null}
+                            align="center"
+                            size="sm"
+                            ariaLabel={`Cantidad de ${d.label}`}
                           />
                         </td>
                         <td className="py-1.5 px-3 text-right tabular-nums text-slate-500">
@@ -747,6 +764,12 @@ export function CloseShiftModal(props: {
           </>
         )}
 
+        {/* v1.12 · las acciones van ANTES del pad y el pad se queda en
+            el borde inferior. En las pruebas físicas el turno se cerró
+            sin que nadie lo pulsara deliberadamente (H7): el teclado de
+            Android desplazaba el modal y "Cerrar turno" acababa justo
+            donde caía el dedo. Un botón destructivo no se pone en la
+            zona de tecleo. */}
         <div className="flex gap-2.5 pt-1">
           <button
             type="button"
@@ -761,7 +784,7 @@ export function CloseShiftModal(props: {
                 : props.onClose
             }
             disabled={busy}
-            className="flex-1 h-12 rounded-2xl border border-slate-200 hover:bg-slate-50 text-[13.5px] text-mipiace-ink-soft font-medium"
+            className="flex-1 h-touch rounded-2xl border border-slate-200 hover:bg-slate-50 text-[13.5px] text-mipiace-ink-soft font-medium"
           >
             {xResult ? "Cerrar" : summary && isZ && !mustCount ? "Volver" : "Cancelar"}
           </button>
@@ -770,7 +793,7 @@ export function CloseShiftModal(props: {
               type="button"
               onClick={submit}
               disabled={busy}
-              className="flex-1 h-12 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[14px] font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+              className="flex-1 h-touch rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[14px] font-medium disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {busy && <Loader2 className="w-4 h-4 animate-spin" />}
               {isZ ? "Cerrar turno" : "Guardar arqueo X"}
@@ -781,6 +804,36 @@ export function CloseShiftModal(props: {
           <div className="mt-4 flex items-start gap-2 text-[13px] text-red-700 bg-red-50 rounded-xl px-3.5 py-2.5">
             <AlertCircle className="w-4 h-4 mt-px shrink-0" />
             <span>{error}</span>
+          </div>
+        )}
+
+        {/* CashPad del arqueo (v1.12). Una sola instancia, abajo, y
+            sólo mientras hay una denominación activa. Conteos enteros:
+            sin coma. */}
+        {!xResult && padDenom && (
+          <div className="mt-4 pt-4 border-t border-slate-200">
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <span className="text-[13px] font-medium text-mipiace-ink truncate">
+                Contando {DENOMINATIONS.find((d) => d.key === padDenom)?.label}
+              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-[17px] font-semibold tabular-nums text-mipiace-ink">
+                  {counts[padDenom] || "0"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPadDenom(null)}
+                  className="h-touch px-4 rounded-xl bg-mipiace-stone hover:bg-slate-100 text-[13px] font-medium text-mipiace-ink"
+                >
+                  Listo
+                </button>
+              </div>
+            </div>
+            <CashPad
+              value={counts[padDenom] ?? ""}
+              maxDecimals={0}
+              onChange={(next) => setCount(padDenom, next)}
+            />
           </div>
         )}
       </div>

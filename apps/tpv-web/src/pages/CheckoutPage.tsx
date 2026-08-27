@@ -26,6 +26,7 @@ import {
   ArrowLeft,
   Banknote,
   Check,
+  ChevronDown,
   CreditCard,
   Gift,
   Loader2,
@@ -33,6 +34,9 @@ import {
 } from "lucide-react";
 
 import { ApiError, apiWithCashier } from "../api.js";
+import { AmountField } from "../components/AmountField.js";
+import { useBackGuard } from "../hooks/useBackGuard.js";
+import { CashPad } from "../components/CashPad.js";
 import type { ContactRef } from "./SalePage.contact.js";
 import { computeLine } from "../lib/cart.js";
 import type { CartLine, CartTotals } from "../lib/cart.js";
@@ -137,9 +141,21 @@ export function CheckoutOverlay(props: {
   const [emailIntent, setEmailIntent] = useState<string>(props.contact?.email ?? "");
   const [emailEnabled, setEmailEnabled] = useState(!!props.contact?.email);
   const [giftReceipt, setGiftReceipt] = useState(false);
+  // v1.12 · fila de pago que está tecleando el CashPad. `null` = pad
+  // cerrado. Una sola instancia de pad por hoja, abajo del todo.
+  const [padTarget, setPadTarget] = useState<number | null>(null);
+  // v1.12 · higiene de la hoja de cobro (§3): email y ticket regalo se
+  // pliegan tras "Más opciones". En hora punta la pantalla es para el
+  // dinero. Se abre solo si el contacto ya trae email (entonces el
+  // cajero venía a usarlo).
+  const [moreOptions, setMoreOptions] = useState(!!props.contact?.email);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // v1.12 · el Atrás del sistema cierra primero el pad y luego la hoja
+  // de cobro; nunca sale de la aplicación (hallazgo H6).
+  useBackGuard(() => setPadTarget(null), padTarget !== null);
+  useBackGuard(props.onClose, padTarget === null);
   // v1.9.2-mesas-concurrencia · Frente 1.4/2: el total con el que se
   // construyeron las filas de pago. Si `props.totals.total` se separa
   // (otra caja añadió/quitó líneas → refetch en el padre, o el server
@@ -719,8 +735,8 @@ export function CheckoutOverlay(props: {
                   onClick={() => pickMethod(m)}
                   className={
                     active
-                      ? "h-11 rounded-xl bg-mipiace-coral-soft border border-mipiace-coral text-[12px] font-medium text-mipiace-coral-dark"
-                      : "h-11 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[12px] font-medium text-mipiace-ink"
+                      ? "h-touch rounded-xl bg-mipiace-coral-soft border border-mipiace-coral text-[12.5px] font-medium text-mipiace-coral-dark"
+                      : "h-touch rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[12.5px] font-medium text-mipiace-ink"
                   }
                 >
                   {labelFor(m)}
@@ -732,8 +748,8 @@ export function CheckoutOverlay(props: {
               title="Cobrar la misma cuenta con dos métodos (mitad y mitad)"
               className={
                 isMixed
-                  ? "h-11 rounded-xl bg-mipiace-coral-soft border border-mipiace-coral text-[12px] font-medium text-mipiace-coral-dark"
-                  : "h-11 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[12px] font-medium text-mipiace-ink"
+                  ? "h-touch rounded-xl bg-mipiace-coral-soft border border-mipiace-coral text-[12.5px] font-medium text-mipiace-coral-dark"
+                  : "h-touch rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[12.5px] font-medium text-mipiace-ink"
               }
             >
               Mixto
@@ -750,6 +766,8 @@ export function CheckoutOverlay(props: {
                 index={i}
                 showMethodPicker={isMixed}
                 autoFilled={isMixed && i === payments.length - 1 && !lastRowPinned}
+                active={padTarget === i}
+                onActivate={() => setPadTarget(i)}
                 onChange={(patch) => setPayment(i, patch)}
                 onMethodChange={(m) => setRowMethod(i, m)}
               />
@@ -764,14 +782,14 @@ export function CheckoutOverlay(props: {
                 <button
                   key={n}
                   onClick={() => setCashTo(n)}
-                  className="h-11 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[14px] font-medium text-mipiace-ink tabular-nums"
+                  className="h-touch rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[14px] font-medium text-mipiace-ink tabular-nums"
                 >
                   {n}
                 </button>
               ))}
               <button
                 onClick={() => setCashTo(0)}
-                className="h-11 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[14px] font-medium text-slate-500"
+                className="h-touch rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[14px] font-medium text-slate-500"
                 aria-label="Limpiar importe efectivo"
               >
                 C
@@ -783,7 +801,7 @@ export function CheckoutOverlay(props: {
           {firstCashIdx !== -1 && (
             <button
               onClick={applyExactCash}
-              className="w-full h-11 mb-2.5 rounded-xl bg-mipiace-coral-soft hover:bg-mipiace-coral-soft/70 border border-mipiace-coral/30 text-mipiace-coral-dark text-[12.5px] font-medium flex items-center justify-center gap-2"
+              className="w-full h-touch mb-2.5 rounded-xl bg-mipiace-coral-soft hover:bg-mipiace-coral-soft/70 border border-mipiace-coral/30 text-mipiace-coral-dark text-[12.5px] font-medium flex items-center justify-center gap-2"
             >
               <span>Importe exacto</span>
               <span className="text-slate-400">·</span>
@@ -908,17 +926,37 @@ export function CheckoutOverlay(props: {
                 onFocus={scrollFocusIntoView}
                 maxLength={60}
                 placeholder="Nombre del profesional"
-                className="w-full h-11 px-3 rounded-xl bg-white border border-transparent text-[13.5px] focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none"
+                className="w-full h-touch px-3 rounded-xl bg-white border border-transparent text-[13.5px] focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none"
               />
             </div>
           )}
 
+          {/* v1.12 · "Imprimir ticket" se queda a la vista; email y
+              ticket regalo se pliegan. De los tres, el único que se usa
+              en cada cobro es el papel. */}
           <div className="space-y-2 mb-4">
             <Checkbox
               checked={printIntent}
               onChange={setPrintIntent}
               label="Imprimir ticket"
             />
+            <button
+              type="button"
+              onClick={() => setMoreOptions((v) => !v)}
+              aria-expanded={moreOptions}
+              className="w-full min-h-touch px-3 rounded-xl bg-mipiace-stone hover:bg-slate-100 flex items-center justify-between text-[13.5px] font-medium text-mipiace-ink"
+            >
+              <span>Más opciones</span>
+              <ChevronDown
+                className={
+                  "w-4 h-4 text-slate-400 transition-transform " +
+                  (moreOptions ? "rotate-180" : "")
+                }
+                strokeWidth={2.25}
+              />
+            </button>
+            {moreOptions && (
+              <>
             <Checkbox
               checked={emailEnabled}
               onChange={setEmailEnabled}
@@ -935,7 +973,7 @@ export function CheckoutOverlay(props: {
                     autoCorrect="off"
                     spellCheck={false}
                     placeholder="cliente@ejemplo.com"
-                    className="h-8 px-2.5 rounded-md bg-mipiace-stone border border-transparent text-[12.5px] focus:bg-white focus:border-mipiace-coral/30 focus:ring-1 focus:ring-mipiace-coral/30 focus:outline-none"
+                    className="h-touch px-3 rounded-xl bg-mipiace-stone border border-transparent text-[12.5px] focus:bg-white focus:border-mipiace-coral/30 focus:ring-1 focus:ring-mipiace-coral/30 focus:outline-none"
                   />
                 ) : null
               }
@@ -945,6 +983,8 @@ export function CheckoutOverlay(props: {
               onChange={setGiftReceipt}
               label="Ticket regalo"
             />
+              </>
+            )}
           </div>
 
           {error && (
@@ -1046,11 +1086,43 @@ export function CheckoutOverlay(props: {
             </div>
           )}
 
+          {/* ── CashPad (v1.12 · hallazgo H2) ────────────────────────
+              Una sola instancia por hoja, en el pie, encima de Cobrar.
+              Se abre al tocar un importe y NO tapa el botón: el pie
+              crece y el body (flex-1 min-h-0) se encoge, así que
+              "Cobrar" sigue en el borde inferior sin scroll. Verificado
+              a 1280×800 (el AP11 a densidad 240) y a 320 de ancho. */}
+          {padTarget !== null && payments[padTarget] && (
+            <div className="mb-2.5 rounded-2xl bg-white border border-slate-200 p-2.5">
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <span className="text-[12.5px] font-medium text-mipiace-ink truncate">
+                  {labelFor(payments[padTarget]!.method)}
+                </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[17px] font-semibold tabular-nums text-mipiace-ink">
+                    {payments[padTarget]!.amount || "0,00"} €
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPadTarget(null)}
+                    className="h-touch px-4 rounded-xl bg-mipiace-stone hover:bg-slate-100 text-[13px] font-medium text-mipiace-ink"
+                  >
+                    Listo
+                  </button>
+                </div>
+              </div>
+              <CashPad
+                value={payments[padTarget]!.amount}
+                onChange={(next) => setPayment(padTarget, { amount: next })}
+              />
+            </div>
+          )}
+
           {/* COBRAR sticky bottom. */}
           <button
             onClick={() => submit()}
             disabled={!ready || submitting || accountChanged}
-            className="w-full h-14 bg-mipiace-coral hover:bg-mipiace-coral-dark text-white font-medium text-[15px] rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50"
+            className="w-full h-touch-lg bg-mipiace-coral hover:bg-mipiace-coral-dark text-white font-medium text-[16px] rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50"
           >
             {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
             {cobrarLabel}
@@ -1062,7 +1134,7 @@ export function CheckoutOverlay(props: {
             <button
               onClick={() => submit(undefined, { credit: true })}
               disabled={submitting}
-              className="mt-2 w-full h-12 bg-white border-2 border-mipiace-coral text-mipiace-coral font-medium text-[14px] rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50"
+              className="mt-2 w-full h-touch bg-white border-2 border-mipiace-coral text-mipiace-coral font-medium text-[14px] rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50"
             >
               Fiado{props.contact?.name ? ` · ${props.contact.name}` : ""}
             </button>
@@ -1220,11 +1292,16 @@ function PaymentRowEditor({
   index,
   showMethodPicker,
   autoFilled,
+  active,
+  onActivate,
   onChange,
   onMethodChange,
 }: {
   payment: PaymentRow;
   index: number;
+  // v1.12 · esta fila es la que está escribiendo el CashPad.
+  active: boolean;
+  onActivate: () => void;
   // v1.10.3-barra · en mixto cada fila elige su método aquí mismo; en
   // simple lo eligen los tabs de arriba y la fila sólo lo enseña.
   showMethodPicker: boolean;
@@ -1247,7 +1324,7 @@ function PaymentRowEditor({
     <div>
       <div className="flex items-stretch gap-2">
         {showMethodPicker ? (
-          <div className="relative h-12 w-[96px] sm:w-[108px] shrink-0">
+          <div className="relative h-touch w-[96px] sm:w-[108px] shrink-0">
             <Icon
               className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-[16px] h-[16px] text-mipiace-coral-dark"
               strokeWidth={2.1}
@@ -1256,7 +1333,7 @@ function PaymentRowEditor({
               value={payment.method}
               onChange={(e) => onMethodChange(e.target.value as Method)}
               aria-label={`Método del pago ${index + 1}`}
-              className="h-12 w-full pl-8 pr-2 rounded-xl bg-mipiace-coral-soft border border-mipiace-coral/25 text-[13px] font-medium text-mipiace-coral-dark appearance-none focus:outline-none focus:ring-2 focus:ring-mipiace-coral/40"
+              className="h-touch w-full pl-8 pr-2 rounded-xl bg-mipiace-coral-soft border border-mipiace-coral/25 text-[13px] font-medium text-mipiace-coral-dark appearance-none focus:outline-none focus:ring-2 focus:ring-mipiace-coral/40"
             >
               {(["CASH", "CARD", "BIZUM", "VOUCHER"] as Method[]).map((m) => (
                 <option key={m} value={m}>
@@ -1267,23 +1344,21 @@ function PaymentRowEditor({
           </div>
         ) : (
           <div
-            className="h-12 w-12 shrink-0 rounded-xl bg-mipiace-coral-soft border border-mipiace-coral/25 flex items-center justify-center text-mipiace-coral-dark"
+            className="h-touch w-touch shrink-0 rounded-xl bg-mipiace-coral-soft border border-mipiace-coral/25 flex items-center justify-center text-mipiace-coral-dark"
             aria-label={labelFor(payment.method)}
           >
             <Icon className="w-[18px] h-[18px]" strokeWidth={2.1} />
           </div>
         )}
-        <input
+        {/* v1.12 · sin `inputMode="decimal"`: eso abría el teclado de
+            símbolos de Android encima del botón Cobrar. Escribe el
+            CashPad del pie. */}
+        <AmountField
           value={payment.amount}
-          onChange={(e) => onChange({ amount: e.target.value })}
-          onFocus={(e) => {
-            e.target.select();
-            scrollFocusIntoView(e);
-          }}
-          inputMode="decimal"
-          placeholder="0,00"
-          aria-label={`Importe ${labelFor(payment.method)}`}
-          className="flex-1 min-w-[84px] h-12 px-3 text-[16px] font-semibold bg-white border border-slate-200 rounded-xl tabular-nums text-right focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/40 focus:outline-none"
+          active={active}
+          onActivate={onActivate}
+          ariaLabel={`Importe ${labelFor(payment.method)}`}
+          className="flex-1 min-w-[84px]"
         />
         {(payment.method === "CARD" || payment.method === "BIZUM") && (
           <input
@@ -1291,7 +1366,7 @@ function PaymentRowEditor({
             onChange={(e) => onChange({ meta: { reference: e.target.value } })}
             placeholder={payment.method === "CARD" ? "últ. 4" : "ref."}
             aria-label={`Referencia ${labelFor(payment.method)}`}
-            className="w-16 sm:w-24 shrink-0 h-12 px-2.5 sm:px-3 text-[12.5px] bg-white border border-slate-200 rounded-xl focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/40 focus:outline-none"
+            className="w-16 sm:w-24 shrink-0 h-touch px-2.5 sm:px-3 text-[12.5px] bg-white border border-slate-200 rounded-xl focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/40 focus:outline-none"
           />
         )}
       </div>
@@ -1321,16 +1396,16 @@ function Checkbox({
   // (comportamiento nativo); no añadimos onClick en el span visual
   // (B-UX-Pulido F0 disparaba onChange dos veces).
   return (
-    <label className="flex items-center gap-3 p-3 bg-mipiace-stone rounded-xl cursor-pointer">
+    <label className="flex items-center gap-3 px-3 min-h-touch bg-mipiace-stone rounded-xl cursor-pointer">
       <span
         aria-hidden="true"
         className={
           checked
-            ? "w-4 h-4 rounded border-2 border-mipiace-coral bg-mipiace-coral flex items-center justify-center shrink-0"
-            : "w-4 h-4 rounded border-2 border-slate-300 shrink-0"
+            ? "w-5 h-5 rounded border-2 border-mipiace-coral bg-mipiace-coral flex items-center justify-center shrink-0"
+            : "w-5 h-5 rounded border-2 border-slate-300 shrink-0"
         }
       >
-        {checked && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+        {checked && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
       </span>
       <input
         type="checkbox"

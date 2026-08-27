@@ -364,7 +364,7 @@ export function TableMapScreen(props: TableMapScreenProps) {
             onClick={() => setDrawerOpen(true)}
             title="Abrir menú"
             aria-label="Abrir menú"
-            className="h-10 w-10 shrink-0 rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-600"
+            className="h-touch w-touch shrink-0 rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-600"
           >
             <Menu className="w-5 h-5" strokeWidth={2.1} />
           </button>
@@ -388,7 +388,7 @@ export function TableMapScreen(props: TableMapScreenProps) {
               setShowHistory(true);
             }}
             title="Tickets pasados"
-            className="h-9 px-3 rounded-lg bg-mipiace-stone hover:bg-slate-100 flex items-center gap-2 text-[12.5px] font-medium text-mipiace-ink"
+            className="h-touch px-3.5 rounded-xl bg-mipiace-stone hover:bg-slate-100 flex items-center gap-2 text-[13px] font-medium text-mipiace-ink"
           >
             <ReceiptText className="w-[17px] h-[17px]" strokeWidth={2.25} />
             <span className="hidden sm:inline">Tickets</span>
@@ -396,7 +396,7 @@ export function TableMapScreen(props: TableMapScreenProps) {
           <button
             type="button"
             onClick={props.onLogoutCashier}
-            className="h-9 px-3 rounded-lg bg-mipiace-stone hover:bg-slate-100 text-[12.5px] text-mipiace-ink max-w-[45vw] truncate"
+            className="h-touch px-3.5 rounded-xl bg-mipiace-stone hover:bg-slate-100 text-[13px] text-mipiace-ink max-w-[45vw] truncate"
           >
             {props.cashierLabel.split("@")[0]}
           </button>
@@ -486,7 +486,7 @@ export function TableMapScreen(props: TableMapScreenProps) {
             <button
               type="button"
               onClick={props.onQuickSale}
-              className="h-9 px-3.5 rounded-full bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[13px] font-medium flex items-center gap-1.5 shrink-0"
+              className="h-touch px-4 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[13px] font-medium flex items-center gap-1.5 shrink-0"
             >
               <Plus className="w-4 h-4" strokeWidth={2.25} />
               Nueva venta rápida
@@ -613,7 +613,7 @@ export function TableMapScreen(props: TableMapScreenProps) {
               onClick={() => setDrawerOpen(false)}
               title="Cerrar menú"
               aria-label="Cerrar menú"
-              className="h-9 w-9 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-500"
+              className="h-touch w-touch rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-500"
             >
               <X className="w-4 h-4" strokeWidth={2.1} />
             </button>
@@ -821,7 +821,7 @@ function ZoneChips({
             key={item.id}
             type="button"
             onClick={() => setZoneFilter(item.id)}
-            className={`h-9 px-3.5 shrink-0 rounded-full text-[13px] font-medium transition-colors flex items-center gap-1.5 ${
+            className={`h-touch px-4 shrink-0 rounded-2xl text-[13px] font-medium transition-colors flex items-center gap-1.5 ${
               active
                 ? "bg-mipiace-coral-soft text-mipiace-coral-dark border border-mipiace-coral/40"
                 : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"

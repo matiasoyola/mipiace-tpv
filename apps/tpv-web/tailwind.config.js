@@ -7,6 +7,24 @@ export default {
       fontFamily: {
         sans: ["DM Sans", "-apple-system", "system-ui", "sans-serif"],
       },
+      // v1.12-manos-de-camarero · escala táctil. Medida sobre el AP11
+      // (8,8 px/mm físicos a densidad 240): lo que se toca cien veces al
+      // día estaba a 5-7 mm y la mano del camarero falla. Tres peldaños,
+      // y nada de `h-[52px]` sueltos: los bloques siguientes heredan
+      // esta escala.
+      //   touch     48px ≈ 9 mm  · mínimo de cualquier control diario
+      //   touch-pad 56px ≈ 10 mm · teclas del CashPad y del keypad de PIN
+      //   touch-lg  64px ≈ 11 mm · barra de cobro y acciones primarias
+      spacing: {
+        touch: "48px",
+        "touch-pad": "56px",
+        "touch-lg": "64px",
+      },
+      minHeight: {
+        touch: "48px",
+        "touch-pad": "56px",
+        "touch-lg": "64px",
+      },
       colors: {
         mipiace: {
           coral: "#E97058",

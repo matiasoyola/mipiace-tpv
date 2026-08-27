@@ -50,6 +50,7 @@ import {
 } from "./lib/shiftSummary.js";
 import { clearTestMode, isTestModeActive } from "./lib/test-mode.js";
 import { startVisualViewportSync } from "./lib/visualViewportSync.js";
+import { installBackGuard, setBackFallback } from "./hooks/useBackGuard.js";
 import { OutboxChip } from "./pages/CheckoutPage.outboxChip.js";
 import { PairScreen } from "./pages/PairScreen.js";
 import { PinScreen, type CashierLoginResponse } from "./pages/PinScreen.js";
@@ -164,6 +165,11 @@ export function App() {
   // dropdown de búsqueda) usa `padding-bottom: var(--keyboard-offset)`
   // para empujarse hacia arriba en lugar de quedar oculto.
   useEffect(() => startVisualViewportSync(), []);
+
+  // v1.12-manos-de-camarero · el Atrás del sistema deja de sacar del TPV
+  // (hallazgo H6). El centinela de historia se instala aquí, una vez,
+  // antes de que nadie registre capas.
+  useEffect(() => installBackGuard(), []);
 
   // v1.5-consistencia-C · reenvío del outbox offline: al arrancar, al
   // evento `online` y cada N segundos mientras haya pendientes.
@@ -558,6 +564,22 @@ function TpvHome(props: {
     }
   }
 
+  // v1.12-manos-de-camarero · guardia de fondo del Atrás (H6). Cuando
+  // no hay ninguna hoja abierta: dentro de una venta se vuelve al mapa
+  // de mesas; en el mapa no se hace nada (el turno está abierto y no
+  // hay ningún sitio al que ir que no sea el escritorio de Android).
+  useEffect(() => {
+    setBackFallback(() => {
+      if (view.kind === "sale" && hasTables) {
+        setMapNotice(null);
+        setView({ kind: "map" });
+        return true;
+      }
+      return false;
+    });
+    return () => setBackFallback(null);
+  }, [view.kind, hasTables]);
+
   useEffect(() => {
     if (skipTables) return;
     let cancelled = false;
@@ -593,6 +615,10 @@ function TpvHome(props: {
     );
   }
 
+  // v1.12-manos-de-camarero · guardia del Atrás del sistema (H6). Sin
+  // capas abiertas, dentro de una venta el Atrás vuelve al mapa de
+  // mesas; en el mapa, con el turno abierto, no hace nada. Nunca al
+  // escritorio de Android.
   if (view.kind === "map") {
     return (
       <TableMapScreen

@@ -43,6 +43,7 @@ import {
 } from "lucide-react";
 
 import { ApiError } from "../api.js";
+import { ConfirmSheet } from "../components/ConfirmSheet.js";
 import { Logo } from "../Logo.js";
 import {
   computeCart,
@@ -355,6 +356,13 @@ export function SalePage(props: SalePageProps) {
 
   // v1.4-Bar-Operativa-MVP Lote 4 · sheet partir cuenta (Modo A).
   const [showSplitBill, setShowSplitBill] = useState(false);
+  // v1.12-manos-de-camarero · confirmación de las dos acciones
+  // destructivas de esta pantalla. Antes eran `confirm()` del
+  // navegador (hallazgo H5): título "mipiacetpv.com dice", botones
+  // azules de Chrome y dos "Cancelar" con significados opuestos.
+  const [confirmAction, setConfirmAction] = useState<
+    null | "voidTable" | "clearCart"
+  >(null);
 
   // Cuando el cajero cambia de mesa o sale del modo mesa, reiniciamos
   // el contador local de comandas. El backend mantiene la verdad
@@ -1663,16 +1671,15 @@ export function SalePage(props: SalePageProps) {
               if (isTableMode) {
                 // Vaciar la mesa: DRAFT → VOIDED en el servidor y las
                 // demás cajas la ven libre (table.cleared).
-                if (confirm("¿Vaciar la mesa? La cuenta se cancela.")) {
-                  void tableVoidTicket();
-                }
+                setConfirmAction("voidTable");
                 return;
               }
-              const inProgress =
-                businessType === "SERVICES" ? "el servicio" : "la venta";
-              if (lines.length === 0 || confirm(`¿Cancelar ${inProgress} en curso?`)) {
+              // Sin líneas no hay nada que destruir: no se pregunta.
+              if (lines.length === 0) {
                 clearCart();
+                return;
               }
+              setConfirmAction("clearCart");
             }}
             onSendToKitchen={() => void sendToKitchen()}
             kitchenBusy={kitchenBusy}
@@ -1715,6 +1722,53 @@ export function SalePage(props: SalePageProps) {
           </footer>
         </div>
       </div>
+
+      {/* v1.12 · acciones destructivas con hoja propia. Los dos botones
+          llevan verbos distintos: en barra no se lee dos veces. */}
+      {confirmAction === "voidTable" && (
+        <ConfirmSheet
+          title="Vaciar mesa"
+          body={`Se cancela la cuenta de ${
+            props.tableContext?.name ?? "la mesa"
+          } y la mesa queda libre para las demás cajas. Lo consumido no se cobra.`}
+          confirmLabel="Vaciar mesa"
+          cancelLabel="Volver"
+          onCancel={() => setConfirmAction(null)}
+          onConfirm={() => {
+            setConfirmAction(null);
+            void tableVoidTicket();
+          }}
+        />
+      )}
+      {confirmAction === "clearCart" && (
+        <ConfirmSheet
+          title={
+            businessType === "SERVICES"
+              ? "Cancelar el servicio"
+              : "Cancelar la venta"
+          }
+          body={
+            businessType === "SERVICES"
+              ? "Se borran las líneas del servicio en curso. No se puede deshacer."
+              : "Se borran las líneas de la venta en curso. No se puede deshacer."
+          }
+          confirmLabel={
+            businessType === "SERVICES"
+              ? "Cancelar el servicio"
+              : "Cancelar la venta"
+          }
+          cancelLabel={
+            businessType === "SERVICES"
+              ? "Seguir con el servicio"
+              : "Seguir con la venta"
+          }
+          onCancel={() => setConfirmAction(null)}
+          onConfirm={() => {
+            setConfirmAction(null);
+            clearCart();
+          }}
+        />
+      )}
 
       {/* Sheets / overlays */}
       {openSheet?.kind === "line" && (

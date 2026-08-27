@@ -5,6 +5,9 @@ import { useState } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
 
 import { apiWithCashier, ApiError } from "../api.js";
+import { AmountField } from "../components/AmountField.js";
+import { CashPad } from "../components/CashPad.js";
+import { parseAmount } from "../lib/money.js";
 import { Logo } from "../Logo.js";
 import { outboxAdd } from "../lib/outbox.js";
 import { openLocalShift } from "../lib/offlineShift.js";
@@ -36,9 +39,16 @@ export function ShiftOpenScreen({
   const [amount, setAmount] = useState<string>("0,00");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // v1.12-manos-de-camarero · el pad del fondo de caja. Cerrado al
+  // entrar: el atajo de 100 € resuelve el caso normal de un toque.
+  const [padOpen, setPadOpen] = useState(false);
 
-  const parsed = parseFloat(amount.replace(",", "."));
-  const ready = !Number.isNaN(parsed) && parsed >= 0 && !busy;
+  // v1.12 · el parseo de importes va por `lib/money.ts` (v1.10.3), que
+  // ya tolera coma, punto, espacios y el símbolo €.
+  const parsed = parseAmount(amount);
+  // Campo vacío ≠ 0,00: vacío es "no introducido" y "Abrir turno"
+  // sigue bloqueado.
+  const ready = amount.trim() !== "" && parsed >= 0 && !busy;
 
   // v1.10-offline: abre el turno en local (latencia percibida cero) y
   // encola el POST /shift/open. El localId es el externalId de
@@ -129,36 +139,50 @@ export function ShiftOpenScreen({
           <label htmlFor="cashOpening" className="block text-[13px] font-medium text-mipiace-ink mb-2">
             Fondo de caja inicial
           </label>
-          <div className="relative mb-6">
-            <input
+          {/* v1.12 · el importe se teclea con el CashPad de la app, no
+              con el de Android (hallazgo H2). */}
+          <div className="mb-3">
+            <AmountField
               id="cashOpening"
-              name="cashOpening"
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              inputMode="decimal"
-              className="w-full h-16 pr-12 px-4 text-[26px] font-semibold tracking-tight bg-mipiace-stone border border-transparent rounded-2xl focus:ring-2 focus:ring-mipiace-coral/40 focus:border-mipiace-coral/30 focus:bg-white tabular-nums text-right focus:outline-none"
+              active={padOpen}
+              onActivate={() => setPadOpen(true)}
+              size="lg"
+              ariaLabel="Fondo de caja inicial"
             />
-            <span className="absolute right-5 top-1/2 -translate-y-1/2 text-[20px] font-semibold text-slate-400">
-              €
-            </span>
           </div>
-          <div className="grid grid-cols-4 gap-2 mb-7">
+          <div className="grid grid-cols-4 gap-2 mb-3">
             {["50,00", "100,00", "150,00", "200,00"].map((v) => (
               <button
                 key={v}
                 type="button"
                 onClick={() => setAmount(v)}
-                className="h-11 rounded-xl bg-mipiace-stone hover:bg-slate-100 text-[13px] font-medium text-mipiace-ink tabular-nums"
+                className="h-touch rounded-xl bg-mipiace-stone hover:bg-slate-100 text-[13px] font-medium text-mipiace-ink tabular-nums"
               >
                 {v} €
               </button>
             ))}
           </div>
+          {padOpen && (
+            <div className="mb-3">
+              <div className="flex justify-end mb-2">
+                <button
+                  type="button"
+                  onClick={() => setPadOpen(false)}
+                  className="h-touch px-4 rounded-xl bg-mipiace-stone hover:bg-slate-100 text-[13px] font-medium text-mipiace-ink"
+                >
+                  Listo
+                </button>
+              </div>
+              <CashPad value={amount} onChange={setAmount} />
+            </div>
+          )}
+          <div className="mb-4" />
           <button
             type="button"
             onClick={onSubmit}
             disabled={!ready}
-            className="w-full h-14 bg-mipiace-coral hover:bg-mipiace-coral-dark text-white font-medium text-[15px] rounded-2xl disabled:opacity-50 flex items-center justify-center gap-2"
+            className="w-full h-touch-lg bg-mipiace-coral hover:bg-mipiace-coral-dark text-white font-medium text-[16px] rounded-2xl disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {busy && <Loader2 className="w-4 h-4 animate-spin" />}
             Abrir turno
@@ -172,7 +196,7 @@ export function ShiftOpenScreen({
           <button
             type="button"
             onClick={onBack}
-            className="w-full mt-3 h-12 text-[13.5px] text-slate-500 hover:text-mipiace-ink font-medium"
+            className="w-full mt-3 h-touch text-[13.5px] text-slate-500 hover:text-mipiace-ink font-medium"
           >
             Volver a selección de cajero
           </button>
