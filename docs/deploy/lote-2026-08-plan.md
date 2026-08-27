@@ -65,9 +65,12 @@ Es el orden en que se construyó `v1-12-base`, así que los conflictos ya están
 
 Sin las cuatro, no se despliega. Con las cuatro, no hace falta pedir permiso a nadie.
 
-### La migración
+### Las migraciones
 
-Una sola: `20260820000000_v1_11_cierre_de_dia`. **Aditiva**: cinco columnas y un enum, todas con
+**Dos**, desde que cerró v1.12-B: `20260820000000_v1_11_cierre_de_dia` y
+`20260827000000_v1_12_mesas_abandonadas` (esta última añade `void_reason`, `voided_at` y
+`voided_by_user_id` a `tickets`; también aditiva, mismo criterio de auditoría que `close_reason`).
+La primera: **Aditiva**: cinco columnas y un enum, todas con
 default, más un `UPDATE` de backfill que marca como ya confirmados los resúmenes de los turnos
 cerrados antes de v1.11 (sin él, el primer login enseñaría a Sirope el resumen del 9 de julio).
 
