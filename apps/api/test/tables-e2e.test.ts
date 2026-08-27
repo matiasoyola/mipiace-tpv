@@ -74,6 +74,10 @@ interface FakeTicket {
   createdAt: Date;
   paidAt: Date | null;
   syncedAt: Date | null;
+  // v1.12-mesas-abandonadas · auditoría de la anulación.
+  voidReason?: string | null;
+  voidedAt?: Date | null;
+  voidedByUserId?: string | null;
 }
 
 interface FakeLine {
@@ -154,6 +158,9 @@ function materialize(t: FakeTicket, rel?: Record<string, unknown>) {
       store: { name: "Bar Test" },
     };
   }
+  // v1.12-mesas-abandonadas · `void-draft.ts` pide el número de líneas
+  // con `_count` para saber si el DRAFT está vacío.
+  if (rel._count) out._count = { lines: linesOf(t.id).length };
   return out;
 }
 
@@ -169,6 +176,9 @@ function matchTicket(t: FakeTicket, where: Record<string, unknown>): boolean {
       return false;
     }
   }
+  // v1.12-mesas-abandonadas · `lines: { none: {} }` — la reclamación del
+  // barrido sólo casa si el DRAFT sigue sin líneas.
+  if (where.lines && linesOf(t.id).length > 0) return false;
   return true;
 }
 
@@ -1029,6 +1039,73 @@ describe("E2E mesas · estados y validaciones", () => {
     const reopen = await openTable(app, MESA_1);
     expect(reopen.statusCode).toBe(201);
     expect(draftOf(MESA_1).id).not.toBe(draft.id);
+  });
+
+  // v1.12-mesas-abandonadas §3 (review) · el TPV limpia el DRAFT vacío al
+  // salir del detalle, pero decide con SU proyección local, que puede
+  // estar desfasada: otra caja tiene permiso para comandar sobre la misma
+  // mesa (v1.9.2) y el evento puede no haber llegado todavía. Si la
+  // decisión fuese del cliente, salir al mapa borraría una comanda real.
+  // Por eso la petición viaja con `?onlyIfEmpty=true` y quien comprueba
+  // que sigue vacía es el servidor, dentro del WHERE de la reclamación.
+  it("onlyIfEmpty: la mesa que otra caja comandó sobrevive aunque el cliente la crea vacía", async () => {
+    const app = await buildApp();
+    // Este device abre la mesa y no pide nada: para él está vacía.
+    await openTable(app, MESA_1);
+    const draft = draftOf(MESA_1);
+    // La otra caja comanda una caña sobre la MISMA mesa. Este device
+    // todavía no se ha enterado.
+    await addLine(app, MESA_1, CAFE, "B");
+    expect(linesOf(draft.id)).toHaveLength(1);
+
+    // El cajero pulsa "Mapa" con su estado desfasado (0 líneas).
+    const res = await app.inject({
+      method: "DELETE",
+      url: `/tickets/${draft.id}?onlyIfEmpty=true&reason=${encodeURIComponent(
+        "Salió del detalle sin añadir nada",
+      )}`,
+      headers: auth(),
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("TICKET_NOT_EMPTY");
+    // La comanda sigue viva y la mesa sigue ocupada.
+    expect(state.tickets.get(draft.id)!.status).toBe("DRAFT");
+    expect(linesOf(draft.id)).toHaveLength(1);
+    expect(broadcasts.at(-1)?.event.type).not.toBe("table.cleared");
+  });
+
+  it("onlyIfEmpty: la mesa que sigue vacía sí se suelta al salir al mapa", async () => {
+    const app = await buildApp();
+    await openTable(app, MESA_1);
+    const draft = draftOf(MESA_1);
+
+    const res = await app.inject({
+      method: "DELETE",
+      url: `/tickets/${draft.id}?onlyIfEmpty=true`,
+      headers: auth(),
+    });
+
+    expect(res.statusCode).toBe(204);
+    expect(state.tickets.get(draft.id)!.status).toBe("VOIDED");
+    expect(state.tickets.get(draft.id)!.voidReason).toBe("MANUAL");
+    expect(broadcasts.at(-1)?.event.type).toBe("table.cleared");
+  });
+
+  // "Vaciar mesa" es la otra intención por la misma puerta: ahí SÍ hay una
+  // persona mirando la cuenta y decidiendo tirarla. Sin `onlyIfEmpty`, las
+  // líneas no la protegen — protegerlas sería romper el botón.
+  it("vaciar mesa SIN onlyIfEmpty sigue anulando un DRAFT con líneas", async () => {
+    const app = await buildApp();
+    await addLine(app, MESA_1, CAFE);
+    const draft = draftOf(MESA_1);
+    const res = await app.inject({
+      method: "DELETE",
+      url: `/tickets/${draft.id}?reason=Cliente se fue`,
+      headers: auth(),
+    });
+    expect(res.statusCode).toBe(204);
+    expect(state.tickets.get(draft.id)!.status).toBe("VOIDED");
   });
 
   it("mover ticket a mesa ocupada → 409 DESTINATION_OCCUPIED con el ticket ocupante", async () => {

@@ -5,6 +5,10 @@
 //   POST   /admin/stores/:storeId/tables/bar-setup        — alta masiva de N puestos de barra.
 //   PATCH  /admin/tables/:tableId                         — edita nombre/capacidad/posición/zona.
 //   DELETE /admin/tables/:tableId                         — soft-delete si no hay DRAFT activo.
+//   GET    /admin/stores/:storeId/tables/abandoned        — v1.12: cuentas abiertas
+//                                                           con consumo y >24 h.
+//   POST   /admin/tables/abandoned/:ticketId/void         — v1.12: anular una de
+//                                                           ellas con PIN de encargado.
 //
 // Reglas de negocio:
 // - Mutaciones siempre `requireOwner`. El MANAGER puede leer el listado
@@ -19,8 +23,19 @@
 import type { FastifyInstance } from "fastify";
 
 import { requireOwner, requireOwnerOrManager } from "../auth/middleware.js";
+import { verifyPassword } from "../auth/passwords.js";
+import {
+  inspect as inspectRateLimit,
+  registerFailure as registerRateLimitFailure,
+  reset as resetRateLimit,
+} from "../auth/rate-limit.js";
 import { getPrisma } from "../context.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
+import {
+  ABANDONED_WITH_LINES_HOURS,
+  listAbandonedTables,
+} from "./abandoned.js";
+import { voidDraftTicket } from "./void-draft.js";
 
 interface TableSummaryDto {
   id: string;
@@ -504,6 +519,171 @@ export async function registerTablesRoutes(app: FastifyInstance): Promise<void> 
         data: { deletedAt: new Date() },
       });
       return reply.code(204).send();
+    },
+  );
+
+  // ── v1.12-mesas-abandonadas · las cuentas que sí tienen dinero ───────
+  //
+  // Los DRAFT VACÍOS los suelta el barrido del corte de día sin preguntar
+  // (`tables/abandoned.ts`). Los que tienen consumo dentro no se tocan
+  // solos jamás: se listan aquí para que una persona decida. Cobrar se
+  // hace donde se cobra —en el TPV, con turno abierto— así que el admin
+  // sólo ofrece el aviso y la anulación con PIN.
+  app.get(
+    "/admin/stores/:storeId/tables/abandoned",
+    {
+      preHandler: requireOwnerOrManager,
+      schema: {
+        params: {
+          type: "object",
+          required: ["storeId"],
+          properties: { storeId: { type: "string", format: "uuid" } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const auth = request.auth!;
+      const { storeId } = request.params as { storeId: string };
+      const prisma = getPrisma();
+      const store = await prisma.store.findFirst({
+        where: { id: storeId, tenantId: auth.tenantId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!store) {
+        return reply.code(404).send({
+          error: "STORE_NOT_FOUND",
+          message: "Tienda no encontrada",
+        });
+      }
+      const tickets = await listAbandonedTables(prisma, auth.tenantId, storeId);
+      return { thresholdHours: ABANDONED_WITH_LINES_HOURS, tickets };
+    },
+  );
+
+  // Anular una cuenta abierta con consumo. Exige PIN de un OWNER/MANAGER
+  // del tenant ADEMÁS del JWT de admin: el que anula 84,60 € de consumo
+  // tiene que estar delante del teclado, no ser una pestaña abierta.
+  //
+  // El PIN se compara contra todos los OWNER/MANAGER con PIN del tenant
+  // (mismo criterio que el cierre forzado de turno) y el ganador queda
+  // en `voidedByUserId`: la columna dice QUIÉN, no "el admin".
+  app.post(
+    "/admin/tables/abandoned/:ticketId/void",
+    {
+      preHandler: requireOwnerOrManager,
+      schema: {
+        params: {
+          type: "object",
+          required: ["ticketId"],
+          properties: { ticketId: { type: "string", format: "uuid" } },
+        },
+        body: {
+          type: "object",
+          required: ["managerPin"],
+          additionalProperties: false,
+          properties: {
+            managerPin: { type: "string", minLength: 4, maxLength: 16 },
+            reason: { type: "string", maxLength: 200 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const auth = request.auth!;
+      const { ticketId } = request.params as { ticketId: string };
+      const body = request.body as { managerPin: string; reason?: string };
+      const prisma = getPrisma();
+
+      // Rate-limit por (tenant, usuario admin): 5 intentos / 5 min,
+      // candado 15 min. Un PIN de 4 dígitos sin esto es un teclado.
+      const rlKey = {
+        attemptsKey: `abandoned-void-attempts:${auth.tenantId}:${auth.userId}`,
+        lockKey: `abandoned-void-locked:${auth.tenantId}:${auth.userId}`,
+      };
+      const pre = await inspectRateLimit(rlKey);
+      if (pre.locked) {
+        return reply.code(429).send({
+          error: "RATE_LIMITED",
+          message: `Demasiados intentos. Vuelve a probar en ${Math.ceil(
+            pre.retryAfterSeconds / 60,
+          )} min.`,
+          retryAfterSeconds: pre.retryAfterSeconds,
+        });
+      }
+
+      const candidates = await prisma.user.findMany({
+        where: {
+          tenantId: auth.tenantId,
+          role: { in: ["MANAGER", "OWNER"] },
+          pinHash: { not: null },
+          deletedAt: null,
+        },
+        select: { id: true, email: true, alias: true, pinHash: true },
+      });
+      let authorized: { id: string; email: string; alias: string | null } | null =
+        null;
+      for (const c of candidates) {
+        if (c.pinHash && (await verifyPassword(c.pinHash, body.managerPin))) {
+          authorized = { id: c.id, email: c.email, alias: c.alias };
+          break;
+        }
+      }
+      if (!authorized) {
+        const state = await registerRateLimitFailure(rlKey);
+        return reply.code(403).send({
+          error: "INVALID_MANAGER_PIN",
+          message: "PIN de encargado incorrecto.",
+          attemptsRemaining: state.attemptsRemaining,
+        });
+      }
+      await resetRateLimit(rlKey);
+
+      const reason = body.reason?.trim();
+      const voided = await voidDraftTicket({
+        prisma,
+        ticketId,
+        tenantId: auth.tenantId,
+        reason: "MANAGER_VOID",
+        byUserId: authorized.id,
+        note: reason
+          ? `[ANULADA EN ADMIN] ${reason}`
+          : "[ANULADA EN ADMIN] sin motivo",
+        // A propósito SIN `requireEmpty`: este camino existe justamente
+        // para las cuentas con consumo. Lo que las protege no es un
+        // filtro, es el PIN de una persona.
+      });
+      if (!voided.ok) {
+        // Lo normal aquí es que la mesa se cobrara desde el TPV mientras
+        // el encargado miraba la lista. No es un fallo: es la respuesta.
+        return reply.code(409).send({
+          error: "TICKET_NOT_DRAFT",
+          message:
+            "Esta cuenta ya no está abierta: alguien la cobró o la anuló desde el TPV.",
+        });
+      }
+
+      request.log.info(
+        {
+          event: "tables.abandoned.manager_void",
+          tenantId: auth.tenantId,
+          actorUserId: auth.userId,
+          authorizedByUserId: authorized.id,
+          authorizedByEmail: authorized.email,
+          ticketId: voided.ticketId,
+          tableId: voided.tableId,
+          total: voided.total,
+          lineCount: voided.lineCount,
+          reason: reason ?? null,
+        },
+        "Cuenta abandonada anulada desde el admin con PIN de encargado",
+      );
+
+      return reply.code(200).send({
+        ticketId: voided.ticketId,
+        tableId: voided.tableId,
+        voidedByEmail: authorized.email,
+        voidedByAlias: authorized.alias,
+      });
     },
   );
 }

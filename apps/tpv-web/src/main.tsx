@@ -7,6 +7,10 @@ import {
   ErrorBoundary,
   installGlobalErrorLogging,
 } from "./components/ErrorBoundary.js";
+import {
+  flexGapSupported,
+  renderUnsupportedBrowser,
+} from "./lib/browser-support.js";
 import { initSentry } from "./lib/sentry.js";
 import { consumeTestModeFromUrl } from "./lib/test-mode.js";
 import { runVersionCheck } from "./lib/version-check.js";
@@ -47,10 +51,21 @@ registerSW({ immediate: true });
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Falta #root en index.html");
-createRoot(root).render(
-  <StrictMode>
-    <ErrorBoundary>
-      <App />
-    </ErrorBoundary>
-  </StrictMode>,
-);
+
+// v1.12-manos-de-camarero · hallazgo H1: en el Chrome 81 de fábrica del
+// AP11 no existe `gap` en flexbox y la UI entera se pinta con los
+// textos pegados ("Sala5 abiertas", "GEgemmamgc720,00 €"). Se comprueba
+// ANTES de montar React y se bloquea con una pantalla honesta: no hay
+// polyfill que valga para 245 `gap-*`, y una UI descuadrada en barra es
+// peor que una puerta cerrada.
+if (!flexGapSupported()) {
+  renderUnsupportedBrowser(root);
+} else {
+  createRoot(root).render(
+    <StrictMode>
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+    </StrictMode>,
+  );
+}

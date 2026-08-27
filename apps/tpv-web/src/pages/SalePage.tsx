@@ -43,6 +43,7 @@ import {
 } from "lucide-react";
 
 import { ApiError } from "../api.js";
+import { ConfirmSheet } from "../components/ConfirmSheet.js";
 import { Logo } from "../Logo.js";
 import {
   computeCart,
@@ -108,8 +109,12 @@ import { vocab } from "../lib/vocab.js";
 // v1.10.2-impresion-honesta · un fallo de impresión de comanda tiene que
 // llegar a Sentry con transporte y motivo; antes moría en el catch.
 import { reportPrinterFailure } from "../platform/printer/telemetry.js";
+import { formatEur } from "../lib/money.js";
 
-const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
+// v1.10.3-barra · ventana de "Deshacer" tras borrar una línea. 4 s es
+// el deshacer estándar de la metodología UX de Mi Piace: da tiempo a
+// leer el aviso sin dejar un banner zombi en pantalla.
+const UNDO_REMOVE_WINDOW_MS = 4000;
 
 // v1.2-Lite Lote 3.A: los tags se persisten en lowercase para evitar
 // duplicados visuales (Thalia tenía chips "Papelería"/"papeleria" como
@@ -351,6 +356,13 @@ export function SalePage(props: SalePageProps) {
 
   // v1.4-Bar-Operativa-MVP Lote 4 · sheet partir cuenta (Modo A).
   const [showSplitBill, setShowSplitBill] = useState(false);
+  // v1.12-manos-de-camarero · confirmación de las dos acciones
+  // destructivas de esta pantalla. Antes eran `confirm()` del
+  // navegador (hallazgo H5): título "mipiacetpv.com dice", botones
+  // azules de Chrome y dos "Cancelar" con significados opuestos.
+  const [confirmAction, setConfirmAction] = useState<
+    null | "voidTable" | "clearCart"
+  >(null);
 
   // Cuando el cajero cambia de mesa o sale del modo mesa, reiniciamos
   // el contador local de comandas. El backend mantiene la verdad
@@ -635,6 +647,17 @@ export function SalePage(props: SalePageProps) {
   >(null);
 
   const searchRef = useRef<HTMLInputElement | null>(null);
+  // v1.10.3-barra · línea borrada a la espera de "Deshacer" (4 s).
+  const [undoRemove, setUndoRemove] = useState<
+    null | { line: CartLine; index: number }
+  >(null);
+  const undoRemoveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (undoRemoveTimer.current) clearTimeout(undoRemoveTimer.current);
+    },
+    [],
+  );
 
   // ── Carga inicial del catálogo ─────────────────────────────────────
   useEffect(() => {
@@ -740,6 +763,13 @@ export function SalePage(props: SalePageProps) {
   // panel con CTA al mapa — no un toast efímero.
   const [deadTable, setDeadTable] = useState<string | null>(null);
 
+  // v1.12-addendum · aquí ya no se envuelve la salida. Soltar el DRAFT
+  // vacío al irse al mapa lo hace `goToMap()` en `App.tsx`, que es quien
+  // cambia de vista — y por tanto el único sitio por el que pasan las
+  // tres salidas (botón "Mapa", Atrás de Android y "Mesas" del historial).
+  // Mientras la limpieza vivió aquí, las otras dos se saltaban el trámite
+  // y dejaban la mesa ocupada con un draft sin líneas.
+
   // Sale al mapa con un aviso inline. Cierra cualquier sheet abierto
   // (incl. el modal de cobro) antes de navegar. Si el padre no cableó
   // onExitToMap (retail puro), cae al onBackToMap plano.
@@ -786,8 +816,8 @@ export function SalePage(props: SalePageProps) {
       setCrossCajaToast({
         // v1.9.5-formacion · Frente 2: nombra la caja si el evento lo trae.
         text: ev.registerName
-          ? `${ev.registerName} cobró un ticket (${ev.totalEur.toFixed(2)} €)`
-          : `Otra caja cobró un ticket (${ev.totalEur.toFixed(2)} €)`,
+          ? `${ev.registerName} cobró un ticket (${formatEur(ev.totalEur)})`
+          : `Otra caja cobró un ticket (${formatEur(ev.totalEur)})`,
         expiresAt: Date.now() + 4_000,
       });
       return;
@@ -795,7 +825,7 @@ export function SalePage(props: SalePageProps) {
     if (ev.type === "ticket.refunded") {
       void refreshShiftTicketsCount();
       setCrossCajaToast({
-        text: `Devolución registrada en otra caja (${ev.totalEur.toFixed(2)} €)`,
+        text: `Devolución registrada en otra caja (${formatEur(ev.totalEur)})`,
         expiresAt: Date.now() + 4_000,
       });
       return;
@@ -1124,15 +1154,65 @@ export function SalePage(props: SalePageProps) {
     setLines((curr) => curr.map((l) => (l.id === id ? { ...l, ...patch } : l)));
   }
 
+  // v1.10.3-barra · hallazgo #2 de la simulación de hora punta. La
+  // papelera pedía un segundo toque dentro de 1,5 s y, pasada la
+  // ventana, se desarmaba EN SILENCIO: con la mano ocupada parecía un
+  // botón muerto. Cambiamos al patrón UX de la casa: borra al primer
+  // toque y deja 4 s de deshacer visibles en pantalla. Un target de
+  // 44 px no debería exigir puntería cronometrada.
   function removeLine(id: string): void {
     if (isTableMode) {
-      const line = tableLines.find((l) => l.id === id);
+      const index = tableLines.findIndex((l) => l.id === id);
+      const line = tableLines[index];
       if (!line) return;
       setTableLines((curr) => curr.filter((l) => l.id !== id));
       void tableDeleteLine(line);
+      armUndoRemove(line, index);
       return;
     }
+    const index = lines.findIndex((l) => l.id === id);
+    const line = lines[index];
+    if (!line) return;
     setLines((curr) => curr.filter((l) => l.id !== id));
+    armUndoRemove(line, index);
+  }
+
+  function armUndoRemove(line: CartLine, index: number): void {
+    if (undoRemoveTimer.current) clearTimeout(undoRemoveTimer.current);
+    setUndoRemove({ line, index });
+    undoRemoveTimer.current = setTimeout(() => {
+      setUndoRemove(null);
+      undoRemoveTimer.current = null;
+    }, UNDO_REMOVE_WINDOW_MS);
+  }
+
+  function dismissUndoRemove(): void {
+    if (undoRemoveTimer.current) {
+      clearTimeout(undoRemoveTimer.current);
+      undoRemoveTimer.current = null;
+    }
+    setUndoRemove(null);
+  }
+
+  function undoRemoveLine(): void {
+    const pending = undoRemove;
+    if (!pending) return;
+    dismissUndoRemove();
+    if (isTableMode) {
+      // El DELETE ya viajó al servidor, así que deshacer es un alta
+      // nueva. Va con id nuevo: el `lineExternalId` viejo ya lo gastó
+      // la línea borrada y reutilizarlo sería pedirle al backend que
+      // resucite algo que él considera cerrado.
+      const revived: CartLine = { ...pending.line, id: newId() };
+      setTableLines((curr) => [...curr, revived]);
+      void tableCreateLine(revived);
+      return;
+    }
+    setLines((curr) => {
+      const next = curr.slice();
+      next.splice(Math.min(pending.index, next.length), 0, pending.line);
+      return next;
+    });
   }
 
   function applyGlobalDiscount(pct: number): void {
@@ -1171,6 +1251,7 @@ export function SalePage(props: SalePageProps) {
   }
 
   function clearCart(): void {
+    dismissUndoRemove();
     setLines([]);
     setContact(null);
     setNotes("");
@@ -1597,16 +1678,15 @@ export function SalePage(props: SalePageProps) {
               if (isTableMode) {
                 // Vaciar la mesa: DRAFT → VOIDED en el servidor y las
                 // demás cajas la ven libre (table.cleared).
-                if (confirm("¿Vaciar la mesa? La cuenta se cancela.")) {
-                  void tableVoidTicket();
-                }
+                setConfirmAction("voidTable");
                 return;
               }
-              const inProgress =
-                businessType === "SERVICES" ? "el servicio" : "la venta";
-              if (lines.length === 0 || confirm(`¿Cancelar ${inProgress} en curso?`)) {
+              // Sin líneas no hay nada que destruir: no se pregunta.
+              if (lines.length === 0) {
                 clearCart();
+                return;
               }
+              setConfirmAction("clearCart");
             }}
             onSendToKitchen={() => void sendToKitchen()}
             kitchenBusy={kitchenBusy}
@@ -1649,6 +1729,53 @@ export function SalePage(props: SalePageProps) {
           </footer>
         </div>
       </div>
+
+      {/* v1.12 · acciones destructivas con hoja propia. Los dos botones
+          llevan verbos distintos: en barra no se lee dos veces. */}
+      {confirmAction === "voidTable" && (
+        <ConfirmSheet
+          title="Vaciar mesa"
+          body={`Se cancela la cuenta de ${
+            props.tableContext?.name ?? "la mesa"
+          } y la mesa queda libre para las demás cajas. Lo consumido no se cobra.`}
+          confirmLabel="Vaciar mesa"
+          cancelLabel="Volver"
+          onCancel={() => setConfirmAction(null)}
+          onConfirm={() => {
+            setConfirmAction(null);
+            void tableVoidTicket();
+          }}
+        />
+      )}
+      {confirmAction === "clearCart" && (
+        <ConfirmSheet
+          title={
+            businessType === "SERVICES"
+              ? "Cancelar el servicio"
+              : "Cancelar la venta"
+          }
+          body={
+            businessType === "SERVICES"
+              ? "Se borran las líneas del servicio en curso. No se puede deshacer."
+              : "Se borran las líneas de la venta en curso. No se puede deshacer."
+          }
+          confirmLabel={
+            businessType === "SERVICES"
+              ? "Cancelar el servicio"
+              : "Cancelar la venta"
+          }
+          cancelLabel={
+            businessType === "SERVICES"
+              ? "Seguir con el servicio"
+              : "Seguir con la venta"
+          }
+          onCancel={() => setConfirmAction(null)}
+          onConfirm={() => {
+            setConfirmAction(null);
+            clearCart();
+          }}
+        />
+      )}
 
       {/* Sheets / overlays */}
       {openSheet?.kind === "line" && (
@@ -1853,6 +1980,31 @@ export function SalePage(props: SalePageProps) {
         />
       )}
       {clientPicker.element}
+      {/* v1.10.3-barra · hallazgo #2: deshacer de 4 s tras borrar una
+          línea. z-[55] lo pone por encima del bottom-sheet del ticket
+          (z-40) y de la barra inferior, pero por debajo de los modales
+          a pantalla completa (z-[60]).
+          En compacto va ARRIBA: abajo se comía el bloque fijo de
+          totales + Cobrar del sheet, y tapar el total —aunque sean 4 s—
+          es justo lo que este bloque vino a arreglar. En escritorio va
+          abajo, sobre el grid de productos, que ahí está libre. */}
+      {undoRemove && (
+        <div
+          role="status"
+          className="fixed left-1/2 -translate-x-1/2 z-[55] top-3 lg:top-auto lg:bottom-5 flex items-center gap-3 bg-mipiace-ink text-white text-[13px] pl-4 pr-2 py-2 rounded-2xl shadow-lg max-w-[92vw]"
+        >
+          <span className="min-w-0 truncate">
+            Línea eliminada · {undoRemove.line.nameSnapshot}
+          </span>
+          <button
+            type="button"
+            onClick={undoRemoveLine}
+            className="shrink-0 h-11 px-4 rounded-xl bg-white/15 hover:bg-white/25 text-[13px] font-semibold"
+          >
+            Deshacer
+          </button>
+        </div>
+      )}
       {clientPickNote && (
         <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[60] bg-mipiace-ink text-white text-[13px] px-4 py-2.5 rounded-2xl shadow-lg max-w-[90vw] text-center">
           {clientPickNote}
@@ -2799,7 +2951,7 @@ function SaleWorkspace({
                 <X className="w-4 h-4" strokeWidth={2.25} />
               </button>
             </div>
-            <TicketPanel {...ticketPanelProps} />
+            <TicketPanel {...ticketPanelProps} layout="sheet" />
           </div>
         </div>
       )}
@@ -2868,9 +3020,11 @@ function TicketPanel({
   hasGroupedTables,
   onClickGroup,
   onClickUngroup,
-}: TicketPanelProps) {
+  layout = "aside",
+}: TicketPanelProps & { layout?: "aside" | "sheet" }) {
   const businessType = getCachedBusinessType();
-  return (
+
+  const headerBlock = (
     <>
         {/* 1 · Header */}
         <div className="flex items-center justify-between px-5 md:px-7 pt-5 md:pt-6 pb-3 md:pb-4 border-b border-slate-100 shrink-0">
@@ -2918,7 +3072,11 @@ function TicketPanel({
             </button>
           )}
         </div>
+    </>
+  );
 
+  const chipsBlock = (
+    <>
         {/* 2 · Chips de acciones del ticket. "Cancelar" en último
              lugar con estilo destructivo más suave para no competir
              visualmente con "Cobrar". */}
@@ -3005,12 +3163,22 @@ function TicketPanel({
             Cancelar
           </button>
         </div>
+    </>
+  );
 
+  const totalsBlock = (
+    <>
         {/* 3 · Resumen + Cobrar fijo arriba. shrink-0 dentro del
              flex-col del aside (aside overflow-hidden), así nunca
              scrollea: header + chips + este bloque quedan SIEMPRE
              visibles. v1.4-hotfix4 2026-06-04. */}
-        <div className="px-5 md:px-7 pt-4 md:pt-5 pb-5 md:pb-6 border-b border-slate-100 shrink-0">
+        <div
+          className={
+            layout === "sheet"
+              ? "px-5 md:px-7 pt-4 md:pt-5 pb-5 md:pb-6 border-t border-slate-100 shrink-0 bg-white"
+              : "px-5 md:px-7 pt-4 md:pt-5 pb-5 md:pb-6 border-b border-slate-100 shrink-0"
+          }
+        >
           <div className="space-y-1.5 mb-3 md:mb-4">
             <div className="flex justify-between text-[12.5px] md:text-[13px]">
               <span className="text-slate-500">Subtotal</span>
@@ -3089,11 +3257,21 @@ function TicketPanel({
             </button>
           </div>
         </div>
+    </>
+  );
 
+  const linesBlock = (
+    <>
         {/* 4 · Lista de líneas debajo del Cobrar. flex-1 + min-h-0
              + overflow-y-auto → SOLO el listado scrollea cuando hay
              muchas líneas; el resto del aside permanece fijo. */}
-        <div className="px-5 md:px-7 py-3 flex-1 min-h-0 overflow-y-auto">
+        <div
+          className={
+            layout === "sheet"
+              ? "px-5 md:px-7 py-3"
+              : "px-5 md:px-7 py-3 flex-1 min-h-0 overflow-y-auto"
+          }
+        >
           {lines.length === 0 ? (
             <div className="py-10 text-center text-[13px] text-slate-400">
               Pulsa un {vocab("itemNoun", businessType).toLowerCase()} o escanea un código para empezar.
@@ -3122,6 +3300,42 @@ function TicketPanel({
             </div>
           )}
         </div>
+    </>
+  );
+
+  // v1.10.3-barra · hallazgo #3 de la simulación de hora punta. En el
+  // bottom-sheet handheld los cuatro bloques eran hermanos `shrink-0`
+  // salvo el listado, que era `flex-1 min-h-0`. Cuando header + chips +
+  // totales medían más que el 88dvh del sheet, al listado le tocaban
+  // 0 px: las líneas arrancaban justo en el borde inferior y no había
+  // forma de llegar a ellas (ni rueda ni arrastre). En el aside de
+  // escritorio nunca pasó porque ahí sobra alto.
+  //
+  // En el sheet invertimos el reparto: cabecera, chips y LÍNEAS van
+  // dentro de un único contenedor scrollable —así el listado siempre
+  // tiene su alto natural— y el bloque de totales + Cobrar se ancla
+  // abajo, que es lo que no puede perderse de vista nunca.
+  if (layout === "sheet") {
+    return (
+      <>
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
+          {headerBlock}
+          {chipsBlock}
+          {linesBlock}
+        </div>
+        {totalsBlock}
+      </>
+    );
+  }
+
+  // Aside de escritorio (≥1024px): layout clásico validado por Sole —
+  // bloques fijos arriba y scroll SÓLO en el listado.
+  return (
+    <>
+      {headerBlock}
+      {chipsBlock}
+      {totalsBlock}
+      {linesBlock}
     </>
   );
 }

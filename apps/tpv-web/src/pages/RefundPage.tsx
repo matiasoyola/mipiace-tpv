@@ -15,8 +15,7 @@ import {
   outboxReleaseAfterFailure,
 } from "../lib/outbox.js";
 import { vocab } from "../lib/vocab.js";
-
-const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
+import { formatEur } from "../lib/money.js";
 
 interface OriginalLine {
   id: string;

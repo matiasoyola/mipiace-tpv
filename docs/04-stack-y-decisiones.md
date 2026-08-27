@@ -297,3 +297,80 @@ demuestra que no es fiable contra esta API.
 - El `HoldedClient` también valida `Content-Type` de la respuesta
   (lanza `HoldedInvalidResponseError` si llega HTML donde se esperaba
   JSON — endpoint inexistente disfrazado de 200).
+
+---
+
+## ADR-012 · El cierre del día lo hace el sistema; el arqueo es opcional
+
+**Contexto (el dato, no la intuición).** Consulta a la BD de producción el
+2026-08-20: los **quince últimos turnos** de Peluquería Sole se cierran
+**entre 1 y 4 segundos antes** de abrirse el siguiente. Los quince, sin
+excepción. No hay auto-cierre en el código — lo que hay es que
+`POST /shift/open` devuelve `409 SHIFT_ALREADY_OPEN`, así que Sole llega por
+la mañana, se encuentra el muro, y hace el arqueo de ayer **de pie, con la
+tabla de 15 denominaciones, antes de su primera clienta**. Dos meses así.
+Los turnos duran 24 h, 70 h en fin de semana, 288 h en vacaciones.
+
+Consecuencias de eso: el informe Z que sale de un turno de 288 h no vale
+como control de caja, y el arqueo obligatorio no es un control — es un
+peaje que se paga en el peor momento del día. Un dato contado a
+disgusto, con prisa y con público, no es más fiable que no contarlo: es
+menos fiable **y** además cuesta.
+
+Lo que hace viable rediseñarlo es **ADR-008**: el TPV no es sistema fiscal.
+El Z de aquí es una herramienta de gestión, no una obligación legal —
+quien registra fiscalmente es Holded. Si el Z fuese un documento fiscal
+obligatorio, esta ADR no existiría.
+
+**Decisión.** Tres cambios, en este orden de importancia:
+
+1. **El turno deja de ser un muro.** Ante un turno del día anterior, la
+   pantalla ofrece *Reanudar turno* como acción **primaria** y *Cerrar el
+   día de ayer* como secundaria. El cajero **puede vender antes de
+   arquear, siempre**.
+2. **Cierre automático por corte de día.** Un job repeatable cierra a la
+   hora local de `Tenant.dayCutHour` (default **05:00** Europe/Madrid) los
+   turnos abiertos que la han cruzado, y genera su Z con los datos del
+   servidor. Quedan marcados `closeReason = AUTO_DAY_CUT` y con
+   `cashCounted = NULL`: **nadie contó, así que el descuadre es
+   desconocido — no cero**.
+3. **El arqueo obligatorio pasa a ser una opción del negocio.** Nuevo flag
+   `Tenant.requireCashCountOnClose`, **default `false`**. El cierre normal
+   es: tarjeta de resumen (ventas, desglose por método, efectivo esperado)
+   + un botón *Confirmar*. Contar el cajón es un enlace, *Cuadrar caja*,
+   nunca bloqueante.
+
+**Alternativas descartadas.**
+
+- *Dejarlo como está.* Es la alternativa que llevamos dos meses ejecutando
+  sin saberlo, y produjo quince turnos de hasta 288 h y un arqueo diario
+  hecho de pie. El coste ya está medido.
+- *Obligar al cierre con un recordatorio* (aviso al cajero al final del
+  día, email al propietario). No arregla nada: el cierre sigue
+  dependiendo de que una persona se acuerde de hacer una tarea que no le
+  aporta nada en ese momento, y añade una notificación más que ignorar.
+  Convierte un problema de diseño en un problema de disciplina ajena.
+- *Cerrar en UTC en vez de en hora local.* Más simple de implementar y
+  mal: el corte caería a una hora distinta según la época del año, y un
+  bar cerraría su turno en mitad del servicio de noche dos veces al año.
+
+**Consecuencias.**
+
+- El Z gana valor como control: pasa a cubrir un día de operación real en
+  vez de un intervalo arbitrario de días.
+- Perdemos el descuadre diario de los negocios que no cuenten. Es
+  deliberado: preferimos **no tener el dato** a tener un dato que nadie
+  se cree. `cashCounted = NULL` lo dice explícitamente.
+- Un terminal offline a la hora del corte obliga a imputar las ventas que
+  llegan tarde **por su timestamp** al turno que les corresponde
+  (`apps/api/src/shift/impute.ts`). Sin eso, el corte automático habría
+  convertido un peaje molesto en ventas perdidas: el `409 SHIFT_NOT_OPEN`
+  es un rechazo permanente para el outbox.
+- Cuando una venta entra en un turno cuyo Z ya está archivado, el turno
+  queda marcado `zReportStale` y el resumen lo dice. El PDF emitido no se
+  reescribe.
+
+**Condición para revisar esta decisión: que un cliente pida cuadrar caja
+a diario.** Si eso pasa, el camino ya está: encender
+`requireCashCountOnClose` para ese tenant. Si pasa en varios, hay que
+volver aquí y replantear el default.

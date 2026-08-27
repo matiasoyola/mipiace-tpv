@@ -18,12 +18,20 @@ build/
 *.log
 logs/
 
+# Informes Z generados en runtime (y por los tests, que instancian el
+# generador de PDF de verdad). No son fuente.
+storage/
+
 .DS_Store
 .idea/
 .vscode/
 
 coverage/
 *.tsbuildinfo
+
+# Volcados del MCP de Playwright (snapshots y logs de consola del
+# bucle visual). Las capturas que sí se guardan viven en docs/blocks/.
+.playwright-mcp/
 
 spike/**/fixtures/*
 !spike/**/fixtures/.gitkeep

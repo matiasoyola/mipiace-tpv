@@ -193,6 +193,33 @@ enum ShiftCashCountKind {
   Z
 }
 
+// v1.11-cierre-de-dia · por qué se cerró un turno. MANUAL = lo cerró una
+// persona desde el TPV (comportamiento histórico, y el default del
+// backfill). AUTO_DAY_CUT = lo cerró el job de corte de día a la hora
+// local de `Tenant.dayCutHour` porque nadie lo cerró. El resumen del día
+// necesita distinguirlos para decir la verdad ("lo cerramos nosotros a
+// las 05:00") y para que el reporting no confunda un cierre real con uno
+// automático.
+enum ShiftCloseReason {
+  MANUAL
+  AUTO_DAY_CUT
+}
+
+// v1.12-mesas-abandonadas · por qué se anuló un ticket DRAFT. NULL en un
+// ticket que no está VOIDED. Mismo criterio que `ShiftCloseReason`:
+// `voidedByUserId` dice QUIÉN (NULL = lo hizo el sistema), esto dice POR QUÉ.
+//   MANUAL                — "vaciar mesa" desde el TPV, con una persona delante.
+//   AUTO_ABANDONED_EMPTY  — barrido del corte de día: draft SIN líneas y de
+//                           antes del corte. Cero consumo, cero decisión.
+//   MANAGER_VOID          — anulado desde el admin con PIN de encargado. Es el
+//                           único camino por el que se anula un draft CON líneas
+//                           sin estar en la caja.
+enum TicketVoidReason {
+  MANUAL
+  AUTO_ABANDONED_EMPTY
+  MANAGER_VOID
+}
+
 // B-reservas-1 (CRM) · tipo de consentimiento RGPD registrado en la ficha
 // del cliente. DATA = tratamiento de datos personales; TREATMENT =
 // consentimiento del tratamiento/servicio (fórmulas de color, parámetros
@@ -344,6 +371,21 @@ model Tenant {
   // autenticado para los cierres que requieran autenticación adicional
   // (sync_failed, force_close cuando el flag de force_close está on).
   requireOwnerPinForCashClose    Boolean           @default(false) @map("require_owner_pin_for_cash_close")
+  // v1.11-cierre-de-dia · hora LOCAL (Europe/Madrid) del corte de día. A
+  // esa hora el job `shift-day-cut` cierra los turnos abiertos que vienen
+  // del día anterior y genera su Z con los datos del server. Default 05:00
+  // — después del cierre de un bar de noche y antes de que abra nadie.
+  dayCutHour                     Int               @default(5) @map("day_cut_hour")
+  // v1.11-cierre-de-dia · si true, cerrar turno EXIGE contar el efectivo
+  // por denominaciones (comportamiento histórico). Default FALSE a
+  // propósito: el cierre normal pasa a ser resumen + "Confirmar", y
+  // cuadrar caja es un enlace opcional. Es el único flag de este bloque
+  // cuyo default cambia la operativa de quien no toque nada — decisión de
+  // producto (Matías, 2026-08-20) tras ver que Peluquería Sole hacía el
+  // arqueo de ayer de pie antes de su primera clienta. Convive con
+  // `requireOwnerPinForCashClose`: uno dice SI hay que contar, el otro
+  // QUIÉN puede autorizar el cierre.
+  requireCashCountOnClose        Boolean           @default(false) @map("require_cash_count_on_close")
   // Si true, se envía email al propietario cuando un device nuevo se
   // empareja o cuando un device conocido aparece desde un país distinto
   // (§17.4). Default true.
@@ -563,6 +605,7 @@ model User {
   shifts         Shift[]              @relation("ShiftOpenedBy")
   closedShifts   Shift[]              @relation("ShiftClosedBy")
   tickets        Ticket[]
+  voidedTickets  Ticket[]             @relation("TicketVoidedBy")
   pairingCodes   PairingCode[]
   resetTokens    PasswordResetToken[]
   refunds        Refund[]
@@ -938,6 +981,19 @@ model Shift {
   // cajero cierra un turno colgado de un compañero (§3.5 del prompt).
   closedByUserId String?   @map("closed_by_user_id") @db.Uuid
   zReportPdfPath String?   @map("z_report_pdf_path")
+  // v1.11-cierre-de-dia · quién/qué cerró el turno. `closedByUserId` dice
+  // QUIÉN (null cuando cierra el job); esto dice POR QUÉ.
+  closeReason    ShiftCloseReason @default(MANUAL) @map("close_reason")
+  // v1.11-cierre-de-dia · cuándo el cajero confirmó el resumen del día de
+  // este turno cerrado. NULL = el resumen sigue pendiente de enseñarse (la
+  // tarjeta aparece al abrir por la mañana). Evita que la tarjeta reaparezca
+  // para siempre sin necesitar estado en el cliente.
+  summaryAckAt   DateTime?        @map("summary_ack_at") @db.Timestamptz()
+  // v1.11-cierre-de-dia · el Z de este turno se generó y DESPUÉS entraron
+  // ventas (tickets de un outbox offline imputados aquí por su timestamp,
+  // ver `shift/impute.ts`). El PDF archivado ya no cuadra con la BD; el
+  // resumen lo dice en vez de callarlo.
+  zReportStale   Boolean          @default(false) @map("z_report_stale")
 
   register   Register         @relation(fields: [registerId], references: [id], onDelete: Restrict)
   user       User             @relation("ShiftOpenedBy", fields: [userId], references: [id], onDelete: Restrict)
@@ -1065,11 +1121,20 @@ model Ticket {
   paidAt               DateTime?    @map("paid_at") @db.Timestamptz()
   syncedAt             DateTime?    @map("synced_at") @db.Timestamptz()
   syncError            Json?        @map("sync_error")
+  // v1.12-mesas-abandonadas · auditoría de la anulación de un DRAFT.
+  // NULL en todo ticket que no esté VOIDED. `voidedByUserId` NULL con
+  // `voidReason = AUTO_ABANDONED_EMPTY` es el barrido del corte de día:
+  // lo anuló SISTEMA. Los VOIDED anteriores a v1.12 quedan MANUAL con
+  // `voidedAt` NULL — los anuló una persona, pero no sabemos cuándo.
+  voidReason           TicketVoidReason? @map("void_reason")
+  voidedAt             DateTime?    @map("voided_at") @db.Timestamptz()
+  voidedByUserId       String?      @map("voided_by_user_id") @db.Uuid
 
   tenant          Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   register        Register               @relation(fields: [registerId], references: [id], onDelete: Restrict)
   shift           Shift                  @relation(fields: [shiftId], references: [id], onDelete: Restrict)
   user            User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
+  voidedBy        User?                  @relation("TicketVoidedBy", fields: [voidedByUserId], references: [id], onDelete: Restrict)
   lines           TicketLine[]
   payments        TicketPayment[]
   partialPayments TicketPartialPayment[]

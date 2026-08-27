@@ -11,7 +11,15 @@ export interface DeviceMeResponse {
   device: { id: string; name: string | null; pairedAt: string };
   register: { id: string; name: string; numSerieHolded: string | null };
   store: { id: string; name: string };
-  tenant: { id: string; name: string; cashierAutoLogoutMinutes: number };
+  tenant: {
+    id: string;
+    name: string;
+    cashierAutoLogoutMinutes: number;
+    // v1.11-cierre-de-dia · el negocio exige cuadrar caja para cerrar.
+    // Ausente en la caché de un device bootstrapeado antes de v1.11 →
+    // se trata como false, que es el default nuevo.
+    requireCashCountOnClose?: boolean;
+  };
 }
 
 export type BootstrapState =

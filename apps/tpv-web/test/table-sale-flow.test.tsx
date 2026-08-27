@@ -239,6 +239,56 @@ async function click(btn: HTMLButtonElement) {
   await settle();
 }
 
+// v1.12 addendum · dónde vive ahora "salir sin haber pedido nada".
+//
+// Este bloque probaba que `SalePage` envolvía su `onBackToMap` para
+// soltar el DRAFT vacío. Esa envoltura se ha quitado: la limpieza vive
+// en `goToMap()` de `App.tsx`, junto al cambio de vista, porque el Atrás
+// de Android y el "Mesas" del historial NO pasaban por aquí y dejaban la
+// mesa ocupada con un ticket sin líneas. La cobertura equivalente —y las
+// otras dos salidas— está en `table-exit-release.test.tsx`.
+//
+// Lo que sigue guardándose aquí es lo contrario: que `SalePage` no
+// vuelva a envolver nada. Si alguien repone el wrapper, la mesa recibe
+// dos DELETE por salida y volvemos a tener dos caminos que mantener.
+describe("SalePage · v1.12 addendum · la salida al mapa no se envuelve aquí", () => {
+  it("«Mapa» llama a onBackToMap y no toca la API por su cuenta", async () => {
+    const calls: Array<{ path: string; method?: string }> = [];
+    apiMock.apiWithCashier.mockImplementation(
+      async (path: string, opts?: { method?: string }) => {
+        calls.push({ path, method: opts?.method });
+        const bg = backgroundRoutes(path);
+        if (bg !== undefined) return bg;
+        throw new Error(`ruta inesperada: ${path}`);
+      },
+    );
+
+    await renderSalePage([]);
+    await click(buttonByText("Mapa"));
+
+    expect(onBackToMap).toHaveBeenCalledTimes(1);
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+  });
+
+  it("con líneas dentro, tampoco: quien decide es el servidor, no la proyección local", async () => {
+    const calls: Array<{ path: string; method?: string }> = [];
+    apiMock.apiWithCashier.mockImplementation(
+      async (path: string, opts?: { method?: string }) => {
+        calls.push({ path, method: opts?.method });
+        const bg = backgroundRoutes(path);
+        if (bg !== undefined) return bg;
+        throw new Error(`ruta inesperada: ${path}`);
+      },
+    );
+
+    await renderSalePage([serverLine()]);
+    await click(buttonByText("Mapa"));
+
+    expect(onBackToMap).toHaveBeenCalledTimes(1);
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+  });
+});
+
 describe("SalePage · mesa cableada a la API", () => {
   it("añadir línea: POST /tables/:id/lines con lineExternalId + reconciliación", async () => {
     let capturedBody: Record<string, unknown> | null = null;

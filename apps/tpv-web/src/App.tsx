@@ -1,13 +1,16 @@
 // Orquestador de estados del TPV en B3:
 //   1. unpaired → PairScreen
 //   2. paired + no session → PinScreen
-//   3. session + shift forceClose → ShiftForceCloseScreen
-//   4. session + needsShiftOpen → ShiftOpenScreen
-//   5. session + reanudar → ShiftActiveScreen
+//   3. session + shift del día anterior → ShiftResumeScreen
+//   4. session + needsShiftOpen → tarjeta del día (si la hay) → ShiftOpenScreen
+//   5. session + reanudar → TpvHome (venta)
 //
-// La venta llega en B4 y reemplaza ShiftActiveScreen.
+// v1.11-cierre-de-dia · el paso 3 dejó de ser un muro: "Reanudar turno" es
+// la acción primaria y el cajero puede vender antes de arquear. Y el paso 4
+// enseña el resumen del día cerrado —lo cerrase una persona o el corte de
+// día— antes de pedir el fondo de caja del turno nuevo.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import {
@@ -40,13 +43,22 @@ import {
   type ServerDraft,
 } from "./lib/tableDraft.js";
 import type { CartLine } from "./lib/cart.js";
+import {
+  ackDaySummary,
+  fetchPendingDaySummary,
+  type ShiftDaySummary,
+} from "./lib/shiftSummary.js";
 import { clearTestMode, isTestModeActive } from "./lib/test-mode.js";
 import { startVisualViewportSync } from "./lib/visualViewportSync.js";
+import { installBackGuard, setBackFallback } from "./hooks/useBackGuard.js";
 import { OutboxChip } from "./pages/CheckoutPage.outboxChip.js";
 import { PairScreen } from "./pages/PairScreen.js";
 import { PinScreen, type CashierLoginResponse } from "./pages/PinScreen.js";
 import { SalePage, type TableContext } from "./pages/SalePage.js";
-import { ShiftForceCloseScreen } from "./pages/ShiftForceCloseScreen.js";
+import { CloseShiftModal } from "./pages/CloseShiftModal.js";
+import { DaySummaryCard } from "./pages/DaySummaryCard.js";
+import { daySummaryTitle } from "./lib/daySummaryTitle.js";
+import { ShiftResumeScreen } from "./pages/ShiftResumeScreen.js";
 import { ShiftOpenScreen } from "./pages/ShiftOpenScreen.js";
 import {
   TableMapScreen,
@@ -153,6 +165,11 @@ export function App() {
   // dropdown de búsqueda) usa `padding-bottom: var(--keyboard-offset)`
   // para empujarse hacia arriba en lugar de quedar oculto.
   useEffect(() => startVisualViewportSync(), []);
+
+  // v1.12-manos-de-camarero · el Atrás del sistema deja de sacar del TPV
+  // (hallazgo H6). El centinela de historia se instala aquí, una vez,
+  // antes de que nadie registre capas.
+  useEffect(() => installBackGuard(), []);
 
   // v1.5-consistencia-C · reenvío del outbox offline: al arrancar, al
   // evento `online` y cada N segundos mientras haya pendientes.
@@ -362,15 +379,22 @@ export function App() {
         />
       )}
       {cashier.kind === "forceClose" ? (
-        <ShiftForceCloseScreen
+        <ShiftResumeScreen
           shift={cashier.shift}
           cashierRole={cashier.cashier.role}
+          requireCashCountOnClose={tenant.requireCashCountOnClose === true}
+          onResumed={(shift) => {
+            // v1.11 · reanudar es la acción primaria: a vender, sin arquear.
+            void mirrorServerShift(shift).catch(() => {});
+            setCashier({ kind: "active", cashier: cashier.cashier, shift });
+          }}
           onClosed={() =>
             setCashier({ kind: "needsShiftOpen", cashier: cashier.cashier })
           }
         />
       ) : cashier.kind === "needsShiftOpen" ? (
-        <ShiftOpenScreen
+        <ShiftOpenWithDaySummary
+          cashierRole={cashier.cashier.role}
           cashierLabel={cashierDisplayLabel(cashier.cashier)}
           registerName={register.name}
           storeName={store.name}
@@ -466,7 +490,10 @@ function LoggedInWrapper({
 // de sala y la venta rápida se accede con botón superior derecha. En
 // modo retail puro (tienda sin mesas), seguimos directos a SalePage
 // como en B4-B6 — sin coste para los clientes que no usan bar.
-function TpvHome(props: {
+// Exportado para los tests del addendum de v1.12: la salida al mapa
+// (botón, Atrás de Android e historial) vive aquí, así que se prueba
+// aquí. En producción sólo lo monta `LoggedInWrapper`.
+export function TpvHome(props: {
   cashier: CashierUser;
   shiftId: string;
   registerName: string;
@@ -540,6 +567,62 @@ function TpvHome(props: {
     }
   }
 
+  // v1.12-addendum · LA salida al mapa. Una sola función, aquí, porque
+  // aquí es donde vive el cambio de vista: el botón "Mapa", el Atrás de
+  // Android y el "Mesas" del historial de tickets salen todos por el
+  // mismo sitio y sueltan la mesa igual.
+  //
+  // Antes había dos caminos. `SalePage` envolvía su `onBackToMap` para
+  // soltar el draft vacío, pero el guardia del Atrás y el historial
+  // llamaban al cambio de vista a pelo: salir con el Atrás dejaba la
+  // mesa ocupada con un DRAFT sin líneas — la mesa zombi que v1.12-B
+  // vino a matar. Envolver cada llamada es cómo se llegó a eso; la
+  // limpieza vive donde vive la navegación.
+  //
+  // QUIÉN DECIDE QUE ESTÁ VACÍA: EL SERVIDOR (v1.12-B). `onlyIfEmpty=true`
+  // se comprueba dentro del WHERE de la reclamación: si otra caja comandó
+  // hace tres segundos, responde 409 y no toca nada. Desde aquí ni
+  // siquiera conocemos las líneas, que es justo la razón de no decidirlo
+  // en el cliente.
+  //
+  // Si no procede —409, mesa ya cobrada, sin red— se traga en silencio y
+  // se va al mapa igual: el cajero pidió ir al mapa, no gestionar un
+  // draft del que no sabe nada. El barrido de madrugada recoge el resto.
+  const goToMap = useCallback(async () => {
+    const ticketId =
+      view.kind === "sale" ? view.tableContext?.activeTicketId ?? null : null;
+    if (ticketId) {
+      try {
+        await apiWithCashier(
+          `/tickets/${ticketId}?onlyIfEmpty=true&reason=${encodeURIComponent(
+            "Salió del detalle sin añadir nada",
+          )}`,
+          { method: "DELETE" },
+        );
+      } catch {
+        // Silencio a propósito, incluido el 409 "la mesa tiene líneas":
+        // esa es la respuesta correcta, no un error que enseñar.
+      }
+    }
+    setMapNotice(null);
+    setView({ kind: "map" });
+  }, [view]);
+
+  // v1.12-manos-de-camarero · guardia de fondo del Atrás (H6). Cuando
+  // no hay ninguna hoja abierta: dentro de una venta se vuelve al mapa
+  // de mesas; en el mapa no se hace nada (el turno está abierto y no
+  // hay ningún sitio al que ir que no sea el escritorio de Android).
+  useEffect(() => {
+    setBackFallback(() => {
+      if (view.kind === "sale" && hasTables) {
+        void goToMap();
+        return true;
+      }
+      return false;
+    });
+    return () => setBackFallback(null);
+  }, [view.kind, hasTables, goToMap]);
+
   useEffect(() => {
     if (skipTables) return;
     let cancelled = false;
@@ -575,6 +658,10 @@ function TpvHome(props: {
     );
   }
 
+  // v1.12-manos-de-camarero · guardia del Atrás del sistema (H6). Sin
+  // capas abiertas, dentro de una venta el Atrás vuelve al mapa de
+  // mesas; en el mapa, con el turno abierto, no hace nada. Nunca al
+  // escritorio de Android.
   if (view.kind === "map") {
     return (
       <TableMapScreen
@@ -609,14 +696,9 @@ function TpvHome(props: {
       storeName={props.storeName}
       tableContext={view.tableContext}
       initialTableLines={view.initialTableLines}
-      onBackToMap={
-        hasTables
-          ? () => {
-              setMapNotice(null);
-              setView({ kind: "map" });
-            }
-          : null
-      }
+      // La salida al mapa ya viene con la limpieza dentro: `SalePage` no
+      // envuelve nada, sólo llama.
+      onBackToMap={hasTables ? () => void goToMap() : null}
       // v1.9.2-mesas-concurrencia · salida al mapa CON aviso inline:
       // expulsión por cobro/absorción remota, o confirmación tras
       // cobrar la mesa desde este dispositivo (banner de éxito con
@@ -659,6 +741,105 @@ function TpvHome(props: {
       onCloseShift={props.onCloseShift}
     />
   );
+}
+
+// v1.11-cierre-de-dia · antes de pedir el fondo de caja del turno nuevo,
+// enseñamos el resumen del día que se acaba de cerrar — lo cerrase una
+// persona anoche o el corte de día de madrugada. Es la parte del bloque que
+// le devuelve a Sole la información que hasta ahora sólo veía quien cerraba
+// desde el menú (addendum, punto 2: el cierre del turno colgado no enseñaba
+// NADA, y era el único que ella ejecutaba).
+//
+// "Confirmar" sella `summaryAckAt` en el server, así que la tarjeta aparece
+// UNA vez y no todas las mañanas. Sin red no hay resumen que pedir: se pasa
+// derecho a abrir turno, como en v1.10.
+function ShiftOpenWithDaySummary({
+  cashierRole,
+  ...props
+}: React.ComponentProps<typeof ShiftOpenScreen> & {
+  cashierRole: "MANAGER" | "CASHIER";
+}) {
+  const [pending, setPending] = useState<ShiftDaySummary | null>(null);
+  const [checking, setChecking] = useState(() => navigator.onLine);
+  const [acking, setAcking] = useState(false);
+  // "Cuadrar caja" sobre un turno que cerró el corte de día: arqueo a
+  // posteriori (kind X). Opcional y nunca bloqueante — el cajero puede
+  // pulsar Confirmar y abrir caja sin contar nada.
+  const [counting, setCounting] = useState(false);
+
+  useEffect(() => {
+    if (!navigator.onLine) return;
+    let alive = true;
+    void fetchPendingDaySummary()
+      .then((s) => {
+        if (!alive) return;
+        setPending(s);
+        setChecking(false);
+      })
+      .catch(() => {
+        // Sin resumen no bloqueamos la apertura de caja. Nunca.
+        if (alive) setChecking(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (checking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-mipiace-stone">
+        <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+      </div>
+    );
+  }
+
+  if (pending) {
+    // El arqueo a posteriori sólo tiene sentido si lo cerró el corte de día
+    // y nadie ha contado todavía. Si lo cerró una persona, ya tuvo su
+    // momento de contar.
+    const canCount =
+      pending.shift.closeReason === "AUTO_DAY_CUT" &&
+      pending.shift.cashCounted == null;
+    return (
+      <div className="min-h-screen bg-mipiace-stone flex items-center justify-center p-5 font-sans">
+        <div className="w-full max-w-lg">
+          <DaySummaryCard
+            summary={pending}
+            title={daySummaryTitle(pending.shift.closedAt)}
+            busy={acking}
+            confirmLabel="Confirmar"
+            onConfirm={async () => {
+              setAcking(true);
+              // Si el ack falla, la tarjeta reaparecerá mañana: molesto, no
+              // grave. Lo que no puede pasar es que el cajero se quede
+              // atrapado aquí sin poder abrir caja.
+              await ackDaySummary(pending.shift.id).catch(() => undefined);
+              setPending(null);
+              setAcking(false);
+            }}
+            {...(canCount ? { onCountCash: () => setCounting(true) } : {})}
+          />
+        </div>
+        {counting && (
+          <CloseShiftModal
+            shiftId={pending.shift.id}
+            cashierRole={cashierRole}
+            mode="X"
+            onClose={() => {
+              setCounting(false);
+              // Al volver del arqueo, el resumen ya conoce el descuadre.
+              void fetchPendingDaySummary()
+                .then((s) => s && setPending(s))
+                .catch(() => undefined);
+            }}
+            onClosed={() => setCounting(false)}
+          />
+        )}
+      </div>
+    );
+  }
+
+  return <ShiftOpenScreen {...props} />;
 }
 
 // ─── Modo prueba (B-OnboardingV2) ──────────────────────────────────
@@ -738,9 +919,12 @@ function TestModeTpv({
           }}
         />
       ) : (
-        <ShiftForceCloseScreen
+        <ShiftResumeScreen
           shift={cashier.shift}
           cashierRole={cashier.cashier.role}
+          onResumed={(shift) =>
+            setCashier({ kind: "active", cashier: cashier.cashier, shift })
+          }
           onClosed={() =>
             setCashier({ kind: "needsShiftOpen", cashier: cashier.cashier })
           }
