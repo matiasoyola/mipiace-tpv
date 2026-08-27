@@ -57,7 +57,10 @@ Es el orden en que se construyó `v1-12-base`, así que los conflictos ya están
 ### Puertas go/no-go
 
 1. **CI verde en master**, incluido el paso de humo. Puerta del protocolo anti-sustos.
-2. **v1.13 (e2e del ciclo de caja) en verde contra Postgres de verdad.** Esta es la puerta nueva y
+2. **v1.13 (e2e del ciclo de caja) en verde contra Postgres de verdad.** Ojo: el job `e2e` del CI
+   queda **fuera de `needs` de `publish`** a propósito, así que no bloquea la publicación por sí
+   solo. Es una puerta que **hay que mirar**, no una que salte sola: antes de desplegar, abrir el
+   run de CI y comprobar que ese job está verde. Esta es la puerta nueva y
    la que justifica todo: v1.11 mete un job que cierra turnos solo a las cinco de la mañana en la
    caja de un cliente, y hoy sólo está probado contra un prisma falso.
 3. **Saber qué turnos hay abiertos antes de desplegar** (ver más abajo).
