@@ -26,6 +26,31 @@ Trabajar sobre `master` significaría reescribir el bloque entero en el merge.
 Si la rama de trabajo no contiene `DaySummaryCard.tsx` y `ShiftResumeScreen.tsx`, **para y avisa**:
 la base está mal.
 
+### 0.1 · Resolver la integración (paso 0 del bloque)
+
+Si la rama llega sin las dos ramas mergeadas, hazlo tú antes de escribir una línea de v1.12:
+
+```bash
+git merge v1-10-3-barra-hora-punta      # limpio
+git merge v1-11-cierre-de-dia           # 4 conflictos esperados
+```
+
+Sólo cuatro ficheros se solapan, y la regla de resolución es la misma en todos: **v1.11 manda en
+la forma, v1.10.3 manda en el contenido de importes.**
+
+- `apps/tpv-web/src/pages/ShiftForceCloseScreen.tsx` y
+  `apps/tpv-web/test/shift-force-close-sync-pending.test.tsx` — v1.11 los **borra** a propósito
+  (su contenido vive ahora en `ShiftResumeScreen.tsx`). El borrado se acepta. Lo que v1.10.3 les
+  había añadido (formato de importes, unidades humanas de tiempo) **hay que reponerlo** sobre
+  `ShiftResumeScreen.tsx`, no restaurar el fichero viejo.
+- `apps/tpv-web/src/pages/CloseShiftModal.tsx` — se queda la estructura de v1.11 con los arreglos
+  de importe de v1.10.3 dentro.
+- `.gitignore` — unir las dos listas.
+
+Al terminar el merge: `pnpm -r test` y `pnpm -r typecheck` en verde **antes** de empezar el
+bloque, y un commit propio (`merge · base de integración v1.10.3 + v1.11`) separado del trabajo
+de v1.12. Si algo no cuadra, para y pregunta: no reescribas v1.11 para que compile.
+
 ## Contexto (leer antes)
 
 - `docs/qa/2026-08-27-pruebas-fisicas-ap11.md` — los 9 hallazgos con medidas y capturas.
