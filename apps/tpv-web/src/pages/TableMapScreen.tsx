@@ -62,6 +62,7 @@ import { outboxBlockedTableIds, subscribeOutbox } from "../lib/outbox.js";
 import { syncNow } from "../lib/syncNow.js";
 import { CloseShiftModal } from "./CloseShiftModal.js";
 import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
+import { formatEur } from "../lib/money.js";
 
 // El modal de cobro arrastra un grafo de dependencias grande (impresión,
 // outbox, overlays). Se carga en diferido para no engordar el arranque
@@ -115,8 +116,6 @@ const ZONE_LABEL: Record<TableZone | "ALL", string> = {
   BARRA: "Barra",
   RESERVADO: "Reservados",
 };
-
-const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
 
 // v1.9.2-mesas-concurrencia · Frente 1/2/3: aviso inline que el mapa
 // muestra cuando el cajero es EXPULSADO de una mesa (cobrada/absorbida
@@ -1008,10 +1007,15 @@ function TableCard({
             cobro pendiente
           </span>
         )}
-        {/* tiempo abierto bajo pax (ámbar si olvidada) */}
+        {/* tiempo abierto bajo pax (ámbar si olvidada).
+            v1.10.3-barra · hallazgo #5: con 4 dígitos de duración el
+            contador se comía la línea entera. Ahora llega en unidades
+            humanas ("42 días", ver `formatElapsed`) y además va acotado
+            a media tarjeta para que nunca pise el nombre de la mesa. */}
         {!isFree && !pendingCheckout && (
           <span
-            className={`absolute top-[30px] right-3 text-[11px] font-semibold tabular-nums ${
+            title={`Abierta hace ${elapsed}`}
+            className={`absolute top-[30px] right-3 max-w-[calc(100%-24px)] truncate text-[11px] font-semibold tabular-nums ${
               olvidada ? "text-amber-700" : "text-slate-500"
             }`}
           >
@@ -1020,23 +1024,36 @@ function TableCard({
         )}
 
         {/* pie: camarero (avatar+alias) + total */}
+        {/* v1.10.3-barra · hallazgo #5: el importe no llevaba `shrink-0`
+            y con la tarjeta estrecha "0,00 €" se partía en dos líneas
+            mientras el alias del cajero quedaba en "m..". El dinero es
+            lo que no se puede leer a medias: gana el ancho que necesita
+            y lo que se recorta es el nombre, que además va en `title`. */}
         {!isFree && table.activeTicket && (
-          <div className="mt-auto flex items-end justify-between gap-2">
+          <div className="mt-auto pt-1 flex flex-wrap items-end justify-between gap-x-2 gap-y-1">
             {alias ? (
-              <span className="flex items-center gap-1.5 text-[11.5px] text-slate-500 min-w-0">
+              <span
+                title={aliasName(alias)}
+                // `min-w-[92px]` + `flex-wrap` en el contenedor: si el
+                // camarero y el importe no caben en la misma línea, el
+                // camarero se lleva una línea entera para él en vez de
+                // quedarse en "m..". Con importes normales siguen en la
+                // misma fila, como hasta ahora.
+                className="flex items-center gap-1.5 text-[11.5px] text-slate-500 min-w-[92px] flex-1"
+              >
                 <span className="w-5 h-5 rounded-[7px] bg-mipiace-ink text-white text-[9.5px] font-bold inline-flex items-center justify-center shrink-0">
                   {avatarInitials(alias)}
                 </span>
                 <span className="truncate">{aliasName(alias)}</span>
               </span>
             ) : (
-              <span />
+              <span className="min-w-[92px] flex-1" />
             )}
             {/* En BILLING el total cede su sitio al botón Cobrar (overlay
                 a la derecha); reservamos el hueco. */}
             {!showCobrar && (
               <span
-                className={`text-[19px] font-bold tabular-nums tracking-tight ${totalColor}`}
+                className={`shrink-0 ml-auto whitespace-nowrap text-[19px] font-bold tabular-nums tracking-tight ${totalColor}`}
               >
                 {formatEur(Number(table.activeTicket.total))}
               </span>
@@ -1160,7 +1177,7 @@ function BarStool({
       </span>
       {table.activeTicket && (
         <span
-          className={`text-[13px] font-bold tabular-nums ${isBilling ? "text-amber-700" : "text-mipiace-coral-dark"}`}
+          className={`text-[13px] font-bold tabular-nums whitespace-nowrap ${isBilling ? "text-amber-700" : "text-mipiace-coral-dark"}`}
         >
           {formatEur(Number(table.activeTicket.total))}
         </span>

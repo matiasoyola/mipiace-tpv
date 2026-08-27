@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { apiWithCashier, ApiError } from "../api.js";
+import { formatAmount, formatEur, parseAmount } from "../lib/money.js";
 
 type Method = "CASH" | "CARD" | "BIZUM" | "VOUCHER";
 
@@ -87,11 +88,11 @@ export function SplitBillSheet({ ticketId, onClose }: SplitBillSheetProps) {
   function applyShortcut(divisor: 2 | 3 | 4) {
     if (total == null) return;
     const v = remaining / divisor;
-    setAmount(v.toFixed(2));
+    setAmount(formatAmount(v));
   }
 
   async function submitPartial() {
-    const parsed = parseFloat(amount.replace(",", "."));
+    const parsed = parseAmount(amount);
     if (!Number.isFinite(parsed) || parsed <= 0) {
       setError("Importe inválido.");
       return;
@@ -158,7 +159,7 @@ export function SplitBillSheet({ ticketId, onClose }: SplitBillSheetProps) {
                   Total
                 </div>
                 <div className="text-[16px] font-semibold tabular-nums text-mipiace-ink">
-                  {total.toFixed(2)} €
+                  {formatEur(total)}
                 </div>
               </div>
               <div>
@@ -166,7 +167,7 @@ export function SplitBillSheet({ ticketId, onClose }: SplitBillSheetProps) {
                   Cobrado
                 </div>
                 <div className="text-[16px] font-semibold tabular-nums text-emerald-700">
-                  {collected.toFixed(2)} €
+                  {formatEur(collected)}
                 </div>
               </div>
               <div>
@@ -174,7 +175,7 @@ export function SplitBillSheet({ ticketId, onClose }: SplitBillSheetProps) {
                   Resta
                 </div>
                 <div className="text-[16px] font-semibold tabular-nums text-mipiace-coral-dark">
-                  {remaining.toFixed(2)} €
+                  {formatEur(remaining)}
                 </div>
               </div>
             </div>
@@ -203,9 +204,9 @@ export function SplitBillSheet({ ticketId, onClose }: SplitBillSheetProps) {
               />
               <div className="grid grid-cols-4 gap-2 mb-4">
                 <button
-                  onClick={() => setAmount(remaining.toFixed(2))}
+                  onClick={() => setAmount(formatAmount(remaining))}
                   className="h-10 rounded-xl bg-mipiace-stone hover:bg-slate-100 text-[12.5px] font-medium text-mipiace-ink"
-                  title={`Importe restante (${remaining.toFixed(2)} €)`}
+                  title={`Importe restante (${formatEur(remaining)})`}
                 >
                   Resto
                 </button>
@@ -294,7 +295,7 @@ export function SplitBillSheet({ ticketId, onClose }: SplitBillSheetProps) {
                   >
                     <div className="text-mipiace-ink">
                       <span className="font-semibold tabular-nums">
-                        {p.amount.toFixed(2)} €
+                        {formatEur(p.amount)}
                       </span>
                       <span className="text-slate-500 ml-2">
                         {METHOD_LABEL[p.method as Method] ?? p.method}

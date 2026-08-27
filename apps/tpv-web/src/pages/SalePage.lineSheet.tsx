@@ -12,8 +12,7 @@ import {
   round2,
   type CartLine,
 } from "../lib/cart.js";
-
-const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
+import { formatAmount, formatEur } from "../lib/money.js";
 
 // v1.2-Lite Lote 4.B: parsea precio escrito por el cajero. Soporta
 // coma o punto como separador decimal. Devuelve null si el input está
@@ -70,7 +69,7 @@ export function LineSheet({
   const effectiveNet =
     line.unitPriceOverride != null ? line.unitPriceOverride : line.unitPrice;
   const [priceInput, setPriceInput] = useState(
-    netToGross(effectiveNet, line.taxRate).toFixed(2).replace(".", ","),
+    formatAmount(netToGross(effectiveNet, line.taxRate)),
   );
 
   // Neto derivado del bruto tecleado. null cuando el input no parsea o
@@ -205,7 +204,7 @@ export function LineSheet({
                 type="button"
                 onClick={() => {
                   setShowPriceEditor(false);
-                  setPriceInput(catalogGross.toFixed(2).replace(".", ","));
+                  setPriceInput(formatAmount(catalogGross));
                 }}
                 className="h-12 px-3 rounded-xl bg-mipiace-stone hover:bg-slate-100 text-slate-600 flex items-center gap-1.5 text-[12.5px] font-medium"
                 aria-label="Restaurar precio del catálogo"
@@ -290,10 +289,7 @@ export function LineSheet({
                       }`}
                     >
                       {s.priceDeltaCents > 0 ? "+" : "−"}{" "}
-                      {(Math.abs(s.priceDeltaCents) / 100)
-                        .toFixed(2)
-                        .replace(".", ",")}{" "}
-                      €
+                      {formatEur(Math.abs(s.priceDeltaCents) / 100)}
                     </span>
                   )}
                 </div>

@@ -121,7 +121,7 @@ describe("v1.5-hotfix2 · turno colgado con SYNC_PENDING", () => {
 
     expect(container.textContent).toContain("Puedes cerrar el turno igualmente");
     expect(container.textContent).toContain("#000022");
-    expect(container.textContent).toContain("27.40 €");
+    expect(container.textContent).toContain("27,40 €");
     expect(closeButton().disabled).toBe(true);
     expect(apiMock.apiWithCashier).toHaveBeenCalledTimes(1);
   });

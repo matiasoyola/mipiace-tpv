@@ -31,8 +31,7 @@ import {
   type PrintOutcome,
 } from "../platform/printer/printJob.js";
 import { RefundOverlay } from "./RefundPage.js";
-
-const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
+import { formatEur } from "../lib/money.js";
 
 // v1.10.2-impresion-honesta · estado de una reimpresión.
 //

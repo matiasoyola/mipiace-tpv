@@ -20,8 +20,7 @@ import {
   subscribeOutbox,
 } from "../lib/outbox.js";
 import type { OutboxItem } from "../lib/outbox.js";
-
-const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
+import { formatEur } from "../lib/money.js";
 
 function formatTime(ts: number): string {
   const d = new Date(ts);

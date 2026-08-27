@@ -7,6 +7,7 @@ import { AlertCircle, Loader2 } from "lucide-react";
 
 import { apiWithCashier, ApiError } from "../api.js";
 import { Logo } from "../Logo.js";
+import { formatEur } from "../lib/money.js";
 
 interface ForceCloseShift {
   id: string;
@@ -174,7 +175,7 @@ export function ShiftForceCloseScreen({
                         {d.kind === "refund" ? "Devolución" : "Ticket"} #{d.internalNumber}
                         {d.errorSummary ? ` · ${d.errorSummary}` : ""}
                       </span>
-                      <span className="font-medium shrink-0">{d.total.toFixed(2)} €</span>
+                      <span className="font-medium shrink-0">{formatEur(d.total)}</span>
                     </li>
                   ))}
                 </ul>

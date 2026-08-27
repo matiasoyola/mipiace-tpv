@@ -14,8 +14,7 @@ import type {
   CatalogModifierGroup,
 } from "../lib/modifiers.js";
 import type { ModifierSelection } from "../lib/cart.js";
-
-const formatEur = (n: number) => n.toFixed(2).replace(".", ",") + " €";
+import { formatEur } from "../lib/money.js";
 
 function formatDelta(cents: number): string | null {
   if (cents === 0) return null;
