@@ -150,6 +150,32 @@ export function CloseShiftModal(props: {
   // de Android con el turno abierto (H6).
   useBackGuard(() => setPadDenom(null), padDenom !== null);
   useBackGuard(props.onClose, padDenom === null);
+  // Con el pad abierto la tabla se queda con lo que sobra, así que la
+  // fila que se está contando se trae a la vista. Contar sin ver la
+  // fila es exactamente cómo se cuela un descuadre.
+  useEffect(() => {
+    if (!padDenom) return;
+    const label = DENOMINATIONS.find((d) => d.key === padDenom)?.label;
+    if (!label) return;
+    // Dos frames: al abrirse el pad la tabla cambia de alto, y centrar
+    // con la geometría vieja deja la fila fuera de cuadro justo en las
+    // pantallas estrechas, que es donde más falta hace.
+    const raf = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const field = document.querySelector(
+          `input[aria-label="Cantidad de ${label}"]`,
+        );
+        const row = field?.closest("tr") ?? field;
+        // `scrollIntoView` no existe en jsdom (tests) y falta en
+        // WebViews viejos: traer la fila a la vista es una cortesía, no
+        // un requisito del recuento.
+        if (typeof row?.scrollIntoView === "function") {
+          row.scrollIntoView({ block: "center" });
+        }
+      });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [padDenom]);
   const [syncFailureAccepted, setSyncFailureAccepted] = useState(false);
   const [managerPin, setManagerPin] = useState("");
   const [needsManager, setNeedsManager] = useState(false);
@@ -652,25 +678,47 @@ export function CloseShiftModal(props: {
   }
 
   // ── Fase `count`: la tabla de siempre, con el esperado delante. ─────
+  //
+  // v1.12-manos-de-camarero · la tarjeta se reparte en tres: cabecera
+  // arriba, la tabla de denominaciones scrolleando sola en el medio, y
+  // acciones + CashPad clavados abajo. Antes scrolleaba la tarjeta
+  // entera y, con 15 denominaciones, el pad y el botón quedaban fuera
+  // de pantalla: había que buscarlos con el pulgar mientras se contaba.
   return (
-    <Shell onClose={props.onClose}>
-      <div className="bg-white w-full rounded-3xl border border-slate-200 p-5 sm:p-7">
-        <h2 className="text-[18px] font-semibold text-mipiace-ink mb-1">
+    <Shell onClose={props.onClose} wide={!xResult && padDenom !== null}>
+      <div className="bg-white w-full rounded-3xl border border-slate-200 p-5 sm:p-7 flex flex-col max-h-[94vh]">
+        <h2 className="text-[18px] font-semibold text-mipiace-ink mb-1 shrink-0">
           {isZ ? "Cuadrar caja y cerrar turno" : "Arqueo X (control)"}
         </h2>
-        <p className="text-[13px] text-slate-500 mb-4">
+        <p className="text-[13px] text-slate-500 mb-4 shrink-0">
           {isZ
             ? "Cuenta el efectivo del cajón por denominaciones. Generamos el informe Z y se archiva el turno."
             : "Cuenta el efectivo del cajón sin cerrar el turno. Útil para arqueos intermedios."}
         </p>
 
+        <div
+          className={
+            "flex-1 min-h-0 flex flex-col" +
+            (!xResult && padDenom ? " sm:flex-row sm:gap-5" : "")
+          }
+        >
+        <div className="flex-1 min-h-0 flex flex-col">
+        <div
+          className={
+            "flex-1 min-h-0 -mx-1 px-1 " +
+            // Contando: columna con la tabla scrolleando dentro (su
+            // cabecera se queda pegada). Con resultado de arqueo X:
+            // un panel normal que scrollea entero.
+            (xResult ? "overflow-y-auto" : "flex flex-col")
+          }
+        >
         {xResult ? (
           <ResultPanel result={xResult} alert={showXDescuadreAlert ?? false} />
         ) : (
           <>
             {/* v1.11 · el esperado va DELANTE, mientras se cuenta. */}
             {expectedCash != null && (
-              <div className="mb-4 rounded-2xl bg-mipiace-stone px-4 py-3">
+              <div className="mb-4 rounded-2xl bg-mipiace-stone px-4 py-3 shrink-0">
                 <div className="flex items-baseline justify-between gap-3">
                   <span className="text-[12.5px] text-slate-600">
                     Efectivo esperado en el cajón
@@ -705,13 +753,25 @@ export function CloseShiftModal(props: {
               </div>
             )}
 
-            <div className="rounded-2xl border border-slate-200 overflow-x-auto mb-4">
-              <table className="w-full min-w-[280px] text-[13.5px]">
-                <thead className="bg-mipiace-stone text-slate-500 text-[12px] uppercase tracking-wider">
+            <div className="rounded-2xl border border-slate-200 overflow-auto mb-4 flex-1 min-h-[140px]">
+              <table className="w-full min-w-[240px] text-[13.5px]">
+                {/* v1.12 · con la tabla scrolleando dentro de la
+                    tarjeta, la cabecera se queda pegada arriba. En
+                    pantalla estrecha CON el pad abierto se despega: ahí
+                    la ventana de la tabla son 140 px y el titular de
+                    columnas se come una fila entera de recuento — y las
+                    columnas son tres y se aprenden; el total contado,
+                    que sigue pegado abajo, no. */}
+                <thead
+                  className={
+                    (padDenom ? "sm:sticky sm:top-0" : "sticky top-0") +
+                    " z-10 bg-mipiace-stone text-slate-500 text-[12px] uppercase tracking-wider"
+                  }
+                >
                   <tr>
-                    <th className="text-left py-2 px-3 font-medium">Denominación</th>
-                    <th className="text-center py-2 px-2 font-medium w-20">Cant.</th>
-                    <th className="text-right py-2 px-3 font-medium w-28">Subtotal</th>
+                    <th className="text-left py-2 px-2.5 font-medium">Denominación</th>
+                    <th className="text-center py-2 px-1.5 font-medium w-[76px]">Cant.</th>
+                    <th className="text-right py-2 px-2.5 font-medium w-[104px]">Subtotal</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -719,9 +779,12 @@ export function CloseShiftModal(props: {
                     const n = parseInt(counts[d.key] ?? "", 10);
                     const subtotal = Number.isFinite(n) && n > 0 ? d.valueEur * n : 0;
                     return (
-                      <tr key={d.key} className="hover:bg-slate-50">
-                        <td className="py-1.5 px-3 text-mipiace-ink">{d.label}</td>
-                        <td className="py-1.5 px-2">
+                      // `scroll-m*`: al centrar la fila activa, que no
+                      // se quede debajo del total contado (pegado abajo)
+                      // ni bajo la cabecera de columnas.
+                      <tr key={d.key} className="hover:bg-slate-50 scroll-mb-14 scroll-mt-10">
+                        <td className="py-1.5 px-2.5 text-mipiace-ink">{d.label}</td>
+                        <td className="py-1.5 px-1.5">
                           {/* v1.12 · sin `inputMode="numeric"`: 15
                               denominaciones eran 15 aperturas del
                               teclado de Android encima del modal
@@ -737,22 +800,25 @@ export function CloseShiftModal(props: {
                             ariaLabel={`Cantidad de ${d.label}`}
                           />
                         </td>
-                        <td className="py-1.5 px-3 text-right tabular-nums text-slate-500">
+                        <td className="py-1.5 px-2.5 text-right tabular-nums whitespace-nowrap text-slate-500">
                           {subtotal > 0 ? formatEur(subtotal) : "—"}
                         </td>
                       </tr>
                     );
                   })}
                 </tbody>
-                <tfoot className="bg-mipiace-stone">
+                {/* v1.12 · el total contado también se queda pegado:
+                    es la cifra que el cajero mira entre denominación y
+                    denominación. */}
+                <tfoot className="sticky bottom-0 z-10 bg-mipiace-stone">
                   <tr>
                     <td
                       colSpan={2}
-                      className="py-2.5 px-3 text-[13px] font-medium text-mipiace-ink"
+                      className="py-2.5 px-2.5 text-[13px] font-medium text-mipiace-ink"
                     >
                       Total contado
                     </td>
-                    <td className="py-2.5 px-3 text-right text-[15px] font-semibold tabular-nums text-mipiace-ink">
+                    <td className="py-2.5 px-2.5 text-right text-[15px] font-semibold tabular-nums whitespace-nowrap text-mipiace-ink">
                       {formatEur(totalEur)}
                     </td>
                   </tr>
@@ -763,6 +829,7 @@ export function CloseShiftModal(props: {
             {syncBlock}
           </>
         )}
+        </div>
 
         {/* v1.12 · las acciones van ANTES del pad y el pad se queda en
             el borde inferior. En las pruebas físicas el turno se cerró
@@ -770,7 +837,7 @@ export function CloseShiftModal(props: {
             Android desplazaba el modal y "Cerrar turno" acababa justo
             donde caía el dedo. Un botón destructivo no se pone en la
             zona de tecleo. */}
-        <div className="flex gap-2.5 pt-1">
+        <div className="flex gap-2.5 pt-3 shrink-0">
           <button
             type="button"
             onClick={
@@ -806,12 +873,15 @@ export function CloseShiftModal(props: {
             <span>{error}</span>
           </div>
         )}
+        </div>
 
-        {/* CashPad del arqueo (v1.12). Una sola instancia, abajo, y
-            sólo mientras hay una denominación activa. Conteos enteros:
-            sin coma. */}
+        {/* CashPad del arqueo (v1.12). Una sola instancia y sólo
+            mientras hay una denominación activa. Conteos enteros: sin
+            coma. En pantalla estrecha va debajo de las acciones; a
+            partir de `sm` se va a su propia columna, y así la tabla
+            sigue enseñando ocho denominaciones mientras se teclea. */}
         {!xResult && padDenom && (
-          <div className="mt-4 pt-4 border-t border-slate-200">
+          <div className="mt-3 pt-3 border-t border-slate-200 shrink-0 sm:mt-0 sm:pt-0 sm:border-t-0 sm:w-[300px] sm:flex sm:flex-col sm:justify-end">
             <div className="flex items-center justify-between gap-3 mb-2">
               <span className="text-[13px] font-medium text-mipiace-ink truncate">
                 Contando {DENOMINATIONS.find((d) => d.key === padDenom)?.label}
@@ -836,6 +906,7 @@ export function CloseShiftModal(props: {
             />
           </div>
         )}
+        </div>
       </div>
     </Shell>
   );
@@ -846,16 +917,24 @@ export function CloseShiftModal(props: {
 function Shell({
   children,
   onClose,
+  // v1.12 · el recuento con el pad abierto necesita sitio para dos
+  // columnas (denominaciones + teclado). El resto de fases se queda en
+  // el ancho de siempre.
+  wide = false,
 }: {
   children: React.ReactNode;
   onClose: () => void;
+  wide?: boolean;
 }) {
   return (
     <div
       className="fixed inset-0 z-50 bg-mipiace-ink/40 flex items-end sm:items-center justify-center p-3 sm:p-4 font-sans overflow-y-auto"
       onClick={onClose}
     >
-      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg my-auto">
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className={"w-full my-auto " + (wide ? "max-w-3xl" : "max-w-lg")}
+      >
         {children}
       </div>
     </div>

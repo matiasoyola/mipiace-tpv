@@ -111,8 +111,12 @@ export function ShiftOpenScreen({
 
   return (
     <div className="min-h-screen bg-mipiace-stone flex items-center justify-center p-5 font-sans">
-      <div className="w-full max-w-lg">
-        <div className="flex justify-center mb-7">
+      {/* v1.12 · con el pad abierto la tarjeta se ensancha y el teclado
+          se va a su propia columna: si no, "Abrir turno" caía por
+          debajo del pliegue a 1280×800 (el AP11 a densidad 240) y el
+          cajero tenía que scrollear para empezar el día. */}
+      <div className={"w-full " + (padOpen ? "max-w-2xl" : "max-w-lg")}>
+        <div className={"flex justify-center " + (padOpen ? "mb-4" : "mb-7")}>
           <Logo size={32} />
         </div>
         <div className="bg-white rounded-3xl border border-slate-200 p-7 md:p-9">
@@ -132,11 +136,18 @@ export function ShiftOpenScreen({
           <h1 className="text-[22px] font-semibold text-mipiace-ink tracking-tight mt-6 mb-1.5">
             Abrir turno
           </h1>
-          <p className="text-[14px] text-slate-500 mb-6 leading-relaxed">
-            Cuenta el efectivo del cajón antes de empezar el turno y anótalo
-            aquí. Aparecerá como fondo inicial en el arqueo de cierre.
-          </p>
-          <label htmlFor="cashOpening" className="block text-[13px] font-medium text-mipiace-ink mb-2">
+          {/* Tecleando, la explicación baja a pie de campo: arriba
+              robaba los 50 px de alto que necesita el pad para caber
+              sin empujar "Abrir turno" fuera de pantalla. */}
+          {!padOpen && (
+            <p className="text-[14px] text-slate-500 mb-6 leading-relaxed">
+              Cuenta el efectivo del cajón antes de empezar el turno y anótalo
+              aquí. Aparecerá como fondo inicial en el arqueo de cierre.
+            </p>
+          )}
+          <div className={padOpen ? "sm:flex sm:items-start sm:gap-5" : ""}>
+          <div className={padOpen ? "sm:flex-1 sm:min-w-0" : ""}>
+          <label htmlFor="cashOpening" className="block text-[13px] font-medium text-mipiace-ink mb-2 mt-4 sm:mt-0">
             Fondo de caja inicial
           </label>
           {/* v1.12 · el importe se teclea con el CashPad de la app, no
@@ -164,7 +175,14 @@ export function ShiftOpenScreen({
             ))}
           </div>
           {padOpen && (
-            <div className="mb-3">
+            <p className="text-[13px] text-slate-500 leading-relaxed mt-4">
+              Cuenta el efectivo del cajón antes de empezar el turno y anótalo
+              aquí. Aparecerá como fondo inicial en el arqueo de cierre.
+            </p>
+          )}
+          </div>
+          {padOpen && (
+            <div className="mb-3 sm:w-[300px] sm:shrink-0">
               <div className="flex justify-end mb-2">
                 <button
                   type="button"
@@ -177,6 +195,7 @@ export function ShiftOpenScreen({
               <CashPad value={amount} onChange={setAmount} />
             </div>
           )}
+          </div>
           <div className="mb-4" />
           <button
             type="button"

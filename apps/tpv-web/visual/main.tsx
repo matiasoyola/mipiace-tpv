@@ -13,6 +13,7 @@
 //   → http://localhost:5173/visual/index.html?screen=checkout
 //
 // screens: checkout · checkout-mixto · checkout-error · sale · mapa
+//   v1.12-manos-de-camarero: arqueo · abrir-turno · confirmar · bloqueo
 
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -165,6 +166,9 @@ function stubFetch(): void {
       syncFailedCount: 0,
     },
     "/shift/current": { shift: null },
+    // v1.12 · el arqueo del banco entra por la tabla de denominaciones
+    // (el resumen del día es de v1.11 y ya tiene sus capturas).
+    "/shift/shift-1/summary": { error: "NOT_FOUND" },
     "/tpv/tables": { storeId: "store-1", registerId: "reg-1", tables: TABLES },
     "/tpv/catalog/products": {
       items: CATALOG,
@@ -236,19 +240,28 @@ function Bench() {
     CheckoutOverlay: typeof import("../src/pages/CheckoutPage.js")["CheckoutOverlay"];
     SalePage: typeof import("../src/pages/SalePage.js")["SalePage"];
     TableMapScreen: typeof import("../src/pages/TableMapScreen.js")["TableMapScreen"];
+    CloseShiftModal: typeof import("../src/pages/CloseShiftModal.js")["CloseShiftModal"];
+    ShiftOpenScreen: typeof import("../src/pages/ShiftOpenScreen.js")["ShiftOpenScreen"];
+    ConfirmSheet: typeof import("../src/components/ConfirmSheet.js")["ConfirmSheet"];
   }>(null);
 
   useEffect(() => {
     void (async () => {
-      const [checkout, sale, map] = await Promise.all([
+      const [checkout, sale, map, close, open, confirmSheet] = await Promise.all([
         import("../src/pages/CheckoutPage.js"),
         import("../src/pages/SalePage.js"),
         import("../src/pages/TableMapScreen.js"),
+        import("../src/pages/CloseShiftModal.js"),
+        import("../src/pages/ShiftOpenScreen.js"),
+        import("../src/components/ConfirmSheet.js"),
       ]);
       setScreens({
         CheckoutOverlay: checkout.CheckoutOverlay,
         SalePage: sale.SalePage,
         TableMapScreen: map.TableMapScreen,
+        CloseShiftModal: close.CloseShiftModal,
+        ShiftOpenScreen: open.ShiftOpenScreen,
+        ConfirmSheet: confirmSheet.ConfirmSheet,
       });
     })();
   }, []);
@@ -271,6 +284,45 @@ function Bench() {
         businessType="HOSPITALITY"
         onClose={() => {}}
         onConfirmed={() => {}}
+      />
+    );
+  }
+
+  // ── v1.12-manos-de-camarero ────────────────────────────────────────
+
+  if (screen === "arqueo") {
+    return (
+      <Screens.CloseShiftModal
+        shiftId="shift-1"
+        cashierRole="MANAGER"
+        requireCashCountOnClose
+        onClose={() => {}}
+        onClosed={() => {}}
+      />
+    );
+  }
+
+  if (screen === "abrir-turno") {
+    return (
+      <Screens.ShiftOpenScreen
+        cashierLabel="matias@sirope.es"
+        registerName="Caja 1"
+        storeName="Cafetería Sirope"
+        onOpened={() => {}}
+        onBack={() => {}}
+      />
+    );
+  }
+
+  if (screen === "confirmar") {
+    return (
+      <Screens.ConfirmSheet
+        title="Vaciar mesa"
+        body="Se cancela la cuenta de M3 y la mesa queda libre para las demás cajas. Lo consumido no se cobra."
+        confirmLabel="Vaciar mesa"
+        cancelLabel="Volver"
+        onConfirm={() => {}}
+        onCancel={() => {}}
       />
     );
   }
@@ -308,8 +360,22 @@ function Bench() {
 
 stubSession();
 stubFetch();
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <Bench />
-  </StrictMode>,
-);
+
+const mount = document.getElementById("root")!;
+
+// v1.12 · la pantalla de bloqueo de navegador viejo se pinta sin React
+// y sin `gap`, así que en el banco se invoca igual que en `main.tsx`.
+if (new URLSearchParams(window.location.search).get("screen") === "bloqueo") {
+  void import("../src/lib/browser-support.js").then((m) =>
+    m.renderUnsupportedBrowser(
+      mount,
+      "Chrome 81.0.4044.138",
+    ),
+  );
+} else {
+  createRoot(mount).render(
+    <StrictMode>
+      <Bench />
+    </StrictMode>,
+  );
+}

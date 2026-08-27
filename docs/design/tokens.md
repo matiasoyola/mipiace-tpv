@@ -114,12 +114,31 @@ font-feature-settings: 'cv11', 'ss01';
 status dots y avatares circulares. Las píldoras grandes ablandan
 demasiado.
 
-**Touch targets mínimos:**
+**Touch targets mínimos** (escala cerrada desde v1.12; en
+`tailwind.config.js` como `h-touch` / `h-touch-pad` / `h-touch-lg`,
+también disponibles como `min-h-*`):
 
-- Mobile: **44×44 px**.
-- Tablet (TPV en hostelería): **56×56 px** para botones del carrito y
-  productos top.
-- Botones de acción primaria (Cobrar, Confirmar): **64-72 px** alto.
+| Token | Valor | ≈ mm en el AP11 | Uso |
+|---|---|---|---|
+| `touch` | **48 px** | 9 mm | Mínimo de cualquier control de uso diario: chips de zona, métodos de pago, atajos de billetes, casillas de la hoja de cobro, botones de modal. |
+| `touch-pad` | **56 px** | 10 mm | Teclas del `CashPad` y del keypad del PIN. |
+| `touch-lg` | **64 px** | 11 mm | Barra de cobro y acciones primarias de pantalla completa (Cobrar, Abrir turno). |
+
+De dónde salen los números: pruebas físicas sobre el AP11-1006 del
+2026-08-27 (`docs/qa/2026-08-27-pruebas-fisicas-ap11.md`, hallazgo H3).
+Medido sobre pantalla real a 8,8 px/mm, lo que se toca cien veces al día
+estaba a 5-7 mm —y las casillas de la hoja de cobro a **2,5 mm**—,
+mientras que lo que se toca una vez (tarjetas de producto y de mesa)
+estaba de sobra a 22-26 mm. El mínimo razonable con dedo de camarero y
+prisa es 9-10 mm.
+
+**Regla:** no se suben alturas con `h-[52px]` sueltos. Si un control no
+entra en la escala, primero se discute el token; luego se implementa.
+
+Nota sobre radios en controles de 48 px: las píldoras (`rounded-full`)
+dejan de usarse al llegar a esa altura — los chips de zona pasaron a
+`rounded-2xl` en v1.12, siguiendo la regla de "sin esquinas tipo pill
+con altura ≥ 40 px" de la sección anterior.
 
 **Padding interno de cards:** 16-28px según tamaño. Cards grandes
 (ticket panel) 28px horizontal, 20-24px vertical.
@@ -182,6 +201,35 @@ canónica para reutilizar:
   billing (amber-50 + amber-300/60).
 - Layout interno: ID arriba izquierda, capacidad arriba derecha, info
   (tiempo, comensales, camarero, total) abajo.
+
+### CashPad (teclado numérico propio) · v1.12
+- Grid de 3 columnas, mismas medidas que el keypad del PIN.
+- Teclas `h-touch-pad` (56px), `rounded-2xl`, fondo `mipiace.stone`,
+  hover `slate-100`, texto 22px `tabular-nums`.
+- Fila inferior aparte con `C` (limpiar) y `⌫` (borrar último).
+- Sin coma en modo conteo (`maxDecimals = 0`); ahí el `0` ocupa el hueco
+  de la coma en vez de dejar una tecla muerta bajo el pulgar.
+- Una sola instancia por hoja, siempre en el borde inferior. Nunca tapa
+  ni desplaza el botón primario: la hoja se reparte cabecera → campo
+  activo → pad → botón. A partir de `sm`, en el arqueo y en la apertura
+  de turno, el pad se va a su propia columna.
+
+### AmountField (campo de importe) · v1.12
+- `h-touch` (48px) normal, `h-touch-lg` (64px) en pantalla completa.
+- Blanco con borde `slate-200`; activo: borde coral + ring `coral/30`.
+- `tabular-nums`, alineado a la derecha, sufijo `€` en gris.
+- **Nunca** editable a mano: `readOnly` + `inputMode="none"` + blur al
+  foco + `user-select: none` + `-webkit-touch-callout: none`. El teclado
+  del sistema no debe aparecer en ninguna pantalla de caja.
+
+### ConfirmSheet (acciones destructivas) · v1.12
+- Card `rounded-3xl` centrada (abajo en móvil), título H2 y cuerpo body.
+- Dos botones `h-touch`: destructivo en coral, salida neutra con borde.
+- Verbos explícitos y **distintos**: "Vaciar mesa" / "Volver",
+  "Cancelar la venta" / "Seguir con la venta". Nunca "Aceptar/Cancelar",
+  nunca dos botones que empiecen por la misma palabra.
+- Sustituye a `window.confirm()`, que en el terminal sale con la marca
+  del navegador y botones azules de Chrome.
 
 ### Línea de carrito
 - Avatar cuadrado (`rounded-xl`) con cantidad en stone.
