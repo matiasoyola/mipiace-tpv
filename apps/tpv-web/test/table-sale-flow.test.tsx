@@ -260,6 +260,11 @@ describe("SalePage · v1.12-mesas-abandonadas · salir sin haber pedido nada", (
     const del = calls.find((c) => c.method === "DELETE");
     expect(del).toBeDefined();
     expect(del!.path.startsWith(`/tickets/${TICKET_1}`)).toBe(true);
+    // La decisión de si la mesa sigue vacía es del SERVIDOR: la
+    // proyección local de este device puede estar desfasada (otra caja
+    // pudo comandar hace tres segundos). Sin este parámetro, salir al
+    // mapa borraría una comanda real en silencio.
+    expect(del!.path).toContain("onlyIfEmpty=true");
     // Y el cajero sale al mapa igual: el draft vacío es cosa nuestra.
     expect(onBackToMap).toHaveBeenCalled();
   });
@@ -280,6 +285,38 @@ describe("SalePage · v1.12-mesas-abandonadas · salir sin haber pedido nada", (
 
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
     expect(onBackToMap).toHaveBeenCalled();
+  });
+
+  it("si el servidor dice 409 (otra caja comandó), se vuelve al mapa sin ruido", async () => {
+    // El cliente cree que la mesa está vacía —su proyección local no se
+    // ha enterado de la caña que pidió la otra caja— así que llama. El
+    // servidor rechaza con 409 y NO anula: ese 409 es la respuesta
+    // correcta, no un error que enseñarle al cajero.
+    const calls: Array<{ path: string; method?: string }> = [];
+    apiMock.apiWithCashier.mockImplementation(
+      async (path: string, opts?: { method?: string }) => {
+        calls.push({ path, method: opts?.method });
+        if (opts?.method === "DELETE") {
+          throw new ApiError(
+            409,
+            "La mesa tiene líneas: no se vacía al salir.",
+            "TICKET_NOT_EMPTY",
+          );
+        }
+        const bg = backgroundRoutes(path);
+        if (bg !== undefined) return bg;
+        throw new Error(`ruta inesperada: ${path}`);
+      },
+    );
+
+    await renderSalePage([]);
+    await click(buttonByText("Mapa"));
+
+    expect(calls.find((c) => c.method === "DELETE")!.path).toContain(
+      "onlyIfEmpty=true",
+    );
+    expect(onBackToMap).toHaveBeenCalled();
+    expect(container.textContent).not.toContain("líneas: no se vacía");
   });
 
   it("si el DELETE falla (sin red), se vuelve al mapa igual", async () => {

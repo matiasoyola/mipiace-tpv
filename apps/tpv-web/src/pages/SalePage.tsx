@@ -766,12 +766,25 @@ export function SalePage(props: SalePageProps) {
   // mismo camino que "Vaciar mesa" y el mapa dice la verdad al instante,
   // sin esperar a las 05:00.
   //
-  // Con líneas NO se toca: eso es una cuenta abierta de verdad.
-  // Si falla (sin red, mesa ya cobrada desde otra caja), se vuelve al
-  // mapa igual — el barrido de madrugada la recoge.
+  // QUIÉN DECIDE QUE ESTÁ VACÍA: EL SERVIDOR. `lines` es la proyección
+  // local de este device y puede estar desfasada — otra caja puede haber
+  // comandado hace tres segundos sobre esta misma mesa (añadir líneas
+  // desde otra caja está PERMITIDO, v1.9.2) y el evento aún no haber
+  // llegado. Decidir aquí con `lines.length` sería anular una comanda
+  // real en silencio. Por eso la llamada va SIEMPRE con
+  // `onlyIfEmpty=true`: el backend lo comprueba dentro del WHERE de la
+  // reclamación y responde 409 sin tocar nada si hay líneas.
+  //
+  // El `lines.length === 0` de aquí es sólo un ahorro de red (no llames
+  // si tú ya sabes que hay líneas), nunca la garantía.
+  //
+  // Si falla —sin red, 409, mesa ya cobrada desde otra caja— se vuelve al
+  // mapa igual: el cajero pidió ir al mapa, no gestionar un draft que él
+  // no sabe que existe. El barrido de madrugada recoge lo que quede.
   const backToMap = useCallback(() => {
-    const empty = isTableMode && activeTicketId != null && lines.length === 0;
-    if (!empty) {
+    const worthTrying =
+      isTableMode && activeTicketId != null && lines.length === 0;
+    if (!worthTrying) {
       props.onBackToMap?.();
       return;
     }
@@ -779,14 +792,14 @@ export function SalePage(props: SalePageProps) {
       try {
         const { apiWithCashier } = await import("../api.js");
         await apiWithCashier(
-          `/tickets/${activeTicketId}?reason=${encodeURIComponent(
+          `/tickets/${activeTicketId}?onlyIfEmpty=true&reason=${encodeURIComponent(
             "Salió del detalle sin añadir nada",
           )}`,
           { method: "DELETE" },
         );
       } catch {
-        // Silencio a propósito: el cajero pidió irse al mapa, no
-        // gestionar un draft vacío que él no sabe que existe.
+        // Silencio a propósito (incluido el 409 "la mesa tiene líneas":
+        // esa es la respuesta correcta, no un error que enseñar).
       }
     })();
     props.onBackToMap?.();

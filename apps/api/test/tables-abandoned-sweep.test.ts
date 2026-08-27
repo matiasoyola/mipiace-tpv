@@ -246,16 +246,11 @@ describe("runAbandonedTableSweep · las cuatro mesas de Sirope", () => {
     // El barrido lo lee vacío y, antes de la reclamación, un camarero
     // teclea "1 caña". El `lines: { none: {} }` del WHERE deja de casar.
     db.client.ticket.findFirst.mockImplementationOnce(async () => {
+      // La foto que ve el barrido: vacía. Justo después, la caña.
+      const comoSeLeyo = project(m3);
       m3.lines = 1;
       m3.total = 2.5;
-      return {
-        id: m3.id,
-        tableId: m3.tableId,
-        notes: null,
-        total: { toString: () => "0.0000" },
-        register: { storeId: m3.storeId },
-        _count: { lines: 0 },
-      };
+      return comoSeLeyo;
     });
 
     const res = await sweep(db);

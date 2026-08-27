@@ -59,15 +59,18 @@ accesos que añade el bloque.
   job**, después del cierre de turnos y envuelto en su propio `try`: si el
   barrido peta, los turnos ya están cerrados.
 - `src/tables/operativa.ts` — `DELETE /tickets/:ticketId` conserva sus guards
-  (tenant, DRAFT, misma caja) y delega el efecto en `voidDraftTicket`.
+  (tenant, DRAFT, misma caja) y delega el efecto en `voidDraftTicket`. Acepta
+  `?onlyIfEmpty=true` → `requireEmpty` (ver "por qué" más abajo): con líneas
+  responde `409 TICKET_NOT_EMPTY` sin tocar nada.
 - `src/tables/routes.ts` — dos rutas nuevas:
   - `GET  /admin/stores/:storeId/tables/abandoned` (OWNER o MANAGER)
   - `POST /admin/tables/abandoned/:ticketId/void` (OWNER o MANAGER **+ PIN**)
 
 ### Frontend TPV (`apps/tpv-web`)
 - `src/pages/SalePage.tsx` — `backToMap`: volver al mapa **sin haber añadido
-  nada** anula el DRAFT vacío por el mismo `DELETE /tickets/:id` de siempre. Es
-  el punto 3 del prompt (ver abajo). Con líneas no se toca.
+  nada** anula el DRAFT vacío por el mismo `DELETE /tickets/:id` de siempre,
+  **siempre con `?onlyIfEmpty=true`**. Es el punto 3 del prompt (ver abajo).
+  Quien comprueba que la mesa sigue vacía es el servidor, no el cliente.
 - El mapa **no se tocó**: la tarjeta ya marca la mesa olvidada con halo ámbar y
   pinta "43 días" desde v1.10.3. El prompt pedía no rehacer el contador y no se
   rehízo.
@@ -128,10 +131,42 @@ Eso es exactamente el "cambio grande" que el prompt decía no hacer.
 
 **Sí se ha hecho la otra mitad que ofrecía el prompt:** borrarlo al salir del
 detalle sin haber añadido nada. `backToMap` en `SalePage.tsx` anula el DRAFT
-vacío con el `DELETE /tickets/:id` que ya existía. Con líneas no hace nada. Si
-falla (sin red, o la mesa ya se cobró desde otra caja) se vuelve al mapa igual y
-el barrido de madrugada la recoge: el cajero pidió ir al mapa, no gestionar un
-draft que él no sabe que existe.
+vacío con el `DELETE /tickets/:id` que ya existía, **con `?onlyIfEmpty=true`**.
+Si falla (sin red, 409, o la mesa ya se cobró desde otra caja) se vuelve al mapa
+igual y el barrido de madrugada la recoge: el cajero pidió ir al mapa, no
+gestionar un draft que él no sabe que existe.
+
+### Por qué "Vaciar mesa" NO lleva `requireEmpty` y esta ruta SÍ
+
+Las dos intenciones entran por la misma puerta —`DELETE /tickets/:ticketId`— y
+son opuestas en lo único que importa:
+
+| | "Vaciar mesa" (el botón) | "Me voy al mapa sin pedir nada" |
+|---|---|---|
+| Quién decide | una persona mirando la cuenta | nadie: es limpieza |
+| Qué espera que pase con las líneas | **que se vayan** — es el sentido del botón | que la operación se caiga |
+| `onlyIfEmpty` | **no** | **sí, siempre** |
+
+Blindar "Vaciar mesa" con `requireEmpty` rompería el botón: el caso de uso es
+precisamente la mesa que se levantó sin pagar y hay que tirar con sus tres cañas
+dentro. Ahí el cajero ve el importe y las líneas antes de pulsar; el consentimiento
+es explícito.
+
+La limpieza al salir no tiene nada de eso, y además **el cliente no puede saber
+si la mesa sigue vacía**. `lines` es la proyección local de ESTE device, y desde
+v1.9.2 otra caja puede comandar sobre la misma mesa: entre que el evento sale y
+llega, este terminal cree que hay cero líneas cuando ya hay una caña servida.
+Decidir con `lines.length` en el cliente era anular una comanda real, en
+silencio y sin que nadie lo pidiera — el bug exacto que el bloque viene a
+arreglar, cometido por el arreglo.
+
+Por eso la comprobación vive en el servidor y viaja dentro del WHERE de la
+reclamación (`lines: { none: {} }`), que es atómico: ni siquiera una línea que
+entre entre la lectura y el UPDATE se pierde. El `lines.length === 0` que queda
+en el cliente es **sólo un ahorro de llamada**, nunca la garantía. Si el servidor
+encuentra líneas responde `409 TICKET_NOT_EMPTY`, no toca nada, lo registra
+(`table.cleanup_skipped`) y el TPV se va al mapa sin enseñar error: ese 409 es la
+respuesta correcta, no un fallo.
 
 **Lo que queda vivo como agujero** (no se ha cerrado, y es honesto decirlo): si
 el terminal se queda sin batería, se cierra la pestaña o el cajero pulsa
@@ -183,8 +218,8 @@ Las filas con `lineas = 0` son las que suelta el barrido. Las que tengan
 
 ## Tests
 
-`pnpm vitest run` → **144 archivos, 1224 pasan, 3 skipped, 0 fallos.**
-(Antes del bloque: 1209 + 3 skipped. El bloque añade 15.)
+`pnpm vitest run` → **144 archivos, 1228 pasan, 3 skipped, 0 fallos.**
+(Antes del bloque: 1209 + 3 skipped. El bloque añade 19.)
 
 Nuevos:
 - `apps/api/test/tables-abandoned-sweep.test.ts` (7) — la pasada contra un prisma
@@ -199,12 +234,17 @@ Nuevos:
   no pasa de la puerta.
 
 Tocados:
-- `apps/tpv-web/test/table-sale-flow.test.tsx` — +3: salir al mapa con la mesa
-  vacía dispara el DELETE; con una línea dentro no; si el DELETE falla se sale
-  al mapa igual.
-- `apps/api/test/tables-e2e.test.ts` — el prisma falso aprende `_count` y
-  `lines: { none: {} }`, que es lo que pide el camino de anulación compartido.
-  Sin cambios en los asserts: los 15 tests de mesas siguen probando lo mismo.
+- `apps/tpv-web/test/table-sale-flow.test.tsx` — +4: salir al mapa con la mesa
+  vacía dispara el DELETE **con `onlyIfEmpty=true`**; con una línea dentro no
+  llama; un 409 del servidor no se le enseña al cajero; sin red se sale al mapa
+  igual.
+- `apps/api/test/tables-e2e.test.ts` — +3 (review): **la mesa que otra caja
+  comandó sobrevive aunque el cliente la crea vacía** (409 `TICKET_NOT_EMPTY`,
+  líneas intactas, sin `table.cleared`); la que sigue vacía sí se suelta; y
+  "Vaciar mesa" **sin** `onlyIfEmpty` sigue anulando un DRAFT con líneas —el
+  botón no se ha blindado, que es lo que se quería. El prisma falso aprende
+  `_count` y `lines: { none: {} }`, que es lo que pide el camino de anulación
+  compartido; los 15 tests previos siguen probando lo mismo.
 
 Typecheck limpio en `apps/api`, `apps/tpv-web` y `apps/admin`.
 
