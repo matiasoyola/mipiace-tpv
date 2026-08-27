@@ -11,8 +11,10 @@ qué turno pertenece cada venta que llega tarde estaban fijados por tests contra
 un falso, pero nadie había visto el ciclo entero correr contra Postgres.
 
 Este bloque traduce a test los ocho pasos de *"Cómo probarlo de cero"* del
-done.md de v1.11. **No se ha tocado ni una línea de `src/`**: el diff es la
-suite, dos scripts y un job de CI.
+done.md de v1.11 y —desde el addendum de abajo— el barrido de mesas que v1.12-B
+enganchó a esa misma pasada. De `src/` se toca **una sola cosa**, y es para que
+la suite pueda cubrir la pasada entera: extraer `runDayCutPass()` (ver el
+addendum). El resto del diff es la suite, dos scripts y un job de CI.
 
 ---
 
@@ -20,7 +22,7 @@ suite, dos scripts y un job de CI.
 
 **Nuevo:**
 
-- `apps/api/test-e2e/ciclo-de-caja.e2e.ts` — la suite. 9 tests, un solo camino:
+- `apps/api/test-e2e/ciclo-de-caja.e2e.ts` — la suite. 12 tests, un solo camino:
   el que hace Sole cada día.
 - `apps/api/test-e2e/global-setup.ts` — `DROP SCHEMA public` + `prisma migrate
   deploy`. Migraciones **reales**, no `db push`: así el e2e prueba también la
@@ -28,6 +30,9 @@ suite, dos scripts y un job de CI.
 - `apps/api/test-e2e/e2e-env.ts` — la puerta: variable de entorno, mensaje de
   salto y el guard de "esta base es desechable".
 - `apps/api/vitest.e2e.config.ts` — config separada.
+- `apps/api/src/shift/day-cut-pass.ts` — **`runDayCutPass()`**: LA pasada del
+  corte, corte de caja + barrido de mesas, en un solo sitio. Lo llaman el worker
+  y el e2e. Ver el addendum.
 
 **Modificado:**
 
@@ -35,6 +40,9 @@ suite, dos scripts y un job de CI.
 - `apps/api/package.json` — `test:e2e`.
 - `apps/api/tsconfig.json` — `include` cubre `test-e2e/`.
 - `.github/workflows/ci.yml` — job `e2e`.
+- `apps/api/src/workers/shift-day-cut-worker.ts` — deja de componer la pasada a
+  mano y llama a `runDayCutPass()`. Mismo orden, mismo aislamiento, mismo
+  `returnvalue`.
 
 ---
 
@@ -71,41 +79,57 @@ Todo contra `SELECT`s. **Ninguna aserción se hace contra la respuesta del API**
 más allá del código de estado: si el test pudiera pasar con la BD vacía, no
 sería un e2e.
 
-1. **Abrir turno con fondo.** Tenant + tienda + caja + cajero sembrados a mano
-   (es lo que deja el onboarding, no parte del ciclo diario); el turno se abre
-   por `POST /shift/open` y se comprueba `cash_opening`, `closed_at` y
+1. **Abrir turno con fondo.** Tenant + tienda + caja + cajero + mesas sembrados
+   a mano (es lo que deja el onboarding, no parte del ciclo diario); el turno se
+   abre por `POST /shift/open` y se comprueba `cash_opening`, `closed_at` y
    `close_reason` en BD.
 2. **Vender.** Dos tickets: 12,10 € en efectivo y uno mixto de 22,00 €
    (12,00 efectivo + 10,00 tarjeta). Verificado con
    `SELECT method, SUM(amount) FROM ticket_payments JOIN tickets …` → exactamente
    `{ CASH: 24.10, CARD: 10.00 }`, y `COUNT(*)`/`SUM(total)` sobre `tickets`.
-3. **El corte de día**, llamando a `runShiftDayCut` con un `now` fabricado — no
-   se espera a las cinco. El turno queda `closeReason = AUTO_DAY_CUT`,
-   `cash_counted` **NULL** (no 0), `closed_by_user_id` NULL, `summary_ack_at`
-   NULL, y con su Z: la columna apunta a un PDF que **existe en disco**
-   (`fs.access`). También se comprueba la decisión 2 de v1.11: `closed_at` es el
-   `now` de la pasada, posterior al instante del corte, no retroactivo.
-4. **Abrir el turno del día siguiente.**
-5. **El caso offline de ANTES del corte.** Ticket con `occurredAt` de una hora
+3. **Abrir mesas** por `POST /tables/:id/open`: M1 vacía, M2 con una caña dentro
+   (`POST /tables/:id/lines`), ambas con el `created_at` retrasado a antes del
+   corte. M3 se abre también pero se queda con su fecha de hoy — es la del
+   test 12.
+4. **La pasada del corte**: `runDayCutPass(now)` con un `now` fabricado — no se
+   espera a las cinco. Es **la misma función que llama el worker**, con el corte
+   de caja y el barrido de mesas dentro y en ese orden (la caja primero). El turno
+   queda `closeReason = AUTO_DAY_CUT`, `cash_counted` **NULL** (no 0),
+   `closed_by_user_id` NULL, `summary_ack_at` NULL, y con su Z: la columna apunta
+   a un PDF que **existe en disco** (`fs.access`). También se comprueba la
+   decisión 2 de v1.11: `closed_at` es el `now` de la pasada, posterior al
+   instante del corte, no retroactivo.
+5. **El barrido de mesas de la misma pasada** (v1.12-B). M1: `status = VOIDED`,
+   `void_reason = AUTO_ABANDONED_EMPTY`, `voided_by_user_id` **NULL** (SISTEMA),
+   `voided_at` sellado y **la mesa libre** —comprobado como lo pinta el mapa: no
+   queda ningún DRAFT colgando de esa `table_id`—. M2, de la misma antigüedad:
+   sigue `DRAFT`, sin `void_reason`, con su línea dentro y su mesa ocupada. M3,
+   la de hoy: intacta — el criterio es el corte, no "mesa vacía" a secas.
+6. **Abrir el turno del día siguiente.**
+7. **El caso offline de ANTES del corte.** Ticket con `occurredAt` de una hora
    antes del corte y el `shiftId` del turno ya cerrado: entra (201, no se
    pierde), va **al turno de ayer**, el efectivo de ayer sube a 30,15 €, el de
    hoy sigue vacío, el turno queda `z_report_stale = true` y el PDF emitido
    **no** se reescribe (misma ruta que antes).
-6. **El caso offline de DESPUÉS del corte.** Mismo `shiftId` viejo,
+8. **El caso offline de DESPUÉS del corte.** Mismo `shiftId` viejo,
    `occurredAt` posterior a la apertura del turno nuevo → entra en el turno
    nuevo y el de ayer no se mueve.
-7. **`GET /shift/last-closed`** devuelve el resumen del turno anterior con las
+9. **`GET /shift/last-closed`** devuelve el resumen del turno anterior con las
    cifras de la BD (3 tickets, teórico 130,15 € = 100 de fondo + 30,15), y
    **después de `ack-summary` ya no lo devuelve**. Confirmar dos veces no mueve
    el sello (idempotente).
-8. **`close-day`** cierra sin contar: `descuadre: null`, `cash_counted` NULL en
-   BD, `close_reason = MANUAL` y `closed_by_user_id` con la firma de quién.
-9. **El corte no pisa un cierre manual** que llegó durante la pasada (F2 del
-   addendum 2 de v1.11).
+10. **`close-day`** cierra sin contar: `descuadre: null`, `cash_counted` NULL en
+    BD, `close_reason = MANUAL` y `closed_by_user_id` con la firma de quién.
+11. **El corte no pisa un cierre manual** que llegó durante la pasada (F2 del
+    addendum 2 de v1.11).
+12. **El barrido no pierde la línea que entra durante la carrera**: la primera
+    línea de M3 se escribe entre la lectura del barrido y su reclamación. El
+    `lines: { none: {} }` del `updateMany` la salva — draft vivo, línea dentro,
+    mesa ocupada, `released` vacío.
 
 ### Dos desvíos del guion de v1.11, y por qué
 
-**El orden de los pasos 4 y 5 está invertido.** El guion pone el caso offline
+**El orden de los pasos 6 y 7 está invertido.** El guion pone el caso offline
 antes de abrir el turno nuevo. Así el test no probaría nada: con un solo turno
 vivo, "el turno de la ventana" y "el turno abierto ahora mismo" dan el mismo
 resultado y las dos reglas de `resolveShiftForSale` son indistinguibles. Con el
@@ -122,23 +146,34 @@ Es el único viaje en el tiempo de la suite y toca un solo campo. La alternativa
 
 ## El criterio de "funciona": se rompió a propósito y se puso rojo
 
-Las dos piezas que sugería el prompt, una a una, con la suite entera corriendo
-detrás:
+Cada pieza, una a una, con la suite entera corriendo detrás:
 
 | Sabotaje | Resultado |
 |---|---|
-| Quitar el guard `closedAt: null` de la reclamación (`day-cut-run.ts`) | 🔴 **1 fallo** — test 9: `expected [ { …(9) } ] to deeply equal []`. El corte reclama un turno que ya había cerrado una persona. |
-| Saltarse la regla de ventana en `resolveShiftForSale` y caer al "turno abierto ahora" | 🔴 **3 fallos** — tests 5, 6 y 7. La venta de antes del corte se va al turno de hoy, el efectivo de ayer se queda en 24,10 € y `zReportStale` no se marca. |
+| Quitar el guard `closedAt: null` de la reclamación (`day-cut-run.ts`) | 🔴 **1 fallo** — test 11: `expected [ { …(9) } ] to deeply equal []`. El corte reclama un turno que ya había cerrado una persona. |
+| Saltarse la regla de ventana en `resolveShiftForSale` y caer al "turno abierto ahora" | 🔴 **3 fallos** — tests 7, 8 y 9. La venta de antes del corte se va al turno de hoy, el efectivo de ayer se queda en 24,10 € y `zReportStale` no se marca. |
+| Quitar el `requireEmpty` del barrido (`abandoned.ts`) | 🔴 **1 fallo** — test 12: `expected [ { …(6) } ] to deeply equal []`. La comanda que el camarero acaba de teclear se anula. |
+| Quitar del barrido el `if (draft._count.lines > 0) continue` | 🔴 **1 fallo** — test 5: `expected +0 to be 1`. Se anula la mesa con consumo dentro. |
+| Borrar la llamada al barrido dentro de `runDayCutPass()` | 🔴 **2 fallos** — test 5 (`expected null not to be null`) y, de rebote, test 12. La pasada cierra turnos y deja el mapa de sala lleno de mesas zombi. |
 
-Ambos archivos se restauraron después; `src/` queda intacto en el diff del
-bloque.
+Los cuatro archivos se restauraron después: los sabotajes no dejan rastro en el
+diff del bloque.
 
-El test 9 merece una nota: la carrera se provoca en el borde —un `Proxy` sobre
-el `findMany` del job que escribe el cierre manual **real** en Postgres antes de
-devolver la foto vieja— pero todo lo demás es la BD de verdad. Es exactamente lo
-que ve el job en producción: una lista de turnos abiertos que ya no es cierta.
-Sin ese test, el sabotaje del guard salía **verde**: el resto del ciclo no lo
-toca.
+Los tests 11 y 12 merecen una nota: **las dos carreras se provocan en el borde**
+—un `Proxy` sobre una sola llamada de Prisma— pero el resto es la BD de verdad y
+la escritura que causa la carrera es real.
+
+- Test 11: el `Proxy` va sobre el `findMany` del job y escribe el cierre manual
+  en Postgres antes de devolver la foto vieja. Es exactamente lo que ve el job
+  en producción: una lista de turnos abiertos que ya no es cierta.
+- Test 12: el `Proxy` va sobre el `updateMany` de tickets e inserta la primera
+  línea justo antes de que llegue la reclamación — la ventana precisa que el
+  `lines: { none: {} }` tiene que cubrir. El guard de lectura de
+  `voidDraftTicket` (`_count.lines > 0`) ya ha pasado a esas alturas, así que lo
+  que se prueba es el WHERE y no el `if`.
+
+Sin esos dos tests, los sabotajes correspondientes salían **verdes**: el resto
+del ciclo no los toca.
 
 ---
 
@@ -148,9 +183,9 @@ Mac (M-series, Docker Desktop, Postgres 16 en contenedor):
 
 | | Tiempo |
 |---|---|
-| Pasada completa (`pnpm test:e2e`) | **~6,5–7 s** de reloj |
+| Pasada completa (`pnpm test:e2e`) | **~7,5–9 s** de reloj |
 | De eso, `DROP SCHEMA` + `prisma migrate deploy` (50 migraciones) | ~4 s |
-| Los 9 tests | ~0,9 s |
+| Los 12 tests | ~1,1 s |
 
 En CI hay que sumar `pnpm install` y `prisma generate` — el job `e2e` viene a
 costar lo mismo que el `ci` menos las builds de Vite. No bloquea `publish`.
@@ -208,9 +243,16 @@ Sin la variable, `pnpm test:e2e` se salta e imprime estos mismos pasos.
    probar otra cosa.
 7. **El job `e2e` no entra en `needs` de `publish`.** Lo pedía el prompt: no
    bloquea el despliegue mientras se estabiliza, pero se ve rojo en el PR.
-8. **Test 9 (la carrera) añadido aunque no estaba en los ocho pasos.** Sin él,
-   el sabotaje que el propio prompt propone como criterio de aceptación salía
-   verde. El criterio manda sobre la lista.
+8. **Tests 11 y 12 (las dos carreras) añadidos aunque no estaban en los pasos.**
+   Sin ellos, los sabotajes que el propio criterio de aceptación propone salían
+   verdes. El criterio manda sobre la lista.
+9. **`runDayCutPass()` extraído a `src/`** — la única línea de `src/` que toca
+   el bloque, y la razón está en el addendum 2: la composición corte + barrido
+   vivía dentro del handler del worker, donde ningún test podía llegar sin
+   Redis. Desconectar el barrido no rompía nada y el fallo tardaba semanas en
+   verse, en forma de mapa de sala con mesas zombi. Ahora la pasada es una
+   función que llaman los dos.
+
 
 ---
 
@@ -221,10 +263,25 @@ Sin la variable, `pnpm test:e2e` se salta e imprime estos mismos pasos.
 - Reescribir tests existentes: se **añade** una suite, no se migra nada. El
   diff no toca `apps/api/test/`.
 
+Del barrido de v1.12-B se prueba lo que corre en la pasada del corte. **NO** se
+prueba aquí, y a propósito:
+
+- `listAbandonedTables` y el botón "Anular" del admin con PIN. No corren en la
+  pasada: son una pantalla y una acción de una persona. Tienen sus tests.
+- El `?onlyIfEmpty=true` del `DELETE /tickets/:id` (addendum de v1.12-B). Es el
+  camino del TPV al salir de una mesa, no el del corte de día.
+- El evento `table.cleared` del bus in-memory. Desde el worker no llega a nadie
+  —proceso distinto, el propio código lo dice— así que afirmarlo en el e2e sería
+  afirmar algo que en producción no pasa.
+
 ---
 
 ## Dudas abiertas / carryover
 
+0. **Lo que queda del worker sigue sin cubrir**: el `repeatable` de BullMQ (que
+   la pasada se dispare cada hora con `tz: Europe/Madrid`) y el envío a Sentry
+   del `tablesError`. Con `runDayCutPass()` extraído, lo que queda en el handler
+   es encolado y reporte — pedir Redis en el e2e para probar eso no compensa.
 1. **El e2e no prueba refunds ni el arqueo por denominaciones.** El ciclo del
    prompt no los incluye. `cash-count` con `kind: "X"` sobre un turno
    auto-cerrado —el "cuadrar caja" de la mañana siguiente— sigue cubierto sólo
@@ -243,3 +300,70 @@ Sin la variable, `pnpm test:e2e` se salta e imprime estos mismos pasos.
 5. **El PDF del Z sólo se comprueba que existe**, no su contenido. Verificar que
    el Z de un corte automático dice lo que tiene que decir sigue siendo la duda
    1 del carryover de v1.11 y necesita ver un Z real primero.
+
+---
+
+# Addendum · el barrido de mesas de v1.12-B (review de Matías)
+
+**Lo que faltaba.** La primera entrega cubría el corte de día de v1.11 y ni
+tocaba ni declaraba el barrido de mesas abandonadas de v1.12-B, que corre en
+**la misma pasada**: `shift-day-cut-worker.ts` encadena `runShiftDayCut` y
+`runAbandonedTableSweep` dentro del mismo job. La suite ejecutaba la primera
+mitad de la pasada y llamaba a eso "el ciclo entero". Cero aserciones sobre
+mesas y cero líneas en "fuera de alcance": el peor de los dos mundos, porque
+leyendo el done.md parecía cubierto.
+
+**Lo que se añadió** (`+3` tests, 9 → 12):
+
+- **Test 3** — dos mesas abiertas por `POST /tables/:id/open` antes del corte:
+  M1 vacía y M2 con una caña. Más M3, que se queda con fecha de hoy.
+- **Test 5** — el barrido de la misma pasada: M1 anulada
+  (`AUTO_ABANDONED_EMPTY`, `voided_by_user_id` NULL, mesa libre), M2 intacta con
+  su línea y su mesa ocupada, M3 sin tocar.
+- **Test 12** — la carrera del `lines: { none: {} }`: la primera línea entra
+  entre la lectura del barrido y su reclamación, y la comanda sobrevive.
+
+**Criterio de "funciona", aplicado igual que a los otros dos:** quitar el
+`requireEmpty` del barrido pone **rojo el test 12**; quitar además el
+`if (draft._count.lines > 0) continue` pone **rojo el test 5**. Los dos
+sabotajes se ejecutaron y `abandoned.ts` se restauró después (ver la tabla de
+sabotajes arriba).
+
+**Lo que sigue sin cubrirse, ahora sí escrito:** la lista del admin, el
+`onlyIfEmpty` del DELETE y el evento del bus quedan en "fuera de alcance" con su
+motivo.
+
+---
+
+# Addendum 2 · `runDayCutPass()` (review de Matías, antes del commit)
+
+El addendum 1 dejaba un hueco declarado como carryover: el e2e encadenaba
+`runShiftDayCut` y `runAbandonedTableSweep` a mano porque la composición sólo
+existía dentro del handler de `shift-day-cut-worker.ts`, y llegar ahí exige
+Redis y BullMQ. Se cierra ahora, y el motivo es que **el fallo que ese hueco no
+detecta es el invisible**: si alguien desconecta el barrido del worker, la suite
+sigue verde y te enteras semanas después con un bar lleno de mesas zombi — que
+es literalmente lo que pasó en Sirope (cuatro mesas ocupadas desde el 9 de
+julio, encontradas el 20 de agosto mirando la BD a mano).
+
+**`apps/api/src/shift/day-cut-pass.ts`** — nuevo. `runDayCutPass({ prisma, log,
+now })`: cierra los turnos que cruzaron el corte y, detrás, suelta las mesas
+abandonadas. Devuelve `{ shifts, tables, tablesError }`. Es mover código: el
+orden (la caja primero) y el aislamiento (si el barrido peta, los turnos ya
+están cerrados) son los de v1.12-B sin tocar. Lo único que cambia de forma es
+que el error del barrido se **devuelve** en vez de reportarse ahí mismo — Sentry
+es cosa del worker, no de la pasada.
+
+- `shift-day-cut-worker.ts` ya no compone nada: llama a `runDayCutPass()` y
+  manda `tablesError` a Sentry si viene. El `returnvalue` del job no cambia.
+- El e2e (test 4) llama a **esa misma función** en vez de reconstruir la
+  cadena.
+
+**Cierre del criterio:** borrar la llamada al barrido dentro de
+`runDayCutPass()` pone **rojo el test 5** (`expected null not to be null`) y, de
+rebote, el 12. El hueco ya no existe. Es la tercera fila de la tabla de
+sabotajes.
+
+**Puertas tras el refactor:** e2e 12/12, `pnpm test` 144 archivos / 1228 pasan /
+3 skipped / 0 fallos, `tsc --noEmit` limpio. Y el sabotaje del test 5 (quitar el
+guard de líneas del barrido) sigue poniéndose rojo igual que antes.

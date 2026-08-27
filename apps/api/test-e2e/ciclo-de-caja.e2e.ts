@@ -11,18 +11,24 @@
 // probarlo de cero" del done.md de v1.11. Un solo camino, el que hace
 // Sole cada día, sin prisma falso:
 //
-//   1. tenant + tienda + caja + cajero; abrir turno con fondo
-//   2. vender (efectivo y mixto) — importes verificados con SELECTs
-//   3. forzar el corte de día con un `now` fabricado
-//   4. abrir el turno del día siguiente
-//   5. el terminal offline sube el ticket de ANTES del corte: entra en el
-//      turno de ayer (no en el que está abierto) y lo marca `zReportStale`
-//   6. y el de DESPUÉS del corte: entra en el turno nuevo
-//   7. `GET /shift/last-closed` y `ack-summary`
-//   8. `close-day` sin contar → descuadre null
-//   9. el corte no pisa un cierre manual que llegó durante la pasada
+//    1. tenant + tienda + caja + cajero; abrir turno con fondo
+//    2. vender (efectivo y mixto) — importes verificados con SELECTs
+//    3. abrir mesas: una vacía, una con líneas
+//    4. forzar `runDayCutPass` con un `now` fabricado → turno cerrado
+//    5. la MISMA pasada suelta la mesa vacía y no toca la que tiene líneas
+//       (v1.12-B: el barrido va enganchado al corte, no es un job nuevo;
+//       desde v1.13 la composición vive en `shift/day-cut-pass.ts`, que es
+//       lo que llama el worker — así este test la cubre de verdad)
+//    6. abrir el turno del día siguiente
+//    7. el terminal offline sube el ticket de ANTES del corte: entra en el
+//       turno de ayer (no en el que está abierto) y lo marca `zReportStale`
+//    8. y el de DESPUÉS del corte: entra en el turno nuevo
+//    9. `GET /shift/last-closed` y `ack-summary`
+//   10. `close-day` sin contar → descuadre null
+//   11. el corte no pisa un cierre manual que llegó durante la pasada
+//   12. el barrido no pierde la línea que entra durante la carrera
 //
-// El orden de los pasos 4 y 5 está invertido respecto al guion de v1.11 a
+// El orden de los pasos 6 y 7 está invertido respecto al guion de v1.11 a
 // propósito: con el turno de hoy YA abierto, imputar por ventana y coger
 // "el turno abierto ahora" dan resultados distintos. Con un solo turno
 // vivo, el paso no distinguiría una regla de la otra.
@@ -76,11 +82,16 @@ vi.mock("../src/queues/ticket-email.js", () => ({
 const { getPrisma, shutdown } = await import("../src/context.js");
 const { registerShiftRoutes } = await import("../src/shift/routes.js");
 const { registerTicketRoutes } = await import("../src/tickets/routes.js");
+const { registerTableOperativaRoutes } = await import(
+  "../src/tables/operativa.js"
+);
 const { registerErrorHandler } = await import("../src/lib/error-handler.js");
 const { registerLenientJsonParser } = await import("../src/lib/lenient-json.js");
 const { signCashierSession } = await import("../src/shift/cashier-session.js");
 const { runShiftDayCut } = await import("../src/shift/day-cut-run.js");
+const { runDayCutPass } = await import("../src/shift/day-cut-pass.js");
 const { lastDayCutBefore } = await import("../src/shift/day-cut.js");
+const { runAbandonedTableSweep } = await import("../src/tables/abandoned.js");
 
 const HOUR = 60 * 60 * 1000;
 
@@ -105,6 +116,22 @@ describe.skipIf(!e2eEnabled)("e2e · ciclo de caja contra Postgres real", () => 
   let shiftA = "";
   let shiftB = "";
   let cutAt: Date = new Date(0);
+
+  // v1.12-B · las tres mesas del barrido. `race` se queda con su DRAFT
+  // recién creado (no ha cruzado ningún corte) hasta el último test.
+  const tables: Record<"empty" | "withLines" | "race", string> = {
+    empty: "",
+    withLines: "",
+    race: "",
+  };
+  const drafts: Record<"empty" | "withLines" | "race", string> = {
+    empty: "",
+    withLines: "",
+    race: "",
+  };
+  // La pasada del corte que se ejecuta en el test 4. El test 5 assertea
+  // su mitad de mesas.
+  let pass: Awaited<ReturnType<typeof runDayCutPass>> | null = null;
 
   const auth = () => ({ authorization: `Bearer ${token}` });
 
@@ -166,6 +193,43 @@ describe.skipIf(!e2eEnabled)("e2e · ciclo de caja contra Postgres real", () => 
     return rows[0]?.shift_id ?? null;
   }
 
+  interface DraftRow {
+    id: string;
+    status: string;
+    table_id: string | null;
+    void_reason: string | null;
+    voided_at: Date | null;
+    voided_by_user_id: string | null;
+    line_count: bigint;
+  }
+
+  async function draftRow(ticketId: string): Promise<DraftRow> {
+    const rows = await prisma.$queryRaw<DraftRow[]>`
+      SELECT t.id::text           AS id,
+             t.status::text       AS status,
+             t.table_id::text     AS table_id,
+             t.void_reason::text  AS void_reason,
+             t.voided_at,
+             t.voided_by_user_id::text AS voided_by_user_id,
+             (SELECT COUNT(*) FROM ticket_lines l WHERE l.ticket_id = t.id) AS line_count
+        FROM tickets t
+       WHERE t.id = ${ticketId}::uuid
+    `;
+    expect(rows).toHaveLength(1);
+    return rows[0]!;
+  }
+
+  /** Una mesa está OCUPADA si tiene un ticket DRAFT colgando. Es
+   *  exactamente lo que pinta el mapa de sala. */
+  async function tableIsOccupied(tableId: string): Promise<boolean> {
+    const rows = await prisma.$queryRaw<Array<{ n: bigint }>>`
+      SELECT COUNT(*) AS n
+        FROM tickets
+       WHERE table_id = ${tableId}::uuid AND status = 'DRAFT'
+    `;
+    return Number(rows[0]!.n) > 0;
+  }
+
   /** Una venta tal y como la manda el TPV. `occurredAt` sólo lo lleva lo
    *  que sube el outbox después de haber estado sin red. */
   async function sell(args: {
@@ -207,6 +271,7 @@ describe.skipIf(!e2eEnabled)("e2e · ciclo de caja contra Postgres real", () => 
     registerLenientJsonParser(app);
     await registerShiftRoutes(app);
     await registerTicketRoutes(app);
+    await registerTableOperativaRoutes(app);
     await app.ready();
 
     // ── paso 1 · tenant + tienda + caja + cajero ──────────────────────
@@ -235,6 +300,20 @@ describe.skipIf(!e2eEnabled)("e2e · ciclo de caja contra Postgres real", () => 
       select: { id: true },
     });
     registerId = register.id;
+
+    // Tres mesas de sala. Como el resto del alta, esto lo deja el admin
+    // al configurar el local: no es parte del ciclo diario.
+    for (const [key, name] of [
+      ["empty", "M1"],
+      ["withLines", "M2"],
+      ["race", "M3"],
+    ] as const) {
+      const table = await prisma.table.create({
+        data: { storeId, name },
+        select: { id: true },
+      });
+      tables[key] = table.id;
+    }
 
     const cashier = await prisma.user.create({
       data: {
@@ -325,14 +404,69 @@ describe.skipIf(!e2eEnabled)("e2e · ciclo de caja contra Postgres real", () => 
     expect(await ticketShiftId(mixed.externalId)).toBe(shiftA);
   });
 
-  it("3 · el corte de día cierra el turno: AUTO_DAY_CUT, sin contar, con Z", async () => {
+  it("3 · dos mesas abiertas antes del corte: una vacía y una con líneas", async () => {
+    // v1.12-B. Un toque en el mapa crea el DRAFT con `tableId` y desde
+    // ese momento la mesa está ocupada. Si nadie la suelta, se queda
+    // ocupada para siempre — cuatro mesas de Sirope llevaban así desde
+    // el 9 de julio.
+    for (const key of ["empty", "withLines", "race"] as const) {
+      const res = await app.inject({
+        method: "POST",
+        url: `/tables/${tables[key]}/open`,
+        headers: auth(),
+        payload: { diners: 2 },
+      });
+      expect(res.statusCode).toBe(201);
+      drafts[key] = res.json().ticket.id as string;
+    }
+
+    // La de en medio tiene consumo dentro: una caña. Esta no se toca
+    // JAMÁS, tenga la edad que tenga — anularla sería borrar una comanda.
+    const line = await app.inject({
+      method: "POST",
+      url: `/tables/${tables.withLines}/lines`,
+      headers: auth(),
+      payload: {
+        nameSnapshot: "Caña",
+        sku: "TPV-CANA",
+        units: 1,
+        unitPrice: 2.5,
+        discountPct: 0,
+        taxRate: 10,
+      },
+    });
+    expect(line.statusCode).toBe(201);
+
+    // Las dos primeras son de ANTES del corte. La tercera se queda con
+    // su `created_at` de ahora: no ha cruzado nada y la pasada del test 4
+    // no debe tocarla (se usa en el test 12).
+    await prisma.$executeRaw`
+      UPDATE tickets SET created_at = now() - interval '30 hours'
+       WHERE id IN (${drafts.empty}::uuid, ${drafts.withLines}::uuid)
+    `;
+
+    expect((await draftRow(drafts.empty)).status).toBe("DRAFT");
+    expect(Number((await draftRow(drafts.empty)).line_count)).toBe(0);
+    expect(Number((await draftRow(drafts.withLines)).line_count)).toBe(1);
+    expect(await tableIsOccupied(tables.empty)).toBe(true);
+    expect(await tableIsOccupied(tables.withLines)).toBe(true);
+  });
+
+  it("4 · la pasada del corte cierra el turno: AUTO_DAY_CUT, sin contar, con Z", async () => {
     // `now` fabricado — no se espera a las cinco de la mañana. Es real
     // (no futuro) a propósito: `occurredAt` de los tickets offline se
     // compara contra el reloj de verdad (OCCURRED_AT_MAX_SKEW_MS).
     const now = new Date();
     cutAt = lastDayCutBefore(now, 5);
 
-    const result = await runShiftDayCut({ prisma, log: silentLog, now });
+    // `runDayCutPass` es LA pasada: la misma función que llama el worker
+    // en producción, con el corte de caja y el barrido de mesas de
+    // v1.12-B dentro y en ese orden. El e2e no la reconstruye — si
+    // alguien desconecta el barrido de ahí, el test 5 se pone rojo.
+    pass = await runDayCutPass({ prisma, log: silentLog, now });
+    const result = pass.shifts;
+
+    expect(pass.tablesError).toBeNull();
     expect(result.failed).toBe(0);
     expect(result.closed.map((c) => c.shiftId)).toEqual([shiftA]);
 
@@ -356,7 +490,43 @@ describe.skipIf(!e2eEnabled)("e2e · ciclo de caja contra Postgres real", () => 
   });
 
 
-  it("4 · el cajero llega y abre el turno del día", async () => {
+  it("5 · la misma pasada suelta la mesa vacía y no toca la que tiene líneas", async () => {
+    // La pasada del test 4 tiene que haber barrido mesas. Si `tables` es
+    // null es que el barrido ya no cuelga de `runDayCutPass`: el mapa de
+    // sala se llenaría de mesas zombi sin que nadie se enterase.
+    const sweep = pass?.tables ?? null;
+    expect(sweep).not.toBeNull();
+    expect(sweep!.failed).toBe(0);
+    // Tres DRAFT con mesa vivos: la vacía antigua, la que tiene líneas y
+    // la de ahora mismo (que no ha cruzado ningún corte).
+    expect(sweep!.scanned).toBe(3);
+    expect(sweep!.released.map((r) => r.ticketId)).toEqual([drafts.empty]);
+    expect(sweep!.keptWithLines).toBe(1);
+
+    // La mesa vacía: draft anulado con su auditoría, y la mesa libre.
+    const empty = await draftRow(drafts.empty);
+    expect(empty.status).toBe("VOIDED");
+    expect(empty.void_reason).toBe("AUTO_ABANDONED_EMPTY");
+    // NULL = SISTEMA. Igual que `closedByUserId` en el corte: no le
+    // atribuimos a nadie algo que hizo el servidor.
+    expect(empty.voided_by_user_id).toBeNull();
+    expect(empty.voided_at).not.toBeNull();
+    expect(await tableIsOccupied(tables.empty)).toBe(false);
+
+    // La mesa con consumo dentro: intacta, con la misma antigüedad.
+    const withLines = await draftRow(drafts.withLines);
+    expect(withLines.status).toBe("DRAFT");
+    expect(withLines.void_reason).toBeNull();
+    expect(Number(withLines.line_count)).toBe(1);
+    expect(await tableIsOccupied(tables.withLines)).toBe(true);
+
+    // Y la de hoy sigue donde estaba: el criterio es el corte, no la
+    // mesa vacía a secas.
+    expect((await draftRow(drafts.race)).status).toBe("DRAFT");
+    expect(await tableIsOccupied(tables.race)).toBe(true);
+  });
+
+  it("6 · el cajero llega y abre el turno del día", async () => {
     const opened = await app.inject({
       method: "POST",
       url: "/shift/open",
@@ -387,7 +557,7 @@ describe.skipIf(!e2eEnabled)("e2e · ciclo de caja contra Postgres real", () => 
   // mismo". Con un solo turno vivo, cualquiera de las dos reglas daría el
   // mismo resultado y el test no probaría nada.
 
-  it("5 · ticket offline de ANTES del corte → turno de ayer, y su Z queda desfasado", async () => {
+  it("7 · ticket offline de ANTES del corte → turno de ayer, y su Z queda desfasado", async () => {
     // Una hora antes del corte: dentro de la ventana del turno de ayer
     // [openedAt, closedAt) y en el pasado real, así que la tolerancia de
     // reloj de `parseOccurredAt` (5 min hacia adelante) no lo descarta.
@@ -420,7 +590,7 @@ describe.skipIf(!e2eEnabled)("e2e · ciclo de caja contra Postgres real", () => 
     expect(rowAfter.z_report_pdf_path).toBe(rowBefore.z_report_pdf_path);
   });
 
-  it("6 · ticket offline de DESPUÉS del corte → turno nuevo", async () => {
+  it("8 · ticket offline de DESPUÉS del corte → turno nuevo", async () => {
     // Mismo outbox, misma subida: el terminal sigue mandando el `shiftId`
     // viejo. El instante es posterior a la apertura del turno nuevo, así
     // que la venta es de hoy.
@@ -443,7 +613,7 @@ describe.skipIf(!e2eEnabled)("e2e · ciclo de caja contra Postgres real", () => 
     expect(await paymentsByMethod(shiftB)).toEqual({ CARD: 33 });
   });
 
-  it("7 · last-closed devuelve el resumen de ayer; tras ack-summary, ya no", async () => {
+  it("9 · last-closed devuelve el resumen de ayer; tras ack-summary, ya no", async () => {
     const res = await app.inject({
       method: "GET",
       url: "/shift/last-closed",
@@ -494,7 +664,7 @@ describe.skipIf(!e2eEnabled)("e2e · ciclo de caja contra Postgres real", () => 
     expect(acked2.summary_ack_at!.getTime()).toBe(acked.summary_ack_at!.getTime());
   });
 
-  it("8 · close-day cierra sin contar y el descuadre es null", async () => {
+  it("10 · close-day cierra sin contar y el descuadre es null", async () => {
     const res = await app.inject({
       method: "POST",
       url: `/shift/${shiftB}/close-day`,
@@ -516,7 +686,7 @@ describe.skipIf(!e2eEnabled)("e2e · ciclo de caja contra Postgres real", () => 
     expect(row.cash_counted).toBeNull();
   });
 
-  it("9 · el corte no pisa un cierre manual que llegó durante la pasada", async () => {
+  it("11 · el corte no pisa un cierre manual que llegó durante la pasada", async () => {
     // addendum 2 de v1.11 (F2). La pasada lee los turnos abiertos al
     // principio y escribe el cierre al final, después de generar el Z
     // (segundos). Si en esa ventana un cajero cierra a mano, el cierre
@@ -586,5 +756,75 @@ describe.skipIf(!e2eEnabled)("e2e · ciclo de caja contra Postgres real", () => 
     expect(row.close_reason).toBe("MANUAL");
     expect(row.closed_by_user_id).toBe(cashierId);
     expect(Number(row.cash_counted)).toBe(20);
+  });
+  it("12 · el barrido no pierde la línea que entra durante la carrera", async () => {
+    // v1.12-B · la red de seguridad del `lines: { none: {} }` en el
+    // `updateMany` de `voidDraftTicket`. El barrido lee la lista de
+    // DRAFT vacíos y, un instante después, escribe la anulación. Si en
+    // esa ventana un camarero teclea la PRIMERA línea, anular el draft
+    // sería borrarle la comanda recién tomada.
+    //
+    // La mesa M3 lleva su DRAFT abierto desde el test 3 y la pasada
+    // anterior no la tocó (era de hoy). Ahora sí es de antes del corte.
+    await prisma.$executeRaw`
+      UPDATE tickets SET created_at = now() - interval '30 hours'
+       WHERE id = ${drafts.race}::uuid
+    `;
+
+    // La carrera, en el borde y contra Postgres: el único punto tocado
+    // es el `updateMany` de tickets —la reclamación—, y la línea se
+    // escribe DE VERDAD justo antes de que llegue. Es exactamente la
+    // ventana que el WHERE tiene que cubrir: después de que el barrido
+    // haya leído "0 líneas", antes de que reclame.
+    let raced = false;
+    const racingPrisma = new Proxy(prisma, {
+      get(target, prop) {
+        if (prop !== "ticket") return Reflect.get(target, prop);
+        const delegate = Reflect.get(target, prop) as typeof prisma.ticket;
+        return new Proxy(delegate, {
+          get(dTarget, dProp) {
+            if (dProp !== "updateMany") return Reflect.get(dTarget, dProp);
+            return async (...args: unknown[]) => {
+              if (!raced) {
+                raced = true;
+                await prisma.ticketLine.create({
+                  data: {
+                    ticketId: drafts.race,
+                    sku: "TPV-CANA",
+                    nameSnapshot: "Caña",
+                    units: 1,
+                    unitPrice: 2.5,
+                    discountPct: 0,
+                    taxRate: 10,
+                    subtotal: 2.5,
+                    total: 2.75,
+                  },
+                });
+              }
+              return (
+                dTarget.updateMany as (...a: unknown[]) => Promise<unknown>
+              )(...args);
+            };
+          },
+        });
+      },
+    }) as typeof prisma;
+
+    const result = await runAbandonedTableSweep({
+      prisma: racingPrisma,
+      log: silentLog,
+      now: new Date(),
+    });
+    expect(raced).toBe(true);
+    // Ni mesa liberada ni fallo: el barrido se aparta.
+    expect(result.released).toEqual([]);
+    expect(result.failed).toBe(0);
+
+    // La comanda sigue viva: draft, con su línea, y la mesa ocupada.
+    const row = await draftRow(drafts.race);
+    expect(row.status).toBe("DRAFT");
+    expect(row.void_reason).toBeNull();
+    expect(Number(row.line_count)).toBe(1);
+    expect(await tableIsOccupied(tables.race)).toBe(true);
   });
 });

@@ -6,8 +6,7 @@ import { Worker } from "bullmq";
 
 import { getPrisma, getRedis } from "../context.js";
 import { captureError } from "../lib/sentry.js";
-import { runShiftDayCut } from "../shift/day-cut-run.js";
-import { runAbandonedTableSweep } from "../tables/abandoned.js";
+import { runDayCutPass } from "../shift/day-cut-pass.js";
 import {
   SHIFT_DAY_CUT_QUEUE_NAME,
   type ShiftDayCutJob,
@@ -23,34 +22,27 @@ export function startShiftDayCutWorker(): Worker<ShiftDayCutJob> {
         error: (obj: unknown, msg?: string) =>
           console.error(`[shift-day-cut] ${msg ?? ""}`, obj),
       };
-      const result = await runShiftDayCut({ prisma: getPrisma(), log });
-      // v1.12-mesas-abandonadas · el mismo job, una capa más abajo: tras
-      // cerrar los turnos que cruzaron el corte, soltamos las mesas que
-      // se quedaron ocupadas con un DRAFT vacío. Va DESPUÉS a propósito
-      // —la caja primero— y aislado: si el barrido peta, los turnos ya
-      // están cerrados.
-      let sweep = { released: 0, keptWithLines: 0, failed: 0 };
-      try {
-        const swept = await runAbandonedTableSweep({ prisma: getPrisma(), log });
-        sweep = {
-          released: swept.released.length,
-          keptWithLines: swept.keptWithLines,
-          failed: swept.failed,
-        };
-      } catch (err) {
-        console.error("[shift-day-cut] barrido de mesas abandonadas falló", err);
+      // v1.13 · la pasada entera vive en `runDayCutPass`: cerrar los
+      // turnos que cruzaron el corte y, detrás, soltar las mesas que se
+      // quedaron ocupadas con un DRAFT vacío (v1.12-B). El worker ya no
+      // compone nada — así el e2e puede ejecutar exactamente la misma
+      // pasada sin levantar Redis, y desconectar el barrido pone la
+      // suite roja en vez de pasar desapercibido durante semanas.
+      const pass = await runDayCutPass({ prisma: getPrisma(), log });
+      if (pass.tablesError) {
+        const err = pass.tablesError;
         captureError(err instanceof Error ? err : new Error(String(err)), {
           extra: { queue: SHIFT_DAY_CUT_QUEUE_NAME, step: "abandoned-tables" },
         });
       }
       return {
         source: job.data.source,
-        scanned: result.scanned,
-        closed: result.closed.length,
-        failed: result.failed,
-        tablesReleased: sweep.released,
-        tablesKeptWithLines: sweep.keptWithLines,
-        tablesFailed: sweep.failed,
+        scanned: pass.shifts.scanned,
+        closed: pass.shifts.closed.length,
+        failed: pass.shifts.failed,
+        tablesReleased: pass.tables?.released.length ?? 0,
+        tablesKeptWithLines: pass.tables?.keptWithLines ?? 0,
+        tablesFailed: pass.tables?.failed ?? 0,
       };
     },
     { connection: getRedis(), concurrency: 1 },
