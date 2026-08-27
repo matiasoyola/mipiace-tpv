@@ -142,6 +142,15 @@ const TransferOwnerMeta = Base.extend({
   passwordReset: z.boolean(),
 });
 
+// Bloque soporte-cajeros-superadmin: el super-admin consultó la lista
+// de cajeros de un tenant desde la ficha. Es lectura pura (el PIN no
+// sale), pero es un acceso a datos de un cliente y se audita como tal.
+// `cashiersReturned` sirve para distinguir de un vistazo la consulta de
+// soporte normal del barrido masivo.
+const ViewTenantCashiersMeta = Base.extend({
+  cashiersReturned: z.number().int().nonnegative(),
+});
+
 const META_SCHEMAS = {
   create_tenant: CreateTenantMeta,
   create_tenant_draft: CreateTenantDraftMeta,
@@ -159,6 +168,7 @@ const META_SCHEMAS = {
   resend_super_admin_invite: ResendSuperAdminInviteMeta,
   dedupe_tags: DedupeTagsMeta,
   transfer_owner: TransferOwnerMeta,
+  view_tenant_cashiers: ViewTenantCashiersMeta,
 } as const;
 
 export type SuperAdminAction = keyof typeof META_SCHEMAS;

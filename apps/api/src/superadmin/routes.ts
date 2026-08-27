@@ -4,6 +4,7 @@ import { registerSuperAdminAdminsRoutes } from "./admins.js";
 import { registerSuperAdminAuthRoutes } from "./auth.js";
 import { registerSuperAdminHubRoutes } from "./hub.js";
 import { registerSuperAdminReconciliationRoutes } from "./reconciliation.js";
+import { registerSuperAdminTenantCashiersRoutes } from "./tenant-cashiers.js";
 import { registerSuperAdminTenantsRoutes } from "./tenants.js";
 
 export async function registerSuperAdminRoutes(
@@ -16,6 +17,9 @@ export async function registerSuperAdminRoutes(
   await registerSuperAdminHubRoutes(app);
   // v1.5-consistencia-B Lote 4: runs de la conciliación diaria.
   await registerSuperAdminReconciliationRoutes(app);
+  // Bloque soporte-cajeros-superadmin: lista de cajeros de un tenant
+  // (lectura, auditada) para atender "no puedo entrar" sin impersonar.
+  await registerSuperAdminTenantCashiersRoutes(app);
 }
 
 export { registerTenantBlockGuard } from "./tenant-block-guard.js";

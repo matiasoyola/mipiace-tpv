@@ -282,3 +282,36 @@ export interface HubResponse {
   tasks: HubCommonTask[];
   generatedAt: string;
 }
+
+// Bloque soporte-cajeros-superadmin · GET /super-admin/tenants/:id/cashiers.
+//
+// Lista de LECTURA de quién puede entrar en las cajas de un tenant.
+// El PIN no está aquí a propósito: no lo devuelve la API ni entero, ni
+// parcial, ni su hash. Lo único que baja es `canOpenTpv`, el booleano
+// derivado de si tiene PIN puesto.
+export type CashierAccessStatus = "ACTIVE" | "NO_PIN" | "REVOKED";
+
+// De dónde puede venir `lastLoginAt`. Un CASHIER sólo entra por el TPV
+// (el login del admin le devuelve 403), así que su fecha es del TPV
+// seguro. Un OWNER o un MANAGER entra por los dos sitios y el modelo
+// comparte el campo — lo decimos en vez de aparentar precisión.
+export type CashierLastLoginSource = "TPV" | "TPV_O_ADMIN";
+
+export interface TenantCashier {
+  id: string;
+  alias: string | null;
+  email: string;
+  role: "OWNER" | "MANAGER" | "CASHIER";
+  status: CashierAccessStatus;
+  canOpenTpv: boolean;
+  isTestCashier: boolean;
+  lastLoginAt: string | null;
+  lastLoginSource: CashierLastLoginSource;
+  createdAt: string;
+}
+
+export interface TenantCashiersResponse {
+  tenantId: string;
+  tenantName: string;
+  cashiers: TenantCashier[];
+}
