@@ -20,6 +20,7 @@ import {
 
 import { superApi, SuperAdminApiError } from "./api.js";
 import { humanizeError } from "./error-messages.js";
+import { CashiersPanel } from "./CashiersPanel.js";
 import { SuperAdminShell } from "./SuperAdminShell.js";
 import type {
   ActivateTenantResponse,
@@ -628,6 +629,12 @@ export function TenantDetailPage() {
           onTransferred={() => void reload()}
         />
       )}
+
+      {/* Bloque soporte-cajeros-superadmin: va justo encima de
+          "Usuarios" porque es lo que se mira cuando suena el teléfono.
+          "Usuarios" es la ficha administrativa (2FA, password); esto es
+          quién puede abrir una caja. */}
+      <CashiersPanel tenantId={tenant.id} />
 
       <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6">
         <h3 className="font-semibold text-slate-900 mb-4">
