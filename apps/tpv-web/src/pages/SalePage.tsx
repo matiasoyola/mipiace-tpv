@@ -53,6 +53,7 @@ import {
   type SuspendedCart,
 } from "../lib/cart.js";
 import { usePersistedCartLines } from "../lib/persistedCart.js";
+import { useVersionLabel } from "../hooks/useVersionLabel.js";
 import {
   findByBarcode,
   fuzzySearch,
@@ -297,6 +298,10 @@ export function SalePage(props: SalePageProps) {
   // pulsar Esc o al pulsar cualquier acción del drawer. No persiste:
   // el estado por defecto es cerrado.
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // A3-distribución · Frente 2: qué versión tiene este terminal. Va al pie
+  // del drawer porque es el único menú al que el cajero llega desde
+  // cualquier punto de la venta.
+  const versionLabel = useVersionLabel();
   // Esc cierra el drawer (accesibilidad teclado). Sólo escuchamos
   // mientras está abierto para no contaminar el resto de listeners.
   useEffect(() => {
@@ -2128,6 +2133,13 @@ export function SalePage(props: SalePageProps) {
               <span className="truncate">Bloquear ({props.cashierLabel})</span>
             </button>
           </nav>
+          {/* A3-distribución · Frente 2. `select-all` para que en soporte
+              baste un toque para seleccionarlo y leerlo por teléfono. */}
+          {versionLabel ? (
+            <p className="mt-auto pt-4 text-[11.5px] leading-tight text-slate-400 tabular-nums select-all">
+              {versionLabel}
+            </p>
+          ) : null}
         </aside>
       </div>
     </div>
