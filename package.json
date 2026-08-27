@@ -13,6 +13,7 @@
     "dev:tpv": "pnpm --filter @mipiacetpv/tpv-web dev",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "pnpm --filter @mipiacetpv/api run test:e2e",
     "db:generate": "pnpm --filter @mipiacetpv/db run generate",
     "db:migrate": "pnpm --filter @mipiacetpv/db run migrate",
     "db:studio": "pnpm --filter @mipiacetpv/db run studio",

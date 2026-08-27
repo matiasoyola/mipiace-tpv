@@ -12,6 +12,10 @@
 # Redis de servicio y le pide /health. Existe porque `ci` NUNCA arranca
 # el proceso — el 2026-08-19 pasó en verde con un bug que lo mataba.
 #
+# Job `e2e` (v1.13): levanta Postgres, aplica las migraciones de verdad
+# y corre el ciclo de caja entero (`pnpm test:e2e`). Fuera de `needs` de
+# `publish` mientras se estabiliza — no bloquea, pero se ve rojo.
+#
 # Job `publish` (v1.5-B · Lote 1): sólo en push a master y tras `ci` y
 # `smoke` en verde. Construye con buildx las imágenes `api` y `static-publish` y
 # las publica en GHCR con dos tags: `<sha-corto>` (inmutable, para
@@ -199,6 +203,69 @@ jobs:
       - name: Logs del contenedor
         if: always()
         run: docker logs api-smoke --tail=200 || true
+
+  # v1.13-e2e-ciclo-de-caja · el ciclo de caja contra Postgres de verdad.
+  #
+  # `ci` corre la suite con prisma FALSO: fija la lógica, pero nunca ha
+  # visto el ciclo entero (abrir turno → vender → corte de día a las
+  # cinco → tickets de un terminal que estuvo sin red → resumen → cerrar)
+  # tocando una base real. Este job aplica las migraciones DE VERDAD
+  # (`prisma migrate deploy` sobre base limpia, así se prueba también la
+  # migración) y corre `pnpm test:e2e`.
+  #
+  # NO está en `needs` de `publish` a propósito (§3 del prompt): mientras
+  # se estabiliza no puede bloquear un despliegue. Pero se ve rojo — un
+  # e2e que nadie mira no existe.
+  #
+  # Sin Redis: la suite mockea el encolado BullMQ en el borde, igual que
+  # el resto de tests. Lo que se prueba aquí es la caja, no el ERP.
+  e2e:
+    needs: ci
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: mipiacetpv
+          POSTGRES_PASSWORD: mipiacetpv
+          POSTGRES_DB: mipiacetpv_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mipiacetpv"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node 20 + cache pnpm store
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Prisma generate
+        run: pnpm --filter @mipiacetpv/db run generate
+
+      # La suite hace DROP SCHEMA public y aplica las migraciones antes de
+      # empezar. `E2E_DATABASE_URL` (y no `DATABASE_URL`) es deliberado:
+      # nadie puede disparar esto por accidente contra su base de trabajo.
+      # Sin la variable la suite se salta en local — pero en CI falla, que
+      # es lo que evita un verde que miente.
+      - name: e2e del ciclo de caja
+        env:
+          E2E_DATABASE_URL: postgresql://mipiacetpv:mipiacetpv@127.0.0.1:5432/mipiacetpv_e2e
+        run: pnpm test:e2e
 
   # v1.5-consistencia-B · Lote 1: publicación de imágenes en GHCR.
   # Sólo en push a master (las ramas validan con `ci` pero no publican).
