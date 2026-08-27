@@ -35,6 +35,7 @@ import {
   computeTicket,
   readUnitPriceDeltaCents,
 } from "../tickets/totals.js";
+import { voidDraftTicket } from "./void-draft.js";
 
 const UUID_V4 =
   "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$";
@@ -659,22 +660,26 @@ export async function registerTableOperativaRoutes(
           message: "El ticket no pertenece a tu caja.",
         });
       }
-      await prisma.ticket.update({
-        where: { id: ticketId },
-        data: {
-          status: "VOIDED",
-          notes: query.reason
-            ? `[VACIADA] ${query.reason}`
-            : "[VACIADA] sin motivo",
-        },
+      // v1.12-mesas-abandonadas · la anulación (VOIDED + auditoría +
+      // liberar la mesa) vive en `void-draft.ts`. Este handler conserva
+      // sus guards —tenant, DRAFT, misma caja— y delega el efecto: es el
+      // mismo camino que usan el barrido del corte de día y el "Anular"
+      // del admin.
+      const voided = await voidDraftTicket({
+        prisma,
+        ticketId,
+        tenantId: cashier.tid,
+        reason: "MANUAL",
+        byUserId: cashier.sub,
+        note: query.reason ? `[VACIADA] ${query.reason}` : "[VACIADA] sin motivo",
       });
-      if (draft.tableId) {
-        getStoreEventBus().broadcast(draft.register.storeId, {
-          type: "table.cleared",
-          tableId: draft.tableId,
-          ticketId,
-          reason: query.reason ?? null,
-          at: new Date().toISOString(),
+      if (!voided.ok) {
+        // Sólo puede llegar aquí por carrera (otro dispositivo cobró o
+        // vació la mesa entre el guard y la reclamación). Vaciar una mesa
+        // ya vacía no es un error para quien lo pidió.
+        return reply.code(404).send({
+          error: "TICKET_NOT_FOUND_OR_NOT_DRAFT",
+          message: "Sólo se pueden cancelar tickets en DRAFT.",
         });
       }
       request.log.info(

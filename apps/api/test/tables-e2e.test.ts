@@ -154,6 +154,9 @@ function materialize(t: FakeTicket, rel?: Record<string, unknown>) {
       store: { name: "Bar Test" },
     };
   }
+  // v1.12-mesas-abandonadas · `void-draft.ts` pide el número de líneas
+  // con `_count` para saber si el DRAFT está vacío.
+  if (rel._count) out._count = { lines: linesOf(t.id).length };
   return out;
 }
 
@@ -169,6 +172,9 @@ function matchTicket(t: FakeTicket, where: Record<string, unknown>): boolean {
       return false;
     }
   }
+  // v1.12-mesas-abandonadas · `lines: { none: {} }` — la reclamación del
+  // barrido sólo casa si el DRAFT sigue sin líneas.
+  if (where.lines && linesOf(t.id).length > 0) return false;
   return true;
 }
 

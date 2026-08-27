@@ -755,6 +755,44 @@ export function SalePage(props: SalePageProps) {
   // panel con CTA al mapa — no un toast efímero.
   const [deadTable, setDeadTable] = useState<string | null>(null);
 
+  // v1.12-mesas-abandonadas §3 · volver al mapa sin haber añadido NADA
+  // suelta la mesa.
+  //
+  // El origen de las cuatro mesas de Sirope ocupadas desde el 9 de julio
+  // no es el barrido que falta: es que un toque en el mapa crea el DRAFT
+  // (para que la mesa aparezca ocupada en las demás cajas desde el primer
+  // toque, v1.0-mesas-frontend) y nadie lo deshace al salir. Si el cajero
+  // se va sin teclear una sola línea, no había mesa: se anula por el
+  // mismo camino que "Vaciar mesa" y el mapa dice la verdad al instante,
+  // sin esperar a las 05:00.
+  //
+  // Con líneas NO se toca: eso es una cuenta abierta de verdad.
+  // Si falla (sin red, mesa ya cobrada desde otra caja), se vuelve al
+  // mapa igual — el barrido de madrugada la recoge.
+  const backToMap = useCallback(() => {
+    const empty = isTableMode && activeTicketId != null && lines.length === 0;
+    if (!empty) {
+      props.onBackToMap?.();
+      return;
+    }
+    void (async () => {
+      try {
+        const { apiWithCashier } = await import("../api.js");
+        await apiWithCashier(
+          `/tickets/${activeTicketId}?reason=${encodeURIComponent(
+            "Salió del detalle sin añadir nada",
+          )}`,
+          { method: "DELETE" },
+        );
+      } catch {
+        // Silencio a propósito: el cajero pidió irse al mapa, no
+        // gestionar un draft vacío que él no sabe que existe.
+      }
+    })();
+    props.onBackToMap?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isTableMode, activeTicketId, lines.length, props.onBackToMap]);
+
   // Sale al mapa con un aviso inline. Cierra cualquier sheet abierto
   // (incl. el modal de cobro) antes de navegar. Si el padre no cableó
   // onExitToMap (retail puro), cae al onBackToMap plano.
@@ -1648,7 +1686,7 @@ export function SalePage(props: SalePageProps) {
             cashierRole={props.cashierRole}
             shiftTicketsCount={shiftTicketsCount}
             tableContext={props.tableContext ?? null}
-            onBackToMap={props.onBackToMap ?? null}
+            onBackToMap={props.onBackToMap ? backToMap : null}
             onClickProduct={addProduct}
             onClickFreeLine={() => setOpenSheet({ kind: "freeLine" })}
             onClickLine={(line) => setOpenSheet({ kind: "line", line })}

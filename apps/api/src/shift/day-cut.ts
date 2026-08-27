@@ -79,5 +79,22 @@ export function shiftCrossedDayCut(
   dayCutHour: number,
   tz: string = CENTER_TZ,
 ): boolean {
-  return shift.openedAt.getTime() < lastDayCutBefore(now, dayCutHour, tz).getTime();
+  return crossedDayCut(shift.openedAt, now, dayCutHour, tz);
+}
+
+/**
+ * La misma pregunta para cualquier instante, no sólo la apertura de un
+ * turno: ¿esto es de antes del último corte que ya pasó?
+ *
+ * v1.12-mesas-abandonadas la usa sobre `Ticket.createdAt` para decidir si
+ * un DRAFT vacío es de hoy (se respeta) o viene de antes del corte (se
+ * anula y su mesa queda libre).
+ */
+export function crossedDayCut(
+  at: Date,
+  now: Date,
+  dayCutHour: number,
+  tz: string = CENTER_TZ,
+): boolean {
+  return at.getTime() < lastDayCutBefore(now, dayCutHour, tz).getTime();
 }

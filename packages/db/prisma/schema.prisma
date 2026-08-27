@@ -205,6 +205,21 @@ enum ShiftCloseReason {
   AUTO_DAY_CUT
 }
 
+// v1.12-mesas-abandonadas · por qué se anuló un ticket DRAFT. NULL en un
+// ticket que no está VOIDED. Mismo criterio que `ShiftCloseReason`:
+// `voidedByUserId` dice QUIÉN (NULL = lo hizo el sistema), esto dice POR QUÉ.
+//   MANUAL                — "vaciar mesa" desde el TPV, con una persona delante.
+//   AUTO_ABANDONED_EMPTY  — barrido del corte de día: draft SIN líneas y de
+//                           antes del corte. Cero consumo, cero decisión.
+//   MANAGER_VOID          — anulado desde el admin con PIN de encargado. Es el
+//                           único camino por el que se anula un draft CON líneas
+//                           sin estar en la caja.
+enum TicketVoidReason {
+  MANUAL
+  AUTO_ABANDONED_EMPTY
+  MANAGER_VOID
+}
+
 // B-reservas-1 (CRM) · tipo de consentimiento RGPD registrado en la ficha
 // del cliente. DATA = tratamiento de datos personales; TREATMENT =
 // consentimiento del tratamiento/servicio (fórmulas de color, parámetros
@@ -590,6 +605,7 @@ model User {
   shifts         Shift[]              @relation("ShiftOpenedBy")
   closedShifts   Shift[]              @relation("ShiftClosedBy")
   tickets        Ticket[]
+  voidedTickets  Ticket[]             @relation("TicketVoidedBy")
   pairingCodes   PairingCode[]
   resetTokens    PasswordResetToken[]
   refunds        Refund[]
@@ -1105,11 +1121,20 @@ model Ticket {
   paidAt               DateTime?    @map("paid_at") @db.Timestamptz()
   syncedAt             DateTime?    @map("synced_at") @db.Timestamptz()
   syncError            Json?        @map("sync_error")
+  // v1.12-mesas-abandonadas · auditoría de la anulación de un DRAFT.
+  // NULL en todo ticket que no esté VOIDED. `voidedByUserId` NULL con
+  // `voidReason = AUTO_ABANDONED_EMPTY` es el barrido del corte de día:
+  // lo anuló SISTEMA. Los VOIDED anteriores a v1.12 quedan MANUAL con
+  // `voidedAt` NULL — los anuló una persona, pero no sabemos cuándo.
+  voidReason           TicketVoidReason? @map("void_reason")
+  voidedAt             DateTime?    @map("voided_at") @db.Timestamptz()
+  voidedByUserId       String?      @map("voided_by_user_id") @db.Uuid
 
   tenant          Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   register        Register               @relation(fields: [registerId], references: [id], onDelete: Restrict)
   shift           Shift                  @relation(fields: [shiftId], references: [id], onDelete: Restrict)
   user            User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
+  voidedBy        User?                  @relation("TicketVoidedBy", fields: [voidedByUserId], references: [id], onDelete: Restrict)
   lines           TicketLine[]
   payments        TicketPayment[]
   partialPayments TicketPartialPayment[]

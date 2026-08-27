@@ -9,6 +9,7 @@ import { ArrowLeft, Building2, Calculator, ChevronRight } from "lucide-react";
 
 import { AdminShell } from "../AdminShell.js";
 import { api, ApiError, clearTokens, readCurrentRole } from "../api.js";
+import { AbandonedTablesSection } from "./StoreDetailPage.abandonedTables.js";
 import { TablesSection } from "./StoreDetailPage.tables.js";
 import { TicketDeliverySection } from "./StoreDetailPage.ticketDelivery.js";
 import {
@@ -411,6 +412,10 @@ export function StoreDetailPage() {
         )}
       </section>
 
+      {/* v1.12-mesas-abandonadas · sólo aparece si hay cuentas colgadas
+          con consumo. Va ANTES del listado de mesas: es lo único de esta
+          pantalla que pide una decisión hoy. */}
+      <AbandonedTablesSection storeId={store.id} role={readCurrentRole()} />
       <TablesSection storeId={store.id} role={readCurrentRole()} />
 
       <TicketDeliverySection storeId={store.id} role={readCurrentRole()} />
