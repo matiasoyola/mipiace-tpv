@@ -97,9 +97,17 @@ aparecer cerrados con `AUTO_DAY_CUT` y ninguno más.
 
 ### Ventana
 
-El job corre a las 5:00. Desplegar **por la mañana**, con el día por delante para mirar, nunca la
-tarde anterior a un fin de semana. El primer corte real ocurre la madrugada siguiente: la mañana
-del día después hay que mirar `shifts` antes de que abra Sole.
+Dos restricciones que se cruzan, y hay que respetar las dos:
+
+- **Peluquería Sole vende por las mañanas** y es el único cliente facturando a diario (184 ventas,
+  la última el 18 de agosto). Un despliegue del núcleo por la mañana cae encima de un negocio
+  vivo. → **Se despliega por la tarde.**
+- **El corte de día corre a las 5:00.** El primer corte real ocurre en la madrugada *siguiente* al
+  despliegue.
+
+Por tanto: **desplegar por la tarde y estar mirando a primera hora de la mañana siguiente, antes
+de que Sole abra.** Nunca un viernes por la tarde: el primer corte caería en sábado sin nadie
+delante. Martes o miércoles por la tarde es la ventana buena.
 
 ## Fuera de este plan
 
