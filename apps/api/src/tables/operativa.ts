@@ -6,6 +6,9 @@
 //   PATCH  /tickets/:ticketId/lines/:lineId — edita cantidad / descuento / modifiers
 //   DELETE /tickets/:ticketId/lines/:lineId — elimina línea
 //   DELETE /tickets/:ticketId               — vacía la mesa (DRAFT) con motivo opcional
+//                                             `?onlyIfEmpty=true` (v1.12): sólo si el
+//                                             DRAFT sigue SIN líneas — lo comprueba el
+//                                             servidor, no el cliente
 //
 // Notas:
 // - Idempotencia opcional al añadir línea con `lineExternalId` UUIDv4
@@ -35,6 +38,7 @@ import {
   computeTicket,
   readUnitPriceDeltaCents,
 } from "../tickets/totals.js";
+import { voidDraftTicket } from "./void-draft.js";
 
 const UUID_V4 =
   "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$";
@@ -629,14 +633,20 @@ export async function registerTableOperativaRoutes(
         querystring: {
           type: "object",
           additionalProperties: false,
-          properties: { reason: { type: "string", maxLength: 200 } },
+          properties: {
+            reason: { type: "string", maxLength: 200 },
+            // v1.12-mesas-abandonadas · "vacía esta mesa SÓLO si sigue
+            // vacía". Lo manda el TPV al salir del detalle sin haber
+            // pedido nada. Ver el bloque de comentario del handler.
+            onlyIfEmpty: { type: "boolean" },
+          },
         },
       },
     },
     async (request, reply) => {
       const cashier = request.cashier!;
       const { ticketId } = request.params as { ticketId: string };
-      const query = request.query as { reason?: string };
+      const query = request.query as { reason?: string; onlyIfEmpty?: boolean };
       const prisma = getPrisma();
       const draft = await prisma.ticket.findFirst({
         where: { id: ticketId, tenantId: cashier.tid, status: "DRAFT" },
@@ -659,22 +669,62 @@ export async function registerTableOperativaRoutes(
           message: "El ticket no pertenece a tu caja.",
         });
       }
-      await prisma.ticket.update({
-        where: { id: ticketId },
-        data: {
-          status: "VOIDED",
-          notes: query.reason
-            ? `[VACIADA] ${query.reason}`
-            : "[VACIADA] sin motivo",
-        },
+      // v1.12-mesas-abandonadas · la anulación (VOIDED + auditoría +
+      // liberar la mesa) vive en `void-draft.ts`. Este handler conserva
+      // sus guards —tenant, DRAFT, misma caja— y delega el efecto: es el
+      // mismo camino que usan el barrido del corte de día y el "Anular"
+      // del admin.
+      //
+      // `onlyIfEmpty` es la diferencia entre las dos intenciones que
+      // llegan por esta misma puerta:
+      //
+      //   · "Vaciar mesa" (el cajero pulsa el botón) → SIN onlyIfEmpty.
+      //     Hay una persona mirando la cuenta que decide tirarla, líneas
+      //     incluidas. Ese es el sentido del botón.
+      //
+      //   · "Me voy al mapa sin haber pedido nada" → CON onlyIfEmpty.
+      //     Ahí no hay decisión de nadie: es limpieza. Y el cliente NO
+      //     puede saber si la mesa sigue vacía —otra caja puede haberle
+      //     metido líneas hace tres segundos y este device aún no ha
+      //     repollado—, así que quien lo comprueba es el servidor, dentro
+      //     del WHERE de la reclamación (`lines: { none: {} }`).
+      const voided = await voidDraftTicket({
+        prisma,
+        ticketId,
+        tenantId: cashier.tid,
+        reason: "MANUAL",
+        byUserId: cashier.sub,
+        note: query.reason ? `[VACIADA] ${query.reason}` : "[VACIADA] sin motivo",
+        requireEmpty: query.onlyIfEmpty === true,
       });
-      if (draft.tableId) {
-        getStoreEventBus().broadcast(draft.register.storeId, {
-          type: "table.cleared",
-          tableId: draft.tableId,
-          ticketId,
-          reason: query.reason ?? null,
-          at: new Date().toISOString(),
+      if (!voided.ok) {
+        // La mesa dejó de estar vacía (otra caja comandó) o el draft ya
+        // no está en DRAFT. Con `onlyIfEmpty` esto NO es un fallo: es
+        // exactamente la respuesta que se pedía —no toques nada— y el
+        // cliente se va al mapa igual.
+        if (voided.code === "NOT_EMPTY") {
+          request.log.info(
+            {
+              event: "table.cleanup_skipped",
+              tenantId: cashier.tid,
+              cashierId: cashier.sub,
+              ticketId,
+              tableId: draft.tableId,
+              lineCount: voided.lineCount,
+            },
+            "Salida al mapa: la mesa tiene líneas (otra caja comandó); no se toca",
+          );
+          return reply.code(409).send({
+            error: "TICKET_NOT_EMPTY",
+            message: "La mesa tiene líneas: no se vacía al salir.",
+          });
+        }
+        // Carrera pura: otro dispositivo cobró o vació la mesa entre el
+        // guard y la reclamación. Vaciar una mesa ya vacía no es un error
+        // para quien lo pidió.
+        return reply.code(404).send({
+          error: "TICKET_NOT_FOUND_OR_NOT_DRAFT",
+          message: "Sólo se pueden cancelar tickets en DRAFT.",
         });
       }
       request.log.info(
