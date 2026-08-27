@@ -239,15 +239,24 @@ async function click(btn: HTMLButtonElement) {
   await settle();
 }
 
-describe("SalePage · v1.12-mesas-abandonadas · salir sin haber pedido nada", () => {
-  it("volver al mapa con la mesa vacía la suelta (DELETE del DRAFT)", async () => {
+// v1.12 addendum · dónde vive ahora "salir sin haber pedido nada".
+//
+// Este bloque probaba que `SalePage` envolvía su `onBackToMap` para
+// soltar el DRAFT vacío. Esa envoltura se ha quitado: la limpieza vive
+// en `goToMap()` de `App.tsx`, junto al cambio de vista, porque el Atrás
+// de Android y el "Mesas" del historial NO pasaban por aquí y dejaban la
+// mesa ocupada con un ticket sin líneas. La cobertura equivalente —y las
+// otras dos salidas— está en `table-exit-release.test.tsx`.
+//
+// Lo que sigue guardándose aquí es lo contrario: que `SalePage` no
+// vuelva a envolver nada. Si alguien repone el wrapper, la mesa recibe
+// dos DELETE por salida y volvemos a tener dos caminos que mantener.
+describe("SalePage · v1.12 addendum · la salida al mapa no se envuelve aquí", () => {
+  it("«Mapa» llama a onBackToMap y no toca la API por su cuenta", async () => {
     const calls: Array<{ path: string; method?: string }> = [];
     apiMock.apiWithCashier.mockImplementation(
       async (path: string, opts?: { method?: string }) => {
         calls.push({ path, method: opts?.method });
-        if (path.startsWith(`/tickets/${TICKET_1}`) && opts?.method === "DELETE") {
-          return undefined;
-        }
         const bg = backgroundRoutes(path);
         if (bg !== undefined) return bg;
         throw new Error(`ruta inesperada: ${path}`);
@@ -257,19 +266,11 @@ describe("SalePage · v1.12-mesas-abandonadas · salir sin haber pedido nada", (
     await renderSalePage([]);
     await click(buttonByText("Mapa"));
 
-    const del = calls.find((c) => c.method === "DELETE");
-    expect(del).toBeDefined();
-    expect(del!.path.startsWith(`/tickets/${TICKET_1}`)).toBe(true);
-    // La decisión de si la mesa sigue vacía es del SERVIDOR: la
-    // proyección local de este device puede estar desfasada (otra caja
-    // pudo comandar hace tres segundos). Sin este parámetro, salir al
-    // mapa borraría una comanda real en silencio.
-    expect(del!.path).toContain("onlyIfEmpty=true");
-    // Y el cajero sale al mapa igual: el draft vacío es cosa nuestra.
-    expect(onBackToMap).toHaveBeenCalled();
+    expect(onBackToMap).toHaveBeenCalledTimes(1);
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
   });
 
-  it("con una línea dentro NO se toca: eso es una cuenta abierta", async () => {
+  it("con líneas dentro, tampoco: quien decide es el servidor, no la proyección local", async () => {
     const calls: Array<{ path: string; method?: string }> = [];
     apiMock.apiWithCashier.mockImplementation(
       async (path: string, opts?: { method?: string }) => {
@@ -283,56 +284,8 @@ describe("SalePage · v1.12-mesas-abandonadas · salir sin haber pedido nada", (
     await renderSalePage([serverLine()]);
     await click(buttonByText("Mapa"));
 
+    expect(onBackToMap).toHaveBeenCalledTimes(1);
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
-    expect(onBackToMap).toHaveBeenCalled();
-  });
-
-  it("si el servidor dice 409 (otra caja comandó), se vuelve al mapa sin ruido", async () => {
-    // El cliente cree que la mesa está vacía —su proyección local no se
-    // ha enterado de la caña que pidió la otra caja— así que llama. El
-    // servidor rechaza con 409 y NO anula: ese 409 es la respuesta
-    // correcta, no un error que enseñarle al cajero.
-    const calls: Array<{ path: string; method?: string }> = [];
-    apiMock.apiWithCashier.mockImplementation(
-      async (path: string, opts?: { method?: string }) => {
-        calls.push({ path, method: opts?.method });
-        if (opts?.method === "DELETE") {
-          throw new ApiError(
-            409,
-            "La mesa tiene líneas: no se vacía al salir.",
-            "TICKET_NOT_EMPTY",
-          );
-        }
-        const bg = backgroundRoutes(path);
-        if (bg !== undefined) return bg;
-        throw new Error(`ruta inesperada: ${path}`);
-      },
-    );
-
-    await renderSalePage([]);
-    await click(buttonByText("Mapa"));
-
-    expect(calls.find((c) => c.method === "DELETE")!.path).toContain(
-      "onlyIfEmpty=true",
-    );
-    expect(onBackToMap).toHaveBeenCalled();
-    expect(container.textContent).not.toContain("líneas: no se vacía");
-  });
-
-  it("si el DELETE falla (sin red), se vuelve al mapa igual", async () => {
-    apiMock.apiWithCashier.mockImplementation(
-      async (path: string, opts?: { method?: string }) => {
-        if (opts?.method === "DELETE") throw new Error("network down");
-        const bg = backgroundRoutes(path);
-        if (bg !== undefined) return bg;
-        throw new Error(`ruta inesperada: ${path}`);
-      },
-    );
-
-    await renderSalePage([]);
-    await click(buttonByText("Mapa"));
-
-    expect(onBackToMap).toHaveBeenCalled();
   });
 });
 

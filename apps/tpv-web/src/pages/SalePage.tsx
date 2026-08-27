@@ -763,56 +763,12 @@ export function SalePage(props: SalePageProps) {
   // panel con CTA al mapa — no un toast efímero.
   const [deadTable, setDeadTable] = useState<string | null>(null);
 
-  // v1.12-mesas-abandonadas §3 · volver al mapa sin haber añadido NADA
-  // suelta la mesa.
-  //
-  // El origen de las cuatro mesas de Sirope ocupadas desde el 9 de julio
-  // no es el barrido que falta: es que un toque en el mapa crea el DRAFT
-  // (para que la mesa aparezca ocupada en las demás cajas desde el primer
-  // toque, v1.0-mesas-frontend) y nadie lo deshace al salir. Si el cajero
-  // se va sin teclear una sola línea, no había mesa: se anula por el
-  // mismo camino que "Vaciar mesa" y el mapa dice la verdad al instante,
-  // sin esperar a las 05:00.
-  //
-  // QUIÉN DECIDE QUE ESTÁ VACÍA: EL SERVIDOR. `lines` es la proyección
-  // local de este device y puede estar desfasada — otra caja puede haber
-  // comandado hace tres segundos sobre esta misma mesa (añadir líneas
-  // desde otra caja está PERMITIDO, v1.9.2) y el evento aún no haber
-  // llegado. Decidir aquí con `lines.length` sería anular una comanda
-  // real en silencio. Por eso la llamada va SIEMPRE con
-  // `onlyIfEmpty=true`: el backend lo comprueba dentro del WHERE de la
-  // reclamación y responde 409 sin tocar nada si hay líneas.
-  //
-  // El `lines.length === 0` de aquí es sólo un ahorro de red (no llames
-  // si tú ya sabes que hay líneas), nunca la garantía.
-  //
-  // Si falla —sin red, 409, mesa ya cobrada desde otra caja— se vuelve al
-  // mapa igual: el cajero pidió ir al mapa, no gestionar un draft que él
-  // no sabe que existe. El barrido de madrugada recoge lo que quede.
-  const backToMap = useCallback(() => {
-    const worthTrying =
-      isTableMode && activeTicketId != null && lines.length === 0;
-    if (!worthTrying) {
-      props.onBackToMap?.();
-      return;
-    }
-    void (async () => {
-      try {
-        const { apiWithCashier } = await import("../api.js");
-        await apiWithCashier(
-          `/tickets/${activeTicketId}?onlyIfEmpty=true&reason=${encodeURIComponent(
-            "Salió del detalle sin añadir nada",
-          )}`,
-          { method: "DELETE" },
-        );
-      } catch {
-        // Silencio a propósito (incluido el 409 "la mesa tiene líneas":
-        // esa es la respuesta correcta, no un error que enseñar).
-      }
-    })();
-    props.onBackToMap?.();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isTableMode, activeTicketId, lines.length, props.onBackToMap]);
+  // v1.12-addendum · aquí ya no se envuelve la salida. Soltar el DRAFT
+  // vacío al irse al mapa lo hace `goToMap()` en `App.tsx`, que es quien
+  // cambia de vista — y por tanto el único sitio por el que pasan las
+  // tres salidas (botón "Mapa", Atrás de Android y "Mesas" del historial).
+  // Mientras la limpieza vivió aquí, las otras dos se saltaban el trámite
+  // y dejaban la mesa ocupada con un draft sin líneas.
 
   // Sale al mapa con un aviso inline. Cierra cualquier sheet abierto
   // (incl. el modal de cobro) antes de navegar. Si el padre no cableó
@@ -1707,7 +1663,7 @@ export function SalePage(props: SalePageProps) {
             cashierRole={props.cashierRole}
             shiftTicketsCount={shiftTicketsCount}
             tableContext={props.tableContext ?? null}
-            onBackToMap={props.onBackToMap ? backToMap : null}
+            onBackToMap={props.onBackToMap ?? null}
             onClickProduct={addProduct}
             onClickFreeLine={() => setOpenSheet({ kind: "freeLine" })}
             onClickLine={(line) => setOpenSheet({ kind: "line", line })}

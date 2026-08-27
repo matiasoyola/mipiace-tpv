@@ -10,7 +10,7 @@
 // enseña el resumen del día cerrado —lo cerrase una persona o el corte de
 // día— antes de pedir el fondo de caja del turno nuevo.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import {
@@ -490,7 +490,10 @@ function LoggedInWrapper({
 // de sala y la venta rápida se accede con botón superior derecha. En
 // modo retail puro (tienda sin mesas), seguimos directos a SalePage
 // como en B4-B6 — sin coste para los clientes que no usan bar.
-function TpvHome(props: {
+// Exportado para los tests del addendum de v1.12: la salida al mapa
+// (botón, Atrás de Android e historial) vive aquí, así que se prueba
+// aquí. En producción sólo lo monta `LoggedInWrapper`.
+export function TpvHome(props: {
   cashier: CashierUser;
   shiftId: string;
   registerName: string;
@@ -564,6 +567,47 @@ function TpvHome(props: {
     }
   }
 
+  // v1.12-addendum · LA salida al mapa. Una sola función, aquí, porque
+  // aquí es donde vive el cambio de vista: el botón "Mapa", el Atrás de
+  // Android y el "Mesas" del historial de tickets salen todos por el
+  // mismo sitio y sueltan la mesa igual.
+  //
+  // Antes había dos caminos. `SalePage` envolvía su `onBackToMap` para
+  // soltar el draft vacío, pero el guardia del Atrás y el historial
+  // llamaban al cambio de vista a pelo: salir con el Atrás dejaba la
+  // mesa ocupada con un DRAFT sin líneas — la mesa zombi que v1.12-B
+  // vino a matar. Envolver cada llamada es cómo se llegó a eso; la
+  // limpieza vive donde vive la navegación.
+  //
+  // QUIÉN DECIDE QUE ESTÁ VACÍA: EL SERVIDOR (v1.12-B). `onlyIfEmpty=true`
+  // se comprueba dentro del WHERE de la reclamación: si otra caja comandó
+  // hace tres segundos, responde 409 y no toca nada. Desde aquí ni
+  // siquiera conocemos las líneas, que es justo la razón de no decidirlo
+  // en el cliente.
+  //
+  // Si no procede —409, mesa ya cobrada, sin red— se traga en silencio y
+  // se va al mapa igual: el cajero pidió ir al mapa, no gestionar un
+  // draft del que no sabe nada. El barrido de madrugada recoge el resto.
+  const goToMap = useCallback(async () => {
+    const ticketId =
+      view.kind === "sale" ? view.tableContext?.activeTicketId ?? null : null;
+    if (ticketId) {
+      try {
+        await apiWithCashier(
+          `/tickets/${ticketId}?onlyIfEmpty=true&reason=${encodeURIComponent(
+            "Salió del detalle sin añadir nada",
+          )}`,
+          { method: "DELETE" },
+        );
+      } catch {
+        // Silencio a propósito, incluido el 409 "la mesa tiene líneas":
+        // esa es la respuesta correcta, no un error que enseñar.
+      }
+    }
+    setMapNotice(null);
+    setView({ kind: "map" });
+  }, [view]);
+
   // v1.12-manos-de-camarero · guardia de fondo del Atrás (H6). Cuando
   // no hay ninguna hoja abierta: dentro de una venta se vuelve al mapa
   // de mesas; en el mapa no se hace nada (el turno está abierto y no
@@ -571,14 +615,13 @@ function TpvHome(props: {
   useEffect(() => {
     setBackFallback(() => {
       if (view.kind === "sale" && hasTables) {
-        setMapNotice(null);
-        setView({ kind: "map" });
+        void goToMap();
         return true;
       }
       return false;
     });
     return () => setBackFallback(null);
-  }, [view.kind, hasTables]);
+  }, [view.kind, hasTables, goToMap]);
 
   useEffect(() => {
     if (skipTables) return;
@@ -653,14 +696,9 @@ function TpvHome(props: {
       storeName={props.storeName}
       tableContext={view.tableContext}
       initialTableLines={view.initialTableLines}
-      onBackToMap={
-        hasTables
-          ? () => {
-              setMapNotice(null);
-              setView({ kind: "map" });
-            }
-          : null
-      }
+      // La salida al mapa ya viene con la limpieza dentro: `SalePage` no
+      // envuelve nada, sólo llama.
+      onBackToMap={hasTables ? () => void goToMap() : null}
       // v1.9.2-mesas-concurrencia · salida al mapa CON aviso inline:
       // expulsión por cobro/absorción remota, o confirmación tras
       // cobrar la mesa desde este dispositivo (banner de éxito con

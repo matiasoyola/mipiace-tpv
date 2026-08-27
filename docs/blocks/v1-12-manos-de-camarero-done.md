@@ -383,6 +383,66 @@ delante, que es de donde salió el bloque entero.
 
 ---
 
+# Addendum · una sola salida al mapa (tras mergear el carril B)
+
+**El fallo.** El guardia del Atrás (`setBackFallback` en `App.tsx`) salía de la venta con un
+`setView({kind:"map"})` a pelo, sin pasar por el `backToMap` que el carril B había añadido dentro
+de `SalePage`. Resultado: salir de una mesa con el Atrás de Android dejaba la mesa **ocupada con un
+DRAFT vacío** — justo la mesa zombi que B vino a matar. Segunda fuga por el mismo motivo: el
+"Mesas" del historial de tickets llamaba al `props.onBackToMap` crudo.
+
+**El arreglo no es parchear las llamadas.** La limpieza vive ahora donde vive el cambio de vista:
+una sola función `goToMap()` en `App.tsx` que suelta el draft
+(`DELETE /tickets/:id?onlyIfEmpty=true`) y después cambia de vista. La usan las tres salidas —el
+botón "Mapa", el Atrás y el historial— porque las tres pasan por el mismo sitio. `SalePage` deja de
+envolver nada: recibe `onBackToMap` y lo llama.
+
+Envolver cada llamada es cómo se llegó al fallo: mientras existan dos caminos a la misma salida,
+uno de los dos se queda sin la limpieza a la primera pantalla nueva.
+
+Consecuencias de mover la limpieza arriba, dichas en voz alta:
+
+- **Desaparece el atajo `lines.length === 0`.** Desde `App` no se conocen las líneas, que es
+  precisamente la razón de no decidirlo en el cliente: la proyección local puede estar desfasada
+  (otra caja puede haber comandado hace tres segundos). Ahora se pregunta siempre y **decide el
+  servidor** dentro del WHERE de la reclamación. El coste es un DELETE de más por salida; el
+  beneficio es que ninguna salida se salta la limpieza.
+- **Sobre una mesa ya cobrada o ya vaciada, ese DELETE responde 404** (`voidDraftTicket` sólo mira
+  tickets en `DRAFT`) y se traga en silencio, igual que el 409 de "la mesa tiene líneas". Ninguno
+  de los dos es un error que enseñarle al cajero.
+- `onExitToMap` (salida **con aviso**: mesa cobrada o absorbida desde otra caja) sigue aparte: ahí
+  no hay draft vacío que soltar, y el aviso es la razón de existir de ese camino.
+
+`TpvHome` se exporta para poder probar esto donde ocurre.
+
+## Tests del addendum
+
+`test/table-exit-release.test.tsx` (6), montados sobre `TpvHome`:
+
+- Con el **Atrás de Android** sobre una mesa vacía: `DELETE` con `onlyIfEmpty=true` y vuelta al
+  mapa.
+- Con el **botón "Mapa"**: exactamente lo mismo que antes del addendum.
+- Desde **"Mesas" del historial**: la tercera salida, misma limpieza.
+- Con **líneas de otra caja** (el servidor responde 409): no se suelta nada, se sale al mapa igual
+  y el cajero no ve un error que no es suyo.
+- Sin red: se sale al mapa igual.
+- En **venta rápida** el Atrás no inventa limpieza: no hay mesa que soltar.
+
+`test/table-sale-flow.test.tsx`: el bloque de B que probaba la envoltura dentro de `SalePage` se
+sustituye por su contrario —que `SalePage` **no** vuelva a envolver la salida—, para que reponer el
+wrapper no pase desapercibido (serían dos DELETE por salida y dos caminos que mantener).
+
+Los tres tests nuevos se verificaron **inyectando la regresión**: con el `setView` a pelo en el
+guardia del Atrás fallan los del Atrás; con el `onBackToMap` crudo fallan los del botón y el
+historial.
+
+```
+pnpm test    → 151 ficheros, 1281 tests, 3 skipped · verde
+tsc -b       → verde
+```
+
+---
+
 ## Fuera de alcance, como estaba escrito
 
 - No se toca la lógica de cobro mixto (v1.10.3) ni el flujo de cierre de día (v1.11): sólo cómo se
