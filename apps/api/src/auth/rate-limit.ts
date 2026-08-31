@@ -29,6 +29,28 @@ const TWO_FA_VERIFY_MAX = 5;
 export interface RateLimitConfig {
   attemptsKey: string;
   lockKey: string;
+  // A3-distribución: umbrales por bucket. Sin ellos rigen los de arriba
+  // (5 intentos / ventana 5 min / candado 15 min), que son los que quieren
+  // las puertas de login. La descarga pública de la APK necesita otros
+  // (10 / 10 min / 30 min): 6 dígitos son un millón de combinaciones y el
+  // endpoint es público, pero el instalador también teclea mal con prisa
+  // en un bar, y bloquearle 15 minutos a la tercera es peor negocio que
+  // dejarle diez intentos.
+  maxAttempts?: number;
+  attemptTtlSeconds?: number;
+  lockTtlSeconds?: number;
+}
+
+function limits(config: RateLimitConfig): {
+  maxAttempts: number;
+  attemptTtl: number;
+  lockTtl: number;
+} {
+  return {
+    maxAttempts: config.maxAttempts ?? MAX_ATTEMPTS,
+    attemptTtl: config.attemptTtlSeconds ?? ATTEMPT_TTL_SECONDS,
+    lockTtl: config.lockTtlSeconds ?? LOCK_TTL_SECONDS,
+  };
 }
 
 export interface RateLimitState {
@@ -49,7 +71,7 @@ export async function inspect(
   return {
     locked: false,
     retryAfterSeconds: 0,
-    attemptsRemaining: Math.max(0, MAX_ATTEMPTS - attempts),
+    attemptsRemaining: Math.max(0, limits(config).maxAttempts - attempts),
   };
 }
 
@@ -57,22 +79,23 @@ export async function registerFailure(
   config: RateLimitConfig,
   redis: Redis = getRedis(),
 ): Promise<RateLimitState> {
+  const { maxAttempts, attemptTtl, lockTtl } = limits(config);
   const attempts = await redis.incr(config.attemptsKey);
   if (attempts === 1) {
-    await redis.expire(config.attemptsKey, ATTEMPT_TTL_SECONDS);
+    await redis.expire(config.attemptsKey, attemptTtl);
   }
-  if (attempts >= MAX_ATTEMPTS) {
-    await redis.set(config.lockKey, "1", "EX", LOCK_TTL_SECONDS);
+  if (attempts >= maxAttempts) {
+    await redis.set(config.lockKey, "1", "EX", lockTtl);
     return {
       locked: true,
-      retryAfterSeconds: LOCK_TTL_SECONDS,
+      retryAfterSeconds: lockTtl,
       attemptsRemaining: 0,
     };
   }
   return {
     locked: false,
     retryAfterSeconds: 0,
-    attemptsRemaining: MAX_ATTEMPTS - attempts,
+    attemptsRemaining: maxAttempts - attempts,
   };
 }
 

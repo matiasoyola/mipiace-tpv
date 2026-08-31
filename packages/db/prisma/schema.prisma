@@ -1977,3 +1977,34 @@ model BookingPolicy {
   @@unique([tenantId, key])
   @@map("booking_policies")
 }
+
+// A3-distribución · código de un solo uso (bueno, de tres) para descargar la
+// APK desde mipiacetpv.com/apk sin sesión. El binario NO vive en la BD ni en
+// el repo: está en RELEASES_DIR del VPS, montado read-only en el contenedor.
+// Aquí sólo vive el permiso para bajarlo.
+//
+// `createdBySuperAdminId` lleva FK dura en SQL pero SIN relación Prisma, para
+// no añadir una back-relation a SuperAdminUser por una tabla periférica
+// (mismo criterio que appointment_items_service_id_fkey). Es también a quién
+// se atribuye la auditoría de cada descarga: la descarga no es anónima, es la
+// consecuencia del acto del super-admin que emitió el código.
+model ApkDownloadCode {
+  id                    String    @id @default(uuid()) @db.Uuid
+  code                  String    @unique
+  versionCode           Int       @map("version_code")
+  createdBySuperAdminId String    @map("created_by_super_admin_id") @db.Uuid
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  expiresAt             DateTime  @map("expires_at") @db.Timestamptz()
+  // 60 min y 3 descargas: el WiFi del bar corta y el instalador reintenta.
+  // Un solo uso obligaría a llamar al super-admin a mitad de instalación.
+  maxDownloads          Int       @default(3) @map("max_downloads")
+  downloadCount         Int       @default(0) @map("download_count")
+  lastDownloadIp        String?   @map("last_download_ip")
+  lastDownloadAt        DateTime? @map("last_download_at") @db.Timestamptz()
+  // "Thalía, terminal barra" — para saber a quién se le dio.
+  note                  String?
+
+  @@index([expiresAt])
+  @@index([versionCode])
+  @@map("apk_download_codes")
+}
