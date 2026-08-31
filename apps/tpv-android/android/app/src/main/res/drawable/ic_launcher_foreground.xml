@@ -1,17 +1,19 @@
 <!-- Icono adaptativo · foreground · mipiacetpv (docs/design/tokens.md §1).
      Logo canónico (4 barras ink + corazón coral) en VectorDrawable: nítido a
      cualquier densidad, sin PNG. El <group> escala el viewBox 0..28 del logo
-     a la zona segura del lienzo adaptativo 108x108. Fondo (stone) aparte. -->
+     a la zona segura del lienzo adaptativo 108x108: el contenido queda dentro del
+     circulo de 33 dp de radio, para que el recorte circular no corte las barras
+     exteriores ni el corazon. Fondo (stone) aparte. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <group
-        android:scaleX="3.1"
-        android:scaleY="3.1"
-        android:translateX="16.1"
-        android:translateY="10">
+        android:scaleX="2.38"
+        android:scaleY="2.38"
+        android:translateX="24.9"
+        android:translateY="20.2">
         <!-- barras (mipiace.ink #1F2937) -->
         <path
             android:fillColor="#1F2937"
