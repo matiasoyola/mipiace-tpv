@@ -7,6 +7,7 @@ import { useNavigate, Link, useLocation } from "react-router-dom";
 import {
   Activity,
   Building2,
+  Download,
   ExternalLink,
   FileClock,
   Home,
@@ -35,6 +36,9 @@ const NAV_ITEMS: Array<NavItem & { rootOnly?: boolean }> = [
   // del super-admin desde este lote.
   { to: "/superadmin/hub", label: "Hub", icon: LayoutDashboard },
   { to: "/superadmin/tenants", label: "Cuentas", icon: Building2 },
+  // A3-distribución: descargas de la APK. Va antes de Auditoría porque se
+  // usa en cada implantación, no sólo cuando algo se investiga.
+  { to: "/superadmin/descargas", label: "Descargas", icon: Download },
   { to: "/superadmin/audit", label: "Auditoría", icon: FileClock },
   // B-Multi-Vertical SB4: panel multi super-admin.
   { to: "/superadmin/admins", label: "Super-admins", icon: Users, rootOnly: true },

@@ -258,6 +258,16 @@ export async function registerSuperAdminHubRoutes(
         href: "/superadmin/tenants/new",
         target: "_self",
       });
+      // A3-distribución: entregar un terminal es hoy el cuello de botella de
+      // la implantación, así que la descarga de la APK entra en las tareas
+      // comunes y no escondida en la nav.
+      tasks.push({
+        id: "apk_downloads",
+        label: "Descargas de la app",
+        hint: "Versiones publicadas y códigos de instalación para los terminales.",
+        href: "/superadmin/descargas",
+        target: "_self",
+      });
       tasks.push({
         id: "open_audit",
         label: "Ver auditoría",

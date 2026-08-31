@@ -22,6 +22,8 @@ const ACTIONS = [
   { value: "test_cashier_session", label: "Sesión cajero de prueba" },
   { value: "create_super_admin", label: "Crear super-admin" },
   { value: "delete_super_admin", label: "Eliminar super-admin" },
+  { value: "create_apk_download_code", label: "Generar código de instalación" },
+  { value: "apk_download", label: "Descarga de la APK" },
 ];
 
 export const ACTION_LABEL: Record<string, string> = Object.fromEntries(
