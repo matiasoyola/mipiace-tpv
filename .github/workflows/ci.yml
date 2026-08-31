@@ -213,9 +213,10 @@ jobs:
   # (`prisma migrate deploy` sobre base limpia, así se prueba también la
   # migración) y corre `pnpm test:e2e`.
   #
-  # NO está en `needs` de `publish` a propósito (§3 del prompt): mientras
-  # se estabiliza no puede bloquear un despliegue. Pero se ve rojo — un
-  # e2e que nadie mira no existe.
+  # 2026-08-31 · SÍ está en `needs` de `publish`. Nació fuera "mientras se
+  # estabiliza" (§3 del prompt), pero v1.13 es la puerta de D2 y una puerta
+  # que no cierra no es una puerta: el corte de día cierra turnos solo a las
+  # 5:00 y es justo lo que esta suite prueba contra Postgres de verdad.
   #
   # Sin Redis: la suite mockea el encolado BullMQ en el borde, igual que
   # el resto de tests. Lo que se prueba aquí es la caja, no el ERP.
@@ -273,7 +274,8 @@ jobs:
   # gracias al bloque `permissions`.
   publish:
     # v1.10.1 · no se publica una imagen que no arranca.
-    needs: [ci, smoke]
+    # v1.13 · ni una que no pase el ciclo de caja contra Postgres real.
+    needs: [ci, smoke, e2e]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     permissions:
