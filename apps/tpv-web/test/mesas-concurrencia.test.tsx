@@ -8,7 +8,7 @@
 //   (4) checkout 409 TICKET_ALREADY_PAID → cierra modal + banner en mapa.
 //   (5) add-line a mesa muerta (TABLE_GROUPED) → banner con CTA al mapa.
 //   (6) autocierre del modal de éxito en venta rápida.
-//   (7) header: "Mesas" en venta rápida; hamburguesa + "Tickets" en mapa.
+//   (7) header: "Mapa" en venta rápida; hamburguesa + "Tickets" en mapa.
 //
 // Mismo patrón sin testing-library que table-sale-flow.test.tsx:
 // createRoot + act + eventos nativos; el WS se mockea capturando el
@@ -437,7 +437,11 @@ describe("Frente 2 · los errores del servidor se ven", () => {
 });
 
 describe("Frente 3 · navegación de bar", () => {
-  it("(7) 'Mesas' visible en el header de venta rápida", async () => {
+  // v1.14-la-comanda-se-ve (hallazgo M4): el botón se llama "Mapa" —el
+  // mismo rótulo que tenía enterrado en el panel del ticket, que es de
+  // donde sube— y en hostelería es la CTA grande de la izquierda a
+  // `touch-lg`. Volver al mapa es la navegación nº 1 del turno.
+  it("(7) 'Mapa' visible en el header de venta rápida", async () => {
     apiMock.apiWithCashier.mockImplementation(async (path: string) => {
       const bg = backgroundRoutes(path);
       if (bg !== undefined) return bg;
@@ -464,8 +468,9 @@ describe("Frente 3 · navegación de bar", () => {
     });
     await settle();
 
-    const mesas = buttonByText("Mesas", false);
-    await click(mesas);
+    const mapa = buttonByText("Mapa", false);
+    expect(mapa.className).toContain("h-touch-lg");
+    await click(mapa);
     expect(onBackToMap).toHaveBeenCalled();
   });
 

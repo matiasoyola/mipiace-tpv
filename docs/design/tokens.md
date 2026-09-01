@@ -236,6 +236,53 @@ canónica para reutilizar:
 - Nombre + meta (precio unitario o modificador) en columna.
 - Total línea a la derecha, weight 500, tabular-nums.
 - Botón eliminar `opacity-0 group-hover:opacity-100`.
+- **Destaque al añadir** (v1.14): la línea recién tocada se pinta en
+  `coral-soft`. Entra **sin transición** y sale con `transition-colors
+  duration-700`. El orden importa: con transición también al encender,
+  el coral se desvanecía *hacia dentro* y a los 150 ms del toque el alfa
+  iba por 0,004 — invisible justo cuando hay que confirmar. El principio
+  §1.3 pide feedback claro en menos de 100 ms (medido: 66 ms).
+
+### Panel del ticket · v1.14
+Orden fijo, de arriba abajo. Es el reparto que arregla el hallazgo C1 de
+la auditoría del 2026-09-01 (antes: 20 px visibles de desglose):
+
+1. **Cabecera compacta** `shrink-0`: nombre de mesa + meta en UNA línea
+   (`truncate`) + botón "Más" (`h-touch`). El botón "Mapa" **no** vive
+   aquí: está en la barra superior.
+2. **Lista de artículos** `flex-1 min-h-0 overflow-y-auto`. Es el único
+   bloque flexible del panel y el único que scrollea.
+3. **Pie anclado** `sticky bottom-0 shrink-0` con fondo sólido y borde
+   superior: Subtotal + IVA en una fila, Total en display, y las dos
+   acciones **en fila** (`grid-cols-2`), las dos a `h-touch-lg`.
+
+Medido a 1280×800 con 12 líneas: cabecera 84 px, lista 304 px (3,4
+líneas), pie 187 px; "Cobrar" termina en y=683 de 800.
+
+Las siete acciones secundarias (Cliente, Descuento, Observaciones, Mover
+mesa, Partir cuenta, Agrupar, Vaciar mesa) van en el sheet de "Más". La
+destructiva se aparta a su propia zona bajo un borde, con la
+consecuencia escrita al lado.
+
+### Chips de categoría · v1.14
+- `h-touch`, `rounded-2xl`, borde 1px, icono Lucide `strokeWidth 2.25`,
+  etiqueta `truncate` con `max-w-[200px]`.
+- Fondo y texto salen de los **seis tonos** de §2, repartidos por
+  `lib/categoryTones.ts` y **persistidos por tenant**: el color de una
+  categoría no puede cambiar entre lunes y martes.
+- **Máximo dos filas** (`flex-wrap`, sin `overflow-x`). Lo que no cabe
+  se va a un chip `Más (N)` que abre un sheet. El scroll horizontal está
+  prohibido por `ux-principles.md` §1.8 y un gradiente no lo arregla.
+- **El coral es de la selección**, no de la marca: un chip en reposo
+  nunca es coral. "Todos" seleccionado va en `mipiace.ink`.
+
+### Estado vacío del ticket · v1.14
+- Nunca en blanco: rejilla de **2 columnas** con los cinco productos más
+  vendidos del turno (o del mes), `min-h-touch-lg`, nombre arriba y
+  precio debajo.
+- Rejilla y no lista: apilados en una columna se leen como líneas ya
+  añadidas, que es lo contrario de lo que son.
+- Sin ranking (offline, sin histórico) cae a la frase de siempre.
 
 ## 6. Breakpoints
 

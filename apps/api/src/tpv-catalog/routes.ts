@@ -3,6 +3,7 @@
 // pantalla de venta (B4 §2).
 
 import type { FastifyInstance } from "fastify";
+import type { TicketStatus } from "@mipiacetpv/db";
 
 import { requireCashierSession } from "../shift/cashier-session.js";
 import { getPrisma } from "../context.js";
@@ -237,6 +238,100 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
           basePrice: Number(p.basePrice),
           taxRate: Number(p.taxRate),
         })),
+      };
+    },
+  );
+
+  // v1.14-la-comanda-se-ve §4 · los más vendidos, para el estado vacío
+  // del ticket.
+  //
+  // Principio UX no negociable: estado vacío siempre informativo, nunca
+  // pantalla en blanco. Una mesa recién abierta es el punto de mayor
+  // intención del turno, así que ahí van los cinco productos que más se
+  // están vendiendo AHORA (este turno) y, si el turno acaba de empezar y
+  // no da para una señal, los del último mes.
+  //
+  // El corte es por unidades vendidas, no por importe: lo que acelera la
+  // comanda es lo que más veces se pulsa, no lo que más factura.
+  app.get(
+    "/tpv/catalog/top-sellers",
+    {
+      preHandler: requireCashierSession,
+      schema: {
+        querystring: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            shiftId: { type: "string", format: "uuid" },
+            limit: { type: "integer", minimum: 1, maximum: 12 },
+          },
+        },
+      },
+    },
+    async (request) => {
+      const cashier = request.cashier!;
+      const q = request.query as { shiftId?: string; limit?: number };
+      const limit = q.limit ?? 5;
+      const prisma = getPrisma();
+
+      // Sólo ventas de verdad. DRAFT es una mesa abierta (todavía no se
+      // ha vendido nada), VOIDED es una mesa vaciada y TEST es el cajero
+      // técnico del onboarding: ninguno debe mover el ranking.
+      const SOLD: TicketStatus[] = [
+        "PAID",
+        "PENDING_SYNC",
+        "SYNCED",
+        "SYNC_FAILED",
+        "ON_CREDIT",
+      ];
+
+      async function rank(
+        ticketWhere: Record<string, unknown>,
+      ): Promise<Array<{ productId: string; units: number }>> {
+        const grouped = await prisma.ticketLine.groupBy({
+          by: ["productId"],
+          where: {
+            productId: { not: null },
+            ticket: { tenantId: cashier.tid, status: { in: SOLD }, ...ticketWhere },
+          },
+          _sum: { units: true },
+          orderBy: { _sum: { units: "desc" } },
+          take: limit,
+        });
+        return grouped
+          .filter((g) => g.productId != null)
+          .map((g) => ({ productId: g.productId!, units: Number(g._sum.units ?? 0) }));
+      }
+
+      // Turno actual primero. Sin `shiftId` (venta rápida sin turno
+      // resuelto todavía) se va directo al último mes.
+      let source: "shift" | "month" = "shift";
+      let ranked = q.shiftId ? await rank({ shiftId: q.shiftId }) : [];
+      // Un turno recién abierto con una sola venta no es una señal: es
+      // ruido. Por debajo de la mitad de los huecos preferimos el mes.
+      if (ranked.length < Math.ceil(limit / 2)) {
+        source = "month";
+        const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        ranked = await rank({ createdAt: { gte: since } });
+      }
+      if (ranked.length === 0) return { source, items: [] };
+
+      // Los productos pueden haberse borrado del catálogo desde que se
+      // vendieron: se filtran aquí, no en el TPV (que sólo sabe pintar).
+      const products = await prisma.product.findMany({
+        where: {
+          id: { in: ranked.map((r) => r.productId) },
+          tenantId: cashier.tid,
+          active: true,
+        },
+        select: { id: true },
+      });
+      const alive = new Set(products.map((p) => p.id));
+      return {
+        source,
+        items: ranked
+          .filter((r) => alive.has(r.productId))
+          .map((r) => ({ productId: r.productId, units: r.units })),
       };
     },
   );

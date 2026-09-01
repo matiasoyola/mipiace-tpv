@@ -227,6 +227,14 @@ function mobileBarButton(): HTMLButtonElement {
   return btn as HTMLButtonElement;
 }
 
+function searchToggle(): HTMLButtonElement {
+  const btn = container.querySelector(
+    'button[aria-label="Buscar producto o escanear código"]',
+  );
+  if (!btn) throw new Error("lupa de búsqueda no encontrada");
+  return btn as HTMLButtonElement;
+}
+
 function ticketSheet(): HTMLElement | null {
   return container.querySelector('[role="dialog"][aria-label="Ticket"]');
 }
@@ -306,8 +314,14 @@ describe("SalePage · layout handheld", () => {
     expect(container.querySelector("section")).not.toBeNull();
   });
 
+  // v1.14-la-comanda-se-ve (hallazgo M3): en HOSPITALITY la búsqueda
+  // arranca plegada tras una lupa —ocupaba el 60 % del ancho en una
+  // pantalla donde casi no se usa—, así que las guardas anti-overflow se
+  // comprueban con el campo desplegado, que es cuando puede desbordar.
   it("Lote 0 · guardas anti-overflow del header presentes", async () => {
     await renderQuickSale();
+
+    await click(searchToggle());
 
     const search = container.querySelector(
       'input[type="search"]',
@@ -326,6 +340,30 @@ describe("SalePage · layout handheld", () => {
     // El header envuelve a dos filas en vez de desbordar.
     const header = wrapper.closest("header")!;
     expect(header.className).toContain("flex-wrap");
+  });
+
+  // v1.14 · el campo plegado NO se desmonta. Es donde aterriza el lector
+  // de códigos USB-HID (el refoco de SalePage escribe en `searchRef`):
+  // desmontarlo dejaría sin escáner a los tenants con lector USB, que es
+  // peor que el 60 % de ancho que el pliegue viene a arreglar.
+  it("M3 · la búsqueda plegada sigue montada y fuera de cuadro", async () => {
+    await renderQuickSale();
+
+    const search = container.querySelector(
+      'input[type="search"]',
+    ) as HTMLInputElement;
+    expect(search).not.toBeNull();
+    expect(search.getAttribute("aria-hidden")).toBe("true");
+    expect(search.tabIndex).toBe(-1);
+    // Fuera de cuadro, no oculto: `display:none` no recibiría el foco.
+    expect(search.parentElement!.className).toContain("-left-[9999px]");
+    // `hidden` a secas (display:none) impediría el foco; el
+    // `overflow-hidden` del recorte fuera de cuadro no. Token exacto.
+    expect(search.parentElement!.classList.contains("hidden")).toBe(false);
+
+    await click(searchToggle());
+    expect(search.getAttribute("aria-hidden")).toBeNull();
+    expect(search.parentElement!.className).not.toContain("-left-[9999px]");
   });
 
   it("mesa · enviar comanda desde la barra inferior", async () => {

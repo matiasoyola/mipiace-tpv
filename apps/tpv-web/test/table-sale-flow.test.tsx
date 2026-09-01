@@ -423,6 +423,11 @@ describe("SalePage · mesa cableada a la API", () => {
     );
 
     await renderSalePage([serverLine()]);
+    // v1.14-la-comanda-se-ve (hallazgo C1): las siete acciones
+    // secundarias del ticket viven ahora tras el botón "Más". Ocupaban
+    // 135 px del mejor sitio del panel para usarse una de cada veinte
+    // veces; el sitio se lo ha quedado el desglose de artículos.
+    await click(buttonByText("Más", false));
     await click(buttonByText("Agrupar"));
     // Picker: marcar Mesa 2 y confirmar.
     await click(buttonByText("Mesa 2", false));

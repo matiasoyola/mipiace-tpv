@@ -14,6 +14,8 @@
 //
 // screens: checkout · checkout-mixto · checkout-error · sale · mapa
 //   v1.12-manos-de-camarero: arqueo · abrir-turno · confirmar · bloqueo
+//   v1.14-la-comanda-se-ve: venta-mesa · venta-mesa-12 · venta-mesa-vacia ·
+//     venta-20-categorias · venta-retail
 
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -120,10 +122,68 @@ function mkTable(
   };
 }
 
-// Catálogo de barra, suficiente para llenar el ticket y estresar el
-// listado del bottom-sheet.
-const CATALOG = LINES.map((l, i) => ({
-  id: `00000000-0000-0000-0000-00000000000${i + 1}`,
+// v1.14-la-comanda-se-ve · el ticket de 12 líneas, que es el caso real
+// de un bar en hora punta y el que la ronda 2 del AP11 NO llegó a
+// probar (queda declarado en "Verificación pendiente" de la auditoría).
+// Con el reparto viejo, aquí es donde Total y "Cobrar" se iban de la
+// vista.
+const LINES_12: CartLine[] = [
+  mkLine("m01", "Café solo", 2, 1.0909, 1.2, 10),
+  mkLine("m02", "Café con leche", 3, 1.0909, 1.2, 10),
+  mkLine("m03", "Cortado", 1, 1.0909, 1.2, 10),
+  mkLine("m04", "Colacao con churros", 1, 2.7273, 3.0, 10),
+  mkLine("m05", "Zumo de naranja natural", 2, 2.2727, 2.5, 10),
+  mkLine("m06", "Tostada de tomate y jamón", 2, 2.7273, 3.0, 10),
+  mkLine("m07", "Croissant a la plancha", 1, 1.8182, 2.0, 10),
+  mkLine("m08", "Bocadillo de tortilla", 1, 3.6364, 4.0, 10),
+  mkLine("m09", "Caña de Mahou", 4, 1.6529, 2.0, 21),
+  mkLine("m10", "Copa de vino tinto de la casa", 2, 2.0661, 2.5, 21),
+  mkLine("m11", "Coca-Cola", 3, 2.2727, 2.5, 10),
+  mkLine("m12", "Agua mineral 50 cl", 2, 1.3636, 1.5, 10),
+];
+
+const TOTALS_12: CartTotals = {
+  subtotalNet: 52.36,
+  tax: 6.24,
+  discount: 0,
+  total: 58.6,
+} as CartTotals;
+
+// Las ocho categorías de Sirope, tal cual llegan de Holded: sin tildes y
+// alguna pegada (`Croissantysandwich` es literal del catálogo real).
+const TAGS_SIROPE = [
+  "cafes",
+  "bolleria",
+  "refrescos",
+  "cervezas",
+  "vinos",
+  "tostadas",
+  "croissantysandwich",
+  "postres",
+];
+
+// v1.14 · el sabotaje del bloque: 20 categorías. Con el reparto viejo
+// llegaban al borde de la pantalla sin ninguna señal.
+const TAGS_20 = [
+  ...TAGS_SIROPE,
+  "raciones",
+  "ensaladas",
+  "hamburguesas",
+  "pizzas",
+  "arroces",
+  "carnes",
+  "pescados",
+  "helados",
+  "licores",
+  "cocteles",
+  "infusiones",
+  "batidos",
+];
+
+// Catálogo de barra, suficiente para llenar el ticket, estresar el
+// listado y repartir las categorías entre productos.
+const CATALOG = LINES_12.map((l, i) => ({
+  id: `00000000-0000-0000-0000-0000000000${String(i + 10)}`,
   holdedProductId: `h-${i + 1}`,
   sku: l.sku,
   name: l.nameSnapshot,
@@ -133,6 +193,23 @@ const CATALOG = LINES.map((l, i) => ({
   tags: [] as string[],
   kind: "PRODUCT" as const,
 }));
+
+/** Reparte `tags` entre los productos del catálogo, en bucle. */
+function catalogWithTags(tags: string[]) {
+  // Con más categorías que productos, se generan productos de relleno
+  // para que ninguna categoría se quede sin nada que enseñar.
+  const base = tags.map((tag, i) => {
+    const src = CATALOG[i % CATALOG.length]!;
+    return {
+      ...src,
+      id: `00000000-0000-0000-0000-000000${String(1000 + i)}`,
+      sku: `${src.sku}-${i}`,
+      name: src.name,
+      tags: [tag],
+    };
+  });
+  return [...CATALOG.map((p, i) => ({ ...p, tags: [tags[i % tags.length]!] })), ...base];
+}
 
 // ── red de mentira ────────────────────────────────────────────────────
 
@@ -151,6 +228,29 @@ function stubSession(): void {
       role: "MANAGER",
     }),
   );
+  // v1.14 · el vertical y el tenant se leen de localStorage en el PRIMER
+  // pintado (antes de que llegue el catálogo), y de ellos dependen la
+  // barra superior y el reparto de tonos por categoría. Sin esto, la
+  // primera captura de `venta-retail` saldría con la barra de hostelería.
+  localStorage.setItem("mipiacetpv-catalog-tenant", "tenant-banco-visual");
+  localStorage.setItem("mipiacetpv-catalog-business-type", benchBusinessType());
+}
+
+// v1.14 · el banco necesita variar catálogo y vertical por pantalla: los
+// chips salen del catálogo y la barra superior del `businessType`.
+function benchScreen(): string {
+  return new URLSearchParams(window.location.search).get("screen") ?? "checkout";
+}
+
+function benchCatalog() {
+  const screen = benchScreen();
+  if (screen === "venta-20-categorias") return catalogWithTags(TAGS_20);
+  if (screen === "venta-retail") return catalogWithTags(TAGS_SIROPE.slice(0, 5));
+  return catalogWithTags(TAGS_SIROPE);
+}
+
+function benchBusinessType(): string {
+  return benchScreen() === "venta-retail" ? "RETAIL" : "HOSPITALITY";
 }
 
 function stubFetch(): void {
@@ -170,11 +270,23 @@ function stubFetch(): void {
     // (el resumen del día es de v1.11 y ya tiene sus capturas).
     "/shift/shift-1/summary": { error: "NOT_FOUND" },
     "/tpv/tables": { storeId: "store-1", registerId: "reg-1", tables: TABLES },
+    // v1.14 §4 · los más vendidos del turno para el estado vacío del
+    // ticket. `venta-mesa-vacia` es la pantalla que los enseña.
+    "/tpv/catalog/top-sellers": {
+      source: "shift",
+      items: [
+        { productId: CATALOG[0]!.id, units: 48 },
+        { productId: CATALOG[8]!.id, units: 41 },
+        { productId: CATALOG[5]!.id, units: 33 },
+        { productId: CATALOG[10]!.id, units: 27 },
+        { productId: CATALOG[1]!.id, units: 22 },
+      ],
+    },
     "/tpv/catalog/products": {
-      items: CATALOG,
+      items: benchCatalog(),
       nextCursor: null,
       tenantId: "tenant-1",
-      businessType: "HOSPITALITY",
+      businessType: benchBusinessType(),
       tpvIconPreset: null,
       tagAliases: [],
       creditSalesEnabled: false,
@@ -193,11 +305,62 @@ function stubFetch(): void {
       syncStatus: "SYNCED",
     },
   };
+  // v1.14 · el DRAFT de mesa vive en el servidor y `tableCreateLine`
+  // reconcilia el carrito con la respuesta: sin un ticket de verdad en
+  // la respuesta, la línea optimista se revierte y el banco no deja
+  // probar el destaque al añadir, que es el núcleo del bloque. El
+  // backend real reutiliza el `lineExternalId` del cliente como id de la
+  // línea (`tables/operativa.ts`), y por eso el destaque sobrevive a la
+  // reconciliación: aquí se replica.
+  // Sembrado con las líneas que ya trae la mesa, para que la primera
+  // reconciliación no borre lo que había.
+  const seed = benchScreen() === "venta-mesa-vacia"
+    ? []
+    : benchScreen() === "venta-mesa-12"
+      ? LINES_12
+      : LINES;
+  const draftLines: Array<Record<string, unknown>> = seed.map((l) => ({
+    id: l.id,
+    productId: l.productId,
+    variantId: null,
+    holdedProductId: l.holdedProductId,
+    sku: l.sku,
+    nameSnapshot: l.nameSnapshot,
+    units: String(l.units),
+    unitPrice: String(l.unitPrice),
+    discountPct: "0",
+    taxRate: String(l.taxRate),
+    subtotal: String(l.unitPrice * l.units),
+    total: String(l.priceGross * l.units),
+    modifiers: null,
+  }));
   const real = window.fetch.bind(window);
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : String((input as Request).url ?? input);
     if (!url.includes("/api/")) return real(input as RequestInfo, init);
     const path = url.slice(url.indexOf("/api/") + 4).split("?")[0]!;
+    if (/^\/tables\/[^/]+\/lines$/.test(path) && init?.method === "POST") {
+      const b = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+      draftLines.push({
+        id: b.lineExternalId,
+        productId: b.productId ?? null,
+        variantId: null,
+        holdedProductId: b.holdedProductId ?? null,
+        sku: b.sku,
+        nameSnapshot: b.nameSnapshot,
+        units: String(b.units),
+        unitPrice: String(b.unitPrice),
+        discountPct: "0",
+        taxRate: String(b.taxRate),
+        subtotal: String(b.unitPrice),
+        total: String(b.unitPrice),
+        modifiers: null,
+      });
+      return new Response(
+        JSON.stringify({ ticket: { id: "tk-m1", lines: draftLines } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
     // El overlay de éxito pide el ticket recién emitido y su payload
     // digital. El primero lo servimos; el segundo lo dejamos caer con
     // 404 a propósito, que es el camino degradado que el overlay ya
@@ -327,6 +490,39 @@ function Bench() {
     );
   }
 
+  // ── v1.14-la-comanda-se-ve ─────────────────────────────────────────
+
+  if (screen.startsWith("venta-mesa") || screen === "venta-20-categorias") {
+    const vacia = screen === "venta-mesa-vacia";
+    const doce = screen === "venta-mesa-12";
+    return (
+      <Screens.SalePage
+        shiftId="shift-1"
+        cashierLabel="Matías"
+        cashierRole="MANAGER"
+        registerName="Caja 1"
+        registerId="reg-1"
+        storeName="Cafetería Sirope"
+        tableContext={{
+          id: "t3",
+          name: "M1",
+          zone: "SALON",
+          capacity: 4,
+          diners: 2,
+          openedAt: new Date(now - 22 * 60_000).toISOString(),
+          openedByEmail: null,
+          openedByAlias: "Gemma",
+          activeTicketId: "tk-m1",
+        }}
+        initialTableLines={vacia ? [] : doce ? LINES_12 : LINES}
+        onBackToMap={() => {}}
+        onTicketMovedToTable={null}
+        onLogoutCashier={() => {}}
+        onCloseShift={() => {}}
+      />
+    );
+  }
+
   if (screen === "mapa") {
     return (
       <Screens.TableMapScreen
@@ -352,6 +548,7 @@ function Bench() {
       registerName="Caja 1"
       registerId="reg-1"
       storeName="Cafetería Sirope"
+      onBackToMap={() => {}}
       onLogoutCashier={() => {}}
       onCloseShift={() => {}}
     />

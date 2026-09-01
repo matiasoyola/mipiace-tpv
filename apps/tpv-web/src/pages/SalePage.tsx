@@ -10,34 +10,52 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Beef,
+  Beer,
   Bookmark,
   Briefcase,
+  Cake,
   Calculator,
   Check,
+  ChevronDown,
   CircleAlert,
   Coffee,
+  Cookie,
+  Croissant,
+  CupSoda,
   Dumbbell,
+  Ellipsis,
+  Fish,
+  GlassWater,
   GraduationCap,
   LayoutGrid,
   Loader2,
   Lock,
   Menu,
   Package,
+  Pizza,
   Plus,
   PowerOff,
   ReceiptText,
   RotateCw,
+  Salad,
   CalendarDays,
+  Sandwich,
   ScanLine,
   Scissors,
   Search,
+  Shirt,
   ShoppingBag,
+  Soup,
   Sparkles,
   Star,
   Stethoscope,
+  TrendingUp,
   Users,
+  Utensils,
   Wifi,
   WifiOff,
+  Wine,
   Wrench,
   X,
 } from "lucide-react";
@@ -105,6 +123,25 @@ import {
   loadModifierGroups,
   type CatalogModifierGroup,
 } from "../lib/modifiers.js";
+import {
+  iconNameForTag,
+  resolveToneAssignments,
+  TONE_STYLES,
+  type CategoryIconName,
+  type CategoryTone,
+} from "../lib/categoryTones.js";
+import { layoutChips } from "../lib/chipRows.js";
+import {
+  fetchTopSellers,
+  resolveTopSellers,
+  type TopSellersResponse,
+} from "../lib/topSellers.js";
+import {
+  CategoriesSheet,
+  TicketActionsSheet,
+  type SheetCategory,
+  type TicketAction,
+} from "./SalePage.moreSheets.js";
 import { syncNow } from "../lib/syncNow.js";
 import { vocab } from "../lib/vocab.js";
 // v1.10.2-impresion-honesta · un fallo de impresión de comanda tiene que
@@ -116,6 +153,37 @@ import { formatEur } from "../lib/money.js";
 // el deshacer estándar de la metodología UX de Mi Piace: da tiempo a
 // leer el aviso sin dejar un banner zombi en pantalla.
 const UNDO_REMOVE_WINDOW_MS = 4000;
+
+// v1.14-la-comanda-se-ve · cuánto dura el destaque de la línea recién
+// añadida. El bloque pide ~1 s: suficiente para verlo con el rabillo del
+// ojo mientras la mano ya va al siguiente producto, corto para que dos
+// cafés seguidos no dejen media lista en coral.
+const LINE_HIGHLIGHT_MS = 1000;
+
+// Iconos Lucide por categoría (hallazgo M2). `categoryTones.ts` decide
+// el NOMBRE; la resolución al componente vive aquí para que el módulo de
+// tonos siga siendo puro y testeable sin montar React.
+const CATEGORY_ICONS: Record<CategoryIconName, typeof Package> = {
+  Coffee,
+  Beer,
+  Wine,
+  GlassWater,
+  CupSoda,
+  Croissant,
+  Sandwich,
+  Salad,
+  Soup,
+  Pizza,
+  Beef,
+  Fish,
+  Cake,
+  Cookie,
+  Utensils,
+  Scissors,
+  Shirt,
+  Sparkles,
+  Package,
+};
 
 // v1.2-Lite Lote 3.A: los tags se persisten en lowercase para evitar
 // duplicados visuales (Thalia tenía chips "Papelería"/"papeleria" como
@@ -397,6 +465,51 @@ export function SalePage(props: SalePageProps) {
   );
   const lines = isTableMode ? tableLines : quickLines;
   const setLines = isTableMode ? setTableLines : setQuickLines;
+
+  // v1.14-la-comanda-se-ve · el núcleo del bloque (hallazgo C1).
+  //
+  // Al tocar un producto la línea correspondiente se destaca y el panel
+  // hace scroll hasta ella. La señal se emite AQUÍ, en el mismo gesto y
+  // sin esperar al servidor (principio §1.1: latencia percibida cero) —
+  // en modo mesa, esperar al POST de la línea sería un feedback de 300 ms
+  // en el mejor de los casos, y offline no llegaría nunca.
+  //
+  // El `nonce` es imprescindible: dos toques seguidos al MISMO café
+  // agrupan en la misma línea, así que sin un contador que cambie
+  // siempre el segundo toque no dispararía destaque — y ese es justo el
+  // caso que produce la doble pulsación que el bloque viene a matar.
+  const [lastTouchedLine, setLastTouchedLine] = useState<{
+    id: string;
+    nonce: number;
+  } | null>(null);
+  const touchNonceRef = useRef(0);
+  const touchLine = useCallback((id: string) => {
+    touchNonceRef.current += 1;
+    setLastTouchedLine({ id, nonce: touchNonceRef.current });
+  }, []);
+
+  // v1.14 §4 · los más vendidos para el estado vacío del ticket. Se pide
+  // cuando el ticket se queda sin líneas (mesa recién abierta, venta
+  // recién cobrada): es el momento en que el panel se vería en blanco.
+  // Un fallo de red no rompe nada — el estado vacío cae a la frase de
+  // siempre.
+  const [topSellersRanking, setTopSellersRanking] =
+    useState<TopSellersResponse | null>(null);
+  useEffect(() => {
+    if (lines.length > 0) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetchTopSellers(props.shiftId ?? null, 5);
+        if (!cancelled) setTopSellersRanking(res);
+      } catch {
+        /* offline o turno sin histórico: sin atajos, no es un error */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [lines.length, props.shiftId]);
   // Toast de error de operativa de mesa (mismo banner que comanda).
   const [tableError, setTableError] = useState<string | null>(null);
   // v1.0-mesas-frontend: agrupar/desagrupar desde la UI. El chip
@@ -652,6 +765,23 @@ export function SalePage(props: SalePageProps) {
   >(null);
 
   const searchRef = useRef<HTMLInputElement | null>(null);
+
+  // v1.14 · hallazgos M3 y M4. El vertical ordena la barra superior:
+  // en hostelería el ancla es el mapa y la búsqueda se pliega; en retail
+  // y servicios la búsqueda es la acción primaria y se queda ancha.
+  const isHospitality = businessType === "HOSPITALITY";
+  const compactSearch = isHospitality;
+  const [searchOpen, setSearchOpen] = useState(false);
+  // Al desplegar la lupa, el foco va al campo: si hubiera que tocarlo
+  // otra vez, el botón sería un paso de más en vez de un atajo.
+  useEffect(() => {
+    if (searchOpen) searchRef.current?.focus();
+  }, [searchOpen]);
+  // Al plegarse, la búsqueda se limpia: dejar un filtro activo detrás de
+  // una lupa cerrada es cómo se llega a "no me salen los productos".
+  useEffect(() => {
+    if (compactSearch && !searchOpen) setQuery("");
+  }, [compactSearch, searchOpen]);
   // v1.10.3-barra · línea borrada a la espera de "Deshacer" (4 s).
   const [undoRemove, setUndoRemove] = useState<
     null | { line: CartLine; index: number }
@@ -1033,6 +1163,7 @@ export function SalePage(props: SalePageProps) {
             l.id === existing.id ? { ...l, units: nextUnits } : l,
           ),
         );
+        touchLine(existing.id);
         void tablePatchLine(existing.id, { units: nextUnits }, existing);
         return;
       }
@@ -1053,45 +1184,55 @@ export function SalePage(props: SalePageProps) {
         modifierSelections: sels.length > 0 ? sels : undefined,
       };
       setTableLines((curr) => [...curr, newLine]);
+      touchLine(newLine.id);
       void tableCreateLine(newLine);
       return;
     }
-    setLines((curr) => {
-      // Agrupar con línea previa sólo si NINGUNA tiene modifiers — dos
-      // cafés "Con leche desnatada" pueden agruparse, pero un "Con
-      // desnatada" y uno "Con entera" no.
-      const existing =
-        sels.length === 0
-          ? curr.find(
-              (l) =>
-                l.productId === p.id &&
-                l.modifiers.length === 0 &&
-                (!l.modifierSelections || l.modifierSelections.length === 0),
-            )
-          : null;
-      if (existing) {
-        return curr.map((l) =>
-          l.id === existing.id ? { ...l, units: l.units + units } : l,
-        );
-      }
-      const newLine: CartLine = {
-        id: newId(),
-        productId: p.id,
-        variantId: null,
-        holdedProductId: p.holdedProductId,
-        sku: p.sku,
-        nameSnapshot: p.name,
-        units,
-        unitPrice: p.basePrice,
-        unitPriceOverride: null,
-        priceGross: p.priceGross,
-        discountPct: 0,
-        taxRate: p.taxRate,
-        modifiers: [],
-        modifierSelections: sels.length > 0 ? sels : undefined,
-      };
-      return [...curr, newLine];
-    });
+    // Agrupar con línea previa sólo si NINGUNA tiene modifiers — dos
+    // cafés "Con leche desnatada" pueden agruparse, pero un "Con
+    // desnatada" y uno "Con entera" no.
+    //
+    // v1.14 · el `find` se hace FUERA del updater, igual que en la rama
+    // de mesa. La razón no es estética: el panel del ticket necesita
+    // saber QUÉ línea destacar, y calcularlo dentro del updater sería un
+    // efecto colateral en una función que React puede invocar dos veces
+    // (StrictMode) — el destaque saldría a veces y a veces no.
+    const existingQuick =
+      sels.length === 0
+        ? quickLines.find(
+            (l) =>
+              l.productId === p.id &&
+              l.modifiers.length === 0 &&
+              (!l.modifierSelections || l.modifierSelections.length === 0),
+          )
+        : null;
+    if (existingQuick) {
+      setLines((curr) =>
+        curr.map((l) =>
+          l.id === existingQuick.id ? { ...l, units: l.units + units } : l,
+        ),
+      );
+      touchLine(existingQuick.id);
+      return;
+    }
+    const newQuickLine: CartLine = {
+      id: newId(),
+      productId: p.id,
+      variantId: null,
+      holdedProductId: p.holdedProductId,
+      sku: p.sku,
+      nameSnapshot: p.name,
+      units,
+      unitPrice: p.basePrice,
+      unitPriceOverride: null,
+      priceGross: p.priceGross,
+      discountPct: 0,
+      taxRate: p.taxRate,
+      modifiers: [],
+      modifierSelections: sels.length > 0 ? sels : undefined,
+    };
+    setLines((curr) => [...curr, newQuickLine]);
+    touchLine(newQuickLine.id);
   }
 
   // Punto de entrada general: si el producto tiene grupos asociados,
@@ -1131,6 +1272,7 @@ export function SalePage(props: SalePageProps) {
       modifiers: [],
     };
     setLines((curr) => [...curr, newLine]);
+    touchLine(newLine.id);
     if (isTableMode) void tableCreateLine(newLine);
   }
 
@@ -1420,6 +1562,14 @@ export function SalePage(props: SalePageProps) {
   }
 
   const totals = useMemo(() => computeCart(lines), [lines]);
+  // v1.14 §4 · el ranking del servidor cruzado con el catálogo local.
+  // Los productos borrados del catálogo desde que se vendieron se caen
+  // aquí: mejor tres atajos buenos que cinco con huecos.
+  const topSellers = useMemo(
+    () => resolveTopSellers(topSellersRanking, catalog ?? [], 5),
+    [topSellersRanking, catalog],
+  );
+
   const filtered = useMemo(() => {
     if (!catalog) return [];
     if (query.trim().length === 0) {
@@ -1482,26 +1632,78 @@ export function SalePage(props: SalePageProps) {
             >
               <Menu className="w-5 h-5" strokeWidth={2.1} />
             </button>
-            {/* v1.9.6 · el botón Mesas estaba camuflado (gris stone) y
-                enterrado en el cluster derecho. Principio de producto:
-                el mapa es el "home" del bar — volver a él es la acción
-                nº1 y vive en cabeza del header, en coral suave (mismo
-                lenguaje que una mesa ocupada) y SIEMPRE con texto. */}
-            {!isTableMode && props.onBackToMap && (
+            {/* v1.14-la-comanda-se-ve · hallazgos M3 y M4 de la auditoría
+                del 2026-09-01. La barra se ordena leyendo `businessType`
+                del tenant, que ya existe y ya se usa en `App.tsx` para
+                decidir si hay mapa de mesas.
+
+                HOSPITALITY · "Mapa" es el ancla fija de la barra: cada
+                mesa atendida termina volviendo al mapa, y hasta ahora
+                era un chip de 9 px de alto ENTERRADO dentro del panel
+                del ticket, compitiendo con el nombre de la mesa (M4).
+                Sube aquí, a la izquierda, a `touch-lg`. Y se pinta
+                TAMBIÉN en modo mesa — que es justo cuando hace falta.
+
+                RETAIL / SERVICES · no hay mesas (`App.tsx` ya se salta
+                la pantalla de mapa para esos verticales), así que el
+                botón no se pinta y la búsqueda se queda ancha, que ahí
+                sí es la acción primaria. */}
+            {isHospitality && props.onBackToMap && (
               <button
                 onClick={props.onBackToMap}
                 title="Ir al mapa de sala"
-                className="h-12 md:h-14 px-4 md:px-5 shrink-0 rounded-2xl bg-mipiace-coral-soft border border-mipiace-coral/40 hover:bg-mipiace-coral/20 flex items-center gap-2 text-[13.5px] md:text-[14px] font-semibold text-mipiace-coral-dark"
+                className="h-touch-lg px-4 md:px-6 shrink-0 rounded-2xl bg-mipiace-coral-soft border border-mipiace-coral/40 hover:bg-mipiace-coral/20 flex items-center gap-2.5 text-[14px] md:text-[15px] font-semibold text-mipiace-coral-dark"
               >
-                <LayoutGrid className="w-[18px] h-[18px]" strokeWidth={2.25} />
-                <span>Mesas</span>
+                <LayoutGrid className="w-[22px] h-[22px]" strokeWidth={2.25} />
+                <span>Mapa</span>
               </button>
             )}
             <div className="lg:hidden">
               <Logo size={24} />
             </div>
-            <div className="order-last w-full lg:order-none lg:w-auto lg:flex-1 lg:max-w-3xl min-w-0 flex items-center gap-2">
-              <div className="relative flex-1 min-w-0">
+            {/* M3 · la búsqueda medía 768 × 56 px sobre 1280 de ancho —el
+                60 % de la franja más valiosa— en una pantalla donde casi
+                no se usa: en un bar se toca categoría y producto. En
+                hostelería se pliega a una lupa que despliega el campo al
+                pulsarla; en retail se queda como estaba.
+
+                El input NO se desmonta al plegarse: sigue montado fuera
+                de cuadro porque es donde aterriza el lector de códigos
+                USB-HID (el refoco de más arriba escribe en `searchRef`).
+                Desmontarlo dejaría a los tenants con lector USB sin
+                escáner, que es peor que el problema que arregla. Fuera
+                de cuadro no es tocable, así que en táctil tampoco abre
+                el teclado del sistema. */}
+            <div
+              className={
+                compactSearch
+                  ? "relative order-last w-full lg:order-none lg:w-auto min-w-0 flex items-center gap-2"
+                  : "order-last w-full lg:order-none lg:w-auto lg:flex-1 lg:max-w-3xl min-w-0 flex items-center gap-2"
+              }
+            >
+              {compactSearch && (
+                <button
+                  type="button"
+                  onClick={() => setSearchOpen((v) => !v)}
+                  title="Buscar producto o escanear código"
+                  aria-label="Buscar producto o escanear código"
+                  aria-expanded={searchOpen}
+                  className="h-touch-lg w-touch-lg shrink-0 rounded-2xl bg-mipiace-stone hover:bg-slate-100 flex items-center justify-center text-slate-600"
+                >
+                  <Search className="w-[20px] h-[20px]" strokeWidth={2.25} />
+                </button>
+              )}
+              <div
+                className={
+                  compactSearch && !searchOpen
+                    ? // Fuera de cuadro pero enfocable: el lector USB-HID
+                      // sigue escribiendo aquí.
+                      "absolute -left-[9999px] top-0 w-px h-px overflow-hidden"
+                    : compactSearch
+                      ? "relative flex-1 min-w-0 lg:w-[420px]"
+                      : "relative flex-1 min-w-0"
+                }
+              >
                 <Search
                   className="absolute left-4 md:left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"
                   strokeWidth={2.25}
@@ -1517,6 +1719,10 @@ export function SalePage(props: SalePageProps) {
                   autoCapitalize="off"
                   autoCorrect="off"
                   spellCheck={false}
+                  // Sólo cuando está plegado: emitir `aria-hidden="false"`
+                  // en retail sería ruido en el árbol de accesibilidad.
+                  aria-hidden={compactSearch && !searchOpen ? true : undefined}
+                  tabIndex={compactSearch && !searchOpen ? -1 : undefined}
                   placeholder={
                     businessType === "SERVICES"
                       ? "Buscar servicio o cliente…"
@@ -1668,7 +1874,9 @@ export function SalePage(props: SalePageProps) {
             cashierRole={props.cashierRole}
             shiftTicketsCount={shiftTicketsCount}
             tableContext={props.tableContext ?? null}
-            onBackToMap={props.onBackToMap ?? null}
+            lastTouchedLine={lastTouchedLine}
+            topSellers={topSellers}
+            topSellersSource={topSellersRanking?.source ?? null}
             onClickProduct={addProduct}
             onClickFreeLine={() => setOpenSheet({ kind: "freeLine" })}
             onClickLine={(line) => setOpenSheet({ kind: "line", line })}
@@ -2378,7 +2586,9 @@ function SaleWorkspace({
   cashierRole: _cashierRole,
   shiftTicketsCount,
   tableContext,
-  onBackToMap,
+  lastTouchedLine,
+  topSellers,
+  topSellersSource,
   onClickProduct,
   onClickFreeLine,
   onClickLine,
@@ -2416,7 +2626,12 @@ function SaleWorkspace({
   // DRAFT, no VOIDED). null si aún no se ha resuelto el primer fetch.
   shiftTicketsCount: number | null;
   tableContext: TableContext | null;
-  onBackToMap: (() => void) | null;
+  // v1.14 · señal de "esta línea acaba de tocarse", para el destaque y
+  // el scroll del panel del ticket. El "Mapa" ya no baja hasta aquí: se
+  // ha ido a la barra superior (hallazgo M4).
+  lastTouchedLine: { id: string; nonce: number } | null;
+  topSellers: CatalogProduct[];
+  topSellersSource: "shift" | "month" | null;
   onClickProduct: (p: CatalogProduct) => void;
   onClickFreeLine: () => void;
   onClickLine: (line: CartLine) => void;
@@ -2531,6 +2746,55 @@ function SaleWorkspace({
   // que un alias nuevo aparece tras el próximo "Sincronizando" sin tocar
   // este componente.
   const tagAliases = useMemo(() => getCachedTagAliases(), [displayTags]);
+  // v1.14 · hallazgo M2. El reparto tono↔categoría se persiste por
+  // tenant: el color de "Cafés" tiene que ser el mismo cada día, porque
+  // lo que se aprende es el color y la posición, no el nombre.
+  const toneAssignments = useMemo(
+    () => resolveToneAssignments(displayTags, tenantId),
+    [displayTags, tenantId],
+  );
+  // v1.14 · hallazgo M1. Dos filas de chips y "Más (N)" para el resto.
+  // El ancho de la fila se mide de verdad cuando el navegador ha hecho
+  // layout; sin medida (primer render, jsdom) se usa el ancho de la
+  // columna del catálogo a 1280 × 800, que es el terminal.
+  const chipRowRef = useRef<HTMLDivElement | null>(null);
+  const [chipRowWidth, setChipRowWidth] = useState(0);
+  useEffect(() => {
+    const el = chipRowRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      // Sólo se reacciona a cambios reales de ancho: sin esto, recortar
+      // un chip cambia el alto del contenedor, el observer vuelve a
+      // disparar y el reparto oscila.
+      setChipRowWidth((prev) => (Math.abs(prev - w) > 1 ? w : prev));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const chipLayout = useMemo(
+    () =>
+      layoutChips(
+        displayTags.map((t) => renderTagLabel(t, tagAliases)),
+        chipRowWidth,
+        showKindToggle ? ["Todos", "Servicios", "Productos"] : ["Todos"],
+      ),
+    [displayTags, tagAliases, chipRowWidth, showKindToggle],
+  );
+  const visibleTags = useMemo(
+    () => displayTags.slice(0, chipLayout.visibleCount),
+    [displayTags, chipLayout.visibleCount],
+  );
+  const overflowTags = useMemo(
+    () => displayTags.slice(chipLayout.visibleCount),
+    [displayTags, chipLayout.visibleCount],
+  );
+  const [categoriesSheetOpen, setCategoriesSheetOpen] = useState(false);
+  // Si el desbordamiento desaparece (el propietario borró categorías en
+  // Holded y llegó un sync), la hoja no puede quedarse abierta y vacía.
+  useEffect(() => {
+    if (overflowTags.length === 0) setCategoriesSheetOpen(false);
+  }, [overflowTags.length]);
   // Si el tag seleccionado deja de existir en el catálogo (el
   // propietario lo quitó en Holded y vino un sync, o el toggle de
   // kind cambió), volvemos a "Todos" automáticamente.
@@ -2574,7 +2838,10 @@ function SaleWorkspace({
     totals,
     shiftTicketsCount,
     tableContext,
-    onBackToMap,
+    lastTouchedLine,
+    topSellers,
+    topSellersSource,
+    onClickProduct,
     onClickLine,
     onUpdateLineUnits,
     onRemoveLine,
@@ -2609,7 +2876,16 @@ function SaleWorkspace({
             área de scroll vertical (antes desaparecía al scrollear el
             grid). El bloque chips queda fijo arriba; favoritos + grid
             van en un sub-contenedor con su propio overflow-y. */}
-        <div className="flex items-center gap-2 mb-4 md:mb-6 overflow-x-auto flex-shrink-0">
+        {/* v1.14-la-comanda-se-ve · hallazgos M1 y M2. La fila ya no
+            lleva `overflow-x-auto`: los chips envuelven a un máximo de
+            dos filas y lo que no cabe se va al chip "Más (N)", que abre
+            un sheet. Un scroll horizontal sin affordance en táctil es
+            una función que no existe (§1.8 de los principios UX). */}
+        <div
+          ref={chipRowRef}
+          data-testid="category-chips"
+          className="flex flex-wrap items-center gap-2 mb-4 md:mb-6 shrink-0"
+        >
           {/* P-1 (v1.1 peluquería): toggle Servicios/Productos para
               verticales SERVICES. Va delante de los chips de tag y
               está separado visualmente por un divisor sutil. */}
@@ -2619,8 +2895,8 @@ function SaleWorkspace({
                 onClick={() => setKindFilter("SERVICE")}
                 className={
                   kindFilter === "SERVICE"
-                    ? "h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-mipiace-ink text-white text-[13.5px] md:text-[14px] font-medium shrink-0"
-                    : "h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-white border border-slate-200 text-slate-700 text-[13.5px] md:text-[14px] font-medium shrink-0 hover:border-mipiace-ink/40"
+                    ? "h-touch px-4 md:px-5 rounded-2xl bg-mipiace-ink text-white text-[13.5px] md:text-[14px] font-medium shrink-0"
+                    : "h-touch px-4 md:px-5 rounded-2xl bg-white border border-slate-200 text-slate-700 text-[13.5px] md:text-[14px] font-medium shrink-0 hover:border-mipiace-ink/40"
                 }
               >
                 Servicios
@@ -2629,8 +2905,8 @@ function SaleWorkspace({
                 onClick={() => setKindFilter("PRODUCT")}
                 className={
                   kindFilter === "PRODUCT"
-                    ? "h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-mipiace-ink text-white text-[13.5px] md:text-[14px] font-medium shrink-0"
-                    : "h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-white border border-slate-200 text-slate-700 text-[13.5px] md:text-[14px] font-medium shrink-0 hover:border-mipiace-ink/40"
+                    ? "h-touch px-4 md:px-5 rounded-2xl bg-mipiace-ink text-white text-[13.5px] md:text-[14px] font-medium shrink-0"
+                    : "h-touch px-4 md:px-5 rounded-2xl bg-white border border-slate-200 text-slate-700 text-[13.5px] md:text-[14px] font-medium shrink-0 hover:border-mipiace-ink/40"
                 }
               >
                 Productos
@@ -2638,45 +2914,66 @@ function SaleWorkspace({
               <div className="w-px h-8 bg-slate-200 mx-1 shrink-0" aria-hidden />
             </>
           )}
-          {/* B-Categorias-via-Tags: chip "Todos" siempre presente +
-              un chip por cada tag único del catálogo. El estado activo
-              se pinta con el coral del producto; los inactivos con
-              estilo neutro. overflow-x-auto del contenedor permite
-              scroll horizontal cuando hay muchas categorías. */}
+          {/* "Todos" NO es coral (hallazgo m2): el coral queda reservado
+              para la categoría seleccionada. Cuando "Todos" llevaba el
+              coral fijo, le robaba la señal a la selección real y el ojo
+              no encontraba en qué categoría estaba. Aquí la selección se
+              marca en `ink`, que es un estado, no un acento de marca. */}
           <button
             onClick={() => setSelectedTag(null)}
+            aria-pressed={selectedTag === null}
             className={
               selectedTag === null
-                ? "h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-mipiace-coral text-white text-[13.5px] md:text-[14px] font-medium flex items-center gap-2 shrink-0"
-                : "h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-white border border-slate-200 text-slate-700 text-[13.5px] md:text-[14px] font-medium flex items-center gap-2 shrink-0 hover:border-mipiace-coral/50"
+                ? "h-touch px-4 md:px-5 rounded-2xl bg-mipiace-ink text-white text-[13.5px] md:text-[14px] font-medium flex items-center gap-2 shrink-0"
+                : "h-touch px-4 md:px-5 rounded-2xl bg-white border border-slate-200 text-slate-700 text-[13.5px] md:text-[14px] font-medium flex items-center gap-2 shrink-0 hover:border-mipiace-ink/40"
             }
           >
             <Star
               className={
-                selectedTag === null
-                  ? "w-3.5 h-3.5 fill-white"
-                  : "w-3.5 h-3.5 text-slate-400"
+                selectedTag === null ? "w-3.5 h-3.5 fill-white" : "w-3.5 h-3.5 text-slate-400"
               }
               strokeWidth={2.5}
             />
             Todos
           </button>
-          {displayTags.map((tag) => {
+          {visibleTags.map((tag) => {
             const active = selectedTag === tag;
+            const tone = toneAssignments[tag] ?? "stone";
+            const Icon = CATEGORY_ICONS[iconNameForTag(tag, tone)];
             return (
               <button
                 key={tag}
                 onClick={() => setSelectedTag(tag)}
+                aria-pressed={active}
+                data-tone={tone}
                 className={
                   active
-                    ? "h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-mipiace-coral text-white text-[13.5px] md:text-[14px] font-medium shrink-0"
-                    : "h-11 md:h-12 px-4 md:px-5 rounded-2xl bg-white border border-slate-200 text-slate-700 text-[13.5px] md:text-[14px] font-medium shrink-0 hover:border-mipiace-coral/50"
+                    ? "h-touch px-4 md:px-5 rounded-2xl border bg-mipiace-coral border-mipiace-coral text-white text-[13.5px] md:text-[14px] font-medium flex items-center gap-2 shrink-0 max-w-[200px]"
+                    : `h-touch px-4 md:px-5 rounded-2xl border ${TONE_STYLES[tone].chip} text-[13.5px] md:text-[14px] font-medium flex items-center gap-2 shrink-0 max-w-[200px]`
                 }
               >
-                {renderTagLabel(tag, tagAliases)}
+                <Icon className="w-[18px] h-[18px] shrink-0" strokeWidth={2.25} />
+                <span className="truncate">{renderTagLabel(tag, tagAliases)}</span>
               </button>
             );
           })}
+          {overflowTags.length > 0 && (
+            <button
+              onClick={() => setCategoriesSheetOpen(true)}
+              // El chip lleva el estado de la selección oculta: si la
+              // categoría activa se ha quedado dentro del sheet, el
+              // camarero tiene que poder verlo sin abrirlo.
+              aria-pressed={selectedTag != null && overflowTags.includes(selectedTag)}
+              className={
+                selectedTag != null && overflowTags.includes(selectedTag)
+                  ? "h-touch px-4 md:px-5 rounded-2xl border bg-mipiace-coral border-mipiace-coral text-white text-[13.5px] md:text-[14px] font-medium flex items-center gap-2 shrink-0"
+                  : "h-touch px-4 md:px-5 rounded-2xl border bg-white border-slate-200 text-slate-700 text-[13.5px] md:text-[14px] font-medium flex items-center gap-2 shrink-0 hover:border-mipiace-ink/40"
+              }
+            >
+              <ChevronDown className="w-[18px] h-[18px] shrink-0" strokeWidth={2.25} />
+              Más ({overflowTags.length})
+            </button>
+          )}
         </div>
         {/* Zona scrollable: favoritos + grid + estados vacíos. min-h-0
             es crítico para que flex-1 + overflow-y funcionen dentro de
@@ -2967,6 +3264,26 @@ function SaleWorkspace({
           </div>
         </div>
       )}
+
+      {/* v1.14 · las categorías que no caben en las dos filas. Es un
+          sheet de acciones secundarias, no del flujo de cobro. */}
+      {categoriesSheetOpen && (
+        <CategoriesSheet
+          categories={overflowTags.map<SheetCategory>((tag) => {
+            const tone: CategoryTone = toneAssignments[tag] ?? "stone";
+            const Icon = CATEGORY_ICONS[iconNameForTag(tag, tone)];
+            return {
+              tag,
+              label: renderTagLabel(tag, tagAliases),
+              tone,
+              icon: <Icon className="w-[18px] h-[18px]" strokeWidth={2.25} />,
+            };
+          })}
+          selectedTag={selectedTag}
+          onSelect={setSelectedTag}
+          onClose={() => setCategoriesSheetOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -2981,7 +3298,6 @@ interface TicketPanelProps {
   totals: ReturnType<typeof computeCart>;
   shiftTicketsCount: number | null;
   tableContext: TableContext | null;
-  onBackToMap: (() => void) | null;
   onClickLine: (line: CartLine) => void;
   onUpdateLineUnits: (id: string, units: number) => void;
   onRemoveLine: (id: string) => void;
@@ -2999,13 +3315,47 @@ interface TicketPanelProps {
   hasGroupedTables: boolean;
   onClickGroup: () => void;
   onClickUngroup: () => void;
+  // v1.14 · última línea tocada (añadida o incrementada) y un contador
+  // que cambia SIEMPRE, incluso al volver a tocar el mismo producto —
+  // sin él, dos toques seguidos al mismo café no dispararían el segundo
+  // destaque, que es justo el caso que produce la doble pulsación.
+  lastTouchedLine: { id: string; nonce: number } | null;
+  // v1.14 §4 · estado vacío informativo: los cinco más vendidos, ya
+  // resueltos contra el catálogo local. Vacío = no se pinta la rejilla
+  // (offline, turno sin datos o catálogo desincronizado).
+  topSellers: CatalogProduct[];
+  topSellersSource: "shift" | "month" | null;
+  onClickProduct: (p: CatalogProduct) => void;
 }
 
-// v1.0-handheld: contenido del panel del ticket, extraído tal cual del
-// aside de escritorio para poder montarlo también en el bottom-sheet
-// handheld. El wrapper (aside fijo vs sheet deslizante) pone el layout;
-// este componente sólo pinta los 4 bloques (header, chips, totales +
-// Cobrar, listado de líneas).
+// v1.14-la-comanda-se-ve · hallazgo C1 (crítico) de la auditoría del
+// 2026-09-01.
+//
+// El reparto medido del panel era: cabecera ~90 px, siete acciones
+// secundarias ~135, totales ~120, "Enviar comanda" ~67 y "Cobrar" ~67
+// sobre 573 px de alto → **20 px para el desglose de artículos**. Con
+// dos productos la primera línea ya salía cortada por el borde, y al
+// tocar un producto no había confirmación visible de nada. En hora
+// punta eso es doble pulsación y un café cobrado de más: es un fallo de
+// dinero, no de estética.
+//
+// La jerarquía va ahora al revés de como estaba:
+//
+//   1. Cabecera compacta (mesa + meta) con un único botón "Más".
+//   2. LISTA DE ARTÍCULOS ocupando todo el espacio flexible.
+//   3. Zona anclada al pie: Subtotal/IVA/Total + Enviar comanda + Cobrar.
+//
+// Las siete acciones secundarias (Cliente, Descuento, Observaciones,
+// Mover mesa, Partir cuenta, Agrupar/Desagrupar y Cancelar) viven en el
+// sheet de "Más": se usan una de cada veinte veces y ocupaban el mejor
+// sitio de la pantalla. El botón "Mapa" se ha ido de aquí a la barra
+// superior (hallazgo M4) — volver al mapa es la navegación nº 1 del
+// turno y competía con el nombre de la mesa.
+//
+// Los dos layouts (aside de escritorio y bottom-sheet handheld) tienen
+// ahora la MISMA forma: cabecera fija, listado flexible con scroll
+// propio y pie anclado. Antes divergían y el sheet tenía su propio
+// reparto invertido — una forma menos que mantener.
 function TicketPanel({
   lines,
   durationByProduct,
@@ -3014,7 +3364,6 @@ function TicketPanel({
   totals,
   shiftTicketsCount,
   tableContext,
-  onBackToMap,
   onClickLine,
   onUpdateLineUnits,
   onRemoveLine,
@@ -3032,325 +3381,404 @@ function TicketPanel({
   hasGroupedTables,
   onClickGroup,
   onClickUngroup,
+  lastTouchedLine,
+  topSellers,
+  topSellersSource,
+  onClickProduct,
   layout = "aside",
 }: TicketPanelProps & { layout?: "aside" | "sheet" }) {
   const businessType = getCachedBusinessType();
+  const [moreOpen, setMoreOpen] = useState(false);
 
+  // Destaque de la línea recién tocada. `nonce` es la señal; el id dice
+  // a cuál. El temporizador se reinicia en cada toque para que dos
+  // toques seguidos no dejen el destaque colgado del primero.
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nonce = lastTouchedLine?.nonce ?? 0;
+  const touchedId = lastTouchedLine?.id ?? null;
+  useEffect(() => {
+    if (!touchedId || nonce === 0) return;
+    setHighlightId(touchedId);
+    // Scroll hasta la línea. `block: "nearest"` no mueve nada si ya se
+    // ve — el listado no debe dar un salto por cada café.
+    const el = listRef.current?.querySelector(
+      `[data-line-id="${CSS?.escape ? CSS.escape(touchedId) : touchedId}"]`,
+    );
+    if (el && typeof (el as HTMLElement).scrollIntoView === "function") {
+      (el as HTMLElement).scrollIntoView({ block: "nearest" });
+    }
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = setTimeout(
+      () => setHighlightId(null),
+      LINE_HIGHLIGHT_MS,
+    );
+    return () => {
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    };
+  }, [touchedId, nonce]);
+
+  // Las siete secundarias, en el orden en que estaban en la fila de
+  // chips. "Cancelar" va marcada como destructiva y el sheet la aparta
+  // a su propia zona (hallazgo m1).
+  const moreActions: TicketAction[] = [
+    {
+      key: "contact",
+      label: contact ? `Cliente: ${contact.name.split(" ")[0]}` : "Cliente",
+      hint: contact ? `Cliente: ${contact.name}` : "Asignar cliente al ticket",
+      onClick: onClickContact,
+    },
+    {
+      key: "discount",
+      label: "Descuento",
+      hint: "Aplicar descuento global al ticket",
+      onClick: onClickDiscountGlobal,
+    },
+    {
+      key: "notes",
+      label: `Observaciones${notes ? " ●" : ""}`,
+      hint: `Observaciones internas del ${vocab("ticketNoun", businessType).toLowerCase()}`,
+      onClick: onClickNotes,
+    },
+  ];
+  if (tableContext) {
+    moreActions.push(
+      {
+        key: "move",
+        label: "Mover mesa",
+        hint: "Llevar este ticket a otra mesa",
+        onClick: onClickMoveTable,
+      },
+      {
+        key: "split",
+        label: "Partir cuenta",
+        hint: "Cobrar parte ahora y dejar el resto pendiente",
+        onClick: onClickSplitBill,
+      },
+      {
+        key: "group",
+        label: "Agrupar",
+        hint: "Unir las cuentas de otras mesas ocupadas a esta",
+        onClick: onClickGroup,
+      },
+    );
+    if (hasGroupedTables) {
+      moreActions.push({
+        key: "ungroup",
+        label: "Desagrupar",
+        hint: "Separar las mesas agrupadas (cada una recupera sus líneas)",
+        onClick: onClickUngroup,
+      });
+    }
+  }
+  moreActions.push({
+    key: "cancel",
+    // v1.9.7 · en modo mesa el botón NUNCA se deshabilita: una mesa con
+    // un DRAFT vacío figura ocupada, y si "Cancelar" está gris no hay
+    // forma de liberarla desde el TPV (implantación de Sirope,
+    // 2026-07-08). En venta rápida sin nada que destruir sí se apaga.
+    label: tableContext ? "Vaciar mesa" : "Cancelar",
+    hint: tableContext
+      ? "Cancela la cuenta y libera la mesa"
+      : `Vacía el ${vocab("ticketNoun", businessType).toLowerCase()} en curso`,
+    onClick: onCancel,
+    disabled: !tableContext && lines.length === 0 && !contact && !notes,
+    destructive: true,
+  });
+
+  // 1 · Cabecera compacta. Nombre de mesa + meta + un solo botón "Más".
   const headerBlock = (
-    <>
-        {/* 1 · Header */}
-        <div className="flex items-center justify-between px-5 md:px-7 pt-5 md:pt-6 pb-3 md:pb-4 border-b border-slate-100 shrink-0">
-          <div className="min-w-0">
-            <h2 className="text-[18px] md:text-[20px] font-semibold text-mipiace-ink tracking-tight truncate">
-              {tableContext
-                ? `Mesa ${tableContext.name}`
-                : `${vocab("ticketNoun", businessType)} de ${vocab("saleNoun", businessType).toLowerCase()}`}
-            </h2>
-            {/* Mejora-02: contador de tickets del turno actual. Aparece
-                a la derecha del subtítulo como "Turno · #N" para que
-                el cajero vea de un vistazo en qué ticket va. shift
-                ticketsCount + 1 = el ticket que está a punto de emitir
-                ahora mismo (lo que tiene en pantalla). */}
-            <div className="text-[12.5px] text-slate-500 mt-0.5 flex items-center gap-1.5">
-              {tableContext ? (
-                <TableContextLine
-                  table={tableContext}
-                  itemCount={totals.itemCount}
-                />
-              ) : (
-                <>{vocab("ticketNoun", businessType)} · {totals.itemCount}</>
-              )}
-              {shiftTicketsCount !== null && (
-                <>
-                  <span className="text-slate-300">·</span>
-                  <span title={`${shiftTicketsCount} ${vocab("ticketNoun", businessType).toLowerCase()}${shiftTicketsCount === 1 ? "" : "s"} ya emitido${shiftTicketsCount === 1 ? "" : "s"} en este turno`}>
-                    {/* v1.9.2-mesas-concurrencia · Frente 3.4: es un
-                        contador de tickets del turno, no el nº de turno. */}
-                    Ticket {shiftTicketsCount + 1} del turno
-                  </span>
-                </>
-              )}
-            </div>
-          </div>
-          {onBackToMap && (
-            <button
-              type="button"
-              onClick={onBackToMap}
-              className="h-9 px-3.5 text-[12.5px] font-semibold rounded-lg bg-mipiace-coral-soft border border-mipiace-coral/40 hover:bg-mipiace-coral/20 text-mipiace-coral-dark inline-flex items-center gap-1.5"
-              title="Volver al mapa de sala"
-            >
-              <LayoutGrid className="w-3.5 h-3.5" strokeWidth={2.25} />
-              Mapa
-            </button>
+    <div className="flex items-center justify-between gap-2 px-5 md:px-7 pt-4 md:pt-5 pb-3 border-b border-slate-100 shrink-0">
+      <div className="min-w-0">
+        <h2 className="text-[18px] md:text-[20px] font-semibold text-mipiace-ink tracking-tight truncate">
+          {tableContext
+            ? `Mesa ${tableContext.name}`
+            : `${vocab("ticketNoun", businessType)} de ${vocab("saleNoun", businessType).toLowerCase()}`}
+        </h2>
+        {/* Una sola línea. En el bucle visual a 1280×800, "2 comensales ·
+            22 min · Gemma · 24 uds." envolvía a dos filas y le robaba
+            20 px al desglose. La meta es contexto: se lee de reojo, y lo
+            que se corta (el alias de quien abrió) está también en el
+            mapa. */}
+        <div className="text-[12.5px] text-slate-500 mt-0.5 flex items-center gap-1.5 truncate">
+          {tableContext ? (
+            <TableContextLine table={tableContext} itemCount={totals.itemCount} />
+          ) : (
+            <>
+              {vocab("ticketNoun", businessType)} · {totals.itemCount}
+            </>
+          )}
+          {shiftTicketsCount !== null && (
+            <>
+              <span className="text-slate-300">·</span>
+              <span
+                title={`${shiftTicketsCount} ${vocab("ticketNoun", businessType).toLowerCase()}${shiftTicketsCount === 1 ? "" : "s"} ya emitido${shiftTicketsCount === 1 ? "" : "s"} en este turno`}
+              >
+                {/* v1.9.2-mesas-concurrencia · Frente 3.4: es un
+                    contador de tickets del turno, no el nº de turno. */}
+                Ticket {shiftTicketsCount + 1} del turno
+              </span>
+            </>
           )}
         </div>
-    </>
+      </div>
+      <button
+        type="button"
+        onClick={() => setMoreOpen(true)}
+        title="Cliente, descuento, observaciones y el resto de acciones del ticket"
+        aria-label="Más acciones del ticket"
+        className="h-touch px-3.5 shrink-0 rounded-2xl bg-mipiace-stone hover:bg-slate-100 text-[13.5px] font-medium text-mipiace-ink inline-flex items-center gap-1.5"
+      >
+        <Ellipsis className="w-[18px] h-[18px]" strokeWidth={2.25} />
+        Más
+      </button>
+    </div>
   );
 
-  const chipsBlock = (
-    <>
-        {/* 2 · Chips de acciones del ticket. "Cancelar" en último
-             lugar con estilo destructivo más suave para no competir
-             visualmente con "Cobrar". */}
-        <div className="px-5 md:px-7 py-3 border-b border-slate-100 flex flex-wrap gap-1.5 shrink-0">
-          <button
-            onClick={onClickContact}
-            className="h-8 px-3 rounded-lg bg-mipiace-stone hover:bg-slate-100 text-[12.5px] font-medium text-mipiace-ink max-w-[180px] truncate"
-            title={contact ? `Cliente: ${contact.name}` : "Asignar cliente al ticket"}
-          >
-            {contact ? `Cliente: ${contact.name.split(" ")[0]}` : "Cliente"}
-          </button>
-          <button
-            onClick={onClickDiscountGlobal}
-            className="h-8 px-3 rounded-lg bg-mipiace-stone hover:bg-slate-100 text-[12.5px] font-medium text-mipiace-ink"
-            title="Aplicar descuento global al ticket"
-          >
-            Descuento
-          </button>
-          <button
-            onClick={onClickNotes}
-            className="h-8 px-3 rounded-lg bg-mipiace-stone hover:bg-slate-100 text-[12.5px] font-medium text-mipiace-ink"
-            title={`Observaciones internas del ${vocab("ticketNoun", businessType).toLowerCase()}`}
-          >
-            Observaciones{notes ? " ●" : ""}
-          </button>
-          {/* v1.4-Bar-Operativa-MVP Lote 3 · "Mover mesa" sólo en
-              mesa abierta. Mismo tamaño que los demás chips. */}
-          {tableContext && (
-            <button
-              onClick={onClickMoveTable}
-              className="h-8 px-3 rounded-lg bg-mipiace-stone hover:bg-slate-100 text-[12.5px] font-medium text-mipiace-ink"
-              title="Llevar este ticket a otra mesa"
-            >
-              Mover mesa
-            </button>
-          )}
-          {/* v1.4-Bar-Operativa-MVP Lote 4 · "Partir cuenta" (Modo A):
-              registra cobros parciales sobre el DRAFT de mesa. */}
-          {tableContext && (
-            <button
-              onClick={onClickSplitBill}
-              className="h-8 px-3 rounded-lg bg-mipiace-stone hover:bg-slate-100 text-[12.5px] font-medium text-mipiace-ink"
-              title="Cobrar parte ahora y dejar el resto pendiente"
-            >
-              Partir cuenta
-            </button>
-          )}
-          {/* v1.0-mesas-frontend · agrupar mesas ocupadas en esta
-              (principal) y deshacer el grupo desde la UI. */}
-          {tableContext && (
-            <button
-              onClick={onClickGroup}
-              className="h-8 px-3 rounded-lg bg-mipiace-stone hover:bg-slate-100 text-[12.5px] font-medium text-mipiace-ink"
-              title="Unir las cuentas de otras mesas ocupadas a esta"
-            >
-              Agrupar
-            </button>
-          )}
-          {tableContext && hasGroupedTables && (
-            <button
-              onClick={onClickUngroup}
-              className="h-8 px-3 rounded-lg bg-mipiace-stone hover:bg-slate-100 text-[12.5px] font-medium text-mipiace-ink"
-              title="Separar las mesas agrupadas (cada una recupera sus líneas)"
-            >
-              Desagrupar
-            </button>
-          )}
-          {/* v1.9.7 · En modo mesa el botón NUNCA se deshabilita: una mesa
-              con un DRAFT vacío (abierta y sin comandar) figura ocupada, y
-              si Cancelar está gris no hay forma de liberarla desde el TPV.
-              Ese era el caso de la implantación de Sirope (2026-07-08).
-              En venta rápida se mantiene el disabled: sin líneas, cliente
-              ni notas no hay nada que cancelar. */}
-          <button
-            onClick={onCancel}
-            disabled={!tableContext && lines.length === 0 && !contact && !notes}
-            className="h-8 px-3 rounded-lg bg-red-50 hover:bg-red-100 text-[12.5px] font-medium text-red-700 disabled:opacity-50 disabled:cursor-not-allowed ml-auto"
-            title={
-              tableContext
-                ? "Vaciar la mesa (cancela la cuenta)"
-                : `Cancelar y vaciar el ${vocab("ticketNoun", businessType).toLowerCase()}`
-            }
-          >
-            Cancelar
-          </button>
+  // 2 · La lista, pegada a la cabecera y con todo el espacio flexible.
+  // Es lo que más se mira y ahora va donde antes estaban las acciones.
+  const linesBlock = (
+    <div
+      ref={listRef}
+      data-testid="ticket-lines"
+      className="px-5 md:px-7 py-3 flex-1 min-h-0 overflow-y-auto overscroll-contain"
+    >
+      {lines.length === 0 ? (
+        <TicketEmptyState
+          businessType={businessType}
+          topSellers={topSellers}
+          topSellersSource={topSellersSource}
+          onClickProduct={onClickProduct}
+        />
+      ) : (
+        <div className="divide-y divide-slate-100">
+          {/* v1.2-Lite-fix1 Lote 3 (F2-UX): cada línea es un componente
+              extraído con stepper inline y papelera. El click central
+              abre el LineSheet para edición avanzada. */}
+          {lines.map((l) => (
+            <CartLineItem
+              key={l.id}
+              line={l}
+              durationMin={l.productId ? durationByProduct.get(l.productId) : undefined}
+              highlighted={highlightId === l.id}
+              onClick={() => onClickLine(l)}
+              onUnitsChange={(units) => onUpdateLineUnits(l.id, units)}
+              onRemove={() => onRemoveLine(l.id)}
+            />
+          ))}
         </div>
-    </>
+      )}
+    </div>
   );
 
-  const totalsBlock = (
-    <>
-        {/* 3 · Resumen + Cobrar fijo arriba. shrink-0 dentro del
-             flex-col del aside (aside overflow-hidden), así nunca
-             scrollea: header + chips + este bloque quedan SIEMPRE
-             visibles. v1.4-hotfix4 2026-06-04. */}
-        <div
-          className={
-            layout === "sheet"
-              ? "px-5 md:px-7 pt-4 md:pt-5 pb-5 md:pb-6 border-t border-slate-100 shrink-0 bg-white"
-              : "px-5 md:px-7 pt-4 md:pt-5 pb-5 md:pb-6 border-b border-slate-100 shrink-0"
-          }
-        >
-          <div className="space-y-1.5 mb-3 md:mb-4">
-            <div className="flex justify-between text-[12.5px] md:text-[13px]">
-              <span className="text-slate-500">Subtotal</span>
-              <span className="text-slate-700 tabular-nums">{formatEur(totals.subtotalNet)}</span>
-            </div>
-            {totals.discount > 0 && (
-              <div className="flex justify-between text-[12.5px] md:text-[13px]">
-                <span className="text-slate-500">Descuento</span>
-                <span className="text-mipiace-coral tabular-nums font-medium">
-                  −{formatEur(totals.discount)}
-                </span>
-              </div>
-            )}
-            <div className="flex justify-between text-[12.5px] md:text-[13px]">
-              <span className="text-slate-500">IVA</span>
-              <span className="text-slate-700 tabular-nums">{formatEur(totals.tax)}</span>
-            </div>
-          </div>
-          <div className="flex items-baseline justify-between mb-3 md:mb-4">
-            <span className="text-[15px] md:text-[16px] font-semibold text-mipiace-ink">Total</span>
-            <span className="text-[28px] md:text-[34px] font-semibold text-mipiace-ink tabular-nums tracking-tight">
-              {formatEur(totals.total)}
+  // 3 · Zona anclada al pie. `sticky bottom-0` con fondo sólido y borde
+  // superior: con el ticket que sea —2 líneas o 12— el Total y "Cobrar"
+  // no se van de la vista. Es el arreglo del caso que la ronda 2 no
+  // llegó a probar.
+  const footerBlock = (
+    <div
+      data-testid="ticket-footer"
+      className="sticky bottom-0 shrink-0 bg-white border-t border-slate-200 px-5 md:px-7 pt-3 md:pt-4 pb-4 md:pb-5"
+    >
+      {/* Subtotal e IVA en UNA fila. Medido en el bucle visual a
+          1280×800: apilados costaban 53 px del pie, y cada píxel del pie
+          se lo quita a las líneas, que es lo que se mira. El descuento
+          sí baja a su propia fila —cuando lo hay— porque es la única de
+          las tres que el cajero necesita comprobar. */}
+      <div className="mb-2 space-y-1">
+        <div className="flex justify-between gap-3 text-[12.5px] md:text-[13px]">
+          <span className="text-slate-500">
+            Subtotal{" "}
+            <span className="text-slate-700 tabular-nums">
+              {formatEur(totals.subtotalNet)}
+            </span>
+          </span>
+          <span className="text-slate-500">
+            IVA{" "}
+            <span className="text-slate-700 tabular-nums">
+              {formatEur(totals.tax)}
+            </span>
+          </span>
+        </div>
+        {totals.discount > 0 && (
+          <div className="flex justify-between text-[12.5px] md:text-[13px]">
+            <span className="text-slate-500">Descuento</span>
+            <span className="text-mipiace-coral tabular-nums font-medium">
+              −{formatEur(totals.discount)}
             </span>
           </div>
-          <div
+        )}
+      </div>
+      <div className="flex items-baseline justify-between mb-2 md:mb-2.5">
+        <span className="text-[15px] md:text-[16px] font-semibold text-mipiace-ink">
+          Total
+        </span>
+        <span className="text-[28px] md:text-[32px] font-semibold text-mipiace-ink tabular-nums tracking-tight">
+          {formatEur(totals.total)}
+        </span>
+      </div>
+      {/* Las dos acciones EN FILA, no apiladas. Apiladas son 136 px de
+          pie (dos veces `touch-lg` más el hueco) y en un panel de 576 px
+          eso se lo come el desglose, que es lo que este bloque viene a
+          recuperar. En fila son 64 px y las dos siguen a la altura que
+          manda el sistema visual. */}
+      <div
+        className={
+          tableContext
+            ? "grid grid-cols-2 gap-2"
+            : "grid grid-cols-[110px_1fr] md:grid-cols-[140px_1fr] gap-2"
+        }
+      >
+        {!tableContext && (
+          <button
+            onClick={onSuspend}
+            disabled={lines.length === 0}
+            className="h-touch-lg border border-mipiace-coral/30 text-mipiace-coral-dark hover:bg-mipiace-coral-soft hover:border-mipiace-coral/50 disabled:opacity-50 font-medium text-[13.5px] md:text-[14.5px] gap-2 rounded-2xl flex items-center justify-center"
+          >
+            <Bookmark className="w-[15px] md:w-[16px] h-[15px] md:h-[16px]" strokeWidth={2.25} />
+            Guardar
+          </button>
+        )}
+        {/* v1.4-Bar-Operativa-MVP Lote 2 · "Enviar comanda" sólo en mesa.
+            Primer envío rotula como acción primaria; reenvíos quedan
+            discretos (ya hay un papel en la cocina). */}
+        {tableContext && (
+          <button
+            onClick={onSendToKitchen}
+            disabled={lines.length === 0 || kitchenBusy}
             className={
-              tableContext
-                ? "grid grid-cols-1 gap-2"
-                : "grid grid-cols-[110px_1fr] md:grid-cols-[140px_1fr] gap-2"
+              kitchenLastRevision > 0
+                ? "h-touch-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50 text-slate-600 font-medium text-[13.5px] md:text-[14px] rounded-2xl flex items-center justify-center gap-2"
+                : "h-touch-lg border border-mipiace-coral/40 text-mipiace-coral-dark hover:bg-mipiace-coral-soft disabled:opacity-50 font-medium text-[13.5px] md:text-[14.5px] rounded-2xl flex items-center justify-center gap-2"
+            }
+            title={
+              kitchenLastRevision > 0
+                ? `Reenviar la comanda (la cocina ya recibió la nº ${kitchenLastRevision}).`
+                : "Imprime una comanda por sección (barra/cocina/salón) y la lleva el camarero."
             }
           >
-            {!tableContext && (
-              <button
-                onClick={onSuspend}
-                disabled={lines.length === 0}
-                className="h-12 md:h-14 border border-mipiace-coral/30 text-mipiace-coral-dark hover:bg-mipiace-coral-soft hover:border-mipiace-coral/50 disabled:opacity-50 font-medium text-[13.5px] md:text-[14.5px] gap-2 rounded-2xl flex items-center justify-center"
-              >
-                <Bookmark className="w-[15px] md:w-[16px] h-[15px] md:h-[16px]" strokeWidth={2.25} />
-                Guardar
-              </button>
-            )}
-            {/* v1.4-Bar-Operativa-MVP Lote 2 · botón "Enviar comanda"
-                sólo en mesa. Primer envío rotula como acción primaria
-                (texto coral suave); reenvíos quedan más discretos
-                (texto gris) porque ya hay una comanda física en la
-                cocina y el caso normal es no reenviar. */}
-            {tableContext && (
-              <button
-                onClick={onSendToKitchen}
-                disabled={lines.length === 0 || kitchenBusy}
-                className={
-                  kitchenLastRevision > 0
-                    ? "h-12 md:h-14 border border-slate-200 hover:bg-slate-50 disabled:opacity-50 text-slate-600 font-medium text-[13.5px] md:text-[14px] rounded-2xl flex items-center justify-center gap-2"
-                    : "h-12 md:h-14 border border-mipiace-coral/40 text-mipiace-coral-dark hover:bg-mipiace-coral-soft disabled:opacity-50 font-medium text-[13.5px] md:text-[14.5px] rounded-2xl flex items-center justify-center gap-2"
-                }
-                title={
-                  kitchenLastRevision > 0
-                    ? `Reenviar la comanda (la cocina ya recibió la nº ${kitchenLastRevision}).`
-                    : "Imprime una comanda por sección (barra/cocina/salón) y la lleva el camarero."
-                }
-              >
-                {kitchenBusy
-                  ? "Enviando…"
-                  : kitchenLastRevision > 0
-                    ? `Reenviar comanda (nº ${kitchenLastRevision + 1})`
-                    : "Enviar comanda"}
-              </button>
-            )}
-            <button
-              onClick={onClickCheckout}
-              disabled={lines.length === 0}
-              className="h-12 md:h-14 bg-mipiace-coral hover:bg-mipiace-coral-dark disabled:opacity-50 text-white font-medium text-[14px] md:text-[15px] flex items-center justify-between px-4 md:px-5 rounded-2xl"
-            >
-              <span>{vocab("saleAction", businessType)}</span>
-              <span className="tabular-nums">{formatEur(totals.total)}</span>
-            </button>
-          </div>
-        </div>
-    </>
-  );
-
-  const linesBlock = (
-    <>
-        {/* 4 · Lista de líneas debajo del Cobrar. flex-1 + min-h-0
-             + overflow-y-auto → SOLO el listado scrollea cuando hay
-             muchas líneas; el resto del aside permanece fijo. */}
-        <div
-          className={
-            layout === "sheet"
-              ? "px-5 md:px-7 py-3"
-              : "px-5 md:px-7 py-3 flex-1 min-h-0 overflow-y-auto"
-          }
+            {/* En media columna no cabe "Reenviar comanda (nº 3)": el
+                número de revisión se queda en el `title`, que es donde
+                se consulta, y el rótulo dice la acción. */}
+            {kitchenBusy
+              ? "Enviando…"
+              : kitchenLastRevision > 0
+                ? `Reenviar (nº ${kitchenLastRevision + 1})`
+                : "Enviar comanda"}
+          </button>
+        )}
+        {/* v1.14 · hallazgo m2: la CTA primaria estaba a 56 px con el
+            propio sistema visual mandando 64-72 (`touch-lg`). */}
+        <button
+          onClick={onClickCheckout}
+          disabled={lines.length === 0}
+          className="h-touch-lg bg-mipiace-coral hover:bg-mipiace-coral-dark disabled:opacity-50 text-white rounded-2xl flex flex-col items-center justify-center leading-tight px-3"
         >
-          {lines.length === 0 ? (
-            <div className="py-10 text-center text-[13px] text-slate-400">
-              Pulsa un {vocab("itemNoun", businessType).toLowerCase()} o escanea un código para empezar.
-            </div>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {/* v1.2-Lite-fix1 Lote 3 (F2-UX): cada línea es un
-                  componente extraído con stepper inline y papelera
-                  armada por doble tap. El click central sigue
-                  abriendo el LineSheet para edición avanzada (precio,
-                  descuento, modifiers, nota). */}
-              {lines.map((l) => (
-                <CartLineItem
-                  key={l.id}
-                  line={l}
-                  durationMin={
-                    l.productId
-                      ? durationByProduct.get(l.productId)
-                      : undefined
-                  }
-                  onClick={() => onClickLine(l)}
-                  onUnitsChange={(units) => onUpdateLineUnits(l.id, units)}
-                  onRemove={() => onRemoveLine(l.id)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-    </>
+          {/* Rótulo e importe APILADOS. En fila, "Cobrar 1.240,50 €" no
+              entra en media columna de un panel de 360 px y el importe
+              se partía. El importe sigue en el botón —el cajero cobra
+              mirando el botón, no la fila de arriba— y con
+              `tabular-nums`. */}
+          <span className="text-[13.5px] font-medium">
+            {vocab("saleAction", businessType)}
+          </span>
+          <span className="text-[15px] md:text-[16px] font-semibold tabular-nums">
+            {formatEur(totals.total)}
+          </span>
+        </button>
+      </div>
+    </div>
   );
 
-  // v1.10.3-barra · hallazgo #3 de la simulación de hora punta. En el
-  // bottom-sheet handheld los cuatro bloques eran hermanos `shrink-0`
-  // salvo el listado, que era `flex-1 min-h-0`. Cuando header + chips +
-  // totales medían más que el 88dvh del sheet, al listado le tocaban
-  // 0 px: las líneas arrancaban justo en el borde inferior y no había
-  // forma de llegar a ellas (ni rueda ni arrastre). En el aside de
-  // escritorio nunca pasó porque ahí sobra alto.
-  //
-  // En el sheet invertimos el reparto: cabecera, chips y LÍNEAS van
-  // dentro de un único contenedor scrollable —así el listado siempre
-  // tiene su alto natural— y el bloque de totales + Cobrar se ancla
-  // abajo, que es lo que no puede perderse de vista nunca.
-  if (layout === "sheet") {
-    return (
-      <>
-        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
-          {headerBlock}
-          {chipsBlock}
-          {linesBlock}
-        </div>
-        {totalsBlock}
-      </>
-    );
-  }
-
-  // Aside de escritorio (≥1024px): layout clásico validado por Sole —
-  // bloques fijos arriba y scroll SÓLO en el listado.
+  // El mismo reparto en el aside de escritorio y en el bottom-sheet
+  // handheld. `layout` sólo queda como marca del sitio donde se monta
+  // (el wrapper lo pone el llamante), no cambia el orden de los bloques.
+  void layout;
   return (
     <>
       {headerBlock}
-      {chipsBlock}
-      {totalsBlock}
       {linesBlock}
+      {footerBlock}
+      {moreOpen && (
+        <TicketActionsSheet actions={moreActions} onClose={() => setMoreOpen(false)} />
+      )}
     </>
   );
 }
+
+// v1.14-la-comanda-se-ve §4 · estado vacío del ticket con inteligencia.
+//
+// Principio UX no negociable (`docs/ux-principles.md`): estado vacío
+// siempre informativo, nunca pantalla en blanco. Una mesa recién abierta
+// era un panel vacío con una frase; es el punto de mayor intención del
+// turno, así que ahí van los cinco productos que más se están vendiendo,
+// tocables para añadir directamente.
+//
+// Si no hay ranking (offline, turno recién abierto sin histórico o
+// catálogo desincronizado) se cae a la frase de siempre: el estado vacío
+// nunca puede convertirse en un hueco.
+function TicketEmptyState({
+  businessType,
+  topSellers,
+  topSellersSource,
+  onClickProduct,
+}: {
+  businessType: BusinessType | null;
+  topSellers: CatalogProduct[];
+  topSellersSource: "shift" | "month" | null;
+  onClickProduct: (p: CatalogProduct) => void;
+}) {
+  if (topSellers.length === 0) {
+    return (
+      <div className="py-10 text-center text-[13px] text-slate-400">
+        Pulsa un {vocab("itemNoun", businessType).toLowerCase()} o escanea un código
+        para empezar.
+      </div>
+    );
+  }
+  return (
+    <div data-testid="ticket-top-sellers" className="py-2">
+      <div className="flex items-center gap-2 mb-2.5">
+        <TrendingUp className="w-3.5 h-3.5 text-slate-500" strokeWidth={2.25} />
+        <h3 className="text-[12.5px] font-semibold text-slate-600">
+          {topSellersSource === "shift"
+            ? "Lo que más sale este turno"
+            : "Lo que más sale este mes"}
+        </h3>
+      </div>
+      {/* Rejilla de dos columnas, no lista. Dos razones, las dos del
+          bucle visual a 1280×800:
+            · Cinco filas de `touch` no caben en los ~280 px útiles del
+              panel y el quinto atajo quedaba cortado — un atajo que hay
+              que ir a buscar no es un atajo.
+            · Apilados en una sola columna se leían como líneas YA
+              añadidas al ticket, que es exactamente lo contrario de lo
+              que son. En rejilla se parecen a las tarjetas del catálogo,
+              que es lo que son: cosas que se pulsan para añadir.
+          Nombre arriba y precio debajo para que quepa sin truncar a
+          media palabra. */}
+      <div className="grid grid-cols-2 gap-2">
+        {topSellers.map((p) => (
+          <button
+            key={`top-${p.id}`}
+            type="button"
+            onClick={() => onClickProduct(p)}
+            className="min-h-touch-lg px-3 py-2 rounded-2xl bg-mipiace-stone hover:bg-mipiace-coral-soft border border-transparent hover:border-mipiace-coral/30 flex flex-col justify-center gap-0.5 text-left"
+          >
+            <span className="text-[13px] font-medium text-mipiace-ink leading-tight line-clamp-2">
+              {p.name}
+            </span>
+            <span className="text-[12.5px] text-slate-500 tabular-nums">
+              {formatEur(p.priceGross)}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 
 // ── Sheets pequeñas ───────────────────────────────────────────────────
 

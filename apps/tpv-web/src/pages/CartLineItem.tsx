@@ -42,6 +42,14 @@ export interface CartLineItemProps {
   // servicio con overlay de scheduling. undefined/null → no se pinta.
   // Base visual para B4 (agenda).
   durationMin?: number | null;
+  // v1.14-la-comanda-se-ve · confirmación visual de "se ha añadido".
+  // Hallazgo C1 de la auditoría del 2026-09-01: al tocar un producto la
+  // línea nacía fuera de la vista y el camarero volvía a tocar, con el
+  // cliente pagando dos cafés. La línea recién tocada se pinta en
+  // `coral-soft` y vuelve a transparente al apagarse el flag — la
+  // transición de 700 ms hace el desvanecido sin animación propia ni
+  // `key` que remonte el nodo (remontarlo perdería el scroll).
+  highlighted?: boolean;
 }
 
 export function CartLineItem({
@@ -50,6 +58,7 @@ export function CartLineItem({
   onUnitsChange,
   onRemove,
   durationMin,
+  highlighted = false,
 }: CartLineItemProps) {
   const total = computeLine(line);
   const [trashHint, setTrashHint] = useState(false);
@@ -92,7 +101,27 @@ export function CartLineItem({
   }
 
   return (
-    <div className="flex items-center gap-2 md:gap-2.5 py-2.5 md:py-3">
+    <div
+      // `data-line-id` es el asa con la que el panel del ticket hace
+      // scroll hasta la línea recién añadida sin guardar un ref por
+      // línea.
+      data-line-id={line.id}
+      data-highlighted={highlighted ? "true" : undefined}
+      // El destaque ENTRA de golpe y sólo SALE con transición.
+      //
+      // Con `transition-colors` en los dos estados, el fondo coral se
+      // desvanecía hacia dentro durante 700 ms: medido en el navegador a
+      // los 150 ms del toque, el alfa iba por 0,004 — o sea, invisible
+      // justo en el instante en que hay que confirmar que la línea se ha
+      // añadido. El principio §1.3 pide feedback claro en menos de
+      // 100 ms, así que el estado destacado va sin transición y es el
+      // apagado el que se desvanece.
+      className={
+        highlighted
+          ? "flex items-center gap-2 md:gap-2.5 py-2.5 md:py-3 px-2 -mx-2 rounded-xl bg-mipiace-coral-soft transition-none"
+          : "flex items-center gap-2 md:gap-2.5 py-2.5 md:py-3 px-2 -mx-2 rounded-xl bg-transparent transition-colors duration-700"
+      }
+    >
       {/* Stepper vertical: cantidad arriba, − y + en fila debajo.
           v1.4-hotfix5: cambio del stepper horizontal previo para
           ganar ~45 px de ancho que iban al título del artículo
