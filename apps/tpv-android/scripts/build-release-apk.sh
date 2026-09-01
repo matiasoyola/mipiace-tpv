@@ -206,6 +206,30 @@ if ! grep -rqF -- "$VITE_API_URL" "$SYNCED_ASSETS"/*.js 2>/dev/null; then
 fi
 echo "    OK · '$VITE_API_URL' presente en los assets del proyecto nativo"
 
+# --- Hallazgo B2 (pruebas físicas AP11, 2026-09-01) ---------------------------
+# La puerta gemela del hallazgo A2. Con el backend correcto pero SIN
+# `server.hostname`, el WebView de Capacitor sirve el bundle bajo el origen por
+# defecto `https://localhost`, y la API lo rechaza por CORS: `server.ts` usa
+# lista blanca exacta contra CORS_ORIGINS y `https://localhost` no está.
+# Resultado idéntico al A2 de cara al cliente: el APK instala perfectamente y
+# NO PUEDE NI VINCULARSE — la petición a /devices/pair muere en el preflight.
+# Se valida sobre el JSON que `cap sync` deja en el proyecto nativo, que es lo
+# que se empaqueta, no sobre capacitor.config.ts.
+CAP_JSON="$ANDROID_DIR/app/src/main/assets/capacitor.config.json"
+# Sin sed: el BSD sed de macOS no entiende \? en regex básica y dejaba
+# EXPECTED_HOST="https:", con lo que el check tumbaba builds legítimos.
+EXPECTED_HOST="${VITE_TPV_URL:-https://mipiacetpv.com}"
+EXPECTED_HOST="${EXPECTED_HOST#*://}"
+EXPECTED_HOST="${EXPECTED_HOST%%/*}"
+[ -f "$CAP_JSON" ] || die "no encuentro $CAP_JSON. ¿El cap sync del paso 3 hizo algo?"
+if ! grep -qF "\"hostname\": \"$EXPECTED_HOST\"" "$CAP_JSON"; then
+  die "capacitor.config.json NO declara hostname=$EXPECTED_HOST.
+       Sin eso el WebView corre en https://localhost y la API lo rechaza por
+       CORS: el APK instala bien y no puede ni vincularse (hallazgo B2).
+       Revisa server.hostname en apps/tpv-android/capacitor.config.ts."
+fi
+echo "    OK · hostname=$EXPECTED_HOST en capacitor.config.json (origen != localhost)"
+
 echo "==> 5/6 gradlew assembleRelease (APK firmado)"
 ( cd "$ANDROID_DIR" && ./gradlew assembleRelease -PversionName="$VERSION_NAME" -PversionCode="$VERSION_CODE" )
 
