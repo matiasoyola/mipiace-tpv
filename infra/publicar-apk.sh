@@ -42,6 +42,30 @@ SIDECAR="$APK.sha256"
 
 APK_NAME="$(basename "$APK")"
 
+# El nombre entra TAL CUAL en el campo `fileName` de releases.json, y la API
+# sólo admite ahí `[A-Za-z0-9._-]` (FILE_NAME_RE en
+# apps/api/src/releases/store.ts: el nombre viaja crudo dentro de
+# Content-Disposition). Ese filtro está sólo en el lado que LEE y descarta la
+# entrada EN SILENCIO — no hay error en ningún sitio.
+#
+# Sin esta comprobación, un APK con un `+` o un espacio en el nombre se sube,
+# se verifica, se escribe en el índice y el script dice "Publicado"; pero
+# /apk/latest.json sigue anunciando la versión anterior y los códigos emitidos
+# para la nueva dan 404. Se para antes del scp: mejor no publicar que publicar
+# algo que la API no ve.
+case "$APK_NAME" in
+  *[!A-Za-z0-9._-]*)
+    die "el nombre del fichero ('$APK_NAME') tiene caracteres que la API no
+       admite en el fileName de releases.json: sólo [A-Za-z0-9._-].
+       Si lo publicas, la API descartará la entrada EN SILENCIO y
+       /apk/latest.json se quedará en la versión anterior.
+       Renombra el APK (y su sidecar) o reconstruye con un VERSION_NAME limpio."
+    ;;
+esac
+[ "${#APK_NAME}" -le 120 ] || die "el nombre del fichero ('$APK_NAME') pasa de 120
+       caracteres, que es el tope que admite la API en el fileName de
+       releases.json. La entrada se descartaría EN SILENCIO."
+
 sha256_local() {
   if command -v shasum >/dev/null 2>&1; then
     shasum -a 256 "$1" | awk '{print $1}'

@@ -115,6 +115,8 @@ El keystore de release **no está en el repo** y no puede estarlo (`.gitignore` 
 - **Los binarios viven fuera del repo y fuera de la imagen Docker**, en
   `/opt/mipiacetpv/releases`, montado read-only en el contenedor.
 - **`latest.json` es público y sólo metadatos.** Saber que existe la 1.10.2 no es un secreto;
-  el binario sigue detrás del código. No lleva URL del binario.
+  el binario sigue detrás del código. No lleva URL del binario, y tampoco `gitSha`: el commit
+  del build sólo se sirve en `/super-admin/releases`, que pide sesión, nunca en el
+  `/apk/latest.json` público.
 - **No se escribe ningún `latest.json` en disco**: la API lo deriva de `releases.json`. Dos
   ficheros con la misma verdad acaban desincronizados.

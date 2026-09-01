@@ -8,7 +8,13 @@
 // pairing-route.test.ts y super-admin-2fa-throttle.test.ts). El directorio de
 // releases es real, en un tmpdir: el modulo lee ficheros y quiero que los lea.
 
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import {
+  createReadStream,
+  mkdtempSync,
+  writeFileSync,
+  mkdirSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes, randomUUID, createHash } from "node:crypto";
@@ -188,12 +194,28 @@ const fakeRedis = {
     if (!e) return -2;
     return e.expiresAt === null ? -1 : Math.ceil((e.expiresAt - Date.now()) / 1000);
   }),
+  decr: vi.fn(async (k: string) => {
+    // Semantica del DECR real: si la clave no existe la crea a -1 y SIN TTL.
+    // Se imita a proposito, que es justo la trampa que forgiveFailure evita.
+    const e = alive(k);
+    const v = e ? Number(e.value) - 1 : -1;
+    store.set(k, { value: String(v), expiresAt: e?.expiresAt ?? null });
+    return v;
+  }),
   del: vi.fn(async (...ks: string[]) => {
     let n = 0;
     for (const k of ks) if (store.delete(k)) n++;
     return n;
   }),
 };
+
+// `createReadStream` espiado y por lo demas REAL: es la unica forma de ver
+// desde fuera si el endpoint llego a abrir un descriptor. Todo lo demas de
+// node:fs se deja tal cual (el propio test escribe ficheros de verdad).
+vi.mock("node:fs", async () => {
+  const real = await vi.importActual<typeof import("node:fs")>("node:fs");
+  return { ...real, createReadStream: vi.fn(real.createReadStream) };
+});
 
 vi.mock("../src/context.js", () => ({
   getPrisma: () => fakePrisma,
@@ -383,13 +405,96 @@ describe("POST /apk y fuerza bruta", () => {
     await app.close();
   });
 
-  it("un acierto limpia el contador de esa IP", async () => {
+  it("un acierto perdona UN intento, no regala la ventana entera", async () => {
+    // Un reset por acierto se lo regala precisamente a quien tiene un codigo
+    // bueno: 9 fallos + 1 acierto, contador a cero, y otra vez, tantas veces
+    // como usos le queden al codigo. Perdonar uno cubre el caso real (el
+    // instalador teclea mal antes de acertar) sin reabrir la ventana.
+    const CLAVE = "apk-download-attempts:127.0.0.1";
     sembrarCodigo();
     const app = await build();
+
+    // Acierto sin fallos previos: no deja la clave en negativo ni sin TTL.
+    expect((await app.inject(form("123456"))).statusCode).toBe(200);
+    expect(await fakeRedis.get(CLAVE)).toBeNull();
+
     for (let i = 0; i < 5; i++) await app.inject(form("999999"));
-    expect(await fakeRedis.get("apk-download-attempts:127.0.0.1")).toBe("5");
-    await app.inject(form("123456"));
-    expect(await fakeRedis.get("apk-download-attempts:127.0.0.1")).toBeNull();
+    expect(await fakeRedis.get(CLAVE)).toBe("5");
+    expect((await app.inject(form("123456"))).statusCode).toBe(200);
+    expect(await fakeRedis.get(CLAVE)).toBe("4");
+
+    // Y el candado sigue cayendo dentro de los 10 intentos de la ventana.
+    for (let i = 0; i < 5; i++) await app.inject(form("999999"));
+    expect(await fakeRedis.get(CLAVE)).toBe("9");
+    expect((await app.inject(form("999999"))).statusCode).toBe(429);
+    await app.close();
+  });
+
+  it("acertar no abre el candado de una IP ya bloqueada", async () => {
+    sembrarCodigo();
+    const app = await build();
+    for (let i = 0; i < 10; i++) await app.inject(form("999999"));
+    const res = await app.inject(form("123456"));
+    expect(res.statusCode).toBe(429);
+    expect(await fakeRedis.ttl("apk-download-locked:127.0.0.1")).toBeGreaterThan(0);
+    await app.close();
+  });
+});
+
+describe("el binario se resuelve antes de gastar la descarga", () => {
+  it("si la version no esta en disco NO se quema una de las 3 descargas", async () => {
+    // El indice la lista pero el fichero no esta (publicacion a medias, un
+    // borrado en el VPS). Eso es problema nuestro: si el claim fuera primero,
+    // el 404 se llevaria uno de los 3 usos y el instalador se quedaria con
+    // dos intentos y sin APK.
+    rmSync(join(RELEASES_DIR, APK_NAME));
+    const row = sembrarCodigo();
+    const app = await build();
+
+    const res = await app.inject(form("123456"));
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toContain("ya no está publicada");
+    expect(codes.get(row.code)!.downloadCount).toBe(0);
+    // Nada que auditar: no ha habido descarga que registrar.
+    expect(audits).toHaveLength(0);
+
+    // Y cuando el fichero vuelve, el MISMO codigo sigue teniendo sus 3 usos.
+    publicarRelease();
+    const segunda = await app.inject(form("123456"));
+    expect(segunda.statusCode).toBe(200);
+    expect(segunda.rawPayload.equals(APK_BYTES)).toBe(true);
+    expect(codes.get(row.code)!.downloadCount).toBe(1);
+    await app.close();
+  });
+
+  it("un codigo apuntando a una version que no esta en el indice tampoco la gasta", async () => {
+    const row = sembrarCodigo({ versionCode: 40404 });
+    const app = await build();
+    expect((await app.inject(form("123456"))).statusCode).toBe(404);
+    expect(codes.get(row.code)!.downloadCount).toBe(0);
+    await app.close();
+  });
+
+  it("si el claim revienta no se fuga ningun descriptor", async () => {
+    // Comprobar el binario antes del claim NO puede significar abrirlo antes
+    // del claim. Un descriptor abierto ahi sobrevive al claim y a la
+    // auditoria, y la salida que no se ve venir —esta: una excepcion de
+    // Prisma— se salta cualquier cierre a mano y lo fuga. En un endpoint
+    // publico eso es un goteo de fds en el proceso que ademas esta cobrando.
+    sembrarCodigo();
+    fakePrisma.apkDownloadCode.updateMany.mockRejectedValueOnce(
+      new Error("Prisma: la conexion se cayo a mitad del UPDATE"),
+    );
+    const app = await build();
+
+    const res = await app.inject(form("123456"));
+    expect(res.statusCode).toBe(500);
+    expect(createReadStream).not.toHaveBeenCalled();
+
+    // Y el espia no esta muerto: por el camino bueno SI se abre, una vez.
+    const buena = await app.inject(form("123456"));
+    expect(buena.statusCode).toBe(200);
+    expect(createReadStream).toHaveBeenCalledTimes(1);
     await app.close();
   });
 });
@@ -473,13 +578,37 @@ describe("GET /apk/latest.json", () => {
       sha256: APK_SHA,
       size: APK_BYTES.length,
       publishedAt: "2026-08-27T10:00:00.000Z",
-      gitSha: "7774c51",
     });
     // Decision 4 del bloque: saber que existe la 1.10.2 no es secreto; donde
     // esta el binario, si.
     expect(res.body).not.toContain(APK_NAME);
     expect(res.body.toLowerCase()).not.toContain("url");
     expect(res.body.toLowerCase()).not.toContain("filename");
+    await app.close();
+  });
+
+  it("no delata el commit de produccion: el gitSha se queda en super-admin", async () => {
+    // El endpoint es publico y sin sesion. El commit del que salio el build
+    // dice que hay desplegado ahi dentro y contra que arbol mirar: es
+    // informacion de casa. La consola, que si pide sesion, lo sigue viendo.
+    const app = await build();
+    const publico = await app.inject({ method: "GET", url: "/apk/latest.json" });
+    expect(publico.json()).not.toHaveProperty("gitSha");
+    expect(publico.body).not.toContain("7774c51");
+
+    const consola = await app.inject({
+      method: "GET",
+      url: "/super-admin/releases",
+      headers: { authorization: saBearer() },
+    });
+    expect(consola.json().releases[0].gitSha).toBe("7774c51");
+    await app.close();
+  });
+
+  it("la pagina publica tampoco pinta el gitSha por ningun lado", async () => {
+    const app = await build();
+    const { body } = await app.inject({ method: "GET", url: "/apk" });
+    expect(body).not.toContain("7774c51");
     await app.close();
   });
 });
@@ -645,6 +774,41 @@ describe("manda el indice, no el directorio", () => {
     });
     expect(res.body).not.toContain("TAMPOCO POR AQUI");
     rmSync(secreto, { force: true });
+    await app.close();
+  });
+
+  it("un fileName con comillas y CRLF no llega a Content-Disposition", async () => {
+    // basename() cierra el traversal, pero el nombre entra CRUDO en la
+    // cabecera. Una comilla cierra el filename y un CR/LF parte la cabecera:
+    // Node rechaza el valor (ERR_INVALID_CHAR) y la descarga se convierte en
+    // un 500 delante del instalador. El fichero existe de verdad en disco
+    // para que el unico filtro que puede parar esto sea el del indice.
+    const venenoso = 'evil.apk"\r\nX-Colada: si';
+    writeFileSync(join(RELEASES_DIR, venenoso), APK_BYTES);
+    writeFileSync(
+      join(RELEASES_DIR, "releases.json"),
+      JSON.stringify([
+        {
+          versionCode: 11002,
+          versionName: "1.10.2",
+          fileName: venenoso,
+          sha256: APK_SHA,
+          size: APK_BYTES.length,
+          publishedAt: "2026-08-27T10:00:00.000Z",
+          gitSha: "7774c51",
+        },
+      ]),
+    );
+    const row = sembrarCodigo();
+    const app = await build();
+    const res = await app.inject(form("123456"));
+
+    expect(res.statusCode).toBe(404);
+    expect(res.headers["x-colada"]).toBeUndefined();
+    expect(res.headers["content-disposition"]).toBeUndefined();
+    expect(res.rawPayload.equals(APK_BYTES)).toBe(false);
+    // La entrada no existe para la API, asi que tampoco quema una descarga.
+    expect(codes.get(row.code)!.downloadCount).toBe(0);
     await app.close();
   });
 

@@ -77,6 +77,26 @@ export async function createDownloadCode(params: {
   return null;
 }
 
+/**
+ * Mira de qué versión es un código SIN gastar nada.
+ *
+ * Existe para poder comprobar que el binario está en disco antes del claim:
+ * si no, un código bueno apuntando a una versión que ya no está en
+ * RELEASES_DIR quema una de sus 3 descargas para acabar en un 404, y el
+ * instalador se queda con dos intentos y sin APK. No decide nada de
+ * caducidad ni de límite: eso sigue siendo cosa del `updateMany` atómico.
+ */
+export async function peekDownloadCode(params: {
+  prisma: PrismaClient;
+  code: string;
+}): Promise<{ versionCode: number } | null> {
+  const row = await params.prisma.apkDownloadCode.findUnique({
+    where: { code: params.code },
+    select: { versionCode: true },
+  });
+  return row ? { versionCode: row.versionCode } : null;
+}
+
 export type ConsumeResult =
   | { status: "ok"; versionCode: number; superAdminId: string }
   | { status: "caducado" | "agotado"; versionCode: number; superAdminId: string }

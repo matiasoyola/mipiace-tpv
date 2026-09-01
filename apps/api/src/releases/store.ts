@@ -26,15 +26,33 @@ export interface ReleaseEntry {
   gitSha: string;
 }
 
-/** Lo que se publica en `/apk/latest.json`. Nunca lleva URL del binario. */
+/**
+ * Lo que se publica en `/apk/latest.json`. Nunca lleva URL del binario.
+ *
+ * Tampoco lleva `gitSha`: ese endpoint es público y sin sesión, y el commit
+ * del build es información de dentro (dice qué hay desplegado y contra qué
+ * árbol mirar). Se queda en `/super-admin/releases`, que sí pide sesión.
+ */
 export interface PublicReleaseMeta {
   versionCode: number;
   versionName: string;
   sha256: string;
   size: number;
   publishedAt: string;
-  gitSha: string;
 }
+
+/**
+ * Nombre de fichero admitido en el índice.
+ *
+ * `basename()` en `openRelease` ya impide salir de RELEASES_DIR, pero el
+ * nombre viaja además CRUDO dentro de `Content-Disposition`. Un `"` cierra el
+ * filename y un CR/LF parte la cabecera: Node rechaza el valor con
+ * ERR_INVALID_CHAR y la descarga se convierte en un 500 en la cara del
+ * instalador (o, en un servidor menos estricto, en una cabecera inyectada).
+ * El índice es un fichero editable a mano en el VPS, así que el nombre se
+ * valida aquí y una entrada con un nombre raro sencillamente no existe.
+ */
+const FILE_NAME_RE = /^[A-Za-z0-9._-]{1,120}$/;
 
 function isReleaseEntry(value: unknown): value is ReleaseEntry {
   if (typeof value !== "object" || value === null) return false;
@@ -44,6 +62,7 @@ function isReleaseEntry(value: unknown): value is ReleaseEntry {
     Number.isInteger(r.versionCode) &&
     typeof r.versionName === "string" &&
     typeof r.fileName === "string" &&
+    FILE_NAME_RE.test(r.fileName) &&
     typeof r.sha256 === "string" &&
     typeof r.size === "number" &&
     typeof r.publishedAt === "string" &&
@@ -99,7 +118,6 @@ export function toPublicMeta(entry: ReleaseEntry): PublicReleaseMeta {
     sha256: entry.sha256,
     size: entry.size,
     publishedAt: entry.publishedAt,
-    gitSha: entry.gitSha,
   };
 }
 
@@ -109,28 +127,66 @@ export interface OpenedRelease {
   fileName: string;
 }
 
+interface LocatedRelease {
+  path: string;
+  fileName: string;
+  size: number;
+}
+
 /**
- * Abre el binario para emitirlo por stream (nunca cargado en memoria: son
- * decenas de MB y el proceso también está cobrando).
+ * Resuelve la entrada del índice a un fichero real. NO abre nada.
  *
  * `basename()` sobre el nombre del índice es deliberado: aunque el índice lo
  * escriba nuestro script, un `fileName` con `../` convertiría este endpoint en
  * una lectura arbitraria del sistema de ficheros. El fichero se sirve SIEMPRE
  * desde RELEASES_DIR y de ningún otro sitio.
  */
-export async function openRelease(
+async function locateRelease(
   entry: ReleaseEntry,
-): Promise<OpenedRelease | null> {
+): Promise<LocatedRelease | null> {
   const dir = loadEnv().RELEASES_DIR;
-  const safeName = basename(entry.fileName);
-  const path = join(dir, safeName);
-  let size: number;
+  const fileName = basename(entry.fileName);
+  const path = join(dir, fileName);
   try {
     const info = await stat(path);
     if (!info.isFile()) return null;
-    size = info.size;
+    return { path, fileName, size: info.size };
   } catch {
     return null;
   }
-  return { stream: createReadStream(path), size, fileName: safeName };
+}
+
+/**
+ * ¿Está el binario de verdad en disco? Sólo `stat`.
+ *
+ * Existe separada de `openRelease` para que `POST /apk` pueda comprobar el
+ * fichero ANTES del claim sin dejar un descriptor abierto durante el claim y
+ * la auditoría. Abrir antes obligaría a cerrar a mano en cada salida, y la
+ * salida que no se ve venir —una excepción de Prisma en el `updateMany` o en
+ * `writeAudit`— se saltaría ese cierre y fugaría el fd: en un endpoint
+ * público eso es un goteo de descriptores que tumba el proceso que además
+ * está cobrando.
+ */
+export async function releaseFileExists(entry: ReleaseEntry): Promise<boolean> {
+  return (await locateRelease(entry)) !== null;
+}
+
+/**
+ * Abre el binario para emitirlo por stream (nunca cargado en memoria: son
+ * decenas de MB y el proceso también está cobrando).
+ *
+ * Se llama lo más tarde posible, con la descarga ya cobrada y sin nada entre
+ * esto y el `send`: mientras haya un descriptor abierto no puede haber ningún
+ * `await` que pueda lanzar.
+ */
+export async function openRelease(
+  entry: ReleaseEntry,
+): Promise<OpenedRelease | null> {
+  const found = await locateRelease(entry);
+  if (!found) return null;
+  return {
+    stream: createReadStream(found.path),
+    size: found.size,
+    fileName: found.fileName,
+  };
 }

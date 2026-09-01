@@ -13,12 +13,16 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
-import { inspect, registerFailure, reset } from "../auth/rate-limit.js";
+import { forgiveFailure, inspect, registerFailure } from "../auth/rate-limit.js";
 import { getPrisma } from "../context.js";
 import { extractRequestSignals, writeAudit } from "../superadmin/audit.js";
 import { requireSuperAdmin } from "../superadmin/middleware.js";
 
-import { consumeDownloadCode, createDownloadCode } from "./codes.js";
+import {
+  consumeDownloadCode,
+  createDownloadCode,
+  peekDownloadCode,
+} from "./codes.js";
 import { renderApkPage, type ApkPageError } from "./page.js";
 import { apkDownloadRateLimit } from "./rate-limit.js";
 import {
@@ -26,6 +30,7 @@ import {
   latestRelease,
   openRelease,
   readReleases,
+  releaseFileExists,
   toPublicMeta,
   type ReleaseEntry,
 } from "./store.js";
@@ -284,11 +289,10 @@ export async function registerReleasesRoutes(
     }
 
     const prisma = getPrisma();
-    const result = await consumeDownloadCode({ prisma, code: codigo, ip });
 
-    // Código inexistente: NO va a SuperAdminAudit (no hay a quién atribuirlo).
-    // Log estructurado + contador del limitador, y nada más.
-    if (result.status === "desconocido") {
+    const desconocido = async (): Promise<FastifyReply> => {
+      // Código inexistente: NO va a SuperAdminAudit (no hay a quién
+      // atribuirlo). Log estructurado + contador del limitador, y nada más.
       const state = await registerFailure(rlKey);
       request.log.warn(
         { ip, codigoLongitud: codigo.length, evento: "apk_codigo_desconocido" },
@@ -304,12 +308,40 @@ export async function registerReleasesRoutes(
           : { kind: "incorrecto" },
         state.locked ? 429 : 400,
       );
+    };
+
+    // El binario se COMPRUEBA antes de gastar la descarga, pero sólo con un
+    // stat: no se abre nada todavía. Un código bueno que apunta a una versión
+    // que ya no está en disco es un problema nuestro, no del instalador: si el
+    // claim fuera primero, el 404 se llevaría por delante uno de los 3 usos
+    // del código y quien está montando un terminal se quedaría con dos
+    // intentos y sin APK.
+    //
+    // Comprobar no es abrir. Un descriptor abierto aquí sobreviviría al claim
+    // y a la auditoría, y la salida que no se ve venir —una excepción de
+    // Prisma en el `updateMany` o en `writeAudit`— se saltaría cualquier
+    // cierre a mano y fugaría el fd. En un endpoint público eso es un goteo de
+    // descriptores en el proceso que además está cobrando.
+    const pendiente = await peekDownloadCode({ prisma, code: codigo });
+    if (!pendiente) return desconocido();
+
+    const release: ReleaseEntry | null = await findRelease(
+      pendiente.versionCode,
+    );
+    if (!release || !(await releaseFileExists(release))) {
+      return renderPage(reply, { kind: "sin-version" }, 404);
     }
+
+    const result = await consumeDownloadCode({ prisma, code: codigo, ip });
+
+    // Carrera improbable: el código existía en el peek y ya no (lo borró la
+    // emisión de otro código al reciclar el número).
+    if (result.status === "desconocido") return desconocido();
 
     const signals = extractRequestSignals(request);
 
     // Auditoría de TODO intento contra un código existente, con éxito o sin
-    // él. Va después del claim atómico y antes de abrir el stream.
+    // él. Va después del claim atómico.
     //
     // Si writeAudit falla, la descarga SIGUE: el contador ya se gastó y el
     // instalador está delante de un cliente. La metadata es determinista, así
@@ -345,6 +377,13 @@ export async function registerReleasesRoutes(
       );
     }
 
+    // Misma carrera que arriba, con el número reciclado hacia OTRA versión
+    // entre el peek y el claim: se ha abierto un binario que no es el de este
+    // código. No se sirve.
+    if (result.status === "ok" && result.versionCode !== pendiente.versionCode) {
+      return renderPage(reply, { kind: "sin-version" }, 404);
+    }
+
     if (result.status !== "ok") {
       const state = await registerFailure(rlKey);
       return renderPage(
@@ -359,15 +398,20 @@ export async function registerReleasesRoutes(
       );
     }
 
-    // Acierto: se limpia el contador de esa IP. El instalador que acaba de
-    // acertar no arrastra los fallos de tecleo previos a la siguiente descarga
-    // (el mismo código sirve hasta 3 veces, y el WiFi del bar corta).
-    await reset(rlKey);
+    // Acierto: se perdona UN fallo, no el contador entero. El instalador que
+    // teclea mal un par de veces antes de acertar no arrastra esos fallos a la
+    // siguiente descarga (el mismo código sirve hasta 3 veces, y el WiFi del
+    // bar corta), pero un reset completo le regalaría la ventana de 10
+    // intentos a quien tiene un código válido: 9 fallos + 1 acierto, y vuelta
+    // a empezar tantas veces como usos le queden.
+    await forgiveFailure(rlKey);
 
-    const release: ReleaseEntry | null = await findRelease(result.versionCode);
-    if (!release) {
-      return renderPage(reply, { kind: "sin-version" }, 404);
-    }
+    // Y AHORA se abre, con la descarga ya cobrada y sin nada entre esto y el
+    // `send`. Queda una ventana mínima —que el fichero desaparezca entre el
+    // stat y el open— en la que el instalador pierde un uso del código; es el
+    // precio de no tener el descriptor abierto durante el claim, y es un
+    // cambio a peor sólo en el caso en que alguien borre el APK del VPS en
+    // ese milisegundo.
     const opened = await openRelease(release);
     if (!opened) {
       return renderPage(reply, { kind: "sin-version" }, 404);

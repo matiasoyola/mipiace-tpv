@@ -38,7 +38,9 @@ puerta de autenticación o la URL pública.
    impracticable. El código de 6 dígitos es el patrón que ya usamos para vincular terminales.
 2. **La página `/apk` la sirve la API y es Chrome-81-safe.** Mini-ADR: ADR-013.
 3. **Los binarios viven fuera del repo**, en `/opt/mipiacetpv/releases`, montado read-only.
-4. **`latest.json` es público y sólo metadatos.** Sin URL del binario.
+4. **`latest.json` es público y sólo metadatos.** Sin URL del binario. Y sin `gitSha`: el
+   commit del build sólo se sirve en `/super-admin/releases`, que pide sesión, nunca en el
+   `/apk/latest.json` público.
 5. **Versionado determinista**: `versionName` sin la `v`; `versionCode` =
    `MAJOR*10000 + MINOR*100 + PATCH`.
 
@@ -120,7 +122,7 @@ puerta de autenticación o la URL pública.
 
 ## Verificación
 
-`pnpm test` desde la raíz: **140 ficheros, 1206 tests**. Typecheck limpio en api, admin y
+`pnpm test` desde la raíz: **141 ficheros, 1220 tests**. Typecheck limpio en api, admin y
 tpv-web. Los tests nuevos se validaron por sabotaje (introducir el fallo y comprobar qué test
 se pone rojo), no sólo por estar en verde:
 
@@ -135,6 +137,12 @@ se pone rojo), no sólo por estar en verde:
 Tres mutantes sobrevivieron a la primera pasada y destaparon huecos reales: un `<p>` vacío en
 el drawer, y —el importante— **path traversal**: nada cubría que un `fileName` con `../` en
 `releases.json` sacara ficheros de `RELEASES_DIR`. Se añadieron tests y ya caen.
+
+La fila del frente 1 dejó de ser "— (script)": los guardias de nombre de fichero de
+`build-release-apk.sh` y `publicar-apk.sh` se prueban en `infra/test/nombre-de-apk.test.ts`
+(proyecto `infra` del workspace de vitest), corriendo los scripts de verdad y comprobando que
+mueren ANTES de compilar y ANTES del scp. También validados por sabotaje: sin los guardias,
+los cinco tests de rechazo caen.
 
 ## Lo que NO está verificado
 

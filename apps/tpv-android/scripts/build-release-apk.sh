@@ -86,6 +86,28 @@ else
   VERSION_CODE="${VERSION_CODE:-1}"
 fi
 
+# ─── El nombre del fichero tiene que pasar el filtro de la API ──────────────
+#
+# El APK se llamará mipiacetpv-$VERSION_NAME-$VERSION_CODE.apk y ese nombre
+# acaba TAL CUAL en el campo `fileName` de releases.json. La API sólo admite
+# ahí `[A-Za-z0-9._-]` (FILE_NAME_RE en apps/api/src/releases/store.ts, porque
+# el nombre viaja crudo dentro de Content-Disposition).
+#
+# Ese filtro está sólo en el lado que LEE, y descarta la entrada en silencio:
+# un VERSION_NAME con un `+` o un espacio compila, firma, sube y escribe la
+# entrada sin un solo error, y luego /apk/latest.json sigue anunciando la
+# versión ANTERIOR porque la nueva no pasa el validador. Nadie sabe por qué.
+# Se para aquí, antes de dos minutos de Vite y un gradle.
+#
+# La ruta del argumento ya obliga a MAJOR.MINOR.PATCH; ésta es la que cubre
+# las env vars, que no validaban nada.
+APK_NAME="mipiacetpv-${VERSION_NAME}-${VERSION_CODE}.apk"
+[[ "$APK_NAME" =~ ^[A-Za-z0-9._-]{1,120}$ ]] || die "el nombre del APK quedaría '$APK_NAME',
+       y la API sólo admite [A-Za-z0-9._-] en el fileName de releases.json.
+       Con este nombre el APK se publicaría y latest.json se quedaría EN
+       SILENCIO en la versión anterior. Revisa VERSION_NAME='$VERSION_NAME' y
+       VERSION_CODE='$VERSION_CODE'."
+
 # ─── Trazabilidad de build (A3-distribución) ────────────────────────────────
 #
 # Dos APKs con el mismo versionName pueden salir de árboles distintos si
@@ -221,7 +243,7 @@ echo "    OK · firmado"
 # seguidas se pisan y luego es imposible saber cuál es cuál. build-releases/
 # está en .gitignore (ver apps/tpv-android/.gitignore).
 mkdir -p "$OUT_DIR"
-APK_NAME="mipiacetpv-${VERSION_NAME}-${VERSION_CODE}.apk"
+# APK_NAME se calculó y validó arriba, antes de compilar.
 APK="$OUT_DIR/$APK_NAME"
 cp "$GRADLE_APK" "$APK"
 

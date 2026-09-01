@@ -106,6 +106,38 @@ export async function reset(
   await redis.del(config.attemptsKey, config.lockKey);
 }
 
+/**
+ * Perdona UN intento fallido. No es `reset`.
+ *
+ * A3-distribución: en `POST /apk` el acierto no puede limpiar el contador
+ * entero. Quien tiene un código válido lo tiene por 3 descargas, y con un
+ * reset por acierto el patrón "9 fallos + 1 acierto" deja el bucket a cero
+ * tantas veces como usos le queden al código: el límite de 10 intentos por
+ * ventana se lo regala a quien más cerca está de poder abusar de él.
+ *
+ * Perdonar uno cubre el caso real —el instalador teclea mal un par de veces
+ * antes de acertar y no quiere arrastrar esos fallos a la siguiente
+ * descarga— y acota el regalo a un intento por acierto.
+ *
+ * NO toca el candado a propósito: una IP bloqueada no se desbloquea acertando
+ * (de hecho ni llega aquí, `inspect` la corta antes). Y el DECR conserva el
+ * TTL de la ventana, así que tampoco la alarga.
+ */
+export async function forgiveFailure(
+  config: RateLimitConfig,
+  redis: Redis = getRedis(),
+): Promise<void> {
+  const current = await redis.get(config.attemptsKey);
+  if (current === null) return;
+  // A 1 o menos, DECR dejaría el contador en negativo (o crearía la clave sin
+  // TTL si hubiera caducado entre el GET y el DECR): se borra y queda a cero.
+  if (Number(current) <= 1) {
+    await redis.del(config.attemptsKey);
+    return;
+  }
+  await redis.decr(config.attemptsKey);
+}
+
 export interface ThrottleState {
   exceeded: boolean;
   count: number;
