@@ -1,0 +1,134 @@
+### ANTES de instalar la APK de A4 · 2026-09-01 21:56:17Z
+
+$ adb shell dumpsys package es.mipiace.tpv | grep versionCode
+    versionCode=1 minSdk=28 targetSdk=34
+    versionName=1.0.0
+
+$ assets index-*.js que la APK INSTALADA lleva dentro
+   assets/public/assets/index-DPJMFGpJ.js
+   assets/public/sw.js
+
+$ adb shell run-as ... grep -ao 'index-*.js' -r app_webview/Default   (lo que el terminal EJECUTA)
+  app_webview/Default/Service Worker/ScriptCache/ba23d8ecda68de77_0:index-CW8x8vhm.js
+  app_webview/Default/Service Worker/ScriptCache/ba23d8ecda68de77_1:index-CW8x8vhm.js
+  app_webview/Default/Service Worker/CacheStorage/d52edff7ee9fe262f9fc84b6bbf6c61417005409/376baf01-8172-437c-8559-ae3d443cc7d8/6c4f4d34847dbf58_0:index-CW8x8vhm.js
+  app_webview/Default/Service Worker/CacheStorage/d52edff7ee9fe262f9fc84b6bbf6c61417005409/376baf01-8172-437c-8559-ae3d443cc7d8/8d5ce20b17eca125_0:index-CW8x8vhm.js
+  app_webview/Default/Service Worker/CacheStorage/d52edff7ee9fe262f9fc84b6bbf6c61417005409/376baf01-8172-437c-8559-ae3d443cc7d8/8d5ce20b17eca125_0:index-CW8x8vhm.js
+  app_webview/Default/Service Worker/CacheStorage/d52edff7ee9fe262f9fc84b6bbf6c61417005409/376baf01-8172-437c-8559-ae3d443cc7d8/8d5ce20b17eca125_1:index-CW8x8vhm.js
+  app_webview/Default/Service Worker/CacheStorage/d52edff7ee9fe262f9fc84b6bbf6c61417005409/376baf01-8172-437c-8559-ae3d443cc7d8/8d5ce20b17eca125_1:index-CW8x8vhm.js
+
+$ el Service Worker registrado y su origen
+  CacheStorage
+  Database
+  ScriptCache
+
+$ cabeceras cacheadas por ese Service Worker
+
+$ de donde vino ese sw.js (URL en el ScriptCache del Service Worker)
+  app_webview/Default/Service Worker/CacheStorage/d52edff7ee9fe262f9fc84b6bbf6c61417005409/376baf01-8172-437c-8559-ae3d443cc7d8/230faa84c0146f05_0:https://mipiacetpv.com/icons/maskable-512.png
+  app_webview/Default/Service Worker/CacheStorage/d52edff7ee9fe262f9fc84b6bbf6c61417005409/376baf01-8172-437c-8559-ae3d443cc7d8/230faa84c0146f05_0:https://mipiacetpv.com/icons/maskable-512.pngP
+  app_webview/Default/Service Worker/CacheStorage/d52edff7ee9fe262f9fc84b6bbf6c61417005409/376baf01-8172-437c-8559-ae3d443cc7d8/26e167ac177fd105_0:https://mipiacetpv.com/favicon.svg
+  app_webview/Default/Service Worker/CacheStorage/d52edff7ee9fe262f9fc84b6bbf6c61417005409/376baf01-8172-437c-8559-ae3d443cc7d8/26e167ac177fd105_0:https://mipiacetpv.com/favicon.svgP
+  app_webview/Default/Service Worker/CacheStorage/d52edff7ee9fe262f9fc84b6bbf6c61417005409/376baf01-8172-437c-8559-ae3d443cc7d8/6c4f4d34847dbf58_0:https://mipiacetpv.com/index.html
+  app_webview/Default/Service Worker/CacheStorage/d52edff7ee9fe262f9fc84b6bbf6c61417005409/376baf01-8172-437c-8559-ae3d443cc7d8/6c4f4d34847dbf58_0:https://mipiacetpv.com/index.htmlP
+  app_webview/Default/Service Worker/CacheStorage/d52edff7ee9fe262f9fc84b6bbf6c61417005409/376baf01-8172-437c-8559-ae3d443cc7d8/7a31e1f5e39c02f6_0:https://mipiacetpv.com/assets/workbox-window.prod.es5-BBnX5xw4.jsP
+  app_webview/Default/Service Worker/CacheStorage/d52edff7ee9fe262f9fc84b6bbf6c61417005409/376baf01-8172-437c-8559-ae3d443cc7d8/7a31e1f5e39c02f6_0:https://mipiacetpv.com/assets/workbox-window.prod.es5-BBnX5xw4.jstry
+  app_webview/Default/Service Worker/CacheStorage/d52edff7ee9fe262f9fc84b6bbf6c61417005409/376baf01-8172-437c-8559-ae3d443cc7d8/7a31e1f5e39c02f6_1:https://mipiacetpv.com/assets/workbox-window.prod.es5-BBnX5xw4.js
+  app_webview/Default/Service Worker/CacheStorage/d52edff7ee9fe262f9fc84b6bbf6c61417005409/376baf01-8172-437c-8559-ae3d443cc7d8/82125f010da5f955_0:https://mipiacetpv.com/manifest.webmanifest
+
+$ cabeceras HTTP guardadas por el Service Worker
+  app_webview/Default/Service Worker/CacheStorage/d52edff7ee9fe262f9fc84b6bbf6c61417005409/376baf01-8172-437c-8559-ae3d443cc7d8/230faa84c0146f05_0:Caddy
+  app_webview/Default/Service Worker/CacheStorage/d52edff7ee9fe262f9fc84b6bbf6c61417005409/376baf01-8172-437c-8559-ae3d443cc7d8/26e167ac177fd105_0:Caddy
+  app_webview/Default/Service Worker/CacheStorage/d52edff7ee9fe262f9fc84b6bbf6c61417005409/376baf01-8172-437c-8559-ae3d443cc7d8/6c4f4d34847dbf58_0:Caddy
+  app_webview/Default/Service Worker/CacheStorage/d52edff7ee9fe262f9fc84b6bbf6c61417005409/376baf01-8172-437c-8559-ae3d443cc7d8/7a31e1f5e39c02f6_0:Caddy
+  app_webview/Default/Service Worker/CacheStorage/d52edff7ee9fe262f9fc84b6bbf6c61417005409/376baf01-8172-437c-8559-ae3d443cc7d8/82125f010da5f955_0:Caddy
+
+$ vinculacion del terminal en localStorage (ANTES)
+$ huella del Local Storage (ANTES)
+  total 32
+  -rw------- 1 u0_a152 u0_a152 2420 2026-09-01 21:51 000005.ldb
+  -rw------- 1 u0_a152 u0_a152  935 2026-09-01 21:54 000008.ldb
+  -rw------- 1 u0_a152 u0_a152  885 2026-09-01 23:11 000014.ldb
+  -rw------- 1 u0_a152 u0_a152 2648 2026-09-01 23:55 000015.log
+  -rw------- 1 u0_a152 u0_a152   16 2026-09-01 23:11 CURRENT
+  -rw------- 1 u0_a152 u0_a152    0 2026-09-01 11:21 LOCK
+  -rw------- 1 u0_a152 u0_a152  259 2026-09-01 23:11 LOG
+  -rw------- 1 u0_a152 u0_a152  254 2026-09-01 21:55 LOG.old
+  -rw------- 1 u0_a152 u0_a152  353 2026-09-01 23:11 MANIFEST-000013
+$ claves de localStorage (ANTES)
+  mipiacetpv-cashier-session
+  mipiacetpv-catalog-meta
+  mipiacetpv-category-tones
+  mipiacetpv-recent-cashiers
+  mipiacetpv-test-
+$ IndexedDB (ANTES)
+  https_mipiacetpv.com_0.indexeddb.leveldb
+### DESPUES de instalar la APK de A4 · 2026-09-01 21:57:48Z
+
+$ adb shell dumpsys package es.mipiace.tpv | grep versionCode
+    versionCode=11401 minSdk=28 targetSdk=34
+    versionName=1.14.1
+
+$ el asset que la APK lleva dentro (sobre el binario)
+   assets/public/assets/index-ClvDUTbk.js
+
+$ COMANDO DEL BLOQUE · lo que el terminal EJECUTA
+  adb shell "run-as es.mipiace.tpv sh -c 'grep -ao \"index-[A-Za-z0-9_-]*\.js\" -r app_webview/Default'"
+  (sin salida = no queda ninguna copia de red; el WebView carga los assets de la APK)
+
+$ el rescate nativo, en logcat
+  09-01 23:57:21.464 27062 27062 I mipiacetpv: A4 rescate: versionCode -1 -> 11401, directorios purgados: 1
+
+$ app_webview/Default DESPUES (Service Worker borrado, el resto intacto)
+  Cookies
+  Cookies-journal
+  IndexedDB
+  Local Storage
+  PersistentOriginTrials
+  Session Storage
+  Shared Dictionary
+  WebStorage
+  blob_storage
+  declarative_performance_observer.db
+  declarative_performance_observer.db-journal
+  shared_proto_db
+
+$ claves de localStorage (DESPUES) — comparar con el ANTES
+  mipiacetpv-recent-cashiers
+$ IndexedDB (DESPUES)
+  https_mipiacetpv.com_0.indexeddb.leveldb
+
+### COMPROBACION 3 · arranque SIN red
+
+$ log del script que corrio EN EL TERMINAL (adb va por wifi; se corta desde dentro)
+  == inicio Wed Sep  2 00:02:54 CEST 2026 ==
+  -- red tras cortar --
+  ping: unknown host api.mipiacetpv.com
+  -- reinicio de la app SIN red --
+  Starting: Intent { cmp=es.mipiace.tpv/.MainActivity }
+  -- captura hecha --
+  == fin Wed Sep  2 00:03:23 CEST 2026 ==
+  (wlan0 sin salida = interfaz caida; ping = 'unknown host')
+
+$ Capacitor durante ese arranque sin red
+  09-02 00:03:03.431 27881 27881 D Capacitor: Loading app at https://mipiacetpv.com
+  09-02 00:03:03.533 27881 27937 D Capacitor: Handling local request: https://mipiacetpv.com/
+  09-02 00:03:03.756 27881 27943 D Capacitor: Handling local request: https://mipiacetpv.com/assets/index-ClvDUTbk.js
+  09-02 00:03:03.758 27881 27938 D Capacitor: Handling local request: https://mipiacetpv.com/assets/index-WPy-Op-4.css
+  09-02 00:03:04.984 27881 27937 D Capacitor: Handling local request: https://mipiacetpv.com/favicon.svg
+  09-02 00:03:04.993 27881 27939 D Capacitor: Handling local request: https://mipiacetpv.com/favicon.svg
+
+$ wifi restaurado
+  8: wlan0    inet 192.168.5.75/24 brd 192.168.5.255 scope global wlan0\       valid_lft forever preferred_lft forever
+
+$ la anotacion del rescate en SharedPreferences (idempotencia)
+  <?xml version='1.0' encoding='utf-8' standalone='yes' ?>
+  <map>
+      <long name="lastPurgedVersionCode" value="11401" />
+  </map>
+
+$ el rescate NO se disparo en el segundo arranque (logcat limpiado antes del test offline)
+  ocurrencias: 0
+
+$ Service Worker sigue sin existir tras dos arranques mas
+  NO-EXISTE
