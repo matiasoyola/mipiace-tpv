@@ -22,6 +22,13 @@ const config: CapacitorConfig = {
     // Esquema https explícito (es el default de Capacitor 6, pero el SW
     // y los permisos del TPV dependen de él; no dejarlo implícito).
     androidScheme: "https",
+    // El WebView sirve el bundle local bajo este host, de modo que el
+    // origen es https://mipiacetpv.com y NO https://localhost. Sin esto,
+    // la API rechaza por CORS (server.ts usa lista blanca exacta contra
+    // CORS_ORIGINS) y la APK no puede ni vincularse. Verificado en el
+    // AP11 el 2026-09-01. Alternativa descartada: meter https://localhost
+    // en CORS_ORIGINS del VPS, que ensancha la lista blanca sin necesidad.
+    hostname: "mipiacetpv.com",
     // Para hot-reload en desarrollo contra la PWA local, descomentar y
     // poner la IP del Mac en la LAN. NO commitear con esto activo.
     // url: "http://192.168.1.50:5174",
