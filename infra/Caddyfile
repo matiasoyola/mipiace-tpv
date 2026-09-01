@@ -56,6 +56,34 @@ mipiacetpv.com, www.mipiacetpv.com {
 		reverse_proxy api:3001
 	}
 
+	# A3-distribución: descarga interna de la APK. Va al backend Fastify,
+	# NO a la PWA, y por dos razones:
+	#
+	#   1. La página se ve en el Chrome 81 de fábrica del AP11, que no
+	#      soporta `gap` en flexbox. Si dependiera del bundle de tpv-web se
+	#      rompería igual que el TPV y el bloque no serviría de nada.
+	#   2. El binario se emite por stream con Content-Length real.
+	#
+	# El handle va ANTES del de estáticos (si no, `try_files` se lo comería y
+	# devolvería index.html) y FUERA del `encode`, que en este sitio vive
+	# dentro del handle de la PWA: un APK ya es un zip, comprimirlo no gana
+	# nada y rompe el Content-Length que Android usa para la barra de
+	# progreso de la descarga.
+	#
+	# Cabeceras de seguridad propias: el bloque `header` de más abajo está
+	# dentro del handle de la PWA y no cubre esta ruta. `script-src 'none'`
+	# es literal, no defensivo — la página no lleva ni un byte de JS.
+	handle /apk* {
+		reverse_proxy api:3001
+		header {
+			Strict-Transport-Security "max-age=31536000; includeSubDomains"
+			X-Content-Type-Options "nosniff"
+			X-Frame-Options "DENY"
+			Referrer-Policy "strict-origin-when-cross-origin"
+			Content-Security-Policy "default-src 'none'; script-src 'none'; style-src 'self' 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+		}
+	}
+
 	# B-ProductImages: imágenes de producto cacheadas localmente desde
 	# Holded. El worker (mipiacetpv-worker) descarga y escribe a
 	# /srv/product-images/<tenantId>/<productId>.<ext>. El path lleva
@@ -171,7 +199,13 @@ admin.mipiacetpv.com {
 # WebSockets de B7 (mesas multi-terminal) pasan por aquí. Caddy detecta
 # el Upgrade header y proxea WS transparentemente.
 api.mipiacetpv.com {
-	encode gzip zstd
+	# A3-distribución: el `encode` de este sitio es a nivel de bloque, así que
+	# también pillaría /apk — y comprimir el APK rompe el Content-Length que
+	# Android usa para la barra de progreso. Se excluye la ruta en vez de
+	# devolver 404 en este host: `curl https://api.mipiacetpv.com/apk/latest.json`
+	# desde el Mac es como se comprueba una publicación.
+	@comprimible not path /apk*
+	encode @comprimible gzip zstd
 	reverse_proxy api:3001
 
 	header {

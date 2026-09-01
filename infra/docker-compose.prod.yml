@@ -113,6 +113,10 @@ services:
       SUPER_ADMIN_FROM_EMAIL: ${SUPER_ADMIN_FROM_EMAIL}
       SUPER_ADMIN_REPLY_TO_EMAIL: ${SUPER_ADMIN_REPLY_TO_EMAIL}
       PRODUCT_IMAGE_CACHE_DIR: /var/cache/mipiacetpv/product-images
+      # A3-distribución: APKs publicadas. Bind mount del host, no un named
+      # volume: los binarios los sube Matías por scp desde el Mac y tiene
+      # que poder verlos y borrarlos sin entrar en Docker.
+      RELEASES_DIR: /srv/releases
       # v1.5-hotfix3 · los Z van a un named volume (antes: FS del
       # contenedor → se perdían en cada recreate + EACCES con USER node).
       Z_REPORT_STORAGE_ROOT: /var/lib/mipiacetpv/z-reports
@@ -133,6 +137,11 @@ services:
       - product_images:/var/cache/mipiacetpv/product-images
       # v1.5-hotfix3 · informes Z persistentes.
       - z_reports:/var/lib/mipiacetpv/z-reports
+      # A3-distribución: los .apk publicados, en READ-ONLY. La API sólo los
+      # sirve; quien escribe ahí es infra/publicar-apk.sh por scp. Si algún
+      # día la API se compromete, no puede reemplazar el binario que se
+      # instalan los terminales.
+      - /opt/mipiacetpv/releases:/srv/releases:ro
     deploy:
       resources:
         limits:
