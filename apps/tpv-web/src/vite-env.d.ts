@@ -12,6 +12,10 @@ declare const __APP_VERSION__: string;
 interface ImportMetaEnv {
   readonly VITE_BUILD_HASH?: string;
   readonly VITE_API_URL?: string;
+  // A4: "android" sólo en el bundle que empaqueta la APK; vacío en el de la
+  // web. Permite detectar en runtime que el JS que se ejecuta dentro de
+  // Capacitor NO es el de la APK (platform/AppInfo.ts).
+  readonly VITE_TARGET?: string;
 }
 interface ImportMeta {
   readonly env: ImportMetaEnv;

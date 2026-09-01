@@ -31,6 +31,20 @@ set -euo pipefail
 # --- Backend de producción (hallazgo A2: sin esto el WebView va a localhost) ---
 export VITE_API_URL="${VITE_API_URL:-https://api.mipiacetpv.com}"
 
+# --- Destino del bundle (hallazgo A4) ------------------------------------------
+# Con VITE_TARGET=android, tpv-web NO genera Service Worker (vite.config.ts) y
+# embebe la marca "android" en el bundle. Las dos cosas importan:
+#
+#   - Sin SW, la APK sirve SU bundle. Con SW, el registro de /sw.js salía a la
+#     red bajo el origen real, traía el sw.js del VPS y a partir de ahí la APK
+#     servía producción para siempre.
+#   - Con la marca embebida, el terminal puede decir en el menú si el JS que
+#     está ejecutando es el de la APK o el de otro sitio.
+#
+# No es sobreescribible: una APK de release con SW dentro es exactamente el
+# fallo del 01-09, y no hay ningún motivo legítimo para construirla.
+export VITE_TARGET="android"
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 ANDROID_DIR="$ROOT/apps/tpv-android/android"
 WEB_DIST="$ROOT/apps/tpv-web/dist"
@@ -172,10 +186,10 @@ find_apksigner() {
 [ -f "$ANDROID_DIR/keystore.properties" ] \
   || die "falta $ANDROID_DIR/keystore.properties (copia keystore.properties.example y rellénalo)."
 
-echo "==> VITE_API_URL=$VITE_API_URL  version=$VERSION_NAME ($VERSION_CODE)  commit=$GIT_SHA"
+echo "==> VITE_API_URL=$VITE_API_URL  VITE_TARGET=$VITE_TARGET  version=$VERSION_NAME ($VERSION_CODE)  commit=$GIT_SHA"
 
 echo "==> 1/6 build tpv-web (dist con backend de producción)"
-VITE_API_URL="$VITE_API_URL" pnpm --filter @mipiacetpv/tpv-web build
+VITE_API_URL="$VITE_API_URL" VITE_TARGET="$VITE_TARGET" pnpm --filter @mipiacetpv/tpv-web build
 
 echo "==> 2/6 verificar que el backend quedó embebido en el dist"
 # Hallazgo A2. tpv-web lee el backend con `import.meta.env.VITE_API_URL` a
@@ -191,6 +205,26 @@ if ! grep -rqF -- "$VITE_API_URL" "$WEB_DIST/assets/"*.js 2>/dev/null; then
 fi
 echo "    OK · '$VITE_API_URL' presente en el bundle"
 
+# --- Hallazgo A4 (pruebas físicas AP11, 2026-09-01) ---------------------------
+# Un sw.js dentro del dist de Android significa que el build volvió a generar
+# Service Worker. Capacitor NO intercepta las peticiones del Service Worker:
+# el registro sale a la red bajo el origen real (server.hostname), trae el
+# sw.js del VPS, precachea los assets del VPS y pasa a controlar la página. A
+# partir de ahí la APK sirve producción para siempre y su bundle queda de
+# adorno — una APK entregada a un cliente enseña lo que haya en el VPS ese
+# día, no lo que se le entregó ni lo que se probó.
+#
+# El fallo no da la cara al construir ni al instalar: da la cara semanas
+# después, en el bar, cuando la versión que se entregó "no cambió nada".
+if [ -e "$WEB_DIST/sw.js" ] || [ -e "$WEB_DIST/registerSW.js" ]; then
+  die "el dist de Android contiene un Service Worker ($WEB_DIST/sw.js).
+       Dentro de la APK los assets ya son locales: el SW no aporta offline y
+       es el vector del hallazgo A4 (la APK acaba sirviendo producción).
+       Revisa que VITE_TARGET=android llegó al build (vite.config.ts usa
+       \`disable\` de VitePWA con esa variable)."
+fi
+echo "    OK · sin Service Worker en el dist (hallazgo A4)"
+
 echo "==> 3/6 cap sync android (copia dist + plugins al proyecto nativo)"
 ( cd "$ROOT/apps/tpv-android" && pnpm exec cap sync android )
 
@@ -205,6 +239,18 @@ if ! grep -rqF -- "$VITE_API_URL" "$SYNCED_ASSETS"/*.js 2>/dev/null; then
        El dist estaba bien pero lo sincronizado al proyecto nativo no lo está."
 fi
 echo "    OK · '$VITE_API_URL' presente en los assets del proyecto nativo"
+
+# Gemela de la guardia A4 del paso 2, sobre lo que Capacitor copió de verdad.
+# Mismo motivo que la doble comprobación de VITE_API_URL: un assets/public/
+# viejo de un build anterior traería el sw.js de vuelta con el dist limpio.
+SYNCED_PUBLIC="$ANDROID_DIR/app/src/main/assets/public"
+if [ -e "$SYNCED_PUBLIC/sw.js" ] || [ -e "$SYNCED_PUBLIC/registerSW.js" ]; then
+  die "$SYNCED_PUBLIC contiene un Service Worker.
+       El dist estaba limpio pero lo sincronizado al proyecto nativo no lo
+       está: probablemente sea un assets/public/ de un build anterior. Borra
+       $SYNCED_PUBLIC y repite (hallazgo A4)."
+fi
+echo "    OK · sin Service Worker en los assets del proyecto nativo (hallazgo A4)"
 
 # --- Hallazgo B2 (pruebas físicas AP11, 2026-09-01) ---------------------------
 # La puerta gemela del hallazgo A2. Con el backend correcto pero SIN

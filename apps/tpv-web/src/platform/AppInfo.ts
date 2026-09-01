@@ -12,7 +12,7 @@
 // de la PWA no carga Capacitor. En navegador el global no existe y devolvemos
 // null, que el formateador degrada a mostrar sólo el hash de build.
 
-import { getCapacitor } from "./index.js";
+import { getCapacitor, isCapacitor } from "./index.js";
 
 export interface NativeAppInfo {
   /** `versionName` de Gradle. Ej: "1.10.2". */
@@ -66,10 +66,60 @@ export function readBuildHash(): string {
 }
 
 /**
+ * A4 · para quién se construyó el bundle QUE SE ESTÁ EJECUTANDO: "android"
+ * si salió del build de la APK, "" si salió del de la web.
+ *
+ * `import.meta.env.VITE_TARGET` lo sustituye Vite en tiempo de build, así que
+ * el valor viaja dentro del propio chunk. Sea cual sea el JS que acabe
+ * corriendo, esta función habla de ÉL y no del servidor ni del contenedor.
+ */
+export function readBundleTarget(): string {
+  return (
+    (import.meta as unknown as { env?: { VITE_TARGET?: string } }).env
+      ?.VITE_TARGET ?? ""
+  ).trim();
+}
+
+/**
+ * A4 · ¿estamos dentro de la APK ejecutando un bundle que NO es el suyo?
+ *
+ * La noche del 01-09 el terminal decía "1.0.0 (1) · build 9d76904" y esa
+ * etiqueta era verdad — el hash ERA el del bundle en ejecución. Lo que no
+ * decía es que ese bundle venía de producción por internet, servido por un
+ * Service Worker que se coló bajo el origen real, y no de los assets de la
+ * APK. Hicieron falta hora y media para verlo.
+ *
+ * El bundle de la APK lleva `VITE_TARGET=android` embebido; el de la web no
+ * lleva nada. Si el contenedor es Capacitor y el bundle no se declara
+ * "android", el JS en ejecución es ajeno a la APK. Se pinta en el menú.
+ *
+ * Fuera de Capacitor (navegador, PWA) siempre es `false`: ahí lo normal y
+ * correcto es un bundle sin marca.
+ *
+ * `bundleTarget` es parámetro con default para poder probar la decisión: Vite
+ * sustituye `import.meta.env.VITE_TARGET` en tiempo de build, así que dentro
+ * de un test el valor real no se puede fingir (`vi.stubEnv` no llega ahí). Que
+ * la marca sobreviva de verdad al build lo comprueba
+ * `infra/test/bundle-android.test.ts` sobre el bundle emitido. En producción
+ * nadie pasa el argumento.
+ */
+export function isForeignBundle(
+  bundleTarget: string = readBundleTarget(),
+): boolean {
+  if (!isCapacitor()) return false;
+  return bundleTarget !== "android";
+}
+
+/**
  * Etiqueta de versión para el menú del cajero.
  *
  *   Android → "1.10.2 (11002) · build a1b2c3d"
  *   Web     → "build a1b2c3d"
+ *
+ * A4: con `foreignBundle`, se añade "· ⚠ bundle ajeno a la APK". Ese aviso
+ * significa que el JS en ejecución dentro de la app Android no salió de los
+ * assets de la APK (ver isForeignBundle). Es la señal que habría cerrado en
+ * dos segundos la noche del 01-09.
  *
  * En web NO hay versionName ni versionCode y no nos los inventamos. El
  * versionCode sólo existe en Gradle, y como versionName tpv-web no tiene
@@ -82,10 +132,14 @@ export function readBuildHash(): string {
 export function formatVersionLabel(
   native: NativeAppInfo | null,
   buildHash: string,
+  foreignBundle = false,
 ): string {
   const hash = buildHash.trim();
   const build = hash ? `build ${hash}` : "";
-  if (!native) return build;
-  const version = `${native.versionName} (${native.versionCode})`;
-  return build ? `${version} · ${build}` : version;
+  const version = native ? `${native.versionName} (${native.versionCode})` : "";
+  const parts = [version, build].filter(Boolean);
+  // A4 · el aviso va SIEMPRE, aunque no haya ni versión nativa ni hash: es
+  // justo el caso en que la etiqueta no dice nada y hay que mirar.
+  if (foreignBundle) parts.push("⚠ bundle ajeno a la APK");
+  return parts.join(" · ");
 }

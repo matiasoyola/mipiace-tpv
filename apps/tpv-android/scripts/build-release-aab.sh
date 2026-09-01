@@ -20,6 +20,14 @@ export VITE_API_URL="${VITE_API_URL:-https://api.mipiacetpv.com}"
 # resuelve Vite del git HEAD; VITE_SENTRY_DSN es opcional. VITE_TPV_URL NO se
 # consume en el código actual (grep en apps/tpv-web/src): no hace falta fijarlo.
 
+# --- Destino del bundle (hallazgo A4) ---
+# Gemelo de build-release-apk.sh. Con VITE_TARGET=android, tpv-web no genera
+# Service Worker: dentro de la APK/AAB los assets ya son locales y el SW no
+# aporta offline, pero SÍ se registra contra el origen real (server.hostname),
+# baja el sw.js del VPS y a partir de ahí el terminal sirve producción para
+# siempre. No es sobreescribible.
+export VITE_TARGET="android"
+
 VERSION_NAME="${VERSION_NAME:-1.0.0}"
 VERSION_CODE="${VERSION_CODE:-1}"
 
@@ -36,10 +44,18 @@ if [ ! -f "$ANDROID_DIR/keystore.properties" ]; then
   exit 1
 fi
 
-echo "==> VITE_API_URL=$VITE_API_URL  version=$VERSION_NAME ($VERSION_CODE)"
+echo "==> VITE_API_URL=$VITE_API_URL  VITE_TARGET=$VITE_TARGET  version=$VERSION_NAME ($VERSION_CODE)"
 
-echo "==> 1/3 build tpv-web (dist con backend de producción)"
-VITE_API_URL="$VITE_API_URL" pnpm --filter @mipiacetpv/tpv-web build
+echo "==> 1/3 build tpv-web (dist con backend de producción, sin Service Worker)"
+VITE_API_URL="$VITE_API_URL" VITE_TARGET="$VITE_TARGET" pnpm --filter @mipiacetpv/tpv-web build
+
+# Hallazgo A4: un sw.js aquí significa que el build volvió a generar Service
+# Worker y que el .aab acabaría sirviendo producción en el terminal.
+if [ -e "$ROOT/apps/tpv-web/dist/sw.js" ] || [ -e "$ROOT/apps/tpv-web/dist/registerSW.js" ]; then
+  echo "ERROR: el dist de Android contiene un Service Worker (hallazgo A4)." >&2
+  echo "       Revisa que VITE_TARGET=android llegó al build." >&2
+  exit 1
+fi
 
 echo "==> 2/3 cap sync android (copia dist + plugins al proyecto nativo)"
 ( cd "$ROOT/apps/tpv-android" && pnpm exec cap sync android )
