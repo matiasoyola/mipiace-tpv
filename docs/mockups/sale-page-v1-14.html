@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Mockup · pantalla de venta v1.14 · mipiacetpv</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --coral:#E97058; --coral-dark:#C75A45; --coral-soft:#FDEAE3;
+    --ink:#1F2937; --ink-soft:#374151; --stone:#F8F6F3;
+    --slate-200:#E2E8F0; --slate-400:#94A3B8; --slate-500:#64748B; --slate-50:#F8FAFC;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'DM Sans',-apple-system,system-ui,sans-serif;
+       font-feature-settings:'cv11','ss01';-webkit-font-smoothing:antialiased;
+       background:#E9E7E3;padding:32px;color:var(--ink)}
+  .caption{font-size:13px;color:var(--slate-500);margin:0 0 10px 4px;letter-spacing:.02em}
+  .caption b{color:var(--ink);font-weight:600}
+  /* el terminal real */
+  .screen{width:1280px;height:800px;background:var(--stone);display:flex;flex-direction:column;
+          border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.12);margin-bottom:36px}
+
+  /* ---------- barra superior ---------- */
+  .topbar{height:72px;flex:0 0 72px;background:#fff;border-bottom:1px solid var(--slate-200);
+          display:flex;align-items:center;gap:12px;padding:0 16px}
+  .btn-map{height:56px;padding:0 22px;border-radius:16px;background:var(--coral);color:#fff;
+           border:none;font:500 15px/1 'DM Sans';display:flex;align-items:center;gap:10px;cursor:pointer}
+  .icon-btn{width:56px;height:56px;border-radius:16px;background:var(--stone);border:none;
+            display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .brand{display:flex;align-items:center;gap:10px;margin-left:4px}
+  .brand .wm{font-size:17px;font-weight:600;letter-spacing:-.01em}
+  .brand .wm i{font-style:normal;color:var(--coral)}
+  .spacer{flex:1}
+  .pill{height:44px;padding:0 16px;border-radius:14px;background:var(--stone);
+        display:flex;align-items:center;font-size:13px;color:var(--ink-soft)}
+
+  /* ---------- cuerpo ---------- */
+  .body{flex:1;display:flex;min-height:0}
+  .left{flex:1;display:flex;flex-direction:column;min-width:0;padding:14px 0 0 16px}
+
+  /* chips: DOS FILAS, sin scroll horizontal */
+  .chips{display:flex;flex-wrap:wrap;gap:8px;padding-right:16px;margin-bottom:12px}
+  .chip{height:52px;padding:0 16px;border-radius:16px;border:1px solid transparent;
+        display:flex;align-items:center;gap:9px;font:500 14px/1 'DM Sans';cursor:pointer;
+        background:var(--stone);color:var(--ink)}
+  .chip svg{width:18px;height:18px;flex:0 0 18px}
+  .chip.sel{background:var(--coral);color:#fff}
+  .chip.amber{background:#FFFBEB;color:#B45309}
+  .chip.sky{background:#F0F9FF;color:#0369A1}
+  .chip.rose{background:#FFF1F2;color:#BE123C}
+  .chip.green{background:#ECFDF5;color:#047857}
+  .chip.red{background:#FEF2F2;color:#B91C1C}
+  .chip.more{background:#fff;border-color:var(--slate-200);color:var(--slate-500)}
+
+  .grid{flex:1;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;
+        overflow:auto;padding:2px 16px 16px 0;align-content:start}
+  .card{background:#fff;border:1px solid var(--slate-200);border-radius:16px;padding:14px;
+        display:flex;flex-direction:column;gap:8px;min-height:118px;cursor:pointer}
+  .card .ph{height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center}
+  .card .nm{font-size:14px;font-weight:500;line-height:1.25}
+  .card .pr{font-size:14px;color:var(--slate-500);font-variant-numeric:tabular-nums}
+
+  /* ---------- panel del ticket ---------- */
+  .ticket{width:372px;flex:0 0 372px;background:#fff;border-left:1px solid var(--slate-200);
+          display:flex;flex-direction:column;min-height:0}
+  .t-head{padding:16px 18px 12px;border-bottom:1px solid var(--slate-200);
+          display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+  .t-head h2{font-size:20px;font-weight:600;letter-spacing:-.01em}
+  .t-head .meta{font-size:12.5px;color:var(--slate-500);margin-top:3px}
+  .btn-more{height:44px;padding:0 14px;border-radius:14px;background:var(--stone);border:none;
+            font:500 13.5px/1 'DM Sans';color:var(--ink);cursor:pointer;flex:0 0 auto}
+
+  /* LO IMPORTANTE: la lista se come el espacio flexible */
+  .lines{flex:1;overflow:auto;padding:6px 0}
+  .line{display:flex;align-items:center;gap:12px;padding:11px 18px}
+  .line .q{width:38px;height:38px;flex:0 0 38px;border-radius:12px;background:var(--stone);
+           display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:500;
+           font-variant-numeric:tabular-nums}
+  .line .n{flex:1;font-size:14.5px}
+  .line .p{font-size:14.5px;font-variant-numeric:tabular-nums}
+  .line.justadded{background:var(--coral-soft)}
+
+  .t-foot{flex:0 0 auto;border-top:1px solid var(--slate-200);padding:14px 18px 16px;background:#fff}
+  .row{display:flex;justify-content:space-between;font-size:13.5px;color:var(--slate-500);
+       margin-bottom:6px;font-variant-numeric:tabular-nums}
+  .total{display:flex;justify-content:space-between;align-items:baseline;margin:10px 0 14px}
+  .total span{font-size:15px;font-weight:500}
+  .total b{font-size:32px;font-weight:600;letter-spacing:-.025em;font-variant-numeric:tabular-nums}
+  .btn-send{width:100%;height:56px;border-radius:16px;background:#fff;border:1px solid rgba(233,112,88,.3);
+            color:var(--coral-dark);font:500 15px/1 'DM Sans';margin-bottom:10px;cursor:pointer}
+  .btn-pay{width:100%;height:68px;border-radius:16px;background:var(--coral);border:none;color:#fff;
+           font:500 17px/1 'DM Sans';display:flex;align-items:center;justify-content:space-between;
+           padding:0 22px;cursor:pointer}
+  .btn-pay b{font-weight:600;font-variant-numeric:tabular-nums}
+
+  /* estado vacio */
+  .empty{padding:18px}
+  .eyebrow{font-size:10.5px;font-weight:500;letter-spacing:.1em;color:var(--slate-400);
+           text-transform:uppercase;margin-bottom:12px}
+  .sug{display:flex;align-items:center;gap:12px;padding:12px 10px;border-radius:14px;
+       border:1px solid var(--slate-200);margin-bottom:8px;cursor:pointer}
+  .sug .r{width:26px;font-size:12px;color:var(--slate-400);font-variant-numeric:tabular-nums}
+  .sug .n{flex:1;font-size:14.5px;font-weight:500}
+  .sug .p{font-size:14px;color:var(--slate-500);font-variant-numeric:tabular-nums}
+  .hint{font-size:12.5px;color:var(--slate-400);margin-top:10px;line-height:1.45}
+  .note{max-width:1280px;font-size:13px;color:var(--slate-500);line-height:1.6;margin:0 0 28px 2px}
+  .note b{color:var(--ink)}
+</style>
+</head>
+<body>
+
+<p class="caption"><b>1 · Mesa con comanda</b> — 1280×800, el viewport real del AP11</p>
+<div class="screen">
+  <div class="topbar">
+    <button class="btn-map">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" width="20" height="20"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+      Mapa
+    </button>
+    <button class="icon-btn" title="Buscar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#1F2937" stroke-width="2.25" width="20" height="20"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    </button>
+    <button class="icon-btn" title="Escanear">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#1F2937" stroke-width="2.25" width="20" height="20"><path d="M4 8V5.5A1.5 1.5 0 015.5 4H8M16 4h2.5A1.5 1.5 0 0120 5.5V8M20 16v2.5a1.5 1.5 0 01-1.5 1.5H16M8 20H5.5A1.5 1.5 0 014 18.5V16"/></svg>
+    </button>
+    <div class="brand"><span class="wm">mipiace<i>tpv</i></span></div>
+    <div class="spacer"></div>
+    <div class="pill">Tickets</div>
+    <div class="pill">mipiacetpv-test-2e5c19f9</div>
+  </div>
+
+  <div class="body">
+    <div class="left">
+      <div class="chips">
+        <div class="chip sel">Todos</div>
+        <div class="chip amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25"><path d="M17 8h1a4 4 0 010 8h-1M3 8h14v9a4 4 0 01-4 4H7a4 4 0 01-4-4z"/></svg>Café</div>
+        <div class="chip sky"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25"><path d="M8 2h8l-1 6H9zM9 8v12M15 8v12M7 22h10"/></svg>Bebidas</div>
+        <div class="chip rose"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25"><path d="M4 16c0-4 3.5-8 8-8s8 4 8 8M2 16h20M6 20h12"/></svg>Bollería</div>
+        <div class="chip green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25"><path d="M12 3v6M8 21h8l-1-9H9zM7 12h10"/></svg>Desayunos</div>
+        <div class="chip red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25"><path d="M6 10a6 6 0 1112 0M8 10l4 11 4-11"/></svg>Helados</div>
+        <div class="chip amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25"><path d="M4 9h13v6a5 5 0 01-5 5H9a5 5 0 01-5-5zM17 10h2a3 3 0 010 6h-2"/></svg>Croissants y sándwiches</div>
+        <div class="chip sky"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25"><path d="M5 10h11v5a5 5 0 01-5 5H10a5 5 0 01-5-5zM11 3c0 2-2 2-2 4M15 4c0 1.5-1.5 1.5-1.5 3"/></svg>Infusiones</div>
+        <div class="chip more">Más (4)</div>
+      </div>
+      <div class="grid">
+        <div class="card"><div class="ph" style="background:#F0F9FF"></div><div class="nm">Agua Mineral</div><div class="pr">1,00 €</div></div>
+        <div class="card"><div class="ph" style="background:#F0F9FF"></div><div class="nm">Baileys</div><div class="pr">3,50 €</div></div>
+        <div class="card"><div class="ph" style="background:#F0F9FF"></div><div class="nm">Batido</div><div class="pr">2,50 €</div></div>
+        <div class="card"><div class="ph" style="background:#F0F9FF"></div><div class="nm">Botellín</div><div class="pr">1,50 €</div></div>
+        <div class="card"><div class="ph" style="background:#FFFBEB"></div><div class="nm">Café Americano</div><div class="pr">1,50 €</div></div>
+        <div class="card"><div class="ph" style="background:#FFFBEB"></div><div class="nm">Café Bombón</div><div class="pr">2,00 €</div></div>
+        <div class="card"><div class="ph" style="background:#FFFBEB"></div><div class="nm">Café Solo</div><div class="pr">1,50 €</div></div>
+        <div class="card"><div class="ph" style="background:#FFFBEB"></div><div class="nm">Café con leche</div><div class="pr">1,50 €</div></div>
+        <div class="card"><div class="ph" style="background:#FFF1F2"></div><div class="nm">Croissant plancha</div><div class="pr">2,20 €</div></div>
+        <div class="card"><div class="ph" style="background:#FFF1F2"></div><div class="nm">Napolitana</div><div class="pr">1,80 €</div></div>
+        <div class="card"><div class="ph" style="background:#ECFDF5"></div><div class="nm">Tostada tomate</div><div class="pr">2,40 €</div></div>
+        <div class="card"><div class="ph" style="background:#ECFDF5"></div><div class="nm">Pincho tortilla</div><div class="pr">2,60 €</div></div>
+      </div>
+    </div>
+
+    <div class="ticket">
+      <div class="t-head">
+        <div><h2>Mesa M1</h2><div class="meta">ahora · 6 uds. · Ticket 1 del turno</div></div>
+        <button class="btn-more">Más</button>
+      </div>
+      <div class="lines">
+        <div class="line justadded"><div class="q">1</div><div class="n">Café cortado</div><div class="p">1,50 €</div></div>
+        <div class="line"><div class="q">1</div><div class="n">Baileys</div><div class="p">3,50 €</div></div>
+        <div class="line"><div class="q">2</div><div class="n">Café con leche</div><div class="p">3,00 €</div></div>
+        <div class="line"><div class="q">1</div><div class="n">Croissant plancha</div><div class="p">2,20 €</div></div>
+        <div class="line"><div class="q">1</div><div class="n">Tostada tomate</div><div class="p">2,40 €</div></div>
+      </div>
+      <div class="t-foot">
+        <div class="row"><span>Subtotal</span><span>11,44 €</span></div>
+        <div class="row"><span>IVA</span><span>1,16 €</span></div>
+        <div class="total"><span>Total</span><b>12,60 €</b></div>
+        <button class="btn-send">Enviar comanda</button>
+        <button class="btn-pay"><span>Cobrar</span><b>12,60 €</b></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="note">La línea en <b>coral suave</b> es la que se acaba de añadir: se destaca ~1 s y la lista hace scroll hasta ella. Es la confirmación que hoy no existe.</p>
+
+<p class="caption"><b>2 · Mesa recién abierta</b> — el estado vacío deja de ser una pantalla en blanco</p>
+<div class="screen">
+  <div class="topbar">
+    <button class="btn-map">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" width="20" height="20"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+      Mapa
+    </button>
+    <button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="#1F2937" stroke-width="2.25" width="20" height="20"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></button>
+    <button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="#1F2937" stroke-width="2.25" width="20" height="20"><path d="M4 8V5.5A1.5 1.5 0 015.5 4H8M16 4h2.5A1.5 1.5 0 0120 5.5V8M20 16v2.5a1.5 1.5 0 01-1.5 1.5H16M8 20H5.5A1.5 1.5 0 014 18.5V16"/></svg></button>
+    <div class="brand"><span class="wm">mipiace<i>tpv</i></span></div>
+    <div class="spacer"></div>
+    <div class="pill">Tickets</div>
+    <div class="pill">mipiacetpv-test-2e5c19f9</div>
+  </div>
+  <div class="body">
+    <div class="left">
+      <div class="chips">
+        <div class="chip sel">Todos</div>
+        <div class="chip amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25"><path d="M17 8h1a4 4 0 010 8h-1M3 8h14v9a4 4 0 01-4 4H7a4 4 0 01-4-4z"/></svg>Café</div>
+        <div class="chip sky"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25"><path d="M8 2h8l-1 6H9zM9 8v12M15 8v12M7 22h10"/></svg>Bebidas</div>
+        <div class="chip rose"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25"><path d="M4 16c0-4 3.5-8 8-8s8 4 8 8M2 16h20M6 20h12"/></svg>Bollería</div>
+        <div class="chip green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25"><path d="M12 3v6M8 21h8l-1-9H9zM7 12h10"/></svg>Desayunos</div>
+        <div class="chip red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25"><path d="M6 10a6 6 0 1112 0M8 10l4 11 4-11"/></svg>Helados</div>
+        <div class="chip amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25"><path d="M4 9h13v6a5 5 0 01-5 5H9a5 5 0 01-5-5zM17 10h2a3 3 0 010 6h-2"/></svg>Croissants y sándwiches</div>
+        <div class="chip sky"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25"><path d="M5 10h11v5a5 5 0 01-5 5H10a5 5 0 01-5-5zM11 3c0 2-2 2-2 4M15 4c0 1.5-1.5 1.5-1.5 3"/></svg>Infusiones</div>
+        <div class="chip more">Más (4)</div>
+      </div>
+      <div class="grid">
+        <div class="card"><div class="ph" style="background:#F0F9FF"></div><div class="nm">Agua Mineral</div><div class="pr">1,00 €</div></div>
+        <div class="card"><div class="ph" style="background:#F0F9FF"></div><div class="nm">Baileys</div><div class="pr">3,50 €</div></div>
+        <div class="card"><div class="ph" style="background:#F0F9FF"></div><div class="nm">Batido</div><div class="pr">2,50 €</div></div>
+        <div class="card"><div class="ph" style="background:#F0F9FF"></div><div class="nm">Botellín</div><div class="pr">1,50 €</div></div>
+        <div class="card"><div class="ph" style="background:#FFFBEB"></div><div class="nm">Café Americano</div><div class="pr">1,50 €</div></div>
+        <div class="card"><div class="ph" style="background:#FFFBEB"></div><div class="nm">Café Bombón</div><div class="pr">2,00 €</div></div>
+        <div class="card"><div class="ph" style="background:#FFFBEB"></div><div class="nm">Café Solo</div><div class="pr">1,50 €</div></div>
+        <div class="card"><div class="ph" style="background:#FFFBEB"></div><div class="nm">Café con leche</div><div class="pr">1,50 €</div></div>
+        <div class="card"><div class="ph" style="background:#FFF1F2"></div><div class="nm">Croissant plancha</div><div class="pr">2,20 €</div></div>
+        <div class="card"><div class="ph" style="background:#FFF1F2"></div><div class="nm">Napolitana</div><div class="pr">1,80 €</div></div>
+        <div class="card"><div class="ph" style="background:#ECFDF5"></div><div class="nm">Tostada tomate</div><div class="pr">2,40 €</div></div>
+        <div class="card"><div class="ph" style="background:#ECFDF5"></div><div class="nm">Pincho tortilla</div><div class="pr">2,60 €</div></div>
+      </div>
+    </div>
+
+    <div class="ticket">
+      <div class="t-head">
+        <div><h2>Mesa M4</h2><div class="meta">ahora · sin líneas · Ticket 4 del turno</div></div>
+        <button class="btn-more">Más</button>
+      </div>
+      <div class="lines">
+        <div class="empty">
+          <div class="eyebrow">Lo más pedido este turno</div>
+          <div class="sug"><span class="r">1</span><span class="n">Café con leche</span><span class="p">1,50 €</span></div>
+          <div class="sug"><span class="r">2</span><span class="n">Café Solo</span><span class="p">1,50 €</span></div>
+          <div class="sug"><span class="r">3</span><span class="n">Tostada tomate</span><span class="p">2,40 €</span></div>
+          <div class="sug"><span class="r">4</span><span class="n">Croissant plancha</span><span class="p">2,20 €</span></div>
+          <div class="sug"><span class="r">5</span><span class="n">Botellín</span><span class="p">1,50 €</span></div>
+          <p class="hint">Toca uno para añadirlo, o elige del catálogo.</p>
+        </div>
+      </div>
+      <div class="t-foot">
+        <div class="row"><span>Subtotal</span><span>0,00 €</span></div>
+        <div class="row"><span>IVA</span><span>0,00 €</span></div>
+        <div class="total"><span>Total</span><b>0,00 €</b></div>
+        <button class="btn-send" disabled style="opacity:.4">Enviar comanda</button>
+        <button class="btn-pay" disabled style="opacity:.4"><span>Cobrar</span><b>0,00 €</b></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="note"><b>Qué cambia respecto de hoy:</b> el Mapa sube a la barra superior como botón primario y la búsqueda se reduce a un icono — recupera los 768 px que ocupaba. Los chips envuelven a dos filas con color e icono, sin scroll horizontal, y el coral marca la selección en vez de ir fijo en «Todos». En el panel del ticket, la lista de artículos ocupa el espacio flexible y los totales con «Cobrar» quedan anclados al pie: con seis líneas se ven todas y el botón no se mueve. Las siete acciones secundarias viven detrás de «Más», con Cancelar dentro.</p>
+
+</body>
+</html>
