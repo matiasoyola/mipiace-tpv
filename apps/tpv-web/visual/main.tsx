@@ -16,6 +16,9 @@
 //   v1.12-manos-de-camarero: arqueo · abrir-turno · confirmar · bloqueo
 //   v1.14-la-comanda-se-ve: venta-mesa · venta-mesa-12 · venta-mesa-vacia ·
 //     venta-20-categorias · venta-retail
+//   v1.14.1-el-catalogo-manda: venta-mesa-1 · venta-mesa-2 · venta-mesa-8
+//     (el hueco del desglose: se llena con 1 y 2 líneas, se va con 8) y
+//     venta-mesa-fotos (catálogo con foto: la tarjeta NO cambia de alto)
 
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -246,7 +249,33 @@ function benchCatalog() {
   const screen = benchScreen();
   if (screen === "venta-20-categorias") return catalogWithTags(TAGS_20);
   if (screen === "venta-retail") return catalogWithTags(TAGS_SIROPE.slice(0, 5));
-  return catalogWithTags(TAGS_SIROPE);
+  const base = catalogWithTags(TAGS_SIROPE);
+  // v1.14.1-el-catalogo-manda §1 · el caso "con foto". Marca la mitad de
+  // los productos con `imageMime` para que `productImageUrl` devuelva
+  // ruta y la tarjeta pinte el `<img>`. Los bytes de la imagen NO viven
+  // aquí: el banco no sirve `/product-images/...`, así que la captura de
+  // esta pantalla rellena los `src` con un data-URI desde Playwright.
+  // Lo que se comprueba es lo que el bloque exige —que la tarjeta con
+  // foto y la tarjeta sin foto midan lo mismo—, y eso no depende de qué
+  // imagen sea.
+  if (screen === "venta-mesa-fotos") {
+    return base.map((p, i) =>
+      i % 2 === 0 ? { ...p, imageMime: "image/jpeg" } : p,
+    );
+  }
+  return base;
+}
+
+// v1.14.1-el-catalogo-manda §3 · el hueco del desglose depende del
+// NÚMERO de líneas, así que el banco necesita poder pedir 0, 1, 2, 6 y 8.
+function benchLines(): CartLine[] {
+  const screen = benchScreen();
+  if (screen === "venta-mesa-vacia") return [];
+  if (screen === "venta-mesa-1") return LINES.slice(0, 1);
+  if (screen === "venta-mesa-2") return LINES.slice(0, 2);
+  if (screen === "venta-mesa-8") return LINES_12.slice(0, 8);
+  if (screen === "venta-mesa-12") return LINES_12;
+  return LINES;
 }
 
 function benchBusinessType(): string {
@@ -314,11 +343,7 @@ function stubFetch(): void {
   // reconciliación: aquí se replica.
   // Sembrado con las líneas que ya trae la mesa, para que la primera
   // reconciliación no borre lo que había.
-  const seed = benchScreen() === "venta-mesa-vacia"
-    ? []
-    : benchScreen() === "venta-mesa-12"
-      ? LINES_12
-      : LINES;
+  const seed = benchLines();
   const draftLines: Array<Record<string, unknown>> = seed.map((l) => ({
     id: l.id,
     productId: l.productId,
@@ -493,8 +518,6 @@ function Bench() {
   // ── v1.14-la-comanda-se-ve ─────────────────────────────────────────
 
   if (screen.startsWith("venta-mesa") || screen === "venta-20-categorias") {
-    const vacia = screen === "venta-mesa-vacia";
-    const doce = screen === "venta-mesa-12";
     return (
       <Screens.SalePage
         shiftId="shift-1"
@@ -514,7 +537,7 @@ function Bench() {
           openedByAlias: "Gemma",
           activeTicketId: "tk-m1",
         }}
-        initialTableLines={vacia ? [] : doce ? LINES_12 : LINES}
+        initialTableLines={benchLines()}
         onBackToMap={() => {}}
         onTicketMovedToTable={null}
         onLogoutCashier={() => {}}

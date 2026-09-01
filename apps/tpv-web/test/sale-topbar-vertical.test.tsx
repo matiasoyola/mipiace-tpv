@@ -374,10 +374,14 @@ describe("v1.14 · §4 · estado vacío del ticket con inteligencia", () => {
       '[data-testid="ticket-lines"] [data-line-id]',
     );
     expect(lineas.length).toBeGreaterThan(0);
-    // Al haber línea, los atajos dejan sitio al desglose.
+    // v1.14.1 §3 · con UNA línea los atajos NO desaparecen: se quedan
+    // llenando el hueco que quedaba debajo, que con una sola línea eran
+    // ~220 px de desierto. Lo que sí cambia es que ahora cuelgan bajo la
+    // lista y no en su lugar. (Que se van del todo con el ticket
+    // crecido lo fija `sale-ticket-filler.test.tsx`.)
     expect(
-      container.querySelector('[data-testid="ticket-top-sellers"]'),
-    ).toBeNull();
+      container.querySelector('[data-testid="ticket-top-sellers-filler"]'),
+    ).not.toBeNull();
   });
 
   it("turno recién abierto · el ranking del mes se rotula como tal", async () => {

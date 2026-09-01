@@ -375,12 +375,100 @@ describe("v1.14 · C1 · jerarquía del panel del ticket", () => {
       (b.textContent ?? "").startsWith("Cobrar"),
     )!;
     expect(cobrar.className).toContain("h-touch-lg");
-    const comanda = Array.from(footerBox().querySelectorAll("button")).find((b) =>
-      (b.textContent ?? "").includes("Enviar comanda"),
-    )!;
-    expect(comanda.className).toContain("h-touch-lg");
     // Ni un `h-[52px]` suelto ni la vieja escala de 12/14 (48/56 px).
     expect(cobrar.className).not.toMatch(/h-\d/);
+  });
+
+  // v1.14.1-el-catalogo-manda §4 · "Cobrar" manda en el pie.
+  //
+  // v1.14 puso las dos acciones en fila, las dos a `touch-lg` y a mitad
+  // y mitad. En la captura del AP11 se ve el resultado: pesan casi lo
+  // mismo, y no lo son. "Cobrar" es LA acción de la pantalla y "Enviar
+  // comanda" es de trámite.
+  //
+  // La jerarquía se construye con las tres variables a la vez, y el test
+  // fija las tres: ancho (dos tercios contra uno), alto (64 contra 48) y
+  // relleno (coral pleno contra borde neutro). Con una sola no basta —
+  // dos botones del mismo alto y el mismo ancho con distinto color se
+  // siguen leyendo como una pareja de iguales.
+  it("§4 · SABOTAJE · 'Cobrar' pesa más que 'Enviar comanda' en las tres variables", async () => {
+    await renderTableSale([serverLine(0)]);
+
+    const botones = Array.from(footerBox().querySelectorAll("button"));
+    const cobrar = botones.find((b) => (b.textContent ?? "").startsWith("Cobrar"))!;
+    const comanda = botones.find((b) =>
+      (b.textContent ?? "").includes("Enviar comanda"),
+    )!;
+
+    // 1 · Alto: la primaria en el tope de la escala táctil, la
+    // secundaria un peldaño por debajo. Nada fuera de la escala.
+    expect(cobrar.className).toContain("h-touch-lg");
+    expect(comanda.className).toContain("h-touch");
+    expect(comanda.className).not.toContain("h-touch-lg");
+    expect(comanda.className).not.toMatch(/h-\d/);
+
+    // 2 · Ancho: la rejilla del pie NO reparte a mitades.
+    const rejilla = cobrar.parentElement!;
+    expect(rejilla).toBe(comanda.parentElement);
+    expect(rejilla.className).not.toContain("grid-cols-2");
+    expect(rejilla.className).toContain("grid-cols-[1fr_1.6fr]");
+
+    // 3 · Relleno: el coral pleno es de "Cobrar", y la secundaria ya no
+    // lleva ni borde coral.
+    expect(cobrar.className.split(/\s+/)).toContain("bg-mipiace-coral");
+    expect(comanda.className).not.toContain("coral");
+  });
+});
+
+// v1.14.1-el-catalogo-manda · §5. El punto medio que colgaba.
+//
+// En el AP11 la meta de la cabecera salía como
+// "10 h 42 m · mipiacetpv-test-2e5c19f9 ·": el separador colgando y sin
+// puntos suspensivos. La causa es `truncate` sobre un contenedor FLEX —
+// `text-overflow: ellipsis` sólo actúa sobre el contenido EN LÍNEA de un
+// bloque; en un flex container los hijos son items, no texto, y el
+// navegador se limita a recortar por donde toque, que fue justo detrás
+// de un separador.
+describe("v1.14.1 · §5 · la meta del ticket trunca con elipsis", () => {
+  it("la meta es un bloque con contenido en línea, no un flex", async () => {
+    await renderTableSale([serverLine(0)]);
+
+    const meta = aside().querySelector(
+      '[data-testid="ticket-meta"]',
+    ) as HTMLElement;
+    expect(meta).not.toBeNull();
+    expect(meta.className).toContain("truncate");
+    // El sabotaje: devolver el `flex` que impedía la elipsis.
+    expect(meta.className).not.toContain("flex");
+  });
+
+  it("no queda un separador suelto al final de la meta", async () => {
+    await renderTableSale([serverLine(0)]);
+
+    const meta = aside().querySelector(
+      '[data-testid="ticket-meta"]',
+    ) as HTMLElement;
+    const texto = (meta.textContent ?? "").trim();
+    expect(texto.length).toBeGreaterThan(0);
+    expect(texto.endsWith("·")).toBe(false);
+    expect(texto).not.toMatch(/·\s*$/);
+  });
+
+  it("el alias va el último: es lo primero que se corta, no las unidades", async () => {
+    await renderTableSale([serverLine(0)]);
+
+    const meta = aside().querySelector(
+      '[data-testid="ticket-meta"]',
+    ) as HTMLElement;
+    const texto = meta.textContent ?? "";
+    // v1.14 decidió que lo primero en caer fuera el alias de quien abrió
+    // la mesa —está también en el mapa—, pero lo dejó DELANTE de las
+    // unidades, así que en la práctica lo primero en caer eran las
+    // unidades. El orden del texto es el orden del recorte.
+    const alias = texto.indexOf("caja1");
+    const unidades = texto.indexOf("ud.");
+    expect(unidades).toBeGreaterThanOrEqual(0);
+    expect(alias).toBeGreaterThan(unidades);
   });
 });
 

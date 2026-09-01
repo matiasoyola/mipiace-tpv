@@ -111,18 +111,33 @@ describe("resolveToneAssignments · reparto", () => {
 
   it("el coral no está en la paleta: queda para la selección (m2)", () => {
     for (const tone of CATEGORY_TONES) {
-      expect(TONE_STYLES[tone].chip).not.toContain("coral");
+      expect(TONE_STYLES[tone].icon).not.toContain("coral");
+      expect(TONE_STYLES[tone].band).not.toContain("coral");
     }
   });
 
-  it("los seis tonos usan las clases de docs/design/tokens.md §2", () => {
-    expect(TONE_STYLES.amber.chip).toContain("bg-amber-50");
-    expect(TONE_STYLES.amber.chip).toContain("text-amber-700");
-    expect(TONE_STYLES.sky.chip).toContain("bg-sky-50");
-    expect(TONE_STYLES.red.chip).toContain("bg-red-50");
-    expect(TONE_STYLES.green.chip).toContain("bg-emerald-50");
-    expect(TONE_STYLES.rose.chip).toContain("bg-rose-50");
-    expect(TONE_STYLES.stone.chip).toContain("bg-stone-100");
+  // v1.14.1-el-catalogo-manda §2 · el tono ya NO pinta el fondo del chip.
+  // En la captura del AP11 los seis fondos de color resultaron ser ruido
+  // —se reparten por orden alfabético, así que no dicen nada del
+  // contenido— y competían con la única señal que hay que leer en esa
+  // fila, que es cuál está seleccionado. El tono se queda en el icono del
+  // chip y en la banda de 4 px de la tarjeta de producto.
+  it("el tono pinta icono y banda, nunca un fondo de chip", () => {
+    for (const tone of CATEGORY_TONES) {
+      expect(TONE_STYLES[tone].icon).toMatch(/^text-/);
+      expect(TONE_STYLES[tone].band).toMatch(/^bg-/);
+      // Si volviera a haber un fondo de color por tono, aquí estaría.
+      expect(Object.keys(TONE_STYLES[tone])).toEqual(["icon", "band"]);
+    }
+  });
+
+  it("los seis tonos usan los colores de docs/design/tokens.md §2", () => {
+    expect(TONE_STYLES.amber.icon).toContain("amber");
+    expect(TONE_STYLES.sky.icon).toContain("sky");
+    expect(TONE_STYLES.red.icon).toContain("red");
+    expect(TONE_STYLES.green.icon).toContain("emerald");
+    expect(TONE_STYLES.rose.icon).toContain("rose");
+    expect(TONE_STYLES.stone.icon).toContain("stone");
   });
 });
 

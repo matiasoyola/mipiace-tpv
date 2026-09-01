@@ -20,7 +20,7 @@
 import { X } from "lucide-react";
 
 import { useBackGuard } from "../hooks/useBackGuard.js";
-import { TONE_STYLES, type CategoryTone } from "../lib/categoryTones.js";
+import { type CategoryTone } from "../lib/categoryTones.js";
 
 // Estructura compartida por las dos hojas: fondo, caja, cabecera con
 // título y cierre. Misma estética que `SheetWrap` de `SalePage`, pero
@@ -173,10 +173,14 @@ export function CategoriesSheet({
                 onSelect(c.tag);
                 onClose();
               }}
+              // v1.14.1 §2 · el fondo es neutro y el tono se queda en el
+              // icono, igual que en la barra. Y el seleccionado va en
+              // coral SUAVE: el coral pleno es de "Cobrar" y de nadie
+              // más en esta pantalla.
               className={
                 active
-                  ? "min-h-touch px-3 py-2.5 rounded-2xl border bg-mipiace-coral border-mipiace-coral text-white text-[13.5px] font-medium flex items-center gap-2 text-left"
-                  : `min-h-touch px-3 py-2.5 rounded-2xl border ${TONE_STYLES[c.tone].chip} text-[13.5px] font-medium flex items-center gap-2 text-left`
+                  ? "min-h-touch px-3 py-2.5 rounded-2xl border bg-mipiace-coral-soft border-mipiace-coral text-mipiace-coral-dark text-[13.5px] font-medium flex items-center gap-2 text-left"
+                  : "min-h-touch px-3 py-2.5 rounded-2xl border bg-white border-slate-200 text-mipiace-ink hover:border-mipiace-coral/40 text-[13.5px] font-medium flex items-center gap-2 text-left"
               }
             >
               <span className="shrink-0">{c.icon}</span>

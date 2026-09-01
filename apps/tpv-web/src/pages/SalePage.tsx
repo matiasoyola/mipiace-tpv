@@ -13,7 +13,6 @@ import {
   Beef,
   Beer,
   Bookmark,
-  Briefcase,
   Cake,
   Calculator,
   Check,
@@ -23,11 +22,9 @@ import {
   Cookie,
   Croissant,
   CupSoda,
-  Dumbbell,
   Ellipsis,
   Fish,
   GlassWater,
-  GraduationCap,
   LayoutGrid,
   Loader2,
   Lock,
@@ -49,14 +46,12 @@ import {
   Soup,
   Sparkles,
   Star,
-  Stethoscope,
   TrendingUp,
   Users,
   Utensils,
   Wifi,
   WifiOff,
   Wine,
-  Wrench,
   X,
 } from "lucide-react";
 
@@ -80,7 +75,6 @@ import {
   getCachedCreditSalesEnabled,
   getCachedCrmEnabled,
   getCachedAgendaEnabled,
-  getCachedIconPreset,
   getCachedTagAliases,
   getCachedTenantId,
   loadCatalogFromCache,
@@ -131,9 +125,11 @@ import {
   type CategoryTone,
 } from "../lib/categoryTones.js";
 import { layoutChips } from "../lib/chipRows.js";
+import { PRODUCT_CARD_MIN_HEIGHT } from "../lib/catalogGrid.js";
 import {
   fetchTopSellers,
   resolveTopSellers,
+  topSellersSlotsFor,
   type TopSellersResponse,
 } from "../lib/topSellers.js";
 import {
@@ -159,6 +155,30 @@ const UNDO_REMOVE_WINDOW_MS = 4000;
 // ojo mientras la mano ya va al siguiente producto, corto para que dos
 // cafés seguidos no dejen media lista en coral.
 const LINE_HIGHLIGHT_MS = 1000;
+
+// v1.14.1-el-catalogo-manda · §2. Las tres pintas del chip de categoría.
+//
+// **El fondo del chip es neutro.** En v1.14 lo pintaba el tono de la
+// categoría, y en la captura del AP11 se vio lo que eso es de verdad:
+// Bollería amarillo, Café rojo, Croissantysandwich verde e Infusiones
+// amarillo otra vez. Los tonos se reparten por orden alfabético, así que
+// el color no dice nada del contenido — y seis fondos de color compiten
+// justo con la señal que sí hay que leer, que es cuál está seleccionado.
+// El tono se queda donde informa sin gritar: el icono.
+//
+// **El seleccionado va en coral, no en ink.** "Todos" salía en negro
+// pleno, que no está en el sistema visual para estados y además es el
+// elemento de más contraste de la pantalla compitiendo con "Cobrar".
+// Aquí el coral es SOFT (fondo `coral-soft`, borde coral, texto
+// `coral-dark`), que es lo que `tokens.md` §2 reserva para "estado
+// activo de nav". El coral PLENO se queda para "Cobrar", que es la única
+// acción de la pantalla que lo lleva.
+const CHIP_BASE =
+  "h-touch px-4 md:px-5 rounded-2xl border text-[13.5px] md:text-[14px] font-medium flex items-center gap-2 shrink-0";
+const CHIP_IDLE =
+  "bg-white border-slate-200 text-mipiace-ink hover:border-mipiace-coral/40";
+const CHIP_SELECTED =
+  "bg-mipiace-coral-soft border-mipiace-coral text-mipiace-coral-dark";
 
 // Iconos Lucide por categoría (hallazgo M2). `categoryTones.ts` decide
 // el NOMBRE; la resolución al componente vive aquí para que el módulo de
@@ -226,40 +246,19 @@ function renderTagLabel(tag: string, aliases: Record<string, string>): string {
   return capitalizeTag(tag);
 }
 
-// B-Multi-Vertical SB3: icono del placeholder según vertical. Fallback
-// a Package (retail genérico) si el tenant aún no ha refrescado el
-// catálogo desde el deploy de SB3.
-const PLACEHOLDER_ICON_BY_TYPE: Record<BusinessType, typeof Package> = {
-  HOSPITALITY: Coffee,
-  RETAIL: Package,
-  SERVICES: Briefcase,
-};
-
-// v1.3-hotfix6 · presets de subvertical configurables desde super-admin
-// (campo Tenant.tpvIconPreset). Si el cliente elige uno, gana sobre el
-// icono genérico del businessType (peluquería ve tijeras, clínica ve
-// estetoscopio, etc.). Cualquier valor no listado cae al icono del
-// businessType — permite añadir presets futuros sin tocar este código
-// (sólo añadir entrada al map).
-const PLACEHOLDER_ICON_BY_PRESET: Record<string, typeof Package> = {
-  haircut: Scissors,
-  medical: Stethoscope,
-  auto_repair: Wrench,
-  beauty: Sparkles,
-  fitness: Dumbbell,
-  education: GraduationCap,
-};
-
-function placeholderIconFor(
-  type: BusinessType | null,
-  preset: string | null,
-): typeof Package {
-  if (preset && PLACEHOLDER_ICON_BY_PRESET[preset]) {
-    return PLACEHOLDER_ICON_BY_PRESET[preset];
-  }
-  if (!type) return Package;
-  return PLACEHOLDER_ICON_BY_TYPE[type] ?? Package;
-}
+// v1.14.1-el-catalogo-manda §1 · aquí vivían `PLACEHOLDER_ICON_BY_TYPE`,
+// `PLACEHOLDER_ICON_BY_PRESET` y `placeholderIconFor`: el icono genérico
+// por vertical (y por subvertical, vía `Tenant.tpvIconPreset`) que
+// llenaba los 125 px de imagen de cada tarjeta de producto cuando Holded
+// no traía foto. Se van con el placeholder, porque el icono era el
+// placeholder: era el MISMO en las diez tarjetas de la pantalla y por
+// tanto no distinguía un café de un botellín.
+//
+// `tpvIconPreset` sigue viajando del backend a `lib/catalog.ts` y sigue
+// cacheado, pero **ya no lo pinta nadie**. Queda declarado como
+// carryover: o se le busca un sitio donde informe, o se retira del
+// formulario de super-admin. Un ajuste que el cliente configura y que no
+// cambia nada en pantalla es peor que no tenerlo.
 
 interface HealthStatus {
   // B6 §3: el backend devuelve `level` + `reason` calculados (no
@@ -496,7 +495,12 @@ export function SalePage(props: SalePageProps) {
   const [topSellersRanking, setTopSellersRanking] =
     useState<TopSellersResponse | null>(null);
   useEffect(() => {
-    if (lines.length > 0) return;
+    // v1.14.1 §3 · antes era `lines.length > 0`: el ranking sólo se
+    // pedía con el ticket VACÍO, porque en v1.14 los atajos eran sólo el
+    // estado vacío. Ahora también llenan el hueco de una y dos líneas,
+    // así que la condición es la misma regla que decide el pintado. Con
+    // dos consumidores de la misma decisión, la regla tiene que ser una.
+    if (topSellersSlotsFor(lines.length) === 0) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -2506,6 +2510,113 @@ export function SalePage(props: SalePageProps) {
   );
 }
 
+// v1.14.1-el-catalogo-manda · §1. La tarjeta de producto.
+//
+// Antes: 206 px de alto, de los cuales **125 eran un icono de taza
+// genérico idéntico en las diez tarjetas**. No informaba de nada y se
+// comía la fila de productos que el camarero necesita ver: a 1280 × 800
+// con el panel del ticket abierto sólo cabían dos filas.
+//
+// Ahora la tarjeta es compacta y tipográfica —el nombre y el precio SON
+// el producto— y mide 104 px, con lo que caben cuatro filas.
+//
+// Los dos casos, y por qué miden lo mismo:
+//
+//   · **Sin foto** (el caso normal: Holded casi nunca las tiene). Nada
+//     de icono grande. Queda un acento de 4 px con el tono de la
+//     categoría, que es información gratis —bajo "Todos" la rejilla
+//     mezcla categorías— y no roba altura.
+//   · **Con foto**. Manda la imagen: ocupa la tarjeta entera bajo un
+//     velo y el nombre y el precio van encima en blanco.
+//
+// El alto no cambia entre los dos porque el reparto de la rejilla no
+// puede depender de si el propietario subió fotos a Holded: si la
+// tarjeta con foto fuera más alta, un catálogo a medio fotografiar
+// dejaría filas rotas.
+function ProductTile({
+  product,
+  imgSrc,
+  tone,
+  favorite = false,
+  onClick,
+}: {
+  product: CatalogProduct;
+  imgSrc: string | null;
+  tone: CategoryTone;
+  favorite?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      data-testid="product-tile"
+      data-tone={tone}
+      // El alto entra por `style` y no por una clase de Tailwind a
+      // propósito: es la MISMA constante que usa `catalogRowsVisible`
+      // para decidir cuántas filas caben. Con una clase suelta, el
+      // número del test y el de la pantalla podrían separarse sin que
+      // nada se pusiera rojo.
+      style={{ minHeight: PRODUCT_CARD_MIN_HEIGHT }}
+      className={
+        favorite
+          ? "group relative flex flex-col overflow-hidden rounded-2xl border border-amber-200 bg-white text-left transition-all hover:border-amber-400 hover:shadow-sm"
+          : "group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-left transition-all hover:border-mipiace-coral/50 hover:shadow-sm"
+      }
+    >
+      {imgSrc ? (
+        <>
+          <img
+            data-testid="product-media"
+            src={imgSrc}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            draggable={false}
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+          {/* Velo: sin él, un nombre blanco sobre una foto clara es
+              ilegible, y el catálogo no controla las fotos. */}
+          <span
+            aria-hidden
+            className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/30 to-black/5"
+          />
+        </>
+      ) : (
+        <span
+          aria-hidden
+          data-testid="product-tone-band"
+          className={`absolute inset-x-0 top-0 h-1 ${TONE_STYLES[tone].band}`}
+        />
+      )}
+      <div className="relative flex flex-1 flex-col justify-between px-3 pb-2.5 pt-3 md:px-3.5">
+        {/* Dos líneas como máximo, con elipsis: `line-clamp-2` corta con
+            puntos suspensivos en vez de partir la palabra. */}
+        <span
+          className={
+            imgSrc
+              ? "line-clamp-2 text-[13.5px] font-medium leading-tight text-white drop-shadow"
+              : "line-clamp-2 text-[13.5px] font-medium leading-tight text-mipiace-ink"
+          }
+        >
+          {product.name}
+        </span>
+        {/* Jerarquía: el precio pesa MÁS que el nombre (15/600 contra
+            13,5/500). En una barra el nombre se reconoce de memoria y lo
+            que se comprueba de un vistazo es el importe. */}
+        <span
+          className={
+            imgSrc
+              ? "mt-1.5 text-[15px] font-semibold tabular-nums text-white drop-shadow"
+              : "mt-1.5 text-[15px] font-semibold tabular-nums text-mipiace-ink"
+          }
+        >
+          {formatEur(product.priceGross)}
+        </span>
+      </div>
+    </button>
+  );
+}
+
 function HealthBanner({ health }: { health: HealthStatus | null }) {
   if (!health) return null;
   // Rojo persistente (v1.5-B §3.b): >48h sin sync o sin API key. Desde
@@ -2677,9 +2788,6 @@ function SaleWorkspace({
   // está vacío (sesión preexistente al deploy), Package es el default
   // — mismo comportamiento que B-UX-Pulido F3.
   const businessType = getCachedBusinessType();
-  // v1.3-hotfix6 · subvertical para refinar el icono placeholder.
-  const iconPreset = getCachedIconPreset();
-  const PlaceholderIcon = placeholderIconFor(businessType, iconPreset);
   // P-1 (v1.1 peluquería): para verticales SERVICES, ofrecer un toggle
   // "Servicios" / "Productos" delante de los chips de tag. Para
   // RETAIL/HOSPITALITY los items se siguen mezclando (caso típico:
@@ -2752,6 +2860,23 @@ function SaleWorkspace({
   const toneAssignments = useMemo(
     () => resolveToneAssignments(displayTags, tenantId),
     [displayTags, tenantId],
+  );
+  // v1.14.1 §1 · el acento de 4 px de la tarjeta sale del tono de su
+  // PRIMERA categoría con tono asignado. Un producto puede llevar varios
+  // tags en Holded (`cafes` + `favoritos` + `desayuno`); se coge el
+  // primero que sea una categoría de verdad, en el orden en que Holded
+  // los devuelve, que es estable. Sin tags cae a `stone`, que es el tono
+  // neutro de la paleta — nunca a "sin banda", porque entonces la
+  // rejilla tendría tarjetas de dos alturas ópticas distintas.
+  const toneForProduct = useCallback(
+    (p: CatalogProduct): CategoryTone => {
+      for (const tag of p.tags) {
+        const tone = toneAssignments[tag];
+        if (tone) return tone;
+      }
+      return "stone";
+    },
+    [toneAssignments],
   );
   // v1.14 · hallazgo M1. Dos filas de chips y "Más (N)" para el resto.
   // El ancho de la fila se mide de verdad cuando el navegador ha hecho
@@ -2877,62 +3002,64 @@ function SaleWorkspace({
             grid). El bloque chips queda fijo arriba; favoritos + grid
             van en un sub-contenedor con su propio overflow-y. */}
         {/* v1.14-la-comanda-se-ve · hallazgos M1 y M2. La fila ya no
-            lleva `overflow-x-auto`: los chips envuelven a un máximo de
-            dos filas y lo que no cabe se va al chip "Más (N)", que abre
-            un sheet. Un scroll horizontal sin affordance en táctil es
-            una función que no existe (§1.8 de los principios UX). */}
+            lleva `overflow-x-auto`: lo que no cabe se va al chip
+            "Más (N)", que abre un sheet. Un scroll horizontal sin
+            affordance en táctil es una función que no existe (§1.8 de
+            los principios UX).
+            v1.14.1-el-catalogo-manda §2 · y ahora es UNA fila, no dos.
+            Las dos filas costaban ~100 px de alto en una pantalla donde
+            sólo cabían dos filas de producto, y aun así con "Más (3)"
+            seguían sin verse todas: el problema se había movido de eje,
+            no se había resuelto. `flex-nowrap` es la garantía dura de
+            que el reparto estimado no puede abrir una segunda fila si
+            se queda corto con la fuente del Chrome del AP11. */}
         <div
           ref={chipRowRef}
           data-testid="category-chips"
-          className="flex flex-wrap items-center gap-2 mb-4 md:mb-6 shrink-0"
+          className="flex flex-nowrap items-center gap-2 mb-4 md:mb-6 shrink-0 overflow-hidden"
         >
           {/* P-1 (v1.1 peluquería): toggle Servicios/Productos para
               verticales SERVICES. Va delante de los chips de tag y
               está separado visualmente por un divisor sutil. */}
           {showKindToggle && (
             <>
+              {/* v1.14.1 §2 · mismo lenguaje de selección que los
+                  chips: si en la misma fila conviven dos formas de decir
+                  "esto está elegido", ninguna de las dos se aprende. */}
               <button
                 onClick={() => setKindFilter("SERVICE")}
-                className={
-                  kindFilter === "SERVICE"
-                    ? "h-touch px-4 md:px-5 rounded-2xl bg-mipiace-ink text-white text-[13.5px] md:text-[14px] font-medium shrink-0"
-                    : "h-touch px-4 md:px-5 rounded-2xl bg-white border border-slate-200 text-slate-700 text-[13.5px] md:text-[14px] font-medium shrink-0 hover:border-mipiace-ink/40"
-                }
+                className={`${CHIP_BASE} ${kindFilter === "SERVICE" ? CHIP_SELECTED : CHIP_IDLE}`}
               >
                 Servicios
               </button>
               <button
                 onClick={() => setKindFilter("PRODUCT")}
-                className={
-                  kindFilter === "PRODUCT"
-                    ? "h-touch px-4 md:px-5 rounded-2xl bg-mipiace-ink text-white text-[13.5px] md:text-[14px] font-medium shrink-0"
-                    : "h-touch px-4 md:px-5 rounded-2xl bg-white border border-slate-200 text-slate-700 text-[13.5px] md:text-[14px] font-medium shrink-0 hover:border-mipiace-ink/40"
-                }
+                className={`${CHIP_BASE} ${kindFilter === "PRODUCT" ? CHIP_SELECTED : CHIP_IDLE}`}
               >
                 Productos
               </button>
               <div className="w-px h-8 bg-slate-200 mx-1 shrink-0" aria-hidden />
             </>
           )}
-          {/* "Todos" NO es coral (hallazgo m2): el coral queda reservado
-              para la categoría seleccionada. Cuando "Todos" llevaba el
-              coral fijo, le robaba la señal a la selección real y el ojo
-              no encontraba en qué categoría estaba. Aquí la selección se
-              marca en `ink`, que es un estado, no un acento de marca. */}
+          {/* v1.14.1 §2 · "Todos" seleccionado va en coral suave, como
+              cualquier otro chip. En v1.14 iba en `ink` pleno para no
+              robarle el coral a la selección real; el problema es que un
+              negro pleno de 48 px es el elemento de más contraste de la
+              pantalla y compite con "Cobrar". Con el coral SOFT no hay
+              tal competencia —el coral pleno sigue siendo de "Cobrar"— y
+              la fila entera usa un solo lenguaje de selección. */}
           <button
             onClick={() => setSelectedTag(null)}
             aria-pressed={selectedTag === null}
-            className={
-              selectedTag === null
-                ? "h-touch px-4 md:px-5 rounded-2xl bg-mipiace-ink text-white text-[13.5px] md:text-[14px] font-medium flex items-center gap-2 shrink-0"
-                : "h-touch px-4 md:px-5 rounded-2xl bg-white border border-slate-200 text-slate-700 text-[13.5px] md:text-[14px] font-medium flex items-center gap-2 shrink-0 hover:border-mipiace-ink/40"
-            }
+            className={`${CHIP_BASE} ${selectedTag === null ? CHIP_SELECTED : CHIP_IDLE}`}
           >
             <Star
               className={
-                selectedTag === null ? "w-3.5 h-3.5 fill-white" : "w-3.5 h-3.5 text-slate-400"
+                selectedTag === null
+                  ? "w-[18px] h-[18px] shrink-0 fill-mipiace-coral text-mipiace-coral"
+                  : "w-[18px] h-[18px] shrink-0 text-slate-400"
               }
-              strokeWidth={2.5}
+              strokeWidth={2.25}
             />
             Todos
           </button>
@@ -2946,13 +3073,15 @@ function SaleWorkspace({
                 onClick={() => setSelectedTag(tag)}
                 aria-pressed={active}
                 data-tone={tone}
-                className={
-                  active
-                    ? "h-touch px-4 md:px-5 rounded-2xl border bg-mipiace-coral border-mipiace-coral text-white text-[13.5px] md:text-[14px] font-medium flex items-center gap-2 shrink-0 max-w-[200px]"
-                    : `h-touch px-4 md:px-5 rounded-2xl border ${TONE_STYLES[tone].chip} text-[13.5px] md:text-[14px] font-medium flex items-center gap-2 shrink-0 max-w-[200px]`
-                }
+                className={`${CHIP_BASE} max-w-[200px] ${active ? CHIP_SELECTED : CHIP_IDLE}`}
               >
-                <Icon className="w-[18px] h-[18px] shrink-0" strokeWidth={2.25} />
+                {/* El tono vive AQUÍ y sólo aquí. Seleccionado, el icono
+                    se pasa al coral con el resto del chip: dos colores
+                    dentro de un chip activo se leen como dos estados. */}
+                <Icon
+                  className={`w-[18px] h-[18px] shrink-0 ${active ? "" : TONE_STYLES[tone].icon}`}
+                  strokeWidth={2.25}
+                />
                 <span className="truncate">{renderTagLabel(tag, tagAliases)}</span>
               </button>
             );
@@ -2964,11 +3093,11 @@ function SaleWorkspace({
               // categoría activa se ha quedado dentro del sheet, el
               // camarero tiene que poder verlo sin abrirlo.
               aria-pressed={selectedTag != null && overflowTags.includes(selectedTag)}
-              className={
+              className={`${CHIP_BASE} ${
                 selectedTag != null && overflowTags.includes(selectedTag)
-                  ? "h-touch px-4 md:px-5 rounded-2xl border bg-mipiace-coral border-mipiace-coral text-white text-[13.5px] md:text-[14px] font-medium flex items-center gap-2 shrink-0"
-                  : "h-touch px-4 md:px-5 rounded-2xl border bg-white border-slate-200 text-slate-700 text-[13.5px] md:text-[14px] font-medium flex items-center gap-2 shrink-0 hover:border-mipiace-ink/40"
-              }
+                  ? CHIP_SELECTED
+                  : CHIP_IDLE
+              }`}
             >
               <ChevronDown className="w-[18px] h-[18px] shrink-0" strokeWidth={2.25} />
               Más ({overflowTags.length})
@@ -2996,42 +3125,16 @@ function SaleWorkspace({
               </h3>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-3.5">
-              {favoriteProducts.map((p) => {
-                const imgSrc = tenantId ? productImageUrl(p, tenantId) : null;
-                return (
-                  <button
-                    key={`fav-${p.id}`}
-                    onClick={() => onClickProduct(p)}
-                    className="group bg-white rounded-2xl border border-amber-200 overflow-hidden text-left hover:border-amber-400 hover:shadow-sm transition-all"
-                  >
-                    <div className="aspect-[5/4] flex items-center justify-center bg-stone-100 text-stone-600 overflow-hidden">
-                      {imgSrc ? (
-                        <img
-                          src={imgSrc}
-                          alt=""
-                          loading="lazy"
-                          decoding="async"
-                          draggable={false}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <PlaceholderIcon
-                          className="w-10 h-10 md:w-12 md:h-12 opacity-80"
-                          strokeWidth={1.4}
-                        />
-                      )}
-                    </div>
-                    <div className="px-3 md:px-3.5 py-2.5 md:py-3">
-                      <div className="text-[13px] md:text-[13.5px] font-medium text-mipiace-ink line-clamp-2 min-h-[2.6em] leading-tight">
-                        {p.name}
-                      </div>
-                      <div className="text-[12.5px] md:text-[13px] text-slate-500 mt-0.5 tabular-nums">
-                        {formatEur(p.priceGross)}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
+              {favoriteProducts.map((p) => (
+                <ProductTile
+                  key={`fav-${p.id}`}
+                  product={p}
+                  imgSrc={tenantId ? productImageUrl(p, tenantId) : null}
+                  tone={toneForProduct(p)}
+                  favorite
+                  onClick={() => onClickProduct(p)}
+                />
+              ))}
             </div>
           </div>
         )}
@@ -3096,56 +3199,24 @@ function SaleWorkspace({
             </div>
           )}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-3.5 mb-5 md:mb-6">
-          {visibleProducts.map((p) => {
-            const imgSrc = tenantId ? productImageUrl(p, tenantId) : null;
-            return (
-              <button
-                key={p.id}
-                onClick={() => onClickProduct(p)}
-                className="group bg-white rounded-2xl border border-slate-200 overflow-hidden text-left hover:border-mipiace-coral/50 hover:shadow-sm transition-all"
-              >
-                <div className="aspect-[5/4] flex items-center justify-center bg-stone-100 text-stone-600 overflow-hidden">
-                  {imgSrc ? (
-                    <img
-                      src={imgSrc}
-                      alt=""
-                      loading="lazy"
-                      decoding="async"
-                      draggable={false}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    // B-Multi-Vertical SB3: icono según vertical
-                    // (Coffee HOSPITALITY, Package RETAIL, Briefcase
-                    // SERVICES). Fallback Package para sesiones sin
-                    // businessType cacheado.
-                    <PlaceholderIcon
-                      className="w-10 h-10 md:w-12 md:h-12 opacity-80"
-                      strokeWidth={1.4}
-                    />
-                  )}
-                </div>
-                <div className="px-3 md:px-3.5 py-2.5 md:py-3">
-                  {/* B-UX-Pulido F3: dos líneas con line-clamp para
-                      catálogos con nombres largos (Thalia tiene
-                      productos tipo "Abre y descubre el espacio4"
-                      que se truncaban antes). min-h reserva siempre
-                      el alto de 2 líneas para que el grid no salte. */}
-                  <div className="text-[13px] md:text-[13.5px] font-medium text-mipiace-ink line-clamp-2 min-h-[2.6em] leading-tight">
-                    {p.name}
-                  </div>
-                  <div className="text-[12.5px] md:text-[13px] text-slate-500 mt-0.5 tabular-nums">
-                    {formatEur(p.priceGross)}
-                  </div>
-                </div>
-              </button>
-            );
-          })}
+          {visibleProducts.map((p) => (
+            <ProductTile
+              key={p.id}
+              product={p}
+              imgSrc={tenantId ? productImageUrl(p, tenantId) : null}
+              tone={toneForProduct(p)}
+              onClick={() => onClickProduct(p)}
+            />
+          ))}
+          {/* "Línea libre" mide lo mismo que una tarjeta: con
+              `min-h-[180px]` estiraba su fila entera y volvía a romper el
+              reparto que §1 acaba de arreglar. */}
           <button
             onClick={onClickFreeLine}
-            className="bg-transparent rounded-2xl border-2 border-dashed border-slate-300 hover:border-mipiace-coral/50 hover:bg-mipiace-coral-soft/40 flex flex-col items-center justify-center gap-2 text-slate-400 hover:text-mipiace-coral-dark text-[13px] font-medium min-h-[140px] md:min-h-[180px]"
+            style={{ minHeight: PRODUCT_CARD_MIN_HEIGHT }}
+            className="bg-transparent rounded-2xl border-2 border-dashed border-slate-300 hover:border-mipiace-coral/50 hover:bg-mipiace-coral-soft/40 flex flex-col items-center justify-center gap-1.5 text-slate-400 hover:text-mipiace-coral-dark text-[13px] font-medium"
           >
-            <Plus className="w-6 h-6" strokeWidth={2} />
+            <Plus className="w-5 h-5" strokeWidth={2} />
             Línea libre
           </button>
         </div>
@@ -3265,18 +3336,31 @@ function SaleWorkspace({
         </div>
       )}
 
-      {/* v1.14 · las categorías que no caben en las dos filas. Es un
-          sheet de acciones secundarias, no del flujo de cobro. */}
+      {/* v1.14 · las categorías que no caben en la fila. Es un sheet de
+          acciones secundarias, no del flujo de cobro. Desde v1.14.1 la
+          barra es de UNA fila, así que aquí cae más gente: el sheet pasa
+          de ser el desagüe de tres categorías raras a ser la lista
+          completa, y por eso lleva el mismo icono y el mismo tono que
+          llevaría el chip. */}
       {categoriesSheetOpen && (
         <CategoriesSheet
           categories={overflowTags.map<SheetCategory>((tag) => {
             const tone: CategoryTone = toneAssignments[tag] ?? "stone";
             const Icon = CATEGORY_ICONS[iconNameForTag(tag, tone)];
+            // Mismo criterio que en la barra: el tono pinta el icono
+            // salvo cuando la categoría está seleccionada, que entonces
+            // el chip entero habla en coral.
+            const activeInSheet = selectedTag === tag;
             return {
               tag,
               label: renderTagLabel(tag, tagAliases),
               tone,
-              icon: <Icon className="w-[18px] h-[18px]" strokeWidth={2.25} />,
+              icon: (
+                <Icon
+                  className={`w-[18px] h-[18px] ${activeInSheet ? "" : TONE_STYLES[tone].icon}`}
+                  strokeWidth={2.25}
+                />
+              ),
             };
           })}
           selectedTag={selectedTag}
@@ -3501,7 +3585,19 @@ function TicketPanel({
             20 px al desglose. La meta es contexto: se lee de reojo, y lo
             que se corta (el alias de quien abrió) está también en el
             mapa. */}
-        <div className="text-[12.5px] text-slate-500 mt-0.5 flex items-center gap-1.5 truncate">
+        {/* v1.14.1-el-catalogo-manda §5 · en el AP11 esta línea salía
+            como "10 h 42 m · mipiacetpv-test-2e5c19f9 ·", con el punto
+            medio colgando y sin puntos suspensivos. La causa: `truncate`
+            sobre un contenedor FLEX. `text-overflow: ellipsis` sólo
+            actúa sobre el contenido en línea de un bloque; en un flex
+            container los hijos son items, no texto, y el navegador se
+            limita a recortar por donde toque — que fue justo detrás de
+            un separador. Ahora la meta es un bloque con contenido en
+            línea, así que trunca de verdad y con elipsis. */}
+        <div
+          data-testid="ticket-meta"
+          className="text-[12.5px] text-slate-500 mt-0.5 truncate"
+        >
           {tableContext ? (
             <TableContextLine table={tableContext} itemCount={totals.itemCount} />
           ) : (
@@ -3511,7 +3607,7 @@ function TicketPanel({
           )}
           {shiftTicketsCount !== null && (
             <>
-              <span className="text-slate-300">·</span>
+              <span className="text-slate-300 mx-1.5">·</span>
               <span
                 title={`${shiftTicketsCount} ${vocab("ticketNoun", businessType).toLowerCase()}${shiftTicketsCount === 1 ? "" : "s"} ya emitido${shiftTicketsCount === 1 ? "" : "s"} en este turno`}
               >
@@ -3536,6 +3632,14 @@ function TicketPanel({
     </div>
   );
 
+  // v1.14.1-el-catalogo-manda §3 · los atajos que caben DEBAJO de las
+  // líneas sin empujar nada. La regla (y los números medidos que la
+  // sostienen) vive en `topSellersSlotsFor`, compartida con la carga del
+  // ranking. Con cero líneas no hay hueco que llenar: eso es el estado
+  // vacío y lo pinta `TicketEmptyState`.
+  const fillerTopSellers =
+    lines.length === 0 ? [] : topSellers.slice(0, topSellersSlotsFor(lines.length));
+
   // 2 · La lista, pegada a la cabecera y con todo el espacio flexible.
   // Es lo que más se mira y ahora va donde antes estaban las acciones.
   const linesBlock = (
@@ -3552,22 +3656,45 @@ function TicketPanel({
           onClickProduct={onClickProduct}
         />
       ) : (
-        <div className="divide-y divide-slate-100">
-          {/* v1.2-Lite-fix1 Lote 3 (F2-UX): cada línea es un componente
-              extraído con stepper inline y papelera. El click central
-              abre el LineSheet para edición avanzada. */}
-          {lines.map((l) => (
-            <CartLineItem
-              key={l.id}
-              line={l}
-              durationMin={l.productId ? durationByProduct.get(l.productId) : undefined}
-              highlighted={highlightId === l.id}
-              onClick={() => onClickLine(l)}
-              onUnitsChange={(units) => onUpdateLineUnits(l.id, units)}
-              onRemove={() => onRemoveLine(l.id)}
-            />
-          ))}
-        </div>
+        <>
+          <div className="divide-y divide-slate-100">
+            {/* v1.2-Lite-fix1 Lote 3 (F2-UX): cada línea es un componente
+                extraído con stepper inline y papelera. El click central
+                abre el LineSheet para edición avanzada. */}
+            {lines.map((l) => (
+              <CartLineItem
+                key={l.id}
+                line={l}
+                durationMin={l.productId ? durationByProduct.get(l.productId) : undefined}
+                highlighted={highlightId === l.id}
+                onClick={() => onClickLine(l)}
+                onUnitsChange={(units) => onUpdateLineUnits(l.id, units)}
+                onRemove={() => onRemoveLine(l.id)}
+              />
+            ))}
+          </div>
+          {/* v1.14.1-el-catalogo-manda · §3. El desierto del desglose.
+              Con una línea quedaban ~220 px vacíos y el panel no parecía
+              un ticket, parecía roto. La jerarquía de v1.14 no se toca
+              —la lista sigue siendo el bloque flexible y el pie sigue
+              anclado—: lo que se hace es llenar el hueco con lo único
+              que ahí es útil, el atajo para añadir lo siguiente. Añadir
+              el segundo café sin volver a buscarlo en la rejilla de la
+              izquierda es exactamente el gesto de la barra en hora
+              punta. */}
+          {fillerTopSellers.length > 0 && (
+            <div
+              data-testid="ticket-top-sellers-filler"
+              className="mt-3 pt-3 border-t border-slate-100"
+            >
+              <TopSellersGrid
+                topSellers={fillerTopSellers}
+                topSellersSource={topSellersSource}
+                onClickProduct={onClickProduct}
+              />
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -3620,21 +3747,25 @@ function TicketPanel({
       </div>
       {/* Las dos acciones EN FILA, no apiladas. Apiladas son 136 px de
           pie (dos veces `touch-lg` más el hueco) y en un panel de 576 px
-          eso se lo come el desglose, que es lo que este bloque viene a
-          recuperar. En fila son 64 px y las dos siguen a la altura que
-          manda el sistema visual. */}
-      <div
-        className={
-          tableContext
-            ? "grid grid-cols-2 gap-2"
-            : "grid grid-cols-[110px_1fr] md:grid-cols-[140px_1fr] gap-2"
-        }
-      >
+          eso se lo come el desglose, que es lo que v1.14 vino a
+          recuperar.
+          v1.14.1-el-catalogo-manda §4 · pero en fila y a mitad y mitad
+          las dos pesaban lo mismo, y no lo son: "Cobrar" es LA acción de
+          la pantalla y "Enviar comanda" es de trámite. La jerarquía se
+          construye con las tres variables a la vez —ancho, alto y
+          relleno—: "Cobrar" se lleva dos tercios del ancho, se queda en
+          `touch-lg` (64 px, el tope de la escala táctil) y es el único
+          coral pleno de la pantalla; "Enviar comanda" baja a `touch`
+          (48), pierde el borde coral y se alinea abajo. No se inventa un
+          `h-[72px]`: `tokens.md` §4 cierra la escala en 64 y dice
+          explícitamente que las alturas sueltas se discuten antes de
+          implementarse. */}
+      <div className="grid grid-cols-[1fr_1.6fr] gap-2 items-end">
         {!tableContext && (
           <button
             onClick={onSuspend}
             disabled={lines.length === 0}
-            className="h-touch-lg border border-mipiace-coral/30 text-mipiace-coral-dark hover:bg-mipiace-coral-soft hover:border-mipiace-coral/50 disabled:opacity-50 font-medium text-[13.5px] md:text-[14.5px] gap-2 rounded-2xl flex items-center justify-center"
+            className="h-touch border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 font-medium text-[12.5px] gap-1.5 rounded-2xl flex items-center justify-center px-1.5 whitespace-nowrap"
           >
             <Bookmark className="w-[15px] md:w-[16px] h-[15px] md:h-[16px]" strokeWidth={2.25} />
             Guardar
@@ -3647,11 +3778,14 @@ function TicketPanel({
           <button
             onClick={onSendToKitchen}
             disabled={lines.length === 0 || kitchenBusy}
-            className={
-              kitchenLastRevision > 0
-                ? "h-touch-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50 text-slate-600 font-medium text-[13.5px] md:text-[14px] rounded-2xl flex items-center justify-center gap-2"
-                : "h-touch-lg border border-mipiace-coral/40 text-mipiace-coral-dark hover:bg-mipiace-coral-soft disabled:opacity-50 font-medium text-[13.5px] md:text-[14.5px] rounded-2xl flex items-center justify-center gap-2"
-            }
+            // Ni el primer envío lleva ya borde coral: en esta pantalla
+            // el coral es de "Cobrar". Que la comanda esté sin enviar se
+            // dice con el rótulo, no compitiendo en color con la caja.
+            // `1fr` de la rejilla son 111 px en un panel de 360: a
+            // 13,5 px "Enviar comanda" partía en dos líneas dentro de un
+            // botón de 48. Baja a 12,5 y el padding a `px-1.5`, que es
+            // lo que lo deja en una línea. Medido en el bucle visual.
+            className="h-touch border border-slate-200 hover:bg-slate-50 disabled:opacity-50 text-slate-600 font-medium text-[12.5px] rounded-2xl flex items-center justify-center gap-2 px-1.5 whitespace-nowrap"
             title={
               kitchenLastRevision > 0
                 ? `Reenviar la comanda (la cocina ya recibió la nº ${kitchenLastRevision}).`
@@ -3673,17 +3807,17 @@ function TicketPanel({
         <button
           onClick={onClickCheckout}
           disabled={lines.length === 0}
-          className="h-touch-lg bg-mipiace-coral hover:bg-mipiace-coral-dark disabled:opacity-50 text-white rounded-2xl flex flex-col items-center justify-center leading-tight px-3"
+          className="h-touch-lg bg-mipiace-coral hover:bg-mipiace-coral-dark disabled:opacity-50 text-white rounded-2xl flex flex-col items-center justify-center leading-tight px-3 shadow-sm"
         >
           {/* Rótulo e importe APILADOS. En fila, "Cobrar 1.240,50 €" no
               entra en media columna de un panel de 360 px y el importe
               se partía. El importe sigue en el botón —el cajero cobra
               mirando el botón, no la fila de arriba— y con
               `tabular-nums`. */}
-          <span className="text-[13.5px] font-medium">
+          <span className="text-[13px] font-medium text-white/85">
             {vocab("saleAction", businessType)}
           </span>
-          <span className="text-[15px] md:text-[16px] font-semibold tabular-nums">
+          <span className="text-[17px] md:text-[18px] font-semibold tabular-nums">
             {formatEur(totals.total)}
           </span>
         </button>
@@ -3737,6 +3871,32 @@ function TicketEmptyState({
       </div>
     );
   }
+  return (
+    <TopSellersGrid
+      topSellers={topSellers}
+      topSellersSource={topSellersSource}
+      onClickProduct={onClickProduct}
+    />
+  );
+}
+
+// v1.14.1-el-catalogo-manda §3 · la rejilla de más vendidos, extraída
+// para que la pinten los DOS sitios que la usan: el estado vacío del
+// ticket (v1.14 §4) y el hueco que queda bajo una o dos líneas.
+//
+// Se extrae en vez de duplicarse porque son lo mismo: un atajo para
+// añadir lo siguiente sin volver a la rejilla de la izquierda. Si
+// divergieran, uno de los dos acabaría siendo el bueno y el otro el
+// olvidado.
+function TopSellersGrid({
+  topSellers,
+  topSellersSource,
+  onClickProduct,
+}: {
+  topSellers: CatalogProduct[];
+  topSellersSource: "shift" | "month" | null;
+  onClickProduct: (p: CatalogProduct) => void;
+}) {
   return (
     <div data-testid="ticket-top-sellers" className="py-2">
       <div className="flex items-center gap-2 mb-2.5">
@@ -4066,12 +4226,19 @@ function TableContextLine({
     parts.push(`${table.diners} comensales`);
   }
   if (elapsed) parts.push(elapsed);
+  parts.push(`${itemCount} ${itemCount === 1 ? "ud." : "uds."}`);
+  // v1.14.1 §5 · el alias va el ÚLTIMO, que es lo primero que se corta.
+  // v1.14 ya decidió que "lo que se corta primero es el alias de quien
+  // abrió la mesa, que está también en el mapa", pero lo había dejado
+  // delante de las unidades, así que en la práctica lo primero en caer
+  // eran las unidades. En el AP11 el alias era además el más largo de
+  // los cuatro campos ("mipiacetpv-test-2e5c19f9", el slug del tenant en
+  // los cajeros de prueba) y se comía él solo la línea entera.
   if (table.openedByAlias) {
     parts.push(table.openedByAlias);
   } else if (table.openedByEmail) {
     parts.push(table.openedByEmail.split("@")[0]!);
   }
-  parts.push(`${itemCount} ${itemCount === 1 ? "ud." : "uds."}`);
   return <>{parts.join(" · ")}</>;
 }
 
