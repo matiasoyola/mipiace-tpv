@@ -151,6 +151,29 @@ const ViewTenantCashiersMeta = Base.extend({
   cashiersReturned: z.number().int().nonnegative(),
 });
 
+// A3-distribución: super-admin emite un código de instalación de 6 dígitos
+// para descargar la APK desde mipiacetpv.com/apk.
+const CreateApkDownloadCodeMeta = Base.extend({
+  versionCode: z.number().int().positive(),
+  code: z.string().length(6),
+  expiresAt: z.string(),
+  maxDownloads: z.number().int().positive(),
+  note: z.string().nullable(),
+});
+
+// A3-distribución: intento de descarga contra un código EXISTENTE. La traza
+// se atribuye al super-admin que lo emitió (`createdBySuperAdminId`): la
+// descarga no es anónima, es la consecuencia de su acto. `tenantId` es null
+// — un APK no pertenece a ningún tenant.
+//
+// Los códigos INEXISTENTES no llegan aquí: no hay a quién atribuirlos, así
+// que se quedan en log estructurado + contador del rate-limiter por IP.
+const ApkDownloadMeta = Base.extend({
+  versionCode: z.number().int().positive(),
+  code: z.string().length(6),
+  result: z.enum(["ok", "caducado", "agotado"]),
+});
+
 const META_SCHEMAS = {
   create_tenant: CreateTenantMeta,
   create_tenant_draft: CreateTenantDraftMeta,
@@ -169,6 +192,8 @@ const META_SCHEMAS = {
   dedupe_tags: DedupeTagsMeta,
   transfer_owner: TransferOwnerMeta,
   view_tenant_cashiers: ViewTenantCashiersMeta,
+  create_apk_download_code: CreateApkDownloadCodeMeta,
+  apk_download: ApkDownloadMeta,
 } as const;
 
 export type SuperAdminAction = keyof typeof META_SCHEMAS;

@@ -374,3 +374,39 @@ obligatorio, esta ADR no existiría.
 a diario.** Si eso pasa, el camino ya está: encender
 `requireCashCountOnClose` para ese tenant. Si pasa en varios, hay que
 volver aquí y replantear el default.
+
+---
+
+## ADR-013 · La página `/apk` la sirve la API, no la PWA
+
+**Contexto.** `apps/tpv-web` es la única fuente de UI del producto: todo lo que ve un
+usuario sale de ese bundle. La distribución interna de la APK (bloque A3) necesita una
+página donde el instalador teclee un código de 6 dígitos y descargue el binario.
+
+Esa página se ve **precisamente en el navegador que no funciona**. En las pruebas del
+2026-08-27 sobre el AP11-1006 se confirmó que su Chrome de fábrica es el 81 (2020), que no
+soporta `gap` en flexbox y pinta el TPV con los textos pegados. La APK existe justamente para
+esquivar ese navegador.
+
+**Decisión.** `GET/POST /apk` y `GET /apk/latest.json` los sirve Fastify
+(`apps/api/src/releases/`), con HTML plano generado en el backend:
+
+- Cero JavaScript. Un `<form method="POST">`.
+- Sin `gap`, sin `grid`, sin variables CSS, sin `:is()`.
+- Colores de marca por valor literal, porque no hay variables CSS donde meterlos.
+- El botón en la mitad superior: el teclado del sistema tapa el 52 % inferior.
+
+Caddy enruta `handle /apk*` al backend antes del handler de estáticos y fuera del `encode`.
+
+**Alternativa descartada.** Servirla desde `tpv-web` como una ruta más de la PWA. Se rompería
+exactamente igual que el TPV en ese mismo navegador, que es el escenario para el que existe.
+Una página de rescate no puede depender de lo que está rescatando.
+
+**Consecuencias.**
+
+- Es la **única** excepción a "tpv-web es la única fuente de UI", y se documenta aquí para que
+  no siente precedente: cualquier otra pantalla sigue yendo a la PWA.
+- El HTML vive en `apps/api/src/releases/page.ts` y no comparte estilos con el resto del
+  producto. Un cambio de marca hay que replicarlo a mano ahí (son ~5 colores literales).
+- Los tests de esa página comprueban que no aparezcan `gap`, `grid`, `var(--` ni `<script`:
+  el navegador que la va a abrir no perdona ninguno de los cuatro.

@@ -11,6 +11,9 @@ android/local.properties
 android/app/release/
 *.apk
 *.aab
+# A3-distribucion: salida renombrada de build-release-apk.sh. El *.apk
+# de arriba ya cubre el binario, pero NO el sidecar .sha256 de al lado.
+build-releases/
 
 # Keystore de firma — NUNCA al repo. Vive en el Mac de Matías + 1Password.
 *.keystore

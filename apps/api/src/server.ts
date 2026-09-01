@@ -22,10 +22,12 @@ import { registerContactImportRoutes } from "./contacts/import.js";
 import { registerCrmRoutes } from "./crm/routes.js";
 import { getPrisma, getRedis, shutdown } from "./context.js";
 import { registerDeviceRoutes } from "./devices/routes.js";
+import { registerReleasesRoutes } from "./releases/routes.js";
 import { loadEnv } from "./env.js";
 import { getAppVersion, SERVER_STARTED_AT } from "./version.js";
 import { registerErrorHandler } from "./lib/error-handler.js";
 import { registerLenientJsonParser } from "./lib/lenient-json.js";
+import { registerFormBodyParser } from "./lib/form-body.js";
 import { initSentry } from "./lib/sentry.js";
 import { registerOnboardingRoutes } from "./onboarding/routes.js";
 import { registerServicesRoutes } from "./services/routes.js";
@@ -110,6 +112,8 @@ async function main() {
   // rechazando vía schema, ahora con un 400 explicable. Importante
   // hacerlo server-side porque las PWA cachean JS viejo semanas.
   registerLenientJsonParser(app);
+  // A3-distribución: el <form> sin JS de la página /apk.
+  registerFormBodyParser(app);
 
   // WebSocket plugin para el bus multi-terminal del vertical bar (B7
   // §6). Registramos antes de las rutas para que el `websocket: true`
@@ -163,6 +167,8 @@ async function main() {
   await registerStaffRoutes(app);
   await registerAgendaRoutes(app);
   await registerDeviceRoutes(app);
+  // A3-distribución: /super-admin/releases* y el /apk público.
+  await registerReleasesRoutes(app);
   await registerCashiersRoutes(app);
   await registerCashierAuthRoutes(app);
   await registerShiftRoutes(app);

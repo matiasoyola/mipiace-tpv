@@ -29,6 +29,28 @@ const TWO_FA_VERIFY_MAX = 5;
 export interface RateLimitConfig {
   attemptsKey: string;
   lockKey: string;
+  // A3-distribución: umbrales por bucket. Sin ellos rigen los de arriba
+  // (5 intentos / ventana 5 min / candado 15 min), que son los que quieren
+  // las puertas de login. La descarga pública de la APK necesita otros
+  // (10 / 10 min / 30 min): 6 dígitos son un millón de combinaciones y el
+  // endpoint es público, pero el instalador también teclea mal con prisa
+  // en un bar, y bloquearle 15 minutos a la tercera es peor negocio que
+  // dejarle diez intentos.
+  maxAttempts?: number;
+  attemptTtlSeconds?: number;
+  lockTtlSeconds?: number;
+}
+
+function limits(config: RateLimitConfig): {
+  maxAttempts: number;
+  attemptTtl: number;
+  lockTtl: number;
+} {
+  return {
+    maxAttempts: config.maxAttempts ?? MAX_ATTEMPTS,
+    attemptTtl: config.attemptTtlSeconds ?? ATTEMPT_TTL_SECONDS,
+    lockTtl: config.lockTtlSeconds ?? LOCK_TTL_SECONDS,
+  };
 }
 
 export interface RateLimitState {
@@ -49,7 +71,7 @@ export async function inspect(
   return {
     locked: false,
     retryAfterSeconds: 0,
-    attemptsRemaining: Math.max(0, MAX_ATTEMPTS - attempts),
+    attemptsRemaining: Math.max(0, limits(config).maxAttempts - attempts),
   };
 }
 
@@ -57,22 +79,23 @@ export async function registerFailure(
   config: RateLimitConfig,
   redis: Redis = getRedis(),
 ): Promise<RateLimitState> {
+  const { maxAttempts, attemptTtl, lockTtl } = limits(config);
   const attempts = await redis.incr(config.attemptsKey);
   if (attempts === 1) {
-    await redis.expire(config.attemptsKey, ATTEMPT_TTL_SECONDS);
+    await redis.expire(config.attemptsKey, attemptTtl);
   }
-  if (attempts >= MAX_ATTEMPTS) {
-    await redis.set(config.lockKey, "1", "EX", LOCK_TTL_SECONDS);
+  if (attempts >= maxAttempts) {
+    await redis.set(config.lockKey, "1", "EX", lockTtl);
     return {
       locked: true,
-      retryAfterSeconds: LOCK_TTL_SECONDS,
+      retryAfterSeconds: lockTtl,
       attemptsRemaining: 0,
     };
   }
   return {
     locked: false,
     retryAfterSeconds: 0,
-    attemptsRemaining: MAX_ATTEMPTS - attempts,
+    attemptsRemaining: maxAttempts - attempts,
   };
 }
 
@@ -81,6 +104,38 @@ export async function reset(
   redis: Redis = getRedis(),
 ): Promise<void> {
   await redis.del(config.attemptsKey, config.lockKey);
+}
+
+/**
+ * Perdona UN intento fallido. No es `reset`.
+ *
+ * A3-distribución: en `POST /apk` el acierto no puede limpiar el contador
+ * entero. Quien tiene un código válido lo tiene por 3 descargas, y con un
+ * reset por acierto el patrón "9 fallos + 1 acierto" deja el bucket a cero
+ * tantas veces como usos le queden al código: el límite de 10 intentos por
+ * ventana se lo regala a quien más cerca está de poder abusar de él.
+ *
+ * Perdonar uno cubre el caso real —el instalador teclea mal un par de veces
+ * antes de acertar y no quiere arrastrar esos fallos a la siguiente
+ * descarga— y acota el regalo a un intento por acierto.
+ *
+ * NO toca el candado a propósito: una IP bloqueada no se desbloquea acertando
+ * (de hecho ni llega aquí, `inspect` la corta antes). Y el DECR conserva el
+ * TTL de la ventana, así que tampoco la alarga.
+ */
+export async function forgiveFailure(
+  config: RateLimitConfig,
+  redis: Redis = getRedis(),
+): Promise<void> {
+  const current = await redis.get(config.attemptsKey);
+  if (current === null) return;
+  // A 1 o menos, DECR dejaría el contador en negativo (o crearía la clave sin
+  // TTL si hubiera caducado entre el GET y el DECR): se borra y queda a cero.
+  if (Number(current) <= 1) {
+    await redis.del(config.attemptsKey);
+    return;
+  }
+  await redis.decr(config.attemptsKey);
 }
 
 export interface ThrottleState {

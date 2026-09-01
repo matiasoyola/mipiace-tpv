@@ -105,6 +105,14 @@ export const EnvSchema = z.object({
     .positive()
     .default(5 * 1024 * 1024),
 
+  // ── Releases de la APK (A3-distribución) ───────────────────────────
+  // Directorio con los .apk publicados y su índice `releases.json`. Vive
+  // FUERA del repo y fuera de la imagen: en producción el compose monta
+  // `/opt/mipiacetpv/releases` como `/srv/releases` en read-only. En dev cae
+  // al mismo path y, si no existe, los endpoints responden 404 en vez de
+  // reventar — un TPV no deja de cobrar porque no haya APKs publicadas.
+  RELEASES_DIR: z.string().default("/srv/releases"),
+
   // ── Sentry (v1.5-consistencia-B · Lote 2) ──────────────────────────
   // Sin DSN, Sentry queda en no-op absoluto (initSentry no llama init).
   // Compose interpola `""` cuando la var no está en .env.production —
