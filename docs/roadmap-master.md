@@ -4,7 +4,9 @@ Documento único con todo el roadmap actual del producto, ordenado
 cronológicamente. Se actualiza cada vez que se cierra un bloque o
 se incorpora feedback nuevo.
 
-Última actualización: **2026-05-20** (cierre sesión Matías + Thalía).
+Última actualización: **2026-09-02** (estado del módulo de agenda; ver
+`docs/reservas/02-roadmap-agenda.md` para el roadmap vivo de esa vertical).
+El resto del documento sigue reflejando el cierre del 2026-05-20.
 
 ---
 
@@ -167,6 +169,16 @@ Ver `docs/roadmap-post-15-clientes.md` para spec completo.
 - **C.4** Transferir stock entre almacenes.
 
 ### Servicios profesionales
+
+> ⚠️ **P-2 ya no está diferido: el módulo de agenda existe y está
+> en marcha.** `B-reservas-1` a `B-reservas-4` están cerrados,
+> `B-reservas-5` escrito, y `B-reservas-6` a `B-reservas-10`
+> abiertos por el cruce con la ingeniería inversa de Koibox.
+> **El roadmap vivo de la vertical es
+> `docs/reservas/02-roadmap-agenda.md`** — esta entrada se
+> conserva sólo como registro de dónde salió. Estado verificado
+> el 2026-09-02 en `docs/reservas/01-cruce-con-b-reservas-4.md`.
+
 - **P-2** Agendas peluquería con tiempos por servicio y
   asignación por empleado. **Spec técnico completo en
   `docs/design/agenda-belleza-spec.md`** (origen: proyecto Raquel
