@@ -113,7 +113,10 @@ function computeLineCount(doc: TicketDocument): number {
   lines += 1; // SUBTOTAL
   lines += 1; // TOTAL (resaltado)
   lines += 1; // metodo pago
-  if (doc.payment.change && doc.payment.change > 0) lines += 1;
+  // v1.15-la-vuelta-existe §3 · Entregado + Cambio.
+  if (doc.payment.change && doc.payment.change > 0) {
+    lines += doc.payment.received != null ? 2 : 1;
+  }
   lines += 1; // separador
   if (doc.creditNotice) lines += 5; // v1.8-Fiado · bloque PENDIENTE DE PAGO
   lines += 2; // footer thanks
@@ -341,7 +344,20 @@ export async function renderTicketPdf(
     `Pago: ${labelPayment(doc.payment.method)} · ${formatEur(doc.payment.paid)}`,
     FONT_SIZE_SMALL,
   );
+  // v1.15-la-vuelta-existe §3 · la vuelta, en el papel. Hasta v1.14.1
+  // esta línea salía por accidente (el ticket llevaba dentro el error de
+  // B1: `Σ payments − total` daba la vuelta porque `payments[].amount`
+  // era el billete). Ahora sale del cálculo correcto —entregado menos
+  // aplicado en efectivo— y va acompañada de lo que puso el cliente.
   if (doc.payment.change && doc.payment.change > 0) {
+    if (doc.payment.received != null) {
+      drawTwoColumn(
+        s,
+        "Entregado",
+        formatEur(doc.payment.received),
+        FONT_SIZE_SMALL,
+      );
+    }
     drawTwoColumn(s, "Cambio", formatEur(doc.payment.change), FONT_SIZE_SMALL);
   }
 

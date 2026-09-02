@@ -31,6 +31,7 @@ import { getPrisma } from "../context.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
 import { cashierLabelFrom } from "../users/display.js";
 import { loadTicketDocument } from "./build-document.js";
+import { changeFromCash } from "@mipiacetpv/ticket-model";
 import type { TicketTotals } from "@mipiacetpv/ticket-model";
 
 interface PrintQuery {
@@ -342,18 +343,41 @@ export function ticketToEscposInput(
     };
   });
 
-  // Pagos: cash con cambio si hay cashAmount > amount.
-  const payments: TicketPaymentEscpos[] = ticket.payments.map((p) => {
+  // Pagos, con la vuelta colgando de la ÚLTIMA fila de efectivo.
+  //
+  // v1.15-la-vuelta-existe §3 · antes se comparaba `cashAmount` contra
+  // el importe de cada fila CASH por separado. Con el error de B1 dentro
+  // del ticket los dos números eran el mismo billete, así que la
+  // condición `cash > amount` no se cumplía nunca y **el térmico no
+  // imprimía la línea CAMBIO jamás**: el cliente se llevaba un papel con
+  // "Efectivo 5,00" bajo un "TOTAL 3,00" y ninguna vuelta.
+  //
+  // Ahora la vuelta se calcula una sola vez —entregado menos el total
+  // aplicado en efectivo, `changeFromCash`— y se cuelga de la última
+  // fila CASH. En un cobro mixto con dos filas de efectivo la vuelta es
+  // una sola, no una por fila.
+  const cashAmountNum =
+    ticket.cashAmount != null ? Number(ticket.cashAmount.toString()) : null;
+  const change = changeFromCash(
+    ticket.payments.map((p) => ({
+      method: p.method,
+      amount: Number(p.amount.toString()),
+    })),
+    cashAmountNum,
+  );
+  const lastCashIdx = ticket.payments.reduce(
+    (idx, p, i) => (p.method === "CASH" ? i : idx),
+    -1,
+  );
+  const payments: TicketPaymentEscpos[] = ticket.payments.map((p, i) => {
     const amount = Number(p.amount.toString());
     const base: TicketPaymentEscpos = {
       label: methodLabel(p.method),
       amount,
     };
-    if (p.method === "CASH" && ticket.cashAmount != null) {
-      const cash = Number(ticket.cashAmount.toString());
-      if (cash > amount) {
-        base.cashChange = +(cash - amount).toFixed(2);
-      }
+    if (i === lastCashIdx && change > 0 && cashAmountNum != null) {
+      base.cashReceived = +cashAmountNum.toFixed(2);
+      base.cashChange = change;
     }
     return base;
   });

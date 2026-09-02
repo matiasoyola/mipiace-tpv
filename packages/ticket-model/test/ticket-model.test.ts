@@ -52,7 +52,10 @@ function baseInput(): BuildTicketDocumentInput {
           taxRate: 21,
         },
       ],
-      payments: [{ method: "CASH", amount: 10 }],
+      // v1.15-la-vuelta-existe §1 · `amount` es lo APLICADO al total
+      // (6,93 €); el billete de 10 vive en `cashAmount`. Antes de v1.15
+      // este fixture llevaba 10 aquí, que es justo el bug B1.
+      payments: [{ method: "CASH", amount: 6.93 }],
     },
   };
 }
@@ -102,7 +105,12 @@ describe("buildTicketDocument", () => {
     ]);
     expect(doc.totals.subtotal).toBe(6);
     expect(doc.payment.method).toBe("CASH");
-    expect(doc.payment.change).toBe(3.07); // 10 - 6.93
+    // v1.15-la-vuelta-existe §3 · el cambio ya no es `Σ payments − total`
+    // (desde v1.15 esa resta es siempre 0: `amount` es lo aplicado). Es
+    // lo entregado menos lo aplicado en efectivo, y con un ticket bien
+    // formado —pago de 6,93 y billete de 10— siguen siendo 3,07.
+    expect(doc.payment.change).toBe(3.07); // entregado 10 − aplicado 6.93
+    expect(doc.payment.received).toBe(10);
   });
 
   it("marca devolución con referencia al ticket original", () => {

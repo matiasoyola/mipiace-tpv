@@ -38,6 +38,7 @@ import {
   type ModifierSnapshotEntry,
   type ResolveResult,
 } from "./modifier-selection.js";
+import { normalizeTicketPayments } from "./normalize-payments.js";
 import { generatePublicSlug } from "./public-slug.js";
 import {
   PAYMENT_TOLERANCE_EUR,
@@ -353,15 +354,37 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         }
       } else if (paymentsSum + PAYMENT_TOLERANCE_EUR < totals.total) {
         // B5 §3.2: aceptamos overpayment en efectivo (la diferencia es el
-        // cambio). Holded recibe siempre `total` exacto en /pay; los
-        // payments[] del TPV reflejan el dinero recibido. Para
-        // payment_methods != CASH no debería haber overpayment; si lo hay,
-        // lo aceptamos igual y queda como descuadre de caja.
+        // cambio). Holded recibe siempre `total` exacto en /pay.
         return reply.code(400).send({
           error: "PAYMENTS_MISMATCH",
           message: `Σ payments (${paymentsSum.toFixed(2)}) menor que total (${totals.total.toFixed(2)})`,
           tolerance: PAYMENT_TOLERANCE_EUR,
         });
+      }
+      // v1.15-la-vuelta-existe §1 · el exceso entregado no entra en
+      // `payments[]`. Se topea aquí, antes de persistir, y vive sólo en
+      // `cashAmount`. Ver `normalize-payments.ts` para el porqué de
+      // normalizar en vez de rechazar.
+      const normalized = normalizeTicketPayments(
+        body.payments,
+        totals.total,
+        body.cashAmount,
+      );
+      if (!normalized.ok) {
+        return reply.code(400).send(normalized.rejection);
+      }
+      const effectivePayments = normalized.value.payments;
+      const effectiveCashAmount = normalized.value.cashAmount;
+      if (normalized.value.capped) {
+        request.log.info(
+          {
+            externalId: body.externalId,
+            total: totals.total,
+            paymentsSum,
+            change: normalized.value.change,
+          },
+          "v1.15 · payments topeados al total; el exceso queda en cashAmount",
+        );
       }
       // El servidor confía en lo calculado por él mismo (no hay total
       // en el body — sólo líneas y pagos). El recálculo es la línea de
@@ -521,7 +544,9 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             totalDiscount: new Prisma.Decimal(totals.discount),
             notes: body.notes ?? null,
             cashAmount:
-              body.cashAmount != null ? new Prisma.Decimal(body.cashAmount) : null,
+              effectiveCashAmount != null
+                ? new Prisma.Decimal(effectiveCashAmount)
+                : null,
             printIntent: body.printIntent ?? true,
             emailIntent: body.emailIntent ?? null,
             giftReceiptIntentAt: body.giftReceiptIntent ? new Date() : null,
@@ -560,7 +585,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
               })),
             },
             payments: {
-              create: body.payments.map((p) => ({
+              create: effectivePayments.map((p) => ({
                 method: p.method,
                 amount: new Prisma.Decimal(p.amount),
                 meta: p.meta ? (p.meta as object) : Prisma.JsonNull,
@@ -806,6 +831,30 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           tolerance: PAYMENT_TOLERANCE_EUR,
         });
       }
+      // v1.15-la-vuelta-existe §1 · el cobro de mesa entra por la misma
+      // puerta que la venta rápida. Sin esto, cobrar una mesa de 3,00 €
+      // con un billete de 5 seguía metiendo 5,00 en el desglose del Z.
+      const normalized = normalizeTicketPayments(
+        body.payments,
+        totals.total,
+        body.cashAmount,
+      );
+      if (!normalized.ok) {
+        return reply.code(400).send(normalized.rejection);
+      }
+      const effectivePayments = normalized.value.payments;
+      const effectiveCashAmount = normalized.value.cashAmount;
+      if (normalized.value.capped) {
+        request.log.info(
+          {
+            ticketId,
+            total: totals.total,
+            paymentsSum,
+            change: normalized.value.change,
+          },
+          "v1.15 · payments topeados al total; el exceso queda en cashAmount",
+        );
+      }
 
       // Validación de descuento (idéntica a POST /tickets B6 §2).
       const tenantForDiscount = await prisma.tenant.findUniqueOrThrow({
@@ -904,8 +953,8 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
               contactHoldedId: body.contactHoldedId ?? draft.contactHoldedId,
               notes: body.notes ?? draft.notes,
               cashAmount:
-                body.cashAmount != null
-                  ? new Prisma.Decimal(body.cashAmount)
+                effectiveCashAmount != null
+                  ? new Prisma.Decimal(effectiveCashAmount)
                   : draft.cashAmount,
               printIntent: body.printIntent ?? draft.printIntent,
               emailIntent: body.emailIntent ?? draft.emailIntent,
@@ -922,7 +971,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
               paidAt: new Date(),
               payments: {
                 deleteMany: {},
-                create: body.payments.map((p) => ({
+                create: effectivePayments.map((p) => ({
                   method: p.method,
                   amount: new Prisma.Decimal(p.amount),
                   meta: p.meta ? (p.meta as object) : Prisma.JsonNull,

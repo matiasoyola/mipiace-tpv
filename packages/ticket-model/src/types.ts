@@ -67,6 +67,10 @@ export type TicketPaymentMethod = "CASH" | "CARD" | "TRANSFER" | "OTHER";
 export interface TicketPayment {
   method: TicketPaymentMethod;
   paid: number;
+  // v1.15-la-vuelta-existe §3 · efectivo ENTREGADO por el cliente. Sólo
+  // viene cuando hay vuelta que devolver; `paid` sigue siendo lo cobrado
+  // (Σ payments, que desde v1.15 es el total del ticket).
+  received?: number;
   change?: number;
 }
 

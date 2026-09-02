@@ -64,6 +64,7 @@ export const TicketDocumentSchema = z.object({
   payment: z.object({
     method: z.enum(["CASH", "CARD", "TRANSFER", "OTHER"]),
     paid: z.number(),
+    received: z.number().optional(),
     change: z.number().optional(),
   }),
   refund: z

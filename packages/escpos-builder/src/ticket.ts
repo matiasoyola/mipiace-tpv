@@ -49,7 +49,12 @@ export interface TicketLineEscpos {
 export interface TicketPaymentEscpos {
   // Lo que pinta el ticket. Castellano: "Efectivo", "Tarjeta", "Bizum".
   label: string;
+  // Importe APLICADO al total (v1.15-la-vuelta-existe): lo que cobró el
+  // comercio por este método, nunca lo que puso el cliente en el mostrador.
   amount: number;
+  // v1.15 · efectivo entregado por el cliente. Sólo viene en la fila de
+  // efectivo que lleva la vuelta, y sólo si hay vuelta.
+  cashReceived?: number;
   // Si method=CASH y dio cambio, pintamos extra. Opcional.
   cashChange?: number;
 }
@@ -255,6 +260,14 @@ export function buildTicketReceipt(input: TicketReceiptInput): Uint8Array {
   for (const pay of input.payments) {
     parts.push(escText(padBetween(pay.label, eur(pay.amount), COLUMNS)));
     if (pay.cashChange != null && pay.cashChange > 0) {
+      // v1.15-la-vuelta-existe §3 · "Efectivo 3,00 / Cambio 2,00" bajo un
+      // "TOTAL 3,00" no cuadra a ojo del cliente si no se dice de dónde
+      // salen los 2,00. Con "Entregado 5,00" en medio, el papel se lee solo.
+      if (pay.cashReceived != null) {
+        parts.push(
+          escText(padBetween("  Entregado", eur(pay.cashReceived), COLUMNS)),
+        );
+      }
       parts.push(escText(padBetween("  Cambio", eur(pay.cashChange), COLUMNS)));
     }
   }

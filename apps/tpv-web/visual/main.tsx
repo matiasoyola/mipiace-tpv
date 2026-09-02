@@ -19,6 +19,9 @@
 //   v1.14.1-el-catalogo-manda: venta-mesa-1 · venta-mesa-2 · venta-mesa-8
 //     (el hueco del desglose: se llena con 1 y 2 líneas, se va con 8) y
 //     venta-mesa-fotos (catálogo con foto: la tarjeta NO cambia de alto)
+//   v1.15-la-vuelta-existe: ticket-emitido (3,00 € cobrados con un billete
+//     de 5: TOTAL / ENTREGADO / CAMBIO) · ticket-emitido-sin-vuelta (el
+//     mismo cobro clavado: el bloque no se pinta)
 
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -214,6 +217,76 @@ function catalogWithTags(tags: string[]) {
   return [...CATALOG.map((p, i) => ({ ...p, tags: [tags[i % tags.length]!] })), ...base];
 }
 
+// v1.15-la-vuelta-existe · el payload digital del ticket #000020 de la
+// auditoría: 3,00 € (café con leche + botellín) pagados con un billete
+// de 5. Sirve para que la pantalla de éxito pinte sus tres acciones —
+// el bloque no quita ninguna— y para poder abrir "Ver ticket" y mirar
+// el PDF con su línea de Entregado / Cambio.
+const TICKET_DIGITAL = {
+  publicSlug: "a1b2c3d4e5f60718",
+  emailedTo: null,
+  ticketDelivery: {
+    emailAutoIfCustomerHasEmail: false,
+    showQrButton: true,
+    showDownloadButton: true,
+    showViewButton: true,
+    emailSubject: "Tu ticket",
+    emailBody: "Gracias por tu visita",
+    qrCaption: "Escanea para ver tu ticket",
+  },
+  document: {
+    fiscal: {
+      legalName: "Sirope Café SL",
+      taxId: "B12345678",
+      address: "c/ Mayor 5, 28001 Madrid",
+      phone: "+34 911 234 567",
+    },
+    store: { name: "Cafetería Sirope", address: "c/ Mayor 5" },
+    ticket: {
+      internalNumber: "000020",
+      publicSlug: "a1b2c3d4e5f60718",
+      issuedAt: new Date(now).toISOString(),
+      cashierName: "Matías",
+      registerName: "Caja 1",
+      businessType: "HOSPITALITY",
+    },
+    lines: [
+      {
+        name: "Café con leche",
+        units: 1,
+        unitPrice: 1.5,
+        discount: 0,
+        subtotal: 1.36,
+        taxRate: 10,
+        total: 1.5,
+      },
+      {
+        name: "Botellín",
+        units: 1,
+        unitPrice: 1.5,
+        discount: 0,
+        subtotal: 1.24,
+        taxRate: 21,
+        total: 1.5,
+      },
+    ],
+    totals: {
+      subtotal: 2.6,
+      taxBreakdown: [
+        { rate: 10, base: 1.36, tax: 0.14 },
+        { rate: 21, base: 1.24, tax: 0.26 },
+      ],
+      total: 3,
+    },
+    // §1: `paid` es lo cobrado (= total); el billete vive en `received`.
+    payment: { method: "CASH", paid: 3, received: 5, change: 2 },
+    footer: {
+      thankYouMessage: "¡Gracias por tu visita!",
+      qrCaption: "Escanea para ver tu ticket",
+    },
+  },
+};
+
 // ── red de mentira ────────────────────────────────────────────────────
 
 // Sesión de mentira: `apiWithCashier` corta con 401 antes de tocar la
@@ -387,24 +460,44 @@ function stubFetch(): void {
       );
     }
     // El overlay de éxito pide el ticket recién emitido y su payload
-    // digital. El primero lo servimos; el segundo lo dejamos caer con
-    // 404 a propósito, que es el camino degradado que el overlay ya
-    // sabe recorrer (y que no toca este bloque).
+    // digital. El primero lo servimos siempre; el segundo, sólo en las
+    // pantallas de v1.15 — que son las que tienen que enseñar que
+    // **ninguna acción existente desaparece** (Mostrar QR · Descargar
+    // PDF · Ver ticket). En el resto se deja caer con 404 a propósito,
+    // que es el camino degradado que el overlay ya sabe recorrer.
     if (/^\/tickets\/[^/]+\/digital$/.test(path)) {
-      return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
-        status: 404,
+      if (!benchScreen().startsWith("ticket-emitido")) {
+        return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify(TICKET_DIGITAL), {
+        status: 200,
         headers: { "Content-Type": "application/json" },
       });
     }
     if (/^\/tickets\/[^/]+$/.test(path)) {
+      // v1.15 · las pantallas de "Ticket emitido" reproducen el ticket
+      // #000020 de la auditoría, que se emitió en MODO PRUEBA. Así el
+      // antes/después compara la misma pantalla y no una versión con
+      // número fiscal que el AP11 nunca llegó a ver.
+      const esTicketEmitido = benchScreen().startsWith("ticket-emitido");
       return new Response(
         JSON.stringify({
-          ticket: {
-            id: path.slice("/tickets/".length),
-            internalNumber: "000015",
-            status: "SYNCED",
-            holdedDocNumber: "T-000015",
-          },
+          ticket: esTicketEmitido
+            ? {
+                id: path.slice("/tickets/".length),
+                internalNumber: "000020",
+                status: "TEST",
+                holdedDocNumber: null,
+              }
+            : {
+                id: path.slice("/tickets/".length),
+                internalNumber: "000015",
+                status: "SYNCED",
+                holdedDocNumber: "T-000015",
+              },
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
@@ -426,6 +519,7 @@ function Bench() {
   const screen = params.get("screen") ?? "checkout";
   const [Screens, setScreens] = useState<null | {
     CheckoutOverlay: typeof import("../src/pages/CheckoutPage.js")["CheckoutOverlay"];
+    SuccessOverlay: typeof import("../src/pages/CheckoutPage.successOverlay.js")["SuccessOverlay"];
     SalePage: typeof import("../src/pages/SalePage.js")["SalePage"];
     TableMapScreen: typeof import("../src/pages/TableMapScreen.js")["TableMapScreen"];
     CloseShiftModal: typeof import("../src/pages/CloseShiftModal.js")["CloseShiftModal"];
@@ -435,8 +529,9 @@ function Bench() {
 
   useEffect(() => {
     void (async () => {
-      const [checkout, sale, map, close, open, confirmSheet] = await Promise.all([
+      const [checkout, success, sale, map, close, open, confirmSheet] = await Promise.all([
         import("../src/pages/CheckoutPage.js"),
+        import("../src/pages/CheckoutPage.successOverlay.js"),
         import("../src/pages/SalePage.js"),
         import("../src/pages/TableMapScreen.js"),
         import("../src/pages/CloseShiftModal.js"),
@@ -445,6 +540,7 @@ function Bench() {
       ]);
       setScreens({
         CheckoutOverlay: checkout.CheckoutOverlay,
+        SuccessOverlay: success.SuccessOverlay,
         SalePage: sale.SalePage,
         TableMapScreen: map.TableMapScreen,
         CloseShiftModal: close.CloseShiftModal,
@@ -455,6 +551,27 @@ function Bench() {
   }, []);
 
   if (!Screens) return <div style={{ padding: 24 }}>cargando…</div>;
+
+  // ── v1.15-la-vuelta-existe ─────────────────────────────────────────
+  // El segundo siguiente al cobro. `ticket-emitido` es el caso de la
+  // auditoría (3,00 € y un billete de 5); `-sin-vuelta`, el mismo cobro
+  // clavado, para mirar que el bloque no aparece y la pantalla queda
+  // como estaba.
+  if (screen.startsWith("ticket-emitido")) {
+    const conVuelta = screen !== "ticket-emitido-sin-vuelta";
+    return (
+      <Screens.SuccessOverlay
+        ticketId="tk-000020"
+        internalNumber="000020"
+        cash={
+          conVuelta
+            ? { total: 3, received: 5, change: 2 }
+            : { total: 3, received: 3, change: 0 }
+        }
+        onDone={() => {}}
+      />
+    );
+  }
 
   if (screen.startsWith("checkout")) {
     return (
