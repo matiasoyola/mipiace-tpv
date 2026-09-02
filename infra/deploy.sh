@@ -40,8 +40,14 @@ fail() { echo -e "\033[1;31m[deploy]\033[0m $1" >&2; exit 1; }
 cd "$REPO_DIR"
 
 # ─── 1. Repo: compose, Caddyfile y migraciones vienen de git ─────────
+# Guardamos la huella del Caddyfile ANTES del pull: si cambia, hay que
+# reiniciar Caddy al final (paso 6.b). Ver el comentario de ahí.
+CADDY_HASH_BEFORE="$(sha256sum "$REPO_DIR/infra/Caddyfile" 2>/dev/null | awk '{print $1}' || echo none)"
+
 log "git pull --ff-only (compose/Caddyfile/migraciones)…"
 git pull --ff-only
+
+CADDY_HASH_AFTER="$(sha256sum "$REPO_DIR/infra/Caddyfile" 2>/dev/null | awk '{print $1}' || echo none)"
 
 # ─── 2. Pull de imágenes ─────────────────────────────────────────────
 # Si el pull falla (sin login, registry caído) pero las imágenes ya
@@ -92,6 +98,27 @@ if "${COMPOSE[@]}" exec -T api wget -q --spider http://127.0.0.1:3001/health; th
   log "/health OK."
 else
   fail "/health no responde. Logs: ${COMPOSE[*]} logs api --tail=100"
+fi
+
+# ─── 6.b Caddy: reiniciar SÓLO si su config cambió ──────────────────
+# 2026-09-02: el `handle /apk*` llevaba desde el bloque A3 en el
+# Caddyfile y NUNCA estuvo servido en mipiacetpv.com. El paso 4 usa
+# --no-deps a propósito (no cortar SSL en cada deploy), así que Caddy se
+# quedaba con la config de memoria de la última vez que alguien lo
+# reinició a mano. El fichero es un bind mount del repo: el pull lo
+# actualiza en disco, pero el proceso vivo no lo relee solo.
+#
+# `caddy reload` por `docker exec` NO bastó (se probó ese día y siguió
+# sirviendo la config vieja). Un `docker restart` sí: los certificados
+# viven en el volumen `caddy_data`, así que no se re-emite nada — el
+# corte es de segundos.
+if [ "$CADDY_HASH_BEFORE" != "$CADDY_HASH_AFTER" ]; then
+  log "El Caddyfile cambió en este pull → reiniciando Caddy…"
+  docker restart mipiacetpv-caddy >/dev/null \
+    && log "Caddy reiniciado con la config nueva." \
+    || warn "No pude reiniciar Caddy. Hazlo a mano: docker restart mipiacetpv-caddy"
+else
+  log "Caddyfile sin cambios — Caddy no se toca."
 fi
 
 # ─── 7. Resumen ─────────────────────────────────────────────────────
