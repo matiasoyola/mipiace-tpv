@@ -63,7 +63,9 @@ function input(): BuildTicketDocumentInput {
           taxRate: 21,
         },
       ],
-      payments: [{ method: "CASH", amount: 10 }],
+      // v1.15-la-vuelta-existe §1 · `amount` es lo APLICADO (6,93 €); el
+      // billete de 10 vive en `cashAmount`.
+      payments: [{ method: "CASH", amount: 6.93 }],
     },
   };
 }
@@ -93,6 +95,27 @@ describe("renderTicketPdf", () => {
     expect(parsed.text).toContain("Caja 1");
     expect(parsed.text).toContain("TOTAL");
     expect(parsed.text).toContain("Cafe");
+  });
+
+  // v1.15-la-vuelta-existe §3 · el bloque pide la línea CAMBIO en el
+  // ESC/POS **y** en el PDF, no sólo en uno.
+  it("imprime Entregado y Cambio cuando el cliente dio de más", async () => {
+    const doc = buildTicketDocument(input());
+    const parsed = await pdfParse(Buffer.from(await renderTicketPdf(doc)));
+    expect(parsed.text).toContain("Entregado");
+    expect(parsed.text).toContain("10,00 €");
+    expect(parsed.text).toContain("Cambio");
+    expect(parsed.text).toContain("3,07 €");
+  });
+
+  it("un cobro clavado no lleva ni Entregado ni Cambio", async () => {
+    const inp = input();
+    inp.ticket.cashAmount = 6.93;
+    const parsed = await pdfParse(
+      Buffer.from(await renderTicketPdf(buildTicketDocument(inp))),
+    );
+    expect(parsed.text).not.toContain("Cambio");
+    expect(parsed.text).not.toContain("Entregado");
   });
 
   it("marca TICKET en venta y DEVOLUCIÓN en refund", async () => {

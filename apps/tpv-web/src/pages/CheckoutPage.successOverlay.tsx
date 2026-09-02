@@ -32,6 +32,7 @@ import type { TicketDocument } from "@mipiacetpv/ticket-model";
 import { apiWithCashier } from "../api.js";
 import { getCachedBusinessType } from "../lib/catalog.js";
 import type { BusinessType } from "../lib/catalog.js";
+import { formatEur } from "../lib/money.js";
 import { subscribeOutbox } from "../lib/outbox.js";
 import { pairUsbPrinter } from "../lib/escposPrint.js";
 // v1.10.2-impresion-honesta · la decisión de "¿hay impresora?" y "¿ha
@@ -65,13 +66,23 @@ interface DigitalPayload {
   };
 }
 
+// v1.15-la-vuelta-existe §4 · el dinero del cobro que acaba de pasar.
+// `received` y `change` son 0 cuando no hubo efectivo o no hubo exceso.
+export interface CashSummary {
+  total: number;
+  received: number;
+  change: number;
+}
+
 export function SuccessOverlay({
   ticketId,
   internalNumber,
+  cash,
   onDone,
 }: {
   ticketId: string;
   internalNumber: string;
+  cash?: CashSummary;
   onDone: () => void;
 }) {
   const [docNumber, setDocNumber] = useState<string | null>(null);
@@ -92,6 +103,9 @@ export function SuccessOverlay({
   // v1.3-Servicios-Pinta · Lote 1: vertical para adaptar copy ("Ticket
   // emitido" → "Comprobante emitido", "Nueva venta" → "Nuevo servicio").
   const businessType = getCachedBusinessType();
+  // v1.15-la-vuelta-existe §4 · sólo hay algo que enseñar si hay algo
+  // que devolver. Medio céntimo de umbral, como el resto de la app.
+  const hasChange = !!cash && cash.change > 0.005;
 
   // Polling Holded para pintar el número fiscal cuando llegue.
   useEffect(() => {
@@ -141,11 +155,16 @@ export function SuccessOverlay({
     printState.phase === "printing" ||
     printState.phase === "error" ||
     printState.phase === "no-printer";
+  // v1.15-la-vuelta-existe §4 · con vuelta que devolver, 4 s no llegan:
+  // el camarero abre el cajón, cuenta las monedas y para entonces el
+  // número ya se había ido de la pantalla — que es exactamente lo que
+  // denuncia C1. Con cambio el autocierre se estira a 8 s; sin cambio se
+  // queda en los 4 s de v1.9.2 (el camarero de bar no debe pensar).
   useEffect(() => {
     if (autoClosePaused) return;
-    const t = setTimeout(() => onDone(), 4_000);
+    const t = setTimeout(() => onDone(), hasChange ? 8_000 : 4_000);
     return () => clearTimeout(t);
-  }, [autoClosePaused, onDone]);
+  }, [autoClosePaused, hasChange, onDone]);
 
   // Carga el payload digital — falla en silencio si la PWA está
   // offline; el QR queda deshabilitado, descargar/ver no se ofrecen
@@ -279,7 +298,61 @@ export function SuccessOverlay({
         <h1 className="text-[22px] font-semibold text-mipiace-ink tracking-tight">
           {vocab("ticketNoun", businessType)} emitido
         </h1>
-        <div className="text-[14px] text-slate-500 mt-1">
+
+        {/* v1.15-la-vuelta-existe §4 · el hallazgo C1 de la auditoría del
+            2026-09-02: se cobran 3,00 €, el cliente da 5, y esta pantalla
+            enseñaba número interno, badge de prueba, aviso de impresora y
+            cuatro acciones — ni total, ni entregado, ni cambio. El dato
+            que el camarero necesita en ese segundo exacto desaparecía
+            justo en ese segundo.
+
+            El CAMBIO manda: es el número más grande de la pantalla, por
+            encima del total (§1.5 de ux-principles: 48 px para el total a
+            cobrar y para el cambio). Sin exceso en efectivo el bloque no
+            se pinta: en una venta que cierra clavada no hay nada que
+            devolver y el número interno vuelve a ser lo primero. */}
+        {hasChange && (
+          <div
+            data-testid="change-due"
+            className="mt-4 rounded-2xl bg-mipiace-coral-soft px-5 py-4"
+          >
+            <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-mipiace-coral-dark">
+              Cambio
+            </div>
+            <div
+              data-testid="change-due-amount"
+              className="text-[48px] leading-none font-semibold tabular-nums tracking-[-0.025em] text-mipiace-ink mt-1"
+            >
+              {formatEur(cash!.change)}
+            </div>
+            <div className="mt-3 pt-3 border-t border-mipiace-coral/25 grid grid-cols-2 gap-3">
+              <div className="text-left">
+                <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500">
+                  Total
+                </div>
+                <div
+                  data-testid="change-due-total"
+                  className="text-[20px] font-semibold tabular-nums text-mipiace-ink"
+                >
+                  {formatEur(cash!.total)}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500">
+                  Entregado
+                </div>
+                <div
+                  data-testid="change-due-received"
+                  className="text-[20px] font-semibold tabular-nums text-mipiace-ink"
+                >
+                  {formatEur(cash!.received)}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className={`text-[14px] text-slate-500 ${hasChange ? "mt-4" : "mt-1"}`}>
           Número interno <span className="tabular-nums">#{internalNumber}</span>
         </div>
 
@@ -417,10 +490,15 @@ export function SuccessOverlay({
 export function PendingSaleOverlay({
   externalId,
   businessType,
+  cash,
   onDone,
 }: {
   externalId: string;
   businessType: BusinessType | null;
+  // v1.15-la-vuelta-existe §4 · se pasa tal cual al SuccessOverlay
+  // cuando el reenvío en background confirma la venta: el cambio no
+  // depende de que el servidor haya contestado.
+  cash?: CashSummary;
   onDone: () => void;
 }) {
   const [state, setState] = useState<
@@ -457,6 +535,7 @@ export function PendingSaleOverlay({
       <SuccessOverlay
         ticketId={state.ticket.id}
         internalNumber={state.ticket.internalNumber}
+        cash={cash}
         onDone={onDone}
       />
     );

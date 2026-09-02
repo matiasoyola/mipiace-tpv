@@ -6,6 +6,7 @@
 // al cliente generado. Los campos numéricos pueden venir como `number`
 // o como Decimal (`{ toString(): string }`) y se normalizan aquí.
 
+import { changeFromCash } from "./payments.js";
 import type {
   TicketBusinessType,
   TicketCustomer,
@@ -215,8 +216,7 @@ export function buildTicketDocument(input: BuildTicketDocumentInput): TicketDocu
   const total = round2(num(input.ticket.total));
 
   // Pago: si hay varios payments, usamos el método del primero como
-  // representativo (mixto se aplana al método dominante). El cambio se
-  // calcula sólo si hubo CASH (overpayment efectivo).
+  // representativo (mixto se aplana al método dominante).
   const firstPayment = input.ticket.payments[0];
   const method: TicketPaymentMethod = firstPayment
     ? mapPaymentMethod(firstPayment.method)
@@ -228,7 +228,25 @@ export function buildTicketDocument(input: BuildTicketDocumentInput): TicketDocu
       : input.ticket.payments
           .filter((p) => p.method === "CASH")
           .reduce((acc, p) => acc + num(p.amount), 0);
-  const change = cashAmount > 0 ? Math.max(0, round2(paidSum - total)) : 0;
+  // v1.15-la-vuelta-existe §3 · el cambio sale de comparar lo ENTREGADO
+  // en efectivo con lo APLICADO en las filas CASH, no de `Σ payments −
+  // total`.
+  //
+  // Esa resta funcionaba por accidente: daba 2,00 € porque el ticket
+  // llevaba dentro el error de B1 (`payments[0].amount` = el billete de
+  // 5, no la venta de 3). Corregido el origen, Σ payments **es** el
+  // total y la resta da cero: el PDF habría dejado de imprimir la línea
+  // "Cambio" justo en el bloque que existe para que la imprima.
+  const change = changeFromCash(
+    input.ticket.payments.map((p) => ({
+      method: p.method,
+      amount: num(p.amount),
+    })),
+    cashAmount,
+  );
+  // Efectivo entregado. Sólo se pinta cuando hay vuelta: en un cobro
+  // clavado "Entregado 3,00 / Efectivo 3,00" es ruido.
+  const received = change > 0 ? round2(cashAmount) : undefined;
 
   const refund: TicketRefund | undefined = input.refund
     ? {
@@ -282,6 +300,7 @@ export function buildTicketDocument(input: BuildTicketDocumentInput): TicketDocu
     payment: {
       method,
       paid: round2(paidSum),
+      received,
       change: change > 0 ? change : undefined,
     },
     refund,

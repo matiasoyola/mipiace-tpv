@@ -354,7 +354,13 @@ describe("v1.10.3-addendum · el exceso", () => {
     // Un cobro con tarjeta de 0,00 € no existió: ni en el ticket, ni en
     // el desglose del Z, ni en el recibo de Holded.
     expect(payments).toHaveLength(1);
-    expect(payments[0]).toMatchObject({ method: "CASH", amount: 20 });
+    // v1.15-la-vuelta-existe §1 · y el efectivo viaja topeado al total:
+    // el billete de 20 se cobró contra una cuenta de 14. Los 6 € de
+    // vuelta viven sólo en `cashAmount`.
+    expect(payments[0]).toMatchObject({ method: "CASH", amount: 14 });
+    const cashAmount = (call![1] as { body: { cashAmount?: number } }).body
+      .cashAmount;
+    expect(cashAmount).toBe(20);
   });
 });
 

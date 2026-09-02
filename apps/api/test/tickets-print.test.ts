@@ -321,6 +321,79 @@ describe("POST /tickets/:id/print/escpos", () => {
   // backend: el endpoint de impresión NO toca el ticket. Falle el socket
   // TCP o no haya impresora, lo único que se escribe es el diagnóstico
   // en el PrinterConfig. El cobro es intocable desde aquí.
+  // v1.15-la-vuelta-existe §3 · hasta v1.14.1 el térmico NUNCA imprimía
+  // la vuelta: `print.ts` la pintaba sólo si `cashAmount > amount`, y con
+  // el error de B1 dentro del ticket los dos números eran el mismo
+  // billete. El cliente se llevaba un papel con "Efectivo 5,00" bajo un
+  // "TOTAL 3,00" y ninguna vuelta.
+  it("el ticket impreso lleva Entregado y CAMBIO cuando hubo vuelta", async () => {
+    seedTicket({
+      total: 3,
+      cashAmount: 5,
+      payments: [{ method: "CASH", amount: 3 }],
+      lines: [
+        {
+          nameSnapshot: "Desayuno 4",
+          units: 1,
+          unitPrice: 2.7273,
+          unitPriceOverride: null,
+          total: 3,
+        },
+      ],
+    });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/tickets/${TICKET}/print/escpos?target=usb`,
+      headers: { authorization: `Bearer ${signSession()}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.rawPayload.toString("latin1");
+    expect(body).toContain("Efectivo");
+    expect(body).toContain("Entregado");
+    expect(body).toContain("5,00");
+    expect(body).toContain("Cambio");
+    expect(body).toContain("2,00");
+  });
+
+  it("un cobro clavado no imprime la línea de cambio", async () => {
+    seedTicket({
+      total: 3,
+      cashAmount: 3,
+      payments: [{ method: "CASH", amount: 3 }],
+    });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/tickets/${TICKET}/print/escpos?target=usb`,
+      headers: { authorization: `Bearer ${signSession()}` },
+    });
+    const body = res.rawPayload.toString("latin1");
+    expect(body).not.toContain("Cambio");
+    expect(body).not.toContain("Entregado");
+  });
+
+  // La vuelta es una sola aunque el cobro lleve dos filas de efectivo.
+  it("mixto con dos filas de efectivo: una sola línea de cambio", async () => {
+    seedTicket({
+      total: 12,
+      cashAmount: 15,
+      payments: [
+        { method: "CASH", amount: 5 },
+        { method: "CASH", amount: 7 },
+      ],
+    });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/tickets/${TICKET}/print/escpos?target=usb`,
+      headers: { authorization: `Bearer ${signSession()}` },
+    });
+    const body = res.rawPayload.toString("latin1");
+    expect(body.match(/Cambio/g)?.length).toBe(1);
+    expect(body).toContain("3,00");
+  });
+
   it("un fallo de impresión no altera el ticket cobrado", async () => {
     const ticket = seedTicket();
     seedWifiPrinter();

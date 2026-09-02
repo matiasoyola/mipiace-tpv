@@ -33,6 +33,8 @@ import {
   Smartphone,
 } from "lucide-react";
 
+import { applyPaymentsToTotal } from "@mipiacetpv/ticket-model";
+
 import { ApiError, apiWithCashier } from "../api.js";
 import { AmountField } from "../components/AmountField.js";
 import { useBackGuard } from "../hooks/useBackGuard.js";
@@ -451,23 +453,32 @@ export function CheckoutOverlay(props: {
             : undefined,
       }));
       // v1.8-Fiado · un fiado nace SIN pagos (se cobra luego en Deudas).
+      //
+      // v1.15-la-vuelta-existe §1 · `amount` es lo APLICADO al total,
+      // nunca lo entregado. Hasta aquí las filas van tal cual las teclea
+      // el cajero (5,00 € en efectivo sobre un ticket de 3,00 €), porque
+      // eso es lo que él ve y con eso se calcula el cambio en pantalla.
+      // Lo que sale hacia el servidor va topeado: el sobrante vive sólo
+      // en `cashAmount`. Si no, el desglose del turno suma el billete en
+      // lugar de la venta y el Z declara un descuadre que no existe.
+      //
+      // `applyPaymentsToTotal` también se queda con el filtro de las
+      // filas a cero que traía el v1.10.3-addendum (review 2026-08-26):
+      // el reparto automático deja la última fila en 0,00 € en cuanto el
+      // cajero teclea en otra un importe ≥ total, y mandar un pago de
+      // 0,00 € en tarjeta ensucia el ticket, el desglose del Z y el
+      // recibo de Holded con un cobro que no existió.
       const paymentsPayload = isCredit
         ? []
-        : payments
-            .map((p) => ({
+        : applyPaymentsToTotal(
+            payments.map((p) => ({
               method: p.method,
               amount: parseAmount(p.amount),
               meta:
                 p.meta && Object.keys(p.meta).length > 0 ? p.meta : undefined,
-            }))
-            // v1.10.3-addendum (review 2026-08-26) · fuera las filas a
-            // cero. El reparto automático deja la última fila en 0,00 €
-            // en cuanto el cajero teclea en otra un importe ≥ total
-            // (cliente que paga los 14 con un billete de 20 después de
-            // haber pulsado Mixto). Mandar un pago de 0,00 € en tarjeta
-            // ensucia el ticket, el desglose del Z y el recibo de
-            // Holded con un cobro que no existió.
-            .filter((p) => p.amount > 0.005);
+            })),
+            total,
+          ).payments;
       const commonFields = {
         externalId: externalIdRef.current,
         payments: paymentsPayload,
@@ -635,6 +646,13 @@ export function CheckoutOverlay(props: {
     }
   }
 
+  // v1.15-la-vuelta-existe §4 · lo único que hace falta en el segundo
+  // siguiente al cobro: cuánto era, cuánto dio y cuánto hay que
+  // devolverle. Sale de aquí (no del ticket que devuelve el servidor)
+  // porque el overlay tiene que poder pintarlo también cuando el POST
+  // no ha confirmado todavía y la venta vive en el outbox local.
+  const cashSummary = { total, received: cashAmount, change };
+
   if (confirmed) {
     if (confirmed.kind === "synced") {
       // Frente 3.1: mesa → sin modal de éxito (el efecto de arriba ya
@@ -645,6 +663,7 @@ export function CheckoutOverlay(props: {
         <SuccessOverlay
           ticketId={confirmed.res.ticket.id}
           internalNumber={confirmed.res.ticket.internalNumber}
+          cash={cashSummary}
           onDone={props.onConfirmed}
         />
       );
@@ -653,6 +672,7 @@ export function CheckoutOverlay(props: {
       <PendingSaleOverlay
         externalId={confirmed.externalId}
         businessType={props.businessType}
+        cash={cashSummary}
         onDone={props.onConfirmed}
       />
     );

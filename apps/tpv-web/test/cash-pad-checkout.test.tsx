@@ -250,10 +250,18 @@ describe("v1.12 · el CashPad de la hoja de cobro", () => {
       });
     }
     const call = apiMock.apiWithCashier.mock.calls.find((c) => c[0] === "/tickets");
-    const payments = (
-      call![1] as { body: { payments: { method: string; amount: number }[] } }
-    ).body.payments;
-    expect(payments).toEqual([{ method: "CASH", amount: 5 }]);
+    const body = call![1] as {
+      body: {
+        payments: { method: string; amount: number }[];
+        cashAmount?: number;
+      };
+    };
+    // v1.15-la-vuelta-existe §1 · el pad manda euros, no céntimos (que es
+    // lo que fija este test desde v1.12), y el importe que viaja es el
+    // APLICADO: 5 € tecleados sobre una cuenta de 3,00 € son 3,00 € de
+    // cobro y 5,00 € de efectivo entregado.
+    expect(body.body.payments).toEqual([{ method: "CASH", amount: 3 }]);
+    expect(body.body.cashAmount).toBe(5);
   });
 });
 
