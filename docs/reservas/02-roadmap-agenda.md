@@ -9,6 +9,9 @@
 > fichero qué de la ingeniería inversa de Koibox ya estaba resuelto aquí y qué no.
 >
 > **Última actualización:** 2026-09-02 · **Verificado contra** `master` en `1d169ef`.
+>
+> **Plan de desarrollo completo** —qué falta para ser equivalente al informe, con tamaños y con el
+> inventario de lo que ya está pagado—: `docs/reservas/03-que-falta-para-la-agenda-del-informe.md`.
 
 ---
 
@@ -46,6 +49,25 @@
 | B-reservas-6 · Reserva online embebible | **B-reservas-11** |
 | B-reservas-7 · Recordatorio de cita | **B-reservas-12** |
 | B-reservas-5 · Bonos y tarjetas regalo | Absorbido por **B-reservas-8** (la parte de sesiones); las tarjetas al portador (`type=AMOUNT`) quedan como deuda |
+
+---
+
+## Nivel 2 · después del mostrador
+
+Los cinco bloques de arriba dejan **la agenda del mostrador**. Para llegar al producto completo que
+describe el informe hacen falta seis más, con su tamaño y sus dependencias en
+**`docs/reservas/03-que-falta-para-la-agenda-del-informe.md`**:
+
+| Bloque | Qué | Tamaño | Nota |
+|---|---|---|---|
+| **B-reservas-15 · Agenda en tiempo real** | Enganchar la agenda al bus WebSocket que **ya existe y no usa** (`realtime/store-event-bus.ts`); habilita el estado "conflicto" | S/M | Barato y se nota |
+| **B-reservas-14 · La API que no miente** | ETag/versión de recurso, 429 con cabeceras, `dry_run`, webhooks salientes | M | Va **antes** que B-11 |
+| **B-reservas-11 · Reserva online embebible** | Endpoint público, CORS por dominio, anti-abuso, widget marca blanca, alta pública con RGPD | L | El objetivo declarado del módulo (ADR-R5) |
+| **B-reservas-12 · Recordatorios** | 24/48 h. Cola y email **ya existen**; WhatsApp es proveedor y coste aparte | M / L | Email primero |
+| **B-reservas-13 · Señal al reservar** | 🔴 **No hay ninguna pasarela de pago en el repo**: `CARD`/`BIZUM` son etiquetas de método manual. Cobro online desde cero + conciliación + devoluciones | L | Toca camino fiscal: necesita asesoría. Candidato a quedarse fuera de la v1 |
+
+**Orden**: el Nivel 1 entero antes del Nivel 2. Y dentro del Nivel 2, **B-15 y B-14 antes que B-11** —
+una reserva online sin ETag, sin 429 y sin tiempo real es justo la API que el informe critica.
 
 ---
 
@@ -100,12 +122,15 @@ Se dice aquí para que ningún bloque lo dé por supuesto ni se lo coma por el c
 - **Sincronización bidireccional** con calendarios externos (Google, iCal).
 - **Capa predictiva / IA de yield.** Cero reservas online = cero datos con los que entrenar. Las reglas
   de B-6 son deterministas y auditables; lo predictivo, si llega, va **encima**, nunca en lugar de.
-- **Señal al reservar** (ADR-R5b, decisión abierta). La columna `depositCents` existe; la pasarela se
-  decide con lo que ya usa el ecosistema — **no entra Stripe**.
-- **Reserva online embebible** (B-reservas-11) y **recordatorios** (B-reservas-12).
+- **Señal al reservar** (B-13, ADR-R5b). La columna `depositCents` existe; **la pasarela no**: hay que
+  construir el cobro online entero, con lo que ya usa el ecosistema — **no entra Stripe**.
+- **Todo el Nivel 2** (B-11 reserva online · B-12 recordatorios · B-13 señal · B-14 API endurecida ·
+  B-15 tiempo real): fuera de **esta** versión, no del producto. Ver el plan en el doc 03.
 - **Tarjetas regalo al portador** (`voucher type=AMOUNT` sin cliente hasta el canje).
 - **Fichaje, control horario y comisiones** del personal.
-- **`catalogDurationMin`** (publicar 90 y bloquear 100): deuda de catálogo (D-5), no urgente.
+- **`catalogDurationMin`** (publicar 90 y bloquear 100): deuda de catálogo (D-5). ⚠️ **Deja de ser
+  opcional si se quiere la tarjeta 2 del panel de salud** ("variantes cuya duración no cuadra con la
+  carta"), que sin el número publicado no se puede calcular. Entonces entra con B-9.
 - **App nativa** específica de agenda: la PWA del TPV es suficiente para el piloto.
 - **Sincronización continua con Koibox**: B-10 importa y, como mucho, lee. Escribir en su agenda de
   forma sostenida es otra conversación.

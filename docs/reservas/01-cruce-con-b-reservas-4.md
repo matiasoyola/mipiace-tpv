@@ -270,8 +270,14 @@ Hay 19 tests de agenda (`agenda-engine` 11, `agenda-time` 5, `agenda-checkout` 3
 carrera (`agenda-engine.test.ts:443`) prueba un store en memoria que **simula** el EXCLUDE
 (`agenda-engine.test.ts:74-92`, la rama de staff en `:76-83`). Está documentado y justificado (`B-reservas-4-done.md`, decisión
 nº 1) y era la elección correcta para B4 — pero el criterio de casa es **sabotaje, no suite verde**:
-hoy nadie ha visto a Postgres rechazar una fila. Añádase que la migración **no está aplicada al
-piloto** (carryover nº 3 de B4) y que requiere `CREATE EXTENSION btree_gist`.
+hoy nadie ha visto a Postgres rechazar una fila.
+
+✅ **Corrección al carryover nº 3 de B4:** ese carryover decía que la migración estaba sin aplicar al
+piloto. **Ya no es cierto.** Las cuatro migraciones del módulo están en el sha desplegado (`4be2f67`,
+48 migraciones) y el despliegue del 27-ago reportó *"No pending migrations to apply"*
+(`docs/deploy/2026-08-27-despliegue-1-done.md`, puerta 2). **Las tablas, los `EXCLUDE` y
+`btree_gist` están vivos en producción.** Lo que sigue sin pasar es que alguien los ejercite: no hay
+ningún tenant con `agendaEnabled`.
 
 → **Test de integración contra Postgres real, en el cierre de B-reservas-6** (el primer bloque que
 vuelve a tocar el motor). No es un bloque propio.
@@ -469,10 +475,10 @@ sí tienen test, pero incompleto: el 1 sólo contra un store simulado, el 14 só
 de **B-6** · **13** a **B-7** · **9** a **B-8** · **5** a **B-9** · **11 y 12** son test barato y caben
 en cualquiera de ellos · **10** no es deuda de test sino la divergencia **D-4**, decisión global.
 
-**Además, y no está en su lista:** el `EXCLUDE` no se ha ejecutado nunca contra Postgres y la
-migración **no está aplicada al piloto** (carryover nº 3 de B4). Antes de encender `agendaEnabled` a
-una clienta real, eso se prueba en un Postgres de verdad — con `CREATE EXTENSION btree_gist` y el rol
-adecuado.
+**Además, y no está en su lista:** el `EXCLUDE` **está creado en producción pero nunca se ha
+ejecutado** — ni en test (harness fake-prisma) ni con datos reales (ningún tenant tiene la agenda
+encendida). Antes de dejar la agenda sola con una clienta real, eso se prueba contra un Postgres de
+verdad.
 
 ---
 
