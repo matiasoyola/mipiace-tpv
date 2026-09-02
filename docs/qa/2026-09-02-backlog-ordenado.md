@@ -47,7 +47,7 @@ en los tickets con `Σpayments > total` y `cashAmount != null`, restar la difere
 | # | Hallazgo | Por qué ahí |
 |---|---|---|
 | 1 | **B1** cierre cuenta lo entregado | Único que corrompe datos a diario y el único problema contable del cliente |
-| 2 | **B6** keystore de release | Sin código, puramente infra, y puerta dura desde A4. Va **en paralelo**, no compite por ficheros |
+| 2 | **B6 · corregido: publicar la APK** | El keystore **ya existe** desde el 04-08 (`~/keys/mipiacetpv-release.jks`) y ya salió un release firmado y verificado. Lo pendiente es **publicar** con `infra/publicar-apk.sh` y probar `/apk` end-to-end. Sin código, en **paralelo** |
 | 3 | **B4** dos productos iguales | Seguridad alimentaria y el arreglo es barato |
 | 4 | **B3** comanda que falla sin rastro | La cocina no se entera; el camarero no tiene forma de saberlo |
 | 5 | **B2** cierre con mesas abiertas | Dinero fantasma en sala + Z incompleto |
@@ -95,8 +95,22 @@ ticket impreso y **TOTAL / ENTREGADO / CAMBIO** en grande en "Ticket emitido".
 *Se desvía de "B1 va solo": C1 y el térmico son el mismo defecto en otras dos capas y el bloque
 sigue siendo pequeño. Arreglarlo tres veces por separado es peor.* **Se despliega solo y ya.**
 
-### A3-F7 · Keystore de release (B6 + E11) — en paralelo
-Sin código de producto. Firma de release + la versión de la APK visible en el menú.
+### A3-F7 · Publicar la APK de release (B6 + E11) — en paralelo
+**La auditoría enunció mal B6.** El keystore no falta: `~/keys/mipiacetpv-release.jks` existe desde
+el 2026-08-04 y `apps/tpv-android/build-releases/mipiacetpv-1.14.1-11401.apk` ya salió firmado y
+verificado. **Nunca relanzar `keytool -genkeypair` sobre esa ruta, ni borrar el `.jks`**: perderlo
+es no poder actualizar jamás una app instalada.
+
+Lo que queda de verdad:
+
+1. Regenerar el release desde **master limpio** — el binario de `build-releases/` lleva
+   `gitSha=336f24b-dirty` y **no incluye v1.14.1**.
+2. `infra/publicar-apk.sh` contra el VPS y probar `/apk` end-to-end (nunca se ha hecho).
+3. **Gotcha de instalación**: el AP11 lleva una APK *debug* con `versionCode 11410`; la release
+   firmada no se instala encima (otra clave) y su `versionCode` es **11401**, menor. Hay que
+   desinstalar, y eso borra la vinculación y obliga a pedir código de 6 dígitos otra vez —
+   que es justamente B5. Ordenar la sustitución con eso en la mano.
+4. E11: la versión de la APK visible en el menú (territorio de A3 frente 2).
 
 ### v1.16 · El producto correcto y la comanda que llega (B4 + B3 + E4 + E5)
 Distinguir las variantes en tarjeta y en línea de ticket; el fallo de impresora en idioma de
