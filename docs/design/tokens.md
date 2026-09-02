@@ -47,16 +47,24 @@ con `font-weight: 600`, `letter-spacing: -0.01em`.
 | `emerald-500` | tailwind | Estado "conectado / OK / caja abierta". |
 | `amber-50/300/700` | tailwind | Estado "atención / pidiendo cuenta / 2FA recomendado". |
 
-**Tonos para iconos de producto** (en `toneStyles`):
+**Tonos de categoría** (en `lib/categoryTones.ts`, `TONE_STYLES`):
 
-| Tone | Background | Text |
+| Tone | Icono | Banda de tarjeta |
 |---|---|---|
-| `amber` | `bg-amber-50` | `text-amber-700` |
-| `sky` | `bg-sky-50` | `text-sky-700` |
-| `red` | `bg-red-50` | `text-red-700` |
-| `green` | `bg-emerald-50` | `text-emerald-700` |
-| `rose` | `bg-rose-50` | `text-rose-700` |
-| `stone` | `bg-stone-100` | `text-stone-700` |
+| `amber` | `text-amber-600` | `bg-amber-400` |
+| `sky` | `text-sky-600` | `bg-sky-400` |
+| `red` | `text-red-600` | `bg-red-400` |
+| `green` | `text-emerald-600` | `bg-emerald-400` |
+| `rose` | `text-rose-600` | `bg-rose-400` |
+| `stone` | `text-stone-500` | `bg-stone-400` |
+
+**El tono NUNCA pinta un fondo** (v1.14.1). En v1.14 el tono era el fondo
+del chip de categoría, y medido sobre el terminal eso resultó ser ruido:
+los tonos se reparten en orden alfabético, así que el color no dice nada
+del contenido (Bollería amarillo, Café rojo, Croissantysandwich verde), y
+seis fondos de color compiten con la única señal que hay que leer en esa
+fila, que es cuál está seleccionado. El tono vive en **el icono** del
+chip y en **la banda de 4 px** de la tarjeta de producto.
 
 Mapping recomendado: café/cervezas → `amber`; agua/refrescos azules →
 `sky`; refrescos rojos → `red`; ensaladas/vegetales → `green`; postres →
@@ -190,10 +198,29 @@ canónica para reutilizar:
 - Activo: bg `mipiace.coral-soft`, texto `coral-dark`, icon `coral`.
 - Inactivo: hover `slate-50`, texto `slate-600`.
 
-### Producto card (TPV)
-- Aspect ratio 5/4 para imagen, info debajo.
-- Imagen = icon de Lucide en fondo de color soft.
-- Hover: border `coral/50`, sombra suave.
+### Producto card (TPV) · v1.14.1
+Compacta y **tipográfica**: el nombre y el precio SON el producto.
+
+- Alto **104 px** (`PRODUCT_CARD_MIN_HEIGHT` en `lib/catalogGrid.ts`), el
+  mismo con foto y sin ella. `rounded-2xl`, borde `slate-200`, hover
+  border `coral/50` y sombra suave.
+- **Sin foto** (el caso normal: Holded casi nunca las trae): nada de
+  icono. Sólo una **banda de 4 px** arriba con el tono de la categoría.
+- **Con foto**: la imagen ocupa la tarjeta entera bajo un velo
+  (`from-black/75` a `to-black/5`) con nombre y precio encima en blanco.
+- Nombre `line-clamp-2` a 13,5 px/500; precio 15 px/600 `tabular-nums`
+  anclado abajo. **El precio pesa más que el nombre**: en una barra el
+  nombre se reconoce de memoria y lo que se comprueba es el importe.
+
+De dónde sale el 104: a 1280 × 800 con el panel del ticket abierto, la
+columna del catálogo deja 504 px útiles con una fila de chips. Cuatro
+tarjetas de 104 más tres huecos de 14 son 458, y la quinta fila asoma
+32 px como pista de scroll. **Se ven cuatro filas completas.** Con el
+placeholder de v1.14 (206 px de tarjeta, 125 de ellos icono genérico
+idéntico en todas) se veían dos.
+
+El alto no puede depender de si hay foto: si la tarjeta con foto midiera
+más, un catálogo a medio fotografiar dejaría la rejilla con filas rotas.
 
 ### Mesa card (mapa de sala)
 - Aspect 7/6, `rounded-2xl`, border 2px.
@@ -254,7 +281,15 @@ la auditoría del 2026-09-01 (antes: 20 px visibles de desglose):
    bloque flexible del panel y el único que scrollea.
 3. **Pie anclado** `sticky bottom-0 shrink-0` con fondo sólido y borde
    superior: Subtotal + IVA en una fila, Total en display, y las dos
-   acciones **en fila** (`grid-cols-2`), las dos a `h-touch-lg`.
+   acciones **en fila** — pero NO a mitades (v1.14.1). "Cobrar" es la
+   acción de la pantalla y "Enviar comanda" es de trámite, así que la
+   jerarquía se construye con las tres variables a la vez:
+   `grid-cols-[1fr_1.6fr]` (dos tercios del ancho), `h-touch-lg` contra
+   `h-touch` (64 contra 48) y coral pleno contra borde neutro. Con una
+   sola variable no basta: dos botones del mismo alto y ancho con
+   distinto color se siguen leyendo como una pareja de iguales.
+   La escala táctil se cierra en 64 (§4): no se sube "Cobrar" a 72 con un
+   `h-[72px]` suelto.
 
 Medido a 1280×800 con 12 líneas: cabecera 84 px, lista 304 px (3,4
 líneas), pie 187 px; "Cobrar" termina en y=683 de 800.
@@ -264,25 +299,48 @@ mesa, Partir cuenta, Agrupar, Vaciar mesa) van en el sheet de "Más". La
 destructiva se aparta a su propia zona bajo un borde, con la
 consecuencia escrita al lado.
 
-### Chips de categoría · v1.14
+### Chips de categoría · v1.14.1
 - `h-touch`, `rounded-2xl`, borde 1px, icono Lucide `strokeWidth 2.25`,
   etiqueta `truncate` con `max-w-[200px]`.
-- Fondo y texto salen de los **seis tonos** de §2, repartidos por
-  `lib/categoryTones.ts` y **persistidos por tenant**: el color de una
-  categoría no puede cambiar entre lunes y martes.
-- **Máximo dos filas** (`flex-wrap`, sin `overflow-x`). Lo que no cabe
-  se va a un chip `Más (N)` que abre un sheet. El scroll horizontal está
-  prohibido por `ux-principles.md` §1.8 y un gradiente no lo arregla.
-- **El coral es de la selección**, no de la marca: un chip en reposo
-  nunca es coral. "Todos" seleccionado va en `mipiace.ink`.
+- **Fondo neutro** (`bg-white`, borde `slate-200`). El tono de §2 pinta
+  **sólo el icono**. El reparto de tonos lo hace `lib/categoryTones.ts` y
+  se **persiste por tenant**: el color de una categoría no puede cambiar
+  entre lunes y martes.
+- **UNA sola fila** (`flex-nowrap` + `overflow-hidden`, sin
+  `overflow-x`). Lo que no cabe se va a un chip `Más (N)` que abre un
+  sheet con todas. El scroll horizontal está prohibido por
+  `ux-principles.md` §1.8 y un gradiente no lo arregla; y dos filas
+  tampoco lo arreglaban — costaban ~100 px de alto en una pantalla donde
+  sólo cabían dos filas de producto y, con "Más (3)", seguían sin verse
+  todas las categorías. El problema se había movido de eje.
+- **El seleccionado va en coral SUAVE**: `bg-coral-soft` + borde coral +
+  texto `coral-dark`, que es lo que §2 reserva para "estado activo de
+  nav". Un chip en reposo nunca lleva coral.
+- **El coral PLENO no es de los chips.** En el área de trabajo —catálogo
+  y panel del ticket— sólo lo lleva "Cobrar". "Todos" iba en `ink` pleno
+  hasta v1.14 y era el elemento de más contraste de la pantalla,
+  compitiendo con la caja.
 
-### Estado vacío del ticket · v1.14
-- Nunca en blanco: rejilla de **2 columnas** con los cinco productos más
+### Estado vacío del ticket, y el hueco del desglose · v1.14.1
+- Nunca en blanco: rejilla de **2 columnas** con los productos más
   vendidos del turno (o del mes), `min-h-touch-lg`, nombre arriba y
   precio debajo.
 - Rejilla y no lista: apilados en una columna se leen como líneas ya
   añadidas, que es lo contrario de lo que son.
 - Sin ranking (offline, sin histórico) cae a la frase de siempre.
+- **La misma rejilla llena el hueco que queda bajo una sola línea**
+  (v1.14.1). Con un ticket de una línea el desglose son 90 px de línea y
+  ~214 de nada, y el panel no parece un ticket: parece roto. Cuelga
+  DEBAJO de la lista, tras un borde, y **desaparece en cuanto compite con
+  las líneas**, que son el contenido.
+- Cuántos caben lo decide `topSellersSlotsFor(lineCount)`, una sola regla
+  compartida por la carga del ranking y el pintado: 5 con el ticket
+  vacío, 2 con una línea, ninguno a partir de dos. Los números están
+  medidos, no sumados sobre el papel — dos filas de atajos con una línea
+  piden 193 px sobre 190 disponibles, y **no se aprietan los márgenes
+  para que entren por tres píxeles**: v1.14 ya cortó por abajo el quinto
+  atajo del estado vacío haciendo eso, y un atajo cortado es peor que un
+  atajo que no está.
 
 ## 6. Breakpoints
 

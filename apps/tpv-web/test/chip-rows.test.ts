@@ -1,5 +1,12 @@
-// v1.14-la-comanda-se-ve · reparto de los chips de categoría en dos
-// filas (hallazgo M1 de la auditoría del 2026-09-01).
+// v1.14-la-comanda-se-ve · reparto de los chips de categoría (hallazgo
+// M1 de la auditoría del 2026-09-01).
+//
+// v1.14.1-el-catalogo-manda §2 · eran DOS filas y ahora es UNA. Medido
+// sobre la captura del AP11 con v1.14 desplegado: las dos filas costaban
+// ~100 px de alto en una pantalla donde sólo cabían dos filas de
+// producto, y con "Más (3)" seguían sin verse todas las categorías. Si
+// de todas formas hay un sheet que las tiene todas, la segunda fila se
+// paga con espacio del catálogo y no compra nada.
 //
 // El scroll horizontal sin affordance es un anti-patrón prohibido por
 // `docs/ux-principles.md` §1.8. Estos tests fijan que el reparto es una
@@ -17,10 +24,18 @@ import {
 
 const AP11_CATALOG_COLUMN = CHIP_FALLBACK_ROW_WIDTH; // 840 px a 1280×800
 
-describe("layoutChips · dos filas y 'Más (N)'", () => {
-  it("las ocho categorías de Sirope caben sin desbordar", () => {
+describe("layoutChips · una fila y 'Más (N)'", () => {
+  // SABOTAJE del bloque v1.14.1: devolver `CHIP_MAX_ROWS` a 2. Este es
+  // el test que cae — el invariante es "una fila", no "pocas filas".
+  it("el máximo es UNA fila", () => {
+    expect(CHIP_MAX_ROWS).toBe(1);
+  });
+
+  it("las ocho de Sirope ya no caben todas: las que se pintan caben en UNA fila", () => {
     // Las que la ronda 2 midió en el terminal, donde el octavo chip
-    // terminaba en x=1876 de 1920 tocando el borde.
+    // terminaba en x=1876 de 1920 tocando el borde. En dos filas cabían
+    // las ocho; en una no, y eso es el precio declarado del bloque: lo
+    // que no cabe se va al sheet, que las tiene todas.
     const ocho = [
       "Cafés",
       "Bollería",
@@ -32,8 +47,15 @@ describe("layoutChips · dos filas y 'Más (N)'", () => {
       "Postres",
     ];
     const layout = layoutChips(ocho, AP11_CATALOG_COLUMN, ["Todos"]);
-    expect(layout.visibleCount).toBe(8);
-    expect(layout.overflowCount).toBe(0);
+    expect(layout.visibleCount + layout.overflowCount).toBe(8);
+    expect(layout.overflowCount).toBeGreaterThan(0);
+    // Lo pintado cabe de verdad en una fila, contando "Más (N)".
+    const widths = [
+      estimateChipWidth("Todos"),
+      ...ocho.slice(0, layout.visibleCount).map(estimateChipWidth),
+      estimateChipWidth(`Más (${layout.overflowCount})`),
+    ];
+    expect(rowsNeeded(widths, AP11_CATALOG_COLUMN)).toBe(1);
   });
 
   it("20 categorías → se recortan y sale el chip 'Más (N)'", () => {
@@ -41,7 +63,7 @@ describe("layoutChips · dos filas y 'Más (N)'", () => {
     const layout = layoutChips(veinte, AP11_CATALOG_COLUMN, ["Todos"]);
     expect(layout.overflowCount).toBeGreaterThan(0);
     expect(layout.visibleCount + layout.overflowCount).toBe(20);
-    // Y lo que queda a la vista cabe de verdad en dos filas, contando el
+    // Y lo que queda a la vista cabe de verdad en la fila, contando el
     // sitio que ocupa el propio chip "Más (N)".
     const widths = [
       estimateChipWidth("Todos"),
@@ -102,7 +124,7 @@ describe("layoutChips · dos filas y 'Más (N)'", () => {
 // visual del bloque (chips de categoría con icono, `h-touch px-5`,
 // DM Sans 14px/500). Este es el test que faltaba en la primera versión:
 // la estimación se quedaba un 10 % corta, el reparto creía que cabían
-// diez chips y "Más (N)" caía a una TERCERA fila. Los tests de reparto
+// diez chips y "Más (N)" caía a una fila de más. Los tests de reparto
 // no lo veían porque usaban la MISMA estimación equivocada a los dos
 // lados de la comparación.
 const ANCHOS_MEDIDOS: ReadonlyArray<[string, number]> = [
@@ -135,7 +157,7 @@ describe("estimateChipWidth · calibración contra el navegador", () => {
     }
   });
 
-  it("el catálogo real de 20 categorías cabe en dos filas CON sus anchos reales", () => {
+  it("el catálogo real de 20 categorías cabe en UNA fila CON sus anchos reales", () => {
     // El caso que se coló: se reparte con la estimación y se comprueba
     // con los anchos medidos.
     const veinte = [

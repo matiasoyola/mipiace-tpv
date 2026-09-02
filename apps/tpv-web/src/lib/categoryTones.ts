@@ -32,20 +32,32 @@ export const CATEGORY_TONES: readonly CategoryTone[] = [
 ] as const;
 
 // Clases Tailwind por tono, copiadas de `docs/design/tokens.md` §2
-// ("Tonos para iconos de producto"). Fondo `-50`, texto `-700`. No se
-// generan por interpolación: Tailwind necesita las clases literales en
-// el fuente para incluirlas en el bundle.
-export const TONE_STYLES: Record<CategoryTone, { chip: string }> = {
-  amber: { chip: "bg-amber-50 border-amber-200 text-amber-700 hover:border-amber-400" },
-  sky: { chip: "bg-sky-50 border-sky-200 text-sky-700 hover:border-sky-400" },
-  red: { chip: "bg-red-50 border-red-200 text-red-700 hover:border-red-400" },
-  green: {
-    chip: "bg-emerald-50 border-emerald-200 text-emerald-700 hover:border-emerald-400",
-  },
-  rose: { chip: "bg-rose-50 border-rose-200 text-rose-700 hover:border-rose-400" },
-  stone: {
-    chip: "bg-stone-100 border-stone-300 text-stone-700 hover:border-stone-400",
-  },
+// ("Tonos para iconos de producto"). No se generan por interpolación:
+// Tailwind necesita las clases literales en el fuente para incluirlas en
+// el bundle.
+//
+// v1.14.1-el-catalogo-manda §2 · **el tono ya no pinta el fondo del
+// chip**. En v1.14 el fondo del chip llevaba el tono, y sobre la captura
+// del AP11 eso resultó ser ruido, no información: los tonos se reparten
+// por orden alfabético y en la pantalla real salían Bollería amarillo,
+// Café rojo, Croissantysandwich verde e Infusiones amarillo otra vez.
+// Cuatro fondos de color que no significan nada compiten con la única
+// señal que sí importa en esa fila, que es cuál está seleccionado. El
+// tono se conserva donde informa sin gritar —el icono— y el fondo del
+// chip pasa a neutro.
+//
+// `band` es el acento de 4 px de la tarjeta de producto (§1): es lo
+// único que queda del antiguo bloque de 125 px de icono placeholder.
+export const TONE_STYLES: Record<
+  CategoryTone,
+  { icon: string; band: string }
+> = {
+  amber: { icon: "text-amber-600", band: "bg-amber-400" },
+  sky: { icon: "text-sky-600", band: "bg-sky-400" },
+  red: { icon: "text-red-600", band: "bg-red-400" },
+  green: { icon: "text-emerald-600", band: "bg-emerald-400" },
+  rose: { icon: "text-rose-600", band: "bg-rose-400" },
+  stone: { icon: "text-stone-500", band: "bg-stone-400" },
 };
 
 // Heurística de tokens.md: "café/cervezas → amber; agua/refrescos azules

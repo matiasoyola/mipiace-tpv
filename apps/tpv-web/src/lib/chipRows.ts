@@ -9,8 +9,16 @@
 // scroll horizontal en táctil ("nunca horizontal — el horizontal es
 // ilegible en táctil"), así que la fila deja de deslizarse.
 //
-// Los chips envuelven a un máximo de DOS filas y lo que no cabe se va a
+// Los chips envuelven a un máximo de UNA fila y lo que no cabe se va a
 // un chip "Más (N)" que abre un sheet.
+//
+// v1.14.1-el-catalogo-manda §2 · eran DOS filas hasta v1.14, y sobre la
+// captura del AP11 se vio que aquello no había resuelto el problema
+// sino que lo había movido de eje: la fila costaba ~100 px de alto —el
+// alto de media fila de producto en una pantalla donde sólo cabían
+// dos— y con "Más (3)" seguían sin verse todas las categorías. Si de
+// todas formas hay un sheet que las tiene todas, la segunda fila se
+// paga con espacio del catálogo y no compra nada.
 //
 // Por qué se estima el ancho en vez de medirlo en el DOM: medir cada
 // chip obliga a un render de dos pasadas (pintar todo, medir `offsetTop`,
@@ -21,7 +29,7 @@
 // testeable sin navegador.
 
 /** Filas máximas antes de mandar el resto al sheet. */
-export const CHIP_MAX_ROWS = 2;
+export const CHIP_MAX_ROWS = 1;
 
 /** `gap-2` de Tailwind. */
 const CHIP_GAP = 8;

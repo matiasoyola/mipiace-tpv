@@ -67,3 +67,52 @@ export function resolveTopSellers(
   }
   return out;
 }
+
+/**
+ * v1.14.1-el-catalogo-manda §3 · cuántos atajos de "lo que más sale"
+ * caben en el panel del ticket para un ticket de `lineCount` líneas.
+ *
+ * En v1.14 los atajos eran SÓLO el estado vacío. Sobre la captura del
+ * AP11 se vio el problema siguiente: con una línea el desglose es un
+ * desierto de ~220 px y el panel no parece un ticket, parece roto. Este
+ * bloque llena ese hueco con lo mismo que llena el vacío, porque es lo
+ * mismo que hace falta: añadir el segundo café sin volver a buscarlo en
+ * la rejilla de la izquierda.
+ *
+ * Los números NO salen de sumar sobre el papel: salen de medir el panel
+ * en el navegador a 1280 × 800, y la primera versión de este bloque los
+ * calculó mal. La lista mide 304 px con `py-3`, cada línea del ticket 90
+ * y cada atajo hasta 71 (el nombre va a `line-clamp-2`, así que 71 es un
+ * techo, no una media). El bloque de atajos cuesta 16 px de separación
+ * más 27 de rótulo antes del primer atajo.
+ *
+ *   0 líneas → 280 px libres → los cinco. Es el estado vacío (v1.14 §4).
+ *   1 línea  → 190 px libres → 114 de una fila de dos. Caben.
+ *   2 líneas → 100 px libres → 114 de una fila de dos. **No caben.**
+ *   3+       → no sobra nada → ninguno.
+ *
+ * A partir de tres líneas el ticket es lo que hay que ver: **el atajo
+ * desaparece en cuanto compite con las líneas**, que son el contenido.
+ *
+ * Con una línea caben 190 px y dos filas de atajos piden 193: se quedan
+ * en UNA fila. Que falte por tres píxeles no es motivo para apretar los
+ * márgenes hasta que entren — v1.14 ya cortó por abajo el quinto atajo
+ * del estado vacío haciendo exactamente eso, y un atajo cortado es peor
+ * que un atajo que no está. Con dos líneas la fila pide 114 sobre 100
+ * disponibles, así que tampoco se pinta.
+ *
+ * El corte va por número de líneas y no por medida del DOM a propósito.
+ * Medir obligaría a un efecto tras el layout y el bloque entraría y
+ * saldría con cada pulsación, que es peor que no tenerlo. Con el número
+ * de líneas la decisión es determinista, se testea sin navegador y se
+ * equivoca del lado bueno: de menos, nunca de más.
+ *
+ * Es la ÚNICA regla: la usan tanto la carga del ranking como el pintado.
+ * Si fueran dos, un día el panel pediría atajos que nadie ha cargado —o
+ * al revés— y el síntoma sería un hueco silencioso.
+ */
+export function topSellersSlotsFor(lineCount: number): number {
+  if (lineCount <= 0) return 5;
+  if (lineCount === 1) return 2;
+  return 0;
+}

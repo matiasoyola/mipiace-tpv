@@ -11,6 +11,21 @@
 //
 // m2: el coral lo llevaba "Todos" de forma fija y le robaba la señal a
 // la selección real.
+//
+// v1.14.1-el-catalogo-manda §2 · tres cosas cambian sobre v1.14, todas
+// vistas en la captura del AP11 con v1.14 ya desplegado:
+//
+//   · De dos filas a UNA. Las dos filas costaban ~100 px en una pantalla
+//     donde sólo cabían dos filas de producto, y con "Más (3)" seguían
+//     sin verse todas: el problema se había movido de eje.
+//   · El fondo del chip pasa a neutro. Los tonos se reparten por orden
+//     alfabético, así que en pantalla salían Bollería amarillo, Café
+//     rojo y Croissantysandwich verde: ruido que competía con la única
+//     señal que hay que leer, cuál está seleccionado. El tono se queda
+//     en el icono.
+//   · El seleccionado va en CORAL SUAVE, no en `ink`. Un negro pleno de
+//     48 px competía con "Cobrar", que es el único coral pleno de la
+//     pantalla.
 
 import "fake-indexeddb/auto";
 import { IDBFactory } from "fake-indexeddb";
@@ -85,7 +100,11 @@ vi.mock("qrcode", () => ({
   default: { toDataURL: vi.fn(async () => "data:image/png;base64,") },
 }));
 
-import { CATEGORY_TONES } from "../src/lib/categoryTones.js";
+import {
+  CATEGORY_TONES,
+  TONE_STYLES,
+  type CategoryTone,
+} from "../src/lib/categoryTones.js";
 import { SalePage } from "../src/pages/SalePage.js";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
@@ -205,10 +224,14 @@ describe("v1.14 · M1 · sin scroll horizontal", () => {
     const veinte = Array.from({ length: 20 }, (_, i) => `categoria-${i + 1}`);
     await render(veinte);
 
-    // 1 · La fila no desliza: envuelve. Ni `overflow-x-auto` ni ningún
-    // primo suyo, ni en la fila ni en sus ancestros del catálogo.
+    // 1 · La fila no desliza NI envuelve. Ni `overflow-x-auto` ni ningún
+    // primo suyo, ni en la fila ni en sus ancestros del catálogo; y
+    // `flex-nowrap` es la garantía dura de que, si la estimación de
+    // ancho se quedara corta con la fuente del Chrome del AP11, no
+    // podría abrirse una segunda fila a nuestras espaldas.
     expect(chipRow().className).not.toContain("overflow-x");
-    expect(chipRow().className).toContain("flex-wrap");
+    expect(chipRow().className).toContain("flex-nowrap");
+    expect(chipRow().className).not.toContain("flex-wrap");
     let padre: HTMLElement | null = chipRow().parentElement;
     while (padre && padre !== container) {
       expect(padre.className).not.toContain("overflow-x-auto");
@@ -281,12 +304,17 @@ describe("v1.14 · M1 · sin scroll horizontal", () => {
     expect(tiles).toHaveLength(1);
   });
 
-  it("las ocho de Sirope caben: sin chip de desbordamiento", async () => {
+  // v1.14.1 · en dos filas cabían las ocho de Sirope. En una no caben, y
+  // ese es el precio declarado del bloque: lo que no cabe se va al
+  // sheet, que las tiene todas y está a un toque. Lo que NO puede pasar
+  // es que se pierda ninguna por el camino.
+  it("las ocho de Sirope: lo que no cabe en la fila se va al sheet, sin perder ninguna", async () => {
     await render(OCHO);
-    expect(chips().some((c) => (c.textContent ?? "").startsWith("Más ("))).toBe(
-      false,
-    );
-    expect(chips().filter((c) => c.getAttribute("data-tone"))).toHaveLength(8);
+    const mas = chipByText("Más (");
+    const anunciados = Number(/Más \((\d+)\)/.exec(mas.textContent ?? "")![1]);
+    const visibles = chips().filter((c) => c.getAttribute("data-tone")).length;
+    expect(visibles + anunciados).toBe(8);
+    expect(visibles).toBeGreaterThan(0);
   });
 });
 
@@ -295,16 +323,31 @@ describe("v1.14 · M2 · color e icono por categoría", () => {
     await render(OCHO);
 
     const conTono = chips().filter((c) => c.getAttribute("data-tone"));
-    expect(conTono).toHaveLength(8);
+    expect(conTono.length).toBeGreaterThan(1);
     for (const chip of conTono) {
       const tone = chip.getAttribute("data-tone")!;
       expect(CATEGORY_TONES).toContain(tone);
       // Icono Lucide dentro del chip (svg), no sólo texto.
       expect(chip.querySelector("svg")).not.toBeNull();
     }
-    // Y se usan varios tonos: ocho chips del mismo color no arreglan M2.
-    const usados = new Set(conTono.map((c) => c.getAttribute("data-tone")));
-    expect(usados.size).toBeGreaterThan(1);
+  });
+
+  // v1.14.1 §2 · SABOTAJE: devolver el tono al FONDO del chip.
+  it("el tono pinta el icono, nunca el fondo del chip", async () => {
+    await render(OCHO);
+
+    for (const chip of chips().filter((c) => c.getAttribute("data-tone"))) {
+      const tone = chip.getAttribute("data-tone") as CategoryTone;
+      // El fondo es neutro: blanco, y sin ningún fondo de color de tono.
+      expect(chip.className).toContain("bg-white");
+      expect(chip.className).not.toContain(TONE_STYLES[tone].band);
+      expect(chip.className).not.toMatch(
+        /bg-(amber|sky|red|emerald|rose|stone)-\d/,
+      );
+      // Y el tono está donde debe: en el icono.
+      const icono = chip.querySelector("svg")!;
+      expect(icono.getAttribute("class")).toContain(TONE_STYLES[tone].icon);
+    }
   });
 
   it("el reparto de tonos se persiste por tenant entre sesiones", async () => {
@@ -329,30 +372,68 @@ describe("v1.14 · M2 · color e icono por categoría", () => {
 });
 
 describe("v1.14 · m2 · el coral es de la selección", () => {
-  it("'Todos' no es coral ni siquiera estando activo", async () => {
+  // v1.14.1 §2 · SABOTAJE: pintar el chip seleccionado en `ink`.
+  //
+  // "Todos" salía en negro pleno en el AP11. No es un estado del sistema
+  // visual y además es el elemento de más contraste de la pantalla,
+  // compitiendo con "Cobrar". Ahora el seleccionado va en coral SUAVE
+  // (`coral-soft` + borde coral), que es lo que `tokens.md` §2 reserva
+  // para "estado activo de nav".
+  it("'Todos' seleccionado va en coral suave, no en ink", async () => {
     await render(OCHO);
 
     const todos = chipByText("Todos");
     expect(todos.getAttribute("aria-pressed")).toBe("true");
-    expect(todos.className).not.toContain("coral");
-    expect(todos.className).toContain("bg-mipiace-ink");
-    // Con "Todos" activo, NINGÚN chip lleva coral: sin selección real de
-    // categoría, no hay a qué apuntar.
-    for (const c of chips()) expect(c.className).not.toContain("bg-mipiace-coral");
+    expect(todos.className).toContain("bg-mipiace-coral-soft");
+    expect(todos.className).toContain("border-mipiace-coral");
+    expect(todos.className).not.toContain("bg-mipiace-ink");
   });
 
-  it("al elegir una categoría, el coral es sólo suyo", async () => {
+  it("el seleccionado es exactamente UNO y es el que se ha pulsado", async () => {
     await render(OCHO);
 
     await click(chipByText("Cafes"));
 
-    const corales = chips().filter((c) =>
-      c.className.includes("bg-mipiace-coral"),
+    const marcados = chips().filter(
+      (c) => c.getAttribute("aria-pressed") === "true",
     );
-    expect(corales).toHaveLength(1);
-    expect(corales[0]!.textContent).toContain("Cafes");
-    expect(corales[0]!.getAttribute("aria-pressed")).toBe("true");
-    expect(chipByText("Todos").className).not.toContain("coral");
+    expect(marcados).toHaveLength(1);
+    expect(marcados[0]!.textContent).toContain("Cafes");
+    expect(marcados[0]!.className).toContain("bg-mipiace-coral-soft");
+    // Y "Todos" se apaga a fondo neutro.
+    const todos = chipByText("Todos");
+    expect(todos.className).toContain("bg-white");
+    expect(todos.className).not.toContain("coral-soft");
+  });
+
+  // v1.14.1 §2 + §4 · la regla que cierra las dos secciones: en el área
+  // de trabajo —catálogo y panel del ticket— el coral PLENO es de
+  // "Cobrar" y de nadie más. Es lo que hacía que "Todos" en negro pleno
+  // y el chip seleccionado en coral pleno compitieran con la caja.
+  //
+  // El invariante se acota al área de trabajo, no a la pantalla entera,
+  // porque la barra superior tiene su propio coral pleno preexistente:
+  // el botón "+" de nueva venta en modo venta rápida. No lo audita este
+  // bloque y no se toca aquí; queda declarado como hallazgo.
+  it("en catálogo y panel del ticket, el único coral pleno es 'Cobrar'", async () => {
+    await render(OCHO);
+    await click(chipByText("Cafes"));
+
+    const areas = [
+      container.querySelector("section"),
+      container.querySelector("aside"),
+    ].filter(Boolean) as HTMLElement[];
+    expect(areas).toHaveLength(2);
+
+    const coralPleno = areas.flatMap((a) =>
+      // La clase EXACTA, no una subcadena: `bg-mipiace-coral-soft` y
+      // `hover:bg-mipiace-coral/40` no son coral pleno en reposo.
+      Array.from(a.querySelectorAll<HTMLElement>("button")).filter((b) =>
+        b.className.split(/\s+/).includes("bg-mipiace-coral"),
+      ),
+    );
+    expect(coralPleno).toHaveLength(1);
+    expect(coralPleno[0]!.textContent).toContain("Cobrar");
   });
 
   it("los chips llegan al mínimo táctil de 48 px", async () => {
