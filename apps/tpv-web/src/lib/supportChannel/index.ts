@@ -19,6 +19,7 @@
 
 import { getDeviceToken } from "../../storage.js";
 import { backoffDelayMs } from "./backoff.js";
+import { ejecutarComando } from "./commands.js";
 import { collectDeviceStatus } from "./status.js";
 
 /** Intervalo por defecto hasta que el servidor diga el suyo en el `ready`. */
@@ -139,12 +140,47 @@ export function startSupportChannel(): SupportChannelHandle {
     });
 
     ws.addEventListener("message", (ev: MessageEvent) => {
-      let msg: { type?: unknown; heartbeatIntervalMs?: unknown };
+      let msg: {
+        type?: unknown;
+        heartbeatIntervalMs?: unknown;
+        commandId?: unknown;
+        action?: unknown;
+      };
       try {
         msg = JSON.parse(String(ev.data)) as typeof msg;
       } catch {
         return;
       }
+
+      if (
+        msg.type === "command" &&
+        typeof msg.commandId === "string" &&
+        typeof msg.action === "string"
+      ) {
+        const commandId = msg.commandId;
+        void ejecutarComando(msg.action)
+          .then(({ resultado, despues }) => {
+            send(
+              resultado.ok
+                ? { type: "command-result", commandId, ok: true, data: resultado.datos }
+                : { type: "command-result", commandId, ok: false, error: resultado.error },
+            );
+            // `recargar` y `reiniciar-app` se llevan por delante este contexto,
+            // así que se disparan DESPUÉS de contestar. Sin esto el panel
+            // pintaría "no volvió" en los dos comandos que sí funcionaron.
+            despues?.();
+          })
+          .catch((err: unknown) => {
+            send({
+              type: "command-result",
+              commandId,
+              ok: false,
+              error: String(err).slice(0, 300),
+            });
+          });
+        return;
+      }
+
       if (msg.type !== "ready") return;
       // El canal está autenticado. Sólo AQUÍ se considera bueno el intento:
       // un socket que abre y se cierra a los 5 s por token inválido no debe

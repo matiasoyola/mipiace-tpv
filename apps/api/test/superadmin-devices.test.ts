@@ -92,7 +92,7 @@ const { getDeviceChannelRegistry } = await import(
 const { signSuperAdminAccessToken } = await import("../src/superadmin/tokens.js");
 
 function saBearer(): string {
-  return `Bearer ${signSuperAdminAccessToken({ sub: SA_ID, tv: 1, isRoot: true })}`;
+  return `Bearer ${signSuperAdminAccessToken({ sub: SA_ID, tv: 1 })}`;
 }
 
 function heartbeat(over: Record<string, unknown> = {}): Record<string, unknown> {

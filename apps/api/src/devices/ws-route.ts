@@ -43,6 +43,7 @@ import {
   WS_CLOSE,
   type DeviceChannel,
 } from "./channel-registry.js";
+import { resolverComando } from "./commands.js";
 import {
   DeviceStatusSchema,
   HEARTBEAT_INTERVAL_MS,
@@ -53,12 +54,14 @@ import {
 export const HELLO_TIMEOUT_MS = 5_000;
 
 /**
- * Tope de tamaño de un mensaje entrante. El canal transporta JSON de estado y
- * resultados de comandos acotados; cualquier cosa mayor es un error o un
- * intento de llenarnos la memoria. Los volcados grandes (logs, capturas) se
- * suben por HTTP con su propio límite, no por aquí.
+ * Tope de tamaño de un mensaje entrante.
+ *
+ * El mensaje más grande que existe es el resultado de `captura-de-pantalla`: un
+ * PNG de 1280×800 de una UI plana ronda los 200 KB, y en base64 unos 270 KB.
+ * 2 MiB deja margen de sobra y sigue acotando la memoria — quince terminales no
+ * pueden sumar más que eso a la vez.
  */
-export const MAX_MESSAGE_BYTES = 512 * 1024;
+export const MAX_MESSAGE_BYTES = 2 * 1024 * 1024;
 
 interface HelloMessage {
   type: "hello";
@@ -250,6 +253,26 @@ export async function registerDeviceWebSocketRoute(
           case "ping":
             send({ type: "pong", serverTime: new Date().toISOString() });
             break;
+          case "command-result": {
+            // El resultado se encaja con el comando que lo espera. El
+            // `deviceId` sale del canal, no del mensaje: un terminal no puede
+            // contestar por otro ni por un error de versión.
+            if (typeof msg.commandId !== "string") break;
+            resolverComando(
+              channel.deviceId,
+              msg.commandId,
+              msg.ok === true
+                ? { estado: "ok", datos: msg.data ?? null }
+                : {
+                    estado: "error",
+                    mensaje:
+                      typeof msg.error === "string"
+                        ? msg.error.slice(0, 500)
+                        : "el terminal no dijo por qué falló",
+                  },
+            );
+            break;
+          }
           default:
             // Mensaje desconocido: se ignora. El canal es nuestro por los dos
             // lados, así que esto sólo pasa con versiones desparejadas.

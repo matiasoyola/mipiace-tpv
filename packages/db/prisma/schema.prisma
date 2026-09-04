@@ -778,12 +778,14 @@ model Device {
   // dispara primer login, cambio de país y re-aparición tras 30d.
   lastEmailAlertAt   DateTime? @map("last_email_alert_at") @db.Timestamptz()
 
-  tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  register         Register         @relation(fields: [registerId], references: [id], onDelete: Cascade)
-  consumedPairings PairingCode[]    @relation("PairingCodeConsumedBy")
+  tenant           Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  register         Register           @relation(fields: [registerId], references: [id], onDelete: Cascade)
+  consumedPairings PairingCode[]      @relation("PairingCodeConsumedBy")
   // A5 · última instantánea que el terminal publicó por su canal de
   // soporte. 1:1, se sobreescribe en cada heartbeat.
   heartbeat        DeviceHeartbeat?
+  // A5 · capturas de pantalla vivas de este terminal (24 h como mucho).
+  screenshots      DeviceScreenshot[]
 
   @@index([tenantId])
   @@index([registerId])
@@ -846,6 +848,44 @@ model DeviceHeartbeat {
   bootedAt         DateTime? @map("booted_at") @db.Timestamptz()
 
   @@map("device_heartbeats")
+}
+
+// A5 · Frente 4 · metadatos de una captura de pantalla de un terminal.
+//
+// El PNG NO vive aquí: vive en disco, bajo DEVICE_SCREENSHOT_DIR, igual que los
+// informes Z. Esta tabla guarda quién la pidió, por qué, y hasta cuándo existe.
+//
+// **Una captura de la pantalla de un TPV contiene datos de clientes.** De ahí
+// las tres reglas que esta tabla hace cumplir: retención corta y declarada
+// (`expiresAt`, 24 h), motivo obligatorio, y nada de capturas anónimas — cada
+// una cuelga del super-admin que la pidió.
+//
+// El barrido lo hace el worker (`device-screenshot-sweeper`): borra el fichero
+// y la fila. Si el worker no corriera, las capturas seguirían en disco: por eso
+// el barrido tiene su propio test y entra en la tabla de sabotaje.
+model DeviceScreenshot {
+  id       String @id @default(uuid()) @db.Uuid
+  deviceId String @map("device_id") @db.Uuid
+  device   Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  // Se copia el tenant en vez de leerlo por el device: si el device se borra,
+  // la traza de auditoría todavía tiene que poder decir de quién era.
+  tenantId String @map("tenant_id") @db.Uuid
+
+  requestedBySuperAdminId String @map("requested_by_super_admin_id") @db.Uuid
+  commandId               String @map("command_id") @db.Uuid
+  /// Por qué se pidió. Obligatorio, como en el comando.
+  reason                  String
+
+  /// Nombre del fichero dentro de DEVICE_SCREENSHOT_DIR. Nunca una ruta.
+  fileName  String   @map("file_name")
+  bytes     Int
+  mimeType  String   @map("mime_type")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  expiresAt DateTime @map("expires_at") @db.Timestamptz()
+
+  @@index([deviceId, createdAt])
+  @@index([expiresAt])
+  @@map("device_screenshots")
 }
 
 // Código efímero que el propietario/encargado entrega al dispositivo

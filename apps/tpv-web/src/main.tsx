@@ -12,6 +12,7 @@ import {
   renderUnsupportedBrowser,
 } from "./lib/browser-support.js";
 import { initSentry } from "./lib/sentry.js";
+import { installLogBuffer } from "./lib/supportChannel/logBuffer.js";
 import { consumeTestModeFromUrl } from "./lib/test-mode.js";
 import { runVersionCheck } from "./lib/version-check.js";
 import { bootstrapPrinters } from "./platform/printer/bootstrap.js";
@@ -25,6 +26,12 @@ initSentry();
 // v1.5-consistencia-A §4.b: promesas rechazadas sin catch → consola
 // estructurada + Sentry.
 installGlobalErrorLogging();
+
+// A5 · diario de a bordo del terminal: anillo en memoria con las últimas
+// líneas de consola y los errores no capturados, que es lo que devuelve el
+// comando `volcar-logs`. Va aquí, antes de montar React, para que el fallo de
+// arranque —el que deja la barra sin TPV— quede dentro.
+installLogBuffer();
 
 // B-OnboardingV2: si la URL trae `?testCashierToken=...&testDeviceToken=...`,
 // los guardamos en sessionStorage y limpiamos la URL antes de que el

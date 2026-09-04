@@ -1,7 +1,7 @@
 import type { ReactElement, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { superApi, SuperAdminApiError } from "./api.js";
+import { superApi, superApiBlob, SuperAdminApiError } from "./api.js";
 import { SuperAdminShell } from "./SuperAdminShell.js";
 
 // A5 · Frente 2 · los terminales se dejan ver.
@@ -271,6 +271,161 @@ export function TerminalesPage() {
   );
 }
 
+// La lista blanca, tal cual la aplica el servidor. Se repite aquí sólo para
+// pintar botones: si alguien añade uno que el servidor no conoce, el servidor
+// lo rechaza y lo audita. El orden es el del uso real — lo barato y reversible
+// primero, lo que interrumpe al camarero al final.
+const COMANDOS: Array<{ accion: string; etiqueta: string; ayuda: string }> = [
+  { accion: "decir-version", etiqueta: "Decir versión", ayuda: "Estado al momento, sin esperar al latido" },
+  { accion: "volcar-logs", etiqueta: "Volcar logs", ayuda: "Consola del WebView + logcat de la app" },
+  { accion: "captura-de-pantalla", etiqueta: "Captura de pantalla", ayuda: "Se borra a las 24 h · el terminal avisa" },
+  { accion: "forzar-sync", etiqueta: "Forzar sync", ayuda: "Vacía la cola pendiente ahora" },
+  { accion: "recargar", etiqueta: "Recargar", ayuda: "Recarga la pantalla del TPV" },
+  { accion: "reiniciar-app", etiqueta: "Reiniciar app", ayuda: "Recrea la app; la cola no se pierde" },
+];
+
+interface RespuestaComando {
+  commandId: string;
+  action: string;
+  status: "ok" | "error" | "sin-respuesta";
+  data: unknown;
+  error: string | null;
+}
+
+function AccionesSoporte({ t }: { t: TerminalRow }): ReactElement {
+  const [motivo, setMotivo] = useState("");
+  const [enviando, setEnviando] = useState<string | null>(null);
+  const [respuesta, setRespuesta] = useState<RespuestaComando | null>(null);
+  const [errorEnvio, setErrorEnvio] = useState<string | null>(null);
+  const [capturaUrl, setCapturaUrl] = useState<string | null>(null);
+
+  // El object URL de una captura no puede quedarse colgado: es una foto con
+  // datos de un cliente y sólo debe vivir mientras se está mirando.
+  useEffect(() => {
+    return () => {
+      if (capturaUrl) URL.revokeObjectURL(capturaUrl);
+    };
+  }, [capturaUrl]);
+
+  async function mandar(accion: string): Promise<void> {
+    setEnviando(accion);
+    setErrorEnvio(null);
+    setRespuesta(null);
+    if (capturaUrl) {
+      URL.revokeObjectURL(capturaUrl);
+      setCapturaUrl(null);
+    }
+    try {
+      const res = await superApi<RespuestaComando>(
+        `/super-admin/devices/${t.id}/commands`,
+        { method: "POST", body: { action: accion, reason: motivo.trim() } },
+      );
+      setRespuesta(res);
+      if (
+        accion === "captura-de-pantalla" &&
+        res.status === "ok" &&
+        res.data &&
+        typeof res.data === "object" &&
+        "screenshotId" in res.data
+      ) {
+        const id = String((res.data as { screenshotId: unknown }).screenshotId);
+        const blob = await superApiBlob(
+          `/super-admin/devices/screenshots/${id}`,
+        );
+        setCapturaUrl(URL.createObjectURL(blob));
+      }
+    } catch (err) {
+      setErrorEnvio(
+        err instanceof SuperAdminApiError
+          ? err.message
+          : "No se pudo mandar el comando.",
+      );
+    } finally {
+      setEnviando(null);
+    }
+  }
+
+  const motivoValido = motivo.trim().length >= 3;
+
+  return (
+    <div className="mt-4 border-t border-slate-100 pt-3">
+      <label
+        htmlFor={`motivo-${t.id}`}
+        className="block text-xs font-medium text-slate-600"
+      >
+        Motivo (obligatorio)
+      </label>
+      <input
+        id={`motivo-${t.id}`}
+        type="text"
+        value={motivo}
+        maxLength={300}
+        onChange={(e) => setMotivo(e.target.value)}
+        placeholder="Thalía llama: dice que no le imprime"
+        className="mt-1 w-full max-w-lg rounded-lg border border-slate-300 px-3 py-2 text-sm"
+      />
+      <p className="mt-1 text-xs text-slate-500">
+        Queda en el registro de auditoría junto al comando. Sin motivo no se
+        manda nada.
+      </p>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {COMANDOS.map((c) => (
+          <button
+            key={c.accion}
+            type="button"
+            title={c.ayuda}
+            disabled={!t.online || !motivoValido || enviando !== null}
+            onClick={() => void mandar(c.accion)}
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {enviando === c.accion ? "Enviando…" : c.etiqueta}
+          </button>
+        ))}
+      </div>
+
+      {!t.online ? (
+        <p className="mt-2 text-xs text-slate-500">
+          El terminal no tiene canal abierto: no se le puede mandar nada hasta
+          que vuelva.
+        </p>
+      ) : null}
+
+      {errorEnvio ? (
+        <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {errorEnvio}
+        </p>
+      ) : null}
+
+      {respuesta ? (
+        <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+          <p className="font-medium text-slate-700">
+            {respuesta.action} ·{" "}
+            {respuesta.status === "ok"
+              ? "hecho"
+              : respuesta.status === "error"
+                ? `error: ${respuesta.error ?? "sin detalle"}`
+                : "no volvió (el terminal no contestó a tiempo)"}
+          </p>
+          {capturaUrl ? (
+            <img
+              src={capturaUrl}
+              alt={`Captura del terminal ${nombreTerminal(t)}`}
+              className="mt-2 max-w-full rounded border border-slate-300"
+            />
+          ) : null}
+          {respuesta.status === "ok" &&
+          respuesta.action !== "captura-de-pantalla" ? (
+            <pre className="mt-2 max-h-72 overflow-auto rounded bg-white p-2 text-xs text-slate-700">
+              {JSON.stringify(respuesta.data, null, 2)}
+            </pre>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function TerminalCard({ t, now }: { t: TerminalRow; now: number }): ReactElement {
   const hb = t.heartbeat;
   const desvio = desvioRelevante(hb?.clockSkewSeconds ?? null);
@@ -368,6 +523,8 @@ function TerminalCard({ t, now }: { t: TerminalRow; now: number }): ReactElement
           <span className="ml-1 font-medium text-amber-700">· {desvio}</span>
         ) : null}
       </p>
+
+      {revocado ? null : <AccionesSoporte t={t} />}
     </li>
   );
 }

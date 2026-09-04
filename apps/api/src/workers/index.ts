@@ -20,6 +20,7 @@ import { startImageCacheWorker } from "./image-cache-worker.js";
 import { startContactImportWorker } from "./contact-import-worker.js";
 import { startReconciliationWorker } from "./reconciliation-worker.js";
 import { startUploadSweeper } from "./upload-sweeper.js";
+import { startDeviceScreenshotSweeper } from "./device-screenshot-sweeper.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
 import { registerReconciliationRepeatable } from "../queues/reconciliation.js";
 import { startAgendaHoldTtlWorker } from "./agenda-hold-ttl-worker.js";
@@ -42,6 +43,10 @@ async function main() {
   const agendaHoldTtlWorker = startAgendaHoldTtlWorker();
   const shiftDayCutWorker = startShiftDayCutWorker();
   const uploadSweeper = startUploadSweeper();
+  // A5 · borra las capturas de pantalla caducadas (fichero y fila). Es lo que
+  // hace verdad la retención de 24 h; sin esto quedan fotos de las pantallas
+  // de nuestros clientes en el disco del VPS.
+  const screenshotSweeper = startDeviceScreenshotSweeper();
   const heartbeat = startWorkerHeartbeat();
   console.log("[workers] initial-sync worker listo");
   console.log("[workers] catalog-incremental worker listo");
@@ -52,6 +57,7 @@ async function main() {
   console.log("[workers] contact-import worker listo");
   console.log("[workers] reconciliation worker listo");
   console.log("[workers] upload-sweeper listo (cada 5 min)");
+  console.log("[workers] device-screenshot-sweeper listo (cada 15 min)");
   console.log("[workers] shift-day-cut worker listo");
   const count = await registerAllExistingRepeatables();
   console.log(`[workers] ${count} repeatable(s) registrados para tenants existentes`);
@@ -70,6 +76,7 @@ async function main() {
   process.on("SIGINT", async () => {
     console.log("[workers] SIGINT — cerrando…");
     uploadSweeper.stop();
+    screenshotSweeper.stop();
     heartbeat.stop();
     await Promise.all([
       initialWorker.close(),
