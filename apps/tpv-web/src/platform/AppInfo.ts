@@ -42,9 +42,16 @@ function asNonEmptyString(value: unknown): string {
  */
 export async function getNativeAppInfo(): Promise<NativeAppInfo | null> {
   const cap = getCapacitor();
-  if (!cap?.registerPlugin) return null;
+  if (!cap) return null;
+  // Ver CameraPermission.ts / UsbNativeTransport.ts: el global del bridge
+  // trae `Plugins`, no `registerPlugin`.
+  const plugin =
+    (cap.Plugins?.["App"] as AppPlugin | undefined) ??
+    (typeof cap.registerPlugin === "function"
+      ? cap.registerPlugin<AppPlugin>("App")
+      : null);
+  if (!plugin) return null;
   try {
-    const plugin = cap.registerPlugin<AppPlugin>("App");
     const info = await plugin.getInfo();
     const versionName = asNonEmptyString(info?.version);
     const versionCode = asNonEmptyString(info?.build);

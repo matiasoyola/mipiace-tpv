@@ -31,10 +31,22 @@ interface CameraPermissionPlugin {
   request(): Promise<{ granted: boolean }>;
 }
 
+// El bridge nativo NO expone `registerPlugin` en el global `Capacitor`
+// (esa función vive en @capacitor/core, que este bundle no importa a
+// propósito). Lo que inyecta es `Capacitor.Plugins.<Nombre>` ya construido.
+// Mismo fallo que tenía UsbNativeTransport y que dejó la impresión USB
+// muerta desde A1 — ver el commit 905bd21.
 function getPlugin(): CameraPermissionPlugin | null {
   const cap = getCapacitor();
-  if (!cap?.registerPlugin) return null;
-  return cap.registerPlugin<CameraPermissionPlugin>("CameraPermission");
+  if (!cap) return null;
+  const fromBridge = cap.Plugins?.["CameraPermission"] as
+    | CameraPermissionPlugin
+    | undefined;
+  if (fromBridge) return fromBridge;
+  if (typeof cap.registerPlugin === "function") {
+    return cap.registerPlugin<CameraPermissionPlugin>("CameraPermission");
+  }
+  return null;
 }
 
 /**
