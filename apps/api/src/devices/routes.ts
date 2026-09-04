@@ -5,6 +5,7 @@ import type { FastifyInstance } from "fastify";
 import { getPrisma } from "../context.js";
 import { requireOwnerOrManager } from "../auth/middleware.js";
 import { evaluateDeviceAlert } from "./alerts.js";
+import { getDeviceChannelRegistry, WS_CLOSE } from "./channel-registry.js";
 import {
   generateDeviceToken,
   hashDeviceToken,
@@ -397,7 +398,20 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
         where: { id: deviceId },
         data: { revokedAt: new Date() },
       });
-      return reply.code(200).send({ ok: true, alreadyRevoked: false });
+      // A5 · si ese terminal tenía el canal de soporte abierto, se le cierra
+      // AHORA. Sin esto, un device revocado seguiría latiendo y aceptando
+      // comandos por un canal que abrió cuando todavía valía, hasta que se
+      // reiniciara la app o se cayera la red. La revocación tiene que valer en
+      // el momento en que se pulsa, que es cuando alguien ha decidido que ese
+      // terminal ya no es de fiar.
+      const canalCerrado = getDeviceChannelRegistry().closeDevice(
+        deviceId,
+        WS_CLOSE.REVOKED,
+        "device revoked",
+      );
+      return reply
+        .code(200)
+        .send({ ok: true, alreadyRevoked: false, canalCerrado });
     },
   );
 }

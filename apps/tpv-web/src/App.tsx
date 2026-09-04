@@ -22,6 +22,7 @@ import {
 import { ReloginPinModal } from "./components/ReloginPinModal.js";
 import { TestModeBanner } from "./components/TestModeBanner.js";
 import { useDeviceBootstrap } from "./hooks/useDeviceBootstrap.js";
+import { startSupportChannel } from "./lib/supportChannel/index.js";
 import { useInactivityLogout } from "./hooks/useInactivityLogout.js";
 import { getCachedBusinessType } from "./lib/catalog.js";
 import {
@@ -186,6 +187,20 @@ export function App() {
       registerShiftResolvedCallback(null);
     };
   }, []);
+
+  // A5 · canal de soporte. Se abre cuando el terminal está vinculado (antes
+  // no hay device token que presentar) y se cierra al desvincular. Es
+  // deliberadamente invisible: no pinta nada, no bloquea nada y ninguna
+  // pantalla espera a que esté conectado. Si la API está caída, reintenta en
+  // segundo plano y el TPV sigue vendiendo.
+  //
+  // `testMode` queda fuera a propósito: el "Probar TPV" del super-admin no es
+  // un terminal, y el inventario tiene que ser de terminales de verdad.
+  useEffect(() => {
+    if (testMode || state.kind !== "paired") return;
+    const channel = startSupportChannel();
+    return () => channel.stop();
+  }, [testMode, state.kind]);
 
   // v1.10-offline-un-terminal §1: en cada arranque online descargamos y
   // cacheamos el paquete offline (roster + config). Best-effort: sin red

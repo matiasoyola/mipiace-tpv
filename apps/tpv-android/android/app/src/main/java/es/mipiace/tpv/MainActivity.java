@@ -35,6 +35,9 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(UsbPrinterPlugin.class);
         // A2-Android · Frente 1 · permiso nativo de cámara para el escáner.
         registerPlugin(CameraPermissionPlugin.class);
+        // A5 · lo que el terminal sabe de sí mismo y el WebView no: red, IP
+        // local, arranque, y la captura de su propia ventana.
+        registerPlugin(SupportAgentPlugin.class);
         super.onCreate(savedInstanceState);
     }
 
