@@ -79,12 +79,39 @@ export class UsbNativeTransport implements PrinterTransport {
 
   private plugin: UsbPrinterPlugin | null = null;
 
+  // El bridge nativo de Capacitor NO expone `registerPlugin` en el global
+  // `Capacitor`: esa función vive en el paquete `@capacitor/core`, que este
+  // bundle no importa a propósito (regresión cero en la PWA). Lo que el
+  // bridge SÍ inyecta es `Capacitor.Plugins.<Nombre>` ya construido.
+  //
+  // Comprobado en el AP12 de Sole el 2026-09-04: dentro de la APK,
+  // `getPlatform()` = "android", `isNativePlatform()` = true y el plugin Java
+  // aparece en logcat como "Registering plugin instance: UsbPrinter", pero
+  // `typeof Capacitor.registerPlugin === "undefined"`. Con el guard viejo
+  // `getPlugin()` devolvía null SIEMPRE → `isSupported()` false → el TPV
+  // contestaba "Este dispositivo no puede imprimir por USB" en un terminal
+  // con la impresora perfectamente enumerada. La impresión USB nativa no
+  // había funcionado nunca desde A1.
   private getPlugin(): UsbPrinterPlugin | null {
     if (this.plugin) return this.plugin;
     const cap = getCapacitor();
-    if (!cap?.registerPlugin) return null;
-    this.plugin = cap.registerPlugin<UsbPrinterPlugin>("UsbPrinter");
-    return this.plugin;
+    if (!cap) return null;
+
+    // 1) Camino real dentro de la APK.
+    const fromBridge = cap.Plugins?.["UsbPrinter"] as UsbPrinterPlugin | undefined;
+    if (fromBridge) {
+      this.plugin = fromBridge;
+      return this.plugin;
+    }
+
+    // 2) Si algún día este bundle sí carga @capacitor/core, el global trae
+    //    registerPlugin y este camino sigue valiendo.
+    if (typeof cap.registerPlugin === "function") {
+      this.plugin = cap.registerPlugin<UsbPrinterPlugin>("UsbPrinter");
+      return this.plugin;
+    }
+
+    return null;
   }
 
   private requirePlugin(): UsbPrinterPlugin {
