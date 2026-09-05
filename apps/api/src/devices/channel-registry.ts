@@ -25,6 +25,17 @@ export const WS_CLOSE = {
   REVOKED: 4403,
   /** El mismo device abrió un canal nuevo; éste sobra. */
   REPLACED: 4409,
+  /**
+   * R1 · problema NUESTRO, no del terminal: la BD no contesta, un fallo
+   * inesperado en el handshake. Existe para que un error transitorio nunca se
+   * disfrace de `REVOKED`.
+   *
+   * La diferencia importa mucho más de lo que parece: `REVOKED` es la única
+   * respuesta ante la que el terminal deja de reintentar. Si un fallo pasajero
+   * la reutilizara, un terminal sano se quedaría sin canal hasta que alguien
+   * fuera al local a reiniciar la app. Ante 4500 el terminal reintenta.
+   */
+  TRANSIENT: 4500,
 } as const;
 
 export interface DeviceChannel {

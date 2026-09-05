@@ -408,11 +408,20 @@ function AccionesSoporte({ t }: { t: TerminalRow }): ReactElement {
                 : "no volvió (el terminal no contestó a tiempo)"}
           </p>
           {capturaUrl ? (
-            <img
-              src={capturaUrl}
-              alt={`Captura del terminal ${nombreTerminal(t)}`}
-              className="mt-2 max-w-full rounded border border-slate-300"
-            />
+            <>
+              <img
+                src={capturaUrl}
+                alt={`Captura del terminal ${nombreTerminal(t)}`}
+                className="mt-2 max-w-full rounded border border-slate-300"
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                Se borra sola a las 24 h. El terminal ha avisado en pantalla de
+                que se ha tomado.
+                {(respuesta.data as { via?: string } | null)?.via === "software"
+                  ? " Capturada por la vía de respaldo (dibujado software): puede no reflejar capas de hardware."
+                  : ""}
+              </p>
+            </>
           ) : null}
           {respuesta.status === "ok" &&
           respuesta.action !== "captura-de-pantalla" ? (

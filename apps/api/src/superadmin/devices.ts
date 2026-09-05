@@ -295,6 +295,15 @@ export async function registerSuperAdminDeviceCommandRoutes(
                 expiresAt: guardada.expiresAt.toISOString(),
               },
             });
+            // `via` dice si la imagen salió de PixelCopy (copia del Surface
+            // real) o del dibujado software de respaldo. Va al panel porque las
+            // dos no valen lo mismo, y quien mira tiene que saber cuál tiene
+            // delante.
+            const via =
+              typeof (enviado.resultado.datos as { via?: unknown })?.via ===
+              "string"
+                ? (enviado.resultado.datos as { via: string }).via
+                : null;
             return reply.code(200).send({
               commandId: enviado.commandId,
               action: enviado.accion,
@@ -303,20 +312,31 @@ export async function registerSuperAdminDeviceCommandRoutes(
                 screenshotId: guardada.screenshotId,
                 bytes: guardada.bytes,
                 expiresAt: guardada.expiresAt.toISOString(),
+                via,
               },
               error: null,
             });
           } catch (err) {
-            if (err instanceof CapturaInvalida) {
-              return reply.code(200).send({
-                commandId: enviado.commandId,
-                action: enviado.accion,
-                status: "error",
-                data: null,
-                error: err.message,
-              });
+            // Tanto una imagen que no vale como un disco que no deja escribir
+            // se contestan igual: como un comando que salió mal, no como un
+            // 500. El super-admin está al teléfono con alguien y necesita leer
+            // qué pasó, no un identificador de incidencia.
+            const motivo =
+              err instanceof CapturaInvalida
+                ? err.message
+                : `no se pudo guardar la captura: ${
+                    (err as { code?: string }).code ?? "error de disco"
+                  }`;
+            if (!(err instanceof CapturaInvalida)) {
+              request.log.error({ err, deviceId }, "A5 no pude guardar la captura");
             }
-            throw err;
+            return reply.code(200).send({
+              commandId: enviado.commandId,
+              action: enviado.accion,
+              status: "error",
+              data: null,
+              error: motivo,
+            });
           }
         }
 

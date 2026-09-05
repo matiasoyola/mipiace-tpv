@@ -156,6 +156,9 @@ beforeEach(async () => {
   await app.register(websocket);
   await registerDeviceWebSocketRoute(app, {
     helloTimeoutMs: HELLO_TIMEOUT_TEST_MS,
+    // El silencio real son 75 s; aquí se acorta para poder probarlo.
+    livenessCheckMs: 40,
+    silenceTimeoutMs: 200,
   });
   await registerDeviceRoutes(app);
   await app.ready();
@@ -352,5 +355,116 @@ describe("A5 · /ws/device · el latido", () => {
     expect(getDeviceChannelRegistry().size()).toBe(1);
     expect(getDeviceChannelRegistry().isOnline(DEVICE_A)).toBe(true);
     segundo.close();
+  });
+});
+
+describe("A5 · R1 · el canal no puede desvincular a nadie", () => {
+  it("un token desconocido cierra 4401, NUNCA 4403", async () => {
+    // Es la diferencia entera: 4403 es el único código ante el que el terminal
+    // deja de reintentar. Si un token que no encaja —una BD de staging, un
+    // hash mal calculado, un despliegue a medias— se contestara con 4403, un
+    // terminal sano se quedaría sin canal hasta que alguien fuera al local.
+    const ws = await app.injectWS("/ws/device");
+    ws.send(JSON.stringify({ type: "hello", token: "token-que-no-existe-pero-largo" }));
+    const code = await waitForClose(ws);
+    expect(code).toBe(4401);
+    expect(code).not.toBe(4403);
+  });
+
+  it("si la BD no contesta, cierra 4500 (problema nuestro), no 4403", async () => {
+    fakePrisma.device.findUnique.mockRejectedValueOnce(new Error("BD caída"));
+    const ws = await app.injectWS("/ws/device");
+    ws.send(JSON.stringify({ type: "hello", token: TOKEN_A }));
+    const code = await waitForClose(ws);
+    expect(
+      code,
+      "un fallo de la API no puede disfrazarse de terminal revocado",
+    ).toBe(4500);
+  });
+
+  it("un device cuya fila ya no existe cierra 4401, no 4403", async () => {
+    const ws = await openChannel(TOKEN_A);
+    devices.delete(DEVICE_A);
+    const closed = waitForClose(ws);
+    ws.send(JSON.stringify({ type: "status", outboxPending: 0 }));
+    expect(await closed).toBe(4401);
+  });
+
+  it("4403 SÓLO cuando revokedAt está puesto de verdad en BD", async () => {
+    devices.get(DEVICE_A)!.revokedAt = new Date();
+    const ws = await app.injectWS("/ws/device");
+    ws.send(JSON.stringify({ type: "hello", token: TOKEN_A }));
+    expect(await waitForClose(ws)).toBe(4403);
+  });
+});
+
+describe("A5 · R2 · el bloque no escribe en Device salvo lastSeenAt", () => {
+  it("el latido sólo toca lastSeenAt", async () => {
+    const ws = await openChannel(TOKEN_A, { outboxPending: 1 });
+    await tick();
+
+    const escrituras = fakePrisma.device.update.mock.calls.map(
+      ([args]: any) => args.data,
+    );
+    expect(escrituras.length).toBeGreaterThan(0);
+    for (const data of escrituras) {
+      expect(
+        Object.keys(data),
+        "el canal no puede escribir nada más en Device: ahí vive la vinculación",
+      ).toEqual(["lastSeenAt"]);
+    }
+    ws.close();
+  });
+
+  it("ningún camino del canal toca el token ni la revocación", async () => {
+    const ws = await openChannel(TOKEN_A, { outboxPending: 1 });
+    await tick();
+    ws.send(JSON.stringify({ type: "status", outboxPending: 0 }));
+    await tick();
+
+    const escrituras = fakePrisma.device.update.mock.calls.map(
+      ([args]: any) => JSON.stringify(args.data),
+    );
+    for (const data of escrituras) {
+      expect(data).not.toContain("deviceTokenHash");
+      expect(data).not.toContain("revokedAt");
+    }
+    // Y el token del device sigue siendo el mismo: nadie lo ha rotado.
+    expect(devices.get(DEVICE_A)!.deviceTokenHash).toBe(sha256(TOKEN_A));
+    ws.close();
+  });
+});
+
+describe("A5 · el terminal que se calla", () => {
+  it("un canal que deja de hablar se cierra y desaparece del panel", async () => {
+    // Es el caso de apagarle la WiFi o el enchufe al terminal: el socket TCP no
+    // se entera —no llega ningún FIN— y sin esto el panel seguiría pintándolo
+    // online durante minutos. Verificado en el AP11: pasa de verdad.
+    const ws = await openChannel(TOKEN_A);
+    expect(getDeviceChannelRegistry().isOnline(DEVICE_A)).toBe(true);
+
+    await esperarA(() => !getDeviceChannelRegistry().isOnline(DEVICE_A), 3_000);
+    expect(
+      getDeviceChannelRegistry().isOnline(DEVICE_A),
+      "un terminal callado no puede seguir contando como online",
+    ).toBe(false);
+    ws.terminate();
+  });
+
+  it("mientras habla, el canal se mantiene", async () => {
+    const ws = await openChannel(TOKEN_A);
+    // Latidos por debajo del umbral: el canal no se cierra.
+    for (let i = 0; i < 5; i += 1) {
+      await tick(60);
+      ws.send(JSON.stringify({ type: "status", outboxPending: 0 }));
+    }
+    expect(getDeviceChannelRegistry().isOnline(DEVICE_A)).toBe(true);
+    ws.terminate();
+  });
+
+  it("cerrar por silencio NO es una revocación (R1)", async () => {
+    const ws = await openChannel(TOKEN_A);
+    const code = await waitForClose(ws);
+    expect(code, "el silencio es un 4500, no un 4403").toBe(4500);
   });
 });

@@ -33,6 +33,23 @@
 // Nada de lo que llega por aquí toca cobro, turno, arqueo ni cierre del día.
 // El canal es de sólo-mirar; los comandos (que tampoco tocan dinero) viven en
 // `commands.ts`.
+//
+// ── R1 · este canal NO PUEDE DESVINCULAR NADA ─────────────────────────────
+// Un terminal desvinculado pide un código de 6 dígitos en la barra un lunes por
+// la mañana. Así que:
+//
+//   - Sólo se cierra con `REVOKED` (4403) cuando el device tiene `revokedAt`
+//     puesto EN BD. Es el único código ante el que el terminal deja de
+//     reintentar, y no se reutiliza para nada más.
+//   - Un token que no encaja cierra con `UNAUTHORIZED` (4401) y el terminal
+//     sigue reintentando con backoff: no borra su vinculación, no la toca.
+//   - Cualquier fallo nuestro —la BD no contesta, una excepción inesperada—
+//     cierra con `TRANSIENT` (4500). Un problema de la API jamás puede
+//     disfrazarse de "este terminal ya no vale".
+//
+// Y del lado del terminal, `lib/supportChannel` no importa `unpair`,
+// `clearAllDeviceState` ni nada de `useDeviceBootstrap`: el canal no comparte
+// camino con el arranque.
 
 import type { FastifyInstance } from "fastify";
 
@@ -47,6 +64,7 @@ import { resolverComando } from "./commands.js";
 import {
   DeviceStatusSchema,
   HEARTBEAT_INTERVAL_MS,
+  HEARTBEAT_TIMEOUT_MS,
   recordHeartbeat,
 } from "./heartbeat.js";
 
@@ -87,6 +105,21 @@ function isHello(msg: Record<string, unknown>): msg is HelloMessage &
   return msg.type === "hello" && typeof msg.token === "string";
 }
 
+/**
+ * Cada cuánto se comprueba si un canal lleva callado demasiado.
+ *
+ * Hace falta porque un socket TCP no se entera de que al terminal le han
+ * quitado la WiFi o el enchufe: el sistema no manda ningún FIN y la conexión se
+ * queda abierta en el servidor hasta que expira el keepalive del kernel, que
+ * son minutos. Verificado en el AP11 el 2026-09-04: tras apagarle la WiFi, el
+ * panel seguía pintándolo online.
+ *
+ * Un panel que dice «online» de un terminal apagado es peor que no tener panel:
+ * es exactamente el viaje a ciegas que este bloque quiere evitar. Así que si un
+ * canal no dice nada en dos latidos y medio, se cierra y desaparece de la lista.
+ */
+export const LIVENESS_CHECK_MS = 10_000;
+
 export interface DeviceWebSocketOptions {
   /**
    * Margen para el `hello`. Parámetro sólo para poder probarlo: un test que
@@ -95,6 +128,9 @@ export interface DeviceWebSocketOptions {
    * producción nadie pasa este valor.
    */
   helloTimeoutMs?: number;
+  /** Ídem para el silencio del canal. */
+  livenessCheckMs?: number;
+  silenceTimeoutMs?: number;
 }
 
 export async function registerDeviceWebSocketRoute(
@@ -102,10 +138,14 @@ export async function registerDeviceWebSocketRoute(
   options: DeviceWebSocketOptions = {},
 ): Promise<void> {
   const helloTimeoutMs = options.helloTimeoutMs ?? HELLO_TIMEOUT_MS;
+  const livenessCheckMs = options.livenessCheckMs ?? LIVENESS_CHECK_MS;
+  const silenceTimeoutMs = options.silenceTimeoutMs ?? HEARTBEAT_TIMEOUT_MS;
   app.get("/ws/device", { websocket: true }, async (socket, request) => {
     const registry = getDeviceChannelRegistry();
     let channel: DeviceChannel | null = null;
     let unregister: (() => void) | null = null;
+    let livenessTimer: NodeJS.Timeout | null = null;
+    let lastMessageAt = Date.now();
 
     // Mientras no haya `hello` válido, el socket no es de nadie. Se cierra
     // solo: un socket anónimo abierto indefinidamente es memoria gratis para
@@ -122,8 +162,41 @@ export async function registerDeviceWebSocketRoute(
       }
     }
 
+    function clearLivenessTimer(): void {
+      if (livenessTimer) {
+        clearInterval(livenessTimer);
+        livenessTimer = null;
+      }
+    }
+
+    /**
+     * Vigila el silencio del canal. No manda pings: el terminal ya habla solo
+     * cada 30 s, así que basta con mirar cuándo fue la última vez. Un ping
+     * añadiría tráfico contra quince terminales para saber lo mismo.
+     */
+    function startLivenessWatch(): void {
+      clearLivenessTimer();
+      livenessTimer = setInterval(() => {
+        if (Date.now() - lastMessageAt <= silenceTimeoutMs) return;
+        request.log.info(
+          { deviceId: channel?.deviceId },
+          "A5 canal callado demasiado tiempo: se cierra",
+        );
+        // R1: esto NO es una revocación. Es "has dejado de hablar". El terminal
+        // ni se entera (su socket ya estaba muerto) y, cuando vuelva la red,
+        // reconecta con su backoff.
+        closeWith(WS_CLOSE.TRANSIENT, "silence");
+      }, livenessCheckMs);
+      livenessTimer.unref?.();
+    }
+
     function closeWith(code: number, reason: string): void {
       clearHelloTimer();
+      clearLivenessTimer();
+      // El `close` del socket puede tardar (o no llegar nunca si el terminal ya
+      // no está): se da de baja YA, para que el panel deje de pintarlo online
+      // en el mismo instante en que se decide que no está.
+      unregister?.();
       try {
         socket.close(code, reason);
       } catch {
@@ -154,10 +227,25 @@ export async function registerDeviceWebSocketRoute(
       }
 
       const prisma = getPrisma();
-      const device = await prisma.device.findUnique({
-        where: { deviceTokenHash: hashDeviceToken(token) },
-        select: { id: true, tenantId: true, registerId: true, revokedAt: true },
-      });
+      let device: {
+        id: string;
+        tenantId: string;
+        registerId: string;
+        revokedAt: Date | null;
+      } | null;
+      try {
+        device = await prisma.device.findUnique({
+          where: { deviceTokenHash: hashDeviceToken(token) },
+          select: { id: true, tenantId: true, registerId: true, revokedAt: true },
+        });
+      } catch (err) {
+        // R1: la BD no contesta. Es un problema NUESTRO y se cierra como tal;
+        // decirle "revocado" a un terminal sano lo dejaría sin canal hasta que
+        // alguien fuese al local.
+        request.log.error({ err }, "A5 hello: la BD no contestó");
+        closeWith(WS_CLOSE.TRANSIENT, "transient");
+        return;
+      }
       if (!device) {
         closeWith(WS_CLOSE.UNAUTHORIZED, "invalid token");
         return;
@@ -177,6 +265,8 @@ export async function registerDeviceWebSocketRoute(
         close: closeWith,
       };
       unregister = registry.register(channel);
+      lastMessageAt = Date.now();
+      startLivenessWatch();
 
       // El terminal necesita saber cada cuánto hablar y qué hora es aquí: con
       // esas dos cosas puede calcular su propio desvío sin que le mandemos un
@@ -219,10 +309,20 @@ export async function registerDeviceWebSocketRoute(
         where: { id: channel.deviceId },
         select: { revokedAt: true },
       });
-      if (!fresh || fresh.revokedAt) {
+      // R1: `REVOKED` sólo si de verdad está revocado en BD. Si la fila ya no
+      // existe (borrada a mano, tenant eliminado) es "no te conozco", no "te
+      // hemos revocado", y el terminal reintenta en vez de rendirse.
+      if (!fresh) {
+        closeWith(WS_CLOSE.UNAUTHORIZED, "unknown device");
+        return;
+      }
+      if (fresh.revokedAt) {
         closeWith(WS_CLOSE.REVOKED, "device revoked");
         return;
       }
+      // R2: lo ÚNICO que este bloque escribe en `Device` es `lastSeenAt`, más
+      // su instantánea en `DeviceHeartbeat`. Ni el token, ni `revokedAt`, ni
+      // nada del emparejamiento.
       await recordHeartbeat({
         prisma,
         deviceId: channel.deviceId,
@@ -231,6 +331,7 @@ export async function registerDeviceWebSocketRoute(
     }
 
     socket.on("message", (raw: Buffer) => {
+      lastMessageAt = Date.now();
       void (async () => {
         const msg = parseMessage(raw);
         if (!msg) return;
@@ -290,12 +391,14 @@ export async function registerDeviceWebSocketRoute(
 
     socket.on("close", () => {
       clearHelloTimer();
+      clearLivenessTimer();
       unregister?.();
     });
 
     socket.on("error", (err: Error) => {
       request.log.warn({ err, deviceId: channel?.deviceId }, "A5 error de socket");
       clearHelloTimer();
+      clearLivenessTimer();
       unregister?.();
     });
   });

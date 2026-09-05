@@ -16,6 +16,22 @@
 //
 // El token NO va en la URL (acabaría en los logs de Caddy y no caduca nunca):
 // va en el primer mensaje. El servidor cierra el socket si no llega en 5 s.
+//
+// ── R1 · ESTE CANAL NO DESVINCULA NADA. NUNCA. ────────────────────────────
+// Un terminal desvinculado pide un código de 6 dígitos en la barra un lunes por
+// la mañana. Este módulo, por tanto:
+//
+//   - NO importa `unpair`, `clearAllDeviceState` ni nada de
+//     `useDeviceBootstrap`. Lo único que toca de `storage` es LEER el token.
+//   - Ante CUALQUIER cierre, incluido un token rechazado, lo único que hace es
+//     reintentar con backoff. No borra nada, no avisa a nadie, no cambia
+//     ninguna pantalla.
+//   - Ni siquiera un `REVOKED` desvincula: deja de reintentar y punto. Si el
+//     device está revocado de verdad, quien lo descubre es `/devices/me` en el
+//     arranque, que es el camino que sí sabe qué hacer con eso.
+//
+// Hay un test que lee este fichero y falla si aparece cualquiera de esos
+// nombres (`support-channel-no-desvincula.test.ts`).
 
 import { getDeviceToken } from "../../storage.js";
 import { backoffDelayMs } from "./backoff.js";
@@ -202,6 +218,9 @@ export function startSupportChannel(): SupportChannelHandle {
       }
       socket = null;
       if (stopped) return;
+      // R1 · aquí NO se desvincula nada, pase lo que pase. Un cierre por token
+      // rechazado, por la BD caída o por revocación se traduce en «reintentar»
+      // o en «callarse», nunca en tocar la vinculación del terminal.
       if (ev.code === CLOSE_REVOKED) return;
       scheduleReconnect();
     });

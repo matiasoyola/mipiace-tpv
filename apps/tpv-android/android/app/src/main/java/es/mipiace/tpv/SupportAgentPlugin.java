@@ -3,6 +3,7 @@ package es.mipiace.tpv;
 import android.app.Activity;
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
@@ -174,41 +175,100 @@ public class SupportAgentPlugin extends Plugin {
             call.reject("sin activity");
             return;
         }
-        Window ventana = actividad.getWindow();
-        View decor = ventana.getDecorView();
-        int ancho = decor.getWidth();
-        int alto = decor.getHeight();
-        if (ancho <= 0 || alto <= 0) {
-            call.reject("la ventana todavía no tiene tamaño");
-            return;
-        }
+        // TODO el trabajo va al hilo de UI. PixelCopy sobre una Window necesita
+        // que la ventana tenga superficie, y comprobarlo desde el hilo de
+        // Capacitor es una carrera: en el AP11 falla con
+        // "Window doesn't have a backing surface!" (verificado el 2026-09-04).
+        actividad.runOnUiThread(() -> capturar(actividad, call));
+    }
 
-        Bitmap bitmap = Bitmap.createBitmap(ancho, alto, Bitmap.Config.ARGB_8888);
-        PixelCopy.request(
-                ventana,
-                bitmap,
-                resultado -> {
-                    if (resultado != PixelCopy.SUCCESS) {
-                        bitmap.recycle();
-                        call.reject("PixelCopy falló con código " + resultado);
-                        return;
-                    }
-                    try {
-                        JSObject ret = new JSObject();
-                        Bitmap escalado = escalar(bitmap);
-                        ret.put("pngBase64", aPngBase64(escalado));
-                        ret.put("width", escalado.getWidth());
-                        ret.put("height", escalado.getHeight());
-                        if (escalado != bitmap) escalado.recycle();
-                        call.resolve(ret);
-                    } catch (Throwable t) {
-                        Log.w(TAG, "A5 SupportAgent: no pude codificar la captura", t);
-                        call.reject("no pude codificar la captura");
-                    } finally {
-                        bitmap.recycle();
-                    }
-                },
-                new Handler(Looper.getMainLooper()));
+    private void capturar(Activity actividad, PluginCall call) {
+        try {
+            Window ventana = actividad.getWindow();
+            View decor = ventana.getDecorView();
+            int ancho = decor.getWidth();
+            int alto = decor.getHeight();
+            if (ancho <= 0 || alto <= 0) {
+                call.reject("la ventana todavía no tiene tamaño");
+                return;
+            }
+
+            boolean conSuperficie =
+                    decor.isAttachedToWindow()
+                            && ventana.peekDecorView() != null
+                            && decor.getRootView() != null
+                            && ventana.getDecorView().getViewTreeObserver().isAlive();
+
+            if (conSuperficie) {
+                Bitmap bitmap = Bitmap.createBitmap(ancho, alto, Bitmap.Config.ARGB_8888);
+                try {
+                    PixelCopy.request(
+                            ventana,
+                            bitmap,
+                            resultado -> {
+                                if (resultado == PixelCopy.SUCCESS) {
+                                    responderCon(call, bitmap, "pixelcopy");
+                                } else {
+                                    bitmap.recycle();
+                                    Log.w(TAG, "A5 captura: PixelCopy devolvió " + resultado
+                                            + ", uso el dibujado software");
+                                    responderCon(call, dibujarEnSoftware(decor), "software");
+                                }
+                            },
+                            new Handler(Looper.getMainLooper()));
+                    return;
+                } catch (Throwable t) {
+                    // "Window doesn't have a backing surface!" y compañía: la
+                    // ventana existe pero su Surface no está disponible para
+                    // copiar. No es motivo para quedarse sin captura.
+                    bitmap.recycle();
+                    Log.w(TAG, "A5 captura: PixelCopy no pudo, uso el dibujado software", t);
+                }
+            }
+
+            responderCon(call, dibujarEnSoftware(decor), "software");
+        } catch (Throwable t) {
+            Log.w(TAG, "A5 captura: fallo al capturar", t);
+            call.reject("no pude capturar la pantalla: " + t.getClass().getSimpleName());
+        }
+    }
+
+    /**
+     * Vía de respaldo: pedirle a la jerarquía de vistas que se dibuje sobre un
+     * canvas en software.
+     *
+     * <p>Es menos fiel que PixelCopy —no ve nada que pinte una capa de
+     * hardware— pero para una UI que es HTML dentro de un WebView da la misma
+     * imagen, y funciona cuando la ventana no tiene Surface copiable. Entre una
+     * captura de respaldo y ninguna captura, la elección no tiene discusión: el
+     * soporte llama por teléfono ahora, no cuando el WebView colabore.
+     */
+    private Bitmap dibujarEnSoftware(View decor) {
+        Bitmap bitmap = Bitmap.createBitmap(
+                decor.getWidth(), decor.getHeight(), Bitmap.Config.ARGB_8888);
+        decor.draw(new Canvas(bitmap));
+        return bitmap;
+    }
+
+    /** Escala, codifica y resuelve. Recicla siempre lo que ha creado. */
+    private void responderCon(PluginCall call, Bitmap bitmap, String via) {
+        try {
+            Bitmap escalado = escalar(bitmap);
+            JSObject ret = new JSObject();
+            ret.put("pngBase64", aPngBase64(escalado));
+            ret.put("width", escalado.getWidth());
+            ret.put("height", escalado.getHeight());
+            // Qué vía se usó. Va al panel y al done-doc: una captura por
+            // software y una por PixelCopy no valen exactamente lo mismo.
+            ret.put("via", via);
+            if (escalado != bitmap) escalado.recycle();
+            call.resolve(ret);
+        } catch (Throwable t) {
+            Log.w(TAG, "A5 captura: no pude codificar", t);
+            call.reject("no pude codificar la captura");
+        } finally {
+            bitmap.recycle();
+        }
     }
 
     /** Reduce a MAX_CAPTURA_ANCHO conservando la proporción. */

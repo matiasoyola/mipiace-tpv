@@ -16,19 +16,24 @@ const config: CapacitorConfig = {
     // El TPV asume HTTPS (WebUSB/cam/SW). En el WebView usamos esquema
     // https para que el Service Worker y los permisos se comporten como
     // en producción.
-    allowMixedContent: false,
+    // TEMPORAL · pasada física de A5 contra la API local por http. REVERTIR.
+    allowMixedContent: true,
   },
   server: {
     // Esquema https explícito (es el default de Capacitor 6, pero el SW
     // y los permisos del TPV dependen de él; no dejarlo implícito).
-    androidScheme: "https",
+    // TEMPORAL · pasada física A5: con origen https el WebView bloquea las
+    // llamadas http a la API local (contenido mixto). REVERTIR.
+    androidScheme: "http",
     // El WebView sirve el bundle local bajo este host, de modo que el
     // origen es https://mipiacetpv.com y NO https://localhost. Sin esto,
     // la API rechaza por CORS (server.ts usa lista blanca exacta contra
     // CORS_ORIGINS) y la APK no puede ni vincularse. Verificado en el
     // AP11 el 2026-09-01. Alternativa descartada: meter https://localhost
     // en CORS_ORIGINS del VPS, que ensancha la lista blanca sin necesidad.
-    hostname: "mipiacetpv.com",
+    // TEMPORAL · pasada física A5: origen propio para NO pisar el
+    // localStorage (y por tanto la vinculación de producción) del terminal.
+    hostname: "a5-lab.mipiacetpv.com",
     // Para hot-reload en desarrollo contra la PWA local, descomentar y
     // poner la IP del Mac en la LAN. NO commitear con esto activo.
     // url: "http://192.168.1.50:5174",

@@ -12,7 +12,7 @@
 // de la PWA no carga Capacitor. En navegador el global no existe y devolvemos
 // null, que el formateador degrada a mostrar sólo el hash de build.
 
-import { getCapacitor, isCapacitor } from "./index.js";
+import { getNativePlugin, isCapacitor } from "./index.js";
 
 export interface NativeAppInfo {
   /** `versionName` de Gradle. Ej: "1.10.2". */
@@ -41,15 +41,10 @@ function asNonEmptyString(value: unknown): string {
  * y un fallo aquí no puede tumbar la pantalla de venta.
  */
 export async function getNativeAppInfo(): Promise<NativeAppInfo | null> {
-  const cap = getCapacitor();
-  if (!cap) return null;
-  // Ver CameraPermission.ts / UsbNativeTransport.ts: el global del bridge
-  // trae `Plugins`, no `registerPlugin`.
-  const plugin =
-    (cap.Plugins?.["App"] as AppPlugin | undefined) ??
-    (typeof cap.registerPlugin === "function"
-      ? cap.registerPlugin<AppPlugin>("App")
-      : null);
+  // A5: se lee de `Capacitor.Plugins.App`, no de `registerPlugin`, que el
+  // bridge nativo no expone — era el motivo de que esto devolviera null en el
+  // terminal (cabo suelto de A4). Ver `getNativePlugin`.
+  const plugin = getNativePlugin<AppPlugin>("App");
   if (!plugin) return null;
   try {
     const info = await plugin.getInfo();

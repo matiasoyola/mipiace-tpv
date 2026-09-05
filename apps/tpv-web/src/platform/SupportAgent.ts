@@ -9,7 +9,7 @@
 // una pestaña de Chrome se anuncia igual, sólo que sin IP local ni arranque:
 // son datos del cacharro, no del TPV.
 
-import { getCapacitor } from "./index.js";
+import { getNativePlugin } from "./index.js";
 
 export type NetworkKind = "wifi" | "cellular" | "ethernet" | "none" | "unknown";
 
@@ -30,6 +30,13 @@ export interface CapturaPantalla {
   pngBase64: string;
   width: number;
   height: number;
+  /**
+   * Cómo se obtuvo: "pixelcopy" (copia del Surface real) o "software" (la
+   * jerarquía de vistas dibujándose en un canvas). Viaja hasta el panel porque
+   * las dos no valen lo mismo: la de respaldo no ve nada pintado por una capa
+   * de hardware.
+   */
+  via: string | null;
 }
 
 interface SupportAgentPlugin {
@@ -47,6 +54,7 @@ interface SupportAgentPlugin {
     pngBase64?: unknown;
     width?: unknown;
     height?: unknown;
+    via?: unknown;
   }>;
 }
 
@@ -66,13 +74,7 @@ function asNetwork(value: unknown): NetworkKind | null {
 }
 
 function getPlugin(): SupportAgentPlugin | null {
-  const cap = getCapacitor();
-  if (!cap?.registerPlugin) return null;
-  try {
-    return cap.registerPlugin<SupportAgentPlugin>("SupportAgent");
-  } catch {
-    return null;
-  }
+  return getNativePlugin<SupportAgentPlugin>("SupportAgent");
 }
 
 /**
@@ -164,6 +166,7 @@ export async function captureOwnWindow(): Promise<CapturaPantalla | null> {
       pngBase64: res.pngBase64,
       width: typeof res.width === "number" ? res.width : 0,
       height: typeof res.height === "number" ? res.height : 0,
+      via: typeof res.via === "string" ? res.via : null,
     };
   } catch {
     return null;
