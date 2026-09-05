@@ -113,6 +113,27 @@ function correr(cmd: string, cwd: string, env: NodeJS.ProcessEnv): void {
  * dejara en estado "android", el siguiente `cap sync` metería ese bundle en el
  * proyecto nativo sin que nadie se enterase.
  */
+/**
+ * Entorno para un `vite build` hijo, partiendo del de vitest.
+ *
+ * `NODE_ENV` se BORRA. Vitest la fija a "test" en su propio proceso y
+ * `spawnSync` se la pasa al build, que entonces resuelve React a su bundle de
+ * DESARROLLO: medio mega de más que nadie compila nunca en la vida real
+ * (1,59 MB reales contra 2,11 MB con NODE_ENV=test). Eso pasaba del tope de
+ * precaché de workbox —2 MiB— y hacía fallar el build con «Assets exceeding
+ * the limit», así que estos tests se ponían rojos por el entorno del runner y
+ * no por el bundle. `vite build` sin `NODE_ENV` asume producción, que es lo
+ * que hace quien compila la APK.
+ *
+ * Las VITE_* se borran aparte por la razón contraria: ahí sí queremos el
+ * entorno pelado, porque es el caso real de quien compila sin exportarlas.
+ */
+function entornoDeBuild(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.NODE_ENV;
+  return env;
+}
+
 function construirAndroid(outDir: string): void {
   const pkg = JSON.parse(
     readFileSync(join(ROOT, "apps/tpv-android/package.json"), "utf8"),
@@ -120,7 +141,7 @@ function construirAndroid(outDir: string): void {
   const script = pkg.scripts["build:web"];
   expect(script, "apps/tpv-android/package.json no tiene build:web").toBeTruthy();
 
-  const env = { ...process.env };
+  const env = entornoDeBuild();
   delete env.VITE_API_URL;
   delete env.VITE_TARGET;
 
@@ -133,7 +154,7 @@ function construirAndroid(outDir: string): void {
 
 /** Construye el bundle de la web: sin VITE_TARGET, con la API de producción. */
 function construirWeb(outDir: string): void {
-  const env = { ...process.env, VITE_API_URL: API_URL };
+  const env = { ...entornoDeBuild(), VITE_API_URL: API_URL };
   delete env.VITE_TARGET;
   correr(
     `pnpm exec vite build --outDir ${outDir} --emptyOutDir`,
