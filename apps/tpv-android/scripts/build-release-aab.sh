@@ -44,6 +44,15 @@ if [ ! -f "$ANDROID_DIR/keystore.properties" ]; then
   exit 1
 fi
 
+# --- A5 · R5 · origen del WebView (incidente del 2026-09-04) ------------------
+# Este script NO tenía ninguna guarda de origen: la del hallazgo B2 se escribió
+# sólo en el gemelo del APK. Un .aab con el origen cambiado deja el terminal
+# desvinculado igual, así que la guarda va en los dos sitios o no sirve.
+# El porqué entero está en scripts/origen-del-webview.mjs.
+node "$ROOT/apps/tpv-android/scripts/verificar-origen.mjs" \
+  --ts "$ROOT/apps/tpv-android/capacitor.config.ts" \
+  || { echo "ERROR: el .aab NO se construye con este origen (R5)." >&2; exit 1; }
+
 echo "==> VITE_API_URL=$VITE_API_URL  VITE_TARGET=$VITE_TARGET  version=$VERSION_NAME ($VERSION_CODE)"
 
 echo "==> 1/3 build tpv-web (dist con backend de producción, sin Service Worker)"
@@ -59,6 +68,14 @@ fi
 
 echo "==> 2/3 cap sync android (copia dist + plugins al proyecto nativo)"
 ( cd "$ROOT/apps/tpv-android" && pnpm exec cap sync android )
+
+# R5, segunda puerta: sobre lo que `cap sync` copió de verdad, que es lo que se
+# empaqueta. Un assets/ viejo de un build anterior deja la fuente impecable y el
+# binario apuntando a otro origen.
+CAP_JSON="$ANDROID_DIR/app/src/main/assets/capacitor.config.json"
+[ -f "$CAP_JSON" ] || { echo "ERROR: no encuentro $CAP_JSON. ¿El cap sync hizo algo?" >&2; exit 1; }
+node "$ROOT/apps/tpv-android/scripts/verificar-origen.mjs" --json "$CAP_JSON" \
+  || { echo "ERROR: el .aab NO se publica con este origen (R5)." >&2; exit 1; }
 
 echo "==> 3/3 gradlew bundleRelease (.aab firmado)"
 ( cd "$ANDROID_DIR" && ./gradlew bundleRelease -PversionName="$VERSION_NAME" -PversionCode="$VERSION_CODE" )
