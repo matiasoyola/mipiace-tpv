@@ -13,7 +13,7 @@
 // prompt gestiona el permiso. Regresión CERO en web: no importamos
 // `@capacitor/core`, no añadimos dependencia al bundle de la PWA.
 
-import { getCapacitor, getPlatform } from "../index.js";
+import { getNativePlugin, getPlatform } from "../index.js";
 
 /**
  * Resultado de asegurar el permiso de cámara:
@@ -37,16 +37,7 @@ interface CameraPermissionPlugin {
 // Mismo fallo que tenía UsbNativeTransport y que dejó la impresión USB
 // muerta desde A1 — ver el commit 905bd21.
 function getPlugin(): CameraPermissionPlugin | null {
-  const cap = getCapacitor();
-  if (!cap) return null;
-  const fromBridge = cap.Plugins?.["CameraPermission"] as
-    | CameraPermissionPlugin
-    | undefined;
-  if (fromBridge) return fromBridge;
-  if (typeof cap.registerPlugin === "function") {
-    return cap.registerPlugin<CameraPermissionPlugin>("CameraPermission");
-  }
-  return null;
+  return getNativePlugin<CameraPermissionPlugin>("CameraPermission");
 }
 
 /**

@@ -18,7 +18,7 @@
 // SharedPreferences y reabre el device autorizado sin diálogo (paralelo
 // a como WebUsbTransport usa localStorage + getDevices()).
 
-import { getCapacitor } from "../index.js";
+import { getNativePlugin } from "../index.js";
 import {
   PrinterError,
   type PrinterDescriptor,
@@ -94,24 +94,8 @@ export class UsbNativeTransport implements PrinterTransport {
   // había funcionado nunca desde A1.
   private getPlugin(): UsbPrinterPlugin | null {
     if (this.plugin) return this.plugin;
-    const cap = getCapacitor();
-    if (!cap) return null;
-
-    // 1) Camino real dentro de la APK.
-    const fromBridge = cap.Plugins?.["UsbPrinter"] as UsbPrinterPlugin | undefined;
-    if (fromBridge) {
-      this.plugin = fromBridge;
-      return this.plugin;
-    }
-
-    // 2) Si algún día este bundle sí carga @capacitor/core, el global trae
-    //    registerPlugin y este camino sigue valiendo.
-    if (typeof cap.registerPlugin === "function") {
-      this.plugin = cap.registerPlugin<UsbPrinterPlugin>("UsbPrinter");
-      return this.plugin;
-    }
-
-    return null;
+    this.plugin = getNativePlugin<UsbPrinterPlugin>("UsbPrinter");
+    return this.plugin;
   }
 
   private requirePlugin(): UsbPrinterPlugin {
