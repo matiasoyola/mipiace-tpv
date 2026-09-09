@@ -75,6 +75,21 @@ function decimalish(n: number) {
   return { toString: () => String(n) };
 }
 
+// S1-sello · la traza que deja la vía de corrección.
+const correctionStore: Array<{
+  id: string;
+  ticketId: string;
+  tableName: string;
+  rowId: string;
+  field: string;
+  oldValue: string | null;
+  newValue: string | null;
+  reason: string;
+  author: string;
+  userId: string | null;
+  createdAt: Date;
+}> = [];
+
 const fakePrisma = {
   ticket: {
     findMany: vi.fn(async ({ where, include, orderBy, take }: any) => {
@@ -172,6 +187,59 @@ const fakePrisma = {
       throw new Error("line not found");
     }),
   },
+  user: {
+    findUnique: vi.fn(async () => ({ email: "owner@t1.es", alias: "Owner" })),
+  },
+  // S1-sello · `record_ticket_correction` y el listado de correcciones
+  // van por SQL crudo: la vía de corrección vive en el motor a propósito
+  // (ver `tickets/corrections.ts`). El doble reproduce el contrato:
+  // motivo obligatorio, valor anterior capturado, fila de traza escrita
+  // y DESPUÉS el UPDATE.
+  $queryRaw: vi.fn(async (query: any) => {
+    const text: string = (query?.strings ?? []).join(" ");
+    const values: unknown[] = query?.values ?? [];
+    if (text.includes("record_ticket_correction")) {
+      const [table, rowId, field, newValue, reason, author, userId] = values as [
+        string, string, string, string | null, string, string, string | null,
+      ];
+      if (!reason || reason.trim() === "") {
+        throw new Error("CORRECCION_SIN_MOTIVO: una corrección sin motivo no se escribe");
+      }
+      let oldValue: string | null = null;
+      let applied = false;
+      for (const t of ticketStore.values()) {
+        const line = t.lines.find((l) => l.id === rowId);
+        if (line && table === "ticket_lines") {
+          oldValue = String((line as any)[field] ?? "");
+          (line as any)[field] = newValue;
+          correctionStore.push({
+            id: `corr-${correctionStore.length + 1}`,
+            ticketId: t.id,
+            tableName: table,
+            rowId,
+            field,
+            oldValue,
+            newValue,
+            reason: reason.trim(),
+            author,
+            userId: userId ?? null,
+            createdAt: new Date(),
+          });
+          applied = true;
+          break;
+        }
+      }
+      if (!applied) {
+        throw new Error(`CORRECCION_INVALIDA: la fila ${rowId} de ${table} no existe`);
+      }
+      return [{ id: `corr-${correctionStore.length}` }];
+    }
+    if (text.includes("ticket_corrections")) {
+      const ticketId = values[0] as string;
+      return correctionStore.filter((c) => c.ticketId === ticketId);
+    }
+    throw new Error(`$queryRaw no simulado: ${text}`);
+  }),
   refundLine: {
     update: vi.fn(async ({ where, data }: any) => {
       for (const r of refundStore.values()) {
@@ -329,6 +397,7 @@ function seedRefund(opts: Partial<RefundRow> & { id: string; status: RefundRow["
 }
 
 beforeEach(() => {
+  correctionStore.length = 0;
   ticketStore.clear();
   refundStore.clear();
   uploadStore.clear();
@@ -463,7 +532,13 @@ describe("POST /admin/tickets/:id/edit-line-sku", () => {
       method: "POST",
       url: `/admin/tickets/${t.id}/edit-line-sku`,
       headers: { authorization: `Bearer ${OWNER_TOKEN}` },
-      payload: { ticketLineId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", sku: "GOOD-SKU" },
+      payload: {
+        ticketLineId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        sku: "GOOD-SKU",
+        // S1-sello · el motivo pasa a ser parte del contrato: el `sku`
+        // identifica qué se vendió y entra en el sello de la venta.
+        reason: "Holded rechazó BAD-SKU: no es el SKU canónico del producto",
+      },
     });
     expect(res.statusCode).toBe(202);
     const updated = ticketStore.get(t.id)!;
@@ -471,6 +546,71 @@ describe("POST /admin/tickets/:id/edit-line-sku", () => {
     // docId parcial se limpia para que el siguiente intento re-cree.
     expect(updated.holdedDocumentId).toBeNull();
     expect(enqueueTicket).toHaveBeenCalledWith(t.externalId);
+    // S1-sello · y queda la traza, con el valor anterior y el motivo.
+    expect(correctionStore).toHaveLength(1);
+    expect(correctionStore[0]).toMatchObject({
+      tableName: "ticket_lines",
+      field: "sku",
+      oldValue: "BAD-SKU",
+      newValue: "GOOD-SKU",
+      author: "owner@t1.es",
+      reason: "Holded rechazó BAD-SKU: no es el SKU canónico del producto",
+    });
+  });
+
+  // S1-sello · el sabotaje "escribir una corrección sin motivo".
+  it("400 y NO escribe si falta el motivo", async () => {
+    const t = seedTicket({
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      status: "SYNC_FAILED",
+      lines: [
+        { id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", sku: "BAD-SKU", nameSnapshot: "X", units: 1, unitPrice: 5, discountPct: 0, taxRate: 21 },
+      ],
+    });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/admin/tickets/${t.id}/edit-line-sku`,
+      headers: { authorization: `Bearer ${OWNER_TOKEN}` },
+      payload: { ticketLineId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", sku: "GOOD-SKU" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(ticketStore.get(t.id)!.lines[0]?.sku).toBe("BAD-SKU");
+    expect(correctionStore).toHaveLength(0);
+    expect(enqueueTicket).not.toHaveBeenCalled();
+  });
+
+  // S1-sello · la vista mínima: sin ella la tabla no sirve para lo único
+  // para lo que existe, que es que alguien la mire.
+  it("GET corrections devuelve el estado del sello y la traza", async () => {
+    const t = seedTicket({
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      status: "SYNC_FAILED",
+      lines: [
+        { id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", sku: "BAD-SKU", nameSnapshot: "X", units: 1, unitPrice: 5, discountPct: 0, taxRate: 21 },
+      ],
+    });
+    const app = await buildApp();
+    await app.inject({
+      method: "POST",
+      url: `/admin/tickets/${t.id}/edit-line-sku`,
+      headers: { authorization: `Bearer ${OWNER_TOKEN}` },
+      payload: {
+        ticketLineId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        sku: "GOOD-SKU",
+        reason: "SKU no canónico",
+      },
+    });
+    const res = await app.inject({
+      method: "GET",
+      url: `/admin/tickets/${t.id}/corrections`,
+      headers: { authorization: `Bearer ${OWNER_TOKEN}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.corrections).toHaveLength(1);
+    expect(body.corrections[0].reason).toBe("SKU no canónico");
+    expect(body.corrections[0].oldValue).toBe("BAD-SKU");
   });
 
   it("400 si la línea no pertenece al ticket", async () => {

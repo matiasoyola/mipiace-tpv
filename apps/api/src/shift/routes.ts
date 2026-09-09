@@ -11,6 +11,7 @@ import { generateZReportPdf } from "./z-report.js";
 import { computeZBreakdown, type ZBreakdown } from "./z-breakdown.js";
 import { loadShiftBreakdownSums } from "./breakdown-sums.js";
 import { buildShiftDaySummary, SHIFT_SUMMARY_SELECT } from "./summary.js";
+import { archiveZReport } from "./z-seal.js";
 
 // Body shape de close (B3 §3.4). methodTotals reportado por el cajero
 // (cash, card, bizum, voucher). En B3 todavía no hay tickets reales →
@@ -991,6 +992,23 @@ async function executeShiftClose(args: {
     }),
   ]);
 
+  // S1-sello · antes iban en línea dentro del payload del PDF. Se
+  // extraen porque ahora los necesitan DOS consumidores: el PDF y el Z
+  // congelado en base de datos, y tienen que decir el mismo número.
+  const ticketsCount = await prisma.ticket.count({
+    // Emitidos de verdad: DRAFT (mesa sin cobrar) y VOIDED (vaciada/
+    // agrupada) no son ventas.
+    where: { shiftId: shift.id, status: { notIn: ["DRAFT", "VOIDED"] } },
+  });
+  // v1.9.5-formacion · Frente 1: las devoluciones TEST computan en el
+  // Z del turno de prueba igual que las ventas TEST (cuyos pagos ya
+  // entran al desglose sin filtro de status). Coherencia formativa: si
+  // la venta test aparece en el Z, su devolución también. En turnos
+  // reales no hay refunds TEST, así que esto no altera el Z de producción.
+  const refundsCount = await prisma.refund.count({
+    where: { shiftId: shift.id, status: { notIn: ["DRAFT", "VOIDED"] } },
+  });
+
   let zPath: string | null = null;
   try {
     zPath = await generateZReportPdf({
@@ -1010,19 +1028,8 @@ async function executeShiftClose(args: {
       cashCounted: body.cashCounted ?? cashTheoretical,
       cashTheoretical,
       breakdown,
-      // Emitidos de verdad: DRAFT (mesa sin cobrar) y VOIDED (vaciada/
-      // agrupada) no son ventas.
-      ticketsCount: await prisma.ticket.count({
-        where: { shiftId: shift.id, status: { notIn: ["DRAFT", "VOIDED"] } },
-      }),
-      // v1.9.5-formacion · Frente 1: las devoluciones TEST computan en el
-      // Z del turno de prueba igual que las ventas TEST (cuyos pagos ya
-      // entran al desglose sin filtro de status). Coherencia formativa: si
-      // la venta test aparece en el Z, su devolución también. En turnos
-      // reales no hay refunds TEST, así que esto no altera el Z de producción.
-      refundsCount: await prisma.refund.count({
-        where: { shiftId: shift.id, status: { notIn: ["DRAFT", "VOIDED"] } },
-      }),
+      ticketsCount,
+      refundsCount,
       syncIssues: { pendingSync, failed },
       acceptedSyncFailures: body.syncFailureAccepted === true,
       managerAuthorizationEmail: managerEmail,
@@ -1052,6 +1059,37 @@ async function executeShiftClose(args: {
     },
     select: { id: true, closedAt: true, zReportPdfPath: true },
   });
+
+  // S1-sello · el Z deja de vivir sólo como PDF. El desglose queda
+  // congelado en `shift_z_reports` con su huella; el PDF pasa a ser una
+  // representación de un dato que ya existe, no el dato.
+  //
+  // Va DESPUÉS del `shift.update`, así que el turno ya está cerrado
+  // cuando esto corre: si reventase sin capturar, el cajero vería un 500
+  // sobre un cierre que sí ocurrió, y el reintento le daría 409 con la
+  // caja bloqueada. Se registra y se sigue, igual que el fallo del PDF
+  // en el corte de día. El turno cerrado es el dato que no se puede
+  // perder; el Z congelado se puede reconstruir después.
+  try {
+    await archiveZReport(prisma, {
+      shiftId: shift.id,
+      reason: "CLOSE",
+      pdfPath: zPath,
+      frozen: {
+        cashOpening: Number(shift.cashOpening),
+        cashCounted: body.cashCounted ?? null,
+        cashTheoretical,
+        ticketsCount,
+        refundsCount,
+        breakdown,
+      },
+    });
+  } catch (err) {
+    log.error(
+      { err, event: "shift.z_report.archive_failed", shiftId: shift.id },
+      "no se pudo congelar el Z; el turno queda cerrado igual",
+    );
+  }
 
   return {
     ok: true,

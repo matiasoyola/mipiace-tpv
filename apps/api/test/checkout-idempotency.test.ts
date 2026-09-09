@@ -127,6 +127,12 @@ const fakePrisma: Record<string, unknown> = {
       }
       return materialize(t, include ?? select);
     }),
+    // S1-sello · el sello relee el ticket dentro de la tx del checkout.
+    findUniqueOrThrow: vi.fn(async ({ where, include, select }: any) => {
+      const t = state.tickets.get(where.id);
+      if (!t) throw new Error("ticket not found");
+      return materialize(t, include ?? select);
+    }),
     update: vi.fn(async ({ where, data, include, select }: any) => {
       const t = state.tickets.get(where.id);
       if (!t) throw new Error("ticket not found");

@@ -46,6 +46,12 @@ export interface ShiftDaySummary {
   ticketsCount: number;
   refundsCount: number;
   breakdown: ZBreakdown;
+  // S1-sello · los Z archivados del turno, del más reciente al más
+  // antiguo. El primero es el vigente; los que llevan `supersededAt` son
+  // los corregidos, conservados. Con esto `zReportStale` deja de ser un
+  // boolean que no lleva a ninguna parte: dice que hay un Z posterior, y
+  // aquí está.
+  zReports: ZReportRef[];
   // fondo inicial + neto en efectivo. Lo que DEBERÍA haber en el cajón.
   cashTheoretical: number;
   // contado − teórico. null cuando nadie contó: un descuadre de 0,00 €
@@ -93,6 +99,17 @@ interface ShiftSummaryRow {
   register: { id: string; name: string; store: { id: string; name: string; tenantId: string } };
 }
 
+export interface ZReportRef {
+  id: string;
+  sequence: number;
+  reason: string;
+  sealedHash: string;
+  sealedAt: string;
+  pdfPath: string | null;
+  /** No null = existe un Z posterior que corrige a este. */
+  supersededAt: string | null;
+}
+
 export async function buildShiftDaySummary(
   prisma: ReturnType<typeof getPrisma>,
   shift: ShiftSummaryRow,
@@ -130,6 +147,20 @@ export async function buildShiftDaySummary(
     ...(cashCounted != null ? { counted: { CASH: cashCounted } } : {}),
   });
 
+  const zReports = await prisma.shiftZReport.findMany({
+    where: { shiftId: shift.id },
+    orderBy: { sequence: "desc" },
+    select: {
+      id: true,
+      sequence: true,
+      reason: true,
+      sealedHash: true,
+      sealedAt: true,
+      pdfPath: true,
+      supersededAt: true,
+    },
+  });
+
   return {
     shift: {
       id: shift.id,
@@ -150,6 +181,15 @@ export async function buildShiftDaySummary(
     ticketsCount,
     refundsCount,
     breakdown,
+    zReports: zReports.map((z) => ({
+      id: z.id,
+      sequence: z.sequence,
+      reason: z.reason,
+      sealedHash: z.sealedHash,
+      sealedAt: z.sealedAt.toISOString(),
+      pdfPath: z.pdfPath,
+      supersededAt: z.supersededAt?.toISOString() ?? null,
+    })),
     cashTheoretical: breakdown.cashTheoretical,
     descuadre:
       cashCounted != null

@@ -20,6 +20,8 @@ process.env.Z_REPORT_STORAGE_ROOT = "/tmp/z-reports-test";
 import Fastify from "fastify";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createFakeZReports } from "./support/fake-z-reports.js";
+
 const TENANT = "00000000-0000-0000-0000-000000000001";
 const STORE = "00000000-0000-0000-0000-000000000002";
 const REGISTER = "00000000-0000-0000-0000-000000000003";
@@ -88,7 +90,14 @@ function dec(n: number) {
   } as { toString: () => string; valueOf: () => number };
 }
 
-const fakePrisma = {
+// S1-sello · el Z se congela en `shift_z_reports` al cerrar. El doble
+// vive en `support/fake-z-reports.ts` porque lo comparte con el corte de
+// día.
+const zReports = createFakeZReports(() => fakePrisma);
+
+const fakePrisma: Record<string, any> = {
+  shiftZReport: zReports.model,
+  $transaction: (fn: any) => zReports.transaction(fn),
   tenant: {
     findUniqueOrThrow: vi.fn(async ({ where }: any) => {
       if (!state.tenant || state.tenant.id !== where.id)
@@ -312,6 +321,7 @@ async function buildApp() {
 }
 
 beforeEach(async () => {
+  zReports.reset();
   state.tenant = {
     id: TENANT,
     requireManagerPinForForceClose: true,

@@ -17,6 +17,8 @@ process.env.Z_REPORT_STORAGE_ROOT = "/tmp/z-reports-test-v1-11";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createFakeZReports } from "./support/fake-z-reports.js";
+
 import { runShiftDayCut } from "../src/shift/day-cut-run.js";
 import { resolveShiftForSale } from "../src/shift/impute.js";
 
@@ -76,10 +78,14 @@ function makeShift(over: Partial<FakeShiftRow> & { id: string; openedAt: Date })
 // `resolveShiftForSale`. Guardamos los updates para asertar sobre ellos.
 function fakePrisma(shifts: FakeShiftRow[]) {
   const updates: Array<{ id: string; data: Record<string, unknown> }> = [];
-  return {
-    updates,
-    shifts,
-    client: {
+  // S1-sello · el corte de día congela el Z en `shift_z_reports`. Se
+  // expone como `zReports` para que los tests puedan asertar sobre él.
+  const zReports = createFakeZReports(() => client);
+  const client: Record<string, any> = {
+    shiftZReport: zReports.model,
+    $transaction: (fn: any) => zReports.transaction(fn),
+  };
+  Object.assign(client, {
       shift: {
         findMany: vi.fn(async (args?: { where?: Record<string, unknown> }) => {
           const where = args?.where ?? {};
@@ -174,8 +180,8 @@ function fakePrisma(shifts: FakeShiftRow[]) {
           alias: "Sole",
         })),
       },
-    },
-  };
+  });
+  return { updates, shifts, client, zReports };
 }
 
 const log = { info: vi.fn(), error: vi.fn() };

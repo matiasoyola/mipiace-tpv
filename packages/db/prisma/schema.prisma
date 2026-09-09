@@ -965,22 +965,22 @@ model Contact {
 // ── Operativa de ventas ───────────────────────────────────────────────
 
 model Shift {
-  id             String    @id @default(uuid()) @db.Uuid
-  registerId     String    @map("register_id") @db.Uuid
-  userId         String    @map("user_id") @db.Uuid
-  openedAt       DateTime  @default(now()) @map("opened_at") @db.Timestamptz()
-  closedAt       DateTime? @map("closed_at") @db.Timestamptz()
+  id             String           @id @default(uuid()) @db.Uuid
+  registerId     String           @map("register_id") @db.Uuid
+  userId         String           @map("user_id") @db.Uuid
+  openedAt       DateTime         @default(now()) @map("opened_at") @db.Timestamptz()
+  closedAt       DateTime?        @map("closed_at") @db.Timestamptz()
   // Última actividad observada en el turno. Se actualiza a `now()` en
   // cada cobro y al hacer cashier-login con `reanudar`. Sirve para
   // diferenciar "turno reanudable" (mismo día) de "turno colgado" (día
   // anterior) en la lógica de login (§4 nucleus).
-  lastActivityAt DateTime  @default(now()) @map("last_activity_at") @db.Timestamptz()
-  cashOpening    Decimal   @map("cash_opening") @db.Decimal(12, 4)
-  cashCounted    Decimal?  @map("cash_counted") @db.Decimal(12, 4)
+  lastActivityAt DateTime         @default(now()) @map("last_activity_at") @db.Timestamptz()
+  cashOpening    Decimal          @map("cash_opening") @db.Decimal(12, 4)
+  cashCounted    Decimal?         @map("cash_counted") @db.Decimal(12, 4)
   // Quién ejecutó el cierre. Puede ser distinto al `userId` cuando un
   // cajero cierra un turno colgado de un compañero (§3.5 del prompt).
-  closedByUserId String?   @map("closed_by_user_id") @db.Uuid
-  zReportPdfPath String?   @map("z_report_pdf_path")
+  closedByUserId String?          @map("closed_by_user_id") @db.Uuid
+  zReportPdfPath String?          @map("z_report_pdf_path")
   // v1.11-cierre-de-dia · quién/qué cerró el turno. `closedByUserId` dice
   // QUIÉN (null cuando cierra el job); esto dice POR QUÉ.
   closeReason    ShiftCloseReason @default(MANUAL) @map("close_reason")
@@ -993,6 +993,11 @@ model Shift {
   // ventas (tickets de un outbox offline imputados aquí por su timestamp,
   // ver `shift/impute.ts`). El PDF archivado ya no cuadra con la BD; el
   // resumen lo dice en vez de callarlo.
+  //
+  // S1-sello · el boolean deja de significar "el PDF puede estar caducado"
+  // y pasa a significar **"existe un Z posterior que corrige a este"**: la
+  // venta tardía emite un `ShiftZReport` nuevo y marca el anterior como
+  // superado, en vez de dejar el cierre en un limbo sin sustituto.
   zReportStale   Boolean          @default(false) @map("z_report_stale")
 
   register   Register         @relation(fields: [registerId], references: [id], onDelete: Restrict)
@@ -1001,6 +1006,7 @@ model Shift {
   tickets    Ticket[]
   refunds    Refund[]
   cashCounts ShiftCashCount[]
+  zReports   ShiftZReport[]
 
   @@index([registerId, openedAt])
   @@index([registerId, closedAt])
@@ -1030,73 +1036,164 @@ model ShiftCashCount {
   @@map("shift_cash_counts")
 }
 
+// S1-sello · pieza 4 del bloque. El Z dejaba de ser un documento en el
+// momento en que vivía SÓLO como PDF en disco: un fichero sustituible
+// sin que nada lo detecte, y con `zReportStale` admitiendo que el
+// contenido podía haber caducado.
+//
+// Aquí el desglose queda CONGELADO en base de datos, con su huella. Y
+// cuando entra una venta tardía en un turno ya cerrado no se pisa el Z
+// anterior: se emite uno nuevo (`sequence` +1) y el anterior queda
+// marcado como corregido (`supersededAt` / `supersededById`), conservado.
+// Eso es lo que pasa a significar `Shift.zReportStale`: "existe un Z
+// posterior que corrige a este".
+//
+// Append-only por trigger: sólo se permite el UPDATE que marca una fila
+// como superada, y una sola vez.
+model ShiftZReport {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shiftId    String   @map("shift_id") @db.Uuid
+  // 1 = el Z del cierre. 2, 3… = los correctivos por ventas tardías.
+  sequence   Int
+  // El desglose entero (`ZBreakdown` + recuentos + fondo/contado) tal
+  // como se calculó. Es lo que el PDF pinta; ahora también es dato.
+  breakdown  Json
+  // SHA-256 (hex) del desglose canonicalizado. Ver `shift/z-seal.ts`.
+  sealedHash String   @map("sealed_hash")
+  sealedAt   DateTime @default(now()) @map("sealed_at") @db.Timestamptz()
+  // Ruta del PDF archivado, si lo hubo. Los correctivos nacen sin PDF:
+  // el documento emitido es el del cierre; este congela el número.
+  pdfPath    String?  @map("pdf_path")
+  // CLOSE = cierre del turno (manual o corte de día). LATE_SALE = venta
+  // que entró después de cerrar. CHECK en la migración.
+  reason     String
+
+  supersededAt   DateTime? @map("superseded_at") @db.Timestamptz()
+  supersededById String?   @map("superseded_by_id") @db.Uuid
+
+  shift Shift @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@unique([shiftId, sequence])
+  @@index([shiftId, sealedAt])
+  @@map("shift_z_reports")
+}
+
+// S1-sello · ADR-015 §4.3. La ÚNICA vía por la que una columna sellada
+// puede cambiar de valor.
+//
+// No es una tabla de log que alguien rellena por educación: el trigger
+// de Postgres exige que exista una fila de aquí, con el mismo
+// `txid_current()`, para la tabla/fila/columna que se está tocando. Sin
+// motivo no hay fila (CHECK), y sin fila no hay UPDATE. Si la
+// transacción revienta, se van las dos cosas a la vez.
+//
+// Se escribe SIEMPRE llamando a `record_ticket_correction(...)`, que lee
+// el valor anterior del propio motor, inserta aquí y hace el UPDATE. El
+// código de la aplicación no escribe una columna sellada a mano nunca.
+//
+// Append-only por trigger: UPDATE y DELETE denegados.
+model TicketCorrection {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  ticketId  String   @map("ticket_id") @db.Uuid
+  // tickets | ticket_lines | ticket_payments
+  tableName String   @map("table_name")
+  rowId     String   @map("row_id") @db.Uuid
+  field     String
+  // Representación textual (la de `to_jsonb(fila)->>columna`) del valor
+  // antes y después. Texto y no el tipo nativo: una sola tabla sirve
+  // para tres tablas y para columnas de tipos distintos.
+  oldValue  String?  @map("old_value")
+  newValue  String?  @map("new_value")
+  // Obligatorio y en texto libre. CHECK `btrim(reason) <> ''`.
+  reason    String
+  // Quién. `userId` cuando hay usuario del tenant detrás; `author` es la
+  // etiqueta legible SIEMPRE, incluido lo que no es una persona
+  // ("script:backfill-vuelta").
+  author    String
+  userId    String?  @map("user_id") @db.Uuid
+  // Transacción en la que se escribió. Es lo que el trigger compara.
+  txid      BigInt
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, createdAt])
+  @@index([tenantId, createdAt])
+  // Por aquí busca el trigger en CADA update de columna sellada. Va
+  // declarado aunque lo cree la migración a mano: si no, el siguiente
+  // `prisma migrate dev` lo daría por sobrante y lo borraría.
+  @@index([txid, tableName, rowId, field])
+  @@map("ticket_corrections")
+}
+
 model Ticket {
-  id                   String       @id @default(uuid()) @db.Uuid
-  tenantId             String       @map("tenant_id") @db.Uuid
-  registerId           String       @map("register_id") @db.Uuid
-  shiftId              String       @map("shift_id") @db.Uuid
-  userId               String       @map("user_id") @db.Uuid
-  internalNumber       String       @map("internal_number")
+  id                   String            @id @default(uuid()) @db.Uuid
+  tenantId             String            @map("tenant_id") @db.Uuid
+  registerId           String            @map("register_id") @db.Uuid
+  shiftId              String            @map("shift_id") @db.Uuid
+  userId               String            @map("user_id") @db.Uuid
+  internalNumber       String            @map("internal_number")
   // UUID v4 generado en el front al cobrar. Llave de idempotencia hacia
   // Holded. Nunca se regenera.
-  externalId           String       @unique @map("external_id") @db.Uuid
+  externalId           String            @unique @map("external_id") @db.Uuid
   // v1.0-mesas-frontend · Lote 2: idempotencia del checkout de mesa.
   // UUID v4 generado en el front al abrir el overlay de cobro. Un
   // reintento de red del POST /tickets/:id/checkout con el mismo valor
   // devuelve el ticket ya cobrado (GET-back) en vez de 409. Nullable:
   // venta rápida y clientes viejos no lo mandan.
-  checkoutExternalId   String?      @unique @map("checkout_external_id") @db.Uuid
+  checkoutExternalId   String?           @unique @map("checkout_external_id") @db.Uuid
   // Capability slug público (16 hex = 8 bytes random ≈ 96 bits) que
   // alimenta el QR, el email y el botón "Ver ticket". Permite al
   // cliente final descargar el PDF sin auth — la entropía es el secreto.
   // B-Print fase 1.
-  publicSlug           String       @unique @map("public_slug")
+  publicSlug           String            @unique @map("public_slug")
   // Timestamp del último fallo persistente del email auto-enviado.
   // El bandeja admin lo muestra para que el propietario sepa que el
   // cliente no recibió su ticket pese a que la sync con Holded fue OK.
-  emailFailedAt        DateTime?    @map("email_failed_at") @db.Timestamptz()
-  contactHoldedId      String?      @map("contact_holded_id")
-  status               TicketStatus @default(DRAFT)
+  emailFailedAt        DateTime?         @map("email_failed_at") @db.Timestamptz()
+  contactHoldedId      String?           @map("contact_holded_id")
+  status               TicketStatus      @default(DRAFT)
   // v1.8-Fiado (variante B) · deuda viva de un ticket vendido a crédito.
   //   NULL  = venta normal (no fiado).
   //   > 0   = deuda pendiente de cobro (status ON_CREDIT).
   //   0     = fiado ya saldado (histórico "fue fiado"; NO se vuelve a NULL).
   // Se decrementa en cada cobro (POST /tickets/:id/credit-payments). Al
   // llegar a 0 el ticket pasa a PAID y se encola la subida a Holded.
-  creditPending        Decimal?     @map("credit_pending") @db.Decimal(12, 4)
-  total                Decimal      @db.Decimal(12, 4)
-  totalTax             Decimal      @map("total_tax") @db.Decimal(12, 4)
-  totalDiscount        Decimal      @map("total_discount") @db.Decimal(12, 4)
+  creditPending        Decimal?          @map("credit_pending") @db.Decimal(12, 4)
+  total                Decimal           @db.Decimal(12, 4)
+  totalTax             Decimal           @map("total_tax") @db.Decimal(12, 4)
+  totalDiscount        Decimal           @map("total_discount") @db.Decimal(12, 4)
   // Texto libre de la venta. Se imprime en el ticket y se concatena a
   // las `notes` Holded después del marcador `TPV-uuid:` (§1.3).
   notes                String?
   // Efectivo recibido (para cálculo de cambio en histórico). Nullable
   // si no hubo efectivo en el cobro.
-  cashAmount           Decimal?     @map("cash_amount") @db.Decimal(12, 4)
-  holdedDocumentId     String?      @map("holded_document_id")
+  cashAmount           Decimal?          @map("cash_amount") @db.Decimal(12, 4)
+  holdedDocumentId     String?           @map("holded_document_id")
   // Numeración fiscal asignada por Holded tras el `approveDoc:true`.
   // Cara visible al cliente; se imprime en el ticket cuando llega.
-  holdedDocNumber      String?      @map("holded_doc_number")
-  holdedPdfUrl         String?      @map("holded_pdf_url")
+  holdedDocNumber      String?           @map("holded_doc_number")
+  holdedPdfUrl         String?           @map("holded_pdf_url")
   // Intents post-cobro. La impresión real es B5; en B4 sólo persistimos
   // la decisión del cajero.
-  printIntent          Boolean      @default(true) @map("print_intent")
-  emailIntent          String?      @map("email_intent")
+  printIntent          Boolean           @default(true) @map("print_intent")
+  emailIntent          String?           @map("email_intent")
   // Timestamp del momento en que el cajero pulsa "Imprimir ticket
   // regalo" (§5.2). Nullable; sólo se rellena si se solicitó.
-  giftReceiptIntentAt  DateTime?    @map("gift_receipt_intent_at") @db.Timestamptz()
+  giftReceiptIntentAt  DateTime?         @map("gift_receipt_intent_at") @db.Timestamptz()
   // Email del MANAGER que autorizó este ticket con descuento superior
   // al umbral (B6 §2). Sólo se rellena si el descuento efectivo del
   // ticket supera `tenant.discountThresholdPct`. NULL en el caso normal.
-  discountAuthorizedBy String?      @map("discount_authorized_by")
+  discountAuthorizedBy String?           @map("discount_authorized_by")
   // Mesa abierta a la que pertenece este ticket (B7). NULL para tickets
   // de venta rápida (retail). El estado de la mesa se deriva: si existe
   // un ticket con `tableId=X, status=DRAFT` la mesa X está ocupada.
-  tableId              String?      @map("table_id") @db.Uuid
-  table                Table?       @relation(fields: [tableId], references: [id])
+  tableId              String?           @map("table_id") @db.Uuid
+  table                Table?            @relation(fields: [tableId], references: [id])
   // Si este ticket nació como absorción de otra mesa en un grupo (§5),
   // se conserva el origen para histórico.
-  originalTableId      String?      @map("original_table_id") @db.Uuid
+  originalTableId      String?           @map("original_table_id") @db.Uuid
   // Nº de comensales introducido al abrir la mesa. Informativo (no
   // bloquea capacidad).
   diners               Int?
@@ -1104,31 +1201,44 @@ model Ticket {
   // (peluquería/clínica/taller). Texto libre opcional introducido en
   // checkout. Vacío en RETAIL/HOSPITALITY. Se imprime en el ticket
   // entre cabecera y líneas si el tenant es SERVICES.
-  attendedBy           String?      @map("attended_by") @db.VarChar(60)
+  attendedBy           String?           @map("attended_by") @db.VarChar(60)
   // v1.4-Bar-Operativa-MVP Lote 2 · cuándo se imprimió la última
   // comanda (kitchen ticket) para esta mesa. NULL = nunca enviada.
   // El TPV pinta "Enviar comanda" cuando hay líneas más nuevas que
   // este timestamp y "Reenviar comanda" cuando coinciden con
   // lastSentRevision. Se borra al cobrar/cancelar para no arrastrar
   // estado a mesas reusadas (la columna sólo existe en DRAFT efectivos).
-  lastSentAt           DateTime?    @map("last_sent_at") @db.Timestamptz()
+  lastSentAt           DateTime?         @map("last_sent_at") @db.Timestamptz()
   // Revisión del envío: cuántas comandas (1ª, 2ª, 3ª) se han enviado
   // al ticket. Se imprime en la cabecera del PDF como "Comanda nº N".
   // Útil cuando una mesa pide más en mitad del servicio y la cocina
   // recibe un segundo papel: el cocinero ve "Comanda nº 2 · mesa 7".
-  lastSentRevision     Int          @default(0) @map("last_sent_revision")
-  createdAt            DateTime     @default(now()) @map("created_at") @db.Timestamptz()
-  paidAt               DateTime?    @map("paid_at") @db.Timestamptz()
-  syncedAt             DateTime?    @map("synced_at") @db.Timestamptz()
-  syncError            Json?        @map("sync_error")
+  lastSentRevision     Int               @default(0) @map("last_sent_revision")
+  createdAt            DateTime          @default(now()) @map("created_at") @db.Timestamptz()
+  paidAt               DateTime?         @map("paid_at") @db.Timestamptz()
+  syncedAt             DateTime?         @map("synced_at") @db.Timestamptz()
+  syncError            Json?             @map("sync_error")
   // v1.12-mesas-abandonadas · auditoría de la anulación de un DRAFT.
   // NULL en todo ticket que no esté VOIDED. `voidedByUserId` NULL con
   // `voidReason = AUTO_ABANDONED_EMPTY` es el barrido del corte de día:
   // lo anuló SISTEMA. Los VOIDED anteriores a v1.12 quedan MANUAL con
   // `voidedAt` NULL — los anuló una persona, pero no sabemos cuándo.
   voidReason           TicketVoidReason? @map("void_reason")
-  voidedAt             DateTime?    @map("voided_at") @db.Timestamptz()
-  voidedByUserId       String?      @map("voided_by_user_id") @db.Uuid
+  voidedAt             DateTime?         @map("voided_at") @db.Timestamptz()
+  voidedByUserId       String?           @map("voided_by_user_id") @db.Uuid
+  // S1-sello · ADR-015 §4.1. SHA-256 (hex) del conjunto económico de la
+  // venta —totales, líneas en orden determinista y pagos— calculado EN EL
+  // SERVIDOR al persistir el cobro, nunca en el terminal. `sealedAt` es
+  // el interruptor que mira el trigger de Postgres: con él no nulo, las
+  // columnas económicas de esta fila (y toda TicketLine / TicketPayment
+  // que cuelgue) dejan de poder modificarse salvo por la vía de
+  // corrección (`TicketCorrection`).
+  //
+  // NULL = ticket pre-sello. No se sella retroactivamente (ADR-015 §5.2):
+  // el histórico anterior al despliegue queda así para siempre y todo
+  // informe que agregue ventas tiene que tolerar las dos poblaciones.
+  sealedHash           String?           @map("sealed_hash")
+  sealedAt             DateTime?         @map("sealed_at") @db.Timestamptz()
 
   tenant          Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   register        Register               @relation(fields: [registerId], references: [id], onDelete: Restrict)
@@ -1141,6 +1251,7 @@ model Ticket {
   refunds         Refund[]
   emailJobs       TicketEmailJob[]
   printIntents    PrintIntent[]
+  corrections     TicketCorrection[]
   // B-reservas-4 · cita → caja: el ticket pre-poblado que abre "Cobrar en
   // caja". Como mucho una cita apunta a un ticket (puente 1:0..1).
   appointment     Appointment?
@@ -1152,6 +1263,8 @@ model Ticket {
   @@index([shiftId])
   @@index([externalId])
   @@index([tableId, status])
+  // S1-sello · separar sellados de pre-sello en los listados del admin.
+  @@index([tenantId, sealedAt])
   // v1.8-Fiado · el listado de deudas por cliente (GET /credits) filtra
   // tickets con deuda viva por contacto. El índice PARCIAL real
   //   (tenant_id, contact_holded_id) WHERE credit_pending > 0

@@ -67,6 +67,20 @@ const fakePrisma = {
       return t;
     }),
     findFirst: vi.fn(async () => null),
+    // S1-sello · el sello relee el ticket recién creado DENTRO de la tx y
+    // escribe sealed_hash/sealed_at. El doble lo soporta para que estos
+    // tests ejerciten el camino de verdad y no una versión sin sellar.
+    findUniqueOrThrow: vi.fn(async ({ where }: any) => {
+      const t = [...tickets.values()].find((x) => x.id === where.id);
+      if (!t) throw new Error(`ticket ${where.id} no encontrado`);
+      return t;
+    }),
+    update: vi.fn(async ({ where, data }: any) => {
+      const t = [...tickets.values()].find((x) => x.id === where.id);
+      if (!t) throw new Error(`ticket ${where.id} no encontrado`);
+      Object.assign(t, data);
+      return t;
+    }),
   },
   register: {
     update: vi.fn(async ({ where, data, select }: any) => {

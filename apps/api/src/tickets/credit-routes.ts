@@ -20,6 +20,7 @@ import { getPrisma } from "../context.js";
 import { enqueueTicketUpload } from "../queues/ticket-upload.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
 import { shouldEnqueueHoldedUpload } from "./holded-upload-gate.js";
+import { sealTicket } from "./seal.js";
 
 // Tolerancia monetaria: la deuda vive con precisión de 4 decimales pero
 // los cobros llegan en euros/céntimos. Media de céntimo evita que un
@@ -316,6 +317,15 @@ export async function registerCreditRoutes(app: FastifyInstance): Promise<void> 
             },
             update: {},
           });
+        }
+        // S1-sello · aquí se cobra el fiado de verdad, y aquí se sella.
+        // No en la venta: hasta este momento `paidAt` —columna sellada—
+        // todavía iba a cambiar (variante B: la fecha fiscal es la del
+        // saldo, no la de la entrega) y los pagos seguían entrando. Los
+        // cobros parciales anteriores son filas NUEVAS sobre un ticket
+        // aún sin sellar, que es exactamente lo que dice ADR-015 §5.1.
+        if (settled) {
+          await sealTicket(tx, ticket.id);
         }
         return updated;
       });
