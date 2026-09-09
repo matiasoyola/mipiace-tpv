@@ -6,7 +6,7 @@ cierre de caja vale para un asesor._
 
 ## Contexto (leer antes)
 
-- `docs/design/adr-014-sello-de-la-venta.md` — **manda este documento.** La decisión, los dos
+- `docs/design/adr-015-sello-de-la-venta.md` — **manda este documento.** La decisión, los dos
   casos de borde ya cerrados y la frontera de lo que NO se hace.
 - `docs/auditorias/2026-09-05-inalterabilidad-datos-venta.md` — los agujeros concretos, con
   fichero y línea.
@@ -50,9 +50,9 @@ importe, y los `TicketPayment` de la venta.
 Ojo a los **tres** caminos de entrada, no dos: venta rápida (`POST /tickets`), cobro de mesa
 (`POST /tickets/:id/checkout`) y el ingreso diferido del **outbox offline**. Un ticket que llega
 dos horas tarde se sella al llegar, igual que uno inmediato. El sello es **por venta, no
-encadenado entre ventas** — eso es deliberado y no se cambia (ADR-014 §2).
+encadenado entre ventas** — eso es deliberado y no se cambia (ADR-015 §2).
 
-`creditPending` **queda fuera del sello** (ADR-014 §5.1).
+`creditPending` **queda fuera del sello** (ADR-015 §5.1).
 
 ### 2 · El trigger, que es lo que de verdad cierra el agujero
 
@@ -95,7 +95,7 @@ una huella del contenido. `zReportStale` deja de ser un boolean incómodo y pasa
 
 ### 5 · Convivencia con el histórico
 
-**No se sella retroactivamente** (ADR-014 §5.2). Los tickets existentes quedan con
+**No se sella retroactivamente** (ADR-015 §5.2). Los tickets existentes quedan con
 `sealed_at IS NULL` y el sello arranca desde el despliegue. Todo informe que agregue ventas
 —arqueo, Z, listados del admin, CRM— tiene que tolerar las dos poblaciones sin romperse y sin
 mentir sobre cuál es cuál.
@@ -132,10 +132,10 @@ preguntarlas una a una, y con el mecanismo elegido para la vía de corrección y
 - **Nada de encadenamiento de huellas entre registros, remisión a la AEAT, certificados ni
   declaración responsable.** Esto no nos convierte en SIF y esa frontera no se cruza en este
   bloque. Si el código te pide "ya que estamos, encadenamos", la respuesta es no.
-- **No partir `tickets` en dos tablas.** Se evaluó y se descartó en ADR-014 §4.
+- **No partir `tickets` en dos tablas.** Se evaluó y se descartó en ADR-015 §4.
 - **No sellar el histórico.**
 - No toques el catálogo, el mapa de sala, el modal de cobro ni la pantalla de "Ticket emitido":
   son v1.16 / v1.17 / v1.18.
 - No toques la integración con Holded. El ticket sigue subiendo exactamente igual.
 - **No añadas en ninguna parte del producto ni de la documentación la frase "cumple Verifactu"**
-  ni equivalentes. La única redacción admitida está en ADR-014 §2.
+  ni equivalentes. La única redacción admitida está en ADR-015 §2.

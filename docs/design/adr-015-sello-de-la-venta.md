@@ -1,4 +1,4 @@
-# ADR-014 · Sello de inalterabilidad de la venta
+# ADR-015 · Sello de inalterabilidad de la venta
 
 _2026-09-05. Decide cómo se hace inalterable el dato económico de una venta cobrada, sin
 convertir a mipiacetpv en SIF y sin partir la tabla `tickets`. Precede al bloque S1._
