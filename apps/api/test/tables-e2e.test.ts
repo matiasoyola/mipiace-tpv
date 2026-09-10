@@ -254,10 +254,13 @@ const fakePrisma: Record<string, unknown> = {
     findMany: vi.fn(async ({ where }: any) =>
       [...state.tickets.values()].filter((t) => matchTicket(t, where)),
     ),
-    findUniqueOrThrow: vi.fn(async ({ where, include }: any) => {
+    findUniqueOrThrow: vi.fn(async ({ where, include, select }: any) => {
       const t = state.tickets.get(where.id);
       if (!t) throw new Error("ticket not found");
-      return materialize(t, include ?? { lines: true, table: true });
+      // S1-sello · el sello pide las relaciones con `select`, no con
+      // `include`. Antes se ignoraba y el doble devolvía un ticket sin
+      // pagos.
+      return materialize(t, include ?? select ?? { lines: true, table: true });
     }),
     create: vi.fn(async ({ data, include, select }: any) => {
       const t: FakeTicket = {

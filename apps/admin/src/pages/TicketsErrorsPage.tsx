@@ -106,6 +106,26 @@ interface RefundDetail {
   }>;
 }
 
+// S1-sello · la vía de corrección, tal y como la devuelve
+// GET /admin/tickets/:id/corrections.
+interface CorrectionRow {
+  id: string;
+  tableName: string;
+  rowId: string;
+  field: string;
+  oldValue: string | null;
+  newValue: string | null;
+  reason: string;
+  author: string;
+  createdAt: string;
+}
+
+interface CorrectionsResponse {
+  sealedAt: string | null;
+  sealedHash: string | null;
+  corrections: CorrectionRow[];
+}
+
 interface Filters {
   from: string;
   to: string;
@@ -496,6 +516,10 @@ function DetailDrawer({
   const [error, setError] = useState<string | null>(null);
   const [editLineId, setEditLineId] = useState<string | null>(null);
   const [editSku, setEditSku] = useState("");
+  // S1-sello · el motivo de la corrección. Sin él el backend responde 400:
+  // el `sku` entra en el sello de la venta y su cambio deja traza.
+  const [editReason, setEditReason] = useState("");
+  const [corrections, setCorrections] = useState<CorrectionsResponse | null>(null);
   const [resolving, setResolving] = useState(false);
   const [resolveDocId, setResolveDocId] = useState("");
   const [resolveDocNumber, setResolveDocNumber] = useState("");
@@ -541,6 +565,15 @@ function DetailDrawer({
             : `/admin/refunds/${entry.id}/holded-payload-preview`;
         const p = await api<{ payload: unknown }>(previewPath);
         if (!cancelled) setPayload(p.payload);
+        // S1-sello · el estado del sello y las correcciones del ticket.
+        // Sólo tickets: los refunds no llevan sello (son registros
+        // nuevos, no ediciones de una venta).
+        if (entry.kind === "ticket") {
+          const c = await api<CorrectionsResponse>(
+            `/admin/tickets/${entry.id}/corrections`,
+          );
+          if (!cancelled) setCorrections(c);
+        }
       } catch (err) {
         if (err instanceof ApiError && !cancelled) setError(err.message);
         else if (!cancelled) throw err;
@@ -599,6 +632,10 @@ function DetailDrawer({
 
   async function onSaveEditSku() {
     if (!editLineId || !editSku.trim()) return;
+    if (entry.kind === "ticket" && !editReason.trim()) {
+      setError("Escribe el motivo de la corrección.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -608,7 +645,11 @@ function DetailDrawer({
           : `/admin/refunds/${entry.id}/edit-line-sku`;
       const body =
         entry.kind === "ticket"
-          ? { ticketLineId: editLineId, sku: editSku.trim() }
+          ? {
+              ticketLineId: editLineId,
+              sku: editSku.trim(),
+              reason: editReason.trim(),
+            }
           : { refundLineId: editLineId, sku: editSku.trim() };
       await api(path, { method: "POST", body });
       onActionComplete();
@@ -795,6 +836,22 @@ function DetailDrawer({
                     onChange={setEditSku}
                     required
                   />
+                  {entry.kind === "ticket" && (
+                    <>
+                      <TextField
+                        id="edit-sku-reason"
+                        label="Motivo de la corrección"
+                        value={editReason}
+                        onChange={setEditReason}
+                        required
+                      />
+                      <p className="text-[12.5px] text-slate-500">
+                        El SKU dice qué se vendió, así que forma parte del
+                        sello de la venta. Cambiarlo queda registrado con tu
+                        nombre, el valor anterior y este motivo.
+                      </p>
+                    </>
+                  )}
                   <div className="flex gap-2.5">
                     <PrimaryButton type="button" onClick={onSaveEditSku} busy={busy}>
                       Guardar y reintentar
@@ -803,6 +860,7 @@ function DetailDrawer({
                       onClick={() => {
                         setEditLineId(null);
                         setEditSku("");
+                        setEditReason("");
                       }}
                     >
                       Cancelar
@@ -810,6 +868,74 @@ function DetailDrawer({
                   </div>
                 </div>
               )}
+            </section>
+          )}
+
+          {/* S1-sello · el sello de la venta y su vía de corrección. Sin
+              esta vista la tabla `ticket_corrections` no sirve para lo
+              único para lo que existe: que alguien la mire. */}
+          {entry.kind === "ticket" && corrections && (
+            <section>
+              <h3 className="text-[11.5px] uppercase tracking-wider text-slate-400 font-medium mb-2">
+                Sello de la venta
+              </h3>
+              <div className="bg-mipiace-stone/40 rounded-2xl border border-slate-200 p-4 space-y-3">
+                {corrections.sealedAt ? (
+                  <div className="text-[13px] text-mipiace-ink">
+                    Sellada el{" "}
+                    <span className="tabular-nums">
+                      {new Date(corrections.sealedAt).toLocaleString("es-ES")}
+                    </span>
+                    <div className="text-[12px] text-slate-500 break-all font-mono mt-1">
+                      {corrections.sealedHash}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-[13px] text-slate-500">
+                    Venta <strong>pre-sello</strong>: anterior al despliegue del
+                    sello. No se sella retroactivamente — decir que está
+                    sellada sería afirmar algo que no podemos verificar.
+                  </div>
+                )}
+
+                {corrections.corrections.length === 0 ? (
+                  <div className="text-[12.5px] text-slate-500">
+                    Sin correcciones.
+                  </div>
+                ) : (
+                  <table className="w-full text-[12.5px]">
+                    <thead className="text-[11.5px] uppercase tracking-wider text-slate-400 font-medium">
+                      <tr className="text-left">
+                        <th className="py-1.5 pr-3">Cuándo</th>
+                        <th className="py-1.5 pr-3">Quién</th>
+                        <th className="py-1.5 pr-3">Campo</th>
+                        <th className="py-1.5 pr-3">Antes → después</th>
+                        <th className="py-1.5">Motivo</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {corrections.corrections.map((c) => (
+                        <tr key={c.id} className="border-t border-slate-200 align-top">
+                          <td className="py-1.5 pr-3 tabular-nums whitespace-nowrap text-slate-500">
+                            {new Date(c.createdAt).toLocaleString("es-ES")}
+                          </td>
+                          <td className="py-1.5 pr-3 text-mipiace-ink">{c.author}</td>
+                          <td className="py-1.5 pr-3 font-mono text-slate-600">
+                            {c.tableName}.{c.field}
+                          </td>
+                          <td className="py-1.5 pr-3 tabular-nums">
+                            <span className="text-red-700 line-through">
+                              {c.oldValue ?? "—"}
+                            </span>{" "}
+                            → <span className="text-mipiace-ink">{c.newValue ?? "—"}</span>
+                          </td>
+                          <td className="py-1.5 text-slate-600">{c.reason}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
             </section>
           )}
 

@@ -244,6 +244,14 @@ const fakePrisma: Record<string, unknown> = {
       applyPaymentsNested(id, data.payments);
       return materialize(t, include);
     }),
+    // S1-sello · el sello relee el ticket dentro de la tx antes de
+    // escribir sealed_hash/sealed_at. Los tests de v1.15 pasan por las
+    // tres puertas de cobro, así que el doble tiene que soportarlo.
+    findUniqueOrThrow: vi.fn(async ({ where, include, select }: any) => {
+      const t = state.tickets.get(where.id);
+      if (!t) throw new Error("ticket not found");
+      return materialize(t, include ?? select);
+    }),
     update: vi.fn(async ({ where, data, include, select }: any) => {
       const t = state.tickets.get(where.id);
       if (!t) throw new Error("ticket not found");

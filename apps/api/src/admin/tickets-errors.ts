@@ -20,6 +20,11 @@ import { getPrisma } from "../context.js";
 import { enqueueRefundUpload } from "../queues/refund-upload.js";
 import { enqueueTicketUpload } from "../queues/ticket-upload.js";
 import {
+  CorrectionRejectedError,
+  listTicketCorrections,
+  recordTicketCorrection,
+} from "../tickets/corrections.js";
+import {
   buildRefundSalesreceiptPayload,
 } from "../tickets/upload-refund.js";
 import {
@@ -457,11 +462,15 @@ export async function registerAdminTicketsErrorsRoutes(
         },
         body: {
           type: "object",
-          required: ["ticketLineId", "sku"],
+          required: ["ticketLineId", "sku", "reason"],
           additionalProperties: false,
           properties: {
             ticketLineId: { type: "string", format: "uuid" },
             sku: { type: "string", minLength: 1, maxLength: 64 },
+            // S1-sello · el motivo pasa a ser obligatorio en el contrato.
+            // El `sku` identifica QUÉ se vendió, así que entra en el sello
+            // y su cambio es una corrección con nombre y apellidos.
+            reason: { type: "string", minLength: 1, maxLength: 500 },
           },
         },
       },
@@ -469,7 +478,7 @@ export async function registerAdminTicketsErrorsRoutes(
     async (request, reply) => {
       const auth = request.auth!;
       const params = request.params as { id: string };
-      const body = request.body as { ticketLineId: string; sku: string };
+      const body = request.body as { ticketLineId: string; sku: string; reason: string };
       const ticket = await getPrisma().ticket.findFirst({
         where: { id: params.id, tenantId: auth.tenantId },
         select: { id: true, externalId: true, status: true, lines: { select: { id: true } } },
@@ -488,20 +497,98 @@ export async function registerAdminTicketsErrorsRoutes(
           message: "La línea indicada no pertenece a este ticket.",
         });
       }
-      await getPrisma().$transaction([
-        getPrisma().ticketLine.update({
-          where: { id: body.ticketLineId },
-          data: { sku: body.sku },
-        }),
-        // Limpiamos el documentId parcial para forzar un POST fresco.
-        getPrisma().ticket.update({
-          where: { id: ticket.id },
-          data: { holdedDocumentId: null, holdedDocNumber: null },
-        }),
-      ]);
+      // S1-sello · el `sku` está dentro del sello (es lo que identifica el
+      // producto vendido), así que este endpoint deja de escribir la
+      // columna y pasa por la vía de corrección: motivo obligatorio, autor
+      // registrado y fila en `ticket_corrections`. En un ticket pre-sello
+      // el camino es el mismo — la traza vale igual.
+      const actor = await getPrisma().user.findUnique({
+        where: { id: auth.userId },
+        select: { email: true, alias: true },
+      });
+      // Etiqueta legible SIEMPRE, incluso si el usuario desapareciera
+      // después. La impersonación se anota: no es lo mismo que el
+      // propietario corrija su ticket a que lo haga un super-admin.
+      const author =
+        (actor?.email ?? actor?.alias ?? auth.userId) +
+        (auth.isImpersonation ? " (vía super-admin)" : "");
+      try {
+        await getPrisma().$transaction(async (tx) => {
+          await recordTicketCorrection(tx, {
+            table: "ticket_lines",
+            rowId: body.ticketLineId,
+            field: "sku",
+            newValue: body.sku,
+            reason: body.reason,
+            author,
+            userId: auth.userId,
+          });
+          // Limpiamos el documentId parcial para forzar un POST fresco.
+          // Columnas operativas: el trigger no las mira.
+          await tx.ticket.update({
+            where: { id: ticket.id },
+            data: { holdedDocumentId: null, holdedDocNumber: null },
+          });
+        });
+      } catch (err) {
+        if (err instanceof CorrectionRejectedError) {
+          return reply.code(400).send({
+            error: "CORRECTION_REJECTED",
+            message: err.message,
+          });
+        }
+        throw err;
+      }
       await resetForRetry(getPrisma(), { kind: "ticket", externalId: ticket.externalId });
       await enqueueTicketUpload(ticket.externalId);
       return reply.code(202).send({ ok: true, jobId: `upload-ticket-${ticket.externalId}` });
+    },
+  );
+
+  // ── GET /admin/tickets/:id/corrections ──────────────────────────────
+  // S1-sello · la vista mínima de la vía de corrección. Sin esto la tabla
+  // no sirve para lo único para lo que existe: que alguien la mire.
+  app.get(
+    "/admin/tickets/:id/corrections",
+    {
+      preHandler: requireOwnerOrManager,
+      schema: {
+        params: {
+          type: "object",
+          required: ["id"],
+          additionalProperties: false,
+          properties: { id: { type: "string", format: "uuid" } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const auth = request.auth!;
+      const params = request.params as { id: string };
+      const ticket = await getPrisma().ticket.findFirst({
+        where: { id: params.id, tenantId: auth.tenantId },
+        select: { id: true, sealedAt: true, sealedHash: true },
+      });
+      if (!ticket) return notFound(reply, "ticket");
+      const corrections = await listTicketCorrections(getPrisma(), ticket.id);
+      return reply.send({
+        // El estado del sello va en la misma respuesta: una corrección
+        // sobre un ticket pre-sello y una sobre uno sellado no significan
+        // lo mismo y la pantalla tiene que poder decirlo.
+        sealedAt: ticket.sealedAt?.toISOString() ?? null,
+        sealedHash: ticket.sealedHash,
+        corrections: corrections.map((c) => ({
+          id: c.id,
+          tableName: c.tableName,
+          rowId: c.rowId,
+          field: c.field,
+          oldValue: c.oldValue,
+          newValue: c.newValue,
+          reason: c.reason,
+          author: c.author,
+          userId: c.userId,
+          createdAt: c.createdAt.toISOString(),
+        })),
+      });
     },
   );
 

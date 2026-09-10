@@ -40,6 +40,7 @@ import {
 } from "./modifier-selection.js";
 import { normalizeTicketPayments } from "./normalize-payments.js";
 import { generatePublicSlug } from "./public-slug.js";
+import { sealTicket } from "./seal.js";
 import {
   PAYMENT_TOLERANCE_EUR,
   TOTAL_TOLERANCE_EUR,
@@ -613,6 +614,21 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             update: {},
           });
         }
+        // S1-sello · el cobro queda sellado aquí, en el servidor y dentro
+        // de la misma transacción que lo persiste. Esta ruta es la puerta
+        // de DOS de los tres caminos: la venta rápida y el ingreso
+        // diferido del outbox offline (el que trae `occurredAt` y se
+        // imputa a un turno ya cerrado). Un ticket que llega dos horas
+        // tarde se sella al llegar, igual que uno inmediato.
+        //
+        // El fiado NO: nace ON_CREDIT, sin pagos y con un `paidAt` que
+        // todavía va a cambiar (la fecha fiscal es la del saldo). Se
+        // sella en POST /tickets/:id/credit-payments al saldarse.
+        if (!isCredit) {
+          // El objeto `t` se leyó antes del sello: se le pega el
+          // resultado para que la respuesta ya lo lleve sin releer.
+          Object.assign(t, await sealTicket(tx, t.id));
+        }
         return t;
       });
 
@@ -1003,6 +1019,13 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             },
             update: {},
           });
+          // S1-sello · el cobro de mesa es el segundo camino de entrada.
+          // El DRAFT vivía suelto (líneas que iban y venían, absorciones
+          // entre mesas); el sello se pone AQUÍ, cuando deja de ser un
+          // borrador y pasa a ser una venta. Ojo al orden: los pagos se
+          // acaban de reescribir arriba (`deleteMany` + `create`) y eso
+          // sólo es legal mientras el ticket no está sellado.
+          Object.assign(t, await sealTicket(tx, t.id));
           return t;
         });
       } catch (err) {
@@ -1847,6 +1870,8 @@ function serializeTicket(t: DbTicket): Record<string, unknown> {
     createdAt: Date;
     paidAt: Date | null;
     syncedAt: Date | null;
+    sealedHash: string | null;
+    sealedAt: Date | null;
     lines: Array<{
       id: string;
       productId: string | null;
@@ -1913,6 +1938,12 @@ function serializeTicket(t: DbTicket): Record<string, unknown> {
     createdAt: ticket.createdAt.toISOString(),
     paidAt: ticket.paidAt?.toISOString() ?? null,
     syncedAt: ticket.syncedAt?.toISOString() ?? null,
+    // S1-sello · ADR-015 §6: el histórico pre-sello y las ventas selladas
+    // conviven durante toda la vida del sistema. El contrato lo dice en
+    // vez de dejar que cada consumidor lo suponga: `sealedAt: null` es
+    // una venta anterior al despliegue del sello, no una venta rota.
+    sealedAt: ticket.sealedAt?.toISOString() ?? null,
+    sealedHash: ticket.sealedHash,
     register: ticket.register
       ? {
           id: ticket.register.id,

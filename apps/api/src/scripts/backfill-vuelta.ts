@@ -18,21 +18,54 @@
 
 import "dotenv/config";
 
-import { Prisma } from "@mipiacetpv/db";
-
 import { getPrisma, shutdown } from "../context.js";
 import {
   planVueltaBackfill,
   type BackfillTicketRow,
 } from "../tickets/backfill-vuelta.js";
+import {
+  CorrectionRejectedError,
+  recordTicketCorrection,
+} from "../tickets/corrections.js";
+
+// S1-sello · el autor que queda en `ticket_corrections`. El convenio para
+// lo que no es una persona es `script:<nombre>`.
+const AUTHOR = "script:backfill-vuelta";
+
+// S1-sello · el motivo por defecto. Es el que documenta v1.15: los pagos
+// de estos tickets llevaban dentro el importe ENTREGADO en vez del
+// cobrado (B1), y esta pasada retira la diferencia. Se puede sustituir
+// con `--motivo="..."` — lo que no se puede es no dar ninguno.
+const DEFAULT_REASON =
+  "v1.15-la-vuelta-existe §2 · backfill B1: el pago llevaba el efectivo entregado en vez del aplicado; se retira la vuelta.";
 
 function eur(n: number): string {
   return `${n.toFixed(2)} €`;
 }
 
+function readReason(argv: string[]): string {
+  const flag = argv.find((a) => a.startsWith("--motivo="));
+  return flag ? flag.slice("--motivo=".length) : DEFAULT_REASON;
+}
+
 async function main(): Promise<void> {
   const apply = process.argv.includes("--apply");
+  const reason = readReason(process.argv);
   const prisma = getPrisma();
+
+  // S1-sello · el guardia RUIDOSO. Este script escribe sobre
+  // `ticket_payments` de ventas ya cobradas: es literalmente el caso que
+  // motivó el bloque (12 tickets y 161,57 € en v1.15, indistinguibles
+  // después de una manipulación). Ahora escribe por la vía de corrección,
+  // y sin motivo no arranca — mejor que se pare aquí, con un mensaje, que
+  // reventar a mitad de la pasada con un error del motor.
+  if (reason.trim() === "") {
+    console.error(
+      "Una corrección sin motivo no se escribe. Usa --motivo=\"...\" o deja el motivo por defecto.",
+    );
+    process.exitCode = 1;
+    return;
+  }
 
   console.log("─".repeat(72));
   console.log("Mipiacetpv · v1.15 · backfill de la vuelta (B1)");
@@ -114,25 +147,58 @@ async function main(): Promise<void> {
   }
 
   let updated = 0;
+  const rejected: Array<{ internalNumber: string; message: string }> = [];
   // Una transacción por ticket: son `update` sobre PK de `ticket_payments`
   // y no hay ninguna razón para tomar un lock largo sobre toda la tabla en
   // una base de producción con el TPV vendiendo.
+  //
+  // S1-sello · el `ticketPayment.update` directo desapareció. Un pago de
+  // una venta sellada sólo se toca por `record_ticket_correction`, que
+  // deja quién, cuándo, valor anterior, valor nuevo y motivo. Si un día
+  // alguien vuelve a necesitar un backfill como este, la traza existirá
+  // sin que tenga que acordarse de escribirla.
   for (const t of plan.tickets) {
-    await prisma.$transaction(
-      t.updates.map((u) =>
-        prisma.ticketPayment.update({
-          where: { id: u.paymentId },
-          data: { amount: new Prisma.Decimal(u.to) },
-        }),
-      ),
-    );
-    updated += t.updates.length;
+    const row = byId.get(t.ticketId)!;
+    try {
+      await prisma.$transaction(async (tx) => {
+        for (const u of t.updates) {
+          await recordTicketCorrection(tx, {
+            table: "ticket_payments",
+            rowId: u.paymentId,
+            field: "amount",
+            newValue: u.to.toFixed(4),
+            reason: `${reason} (#${row.internalNumber}: ${u.from.toFixed(2)} € → ${u.to.toFixed(2)} €)`,
+            author: AUTHOR,
+          });
+        }
+      });
+      updated += t.updates.length;
+    } catch (err) {
+      // Ruidoso, no silencioso: se informa del ticket que no se pudo
+      // corregir y se sigue con el resto. Al final el resumen lo dice y
+      // el proceso sale con código de error.
+      const message =
+        err instanceof CorrectionRejectedError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : String(err);
+      console.error(`  ✗ #${row.internalNumber}: ${message}`);
+      rejected.push({ internalNumber: row.internalNumber, message });
+    }
   }
 
   console.log("");
   console.log(
-    `Hecho. ${plan.tickets.length} tickets corregidos, ${updated} filas de pago actualizadas, ${eur(plan.excessTotal)} retirados de las ventas.`,
+    `Hecho. ${plan.tickets.length - rejected.length} tickets corregidos, ${updated} filas de pago actualizadas, ${eur(plan.excessTotal)} retirados de las ventas.`,
   );
+  if (rejected.length > 0) {
+    console.error("");
+    console.error(
+      `${rejected.length} tickets NO se pudieron corregir. Nada se escribió para ellos.`,
+    );
+    process.exitCode = 1;
+  }
 }
 
 main()
