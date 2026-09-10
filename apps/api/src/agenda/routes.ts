@@ -360,9 +360,13 @@ export async function registerAgendaRoutes(
         id,
       );
       if (!result.ok) {
-        return reply
-          .code(result.status)
-          .send({ error: result.error, message: result.message });
+        return reply.code(result.status).send({
+          error: result.error,
+          message: result.message,
+          // B-reservas-5 F5 · APPOINTMENT_ALREADY_PAID lo trae para que
+          // el TPV pueda llevar al ticket en vez de dejar un callejón.
+          ...(result.ticketId ? { ticketId: result.ticketId } : {}),
+        });
       }
       return reply
         .code(result.alreadyLinked ? 200 : 201)
