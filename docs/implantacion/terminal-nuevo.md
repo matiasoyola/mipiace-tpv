@@ -32,6 +32,25 @@ Hay exactamente tres cosas que, si no se hacen aquí, después cuestan un despla
       por eso existe la APK).
 - [ ] Foto de la etiqueta trasera. Cuando el terminal esté a 40 km, el número de serie es lo
       que identifica de cuál se está hablando.
+- [ ] **Versión del WebView del sistema**, que no es la de Chrome. La APK no trae navegador
+      propio: pinta con el WebView del sistema, y cada terminal trae el suyo.
+
+      ```
+      adb -s <ip:puerto> shell dumpsys webviewupdate | grep "Current WebView package"
+      ```
+
+      Tiene que ser **84 o más** (el front usa `gap` en flexbox). Si es menor, actualizar en
+      la mesa: Play Store → **"WebView del sistema Android"** (Google LLC), o lanzar la ficha
+      por adb con
+      `adb shell am start -a android.intent.action.VIEW -d 'market://details?id=com.google.android.webview'`,
+      y después `adb shell am force-stop es.mipiace.tpv`.
+
+> **Por qué está en la mesa y no en el local.** El AP12 de Peluquería Sole llegó con el
+> WebView **83** y la APK instalada enseñaba *"Este navegador es demasiado antiguo"*: se quedó
+> corto por una versión. En el AP11 era el 93 y funcionaba, así que "la APK lo arregla" era
+> cierto de un terminal, no del hierro. Con Play Store y cuenta de Google se arregla en 5
+> minutos (83 → 151 el 04-09). **Un terminal sin Play o sin cuenta y con WebView < 84 no
+> puede funcionar hoy**: no se entrega, y se avisa a desarrollo.
 
 ## 2 · Red y hora
 
@@ -43,6 +62,17 @@ Hay exactamente tres cosas que, si no se hacen aquí, después cuestan un despla
       se anuncia, pero es mejor que nazca bien.
 - [ ] Suspensión de pantalla y bloqueo: sin PIN, sin patrón. Un TPV que pide desbloqueo a las
       7:00 es un TPV parado.
+- [ ] Apagado de pantalla. Lo que se dejó en Sole el 2026-09-10, a petición de Matías:
+      apagar a los 5 minutos y salvapantallas de reloj mientras está enchufado.
+
+      ```
+      adb shell settings put global stay_on_while_plugged_in 0
+      adb shell settings put system screen_off_timeout 300000
+      adb shell settings put secure screensaver_activate_on_sleep 1
+      ```
+
+      Efecto secundario que hay que saber: con la depuración inalámbrica, **cada apagado de
+      pantalla cambia el puerto de adb** (§4).
 
 > **El AP11 se cae de la red cuando está ocioso** y vuelve al tocarle la pantalla. No es un
 > fallo de configuración: es su comportamiento. Condiciona toda la escalada de §4 y está sin
@@ -60,6 +90,12 @@ la tienda y la caja a la que cuelga, que es peor pero funciona.
 Convención: **dónde está**, no qué es. `barra`, `terraza`, `cocina`. El local ya lo dice el
 `Store`.
 
+> **Lo que pasó en Sole el 2026-09-10.** La cuenta tenía 4 dispositivos activos, sin nombre y
+> con el user-agent recortado como única pista. Uno de los que se "sabía" que era la tablet
+> resultó ser un Mac, y el listado se reordena tras cada revocación: faltó poco para revocar
+> el terminal bueno, que es lo único que deja al cliente sin cobrar. Mientras el listado no diga
+> modelo ni "este es el que acaba de hablar", **el nombre es la única defensa**.
+
 ## 4 · Depuración por red (la escalada)
 
 Esto es lo que permite `adb install -r` para actualizar sin desplazarse, y `scrcpy` para ver y
@@ -70,6 +106,18 @@ fábrica que no todo el mundo sabe abrir.**
 - [ ] Activar **Depuración por USB**.
 - [ ] Con el terminal por cable: `adb tcpip 5555`.
 - [ ] Comprobar desde el Mac: `infra/terminal.sh connect <nombre>`.
+
+> **Los terminales que hay hoy no van por el 5555.** AP11 y AP12 son Android 11 y lo que se ha
+> usado en la práctica es la **Depuración inalámbrica** de Opciones de desarrollador, que
+> escucha en un **puerto aleatorio** (`service.adb.tcp.port = 0`): el AP12 de Sole pasó del
+> 37767 al 40471 en la misma sesión el 04-09, y el 10-09 estaba en el 41275. El puerto **cambia cada vez
+> que se apaga la pantalla** o se toca el interruptor. La primera vez hay que emparejar
+> (`adb pair <ip>:<puerto-de-emparejamiento>` con el código de la pantalla).
+>
+> Así que el puerto se lee **en la pantalla del terminal** (Depuración inalámbrica → IP y
+> puerto) justo antes de conectar, y se le pasa al script:
+> `TERMINAL_ADB_PORT=<puerto> infra/terminal.sh connect <nombre>`. El 5555 por defecto sólo
+> vale si se hizo `adb tcpip 5555` por cable y el terminal no se ha reiniciado desde entonces.
 
 > ### Lo que NO sobrevive a un reinicio
 >
@@ -98,6 +146,23 @@ no en el local:
 
 - [ ] Instalar la APK y **abrirla una vez**, para que el WebView descomprima sus assets. El
       primer arranque es el lento.
+- [ ] **Comprobar que es el build de producción**, no uno de laboratorio:
+
+      ```
+      adb -s <ip:puerto> logcat -d | grep -E "Loading app at|Handling local request" | tail -3
+      ```
+
+      La URL tiene que ser `https://mipiacetpv.com`. Si sale `http://`, `a5-lab` o una IP de la
+      LAN, es un build de desarrollo y **no sale de la mesa**. `versionName` y `versionCode` no
+      sirven para distinguirlos: el build de laboratorio de A5 también decía 1.15.1 / 11501. Sólo
+      la URL y el asset (`index-*.js`) los separan.
+
+> Esto no es teórico. El 2026-09-04 un build de laboratorio (`http` + `a5-lab`) acabó encima de
+> la release en la caja de Peluquería Sole y la dejó sin cobrar con el TPV hasta el 10-09: el terminal
+> hablaba con otra API y el PIN se rechazaba. Se recuperó el 10-09 con `adb install -r` de la
+> release, **sin perder la vinculación**, porque el `localStorage` va por origen y el de
+> `https://mipiacetpv.com` seguía intacto. `build-release-apk.sh` ya se niega a compilar con el
+> origen cambiado (R5), pero la comprobación en el terminal es la que cierra la puerta.
 - [ ] Dejar el emparejamiento **para el local**, no para la mesa: el `Device` queda atado a un
       `Register` concreto, y si se empareja aquí contra una caja de prueba hay que revocarlo y
       repetirlo.
