@@ -156,6 +156,16 @@ const fakePrisma: Record<string, unknown> = {
     })),
   },
   shift: {
+    // B-reservas-5 Frente T · el cobro de un borrador resuelve a qué
+    // turno va la venta (`resolveShiftForSale`) antes de sellarla. Aquí
+    // el turno está abierto: la resolución devuelve el mismo y no hace
+    // ninguna consulta más.
+    findFirst: vi.fn(async () => ({
+      id: SHIFT,
+      openedAt: new Date(Date.now() - 3_600_000),
+      closedAt: null,
+      closeReason: "MANUAL" as const,
+    })),
     update: vi.fn(async () => ({})),
   },
   user: {

@@ -90,6 +90,16 @@ export function pickShiftForOccurrence(
   return best;
 }
 
+/**
+ * B-reservas-5 Frente T · lo único que esta resolución necesita del
+ * cliente es leer `shifts`. Tipado así, vale igual el `PrismaClient` de
+ * siempre que el cliente de una transacción interactiva (`tx`), que es
+ * donde la llama el cobro de un borrador: resolver el turno FUERA de la
+ * tx y escribirlo dentro abre una ventana en la que el turno puede
+ * cerrarse entre una cosa y la otra.
+ */
+export type ShiftReaderClient = Pick<ReturnType<typeof getPrisma>, "shift">;
+
 export type ShiftResolution =
   | {
       ok: true;
@@ -111,7 +121,7 @@ export type ShiftResolution =
  * abajo sólo se ejecuta cuando el turno pedido ya está cerrado.
  */
 export async function resolveShiftForSale(args: {
-  prisma: ReturnType<typeof getPrisma>;
+  prisma: ShiftReaderClient;
   registerId: string;
   requestedShiftId: string;
   occurredAt?: Date | null;

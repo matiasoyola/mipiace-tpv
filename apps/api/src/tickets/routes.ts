@@ -57,6 +57,16 @@ class TicketAlreadyPaidError extends Error {
   }
 }
 
+// B-reservas-5 Frente T · señal interna de la tx de checkout cuando el
+// turno del borrador lo cerró UNA PERSONA y no hay otro abierto en la
+// caja. Aborta la tx (el DRAFT se queda DRAFT, sin quemar serie) y sale
+// como 409 SHIFT_NOT_OPEN, igual que `POST /tickets`.
+class ShiftNotOpenError extends Error {
+  constructor() {
+    super("shift not open");
+  }
+}
+
 const UUID_V4 =
   "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$";
 
@@ -733,6 +743,14 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             // devolvemos el ticket existente (GET-back) en vez de 409 —
             // cubre el reintento de red del outbox.
             externalId: { type: "string", format: "uuid" },
+            // B-reservas-5 Frente T · el instante en que el cajero pulsó
+            // Cobrar, sellado por el outbox al encolar. El cobro de un
+            // borrador se imputa al turno de ESE instante, igual que
+            // `POST /tickets` desde v1.11. Sin esto el campo llegaba y
+            // Fastify lo tiraba en silencio (`additionalProperties: false`
+            // + `removeAdditional`), y una cita abierta ayer y cobrada hoy
+            // se sellaba en el turno de ayer, con su Z ya archivado.
+            occurredAt: { type: "string", format: "date-time" },
             contactHoldedId: { type: "string", maxLength: 64 },
             notes: { type: "string", maxLength: 1000 },
             cashAmount: { type: "number", minimum: 0 },
@@ -936,13 +954,33 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         discountAuthorizedBy = manager.email;
       }
 
+      // B-reservas-5 Frente T · CUÁNDO ocurrió este cobro. El borrador
+      // fijó su `shiftId` al ABRIRSE (mesa o cita), y entre abrir y
+      // cobrar puede haber pasado un corte de día: en Sole pasa siempre,
+      // porque no cierra turno a mano y la cita se queda abierta de un
+      // día para otro. La venta va al turno de su instante, que es la
+      // regla de v1.11, no al turno en que se abrió el papel.
+      const { at: bodyOccurredAt, skewed } = parseOccurredAt(body.occurredAt);
+      if (skewed) {
+        // Reloj del terminal adelantado. No se rechaza el cobro: se
+        // ignora el instante que manda y vale el del servidor.
+        request.log.warn(
+          {
+            event: "ticket.occurred_at_skew",
+            ticketId,
+            occurredAt: body.occurredAt,
+          },
+          "occurredAt del futuro: se ignora para la imputación",
+        );
+      }
+
       // internalNumber atómico — sólo al cobrar (B7 §4: los DRAFT no
       // consumen serie). Patrón idéntico al POST /tickets: el
       // incremento va dentro de la tx para que un fallo posterior no
       // queme el número (v1.5-consistencia-A §3.a).
-      let updated;
+      let txOut;
       try {
-        updated = await prisma.$transaction(async (tx) => {
+        txOut = await prisma.$transaction(async (tx) => {
           // v1.0-pilotos · Lote 1: reclama el DRAFT dentro de la tx. El
           // check de status de arriba corre fuera de transacción — dos
           // checkouts simultáneos podían pasar ambos y cobrar dos veces.
@@ -954,6 +992,22 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             data: { status: TicketStatus.PENDING_SYNC },
           });
           if (claimed.count === 0) throw new TicketAlreadyPaidError();
+
+          // El turno de la venta, con la MISMA regla que `POST /tickets`
+          // (`resolveShiftForSale`). Va DENTRO de la tx y DESPUÉS del
+          // claim a propósito: resolver fuera abriría una ventana en la
+          // que el turno se cierra entre la lectura y la escritura, y el
+          // ticket acabaría sellado en un turno que ya no es el que la
+          // resolución vio. Sin `occurredAt` en el cuerpo (camino online
+          // de siempre) el instante es el del cobro, ahora.
+          const resolution = await resolveShiftForSale({
+            prisma: tx,
+            registerId: cashier.rid,
+            requestedShiftId: draft.shiftId,
+            occurredAt: bodyOccurredAt ?? new Date(),
+          });
+          if (!resolution.ok) throw new ShiftNotOpenError();
+
           const next = await tx.register.update({
             where: { id: cashier.rid },
             data: { ticketCounter: { increment: 1 } },
@@ -965,6 +1019,10 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             data: {
               status: TicketStatus.PENDING_SYNC,
               internalNumber,
+              // `shift_id` es columna sellada (S1 §2.4), pero AQUÍ el
+              // ticket sigue siendo un DRAFT sin `sealed_at`: el guardián
+              // deja pasar la escritura. Después de `sealTicket` ya no.
+              shiftId: resolution.shiftId,
               checkoutExternalId: body.externalId ?? null,
               contactHoldedId: body.contactHoldedId ?? draft.contactHoldedId,
               notes: body.notes ?? draft.notes,
@@ -1006,7 +1064,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             });
           }
           await tx.shift.update({
-            where: { id: draft.shiftId },
+            where: { id: resolution.shiftId },
             data: { lastActivityAt: new Date() },
           });
           await tx.holdedUpload.upsert({
@@ -1026,9 +1084,37 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           // acaban de reescribir arriba (`deleteMany` + `create`) y eso
           // sólo es legal mientras el ticket no está sellado.
           Object.assign(t, await sealTicket(tx, t.id));
-          return t;
+          // La imputación sale de la tx para que el log y el Z
+          // correctivo se hagan fuera, como en `POST /tickets`.
+          return {
+            ticket: t,
+            shift: {
+              shiftId: resolution.shiftId,
+              imputed: resolution.imputed,
+              stale: resolution.stale,
+            },
+          };
         });
       } catch (err) {
+        if (err instanceof ShiftNotOpenError) {
+          // El turno del borrador lo cerró una persona y no hay otro
+          // abierto en la caja. La tx entera se ha deshecho: el DRAFT
+          // sigue siendo DRAFT, con sus líneas, sin número de serie
+          // quemado, y la cita que lo enlaza sigue enlazada. La cajera
+          // tiene algo que hacer, y el mensaje se lo dice.
+          request.log.info(
+            {
+              event: "ticket.checkout_shift_not_open",
+              ticketId,
+              requestedShiftId: draft.shiftId,
+            },
+            "cobro de borrador sin turno abierto en la caja",
+          );
+          return reply.code(409).send({
+            error: "SHIFT_NOT_OPEN",
+            message: "No hay turno abierto en esta caja. Abre turno para cobrar.",
+          });
+        }
         if (err instanceof TicketAlreadyPaidError) {
           // Carrera: el claim no ganó. Si fue ESTE mismo checkout (un
           // doble submit con el mismo externalId que entró en paralelo),
@@ -1052,6 +1138,38 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           });
         }
         throw err;
+      }
+
+      const updated = txOut.ticket;
+      const shiftResolution = txOut.shift;
+
+      // B-reservas-5 Frente T · rastro de la imputación, con el mismo
+      // nombre de evento que `POST /tickets` para que una sola búsqueda
+      // en los logs cubra los dos caminos de venta.
+      if (shiftResolution.imputed || shiftResolution.stale) {
+        request.log.info(
+          {
+            event: "ticket.shift_imputed",
+            externalId: draft.externalId,
+            requestedShiftId: draft.shiftId,
+            effectiveShiftId: shiftResolution.shiftId,
+            occurredAt: body.occurredAt ?? null,
+            stale: shiftResolution.stale,
+          },
+          "venta imputada a un turno distinto del que abrió el borrador",
+        );
+      }
+      // La venta ha entrado en un turno cuyo Z ya está archivado: Z
+      // correctivo. Best-effort — la venta ya está registrada, que es lo
+      // que no se puede perder.
+      if (shiftResolution.stale) {
+        const staleShiftId = shiftResolution.shiftId;
+        await markZReportStale(prisma, staleShiftId).catch((err) => {
+          request.log.warn(
+            { shiftId: staleShiftId },
+            `no se pudo marcar el Z como desfasado: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
       }
 
       try {
