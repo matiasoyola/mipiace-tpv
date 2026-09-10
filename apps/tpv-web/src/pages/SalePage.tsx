@@ -105,7 +105,6 @@ import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
 import type { MapNotice } from "./TableMapScreen.js";
 import { DebtsScreen } from "./DebtsScreen.js";
 import { ClientsPage } from "./ClientsPage.js";
-import { AgendaPage } from "./AgendaPage.js";
 import { useClientPicker } from "../hooks/useClientPicker.js";
 import { clientFullName } from "../lib/clients.js";
 import { useElapsedTime } from "../hooks/useElapsedTime.js";
@@ -294,6 +293,16 @@ export interface TableContext {
 }
 
 export interface SalePageProps {
+  // B-reservas-5 F1 · la agenda subió a `App` (vista hermana del mapa de
+  // sala). Esta pantalla conserva el gate `agendaEnabled` del botón y
+  // sólo avisa hacia arriba; quien la pinta es `App`.
+  onOpenAgenda?: () => void;
+  // Andamio de la mudanza: las líneas que "Cobrar en caja" pre-pobla
+  // siguen entrando en el carrito exactamente como hasta ahora, sólo que
+  // ahora llegan desde `App` en vez de desde el overlay local. Se retira
+  // en F3, cuando la cita entre en contexto DRAFT y deje de rehidratar.
+  agendaCheckoutLines?: CartLine[] | null;
+  onAgendaLinesConsumed?: () => void;
   shiftId: string;
   // v1.7-alias-cajeros: label de display (alias con fallback a email),
   // calculado en App con cashierDisplayLabel.
@@ -352,8 +361,10 @@ export function SalePage(props: SalePageProps) {
   const crmEnabled = getCachedCrmEnabled();
   const [showClients, setShowClients] = useState(false);
   // B-reservas-4 · Agenda (motor de reservas). Sólo con `agendaEnabled`.
+  // B-reservas-5 F1: la agenda ya no vive aquí — la pinta `App`, como el
+  // mapa de sala. Esta pantalla sólo conserva el gate del botón y avisa
+  // hacia arriba.
   const agendaEnabled = getCachedAgendaEnabled();
-  const [showAgenda, setShowAgenda] = useState(false);
   const clientPicker = useClientPicker();
   // Aviso transitorio cuando el cliente elegido por F1 aún no tiene
   // contacto fiscal de Holded (el enlace lo hace el cobro).
@@ -464,6 +475,21 @@ export function SalePage(props: SalePageProps) {
   );
   const lines = isTableMode ? tableLines : quickLines;
   const setLines = isTableMode ? setTableLines : setQuickLines;
+
+  // B-reservas-5 F1 · andamio de la mudanza. Hasta ahora este append lo
+  // hacía el `onCheckoutLines` del overlay local; ahora las líneas bajan
+  // desde `App`. Mismo `setLines`, mismo resultado: el carrito recibe lo
+  // que la cita pre-pobló. Se retira entero en F3.
+  const agendaLines = props.agendaCheckoutLines;
+  const onAgendaLinesConsumed = props.onAgendaLinesConsumed;
+  useEffect(() => {
+    if (!agendaLines || agendaLines.length === 0) return;
+    setLines((curr) => [...curr, ...agendaLines]);
+    onAgendaLinesConsumed?.();
+    // `setLines` cambia de identidad con `isTableMode`; la dependencia
+    // que manda es la remesa de líneas.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agendaLines]);
 
   // v1.14-la-comanda-se-ve · el núcleo del bloque (hallazgo C1).
   //
@@ -1830,7 +1856,7 @@ export function SalePage(props: SalePageProps) {
               {/* B-reservas-4 · Agenda. Sólo con la capability activa. */}
               {agendaEnabled && (
                 <button
-                  onClick={() => setShowAgenda(true)}
+                  onClick={() => props.onOpenAgenda?.()}
                   title="Agenda"
                   className="h-12 md:h-14 px-3 md:px-5 rounded-2xl bg-mipiace-stone hover:bg-slate-100 flex items-center gap-2 text-[13.5px] md:text-[14px] font-medium text-mipiace-ink"
                 >
@@ -2185,17 +2211,6 @@ export function SalePage(props: SalePageProps) {
       )}
       {/* B-reservas-1 · sección Clientes (CRM) + picker rápido F1. */}
       {showClients && <ClientsPage onClose={() => setShowClients(false)} />}
-      {/* B-reservas-4 · Agenda. "Cobrar en caja" carga las líneas del ticket
-          pre-poblado en el carrito y cierra la agenda: el cobro sigue por el
-          camino existente sin re-teclear (no se toca ADR-010). */}
-      {showAgenda && (
-        <AgendaPage
-          onClose={() => setShowAgenda(false)}
-          onCheckoutLines={(agendaLines) => {
-            setLines((curr) => [...curr, ...agendaLines]);
-          }}
-        />
-      )}
       {clientPicker.element}
       {/* v1.10.3-barra · hallazgo #2: deshacer de 4 s tras borrar una
           línea. z-[55] lo pone por encima del bottom-sheet del ticket

@@ -55,6 +55,9 @@ import { OutboxChip } from "./pages/CheckoutPage.outboxChip.js";
 import { PairScreen } from "./pages/PairScreen.js";
 import { PinScreen, type CashierLoginResponse } from "./pages/PinScreen.js";
 import { SalePage, type TableContext } from "./pages/SalePage.js";
+// B-reservas-5 F1 · la agenda es una vista hermana del mapa de sala: la
+// pinta quien manda en la navegación, no la pantalla de venta.
+import { AgendaPage } from "./pages/AgendaPage.js";
 import { CloseShiftModal } from "./pages/CloseShiftModal.js";
 import { DaySummaryCard } from "./pages/DaySummaryCard.js";
 import { daySummaryTitle } from "./lib/daySummaryTitle.js";
@@ -532,6 +535,15 @@ export function TpvHome(props: {
   // cuando el cajero vuelve por una expulsión (mesa cobrada/absorbida
   // desde otra caja) o tras cobrar una mesa desde este dispositivo.
   const [mapNotice, setMapNotice] = useState<MapNotice | null>(null);
+  // B-reservas-5 F1 · la agenda. Vivía como estado local de `SalePage`;
+  // sube aquí sin tocar el componente ni su aspecto (es un overlay
+  // `fixed inset-0`, se pinta igual colgado de un sitio que del otro).
+  const [showAgenda, setShowAgenda] = useState(false);
+  // Andamio de la mudanza: "Cobrar en caja" sigue metiendo las líneas
+  // pre-pobladas en el carrito, sólo que ahora pasan por aquí. Se retira
+  // en F3, cuando la cita entre en contexto DRAFT.
+  const [agendaCheckoutLines, setAgendaCheckoutLines] =
+    useState<CartLine[] | null>(null);
 
   async function pickTable(table: ApiTable): Promise<void> {
     if (openingTableId) return;
@@ -686,60 +698,71 @@ export function TpvHome(props: {
   }
 
   return (
-    <SalePage
-      key={view.tableContext?.id ?? "quick-sale"}
-      shiftId={props.shiftId}
-      cashierLabel={cashierDisplayLabel(props.cashier)}
-      cashierRole={props.cashier.role}
-      registerName={props.registerName}
-      registerId={props.registerId}
-      storeName={props.storeName}
-      tableContext={view.tableContext}
-      initialTableLines={view.initialTableLines}
-      // La salida al mapa ya viene con la limpieza dentro: `SalePage` no
-      // envuelve nada, sólo llama.
-      onBackToMap={hasTables ? () => void goToMap() : null}
-      // v1.9.2-mesas-concurrencia · salida al mapa CON aviso inline:
-      // expulsión por cobro/absorción remota, o confirmación tras
-      // cobrar la mesa desde este dispositivo (banner de éxito con
-      // "Ver ticket"). Reemplaza el modal "Ticket emitido" en mesa.
-      onExitToMap={
-        hasTables
-          ? (notice) => {
-              setMapNotice(notice);
-              setView({ kind: "map" });
-            }
-          : null
-      }
-      onTicketMovedToTable={
-        hasTables
-          ? async (newTableId) => {
-              // v1.4-Bar-Operativa-MVP Lote 3 · tras un mover-mesa
-              // exitoso, recargamos `/tpv/tables` y reconstruimos el
-              // tableContext apuntando a la mesa destino (vía pickTable,
-              // que además trae las líneas del DRAFT — el SalePage se
-              // remonta con key nueva). Si la recarga falla (offline),
-              // caemos al mapa: el usuario verá la mesa nueva ya
-              // ocupada y podrá tocarla.
-              try {
-                const res = await apiWithCashier<{ tables: ApiTable[] }>(
-                  "/tpv/tables",
-                );
-                const fresh = res.tables.find((t) => t.id === newTableId);
-                if (fresh) {
-                  await pickTable(fresh);
-                } else {
-                  setView({ kind: "map" });
-                }
-              } catch {
+    <>
+      {showAgenda && (
+        <AgendaPage
+          onClose={() => setShowAgenda(false)}
+          onCheckoutLines={(lines) => setAgendaCheckoutLines(lines)}
+        />
+      )}
+      <SalePage
+        key={view.tableContext?.id ?? "quick-sale"}
+        onOpenAgenda={() => setShowAgenda(true)}
+        agendaCheckoutLines={agendaCheckoutLines}
+        onAgendaLinesConsumed={() => setAgendaCheckoutLines(null)}
+        shiftId={props.shiftId}
+        cashierLabel={cashierDisplayLabel(props.cashier)}
+        cashierRole={props.cashier.role}
+        registerName={props.registerName}
+        registerId={props.registerId}
+        storeName={props.storeName}
+        tableContext={view.tableContext}
+        initialTableLines={view.initialTableLines}
+        // La salida al mapa ya viene con la limpieza dentro: `SalePage` no
+        // envuelve nada, sólo llama.
+        onBackToMap={hasTables ? () => void goToMap() : null}
+        // v1.9.2-mesas-concurrencia · salida al mapa CON aviso inline:
+        // expulsión por cobro/absorción remota, o confirmación tras
+        // cobrar la mesa desde este dispositivo (banner de éxito con
+        // "Ver ticket"). Reemplaza el modal "Ticket emitido" en mesa.
+        onExitToMap={
+          hasTables
+            ? (notice) => {
+                setMapNotice(notice);
                 setView({ kind: "map" });
               }
-            }
-          : null
-      }
-      onLogoutCashier={props.onLogoutCashier}
-      onCloseShift={props.onCloseShift}
-    />
+            : null
+        }
+        onTicketMovedToTable={
+          hasTables
+            ? async (newTableId) => {
+                // v1.4-Bar-Operativa-MVP Lote 3 · tras un mover-mesa
+                // exitoso, recargamos `/tpv/tables` y reconstruimos el
+                // tableContext apuntando a la mesa destino (vía pickTable,
+                // que además trae las líneas del DRAFT — el SalePage se
+                // remonta con key nueva). Si la recarga falla (offline),
+                // caemos al mapa: el usuario verá la mesa nueva ya
+                // ocupada y podrá tocarla.
+                try {
+                  const res = await apiWithCashier<{ tables: ApiTable[] }>(
+                    "/tpv/tables",
+                  );
+                  const fresh = res.tables.find((t) => t.id === newTableId);
+                  if (fresh) {
+                    await pickTable(fresh);
+                  } else {
+                    setView({ kind: "map" });
+                  }
+                } catch {
+                  setView({ kind: "map" });
+                }
+              }
+            : null
+        }
+        onLogoutCashier={props.onLogoutCashier}
+        onCloseShift={props.onCloseShift}
+      />
+    </>
   );
 }
 
