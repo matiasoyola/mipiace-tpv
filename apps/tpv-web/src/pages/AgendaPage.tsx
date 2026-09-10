@@ -18,8 +18,6 @@ import {
   loadClientsFromCache,
   type ClientRow,
 } from "../lib/clients.js";
-import type { CartLine } from "../lib/cart.js";
-import { newId } from "../lib/ids.js";
 import {
   checkoutAppointmentTicket,
   createAppointment,
@@ -140,10 +138,22 @@ export interface AgendaPageProps {
   onClose: () => void;
   // Cita → caja: recibe las líneas del ticket pre-poblado para cargarlas en
   // el carrito y cobrar por el camino existente (SalePage). No toca el cobro.
-  onCheckoutLines?: (lines: CartLine[]) => void;
+  // B-reservas-5 F3 · "Cobrar en caja" ya no rehidrata líneas: abre el
+  // DRAFT en el servidor y entrega su id. Quien manda en la navegación
+  // (`App`) entra en contexto de borrador por el MISMO camino que usa la
+  // mesa, y las líneas salen de `GET /tickets/:id` con el mapper que ya
+  // existe (`tableDraft.ts::mapServerDraftLines`). Aquí no se escribe un
+  // segundo mapper: el que había era una copia y ya había divergido
+  // (perdía `holdedProductId`).
+  onEnterDraft?: (entry: {
+    appointmentId: string;
+    ticketId: string;
+    clientName: string | null;
+    serviceLabel: string;
+  }) => void;
 }
 
-export function AgendaPage({ onClose, onCheckoutLines }: AgendaPageProps) {
+export function AgendaPage({ onClose, onEnterDraft }: AgendaPageProps) {
   const [date, setDate] = useState<string>(todayLocalDate());
   const [day, setDay] = useState<AgendaDay | null>(null);
   const [loading, setLoading] = useState(true);
@@ -284,29 +294,19 @@ export function AgendaPage({ onClose, onCheckoutLines }: AgendaPageProps) {
       flash(res.message);
       return;
     }
-    // Cargar las líneas pre-pobladas en el carrito del TPV (camino de cobro
-    // existente). Reconstruimos CartLine desde el ticket DRAFT del server.
-    const lines: CartLine[] = res.ticket.lines.map((l) => ({
-      id: newId(),
-      productId: l.productId,
-      variantId: null,
-      holdedProductId: null,
-      sku: l.sku,
-      nameSnapshot: l.nameSnapshot,
-      units: Number(l.units),
-      unitPrice: Number(l.unitPrice),
-      unitPriceOverride: null,
-      priceGross: Number(l.unitPrice) * (1 + Number(l.taxRate) / 100),
-      discountPct: 0,
-      taxRate: Number(l.taxRate),
-      modifiers: [],
-    }));
-    if (onCheckoutLines) {
-      onCheckoutLines(lines);
-      onClose();
-    } else {
+    if (!onEnterDraft) {
       flash("Ticket pre-poblado abierto en caja.");
+      return;
     }
+    const appt =
+      day?.appointments.find((a) => a.id === appointmentId) ?? detail ?? null;
+    onEnterDraft({
+      appointmentId,
+      ticketId: res.ticket.id,
+      clientName: appt ? clientName(appt.clientId) : null,
+      serviceLabel: appt ? serviceNames(appt) : "",
+    });
+    onClose();
   }
 
   async function changeStatus(id: string, status: AppointmentStatus) {

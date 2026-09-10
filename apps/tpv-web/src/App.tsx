@@ -54,7 +54,11 @@ import { installBackGuard, setBackFallback } from "./hooks/useBackGuard.js";
 import { OutboxChip } from "./pages/CheckoutPage.outboxChip.js";
 import { PairScreen } from "./pages/PairScreen.js";
 import { PinScreen, type CashierLoginResponse } from "./pages/PinScreen.js";
-import { SalePage, type TableContext } from "./pages/SalePage.js";
+import {
+  SalePage,
+  type AppointmentContext,
+  type TableContext,
+} from "./pages/SalePage.js";
 // B-reservas-5 F1 · la agenda es una vista hermana del mapa de sala: la
 // pinta quien manda en la navegación, no la pantalla de venta.
 import { AgendaPage } from "./pages/AgendaPage.js";
@@ -520,10 +524,13 @@ export function TpvHome(props: {
     | {
         kind: "sale";
         tableContext: TableContext | null;
+        // B-reservas-5 F3 · el otro borrador que se puede estar cobrando.
+        // Excluyente con `tableContext`: o mesa, o cita, o venta rápida.
+        appointmentContext?: AppointmentContext | null;
         // v1.0-mesas-frontend: proyección inicial del DRAFT server-side
         // (las líneas que ya tenía la mesa al retomarla). null en venta
         // rápida.
-        initialTableLines?: CartLine[];
+        initialDraftLines?: CartLine[];
       }
   >(skipTables ? { kind: "sale", tableContext: null } : { kind: "map" });
   // v1.0-mesas-frontend: tocar una mesa abre (o retoma) el DRAFT
@@ -539,11 +546,36 @@ export function TpvHome(props: {
   // sube aquí sin tocar el componente ni su aspecto (es un overlay
   // `fixed inset-0`, se pinta igual colgado de un sitio que del otro).
   const [showAgenda, setShowAgenda] = useState(false);
-  // Andamio de la mudanza: "Cobrar en caja" sigue metiendo las líneas
-  // pre-pobladas en el carrito, sólo que ahora pasan por aquí. Se retira
-  // en F3, cuando la cita entre en contexto DRAFT.
-  const [agendaCheckoutLines, setAgendaCheckoutLines] =
-    useState<CartLine[] | null>(null);
+
+  // B-reservas-5 F3 · LA entrada al contexto de borrador. Una sola
+  // función, porque aquí es donde vive el cambio de vista — igual que
+  // `goToMap` es LA salida. Tocar una mesa y cobrar una cita hacen lo
+  // mismo: hay un ticket DRAFT en el servidor, se carga su proyección
+  // con el mapper que ya existe y se entra a vender sobre él.
+  //
+  // Las líneas NUNCA se reconstruyen a mano: o vienen ya mapeadas del
+  // endpoint que abrió el borrador (mesa), o se piden con
+  // `GET /tickets/:id` (cita). El mapeo vive en un solo sitio.
+  async function enterDraft(entry: {
+    tableContext?: TableContext | null;
+    appointmentContext?: AppointmentContext | null;
+    lines?: CartLine[];
+    ticketId?: string;
+  }): Promise<void> {
+    let lines = entry.lines;
+    if (!lines && entry.ticketId) {
+      const res = await apiWithCashier<{ ticket: ServerDraft }>(
+        `/tickets/${entry.ticketId}`,
+      );
+      lines = mapServerDraftLines(res.ticket.lines);
+    }
+    setView({
+      kind: "sale",
+      tableContext: entry.tableContext ?? null,
+      appointmentContext: entry.appointmentContext ?? null,
+      initialDraftLines: lines ?? [],
+    });
+  }
 
   async function pickTable(table: ApiTable): Promise<void> {
     if (openingTableId) return;
@@ -555,8 +587,7 @@ export function TpvHome(props: {
         `/tables/${table.id}/open`,
         { method: "POST", body: {} },
       );
-      setView({
-        kind: "sale",
+      await enterDraft({
         tableContext: {
           id: table.id,
           name: table.name,
@@ -568,7 +599,7 @@ export function TpvHome(props: {
           openedByAlias: table.activeTicket?.openedByAlias ?? null,
           activeTicketId: res.ticket.id,
         },
-        initialTableLines: mapServerDraftLines(res.ticket.lines),
+        lines: mapServerDraftLines(res.ticket.lines),
       });
     } catch (err) {
       // 409 TABLE_GROUPED / SHIFT_NOT_OPEN llegan con mensaje en
@@ -702,14 +733,40 @@ export function TpvHome(props: {
       {showAgenda && (
         <AgendaPage
           onClose={() => setShowAgenda(false)}
-          onCheckoutLines={(lines) => setAgendaCheckoutLines(lines)}
+          // B-reservas-5 F3 · cobrar una cita entra en contexto de
+          // borrador por la MISMA puerta que abrir una mesa. No se
+          // rehidratan líneas en el cliente: `enterDraft` las pide.
+          onEnterDraft={(entry) =>
+            void enterDraft({
+              ticketId: entry.ticketId,
+              appointmentContext: {
+                appointmentId: entry.appointmentId,
+                activeTicketId: entry.ticketId,
+                clientName: entry.clientName,
+                serviceLabel: entry.serviceLabel,
+              },
+            })
+          }
         />
       )}
       <SalePage
-        key={view.tableContext?.id ?? "quick-sale"}
+        // B-reservas-5 F3 · la cita también remonta. Sin su id en la
+        // key, pasar de venta rápida a cobrar una cita reusaría la
+        // instancia y el carrito se quedaría con lo de antes: el
+        // estado de líneas se inicializa UNA vez, en el montaje.
+        key={
+          view.tableContext?.id ??
+          view.appointmentContext?.activeTicketId ??
+          "quick-sale"
+        }
         onOpenAgenda={() => setShowAgenda(true)}
-        agendaCheckoutLines={agendaCheckoutLines}
-        onAgendaLinesConsumed={() => setAgendaCheckoutLines(null)}
+        appointmentContext={view.appointmentContext ?? null}
+        // Salir del cobro de una cita devuelve a la agenda, que es de
+        // donde se vino. En SERVICES no hay mapa al que caer.
+        onBackToAgenda={() => {
+          setView({ kind: "sale", tableContext: null });
+          setShowAgenda(true);
+        }}
         shiftId={props.shiftId}
         cashierLabel={cashierDisplayLabel(props.cashier)}
         cashierRole={props.cashier.role}
@@ -717,7 +774,7 @@ export function TpvHome(props: {
         registerId={props.registerId}
         storeName={props.storeName}
         tableContext={view.tableContext}
-        initialTableLines={view.initialTableLines}
+        initialDraftLines={view.initialDraftLines}
         // La salida al mapa ya viene con la limpieza dentro: `SalePage` no
         // envuelve nada, sólo llama.
         onBackToMap={hasTables ? () => void goToMap() : null}

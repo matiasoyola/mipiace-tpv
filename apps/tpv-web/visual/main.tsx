@@ -30,6 +30,7 @@ import "../src/index.css";
 
 import type { CartLine, CartTotals } from "../src/lib/cart.js";
 import type { ApiTable } from "../src/pages/TableMapScreen.js";
+import type { AppointmentContext } from "../src/pages/SalePage.js";
 
 // ── fixtures ──────────────────────────────────────────────────────────
 
@@ -479,6 +480,32 @@ const SOLE_DAY = {
   ],
 };
 
+// El DRAFT que abriría el puente cita→caja: una línea por servicio del
+// visit, resuelta por `serviceId`, units 1 y sin descuento — igual que
+// `apps/api/src/agenda/checkout.ts`.
+function cartForAppointment(appointmentId: string): CartLine[] {
+  const appt = SOLE_DAY.appointments.find((a) => a.id === appointmentId);
+  if (!appt) return [];
+  return appt.items.map((it, i) => {
+    const svc = SOLE_CATALOG.find((p) => p.id === it.serviceId)!;
+    return {
+      id: `${appointmentId}-l${i}`,
+      productId: svc.id,
+      variantId: null,
+      holdedProductId: svc.holdedProductId,
+      sku: svc.sku,
+      nameSnapshot: svc.name,
+      units: 1,
+      unitPrice: svc.basePrice,
+      unitPriceOverride: null,
+      priceGross: svc.priceGross,
+      discountPct: 0,
+      taxRate: svc.taxRate,
+      modifiers: [],
+    };
+  });
+}
+
 function isAgendaScreen(): boolean {
   return benchScreen().startsWith("agenda");
 }
@@ -676,6 +703,38 @@ function stubFetch(): void {
     // **ninguna acción existente desaparece** (Mostrar QR · Descargar
     // PDF · Ver ticket). En el resto se deja caer con 404 a propósito,
     // que es el camino degradado que el overlay ya sabe recorrer.
+    // B-reservas-5 · el puente cita→caja. Devuelve el DRAFT pre-poblado
+    // con las líneas del visit, como `agenda/checkout.ts`.
+    const cita = /^\/agenda\/appointments\/([^/]+)\/checkout$/.exec(path);
+    if (cita) {
+      const id = cita[1]!;
+      const cart = cartForAppointment(id);
+      return new Response(
+        JSON.stringify({
+          ticket: {
+            id: `tk-${id}`,
+            externalId: `ext-${id}`,
+            status: "DRAFT",
+            total: cart
+              .reduce((a, l) => a + l.priceGross * l.units, 0)
+              .toFixed(2),
+            totalTax: "0.00",
+            totalDiscount: "0.00",
+            lines: cart.map((l) => ({
+              id: l.id,
+              productId: l.productId,
+              sku: l.sku,
+              nameSnapshot: l.nameSnapshot,
+              units: String(l.units),
+              unitPrice: String(l.unitPrice),
+              taxRate: String(l.taxRate),
+              total: String(l.priceGross * l.units),
+            })),
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
     if (/^\/tickets\/[^/]+\/digital$/.test(path)) {
       if (!benchScreen().startsWith("ticket-emitido")) {
         return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
@@ -739,18 +798,29 @@ function AgendaEntrada({
   };
 }) {
   const [showAgenda, setShowAgenda] = useState(false);
-  const [agendaCheckoutLines, setAgendaCheckoutLines] = useState<
-    CartLine[] | null
+  const [appointmentContext, setAppointmentContext] = useState<
+    AppointmentContext | null
   >(null);
+  const draftCart = appointmentContext
+    ? cartForAppointment(appointmentContext.appointmentId)
+    : undefined;
   return (
     <>
       {showAgenda && (
         <Screens.AgendaPage
           onClose={() => setShowAgenda(false)}
-          onCheckoutLines={(lines) => setAgendaCheckoutLines(lines)}
+          onEnterDraft={(entry) => {
+            setAppointmentContext({
+              appointmentId: entry.appointmentId,
+              activeTicketId: entry.ticketId,
+              clientName: entry.clientName,
+              serviceLabel: entry.serviceLabel,
+            });
+          }}
         />
       )}
       <Screens.SalePage
+        key={appointmentContext?.activeTicketId ?? "quick-sale"}
         shiftId="shift-1"
         cashierLabel="Sole"
         cashierRole="MANAGER"
@@ -758,8 +828,12 @@ function AgendaEntrada({
         registerId="reg-1"
         storeName="Peluquería Sole"
         onOpenAgenda={() => setShowAgenda(true)}
-        agendaCheckoutLines={agendaCheckoutLines}
-        onAgendaLinesConsumed={() => setAgendaCheckoutLines(null)}
+        appointmentContext={appointmentContext}
+        initialDraftLines={draftCart}
+        onBackToAgenda={() => {
+          setAppointmentContext(null);
+          setShowAgenda(true);
+        }}
         onBackToMap={() => {}}
         onLogoutCashier={() => {}}
         onCloseShift={() => {}}
@@ -928,7 +1002,7 @@ function Bench() {
           openedByAlias: "Gemma",
           activeTicketId: "tk-m1",
         }}
-        initialTableLines={benchLines()}
+        initialDraftLines={benchLines()}
         onBackToMap={() => {}}
         onTicketMovedToTable={null}
         onLogoutCashier={() => {}}

@@ -125,6 +125,10 @@ export function CheckoutOverlay(props: {
   // Etiqueta del item del outbox mientras el cobro está en tránsito
   // ("Mesa", "Cita"…). Sin ella se cae al copy por vertical de siempre.
   draftLabel?: string;
+  // Por qué no hay "Fiado" en este cobro, cuando el tenant lo tiene
+  // activado. Sólo se pinta en contexto de borrador; sin motivo, no se
+  // dice nada (mesa nunca lo ofreció y no hay nada que explicar).
+  creditUnavailableReason?: string;
   onClose: () => void;
   onConfirmed: () => void;
 }) {
@@ -1163,6 +1167,19 @@ export function CheckoutOverlay(props: {
               Fiado{props.contact?.name ? ` · ${props.contact.name}` : ""}
             </button>
           )}
+          {/* B-reservas-5 F3 · el fiado no cabe en un borrador ya abierto:
+              el camino de v1.8 sólo sabe cobrar por `POST /tickets`. Hasta
+              ahora una cita se cobraba por ahí y el botón SÍ estaba; al
+              pasar a contexto de borrador desaparece. Un botón que se
+              esfuma sin explicación es exactamente lo que v1.10.2 vino a
+              corregir en la impresión, así que aquí se dice. */}
+          {props.creditSalesEnabled &&
+            props.draftTicketId &&
+            props.creditUnavailableReason && (
+              <p className="mt-2 text-[12.5px] text-slate-500 text-center leading-snug">
+                {props.creditUnavailableReason}
+              </p>
+            )}
         </footer>
       </div>
 
