@@ -97,7 +97,7 @@ export function CheckoutOverlay(props: {
   // server-side; aquí sólo van pagos + intents + externalId de
   // idempotencia). tableId acompaña al item del outbox para que el
   // mapa local bloquee la mesa mientras el cobro esté en tránsito.
-  tableTicketId?: string | null;
+  draftTicketId?: string | null;
   tableId?: string | null;
   // v1.8-Fiado · si el tenant tiene la venta a crédito activada, se
   // muestra el botón "Fiado" (sólo en venta rápida, no en mesa).
@@ -105,17 +105,26 @@ export function CheckoutOverlay(props: {
   // v1.9.2-mesas-concurrencia · Frente 1.4/2: refetch de la proyección
   // del DRAFT de mesa. Se llama tras PAYMENTS_MISMATCH (otra caja cambió
   // la cuenta) para recalcular el total del modal in situ.
-  onRefetchTable?: () => Promise<void>;
+  onRefetchDraft?: () => Promise<void>;
   // Frente 2: 409 TICKET_ALREADY_PAID — la mesa la cobró otra caja.
   // El modal se cierra y el padre sale al mapa con banner.
-  onTableClosedElsewhere?: (notice: string) => void;
+  onDraftClosedElsewhere?: (notice: string) => void;
   // Frente 3.1: cobro de mesa OK → salir directo al mapa con banner de
   // éxito (sustituye al modal "Ticket emitido" sólo en contexto mesa).
-  onTablePaidExit?: (opts: {
-    notice: string;
+  //
+  // B-reservas-5 F2 · el AVISO lo redacta quien llama, no el modal de
+  // cobro. El núcleo no sabe si lo que acaba de cobrarse era una mesa,
+  // una cita o cualquier otro borrador (ADR-R8: cero vocabulario de
+  // vertical en el núcleo); sí sabe el número de ticket, que es lo que
+  // hace falta para redactarlo.
+  onDraftPaidExit?: (opts: {
+    internalNumber: string | null;
     ticketId: string;
     ticketQuery: string | null;
   }) => void;
+  // Etiqueta del item del outbox mientras el cobro está en tránsito
+  // ("Mesa", "Cita"…). Sin ella se cae al copy por vertical de siempre.
+  draftLabel?: string;
   onClose: () => void;
   onConfirmed: () => void;
 }) {
@@ -322,14 +331,12 @@ export function CheckoutOverlay(props: {
   useEffect(() => {
     if (
       confirmed?.kind === "synced" &&
-      props.tableTicketId &&
-      props.onTablePaidExit
+      props.draftTicketId &&
+      props.onDraftPaidExit
     ) {
       const internal = confirmed.res.ticket.internalNumber;
-      props.onTablePaidExit({
-        notice: internal
-          ? `Mesa cobrada · Ticket ${internal}`
-          : "Mesa cobrada",
+      props.onDraftPaidExit({
+        internalNumber: internal ?? null,
         ticketId: confirmed.res.ticket.id,
         ticketQuery: internal ?? null,
       });
@@ -498,10 +505,10 @@ export function CheckoutOverlay(props: {
       // Mesa: el DRAFT ya tiene las líneas en el servidor; el checkout
       // sólo manda pagos + intents (+ externalId de idempotencia, Lote 2
       // v1.0-mesas-frontend). Venta rápida: POST /tickets con todo.
-      const path = props.tableTicketId
-        ? `/tickets/${props.tableTicketId}/checkout`
+      const path = props.draftTicketId
+        ? `/tickets/${props.draftTicketId}/checkout`
         : "/tickets";
-      const body = props.tableTicketId
+      const body = props.draftTicketId
         ? commonFields
         : {
             ...commonFields,
@@ -524,11 +531,8 @@ export function CheckoutOverlay(props: {
             body,
             label: isCredit
               ? "Fiado"
-              : props.tableTicketId
-                ? "Mesa"
-                : props.businessType === "SERVICES"
-                  ? "Servicio"
-                  : "Venta",
+              : (props.draftLabel ??
+                (props.businessType === "SERVICES" ? "Servicio" : "Venta")),
             total,
             tableId: props.tableId ?? undefined,
           },
@@ -559,12 +563,12 @@ export function CheckoutOverlay(props: {
         // (el ticket ya existe en el server, no hay que reintentar).
         if (
           err.code === "TICKET_ALREADY_PAID" &&
-          props.tableTicketId &&
-          props.onTableClosedElsewhere
+          props.draftTicketId &&
+          props.onDraftClosedElsewhere
         ) {
           await outboxDelete(externalIdRef.current).catch(() => {});
           setSubmitting(false);
-          props.onTableClosedElsewhere(
+          props.onDraftClosedElsewhere(
             "Esta mesa ya fue cobrada desde otra caja",
           );
           return;
@@ -576,12 +580,12 @@ export function CheckoutOverlay(props: {
         // el flag por si el total refetcheado coincide).
         if (
           err.code === "PAYMENTS_MISMATCH" &&
-          props.tableTicketId &&
-          props.onRefetchTable
+          props.draftTicketId &&
+          props.onRefetchDraft
         ) {
           await outboxDelete(externalIdRef.current).catch(() => {});
           setServerMismatch(true);
-          await props.onRefetchTable().catch(() => {});
+          await props.onRefetchDraft().catch(() => {});
           setSubmitting(false);
           return;
         }
@@ -658,7 +662,7 @@ export function CheckoutOverlay(props: {
       // Frente 3.1: mesa → sin modal de éxito (el efecto de arriba ya
       // disparó la salida al mapa con banner). Render vacío mientras el
       // padre desmonta la SalePage.
-      if (props.tableTicketId && props.onTablePaidExit) return null;
+      if (props.draftTicketId && props.onDraftPaidExit) return null;
       return (
         <SuccessOverlay
           ticketId={confirmed.res.ticket.id}
@@ -1150,7 +1154,7 @@ export function CheckoutOverlay(props: {
           {/* v1.8-Fiado · venta a crédito. Sólo venta rápida (no mesa) y
               sólo con el flag activado. El cliente se lleva el género y
               paga otro día; la deuda se cobra desde la pantalla Deudas. */}
-          {props.creditSalesEnabled && !props.tableTicketId && (
+          {props.creditSalesEnabled && !props.draftTicketId && (
             <button
               onClick={() => submit(undefined, { credit: true })}
               disabled={submitting}

@@ -9,7 +9,7 @@
 //   - Cabecera de sala: "N abiertas · M libres · X,XX € en sala".
 //   - Botón «Cobrar X €» SÓLO en BILLING, que abre el modal de cobro
 //     (CheckoutOverlay) con la proyección FRESCA del DRAFT (GET
-//     /tickets/:id) — mismo tableTicketId/tableId, total recalculado.
+//     /tickets/:id) — mismo draftTicketId/tableId, total recalculado.
 //   - Gate del componente: sin mesas → EmptyState.
 //   - Barra ordenada por barSeatIndex.
 
@@ -322,7 +322,7 @@ describe("TableMapScreen · lienzo visual", () => {
 
     expect(apiMock.apiWithCashier).toHaveBeenCalledWith("/tickets/tk-M3");
     expect(checkoutMock.mounts).toBeGreaterThan(0);
-    expect(checkoutMock.props?.tableTicketId).toBe("tk-M3");
+    expect(checkoutMock.props?.draftTicketId).toBe("tk-M3");
     expect(checkoutMock.props?.tableId).toBe("M3");
     // Total recalculado desde el DRAFT fresco (línea 10,00 sin IVA), NO
     // el 9,99 del listado.

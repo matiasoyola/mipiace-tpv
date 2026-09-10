@@ -2104,16 +2104,17 @@ export function SalePage(props: SalePageProps) {
           // (el DRAFT ya tiene las líneas server-side). tableId viaja al
           // outbox para bloquear la mesa local si el cobro queda en
           // tránsito sin red.
-          tableTicketId={isTableMode ? activeTicketId : null}
+          draftTicketId={isTableMode ? activeTicketId : null}
+          draftLabel={isTableMode ? "Mesa" : undefined}
           tableId={isTableMode ? tableContext?.id : null}
           creditSalesEnabled={creditSalesEnabled}
           // v1.9.2-mesas-concurrencia · Frente 2: si el server rechaza el
           // cobro con PAYMENTS_MISMATCH (otra caja cambió la cuenta), el
           // modal refetchea la proyección y recalcula el total in situ.
-          onRefetchTable={isTableMode ? reloadTableDraft : undefined}
+          onRefetchDraft={isTableMode ? reloadTableDraft : undefined}
           // 409 TICKET_ALREADY_PAID: doble cobro físico. Cerrar modal y
           // salir al mapa con banner — nunca dejarlo mudo.
-          onTableClosedElsewhere={
+          onDraftClosedElsewhere={
             isTableMode
               ? (text) => exitToMap({ text, tone: "info" })
               : undefined
@@ -2121,14 +2122,18 @@ export function SalePage(props: SalePageProps) {
           // Frente 3.1: tras cobrar la mesa, cerrar directo al mapa con
           // banner de confirmación (sustituye al modal "Ticket emitido"
           // sólo en contexto mesa). "Ver ticket" abre el detalle.
-          onTablePaidExit={
+          onDraftPaidExit={
             isTableMode
-              ? ({ notice, ticketQuery }) => {
+              ? ({ internalNumber, ticketQuery }) => {
                   setTableLines([]);
                   setContact(null);
                   setNotes("");
+                  // B-reservas-5 F2 · el aviso lo redacta quien sabe qué
+                  // se cobró. Aquí siempre es una mesa.
                   exitToMap({
-                    text: notice,
+                    text: internalNumber
+                      ? `Mesa cobrada · Ticket ${internalNumber}`
+                      : "Mesa cobrada",
                     tone: "success",
                     ticketQuery,
                   });
