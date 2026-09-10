@@ -88,7 +88,20 @@ function correr(cmd: string, cwd: string, env: NodeJS.ProcessEnv): void {
     cwd,
     encoding: "utf8",
     timeout: 600_000,
-    env,
+    // B-reservas-5 Frente B · NODE_ENV=production, explícito.
+    //
+    // Vitest exporta `NODE_ENV=test` y aquí se reenviaba el entorno tal
+    // cual. Vite RESPETA un `NODE_ENV` ya fijado e inlinea
+    // `process.env.NODE_ENV`, así que el bundle salía con React en modo
+    // DESARROLLO dentro: ~520 kB de más, por encima del límite de
+    // precache de workbox (2 MiB), y `vite-plugin-pwa` abortaba el build
+    // con código 1. El fichero entero se caía en el `beforeAll` y sus
+    // diez tests quedaban `skipped` — un test que no mira nada.
+    //
+    // Ese artefacto no se despliega jamás. Este fichero existe para
+    // afirmar sobre EL BUNDLE REAL (ver la cabecera), y el bundle real
+    // lo construye `pnpm build` desde una shell, sin `NODE_ENV` puesto.
+    env: { ...env, NODE_ENV: "production" },
   });
   if (r.status !== 0) {
     throw new Error(
@@ -240,5 +253,32 @@ describe("A4 · regresión cero en la web", () => {
   it("el sw.js de la web precachea los assets", () => {
     const sw = readFileSync(join(DIST_WEB, "sw.js"), "utf8");
     expect(sw).toContain("precache");
+  });
+
+  // B-reservas-5 Frente B · la promesa de offline, comprobada de verdad.
+  //
+  // "El sw.js contiene la palabra precache" pasa igual con el precache
+  // vacío. Workbox deja FUERA cualquier asset que se pase de
+  // `maximumFileSizeToCacheInBytes` (2 MiB por defecto) y sigue emitiendo
+  // su sw.js: la PWA se instala, arranca con red y se queda en blanco sin
+  // ella. Es exactamente lo que pasaba con el bundle que este fichero
+  // construía antes de fijar NODE_ENV, y nadie lo miraba.
+  //
+  // SABOTAJE, comprobado: quitar `js` de `workbox.globPatterns` en
+  // apps/tpv-web/vite.config.ts. El sw.js se emite igual, sigue diciendo
+  // "precache" —el test de arriba se queda VERDE— y el JS principal ya no
+  // está dentro. Sólo esta aserción se pone roja.
+  //
+  // El otro camino, bajar `maximumFileSizeToCacheInBytes` por debajo del
+  // peso del bundle, NO sirve como sabotaje de esta línea: vite-plugin-pwa
+  // aborta el build con código 1 y el fichero entero muere en el
+  // `beforeAll`. Es el fallo que este frente venía a diagnosticar.
+  it("el sw.js de la web precachea el JS principal", () => {
+    const sw = readFileSync(join(DIST_WEB, "sw.js"), "utf8");
+    const principal = readdirSync(join(DIST_WEB, "assets")).find((f) =>
+      /^index-.*\.js$/.test(f),
+    );
+    expect(principal, "no se emitió ningún assets/index-*.js").toBeTruthy();
+    expect(sw).toContain(principal!);
   });
 });
