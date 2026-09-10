@@ -26,7 +26,9 @@ Es el bloqueante que impedía encender `agendaEnabled` a Sole.
 | `COMPLETED` automático al cobrar, degradable y con outbox | `App.tsx` · `lib/agenda.ts` · `lib/outbox.ts` |
 | Una cita ya cobrada no se vuelve a cobrar (409) | `apps/api/src/agenda/checkout.ts` |
 | Censo de borradores huérfanos (**sólo cuenta**) | `apps/api/src/scripts/audit-appointment-drafts.ts` |
+| **El cobro de un borrador va al turno de su instante** | `apps/api/src/tickets/routes.ts` · `shift/impute.ts` |
 | El camino contra Postgres real | `apps/api/test-e2e/cita-a-caja.e2e.ts` |
+| El turno del cobro contra Postgres real | `apps/api/test-e2e/cita-y-turno.e2e.ts` |
 | El camino en el front | `apps/tpv-web/test/cita-sale-flow.test.tsx` |
 | Banco visual con datos de peluquería y reloj congelado | `apps/tpv-web/visual/main.tsx` |
 
@@ -136,6 +138,74 @@ cobro **dice por qué** no está el botón, en vez de esconderlo.
 propio (§2.1), la agenda **no** pasa a ser la pantalla de aterrizaje de `SERVICES` (§8), y un solo
 camino para abrir un borrador (§2.2).
 
+### 2.12 El cobro de un borrador se imputa al turno de **su instante**, no al del papel
+
+Añadido después del cierre inicial (Frente T). Era el filo que §4.6 daba por conocido, y resultó
+ser **una regresión de este bloque**, no un preexistente:
+
+- Antes de B-5 la cita cobraba por `POST /tickets`, que **sí** imputa el turno por `occurredAt`
+  desde v1.11 (`resolveShiftForSale`). B-5 la pasó a `POST /tickets/:id/checkout`, que no imputaba:
+  el borrador fija `shiftId` **al abrirse** (`agenda/checkout.ts`) y el checkout sólo tocaba
+  `lastActivityAt` de `draft.shiftId`.
+- El camino real de Sole lo cruza siempre: no cierra el turno a mano, lo cierra al día siguiente
+  para poder abrir. El corte de las 05:00 (`Tenant.dayCutHour`, `AUTO_DAY_CUT`) se lo cierra solo y
+  archiva el Z, y §2.5 deja vivo el borrador de la cita al "Volver a la agenda". "Cobrar en caja" →
+  "Volver a la agenda" → corte → cobro al día siguiente: la venta se sellaba (S1) **en el turno de
+  ayer, con el Z ya archivado y sin Z correctivo**, y el arqueo de hoy esperaba menos efectivo del
+  que hay en el cajón. Sólo se corregía por `ticket_corrections`.
+- **El cliente ya mandaba el instante y el servidor lo tiraba en silencio.** `outboxAdd` sella
+  `occurredAt` para `kind: "ticket"` y el checkout de borrador se encola con ese `kind`; el schema
+  del checkout tenía `additionalProperties: false` sin `occurredAt`, y el `removeAdditional` por
+  defecto de Fastify lo borraba antes de que nadie lo viera.
+
+Qué se hizo, en el único camino que hay:
+
+- `occurredAt` opcional en el schema de `POST /tickets/:id/checkout`.
+- `resolveShiftForSale` **dentro de la tx y después del claim del `DRAFT`**. Fuera de la tx habría
+  una ventana en la que el turno se cierra entre la lectura y la escritura, y el ticket acabaría
+  sellado en un turno que la resolución ya no vio. `shift_id` se escribe en el ticket —es legal, el
+  `DRAFT` no está sellado y el guardián de S1 sólo mira filas con `sealed_at`—, `lastActivityAt` va
+  a **ese** turno, y fuera de la tx quedan el log `ticket.shift_imputed` y `markZReportStale`,
+  exactamente como en `POST /tickets`.
+- **Vale para todo borrador, mesa y cita.** No hay vocabulario de vertical aquí: es un solo camino
+  de cobro y la regla de v1.11 es que una venta va al turno de su instante. Ningún test de mesa
+  afirmaba lo contrario.
+- `SHIFT_NOT_OPEN` (el turno del borrador lo cerró **una persona** y no hay otro abierto) aborta la
+  tx entera: el `DRAFT` sigue `DRAFT`, con sus líneas, **sin quemar número de serie**, y la cita
+  sigue enlazada. El copy dice qué hacer — "No hay turno abierto en esta caja. **Abre turno para
+  cobrar.**" — y es el mismo en cita y en mesa porque es el mismo endpoint.
+
+`resolveShiftForSale` pasa a tipar su cliente como `ShiftReaderClient` (`Pick<PrismaClient,
+"shift">`) para aceptar también el cliente de una transacción interactiva.
+
+### 2.13 `infra/bundle-android` construía un bundle que no se despliega
+
+Añadido después del cierre inicial (Frente B). El done decía "preexistente, comprobado con
+`git stash`" — y `git stash` no quita commits, así que eso no demostraba nada. Comprobado como
+toca, en un worktree detached sobre `cb468bd` con `pnpm install --frozen-lockfile`:
+
+| | JS principal, build de despliegue | JS principal, build **como lo hacía el test** | `infra/bundle-android` |
+|---|---|---|---|
+| `cb468bd` | 1.580,55 kB | 2.250,38 kB | 🔴 |
+| `reservas-5-cita-caja` | 1.583,36 kB | 2.103,07 kB | 🔴 |
+
+**Preexistente**, ahora sí demostrado. B-5 añade 2,8 kB al bundle real y en el camino del test lo
+deja 147 kB **más pequeño** que master.
+
+Y el rojo no era el peso del código. Vitest exporta `NODE_ENV=test`; `correr()` reenviaba
+`process.env` tal cual; Vite **respeta un `NODE_ENV` ya fijado** e inlinea `process.env.NODE_ENV`,
+así que el bundle salía con **React en modo desarrollo dentro** (~520 kB de más), cruzaba los 2 MiB
+de precache de workbox, `vite-plugin-pwa` abortaba el build con código 1, el fichero moría en el
+`beforeAll` y sus diez tests quedaban `skipped`. Un test que no miraba nada.
+
+**Ese artefacto no se despliega jamás.** El `sw.js` del build real precachea su `index-*.js`: la vía
+navegador **no** había perdido el offline.
+
+- `correr()` fija `NODE_ENV=production`. **No se ha tocado** `maximumFileSizeToCacheInBytes`.
+- Aserción nueva: el `sw.js` de la web **nombra el JS principal** en su precache. La de antes ("el
+  `sw.js` contiene la palabra `precache`") pasa igual con el precache vacío, que es exactamente
+  cómo se pierde el offline sin que nadie se entere.
+- Los diez tests que estaban `skipped` **pasan y no destapan nada**.
 ---
 
 ## 3 · Sabotaje → test rojo
@@ -154,6 +224,17 @@ Los diez sabotajes se **aplicaron de verdad** sobre el código, se corrió la su
 | 8 | El censo mezcla las dos poblaciones | e2e cita **8** — **sólo tras añadir el caso de población B** |
 | 9 | El outbox vuelve a POST-only | `outbox.test` — **sólo tras escribir el test** |
 | 10 | El censo empareja sin mirar el importe | **NADA** — declarado en §4 |
+| 11 | El cobro de borrador vuelve a usar el turno del borrador (§2.12 fuera) | e2e turno **1 y 2** |
+| 12 | `occurredAt` sale del schema del checkout (Fastify lo tira otra vez) | e2e turno **2** |
+| 13 | El 409 pierde el "qué hacer" (`"El turno no está abierto en esta caja."`) | e2e turno **3 y 4** |
+| 14 | `js` fuera de `workbox.globPatterns` (el JS sale del precache) | `bundle-android` — **sólo la aserción nueva**; los diez viejos siguen verdes |
+
+Los cuatro últimos se aplicaron igual: sobre el código, con la suite corrida y revertidos. El **14**
+es el que justifica su aserción: con el JS fuera del precache, `el sw.js de la web precachea los
+assets` —el test que ya existía— **sigue en verde**, porque el `sw.js` contiene la palabra
+`precache` con el precache vacío. Bajar `maximumFileSizeToCacheInBytes` NO sirve como sabotaje de
+esa línea: `vite-plugin-pwa` aborta el build y el fichero entero muere en el `beforeAll`, que es el
+fallo que §2.13 venía a diagnosticar.
 
 **Tres sabotajes no pusieron nada rojo la primera vez.** Eso es el valor del ejercicio, no un
 trámite:
@@ -186,10 +267,14 @@ Escrito para que nadie lo confunda con lo que sí cubre.
 5. **`REGISTER_MISMATCH` en cita.** El borrador se crea con la caja de quien pulsó "Cobrar en caja"
    y el checkout exige que coincida. En un centro con dos cajas, quien abre el cobro es quien lo
    cierra. Sole tiene una: no bloquea, y no hay test.
-6. **La ventana larga del borrador de cita y `shift_id`.** `shift_id` es columna sellada (S1 §2.4) y
-   el borrador fija su turno **al abrirse**, no al cobrarse. Si el turno se cierra en medio, la
-   venta se sella en el turno viejo y ya no se corrige sin `ticket_corrections`. Con mesas pasaba
-   igual; con citas la ventana es más ancha por diseño. **No lo arregla este bloque.**
+6. ~~**La ventana larga del borrador de cita y `shift_id`.**~~ **ARREGLADO** (§2.12). Era una
+   regresión de este bloque, no un filo preexistente: antes de B-5 la cita cobraba por
+   `POST /tickets`, que imputa el turno por `occurredAt` desde v1.11. Ahora el cobro de **cualquier**
+   borrador —mesa y cita— resuelve el turno con la misma regla dentro de la tx, escribe `shift_id`
+   antes del sello, y emite Z correctivo si entra en un turno ya cerrado. Cubierto por
+   `cita-y-turno.e2e.ts` (5 tests) y por los sabotajes 11, 12 y 13. Lo que sigue **sin** cubrir de
+   este filo: el reintento del outbox subiendo el cobro *de verdad* al reconectar (punto 4 de esta
+   misma lista) — aquí el `occurredAt` se inyecta en el cuerpo, no lo sella un outbox real.
 7. **El orden de las líneas de un ticket no está definido en ninguna parte.** `ticketInclude()` pide
    `lines: true` sin `orderBy` y `ticket_lines` no tiene columna de orden, así que el `sortOrder`
    del visit no llega al ticket. Preexistente y de toda venta.
@@ -293,6 +378,7 @@ producto y va en su propio bloque.
 docs/blocks/reservas-5-reconciliacion.md            el Frente 0
 apps/api/src/scripts/audit-appointment-drafts.ts    censo de huérfanos (sólo cuenta)
 apps/api/test-e2e/cita-a-caja.e2e.ts                el camino contra Postgres real (8)
+apps/api/test-e2e/cita-y-turno.e2e.ts               el turno del cobro contra Postgres real (5)
 apps/tpv-web/test/cita-sale-flow.test.tsx           el cobro de la cita en el front (4)
 docs/blocks/reservas-5-shots/                       11 capturas
 ```
@@ -312,7 +398,10 @@ apps/tpv-web/src/lib/outbox.ts              OutboxItem.method (ausente = POST)
 apps/tpv-web/visual/main.tsx                banco: peluquería, reloj congelado, error
 apps/api/src/agenda/checkout.ts             la cita cobrada no se vuelve a cobrar
 apps/api/src/agenda/routes.ts               ticketId en el 409
+apps/api/src/tickets/routes.ts              el cobro de borrador imputa turno (§2.12)
+apps/api/src/shift/impute.ts                ShiftReaderClient (vale el cliente de una tx)
 apps/api/package.json                       audit:appointment-drafts
+infra/test/bundle-android.test.ts           NODE_ENV=production + precache del JS (§2.13)
 ```
 
 **Tests tocados** (renames mecánicos, cero expectativas cambiadas salvo donde se dice)
@@ -322,6 +411,7 @@ apps/tpv-web/test/table-map-visual.test.tsx    la línea que afirma sobre el nom
 apps/tpv-web/test/mesas-concurrencia.test.tsx  + 6 ficheros más: initialTableLines → initialDraftLines
 apps/tpv-web/test/outbox.test.ts               + el test del method
 apps/api/test/agenda-checkout.test.ts          + el test de la cita ya cobrada
+apps/api/test/checkout-idempotency.test.ts    el fake prisma necesita shift.findFirst (§2.12)
 ```
 
 ---
@@ -340,13 +430,19 @@ apps/api/test/agenda-checkout.test.ts          + el test de la cita ya cobrada
 | Script de auditoría que sólo cuenta | ✅ y ejecutado de verdad dentro del e2e |
 | Camino de cobro a Holded intacto | ✅ §6 |
 | Bucle visual 1280/390/320 + error | ✅ §5 |
-| Tabla de sabotaje con sabotajes reales | ✅ §3, 10 sabotajes, 3 huecos destapados |
-| Test contra Postgres real | ✅ 8 tests |
+| Tabla de sabotaje con sabotajes reales | ✅ §3, 14 sabotajes, 3 huecos destapados |
+| Test contra Postgres real | ✅ 13 tests (8 del camino + 5 del turno) |
+| El cobro va al turno de su instante | ✅ §2.12 · e2e turno 1, 2, 3 y 4 |
+| `infra/bundle-android` | ✅ §2.13 — era el entorno del test, no el bundle |
 | **Verificado en hierro** | ❌ pendiente (§7.1) |
 
-Suite: **176/177 ficheros, 1553 tests verdes**. El único rojo es `infra/bundle-android`, y es
-**preexistente** (el bundle pesa 2,1 MB y se pasa del límite de precache de workbox; comprobado con
-`git stash`). e2e: **3 ficheros, 30 tests**. `tsc --noEmit` limpio en api, tpv-web y admin.
+Suite: **177/177 ficheros, 1564 tests verdes**, 3 saltados. Sin rojos: los diez de
+`infra/bundle-android` que estaban `skipped` pasan (§2.13) y no destapan nada. e2e: **4 ficheros,
+35 tests**. `tsc --noEmit` limpio en api, tpv-web y admin.
+
+Los e2e de este bloque se corrieron contra una base propia
+(`E2E_DATABASE_URL=…/mipiacetpv_r5_e2e`) para no pisar la de otra sesión: la suite hace
+`DROP SCHEMA public` sobre la que le den.
 
 **Nota de método:** la suite de tpv-web **no está rota en este Mac**.
 `pnpm --filter @mipiacetpv/tpv-web test` corre `vitest` dentro del paquete y no ve el
@@ -369,10 +465,13 @@ aed9945  feat(reservas-5): la cita se finaliza sola al cobrarse
 b648708  test(reservas-5): el camino cita -> ticket contra Postgres real
 56a4486  test(reservas-5): tabla de sabotaje, y los tres huecos que destapo
 aee1b70  fix(reservas-5): bucle visual · lo que las capturas destaparon
+6eddc53  docs(reservas-5): done · decisiones, sabotaje, capturas y siguiente bloque
+72e6691  fix(reservas-5): el cobro de un borrador va al turno de su instante   ← Frente T
+e217a35  fix(reservas-5): infra/bundle-android construia un bundle que no se despliega   ← Frente B
 ```
 
-Último commit de código: **`aee1b70e024332fc9b248aac0cd2f93e9ac2b2cc`**
-(`fix(reservas-5): bucle visual · lo que las capturas destaparon`).
+Último commit de código: **`e217a35`**
+(`fix(reservas-5): infra/bundle-android construia un bundle que no se despliega`).
 Este documento va encima, en `docs(reservas-5): done · …`.
 
 ---
