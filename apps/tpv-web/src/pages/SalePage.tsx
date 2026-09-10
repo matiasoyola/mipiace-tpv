@@ -312,6 +312,9 @@ export interface SalePageProps {
   appointmentContext?: AppointmentContext | null;
   // Vuelta a la agenda tras cerrar el cobro de una cita.
   onBackToAgenda?: () => void;
+  // B-reservas-5 F4 · la cita acaba de cobrarse. Quien manda en la
+  // agenda (`App`) es quien la marca COMPLETED.
+  onAppointmentPaid?: (appointmentId: string) => void;
   // B-reservas-5 F1 · la agenda subió a `App` (vista hermana del mapa de
   // sala). Esta pantalla conserva el gate `agendaEnabled` del botón y
   // sólo avisa hacia arriba; quien la pinta es `App`.
@@ -2128,6 +2131,11 @@ export function SalePage(props: SalePageProps) {
           draftTicketId={isDraftMode ? activeTicketId : null}
           draftLabel={
             isTableMode ? "Mesa" : appointmentContext ? "Cita" : undefined
+          }
+          onPaid={
+            appointmentContext
+              ? () => props.onAppointmentPaid?.(appointmentContext.appointmentId)
+              : undefined
           }
           creditUnavailableReason={
             appointmentContext

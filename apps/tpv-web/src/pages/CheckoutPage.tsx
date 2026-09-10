@@ -125,6 +125,10 @@ export function CheckoutOverlay(props: {
   // Etiqueta del item del outbox mientras el cobro está en tránsito
   // ("Mesa", "Cita"…). Sin ella se cae al copy por vertical de siempre.
   draftLabel?: string;
+  // B-reservas-5 F4 · el cobro se ha confirmado: o lo aceptó el servidor,
+  // o quedó persistido en el outbox (offline). En los dos casos la venta
+  // ocurrió; lo que cuelgue de aquí NO puede condicionar el cobro.
+  onPaid?: () => void;
   // Por qué no hay "Fiado" en este cobro, cuando el tenant lo tiene
   // activado. Sólo se pinta en contexto de borrador; sin motivo, no se
   // dice nada (mesa nunca lo ofreció y no hay nada que explicar).
@@ -345,6 +349,18 @@ export function CheckoutOverlay(props: {
         ticketQuery: internal ?? null,
       });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [confirmed]);
+
+  // B-reservas-5 F4 · aviso de "esto ya está cobrado" para quien tenga
+  // algo que hacer después (marcar la cita COMPLETED). Se dispara con
+  // `confirmed` puesto, que cubre las dos salidas buenas: `synced` (el
+  // servidor lo aceptó) y la del outbox (sin red, la venta está a salvo
+  // en la cola). Una sola vez por cobro.
+  const onPaid = props.onPaid;
+  useEffect(() => {
+    if (!confirmed) return;
+    onPaid?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [confirmed]);
 

@@ -310,6 +310,53 @@ export async function checkoutAppointmentTicket(
   }
 }
 
+// B-reservas-5 F4 · la cita se finaliza sola al cobrarse.
+//
+// Se hace en el FRONT a propósito: engancharlo dentro de
+// `POST /tickets/:id/checkout` metería la agenda dentro del camino de
+// cobro, que es justo lo que prohíben ADR-010 y ADR-R8 §5 (el motor
+// alimenta ese camino, no lo toca). El front ya sabe que está en
+// contexto de cita; que lo diga él.
+//
+// EL DINERO MANDA: si esto falla, el cobro sigue siendo válido. Un 4xx
+// se devuelve para avisar (y queda "Finalizar" a mano en el detalle);
+// una caída de red se encola en el outbox como PATCH y se reintenta al
+// reconectar. Lo que no puede pasar es que se pierda en silencio.
+//
+// `PATCH { status: COMPLETED }` es idempotente por naturaleza: repetirlo
+// deja la cita como ya estaba, así que el reintento del outbox no
+// necesita un externalId que el server conozca.
+export async function completeAppointment(
+  id: string,
+): Promise<
+  | { ok: true; queuedOffline?: boolean }
+  | { ok: false; error: string; message: string }
+> {
+  try {
+    await apiWithCashier(`/agenda/appointments/${id}`, {
+      method: "PATCH",
+      body: { status: "COMPLETED" },
+    });
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+      // Error de negocio (la cita ya no existe, estado no permitido): no
+      // va al outbox, reintentarlo daría el mismo 4xx para siempre.
+      return { ok: false, error: err.code ?? "ERROR", message: err.message };
+    }
+    await outboxAdd({
+      externalId: newId(),
+      kind: "appointment",
+      method: "PATCH",
+      path: `/agenda/appointments/${id}`,
+      body: { status: "COMPLETED" },
+      label: "Cita finalizada",
+      total: 0,
+    });
+    return { ok: true, queuedOffline: true };
+  }
+}
+
 // ── Helpers de presentación ───────────────────────────────────────────
 
 export const STATUS_LABEL: Record<AppointmentStatus, string> = {

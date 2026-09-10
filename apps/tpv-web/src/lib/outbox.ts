@@ -61,6 +61,11 @@ export interface OutboxItem {
   // "/tickets", "/refunds" o "/tickets/:id/checkout" (v1.0-mesas-frontend:
   // el cobro de mesa también pasa por el outbox).
   path: string;
+  // B-reservas-5 F4 · el outbox nació POST-only porque todo lo que
+  // llevaba eran altas. Marcar una cita COMPLETED es un PATCH. Los items
+  // ya persistidos no llevan el campo, así que la ausencia significa
+  // POST y no hace falta subir la versión de la BD.
+  method?: "POST" | "PATCH";
   body: Record<string, unknown>;
   // Para pintar el item en el chip de pendientes sin parsear el body.
   label: string;
@@ -213,6 +218,7 @@ export async function outboxAdd(
     body: Record<string, unknown>;
     label: string;
     total: number;
+    method?: "POST" | "PATCH";
     tableId?: string;
     // v1.10-offline: explícito para las operaciones de turno
     // (shift-open/cash-count). Para tickets se auto-deduce del
@@ -415,7 +421,7 @@ async function sendItem(
 ): Promise<{ resolvedShiftLocalId?: string } | void> {
   try {
     const response = await apiWithCashier<unknown>(item.path, {
-      method: "POST",
+      method: item.method ?? "POST",
       body: item.body,
     });
     // 201 creado o 200 duplicate:true — en ambos casos el servidor

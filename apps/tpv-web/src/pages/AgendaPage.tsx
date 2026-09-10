@@ -145,6 +145,11 @@ export interface AgendaPageProps {
   // existe (`tableDraft.ts::mapServerDraftLines`). Aquí no se escribe un
   // segundo mapper: el que había era una copia y ya había divergido
   // (perdía `holdedProductId`).
+  // B-reservas-5 F4 · aviso que traer puesto al abrir (p.ej. "el cobro
+  // se hizo bien pero la cita no se pudo finalizar"). Se enseña con el
+  // toast que ya existe y se consume una sola vez.
+  notice?: string | null;
+  onNoticeShown?: () => void;
   onEnterDraft?: (entry: {
     appointmentId: string;
     ticketId: string;
@@ -153,7 +158,12 @@ export interface AgendaPageProps {
   }) => void;
 }
 
-export function AgendaPage({ onClose, onEnterDraft }: AgendaPageProps) {
+export function AgendaPage({
+  onClose,
+  onEnterDraft,
+  notice,
+  onNoticeShown,
+}: AgendaPageProps) {
   const [date, setDate] = useState<string>(todayLocalDate());
   const [day, setDay] = useState<AgendaDay | null>(null);
   const [loading, setLoading] = useState(true);
@@ -194,6 +204,18 @@ export function AgendaPage({ onClose, onEnterDraft }: AgendaPageProps) {
   useEffect(() => {
     void loadDay(date);
   }, [date, loadDay]);
+
+  // B-reservas-5 F4 · el aviso que viene de fuera (el cobro que no pudo
+  // finalizar la cita) se enseña al abrir, que es cuando la cajera tiene
+  // delante el botón "Finalizar".
+  useEffect(() => {
+    if (!notice) return;
+    setToast(notice);
+    const t = window.setTimeout(() => setToast(null), 6000);
+    onNoticeShown?.();
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notice]);
 
   useEffect(() => {
     void loadCatalogFromCache().then(setServices);

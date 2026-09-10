@@ -62,6 +62,7 @@ import {
 // B-reservas-5 F1 · la agenda es una vista hermana del mapa de sala: la
 // pinta quien manda en la navegación, no la pantalla de venta.
 import { AgendaPage } from "./pages/AgendaPage.js";
+import { completeAppointment } from "./lib/agenda.js";
 import { CloseShiftModal } from "./pages/CloseShiftModal.js";
 import { DaySummaryCard } from "./pages/DaySummaryCard.js";
 import { daySummaryTitle } from "./lib/daySummaryTitle.js";
@@ -546,6 +547,10 @@ export function TpvHome(props: {
   // sube aquí sin tocar el componente ni su aspecto (es un overlay
   // `fixed inset-0`, se pinta igual colgado de un sitio que del otro).
   const [showAgenda, setShowAgenda] = useState(false);
+  // B-reservas-5 F4 · aviso que la agenda enseña al abrirse. Se usa
+  // cuando el paso a COMPLETED no salió: el cobro es válido igual y la
+  // cajera tiene que saber que le queda pulsar "Finalizar".
+  const [agendaNotice, setAgendaNotice] = useState<string | null>(null);
 
   // B-reservas-5 F3 · LA entrada al contexto de borrador. Una sola
   // función, porque aquí es donde vive el cambio de vista — igual que
@@ -732,6 +737,8 @@ export function TpvHome(props: {
     <>
       {showAgenda && (
         <AgendaPage
+          notice={agendaNotice}
+          onNoticeShown={() => setAgendaNotice(null)}
           onClose={() => setShowAgenda(false)}
           // B-reservas-5 F3 · cobrar una cita entra en contexto de
           // borrador por la MISMA puerta que abrir una mesa. No se
@@ -766,6 +773,22 @@ export function TpvHome(props: {
         onBackToAgenda={() => {
           setView({ kind: "sale", tableContext: null });
           setShowAgenda(true);
+        }}
+        // B-reservas-5 F4 · la cita se finaliza sola al cobrarse. EL
+        // DINERO MANDA: esto corre DESPUÉS del cobro y no puede tumbarlo.
+        // Si falla, se avisa y queda "Finalizar" a mano en el detalle.
+        onAppointmentPaid={(appointmentId) => {
+          void completeAppointment(appointmentId).then((res) => {
+            if (!res.ok) {
+              setAgendaNotice(
+                `El cobro se hizo bien, pero la cita no se pudo marcar como finalizada (${res.message}). Márcala a mano con "Finalizar".`,
+              );
+            } else if (res.queuedOffline) {
+              setAgendaNotice(
+                "Sin conexión: la cita se marcará como finalizada al reconectar.",
+              );
+            }
+          });
         }}
         shiftId={props.shiftId}
         cashierLabel={cashierDisplayLabel(props.cashier)}
