@@ -122,6 +122,9 @@ export function CheckoutOverlay(props: {
     ticketId: string;
     ticketQuery: string | null;
   }) => void;
+  // Etiqueta del botón de salir de "Ticket emitido". Sin ella, el copy
+  // por vertical de siempre.
+  doneLabel?: string;
   // Etiqueta del item del outbox mientras el cobro está en tránsito
   // ("Mesa", "Cita"…). Sin ella se cae al copy por vertical de siempre.
   draftLabel?: string;
@@ -688,6 +691,7 @@ export function CheckoutOverlay(props: {
           ticketId={confirmed.res.ticket.id}
           internalNumber={confirmed.res.ticket.internalNumber}
           cash={cashSummary}
+          doneLabel={props.doneLabel}
           onDone={props.onConfirmed}
         />
       );

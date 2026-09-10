@@ -326,6 +326,18 @@ function freezeClock(): void {
   FrozenDate.parse = RealDate.parse;
   FrozenDate.UTC = RealDate.UTC;
   window.Date = FrozenDate;
+
+  // Con `?congelaAvisos=1` los temporizadores largos (los que apagan
+  // toasts y overlays de éxito) no llegan a disparar. Los avisos duran
+  // 3,5 s y una captura de Playwright tarda más que eso: sin esto, el
+  // estado de error del bucle visual es infotografiable. Sólo el banco.
+  if (new URLSearchParams(window.location.search).get("congelaAvisos") === "1") {
+    const realTimeout = window.setTimeout.bind(window);
+    window.setTimeout = ((fn: TimerHandler, ms?: number, ...rest: unknown[]) => {
+      if ((ms ?? 0) >= 3000) return 0 as unknown as number;
+      return realTimeout(fn, ms, ...rest);
+    }) as typeof window.setTimeout;
+  }
 }
 
 const TZ_MADRID = "Europe/Madrid";
@@ -504,6 +516,10 @@ function cartForAppointment(appointmentId: string): CartLine[] {
       modifiers: [],
     };
   });
+}
+
+function benchFallo(): string | null {
+  return new URLSearchParams(window.location.search).get("fallo");
 }
 
 function isAgendaScreen(): boolean {
@@ -708,6 +724,19 @@ function stubFetch(): void {
     const cita = /^\/agenda\/appointments\/([^/]+)\/checkout$/.exec(path);
     if (cita) {
       const id = cita[1]!;
+      // B-reservas-5 F8 · el estado de error del bucle visual. La cita
+      // ya se cobró: el servidor corta antes de pasear a la cajera por
+      // el modal (F5). `?fallo=cobrada` lo reproduce en el banco.
+      if (benchFallo() === "cobrada") {
+        return new Response(
+          JSON.stringify({
+            error: "APPOINTMENT_ALREADY_PAID",
+            message: "Esta cita ya se cobró.",
+            ticketId: `tk-${id}`,
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
+        );
+      }
       const cart = cartForAppointment(id);
       return new Response(
         JSON.stringify({
@@ -735,8 +764,26 @@ function stubFetch(): void {
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     }
+    // B-reservas-5 F8 · el cobro del borrador de la cita. Devuelve el
+    // ticket emitido para poder fotografiar "Ticket emitido" con la
+    // vuelta de v1.15, que es la razón de que la cita NO herede el
+    // patrón mesa (decisión P1 del bloque).
+    if (/^\/tickets\/[^/]+\/checkout$/.test(path)) {
+      return new Response(
+        JSON.stringify({
+          ticket: {
+            id: "tk-cita",
+            internalNumber: "000042",
+            status: "TEST",
+            holdedDocNumber: null,
+          },
+          syncStatus: "TEST",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
     if (/^\/tickets\/[^/]+\/digital$/.test(path)) {
-      if (!benchScreen().startsWith("ticket-emitido")) {
+      if (!benchScreen().startsWith("ticket-emitido") && !isAgendaScreen()) {
         return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
           status: 404,
           headers: { "Content-Type": "application/json" },

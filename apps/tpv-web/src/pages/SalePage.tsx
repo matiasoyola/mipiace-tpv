@@ -2132,6 +2132,7 @@ export function SalePage(props: SalePageProps) {
           draftLabel={
             isTableMode ? "Mesa" : appointmentContext ? "Cita" : undefined
           }
+          doneLabel={appointmentContext ? "Volver a la agenda" : undefined}
           onPaid={
             appointmentContext
               ? () => props.onAppointmentPaid?.(appointmentContext.appointmentId)
@@ -3353,8 +3354,16 @@ function SaleWorkspace({
           aria-label="Abrir ticket"
           className="flex-1 min-w-0 h-12 rounded-2xl bg-mipiace-ink text-white flex items-center justify-between px-4"
         >
+          {/* B-reservas-5 F8 · en compacto esta barra es lo ÚNICO que se ve
+              del ticket, y en contexto de cita no decía de quién era: la
+              cajera veía una venta cualquiera. La mesa ya llevaba su
+              nombre aquí por la misma razón. */}
           <span className="text-[13px] font-medium truncate">
-            {tableContext ? `Mesa ${tableContext.name} · ` : ""}
+            {tableContext
+              ? `Mesa ${tableContext.name} · `
+              : appointmentContext
+                ? `${appointmentContext.clientName ?? "Cita"} · `
+                : ""}
             {lines.length} {lines.length === 1 ? "línea" : "líneas"}
           </span>
           <span className="text-[18px] font-semibold tabular-nums">

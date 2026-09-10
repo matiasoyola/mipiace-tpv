@@ -41,6 +41,10 @@ const TZ = "Europe/Madrid";
 const dayStartMin = 8 * 60; // 08:00
 const dayEndMin = 21 * 60; // 21:00
 const PX_PER_MIN = 1.1;
+// B-reservas-5 F8 · alto mínimo para que la tarjeta pueda pintar sus dos
+// líneas enteras: 17 (hora + cliente) + 16 (servicios) + 8 de padding.
+// Por debajo de esto se pinta sólo la primera.
+const CARD_TWO_LINE_MIN_H = 41;
 
 const partsFmt = new Intl.DateTimeFormat("en-GB", {
   timeZone: TZ,
@@ -360,18 +364,32 @@ export function AgendaPage({
     <div className="fixed inset-0 z-40 bg-mipiace-stone flex flex-col font-sans">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 md:px-6 h-16 bg-white border-b border-slate-200 shrink-0">
+        {/* B-reservas-5 F8 · `shrink-0`. Sin él, a 390 px el flex aplastaba
+            el botón de Volver a 20 px de ancho: el área tocable se comía
+            para hacerle sitio al título, y el estándar de la casa son
+            64×64 (docs/ux-principles.md §1.2). Nada de lo que hay en esta
+            barra puede encogerse por debajo de su área tocable. */}
         <button
           onClick={onClose}
-          className="h-11 w-11 rounded-2xl hover:bg-slate-100 flex items-center justify-center text-mipiace-ink"
+          className="h-11 w-11 shrink-0 rounded-2xl hover:bg-slate-100 flex items-center justify-center text-mipiace-ink"
           aria-label="Volver"
         >
           <ArrowLeft className="w-5 h-5" strokeWidth={2.25} />
         </button>
-        <h1 className="text-[18px] font-semibold text-mipiace-ink">Agenda</h1>
-        <div className="flex items-center gap-1 ml-2">
+        {/* El título se va en compacto: la tira de días de debajo ya dice
+            que esto es la agenda, y esos 66 px son los que le faltaban al
+            botón de Volver y al de Nueva cita. */}
+        <h1 className="hidden sm:block text-[18px] font-semibold text-mipiace-ink">
+          Agenda
+        </h1>
+        <div className="flex items-center gap-1 ml-2 shrink-0">
+          {/* B-reservas-5 F8 · las flechas se van en compacto. A 320 px la
+              barra no cabía y lo que se cortaba era "Nueva cita", que es
+              la acción principal. Y son redundantes: la tira de días de
+              debajo hace el mismo trabajo y con el dedo. */}
           <button
             onClick={() => setDate(addDays(date, -1))}
-            className="h-9 w-9 rounded-xl hover:bg-slate-100 flex items-center justify-center"
+            className="hidden sm:flex h-9 w-9 rounded-xl hover:bg-slate-100 items-center justify-center"
             aria-label="Día anterior"
           >
             <ChevronLeft className="w-4 h-4" />
@@ -384,7 +402,7 @@ export function AgendaPage({
           </button>
           <button
             onClick={() => setDate(addDays(date, 1))}
-            className="h-9 w-9 rounded-xl hover:bg-slate-100 flex items-center justify-center"
+            className="hidden sm:flex h-9 w-9 rounded-xl hover:bg-slate-100 items-center justify-center"
             aria-label="Día siguiente"
           >
             <ChevronRight className="w-4 h-4" />
@@ -401,7 +419,7 @@ export function AgendaPage({
           <select
             value={staffFilter ?? ""}
             onChange={(e) => setStaffFilter(e.target.value || null)}
-            className="h-10 px-2 rounded-xl bg-mipiace-stone border border-slate-200 text-[13px]"
+            className="h-10 px-2 shrink-0 rounded-xl bg-mipiace-stone border border-slate-200 text-[13px]"
           >
             <option value="">Todos</option>
             {activeStaff.map((s) => (
@@ -421,7 +439,7 @@ export function AgendaPage({
               start: null,
             })
           }
-          className="h-11 px-4 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[14px] font-medium flex items-center gap-2"
+          className="h-11 px-4 shrink-0 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[14px] font-medium flex items-center gap-2"
         >
           <Plus className="w-[18px] h-[18px]" strokeWidth={2.25} />
           <span className="hidden sm:inline">Nueva cita</span>
@@ -622,9 +640,17 @@ function StaffColumn(props: {
               <div className="text-[11px] font-semibold text-mipiace-ink truncate">
                 {localHHMM(a.start)} · {props.clientOf(a)}
               </div>
-              <div className="text-[10.5px] text-slate-500 truncate">
-                {props.labelOf(a)}
-              </div>
+              {/* B-reservas-5 F8 · la segunda línea sólo si cabe entera.
+                  Una cita de 30 min mide 33 px y el contenido pide 40:
+                  el `overflow-hidden` cortaba "Corte de pelo" por la
+                  mitad de las letras, que se lee como un fallo de pintado.
+                  Cortar limpio y dejar el servicio para el detalle es
+                  mejor que enseñar media palabra. */}
+              {height >= CARD_TWO_LINE_MIN_H && (
+                <div className="text-[10.5px] text-slate-500 truncate">
+                  {props.labelOf(a)}
+                </div>
+              )}
             </button>
           );
         })}
