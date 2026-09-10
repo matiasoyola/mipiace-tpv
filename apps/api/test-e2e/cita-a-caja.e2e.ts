@@ -27,6 +27,9 @@
 // contra la respuesta del API. Si el test puede pasar con la BD vacía, no
 // es un e2e.
 
+import { spawnSync } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { randomBytes, randomUUID } from "node:crypto";
 
 import Fastify, { type FastifyInstance } from "fastify";
@@ -150,6 +153,31 @@ describe.skipIf(!e2eEnabled)("e2e · cita → caja contra Postgres real", () => 
         FROM ticket_lines WHERE ticket_id = ${id}::uuid
        ORDER BY id
     `;
+  }
+
+  /** Lanza el censo DE VERDAD, el binario que se lanzaría en producción.
+   *  No se simula su SQL: si la consulta se rompe, este test lo dice. */
+  function runCenso(): { status: number | null; output: string } {
+    const apiRoot = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "..",
+    );
+    const res = spawnSync(
+      path.join(apiRoot, "node_modules/.bin/tsx"),
+      [
+        path.join(apiRoot, "src/scripts/audit-appointment-drafts.ts"),
+        `--tenant=${tenantId}`,
+      ],
+      {
+        cwd: apiRoot,
+        encoding: "utf8",
+        env: { ...process.env, DATABASE_URL: E2E_DATABASE_URL },
+      },
+    );
+    return {
+      status: res.status,
+      output: `${res.stdout ?? ""}\n${res.stderr ?? ""}`,
+    };
   }
 
   // ── siembra ─────────────────────────────────────────────────────────
@@ -443,6 +471,12 @@ describe.skipIf(!e2eEnabled)("e2e · cita → caja contra Postgres real", () => 
 
   it("7 · el censo de huérfanos: cero cuando el ciclo se cerró bien", async () => {
     expect(await draftsHuerfanos()).toBe(0);
+    // Y el script de verdad dice lo mismo.
+    const censo = runCenso();
+    expect(censo.status).toBe(0);
+    expect(censo.output).toContain("A · Con un cobro que cuadra al lado (el bug): 0");
+    expect(censo.output).toContain("B · Sin cobro identificado");
+    expect(censo.output).toContain("Nada que limpiar.");
   });
 
   it("8 · y lo ve cuando el bug existe (el estado que dejaba B4)", async () => {
@@ -491,5 +525,32 @@ describe.skipIf(!e2eEnabled)("e2e · cita → caja contra Postgres real", () => 
     // enlazó a la cita, que es exactamente el bug.
     const todos = await ticketsDelTenant();
     expect(todos.length).toBe(3);
+
+    // Y ahora el caso que NO es el bug y que nadie puede borrar a ciegas:
+    // una cita que se abrió en caja y a la que nunca se llegó a cobrar
+    // nada. Su borrador está igual de vivo, y el motivo es otro.
+    const pendiente = await crearCita([corteId], "16:00");
+    const abierto2 = await app.inject({
+      method: "POST",
+      url: `/agenda/appointments/${pendiente}/checkout`,
+      headers: auth(),
+      payload: {},
+    });
+    expect(abierto2.statusCode).toBe(201);
+    const sinCobrar = (abierto2.json() as { ticket: { id: string } }).ticket.id;
+
+    // EL PUNTO DEL CENSO: los dos borradores están vivos, y el script los
+    // separa. Mezclarlos sería el error caro — borrar la población B es
+    // borrar cobros pendientes de verdad.
+    const censo = runCenso();
+    expect(censo.status).toBe(0);
+    expect(censo.output).toContain("A · Con un cobro que cuadra al lado (el bug): 1");
+    expect(censo.output).toContain("B · Sin cobro identificado (MIRAR ANTES DE TOCAR): 1");
+    expect(censo.output).toContain(huerfano);
+    expect(censo.output).toContain(sinCobrar);
+    expect(censo.output).not.toContain("Nada que limpiar.");
+    // Y NO borra nada: los dos siguen ahí después de pasar el censo.
+    expect((await ticketRow(huerfano)).status).toBe("DRAFT");
+    expect((await ticketRow(sinCobrar)).status).toBe("DRAFT");
   });
 });
