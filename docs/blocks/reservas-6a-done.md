@@ -6,6 +6,9 @@ Frente 0: `docs/blocks/reservas-6a-plan.md`.
 Rama `reservas-6a-suelo`, worktree `mipiacetpv-reservas-6a`. Base: `562458a`. **Sin push, sin deploy,
 sin migración.**
 
+**Frente O añadido después del cierre inicial** (§2.13 y §2.14): el alta que se crea sin red ya no
+caduca por el suelo, y una cita que el servidor rechaza deja de ser invisible en la agenda.
+
 **El motor no tenía reloj.** Medido en el Frente 0: `grep "new Date()\|Date.now()"` sobre
 `apps/api/src/agenda/*.ts` daba **una sola aparición**, y era el TTL del hold. Ofrecía y aceptaba
 ayer, y aceptaba las 10:07 llamando al endpoint. Ahora hay un suelo, no se configura, y vale igual al
@@ -31,7 +34,10 @@ Es lo que hacía falta para **dejar la agenda sola con Sole**.
 | El store en memoria, compartido y menos mentiroso | `apps/api/test/helpers/agenda-fake-store.ts` |
 | Una franja pasada no invita; el 409 con sus alternativas tocables | `apps/tpv-web/src/pages/AgendaPage.tsx` |
 | Primer test de `AgendaPage` en jsdom | `apps/tpv-web/test/agenda-suelo.test.tsx` (8) |
-| El banco visual con el 409 (`?fallo=pasado`) | `apps/tpv-web/visual/main.tsx` |
+| El banco visual con el 409 (`?fallo=pasado`) y el alta encolada (`?encolada=`) | `apps/tpv-web/visual/main.tsx` |
+| **El alta creada sin red no caduca**: `occurredAt` sellado y acotado | `outbox.ts` · `floor.ts` · `engine.ts` · `routes.ts` |
+| La cita encolada y la rechazada, pintadas en la agenda | `lib/agenda.ts` (`mergePendingLocal`) · `AgendaPage.tsx` |
+| El alta sin red, de punta a punta | `apps/tpv-web/test/agenda-offline.test.tsx` (7) |
 
 **Sin migración.** Este bloque no toca el esquema.
 
@@ -88,11 +94,12 @@ que se le dan a la clienta son de mañana. Un error que no propone salida es med
 El alta offline del TPV sube con `externalId`. Reenviar al reconectar una cita que el servidor **ya
 tiene** no puede fallar porque haya pasado el tiempo. Tiene su test y su sabotaje.
 
-⚠️ **El filo que esto NO tapa, y va aquí porque es de producto:** un alta creada sin red que **nunca
-llegó a subir** y se replica cuando su hora ya pasó **la rechaza el suelo**, a propósito y sin
-excepción. El outbox no reintenta los 4xx (B-5 §2.8) y el TPV avisa. Es coherente con "sin
-excepciones", pero es el caso en que el suelo le quita trabajo hecho a la cajera. Si Matías quiere
-otra cosa, es una decisión de producto y va a su bloque.
+⚠️ **El filo que esto dejaba abierto — ARREGLADO en el frente O (§2.13).** La primera versión de este
+documento lo dejaba escrito y no lo tocaba: un alta creada sin red que **nunca llegó a subir** y se
+replica cuando su hora ya pasó la rechazaba el suelo, a propósito. Matías lo devolvió con la regla de
+la casa: **lo que el uso real del cliente va a pisar se arregla, no se documenta.** Y lo va a pisar:
+el AP12 apaga la pantalla a los cinco minutos y la primera acción al despertarlo puede salir sin red,
+justo con "¿tienes hueco ahora?", que es la que va pegada a la franja en curso.
 
 ### 2.8 La guarda del cambio de hora: el suelo nunca por delante de ahora
 
@@ -127,11 +134,71 @@ La superficie de la columna y las etiquetas de la regla hay que poder cogerlas p
 jsdom y desde Playwright. Un selector por clase de Tailwind no sobrevive a un refactor y, de hecho,
 se rompió a mitad de este bloque cuando la regla pasó a ser `relative`.
 
+### 2.13 · Frente O · el suelo se evalúa con el instante del alta, con una cota de 2 h
+
+Mismo patrón que los tickets desde v1.11: el outbox sella `occurredAt` **al encolar** y el servidor
+juzga con ese instante, no con el de llegada. Aquí, en vez del turno, lo que se decide es el suelo.
+
+**La cota hacia atrás, y de dónde sale el número.** El prompt apuntaba a "la edad máxima del outbox".
+No existe: **comprobado, el outbox no caduca sus items** — viven hasta el 2xx o hasta un rechazo
+permanente, y no hay purga por antigüedad en `outbox.ts`. Así que no hay número que heredar y se
+elige uno: **dos horas**.
+
+- Cubre de sobra el caso real. Un AP12 que despierta sin red tarda segundos; una línea caída, minutos.
+- Es **más larga que el servicio más largo del catálogo de Sole** (120 min: mechas, recogido de
+  novia). Un alta aceptada está, como mucho, a un servicio de distancia: la clienta sigue en la silla
+  o acaba de salir, y el cobro de B-5 funciona sobre ella.
+- Y **acota la mentira**. `occurredAt` es un campo del cuerpo: sin cota, se reserva en el pasado
+  falseándolo, que es justo lo que el suelo existe para impedir. Con ella, lo más que se mueve una
+  reserva son dos horas: nunca a ayer, nunca cruzando el corte de día (`Tenant.dayCutHour`, 05:00).
+
+**Lo que cuesta:** con la línea caída más de dos horas, el alta se rechaza. A esas alturas la cita ya
+ocurrió —la clienta vino o no vino— así que lo que se pierde es el registro en el calendario, no un
+cobro; y no se pierde en silencio (§2.14). Es el precio de que el campo no sea una puerta trasera.
+
+Tres detalles que no son obvios:
+
+- **`occurredAt` sólo mueve el suelo HACIA ATRÁS.** Del futuro lo descarta `parseOccurredAt` con la
+  misma tolerancia de 5 min de v1.11: un reloj adelantado no abre el futuro de la agenda.
+- **Las alternativas del rechazo salen del AHORA real, no de la puerta.** Ofrecerle a la clienta un
+  hueco que también ha pasado es cambiar un error por otro. Tiene su test — y su sabotaje, que la
+  primera vez no puso nada rojo (§3, O5).
+- **Manda el motor.** `resolveBookingNow` es la autoridad y la ruta la llama sólo para loguear
+  (`agenda.booking_occurred_at`, con `source`: `now` · `occurred_at` · `future` · `too_old`). Un
+  `occurredAt` colado por otro camino tampoco pasa.
+- **El `EXCLUDE` sigue siendo el único árbitro del solape.** Si en el tiempo sin red otra cita ocupó
+  el hueco, el sello no lo devuelve: 409 como siempre, y el e2e lo prueba.
+
+### 2.14 · Frente O · lo que ve la cajera, que hasta ahora era nada
+
+**Comprobado antes de tocar nada**, que es lo que el prompt pedía: `mergePendingLocal`
+(`lib/agenda.ts`) **era un stub** desde B4 —`return day.appointments`— con un comentario encima que
+decía que conservaba las citas optimistas. No conservaba ninguna. El camino real era:
+
+1. la cajera escribe la cita sin red → se guarda en el outbox;
+2. ve un **toast de 3,5 segundos** y `loadDay()` repinta el día **desde el servidor o desde la
+   caché** — en los dos casos, sin su cita: **la agenda no la pintaba nunca**;
+3. si al reconectar el servidor la rechazaba, lo único que quedaba era el chip rojo de abajo a la
+   derecha (`OutboxChip`, que sí se pinta sobre la agenda), con la fila "Rechazado por el servidor" y
+   sus botones de Reintentar / Descartar.
+
+O sea: no es que desapareciera de la agenda — es que **nunca llegó a estar**. Ahora:
+
+- la cita encolada se pinta **en su hueco**, a rayas y diciendo "sin enviar";
+- la rechazada **se queda ahí**, en rojo y diciendo "rechazada";
+- y la agenda enseña un aviso **que no se va solo** —no es un toast— con el motivo del servidor y
+  **"Reintentar"**. Descartar sigue en el chip, que ya pide confirmación;
+- tocar una de estas citas **no abre el detalle**: esa cita no está en el servidor y el detalle
+  ofrecería "Cobrar en caja" sobre algo que no existe. Cuenta en qué estado está.
+
+De paso: el chip decía **"Cita 09:00" de una cita de las 11:00** — la etiqueta se construía con
+`start.slice(11,16)`, que es UTC. Y el chip es justo donde la cajera lee lo que se rechazó.
+
 ---
 
 ## 3 · Sabotaje → test rojo
 
-Los quince se **aplicaron de verdad** sobre el código, se corrió la suite, y se revirtieron.
+Los veinte se **aplicaron de verdad** sobre el código, se corrió la suite, y se revirtieron.
 
 | # | Sabotaje aplicado | Qué se puso rojo |
 |---|---|---|
@@ -150,6 +217,11 @@ Los quince se **aplicaron de verdad** sobre el código, se corrió la suite, y s
 | 13 | `const tz = CENTER_TZ` dentro del motor (se ignora la inyectada) | **NADA** → ahora **1** |
 | 14 | Las alternativas dejan de mirar el día siguiente | **NADA** → ahora **1** |
 | 15 | El 409 de **mover** pierde el campo `code` | **NADA** → ahora e2e **8** |
+| **O1** | El outbox deja de sellar `occurredAt` en el alta de cita | `outbox` **1** |
+| **O2** | El servidor ignora `occurredAt` (el suelo vuelve al reloj de llegada) | **2** unit + e2e **11 y 16** |
+| **O3** | La cota hacia atrás desaparece (`occurredAt` sin límite) | **3** unit + e2e **13** |
+| **O4** | `mergePendingLocal` vuelve a ser el stub que era | `agenda-offline` **6** |
+| **O5** | Las alternativas salen de la puerta del alta, no del ahora real | **NADA** → ahora **1** unit + e2e **15** |
 
 **El 5 es el que este bloque venía a poder escribir.** El `EXCLUDE USING gist` estaba creado en
 producción desde agosto y **nadie lo había visto rechazar una fila**: los tests del motor corren
@@ -157,7 +229,7 @@ contra un store que lo simula y ningún tenant tiene la agenda encendida. Tirán
 test caen el 1 y el 3 — y que caiga el **3** (dos altas simultáneas por la API) prueba que la carrera
 la ganaba **la BD y no el código**.
 
-**Tres sabotajes no pusieron nada rojo la primera vez.** Eso es el valor del ejercicio:
+**Cuatro sabotajes no pusieron nada rojo la primera vez.** Eso es el valor del ejercicio:
 
 - **13** — la `tz` inyectable era una promesa sin testigo, y es justo la pieza que se enchufa el día
   que `Tenant` tenga columna de huso. El test nuevo pone el centro en Nueva York con el instante
@@ -168,6 +240,12 @@ la ganaba **la BD y no el código**.
 - **14** — y la razón era peor que el hueco: **el store en memoria ignoraba la ventana de fechas**.
   El falso mentía a favor del motor (§2.11).
 - **15** — sólo el alta afirmaba sobre `code`; mover no. El front lee las dos por el mismo camino.
+- **O5** — el test decía mirar que las alternativas salen del ahora real, y **pasaba con el sabotaje
+  puesto**: usaba un `occurredAt` fuera de la cota, así que la puerta y el reloj eran el MISMO
+  instante y ofrecer desde una o desde el otro daba igual. El caso que sí distingue es un alta
+  **válida** (55 min, dentro de la cota) cuyo hueco se rechaza igual — puerta en las 11:00, reloj en
+  las 12:00: con el sabotaje, a la clienta se le ofrecen las 11:00 y las 11:15, que también han
+  pasado.
 
 ---
 
@@ -177,15 +255,24 @@ Escrito para que nadie lo confunda con lo que sí cubre.
 
 1. **Las frases sin alternativas.** `pastMessage([])` y `offGridMessage([])` ("…y no me queda ningún
    hueco después") no las ejerce ningún test. Se llega a ellas con el centro sin turnos.
-2. **El alta offline que caduca antes de subir** (§2.7). El camino existe —el outbox no reintenta
-   los 4xx y el TPV avisa— pero no hay test de punta a punta de ese caso concreto, ni se ha visto el
-   aviso con un servidor de verdad.
+2. ~~**El alta offline que caduca antes de subir.**~~ **ARREGLADO** (frente O, §2.13 y §2.14). Lo que
+   sigue **sin** cubrir de este filo:
+   - el `occurredAt` se inyecta en el cuerpo en los tests; **nadie prueba el camino completo con un
+     outbox de verdad** reenviando al reconectar (es el mismo hueco que B-5 §4.4 dejó abierto para el
+     `COMPLETED`);
+   - **la cota de 2 h no se ha visto en la práctica**: el número está elegido y probado en sus bordes,
+     pero no hay dato de cuánto dura realmente una caída de red en el local de Sole;
+   - el reintento desde el aviso de la agenda llama a `outboxRetry`, pero **el resultado de ese
+     reintento no tiene test**: se prueba que el botón está y qué hace, no el ciclo entero;
+   - y una cita encolada que **el servidor sí acepta** desaparece del outbox y vuelve por el `GET`:
+     hay test de que no se pinta dos veces, pero no del instante exacto del relevo.
 3. **`BOOKING_OFF_GRID` desde el front no se puede provocar.** `openSlotFirst` redondea a la retícula
    y las alternativas vienen del servidor: la fuga de D-4b sólo se abre llamando a la API. El test
    del front lo **simula** para fijar que el aviso se pinta igual.
 4. **El front no reacciona al paso del tiempo.** `nowMin` se calcula en el render: con la agenda
    abierta veinte minutos, lo pintado en apagado se queda atrás hasta el siguiente render. El
-   servidor corta igualmente (el 409 llega), así que el fallo es cosmético — pero está.
+   servidor corta igualmente (el 409 llega), así que el fallo es cosmético — pero está. (Con el
+   frente O hay un repintado más: el outbox avisa de sus cambios y la agenda recarga el día.)
 5. **El front tiene su propia aritmética de huso.** `AgendaPage` lleva su `TZ = "Europe/Madrid"`
    desde B4; la "sola fuente" de este bloque es la del **motor**. Son dos sitios que hoy dicen lo
    mismo y nadie comprueba que sigan diciéndolo.
@@ -198,8 +285,14 @@ Escrito para que nadie lo confunda con lo que sí cubre.
 8. **El worker del TTL de holds** (`agenda-hold-ttl-worker`) no se ha tocado ni se ha probado contra
    el suelo.
 9. **`availability()` multi-día por la API** sólo se prueba con `from=to=hoy` en el e2e.
-10. **Nada de esto se ha visto en hierro.** El AP11 está reservado para la pasada de B-5 (valla del
-    prompt).
+10. **La agenda no tiene layout de solape.** Dos citas a la misma hora en la misma columna se pintan
+    una encima de otra. Nunca había pasado —el `EXCLUDE` lo hace imposible entre citas del
+    servidor—, pero una cita local rechazada por `TAKEN` está por definición encima de la que ocupó
+    su hueco. Respuesta barata y suficiente: las locales se pintan en la **mitad derecha** de la
+    columna, así que las dos se leen (§5). Un layout de solape de verdad no entra aquí.
+11. **Nada de esto se ha visto en hierro.** El AP11 está reservado para la pasada de B-5 (valla del
+    prompt), y el frente O es justo el que más pide un AP12 de verdad: apagar la pantalla, quitar la
+    wifi y escribir una cita.
 
 ---
 
@@ -217,6 +310,9 @@ ya venía de B-5.
 | `f6-franja-pasada-1280.png` | Tocar las 10:45: **no se abre el panel**, y el aviso dice "El primer hueco es a las 11:15" |
 | `f6-error-booking-in-past-1280.png` | El 409 con su frase y **tres horas tocables** (11:30 · 11:45 · 12:00), encima de las acciones primarias |
 | `f6-error-booking-in-past-390.png` | Ídem en compacto, con el panel a pantalla completa |
+| `fo-cita-sin-enviar-1280.png` | **Frente O** · la cita escrita sin red, pintada en su hueco a rayas y con "sin enviar" |
+| `fo-cita-rechazada-1280.png` | El servidor la rechazó: la cita sigue ahí en rojo, y el aviso de arriba dice el motivo y ofrece "Reintentar" |
+| `fo-cita-rechazada-390.png` | Lo mismo en compacto. La rechazada ocupa la mitad derecha: la cita que le quitó el hueco se sigue leyendo |
 
 **Lo que el bucle cambió**, y que ningún test habría cogido:
 
@@ -231,6 +327,14 @@ ya venía de B-5.
      a las 20:00 — hora y media de desfase.
    Medido después del arreglo: la etiqueta de las 11:00 cae en 255,0 px y la de las 20:00 en 849,0
    px, que es **exactamente** donde las pone la geometría de la columna.
+
+**Lo que el bucle destapó del frente O:** una cita rechazada por `TAKEN` está **por definición**
+encima de la que ocupó su hueco, y a ancho completo la tapaba — se leía "Manicura" cortada por debajo
+de la tarjeta roja. La agenda nunca había necesitado layout de solape porque el `EXCLUDE` lo hacía
+imposible entre citas del servidor. Las locales pasan a la mitad derecha de la columna.
+
+**Medido y NO arreglado:** a 390 px, la tarjeta local trunca ("12:30 · Clie…") y no se lee la palabra
+"rechazada". El aviso de arriba sí la dice entera, y el rojo a rayas ya comunica que algo pasa.
 
 **Medido y NO arreglado:** la línea roja de "ahora" (`z-20`) se pinta **encima** de las tarjetas y
 tacha el texto de una cita que la cruce (se ve en "10:30 · Ana Belén Soto"). Es preexistente de B4 y
@@ -282,7 +386,8 @@ apps/api/test/agenda-tz.test.ts                     otra TZ de proceso + 25-10-2
 apps/api/test/helpers/agenda-fake-store.ts          el store en memoria, compartido
 apps/api/test-e2e/agenda-suelo.e2e.ts               EXCLUDE + suelo contra Postgres real (10)
 apps/tpv-web/test/agenda-suelo.test.tsx             AgendaPage en jsdom, el primero (8)
-docs/blocks/reservas-6a-shots/                      6 capturas
+apps/tpv-web/test/agenda-offline.test.tsx           el alta sin red, de punta a punta (7)
+docs/blocks/reservas-6a-shots/                      9 capturas
 ```
 
 **Modificados**
@@ -291,7 +396,9 @@ docs/blocks/reservas-6a-shots/                      6 capturas
 apps/api/src/agenda/engine.ts        reloj y huso inyectables; suelo al listar y al reservar
 apps/api/src/agenda/routes.ts        409 con code, message y alternatives
 apps/tpv-web/src/pages/AgendaPage.tsx  el suelo en la superficie, el 409 con salida, la regla
-apps/tpv-web/visual/main.tsx         el escenario del 409 (?fallo=pasado)
+apps/tpv-web/visual/main.tsx         el 409 (?fallo=pasado) y el alta encolada (?encolada=)
+apps/tpv-web/src/lib/outbox.ts       sella occurredAt en el alta de cita + durationMin local
+apps/tpv-web/src/lib/agenda.ts       tz del centro en un sitio; mergePendingLocal de verdad
 apps/api/test/agenda-engine.test.ts  reloj congelado + import del helper (cero expectativas tocadas)
 docs/code-prompts/bloque-reservas-6-yield.md   la nota de que es B-6b
 ```
@@ -316,15 +423,19 @@ docs/code-prompts/bloque-reservas-6-yield.md   la nota de que es B-6b
 | Front: una franja pasada no invita | ✅ front 1 y 2 · capturas |
 | Front: el 409 con su frase y alternativas tocables | ✅ front 6, 7 y 8 · capturas |
 | Bucle visual 1280/390/320 + error | ✅ §5 |
+| **Frente O · el alta sin red no caduca por el suelo** | ✅ e2e 11 a 16 · unit · §2.13 |
+| Frente O · la cota acota la mentira y está probada en sus bordes | ✅ unit + e2e 13 · sabotaje O3 |
+| Frente O · el EXCLUDE sigue siendo el árbitro del solape | ✅ e2e 16 |
+| Frente O · una cita rechazada no desaparece en silencio | ✅ `agenda-offline` (7) · §2.14 · capturas |
 | Tabla de sabotaje con sabotajes reales | ✅ §3, 15 sabotajes, 3 huecos destapados |
 | **Verificado en hierro** | ❌ fuera de alcance (AP11 reservado a B-5) |
 
-Suite: **180 ficheros, 1609 tests verdes, 3 saltados** (antes del bloque: 177 / 1564 / 3).
+Suite: **181 ficheros, 1628 tests verdes, 3 saltados** (antes del bloque: 177 / 1564 / 3).
 Los **3 saltados son los mismos de siempre y están justificados**: el `describe.skip` del flujo
 *legacy* de `super-admin.test.ts:566`, cuya cobertura se trasladó a `onboarding-v2.test.ts` cuando
 B-OnboardingV2 rehizo `POST /super-admin/tenants`. **Este bloque no salta ni un test.**
 
-e2e: **5 ficheros, 45 tests** (antes: 4 / 35). `tsc --noEmit` limpio en api, tpv-web y admin.
+e2e: **5 ficheros, 51 tests** (antes: 4 / 35). `tsc --noEmit` limpio en api, tpv-web y admin.
 
 Los e2e se corrieron contra una base propia
 (`E2E_DATABASE_URL=…/mipiacetpv_r6a_e2e`), **borrada al terminar**: la suite hace `DROP SCHEMA
@@ -341,9 +452,14 @@ b08d6a3  test(reservas-6a): la agenda bajo otra TZ y el cambio de hora
 8292b75  test(reservas-6a): el EXCLUDE y el suelo contra Postgres real
 61c7911  feat(reservas-6a): la agenda no invita a una hora que ya paso
 dee340f  test(reservas-6a): tabla de sabotaje, y los tres huecos que destapo
+c9b882c  docs(reservas-6a): done · decisiones, sabotaje, capturas y el orden que viene
+abe4d01  feat(reservas-6a): el alta creada sin red no caduca por el suelo        ← Frente O
+efe224a  fix(reservas-6a): el bucle visual del frente O, y el test que no miraba ← Frente O
 ```
 
-Último commit de código: **`dee340f`**. Este documento va encima, en `docs(reservas-6a): done · …`.
+Último commit de código: **`efe224a`**
+(`fix(reservas-6a): el bucle visual del frente O, y el test que no miraba`).
+Este documento va encima, en `docs(reservas-6a): frente O · …`.
 
 ---
 
@@ -351,11 +467,32 @@ dee340f  test(reservas-6a): tabla de sabotaje, y los tres huecos que destapo
 
 **El orden lo decide Matías.** Mi propuesta, con el porqué.
 
-Primero, lo que **ya no falta**: con B-5 y 6a dentro, la agenda **se puede encender hoy**. Son los
-cuatro pasos de configuración de `03-que-falta-para-la-agenda-del-informe.md` §1 bis (interruptor →
-catálogo de agenda → personal y turnos → el botón aparece en el TPV), y ninguno depende de código.
-Lo que 6a cambia es que **ya se la puede dejar sola con ella**: la agenda no acepta una hora que no
-existe, y cuando dice que no, dice a qué hora sí.
+### 0º · Llegar a Sole es un despliegue, no un interruptor
+
+**Corrección de la primera versión de este documento**, que decía que "la agenda se puede encender
+hoy". En producción **no**. Producción está en **`8197e4e`** (`Merge branch 'v1-15-la-vuelta-existe'`):
+**28 commits por detrás** de la base de este bloque. Ahí no están ni S1, ni B-5, ni 6a. Lo que se
+puede encender hoy con cuatro pasos de configuración es la agenda **de B4** — la que acepta ayer y
+abre un borrador huérfano por cada cita cobrada.
+
+Para que esto llegue a Sole hacen falta dos cosas, y ninguna es un flag:
+
+1. **Despliegue de servidor**, que **arrastra la migración de S1** (el sello de la venta, con sus
+   triggers). Eso es una ventana con **la caja parada**: no es un despliegue de los de cualquier
+   martes por la tarde.
+2. **APK nueva en el AP12.** El front de la agenda con el suelo, el aviso del 409 y el frente O viaja
+   en el bundle; el terminal de Sole no se actualiza solo.
+
+Y entre medias, la pasada en hierro de B-5 que sigue pendiente. Dicho de otra forma: **el trabajo que
+falta para encender la agenda a Sole no es sólo de bloques, es de despliegue**, y ese calendario lo
+pone Matías.
+
+### Lo que ya no falta en código
+
+Con B-5 y 6a dentro, la agenda **ya se le puede dejar sola**: no acepta una hora que no existe, y
+cuando dice que no, dice a qué hora sí. Los cuatro pasos de configuración de
+`03-que-falta-para-la-agenda-del-informe.md` §1 bis (interruptor → catálogo de agenda → personal y
+turnos → el botón aparece en el TPV) siguen sin depender de código.
 
 ### 1º · **B-7 · el horario del centro y los festivos** — y ahora sí, antes que 6b
 
@@ -387,4 +524,6 @@ acompañando. Paga cuando el centro crezca o cuando dejemos de acompañar. Con 6
 tendrá algo que pintar: la traza de qué regla descartó qué hueco.
 
 **Y antes de cualquiera de los cuatro: la pasada en hierro de B-5** (AP11, cajón, papel). Es la única
-parte del ciclo de Sole que **nadie ha visto funcionar en una máquina de verdad**.
+parte del ciclo de Sole que **nadie ha visto funcionar en una máquina de verdad** — y el frente O le
+añade su propia prueba de hierro, que es la más barata de todas: apagar la pantalla del AP12, quitarle
+la wifi, escribir una cita y ver qué pasa al volver.
