@@ -131,6 +131,57 @@ describe("bajo TZ=America/New_York · el proceso no manda", () => {
     expect(utcToWallTime(currentGridStart(ahora))).toBe("11:00");
   });
 
+  it("y si el CENTRO estuviera en Nueva York, el motor iría a su hora", async () => {
+    // DESTAPADO POR EL SABOTAJE: devolver `const tz = CENTER_TZ` dentro del
+    // motor no ponía NADA rojo. La `tz` inyectable era una promesa sin
+    // testigo — y es justo la pieza que el día que `Tenant` tenga columna de
+    // huso se enchufa en una línea.
+    const store = makeFakeStore({
+      [TENANT]: {
+        requirements: { [CORTE]: req(CORTE, 30) },
+        skills: { [CORTE]: [SOLE] },
+        templates: [
+          { userId: SOLE, date: "2026-08-10", startTime: "09:00", endTime: "18:00" },
+        ],
+      },
+    });
+    const NY = "America/New_York";
+    // 20:10Z. En Nueva York (EDT, UTC−4) son las 16:10 —dentro del turno de
+    // 09:00 a 18:00—; en Madrid (CEST, UTC+2) son las 22:10, con el centro
+    // cerrado hace cuatro horas. El instante está elegido para que las dos
+    // zonas NO puedan dar la misma respuesta: con la tz de Madrid clavada,
+    // este día no ofrece ni un hueco.
+    const engine = createCitaEngine(store, {
+      tz: NY,
+      clock: { now: () => new Date("2026-08-10T20:10:00.000Z") },
+    });
+    const slots = await engine.availability({
+      tenantId: TENANT,
+      items: [{ serviceId: CORTE }],
+      fromDate: "2026-08-10",
+      toDate: "2026-08-10",
+    });
+    // El suelo son las 16:00 de NUEVA YORK = 20:00Z.
+    expect(slots.length).toBeGreaterThan(0);
+    expect(slots[0]!.start).toBe("2026-08-10T20:00:00.000Z");
+    expect(utcToWallTime(new Date(slots[0]!.start), NY)).toBe("16:00");
+
+    // Y al reservar manda la misma tz: las 16:00 de Nueva York ENTRAN. Con
+    // Madrid clavada serían las 22:00, fuera del turno → NO_SLOT.
+    const res = await engine.hold({
+      tenantId: TENANT,
+      externalId: null,
+      clientId: null,
+      items: [{ serviceId: CORTE }],
+      start: "2026-08-10T20:00:00.000Z",
+      source: "PRESENCIAL",
+      confirmed: true,
+      pendingTtlMinutes: 10,
+      notes: null,
+    });
+    expect(res.ok).toBe(true);
+  });
+
   it("y la agenda entera se comporta igual: 11:00 sí, 10:45 no", async () => {
     const ahora = wallTimeToUtc("2026-08-10", "11:10");
     const a = motor(ahora, ["2026-08-10"]);

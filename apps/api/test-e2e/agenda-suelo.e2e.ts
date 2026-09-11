@@ -425,7 +425,19 @@ describe.skipIf(!e2eEnabled)("e2e · el suelo y el EXCLUDE contra Postgres real"
       payload: { start: desdeSuelo(-30).toISOString() },
     });
     expect(atras.statusCode).toBe(409);
-    expect((atras.json() as { error: string }).error).toBe("BOOKING_IN_PAST");
+    // DESTAPADO POR EL SABOTAJE: quitar `code` de la respuesta de MOVER no
+    // ponía nada rojo — sólo el alta lo miraba. El front lee las dos por el
+    // mismo camino, y en B-6b `code` pasará a ser la key de la regla.
+    const cuerpo = atras.json() as {
+      error: string;
+      code: string;
+      message: string;
+      alternatives: unknown[];
+    };
+    expect(cuerpo.error).toBe("BOOKING_IN_PAST");
+    expect(cuerpo.code).toBe("BOOKING_IN_PAST");
+    expect(cuerpo.message).toContain("ya ha pasado");
+    expect(Array.isArray(cuerpo.alternatives)).toBe(true);
 
     const adelante = await app.inject({
       method: "PATCH",

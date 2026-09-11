@@ -126,10 +126,16 @@ export function makeFakeStore(
     async getSkilledStaff(tenantId, serviceId) {
       return seedByTenant[tenantId]?.skills[serviceId] ?? [];
     },
-    async getTemplateSlots(tenantId, userIds, _from, _to) {
+    async getTemplateSlots(tenantId, userIds, from, to) {
+      // B-reservas-6a · ANTES esto ignoraba la ventana `from`/`to` y
+      // devolvía TODAS las plantillas sembradas. El store real
+      // (`store.ts::getTemplateSlots`) sí la respeta, así que el falso
+      // mentía a favor: una ventana mal calculada por el motor pasaba los
+      // tests igual. Lo destapó un sabotaje —estrechar la ventana de las
+      // alternativas al día pedido— que no ponía NADA rojo.
       const set = new Set(userIds);
-      return (seedByTenant[tenantId]?.templates ?? []).filter((t) =>
-        set.has(t.userId),
+      return (seedByTenant[tenantId]?.templates ?? []).filter(
+        (t) => set.has(t.userId) && t.date >= from && t.date <= to,
       );
     },
     async getOccupancies(tenantId, from, to) {

@@ -185,6 +185,22 @@ describe("hold() y el suelo", () => {
     expect(res.alternatives[0]!.start).toBe(h(HOY, "11:00").toISOString());
   });
 
+  it("si hoy ya no queda nada, las alternativas son de MAÑANA", async () => {
+    // DESTAPADO POR EL SABOTAJE: cambiar `toDate: nextWallDate(fromDate)`
+    // por `toDate: fromDate` no ponía nada rojo. Y es el caso de la llamada
+    // de las ocho y media de la tarde: "esa hora ya ha pasado" sin ninguna
+    // hora detrás es medio error, que es justo lo que este bloque no quiere.
+    const { engine } = motorA("19:00", HOY, [HOY, MANANA]);
+    const res = await engine.hold(alta(h(HOY, "10:00")));
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.reason).toBe("BOOKING_IN_PAST");
+    // El centro cierra a las 18:00: hoy no queda ni un hueco.
+    expect(res.alternatives).toHaveLength(3);
+    expect(res.alternatives[0]!.start).toBe(h(MANANA, "09:00").toISOString());
+    expect(res.message).toContain("09:00");
+  });
+
   it("las 10:07 de mañana son 409 BOOKING_OFF_GRID (la fuga de D-4b)", async () => {
     const { engine } = motorA("11:10", HOY, [MANANA]);
     const res = await engine.hold(alta(h(MANANA, "10:07")));
