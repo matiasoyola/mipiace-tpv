@@ -22,6 +22,9 @@
 //   v1.15-la-vuelta-existe: ticket-emitido (3,00 € cobrados con un billete
 //     de 5: TOTAL / ENTREGADO / CAMBIO) · ticket-emitido-sin-vuelta (el
 //     mismo cobro clavado: el bloque no se pinta)
+//   B-reservas-6a-el-suelo: agenda con `?at=` (el reloj) — lo anterior al
+//     comienzo de la franja EN CURSO sale apagado — y `?fallo=pasado`, que
+//     devuelve el 409 BOOKING_IN_PAST con su frase y sus tres alternativas
 
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -762,6 +765,45 @@ function stubFetch(): void {
           },
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    // B-reservas-6a · el 409 del suelo. `?fallo=pasado` reproduce en el
+    // banco lo que el servidor manda cuando la hora ya pasó: la frase que
+    // se le lee a la clienta y los tres huecos que sí se le pueden dar.
+    // Es el estado de error del bucle visual de este bloque.
+    if (path === "/agenda/appointments" && init?.method === "POST") {
+      if (benchFallo() === "pasado") {
+        return new Response(
+          JSON.stringify({
+            error: "BOOKING_IN_PAST",
+            code: "BOOKING_IN_PAST",
+            message:
+              "Esa hora ya ha pasado. Te puedo dar las 11:30, las 11:45 o las 12:00.",
+            alternatives: [
+              { start: madridIso(11, 30), end: madridIso(12, 0), options: 1 },
+              { start: madridIso(11, 45), end: madridIso(12, 15), options: 1 },
+              { start: madridIso(12, 0), end: madridIso(12, 30), options: 1 },
+            ],
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          appointment: {
+            id: "ap-nueva",
+            clientId: null,
+            status: "CONFIRMED",
+            source: "PRESENCIAL",
+            start: madridIso(12, 0),
+            end: madridIso(12, 30),
+            ticketId: null,
+            notes: null,
+            items: [],
+            assignments: [],
+          },
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
       );
     }
     // B-reservas-5 F8 · el cobro del borrador de la cita. Devuelve el
