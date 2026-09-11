@@ -339,20 +339,29 @@ describe("hold() · el alta que se escribió sin red", () => {
   });
 
   it("las alternativas del rechazo son del AHORA real, no del alta", async () => {
-    // Si se ofrecieran desde el instante del alta, serían horas que
-    // también han pasado: cambiar un error por otro.
-    const { engine } = motorA("14:00");
+    // DESTAPADO POR EL SABOTAJE: la primera versión de este test usaba un
+    // `occurredAt` fuera de la cota, así que la puerta y el ahora eran el
+    // MISMO instante y ofrecer desde una o desde el otro daba igual. Aquí
+    // el alta SÍ es válida (55 min, dentro de la cota) y aun así su hueco
+    // se rechaza: la puerta está en las 11:00 y el reloj en las 12:00.
+    // Ofrecer desde la puerta sería darle a la clienta las 11:00 y las
+    // 11:15 — horas que también han pasado. Cambiar un error por otro.
+    const { engine } = motorA("12:00");
     const res = await engine.hold({
-      ...alta(h(HOY, "11:00")),
+      ...alta(h(HOY, "10:45")),
       occurredAt: h(HOY, "11:05"),
     });
     expect(res.ok).toBe(false);
     if (res.ok) return;
+    expect(res.reason).toBe("BOOKING_IN_PAST");
+    expect(res.alternatives.length).toBeGreaterThan(0);
     for (const alt of res.alternatives) {
       expect(new Date(alt.start).getTime()).toBeGreaterThanOrEqual(
-        h(HOY, "14:00").getTime(),
+        h(HOY, "12:00").getTime(),
       );
     }
+    // Y la frase dice esas horas, no las de la puerta.
+    expect(res.message).not.toContain("11:00");
   });
 
   it("el suelo del alta no se salta la retícula", async () => {

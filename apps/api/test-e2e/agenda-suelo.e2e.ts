@@ -541,7 +541,32 @@ describe.skipIf(!e2eEnabled)("e2e · el suelo y el EXCLUDE contra Postgres real"
     expect((no.json() as { error: string }).error).toBe("BOOKING_IN_PAST");
   });
 
-  it("15 · el EXCLUDE sigue mandando sobre el alta con occurredAt", async () => {
+  it("15 · las alternativas de un alta vieja son del AHORA, no de su puerta", async () => {
+    // El alta es válida (dentro de la cota) pero su hueco es anterior
+    // incluso a cuando se escribió. Las horas que se le ofrecen a la
+    // clienta tienen que ser futuras DE VERDAD.
+    const escrita = new Date(suelo().getTime() - 60 * 60_000);
+    const res = await app.inject({
+      method: "POST",
+      url: "/agenda/appointments",
+      headers: auth(),
+      payload: altaPayload(desdeSuelo(-90), soleId, escrita),
+    });
+    expect(res.statusCode).toBe(409);
+    const body = res.json() as {
+      error: string;
+      alternatives: Array<{ start: string }>;
+    };
+    expect(body.error).toBe("BOOKING_IN_PAST");
+    expect(body.alternatives.length).toBeGreaterThan(0);
+    for (const alt of body.alternatives) {
+      expect(new Date(alt.start).getTime()).toBeGreaterThanOrEqual(
+        suelo().getTime(),
+      );
+    }
+  });
+
+  it("16 · el EXCLUDE sigue mandando sobre el alta con occurredAt", async () => {
     // Si en el tiempo sin red otra cita ocupó el hueco, el sello no lo
     // devuelve: el árbitro del solape sigue siendo la base de datos.
     const hueco = desdeSuelo(-45);

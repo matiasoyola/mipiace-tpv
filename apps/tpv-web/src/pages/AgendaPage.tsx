@@ -813,7 +813,15 @@ function StaffColumn(props: {
               }}
               className={
                 local
-                  ? `absolute left-1 right-1 rounded-lg px-2 py-1 text-left overflow-hidden border-2 border-dashed ${
+                  ? // A la MITAD DERECHA de la columna. El bucle visual
+                    // destapó por qué hace falta: una cita rechazada por
+                    // TAKEN está, por definición, encima de la que ocupó
+                    // su hueco — y a ancho completo la tapaba. La agenda
+                    // no tiene layout de solape porque hasta ahora el
+                    // EXCLUDE lo hacía imposible; con las citas locales
+                    // deja de serlo, y ésta es la respuesta barata: las
+                    // dos se ven.
+                    `absolute left-1/2 right-1 rounded-lg px-2 py-1 text-left overflow-hidden border-2 border-dashed ${
                       rechazada
                         ? "bg-red-50 border-red-300"
                         : "bg-amber-50 border-amber-300"
