@@ -15,6 +15,16 @@
 //
 // Motor agnóstico: cero `if(businessType)`, vocabulario neutro. Lo específico
 // de cita vive en `CitaMode`; el núcleo (engine/store/GiST) es compartido.
+//
+// B-reservas-6a · el suelo temporal viaja como `409` con la frase que la
+// cajera lee en voz alta y las tres horas que sí se pueden dar:
+//
+//   { error: "BOOKING_IN_PAST",  code, message, alternatives }
+//   { error: "BOOKING_OFF_GRID", code, message, alternatives }
+//
+// `code` lleva hoy el mismo valor que `error`: es el hueco donde B-6b
+// pondrá la key de la regla que bloqueó (`POLICY_BLOCKED`), y así el front
+// lee `code` desde ya y no se reescribe dos veces.
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
@@ -22,7 +32,11 @@ import { requireOwnerOrCashier } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
 import type { PrismaClient } from "@mipiacetpv/db";
 import { checkoutAppointment } from "./checkout.js";
-import { createCitaEngine, type BookingEngine } from "./engine.js";
+import {
+  createCitaEngine,
+  type BookingEngine,
+  type HoldFailureReason,
+} from "./engine.js";
 import { createAgendaStore, type AgendaStore } from "./store.js";
 import { wallTimeToUtc } from "./time.js";
 import type { AppointmentStatus } from "./types.js";
@@ -46,6 +60,21 @@ async function ensureAgendaEnabled(
       message: "El módulo de agenda no está activado para este negocio.",
     });
   }
+}
+
+// B-reservas-6a · un solo sitio traduce el motor a HTTP. `NO_REQUIREMENTS`
+// es del pedido (400); todo lo demás es el hueco (409), incluido el suelo.
+function statusFor(reason: HoldFailureReason): number {
+  return reason === "NO_REQUIREMENTS" ? 400 : 409;
+}
+
+// La frase por defecto, para los rechazos que el motor no redacta. Los del
+// suelo SÍ la traen: sólo el motor conoce el huso y las alternativas.
+function defaultMessage(reason: HoldFailureReason): string {
+  if (reason === "NO_REQUIREMENTS") {
+    return "Algún servicio no es agendable (sin duración configurada).";
+  }
+  return "El hueco ya no está disponible.";
 }
 
 export interface AgendaRoutesOptions {
@@ -222,13 +251,10 @@ export async function registerAgendaRoutes(
         }
         return reply.code(201).send({ appointment: result.appointment });
       }
-      const code = result.reason === "NO_REQUIREMENTS" ? 400 : 409;
-      return reply.code(code).send({
+      return reply.code(statusFor(result.reason)).send({
         error: result.reason,
-        message:
-          result.reason === "NO_REQUIREMENTS"
-            ? "Algún servicio no es agendable (sin duración configurada)."
-            : "El hueco ya no está disponible.",
+        code: result.reason,
+        message: result.message ?? defaultMessage(result.reason),
         alternatives: result.alternatives,
       });
     },
@@ -282,9 +308,10 @@ export async function registerAgendaRoutes(
             message: "Cita no encontrada.",
           });
         }
-        return reply.code(409).send({
+        return reply.code(statusFor(moved.reason)).send({
           error: moved.reason,
-          message: "No se pudo mover a ese hueco.",
+          code: moved.reason,
+          message: moved.message ?? "No se pudo mover a ese hueco.",
           alternatives: moved.alternatives,
         });
       }
