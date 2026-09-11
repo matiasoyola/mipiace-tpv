@@ -9,7 +9,15 @@
 // Offline: lectura del día desde caché; alta por outbox con externalId.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ChevronLeft, ChevronRight, Loader2, Plus, X } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+  MoreVertical,
+  Plus,
+  X,
+} from "lucide-react";
 
 import { ApiError } from "../api.js";
 import { loadCatalogFromCache, type CatalogProduct } from "../lib/catalog.js";
@@ -19,21 +27,30 @@ import {
   type ClientRow,
 } from "../lib/clients.js";
 import {
+  ALL_DAY_END,
+  ALL_DAY_START,
   centerHHMM,
   centerToday,
   checkoutAppointmentTicket,
+  createAbsence,
   createAppointment,
+  dayInfoOf,
+  deleteAbsence,
   fetchAgendaDay,
   loadAgendaDayFromCache,
   patchAppointment,
   searchAvailability,
+  slotMinutesOf,
   STATUS_COLOR,
   STATUS_LABEL,
+  type AgendaAbsence,
   type AgendaAppointment,
   type AgendaDay,
+  type AgendaDayInfo,
   type AgendaStaff,
   type AppointmentStatus,
   type AvailabilitySlot,
+  type OpenRange,
 } from "../lib/agenda.js";
 import { useClientPicker } from "../hooks/useClientPicker.js";
 import { outboxRetry, subscribeOutbox } from "../lib/outbox.js";
@@ -41,12 +58,21 @@ import { outboxRetry, subscribeOutbox } from "../lib/outbox.js";
 // ── Helpers de zona horaria (Europe/Madrid) para pintar ────────────────
 
 const TZ = "Europe/Madrid";
-// B-reservas-6a · la retícula del centro, la misma que el motor
-// (`apps/api/src/agenda/time.ts::SLOT_MINUTES`). El suelo de la agenda es
-// el comienzo de la franja EN CURSO: a las 11:10, las 11:00.
-const SLOT_MIN = 15;
-const dayStartMin = 8 * 60; // 08:00
-const dayEndMin = 21 * 60; // 21:00
+// B-reservas-7a · `SLOT_MIN` YA NO EXISTE. La retícula del centro es un
+// dato del día (`Tenant.agendaSlotMinutes`, 15 o 30) que llega con
+// `GET /agenda` y viaja en la caché offline: el toque, las líneas de la
+// regla y el suelo pintado salen de ahí. Sole trabaja en franjas de 30 y
+// hasta este bloque le ofrecíamos inicios a y cuarto (6a §4.6).
+//
+// El suelo de 6a no cambia: sigue siendo el comienzo de la franja EN
+// CURSO. Con 30 eso significa que a las 11:29 todavía valen las 11:00.
+
+// La franja visible del día sale del horario del centro con este margen;
+// 08:00–21:00 queda sólo como valor por defecto de un centro SIN
+// configurar, que es como se comportaba antes del bloque.
+const DEFAULT_START_MIN = 8 * 60;
+const DEFAULT_END_MIN = 21 * 60;
+const VISIBLE_MARGIN_MIN = 30;
 const PX_PER_MIN = 1.1;
 // B-reservas-5 F8 · alto mínimo para que la tarjeta pueda pintar sus dos
 // líneas enteras: 17 (hora + cliente) + 16 (servicios) + 8 de padding.
@@ -77,6 +103,91 @@ function hhmm(minutes: number): string {
   const hh = Math.floor(minutes / 60);
   const mm = minutes % 60;
   return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
+// "HH:MM" → minutos desde medianoche. "24:00" son 1440: es el final del
+// día, no las 00:00 del mismo (una ausencia de día entero acaba ahí).
+function minOf(time: string): number {
+  const [hh, mm] = time.split(":").map(Number);
+  return (hh ?? 0) * 60 + (mm ?? 0);
+}
+
+// ── B-reservas-7a · la geometría del día ──────────────────────────────
+
+/**
+ * De qué hora a qué hora se pinta el día.
+ *
+ * Sale del horario del CENTRO de ese día con media hora de margen arriba y
+ * abajo, redondeado a la hora. Un sábado de boda que abre a las 8:30
+ * enseña las 8:30; 08:00–21:00 queda como valor por defecto de un centro
+ * sin configurar.
+ *
+ * Y SIEMPRE se ensancha hasta cubrir toda cita y toda ausencia del día: una
+ * cita que quedó fuera de horario —porque el festivo o la ausencia se
+ * pusieron después— tiene que seguir viéndose y pudiéndose cobrar. Si la
+ * franja visible no la cubriera, sería una cita impintable.
+ */
+function visibleRange(
+  info: AgendaDayInfo | undefined,
+  appts: AgendaAppointment[],
+): { startMin: number; endMin: number } {
+  let start = DEFAULT_START_MIN;
+  let end = DEFAULT_END_MIN;
+  if (info?.open && info.open.length > 0) {
+    start = Math.min(...info.open.map((r) => minOf(r.startTime)));
+    end = Math.max(...info.open.map((r) => minOf(r.endTime)));
+    start = Math.floor((start - VISIBLE_MARGIN_MIN) / 60) * 60;
+    end = Math.ceil((end + VISIBLE_MARGIN_MIN) / 60) * 60;
+  }
+  for (const a of appts) {
+    if (a.status === "CANCELLED") continue;
+    const s = localMinutes(a.start);
+    // Una cita que acaba a medianoche da 0: es el final del día, no el
+    // principio.
+    const e0 = localMinutes(a.end);
+    const e = e0 <= s ? 24 * 60 : e0;
+    start = Math.min(start, Math.floor(s / 60) * 60);
+    end = Math.max(end, Math.ceil(e / 60) * 60);
+  }
+  for (const ab of info?.absences ?? []) {
+    start = Math.min(start, Math.floor(minOf(ab.startTime) / 60) * 60);
+    end = Math.max(end, Math.ceil(minOf(ab.endTime) / 60) * 60);
+  }
+  start = Math.max(0, start);
+  end = Math.min(24 * 60, Math.max(end, start + 60));
+  return { startMin: start, endMin: end };
+}
+
+/**
+ * Los huecos NO reservables de una columna dentro de la franja visible: lo
+ * que cae fuera de sus tramos abiertos.
+ *
+ * `open === null` (centro sin configurar) devuelve CERO bandas: sin techo
+ * no hay nada que apagar, que es como se comportaba antes del bloque.
+ */
+function closedBands(
+  open: OpenRange[] | null | undefined,
+  startMin: number,
+  endMin: number,
+): Array<{ from: number; to: number }> {
+  if (open == null) return [];
+  const abiertos = [...open]
+    .map((r) => ({ from: minOf(r.startTime), to: minOf(r.endTime) }))
+    .sort((a, b) => a.from - b.from);
+  const out: Array<{ from: number; to: number }> = [];
+  let cursor = startMin;
+  for (const r of abiertos) {
+    if (r.from > cursor) out.push({ from: cursor, to: Math.min(r.from, endMin) });
+    cursor = Math.max(cursor, r.to);
+  }
+  if (cursor < endMin) out.push({ from: cursor, to: endMin });
+  return out.filter((b) => b.to > b.from);
+}
+
+/** ¿Este minuto cae dentro de algún tramo abierto? Sin techo, siempre sí. */
+function isOpenAt(open: OpenRange[] | null | undefined, minute: number): boolean {
+  if (open == null) return true;
+  return open.some((r) => minOf(r.startTime) <= minute && minute < minOf(r.endTime));
 }
 
 const todayLocalDate = centerToday;
@@ -192,6 +303,11 @@ export function AgendaPage({
     message: string;
     alternatives: AvailabilitySlot[];
   } | null>(null);
+  // B-reservas-7a · la hoja de ausencias, que es donde Sole las escribe hoy
+  // (en la columna, no en el admin). `null` = cerrada.
+  const [absenceFor, setAbsenceFor] = useState<AgendaStaff | null>(null);
+  // La ausencia pintada que se ha tocado, para ofrecer quitarla.
+  const [absenceDetail, setAbsenceDetail] = useState<AgendaAbsence | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const durationByService = useMemo(() => {
@@ -203,6 +319,20 @@ export function AgendaPage({
     }
     return m;
   }, [services]);
+
+  // ── B-reservas-7a · la geometría del día ──────────────────────────
+  //
+  // Tres datos que antes eran constantes del módulo y ahora salen del día:
+  // la retícula del centro, y de qué hora a qué hora se pinta. Sin red
+  // salen de la caché; sin caché, de los valores por defecto de B4.
+  const dayInfo = useMemo(() => dayInfoOf(day, date), [day, date]);
+  const slotMin = slotMinutesOf(day);
+  const { startMin: dayStartMin, endMin: dayEndMin } = useMemo(
+    () => visibleRange(dayInfo, day?.appointments ?? []),
+    [dayInfo, day],
+  );
+  // El día cerrado: la rejilla no ofrece nada y lo dice con su nombre.
+  const cerrado = dayInfo?.closed ?? null;
 
   const loadDay = useCallback(async (d: string) => {
     setLoading(true);
@@ -260,7 +390,8 @@ export function AgendaPage({
         (now - dayStartMin) * PX_PER_MIN - 120,
       );
     }
-  }, [date, day]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date, day, dayStartMin]);
 
   const flash = (msg: string) => {
     setToast(msg);
@@ -275,6 +406,21 @@ export function AgendaPage({
     if (staffFilter) return activeStaff.filter((s) => s.userId === staffFilter);
     return activeStaff;
   }, [activeStaff, staffFilter]);
+
+  // Las ausencias que van en cada columna. Las del CENTRO (sin dueño) se
+  // pintan en todas: un cierre por formación afecta a quien esté.
+  const absencesByStaff = useMemo(() => {
+    const m = new Map<string, AgendaAbsence[]>();
+    for (const s of activeStaff) {
+      m.set(
+        s.userId,
+        (dayInfo?.absences ?? []).filter(
+          (a) => a.staffUserId === s.userId || a.staffUserId === null,
+        ),
+      );
+    }
+    return m;
+  }, [dayInfo, activeStaff]);
 
   // Las altas del outbox que el servidor rechazó. No se van solas de la
   // pantalla: la cajera tiene que poder verlas y decidir.
@@ -320,7 +466,52 @@ export function AgendaPage({
     return m;
   }, [day]);
 
+
   // ── Acciones ──────────────────────────────────────────────────────
+
+  // B-reservas-7a · una ausencia es un `BookingBlock scope=STAFF` por la
+  // API que ya existe. No se crea ninguna entidad nueva.
+  async function ponerAusencia(
+    staff: AgendaStaff,
+    startTime: string,
+    endTime: string,
+    reason: string,
+  ) {
+    const res = await createAbsence({
+      staffUserId: staff.userId,
+      date,
+      startTime,
+      endTime,
+      reason,
+    });
+    setAbsenceFor(null);
+    if (!res.ok) {
+      flash(res.message);
+      return;
+    }
+    flash(
+      startTime === ALL_DAY_START && endTime === ALL_DAY_END
+        ? `${staff.displayName} no está hoy.`
+        : `${staff.displayName} no está de ${startTime} a ${endTime}.`,
+    );
+    await loadDay(date);
+  }
+
+  async function quitarAusencia(a: AgendaAbsence) {
+    setAbsenceDetail(null);
+    if (!a.id) {
+      flash("Esa ausencia no se puede quitar desde aquí.");
+      return;
+    }
+    const res = await deleteAbsence(a.id);
+    if (!res.ok) {
+      flash(res.message);
+      return;
+    }
+    flash("Ausencia quitada.");
+    await loadDay(date);
+  }
+
   async function doCreate(cobrar: boolean) {
     if (!draft || draft.serviceIds.length === 0 || !draft.start) return;
     setBookError(null);
@@ -403,7 +594,54 @@ export function AgendaPage({
 
   // Tap en un hueco vacío de una columna → alta slot-first.
   function openSlotFirst(staffUserId: string | null, minutes: number) {
-    const snapped = Math.round(minutes / SLOT_MIN) * SLOT_MIN;
+    // B-reservas-7a · se redondea HACIA ABAJO, no al más cercano. Con la
+    // retícula pintada (sobre todo a 30) redondear al más cercano
+    // contradice lo que se ve: la mitad de abajo de la banda de las 11:00
+    // abriría un alta a las 11:30. Se toca una banda, se coge esa banda.
+    const snapped = Math.floor(minutes / slotMin) * slotMin;
+
+    // B-reservas-7a · el día cerrado no ofrece NADA, y lo dice con su
+    // nombre. Tocarlo para acabar en un 409 es pasear a la cajera delante
+    // de la clienta.
+    if (cerrado) {
+      flash(
+        cerrado.name
+          ? `El centro está cerrado ese día · ${cerrado.name}.`
+          : "El centro está cerrado ese día.",
+      );
+      return;
+    }
+    // Fuera de los tramos abiertos de ESA columna tampoco se abre un alta:
+    // o el centro no abre a esa hora, o esa profesional no está.
+    const abiertos = staffUserId
+      ? (dayInfo?.staffOpen?.[staffUserId] ?? null)
+      : (dayInfo?.open ?? null);
+    if (dayInfo && !isOpenAt(abiertos, snapped)) {
+      flash(
+        abiertos && abiertos.length > 0
+          ? `A esa hora no se reserva. El horario es ${abiertos
+              .map((r) => `${r.startTime}–${r.endTime}`)
+              .join(" y ")}.`
+          : "A esa hora no se reserva: ese día no hay turno en esta columna.",
+      );
+      return;
+    }
+    // Y una ausencia pintada es la tercera causa, con su motivo.
+    const ausencia = (dayInfo?.absences ?? []).find(
+      (a) =>
+        (a.staffUserId === staffUserId || a.staffUserId === null) &&
+        minOf(a.startTime) <= snapped &&
+        snapped < minOf(a.endTime),
+    );
+    if (ausencia) {
+      flash(
+        ausencia.reason
+          ? `A esa hora no está: ${ausencia.reason}.`
+          : "A esa hora no está.",
+      );
+      return;
+    }
+
     // B-reservas-6a · una franja pasada NO invita a crear una cita. El
     // servidor la rechazaría igual (409 BOOKING_IN_PAST); enseñar el panel
     // de alta para acabar en un error es pasear a la cajera delante de la
@@ -434,7 +672,11 @@ export function AgendaPage({
   // en curso. A las 11:10 son las 11:00 — la franja en curso SE RESERVA
   // ("¿tienes hueco ahora?" es media agenda de una peluquería), y por eso
   // la línea de "ahora" cae DENTRO de la última franja que aún se ofrece.
-  const floorMin = Math.floor(nowMin / SLOT_MIN) * SLOT_MIN;
+  //
+  // B-reservas-7a · con la retícula de 30 la franja es el DOBLE de grande:
+  // a las 11:29 todavía se pueden dar las 11:00, a las 11:30 ya no. Mismo
+  // precio, decisión del bloque.
+  const floorMin = Math.floor(nowMin / slotMin) * slotMin;
   const earliestMin = isPastDay
     ? Number.POSITIVE_INFINITY
     : isToday
@@ -578,6 +820,41 @@ export function AgendaPage({
         )}
       </div>
 
+      {/* B-reservas-7a · el día CERRADO se dice arriba y con su nombre, no
+          se deduce de una rejilla vacía. «Cerrado · Virgen del Prado» es lo
+          que la cajera le lee a la clienta por teléfono. */}
+      {cerrado && (
+        <div
+          data-dia-cerrado={cerrado.name ?? ""}
+          className="shrink-0 px-3 md:px-6 py-2 bg-slate-800 text-white flex items-center gap-2 flex-wrap"
+        >
+          <span className="text-[13.5px] font-semibold">
+            Cerrado{cerrado.name ? ` · ${cerrado.name}` : ""}
+          </span>
+          <span className="text-[12.5px] text-slate-300">
+            Ese día el centro no abre y la agenda no ofrece nada.
+          </span>
+        </div>
+      )}
+      {/* Y el día especial que ABRE también se dice: un sábado de boda que
+          empieza a las 8:30 no se explica solo. */}
+      {!cerrado && dayInfo?.specialName && (
+        <div
+          data-dia-especial={dayInfo.specialName}
+          className="shrink-0 px-3 md:px-6 py-2 bg-amber-50 border-b border-amber-200 flex items-center gap-2 flex-wrap"
+        >
+          <span className="text-[13px] font-semibold text-amber-900">
+            {dayInfo.specialName}
+          </span>
+          <span className="text-[12.5px] text-amber-700">
+            Horario especial:{" "}
+            {(dayInfo.open ?? [])
+              .map((r) => `${r.startTime}–${r.endTime}`)
+              .join(" y ")}
+          </span>
+        </div>
+      )}
+
       <div className="flex-1 flex overflow-hidden">
         {/* Calendario */}
         <div ref={scrollRef} className="flex-1 overflow-auto">
@@ -614,7 +891,7 @@ export function AgendaPage({
                   className="relative"
                   style={{ height: (dayEndMin - dayStartMin) * PX_PER_MIN }}
                 >
-                  {hourRows().map((h) => (
+                  {hourRows(dayStartMin, dayEndMin).map((h) => (
                     <div
                       key={h}
                       data-hora={`${String(h).padStart(2, "0")}:00`}
@@ -634,6 +911,14 @@ export function AgendaPage({
                   appts={apptsByStaff.get(s.userId) ?? []}
                   nowMin={isToday ? nowMin : null}
                   pastUntilMin={pastUntilMin}
+                  dayStartMin={dayStartMin}
+                  dayEndMin={dayEndMin}
+                  slotMin={slotMin}
+                  // El día cerrado apaga la columna entera: `open: []`.
+                  open={cerrado ? [] : (dayInfo?.staffOpen?.[s.userId] ?? null)}
+                  absences={absencesByStaff.get(s.userId) ?? []}
+                  onAbsence={setAbsenceDetail}
+                  onMenu={() => setAbsenceFor(s)}
                   onSlot={(min) => openSlotFirst(s.userId, min)}
                   onAppt={abrirCita}
                   labelOf={serviceNames}
@@ -651,6 +936,14 @@ export function AgendaPage({
                   appts={apptsByStaff.get("__unassigned__") ?? []}
                   nowMin={isToday ? nowMin : null}
                   pastUntilMin={pastUntilMin}
+                  dayStartMin={dayStartMin}
+                  dayEndMin={dayEndMin}
+                  slotMin={slotMin}
+                  open={cerrado ? [] : (dayInfo?.open ?? null)}
+                  absences={(dayInfo?.absences ?? []).filter(
+                    (a) => a.staffUserId === null,
+                  )}
+                  onAbsence={setAbsenceDetail}
                   onSlot={(min) => openSlotFirst(null, min)}
                   onAppt={abrirCita}
                   labelOf={serviceNames}
@@ -671,6 +964,11 @@ export function AgendaPage({
             staff={activeStaff}
             date={date}
             isPastDay={isPastDay}
+            dayInfo={dayInfo}
+            staffName={
+              activeStaff.find((s) => s.userId === draft.staffUserId)
+                ?.displayName ?? null
+            }
             bookError={bookError}
             onPickAlternative={(start) => {
               setDraft({ ...draft, start });
@@ -697,6 +995,51 @@ export function AgendaPage({
         )}
       </div>
 
+      {/* B-reservas-7a · el alta de una ausencia, en TRES TOQUES como
+          máximo: el ⋯ de la columna, "No está en todo el día", y ya. */}
+      {absenceFor && (
+        <AbsenceSheet
+          staff={absenceFor}
+          // El rango por defecto arranca donde abre su columna, para que
+          // "de tal a tal hora" no obligue a tocar los dos selectores.
+          openRanges={dayInfo?.staffOpen?.[absenceFor.userId] ?? null}
+          slotMin={slotMin}
+          onCancel={() => setAbsenceFor(null)}
+          onSave={(from, to, reason) =>
+            void ponerAusencia(absenceFor, from, to, reason)
+          }
+        />
+      )}
+      {/* Y se quita desde la propia ausencia pintada. */}
+      {absenceDetail && (
+        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/30 p-3">
+          <div className="w-full md:w-80 bg-white rounded-2xl p-4 shadow-xl">
+            <h2 className="text-[15px] font-semibold text-mipiace-ink mb-1">
+              {absenceDetail.reason ?? "No está"}
+            </h2>
+            <p className="text-[13px] text-slate-500 mb-4">
+              {absenceDetail.startTime === "00:00" &&
+              absenceDetail.endTime === "24:00"
+                ? "Todo el día"
+                : `De ${absenceDetail.startTime} a ${absenceDetail.endTime}`}
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setAbsenceDetail(null)}
+                className="flex-1 h-11 rounded-2xl bg-mipiace-stone text-[14px] font-medium"
+              >
+                Cerrar
+              </button>
+              <button
+                onClick={() => void quitarAusencia(absenceDetail)}
+                className="flex-1 h-11 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[14px] font-medium"
+              >
+                Quitar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {toast && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-mipiace-ink text-white text-[13px] px-4 py-2 rounded-xl shadow-lg z-50">
           {toast}
@@ -706,10 +1049,148 @@ export function AgendaPage({
   );
 }
 
-function hourRows(): number[] {
+// B-reservas-7a · la regla ya no es de 8 a 21: sale de la franja visible
+// del día, que sale del horario del centro.
+function hourRows(startMin: number, endMin: number): number[] {
   const out: number[] = [];
-  for (let h = dayStartMin / 60; h < dayEndMin / 60; h++) out.push(h);
+  for (let h = Math.ceil(startMin / 60); h < endMin / 60; h++) out.push(h);
   return out;
+}
+
+// ── B-reservas-7a · poner una ausencia, en tres toques ─────────────────
+//
+// Donde Sole las escribe hoy: en la columna de la persona, no en un ajuste
+// del admin. «Ana libre» el miércoles entero; «ISA NO» de 9:00 a 10:30.
+//
+// El camino mínimo son TRES toques: el ⋯ de la cabecera (1), "No está en
+// todo el día" (2) — y ese ya guarda. El de rango son tres también si los
+// valores por defecto sirven: ⋯ (1), "No está a ratos" (2), "Guardar" (3).
+//
+// Por debajo es un `BookingBlock scope=STAFF` por la API que ya existe, y
+// que ya podían llamar el cajero y el owner. No hay entidad nueva.
+
+function AbsenceSheet(props: {
+  staff: AgendaStaff;
+  openRanges: OpenRange[] | null;
+  slotMin: number;
+  onCancel: () => void;
+  onSave: (startTime: string, endTime: string, reason: string) => void;
+}) {
+  const { staff, openRanges, slotMin } = props;
+  // El rango por defecto: desde donde abre su columna, una hora. Si no hay
+  // horario configurado, las 09:00 — la hora a la que abre casi todo.
+  const baseStart = openRanges?.[0] ? minOf(openRanges[0]!.startTime) : 9 * 60;
+  const baseEnd = Math.min(baseStart + 60, 24 * 60);
+  const [modo, setModo] = useState<"menu" | "rango">("menu");
+  const [from, setFrom] = useState(hhmm(baseStart));
+  const [to, setTo] = useState(hhmm(baseEnd));
+  const [reason, setReason] = useState("");
+
+  // Las horas que se pueden elegir, en la RETÍCULA del centro: ofrecer las
+  // 10:15 con la retícula a 30 sería ofrecer una hora que no existe.
+  const horas: string[] = [];
+  for (let m = 0; m <= 24 * 60; m += slotMin) horas.push(hhmm(m));
+
+  const invalido = minOf(to) <= minOf(from);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/30 p-3">
+      <div className="w-full md:w-96 bg-white rounded-2xl p-4 shadow-xl">
+        <div className="flex items-center gap-2 mb-3">
+          <h2 className="text-[15px] font-semibold text-mipiace-ink flex-1">
+            {staff.displayName}
+          </h2>
+          <button
+            onClick={props.onCancel}
+            className="h-9 w-9 rounded-xl hover:bg-slate-100 flex items-center justify-center"
+            aria-label="Cerrar"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {modo === "menu" ? (
+          <div className="flex flex-col gap-2">
+            <button
+              data-ausencia-dia-entero
+              onClick={() =>
+                props.onSave(ALL_DAY_START, ALL_DAY_END, reason)
+              }
+              className="h-12 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[14px] font-medium"
+            >
+              No está en todo el día
+            </button>
+            <button
+              data-ausencia-rango
+              onClick={() => setModo("rango")}
+              className="h-12 rounded-2xl bg-mipiace-stone hover:bg-slate-200 text-[14px] font-medium text-mipiace-ink"
+            >
+              No está a ratos
+            </button>
+            <input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              maxLength={200}
+              placeholder="Motivo (opcional)"
+              aria-label="Motivo"
+              className="h-11 px-3 rounded-2xl bg-mipiace-stone border border-slate-200 text-[14px]"
+            />
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-2">
+              <select
+                value={from}
+                onChange={(e) => setFrom(e.target.value)}
+                aria-label="Desde"
+                className="h-11 flex-1 px-2 rounded-2xl bg-mipiace-stone border border-slate-200 text-[14px] tabular-nums"
+              >
+                {horas.slice(0, -1).map((h) => (
+                  <option key={h} value={h}>
+                    {h}
+                  </option>
+                ))}
+              </select>
+              <span className="text-[13px] text-slate-400">a</span>
+              <select
+                value={to}
+                onChange={(e) => setTo(e.target.value)}
+                aria-label="Hasta"
+                className="h-11 flex-1 px-2 rounded-2xl bg-mipiace-stone border border-slate-200 text-[14px] tabular-nums"
+              >
+                {horas.slice(1).map((h) => (
+                  <option key={h} value={h}>
+                    {h === "24:00" ? "24:00 (fin del día)" : h}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              maxLength={200}
+              placeholder="Motivo (opcional)"
+              aria-label="Motivo"
+              className="h-11 px-3 rounded-2xl bg-mipiace-stone border border-slate-200 text-[14px]"
+            />
+            {invalido && (
+              <p className="text-[12.5px] text-red-600">
+                La hora de fin tiene que ser posterior a la de inicio.
+              </p>
+            )}
+            <button
+              data-ausencia-guardar
+              disabled={invalido}
+              onClick={() => props.onSave(from, to, reason)}
+              className="h-12 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark disabled:bg-slate-300 text-white text-[14px] font-medium"
+            >
+              Guardar
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ── Columna de un profesional ──────────────────────────────────────────
@@ -721,12 +1202,36 @@ function StaffColumn(props: {
   // B-reservas-6a · hasta qué minuto del día ya ha pasado (el suelo).
   // `null` = un día futuro, nada ha pasado.
   pastUntilMin: number | null;
+  // B-reservas-7a · la franja visible y la retícula, que ya no son
+  // constantes del módulo: salen del horario del centro de ESE día.
+  dayStartMin: number;
+  dayEndMin: number;
+  slotMin: number;
+  // Los tramos reservables de esta columna (turno ∩ centro). `null` = este
+  // centro no tiene horario configurado ⇒ no se apaga nada, que es como se
+  // comportaba antes del bloque. `[]` = nada es reservable hoy.
+  open: OpenRange[] | null;
+  absences: AgendaAbsence[];
+  onAbsence: (a: AgendaAbsence) => void;
+  // El gesto que pone una ausencia. Ausente en la columna "Sin asignar",
+  // que no es de nadie.
+  onMenu?: () => void;
   onSlot: (minutes: number) => void;
   onAppt: (a: AgendaAppointment) => void;
   labelOf: (a: AgendaAppointment) => string;
   clientOf: (a: AgendaAppointment) => string;
 }) {
-  const { staff, appts, nowMin, pastUntilMin } = props;
+  const {
+    staff,
+    appts,
+    nowMin,
+    pastUntilMin,
+    dayStartMin,
+    dayEndMin,
+    slotMin,
+    open,
+    absences,
+  } = props;
   const totalH = (dayEndMin - dayStartMin) * PX_PER_MIN;
   const pastH =
     pastUntilMin == null
@@ -735,15 +1240,61 @@ function StaffColumn(props: {
           0,
           (Math.min(pastUntilMin, dayEndMin) - dayStartMin) * PX_PER_MIN,
         );
+  // B-reservas-7a · lo que NO es reservable de esta columna.
+  const cerradas = closedBands(open, dayStartMin, dayEndMin);
+  // Y las líneas de la retícula, que antes eran sólo las horas en punto.
+  // Con 30 se ven las medias: la cajera tiene que poder contar las bandas
+  // que va a tocar.
+  const gridLines: number[] = [];
+  for (
+    let m = Math.ceil(dayStartMin / slotMin) * slotMin;
+    m < dayEndMin;
+    m += slotMin
+  ) {
+    gridLines.push(m);
+  }
+  /** ¿Esta cita se sale del horario de la columna o pisa una ausencia?
+   *  Pasa cuando el festivo o la ausencia se pusieron DESPUÉS. Se sigue
+   *  viendo y se sigue pudiendo cobrar: sólo se marca. */
+  function fueraDeHorario(a: AgendaAppointment): boolean {
+    const s = localMinutes(a.start);
+    const e0 = localMinutes(a.end);
+    const e = e0 <= s ? 24 * 60 : e0;
+    if (open != null) {
+      const dentro = open.some(
+        (r) => minOf(r.startTime) <= s && e <= minOf(r.endTime),
+      );
+      if (!dentro) return true;
+    }
+    return absences.some(
+      (ab) => s < minOf(ab.endTime) && minOf(ab.startTime) < e,
+    );
+  }
   return (
     <div className="w-44 md:w-52 shrink-0 border-l border-slate-200">
       <div
         className="sticky top-0 z-10 h-10 flex items-center gap-2 px-2 bg-white border-b border-slate-200"
         style={{ borderTop: `3px solid ${staff.color ?? "#cbd5e1"}` }}
       >
-        <span className="text-[13px] font-semibold text-mipiace-ink truncate">
+        <span className="text-[13px] font-semibold text-mipiace-ink truncate flex-1">
           {staff.displayName}
         </span>
+        {/* B-reservas-7a · TOQUE 1 de 3 para poner una ausencia. Va en la
+            cabecera de la columna porque es donde Sole escribe «Ana libre»
+            en su Excel: en la fila de la persona, no en un ajuste. */}
+        {props.onMenu && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              props.onMenu!();
+            }}
+            data-ausencia-menu={staff.userId}
+            className="h-8 w-8 shrink-0 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-500"
+            aria-label={`Opciones de ${staff.displayName}`}
+          >
+            <MoreVertical className="w-4 h-4" />
+          </button>
+        )}
       </div>
       <div
         // Gancho estable para el bucle visual y el test de jsdom: la
@@ -769,14 +1320,64 @@ function StaffColumn(props: {
             className="absolute left-0 right-0 top-0 bg-slate-200/45 pointer-events-none border-b border-slate-300/60"
           />
         )}
-        {/* rejilla horaria */}
-        {hourRows().map((h) => (
+        {/* B-reservas-7a · lo que NO es reservable de esta columna: fuera
+            del horario del centro, o fuera del turno de esta profesional.
+            Va por debajo de las citas —una cita que quedó fuera se sigue
+            viendo y se sigue cobrando— y no se puede tocar para crear. */}
+        {cerradas.map((b) => (
           <div
-            key={h}
-            style={{ top: (h * 60 - dayStartMin) * PX_PER_MIN }}
-            className="absolute left-0 right-0 border-t border-slate-100"
+            key={`cerrada-${b.from}`}
+            aria-hidden
+            data-no-reservable={`${hhmm(b.from)}-${hhmm(b.to)}`}
+            style={{
+              top: (b.from - dayStartMin) * PX_PER_MIN,
+              height: (b.to - b.from) * PX_PER_MIN,
+            }}
+            className="absolute left-0 right-0 bg-slate-100 pointer-events-none bg-[repeating-linear-gradient(135deg,transparent,transparent_5px,rgba(148,163,184,0.18)_5px,rgba(148,163,184,0.18)_10px)]"
           />
         ))}
+        {/* rejilla: una línea por franja de la RETÍCULA del centro, más
+            marcada en las horas en punto. Con 30 se ven las medias. */}
+        {gridLines.map((m) => (
+          <div
+            key={m}
+            style={{ top: (m - dayStartMin) * PX_PER_MIN }}
+            className={`absolute left-0 right-0 border-t ${
+              m % 60 === 0 ? "border-slate-200" : "border-slate-100"
+            }`}
+          />
+        ))}
+        {/* B-reservas-7a · las AUSENCIAS, con su motivo. Es el «Ana libre»
+            que Sole escribe en la celda. Se tocan para quitarlas. */}
+        {absences.map((ab) => {
+          const from = Math.max(minOf(ab.startTime), dayStartMin);
+          const to = Math.min(minOf(ab.endTime), dayEndMin);
+          if (to <= from) return null;
+          return (
+            <button
+              key={`${ab.id ?? "sin-id"}-${ab.startTime}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                props.onAbsence(ab);
+              }}
+              data-ausencia={ab.id ?? "sin-id"}
+              style={{
+                top: (from - dayStartMin) * PX_PER_MIN,
+                height: (to - from) * PX_PER_MIN,
+              }}
+              className="absolute left-0.5 right-0.5 rounded-lg bg-rose-50/85 border border-dashed border-rose-300 px-2 py-1 text-left overflow-hidden z-10 hover:bg-rose-100"
+            >
+              <div className="text-[11px] font-semibold text-rose-800 truncate">
+                {ab.reason ?? "No está"}
+              </div>
+              <div className="text-[10.5px] text-rose-600 truncate">
+                {ab.startTime === "00:00" && ab.endTime === "24:00"
+                  ? "todo el día"
+                  : `${ab.startTime}–${ab.endTime}`}
+              </div>
+            </button>
+          );
+        })}
         {/* línea "ahora" */}
         {nowMin != null && nowMin >= dayStartMin && nowMin <= dayEndMin && (
           <div
@@ -787,10 +1388,19 @@ function StaffColumn(props: {
         {/* citas */}
         {appts.map((a) => {
           const top = (localMinutes(a.start) - dayStartMin) * PX_PER_MIN;
+          const finMin =
+            localMinutes(a.end) <= localMinutes(a.start)
+              ? 24 * 60
+              : localMinutes(a.end);
           const height = Math.max(
             22,
-            (localMinutes(a.end) - localMinutes(a.start)) * PX_PER_MIN,
+            (finMin - localMinutes(a.start)) * PX_PER_MIN,
           );
+          // B-reservas-7a · una cita que quedó fuera del horario —porque el
+          // festivo o la ausencia se pusieron DESPUÉS— se sigue viendo y se
+          // sigue pudiendo cobrar. Sólo se marca, para que la cajera sepa
+          // que hay algo que avisar.
+          const fuera = fueraDeHorario(a);
           // B-reservas-6a frente O · una cita que sigue en el outbox se
           // pinta DISTINTA: a rayas discontinuas y diciendo en qué estado
           // está. No es una cita del centro todavía — y si el servidor la
@@ -826,8 +1436,13 @@ function StaffColumn(props: {
                         ? "bg-red-50 border-red-300"
                         : "bg-amber-50 border-amber-300"
                     }`
-                  : "absolute left-1 right-1 rounded-lg bg-white shadow-sm border border-slate-200 px-2 py-1 text-left overflow-hidden hover:shadow-md"
+                  : `absolute left-1 right-1 rounded-lg bg-white shadow-sm px-2 py-1 text-left overflow-hidden hover:shadow-md z-20 ${
+                      fuera
+                        ? "border border-amber-300 ring-1 ring-amber-200"
+                        : "border border-slate-200"
+                    }`
               }
+              data-fuera-de-horario={!local && fuera ? "1" : undefined}
             >
               <div
                 className={`text-[11px] font-semibold truncate ${
@@ -849,7 +1464,15 @@ function StaffColumn(props: {
                   mejor que enseñar media palabra. */}
               {height >= CARD_TWO_LINE_MIN_H && (
                 <div className="text-[10.5px] text-slate-500 truncate">
+                  {!local && fuera ? "fuera de horario · " : ""}
                   {props.labelOf(a)}
+                </div>
+              )}
+              {/* Si la tarjeta no da para dos líneas, la marca va en la
+                  primera: es lo que hay que saber antes que el servicio. */}
+              {height < CARD_TWO_LINE_MIN_H && !local && fuera && (
+                <div className="text-[10px] text-amber-700 truncate">
+                  fuera de horario
                 </div>
               )}
             </button>
@@ -870,6 +1493,10 @@ function BookingPanel(props: {
   date: string;
   // B-reservas-6a · un día que ya pasó no tiene huecos que buscar.
   isPastDay: boolean;
+  // B-reservas-7a · el horario del centro de ESE día. Sirve para que "no
+  // hay huecos" deje de ser una sola frase para tres causas distintas.
+  dayInfo: AgendaDayInfo | undefined;
+  staffName: string | null;
   // El 409 del servidor con su frase y sus alternativas.
   bookError: { message: string; alternatives: AvailabilitySlot[] } | null;
   onPickAlternative: (start: string) => void;
@@ -877,7 +1504,8 @@ function BookingPanel(props: {
   onReserve: () => void;
   onReserveAndCharge: () => void;
 }) {
-  const { draft, setDraft, services, date, isPastDay, bookError } = props;
+  const { draft, setDraft, services, date, isPastDay, bookError, dayInfo } =
+    props;
   const picker = useClientPicker();
   const [slots, setSlots] = useState<AvailabilitySlot[]>([]);
   const [searching, setSearching] = useState(false);
@@ -917,6 +1545,40 @@ function BookingPanel(props: {
     setSlots([]);
   }
 
+  /** Por qué no hay huecos: el centro cerrado, nadie con turno, o el día
+   *  lleno. Se mira en ese orden porque es el orden en que se arreglan. */
+  function sinHuecosPorque(): string {
+    if (dayInfo?.closed) {
+      return dayInfo.closed.name
+        ? `El centro está cerrado ese día · ${dayInfo.closed.name}.`
+        : "El centro está cerrado ese día.";
+    }
+    const quien = draft.staffUserId;
+    if (quien && dayInfo) {
+      const suyos = dayInfo.staffOpen?.[quien] ?? [];
+      if (suyos.length === 0) {
+        return `${props.staffName ?? "Esa profesional"} no tiene turno ese día.`;
+      }
+      const todoElDia = (dayInfo.absences ?? []).some(
+        (a) =>
+          (a.staffUserId === quien || a.staffUserId === null) &&
+          minOf(a.startTime) <= minOf(suyos[0]!.startTime) &&
+          minOf(a.endTime) >= minOf(suyos[suyos.length - 1]!.endTime),
+      );
+      if (todoElDia) {
+        return `${props.staffName ?? "Esa profesional"} no está ese día.`;
+      }
+    }
+    if (
+      dayInfo &&
+      !quien &&
+      Object.values(dayInfo.staffOpen ?? {}).every((r) => r.length === 0)
+    ) {
+      return "Ese día no hay nadie con turno.";
+    }
+    return "No hay huecos ese día.";
+  }
+
   async function findSlots() {
     if (draft.serviceIds.length === 0) return;
     if (isPastDay) {
@@ -933,7 +1595,12 @@ function BookingPanel(props: {
         to: date,
       });
       setSlots(res);
-      if (res.length === 0) setSearchError("No hay huecos ese día.");
+      // B-reservas-7a · TRES CAUSAS, tres frases. "No hay huecos" era una
+      // sola para las tres, y se arreglan de formas distintas: el centro
+      // cerrado lo arregla el owner en los ajustes, el turno que falta lo
+      // arregla el panel de Personal, y el día lleno se arregla con otro
+      // día. Decirlas igual es mandar a la cajera al sitio equivocado.
+      if (res.length === 0) setSearchError(sinHuecosPorque());
     } catch (err) {
       setSearchError(err instanceof ApiError ? err.message : "Error buscando huecos.");
     } finally {
