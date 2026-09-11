@@ -48,7 +48,17 @@ export function currentGridStart(
   const date = utcToWallDate(now, tz);
   const min = timeToMinutes(utcToWallTime(now, tz));
   const floored = Math.floor(min / stepMin) * stepMin;
-  return wallTimeToUtc(date, minutesToTime(floored), tz);
+  const wallFloor = wallTimeToUtc(date, minutesToTime(floored), tz);
+  if (wallFloor.getTime() <= now.getTime()) return wallFloor;
+  // La hora REPETIDA del cambio de hora (25-10-2026 en Europe/Madrid: las
+  // 02:00–03:00 se viven dos veces). Esa hora de pared es ambigua y
+  // `wallTimeToUtc` resuelve a la segunda pasada, que cae DESPUÉS de `now`
+  // — y un suelo en el futuro rechazaría una cita perfectamente legal.
+  // Se cae al epoch, que es exacto mientras el offset del huso sea múltiplo
+  // de la retícula: lo es en todos los husos vivos (hasta el +05:45 de
+  // Nepal es múltiplo de 15).
+  const stepMs = stepMin * 60_000;
+  return new Date(Math.floor(now.getTime() / stepMs) * stepMs);
 }
 
 /**
