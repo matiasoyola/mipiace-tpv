@@ -58,6 +58,7 @@ vi.mock("../src/hooks/useClientPicker.js", () => ({
 }));
 
 import { ApiError } from "../src/api.js";
+import { __resetOutboxForTests } from "../src/lib/outbox.js";
 import { AgendaPage } from "../src/pages/AgendaPage.js";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
@@ -94,10 +95,16 @@ function yDe(hhmm: string): number {
 let container: HTMLDivElement;
 let root: Root;
 
-beforeEach(() => {
-  vi.useFakeTimers({ shouldAdvanceTime: true });
+beforeEach(async () => {
+  // Sólo se congela `Date`. Falsear también los timers deja colgada a
+  // fake-indexeddb —que es quien mueve el outbox que la agenda mezcla
+  // (frente O)— y la pantalla se queda en "Cargando…".
+  vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["Date"] });
   vi.setSystemTime(AHORA);
   (globalThis as Record<string, unknown>).indexedDB = new IDBFactory();
+  // La agenda mezcla las altas del outbox (frente O), así que este test
+  // necesita el mismo arranque limpio que los del cobro.
+  await __resetOutboxForTests();
   apiMock.apiWithCashier.mockReset();
   apiMock.apiWithCashier.mockImplementation(async (path: string) => {
     if (path.startsWith("/agenda?")) {

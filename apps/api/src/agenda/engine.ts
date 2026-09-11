@@ -11,6 +11,7 @@
 import {
   currentGridStart,
   isOnGrid,
+  resolveBookingNow,
   nextWallDate,
   offGridMessage,
   pastMessage,
@@ -62,6 +63,11 @@ export interface HoldRequest {
   confirmed: boolean;
   pendingTtlMinutes: number;
   notes: string | null;
+  // B-reservas-6a frente O · el instante en que la cajera creó el alta,
+  // sellado por el outbox al encolar. Sólo puede mover el SUELO hacia
+  // atrás, y dentro de la cota (`resolveBookingNow`). Ausente en el alta
+  // online normal, que es el 99 % de las altas.
+  occurredAt?: Date | null;
 }
 
 export type HoldFailureReason =
@@ -526,21 +532,28 @@ export function createCitaEngine(
   // `hold()` y `reschedule()` la llaman con el mismo suelo que
   // `computeSlots` usa para listar: ésa es la simetría del invariante 6.
   // Devuelve el rechazo ya redactado, o `null` si el inicio es legal.
+  // `gate` es el suelo con el que se JUZGA el inicio pedido; `floorNow` el
+  // suelo del reloj real, del que salen las ALTERNATIVAS. Son el mismo
+  // instante salvo en el alta que se creó sin red (frente O): ahí la
+  // puerta se abre con el instante del alta, pero las horas que se le
+  // ofrecen a la clienta tienen que ser de verdad futuras — proponerle un
+  // hueco que también pasó sería cambiar un error por otro.
   async function floorCheck(
     startUtc: Date,
-    floor: Date,
+    gate: Date,
+    floorNow: Date,
     params: AvailabilityParams,
     reqMap: Map<string, ServiceRequirement>,
     planned: PlannedItem[],
   ): Promise<(HoldResult & { ok: false }) | null> {
     // El pasado se mira primero: es lo que hay que decirle a la clienta.
     // Un "martes pasado a las 10:07" es, para ella, una hora que ya pasó.
-    if (startUtc.getTime() < floor.getTime()) {
+    if (startUtc.getTime() < gate.getTime()) {
       const alternatives = await openingsFrom(
         params,
         reqMap,
         planned,
-        floor,
+        floorNow,
         FLOOR_ALTERNATIVES,
       );
       return {
@@ -555,7 +568,7 @@ export function createCitaEngine(
         params,
         reqMap,
         planned,
-        startUtc,
+        startUtc.getTime() > floorNow.getTime() ? startUtc : floorNow,
         FLOOR_ALTERNATIVES,
       );
       return {
@@ -617,9 +630,21 @@ export function createCitaEngine(
       // B-reservas-6a · el suelo, ANTES de mirar si el hueco cabe. Un
       // inicio que ya pasó no es un hueco ocupado: es un hueco que no
       // existe, y la frase que se le dice a la clienta es otra.
-      const floor = currentGridStart(clock.now(), tz, SLOT_MINUTES);
+      const now = clock.now();
+      const floor = currentGridStart(now, tz, SLOT_MINUTES);
+      // Frente O · si el alta se creó sin red, la puerta se juzga con el
+      // instante en que la cajera la escribió. `resolveBookingNow` es la
+      // autoridad —la ruta la llama sólo para loguear—, así que un
+      // `occurredAt` del futuro o más viejo que la cota no entra ni
+      // aunque alguien lo cuele por otro camino.
+      const gate = currentGridStart(
+        resolveBookingNow(now, request.occurredAt ?? null).at,
+        tz,
+        SLOT_MINUTES,
+      );
       const rejected = await floorCheck(
         startUtc,
+        gate,
         floor,
         params,
         reqMap,
@@ -710,9 +735,12 @@ export function createCitaEngine(
       // B-reservas-6a · mover una cita es elegir un inicio, así que el suelo
       // y la retícula valen igual que al crearla. Sólo el INICIO está bajo
       // el suelo: el estado de una cita pasada y su cobro no pasan por aquí.
+      // Mover no pasa por el outbox (`patchAppointment` no encola), así
+      // que aquí la puerta es siempre el reloj real.
       const floor = currentGridStart(clock.now(), tz, SLOT_MINUTES);
       const rejected = await floorCheck(
         startUtc,
+        floor,
         floor,
         params,
         reqMap,

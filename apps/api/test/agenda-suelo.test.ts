@@ -19,7 +19,12 @@
 import { describe, expect, it } from "vitest";
 
 import { createCitaEngine } from "../src/agenda/engine.js";
-import { currentGridStart, isOnGrid } from "../src/agenda/floor.js";
+import {
+  BOOKING_OCCURRED_AT_MAX_AGE_MS,
+  currentGridStart,
+  isOnGrid,
+  resolveBookingNow,
+} from "../src/agenda/floor.js";
 import { utcToWallTime, wallTimeToUtc } from "../src/agenda/time.js";
 import type { ServiceRequirement, TemplateSlot } from "../src/agenda/types.js";
 import { makeFakeStore } from "./helpers/agenda-fake-store.js";
@@ -251,6 +256,114 @@ describe("hold() y el suelo", () => {
     expect(reenvio.ok).toBe(true);
     if (!reenvio.ok) return;
     expect(reenvio.duplicate).toBe(true);
+  });
+});
+
+// ── El alta que se creó sin red (frente O) ────────────────────────────
+
+describe("resolveBookingNow · con qué instante se juzga el suelo", () => {
+  const ahora = h(HOY, "11:40");
+
+  it("sin occurredAt manda el reloj del servidor", () => {
+    const r = resolveBookingNow(ahora, null);
+    expect(r.source).toBe("now");
+    expect(r.at.getTime()).toBe(ahora.getTime());
+  });
+
+  it("con un occurredAt reciente, manda el instante del alta", () => {
+    const r = resolveBookingNow(ahora, h(HOY, "11:05"));
+    expect(r.source).toBe("occurred_at");
+    expect(r.at.toISOString()).toBe(h(HOY, "11:05").toISOString());
+  });
+
+  it("del FUTURO se ignora: un reloj adelantado no abre el futuro", () => {
+    const r = resolveBookingNow(ahora, h(HOY, "12:00"));
+    expect(r.source).toBe("future");
+    expect(r.at.getTime()).toBe(ahora.getTime());
+  });
+
+  it("más viejo que la cota se ignora, y la cota son dos horas", () => {
+    expect(BOOKING_OCCURRED_AT_MAX_AGE_MS).toBe(2 * 60 * 60 * 1000);
+    const justo = new Date(ahora.getTime() - BOOKING_OCCURRED_AT_MAX_AGE_MS);
+    expect(resolveBookingNow(ahora, justo).source).toBe("occurred_at");
+    const pasado = new Date(justo.getTime() - 1000);
+    const r = resolveBookingNow(ahora, pasado);
+    expect(r.source).toBe("too_old");
+    expect(r.at.getTime()).toBe(ahora.getTime());
+  });
+});
+
+describe("hold() · el alta que se escribió sin red", () => {
+  it("la franja era buena al escribirla: entra aunque llegue 40 min tarde", async () => {
+    // La cajera la escribió a las 11:05 ("¿tienes hueco ahora?"); el AP12
+    // estaba sin red y sube a las 11:45.
+    const { engine } = motorA("11:45");
+    const res = await engine.hold({
+      ...alta(h(HOY, "11:00")),
+      occurredAt: h(HOY, "11:05"),
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // Y entra en SU hueco, el de las 11:00, no en el de la llegada.
+    expect(res.appointment.start).toBe(h(HOY, "11:00").toISOString());
+  });
+
+  it("sin el sello, esa misma alta se cae (que es lo que pasaba)", async () => {
+    const { engine } = motorA("11:45");
+    const res = await engine.hold(alta(h(HOY, "11:00")));
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.reason).toBe("BOOKING_IN_PAST");
+  });
+
+  it("un occurredAt más viejo que la cota no salva nada", async () => {
+    const { engine } = motorA("14:00");
+    const res = await engine.hold({
+      ...alta(h(HOY, "11:00")),
+      occurredAt: h(HOY, "11:05"), // hace 2 h 55 min
+    });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.reason).toBe("BOOKING_IN_PAST");
+  });
+
+  it("un occurredAt del futuro no abre el pasado", async () => {
+    const { engine } = motorA("11:45");
+    const res = await engine.hold({
+      ...alta(h(HOY, "11:00")),
+      occurredAt: h(HOY, "23:00"),
+    });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.reason).toBe("BOOKING_IN_PAST");
+  });
+
+  it("las alternativas del rechazo son del AHORA real, no del alta", async () => {
+    // Si se ofrecieran desde el instante del alta, serían horas que
+    // también han pasado: cambiar un error por otro.
+    const { engine } = motorA("14:00");
+    const res = await engine.hold({
+      ...alta(h(HOY, "11:00")),
+      occurredAt: h(HOY, "11:05"),
+    });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    for (const alt of res.alternatives) {
+      expect(new Date(alt.start).getTime()).toBeGreaterThanOrEqual(
+        h(HOY, "14:00").getTime(),
+      );
+    }
+  });
+
+  it("el suelo del alta no se salta la retícula", async () => {
+    const { engine } = motorA("11:45");
+    const res = await engine.hold({
+      ...alta(h(HOY, "11:07")),
+      occurredAt: h(HOY, "11:05"),
+    });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.reason).toBe("BOOKING_OFF_GRID");
   });
 });
 

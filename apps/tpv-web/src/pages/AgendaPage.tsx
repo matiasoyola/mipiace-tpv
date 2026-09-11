@@ -19,6 +19,8 @@ import {
   type ClientRow,
 } from "../lib/clients.js";
 import {
+  centerHHMM,
+  centerToday,
   checkoutAppointmentTicket,
   createAppointment,
   fetchAgendaDay,
@@ -34,6 +36,7 @@ import {
   type AvailabilitySlot,
 } from "../lib/agenda.js";
 import { useClientPicker } from "../hooks/useClientPicker.js";
+import { outboxRetry, subscribeOutbox } from "../lib/outbox.js";
 
 // ── Helpers de zona horaria (Europe/Madrid) para pintar ────────────────
 
@@ -65,9 +68,9 @@ function localMinutes(iso: string): number {
   return (hh === 24 ? 0 : hh) * 60 + mm;
 }
 
-function localHHMM(iso: string): string {
-  return partsFmt.format(new Date(iso));
-}
+// B-reservas-6a frente O · la hora de pared la da `lib/agenda.ts`, que es
+// donde también la necesita el merge del outbox. Una copia menos.
+const localHHMM = centerHHMM;
 
 // minutos desde medianoche → "HH:MM" (para decir la hora del suelo).
 function hhmm(minutes: number): string {
@@ -76,15 +79,7 @@ function hhmm(minutes: number): string {
   return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
 }
 
-function todayLocalDate(): string {
-  const f = new Intl.DateTimeFormat("en-CA", {
-    timeZone: TZ,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  return f.format(new Date());
-}
+const todayLocalDate = centerToday;
 
 function addDays(dateStr: string, n: number): string {
   const d = new Date(`${dateStr}T12:00:00.000Z`);
@@ -240,6 +235,15 @@ export function AgendaPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notice]);
 
+  // B-reservas-6a frente O · un alta encolada que el servidor acepta (o
+  // rechaza) cambia lo que hay que pintar sin que nadie toque la pantalla.
+  // El outbox avisa; la agenda se repinta.
+  useEffect(() => {
+    return subscribeOutbox(() => {
+      void loadDay(date);
+    });
+  }, [date, loadDay]);
+
   useEffect(() => {
     void loadCatalogFromCache().then(setServices);
     void loadClientsFromCache().then((cs) => {
@@ -271,6 +275,13 @@ export function AgendaPage({
     if (staffFilter) return activeStaff.filter((s) => s.userId === staffFilter);
     return activeStaff;
   }, [activeStaff, staffFilter]);
+
+  // Las altas del outbox que el servidor rechazó. No se van solas de la
+  // pantalla: la cajera tiene que poder verlas y decidir.
+  const rechazadas = useMemo(
+    () => (day?.appointments ?? []).filter((a) => a.outboxStatus === "rejected"),
+    [day],
+  );
 
   const clientName = (id: string | null): string => {
     if (!id) return "Sin cliente";
@@ -321,6 +332,12 @@ export function AgendaPage({
       })),
       start: draft.start,
       source: "PRESENCIAL",
+      // Sólo para pintarla en su hueco mientras está encolada: el schema
+      // del alta no acepta este campo y el outbox no lo envía.
+      durationMin: draft.serviceIds.reduce(
+        (sum, id) => sum + (durationByService.get(id)?.durationMin ?? 0),
+        0,
+      ),
     });
     if (!res.ok) {
       // El servidor ya redacta la frase (BOOKING_IN_PAST / BOOKING_OFF_GRID
@@ -357,6 +374,21 @@ export function AgendaPage({
       serviceLabel: appt ? serviceNames(appt) : "",
     });
     onClose();
+  }
+
+  // Una cita que todavía vive en el outbox NO existe en el servidor:
+  // abrir su detalle ofrecería "Cobrar en caja" sobre algo que no está.
+  // Se cuenta lo que le pasa, que es lo que la cajera necesita saber.
+  function abrirCita(a: AgendaAppointment) {
+    if (!a.pendingOffline) {
+      setDetail(a);
+      return;
+    }
+    flash(
+      a.outboxStatus === "rejected"
+        ? `No se pudo guardar: ${a.outboxError ?? "el servidor la rechazó"}`
+        : "Cita guardada sin red; se enviará al reconectar.",
+    );
   }
 
   async function changeStatus(id: string, status: AppointmentStatus) {
@@ -498,6 +530,32 @@ export function AgendaPage({
         </button>
       </div>
 
+      {/* B-reservas-6a frente O · un alta que el servidor rechazó no puede
+          quedarse sólo en el chip de abajo a la derecha: la cajera está
+          mirando la agenda, y esa cita la escribió ella. El aviso NO es un
+          toast — no se va solo — y trae la acción que se quiere: reintentar.
+          Descartar sigue en el chip, que ya pide confirmación. */}
+      {rechazadas.length > 0 && (
+        <div className="shrink-0 px-3 md:px-6 py-2 bg-red-50 border-b border-red-200 flex items-center gap-3 flex-wrap">
+          <span className="text-[13px] text-red-800">
+            {rechazadas.length === 1
+              ? `La cita de las ${localHHMM(rechazadas[0]!.start)} no se pudo guardar`
+              : `${rechazadas.length} citas no se pudieron guardar`}
+            {rechazadas.length === 1 && rechazadas[0]!.outboxError
+              ? `: ${rechazadas[0]!.outboxError}`
+              : "."}
+          </span>
+          <button
+            onClick={() => {
+              for (const a of rechazadas) void outboxRetry(a.id);
+            }}
+            className="h-9 shrink-0 px-3 rounded-xl bg-white border border-red-200 hover:bg-red-100 text-[12.5px] font-medium text-red-700"
+          >
+            Reintentar
+          </button>
+        </div>
+      )}
+
       {/* Semana (tira de días) */}
       <div className="flex gap-1 px-3 md:px-6 py-2 bg-white border-b border-slate-100 shrink-0 overflow-x-auto">
         {Array.from({ length: 7 }, (_, i) => addDays(todayLocalDate(), i)).map(
@@ -577,7 +635,7 @@ export function AgendaPage({
                   nowMin={isToday ? nowMin : null}
                   pastUntilMin={pastUntilMin}
                   onSlot={(min) => openSlotFirst(s.userId, min)}
-                  onAppt={setDetail}
+                  onAppt={abrirCita}
                   labelOf={serviceNames}
                   clientOf={(a) => clientName(a.clientId)}
                 />
@@ -594,7 +652,7 @@ export function AgendaPage({
                   nowMin={isToday ? nowMin : null}
                   pastUntilMin={pastUntilMin}
                   onSlot={(min) => openSlotFirst(null, min)}
-                  onAppt={setDetail}
+                  onAppt={abrirCita}
                   labelOf={serviceNames}
                   clientOf={(a) => clientName(a.clientId)}
                 />
@@ -733,6 +791,12 @@ function StaffColumn(props: {
             22,
             (localMinutes(a.end) - localMinutes(a.start)) * PX_PER_MIN,
           );
+          // B-reservas-6a frente O · una cita que sigue en el outbox se
+          // pinta DISTINTA: a rayas discontinuas y diciendo en qué estado
+          // está. No es una cita del centro todavía — y si el servidor la
+          // rechazó, se queda ahí en rojo hasta que alguien decida.
+          const local = a.pendingOffline === true;
+          const rechazada = a.outboxStatus === "rejected";
           return (
             <button
               key={a.id + staff.userId}
@@ -743,12 +807,31 @@ function StaffColumn(props: {
               style={{
                 top,
                 height,
-                borderLeft: `4px solid ${STATUS_COLOR[a.status]}`,
+                ...(local
+                  ? {}
+                  : { borderLeft: `4px solid ${STATUS_COLOR[a.status]}` }),
               }}
-              className="absolute left-1 right-1 rounded-lg bg-white shadow-sm border border-slate-200 px-2 py-1 text-left overflow-hidden hover:shadow-md"
+              className={
+                local
+                  ? `absolute left-1 right-1 rounded-lg px-2 py-1 text-left overflow-hidden border-2 border-dashed ${
+                      rechazada
+                        ? "bg-red-50 border-red-300"
+                        : "bg-amber-50 border-amber-300"
+                    }`
+                  : "absolute left-1 right-1 rounded-lg bg-white shadow-sm border border-slate-200 px-2 py-1 text-left overflow-hidden hover:shadow-md"
+              }
             >
-              <div className="text-[11px] font-semibold text-mipiace-ink truncate">
+              <div
+                className={`text-[11px] font-semibold truncate ${
+                  local
+                    ? rechazada
+                      ? "text-red-800"
+                      : "text-amber-900"
+                    : "text-mipiace-ink"
+                }`}
+              >
                 {localHHMM(a.start)} · {props.clientOf(a)}
+                {local && (rechazada ? " · rechazada" : " · sin enviar")}
               </div>
               {/* B-reservas-5 F8 · la segunda línea sólo si cabe entera.
                   Una cita de 30 min mide 33 px y el contenido pide 40:

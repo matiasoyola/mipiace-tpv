@@ -37,6 +37,8 @@ import {
   type BookingEngine,
   type HoldFailureReason,
 } from "./engine.js";
+import { resolveBookingNow } from "./floor.js";
+import { parseOccurredAt } from "../shift/impute.js";
 import { createAgendaStore, type AgendaStore } from "./store.js";
 import { wallTimeToUtc } from "./time.js";
 import type { AppointmentStatus } from "./types.js";
@@ -210,6 +212,12 @@ export async function registerAgendaRoutes(
               },
             },
             start: { type: "string", format: "date-time" },
+            // B-reservas-6a frente O · el instante en que la cajera creó
+            // el alta, sellado por el outbox al encolar. Sin este campo en
+            // el schema, el `removeAdditional` de Fastify lo borraría antes
+            // de que nadie lo viera — que es exactamente lo que le pasó al
+            // checkout de borrador en B-5 (§2.12 de reservas-5-done).
+            occurredAt: { type: ["string", "null"], format: "date-time" },
             source: {
               type: "string",
               enum: ["PRESENCIAL", "WEB", "PHONE", "GIFT_REDEMPTION"],
@@ -226,10 +234,37 @@ export async function registerAgendaRoutes(
         clientId?: string | null;
         items: Array<{ serviceId: string; staffUserId?: string | null }>;
         start: string;
+        occurredAt?: string | null;
         source?: "PRESENCIAL" | "WEB" | "PHONE" | "GIFT_REDEMPTION";
         notes?: string | null;
       };
       const source = body.source ?? "PRESENCIAL";
+
+      // Frente O · el alta que se creó sin red. Dos filtros encadenados,
+      // cada uno con su dueño:
+      //   1. `parseOccurredAt` (v1.11) descarta el FUTURO con la misma
+      //      tolerancia de 5 min que usan los tickets — un reloj
+      //      adelantado no abre el futuro de la agenda;
+      //   2. `resolveBookingNow` (el suelo) descarta lo más viejo que la
+      //      cota. Manda el motor, que la vuelve a llamar; aquí se llama
+      //      sólo para dejar escrito QUÉ pasó con el campo.
+      const { at: parsedOccurredAt, skewed } = parseOccurredAt(body.occurredAt);
+      const decision = resolveBookingNow(new Date(), parsedOccurredAt);
+      if (body.occurredAt) {
+        request.log.info(
+          {
+            event: "agenda.booking_occurred_at",
+            externalId: body.externalId,
+            occurredAt: body.occurredAt,
+            start: body.start,
+            // "future" también cuando `parseOccurredAt` ya lo tiró.
+            source: skewed ? "future" : decision.source,
+          },
+          decision.source === "occurred_at"
+            ? "el suelo se evalúa con el instante del alta (creada sin red)"
+            : "occurredAt no se usa para el suelo",
+        );
+      }
       // Presencial = confirmada directa; el resto entra como hold PENDING.
       const confirmed = source === "PRESENCIAL";
       const result = await engine.hold({
@@ -238,6 +273,7 @@ export async function registerAgendaRoutes(
         clientId: body.clientId ?? null,
         items: body.items,
         start: body.start,
+        occurredAt: parsedOccurredAt,
         source,
         confirmed,
         pendingTtlMinutes: HOLD_TTL_MINUTES,

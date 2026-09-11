@@ -6,7 +6,41 @@
 
 import { ApiError, apiWithCashier } from "../api.js";
 import { newId } from "./ids.js";
-import { outboxAdd } from "./outbox.js";
+import { outboxAdd, outboxList } from "./outbox.js";
+
+// Zona horaria del centro para pintar. El motor tiene la suya
+// (`apps/api/src/agenda/time.ts`); esto es el espejo del front, y vive
+// aquí —no en la pantalla— para que la agenda y el outbox agrupen por el
+// mismo día.
+export const AGENDA_TZ = "Europe/Madrid";
+
+const hhmmFmt = new Intl.DateTimeFormat("en-GB", {
+  timeZone: AGENDA_TZ,
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+const dateFmt = new Intl.DateTimeFormat("en-CA", {
+  timeZone: AGENDA_TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+/** ISO UTC → "HH:MM" de pared del centro. */
+export function centerHHMM(iso: string): string {
+  return hhmmFmt.format(new Date(iso));
+}
+
+/** ISO UTC → "YYYY-MM-DD" de pared del centro. */
+export function centerWallDate(iso: string): string {
+  return dateFmt.format(new Date(iso));
+}
+
+/** Hoy, en fecha de pared del centro. */
+export function centerToday(): string {
+  return dateFmt.format(new Date());
+}
 
 export type AppointmentStatus =
   | "PENDING"
@@ -48,6 +82,12 @@ export interface AgendaAppointment {
   }>;
   // Marca local del alta offline aún no confirmada por el server.
   pendingOffline?: boolean;
+  // B-reservas-6a frente O · en qué estado está esa alta local. Si el
+  // servidor la rechazó (solape, o una hora que ya no se sostiene), la
+  // cita NO puede desaparecer de la agenda en silencio: se queda pintada
+  // con su motivo.
+  outboxStatus?: "pending" | "rejected";
+  outboxError?: string | null;
 }
 
 export interface AgendaDay {
@@ -137,19 +177,93 @@ export async function fetchAgendaDay(date: string): Promise<AgendaDay> {
       staff: res.staff,
       appointments: res.appointments,
     };
+    // La caché guarda lo que dijo el SERVIDOR. Lo local se mezcla al
+    // devolver, nunca se persiste: si se cacheara, una cita rechazada
+    // sobreviviría a su propio item del outbox.
     await writeDay(day);
-    return day;
+    return { ...day, appointments: await mergePendingLocal(day) };
   } catch (err) {
     // Offline / 5xx: usa la caché del día si existe.
     const cached = await loadAgendaDayFromCache(date);
-    if (cached) return { ...cached, appointments: mergePendingLocal(cached) };
+    if (cached) {
+      return { ...cached, appointments: await mergePendingLocal(cached) };
+    }
     throw err;
   }
 }
 
-// Conserva las citas offline optimistas al re-render (marca pendingOffline).
-function mergePendingLocal(day: AgendaDay): AgendaAppointment[] {
-  return day.appointments;
+/**
+ * Mezcla las altas que están en el outbox con lo que dice el servidor.
+ *
+ * B-reservas-6a frente O · esto ERA UN STUB (`return day.appointments`)
+ * desde B4, con un comentario que decía que conservaba las citas
+ * optimistas. No conservaba nada: una cita creada sin red se guardaba en
+ * el outbox, la cajera veía un aviso de 3,5 segundos y **la agenda no la
+ * pintaba nunca**. Y si el servidor la rechazaba al reconectar, lo único
+ * que quedaba era el chip de abajo a la derecha.
+ *
+ * Ahora la cita encolada se pinta en su hueco, y la rechazada SE QUEDA
+ * pintada con su motivo hasta que alguien la reintenta o la descarta. Una
+ * cita escrita no se cae de la agenda en silencio.
+ *
+ * Se mezcla SIEMPRE, también con red: es online cuando más importa —el
+ * servidor no la tiene, y sin esto el hueco se ve vacío.
+ */
+async function mergePendingLocal(day: AgendaDay): Promise<AgendaAppointment[]> {
+  let items;
+  try {
+    items = await outboxList();
+  } catch {
+    return day.appointments; // sin IndexedDB, la agenda del servidor basta
+  }
+  const yaEnElServidor = new Set(day.appointments.map((a) => a.id));
+  const locales: AgendaAppointment[] = [];
+  for (const it of items) {
+    if (it.kind !== "appointment" || (it.method ?? "POST") !== "POST") continue;
+    const body = it.body as {
+      clientId?: string | null;
+      start?: string;
+      notes?: string | null;
+      source?: string;
+      items?: Array<{ serviceId: string; staffUserId?: string | null }>;
+    };
+    if (typeof body.start !== "string") continue;
+    if (centerWallDate(body.start) !== day.date) continue;
+    // Ya subió y el servidor la devuelve con el id definitivo: el item
+    // desaparece del outbox al 2xx, pero puede haber una ventana.
+    if (yaEnElServidor.has(it.externalId)) continue;
+    const bodyItems = body.items ?? [];
+    locales.push({
+      id: it.externalId,
+      clientId: body.clientId ?? null,
+      status: "CONFIRMED",
+      source: body.source ?? "PRESENCIAL",
+      start: body.start,
+      end: new Date(
+        new Date(body.start).getTime() + (it.durationMin ?? 0) * 60_000,
+      ).toISOString(),
+      ticketId: null,
+      notes: body.notes ?? null,
+      items: bodyItems.map((x, i) => ({
+        id: `${it.externalId}-${i}`,
+        serviceId: x.serviceId,
+        durationMin: 0,
+        sortOrder: i,
+        startOffsetMin: 0,
+      })),
+      assignments: bodyItems
+        .filter((x) => x.staffUserId)
+        .map((x) => ({
+          reservableType: "STAFF" as const,
+          staffUserId: x.staffUserId!,
+          resourceId: null,
+        })),
+      pendingOffline: true,
+      outboxStatus: it.status,
+      outboxError: it.lastError,
+    });
+  }
+  return [...day.appointments, ...locales];
 }
 
 export async function searchAvailability(input: {
@@ -171,6 +285,10 @@ export interface CreateAppointmentInput {
   start: string; // ISO UTC
   source?: "PRESENCIAL" | "WEB" | "PHONE" | "GIFT_REDEMPTION";
   notes?: string | null;
+  // Duración total del visit. NO se envía (el schema del alta no la
+  // acepta): viaja en el item del outbox para poder pintar la cita
+  // encolada con su alto real mientras el servidor no la ha visto.
+  durationMin?: number;
 }
 
 export type CreateAppointmentResult =
@@ -215,8 +333,12 @@ export async function createAppointment(
       kind: "appointment",
       path: "/agenda/appointments",
       body,
-      label: `Cita ${input.start.slice(11, 16)}`,
+      // La hora de PARED del centro. Antes era `start.slice(11,16)`, que
+      // es UTC: el chip decía "Cita 09:00" de una cita de las 11:00, y el
+      // chip es justo donde la cajera lee lo que se rechazó.
+      label: `Cita ${centerHHMM(input.start)}`,
       total: 0,
+      durationMin: input.durationMin,
     });
     const optimistic: AgendaAppointment = {
       id: externalId,
@@ -224,7 +346,9 @@ export async function createAppointment(
       status: input.source && input.source !== "PRESENCIAL" ? "PENDING" : "CONFIRMED",
       source: input.source ?? "PRESENCIAL",
       start: input.start,
-      end: input.start,
+      end: new Date(
+        new Date(input.start).getTime() + (input.durationMin ?? 0) * 60_000,
+      ).toISOString(),
       ticketId: null,
       notes: input.notes ?? null,
       items: input.items.map((it, i) => ({
@@ -234,8 +358,16 @@ export async function createAppointment(
         sortOrder: i,
         startOffsetMin: 0,
       })),
-      assignments: [],
+      assignments: input.items
+        .filter((it) => it.staffUserId)
+        .map((it) => ({
+          reservableType: "STAFF" as const,
+          staffUserId: it.staffUserId!,
+          resourceId: null,
+        })),
       pendingOffline: true,
+      outboxStatus: "pending",
+      outboxError: null,
     };
     return { ok: true, appointment: optimistic, queuedOffline: true };
   }

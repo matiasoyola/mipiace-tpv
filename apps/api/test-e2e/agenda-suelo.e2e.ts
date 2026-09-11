@@ -159,10 +159,15 @@ describe.skipIf(!e2eEnabled)("e2e · el suelo y el EXCLUDE contra Postgres real"
     return view.id;
   }
 
-  function altaPayload(start: Date, staffUserId?: string) {
+  function altaPayload(
+    start: Date,
+    staffUserId?: string,
+    occurredAt?: Date,
+  ) {
     return {
       items: [{ serviceId: corteId, ...(staffUserId ? { staffUserId } : {}) }],
       start: start.toISOString(),
+      ...(occurredAt ? { occurredAt: occurredAt.toISOString() } : {}),
       source: "PRESENCIAL" as const,
     };
   }
@@ -448,7 +453,112 @@ describe.skipIf(!e2eEnabled)("e2e · el suelo y el EXCLUDE contra Postgres real"
     expect(adelante.statusCode).toBe(200);
   });
 
-  // ── 3. Lo que el suelo NO puede tocar ───────────────────────────────
+  // ── 3. El alta que se creó sin red (frente O) ───────────────────────
+
+  it("11 · la franja era buena al escribirla: entra aunque llegue tarde", async () => {
+    // El AP12 apaga la pantalla a los cinco minutos. La cajera despierta
+    // el terminal, escribe "¿tienes hueco ahora?" sin red, y el alta sube
+    // 40 minutos después. Sin `occurredAt` el suelo la rechazaría por una
+    // hora que era buena cuando la escribió.
+    const hueco = desdeSuelo(-30);
+    const escrita = new Date(hueco.getTime() + 60_000); // un minuto después
+    const res = await app.inject({
+      method: "POST",
+      url: "/agenda/appointments",
+      headers: auth(),
+      payload: altaPayload(hueco, soleId, escrita),
+    });
+    expect(res.statusCode).toBe(201);
+
+    // Contra la BD: la cita está en SU hueco, el de cuando se escribió.
+    const id = (res.json() as { appointment: { id: string } }).appointment.id;
+    const fila = (await citasDelTenant()).find((c) => c.id === id);
+    expect(fila).toBeTruthy();
+    expect(new Date(fila!.starts).getTime()).toBe(hueco.getTime());
+  });
+
+  it("12 · sin occurredAt, esa misma alta es 409 (lo que pasaba antes)", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/agenda/appointments",
+      headers: auth(),
+      payload: altaPayload(desdeSuelo(-30), anaId),
+    });
+    expect(res.statusCode).toBe(409);
+    expect((res.json() as { error: string }).error).toBe("BOOKING_IN_PAST");
+  });
+
+  it("13 · un occurredAt más viejo que la cota no salva nada", async () => {
+    // Dos horas y pico: por encima de la cota el campo no se usa, y el
+    // alta entra por el camino de siempre — donde su hora ya pasó.
+    const res = await app.inject({
+      method: "POST",
+      url: "/agenda/appointments",
+      headers: auth(),
+      payload: altaPayload(
+        desdeSuelo(-150),
+        soleId,
+        new Date(suelo().getTime() - 149 * 60_000),
+      ),
+    });
+    expect(res.statusCode).toBe(409);
+    const body = res.json() as { error: string; alternatives: Array<{ start: string }> };
+    expect(body.error).toBe("BOOKING_IN_PAST");
+    // Y las alternativas son del AHORA real, no del instante del alta.
+    for (const alt of body.alternatives) {
+      expect(new Date(alt.start).getTime()).toBeGreaterThanOrEqual(
+        suelo().getTime(),
+      );
+    }
+  });
+
+  it("14 · un occurredAt del FUTURO se ignora y vale 'ahora'", async () => {
+    // Vale "ahora" para lo bueno y para lo malo: la franja en curso entra…
+    const ok = await app.inject({
+      method: "POST",
+      url: "/agenda/appointments",
+      headers: auth(),
+      payload: altaPayload(
+        desdeSuelo(600),
+        soleId,
+        new Date(Date.now() + 6 * 60 * 60_000),
+      ),
+    });
+    expect(ok.statusCode).toBe(201);
+
+    // …y el pasado sigue sin entrar por mucho que el reloj mienta.
+    const no = await app.inject({
+      method: "POST",
+      url: "/agenda/appointments",
+      headers: auth(),
+      payload: altaPayload(
+        desdeSuelo(-15),
+        anaId,
+        new Date(Date.now() + 6 * 60 * 60_000),
+      ),
+    });
+    expect(no.statusCode).toBe(409);
+    expect((no.json() as { error: string }).error).toBe("BOOKING_IN_PAST");
+  });
+
+  it("15 · el EXCLUDE sigue mandando sobre el alta con occurredAt", async () => {
+    // Si en el tiempo sin red otra cita ocupó el hueco, el sello no lo
+    // devuelve: el árbitro del solape sigue siendo la base de datos.
+    const hueco = desdeSuelo(-45);
+    const escrita = new Date(hueco.getTime() + 60_000);
+    await sembrarCita(hueco, anaId);
+    const res = await app.inject({
+      method: "POST",
+      url: "/agenda/appointments",
+      headers: auth(),
+      payload: altaPayload(hueco, anaId, escrita),
+    });
+    expect(res.statusCode).toBe(409);
+    // NO es el suelo: el hueco existía, lo que no había era sitio.
+    expect((res.json() as { error: string }).error).not.toBe("BOOKING_IN_PAST");
+  });
+
+  // ── 4. Lo que el suelo NO puede tocar ───────────────────────────────
 
   it("9 · una cita de hace una hora SE COBRA (el camino normal del mostrador)", async () => {
     const apptId = await sembrarCita(desdeSuelo(-90), soleId);

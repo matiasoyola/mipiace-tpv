@@ -28,6 +28,76 @@ import {
 } from "./time.js";
 import type { Slot } from "./types.js";
 
+// ── El alta que se creó sin red (B-reservas-6a, frente O) ─────────────
+//
+// El AP12 de Sole apaga la pantalla a los cinco minutos. La primera acción
+// al despertarlo puede salir sin red — y justo con "¿tienes hueco ahora?",
+// que es la que va pegada a la franja en curso. El alta se encola, y al
+// reconectar veinte minutos después el suelo la rechazaría por una hora
+// que era buena cuando la cajera la escribió. Trabajo hecho que
+// desaparece.
+//
+// Mismo patrón que los tickets desde v1.11: el outbox sella `occurredAt`
+// AL ENCOLAR y el servidor evalúa el suelo con ESE instante, no con el de
+// llegada.
+//
+// LA COTA HACIA ATRÁS. Sin ella, `occurredAt` es un campo del cuerpo: se
+// reserva en el pasado mintiendo en él, que es justo lo que el suelo
+// existe para impedir. Y NO hay ningún número que heredar — comprobado:
+// el outbox **no tiene edad máxima**, sus items viven hasta el 2xx o
+// hasta un rechazo permanente (`outbox.ts`, sin purga por antigüedad).
+// Así que se elige aquí, y se elige corto:
+//
+//   · Cubre de sobra el caso real: un AP12 que despierta sin red tarda
+//     segundos, y una línea caída se mide en minutos.
+//   · Es más larga que el servicio más largo del catálogo de Sole (120
+//     min: mechas, recogido de novia), así que un alta aceptada está como
+//     mucho a un servicio de distancia: la clienta sigue en la silla o
+//     acaba de salir, y el cobro de B-5 funciona sobre ella.
+//   · Y acota la mentira: un `occurredAt` falseado mueve una reserva dos
+//     horas hacia atrás como máximo. Nunca a ayer, nunca cruzando el
+//     corte de día (`Tenant.dayCutHour`, 05:00).
+//
+// Por encima de la cota el instante NO se usa — y no usarlo NO significa
+// rechazar por sí mismo: el alta entra por el camino de siempre, con el
+// suelo de "ahora". Si su hora ya pasó, la rechaza el suelo como a
+// cualquier otra (409 BOOKING_IN_PAST).
+export const BOOKING_OCCURRED_AT_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+
+export type BookingNowSource =
+  /** No vino `occurredAt`: manda el reloj del servidor. */
+  | "now"
+  /** Se usó el instante del alta: el suelo se evalúa con él. */
+  | "occurred_at"
+  /** Vino del futuro (ya lo descarta `parseOccurredAt`): se ignora. */
+  | "future"
+  /** Más viejo que la cota: se ignora. */
+  | "too_old";
+
+/**
+ * Con qué instante se evalúa el SUELO de un alta. Pura y única: la llaman
+ * el motor (que manda) y la ruta (que sólo quiere saber qué loguear).
+ *
+ * `occurredAt` sólo puede mover el suelo HACIA ATRÁS y dentro de la cota.
+ * Nunca hacia adelante: un reloj adelantado no abre el futuro.
+ */
+export function resolveBookingNow(
+  now: Date,
+  occurredAt: Date | null | undefined,
+  maxAgeMs: number = BOOKING_OCCURRED_AT_MAX_AGE_MS,
+): { at: Date; source: BookingNowSource } {
+  if (!occurredAt || Number.isNaN(occurredAt.getTime())) {
+    return { at: now, source: "now" };
+  }
+  if (occurredAt.getTime() > now.getTime()) {
+    return { at: now, source: "future" };
+  }
+  if (now.getTime() - occurredAt.getTime() > maxAgeMs) {
+    return { at: now, source: "too_old" };
+  }
+  return { at: occurredAt, source: "occurred_at" };
+}
+
 /** La única fuente del "ahora" del motor. Inyectable para los tests: un
  *  motor con reloj de mentira es un motor que se puede probar. */
 export interface Clock {
