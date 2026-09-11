@@ -1,4 +1,37 @@
-# Bloque Reservas-6 · Capa de yield sobre `BookingPolicy`
+# Bloque Reservas-6b · Capa de yield sobre `BookingPolicy`
+
+> ## ⚠️ Este prompt es ahora **B-6b**. Léelo con esto delante.
+>
+> **Matías partió B-6 en dos el 11-09-2026.** Lo que sigue —el registro de políticas, las siete
+> reglas, la pantalla de ajustes, la simulación y el override auditado— es **B-6b** y **no se toca**
+> hasta que 6a esté cerrado.
+>
+> **Por qué se partió.** Para encender la agenda a Peluquería Sole (tres profesionales, franjas de
+> 30 min, reservas por teléfono, muchas para "ahora mismo") no hace falta yield: hace falta que el
+> motor **tenga reloj**. Hoy ofrece y acepta ayer. Eso no es una regla del centro que falte
+> configurar, es un invariante que falta — y mezclar las dos cosas en un bloque retrasaba el
+> guardarraíl detrás de siete políticas que Sole no necesita el primer día.
+>
+> **Lo que se llevó B-6a** (`docs/blocks/reservas-6a-plan.md`, `…-done.md`), y que aquí ya está
+> hecho cuando leas esto:
+>
+> - El **suelo temporal** en el motor y **sin configurar**: nada de inicios anteriores al comienzo de
+>   la franja en curso de la retícula, ni al listar ni al reservar ni al mover. `409 BOOKING_IN_PAST`.
+>   **Ojo: `MIN_LEAD_MINUTES` (§2 de este prompt) ya NO es quien "acaba con el poder reservar en el
+>   pasado"** — eso lo cierra el suelo de 6a, que es un invariante y no se apaga. `MIN_LEAD_MINUTES`
+>   se queda con lo suyo: la antelación mínima *configurable* por encima del suelo.
+> - La **fuga de la retícula (D-4b)** en `hold()` **y** en `reschedule()`: `409 BOOKING_OFF_GRID`.
+> - El **invariante 6** (listar ↔ reservar) con su test fundacional.
+> - El **invariante 14** (`TZ=America/New_York` + el cambio de hora del 25-10-2026).
+> - El **EXCLUDE USING gist contra un Postgres real**.
+> - La agenda del TPV, que ya no invita a una hora que ya pasó.
+>
+> **Lo que sigue siendo de este bloque:** todo lo demás de aquí, **más** los invariantes **2** (solape
+> de recurso) y **4** (buffers ≠ 0), que 6a dejó explícitamente fuera.
+>
+> Los enganches que este prompt describe (§3) siguen valiendo tal cual: el punto único de evaluación
+> es el mismo por el que pasa el suelo de 6a. Las **líneas de `engine.ts` que cita este documento se
+> han movido** — 6a cambió el motor.
 
 > B4 creó la tabla `booking_policies` y **nadie la lee**: cero apariciones de `BookingPolicy` en todo
 > `apps/` (ver `docs/reservas/01-cruce-con-b-reservas-4.md` §H1). Hoy el motor ofrece y acepta

@@ -22,6 +22,12 @@
 //   v1.15-la-vuelta-existe: ticket-emitido (3,00 € cobrados con un billete
 //     de 5: TOTAL / ENTREGADO / CAMBIO) · ticket-emitido-sin-vuelta (el
 //     mismo cobro clavado: el bloque no se pinta)
+//   B-reservas-6a-el-suelo: agenda con `?at=` (el reloj) — lo anterior al
+//     comienzo de la franja EN CURSO sale apagado — y `?fallo=pasado`, que
+//     devuelve el 409 BOOKING_IN_PAST con su frase y sus tres alternativas
+//   B-reservas-6a-frente-O: `?encolada=sin-enviar` y `?encolada=rechazada`
+//     siembran el outbox con un alta creada sin red, para ver que la cita
+//     se pinta en su hueco y que la rechazada NO desaparece de la agenda
 
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -522,6 +528,53 @@ function benchFallo(): string | null {
   return new URLSearchParams(window.location.search).get("fallo");
 }
 
+// B-reservas-6a frente O · siembra el outbox con un alta de cita creada
+// sin red, para fotografiar lo que ve la cajera. `sin-enviar` la deja
+// pendiente; `rechazada`, con el 409 del servidor encima.
+async function sembrarAltaEncolada(): Promise<void> {
+  const modo = new URLSearchParams(window.location.search).get("encolada");
+  if (!modo) return;
+  const { outboxAdd } = await import("../src/lib/outbox.js");
+  const externalId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  await outboxAdd({
+    externalId,
+    kind: "appointment",
+    path: "/agenda/appointments",
+    body: {
+      externalId,
+      clientId: "cl-2",
+      items: [{ serviceId: "sv-corte", staffUserId: "st-marta" }],
+      start: madridIso(12, 30),
+      source: "PRESENCIAL",
+      notes: null,
+    },
+    label: "Cita 12:30",
+    total: 0,
+    durationMin: 30,
+  });
+  if (modo !== "rechazada") return;
+  // Lo que deja el outbox cuando el servidor contesta un 4xx.
+  const db = indexedDB.open("mipiacetpv-outbox");
+  await new Promise<void>((resolve) => {
+    db.onsuccess = () => {
+      const tx = db.result.transaction("outbox", "readwrite");
+      const store = tx.objectStore("outbox");
+      const get = store.get(externalId);
+      get.onsuccess = () => {
+        store.put({
+          ...(get.result as Record<string, unknown>),
+          status: "rejected",
+          lastError: "TAKEN: El hueco ya no está disponible.",
+        });
+      };
+      tx.oncomplete = () => {
+        db.result.close();
+        resolve();
+      };
+    };
+  });
+}
+
 function isAgendaScreen(): boolean {
   return benchScreen().startsWith("agenda");
 }
@@ -762,6 +815,45 @@ function stubFetch(): void {
           },
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    // B-reservas-6a · el 409 del suelo. `?fallo=pasado` reproduce en el
+    // banco lo que el servidor manda cuando la hora ya pasó: la frase que
+    // se le lee a la clienta y los tres huecos que sí se le pueden dar.
+    // Es el estado de error del bucle visual de este bloque.
+    if (path === "/agenda/appointments" && init?.method === "POST") {
+      if (benchFallo() === "pasado") {
+        return new Response(
+          JSON.stringify({
+            error: "BOOKING_IN_PAST",
+            code: "BOOKING_IN_PAST",
+            message:
+              "Esa hora ya ha pasado. Te puedo dar las 11:30, las 11:45 o las 12:00.",
+            alternatives: [
+              { start: madridIso(11, 30), end: madridIso(12, 0), options: 1 },
+              { start: madridIso(11, 45), end: madridIso(12, 15), options: 1 },
+              { start: madridIso(12, 0), end: madridIso(12, 30), options: 1 },
+            ],
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          appointment: {
+            id: "ap-nueva",
+            clientId: null,
+            status: "CONFIRMED",
+            source: "PRESENCIAL",
+            start: madridIso(12, 0),
+            end: madridIso(12, 30),
+            ticketId: null,
+            notes: null,
+            items: [],
+            assignments: [],
+          },
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
       );
     }
     // B-reservas-5 F8 · el cobro del borrador de la cita. Devuelve el
@@ -1122,9 +1214,14 @@ if (new URLSearchParams(window.location.search).get("screen") === "bloqueo") {
     ),
   );
 } else {
-  createRoot(mount).render(
-    <StrictMode>
-      <Bench />
-    </StrictMode>,
-  );
+  // La siembra del outbox va ANTES de montar: la agenda mezcla lo local
+  // al cargar el día, y si el item llega después la primera pintada no lo
+  // lleva (frente O).
+  void sembrarAltaEncolada().then(() => {
+    createRoot(mount).render(
+      <StrictMode>
+        <Bench />
+      </StrictMode>,
+    );
+  });
 }

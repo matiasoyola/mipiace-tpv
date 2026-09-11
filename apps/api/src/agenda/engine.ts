@@ -8,6 +8,16 @@
 // sólo calcula QUÉ huecos son factibles y CÓMO asignarlos; la carrera final
 // la gana Postgres.
 
+import {
+  currentGridStart,
+  isOnGrid,
+  resolveBookingNow,
+  nextWallDate,
+  offGridMessage,
+  pastMessage,
+  systemClock,
+  type Clock,
+} from "./floor.js";
 import { ExclusionError, type AgendaStore, type HoldInput } from "./store.js";
 import {
   CENTER_TZ,
@@ -53,11 +63,42 @@ export interface HoldRequest {
   confirmed: boolean;
   pendingTtlMinutes: number;
   notes: string | null;
+  // B-reservas-6a frente O · el instante en que la cajera creó el alta,
+  // sellado por el outbox al encolar. Sólo puede mover el SUELO hacia
+  // atrás, y dentro de la cota (`resolveBookingNow`). Ausente en el alta
+  // online normal, que es el 99 % de las altas.
+  occurredAt?: Date | null;
 }
+
+export type HoldFailureReason =
+  | "NO_REQUIREMENTS"
+  | "NO_SLOT"
+  | "TAKEN"
+  // B-reservas-6a · el suelo. Inicio anterior al comienzo de la franja en
+  // curso de la retícula del centro.
+  | "BOOKING_IN_PAST"
+  // B-reservas-6a · D-4b. Inicio que no cae en la retícula del centro.
+  | "BOOKING_OFF_GRID";
 
 export type HoldResult =
   | { ok: true; appointment: AppointmentView; duplicate?: boolean }
-  | { ok: false; reason: "NO_REQUIREMENTS" | "NO_SLOT" | "TAKEN"; alternatives: Slot[] };
+  | {
+      ok: false;
+      reason: HoldFailureReason;
+      alternatives: Slot[];
+      // La frase que la cajera lee en voz alta a la clienta. La escribe el
+      // motor porque es quien conoce el huso y las alternativas.
+      message?: string;
+    };
+
+// B-reservas-6a · el motor deja de ser ciego a la hora. `clock` es la ÚNICA
+// fuente del "ahora" y `tz` la única del huso del centro; las dos son
+// inyectables para los tests y ninguna se lee del proceso. Sin opciones, el
+// motor se comporta igual que en producción.
+export interface EngineOptions {
+  clock?: Clock;
+  tz?: string;
+}
 
 // Interfaz del motor (idéntica firma que expondrá KoiboxAdapter/B6).
 export interface BookingEngine {
@@ -91,7 +132,16 @@ function tKey(userId: string, date: string): string {
   return `${userId}|${date}`;
 }
 
-export function createCitaEngine(store: AgendaStore): BookingEngine {
+export function createCitaEngine(
+  store: AgendaStore,
+  opts: EngineOptions = {},
+): BookingEngine {
+  const clock = opts.clock ?? systemClock;
+  const tz = opts.tz ?? CENTER_TZ;
+  // Cuántas alternativas acompañan a un rechazo del suelo. Tres: las que
+  // caben en una frase dicha por teléfono.
+  const FLOOR_ALTERNATIVES = 3;
+
   // Deriva los items planificados (snapshot + offsets secuenciales) del
   // pedido. Devuelve null si algún servicio no es agendable (sin scheduling).
   function deriveItems(
@@ -156,9 +206,9 @@ export function createCitaEngine(store: AgendaStore): BookingEngine {
       templateByUserDate.set(k, arr);
     }
     // Ventana UTC amplia (borde local del rango + margen de un día).
-    const from = wallTimeToUtc(params.fromDate, "00:00");
+    const from = wallTimeToUtc(params.fromDate, "00:00", tz);
     const toEnd = new Date(
-      wallTimeToUtc(params.toDate, "23:59").getTime() + 60 * 60 * 1000,
+      wallTimeToUtc(params.toDate, "23:59", tz).getTime() + 60 * 60 * 1000,
     );
     const [occ, blocks, resourcesByKind] = await Promise.all([
       store.getOccupancies(params.tenantId, from, toEnd),
@@ -327,8 +377,8 @@ export function createCitaEngine(store: AgendaStore): BookingEngine {
         itemStart.getTime() - it.bufferBeforeMin * 60000,
       );
       const staffEnd = new Date(itemEnd.getTime() + it.bufferAfterMin * 60000);
-      const date = utcToWallDate(itemStart, CENTER_TZ);
-      const needStartMin = timeToMinutes(utcToWallTime(staffStart, CENTER_TZ));
+      const date = utcToWallDate(itemStart, tz);
+      const needStartMin = timeToMinutes(utcToWallTime(staffStart, tz));
       const needEndMin = needStartMin + (it.durationMin +
         it.bufferBeforeMin + it.bufferAfterMin);
 
@@ -418,7 +468,7 @@ export function createCitaEngine(store: AgendaStore): BookingEngine {
           const key = `${date}|${startMin}`;
           if (seen.has(key)) continue;
           seen.add(key);
-          out.push(wallTimeToUtc(date, minutesToTime(startMin), CENTER_TZ));
+          out.push(wallTimeToUtc(date, minutesToTime(startMin), tz));
         }
       }
     }
@@ -426,17 +476,24 @@ export function createCitaEngine(store: AgendaStore): BookingEngine {
     return out;
   }
 
+  // B-reservas-6a · EL SUELO, y el único sitio donde se aplica al listar.
+  // `notBefore` llega SIEMPRE (es el suelo, o algo posterior cuando quien
+  // llama quiere "los huecos a partir de aquí"): `availability()` y las
+  // `alternatives` de `hold()`/`reschedule()` pasan las dos por esta
+  // función, así que no hay forma de que una ofrezca lo que la otra no.
   async function computeSlots(
     params: AvailabilityParams,
     reqMap: Map<string, ServiceRequirement>,
     planned: PlannedItem[],
     cap: number,
+    notBefore: Date,
   ): Promise<Slot[]> {
     const ctx = await loadContext(params, reqMap);
     const span = visitSpanMin(planned);
     const fixed = params.staffUserId ?? null;
     const slots: Slot[] = [];
     for (const start of candidateStarts(ctx, span)) {
+      if (start.getTime() < notBefore.getTime()) continue;
       const plan = planForStart(ctx, planned, start, fixed);
       if (plan) {
         const end = new Date(start.getTime() + span * 60000);
@@ -451,6 +508,79 @@ export function createCitaEngine(store: AgendaStore): BookingEngine {
     return slots;
   }
 
+  // Los huecos que el motor SÍ ofrecería a partir de un instante. Mira el
+  // día de ese instante y el siguiente: si alguien pide el martes pasado,
+  // "los tres huecos siguientes" del martes pasado son cero, y una clienta
+  // al teléfono necesita una hora, no un cero.
+  async function openingsFrom(
+    base: AvailabilityParams,
+    reqMap: Map<string, ServiceRequirement>,
+    planned: PlannedItem[],
+    fromInstant: Date,
+    cap: number,
+  ): Promise<Slot[]> {
+    const fromDate = utcToWallDate(fromInstant, tz);
+    const params: AvailabilityParams = {
+      ...base,
+      fromDate,
+      toDate: nextWallDate(fromDate),
+    };
+    return computeSlots(params, reqMap, planned, cap, fromInstant);
+  }
+
+  // B-reservas-6a · LA GUARDA, y el único sitio donde se aplica al reservar.
+  // `hold()` y `reschedule()` la llaman con el mismo suelo que
+  // `computeSlots` usa para listar: ésa es la simetría del invariante 6.
+  // Devuelve el rechazo ya redactado, o `null` si el inicio es legal.
+  // `gate` es el suelo con el que se JUZGA el inicio pedido; `floorNow` el
+  // suelo del reloj real, del que salen las ALTERNATIVAS. Son el mismo
+  // instante salvo en el alta que se creó sin red (frente O): ahí la
+  // puerta se abre con el instante del alta, pero las horas que se le
+  // ofrecen a la clienta tienen que ser de verdad futuras — proponerle un
+  // hueco que también pasó sería cambiar un error por otro.
+  async function floorCheck(
+    startUtc: Date,
+    gate: Date,
+    floorNow: Date,
+    params: AvailabilityParams,
+    reqMap: Map<string, ServiceRequirement>,
+    planned: PlannedItem[],
+  ): Promise<(HoldResult & { ok: false }) | null> {
+    // El pasado se mira primero: es lo que hay que decirle a la clienta.
+    // Un "martes pasado a las 10:07" es, para ella, una hora que ya pasó.
+    if (startUtc.getTime() < gate.getTime()) {
+      const alternatives = await openingsFrom(
+        params,
+        reqMap,
+        planned,
+        floorNow,
+        FLOOR_ALTERNATIVES,
+      );
+      return {
+        ok: false,
+        reason: "BOOKING_IN_PAST",
+        alternatives,
+        message: pastMessage(alternatives, tz),
+      };
+    }
+    if (!isOnGrid(startUtc, tz, SLOT_MINUTES)) {
+      const alternatives = await openingsFrom(
+        params,
+        reqMap,
+        planned,
+        startUtc.getTime() > floorNow.getTime() ? startUtc : floorNow,
+        FLOOR_ALTERNATIVES,
+      );
+      return {
+        ok: false,
+        reason: "BOOKING_OFF_GRID",
+        alternatives,
+        message: offGridMessage(alternatives, tz, SLOT_MINUTES),
+      };
+    }
+    return null;
+  }
+
   return {
     async availability(params) {
       const serviceIds = [...new Set(params.items.map((i) => i.serviceId))];
@@ -460,7 +590,10 @@ export function createCitaEngine(store: AgendaStore): BookingEngine {
       );
       const planned = deriveItems(params.items, reqMap);
       if (!planned) return [];
-      return computeSlots(params, reqMap, planned, 200);
+      // El suelo. Un solo `clock.now()` por petición: el instante con el que
+      // se lista es el mismo con el que se reserva.
+      const floor = currentGridStart(clock.now(), tz, SLOT_MINUTES);
+      return computeSlots(params, reqMap, planned, 200, floor);
     },
 
     async hold(request) {
@@ -482,7 +615,7 @@ export function createCitaEngine(store: AgendaStore): BookingEngine {
 
       const span = visitSpanMin(planned);
       const startUtc = new Date(request.start);
-      const dateStr = utcToWallDate(startUtc, CENTER_TZ);
+      const dateStr = utcToWallDate(startUtc, tz);
       const params: AvailabilityParams = {
         tenantId: request.tenantId,
         items: request.items,
@@ -493,11 +626,37 @@ export function createCitaEngine(store: AgendaStore): BookingEngine {
         fromDate: dateStr,
         toDate: dateStr,
       };
+
+      // B-reservas-6a · el suelo, ANTES de mirar si el hueco cabe. Un
+      // inicio que ya pasó no es un hueco ocupado: es un hueco que no
+      // existe, y la frase que se le dice a la clienta es otra.
+      const now = clock.now();
+      const floor = currentGridStart(now, tz, SLOT_MINUTES);
+      // Frente O · si el alta se creó sin red, la puerta se juzga con el
+      // instante en que la cajera la escribió. `resolveBookingNow` es la
+      // autoridad —la ruta la llama sólo para loguear—, así que un
+      // `occurredAt` del futuro o más viejo que la cota no entra ni
+      // aunque alguien lo cuele por otro camino.
+      const gate = currentGridStart(
+        resolveBookingNow(now, request.occurredAt ?? null).at,
+        tz,
+        SLOT_MINUTES,
+      );
+      const rejected = await floorCheck(
+        startUtc,
+        gate,
+        floor,
+        params,
+        reqMap,
+        planned,
+      );
+      if (rejected) return rejected;
+
       const ctx = await loadContext(params, reqMap);
       const plan = planForStart(ctx, planned, startUtc, params.staffUserId ?? null);
       if (!plan) {
         // No cabe: devolver alternativas del mismo día.
-        const alternatives = await computeSlots(params, reqMap, planned, 10);
+        const alternatives = await computeSlots(params, reqMap, planned, 10, floor);
         return { ok: false, reason: "NO_SLOT", alternatives };
       }
 
@@ -522,7 +681,13 @@ export function createCitaEngine(store: AgendaStore): BookingEngine {
       } catch (err) {
         if (err instanceof ExclusionError) {
           // La BD ganó la carrera: hueco perdido, devolver alternativas.
-          const alternatives = await computeSlots(params, reqMap, planned, 10);
+          const alternatives = await computeSlots(
+            params,
+            reqMap,
+            planned,
+            10,
+            floor,
+          );
           return { ok: false, reason: "TAKEN", alternatives };
         }
         throw err;
@@ -558,7 +723,7 @@ export function createCitaEngine(store: AgendaStore): BookingEngine {
         return { ok: false, reason: "NO_REQUIREMENTS", alternatives: [] };
       const span = visitSpanMin(planned);
       const startUtc = new Date(newStartISO);
-      const dateStr = utcToWallDate(startUtc, CENTER_TZ);
+      const dateStr = utcToWallDate(startUtc, tz);
       const params: AvailabilityParams = {
         tenantId,
         items: requestItems,
@@ -566,10 +731,27 @@ export function createCitaEngine(store: AgendaStore): BookingEngine {
         fromDate: dateStr,
         toDate: dateStr,
       };
+
+      // B-reservas-6a · mover una cita es elegir un inicio, así que el suelo
+      // y la retícula valen igual que al crearla. Sólo el INICIO está bajo
+      // el suelo: el estado de una cita pasada y su cobro no pasan por aquí.
+      // Mover no pasa por el outbox (`patchAppointment` no encola), así
+      // que aquí la puerta es siempre el reloj real.
+      const floor = currentGridStart(clock.now(), tz, SLOT_MINUTES);
+      const rejected = await floorCheck(
+        startUtc,
+        floor,
+        floor,
+        params,
+        reqMap,
+        planned,
+      );
+      if (rejected) return rejected;
+
       const ctx = await loadContext(params, reqMap);
       const plan = planForStart(ctx, planned, startUtc, null);
       if (!plan) {
-        const alternatives = await computeSlots(params, reqMap, planned, 10);
+        const alternatives = await computeSlots(params, reqMap, planned, 10, floor);
         return { ok: false, reason: "NO_SLOT", alternatives };
       }
       try {
@@ -585,7 +767,13 @@ export function createCitaEngine(store: AgendaStore): BookingEngine {
         return { ok: true, appointment: updated };
       } catch (err) {
         if (err instanceof ExclusionError) {
-          const alternatives = await computeSlots(params, reqMap, planned, 10);
+          const alternatives = await computeSlots(
+            params,
+            reqMap,
+            planned,
+            10,
+            floor,
+          );
           return { ok: false, reason: "TAKEN", alternatives };
         }
         throw err;

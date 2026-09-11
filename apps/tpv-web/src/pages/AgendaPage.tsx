@@ -19,6 +19,8 @@ import {
   type ClientRow,
 } from "../lib/clients.js";
 import {
+  centerHHMM,
+  centerToday,
   checkoutAppointmentTicket,
   createAppointment,
   fetchAgendaDay,
@@ -34,10 +36,15 @@ import {
   type AvailabilitySlot,
 } from "../lib/agenda.js";
 import { useClientPicker } from "../hooks/useClientPicker.js";
+import { outboxRetry, subscribeOutbox } from "../lib/outbox.js";
 
 // ── Helpers de zona horaria (Europe/Madrid) para pintar ────────────────
 
 const TZ = "Europe/Madrid";
+// B-reservas-6a · la retícula del centro, la misma que el motor
+// (`apps/api/src/agenda/time.ts::SLOT_MINUTES`). El suelo de la agenda es
+// el comienzo de la franja EN CURSO: a las 11:10, las 11:00.
+const SLOT_MIN = 15;
 const dayStartMin = 8 * 60; // 08:00
 const dayEndMin = 21 * 60; // 21:00
 const PX_PER_MIN = 1.1;
@@ -61,19 +68,18 @@ function localMinutes(iso: string): number {
   return (hh === 24 ? 0 : hh) * 60 + mm;
 }
 
-function localHHMM(iso: string): string {
-  return partsFmt.format(new Date(iso));
+// B-reservas-6a frente O · la hora de pared la da `lib/agenda.ts`, que es
+// donde también la necesita el merge del outbox. Una copia menos.
+const localHHMM = centerHHMM;
+
+// minutos desde medianoche → "HH:MM" (para decir la hora del suelo).
+function hhmm(minutes: number): string {
+  const hh = Math.floor(minutes / 60);
+  const mm = minutes % 60;
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
 }
 
-function todayLocalDate(): string {
-  const f = new Intl.DateTimeFormat("en-CA", {
-    timeZone: TZ,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  return f.format(new Date());
-}
+const todayLocalDate = centerToday;
 
 function addDays(dateStr: string, n: number): string {
   const d = new Date(`${dateStr}T12:00:00.000Z`);
@@ -178,6 +184,14 @@ export function AgendaPage({
   const [draft, setDraft] = useState<DraftBooking | null>(null);
   const [detail, setDetail] = useState<AgendaAppointment | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  // B-reservas-6a · el 409 del suelo NO es un error genérico: trae la frase
+  // que se le lee a la clienta y los tres huecos que sí se le pueden dar.
+  // Vive en el panel de alta, que es donde está la acción que falló — un
+  // toast abajo-centro deja a la cajera leyendo al otro lado de la tablet.
+  const [bookError, setBookError] = useState<{
+    message: string;
+    alternatives: AvailabilitySlot[];
+  } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const durationByService = useMemo(() => {
@@ -221,6 +235,15 @@ export function AgendaPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notice]);
 
+  // B-reservas-6a frente O · un alta encolada que el servidor acepta (o
+  // rechaza) cambia lo que hay que pintar sin que nadie toque la pantalla.
+  // El outbox avisa; la agenda se repinta.
+  useEffect(() => {
+    return subscribeOutbox(() => {
+      void loadDay(date);
+    });
+  }, [date, loadDay]);
+
   useEffect(() => {
     void loadCatalogFromCache().then(setServices);
     void loadClientsFromCache().then((cs) => {
@@ -252,6 +275,13 @@ export function AgendaPage({
     if (staffFilter) return activeStaff.filter((s) => s.userId === staffFilter);
     return activeStaff;
   }, [activeStaff, staffFilter]);
+
+  // Las altas del outbox que el servidor rechazó. No se van solas de la
+  // pantalla: la cajera tiene que poder verlas y decidir.
+  const rechazadas = useMemo(
+    () => (day?.appointments ?? []).filter((a) => a.outboxStatus === "rejected"),
+    [day],
+  );
 
   const clientName = (id: string | null): string => {
     if (!id) return "Sin cliente";
@@ -293,6 +323,7 @@ export function AgendaPage({
   // ── Acciones ──────────────────────────────────────────────────────
   async function doCreate(cobrar: boolean) {
     if (!draft || draft.serviceIds.length === 0 || !draft.start) return;
+    setBookError(null);
     const res = await createAppointment({
       clientId: draft.clientId,
       items: draft.serviceIds.map((serviceId) => ({
@@ -301,12 +332,22 @@ export function AgendaPage({
       })),
       start: draft.start,
       source: "PRESENCIAL",
+      // Sólo para pintarla en su hueco mientras está encolada: el schema
+      // del alta no acepta este campo y el outbox no lo envía.
+      durationMin: draft.serviceIds.reduce(
+        (sum, id) => sum + (durationByService.get(id)?.durationMin ?? 0),
+        0,
+      ),
     });
     if (!res.ok) {
-      flash(res.message);
+      // El servidor ya redacta la frase (BOOKING_IN_PAST / BOOKING_OFF_GRID
+      // y los que vengan): aquí no se reescribe, se enseña — con sus
+      // alternativas tocables.
+      setBookError({ message: res.message, alternatives: res.alternatives ?? [] });
       return;
     }
     setDraft(null);
+    setBookError(null);
     if (res.queuedOffline) flash("Cita guardada sin red; se enviará al reconectar.");
     await loadDay(date);
     if (cobrar && !res.queuedOffline) {
@@ -335,6 +376,21 @@ export function AgendaPage({
     onClose();
   }
 
+  // Una cita que todavía vive en el outbox NO existe en el servidor:
+  // abrir su detalle ofrecería "Cobrar en caja" sobre algo que no está.
+  // Se cuenta lo que le pasa, que es lo que la cajera necesita saber.
+  function abrirCita(a: AgendaAppointment) {
+    if (!a.pendingOffline) {
+      setDetail(a);
+      return;
+    }
+    flash(
+      a.outboxStatus === "rejected"
+        ? `No se pudo guardar: ${a.outboxError ?? "el servidor la rechazó"}`
+        : "Cita guardada sin red; se enviará al reconectar.",
+    );
+  }
+
   async function changeStatus(id: string, status: AppointmentStatus) {
     const res = await patchAppointment(id, { status });
     if (!res.ok) {
@@ -347,18 +403,46 @@ export function AgendaPage({
 
   // Tap en un hueco vacío de una columna → alta slot-first.
   function openSlotFirst(staffUserId: string | null, minutes: number) {
+    const snapped = Math.round(minutes / SLOT_MIN) * SLOT_MIN;
+    // B-reservas-6a · una franja pasada NO invita a crear una cita. El
+    // servidor la rechazaría igual (409 BOOKING_IN_PAST); enseñar el panel
+    // de alta para acabar en un error es pasear a la cajera delante de la
+    // clienta. Se corta aquí y se dice a partir de qué hora sí.
+    if (snapped < earliestMin) {
+      flash(
+        isPastDay
+          ? "Ese día ya ha pasado. Elige hoy o un día siguiente."
+          : `Esa hora ya ha pasado. El primer hueco es a las ${hhmm(earliestMin)}.`,
+      );
+      return;
+    }
     setDetail(null);
+    setBookError(null);
     setDraft({
       clientId: null,
       clientName: null,
       serviceIds: [],
       staffUserId,
-      start: localToIso(date, Math.round(minutes / 15) * 15),
+      start: localToIso(date, snapped),
     });
   }
 
   const isToday = date === todayLocalDate();
+  const isPastDay = date < todayLocalDate();
   const nowMin = localMinutes(new Date().toISOString());
+  // EL SUELO, en la misma aritmética que el motor: el comienzo de la franja
+  // en curso. A las 11:10 son las 11:00 — la franja en curso SE RESERVA
+  // ("¿tienes hueco ahora?" es media agenda de una peluquería), y por eso
+  // la línea de "ahora" cae DENTRO de la última franja que aún se ofrece.
+  const floorMin = Math.floor(nowMin / SLOT_MIN) * SLOT_MIN;
+  const earliestMin = isPastDay
+    ? Number.POSITIVE_INFINITY
+    : isToday
+      ? floorMin
+      : Number.NEGATIVE_INFINITY;
+  // Hasta dónde se pinta apagada la columna. `null` = nada del día ha
+  // pasado (un día futuro).
+  const pastUntilMin = isPastDay ? dayEndMin : isToday ? floorMin : null;
 
   return (
     <div className="fixed inset-0 z-40 bg-mipiace-stone flex flex-col font-sans">
@@ -446,6 +530,32 @@ export function AgendaPage({
         </button>
       </div>
 
+      {/* B-reservas-6a frente O · un alta que el servidor rechazó no puede
+          quedarse sólo en el chip de abajo a la derecha: la cajera está
+          mirando la agenda, y esa cita la escribió ella. El aviso NO es un
+          toast — no se va solo — y trae la acción que se quiere: reintentar.
+          Descartar sigue en el chip, que ya pide confirmación. */}
+      {rechazadas.length > 0 && (
+        <div className="shrink-0 px-3 md:px-6 py-2 bg-red-50 border-b border-red-200 flex items-center gap-3 flex-wrap">
+          <span className="text-[13px] text-red-800">
+            {rechazadas.length === 1
+              ? `La cita de las ${localHHMM(rechazadas[0]!.start)} no se pudo guardar`
+              : `${rechazadas.length} citas no se pudieron guardar`}
+            {rechazadas.length === 1 && rechazadas[0]!.outboxError
+              ? `: ${rechazadas[0]!.outboxError}`
+              : "."}
+          </span>
+          <button
+            onClick={() => {
+              for (const a of rechazadas) void outboxRetry(a.id);
+            }}
+            className="h-9 shrink-0 px-3 rounded-xl bg-white border border-red-200 hover:bg-red-100 text-[12.5px] font-medium text-red-700"
+          >
+            Reintentar
+          </button>
+        </div>
+      )}
+
       {/* Semana (tira de días) */}
       <div className="flex gap-1 px-3 md:px-6 py-2 bg-white border-b border-slate-100 shrink-0 overflow-x-auto">
         {Array.from({ length: 7 }, (_, i) => addDays(todayLocalDate(), i)).map(
@@ -482,17 +592,39 @@ export function AgendaPage({
             </div>
           ) : (
             <div className="flex min-w-max">
-              {/* Regla de horas */}
+              {/* Regla de horas.
+
+                  B-reservas-6a · la regla MENTÍA, y el bucle visual de este
+                  bloque la pilló. Dos fallos, los dos preexistentes (se ven
+                  igual en las capturas de B-5):
+
+                  1. no dejaba hueco para la cabecera de profesional, así que
+                     iba 40 px por delante de las columnas;
+                  2. cada fila llevaba `-mt-2` en flujo, y esos 8 px se
+                     ACUMULABAN: la regla derivaba 8 px por hora. A las 20:00
+                     eran 96 px — hora y media de desfase.
+
+                  Ahora las etiquetas van absolutas sobre la misma geometría
+                  que las líneas de la columna, centradas en su hora. Con el
+                  suelo pintado esto deja de ser un detalle: si la regla no
+                  cuadra, no se sabe a qué hora acaba lo que ya pasó. */}
               <div className="w-14 shrink-0 sticky left-0 z-10 bg-mipiace-stone">
-                {hourRows().map((h) => (
-                  <div
-                    key={h}
-                    style={{ height: 60 * PX_PER_MIN }}
-                    className="text-[11px] text-slate-400 text-right pr-2 -mt-2"
-                  >
-                    {String(h).padStart(2, "0")}:00
-                  </div>
-                ))}
+                <div className="h-10 shrink-0" />
+                <div
+                  className="relative"
+                  style={{ height: (dayEndMin - dayStartMin) * PX_PER_MIN }}
+                >
+                  {hourRows().map((h) => (
+                    <div
+                      key={h}
+                      data-hora={`${String(h).padStart(2, "0")}:00`}
+                      style={{ top: (h * 60 - dayStartMin) * PX_PER_MIN }}
+                      className="absolute right-0 pr-2 -translate-y-1/2 text-[11px] text-slate-400 tabular-nums"
+                    >
+                      {String(h).padStart(2, "0")}:00
+                    </div>
+                  ))}
+                </div>
               </div>
               {/* Columnas por profesional */}
               {columns.map((s) => (
@@ -501,8 +633,9 @@ export function AgendaPage({
                   staff={s}
                   appts={apptsByStaff.get(s.userId) ?? []}
                   nowMin={isToday ? nowMin : null}
+                  pastUntilMin={pastUntilMin}
                   onSlot={(min) => openSlotFirst(s.userId, min)}
-                  onAppt={setDetail}
+                  onAppt={abrirCita}
                   labelOf={serviceNames}
                   clientOf={(a) => clientName(a.clientId)}
                 />
@@ -517,8 +650,9 @@ export function AgendaPage({
                   }}
                   appts={apptsByStaff.get("__unassigned__") ?? []}
                   nowMin={isToday ? nowMin : null}
+                  pastUntilMin={pastUntilMin}
                   onSlot={(min) => openSlotFirst(null, min)}
-                  onAppt={setDetail}
+                  onAppt={abrirCita}
                   labelOf={serviceNames}
                   clientOf={(a) => clientName(a.clientId)}
                 />
@@ -536,7 +670,16 @@ export function AgendaPage({
             services={services}
             staff={activeStaff}
             date={date}
-            onCancel={() => setDraft(null)}
+            isPastDay={isPastDay}
+            bookError={bookError}
+            onPickAlternative={(start) => {
+              setDraft({ ...draft, start });
+              setBookError(null);
+            }}
+            onCancel={() => {
+              setDraft(null);
+              setBookError(null);
+            }}
             onReserve={() => doCreate(false)}
             onReserveAndCharge={() => doCreate(true)}
           />
@@ -575,13 +718,23 @@ function StaffColumn(props: {
   staff: AgendaStaff;
   appts: AgendaAppointment[];
   nowMin: number | null;
+  // B-reservas-6a · hasta qué minuto del día ya ha pasado (el suelo).
+  // `null` = un día futuro, nada ha pasado.
+  pastUntilMin: number | null;
   onSlot: (minutes: number) => void;
   onAppt: (a: AgendaAppointment) => void;
   labelOf: (a: AgendaAppointment) => string;
   clientOf: (a: AgendaAppointment) => string;
 }) {
-  const { staff, appts, nowMin } = props;
+  const { staff, appts, nowMin, pastUntilMin } = props;
   const totalH = (dayEndMin - dayStartMin) * PX_PER_MIN;
+  const pastH =
+    pastUntilMin == null
+      ? 0
+      : Math.max(
+          0,
+          (Math.min(pastUntilMin, dayEndMin) - dayStartMin) * PX_PER_MIN,
+        );
   return (
     <div className="w-44 md:w-52 shrink-0 border-l border-slate-200">
       <div
@@ -593,6 +746,9 @@ function StaffColumn(props: {
         </span>
       </div>
       <div
+        // Gancho estable para el bucle visual y el test de jsdom: la
+        // superficie de la columna hay que poder tocarla por su sitio.
+        data-columna={staff.userId}
         className="relative"
         style={{ height: totalH }}
         onClick={(e) => {
@@ -601,6 +757,18 @@ function StaffColumn(props: {
           props.onSlot(dayStartMin + y / PX_PER_MIN);
         }}
       >
+        {/* B-reservas-6a · lo que ya pasó no invita. Va PRIMERO en el DOM
+            para quedar por debajo de las citas (una cita de las 10:00 se
+            sigue viendo y se sigue tocando: se cobra, se finaliza y se
+            cancela). El borde de abajo es el SUELO, no "ahora": la línea
+            roja cae dentro de la franja en curso, que sí se reserva. */}
+        {pastH > 0 && (
+          <div
+            aria-hidden
+            style={{ height: pastH }}
+            className="absolute left-0 right-0 top-0 bg-slate-200/45 pointer-events-none border-b border-slate-300/60"
+          />
+        )}
         {/* rejilla horaria */}
         {hourRows().map((h) => (
           <div
@@ -623,6 +791,12 @@ function StaffColumn(props: {
             22,
             (localMinutes(a.end) - localMinutes(a.start)) * PX_PER_MIN,
           );
+          // B-reservas-6a frente O · una cita que sigue en el outbox se
+          // pinta DISTINTA: a rayas discontinuas y diciendo en qué estado
+          // está. No es una cita del centro todavía — y si el servidor la
+          // rechazó, se queda ahí en rojo hasta que alguien decida.
+          const local = a.pendingOffline === true;
+          const rechazada = a.outboxStatus === "rejected";
           return (
             <button
               key={a.id + staff.userId}
@@ -633,12 +807,39 @@ function StaffColumn(props: {
               style={{
                 top,
                 height,
-                borderLeft: `4px solid ${STATUS_COLOR[a.status]}`,
+                ...(local
+                  ? {}
+                  : { borderLeft: `4px solid ${STATUS_COLOR[a.status]}` }),
               }}
-              className="absolute left-1 right-1 rounded-lg bg-white shadow-sm border border-slate-200 px-2 py-1 text-left overflow-hidden hover:shadow-md"
+              className={
+                local
+                  ? // A la MITAD DERECHA de la columna. El bucle visual
+                    // destapó por qué hace falta: una cita rechazada por
+                    // TAKEN está, por definición, encima de la que ocupó
+                    // su hueco — y a ancho completo la tapaba. La agenda
+                    // no tiene layout de solape porque hasta ahora el
+                    // EXCLUDE lo hacía imposible; con las citas locales
+                    // deja de serlo, y ésta es la respuesta barata: las
+                    // dos se ven.
+                    `absolute left-1/2 right-1 rounded-lg px-2 py-1 text-left overflow-hidden border-2 border-dashed ${
+                      rechazada
+                        ? "bg-red-50 border-red-300"
+                        : "bg-amber-50 border-amber-300"
+                    }`
+                  : "absolute left-1 right-1 rounded-lg bg-white shadow-sm border border-slate-200 px-2 py-1 text-left overflow-hidden hover:shadow-md"
+              }
             >
-              <div className="text-[11px] font-semibold text-mipiace-ink truncate">
+              <div
+                className={`text-[11px] font-semibold truncate ${
+                  local
+                    ? rechazada
+                      ? "text-red-800"
+                      : "text-amber-900"
+                    : "text-mipiace-ink"
+                }`}
+              >
                 {localHHMM(a.start)} · {props.clientOf(a)}
+                {local && (rechazada ? " · rechazada" : " · sin enviar")}
               </div>
               {/* B-reservas-5 F8 · la segunda línea sólo si cabe entera.
                   Una cita de 30 min mide 33 px y el contenido pide 40:
@@ -667,15 +868,27 @@ function BookingPanel(props: {
   services: CatalogProduct[];
   staff: AgendaStaff[];
   date: string;
+  // B-reservas-6a · un día que ya pasó no tiene huecos que buscar.
+  isPastDay: boolean;
+  // El 409 del servidor con su frase y sus alternativas.
+  bookError: { message: string; alternatives: AvailabilitySlot[] } | null;
+  onPickAlternative: (start: string) => void;
   onCancel: () => void;
   onReserve: () => void;
   onReserveAndCharge: () => void;
 }) {
-  const { draft, setDraft, services, date } = props;
+  const { draft, setDraft, services, date, isPastDay, bookError } = props;
   const picker = useClientPicker();
   const [slots, setSlots] = useState<AvailabilitySlot[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  // El panel hace scroll: si el aviso nace fuera de la vista, no existe.
+  const errorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // `?.()` porque jsdom no implementa scrollIntoView y el aviso no
+    // puede depender de que exista.
+    if (bookError) errorRef.current?.scrollIntoView?.({ block: "center" });
+  }, [bookError]);
 
   const bookableServices = services.filter(
     (s) => s.kind === "SERVICE" && (s.durationMin ?? 0) > 0,
@@ -706,6 +919,10 @@ function BookingPanel(props: {
 
   async function findSlots() {
     if (draft.serviceIds.length === 0) return;
+    if (isPastDay) {
+      setSearchError("Ese día ya ha pasado.");
+      return;
+    }
     setSearching(true);
     setSearchError(null);
     try {
@@ -727,7 +944,7 @@ function BookingPanel(props: {
   const canReserve = draft.serviceIds.length > 0 && !!draft.start;
 
   return (
-    <div className="w-full md:w-96 shrink-0 bg-white border-l border-slate-200 flex flex-col overflow-y-auto">
+    <div className="w-full md:w-96 shrink-0 bg-white border-l border-slate-200 flex flex-col overflow-hidden">
       <div className="flex items-center gap-2 h-14 px-4 border-b border-slate-100 shrink-0">
         <h2 className="text-[15px] font-semibold text-mipiace-ink flex-1">
           Nueva cita
@@ -741,7 +958,12 @@ function BookingPanel(props: {
         </button>
       </div>
 
-      <div className="p-4 space-y-4">
+      {/* B-reservas-6a · el cuerpo es lo único que hace scroll. Antes
+          scrolleaba el panel entero con el pie en `sticky bottom-0`, así que
+          el pie FLOTABA sobre el contenido: el bucle visual pilló las
+          alternativas del 409 asomando por debajo de "Reservar y cobrar",
+          visibles y no tocables. */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {/* Cliente primero */}
         <div>
           <label className="text-[12px] font-medium text-slate-500">Cliente</label>
@@ -810,7 +1032,7 @@ function BookingPanel(props: {
             <div className="mt-1">
               <button
                 onClick={findSlots}
-                disabled={draft.serviceIds.length === 0 || searching}
+                disabled={draft.serviceIds.length === 0 || searching || isPastDay}
                 className="w-full h-10 rounded-xl bg-mipiace-ink text-white text-[13px] font-medium disabled:opacity-40"
               >
                 {searching ? "Buscando…" : "Buscar hueco"}
@@ -832,10 +1054,38 @@ function BookingPanel(props: {
             </div>
           )}
         </div>
+        {/* B-reservas-6a · el 409 del suelo, pegado a la HORA, que es de lo
+            que habla. Aquí y no al final del panel: el bucle visual lo puso
+            debajo de las acciones primarias y la barra pegajosa le tapaba
+            justo las alternativas — un error con salida cuya salida no se
+            puede tocar es medio error otra vez. */}
+        {bookError && (
+          <div
+            ref={errorRef}
+            className="rounded-xl border border-amber-300 bg-amber-50 p-3"
+          >
+            <div className="text-[13px] leading-snug text-amber-900">
+              {bookError.message}
+            </div>
+            {bookError.alternatives.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {bookError.alternatives.slice(0, 3).map((sl) => (
+                  <button
+                    key={sl.start}
+                    onClick={() => props.onPickAlternative(sl.start)}
+                    className="h-11 px-3.5 rounded-xl bg-white border border-amber-300 text-[14px] font-semibold tabular-nums text-amber-900 hover:bg-amber-100"
+                  >
+                    {localHHMM(sl.start)}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Acciones primarias */}
-      <div className="mt-auto p-4 border-t border-slate-100 space-y-2 sticky bottom-0 bg-white">
+      <div className="shrink-0 p-4 border-t border-slate-100 space-y-2 bg-white">
         <button
           onClick={props.onReserveAndCharge}
           disabled={!canReserve}

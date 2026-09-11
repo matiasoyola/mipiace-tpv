@@ -15,6 +15,16 @@
 //
 // Motor agnóstico: cero `if(businessType)`, vocabulario neutro. Lo específico
 // de cita vive en `CitaMode`; el núcleo (engine/store/GiST) es compartido.
+//
+// B-reservas-6a · el suelo temporal viaja como `409` con la frase que la
+// cajera lee en voz alta y las tres horas que sí se pueden dar:
+//
+//   { error: "BOOKING_IN_PAST",  code, message, alternatives }
+//   { error: "BOOKING_OFF_GRID", code, message, alternatives }
+//
+// `code` lleva hoy el mismo valor que `error`: es el hueco donde B-6b
+// pondrá la key de la regla que bloqueó (`POLICY_BLOCKED`), y así el front
+// lee `code` desde ya y no se reescribe dos veces.
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
@@ -22,7 +32,13 @@ import { requireOwnerOrCashier } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
 import type { PrismaClient } from "@mipiacetpv/db";
 import { checkoutAppointment } from "./checkout.js";
-import { createCitaEngine, type BookingEngine } from "./engine.js";
+import {
+  createCitaEngine,
+  type BookingEngine,
+  type HoldFailureReason,
+} from "./engine.js";
+import { resolveBookingNow } from "./floor.js";
+import { parseOccurredAt } from "../shift/impute.js";
 import { createAgendaStore, type AgendaStore } from "./store.js";
 import { wallTimeToUtc } from "./time.js";
 import type { AppointmentStatus } from "./types.js";
@@ -46,6 +62,21 @@ async function ensureAgendaEnabled(
       message: "El módulo de agenda no está activado para este negocio.",
     });
   }
+}
+
+// B-reservas-6a · un solo sitio traduce el motor a HTTP. `NO_REQUIREMENTS`
+// es del pedido (400); todo lo demás es el hueco (409), incluido el suelo.
+function statusFor(reason: HoldFailureReason): number {
+  return reason === "NO_REQUIREMENTS" ? 400 : 409;
+}
+
+// La frase por defecto, para los rechazos que el motor no redacta. Los del
+// suelo SÍ la traen: sólo el motor conoce el huso y las alternativas.
+function defaultMessage(reason: HoldFailureReason): string {
+  if (reason === "NO_REQUIREMENTS") {
+    return "Algún servicio no es agendable (sin duración configurada).";
+  }
+  return "El hueco ya no está disponible.";
 }
 
 export interface AgendaRoutesOptions {
@@ -181,6 +212,12 @@ export async function registerAgendaRoutes(
               },
             },
             start: { type: "string", format: "date-time" },
+            // B-reservas-6a frente O · el instante en que la cajera creó
+            // el alta, sellado por el outbox al encolar. Sin este campo en
+            // el schema, el `removeAdditional` de Fastify lo borraría antes
+            // de que nadie lo viera — que es exactamente lo que le pasó al
+            // checkout de borrador en B-5 (§2.12 de reservas-5-done).
+            occurredAt: { type: ["string", "null"], format: "date-time" },
             source: {
               type: "string",
               enum: ["PRESENCIAL", "WEB", "PHONE", "GIFT_REDEMPTION"],
@@ -197,10 +234,37 @@ export async function registerAgendaRoutes(
         clientId?: string | null;
         items: Array<{ serviceId: string; staffUserId?: string | null }>;
         start: string;
+        occurredAt?: string | null;
         source?: "PRESENCIAL" | "WEB" | "PHONE" | "GIFT_REDEMPTION";
         notes?: string | null;
       };
       const source = body.source ?? "PRESENCIAL";
+
+      // Frente O · el alta que se creó sin red. Dos filtros encadenados,
+      // cada uno con su dueño:
+      //   1. `parseOccurredAt` (v1.11) descarta el FUTURO con la misma
+      //      tolerancia de 5 min que usan los tickets — un reloj
+      //      adelantado no abre el futuro de la agenda;
+      //   2. `resolveBookingNow` (el suelo) descarta lo más viejo que la
+      //      cota. Manda el motor, que la vuelve a llamar; aquí se llama
+      //      sólo para dejar escrito QUÉ pasó con el campo.
+      const { at: parsedOccurredAt, skewed } = parseOccurredAt(body.occurredAt);
+      const decision = resolveBookingNow(new Date(), parsedOccurredAt);
+      if (body.occurredAt) {
+        request.log.info(
+          {
+            event: "agenda.booking_occurred_at",
+            externalId: body.externalId,
+            occurredAt: body.occurredAt,
+            start: body.start,
+            // "future" también cuando `parseOccurredAt` ya lo tiró.
+            source: skewed ? "future" : decision.source,
+          },
+          decision.source === "occurred_at"
+            ? "el suelo se evalúa con el instante del alta (creada sin red)"
+            : "occurredAt no se usa para el suelo",
+        );
+      }
       // Presencial = confirmada directa; el resto entra como hold PENDING.
       const confirmed = source === "PRESENCIAL";
       const result = await engine.hold({
@@ -209,6 +273,7 @@ export async function registerAgendaRoutes(
         clientId: body.clientId ?? null,
         items: body.items,
         start: body.start,
+        occurredAt: parsedOccurredAt,
         source,
         confirmed,
         pendingTtlMinutes: HOLD_TTL_MINUTES,
@@ -222,13 +287,10 @@ export async function registerAgendaRoutes(
         }
         return reply.code(201).send({ appointment: result.appointment });
       }
-      const code = result.reason === "NO_REQUIREMENTS" ? 400 : 409;
-      return reply.code(code).send({
+      return reply.code(statusFor(result.reason)).send({
         error: result.reason,
-        message:
-          result.reason === "NO_REQUIREMENTS"
-            ? "Algún servicio no es agendable (sin duración configurada)."
-            : "El hueco ya no está disponible.",
+        code: result.reason,
+        message: result.message ?? defaultMessage(result.reason),
         alternatives: result.alternatives,
       });
     },
@@ -282,9 +344,10 @@ export async function registerAgendaRoutes(
             message: "Cita no encontrada.",
           });
         }
-        return reply.code(409).send({
+        return reply.code(statusFor(moved.reason)).send({
           error: moved.reason,
-          message: "No se pudo mover a ese hueco.",
+          code: moved.reason,
+          message: moved.message ?? "No se pudo mover a ese hueco.",
           alternatives: moved.alternatives,
         });
       }

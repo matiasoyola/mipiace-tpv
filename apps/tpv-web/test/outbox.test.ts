@@ -203,6 +203,40 @@ describe("outbox · occurredAt (v1.11-cierre-de-dia)", () => {
     expect(item!.body.occurredAt).toBe(stamped);
   });
 
+  // B-reservas-6a frente O · el alta de cita lleva el mismo sello por la
+  // misma razón con otro reloj: el AP12 apaga la pantalla a los cinco
+  // minutos y "¿tienes hueco ahora?" va pegada a la franja en curso. Sin
+  // el sello, al reconectar el suelo rechaza una hora que era buena
+  // cuando la cajera la escribió — y el 409 es rechazo permanente.
+  it("el ALTA DE CITA también lo lleva (B-reservas-6a)", async () => {
+    await outboxAdd({
+      externalId: OTHER_ID,
+      kind: "appointment",
+      path: "/agenda/appointments",
+      body: { externalId: OTHER_ID, items: [], start: "2026-09-15T09:00:00.000Z" },
+      label: "Cita 11:00",
+      total: 0,
+    });
+    const [item] = await outboxList();
+    const occurredAt = item!.body.occurredAt as string;
+    expect(typeof occurredAt).toBe("string");
+    expect(Math.abs(Date.parse(occurredAt) - item!.createdAt)).toBeLessThan(2000);
+  });
+
+  it("pero el PATCH de COMPLETED no: terminar no depende de cuándo se pulsó", async () => {
+    await outboxAdd({
+      externalId: OTHER_ID,
+      kind: "appointment",
+      method: "PATCH",
+      path: "/agenda/appointments/ap-1",
+      body: { status: "COMPLETED" },
+      label: "Finalizar cita",
+      total: 0,
+    });
+    const [item] = await outboxList();
+    expect(item!.body.occurredAt).toBeUndefined();
+  });
+
   it("las operaciones de turno NO lo llevan: no son ventas", async () => {
     await outboxAdd({
       externalId: OTHER_ID,
