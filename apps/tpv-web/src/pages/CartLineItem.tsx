@@ -159,16 +159,6 @@ export function CartLineItem({
       >
         <div className="text-[14px] md:text-[14.5px] font-medium text-mipiace-ink leading-tight flex items-center gap-1.5">
           <span className="truncate">{line.nameSnapshot}</span>
-          {/* B-reservas-2: duración del servicio, informativa. Minutos con
-              tabular-nums (UX metodología). Base visual para B4. */}
-          {durationMin != null && durationMin > 0 && (
-            <span
-              className="shrink-0 inline-flex items-center rounded-md bg-mipiace-stone px-1.5 py-0.5 text-[11.5px] font-medium tabular-nums text-slate-500"
-              title="Duración del servicio (agenda)"
-            >
-              {durationMin} min
-            </span>
-          )}
           {/* v1.2-Lite-fix1 Lote 3: indicador discreto de precio
               modificado, alternativa compacta al chip "Precio
               modificado" del breakdown — la papelera roba poco
@@ -204,6 +194,22 @@ export function CartLineItem({
         ) : (
           <div className="text-[12.5px] text-slate-400 tabular-nums mt-0.5">
             {formatEur(line.priceGross)} ud.
+          </div>
+        )}
+        {/* B-reservas-2: duración del servicio, informativa.
+            B-reservas-5 F3 · baja a su propia línea. Compartía fila con
+            el nombre, y en el panel del ticket a 1280 px el nombre
+            perdía: "Corte de pelo" salía como "Cor…" al lado de un
+            "30 min" que no se recorta nunca. El nombre de lo que se
+            está cobrando manda sobre el dato informativo. */}
+        {durationMin != null && durationMin > 0 && (
+          <div className="mt-1">
+            <span
+              className="inline-flex items-center rounded-md bg-mipiace-stone px-1.5 py-0.5 text-[11.5px] font-medium tabular-nums text-slate-500"
+              title="Duración del servicio (agenda)"
+            >
+              {durationMin} min
+            </span>
           </div>
         )}
       </button>

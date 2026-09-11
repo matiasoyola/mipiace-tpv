@@ -30,6 +30,7 @@ import "../src/index.css";
 
 import type { CartLine, CartTotals } from "../src/lib/cart.js";
 import type { ApiTable } from "../src/pages/TableMapScreen.js";
+import type { AppointmentContext } from "../src/pages/SalePage.js";
 
 // ── fixtures ──────────────────────────────────────────────────────────
 
@@ -291,6 +292,240 @@ const TICKET_DIGITAL = {
 
 // Sesión de mentira: `apiWithCashier` corta con 401 antes de tocar la
 // red si no hay cajero en localStorage, así que el banco necesita una.
+// ── B-reservas-5 · fixtures de la peluquería (Sole) ───────────────────
+//
+// El banco necesitaba un vertical SERVICES con agenda para el bucle
+// visual de este bloque: 3 profesionales, servicios con `durationMin` y
+// un día con las seis situaciones que la agenda sabe pintar (pendiente,
+// confirmada, en sala, finalizada, multi-servicio y hueco libre).
+//
+// Las horas se componen como HORA DE PARED de Europe/Madrid, igual que
+// hace el motor (`apps/api/src/agenda/time.ts`): así la captura sale
+// idéntica se tome desde el Mac o desde CI, que no comparten zona.
+
+// B-reservas-5 · reloj congelado del banco.
+//
+// Sin esto, dos capturas de la misma pantalla NUNCA salen iguales: la
+// agenda pinta la línea de "ahora" y hace auto-scroll hasta ella, y la
+// barra inferior lleva la hora. Eso convierte el antes/después de la
+// mudanza en un ejercicio de fe. Con `?at=HH:MM` (por defecto 11:20) el
+// banco fija el instante y la comparación es byte a byte.
+//
+// Sólo el banco visual. No entra en el bundle de producción.
+function freezeClock(): void {
+  const at = new URLSearchParams(window.location.search).get("at") ?? "11:20";
+  const [hh, mm] = at.split(":").map(Number);
+  const fixed = new Date(madridIso(hh ?? 11, mm ?? 20)).getTime();
+  const RealDate = Date;
+  const FrozenDate = function (this: unknown, ...args: unknown[]) {
+    if (args.length === 0) return new RealDate(fixed);
+    return new (RealDate as unknown as new (...a: unknown[]) => Date)(...args);
+  } as unknown as DateConstructor;
+  (FrozenDate as { prototype: unknown }).prototype = RealDate.prototype;
+  FrozenDate.now = () => fixed;
+  FrozenDate.parse = RealDate.parse;
+  FrozenDate.UTC = RealDate.UTC;
+  window.Date = FrozenDate;
+
+  // Con `?congelaAvisos=1` los temporizadores largos (los que apagan
+  // toasts y overlays de éxito) no llegan a disparar. Los avisos duran
+  // 3,5 s y una captura de Playwright tarda más que eso: sin esto, el
+  // estado de error del bucle visual es infotografiable. Sólo el banco.
+  if (new URLSearchParams(window.location.search).get("congelaAvisos") === "1") {
+    const realTimeout = window.setTimeout.bind(window);
+    window.setTimeout = ((fn: TimerHandler, ms?: number, ...rest: unknown[]) => {
+      if ((ms ?? 0) >= 3000) return 0 as unknown as number;
+      return realTimeout(fn, ms, ...rest);
+    }) as typeof window.setTimeout;
+  }
+}
+
+const TZ_MADRID = "Europe/Madrid";
+
+function benchToday(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: TZ_MADRID,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function madridIso(hh: number, mm: number): string {
+  const date = benchToday();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const guess = new Date(`${date}T${pad(hh)}:${pad(mm)}:00Z`);
+  const [gh, gm] = new Intl.DateTimeFormat("en-US", {
+    timeZone: TZ_MADRID,
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+    .format(guess)
+    .split(":")
+    .map(Number);
+  const deltaMin = (gh! % 24) * 60 + gm! - (hh * 60 + mm);
+  return new Date(guess.getTime() - deltaMin * 60_000).toISOString();
+}
+
+const SOLE_STAFF = [
+  { userId: "st-sole", displayName: "Sole", color: "#8b5cf6", active: true },
+  { userId: "st-marta", displayName: "Marta", color: "#ec4899", active: true },
+  { userId: "st-nuria", displayName: "Nuria", color: "#0ea5e9", active: true },
+];
+
+function mkService(
+  id: string,
+  name: string,
+  sku: string,
+  priceGross: number,
+  durationMin: number,
+) {
+  return {
+    id,
+    holdedProductId: `h-${id}`,
+    name,
+    sku,
+    barcode: null,
+    basePrice: Math.round((priceGross / 1.21) * 10_000) / 10_000,
+    priceGross,
+    taxRate: 21,
+    kind: "SERVICE" as const,
+    imageMime: null,
+    tags: ["peluqueria"],
+    durationMin,
+  };
+}
+
+const SOLE_CATALOG = [
+  mkService("sv-corte", "Corte de pelo", "CORTE", 18, 30),
+  mkService("sv-lavado", "Lavado y peinado", "PEINADO", 15, 30),
+  mkService("sv-tinte", "Tinte completo", "TINTE", 45, 90),
+  mkService("sv-mechas", "Mechas balayage", "MECHAS", 70, 120),
+  mkService("sv-manicura", "Manicura", "MANI", 22, 45),
+  mkService("sv-recogido", "Recogido de novia", "RECOGIDO", 90, 120),
+];
+
+function mkClient(id: string, firstName: string, lastName: string, phone: string) {
+  return {
+    id,
+    externalId: null,
+    firstName,
+    lastName,
+    phone,
+    email: null,
+    birthdate: null,
+    holdedContactId: null,
+    marketingOptIn: false,
+    notes: null,
+    createdAt: "2026-01-15T09:00:00.000Z",
+    updatedAt: "2026-01-15T09:00:00.000Z",
+  };
+}
+
+const SOLE_CLIENTS = [
+  mkClient("cl-carmen", "Carmen", "Ruiz", "600 111 222"),
+  mkClient("cl-lucia", "Lucía", "Prieto", "600 333 444"),
+  mkClient("cl-anabelen", "Ana Belén", "Soto", "600 555 666"),
+  mkClient("cl-rosa", "Rosa", "Marín", "600 777 888"),
+  mkClient("cl-isabel", "Isabel", "Cano", "600 999 000"),
+];
+
+function mkAppt(
+  id: string,
+  clientId: string | null,
+  staffUserId: string,
+  status: string,
+  hh: number,
+  mm: number,
+  services: Array<[string, number]>,
+  ticketId: string | null = null,
+) {
+  let offset = 0;
+  const items = services.map(([serviceId, durationMin], i) => {
+    const it = {
+      id: `${id}-i${i}`,
+      serviceId,
+      durationMin,
+      sortOrder: i,
+      startOffsetMin: offset,
+    };
+    offset += durationMin;
+    return it;
+  });
+  const start = madridIso(hh, mm);
+  return {
+    id,
+    clientId,
+    status,
+    source: "PRESENCIAL",
+    start,
+    end: new Date(new Date(start).getTime() + offset * 60_000).toISOString(),
+    ticketId,
+    notes: null,
+    items,
+    assignments: items.map(() => ({
+      reservableType: "STAFF" as const,
+      staffUserId,
+      resourceId: null,
+    })),
+  };
+}
+
+const SOLE_DAY = {
+  from: madridIso(0, 0),
+  to: madridIso(23, 59),
+  staff: SOLE_STAFF,
+  appointments: [
+    mkAppt("ap-1", "cl-carmen", "st-sole", "COMPLETED", 9, 30, [["sv-corte", 30]]),
+    mkAppt("ap-2", "cl-lucia", "st-marta", "IN_SERVICE", 10, 0, [["sv-tinte", 90]]),
+    mkAppt("ap-3", "cl-anabelen", "st-nuria", "CONFIRMED", 10, 30, [["sv-mechas", 120]]),
+    // Multi-servicio encadenado: corte + peinado en la misma visita.
+    mkAppt("ap-4", "cl-rosa", "st-sole", "CONFIRMED", 12, 0, [
+      ["sv-corte", 30],
+      ["sv-lavado", 30],
+    ]),
+    mkAppt("ap-5", "cl-isabel", "st-marta", "PENDING", 12, 30, [["sv-manicura", 45]]),
+    // Sin cliente: la reserva de teléfono que aún no tiene ficha.
+    mkAppt("ap-6", null, "st-nuria", "CONFIRMED", 16, 0, [["sv-corte", 30]]),
+    mkAppt("ap-7", "cl-carmen", "st-sole", "CONFIRMED", 17, 0, [["sv-recogido", 120]]),
+  ],
+};
+
+// El DRAFT que abriría el puente cita→caja: una línea por servicio del
+// visit, resuelta por `serviceId`, units 1 y sin descuento — igual que
+// `apps/api/src/agenda/checkout.ts`.
+function cartForAppointment(appointmentId: string): CartLine[] {
+  const appt = SOLE_DAY.appointments.find((a) => a.id === appointmentId);
+  if (!appt) return [];
+  return appt.items.map((it, i) => {
+    const svc = SOLE_CATALOG.find((p) => p.id === it.serviceId)!;
+    return {
+      id: `${appointmentId}-l${i}`,
+      productId: svc.id,
+      variantId: null,
+      holdedProductId: svc.holdedProductId,
+      sku: svc.sku,
+      nameSnapshot: svc.name,
+      units: 1,
+      unitPrice: svc.basePrice,
+      unitPriceOverride: null,
+      priceGross: svc.priceGross,
+      discountPct: 0,
+      taxRate: svc.taxRate,
+      modifiers: [],
+    };
+  });
+}
+
+function benchFallo(): string | null {
+  return new URLSearchParams(window.location.search).get("fallo");
+}
+
+function isAgendaScreen(): boolean {
+  return benchScreen().startsWith("agenda");
+}
+
 function stubSession(): void {
   localStorage.setItem("mipiacetpv-device-token", "banco-visual-device");
   localStorage.setItem(
@@ -310,6 +545,17 @@ function stubSession(): void {
   // primera captura de `venta-retail` saldría con la barra de hostelería.
   localStorage.setItem("mipiacetpv-catalog-tenant", "tenant-banco-visual");
   localStorage.setItem("mipiacetpv-catalog-business-type", benchBusinessType());
+  // B-reservas-5 · las capabilities se leen en el PRIMER pintado (igual
+  // que el vertical): sin esto, `agenda-entrada` saldría sin el botón
+  // "Agenda", que es justo lo que esa captura viene a fijar.
+  localStorage.setItem(
+    "mipiacetpv-catalog-agenda-enabled",
+    isAgendaScreen() ? "1" : "0",
+  );
+  localStorage.setItem(
+    "mipiacetpv-catalog-crm-enabled",
+    isAgendaScreen() ? "1" : "0",
+  );
 }
 
 // v1.14 · el banco necesita variar catálogo y vertical por pantalla: los
@@ -320,6 +566,9 @@ function benchScreen(): string {
 
 function benchCatalog() {
   const screen = benchScreen();
+  // B-reservas-5 · la agenda pinta nombres de servicio desde la caché
+  // del catálogo; sin esto las citas saldrían todas como "Servicio".
+  if (isAgendaScreen()) return SOLE_CATALOG;
   if (screen === "venta-20-categorias") return catalogWithTags(TAGS_20);
   if (screen === "venta-retail") return catalogWithTags(TAGS_SIROPE.slice(0, 5));
   const base = catalogWithTags(TAGS_SIROPE);
@@ -352,6 +601,7 @@ function benchLines(): CartLine[] {
 }
 
 function benchBusinessType(): string {
+  if (isAgendaScreen()) return "SERVICES";
   return benchScreen() === "venta-retail" ? "RETAIL" : "HOSPITALITY";
 }
 
@@ -392,9 +642,13 @@ function stubFetch(): void {
       tpvIconPreset: null,
       tagAliases: [],
       creditSalesEnabled: false,
-      crmEnabled: false,
-      agendaEnabled: false,
+      crmEnabled: isAgendaScreen(),
+      agendaEnabled: isAgendaScreen(),
     },
+    // B-reservas-5 · el día de la peluquería. La query (`?date=`) la
+    // recorta el dispatcher, así que la clave es la ruta pelada.
+    "/agenda": SOLE_DAY,
+    "/clients": { items: SOLE_CLIENTS, nextCursor: null },
     "/tpv/catalog/wildcards": { items: [] },
     "/tpv/catalog/modifier-groups": { groups: [] },
     "/tickets": {
@@ -465,8 +719,71 @@ function stubFetch(): void {
     // **ninguna acción existente desaparece** (Mostrar QR · Descargar
     // PDF · Ver ticket). En el resto se deja caer con 404 a propósito,
     // que es el camino degradado que el overlay ya sabe recorrer.
+    // B-reservas-5 · el puente cita→caja. Devuelve el DRAFT pre-poblado
+    // con las líneas del visit, como `agenda/checkout.ts`.
+    const cita = /^\/agenda\/appointments\/([^/]+)\/checkout$/.exec(path);
+    if (cita) {
+      const id = cita[1]!;
+      // B-reservas-5 F8 · el estado de error del bucle visual. La cita
+      // ya se cobró: el servidor corta antes de pasear a la cajera por
+      // el modal (F5). `?fallo=cobrada` lo reproduce en el banco.
+      if (benchFallo() === "cobrada") {
+        return new Response(
+          JSON.stringify({
+            error: "APPOINTMENT_ALREADY_PAID",
+            message: "Esta cita ya se cobró.",
+            ticketId: `tk-${id}`,
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      const cart = cartForAppointment(id);
+      return new Response(
+        JSON.stringify({
+          ticket: {
+            id: `tk-${id}`,
+            externalId: `ext-${id}`,
+            status: "DRAFT",
+            total: cart
+              .reduce((a, l) => a + l.priceGross * l.units, 0)
+              .toFixed(2),
+            totalTax: "0.00",
+            totalDiscount: "0.00",
+            lines: cart.map((l) => ({
+              id: l.id,
+              productId: l.productId,
+              sku: l.sku,
+              nameSnapshot: l.nameSnapshot,
+              units: String(l.units),
+              unitPrice: String(l.unitPrice),
+              taxRate: String(l.taxRate),
+              total: String(l.priceGross * l.units),
+            })),
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    // B-reservas-5 F8 · el cobro del borrador de la cita. Devuelve el
+    // ticket emitido para poder fotografiar "Ticket emitido" con la
+    // vuelta de v1.15, que es la razón de que la cita NO herede el
+    // patrón mesa (decisión P1 del bloque).
+    if (/^\/tickets\/[^/]+\/checkout$/.test(path)) {
+      return new Response(
+        JSON.stringify({
+          ticket: {
+            id: "tk-cita",
+            internalNumber: "000042",
+            status: "TEST",
+            holdedDocNumber: null,
+          },
+          syncStatus: "TEST",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
     if (/^\/tickets\/[^/]+\/digital$/.test(path)) {
-      if (!benchScreen().startsWith("ticket-emitido")) {
+      if (!benchScreen().startsWith("ticket-emitido") && !isAgendaScreen()) {
         return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
           status: 404,
           headers: { "Content-Type": "application/json" },
@@ -512,6 +829,66 @@ function stubFetch(): void {
   };
 }
 
+// B-reservas-5 F1 · el cableado de `App`, replicado.
+//
+// El banco no monta `App` (pide sesión, turno y catálogo reales), pero la
+// mudanza consiste justamente en QUIÉN pinta la agenda. Así que aquí se
+// reproduce el contrato exacto que ahora tiene `App`: el botón sólo avisa
+// (`onOpenAgenda`) y el overlay lo pinta el de arriba. Si ese contrato se
+// rompiera, esta pantalla dejaría de abrir la agenda al tocar el botón.
+function AgendaEntrada({
+  Screens,
+}: {
+  Screens: {
+    SalePage: typeof import("../src/pages/SalePage.js")["SalePage"];
+    AgendaPage: typeof import("../src/pages/AgendaPage.js")["AgendaPage"];
+  };
+}) {
+  const [showAgenda, setShowAgenda] = useState(false);
+  const [appointmentContext, setAppointmentContext] = useState<
+    AppointmentContext | null
+  >(null);
+  const draftCart = appointmentContext
+    ? cartForAppointment(appointmentContext.appointmentId)
+    : undefined;
+  return (
+    <>
+      {showAgenda && (
+        <Screens.AgendaPage
+          onClose={() => setShowAgenda(false)}
+          onEnterDraft={(entry) => {
+            setAppointmentContext({
+              appointmentId: entry.appointmentId,
+              activeTicketId: entry.ticketId,
+              clientName: entry.clientName,
+              serviceLabel: entry.serviceLabel,
+            });
+          }}
+        />
+      )}
+      <Screens.SalePage
+        key={appointmentContext?.activeTicketId ?? "quick-sale"}
+        shiftId="shift-1"
+        cashierLabel="Sole"
+        cashierRole="MANAGER"
+        registerName="Caja 1"
+        registerId="reg-1"
+        storeName="Peluquería Sole"
+        onOpenAgenda={() => setShowAgenda(true)}
+        appointmentContext={appointmentContext}
+        initialDraftLines={draftCart}
+        onBackToAgenda={() => {
+          setAppointmentContext(null);
+          setShowAgenda(true);
+        }}
+        onBackToMap={() => {}}
+        onLogoutCashier={() => {}}
+        onCloseShift={() => {}}
+      />
+    </>
+  );
+}
+
 // ── pantallas ─────────────────────────────────────────────────────────
 
 function Bench() {
@@ -525,19 +902,36 @@ function Bench() {
     CloseShiftModal: typeof import("../src/pages/CloseShiftModal.js")["CloseShiftModal"];
     ShiftOpenScreen: typeof import("../src/pages/ShiftOpenScreen.js")["ShiftOpenScreen"];
     ConfirmSheet: typeof import("../src/components/ConfirmSheet.js")["ConfirmSheet"];
+    AgendaPage: typeof import("../src/pages/AgendaPage.js")["AgendaPage"];
   }>(null);
 
   useEffect(() => {
     void (async () => {
-      const [checkout, success, sale, map, close, open, confirmSheet] = await Promise.all([
-        import("../src/pages/CheckoutPage.js"),
-        import("../src/pages/CheckoutPage.successOverlay.js"),
-        import("../src/pages/SalePage.js"),
-        import("../src/pages/TableMapScreen.js"),
-        import("../src/pages/CloseShiftModal.js"),
-        import("../src/pages/ShiftOpenScreen.js"),
-        import("../src/components/ConfirmSheet.js"),
-      ]);
+      const [checkout, success, sale, map, close, open, confirmSheet, agenda] =
+        await Promise.all([
+          import("../src/pages/CheckoutPage.js"),
+          import("../src/pages/CheckoutPage.successOverlay.js"),
+          import("../src/pages/SalePage.js"),
+          import("../src/pages/TableMapScreen.js"),
+          import("../src/pages/CloseShiftModal.js"),
+          import("../src/pages/ShiftOpenScreen.js"),
+          import("../src/components/ConfirmSheet.js"),
+          import("../src/pages/AgendaPage.js"),
+        ]);
+      // B-reservas-5 · la agenda lee servicios y clientes de la CACHÉ
+      // (IndexedDB), no de la red: sin sembrarla, las citas saldrían como
+      // "Servicio" / "Cliente" y el panel de alta, vacío. Se siembra
+      // contra los mismos stubs que sirve el banco.
+      if (isAgendaScreen()) {
+        const [cat, cli] = await Promise.all([
+          import("../src/lib/catalog.js"),
+          import("../src/lib/clients.js"),
+        ]);
+        await Promise.all([
+          cat.refreshCatalog().catch(() => {}),
+          cli.refreshClients().catch(() => {}),
+        ]);
+      }
       setScreens({
         CheckoutOverlay: checkout.CheckoutOverlay,
         SuccessOverlay: success.SuccessOverlay,
@@ -546,6 +940,7 @@ function Bench() {
         CloseShiftModal: close.CloseShiftModal,
         ShiftOpenScreen: open.ShiftOpenScreen,
         ConfirmSheet: confirmSheet.ConfirmSheet,
+        AgendaPage: agenda.AgendaPage,
       });
     })();
   }, []);
@@ -654,13 +1049,29 @@ function Bench() {
           openedByAlias: "Gemma",
           activeTicketId: "tk-m1",
         }}
-        initialTableLines={benchLines()}
+        initialDraftLines={benchLines()}
         onBackToMap={() => {}}
         onTicketMovedToTable={null}
         onLogoutCashier={() => {}}
         onCloseShift={() => {}}
       />
     );
+  }
+
+  // ── B-reservas-5 · la agenda ───────────────────────────────────────
+  // `AgendaPage` es un overlay a pantalla completa (`fixed inset-0`), así
+  // que se pinta igual montada suelta que montada dentro de `SalePage`.
+  // Ese es justo el punto de la MUDANZA SIN REFORMA: esta captura tiene
+  // que salir idéntica antes y después de que la agenda suba a `App`.
+  if (screen === "agenda") {
+    return <Screens.AgendaPage onClose={() => {}} />;
+  }
+
+  // El punto de ENTRADA a la agenda: la venta de Sole con el botón
+  // "Agenda" en la barra. La mudanza cambia a quién llama ese botón, así
+  // que la captura tiene que salir igual antes y después.
+  if (screen === "agenda-entrada") {
+    return <AgendaEntrada Screens={Screens} />;
   }
 
   if (screen === "mapa") {
@@ -695,6 +1106,7 @@ function Bench() {
   );
 }
 
+freezeClock();
 stubSession();
 stubFetch();
 

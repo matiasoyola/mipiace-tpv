@@ -203,7 +203,7 @@ async function renderSalePage(initialLines: ServerDraftLine[]) {
         registerId="reg-1"
         storeName="Bar Test"
         tableContext={tableContext}
-        initialTableLines={mapServerDraftLines(initialLines)}
+        initialDraftLines={mapServerDraftLines(initialLines)}
         onBackToMap={onBackToMap}
         onExitToMap={onExitToMap}
         onTicketMovedToTable={null}

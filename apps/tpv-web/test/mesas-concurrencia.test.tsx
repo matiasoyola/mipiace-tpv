@@ -206,7 +206,7 @@ async function renderTableSalePage(
         registerId="reg-1"
         storeName="Bar Test"
         tableContext={tableContext}
-        initialTableLines={mapServerDraftLines(initialLines)}
+        initialDraftLines={mapServerDraftLines(initialLines)}
         onBackToMap={onBackToMap}
         onExitToMap={onExitToMap}
         onTicketMovedToTable={null}
@@ -347,7 +347,7 @@ describe("Frente 2 · los errores del servidor se ven", () => {
             "PAYMENTS_MISMATCH",
           );
         }
-        // Refetch (onRefetchTable): la cuenta ahora suma 4,40 €.
+        // Refetch (onRefetchDraft): la cuenta ahora suma 4,40 €.
         if (path === `/tickets/${TICKET_1}` && (!opts?.method || opts.method === "GET")) {
           return {
             ticket: serverDraft([

@@ -79,11 +79,16 @@ export function SuccessOverlay({
   internalNumber,
   cash,
   onDone,
+  doneLabel,
 }: {
   ticketId: string;
   internalNumber: string;
   cash?: CashSummary;
   onDone: () => void;
+  // B-reservas-5 F8 · qué hace el botón de salir. En venta rápida abre
+  // otra venta; cobrando una cita devuelve a la agenda, y llamarlo
+  // "Nuevo servicio" sería decir lo que no hace.
+  doneLabel?: string;
 }) {
   const [docNumber, setDocNumber] = useState<string | null>(null);
   const [status, setStatus] = useState("PENDING_SYNC");
@@ -459,7 +464,8 @@ export function SuccessOverlay({
           onClick={onDone}
           className="mt-6 w-full h-12 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white font-medium text-[14px]"
         >
-          {businessType === "SERVICES" ? "Nuevo servicio" : "Nueva venta"}
+          {doneLabel ??
+            (businessType === "SERVICES" ? "Nuevo servicio" : "Nueva venta")}
         </button>
       </div>
 

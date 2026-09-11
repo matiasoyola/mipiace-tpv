@@ -302,3 +302,49 @@ describe("outbox · lock multi-pestaña", () => {
     expect(await outboxList()).toHaveLength(1);
   });
 });
+
+// B-reservas-5 F4 · el outbox nació POST-only porque todo lo que llevaba
+// eran altas. Marcar una cita COMPLETED sin red es un PATCH, y si el
+// envío lo forzase a POST el reintento moriría contra una ruta que no
+// existe: el "no puede perderse en silencio" del bloque se perdería en
+// silencio, que es peor.
+describe("B-reservas-5 · el outbox respeta el método del item", () => {
+  it("un item PATCH se reenvía como PATCH; sin método, sigue siendo POST", async () => {
+    const metodos: Array<{ path: string; method: string | undefined }> = [];
+    apiMock.apiWithCashier.mockImplementation(
+      async (path: string, opts?: { method?: string }) => {
+        metodos.push({ path, method: opts?.method });
+        return {};
+      },
+    );
+
+    await outboxAdd({
+      externalId: "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
+      kind: "appointment",
+      method: "PATCH",
+      path: "/agenda/appointments/cita-1",
+      body: { status: "COMPLETED" },
+      label: "Cita finalizada",
+      total: 0,
+    });
+    await outboxAdd({
+      externalId: "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb",
+      kind: "appointment",
+      path: "/agenda/appointments",
+      body: { externalId: "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb" },
+      label: "Cita 10:00",
+      total: 0,
+    });
+
+    await flushOutbox();
+
+    expect(
+      metodos.find((m) => m.path === "/agenda/appointments/cita-1")?.method,
+    ).toBe("PATCH");
+    expect(
+      metodos.find((m) => m.path === "/agenda/appointments")?.method,
+    ).toBe("POST");
+    // Los dos se enviaron y la cola queda limpia.
+    expect(await outboxList()).toHaveLength(0);
+  });
+});

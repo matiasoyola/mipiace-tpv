@@ -94,6 +94,12 @@ function makeFakePrisma(products: Array<{
       findUnique: async (args: { where: { id: string } }) =>
         tickets.get(args.where.id) ?? null,
     },
+    // B-reservas-5 F5 · el test necesita poder cobrar el borrador para
+    // comprobar qué pasa al volver a "Cobrar en caja".
+    __markPaid: (id: string) => {
+      const t = tickets.get(id) as Record<string, unknown> | undefined;
+      if (t) tickets.set(id, { ...t, status: "PENDING_SYNC" });
+    },
   } as never;
 }
 
@@ -176,6 +182,35 @@ describe("cita → caja (ticket pre-poblado)", () => {
       expect(second.alreadyLinked).toBe(true);
       expect(second.ticket.id).toBe(first.ticket.id);
     }
+  });
+
+  // B-reservas-5 F5 · antes de este bloque el ticket enlazado no se
+  // cobraba NUNCA (el cobro abría otro por su cuenta), así que devolverlo
+  // siempre era inofensivo. Ahora el ticket enlazado ES la venta.
+  it("una cita YA COBRADA no se vuelve a cobrar: 409 con el ticket", async () => {
+    const appt = apptWith([{ serviceId: CORTE }]);
+    const { store } = makeStore(appt);
+    const prisma = makeFakePrisma([
+      { id: CORTE, holdedProductId: "H-CORTE", sku: "SVC-CORTE", name: "Corte", basePrice: 20, taxRate: 21 },
+    ]);
+    const ctx = { tenantId: TENANT, registerId: REGISTER, cashierUserId: CASHIER };
+    const first = await checkoutAppointment(prisma, store, ctx, appt.id);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    // El cobro pasa por el camino existente y el DRAFT deja de serlo.
+    (prisma as unknown as { __markPaid: (id: string) => void }).__markPaid(
+      first.ticket.id,
+    );
+
+    const second = await checkoutAppointment(prisma, store, ctx, appt.id);
+    expect(second.ok).toBe(false);
+    if (second.ok) return;
+    expect(second.status).toBe(409);
+    expect(second.error).toBe("APPOINTMENT_ALREADY_PAID");
+    // Con el ticket a mano: la cajera puede mirarlo, no se queda en un
+    // callejón con un mensaje.
+    expect(second.ticketId).toBe(first.ticket.id);
   });
 
   it("rechaza el checkout de un servicio sin SKU (no cobrable)", async () => {

@@ -194,7 +194,7 @@ async function renderTableSale(initialLines: ServerDraftLine[]) {
         registerId="reg-1"
         storeName="Bar Test"
         tableContext={tableContext}
-        initialTableLines={mapServerDraftLines(initialLines)}
+        initialDraftLines={mapServerDraftLines(initialLines)}
         onBackToMap={vi.fn()}
         onTicketMovedToTable={null}
         onLogoutCashier={vi.fn()}
