@@ -16,6 +16,11 @@
 
 import { randomUUID } from "node:crypto";
 
+import {
+  resolveCenterSchedule,
+  type CenterDayRow,
+  type CenterHoursRow,
+} from "../../src/agenda/center-hours.js";
 import { ExclusionError, type AgendaStore } from "../../src/agenda/store.js";
 import type {
   AppointmentView,
@@ -31,6 +36,11 @@ export interface Seed {
   templates: TemplateSlot[]; // por tenant implícito
   resourcesByKind?: Record<string, string[]>;
   blocks?: BlockInterval[];
+  // B-reservas-7a · el TECHO. Ausentes = el tenant no tiene horario
+  // configurado ⇒ sin techo, que es como se comportaba antes del bloque.
+  // Por eso los tests de B4, B-5 y 6a no se tocan: no siembran esto.
+  centerHours?: CenterHoursRow[];
+  centerDays?: CenterDayRow[];
 }
 
 // Store en memoria multi-tenant. Enforce del EXCLUDE: un staff/resource no
@@ -152,6 +162,19 @@ export function makeFakeStore(
         });
       }
       return out;
+    },
+    async getCenterSchedule(tenantId, fromDate, toDate) {
+      // Misma resolución PURA que usa el store real: el falso trae las
+      // filas sembradas y `center-hours.ts` decide. Si el falso tuviera su
+      // propia lógica, mentiría a favor igual que mentía con la ventana de
+      // `getTemplateSlots` antes de 6a.
+      const seed = seedByTenant[tenantId];
+      return resolveCenterSchedule(
+        seed?.centerHours ?? [],
+        seed?.centerDays ?? [],
+        fromDate,
+        toDate,
+      );
     },
     async getBlocks(tenantId) {
       return seedByTenant[tenantId]?.blocks ?? [];

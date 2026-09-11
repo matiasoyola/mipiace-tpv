@@ -1,5 +1,28 @@
 # Bloque Reservas-7 · Ventana reservable separada del turno contratado
 
+> **NOTA (11-09-2026) · este prompt es B-7b y NO es lo que se está construyendo hoy.**
+>
+> Matías partió B-7 el 11-09, igual que partió B-6. Lo que se hace ahora es **B-7a ·
+> el horario del centro** (`docs/blocks/reservas-7a-plan.md`, rama
+> `reservas-7a-horario`): `center_hours`, `center_days` (los días especiales, más
+> anchos que los festivos que pedía este documento), la retícula por centro, las
+> ausencias puestas desde la agenda y lo que la cajera ve en la rejilla.
+>
+> **Por qué se partió.** Hoy el turno lo lee **un solo consumidor**: la agenda. No hay
+> fichaje, ni nóminas, ni informes de ocupación encima de `staff_shifts`. Separar
+> `bookable_window` de `StaffShift` —lo que pide este documento— no le arregla nada a
+> nadie **todavía**; el techo del centro, en cambio, lo pisa la rutina de Peluquería
+> Sole todos los días: cierra el domingo, tiene festivos con nombre, y el sábado de una
+> boda abre a las 8:30, antes del turno de nadie. Eso es lo que se arregla primero.
+>
+> **Lo que B-7a se lleva de aquí:** `center_hours`, los festivos (aquí como
+> `center_days`, que además saben **abrir**) y el estado vacío que distingue causas.
+>
+> **Lo que sigue siendo B-7b, y es este documento:** `bookable_windows`, la derivación
+> por defecto desde el turno, la desviación visible con su motivo,
+> `GET /agenda/occupancy` y la pantalla P9 de turnos y ventanas. Sigue en pie tal cual,
+> incluida la restricción de **no tocar `StaffShift`** (D-3), que B-7a también respeta.
+
 > Hoy el motor lee la disponibilidad **directamente de `staff_shifts`**
 > (`apps/api/src/agenda/store.ts:203-222`): un solo concepto haciendo dos trabajos incompatibles. Para
 > abrir un hueco al público hay que **ensanchar el turno**, es decir, mentir en el dato de RRHH; y

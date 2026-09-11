@@ -21,6 +21,11 @@ type RRule = InstanceType<typeof RRule>;
 import type { PrismaClient } from "@mipiacetpv/db";
 
 import {
+  resolveCenterSchedule,
+  type CenterDayRow,
+  type CenterHoursRow,
+} from "./center-hours.js";
+import {
   wallTimeToUtc,
   utcToWallDate,
 } from "./time.js";
@@ -28,6 +33,7 @@ import type {
   AppointmentStatus,
   AppointmentView,
   BlockInterval,
+  CenterDayHours,
   Occupancy,
   PlannedAssignment,
   PlannedItem,
@@ -86,6 +92,14 @@ export interface AgendaStore {
     fromDate: string,
     toDate: string,
   ): Promise<TemplateSlot[]>;
+  // B-reservas-7a · EL TECHO. El horario del centro fecha a fecha en el
+  // rango. `open: null` para una fecha = este tenant no tiene horario
+  // configurado ahí ⇒ sin techo, exactamente como antes de este bloque.
+  getCenterSchedule(
+    tenantId: string,
+    fromDate: string,
+    toDate: string,
+  ): Promise<Map<string, CenterDayHours>>;
   getOccupancies(tenantId: string, from: Date, to: Date): Promise<Occupancy[]>;
   getBlocks(tenantId: string, from: Date, to: Date): Promise<BlockInterval[]>;
   getResourcesByKind(
@@ -238,6 +252,66 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
         }
       }
       return out;
+    },
+
+    async getCenterSchedule(tenantId, fromDate, toDate) {
+      // Las dos tablas del techo. La resolución (qué manda sobre qué) es
+      // pura y vive en `center-hours.ts`; aquí sólo se traen las filas.
+      //
+      // `@db.Date` llega como `Date` a medianoche UTC: se normaliza a
+      // "YYYY-MM-DD" ANTES de comparar nada. Comparar una fecha de pared
+      // contra un instante es la clase de error que aparece un 25 de
+      // octubre y no antes.
+      const [weekRows, dayRows] = await Promise.all([
+        prisma.centerHours.findMany({
+          where: {
+            tenantId,
+            validFrom: { lte: new Date(`${toDate}T00:00:00.000Z`) },
+            OR: [
+              { validUntil: null },
+              { validUntil: { gte: new Date(`${fromDate}T00:00:00.000Z`) } },
+            ],
+          },
+          select: {
+            weekday: true,
+            openTime: true,
+            closeTime: true,
+            validFrom: true,
+            validUntil: true,
+          },
+        }),
+        prisma.centerDay.findMany({
+          where: {
+            tenantId,
+            date: {
+              gte: new Date(`${fromDate}T00:00:00.000Z`),
+              lte: new Date(`${toDate}T00:00:00.000Z`),
+            },
+          },
+          select: {
+            date: true,
+            closed: true,
+            name: true,
+            openTime: true,
+            closeTime: true,
+          },
+        }),
+      ]);
+      const week: CenterHoursRow[] = weekRows.map((r) => ({
+        weekday: r.weekday,
+        openTime: r.openTime,
+        closeTime: r.closeTime,
+        validFrom: isoDate(r.validFrom),
+        validUntil: r.validUntil ? isoDate(r.validUntil) : null,
+      }));
+      const days: CenterDayRow[] = dayRows.map((r) => ({
+        date: isoDate(r.date),
+        closed: r.closed,
+        name: r.name,
+        openTime: r.openTime,
+        closeTime: r.closeTime,
+      }));
+      return resolveCenterSchedule(week, days, fromDate, toDate);
     },
 
     async getOccupancies(tenantId, from, to) {
@@ -653,14 +727,20 @@ async function readBlocks(
   // Puntuales.
   const punctual = await prisma.$queryRawUnsafe<
     Array<{
+      id: string;
       scope: "CENTER" | "STAFF" | "RESOURCE" | "TABLE";
       staff_user_id: string | null;
       resource_id: string | null;
+      reason: string | null;
       starts_at: Date;
       ends_at: Date;
     }>
   >(
-    `SELECT scope, staff_user_id, resource_id, lower(slot) AS starts_at, upper(slot) AS ends_at
+    // B-reservas-7a · `id` y `reason` salen de aquí porque la AGENDA los
+    // necesita: una ausencia se pinta con su motivo y se quita tocándola,
+    // lo que exige su id. El motor no los mira.
+    `SELECT id, scope, staff_user_id, resource_id, reason,
+            lower(slot) AS starts_at, upper(slot) AS ends_at
      FROM booking_blocks
      WHERE tenant_id = $1::uuid AND slot IS NOT NULL
        AND slot && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
@@ -670,9 +750,11 @@ async function readBlocks(
   );
   for (const b of punctual) {
     out.push({
+      id: b.id,
       scope: b.scope,
       staffUserId: b.staff_user_id,
       resourceId: b.resource_id,
+      reason: b.reason,
       startsAt: b.starts_at,
       endsAt: b.ends_at,
     });
@@ -686,9 +768,11 @@ async function readBlocks(
       OR: [{ validUntil: null }, { validUntil: { gte: from } }],
     },
     select: {
+      id: true,
       scope: true,
       staffUserId: true,
       resourceId: true,
+      reason: true,
       rrule: true,
       startTime: true,
       endTime: true,
@@ -708,9 +792,14 @@ async function readBlocks(
       new Date(`${toDate}T23:59:59.999Z`),
     )) {
       out.push({
+        // Todas las repeticiones comparten el id del bloqueo recurrente:
+        // quitar una desde la agenda quita el bloqueo entero, y eso la
+        // pantalla lo dice antes de hacerlo.
+        id: b.id,
         scope: b.scope,
         staffUserId: b.staffUserId,
         resourceId: b.resourceId,
+        reason: b.reason,
         startsAt: wallTimeToUtc(d, b.startTime),
         endsAt: wallTimeToUtc(d, b.endTime),
       });
@@ -743,4 +832,12 @@ function expandRule(
     return [];
   }
   return rule.between(start, end, true).map((d) => d.toISOString().slice(0, 10));
+}
+
+// `@db.Date` de Prisma llega como `Date` a medianoche UTC. La fecha de
+// pared es su parte UTC, SIN pasar por la zona del proceso: `toISOString`
+// y cortar. Un `getFullYear()` aquí daría el día anterior en cualquier
+// huso al oeste de Greenwich.
+function isoDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
 }
