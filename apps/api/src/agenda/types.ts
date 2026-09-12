@@ -50,12 +50,52 @@ export interface Occupancy {
 
 // Bloqueo puntual expandido a intervalo UTC (afecta a un profesional, un
 // recurso, o al centro entero).
+//
+// B-reservas-7a · `id` y `reason` viajan desde el bloque original porque la
+// AGENDA los necesita: una ausencia se pinta con su motivo ("Ana libre", el
+// del Excel de Sole) y se quita tocándola, lo que exige su id. Los dos son
+// nullable porque el store en memoria de los tests y las expansiones
+// recurrentes pueden no tenerlos; el motor nunca los mira.
 export interface BlockInterval {
   scope: "CENTER" | "STAFF" | "RESOURCE" | "TABLE";
   staffUserId: string | null;
   resourceId: string | null;
   startsAt: Date;
   endsAt: Date;
+  id?: string | null;
+  reason?: string | null;
+}
+
+// ─── B-reservas-7a · el horario del centro ────────────────────────────
+//
+// El TECHO. La ventana de un profesional en una fecha pasa a ser su turno
+// INTERSECADO con esto, antes de descontar bloqueos y citas.
+
+// Un tramo abierto en hora de pared "HH:MM".
+export interface OpenRange {
+  startTime: string;
+  endTime: string;
+}
+
+// El horario del centro resuelto para UNA fecha concreta.
+//
+// `open === null` es el caso que mantiene la compatibilidad: el tenant no
+// tiene ningún horario vigente esa fecha, así que NO hay techo y el motor
+// se comporta exactamente como antes de este bloque.
+//
+// `open === []` es lo contrario: el centro está CERRADO ese día. Pasa
+// cuando un día especial lo cierra (un festivo) o cuando el tenant tiene
+// semana tipo y ese día de la semana no tiene ninguna fila.
+export interface CenterDayHours {
+  date: string; // YYYY-MM-DD
+  open: OpenRange[] | null;
+  // El nombre del día especial que manda, si lo hay. Es lo que la rejilla
+  // dice en voz alta: "Cerrado · Virgen del Prado", "boda Marta".
+  specialName: string | null;
+  // true = ese día no se abre. Redundante con `open.length === 0` a
+  // propósito: `open: null` (sin techo) y `open: []` (cerrado) se
+  // confunden con una comprobación de longitud descuidada.
+  closed: boolean;
 }
 
 // Un item pedido en availability/hold: qué servicio y (opcional) el

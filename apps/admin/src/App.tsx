@@ -13,6 +13,7 @@ import { PrintersPage } from "./pages/PrintersPage.js";
 import { SecurityPage } from "./pages/SecurityPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 import { AgendaCatalogPage } from "./pages/AgendaCatalogPage.js";
+import { AgendaHorarioPage } from "./pages/AgendaHorarioPage.js";
 import { StaffPage } from "./pages/StaffPage.js";
 import { ContactImportPage } from "./pages/ContactImportPage.js";
 import { StoreDetailPage, StoresPage } from "./pages/StoresPage.js";
@@ -93,6 +94,7 @@ export function App() {
         <Route path="/admin/settings" element={<SettingsPage />} />
         <Route path="/admin/staff" element={<StaffPage />} />
         <Route path="/admin/agenda-catalog" element={<AgendaCatalogPage />} />
+        <Route path="/admin/agenda-hours" element={<AgendaHorarioPage />} />
         <Route path="/admin/tag-aliases" element={<TagAliasesPage />} />
         <Route path="/admin/tag-sections" element={<TagSectionsPage />} />
         <Route path="/admin/printers" element={<PrintersPage />} />

@@ -18,6 +18,7 @@ import {
   systemClock,
   type Clock,
 } from "./floor.js";
+import { clipToCenter } from "./center-hours.js";
 import { ExclusionError, type AgendaStore, type HoldInput } from "./store.js";
 import {
   CENTER_TZ,
@@ -98,6 +99,15 @@ export type HoldResult =
 export interface EngineOptions {
   clock?: Clock;
   tz?: string;
+  // B-reservas-7a · LA RETÍCULA del centro (`Tenant.agendaSlotMinutes`):
+  // cada cuántos minutos empieza una cita. Entra por aquí, igual que `tz`,
+  // y por la misma razón: una sola lectura por petición y ninguna
+  // constante suelta. Sin ella, `SLOT_MINUTES` (15) — el valor de B4, así
+  // que un tenant que no la configure se comporta como antes del bloque.
+  //
+  // Peluquería Sole trabaja en franjas de 30 y hasta ahora le ofrecíamos
+  // inicios a y cuarto y menos cuarto (6a §4.6).
+  slotMinutes?: number;
 }
 
 // Interfaz del motor (idéntica firma que expondrá KoiboxAdapter/B6).
@@ -138,6 +148,14 @@ export function createCitaEngine(
 ): BookingEngine {
   const clock = opts.clock ?? systemClock;
   const tz = opts.tz ?? CENTER_TZ;
+  // La retícula, resuelta UNA vez por motor. Un valor absurdo (0, negativo,
+  // no entero) no puede llegar aquí —el CHECK de la BD sólo admite 15 y
+  // 30— pero si llegara dejaría `gridStarts` en bucle: se cae al default
+  // en vez de colgar la petición.
+  const slot =
+    Number.isInteger(opts.slotMinutes) && (opts.slotMinutes ?? 0) > 0
+      ? opts.slotMinutes!
+      : SLOT_MINUTES;
   // Cuántas alternativas acompañan a un rechazo del suelo. Tres: las que
   // caben en una frase dicha por teléfono.
   const FLOOR_ALTERNATIVES = 3;
@@ -192,18 +210,40 @@ export function createCitaEngine(
       skilledByService.set(sid, set);
       for (const u of set) allStaff.add(u);
     }
-    const templates = await store.getTemplateSlots(
-      params.tenantId,
-      [...allStaff],
-      params.fromDate,
-      params.toDate,
-    );
+    // B-reservas-7a · EL TECHO se aplica AQUÍ, al construir las plantillas
+    // del día, y en ningún otro sitio. `templateCovers` y `candidateStarts`
+    // —los dos únicos consumidores— siguen sin saber que el centro tiene
+    // horario: los dos ven una plantilla que ya viene recortada. Poner el
+    // recorte en cualquiera de los dos abriría la puerta a que listar y
+    // reservar dejaran de decir lo mismo, que es el invariante 6.
+    //
+    //   turno(profesional, fecha) ∩ horario_del_centro(fecha)
+    //     ∖ bloqueos CENTER|STAFF   ← ya lo hace staffFree()
+    //     ∖ citas activas           ← ya lo hacen occByStaff y el GiST
+    const [templates, centerSchedule] = await Promise.all([
+      store.getTemplateSlots(
+        params.tenantId,
+        [...allStaff],
+        params.fromDate,
+        params.toDate,
+      ),
+      store.getCenterSchedule(params.tenantId, params.fromDate, params.toDate),
+    ]);
     const templateByUserDate = new Map<string, TemplateSlot[]>();
     for (const t of templates) {
       const k = tKey(t.userId, t.date);
       const arr = templateByUserDate.get(k) ?? [];
       arr.push(t);
       templateByUserDate.set(k, arr);
+    }
+    for (const [k, slots] of templateByUserDate) {
+      const date = k.split("|")[1]!;
+      const recortadas = clipToCenter(slots, centerSchedule.get(date));
+      // Una clave con cero franjas es una clave que `templateCovers` tiene
+      // que ver como "no cubre": se borra, porque `get()` devolviendo `[]`
+      // y devolviendo `undefined` no se distinguen en `some()`.
+      if (recortadas.length === 0) templateByUserDate.delete(k);
+      else templateByUserDate.set(k, recortadas);
     }
     // Ventana UTC amplia (borde local del rango + margen de un día).
     const from = wallTimeToUtc(params.fromDate, "00:00", tz);
@@ -451,8 +491,10 @@ export function createCitaEngine(
     return assignments;
   }
 
-  // Genera los inicios de visit candidatos (UTC) en el rango, gridados a 15
-  // min dentro de las ventanas de plantilla de cualquier profesional.
+  // Genera los inicios de visit candidatos (UTC) en el rango, gridados a la
+  // RETÍCULA DEL CENTRO (`slot`, B-reservas-7a: 15 o 30) dentro de las
+  // ventanas de plantilla de cualquier profesional — que a estas alturas ya
+  // vienen recortadas por el horario del centro.
   function candidateStarts(
     ctx: EngineContext,
     spanMin: number,
@@ -464,7 +506,7 @@ export function createCitaEngine(
       for (const s of slots) {
         const fromMin = timeToMinutes(s.startTime);
         const toMin = timeToMinutes(s.endTime);
-        for (const startMin of gridStarts(fromMin, toMin, spanMin, SLOT_MINUTES)) {
+        for (const startMin of gridStarts(fromMin, toMin, spanMin, slot)) {
           const key = `${date}|${startMin}`;
           if (seen.has(key)) continue;
           seen.add(key);
@@ -563,7 +605,7 @@ export function createCitaEngine(
         message: pastMessage(alternatives, tz),
       };
     }
-    if (!isOnGrid(startUtc, tz, SLOT_MINUTES)) {
+    if (!isOnGrid(startUtc, tz, slot)) {
       const alternatives = await openingsFrom(
         params,
         reqMap,
@@ -575,7 +617,7 @@ export function createCitaEngine(
         ok: false,
         reason: "BOOKING_OFF_GRID",
         alternatives,
-        message: offGridMessage(alternatives, tz, SLOT_MINUTES),
+        message: offGridMessage(alternatives, tz, slot),
       };
     }
     return null;
@@ -592,7 +634,7 @@ export function createCitaEngine(
       if (!planned) return [];
       // El suelo. Un solo `clock.now()` por petición: el instante con el que
       // se lista es el mismo con el que se reserva.
-      const floor = currentGridStart(clock.now(), tz, SLOT_MINUTES);
+      const floor = currentGridStart(clock.now(), tz, slot);
       return computeSlots(params, reqMap, planned, 200, floor);
     },
 
@@ -631,7 +673,7 @@ export function createCitaEngine(
       // inicio que ya pasó no es un hueco ocupado: es un hueco que no
       // existe, y la frase que se le dice a la clienta es otra.
       const now = clock.now();
-      const floor = currentGridStart(now, tz, SLOT_MINUTES);
+      const floor = currentGridStart(now, tz, slot);
       // Frente O · si el alta se creó sin red, la puerta se juzga con el
       // instante en que la cajera la escribió. `resolveBookingNow` es la
       // autoridad —la ruta la llama sólo para loguear—, así que un
@@ -640,7 +682,7 @@ export function createCitaEngine(
       const gate = currentGridStart(
         resolveBookingNow(now, request.occurredAt ?? null).at,
         tz,
-        SLOT_MINUTES,
+        slot,
       );
       const rejected = await floorCheck(
         startUtc,
@@ -737,7 +779,7 @@ export function createCitaEngine(
       // el suelo: el estado de una cita pasada y su cobro no pasan por aquí.
       // Mover no pasa por el outbox (`patchAppointment` no encola), así
       // que aquí la puerta es siempre el reloj real.
-      const floor = currentGridStart(clock.now(), tz, SLOT_MINUTES);
+      const floor = currentGridStart(clock.now(), tz, slot);
       const rejected = await floorCheck(
         startUtc,
         floor,
