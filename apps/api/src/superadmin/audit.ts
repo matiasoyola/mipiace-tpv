@@ -32,6 +32,12 @@ const CreateTenantDraftMeta = Base.extend({
   // (tenant creado con id equivocado, etc.).
   holdedAccountId: z.string(),
   source: z.enum(["holded_account", "manual"]),
+  // H1 · con qué se dio de alta la empresa. Opcionales para no invalidar
+  // los audit logs escritos antes del bloque, que no los llevan.
+  usesHolded: z.boolean().optional(),
+  modules: z
+    .object({ caja: z.boolean(), crm: z.boolean(), agenda: z.boolean() })
+    .optional(),
 });
 
 // B-OnboardingV2: super-admin pulsó "Probar TPV", emisión del JWT
@@ -50,6 +56,9 @@ const ActivateTenantMeta = Base.extend({
   ownerName: z.string(),
   ticketsTestPurged: z.number().int().nonnegative(),
   emailJobsPurged: z.number().int().nonnegative(),
+  // H1 · si el OWNER nació también como cajero del TPV. Opcional para no
+  // invalidar los audit logs escritos antes del bloque.
+  cashierPinIssued: z.boolean().optional(),
 });
 
 const UpdateTenantMeta = Base.extend({

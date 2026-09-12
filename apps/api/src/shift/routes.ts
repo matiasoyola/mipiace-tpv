@@ -12,6 +12,7 @@ import { computeZBreakdown, type ZBreakdown } from "./z-breakdown.js";
 import { loadShiftBreakdownSums } from "./breakdown-sums.js";
 import { buildShiftDaySummary, SHIFT_SUMMARY_SELECT } from "./summary.js";
 import { archiveZReport } from "./z-seal.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 
 // Body shape de close (B3 §3.4). methodTotals reportado por el cajero
 // (cash, card, bizum, voucher). En B3 todavía no hay tickets reales →
@@ -30,7 +31,7 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
   // tras abrir/reanudar el turno — sin él, B3 pintaba "pending-refresh".
   app.get(
     "/shift/current",
-    { preHandler: requireCashierSession },
+    { preHandler: [requireCashierSession, ensureCajaEnabled] },
     async (request) => {
       const cashier = request.cashier!;
       const prisma = getPrisma();
@@ -73,7 +74,7 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     "/shift/open",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         body: {
           type: "object",
@@ -135,7 +136,7 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     "/shift/:shiftId/close",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -195,7 +196,7 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     "/shift/:shiftId/cash-count",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -379,7 +380,7 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     "/shift/:shiftId/cash-counts",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -442,7 +443,7 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     "/shift/:shiftId/resume",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -496,7 +497,7 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     "/shift/:shiftId/summary",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -529,7 +530,7 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
   // nada pendiente — el caso normal a mitad de jornada.
   app.get(
     "/shift/last-closed",
-    { preHandler: requireCashierSession },
+    { preHandler: [requireCashierSession, ensureCajaEnabled] },
     async (request, reply) => {
       const cashier = request.cashier!;
       const prisma = getPrisma();
@@ -566,7 +567,7 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     "/shift/:shiftId/close-day",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -625,7 +626,7 @@ export async function registerShiftRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     "/shift/:shiftId/ack-summary",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { apiWithDevice } from "../api.js";
+import { ApiError, apiWithDevice } from "../api.js";
 import {
   clearAllDeviceState,
   getDeviceToken,
@@ -25,6 +25,10 @@ export interface DeviceMeResponse {
 export type BootstrapState =
   | { kind: "loading" }
   | { kind: "unpaired" }
+  // H1 (ADR-016) · la empresa no tiene caja. Estado terminal: no se
+  // reintenta, no se desempareja y no se vuelve al PIN. `message` es la
+  // frase que mandó el servidor, para no tener dos textos que mantener.
+  | { kind: "cajaDisabled"; message: string }
   | { kind: "paired"; data: DeviceMeResponse };
 
 // v1.10-offline-un-terminal: cacheamos el device-me en localStorage. Un
@@ -70,7 +74,23 @@ export function useDeviceBootstrap(): {
       writeCachedDeviceMe(data);
       setState({ kind: "paired", data });
     } catch (err) {
-      if (decideAfterBootstrapError(err) === "purge") {
+      const decision = decideAfterBootstrapError(err);
+      // H1 · antes esto caía en la rama de abajo y, sin `device-me`
+      // cacheado, dejaba el terminal en `loading` reintentando cada 3 s
+      // para siempre. Ahora para y lo dice. NO purgamos el token: el
+      // dispositivo sigue emparejado, y el día que le enciendan la caja
+      // a la empresa arranca sin volver a emparejarlo.
+      if (decision === "caja-disabled") {
+        setState({
+          kind: "cajaDisabled",
+          message:
+            err instanceof ApiError && err.message
+              ? err.message
+              : "Esta empresa no tiene el módulo de caja activado.",
+        });
+        return;
+      }
+      if (decision === "purge") {
         // Sólo borramos cuando el backend confirma que el dispositivo
         // está revocado o el JWT ha caducado — un 401 sin código (o con
         // código que no entendemos) probablemente es un proxy o un

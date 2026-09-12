@@ -21,6 +21,7 @@ import { enqueueTicketUpload } from "../queues/ticket-upload.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
 import { shouldEnqueueHoldedUpload } from "./holded-upload-gate.js";
 import { sealTicket } from "./seal.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 
 // Tolerancia monetaria: la deuda vive con precisión de 4 decimales pero
 // los cobros llegan en euros/céntimos. Media de céntimo evita que un
@@ -51,7 +52,7 @@ export async function registerCreditRoutes(app: FastifyInstance): Promise<void> 
   app.get(
     "/credits",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         querystring: {
           type: "object",
@@ -176,7 +177,7 @@ export async function registerCreditRoutes(app: FastifyInstance): Promise<void> 
   app.post(
     "/tickets/:ticketId/credit-payments",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -383,7 +384,7 @@ export async function registerCreditRoutes(app: FastifyInstance): Promise<void> 
   app.post(
     "/tickets/:ticketId/credit-void",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -507,7 +508,7 @@ export async function registerCreditRoutes(app: FastifyInstance): Promise<void> 
   app.post(
     "/tickets/:ticketId/credit-receipt/escpos",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",

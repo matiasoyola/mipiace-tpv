@@ -41,6 +41,7 @@ import {
 import { normalizeTicketPayments } from "./normalize-payments.js";
 import { generatePublicSlug } from "./public-slug.js";
 import { sealTicket } from "./seal.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 import {
   PAYMENT_TOLERANCE_EUR,
   TOTAL_TOLERANCE_EUR,
@@ -142,7 +143,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
   app.post(
     "/tickets",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         body: {
           type: "object",
@@ -725,7 +726,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
   app.post(
     "/tickets/:ticketId/checkout",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -1252,7 +1253,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
   app.get(
     "/tickets/:ticketId",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -1282,7 +1283,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
   app.get(
     "/tickets",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         querystring: {
           type: "object",
@@ -1374,7 +1375,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
   app.post(
     "/tickets/:ticketId/resend-email",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -1433,7 +1434,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
   app.post(
     "/tickets/:ticketId/reprint",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -1494,7 +1495,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
   app.post(
     "/tickets/:ticketId/gift-receipt-intent",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -1530,7 +1531,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
   app.post(
     "/refunds",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         body: {
           type: "object",

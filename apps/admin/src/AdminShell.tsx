@@ -51,10 +51,15 @@ interface NavItem {
   // per-tenant las verá en su admin.
   superAdminOnly?: boolean;
   // B-reservas-2 (ADR-R6): la entrada sólo se muestra si el tenant tiene la
-  // capability activada. Hoy sólo "agenda" (`Tenant.agendaEnabled`). El
-  // flag se lee una vez desde /admin/tenant/settings; mientras carga la
-  // entrada permanece oculta para no parpadear.
-  capability?: "agenda";
+  // capability activada. H1 añade "caja" (`Tenant.cajaEnabled`) junto a la
+  // "agenda" que traía B-reservas-2. Los flags se leen una vez desde
+  // /admin/tenant/settings; mientras cargan, las entradas con capability
+  // permanecen ocultas para no parpadear.
+  //
+  // Esconder NO es gatear: cada una de estas secciones tiene además su
+  // puerta de servidor (`lib/caja-gate.ts`). Esto es sólo para que el
+  // propietario de un colegio no vea "Comanderas" en su barra lateral.
+  capability?: "agenda" | "caja" | "holded";
 }
 
 const NAV_ITEMS: NavItem[] = [
@@ -64,17 +69,21 @@ const NAV_ITEMS: NavItem[] = [
   // técnicos y la bandeja de errores de sync ahora son responsabilidad
   // del equipo mipiacetpv (super-admin). El OWNER mantiene la operativa
   // de negocio: tiendas, cajeros, tickets regalo, su cuenta, seguridad.
+  // H1 · "Tiendas" NO lleva `capability: "caja"`: la ficha fiscal del
+  // local (razón social, dirección) vale para cualquier empresa. Lo que
+  // cuelga de la caja dentro de la tienda —cajas registradoras, mesas,
+  // entrega de ticket— se esconde dentro de la propia pantalla.
   { to: "/admin/stores", label: "Tiendas", icon: Building2 },
   // v1.3-piloto-feedback · Lote 1: Dispositivos era visible sólo a
   // super-admin por un error histórico — el backend del endpoint de
   // pairing codes ya acepta OWNER/MANAGER. Lo abrimos al OWNER y al
   // MANAGER para que generen el pairing sin escalar a soporte.
-  { to: "/admin/devices", label: "Dispositivos", icon: Calculator },
+  { to: "/admin/devices", label: "Dispositivos", icon: Calculator, capability: "caja" },
   // v1.4-Impresoras-Fase-1 Lote 1: gestor de impresoras térmicas
   // (USB / WIFI) por register. OWNER + MANAGER pueden tocarlo
   // porque es operativa diaria (cambiar IP del router, etc.).
-  { to: "/admin/printers", label: "Impresoras", icon: Printer },
-  { to: "/admin/cashiers", label: "Cajeros", icon: Users },
+  { to: "/admin/printers", label: "Impresoras", icon: Printer, capability: "caja" },
+  { to: "/admin/cashiers", label: "Cajeros", icon: Users, capability: "caja" },
   // B-reservas-3: panel de personal (profesionales + skills + turnos) de la
   // agenda. Sólo visible con la capability `agenda` activada (misma puerta
   // que el catálogo de agenda); la página además se auto-gatea.
@@ -86,8 +95,11 @@ const NAV_ITEMS: NavItem[] = [
   },
   // v1.0-pilotos · Lote 6 (#22): importador de clientes desde Excel/CSV.
   // OWNER-only — crea contactos en Holded, que es la fuente de verdad.
-  { to: "/admin/contacts-import", label: "Importar clientes", icon: UserPlus, ownerOnly: true },
-  { to: "/admin/products", label: "Productos", icon: Package },
+  // H1 · el importador crea contactos EN HOLDED, que es la fuente de
+  // verdad. Sin Holded no tiene destino: el endpoint aborta y el
+  // propietario se queda mirando un error. Se esconde.
+  { to: "/admin/contacts-import", label: "Importar clientes", icon: UserPlus, ownerOnly: true, capability: "holded" },
+  { to: "/admin/products", label: "Productos", icon: Package, capability: "caja" },
   // B-reservas-2: catálogo de agenda (duración/pausas/canales + recursos).
   // Sólo visible si el tenant tiene la capability `agenda` activada.
   {
@@ -108,19 +120,19 @@ const NAV_ITEMS: NavItem[] = [
   // v1.3-Operativa-Extra · Lote 1: editor de aliases de tags. Visible
   // a OWNER y MANAGER porque la operativa (renombrar categorías) es de
   // negocio, no técnica.
-  { to: "/admin/tag-aliases", label: "Etiquetas", icon: Tag },
+  { to: "/admin/tag-aliases", label: "Etiquetas", icon: Tag, capability: "caja" },
   // v1.4-Bar-Operativa-MVP Lote 2: mapa tag → sección de cocina/barra.
   // Sólo lo usan los tenants HOSPITALITY; en otros verticales queda
   // visible pero vacío sin perjudicar la operativa.
-  { to: "/admin/tag-sections", label: "Comanderas", icon: Printer },
+  { to: "/admin/tag-sections", label: "Comanderas", icon: Printer, capability: "caja" },
   // v1.3-Operativa-Extra · Lote 2: panel para que el OWNER fuerce sync
   // con Holded sin pasar por super-admin.
-  { to: "/admin/holded", label: "Sync Holded", icon: RefreshCw },
-  { to: "/admin/gift-receipts", label: "Tickets regalo", icon: Gift },
+  { to: "/admin/holded", label: "Sync Holded", icon: RefreshCw, capability: "caja" },
+  { to: "/admin/gift-receipts", label: "Tickets regalo", icon: Gift, capability: "caja" },
   { to: "/admin/account", label: "Mi cuenta", icon: User },
   { to: "/admin/security", label: "Seguridad", icon: Shield },
-  { to: "/admin/tickets-errors", label: "Holded", icon: KeyRound, badge: "syncErrors", superAdminOnly: true },
-  { to: "/admin/settings", label: "Ajustes", icon: Settings, superAdminOnly: true },
+  { to: "/admin/tickets-errors", label: "Holded", icon: KeyRound, badge: "syncErrors", superAdminOnly: true, capability: "caja" },
+  { to: "/admin/settings", label: "Ajustes", icon: Settings, superAdminOnly: true, capability: "caja" },
 ];
 
 // v1.5-consistencia-B §3.b: salud de la integración Holded para el
@@ -133,9 +145,11 @@ interface HoldedHealth {
   lastSyncAgeMs: number | null;
 }
 
-function useHoldedHealth(): HoldedHealth | null {
+function useHoldedHealth(enabled = true): HoldedHealth | null {
   const [health, setHealth] = useState<HoldedHealth | null>(null);
   useEffect(() => {
+    // H1 · ver `HoldedHealthBanner`.
+    if (!enabled) return;
     let cancelled = false;
     async function tick() {
       try {
@@ -151,15 +165,26 @@ function useHoldedHealth(): HoldedHealth | null {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [enabled]);
   return health;
 }
 
 // Banner a ancho completo, imposible de pasar por alto (§3.b: "el admin
 // debe mostrarlo en grande"). Sólo nivel blocked; el warning de 24h ya
 // lo cubre el TPV.
-function HoldedHealthBanner() {
-  const health = useHoldedHealth();
+// H1 · el banner rojo "Holded está desconectado" es una ALARMA para
+// quien depende de Holded. En una empresa que nunca lo tuvo no es una
+// alarma, es una mentira: `getTenantHealthStatus` devuelve
+// `blocked / no_api_key` en cuanto no hay clave, y el colegio lo vería
+// a ancho completo, en rojo y para siempre.
+//
+// El gate es `cajaEnabled`: sin caja no hay tickets que subir, así que
+// no hay nada que Holded pueda estar dejando de recibir. La empresa CON
+// caja y sin clave sí lo sigue viendo — ésa es exactamente la que tiene
+// un problema.
+function HoldedHealthBanner({ cajaEnabled }: { cajaEnabled: boolean }) {
+  const health = useHoldedHealth(cajaEnabled);
+  if (!cajaEnabled) return null;
   if (!health || health.level !== "blocked") return null;
   const noKey = health.reason === "no_api_key";
   const hours = health.lastSyncAgeMs
@@ -196,9 +221,13 @@ function HoldedHealthBanner() {
 // Hook compartido entre desktop sidebar y mobile drawer: pollea el
 // contador de tickets con error cada 60s mientras la pestaña esté
 // abierta. Silencioso a errores 401 (se gestionan en api.ts).
-function useSyncErrorsCount(): number {
+function useSyncErrorsCount(enabled = true): number {
   const [count, setCount] = useState(0);
   useEffect(() => {
+    // H1 · sin caja no hay tickets, así que no hay errores de sync que
+    // contar. Además la ruta devuelve 403 CAJA_DISABLED: pollearla cada
+    // 60 s sería ruido en los logs y un badge que nunca se mueve.
+    if (!enabled) return;
     let cancelled = false;
     async function tick() {
       try {
@@ -216,7 +245,7 @@ function useSyncErrorsCount(): number {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [enabled]);
   return count;
 }
 
@@ -232,6 +261,12 @@ export function AdminShell({
   const navigate = useNavigate();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [logoutAllOpen, setLogoutAllOpen] = useState(false);
+  // H1 · `null` mientras carga. El banner no se pinta hasta saberlo: es
+  // una alarma, y una alarma que parpadea mientras carga es peor que una
+  // alarma que tarda medio segundo. Ojo, aquí `=== true` y no
+  // `!== false` (ver `useSyncErrorsCount`): pollear antes de saber si hay
+  // caja dispara un 403 por nada.
+  const shellCaps = useTenantCapabilities();
 
   function onLogout() {
     clearTokens();
@@ -243,7 +278,7 @@ export function AdminShell({
   return (
     <div className="min-h-screen bg-mipiace-stone flex flex-col font-sans">
       {impersonating && <ImpersonationBanner />}
-      <HoldedHealthBanner />
+      <HoldedHealthBanner cajaEnabled={shellCaps?.caja === true} />
       <div className="flex flex-1 min-h-0">
       <DesktopSidebar onAskLogoutAll={() => setLogoutAllOpen(true)} />
 
@@ -366,25 +401,48 @@ function MobileDrawer({
   );
 }
 
-// B-reservas-2: lee las capabilities del tenant una vez para gatear las
-// entradas del sidebar (hoy sólo `agenda`). null mientras carga → las
+// B-reservas-2, generalizado por H1: lee las capabilities del tenant una
+// vez para gatear las entradas del sidebar. `null` mientras carga → las
 // entradas con capability quedan ocultas hasta saber el valor real.
-function useAgendaEnabled(): boolean | null {
-  const [enabled, setEnabled] = useState<boolean | null>(null);
+//
+// Los defaults al fallar reproducen master: agenda apagada (era `false`
+// antes del bloque) y caja ENCENDIDA, porque `caja_enabled` es
+// `@default(true)` y esconderle la caja a quien cobra por un error de red
+// sería el peor fallo posible. Mismo criterio que `lib/caja-gate.ts`.
+interface TenantCapabilities {
+  caja: boolean;
+  agenda: boolean;
+  // H1 · no es una columna: es "tiene clave de Holded", que sale de
+  // `/auth/me`. Se trata igual que las otras para gatear el sidebar.
+  holded: boolean;
+}
+
+function useTenantCapabilities(): TenantCapabilities | null {
+  const [caps, setCaps] = useState<TenantCapabilities | null>(null);
   useEffect(() => {
     let cancelled = false;
-    api<{ settings: { agendaEnabled?: boolean } }>("/admin/tenant/settings")
-      .then((res) => {
-        if (!cancelled) setEnabled(res.settings.agendaEnabled ?? false);
+    Promise.all([
+      api<{ settings: { agendaEnabled?: boolean; cajaEnabled?: boolean } }>(
+        "/admin/tenant/settings",
+      ),
+      api<{ tenant: { hasHoldedKey?: boolean } }>("/auth/me"),
+    ])
+      .then(([s, me]) => {
+        if (cancelled) return;
+        setCaps({
+          agenda: s.settings.agendaEnabled ?? false,
+          caja: s.settings.cajaEnabled !== false,
+          holded: me.tenant.hasHoldedKey === true,
+        });
       })
       .catch(() => {
-        if (!cancelled) setEnabled(false);
+        if (!cancelled) setCaps({ agenda: false, caja: true, holded: true });
       });
     return () => {
       cancelled = true;
     };
   }, []);
-  return enabled;
+  return caps;
 }
 
 function NavList({
@@ -394,14 +452,23 @@ function NavList({
   currentPath: string;
   onNavigate?: () => void;
 }) {
-  const syncErrorsCount = useSyncErrorsCount();
-  const agendaEnabled = useAgendaEnabled();
+  const caps = useTenantCapabilities();
+  // H1 · `=== true`, no `!== false`: mientras `caps` es null NO sabemos si
+  // hay caja, y pollear "por si acaso" dispara un 403 antes de tener la
+  // respuesta. Cuando el flag llega, el efecto vuelve a correr.
+  const syncErrorsCount = useSyncErrorsCount(caps?.caja === true);
   const role = readCurrentRole();
   const impersonating = readImpersonationState() != null;
   const visibleItems = NAV_ITEMS.filter((item) => {
-    if (item.superAdminOnly) return impersonating;
-    if (item.ownerOnly) return role === "OWNER";
-    if (item.capability === "agenda") return agendaEnabled === true;
+    if (item.superAdminOnly && !impersonating) return false;
+    if (item.ownerOnly && role !== "OWNER") return false;
+    // H1 · las capabilities se evalúan DESPUÉS de rol e impersonación, y
+    // se combinan en vez de excluirse: la bandeja "Holded" es a la vez
+    // `superAdminOnly` y de caja, y antes el primer `return` se comía la
+    // segunda condición.
+    if (item.capability === "agenda") return caps?.agenda === true;
+    if (item.capability === "caja") return caps?.caja === true;
+    if (item.capability === "holded") return caps?.holded === true;
     return true;
   });
   return (

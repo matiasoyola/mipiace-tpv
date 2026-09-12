@@ -15,6 +15,7 @@ import { DEFAULT_TICKET_DELIVERY } from "../admin/ticket-delivery.js";
 import { getPrisma } from "../context.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
 import { loadTicketDocument } from "./build-document.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 
 export async function registerTicketDigitalRoute(
   app: FastifyInstance,
@@ -22,7 +23,7 @@ export async function registerTicketDigitalRoute(
   app.get(
     "/tickets/:ticketId/digital",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",

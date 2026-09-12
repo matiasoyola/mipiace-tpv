@@ -14,13 +14,14 @@ import type { FastifyInstance } from "fastify";
 
 import { requireOwnerOrManager } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 
 export async function registerAdminTagAliasesRoutes(
   app: FastifyInstance,
 ): Promise<void> {
   app.get(
     "/admin/tag-aliases",
-    { preHandler: requireOwnerOrManager },
+    { preHandler: [requireOwnerOrManager, ensureCajaEnabled] },
     async (request) => {
       const auth = request.auth!;
       const prisma = getPrisma();
@@ -36,7 +37,7 @@ export async function registerAdminTagAliasesRoutes(
   app.post(
     "/admin/tag-aliases",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         body: {
           type: "object",
@@ -75,7 +76,7 @@ export async function registerAdminTagAliasesRoutes(
   app.delete(
     "/admin/tag-aliases/:id",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",

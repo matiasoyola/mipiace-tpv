@@ -61,6 +61,14 @@ const CRM_ENABLED_KEY = "mipiacetpv-catalog-crm-enabled";
 // B-reservas-2 · capability flag de la agenda (ADR-R6). El TPV lo cachea
 // para pintar (o no) la duración por línea de servicio en el ticket.
 const AGENDA_ENABLED_KEY = "mipiacetpv-catalog-agenda-enabled";
+// H1 (ADR-016) · capability flag de la CAJA. Lo cacheamos igual que sus
+// hermanos, pero con una diferencia que importa: el default al no
+// saberlo es ENCENDIDA, porque `caja_enabled` es `@default(true)` y un
+// TPV que se esconde a sí mismo por no tener el flag en localStorage
+// sería el peor fallo posible. La puerta de verdad es el 403
+// CAJA_DISABLED del servidor; esto es sólo para que la PWA pinte la
+// frase sin esperar a la red.
+const CAJA_ENABLED_KEY = "mipiacetpv-catalog-caja-enabled";
 
 export type BusinessType = "HOSPITALITY" | "RETAIL" | "SERVICES";
 
@@ -117,6 +125,17 @@ export function getCachedAgendaEnabled(): boolean {
 
 export function setCachedAgendaEnabled(value: boolean): void {
   localStorage.setItem(AGENDA_ENABLED_KEY, value ? "1" : "0");
+}
+
+// H1 · `true` salvo que el servidor haya dicho explícitamente que no.
+// Ojo a la asimetría con sus hermanos: aquí el default es `true` (ver la
+// nota de `CAJA_ENABLED_KEY`), así que se compara con "0" y no con "1".
+export function getCachedCajaEnabled(): boolean {
+  return localStorage.getItem(CAJA_ENABLED_KEY) !== "0";
+}
+
+export function setCachedCajaEnabled(value: boolean): void {
+  localStorage.setItem(CAJA_ENABLED_KEY, value ? "1" : "0");
 }
 
 export function setCachedBusinessType(value: BusinessType): void {
@@ -245,6 +264,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
   let lastCreditSales: boolean | undefined = undefined;
   let lastCrmEnabled: boolean | undefined = undefined;
   let lastAgendaEnabled: boolean | undefined = undefined;
+  let lastCajaEnabled: boolean | undefined = undefined;
   for (let safety = 0; safety < 200; safety++) {
     const res = await apiWithCashier<{
       items: CatalogProduct[];
@@ -256,6 +276,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
       creditSalesEnabled?: boolean;
       crmEnabled?: boolean;
       agendaEnabled?: boolean;
+      cajaEnabled?: boolean;
     }>(
       `/tpv/catalog/products${cursor ? `?cursor=${cursor}&limit=500` : "?limit=500"}`,
     );
@@ -285,6 +306,9 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
     if (res.agendaEnabled !== undefined) {
       lastAgendaEnabled = res.agendaEnabled;
     }
+    if (res.cajaEnabled !== undefined) {
+      lastCajaEnabled = res.cajaEnabled;
+    }
     if (!res.nextCursor) break;
     cursor = res.nextCursor;
   }
@@ -296,6 +320,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
   if (lastCreditSales !== undefined) setCachedCreditSalesEnabled(lastCreditSales);
   if (lastCrmEnabled !== undefined) setCachedCrmEnabled(lastCrmEnabled);
   if (lastAgendaEnabled !== undefined) setCachedAgendaEnabled(lastAgendaEnabled);
+  if (lastCajaEnabled !== undefined) setCachedCajaEnabled(lastCajaEnabled);
   if (lastTagAliases !== undefined) {
     const map: Record<string, string> = {};
     for (const a of lastTagAliases) map[a.slug] = a.label;

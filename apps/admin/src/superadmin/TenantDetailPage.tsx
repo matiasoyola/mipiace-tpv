@@ -10,6 +10,7 @@ import {
   LockKeyhole,
   LockOpen,
   LogOut,
+  Minus,
   Power,
   RefreshCw,
   Settings,
@@ -28,7 +29,9 @@ import type {
   HoldedConnectionStatus,
   ImpersonateResponse,
   ImpersonationMode,
+  ReadinessCheck,
   TenantDetail,
+  TenantModules,
   TestCashierTokenResponse,
 } from "./types.js";
 import { BUSINESS_TYPE_LABEL } from "./types.js";
@@ -373,7 +376,8 @@ export function TenantDetailPage() {
   }
 
   async function copyPin(): Promise<void> {
-    if (!activated) return;
+    // H1 · sin caja no hay PIN que copiar.
+    if (!activated?.ownerPin) return;
     try {
       await navigator.clipboard.writeText(activated.ownerPin);
       setCopiedPin(true);
@@ -431,26 +435,41 @@ export function TenantDetailPage() {
           </div>
           {/* v1.3-piloto-feedback · Lote 1: PIN del OWNER como cajero
               en el TPV. Se enseña sólo aquí; el OWNER lo puede regenerar
-              desde "Mi cuenta" cuando entre al admin. */}
-          <div className="text-[12px] uppercase tracking-wide text-emerald-700 mt-4 mb-1">
-            PIN del OWNER (TPV / cajero)
-          </div>
-          <div className="flex items-center gap-2">
-            <code className="font-mono bg-slate-900 text-white rounded-lg px-3 py-2 text-[14px] tracking-wide">
-              {activated.ownerPin}
-            </code>
-            <button
-              onClick={copyPin}
-              className="inline-flex items-center gap-1 h-9 px-3 border border-emerald-300 rounded-lg text-[12.5px] hover:bg-emerald-100 text-emerald-800"
-            >
-              <Copy className="w-3.5 h-3.5" />
-              {copiedPin ? "Copiado" : "Copiar"}
-            </button>
-          </div>
-          <p className="text-[11.5px] text-emerald-700 mt-2">
-            Contraseña y PIN se muestran una sola vez. Si el email no llega,
-            pásaselos al cliente por canal seguro.
-          </p>
+              desde "Mi cuenta" cuando entre al admin.
+
+              H1 · sin caja no hay PIN. En vez de dejar el hueco vacío o un
+              "null", lo decimos: el implantador está en la llamada con el
+              cliente y necesita saber que NO falta nada. */}
+          {activated.ownerPin ? (
+            <>
+              <div className="text-[12px] uppercase tracking-wide text-emerald-700 mt-4 mb-1">
+                PIN del OWNER (TPV / cajero)
+              </div>
+              <div className="flex items-center gap-2">
+                <code className="font-mono bg-slate-900 text-white rounded-lg px-3 py-2 text-[14px] tracking-wide">
+                  {activated.ownerPin}
+                </code>
+                <button
+                  onClick={copyPin}
+                  className="inline-flex items-center gap-1 h-9 px-3 border border-emerald-300 rounded-lg text-[12.5px] hover:bg-emerald-100 text-emerald-800"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  {copiedPin ? "Copiado" : "Copiar"}
+                </button>
+              </div>
+              <p className="text-[11.5px] text-emerald-700 mt-2">
+                Contraseña y PIN se muestran una sola vez. Si el email no llega,
+                pásaselos al cliente por canal seguro.
+              </p>
+            </>
+          ) : (
+            <p className="text-[11.5px] text-emerald-700 mt-3">
+              Esta empresa no tiene caja, así que <strong>no se ha generado
+              PIN de cajero</strong>: no hay TPV al que entrar. La contraseña
+              se muestra una sola vez; si el email no llega, pásasela al
+              cliente por canal seguro.
+            </p>
+          )}
         </div>
       )}
 
@@ -574,11 +593,17 @@ export function TenantDetailPage() {
             busy={busy}
             onResync={onResync}
           />
-          <TestPanel
-            tenant={tenant}
-            busy={busy}
-            onTestTpv={onTestTpv}
-          />
+          {/* H1 · "Modo prueba" abre el TPV con un cajero técnico. En una
+              empresa sin caja no hay TPV que abrir, y la nota ámbar
+              ("Esperando a que el sync inicial termine…") hablaría de un
+              sync que nunca va a correr. */}
+          {tenant.modules.caja && (
+            <TestPanel
+              tenant={tenant}
+              busy={busy}
+              onTestTpv={onTestTpv}
+            />
+          )}
           <ActivatePanel
             tenant={tenant}
             busy={busy}
@@ -603,21 +628,30 @@ export function TenantDetailPage() {
       <HoldedAccountIdPanel
         tenantId={tenant.id}
         current={tenant.holdedAccountId}
+        usesHolded={tenant.holdedConnected}
         onSaved={(next) => setTenant({ ...tenant, holdedAccountId: next })}
       />
 
-      <ReceiptFooterPanel
-        tenantId={tenant.id}
-        current={tenant.receiptFooter}
-        onSaved={(next) => setTenant({ ...tenant, receiptFooter: next })}
-      />
+      {/* H1 · el pie del ticket y el icono del catálogo del TPV son de la
+          caja. Sin caja no hay tickets que imprimir ni catálogo que
+          pintar; dejarlos visibles sólo da al implantador tres campos
+          que no hacen nada. */}
+      {tenant.modules.caja && (
+        <>
+          <ReceiptFooterPanel
+            tenantId={tenant.id}
+            current={tenant.receiptFooter}
+            onSaved={(next) => setTenant({ ...tenant, receiptFooter: next })}
+          />
 
-      <IconPresetPanel
-        tenantId={tenant.id}
-        current={tenant.tpvIconPreset}
-        businessType={tenant.businessType}
-        onSaved={(next) => setTenant({ ...tenant, tpvIconPreset: next })}
-      />
+          <IconPresetPanel
+            tenantId={tenant.id}
+            current={tenant.tpvIconPreset}
+            businessType={tenant.businessType}
+            onSaved={(next) => setTenant({ ...tenant, tpvIconPreset: next })}
+          />
+        </>
+      )}
 
       {/* v1.3-piloto-feedback · Lote 2: cambiar el OWNER de un tenant
           activo. Sólo visible en ACTIVE; en DRAFT basta con activar
@@ -634,7 +668,9 @@ export function TenantDetailPage() {
           "Usuarios" porque es lo que se mira cuando suena el teléfono.
           "Usuarios" es la ficha administrativa (2FA, password); esto es
           quién puede abrir una caja. */}
-      <CashiersPanel tenantId={tenant.id} />
+      {/* H1 · sin caja no hay cajeros que consultar cuando suena el
+          teléfono. La ficha administrativa ("Usuarios") sí se queda. */}
+      {tenant.modules.caja && <CashiersPanel tenantId={tenant.id} />}
 
       <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6">
         <h3 className="font-semibold text-slate-900 mb-4">
@@ -861,7 +897,11 @@ function HealthPanel({
         <div>
           <h3 className="font-semibold text-slate-900">Validación de onboarding</h3>
           <p className="text-[12px] text-slate-500 mt-0.5">
-            Cuando todos los checks pasen, podrás activar la cuenta.
+            {/* H1 · "los que apliquen", no "todos": en una empresa sin caja
+                la mitad de la lista no cuenta y el implantador tiene que
+                leerlo aquí, no deducirlo. */}
+            Cuando pasen los checks que aplican a esta empresa, podrás
+            activar la cuenta.
           </p>
         </div>
         <button
@@ -873,34 +913,11 @@ function HealthPanel({
           Re-sync
         </button>
       </div>
+      {/* H1 · qué es esta empresa, en una línea, encima de la lista. */}
+      <ModuleChips modules={h.modules} usesHolded={h.usesHolded} />
       <ul className="space-y-2 mb-5">
         {h.readinessChecks.map((c) => (
-          <li
-            key={c.id}
-            className={`flex items-start gap-2 p-2.5 rounded-lg ${
-              c.ok ? "bg-emerald-50" : "bg-amber-50"
-            }`}
-          >
-            <span
-              className={`mt-0.5 inline-flex items-center justify-center w-5 h-5 rounded-full ${
-                c.ok ? "bg-emerald-600" : "bg-amber-500"
-              }`}
-            >
-              {c.ok ? (
-                <Check className="w-3 h-3 text-white" strokeWidth={3} />
-              ) : (
-                <X className="w-3 h-3 text-white" strokeWidth={3} />
-              )}
-            </span>
-            <div className="flex-1">
-              <div className="text-[13px] text-slate-900">{c.label}</div>
-              {c.value && (
-                <div className="text-[11.5px] text-slate-500 mt-0.5 font-mono">
-                  {c.value}
-                </div>
-              )}
-            </div>
-          </li>
+          <CheckRow key={c.id} check={c} />
         ))}
       </ul>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-[12px]">
@@ -914,6 +931,101 @@ function HealthPanel({
           Último error de sync: {h.initialSync.errorMessage}
         </div>
       )}
+    </div>
+  );
+}
+
+// H1 (ADR-016) · un check tiene TRES estados, no dos, y se tienen que
+// distinguir a la vista sin depender del color: icono + etiqueta.
+//
+//   cumple   → verde,  ✓,  sin etiqueta (es lo esperado)
+//   falla    → ámbar,  ✗,  "Falta"
+//   no aplica→ gris,   —,  "No aplica · sin caja" / "· sin Holded"
+//
+// El gris atenuado es deliberado: un check que no aplica no es una
+// advertencia, es ruido de fondo que el implantador tiene que poder
+// saltarse de un vistazo.
+const NO_APLICA_MOTIVO: Record<string, string> = {
+  caja: "sin caja",
+  holded: "sin Holded",
+};
+
+function CheckRow({ check }: { check: ReadinessCheck }) {
+  const aplica = check.applies !== false;
+  const tone = !aplica
+    ? { row: "bg-slate-50", badge: "bg-slate-300", label: "text-slate-400" }
+    : check.ok
+      ? { row: "bg-emerald-50", badge: "bg-emerald-600", label: "text-slate-900" }
+      : { row: "bg-amber-50", badge: "bg-amber-500", label: "text-slate-900" };
+  const estado = !aplica ? "No aplica" : check.ok ? "Cumple" : "Falta";
+  const motivo = !aplica ? NO_APLICA_MOTIVO[check.requires ?? ""] : undefined;
+  return (
+    <li className={`flex items-start gap-2 p-2.5 rounded-lg ${tone.row}`}>
+      <span
+        aria-hidden
+        className={`mt-0.5 inline-flex items-center justify-center w-5 h-5 rounded-full shrink-0 ${tone.badge}`}
+      >
+        {!aplica ? (
+          <Minus className="w-3 h-3 text-white" strokeWidth={3} />
+        ) : check.ok ? (
+          <Check className="w-3 h-3 text-white" strokeWidth={3} />
+        ) : (
+          <X className="w-3 h-3 text-white" strokeWidth={3} />
+        )}
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-baseline gap-2 flex-wrap">
+          <span className={`text-[13px] ${tone.label}`}>{check.label}</span>
+          <span
+            className={`text-[10.5px] uppercase tracking-wide font-semibold ${
+              !aplica
+                ? "text-slate-400"
+                : check.ok
+                  ? "text-emerald-700"
+                  : "text-amber-700"
+            }`}
+          >
+            {estado}
+            {motivo ? ` · ${motivo}` : ""}
+          </span>
+        </div>
+        {check.value && aplica && (
+          <div className="text-[11.5px] text-slate-500 mt-0.5 font-mono break-words">
+            {check.value}
+          </div>
+        )}
+      </div>
+    </li>
+  );
+}
+
+function ModuleChips({
+  modules,
+  usesHolded,
+}: {
+  modules: TenantModules;
+  usesHolded: boolean;
+}) {
+  const items: Array<[string, boolean]> = [
+    ["Caja", modules.caja],
+    ["CRM", modules.crm],
+    ["Agenda", modules.agenda],
+    ["Holded", usesHolded],
+  ];
+  return (
+    <div className="flex flex-wrap gap-1.5 mb-4">
+      {items.map(([label, on]) => (
+        <span
+          key={label}
+          className={`inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11.5px] font-medium ${
+            on
+              ? "bg-slate-900 text-white"
+              : "bg-slate-100 text-slate-400 line-through"
+          }`}
+        >
+          {label}
+        </span>
+      ))}
     </div>
   );
 }
@@ -1025,24 +1137,53 @@ function ActiveTenantActions({
 }) {
   return (
     <>
+      {/* H1 · las métricas que no aplican no se pintan a cero: un cero es
+          un dato ("hoy no ha vendido") y en una empresa sin caja sería
+          mentira. Y "Holded · Sin conectar" en ámbar es una alarma; en
+          una empresa que no usa Holded no hay nada que conectar, así que
+          va en neutro. */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <CardMetric label="Tickets últimos 7 días" value={tenant.metrics.ticketsLast7d} />
+        {tenant.modules.caja && (
+          <>
+            <CardMetric label="Tickets últimos 7 días" value={tenant.metrics.ticketsLast7d} />
+            <CardMetric
+              label="Tickets en SYNC_FAILED"
+              value={tenant.metrics.ticketsSyncFailed}
+              accent={tenant.metrics.ticketsSyncFailed > 0 ? "warning" : "neutral"}
+            />
+            <CardMetric
+              label="Tickets con email fallido"
+              value={tenant.metrics.ticketsEmailFailed}
+              accent={tenant.metrics.ticketsEmailFailed > 0 ? "warning" : "neutral"}
+            />
+            <CardMetric label="Stores" value={tenant.metrics.storesCount} />
+            <CardMetric label="Turnos abiertos" value={tenant.metrics.activeShifts} />
+          </>
+        )}
         <CardMetric
-          label="Tickets en SYNC_FAILED"
-          value={tenant.metrics.ticketsSyncFailed}
-          accent={tenant.metrics.ticketsSyncFailed > 0 ? "warning" : "neutral"}
+          label="Módulos"
+          value={
+            [
+              tenant.modules.caja ? "Caja" : null,
+              tenant.modules.crm ? "CRM" : null,
+              tenant.modules.agenda ? "Agenda" : null,
+            ]
+              .filter(Boolean)
+              .join(" · ") || "—"
+          }
         />
-        <CardMetric
-          label="Tickets con email fallido"
-          value={tenant.metrics.ticketsEmailFailed}
-          accent={tenant.metrics.ticketsEmailFailed > 0 ? "warning" : "neutral"}
-        />
-        <CardMetric label="Stores" value={tenant.metrics.storesCount} />
-        <CardMetric label="Turnos abiertos" value={tenant.metrics.activeShifts} />
         <CardMetric
           label="Holded"
-          value={HOLDED_STATUS_LABEL[tenant.holdedStatus]}
-          accent={HOLDED_STATUS_ACCENT[tenant.holdedStatus]}
+          value={
+            tenant.holdedConnected
+              ? HOLDED_STATUS_LABEL[tenant.holdedStatus]
+              : "No lo usa"
+          }
+          accent={
+            tenant.holdedConnected
+              ? HOLDED_STATUS_ACCENT[tenant.holdedStatus]
+              : "neutral"
+          }
         />
       </div>
 
@@ -1062,12 +1203,15 @@ function ActiveTenantActions({
             label="Resync Holded"
             disabled={!tenant.holdedConnected}
           />
-          <Action
-            onClick={onDedupeTags}
-            busy={busy}
-            icon={Tags}
-            label="Limpiar tags duplicados"
-          />
+          {/* H1 · los tags son categorías del catálogo del TPV. */}
+          {tenant.modules.caja && (
+            <Action
+              onClick={onDedupeTags}
+              busy={busy}
+              icon={Tags}
+              label="Limpiar tags duplicados"
+            />
+          )}
           <Action
             onClick={onImpersonateReadonly}
             busy={busy}
@@ -1801,10 +1945,13 @@ function TransferOwnerPanel({
 function HoldedAccountIdPanel({
   tenantId,
   current,
+  usesHolded,
   onSaved,
 }: {
   tenantId: string;
   current: string | null;
+  // H1 · `holdedConnected` del detalle: si la empresa tiene clave.
+  usesHolded: boolean;
   onSaved: (next: string | null) => void;
 }) {
   const [value, setValue] = useState(current ?? "");
@@ -1861,10 +2008,19 @@ function HoldedAccountIdPanel({
         El hub usa este id para abrir Holded directamente. Puedes pegar
         la URL completa: recortamos al id automáticamente.
       </p>
-      {current === null && (
+      {/* H1 · el aviso ámbar es para una empresa que USA Holded y a la
+          que le falta el id. En una que no lo usa no falta nada, y
+          pintarlo en ámbar convierte una decisión en un problema. */}
+      {current === null && usesHolded && (
         <div className="mb-3 p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-[11.5px] text-amber-900">
           ⚠ Sin ID de cuenta. El hub no podrá enlazar al panel Holded
           de este cliente hasta que lo añadas.
+        </div>
+      )}
+      {current === null && !usesHolded && (
+        <div className="mb-3 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-[11.5px] text-slate-600">
+          Esta empresa no usa Holded. Si lo contrata, guarda aquí el ID y
+          la API Key: al guardar la clave arrancamos el sync inicial.
         </div>
       )}
       <input

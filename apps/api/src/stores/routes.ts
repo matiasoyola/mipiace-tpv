@@ -18,6 +18,7 @@ import type { FastifyInstance } from "fastify";
 
 import { requireOwner, requireOwnerOrManager } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 
 export async function registerStoresRoutes(app: FastifyInstance): Promise<void> {
   // Listado de almacenes Holded del tenant. Se usa para alimentar el
@@ -25,7 +26,7 @@ export async function registerStoresRoutes(app: FastifyInstance): Promise<void> 
   // cache local poblado por el sync inicial — no llama a Holded en vivo.
   app.get(
     "/admin/warehouses",
-    { preHandler: requireOwnerOrManager },
+    { preHandler: [requireOwnerOrManager, ensureCajaEnabled] },
     async (request) => {
       const auth = request.auth!;
       const prisma = getPrisma();
@@ -435,7 +436,7 @@ export async function registerStoresRoutes(app: FastifyInstance): Promise<void> 
   app.post(
     "/admin/stores/:storeId/registers",
     {
-      preHandler: requireOwner,
+      preHandler: [requireOwner, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -490,7 +491,7 @@ export async function registerStoresRoutes(app: FastifyInstance): Promise<void> 
   // devices; en B4 ya tenemos creación explícita.
   app.get(
     "/admin/registers",
-    { preHandler: requireOwnerOrManager },
+    { preHandler: [requireOwnerOrManager, ensureCajaEnabled] },
     async (request) => {
       const auth = request.auth!;
       const prisma = getPrisma();
@@ -522,7 +523,7 @@ export async function registerStoresRoutes(app: FastifyInstance): Promise<void> 
   app.patch(
     "/admin/registers/:registerId",
     {
-      preHandler: requireOwner,
+      preHandler: [requireOwner, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -587,7 +588,7 @@ export async function registerStoresRoutes(app: FastifyInstance): Promise<void> 
   app.delete(
     "/admin/registers/:registerId",
     {
-      preHandler: requireOwner,
+      preHandler: [requireOwner, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",

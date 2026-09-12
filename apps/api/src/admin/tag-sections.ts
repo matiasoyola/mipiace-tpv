@@ -19,6 +19,7 @@ import type { FastifyInstance } from "fastify";
 
 import { requireOwnerOrManager } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 
 const SECTIONS = ["BARRA", "COCINA", "SALON"] as const;
 
@@ -27,7 +28,7 @@ export async function registerAdminTagSectionsRoutes(
 ): Promise<void> {
   app.get(
     "/admin/tag-sections",
-    { preHandler: requireOwnerOrManager },
+    { preHandler: [requireOwnerOrManager, ensureCajaEnabled] },
     async (request) => {
       const auth = request.auth!;
       const prisma = getPrisma();
@@ -43,7 +44,7 @@ export async function registerAdminTagSectionsRoutes(
   app.post(
     "/admin/tag-sections",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         body: {
           type: "object",
@@ -82,7 +83,7 @@ export async function registerAdminTagSectionsRoutes(
   app.delete(
     "/admin/tag-sections/:id",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",

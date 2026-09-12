@@ -5,6 +5,7 @@ import type { FastifyInstance } from "fastify";
 import { getPrisma } from "../context.js";
 import { requireOwnerOrManager } from "../auth/middleware.js";
 import { evaluateDeviceAlert } from "./alerts.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 import {
   generateDeviceToken,
   hashDeviceToken,
@@ -26,7 +27,7 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
   app.post(
     "/admin/registers/:registerId/pairing-codes",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -108,7 +109,7 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
   // Lista de dispositivos del tenant + sus pairing codes activos.
   app.get(
     "/admin/devices",
-    { preHandler: requireOwnerOrManager },
+    { preHandler: [requireOwnerOrManager, ensureCajaEnabled] },
     async (request) => {
       const auth = request.auth!;
       const prisma = getPrisma();
@@ -148,7 +149,7 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
   // Pairing codes activos (no consumidos, no caducados).
   app.get(
     "/admin/pairing-codes",
-    { preHandler: requireOwnerOrManager },
+    { preHandler: [requireOwnerOrManager, ensureCajaEnabled] },
     async (request) => {
       const auth = request.auth!;
       const prisma = getPrisma();
@@ -302,7 +303,7 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
   // GET /devices/me — la PWA lo llama al arrancar.
   app.get(
     "/devices/me",
-    { preHandler: requireDeviceToken },
+    { preHandler: [requireDeviceToken, ensureCajaEnabled] },
     async (request) => {
       const ctx = request.device!;
       const prisma = getPrisma();
@@ -368,7 +369,7 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
   app.post(
     "/admin/devices/:deviceId/revoke",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",

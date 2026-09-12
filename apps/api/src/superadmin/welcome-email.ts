@@ -13,7 +13,13 @@ export interface WelcomeEmailParams {
   // v1.3-piloto-feedback · Lote 1: PIN del OWNER como cajero del TPV.
   // Opcional para no romper callers antiguos; cuando viene se incluye
   // como segunda credencial junto al email/password de admin.
-  ownerPin?: string;
+  //
+  // H1 · `null` cuando la empresa no tiene caja: sin TPV no hay PIN.
+  ownerPin?: string | null;
+  // H1 · si el propietario tiene que conectar Holded tras el primer
+  // login. `false` en una empresa que no usa Holded: mandarle a
+  // conectarlo era el primer paso en falso de su primer día.
+  expectsHolded?: boolean;
 }
 
 export async function sendOwnerWelcomeEmail(
@@ -43,8 +49,12 @@ export async function sendOwnerWelcomeEmail(
           `Puedes cambiar tu PIN en cualquier momento desde el panel admin.`,
         ]
       : []),
-    ``,
-    `Para empezar a operar, conecta tu cuenta de Holded en "Mi cuenta" tras el primer login. El catálogo se sincroniza automáticamente en 2-5 minutos.`,
+    ...(params.expectsHolded !== false
+      ? [
+          ``,
+          `Para empezar a operar, conecta tu cuenta de Holded en "Mi cuenta" tras el primer login. El catálogo se sincroniza automáticamente en 2-5 minutos.`,
+        ]
+      : []),
     ``,
     `Si necesitas ayuda, responde a este email.`,
     ``,
@@ -80,7 +90,11 @@ export async function sendOwnerWelcomeEmail(
   </ul>
   <p>Por seguridad te pediremos cambiarla en el primer inicio de sesión.</p>
   ${pinBlock}
-  <p>Para empezar a operar, conecta tu cuenta de Holded en "Mi cuenta" tras el primer login. El catálogo se sincroniza automáticamente en 2-5 minutos.</p>
+  ${
+    params.expectsHolded !== false
+      ? '<p>Para empezar a operar, conecta tu cuenta de Holded en "Mi cuenta" tras el primer login. El catálogo se sincroniza automáticamente en 2-5 minutos.</p>'
+      : ""
+  }
   <p>Si necesitas ayuda, responde a este email.</p>
   <p>— El equipo de Mipiacetpv</p>
 </body>

@@ -45,6 +45,10 @@ export async function registerAdminTenantSettingsRoutes(
           creditSalesEnabled: true,
           crmEnabled: true,
           agendaEnabled: true,
+          // H1 (ADR-016) · se DEVUELVE pero no se acepta en el POST: la
+          // caja es una decisión comercial y sólo la mueve el
+          // super-admin. El panel la lee para esconder lo que no aplica.
+          cajaEnabled: true,
         },
       });
       return {
@@ -61,6 +65,8 @@ export async function registerAdminTenantSettingsRoutes(
           creditSalesEnabled: tenant.creditSalesEnabled,
           crmEnabled: tenant.crmEnabled,
           agendaEnabled: tenant.agendaEnabled,
+          // H1 · sólo lectura (ver el select de arriba).
+          cajaEnabled: tenant.cajaEnabled,
         },
       };
     },
@@ -102,6 +108,11 @@ export async function registerAdminTenantSettingsRoutes(
             // `agendaEnabled`); el gate lo consumen el panel de personal
             // (B3) y la agenda (B4).
             agendaEnabled: { type: "boolean" },
+            // H1 (ADR-016) · `cajaEnabled` NO está aquí, y no es un
+            // olvido: la caja se enciende y se apaga SÓLO desde el
+            // super-admin porque es una decisión comercial, no un ajuste
+            // del negocio. `additionalProperties: false` hace que un
+            // intento de mandarla devuelva 400, que es lo que queremos.
           },
         },
       },
