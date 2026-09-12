@@ -3,7 +3,8 @@
 Rama `reservas-7a-horario`, worktree `mipiacetpv-reservas-7a`, desde master **`4078655`**
 (S1, B-5 y B-6a dentro). **Sin push ni deploy.**
 
-**Último commit: `9ac158e`.**
+**Último commit de código: `9ac158e`.** (Los dos que van detrás son este documento;
+no tocan una sola línea que corra.)
 
 | | |
 |---|---|
@@ -392,7 +393,12 @@ ajustes del owner y el simulacro) · `engine.ts` (+72) · `store.ts` (+99) · `r
 ea4d651 feat(reservas-7a): la rejilla deja de ser de 8 a 21 y de 15 en 15
 1ea3e6b feat(reservas-7a): los ajustes de agenda del propietario
 9ac158e fix(reservas-7a): el bucle visual · tres cosas que ningún test cogió
+6b642e0 docs(reservas-7a): done · decisiones, sabotaje, capturas y el rojo ajeno
+         docs(reservas-7a): el done se sella con su propio hash
 ```
+
+Los dos últimos son este documento. **El código de este bloque termina en `9ac158e`**, y
+es el hash contra el que se han medido la suite, el sabotaje y las capturas.
 
 **Sin push ni deploy.** Eso lo hace Matías.
 
