@@ -1365,7 +1365,12 @@ function StaffColumn(props: {
                 top: (from - dayStartMin) * PX_PER_MIN,
                 height: (to - from) * PX_PER_MIN,
               }}
-              className="absolute left-0.5 right-0.5 rounded-lg bg-rose-50/85 border border-dashed border-rose-300 px-2 py-1 text-left overflow-hidden z-10 hover:bg-rose-100"
+              // SIN `z-index`: el orden del DOM ya la deja por encima de las
+              // bandas apagadas y por debajo de las citas, que van después.
+              // Un `z-10` aquí la subía por encima de la cabecera sticky de
+              // la columna y tapaba el nombre de la profesional — lo cogió
+              // el bucle visual, no un test.
+              className="absolute left-0.5 right-0.5 rounded-lg bg-rose-50/85 border border-dashed border-rose-300 px-2 py-1 text-left overflow-hidden hover:bg-rose-100"
             >
               <div className="text-[11px] font-semibold text-rose-800 truncate">
                 {ab.reason ?? "No está"}
@@ -1436,7 +1441,12 @@ function StaffColumn(props: {
                         ? "bg-red-50 border-red-300"
                         : "bg-amber-50 border-amber-300"
                     }`
-                  : `absolute left-1 right-1 rounded-lg bg-white shadow-sm px-2 py-1 text-left overflow-hidden hover:shadow-md z-20 ${
+                  : // Sin `z-index`, como en B4: va la última en el DOM, así
+                    // que ya queda por encima de las bandas y de las
+                    // ausencias, y por DEBAJO de la cabecera sticky y de la
+                    // línea de "ahora" — que es como estaba y no lo cambia
+                    // este bloque.
+                    `absolute left-1 right-1 rounded-lg bg-white shadow-sm px-2 py-1 text-left overflow-hidden hover:shadow-md ${
                       fuera
                         ? "border border-amber-300 ring-1 ring-amber-200"
                         : "border border-slate-200"
@@ -1455,6 +1465,15 @@ function StaffColumn(props: {
               >
                 {localHHMM(a.start)} · {props.clientOf(a)}
                 {local && (rechazada ? " · rechazada" : " · sin enviar")}
+                {/* B-reservas-7a · si la tarjeta NO da para dos líneas, la
+                    marca va aquí. Meterla en una segunda línea que no cabe
+                    es el fallo que B-5 F8 arregló con `CARD_TWO_LINE_MIN_H`:
+                    el `overflow-hidden` corta las letras por la mitad y se
+                    lee como un fallo de pintado. Lo cogió el bucle visual,
+                    no un test. */}
+                {!local && fuera && height < CARD_TWO_LINE_MIN_H
+                  ? " · fuera de horario"
+                  : ""}
               </div>
               {/* B-reservas-5 F8 · la segunda línea sólo si cabe entera.
                   Una cita de 30 min mide 33 px y el contenido pide 40:
@@ -1468,13 +1487,7 @@ function StaffColumn(props: {
                   {props.labelOf(a)}
                 </div>
               )}
-              {/* Si la tarjeta no da para dos líneas, la marca va en la
-                  primera: es lo que hay que saber antes que el servicio. */}
-              {height < CARD_TWO_LINE_MIN_H && !local && fuera && (
-                <div className="text-[10px] text-amber-700 truncate">
-                  fuera de horario
-                </div>
-              )}
+
             </button>
           );
         })}

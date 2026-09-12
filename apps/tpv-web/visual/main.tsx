@@ -28,6 +28,16 @@
 //   B-reservas-6a-frente-O: `?encolada=sin-enviar` y `?encolada=rechazada`
 //     siembran el outbox con un alta creada sin red, para ver que la cita
 //     se pinta en su hueco y que la rechazada NO desaparece de la agenda
+//   B-reservas-7a-el-horario: `?dia=` y `?reticula=` cambian el horario del
+//     centro que devuelve `GET /agenda`:
+//       · `dia=normal`  (por defecto) 9:00–20:00, con la ausencia de Nuria
+//         de 9:00 a 10:30 pintada y la cita de las 17:00 de Sole fuera de
+//         horario porque el horario se acortó después;
+//       · `dia=cerrado` festivo con nombre → «Cerrado · Virgen del Prado»;
+//       · `dia=boda`    día especial de 8:30 a 14:00 («boda Marta»);
+//       · `dia=sin-techo` el centro que no ha configurado nada (como antes
+//         del bloque: ni bandas apagadas ni cierre);
+//       · `reticula=30` la retícula del centro en franjas de media hora
 
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -528,6 +538,83 @@ function benchFallo(): string | null {
   return new URLSearchParams(window.location.search).get("fallo");
 }
 
+// ── B-reservas-7a · el horario del centro en el banco ─────────────────
+
+function benchDia(): string {
+  return new URLSearchParams(window.location.search).get("dia") ?? "normal";
+}
+
+function benchReticula(): number {
+  const v = new URLSearchParams(window.location.search).get("reticula");
+  return v === "30" ? 30 : 15;
+}
+
+/** El `days[0]` que ahora devuelve `GET /agenda`: el horario del centro,
+ *  los tramos de cada profesional y las ausencias. */
+function benchDayInfo() {
+  const dia = benchDia();
+  const todos = (r: Array<{ startTime: string; endTime: string }>) =>
+    Object.fromEntries(SOLE_STAFF.map((s) => [s.userId, r]));
+
+  if (dia === "sin-techo") {
+    // El centro que no ha configurado nada: sin techo, como antes de este
+    // bloque. La captura tiene que salir igual que la de 6a.
+    return {
+      date: benchToday(),
+      open: null,
+      closed: null,
+      specialName: null,
+      staffOpen: todos([{ startTime: "09:00", endTime: "20:00" }]),
+      absences: [],
+    };
+  }
+  if (dia === "cerrado") {
+    return {
+      date: benchToday(),
+      open: [],
+      closed: { name: "Virgen del Prado" },
+      specialName: "Virgen del Prado",
+      staffOpen: todos([]),
+      absences: [],
+    };
+  }
+  if (dia === "boda") {
+    const tramo = [{ startTime: "08:30", endTime: "14:00" }];
+    return {
+      date: benchToday(),
+      open: tramo,
+      closed: null,
+      specialName: "boda Marta",
+      // Sole entra de refuerzo a las 8:30; las otras dos, a las 9:00.
+      staffOpen: {
+        "st-sole": tramo,
+        "st-marta": [{ startTime: "09:00", endTime: "14:00" }],
+        "st-nuria": [{ startTime: "09:00", endTime: "14:00" }],
+      },
+      absences: [],
+    };
+  }
+  // El día normal: el centro abre de 9:00 a 20:00 y Nuria no está de 9:00
+  // a 10:30 («ISA NO» en la celda del Excel de Sole). La cita de las 17:00
+  // de Sole queda FUERA del horario nuevo: se sigue viendo y se cobra.
+  return {
+    date: benchToday(),
+    open: [{ startTime: "09:00", endTime: "17:00" }],
+    closed: null,
+    specialName: null,
+    staffOpen: todos([{ startTime: "09:00", endTime: "17:00" }]),
+    absences: [
+      {
+        id: "bk-nuria",
+        staffUserId: "st-nuria",
+        startTime: "09:00",
+        endTime: "10:30",
+        reason: "Nuria libre",
+      },
+    ],
+  };
+}
+
 // B-reservas-6a frente O · siembra el outbox con un alta de cita creada
 // sin red, para fotografiar lo que ve la cajera. `sin-enviar` la deja
 // pendiente; `rechazada`, con el 409 del servidor encima.
@@ -700,7 +787,13 @@ function stubFetch(): void {
     },
     // B-reservas-5 · el día de la peluquería. La query (`?date=`) la
     // recorta el dispatcher, así que la clave es la ruta pelada.
-    "/agenda": SOLE_DAY,
+    // B-reservas-7a · el día lleva ahora la retícula y el horario. Se
+    // compone en cada petición porque depende de los parámetros del banco.
+    "/agenda": {
+      ...SOLE_DAY,
+      slotMinutes: benchReticula(),
+      days: [benchDayInfo()],
+    },
     "/clients": { items: SOLE_CLIENTS, nextCursor: null },
     "/tpv/catalog/wildcards": { items: [] },
     "/tpv/catalog/modifier-groups": { groups: [] },
@@ -821,6 +914,21 @@ function stubFetch(): void {
     // banco lo que el servidor manda cuando la hora ya pasó: la frase que
     // se le lee a la clienta y los tres huecos que sí se le pueden dar.
     // Es el estado de error del bucle visual de este bloque.
+    // B-reservas-7a · el alta y la baja de una AUSENCIA. Por debajo es el
+    // `BookingBlock scope=STAFF` de siempre: aquí sólo se responde que sí,
+    // porque lo que el bucle fotografía es el camino de tres toques.
+    if (path === "/agenda/blocks" && init?.method === "POST") {
+      return new Response(JSON.stringify({ id: "bk-nueva" }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (path.startsWith("/agenda/blocks/") && init?.method === "DELETE") {
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     if (path === "/agenda/appointments" && init?.method === "POST") {
       if (benchFallo() === "pasado") {
         return new Response(

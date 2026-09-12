@@ -631,12 +631,17 @@ function SpecialDaysCard({
             <li
               key={d.id}
               data-dia-especial={d.date}
-              className="flex items-center gap-3 py-2"
+              // `flex-wrap` + un ancho mínimo para el NOMBRE. A 320 px el
+              // `flex-1 truncate` lo aplastaba a cero: la fila quedaba en
+              // "2026-09-15 · cerrado · Quitar" y el nombre —que es lo que
+              // este bloque existe para poder decir— desaparecía, con el
+              // botón saliéndose de la tarjeta. Lo cogió el bucle visual.
+              className="flex items-center gap-x-3 gap-y-1 py-2 flex-wrap"
             >
               <span className="text-[13px] tabular-nums text-slate-500 w-24 shrink-0">
                 {d.date}
               </span>
-              <span className="text-[13.5px] font-medium text-mipiace-ink flex-1 truncate">
+              <span className="text-[13.5px] font-medium text-mipiace-ink flex-1 min-w-[9rem] truncate">
                 {d.name}
               </span>
               <span className="text-[12.5px] text-slate-500 shrink-0">
