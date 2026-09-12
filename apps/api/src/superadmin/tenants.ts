@@ -1409,7 +1409,10 @@ export async function registerSuperAdminTenantsRoutes(
       const prisma = getPrisma();
       const tenant = await prisma.tenant.findUnique({
         where: { id },
-        select: { id: true, name: true },
+        // H1 · el estado del sync decide si esto es una rotación (la
+        // clave de siempre, cuenta nueva) o el ESTRENO de Holded en una
+        // empresa que nació sin él.
+        select: { id: true, name: true, initialSyncStatus: true },
       });
       if (!tenant) {
         return reply.code(404).send({
@@ -1454,13 +1457,38 @@ export async function registerSuperAdminTenantsRoutes(
         });
       }
       const ciphertext = encryptSecret(holdedApiKey, env.HOLDED_KEY_ENCRYPTION_SECRET);
+      // H1 · encender Holded MÁS TARDE en una empresa que nació sin él.
+      //
+      // No se duplica el flujo de onboarding: se reutiliza el camino que
+      // ya existía (guardar clave → PENDING → encolar el sync inicial),
+      // y sólo se dispara desde NOT_APPLICABLE. Desde cualquier otro
+      // estado la semántica de ROTACIÓN se conserva intacta: cambiar la
+      // clave de la MISMA cuenta Holded no debe resincronizar nada (ver
+      // la nota de `auth/routes.ts` en `/auth/me/rotate-holded-key`).
+      const estrenaHolded = tenant.initialSyncStatus === "NOT_APPLICABLE";
       await prisma.tenant.update({
         where: { id },
         data: {
           holdedApiKeyCiphertext: ciphertext,
           holdedAuthMode: "API_KEY",
+          ...(estrenaHolded ? { initialSyncStatus: "PENDING" as const } : {}),
         },
       });
+      // El sync inicial se encola DESPUÉS de persistir la clave: si la
+      // cola está caída, la clave queda guardada y el super-admin
+      // reintenta con "Re-sync" sin volver a teclearla.
+      let syncQueued = false;
+      if (estrenaHolded) {
+        try {
+          await enqueueInitialSync(id);
+          syncQueued = true;
+        } catch (err) {
+          request.log.error(
+            { event: "super_admin.holded_first_key_enqueue_failed", tenantId: id, err },
+            "clave de Holded guardada pero el sync inicial no se pudo encolar",
+          );
+        }
+      }
       const signals = extractRequestSignals(request);
       // Audit como "update_tenant" con el campo `holdedApiKey: rotated`
       // (no persistimos la clave en metadata, sólo señalamos la rotación).
@@ -1473,10 +1501,22 @@ export async function registerSuperAdminTenantsRoutes(
           ...signals,
           changes: {
             holdedApiKey: { before: "<redacted>", after: "<rotated>" },
+            ...(estrenaHolded
+              ? {
+                  initialSyncStatus: { before: "NOT_APPLICABLE", after: "PENDING" },
+                }
+              : {}),
           },
         },
       });
-      return reply.code(200).send({ ok: true, validatedAt: new Date().toISOString() });
+      return reply.code(200).send({
+        ok: true,
+        validatedAt: new Date().toISOString(),
+        // H1 · la consola tiene que poder decir "he arrancado el sync" o
+        // "he guardado la clave pero la cola está caída, dale a Re-sync".
+        initialSyncStatus: estrenaHolded ? "PENDING" : tenant.initialSyncStatus,
+        initialSyncQueued: syncQueued,
+      });
     },
   );
 

@@ -10,6 +10,7 @@ import { loadEnv } from "../env.js";
 import { probeFailureToHttpStatus, probeHoldedKey } from "../holded/probe.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
 import { requireOwner, requireOwnerOrManager } from "./middleware.js";
+import { enqueueInitialSync } from "../queues/initial-sync.js";
 import {
   signMustChangePasswordToken,
   verifyMustChangePasswordToken,
@@ -444,23 +445,55 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       const ciphertext = encryptSecret(apiKey, env.HOLDED_KEY_ENCRYPTION_SECRET);
       const prisma = getPrisma();
       const now = new Date();
+      // H1 · ¿rotación o estreno? Mismo criterio que la ruta hermana del
+      // super-admin (`PATCH /super-admin/tenants/:id/holded-api-key`):
+      // sólo se arranca el sync inicial desde NOT_APPLICABLE.
+      const before = await prisma.tenant.findUnique({
+        where: { id: auth.tenantId },
+        select: { initialSyncStatus: true },
+      });
+      const estrenaHolded = before?.initialSyncStatus === "NOT_APPLICABLE";
       await prisma.tenant.update({
         where: { id: auth.tenantId },
         data: {
           holdedApiKeyCiphertext: ciphertext,
           holdedAuthMode: "API_KEY",
+          ...(estrenaHolded ? { initialSyncStatus: "PENDING" as const } : {}),
         },
       });
-      // No tocamos initialSyncStatus ni encolamos sync — la rotación
-      // típica (clave comprometida → nueva clave de la MISMA cuenta
-      // Holded) no necesita resync. Si el propietario cambia de cuenta
-      // Holded, puede forzar manualmente con POST /catalog/sync-now.
-      // No hay cache en memoria de la API key descifrada — cada job
-      // descifra al arrancar, así que la rotación es efectiva sin
-      // acción extra del runtime.
+      // Rotación: no tocamos initialSyncStatus ni encolamos sync — la
+      // rotación típica (clave comprometida → nueva clave de la MISMA
+      // cuenta Holded) no necesita resync. Si el propietario cambia de
+      // cuenta Holded, puede forzar manualmente con POST
+      // /catalog/sync-now. No hay cache en memoria de la API key
+      // descifrada — cada job descifra al arrancar, así que la rotación
+      // es efectiva sin acción extra del runtime.
+      //
+      // Estreno (H1): la empresa nació sin Holded y acaba de conectarlo.
+      // Aquí sí hay catálogo que traerse por primera vez, así que se
+      // encola el sync inicial — el MISMO camino que usa
+      // `/onboarding/connect-holded`, sin duplicar su flujo.
+      let initialSyncQueued = false;
+      if (estrenaHolded) {
+        try {
+          await enqueueInitialSync(auth.tenantId);
+          initialSyncQueued = true;
+        } catch (err) {
+          request.log.error(
+            { tenantId: auth.tenantId },
+            `clave guardada pero initial-sync no se pudo encolar: ${
+              err instanceof Error ? err.message : err
+            }`,
+          );
+        }
+      }
       return reply.code(200).send({
         ok: true,
         validatedAt: now.toISOString(),
+        initialSyncStatus: estrenaHolded
+          ? "PENDING"
+          : (before?.initialSyncStatus ?? null),
+        initialSyncQueued,
       });
     },
   );
