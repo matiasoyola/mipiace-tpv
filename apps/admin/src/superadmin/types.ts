@@ -81,6 +81,15 @@ export interface TenantStore {
   ticketDelivery: unknown;
 }
 
+// H1 (ADR-016) · las tres capabilities del tenant, juntas. La caja sólo
+// se mueve desde el super-admin; CRM y agenda también desde el panel del
+// cliente (`/admin/tenant/settings`).
+export interface TenantModules {
+  caja: boolean;
+  crm: boolean;
+  agenda: boolean;
+}
+
 export interface ReadinessCheck {
   id: string;
   label: string;
@@ -128,6 +137,7 @@ export interface TenantDetail {
   // `https://app.holded.com/accounts/<id>` del hub.
   holdedAccountId: string | null;
   initialSyncStatus: string;
+  modules: TenantModules;
   lastIncrementalSyncAt: string | null;
   createdAt: string;
   blockedAt: string | null;
@@ -149,8 +159,12 @@ export interface CreateTenantDraftResponse {
     onboardingState: OnboardingState;
     businessType: BusinessType;
     createdAt: string;
+    // H1 · null cuando la empresa nace sin Holded (NOT_APPLICABLE).
+    initialSyncStatus: string | null;
+    modules: TenantModules;
   };
-  syncJobId: string;
+  // H1 · null cuando no hay Holded: no se encola nada.
+  syncJobId: string | null;
 }
 
 export interface TestCashierTokenResponse {
@@ -170,7 +184,10 @@ export interface ActivateTenantResponse {
   // v1.3-piloto-feedback · Lote 1: PIN del OWNER como cajero por defecto
   // en el TPV. Mostrado una sola vez para que el super-admin lo pase al
   // cliente offline como fallback si el email no llega.
-  ownerPin: string;
+  // H1 · null cuando la empresa no tiene caja: el PIN de cajero no se
+  // genera ni se enseña, porque no hay TPV al que entrar.
+  ownerPin: string | null;
+  cashierPinIssued: boolean;
   purge: {
     ticketsTestPurged: number;
     emailJobsPurged: number;

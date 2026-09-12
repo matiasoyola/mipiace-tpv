@@ -373,7 +373,8 @@ export function TenantDetailPage() {
   }
 
   async function copyPin(): Promise<void> {
-    if (!activated) return;
+    // H1 · sin caja no hay PIN que copiar.
+    if (!activated?.ownerPin) return;
     try {
       await navigator.clipboard.writeText(activated.ownerPin);
       setCopiedPin(true);

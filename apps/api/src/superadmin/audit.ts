@@ -32,6 +32,12 @@ const CreateTenantDraftMeta = Base.extend({
   // (tenant creado con id equivocado, etc.).
   holdedAccountId: z.string(),
   source: z.enum(["holded_account", "manual"]),
+  // H1 · con qué se dio de alta la empresa. Opcionales para no invalidar
+  // los audit logs escritos antes del bloque, que no los llevan.
+  usesHolded: z.boolean().optional(),
+  modules: z
+    .object({ caja: z.boolean(), crm: z.boolean(), agenda: z.boolean() })
+    .optional(),
 });
 
 // B-OnboardingV2: super-admin pulsó "Probar TPV", emisión del JWT

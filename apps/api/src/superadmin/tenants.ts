@@ -93,6 +93,12 @@ function serializeDraftTenant(t: {
   businessType: "HOSPITALITY" | "RETAIL" | "SERVICES";
   holdedAccountId: string | null;
   createdAt: Date;
+  // H1 · opcionales para que los bancos de pruebas que construyen un
+  // tenant a mano (sin las columnas nuevas) sigan sirviendo.
+  initialSyncStatus?: string;
+  cajaEnabled?: boolean;
+  crmEnabled?: boolean;
+  agendaEnabled?: boolean;
 }) {
   return {
     id: t.id,
@@ -104,6 +110,15 @@ function serializeDraftTenant(t: {
     businessType: t.businessType,
     holdedAccountId: t.holdedAccountId,
     createdAt: t.createdAt.toISOString(),
+    // H1 · el front del alta necesita saber en qué acaba de convertirse
+    // la empresa sin volver a pedir el detalle: si el sync aplica y qué
+    // módulos quedaron encendidos.
+    initialSyncStatus: t.initialSyncStatus ?? null,
+    modules: {
+      caja: t.cajaEnabled ?? true,
+      crm: t.crmEnabled ?? false,
+      agenda: t.agendaEnabled ?? false,
+    },
   };
 }
 
@@ -384,6 +399,14 @@ export async function registerSuperAdminTenantsRoutes(
         // su panel directamente desde el detalle/hub.
         holdedAccountId: tenant.holdedAccountId,
         initialSyncStatus: tenant.initialSyncStatus,
+        // H1 (ADR-016) · los tres módulos, juntos y en un solo sitio. La
+        // caja se pinta aquí y sólo aquí: el panel del cliente no la
+        // enseña ni la puede mover.
+        modules: {
+          caja: tenant.cajaEnabled,
+          crm: tenant.crmEnabled,
+          agenda: tenant.agendaEnabled,
+        },
         lastIncrementalSyncAt:
           tenant.lastIncrementalSyncAt?.toISOString() ?? null,
         createdAt: tenant.createdAt.toISOString(),
@@ -433,12 +456,20 @@ export async function registerSuperAdminTenantsRoutes(
       schema: {
         body: {
           type: "object",
-          // v1.3-SuperAdmin-Hub Lote 3: holdedAccountId pasa a required.
-          // El implantador siempre tiene acceso al panel Holded del
-          // cliente (es lo primero que mira para sacar la API key) y
-          // necesitamos el id para que el hub pueda enlazar a Holded
-          // directamente sin un fetch extra.
-          required: ["holdedApiKey", "holdedAccountId"],
+          // H1 · nada es required en el esquema, porque hay dos altas
+          // distintas y el esquema JSON no sabe distinguirlas. El
+          // handler impone las reglas de cada una:
+          //
+          //   · CON Holded  → `holdedAccountId` sigue siendo obligatorio
+          //     (v1.3-SuperAdmin-Hub Lote 3: el implantador ya está en
+          //     el panel Holded y el hub necesita el id para el
+          //     deep-link). Lo valida el handler con el mismo 400.
+          //   · SIN Holded  → `legalName` pasa a obligatorio, porque es
+          //     lo que antes salía del almacén default de la cuenta.
+          //
+          // Media configuración de Holded (uno de los dos campos) es
+          // peor que ninguna: 400 HOLDED_PARTIAL_CONFIG.
+          required: [],
           additionalProperties: false,
           properties: {
             holdedApiKey: { type: "string", minLength: 10, maxLength: 512 },
@@ -464,22 +495,66 @@ export async function registerSuperAdminTenantsRoutes(
             // BD para que el hub pueda construir el deep-link sin
             // pedir un fetch extra. Editable después desde el detalle.
             holdedAccountId: { type: "string", minLength: 1, maxLength: 64 },
+            // H1 (ADR-016) · los módulos de la empresa se eligen en el
+            // alta. Los defaults son los de hoy: caja encendida, CRM y
+            // agenda apagados. Una empresa sin ningún módulo encendido
+            // no se puede activar (lo comprueba computeOnboardingHealth),
+            // así que la rechazamos ya aquí con un mensaje que lo dice.
+            //
+            // La caja vive SÓLO aquí y en el detalle del super-admin: es
+            // una decisión comercial, no un ajuste del negocio, y por eso
+            // no está en POST /admin/tenant/settings junto a las otras dos.
+            cajaEnabled: { type: "boolean" },
+            crmEnabled: { type: "boolean" },
+            agendaEnabled: { type: "boolean" },
           },
         },
       },
     },
     async (request, reply) => {
       const body = request.body as {
-        holdedApiKey: string;
+        holdedApiKey?: string;
         taxId?: string;
         legalName?: string;
         plan?: string;
         businessType?: "HOSPITALITY" | "RETAIL" | "SERVICES";
-        holdedAccountId: string;
+        holdedAccountId?: string;
+        cajaEnabled?: boolean;
+        crmEnabled?: boolean;
+        agendaEnabled?: boolean;
       };
       const ctx = request.superAdmin!;
       const env = loadEnv();
       const prisma = getPrisma();
+
+      // H1 · ¿qué alta es ésta? Es la bifurcación de todo lo que sigue.
+      // `usesHolded` no es un flag nuevo en base de datos: es la
+      // presencia de la clave, que es lo mismo que mira el resto del
+      // sistema (`holdedApiKeyCiphertext != null`).
+      const usesHolded = body.holdedApiKey !== undefined;
+
+      // H1 · los módulos. Defaults = lo de hoy: caja sí, los otros no.
+      const cajaEnabled = body.cajaEnabled ?? true;
+      const crmEnabled = body.crmEnabled ?? false;
+      const agendaEnabled = body.agendaEnabled ?? false;
+      if (!cajaEnabled && !crmEnabled && !agendaEnabled) {
+        return reply.code(400).send({
+          error: "NO_MODULES_ENABLED",
+          message:
+            "Enciende al menos un módulo (caja, CRM o agenda). Una empresa sin ningún módulo no puede activarse ni entrar a su panel.",
+        });
+      }
+
+      // H1 · media configuración de Holded es peor que ninguna: un
+      // tenant con clave y sin id de cuenta rompe el deep-link del hub;
+      // uno con id y sin clave no sincroniza y parece que sí.
+      if (usesHolded !== (body.holdedAccountId !== undefined)) {
+        return reply.code(400).send({
+          error: "HOLDED_PARTIAL_CONFIG",
+          message:
+            "La API Key de Holded y el ID de cuenta van juntos: o los dos, o ninguno.",
+        });
+      }
 
       // 1. Validar taxId si viene.
       let normalizedTaxId: string | null = null;
@@ -499,10 +574,10 @@ export async function registerSuperAdminTenantsRoutes(
       // implantadores copian de la URL del panel Holded y suelen
       // arrastrar el "/" final o un espacio invisible — nos comemos
       // el caso aquí para no ensuciar BD ni romper el deep-link.
-      const normalizedHoldedAccountId = body.holdedAccountId
-        .trim()
-        .replace(/\/+$/, "");
-      if (normalizedHoldedAccountId.length === 0) {
+      // H1 · `null` cuando la empresa no usa Holded.
+      const normalizedHoldedAccountId =
+        body.holdedAccountId?.trim().replace(/\/+$/, "") ?? null;
+      if (usesHolded && normalizedHoldedAccountId!.length === 0) {
         return reply.code(400).send({
           error: "INVALID_HOLDED_ACCOUNT_ID",
           message:
@@ -516,12 +591,19 @@ export async function registerSuperAdminTenantsRoutes(
       //    la API por API Key ofrece (legalName desde `name`, address
       //    estructurada). Lo usamos también como prueba de vida de la
       //    key (igual que el probe legacy hace contra /products).
-      const client = new ApiKeyClient(body.holdedApiKey, {
-        baseUrl: env.HOLDED_BASE_URL,
-      });
-      let warehouses: HoldedWarehouse[];
+      //
+      //    H1 · SIN clave no se instancia el cliente ni se toca la red.
+      //    No es una optimización: una empresa sin Holded no tiene nada
+      //    que validar, y un 502 de Holded no puede impedir dar de alta
+      //    a un cliente que no lo usa.
+      let warehouses: HoldedWarehouse[] = [];
       try {
-        warehouses = await listWarehouses(client);
+        if (usesHolded) {
+          const client = new ApiKeyClient(body.holdedApiKey!, {
+            baseUrl: env.HOLDED_BASE_URL,
+          });
+          warehouses = await listWarehouses(client);
+        }
       } catch (err) {
         if (
           err instanceof HoldedApiError &&
@@ -557,14 +639,19 @@ export async function registerSuperAdminTenantsRoutes(
       }
 
       // 3. Construir fiscalProfile desde el warehouse default (ver spike §08).
+      //
+      //    H1 · sin Holded no hay almacén del que derivar nada: la razón
+      //    social se teclea, y sin ella no hay alta. El mensaje lo dice
+      //    con las palabras del caso, no con las de Holded.
       const def = warehouses.find((w) => w.default) ?? warehouses[0] ?? null;
       const derivedLegalName =
         body.legalName ?? (def?.name && def.name.trim().length > 0 ? def.name : null);
       if (!derivedLegalName) {
         return reply.code(400).send({
           error: "INVALID_HOLDED_FISCAL_PROFILE",
-          message:
-            "No hemos podido extraer una razón social de Holded. Crea un almacén con nombre en la cuenta Holded del cliente o introduce `legalName` manualmente.",
+          message: usesHolded
+            ? "No hemos podido extraer una razón social de Holded. Crea un almacén con nombre en la cuenta Holded del cliente o introduce `legalName` manualmente."
+            : "Sin Holded, la razón social se introduce a mano: es obligatoria.",
         });
       }
       const fiscalProfile: Record<string, unknown> = {
@@ -572,7 +659,10 @@ export async function registerSuperAdminTenantsRoutes(
         nif: normalizedTaxId,
         taxId: normalizedTaxId,
         address: def?.address ?? null,
-        source: "super_admin_draft",
+        // H1 · de dónde salen estos datos, para que el que los mire
+        // dentro de un año sepa si puede fiarse del almacén de Holded o
+        // si los tecleó un implantador.
+        source: usesHolded ? "super_admin_draft" : "super_admin_manual",
         warehouseHoldedId: def?.id ?? null,
         updatedAt: new Date().toISOString(),
       };
@@ -603,10 +693,9 @@ export async function registerSuperAdminTenantsRoutes(
       }
 
       // 5. Crear Tenant DRAFT + cifrar API key + audit.
-      const ciphertext = encryptSecret(
-        body.holdedApiKey,
-        env.HOLDED_KEY_ENCRYPTION_SECRET,
-      );
+      const ciphertext = usesHolded
+        ? encryptSecret(body.holdedApiKey!, env.HOLDED_KEY_ENCRYPTION_SECRET)
+        : null;
       const created = await prisma.$transaction(async (tx) => {
         const tenant = await tx.tenant.create({
           data: {
@@ -619,7 +708,16 @@ export async function registerSuperAdminTenantsRoutes(
             plan: body.plan ?? "pilot",
             fiscalProfile: fiscalProfile as Prisma.InputJsonValue,
             onboardingState: "DRAFT",
-            initialSyncStatus: "PENDING",
+            // H1 · el estado del sync es lo que distingue a una empresa
+            // sin Holded, y no una columna nueva: el estado del sync ya
+            // es el sitio donde todo el mundo mira (el panel, los crons,
+            // la salud del onboarding). NOT_APPLICABLE no entra en el
+            // cron incremental, que filtra por DONE.
+            initialSyncStatus: usesHolded ? "PENDING" : "NOT_APPLICABLE",
+            // H1 (ADR-016) · los módulos elegidos en el alta.
+            cajaEnabled,
+            crmEnabled,
+            agendaEnabled,
             // B-Multi-Vertical: si no viene en el body, el default
             // del schema (RETAIL) se aplica automáticamente.
             ...(body.businessType ? { businessType: body.businessType } : {}),
@@ -635,8 +733,12 @@ export async function registerSuperAdminTenantsRoutes(
             ...signals,
             tenantName: tenant.name,
             fiscalNif: normalizedTaxId ?? "",
-            holdedAccountId: normalizedHoldedAccountId,
+            holdedAccountId: normalizedHoldedAccountId ?? "",
             source: def ? "holded_account" : "manual",
+            // H1 · la auditoría tiene que poder responder "¿con qué se
+            // dio de alta esta empresa?" sin mirar el resto del sistema.
+            usesHolded,
+            modules: { caja: cajaEnabled, crm: crmEnabled, agenda: agendaEnabled },
           },
         });
         return tenant;
@@ -645,6 +747,15 @@ export async function registerSuperAdminTenantsRoutes(
       // 6. Encolar sync inicial. Si Redis está caído, devolvemos 503 —
       //    el tenant queda creado y el super-admin puede reintentar
       //    desde la consola con "Re-sync".
+      //
+      //    H1 · sin Holded no hay nada que encolar. Un Redis caído no
+      //    puede devolver 503 en un alta que no necesita la cola.
+      if (!usesHolded) {
+        return reply.code(201).send({
+          tenant: serializeDraftTenant(created),
+          syncJobId: null,
+        });
+      }
       try {
         await enqueueInitialSync(created.id);
       } catch (err) {
@@ -720,6 +831,13 @@ export async function registerSuperAdminTenantsRoutes(
             // pegando la URL completa, o si la cuenta Holded cambió de
             // propietario y migró a otro id. String vacío → null (limpiar).
             holdedAccountId: { type: "string", maxLength: 64 },
+            // H1 (ADR-016) · los módulos también se mueven después del
+            // alta, y la CAJA sólo desde aquí: es una decisión comercial.
+            // `POST /admin/tenant/settings` (el panel del cliente) sigue
+            // sin aceptar `cajaEnabled` — ahí viven CRM y agenda.
+            cajaEnabled: { type: "boolean" },
+            crmEnabled: { type: "boolean" },
+            agendaEnabled: { type: "boolean" },
           },
         },
       },
@@ -740,6 +858,9 @@ export async function registerSuperAdminTenantsRoutes(
         receiptFooter?: string;
         tpvIconPreset?: string;
         holdedAccountId?: string;
+        cajaEnabled?: boolean;
+        crmEnabled?: boolean;
+        agendaEnabled?: boolean;
       };
       const ctx = request.superAdmin!;
       const prisma = getPrisma();
@@ -851,6 +972,28 @@ export async function registerSuperAdminTenantsRoutes(
           };
           data.holdedAccountId = nextValue;
         }
+      }
+
+      // H1 (ADR-016) · los tres módulos, con la misma mecánica de diff y
+      // audit que el resto. Se aplican juntos para poder comprobar el
+      // invariante DESPUÉS del cambio: una empresa no puede quedarse sin
+      // ningún módulo encendido, ni siquiera apagando de uno en uno.
+      const MODULE_FIELDS = ["cajaEnabled", "crmEnabled", "agendaEnabled"] as const;
+      for (const field of MODULE_FIELDS) {
+        const next = body[field];
+        if (next === undefined || next === tenant[field]) continue;
+        changes[field] = { before: tenant[field], after: next };
+        data[field] = next;
+      }
+      const modulesAfter = MODULE_FIELDS.map(
+        (field) => body[field] ?? tenant[field],
+      );
+      if (!modulesAfter.some(Boolean)) {
+        return reply.code(400).send({
+          error: "NO_MODULES_ENABLED",
+          message:
+            "Una empresa tiene que conservar al menos un módulo encendido (caja, CRM o agenda).",
+        });
       }
 
       if (Object.keys(changes).length === 0) {
