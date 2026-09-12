@@ -435,26 +435,41 @@ export function TenantDetailPage() {
           </div>
           {/* v1.3-piloto-feedback · Lote 1: PIN del OWNER como cajero
               en el TPV. Se enseña sólo aquí; el OWNER lo puede regenerar
-              desde "Mi cuenta" cuando entre al admin. */}
-          <div className="text-[12px] uppercase tracking-wide text-emerald-700 mt-4 mb-1">
-            PIN del OWNER (TPV / cajero)
-          </div>
-          <div className="flex items-center gap-2">
-            <code className="font-mono bg-slate-900 text-white rounded-lg px-3 py-2 text-[14px] tracking-wide">
-              {activated.ownerPin}
-            </code>
-            <button
-              onClick={copyPin}
-              className="inline-flex items-center gap-1 h-9 px-3 border border-emerald-300 rounded-lg text-[12.5px] hover:bg-emerald-100 text-emerald-800"
-            >
-              <Copy className="w-3.5 h-3.5" />
-              {copiedPin ? "Copiado" : "Copiar"}
-            </button>
-          </div>
-          <p className="text-[11.5px] text-emerald-700 mt-2">
-            Contraseña y PIN se muestran una sola vez. Si el email no llega,
-            pásaselos al cliente por canal seguro.
-          </p>
+              desde "Mi cuenta" cuando entre al admin.
+
+              H1 · sin caja no hay PIN. En vez de dejar el hueco vacío o un
+              "null", lo decimos: el implantador está en la llamada con el
+              cliente y necesita saber que NO falta nada. */}
+          {activated.ownerPin ? (
+            <>
+              <div className="text-[12px] uppercase tracking-wide text-emerald-700 mt-4 mb-1">
+                PIN del OWNER (TPV / cajero)
+              </div>
+              <div className="flex items-center gap-2">
+                <code className="font-mono bg-slate-900 text-white rounded-lg px-3 py-2 text-[14px] tracking-wide">
+                  {activated.ownerPin}
+                </code>
+                <button
+                  onClick={copyPin}
+                  className="inline-flex items-center gap-1 h-9 px-3 border border-emerald-300 rounded-lg text-[12.5px] hover:bg-emerald-100 text-emerald-800"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  {copiedPin ? "Copiado" : "Copiar"}
+                </button>
+              </div>
+              <p className="text-[11.5px] text-emerald-700 mt-2">
+                Contraseña y PIN se muestran una sola vez. Si el email no llega,
+                pásaselos al cliente por canal seguro.
+              </p>
+            </>
+          ) : (
+            <p className="text-[11.5px] text-emerald-700 mt-3">
+              Esta empresa no tiene caja, así que <strong>no se ha generado
+              PIN de cajero</strong>: no hay TPV al que entrar. La contraseña
+              se muestra una sola vez; si el email no llega, pásasela al
+              cliente por canal seguro.
+            </p>
+          )}
         </div>
       )}
 

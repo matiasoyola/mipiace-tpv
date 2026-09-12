@@ -1507,7 +1507,14 @@ export async function registerSuperAdminTenantsRoutes(
       const prisma = getPrisma();
       const tenant = await prisma.tenant.findUnique({
         where: { id },
-        select: { id: true, onboardingState: true, name: true },
+        // H1 · la caja decide si el OWNER nace también como cajero.
+        select: {
+          id: true,
+          onboardingState: true,
+          name: true,
+          cajaEnabled: true,
+          holdedApiKeyCiphertext: true,
+        },
       });
       if (!tenant) {
         return reply.code(404).send({
@@ -1590,7 +1597,14 @@ export async function registerSuperAdminTenantsRoutes(
 
       const tenant = await prisma.tenant.findUnique({
         where: { id },
-        select: { id: true, onboardingState: true, name: true },
+        // H1 · la caja decide si el OWNER nace también como cajero.
+        select: {
+          id: true,
+          onboardingState: true,
+          name: true,
+          cajaEnabled: true,
+          holdedApiKeyCiphertext: true,
+        },
       });
       if (!tenant) {
         return reply.code(404).send({
@@ -1638,8 +1652,16 @@ export async function registerSuperAdminTenantsRoutes(
       // super-admin lo enseñe offline si el email tarda. El propio
       // `/auth/login` ya regenera el pinHash si no existe, pero generarlo
       // aquí evita la primera vuelta admin-login antes de poder usar el TPV.
-      const ownerPin = generateOwnerCashierPin();
-      const pinHash = await hashPassword(ownerPin);
+      //
+      // H1 · el PIN de cajero SÓLO tiene sentido con caja. Sin caja no
+      // hay TPV al que entrar, así que no se genera, no se persiste y no
+      // se enseña — ni en la respuesta ni en el email. Y la respuesta lo
+      // DICE (`cashierPinIssued`), en vez de dejar un `null` mudo que el
+      // implantador tenga que interpretar.
+      const issueCashierPin = tenant.cajaEnabled !== false;
+      const tenantHasHolded = tenant.holdedApiKeyCiphertext != null;
+      const ownerPin = issueCashierPin ? generateOwnerCashierPin() : null;
+      const pinHash = ownerPin ? await hashPassword(ownerPin) : null;
       const signals = extractRequestSignals(request);
 
       // v1.9.7 · La activación no debe abortar por la limpieza de datos
@@ -1698,6 +1720,8 @@ export async function registerSuperAdminTenantsRoutes(
             ownerName: body.ownerName,
             ticketsTestPurged: purge.ticketsTestPurged,
             emailJobsPurged: purge.emailJobsPurged,
+            // H1 · queda dicho si el OWNER nació además como cajero.
+            cashierPinIssued: issueCashierPin,
           },
         });
       } catch (err) {
@@ -1712,7 +1736,10 @@ export async function registerSuperAdminTenantsRoutes(
           ownerEmail: activated.owner.email,
           ownerName: body.ownerName,
           tempPassword,
+          // H1 · sin caja el email no habla de PIN ni de TPV; sin Holded
+          // no le pide al propietario que lo conecte.
           ownerPin,
+          expectsHolded: tenantHasHolded,
         });
       } catch (err) {
         request.log.error(
@@ -1736,7 +1763,11 @@ export async function registerSuperAdminTenantsRoutes(
         // v1.3-piloto-feedback · Lote 1: PIN del OWNER como cajero. Una
         // sola vez en la respuesta; el OWNER puede regenerarlo desde
         // `/auth/me/regenerate-owner-pin` si lo pierde.
+        //
+        // H1 · `null` + `cashierPinIssued: false` cuando la empresa no
+        // tiene caja.
         ownerPin,
+        cashierPinIssued: issueCashierPin,
         purge,
       });
     },
