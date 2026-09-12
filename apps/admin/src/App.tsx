@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-
 import { Check, Eye, EyeOff, KeyRound, RotateCcw } from "lucide-react";
 
 import { AdminShell } from "./AdminShell.js";
+import { CajaGate } from "./CajaGate.js";
 import { ImpersonationBootstrap } from "./components/ImpersonationBootstrap.js";
 import { CashiersPage } from "./pages/CashiersPage.js";
 import { DevicesPage } from "./pages/DevicesPage.js";
@@ -63,10 +64,32 @@ interface MeResponse {
     id: string;
     name: string;
     hasHoldedKey: boolean;
-    initialSyncStatus: "PENDING" | "RUNNING" | "DONE" | "FAILED";
+    // H1 · NOT_APPLICABLE en la empresa que nunca va a sincronizar.
+    initialSyncStatus:
+      | "PENDING"
+      | "RUNNING"
+      | "DONE"
+      | "FAILED"
+      | "NOT_APPLICABLE";
     fiscalProfile: Record<string, unknown> | null;
     lastIncrementalSyncAt: string | null;
+    // H1 (ADR-016) · los módulos del tenant. Opcionales para no romper
+    // si el front va por delante del backend en un despliegue parcial;
+    // los defaults reproducen el comportamiento de master.
+    cajaEnabled?: boolean;
+    crmEnabled?: boolean;
+    agendaEnabled?: boolean;
   };
+}
+
+// H1 · a dónde entra una empresa SIN caja. No hay pantalla de "inicio"
+// en el panel del cliente: se entra a la primera sección que tenga
+// sentido con sus módulos. La agenda es la única sección de panel que
+// aporta un módulo hoy; el CRM del cliente vive en el TPV, así que una
+// empresa con CRM y sin agenda aterriza en su cuenta.
+function landingSinCaja(tenant: MeResponse["tenant"]): string {
+  if (tenant.agendaEnabled) return "/admin/agenda-catalog";
+  return "/admin/account";
 }
 
 export function App() {
@@ -81,23 +104,34 @@ export function App() {
         <Route path="/onboarding" element={<ConnectHoldedPage />} />
         <Route path="/onboarding/sync" element={<SyncProgressPage />} />
         <Route path="/onboarding/done" element={<SyncSummaryPage />} />
+        {/* H1 (ADR-016) · las pantallas que cuelgan de la caja van
+            envueltas en <CajaGate>: esconderlas del sidebar no basta,
+            porque la URL sigue existiendo. La puerta de verdad es la del
+            servidor (`lib/caja-gate.ts`); ésta es para que el cliente lea
+            una frase en vez de un error. "Mi cuenta", "Seguridad",
+            "Tiendas", "Personal" y "Agenda · Catálogo" NO se envuelven:
+            valen sin caja. */}
         <Route path="/admin/account" element={<AccountPage />} />
-        <Route path="/admin/products" element={<SkuReviewPage />} />
-        <Route path="/admin/devices" element={<DevicesPage />} />
-        <Route path="/admin/cashiers" element={<CashiersPage />} />
+        <Route path="/admin/products" element={<CajaGate title="Productos"><SkuReviewPage /></CajaGate>} />
+        <Route path="/admin/devices" element={<CajaGate title="Dispositivos"><DevicesPage /></CajaGate>} />
+        <Route path="/admin/cashiers" element={<CajaGate title="Cajeros"><CashiersPage /></CajaGate>} />
         <Route path="/admin/contacts-import" element={<ContactImportPage />} />
         <Route path="/admin/security" element={<SecurityPage />} />
         <Route path="/admin/stores" element={<StoresPage />} />
         <Route path="/admin/stores/:storeId" element={<StoreDetailPage />} />
-        <Route path="/admin/tickets-errors" element={<TicketsErrorsPage />} />
+        <Route path="/admin/tickets-errors" element={<CajaGate title="Holded"><TicketsErrorsPage /></CajaGate>} />
+        {/* H1 · Ajustes NO va envuelto: dentro vive la sección "Módulos del
+            negocio" (CRM y agenda), que es justo lo que una empresa sin
+            caja necesita tocar. La propia pantalla esconde las secciones
+            que cuelgan de la caja. */}
         <Route path="/admin/settings" element={<SettingsPage />} />
         <Route path="/admin/staff" element={<StaffPage />} />
         <Route path="/admin/agenda-catalog" element={<AgendaCatalogPage />} />
-        <Route path="/admin/tag-aliases" element={<TagAliasesPage />} />
-        <Route path="/admin/tag-sections" element={<TagSectionsPage />} />
-        <Route path="/admin/printers" element={<PrintersPage />} />
-        <Route path="/admin/holded" element={<HoldedPage />} />
-        <Route path="/admin/gift-receipts" element={<GiftReceiptsPage />} />
+        <Route path="/admin/tag-aliases" element={<CajaGate title="Etiquetas"><TagAliasesPage /></CajaGate>} />
+        <Route path="/admin/tag-sections" element={<CajaGate title="Comanderas"><TagSectionsPage /></CajaGate>} />
+        <Route path="/admin/printers" element={<CajaGate title="Impresoras"><PrintersPage /></CajaGate>} />
+        <Route path="/admin/holded" element={<CajaGate title="Sync Holded"><HoldedPage /></CajaGate>} />
+        <Route path="/admin/gift-receipts" element={<CajaGate title="Tickets regalo"><GiftReceiptsPage /></CajaGate>} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/admin/reset" element={<ResetPasswordPage />} />
         {/* B-SuperAdmin: consola super-admin (shell propio, sesión separada) */}
@@ -120,7 +154,10 @@ export function App() {
   );
 }
 
-function RootRouter() {
+// H1 · exportado para poder probar la decisión de entrada sin montar la
+// app entera. Es LA pieza del bloque en el panel del cliente: decidir a
+// dónde entra una empresa según sus módulos.
+export function RootRouter() {
   const navigate = useNavigate();
   useEffect(() => {
     let cancelled = false;
@@ -137,6 +174,17 @@ function RootRouter() {
         // tickets-errors, que es su pantalla operativa principal.
         if (me.user.role === "MANAGER") {
           navigate("/admin/tickets-errors", { replace: true });
+          return;
+        }
+        // H1 (ADR-016) · la redirección a /onboarding vale SÓLO para la
+        // empresa que TIENE caja y aún no ha conectado Holded. Antes de
+        // este bloque, cualquier tenant sin clave caía aquí y no salía:
+        // era el muro que dejaba al colegio fuera de su propio panel.
+        //
+        // Sin caja se entra directo a lo que le corresponda por sus
+        // módulos. Ni /onboarding, ni /onboarding/sync, ni sync alguno.
+        if (me.tenant.cajaEnabled === false) {
+          navigate(landingSinCaja(me.tenant), { replace: true });
           return;
         }
         if (!me.tenant.hasHoldedKey) navigate("/onboarding", { replace: true });

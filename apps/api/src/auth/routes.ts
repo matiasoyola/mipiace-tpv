@@ -329,6 +329,13 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
           initialSyncStatus: tenant.initialSyncStatus,
           fiscalProfile: tenant.fiscalProfile ?? null,
           lastIncrementalSyncAt: tenant.lastIncrementalSyncAt?.toISOString() ?? null,
+          // H1 (ADR-016) · los módulos del tenant, para que el panel
+          // decida a dónde entra y qué esconde SIN una segunda llamada.
+          // `cajaEnabled` es de sólo lectura aquí: se mueve desde el
+          // super-admin, nunca desde el panel del cliente.
+          cajaEnabled: tenant.cajaEnabled,
+          crmEnabled: tenant.crmEnabled,
+          agendaEnabled: tenant.agendaEnabled,
         },
       };
     },

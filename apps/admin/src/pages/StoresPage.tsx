@@ -9,6 +9,7 @@ import { ArrowLeft, Building2, Calculator, ChevronRight } from "lucide-react";
 
 import { AdminShell } from "../AdminShell.js";
 import { api, ApiError, clearTokens, readCurrentRole } from "../api.js";
+import { useCajaEnabled } from "../CajaGate.js";
 import { AbandonedTablesSection } from "./StoreDetailPage.abandonedTables.js";
 import { TablesSection } from "./StoreDetailPage.tables.js";
 import { TicketDeliverySection } from "./StoreDetailPage.ticketDelivery.js";
@@ -310,6 +311,9 @@ export function StoreDetailPage() {
   const [showNewRegister, setShowNewRegister] = useState(false);
   const [editing, setEditing] = useState(false);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  // H1 · `null` mientras carga; lo tratamos como encendida para no hacer
+  // desaparecer las cajas de una tienda con un parpadeo de red.
+  const cajaEnabled = useCajaEnabled() !== false;
 
   async function refresh() {
     if (!storeId) return;
@@ -377,6 +381,12 @@ export function StoreDetailPage() {
         )}
       </section>
 
+      {/* H1 (ADR-016) · "Tiendas" vale sin caja —la ficha fiscal del local
+          es la del negocio, no la del TPV—, pero todo lo que cuelga de la
+          caja dentro de la tienda se esconde: cajas registradoras, mesas y
+          barra, cuentas abandonadas y entrega de ticket. Sus rutas de API
+          además gatean (`lib/caja-gate.ts`). */}
+      {cajaEnabled && (
       <section className="bg-white rounded-2xl border border-slate-200 p-6 md:p-7 mb-5">
         <div className="flex items-center justify-between mb-4">
           <div>
@@ -411,14 +421,18 @@ export function StoreDetailPage() {
           </div>
         )}
       </section>
+      )}
 
       {/* v1.12-mesas-abandonadas · sólo aparece si hay cuentas colgadas
           con consumo. Va ANTES del listado de mesas: es lo único de esta
           pantalla que pide una decisión hoy. */}
-      <AbandonedTablesSection storeId={store.id} role={readCurrentRole()} />
-      <TablesSection storeId={store.id} role={readCurrentRole()} />
-
-      <TicketDeliverySection storeId={store.id} role={readCurrentRole()} />
+      {cajaEnabled && (
+        <>
+          <AbandonedTablesSection storeId={store.id} role={readCurrentRole()} />
+          <TablesSection storeId={store.id} role={readCurrentRole()} />
+          <TicketDeliverySection storeId={store.id} role={readCurrentRole()} />
+        </>
+      )}
 
       <DeleteStoreSection
         storeId={store.id}
