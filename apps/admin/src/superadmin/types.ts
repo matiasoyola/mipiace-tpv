@@ -90,11 +90,18 @@ export interface TenantModules {
   agenda: boolean;
 }
 
+// H1 (ADR-016) · de qué depende un check. `always` vale para cualquier
+// empresa; `caja` y `holded` sólo cuando el tenant los tiene.
+export type CheckRequirement = "always" | "caja" | "holded";
+
 export interface ReadinessCheck {
   id: string;
   label: string;
   ok: boolean;
   value?: string;
+  // H1 · opcionales para no romper si el backend es anterior al bloque.
+  requires?: CheckRequirement;
+  applies?: boolean;
 }
 
 export interface OnboardingHealth {
@@ -110,6 +117,8 @@ export interface OnboardingHealth {
   ticketsTest: { total: number; lastAt: string | null };
   ticketsSyncFailed: number;
   testCashierProvisioned: boolean;
+  modules: TenantModules;
+  usesHolded: boolean;
   readinessChecks: ReadinessCheck[];
   ready: boolean;
 }

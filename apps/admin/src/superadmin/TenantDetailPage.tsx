@@ -10,6 +10,7 @@ import {
   LockKeyhole,
   LockOpen,
   LogOut,
+  Minus,
   Power,
   RefreshCw,
   Settings,
@@ -28,7 +29,9 @@ import type {
   HoldedConnectionStatus,
   ImpersonateResponse,
   ImpersonationMode,
+  ReadinessCheck,
   TenantDetail,
+  TenantModules,
   TestCashierTokenResponse,
 } from "./types.js";
 import { BUSINESS_TYPE_LABEL } from "./types.js";
@@ -862,7 +865,11 @@ function HealthPanel({
         <div>
           <h3 className="font-semibold text-slate-900">Validación de onboarding</h3>
           <p className="text-[12px] text-slate-500 mt-0.5">
-            Cuando todos los checks pasen, podrás activar la cuenta.
+            {/* H1 · "los que apliquen", no "todos": en una empresa sin caja
+                la mitad de la lista no cuenta y el implantador tiene que
+                leerlo aquí, no deducirlo. */}
+            Cuando pasen los checks que aplican a esta empresa, podrás
+            activar la cuenta.
           </p>
         </div>
         <button
@@ -874,34 +881,11 @@ function HealthPanel({
           Re-sync
         </button>
       </div>
+      {/* H1 · qué es esta empresa, en una línea, encima de la lista. */}
+      <ModuleChips modules={h.modules} usesHolded={h.usesHolded} />
       <ul className="space-y-2 mb-5">
         {h.readinessChecks.map((c) => (
-          <li
-            key={c.id}
-            className={`flex items-start gap-2 p-2.5 rounded-lg ${
-              c.ok ? "bg-emerald-50" : "bg-amber-50"
-            }`}
-          >
-            <span
-              className={`mt-0.5 inline-flex items-center justify-center w-5 h-5 rounded-full ${
-                c.ok ? "bg-emerald-600" : "bg-amber-500"
-              }`}
-            >
-              {c.ok ? (
-                <Check className="w-3 h-3 text-white" strokeWidth={3} />
-              ) : (
-                <X className="w-3 h-3 text-white" strokeWidth={3} />
-              )}
-            </span>
-            <div className="flex-1">
-              <div className="text-[13px] text-slate-900">{c.label}</div>
-              {c.value && (
-                <div className="text-[11.5px] text-slate-500 mt-0.5 font-mono">
-                  {c.value}
-                </div>
-              )}
-            </div>
-          </li>
+          <CheckRow key={c.id} check={c} />
         ))}
       </ul>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-[12px]">
@@ -915,6 +899,101 @@ function HealthPanel({
           Último error de sync: {h.initialSync.errorMessage}
         </div>
       )}
+    </div>
+  );
+}
+
+// H1 (ADR-016) · un check tiene TRES estados, no dos, y se tienen que
+// distinguir a la vista sin depender del color: icono + etiqueta.
+//
+//   cumple   → verde,  ✓,  sin etiqueta (es lo esperado)
+//   falla    → ámbar,  ✗,  "Falta"
+//   no aplica→ gris,   —,  "No aplica · sin caja" / "· sin Holded"
+//
+// El gris atenuado es deliberado: un check que no aplica no es una
+// advertencia, es ruido de fondo que el implantador tiene que poder
+// saltarse de un vistazo.
+const NO_APLICA_MOTIVO: Record<string, string> = {
+  caja: "sin caja",
+  holded: "sin Holded",
+};
+
+function CheckRow({ check }: { check: ReadinessCheck }) {
+  const aplica = check.applies !== false;
+  const tone = !aplica
+    ? { row: "bg-slate-50", badge: "bg-slate-300", label: "text-slate-400" }
+    : check.ok
+      ? { row: "bg-emerald-50", badge: "bg-emerald-600", label: "text-slate-900" }
+      : { row: "bg-amber-50", badge: "bg-amber-500", label: "text-slate-900" };
+  const estado = !aplica ? "No aplica" : check.ok ? "Cumple" : "Falta";
+  const motivo = !aplica ? NO_APLICA_MOTIVO[check.requires ?? ""] : undefined;
+  return (
+    <li className={`flex items-start gap-2 p-2.5 rounded-lg ${tone.row}`}>
+      <span
+        aria-hidden
+        className={`mt-0.5 inline-flex items-center justify-center w-5 h-5 rounded-full shrink-0 ${tone.badge}`}
+      >
+        {!aplica ? (
+          <Minus className="w-3 h-3 text-white" strokeWidth={3} />
+        ) : check.ok ? (
+          <Check className="w-3 h-3 text-white" strokeWidth={3} />
+        ) : (
+          <X className="w-3 h-3 text-white" strokeWidth={3} />
+        )}
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-baseline gap-2 flex-wrap">
+          <span className={`text-[13px] ${tone.label}`}>{check.label}</span>
+          <span
+            className={`text-[10.5px] uppercase tracking-wide font-semibold ${
+              !aplica
+                ? "text-slate-400"
+                : check.ok
+                  ? "text-emerald-700"
+                  : "text-amber-700"
+            }`}
+          >
+            {estado}
+            {motivo ? ` · ${motivo}` : ""}
+          </span>
+        </div>
+        {check.value && aplica && (
+          <div className="text-[11.5px] text-slate-500 mt-0.5 font-mono break-words">
+            {check.value}
+          </div>
+        )}
+      </div>
+    </li>
+  );
+}
+
+function ModuleChips({
+  modules,
+  usesHolded,
+}: {
+  modules: TenantModules;
+  usesHolded: boolean;
+}) {
+  const items: Array<[string, boolean]> = [
+    ["Caja", modules.caja],
+    ["CRM", modules.crm],
+    ["Agenda", modules.agenda],
+    ["Holded", usesHolded],
+  ];
+  return (
+    <div className="flex flex-wrap gap-1.5 mb-4">
+      {items.map(([label, on]) => (
+        <span
+          key={label}
+          className={`inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11.5px] font-medium ${
+            on
+              ? "bg-slate-900 text-white"
+              : "bg-slate-100 text-slate-400 line-through"
+          }`}
+        >
+          {label}
+        </span>
+      ))}
     </div>
   );
 }

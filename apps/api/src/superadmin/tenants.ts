@@ -1606,8 +1606,11 @@ export async function registerSuperAdminTenantsRoutes(
       }
       const health = await computeOnboardingHealth(prisma, id);
       if (!health.ready) {
+        // H1 · sólo lo que aplica. Listar "Sync inicial completado" como
+        // motivo de bloqueo en una empresa sin Holded era exactamente la
+        // confusión que este bloque quita.
         const failing = health.readinessChecks
-          .filter((c) => !c.ok)
+          .filter((c) => c.applies !== false && !c.ok)
           .map((c) => c.label);
         return reply.code(400).send({
           error: "ONBOARDING_NOT_READY",

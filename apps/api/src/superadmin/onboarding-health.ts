@@ -1,4 +1,5 @@
 // B-OnboardingV2 · Frente 3 · Métricas de salud del onboarding.
+// H1 · reescrito para que cada check declare de qué depende (ADR-016).
 //
 // El super-admin necesita una vista clara de "¿está listo para activar
 // al propietario?". Esta función agrega las señales que importan en
@@ -12,11 +13,36 @@
 // (negocio nuevo con 5 productos) los porcentajes son frágiles, pero
 // los pilotos esperados tienen catálogos grandes, así que vale la pena
 // detectar "muchos productos sin SKU" como red flag.
+//
+// ── H1 · qué cambia ──────────────────────────────────────────────────
+//
+// Hasta hoy los cinco checks daban por hecho que el tenant tenía caja y
+// Holded, y `ready` era `checks.every(ok)`. Una empresa sin caja no
+// pasaba ninguno y no se podía activar nunca.
+//
+// Ahora cada check declara su dependencia (`requires`) y trae un
+// `applies`. Los que no aplican salen como tales y NO cuentan para
+// `ready`; los que aplican siguen exactamente igual de duros:
+//
+//   ready = checks.filter(applies).every(ok)
+//
+// `sync-done` depende de HOLDED y no de la caja, a propósito: una
+// empresa con caja y sin Holded (caja local) no debe quedar bloqueada
+// por un sync que nunca va a correr. La dependencia real de ese check
+// es la clave, no la caja.
+//
+// Y se añaden dos que valen para CUALQUIER empresa, tenga lo que tenga:
+// al menos un módulo encendido, y datos fiscales mínimos.
 
 import { TicketStatus, type PrismaClient } from "@mipiacetpv/db";
 
 const TAXES_RATE_THRESHOLD_PCT = 80;
 const PRODUCTS_SELLABLE_THRESHOLD_PCT = 50;
+
+/**
+ * De qué depende un check. `always` = vale para cualquier empresa.
+ */
+export type CheckRequirement = "always" | "caja" | "holded";
 
 export interface ReadinessCheck {
   id:
@@ -24,10 +50,17 @@ export interface ReadinessCheck {
     | "taxes-ratio"
     | "products-sellable"
     | "no-sync-failures"
-    | "test-cashier-provisioned";
+    | "test-cashier-provisioned"
+    | "modules-enabled"
+    | "fiscal-minimum";
   label: string;
   ok: boolean;
   value?: string;
+  // H1 · de qué depende, y si el tenant lo tiene. Un check con
+  // `applies: false` no bloquea la activación y la pantalla lo pinta
+  // como "No aplica", que es distinto de cumplir y de fallar.
+  requires: CheckRequirement;
+  applies: boolean;
 }
 
 export interface OnboardingHealth {
@@ -60,6 +93,11 @@ export interface OnboardingHealth {
   };
   ticketsSyncFailed: number;
   testCashierProvisioned: boolean;
+  // H1 · en qué empresa estamos. La pantalla lo necesita para explicar
+  // por qué la mitad de los checks dicen "No aplica" sin que el
+  // implantador tenga que deducirlo.
+  modules: { caja: boolean; crm: boolean; agenda: boolean };
+  usesHolded: boolean;
   readinessChecks: ReadinessCheck[];
   ready: boolean;
 }
@@ -95,6 +133,12 @@ export async function computeOnboardingHealth(
         initialSyncCompletedAt: true,
         initialSyncStartedAt: true,
         initialSyncStats: true,
+        // H1 · de qué depende cada check.
+        cajaEnabled: true,
+        crmEnabled: true,
+        agendaEnabled: true,
+        holdedApiKeyCiphertext: true,
+        fiscalProfile: true,
       },
     }),
     prisma.tenantTax.count({ where: { tenantId } }),
@@ -145,18 +189,68 @@ export async function computeOnboardingHealth(
   const lastRunAt =
     tenant.initialSyncCompletedAt ?? tenant.initialSyncStartedAt ?? null;
 
-  const checks: ReadinessCheck[] = [
+  // H1 · las dos dependencias. `cajaEnabled !== false` y no `!`: la
+  // columna es `@default(true)` y sólo un `false` explícito la apaga
+  // (mismo criterio que `lib/caja-gate.ts`).
+  const hasCaja = tenant.cajaEnabled !== false;
+  const usesHolded = tenant.holdedApiKeyCiphertext != null;
+  const hasCrm = tenant.crmEnabled === true;
+  const hasAgenda = tenant.agendaEnabled === true;
+  const applies: Record<CheckRequirement, boolean> = {
+    always: true,
+    caja: hasCaja,
+    holded: usesHolded,
+  };
+
+  // Datos fiscales mínimos: razón social y NIF válido en forma. No
+  // validamos el dígito de control aquí — eso lo hace el alta con
+  // `validateSpanishTaxId`; esto detecta el hueco, que es el fallo real
+  // (el implantador no lo sabía y lo dejó vacío).
+  const legalName = fiscalString(tenant.fiscalProfile, ["legalName", "businessName"]);
+  const taxId = fiscalString(tenant.fiscalProfile, ["taxId", "nif", "fiscalNif"]);
+  const fiscalOk = legalName != null && taxId != null;
+
+  const modulesOn = [
+    hasCaja ? "caja" : null,
+    hasCrm ? "CRM" : null,
+    hasAgenda ? "agenda" : null,
+  ].filter((x): x is string => x != null);
+
+  const declared: Array<Omit<ReadinessCheck, "applies">> = [
+    // ── Valen para cualquier empresa ──────────────────────────────────
+    {
+      id: "modules-enabled",
+      label: "Al menos un módulo encendido",
+      ok: modulesOn.length > 0,
+      value: modulesOn.length > 0 ? modulesOn.join(" · ") : "ninguno",
+      requires: "always",
+    },
+    {
+      id: "fiscal-minimum",
+      label: "Datos fiscales mínimos (razón social y NIF)",
+      ok: fiscalOk,
+      value: fiscalOk
+        ? `${legalName} · ${taxId}`
+        : legalName == null
+          ? "falta la razón social"
+          : "falta el NIF",
+      requires: "always",
+    },
+    // ── Dependen de Holded ────────────────────────────────────────────
     {
       id: "sync-done",
       label: "Sync inicial completado",
       ok: tenant.initialSyncStatus === "DONE",
       value: tenant.initialSyncStatus,
+      requires: "holded",
     },
+    // ── Dependen de la caja ───────────────────────────────────────────
     {
       id: "taxes-ratio",
       label: `≥${TAXES_RATE_THRESHOLD_PCT}% de taxes con rate`,
       ok: taxes === 0 ? false : taxesPct >= TAXES_RATE_THRESHOLD_PCT,
       value: `${taxesWithRate}/${taxes} (${taxesPct}%)`,
+      requires: "caja",
     },
     {
       id: "products-sellable",
@@ -166,20 +260,28 @@ export async function computeOnboardingHealth(
           ? false
           : sellablePct >= PRODUCTS_SELLABLE_THRESHOLD_PCT,
       value: `${productsSellable}/${productsTotal} (${sellablePct}%)`,
+      requires: "caja",
     },
     {
       id: "no-sync-failures",
       label: "Sin tickets SYNC_FAILED",
       ok: ticketsSyncFailed === 0,
       value: `${ticketsSyncFailed} pendientes`,
+      requires: "caja",
     },
     {
       id: "test-cashier-provisioned",
       label: "Cajero técnico provisionado",
       ok: cashierTest != null,
       value: cashierTest != null ? "sí" : "no",
+      requires: "caja",
     },
   ];
+
+  const checks: ReadinessCheck[] = declared.map((c) => ({
+    ...c,
+    applies: applies[c.requires],
+  }));
 
   return {
     initialSync: {
@@ -211,7 +313,25 @@ export async function computeOnboardingHealth(
     },
     ticketsSyncFailed,
     testCashierProvisioned: cashierTest != null,
+    modules: { caja: hasCaja, crm: hasCrm, agenda: hasAgenda },
+    usesHolded,
     readinessChecks: checks,
-    ready: checks.every((c) => c.ok),
+    // H1 · sólo cuenta lo que aplica. Los que aplican siguen igual de
+    // duros que antes: ni un umbral se ha relajado.
+    ready: checks.filter((c) => c.applies).every((c) => c.ok),
   };
+}
+
+// Lee la primera clave presente de un `fiscalProfile` (Json libre) y la
+// devuelve trimeada, o null si no hay nada utilizable. Los alias vienen
+// de la historia del campo: `legalName`/`businessName`, `taxId`/`nif`/
+// `fiscalNif` (ver `superadmin/tenants.ts`).
+function fiscalString(profile: unknown, keys: string[]): string | null {
+  if (!profile || typeof profile !== "object" || Array.isArray(profile)) return null;
+  const obj = profile as Record<string, unknown>;
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === "string" && v.trim().length > 0) return v.trim();
+  }
+  return null;
 }
