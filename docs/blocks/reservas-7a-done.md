@@ -3,8 +3,8 @@
 Rama `reservas-7a-horario`, worktree `mipiacetpv-reservas-7a`, desde master **`4078655`**
 (S1, B-5 y B-6a dentro). **Sin push ni deploy.**
 
-**Último commit de código: `9ac158e`.** (Los dos que van detrás son este documento;
-no tocan una sola línea que corra.)
+**Último commit de código: `b7902cb`** (frente R). Lo demás que va detrás es este
+documento.
 
 | | |
 |---|---|
@@ -12,7 +12,7 @@ no tocan una sola línea que corra.)
 | **Suite después** | `187 ficheros · 1746 verdes · 3 saltados` · exit 0 |
 | **Tests nuevos** | **118** en `pnpm test` (+6 ficheros): 70 de API, 28 del TPV, 20 del admin. **Más 21 casos de e2e**, que corren en su propia suite |
 | **Saltados** | **los mismos 3 de antes**: `describe.skip` de `super-admin.test.ts:566` (flujo legacy B-SuperAdmin). Este bloque no salta ni un test |
-| **e2e** | `21/21` contra Postgres real, base propia `mipiacetpv_r7a_e2e` (borrada al terminar) |
+| **e2e** | **`72/72`**, la suite e2e ENTERA, contra Postgres real y base propia `mipiacetpv_r7a_e2e` (borrada al terminar). 21 casos nuevos de este bloque + los 51 de antes, **incluido el que se caía solo cada tarde** (§11) |
 
 ---
 
@@ -153,6 +153,20 @@ Los tests usan un centro genérico que abre de martes a sábado de 9:00 a 20:00 
 domingo. El único sitio donde aparece el nombre es el **banco visual**, que ya lo llevaba
 desde B-5 y no entra en el bundle de producción.
 
+### 2.14 Frente R · fecha controlada, y NO un turno derivado del suelo
+
+El encargo daba dos caminos para quitarle al e2e del suelo su dependencia de la hora:
+derivar el final del turno del suelo, o mover los casos a una fecha controlada. **Tomo el
+segundo.**
+
+Derivar el turno habría hecho que el turno del test dependiera del reloj **también**: el
+fallo no desaparece, se esconde. Un turno que se estira para que el caso quepa deja de decir
+nada sobre lo que pasa cuando no cabe — y lo que no cabía era justamente lo interesante (una
+visita no puede cruzar la medianoche). Separar los casos en dos grupos —«esto prueba el
+suelo, va contra el suelo real y sólo hacia atrás» / «esto sólo necesita un hueco futuro
+cualquiera, va a `manana(HH:MM)`»— deja cada caso probando exactamente lo suyo, y la regla
+escrita en la cabecera del fichero para el que venga detrás. Todo el detalle en §11.
+
 ---
 
 ## 3 · Sabotaje → test rojo
@@ -171,6 +185,13 @@ Ejecutado de verdad, uno a uno, revirtiendo entre medias. Línea base limpia:
 | 7 | **No calcular las citas afectadas** | `appointmentsOutside` devuelve `[]` | **6 rojos**, el bloque `qué citas quedarían fuera` entero |
 | 7b | **El front guarda sin enseñarlas** | se salta el `setImpact` y guarda directo | **4 rojos** en el admin: `se enseñan ANTES de guardar`, `dice hasta dónde ha mirado`, `cancelar no guarda nada` y `confirmar SÍ guarda` |
 | 8 | **Que la configuración cambie algo en un tenant SIN configurar** | «sin filas» deja de significar «sin techo» | **49 rojos**, y ésta es la importante: caen los tests de **B4** (`disponibilidad (cita)`, `aislamiento por tenant`, la carrera del GiST), los de **6a** (`availability() no ofrece el pasado`, el cambio de hora), los de **huso** (`bajo TZ=America/New_York`) y los míos (`sin techo devuelve la plantilla TAL CUAL`, `un tenant sin configurar NO tiene día cerrado nunca`). **La compatibilidad no es una promesa: está sujeta por 49 testigos** |
+
+**Y un noveno, que no es una mutación del código sino del RELOJ** (frente R, §11): correr
+`agenda-suelo.e2e.ts` **como si fuera otra hora del día**. La versión de master `4078655` se
+pone roja a las **13:30** (caso 14), **16:30** (casos 3 y 8), **19:30** (caso 3) y **00:05**
+(casos 7 y 11). La de esta rama pasa **16/16 en diez horas distintas**: 06:00, 09:30, 11:45,
+13:30, 16:30, 19:30, 20:30, 23:45, 00:05 y 02:15. El shim de reloj vive en el scratchpad y no
+entra en el repo.
 
 **Ruido observado y dicho:** en la pasada del sabotaje 4 cayó además
 `POST /shift/cashier-login > rate limit se resetea tras un login exitoso` (5,7 s). Es un
@@ -228,7 +249,17 @@ sábado de boda a las 8:30, «Ana libre» y «ISA NO» en la celda).
 11. **El bucle visual del admin usa la pantalla de verdad con la API interceptada en la capa
     de red**, no un banco en el repo. Lo bueno: no hay fixtures de admin que mantener. Lo
     que no cubre: nadie fotografía el admin contra un servidor real.
-12. **Nada de esto se ha visto en hierro.** El AP11 sigue reservado para la pasada de B-5 y
+12. **La carrera de dos altas sobre el mismo hueco puede devolver 500 en vez de 409.**
+    Observado **una vez** durante el frente R, sobre la versión vieja (§11): dos
+    transacciones concurrentes contra el mismo `EXCLUDE` pueden levantar un error de Postgres
+    que `isExclusionViolation` no reconoce. No se reprodujo en las diez pasadas del fichero
+    arreglado. *La rutina de Sole lo pisaría sólo con dos personas dando de alta la misma
+    hora a la vez* — tiene una recepción, así que hoy no. No se arregla aquí porque el
+    anti-solape es frontera declarada; queda dicho en §11.
+13. **`cita-y-turno.e2e.ts` y `cita-a-caja.e2e.ts` nunca ejercen el suelo.** Crean sus citas
+    con `store.insertHold`, saltándose el motor, y con fechas que ya son pasado. No son
+    frágiles al reloj (§11), pero tampoco prueban nada del suelo. Es deuda de 6a, no de aquí.
+14. **Nada de esto se ha visto en hierro.** El AP11 sigue reservado para la pasada de B-5 y
     6a (valla del prompt).
 
 **Y un punto que SÍ pisaba su rutina y por eso se arregló aquí, no se apuntó:** el toque de
@@ -372,6 +403,8 @@ ajustes del owner y el simulacro) · `engine.ts` (+72) · `store.ts` (+99) · `r
 `App.tsx` (+2)
 
 **Tests**
+`apps/api/test-e2e/agenda-suelo.e2e.ts` (frente R: el fichero de 6a, sin cambiar ni una
+aserción — sólo de dónde sale cada hora) ·
 `apps/api/test/agenda-horario.test.ts` (20) · `agenda-reticula.test.ts` (16) ·
 `agenda-ausencias.test.ts` (18) · `agenda-impacto.test.ts` (16) ·
 `test/helpers/agenda-fake-store.ts` (+23) · `apps/api/test-e2e/agenda-horario.e2e.ts` (21) ·
@@ -394,39 +427,125 @@ ea4d651 feat(reservas-7a): la rejilla deja de ser de 8 a 21 y de 15 en 15
 1ea3e6b feat(reservas-7a): los ajustes de agenda del propietario
 9ac158e fix(reservas-7a): el bucle visual · tres cosas que ningún test cogió
 6b642e0 docs(reservas-7a): done · decisiones, sabotaje, capturas y el rojo ajeno
-         docs(reservas-7a): el done se sella con su propio hash
+b4e8690 docs(reservas-7a): el done se sella con su propio hash
+b7902cb test(reservas-7a): frente R · el e2e del suelo deja de depender de la hora
 ```
 
-Los dos últimos son este documento. **El código de este bloque termina en `9ac158e`**, y
-es el hash contra el que se han medido la suite, el sabotaje y las capturas.
+**El código de este bloque termina en `b7902cb`**, y es el hash contra el que se han medido
+la suite, el sabotaje, el bucle visual y las diez horas del frente R.
 
 **Sin push ni deploy.** Eso lo hace Matías.
 
 ---
 
-## 11 · Un rojo que NO es de este bloque, y hay que decirlo
+## 11 · Frente R · el e2e del suelo deja de depender de la hora del CI
 
-`apps/api/test-e2e/agenda-suelo.e2e.ts` **caso 14** («un `occurredAt` del FUTURO se ignora y
-vale "ahora"») **falla si la suite se corre después de las ~13:29 hora de Madrid**, y es
-**preexistente**.
+`agenda-suelo.e2e.ts` venía de 6a y **se caía solo según la hora a la que corriera la
+suite**. Lo encontré al cerrar este bloque, lo dejé apuntado como ajeno, y Matías pidió
+arreglarlo aquí con una razón que se sostiene: *el CI es la puerta del protocolo, y una
+puerta que se cae sola cada tarde acaba ignorada* — como los 10 tests saltados de A4 que
+descubrimos en B-5.
 
-**La causa.** El caso reserva en `desdeSuelo(600)` —diez horas por delante del suelo— y el
-turno sembrado va de `00:00` a `23:59`. Pasadas las 13:29, `suelo + 600 min` cae a las 23:30
-o después, y el servicio de 30 minutos termina a las 00:00: fuera del turno. El motor
-responde `NO_SLOT` (409) donde el test espera 201.
+### La causa, que era peor de lo que dije
 
-**Comprobado, no supuesto.** Monté un worktree efímero en `4078655` (master, sin una línea de
-este bloque), con su propia base e2e, y **falla exactamente igual**: mismo caso, misma línea,
-mismo 409. Worktree y base borrados después.
+Mi primer diagnóstico («falla a partir de las 13:29») **era incorrecto** y lo corrijo. Una
+visita **no puede cruzar la medianoche**: la plantilla es por día y `templateCovers` mira un
+solo `TemplateSlot`. Los casos que reservaban a `suelo + N minutos` contra un turno que
+acababa a las 23:59 se caían **cuando `suelo + N` caía en la última media hora del día** —
+una ventana de 30 minutos **por cada offset**, no un corte a partir de una hora:
 
-**No lo he arreglado** porque el prompt cierra explícitamente sobre 6a («el suelo de 6a más
-allá de pasarle la retícula» está fuera) y porque tocar sus tests emborrona la prueba de que
-siguen verdes sin tocarlos. El arreglo es de una línea en el test —bajar el offset, o sembrar
-el turno hasta `24:00`— y es de quien lleve 6a.
+| Caso | Offset | Rojo con el suelo en |
+|---|---|---|
+| 14 · `occurredAt` del futuro | `+600` | **13:30–13:45** ← el que nos mordió |
+| 8 · mover hacia adelante | `+420` | 16:30–16:45 |
+| 3 · dos altas simultáneas | `+240` | 19:30–19:45 |
+| 1 y 2 · el EXCLUDE | `+180` | 20:30–20:45 |
+| 11 · la franja era buena al escribirla | `−30` | 00:00–00:15 (el otro borde del día) |
+| 7 · `availability()` no ofrece el pasado | — | 00:00–01:59: pedía el día con `toISOString()`, que en Madrid **todavía devuelve AYER** |
 
-Los otros cinco ficheros de e2e y los 21 casos nuevos de éste pasan: `71 verdes | 1 rojo`.
+Entre todas, **unas dos horas de las veinticuatro**: una de cada doce pasadas del CI en rojo,
+por seis motivos distintos y ninguno real.
 
----
+### Qué hice, y por qué esto y no lo otro
+
+**La regla nueva, escrita en la cabecera del fichero:** lo que prueba **el suelo** va contra
+el suelo real y **sólo hacia atrás o dentro de la franja en curso** —que es donde el suelo
+tiene algo que decir y donde siempre hay sitio—; lo que sólo necesita **un hueco futuro
+cualquiera** va a `manana("HH:MM")`, una fecha controlada.
+
+Elegí **mover los casos a una fecha controlada** y no *derivar el final del turno del suelo*
+(la otra opción del encargo) por una razón: derivar el turno habría hecho que el turno del
+test dependiera del reloj **también**, y con eso el fallo no desaparece, se esconde. Un turno
+que se estira para que el caso quepa deja de decir nada sobre lo que pasa cuando no cabe.
+Separar los dos grupos —«esto prueba el suelo» / «esto sólo necesita un hueco»— deja cada
+caso probando exactamente lo suyo.
+
+Tres cosas más, del mismo hilo:
+
+1. **El turno sembrado acaba a las `24:00`, no a las `23:59`.** Con 23:59 una visita de 30
+   minutos que empieza a las 23:30 se salía del turno **por un minuto**. Eso era el caso 11 a
+   las 00:00 en punto.
+2. **Un servicio corto de 15 minutos para el caso 6, y sólo para él.** El caso 6 reserva la
+   **franja en curso**: su hora es la del reloj y no se puede mover sin dejar de probar lo que
+   prueba. Con 30 minutos, una franja en curso de las 23:45 no cabe en el día y el caso se
+   caería 15 minutos al día. Con 15 cabe siempre: 23:45 + 15 = 24:00 justo.
+3. **El caso 7 pasa a pedir de HOY a MAÑANA.** A las 23:45 un servicio de 30 minutos ya no
+   cabe hoy: cero huecos, y el caso se caía por una respuesta **correcta**. Con mañana dentro
+   siempre hay algo que ofrecer, y la aserción —ni un hueco anterior al suelo— se vuelve más
+   fuerte porque barre dos días. **De paso cierra la deuda de 6a §4.9**: `availability()`
+   multi-día por la API sólo se probaba con `from = to = hoy`.
+
+### Comprobado en diez horas del día, no en dos
+
+Con un shim de reloj que desplaza `Date` un número fijo de minutos (vive en el scratchpad,
+**no entra en el repo**) se corre el fichero como si fuera otra hora. Primero contra la
+**versión vieja**, para saber que el shim de verdad simula:
+
+| Hora simulada | Versión de master `4078655` | Este frente |
+|---|---|---|
+| 06:00 | — | **16/16** |
+| 09:30 | — | **16/16** |
+| 11:45 | — | **16/16** |
+| **13:30** | **1 rojo** (caso 14) | **16/16** |
+| **16:30** | **2 rojos** (casos 3 y 8) | **16/16** |
+| **19:30** | **1 rojo** (caso 3) | **16/16** |
+| 20:30 | 16/16 | **16/16** |
+| 23:45 | — | **16/16** |
+| **00:05** | **2 rojos** (casos 7 y 11) | **16/16** |
+| 02:15 | — | **16/16** |
+
+Y con el reloj real, la suite e2e **entera**: **6 ficheros, 72/72**.
+
+### Lo que el frente R destapó y NO he arreglado
+
+En la pasada de la **versión vieja** a las 16:30, el caso 3 (dos altas simultáneas sobre el
+mismo hueco) devolvió **500 en vez de 409**. No es el reloj: es la carrera. Dos transacciones
+concurrentes contra el mismo `EXCLUDE` pueden levantar un error de Postgres que
+`isExclusionViolation` no reconoce (un deadlock `40P01` o un `40001`), y entonces sale por el
+manejador genérico. **No se reprodujo** en ninguna de las diez pasadas del fichero arreglado,
+así que es infrecuente — pero está.
+
+No lo arreglo aquí: el anti-solape es frontera declarada de este bloque («NO se toca el
+anti-solape»), y el arreglo es de `store.ts::isExclusionViolation`, que es de B4. **Queda
+dicho**: si la agenda de un centro con dos recepcionistas empieza a devolver 500 en vez de
+«ese hueco ya no está», es esto.
+
+### El repaso del resto, que pediste aunque no lo tocara
+
+- **`apps/api/test/agenda-*.test.ts` (los seis) y los tres del TPV**: todos con **reloj
+  congelado** (`clock:` inyectado o `vi.setSystemTime`). Ni uno depende de la hora.
+- **`cita-y-turno.e2e.ts` y `cita-a-caja.e2e.ts`**: crean las citas con fechas absolutas
+  (`2026-09-11`, `2026-09-10`) y **por `store.insertHold`, saltándose el motor**. El suelo no
+  las mira, así que la hora del CI les da igual. Lo que sí tienen —y no lo toco— es que
+  **nunca ejercen el suelo**: sus fechas ya están en el pasado y ninguna pasa por
+  `hold()`.
+- **`agenda-horario.e2e.ts`** (el mío): las fechas salen de `hoy + 30 días` y las horas del
+  horario del centro, así que no dependen del reloj. Las dos fechas absolutas que lleva
+  (`2026-10-25` y `2027-03-28`) son **a propósito**: son los domingos del cambio de hora, y
+  se usan para dar de alta bloqueos, que no pasan por el suelo. Seguirán valiendo cuando
+  queden atrás.
+- **`sello-de-la-venta.e2e.ts` y `ciclo-de-caja.e2e.ts`**: usan el reloj real pero no son de
+  agenda y no tienen esta clase de borde.
 
 ## 12 · Qué falta para encender la agenda a Sole, y en qué orden lo haría
 
