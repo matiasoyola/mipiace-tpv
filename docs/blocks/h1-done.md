@@ -62,6 +62,34 @@ flujo legacy de B-SuperAdmin, anterior a este bloque.
 **e2e: 6 ficheros, 64 verdes** contra `mipiacetpv_h1_e2e` (51 de antes + 13 de H1). Base borrada al
 terminar.
 
+### La rama ya lleva B-reservas-7a dentro (12-09-2026)
+
+`master` (`3e218b4`, el merge de **B-reservas-7a** · horario del centro, días especiales y retícula)
+se ha fusionado en `holded-opcional-1-empresa-sin-caja`. Dos conflictos, los dos aditivos por ambos
+lados y resueltos quedándose **todo** de las dos ramas:
+
+- **`packages/db/prisma/schema.prisma`** — conviven el `cajaEnabled` de H1 y el `agendaSlotMinutes`
+  de 7a en `Tenant`, más las relaciones `centerHours` / `centerDays` y los modelos `CenterHours` /
+  `CenterDay`. Las dos migraciones son independientes y quedan en orden
+  (`20260911…_b_reservas_7a_horario_centro` → `20260912…_h1_la_caja_es_un_modulo`).
+- **`apps/admin/src/App.tsx`** — los dos imports (`AgendaHorarioPage` y `CajaGate`) y todas las rutas
+  de ambos lados. La ruta `/admin/agenda-hours` va **sin `<CajaGate>`**: es agenda, no caja, y la
+  regla §2.11 dice que lo que no cuelga de la caja no se envuelve (misma decisión que
+  `/admin/agenda-catalog`). Las que H1 envolvió siguen envueltas.
+
+El sidebar de `AdminShell.tsx` se auto-fusionó bien: la entrada "Agenda · Horario" lleva
+`capability: "agenda"`, no `"caja"`, así que un tenant con agenda y sin caja la sigue viendo.
+
+Recuento después del merge, sin arreglar nada (nada se puso rojo):
+
+| | Antes (H1 solo) | Después (H1 + 7a) |
+| --- | --- | --- |
+| Suite (`pnpm test` raíz) | 190 ficheros · 1747 verdes · **3 saltados** | 196 ficheros · 1865 verdes · **3 saltados** |
+| e2e (`mipiacetpv_h1_e2e`) | 6 ficheros · 64 verdes | 7 ficheros · 85 verdes |
+
+Los 3 saltados son los mismos de siempre (`super-admin.test.ts:566`): ni el merge ni 7a añaden
+saltos nuevos. Los +118 verdes de la suite y los +21 de e2e son los de 7a.
+
 ---
 
 ## 2 · Decisiones tomadas sin preguntar, una a una

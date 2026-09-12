@@ -456,6 +456,13 @@ model Tenant {
   // los tenants de hoy exactamente como estaban. Un `false` explicito es
   // la unica forma de apagar la caja.
   cajaEnabled                    Boolean           @default(true) @map("caja_enabled")
+  // B-reservas-7a · la RETÍCULA del centro: cada cuántos minutos empieza una
+  // cita. 15 (el valor histórico de B4, `agenda/time.ts::SLOT_MINUTES`) o 30.
+  // Peluquería Sole trabaja en franjas de 30 y hasta ahora le ofrecíamos
+  // inicios a y cuarto (6a §4.6). El CHECK de valores permitidos vive en la
+  // BASE DE DATOS, no sólo en el schema de la ruta. Default 15: un tenant
+  // que no la toque se comporta exactamente como antes de este bloque.
+  agendaSlotMinutes              Int               @default(15) @map("agenda_slot_minutes")
   // v1.3-Thalia Lote 6 · pie de ticket personalizado. NULL = no se
   // pinta nada extra (comportamiento previo). Si está set, el renderer
   // del ticket lo pinta arriba del QR/CIF tras el "Gracias por tu
@@ -496,6 +503,8 @@ model Tenant {
   appointments       Appointment[]
   bookingBlocks      BookingBlock[]
   bookingPolicies    BookingPolicy[]
+  centerHours        CenterHours[]
+  centerDays         CenterDay[]
 
   // v1.3-SuperAdmin-Hub Lote 3 · el backfill y el hub buscan/listan
   // tenants por `holded_account_id`. Sin índice eran scans completos
@@ -2173,6 +2182,83 @@ model BookingPolicy {
 
   @@unique([tenantId, key])
   @@map("booking_policies")
+}
+
+// ─── B-reservas-7a · El horario del centro ──────────────────────────────
+//
+// El TECHO de la agenda. Hasta este bloque la disponibilidad salía SÓLO de
+// los turnos del personal (`staff_shifts` → `store.getTemplateSlots`): si
+// nadie definía turno el centro no abría, y si alguien lo definía de par en
+// par el centro abría de par en par. La ventana de un profesional en una
+// fecha pasa a ser `turno ∩ horario_del_centro(fecha)`, y de ahí se siguen
+// descontando los bloqueos y las citas como hasta ahora.
+//
+// Migración ADITIVA con backfill VACÍO: un tenant sin ninguna fila en
+// `center_hours` NO tiene techo y se comporta exactamente como antes de
+// este bloque. Ésa es la compatibilidad, y está testeada.
+//
+// NO se toca `StaffShift` (D-3 del cruce): es contrato vivo de B3.
+
+// La semana tipo del centro. VARIAS filas por día = horario partido
+// (10:00–14:00 y 17:00–20:30). `openTime`/`closeTime` son horas de PARED
+// "HH:MM", igual que en `StaffShift`: la recurrencia la da `weekday` y la
+// hora estos campos, sin conversión. `validFrom`/`validUntil` acotan la
+// vigencia (una semana tipo cambia por temporada).
+//
+// `weekday` es ISO-8601: 1 = lunes … 7 = domingo. NO el `getUTCDay()` de
+// JS (0 = domingo) porque la pantalla se lee de lunes a domingo y porque
+// "cierra el domingo" tiene que poder escribirse sin pensar. El CHECK del
+// rango vive en la base de datos.
+model CenterHours {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  weekday    Int
+  openTime   String    @map("open_time")
+  closeTime  String    @map("close_time")
+  validFrom  DateTime  @map("valid_from") @db.Date
+  validUntil DateTime? @map("valid_until") @db.Date
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, weekday])
+  @@map("center_hours")
+}
+
+// Los días especiales del centro. Una fila es O BIEN un cierre con nombre
+// (un festivo, "vacaciones de agosto") O BIEN un horario propio de ese día
+// con nombre ("boda Marta").
+//
+// Un día especial SUSTITUYE al horario semanal de ese día; no se suma. Un
+// solo rango por día basta: un festivo no tiene horario partido y un sábado
+// de boda tampoco.
+//
+// POR QUÉ ES UNA TABLA Y NO UN `BookingBlock scope=CENTER`: un bloqueo sólo
+// sabe CERRAR. El sábado de la boda hay que ABRIR a las 8:30, antes de la
+// hora normal, y eso un bloqueo no lo puede decir. Y el festivo necesita un
+// NOMBRE que la rejilla pueda leer en voz alta ("Cerrado · Virgen del
+// Prado"); el `reason` de un bloqueo no viaja hoy hasta la pantalla.
+//
+// El CHECK de coherencia (cerrado ⇒ sin horas; abierto ⇒ con las dos y
+// ordenadas) y el de nombre no vacío viven en la base de datos.
+model CenterDay {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  date      DateTime @db.Date
+  closed    Boolean  @default(true)
+  name      String
+  openTime  String?  @map("open_time")
+  closeTime String?  @map("close_time")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, date])
+  @@index([tenantId])
+  @@map("center_days")
 }
 
 // A3-distribución · código de un solo uso (bueno, de tres) para descargar la

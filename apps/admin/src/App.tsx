@@ -14,6 +14,7 @@ import { PrintersPage } from "./pages/PrintersPage.js";
 import { SecurityPage } from "./pages/SecurityPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 import { AgendaCatalogPage } from "./pages/AgendaCatalogPage.js";
+import { AgendaHorarioPage } from "./pages/AgendaHorarioPage.js";
 import { StaffPage } from "./pages/StaffPage.js";
 import { ContactImportPage } from "./pages/ContactImportPage.js";
 import { StoreDetailPage, StoresPage } from "./pages/StoresPage.js";
@@ -109,8 +110,8 @@ export function App() {
             porque la URL sigue existiendo. La puerta de verdad es la del
             servidor (`lib/caja-gate.ts`); ésta es para que el cliente lea
             una frase en vez de un error. "Mi cuenta", "Seguridad",
-            "Tiendas", "Personal" y "Agenda · Catálogo" NO se envuelven:
-            valen sin caja. */}
+            "Tiendas", "Personal", "Agenda · Catálogo" y "Agenda · Horario"
+            NO se envuelven: valen sin caja. */}
         <Route path="/admin/account" element={<AccountPage />} />
         <Route path="/admin/products" element={<CajaGate title="Productos"><SkuReviewPage /></CajaGate>} />
         <Route path="/admin/devices" element={<CajaGate title="Dispositivos"><DevicesPage /></CajaGate>} />
@@ -127,6 +128,9 @@ export function App() {
         <Route path="/admin/settings" element={<SettingsPage />} />
         <Route path="/admin/staff" element={<StaffPage />} />
         <Route path="/admin/agenda-catalog" element={<AgendaCatalogPage />} />
+        {/* B-reservas-7a · el horario del centro NO va envuelto: es agenda,
+            no caja. Misma regla que "Agenda · Catálogo". */}
+        <Route path="/admin/agenda-hours" element={<AgendaHorarioPage />} />
         <Route path="/admin/tag-aliases" element={<CajaGate title="Etiquetas"><TagAliasesPage /></CajaGate>} />
         <Route path="/admin/tag-sections" element={<CajaGate title="Comanderas"><TagSectionsPage /></CajaGate>} />
         <Route path="/admin/printers" element={<CajaGate title="Impresoras"><PrintersPage /></CajaGate>} />

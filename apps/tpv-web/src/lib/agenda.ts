@@ -90,10 +90,67 @@ export interface AgendaAppointment {
   outboxError?: string | null;
 }
 
+// ─── B-reservas-7a · lo que la rejilla necesita para pintar el día ────
+
+/** Un tramo abierto, en hora de PARED del centro ("HH:MM"). */
+export interface OpenRange {
+  startTime: string;
+  endTime: string;
+}
+
+/** Una ausencia pintada en la columna de quien falta. `id` es el del
+ *  `BookingBlock` que la produjo: hace falta para quitarla tocándola. */
+export interface AgendaAbsence {
+  id: string | null;
+  staffUserId: string | null; // null = el centro entero
+  startTime: string;
+  endTime: string; // "24:00" = hasta el final del día
+  reason: string | null;
+}
+
+export interface AgendaDayInfo {
+  date: string;
+  // `null` = este centro no tiene horario configurado ⇒ sin techo, que es
+  // el comportamiento de antes de B-7a.
+  open: OpenRange[] | null;
+  // El día cerrado, con el nombre del día especial si lo hay.
+  closed: { name: string | null } | null;
+  specialName: string | null;
+  // Por profesional: turno ∩ centro. Lo que NO esté aquí no es reservable
+  // y tocarlo no abre un alta.
+  staffOpen: Record<string, OpenRange[]>;
+  absences: AgendaAbsence[];
+}
+
 export interface AgendaDay {
   date: string; // YYYY-MM-DD
   staff: AgendaStaff[];
   appointments: AgendaAppointment[];
+  // B-reservas-7a · la RETÍCULA del centro. Viaja en la caché offline
+  // porque sin red la cajera sigue tocando la rejilla: si el front
+  // redondeara con otro paso que el servidor, el alta encolada se
+  // rechazaría al volver. Ausente en una caché vieja ⇒ 15, el valor de B4.
+  slotMinutes?: number;
+  // El horario del centro y las ausencias, fecha a fecha. También en la
+  // caché: sin red hay que poder decir "el centro está cerrado" igual.
+  days?: AgendaDayInfo[];
+}
+
+/** La retícula del día, con el valor de B4 como último recurso: caché
+ *  vieja, o un día que todavía no ha llegado del servidor. */
+export const DEFAULT_SLOT_MINUTES = 15;
+
+export function slotMinutesOf(day: AgendaDay | null): number {
+  return day?.slotMinutes ?? DEFAULT_SLOT_MINUTES;
+}
+
+/** La info del día pedido dentro de la respuesta (que puede traer un
+ *  rango). `undefined` = no vino, y entonces no hay techo que pintar. */
+export function dayInfoOf(
+  day: AgendaDay | null,
+  date: string,
+): AgendaDayInfo | undefined {
+  return day?.days?.find((d) => d.date === date);
 }
 
 export interface AvailabilitySlot {
@@ -171,11 +228,18 @@ export async function fetchAgendaDay(date: string): Promise<AgendaDay> {
     const res = await apiWithCashier<{
       staff: AgendaStaff[];
       appointments: AgendaAppointment[];
+      // B-reservas-7a. Opcionales en el tipo a propósito: un servidor
+      // anterior a este bloque no los manda y la agenda tiene que seguir
+      // funcionando contra él (el APK se despliega aparte del servidor).
+      slotMinutes?: number;
+      days?: AgendaDayInfo[];
     }>(`/agenda?date=${date}`);
     const day: AgendaDay = {
       date,
       staff: res.staff,
       appointments: res.appointments,
+      slotMinutes: res.slotMinutes ?? DEFAULT_SLOT_MINUTES,
+      days: res.days ?? [],
     };
     // La caché guarda lo que dijo el SERVIDOR. Lo local se mezcla al
     // devolver, nunca se persiste: si se cacheara, una cita rechazada
@@ -509,3 +573,73 @@ export const STATUS_COLOR: Record<AppointmentStatus, string> = {
   NO_SHOW: "#ef4444", // rojo
   CANCELLED: "#cbd5e1", // gris claro
 };
+
+// ─── B-reservas-7a · las ausencias, puestas desde la agenda ───────────
+//
+// Se ponen donde Sole las escribe hoy: en la columna, no en el admin. Por
+// debajo es un `BookingBlock scope=STAFF` por la API que YA EXISTE
+// (`POST /agenda/blocks`, que ya podía llamar el cajero). NO se crea
+// ninguna entidad nueva de ausencias — ésa sigue siendo deuda declarada.
+//
+// EL DÍA ENTERO SON 23 O 25 HORAS los dos domingos del cambio de hora. Se
+// manda "00:00"–"24:00" y el servidor compone con hora de pared: restar 24
+// horas daría una de más o de menos justo esos dos días del año.
+
+export const ALL_DAY_START = "00:00";
+export const ALL_DAY_END = "24:00";
+
+export interface CreateAbsenceInput {
+  staffUserId: string;
+  date: string; // YYYY-MM-DD de pared
+  startTime: string; // "HH:MM"
+  endTime: string; // "HH:MM", o "24:00" para el día entero
+  reason?: string | null;
+}
+
+export type AbsenceResult =
+  | { ok: true; id: string }
+  | { ok: false; message: string };
+
+/** Crea una ausencia. NO pasa por el outbox: un bloqueo encolado que el
+ *  servidor rechaza dejaría a la cajera creyendo que alguien no está
+ *  cuando la agenda sigue ofreciendo sus huecos. Sin red, se dice. */
+export async function createAbsence(
+  input: CreateAbsenceInput,
+): Promise<AbsenceResult> {
+  try {
+    const res = await apiWithCashier<{ id: string }>("/agenda/blocks", {
+      method: "POST",
+      body: {
+        scope: "STAFF",
+        staffUserId: input.staffUserId,
+        date: input.date,
+        startTime: input.startTime,
+        endTime: input.endTime,
+        reason: input.reason?.trim() ? input.reason.trim() : null,
+      },
+    });
+    return { ok: true, id: res.id };
+  } catch (err) {
+    if (err instanceof ApiError) return { ok: false, message: err.message };
+    return {
+      ok: false,
+      message: "Sin conexión: la ausencia no se ha podido guardar.",
+    };
+  }
+}
+
+/** Quita una ausencia desde la propia ausencia pintada. */
+export async function deleteAbsence(id: string): Promise<AbsenceResult> {
+  try {
+    await apiWithCashier<{ ok: true }>(`/agenda/blocks/${id}`, {
+      method: "DELETE",
+    });
+    return { ok: true, id };
+  } catch (err) {
+    if (err instanceof ApiError) return { ok: false, message: err.message };
+    return {
+      ok: false,
+      message: "Sin conexión: la ausencia no se ha podido quitar.",
+    };
+  }
+}

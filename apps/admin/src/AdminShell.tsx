@@ -108,6 +108,15 @@ const NAV_ITEMS: NavItem[] = [
     icon: CalendarClock,
     capability: "agenda",
   },
+  // B-reservas-7a: el horario del centro, los días especiales y la
+  // retícula. Misma puerta que el resto del módulo (`agendaEnabled`); la
+  // página además se auto-gatea.
+  {
+    to: "/admin/agenda-hours",
+    label: "Agenda · Horario",
+    icon: CalendarClock,
+    capability: "agenda",
+  },
   // v1.3-Operativa-Extra · Lote 1: editor de aliases de tags. Visible
   // a OWNER y MANAGER porque la operativa (renombrar categorías) es de
   // negocio, no técnica.

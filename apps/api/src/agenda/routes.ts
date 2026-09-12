@@ -5,6 +5,8 @@
 // owner/manager.
 //
 //   GET   /agenda?date= | ?from=&to=          — citas por profesional (columnas)
+//                                              + B-7a: retícula, horario del
+//                                                centro, tramos y ausencias
 //   POST  /agenda/availability                — buscar hueco → slots[]
 //   POST  /agenda/appointments                — alta (presencial = confirmada)
 //   PATCH /agenda/appointments/:id            — transición de estado / mover
@@ -37,14 +39,25 @@ import {
   type BookingEngine,
   type HoldFailureReason,
 } from "./engine.js";
+import { buildAgendaDays } from "./day-view.js";
 import { resolveBookingNow } from "./floor.js";
 import { parseOccurredAt } from "../shift/impute.js";
 import { createAgendaStore, type AgendaStore } from "./store.js";
-import { wallTimeToUtc } from "./time.js";
+import { CENTER_TZ, SLOT_MINUTES, wallTimeToUtc } from "./time.js";
 import type { AppointmentStatus } from "./types.js";
 
 // Minutos por defecto del hold PENDING (reserva no presencial).
 const HOLD_TTL_MINUTES = 10;
+
+// B-reservas-7a · la retícula del centro viaja en la request. El gate ya
+// hacía una lectura de tenant por petición: se le añade la columna y no hay
+// ninguna lectura nueva. Es lo que el prompt llama "una sola lectura por
+// petición y ninguna constante suelta".
+declare module "fastify" {
+  interface FastifyRequest {
+    agendaSlotMinutes?: number;
+  }
+}
 
 // Gate por capability flag (ADR-R6). Corre tras la autenticación.
 async function ensureAgendaEnabled(
@@ -54,14 +67,16 @@ async function ensureAgendaEnabled(
   const auth = request.auth!;
   const tenant = await getPrisma().tenant.findUnique({
     where: { id: auth.tenantId },
-    select: { agendaEnabled: true },
+    select: { agendaEnabled: true, agendaSlotMinutes: true },
   });
   if (!tenant?.agendaEnabled) {
     reply.code(403).send({
       error: "AGENDA_DISABLED",
       message: "El módulo de agenda no está activado para este negocio.",
     });
+    return;
   }
+  request.agendaSlotMinutes = tenant.agendaSlotMinutes;
 }
 
 // B-reservas-6a · un solo sitio traduce el motor a HTTP. `NO_REQUIREMENTS`
@@ -92,8 +107,17 @@ export async function registerAgendaRoutes(
 ): Promise<void> {
   const store: AgendaStore =
     opts.store ?? createAgendaStore(opts.prisma ?? getPrisma());
-  const engine: BookingEngine = createCitaEngine(store);
   const prismaFor = (): PrismaClient => opts.prisma ?? getPrisma();
+
+  // B-reservas-7a · el motor se construye POR PETICIÓN, con la retícula del
+  // centro que el gate acaba de leer. Antes era uno solo, creado al
+  // arrancar y sin tenant — imposible darle una retícula por centro.
+  // El coste es una closure: el motor no tiene estado, todo lo que sabe
+  // viene del store y de estas opciones.
+  const engineFor = (request: FastifyRequest): BookingEngine =>
+    createCitaEngine(store, {
+      slotMinutes: request.agendaSlotMinutes ?? SLOT_MINUTES,
+    });
 
   // ── Día / semana por profesional ────────────────────────────────────
   app.get(
@@ -129,7 +153,29 @@ export async function registerAgendaRoutes(
         store.getStaffProfiles(auth.tenantId),
         store.listAppointments(auth.tenantId, from, to),
       ]);
-      return { from: fromDate, to: toDate, staff, appointments };
+      // B-reservas-7a · la rejilla deja de ser ciega. Los cuatro campos de
+      // antes siguen ahí y con el mismo nombre: quien no lea los nuevos no
+      // se entera de que existen. Todo esto viaja a la caché offline del
+      // día (`lib/agenda.ts`), porque sin red la cajera sigue teniendo que
+      // saber a qué hora abre y quién falta.
+      const days = await buildAgendaDays(
+        store,
+        auth.tenantId,
+        fromDate,
+        toDate,
+        // Sólo las columnas que la rejilla pinta.
+        staff.filter((s) => s.active).map((s) => s.userId),
+        CENTER_TZ,
+        (d) => wallTimeToUtc(d, "00:00"),
+      );
+      return {
+        from: fromDate,
+        to: toDate,
+        staff,
+        appointments,
+        slotMinutes: request.agendaSlotMinutes ?? SLOT_MINUTES,
+        days,
+      };
     },
   );
 
@@ -173,7 +219,7 @@ export async function registerAgendaRoutes(
         from: string;
         to: string;
       };
-      const slots = await engine.availability({
+      const slots = await engineFor(request).availability({
         tenantId: auth.tenantId,
         items: body.items,
         staffUserId: body.staffUserId ?? null,
@@ -267,7 +313,7 @@ export async function registerAgendaRoutes(
       }
       // Presencial = confirmada directa; el resto entra como hold PENDING.
       const confirmed = source === "PRESENCIAL";
-      const result = await engine.hold({
+      const result = await engineFor(request).hold({
         tenantId: auth.tenantId,
         externalId: body.externalId ?? null,
         clientId: body.clientId ?? null,
@@ -336,7 +382,11 @@ export async function registerAgendaRoutes(
 
       // Reprogramar (mover el slot).
       if (body.start) {
-        const moved = await engine.reschedule(auth.tenantId, id, body.start);
+        const moved = await engineFor(request).reschedule(
+          auth.tenantId,
+          id,
+          body.start,
+        );
         if (moved.ok) return { appointment: moved.appointment };
         if (moved.reason === "NOT_FOUND") {
           return reply.code(404).send({
@@ -361,19 +411,19 @@ export async function registerAgendaRoutes(
       let updated;
       switch (body.status) {
         case "CONFIRMED":
-          updated = await engine.confirm(auth.tenantId, id);
+          updated = await engineFor(request).confirm(auth.tenantId, id);
           break;
         case "IN_SERVICE":
-          updated = await engine.setInService(auth.tenantId, id);
+          updated = await engineFor(request).setInService(auth.tenantId, id);
           break;
         case "COMPLETED":
-          updated = await engine.complete(auth.tenantId, id);
+          updated = await engineFor(request).complete(auth.tenantId, id);
           break;
         case "NO_SHOW":
-          updated = await engine.noShow(auth.tenantId, id);
+          updated = await engineFor(request).noShow(auth.tenantId, id);
           break;
         case "CANCELLED":
-          updated = await engine.cancel(auth.tenantId, id);
+          updated = await engineFor(request).cancel(auth.tenantId, id);
           break;
       }
       if (!updated) {
@@ -464,9 +514,13 @@ export async function registerAgendaRoutes(
       );
       return {
         blocks: blocks.map((b) => ({
+          // B-reservas-7a · `id` y `reason`: una ausencia se quita desde la
+          // agenda tocándola (hace falta el id) y se pinta con su motivo.
+          id: b.id ?? null,
           scope: b.scope,
           staffUserId: b.staffUserId,
           resourceId: b.resourceId,
+          reason: b.reason ?? null,
           start: b.startsAt.toISOString(),
           end: b.endsAt.toISOString(),
         })),
@@ -489,6 +543,11 @@ export async function registerAgendaRoutes(
             resourceId: { type: ["string", "null"], format: "uuid" },
             date: { type: "string", format: "date" },
             startTime: { type: "string" },
+            // B-reservas-7a · "24:00" es legal y es lo que manda la agenda
+            // para una ausencia de DÍA ENTERO: `wallTimeToUtc` lo resuelve
+            // a la medianoche de pared del día siguiente, así que el día
+            // del cambio de hora cubre sus 23 o sus 25 horas. Restar 24 h
+            // daría una hora de más o de menos justo esos dos días.
             endTime: { type: "string" },
             reason: { type: ["string", "null"], maxLength: 200 },
           },

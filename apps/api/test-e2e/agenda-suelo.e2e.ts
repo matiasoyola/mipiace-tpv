@@ -20,8 +20,44 @@
 // normal en un mostrador (cita de las 10:00 cobrada a las 11:00). Si el
 // suelo se comiera el cobro, habríamos cambiado un fallo por otro peor.
 //
-// El reloj aquí es el del sistema: todas las horas se calculan desde el
-// suelo real (`currentGridStart(new Date())`), nunca desde una constante.
+// EL RELOJ Y LA REGLA DE ESTE FICHERO (B-reservas-7a, frente R).
+//
+// El reloj es el del sistema —el suelo tiene que ser el de verdad o no
+// prueba nada—, pero eso NO puede significar que la suite dependa de la
+// hora a la que corra el CI. Antes sí dependía.
+//
+// LA CAUSA. Varios casos reservaban a `suelo + N minutos` contra un turno
+// que acababa a las 23:59. Una visita NO puede cruzar la medianoche (la
+// plantilla es por día: `templateCovers` mira un solo `TemplateSlot`), así
+// que cuando `suelo + N` caía en la última media hora de un día, el motor
+// respondía NO_SLOT donde el caso esperaba 201. Cada offset tenía su
+// ventana de 30 minutos al día, y entre todas sumaban ~2 h de las 24:
+//
+//   · caso 14 (`+600`) rojo con el suelo en 13:30–13:45  ← el que nos mordió
+//   · caso  8 (`+420`) rojo en 16:30–16:45
+//   · caso  3 (`+240`) rojo en 19:30–19:45
+//   · casos 1 y 2 (`+180`) rojos en 20:30–20:45
+//   · caso 11 (`−30`) rojo en 00:00–00:15 (por el otro borde del día)
+//   · caso  7 pedía el día con `toISOString()`, que a las 00:00–01:59 de
+//     Madrid todavía devuelve AYER: cero huecos y rojo
+//
+// Verificado, no supuesto: la versión anterior a este frente se pone roja
+// en 13:30, 16:30, 19:30 y 00:05, y esta pasa en diez horas distintas
+// (06:00, 09:30, 11:45, 13:30, 16:30, 19:30, 20:30, 23:45, 00:05, 02:15).
+//
+// La regla, a partir de ahora:
+//
+//   · lo que prueba EL SUELO va contra el suelo real (`desdeSuelo`), y sólo
+//     hacia ATRÁS o dentro de la franja en curso — que es donde el suelo
+//     tiene algo que decir y donde siempre hay sitio;
+//   · lo que sólo necesita UN HUECO FUTURO CUALQUIERA va a `manana(HH:MM)`,
+//     una fecha controlada: siempre por delante del suelo, se corra la
+//     suite a la hora que se corra, y siempre con el día entero por
+//     delante.
+//
+// Y el turno sembrado acaba a las **24:00**, no a las 23:59: con 23:59 una
+// visita de 30 minutos que empiece a las 23:30 no cabía por un minuto, y
+// eso rompía el caso 11 a las 00:00 en punto.
 
 import { randomBytes, randomUUID } from "node:crypto";
 
@@ -58,7 +94,9 @@ const { createAgendaStore, ExclusionError } = await import(
   "../src/agenda/store.js"
 );
 const { currentGridStart } = await import("../src/agenda/floor.js");
-const { utcToWallTime } = await import("../src/agenda/time.js");
+const { utcToWallDate, utcToWallTime, wallTimeToUtc } = await import(
+  "../src/agenda/time.js"
+);
 
 describe.skipIf(!e2eEnabled)("e2e · el suelo y el EXCLUDE contra Postgres real", () => {
   if (!e2eEnabled) console.warn(`\n${SKIP_MESSAGE}\n`);
@@ -73,6 +111,7 @@ describe.skipIf(!e2eEnabled)("e2e · el suelo y el EXCLUDE contra Postgres real"
   let soleId = "";
   let anaId = "";
   let corteId = "";
+  let rapidoId = "";
   let token = "";
 
   const auth = () => ({ authorization: `Bearer ${token}` });
@@ -80,9 +119,29 @@ describe.skipIf(!e2eEnabled)("e2e · el suelo y el EXCLUDE contra Postgres real"
   /** EL SUELO, calculado una vez por caso con el reloj real: es el mismo
    *  punto que usa el motor que corre dentro de la API. */
   const suelo = (): Date => currentGridStart(new Date());
-  /** Un instante relativo al suelo, en minutos. */
+  /** Un instante relativo al suelo, en minutos. Para lo que prueba el
+   *  SUELO: hacia atrás, o dentro de la franja en curso. */
   const desdeSuelo = (min: number): Date =>
     new Date(suelo().getTime() + min * 60_000);
+
+  /**
+   * Un hueco de MAÑANA a una hora de pared fija.
+   *
+   * Para los casos que sólo necesitan "un hueco futuro cualquiera" y no
+   * tienen nada que ver con el suelo: el EXCLUDE, la carrera de dos altas,
+   * la retícula, mover hacia adelante. Mañana a las 10:00 está SIEMPRE por
+   * delante del suelo y SIEMPRE con el día entero por delante, se corra la
+   * suite a las 9 de la mañana o a las 11 de la noche.
+   *
+   * La fecha se toma de la pared del CENTRO, no de `toISOString()`: a las
+   * 00:30 de Madrid el día UTC todavía es el de ayer.
+   */
+  function manana(hhmm: string): Date {
+    const hoy = utcToWallDate(new Date());
+    const d = new Date(`${hoy}T12:00:00.000Z`);
+    d.setUTCDate(d.getUTCDate() + 1);
+    return wallTimeToUtc(d.toISOString().slice(0, 10), hhmm);
+  }
 
   // ── aserciones contra la BD, por SQL ────────────────────────────────
 
@@ -163,9 +222,15 @@ describe.skipIf(!e2eEnabled)("e2e · el suelo y el EXCLUDE contra Postgres real"
     start: Date,
     staffUserId?: string,
     occurredAt?: Date,
+    serviceId?: string,
   ) {
     return {
-      items: [{ serviceId: corteId, ...(staffUserId ? { staffUserId } : {}) }],
+      items: [
+        {
+          serviceId: serviceId ?? corteId,
+          ...(staffUserId ? { staffUserId } : {}),
+        },
+      ],
       start: start.toISOString(),
       ...(occurredAt ? { occurredAt: occurredAt.toISOString() } : {}),
       source: "PRESENCIAL" as const,
@@ -228,9 +293,35 @@ describe.skipIf(!e2eEnabled)("e2e · el suelo y el EXCLUDE contra Postgres real"
       data: { productId: corteId, tenantId, durationMin: 30 },
     });
 
-    // Las dos profesionales. Turno DIARIO de 00:00 a 23:59 desde hace tres
-    // días: el caso se apoya en el reloj real y no puede depender de a qué
-    // hora se corra la suite.
+    // Un servicio CORTO, de 15 minutos, para el caso 6 y sólo para él.
+    //
+    // El caso 6 reserva la FRANJA EN CURSO, así que su hora es la del
+    // reloj y no se puede mover a una fecha controlada sin dejar de probar
+    // lo que prueba. Con un servicio de 30 minutos y el centro cerrando a
+    // medianoche, una franja en curso de las 23:45 no cabe — y el caso se
+    // caería 15 minutos al día. Con 15 minutos cabe SIEMPRE: 23:45 + 15 =
+    // 24:00 justo, que es donde acaba el turno.
+    const rapido = await prisma.product.create({
+      data: {
+        tenantId,
+        holdedProductId: `h-rapido-${randomUUID()}`,
+        name: "Flequillo",
+        sku: "SVC-FLEQUILLO",
+        basePrice: "8.2645",
+        taxRate: "21",
+        kind: "SERVICE",
+      },
+      select: { id: true },
+    });
+    rapidoId = rapido.id;
+    await prisma.serviceScheduling.create({
+      data: { productId: rapidoId, tenantId, durationMin: 15 },
+    });
+
+    // Las dos profesionales. Turno DIARIO de 00:00 a **24:00** desde hace
+    // tres días. El 24:00 no es cosmético: con 23:59 una visita de 30
+    // minutos que empiece a las 23:30 se salía del turno por UN MINUTO, y
+    // el caso 11 (`suelo − 30`) se caía a las 00:00 en punto.
     const ayerAyer = new Date(Date.now() - 3 * 24 * 3600_000);
     for (const [alias, ref] of [
       ["Sole", "sole"],
@@ -253,13 +344,16 @@ describe.skipIf(!e2eEnabled)("e2e · el suelo y el EXCLUDE contra Postgres real"
       await prisma.staffSkill.create({
         data: { userId: u.id, tenantId, serviceId: corteId },
       });
+      await prisma.staffSkill.create({
+        data: { userId: u.id, tenantId, serviceId: rapidoId },
+      });
       await prisma.staffShift.create({
         data: {
           userId: u.id,
           tenantId,
           rrule: "FREQ=DAILY",
           startTime: "00:00",
-          endTime: "23:59",
+          endTime: "24:00",
           validFrom: ayerAyer,
         },
       });
@@ -285,7 +379,10 @@ describe.skipIf(!e2eEnabled)("e2e · el suelo y el EXCLUDE contra Postgres real"
   // ── 1. El EXCLUDE, ejecutándose ─────────────────────────────────────
 
   it("1 · POSTGRES rechaza la segunda cita de la misma profesional en el mismo hueco", async () => {
-    const hueco = desdeSuelo(180);
+    // El EXCLUDE no tiene nada que ver con el suelo: le basta un hueco
+    // futuro cualquiera. A fecha controlada (antes: `suelo + 180`, que se
+    // salía del día a partir de las 20:30).
+    const hueco = manana("10:00");
     const primera = await sembrarCita(hueco, soleId);
     expect(primera).toBeTruthy();
 
@@ -310,14 +407,14 @@ describe.skipIf(!e2eEnabled)("e2e · el suelo y el EXCLUDE contra Postgres real"
   });
 
   it("2 · el mismo hueco con OTRA profesional sí entra (el EXCLUDE es por persona)", async () => {
-    const hueco = desdeSuelo(180);
+    const hueco = manana("10:00"); // el MISMO que el caso 1, otra persona
     const id = await sembrarCita(hueco, anaId);
     expect(id).toBeTruthy();
     expect(await assignmentsDe(anaId)).toBeGreaterThan(0);
   });
 
   it("3 · dos altas SIMULTÁNEAS por la API dejan una sola cita en la BD", async () => {
-    const hueco = desdeSuelo(240);
+    const hueco = manana("11:00");
     const antes = (await citasDelTenant()).length;
     const [a, b] = await Promise.all([
       app.inject({
@@ -379,7 +476,9 @@ describe.skipIf(!e2eEnabled)("e2e · el suelo y el EXCLUDE contra Postgres real"
       method: "POST",
       url: "/agenda/appointments",
       headers: auth(),
-      payload: altaPayload(desdeSuelo(307)),
+      // Una hora futura que NO cae en la retícula. A fecha controlada: lo
+      // que se prueba es la retícula, no el suelo.
+      payload: altaPayload(manana("12:07")),
     });
     expect(res.statusCode).toBe(409);
     const body = res.json() as { error: string; message: string };
@@ -392,7 +491,10 @@ describe.skipIf(!e2eEnabled)("e2e · el suelo y el EXCLUDE contra Postgres real"
       method: "POST",
       url: "/agenda/appointments",
       headers: auth(),
-      payload: altaPayload(suelo(), anaId),
+      // ÉSTE sí va contra el suelo real: es lo que prueba. Con el servicio
+      // CORTO (15 min), para que la franja en curso quepa también a las
+      // 23:45, que es la última del día.
+      payload: altaPayload(suelo(), anaId, undefined, rapidoId),
     });
     expect(res.statusCode).toBe(201);
     const id = (res.json() as { appointment: { id: string } }).appointment.id;
@@ -403,12 +505,27 @@ describe.skipIf(!e2eEnabled)("e2e · el suelo y el EXCLUDE contra Postgres real"
   });
 
   it("7 · availability() no ofrece nada anterior al suelo", async () => {
-    const hoy = new Date().toISOString().slice(0, 10);
+    // Dos arreglos del frente R de B-7a, los dos de la misma familia:
+    //
+    //   · la fecha es la de PARED del centro, no `toISOString()`: a las
+    //     00:30 de Madrid el día UTC todavía es el de ayer, y el caso
+    //     pedía la disponibilidad de un día entero ya pasado — cero
+    //     huecos y rojo;
+    //   · y el rango va de HOY a MAÑANA, no de hoy a hoy. A las 23:45 un
+    //     servicio de 30 minutos ya no cabe en el día: cero huecos, y el
+    //     caso se caía por una respuesta CORRECTA. Con mañana dentro
+    //     siempre hay algo que ofrecer, y la aserción —ni un hueco
+    //     anterior al suelo— se vuelve más fuerte, porque barre dos días.
+    //
+    // De paso cierra la deuda de 6a §4.9: `availability()` multi-día por
+    // la API sólo se probaba con `from = to = hoy`.
+    const hoy = utcToWallDate(new Date());
+    const manana_ = utcToWallDate(new Date(Date.now() + 24 * 3600_000));
     const res = await app.inject({
       method: "POST",
       url: "/agenda/availability",
       headers: auth(),
-      payload: { items: [{ serviceId: corteId }], from: hoy, to: hoy },
+      payload: { items: [{ serviceId: corteId }], from: hoy, to: manana_ },
     });
     expect(res.statusCode).toBe(200);
     const { slots } = res.json() as { slots: Array<{ start: string }> };
@@ -448,7 +565,9 @@ describe.skipIf(!e2eEnabled)("e2e · el suelo y el EXCLUDE contra Postgres real"
       method: "PATCH",
       url: `/agenda/appointments/${id}`,
       headers: auth(),
-      payload: { start: desdeSuelo(420).toISOString() },
+      // Hacia adelante, a fecha controlada: lo que se prueba es que MOVER
+      // adelante se deja, no a qué distancia.
+      payload: { start: manana("13:00").toISOString() },
     });
     expect(adelante.statusCode).toBe(200);
   });
@@ -519,7 +638,10 @@ describe.skipIf(!e2eEnabled)("e2e · el suelo y el EXCLUDE contra Postgres real"
       url: "/agenda/appointments",
       headers: auth(),
       payload: altaPayload(
-        desdeSuelo(600),
+        // El hueco sólo tiene que ser válido; lo que se prueba es que el
+        // `occurredAt` del futuro se ignore. A fecha controlada: con
+        // `suelo + 600` este caso se caía a partir de las 13:29.
+        manana("15:00"),
         soleId,
         new Date(Date.now() + 6 * 60 * 60_000),
       ),
