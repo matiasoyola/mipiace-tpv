@@ -839,6 +839,9 @@ type FiscalProfile = {
   country?: string;
   source?: string;
   name?: string; // legado: del almacén default lo guarda como "name".
+  // H1 · la clave que el backend escribe desde B-OnboardingV2
+  // (`superadmin/tenants.ts`) y la única que trae un alta manual.
+  legalName?: string;
 };
 
 function AccountPage() {
@@ -860,6 +863,10 @@ function AccountPage() {
         }
       });
   }, [navigate]);
+
+  // H1 · `!== false` y no `!`: la columna es `@default(true)` y el campo
+  // puede faltar si el front va por delante del backend.
+  const cajaEnabled = me?.tenant.cajaEnabled !== false;
 
   async function onTestConnection() {
     setTesting(true);
@@ -901,6 +908,13 @@ function AccountPage() {
         }}
       />
 
+      {/* H1 (ADR-016) · el estado de Holded es de la caja: lo que se
+          sincroniza es el catálogo y lo que sube son los tickets. Una
+          empresa sin caja no tiene ni lo uno ni lo otro, y este panel le
+          enseñaba "No conectada" con un check verde y dos botones que no
+          sirven. Una empresa CON caja y sin clave sí lo sigue viendo —
+          ésa es la que tiene algo que conectar. */}
+      {cajaEnabled && (
       <section className="bg-white rounded-2xl border border-slate-200 p-6 md:p-7 mb-5">
         <h2 className="text-[17px] font-semibold text-mipiace-ink tracking-tight mb-1">
           Conexión con Holded
@@ -953,8 +967,11 @@ function AccountPage() {
             <FieldError message={testMessage.text} />
           ))}
       </section>
+      )}
 
-      {canEdit && <OwnerPinSection />}
+      {/* H1 · el PIN de respaldo autoriza descuentos y cierres EN EL TPV.
+          Sin caja no hay TPV, y el propio `activate` ya no lo genera. */}
+      {canEdit && cajaEnabled && <OwnerPinSection />}
 
       {showRotateModal && (
         <RotateKeyModal
@@ -1104,7 +1121,9 @@ function FiscalProfileSection({
             <TextField
               id="businessName"
               label="Razón social"
-              value={form.businessName ?? ""}
+              // H1 · mismo alias que en la lectura: al entrar a editar, el
+              // campo arranca con lo que el implantador tecleó.
+              value={form.businessName ?? form.legalName ?? form.name ?? ""}
               onChange={(v) => setForm({ ...form, businessName: v })}
             />
             <TextField
@@ -1156,7 +1175,18 @@ function FiscalProfileSection({
         </div>
       ) : (
         <div className="grid sm:grid-cols-2 gap-x-6 gap-y-4 mt-5">
-          <ReadOnlyField label="Razón social" value={form.businessName ?? form.name ?? "—"} />
+          {/* H1 · fuera del alcance del bloque, pero en su camino: el
+              backend escribe la razón social como `legalName` desde
+              B-OnboardingV2 (`superadmin/tenants.ts`) y esta pantalla
+              sólo leía `businessName`/`name`, así que salía "—". Hasta
+              ahora se notaba poco porque el dato venía de Holded; con el
+              alta manual de H1 es lo que el implantador acaba de teclear
+              y el propietario lo primero que mira. Se añade el alias a la
+              LECTURA; el guardado sigue escribiendo `businessName`. */}
+          <ReadOnlyField
+            label="Razón social"
+            value={form.businessName ?? form.legalName ?? form.name ?? "—"}
+          />
           <ReadOnlyField label="NIF / CIF" value={form.nif ?? "—"} tabular />
           <ReadOnlyField
             label="Dirección"

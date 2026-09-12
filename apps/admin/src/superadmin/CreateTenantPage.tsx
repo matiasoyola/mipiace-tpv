@@ -119,16 +119,21 @@ export function CreateTenantPage() {
 
   return (
     <SuperAdminShell title="Crear cuenta">
+      {/* H1 · `min-w-0` + grids que apilan: el shell del super-admin tiene
+          una barra lateral fija de 240 px sin variante móvil (es una
+          herramienta de escritorio, ver `SuperAdminShell.tsx`). No la
+          arreglamos aquí, pero al menos este formulario no añade
+          desbordamiento horizontal por su cuenta. */}
       <form
         onSubmit={onSubmit}
-        className="max-w-xl bg-white rounded-xl border border-slate-200 p-6 shadow-sm space-y-5"
+        className="max-w-xl min-w-0 bg-white rounded-xl border border-slate-200 p-4 sm:p-6 shadow-sm space-y-5"
       >
         {/* H1 · la primera pregunta, porque decide el resto del formulario. */}
         <fieldset>
           <legend className="block text-[12.5px] font-medium text-slate-700 mb-1.5">
             ¿La empresa tiene Holded? <span className="text-red-500">*</span>
           </legend>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <ChoiceCard
               active={usesHolded}
               onClick={() => setUsesHolded(true)}
@@ -224,7 +229,7 @@ export function CreateTenantPage() {
           <legend className="block text-[12.5px] font-medium text-slate-700 mb-1.5">
             Módulos <span className="text-red-500">*</span>
           </legend>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <ModuleCard
               icon={Calculator}
               label="Caja"
@@ -273,7 +278,7 @@ export function CreateTenantPage() {
           <label className="block text-[12.5px] font-medium text-slate-700 mb-1.5">
             Tipo de negocio <span className="text-red-500">*</span>
           </label>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             {(["HOSPITALITY", "RETAIL", "SERVICES"] as BusinessType[]).map((t) => {
               const Icon = BUSINESS_ICONS[t];
               const active = businessType === t;

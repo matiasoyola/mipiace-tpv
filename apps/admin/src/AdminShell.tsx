@@ -59,7 +59,7 @@ interface NavItem {
   // Esconder NO es gatear: cada una de estas secciones tiene además su
   // puerta de servidor (`lib/caja-gate.ts`). Esto es sólo para que el
   // propietario de un colegio no vea "Comanderas" en su barra lateral.
-  capability?: "agenda" | "caja";
+  capability?: "agenda" | "caja" | "holded";
 }
 
 const NAV_ITEMS: NavItem[] = [
@@ -95,7 +95,10 @@ const NAV_ITEMS: NavItem[] = [
   },
   // v1.0-pilotos · Lote 6 (#22): importador de clientes desde Excel/CSV.
   // OWNER-only — crea contactos en Holded, que es la fuente de verdad.
-  { to: "/admin/contacts-import", label: "Importar clientes", icon: UserPlus, ownerOnly: true },
+  // H1 · el importador crea contactos EN HOLDED, que es la fuente de
+  // verdad. Sin Holded no tiene destino: el endpoint aborta y el
+  // propietario se queda mirando un error. Se esconde.
+  { to: "/admin/contacts-import", label: "Importar clientes", icon: UserPlus, ownerOnly: true, capability: "holded" },
   { to: "/admin/products", label: "Productos", icon: Package, capability: "caja" },
   // B-reservas-2: catálogo de agenda (duración/pausas/canales + recursos).
   // Sólo visible si el tenant tiene la capability `agenda` activada.
@@ -249,9 +252,11 @@ export function AdminShell({
   const navigate = useNavigate();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [logoutAllOpen, setLogoutAllOpen] = useState(false);
-  // H1 · `undefined` mientras carga → tratamos la caja como encendida,
-  // que es el default de la columna: nadie pierde su banner por un
-  // parpadeo de red.
+  // H1 · `null` mientras carga. El banner no se pinta hasta saberlo: es
+  // una alarma, y una alarma que parpadea mientras carga es peor que una
+  // alarma que tarda medio segundo. Ojo, aquí `=== true` y no
+  // `!== false` (ver `useSyncErrorsCount`): pollear antes de saber si hay
+  // caja dispara un 403 por nada.
   const shellCaps = useTenantCapabilities();
 
   function onLogout() {
@@ -264,7 +269,7 @@ export function AdminShell({
   return (
     <div className="min-h-screen bg-mipiace-stone flex flex-col font-sans">
       {impersonating && <ImpersonationBanner />}
-      <HoldedHealthBanner cajaEnabled={shellCaps?.caja !== false} />
+      <HoldedHealthBanner cajaEnabled={shellCaps?.caja === true} />
       <div className="flex flex-1 min-h-0">
       <DesktopSidebar onAskLogoutAll={() => setLogoutAllOpen(true)} />
 
@@ -398,24 +403,31 @@ function MobileDrawer({
 interface TenantCapabilities {
   caja: boolean;
   agenda: boolean;
+  // H1 · no es una columna: es "tiene clave de Holded", que sale de
+  // `/auth/me`. Se trata igual que las otras para gatear el sidebar.
+  holded: boolean;
 }
 
 function useTenantCapabilities(): TenantCapabilities | null {
   const [caps, setCaps] = useState<TenantCapabilities | null>(null);
   useEffect(() => {
     let cancelled = false;
-    api<{ settings: { agendaEnabled?: boolean; cajaEnabled?: boolean } }>(
-      "/admin/tenant/settings",
-    )
-      .then((res) => {
+    Promise.all([
+      api<{ settings: { agendaEnabled?: boolean; cajaEnabled?: boolean } }>(
+        "/admin/tenant/settings",
+      ),
+      api<{ tenant: { hasHoldedKey?: boolean } }>("/auth/me"),
+    ])
+      .then(([s, me]) => {
         if (cancelled) return;
         setCaps({
-          agenda: res.settings.agendaEnabled ?? false,
-          caja: res.settings.cajaEnabled !== false,
+          agenda: s.settings.agendaEnabled ?? false,
+          caja: s.settings.cajaEnabled !== false,
+          holded: me.tenant.hasHoldedKey === true,
         });
       })
       .catch(() => {
-        if (!cancelled) setCaps({ agenda: false, caja: true });
+        if (!cancelled) setCaps({ agenda: false, caja: true, holded: true });
       });
     return () => {
       cancelled = true;
@@ -432,7 +444,10 @@ function NavList({
   onNavigate?: () => void;
 }) {
   const caps = useTenantCapabilities();
-  const syncErrorsCount = useSyncErrorsCount(caps?.caja !== false);
+  // H1 · `=== true`, no `!== false`: mientras `caps` es null NO sabemos si
+  // hay caja, y pollear "por si acaso" dispara un 403 antes de tener la
+  // respuesta. Cuando el flag llega, el efecto vuelve a correr.
+  const syncErrorsCount = useSyncErrorsCount(caps?.caja === true);
   const role = readCurrentRole();
   const impersonating = readImpersonationState() != null;
   const visibleItems = NAV_ITEMS.filter((item) => {
@@ -444,6 +459,7 @@ function NavList({
     // segunda condición.
     if (item.capability === "agenda") return caps?.agenda === true;
     if (item.capability === "caja") return caps?.caja === true;
+    if (item.capability === "holded") return caps?.holded === true;
     return true;
   });
   return (
