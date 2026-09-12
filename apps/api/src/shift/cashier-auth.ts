@@ -11,6 +11,7 @@ import { verifyPassword } from "../auth/passwords.js";
 import { requireDeviceToken } from "../devices/auth.js";
 import { signCashierSession, requireCashierSession } from "./cashier-session.js";
 import { getShiftStateForLogin } from "./state.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 
 // Rate-limit clave: usamos (tenantId, email) — el tenantId viene del
 // device token, así que el rate-limit es por (caja-de-este-tenant, email
@@ -28,7 +29,7 @@ export async function registerCashierAuthRoutes(
   app.post(
     "/shift/cashier-login",
     {
-      preHandler: requireDeviceToken,
+      preHandler: [requireDeviceToken, ensureCajaEnabled],
       schema: {
         body: {
           type: "object",
@@ -133,6 +134,10 @@ export async function registerCashierAuthRoutes(
     },
   );
 
+  // Sin gate de caja a propósito: cerrar sesión tiene que funcionar
+  // SIEMPRE, también en el instante en que a la empresa le apagan la
+  // caja con un cajero dentro. Un 403 aquí dejaría al cajero atrapado en
+  // la pantalla de venta.
   app.post(
     "/shift/cashier-logout",
     { preHandler: requireCashierSession },
@@ -152,7 +157,7 @@ export async function registerCashierAuthRoutes(
   // los datos de tenant/register/store sin pasar por PinScreen.
   app.get(
     "/shift/cashier-bootstrap",
-    { preHandler: requireCashierSession },
+    { preHandler: [requireCashierSession, ensureCajaEnabled] },
     async (request, reply) => {
       const ctx = request.cashier!;
       if (!ctx.isTest) {
@@ -236,7 +241,7 @@ export async function registerCashierAuthRoutes(
   // obtener el JWT que los POST necesitan.
   app.get(
     "/shift/offline-bundle",
-    { preHandler: requireDeviceToken },
+    { preHandler: [requireDeviceToken, ensureCajaEnabled] },
     async (request, reply) => {
       const ctx = request.device!;
       // El modo prueba (test-cashier) no tiene device físico ni roster

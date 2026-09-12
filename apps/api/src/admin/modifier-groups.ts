@@ -25,6 +25,7 @@ import type { FastifyInstance } from "fastify";
 
 import { requireOwnerOrManager } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 
 interface ModifierGroupView {
   id: string;
@@ -87,7 +88,7 @@ export async function registerAdminModifierGroupRoutes(
   // ── LIST ─────────────────────────────────────────────────────────
   app.get(
     "/admin/modifier-groups",
-    { preHandler: requireOwnerOrManager },
+    { preHandler: [requireOwnerOrManager, ensureCajaEnabled] },
     async (request) => {
       const auth = request.auth!;
       const prisma = getPrisma();
@@ -110,7 +111,7 @@ export async function registerAdminModifierGroupRoutes(
   app.post(
     "/admin/modifier-groups",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         body: {
           type: "object",
@@ -155,7 +156,7 @@ export async function registerAdminModifierGroupRoutes(
   app.patch(
     "/admin/modifier-groups/:groupId",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -217,7 +218,7 @@ export async function registerAdminModifierGroupRoutes(
   app.delete(
     "/admin/modifier-groups/:groupId",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -247,7 +248,7 @@ export async function registerAdminModifierGroupRoutes(
   app.post(
     "/admin/modifier-groups/:groupId/modifiers",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -311,7 +312,7 @@ export async function registerAdminModifierGroupRoutes(
   app.patch(
     "/admin/modifier-groups/:groupId/modifiers/:modifierId",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -387,7 +388,7 @@ export async function registerAdminModifierGroupRoutes(
   app.delete(
     "/admin/modifier-groups/:groupId/modifiers/:modifierId",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -428,7 +429,7 @@ export async function registerAdminModifierGroupRoutes(
   app.post(
     "/admin/products/:productId/modifier-groups/:groupId",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -508,7 +509,7 @@ export async function registerAdminModifierGroupRoutes(
   app.delete(
     "/admin/products/:productId/modifier-groups/:groupId",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",

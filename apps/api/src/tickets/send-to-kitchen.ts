@@ -33,6 +33,7 @@ import { getPrisma } from "../context.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
 import { cashierLabelFrom } from "../users/display.js";
 import { dispatchKitchenTicket } from "./kitchen-dispatch.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 
 interface ProductWithTags {
   id: string;
@@ -45,7 +46,7 @@ export async function registerSendToKitchenRoute(
   app.post(
     "/tickets/:ticketId/send-to-kitchen",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",

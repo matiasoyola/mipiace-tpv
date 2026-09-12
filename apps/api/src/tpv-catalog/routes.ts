@@ -8,10 +8,18 @@ import type { TicketStatus } from "@mipiacetpv/db";
 import { requireCashierSession } from "../shift/cashier-session.js";
 import { getPrisma } from "../context.js";
 import { getTenantHealthStatus } from "../tickets/health.js";
+import { CAJA_DISABLED_MESSAGE, ensureCajaEnabled } from "../lib/caja-gate.js";
 
 export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<void> {
   // Catálogo paginado. El TPV cachea el resultado en IndexedDB la primera
   // vez (B4 §2.2); refresca cuando el banner "Sincronizando" llega.
+  // H1 · esta ruta NO lleva `ensureCajaEnabled` como preHandler, y es la
+  // única del módulo que no lo lleva. La puerta va dentro del handler,
+  // sobre el tenant que la primera página ya lee de todas formas: un
+  // preHandler añadiría una consulta por CADA cursor de paginación, que
+  // es exactamente lo que el comentario de abajo evita desde B4. El
+  // cajero no puede llegar aquí sin haber cruzado `/shift/cashier-login`,
+  // que sí la lleva.
   app.get(
     "/tpv/catalog/products",
     {
@@ -27,7 +35,7 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
         },
       },
     },
-    async (request) => {
+    async (request, reply) => {
       const cashier = request.cashier!;
       const q = request.query as { cursor?: string; limit?: number };
       const limit = q.limit ?? 500;
@@ -47,8 +55,18 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
               creditSalesEnabled: true,
               crmEnabled: true,
               agendaEnabled: true,
+              // H1 (ADR-016) · sirve para dos cosas a la vez: cerrar la
+              // puerta aquí mismo y viajar al TPV para que esconda lo
+              // que no aplica. La puerta es ésta; el flag cacheado es UI.
+              cajaEnabled: true,
             },
           });
+      if (tenant?.cajaEnabled === false) {
+        return reply.code(403).send({
+          error: "CAJA_DISABLED",
+          message: CAJA_DISABLED_MESSAGE,
+        });
+      }
       // v1.3-Operativa-Extra · Lote 1: mapa slug→label editable desde el
       // admin. Sólo se devuelve en la primera página para que el TPV lo
       // cachee junto al businessType/iconPreset; las páginas siguientes
@@ -162,7 +180,7 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
   // se cachea en memoria — el dataset típico de un bar son <50 modifiers.
   app.get(
     "/tpv/catalog/modifier-groups",
-    { preHandler: requireCashierSession },
+    { preHandler: [requireCashierSession, ensureCajaEnabled] },
     async (request) => {
       const cashier = request.cashier!;
       const prisma = getPrisma();
@@ -209,7 +227,7 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
   // con "TPV-OTROS-".
   app.get(
     "/tpv/catalog/wildcards",
-    { preHandler: requireCashierSession },
+    { preHandler: [requireCashierSession, ensureCajaEnabled] },
     async (request) => {
       const cashier = request.cashier!;
       const prisma = getPrisma();
@@ -256,7 +274,7 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
   app.get(
     "/tpv/catalog/top-sellers",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         querystring: {
           type: "object",
@@ -343,7 +361,7 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
   // pinte tres estados (oculto/ámbar/rojo) sin recalcular umbrales.
   app.get(
     "/tpv/health/holded",
-    { preHandler: requireCashierSession },
+    { preHandler: [requireCashierSession, ensureCajaEnabled] },
     async (request) => {
       const cashier = request.cashier!;
       const prisma = getPrisma();

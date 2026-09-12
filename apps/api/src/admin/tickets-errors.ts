@@ -19,6 +19,7 @@ import { requireOwnerOrManager } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
 import { enqueueRefundUpload } from "../queues/refund-upload.js";
 import { enqueueTicketUpload } from "../queues/ticket-upload.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 import {
   CorrectionRejectedError,
   listTicketCorrections,
@@ -38,7 +39,7 @@ export async function registerAdminTicketsErrorsRoutes(
   app.get(
     "/admin/tickets/sync-errors",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         querystring: {
           type: "object",
@@ -206,7 +207,7 @@ export async function registerAdminTicketsErrorsRoutes(
   app.get(
     "/admin/tickets/:id/holded-payload-preview",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -232,7 +233,7 @@ export async function registerAdminTicketsErrorsRoutes(
   app.get(
     "/admin/refunds/:id/holded-payload-preview",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -263,7 +264,7 @@ export async function registerAdminTicketsErrorsRoutes(
   app.post(
     "/admin/tickets/:id/retry-sync",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -296,7 +297,7 @@ export async function registerAdminTicketsErrorsRoutes(
   app.post(
     "/admin/refunds/:id/retry-sync",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -335,7 +336,7 @@ export async function registerAdminTicketsErrorsRoutes(
   app.post(
     "/admin/tickets/:id/mark-resolved",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -390,7 +391,7 @@ export async function registerAdminTicketsErrorsRoutes(
   app.post(
     "/admin/refunds/:id/mark-resolved",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -452,7 +453,7 @@ export async function registerAdminTicketsErrorsRoutes(
   app.post(
     "/admin/tickets/:id/edit-line-sku",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -551,7 +552,7 @@ export async function registerAdminTicketsErrorsRoutes(
   app.get(
     "/admin/tickets/:id/corrections",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -595,7 +596,7 @@ export async function registerAdminTicketsErrorsRoutes(
   app.post(
     "/admin/refunds/:id/edit-line-sku",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",

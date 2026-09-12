@@ -28,12 +28,13 @@ import { loadEnv } from "../env.js";
 import { buildAutoSku } from "../onboarding/auto-sku.js";
 import { enqueueManualSync } from "../queues/catalog-incremental.js";
 import { getTenantHealthStatus } from "../tickets/health.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 
 export async function registerCatalogRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     "/catalog/sync-now",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: { body: { type: "object", additionalProperties: false, properties: {} } },
     },
     async (request, reply) => {
@@ -97,7 +98,7 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
   // auto-sku no pudo resolver (Holded silenció el PUT, ADR-010).
   app.get(
     "/catalog/sku-review",
-    { preHandler: requireOwnerOrManager },
+    { preHandler: [requireOwnerOrManager, ensureCajaEnabled] },
     async (request) => {
       const auth = request.auth!;
       const prisma = getPrisma();
@@ -139,7 +140,7 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
   app.post(
     "/catalog/sku-review/:productId/assign",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -280,7 +281,7 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
   app.post(
     "/catalog/sku-review/:productId/mark-unsellable",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -313,7 +314,7 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
 
   app.get(
     "/catalog/sync-status",
-    { preHandler: requireOwnerOrManager },
+    { preHandler: [requireOwnerOrManager, ensureCajaEnabled] },
     async (request) => {
       const auth = request.auth!;
       const prisma = getPrisma();

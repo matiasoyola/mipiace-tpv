@@ -13,6 +13,7 @@ import type { FastifyInstance } from "fastify";
 
 import { requireOwner, requireOwnerOrManager } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 
 export interface TicketDeliverySettings {
   emailAutoIfCustomerHasEmail: boolean;
@@ -75,7 +76,7 @@ export async function registerAdminTicketDeliveryRoutes(
   app.get(
     "/admin/stores/:storeId/ticket-delivery",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -107,7 +108,7 @@ export async function registerAdminTicketDeliveryRoutes(
   app.patch(
     "/admin/stores/:storeId/ticket-delivery",
     {
-      preHandler: requireOwner,
+      preHandler: [requireOwner, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",

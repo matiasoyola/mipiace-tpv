@@ -17,6 +17,7 @@ import { getPrisma } from "../context.js";
 import { getStoreEventBus } from "../realtime/store-event-bus.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
 import { generatePublicSlug } from "../tickets/public-slug.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 import {
   computeTicket,
   readUnitPriceDeltaCents,
@@ -29,7 +30,7 @@ export async function registerTableGroupingRoutes(
   app.post(
     "/tickets/:sourceTicketId/lines/move",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -216,7 +217,7 @@ export async function registerTableGroupingRoutes(
   app.post(
     "/tables/:mainTableId/group",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -409,7 +410,7 @@ export async function registerTableGroupingRoutes(
   app.post(
     "/tables/:mainTableId/ungroup",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",

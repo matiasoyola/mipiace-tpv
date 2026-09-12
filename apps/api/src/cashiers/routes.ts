@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { getPrisma } from "../context.js";
 import { requireOwner, requireOwnerOrManager } from "../auth/middleware.js";
 import { hashPassword } from "../auth/passwords.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 
 // CRUD mínimo de cajeros/encargados (B3 §1.4 ampliado). Sólo el OWNER
 // crea o revoca cajeros (§15 nucleus). El alta exige un PIN inicial —
@@ -44,7 +45,7 @@ async function findAliasCollision(
 export async function registerCashiersRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     "/cashiers",
-    { preHandler: requireOwnerOrManager },
+    { preHandler: [requireOwnerOrManager, ensureCajaEnabled] },
     async (request) => {
       const auth = request.auth!;
       const prisma = getPrisma();
@@ -79,7 +80,7 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
   app.post(
     "/cashiers",
     {
-      preHandler: requireOwner,
+      preHandler: [requireOwner, ensureCajaEnabled],
       schema: {
         body: {
           type: "object",
@@ -164,7 +165,7 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
   app.patch(
     "/cashiers/:cashierId",
     {
-      preHandler: requireOwner,
+      preHandler: [requireOwner, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -237,7 +238,7 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
   app.patch(
     "/cashiers/:cashierId/pin",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -281,7 +282,7 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
   app.delete(
     "/cashiers/:cashierId",
     {
-      preHandler: requireOwner,
+      preHandler: [requireOwner, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",

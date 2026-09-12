@@ -39,6 +39,7 @@ import {
   readUnitPriceDeltaCents,
 } from "../tickets/totals.js";
 import { voidDraftTicket } from "./void-draft.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 
 const UUID_V4 =
   "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$";
@@ -68,7 +69,7 @@ export async function registerTableOperativaRoutes(
   app.post(
     "/tables/:tableId/open",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -122,7 +123,7 @@ export async function registerTableOperativaRoutes(
   app.post(
     "/tables/:tableId/lines",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -273,7 +274,7 @@ export async function registerTableOperativaRoutes(
   app.patch(
     "/tickets/:ticketId/lines/:lineId",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -394,7 +395,7 @@ export async function registerTableOperativaRoutes(
   app.delete(
     "/tickets/:ticketId/lines/:lineId",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -473,7 +474,7 @@ export async function registerTableOperativaRoutes(
   app.post(
     "/tickets/:ticketId/move-to-table",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -623,7 +624,7 @@ export async function registerTableOperativaRoutes(
   app.delete(
     "/tickets/:ticketId",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",

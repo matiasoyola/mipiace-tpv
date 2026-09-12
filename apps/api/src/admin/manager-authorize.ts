@@ -24,6 +24,7 @@ import {
 import { signManagerAuthorization } from "../auth/manager-authorization.js";
 import { getPrisma } from "../context.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 
 const emailFormat = "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$";
 
@@ -44,7 +45,7 @@ export async function registerManagerAuthorizationRoutes(
   app.post(
     "/admin/auth/manager-authorize",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         body: {
           type: "object",

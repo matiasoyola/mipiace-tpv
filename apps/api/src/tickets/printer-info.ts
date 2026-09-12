@@ -13,6 +13,7 @@ import type { FastifyInstance } from "fastify";
 
 import { getPrisma } from "../context.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 
 type SectionParam = "ticket" | "barra" | "cocina" | "salon";
 
@@ -22,7 +23,7 @@ export async function registerTpvPrinterInfoRoute(
   app.get(
     "/tpv/printer-info",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         querystring: {
           type: "object",

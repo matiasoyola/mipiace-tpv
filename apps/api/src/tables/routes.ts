@@ -36,6 +36,7 @@ import {
   listAbandonedTables,
 } from "./abandoned.js";
 import { voidDraftTicket } from "./void-draft.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 
 interface TableSummaryDto {
   id: string;
@@ -145,7 +146,7 @@ export async function registerTablesRoutes(app: FastifyInstance): Promise<void> 
   app.get(
     "/admin/stores/:storeId/tables",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -179,7 +180,7 @@ export async function registerTablesRoutes(app: FastifyInstance): Promise<void> 
   // "su" store sin un round-trip extra.
   app.get(
     "/tpv/tables",
-    { preHandler: requireCashierSession },
+    { preHandler: [requireCashierSession, ensureCajaEnabled] },
     async (request) => {
       const cashier = request.cashier!;
       const prisma = getPrisma();
@@ -207,7 +208,7 @@ export async function registerTablesRoutes(app: FastifyInstance): Promise<void> 
   app.post(
     "/admin/stores/:storeId/tables",
     {
-      preHandler: requireOwner,
+      preHandler: [requireOwner, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -293,7 +294,7 @@ export async function registerTablesRoutes(app: FastifyInstance): Promise<void> 
   app.post(
     "/admin/stores/:storeId/tables/bar-setup",
     {
-      preHandler: requireOwner,
+      preHandler: [requireOwner, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -378,7 +379,7 @@ export async function registerTablesRoutes(app: FastifyInstance): Promise<void> 
   app.patch(
     "/admin/tables/:tableId",
     {
-      preHandler: requireOwner,
+      preHandler: [requireOwner, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -480,7 +481,7 @@ export async function registerTablesRoutes(app: FastifyInstance): Promise<void> 
   app.delete(
     "/admin/tables/:tableId",
     {
-      preHandler: requireOwner,
+      preHandler: [requireOwner, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -532,7 +533,7 @@ export async function registerTablesRoutes(app: FastifyInstance): Promise<void> 
   app.get(
     "/admin/stores/:storeId/tables/abandoned",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -570,7 +571,7 @@ export async function registerTablesRoutes(app: FastifyInstance): Promise<void> 
   app.post(
     "/admin/tables/abandoned/:ticketId/void",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",

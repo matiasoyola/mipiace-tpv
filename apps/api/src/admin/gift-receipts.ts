@@ -12,6 +12,7 @@ import type { FastifyInstance } from "fastify";
 
 import { requireOwnerOrManager } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 
 const DEFAULT_DAYS_BACK = 30;
 const MAX_DAYS_BACK = 365;
@@ -23,7 +24,7 @@ export async function registerAdminGiftReceiptRoutes(
   app.get(
     "/admin/tickets/gift-receipt-candidates",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         querystring: {
           type: "object",
@@ -138,7 +139,7 @@ export async function registerAdminGiftReceiptRoutes(
   app.post(
     "/admin/tickets/:ticketId/gift-receipt-intent",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -181,7 +182,7 @@ export async function registerAdminGiftReceiptRoutes(
   app.post(
     "/admin/tickets/batch-gift-receipt",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         body: {
           type: "object",

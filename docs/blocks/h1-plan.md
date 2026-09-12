@@ -261,6 +261,15 @@ ENCENDIDA. Esto es una *capability* (ADR-016), no la frontera de aislamiento —
 `requireCashierSession` y `requireOwner`—, y fallar hacia "apagado" dejaría sin cobrar a un cliente
 que cobra. Se declara como decisión en `h1-done.md` y en "qué NO cubre la suite".
 
+**Medido al cablear (no era teoría):** con una lectura ingenua, gatear las rutas de §2.1 dejó
+**213 tests rojos en 31 ficheros**. La causa no fue el gate sino la forma de los Prisma falsos:
+unos no modelan `tenant`, otros sólo exponen `findUniqueOrThrow` y no `findUnique`. Con la lectura
+tolerante quedó **un solo rojo**: `tpv-catalog-business-type.test.ts`, que afirma que el tenant se
+consulta **sólo en la primera página** del catálogo. Ese rojo era legítimo —el `preHandler` añadía
+una consulta por cada cursor— y se arregló moviendo esa única puerta DENTRO del handler, sobre el
+tenant que la primera página ya lee. Es la única ruta de caja cuyo gate no es un `preHandler`, y
+lleva el comentario que lo dice.
+
 ### F3 · Alta sin Holded (`POST /super-admin/tenants`)
 
 - `required: []`; `holdedApiKey` y `holdedAccountId` pasan a opcionales.
