@@ -164,6 +164,11 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
               // para pintar (o no) la duración por línea de servicio en el
               // ticket (ADR-R6).
               agendaEnabled: tenant.agendaEnabled,
+              // H1 (ADR-016) · el flag viaja al TPV junto a sus hermanos
+              // para que la PWA pinte la frase sin esperar a un 403. La
+              // puerta sigue siendo el servidor (arriba, en este mismo
+              // handler): un catálogo cacheado no abre nada.
+              cajaEnabled: tenant.cajaEnabled,
               // v1.3-Operativa-Extra · Lote 1: alias editable de tags
               // (`slug` tal como llega de Holded en lowercase → `label`
               // a pintar en el chip).

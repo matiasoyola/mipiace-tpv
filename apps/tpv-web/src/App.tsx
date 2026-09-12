@@ -11,7 +11,7 @@
 // día— antes de pedir el fondo de caja del turno nuevo.
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, Lock } from "lucide-react";
 
 import {
   apiWithCashier,
@@ -330,6 +330,12 @@ export function App() {
   }
   if (state.kind === "unpaired") {
     return <PairScreen onPaired={refresh} />;
+  }
+  // H1 (ADR-016) · la empresa no tiene caja. Una frase, y se acabó: ni
+  // spinner, ni vuelta al PIN, ni reintento en bucle. El terminal sigue
+  // emparejado; el día que le enciendan la caja, recargar basta.
+  if (state.kind === "cajaDisabled") {
+    return <CajaDisabledScreen message={state.message} onRetry={refresh} />;
   }
 
   const { register, store, tenant } = state.data;
@@ -1038,3 +1044,42 @@ function TestModeTpv({
 }
 
 export default App;
+
+// H1 (ADR-016) · lo que ve un terminal cuya empresa no tiene caja.
+//
+// Deliberadamente sobrio y sin salidas falsas: no ofrecemos "iniciar
+// sesión" ni "emparejar otra vez", porque ninguna de las dos arregla
+// nada y las dos invitan a un bucle. Sólo "Reintentar", que sirve para
+// el caso real: acaban de encenderle la caja y quiere entrar sin
+// reinstalar nada.
+function CajaDisabledScreen({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-mipiace-stone px-6">
+      <div
+        role="alert"
+        className="w-full max-w-sm bg-white rounded-2xl border border-slate-200 p-7 text-center"
+      >
+        <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-4">
+          <Lock className="w-6 h-6 text-amber-700" strokeWidth={1.8} />
+        </div>
+        <h1 className="text-[17px] font-semibold text-mipiace-ink tracking-tight">
+          Esta caja no está activada
+        </h1>
+        <p className="text-[13.5px] text-slate-500 mt-2 leading-relaxed">{message}</p>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-5 h-11 w-full rounded-xl border border-slate-300 text-[14px] font-medium text-slate-700 hover:bg-slate-50"
+        >
+          Reintentar
+        </button>
+      </div>
+    </div>
+  );
+}

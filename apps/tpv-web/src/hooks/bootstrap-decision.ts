@@ -9,7 +9,15 @@
 
 import { ApiError } from "../api.js";
 
-export type BootstrapDecision = "purge" | "retry";
+// H1 · tercera salida, `caja-disabled`. Antes del bloque, un 403 caía en
+// `retry`: el hook se quedaba en `loading` y reintentaba cada 3 s para
+// siempre. Es decir, spinner infinito — la "pantalla en blanco" que el
+// TPV no puede permitirse. Ahora el terminal lo dice y para.
+//
+// No es `purge`: el dispositivo sigue emparejado y su token sigue siendo
+// bueno. Si mañana le encienden la caja a la empresa, el mismo terminal
+// arranca sin volver a emparejarlo.
+export type BootstrapDecision = "purge" | "retry" | "caja-disabled";
 
 // Sólo estos códigos disparan purga real del deviceToken. Cualquier
 // otro 401 (sin código o con código desconocido) y los errores de red
@@ -24,6 +32,9 @@ export function decideAfterBootstrapError(err: unknown): BootstrapDecision {
     HARD_REVOKE_CODES.has(err.code)
   ) {
     return "purge";
+  }
+  if (err instanceof ApiError && err.status === 403 && err.code === "CAJA_DISABLED") {
+    return "caja-disabled";
   }
   return "retry";
 }
