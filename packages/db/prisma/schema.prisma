@@ -130,6 +130,14 @@ enum InitialSyncStatus {
   RUNNING
   DONE
   FAILED
+  // H1 (la caja es un modulo) · el tenant que NUNCA va a sincronizar
+  // porque no tiene Holded. No es DONE (mentiria: el cron incremental
+  // barre `initialSyncStatus = DONE` y se lo llevaria por delante) ni
+  // PENDING (el panel lo pintaria como un sync a medias y el super-admin
+  // esperaria a que terminase algo que no ha empezado). Se sale de
+  // NOT_APPLICABLE en un solo sentido: al guardar una API key de Holded,
+  // que lo pasa a PENDING y encola el sync inicial.
+  NOT_APPLICABLE
 }
 
 // B-OnboardingV2: ciclo de vida del onboarding supervisado del tenant.
@@ -437,6 +445,17 @@ model Tenant {
   // OWNER de esta columna (hermana de `crmEnabled`; vendrán `bonosEnabled`
   // y `reservaOnlineEnabled` con B5/B6).
   agendaEnabled                  Boolean           @default(false) @map("agenda_enabled")
+  // H1 (ADR-016) · capability flag de la CAJA: venta, turno, catalogo del
+  // TPV, cajeros, dispositivos e impresion. Hermana de `crmEnabled` y
+  // `agendaEnabled` en forma (columna booleana por tenant, ADR-R6), pero
+  // distinta en gobierno: la caja se enciende y se apaga SOLO desde el
+  // super-admin, porque es una decision comercial, no un ajuste del
+  // negocio. Por eso no aparece en el POST de /admin/tenant/settings.
+  //
+  // `@default(true)` y NO false: el backfill de la migracion deja a todos
+  // los tenants de hoy exactamente como estaban. Un `false` explicito es
+  // la unica forma de apagar la caja.
+  cajaEnabled                    Boolean           @default(true) @map("caja_enabled")
   // v1.3-Thalia Lote 6 · pie de ticket personalizado. NULL = no se
   // pinta nada extra (comportamiento previo). Si está set, el renderer
   // del ticket lo pinta arriba del QR/CIF tras el "Gracias por tu
