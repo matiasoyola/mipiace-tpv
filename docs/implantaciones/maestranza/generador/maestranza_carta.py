@@ -1,10 +1,70 @@
 # -*- coding: utf-8 -*-
-import math
+"""
+Generador de la carta del Bar La Maestranza (Santa Olalla, Toledo) — 2026-09-13.
+
+Mantiene la estructura validada (mismos platos, mismos precios, mismos alérgenos
+por plato) y corrige lo medido sobre el PDF anterior:
+
+  · FUGA DE TRACKING. En reportlab, el setCharSpace de un beginText NO muere al
+    cerrar el objeto de texto: se queda en el estado del PDF. El epígrafe lo
+    ponía a 1,6 pt y a partir de ahí todo salía con las letras separadas, pero
+    el script calculaba las anchuras como si no lo estuvieran. Consecuencias
+    medidas: la línea del epígrafe entraba 5,7 mm sobre "7,00" y 6,3 mm sobre
+    "12,00" (parecían tachados), los puntos guía se comían las últimas letras
+    de cada nombre, y los precios se salían 0,9 mm del margen derecho.
+    Aquí todo el texto espaciado se dibuja con ls(), que devuelve el avance real
+    y deja el tracking a 0 antes de cerrar el objeto de texto.
+  · Leyenda de alérgenos: 6,6 -> 9 pt, y solo los que aparecen de verdad en
+    algún plato (8 de 14; cacahuetes, frutos de cáscara, apio, mostaza, sésamo
+    y altramuces no los usa ningún producto).
+  · Nota legal 1169/2011: 6,2 -> 7,5 pt. Pie: 7,5 -> 8 pt.
+  · Cuerpo de 10 -> 11,5 pt (el interlineado ya daba de sobra: 2,0 líneas por
+    cuerpo de letra).
+  · Un solo interlineado para las tres caras, resuelto por el propio script:
+    busca el mayor que cabe en la cara más apretada (Desayunos, 21 líneas) y lo
+    aplica a las tres. El sobrante de las otras dos va a las separaciones entre
+    secciones, no a la línea.
+  · Reparto de secciones 21 / 19 / 19 (antes 21 / 21 / 10, con 90 mm de blanco
+    en la última cara). Los bocadillos fríos pasan a una columna y se juntan con
+    los calientes, que es donde el cliente los busca.
+  · Tipografías embebidas (Liberation Sans, métricas de Helvetica).
+  · La salida va al repo, no a /tmp.
+
+Uso:
+    python3 generador/maestranza_carta.py [carpeta_salida] [carpeta_assets]
+"""
+import os, sys
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
-from reportlab.lib.colors import HexColor, white, black, Color
+from reportlab.lib.colors import HexColor, white, black
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
-# ---- Paleta Mi Piace / La Maestranza ----
+HERE = os.path.dirname(os.path.abspath(__file__))
+BASE = os.path.dirname(HERE)
+OUT    = sys.argv[1] if len(sys.argv) > 1 else BASE
+ASSETS = sys.argv[2] if len(sys.argv) > 2 else BASE
+EMB = os.path.join(ASSETS, "Logo_La_Maestranza_FINAL.png")
+
+# ---------------- tipografías embebidas ----------------
+FONT_DIRS = ["/usr/share/fonts/truetype/liberation",
+             "/usr/share/fonts/truetype/liberation2",
+             "/Library/Fonts", os.path.expanduser("~/Library/Fonts"),
+             "/opt/homebrew/share/fonts", "/usr/local/share/fonts"]
+def _register(alias, filename, fallback):
+    for d in FONT_DIRS:
+        p = os.path.join(d, filename)
+        if os.path.exists(p):
+            pdfmetrics.registerFont(TTFont(alias, p))
+            return alias
+    sys.stderr.write("AVISO: no encuentro %s; uso %s SIN EMBEBER (no vale para imprenta)\n"
+                     % (filename, fallback))
+    return fallback
+SANS  = _register("Sans",  "LiberationSans-Regular.ttf", "Helvetica")
+SANSB = _register("SansB", "LiberationSans-Bold.ttf",    "Helvetica-Bold")
+SANSI = _register("SansI", "LiberationSans-Italic.ttf",  "Helvetica-Oblique")
+
+# ---------------- paleta ----------------
 BG    = HexColor("#FBF7F1")
 INK   = HexColor("#26221E")
 CORAL = HexColor("#E97058")
@@ -12,35 +72,141 @@ CORALD= HexColor("#C75A45")
 MUTED = HexColor("#8A8078")
 LINE  = HexColor("#E1D6C6")
 
-# ---- 14 alergenos (codigo -> (nombre, color)) ----
 ALG = {
- "GL":("Gluten",        HexColor("#C9843F")),
- "CR":("Crustáceos",    HexColor("#4E86C6")),
- "HU":("Huevo",         HexColor("#E0A83E")),
- "PE":("Pescado",       HexColor("#3D6BA3")),
- "CA":("Cacahuetes",    HexColor("#B08968")),
- "SO":("Soja",          HexColor("#4E9B5E")),
- "LA":("Lácteos",       HexColor("#7E6551")),
+ "GL":("Gluten",            HexColor("#C9843F")),
+ "CR":("Crustáceos",        HexColor("#4E86C6")),
+ "HU":("Huevo",             HexColor("#E0A83E")),
+ "PE":("Pescado",           HexColor("#3D6BA3")),
+ "CA":("Cacahuetes",        HexColor("#B08968")),
+ "SO":("Soja",              HexColor("#4E9B5E")),
+ "LA":("Lácteos",           HexColor("#7E6551")),
  "FC":("Frutos de cáscara", HexColor("#9B5B6B")),
- "AP":("Apio",          HexColor("#7DA845")),
- "MO":("Mostaza",       HexColor("#C4A24B")),
- "SE":("Sésamo",        HexColor("#9E9284")),
- "SU":("Sulfitos",      HexColor("#8A5A7A")),
- "MC":("Moluscos",      HexColor("#6FA0C8")),
- "AL":("Altramuces",    HexColor("#D9B24A")),
+ "AP":("Apio",              HexColor("#7DA845")),
+ "MO":("Mostaza",           HexColor("#C4A24B")),
+ "SE":("Sésamo",            HexColor("#9E9284")),
+ "SU":("Sulfitos",          HexColor("#8A5A7A")),
+ "MC":("Moluscos",          HexColor("#6FA0C8")),
+ "AL":("Altramuces",        HexColor("#D9B24A")),
 }
 
+# ---------------- geometría ----------------
 BLEED=3*mm; PW,PH=210*mm,297*mm; MW,MH=PW+2*BLEED,PH+2*BLEED
 ML=18*mm; MR=18*mm; X0=BLEED+ML; X1=BLEED+PW-MR
 TOP=BLEED+PH-16*mm; CXC=BLEED+PW/2
-EMB="/tmp/Logo_La_Maestranza_FINAL.png"
+EMB_SIZE=36*mm
+Y_FIRST = TOP-EMB_SIZE-2*mm-9*mm     # línea base del primer epígrafe
+Y_LEG   = BLEED+45*mm                # filete de la leyenda de alérgenos
+Y_ROOM  = Y_FIRST-Y_LEG-2*mm         # alto útil de cuerpo
 
-c=canvas.Canvas("/tmp/Cartas_La_Maestranza_ICONOS.pdf",pagesize=(MW,MH))
+# ---------------- cuerpos de letra ----------------
+FS_TITLE=16; TRK_TITLE=3.4
+FS_SEC=15;   TRK_SEC=1.8
+FS_SECP=12.5
+FS_ITEM=14
+FS_SUB=10
+FS_LEGT=10; FS_LEG=9.5
+FS_LEGAL=7.5
+FS_FOOT=8.5;  TRK_FOOT=1.4
+
+SEC_STEP=9.4*mm     # del epígrafe a la primera línea de su sección
+SUB_STEP=7.2*mm     # del subtítulo a la primera línea
+GAP_MIN=5.0*mm      # separación mínima entre secciones
+GAP_MAX=20.0*mm     # tope, para que el sobrante no abra un agujero
+R_ITEM=2.4*mm; STEP_ITEM=5.4*mm   # pictogramas junto al plato
+R_LEG=2.6*mm
+
+# ---------------- contenido (estructura validada: no se toca) ----------------
+DES_CAFE=[("Café con leche",1.60,["LA"]),("Café solo",1.60,[]),("Cortado",1.60,["LA"]),
+ ("Café bombón",2.00,["LA"]),("Carajillo",3.00,["SU"]),("Café para llevar",1.90,["LA"]),
+ ("Cola Cao",2.00,["LA"]),("Infusión (manzanilla, poleo, tila…)",1.60,[]),("Vaso de leche",2.00,["LA"])]
+DES_TOST=[("Tomate y aceite",2.50,["GL"]),("Mermelada y mantequilla",1.50,["GL","LA"]),
+ ("Jamón curado y tomate",2.50,["GL"]),("York y queso",2.50,["GL","LA"]),("Jamón ibérico",7.00,["GL"])]
+DES_BOLL=[("Croissant",2.50,["GL","HU","LA"]),("Croissant mermelada y mantequilla",2.50,["GL","HU","LA"]),
+ ("Croissant york y queso",3.00,["GL","HU","LA"]),("Napolitana de chocolate",2.50,["GL","HU","LA","SO"]),
+ ("Napolitana de crema",2.50,["GL","HU","LA"]),("Dónut",1.50,["GL","HU","LA","SO"]),("Pincho de tortilla",3.00,["GL","HU"])]
+
+RAC=[("Ensaladilla rusa",7.00,["HU","PE"]),("Patatas alioli",8.00,["HU"]),("Croquetas",10.00,["GL","HU","LA"]),
+ ("Patatas bravas",10.00,["GL"]),("Alitas de pollo",10.00,["GL"]),("Fingers de pollo",10.00,["GL","HU"]),
+ ("Magro con tomate",10.00,[]),("Torrezno",10.00,[]),("Torrezno especial",15.00,[]),
+ ("Calamares",12.00,["GL","MC"]),("Chopitos",12.00,["GL","MC"]),("Queso curado",12.00,["LA"]),
+ ("Jamón serrano",12.00,[]),("Gambas al ajillo",14.00,["CR"])]
+COMB=[("Filete de ternera",None,["HU"]),("Filete de pollo",None,["HU"]),("Filete de lomo",None,["HU"]),
+ ("Chuleta de cerdo",None,["HU"]),("Chuleta de ternera",None,["HU"])]
+BOCA=[("Lomo con queso",None,["GL","LA"]),("Filete de ternera",None,["GL"]),("Tortilla de patatas",None,["GL","HU"]),
+ ("Tortilla francesa",None,["GL","HU"]),("Lomo con pimientos",None,["GL"]),("Bacon con queso",None,["GL","LA"]),
+ ("Anchoas con tomate",None,["GL","PE"]),("Atún con tomate",None,["GL","PE"]),("Filete de pollo",None,["GL"]),
+ ("Salchichón",None,["GL"]),("Chorizo de pavo",None,["GL"]),("Queso",None,["GL","LA"]),
+ ("Caballa",None,["GL","PE"]),("Calamares",None,["GL","MC"])]
+HAMB=[("Hamburguesa",5.00,["GL","LA"]),("Hamburguesa especial",7.00,["GL","HU","LA"]),
+ ("Sándwich mixto",2.50,["GL","LA"]),("Sándwich mixto con huevo",3.50,["GL","HU","LA"]),
+ ("Sándwich vegetal",5.00,["GL","HU"])]
+
+# ---- las tres caras: 21 / 19 / 19 ----
+PAGES=[
+ ("Desayunos","BUENOS DÍAS · LA MAESTRANZA · IVA INCLUIDO",
+  [("sec","Cafés e infusiones",None,None),("items",DES_CAFE),("gap",),
+   ("sec","Tostadas",None,None),("items",DES_TOST),("gap",),
+   ("sec","Bollería",None,None),("items",DES_BOLL)]),
+ ("Para compartir y platos","BUEN PROVECHO · LA MAESTRANZA · IVA INCLUIDO",
+  [("sec","Raciones",None,None),("items",RAC),("gap",),
+   ("sec","Platos combinados","10,00 · ternera 12,00","Todos con patatas y huevo"),("items",COMB)]),
+ ("Bocadillos y hamburguesas","BUEN PROVECHO · LA MAESTRANZA · IVA INCLUIDO",
+  [("sec","Bocadillos","5,00 · especial 7,00",None),("items",BOCA),("gap",),
+   ("sec","Hamburguesas y sándwiches",None,None),("items",HAMB)]),
+]
+
+USADOS=[k for k in ALG if any(k in a for _,_,_,blocks in
+        [(None,None,None,p[2]) for p in PAGES] for b in blocks if b[0]=="items"
+        for _,_,a in b[1])]
+
+# ---------------- interlineado único, resuelto aquí ----------------
+def page_height(blocks, step, gap):
+    h=0.0
+    for b in blocks:
+        if b[0]=="sec":
+            h+=SEC_STEP
+            if b[3]: h+=SUB_STEP
+        elif b[0]=="items": h+=len(b[1])*step
+        elif b[0]=="gap":   h+=gap
+    return h
+
+def solve_step():
+    s=8.0*mm
+    while s>4.0*mm:
+        if all(page_height(p[2],s,GAP_MIN)<=Y_ROOM for p in PAGES): return s
+        s-=0.05*mm
+    raise SystemExit("no cabe")
+STEP=solve_step()
+
+def page_gap(blocks):
+    n=sum(1 for b in blocks if b[0]=="gap")
+    if not n: return GAP_MIN
+    sobra=Y_ROOM-page_height(blocks,STEP,GAP_MIN)
+    return min(GAP_MAX, GAP_MIN+max(0.0,sobra)/n)
+
+# ---------------- lienzo ----------------
+c=canvas.Canvas(os.path.join(OUT,"Cartas_La_Maestranza_ICONOS.pdf"),pagesize=(MW,MH),
+                initialFontName=SANS,initialFontSize=FS_ITEM)
+c.setTitle("Carta · Bar La Maestranza")
+AVISOS=[]
+
+def ls(x,y,txt,font,size,color,trk=0.0,center=False):
+    """Texto con tracking que NO deja el estado sucio. Devuelve el avance real."""
+    adv=pdfmetrics.stringWidth(txt,font,size)+trk*len(txt)
+    ink=pdfmetrics.stringWidth(txt,font,size)+trk*max(0,len(txt)-1)
+    xx=x-ink/2 if center else x
+    t=c.beginText(xx,y); t.setFont(font,size); t.setFillColor(color)
+    if trk: t.setCharSpace(trk)
+    t.textOut(txt)
+    t.setCharSpace(0)          # <- el estado queda limpio para lo siguiente
+    c.drawText(t)
+    return ink if not trk else adv
 
 def bg():
     c.setFillColor(BG); c.rect(0,0,MW,MH,fill=1,stroke=0)
     c.setStrokeColor(LINE); c.setLineWidth(0.8)
     c.roundRect(BLEED+7*mm,BLEED+7*mm,PW-14*mm,PH-14*mm,3*mm,fill=0,stroke=1)
+
 def crop():
     c.setStrokeColor(black); c.setLineWidth(0.3); L=3*mm
     for x,y,dx,dy in [(BLEED,BLEED,-1,0),(BLEED,BLEED,0,-1),(BLEED+PW,BLEED,1,0),(BLEED+PW,BLEED,0,-1),
@@ -103,8 +269,8 @@ def ic_SE(cx,cy,r,col):
     for dx,dy in [(-0.28,0.2),(0.28,0.2),(0,-0.28)]:
         c.ellipse(cx+dx*r-r*0.14,cy+dy*r-r*0.22,cx+dx*r+r*0.14,cy+dy*r+r*0.22,fill=1,stroke=0)
 def ic_SU(cx,cy,r,col):
-    _prep(cx,cy,r,col); c.setFillColor(white); c.setFont("Helvetica-Bold",r*0.9)
-    c.drawCentredString(cx,cy-r*0.32,"E-X")
+    _prep(cx,cy,r,col); c.setFillColor(white)
+    ls(cx,cy-r*0.32,"E-X",SANSB,r*0.85,white,center=True)
 def ic_MC(cx,cy,r,col):
     _prep(cx,cy,r,col); c.setFillColor(white)
     p=c.beginPath(); p.moveTo(cx,cy-r*0.5); p.curveTo(cx-r*0.6,cy-r*0.3,cx-r*0.6,cy+r*0.4,cx,cy+r*0.5)
@@ -119,132 +285,92 @@ ICON={"GL":ic_GL,"CR":ic_CR,"HU":ic_HU,"PE":ic_PE,"CA":ic_CA,"SO":ic_SO,"LA":ic_
       "FC":ic_FC,"AP":ic_AP,"MO":ic_MO,"SE":ic_SE,"SU":ic_SU,"MC":ic_MC,"AL":ic_AL}
 def icon(code,cx,cy,r): ICON[code](cx,cy,r,ALG[code][1])
 
-# ---------------- layout helpers ----------------
-def header(cartatype):
-    es=42*mm
-    c.drawImage(EMB, CXC-es/2, TOP-es+2*mm, width=es, height=es, mask='auto')
-    y=TOP-es-2*mm
-    c.setFillColor(INK); c.setFont("Helvetica",13); 
-    t=cartatype.upper(); 
-    # letterspacing
-    cs=3.2; tw=c.stringWidth(t,"Helvetica",13)+cs*(len(t)-1)
-    tt=c.beginText(CXC-tw/2,y); tt.setFont("Helvetica",13); tt.setCharSpace(cs); tt.setFillColor(INK); tt.textOut(t); c.drawText(tt)
-    return y-9*mm
+# ---------------- bloques ----------------
+def header(titulo):
+    c.drawImage(EMB, CXC-EMB_SIZE/2, TOP-EMB_SIZE+2*mm, width=EMB_SIZE, height=EMB_SIZE, mask='auto')
+    ls(CXC,TOP-EMB_SIZE-2*mm,titulo.upper(),SANS,FS_TITLE,INK,TRK_TITLE,center=True)
 
-def section(y,title,price=None):
-    c.setFillColor(CORALD); c.setFont("Helvetica-Bold",11.5)
-    t=title.upper(); cs=1.6
-    tt=c.beginText(X0,y); tt.setFont("Helvetica-Bold",11.5); tt.setCharSpace(cs); tt.setFillColor(CORALD); tt.textOut(t); c.drawText(tt)
-    tw=c.stringWidth(t,"Helvetica-Bold",11.5)+cs*(len(t)-1)
-    px=X0+tw+4*mm
+def section(y,title,price):
+    w=ls(X0,y,title.upper(),SANSB,FS_SEC,CORALD,TRK_SEC)
+    px=X0+w+4*mm
     if price:
-        c.setFont("Helvetica-Bold",9.5); c.setFillColor(CORALD); c.drawString(px,y,price)
-        px+=c.stringWidth(price,"Helvetica-Bold",9.5)+5*mm
-    c.setStrokeColor(LINE); c.setLineWidth(0.8); c.line(px,y+1.2*mm,X1,y+1.2*mm)
-    return y-7.2*mm
+        c.setFont(SANSB,FS_SECP); c.setFillColor(CORALD); c.drawString(px,y,price)
+        px+=pdfmetrics.stringWidth(price,SANSB,FS_SECP)+5*mm
+    if px<X1-3*mm:
+        c.setStrokeColor(LINE); c.setLineWidth(0.8); c.line(px,y+1.4*mm,X1,y+1.4*mm)
+    else:
+        AVISOS.append("epígrafe sin sitio para el filete: %s" % title)
 
 def leaders(x0,x1,y):
     if x1-x0<5*mm: return
-    c.setFillColor(LINE); c.setFont("Helvetica",6.5); x=x0; step=1.9*mm
+    c.setFillColor(LINE); c.setFont(SANS,7.5); x=x0; step=2.6*mm
     while x<x1: c.drawString(x,y,"."); x+=step
 
-def item(y,name,price,algs,x0=X0,x1=X1,fs=10):
-    c.setFont("Helvetica",fs); c.setFillColor(INK); c.drawString(x0,y,name)
-    nw=c.stringWidth(name,"Helvetica",fs)
-    pw=0
-    if price is not None:
-        ptxt=("%.2f"%price).replace(".",",")+" €"
-        c.setFont("Helvetica-Bold",fs); pw=c.stringWidth(ptxt,"Helvetica-Bold",fs)
-        c.setFillColor(CORALD); c.drawRightString(x1,y,ptxt)
-    r=1.7*mm; step=4.0*mm; n=len(algs)
-    cluster_right=x1-pw-(3*mm if price is not None else 0)
-    xs=cluster_right-n*step
-    for i,a in enumerate(algs): icon(a,xs+i*step+r,y+1.0*mm,r)
-    lx0=x0+nw+2.2*mm; lx1=(xs-1.5*mm) if n else cluster_right
+def item(y,name,price,algs):
+    """Con precio: nombre · puntos guía · pictogramas · precio a la derecha.
+    Sin precio (el precio va en el epígrafe): los pictogramas van pegados al
+    nombre y no se ponen puntos guía, porque no conducen a ningún sitio."""
+    c.setFont(SANS,FS_ITEM); c.setFillColor(INK); c.drawString(X0,y,name)
+    nw=pdfmetrics.stringWidth(name,SANS,FS_ITEM)
+    n=len(algs)
+    if price is None:
+        xs=X0+nw+3*mm
+        for i,a in enumerate(algs): icon(a,xs+i*STEP_ITEM+R_ITEM,y+1.2*mm,R_ITEM)
+        if xs+n*STEP_ITEM>X1: AVISOS.append("no cabe en una línea: %s" % name)
+        return
+    ptxt=("%.2f"%price).replace(".",",")+" €"
+    pw=pdfmetrics.stringWidth(ptxt,SANSB,FS_ITEM)
+    c.setFont(SANSB,FS_ITEM); c.setFillColor(CORALD); c.drawRightString(X1,y,ptxt)
+    cluster_right=X1-pw-4*mm
+    xs=cluster_right-n*STEP_ITEM
+    for i,a in enumerate(algs): icon(a,xs+i*STEP_ITEM+R_ITEM,y+1.2*mm,R_ITEM)
+    lx0=X0+nw+2.5*mm; lx1=(xs-2*mm) if n else cluster_right
+    if lx0>lx1+0.5: AVISOS.append("no cabe en una línea: %s" % name)
     leaders(lx0,lx1,y)
-    return y-7.0*mm
 
-def legend(y):
-    c.setStrokeColor(LINE); c.setLineWidth(0.7); c.line(X0,y,X1,y); y-=5*mm
-    c.setFillColor(CORALD); c.setFont("Helvetica-Bold",9); 
-    tt=c.beginText(X0,y); tt.setFont("Helvetica-Bold",9); tt.setCharSpace(1.2); tt.setFillColor(CORALD); tt.textOut("ALÉRGENOS"); c.drawText(tt)
-    y-=5.6*mm
-    codes=list(ALG.keys()); ncol=5; cw=(X1-X0)/ncol; r=1.7*mm
-    for k,code in enumerate(codes):
-        col=k%ncol; row=k//ncol; xx=X0+col*cw; yy=y-row*5.6*mm
-        icon(code,xx+r,yy,r)
-        c.setFillColor(INK); c.setFont("Helvetica",6.6); c.drawString(xx+2*r+1.2*mm,yy-1.0*mm,ALG[code][0])
-    y=y-3*5.6*mm
-    c.setFillColor(MUTED); c.setFont("Helvetica-Oblique",6.2)
-    c.drawString(X0,y,"Información de alérgenos conforme al Reglamento (UE) 1169/2011. Consulta al personal cualquier duda.")
-    return y
+def legend():
+    c.setStrokeColor(LINE); c.setLineWidth(0.7); c.line(X0,Y_LEG,X1,Y_LEG)
+    y=Y_LEG-5.5*mm
+    ls(X0,y,"ALÉRGENOS",SANSB,FS_LEGT,CORALD,1.2)
+    y-=7.4*mm
+    ncol=4; cw=(X1-X0)/ncol
+    for k,code in enumerate(USADOS):
+        col=k%ncol; row=k//ncol
+        xx=X0+col*cw; yy=y-row*7.6*mm
+        icon(code,xx+R_LEG,yy+1.0*mm,R_LEG)
+        c.setFillColor(INK); c.setFont(SANS,FS_LEG)
+        c.drawString(xx+2*R_LEG+1.6*mm,yy,ALG[code][0])
+    nrow=(len(USADOS)+ncol-1)//ncol
+    y=y-(nrow-1)*7.6*mm-6.6*mm
+    c.setFillColor(MUTED); c.setFont(SANSI,FS_LEGAL)
+    c.drawString(X0,y,"Información de alérgenos conforme al Reglamento (UE) 1169/2011.")
+    c.drawString(X0,y-4.2*mm,"Consulta al personal cualquier duda sobre trazas o preparación.")
 
 def footer(txt):
-    c.setFillColor(MUTED); c.setFont("Helvetica",7.5)
-    cs=1.4; tw=c.stringWidth(txt,"Helvetica",7.5)+cs*(len(txt)-1)
-    tt=c.beginText(CXC-tw/2,BLEED+9.5*mm); tt.setFont("Helvetica",7.5); tt.setCharSpace(cs); tt.setFillColor(MUTED); tt.textOut(txt); c.drawText(tt)
+    ls(CXC,BLEED+8*mm,txt,SANS,FS_FOOT,MUTED,TRK_FOOT,center=True)
 
-# ---------------- CONTENIDO ----------------
-DES_CAFE=[("Café con leche",1.60,["LA"]),("Café solo",1.60,[]),("Cortado",1.60,["LA"]),
- ("Café bombón",2.00,["LA"]),("Carajillo",3.00,["SU"]),("Café para llevar",1.90,["LA"]),
- ("Cola Cao",2.00,["LA"]),("Infusión (manzanilla, poleo, tila…)",1.60,[]),("Vaso de leche",2.00,["LA"])]
-DES_TOST=[("Tomate y aceite",2.50,["GL"]),("Mermelada y mantequilla",1.50,["GL","LA"]),
- ("Jamón curado y tomate",2.50,["GL"]),("York y queso",2.50,["GL","LA"]),("Jamón ibérico",7.00,["GL"])]
-DES_BOLL=[("Croissant",2.50,["GL","HU","LA"]),("Croissant mermelada y mantequilla",2.50,["GL","HU","LA"]),
- ("Croissant york y queso",3.00,["GL","HU","LA"]),("Napolitana de chocolate",2.50,["GL","HU","LA","SO"]),
- ("Napolitana de crema",2.50,["GL","HU","LA"]),("Dónut",1.50,["GL","HU","LA","SO"]),("Pincho de tortilla",3.00,["GL","HU"])]
-
-RAC=[("Ensaladilla rusa",7.00,["HU","PE"]),("Patatas alioli",8.00,["HU"]),("Croquetas",10.00,["GL","HU","LA"]),
- ("Patatas bravas",10.00,["GL"]),("Alitas de pollo",10.00,["GL"]),("Fingers de pollo",10.00,["GL","HU"]),
- ("Magro con tomate",10.00,[]),("Torrezno",10.00,[]),("Torrezno especial",15.00,[]),
- ("Calamares",12.00,["GL","MC"]),("Chopitos",12.00,["GL","MC"]),("Queso curado",12.00,["LA"]),
- ("Jamón serrano",12.00,[]),("Gambas al ajillo",14.00,["CR"])]
-BOCA=[("Lomo con queso",["GL","LA"]),("Filete de ternera",["GL"]),("Tortilla de patatas",["GL","HU"]),
- ("Tortilla francesa",["GL","HU"]),("Lomo con pimientos",["GL"]),("Bacon con queso",["GL","LA"]),
- ("Anchoas con tomate",["GL","PE"]),("Atún con tomate",["GL","PE"]),("Filete de pollo",["GL"]),
- ("Salchichón",["GL"]),("Chorizo de pavo",["GL"]),("Queso",["GL","LA"]),("Caballa",["GL","PE"]),("Calamares",["GL","MC"])]
-HAMB=[("Hamburguesa",5.00,["GL","LA"]),("Hamburguesa especial",7.00,["GL","HU","LA"]),
- ("Sándwich mixto",2.50,["GL","LA"]),("Sándwich mixto con huevo",3.50,["GL","HU","LA"]),("Sándwich vegetal",5.00,["GL","HU"])]
-COMB=[("Filete de ternera",["HU"]),("Filete de pollo",["HU"]),("Filete de lomo",["HU"]),("Chuleta de cerdo",["HU"]),("Chuleta de ternera",["HU"])]
-
-# ===== P1 Desayunos =====
-bg(); crop()
-y=header("Desayunos")
-y=section(y,"Cafés e infusiones")
-for n,p,a in DES_CAFE: y=item(y,n,p,a)
-y-=4*mm; y=section(y,"Tostadas")
-for n,p,a in DES_TOST: y=item(y,n,p,a)
-y-=4*mm; y=section(y,"Bollería")
-for n,p,a in DES_BOLL: y=item(y,n,p,a)
-legend(BLEED+50*mm); footer("BUENOS DÍAS · LA MAESTRANZA · IVA INCLUIDO")
-c.showPage()
-
-# ===== P2 Para compartir (Raciones + Bocadillos 2 col) =====
-bg(); crop()
-y=header("Para compartir")
-y=section(y,"Raciones")
-for n,p,a in RAC: y=item(y,n,p,a)
-y-=4*mm; y=section(y,"Bocadillos","5,00 · especial 7,00")
-# 2 columnas de nombres con iconos (sin precio)
-half=(len(BOCA)+1)//2
-midgap=8*mm; colw=(X1-X0-midgap)/2
-xL0,xL1=X0,X0+colw; xR0,xR1=X0+colw+midgap,X1
-yy=y
-for n,a in BOCA[:half]: yy=item(yy,n,None,a,x0=xL0,x1=xL1)
-yy2=y
-for n,a in BOCA[half:]: yy2=item(yy2,n,None,a,x0=xR0,x1=xR1)
-legend(BLEED+50*mm); footer("BUEN PROVECHO · LA MAESTRANZA · IVA INCLUIDO")
-c.showPage()
-
-# ===== P3 Comida dorso =====
-bg(); crop()
-y=header("Bocadillos calientes y platos")
-y=section(y,"Hamburguesas y sándwiches")
-for n,p,a in HAMB: y=item(y,n,p,a)
-y-=4*mm; y=section(y,"Platos combinados","10,00 · ternera 12,00")
-c.setFillColor(MUTED); c.setFont("Helvetica-Oblique",8.5); c.drawString(X0,y,"Todos con patatas y huevo"); y-=6*mm
-for n,a in COMB: y=item(y,n,None,a)
-legend(BLEED+50*mm); footer("BUEN PROVECHO · LA MAESTRANZA · IVA INCLUIDO")
-c.showPage()
+# ---------------- render ----------------
+for titulo,pie,blocks in PAGES:
+    bg(); crop(); header(titulo)
+    gap=page_gap(blocks)
+    y=Y_FIRST
+    for b in blocks:
+        if b[0]=="sec":
+            section(y,b[1],b[2]); y-=SEC_STEP
+            if b[3]:
+                c.setFillColor(MUTED); c.setFont(SANSI,FS_SUB); c.drawString(X0,y,b[3]); y-=SUB_STEP
+        elif b[0]=="items":
+            for n,p,a in b[1]:
+                item(y,n,p,a); y-=STEP
+        elif b[0]=="gap":
+            y-=gap
+    if y<Y_LEG+1*mm: AVISOS.append("la cara '%s' se come la leyenda" % titulo)
+    legend(); footer(pie)
+    c.showPage()
 c.save()
-print("PDF OK")
+
+print("PDF: %s" % os.path.join(OUT,"Cartas_La_Maestranza_ICONOS.pdf"))
+print("interlineado unico: %.2f mm  ·  cuerpo %.1f pt  ·  ratio %.2f"
+      % (STEP/mm, FS_ITEM, (STEP/mm)/(FS_ITEM*25.4/72)))
+print("alergenos en leyenda: %s" % ", ".join(USADOS))
+for a in AVISOS: print("AVISO:", a)
