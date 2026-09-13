@@ -47,6 +47,10 @@ import type { Prisma } from "@mipiacetpv/db";
 
 import { requireOwnerOrManager } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
+import {
+  setSkillsForStaff,
+  SkillMatrixError,
+} from "../agenda/skill-matrix.js";
 
 // "HH:MM" en 24h (00:00–23:59). Las horas son de pared (la recurrencia da
 // los días; la hora la ponen start/end del turno).
@@ -359,48 +363,29 @@ export async function registerStaffRoutes(app: FastifyInstance): Promise<void> {
       const body = request.body as { serviceIds: string[] };
       const user = await loadTenantUser(auth.tenantId, userId);
       if (!user) return notFoundUser(reply);
-      const prisma = getPrisma();
 
-      const profile = await loadStaffProfile(auth.tenantId, userId);
-      if (!profile) {
-        return reply.code(409).send({
-          error: "NO_STAFF_PROFILE",
-          message: "Da de alta el perfil del profesional antes de asignar servicios.",
-        });
-      }
-
-      // Deduplica y valida que cada serviceId es un servicio (kind=SERVICE)
-      // del tenant. Un id desconocido/ajeno → 400 (no se ignora en silencio).
-      const requested = [...new Set(body.serviceIds)];
-      if (requested.length > 0) {
-        const valid = await prisma.product.findMany({
-          where: {
-            tenantId: auth.tenantId,
-            id: { in: requested },
-            kind: "SERVICE",
-          },
-          select: { id: true },
-        });
-        if (valid.length !== requested.length) {
-          return reply.code(400).send({
-            error: "INVALID_SERVICE_ID",
-            message: "Algún servicio no existe o no pertenece a este negocio.",
-          });
+      // B-reservas-9 · la escritura de la matriz vive en UN sitio
+      // (`agenda/skill-matrix.ts`) y la comparten los dos lados: éste (la
+      // ficha del profesional, en el admin) y el de la ficha del servicio,
+      // que es el que usa el panel de salud del TPV. Dos implementaciones
+      // de la misma matriz acabarían divergiendo; la validación
+      // (perfil de agenda → 409, servicio ajeno → 400) también es la misma.
+      try {
+        const serviceIds = await setSkillsForStaff(
+          getPrisma(),
+          auth.tenantId,
+          userId,
+          body.serviceIds,
+        );
+        return { serviceIds };
+      } catch (err) {
+        if (err instanceof SkillMatrixError) {
+          return reply
+            .code(err.status)
+            .send({ error: err.code, message: err.message });
         }
+        throw err;
       }
-
-      // Reemplazo del set completo en transacción.
-      await prisma.$transaction([
-        prisma.staffSkill.deleteMany({ where: { userId, tenantId: auth.tenantId } }),
-        prisma.staffSkill.createMany({
-          data: requested.map((serviceId) => ({
-            userId,
-            serviceId,
-            tenantId: auth.tenantId,
-          })),
-        }),
-      ]);
-      return { serviceIds: requested };
     },
   );
 

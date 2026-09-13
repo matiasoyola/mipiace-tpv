@@ -15,6 +15,19 @@
 //   POST  /agenda/blocks                      — crear bloqueo puntual
 //   DELETE /agenda/blocks/:id                 — borrar bloqueo
 //
+// B-reservas-9 · el panel de salud y la matriz:
+//
+//   GET   /agenda/health                      — las seis tarjetas, cada una
+//                                               con su cifra, su consulta y
+//                                               su explicación
+//   GET   /agenda/skill-matrix                — servicio × profesional
+//   PUT   /agenda/skill-matrix/staff/:userId  — lado A: qué servicios da
+//   PUT   /agenda/skill-matrix/service/:id    — lado B: quién lo da
+//
+// Las dos escrituras son configuración del centro: las hace el propietario
+// o la encargada, no la cajera (`requireConfigRole`). Leer el panel sí lo
+// puede hacer cualquiera del mostrador: diagnosticar no rompe nada.
+//
 // Motor agnóstico: cero `if(businessType)`, vocabulario neutro. Lo específico
 // de cita vive en `CitaMode`; el núcleo (engine/store/GiST) es compartido.
 //
@@ -40,7 +53,14 @@ import {
   type HoldFailureReason,
 } from "./engine.js";
 import { buildAgendaDays } from "./day-view.js";
-import { resolveBookingNow } from "./floor.js";
+import { resolveBookingNow, systemClock, type Clock } from "./floor.js";
+import { runAgendaHealth } from "./health.js";
+import {
+  loadSkillMatrix,
+  setSkillsForStaff,
+  setStaffForService,
+  SkillMatrixError,
+} from "./skill-matrix.js";
 import { parseOccurredAt } from "../shift/impute.js";
 import { createAgendaStore, type AgendaStore } from "./store.js";
 import { CENTER_TZ, SLOT_MINUTES, wallTimeToUtc } from "./time.js";
@@ -79,6 +99,25 @@ async function ensureAgendaEnabled(
   request.agendaSlotMinutes = tenant.agendaSlotMinutes;
 }
 
+// B-reservas-9 · la matriz es configuración del centro. El gate de ruta ya
+// deja pasar la sesión de cajera (la agenda la usa el mostrador entero);
+// esta guarda corre DESPUÉS y sólo sobre las dos escrituras. La cajera ve
+// el panel y ve la matriz — el diagnóstico no se esconde — pero no la
+// edita, y la pantalla se lo dice en vez de dejarla fallar al guardar.
+async function requireConfigRole(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const role = request.auth?.role;
+  if (role !== "OWNER" && role !== "MANAGER") {
+    reply.code(403).send({
+      error: "FORBIDDEN",
+      message:
+        "Sólo el propietario o la encargada pueden cambiar quién da cada servicio.",
+    });
+  }
+}
+
 // B-reservas-6a · un solo sitio traduce el motor a HTTP. `NO_REQUIREMENTS`
 // es del pedido (400); todo lo demás es el hueco (409), incluido el suelo.
 function statusFor(reason: HoldFailureReason): number {
@@ -99,6 +138,10 @@ export interface AgendaRoutesOptions {
   // desde `getPrisma()`.
   store?: AgendaStore;
   prisma?: PrismaClient;
+  // B-reservas-9 · el panel de salud cuenta "las últimas 24 h", así que
+  // necesita el mismo reloj inyectable que el motor (B-6a): un panel con
+  // reloj propio no se puede probar.
+  clock?: Clock;
 }
 
 export async function registerAgendaRoutes(
@@ -108,6 +151,7 @@ export async function registerAgendaRoutes(
   const store: AgendaStore =
     opts.store ?? createAgendaStore(opts.prisma ?? getPrisma());
   const prismaFor = (): PrismaClient => opts.prisma ?? getPrisma();
+  const clock: Clock = opts.clock ?? systemClock;
 
   // B-reservas-7a · el motor se construye POR PETICIÓN, con la retícula del
   // centro que el gate acaba de leer. Antes era uno solo, creado al
@@ -622,4 +666,138 @@ export async function registerAgendaRoutes(
       return { ok: true };
     },
   );
+
+  // ── B-reservas-9 · Panel de salud ───────────────────────────────────
+  //
+  // El endpoint no calcula nada: le pide las seis tarjetas a `health.ts` y
+  // devuelve lo que salga, cifra Y explicación Y consulta. El front pinta.
+  app.get(
+    "/agenda/health",
+    { preHandler: [requireOwnerOrCashier, ensureAgendaEnabled] },
+    async (request: FastifyRequest) => {
+      const auth = request.auth!;
+      return runAgendaHealth({
+        prisma: prismaFor(),
+        tenantId: auth.tenantId,
+        now: clock.now(),
+        logError: (key, err) =>
+          request.log.error({ err, card: key }, "agenda-health card failed"),
+      });
+    },
+  );
+
+  // ── B-reservas-9 · La matriz servicio × profesional ─────────────────
+
+  app.get(
+    "/agenda/skill-matrix",
+    { preHandler: [requireOwnerOrCashier, ensureAgendaEnabled] },
+    async (request: FastifyRequest) => {
+      const auth = request.auth!;
+      const matrix = await loadSkillMatrix(prismaFor(), auth.tenantId);
+      // El front necesita saber si esta sesión puede escribir ANTES de
+      // enseñar casillas que no van a guardar (H7: nada que prometa una
+      // acción que no existe).
+      return { ...matrix, editable: canConfigure(request) };
+    },
+  );
+
+  // Lado A · desde la ficha del profesional: qué servicios da.
+  app.put(
+    "/agenda/skill-matrix/staff/:userId",
+    {
+      preHandler: [requireOwnerOrCashier, ensureAgendaEnabled, requireConfigRole],
+      schema: {
+        params: {
+          type: "object",
+          required: ["userId"],
+          properties: { userId: { type: "string", format: "uuid" } },
+        },
+        body: {
+          type: "object",
+          required: ["serviceIds"],
+          additionalProperties: false,
+          properties: {
+            serviceIds: {
+              type: "array",
+              maxItems: 500,
+              items: { type: "string", format: "uuid" },
+            },
+          },
+        },
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const auth = request.auth!;
+      const { userId } = request.params as { userId: string };
+      const { serviceIds } = request.body as { serviceIds: string[] };
+      try {
+        const saved = await setSkillsForStaff(
+          prismaFor(),
+          auth.tenantId,
+          userId,
+          serviceIds,
+        );
+        return { userId, serviceIds: saved };
+      } catch (err) {
+        return sendSkillMatrixError(reply, err);
+      }
+    },
+  );
+
+  // Lado B · desde la ficha del servicio: quién lo da. Es la vía de un clic
+  // desde la tarjeta 1 del panel.
+  app.put(
+    "/agenda/skill-matrix/service/:serviceId",
+    {
+      preHandler: [requireOwnerOrCashier, ensureAgendaEnabled, requireConfigRole],
+      schema: {
+        params: {
+          type: "object",
+          required: ["serviceId"],
+          properties: { serviceId: { type: "string", format: "uuid" } },
+        },
+        body: {
+          type: "object",
+          required: ["staffUserIds"],
+          additionalProperties: false,
+          properties: {
+            staffUserIds: {
+              type: "array",
+              maxItems: 500,
+              items: { type: "string", format: "uuid" },
+            },
+          },
+        },
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const auth = request.auth!;
+      const { serviceId } = request.params as { serviceId: string };
+      const { staffUserIds } = request.body as { staffUserIds: string[] };
+      try {
+        const saved = await setStaffForService(
+          prismaFor(),
+          auth.tenantId,
+          serviceId,
+          staffUserIds,
+        );
+        return { serviceId, staffUserIds: saved };
+      } catch (err) {
+        return sendSkillMatrixError(reply, err);
+      }
+    },
+  );
+}
+
+function canConfigure(request: FastifyRequest): boolean {
+  const role = request.auth?.role;
+  return role === "OWNER" || role === "MANAGER";
+}
+
+// Los dos lados fallan igual, con el mismo código y el mismo mensaje.
+function sendSkillMatrixError(reply: FastifyReply, err: unknown): FastifyReply {
+  if (err instanceof SkillMatrixError) {
+    return reply.code(err.status).send({ error: err.code, message: err.message });
+  }
+  throw err;
 }

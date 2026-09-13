@@ -16,6 +16,7 @@ import {
   Loader2,
   MoreVertical,
   Plus,
+  Stethoscope,
   X,
 } from "lucide-react";
 
@@ -54,6 +55,13 @@ import {
 } from "../lib/agenda.js";
 import { useClientPicker } from "../hooks/useClientPicker.js";
 import { outboxRetry, subscribeOutbox } from "../lib/outbox.js";
+import {
+  fetchAgendaHealth,
+  readHealthSnapshot,
+  serviciosSinNadie,
+} from "../lib/agenda-health.js";
+import { AgendaHealthPanel } from "./AgendaHealthPanel.js";
+import { AgendaSkillMatrix } from "./AgendaSkillMatrix.js";
 
 // ── Helpers de zona horaria (Europe/Madrid) para pintar ────────────────
 
@@ -292,6 +300,18 @@ export function AgendaPage({
   const [services, setServices] = useState<CatalogProduct[]>([]);
   const [clientsById, setClientsById] = useState<Map<string, ClientRow>>(new Map());
   const [staffFilter, setStaffFilter] = useState<string | null>(null);
+  // B-reservas-9 · el panel de salud y la matriz cuelgan de aquí: se entra y
+  // se sale sin dejar la agenda.
+  const [saludAbierta, setSaludAbierta] = useState(false);
+  const [matriz, setMatriz] = useState<{ focusServiceId: string | null } | null>(
+    null,
+  );
+  // La cifra de la tarjeta nº 1 en el botón. Un panel que hay que abrir para
+  // enterarse de que hay un problema es el mismo silencio de antes con otra
+  // pantalla: el número tiene que verse desde la agenda.
+  const [sinNadie, setSinNadie] = useState<number | null>(
+    () => serviciosSinNadie(readHealthSnapshot()?.health ?? null),
+  );
   const [draft, setDraft] = useState<DraftBooking | null>(null);
   const [detail, setDetail] = useState<AgendaAppointment | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -686,6 +706,21 @@ export function AgendaPage({
   // pasado (un día futuro).
   const pastUntilMin = isPastDay ? dayEndMin : isToday ? floorMin : null;
 
+  // B-reservas-9 · una sola lectura al abrir la agenda. Si no hay red no
+  // pasa nada: el botón se queda con la cifra de la última foto, o sin
+  // cifra. Nunca con un cero inventado.
+  useEffect(() => {
+    let cancelado = false;
+    void fetchAgendaHealth()
+      .then((snap) => {
+        if (!cancelado) setSinNadie(serviciosSinNadie(snap.health));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelado = true;
+    };
+  }, []);
+
   return (
     <div className="fixed inset-0 z-40 bg-mipiace-stone flex flex-col font-sans">
       {/* Header */}
@@ -798,26 +833,50 @@ export function AgendaPage({
         </div>
       )}
 
-      {/* Semana (tira de días) */}
-      <div className="flex gap-1 px-3 md:px-6 py-2 bg-white border-b border-slate-100 shrink-0 overflow-x-auto">
-        {Array.from({ length: 7 }, (_, i) => addDays(todayLocalDate(), i)).map(
-          (d) => (
-            <button
-              key={d}
-              onClick={() => setDate(d)}
-              className={`shrink-0 h-9 px-3 rounded-xl text-[12.5px] font-medium capitalize ${
-                d === date
-                  ? "bg-mipiace-ink text-white"
-                  : "bg-mipiace-stone text-slate-600 hover:bg-slate-200"
-              }`}
-            >
-              {new Intl.DateTimeFormat("es-ES", {
-                weekday: "short",
-                day: "numeric",
-              }).format(new Date(`${d}T12:00:00.000Z`))}
-            </button>
-          ),
-        )}
+      {/* Semana (tira de días) + la puerta del panel de salud.
+          B-reservas-9 · el botón NO va en la cabecera: a 320 px la barra ya
+          iba justa y lo que se cortaba era "Nueva cita" (B-5 F8). Aquí no
+          le quita nada a nadie — los chips de día ya hacen scroll — y la
+          cifra de servicios que nadie puede hacer se ve desde la agenda,
+          que es de lo que va el bloque: el fallo era invisible porque había
+          que saber dónde mirar. */}
+      <div className="flex items-center gap-1 px-3 md:px-6 py-2 bg-white border-b border-slate-100 shrink-0">
+        <div className="flex-1 flex gap-1 overflow-x-auto">
+          {Array.from({ length: 7 }, (_, i) => addDays(todayLocalDate(), i)).map(
+            (d) => (
+              <button
+                key={d}
+                onClick={() => setDate(d)}
+                className={`shrink-0 h-9 px-3 rounded-xl text-[12.5px] font-medium capitalize ${
+                  d === date
+                    ? "bg-mipiace-ink text-white"
+                    : "bg-mipiace-stone text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                {new Intl.DateTimeFormat("es-ES", {
+                  weekday: "short",
+                  day: "numeric",
+                }).format(new Date(`${d}T12:00:00.000Z`))}
+              </button>
+            ),
+          )}
+        </div>
+        <button
+          onClick={() => setSaludAbierta(true)}
+          className={`ml-1 h-11 px-3 shrink-0 rounded-2xl text-[13px] font-medium flex items-center gap-1.5 ${
+            sinNadie !== null && sinNadie > 0
+              ? "bg-mipiace-coral-soft text-mipiace-coral-dark"
+              : "bg-mipiace-stone text-slate-600 hover:bg-slate-200"
+          }`}
+          aria-label="Salud de la agenda"
+        >
+          <Stethoscope className="w-[18px] h-[18px]" strokeWidth={2.25} />
+          {sinNadie !== null && sinNadie > 0 && (
+            <span data-test="badge-salud" className="tabular-nums font-semibold">
+              {sinNadie}
+            </span>
+          )}
+        </button>
       </div>
 
       {/* B-reservas-7a · el día CERRADO se dice arriba y con su nombre, no
@@ -1044,6 +1103,29 @@ export function AgendaPage({
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-mipiace-ink text-white text-[13px] px-4 py-2 rounded-xl shadow-lg z-50">
           {toast}
         </div>
+      )}
+
+      {/* B-reservas-9 · el panel de salud y la matriz. Van encima de la
+          agenda y se cierran a ella: el criterio del bloque es que el fallo
+          se arregle SIN salir de la agenda. */}
+      {saludAbierta && (
+        <AgendaHealthPanel
+          onClose={() => setSaludAbierta(false)}
+          onOpenMatrix={(focusServiceId) => setMatriz({ focusServiceId })}
+        />
+      )}
+      {matriz && (
+        <AgendaSkillMatrix
+          focusServiceId={matriz.focusServiceId}
+          onClose={() => {
+            setMatriz(null);
+            // Al volver de arreglar la matriz, la cifra del botón se relee:
+            // si ya no hay servicios huérfanos, el aviso se va solo.
+            void fetchAgendaHealth()
+              .then((snap) => setSinNadie(serviciosSinNadie(snap.health)))
+              .catch(() => undefined);
+          }}
+        />
       )}
     </div>
   );
