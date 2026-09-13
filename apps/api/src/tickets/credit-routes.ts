@@ -258,6 +258,13 @@ export async function registerCreditRoutes(app: FastifyInstance): Promise<void> 
       if (!ticket) {
         return reply.code(404).send({ error: "TICKET_NOT_FOUND", message: "Ticket no encontrado." });
       }
+      // catalogo-local · ¿hay destino en Holded? Al saldarse, el fiado
+      // pasa a PAID y ESE sí se encola (variante B). Sin clave, no.
+      const tenantForUpload = await prisma.tenant.findUniqueOrThrow({
+        where: { id: cashier.tid },
+        select: { holdedApiKeyCiphertext: true },
+      });
+      const tenantHasHoldedKey = tenantForUpload.holdedApiKeyCiphertext != null;
       if (ticket.status !== TicketStatus.ON_CREDIT || ticket.creditPending == null) {
         return reply.code(409).send({
           error: "NOT_ON_CREDIT",
@@ -307,7 +314,7 @@ export async function registerCreditRoutes(app: FastifyInstance): Promise<void> 
         });
         // Al saldar, crear la fila de upload (el gate ya lo autoriza en
         // PAID). Antes de esto un fiado nunca tuvo HoldedUpload.
-        if (settled && shouldEnqueueHoldedUpload(updated.status)) {
+        if (settled && shouldEnqueueHoldedUpload(updated.status, tenantHasHoldedKey)) {
           await tx.holdedUpload.upsert({
             where: { externalId: ticket.externalId },
             create: {
@@ -332,7 +339,7 @@ export async function registerCreditRoutes(app: FastifyInstance): Promise<void> 
       });
 
       // Encolar la subida fuera de la tx (sólo al saldar).
-      if (settled && shouldEnqueueHoldedUpload(result.status)) {
+      if (settled && shouldEnqueueHoldedUpload(result.status, tenantHasHoldedKey)) {
         try {
           await enqueueTicketUpload(ticket.externalId);
         } catch (err) {

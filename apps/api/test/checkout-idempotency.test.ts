@@ -174,7 +174,11 @@ const fakePrisma: Record<string, unknown> = {
     findFirst: vi.fn(async () => null),
   },
   tenant: {
-    findUniqueOrThrow: vi.fn(async () => ({ discountThresholdPct: 10 })),
+    findUniqueOrThrow: vi.fn(async () => ({
+      discountThresholdPct: 10,
+      // catalogo-local · este tenant tiene Holded (ver tickets-route.test.ts).
+      holdedApiKeyCiphertext: "cipher",
+    })),
   },
   holdedUpload: {
     upsert: vi.fn(async ({ where, create }: any) => {

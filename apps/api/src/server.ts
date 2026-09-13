@@ -17,6 +17,7 @@ import { registerAuthRoutes } from "./auth/routes.js";
 import { registerPasswordResetRoutes } from "./auth/password-reset.js";
 import { registerCashiersRoutes } from "./cashiers/routes.js";
 import { registerCatalogRoutes } from "./catalog/routes.js";
+import { registerLocalCatalogRoutes } from "./catalog/local-products.js";
 import { registerContactsRoutes } from "./contacts/routes.js";
 import { registerContactImportRoutes } from "./contacts/import.js";
 import { registerCrmRoutes } from "./crm/routes.js";
@@ -161,6 +162,8 @@ async function main() {
   await registerPasswordResetRoutes(app);
   await registerOnboardingRoutes(app);
   await registerCatalogRoutes(app);
+  // catalogo-local · el CRUD del catálogo propio (ADR-017).
+  await registerLocalCatalogRoutes(app);
   await registerContactsRoutes(app);
   await registerContactImportRoutes(app);
   await registerCrmRoutes(app);

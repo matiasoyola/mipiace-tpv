@@ -83,8 +83,20 @@ export async function archiveMissingProducts(
   options: ArchiveMissingOptions = {},
 ): Promise<ArchiveMissingResult> {
   const log = options.logger ?? consoleLogger();
+  // catalogo-local · este contador alimenta la protección anti-catástrofe
+  // de abajo (`liveIds.size < localActiveBefore * MIN_LIVE_RATIO`), que
+  // compara el listado VIVO de Holded contra nuestra cache DE HOLDED. Un
+  // producto local no está en ninguno de los dos lados de esa
+  // comparación: contarlo infla el denominador y aborta conciliaciones
+  // legítimas. Un tenant con 50 fichas de Holded y 200 locales abortaría
+  // siempre, y dejaría de archivar lo que Holded sí borró.
+  //
+  // Aviso de vocabulario: "local" en el nombre de esta variable y en los
+  // comentarios de este fichero significa "en nuestra base", que es como
+  // se escribió en v1.9, y NO `source = LOCAL`. Aquí chocan los dos
+  // sentidos por primera vez.
   const localActiveBefore = await prisma.product.count({
-    where: { tenantId, active: true },
+    where: { tenantId, active: true, source: "HOLDED" },
   });
 
   const result: ArchiveMissingResult = {
@@ -124,10 +136,23 @@ export async function archiveMissingProducts(
 
   // Candidatos a archivar: activos que Holded ya no lista. Los leemos
   // antes del UPDATE para poder loguear una muestra con nombre.
+  //
+  // catalogo-local · `source: "HOLDED"` es LA PUERTA de la conciliación.
+  // Un producto local no puede ser archivado por "no estar en Holded":
+  // es que nunca estuvo, y archivarlo dejaría de venderlo en el TPV sin
+  // que nadie hubiera hecho nada.
+  //
+  // El filtro es explícito y no se apoya en el `notIn`. En SQL, un
+  // `holded_product_id NULL NOT IN (...)` evalúa a NULL y la fila no
+  // entra — así que los locales ya quedarían fuera por accidente. Pero
+  // por accidente no vale: si algún día alguien cambia ese `notIn` por
+  // otra cosa, la protección desaparecería en silencio. La condición
+  // dice lo que quiere decir.
   const missing = await prisma.product.findMany({
     where: {
       tenantId,
       active: true,
+      source: "HOLDED",
       holdedProductId: { notIn: [...liveIds] },
     },
     select: { holdedProductId: true, name: true },
@@ -140,6 +165,10 @@ export async function archiveMissingProducts(
     where: {
       tenantId,
       active: true,
+      // catalogo-local · la misma puerta que en el SELECT de arriba. Van
+      // las dos porque son dos consultas distintas: la de la muestra y
+      // la que escribe. La que hace daño es ésta.
+      source: "HOLDED",
       holdedProductId: { notIn: [...liveIds] },
     },
     data: {
@@ -151,7 +180,10 @@ export async function archiveMissingProducts(
   result.archived = updated.count;
   result.archivedSample = missing
     .slice(0, ARCHIVED_SAMPLE_MAX)
-    .map((p) => ({ holdedProductId: p.holdedProductId, name: p.name }));
+    // Un HOLDED sin enlace no existe, pero el tipo lo admite desde que
+    // la columna es nullable. `?? ""` mantiene la forma del log sin
+    // inventar un id.
+    .map((p) => ({ holdedProductId: p.holdedProductId ?? "", name: p.name }));
 
   log.info("conciliación: productos borrados en Holded archivados", {
     tenantId,

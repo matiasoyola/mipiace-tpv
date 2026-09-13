@@ -85,11 +85,18 @@ export async function backfillImagesFromHolded(
   log: ImageBackfillLogger,
 ): Promise<ImageBackfillResult> {
   const cutoff = new Date(Date.now() - REVALIDATE_AFTER_MS);
+  // catalogo-local · el backfill descarga la imagen DESDE HOLDED por
+  // `holdedProductId`. Un producto local no tiene ficha allí y su
+  // `imageUrl` es siempre NULL (sólo la escribe el sync), así que jamás
+  // sería candidato — pero entrar aquí con el enlace a NULL pediría
+  // imágenes de un id inexistente en cada pasada.
   const pending = await prisma.product.findMany({
     where: {
       tenantId,
       active: true,
       kind: "PRODUCT",
+      source: "HOLDED",
+      holdedProductId: { not: null },
       OR: [
         { imageCachedAt: null },
         { imageCachedAt: { lt: cutoff } },
@@ -115,6 +122,9 @@ export async function backfillImagesFromHolded(
   >();
   const holdedIds: string[] = [];
   for (const p of pending) {
+    // Garantizado por el `not: null` de la consulta; Prisma sigue
+    // tipándolo nullable y el estrechamiento va aquí.
+    if (p.holdedProductId == null) continue;
     byHoldedId.set(p.holdedProductId, {
       localId: p.id,
       previousMime: p.imageMime,

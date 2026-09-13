@@ -238,7 +238,10 @@ const fakePrisma = {
     update: vi.fn(async () => ({ ticketCounter: 1 })),
   },
   tenant: {
-    findUniqueOrThrow: vi.fn(async () => ({ discountThresholdPct: dec(10) })),
+    findUniqueOrThrow: vi.fn(async () => ({
+      discountThresholdPct: dec(10),
+      holdedApiKeyCiphertext: "cipher",
+    })),
   },
   user: {
     findFirst: vi.fn(async () => null),

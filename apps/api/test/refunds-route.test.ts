@@ -33,6 +33,13 @@ let originalTicket: any;
 const refundsByExternalId = new Map<string, any>();
 
 const fakePrisma = {
+  // catalogo-local · `POST /refunds` lee ahora el tenant para saber si
+  // hay Holded al otro lado: sin clave no se crea la fila de upload ni
+  // se encola. Este fake declara que SÍ la hay, que es el comercio que
+  // estos tests describen.
+  tenant: {
+    findUniqueOrThrow: vi.fn(async () => ({ holdedApiKeyCiphertext: "cipher" })),
+  },
   refund: {
     findUnique: vi.fn(async ({ where }: any) =>
       refundsByExternalId.get(where.externalId) ?? null,

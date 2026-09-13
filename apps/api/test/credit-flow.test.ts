@@ -152,6 +152,9 @@ const fakePrisma: any = {
     findUniqueOrThrow: vi.fn(async () => ({
       discountThresholdPct: { toString: () => "10" },
       creditSalesEnabled,
+      // catalogo-local · este tenant tiene Holded: al saldarse el fiado
+      // pasa a PAID y se encola, que es justo lo que el test comprueba.
+      holdedApiKeyCiphertext: "cipher",
     })),
   },
   user: {

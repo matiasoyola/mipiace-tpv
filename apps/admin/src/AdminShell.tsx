@@ -15,6 +15,7 @@ import {
   Package,
   Printer,
   RefreshCw,
+  ScanBarcode,
   Settings,
   Shield,
   Tag,
@@ -99,7 +100,26 @@ const NAV_ITEMS: NavItem[] = [
   // verdad. Sin Holded no tiene destino: el endpoint aborta y el
   // propietario se queda mirando un error. Se esconde.
   { to: "/admin/contacts-import", label: "Importar clientes", icon: UserPlus, ownerOnly: true, capability: "holded" },
-  { to: "/admin/products", label: "Productos", icon: Package, capability: "caja" },
+  // catalogo-local · el CRUD del catálogo propio. Es "dónde están mis
+  // productos" para cualquier comercio con caja, tenga Holded o no: con
+  // Holded se listan en sólo lectura, sin Holded se dan de alta aquí.
+  { to: "/admin/catalog", label: "Catálogo", icon: Package, capability: "caja" },
+  // catalogo-local · esta entrada se llamaba "Productos" y llevaba a la
+  // bandeja de SKUs que Holded silenció. Dos cambios y ninguno toca la
+  // pantalla por dentro:
+  //
+  //   · **El nombre.** Con "Catálogo" al lado, "Productos" era ambiguo:
+  //     dos etiquetas que significan lo mismo para cualquiera que no
+  //     haya escrito el código. "Revisión de SKU" dice lo que es, y
+  //     coincide con el título que ya se lee al entrar ("Productos
+  //     pendientes de SKU").
+  //   · **La capability pasa de `caja` a `holded`.** La bandeja existe
+  //     porque el auto-SKU subió un SKU a Holded y Holded lo descartó en
+  //     silencio (ADR-010). Sin Holded no puede tener ni una fila, y su
+  //     texto entero habla de Holded. Enseñarle al comercio de catálogo
+  //     local una sección permanentemente vacía que le habla de un ERP
+  //     que no usa es justo lo que H1 vino a quitar del panel.
+  { to: "/admin/products", label: "Revisión de SKU", icon: ScanBarcode, capability: "holded" },
   // B-reservas-2: catálogo de agenda (duración/pausas/canales + recursos).
   // Sólo visible si el tenant tiene la capability `agenda` activada.
   {

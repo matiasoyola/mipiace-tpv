@@ -6,6 +6,7 @@ import { AdminShell } from "./AdminShell.js";
 import { CajaGate } from "./CajaGate.js";
 import { ImpersonationBootstrap } from "./components/ImpersonationBootstrap.js";
 import { CashiersPage } from "./pages/CashiersPage.js";
+import { CatalogoPage } from "./pages/CatalogoPage.js";
 import { DevicesPage } from "./pages/DevicesPage.js";
 import { GiftReceiptsPage } from "./pages/GiftReceiptsPage.js";
 import { HoldedPage } from "./pages/HoldedPage.js";
@@ -113,6 +114,13 @@ export function App() {
             "Tiendas", "Personal", "Agenda · Catálogo" y "Agenda · Horario"
             NO se envuelven: valen sin caja. */}
         <Route path="/admin/account" element={<AccountPage />} />
+        {/* catalogo-local · el CRUD del catálogo propio. Va envuelto en
+            <CajaGate> como el resto de lo que cuelga de la caja: sin caja
+            no hay TPV que vender, así que no hay catálogo que mantener. */}
+        <Route path="/admin/catalog" element={<CajaGate title="Catálogo"><CatalogoPage /></CajaGate>} />
+        {/* catalogo-local · la bandeja de SKU sigue exactamente donde
+            estaba y como estaba. Lo único que cambió es su etiqueta en el
+            sidebar ("Revisión de SKU") y su capability (`holded`). */}
         <Route path="/admin/products" element={<CajaGate title="Productos"><SkuReviewPage /></CajaGate>} />
         <Route path="/admin/devices" element={<CajaGate title="Dispositivos"><DevicesPage /></CajaGate>} />
         <Route path="/admin/cashiers" element={<CajaGate title="Cajeros"><CashiersPage /></CajaGate>} />

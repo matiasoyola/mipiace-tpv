@@ -403,6 +403,11 @@ async function upsertCatalogEntry(
     create: {
       tenantId,
       holdedProductId: raw.id,
+      // catalogo-local · lo que nace del sync nace HOLDED. Es el valor
+      // por defecto de la columna, pero se escribe explícito: este
+      // `create` es LA definición de "producto de Holded", y leerlo aquí
+      // evita tener que ir al schema para saber qué sale.
+      source: "HOLDED",
       name: raw.name,
       sku,
       barcode,
