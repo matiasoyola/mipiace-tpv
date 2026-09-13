@@ -70,6 +70,9 @@ vi.mock("../src/lib/catalog.js", () => ({
   getCachedBusinessType: () => "HOSPITALITY" as const,
   getCachedCrmEnabled: () => false,
   getCachedAgendaEnabled: () => false,
+  // catalogo-local (addendum 3) · default TRUE, como en la caché real:
+  // un TPV que no ha refrescado se comporta como antes del bloque.
+  getCachedHoldedEnabled: () => true,
   getCachedCreditSalesEnabled: () => false,
   getCachedIconPreset: () => null,
   getCachedTagAliases: () => ({}),

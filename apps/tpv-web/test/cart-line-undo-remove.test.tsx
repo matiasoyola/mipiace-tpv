@@ -51,6 +51,9 @@ vi.mock("../src/lib/catalog.js", () => ({
   getCachedBusinessType: () => "HOSPITALITY" as const,
   getCachedCrmEnabled: () => false,
   getCachedAgendaEnabled: () => false,
+  // catalogo-local (addendum 3) · default TRUE, como en la caché real:
+  // un TPV que no ha refrescado se comporta como antes del bloque.
+  getCachedHoldedEnabled: () => true,
   // v1.8-fiado añadió este export a catalog.ts DESPUÉS de escribirse
   // este mock (conflicto semántico del merge v1.9.1 × v1.8, CI #45):
   // SalePage lo importa, así que el mock debe declararlo.

@@ -55,6 +55,12 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
               creditSalesEnabled: true,
               crmEnabled: true,
               agendaEnabled: true,
+              // catalogo-local (addendum 3) · el TPV necesita saber si el
+              // comercio USA Holded, no si lo tiene conectado. Lo pide una
+              // sola frase, la del catálogo vacío, y por eso no había
+              // manera de acertarla sin este dato: mandaba al cajero a
+              // configurar sus productos en un ERP que no existe.
+              holdedEnabled: true,
               // H1 (ADR-016) · sirve para dos cosas a la vez: cerrar la
               // puerta aquí mismo y viajar al TPV para que esconda lo
               // que no aplica. La puerta es ésta; el flag cacheado es UI.
@@ -169,6 +175,9 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
               // puerta sigue siendo el servidor (arriba, en este mismo
               // handler): un catálogo cacheado no abre nada.
               cajaEnabled: tenant.cajaEnabled,
+              // catalogo-local (addendum 3) · viaja con sus hermanos y se
+              // cachea igual. Es UI: aquí no gatea nada.
+              holdedEnabled: tenant.holdedEnabled,
               // v1.3-Operativa-Extra · Lote 1: alias editable de tags
               // (`slug` tal como llega de Holded en lowercase → `label`
               // a pintar en el chip).

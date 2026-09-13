@@ -75,6 +75,7 @@ import {
   getCachedCreditSalesEnabled,
   getCachedCrmEnabled,
   getCachedAgendaEnabled,
+  getCachedHoldedEnabled,
   getCachedTagAliases,
   getCachedTenantId,
   loadCatalogFromCache,
@@ -3009,6 +3010,9 @@ function SaleWorkspace({
   // tenant tiene la agenda activa; en caso contrario queda vacío y el
   // ticket no muestra duraciones (base visual para B4).
   const agendaEnabled = getCachedAgendaEnabled();
+  // catalogo-local (addendum 3) · sólo decide una frase, la del catálogo
+  // vacío. No gatea nada: la puerta de la caja sigue siendo el servidor.
+  const holdedEnabled = getCachedHoldedEnabled();
   const durationByProduct = useMemo(() => {
     const map = new Map<string, number>();
     if (!agendaEnabled) return map;
@@ -3236,20 +3240,25 @@ function SaleWorkspace({
             Copy adaptado por vertical para que el dueño SERVICES no
             vea "productos" cuando vende servicios. Desde v1.9.1 exige
             además que no haya búsqueda activa (ese caso va arriba). */}
+        {/* catalogo-local (addendum 3) · la frase depende de DÓNDE nace
+            el catálogo de este comercio. Lo encontró el bucle visual: al
+            comercio de catálogo local se le decía "Configúralos en
+            Holded o sincroniza", que es mandarlo a un ERP que no ha
+            comprado y a un sync que no existe. Su catálogo se da de alta
+            en el panel, en "Catálogo". */}
         {!catalogError &&
           products.length === 0 &&
-          searchQuery.trim().length === 0 &&
-          (businessType === "SERVICES" ? (
+          searchQuery.trim().length === 0 && (
             <div className="text-[13px] text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4">
-              Aún no has cargado servicios. Configúralos en Holded o
-              sincroniza para verlos aquí.
+              {holdedEnabled
+                ? businessType === "SERVICES"
+                  ? "Aún no has cargado servicios. Configúralos en Holded o sincroniza para verlos aquí."
+                  : "Aún no has cargado productos. Configúralos en Holded o sincroniza para verlos aquí."
+                : businessType === "SERVICES"
+                  ? "Todavía no hay servicios. Se dan de alta desde el panel, en Catálogo, y aparecen aquí al momento."
+                  : "Todavía no hay productos. Se dan de alta desde el panel, en Catálogo, y aparecen aquí al momento."}
             </div>
-          ) : (
-            <div className="text-[13px] text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4">
-              Aún no has cargado productos. Configúralos en Holded o
-              sincroniza para verlos aquí.
-            </div>
-          ))}
+          )}
         {/* v1.3-Servicios-Pinta · Lote 5: filtro vacío (búsqueda, tag
             o ambos) con catálogo no vacío. SERVICES dice "servicios";
             RETAIL/HOSPITALITY mantienen "productos". */}

@@ -52,15 +52,14 @@ imposible por partida doble: `Product.holded_product_id` era `NOT NULL` y no exi
 ruta de escritura de producto en el admin; y aunque hubiera existido, **el propietario no
 podía llegar a ella**, porque caía en la pantalla de "Conectar Holded" y no salía.
 
-Dos commits en la rama:
+Cuatro commits en la rama:
 
 | Commit | Qué cierra |
 |---|---|
 | `0f5a113` | El prompt + addenda 1 y 2: datos, CRUD, las cuatro puertas, y el arreglo del encolado |
 | `614d9bd` | El addendum 3: `Tenant.holdedEnabled`, el muro, el predicado de tres estados, el toggle del super-admin |
-| (este) | ADR-017, done-doc, capturas y los tres arreglos del bucle visual |
-
-45 ficheros, +5 932 / −110.
+| `d8799ab` | ADR-017, done-doc, capturas del admin y los cinco arreglos de su bucle visual |
+| (este) | El bucle visual de la **rejilla del TPV** y sus dos arreglos (§9.2) |
 
 ### 1.1 La forma final del dato
 
@@ -240,9 +239,11 @@ deshabilitado, pero eso es cortesía: la puerta es el 409.
   Holded no cambian de comportamiento, no con una cuenta viva.
 - **La migración sobre las bases de producción.** Se midió sobre una réplica del schema real
   con 200.000 productos, no sobre los datos de Sole.
-- **El TPV pintando un producto local.** El e2e comprueba que sale por
-  `/tpv/catalog/products` y que se cobra; que la grid lo pinte bien no lo mira nadie
-  automáticamente.
+- **La rejilla del TPV como test de regresión.** Ya está mirada — el bucle visual del §9.2
+  cubre la rejilla local, la mixta, los dos catálogos vacíos y el ticket con una línea local —
+  pero son capturas de un momento: nadie las compara automáticamente en el siguiente commit.
+  Lo que sí tiene test es el flag del que depende la frase (`catalogo-local-tpv.test.ts` y
+  `h1-caja-al-tpv.test.ts`).
 - **El día que un tenant local conecte Holded.** El forward-only está escrito y el código no
   intenta subir nada, pero el casamiento por SKU es otro bloque y no hay test de algo que no
   existe.
@@ -385,14 +386,60 @@ fixtures de admin que mantener. A **1280×800, 390 y 320**, DPR 1. Capturas en
 Los cinco tienen su arreglo en el tercer commit; 2 y 4 llevan test propio, 1/3/5 son de
 presentación y viven en las capturas.
 
+### 9.2 · Segundo bucle: la REJILLA DEL TPV con catálogo local
+
+Decisión de Matías: era la mitad visual del criterio 1 y estaba sin mirar. Misma receta, contra
+el TPV de verdad (`:5174`), entrando por el **modo prueba** — el único camino que no pide
+emparejar un dispositivo ni teclear un PIN.
+
+⚠️ **Detalle de la receta que costó media hora**: el TPV registra un **service worker** en dev
+(`VitePWA.devOptions.enabled`), y un SW se salta `page.route`. Las peticiones del catálogo
+salían a la red real y volvían 401, así que la rejilla aparecía vacía de forma intermitente. El
+contexto se abre con `serviceWorkers: "block"`.
+
+| Captura | Qué enseña |
+|---|---|
+| `tpv-local-rejilla-1280 · -390 · -320` | La rejilla del comercio del bloque: ocho fichas locales, **ninguna con imagen** —que es el caso normal, el alta local no pide foto— con su banda de color por categoría, el nombre a dos líneas con elipsis y el precio en `tabular-nums` pesando más que el nombre |
+| `tpv-mixto-rejilla-1280 · -390 · -320` | Locales y de Holded en la MISMA rejilla. Se ven **exactamente iguales**, y es lo correcto: al cajero el origen de la ficha no le sirve para nada. El TPV no filtra ni distingue por `source` |
+| `tpv-vacio-local-1280 · -390` | El catálogo vacío del comercio local: *"Todavía no hay servicios. Se dan de alta desde el panel, en Catálogo, y aparecen aquí al momento"* |
+| `tpv-vacio-holded-1280` | **La captura de control**: el mismo vacío en un comercio con Holded sigue diciendo *"Configúralos en Holded o sincroniza"*, palabra por palabra como antes del bloque |
+| `tpv-local-ticket-1280 · -390 · -320` | El ticket con una línea local dentro: 18,50 + 3,89 de IVA = 22,39 €, y el botón de cobrar activo |
+
+**Lo que este bucle cambió:**
+
+1. **El catálogo vacío mandaba al comercio de catálogo local a configurar sus productos en
+   Holded.** *"Aún no has cargado productos. Configúralos en Holded o sincroniza para verlos
+   aquí."* Es un ERP que no ha comprado y un sync que no va a correr nunca. Para poder acertar
+   la frase, el TPV necesitaba el dato: `holdedEnabled` viaja ahora en la primera página de
+   `/tpv/catalog/products` y se cachea como sus hermanos. **Con test en los dos lados**, y con
+   la captura de control que demuestra que al de Holded no le cambia la frase.
+2. **`CatalogProduct.holdedProductId` estaba tipado como `string`** y el dato llegaba `null`
+   desde que la columna pasó a nullable. No reventaba nada —`cart.ts` sí lo tenía bien y el
+   checkout manda `?? undefined`— pero el tipo mentía, y el siguiente que escriba
+   `p.holdedProductId!` se lo cree. Tipo corregido, con test.
+
+⚠️ **El default del flag nuevo es TRUE, y ésa es la parte peligrosa.** Igual que `cajaEnabled`
+(H1) y al revés que `crmEnabled`/`agendaEnabled`: un TPV que aún no haya refrescado el catálogo
+tiene que comportarse como antes del bloque. Si alguien lo invierte, los cinco TPV de
+producción pasarían a decirle al cajero que sus productos se dan de alta en el panel — donde no
+puede crearlos, porque su alta local está cerrada. Hay test del default y de que sólo un `"0"`
+lo apaga.
+
+**Lo que se vio y NO se ha tocado, a propósito:** en el panel del ticket, el nombre de la línea
+se trunca pronto (`Corte de p…` con la columna a 360 px), porque el paso de unidades y el
+importe se llevan el ancho. Es **anterior a este bloque y común a todos los verticales** —no
+tiene nada que ver con el catálogo local, que llega con nombres igual de largos que Holded—, y
+tocar el layout de la línea del ticket para todo el mundo no cabe en este frente. Queda dicho
+aquí con su captura para que sea una decisión y no un descuido.
+
 ---
 
 ## 10 · Estado de la suite
 
 ```
-pnpm test            (desde la raíz)   203 ficheros · 1991 tests · 3 skipped · verde
+pnpm test            (desde la raíz)   204 ficheros · 2000 tests · 3 skipped · verde
 pnpm test:e2e        (Postgres real)     8 ficheros ·  110 tests · verde
-tsc --noEmit         api y admin        limpio
+tsc --noEmit         api, admin y tpv-web           limpio
 ```
 
 El e2e necesita `E2E_DATABASE_URL` y **hace DROP SCHEMA**: base desechable y propia, nunca la
@@ -422,5 +469,5 @@ de desarrollo de nadie.
 2. **El `taxRate` local no se casa** con ningún `holdedTaxId`. Anotado en ADR-017 §3.2, con el
    aviso de que convertir `Product.taxRate` en una relación rompería este bloque entero.
 3. **El catálogo mixto** y su conversación de producto.
-4. **Que el TPV pinte bien un catálogo local** — el e2e llega hasta el cobro; la grid no la
-   mira nadie automáticamente.
+4. **El ancho del nombre en la línea del ticket** (§9.2). Anterior a este bloque y común a
+   todos los verticales; se mira cuando toque el checkout, no aquí.

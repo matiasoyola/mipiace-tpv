@@ -7,7 +7,13 @@ import { apiWithCashier } from "../api.js";
 
 export interface CatalogProduct {
   id: string;
-  holdedProductId: string;
+  // catalogo-local · NULLABLE desde el escalón 2. Un producto que nació
+  // en la BD no tiene enlace con Holded y nunca lo tendrá en este
+  // bloque. Estaba tipado como `string` y el dato ya llegaba null: el
+  // carrito (`cart.ts`) sí lo tenía bien y por eso no reventaba nada,
+  // pero el tipo mentía y el siguiente que escriba `p.holdedProductId!`
+  // se lo cree.
+  holdedProductId: string | null;
   name: string;
   sku: string;
   barcode: string | null;
@@ -69,6 +75,11 @@ const AGENDA_ENABLED_KEY = "mipiacetpv-catalog-agenda-enabled";
 // CAJA_DISABLED del servidor; esto es sólo para que la PWA pinte la
 // frase sin esperar a la red.
 const CAJA_ENABLED_KEY = "mipiacetpv-catalog-caja-enabled";
+// catalogo-local (addendum 3) · ¿está previsto que el comercio use
+// Holded? Mismo default ASIMÉTRICO que `CAJA_ENABLED_KEY`: se compara
+// con "0", porque la columna nace en `true` y un TPV que aún no haya
+// refrescado tiene que comportarse como antes del bloque.
+const HOLDED_ENABLED_KEY = "mipiacetpv-catalog-holded-enabled";
 
 export type BusinessType = "HOSPITALITY" | "RETAIL" | "SERVICES";
 
@@ -136,6 +147,16 @@ export function getCachedCajaEnabled(): boolean {
 
 export function setCachedCajaEnabled(value: boolean): void {
   localStorage.setItem(CAJA_ENABLED_KEY, value ? "1" : "0");
+}
+
+// catalogo-local (addendum 3) · `true` salvo que el servidor haya dicho
+// explícitamente que no. Misma asimetría que `getCachedCajaEnabled`.
+export function getCachedHoldedEnabled(): boolean {
+  return localStorage.getItem(HOLDED_ENABLED_KEY) !== "0";
+}
+
+export function setCachedHoldedEnabled(value: boolean): void {
+  localStorage.setItem(HOLDED_ENABLED_KEY, value ? "1" : "0");
 }
 
 export function setCachedBusinessType(value: BusinessType): void {
@@ -265,6 +286,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
   let lastCrmEnabled: boolean | undefined = undefined;
   let lastAgendaEnabled: boolean | undefined = undefined;
   let lastCajaEnabled: boolean | undefined = undefined;
+  let lastHoldedEnabled: boolean | undefined = undefined;
   for (let safety = 0; safety < 200; safety++) {
     const res = await apiWithCashier<{
       items: CatalogProduct[];
@@ -277,6 +299,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
       crmEnabled?: boolean;
       agendaEnabled?: boolean;
       cajaEnabled?: boolean;
+      holdedEnabled?: boolean;
     }>(
       `/tpv/catalog/products${cursor ? `?cursor=${cursor}&limit=500` : "?limit=500"}`,
     );
@@ -309,6 +332,9 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
     if (res.cajaEnabled !== undefined) {
       lastCajaEnabled = res.cajaEnabled;
     }
+    if (res.holdedEnabled !== undefined) {
+      lastHoldedEnabled = res.holdedEnabled;
+    }
     if (!res.nextCursor) break;
     cursor = res.nextCursor;
   }
@@ -321,6 +347,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
   if (lastCrmEnabled !== undefined) setCachedCrmEnabled(lastCrmEnabled);
   if (lastAgendaEnabled !== undefined) setCachedAgendaEnabled(lastAgendaEnabled);
   if (lastCajaEnabled !== undefined) setCachedCajaEnabled(lastCajaEnabled);
+  if (lastHoldedEnabled !== undefined) setCachedHoldedEnabled(lastHoldedEnabled);
   if (lastTagAliases !== undefined) {
     const map: Record<string, string> = {};
     for (const a of lastTagAliases) map[a.slug] = a.label;
