@@ -145,6 +145,12 @@ export function CatalogoPage() {
 
   const canCreate = usaHolded === false;
   const items = data?.items ?? [];
+  // El catálogo vacío de verdad (no una búsqueda sin resultados) pinta su
+  // propio "Nuevo producto" dentro del estado vacío. Lo encontró el bucle
+  // visual: se veían los DOS a la vez, uno encima del otro, en una
+  // pantalla donde no hay nada más. El de la barra se calla.
+  const vacioDeVerdad =
+    data != null && items.length === 0 && search.trim() === "" && filter === "ALL";
 
   return (
     <AdminShell title="Catálogo">
@@ -185,7 +191,7 @@ export function CatalogoPage() {
             className="w-full h-11 pl-10 pr-3.5 rounded-xl bg-white border border-slate-200 text-[14px] text-mipiace-ink placeholder:text-slate-400 focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none"
           />
         </div>
-        {canCreate && editing !== "new" && (
+        {canCreate && editing !== "new" && !vacioDeVerdad && (
           <PrimaryButton
             type="button"
             onClick={() => setEditing("new")}
@@ -235,7 +241,12 @@ export function CatalogoPage() {
         />
       )}
 
-      {!data ? (
+      {/* El error y el cargador son EXCLUYENTES. Lo encontró el bucle
+          visual: al fallar la carga, `data` seguía en `null` y la
+          pantalla pintaba el aviso rojo Y un "Cargando catálogo…"
+          girando debajo, para siempre. Quien lo viera entendería que
+          todavía está intentándolo. */}
+      {!data && error ? null : !data ? (
         <CenteredLoader label="Cargando catálogo…" />
       ) : items.length === 0 ? (
         <EmptyState
@@ -312,9 +323,20 @@ function ProductRow({ product, onEdit }: { product: Product; onEdit: () => void 
             {/* El origen se dice siempre que haya algo que distinguir. */}
             {product.source === "HOLDED" && <Badge tone="slate">De Holded</Badge>}
           </div>
-          <div className="text-[12.5px] text-slate-500 mt-1 tabular-nums break-all">
-            {product.sku ?? "Sin SKU"} · IVA {product.taxRate}%
-            {product.barcode ? ` · ${product.barcode}` : ""}
+          {/* `break-all` en toda la línea partía el código de barras por
+              la mitad a 320 px ("8 412345678905"), y un EAN partido no se
+              puede leer ni teclear. Se parte entre campos, no dentro:
+              cada trozo va en su `span` que no se rompe. */}
+          <div className="text-[12.5px] text-slate-500 mt-1 tabular-nums flex flex-wrap gap-x-1.5">
+            <span className="break-all">{product.sku ?? "Sin SKU"}</span>
+            <span aria-hidden>·</span>
+            <span className="whitespace-nowrap">IVA {product.taxRate}%</span>
+            {product.barcode && (
+              <>
+                <span aria-hidden>·</span>
+                <span className="whitespace-nowrap">{product.barcode}</span>
+              </>
+            )}
           </div>
           {product.tags.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mt-2">

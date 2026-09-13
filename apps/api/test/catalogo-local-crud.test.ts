@@ -380,6 +380,39 @@ describe("catalogo-local · la puerta del alta cuando el tenant USA Holded", () 
     expect(store.size).toBe(0);
   });
 
+  it("un producto LOCAL de antes sale editable:false si la puerta está cerrada", async () => {
+    // Lo encontró el bucle visual. Un comercio que arrastra productos
+    // locales y al que luego se le enciende Holded: la pantalla pintaba
+    // "Editar" en cada uno y el PATCH respondía 403. El botón es
+    // cortesía y el 403 es la puerta, pero una cortesía que miente es
+    // peor que no tenerla.
+    seed({ name: "Local de antes", source: "LOCAL", sku: "L-VIEJO" });
+    tenantHoldedEnabled = true;
+    tenantHasHoldedKey = true;
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "GET",
+      url: "/catalog/products",
+      headers: { authorization: owner() },
+    });
+    expect(res.statusCode).toBe(200);
+    const item = res.json().items.find((i: any) => i.sku === "L-VIEJO");
+    expect(item.source).toBe("LOCAL");
+    expect(item.editable).toBe(false);
+  });
+
+  it("y sale editable:true en cuanto la puerta está abierta", async () => {
+    seed({ name: "Local", source: "LOCAL", sku: "L-1" });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "GET",
+      url: "/catalog/products",
+      headers: { authorization: owner() },
+    });
+    const item = res.json().items.find((i: any) => i.sku === "L-1");
+    expect(item.editable).toBe(true);
+  });
+
   it("el LISTADO sigue abierto con Holded: es la pantalla de diagnóstico", async () => {
     tenantHoldedEnabled = true;
     tenantHasHoldedKey = true;

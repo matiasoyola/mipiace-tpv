@@ -147,7 +147,14 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/admin/tag-sections", label: "Comanderas", icon: Printer, capability: "caja" },
   // v1.3-Operativa-Extra · Lote 2: panel para que el OWNER fuerce sync
   // con Holded sin pasar por super-admin.
-  { to: "/admin/holded", label: "Sync Holded", icon: RefreshCw, capability: "caja" },
+  //
+  // catalogo-local (addendum 3) · la capability pasa de `caja` a
+  // `holded`. Lo encontró el bucle visual, no un test: en la captura del
+  // comercio de catálogo local, "Sync Holded" seguía en su barra lateral.
+  // Es una sección cuyo único botón fuerza una sincronización que no
+  // existe, en una pantalla que le habla de un ERP que no ha comprado —
+  // exactamente lo que H1 vino a quitar del panel del colegio.
+  { to: "/admin/holded", label: "Sync Holded", icon: RefreshCw, capability: "holded" },
   { to: "/admin/gift-receipts", label: "Tickets regalo", icon: Gift, capability: "caja" },
   { to: "/admin/account", label: "Mi cuenta", icon: User },
   { to: "/admin/security", label: "Seguridad", icon: Shield },

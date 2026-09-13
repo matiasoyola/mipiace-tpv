@@ -33,7 +33,10 @@ import { randomUUID } from "node:crypto";
 import { requireOwnerOrManager } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
 import { ensureCajaEnabled } from "../lib/caja-gate.js";
-import { ensureLocalCatalogWritable } from "../lib/catalogo-local-gate.js";
+import {
+  ensureLocalCatalogWritable,
+  localCatalogIsClosed,
+} from "../lib/catalogo-local-gate.js";
 import { buildLocalSku } from "../onboarding/auto-sku.js";
 
 // catalogo-local · el tipo de IVA del alta local (addendum 2).
@@ -164,7 +167,16 @@ type ProductRow = {
   holdedProductId: string | null;
 };
 
-function serialize(p: ProductRow) {
+// `escribible` es si la PUERTA del alta local está abierta para este
+// tenant (`holdedEnabled === false`). Se pasa desde fuera porque es del
+// tenant, no del producto.
+//
+// catalogo-local (addendum 3) · lo encontró el bucle visual: en un
+// comercio con Holded que arrastra productos locales de antes, la
+// pantalla pintaba "Editar" en cada uno y el PATCH respondía 403. El
+// botón es cortesía y el 403 es la puerta, pero una cortesía que miente
+// es peor que no tenerla.
+function serialize(p: ProductRow, escribible: boolean) {
   return {
     id: p.id,
     name: p.name,
@@ -180,9 +192,9 @@ function serialize(p: ProductRow) {
     // pantalla pueda avisar de "creado pero no vendible" sin tener que
     // deducirlo de tres campos.
     sellableViaTpv: p.sellableViaTpv,
-    // Sólo para que la pantalla pueda decir de dónde viene. Nunca se
-    // edita desde aquí.
-    editable: p.source === "LOCAL",
+    // Las DOS condiciones que el PATCH comprueba, en el mismo orden:
+    // que la ficha sea local, y que la puerta esté abierta.
+    editable: p.source === "LOCAL" && escribible,
   };
 }
 
@@ -302,7 +314,7 @@ export async function registerLocalCatalogRoutes(app: FastifyInstance): Promise<
           : {}),
       };
 
-      const [rows, total, localCount] = await Promise.all([
+      const [rows, total, localCount, cerrada] = await Promise.all([
         prisma.product.findMany({
           where,
           // Los locales primero: en el comercio mixto son los que el
@@ -315,10 +327,15 @@ export async function registerLocalCatalogRoutes(app: FastifyInstance): Promise<
         }),
         prisma.product.count({ where }),
         prisma.product.count({ where: { tenantId: auth.tenantId, source: "LOCAL" } }),
+        // Si no se puede saber, se asume cerrada: misma dirección que el
+        // gate (`lib/catalogo-local-gate.ts`). Esconder un botón que
+        // funciona es un incordio; enseñar uno que devuelve 403 es un
+        // error del que el propietario no sabe salir.
+        localCatalogIsClosed(auth.tenantId).catch(() => true),
       ]);
 
       return {
-        items: rows.map(serialize),
+        items: rows.map((r) => serialize(r, !cerrada)),
         total,
         page,
         pageSize,
@@ -423,7 +440,9 @@ export async function registerLocalCatalogRoutes(app: FastifyInstance): Promise<
           { tenantId: auth.tenantId, productId: row.id, sku: row.sku },
           "producto local creado",
         );
-        return reply.code(201).send({ product: serialize(row) });
+        // Ha pasado por `ensureLocalCatalogWritable`, así que la puerta
+        // está abierta por definición.
+        return reply.code(201).send({ product: serialize(row, true) });
       } catch (err) {
         if (isLocalSkuConflict(err)) {
           // 409 y una frase, no un 500. El choque de SKU es la
@@ -519,7 +538,7 @@ export async function registerLocalCatalogRoutes(app: FastifyInstance): Promise<
           data,
           select: PRODUCT_SELECT,
         });
-        return reply.code(200).send({ product: serialize(row) });
+        return reply.code(200).send({ product: serialize(row, true) });
       } catch (err) {
         if (isLocalSkuConflict(err)) {
           return reply.code(409).send(SKU_CONFLICT);
