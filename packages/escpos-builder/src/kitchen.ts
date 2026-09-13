@@ -112,7 +112,7 @@ export function buildKitchenComanda(input: KitchenComandaInput): Uint8Array {
     parts.push(escBold(false));
   }
 
-  parts.push(escFeed(3));
+  parts.push(escFeed(6));
   parts.push(escCut());
 
   return concatBytes(parts);

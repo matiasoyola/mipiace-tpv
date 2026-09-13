@@ -318,7 +318,7 @@ export function buildTicketReceipt(input: TicketReceiptInput): Uint8Array {
     parts.push(escAlign("left"));
   }
 
-  parts.push(escFeed(3));
+  parts.push(escFeed(6));
   parts.push(escCut());
 
   return concatBytes(parts);
@@ -343,7 +343,7 @@ export function buildTestPrint(now: Date = new Date()): Uint8Array {
     escText(""),
     escText("Si lees esto, la conexión funciona."),
     escAlign("left"),
-    escFeed(3),
+    escFeed(6),
     escCut(),
   ]);
 }
