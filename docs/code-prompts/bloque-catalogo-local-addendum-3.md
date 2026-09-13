@@ -70,10 +70,8 @@ en ese fichero, no dejes las dos ideas llamándose parecido.
   regla es mejor y más estricta: un tenant con `holdedEnabled = true` que aún no ha
   conectado está **a mitad de su onboarding** y tampoco debe crear productos locales. El 403
   sigue el patrón de `caja-gate.ts`.
-- **`shouldEnqueueHoldedUpload`** corta por `holdedEnabled === false`: ni fila `HoldedUpload`
-  ni job, con la línea de log explícita ya decidida. El caso `holdedEnabled = true` **sin
-  clave todavía** NO se toca: sigue siendo el camino `PENDING_SYNC` de siempre. Esto es lo
-  que protege el criterio 4.
+- **`shouldEnqueueHoldedUpload` / `paidTicketStatus`**: ver la sección propia más abajo.
+  Code ya los resolvió antes de este addendum, y bien, pero con el predicado equivocado.
 - **`onboarding-health.ts`**: los checks que dependen de Holded dicen **"No aplica"** cuando
   `holdedEnabled === false`, exactamente como H1 hizo con los de caja. Un tenant sin Holded
   no puede salir "no listo" por no tener impuestos sincronizados.
@@ -95,3 +93,54 @@ obedece.
   `holdedEnabled = false`: entra al panel sin muro, da de alta tres productos con SKU, los
   ve en el TPV, cobra, y **en los logs se ve que no intenta subir nada**.
 - Y el criterio 4 con Sole: `holdedEnabled` nace `true`, nada de esto se le aplica.
+
+## El choque con lo que Code ya hizo (leer entero antes de tocar el gate)
+
+Code encontró y arregló, antes de este addendum, algo que precede al bloque y que estaba
+roto de verdad: `shouldEnqueueHoldedUpload()` decidía **sólo por `TicketStatus`**, así que
+un tenant con caja y sin Holded cobraba bien pero se le creaba la fila `HoldedUpload`, se
+encolaba el job y `uploadTicket` lo tumbaba con `no_holded_key` → `SYNC_FAILED`. Vendía
+perfectamente y tenía la bandeja de errores encendida con todos sus tickets, para siempre.
+Y había **cuatro** caminos que encolaban, no dos: mesa y devolución no pasaban por el gate.
+Lo resolvió con `paidTicketStatus()`: sin Holded el ticket nace `PAID`.
+
+**El arreglo es correcto y se queda.** Lo que hay que cambiar es su predicado: lo decide
+`tenantHasHoldedKey`, que es exactamente la señal de dos significados que este addendum
+viene a partir en dos.
+
+### La tabla
+
+| | ¿encola? | estado al cobrar |
+|---|---|---|
+| `holdedEnabled = false` | no | `PAID` |
+| `holdedEnabled = true`, **sin** clave todavía | no | `PAID` |
+| `holdedEnabled = true`, con clave | sí | `PENDING_SYNC` |
+
+Las dos primeras filas **hacen** lo mismo y **no significan** lo mismo. Por eso no pueden
+compartir la línea de log:
+
+- La primera es **correcta por diseño**: no hay destino y no lo habrá. Log informativo.
+- La segunda es una **anomalía**: un cliente que compró el ERP está cobrando antes de
+  conectarlo, y esas ventas **no llegarán nunca a su contabilidad**. Eso no puede pasar en
+  silencio — es justo lo que el bloque prohíbe en la puerta del §3 ("que falle ruidosamente,
+  nunca en silencio"). Log de **warning** con el id del ticket, y un check en
+  `onboarding-health` que lo cante: *"N tickets cobrados antes de conectar Holded; no se
+  subirán"*.
+
+### Lo que NO se hace, y por qué
+
+No se manda esa segunda fila a `PENDING_SYNC`. Sería lo intuitivo ("que espere y suba
+cuando llegue la clave"), pero Code ya demostró que **no hay sweeper** que recoja
+`PENDING_SYNC`, así que el ticket se quedaría ahí para siempre y arrastraría las tres
+consecuencias que él documentó: no se podría devolver (`POST /tickets/:id/refunds` exige
+`SYNCED` o `PAID`), el corte y el Z lo contarían como incidencia pendiente cada día, y el
+cliente cerraría en falso. `PAID` + warning es peor de lo ideal y mejor que todo lo demás.
+
+Un sweeper que suba lo cobrado antes de conectar es un bloque aparte, y tendría que
+resolver primero la pregunta fiscal de las fechas pasadas.
+
+### Nota de alcance para el done
+
+Esto es **alcance por encima del prompt** y Matías lo sabe. Se acepta porque está puesto
+detrás de "sin Holded" y por tanto el **criterio 4** sigue en pie: un tenant con Holded
+conectado se comporta exactamente igual que antes. Demuéstralo, no lo afirmes.
