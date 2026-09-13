@@ -72,7 +72,7 @@ export function buildCreditPaymentReceipt(input: CreditReceiptInput): Uint8Array
   }
 
   parts.push(escSeparator(COLUMNS));
-  parts.push(escFeed(3));
+  parts.push(escFeed(6));
   parts.push(escCut());
   return concatBytes(parts);
 }
