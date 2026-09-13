@@ -111,6 +111,15 @@ const fakePrisma: any = {
     }),
   },
   staffProfile: {
+    // B-reservas-9 · la escritura de skills pasa por
+    // `agenda/skill-matrix.ts`, que valida el perfil con un findMany.
+    findMany: vi.fn(async ({ where }: any) =>
+      [...profileStore.values()].filter(
+        (p) =>
+          p.tenantId === where.tenantId &&
+          (where.userId?.in ? where.userId.in.includes(p.userId) : true),
+      ),
+    ),
     findFirst: vi.fn(async ({ where }: any) => {
       const p = profileStore.get(where.userId);
       return p && p.tenantId === where.tenantId ? p : null;
@@ -148,7 +157,10 @@ const fakePrisma: any = {
       for (let i = skillStore.length - 1; i >= 0; i--) {
         if (
           skillStore[i]!.userId === where.userId &&
-          skillStore[i]!.tenantId === where.tenantId
+          skillStore[i]!.tenantId === where.tenantId &&
+          // B-reservas-9 · el borrado de la matriz es celda a celda.
+          (where.serviceId === undefined ||
+            skillStore[i]!.serviceId === where.serviceId)
         ) {
           skillStore.splice(i, 1);
           n++;

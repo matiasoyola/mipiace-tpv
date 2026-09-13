@@ -28,6 +28,16 @@
 //   B-reservas-6a-frente-O: `?encolada=sin-enviar` y `?encolada=rechazada`
 //     siembran el outbox con un alta creada sin red, para ver que la cita
 //     se pinta en su hueco y que la rechazada NO desaparece de la agenda
+//   B-reservas-9-panel-salud: `agenda-salud` (las seis tarjetas del centro
+//     de Sole: dos servicios que nadie puede hacer, tres tarjetas apagadas
+//     diciendo de qué dependen), `agenda-salud-vacia` (el mismo panel con
+//     el 0 y su buena noticia), `agenda-salud-error` (sin servidor: la
+//     última foto con su hora + reintentar), `agenda-matriz` (la matriz
+//     servicio × profesional con la ficha del servicio abierta),
+//     `agenda-matriz-catalogo` (la rejilla a escala de catálogo real: 36
+//     servicios y cuatro profesionales, donde se ve que la cabecera aguanta
+//     el scroll) y `agenda-matriz-sin-nadie` (el día que un centro enciende
+//     la agenda: catálogo cargado y ni un perfil de agenda)
 //   B-reservas-7a-el-horario: `?dia=` y `?reticula=` cambian el horario del
 //     centro que devuelve `GET /agenda`:
 //       · `dia=normal`  (por defecto) 9:00–20:00, con la ausencia de Nuria
@@ -745,6 +755,257 @@ function benchBusinessType(): string {
   return benchScreen() === "venta-retail" ? "RETAIL" : "HOSPITALITY";
 }
 
+// ── B-reservas-9 · el panel de salud del centro de Sole ──────────────
+//
+// Las cifras son las del criterio del bloque: tres servicios agendables y
+// dos que no puede hacer nadie. Las tres tarjetas de bloques que no
+// existen vienen como el servidor las manda hoy: sin cifra.
+
+const SALUD_SPA = "svc-spa-capilar";
+const SALUD_RITUAL = "svc-ritual";
+const SALUD_MADERO = "svc-maderoterapia";
+const SALUD_SOLE = "u-sole";
+const SALUD_NURIA = "u-nuria";
+
+function saludCards(vacia: boolean) {
+  return [
+    {
+      key: "servicios-sin-profesional",
+      title: "Servicios que nadie puede hacer",
+      unit: "servicios",
+      unitOne: "servicio",
+      status: "ok",
+      value: vacia ? 0 : 2,
+      items: vacia
+        ? []
+        : [
+            {
+              id: SALUD_SPA,
+              label: "Spa capilar",
+              detail: "Nadie lo tiene asignado",
+            },
+            {
+              id: SALUD_RITUAL,
+              label: "Ritual reafirmante drenante",
+              detail: "1 asignada, ninguna con perfil de agenda activo",
+            },
+          ],
+      goodNews: "Todos los servicios agendables tienen a alguien que los da.",
+      explain:
+        "Cuenta los servicios con ficha de agenda (duración configurada) que no llegan a los profesionales que necesitan: se miran los que tienen el servicio asignado Y el perfil de agenda activo, y se comparan con los que el servicio exige a la vez.",
+      query:
+        "SELECT p.id, p.name, ss.staff_required, COUNT(sp.user_id)::int AS skilled_active\n  FROM service_scheduling ss\n  JOIN products p ON p.id = ss.product_id\n  LEFT JOIN staff_skills sk ON sk.service_id = ss.product_id\n WHERE ss.tenant_id = $1::uuid\nHAVING COUNT(sp.user_id) < ss.staff_required",
+      params: ["$1 = este negocio"],
+      dependsOn: null,
+      unavailableReason: null,
+    },
+    {
+      key: "duracion-fuera-de-patron",
+      title: "Duraciones que no cuadran con la carta",
+      unit: "servicios",
+      unitOne: "servicio",
+      status: "ok",
+      value: 1,
+      items: [
+        {
+          id: SALUD_SPA,
+          label: "Spa capilar",
+          detail: "32 min no es múltiplo de 5 · recogida de 0 min en vez de 10",
+        },
+      ],
+      goodNews: "Ninguna duración se sale del patrón que declara el centro.",
+      explain:
+        "El centro declara su patrón (en qué múltiplo van las duraciones y cuántos minutos de recogida van en el buffer). Esta tarjeta lista los servicios que se salen.",
+      query:
+        "SELECT p.id, p.name, ss.duration_min, ss.buffer_after_min\n  FROM service_scheduling ss\n  JOIN products p ON p.id = ss.product_id\n WHERE ss.tenant_id = $1::uuid\n   AND ss.duration_min % $2::int <> 0",
+      params: [
+        "$1 = este negocio",
+        "$2 = múltiplo declarado: 5 min",
+        "$3 = recogida declarada: 10 min",
+      ],
+      dependsOn: null,
+      unavailableReason: null,
+    },
+    {
+      key: "saldo-vivo-sin-cita",
+      title: "Programas con saldo vivo y sin próxima cita",
+      unit: "programas",
+      unitOne: "programa",
+      status: "unavailable",
+      value: null,
+      items: [],
+      goodNews: "Todo el saldo vendido tiene su próxima cita puesta.",
+      explain:
+        "Bonos de sesiones con sesiones sin gastar y ninguna cita futura asociada. Es dinero cobrado y no entregado.",
+      query: "SELECT v.id, v.code FROM vouchers v WHERE v.tenant_id = $1::uuid",
+      params: ["$1 = este negocio", "$2 = ahora"],
+      dependsOn: {
+        block: "B-reservas-8",
+        what: "el saldo por sesiones (bonos de tipo SESSIONS y su consumo)",
+      },
+      unavailableReason: "El saldo por sesiones todavía no existe en este sistema.",
+    },
+    {
+      key: "filtrado-por-reglas",
+      title: "Qué han filtrado hoy las reglas",
+      unit: "huecos",
+      unitOne: "hueco",
+      status: "unavailable",
+      value: null,
+      items: [],
+      goodNews: "Hoy las reglas no han quitado ningún hueco de en medio.",
+      explain:
+        "Huecos que las reglas del centro han quitado en las últimas 24 horas, desglosados por la regla que los quitó.",
+      query:
+        "SELECT h.rule_key, SUM(h.filtered)::int FROM booking_rule_hits h WHERE h.tenant_id = $1::uuid",
+      params: ["$1 = este negocio", "$2 = hace 24 horas"],
+      dependsOn: {
+        block: "B-reservas-6b",
+        what: "las reglas de yield y su registro de filtrado",
+      },
+      unavailableReason:
+        "Las reglas de yield todavía no existen, así que no filtran nada.",
+    },
+    {
+      key: "citas-por-canal-24h",
+      title: "Citas creadas por canal en 24 h",
+      unit: "citas",
+      unitOne: "cita",
+      status: "ok",
+      value: 9,
+      items: [
+        { id: "PRESENCIAL", label: "Mostrador", detail: "6 citas" },
+        { id: "PHONE", label: "Teléfono", detail: "3 citas" },
+      ],
+      goodNews: "En las últimas 24 horas no ha entrado ninguna cita.",
+      explain:
+        "Citas creadas en las últimas 24 horas, contadas por el canal desde el que entraron. Es la métrica de adopción de la agenda.",
+      query:
+        "SELECT a.source::text, COUNT(*)::int AS n\n  FROM appointments a\n WHERE a.tenant_id = $1::uuid\n   AND a.created_at >= $2::timestamptz\n GROUP BY a.source",
+      params: ["$1 = este negocio", "$2 = hace 24 horas"],
+      dependsOn: null,
+      unavailableReason: null,
+    },
+    {
+      key: "ventanas-fuera-de-turno",
+      title: "Ventanas que se desvían del turno contratado",
+      unit: "ventanas",
+      unitOne: "ventana",
+      status: "unavailable",
+      value: null,
+      items: [],
+      goodNews: "Ninguna ventana reservable se aparta del turno contratado.",
+      explain:
+        "Ventanas reservables que no salen de ningún turno contratado. La desviación existe y es legítima; lo que no puede ser es que no se vea.",
+      query:
+        "SELECT w.id, w.staff_user_id FROM bookable_windows w WHERE w.tenant_id = $1::uuid",
+      params: ["$1 = este negocio"],
+      dependsOn: {
+        block: "B-reservas-7b",
+        what: "la ventana reservable separada del turno contratado",
+      },
+      unavailableReason:
+        "La ventana reservable todavía no está separada del turno: hoy la agenda ofrece el turno tal cual.",
+    },
+  ];
+}
+
+const SALUD_MATRIZ = {
+  editable: true,
+  services: [
+    {
+      id: SALUD_SPA,
+      name: "Spa capilar",
+      agendable: true,
+      active: true,
+      staffRequired: 1,
+      staffUserIds: [] as string[],
+    },
+    {
+      id: SALUD_RITUAL,
+      name: "Ritual reafirmante drenante",
+      agendable: true,
+      active: true,
+      staffRequired: 1,
+      staffUserIds: [SALUD_NURIA],
+    },
+    {
+      id: SALUD_MADERO,
+      name: "Maderoterapia",
+      agendable: true,
+      active: false,
+      staffRequired: 1,
+      staffUserIds: [SALUD_SOLE],
+    },
+  ],
+  staff: [
+    { userId: SALUD_SOLE, displayName: "Sole", active: true, hasProfile: true },
+    {
+      userId: SALUD_NURIA,
+      displayName: "Nuria",
+      active: false,
+      hasProfile: true,
+    },
+  ],
+};
+
+// B-reservas-9 · las dos pantallas que el cierre declaraba SIN MIRAR (§4.4
+// del done) y que son las dos que se ven de verdad el primer día:
+//
+//  · `agenda-matriz-catalogo` — un catálogo de centro (36 servicios, cuatro
+//    profesionales), que es donde se comprueba que la cabecera aguanta el
+//    scroll y que la rejilla se sigue leyendo;
+//  · `agenda-matriz-sin-nadie` — el día que un centro enciende la agenda:
+//    catálogo cargado y ni un perfil de agenda dado de alta.
+const MATRIZ_CATALOGO_NOMBRES = [
+  "Corte caballero", "Corte señora", "Corte niño", "Lavar y peinar",
+  "Peinado de fiesta", "Recogido de novia", "Color raíz", "Color completo",
+  "Mechas balayage", "Mechas babylights", "Mechas californianas", "Matiz",
+  "Decoloración", "Permanente", "Alisado de keratina", "Botox capilar",
+  "Tratamiento anticaída", "Hidratación profunda", "Spa capilar",
+  "Ritual reafirmante drenante", "Maderoterapia", "Manicura express",
+  "Manicura semipermanente", "Pedicura completa", "Uñas de gel",
+  "Retirada de gel", "Depilación cejas", "Depilación labio",
+  "Depilación media pierna", "Depilación completa", "Limpieza facial",
+  "Tratamiento antiedad", "Maquillaje de día", "Maquillaje de novia",
+  "Extensiones de pestañas", "Lifting de pestañas",
+];
+
+const MATRIZ_CATALOGO_STAFF = [
+  { userId: "u-sole", displayName: "Sole", active: true, hasProfile: true },
+  { userId: "u-ana", displayName: "Ana", active: true, hasProfile: true },
+  { userId: "u-isa", displayName: "Isa", active: true, hasProfile: true },
+  { userId: "u-nuria", displayName: "Nuria", active: false, hasProfile: true },
+];
+
+function matrizCatalogo() {
+  return {
+    editable: true,
+    staff: MATRIZ_CATALOGO_STAFF,
+    services: MATRIZ_CATALOGO_NOMBRES.map((name, i) => ({
+      id: `svc-cat-${i}`,
+      name,
+      agendable: true,
+      active: i % 11 !== 10,
+      staffRequired: i % 9 === 8 ? 2 : 1,
+      // Dos de cada tres siguen sin nadie: es el estado real de un centro
+      // recién encendido, no un catálogo ya trabajado.
+      staffUserIds: i % 3 === 0 ? ["u-sole"] : [],
+    })),
+  };
+}
+
+function matrizSinProfesionales() {
+  return { editable: true, staff: [], services: matrizCatalogo().services.map((s) => ({ ...s, staffUserIds: [] })) };
+}
+
+function matrizDelBanco() {
+  const screen = benchScreen();
+  if (screen === "agenda-matriz-catalogo") return matrizCatalogo();
+  if (screen === "agenda-matriz-sin-nadie") return matrizSinProfesionales();
+  return SALUD_MATRIZ;
+}
+
 function stubFetch(): void {
   const routes: Record<string, unknown> = {
     "/tpv/health/holded": {
@@ -794,6 +1055,12 @@ function stubFetch(): void {
       slotMinutes: benchReticula(),
       days: [benchDayInfo()],
     },
+    // B-reservas-9 · el panel de salud y la matriz.
+    "/agenda/health": {
+      generatedAt: new Date().toISOString(),
+      cards: saludCards(benchScreen() === "agenda-salud-vacia"),
+    },
+    "/agenda/skill-matrix": matrizDelBanco(),
     "/clients": { items: SOLE_CLIENTS, nextCursor: null },
     "/tpv/catalog/wildcards": { items: [] },
     "/tpv/catalog/modifier-groups": { groups: [] },
@@ -1019,6 +1286,39 @@ function stubFetch(): void {
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     }
+    // B-reservas-9 · el estado de ERROR del panel: `?fallo=salud` deja al
+    // servidor sin responder para ver la última foto con su hora.
+    if (path === "/agenda/health" && benchFallo() === "salud") {
+      return new Response(JSON.stringify({ error: "UPSTREAM" }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    // Las dos escrituras de la matriz devuelven lo que se les manda: el
+    // banco no tiene base de datos, pero la pantalla sí tiene que ver su
+    // celda marcada después de tocarla.
+    const matrizServicio = /^\/agenda\/skill-matrix\/service\/([^/]+)$/.exec(path);
+    if (matrizServicio && init?.method === "PUT") {
+      const b = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({
+          serviceId: matrizServicio[1],
+          staffUserIds: b.staffUserIds ?? [],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    const matrizStaff = /^\/agenda\/skill-matrix\/staff\/([^/]+)$/.exec(path);
+    if (matrizStaff && init?.method === "PUT") {
+      const b = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({
+          userId: matrizStaff[1],
+          serviceIds: b.serviceIds ?? [],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
     const body = routes[path] ?? {};
     // eslint-disable-next-line no-console
     console.log("[banco-visual] stub", path);
@@ -1103,21 +1403,35 @@ function Bench() {
     ShiftOpenScreen: typeof import("../src/pages/ShiftOpenScreen.js")["ShiftOpenScreen"];
     ConfirmSheet: typeof import("../src/components/ConfirmSheet.js")["ConfirmSheet"];
     AgendaPage: typeof import("../src/pages/AgendaPage.js")["AgendaPage"];
+    AgendaHealthPanel: typeof import("../src/pages/AgendaHealthPanel.js")["AgendaHealthPanel"];
+    AgendaSkillMatrix: typeof import("../src/pages/AgendaSkillMatrix.js")["AgendaSkillMatrix"];
   }>(null);
 
   useEffect(() => {
     void (async () => {
-      const [checkout, success, sale, map, close, open, confirmSheet, agenda] =
-        await Promise.all([
-          import("../src/pages/CheckoutPage.js"),
-          import("../src/pages/CheckoutPage.successOverlay.js"),
-          import("../src/pages/SalePage.js"),
-          import("../src/pages/TableMapScreen.js"),
-          import("../src/pages/CloseShiftModal.js"),
-          import("../src/pages/ShiftOpenScreen.js"),
-          import("../src/components/ConfirmSheet.js"),
-          import("../src/pages/AgendaPage.js"),
-        ]);
+      const [
+        checkout,
+        success,
+        sale,
+        map,
+        close,
+        open,
+        confirmSheet,
+        agenda,
+        salud,
+        matriz,
+      ] = await Promise.all([
+        import("../src/pages/CheckoutPage.js"),
+        import("../src/pages/CheckoutPage.successOverlay.js"),
+        import("../src/pages/SalePage.js"),
+        import("../src/pages/TableMapScreen.js"),
+        import("../src/pages/CloseShiftModal.js"),
+        import("../src/pages/ShiftOpenScreen.js"),
+        import("../src/components/ConfirmSheet.js"),
+        import("../src/pages/AgendaPage.js"),
+        import("../src/pages/AgendaHealthPanel.js"),
+        import("../src/pages/AgendaSkillMatrix.js"),
+      ]);
       // B-reservas-5 · la agenda lee servicios y clientes de la CACHÉ
       // (IndexedDB), no de la red: sin sembrarla, las citas saldrían como
       // "Servicio" / "Cliente" y el panel de alta, vacío. Se siembra
@@ -1141,6 +1455,8 @@ function Bench() {
         ShiftOpenScreen: open.ShiftOpenScreen,
         ConfirmSheet: confirmSheet.ConfirmSheet,
         AgendaPage: agenda.AgendaPage,
+        AgendaHealthPanel: salud.AgendaHealthPanel,
+        AgendaSkillMatrix: matriz.AgendaSkillMatrix,
       });
     })();
   }, []);
@@ -1265,6 +1581,27 @@ function Bench() {
   // que salir idéntica antes y después de que la agenda suba a `App`.
   if (screen === "agenda") {
     return <Screens.AgendaPage onClose={() => {}} />;
+  }
+
+  // ── B-reservas-9 · el panel de salud y la matriz ───────────────────
+  // Los dos son overlays a pantalla completa igual que la agenda, así que
+  // se pintan sueltos exactamente como se ven colgados de ella.
+  if (screen.startsWith("agenda-salud")) {
+    return (
+      <Screens.AgendaHealthPanel onClose={() => {}} onOpenMatrix={() => {}} />
+    );
+  }
+
+  if (screen === "agenda-matriz") {
+    return (
+      <Screens.AgendaSkillMatrix onClose={() => {}} focusServiceId={SALUD_SPA} />
+    );
+  }
+
+  // La rejilla a escala de catálogo y el centro sin un solo perfil: las dos
+  // sin la ficha abierta, que es como se llega desde la agenda.
+  if (screen.startsWith("agenda-matriz-")) {
+    return <Screens.AgendaSkillMatrix onClose={() => {}} focusServiceId={null} />;
   }
 
   // El punto de ENTRADA a la agenda: la venta de Sole con el botón
