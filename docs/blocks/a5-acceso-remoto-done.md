@@ -293,6 +293,85 @@ reiniciar → comprobar si levanta solo → dejarlo ocioso una hora → comproba
 
 ---
 
+## 4 bis · Frente 5 · VERIFICACIÓN FÍSICA EJECUTADA (2026-09-13)
+
+El AP11 estuvo en red esta vez. Se contesta **la pregunta 1**; las 2 y 3 siguen abiertas porque
+Tailscale no está instalado ni en el terminal ni en el Mac.
+
+Terminal: AP11-1006, Android 11, firmware `V11.2.20250603.110008-fy.userdebug`, 192.168.5.75.
+APK instalada: **1.16.0 (11600)**, commit `0cd8ac6`. Capturas: `docs/qa/2026-09-13-ap11/`.
+
+### Pregunta 1 · ¿sobrevive el adb por TCP a un reinicio? → **SÍ en este hierro**
+
+Reinicio real ejecutado a las 13:08 (`adb reboot`, comprobado con `uptime` = 1 min después).
+Con el **servidor de adb recién arrancado** —para que no valiera una entrada zombi del servidor
+anterior—, `adb connect 192.168.5.75:5555` entra a la primera.
+
+Y lo hace **sin `persist.adb.tcp.port`**:
+
+| Propiedad | Antes del reinicio | Después |
+|---|---|---|
+| `service.adb.tcp.port` | `5555` | **`5555`** |
+| `persist.adb.tcp.port` | *(vacía)* | *(vacía)* |
+| `adb_wifi_enabled` | `0` | `0` |
+
+⇒ Lo que persiste **no es** la propiedad de Android, sino **el ajuste de depuración de red del
+fabricante**, que el firmware vuelve a aplicar al arrancar. Corrige la suposición de
+`terminal-nuevo.md` §4 ("no sobrevive sin root"): en **este** modelo sí, pero por una vía del
+fabricante. **No generalizar a otro hierro sin repetir la prueba.**
+
+### El canal estable es el 5555, NO la depuración inalámbrica de Android 11
+
+La depuración inalámbrica (menú de Android 11, puerto aleatorio) **no sobrevive**: `adb_wifi_enabled`
+vuelve a `0`, y además el puerto **cambia en cada reconexión** y exige `adb pair` con un código de 6
+dígitos y **un puerto distinto del de conexión**. Durante esta sesión se cayó dos veces (36679 →
+38139 → muerta) mientras el `:5555` aguantó todo.
+
+⇒ El `PORT=${TERMINAL_ADB_PORT:-5555}` de `infra/terminal.sh` **tiene el default correcto**.
+
+### 🔴 Hallazgo nuevo: el TPV NO arranca solo tras el reinicio
+
+Tras reiniciar, la actividad en primer plano es **`android.app.smdt.launcher/.Launcher`**, el
+lanzador del fabricante. El TPV se queda cerrado hasta que alguien lo toca.
+
+Es el mismo argumento que tumbó a RustDesk en la decisión de arquitectura: **un TPV que arranca un
+lunes a las 7:00 no tiene quién le dé al icono.** Un corte de luz de madrugada deja al cliente con
+la caja cerrada y sin saber por qué. Refuerza la duda 1 de §8 (**Device Owner**), que es lo que
+permitiría modo kiosco y arranque automático.
+
+### ✅ Lo que sí sobrevive al reinicio (y era lo que no se podía romper)
+
+La **vinculación aguanta**: el TPV vuelve con "Caja 1 · Tienda principal" en la cabecera, sin pedir
+código, y con el cajero en CAJEROS RECIENTES ("último acceso hoy 12:50"). Sólo pide el PIN. R5 y el
+`bootstrap-decision` se comportan como dicen.
+
+### Preguntas 2 y 3 · siguen sin respuesta
+
+Tailscale **no está instalado** en el AP11 (`pm list packages` no lo encuentra) ni en el Mac. El
+terminal **sí tiene Play Store y GMS** (`com.android.vending`, `com.google.android.gms`), así que se
+puede instalar sin sideload. Falta una sesión con la cuenta de Google del terminal y el login del
+tailnet: son credenciales, las teclea Matías.
+
+Quedan igual que estaban:
+
+2. ¿Evita Tailscale la caída de la LAN cuando el terminal está ocioso?
+3. ¿Arranca Tailscale solo tras un reinicio?
+
+⚠️ La caída en ocioso **se reprodujo otra vez hoy**: el terminal dejó de responder a `adb` a mitad
+de sesión y hubo que despertarlo a mano. Sigue siendo el motivo por el que la pregunta 2 importa.
+
+### Trampa en la que se volvió a caer (y cómo se sale)
+
+Hacer `adb kill-server` desde un shell sin permiso de **Red Local** de macOS deja el servidor nuevo
+sin acceso a la LAN: el síntoma es `No route to host` **contra todo el segmento**, no un error de
+permisos. Se arregla relanzando el servidor desde Terminal.app:
+
+```bash
+osascript -e 'tell application "Terminal" to do script "adb kill-server; adb start-server; adb connect 192.168.5.75:5555"'
+```
+
+---
+
 ## 5 · Decisiones tomadas sin preguntar, con su justificación
 
 1. **Ruta y autenticación propias en vez de reutilizar `/ws/store/:storeId`.** Aquel canal es
