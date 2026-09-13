@@ -30,13 +30,22 @@ por plato) y corrige lo medido sobre el PDF anterior:
   · Tipografías embebidas (Liberation Sans, métricas de Helvetica).
   · La salida va al repo, no a /tmp.
 
+Saca DOS archivos del mismo codigo, asi que no pueden descuadrarse entre si:
+  · Cartas_La_Maestranza_ICONOS.pdf        RGB, para pantalla y para ensenarselo al bar.
+  · Cartas_La_Maestranza_IMPRENTA_CMYK.pdf CMYK, el que va a la imprenta.
+En el de imprenta: separacion CMYK con extraccion de negro hecha aqui (no la adivina el RIP),
+todo el texto a negro 100 % K solo -- nada de texto en cuatricromia, que a estos cuerpos se
+descuadra el registro --, marcas de corte en negro de registro y el emblema convertido con la
+misma formula que el resto, para que el coral del sello y el de los epigrafes sean el mismo.
+
 Uso:
     python3 generador/maestranza_carta.py [carpeta_salida] [carpeta_assets]
 """
 import os, sys
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
-from reportlab.lib.colors import HexColor, white, black
+from reportlab.lib.colors import HexColor, CMYKColor
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
@@ -65,29 +74,71 @@ SANSB = _register("SansB", "LiberationSans-Bold.ttf",    "Helvetica-Bold")
 SANSI = _register("SansI", "LiberationSans-Italic.ttf",  "Helvetica-Oblique")
 
 # ---------------- paleta ----------------
-BG    = HexColor("#FBF7F1")
-INK   = HexColor("#26221E")
-CORAL = HexColor("#E97058")
-CORALD= HexColor("#C75A45")
-MUTED = HexColor("#8A8078")
-LINE  = HexColor("#E1D6C6")
+HEX = {"BG":"#FBF7F1","INK":"#26221E","CORAL":"#E97058","CORALD":"#C75A45",
+       "MUTED":"#8A8078","LINE":"#E1D6C6"}
 
-ALG = {
- "GL":("Gluten",            HexColor("#C9843F")),
- "CR":("Crustáceos",        HexColor("#4E86C6")),
- "HU":("Huevo",             HexColor("#E0A83E")),
- "PE":("Pescado",           HexColor("#3D6BA3")),
- "CA":("Cacahuetes",        HexColor("#B08968")),
- "SO":("Soja",              HexColor("#4E9B5E")),
- "LA":("Lácteos",           HexColor("#7E6551")),
- "FC":("Frutos de cáscara", HexColor("#9B5B6B")),
- "AP":("Apio",              HexColor("#7DA845")),
- "MO":("Mostaza",           HexColor("#C4A24B")),
- "SE":("Sésamo",            HexColor("#9E9284")),
- "SU":("Sulfitos",          HexColor("#8A5A7A")),
- "MC":("Moluscos",          HexColor("#6FA0C8")),
- "AL":("Altramuces",        HexColor("#D9B24A")),
+def to_cmyk(hexstr):
+    """Separacion con extraccion de negro, la misma para los vectores y para el emblema."""
+    r,g,b=(int(hexstr[i:i+2],16)/255.0 for i in (1,3,5))
+    k=1-max(r,g,b)
+    if k>=1: return CMYKColor(0,0,0,1)
+    return CMYKColor((1-r-k)/(1-k),(1-g-k)/(1-k),(1-b-k)/(1-k),k)
+
+MODO="rgb"
+def col(hexstr):
+    return HexColor(hexstr) if MODO=="rgb" else to_cmyk(hexstr)
+WHITE = HexColor("#FFFFFF")
+REG   = HexColor("#000000")      # marcas de corte; en CMYK pasa a negro de registro
+
+ALG_HEX = {
+ "GL":("Gluten",            "#C9843F"),
+ "CR":("Crustáceos",        "#4E86C6"),
+ "HU":("Huevo",             "#E0A83E"),
+ "PE":("Pescado",           "#3D6BA3"),
+ "CA":("Cacahuetes",        "#B08968"),
+ "SO":("Soja",              "#4E9B5E"),
+ "LA":("Lácteos",           "#7E6551"),
+ "FC":("Frutos de cáscara", "#9B5B6B"),
+ "AP":("Apio",              "#7DA845"),
+ "MO":("Mostaza",           "#C4A24B"),
+ "SE":("Sésamo",            "#9E9284"),
+ "SU":("Sulfitos",          "#8A5A7A"),
+ "MC":("Moluscos",          "#6FA0C8"),
+ "AL":("Altramuces",        "#D9B24A"),
 }
+ALG = {k:(v[0],None) for k,v in ALG_HEX.items()}   # el color se resuelve por modo
+ALGCOL = {}
+
+def set_modo(m):
+    """Fija la paleta del modo. En CMYK el texto va a negro 100 % K solo y las
+    marcas de corte a negro de registro."""
+    global MODO,BG,INK,CORAL,CORALD,MUTED,LINE,WHITE,REG,ALGCOL
+    MODO=m
+    BG,CORAL,CORALD,LINE = (col(HEX[k]) for k in ("BG","CORAL","CORALD","LINE"))
+    if m=="rgb":
+        INK=HexColor(HEX["INK"]); MUTED=HexColor(HEX["MUTED"])
+        WHITE=HexColor("#FFFFFF"); REG=HexColor("#000000")
+    else:
+        INK=CMYKColor(0,0,0,1); MUTED=CMYKColor(0,0,0,0.52)
+        WHITE=CMYKColor(0,0,0,0); REG=CMYKColor(1,1,1,1)
+    ALGCOL={k:col(v[1]) for k,v in ALG_HEX.items()}
+
+_EMB_CACHE={}
+def emblema():
+    """RGB: el PNG tal cual. CMYK: el mismo PNG separado con to_cmyk(), para que
+    el coral del sello sea exactamente el de los epigrafes y el fondo del sello
+    exactamente el de la pagina."""
+    if MODO=="rgb": return EMB
+    if "cmyk" not in _EMB_CACHE:
+        import numpy as np
+        from PIL import Image
+        a=np.asarray(Image.open(EMB).convert("RGB"),dtype=np.float32)/255.0
+        mx=a.max(axis=2); k=1.0-mx
+        den=np.where(mx<=0,1.0,mx)
+        cmy=(mx[...,None]-a)/den[...,None]
+        out=np.concatenate([cmy,k[...,None]],axis=2)
+        _EMB_CACHE["cmyk"]=ImageReader(Image.fromarray((out*255).round().astype("uint8"),mode="CMYK"))
+    return _EMB_CACHE["cmyk"]
 
 # ---------------- geometría ----------------
 BLEED=3*mm; PW,PH=210*mm,297*mm; MW,MH=PW+2*BLEED,PH+2*BLEED
@@ -185,9 +236,7 @@ def page_gap(blocks):
     return min(GAP_MAX, GAP_MIN+max(0.0,sobra)/n)
 
 # ---------------- lienzo ----------------
-c=canvas.Canvas(os.path.join(OUT,"Cartas_La_Maestranza_ICONOS.pdf"),pagesize=(MW,MH),
-                initialFontName=SANS,initialFontSize=FS_ITEM)
-c.setTitle("Carta · Bar La Maestranza")
+c=None
 AVISOS=[]
 
 def ls(x,y,txt,font,size,color,trk=0.0,center=False):
@@ -208,7 +257,7 @@ def bg():
     c.roundRect(BLEED+7*mm,BLEED+7*mm,PW-14*mm,PH-14*mm,3*mm,fill=0,stroke=1)
 
 def crop():
-    c.setStrokeColor(black); c.setLineWidth(0.3); L=3*mm
+    c.setStrokeColor(REG); c.setLineWidth(0.3); L=3*mm
     for x,y,dx,dy in [(BLEED,BLEED,-1,0),(BLEED,BLEED,0,-1),(BLEED+PW,BLEED,1,0),(BLEED+PW,BLEED,0,-1),
                       (BLEED,BLEED+PH,-1,0),(BLEED,BLEED+PH,0,1),(BLEED+PW,BLEED+PH,1,0),(BLEED+PW,BLEED+PH,0,1)]:
         c.line(x,y,x+dx*L,y+dy*L)
@@ -216,7 +265,7 @@ def crop():
 # ---------------- pictogramas ----------------
 def _prep(cx,cy,r,col):
     c.setFillColor(col); c.circle(cx,cy,r,fill=1,stroke=0)
-    c.setStrokeColor(white); c.setFillColor(white)
+    c.setStrokeColor(WHITE); c.setFillColor(WHITE)
     c.setLineWidth(max(0.35,r*0.12)); c.setLineCap(1); c.setLineJoin(1)
 def ic_GL(cx,cy,r,col):
     _prep(cx,cy,r,col); c.line(cx,cy-r*0.62,cx,cy+r*0.6)
@@ -224,70 +273,70 @@ def ic_GL(cx,cy,r,col):
         yy=cy+r*0.5-i*r*0.34
         c.line(cx,yy,cx-r*0.42,yy+r*0.18); c.line(cx,yy,cx+r*0.42,yy+r*0.18)
 def ic_CR(cx,cy,r,col):
-    _prep(cx,cy,r,col); c.setFillColor(white)
+    _prep(cx,cy,r,col); c.setFillColor(WHITE)
     c.ellipse(cx-r*0.42,cy-r*0.34,cx+r*0.42,cy+r*0.22,fill=1,stroke=0)
     c.circle(cx-r*0.55,cy+r*0.35,r*0.16,fill=1,stroke=0); c.circle(cx+r*0.55,cy+r*0.35,r*0.16,fill=1,stroke=0)
     for s in(-1,1):
         c.line(cx+s*r*0.3,cy-r*0.2,cx+s*r*0.6,cy-r*0.5); c.line(cx+s*r*0.15,cy-r*0.25,cx+s*r*0.4,cy-r*0.55)
 def ic_HU(cx,cy,r,col):
-    _prep(cx,cy,r,col); c.setFillColor(white)
+    _prep(cx,cy,r,col); c.setFillColor(WHITE)
     c.ellipse(cx-r*0.5,cy-r*0.25,cx-r*0.02,cy+r*0.55,fill=1,stroke=0)
     c.ellipse(cx-r*0.05,cy-r*0.55,cx+r*0.5,cy+r*0.3,fill=1,stroke=0)
 def ic_PE(cx,cy,r,col):
-    _prep(cx,cy,r,col); c.setFillColor(white)
+    _prep(cx,cy,r,col); c.setFillColor(WHITE)
     p=c.beginPath(); p.moveTo(cx-r*0.55,cy); p.curveTo(cx-r*0.2,cy+r*0.4,cx+r*0.35,cy+r*0.35,cx+r*0.55,cy)
     p.curveTo(cx+r*0.35,cy-r*0.35,cx-r*0.2,cy-r*0.4,cx-r*0.55,cy); c.drawPath(p,fill=1,stroke=0)
     c.setFillColor(col); c.circle(cx+r*0.28,cy+r*0.1,r*0.08,fill=1,stroke=0)
-    c.setFillColor(white); p=c.beginPath(); p.moveTo(cx-r*0.5,cy); p.lineTo(cx-r*0.8,cy+r*0.28); p.lineTo(cx-r*0.8,cy-r*0.28); p.close(); c.drawPath(p,fill=1,stroke=0)
+    c.setFillColor(WHITE); p=c.beginPath(); p.moveTo(cx-r*0.5,cy); p.lineTo(cx-r*0.8,cy+r*0.28); p.lineTo(cx-r*0.8,cy-r*0.28); p.close(); c.drawPath(p,fill=1,stroke=0)
 def ic_CA(cx,cy,r,col):
     _prep(cx,cy,r,col); c.setLineWidth(max(0.4,r*0.14))
     c.circle(cx,cy+r*0.28,r*0.3,fill=0,stroke=1); c.circle(cx,cy-r*0.28,r*0.34,fill=0,stroke=1)
 def ic_SO(cx,cy,r,col):
-    _prep(cx,cy,r,col); c.setFillColor(white)
+    _prep(cx,cy,r,col); c.setFillColor(WHITE)
     p=c.beginPath(); p.moveTo(cx-r*0.45,cy-r*0.45); p.curveTo(cx-r*0.6,cy+r*0.45,cx+r*0.4,cy+r*0.6,cx+r*0.5,cy-r*0.1)
     p.curveTo(cx+r*0.1,cy+r*0.1,cx-r*0.1,cy-r*0.2,cx-r*0.45,cy-r*0.45); c.drawPath(p,fill=1,stroke=0)
     c.setStrokeColor(col); c.setLineWidth(max(0.3,r*0.1)); c.line(cx-r*0.3,cy-r*0.3,cx+r*0.3,cy+r*0.35)
 def ic_LA(cx,cy,r,col):
-    _prep(cx,cy,r,col); c.setFillColor(white)
+    _prep(cx,cy,r,col); c.setFillColor(WHITE)
     p=c.beginPath(); p.moveTo(cx-r*0.34,cy+r*0.5); p.lineTo(cx+r*0.34,cy+r*0.5); p.lineTo(cx+r*0.26,cy-r*0.55)
     p.lineTo(cx-r*0.26,cy-r*0.55); p.close(); c.drawPath(p,fill=1,stroke=0)
     c.setStrokeColor(col); c.setLineWidth(max(0.3,r*0.1)); c.line(cx-r*0.3,cy+r*0.18,cx+r*0.32,cy+r*0.18)
 def ic_FC(cx,cy,r,col):
-    _prep(cx,cy,r,col); c.setFillColor(white)
+    _prep(cx,cy,r,col); c.setFillColor(WHITE)
     p=c.beginPath(); p.moveTo(cx,cy+r*0.55); p.curveTo(cx+r*0.5,cy+r*0.2,cx+r*0.45,cy-r*0.5,cx,cy-r*0.55)
     p.curveTo(cx-r*0.45,cy-r*0.5,cx-r*0.5,cy+r*0.2,cx,cy+r*0.55); c.drawPath(p,fill=1,stroke=0)
     c.setStrokeColor(col); c.setLineWidth(max(0.3,r*0.09)); c.line(cx,cy-r*0.4,cx,cy+r*0.4)
 def ic_AP(cx,cy,r,col):
     _prep(cx,cy,r,col)
     for s in(-0.28,0,0.28): c.line(cx+s*r,cy-r*0.5,cx+s*r*0.4,cy+r*0.5)
-    c.setFillColor(white); c.circle(cx-r*0.1,cy+r*0.5,r*0.12,fill=1,stroke=0); c.circle(cx+r*0.18,cy+r*0.52,r*0.12,fill=1,stroke=0)
+    c.setFillColor(WHITE); c.circle(cx-r*0.1,cy+r*0.5,r*0.12,fill=1,stroke=0); c.circle(cx+r*0.18,cy+r*0.52,r*0.12,fill=1,stroke=0)
 def ic_MO(cx,cy,r,col):
-    _prep(cx,cy,r,col); c.setFillColor(white)
+    _prep(cx,cy,r,col); c.setFillColor(WHITE)
     c.rect(cx-r*0.2,cy-r*0.5,r*0.4,r*0.8,fill=1,stroke=0); c.rect(cx-r*0.1,cy+r*0.3,r*0.2,r*0.25,fill=1,stroke=0)
 def ic_SE(cx,cy,r,col):
-    _prep(cx,cy,r,col); c.setFillColor(white)
+    _prep(cx,cy,r,col); c.setFillColor(WHITE)
     for dx,dy in [(-0.28,0.2),(0.28,0.2),(0,-0.28)]:
         c.ellipse(cx+dx*r-r*0.14,cy+dy*r-r*0.22,cx+dx*r+r*0.14,cy+dy*r+r*0.22,fill=1,stroke=0)
 def ic_SU(cx,cy,r,col):
-    _prep(cx,cy,r,col); c.setFillColor(white)
-    ls(cx,cy-r*0.32,"E-X",SANSB,r*0.85,white,center=True)
+    _prep(cx,cy,r,col); c.setFillColor(WHITE)
+    ls(cx,cy-r*0.32,"E-X",SANSB,r*0.85,WHITE,center=True)
 def ic_MC(cx,cy,r,col):
-    _prep(cx,cy,r,col); c.setFillColor(white)
+    _prep(cx,cy,r,col); c.setFillColor(WHITE)
     p=c.beginPath(); p.moveTo(cx,cy-r*0.5); p.curveTo(cx-r*0.6,cy-r*0.3,cx-r*0.6,cy+r*0.4,cx,cy+r*0.5)
     p.curveTo(cx+r*0.6,cy+r*0.4,cx+r*0.6,cy-r*0.3,cx,cy-r*0.5); c.drawPath(p,fill=1,stroke=0)
     c.setStrokeColor(col); c.setLineWidth(max(0.3,r*0.09))
     for s in(-0.3,0,0.3): c.line(cx,cy-r*0.45,cx+s*r,cy+r*0.45)
 def ic_AL(cx,cy,r,col):
-    _prep(cx,cy,r,col); c.setFillColor(white)
+    _prep(cx,cy,r,col); c.setFillColor(WHITE)
     for dx,dy in [(-0.26,0.2),(0.28,0.28),(0.05,-0.28)]:
         c.circle(cx+dx*r,cy+dy*r,r*0.2,fill=1,stroke=0)
 ICON={"GL":ic_GL,"CR":ic_CR,"HU":ic_HU,"PE":ic_PE,"CA":ic_CA,"SO":ic_SO,"LA":ic_LA,
       "FC":ic_FC,"AP":ic_AP,"MO":ic_MO,"SE":ic_SE,"SU":ic_SU,"MC":ic_MC,"AL":ic_AL}
-def icon(code,cx,cy,r): ICON[code](cx,cy,r,ALG[code][1])
+def icon(code,cx,cy,r): ICON[code](cx,cy,r,ALGCOL[code])
 
 # ---------------- bloques ----------------
 def header(titulo):
-    c.drawImage(EMB, CXC-EMB_SIZE/2, TOP-EMB_SIZE+2*mm, width=EMB_SIZE, height=EMB_SIZE, mask='auto')
+    c.drawImage(emblema(), CXC-EMB_SIZE/2, TOP-EMB_SIZE+2*mm, width=EMB_SIZE, height=EMB_SIZE, mask='auto')
     ls(CXC,TOP-EMB_SIZE-2*mm,titulo.upper(),SANS,FS_TITLE,INK,TRK_TITLE,center=True)
 
 def section(y,title,price):
@@ -339,7 +388,7 @@ def legend():
         xx=X0+col*cw; yy=y-row*7.6*mm
         icon(code,xx+R_LEG,yy+1.0*mm,R_LEG)
         c.setFillColor(INK); c.setFont(SANS,FS_LEG)
-        c.drawString(xx+2*R_LEG+1.6*mm,yy,ALG[code][0])
+        c.drawString(xx+2*R_LEG+1.6*mm,yy,ALG_HEX[code][0])
     nrow=(len(USADOS)+ncol-1)//ncol
     y=y-(nrow-1)*7.6*mm-6.6*mm
     c.setFillColor(MUTED); c.setFont(SANSI,FS_LEGAL)
@@ -350,27 +399,40 @@ def footer(txt):
     ls(CXC,BLEED+8*mm,txt,SANS,FS_FOOT,MUTED,TRK_FOOT,center=True)
 
 # ---------------- render ----------------
-for titulo,pie,blocks in PAGES:
-    bg(); crop(); header(titulo)
-    gap=page_gap(blocks)
-    y=Y_FIRST
-    for b in blocks:
-        if b[0]=="sec":
-            section(y,b[1],b[2]); y-=SEC_STEP
-            if b[3]:
-                c.setFillColor(MUTED); c.setFont(SANSI,FS_SUB); c.drawString(X0,y,b[3]); y-=SUB_STEP
-        elif b[0]=="items":
-            for n,p,a in b[1]:
-                item(y,n,p,a); y-=STEP
-        elif b[0]=="gap":
-            y-=gap
-    if y<Y_LEG+1*mm: AVISOS.append("la cara '%s' se come la leyenda" % titulo)
-    legend(); footer(pie)
-    c.showPage()
-c.save()
+def build(modo,fichero):
+    global c
+    set_modo(modo)
+    c=canvas.Canvas(os.path.join(OUT,fichero),pagesize=(MW,MH),
+                    initialFontName=SANS,initialFontSize=FS_ITEM)
+    c.setTitle("Carta · Bar La Maestranza")
+    for titulo,pie,blocks in PAGES:
+        bg(); crop(); header(titulo)
+        gap=page_gap(blocks)
+        y=Y_FIRST
+        for b in blocks:
+            if b[0]=="sec":
+                section(y,b[1],b[2]); y-=SEC_STEP
+                if b[3]:
+                    c.setFillColor(MUTED); c.setFont(SANSI,FS_SUB); c.drawString(X0,y,b[3]); y-=SUB_STEP
+            elif b[0]=="items":
+                for n,p,a in b[1]:
+                    item(y,n,p,a); y-=STEP
+            elif b[0]=="gap":
+                y-=gap
+        if y<Y_LEG+1*mm: AVISOS.append("la cara '%s' se come la leyenda" % titulo)
+        legend(); footer(pie)
+        c.showPage()
+    c.save()
+    print("  %-40s %s" % (fichero, modo.upper()))
 
-print("PDF: %s" % os.path.join(OUT,"Cartas_La_Maestranza_ICONOS.pdf"))
 print("interlineado unico: %.2f mm  ·  cuerpo %.1f pt  ·  ratio %.2f"
       % (STEP/mm, FS_ITEM, (STEP/mm)/(FS_ITEM*25.4/72)))
 print("alergenos en leyenda: %s" % ", ".join(USADOS))
-for a in AVISOS: print("AVISO:", a)
+build("rgb","Cartas_La_Maestranza_ICONOS.pdf")
+build("cmyk","Cartas_La_Maestranza_IMPRENTA_CMYK.pdf")
+set_modo("cmyk")
+for n in ("CORAL","CORALD","LINE","BG"):
+    v=col(HEX[n]); print("  %-7s %-8s -> C%.0f M%.0f Y%.0f K%.0f" %
+        (n,HEX[n],v.cyan*100,v.magenta*100,v.yellow*100,v.black*100))
+print("  TEXTO   %-8s -> K100 (solo negro)" % HEX["INK"])
+for a in sorted(set(AVISOS)): print("AVISO:", a)
