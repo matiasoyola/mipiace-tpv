@@ -47,6 +47,11 @@ interface Row {
 }
 
 const store = new Map<string, Row>();
+// catalogo-local (addendum 3) · las DOS señales del tenant, separadas.
+// La puerta del alta mira `holdedEnabled`, no la clave: un tenant que
+// usa Holded y todavía no lo ha conectado tampoco crea productos
+// locales, porque está a mitad de su onboarding.
+let tenantHoldedEnabled = false;
 let tenantHasHoldedKey = false;
 // Emula el índice único parcial `(tenant_id, sku) WHERE source='LOCAL'`.
 let uniqueIndexOn = true;
@@ -91,6 +96,7 @@ function enforceUnique(tenantId: string, sku: string | null, ignoreId?: string):
 const fakePrisma = {
   tenant: {
     findUnique: vi.fn(async () => ({
+      holdedEnabled: tenantHoldedEnabled,
       holdedApiKeyCiphertext: tenantHasHoldedKey ? "cipher" : null,
       cajaEnabled: true,
     })),
@@ -225,6 +231,9 @@ function post(app: any, body: unknown) {
 beforeEach(() => {
   store.clear();
   vi.clearAllMocks();
+  // El tenant del banco por defecto es el del bloque: con caja, sin
+  // Holded y con el alta local abierta.
+  tenantHoldedEnabled = false;
   tenantHasHoldedKey = false;
   uniqueIndexOn = true;
 });
@@ -327,8 +336,9 @@ describe("catalogo-local · un SKU local no se repite dentro del tenant", () => 
 
 // ── La puerta del alta local (addendum 1) ──────────────────────────────
 
-describe("catalogo-local · la puerta del alta cuando el tenant TIENE Holded", () => {
+describe("catalogo-local · la puerta del alta cuando el tenant USA Holded", () => {
   it("403 LOCAL_CATALOG_DISABLED, probado contra un tenant con clave", async () => {
+    tenantHoldedEnabled = true;
     tenantHasHoldedKey = true;
     const app = await buildApp();
     const res = await post(app, VALID);
@@ -341,6 +351,7 @@ describe("catalogo-local · la puerta del alta cuando el tenant TIENE Holded", (
 
   it("el PATCH también está cerrado con Holded conectado", async () => {
     const local = seed({ name: "Local", source: "LOCAL", sku: "L-1" });
+    tenantHoldedEnabled = true;
     tenantHasHoldedKey = true;
     const app = await buildApp();
     const res = await app.inject({
@@ -353,7 +364,24 @@ describe("catalogo-local · la puerta del alta cuando el tenant TIENE Holded", (
     expect(store.get(local.id)!.name).toBe("Local");
   });
 
+  // ── addendum 3 · el caso que el predicado viejo no veía ────────────
+  it("403 TAMBIÉN si usa Holded y todavía NO lo ha conectado", async () => {
+    // Éste es el tenant que el predicado anterior (`¿tiene clave?`)
+    // dejaba pasar: sin clave, el alta se le abría. Está a mitad de su
+    // onboarding, y dejarle crear productos locales le fabricaría el
+    // catálogo mixto que este bloque existe para impedir, justo el día
+    // antes de conectar su ERP.
+    tenantHoldedEnabled = true;
+    tenantHasHoldedKey = false;
+    const app = await buildApp();
+    const res = await post(app, VALID);
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("LOCAL_CATALOG_DISABLED");
+    expect(store.size).toBe(0);
+  });
+
   it("el LISTADO sigue abierto con Holded: es la pantalla de diagnóstico", async () => {
+    tenantHoldedEnabled = true;
     tenantHasHoldedKey = true;
     seed({ name: "De Holded", source: "HOLDED" });
     const app = await buildApp();

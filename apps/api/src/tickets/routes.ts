@@ -32,6 +32,8 @@ import {
 } from "../shift/impute.js";
 import { maybeEnqueueAutoEmail } from "./email-trigger.js";
 import {
+  holdedDestination,
+  logHoldedUploadSkipped,
   paidTicketStatus,
   shouldEnqueueHoldedRefundUpload,
   shouldEnqueueHoldedUpload,
@@ -429,16 +431,17 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         select: {
           discountThresholdPct: true,
           creditSalesEnabled: true,
-          // catalogo-local · lo consume `shouldEnqueueHoldedUpload` más
-          // abajo. Se cuela en este `select` que ya existía: cero
-          // consultas extra en el camino de cobro.
+          // catalogo-local · las dos columnas que lee `holdedDestination`.
+          // Se cuelan en este `select` que ya existía: cero consultas
+          // extra en el camino de cobro.
+          holdedEnabled: true,
           holdedApiKeyCiphertext: true,
         },
       });
-      // catalogo-local · ¿hay destino en Holded? Se calcula una vez y lo
-      // usan los dos puntos de encolado del handler (la fila dentro de
-      // la transacción y el job de fuera).
-      const tenantHasHoldedKey = tenantForDiscount.holdedApiKeyCiphertext != null;
+      // catalogo-local (addendum 3) · ¿hay destino en Holded, y de qué
+      // tipo? Se calcula una vez y lo usan los dos puntos de encolado del
+      // handler (la fila dentro de la transacción y el job de fuera).
+      const destinoHolded = holdedDestination(tenantForDiscount);
 
       // v1.8-Fiado · gate de venta a crédito. El tenant debe tenerlo
       // activado y el ticket debe llevar deudor (contactHoldedId).
@@ -566,7 +569,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             // venta normal nace PENDING_SYNC para subir a Holded ya.
             // catalogo-local · sin Holded nace PAID, no PENDING_SYNC.
             // Ver `paidTicketStatus` para las tres cosas que rompía.
-            status: isCredit ? TicketStatus.ON_CREDIT : paidTicketStatus(tenantHasHoldedKey),
+            status: isCredit ? TicketStatus.ON_CREDIT : paidTicketStatus(destinoHolded),
             creditPending: isCredit ? new Prisma.Decimal(totals.total) : null,
             total: new Prisma.Decimal(totals.total),
             totalTax: new Prisma.Decimal(totals.tax),
@@ -630,7 +633,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         // v1.8-Fiado · el gate único decide si se crea la fila de upload.
         // Un fiado (ON_CREDIT) NO se sube a Holded hasta saldarse: ni fila
         // ni job. Al saldar (POST /credit-payments) se crea entonces.
-        if (shouldEnqueueHoldedUpload(t.status, tenantHasHoldedKey)) {
+        if (shouldEnqueueHoldedUpload(t.status, destinoHolded)) {
           await tx.holdedUpload.upsert({
             where: { externalId: body.externalId },
             create: {
@@ -663,7 +666,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       // 7. Encolar upload-ticket (idempotente; jobId determinista). Mismo
       // gate: un fiado no encola nada (ver docs/design/fiado.md §7), y
       // un tenant sin Holded tampoco (catalogo-local).
-      if (shouldEnqueueHoldedUpload(ticket.status, tenantHasHoldedKey)) {
+      if (shouldEnqueueHoldedUpload(ticket.status, destinoHolded)) {
         try {
           await enqueueTicketUpload(body.externalId);
         } catch (err) {
@@ -672,14 +675,20 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             `enqueue ticket upload falló: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
-      } else if (!tenantHasHoldedKey) {
-        // catalogo-local · el criterio del bloque pide que se VEA en los
-        // logs que no se intenta. Un silencio sin línea es
-        // indistinguible de un olvido.
-        request.log.info(
-          { externalId: body.externalId, tenantId: cashier.tid },
-          "ticket no encolado a Holded: el comercio no tiene Holded conectado",
-        );
+      } else if (ticket.status !== TicketStatus.ON_CREDIT) {
+        // catalogo-local · el criterio 2 del bloque pide que se VEA en
+        // los logs que no se intenta. Un silencio sin línea es
+        // indistinguible de un olvido. El nivel lo decide el gate: info
+        // si el comercio no usa Holded, warning si lo usa y aún no lo ha
+        // conectado (addendum 3).
+        //
+        // El fiado queda fuera: no encolar un ON_CREDIT es la variante B
+        // funcionando, no una venta que se pierde.
+        logHoldedUploadSkipped(request.log, destinoHolded, {
+          externalId: body.externalId,
+          tenantId: cashier.tid,
+          camino: "ticket",
+        });
       }
 
       // Encolado de email auto (B-Print fase 1). Si el cajero introdujo
@@ -920,15 +929,19 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       // Validación de descuento (idéntica a POST /tickets B6 §2).
       const tenantForDiscount = await prisma.tenant.findUniqueOrThrow({
         where: { id: cashier.tid },
-        select: { discountThresholdPct: true, holdedApiKeyCiphertext: true },
+        select: {
+          discountThresholdPct: true,
+          holdedEnabled: true,
+          holdedApiKeyCiphertext: true,
+        },
       });
       // catalogo-local · el cobro de mesa NUNCA pasó por
       // `shouldEnqueueHoldedUpload`: creaba la fila y encolaba el job
       // siempre. Un fiado no puede nacer aquí, así que la parte del
-      // estado no le aplicaba — pero la de la clave sí, y sin ella este
+      // estado no le aplicaba — pero la del destino sí, y sin ella este
       // camino dejaba al tenant sin Holded con todos sus tickets de mesa
       // en SYNC_FAILED.
-      const tenantHasHoldedKey = tenantForDiscount.holdedApiKeyCiphertext != null;
+      const destinoHolded = holdedDestination(tenantForDiscount);
       const grossSubtotal = totals.subtotal + totals.discount;
       const effectiveDiscountPct =
         grossSubtotal > 0
@@ -1055,7 +1068,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
               // arriba (el claim del DRAFT) se queda en PENDING_SYNC: es
               // el cerrojo de la transacción, dura microsegundos y este
               // update lo pisa antes de que nadie pueda leerlo.
-              status: paidTicketStatus(tenantHasHoldedKey),
+              status: paidTicketStatus(destinoHolded),
               internalNumber,
               // `shift_id` es columna sellada (S1 §2.4), pero AQUÍ el
               // ticket sigue siendo un DRAFT sin `sealed_at`: el guardián
@@ -1105,7 +1118,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             where: { id: resolution.shiftId },
             data: { lastActivityAt: new Date() },
           });
-          if (shouldEnqueueHoldedUpload(t.status, tenantHasHoldedKey)) {
+          if (shouldEnqueueHoldedUpload(t.status, destinoHolded)) {
             await tx.holdedUpload.upsert({
               where: { externalId: draft.externalId },
               create: {
@@ -1214,7 +1227,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
 
       // catalogo-local · misma puerta que la fila de dentro de la
       // transacción. Se usa el estado del ticket ya cobrado.
-      if (shouldEnqueueHoldedUpload(updated.status, tenantHasHoldedKey)) {
+      if (shouldEnqueueHoldedUpload(updated.status, destinoHolded)) {
         try {
           await enqueueTicketUpload(draft.externalId);
         } catch (err) {
@@ -1223,11 +1236,12 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             `enqueue ticket upload (mesa) falló: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
-      } else if (!tenantHasHoldedKey) {
-        request.log.info(
-          { externalId: draft.externalId, tenantId: cashier.tid },
-          "ticket de mesa no encolado a Holded: el comercio no tiene Holded conectado",
-        );
+      } else {
+        logHoldedUploadSkipped(request.log, destinoHolded, {
+          externalId: draft.externalId,
+          tenantId: cashier.tid,
+          camino: "ticket de mesa",
+        });
       }
 
       try {
@@ -1669,9 +1683,9 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       // propia: el handler del refund no leía el tenant para nada.
       const tenantForUpload = await prisma.tenant.findUniqueOrThrow({
         where: { id: cashier.tid },
-        select: { holdedApiKeyCiphertext: true },
+        select: { holdedEnabled: true, holdedApiKeyCiphertext: true },
       });
-      const tenantHasHoldedKey = tenantForUpload.holdedApiKeyCiphertext != null;
+      const destinoHolded = holdedDestination(tenantForUpload);
 
       const isTestTicket = ticket.status === TicketStatus.TEST;
       if (
@@ -1832,7 +1846,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             // → el gate fiscal lo mantiene fuera de Holded igual que la
             // venta que lo originó.
             // catalogo-local · idem. El refund de prueba manda sobre todo.
-            status: isTestTicket ? TicketStatus.TEST : paidTicketStatus(tenantHasHoldedKey),
+            status: isTestTicket ? TicketStatus.TEST : paidTicketStatus(destinoHolded),
             reason: body.reason ?? null,
             method,
             total: new Prisma.Decimal(total),
@@ -1855,7 +1869,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         // catalogo-local · sin Holded no se crea ni la fila. Antes se
         // creaba siempre y quedaba PENDING para que el sweeper la
         // reintentara cada 5 minutos contra un destino inexistente.
-        if (shouldEnqueueHoldedRefundUpload(tenantHasHoldedKey)) {
+        if (shouldEnqueueHoldedRefundUpload(destinoHolded)) {
           await tx.holdedUpload.upsert({
             where: { externalId: body.externalId },
             create: {
@@ -1876,7 +1890,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       // Gate fiscal sagrado: un refund de prueba JAMÁS se encola contra
       // Holded. Sólo encolamos los refunds reales.
       // catalogo-local · y sólo si hay Holded al otro lado.
-      if (!isTestTicket && shouldEnqueueHoldedRefundUpload(tenantHasHoldedKey)) {
+      if (!isTestTicket && shouldEnqueueHoldedRefundUpload(destinoHolded)) {
         try {
           await enqueueRefundUpload(body.externalId);
         } catch (err) {
@@ -1885,6 +1899,16 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             `enqueue refund upload falló: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
+      } else if (!isTestTicket) {
+        // catalogo-local · mismo criterio que la venta: el abono que no
+        // sube deja su línea. El refund de PRUEBA queda fuera a
+        // propósito — que no suba no es una anomalía, es el gate fiscal
+        // haciendo su trabajo, y una línea aquí sería ruido diario.
+        logHoldedUploadSkipped(request.log, destinoHolded, {
+          externalId: body.externalId,
+          tenantId: cashier.tid,
+          camino: "abono",
+        });
       }
 
       // Lote 4 v1.1 Thalia: ticket.refunded → otras cajas se enteran

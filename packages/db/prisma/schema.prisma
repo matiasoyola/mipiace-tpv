@@ -479,6 +479,33 @@ model Tenant {
   // los tenants de hoy exactamente como estaban. Un `false` explicito es
   // la unica forma de apagar la caja.
   cajaEnabled                    Boolean           @default(true) @map("caja_enabled")
+  // catalogo-local (addendum 3, ADR-017) · ¿está PREVISTO que esta
+  // empresa use Holded? No confundir con `holdedApiKeyCiphertext != null`,
+  // que responde a otra pregunta: ¿lo tiene conectado YA?
+  //
+  // Hasta este bloque `!hasHoldedKey` significaba las dos cosas a la vez y
+  // el código no podía distinguirlas:
+  //
+  //   · "todavía no lo ha conectado" → está a mitad del onboarding y el
+  //     muro de /onboarding es correcto.
+  //   · "no lo va a conectar nunca"  → es el comercio de catálogo local, y
+  //     el muro lo deja fuera de su propio panel para siempre.
+  //
+  // El interruptor no se deduce: deducirlo del catálogo sería circular
+  // (para crear productos hay que entrar, y para entrar habría que tener
+  // productos). Por eso es una columna explícita.
+  //
+  // Gobierno: lo apaga SÓLO el super-admin, y sólo mientras el tenant no
+  // tenga clave de Holded conectada (si la tiene, 409 — apagarlo dejaría
+  // documentos a medias y ventas sin subir sin que nadie se enterara). El
+  // propietario no tiene ninguna salida de "trabajar sin Holded" en su
+  // pantalla de onboarding: la implantación de Holded es una decisión de
+  // venta de Mi Piace, no una casilla que el cliente se marca solo.
+  //
+  // `@default(true)` y se lee `holdedEnabled !== false`, nunca
+  // `!holdedEnabled`: mismo criterio exacto que `cajaEnabled` arriba. Todo
+  // lo que existe hoy nace encendido y se comporta igual que antes.
+  holdedEnabled                  Boolean           @default(true) @map("holded_enabled")
   // B-reservas-7a · la RETÍCULA del centro: cada cuántos minutos empieza una
   // cita. 15 (el valor histórico de B4, `agenda/time.ts::SLOT_MINUTES`) o 30.
   // Peluquería Sole trabaja en franjas de 30 y hasta ahora le ofrecíamos

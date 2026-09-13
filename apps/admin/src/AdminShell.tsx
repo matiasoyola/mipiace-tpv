@@ -198,13 +198,28 @@ function useHoldedHealth(enabled = true): HoldedHealth | null {
 // `blocked / no_api_key` en cuanto no hay clave, y el colegio lo vería
 // a ancho completo, en rojo y para siempre.
 //
-// El gate es `cajaEnabled`: sin caja no hay tickets que subir, así que
-// no hay nada que Holded pueda estar dejando de recibir. La empresa CON
-// caja y sin clave sí lo sigue viendo — ésa es exactamente la que tiene
-// un problema.
-function HoldedHealthBanner({ cajaEnabled }: { cajaEnabled: boolean }) {
-  const health = useHoldedHealth(cajaEnabled);
-  if (!cajaEnabled) return null;
+// El gate era sólo `cajaEnabled`: sin caja no hay tickets que subir, así
+// que no hay nada que Holded pueda estar dejando de recibir.
+//
+// catalogo-local (addendum 3) · falta la otra mitad, y es la del comercio
+// de este bloque: TIENE caja, así que el gate de H1 no le valía, y no
+// tiene clave, así que `getTenantHealthStatus` devuelve
+// `blocked / no_api_key`. Vería la barra roja "Holded está desconectado ·
+// reconecta la API Key" a ancho completo, todos los días, para siempre —
+// sobre un ERP que no ha comprado. Es la misma mentira que H1 le quitó al
+// colegio, servida por el otro lado.
+//
+// Quien SÍ usa Holded y no lo ha conectado la sigue viendo, y debe: ésa
+// es exactamente la empresa que tiene un problema.
+function HoldedHealthBanner({
+  cajaEnabled,
+  holdedEnabled,
+}: {
+  cajaEnabled: boolean;
+  holdedEnabled: boolean;
+}) {
+  const health = useHoldedHealth(cajaEnabled && holdedEnabled);
+  if (!cajaEnabled || !holdedEnabled) return null;
   if (!health || health.level !== "blocked") return null;
   const noKey = health.reason === "no_api_key";
   const hours = health.lastSyncAgeMs
@@ -298,7 +313,10 @@ export function AdminShell({
   return (
     <div className="min-h-screen bg-mipiace-stone flex flex-col font-sans">
       {impersonating && <ImpersonationBanner />}
-      <HoldedHealthBanner cajaEnabled={shellCaps?.caja === true} />
+      <HoldedHealthBanner
+        cajaEnabled={shellCaps?.caja === true}
+        holdedEnabled={shellCaps?.holdedEnabled !== false}
+      />
       <div className="flex flex-1 min-h-0">
       <DesktopSidebar onAskLogoutAll={() => setLogoutAllOpen(true)} />
 
@@ -435,6 +453,13 @@ interface TenantCapabilities {
   // H1 · no es una columna: es "tiene clave de Holded", que sale de
   // `/auth/me`. Se trata igual que las otras para gatear el sidebar.
   holded: boolean;
+  // catalogo-local (addendum 3) · ¿está PREVISTO que use Holded? Sí es
+  // una columna (`Tenant.holdedEnabled`). Se guarda aparte de `holded` a
+  // propósito, porque responden a preguntas distintas y confundirlas es
+  // el bug que el addendum viene a arreglar: `holded` gatea las
+  // secciones que sólo tienen sentido con el ERP conectado, y esta gatea
+  // la ALARMA de que el ERP no responde.
+  holdedEnabled: boolean;
 }
 
 function useTenantCapabilities(): TenantCapabilities | null {
@@ -445,7 +470,9 @@ function useTenantCapabilities(): TenantCapabilities | null {
       api<{ settings: { agendaEnabled?: boolean; cajaEnabled?: boolean } }>(
         "/admin/tenant/settings",
       ),
-      api<{ tenant: { hasHoldedKey?: boolean } }>("/auth/me"),
+      api<{ tenant: { hasHoldedKey?: boolean; holdedEnabled?: boolean } }>(
+        "/auth/me",
+      ),
     ])
       .then(([s, me]) => {
         if (cancelled) return;
@@ -453,10 +480,12 @@ function useTenantCapabilities(): TenantCapabilities | null {
           agenda: s.settings.agendaEnabled ?? false,
           caja: s.settings.cajaEnabled !== false,
           holded: me.tenant.hasHoldedKey === true,
+          holdedEnabled: me.tenant.holdedEnabled !== false,
         });
       })
       .catch(() => {
-        if (!cancelled) setCaps({ agenda: false, caja: true, holded: true });
+        if (!cancelled)
+          setCaps({ agenda: false, caja: true, holded: true, holdedEnabled: true });
       });
     return () => {
       cancelled = true;

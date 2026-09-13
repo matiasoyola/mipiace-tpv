@@ -99,6 +99,7 @@ function serializeDraftTenant(t: {
   cajaEnabled?: boolean;
   crmEnabled?: boolean;
   agendaEnabled?: boolean;
+  holdedEnabled?: boolean;
 }) {
   return {
     id: t.id,
@@ -119,6 +120,10 @@ function serializeDraftTenant(t: {
       crm: t.crmEnabled ?? false,
       agenda: t.agendaEnabled ?? false,
     },
+    // catalogo-local (addendum 3) · fuera de `modules` a propósito: no
+    // es un módulo, es el interruptor del ERP. Mezclarlo ahí volvería a
+    // juntar dos ideas que este addendum separa.
+    holdedEnabled: t.holdedEnabled ?? true,
   };
 }
 
@@ -407,6 +412,9 @@ export async function registerSuperAdminTenantsRoutes(
           crm: tenant.crmEnabled,
           agenda: tenant.agendaEnabled,
         },
+        // catalogo-local (addendum 3) · el interruptor de Holded, para
+        // que el detalle pueda pintarlo y moverlo.
+        holdedEnabled: tenant.holdedEnabled,
         lastIncrementalSyncAt:
           tenant.lastIncrementalSyncAt?.toISOString() ?? null,
         createdAt: tenant.createdAt.toISOString(),
@@ -507,6 +515,17 @@ export async function registerSuperAdminTenantsRoutes(
             cajaEnabled: { type: "boolean" },
             crmEnabled: { type: "boolean" },
             agendaEnabled: { type: "boolean" },
+            // catalogo-local (addendum 3) · el interruptor de Holded. NO
+            // es un módulo: no entra en el invariante de "al menos uno
+            // encendido" (una empresa sin Holded es una empresa normal,
+            // no una empresa vacía) y por eso va suelto.
+            //
+            // Default `true`: el alta de siempre no cambia. Se apaga
+            // AQUÍ, en el alta, porque la implantación de Holded es una
+            // decisión de venta de Mi Piace y no una casilla que el
+            // cliente se marca solo. El propietario no tiene ninguna
+            // salida de "trabajar sin Holded" en su onboarding.
+            holdedEnabled: { type: "boolean" },
           },
         },
       },
@@ -522,6 +541,7 @@ export async function registerSuperAdminTenantsRoutes(
         cajaEnabled?: boolean;
         crmEnabled?: boolean;
         agendaEnabled?: boolean;
+        holdedEnabled?: boolean;
       };
       const ctx = request.superAdmin!;
       const env = loadEnv();
@@ -532,6 +552,21 @@ export async function registerSuperAdminTenantsRoutes(
       // presencia de la clave, que es lo mismo que mira el resto del
       // sistema (`holdedApiKeyCiphertext != null`).
       const usesHolded = body.holdedApiKey !== undefined;
+
+      // catalogo-local (addendum 3) · y la OTRA pregunta, que hasta este
+      // bloque no se podía hacer: ¿está previsto que use Holded alguna
+      // vez? `usesHolded` significa "me has dado la clave AHORA", que no
+      // es lo mismo — el alta normal de un cliente que conectará Holded
+      // la semana que viene viene sin clave y con el interruptor
+      // encendido, y ése es el caso de siempre.
+      const holdedEnabled = body.holdedEnabled ?? true;
+      if (!holdedEnabled && usesHolded) {
+        return reply.code(400).send({
+          error: "HOLDED_DISABLED_WITH_KEY",
+          message:
+            "No puedes dar de alta una empresa sin Holded y pasarle una API Key de Holded a la vez. Decide una de las dos.",
+        });
+      }
 
       // H1 · los módulos. Defaults = lo de hoy: caja sí, los otros no.
       const cajaEnabled = body.cajaEnabled ?? true;
@@ -718,6 +753,9 @@ export async function registerSuperAdminTenantsRoutes(
             cajaEnabled,
             crmEnabled,
             agendaEnabled,
+            // catalogo-local (addendum 3) · el interruptor. Apagado, este
+            // tenant no verá /onboarding nunca y su catálogo nace aquí.
+            holdedEnabled,
             // B-Multi-Vertical: si no viene en el body, el default
             // del schema (RETAIL) se aplica automáticamente.
             ...(body.businessType ? { businessType: body.businessType } : {}),
@@ -738,6 +776,7 @@ export async function registerSuperAdminTenantsRoutes(
             // H1 · la auditoría tiene que poder responder "¿con qué se
             // dio de alta esta empresa?" sin mirar el resto del sistema.
             usesHolded,
+            holdedEnabled,
             modules: { caja: cajaEnabled, crm: crmEnabled, agenda: agendaEnabled },
           },
         });
@@ -838,6 +877,10 @@ export async function registerSuperAdminTenantsRoutes(
             cajaEnabled: { type: "boolean" },
             crmEnabled: { type: "boolean" },
             agendaEnabled: { type: "boolean" },
+            // catalogo-local (addendum 3) · el interruptor de Holded.
+            // Sólo se mueve desde aquí, y apagarlo tiene guarda: ver más
+            // abajo el 409.
+            holdedEnabled: { type: "boolean" },
           },
         },
       },
@@ -861,6 +904,7 @@ export async function registerSuperAdminTenantsRoutes(
         cajaEnabled?: boolean;
         crmEnabled?: boolean;
         agendaEnabled?: boolean;
+        holdedEnabled?: boolean;
       };
       const ctx = request.superAdmin!;
       const prisma = getPrisma();
@@ -994,6 +1038,42 @@ export async function registerSuperAdminTenantsRoutes(
           message:
             "Una empresa tiene que conservar al menos un módulo encendido (caja, CRM o agenda).",
         });
+      }
+
+      // catalogo-local (addendum 3) · EL INTERRUPTOR DE HOLDED.
+      //
+      // Fuera de `MODULE_FIELDS` a propósito: no es un módulo y no entra
+      // en el invariante de "al menos uno encendido". Una empresa sin
+      // Holded y con caja es una empresa completa.
+      //
+      // La guarda: sólo se puede APAGAR mientras no haya clave
+      // conectada. Apagarlo en un tenant que ya está subiendo tickets
+      // dejaría documentos a medias en su contabilidad y ventas sin
+      // subir sin que nadie se enterara — y como el bloque es
+      // forward-only, no habría marcha atrás cómoda. 409 con el motivo,
+      // no un toggle que obedece.
+      //
+      // ENCENDERLO no tiene guarda: es volver al camino de siempre. El
+      // tenant pasará a ver /onboarding y conectará su clave, y lo que
+      // cobró mientras estaba apagado se queda en PAID —forward-only— y
+      // sale cantado en el check `tickets-before-holded` de la salud del
+      // onboarding, que es donde alguien lo va a ver.
+      if (
+        body.holdedEnabled !== undefined &&
+        body.holdedEnabled !== tenant.holdedEnabled
+      ) {
+        if (body.holdedEnabled === false && tenant.holdedApiKeyCiphertext != null) {
+          return reply.code(409).send({
+            error: "HOLDED_ENABLED_HAS_KEY",
+            message:
+              "Esta empresa tiene Holded conectado. Desconecta primero la API Key: apagar Holded con la clave puesta dejaría ventas sin subir y documentos a medias.",
+          });
+        }
+        changes.holdedEnabled = {
+          before: tenant.holdedEnabled,
+          after: body.holdedEnabled,
+        };
+        data.holdedEnabled = body.holdedEnabled;
       }
 
       if (Object.keys(changes).length === 0) {

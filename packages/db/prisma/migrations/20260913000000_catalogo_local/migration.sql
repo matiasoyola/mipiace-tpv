@@ -34,11 +34,21 @@ CREATE TYPE "ProductSource" AS ENUM ('HOLDED', 'LOCAL');
 -- filas, pero `products` tiene miles por tenant. Sin la garantía del
 -- DEFAULT esto sería un rewrite con la caja parada.
 --
--- MEDIDO, no supuesto (PG 16.13, tabla réplica de 200.000 filas):
---   pg_relation_size ANTES  = 19 423 232 bytes
---   pg_relation_size DESPUÉS= 19 423 232 bytes  → sin rewrite
---   ALTER TABLE ADD COLUMN  = 2,97 ms
+-- MEDIDO, no supuesto. Todas las cifras de esta migración salen de la
+-- MISMA réplica y las tomó quien firma el done-doc, no se heredaron:
+-- base `mipiacetpv_medicion2` en el contenedor `mipiacetpv-postgres`
+-- (PostgreSQL 16.13), con las migraciones anteriores a ésta desplegadas,
+-- cinco tenants y 200.000 productos de una fila típica del proyecto.
+--
+-- El tamaño absoluto depende del ancho de fila que uses para rellenar,
+-- así que lo que prueba la ausencia de rewrite no es el número en sí:
+-- es que ANTES y DESPUÉS coinciden al byte y que `n_tup_upd` sigue en 0.
+--
+--   pg_relation_size ANTES   = 31 506 432 bytes
+--   pg_relation_size DESPUÉS = 31 506 432 bytes  → sin rewrite
+--   ALTER TABLE ADD COLUMN   = 1,669 ms
 --   pg_attribute.atthasmissing = t, attmissingval = {HOLDED}
+--   pg_stat_user_tables.n_tup_upd = 0 → ni una fila actualizada
 --   las 200.000 filas viejas leen 'HOLDED' sin haber sido tocadas
 
 ALTER TABLE "products"
@@ -50,7 +60,8 @@ ALTER TABLE "products"
 -- no hay validación de filas que hacer, porque relajar una restricción
 -- no puede invalidar ninguna fila existente. Instantáneo. (Lo caro es lo
 -- contrario, `SET NOT NULL`, que sí escanea la tabla entera.)
--- Medido en la misma réplica de 200.000 filas: 2,20 ms.
+-- Medido en la misma réplica de 200.000 filas: 0,946 ms, y
+-- `pg_attribute.attnotnull` pasa a `f` sin tocar ninguna fila.
 --
 -- El `products_tenant_id_holded_product_id_key` que ya existe NO se
 -- toca. En Postgres un índice único trata cada NULL como distinto de
@@ -79,8 +90,9 @@ ALTER TABLE "products"
 -- dentro de una transacción y `CREATE INDEX CONCURRENTLY` no puede vivir
 -- en una. El índice se crea sobre el subconjunto `source = 'LOCAL'`, que
 -- el día del despliegue está VACÍO en las cinco bases de producción — el
--- lock es sobre cero filas. Medido en la réplica de 200.000: 32,8 ms y
--- 8 KB de índice (una sola página: el subconjunto está vacío).
+-- lock es sobre cero filas. Medido en la misma réplica de 200.000:
+-- 32,754 ms y 8 192 bytes de índice (una sola página, porque el
+-- subconjunto `source = 'LOCAL'` está vacío).
 --
 -- Lo que este índice NO gobierna, y por eso el SKU se valida además en
 -- el handler: un `sku` NULL. Los NULL son distintos entre sí también en
@@ -90,3 +102,38 @@ ALTER TABLE "products"
 CREATE UNIQUE INDEX "products_tenant_id_sku_local_key"
   ON "products" ("tenant_id", "sku")
   WHERE "source" = 'LOCAL';
+
+-- ── 5 · el interruptor de Holded (addendum 3) ──────────────────────────
+--
+-- `holded_enabled` responde a "¿está PREVISTO que esta empresa use
+-- Holded?". `holded_api_key_ciphertext IS NOT NULL` responde a otra
+-- distinta: "¿lo tiene conectado YA?". Hasta aquí la segunda se usaba
+-- para contestar las dos, y por eso un tenant con caja y sin Holded caía
+-- en /onboarding y no salía (`apps/admin/src/App.tsx`).
+--
+-- Va en ESTA migración y no en una aparte a propósito: el bloque
+-- despliega una vez, y el criterio 1 del prompt —un tenant sin Holded da
+-- de alta productos y cobra— es imposible de cumplir sin esta columna.
+-- Separarlas sería fingir que el catálogo local funciona sin ella.
+--
+-- Mismo patrón que `caja_enabled` en H1 y que `source` aquí arriba: NOT
+-- NULL DEFAULT true, así que todas las filas de hoy nacen encendidas y
+-- nada cambia de comportamiento. Sólo un `false` explícito lo apaga, y
+-- sólo lo escribe el super-admin.
+--
+-- MEDIDO en la misma réplica que el resto de esta migración, con cinco
+-- tenants dentro (producción tiene cinco):
+--   pg_relation_size ANTES     = 8 192 bytes
+--   pg_relation_size DESPUÉS   = 8 192 bytes  → sin rewrite
+--   ALTER TABLE ADD COLUMN     = 2,507 ms
+--   pg_attribute.atthasmissing = t, attmissingval = {t}
+--   pg_stat_user_tables.n_tup_upd = 0 → ni una fila actualizada
+--   los 5 tenants leen holded_enabled = true sin haber sido tocados
+--
+-- El DEFAULT booleano es constante, así que aplica la misma garantía de
+-- PG ≥ 11 que la columna `source`: metadatos, no UPDATE masivo. Con cinco
+-- filas daría igual; se deja escrito porque el criterio del proyecto es
+-- que una migración diga lo que bloquea, no que se confíe en el tamaño.
+
+ALTER TABLE "tenants"
+  ADD COLUMN "holded_enabled" BOOLEAN NOT NULL DEFAULT true;

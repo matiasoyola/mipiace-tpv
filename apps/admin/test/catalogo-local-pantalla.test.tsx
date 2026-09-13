@@ -37,6 +37,11 @@ interface FakeProduct {
   editable: boolean;
 }
 
+// catalogo-local (addendum 3) · la pantalla pregunta "¿usa Holded?"
+// (`holdedEnabled`), no "¿lo tiene conectado?" (`hasHoldedKey`). Mismo
+// predicado exacto que la puerta del servidor, para que el botón de alta
+// y el 403 no puedan discrepar.
+let usaHolded = false;
 let hasHoldedKey = false;
 let items: FakeProduct[] = [];
 let localCount = 0;
@@ -60,7 +65,10 @@ vi.mock("../src/api.js", () => ({
       return { product: items[0] };
     }
     if (path === "/auth/me") {
-      return { user: { id: "u1", email: "o@x.es", role: "OWNER" }, tenant: { hasHoldedKey } };
+      return {
+        user: { id: "u1", email: "o@x.es", role: "OWNER" },
+        tenant: { hasHoldedKey, holdedEnabled: usaHolded },
+      };
     }
     if (path.startsWith("/catalog/products/sku-suggestion")) {
       return { sku: "LOC-AB12CD34" };
@@ -105,6 +113,7 @@ function product(p: Partial<FakeProduct> & { name: string }): FakeProduct {
 }
 
 beforeEach(() => {
+  usaHolded = false;
   hasHoldedKey = false;
   items = [];
   localCount = 0;
@@ -164,6 +173,7 @@ describe("catalogo-local · el alta sólo se ofrece sin Holded", () => {
   });
 
   it("CON Holded NO se pinta el botón, y se explica por qué", async () => {
+    usaHolded = true;
     hasHoldedKey = true;
     items = [product({ name: "Champú", source: "HOLDED", editable: false })];
     await render();
@@ -174,6 +184,7 @@ describe("catalogo-local · el alta sólo se ofrece sin Holded", () => {
   });
 
   it("un producto de Holded no trae botón de editar: trae la razón escrita", async () => {
+    usaHolded = true;
     hasHoldedKey = true;
     items = [product({ name: "Champú", source: "HOLDED", editable: false })];
     await render();
@@ -235,6 +246,7 @@ describe("catalogo-local · los estados vacíos dicen cosas distintas", () => {
   });
 
   it("con Holded y sin catálogo: dice que llegará por sync, no invita a crear", async () => {
+    usaHolded = true;
     hasHoldedKey = true;
     items = [];
     await render();

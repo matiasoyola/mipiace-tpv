@@ -16,6 +16,11 @@
 //      falta hace aquí: Prisma NO lo puede declarar en el schema, así
 //      que `migrate dev` lo verá como deriva y ofrecerá borrarlo. Este
 //      test es lo único que se pone rojo si alguien acepta.
+//   5. (addendum 3) Añadir `tenants.holded_enabled` NOT NULL DEFAULT
+//      true. Con DEFAULT false, las cinco empresas vivas dejarían de
+//      subir a Holded el día del despliegue y nadie se enteraría hasta
+//      el cierre: el TPV seguiría cobrando y los tickets nacerían PAID.
+//      Es el fallo más caro que esta migración puede cometer.
 
 import { readFileSync } from "node:fs";
 
@@ -50,6 +55,18 @@ describe("migración catalogo_local", () => {
 
   it("NO nace nada como LOCAL: nada de DEFAULT 'LOCAL'", () => {
     expect(statements).not.toMatch(/DEFAULT\s+'LOCAL'/i);
+  });
+
+  it("añade tenants.holded_enabled NOT NULL con DEFAULT true", () => {
+    expect(statements).toMatch(
+      /ALTER TABLE "tenants"\s*\n?\s*ADD COLUMN "holded_enabled" BOOLEAN NOT NULL DEFAULT true;/,
+    );
+  });
+
+  it("el interruptor NO nace apagado: nada de DEFAULT false", () => {
+    // Mismo criterio que `caja_enabled` en H1. Un `false` aquí apagaría
+    // Holded en Sole, Cachitos, Thalía y La Maestranza a la vez.
+    expect(statements).not.toMatch(/"holded_enabled"[^;]*DEFAULT\s+false/i);
   });
 
   it("relaja el NOT NULL de holded_product_id", () => {

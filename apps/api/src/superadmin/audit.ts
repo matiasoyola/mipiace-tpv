@@ -35,6 +35,12 @@ const CreateTenantDraftMeta = Base.extend({
   // H1 · con qué se dio de alta la empresa. Opcionales para no invalidar
   // los audit logs escritos antes del bloque, que no los llevan.
   usesHolded: z.boolean().optional(),
+  // catalogo-local (addendum 3) · si la empresa nació con el interruptor
+  // de Holded apagado. Distinto de `usesHolded`, que dice si el
+  // implantador pegó la clave EN EL ALTA: un tenant normal nace sin
+  // clave y con el interruptor encendido. Opcional por lo mismo que su
+  // vecina — los audit logs anteriores al bloque no la llevan.
+  holdedEnabled: z.boolean().optional(),
   modules: z
     .object({ caja: z.boolean(), crm: z.boolean(), agenda: z.boolean() })
     .optional(),

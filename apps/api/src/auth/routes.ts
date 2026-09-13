@@ -327,6 +327,14 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
           id: tenant.id,
           name: tenant.name,
           hasHoldedKey: tenant.holdedApiKeyCiphertext != null,
+          // catalogo-local (addendum 3) · ¿está PREVISTO que use Holded?
+          // Distinta pregunta que `hasHoldedKey`, que es "¿lo tiene
+          // conectado ya?". El panel necesita las DOS para decidir a
+          // dónde entra: sin esta, un comercio de catálogo local cae en
+          // /onboarding y no sale nunca (ver `RootRouter` en App.tsx).
+          // Sólo lectura aquí; se mueve desde el super-admin, igual que
+          // `cajaEnabled`.
+          holdedEnabled: tenant.holdedEnabled,
           initialSyncStatus: tenant.initialSyncStatus,
           fiscalProfile: tenant.fiscalProfile ?? null,
           lastIncrementalSyncAt: tenant.lastIncrementalSyncAt?.toISOString() ?? null,

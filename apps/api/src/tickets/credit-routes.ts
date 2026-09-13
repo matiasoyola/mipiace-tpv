@@ -19,7 +19,11 @@ import { verifyManagerAuthorization } from "../auth/manager-authorization.js";
 import { getPrisma } from "../context.js";
 import { enqueueTicketUpload } from "../queues/ticket-upload.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
-import { shouldEnqueueHoldedUpload } from "./holded-upload-gate.js";
+import {
+  holdedDestination,
+  logHoldedUploadSkipped,
+  shouldEnqueueHoldedUpload,
+} from "./holded-upload-gate.js";
 import { sealTicket } from "./seal.js";
 import { ensureCajaEnabled } from "../lib/caja-gate.js";
 
@@ -259,12 +263,12 @@ export async function registerCreditRoutes(app: FastifyInstance): Promise<void> 
         return reply.code(404).send({ error: "TICKET_NOT_FOUND", message: "Ticket no encontrado." });
       }
       // catalogo-local · ¿hay destino en Holded? Al saldarse, el fiado
-      // pasa a PAID y ESE sí se encola (variante B). Sin clave, no.
+      // pasa a PAID y ESE sí se encola (variante B). Sin destino, no.
       const tenantForUpload = await prisma.tenant.findUniqueOrThrow({
         where: { id: cashier.tid },
-        select: { holdedApiKeyCiphertext: true },
+        select: { holdedEnabled: true, holdedApiKeyCiphertext: true },
       });
-      const tenantHasHoldedKey = tenantForUpload.holdedApiKeyCiphertext != null;
+      const destinoHolded = holdedDestination(tenantForUpload);
       if (ticket.status !== TicketStatus.ON_CREDIT || ticket.creditPending == null) {
         return reply.code(409).send({
           error: "NOT_ON_CREDIT",
@@ -314,7 +318,7 @@ export async function registerCreditRoutes(app: FastifyInstance): Promise<void> 
         });
         // Al saldar, crear la fila de upload (el gate ya lo autoriza en
         // PAID). Antes de esto un fiado nunca tuvo HoldedUpload.
-        if (settled && shouldEnqueueHoldedUpload(updated.status, tenantHasHoldedKey)) {
+        if (settled && shouldEnqueueHoldedUpload(updated.status, destinoHolded)) {
           await tx.holdedUpload.upsert({
             where: { externalId: ticket.externalId },
             create: {
@@ -339,7 +343,7 @@ export async function registerCreditRoutes(app: FastifyInstance): Promise<void> 
       });
 
       // Encolar la subida fuera de la tx (sólo al saldar).
-      if (settled && shouldEnqueueHoldedUpload(result.status, tenantHasHoldedKey)) {
+      if (settled && shouldEnqueueHoldedUpload(result.status, destinoHolded)) {
         try {
           await enqueueTicketUpload(ticket.externalId);
         } catch (err) {
@@ -348,6 +352,16 @@ export async function registerCreditRoutes(app: FastifyInstance): Promise<void> 
             `enqueue upload al saldar fiado falló: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
+      } else if (settled) {
+        // catalogo-local · el fiado que se salda es una venta cobrada
+        // como cualquier otra: si no sube, deja su línea. Sólo al
+        // SALDAR — mientras la deuda sigue viva no encolar es la
+        // variante B funcionando, no una venta que se pierde.
+        logHoldedUploadSkipped(request.log, destinoHolded, {
+          externalId: ticket.externalId,
+          tenantId: cashier.tid,
+          camino: "fiado saldado",
+        });
       }
 
       // Datos del justificante de cobro (recibo simple no fiscal). El TPV

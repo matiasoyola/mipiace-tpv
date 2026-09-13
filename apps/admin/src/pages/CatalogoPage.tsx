@@ -84,7 +84,7 @@ export function CatalogoPage() {
   const [filter, setFilter] = useState<Filter>("ALL");
   const [includeInactive, setIncludeInactive] = useState(false);
   // `null` mientras carga. Decide si se puede dar de alta.
-  const [hasHolded, setHasHolded] = useState<boolean | null>(null);
+  const [usaHolded, setUsaHolded] = useState<boolean | null>(null);
   // `null` = formulario cerrado. `"new"` = alta. Un id = edición.
   const [editing, setEditing] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
@@ -110,13 +110,19 @@ export function CatalogoPage() {
   }, [search, filter, includeInactive, navigate]);
 
   useEffect(() => {
-    api<{ tenant: { hasHoldedKey?: boolean } }>("/auth/me")
-      .then((me) => setHasHolded(me.tenant.hasHoldedKey === true))
-      // Al fallar se asume que SÍ hay Holded: esconde el botón de alta
+    // catalogo-local (addendum 3) · la pregunta es "¿usa Holded?"
+    // (`holdedEnabled`), no "¿lo tiene conectado?" (`hasHoldedKey`). El
+    // que lo usa y aún no lo ha conectado TAMPOCO da de alta productos
+    // locales: está a mitad de su onboarding. Mismo predicado exacto que
+    // la puerta del servidor, para que el botón y el 403 no puedan
+    // discrepar.
+    api<{ tenant: { holdedEnabled?: boolean } }>("/auth/me")
+      .then((me) => setUsaHolded(me.tenant.holdedEnabled !== false))
+      // Al fallar se asume que SÍ usa Holded: esconde el botón de alta
       // en vez de ofrecer un alta que el servidor va a rechazar con un
       // 403. Misma dirección que la puerta del servidor
       // (`lib/catalogo-local-gate.ts`), que también cierra al no saber.
-      .catch(() => setHasHolded(true));
+      .catch(() => setUsaHolded(true));
   }, []);
 
   // Debounce del buscador: 250 ms. Sin él, cada tecla es una consulta
@@ -137,7 +143,7 @@ export function CatalogoPage() {
     setTimeout(() => setFlash(null), 4000);
   }
 
-  const canCreate = hasHolded === false;
+  const canCreate = usaHolded === false;
   const items = data?.items ?? [];
 
   return (
@@ -148,7 +154,7 @@ export function CatalogoPage() {
           : "Los productos y servicios que vendes en el TPV."}
       </p>
 
-      {hasHolded === true && (
+      {usaHolded === true && (
         <div className="mb-5 flex items-start gap-2.5 text-[13px] text-mipiace-ink-soft bg-mipiace-coral-soft rounded-xl px-3.5 py-3">
           <Package className="w-4 h-4 mt-px shrink-0 text-mipiace-coral-dark" />
           <span>
@@ -195,7 +201,7 @@ export function CatalogoPage() {
           filtrar: en un comercio sin Holded todo es local y tres chips
           para un solo grupo son ruido (§1.8, la pantalla no se inunda). */}
       <div className="flex flex-wrap items-center gap-2 mb-5">
-        {(data?.localCount ?? 0) > 0 && hasHolded === true && (
+        {(data?.localCount ?? 0) > 0 && usaHolded === true && (
           <>
             <FilterChip label="Todos" active={filter === "ALL"} onClick={() => setFilter("ALL")} />
             <FilterChip label="Míos" active={filter === "LOCAL"} onClick={() => setFilter("LOCAL")} />

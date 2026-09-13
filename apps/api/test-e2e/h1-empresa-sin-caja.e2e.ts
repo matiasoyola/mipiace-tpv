@@ -228,6 +228,15 @@ describe.skipIf(!e2eEnabled)("e2e · la empresa sin caja contra Postgres real", 
           taxId: spanishNif(),
           cajaEnabled: false,
           crmEnabled: true,
+          // catalogo-local (addendum 3) · EXPLÍCITO donde H1 lo deducía.
+          //
+          // H1 daba de alta este colegio "sin clave" y el sistema
+          // entendía "no usa Holded". Esa deducción es la que el addendum
+          // parte en dos: sin clave también está el cliente que lo
+          // conectará la semana que viene, y ése SÍ debe quedarse sin
+          // activar hasta que lo conecte. El colegio de verdad —el que no
+          // lo va a usar nunca— lo dice ahora con el interruptor.
+          holdedEnabled: false,
         },
       });
       expect(res.statusCode).toBe(201);
@@ -236,13 +245,14 @@ describe.skipIf(!e2eEnabled)("e2e · la empresa sin caja contra Postgres real", 
       const t = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
       expect(t.cajaEnabled).toBe(false);
       expect(t.crmEnabled).toBe(true);
+      expect(t.holdedEnabled).toBe(false);
       expect(t.initialSyncStatus).toBe("NOT_APPLICABLE");
       expect(t.holdedApiKeyCiphertext).toBeNull();
       // Y no se encoló nada.
       expect(enqueuedInitialSync).not.toContain(tenantId);
     });
 
-    it("la salud dice que está lista, con cinco checks que no aplican", async () => {
+    it("la salud dice que está lista, con seis checks que no aplican", async () => {
       const res = await app.inject({
         method: "GET",
         url: `/super-admin/tenants/${tenantId}`,
@@ -251,7 +261,23 @@ describe.skipIf(!e2eEnabled)("e2e · la empresa sin caja contra Postgres real", 
       expect(res.statusCode).toBe(200);
       const h = res.json().onboardingHealth;
       expect(h.ready).toBe(true);
-      expect(h.readinessChecks.filter((c: any) => !c.applies)).toHaveLength(5);
+      // catalogo-local (addendum 3) · eran cinco y ahora son seis. Los
+      // cuatro de la caja siguen igual; de los de Holded, `taxes-ratio`
+      // se mudó de `caja` a `holded` (TenantTax sólo lo puebla el sync) y
+      // se sumó `tickets-before-holded`. Ninguno le aplica a una empresa
+      // que no usa Holded.
+      const noAplican = h.readinessChecks
+        .filter((c: any) => !c.applies)
+        .map((c: any) => c.id)
+        .sort();
+      expect(noAplican).toEqual([
+        "no-sync-failures",
+        "products-sellable",
+        "sync-done",
+        "taxes-ratio",
+        "test-cashier-provisioned",
+        "tickets-before-holded",
+      ]);
     });
 
     it("se activa y el OWNER nace SIN PIN de cajero", async () => {
