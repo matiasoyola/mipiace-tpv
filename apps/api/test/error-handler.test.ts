@@ -18,6 +18,7 @@ import {
   HoldedSilentRejectError,
   HoldedSubscriptionSuspendedError,
 } from "@mipiacetpv/holded-client";
+import { Prisma } from "@mipiacetpv/db";
 
 import { registerErrorHandler } from "../src/lib/error-handler.js";
 
@@ -58,6 +59,27 @@ async function buildApp() {
   });
   app.get("/boom", async () => {
     throw new Error("detalle interno secreto con stack");
+  });
+  // Frente carrera-409 · el deadlock de dos altas simultáneas, con la forma
+  // EXACTA con la que llega: `P2010` por fuera («raw query failed», que vale
+  // para cualquier cosa) y el SQLSTATE sólo en `meta.code`.
+  app.get("/deadlock", async () => {
+    throw new Prisma.PrismaClientKnownRequestError(
+      "Invalid `prisma.$executeRawUnsafe()` invocation:\n\nRaw query failed. " +
+        "Code: `40P01`. Message: `ERROR: deadlock detected`",
+      {
+        code: "P2010",
+        clientVersion: "test",
+        meta: { code: "40P01", message: "ERROR: deadlock detected" },
+      },
+    );
+  });
+  app.get("/prisma-unique", async () => {
+    throw new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+      code: "P2002",
+      clientVersion: "test",
+      meta: { target: ["email"] },
+    });
   });
   return app;
 }
@@ -125,5 +147,36 @@ describe("registerErrorHandler", () => {
     expect(body.requestId).toBeTruthy();
     expect(res.body).not.toContain("detalle interno secreto");
     expect(res.body).not.toContain("at "); // nada de stack frames
+  });
+
+  // ── Frente carrera-409 · que el 500 traiga su SQLSTATE ────────────────
+  //
+  // Por qué esto es un test y no una línea de log más: el done de B-7a pudo
+  // escribir «sale por el manejador genérico» y NO pudo decir cuál era el
+  // error, porque `prismaCode: "P2010"` significa «una raw query falló» y
+  // vale igual para un deadlock, una clave ajena o una columna que no
+  // existe. Averiguarlo costó una sonda entera. Que no vuelva a costar.
+
+  it("un error de raw query trae el SQLSTATE, no sólo el código de Prisma", async () => {
+    const app = await buildApp();
+    const res = await app.inject({ method: "GET", url: "/deadlock" });
+    expect(res.statusCode).toBe(500);
+    const body = res.json();
+    expect(body.error).toBe("DB_ERROR");
+    expect(body.prismaCode).toBe("P2010");
+    // LO QUE FALTABA: el código de Postgres, que es el que dice algo.
+    expect(body.sqlState).toBe("40P01");
+    expect(body.requestId).toBeTruthy();
+  });
+
+  it("un error de Prisma sin SQLSTATE no se inventa uno", async () => {
+    // `P2002` es un código de PRISMA y tiene la misma forma que un
+    // SQLSTATE. Colarlo como tal sería peor que no ponerlo.
+    const app = await buildApp();
+    const res = await app.inject({ method: "GET", url: "/prisma-unique" });
+    expect(res.statusCode).toBe(500);
+    const body = res.json();
+    expect(body.prismaCode).toBe("P2002");
+    expect(body.sqlState).toBeUndefined();
   });
 });
