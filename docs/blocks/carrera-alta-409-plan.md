@@ -28,17 +28,24 @@ de Prisma para «raw query failed» y no dice nada de qué falló.
 
 ## 1 · Reproducción · qué hizo falta
 
-### 1.1 El fichero en bucle: 20 pasadas, 0 rojas
+### 1.1 El fichero en bucle: 60 pasadas, y el 500 no sale
 
 ```
 apps/api $ C409_DEBUG=1 E2E_DATABASE_URL=…/mipiacetpv_c409_e2e \
     npx vitest run --config vitest.e2e.config.ts test-e2e/agenda-suelo.e2e.ts
 ```
 
-×20 → **20 verdes, 0 rojas** (~11 s por pasada, cada una con su `DROP SCHEMA` +
-`migrate deploy`). Es decir: **el bucle del fichero tal cual NO reprodujo el fallo**, ni
-en 20 pasadas ni en las 10 de B-7a. Con una sola ronda de dos altas por pasada, la
-ventana es demasiado estrecha para caer a mano.
+**60 pasadas** (una tanda de 20 y otra de 40), ~11 s cada una con su `DROP SCHEMA` +
+`migrate deploy`. **Ni una reprodujo el 500.** Es decir: **el bucle del fichero tal cual
+NO sirve para verlo**, ni en 60 pasadas ni en las 10 de B-7a. Con una sola ronda de dos
+altas por pasada, la ventana es demasiado estrecha para caer a mano.
+
+Una de las 60 (la 25) salió roja **por otra cosa**, y se dice para no apuntarse un mérito
+que no es: `Hook timed out in 120000ms`, con el `beforeAll` colgado 698 s. No es el
+500-en-vez-de-409 (los 16 casos quedaron `skipped`, ni siquiera llegaron a correr) y no
+dejó rastro: al mirarlo, `pg_stat_activity` estaba limpio y el contenedor al 1 % de CPU.
+Un hipo de la máquina durante un bucle desatendido. No se ha vuelto a ver en las 20
+pasadas del cierre.
 
 Que no caiga en 20 pasadas no lo desmiente: el CI de master está en rojo por esto y hay
 un deadlock del **12-09** en el log de Postgres, que es justo la fecha del frente R
