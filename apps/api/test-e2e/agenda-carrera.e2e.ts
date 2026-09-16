@@ -19,9 +19,11 @@
 // Y este fichero tiene DOS mitades porque hacen falta las dos:
 //
 //   1. **el deadlock de verdad** (§1) — la misma carrera repetida hasta que
-//      Postgres cuente un deadlock, con `pg_stat_database` de testigo. Si
-//      no llegara a haber ninguno, el caso se pone ROJO: un test que no
-//      ejerce lo que dice cubrir miente más que uno que falta;
+//      el código pase por la rama del 40P01, con el contador de `store.ts`
+//      de testigo. Si no llegara a haber ninguno, el caso **se SALTA**: ni
+//      rojo (no ha fallado nada) ni verde (no habría probado lo que dice).
+//      El testigo era `pg_stat_database.deadlocks` y eso puso el CI en rojo
+//      — ver el addendum de `carrera-alta-409-plan.md`;
 //   2. **el deadlock inyectado** (§2 y §3) — porque el final que importa
 //      no se puede provocar a voluntad. Cuando hay un deadlock de verdad,
 //      la otra transacción casi siempre acaba cometiendo, así que el
@@ -63,7 +65,7 @@ const { registerAgendaRoutes } = await import("../src/agenda/routes.js");
 const { registerErrorHandler } = await import("../src/lib/error-handler.js");
 const { registerLenientJsonParser } = await import("../src/lib/lenient-json.js");
 const { signCashierSession } = await import("../src/shift/cashier-session.js");
-const { createAgendaStore } = await import("../src/agenda/store.js");
+const { createAgendaStore, readRaceStats } = await import("../src/agenda/store.js");
 const { utcToWallDate, wallTimeToUtc } = await import("../src/agenda/time.js");
 
 /** El deadlock, con la forma EXACTA con la que Postgres+Prisma lo entregan:
@@ -130,14 +132,20 @@ describe.skipIf(!e2eEnabled)(
       return Number(rows[0]!.n);
     }
 
-    /** El contador de deadlocks de ESTA base. Es el testigo de que la
-     *  carrera se ha ejercido de verdad y no en el papel. */
-    async function deadlocksDeLaBase(): Promise<number> {
-      const rows = await prisma.$queryRaw<Array<{ deadlocks: bigint }>>`
-        SELECT deadlocks FROM pg_stat_database WHERE datname = current_database()
-      `;
-      return Number(rows[0]?.deadlocks ?? 0);
-    }
+    /**
+     * EL TESTIGO: cuántas veces ha pasado el CÓDIGO por la rama del
+     * deadlock. Lo cuenta `store.ts` en el instante en que reconoce el
+     * SQLSTATE, así que no depende de nada más.
+     *
+     * La primera versión de este caso se lo preguntaba a
+     * `pg_stat_database.deadlocks` y **eso puso el CI en rojo**: ese
+     * contador lo acumula el backend víctima en sus estadísticas
+     * PENDIENTES y se vuelca con retraso. Medido en este mismo Postgres 16
+     * con `deadlock_timeout` bajado a 50 ms: **11 s ciego** en dos de tres
+     * rondas (`carrera-alta-409-plan.md`, addendum §A.2). Preguntar por ahí
+     * era preguntar por algo que todavía no había pasado.
+     */
+    const testigo = (): number => readRaceStats().aborts;
 
     /**
      * Una app idéntica a la de verdad salvo en una cosa: su `$transaction`
@@ -288,22 +296,43 @@ describe.skipIf(!e2eEnabled)(
 
     // ── 1. El deadlock DE VERDAD ──────────────────────────────────────
 
-    it("1 · con deadlocks reales de por medio, la carrera sigue saliendo 201/409", async () => {
+    it("1 · con deadlocks reales de por medio, la carrera sigue saliendo 201/409", async (ctx) => {
       // La misma carrera del caso 3 de `agenda-suelo.e2e.ts` —dos altas
       // simultáneas, mismo hueco, misma profesional— repetida sobre un
-      // hueco distinto cada ronda hasta que Postgres cuente un deadlock.
+      // hueco distinto cada ronda hasta que el código pase por la rama del
+      // 40P01. Con el código de antes del frente, esto sale ROJO: en la
+      // sonda, 44 de 120 perdedoras (37 %) devolvían 500.
       //
-      // Con el código de antes de este frente, esto sale ROJO: en la sonda
-      // del frente 0, 44 de 120 perdedoras (37 %) devolvían 500.
+      // QUÉ PASA SI NO HAY DEADLOCK, que es lo que se aprendió a la mala:
+      // este caso **se SALTA**, no se pone rojo ni verde.
       //
-      // El bucle para en cuanto hay un deadlock contado (normalmente en las
-      // primeras rondas); el tope de 40 es la red por si la máquina del CI
-      // entrelaza distinto. Si se agota sin un solo deadlock, el caso se
-      // pone rojo a propósito: no habría probado lo que dice probar.
+      //   · rojo sería mentira: no ha fallado nada. El CI de master se puso
+      //     rojo así (run 34944219974), con las 40 rondas en 1,4 s y ni un
+      //     500 a la vista;
+      //   · verde también: habría pasado sin ejercer lo que dice cubrir.
+      //
+      // Saltado es lo único honesto, y además **sale en el recuento de
+      // saltados**, que es donde hay que mirarlo.
+      //
+      // Y no deja la lógica del 40P01 sin probar: los casos 2 a 5 la
+      // ejercen SIEMPRE con el error inyectado, haya carrera o no. Lo que
+      // este caso aporta —y sólo él— es que el deadlock que se traduce sea
+      // uno que Postgres haya levantado de verdad.
+      //
+      // Por qué el CI no entrelaza: un deadlock cuesta como mínimo
+      // `deadlock_timeout` (1 s por defecto, y el CI no lo cambia) porque
+      // Postgres no busca ciclos antes. 40 rondas en 1,4 s **no caben** ni
+      // un solo deadlock; allí las dos altas se ordenan y sale el 23P01 de
+      // siempre. Aquí, en cambio, cae en las primeras rondas.
       const TOPE_RONDAS = 40;
-      const deadlocksAntes = await deadlocksDeLaBase();
+      // La palanca para reproducir la condición del CI a mano:
+      // `C409_SIN_CARRERA=1` serializa las dos altas, así que no hay
+      // carrera posible y este caso tiene que acabar SALTADO. No se usa en
+      // la suite; existe para poder comprobar el camino del salto.
+      const SIN_CARRERA = process.env.C409_SIN_CARRERA === "1";
+
+      const testigoAntes = testigo();
       let rondas = 0;
-      let deadlocksAhora = deadlocksAntes;
       const codigosVistos: number[] = [];
 
       while (rondas < TOPE_RONDAS) {
@@ -311,42 +340,60 @@ describe.skipIf(!e2eEnabled)(
           `${String(6 + (rondas % 16)).padStart(2, "0")}:00`,
           2 + Math.floor(rondas / 16),
         );
-        const [a, b] = await Promise.all([
+        const alta = () =>
           app.inject({
             method: "POST",
             url: "/agenda/appointments",
             headers: auth(),
             payload: altaPayload(hueco, soleId),
-          }),
-          app.inject({
-            method: "POST",
-            url: "/agenda/appointments",
-            headers: auth(),
-            payload: altaPayload(hueco, soleId),
-          }),
-        ]);
+          });
+        const [a, b] = SIN_CARRERA
+          ? [await alta(), await alta()] // una detrás de otra: sin carrera
+          : await Promise.all([alta(), alta()]);
         rondas += 1;
         const codigos = [a.statusCode, b.statusCode].sort();
         codigosVistos.push(...codigos);
 
-        // LO QUE NO PUEDE PASAR, ronda a ronda: ni un 500, ni dos citas.
+        // LAS GARANTÍAS DURAS, ronda a ronda y ANTES de cualquier salto:
+        // ni un 500, y una sola cita en el hueco. Esto se comprueba
+        // siempre, haya deadlock o no — es lo que protege al mostrador.
         expect(
           codigos,
           `ronda ${rondas}: ${a.statusCode} ${a.body.slice(0, 200)} / ${b.statusCode} ${b.body.slice(0, 200)}`,
         ).toEqual([201, 409]);
         expect(await citasEn(hueco)).toBe(1);
 
-        deadlocksAhora = await deadlocksDeLaBase();
-        if (deadlocksAhora > deadlocksAntes && rondas >= 3) break;
+        if (testigo() > testigoAntes && rondas >= 3) break;
       }
 
       expect(codigosVistos).not.toContain(500);
-      // El testigo: Postgres contó al menos un deadlock. Sin esto el caso
-      // podría pasar sin haber ejercido nunca el camino del 40P01.
-      expect(
-        deadlocksAhora - deadlocksAntes,
-        `${rondas} rondas sin un solo deadlock: esta pasada NO ha ejercido el 40P01`,
-      ).toBeGreaterThan(0);
+
+      const abortos = testigo() - testigoAntes;
+      if (abortos === 0) {
+        // El motivo, a la salida, para que quien lea el recuento de
+        // saltados sepa qué se quedó sin ejercer y por qué.
+        console.warn(
+          [
+            "",
+            `SALTADO · caso 1 de agenda-carrera: ${rondas} rondas de la carrera real`,
+            "sin que Postgres levantara un solo deadlock (40P01).",
+            "",
+            "NO es un fallo: las garantías duras se han comprobado en las",
+            `${rondas} rondas (ni un 500, y una sola cita por hueco). Lo que no`,
+            "se ha ejercido es el 40P01 con un deadlock de verdad.",
+            "",
+            "Pasa cuando la máquina ordena las dos altas en vez de entrelazarlas",
+            "(un deadlock cuesta >= deadlock_timeout, 1 s): entonces sale el",
+            "23P01 de siempre. La traducción del 40P01 la cubren igual los casos",
+            "2 a 5 de este fichero, con el error inyectado.",
+            "",
+          ].join("\n"),
+        );
+        ctx.skip();
+        return;
+      }
+
+      expect(abortos).toBeGreaterThan(0);
     }, 240_000);
 
     // ── 2. El deadlock inyectado · el alta ────────────────────────────
