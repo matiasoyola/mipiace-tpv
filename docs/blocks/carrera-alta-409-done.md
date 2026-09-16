@@ -286,6 +286,117 @@ reintentándose y saliendo bien. Lo que sí sería un fallo es ver un 500 `DB_ER
 
 ---
 
+## 9 · ADDENDUM · el testigo puso el CI en rojo (16-09-2026)
+
+### 9.1 Qué pasó
+
+Mergeado a master (`5994fde`), el CI siguió en rojo — y esta vez el culpable era mío. Run
+**34944219974**, job `e2e`:
+
+- `agenda-suelo.e2e.ts` pasaba **16/16**;
+- las **40 rondas** del caso 1 de `agenda-carrera.e2e.ts` salían **todas 201/409, sin un
+  solo 500** — o sea, el arreglo del frente funcionaba;
+- lo que caía era **el testigo**: `40 rondas sin un solo deadlock: esta pasada NO ha
+  ejercido el 40P01: expected 0 to be greater than 0`.
+
+**§2.11 de este mismo documento lo avisaba** («un test que exige que ocurra una carrera…»)
+y lo dejó pasar igual. El aviso estaba escrito y no se actuó sobre él: eso es lo que hay
+que anotar, más que el fallo.
+
+### 9.2 La causa, confirmada
+
+La hipótesis era el retardo con el que Postgres publica `pg_stat_database.deadlocks`. Hay
+**dos** relojes y uno tapaba al otro; medidos por separado en este mismo Postgres 16
+(detalle en `carrera-alta-409-plan.md`, addendum §A):
+
+| | |
+|---|---|
+| **(A) detección** | Postgres no busca ciclos hasta que una espera supera `deadlock_timeout`. Por defecto **1 s**, y el CI no lo cambia. **Un deadlock cuesta ≥ 1 s de reloj.** |
+| **(B) volcado** | el contador lo acumula el backend víctima en estadísticas pendientes. Con `deadlock_timeout` a 50 ms para destapar (B): **11 s ciego** en dos de tres rondas. |
+
+**(B) es real y está confirmado.** Pero **no es lo que pasó en el CI**, y esto es lo que
+cierra el caso:
+
+> **40 rondas en 1,4 s = 35 ms por ronda. Un deadlock cuesta ≥ 1 s. No cabe ni uno.**
+
+Lo confirma el contraste con la sonda del frente 0: **120 rondas en 49 s con 44
+deadlocks** → 44 × 1 s + 76 × ~50 ms ≈ 48 s, que es lo que tardó. Las rondas con deadlock
+cuestan un segundo; las que no, cincuenta milisegundos.
+
+**En el CI sencillamente no hubo carrera.** Aquella máquina ordena las dos altas —una
+escanea el índice antes de que la otra escriba— y sale el `23P01` de siempre, que es un
+final correcto. El testigo exigía un entrelazado que allí no se produce.
+
+### 9.3 La decisión
+
+**El testigo lo cuenta el código, y si no hay carrera el caso se salta.**
+
+1. `store.ts` lleva `raceStats` (`aborts` / `retries` / `exhausted`), que sube en el
+   instante en que `withRaceRetry` reconoce el SQLSTATE. Tres enteros que sólo suben:
+   **cero cambio de comportamiento**, y no le pregunta a nadie cuándo se enteró. De paso
+   deja de ser sólo cosa del test: cuánto se desatasca la agenda de un centro es una cifra
+   de salud. Engancharla al panel de B-9 queda fuera.
+2. **Sin deadlock real, el caso 1 se SALTA** (`ctx.skip()`), con el motivo impreso y
+   contando en el recuento de saltados. Ni rojo —no ha fallado nada— ni verde —no habría
+   probado lo que dice—. Es la misma regla que `e2e-env.ts` aplica a saltarse la suite:
+   saltado y dicho, nunca verde callando.
+3. **Las garantías duras se comprueban siempre**, ronda a ronda y **antes** de cualquier
+   salto: ni un 500, y una sola cita por hueco. Lo que protege al mostrador no depende de
+   que haya suerte con el entrelazado.
+4. **La traducción del 40P01 no queda al azar**: la cubren los casos 2 a 5 con el error
+   inyectado, haya carrera o no.
+
+Lo que **no** se ha tocado: el helper de reintento, la traducción a 409, `reschedule`, el
+manejador genérico y el workflow del CI. Cero migraciones.
+
+### 9.4 Sabotaje, con las dos filas nuevas
+
+Las seis de §3 se volvieron a correr sobre el árbol nuevo y siguen rojas. Y hay dos filas
+más, que son las de este addendum:
+
+| # | Qué rompo a propósito | Qué se pone rojo | Con qué mensaje |
+|---|---|---|---|
+| 7 | **El testigo vuelve a leer `pg_stat_database`** (el bucle para con el contador bueno, así que la pasada NO espera al volcado; `deadlock_timeout` a 50 ms) | caso 1, **6 de 6 pasadas** | `codigo=1 pg=0` — hubo **un deadlock de verdad**, el código lo vio y Postgres decía cero. Con el salto puesto el caso se **queda ciego** (4 de 4 pasadas: `4 passed \| 1 skipped` habiendo habido carrera); sin el salto, **rojo** |
+| 8 | **Quitar el salto** (que el caso 1 vuelva a exigir el deadlock), bajo la condición del CI | caso 1 | **`expected 0 to be greater than 0`** — el mensaje literal del run 34944219974 |
+
+Y una comprobación que no es una fila pero es la que sostiene el punto 4 de §9.3: con el
+**caso 1 SALTADO** (condición del CI) y el reconocimiento del `40P01` roto, **los cuatro
+casos inyectados se ponen rojos igual**. La lógica del deadlock no depende de que haya
+carrera.
+
+### 9.5 Los números
+
+| Qué | Resultado |
+|---|---|
+| **20 pasadas de `agenda-carrera.e2e.ts`** | **20 verdes, 0 rojas** · caso 1 **ejecutado en las 20** (0 saltos) |
+| **20 pasadas de `agenda-suelo.e2e.ts`** | **20 verdes, 0 rojas**, 16/16 en cada una (este fichero no tiene salto) |
+| Condición del CI reproducida a mano | `C409_SIN_CARRERA=1` serializa las dos altas → 40 rondas sin deadlock → **caso 1 SALTADO**, `4 passed \| 1 skipped`, con el motivo a la salida. Ni rojo ni verde |
+| **Suite entera** | **200 ficheros · 1930 verdes · 3 saltados · 0 rojos** |
+| **e2e completa** | **9 ficheros · 105 verdes** |
+| Typecheck | `tsc --noEmit` de `apps/api` limpio |
+
+**Los 3 saltados siguen siendo los mismos** (el `describe.skip` del flow legacy de
+super-admin, de B-OnboardingV2). El caso 1 **no** aparece entre ellos en una máquina que
+entrelaza; en el CI aparecerá, y ahí es donde hay que leerlo.
+
+### 9.6 Lo que este addendum NO cubre
+
+1. **En el CI, el caso 1 se va a saltar siempre**, casi con seguridad: aquella máquina no
+   entrelaza. O sea que **el deadlock con Postgres de verdad sólo se ejerce en local**. Lo
+   que allí queda cubierto es la traducción con el error inyectado más las garantías duras
+   de las 40 rondas. Es menos de lo que parecía que había, y es lo honesto.
+2. **No se ha intentado forzar el entrelazado en el CI** (ni bajando `deadlock_timeout` en
+   el servicio de Postgres, ni metiendo una pausa entre el INSERT y el escaneo). Se podría
+   —`ALTER DATABASE … SET deadlock_timeout` en el arranque del job— pero toca el workflow,
+   que el prompt deja fuera. **Queda dicho** como la forma de recuperar esa cobertura.
+3. **El contador es del proceso y sólo sube**: no se puede poner a cero ni por tenant. Si
+   algún día lo lee el panel de salud, esa cifra habrá que acotarla — hoy no la lee nadie
+   más que el test.
+4. **`C409_SIN_CARRERA` es una palanca de test** que existe sólo para poder comprobar el
+   camino del salto. No la usa la suite y no toca `src/`.
+
+---
+
 ## 8 · Commits
 
 Dos, y la frontera entre ellos es la que importa:
@@ -293,10 +404,12 @@ Dos, y la frontera entre ellos es la que importa:
 | hash | commit |
 |---|---|
 | `2c91be4` | **fix(agenda): la carrera de dos altas acaba en 409, no en 500** — todo el código y todos los tests |
-| HEAD | docs(carrera-409): done + plan + los avisos de 7a cerrados — sólo documentación |
+| `912e35c` | docs(carrera-409): done + plan + los avisos de 7a cerrados — sólo documentación |
+| `1cdf7e3` | **fix(agenda): el testigo del deadlock lo cuenta el código, no `pg_stat_database`** — el addendum (§9) |
+| HEAD | docs(carrera-409): el addendum del testigo — sólo documentación |
 
-**El último commit con código es `2c91be4`.** El que le sigue es este documento, el plan
-del frente 0 y el cierre de `reservas-7a-done.md`: no toca `src/` ni `test/`. Su hash no
-se escribe aquí porque un commit no puede contener el suyo propio — `git log -2` lo da.
+**El último commit con código es `1cdf7e3`.** El que le sigue es documentación: este
+addendum y el del plan, sin tocar `src/`. Su hash no se escribe aquí porque un commit no
+puede contener el suyo propio — `git log -4` lo da.
 
 **Ni push ni deploy: eso lo hace Matías.**
