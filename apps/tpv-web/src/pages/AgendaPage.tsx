@@ -360,20 +360,54 @@ export function AgendaPage({
   // El día cerrado: la rejilla no ofrece nada y lo dice con su nombre.
   const cerrado = dayInfo?.closed ?? null;
 
-  const loadDay = useCallback(async (d: string) => {
-    setLoading(true);
-    try {
-      const fresh = await fetchAgendaDay(d);
-      setDay(fresh);
-      setOffline(false);
-    } catch {
-      const cached = await loadAgendaDayFromCache(d);
-      setDay(cached ?? { date: d, staff: [], appointments: [] });
-      setOffline(true);
-    } finally {
-      setLoading(false);
-    }
+  // B-reservas-mostrador F5 · las dos cachés locales de las que vive esta
+  // pantalla: los clientes (el nombre de la tarjeta) y el catálogo (el nombre
+  // del servicio). Hasta este bloque se leían UNA VEZ al montar y no se
+  // volvían a mirar, así que un cliente creado o sincronizado con la agenda
+  // ya abierta se pintaba «Cliente» para siempre — es el segundo hallazgo del
+  // 13-09 (`docs/qa/2026-09-13-ap11/20-lunes-cita.png`).
+  //
+  // El catálogo tenía el MISMO patrón y el mismo fallo latente (un servicio
+  // nuevo se pintaba «Servicio»); se arregla igual, de paso, porque es el
+  // mismo bug con otro nombre.
+  const refrescarCachesLocales = useCallback(async () => {
+    const [catalogo, clientes] = await Promise.all([
+      loadCatalogFromCache(),
+      loadClientsFromCache(),
+    ]);
+    setServices(catalogo);
+    // El refresco MEZCLA, no reemplaza. El caché manda sobre lo que ya
+    // había —una ficha editada trae el nombre nuevo—, pero un cliente que
+    // el mapa conoce y el caché todavía no NO se pierde: si se reemplazara,
+    // la clienta que se acaba de elegir en el selector volvería a «Sin
+    // nombre» en cuanto el alta recargara el día, delante de ella.
+    setClientsById((prev) => {
+      const next = new Map(clientes.map((c) => [c.id, c]));
+      for (const [id, c] of prev) if (!next.has(id)) next.set(id, c);
+      return next;
+    });
   }, []);
+
+  const loadDay = useCallback(
+    async (d: string) => {
+      setLoading(true);
+      try {
+        const fresh = await fetchAgendaDay(d);
+        setDay(fresh);
+        setOffline(false);
+      } catch {
+        const cached = await loadAgendaDayFromCache(d);
+        setDay(cached ?? { date: d, staff: [], appointments: [] });
+        setOffline(true);
+      } finally {
+        setLoading(false);
+      }
+      // Después de pintar el día, y sin bloquearlo: si entretanto se dio de
+      // alta una clienta o un servicio, el siguiente pintado ya los sabe.
+      void refrescarCachesLocales();
+    },
+    [refrescarCachesLocales],
+  );
 
   useEffect(() => {
     void loadDay(date);
@@ -399,13 +433,6 @@ export function AgendaPage({
       void loadDay(date);
     });
   }, [date, loadDay]);
-
-  useEffect(() => {
-    void loadCatalogFromCache().then(setServices);
-    void loadClientsFromCache().then((cs) => {
-      setClientsById(new Map(cs.map((c) => [c.id, c])));
-    });
-  }, []);
 
   // Auto-scroll a la línea "ahora" al abrir el día de hoy.
   useEffect(() => {
@@ -455,11 +482,31 @@ export function AgendaPage({
     [day],
   );
 
-  const clientName = (id: string | null): string => {
-    if (!id) return "Sin cliente";
+  // B-reservas-mostrador F5 · «Cliente» SE LEE COMO UN NOMBRE. Una tarjeta
+  // que pone «16:00 · Cliente» parece una cita de alguien que se llama así,
+  // no un dato que falta — y eso es lo que engañó el 13-09. El marcador dice
+  // que falta el dato, y se pinta apagado para que no compita con los
+  // nombres de verdad.
+  const NOMBRE_QUE_FALTA = "Sin nombre";
+
+  /** El nombre para pintar, y si es el marcador o un nombre de verdad. */
+  const clientLabel = (
+    id: string | null,
+  ): { nombre: string; desconocido: boolean } => {
+    if (!id) return { nombre: "Sin cliente", desconocido: false };
     const c = clientsById.get(id);
-    return c ? clientFullName(c) : "Cliente";
+    if (c) return { nombre: clientFullName(c), desconocido: false };
+    return { nombre: NOMBRE_QUE_FALTA, desconocido: true };
   };
+
+  /** El nombre para MANDAR a otra pantalla: `null` si no se sabe. Aquí el
+   *  marcador no vale — la caja pondría «Sin nombre» como si fuera el
+   *  nombre de la clienta en el contexto del borrador. */
+  const clientNameOrNull = (id: string | null): string | null => {
+    const c = id ? clientsById.get(id) : null;
+    return c ? clientFullName(c) : null;
+  };
+
 
   const serviceNames = (a: AgendaAppointment): string =>
     a.items
@@ -587,7 +634,7 @@ export function AgendaPage({
     onEnterDraft({
       appointmentId,
       ticketId: res.ticket.id,
-      clientName: appt ? clientName(appt.clientId) : null,
+      clientName: appt ? clientNameOrNull(appt.clientId) : null,
       serviceLabel: appt ? serviceNames(appt) : "",
     });
     onClose();
@@ -987,7 +1034,7 @@ export function AgendaPage({
                   onSlot={(min) => openSlotFirst(s.userId, min)}
                   onAppt={abrirCita}
                   labelOf={serviceNames}
-                  clientOf={(a) => clientName(a.clientId)}
+                  clientOf={(a) => clientLabel(a.clientId)}
                 />
               ))}
               {(apptsByStaff.get("__unassigned__")?.length ?? 0) > 0 && (
@@ -1012,7 +1059,7 @@ export function AgendaPage({
                   onSlot={(min) => openSlotFirst(null, min)}
                   onAppt={abrirCita}
                   labelOf={serviceNames}
-                  clientOf={(a) => clientName(a.clientId)}
+                  clientOf={(a) => clientLabel(a.clientId)}
                 />
               )}
             </div>
@@ -1039,6 +1086,13 @@ export function AgendaPage({
               setDraft({ ...draft, start });
               setBookError(null);
             }}
+            // B-reservas-mostrador F5 · el cliente que se acaba de elegir o
+            // de crear entra en el mapa AQUÍ MISMO. Esperar a la siguiente
+            // carga del día dejaría la tarjeta recién creada diciendo «Sin
+            // nombre» delante de la clienta cuyo nombre se acaba de teclear.
+            onClientPicked={(c) =>
+              setClientsById((prev) => new Map(prev).set(c.id, c))
+            }
             onCancel={() => {
               setDraft(null);
               setBookError(null);
@@ -1051,7 +1105,7 @@ export function AgendaPage({
         {detail && (
           <DetailPanel
             appt={detail}
-            clientName={clientName(detail.clientId)}
+            client={clientLabel(detail.clientId)}
             serviceLabel={serviceNames(detail)}
             onClose={() => setDetail(null)}
             onStatus={(st) => changeStatus(detail.id, st)}
@@ -1307,7 +1361,7 @@ function StaffColumn(props: {
   onSlot: (minutes: number) => void;
   onAppt: (a: AgendaAppointment) => void;
   labelOf: (a: AgendaAppointment) => string;
-  clientOf: (a: AgendaAppointment) => string;
+  clientOf: (a: AgendaAppointment) => { nombre: string; desconocido: boolean };
 }) {
   const {
     staff,
@@ -1580,7 +1634,20 @@ function StaffColumn(props: {
                     : "text-mipiace-ink"
                 }`}
               >
-                {localHHMM(a.start)} · {props.clientOf(a)}
+                {localHHMM(a.start)} ·{" "}
+                {(() => {
+                  const cl = props.clientOf(a);
+                  return cl.desconocido ? (
+                    <span
+                      data-cliente-desconocido
+                      className="font-normal italic text-slate-400"
+                    >
+                      {cl.nombre}
+                    </span>
+                  ) : (
+                    cl.nombre
+                  );
+                })()}
                 {local && (rechazada ? " · rechazada" : " · sin enviar")}
                 {/* B-reservas-7a · si la tarjeta NO da para dos líneas, la
                     marca va aquí. Meterla en una segunda línea que no cabe
@@ -1640,6 +1707,7 @@ function BookingPanel(props: {
   // El 409 del servidor con su frase y sus alternativas.
   bookError: { message: string; alternatives: AvailabilitySlot[] } | null;
   onPickAlternative: (start: string) => void;
+  onClientPicked: (c: ClientRow) => void;
   onCancel: () => void;
   onReserve: () => void;
   onReserveAndCharge: () => void;
@@ -1824,9 +1892,10 @@ function BookingPanel(props: {
           <label className="text-[12px] font-medium text-slate-500">Cliente</label>
           <button
             onClick={() =>
-              picker.open((c) =>
-                setDraft({ ...draft, clientId: c.id, clientName: clientFullName(c) }),
-              )
+              picker.open((c) => {
+                props.onClientPicked(c);
+                setDraft({ ...draft, clientId: c.id, clientName: clientFullName(c) });
+              })
             }
             className="mt-1 w-full h-11 px-3 rounded-xl bg-mipiace-stone border border-slate-200 text-left text-[14px]"
           >
@@ -2029,7 +2098,7 @@ function BookingPanel(props: {
 
 function DetailPanel(props: {
   appt: AgendaAppointment;
-  clientName: string;
+  client: { nombre: string; desconocido: boolean };
   serviceLabel: string;
   onClose: () => void;
   onStatus: (s: AppointmentStatus) => void;
@@ -2057,7 +2126,16 @@ function DetailPanel(props: {
       <div className="p-4 space-y-3 text-[14px]">
         <div>
           <div className="text-[12px] text-slate-400">Cliente</div>
-          <div className="font-medium text-mipiace-ink">{props.clientName}</div>
+          <div
+            data-cliente-desconocido={props.client.desconocido ? "" : undefined}
+            className={
+              props.client.desconocido
+                ? "italic text-slate-400"
+                : "font-medium text-mipiace-ink"
+            }
+          >
+            {props.client.nombre}
+          </div>
         </div>
         <div>
           <div className="text-[12px] text-slate-400">Servicios</div>

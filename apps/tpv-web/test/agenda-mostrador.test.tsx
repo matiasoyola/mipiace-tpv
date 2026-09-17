@@ -770,3 +770,133 @@ describe("F4 · «fin» sólo existe si hay algo que dure", () => {
     expect(texto()).not.toContain("fin");
   });
 });
+
+// ── F5 · el nombre de la clienta siempre ──────────────────────────────
+
+describe("F5 · el nombre real aparece aunque el cliente llegue después", () => {
+  beforeEach(() => {
+    respuesta.appointments = [
+      cita("ap-sole", CARMEN.id, SOLE.userId, "CONFIRMED", "12:00", 90),
+    ];
+  });
+
+  it("el cliente que YA estaba en el caché se pinta con su nombre", async () => {
+    await render();
+    expect(tarjetaDe("12:00").textContent).toContain("Carmen Ruiz");
+  });
+
+  it("un cliente que llega al caché DESPUÉS de montar aparece al recargar el día", async () => {
+    // Arranca sin ese cliente en el caché: es lo que pasa cuando la ficha se
+    // crea desde otro terminal, o cuando el sync la trae con la agenda ya
+    // abierta.
+    cacheMock.clientes = [];
+    await render();
+    expect(tarjetaDe("12:00").textContent).toContain("Sin nombre");
+
+    // Llega al caché y se recarga el día (cambiar de día y volver, o el
+    // repintado que dispara el outbox).
+    cacheMock.clientes = [CARMEN];
+    await irAlDia(MANANA);
+    await irAlDia(HOY);
+    expect(tarjetaDe("12:00").textContent).toContain("Carmen Ruiz");
+    expect(tarjetaDe("12:00").textContent).not.toContain("Sin nombre");
+  });
+
+  it("el caché de clientes se RELEE en cada carga del día, no sólo al montar", async () => {
+    await render();
+    const alMontar = cacheMock.lecturasDeClientes;
+    expect(alMontar).toBeGreaterThan(0);
+    await irAlDia(MANANA);
+    expect(cacheMock.lecturasDeClientes).toBeGreaterThan(alMontar);
+  });
+
+  it("y el del CATÁLOGO también: un servicio nuevo deja de ser «Servicio»", async () => {
+    // El mismo patrón «cargar una vez al montar» estaba en el catálogo.
+    cacheMock.servicios = [];
+    await render();
+    expect(tarjetaDe("12:00").textContent).toContain("Servicio");
+    expect(tarjetaDe("12:00").textContent).not.toContain("Corte de pelo");
+
+    cacheMock.servicios = [CORTE, TINTE];
+    await irAlDia(MANANA);
+    await irAlDia(HOY);
+    expect(tarjetaDe("12:00").textContent).toContain("Corte de pelo");
+  });
+
+  it("elegir un cliente en el selector lo enseña SIN recargar nada", async () => {
+    cacheMock.clientes = [];
+    respuesta.appointments = [];
+    clientesMock.elegido = CARMEN;
+    await render();
+    await tocarFranja(SOLE.userId, "12:00");
+
+    // Al abrir el selector, el mock dispara `onSelect` con Carmen.
+    await click(botonPorTexto("Buscar o crear cliente…")!);
+    expect(texto()).toContain("Carmen Ruiz");
+
+    // Y la cita que se cree con ella ya sale con su nombre, sin esperar a
+    // que el caché se vuelva a leer.
+    respuesta.appointments = [
+      cita("ap-nueva", CARMEN.id, SOLE.userId, "CONFIRMED", "12:00", 90),
+    ];
+    await click(servicio("Corte de pelo"));
+    await click(accion("reservar")!);
+    expect(tarjetaDe("12:00").textContent).toContain("Carmen Ruiz");
+  });
+});
+
+describe("F5 · «Cliente» deja de leerse como un nombre", () => {
+  it("un id que no se conoce se lee como un dato que FALTA, apagado", async () => {
+    cacheMock.clientes = [];
+    respuesta.appointments = [
+      cita("ap-x", "cl-desconocida", SOLE.userId, "CONFIRMED", "12:00", 90),
+    ];
+    await render();
+
+    const marca = container.querySelector<HTMLElement>("[data-cliente-desconocido]");
+    expect(marca).not.toBeNull();
+    expect(marca!.textContent).toBe("Sin nombre");
+    // Apagado y en cursiva: no compite con los nombres de verdad.
+    expect(marca!.className).toContain("italic");
+    expect(marca!.className).toContain("text-slate-400");
+    // Y ya no dice «Cliente», que es lo que engañaba.
+    expect(tarjetaDe("12:00").textContent).not.toContain("· Cliente");
+  });
+
+  it("una cita SIN cliente sigue diciendo «Sin cliente», que es otra cosa", async () => {
+    respuesta.appointments = [
+      cita("ap-sin", null, SOLE.userId, "CONFIRMED", "12:00", 90),
+    ];
+    await render();
+    expect(tarjetaDe("12:00").textContent).toContain("Sin cliente");
+    // «Sin cliente» NO es un dato que falte: es una cita que no tiene ficha
+    // asociada a propósito (la reserva por teléfono de B4).
+    expect(
+      container.querySelector("[data-cliente-desconocido]"),
+    ).toBeNull();
+  });
+
+  it("el detalle de la cita marca lo mismo", async () => {
+    cacheMock.clientes = [];
+    respuesta.appointments = [
+      cita("ap-x", "cl-desconocida", SOLE.userId, "CONFIRMED", "12:00", 90),
+    ];
+    await render();
+    await click(tarjetaDe("12:00"));
+
+    const marcas = container.querySelectorAll("[data-cliente-desconocido]");
+    // Una en la tarjeta y otra en el panel de detalle.
+    expect(marcas.length).toBe(2);
+    expect(texto()).toContain("Sin nombre");
+  });
+
+  it("con el nombre sabido, el detalle NO marca nada", async () => {
+    respuesta.appointments = [
+      cita("ap-sole", CARMEN.id, SOLE.userId, "CONFIRMED", "12:00", 90),
+    ];
+    await render();
+    await click(tarjetaDe("12:00"));
+    expect(texto()).toContain("Carmen Ruiz");
+    expect(container.querySelector("[data-cliente-desconocido]")).toBeNull();
+  });
+});
