@@ -355,6 +355,13 @@ async function irAlDia(date: string) {
   await click(chip);
 }
 
+/** Un botón por su `aria-label` (los que sólo llevan icono). */
+function porEtiqueta(label: string): HTMLButtonElement {
+  const b = container.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`);
+  if (!b) throw new Error(`no hay botón con aria-label "${label}"`);
+  return b;
+}
+
 function botonPorTexto(text: string): HTMLButtonElement | undefined {
   return Array.from(container.querySelectorAll("button")).find(
     (b) => (b.textContent ?? "").trim() === text,
@@ -426,7 +433,10 @@ describe("F1 · «Reservar» es el primario y «Reservar y cobrar» sólo es de 
     expect(conBoton).toContain("Reservar y cobrar");
     // Mismo número de filas y la misma altura reservada para la segunda.
     expect(filasManana).toBe(filasHoy);
-    const ranura = pieDelPanel().children[1] as HTMLElement;
+    // El pie son tres filas de alto fijo: el motivo de F4, el primario y la
+    // ranura del secundario. Ninguna aparece o desaparece.
+    expect(filasHoy).toBe(3);
+    const ranura = pieDelPanel().children[2] as HTMLElement;
     expect(ranura.className).toContain("h-11");
   });
 
@@ -608,5 +618,155 @@ describe("F2 · la tarjeta se tiñe con el color de la profesional", () => {
     expect(cabecera.style.borderTop).toContain(
       hexARgb(colorDeProfesional(ISA.userId, ISA.color)),
     );
+  });
+});
+
+// ── F4 · ningún botón mudo ────────────────────────────────────────────
+
+function motivo(cual: string): HTMLElement | null {
+  return container.querySelector<HTMLElement>(`[data-motivo="${cual}"]`);
+}
+
+describe("F4 · un botón apagado dice qué le falta, en texto", () => {
+  it("«Buscar hueco» sin servicios dice que elija uno", async () => {
+    await render();
+    await tocarFranja(SOLE.userId, "12:00");
+    // Se quita la hora para que aparezca el botón de buscar.
+    await click(botonPorTexto("cambiar")!);
+
+    const btn = accion("buscar-hueco")!;
+    expect(btn.disabled).toBe(true);
+    expect(motivo("buscar-hueco")!.textContent).toBe("Elige al menos un servicio.");
+  });
+
+  it("con un servicio elegido, el botón se enciende y el motivo se va", async () => {
+    await render();
+    await tocarFranja(SOLE.userId, "12:00");
+    await click(botonPorTexto("cambiar")!);
+    await click(servicio("Corte de pelo"));
+
+    expect(accion("buscar-hueco")!.disabled).toBe(false);
+    expect(motivo("buscar-hueco")).toBeNull();
+  });
+
+  it("en un día PASADO dice que ese día ya pasó, no que falte un servicio", async () => {
+    await render();
+    // Al día de ayer sólo se llega por la flecha: la tira de chips va de hoy
+    // en adelante. El panel se abre por el botón de cabecera, porque tocar
+    // una franja de un día pasado no abre nada (el suelo de 6a, intacto).
+    await click(porEtiqueta("Día anterior"));
+    await click(botonPorTexto("Nueva cita")!);
+    await click(servicio("Corte de pelo"));
+
+    const btn = accion("buscar-hueco")!;
+    expect(btn.disabled).toBe(true);
+    // Con el servicio YA elegido, el motivo no puede seguir siendo el
+    // servicio: la causa de verdad es el día.
+    expect(motivo("buscar-hueco")!.textContent).toBe("Ese día ya ha pasado.");
+  });
+
+  it("y el día pasado MANDA sobre el servicio que falta", async () => {
+    await render();
+    await click(porEtiqueta("Día anterior"));
+    await click(botonPorTexto("Nueva cita")!);
+    // Sin servicio Y en día pasado: se dice lo que no tiene arreglo aquí.
+    expect(motivo("buscar-hueco")!.textContent).toBe("Ese día ya ha pasado.");
+  });
+
+  it("el motivo NUNCA va en un tooltip: ux-principles §6 los prohíbe", async () => {
+    await render();
+    await tocarFranja(SOLE.userId, "12:00");
+    await click(botonPorTexto("cambiar")!);
+    for (const b of Array.from(container.querySelectorAll("button"))) {
+      expect(b.hasAttribute("title")).toBe(false);
+    }
+    // Y el motivo es texto que se lee sin tocar nada.
+    expect(texto()).toContain("Elige al menos un servicio.");
+  });
+
+  it("«Reservar» sin servicio lo dice, y se calla al elegirlo", async () => {
+    await render();
+    await tocarFranja(SOLE.userId, "12:00");
+    expect(accion("reservar")!.disabled).toBe(true);
+    expect(motivo("reservar")!.textContent).toBe("Falta el servicio.");
+
+    await click(servicio("Corte de pelo"));
+    expect(accion("reservar")!.disabled).toBe(false);
+    expect(motivo("reservar")).toBeNull();
+  });
+
+  it("sin hora y sin servicio, lo dice de los dos de una vez", async () => {
+    await render();
+    await click(botonPorTexto("Nueva cita")!);
+    expect(motivo("reservar")!.textContent).toBe("Faltan el servicio y la hora.");
+  });
+
+  it("con servicio pero sin hora, sólo la hora", async () => {
+    await render();
+    await click(botonPorTexto("Nueva cita")!);
+    await click(servicio("Corte de pelo"));
+    expect(motivo("reservar")!.textContent).toBe("Falta la hora.");
+  });
+
+  it("NO nombra el cliente: una cita sin cliente es legal desde B4", async () => {
+    await render();
+    await tocarFranja(SOLE.userId, "12:00");
+    await click(servicio("Corte de pelo"));
+    // Sin cliente y con servicio y hora: se reserva.
+    expect(accion("reservar")!.disabled).toBe(false);
+    expect(motivo("reservar")).toBeNull();
+    expect(texto()).not.toContain("Falta el cliente");
+  });
+
+  it("el motivo vive en una ranura de alto fijo: no mueve los botones", async () => {
+    await render();
+    await tocarFranja(SOLE.userId, "12:00");
+    const ranura = pieDelPanel().children[0] as HTMLElement;
+    expect(ranura.className).toContain("h-5");
+    expect(ranura.contains(motivo("reservar"))).toBe(true);
+
+    const filasConMotivo = pieDelPanel().children.length;
+    await click(servicio("Corte de pelo"));
+    expect(motivo("reservar")).toBeNull();
+    expect(pieDelPanel().children.length).toBe(filasConMotivo);
+    expect((pieDelPanel().children[0] as HTMLElement).className).toContain("h-5");
+  });
+});
+
+// ── F4 · sin duración no hay «fin» ────────────────────────────────────
+
+describe("F4 · «fin» sólo existe si hay algo que dure", () => {
+  it("con la hora puesta y CERO servicios no se dice ningún «fin»", async () => {
+    await render();
+    await tocarFranja(SOLE.userId, "12:00");
+    // Éste es el fallo del AP11: decía «Servicios · fin 12:00» para una cita
+    // que empieza a las 12:00 (docs/qa/2026-09-13-ap11/20-lunes-cita.png).
+    expect(texto()).not.toContain("fin");
+  });
+
+  it("al elegir un servicio aparece el fin de verdad", async () => {
+    await render();
+    await tocarFranja(SOLE.userId, "12:00");
+    await click(servicio("Corte de pelo")); // 30 min
+    expect(texto()).toContain("30 min");
+    expect(texto()).toContain("fin 12:30");
+  });
+
+  it("dos servicios encadenados suman, y el fin lo dice", async () => {
+    await render();
+    await tocarFranja(SOLE.userId, "12:00");
+    await click(servicio("Corte de pelo")); // 30
+    await click(servicio("Tinte")); // 90
+    expect(texto()).toContain("120 min");
+    expect(texto()).toContain("fin 14:00");
+  });
+
+  it("quitar el último servicio se lleva el «fin» con él", async () => {
+    await render();
+    await tocarFranja(SOLE.userId, "12:00");
+    await click(servicio("Corte de pelo"));
+    expect(texto()).toContain("fin 12:30");
+    await click(servicio("Corte de pelo")); // lo deselecciona
+    expect(texto()).not.toContain("fin");
   });
 });

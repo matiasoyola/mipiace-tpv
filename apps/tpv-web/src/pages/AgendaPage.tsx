@@ -1666,13 +1666,20 @@ function BookingPanel(props: {
     return sum + (s?.durationMin ?? 0);
   }, 0);
 
-  const endHHMM = draft.start
-    ? localHHMM(
-        new Date(
-          new Date(draft.start).getTime() + totalDuration * 60000,
-        ).toISOString(),
-      )
-    : null;
+  // B-reservas-mostrador F4 · SIN DURACIÓN NO HAY FIN. Hasta este bloque
+  // bastaba con tener la hora de inicio: con cero servicios elegidos
+  // `totalDuration` es 0 y la etiqueta decía «fin 12:30» para una cita que
+  // empieza a las 12:30. En el AP11 quedó fotografiado
+  // (`docs/qa/2026-09-13-ap11/20-lunes-cita.png`). Decir una hora de fin
+  // falsa es peor que no decir ninguna: la cajera la lee por teléfono.
+  const endHHMM =
+    draft.start && totalDuration > 0
+      ? localHHMM(
+          new Date(
+            new Date(draft.start).getTime() + totalDuration * 60000,
+          ).toISOString(),
+        )
+      : null;
 
   function toggleService(id: string) {
     const has = draft.serviceIds.includes(id);
@@ -1749,6 +1756,41 @@ function BookingPanel(props: {
   }
 
   const canReserve = draft.serviceIds.length > 0 && !!draft.start;
+
+  // ── B-reservas-mostrador F4 · ningún botón mudo ────────────────────
+  //
+  // Un botón apagado sin motivo obliga a adivinar delante de la clienta. El
+  // motivo va en TEXTO VISIBLE junto al botón, nunca en un `title` ni en un
+  // tooltip: `docs/ux-principles.md` §6 los prohíbe («Touch no tiene hover.
+  // Las cosas se ven o no existen»).
+
+  /** Por qué no se puede buscar hueco. `null` = sí se puede. */
+  function motivoBuscarHueco(): string | null {
+    if (isPastDay) return "Ese día ya ha pasado.";
+    if (draft.serviceIds.length === 0) return "Elige al menos un servicio.";
+    return null;
+  }
+
+  /**
+   * Por qué no se puede reservar. `null` = sí se puede.
+   *
+   * NO nombra el cliente, y no es un olvido: desde B4 una cita SIN cliente es
+   * legal a propósito —la reserva por teléfono de quien todavía no tiene
+   * ficha— y `canReserve` nunca lo ha exigido. Decir «falta el cliente»
+   * mandaría a la cajera a buscar un dato que no hace falta.
+   */
+  function motivoReservar(): string | null {
+    const falta: string[] = [];
+    if (draft.serviceIds.length === 0) falta.push("el servicio");
+    if (!draft.start) falta.push("la hora");
+    if (falta.length === 0) return null;
+    return falta.length === 1
+      ? `Falta ${falta[0]}.`
+      : `Faltan ${falta.join(" y ")}.`;
+  }
+
+  const porQueNoSeBusca = motivoBuscarHueco();
+  const porQueNoSeReserva = motivoReservar();
 
   // B-reservas-mostrador F1 · ¿la cita que se va a guardar es de HOY? Sale de
   // `draft.start` —el instante que se va a escribir— y no de `date`, que es
@@ -1844,12 +1886,24 @@ function BookingPanel(props: {
           ) : (
             <div className="mt-1">
               <button
+                data-accion="buscar-hueco"
                 onClick={findSlots}
-                disabled={draft.serviceIds.length === 0 || searching || isPastDay}
+                disabled={porQueNoSeBusca !== null || searching}
                 className="w-full h-10 rounded-xl bg-mipiace-ink text-white text-[13px] font-medium disabled:opacity-40"
               >
                 {searching ? "Buscando…" : "Buscar hueco"}
               </button>
+              {/* B-reservas-mostrador F4 · el motivo, en texto y debajo del
+                  botón que está apagado. `searching` no genera frase: la
+                  etiqueta ya dice «Buscando…». */}
+              {porQueNoSeBusca && !searching && (
+                <div
+                  data-motivo="buscar-hueco"
+                  className="text-[12px] text-slate-500 mt-1.5"
+                >
+                  {porQueNoSeBusca}
+                </div>
+              )}
               {searchError && (
                 <div className="text-[12px] text-red-500 mt-1">{searchError}</div>
               )}
@@ -1918,6 +1972,22 @@ function BookingPanel(props: {
           Enter que cobre; lo que se fija aquí es que no nazca uno por
           descuido al reordenar. */}
       <div className="shrink-0 p-4 border-t border-slate-100 space-y-2 bg-white">
+        {/* B-reservas-mostrador F4 · el motivo va ENCIMA del botón apagado,
+            que es donde cae la mirada al venir del cuerpo del panel. Y en una
+            ranura de alto fijo, por lo mismo que el secundario de F1: el pie
+            está anclado abajo, así que cualquier fila que aparezca o
+            desaparezca mueve los dos botones — y moverlos justo cuando la
+            cajera va a tocar es cómo se cobra lo que no se quería cobrar. */}
+        <div className="h-5 flex items-center justify-center">
+          {porQueNoSeReserva && (
+            <p
+              data-motivo="reservar"
+              className="text-[12.5px] text-slate-500 text-center leading-snug"
+            >
+              {porQueNoSeReserva}
+            </p>
+          )}
+        </div>
         <button
           data-accion="reservar"
           onClick={props.onReserve}
