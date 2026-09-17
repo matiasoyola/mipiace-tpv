@@ -51,6 +51,20 @@ export const LUMINANCIA_TINTE = 0.72;
 /** La luminancia MÁXIMA de un color de estado (filete y chip). */
 export const LUMINANCIA_MAX_ESTADO = 0.18;
 
+/**
+ * La luminancia MÁXIMA del filete de 3 px que identifica la columna.
+ *
+ * Lo cogió el bucle visual: la cabecera pintaba el color CRUDO, y el de una
+ * profesional con un amarillo casi blanco (#fef9c3) desaparecía sobre el
+ * blanco de la cabecera — la columna se quedaba sin su marca. Es un
+ * componente no textual (WCAG 1.4.11, 3:1), y contra blanco eso exige
+ * L ≤ 1,05/3 − 0,05 = 0,30. Se deja en 0,29 y no en 0,30 clavado: el color
+ * acaba en canales de 8 bits, y redondear con el techo justo dejaba algún
+ * tono del repertorio en 2,99997:1 — un test rojo por un pelo que no vale
+ * para nada. Con 0,29 el peor caso es 3,04:1.
+ */
+export const LUMINANCIA_MAX_CABECERA = 0.29;
+
 export type Rgb = [number, number, number];
 
 /** "#rgb" o "#rrggbb" → canales 0-255. `null` si no se entiende. */
@@ -140,21 +154,26 @@ export function tinteClaro(
 }
 
 /**
- * El color de un ESTADO de cita, bajado hasta que se distingue.
+ * Un color bajado hasta caber bajo un techo de luminancia.
  *
  * Es `tinteClaro` con el objetivo por el otro lado: un color que ya está por
- * debajo del techo se deja como está (COMPLETED apenas se mueve), y uno por
- * encima se baja proporcionalmente, que conserva el tono. El ámbar sigue
- * siendo ámbar y el verde, verde; lo que cambia es que se ven.
+ * debajo del techo se deja como está, y uno por encima se baja
+ * proporcionalmente, que conserva el tono. El ámbar sigue siendo ámbar y el
+ * amarillo, amarillo; lo que cambia es que se ven.
  */
+export function bajarHasta(hex: string | null | undefined, techo: number): string {
+  const rgb = parseHex(hex);
+  if (!rgb) return "#000000";
+  if (luminanciaRelativa(rgb) <= techo) return hex!.trim();
+  return tinteClaro(hex, techo);
+}
+
+/** El color con el que se pinta un ESTADO de cita (filete y chip). */
 export function tonoDeEstado(
   hex: string,
   techo = LUMINANCIA_MAX_ESTADO,
 ): string {
-  const rgb = parseHex(hex);
-  if (!rgb) return "#000000";
-  if (luminanciaRelativa(rgb) <= techo) return hex.trim();
-  return tinteClaro(hex, techo);
+  return bajarHasta(hex, techo);
 }
 
 // ── El color de quien no tiene color ──────────────────────────────────
@@ -202,4 +221,13 @@ export function tinteDeProfesional(
   color: string | null | undefined,
 ): string {
   return tinteClaro(colorDeProfesional(userId, color));
+}
+
+/** El filete de 3 px de la cabecera de su columna: el mismo tono, pero
+ *  garantizando que se ve sobre el blanco de la cabecera. */
+export function colorDeCabecera(
+  userId: string,
+  color: string | null | undefined,
+): string {
+  return bajarHasta(colorDeProfesional(userId, color), LUMINANCIA_MAX_CABECERA);
 }

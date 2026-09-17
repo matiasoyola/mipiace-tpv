@@ -76,7 +76,7 @@ import { __resetOutboxForTests } from "../src/lib/outbox.js";
 import { STATUS_COLOR } from "../src/lib/agenda.js";
 import {
   LUMINANCIA_TINTE,
-  colorDeProfesional,
+  colorDeCabecera,
   contraste,
   luminanciaRelativa,
   parseHex,
@@ -610,14 +610,29 @@ describe("F2 · la tarjeta se tiñe con el color de la profesional", () => {
     expect(banda!.className).toContain("bg-slate-50");
   });
 
-  it("la cabecera de la columna usa el MISMO color base que sus tarjetas", async () => {
+  it("la cabecera de la columna lleva el color de la profesional", async () => {
     await render();
     const cabecera = container.querySelector<HTMLElement>(
       `[data-ausencia-menu="${ISA.userId}"]`,
     )!.parentElement!;
     expect(cabecera.style.borderTop).toContain(
-      hexARgb(colorDeProfesional(ISA.userId, ISA.color)),
+      hexARgb(colorDeCabecera(ISA.userId, ISA.color)),
     );
+  });
+
+  it("y un color CLARÍSIMO no desaparece sobre el blanco de la cabecera", async () => {
+    // Ana tiene un amarillo casi blanco (#fef9c3). Con el color crudo, el
+    // filete de 3 px se perdía y la columna se quedaba sin marca. Lo cogió
+    // el bucle visual.
+    await render();
+    const cabecera = container.querySelector<HTMLElement>(
+      `[data-ausencia-menu="${ANA.userId}"]`,
+    )!.parentElement!;
+    const filete = rgbAHex(
+      cabecera.style.borderTopColor || cabecera.style.borderColor,
+    );
+    expect(filete).not.toBe(ANA.color);
+    expect(contraste(filete, "#ffffff")).toBeGreaterThanOrEqual(3);
   });
 });
 
@@ -856,9 +871,13 @@ describe("F5 · «Cliente» deja de leerse como un nombre", () => {
     const marca = container.querySelector<HTMLElement>("[data-cliente-desconocido]");
     expect(marca).not.toBeNull();
     expect(marca!.textContent).toBe("Sin nombre");
-    // Apagado y en cursiva: no compite con los nombres de verdad.
+    // Lo que lo distingue de un nombre de verdad es la CURSIVA y el peso
+    // normal — NO un gris claro. Sobre el tinte de la tarjeta, `slate-400`
+    // da 1,95:1: ilegible. Lo cogió el bucle visual, no un test.
     expect(marca!.className).toContain("italic");
-    expect(marca!.className).toContain("text-slate-400");
+    expect(marca!.className).toContain("font-normal");
+    expect(marca!.className).not.toContain("text-slate-400");
+    expect(marca!.className).not.toContain("text-slate-300");
     // Y ya no dice «Cliente», que es lo que engañaba.
     expect(tarjetaDe("12:00").textContent).not.toContain("· Cliente");
   });

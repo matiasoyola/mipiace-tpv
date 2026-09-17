@@ -14,8 +14,10 @@ import { describe, expect, it } from "vitest";
 
 import { STATUS_COLOR, type AppointmentStatus } from "../src/lib/agenda.js";
 import {
+  LUMINANCIA_MAX_CABECERA,
   LUMINANCIA_MAX_ESTADO,
   LUMINANCIA_TINTE,
+  colorDeCabecera,
   colorDeProfesional,
   contraste,
   luminanciaRelativa,
@@ -168,6 +170,47 @@ describe("el color del ESTADO cierra un defecto que ya estaba en master", () => 
     // COMPLETED (#64748b) está justo por encima; CANCELLED es claro y se baja.
     expect(tonoDeEstado("#000000")).toBe("#000000");
     expect(tonoDeEstado("#1f2937")).toBe("#1f2937");
+  });
+});
+
+describe("el filete de la CABECERA se ve sobre blanco", () => {
+  const ID = "00000000-0000-0000-0000-0000000000a1";
+
+  it("un amarillo casi blanco se baja hasta que se distingue", () => {
+    const crudo = "#fef9c3";
+    expect(contraste(crudo, "#ffffff")).toBeLessThan(3); // el defecto
+    const filete = colorDeCabecera(ID, crudo);
+    expect(filete).not.toBe(crudo);
+    expect(contraste(filete, "#ffffff")).toBeGreaterThanOrEqual(3);
+    expect(luminanciaRelativa(parseHex(filete)!)).toBeLessThanOrEqual(
+      LUMINANCIA_MAX_CABECERA + 0.005,
+    );
+  });
+
+  it("un color que ya se veía NO se toca", () => {
+    expect(colorDeCabecera(ID, "#4c1d95")).toBe("#4c1d95");
+    expect(colorDeCabecera(ID, "#8b5cf6")).toBe("#8b5cf6");
+  });
+
+  it("y el de una profesional SIN color también se ve", () => {
+    for (const id of ["a", "b", "c", ID, "st-sole", "st-marta", "st-nuria"]) {
+      expect(contraste(colorDeCabecera(id, null), "#ffffff")).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it("el tono del filete conserva el tono del tinte: es la misma columna", () => {
+    // Los dos salen del mismo color base, así que el amarillo sigue siendo
+    // amarillo arriba y abajo.
+    const [r, g, b] = parseHex(colorDeCabecera(ID, "#fef9c3"))!;
+    expect(r).toBeGreaterThan(b);
+    expect(g).toBeGreaterThan(b);
+  });
+});
+
+describe("por qué el marcador «Sin nombre» no puede ir en gris claro", () => {
+  it("slate-400 sobre el tinte es ilegible: por eso hereda el color de la línea", () => {
+    // El número que cerró la discusión en el bucle visual.
+    expect(contraste("#94a3b8", tinteClaro("#8b5cf6"))).toBeLessThan(2.5);
   });
 });
 

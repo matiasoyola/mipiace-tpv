@@ -55,6 +55,14 @@ export function formatearDesdeIso(iso: string | null | undefined): string {
 // año (1061 por 1961), y decirlo es más útil que guardarlo.
 const ANO_MINIMO = 1900;
 
+// El mes POR SU NOMBRE. Lo cogió el bucle visual: «El 02 no tiene 31 días» es
+// una frase de programador — hay que traducir el 02 antes de entenderla, y
+// eso es justo lo que no se hace con una clienta delante.
+const MESES = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+];
+
 /**
  * "07/03/1961" → `{ iso: "1961-03-07" }`, o la razón por la que no.
  *
@@ -86,7 +94,7 @@ export function parsearFecha(texto: string, hoy: Date = new Date()): ResultadoFe
     fecha.getUTCMonth() !== mes - 1 ||
     fecha.getUTCDate() !== dia
   ) {
-    return { error: `El ${String(mes).padStart(2, "0")} no tiene ${dia} días.` };
+    return { error: `${MESES[mes - 1]} no tiene ${dia} días.` };
   }
   // Futuro: se compara por FECHA, no por instante. Cumplir años hoy vale.
   const hoyIso = new Date(

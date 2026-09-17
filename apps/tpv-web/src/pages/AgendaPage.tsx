@@ -55,7 +55,7 @@ import {
   type OpenRange,
 } from "../lib/agenda.js";
 import {
-  colorDeProfesional,
+  colorDeCabecera,
   tinteDeProfesional,
   tonoDeEstado,
 } from "../lib/staffColor.js";
@@ -1377,7 +1377,7 @@ function StaffColumn(props: {
   const totalH = (dayEndMin - dayStartMin) * PX_PER_MIN;
   // B-reservas-mostrador F2 · el color de ESTA columna, y el tinte con el que
   // se pintan sus citas. Se calculan una vez por columna, no por tarjeta.
-  const colorStaff = colorDeProfesional(staff.userId, staff.color);
+  const colorStaff = colorDeCabecera(staff.userId, staff.color);
   const tinteStaff = tinteDeProfesional(staff.userId, staff.color);
   const pastH =
     pastUntilMin == null
@@ -1424,6 +1424,10 @@ function StaffColumn(props: {
         // tinte de sus tarjetas: si la columna es morada, sus citas son
         // moradas. Una profesional sin color ya no cae en el gris de todas —
         // tiene el suyo, derivado de su id y por tanto estable.
+        //
+        // Va por `colorDeCabecera` y no por el color crudo: lo cogió el bucle
+        // visual. Un amarillo casi blanco (#fef9c3) DESAPARECÍA sobre el
+        // blanco de la cabecera y la columna se quedaba sin su marca.
         style={{ borderTop: `3px solid ${colorStaff}` }}
       >
         <span className="text-[13px] font-semibold text-mipiace-ink truncate flex-1">
@@ -1637,11 +1641,13 @@ function StaffColumn(props: {
                 {localHHMM(a.start)} ·{" "}
                 {(() => {
                   const cl = props.clientOf(a);
+                  // El marcador NO lleva color propio: hereda el de la línea.
+                  // Lo cogió el bucle visual — con `text-slate-400` sobre el
+                  // tinte daba 1,95:1, o sea ilegible. Lo que lo distingue de
+                  // un nombre de verdad es la CURSIVA y el peso normal, que no
+                  // cuestan contraste.
                   return cl.desconocido ? (
-                    <span
-                      data-cliente-desconocido
-                      className="font-normal italic text-slate-400"
-                    >
+                    <span data-cliente-desconocido className="font-normal italic">
                       {cl.nombre}
                     </span>
                   ) : (
@@ -2130,7 +2136,8 @@ function DetailPanel(props: {
             data-cliente-desconocido={props.client.desconocido ? "" : undefined}
             className={
               props.client.desconocido
-                ? "italic text-slate-400"
+                ? // Cursiva, no gris claro: el marcador tiene que LEERSE.
+                  "italic text-slate-600"
                 : "font-medium text-mipiace-ink"
             }
           >

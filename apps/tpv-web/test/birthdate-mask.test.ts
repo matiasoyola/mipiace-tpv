@@ -75,10 +75,21 @@ describe("el parser manda a la API un YYYY-MM-DD o no manda nada", () => {
     expect((r as { error: string }).error).toContain("dd/mm/aaaa");
   });
 
-  it("el 31 de febrero no existe, y lo dice con el día", () => {
+  it("el 31 de febrero no existe, y lo dice CON EL NOMBRE DEL MES", () => {
+    // «El 02 no tiene 31 días» es una frase de programador: hay que traducir
+    // el 02 antes de entenderla, y eso no se hace con una clienta delante.
     const r = parsearFecha("31/02/1990", HOY);
     expect(esFechaMala(r)).toBe(true);
-    expect((r as { error: string }).error).toContain("31");
+    expect((r as { error: string }).error).toBe("Febrero no tiene 31 días.");
+  });
+
+  it("y cada mes dice el suyo", () => {
+    expect((parsearFecha("31/04/1990", HOY) as { error: string }).error).toBe(
+      "Abril no tiene 31 días.",
+    );
+    expect((parsearFecha("31/09/1990", HOY) as { error: string }).error).toBe(
+      "Septiembre no tiene 31 días.",
+    );
   });
 
   it("el 30 de febrero tampoco, ni el 31 de abril", () => {
