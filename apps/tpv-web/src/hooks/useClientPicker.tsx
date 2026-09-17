@@ -128,7 +128,12 @@ function ClientPickerSheet({
         </div>
 
         {showCreate ? (
+          // B-reservas-mostrador F3 · alta RÁPIDA: hay una clienta delante
+          // esperando. La fecha de nacimiento no sale aquí — al reservar o al
+          // cobrar no permite tomar ninguna decisión. Vive en la ficha
+          // (ClientsPage), que es donde se rellena sin prisa.
           <ClientForm
+            modo="rapido"
             onSaved={(c) => onSelect(c)}
             onCancel={() => setShowCreate(false)}
           />

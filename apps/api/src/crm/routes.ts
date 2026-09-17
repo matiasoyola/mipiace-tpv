@@ -145,6 +145,15 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
       const rows = await prisma.client.findMany({
         where,
         // A–Z estable: apellido, nombre y desempate por id (cursor).
+        //
+        // B-reservas-mostrador F3 · con apellidos opcionales, un `""` ordena
+        // ANTES que cualquier letra y esas clientas salen las primeras de la
+        // primera página. Este orden NO se toca, y no es una omisión: es el
+        // ORDEN DEL CURSOR de paginación, no lo que se ve. `refreshClients()`
+        // en el TPV se baja el tenant entero (200 por página) y la lista se
+        // pinta con `sortClientsAz`, que sí trata el apellido vacío (la clave
+        // pasa a ser el nombre). Lo único que este `orderBy` tiene que
+        // garantizar es ser un orden TOTAL y estable entre páginas, y lo es.
         orderBy: [{ lastName: "asc" }, { firstName: "asc" }, { id: "asc" }],
         take: limit + 1,
         ...(q.cursor ? { cursor: { id: q.cursor }, skip: 1 } : {}),
@@ -167,7 +176,11 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
       schema: {
         body: {
           type: "object",
-          required: ["firstName", "lastName"],
+          // B-reservas-mostrador F3 · `lastName` sale de `required`. Decisión
+          // de dirección: Sole apunta a sus clientas por el nombre de pila, y
+          // exigir un apellido obliga a inventárselo. La columna sigue siendo
+          // NOT NULL y un cliente sin apellidos guarda "" — sin migración.
+          required: ["firstName"],
           additionalProperties: false,
           properties: {
             // Idempotencia del alta offline (outbox). Si ya existe un
@@ -175,7 +188,7 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
             // cual (200) en vez de duplicar.
             externalId: { type: "string", format: "uuid" },
             firstName: { type: "string", minLength: 1, maxLength: 120 },
-            lastName: { type: "string", minLength: 1, maxLength: 120 },
+            lastName: { type: "string", maxLength: 120 },
             phone: { type: "string", maxLength: 32 },
             email: { type: "string", maxLength: 320 },
             // YYYY-MM-DD (@db.Date).
@@ -192,7 +205,7 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
       const body = request.body as {
         externalId?: string;
         firstName: string;
-        lastName: string;
+        lastName?: string;
         phone?: string;
         email?: string;
         birthdate?: string;
@@ -239,7 +252,7 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
           tenantId: auth.tenantId,
           externalId: body.externalId ?? null,
           firstName: body.firstName.trim(),
-          lastName: body.lastName.trim(),
+          lastName: body.lastName?.trim() ?? "",
           phone: phone || null,
           email: body.email?.trim() || null,
           birthdate: body.birthdate ? new Date(body.birthdate) : null,
@@ -314,7 +327,9 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
           additionalProperties: false,
           properties: {
             firstName: { type: "string", minLength: 1, maxLength: 120 },
-            lastName: { type: "string", minLength: 1, maxLength: 120 },
+            // B-reservas-mostrador F3 · sin `minLength`: se puede BORRAR el
+            // apellido de una ficha, no sólo dejarlo sin poner al crearla.
+            lastName: { type: "string", maxLength: 120 },
             phone: { type: ["string", "null"], maxLength: 32 },
             email: { type: ["string", "null"], maxLength: 320 },
             birthdate: { type: ["string", "null"], format: "date" },
