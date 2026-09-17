@@ -32,6 +32,7 @@ import {
   ALL_DAY_START,
   centerHHMM,
   centerToday,
+  centerWallDate,
   checkoutAppointmentTicket,
   createAbsence,
   createAppointment,
@@ -1705,6 +1706,12 @@ function BookingPanel(props: {
 
   const canReserve = draft.serviceIds.length > 0 && !!draft.start;
 
+  // B-reservas-mostrador F1 · ¿la cita que se va a guardar es de HOY? Sale de
+  // `draft.start` —el instante que se va a escribir— y no de `date`, que es
+  // sólo el día que se está mirando. Sin hora elegida no hay cita que cobrar,
+  // así que tampoco hay botón.
+  const esDeHoy = draft.start ? centerWallDate(draft.start) === centerToday() : false;
+
   return (
     <div className="w-full md:w-96 shrink-0 bg-white border-l border-slate-200 flex flex-col overflow-hidden">
       <div className="flex items-center gap-2 h-14 px-4 border-b border-slate-100 shrink-0">
@@ -1846,22 +1853,58 @@ function BookingPanel(props: {
         )}
       </div>
 
-      {/* Acciones primarias */}
+      {/* Acciones primarias.
+
+          B-reservas-mostrador F1 · «Reservar» es EL botón, y «Reservar y
+          cobrar» sólo existe si la cita es de hoy.
+
+          Por qué: un cobro entra en el turno ABIERTO, que es el de hoy. Si
+          alguien reserva para el jueves y pulsa el primario por inercia, el
+          dinero del jueves cae en el arqueo de hoy — y deshacerlo no es
+          anular (no existe) sino devolver, que cae en el turno del día en que
+          se haga. Un toque de más descuadra DOS arqueos.
+
+          Y «de hoy» sale de `draft.start`, no del día que se está mirando:
+          `start` es el instante que se va a guardar, y cambiar de día con el
+          panel abierto NO lo mueve. Derivarlo de `date` haría aparecer el
+          botón sobre una cita que sigue siendo del jueves.
+
+          El orden del DOM es el orden del tabulador: «Reservar» primero. No
+          hay `<form>` ni `type="submit"` en este panel, así que no existe un
+          Enter que cobre; lo que se fija aquí es que no nazca uno por
+          descuido al reordenar. */}
       <div className="shrink-0 p-4 border-t border-slate-100 space-y-2 bg-white">
         <button
-          onClick={props.onReserveAndCharge}
+          data-accion="reservar"
+          onClick={props.onReserve}
           disabled={!canReserve}
           className="w-full h-12 rounded-xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[15px] font-semibold disabled:opacity-40"
         >
-          Reservar y cobrar
-        </button>
-        <button
-          onClick={props.onReserve}
-          disabled={!canReserve}
-          className="w-full h-11 rounded-xl border border-slate-300 text-mipiace-ink text-[14px] font-medium disabled:opacity-40"
-        >
           Reservar
         </button>
+        {/* El hueco del secundario NO desaparece: el pie es `shrink-0` al
+            final de un `flex-col`, así que quitarle una fila subiría el borde
+            y bajaría el primario de golpe. Cuando la cita no es de hoy, esa
+            misma fila la ocupa la razón. Ni salto ni hueco muerto. */}
+        <div className="h-11 flex items-center justify-center">
+          {esDeHoy ? (
+            <button
+              data-accion="reservar-y-cobrar"
+              onClick={props.onReserveAndCharge}
+              disabled={!canReserve}
+              className="w-full h-11 rounded-xl border border-slate-300 text-mipiace-ink text-[14px] font-medium disabled:opacity-40"
+            >
+              Reservar y cobrar
+            </button>
+          ) : (
+            <p
+              data-cobro-otro-dia
+              className="text-[12.5px] text-slate-500 text-center leading-snug"
+            >
+              Se cobra el día de la cita.
+            </p>
+          )}
+        </div>
       </div>
       {picker.element}
     </div>
