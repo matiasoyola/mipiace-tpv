@@ -31,7 +31,7 @@ import { randomUUID } from "node:crypto";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { createAgendaStore, ExclusionError } from "../src/agenda/store.js";
+import { createAgendaStore, ExclusionError, readRaceStats } from "../src/agenda/store.js";
 import { sqlStateOf, hasSqlState } from "../src/lib/sqlstate.js";
 import type { PlannedAssignment } from "../src/agenda/types.js";
 
@@ -324,5 +324,77 @@ describe("reschedule · mover cae en la misma carrera y con el mismo trato", () 
       store.reschedule(TENANT, CITA, INICIO, FIN, asignaciones()),
     ).rejects.toBeInstanceOf(ExclusionError);
     expect(estado.intentos).toBe(1);
+  });
+});
+
+// ── 4. El testigo (addendum) ────────────────────────────────────────────
+//
+// POR QUÉ EXISTE. El e2e tiene que saber si una pasada ha ejercido DE
+// VERDAD la rama del 40P01. Preguntárselo a `pg_stat_database.deadlocks`
+// **puso el CI en rojo**: ese contador se vuelca con retraso (hasta 11 s
+// medidos) y una pasada rápida lo lee a cero aunque haya habido deadlocks.
+// Éste lo sabe en el instante.
+//
+// Los contadores son del proceso y sólo suben, así que aquí se miran
+// SIEMPRE por diferencia, nunca por valor absoluto.
+
+describe("readRaceStats · el testigo cuenta lo que pasa, no lo que Postgres publica", () => {
+  const delta = (antes: ReturnType<typeof readRaceStats>) => {
+    const ahora = readRaceStats();
+    return {
+      aborts: ahora.aborts - antes.aborts,
+      retries: ahora.retries - antes.retries,
+      exhausted: ahora.exhausted - antes.exhausted,
+    };
+  };
+
+  it("un deadlock que cede: un aborto, un reintento, y nada agotado", async () => {
+    const antes = readRaceStats();
+    const { prisma } = prismaDoble({ fallos: 1, error: errorDeDeadlock });
+    await createAgendaStore(prisma).insertHold(alta());
+    expect(delta(antes)).toEqual({ aborts: 1, retries: 1, exhausted: 0 });
+  });
+
+  it("un deadlock que no cede: dos abortos, un reintento y UNO agotado", async () => {
+    const antes = readRaceStats();
+    const { prisma } = prismaDoble({ fallos: 99, error: errorDeDeadlock });
+    await expect(
+      createAgendaStore(prisma).insertHold(alta()),
+    ).rejects.toBeInstanceOf(ExclusionError);
+    expect(delta(antes)).toEqual({ aborts: 2, retries: 1, exhausted: 1 });
+  });
+
+  it("el 23P01 NO toca el testigo: no es un aborto de carrera", async () => {
+    // Si el EXCLUDE contara como deadlock, el e2e daría por ejercida la
+    // rama del 40P01 sin haberla pisado — que es justo lo que no puede
+    // volver a pasar.
+    const antes = readRaceStats();
+    const { prisma } = prismaDoble({ fallos: 99, error: errorDeExclusion });
+    await expect(
+      createAgendaStore(prisma).insertHold(alta()),
+    ).rejects.toBeInstanceOf(ExclusionError);
+    expect(delta(antes)).toEqual({ aborts: 0, retries: 0, exhausted: 0 });
+  });
+
+  it("un error de otra familia tampoco lo toca", async () => {
+    const antes = readRaceStats();
+    const { prisma } = prismaDoble({ fallos: 99, error: errorDeClaveAjena });
+    await expect(
+      createAgendaStore(prisma).insertHold(alta()),
+    ).rejects.toMatchObject({ code: "P2003" });
+    expect(delta(antes)).toEqual({ aborts: 0, retries: 0, exhausted: 0 });
+  });
+
+  it("mover cuenta en el mismo testigo que el alta", async () => {
+    const antes = readRaceStats();
+    const { prisma } = prismaDoble({ fallos: 1, error: errorDeDeadlock });
+    await createAgendaStore(prisma).reschedule(TENANT, CITA, INICIO, FIN, asignaciones());
+    expect(delta(antes)).toEqual({ aborts: 1, retries: 1, exhausted: 0 });
+  });
+
+  it("la foto es una COPIA: nadie de fuera puede mover el contador", async () => {
+    const foto = readRaceStats() as { aborts: number };
+    foto.aborts = 9999;
+    expect(readRaceStats().aborts).not.toBe(9999);
   });
 });
