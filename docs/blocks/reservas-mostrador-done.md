@@ -3,7 +3,7 @@
 **Rama** `reservas-mostrador` · **worktree** `mipiacetpv-reservas-mostrador` ·
 **desde** master `5994fde` · **último commit con código** `8656776`.
 
-**Suite entera** (`pnpm test` en la raíz): **208 ficheros · 2125 pasados ·
+**Suite entera** (`pnpm test` en la raíz): **208 ficheros · 2131 pasados ·
 3 SALTADOS**. Los 3 saltados son los mismos de la base
 (`apps/api/test/super-admin.test.ts:566`, `describe.skip` del flujo legacy de
 B-SuperAdmin): preexistentes, nada que ver con este bloque.
@@ -362,6 +362,19 @@ cada uno que el test estaba VERDE con el código intacto.
 | 8 | Tarjeta sin el tinte de la profesional | `AgendaPage.tsx` | `agenda-mostrador` | 6 | `expected '' to be '#e1d9ed'` · `expected 1 to be greater than or equal to 3` |
 | 9 | **Quitar EL CERROJO** | `crm/from-contact.ts` | `crm-contacto.e2e` (Postgres real) | 2 | `expected 2 to be 1` |
 | 10 | Proponer `COLOR_PRESETS[0]` a toda profesional sin perfil | `admin/StaffPage.tsx` | `staff-color-propuesto` | 3 | `expected 1 to be 3` (un color donde tenía que haber tres) · `expected '#e8663c' to be '#3c8ce8'` |
+| 11 | Que el 40P01 deje de reconocerse (`isRaceAbort` → `false`) | `agenda/store.ts` | `agenda-carrera.e2e` (Postgres real) | 5 | `expected [201, 500] to deeply equal [201, 409]` con el `sqlState: "40P01"` en el cuerpo |
+
+La 11 no es de este bloque: es el test que traía master y que puso el CI de
+la rama en rojo (§12.1). Se comprueba aquí porque al traerse el arreglo hay
+que demostrar que **sigue cazando lo que decía cazar** — que no se ha comprado
+el verde a cambio de dejar de mirar. Las dos pasadas:
+
+- **sin carrera** (`C409_SIN_CARRERA=1`, la palanca que trae el propio
+  arreglo, que serializa las dos altas): el caso 1 sale **SALTADO**, con el
+  motivo por consola. Es la condición del CI reproducida a mano;
+- **con el 40P01 sin traducir**: **5 rojos**, y el primero salta en la ronda
+  14 con el 500 en el mensaje — o sea, la garantía dura se comprueba ronda a
+  ronda y ANTES de cualquier salto.
 
 **Dos sabotajes salieron VERDES al primer intento, y los dos destaparon un
 test malo:**
@@ -678,6 +691,8 @@ En este orden, que es el del daño:
 | `3cd910f` | El alta sin apellidos y sin red |
 | `6bf3c4f` | El done del bloque |
 | `8656776` | Revisión de cierre · el color propuesto a una profesional nueva |
+| `86fb85d` | La corrección del §4.6 |
+| *(merge)* | Master a la rama: el testigo del deadlock de `1cdf7e3`, que es lo que puso el CI en rojo (§12) |
 
 **Último commit con código: `8656776`.**
 
@@ -685,7 +700,86 @@ En este orden, que es el del daño:
 
 ---
 
-## 12 · Cómo repetir lo de aquí
+## 12 · El CI se puso rojo, y por qué en local no
+
+### 12.1 · Qué falló (run 35224660333)
+
+El job `e2e`. Y **no era nada de este bloque**: `crm-contacto.e2e.ts` pasó sus
+15 casos. El que cayó fue el **caso 1 de `agenda-carrera.e2e.ts`**, que viene
+de master:
+
+```
+AssertionError: 40 rondas sin un solo deadlock:
+esta pasada NO ha ejercido el 40P01: expected 0 to be greater than 0
+  ❯ test-e2e/agenda-carrera.e2e.ts:349:9
+```
+
+Ese caso repite la carrera de dos altas hasta que Postgres levante un
+deadlock, y **se ponía rojo a propósito si no llegaba a haber ninguno** — la
+idea era que un test que no ejerce lo que dice cubrir miente más que uno que
+falta.
+
+**La causa NO es la base, ni una variable de entorno, ni el orden de los
+ficheros.** Es el reloj:
+
+- un deadlock cuesta **como mínimo `deadlock_timeout`**, que es 1 s por
+  defecto y el CI no lo cambia: Postgres no busca ciclos antes;
+- en el CI las 40 rondas se despacharon en **1,4 s**. No caben ni un solo
+  deadlock. Allí sencillamente **no hubo carrera**: con el socket local del
+  runner, la primera alta termina antes de que la segunda empiece, y sale el
+  23P01 de siempre;
+- en este portátil, con Postgres en Docker y su VM de por medio, cada ronda
+  tarda lo bastante como para que las dos se solapen — y el deadlock cae en
+  las primeras rondas. Por eso aquí salía verde y allí rojo, **con el mismo
+  Postgres 16-alpine y el mismo `deadlock_timeout` de 1 s** (comprobado en los
+  dos sitios).
+
+La diferencia entre local y CI no era de configuración: era de **latencia**.
+
+### 12.2 · Por qué lo tenía mi rama y no master
+
+Master ya había pasado por esto —su propio CI se puso rojo igual, run
+34944219974— y lo arregló en `1cdf7e3` («el testigo del deadlock lo cuenta el
+código, no `pg_stat_database`»). **Esta rama sale de `5994fde`, que es
+anterior**, así que arrastraba la versión vieja del test.
+
+Se arregla trayendo master a la rama (`git merge master`), que además es lo
+que va a pasar al integrar. Cero conflictos: los tres ficheros que toca
+`1cdf7e3` —`agenda/store.ts`, `agenda-carrera.e2e.ts` y
+`agenda-carrera.test.ts`— no los toca este bloque.
+
+Lo que trae el arreglo: el testigo pasa a ser un contador de `store.ts` que
+sube en el instante en que se reconoce el SQLSTATE, y si una pasada no llega a
+provocar deadlock **el caso 1 se SALTA** en vez de ponerse rojo (mentira: no
+ha fallado nada) o verde (mentira también: no habría probado lo que dice). Las
+garantías duras —ni un 500, una sola cita por hueco— se siguen comprobando en
+cada ronda antes del salto.
+
+### 12.3 · La lección para el siguiente bloque
+
+**Correr los e2e en local NO es correr los e2e del CI.** Aquí se corrieron
+contra una base propia (`mipiacetpv_mostrador_e2e`, con las credenciales de
+desarrollo) y sin `CI=true`; el workflow usa `mipiacetpv_e2e`, la contraseña
+`mipiacetpv` y un runner mucho más rápido. Ninguna de esas tres diferencias
+causó ESTE fallo, pero la tercera lo destapó.
+
+Antes de dar un bloque por cerrado, además de la pasada de siempre:
+
+```bash
+# Los e2e con la forma del CI: su nombre de base y su CI=true.
+docker exec -i mipiacetpv-postgres psql -U mipiacetpv \
+  -c "CREATE DATABASE mipiacetpv_ci_e2e;"
+CI=true E2E_DATABASE_URL='postgresql://mipiacetpv:mipiacetpv_dev@127.0.0.1:5432/mipiacetpv_ci_e2e' \
+  pnpm test:e2e
+```
+
+Y **mirar si master se ha movido** (`git log HEAD..master`): una rama larga
+puede arrastrar un test que master ya arregló, que es exactamente lo que pasó
+aquí.
+
+---
+
+## 13 · Cómo repetir lo de aquí
 
 ```bash
 # La suite entera, desde la raíz
@@ -699,6 +793,14 @@ E2E_DATABASE_URL='postgresql://mipiacetpv:mipiacetpv_dev@127.0.0.1:5432/mipiacet
 # Y al terminar, borrarla:
 docker exec -i mipiacetpv-postgres psql -U mipiacetpv \
   -c "DROP DATABASE mipiacetpv_mostrador_e2e;"
+
+# Los mismos e2e CON LA FORMA DEL CI (§12.3): su nombre de base y su CI=true.
+docker exec -i mipiacetpv-postgres psql -U mipiacetpv \
+  -c "CREATE DATABASE mipiacetpv_ci_e2e;"
+CI=true E2E_DATABASE_URL='postgresql://mipiacetpv:mipiacetpv_dev@127.0.0.1:5432/mipiacetpv_ci_e2e' \
+  pnpm test:e2e
+docker exec -i mipiacetpv-postgres psql -U mipiacetpv \
+  -c "DROP DATABASE mipiacetpv_ci_e2e;"
 
 # El banco visual
 pnpm --filter @mipiacetpv/tpv-web dev
