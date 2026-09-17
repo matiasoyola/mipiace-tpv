@@ -4,6 +4,10 @@
 //                                            teléfono/email, paginado.
 //   POST  /clients                         — alta (idempotente por
 //                                            externalId para el outbox).
+//   POST  /clients/from-contact/:contactId — cliente enlazado a un contacto
+//                                            de Holded (idempotente por
+//                                            cerrojo consultivo; ver
+//                                            `from-contact.ts`).
 //   GET   /clients/:id                     — ficha completa (+ consents,
 //                                            + ficha técnica).
 //   PATCH /clients/:id                     — edición.
@@ -34,6 +38,11 @@ import { ClientConsentKind, type Prisma } from "@mipiacetpv/db";
 import { requireOwnerOrCashier } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
 import { createAgendaStore } from "../agenda/store.js";
+import {
+  comoPrismaParaEnlace,
+  enlazarContacto,
+  esContactoDeCliente,
+} from "./from-contact.js";
 
 // Vista pública de un cliente para el TPV. No incluye `raw` ni metadatos
 // internos; el front cachea esto en Dexie para la búsqueda offline.
@@ -266,6 +275,80 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
         client: toClientView(created),
         ...(phoneWarning ? { phoneWarning } : {}),
       });
+    },
+  );
+
+  // ── B-reservas-mostrador F6 · el contacto de Holded se hace cliente ──
+  //
+  // Un solo endpoint, idempotente, porque la alternativa (buscar desde el
+  // front y crear si no está) deja un hueco entre las dos llamadas por el que
+  // caben dos toques seguidos o dos terminales. Cómo se garantiza el «uno y
+  // sólo uno» sin hacer único el índice: ver `from-contact.ts`.
+  app.post(
+    "/clients/from-contact/:contactId",
+    {
+      preHandler: requireOwnerOrCashier,
+      schema: {
+        params: {
+          type: "object",
+          required: ["contactId"],
+          additionalProperties: false,
+          properties: {
+            // El id de la FILA `Contact` (uuid del tenant), no el
+            // `holdedContactId`: valida la pertenencia al tenant de un golpe.
+            contactId: { type: "string", format: "uuid" },
+          },
+        },
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const auth = request.auth!;
+      const { contactId } = request.params as { contactId: string };
+      const prisma = getPrisma();
+
+      const contacto = await prisma.contact.findFirst({
+        where: { id: contactId, tenantId: auth.tenantId },
+        select: {
+          holdedContactId: true,
+          name: true,
+          email: true,
+          phone: true,
+          type: true,
+        },
+      });
+      if (!contacto) {
+        return reply.code(404).send({
+          error: "CONTACT_NOT_FOUND",
+          message: "Ese contacto no existe.",
+        });
+      }
+      // El filtro de tipo NO puede vivir sólo en la búsqueda: si viviera sólo
+      // allí, quien llamara al endpoint a mano podría enlazar un proveedor y
+      // meterlo en la agenda como clienta.
+      if (!esContactoDeCliente(contacto.type)) {
+        return reply.code(409).send({
+          error: "CONTACT_NOT_CLIENT",
+          message: `«${contacto.name}» no es un cliente en Holded.`,
+        });
+      }
+
+      const { client, created } = await enlazarContacto<
+        Parameters<typeof toClientView>[0]
+      >(
+        comoPrismaParaEnlace(prisma),
+        auth.tenantId,
+        {
+          holdedContactId: contacto.holdedContactId,
+          name: contacto.name,
+          email: contacto.email,
+          phone: contacto.phone,
+        },
+        CLIENT_SELECT,
+      );
+
+      return reply
+        .code(created ? 201 : 200)
+        .send({ client: toClientView(client), created });
     },
   );
 

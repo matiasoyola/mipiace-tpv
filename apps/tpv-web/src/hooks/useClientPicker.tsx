@@ -3,13 +3,23 @@
 // (B4, asignar cliente a cita). Búsqueda instantánea sobre el caché local
 // Dexie (feedback <100 ms) con sync en background; alta rápida inline.
 //
+// B-reservas-mostrador F6 · el buscador encuentra TAMBIÉN a los contactos de
+// Holded. El 13-09 la recepcionista buscó «Dem…» en el AP11, no salió nadie y
+// la clienta llevaba tres años en Holded: son dos listas —`clients` (el CRM
+// local) y `contacts` (lo sincronizado)— y no tiene por qué saberlo.
+//
+// El equilibrio: **el selector sigue siendo local y sin esperas.** Los del CRM
+// salen del caché como hasta ahora, al instante. Los de Holded llegan después,
+// por red, con debounce, y en una sección aparte y discreta debajo — nunca
+// mezclados, porque elegir uno de ellos CREA una ficha y elegir un cliente no.
+//
 // Uso:
 //   const picker = useClientPicker();
 //   // en el JSX: {picker.element}
 //   // al pulsar F1: picker.open((client) => { ...asignar... })
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, X } from "lucide-react";
+import { Loader2, WifiOff, X } from "lucide-react";
 
 import { scrollFocusIntoView } from "../lib/visualViewportSync.js";
 import {
@@ -19,6 +29,13 @@ import {
   clientFullName,
   type ClientRow,
 } from "../lib/clients.js";
+import {
+  buscarContactosHolded,
+  clienteDesdeContacto,
+  MINIMO_PARA_BUSCAR_EN_HOLDED,
+  type ContactoHolded,
+} from "../lib/contacts.js";
+import { maskPhone } from "../pages/SalePage.contact.privacy.js";
 import { ClientForm } from "../pages/ClientForm.js";
 
 interface PickerState {
@@ -65,6 +82,13 @@ function ClientPickerSheet({
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // B-reservas-mostrador F6 · los de Holded. `null` = todavía no se sabe (o
+  // no se ha podido preguntar); `[]` = se ha preguntado y no hay nadie. No es
+  // lo mismo y no se dice igual.
+  const [holded, setHolded] = useState<ContactoHolded[] | null>(null);
+  const [sinRed, setSinRed] = useState(false);
+  const [enlazando, setEnlazando] = useState<string | null>(null);
+  const [errorEnlace, setErrorEnlace] = useState<string | null>(null);
 
   // Carga inmediata del caché (sin red) + refresh en background.
   useEffect(() => {
@@ -103,6 +127,57 @@ function ClientPickerSheet({
     () => searchClientsLocal(all, query, 50),
     [all, query],
   );
+
+  // B-reservas-mostrador F6 · la búsqueda en Holded, con debounce y a partir
+  // de dos letras. NO bloquea nada: mientras llega, los del CRM ya están en
+  // pantalla y se pueden tocar.
+  useEffect(() => {
+    const q = query.trim();
+    setErrorEnlace(null);
+    if (q.length < MINIMO_PARA_BUSCAR_EN_HOLDED) {
+      setHolded(null);
+      setSinRed(false);
+      return;
+    }
+    let vivo = true;
+    const t = setTimeout(async () => {
+      const res = await buscarContactosHolded(q);
+      if (!vivo) return;
+      // `null` es «no se ha podido preguntar». La sección NO aparece y un
+      // aviso pequeño lo dice: un hueco vacío se leería como «no está», y
+      // mandaría a la recepcionista a crear una ficha duplicada.
+      setSinRed(res === null);
+      setHolded(res);
+    }, 250);
+    return () => {
+      vivo = false;
+      clearTimeout(t);
+    };
+  }, [query]);
+
+  // Un contacto que YA está enlazado a un cliente del CRM no sale dos veces:
+  // sale como cliente, que es lo que es.
+  const yaEnlazados = useMemo(
+    () => new Set(all.map((c) => c.holdedContactId).filter(Boolean)),
+    [all],
+  );
+  const contactosNuevos = useMemo(
+    () => (holded ?? []).filter((c) => !yaEnlazados.has(c.holdedContactId)),
+    [holded, yaEnlazados],
+  );
+
+  async function elegirContacto(c: ContactoHolded) {
+    setEnlazando(c.id);
+    setErrorEnlace(null);
+    try {
+      const { client } = await clienteDesdeContacto(c.id);
+      onSelect(client);
+    } catch {
+      setErrorEnlace("No se ha podido traer ese contacto. Inténtalo otra vez.");
+    } finally {
+      setEnlazando(null);
+    }
+  }
 
   return (
     <div
@@ -158,11 +233,16 @@ function ClientPickerSheet({
                 <Loader2 className="w-3.5 h-3.5 animate-spin" /> Cargando…
               </div>
             ) : results.length === 0 ? (
-              <div className="text-[13px] text-slate-500 text-center py-4">
-                {query
-                  ? "Sin coincidencias."
-                  : "Aún no hay clientes. Crea el primero."}
-              </div>
+              // B-reservas-mostrador F6 · «Sin coincidencias» se calla si hay
+              // contactos de Holded debajo: decir que no hay nadie y a
+              // continuación enseñar tres es lo que hace dudar a la cajera.
+              contactosNuevos.length > 0 ? null : (
+                <div className="text-[13px] text-slate-500 text-center py-4">
+                  {query
+                    ? "Sin coincidencias."
+                    : "Aún no hay clientes. Crea el primero."}
+                </div>
+              )
             ) : (
               <ul className="space-y-1.5 mb-3" data-testid="client-picker-results">
                 {results.map((c) => (
@@ -187,6 +267,59 @@ function ClientPickerSheet({
                   </li>
                 ))}
               </ul>
+            )}
+            {/* B-reservas-mostrador F6 · los de Holded, DEBAJO y en su
+                sección. Nunca mezclados con los clientes: tocar uno de aquí
+                crea una ficha, y tocar un cliente no. */}
+            {contactosNuevos.length > 0 && (
+              <div className="mb-3" data-seccion-holded>
+                <div className="text-[11.5px] font-medium text-slate-400 uppercase tracking-wide mb-1.5">
+                  De Holded
+                </div>
+                <ul className="space-y-1.5">
+                  {contactosNuevos.map((c) => (
+                    <li key={c.id}>
+                      <button
+                        onClick={() => void elegirContacto(c)}
+                        disabled={enlazando !== null}
+                        data-contacto-holded={c.id}
+                        className="w-full text-left p-3 rounded-xl bg-mipiace-stone border border-dashed border-slate-300 hover:border-mipiace-coral/40 disabled:opacity-50 flex items-center gap-2"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[14px] font-medium text-mipiace-ink truncate">
+                            {c.name}
+                          </div>
+                          {/* v1.4-Buscador-Contactos · el listado NUNCA enseña
+                              el teléfono completo. Delante de la clienta hay
+                              más gente mirando la tablet. */}
+                          <div className="text-[12.5px] text-slate-500 truncate">
+                            {maskPhone(c.phone) ?? "Sin teléfono"}
+                          </div>
+                        </div>
+                        {enlazando === c.id && (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400 shrink-0" />
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {/* Sin red la sección NO aparece vacía: un hueco vacío se leería
+                como «no está» y mandaría a crear una ficha duplicada. */}
+            {sinRed && (
+              <div
+                data-aviso-sin-red
+                className="mb-3 flex items-center gap-1.5 text-[12px] text-slate-400"
+              >
+                <WifiOff className="w-3.5 h-3.5 shrink-0" />
+                Sin conexión: no se buscan contactos de Holded.
+              </div>
+            )}
+            {errorEnlace && (
+              <div className="mb-3 text-[12.5px] text-red-700 bg-red-50 rounded-xl p-3">
+                {errorEnlace}
+              </div>
             )}
             <button
               onClick={() => setShowCreate(true)}
