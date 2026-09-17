@@ -105,6 +105,45 @@ function isRaceAbort(err: unknown): boolean {
  *  ofrecer otras horas, no seguir insistiendo delante de una clienta. */
 const REINTENTOS_DE_CARRERA = 1;
 
+/**
+ * EL TESTIGO DE LA CARRERA (addendum del frente carrera-409).
+ *
+ * Cuántas veces ha pasado el código por la rama del deadlock. Tres cifras,
+ * monótonas y del proceso entero:
+ *
+ *   · `aborts`    — abortos de carrera reconocidos (40P01/40001), contando
+ *                   también los del reintento;
+ *   · `retries`   — veces que se ha reintentado la transacción;
+ *   · `exhausted` — veces que se agotó el tope y se salió por TAKEN.
+ *
+ * POR QUÉ ESTÁ EN `src/` Y NO EN EL TEST. El e2e necesita saber si una
+ * pasada ha ejercido DE VERDAD la rama del 40P01: un caso que pasa sin
+ * haber ejercido lo que dice cubrir miente. La primera versión se lo
+ * preguntaba a `pg_stat_database.deadlocks`, y eso **puso el CI en rojo**:
+ * en Postgres 16 ese contador lo acumula el backend víctima en sus
+ * estadísticas PENDIENTES y se vuelca con retraso — medido aquí mismo,
+ * **11 s ciego** en dos de tres rondas
+ * (`docs/blocks/carrera-alta-409-plan.md`, addendum §A.2). Este contador lo
+ * sabe en el instante, sin preguntarle nada a nadie.
+ *
+ * NO cambia el comportamiento: tres enteros que sólo suben. Y de paso vale
+ * para lo que no es un test — saber cuánto se está desatascando la agenda
+ * de un centro es una cifra de salud, no una curiosidad. Engancharla al
+ * panel de B-9 queda fuera de este frente.
+ */
+const raceStats = { aborts: 0, retries: 0, exhausted: 0 };
+
+export type RaceStats = Readonly<{
+  aborts: number;
+  retries: number;
+  exhausted: number;
+}>;
+
+/** Una foto del testigo. Copia: nadie de fuera toca el contador. */
+export function readRaceStats(): RaceStats {
+  return { ...raceStats };
+}
+
 /** Tope de la espera entre intentos, en ms. Corta a propósito: esto pasa
  *  mientras alguien está de pie en el mostrador. Es ALEATORIA porque si los
  *  dos perdedores reintentasen a la vez volverían a chocar igual. */
@@ -150,7 +189,12 @@ async function withRaceRetry<T>(run: () => Promise<T>): Promise<T> {
     } catch (err) {
       if (isExclusionViolation(err)) throw new ExclusionError();
       if (!isRaceAbort(err)) throw err;
-      if (intento >= REINTENTOS_DE_CARRERA) throw new ExclusionError();
+      raceStats.aborts += 1;
+      if (intento >= REINTENTOS_DE_CARRERA) {
+        raceStats.exhausted += 1;
+        throw new ExclusionError();
+      }
+      raceStats.retries += 1;
       await esperaCorta();
     }
   }
