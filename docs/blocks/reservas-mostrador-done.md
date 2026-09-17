@@ -1,17 +1,17 @@
 # Bloque B-reservas-mostrador · El mostrador de la agenda — DONE
 
 **Rama** `reservas-mostrador` · **worktree** `mipiacetpv-reservas-mostrador` ·
-**desde** master `5994fde` · **último commit con código** `3cd910f`.
+**desde** master `5994fde` · **último commit con código** `8656776`.
 
-**Suite entera** (`pnpm test` en la raíz): **207 ficheros · 2106 pasados ·
+**Suite entera** (`pnpm test` en la raíz): **208 ficheros · 2125 pasados ·
 3 SALTADOS**. Los 3 saltados son los mismos de la base
 (`apps/api/test/super-admin.test.ts:566`, `describe.skip` del flujo legacy de
 B-SuperAdmin): preexistentes, nada que ver con este bloque.
 **e2e contra Postgres real**: 10 ficheros · 120 pasados, cero saltados.
 
 La base antes de tocar nada era 200 ficheros / 1924 pasados / 3 saltados, y
-los e2e 9 ficheros / 105 casos. El bloque añade **7 ficheros de test y 182
-casos** a la suite (175 en los ficheros nuevos y 7 repartidos en dos que ya
+los e2e 9 ficheros / 105 casos. El bloque añade **8 ficheros de test y 201
+casos** a la suite (194 en los ficheros nuevos y 7 repartidos en dos que ya
 existían) y **1 fichero e2e con 15 casos**.
 
 ---
@@ -361,6 +361,7 @@ cada uno que el test estaba VERDE con el código intacto.
 | 7 | Calcular «fin» con cero servicios | `AgendaPage.tsx` | `agenda-mostrador` | 2 | `expected '…' not to contain 'fin'` |
 | 8 | Tarjeta sin el tinte de la profesional | `AgendaPage.tsx` | `agenda-mostrador` | 6 | `expected '' to be '#e1d9ed'` · `expected 1 to be greater than or equal to 3` |
 | 9 | **Quitar EL CERROJO** | `crm/from-contact.ts` | `crm-contacto.e2e` (Postgres real) | 2 | `expected 2 to be 1` |
+| 10 | Proponer `COLOR_PRESETS[0]` a toda profesional sin perfil | `admin/StaffPage.tsx` | `staff-color-propuesto` | 3 | `expected 1 to be 3` (un color donde tenía que haber tres) · `expected '#e8663c' to be '#3c8ce8'` |
 
 **Dos sabotajes salieron VERDES al primer intento, y los dos destaparon un
 test malo:**
@@ -406,11 +407,22 @@ rutina pisaba está arreglado en esta rama** (§5); esto es lo que queda fuera.
 5. **Dos citas que se solapan** en la misma columna siguen sin layout de
    solape (el `EXCLUDE` lo hace imposible salvo con citas locales, y para eso
    está la mitad derecha de 6a). No lo toca este bloque.
-6. **El color de la profesional no se puede poner desde el admin.** La API lo
-   acepta (`staff/routes.ts`), la pantalla no lo pide. Hasta que se añada,
-   **todas las profesionales de Sole caerán en el color derivado de su id** —
-   que es estable y pasa AA, pero no lo elige ella. Está fuera de alcance por
-   el prompt («no se activa un perfil de agenda desde el panel»).
+6. **La paleta del admin no está medida contra el tinte.** ~~El color de la
+   profesional no se puede poner desde el admin.~~ **Eso era falso y lo corrigió
+   la revisión de cierre: sí se puede** — `apps/admin/src/pages/StaffPage.tsx`
+   tiene un selector con seis presets (`COLOR_PRESETS`) y además un
+   `input type="color"` para cualquier otro. Lo escribí sin mirar la pantalla,
+   fiándome de un `grep` que sólo buscaba en `apps/admin-web/` (un directorio
+   que no existe: el paquete se llama `apps/admin`). **De ahí salió el filo de
+   §5**, que sí estaba y ahora está arreglado.
+
+   Lo que de verdad NO cubre la suite: **ninguno de los seis presets se ha
+   medido contra el tinte del frente 2**, ni el color libre del
+   `input type="color"`. No hace falta que se midan —`tinteClaro` normaliza
+   CUALQUIER color a luminancia 0,72 y `staff-color.test.ts` lo comprueba con
+   ocho colores, incluidos un casi negro y un casi blanco— pero nadie ha mirado
+   si los seis presets, ya teñidos, se distinguen **entre sí**. Dos presets con
+   tonos parecidos darían dos tintes parecidos, y eso el contraste no lo dice.
 7. **`agenda-mostrador.test.tsx` no comprueba píxeles.** Que el pie no salte
    se fija contando filas y mirando las clases de alto fijo, no midiendo. Lo
    que mide de verdad es el bucle visual.
@@ -434,6 +446,34 @@ son `hidden sm:flex`. O sea:
 
 La cabecera gana un salto de fecha con `min` en hoy (§2.11), y la vuelta a hoy
 pasa al primer chip de la tira (§2.12).
+
+**Las tres profesionales salían del mismo color.** El formulario de perfil del
+admin proponía `COLOR_PRESETS[0]` a **toda** profesional sin perfil. El día en
+que Sole da de alta a SOLE, ANA e ISA, nadie toca el selector —que es lo
+normal: el campo ya venía relleno— y **las tres quedan en el mismo coral**. En
+la agenda, el tinte del frente 2 las pinta idénticas: el color deja de
+distinguir de quién es cada cita, que es para lo único que está. O sea, el
+frente 2 entero se quedaba sin efecto en el caso más probable de todos — el
+primer día.
+
+Ahora se propone **el primer color de la paleta que no esté usando ya otra
+profesional ACTIVA del tenant**; si están todos usados, se vuelve a empezar por
+el principio. Detalles:
+
+- **Sólo cambia el valor inicial del formulario.** El color que una profesional
+  ya tiene guardado no se toca nunca: esto no repinta a nadie, sólo evita que
+  la siguiente alta nazca repetida. Hay test de que dos profesionales que hoy
+  comparten color siguen viendo el suyo al abrir su editor.
+- **Una profesional de baja no ocupa color**: sin citas en la rejilla, el suyo
+  no le estorba a nadie.
+- **Se coge el hueco, no el siguiente al último.** Si la segunda se dio de baja
+  y su color quedó libre, se reusa.
+- **Se calcula una sola vez, al abrir el editor** (`useState` con función).
+  Recalcularlo en cada render movería el color bajo el dedo de quien lo está
+  eligiendo.
+- La regla vive en `apps/admin/src/pages/StaffPage.colors.ts`, aparte y pura,
+  para poder probarla sin montar la pantalla — mismo patrón que
+  `SalePage.contact.privacy.ts`.
 
 **Un alta sin apellidos SIN RED.** Los dos casos de su rutina a la vez: apunta
 a sus clientas por el nombre de pila y el centro se queda sin cobertura. El
@@ -538,6 +578,11 @@ En este orden, que es el del daño:
 8. **El nombre en la tarjeta.** Crear una clienta desde el selector con la
    agenda abierta y comprobar que la cita nueva sale **con su nombre**, no con
    «Sin nombre». Y que ninguna cita vieja pone ya «Cliente».
+9. **Dar de alta tres profesionales y comprobar que salen con tres colores
+   distintos.** En el panel de Personal, abrir SOLE, ANA e ISA y guardar cada
+   una **sin tocar el selector de color**. Las tres tienen que quedar en tres
+   colores de la paleta, no en el mismo. Y luego, en la agenda: que las tres
+   columnas se distingan por el tinte.
 
 ---
 
@@ -573,6 +618,7 @@ En este orden, que es el del daño:
 | `apps/tpv-web/src/lib/birthdate-mask.ts` | Máscara `dd/mm/aaaa` y parseo a `YYYY-MM-DD`, con el «hoy» por parámetro |
 | `apps/tpv-web/src/lib/contacts.ts` | Búsqueda de contactos de Holded y enlace, con el caché al día |
 | `apps/api/src/crm/from-contact.ts` | El cerrojo, el `SELECT`-o-`INSERT` y `partirNombre` |
+| `apps/admin/src/pages/StaffPage.colors.ts` | La paleta y el color que se propone a una profesional nueva |
 | `apps/tpv-web/test/staff-color.test.ts` | 48 casos de contraste |
 | `apps/tpv-web/test/birthdate-mask.test.ts` | 19 casos del parser |
 | `apps/tpv-web/test/agenda-mostrador.test.tsx` | 45 casos de los frentes 1, 2, 4, 5 y el salto de fecha |
@@ -581,6 +627,7 @@ En este orden, que es el del daño:
 | `apps/tpv-web/test/client-picker-holded.test.tsx` | 19 casos de la sección de Holded |
 | `apps/api/test/crm-from-contact.test.ts` | 21 casos del contrato del endpoint |
 | `apps/api/test-e2e/crm-contacto.e2e.ts` | 15 casos contra Postgres real |
+| `apps/admin/test/staff-color-propuesto.test.tsx` | 19 casos: la regla del color libre y las tres altas seguidas |
 
 **Tocados**
 
@@ -594,6 +641,7 @@ En este orden, que es el del daño:
 | `apps/api/test/crm-route.test.ts` | El bloque de apellidos opcionales; un test viejo actualizado |
 | `apps/tpv-web/test/clients-cache.test.ts` | El alta sin apellidos y sin red |
 | `apps/tpv-web/visual/main.tsx` | Los parámetros del bloque y la pantalla `clientes` |
+| `apps/admin/src/pages/StaffPage.tsx` | El color propuesto sale de los que ya están pillados; la paleta se va al módulo puro |
 
 ---
 
@@ -628,8 +676,10 @@ En este orden, que es el del daño:
 | `f1774f6` | Lo que cogió el bucle visual |
 | `bee7321` | Se llega a un día de dentro de tres semanas |
 | `3cd910f` | El alta sin apellidos y sin red |
+| `6bf3c4f` | El done del bloque |
+| `8656776` | Revisión de cierre · el color propuesto a una profesional nueva |
 
-**Último commit con código: `3cd910f`.**
+**Último commit con código: `8656776`.**
 
 **Ni push ni deploy**: eso lo hace Matías.
 
