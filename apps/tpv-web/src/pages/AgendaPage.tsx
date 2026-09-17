@@ -212,14 +212,6 @@ function addDays(dateStr: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function fmtDateHuman(dateStr: string): string {
-  return new Intl.DateTimeFormat("es-ES", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  }).format(new Date(`${dateStr}T12:00:00.000Z`));
-}
-
 // Instante UTC a partir de fecha local + minutos de pared (para slot-first).
 function localToIso(dateStr: string, minutes: number): string {
   // Reutiliza el mismo truco de offset que el server: interpretar como UTC y
@@ -808,12 +800,39 @@ export function AgendaPage({
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
-          <button
-            onClick={() => setDate(todayLocalDate())}
-            className="h-9 px-3 rounded-xl hover:bg-slate-100 text-[13px] font-medium capitalize"
-          >
-            {isToday ? "Hoy" : fmtDateHuman(date)}
-          </button>
+          {/* B-reservas-mostrador · IR A UN DÍA CUALQUIERA.
+
+              Lo destapó cruzar la suite con la rutina real de Sole, que
+              reserva con semanas de antelación. Hasta aquí sólo se podía
+              cambiar de día con la tira de SIETE chips y con dos flechas que
+              son `hidden sm:flex`. O sea:
+
+                · en la tablet, un jueves de dentro de tres semanas costaba
+                  VEINTIÚN toques en la flecha;
+                · por debajo de 640 px las flechas no existen, así que el
+                  día 8 en adelante era SENCILLAMENTE INALCANZABLE.
+
+              Aquí el `type="date"` nativo sí es el control bueno, y es el
+              contrario exacto del razonamiento del frente 3: una fecha de
+              CITA cae a semanas del día de hoy, que es justo donde el
+              calendario del sistema abre. Una fecha de NACIMIENTO cae
+              cuarenta años atrás, que es justo donde no abre. */}
+          <input
+            type="date"
+            value={date}
+            min={todayLocalDate()}
+            onChange={(e) => {
+              if (e.target.value) setDate(e.target.value);
+            }}
+            data-ir-a-dia
+            aria-label="Ir a un día"
+            className="h-11 w-[132px] shrink-0 px-2 rounded-xl bg-mipiace-stone border border-slate-200 text-[13px] font-medium tabular-nums text-mipiace-ink"
+          />
+          {/* La vuelta a HOY no va aquí: va en el primer chip de la tira de
+              días, que ahora dice «Hoy» y está siempre a la vista. Probé a
+              ponerla también en la cabecera y a 390 px el resultado fue el
+              fallo que B-5 F8 arregló — «Nueva cita» cortado por el borde
+              derecho. Esta barra no tiene píxeles de sobra. */}
           <button
             onClick={() => setDate(addDays(date, 1))}
             className="hidden sm:flex h-9 w-9 rounded-xl hover:bg-slate-100 items-center justify-center"
@@ -906,10 +925,12 @@ export function AgendaPage({
                     : "bg-mipiace-stone text-slate-600 hover:bg-slate-200"
                 }`}
               >
-                {new Intl.DateTimeFormat("es-ES", {
-                  weekday: "short",
-                  day: "numeric",
-                }).format(new Date(`${d}T12:00:00.000Z`))}
+                {d === todayLocalDate()
+                  ? "Hoy"
+                  : new Intl.DateTimeFormat("es-ES", {
+                      weekday: "short",
+                      day: "numeric",
+                    }).format(new Date(`${d}T12:00:00.000Z`))}
               </button>
             ),
           )}

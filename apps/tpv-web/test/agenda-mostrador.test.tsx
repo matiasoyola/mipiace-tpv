@@ -342,12 +342,15 @@ async function tocarFranja(userId: string, hhmm: string) {
   await settle();
 }
 
-/** Cambia al día que dice el chip de la tira de días ("mié 16", "jue 17"…). */
+/** Cambia al día que dice el chip de la tira ("Hoy", "mié 16", "jue 17"…). */
 async function irAlDia(date: string) {
-  const etiqueta = new Intl.DateTimeFormat("es-ES", {
-    weekday: "short",
-    day: "numeric",
-  }).format(new Date(`${date}T12:00:00.000Z`));
+  const etiqueta =
+    date === HOY
+      ? "Hoy"
+      : new Intl.DateTimeFormat("es-ES", {
+          weekday: "short",
+          day: "numeric",
+        }).format(new Date(`${date}T12:00:00.000Z`));
   const chip = Array.from(container.querySelectorAll("button")).find(
     (b) => (b.textContent ?? "").trim() === etiqueta,
   );
@@ -917,5 +920,97 @@ describe("F5 · «Cliente» deja de leerse como un nombre", () => {
     await click(tarjetaDe("12:00"));
     expect(texto()).toContain("Carmen Ruiz");
     expect(container.querySelector("[data-cliente-desconocido]")).toBeNull();
+  });
+});
+
+// ── La rutina de Sole · reservas a SEMANAS vista ──────────────────────
+//
+// No sale de las capturas del 13-09 sino de cruzar lo que cubre la suite con
+// cómo trabaja el centro: Sole reserva con semanas de antelación. Hasta este
+// bloque sólo se podía cambiar de día con la tira de SIETE chips y con dos
+// flechas `hidden sm:flex`, así que un jueves de dentro de tres semanas
+// costaba veintiún toques en la tablet — y por debajo de 640 px, donde las
+// flechas no existen, era INALCANZABLE.
+
+describe("se llega a un día de dentro de tres semanas", () => {
+  const DENTRO_DE_TRES_SEMANAS = "2026-10-06";
+
+  function irADia(): HTMLInputElement {
+    const el = container.querySelector<HTMLInputElement>("[data-ir-a-dia]");
+    if (!el) throw new Error("no hay control para ir a un día");
+    return el;
+  }
+
+  async function escribirFecha(valor: string) {
+    const input = irADia();
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        "value",
+      )!.set!;
+      setter.call(input, valor);
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await settle();
+  }
+
+  it("de un toque, sin tocar veintiuna veces una flecha", async () => {
+    await render();
+    await escribirFecha(DENTRO_DE_TRES_SEMANAS);
+    const pedidos = llamadas
+      .filter((l) => l.path.startsWith("/agenda?"))
+      .map((l) => l.path);
+    expect(pedidos[pedidos.length - 1]).toContain(DENTRO_DE_TRES_SEMANAS);
+  });
+
+  it("y el control NO es una de las flechas que desaparecen en compacto", async () => {
+    await render();
+    // Las flechas siguen siendo `hidden sm:flex`; el salto de fecha, no.
+    expect(porEtiqueta("Día anterior").className).toContain("hidden");
+    expect(irADia().className).not.toContain("hidden");
+    expect(irADia().className).not.toContain("sm:");
+  });
+
+  it("no ofrece días pasados: la agenda no reserva hacia atrás", async () => {
+    await render();
+    expect(irADia().getAttribute("min")).toBe(HOY);
+  });
+
+  it("el área tocable llega al peldaño de la casa (48 px)", async () => {
+    await render();
+    expect(irADia().className).toContain("h-11");
+  });
+
+  it("la vuelta a HOY sigue siendo UN toque, desde el chip de la tira", async () => {
+    await render();
+    await escribirFecha(DENTRO_DE_TRES_SEMANAS);
+    // Hay UN solo «Hoy», el de la tira: la cabecera no lleva otro. A 390 px
+    // ese botón de más cortaba «Nueva cita» por el borde, que es el fallo
+    // que B-5 F8 arregló. Esta barra no tiene píxeles de sobra.
+    const vuelta = Array.from(container.querySelectorAll("button")).filter(
+      (b) => (b.textContent ?? "").trim() === "Hoy",
+    );
+    expect(vuelta).toHaveLength(1);
+    await click(vuelta[0]!);
+    const pedidos = llamadas.filter((l) => l.path.startsWith("/agenda?"));
+    expect(pedidos[pedidos.length - 1]!.path).toContain(HOY);
+  });
+
+  it("y el salto de fecha no le quita su área tocable a «Nueva cita»", async () => {
+    await render();
+    const nueva = botonPorTexto("Nueva cita")!;
+    // El estándar de la casa (`tailwind.config.js`, peldaño `touch`) y la
+    // lección de B-5 F8: nada de esta barra puede encogerse por debajo de su
+    // área tocable para hacerle sitio a otra cosa.
+    expect(nueva.className).toContain("shrink-0");
+    expect(irADia().className).toContain("shrink-0");
+  });
+
+  it("el primer chip de la tira dice «Hoy», que es el ancla", async () => {
+    await render();
+    const chips = Array.from(
+      container.querySelectorAll<HTMLElement>("div.flex-1.flex.gap-1 > button"),
+    );
+    expect(chips[0]!.textContent?.trim()).toBe("Hoy");
   });
 });
