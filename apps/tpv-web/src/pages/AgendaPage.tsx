@@ -54,6 +54,11 @@ import {
   type AvailabilitySlot,
   type OpenRange,
 } from "../lib/agenda.js";
+import {
+  colorDeProfesional,
+  tinteDeProfesional,
+  tonoDeEstado,
+} from "../lib/staffColor.js";
 import { useClientPicker } from "../hooks/useClientPicker.js";
 import { outboxRetry, subscribeOutbox } from "../lib/outbox.js";
 import {
@@ -1316,6 +1321,10 @@ function StaffColumn(props: {
     absences,
   } = props;
   const totalH = (dayEndMin - dayStartMin) * PX_PER_MIN;
+  // B-reservas-mostrador F2 · el color de ESTA columna, y el tinte con el que
+  // se pintan sus citas. Se calculan una vez por columna, no por tarjeta.
+  const colorStaff = colorDeProfesional(staff.userId, staff.color);
+  const tinteStaff = tinteDeProfesional(staff.userId, staff.color);
   const pastH =
     pastUntilMin == null
       ? 0
@@ -1357,7 +1366,11 @@ function StaffColumn(props: {
     <div className="w-44 md:w-52 shrink-0 border-l border-slate-200">
       <div
         className="sticky top-0 z-10 h-10 flex items-center gap-2 px-2 bg-white border-b border-slate-200"
-        style={{ borderTop: `3px solid ${staff.color ?? "#cbd5e1"}` }}
+        // B-reservas-mostrador F2 · la cabecera usa el MISMO color base que el
+        // tinte de sus tarjetas: si la columna es morada, sus citas son
+        // moradas. Una profesional sin color ya no cae en el gris de todas —
+        // tiene el suyo, derivado de su id y por tanto estable.
+        style={{ borderTop: `3px solid ${colorStaff}` }}
       >
         <span className="text-[13px] font-semibold text-mipiace-ink truncate flex-1">
           {staff.displayName}
@@ -1416,7 +1429,13 @@ function StaffColumn(props: {
               top: (b.from - dayStartMin) * PX_PER_MIN,
               height: (b.to - b.from) * PX_PER_MIN,
             }}
-            className="absolute left-0 right-0 bg-slate-100 pointer-events-none bg-[repeating-linear-gradient(135deg,transparent,transparent_5px,rgba(148,163,184,0.18)_5px,rgba(148,163,184,0.18)_10px)]"
+            // B-reservas-mostrador F2 · el rayado BAJA de tono (0,18 → 0,09 y
+            // el fondo de slate-100 a slate-50). Hasta este bloque era lo que
+            // más gritaba de la pantalla: una banda que dice que ahí NO se
+            // puede hacer nada pesaba más que la cita, que es lo único que
+            // importa. Sigue viéndose —lo fija `agenda-horario.test.tsx`— pero
+            // ya no compite con las tarjetas teñidas.
+            className="absolute left-0 right-0 bg-slate-50 pointer-events-none bg-[repeating-linear-gradient(135deg,transparent,transparent_5px,rgba(148,163,184,0.09)_5px,rgba(148,163,184,0.09)_10px)]"
           />
         ))}
         {/* rejilla: una línea por franja de la RETÍCULA del centro, más
@@ -1505,10 +1524,22 @@ function StaffColumn(props: {
               style={{
                 top,
                 height,
+                // B-reservas-mostrador F2 · la cita de una profesional se tiñe
+                // con SU color. La local y la rechazada de 6a NO: su ámbar y
+                // su rojo son lo que las distingue de una cita de verdad, y
+                // teñirlas sería borrar esa diferencia.
                 ...(local
                   ? {}
-                  : { borderLeft: `4px solid ${STATUS_COLOR[a.status]}` }),
+                  : {
+                      background: tinteStaff,
+                      borderLeft: `4px solid ${tonoDeEstado(STATUS_COLOR[a.status])}`,
+                    }),
               }}
+              // Ganchos estables para el bucle visual. El tinte de verdad va
+              // en `style`, que es lo que el navegador pinta: `data-tinte` es
+              // sólo para poder localizarlo desde Playwright.
+              data-cita={a.id}
+              data-tinte={local ? undefined : tinteStaff}
               className={
                 local
                   ? // A la MITAD DERECHA de la columna. El bucle visual
@@ -1529,7 +1560,10 @@ function StaffColumn(props: {
                     // ausencias, y por DEBAJO de la cabecera sticky y de la
                     // línea de "ahora" — que es como estaba y no lo cambia
                     // este bloque.
-                    `absolute left-1 right-1 rounded-lg bg-white shadow-sm px-2 py-1 text-left overflow-hidden hover:shadow-md ${
+                    //
+                    // B-reservas-mostrador F2 · sin `bg-white`: el fondo lo
+                    // pone el tinte de la profesional por `style`.
+                    `absolute left-1 right-1 rounded-lg shadow-sm px-2 py-1 text-left overflow-hidden hover:shadow-md ${
                       fuera
                         ? "border border-amber-300 ring-1 ring-amber-200"
                         : "border border-slate-200"
@@ -1564,8 +1598,18 @@ function StaffColumn(props: {
                   mitad de las letras, que se lee como un fallo de pintado.
                   Cortar limpio y dejar el servicio para el detalle es
                   mejor que enseñar media palabra. */}
+              {/* B-reservas-mostrador F2 · `slate-600`, no `slate-500`.
+                  Sobre blanco los dos pasaban AA, pero sobre un tinte que se
+                  vea slate-500 pediría un fondo de luminancia 0,943 — o sea,
+                  blanco. Con slate-600 el tinte cabe (5,56:1 contra el
+                  objetivo del bloque). El número vive en
+                  `lib/staffColor.ts` y lo fija `staff-color.test.ts`. */}
               {height >= CARD_TWO_LINE_MIN_H && (
-                <div className="text-[10.5px] text-slate-500 truncate">
+                <div
+                  className={`text-[10.5px] truncate ${
+                    local ? "text-slate-500" : "text-slate-600"
+                  }`}
+                >
                   {!local && fuera ? "fuera de horario · " : ""}
                   {props.labelOf(a)}
                 </div>
@@ -1956,9 +2000,14 @@ function DetailPanel(props: {
           </div>
         </div>
         <div>
+          {/* B-reservas-mostrador F2 · el mismo tono que el filete de la
+              tarjeta. Con `STATUS_COLOR` crudo este chip pintaba texto BLANCO
+              sobre el ámbar de "Pendiente": 2,15:1, muy por debajo de AA. Era
+              un defecto de master que el bloque cierra de paso. */}
           <span
+            data-estado={appt.status}
             className="inline-block text-[12px] font-medium px-2 py-0.5 rounded-md text-white"
-            style={{ background: STATUS_COLOR[appt.status] }}
+            style={{ background: tonoDeEstado(STATUS_COLOR[appt.status]) }}
           >
             {STATUS_LABEL[appt.status]}
           </span>
