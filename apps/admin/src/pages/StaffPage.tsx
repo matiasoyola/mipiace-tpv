@@ -14,6 +14,11 @@ import {
   OutlineButton,
   PrimaryButton,
 } from "../ui.js";
+import {
+  COLOR_PRESETS,
+  colorPropuesto,
+  coloresEnUso,
+} from "./StaffPage.colors.js";
 
 // ── Tipos del contrato de la API ─────────────────────────────────────
 interface StaffProfile {
@@ -62,15 +67,6 @@ const KIND_LABEL: Record<ShiftKind, string> = {
   SWAP: "Cambio",
 };
 // Paleta de colores sugeridos para pintar la columna en la agenda.
-const COLOR_PRESETS = [
-  "#e8663c",
-  "#3c8ce8",
-  "#2fb686",
-  "#b65fd6",
-  "#d6a13c",
-  "#5f6bd6",
-];
-
 function parseByday(rrule: string): string[] {
   const m = /BYDAY=([^;]+)/i.exec(rrule);
   return m ? m[1]!.split(",").map((d) => d.trim().toUpperCase()) : [];
@@ -166,6 +162,9 @@ export function StaffPage() {
             <ProfessionalCard
               key={row.userId}
               row={row}
+              // B-reservas-mostrador · el perfil necesita saber qué colores
+              // están ya pillados para no proponer el mismo a todas.
+              personal={staff}
               services={services}
               canEdit={canEdit}
               onChanged={refresh}
@@ -180,12 +179,14 @@ export function StaffPage() {
 
 function ProfessionalCard({
   row,
+  personal,
   services,
   canEdit,
   onChanged,
   onError,
 }: {
   row: StaffRow;
+  personal: readonly StaffRow[];
   services: ServiceRow[];
   canEdit: boolean;
   onChanged: () => Promise<void>;
@@ -235,6 +236,7 @@ function ProfessionalCard({
         <div className="border-t border-slate-100 p-4 space-y-6">
           <ProfileEditor
             row={row}
+            personal={personal}
             canEdit={canEdit}
             onChanged={onChanged}
             onError={onError}
@@ -263,11 +265,13 @@ function ProfessionalCard({
 
 function ProfileEditor({
   row,
+  personal,
   canEdit,
   onChanged,
   onError,
 }: {
   row: StaffRow;
+  personal: readonly StaffRow[];
   canEdit: boolean;
   onChanged: () => Promise<void>;
   onError: (m: string | null) => void;
@@ -275,7 +279,20 @@ function ProfileEditor({
   const [displayName, setDisplayName] = useState(
     row.profile?.displayName ?? row.alias ?? "",
   );
-  const [color, setColor] = useState(row.profile?.color ?? COLOR_PRESETS[0]!);
+  // B-reservas-mostrador · el color que se PROPONE a quien no tiene perfil es
+  // el primero de la paleta que no esté usando ya otra profesional activa. Con
+  // `COLOR_PRESETS[0]` a secas, dar de alta a SOLE, ANA e ISA sin tocar el
+  // selector las dejaba a las tres en el mismo coral, y el tinte de la agenda
+  // dejaba de distinguir sus citas.
+  //
+  // `useState` con función: se calcula UNA vez, al abrir el editor. Recalcular
+  // en cada render movería el color bajo el dedo de quien lo está eligiendo.
+  //
+  // El color YA GUARDADO de una profesional no se toca: esto sólo rellena el
+  // formulario de una que todavía no tiene perfil.
+  const [color, setColor] = useState(
+    () => row.profile?.color ?? colorPropuesto(coloresEnUso(personal, row.userId)),
+  );
   const [active, setActive] = useState(row.profile?.active ?? true);
   const [busy, setBusy] = useState(false);
 
