@@ -225,6 +225,7 @@ Cada fila: se rompe la guarda a mano y se mira qué test lo caza.
 | Meter `holdedEnabled` en `MODULE_FIELDS` | `h1-alta-sin-holded.test.ts` · "NO es un módulo" |
 | Dejar `editable: p.source === "LOCAL"` sin mirar la puerta | `catalogo-local-crud.test.ts` · "un producto LOCAL de antes sale editable:false" |
 | Dar de alta sin SKU por la API | `catalogo-local-crud.test.ts` + e2e, los tres casos (sin campo, vacío, espacios) |
+| **(§13)** Quitar el gate de `getCachedHoldedEnabled()` del selector de clientes | `client-picker-holded.test.tsx` · "NI UNA petición a /contacts/search" + "no aparece NADA de Holded" |
 
 **El sabotaje obligatorio del addendum 3, hecho a mano además del test:** con un tenant con
 `holdedApiKeyCiphertext` puesto, `PATCH /super-admin/tenants/:id { holdedEnabled: false }`
@@ -436,11 +437,29 @@ aquí con su captura para que sea una decisión y no un descuido.
 
 ## 10 · Estado de la suite
 
+Al cerrar el bloque, el 13-09:
+
 ```
 pnpm test            (desde la raíz)   204 ficheros · 2000 tests · 3 skipped · verde
 pnpm test:e2e        (Postgres real)     8 ficheros ·  110 tests · verde
 tsc --noEmit         api, admin y tpv-web           limpio
 ```
+
+**Después del merge de master** (18-09, ver §13). Crecen los dos lados porque master trae sus
+propios tests, no porque aquí se haya añadido casi nada:
+
+```
+pnpm test            (desde la raíz)   216 ficheros · 2273 tests · 3 skipped · verde
+pnpm test:e2e        (Postgres real)    11 ficheros ·  145 tests · verde
+tsc --noEmit         api, admin y tpv-web           limpio
+```
+
+**Los 3 SALTADOS, dichos por su nombre** porque un recuento sin nombre no se puede auditar: son
+el `describe.skip("super-admin · crear tenant (legacy flow B-SuperAdmin)")` de
+`apps/api/test/super-admin.test.ts`. Los dejó **B-OnboardingV2** al partir
+`POST /super-admin/tenants` en DRAFT + activate, y su cobertura se trasladó a
+`onboarding-v2.test.ts`. Son los mismos 3 de antes del bloque y los mismos de después del
+merge: **este bloque no salta ni un test**.
 
 El e2e necesita `E2E_DATABASE_URL` y **hace DROP SCHEMA**: base desechable y propia, nunca la
 de desarrollo de nadie.
@@ -471,3 +490,170 @@ de desarrollo de nadie.
 3. **El catálogo mixto** y su conversación de producto.
 4. **El ancho del nombre en la línea del ticket** (§9.2). Anterior a este bloque y común a
    todos los verticales; se mira cuando toque el checkout, no aquí.
+
+---
+
+## 13 · La integración en master (18-09-2026)
+
+La rama iba **5 commits por delante y 22 por detrás**, y master se había movido mucho: el panel
+de salud de la agenda (B-9), la carrera de dos altas `500 → 409` con su testigo, y el bloque
+**reservas-mostrador** (merge `3e254b8`, que es lo que hay en producción, con la APK 1.17.0).
+Aquí no se abre nada nuevo: se pone esta rama en condiciones de entrar.
+
+`git merge master` y no rebase: son 22 commits y el historial de la rama ya llevaba un merge de
+master previo (`434bf36`).
+
+### 13.1 Los conflictos: NO HUBO NINGUNO, y eso hay que explicarlo
+
+Cero conflictos textuales. No es suerte ni es que se resolvieran por comodidad — **es que los
+dos lados no comparten ni un solo fichero**:
+
+```
+comm -12 <(git diff --name-only $BASE HEAD | sort) \
+         <(git diff --name-only $BASE master | sort)
+→ (vacío)
+```
+
+Los choques que se esperaban **no existieron**, y merece la pena dejar dicho dónde no estaban,
+porque es la prueba de que la separación entre los dos frentes era real:
+
+| Dónde se esperaba el choque | Qué pasó |
+|---|---|
+| `apps/admin` · `CatalogoPage`, `TenantDetailPage`, `CreateTenantPage`, `AdminShell`, `App.tsx`, `superadmin/types.ts` | master no tocó **ninguno**. Lo suyo en el admin fue `StaffPage` y su color propuesto, que esta rama no mira |
+| `apps/api/src/catalog/**` | master no entró ahí. Lo suyo fue `crm/`, `agenda/store.ts` y `lib/error-handler.ts` |
+| `apps/api/src/server.ts` | tampoco: master registra sus rutas nuevas desde `crm/routes.ts`, no desde el server |
+
+`tsc --noEmit` limpio en api, admin y tpv-web sobre el árbol fusionado antes de commitear el
+merge (`a6be679`).
+
+### 13.2 Las dos comprobaciones que se pidieron a mano, no a suponer
+
+**(a) El corte a nivel de tenant antes de encolar sigue cubriendo el camino de cobro.**
+
+Los **cuatro** caminos que encolan siguen pasando por el gate, y master **no añadió un quinto**:
+
+| Camino | Dónde | Gate |
+|---|---|---|
+| Venta rápida (el camino de B-5) | `tickets/routes.ts:444` | `holdedDestination` → `shouldEnqueueHoldedUpload` (`:669`) |
+| Mesa | `tickets/routes.ts:944` | ídem (`:1230`) |
+| Devolución | `tickets/routes.ts:1688` | `shouldEnqueueHoldedRefundUpload` (`:1893`) |
+| Saldo de un fiado | `credit-routes.ts:271` | `shouldEnqueueHoldedUpload` (`:346`) |
+
+Se comprobó además que el diff entero de master sobre `apps/api/src` **no contiene ni una línea
+añadida** que mencione `Ticket`, `HoldedUpload` o `enqueue`: lo suyo es agenda y CRM, y ninguna
+de las dos cobra.
+
+⚠️ **Lo que sí apareció al mirar, y no es una regresión:** `admin/tickets-errors.ts` tiene
+cuatro `enqueueTicketUpload`/`enqueueRefundUpload` **sin gate**. Es la bandeja de "reintentar" y
+sólo actúa sobre filas `HoldedUpload` que ya existen. En un tenant `NONE` o
+`NOT_CONNECTED_YET` esas filas **no se crean**, así que la bandeja está vacía por construcción.
+Es el mismo argumento de "garantizado por la ausencia de datos" del §12.1, y es anterior al
+merge.
+
+**Y la frase del §2.9 ("no hay sweeper que recoja `PENDING_SYNC`") se volvió a comprobar,
+porque `workers/upload-sweeper.ts` existe y el nombre asusta.** Sigue siendo cierta: el sweeper
+busca `holdedUpload.status = 'PENDING'`, **no** `ticket.status = 'PENDING_SYNC'`. Son dos cosas
+distintas, y el gate impide que la fila `HoldedUpload` llegue a existir — así que el sweeper no
+tiene nada que barrer hacia arriba. El forward-only se sostiene.
+
+**El roce real con la carrera 409, que no estaba en el guion:** master cambió
+`lib/error-handler.ts`, y esta rama depende de que un `P2002` del índice parcial del SKU se
+traduzca a 409 (§4, "concurrencia sobre el índice parcial"). No se pisan: el cambio de master es
+**aditivo** —añade el `SQLSTATE` al log y al cuerpo del 500, vía el `sqlstate.ts` nuevo— y no
+toca el tratamiento del `P2002`; y además `catalog/local-products.ts` **captura el `P2002` en la
+propia ruta** (`:446` y `:542`) y devuelve el 409 con su frase, así que nunca llega al manejador
+genérico. Comprobado leyendo los dos, no deducido.
+
+**(b) La sección "De Holded" del selector de clientes con `holdedEnabled = false`.**
+
+El done de reservas-mostrador lo dejó anotado para esta rama (§8 de aquel documento): la sección
+ya **no aparecía** por el camino natural —un tenant sin contactos sincronizados devuelve cero
+resultados y la sección sólo existe si hay alguno—, pero se gastaba un `GET /contacts/search`
+por cada búsqueda que en ese comercio siempre iba a volver vacío. *"Es desperdicio, no un
+fallo."*
+
+Hacía falta gatear la petición, y se ha hecho aquí (`47a9fa5`). El flag ya viajaba en el payload
+del catálogo desde el §9.2, así que el TPV ya lo tenía cacheado:
+
+- `useClientPicker.tsx` corta **antes de salir a la red** si `getCachedHoldedEnabled()` es falso.
+- Se apaga además `sinRed`. Sin eso, el comercio sin Holded vería *"Sin conexión: no se buscan
+  contactos de Holded"* — un ERP que no ha comprado, que es **la misma mentira** que el bloque le
+  quita en la rejilla del TPV (§9.2) y en el sidebar del panel (§9).
+- El default sigue siendo el **asimétrico** de todo el caché del catálogo: `true` salvo un `"0"`
+  explícito. Un TPV que aún no haya refrescado busca como antes del bloque; nunca deja de buscar
+  por no saberlo.
+
+Siete tests nuevos, con los tres casos del default (ausente, valor raro, encendido explícito).
+El `beforeEach` del fichero limpia la clave, porque jsdom no tira `localStorage` entre tests del
+mismo fichero y el resto de aquel fichero asume el comercio CON Holded.
+
+### 13.3 Qué cambió respecto a lo que el done decía
+
+| El done decía | Ahora |
+|---|---|
+| §10 · `204 ficheros · 2000 tests · 3 skipped` | `216 · 2273 · 3`. Los 12 ficheros y 273 tests de más **son de master**; de esta rama sólo entran los 7 del selector |
+| §10 · e2e `8 ficheros · 110 tests` | `11 · 145`. Los tres nuevos son de master: `agenda-carrera`, `crm-contacto` y el suyo propio |
+| §3 · tabla de sabotaje de 15 filas | 16. La fila nueva es la del §13.2(b) |
+| §12 · "queda pendiente" no mencionaba el selector de clientes | Cerrado. La deuda que reservas-mostrador dejó apuntada a esta rama está pagada |
+
+**Lo que NO cambió:** ni una decisión del §2, ni la forma del dato del §1.1, ni la migración.
+Master no tocó `packages/db/prisma/`, así que la migración `20260913000000_catalogo_local` sigue
+siendo la única del bloque y se aplicó limpia sobre una base vacía en el e2e.
+
+### 13.4 La tabla de sabotaje, revalidada entera
+
+Se volvió a pasar **fila por fila** sobre el árbol ya fusionado, y con el paso que hace que la
+tabla signifique algo: **antes de romper nada se comprueba que el test está VERDE con el código
+intacto**. Si no, un rojo no prueba nada.
+
+**16 de 16 confirmadas.** Ninguna garantía se ha vuelto irrompible: **master no tocó ninguna**,
+que es el hallazgo — y es un hallazgo aburrido, que es el que uno quiere.
+
+Dos filas se comprobaron por sus **dos** mitades, porque la tabla nombraba dos tests:
+
+- **Fila 2 (el índice parcial)** tiene dos sabotajes distintos y cada uno cae por un lado:
+  quitar el `WHERE` (dejarlo global) revienta *"…y a la vez DEJA convivir dos SKU iguales de
+  HOLDED"* —que es justo el sync de Holded rompiéndose—, y **borrar el índice entero** —lo que
+  de verdad ofrece `migrate dev`— revienta *"el índice PARCIAL rechaza dos SKU locales iguales
+  en el mismo tenant"*. Las dos contra Postgres real.
+- **Fila 9 (`!holdedEnabled` en vez de `=== false`)** vive en dos sitios: el gate del encolado
+  (rojo en `catalogo-local-encolado.test.ts` · *"un tenant sin la columna se comporta como el de
+  siempre"*) y el muro de `App.tsx` (rojo en `catalogo-local-muro-onboarding.test.tsx` ·
+  *"sin el campo se comporta como master"*). Se rompieron por separado.
+
+Las tres filas de e2e (2, 12 y 15) se corrieron contra Postgres de verdad. La 12 —contar los
+cobros huérfanos con `status = 'PAID'` a secas, sin el `NOT EXISTS`— pone rojo *"el falso
+positivo que el NOT EXISTS evita: un PAID CON fila de upload"*, exactamente como decía.
+
+### 13.5 Cómo se corrió, y la base que se usó
+
+Los e2e **como los corre el CI**, no como se corren en local: `pnpm --filter @mipiacetpv/db run
+generate` primero y luego `pnpm test:e2e` con **`E2E_DATABASE_URL` como única variable** (es lo
+único que el job `e2e` de `ci.yml` inyecta), contra `postgres:16-alpine`, sin Redis. La suite
+aplica ella misma `DROP SCHEMA` + las migraciones de verdad, así que la migración se prueba
+desde cero en cada pasada.
+
+**Base propia y desechable: `mipiacetpv_catalogo_e2e`**, creada para esta integración y
+**borrada al terminar**. No se tocó `mipiacetpv_e2e`, la compartida: había otra sesión de Code
+trabajando en paralelo en otra rama y esta suite hace `DROP SCHEMA`. Es la regla del §0 otra
+vez, sólo que aplicada a las bases en vez de a los árboles.
+
+Ningún test falló, así que no hizo falta decidir si un rojo venía de master o de la rama.
+
+### 13.6 Lo que queda pendiente
+
+1. **`SalePage.contact.tsx` también llama a `/contacts/search`** y **no se ha gateado**. Es otra
+   pantalla y otro bloque: el sheet de "cliente del ticket" de B4, cuyo propósito es adjuntar un
+   contacto **para la factura de Holded**. En un comercio con `holdedEnabled = false` no hay
+   factura de Holded, así que la pregunta no es "¿gateo la petición?" sino "¿qué pinta ese sheet
+   entero en ese comercio?" — y eso es una decisión de producto, no una optimización. Se deja
+   dicho aquí con su fichero para que sea una decisión y no un descuido, igual que el ancho del
+   nombre en la línea del ticket (§9.2).
+2. Todo lo del §12 sigue en pie sin cambios: el casamiento por SKU, el `taxRate` local, el
+   catálogo mixto.
+3. **El repaso manual del §8.1 sigue pendiente de hacerse al desplegar.** El merge no lo toca.
+
+### 13.7 Lo que esta sesión NO ha hecho
+
+**Ni push ni merge a master: eso lo hace Matías.** La rama queda en `47a9fa5`, por delante de
+master y con master dentro.
