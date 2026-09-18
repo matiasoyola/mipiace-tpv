@@ -488,3 +488,207 @@ permiso de Red Local. Si no, `adb` da `Operation timed out` contra toda la LAN.
 **Construir una APK:** `apps/tpv-android/scripts/build-release-apk.sh 1.16.0`. Se niega a
 compilar si el origen del WebView no es `https://mipiacetpv.com` sin contenido mixto (R5). Si te
 lo encuentras a las 8 de la mañana, el mensaje te cuenta por qué: §0.
+
+---
+
+## 10 · Integración en `master` (2026-09-18)
+
+La rama estuvo cinco días parada y `master` se movió **95 commits**. Aquí no se abrió
+nada nuevo: se trajo `master` a la rama (`git merge master`, commit de fusión `741953f`)
+y se dejó A5 en condiciones de entrar. **Sin pushear y sin fusionar a `master`.**
+
+Base común `7ce5194`. `master` en `3e254b8`, que es por donde va producción y de donde
+salió la APK publicada, la **1.17.0**. Entró por medio B-9 (panel de salud de la agenda),
+la carrera de dos altas 500→409 con su testigo del deadlock, el bloque reservas-mostrador
+(merge `3e254b8`) y H1 («la caja es un módulo»).
+
+### 10.1 · Lo primero: las dos migraciones de A5 llegan FUERA DE ORDEN
+
+Las dos migraciones del bloque —`20260904100000_a5_device_heartbeats` y
+`20260904110000_a5_device_screenshots`— llevan fecha **anterior** a tres que ya están
+aplicadas en producción:
+
+| Migración | Estado en producción (3e254b8) |
+|---|---|
+| `20260904100000_a5_device_heartbeats` | **sin aplicar** (A5) |
+| `20260904110000_a5_device_screenshots` | **sin aplicar** (A5) |
+| `20260909000000_s1_sello_de_la_venta` | aplicada |
+| `20260911000000_b_reservas_7a_horario_centro` | aplicada |
+| `20260912000000_h1_la_caja_es_un_modulo` | aplicada |
+
+**Veredicto: el despliegue entra limpio. NO hay que renombrarlas.** Y no se dice de
+memoria: se reprodujo contra Postgres de verdad (Prisma 5.22, `postgres:16-alpine`).
+Producción despliega con `prisma migrate deploy` (`infra/deploy.sh:69` y
+`infra/bootstrap-hostinger.sh:125`), que es justo el camino que se probó.
+
+Lo que se hizo, y lo que salió:
+
+1. Base limpia + **sólo las 54 migraciones de `master`** → `migrate deploy`. Eso es
+   producción hoy.
+2. Se añaden las dos de A5, que en orden lexicográfico caen **en medio** de las ya
+   aplicadas. `migrate status`: *«Following migrations have not yet been applied»*, las
+   dos, **sin una palabra sobre el orden**.
+3. `migrate deploy` → `Applying migration 20260904100000…`, `…110000…`,
+   **`All migrations have been successfully applied`**, salida 0. Ni aviso, ni error, ni
+   reset.
+4. La prueba que decide: se construye una base **de control** con las 56 migraciones
+   desde cero (ahí A5 sí va en su sitio) y se comparan las dos bases con
+   `prisma migrate diff --from-url … --to-url … --exit-code`:
+
+   ```
+   EXIT=0  →  No difference detected.
+   ```
+
+   **El esquema que deja el despliegue fuera de orden es idéntico al que deja el
+   despliegue en orden.** Que es lo que había que saber.
+
+`migrate deploy` no reordena ni valida el orden: aplica lo que no está en
+`_prisma_migrations`, en orden de nombre, y sigue. El orden sólo importaría si las dos de
+A5 dependieran de algo que crean las de septiembre, y no es el caso: `device_heartbeats` y
+`device_screenshots` sólo cuelgan de `devices`, `tenants` y `super_admin_users`, que
+existen desde mucho antes.
+
+**Dos avisos, para no cantar victoria de más:**
+
+- **El camino del desarrollador no es ése.** `pnpm db:migrate` es `prisma migrate dev`,
+  no `deploy`. Sobre una base que ya iba por `master`, `migrate dev` **también aplica las
+  dos sin resetear nada**, pero después se para a pedir nombre para una migración nueva
+  (*«Enter a name for the new migration»*). Eso **no lo causa A5 ni el desorden**:
+  es drift que `master` ya tiene por su cuenta —comprobado con `master` solo, salen
+  **5 tablas**: las FKs a `super_admin_users` de `apk_download_codes`, las de
+  `appointment_assignments` / `appointment_items`, el índice de `appointments` sobre
+  `(tenant_id, timeslot)` y el GIN de `products.tags`—, todas cosas declaradas en SQL
+  crudo que el datamodel de Prisma no sabe expresar. A5 añade **una** línea a esa lista
+  (la FK `device_screenshots.requested_by_super_admin_id`) siguiendo **exactamente** la
+  pauta que master estrenó en A3 con `apk_download_codes`. Quien vea el prompt en local
+  que corte con Ctrl-C y use `pnpm --filter @mipiacetpv/db run migrate:deploy`.
+- **Esto vale para desplegar sobre la producción de HOY.** Si antes de desplegar A5
+  entrara en `master` otra migración que tocase estas tablas, hay que repetir la
+  comprobación: el argumento es «no hay dependencia entre ellas», no «el orden da igual
+  siempre».
+
+### 10.2 · Conflictos y cómo se resolvieron
+
+De los siete ficheros que tocan las dos partes, **dos** dieron conflicto de verdad.
+
+**`packages/db/prisma/schema.prisma` — se queda lo de `master`.** El choque cae en la cola
+del modelo `Ticket`. A5 **no aportaba nada** ahí: su lado del conflicto venía vacío, y lo
+que había cambiado era sólo el realineado de espacios que deja `prisma format` al crecer
+los nombres de tipo. `master` mete `sealedHash`/`sealedAt`, el sello de la venta (S1). Se
+conserva el bloque de `master` tal cual y se pasa `prisma format` después, para que el
+alineado no quede a medias. Los dos modelos nuevos de A5 —`DeviceHeartbeat` y
+`DeviceScreenshot`— y las dos relaciones que cuelgan de `Device` están más arriba en el
+fichero y fusionaron solos: siguen enteros.
+
+**`apps/api/src/devices/routes.ts` — se quedan los dos.** Colisión de imports y nada más:
+A5 trae `getDeviceChannelRegistry` / `WS_CLOSE` (cerrar el canal al revocar, S3 de la
+tabla de sabotaje) y `master` trae `ensureCajaEnabled` (la puerta de H1). Los dos símbolos
+se usan de verdad en el fichero fusionado. El bloque de A5 que cierra el canal abierto
+dentro de `POST /admin/devices/:deviceId/revoke` queda intacto, ahora bajo el
+`preHandler: [requireOwnerOrManager, ensureCajaEnabled]` nuevo.
+
+Los otros cinco fusionaron solos, pero se miraron uno a uno porque «auto-merge» no es
+«correcto»:
+
+| Fichero | Qué pasó |
+|---|---|
+| `apps/api/src/server.ts` | Los dos registros de ruta se suman: `registerAgendaHoursRoutes` (master) y `registerDeviceWebSocketRoute` (A5, `/ws/device`). El worker `device-screenshot-sweeper` vive en `workers/index.ts`, que master no tocó: sigue arrancando. |
+| `apps/api/src/superadmin/audit.ts` | Aditivo por los dos lados: los cinco esquemas de metadatos de A5 (`device_command`, `…_result`, `…_rejected`, `device_screenshot`, `…_viewed`) junto a los campos nuevos de H1. |
+| `apps/admin/src/App.tsx` | La ruta `/superadmin/terminales` de A5 y el `<CajaGate>` de H1 conviven. **Terminales NO se envuelve en `CajaGate`, y es lo correcto**: es pantalla de super-admin, no cuelga de la caja de ningún tenant. |
+| `apps/tpv-web/src/App.tsx` | H1 mete un `return` temprano nuevo (`cajaDisabled`). El `useEffect` del canal de soporte de A5 queda en la línea 207, **antes** del primer `return` (línea 339), así que el orden de hooks aguanta. |
+| `infra/test/bundle-android.test.ts` | Ver abajo: las dos ramas arreglaron el mismo fallo. |
+
+**El caso curioso del test de bundle.** A5 lo arregló en `d8b35d8` y `master` lo arregló
+por su cuenta en el frente B de reservas-5 — el **mismo** fallo (el `vite build` hijo
+heredaba `NODE_ENV=test` de vitest y sacaba React en modo desarrollo, 2,11 MB contra 1,59,
+por encima del tope de precaché de workbox). A5 **borra** la variable del entorno del
+hijo; `master` la **fija** a `production` dentro de `correr()`. **Se conservan las dos**:
+no se contradicen y manda la de `master`, que es la que se pone al final. Lo único que se
+tocó es el comentario de A5, que a partir del merge habría mentido —decía que el build
+sale «sin `NODE_ENV`», y ya no—; ahora explica las dos capas. De paso, `master` traía un
+test nuevo que hacía falta: que el `sw.js` precachee de verdad el JS principal, no que
+contenga la palabra «precache».
+
+### 10.3 · El blindaje del origen del WebView, después del merge
+
+Sigue en pie, y **no hay divergencia que reconciliar**: `master` no ha tocado
+`apps/tpv-android/scripts/` ni `capacitor.config.ts` desde la base común (`git diff
+7ce5194 master` sobre esas rutas sale vacío). Así que el script de A5 sustituye al de
+`master` sin pelearse con nadie, y **los dos criterios mandan juntos**, porque están en
+pasos distintos del mismo script:
+
+- **Producción embebida** (hallazgo A2, paso 2/6): el build falla si `VITE_API_URL` no
+  aparece en `dist/assets/*.js`. Intacto, viene de antes.
+- **Origen no-localhost** (R5, pasos previo y 4/6): `verificar-origen.mjs` sobre la fuente
+  `.ts` **antes** de compilar y sobre el `capacitor.config.json` que deja `cap sync`
+  **después**. Sustituye a la guarda vieja, que sólo miraba `hostname` y se apagaba
+  exportando `VITE_TPV_URL`.
+
+**El dato que importa para la 1.17.0 ya publicada:** esa APK salió de `3e254b8`, cuyo
+`capacitor.config.ts` declara `androidScheme: "https"`, `hostname: "mipiacetpv.com"` y
+`allowMixedContent: false` — el origen **correcto**. Lo que le faltaba era la guarda
+fuerte, no el valor. Comparados línea a línea, **el origen del árbol fusionado es idéntico
+al de la 1.17.0**, así que la siguiente APK cae en el **mismo** origen y **ningún terminal
+actualizado pierde su `localStorage`**. El merge endurece el guardián; no mueve el origen.
+
+### 10.4 · La tabla de sabotaje, revalidada sobre el código fusionado
+
+Cada garantía del done, rota a mano **sobre el árbol ya fusionado**, y revertida después.
+Los cuatro tests se comprobaron **verdes con el árbol intacto antes de romper nada**
+(60 tests en los cuatro ficheros) y **verdes otra vez al revertir** (los mismos 60).
+Mensajes copiados de la salida real de `vitest`.
+
+| Garantía | Línea que rompo | Test que se pone rojo | Mensaje real |
+|---|---|---|---|
+| **Lista blanca de comandos** | `apps/api/src/devices/commands.ts` · `if (!esComandoConocido(accion))` → `if (false && …)` | `device-commands` › *un comando fuera de la lista se rechaza Y queda auditado* **y** *no hay comando genérico: 'eval' tampoco cuela* | `expected 500 to be 400` · `expected [ 400, 404 ] to include 500` |
+| **Caducidad de las capturas** | `apps/api/src/devices/screenshots.ts` · `if (expiresAt.getTime() <= now.getTime()) return null;` → `if (false && …)` | `device-commands` › *una captura CADUCADA no se sirve aunque el fichero siga en disco* | `expected 200 to be 404` |
+| **El canal NO desvincula** | `apps/tpv-web/src/lib/supportChannel/index.ts` · en el `close` por `CLOSE_REVOKED`, llamar a `clearAllDeviceState()` | `support-channel-no-desvincula` › *un cierre por REVOCADO (4403) tampoco desvincula* **y** *red estructural › index.ts no puede desvincular* | `ni un 4403 puede borrar el token: expected false to be true` · `index.ts menciona clearAllDeviceState: el canal de soporte no puede desvincular un terminal: expected true to be false` |
+| **Origen del WebView** | `apps/tpv-android/capacitor.config.ts` · los tres valores del incidente (`http` / `a5-lab.mipiacetpv.com` / `allowMixedContent: true`) | `origen-del-webview` › *capacitor.config.ts declara exactamente esos valores* **y** *el comentario del fichero no cuenta como configuración* | `capacitor.config.ts no tiene el origen de producción: una APK con esto deja los terminales DESVINCULADOS (incidente del 2026-09-04)` |
+
+Del último, además, lo que de verdad para un APK: `verificar-origen.mjs --ts` sobre la
+config saboteada **sale con código 1** y escupe los tres valores malos uno a uno. Con el
+árbol intacto: `OK · origen del WebView correcto en la fuente (R5)`, código 0.
+
+Las dos redes de R1 siguen cayendo juntas: la de **comportamiento** (el token desapareció)
+y la **estructural** (el fichero no puede ni mencionar `clearAllDeviceState`). La
+estructural es la que sobrevive a un refactor.
+
+### 10.5 · Qué cambió respecto a lo que decía el done
+
+- **La suite es otra.** §2 decía `181 ficheros · 1650 tests · 3 skipped`. Ahora, desde la
+  raíz y con `pnpm db:generate` antes: **216 ficheros · 2247 verdes · 3 saltados · 0
+  fallos**. Los **3 saltados** son los mismos de siempre y **no son de A5**: el
+  `describe.skip("super-admin · crear tenant (legacy flow B-SuperAdmin)")` de
+  `apps/api/test/super-admin.test.ts:566`, tres tests que B-OnboardingV2 apagó en `master`
+  al mover su cobertura a `onboarding-v2.test.ts`.
+- **Los e2e ya no son «aparte».** §3 decía que ningún test de A5 corre contra un Postgres
+  real. Sigue siendo cierto de los tests **de A5**, pero ahora la suite e2e de `master`
+  (10 ficheros, **120 verdes**) **aplica las dos migraciones de A5** sobre base limpia en
+  cada ejecución, así que el SQL del bloque sí pasa por un Postgres de verdad. Corridos
+  como los corre el CI (`E2E_DATABASE_URL`, `TZ=UTC`, `CI=true`) contra una base propia,
+  `mipiacetpv_a5_e2e`, **borrada al terminar** — hay otra sesión corriendo suites en
+  paralelo y esta suite hace `DROP SCHEMA`.
+- **Ningún test del reloj separa el CI de local.** Se corrieron los e2e **dos veces**, con
+  `TZ=UTC` (como el CI) y con la TZ de la máquina (`CEST`, `+0200`): 120 verdes las dos
+  veces. No hizo falta investigar de dónde venía ningún fallo, porque no hubo ninguno.
+- **Novedad de comportamiento, por H1: en una empresa SIN caja el canal de soporte no se
+  abre.** El efecto de A5 exige `state.kind === "paired"`, y un terminal de un tenant sin
+  el módulo de caja aterriza en `cajaDisabled`. Consecuencia: **ese terminal no aparece en
+  la pantalla Terminales**. Hoy es defendible —sin caja no hay TPV que atender— pero
+  **nadie lo decidió**: sale del cruce de dos bloques. Queda anotado en §10.6.
+
+### 10.6 · Qué queda pendiente
+
+1. **Las preguntas 2 y 3 del frente 5 siguen sin respuesta.** Tailscale no está instalado
+   ni en el AP11 ni en el Mac; son credenciales y las teclea Matías. §4 bis sin cambios.
+2. **El TPV no arranca solo tras un reinicio** (hallazgo de §4 bis). El merge no lo toca.
+   Sigue apuntando a la duda 1 de §8, Device Owner.
+3. **Decidir si un terminal de una empresa sin caja debe salir en Terminales.** Ver §10.5.
+   Si la respuesta es que sí, el arreglo es del lado del TPV: abrir el canal también en
+   `cajaDisabled`. No se ha tocado nada por no decidirlo por mi cuenta.
+4. **Las cuatro dudas de §8 siguen abiertas**, y la retención de capturas (duda 2) es
+   ahora más urgente: con el bloque a punto de entrar, el número deja de ser hipotético.
+5. **La deuda legal de §6** —el contrato de encargado de tratamiento que ampare mirar
+   pantallas con datos de clientes— **sigue sin resolver**. El merge no la mueve.
+6. **Repetir la comprobación de las migraciones si `master` se mueve otra vez** antes de
+   desplegar. Ver el segundo aviso de §10.1.
