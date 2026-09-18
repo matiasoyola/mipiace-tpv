@@ -26,6 +26,7 @@ import { loadShiftBreakdownSums } from "./breakdown-sums.js";
 import { shiftCrossedDayCut } from "./day-cut.js";
 import { computeZBreakdown } from "./z-breakdown.js";
 import { generateZReportPdf } from "./z-report.js";
+import { archiveZReport } from "./z-seal.js";
 import { cashierLabelFrom } from "../users/display.js";
 
 export interface DayCutOutcome {
@@ -228,6 +229,39 @@ async function closeShiftAtDayCut(args: {
       where: { id: shift.id },
       data: { zReportPdfPath: zPath },
     });
+  }
+
+  // S1-sello · el Z del corte de día se congela igual que el del cierre
+  // manual, y por la misma razón: nadie lo miró al generarse (lo cierra
+  // un job a las cinco de la mañana), así que es todavía más importante
+  // que el número quede en base de datos y no sólo en un PDF. Se archiva
+  // AUNQUE el PDF haya fallado — el desglose es el dato.
+  //
+  // Capturado por lo mismo que el PDF de arriba: el cierre ya está
+  // escrito (la reclamación del `updateMany`), así que dejar salir la
+  // excepción aquí abortaría la pasada y dejaría sin cerrar los turnos
+  // que vienen detrás, por un turno que en realidad SÍ se cerró.
+  try {
+    await archiveZReport(prisma, {
+      shiftId: shift.id,
+      reason: "CLOSE",
+      pdfPath: zPath,
+      frozen: {
+        cashOpening,
+        // Nadie contó: el corte de día no tiene a nadie delante. `null` y
+        // no un cero, que afirmaría un arqueo que no existió.
+        cashCounted: null,
+        cashTheoretical: breakdown.cashTheoretical,
+        ticketsCount,
+        refundsCount,
+        breakdown,
+      },
+    });
+  } catch (err) {
+    log.error(
+      { err, event: "shift.day_cut.z_archive_failed", shiftId: shift.id },
+      "corte de día: no se pudo congelar el Z; el turno queda cerrado igual",
+    );
   }
 
   const outcome: DayCutOutcome = {

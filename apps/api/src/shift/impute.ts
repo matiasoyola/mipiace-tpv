@@ -27,6 +27,7 @@
 // automatismo que sorprendiera a nadie, y el 409 histórico se mantiene.
 
 import type { getPrisma } from "../context.js";
+import { archiveCorrectiveZReport } from "./z-seal.js";
 
 // addendum 2 (review 2026-08-26) · tolerancia de reloj hacia adelante.
 //
@@ -89,6 +90,16 @@ export function pickShiftForOccurrence(
   return best;
 }
 
+/**
+ * B-reservas-5 Frente T · lo único que esta resolución necesita del
+ * cliente es leer `shifts`. Tipado así, vale igual el `PrismaClient` de
+ * siempre que el cliente de una transacción interactiva (`tx`), que es
+ * donde la llama el cobro de un borrador: resolver el turno FUERA de la
+ * tx y escribirlo dentro abre una ventana en la que el turno puede
+ * cerrarse entre una cosa y la otra.
+ */
+export type ShiftReaderClient = Pick<ReturnType<typeof getPrisma>, "shift">;
+
 export type ShiftResolution =
   | {
       ok: true;
@@ -110,7 +121,7 @@ export type ShiftResolution =
  * abajo sólo se ejecuta cuando el turno pedido ya está cerrado.
  */
 export async function resolveShiftForSale(args: {
-  prisma: ReturnType<typeof getPrisma>;
+  prisma: ShiftReaderClient;
   registerId: string;
   requestedShiftId: string;
   occurredAt?: Date | null;
@@ -169,8 +180,19 @@ export async function resolveShiftForSale(args: {
   return { ok: true, shiftId: requested.id, imputed: false, stale: true };
 }
 
-/** Marca el Z del turno como desfasado. Best-effort: si esto falla, la
- *  venta ya está registrada y eso es lo que importa. */
+/**
+ * Una venta ha entrado en un turno cuyo Z ya estaba archivado.
+ *
+ * S1-sello · antes esto sólo levantaba un boolean y dejaba el cierre en
+ * un limbo: "el PDF que tienes puede estar caducado, apáñate". Ahora
+ * emite un **Z correctivo** con el desglose recalculado y marca el
+ * anterior como corregido, conservándolo. Por eso `zReportStale` cambia
+ * de significado: pasa a ser "existe un Z posterior que corrige a este".
+ *
+ * Best-effort, igual que antes: si esto falla, la venta ya está
+ * registrada y eso es lo que importa. Lo que NO se hace es regenerar el
+ * PDF — el documento emitido es el del cierre y no se reescribe.
+ */
 export async function markZReportStale(
   prisma: ReturnType<typeof getPrisma>,
   shiftId: string,
@@ -179,4 +201,5 @@ export async function markZReportStale(
     where: { id: shiftId, zReportStale: false, closedAt: { not: null } },
     data: { zReportStale: true },
   });
+  await archiveCorrectiveZReport(prisma, shiftId);
 }

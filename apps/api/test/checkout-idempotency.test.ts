@@ -127,6 +127,12 @@ const fakePrisma: Record<string, unknown> = {
       }
       return materialize(t, include ?? select);
     }),
+    // S1-sello · el sello relee el ticket dentro de la tx del checkout.
+    findUniqueOrThrow: vi.fn(async ({ where, include, select }: any) => {
+      const t = state.tickets.get(where.id);
+      if (!t) throw new Error("ticket not found");
+      return materialize(t, include ?? select);
+    }),
     update: vi.fn(async ({ where, data, include, select }: any) => {
       const t = state.tickets.get(where.id);
       if (!t) throw new Error("ticket not found");
@@ -150,6 +156,16 @@ const fakePrisma: Record<string, unknown> = {
     })),
   },
   shift: {
+    // B-reservas-5 Frente T · el cobro de un borrador resuelve a qué
+    // turno va la venta (`resolveShiftForSale`) antes de sellarla. Aquí
+    // el turno está abierto: la resolución devuelve el mismo y no hace
+    // ninguna consulta más.
+    findFirst: vi.fn(async () => ({
+      id: SHIFT,
+      openedAt: new Date(Date.now() - 3_600_000),
+      closedAt: null,
+      closeReason: "MANUAL" as const,
+    })),
     update: vi.fn(async () => ({})),
   },
   user: {

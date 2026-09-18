@@ -105,7 +105,6 @@ import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
 import type { MapNotice } from "./TableMapScreen.js";
 import { DebtsScreen } from "./DebtsScreen.js";
 import { ClientsPage } from "./ClientsPage.js";
-import { AgendaPage } from "./AgendaPage.js";
 import { useClientPicker } from "../hooks/useClientPicker.js";
 import { clientFullName } from "../lib/clients.js";
 import { useElapsedTime } from "../hooks/useElapsedTime.js";
@@ -293,7 +292,33 @@ export interface TableContext {
   activeTicketId: string | null;
 }
 
+// B-reservas-5 F3 · el otro borrador que se puede estar cobrando.
+//
+// Una mesa y una cita comparten lo único que le importa al carrito: hay
+// un ticket DRAFT en el servidor y el carrito es su proyección. Lo que
+// NO comparten (mapa de sala, comensales, comanda a cocina) sigue
+// colgando de `tableContext`, y lo propio de la cita, de aquí.
+export interface AppointmentContext {
+  appointmentId: string;
+  activeTicketId: string;
+  // Para el encabezado y el aviso de vuelta a la agenda.
+  clientName: string | null;
+  serviceLabel: string;
+}
+
 export interface SalePageProps {
+  // B-reservas-5 F3 · cobro de una cita: el carrito es la proyección del
+  // DRAFT que abrió el puente cita→caja. Excluyente con `tableContext`.
+  appointmentContext?: AppointmentContext | null;
+  // Vuelta a la agenda tras cerrar el cobro de una cita.
+  onBackToAgenda?: () => void;
+  // B-reservas-5 F4 · la cita acaba de cobrarse. Quien manda en la
+  // agenda (`App`) es quien la marca COMPLETED.
+  onAppointmentPaid?: (appointmentId: string) => void;
+  // B-reservas-5 F1 · la agenda subió a `App` (vista hermana del mapa de
+  // sala). Esta pantalla conserva el gate `agendaEnabled` del botón y
+  // sólo avisa hacia arriba; quien la pinta es `App`.
+  onOpenAgenda?: () => void;
   shiftId: string;
   // v1.7-alias-cajeros: label de display (alias con fallback a email),
   // calculado en App con cashierDisplayLabel.
@@ -311,7 +336,7 @@ export interface SalePageProps {
   // montar esta pantalla). En contexto mesa la verdad son los
   // endpoints; el carrito local de sessionStorage queda SOLO para la
   // venta rápida.
-  initialTableLines?: CartLine[];
+  initialDraftLines?: CartLine[];
   // Sólo provisto cuando la tienda tiene mesas configuradas — permite
   // al cajero volver al mapa con un toque. Null en modo retail puro.
   onBackToMap?: (() => void) | null;
@@ -352,8 +377,10 @@ export function SalePage(props: SalePageProps) {
   const crmEnabled = getCachedCrmEnabled();
   const [showClients, setShowClients] = useState(false);
   // B-reservas-4 · Agenda (motor de reservas). Sólo con `agendaEnabled`.
+  // B-reservas-5 F1: la agenda ya no vive aquí — la pinta `App`, como el
+  // mapa de sala. Esta pantalla sólo conserva el gate del botón y avisa
+  // hacia arriba.
   const agendaEnabled = getCachedAgendaEnabled();
-  const [showAgenda, setShowAgenda] = useState(false);
   const clientPicker = useClientPicker();
   // Aviso transitorio cuando el cliente elegido por F1 aún no tiene
   // contacto fiscal de Holded (el enlace lo hace el cobro).
@@ -441,7 +468,10 @@ export function SalePage(props: SalePageProps) {
   // (Ticket.lastSentRevision), pero como SalePage no recarga el
   // ticket DRAFT entre interacciones, este state es el que decide
   // si el botón rotula "Enviar" o "Reenviar".
-  const activeTicketId = props.tableContext?.activeTicketId ?? null;
+  const activeTicketId =
+    props.tableContext?.activeTicketId ??
+    props.appointmentContext?.activeTicketId ??
+    null;
   useEffect(() => {
     setKitchenRevision(0);
     setKitchenToast(null);
@@ -456,14 +486,23 @@ export function SalePage(props: SalePageProps) {
   // revierte y se muestra un toast. El respaldo de sessionStorage
   // queda SOLO para la venta rápida (decisión del bloque: retomar una
   // mesa SIEMPRE carga el DRAFT del servidor, nunca un carrito local).
+  // B-reservas-5 F3 · dos preguntas distintas que hasta ahora eran una.
+  //   isDraftMode  — el carrito es la proyección de un DRAFT del servidor
+  //                  (mesa O cita): manda las mutaciones por la API, no
+  //                  guarda carrito local, no ofrece "Nueva venta".
+  //   isTableMode  — además es una MESA: mapa de sala, comensales,
+  //                  comanda a cocina, mover línea a otra mesa.
   const isTableMode = props.tableContext != null;
+  const appointmentContext = props.appointmentContext ?? null;
+  const isDraftMode = isTableMode || appointmentContext != null;
   const tableContext = props.tableContext ?? null;
   const [quickLines, setQuickLines] = usePersistedCartLines("quick-sale");
-  const [tableLines, setTableLines] = useState<CartLine[]>(
-    props.initialTableLines ?? [],
+  const [draftLines, setDraftLines] = useState<CartLine[]>(
+    props.initialDraftLines ?? [],
   );
-  const lines = isTableMode ? tableLines : quickLines;
-  const setLines = isTableMode ? setTableLines : setQuickLines;
+  const lines = isDraftMode ? draftLines : quickLines;
+  const setLines = isDraftMode ? setDraftLines : setQuickLines;
+
 
   // v1.14-la-comanda-se-ve · el núcleo del bloque (hallazgo C1).
   //
@@ -531,13 +570,13 @@ export function SalePage(props: SalePageProps) {
   // Recarga la proyección local desde el servidor (GET /tickets/:id).
   // Se usa tras agrupar/desagrupar/mover líneas, donde la respuesta del
   // endpoint no incluye el ticket completo.
-  async function reloadTableDraft(): Promise<void> {
+  async function reloadDraft(): Promise<void> {
     if (!activeTicketId) return;
     const { apiWithCashier } = await import("../api.js");
     const res = await apiWithCashier<{ ticket: ServerDraft }>(
       `/tickets/${activeTicketId}`,
     );
-    setTableLines(mapServerDraftLines(res.ticket.lines));
+    setDraftLines(mapServerDraftLines(res.ticket.lines));
   }
 
   // Crea la línea en el DRAFT de la mesa. El id local de la CartLine
@@ -574,10 +613,10 @@ export function SalePage(props: SalePageProps) {
           },
         },
       );
-      setTableLines(mapServerDraftLines(res.ticket.lines));
+      setDraftLines(mapServerDraftLines(res.ticket.lines));
     } catch (err) {
       // Revertir la línea optimista.
-      setTableLines((curr) => curr.filter((l) => l.id !== line.id));
+      setDraftLines((curr) => curr.filter((l) => l.id !== line.id));
       // v1.9.2-mesas-concurrencia · Frente 2: si el DRAFT ya no está
       // vivo (cobrado, anulado o absorbido por un grupo desde otra
       // caja), no es un error puntual: la mesa murió. Banner persistente
@@ -608,9 +647,9 @@ export function SalePage(props: SalePageProps) {
         `/tickets/${activeTicketId}/lines/${lineId}`,
         { method: "PATCH", body: patch },
       );
-      setTableLines(mapServerDraftLines(res.ticket.lines));
+      setDraftLines(mapServerDraftLines(res.ticket.lines));
     } catch (err) {
-      setTableLines((curr) =>
+      setDraftLines((curr) =>
         curr.map((l) => (l.id === lineId ? before : l)),
       );
       setTableError(tableErrorMessage(err));
@@ -625,10 +664,10 @@ export function SalePage(props: SalePageProps) {
         `/tickets/${activeTicketId}/lines/${line.id}`,
         { method: "DELETE" },
       );
-      setTableLines(mapServerDraftLines(res.ticket.lines));
+      setDraftLines(mapServerDraftLines(res.ticket.lines));
     } catch (err) {
       // Reinsertar la línea borrada optimistamente.
-      setTableLines((curr) =>
+      setDraftLines((curr) =>
         curr.some((l) => l.id === line.id) ? curr : [...curr, line],
       );
       setTableError(tableErrorMessage(err));
@@ -644,7 +683,7 @@ export function SalePage(props: SalePageProps) {
         `/tickets/${activeTicketId}?reason=${encodeURIComponent("Vaciada desde el TPV")}`,
         { method: "DELETE" },
       );
-      setTableLines([]);
+      setDraftLines([]);
       setContact(null);
       setNotes("");
       props.onBackToMap?.();
@@ -664,7 +703,7 @@ export function SalePage(props: SalePageProps) {
       });
       setShowGroupPicker(false);
       setHasGroupedTables(true);
-      await reloadTableDraft();
+      await reloadDraft();
     } catch (err) {
       // 409 TABLE_ALREADY_GROUPED llega con mensaje en español.
       setTableError(tableErrorMessage(err));
@@ -681,7 +720,7 @@ export function SalePage(props: SalePageProps) {
         method: "POST",
       });
       setHasGroupedTables(false);
-      await reloadTableDraft();
+      await reloadDraft();
     } catch (err) {
       setTableError(tableErrorMessage(err));
     }
@@ -700,7 +739,7 @@ export function SalePage(props: SalePageProps) {
       });
       setMoveLineTarget(null);
       setOpenSheet(null);
-      await reloadTableDraft();
+      await reloadDraft();
     } catch (err) {
       setTableError(tableErrorMessage(err));
     }
@@ -999,7 +1038,7 @@ export function SalePage(props: SalePageProps) {
         ev.type === "table.lineUpdated") &&
       ev.tableId === tableContext.id
     ) {
-      void reloadTableDraft();
+      void reloadDraft();
       return;
     }
     if (
@@ -1007,7 +1046,7 @@ export function SalePage(props: SalePageProps) {
       (ev.sourceTableId === tableContext.id ||
         ev.destinationTableId === tableContext.id)
     ) {
-      void reloadTableDraft();
+      void reloadDraft();
       return;
     }
   });
@@ -1020,10 +1059,10 @@ export function SalePage(props: SalePageProps) {
     if (
       prevWsStatus.current !== "open" &&
       wsStatus === "open" &&
-      isTableMode &&
+      isDraftMode &&
       activeTicketId
     ) {
-      void reloadTableDraft();
+      void reloadDraft();
     }
     prevWsStatus.current = wsStatus;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1147,13 +1186,13 @@ export function SalePage(props: SalePageProps) {
   ): void {
     const units = options.units ?? 1;
     const sels = options.modifierSelections ?? [];
-    if (isTableMode) {
-      // Mesa: misma semántica de agrupado que el carrito local, pero
+    if (isDraftMode) {
+      // DRAFT: misma semántica de agrupado que el carrito local, pero
       // contra la API. Línea previa del mismo producto sin modifiers →
       // PATCH units; si no, POST con lineExternalId (optimista).
       const existing =
         sels.length === 0
-          ? tableLines.find(
+          ? draftLines.find(
               (l) =>
                 l.productId === p.id &&
                 l.modifiers.length === 0 &&
@@ -1162,7 +1201,7 @@ export function SalePage(props: SalePageProps) {
           : null;
       if (existing) {
         const nextUnits = existing.units + units;
-        setTableLines((curr) =>
+        setDraftLines((curr) =>
           curr.map((l) =>
             l.id === existing.id ? { ...l, units: nextUnits } : l,
           ),
@@ -1187,7 +1226,7 @@ export function SalePage(props: SalePageProps) {
         modifiers: [],
         modifierSelections: sels.length > 0 ? sels : undefined,
       };
-      setTableLines((curr) => [...curr, newLine]);
+      setDraftLines((curr) => [...curr, newLine]);
       touchLine(newLine.id);
       void tableCreateLine(newLine);
       return;
@@ -1277,12 +1316,12 @@ export function SalePage(props: SalePageProps) {
     };
     setLines((curr) => [...curr, newLine]);
     touchLine(newLine.id);
-    if (isTableMode) void tableCreateLine(newLine);
+    if (isDraftMode) void tableCreateLine(newLine);
   }
 
   function updateLine(id: string, patch: Partial<CartLine>): void {
-    if (isTableMode) {
-      const before = tableLines.find((l) => l.id === id);
+    if (isDraftMode) {
+      const before = draftLines.find((l) => l.id === id);
       if (!before) return;
       // El PATCH de líneas de mesa sólo admite units / discountPct /
       // modifiers ad-hoc (el override de precio no existe server-side;
@@ -1296,7 +1335,7 @@ export function SalePage(props: SalePageProps) {
       if (patch.discountPct !== undefined) apiPatch.discountPct = patch.discountPct;
       if (patch.modifiers !== undefined) apiPatch.modifiers = patch.modifiers;
       if (Object.keys(apiPatch).length === 0) return;
-      setTableLines((curr) =>
+      setDraftLines((curr) =>
         curr.map((l) => (l.id === id ? { ...l, ...apiPatch } : l)),
       );
       void tablePatchLine(id, apiPatch, before);
@@ -1312,11 +1351,11 @@ export function SalePage(props: SalePageProps) {
   // toque y deja 4 s de deshacer visibles en pantalla. Un target de
   // 44 px no debería exigir puntería cronometrada.
   function removeLine(id: string): void {
-    if (isTableMode) {
-      const index = tableLines.findIndex((l) => l.id === id);
-      const line = tableLines[index];
+    if (isDraftMode) {
+      const index = draftLines.findIndex((l) => l.id === id);
+      const line = draftLines[index];
       if (!line) return;
-      setTableLines((curr) => curr.filter((l) => l.id !== id));
+      setDraftLines((curr) => curr.filter((l) => l.id !== id));
       void tableDeleteLine(line);
       armUndoRemove(line, index);
       return;
@@ -1349,13 +1388,13 @@ export function SalePage(props: SalePageProps) {
     const pending = undoRemove;
     if (!pending) return;
     dismissUndoRemove();
-    if (isTableMode) {
+    if (isDraftMode) {
       // El DELETE ya viajó al servidor, así que deshacer es un alta
       // nueva. Va con id nuevo: el `lineExternalId` viejo ya lo gastó
       // la línea borrada y reutilizarlo sería pedirle al backend que
       // resucite algo que él considera cerrado.
       const revived: CartLine = { ...pending.line, id: newId() };
-      setTableLines((curr) => [...curr, revived]);
+      setDraftLines((curr) => [...curr, revived]);
       void tableCreateLine(revived);
       return;
     }
@@ -1368,11 +1407,11 @@ export function SalePage(props: SalePageProps) {
 
   function applyGlobalDiscount(pct: number): void {
     const clamped = Math.min(100, Math.max(0, pct));
-    if (isTableMode) {
+    if (isDraftMode) {
       // Un PATCH por línea, en secuencia; si algo falla a mitad, la
       // recarga del draft deja la proyección consistente con la BD.
-      const targets = [...tableLines];
-      setTableLines((curr) =>
+      const targets = [...draftLines];
+      setDraftLines((curr) =>
         curr.map((l) => ({ ...l, discountPct: clamped })),
       );
       void (async () => {
@@ -1385,10 +1424,10 @@ export function SalePage(props: SalePageProps) {
               { method: "PATCH", body: { discountPct: clamped } },
             );
           }
-          if (last) setTableLines(mapServerDraftLines(last.ticket.lines));
+          if (last) setDraftLines(mapServerDraftLines(last.ticket.lines));
         } catch (err) {
           setTableError(tableErrorMessage(err));
-          void reloadTableDraft().catch(() => {});
+          void reloadDraft().catch(() => {});
         }
       })();
       return;
@@ -1830,7 +1869,7 @@ export function SalePage(props: SalePageProps) {
               {/* B-reservas-4 · Agenda. Sólo con la capability activa. */}
               {agendaEnabled && (
                 <button
-                  onClick={() => setShowAgenda(true)}
+                  onClick={() => props.onOpenAgenda?.()}
                   title="Agenda"
                   className="h-12 md:h-14 px-3 md:px-5 rounded-2xl bg-mipiace-stone hover:bg-slate-100 flex items-center gap-2 text-[13.5px] md:text-[14px] font-medium text-mipiace-ink"
                 >
@@ -1842,7 +1881,7 @@ export function SalePage(props: SalePageProps) {
                   suspendidos (la mesa abierta YA es la venta en pausa)
                   ni "Nueva venta" (vaciaría la proyección de un DRAFT
                   que vive en el servidor). */}
-              {!isTableMode && (
+              {!isDraftMode && (
                 <button
                   onClick={() => setOpenSheet({ kind: "suspended" })}
                   title={businessType === "SERVICES" ? "Servicios pendientes" : "Ventas pendientes"}
@@ -1852,7 +1891,7 @@ export function SalePage(props: SalePageProps) {
                   <span className="hidden sm:inline">Pendientes ({getSuspendedCarts().length})</span>
                 </button>
               )}
-              {!isTableMode && (
+              {!isDraftMode && (
                 <button
                   onClick={clearCart}
                   title={businessType === "SERVICES" ? "Nuevo servicio" : "Nueva venta"}
@@ -1878,6 +1917,7 @@ export function SalePage(props: SalePageProps) {
             cashierRole={props.cashierRole}
             shiftTicketsCount={shiftTicketsCount}
             tableContext={props.tableContext ?? null}
+            appointmentContext={appointmentContext}
             lastTouchedLine={lastTouchedLine}
             topSellers={topSellers}
             topSellersSource={topSellersRanking?.source ?? null}
@@ -1896,6 +1936,16 @@ export function SalePage(props: SalePageProps) {
                 // Vaciar la mesa: DRAFT → VOIDED en el servidor y las
                 // demás cajas la ven libre (table.cleared).
                 setConfirmAction("voidTable");
+                return;
+              }
+              // B-reservas-5 F3 · en contexto CITA no se destruye nada.
+              // `clearCart()` sólo vaciaría la proyección local y dejaría
+              // el DRAFT del servidor vivo y desincronizado; y anular el
+              // DRAFT dejaría la cita enlazada a un ticket muerto. Salir
+              // a la agenda es lo honesto: el borrador se queda como
+              // está y "Cobrar en caja" devuelve el mismo.
+              if (appointmentContext) {
+                props.onBackToAgenda?.();
                 return;
               }
               // Sin líneas no hay nada que destruir: no se pregunta.
@@ -2004,7 +2054,7 @@ export function SalePage(props: SalePageProps) {
             removeLine(openSheet.line.id);
             setOpenSheet(null);
           }}
-          allowPriceOverride={!isTableMode}
+          allowPriceOverride={!isDraftMode}
           onMoveToTable={
             isTableMode
               ? () => setMoveLineTarget(openSheet.line)
@@ -2078,31 +2128,51 @@ export function SalePage(props: SalePageProps) {
           // (el DRAFT ya tiene las líneas server-side). tableId viaja al
           // outbox para bloquear la mesa local si el cobro queda en
           // tránsito sin red.
-          tableTicketId={isTableMode ? activeTicketId : null}
+          draftTicketId={isDraftMode ? activeTicketId : null}
+          draftLabel={
+            isTableMode ? "Mesa" : appointmentContext ? "Cita" : undefined
+          }
+          doneLabel={appointmentContext ? "Volver a la agenda" : undefined}
+          onPaid={
+            appointmentContext
+              ? () => props.onAppointmentPaid?.(appointmentContext.appointmentId)
+              : undefined
+          }
+          creditUnavailableReason={
+            appointmentContext
+              ? "Las citas todavía no se pueden fiar: se cobran ahora o se dejan sin cobrar en la agenda."
+              : undefined
+          }
           tableId={isTableMode ? tableContext?.id : null}
           creditSalesEnabled={creditSalesEnabled}
           // v1.9.2-mesas-concurrencia · Frente 2: si el server rechaza el
           // cobro con PAYMENTS_MISMATCH (otra caja cambió la cuenta), el
           // modal refetchea la proyección y recalcula el total in situ.
-          onRefetchTable={isTableMode ? reloadTableDraft : undefined}
+          onRefetchDraft={isDraftMode ? reloadDraft : undefined}
           // 409 TICKET_ALREADY_PAID: doble cobro físico. Cerrar modal y
           // salir al mapa con banner — nunca dejarlo mudo.
-          onTableClosedElsewhere={
+          onDraftClosedElsewhere={
             isTableMode
               ? (text) => exitToMap({ text, tone: "info" })
-              : undefined
+              : appointmentContext
+                ? () => props.onBackToAgenda?.()
+                : undefined
           }
           // Frente 3.1: tras cobrar la mesa, cerrar directo al mapa con
           // banner de confirmación (sustituye al modal "Ticket emitido"
           // sólo en contexto mesa). "Ver ticket" abre el detalle.
-          onTablePaidExit={
+          onDraftPaidExit={
             isTableMode
-              ? ({ notice, ticketQuery }) => {
-                  setTableLines([]);
+              ? ({ internalNumber, ticketQuery }) => {
+                  setDraftLines([]);
                   setContact(null);
                   setNotes("");
+                  // B-reservas-5 F2 · el aviso lo redacta quien sabe qué
+                  // se cobró. Aquí siempre es una mesa.
                   exitToMap({
-                    text: notice,
+                    text: internalNumber
+                      ? `Mesa cobrada · Ticket ${internalNumber}`
+                      : "Mesa cobrada",
                     tone: "success",
                     ticketQuery,
                   });
@@ -2116,14 +2186,17 @@ export function SalePage(props: SalePageProps) {
           onRequestAssignContact={() => setOpenSheet({ kind: "contact" })}
           onClose={() => setOpenSheet(null)}
           onConfirmed={() => {
-            if (isTableMode) {
-              // La mesa quedó cobrada (o el cobro en tránsito en el
-              // outbox): proyección local fuera y vuelta al mapa.
-              setTableLines([]);
+            if (isDraftMode) {
+              // El borrador quedó cobrado (o el cobro en tránsito en el
+              // outbox): proyección local fuera y salida al sitio del
+              // que se vino. En cita esto ocurre al cerrarse "Ticket
+              // emitido", no antes: la vuelta de v1.15 se ve.
+              setDraftLines([]);
               setContact(null);
               setNotes("");
               setOpenSheet(null);
-              props.onBackToMap?.();
+              if (appointmentContext) props.onBackToAgenda?.();
+              else props.onBackToMap?.();
               return;
             }
             clearCart();
@@ -2185,17 +2258,6 @@ export function SalePage(props: SalePageProps) {
       )}
       {/* B-reservas-1 · sección Clientes (CRM) + picker rápido F1. */}
       {showClients && <ClientsPage onClose={() => setShowClients(false)} />}
-      {/* B-reservas-4 · Agenda. "Cobrar en caja" carga las líneas del ticket
-          pre-poblado en el carrito y cierra la agenda: el cobro sigue por el
-          camino existente sin re-teclear (no se toca ADR-010). */}
-      {showAgenda && (
-        <AgendaPage
-          onClose={() => setShowAgenda(false)}
-          onCheckoutLines={(agendaLines) => {
-            setLines((curr) => [...curr, ...agendaLines]);
-          }}
-        />
-      )}
       {clientPicker.element}
       {/* v1.10.3-barra · hallazgo #2: deshacer de 4 s tras borrar una
           línea. z-[55] lo pone por encima del bottom-sheet del ticket
@@ -2687,6 +2749,7 @@ function Banner({ color, children }: { color: "amber" | "red"; children: React.R
 }
 
 function SaleWorkspace({
+  appointmentContext,
   products,
   searchQuery,
   catalogError,
@@ -2737,6 +2800,8 @@ function SaleWorkspace({
   // DRAFT, no VOIDED). null si aún no se ha resuelto el primer fetch.
   shiftTicketsCount: number | null;
   tableContext: TableContext | null;
+  // B-reservas-5 F3 · sólo para el copy de las acciones destructivas.
+  appointmentContext: AppointmentContext | null;
   // v1.14 · señal de "esta línea acaba de tocarse", para el destaque y
   // el scroll del panel del ticket. El "Mapa" ya no baja hasta aquí: se
   // ha ido a la barra superior (hallazgo M4).
@@ -2963,6 +3028,7 @@ function SaleWorkspace({
     totals,
     shiftTicketsCount,
     tableContext,
+    appointmentContext,
     lastTouchedLine,
     topSellers,
     topSellersSource,
@@ -3288,8 +3354,16 @@ function SaleWorkspace({
           aria-label="Abrir ticket"
           className="flex-1 min-w-0 h-12 rounded-2xl bg-mipiace-ink text-white flex items-center justify-between px-4"
         >
+          {/* B-reservas-5 F8 · en compacto esta barra es lo ÚNICO que se ve
+              del ticket, y en contexto de cita no decía de quién era: la
+              cajera veía una venta cualquiera. La mesa ya llevaba su
+              nombre aquí por la misma razón. */}
           <span className="text-[13px] font-medium truncate">
-            {tableContext ? `Mesa ${tableContext.name} · ` : ""}
+            {tableContext
+              ? `Mesa ${tableContext.name} · `
+              : appointmentContext
+                ? `${appointmentContext.clientName ?? "Cita"} · `
+                : ""}
             {lines.length} {lines.length === 1 ? "línea" : "líneas"}
           </span>
           <span className="text-[18px] font-semibold tabular-nums">
@@ -3382,6 +3456,7 @@ interface TicketPanelProps {
   totals: ReturnType<typeof computeCart>;
   shiftTicketsCount: number | null;
   tableContext: TableContext | null;
+  appointmentContext: AppointmentContext | null;
   onClickLine: (line: CartLine) => void;
   onUpdateLineUnits: (id: string, units: number) => void;
   onRemoveLine: (id: string) => void;
@@ -3448,6 +3523,7 @@ function TicketPanel({
   totals,
   shiftTicketsCount,
   tableContext,
+  appointmentContext,
   onClickLine,
   onUpdateLineUnits,
   onRemoveLine,
@@ -3562,13 +3638,28 @@ function TicketPanel({
     // un DRAFT vacío figura ocupada, y si "Cancelar" está gris no hay
     // forma de liberarla desde el TPV (implantación de Sirope,
     // 2026-07-08). En venta rápida sin nada que destruir sí se apaga.
-    label: tableContext ? "Vaciar mesa" : "Cancelar",
+    // B-reservas-5 F3 · en contexto CITA el botón NO destruye: sale a la
+    // agenda y deja el borrador donde está. Etiquetarlo "Cancelar" con
+    // el mismo aspecto destructivo que "Vaciar mesa" sería mentir sobre
+    // lo que hace.
+    label: tableContext
+      ? "Vaciar mesa"
+      : appointmentContext
+        ? "Volver a la agenda"
+        : "Cancelar",
     hint: tableContext
       ? "Cancela la cuenta y libera la mesa"
-      : `Vacía el ${vocab("ticketNoun", businessType).toLowerCase()} en curso`,
+      : appointmentContext
+        ? "El borrador de la cita se queda como está"
+        : `Vacía el ${vocab("ticketNoun", businessType).toLowerCase()} en curso`,
     onClick: onCancel,
-    disabled: !tableContext && lines.length === 0 && !contact && !notes,
-    destructive: true,
+    disabled:
+      !tableContext &&
+      !appointmentContext &&
+      lines.length === 0 &&
+      !contact &&
+      !notes,
+    destructive: !appointmentContext,
   });
 
   // 1 · Cabecera compacta. Nombre de mesa + meta + un solo botón "Más".
@@ -3576,9 +3667,15 @@ function TicketPanel({
     <div className="flex items-center justify-between gap-2 px-5 md:px-7 pt-4 md:pt-5 pb-3 border-b border-slate-100 shrink-0">
       <div className="min-w-0">
         <h2 className="text-[18px] md:text-[20px] font-semibold text-mipiace-ink tracking-tight truncate">
+          {/* B-reservas-5 F3 · en contexto CITA manda de QUIÉN es. La
+              cajera puede tener dos citas abiertas en la mañana y el
+              titular "Ticket de venta" no le dice cuál está cobrando —
+              lo mismo que en mesa resuelve "Mesa M3". */}
           {tableContext
             ? `Mesa ${tableContext.name}`
-            : `${vocab("ticketNoun", businessType)} de ${vocab("saleNoun", businessType).toLowerCase()}`}
+            : appointmentContext
+              ? (appointmentContext.clientName ?? "Cita sin cliente")
+              : `${vocab("ticketNoun", businessType)} de ${vocab("saleNoun", businessType).toLowerCase()}`}
         </h2>
         {/* Una sola línea. En el bucle visual a 1280×800, "2 comensales ·
             22 min · Gemma · 24 uds." envolvía a dos filas y le robaba
@@ -3600,6 +3697,10 @@ function TicketPanel({
         >
           {tableContext ? (
             <TableContextLine table={tableContext} itemCount={totals.itemCount} />
+          ) : appointmentContext ? (
+            <>
+              {appointmentContext.serviceLabel || "Cita"} · {totals.itemCount}
+            </>
           ) : (
             <>
               {vocab("ticketNoun", businessType)} · {totals.itemCount}

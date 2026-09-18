@@ -6,7 +6,41 @@
 
 import { ApiError, apiWithCashier } from "../api.js";
 import { newId } from "./ids.js";
-import { outboxAdd } from "./outbox.js";
+import { outboxAdd, outboxList } from "./outbox.js";
+
+// Zona horaria del centro para pintar. El motor tiene la suya
+// (`apps/api/src/agenda/time.ts`); esto es el espejo del front, y vive
+// aquí —no en la pantalla— para que la agenda y el outbox agrupen por el
+// mismo día.
+export const AGENDA_TZ = "Europe/Madrid";
+
+const hhmmFmt = new Intl.DateTimeFormat("en-GB", {
+  timeZone: AGENDA_TZ,
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+const dateFmt = new Intl.DateTimeFormat("en-CA", {
+  timeZone: AGENDA_TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+/** ISO UTC → "HH:MM" de pared del centro. */
+export function centerHHMM(iso: string): string {
+  return hhmmFmt.format(new Date(iso));
+}
+
+/** ISO UTC → "YYYY-MM-DD" de pared del centro. */
+export function centerWallDate(iso: string): string {
+  return dateFmt.format(new Date(iso));
+}
+
+/** Hoy, en fecha de pared del centro. */
+export function centerToday(): string {
+  return dateFmt.format(new Date());
+}
 
 export type AppointmentStatus =
   | "PENDING"
@@ -48,12 +82,75 @@ export interface AgendaAppointment {
   }>;
   // Marca local del alta offline aún no confirmada por el server.
   pendingOffline?: boolean;
+  // B-reservas-6a frente O · en qué estado está esa alta local. Si el
+  // servidor la rechazó (solape, o una hora que ya no se sostiene), la
+  // cita NO puede desaparecer de la agenda en silencio: se queda pintada
+  // con su motivo.
+  outboxStatus?: "pending" | "rejected";
+  outboxError?: string | null;
+}
+
+// ─── B-reservas-7a · lo que la rejilla necesita para pintar el día ────
+
+/** Un tramo abierto, en hora de PARED del centro ("HH:MM"). */
+export interface OpenRange {
+  startTime: string;
+  endTime: string;
+}
+
+/** Una ausencia pintada en la columna de quien falta. `id` es el del
+ *  `BookingBlock` que la produjo: hace falta para quitarla tocándola. */
+export interface AgendaAbsence {
+  id: string | null;
+  staffUserId: string | null; // null = el centro entero
+  startTime: string;
+  endTime: string; // "24:00" = hasta el final del día
+  reason: string | null;
+}
+
+export interface AgendaDayInfo {
+  date: string;
+  // `null` = este centro no tiene horario configurado ⇒ sin techo, que es
+  // el comportamiento de antes de B-7a.
+  open: OpenRange[] | null;
+  // El día cerrado, con el nombre del día especial si lo hay.
+  closed: { name: string | null } | null;
+  specialName: string | null;
+  // Por profesional: turno ∩ centro. Lo que NO esté aquí no es reservable
+  // y tocarlo no abre un alta.
+  staffOpen: Record<string, OpenRange[]>;
+  absences: AgendaAbsence[];
 }
 
 export interface AgendaDay {
   date: string; // YYYY-MM-DD
   staff: AgendaStaff[];
   appointments: AgendaAppointment[];
+  // B-reservas-7a · la RETÍCULA del centro. Viaja en la caché offline
+  // porque sin red la cajera sigue tocando la rejilla: si el front
+  // redondeara con otro paso que el servidor, el alta encolada se
+  // rechazaría al volver. Ausente en una caché vieja ⇒ 15, el valor de B4.
+  slotMinutes?: number;
+  // El horario del centro y las ausencias, fecha a fecha. También en la
+  // caché: sin red hay que poder decir "el centro está cerrado" igual.
+  days?: AgendaDayInfo[];
+}
+
+/** La retícula del día, con el valor de B4 como último recurso: caché
+ *  vieja, o un día que todavía no ha llegado del servidor. */
+export const DEFAULT_SLOT_MINUTES = 15;
+
+export function slotMinutesOf(day: AgendaDay | null): number {
+  return day?.slotMinutes ?? DEFAULT_SLOT_MINUTES;
+}
+
+/** La info del día pedido dentro de la respuesta (que puede traer un
+ *  rango). `undefined` = no vino, y entonces no hay techo que pintar. */
+export function dayInfoOf(
+  day: AgendaDay | null,
+  date: string,
+): AgendaDayInfo | undefined {
+  return day?.days?.find((d) => d.date === date);
 }
 
 export interface AvailabilitySlot {
@@ -131,25 +228,106 @@ export async function fetchAgendaDay(date: string): Promise<AgendaDay> {
     const res = await apiWithCashier<{
       staff: AgendaStaff[];
       appointments: AgendaAppointment[];
+      // B-reservas-7a. Opcionales en el tipo a propósito: un servidor
+      // anterior a este bloque no los manda y la agenda tiene que seguir
+      // funcionando contra él (el APK se despliega aparte del servidor).
+      slotMinutes?: number;
+      days?: AgendaDayInfo[];
     }>(`/agenda?date=${date}`);
     const day: AgendaDay = {
       date,
       staff: res.staff,
       appointments: res.appointments,
+      slotMinutes: res.slotMinutes ?? DEFAULT_SLOT_MINUTES,
+      days: res.days ?? [],
     };
+    // La caché guarda lo que dijo el SERVIDOR. Lo local se mezcla al
+    // devolver, nunca se persiste: si se cacheara, una cita rechazada
+    // sobreviviría a su propio item del outbox.
     await writeDay(day);
-    return day;
+    return { ...day, appointments: await mergePendingLocal(day) };
   } catch (err) {
     // Offline / 5xx: usa la caché del día si existe.
     const cached = await loadAgendaDayFromCache(date);
-    if (cached) return { ...cached, appointments: mergePendingLocal(cached) };
+    if (cached) {
+      return { ...cached, appointments: await mergePendingLocal(cached) };
+    }
     throw err;
   }
 }
 
-// Conserva las citas offline optimistas al re-render (marca pendingOffline).
-function mergePendingLocal(day: AgendaDay): AgendaAppointment[] {
-  return day.appointments;
+/**
+ * Mezcla las altas que están en el outbox con lo que dice el servidor.
+ *
+ * B-reservas-6a frente O · esto ERA UN STUB (`return day.appointments`)
+ * desde B4, con un comentario que decía que conservaba las citas
+ * optimistas. No conservaba nada: una cita creada sin red se guardaba en
+ * el outbox, la cajera veía un aviso de 3,5 segundos y **la agenda no la
+ * pintaba nunca**. Y si el servidor la rechazaba al reconectar, lo único
+ * que quedaba era el chip de abajo a la derecha.
+ *
+ * Ahora la cita encolada se pinta en su hueco, y la rechazada SE QUEDA
+ * pintada con su motivo hasta que alguien la reintenta o la descarta. Una
+ * cita escrita no se cae de la agenda en silencio.
+ *
+ * Se mezcla SIEMPRE, también con red: es online cuando más importa —el
+ * servidor no la tiene, y sin esto el hueco se ve vacío.
+ */
+async function mergePendingLocal(day: AgendaDay): Promise<AgendaAppointment[]> {
+  let items;
+  try {
+    items = await outboxList();
+  } catch {
+    return day.appointments; // sin IndexedDB, la agenda del servidor basta
+  }
+  const yaEnElServidor = new Set(day.appointments.map((a) => a.id));
+  const locales: AgendaAppointment[] = [];
+  for (const it of items) {
+    if (it.kind !== "appointment" || (it.method ?? "POST") !== "POST") continue;
+    const body = it.body as {
+      clientId?: string | null;
+      start?: string;
+      notes?: string | null;
+      source?: string;
+      items?: Array<{ serviceId: string; staffUserId?: string | null }>;
+    };
+    if (typeof body.start !== "string") continue;
+    if (centerWallDate(body.start) !== day.date) continue;
+    // Ya subió y el servidor la devuelve con el id definitivo: el item
+    // desaparece del outbox al 2xx, pero puede haber una ventana.
+    if (yaEnElServidor.has(it.externalId)) continue;
+    const bodyItems = body.items ?? [];
+    locales.push({
+      id: it.externalId,
+      clientId: body.clientId ?? null,
+      status: "CONFIRMED",
+      source: body.source ?? "PRESENCIAL",
+      start: body.start,
+      end: new Date(
+        new Date(body.start).getTime() + (it.durationMin ?? 0) * 60_000,
+      ).toISOString(),
+      ticketId: null,
+      notes: body.notes ?? null,
+      items: bodyItems.map((x, i) => ({
+        id: `${it.externalId}-${i}`,
+        serviceId: x.serviceId,
+        durationMin: 0,
+        sortOrder: i,
+        startOffsetMin: 0,
+      })),
+      assignments: bodyItems
+        .filter((x) => x.staffUserId)
+        .map((x) => ({
+          reservableType: "STAFF" as const,
+          staffUserId: x.staffUserId!,
+          resourceId: null,
+        })),
+      pendingOffline: true,
+      outboxStatus: it.status,
+      outboxError: it.lastError,
+    });
+  }
+  return [...day.appointments, ...locales];
 }
 
 export async function searchAvailability(input: {
@@ -171,6 +349,10 @@ export interface CreateAppointmentInput {
   start: string; // ISO UTC
   source?: "PRESENCIAL" | "WEB" | "PHONE" | "GIFT_REDEMPTION";
   notes?: string | null;
+  // Duración total del visit. NO se envía (el schema del alta no la
+  // acepta): viaja en el item del outbox para poder pintar la cita
+  // encolada con su alto real mientras el servidor no la ha visto.
+  durationMin?: number;
 }
 
 export type CreateAppointmentResult =
@@ -215,8 +397,12 @@ export async function createAppointment(
       kind: "appointment",
       path: "/agenda/appointments",
       body,
-      label: `Cita ${input.start.slice(11, 16)}`,
+      // La hora de PARED del centro. Antes era `start.slice(11,16)`, que
+      // es UTC: el chip decía "Cita 09:00" de una cita de las 11:00, y el
+      // chip es justo donde la cajera lee lo que se rechazó.
+      label: `Cita ${centerHHMM(input.start)}`,
       total: 0,
+      durationMin: input.durationMin,
     });
     const optimistic: AgendaAppointment = {
       id: externalId,
@@ -224,7 +410,9 @@ export async function createAppointment(
       status: input.source && input.source !== "PRESENCIAL" ? "PENDING" : "CONFIRMED",
       source: input.source ?? "PRESENCIAL",
       start: input.start,
-      end: input.start,
+      end: new Date(
+        new Date(input.start).getTime() + (input.durationMin ?? 0) * 60_000,
+      ).toISOString(),
       ticketId: null,
       notes: input.notes ?? null,
       items: input.items.map((it, i) => ({
@@ -234,8 +422,16 @@ export async function createAppointment(
         sortOrder: i,
         startOffsetMin: 0,
       })),
-      assignments: [],
+      assignments: input.items
+        .filter((it) => it.staffUserId)
+        .map((it) => ({
+          reservableType: "STAFF" as const,
+          staffUserId: it.staffUserId!,
+          resourceId: null,
+        })),
       pendingOffline: true,
+      outboxStatus: "pending",
+      outboxError: null,
     };
     return { ok: true, appointment: optimistic, queuedOffline: true };
   }
@@ -310,6 +506,53 @@ export async function checkoutAppointmentTicket(
   }
 }
 
+// B-reservas-5 F4 · la cita se finaliza sola al cobrarse.
+//
+// Se hace en el FRONT a propósito: engancharlo dentro de
+// `POST /tickets/:id/checkout` metería la agenda dentro del camino de
+// cobro, que es justo lo que prohíben ADR-010 y ADR-R8 §5 (el motor
+// alimenta ese camino, no lo toca). El front ya sabe que está en
+// contexto de cita; que lo diga él.
+//
+// EL DINERO MANDA: si esto falla, el cobro sigue siendo válido. Un 4xx
+// se devuelve para avisar (y queda "Finalizar" a mano en el detalle);
+// una caída de red se encola en el outbox como PATCH y se reintenta al
+// reconectar. Lo que no puede pasar es que se pierda en silencio.
+//
+// `PATCH { status: COMPLETED }` es idempotente por naturaleza: repetirlo
+// deja la cita como ya estaba, así que el reintento del outbox no
+// necesita un externalId que el server conozca.
+export async function completeAppointment(
+  id: string,
+): Promise<
+  | { ok: true; queuedOffline?: boolean }
+  | { ok: false; error: string; message: string }
+> {
+  try {
+    await apiWithCashier(`/agenda/appointments/${id}`, {
+      method: "PATCH",
+      body: { status: "COMPLETED" },
+    });
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+      // Error de negocio (la cita ya no existe, estado no permitido): no
+      // va al outbox, reintentarlo daría el mismo 4xx para siempre.
+      return { ok: false, error: err.code ?? "ERROR", message: err.message };
+    }
+    await outboxAdd({
+      externalId: newId(),
+      kind: "appointment",
+      method: "PATCH",
+      path: `/agenda/appointments/${id}`,
+      body: { status: "COMPLETED" },
+      label: "Cita finalizada",
+      total: 0,
+    });
+    return { ok: true, queuedOffline: true };
+  }
+}
+
 // ── Helpers de presentación ───────────────────────────────────────────
 
 export const STATUS_LABEL: Record<AppointmentStatus, string> = {
@@ -330,3 +573,73 @@ export const STATUS_COLOR: Record<AppointmentStatus, string> = {
   NO_SHOW: "#ef4444", // rojo
   CANCELLED: "#cbd5e1", // gris claro
 };
+
+// ─── B-reservas-7a · las ausencias, puestas desde la agenda ───────────
+//
+// Se ponen donde Sole las escribe hoy: en la columna, no en el admin. Por
+// debajo es un `BookingBlock scope=STAFF` por la API que YA EXISTE
+// (`POST /agenda/blocks`, que ya podía llamar el cajero). NO se crea
+// ninguna entidad nueva de ausencias — ésa sigue siendo deuda declarada.
+//
+// EL DÍA ENTERO SON 23 O 25 HORAS los dos domingos del cambio de hora. Se
+// manda "00:00"–"24:00" y el servidor compone con hora de pared: restar 24
+// horas daría una de más o de menos justo esos dos días del año.
+
+export const ALL_DAY_START = "00:00";
+export const ALL_DAY_END = "24:00";
+
+export interface CreateAbsenceInput {
+  staffUserId: string;
+  date: string; // YYYY-MM-DD de pared
+  startTime: string; // "HH:MM"
+  endTime: string; // "HH:MM", o "24:00" para el día entero
+  reason?: string | null;
+}
+
+export type AbsenceResult =
+  | { ok: true; id: string }
+  | { ok: false; message: string };
+
+/** Crea una ausencia. NO pasa por el outbox: un bloqueo encolado que el
+ *  servidor rechaza dejaría a la cajera creyendo que alguien no está
+ *  cuando la agenda sigue ofreciendo sus huecos. Sin red, se dice. */
+export async function createAbsence(
+  input: CreateAbsenceInput,
+): Promise<AbsenceResult> {
+  try {
+    const res = await apiWithCashier<{ id: string }>("/agenda/blocks", {
+      method: "POST",
+      body: {
+        scope: "STAFF",
+        staffUserId: input.staffUserId,
+        date: input.date,
+        startTime: input.startTime,
+        endTime: input.endTime,
+        reason: input.reason?.trim() ? input.reason.trim() : null,
+      },
+    });
+    return { ok: true, id: res.id };
+  } catch (err) {
+    if (err instanceof ApiError) return { ok: false, message: err.message };
+    return {
+      ok: false,
+      message: "Sin conexión: la ausencia no se ha podido guardar.",
+    };
+  }
+}
+
+/** Quita una ausencia desde la propia ausencia pintada. */
+export async function deleteAbsence(id: string): Promise<AbsenceResult> {
+  try {
+    await apiWithCashier<{ ok: true }>(`/agenda/blocks/${id}`, {
+      method: "DELETE",
+    });
+    return { ok: true, id };
+  } catch (err) {
+    if (err instanceof ApiError) return { ok: false, message: err.message };
+    return {
+      ok: false,
+      message: "Sin conexión: la ausencia no se ha podido quitar.",
+    };
+  }
+}

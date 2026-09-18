@@ -203,6 +203,40 @@ describe("outbox · occurredAt (v1.11-cierre-de-dia)", () => {
     expect(item!.body.occurredAt).toBe(stamped);
   });
 
+  // B-reservas-6a frente O · el alta de cita lleva el mismo sello por la
+  // misma razón con otro reloj: el AP12 apaga la pantalla a los cinco
+  // minutos y "¿tienes hueco ahora?" va pegada a la franja en curso. Sin
+  // el sello, al reconectar el suelo rechaza una hora que era buena
+  // cuando la cajera la escribió — y el 409 es rechazo permanente.
+  it("el ALTA DE CITA también lo lleva (B-reservas-6a)", async () => {
+    await outboxAdd({
+      externalId: OTHER_ID,
+      kind: "appointment",
+      path: "/agenda/appointments",
+      body: { externalId: OTHER_ID, items: [], start: "2026-09-15T09:00:00.000Z" },
+      label: "Cita 11:00",
+      total: 0,
+    });
+    const [item] = await outboxList();
+    const occurredAt = item!.body.occurredAt as string;
+    expect(typeof occurredAt).toBe("string");
+    expect(Math.abs(Date.parse(occurredAt) - item!.createdAt)).toBeLessThan(2000);
+  });
+
+  it("pero el PATCH de COMPLETED no: terminar no depende de cuándo se pulsó", async () => {
+    await outboxAdd({
+      externalId: OTHER_ID,
+      kind: "appointment",
+      method: "PATCH",
+      path: "/agenda/appointments/ap-1",
+      body: { status: "COMPLETED" },
+      label: "Finalizar cita",
+      total: 0,
+    });
+    const [item] = await outboxList();
+    expect(item!.body.occurredAt).toBeUndefined();
+  });
+
   it("las operaciones de turno NO lo llevan: no son ventas", async () => {
     await outboxAdd({
       externalId: OTHER_ID,
@@ -300,5 +334,51 @@ describe("outbox · lock multi-pestaña", () => {
     await flushOutbox();
     expect(apiMock.apiWithCashier).not.toHaveBeenCalled();
     expect(await outboxList()).toHaveLength(1);
+  });
+});
+
+// B-reservas-5 F4 · el outbox nació POST-only porque todo lo que llevaba
+// eran altas. Marcar una cita COMPLETED sin red es un PATCH, y si el
+// envío lo forzase a POST el reintento moriría contra una ruta que no
+// existe: el "no puede perderse en silencio" del bloque se perdería en
+// silencio, que es peor.
+describe("B-reservas-5 · el outbox respeta el método del item", () => {
+  it("un item PATCH se reenvía como PATCH; sin método, sigue siendo POST", async () => {
+    const metodos: Array<{ path: string; method: string | undefined }> = [];
+    apiMock.apiWithCashier.mockImplementation(
+      async (path: string, opts?: { method?: string }) => {
+        metodos.push({ path, method: opts?.method });
+        return {};
+      },
+    );
+
+    await outboxAdd({
+      externalId: "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
+      kind: "appointment",
+      method: "PATCH",
+      path: "/agenda/appointments/cita-1",
+      body: { status: "COMPLETED" },
+      label: "Cita finalizada",
+      total: 0,
+    });
+    await outboxAdd({
+      externalId: "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb",
+      kind: "appointment",
+      path: "/agenda/appointments",
+      body: { externalId: "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb" },
+      label: "Cita 10:00",
+      total: 0,
+    });
+
+    await flushOutbox();
+
+    expect(
+      metodos.find((m) => m.path === "/agenda/appointments/cita-1")?.method,
+    ).toBe("PATCH");
+    expect(
+      metodos.find((m) => m.path === "/agenda/appointments")?.method,
+    ).toBe("POST");
+    // Los dos se enviaron y la cola queda limpia.
+    expect(await outboxList()).toHaveLength(0);
   });
 });

@@ -22,7 +22,15 @@ import type { AgendaStore } from "./store.js";
 
 export type CheckoutResult =
   | { ok: true; ticket: SerializedCheckoutTicket; alreadyLinked: boolean }
-  | { ok: false; status: number; error: string; message: string };
+  | {
+      ok: false;
+      status: number;
+      error: string;
+      message: string;
+      // B-reservas-5 F5 · para que el TPV pueda ofrecer "ver el ticket"
+      // en vez de dejar a la cajera con un mensaje y nada que tocar.
+      ticketId?: string;
+    };
 
 export interface SerializedCheckoutTicket {
   id: string;
@@ -78,9 +86,33 @@ export async function checkoutAppointment(
   }
 
   // Idempotencia: si ya hay ticket enlazado, devolverlo (GET-back del DRAFT).
+  //
+  // B-reservas-5 F5 · pero SÓLO si sigue siendo un borrador. Antes de
+  // este bloque daba igual: el ticket enlazado no se cobraba nunca (el
+  // cobro abría otro por su cuenta), así que devolverlo era inofensivo.
+  // Ahora el ticket enlazado ES la venta. Devolverlo cobrado mandaría a
+  // la cajera a un contexto de cobro sobre un ticket ya sellado, y el
+  // `POST /tickets/:id/checkout` respondería 409 TICKET_ALREADY_PAID
+  // después de haberla paseado por todo el modal. Se corta aquí y se le
+  // dice qué pasó, con el número de ticket para poder mirarlo.
   if (appt.ticketId) {
     const existing = await loadTicket(prisma, appt.ticketId);
-    if (existing) return { ok: true, ticket: existing, alreadyLinked: true };
+    if (existing && existing.status === "DRAFT") {
+      return { ok: true, ticket: existing, alreadyLinked: true };
+    }
+    if (existing) {
+      return {
+        ok: false,
+        status: 409,
+        error: "APPOINTMENT_ALREADY_PAID",
+        message: "Esta cita ya se cobró.",
+        ticketId: existing.id,
+      };
+    }
+    // El ticket enlazado ya no existe (borrado del tenant, limpieza de
+    // implantación): la cita se quedó apuntando al vacío. `ticket_id` es
+    // `ON DELETE SET NULL`, así que esto sólo pasa con una lectura
+    // vieja; seguir adelante abre un borrador nuevo, que es lo correcto.
   }
 
   if (appt.items.length === 0) {

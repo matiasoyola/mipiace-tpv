@@ -61,10 +61,22 @@ export interface OutboxItem {
   // "/tickets", "/refunds" o "/tickets/:id/checkout" (v1.0-mesas-frontend:
   // el cobro de mesa también pasa por el outbox).
   path: string;
+  // B-reservas-5 F4 · el outbox nació POST-only porque todo lo que
+  // llevaba eran altas. Marcar una cita COMPLETED es un PATCH. Los items
+  // ya persistidos no llevan el campo, así que la ausencia significa
+  // POST y no hace falta subir la versión de la BD.
+  method?: "POST" | "PATCH";
   body: Record<string, unknown>;
   // Para pintar el item en el chip de pendientes sin parsear el body.
   label: string;
   total: number;
+  // B-reservas-6a frente O · duración del visit, SÓLO local: nunca se
+  // envía (el schema del alta es `additionalProperties: false`). Sirve
+  // para pintar la cita encolada en su hueco, con su alto, mientras el
+  // servidor no la ha visto. Los items ya persistidos no lo llevan, así
+  // que su ausencia significa "no se sabe" — sin subir la versión de la
+  // BD, igual que `method` en B-5.
+  durationMin?: number;
   // v1.0-mesas-frontend: presente cuando el item es el checkout de una
   // mesa. Mientras el item exista (pending o rejected), ESTE dispositivo
   // bloquea reabrir/editar esa mesa — está "cobrada en tránsito".
@@ -213,6 +225,8 @@ export async function outboxAdd(
     body: Record<string, unknown>;
     label: string;
     total: number;
+    method?: "POST" | "PATCH";
+    durationMin?: number;
     tableId?: string;
     // v1.10-offline: explícito para las operaciones de turno
     // (shift-open/cash-count). Para tickets se auto-deduce del
@@ -244,9 +258,24 @@ export async function outboxAdd(
   //
   // Se sella al ENCOLAR, que es cuando el cajero pulsó Cobrar. Los
   // reintentos reusan el mismo valor, igual que el externalId.
+  //
+  // B-reservas-6a frente O · y también el ALTA DE CITA, por la misma
+  // razón con otro reloj: el AP12 apaga la pantalla a los cinco minutos y
+  // la primera acción al despertarlo puede salir sin red — justo con
+  // "¿tienes hueco ahora?", que va pegada a la franja en curso. Sin el
+  // sello, al reconectar el suelo rechaza una hora que era buena cuando
+  // la cajera la escribió (409 BOOKING_IN_PAST → rechazo permanente →
+  // trabajo hecho que desaparece). El servidor evalúa el suelo con este
+  // instante, acotado (`agenda/floor.ts::resolveBookingNow`).
+  //
+  // Sólo el POST del alta. El `PATCH` de COMPLETED no lo necesita: marcar
+  // una cita como terminada no depende de cuándo se pulsó.
+  const sellaOccurredAt =
+    input.kind === "ticket" ||
+    input.kind === "refund" ||
+    (input.kind === "appointment" && (input.method ?? "POST") === "POST");
   const body =
-    (input.kind === "ticket" || input.kind === "refund") &&
-    input.body.occurredAt == null
+    sellaOccurredAt && input.body.occurredAt == null
       ? { ...input.body, occurredAt: new Date(now).toISOString() }
       : input.body;
   const item: OutboxItem = {
@@ -415,7 +444,7 @@ async function sendItem(
 ): Promise<{ resolvedShiftLocalId?: string } | void> {
   try {
     const response = await apiWithCashier<unknown>(item.path, {
-      method: "POST",
+      method: item.method ?? "POST",
       body: item.body,
     });
     // 201 creado o 200 duplicate:true — en ambos casos el servidor

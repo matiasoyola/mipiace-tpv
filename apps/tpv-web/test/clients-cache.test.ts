@@ -111,6 +111,26 @@ describe("alta offline", () => {
     expect(outboxMock.outboxAdd).not.toHaveBeenCalled();
   });
 
+  // B-reservas-mostrador F3 · Sole apunta a sus clientas por el nombre de
+  // pila, y el centro se queda sin red. Los dos a la vez tienen que valer:
+  // el cuerpo que se encola es el que va a reintentar el outbox, y la
+  // columna `last_name` es NOT NULL.
+  it("un alta SIN APELLIDOS encola el cuerpo con cadena vacía, no con undefined", async () => {
+    apiMock.apiWithCashier.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    const res = await createClient({ firstName: "Sole" });
+    expect(res.queuedOffline).toBe(true);
+    expect(res.client.lastName).toBe("");
+
+    const encolado = outboxMock.outboxAdd.mock.calls[0]![0] as {
+      body: Record<string, unknown>;
+      label: string;
+    };
+    expect(encolado.body.lastName).toBe("");
+    expect(encolado.body.firstName).toBe("Sole");
+    // Y la etiqueta de la cola no deja un espacio colgando.
+    expect(encolado.label).toBe("Cliente: Sole");
+  });
+
   it("alta online cachea la fila del server", async () => {
     const server = row({ firstName: "On", lastName: "Line", id: "srv-1" });
     apiMock.apiWithCashier.mockResolvedValueOnce({ client: server });

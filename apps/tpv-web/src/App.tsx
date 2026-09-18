@@ -11,7 +11,7 @@
 // día— antes de pedir el fondo de caja del turno nuevo.
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, Lock } from "lucide-react";
 
 import {
   apiWithCashier,
@@ -55,7 +55,15 @@ import { installBackGuard, setBackFallback } from "./hooks/useBackGuard.js";
 import { OutboxChip } from "./pages/CheckoutPage.outboxChip.js";
 import { PairScreen } from "./pages/PairScreen.js";
 import { PinScreen, type CashierLoginResponse } from "./pages/PinScreen.js";
-import { SalePage, type TableContext } from "./pages/SalePage.js";
+import {
+  SalePage,
+  type AppointmentContext,
+  type TableContext,
+} from "./pages/SalePage.js";
+// B-reservas-5 F1 · la agenda es una vista hermana del mapa de sala: la
+// pinta quien manda en la navegación, no la pantalla de venta.
+import { AgendaPage } from "./pages/AgendaPage.js";
+import { completeAppointment } from "./lib/agenda.js";
 import { CloseShiftModal } from "./pages/CloseShiftModal.js";
 import { DaySummaryCard } from "./pages/DaySummaryCard.js";
 import { daySummaryTitle } from "./lib/daySummaryTitle.js";
@@ -338,6 +346,12 @@ export function App() {
   if (state.kind === "unpaired") {
     return <PairScreen onPaired={refresh} />;
   }
+  // H1 (ADR-016) · la empresa no tiene caja. Una frase, y se acabó: ni
+  // spinner, ni vuelta al PIN, ni reintento en bucle. El terminal sigue
+  // emparejado; el día que le enciendan la caja, recargar basta.
+  if (state.kind === "cajaDisabled") {
+    return <CajaDisabledScreen message={state.message} onRetry={refresh} />;
+  }
 
   const { register, store, tenant } = state.data;
 
@@ -532,10 +546,13 @@ export function TpvHome(props: {
     | {
         kind: "sale";
         tableContext: TableContext | null;
+        // B-reservas-5 F3 · el otro borrador que se puede estar cobrando.
+        // Excluyente con `tableContext`: o mesa, o cita, o venta rápida.
+        appointmentContext?: AppointmentContext | null;
         // v1.0-mesas-frontend: proyección inicial del DRAFT server-side
         // (las líneas que ya tenía la mesa al retomarla). null en venta
         // rápida.
-        initialTableLines?: CartLine[];
+        initialDraftLines?: CartLine[];
       }
   >(skipTables ? { kind: "sale", tableContext: null } : { kind: "map" });
   // v1.0-mesas-frontend: tocar una mesa abre (o retoma) el DRAFT
@@ -547,6 +564,44 @@ export function TpvHome(props: {
   // cuando el cajero vuelve por una expulsión (mesa cobrada/absorbida
   // desde otra caja) o tras cobrar una mesa desde este dispositivo.
   const [mapNotice, setMapNotice] = useState<MapNotice | null>(null);
+  // B-reservas-5 F1 · la agenda. Vivía como estado local de `SalePage`;
+  // sube aquí sin tocar el componente ni su aspecto (es un overlay
+  // `fixed inset-0`, se pinta igual colgado de un sitio que del otro).
+  const [showAgenda, setShowAgenda] = useState(false);
+  // B-reservas-5 F4 · aviso que la agenda enseña al abrirse. Se usa
+  // cuando el paso a COMPLETED no salió: el cobro es válido igual y la
+  // cajera tiene que saber que le queda pulsar "Finalizar".
+  const [agendaNotice, setAgendaNotice] = useState<string | null>(null);
+
+  // B-reservas-5 F3 · LA entrada al contexto de borrador. Una sola
+  // función, porque aquí es donde vive el cambio de vista — igual que
+  // `goToMap` es LA salida. Tocar una mesa y cobrar una cita hacen lo
+  // mismo: hay un ticket DRAFT en el servidor, se carga su proyección
+  // con el mapper que ya existe y se entra a vender sobre él.
+  //
+  // Las líneas NUNCA se reconstruyen a mano: o vienen ya mapeadas del
+  // endpoint que abrió el borrador (mesa), o se piden con
+  // `GET /tickets/:id` (cita). El mapeo vive en un solo sitio.
+  async function enterDraft(entry: {
+    tableContext?: TableContext | null;
+    appointmentContext?: AppointmentContext | null;
+    lines?: CartLine[];
+    ticketId?: string;
+  }): Promise<void> {
+    let lines = entry.lines;
+    if (!lines && entry.ticketId) {
+      const res = await apiWithCashier<{ ticket: ServerDraft }>(
+        `/tickets/${entry.ticketId}`,
+      );
+      lines = mapServerDraftLines(res.ticket.lines);
+    }
+    setView({
+      kind: "sale",
+      tableContext: entry.tableContext ?? null,
+      appointmentContext: entry.appointmentContext ?? null,
+      initialDraftLines: lines ?? [],
+    });
+  }
 
   async function pickTable(table: ApiTable): Promise<void> {
     if (openingTableId) return;
@@ -558,8 +613,7 @@ export function TpvHome(props: {
         `/tables/${table.id}/open`,
         { method: "POST", body: {} },
       );
-      setView({
-        kind: "sale",
+      await enterDraft({
         tableContext: {
           id: table.id,
           name: table.name,
@@ -571,7 +625,7 @@ export function TpvHome(props: {
           openedByAlias: table.activeTicket?.openedByAlias ?? null,
           activeTicketId: res.ticket.id,
         },
-        initialTableLines: mapServerDraftLines(res.ticket.lines),
+        lines: mapServerDraftLines(res.ticket.lines),
       });
     } catch (err) {
       // 409 TABLE_GROUPED / SHIFT_NOT_OPEN llegan con mensaje en
@@ -701,60 +755,115 @@ export function TpvHome(props: {
   }
 
   return (
-    <SalePage
-      key={view.tableContext?.id ?? "quick-sale"}
-      shiftId={props.shiftId}
-      cashierLabel={cashierDisplayLabel(props.cashier)}
-      cashierRole={props.cashier.role}
-      registerName={props.registerName}
-      registerId={props.registerId}
-      storeName={props.storeName}
-      tableContext={view.tableContext}
-      initialTableLines={view.initialTableLines}
-      // La salida al mapa ya viene con la limpieza dentro: `SalePage` no
-      // envuelve nada, sólo llama.
-      onBackToMap={hasTables ? () => void goToMap() : null}
-      // v1.9.2-mesas-concurrencia · salida al mapa CON aviso inline:
-      // expulsión por cobro/absorción remota, o confirmación tras
-      // cobrar la mesa desde este dispositivo (banner de éxito con
-      // "Ver ticket"). Reemplaza el modal "Ticket emitido" en mesa.
-      onExitToMap={
-        hasTables
-          ? (notice) => {
-              setMapNotice(notice);
-              setView({ kind: "map" });
+    <>
+      {showAgenda && (
+        <AgendaPage
+          notice={agendaNotice}
+          onNoticeShown={() => setAgendaNotice(null)}
+          onClose={() => setShowAgenda(false)}
+          // B-reservas-5 F3 · cobrar una cita entra en contexto de
+          // borrador por la MISMA puerta que abrir una mesa. No se
+          // rehidratan líneas en el cliente: `enterDraft` las pide.
+          onEnterDraft={(entry) =>
+            void enterDraft({
+              ticketId: entry.ticketId,
+              appointmentContext: {
+                appointmentId: entry.appointmentId,
+                activeTicketId: entry.ticketId,
+                clientName: entry.clientName,
+                serviceLabel: entry.serviceLabel,
+              },
+            })
+          }
+        />
+      )}
+      <SalePage
+        // B-reservas-5 F3 · la cita también remonta. Sin su id en la
+        // key, pasar de venta rápida a cobrar una cita reusaría la
+        // instancia y el carrito se quedaría con lo de antes: el
+        // estado de líneas se inicializa UNA vez, en el montaje.
+        key={
+          view.tableContext?.id ??
+          view.appointmentContext?.activeTicketId ??
+          "quick-sale"
+        }
+        onOpenAgenda={() => setShowAgenda(true)}
+        appointmentContext={view.appointmentContext ?? null}
+        // Salir del cobro de una cita devuelve a la agenda, que es de
+        // donde se vino. En SERVICES no hay mapa al que caer.
+        onBackToAgenda={() => {
+          setView({ kind: "sale", tableContext: null });
+          setShowAgenda(true);
+        }}
+        // B-reservas-5 F4 · la cita se finaliza sola al cobrarse. EL
+        // DINERO MANDA: esto corre DESPUÉS del cobro y no puede tumbarlo.
+        // Si falla, se avisa y queda "Finalizar" a mano en el detalle.
+        onAppointmentPaid={(appointmentId) => {
+          void completeAppointment(appointmentId).then((res) => {
+            if (!res.ok) {
+              setAgendaNotice(
+                `El cobro se hizo bien, pero la cita no se pudo marcar como finalizada (${res.message}). Márcala a mano con "Finalizar".`,
+              );
+            } else if (res.queuedOffline) {
+              setAgendaNotice(
+                "Sin conexión: la cita se marcará como finalizada al reconectar.",
+              );
             }
-          : null
-      }
-      onTicketMovedToTable={
-        hasTables
-          ? async (newTableId) => {
-              // v1.4-Bar-Operativa-MVP Lote 3 · tras un mover-mesa
-              // exitoso, recargamos `/tpv/tables` y reconstruimos el
-              // tableContext apuntando a la mesa destino (vía pickTable,
-              // que además trae las líneas del DRAFT — el SalePage se
-              // remonta con key nueva). Si la recarga falla (offline),
-              // caemos al mapa: el usuario verá la mesa nueva ya
-              // ocupada y podrá tocarla.
-              try {
-                const res = await apiWithCashier<{ tables: ApiTable[] }>(
-                  "/tpv/tables",
-                );
-                const fresh = res.tables.find((t) => t.id === newTableId);
-                if (fresh) {
-                  await pickTable(fresh);
-                } else {
-                  setView({ kind: "map" });
-                }
-              } catch {
+          });
+        }}
+        shiftId={props.shiftId}
+        cashierLabel={cashierDisplayLabel(props.cashier)}
+        cashierRole={props.cashier.role}
+        registerName={props.registerName}
+        registerId={props.registerId}
+        storeName={props.storeName}
+        tableContext={view.tableContext}
+        initialDraftLines={view.initialDraftLines}
+        // La salida al mapa ya viene con la limpieza dentro: `SalePage` no
+        // envuelve nada, sólo llama.
+        onBackToMap={hasTables ? () => void goToMap() : null}
+        // v1.9.2-mesas-concurrencia · salida al mapa CON aviso inline:
+        // expulsión por cobro/absorción remota, o confirmación tras
+        // cobrar la mesa desde este dispositivo (banner de éxito con
+        // "Ver ticket"). Reemplaza el modal "Ticket emitido" en mesa.
+        onExitToMap={
+          hasTables
+            ? (notice) => {
+                setMapNotice(notice);
                 setView({ kind: "map" });
               }
-            }
-          : null
-      }
-      onLogoutCashier={props.onLogoutCashier}
-      onCloseShift={props.onCloseShift}
-    />
+            : null
+        }
+        onTicketMovedToTable={
+          hasTables
+            ? async (newTableId) => {
+                // v1.4-Bar-Operativa-MVP Lote 3 · tras un mover-mesa
+                // exitoso, recargamos `/tpv/tables` y reconstruimos el
+                // tableContext apuntando a la mesa destino (vía pickTable,
+                // que además trae las líneas del DRAFT — el SalePage se
+                // remonta con key nueva). Si la recarga falla (offline),
+                // caemos al mapa: el usuario verá la mesa nueva ya
+                // ocupada y podrá tocarla.
+                try {
+                  const res = await apiWithCashier<{ tables: ApiTable[] }>(
+                    "/tpv/tables",
+                  );
+                  const fresh = res.tables.find((t) => t.id === newTableId);
+                  if (fresh) {
+                    await pickTable(fresh);
+                  } else {
+                    setView({ kind: "map" });
+                  }
+                } catch {
+                  setView({ kind: "map" });
+                }
+              }
+            : null
+        }
+        onLogoutCashier={props.onLogoutCashier}
+        onCloseShift={props.onCloseShift}
+      />
+    </>
   );
 }
 
@@ -950,3 +1059,42 @@ function TestModeTpv({
 }
 
 export default App;
+
+// H1 (ADR-016) · lo que ve un terminal cuya empresa no tiene caja.
+//
+// Deliberadamente sobrio y sin salidas falsas: no ofrecemos "iniciar
+// sesión" ni "emparejar otra vez", porque ninguna de las dos arregla
+// nada y las dos invitan a un bucle. Sólo "Reintentar", que sirve para
+// el caso real: acaban de encenderle la caja y quiere entrar sin
+// reinstalar nada.
+function CajaDisabledScreen({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-mipiace-stone px-6">
+      <div
+        role="alert"
+        className="w-full max-w-sm bg-white rounded-2xl border border-slate-200 p-7 text-center"
+      >
+        <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-4">
+          <Lock className="w-6 h-6 text-amber-700" strokeWidth={1.8} />
+        </div>
+        <h1 className="text-[17px] font-semibold text-mipiace-ink tracking-tight">
+          Esta caja no está activada
+        </h1>
+        <p className="text-[13.5px] text-slate-500 mt-2 leading-relaxed">{message}</p>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-5 h-11 w-full rounded-xl border border-slate-300 text-[14px] font-medium text-slate-700 hover:bg-slate-50"
+        >
+          Reintentar
+        </button>
+      </div>
+    </div>
+  );
+}

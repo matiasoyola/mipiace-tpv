@@ -130,6 +130,14 @@ enum InitialSyncStatus {
   RUNNING
   DONE
   FAILED
+  // H1 (la caja es un modulo) · el tenant que NUNCA va a sincronizar
+  // porque no tiene Holded. No es DONE (mentiria: el cron incremental
+  // barre `initialSyncStatus = DONE` y se lo llevaria por delante) ni
+  // PENDING (el panel lo pintaria como un sync a medias y el super-admin
+  // esperaria a que terminase algo que no ha empezado). Se sale de
+  // NOT_APPLICABLE en un solo sentido: al guardar una API key de Holded,
+  // que lo pasa a PENDING y encola el sync inicial.
+  NOT_APPLICABLE
 }
 
 // B-OnboardingV2: ciclo de vida del onboarding supervisado del tenant.
@@ -437,6 +445,24 @@ model Tenant {
   // OWNER de esta columna (hermana de `crmEnabled`; vendrán `bonosEnabled`
   // y `reservaOnlineEnabled` con B5/B6).
   agendaEnabled                  Boolean           @default(false) @map("agenda_enabled")
+  // H1 (ADR-016) · capability flag de la CAJA: venta, turno, catalogo del
+  // TPV, cajeros, dispositivos e impresion. Hermana de `crmEnabled` y
+  // `agendaEnabled` en forma (columna booleana por tenant, ADR-R6), pero
+  // distinta en gobierno: la caja se enciende y se apaga SOLO desde el
+  // super-admin, porque es una decision comercial, no un ajuste del
+  // negocio. Por eso no aparece en el POST de /admin/tenant/settings.
+  //
+  // `@default(true)` y NO false: el backfill de la migracion deja a todos
+  // los tenants de hoy exactamente como estaban. Un `false` explicito es
+  // la unica forma de apagar la caja.
+  cajaEnabled                    Boolean           @default(true) @map("caja_enabled")
+  // B-reservas-7a · la RETÍCULA del centro: cada cuántos minutos empieza una
+  // cita. 15 (el valor histórico de B4, `agenda/time.ts::SLOT_MINUTES`) o 30.
+  // Peluquería Sole trabaja en franjas de 30 y hasta ahora le ofrecíamos
+  // inicios a y cuarto (6a §4.6). El CHECK de valores permitidos vive en la
+  // BASE DE DATOS, no sólo en el schema de la ruta. Default 15: un tenant
+  // que no la toque se comporta exactamente como antes de este bloque.
+  agendaSlotMinutes              Int               @default(15) @map("agenda_slot_minutes")
   // v1.3-Thalia Lote 6 · pie de ticket personalizado. NULL = no se
   // pinta nada extra (comportamiento previo). Si está set, el renderer
   // del ticket lo pinta arriba del QR/CIF tras el "Gracias por tu
@@ -477,6 +503,8 @@ model Tenant {
   appointments       Appointment[]
   bookingBlocks      BookingBlock[]
   bookingPolicies    BookingPolicy[]
+  centerHours        CenterHours[]
+  centerDays         CenterDay[]
 
   // v1.3-SuperAdmin-Hub Lote 3 · el backfill y el hub buscan/listan
   // tenants por `holded_account_id`. Sin índice eran scans completos
@@ -1094,6 +1122,11 @@ model Shift {
   // ventas (tickets de un outbox offline imputados aquí por su timestamp,
   // ver `shift/impute.ts`). El PDF archivado ya no cuadra con la BD; el
   // resumen lo dice en vez de callarlo.
+  //
+  // S1-sello · el boolean deja de significar "el PDF puede estar caducado"
+  // y pasa a significar **"existe un Z posterior que corrige a este"**: la
+  // venta tardía emite un `ShiftZReport` nuevo y marca el anterior como
+  // superado, en vez de dejar el cierre en un limbo sin sustituto.
   zReportStale   Boolean          @default(false) @map("z_report_stale")
 
   register   Register         @relation(fields: [registerId], references: [id], onDelete: Restrict)
@@ -1102,6 +1135,7 @@ model Shift {
   tickets    Ticket[]
   refunds    Refund[]
   cashCounts ShiftCashCount[]
+  zReports   ShiftZReport[]
 
   @@index([registerId, openedAt])
   @@index([registerId, closedAt])
@@ -1129,6 +1163,97 @@ model ShiftCashCount {
 
   @@index([shiftId, createdAt])
   @@map("shift_cash_counts")
+}
+
+// S1-sello · pieza 4 del bloque. El Z dejaba de ser un documento en el
+// momento en que vivía SÓLO como PDF en disco: un fichero sustituible
+// sin que nada lo detecte, y con `zReportStale` admitiendo que el
+// contenido podía haber caducado.
+//
+// Aquí el desglose queda CONGELADO en base de datos, con su huella. Y
+// cuando entra una venta tardía en un turno ya cerrado no se pisa el Z
+// anterior: se emite uno nuevo (`sequence` +1) y el anterior queda
+// marcado como corregido (`supersededAt` / `supersededById`), conservado.
+// Eso es lo que pasa a significar `Shift.zReportStale`: "existe un Z
+// posterior que corrige a este".
+//
+// Append-only por trigger: sólo se permite el UPDATE que marca una fila
+// como superada, y una sola vez.
+model ShiftZReport {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shiftId    String   @map("shift_id") @db.Uuid
+  // 1 = el Z del cierre. 2, 3… = los correctivos por ventas tardías.
+  sequence   Int
+  // El desglose entero (`ZBreakdown` + recuentos + fondo/contado) tal
+  // como se calculó. Es lo que el PDF pinta; ahora también es dato.
+  breakdown  Json
+  // SHA-256 (hex) del desglose canonicalizado. Ver `shift/z-seal.ts`.
+  sealedHash String   @map("sealed_hash")
+  sealedAt   DateTime @default(now()) @map("sealed_at") @db.Timestamptz()
+  // Ruta del PDF archivado, si lo hubo. Los correctivos nacen sin PDF:
+  // el documento emitido es el del cierre; este congela el número.
+  pdfPath    String?  @map("pdf_path")
+  // CLOSE = cierre del turno (manual o corte de día). LATE_SALE = venta
+  // que entró después de cerrar. CHECK en la migración.
+  reason     String
+
+  supersededAt   DateTime? @map("superseded_at") @db.Timestamptz()
+  supersededById String?   @map("superseded_by_id") @db.Uuid
+
+  shift Shift @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@unique([shiftId, sequence])
+  @@index([shiftId, sealedAt])
+  @@map("shift_z_reports")
+}
+
+// S1-sello · ADR-015 §4.3. La ÚNICA vía por la que una columna sellada
+// puede cambiar de valor.
+//
+// No es una tabla de log que alguien rellena por educación: el trigger
+// de Postgres exige que exista una fila de aquí, con el mismo
+// `txid_current()`, para la tabla/fila/columna que se está tocando. Sin
+// motivo no hay fila (CHECK), y sin fila no hay UPDATE. Si la
+// transacción revienta, se van las dos cosas a la vez.
+//
+// Se escribe SIEMPRE llamando a `record_ticket_correction(...)`, que lee
+// el valor anterior del propio motor, inserta aquí y hace el UPDATE. El
+// código de la aplicación no escribe una columna sellada a mano nunca.
+//
+// Append-only por trigger: UPDATE y DELETE denegados.
+model TicketCorrection {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  ticketId  String   @map("ticket_id") @db.Uuid
+  // tickets | ticket_lines | ticket_payments
+  tableName String   @map("table_name")
+  rowId     String   @map("row_id") @db.Uuid
+  field     String
+  // Representación textual (la de `to_jsonb(fila)->>columna`) del valor
+  // antes y después. Texto y no el tipo nativo: una sola tabla sirve
+  // para tres tablas y para columnas de tipos distintos.
+  oldValue  String?  @map("old_value")
+  newValue  String?  @map("new_value")
+  // Obligatorio y en texto libre. CHECK `btrim(reason) <> ''`.
+  reason    String
+  // Quién. `userId` cuando hay usuario del tenant detrás; `author` es la
+  // etiqueta legible SIEMPRE, incluido lo que no es una persona
+  // ("script:backfill-vuelta").
+  author    String
+  userId    String?  @map("user_id") @db.Uuid
+  // Transacción en la que se escribió. Es lo que el trigger compara.
+  txid      BigInt
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, createdAt])
+  @@index([tenantId, createdAt])
+  // Por aquí busca el trigger en CADA update de columna sellada. Va
+  // declarado aunque lo cree la migración a mano: si no, el siguiente
+  // `prisma migrate dev` lo daría por sobrante y lo borraría.
+  @@index([txid, tableName, rowId, field])
+  @@map("ticket_corrections")
 }
 
 model Ticket {
@@ -1230,6 +1355,19 @@ model Ticket {
   voidReason           TicketVoidReason? @map("void_reason")
   voidedAt             DateTime?         @map("voided_at") @db.Timestamptz()
   voidedByUserId       String?           @map("voided_by_user_id") @db.Uuid
+  // S1-sello · ADR-015 §4.1. SHA-256 (hex) del conjunto económico de la
+  // venta —totales, líneas en orden determinista y pagos— calculado EN EL
+  // SERVIDOR al persistir el cobro, nunca en el terminal. `sealedAt` es
+  // el interruptor que mira el trigger de Postgres: con él no nulo, las
+  // columnas económicas de esta fila (y toda TicketLine / TicketPayment
+  // que cuelgue) dejan de poder modificarse salvo por la vía de
+  // corrección (`TicketCorrection`).
+  //
+  // NULL = ticket pre-sello. No se sella retroactivamente (ADR-015 §5.2):
+  // el histórico anterior al despliegue queda así para siempre y todo
+  // informe que agregue ventas tiene que tolerar las dos poblaciones.
+  sealedHash           String?           @map("sealed_hash")
+  sealedAt             DateTime?         @map("sealed_at") @db.Timestamptz()
 
   tenant          Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   register        Register               @relation(fields: [registerId], references: [id], onDelete: Restrict)
@@ -1242,6 +1380,7 @@ model Ticket {
   refunds         Refund[]
   emailJobs       TicketEmailJob[]
   printIntents    PrintIntent[]
+  corrections     TicketCorrection[]
   // B-reservas-4 · cita → caja: el ticket pre-poblado que abre "Cobrar en
   // caja". Como mucho una cita apunta a un ticket (puente 1:0..1).
   appointment     Appointment?
@@ -1253,6 +1392,8 @@ model Ticket {
   @@index([shiftId])
   @@index([externalId])
   @@index([tableId, status])
+  // S1-sello · separar sellados de pre-sello en los listados del admin.
+  @@index([tenantId, sealedAt])
   // v1.8-Fiado · el listado de deudas por cliente (GET /credits) filtra
   // tickets con deuda viva por contacto. El índice PARCIAL real
   //   (tenant_id, contact_holded_id) WHERE credit_pending > 0
@@ -2142,6 +2283,83 @@ model BookingPolicy {
 
   @@unique([tenantId, key])
   @@map("booking_policies")
+}
+
+// ─── B-reservas-7a · El horario del centro ──────────────────────────────
+//
+// El TECHO de la agenda. Hasta este bloque la disponibilidad salía SÓLO de
+// los turnos del personal (`staff_shifts` → `store.getTemplateSlots`): si
+// nadie definía turno el centro no abría, y si alguien lo definía de par en
+// par el centro abría de par en par. La ventana de un profesional en una
+// fecha pasa a ser `turno ∩ horario_del_centro(fecha)`, y de ahí se siguen
+// descontando los bloqueos y las citas como hasta ahora.
+//
+// Migración ADITIVA con backfill VACÍO: un tenant sin ninguna fila en
+// `center_hours` NO tiene techo y se comporta exactamente como antes de
+// este bloque. Ésa es la compatibilidad, y está testeada.
+//
+// NO se toca `StaffShift` (D-3 del cruce): es contrato vivo de B3.
+
+// La semana tipo del centro. VARIAS filas por día = horario partido
+// (10:00–14:00 y 17:00–20:30). `openTime`/`closeTime` son horas de PARED
+// "HH:MM", igual que en `StaffShift`: la recurrencia la da `weekday` y la
+// hora estos campos, sin conversión. `validFrom`/`validUntil` acotan la
+// vigencia (una semana tipo cambia por temporada).
+//
+// `weekday` es ISO-8601: 1 = lunes … 7 = domingo. NO el `getUTCDay()` de
+// JS (0 = domingo) porque la pantalla se lee de lunes a domingo y porque
+// "cierra el domingo" tiene que poder escribirse sin pensar. El CHECK del
+// rango vive en la base de datos.
+model CenterHours {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  weekday    Int
+  openTime   String    @map("open_time")
+  closeTime  String    @map("close_time")
+  validFrom  DateTime  @map("valid_from") @db.Date
+  validUntil DateTime? @map("valid_until") @db.Date
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, weekday])
+  @@map("center_hours")
+}
+
+// Los días especiales del centro. Una fila es O BIEN un cierre con nombre
+// (un festivo, "vacaciones de agosto") O BIEN un horario propio de ese día
+// con nombre ("boda Marta").
+//
+// Un día especial SUSTITUYE al horario semanal de ese día; no se suma. Un
+// solo rango por día basta: un festivo no tiene horario partido y un sábado
+// de boda tampoco.
+//
+// POR QUÉ ES UNA TABLA Y NO UN `BookingBlock scope=CENTER`: un bloqueo sólo
+// sabe CERRAR. El sábado de la boda hay que ABRIR a las 8:30, antes de la
+// hora normal, y eso un bloqueo no lo puede decir. Y el festivo necesita un
+// NOMBRE que la rejilla pueda leer en voz alta ("Cerrado · Virgen del
+// Prado"); el `reason` de un bloqueo no viaja hoy hasta la pantalla.
+//
+// El CHECK de coherencia (cerrado ⇒ sin horas; abierto ⇒ con las dos y
+// ordenadas) y el de nombre no vacío viven en la base de datos.
+model CenterDay {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  date      DateTime @db.Date
+  closed    Boolean  @default(true)
+  name      String
+  openTime  String?  @map("open_time")
+  closeTime String?  @map("close_time")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, date])
+  @@index([tenantId])
+  @@map("center_days")
 }
 
 // A3-distribución · código de un solo uso (bueno, de tres) para descargar la

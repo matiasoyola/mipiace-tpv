@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-
 import { Check, Eye, EyeOff, KeyRound, RotateCcw } from "lucide-react";
 
 import { AdminShell } from "./AdminShell.js";
+import { CajaGate } from "./CajaGate.js";
 import { ImpersonationBootstrap } from "./components/ImpersonationBootstrap.js";
 import { CashiersPage } from "./pages/CashiersPage.js";
 import { DevicesPage } from "./pages/DevicesPage.js";
@@ -13,6 +14,7 @@ import { PrintersPage } from "./pages/PrintersPage.js";
 import { SecurityPage } from "./pages/SecurityPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 import { AgendaCatalogPage } from "./pages/AgendaCatalogPage.js";
+import { AgendaHorarioPage } from "./pages/AgendaHorarioPage.js";
 import { StaffPage } from "./pages/StaffPage.js";
 import { ContactImportPage } from "./pages/ContactImportPage.js";
 import { StoreDetailPage, StoresPage } from "./pages/StoresPage.js";
@@ -64,10 +66,32 @@ interface MeResponse {
     id: string;
     name: string;
     hasHoldedKey: boolean;
-    initialSyncStatus: "PENDING" | "RUNNING" | "DONE" | "FAILED";
+    // H1 · NOT_APPLICABLE en la empresa que nunca va a sincronizar.
+    initialSyncStatus:
+      | "PENDING"
+      | "RUNNING"
+      | "DONE"
+      | "FAILED"
+      | "NOT_APPLICABLE";
     fiscalProfile: Record<string, unknown> | null;
     lastIncrementalSyncAt: string | null;
+    // H1 (ADR-016) · los módulos del tenant. Opcionales para no romper
+    // si el front va por delante del backend en un despliegue parcial;
+    // los defaults reproducen el comportamiento de master.
+    cajaEnabled?: boolean;
+    crmEnabled?: boolean;
+    agendaEnabled?: boolean;
   };
+}
+
+// H1 · a dónde entra una empresa SIN caja. No hay pantalla de "inicio"
+// en el panel del cliente: se entra a la primera sección que tenga
+// sentido con sus módulos. La agenda es la única sección de panel que
+// aporta un módulo hoy; el CRM del cliente vive en el TPV, así que una
+// empresa con CRM y sin agenda aterriza en su cuenta.
+function landingSinCaja(tenant: MeResponse["tenant"]): string {
+  if (tenant.agendaEnabled) return "/admin/agenda-catalog";
+  return "/admin/account";
 }
 
 export function App() {
@@ -82,23 +106,37 @@ export function App() {
         <Route path="/onboarding" element={<ConnectHoldedPage />} />
         <Route path="/onboarding/sync" element={<SyncProgressPage />} />
         <Route path="/onboarding/done" element={<SyncSummaryPage />} />
+        {/* H1 (ADR-016) · las pantallas que cuelgan de la caja van
+            envueltas en <CajaGate>: esconderlas del sidebar no basta,
+            porque la URL sigue existiendo. La puerta de verdad es la del
+            servidor (`lib/caja-gate.ts`); ésta es para que el cliente lea
+            una frase en vez de un error. "Mi cuenta", "Seguridad",
+            "Tiendas", "Personal", "Agenda · Catálogo" y "Agenda · Horario"
+            NO se envuelven: valen sin caja. */}
         <Route path="/admin/account" element={<AccountPage />} />
-        <Route path="/admin/products" element={<SkuReviewPage />} />
-        <Route path="/admin/devices" element={<DevicesPage />} />
-        <Route path="/admin/cashiers" element={<CashiersPage />} />
+        <Route path="/admin/products" element={<CajaGate title="Productos"><SkuReviewPage /></CajaGate>} />
+        <Route path="/admin/devices" element={<CajaGate title="Dispositivos"><DevicesPage /></CajaGate>} />
+        <Route path="/admin/cashiers" element={<CajaGate title="Cajeros"><CashiersPage /></CajaGate>} />
         <Route path="/admin/contacts-import" element={<ContactImportPage />} />
         <Route path="/admin/security" element={<SecurityPage />} />
         <Route path="/admin/stores" element={<StoresPage />} />
         <Route path="/admin/stores/:storeId" element={<StoreDetailPage />} />
-        <Route path="/admin/tickets-errors" element={<TicketsErrorsPage />} />
+        <Route path="/admin/tickets-errors" element={<CajaGate title="Holded"><TicketsErrorsPage /></CajaGate>} />
+        {/* H1 · Ajustes NO va envuelto: dentro vive la sección "Módulos del
+            negocio" (CRM y agenda), que es justo lo que una empresa sin
+            caja necesita tocar. La propia pantalla esconde las secciones
+            que cuelgan de la caja. */}
         <Route path="/admin/settings" element={<SettingsPage />} />
         <Route path="/admin/staff" element={<StaffPage />} />
         <Route path="/admin/agenda-catalog" element={<AgendaCatalogPage />} />
-        <Route path="/admin/tag-aliases" element={<TagAliasesPage />} />
-        <Route path="/admin/tag-sections" element={<TagSectionsPage />} />
-        <Route path="/admin/printers" element={<PrintersPage />} />
-        <Route path="/admin/holded" element={<HoldedPage />} />
-        <Route path="/admin/gift-receipts" element={<GiftReceiptsPage />} />
+        {/* B-reservas-7a · el horario del centro NO va envuelto: es agenda,
+            no caja. Misma regla que "Agenda · Catálogo". */}
+        <Route path="/admin/agenda-hours" element={<AgendaHorarioPage />} />
+        <Route path="/admin/tag-aliases" element={<CajaGate title="Etiquetas"><TagAliasesPage /></CajaGate>} />
+        <Route path="/admin/tag-sections" element={<CajaGate title="Comanderas"><TagSectionsPage /></CajaGate>} />
+        <Route path="/admin/printers" element={<CajaGate title="Impresoras"><PrintersPage /></CajaGate>} />
+        <Route path="/admin/holded" element={<CajaGate title="Sync Holded"><HoldedPage /></CajaGate>} />
+        <Route path="/admin/gift-receipts" element={<CajaGate title="Tickets regalo"><GiftReceiptsPage /></CajaGate>} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/admin/reset" element={<ResetPasswordPage />} />
         {/* B-SuperAdmin: consola super-admin (shell propio, sesión separada) */}
@@ -122,7 +160,10 @@ export function App() {
   );
 }
 
-function RootRouter() {
+// H1 · exportado para poder probar la decisión de entrada sin montar la
+// app entera. Es LA pieza del bloque en el panel del cliente: decidir a
+// dónde entra una empresa según sus módulos.
+export function RootRouter() {
   const navigate = useNavigate();
   useEffect(() => {
     let cancelled = false;
@@ -139,6 +180,17 @@ function RootRouter() {
         // tickets-errors, que es su pantalla operativa principal.
         if (me.user.role === "MANAGER") {
           navigate("/admin/tickets-errors", { replace: true });
+          return;
+        }
+        // H1 (ADR-016) · la redirección a /onboarding vale SÓLO para la
+        // empresa que TIENE caja y aún no ha conectado Holded. Antes de
+        // este bloque, cualquier tenant sin clave caía aquí y no salía:
+        // era el muro que dejaba al colegio fuera de su propio panel.
+        //
+        // Sin caja se entra directo a lo que le corresponda por sus
+        // módulos. Ni /onboarding, ni /onboarding/sync, ni sync alguno.
+        if (me.tenant.cajaEnabled === false) {
+          navigate(landingSinCaja(me.tenant), { replace: true });
           return;
         }
         if (!me.tenant.hasHoldedKey) navigate("/onboarding", { replace: true });
@@ -793,6 +845,9 @@ type FiscalProfile = {
   country?: string;
   source?: string;
   name?: string; // legado: del almacén default lo guarda como "name".
+  // H1 · la clave que el backend escribe desde B-OnboardingV2
+  // (`superadmin/tenants.ts`) y la única que trae un alta manual.
+  legalName?: string;
 };
 
 function AccountPage() {
@@ -814,6 +869,10 @@ function AccountPage() {
         }
       });
   }, [navigate]);
+
+  // H1 · `!== false` y no `!`: la columna es `@default(true)` y el campo
+  // puede faltar si el front va por delante del backend.
+  const cajaEnabled = me?.tenant.cajaEnabled !== false;
 
   async function onTestConnection() {
     setTesting(true);
@@ -855,6 +914,13 @@ function AccountPage() {
         }}
       />
 
+      {/* H1 (ADR-016) · el estado de Holded es de la caja: lo que se
+          sincroniza es el catálogo y lo que sube son los tickets. Una
+          empresa sin caja no tiene ni lo uno ni lo otro, y este panel le
+          enseñaba "No conectada" con un check verde y dos botones que no
+          sirven. Una empresa CON caja y sin clave sí lo sigue viendo —
+          ésa es la que tiene algo que conectar. */}
+      {cajaEnabled && (
       <section className="bg-white rounded-2xl border border-slate-200 p-6 md:p-7 mb-5">
         <h2 className="text-[17px] font-semibold text-mipiace-ink tracking-tight mb-1">
           Conexión con Holded
@@ -907,8 +973,11 @@ function AccountPage() {
             <FieldError message={testMessage.text} />
           ))}
       </section>
+      )}
 
-      {canEdit && <OwnerPinSection />}
+      {/* H1 · el PIN de respaldo autoriza descuentos y cierres EN EL TPV.
+          Sin caja no hay TPV, y el propio `activate` ya no lo genera. */}
+      {canEdit && cajaEnabled && <OwnerPinSection />}
 
       {showRotateModal && (
         <RotateKeyModal
@@ -1058,7 +1127,9 @@ function FiscalProfileSection({
             <TextField
               id="businessName"
               label="Razón social"
-              value={form.businessName ?? ""}
+              // H1 · mismo alias que en la lectura: al entrar a editar, el
+              // campo arranca con lo que el implantador tecleó.
+              value={form.businessName ?? form.legalName ?? form.name ?? ""}
               onChange={(v) => setForm({ ...form, businessName: v })}
             />
             <TextField
@@ -1110,7 +1181,18 @@ function FiscalProfileSection({
         </div>
       ) : (
         <div className="grid sm:grid-cols-2 gap-x-6 gap-y-4 mt-5">
-          <ReadOnlyField label="Razón social" value={form.businessName ?? form.name ?? "—"} />
+          {/* H1 · fuera del alcance del bloque, pero en su camino: el
+              backend escribe la razón social como `legalName` desde
+              B-OnboardingV2 (`superadmin/tenants.ts`) y esta pantalla
+              sólo leía `businessName`/`name`, así que salía "—". Hasta
+              ahora se notaba poco porque el dato venía de Holded; con el
+              alta manual de H1 es lo que el implantador acaba de teclear
+              y el propietario lo primero que mira. Se añade el alias a la
+              LECTURA; el guardado sigue escribiendo `businessName`. */}
+          <ReadOnlyField
+            label="Razón social"
+            value={form.businessName ?? form.legalName ?? form.name ?? "—"}
+          />
           <ReadOnlyField label="NIF / CIF" value={form.nif ?? "—"} tabular />
           <ReadOnlyField
             label="Dirección"

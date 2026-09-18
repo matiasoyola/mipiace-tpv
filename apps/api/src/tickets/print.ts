@@ -33,6 +33,7 @@ import { cashierLabelFrom } from "../users/display.js";
 import { loadTicketDocument } from "./build-document.js";
 import { changeFromCash } from "@mipiacetpv/ticket-model";
 import type { TicketTotals } from "@mipiacetpv/ticket-model";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 
 interface PrintQuery {
   target: "usb" | "wifi";
@@ -47,7 +48,7 @@ export async function registerTicketPrintRoute(
   app.post(
     "/tickets/:ticketId/print/escpos",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",

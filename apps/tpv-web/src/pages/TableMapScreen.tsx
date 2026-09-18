@@ -742,7 +742,7 @@ export function TableMapScreen(props: TableMapScreenProps) {
 
       {/* v1.9.3-mapa-visual · cobro directo desde la tarjeta BILLING.
           El modal de cobro ES el mismo que en SalePage (CheckoutOverlay),
-          en modo mesa (tableTicketId/tableId) — mismo endpoint, misma
+          en modo mesa (draftTicketId/tableId) — mismo endpoint, misma
           idempotencia, cero cambios de flujo de dinero. */}
       {cobro && props.shiftId && props.registerId && (
         <Suspense
@@ -760,10 +760,11 @@ export function TableMapScreen(props: TableMapScreenProps) {
             contact={null}
             notes=""
             businessType={getCachedBusinessType()}
-            tableTicketId={cobro.ticketId}
+            draftTicketId={cobro.ticketId}
+            draftLabel="Mesa"
             tableId={cobro.table.id}
             creditSalesEnabled={getCachedCreditSalesEnabled()}
-            onRefetchTable={async () => {
+            onRefetchDraft={async () => {
               const res = await apiWithCashier<{ ticket: ServerDraft }>(
                 `/tickets/${cobro.ticketId}`,
               );
@@ -772,14 +773,22 @@ export function TableMapScreen(props: TableMapScreenProps) {
                 c ? { ...c, lines: l, totals: computeCart(l) } : c,
               );
             }}
-            onTableClosedElsewhere={(text) => {
+            onDraftClosedElsewhere={(text) => {
               setCobro(null);
               setNotice({ text, tone: "info" });
               void load();
             }}
-            onTablePaidExit={({ notice: text, ticketQuery }) => {
+            onDraftPaidExit={({ internalNumber, ticketQuery }) => {
               setCobro(null);
-              setNotice({ text, tone: "success", ticketQuery });
+              // B-reservas-5 F2 · el aviso lo redacta quien sabe qué se
+              // cobró. Aquí siempre es una mesa.
+              setNotice({
+                text: internalNumber
+                  ? `Mesa cobrada · Ticket ${internalNumber}`
+                  : "Mesa cobrada",
+                tone: "success",
+                ticketQuery,
+              });
               void load();
             }}
             onClose={() => setCobro(null)}

@@ -12,6 +12,7 @@ import type { FastifyInstance } from "fastify";
 
 import { requireCashierSession } from "../shift/cashier-session.js";
 import { dispatchKitchenTicket } from "./kitchen-dispatch.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 
 export async function registerSendToKitchenEscposRoute(
   app: FastifyInstance,
@@ -19,7 +20,7 @@ export async function registerSendToKitchenEscposRoute(
   app.post(
     "/tickets/:ticketId/send-to-kitchen/escpos",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",

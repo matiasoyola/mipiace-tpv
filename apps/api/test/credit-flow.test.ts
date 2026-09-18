@@ -98,16 +98,32 @@ const fakePrisma: any = {
       Object.assign(t, data);
       return t;
     }),
+    // S1-sello · un fiado se sella al SALDARSE, no al venderse: su
+    // `paidAt` —columna sellada— es la fecha del saldo. El doble tiene
+    // que dejar que el sello relea el ticket con sus pagos.
+    findUniqueOrThrow: vi.fn(async ({ where }: any) => {
+      const t = ticketsById.get(where.id);
+      if (!t) throw new Error("ticket not found");
+      return t;
+    }),
   },
   ticketPayment: {
     findUnique: vi.fn(async ({ where }: any) =>
       paymentsByExternal.get(where.externalId) ?? null,
     ),
     create: vi.fn(async ({ data }: any) => {
-      const p = { id: randomUUID(), ...data };
+      const p = {
+        id: randomUUID(),
+        ...data,
+        amount: { toString: () => String(data.amount) },
+      };
       if (data.externalId) paymentsByExternal.set(data.externalId, p);
       const t = ticketsById.get(data.ticketId);
-      if (t) t._count = { payments: (t._count?.payments ?? 0) + 1 };
+      if (t) {
+        t._count = { payments: (t._count?.payments ?? 0) + 1 };
+        // El cobro de deuda entra en el conjunto que se sella al saldar.
+        t.payments = [...(t.payments ?? []), p];
+      }
       return p;
     }),
   },

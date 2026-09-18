@@ -7,6 +7,11 @@
 // El anti-solape NO se hace "en el código": `insertHold`/`reschedule`
 // disparan los EXCLUDE USING gist y, si Postgres los rechaza (23P01),
 // lanzan `ExclusionError` → el hueco se perdió, se devuelven alternativas.
+//
+// Y la carrera tiene DOS finales, no uno (frente carrera-409). Ver
+// `withRaceRetry` más abajo: el 23P01 es el final ordenado; el 40P01
+// (deadlock) es el mismo choque resuelto por la vía dura, y hasta este
+// frente salía por el manejador genérico como un 500.
 
 import { randomUUID } from "node:crypto";
 
@@ -20,6 +25,12 @@ const { RRule } = rrulePkg;
 type RRule = InstanceType<typeof RRule>;
 import type { PrismaClient } from "@mipiacetpv/db";
 
+import { sqlStateOf } from "../lib/sqlstate.js";
+import {
+  resolveCenterSchedule,
+  type CenterDayRow,
+  type CenterHoursRow,
+} from "./center-hours.js";
 import {
   wallTimeToUtc,
   utcToWallDate,
@@ -28,6 +39,7 @@ import type {
   AppointmentStatus,
   AppointmentView,
   BlockInterval,
+  CenterDayHours,
   Occupancy,
   PlannedAssignment,
   PlannedItem,
@@ -58,6 +70,136 @@ function isExclusionViolation(err: unknown): boolean {
   );
 }
 
+/**
+ * EL OTRO FINAL DE LA MISMA CARRERA (frente carrera-409).
+ *
+ * El `EXCLUDE USING gist` no se comprueba antes de escribir: el INSERT mete
+ * primero su entrada en el índice y LUEGO lo escanea buscando conflictos.
+ * Si encuentra uno de una transacción viva, la espera para saber si esa
+ * fila acaba contando o no.
+ *
+ * Con dos altas simultáneas sobre el mismo hueco hay dos entrelazados:
+ *
+ *   · una escanea antes de que la otra escriba → espera, la primera
+ *     comete, la segunda recibe **23P01** → `ExclusionError` → TAKEN → 409.
+ *     Es el camino de siempre y funciona;
+ *   · las dos escriben antes de que ninguna escanee → cada una encuentra la
+ *     entrada de la otra y cada una se pone a esperarla. Ciclo. Postgres
+ *     desatasca matando a una: **40P01 `deadlock_detected`**.
+ *
+ * El segundo es el que tenía el CI en rojo. Se reprodujo con las mismas dos
+ * altas del caso 3 repetidas: 44 de 120 perdedoras (37 %) salían por ahí
+ * (`docs/blocks/carrera-alta-409-plan.md` §1).
+ *
+ * Se incluye el **40001** (`serialization_failure`) porque es la misma
+ * familia y llegaría por el mismo sitio si algún día algo de esto corriera
+ * en REPEATABLE READ. No se ha observado ni una vez aquí.
+ */
+function isRaceAbort(err: unknown): boolean {
+  const state = sqlStateOf(err);
+  return state === "40P01" || state === "40001";
+}
+
+/** Un solo reintento. No es una política de resiliencia: es desempatar una
+ *  carrera de dos. Si con dos intentos no entra, la respuesta honesta es
+ *  ofrecer otras horas, no seguir insistiendo delante de una clienta. */
+const REINTENTOS_DE_CARRERA = 1;
+
+/**
+ * EL TESTIGO DE LA CARRERA (addendum del frente carrera-409).
+ *
+ * Cuántas veces ha pasado el código por la rama del deadlock. Tres cifras,
+ * monótonas y del proceso entero:
+ *
+ *   · `aborts`    — abortos de carrera reconocidos (40P01/40001), contando
+ *                   también los del reintento;
+ *   · `retries`   — veces que se ha reintentado la transacción;
+ *   · `exhausted` — veces que se agotó el tope y se salió por TAKEN.
+ *
+ * POR QUÉ ESTÁ EN `src/` Y NO EN EL TEST. El e2e necesita saber si una
+ * pasada ha ejercido DE VERDAD la rama del 40P01: un caso que pasa sin
+ * haber ejercido lo que dice cubrir miente. La primera versión se lo
+ * preguntaba a `pg_stat_database.deadlocks`, y eso **puso el CI en rojo**:
+ * en Postgres 16 ese contador lo acumula el backend víctima en sus
+ * estadísticas PENDIENTES y se vuelca con retraso — medido aquí mismo,
+ * **11 s ciego** en dos de tres rondas
+ * (`docs/blocks/carrera-alta-409-plan.md`, addendum §A.2). Este contador lo
+ * sabe en el instante, sin preguntarle nada a nadie.
+ *
+ * NO cambia el comportamiento: tres enteros que sólo suben. Y de paso vale
+ * para lo que no es un test — saber cuánto se está desatascando la agenda
+ * de un centro es una cifra de salud, no una curiosidad. Engancharla al
+ * panel de B-9 queda fuera de este frente.
+ */
+const raceStats = { aborts: 0, retries: 0, exhausted: 0 };
+
+export type RaceStats = Readonly<{
+  aborts: number;
+  retries: number;
+  exhausted: number;
+}>;
+
+/** Una foto del testigo. Copia: nadie de fuera toca el contador. */
+export function readRaceStats(): RaceStats {
+  return { ...raceStats };
+}
+
+/** Tope de la espera entre intentos, en ms. Corta a propósito: esto pasa
+ *  mientras alguien está de pie en el mostrador. Es ALEATORIA porque si los
+ *  dos perdedores reintentasen a la vez volverían a chocar igual. */
+const ESPERA_ENTRE_INTENTOS_MS = 25;
+
+function esperaCorta(): Promise<void> {
+  return new Promise((resolve) =>
+    setTimeout(resolve, Math.floor(Math.random() * ESPERA_ENTRE_INTENTOS_MS)),
+  );
+}
+
+/**
+ * Corre una transacción que compite por el `EXCLUDE` y traduce sus dos
+ * finales. **La unidad que se reintenta es la TRANSACCIÓN ENTERA**, no la
+ * sentencia: un deadlock aborta toda la transacción y Postgres ya ha
+ * deshecho lo escrito, así que reejecutar el INSERT suelto ni siquiera es
+ * posible. Por eso `run` tiene que ser idempotente contra sí mismo, y lo
+ * es: `insertHold` no dejó ninguna fila y `reschedule` recuperó las suyas.
+ *
+ * Salidas:
+ *
+ *   · **23P01** → `ExclusionError` (TAKEN → 409 con alternativas). No se
+ *     reintenta: el hueco es de otra de verdad, insistir no lo devuelve;
+ *   · **40P01 / 40001** → se reintenta UNA vez la transacción entera. Un
+ *     deadlock NO significa que el hueco se haya perdido: significa que
+ *     Postgres tumbó a una de las dos para desatascarlas, y la tumbada
+ *     puede entrar perfectamente. Si el reintento entra, la cita es válida
+ *     y sale 201;
+ *   · si el reintento choca contra el `EXCLUDE`, entonces sí: TAKEN;
+ *   · si el reintento vuelve a deadlockear, se acabó el tope y sale
+ *     igualmente TAKEN. Es un falso negativo asumido a propósito: como
+ *     mucho se le ofrecen a la clienta tres horas más (entre ellas, casi
+ *     seguro, la que pidió), mientras que un 500 la deja sin salida y sin
+ *     frase que leer. «Nunca un 500» manda sobre «nunca un TAKEN de más».
+ *
+ * Lo que NO hace: bucle, espera larga, ni mapear el deadlock directo a
+ * TAKEN sin haberlo intentado otra vez.
+ */
+async function withRaceRetry<T>(run: () => Promise<T>): Promise<T> {
+  for (let intento = 0; ; intento++) {
+    try {
+      return await run();
+    } catch (err) {
+      if (isExclusionViolation(err)) throw new ExclusionError();
+      if (!isRaceAbort(err)) throw err;
+      raceStats.aborts += 1;
+      if (intento >= REINTENTOS_DE_CARRERA) {
+        raceStats.exhausted += 1;
+        throw new ExclusionError();
+      }
+      raceStats.retries += 1;
+      await esperaCorta();
+    }
+  }
+}
+
 export interface HoldInput {
   tenantId: string;
   externalId: string | null;
@@ -86,6 +228,14 @@ export interface AgendaStore {
     fromDate: string,
     toDate: string,
   ): Promise<TemplateSlot[]>;
+  // B-reservas-7a · EL TECHO. El horario del centro fecha a fecha en el
+  // rango. `open: null` para una fecha = este tenant no tiene horario
+  // configurado ahí ⇒ sin techo, exactamente como antes de este bloque.
+  getCenterSchedule(
+    tenantId: string,
+    fromDate: string,
+    toDate: string,
+  ): Promise<Map<string, CenterDayHours>>;
   getOccupancies(tenantId: string, from: Date, to: Date): Promise<Occupancy[]>;
   getBlocks(tenantId: string, from: Date, to: Date): Promise<BlockInterval[]>;
   getResourcesByKind(
@@ -240,6 +390,66 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
       return out;
     },
 
+    async getCenterSchedule(tenantId, fromDate, toDate) {
+      // Las dos tablas del techo. La resolución (qué manda sobre qué) es
+      // pura y vive en `center-hours.ts`; aquí sólo se traen las filas.
+      //
+      // `@db.Date` llega como `Date` a medianoche UTC: se normaliza a
+      // "YYYY-MM-DD" ANTES de comparar nada. Comparar una fecha de pared
+      // contra un instante es la clase de error que aparece un 25 de
+      // octubre y no antes.
+      const [weekRows, dayRows] = await Promise.all([
+        prisma.centerHours.findMany({
+          where: {
+            tenantId,
+            validFrom: { lte: new Date(`${toDate}T00:00:00.000Z`) },
+            OR: [
+              { validUntil: null },
+              { validUntil: { gte: new Date(`${fromDate}T00:00:00.000Z`) } },
+            ],
+          },
+          select: {
+            weekday: true,
+            openTime: true,
+            closeTime: true,
+            validFrom: true,
+            validUntil: true,
+          },
+        }),
+        prisma.centerDay.findMany({
+          where: {
+            tenantId,
+            date: {
+              gte: new Date(`${fromDate}T00:00:00.000Z`),
+              lte: new Date(`${toDate}T00:00:00.000Z`),
+            },
+          },
+          select: {
+            date: true,
+            closed: true,
+            name: true,
+            openTime: true,
+            closeTime: true,
+          },
+        }),
+      ]);
+      const week: CenterHoursRow[] = weekRows.map((r) => ({
+        weekday: r.weekday,
+        openTime: r.openTime,
+        closeTime: r.closeTime,
+        validFrom: isoDate(r.validFrom),
+        validUntil: r.validUntil ? isoDate(r.validUntil) : null,
+      }));
+      const days: CenterDayRow[] = dayRows.map((r) => ({
+        date: isoDate(r.date),
+        closed: r.closed,
+        name: r.name,
+        openTime: r.openTime,
+        closeTime: r.closeTime,
+      }));
+      return resolveCenterSchedule(week, days, fromDate, toDate);
+    },
+
     async getOccupancies(tenantId, from, to) {
       const rows = await prisma.$queryRawUnsafe<
         Array<{
@@ -296,8 +506,13 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
       const apptId = randomUUID();
       // ids de item por índice, para mapear assignments.
       const itemIds = input.items.map(() => randomUUID());
-      try {
-        await prisma.$transaction(async (tx) => {
+      // La transacción entera va dentro de `withRaceRetry`: es la unidad
+      // que se reintenta si la carrera acaba en deadlock. `apptId` e
+      // `itemIds` se generan FUERA a propósito — un intento abortado no
+      // deja fila, así que el reintento reusa los mismos ids y no hay dos
+      // citas ni por un microsegundo.
+      await withRaceRetry(() =>
+        prisma.$transaction(async (tx) => {
           await tx.$executeRawUnsafe(
             `INSERT INTO appointments
                (id, tenant_id, external_id, mode, client_id, timeslot, status, source,
@@ -354,11 +569,8 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
               a.endsAt.toISOString(),
             );
           }
-        });
-      } catch (err) {
-        if (isExclusionViolation(err)) throw new ExclusionError();
-        throw err;
-      }
+        }),
+      );
       const view = await this.getAppointmentView(input.tenantId, apptId);
       if (!view) throw new Error("appointment vanished after insert");
       return view;
@@ -457,8 +669,12 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
         orderBy: { sortOrder: "asc" },
         select: { id: true },
       });
-      try {
-        await prisma.$transaction(async (tx) => {
+      // Mover tiene la MISMA forma y el MISMO `EXCLUDE` debajo, así que
+      // cae en la misma carrera: mismo trato. El reintento es seguro
+      // porque el rollback devuelve los assignments que el `deleteMany`
+      // había borrado — la cita vuelve a estar donde estaba.
+      await withRaceRetry(() =>
+        prisma.$transaction(async (tx) => {
           await tx.appointmentAssignment.deleteMany({
             where: { tenantId, appointmentId: id },
           });
@@ -491,11 +707,8 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
               a.endsAt.toISOString(),
             );
           }
-        });
-      } catch (err) {
-        if (isExclusionViolation(err)) throw new ExclusionError();
-        throw err;
-      }
+        }),
+      );
       return this.getAppointmentView(tenantId, id);
     },
 
@@ -653,14 +866,20 @@ async function readBlocks(
   // Puntuales.
   const punctual = await prisma.$queryRawUnsafe<
     Array<{
+      id: string;
       scope: "CENTER" | "STAFF" | "RESOURCE" | "TABLE";
       staff_user_id: string | null;
       resource_id: string | null;
+      reason: string | null;
       starts_at: Date;
       ends_at: Date;
     }>
   >(
-    `SELECT scope, staff_user_id, resource_id, lower(slot) AS starts_at, upper(slot) AS ends_at
+    // B-reservas-7a · `id` y `reason` salen de aquí porque la AGENDA los
+    // necesita: una ausencia se pinta con su motivo y se quita tocándola,
+    // lo que exige su id. El motor no los mira.
+    `SELECT id, scope, staff_user_id, resource_id, reason,
+            lower(slot) AS starts_at, upper(slot) AS ends_at
      FROM booking_blocks
      WHERE tenant_id = $1::uuid AND slot IS NOT NULL
        AND slot && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
@@ -670,9 +889,11 @@ async function readBlocks(
   );
   for (const b of punctual) {
     out.push({
+      id: b.id,
       scope: b.scope,
       staffUserId: b.staff_user_id,
       resourceId: b.resource_id,
+      reason: b.reason,
       startsAt: b.starts_at,
       endsAt: b.ends_at,
     });
@@ -686,9 +907,11 @@ async function readBlocks(
       OR: [{ validUntil: null }, { validUntil: { gte: from } }],
     },
     select: {
+      id: true,
       scope: true,
       staffUserId: true,
       resourceId: true,
+      reason: true,
       rrule: true,
       startTime: true,
       endTime: true,
@@ -708,9 +931,14 @@ async function readBlocks(
       new Date(`${toDate}T23:59:59.999Z`),
     )) {
       out.push({
+        // Todas las repeticiones comparten el id del bloqueo recurrente:
+        // quitar una desde la agenda quita el bloqueo entero, y eso la
+        // pantalla lo dice antes de hacerlo.
+        id: b.id,
         scope: b.scope,
         staffUserId: b.staffUserId,
         resourceId: b.resourceId,
+        reason: b.reason,
         startsAt: wallTimeToUtc(d, b.startTime),
         endsAt: wallTimeToUtc(d, b.endTime),
       });
@@ -743,4 +971,12 @@ function expandRule(
     return [];
   }
   return rule.between(start, end, true).map((d) => d.toISOString().slice(0, 10));
+}
+
+// `@db.Date` de Prisma llega como `Date` a medianoche UTC. La fecha de
+// pared es su parte UTC, SIN pasar por la zona del proceso: `toISOString`
+// y cortar. Un `getFullYear()` aquí daría el día anterior en cualquier
+// huso al oeste de Greenwich.
+function isoDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
 }

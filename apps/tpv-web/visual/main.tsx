@@ -22,6 +22,42 @@
 //   v1.15-la-vuelta-existe: ticket-emitido (3,00 € cobrados con un billete
 //     de 5: TOTAL / ENTREGADO / CAMBIO) · ticket-emitido-sin-vuelta (el
 //     mismo cobro clavado: el bloque no se pinta)
+//   B-reservas-6a-el-suelo: agenda con `?at=` (el reloj) — lo anterior al
+//     comienzo de la franja EN CURSO sale apagado — y `?fallo=pasado`, que
+//     devuelve el 409 BOOKING_IN_PAST con su frase y sus tres alternativas
+//   B-reservas-6a-frente-O: `?encolada=sin-enviar` y `?encolada=rechazada`
+//     siembran el outbox con un alta creada sin red, para ver que la cita
+//     se pinta en su hueco y que la rechazada NO desaparece de la agenda
+//   B-reservas-9-panel-salud: `agenda-salud` (las seis tarjetas del centro
+//     de Sole: dos servicios que nadie puede hacer, tres tarjetas apagadas
+//     diciendo de qué dependen), `agenda-salud-vacia` (el mismo panel con
+//     el 0 y su buena noticia), `agenda-salud-error` (sin servidor: la
+//     última foto con su hora + reintentar), `agenda-matriz` (la matriz
+//     servicio × profesional con la ficha del servicio abierta),
+//     `agenda-matriz-catalogo` (la rejilla a escala de catálogo real: 36
+//     servicios y cuatro profesionales, donde se ve que la cabecera aguanta
+//     el scroll) y `agenda-matriz-sin-nadie` (el día que un centro enciende
+//     la agenda: catálogo cargado y ni un perfil de agenda)
+//   B-reservas-7a-el-horario: `?dia=` y `?reticula=` cambian el horario del
+//     centro que devuelve `GET /agenda`:
+//       · `dia=normal`  (por defecto) 9:00–20:00, con la ausencia de Nuria
+//         de 9:00 a 10:30 pintada y la cita de las 17:00 de Sole fuera de
+//         horario porque el horario se acortó después;
+//       · `dia=cerrado` festivo con nombre → «Cerrado · Virgen del Prado»;
+//       · `dia=boda`    día especial de 8:30 a 14:00 («boda Marta»);
+//       · `dia=sin-techo` el centro que no ha configurado nada (como antes
+//         del bloque: ni bandas apagadas ni cierre);
+//       · `reticula=30` la retícula del centro en franjas de media hora
+//   B-reservas-mostrador: el mostrador de la agenda
+//       · `colores=matriz` las tres profesionales con el caso duro del tinte:
+//         Sole con un morado OSCURO, Ana con un amarillo CLARÍSIMO e Isa SIN
+//         color (la agenda le da uno estable derivado de su id);
+//       · `sin-apellidos=1` mete una clienta apuntada sólo por el nombre de
+//         pila, para ver el A–Z y la tarjeta;
+//       · `holded=resultados | vacio | sin-red` controla qué contesta
+//         `GET /contacts/search` para el selector de cliente;
+//       · pantalla `clientes` (la sección Clientes con su ficha), donde vive
+//         la fecha de nacimiento con máscara.
 
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -30,6 +66,7 @@ import "../src/index.css";
 
 import type { CartLine, CartTotals } from "../src/lib/cart.js";
 import type { ApiTable } from "../src/pages/TableMapScreen.js";
+import type { AppointmentContext } from "../src/pages/SalePage.js";
 
 // ── fixtures ──────────────────────────────────────────────────────────
 
@@ -291,6 +328,433 @@ const TICKET_DIGITAL = {
 
 // Sesión de mentira: `apiWithCashier` corta con 401 antes de tocar la
 // red si no hay cajero en localStorage, así que el banco necesita una.
+// ── B-reservas-5 · fixtures de la peluquería (Sole) ───────────────────
+//
+// El banco necesitaba un vertical SERVICES con agenda para el bucle
+// visual de este bloque: 3 profesionales, servicios con `durationMin` y
+// un día con las seis situaciones que la agenda sabe pintar (pendiente,
+// confirmada, en sala, finalizada, multi-servicio y hueco libre).
+//
+// Las horas se componen como HORA DE PARED de Europe/Madrid, igual que
+// hace el motor (`apps/api/src/agenda/time.ts`): así la captura sale
+// idéntica se tome desde el Mac o desde CI, que no comparten zona.
+
+// B-reservas-5 · reloj congelado del banco.
+//
+// Sin esto, dos capturas de la misma pantalla NUNCA salen iguales: la
+// agenda pinta la línea de "ahora" y hace auto-scroll hasta ella, y la
+// barra inferior lleva la hora. Eso convierte el antes/después de la
+// mudanza en un ejercicio de fe. Con `?at=HH:MM` (por defecto 11:20) el
+// banco fija el instante y la comparación es byte a byte.
+//
+// Sólo el banco visual. No entra en el bundle de producción.
+function freezeClock(): void {
+  const at = new URLSearchParams(window.location.search).get("at") ?? "11:20";
+  const [hh, mm] = at.split(":").map(Number);
+  const fixed = new Date(madridIso(hh ?? 11, mm ?? 20)).getTime();
+  const RealDate = Date;
+  const FrozenDate = function (this: unknown, ...args: unknown[]) {
+    if (args.length === 0) return new RealDate(fixed);
+    return new (RealDate as unknown as new (...a: unknown[]) => Date)(...args);
+  } as unknown as DateConstructor;
+  (FrozenDate as { prototype: unknown }).prototype = RealDate.prototype;
+  FrozenDate.now = () => fixed;
+  FrozenDate.parse = RealDate.parse;
+  FrozenDate.UTC = RealDate.UTC;
+  window.Date = FrozenDate;
+
+  // Con `?congelaAvisos=1` los temporizadores largos (los que apagan
+  // toasts y overlays de éxito) no llegan a disparar. Los avisos duran
+  // 3,5 s y una captura de Playwright tarda más que eso: sin esto, el
+  // estado de error del bucle visual es infotografiable. Sólo el banco.
+  if (new URLSearchParams(window.location.search).get("congelaAvisos") === "1") {
+    const realTimeout = window.setTimeout.bind(window);
+    window.setTimeout = ((fn: TimerHandler, ms?: number, ...rest: unknown[]) => {
+      if ((ms ?? 0) >= 3000) return 0 as unknown as number;
+      return realTimeout(fn, ms, ...rest);
+    }) as typeof window.setTimeout;
+  }
+}
+
+const TZ_MADRID = "Europe/Madrid";
+
+function benchToday(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: TZ_MADRID,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function madridIso(hh: number, mm: number): string {
+  const date = benchToday();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const guess = new Date(`${date}T${pad(hh)}:${pad(mm)}:00Z`);
+  const [gh, gm] = new Intl.DateTimeFormat("en-US", {
+    timeZone: TZ_MADRID,
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+    .format(guess)
+    .split(":")
+    .map(Number);
+  const deltaMin = (gh! % 24) * 60 + gm! - (hh * 60 + mm);
+  return new Date(guess.getTime() - deltaMin * 60_000).toISOString();
+}
+
+// B-reservas-mostrador F2 · `?colores=matriz` cambia los tres colores por el
+// caso DURO del tinte: uno muy oscuro, uno casi blanco y uno sin color. Es la
+// matriz que pide el bucle visual del bloque — con los tres por defecto (tres
+// tonos medios) no se vería si la normalización de luminancia hace su trabajo.
+function benchColores(): boolean {
+  return new URLSearchParams(window.location.search).get("colores") === "matriz";
+}
+
+const SOLE_STAFF = benchColores()
+  ? [
+      { userId: "st-sole", displayName: "Sole", color: "#4c1d95", active: true },
+      { userId: "st-marta", displayName: "Ana", color: "#fef9c3", active: true },
+      { userId: "st-nuria", displayName: "Isa", color: null, active: true },
+    ]
+  : [
+      { userId: "st-sole", displayName: "Sole", color: "#8b5cf6", active: true },
+      { userId: "st-marta", displayName: "Marta", color: "#ec4899", active: true },
+      { userId: "st-nuria", displayName: "Nuria", color: "#0ea5e9", active: true },
+    ];
+
+function mkService(
+  id: string,
+  name: string,
+  sku: string,
+  priceGross: number,
+  durationMin: number,
+) {
+  return {
+    id,
+    holdedProductId: `h-${id}`,
+    name,
+    sku,
+    barcode: null,
+    basePrice: Math.round((priceGross / 1.21) * 10_000) / 10_000,
+    priceGross,
+    taxRate: 21,
+    kind: "SERVICE" as const,
+    imageMime: null,
+    tags: ["peluqueria"],
+    durationMin,
+  };
+}
+
+const SOLE_CATALOG = [
+  mkService("sv-corte", "Corte de pelo", "CORTE", 18, 30),
+  mkService("sv-lavado", "Lavado y peinado", "PEINADO", 15, 30),
+  mkService("sv-tinte", "Tinte completo", "TINTE", 45, 90),
+  mkService("sv-mechas", "Mechas balayage", "MECHAS", 70, 120),
+  mkService("sv-manicura", "Manicura", "MANI", 22, 45),
+  mkService("sv-recogido", "Recogido de novia", "RECOGIDO", 90, 120),
+];
+
+function mkClient(id: string, firstName: string, lastName: string, phone: string) {
+  return {
+    id,
+    externalId: null,
+    firstName,
+    lastName,
+    phone,
+    email: null,
+    birthdate: id === "cl-carmen" ? "1961-03-07" : null,
+    // B-reservas-mostrador F6 · Carmen ya está enlazada a su contacto de
+    // Holded: es el caso de la deduplicación (sale arriba, como clienta, y
+    // NO abajo en «De Holded»).
+    holdedContactId: id === "cl-carmen" ? "h-carmen" : null,
+    marketingOptIn: false,
+    notes: null,
+    createdAt: "2026-01-15T09:00:00.000Z",
+    updatedAt: "2026-01-15T09:00:00.000Z",
+  };
+}
+
+// B-reservas-mostrador F3 · `?sin-apellidos=1` añade a «Sole», apuntada por
+// el nombre de pila como Sole apunta a sus clientas. Sirve para mirar dos
+// cosas: que el nombre no deja un espacio colgando y que el A–Z la coloca en
+// la S y no la primera de la lista.
+const SOLE_CLIENTS = [
+  mkClient("cl-carmen", "Carmen", "Ruiz", "600 111 222"),
+  mkClient("cl-lucia", "Lucía", "Prieto", "600 333 444"),
+  mkClient("cl-anabelen", "Ana Belén", "Soto", "600 555 666"),
+  mkClient("cl-rosa", "Rosa", "Marín", "600 777 888"),
+  mkClient("cl-isabel", "Isabel", "Cano", "600 999 000"),
+  ...(new URLSearchParams(window.location.search).get("sin-apellidos") === "1"
+    ? [
+        mkClient("cl-sole", "Sole", "", "600 222 333"),
+        mkClient("cl-suarez", "Lucía", "Suárez", "600 444 555"),
+      ]
+    : []),
+];
+
+function mkAppt(
+  id: string,
+  clientId: string | null,
+  staffUserId: string,
+  status: string,
+  hh: number,
+  mm: number,
+  services: Array<[string, number]>,
+  ticketId: string | null = null,
+) {
+  let offset = 0;
+  const items = services.map(([serviceId, durationMin], i) => {
+    const it = {
+      id: `${id}-i${i}`,
+      serviceId,
+      durationMin,
+      sortOrder: i,
+      startOffsetMin: offset,
+    };
+    offset += durationMin;
+    return it;
+  });
+  const start = madridIso(hh, mm);
+  return {
+    id,
+    clientId,
+    status,
+    source: "PRESENCIAL",
+    start,
+    end: new Date(new Date(start).getTime() + offset * 60_000).toISOString(),
+    ticketId,
+    notes: null,
+    items,
+    assignments: items.map(() => ({
+      reservableType: "STAFF" as const,
+      staffUserId,
+      resourceId: null,
+    })),
+  };
+}
+
+const SOLE_DAY = {
+  from: madridIso(0, 0),
+  to: madridIso(23, 59),
+  staff: SOLE_STAFF,
+  appointments: [
+    mkAppt("ap-1", "cl-carmen", "st-sole", "COMPLETED", 9, 30, [["sv-corte", 30]]),
+    mkAppt("ap-2", "cl-lucia", "st-marta", "IN_SERVICE", 10, 0, [["sv-tinte", 90]]),
+    mkAppt("ap-3", "cl-anabelen", "st-nuria", "CONFIRMED", 10, 30, [["sv-mechas", 120]]),
+    // Multi-servicio encadenado: corte + peinado en la misma visita.
+    mkAppt("ap-4", "cl-rosa", "st-sole", "CONFIRMED", 12, 0, [
+      ["sv-corte", 30],
+      ["sv-lavado", 30],
+    ]),
+    mkAppt("ap-5", "cl-isabel", "st-marta", "PENDING", 12, 30, [["sv-manicura", 45]]),
+    // Sin cliente: la reserva de teléfono que aún no tiene ficha.
+    mkAppt("ap-6", null, "st-nuria", "CONFIRMED", 16, 0, [["sv-corte", 30]]),
+    mkAppt("ap-7", "cl-carmen", "st-sole", "CONFIRMED", 17, 0, [["sv-recogido", 120]]),
+  ],
+};
+
+// El DRAFT que abriría el puente cita→caja: una línea por servicio del
+// visit, resuelta por `serviceId`, units 1 y sin descuento — igual que
+// `apps/api/src/agenda/checkout.ts`.
+function cartForAppointment(appointmentId: string): CartLine[] {
+  const appt = SOLE_DAY.appointments.find((a) => a.id === appointmentId);
+  if (!appt) return [];
+  return appt.items.map((it, i) => {
+    const svc = SOLE_CATALOG.find((p) => p.id === it.serviceId)!;
+    return {
+      id: `${appointmentId}-l${i}`,
+      productId: svc.id,
+      variantId: null,
+      holdedProductId: svc.holdedProductId,
+      sku: svc.sku,
+      nameSnapshot: svc.name,
+      units: 1,
+      unitPrice: svc.basePrice,
+      unitPriceOverride: null,
+      priceGross: svc.priceGross,
+      discountPct: 0,
+      taxRate: svc.taxRate,
+      modifiers: [],
+    };
+  });
+}
+
+function benchFallo(): string | null {
+  return new URLSearchParams(window.location.search).get("fallo");
+}
+
+// ── B-reservas-mostrador F6 · los contactos de Holded ──────────────────
+//
+// `?holded=resultados` (por defecto en la pantalla `clientes` y en la agenda)
+// devuelve tres contactos, uno de ellos YA enlazado a un cliente del CRM para
+// poder ver la deduplicación; `vacio` devuelve cero; `sin-red` revienta la
+// petición, que es como se ve la sección cuando no se puede preguntar.
+function benchHolded(): "resultados" | "vacio" | "sin-red" {
+  const v = new URLSearchParams(window.location.search).get("holded");
+  return v === "vacio" || v === "sin-red" ? v : "resultados";
+}
+
+const CONTACTOS_HOLDED = [
+  {
+    id: "ct-demetria",
+    holdedContactId: "h-demetria",
+    name: "Demetria Salas Gil",
+    nif: null,
+    email: null,
+    phone: "+34 600 123 456",
+  },
+  {
+    id: "ct-demelza",
+    holdedContactId: "h-demelza",
+    name: "Demelza Ortiz",
+    nif: null,
+    email: "demelza@ejemplo.es",
+    phone: "+34 611 987 654",
+  },
+  {
+    id: "ct-carmen",
+    holdedContactId: "h-carmen",
+    // Éste YA está enlazado (`cl-carmen` lo lleva en `holdedContactId`), así
+    // que NO puede salir en la sección de Holded: sale arriba, como clienta.
+    name: "Carmen Ruiz",
+    nif: null,
+    email: null,
+    phone: "+34 600 111 222",
+  },
+];
+
+// ── B-reservas-7a · el horario del centro en el banco ─────────────────
+
+function benchDia(): string {
+  return new URLSearchParams(window.location.search).get("dia") ?? "normal";
+}
+
+function benchReticula(): number {
+  const v = new URLSearchParams(window.location.search).get("reticula");
+  return v === "30" ? 30 : 15;
+}
+
+/** El `days[0]` que ahora devuelve `GET /agenda`: el horario del centro,
+ *  los tramos de cada profesional y las ausencias. */
+function benchDayInfo() {
+  const dia = benchDia();
+  const todos = (r: Array<{ startTime: string; endTime: string }>) =>
+    Object.fromEntries(SOLE_STAFF.map((s) => [s.userId, r]));
+
+  if (dia === "sin-techo") {
+    // El centro que no ha configurado nada: sin techo, como antes de este
+    // bloque. La captura tiene que salir igual que la de 6a.
+    return {
+      date: benchToday(),
+      open: null,
+      closed: null,
+      specialName: null,
+      staffOpen: todos([{ startTime: "09:00", endTime: "20:00" }]),
+      absences: [],
+    };
+  }
+  if (dia === "cerrado") {
+    return {
+      date: benchToday(),
+      open: [],
+      closed: { name: "Virgen del Prado" },
+      specialName: "Virgen del Prado",
+      staffOpen: todos([]),
+      absences: [],
+    };
+  }
+  if (dia === "boda") {
+    const tramo = [{ startTime: "08:30", endTime: "14:00" }];
+    return {
+      date: benchToday(),
+      open: tramo,
+      closed: null,
+      specialName: "boda Marta",
+      // Sole entra de refuerzo a las 8:30; las otras dos, a las 9:00.
+      staffOpen: {
+        "st-sole": tramo,
+        "st-marta": [{ startTime: "09:00", endTime: "14:00" }],
+        "st-nuria": [{ startTime: "09:00", endTime: "14:00" }],
+      },
+      absences: [],
+    };
+  }
+  // El día normal: el centro abre de 9:00 a 20:00 y Nuria no está de 9:00
+  // a 10:30 («ISA NO» en la celda del Excel de Sole). La cita de las 17:00
+  // de Sole queda FUERA del horario nuevo: se sigue viendo y se cobra.
+  return {
+    date: benchToday(),
+    open: [{ startTime: "09:00", endTime: "17:00" }],
+    closed: null,
+    specialName: null,
+    staffOpen: todos([{ startTime: "09:00", endTime: "17:00" }]),
+    absences: [
+      {
+        id: "bk-nuria",
+        staffUserId: "st-nuria",
+        startTime: "09:00",
+        endTime: "10:30",
+        // El motivo lleva el nombre de la profesional de la columna, que
+        // cambia con `?colores=matriz` (ahí la tercera se llama Isa).
+        reason: `${SOLE_STAFF[2]!.displayName} libre`,
+      },
+    ],
+  };
+}
+
+// B-reservas-6a frente O · siembra el outbox con un alta de cita creada
+// sin red, para fotografiar lo que ve la cajera. `sin-enviar` la deja
+// pendiente; `rechazada`, con el 409 del servidor encima.
+async function sembrarAltaEncolada(): Promise<void> {
+  const modo = new URLSearchParams(window.location.search).get("encolada");
+  if (!modo) return;
+  const { outboxAdd } = await import("../src/lib/outbox.js");
+  const externalId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  await outboxAdd({
+    externalId,
+    kind: "appointment",
+    path: "/agenda/appointments",
+    body: {
+      externalId,
+      clientId: "cl-2",
+      items: [{ serviceId: "sv-corte", staffUserId: "st-marta" }],
+      start: madridIso(12, 30),
+      source: "PRESENCIAL",
+      notes: null,
+    },
+    label: "Cita 12:30",
+    total: 0,
+    durationMin: 30,
+  });
+  if (modo !== "rechazada") return;
+  // Lo que deja el outbox cuando el servidor contesta un 4xx.
+  const db = indexedDB.open("mipiacetpv-outbox");
+  await new Promise<void>((resolve) => {
+    db.onsuccess = () => {
+      const tx = db.result.transaction("outbox", "readwrite");
+      const store = tx.objectStore("outbox");
+      const get = store.get(externalId);
+      get.onsuccess = () => {
+        store.put({
+          ...(get.result as Record<string, unknown>),
+          status: "rejected",
+          lastError: "TAKEN: El hueco ya no está disponible.",
+        });
+      };
+      tx.oncomplete = () => {
+        db.result.close();
+        resolve();
+      };
+    };
+  });
+}
+
+function isAgendaScreen(): boolean {
+  return benchScreen().startsWith("agenda");
+}
+
 function stubSession(): void {
   localStorage.setItem("mipiacetpv-device-token", "banco-visual-device");
   localStorage.setItem(
@@ -310,6 +774,17 @@ function stubSession(): void {
   // primera captura de `venta-retail` saldría con la barra de hostelería.
   localStorage.setItem("mipiacetpv-catalog-tenant", "tenant-banco-visual");
   localStorage.setItem("mipiacetpv-catalog-business-type", benchBusinessType());
+  // B-reservas-5 · las capabilities se leen en el PRIMER pintado (igual
+  // que el vertical): sin esto, `agenda-entrada` saldría sin el botón
+  // "Agenda", que es justo lo que esa captura viene a fijar.
+  localStorage.setItem(
+    "mipiacetpv-catalog-agenda-enabled",
+    isAgendaScreen() ? "1" : "0",
+  );
+  localStorage.setItem(
+    "mipiacetpv-catalog-crm-enabled",
+    isAgendaScreen() ? "1" : "0",
+  );
 }
 
 // v1.14 · el banco necesita variar catálogo y vertical por pantalla: los
@@ -320,6 +795,9 @@ function benchScreen(): string {
 
 function benchCatalog() {
   const screen = benchScreen();
+  // B-reservas-5 · la agenda pinta nombres de servicio desde la caché
+  // del catálogo; sin esto las citas saldrían todas como "Servicio".
+  if (isAgendaScreen()) return SOLE_CATALOG;
   if (screen === "venta-20-categorias") return catalogWithTags(TAGS_20);
   if (screen === "venta-retail") return catalogWithTags(TAGS_SIROPE.slice(0, 5));
   const base = catalogWithTags(TAGS_SIROPE);
@@ -352,7 +830,259 @@ function benchLines(): CartLine[] {
 }
 
 function benchBusinessType(): string {
+  if (isAgendaScreen()) return "SERVICES";
   return benchScreen() === "venta-retail" ? "RETAIL" : "HOSPITALITY";
+}
+
+// ── B-reservas-9 · el panel de salud del centro de Sole ──────────────
+//
+// Las cifras son las del criterio del bloque: tres servicios agendables y
+// dos que no puede hacer nadie. Las tres tarjetas de bloques que no
+// existen vienen como el servidor las manda hoy: sin cifra.
+
+const SALUD_SPA = "svc-spa-capilar";
+const SALUD_RITUAL = "svc-ritual";
+const SALUD_MADERO = "svc-maderoterapia";
+const SALUD_SOLE = "u-sole";
+const SALUD_NURIA = "u-nuria";
+
+function saludCards(vacia: boolean) {
+  return [
+    {
+      key: "servicios-sin-profesional",
+      title: "Servicios que nadie puede hacer",
+      unit: "servicios",
+      unitOne: "servicio",
+      status: "ok",
+      value: vacia ? 0 : 2,
+      items: vacia
+        ? []
+        : [
+            {
+              id: SALUD_SPA,
+              label: "Spa capilar",
+              detail: "Nadie lo tiene asignado",
+            },
+            {
+              id: SALUD_RITUAL,
+              label: "Ritual reafirmante drenante",
+              detail: "1 asignada, ninguna con perfil de agenda activo",
+            },
+          ],
+      goodNews: "Todos los servicios agendables tienen a alguien que los da.",
+      explain:
+        "Cuenta los servicios con ficha de agenda (duración configurada) que no llegan a los profesionales que necesitan: se miran los que tienen el servicio asignado Y el perfil de agenda activo, y se comparan con los que el servicio exige a la vez.",
+      query:
+        "SELECT p.id, p.name, ss.staff_required, COUNT(sp.user_id)::int AS skilled_active\n  FROM service_scheduling ss\n  JOIN products p ON p.id = ss.product_id\n  LEFT JOIN staff_skills sk ON sk.service_id = ss.product_id\n WHERE ss.tenant_id = $1::uuid\nHAVING COUNT(sp.user_id) < ss.staff_required",
+      params: ["$1 = este negocio"],
+      dependsOn: null,
+      unavailableReason: null,
+    },
+    {
+      key: "duracion-fuera-de-patron",
+      title: "Duraciones que no cuadran con la carta",
+      unit: "servicios",
+      unitOne: "servicio",
+      status: "ok",
+      value: 1,
+      items: [
+        {
+          id: SALUD_SPA,
+          label: "Spa capilar",
+          detail: "32 min no es múltiplo de 5 · recogida de 0 min en vez de 10",
+        },
+      ],
+      goodNews: "Ninguna duración se sale del patrón que declara el centro.",
+      explain:
+        "El centro declara su patrón (en qué múltiplo van las duraciones y cuántos minutos de recogida van en el buffer). Esta tarjeta lista los servicios que se salen.",
+      query:
+        "SELECT p.id, p.name, ss.duration_min, ss.buffer_after_min\n  FROM service_scheduling ss\n  JOIN products p ON p.id = ss.product_id\n WHERE ss.tenant_id = $1::uuid\n   AND ss.duration_min % $2::int <> 0",
+      params: [
+        "$1 = este negocio",
+        "$2 = múltiplo declarado: 5 min",
+        "$3 = recogida declarada: 10 min",
+      ],
+      dependsOn: null,
+      unavailableReason: null,
+    },
+    {
+      key: "saldo-vivo-sin-cita",
+      title: "Programas con saldo vivo y sin próxima cita",
+      unit: "programas",
+      unitOne: "programa",
+      status: "unavailable",
+      value: null,
+      items: [],
+      goodNews: "Todo el saldo vendido tiene su próxima cita puesta.",
+      explain:
+        "Bonos de sesiones con sesiones sin gastar y ninguna cita futura asociada. Es dinero cobrado y no entregado.",
+      query: "SELECT v.id, v.code FROM vouchers v WHERE v.tenant_id = $1::uuid",
+      params: ["$1 = este negocio", "$2 = ahora"],
+      dependsOn: {
+        block: "B-reservas-8",
+        what: "el saldo por sesiones (bonos de tipo SESSIONS y su consumo)",
+      },
+      unavailableReason: "El saldo por sesiones todavía no existe en este sistema.",
+    },
+    {
+      key: "filtrado-por-reglas",
+      title: "Qué han filtrado hoy las reglas",
+      unit: "huecos",
+      unitOne: "hueco",
+      status: "unavailable",
+      value: null,
+      items: [],
+      goodNews: "Hoy las reglas no han quitado ningún hueco de en medio.",
+      explain:
+        "Huecos que las reglas del centro han quitado en las últimas 24 horas, desglosados por la regla que los quitó.",
+      query:
+        "SELECT h.rule_key, SUM(h.filtered)::int FROM booking_rule_hits h WHERE h.tenant_id = $1::uuid",
+      params: ["$1 = este negocio", "$2 = hace 24 horas"],
+      dependsOn: {
+        block: "B-reservas-6b",
+        what: "las reglas de yield y su registro de filtrado",
+      },
+      unavailableReason:
+        "Las reglas de yield todavía no existen, así que no filtran nada.",
+    },
+    {
+      key: "citas-por-canal-24h",
+      title: "Citas creadas por canal en 24 h",
+      unit: "citas",
+      unitOne: "cita",
+      status: "ok",
+      value: 9,
+      items: [
+        { id: "PRESENCIAL", label: "Mostrador", detail: "6 citas" },
+        { id: "PHONE", label: "Teléfono", detail: "3 citas" },
+      ],
+      goodNews: "En las últimas 24 horas no ha entrado ninguna cita.",
+      explain:
+        "Citas creadas en las últimas 24 horas, contadas por el canal desde el que entraron. Es la métrica de adopción de la agenda.",
+      query:
+        "SELECT a.source::text, COUNT(*)::int AS n\n  FROM appointments a\n WHERE a.tenant_id = $1::uuid\n   AND a.created_at >= $2::timestamptz\n GROUP BY a.source",
+      params: ["$1 = este negocio", "$2 = hace 24 horas"],
+      dependsOn: null,
+      unavailableReason: null,
+    },
+    {
+      key: "ventanas-fuera-de-turno",
+      title: "Ventanas que se desvían del turno contratado",
+      unit: "ventanas",
+      unitOne: "ventana",
+      status: "unavailable",
+      value: null,
+      items: [],
+      goodNews: "Ninguna ventana reservable se aparta del turno contratado.",
+      explain:
+        "Ventanas reservables que no salen de ningún turno contratado. La desviación existe y es legítima; lo que no puede ser es que no se vea.",
+      query:
+        "SELECT w.id, w.staff_user_id FROM bookable_windows w WHERE w.tenant_id = $1::uuid",
+      params: ["$1 = este negocio"],
+      dependsOn: {
+        block: "B-reservas-7b",
+        what: "la ventana reservable separada del turno contratado",
+      },
+      unavailableReason:
+        "La ventana reservable todavía no está separada del turno: hoy la agenda ofrece el turno tal cual.",
+    },
+  ];
+}
+
+const SALUD_MATRIZ = {
+  editable: true,
+  services: [
+    {
+      id: SALUD_SPA,
+      name: "Spa capilar",
+      agendable: true,
+      active: true,
+      staffRequired: 1,
+      staffUserIds: [] as string[],
+    },
+    {
+      id: SALUD_RITUAL,
+      name: "Ritual reafirmante drenante",
+      agendable: true,
+      active: true,
+      staffRequired: 1,
+      staffUserIds: [SALUD_NURIA],
+    },
+    {
+      id: SALUD_MADERO,
+      name: "Maderoterapia",
+      agendable: true,
+      active: false,
+      staffRequired: 1,
+      staffUserIds: [SALUD_SOLE],
+    },
+  ],
+  staff: [
+    { userId: SALUD_SOLE, displayName: "Sole", active: true, hasProfile: true },
+    {
+      userId: SALUD_NURIA,
+      displayName: "Nuria",
+      active: false,
+      hasProfile: true,
+    },
+  ],
+};
+
+// B-reservas-9 · las dos pantallas que el cierre declaraba SIN MIRAR (§4.4
+// del done) y que son las dos que se ven de verdad el primer día:
+//
+//  · `agenda-matriz-catalogo` — un catálogo de centro (36 servicios, cuatro
+//    profesionales), que es donde se comprueba que la cabecera aguanta el
+//    scroll y que la rejilla se sigue leyendo;
+//  · `agenda-matriz-sin-nadie` — el día que un centro enciende la agenda:
+//    catálogo cargado y ni un perfil de agenda dado de alta.
+const MATRIZ_CATALOGO_NOMBRES = [
+  "Corte caballero", "Corte señora", "Corte niño", "Lavar y peinar",
+  "Peinado de fiesta", "Recogido de novia", "Color raíz", "Color completo",
+  "Mechas balayage", "Mechas babylights", "Mechas californianas", "Matiz",
+  "Decoloración", "Permanente", "Alisado de keratina", "Botox capilar",
+  "Tratamiento anticaída", "Hidratación profunda", "Spa capilar",
+  "Ritual reafirmante drenante", "Maderoterapia", "Manicura express",
+  "Manicura semipermanente", "Pedicura completa", "Uñas de gel",
+  "Retirada de gel", "Depilación cejas", "Depilación labio",
+  "Depilación media pierna", "Depilación completa", "Limpieza facial",
+  "Tratamiento antiedad", "Maquillaje de día", "Maquillaje de novia",
+  "Extensiones de pestañas", "Lifting de pestañas",
+];
+
+const MATRIZ_CATALOGO_STAFF = [
+  { userId: "u-sole", displayName: "Sole", active: true, hasProfile: true },
+  { userId: "u-ana", displayName: "Ana", active: true, hasProfile: true },
+  { userId: "u-isa", displayName: "Isa", active: true, hasProfile: true },
+  { userId: "u-nuria", displayName: "Nuria", active: false, hasProfile: true },
+];
+
+function matrizCatalogo() {
+  return {
+    editable: true,
+    staff: MATRIZ_CATALOGO_STAFF,
+    services: MATRIZ_CATALOGO_NOMBRES.map((name, i) => ({
+      id: `svc-cat-${i}`,
+      name,
+      agendable: true,
+      active: i % 11 !== 10,
+      staffRequired: i % 9 === 8 ? 2 : 1,
+      // Dos de cada tres siguen sin nadie: es el estado real de un centro
+      // recién encendido, no un catálogo ya trabajado.
+      staffUserIds: i % 3 === 0 ? ["u-sole"] : [],
+    })),
+  };
+}
+
+function matrizSinProfesionales() {
+  return { editable: true, staff: [], services: matrizCatalogo().services.map((s) => ({ ...s, staffUserIds: [] })) };
+}
+
+function matrizDelBanco() {
+  const screen = benchScreen();
+  if (screen === "agenda-matriz-catalogo") return matrizCatalogo();
+  if (screen === "agenda-matriz-sin-nadie") return matrizSinProfesionales();
+  return SALUD_MATRIZ;
 }
 
 function stubFetch(): void {
@@ -392,9 +1122,25 @@ function stubFetch(): void {
       tpvIconPreset: null,
       tagAliases: [],
       creditSalesEnabled: false,
-      crmEnabled: false,
-      agendaEnabled: false,
+      crmEnabled: isAgendaScreen() || benchScreen() === "clientes",
+      agendaEnabled: isAgendaScreen(),
     },
+    // B-reservas-5 · el día de la peluquería. La query (`?date=`) la
+    // recorta el dispatcher, así que la clave es la ruta pelada.
+    // B-reservas-7a · el día lleva ahora la retícula y el horario. Se
+    // compone en cada petición porque depende de los parámetros del banco.
+    "/agenda": {
+      ...SOLE_DAY,
+      slotMinutes: benchReticula(),
+      days: [benchDayInfo()],
+    },
+    // B-reservas-9 · el panel de salud y la matriz.
+    "/agenda/health": {
+      generatedAt: new Date().toISOString(),
+      cards: saludCards(benchScreen() === "agenda-salud-vacia"),
+    },
+    "/agenda/skill-matrix": matrizDelBanco(),
+    "/clients": { items: SOLE_CLIENTS, nextCursor: null },
     "/tpv/catalog/wildcards": { items: [] },
     "/tpv/catalog/modifier-groups": { groups: [] },
     "/tickets": {
@@ -465,8 +1211,168 @@ function stubFetch(): void {
     // **ninguna acción existente desaparece** (Mostrar QR · Descargar
     // PDF · Ver ticket). En el resto se deja caer con 404 a propósito,
     // que es el camino degradado que el overlay ya sabe recorrer.
+    // B-reservas-5 · el puente cita→caja. Devuelve el DRAFT pre-poblado
+    // con las líneas del visit, como `agenda/checkout.ts`.
+    const cita = /^\/agenda\/appointments\/([^/]+)\/checkout$/.exec(path);
+    if (cita) {
+      const id = cita[1]!;
+      // B-reservas-5 F8 · el estado de error del bucle visual. La cita
+      // ya se cobró: el servidor corta antes de pasear a la cajera por
+      // el modal (F5). `?fallo=cobrada` lo reproduce en el banco.
+      if (benchFallo() === "cobrada") {
+        return new Response(
+          JSON.stringify({
+            error: "APPOINTMENT_ALREADY_PAID",
+            message: "Esta cita ya se cobró.",
+            ticketId: `tk-${id}`,
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      const cart = cartForAppointment(id);
+      return new Response(
+        JSON.stringify({
+          ticket: {
+            id: `tk-${id}`,
+            externalId: `ext-${id}`,
+            status: "DRAFT",
+            total: cart
+              .reduce((a, l) => a + l.priceGross * l.units, 0)
+              .toFixed(2),
+            totalTax: "0.00",
+            totalDiscount: "0.00",
+            lines: cart.map((l) => ({
+              id: l.id,
+              productId: l.productId,
+              sku: l.sku,
+              nameSnapshot: l.nameSnapshot,
+              units: String(l.units),
+              unitPrice: String(l.unitPrice),
+              taxRate: String(l.taxRate),
+              total: String(l.priceGross * l.units),
+            })),
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    // B-reservas-6a · el 409 del suelo. `?fallo=pasado` reproduce en el
+    // banco lo que el servidor manda cuando la hora ya pasó: la frase que
+    // se le lee a la clienta y los tres huecos que sí se le pueden dar.
+    // Es el estado de error del bucle visual de este bloque.
+    // B-reservas-7a · el alta y la baja de una AUSENCIA. Por debajo es el
+    // `BookingBlock scope=STAFF` de siempre: aquí sólo se responde que sí,
+    // porque lo que el bucle fotografía es el camino de tres toques.
+    // B-reservas-mostrador F6 · el buscador de contactos de Holded y el
+    // enlace. El enlace devuelve un cliente con el nombre ya partido por el
+    // servidor (primera palabra → nombre, el resto → apellidos).
+    if (path === "/contacts/search") {
+      if (benchHolded() === "sin-red") {
+        return new Response(JSON.stringify({ error: "OFFLINE" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      const q = (new URL(url, window.location.origin).searchParams.get("q") ?? "")
+        .trim()
+        .toLowerCase();
+      const results =
+        benchHolded() === "vacio"
+          ? []
+          : CONTACTOS_HOLDED.filter((c) => c.name.toLowerCase().includes(q));
+      return new Response(
+        JSON.stringify({ results, source: "local", holdedFallback: null }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    const enlace = /^\/clients\/from-contact\/(.+)$/.exec(path);
+    if (enlace && init?.method === "POST") {
+      const c = CONTACTOS_HOLDED.find((x) => x.id === enlace[1]);
+      if (!c) {
+        return new Response(JSON.stringify({ error: "CONTACT_NOT_FOUND" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      const [nombre, ...resto] = c.name.split(" ");
+      return new Response(
+        JSON.stringify({
+          client: {
+            ...mkClient(`cl-de-${c.id}`, nombre!, resto.join(" "), c.phone),
+            holdedContactId: c.holdedContactId,
+          },
+          created: true,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    if (path === "/agenda/blocks" && init?.method === "POST") {
+      return new Response(JSON.stringify({ id: "bk-nueva" }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (path.startsWith("/agenda/blocks/") && init?.method === "DELETE") {
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (path === "/agenda/appointments" && init?.method === "POST") {
+      if (benchFallo() === "pasado") {
+        return new Response(
+          JSON.stringify({
+            error: "BOOKING_IN_PAST",
+            code: "BOOKING_IN_PAST",
+            message:
+              "Esa hora ya ha pasado. Te puedo dar las 11:30, las 11:45 o las 12:00.",
+            alternatives: [
+              { start: madridIso(11, 30), end: madridIso(12, 0), options: 1 },
+              { start: madridIso(11, 45), end: madridIso(12, 15), options: 1 },
+              { start: madridIso(12, 0), end: madridIso(12, 30), options: 1 },
+            ],
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          appointment: {
+            id: "ap-nueva",
+            clientId: null,
+            status: "CONFIRMED",
+            source: "PRESENCIAL",
+            start: madridIso(12, 0),
+            end: madridIso(12, 30),
+            ticketId: null,
+            notes: null,
+            items: [],
+            assignments: [],
+          },
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    // B-reservas-5 F8 · el cobro del borrador de la cita. Devuelve el
+    // ticket emitido para poder fotografiar "Ticket emitido" con la
+    // vuelta de v1.15, que es la razón de que la cita NO herede el
+    // patrón mesa (decisión P1 del bloque).
+    if (/^\/tickets\/[^/]+\/checkout$/.test(path)) {
+      return new Response(
+        JSON.stringify({
+          ticket: {
+            id: "tk-cita",
+            internalNumber: "000042",
+            status: "TEST",
+            holdedDocNumber: null,
+          },
+          syncStatus: "TEST",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
     if (/^\/tickets\/[^/]+\/digital$/.test(path)) {
-      if (!benchScreen().startsWith("ticket-emitido")) {
+      if (!benchScreen().startsWith("ticket-emitido") && !isAgendaScreen()) {
         return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
           status: 404,
           headers: { "Content-Type": "application/json" },
@@ -502,6 +1408,58 @@ function stubFetch(): void {
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     }
+    // B-reservas-9 · el estado de ERROR del panel: `?fallo=salud` deja al
+    // servidor sin responder para ver la última foto con su hora.
+    if (path === "/agenda/health" && benchFallo() === "salud") {
+      return new Response(JSON.stringify({ error: "UPSTREAM" }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    // Las dos escrituras de la matriz devuelven lo que se les manda: el
+    // banco no tiene base de datos, pero la pantalla sí tiene que ver su
+    // celda marcada después de tocarla.
+    const matrizServicio = /^\/agenda\/skill-matrix\/service\/([^/]+)$/.exec(path);
+    if (matrizServicio && init?.method === "PUT") {
+      const b = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({
+          serviceId: matrizServicio[1],
+          staffUserIds: b.staffUserIds ?? [],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    const matrizStaff = /^\/agenda\/skill-matrix\/staff\/([^/]+)$/.exec(path);
+    if (matrizStaff && init?.method === "PUT") {
+      const b = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({
+          userId: matrizStaff[1],
+          serviceIds: b.serviceIds ?? [],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    // B-reservas-mostrador F3 · la ficha del cliente de la sección Clientes.
+    // Se resuelven aquí porque el id va en la ruta y `routes` es una tabla
+    // de rutas peladas.
+    const ficha = /^\/clients\/([^/]+)(\/(history|vouchers))?$/.exec(path);
+    if (ficha && (init?.method ?? "GET") === "GET") {
+      const cliente = SOLE_CLIENTS.find((c) => c.id === ficha[1]);
+      if (cliente) {
+        const cuerpo =
+          ficha[3] === "history"
+            ? { entries: [], appointments: [], voucherMovements: [] }
+            : ficha[3] === "vouchers"
+              ? { balance: { sessionsLeft: 0, amountLeftCents: 0 }, vouchers: [] }
+              : { client: cliente, consents: [], technicalNotes: [] };
+        return new Response(JSON.stringify(cuerpo), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
     const body = routes[path] ?? {};
     // eslint-disable-next-line no-console
     console.log("[banco-visual] stub", path);
@@ -510,6 +1468,66 @@ function stubFetch(): void {
       headers: { "Content-Type": "application/json" },
     });
   };
+}
+
+// B-reservas-5 F1 · el cableado de `App`, replicado.
+//
+// El banco no monta `App` (pide sesión, turno y catálogo reales), pero la
+// mudanza consiste justamente en QUIÉN pinta la agenda. Así que aquí se
+// reproduce el contrato exacto que ahora tiene `App`: el botón sólo avisa
+// (`onOpenAgenda`) y el overlay lo pinta el de arriba. Si ese contrato se
+// rompiera, esta pantalla dejaría de abrir la agenda al tocar el botón.
+function AgendaEntrada({
+  Screens,
+}: {
+  Screens: {
+    SalePage: typeof import("../src/pages/SalePage.js")["SalePage"];
+    AgendaPage: typeof import("../src/pages/AgendaPage.js")["AgendaPage"];
+  };
+}) {
+  const [showAgenda, setShowAgenda] = useState(false);
+  const [appointmentContext, setAppointmentContext] = useState<
+    AppointmentContext | null
+  >(null);
+  const draftCart = appointmentContext
+    ? cartForAppointment(appointmentContext.appointmentId)
+    : undefined;
+  return (
+    <>
+      {showAgenda && (
+        <Screens.AgendaPage
+          onClose={() => setShowAgenda(false)}
+          onEnterDraft={(entry) => {
+            setAppointmentContext({
+              appointmentId: entry.appointmentId,
+              activeTicketId: entry.ticketId,
+              clientName: entry.clientName,
+              serviceLabel: entry.serviceLabel,
+            });
+          }}
+        />
+      )}
+      <Screens.SalePage
+        key={appointmentContext?.activeTicketId ?? "quick-sale"}
+        shiftId="shift-1"
+        cashierLabel="Sole"
+        cashierRole="MANAGER"
+        registerName="Caja 1"
+        registerId="reg-1"
+        storeName="Peluquería Sole"
+        onOpenAgenda={() => setShowAgenda(true)}
+        appointmentContext={appointmentContext}
+        initialDraftLines={draftCart}
+        onBackToAgenda={() => {
+          setAppointmentContext(null);
+          setShowAgenda(true);
+        }}
+        onBackToMap={() => {}}
+        onLogoutCashier={() => {}}
+        onCloseShift={() => {}}
+      />
+    </>
+  );
 }
 
 // ── pantallas ─────────────────────────────────────────────────────────
@@ -525,11 +1543,27 @@ function Bench() {
     CloseShiftModal: typeof import("../src/pages/CloseShiftModal.js")["CloseShiftModal"];
     ShiftOpenScreen: typeof import("../src/pages/ShiftOpenScreen.js")["ShiftOpenScreen"];
     ConfirmSheet: typeof import("../src/components/ConfirmSheet.js")["ConfirmSheet"];
+    AgendaPage: typeof import("../src/pages/AgendaPage.js")["AgendaPage"];
+    AgendaHealthPanel: typeof import("../src/pages/AgendaHealthPanel.js")["AgendaHealthPanel"];
+    AgendaSkillMatrix: typeof import("../src/pages/AgendaSkillMatrix.js")["AgendaSkillMatrix"];
+    ClientsPage: typeof import("../src/pages/ClientsPage.js")["ClientsPage"];
   }>(null);
 
   useEffect(() => {
     void (async () => {
-      const [checkout, success, sale, map, close, open, confirmSheet] = await Promise.all([
+      const [
+        checkout,
+        success,
+        sale,
+        map,
+        close,
+        open,
+        confirmSheet,
+        agenda,
+        salud,
+        matriz,
+        clientes,
+      ] = await Promise.all([
         import("../src/pages/CheckoutPage.js"),
         import("../src/pages/CheckoutPage.successOverlay.js"),
         import("../src/pages/SalePage.js"),
@@ -537,7 +1571,25 @@ function Bench() {
         import("../src/pages/CloseShiftModal.js"),
         import("../src/pages/ShiftOpenScreen.js"),
         import("../src/components/ConfirmSheet.js"),
+        import("../src/pages/AgendaPage.js"),
+        import("../src/pages/AgendaHealthPanel.js"),
+        import("../src/pages/AgendaSkillMatrix.js"),
+        import("../src/pages/ClientsPage.js"),
       ]);
+      // B-reservas-5 · la agenda lee servicios y clientes de la CACHÉ
+      // (IndexedDB), no de la red: sin sembrarla, las citas saldrían como
+      // "Servicio" / "Cliente" y el panel de alta, vacío. Se siembra
+      // contra los mismos stubs que sirve el banco.
+      if (isAgendaScreen() || benchScreen() === "clientes") {
+        const [cat, cli] = await Promise.all([
+          import("../src/lib/catalog.js"),
+          import("../src/lib/clients.js"),
+        ]);
+        await Promise.all([
+          cat.refreshCatalog().catch(() => {}),
+          cli.refreshClients().catch(() => {}),
+        ]);
+      }
       setScreens({
         CheckoutOverlay: checkout.CheckoutOverlay,
         SuccessOverlay: success.SuccessOverlay,
@@ -546,6 +1598,10 @@ function Bench() {
         CloseShiftModal: close.CloseShiftModal,
         ShiftOpenScreen: open.ShiftOpenScreen,
         ConfirmSheet: confirmSheet.ConfirmSheet,
+        AgendaPage: agenda.AgendaPage,
+        AgendaHealthPanel: salud.AgendaHealthPanel,
+        AgendaSkillMatrix: matriz.AgendaSkillMatrix,
+        ClientsPage: clientes.ClientsPage,
       });
     })();
   }, []);
@@ -654,13 +1710,57 @@ function Bench() {
           openedByAlias: "Gemma",
           activeTicketId: "tk-m1",
         }}
-        initialTableLines={benchLines()}
+        initialDraftLines={benchLines()}
         onBackToMap={() => {}}
         onTicketMovedToTable={null}
         onLogoutCashier={() => {}}
         onCloseShift={() => {}}
       />
     );
+  }
+
+  // ── B-reservas-5 · la agenda ───────────────────────────────────────
+  // `AgendaPage` es un overlay a pantalla completa (`fixed inset-0`), así
+  // que se pinta igual montada suelta que montada dentro de `SalePage`.
+  // Ese es justo el punto de la MUDANZA SIN REFORMA: esta captura tiene
+  // que salir idéntica antes y después de que la agenda suba a `App`.
+  if (screen === "agenda") {
+    return <Screens.AgendaPage onClose={() => {}} />;
+  }
+
+  // ── B-reservas-9 · el panel de salud y la matriz ───────────────────
+  // Los dos son overlays a pantalla completa igual que la agenda, así que
+  // se pintan sueltos exactamente como se ven colgados de ella.
+  if (screen.startsWith("agenda-salud")) {
+    return (
+      <Screens.AgendaHealthPanel onClose={() => {}} onOpenMatrix={() => {}} />
+    );
+  }
+
+  if (screen === "agenda-matriz") {
+    return (
+      <Screens.AgendaSkillMatrix onClose={() => {}} focusServiceId={SALUD_SPA} />
+    );
+  }
+
+  // La rejilla a escala de catálogo y el centro sin un solo perfil: las dos
+  // sin la ficha abierta, que es como se llega desde la agenda.
+  if (screen.startsWith("agenda-matriz-")) {
+    return <Screens.AgendaSkillMatrix onClose={() => {}} focusServiceId={null} />;
+  }
+
+  // El punto de ENTRADA a la agenda: la venta de Sole con el botón
+  // "Agenda" en la barra. La mudanza cambia a quién llama ese botón, así
+  // que la captura tiene que salir igual antes y después.
+  if (screen === "agenda-entrada") {
+    return <AgendaEntrada Screens={Screens} />;
+  }
+
+  // ── B-reservas-mostrador F3 · la sección Clientes ──────────────────
+  // Es donde vive la fecha de nacimiento con máscara y donde se ve el A–Z
+  // con una clienta sin apellidos (`?sin-apellidos=1`).
+  if (screen === "clientes") {
+    return <Screens.ClientsPage onClose={() => {}} />;
   }
 
   if (screen === "mapa") {
@@ -695,6 +1795,7 @@ function Bench() {
   );
 }
 
+freezeClock();
 stubSession();
 stubFetch();
 
@@ -710,9 +1811,14 @@ if (new URLSearchParams(window.location.search).get("screen") === "bloqueo") {
     ),
   );
 } else {
-  createRoot(mount).render(
-    <StrictMode>
-      <Bench />
-    </StrictMode>,
-  );
+  // La siembra del outbox va ANTES de montar: la agenda mezcla lo local
+  // al cargar el día, y si el item llega después la primera pintada no lo
+  // lleva (frente O).
+  void sembrarAltaEncolada().then(() => {
+    createRoot(mount).render(
+      <StrictMode>
+        <Bench />
+      </StrictMode>,
+    );
+  });
 }

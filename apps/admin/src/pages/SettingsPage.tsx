@@ -35,6 +35,11 @@ interface TenantSettings {
   creditSalesEnabled: boolean;
   crmEnabled: boolean;
   agendaEnabled: boolean;
+  // H1 (ADR-016) · sólo lectura: la caja se enciende y se apaga desde el
+  // super-admin. Aquí sirve para esconder las secciones que cuelgan de
+  // ella — todas menos "Módulos del negocio", que es lo que una empresa
+  // sin caja viene a tocar. Opcional por si el backend va por detrás.
+  cajaEnabled?: boolean;
 }
 
 const AUTO_LOGOUT_MIN = 5;
@@ -100,16 +105,25 @@ export function SettingsPage() {
 
   if (!form || !settings) return <CenteredLoader label="Cargando ajustes…" />;
 
+  // H1 · `!== false` y no `!`: la columna es `@default(true)`.
+  const cajaEnabled = settings.cajaEnabled !== false;
+
   return (
     <AdminShell title="Ajustes">
       <p className="text-[13.5px] text-slate-500 mb-5 -mt-2">
-        Configura cómo opera el TPV. Estos ajustes aplican a todo el negocio.
+        {cajaEnabled
+          ? "Configura cómo opera el TPV. Estos ajustes aplican a todo el negocio."
+          : "Tu empresa no tiene caja, así que aquí sólo verás los módulos que sí usas."}
         {!canEdit && readonlyTip && " " + readonlyTip + "."}
       </p>
 
       {success && <SuccessBanner message={success} />}
       {error && <FieldError message={error} />}
 
+      {/* H1 · todo lo de abajo cuelga de la caja: sesión del cajero,
+          fiado, corte de día, arqueo, impresión. La sección "Módulos del
+          negocio" queda fuera del gate a propósito. */}
+      {cajaEnabled && (
       <Section title="Cajeros" subtitle="Cómo se comporta la sesión del cajero en el TPV.">
         <SliderField
           id="autoLogout"
@@ -158,6 +172,7 @@ export function SettingsPage() {
           help="Permite cobrar tickets como 'fiado': el cliente se lleva el género y paga otro día. La deuda queda apuntada y se cobra desde la pantalla Deudas del TPV. El ticket no se sube a Holded hasta que se salda. Exige asociar un cliente al ticket."
         />
       </Section>
+      )}
 
       <Section
         title="Módulos del negocio"
@@ -182,7 +197,10 @@ export function SettingsPage() {
       </Section>
 
       {/* v1.11-cierre-de-dia · el cierre del día deja de ser un trámite del
-          cajero y pasa a ser una decisión del negocio. */}
+          cajero y pasa a ser una decisión del negocio.
+          H1 · de aquí hasta el final, todo cuelga de la caja. */}
+      {cajaEnabled && (
+      <>
       <Section
         title="Cierre del día"
         subtitle="Cerramos los turnos que se quedan abiertos y enseñamos el resumen. Tú decides a qué hora y si hay que contar el cajón."
@@ -264,6 +282,8 @@ export function SettingsPage() {
           help="Si el cajero aplica un descuento superior, el TPV pide PIN del encargado para autorizarlo."
         />
       </Section>
+      </>
+      )}
 
       {canEdit && (
         <div className="flex gap-2.5 mt-6">

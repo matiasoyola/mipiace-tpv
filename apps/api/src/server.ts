@@ -31,6 +31,7 @@ import { registerFormBodyParser } from "./lib/form-body.js";
 import { initSentry } from "./lib/sentry.js";
 import { registerOnboardingRoutes } from "./onboarding/routes.js";
 import { registerServicesRoutes } from "./services/routes.js";
+import { registerAgendaHoursRoutes } from "./agenda/hours.js";
 import { registerAgendaRoutes } from "./agenda/routes.js";
 import { registerCashierAuthRoutes } from "./shift/cashier-auth.js";
 import { registerShiftRoutes } from "./shift/routes.js";
@@ -167,6 +168,7 @@ async function main() {
   await registerServicesRoutes(app);
   await registerStaffRoutes(app);
   await registerAgendaRoutes(app);
+  await registerAgendaHoursRoutes(app);
   await registerDeviceRoutes(app);
   // A3-distribución: /super-admin/releases* y el /apk público.
   await registerReleasesRoutes(app);

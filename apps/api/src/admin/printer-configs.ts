@@ -23,6 +23,7 @@ import type { FastifyInstance } from "fastify";
 
 import { requireOwnerOrManager } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 
 const SECTIONS = ["BARRA", "COCINA", "SALON"] as const;
 const MODES = ["USB", "WIFI"] as const;
@@ -37,7 +38,7 @@ export async function registerAdminPrinterConfigsRoutes(
   app.get(
     "/admin/printer-configs",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         querystring: {
           type: "object",
@@ -93,7 +94,7 @@ export async function registerAdminPrinterConfigsRoutes(
   app.post(
     "/admin/printer-configs",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         body: {
           type: "object",
@@ -157,7 +158,7 @@ export async function registerAdminPrinterConfigsRoutes(
   app.patch(
     "/admin/printer-configs/:id",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -236,7 +237,7 @@ export async function registerAdminPrinterConfigsRoutes(
   app.delete(
     "/admin/printer-configs/:id",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
@@ -271,7 +272,7 @@ export async function registerAdminPrinterConfigsRoutes(
   app.post(
     "/admin/printer-configs/:id/test",
     {
-      preHandler: requireOwnerOrManager,
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",

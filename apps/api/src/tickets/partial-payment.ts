@@ -20,6 +20,7 @@ import { Prisma } from "@mipiacetpv/db";
 
 import { getPrisma } from "../context.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
+import { ensureCajaEnabled } from "../lib/caja-gate.js";
 import {
   PAYMENT_TOLERANCE_EUR,
   computeTicket,
@@ -33,7 +34,7 @@ export async function registerPartialPaymentRoute(
   app.post(
     "/tickets/:ticketId/partial-payment",
     {
-      preHandler: requireCashierSession,
+      preHandler: [requireCashierSession, ensureCajaEnabled],
       schema: {
         params: {
           type: "object",
