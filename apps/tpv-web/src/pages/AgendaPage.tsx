@@ -32,6 +32,7 @@ import {
   ALL_DAY_START,
   centerHHMM,
   centerToday,
+  centerWallDate,
   checkoutAppointmentTicket,
   createAbsence,
   createAppointment,
@@ -53,6 +54,11 @@ import {
   type AvailabilitySlot,
   type OpenRange,
 } from "../lib/agenda.js";
+import {
+  colorDeCabecera,
+  tinteDeProfesional,
+  tonoDeEstado,
+} from "../lib/staffColor.js";
 import { useClientPicker } from "../hooks/useClientPicker.js";
 import { outboxRetry, subscribeOutbox } from "../lib/outbox.js";
 import {
@@ -206,14 +212,6 @@ function addDays(dateStr: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function fmtDateHuman(dateStr: string): string {
-  return new Intl.DateTimeFormat("es-ES", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  }).format(new Date(`${dateStr}T12:00:00.000Z`));
-}
-
 // Instante UTC a partir de fecha local + minutos de pared (para slot-first).
 function localToIso(dateStr: string, minutes: number): string {
   // Reutiliza el mismo truco de offset que el server: interpretar como UTC y
@@ -354,20 +352,54 @@ export function AgendaPage({
   // El día cerrado: la rejilla no ofrece nada y lo dice con su nombre.
   const cerrado = dayInfo?.closed ?? null;
 
-  const loadDay = useCallback(async (d: string) => {
-    setLoading(true);
-    try {
-      const fresh = await fetchAgendaDay(d);
-      setDay(fresh);
-      setOffline(false);
-    } catch {
-      const cached = await loadAgendaDayFromCache(d);
-      setDay(cached ?? { date: d, staff: [], appointments: [] });
-      setOffline(true);
-    } finally {
-      setLoading(false);
-    }
+  // B-reservas-mostrador F5 · las dos cachés locales de las que vive esta
+  // pantalla: los clientes (el nombre de la tarjeta) y el catálogo (el nombre
+  // del servicio). Hasta este bloque se leían UNA VEZ al montar y no se
+  // volvían a mirar, así que un cliente creado o sincronizado con la agenda
+  // ya abierta se pintaba «Cliente» para siempre — es el segundo hallazgo del
+  // 13-09 (`docs/qa/2026-09-13-ap11/20-lunes-cita.png`).
+  //
+  // El catálogo tenía el MISMO patrón y el mismo fallo latente (un servicio
+  // nuevo se pintaba «Servicio»); se arregla igual, de paso, porque es el
+  // mismo bug con otro nombre.
+  const refrescarCachesLocales = useCallback(async () => {
+    const [catalogo, clientes] = await Promise.all([
+      loadCatalogFromCache(),
+      loadClientsFromCache(),
+    ]);
+    setServices(catalogo);
+    // El refresco MEZCLA, no reemplaza. El caché manda sobre lo que ya
+    // había —una ficha editada trae el nombre nuevo—, pero un cliente que
+    // el mapa conoce y el caché todavía no NO se pierde: si se reemplazara,
+    // la clienta que se acaba de elegir en el selector volvería a «Sin
+    // nombre» en cuanto el alta recargara el día, delante de ella.
+    setClientsById((prev) => {
+      const next = new Map(clientes.map((c) => [c.id, c]));
+      for (const [id, c] of prev) if (!next.has(id)) next.set(id, c);
+      return next;
+    });
   }, []);
+
+  const loadDay = useCallback(
+    async (d: string) => {
+      setLoading(true);
+      try {
+        const fresh = await fetchAgendaDay(d);
+        setDay(fresh);
+        setOffline(false);
+      } catch {
+        const cached = await loadAgendaDayFromCache(d);
+        setDay(cached ?? { date: d, staff: [], appointments: [] });
+        setOffline(true);
+      } finally {
+        setLoading(false);
+      }
+      // Después de pintar el día, y sin bloquearlo: si entretanto se dio de
+      // alta una clienta o un servicio, el siguiente pintado ya los sabe.
+      void refrescarCachesLocales();
+    },
+    [refrescarCachesLocales],
+  );
 
   useEffect(() => {
     void loadDay(date);
@@ -393,13 +425,6 @@ export function AgendaPage({
       void loadDay(date);
     });
   }, [date, loadDay]);
-
-  useEffect(() => {
-    void loadCatalogFromCache().then(setServices);
-    void loadClientsFromCache().then((cs) => {
-      setClientsById(new Map(cs.map((c) => [c.id, c])));
-    });
-  }, []);
 
   // Auto-scroll a la línea "ahora" al abrir el día de hoy.
   useEffect(() => {
@@ -449,11 +474,31 @@ export function AgendaPage({
     [day],
   );
 
-  const clientName = (id: string | null): string => {
-    if (!id) return "Sin cliente";
+  // B-reservas-mostrador F5 · «Cliente» SE LEE COMO UN NOMBRE. Una tarjeta
+  // que pone «16:00 · Cliente» parece una cita de alguien que se llama así,
+  // no un dato que falta — y eso es lo que engañó el 13-09. El marcador dice
+  // que falta el dato, y se pinta apagado para que no compita con los
+  // nombres de verdad.
+  const NOMBRE_QUE_FALTA = "Sin nombre";
+
+  /** El nombre para pintar, y si es el marcador o un nombre de verdad. */
+  const clientLabel = (
+    id: string | null,
+  ): { nombre: string; desconocido: boolean } => {
+    if (!id) return { nombre: "Sin cliente", desconocido: false };
     const c = clientsById.get(id);
-    return c ? clientFullName(c) : "Cliente";
+    if (c) return { nombre: clientFullName(c), desconocido: false };
+    return { nombre: NOMBRE_QUE_FALTA, desconocido: true };
   };
+
+  /** El nombre para MANDAR a otra pantalla: `null` si no se sabe. Aquí el
+   *  marcador no vale — la caja pondría «Sin nombre» como si fuera el
+   *  nombre de la clienta en el contexto del borrador. */
+  const clientNameOrNull = (id: string | null): string | null => {
+    const c = id ? clientsById.get(id) : null;
+    return c ? clientFullName(c) : null;
+  };
+
 
   const serviceNames = (a: AgendaAppointment): string =>
     a.items
@@ -581,7 +626,7 @@ export function AgendaPage({
     onEnterDraft({
       appointmentId,
       ticketId: res.ticket.id,
-      clientName: appt ? clientName(appt.clientId) : null,
+      clientName: appt ? clientNameOrNull(appt.clientId) : null,
       serviceLabel: appt ? serviceNames(appt) : "",
     });
     onClose();
@@ -755,12 +800,39 @@ export function AgendaPage({
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
-          <button
-            onClick={() => setDate(todayLocalDate())}
-            className="h-9 px-3 rounded-xl hover:bg-slate-100 text-[13px] font-medium capitalize"
-          >
-            {isToday ? "Hoy" : fmtDateHuman(date)}
-          </button>
+          {/* B-reservas-mostrador · IR A UN DÍA CUALQUIERA.
+
+              Lo destapó cruzar la suite con la rutina real de Sole, que
+              reserva con semanas de antelación. Hasta aquí sólo se podía
+              cambiar de día con la tira de SIETE chips y con dos flechas que
+              son `hidden sm:flex`. O sea:
+
+                · en la tablet, un jueves de dentro de tres semanas costaba
+                  VEINTIÚN toques en la flecha;
+                · por debajo de 640 px las flechas no existen, así que el
+                  día 8 en adelante era SENCILLAMENTE INALCANZABLE.
+
+              Aquí el `type="date"` nativo sí es el control bueno, y es el
+              contrario exacto del razonamiento del frente 3: una fecha de
+              CITA cae a semanas del día de hoy, que es justo donde el
+              calendario del sistema abre. Una fecha de NACIMIENTO cae
+              cuarenta años atrás, que es justo donde no abre. */}
+          <input
+            type="date"
+            value={date}
+            min={todayLocalDate()}
+            onChange={(e) => {
+              if (e.target.value) setDate(e.target.value);
+            }}
+            data-ir-a-dia
+            aria-label="Ir a un día"
+            className="h-11 w-[132px] shrink-0 px-2 rounded-xl bg-mipiace-stone border border-slate-200 text-[13px] font-medium tabular-nums text-mipiace-ink"
+          />
+          {/* La vuelta a HOY no va aquí: va en el primer chip de la tira de
+              días, que ahora dice «Hoy» y está siempre a la vista. Probé a
+              ponerla también en la cabecera y a 390 px el resultado fue el
+              fallo que B-5 F8 arregló — «Nueva cita» cortado por el borde
+              derecho. Esta barra no tiene píxeles de sobra. */}
           <button
             onClick={() => setDate(addDays(date, 1))}
             className="hidden sm:flex h-9 w-9 rounded-xl hover:bg-slate-100 items-center justify-center"
@@ -853,10 +925,12 @@ export function AgendaPage({
                     : "bg-mipiace-stone text-slate-600 hover:bg-slate-200"
                 }`}
               >
-                {new Intl.DateTimeFormat("es-ES", {
-                  weekday: "short",
-                  day: "numeric",
-                }).format(new Date(`${d}T12:00:00.000Z`))}
+                {d === todayLocalDate()
+                  ? "Hoy"
+                  : new Intl.DateTimeFormat("es-ES", {
+                      weekday: "short",
+                      day: "numeric",
+                    }).format(new Date(`${d}T12:00:00.000Z`))}
               </button>
             ),
           )}
@@ -981,7 +1055,7 @@ export function AgendaPage({
                   onSlot={(min) => openSlotFirst(s.userId, min)}
                   onAppt={abrirCita}
                   labelOf={serviceNames}
-                  clientOf={(a) => clientName(a.clientId)}
+                  clientOf={(a) => clientLabel(a.clientId)}
                 />
               ))}
               {(apptsByStaff.get("__unassigned__")?.length ?? 0) > 0 && (
@@ -1006,7 +1080,7 @@ export function AgendaPage({
                   onSlot={(min) => openSlotFirst(null, min)}
                   onAppt={abrirCita}
                   labelOf={serviceNames}
-                  clientOf={(a) => clientName(a.clientId)}
+                  clientOf={(a) => clientLabel(a.clientId)}
                 />
               )}
             </div>
@@ -1033,6 +1107,13 @@ export function AgendaPage({
               setDraft({ ...draft, start });
               setBookError(null);
             }}
+            // B-reservas-mostrador F5 · el cliente que se acaba de elegir o
+            // de crear entra en el mapa AQUÍ MISMO. Esperar a la siguiente
+            // carga del día dejaría la tarjeta recién creada diciendo «Sin
+            // nombre» delante de la clienta cuyo nombre se acaba de teclear.
+            onClientPicked={(c) =>
+              setClientsById((prev) => new Map(prev).set(c.id, c))
+            }
             onCancel={() => {
               setDraft(null);
               setBookError(null);
@@ -1045,7 +1126,7 @@ export function AgendaPage({
         {detail && (
           <DetailPanel
             appt={detail}
-            clientName={clientName(detail.clientId)}
+            client={clientLabel(detail.clientId)}
             serviceLabel={serviceNames(detail)}
             onClose={() => setDetail(null)}
             onStatus={(st) => changeStatus(detail.id, st)}
@@ -1301,7 +1382,7 @@ function StaffColumn(props: {
   onSlot: (minutes: number) => void;
   onAppt: (a: AgendaAppointment) => void;
   labelOf: (a: AgendaAppointment) => string;
-  clientOf: (a: AgendaAppointment) => string;
+  clientOf: (a: AgendaAppointment) => { nombre: string; desconocido: boolean };
 }) {
   const {
     staff,
@@ -1315,6 +1396,10 @@ function StaffColumn(props: {
     absences,
   } = props;
   const totalH = (dayEndMin - dayStartMin) * PX_PER_MIN;
+  // B-reservas-mostrador F2 · el color de ESTA columna, y el tinte con el que
+  // se pintan sus citas. Se calculan una vez por columna, no por tarjeta.
+  const colorStaff = colorDeCabecera(staff.userId, staff.color);
+  const tinteStaff = tinteDeProfesional(staff.userId, staff.color);
   const pastH =
     pastUntilMin == null
       ? 0
@@ -1356,7 +1441,15 @@ function StaffColumn(props: {
     <div className="w-44 md:w-52 shrink-0 border-l border-slate-200">
       <div
         className="sticky top-0 z-10 h-10 flex items-center gap-2 px-2 bg-white border-b border-slate-200"
-        style={{ borderTop: `3px solid ${staff.color ?? "#cbd5e1"}` }}
+        // B-reservas-mostrador F2 · la cabecera usa el MISMO color base que el
+        // tinte de sus tarjetas: si la columna es morada, sus citas son
+        // moradas. Una profesional sin color ya no cae en el gris de todas —
+        // tiene el suyo, derivado de su id y por tanto estable.
+        //
+        // Va por `colorDeCabecera` y no por el color crudo: lo cogió el bucle
+        // visual. Un amarillo casi blanco (#fef9c3) DESAPARECÍA sobre el
+        // blanco de la cabecera y la columna se quedaba sin su marca.
+        style={{ borderTop: `3px solid ${colorStaff}` }}
       >
         <span className="text-[13px] font-semibold text-mipiace-ink truncate flex-1">
           {staff.displayName}
@@ -1415,7 +1508,13 @@ function StaffColumn(props: {
               top: (b.from - dayStartMin) * PX_PER_MIN,
               height: (b.to - b.from) * PX_PER_MIN,
             }}
-            className="absolute left-0 right-0 bg-slate-100 pointer-events-none bg-[repeating-linear-gradient(135deg,transparent,transparent_5px,rgba(148,163,184,0.18)_5px,rgba(148,163,184,0.18)_10px)]"
+            // B-reservas-mostrador F2 · el rayado BAJA de tono (0,18 → 0,09 y
+            // el fondo de slate-100 a slate-50). Hasta este bloque era lo que
+            // más gritaba de la pantalla: una banda que dice que ahí NO se
+            // puede hacer nada pesaba más que la cita, que es lo único que
+            // importa. Sigue viéndose —lo fija `agenda-horario.test.tsx`— pero
+            // ya no compite con las tarjetas teñidas.
+            className="absolute left-0 right-0 bg-slate-50 pointer-events-none bg-[repeating-linear-gradient(135deg,transparent,transparent_5px,rgba(148,163,184,0.09)_5px,rgba(148,163,184,0.09)_10px)]"
           />
         ))}
         {/* rejilla: una línea por franja de la RETÍCULA del centro, más
@@ -1504,10 +1603,22 @@ function StaffColumn(props: {
               style={{
                 top,
                 height,
+                // B-reservas-mostrador F2 · la cita de una profesional se tiñe
+                // con SU color. La local y la rechazada de 6a NO: su ámbar y
+                // su rojo son lo que las distingue de una cita de verdad, y
+                // teñirlas sería borrar esa diferencia.
                 ...(local
                   ? {}
-                  : { borderLeft: `4px solid ${STATUS_COLOR[a.status]}` }),
+                  : {
+                      background: tinteStaff,
+                      borderLeft: `4px solid ${tonoDeEstado(STATUS_COLOR[a.status])}`,
+                    }),
               }}
+              // Ganchos estables para el bucle visual. El tinte de verdad va
+              // en `style`, que es lo que el navegador pinta: `data-tinte` es
+              // sólo para poder localizarlo desde Playwright.
+              data-cita={a.id}
+              data-tinte={local ? undefined : tinteStaff}
               className={
                 local
                   ? // A la MITAD DERECHA de la columna. El bucle visual
@@ -1528,7 +1639,10 @@ function StaffColumn(props: {
                     // ausencias, y por DEBAJO de la cabecera sticky y de la
                     // línea de "ahora" — que es como estaba y no lo cambia
                     // este bloque.
-                    `absolute left-1 right-1 rounded-lg bg-white shadow-sm px-2 py-1 text-left overflow-hidden hover:shadow-md ${
+                    //
+                    // B-reservas-mostrador F2 · sin `bg-white`: el fondo lo
+                    // pone el tinte de la profesional por `style`.
+                    `absolute left-1 right-1 rounded-lg shadow-sm px-2 py-1 text-left overflow-hidden hover:shadow-md ${
                       fuera
                         ? "border border-amber-300 ring-1 ring-amber-200"
                         : "border border-slate-200"
@@ -1545,7 +1659,22 @@ function StaffColumn(props: {
                     : "text-mipiace-ink"
                 }`}
               >
-                {localHHMM(a.start)} · {props.clientOf(a)}
+                {localHHMM(a.start)} ·{" "}
+                {(() => {
+                  const cl = props.clientOf(a);
+                  // El marcador NO lleva color propio: hereda el de la línea.
+                  // Lo cogió el bucle visual — con `text-slate-400` sobre el
+                  // tinte daba 1,95:1, o sea ilegible. Lo que lo distingue de
+                  // un nombre de verdad es la CURSIVA y el peso normal, que no
+                  // cuestan contraste.
+                  return cl.desconocido ? (
+                    <span data-cliente-desconocido className="font-normal italic">
+                      {cl.nombre}
+                    </span>
+                  ) : (
+                    cl.nombre
+                  );
+                })()}
                 {local && (rechazada ? " · rechazada" : " · sin enviar")}
                 {/* B-reservas-7a · si la tarjeta NO da para dos líneas, la
                     marca va aquí. Meterla en una segunda línea que no cabe
@@ -1563,8 +1692,18 @@ function StaffColumn(props: {
                   mitad de las letras, que se lee como un fallo de pintado.
                   Cortar limpio y dejar el servicio para el detalle es
                   mejor que enseñar media palabra. */}
+              {/* B-reservas-mostrador F2 · `slate-600`, no `slate-500`.
+                  Sobre blanco los dos pasaban AA, pero sobre un tinte que se
+                  vea slate-500 pediría un fondo de luminancia 0,943 — o sea,
+                  blanco. Con slate-600 el tinte cabe (5,56:1 contra el
+                  objetivo del bloque). El número vive en
+                  `lib/staffColor.ts` y lo fija `staff-color.test.ts`. */}
               {height >= CARD_TWO_LINE_MIN_H && (
-                <div className="text-[10.5px] text-slate-500 truncate">
+                <div
+                  className={`text-[10.5px] truncate ${
+                    local ? "text-slate-500" : "text-slate-600"
+                  }`}
+                >
                   {!local && fuera ? "fuera de horario · " : ""}
                   {props.labelOf(a)}
                 </div>
@@ -1595,6 +1734,7 @@ function BookingPanel(props: {
   // El 409 del servidor con su frase y sus alternativas.
   bookError: { message: string; alternatives: AvailabilitySlot[] } | null;
   onPickAlternative: (start: string) => void;
+  onClientPicked: (c: ClientRow) => void;
   onCancel: () => void;
   onReserve: () => void;
   onReserveAndCharge: () => void;
@@ -1621,13 +1761,20 @@ function BookingPanel(props: {
     return sum + (s?.durationMin ?? 0);
   }, 0);
 
-  const endHHMM = draft.start
-    ? localHHMM(
-        new Date(
-          new Date(draft.start).getTime() + totalDuration * 60000,
-        ).toISOString(),
-      )
-    : null;
+  // B-reservas-mostrador F4 · SIN DURACIÓN NO HAY FIN. Hasta este bloque
+  // bastaba con tener la hora de inicio: con cero servicios elegidos
+  // `totalDuration` es 0 y la etiqueta decía «fin 12:30» para una cita que
+  // empieza a las 12:30. En el AP11 quedó fotografiado
+  // (`docs/qa/2026-09-13-ap11/20-lunes-cita.png`). Decir una hora de fin
+  // falsa es peor que no decir ninguna: la cajera la lee por teléfono.
+  const endHHMM =
+    draft.start && totalDuration > 0
+      ? localHHMM(
+          new Date(
+            new Date(draft.start).getTime() + totalDuration * 60000,
+          ).toISOString(),
+        )
+      : null;
 
   function toggleService(id: string) {
     const has = draft.serviceIds.includes(id);
@@ -1705,6 +1852,47 @@ function BookingPanel(props: {
 
   const canReserve = draft.serviceIds.length > 0 && !!draft.start;
 
+  // ── B-reservas-mostrador F4 · ningún botón mudo ────────────────────
+  //
+  // Un botón apagado sin motivo obliga a adivinar delante de la clienta. El
+  // motivo va en TEXTO VISIBLE junto al botón, nunca en un `title` ni en un
+  // tooltip: `docs/ux-principles.md` §6 los prohíbe («Touch no tiene hover.
+  // Las cosas se ven o no existen»).
+
+  /** Por qué no se puede buscar hueco. `null` = sí se puede. */
+  function motivoBuscarHueco(): string | null {
+    if (isPastDay) return "Ese día ya ha pasado.";
+    if (draft.serviceIds.length === 0) return "Elige al menos un servicio.";
+    return null;
+  }
+
+  /**
+   * Por qué no se puede reservar. `null` = sí se puede.
+   *
+   * NO nombra el cliente, y no es un olvido: desde B4 una cita SIN cliente es
+   * legal a propósito —la reserva por teléfono de quien todavía no tiene
+   * ficha— y `canReserve` nunca lo ha exigido. Decir «falta el cliente»
+   * mandaría a la cajera a buscar un dato que no hace falta.
+   */
+  function motivoReservar(): string | null {
+    const falta: string[] = [];
+    if (draft.serviceIds.length === 0) falta.push("el servicio");
+    if (!draft.start) falta.push("la hora");
+    if (falta.length === 0) return null;
+    return falta.length === 1
+      ? `Falta ${falta[0]}.`
+      : `Faltan ${falta.join(" y ")}.`;
+  }
+
+  const porQueNoSeBusca = motivoBuscarHueco();
+  const porQueNoSeReserva = motivoReservar();
+
+  // B-reservas-mostrador F1 · ¿la cita que se va a guardar es de HOY? Sale de
+  // `draft.start` —el instante que se va a escribir— y no de `date`, que es
+  // sólo el día que se está mirando. Sin hora elegida no hay cita que cobrar,
+  // así que tampoco hay botón.
+  const esDeHoy = draft.start ? centerWallDate(draft.start) === centerToday() : false;
+
   return (
     <div className="w-full md:w-96 shrink-0 bg-white border-l border-slate-200 flex flex-col overflow-hidden">
       <div className="flex items-center gap-2 h-14 px-4 border-b border-slate-100 shrink-0">
@@ -1731,9 +1919,10 @@ function BookingPanel(props: {
           <label className="text-[12px] font-medium text-slate-500">Cliente</label>
           <button
             onClick={() =>
-              picker.open((c) =>
-                setDraft({ ...draft, clientId: c.id, clientName: clientFullName(c) }),
-              )
+              picker.open((c) => {
+                props.onClientPicked(c);
+                setDraft({ ...draft, clientId: c.id, clientName: clientFullName(c) });
+              })
             }
             className="mt-1 w-full h-11 px-3 rounded-xl bg-mipiace-stone border border-slate-200 text-left text-[14px]"
           >
@@ -1793,12 +1982,24 @@ function BookingPanel(props: {
           ) : (
             <div className="mt-1">
               <button
+                data-accion="buscar-hueco"
                 onClick={findSlots}
-                disabled={draft.serviceIds.length === 0 || searching || isPastDay}
+                disabled={porQueNoSeBusca !== null || searching}
                 className="w-full h-10 rounded-xl bg-mipiace-ink text-white text-[13px] font-medium disabled:opacity-40"
               >
                 {searching ? "Buscando…" : "Buscar hueco"}
               </button>
+              {/* B-reservas-mostrador F4 · el motivo, en texto y debajo del
+                  botón que está apagado. `searching` no genera frase: la
+                  etiqueta ya dice «Buscando…». */}
+              {porQueNoSeBusca && !searching && (
+                <div
+                  data-motivo="buscar-hueco"
+                  className="text-[12px] text-slate-500 mt-1.5"
+                >
+                  {porQueNoSeBusca}
+                </div>
+              )}
               {searchError && (
                 <div className="text-[12px] text-red-500 mt-1">{searchError}</div>
               )}
@@ -1846,22 +2047,74 @@ function BookingPanel(props: {
         )}
       </div>
 
-      {/* Acciones primarias */}
+      {/* Acciones primarias.
+
+          B-reservas-mostrador F1 · «Reservar» es EL botón, y «Reservar y
+          cobrar» sólo existe si la cita es de hoy.
+
+          Por qué: un cobro entra en el turno ABIERTO, que es el de hoy. Si
+          alguien reserva para el jueves y pulsa el primario por inercia, el
+          dinero del jueves cae en el arqueo de hoy — y deshacerlo no es
+          anular (no existe) sino devolver, que cae en el turno del día en que
+          se haga. Un toque de más descuadra DOS arqueos.
+
+          Y «de hoy» sale de `draft.start`, no del día que se está mirando:
+          `start` es el instante que se va a guardar, y cambiar de día con el
+          panel abierto NO lo mueve. Derivarlo de `date` haría aparecer el
+          botón sobre una cita que sigue siendo del jueves.
+
+          El orden del DOM es el orden del tabulador: «Reservar» primero. No
+          hay `<form>` ni `type="submit"` en este panel, así que no existe un
+          Enter que cobre; lo que se fija aquí es que no nazca uno por
+          descuido al reordenar. */}
       <div className="shrink-0 p-4 border-t border-slate-100 space-y-2 bg-white">
+        {/* B-reservas-mostrador F4 · el motivo va ENCIMA del botón apagado,
+            que es donde cae la mirada al venir del cuerpo del panel. Y en una
+            ranura de alto fijo, por lo mismo que el secundario de F1: el pie
+            está anclado abajo, así que cualquier fila que aparezca o
+            desaparezca mueve los dos botones — y moverlos justo cuando la
+            cajera va a tocar es cómo se cobra lo que no se quería cobrar. */}
+        <div className="h-5 flex items-center justify-center">
+          {porQueNoSeReserva && (
+            <p
+              data-motivo="reservar"
+              className="text-[12.5px] text-slate-500 text-center leading-snug"
+            >
+              {porQueNoSeReserva}
+            </p>
+          )}
+        </div>
         <button
-          onClick={props.onReserveAndCharge}
+          data-accion="reservar"
+          onClick={props.onReserve}
           disabled={!canReserve}
           className="w-full h-12 rounded-xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[15px] font-semibold disabled:opacity-40"
         >
-          Reservar y cobrar
-        </button>
-        <button
-          onClick={props.onReserve}
-          disabled={!canReserve}
-          className="w-full h-11 rounded-xl border border-slate-300 text-mipiace-ink text-[14px] font-medium disabled:opacity-40"
-        >
           Reservar
         </button>
+        {/* El hueco del secundario NO desaparece: el pie es `shrink-0` al
+            final de un `flex-col`, así que quitarle una fila subiría el borde
+            y bajaría el primario de golpe. Cuando la cita no es de hoy, esa
+            misma fila la ocupa la razón. Ni salto ni hueco muerto. */}
+        <div className="h-11 flex items-center justify-center">
+          {esDeHoy ? (
+            <button
+              data-accion="reservar-y-cobrar"
+              onClick={props.onReserveAndCharge}
+              disabled={!canReserve}
+              className="w-full h-11 rounded-xl border border-slate-300 text-mipiace-ink text-[14px] font-medium disabled:opacity-40"
+            >
+              Reservar y cobrar
+            </button>
+          ) : (
+            <p
+              data-cobro-otro-dia
+              className="text-[12.5px] text-slate-500 text-center leading-snug"
+            >
+              Se cobra el día de la cita.
+            </p>
+          )}
+        </div>
       </div>
       {picker.element}
     </div>
@@ -1872,7 +2125,7 @@ function BookingPanel(props: {
 
 function DetailPanel(props: {
   appt: AgendaAppointment;
-  clientName: string;
+  client: { nombre: string; desconocido: boolean };
   serviceLabel: string;
   onClose: () => void;
   onStatus: (s: AppointmentStatus) => void;
@@ -1900,7 +2153,17 @@ function DetailPanel(props: {
       <div className="p-4 space-y-3 text-[14px]">
         <div>
           <div className="text-[12px] text-slate-400">Cliente</div>
-          <div className="font-medium text-mipiace-ink">{props.clientName}</div>
+          <div
+            data-cliente-desconocido={props.client.desconocido ? "" : undefined}
+            className={
+              props.client.desconocido
+                ? // Cursiva, no gris claro: el marcador tiene que LEERSE.
+                  "italic text-slate-600"
+                : "font-medium text-mipiace-ink"
+            }
+          >
+            {props.client.nombre}
+          </div>
         </div>
         <div>
           <div className="text-[12px] text-slate-400">Servicios</div>
@@ -1913,9 +2176,14 @@ function DetailPanel(props: {
           </div>
         </div>
         <div>
+          {/* B-reservas-mostrador F2 · el mismo tono que el filete de la
+              tarjeta. Con `STATUS_COLOR` crudo este chip pintaba texto BLANCO
+              sobre el ámbar de "Pendiente": 2,15:1, muy por debajo de AA. Era
+              un defecto de master que el bloque cierra de paso. */}
           <span
+            data-estado={appt.status}
             className="inline-block text-[12px] font-medium px-2 py-0.5 rounded-md text-white"
-            style={{ background: STATUS_COLOR[appt.status] }}
+            style={{ background: tonoDeEstado(STATUS_COLOR[appt.status]) }}
           >
             {STATUS_LABEL[appt.status]}
           </span>

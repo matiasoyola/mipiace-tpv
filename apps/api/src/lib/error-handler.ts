@@ -20,6 +20,7 @@ import {
 import { Prisma } from "@mipiacetpv/db";
 
 import { captureError } from "./sentry.js";
+import { sqlStateOf } from "./sqlstate.js";
 
 function isHoldedError(
   err: unknown,
@@ -132,33 +133,47 @@ export function registerErrorHandler(app: FastifyInstance): void {
     ) {
       const prismaCode =
         err instanceof Prisma.PrismaClientKnownRequestError ? err.code : "VALIDATION";
+      // Y el SQLSTATE, que es el que dice algo. `prismaCode` solo no basta:
+      // todo el SQL crudo de la agenda llega aquí como `P2010` («raw query
+      // failed»), que vale para un deadlock, una FK y una columna que no
+      // existe. El frente carrera-409 se comió eso: el done de B-7a pudo
+      // escribir "sale por el manejador genérico" sin poder decir cuál era
+      // el error, y costó una sonda entera averiguarlo. No otra vez.
+      const sqlState = sqlStateOf(err);
       request.log.error(
-        { err, tenantId, requestId: request.id, prismaCode },
-        `error Prisma ${prismaCode} en ${request.method} ${request.url}`,
+        { err, tenantId, requestId: request.id, prismaCode, sqlState },
+        `error Prisma ${prismaCode}${sqlState ? ` (SQLSTATE ${sqlState})` : ""} en ${request.method} ${request.url}`,
       );
       captureError(err, {
         tenantId,
         requestId: String(request.id),
-        extra: { prismaCode, method: request.method, url: request.url },
+        extra: { prismaCode, sqlState, method: request.method, url: request.url },
       });
       return reply.code(500).send({
         error: "DB_ERROR",
         message: `Error de base de datos (${prismaCode}). Si persiste, contacta con soporte indicando el identificador.`,
         prismaCode,
+        ...(sqlState ? { sqlState } : {}),
         requestId: request.id,
       });
     }
 
     // 5. Resto → 500 con requestId. Stack SOLO en logs. Sentry (Lote 2
     // v1.5-B): captura con tenantId+requestId; no-op sin SENTRY_DSN.
+    //
+    // Aquí también se busca el SQLSTATE: un error de base de datos no
+    // siempre llega envuelto por Prisma (el driver `pg` a pelo, un error
+    // reenvuelto por una capa de arriba), y el que caiga por esta rama es
+    // justo el que nadie sabe qué es. Si lo trae, se registra.
+    const sqlStateSuelto = sqlStateOf(err);
     request.log.error(
-      { err, tenantId, requestId: request.id },
-      `error no controlado en ${request.method} ${request.url}`,
+      { err, tenantId, requestId: request.id, sqlState: sqlStateSuelto },
+      `error no controlado${sqlStateSuelto ? ` (SQLSTATE ${sqlStateSuelto})` : ""} en ${request.method} ${request.url}`,
     );
     captureError(err, {
       tenantId,
       requestId: String(request.id),
-      extra: { method: request.method, url: request.url },
+      extra: { sqlState: sqlStateSuelto, method: request.method, url: request.url },
     });
     return reply.code(500).send({
       error: "INTERNAL_ERROR",

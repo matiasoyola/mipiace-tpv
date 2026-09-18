@@ -48,6 +48,16 @@
 //       · `dia=sin-techo` el centro que no ha configurado nada (como antes
 //         del bloque: ni bandas apagadas ni cierre);
 //       · `reticula=30` la retícula del centro en franjas de media hora
+//   B-reservas-mostrador: el mostrador de la agenda
+//       · `colores=matriz` las tres profesionales con el caso duro del tinte:
+//         Sole con un morado OSCURO, Ana con un amarillo CLARÍSIMO e Isa SIN
+//         color (la agenda le da uno estable derivado de su id);
+//       · `sin-apellidos=1` mete una clienta apuntada sólo por el nombre de
+//         pila, para ver el A–Z y la tarjeta;
+//       · `holded=resultados | vacio | sin-red` controla qué contesta
+//         `GET /contacts/search` para el selector de cliente;
+//       · pantalla `clientes` (la sección Clientes con su ficha), donde vive
+//         la fecha de nacimiento con máscara.
 
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -394,11 +404,25 @@ function madridIso(hh: number, mm: number): string {
   return new Date(guess.getTime() - deltaMin * 60_000).toISOString();
 }
 
-const SOLE_STAFF = [
-  { userId: "st-sole", displayName: "Sole", color: "#8b5cf6", active: true },
-  { userId: "st-marta", displayName: "Marta", color: "#ec4899", active: true },
-  { userId: "st-nuria", displayName: "Nuria", color: "#0ea5e9", active: true },
-];
+// B-reservas-mostrador F2 · `?colores=matriz` cambia los tres colores por el
+// caso DURO del tinte: uno muy oscuro, uno casi blanco y uno sin color. Es la
+// matriz que pide el bucle visual del bloque — con los tres por defecto (tres
+// tonos medios) no se vería si la normalización de luminancia hace su trabajo.
+function benchColores(): boolean {
+  return new URLSearchParams(window.location.search).get("colores") === "matriz";
+}
+
+const SOLE_STAFF = benchColores()
+  ? [
+      { userId: "st-sole", displayName: "Sole", color: "#4c1d95", active: true },
+      { userId: "st-marta", displayName: "Ana", color: "#fef9c3", active: true },
+      { userId: "st-nuria", displayName: "Isa", color: null, active: true },
+    ]
+  : [
+      { userId: "st-sole", displayName: "Sole", color: "#8b5cf6", active: true },
+      { userId: "st-marta", displayName: "Marta", color: "#ec4899", active: true },
+      { userId: "st-nuria", displayName: "Nuria", color: "#0ea5e9", active: true },
+    ];
 
 function mkService(
   id: string,
@@ -440,8 +464,11 @@ function mkClient(id: string, firstName: string, lastName: string, phone: string
     lastName,
     phone,
     email: null,
-    birthdate: null,
-    holdedContactId: null,
+    birthdate: id === "cl-carmen" ? "1961-03-07" : null,
+    // B-reservas-mostrador F6 · Carmen ya está enlazada a su contacto de
+    // Holded: es el caso de la deduplicación (sale arriba, como clienta, y
+    // NO abajo en «De Holded»).
+    holdedContactId: id === "cl-carmen" ? "h-carmen" : null,
     marketingOptIn: false,
     notes: null,
     createdAt: "2026-01-15T09:00:00.000Z",
@@ -449,12 +476,22 @@ function mkClient(id: string, firstName: string, lastName: string, phone: string
   };
 }
 
+// B-reservas-mostrador F3 · `?sin-apellidos=1` añade a «Sole», apuntada por
+// el nombre de pila como Sole apunta a sus clientas. Sirve para mirar dos
+// cosas: que el nombre no deja un espacio colgando y que el A–Z la coloca en
+// la S y no la primera de la lista.
 const SOLE_CLIENTS = [
   mkClient("cl-carmen", "Carmen", "Ruiz", "600 111 222"),
   mkClient("cl-lucia", "Lucía", "Prieto", "600 333 444"),
   mkClient("cl-anabelen", "Ana Belén", "Soto", "600 555 666"),
   mkClient("cl-rosa", "Rosa", "Marín", "600 777 888"),
   mkClient("cl-isabel", "Isabel", "Cano", "600 999 000"),
+  ...(new URLSearchParams(window.location.search).get("sin-apellidos") === "1"
+    ? [
+        mkClient("cl-sole", "Sole", "", "600 222 333"),
+        mkClient("cl-suarez", "Lucía", "Suárez", "600 444 555"),
+      ]
+    : []),
 ];
 
 function mkAppt(
@@ -548,6 +585,46 @@ function benchFallo(): string | null {
   return new URLSearchParams(window.location.search).get("fallo");
 }
 
+// ── B-reservas-mostrador F6 · los contactos de Holded ──────────────────
+//
+// `?holded=resultados` (por defecto en la pantalla `clientes` y en la agenda)
+// devuelve tres contactos, uno de ellos YA enlazado a un cliente del CRM para
+// poder ver la deduplicación; `vacio` devuelve cero; `sin-red` revienta la
+// petición, que es como se ve la sección cuando no se puede preguntar.
+function benchHolded(): "resultados" | "vacio" | "sin-red" {
+  const v = new URLSearchParams(window.location.search).get("holded");
+  return v === "vacio" || v === "sin-red" ? v : "resultados";
+}
+
+const CONTACTOS_HOLDED = [
+  {
+    id: "ct-demetria",
+    holdedContactId: "h-demetria",
+    name: "Demetria Salas Gil",
+    nif: null,
+    email: null,
+    phone: "+34 600 123 456",
+  },
+  {
+    id: "ct-demelza",
+    holdedContactId: "h-demelza",
+    name: "Demelza Ortiz",
+    nif: null,
+    email: "demelza@ejemplo.es",
+    phone: "+34 611 987 654",
+  },
+  {
+    id: "ct-carmen",
+    holdedContactId: "h-carmen",
+    // Éste YA está enlazado (`cl-carmen` lo lleva en `holdedContactId`), así
+    // que NO puede salir en la sección de Holded: sale arriba, como clienta.
+    name: "Carmen Ruiz",
+    nif: null,
+    email: null,
+    phone: "+34 600 111 222",
+  },
+];
+
 // ── B-reservas-7a · el horario del centro en el banco ─────────────────
 
 function benchDia(): string {
@@ -619,7 +696,9 @@ function benchDayInfo() {
         staffUserId: "st-nuria",
         startTime: "09:00",
         endTime: "10:30",
-        reason: "Nuria libre",
+        // El motivo lleva el nombre de la profesional de la columna, que
+        // cambia con `?colores=matriz` (ahí la tercera se llama Isa).
+        reason: `${SOLE_STAFF[2]!.displayName} libre`,
       },
     ],
   };
@@ -1043,7 +1122,7 @@ function stubFetch(): void {
       tpvIconPreset: null,
       tagAliases: [],
       creditSalesEnabled: false,
-      crmEnabled: isAgendaScreen(),
+      crmEnabled: isAgendaScreen() || benchScreen() === "clientes",
       agendaEnabled: isAgendaScreen(),
     },
     // B-reservas-5 · el día de la peluquería. La query (`?date=`) la
@@ -1184,6 +1263,49 @@ function stubFetch(): void {
     // B-reservas-7a · el alta y la baja de una AUSENCIA. Por debajo es el
     // `BookingBlock scope=STAFF` de siempre: aquí sólo se responde que sí,
     // porque lo que el bucle fotografía es el camino de tres toques.
+    // B-reservas-mostrador F6 · el buscador de contactos de Holded y el
+    // enlace. El enlace devuelve un cliente con el nombre ya partido por el
+    // servidor (primera palabra → nombre, el resto → apellidos).
+    if (path === "/contacts/search") {
+      if (benchHolded() === "sin-red") {
+        return new Response(JSON.stringify({ error: "OFFLINE" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      const q = (new URL(url, window.location.origin).searchParams.get("q") ?? "")
+        .trim()
+        .toLowerCase();
+      const results =
+        benchHolded() === "vacio"
+          ? []
+          : CONTACTOS_HOLDED.filter((c) => c.name.toLowerCase().includes(q));
+      return new Response(
+        JSON.stringify({ results, source: "local", holdedFallback: null }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    const enlace = /^\/clients\/from-contact\/(.+)$/.exec(path);
+    if (enlace && init?.method === "POST") {
+      const c = CONTACTOS_HOLDED.find((x) => x.id === enlace[1]);
+      if (!c) {
+        return new Response(JSON.stringify({ error: "CONTACT_NOT_FOUND" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      const [nombre, ...resto] = c.name.split(" ");
+      return new Response(
+        JSON.stringify({
+          client: {
+            ...mkClient(`cl-de-${c.id}`, nombre!, resto.join(" "), c.phone),
+            holdedContactId: c.holdedContactId,
+          },
+          created: true,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    }
     if (path === "/agenda/blocks" && init?.method === "POST") {
       return new Response(JSON.stringify({ id: "bk-nueva" }), {
         status: 201,
@@ -1319,6 +1441,25 @@ function stubFetch(): void {
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     }
+    // B-reservas-mostrador F3 · la ficha del cliente de la sección Clientes.
+    // Se resuelven aquí porque el id va en la ruta y `routes` es una tabla
+    // de rutas peladas.
+    const ficha = /^\/clients\/([^/]+)(\/(history|vouchers))?$/.exec(path);
+    if (ficha && (init?.method ?? "GET") === "GET") {
+      const cliente = SOLE_CLIENTS.find((c) => c.id === ficha[1]);
+      if (cliente) {
+        const cuerpo =
+          ficha[3] === "history"
+            ? { entries: [], appointments: [], voucherMovements: [] }
+            : ficha[3] === "vouchers"
+              ? { balance: { sessionsLeft: 0, amountLeftCents: 0 }, vouchers: [] }
+              : { client: cliente, consents: [], technicalNotes: [] };
+        return new Response(JSON.stringify(cuerpo), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
     const body = routes[path] ?? {};
     // eslint-disable-next-line no-console
     console.log("[banco-visual] stub", path);
@@ -1405,6 +1546,7 @@ function Bench() {
     AgendaPage: typeof import("../src/pages/AgendaPage.js")["AgendaPage"];
     AgendaHealthPanel: typeof import("../src/pages/AgendaHealthPanel.js")["AgendaHealthPanel"];
     AgendaSkillMatrix: typeof import("../src/pages/AgendaSkillMatrix.js")["AgendaSkillMatrix"];
+    ClientsPage: typeof import("../src/pages/ClientsPage.js")["ClientsPage"];
   }>(null);
 
   useEffect(() => {
@@ -1420,6 +1562,7 @@ function Bench() {
         agenda,
         salud,
         matriz,
+        clientes,
       ] = await Promise.all([
         import("../src/pages/CheckoutPage.js"),
         import("../src/pages/CheckoutPage.successOverlay.js"),
@@ -1431,12 +1574,13 @@ function Bench() {
         import("../src/pages/AgendaPage.js"),
         import("../src/pages/AgendaHealthPanel.js"),
         import("../src/pages/AgendaSkillMatrix.js"),
+        import("../src/pages/ClientsPage.js"),
       ]);
       // B-reservas-5 · la agenda lee servicios y clientes de la CACHÉ
       // (IndexedDB), no de la red: sin sembrarla, las citas saldrían como
       // "Servicio" / "Cliente" y el panel de alta, vacío. Se siembra
       // contra los mismos stubs que sirve el banco.
-      if (isAgendaScreen()) {
+      if (isAgendaScreen() || benchScreen() === "clientes") {
         const [cat, cli] = await Promise.all([
           import("../src/lib/catalog.js"),
           import("../src/lib/clients.js"),
@@ -1457,6 +1601,7 @@ function Bench() {
         AgendaPage: agenda.AgendaPage,
         AgendaHealthPanel: salud.AgendaHealthPanel,
         AgendaSkillMatrix: matriz.AgendaSkillMatrix,
+        ClientsPage: clientes.ClientsPage,
       });
     })();
   }, []);
@@ -1609,6 +1754,13 @@ function Bench() {
   // que la captura tiene que salir igual antes y después.
   if (screen === "agenda-entrada") {
     return <AgendaEntrada Screens={Screens} />;
+  }
+
+  // ── B-reservas-mostrador F3 · la sección Clientes ──────────────────
+  // Es donde vive la fecha de nacimiento con máscara y donde se ve el A–Z
+  // con una clienta sin apellidos (`?sin-apellidos=1`).
+  if (screen === "clientes") {
+    return <Screens.ClientsPage onClose={() => {}} />;
   }
 
   if (screen === "mapa") {

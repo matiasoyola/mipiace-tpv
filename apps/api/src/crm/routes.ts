@@ -4,6 +4,10 @@
 //                                            teléfono/email, paginado.
 //   POST  /clients                         — alta (idempotente por
 //                                            externalId para el outbox).
+//   POST  /clients/from-contact/:contactId — cliente enlazado a un contacto
+//                                            de Holded (idempotente por
+//                                            cerrojo consultivo; ver
+//                                            `from-contact.ts`).
 //   GET   /clients/:id                     — ficha completa (+ consents,
 //                                            + ficha técnica).
 //   PATCH /clients/:id                     — edición.
@@ -34,6 +38,11 @@ import { ClientConsentKind, type Prisma } from "@mipiacetpv/db";
 import { requireOwnerOrCashier } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
 import { createAgendaStore } from "../agenda/store.js";
+import {
+  comoPrismaParaEnlace,
+  enlazarContacto,
+  esContactoDeCliente,
+} from "./from-contact.js";
 
 // Vista pública de un cliente para el TPV. No incluye `raw` ni metadatos
 // internos; el front cachea esto en Dexie para la búsqueda offline.
@@ -145,6 +154,15 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
       const rows = await prisma.client.findMany({
         where,
         // A–Z estable: apellido, nombre y desempate por id (cursor).
+        //
+        // B-reservas-mostrador F3 · con apellidos opcionales, un `""` ordena
+        // ANTES que cualquier letra y esas clientas salen las primeras de la
+        // primera página. Este orden NO se toca, y no es una omisión: es el
+        // ORDEN DEL CURSOR de paginación, no lo que se ve. `refreshClients()`
+        // en el TPV se baja el tenant entero (200 por página) y la lista se
+        // pinta con `sortClientsAz`, que sí trata el apellido vacío (la clave
+        // pasa a ser el nombre). Lo único que este `orderBy` tiene que
+        // garantizar es ser un orden TOTAL y estable entre páginas, y lo es.
         orderBy: [{ lastName: "asc" }, { firstName: "asc" }, { id: "asc" }],
         take: limit + 1,
         ...(q.cursor ? { cursor: { id: q.cursor }, skip: 1 } : {}),
@@ -167,7 +185,11 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
       schema: {
         body: {
           type: "object",
-          required: ["firstName", "lastName"],
+          // B-reservas-mostrador F3 · `lastName` sale de `required`. Decisión
+          // de dirección: Sole apunta a sus clientas por el nombre de pila, y
+          // exigir un apellido obliga a inventárselo. La columna sigue siendo
+          // NOT NULL y un cliente sin apellidos guarda "" — sin migración.
+          required: ["firstName"],
           additionalProperties: false,
           properties: {
             // Idempotencia del alta offline (outbox). Si ya existe un
@@ -175,7 +197,7 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
             // cual (200) en vez de duplicar.
             externalId: { type: "string", format: "uuid" },
             firstName: { type: "string", minLength: 1, maxLength: 120 },
-            lastName: { type: "string", minLength: 1, maxLength: 120 },
+            lastName: { type: "string", maxLength: 120 },
             phone: { type: "string", maxLength: 32 },
             email: { type: "string", maxLength: 320 },
             // YYYY-MM-DD (@db.Date).
@@ -192,7 +214,7 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
       const body = request.body as {
         externalId?: string;
         firstName: string;
-        lastName: string;
+        lastName?: string;
         phone?: string;
         email?: string;
         birthdate?: string;
@@ -239,7 +261,7 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
           tenantId: auth.tenantId,
           externalId: body.externalId ?? null,
           firstName: body.firstName.trim(),
-          lastName: body.lastName.trim(),
+          lastName: body.lastName?.trim() ?? "",
           phone: phone || null,
           email: body.email?.trim() || null,
           birthdate: body.birthdate ? new Date(body.birthdate) : null,
@@ -253,6 +275,80 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
         client: toClientView(created),
         ...(phoneWarning ? { phoneWarning } : {}),
       });
+    },
+  );
+
+  // ── B-reservas-mostrador F6 · el contacto de Holded se hace cliente ──
+  //
+  // Un solo endpoint, idempotente, porque la alternativa (buscar desde el
+  // front y crear si no está) deja un hueco entre las dos llamadas por el que
+  // caben dos toques seguidos o dos terminales. Cómo se garantiza el «uno y
+  // sólo uno» sin hacer único el índice: ver `from-contact.ts`.
+  app.post(
+    "/clients/from-contact/:contactId",
+    {
+      preHandler: requireOwnerOrCashier,
+      schema: {
+        params: {
+          type: "object",
+          required: ["contactId"],
+          additionalProperties: false,
+          properties: {
+            // El id de la FILA `Contact` (uuid del tenant), no el
+            // `holdedContactId`: valida la pertenencia al tenant de un golpe.
+            contactId: { type: "string", format: "uuid" },
+          },
+        },
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const auth = request.auth!;
+      const { contactId } = request.params as { contactId: string };
+      const prisma = getPrisma();
+
+      const contacto = await prisma.contact.findFirst({
+        where: { id: contactId, tenantId: auth.tenantId },
+        select: {
+          holdedContactId: true,
+          name: true,
+          email: true,
+          phone: true,
+          type: true,
+        },
+      });
+      if (!contacto) {
+        return reply.code(404).send({
+          error: "CONTACT_NOT_FOUND",
+          message: "Ese contacto no existe.",
+        });
+      }
+      // El filtro de tipo NO puede vivir sólo en la búsqueda: si viviera sólo
+      // allí, quien llamara al endpoint a mano podría enlazar un proveedor y
+      // meterlo en la agenda como clienta.
+      if (!esContactoDeCliente(contacto.type)) {
+        return reply.code(409).send({
+          error: "CONTACT_NOT_CLIENT",
+          message: `«${contacto.name}» no es un cliente en Holded.`,
+        });
+      }
+
+      const { client, created } = await enlazarContacto<
+        Parameters<typeof toClientView>[0]
+      >(
+        comoPrismaParaEnlace(prisma),
+        auth.tenantId,
+        {
+          holdedContactId: contacto.holdedContactId,
+          name: contacto.name,
+          email: contacto.email,
+          phone: contacto.phone,
+        },
+        CLIENT_SELECT,
+      );
+
+      return reply
+        .code(created ? 201 : 200)
+        .send({ client: toClientView(client), created });
     },
   );
 
@@ -314,7 +410,9 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
           additionalProperties: false,
           properties: {
             firstName: { type: "string", minLength: 1, maxLength: 120 },
-            lastName: { type: "string", minLength: 1, maxLength: 120 },
+            // B-reservas-mostrador F3 · sin `minLength`: se puede BORRAR el
+            // apellido de una ficha, no sólo dejarlo sin poner al crearla.
+            lastName: { type: "string", maxLength: 120 },
             phone: { type: ["string", "null"], maxLength: 32 },
             email: { type: ["string", "null"], maxLength: 320 },
             birthdate: { type: ["string", "null"], format: "date" },

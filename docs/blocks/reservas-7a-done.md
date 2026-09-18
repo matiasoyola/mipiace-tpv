@@ -249,13 +249,19 @@ sábado de boda a las 8:30, «Ana libre» y «ISA NO» en la celda).
 11. **El bucle visual del admin usa la pantalla de verdad con la API interceptada en la capa
     de red**, no un banco en el repo. Lo bueno: no hay fixtures de admin que mantener. Lo
     que no cubre: nadie fotografía el admin contra un servidor real.
-12. **La carrera de dos altas sobre el mismo hueco puede devolver 500 en vez de 409.**
-    Observado **una vez** durante el frente R, sobre la versión vieja (§11): dos
-    transacciones concurrentes contra el mismo `EXCLUDE` pueden levantar un error de Postgres
-    que `isExclusionViolation` no reconoce. No se reprodujo en las diez pasadas del fichero
-    arreglado. *La rutina de Sole lo pisaría sólo con dos personas dando de alta la misma
-    hora a la vez* — tiene una recepción, así que hoy no. No se arregla aquí porque el
-    anti-solape es frontera declarada; queda dicho en §11.
+12. ~~**La carrera de dos altas sobre el mismo hueco puede devolver 500 en vez de 409.**~~
+    **RESUELTO (14-09-2026) en `fix-carrera-alta-409`** —
+    ver `docs/blocks/carrera-alta-409-done.md`. Era un deadlock **`40P01`** en el `INSERT
+    INTO appointment_assignments`, y ya no sale: se reintenta una vez la transacción entera
+    y, si el reintento choca de verdad contra el `EXCLUDE`, sale 409 `TAKEN` con
+    alternativas. Cubierto por `test-e2e/agenda-carrera.e2e.ts` (con el deadlock provocado
+    DE VERDAD, con `pg_stat_database` de testigo) y `test/agenda-carrera.test.ts`. *Como
+    decía este punto, la rutina de Sole no lo pisaba —una recepción—; **un bar con dos
+    camareros dando de alta a la vez sí lo pisa**, y por ahí entraba el CI en rojo.*
+    Texto original: observado una vez durante el frente R sobre la versión vieja (§11);
+    dos transacciones concurrentes contra el mismo `EXCLUDE` levantaban un error que
+    `isExclusionViolation` no reconocía; no se reprodujo en las diez pasadas del fichero
+    arreglado.
 13. **`cita-y-turno.e2e.ts` y `cita-a-caja.e2e.ts` nunca ejercen el suelo.** Crean sus citas
     con `store.insertHold`, saltándose el motor, y con fechas que ya son pasado. No son
     frágiles al reloj (§11), pero tampoco prueban nada del suelo. Es deuda de 6a, no de aquí.
@@ -516,7 +522,17 @@ Con un shim de reloj que desplaza `Date` un número fijo de minutos (vive en el 
 
 Y con el reloj real, la suite e2e **entera**: **6 ficheros, 72/72**.
 
-### Lo que el frente R destapó y NO he arreglado
+### Lo que el frente R destapó y NO arreglé — **RESUELTO** (14-09-2026)
+
+> **Cerrado en el frente `fix-carrera-alta-409`.**
+> Ver `docs/blocks/carrera-alta-409-done.md`. Era un **`40P01`** (deadlock), **no** un
+> `40001`; y el agujero era más ancho de lo que digo abajo: además de que
+> `isExclusionViolation` no lo reconocía, **el SQLSTATE no aparecía en ningún sitio** —
+> Prisma envuelve las raw queries en `P2010` y esconde el código de Postgres en
+> `meta.code`, que es justo por lo que este párrafo no pudo decir cuál era el error.
+> Arreglado reintentando **una vez la transacción entera** (un deadlock no es un hueco
+> ocupado) y haciendo que el manejador genérico registre el SQLSTATE. Mismo trato en
+> `reschedule`. Cero migraciones.
 
 En la pasada de la **versión vieja** a las 16:30, el caso 3 (dos altas simultáneas sobre el
 mismo hueco) devolvió **500 en vez de 409**. No es el reloj: es la carrera. Dos transacciones
@@ -529,6 +545,11 @@ No lo arreglo aquí: el anti-solape es frontera declarada de este bloque («NO s
 anti-solape»), y el arreglo es de `store.ts::isExclusionViolation`, que es de B4. **Queda
 dicho**: si la agenda de un centro con dos recepcionistas empieza a devolver 500 en vez de
 «ese hueco ya no está», es esto.
+
+**Epílogo.** Era esto, y tenía el CI de master en rojo. Diez pasadas no bastaban —tampoco
+sesenta—: hizo falta repetir la misma carrera ronda tras ronda para verlo, y entonces salía
+en el **37 %** de las perdedoras. Del log de Postgres de aquel día sobrevive el deadlock del
+12-09 08:23, que es el que se vio aquí.
 
 ### El repaso del resto, que pediste aunque no lo tocara
 
