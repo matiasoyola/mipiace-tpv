@@ -202,6 +202,22 @@ function botonPorTexto(texto: string): HTMLButtonElement | null {
   );
 }
 
+/**
+ * Mete una línea en el ticket y abre el cobro. Hace falta para ver el
+ * botón "Fiado": vive dentro del overlay de cobro, y sin línea no hay
+ * overlay — afirmar que no está sin abrirlo sería una tautología.
+ */
+async function abrirCobro(): Promise<void> {
+  const tile = container.querySelector<HTMLElement>(
+    '[data-testid="product-tile"]',
+  );
+  if (!tile) throw new Error("no hay fichas en la rejilla");
+  await click(tile);
+  const cobrar = botonPorTexto("Cobrar");
+  if (!cobrar) throw new Error('botón "Cobrar" no encontrado');
+  await click(cobrar);
+}
+
 /** Abre el sheet "Más acciones" del panel del ticket. */
 async function abrirMas(): Promise<void> {
   const mas = botonPorTexto("Más");
@@ -291,6 +307,10 @@ describe("catalogo-local · sin Holded, el panel de contacto NO existe", () => {
     flags.holded = false;
     flags.credit = true;
     await render();
+    await abrirCobro();
+    // El overlay de cobro SÍ está abierto — si no, este `toBeNull` no
+    // probaría nada.
+    expect(botonPorTexto("Cobrar")).not.toBeNull();
     expect(botonPorTexto("Fiado")).toBeNull();
   });
 });
@@ -313,6 +333,14 @@ describe("catalogo-local · con Holded, TODO sigue igual que en master", () => {
     expect(entrada).not.toBeNull();
     await click(entrada!);
     expect(sheetDeContacto()).toBe(true);
+  });
+
+  it("y el botón «Fiado» sigue donde estaba", async () => {
+    flags.holded = true;
+    flags.credit = true;
+    await render();
+    await abrirCobro();
+    expect(botonPorTexto("Fiado")).not.toBeNull();
   });
 
   it("EL DEFAULT ES ASIMÉTRICO: un TPV que no ha refrescado se comporta como antes", async () => {
