@@ -226,6 +226,9 @@ Cada fila: se rompe la guarda a mano y se mira qué test lo caza.
 | Dejar `editable: p.source === "LOCAL"` sin mirar la puerta | `catalogo-local-crud.test.ts` · "un producto LOCAL de antes sale editable:false" |
 | Dar de alta sin SKU por la API | `catalogo-local-crud.test.ts` + e2e, los tres casos (sin campo, vacío, espacios) |
 | **(§13)** Quitar el gate de `getCachedHoldedEnabled()` del selector de clientes | `client-picker-holded.test.tsx` · "NI UNA petición a /contacts/search" + "no aparece NADA de Holded" |
+| **(§14)** Devolver la entrada "Cliente" al menú del ticket sin su puerta | `catalogo-local-contact-sheet.test.tsx` · "la entrada «Cliente» no está en el menú" |
+| **(§14)** Quitar las DOS puertas (la entrada Y el render del `ContactSheet`) | el de arriba **+** "se pulsa TODO el menú y el sheet no aparece por ninguna" |
+| **(§14)** Devolver el botón "Fiado" sin mirar el interruptor | `catalogo-local-contact-sheet.test.tsx` · "el botón «Fiado» se va con él" |
 
 **El sabotaje obligatorio del addendum 3, hecho a mano además del test:** con un tenant con
 `holdedApiKeyCiphertext` puesto, `PATCH /super-admin/tenants/:id { holdedEnabled: false }`
@@ -454,6 +457,17 @@ pnpm test:e2e        (Postgres real)    11 ficheros ·  145 tests · verde
 tsc --noEmit         api, admin y tpv-web           limpio
 ```
 
+**Y después del frente del §14** (el ContactSheet de la venta):
+
+```
+pnpm test            (desde la raíz)   217 ficheros · 2281 tests · 3 skipped · verde
+pnpm test:e2e        (Postgres real)    11 ficheros ·  145 tests · verde
+tsc --noEmit         api, admin y tpv-web           limpio
+```
+
+Los 3 saltados son los mismos de siempre. El e2e no se mueve: el frente es
+de pantalla y no toca ninguna ruta.
+
 **Los 3 SALTADOS, dichos por su nombre** porque un recuento sin nombre no se puede auditar: son
 el `describe.skip("super-admin · crear tenant (legacy flow B-SuperAdmin)")` de
 `apps/api/test/super-admin.test.ts`. Los dejó **B-OnboardingV2** al partir
@@ -657,3 +671,129 @@ Ningún test falló, así que no hizo falta decidir si un rojo venía de master 
 
 **Ni push ni merge a master: eso lo hace Matías.** La rama queda en `47a9fa5`, por delante de
 master y con master dentro.
+
+---
+
+## 14 · El ContactSheet de la venta (18-09-2026)
+
+El §13.6 dejó apuntado que `SalePage.contact.tsx` seguía llamando a
+`/contacts/search` sin gatear, y que la pregunta no era de red sino de producto.
+Matías la decidió: **ese panel no se muestra si el tenant no tiene Holded.**
+
+### 14.1 La decisión y su predicado
+
+El ContactSheet adjunta un contacto **de Holded** al ticket para la factura
+(ADR-010). Sin Holded no hay factura, así que el botón que lo abre desaparece —
+no se queda encendido buscando en una lista que siempre vuelve vacía.
+
+Mismo predicado que el resto del frente, `getCachedHoldedEnabled()`, no uno
+nuevo. Es el que ya usan la rejilla del TPV (§9.2) y el selector de clientes
+del CRM (§13.2b).
+
+### 14.2 Qué cuelga de ese panel · lo que se miró ANTES de tocarlo
+
+Esto es lo que había que comprobar, y lo que más tiempo llevó. El dato que
+viaja es `Ticket.contactHoldedId`, y lo lee más gente de la que parecía:
+
+| Quién lo usa | Qué pasa en un tenant sin Holded |
+|---|---|
+| **El papel** — `tickets/print.ts:309` hidrata el nombre del deudor para la leyenda "PENDIENTE DE PAGO" | Sólo entra si el ticket trae contacto. Degrada a `null` |
+| **El email automático** — `tickets/email-trigger.ts:50` | Corta en `if (!opts.contactHoldedId)`. No se encola |
+| **El email manual** que teclea el cajero | **No depende del contacto.** Sigue funcionando |
+| **El listado de deudas** — `credit-routes.ts:102` resuelve nombres por `contactHoldedId` | Sin fiados, lista vacía |
+| **El fiado** — `CheckoutPage:453` y `tickets/routes.ts:456` lo EXIGEN | Ver §14.3 |
+
+**Ninguno se rompe, y la razón es la misma para todos:** en ese comercio
+`contactHoldedId` **no puede llegar a existir**. La tabla `Contact` se puebla
+sólo desde Holded —el sync inicial (`onboarding/initial-sync.ts`), el cron de 15
+min, el fallback por teléfono de `/contacts/search` y el import CSV
+(`workers/contact-import-worker.ts`)— y **los cuatro exigen la API key**. Se
+comprobó uno a uno; el del CSV es el que más engaña, porque suena a "local" y
+no lo es: crea el contacto **en Holded** y lo espeja. Y `POST /contacts`
+responde `409 NO_HOLDED_KEY` sin clave, así que "Crear contacto" tampoco era una
+salida.
+
+### 14.3 El fiado, que es el hallazgo de verdad
+
+**El fiado exige deudor.** `POST /tickets` devuelve `400
+CREDIT_SALE_REQUIRES_CONTACT` sin `contactHoldedId`, y el único sitio donde el
+cajero podía ponerlo era este panel.
+
+O sea que **el fiado ya era imposible** en un comercio sin Holded, desde antes
+de este frente: se pulsaba "Fiado", se leía *"Un fiado necesita un cliente (el
+deudor)"*, se abría el buscador, no había nadie, y no se podía crear a nadie.
+Un callejón sin salida que nadie había visto porque `creditSalesEnabled` **nace
+en `false`** y hace falta encenderlo a mano.
+
+Al dejar de montar el sheet, ese callejón se habría vuelto **mudo**: el aviso
+mandaría a abrir un panel que ya no aparece. Así que **el botón "Fiado" se va
+con él**, mismo predicado. No se rompe ningún fiado porque no había ninguno que
+romper. **"Deudas" NO se toca**: lista lo ya fiado y en ese comercio sale vacía
+sola.
+
+### 14.4 Dos puertas, y una de ellas no se puede probar
+
+La condición está en **dos** sitios: la entrada del menú (`TicketPanel`, la
+cortesía) y el render del `ContactSheet` (`SalePage`, la puerta). Al sabotear
+salió un detalle que merece quedar escrito:
+
+**Quitar sólo la puerta interior no pone rojo ningún test, y no es un fallo del
+test: es que la puerta no tiene llamador.** Sin la entrada del menú, nadie pone
+`openSheet` en `"contact"` —el nudge "Servicio sin cliente" lo quitó v1.3 Lote
+3, y el del fiado también se fue—, así que es inalcanzable por construcción.
+Con las **dos** fuera, el test sí cae. Se mantiene como red para el próximo que
+añada un disparador, y queda dicho aquí para que sea una decisión y no un
+adorno.
+
+### 14.5 Dos tests que pasaban sin probar nada
+
+Merece la pena porque es el fallo que el método existe para cazar, y esta vez
+lo cazó el propio sabotaje:
+
+1. *"el sheet no se monta"* afirmaba que el panel no estaba **sin que nadie
+   hubiera intentado abrirlo**. Verde garantizado. Ahora abre el menú y **pulsa
+   todas sus acciones una a una**. (Y hay que fotografiar los botones del topbar
+   antes de abrir el menú: "Deudas" y "Tickets" también tienen `title`, y
+   pulsarlos se iba a otra pantalla.)
+2. *"el botón Fiado se va"* nunca abría el overlay de cobro, que es donde vive
+   el botón. Ahora mete una línea, pulsa "Cobrar" y **afirma primero que el
+   overlay está abierto**.
+
+Los dos se descubrieron porque el sabotaje correspondiente **no ponía nada en
+rojo**. Un test que no se puede romper no es un test.
+
+### 14.6 El bucle visual
+
+Ocho capturas en `docs/blocks/catalogo-local-shots/`, cada una con su pareja de
+control con Holded al lado — que es lo que demuestra que el único cambio es el
+buscado. A **390×844 (DPR 1)** y a **1280×800 con `deviceScaleFactor` 1,5**, el
+AP11 en horizontal según la medición del done de reservas-mostrador §6.
+
+| Captura | Qué enseña |
+|---|---|
+| `venta-menu-sin-holded-390 · -ap11` | "Más acciones" con **Descuento** y **Observaciones** |
+| `venta-menu-con-holded-390 · -ap11` | Las mismas **más "Cliente"**, como en master |
+| `venta-cobro-sin-holded-390 · -ap11` | El cobro **sin "Fiado"**; "Cobrar" a lo ancho |
+| `venta-cobro-con-holded-390 · -ap11` | El cobro **con "Fiado"** debajo de "Cobrar" |
+
+**El hueco raro que había que buscar no existe.** La rejilla del menú es
+`grid-cols-2 sm:grid-cols-3`: a 390 quedan dos acciones que llenan la fila
+**exacta** —mejor repartidas que las tres de antes, que dejaban una huérfana— y
+en el AP11 quedan dos de tres, sin agujero en medio. En el cobro, quitar
+"Fiado" deja "Cobrar" a lo ancho y el pie cierra igual.
+
+El banco visual (`apps/tpv-web/visual/`) gana `?sin-holded=1` y `?fiado=1`. Van
+también en la respuesta del stub de `/tpv/catalog/products`, no sólo en
+`localStorage`: `refreshCatalog()` corre después de `stubSession()` y volcaba el
+valor del servidor encima, así que sembrar sólo la caché daba una captura con
+"Fiado" en **las dos** columnas.
+
+### 14.7 Lo que sigue pendiente
+
+1. **La conversación de producto completa del comercio sin Holded.** Este frente
+   quita el panel de contacto y el fiado. Quedan sin mirar, a propósito, las
+   pantallas del panel de administración que hablan de contactos (el import CSV
+   entre ellas): son otro bloque y otra pantalla.
+2. Todo lo del §12 y del §13.6 sigue igual.
+
+**Ni push ni merge a master: eso lo hace Matías.**
