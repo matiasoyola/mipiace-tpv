@@ -330,13 +330,17 @@ describe("POST /clients", () => {
     await app.close();
   });
 
-  it("rechaza sin firstName/lastName → 400", async () => {
+  // B-reservas-mostrador F3 · este test exigía firstName Y lastName. Lo que
+  // se exige ahora es sólo el NOMBRE: los apellidos pasan a ser opcionales
+  // (decisión de dirección, ver el `describe` de F3 al final del fichero).
+  // El caso que antes daba 400 —`{ firstName: "Solo" }`— ahora da 201.
+  it("rechaza sin firstName → 400 (el apellido ya no hace falta)", async () => {
     const app = await buildApp();
     const res = await app.inject({
       method: "POST",
       url: "/clients",
       headers: auth,
-      payload: { firstName: "Solo" },
+      payload: { lastName: "Solo" },
     });
     expect(res.statusCode).toBe(400);
     await app.close();
@@ -455,6 +459,118 @@ describe("sub-recursos: alta manual", () => {
     const app = await buildApp();
     const res = await app.inject({ method: "POST", url: `/clients/${c.id}/technical-notes`, headers: auth, payload: { body: "x" } });
     expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+});
+
+// ── B-reservas-mostrador F3 · los apellidos son opcionales ────────────
+//
+// Decisión de dirección: Sole apunta a sus clientas por el nombre de pila.
+// Exigir un apellido obliga a inventárselo, y un CRM lleno de "." o "X" es
+// peor que un CRM con el campo vacío.
+//
+// Sin migración: la columna sigue siendo NOT NULL y un cliente sin apellidos
+// guarda "". Lo que cambia es el JSON Schema del body, en el alta y en la
+// edición.
+
+describe("F3 · apellidos opcionales", () => {
+  it("POST /clients SIN lastName crea el cliente y guarda cadena vacía", async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/clients",
+      headers: auth,
+      payload: { firstName: "Sole" },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().client.firstName).toBe("Sole");
+    expect(res.json().client.lastName).toBe("");
+    // Y en la fila, no sólo en la respuesta: la columna es NOT NULL.
+    const row = [...clientStore.values()][0]!;
+    expect(row.lastName).toBe("");
+    await app.close();
+  });
+
+  it("POST /clients con lastName vacío también entra", async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/clients",
+      headers: auth,
+      payload: { firstName: "Isa", lastName: "" },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().client.lastName).toBe("");
+    await app.close();
+  });
+
+  it("el nombre SIGUE siendo obligatorio: un cliente sin nombre no es nadie", async () => {
+    const app = await buildApp();
+    for (const payload of [{}, { lastName: "Ruiz" }, { firstName: "" }]) {
+      const res = await app.inject({
+        method: "POST",
+        url: "/clients",
+        headers: auth,
+        payload,
+      });
+      expect(res.statusCode).toBe(400);
+    }
+    expect(clientStore.size).toBe(0);
+    await app.close();
+  });
+
+  it("PATCH puede BORRAR el apellido de una ficha que ya lo tenía", async () => {
+    const c = seedClient({ firstName: "Ana", lastName: "Soto" });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/clients/${c.id}`,
+      headers: auth,
+      payload: { lastName: "" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().client.lastName).toBe("");
+    expect(clientStore.get(c.id)!.lastName).toBe("");
+    await app.close();
+  });
+
+  it("el aviso de teléfono duplicado no deja un espacio colgando", async () => {
+    seedClient({ firstName: "Sole", lastName: "", phone: "600111222" });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/clients",
+      headers: auth,
+      payload: { firstName: "Otra", phone: "600111222" },
+    });
+    expect(res.statusCode).toBe(201);
+    const aviso = res.json().phoneWarning;
+    expect(aviso).toHaveLength(1);
+    expect(aviso[0].name).toBe("Sole");
+    expect(aviso[0].name).not.toMatch(/\s$/);
+    await app.close();
+  });
+
+  it("el alta idempotente del outbox sigue funcionando sin apellidos", async () => {
+    const app = await buildApp();
+    const externalId = randomUUID();
+    const primera = await app.inject({
+      method: "POST",
+      url: "/clients",
+      headers: auth,
+      payload: { externalId, firstName: "Sole" },
+    });
+    expect(primera.statusCode).toBe(201);
+    const segunda = await app.inject({
+      method: "POST",
+      url: "/clients",
+      headers: auth,
+      payload: { externalId, firstName: "Sole" },
+    });
+    expect(segunda.statusCode).toBe(200);
+    expect(segunda.json().duplicate).toBe(true);
+    expect(segunda.json().client.id).toBe(primera.json().client.id);
+    expect(clientStore.size).toBe(1);
     await app.close();
   });
 });

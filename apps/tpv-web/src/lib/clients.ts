@@ -161,11 +161,28 @@ export async function upsertClientInCache(client: ClientRow): Promise<void> {
 
 // ─── Búsqueda local (feedback <100 ms) ───────────────────────────────
 
-// Ordena A–Z por apellido, luego nombre. Estable con el orden del server.
+/**
+ * Ordena A–Z por apellido, luego nombre.
+ *
+ * B-reservas-mostrador F3 · **el apellido puede estar vacío**, y una cadena
+ * vacía ordena ANTES que cualquier letra: sin esto, todas las clientas que
+ * Sole apunta por el nombre de pila se amontonaban al principio de la lista,
+ * que es justo donde no se las busca. La clave de orden es «el apellido, o el
+ * nombre si no hay apellido»: Sole (sin apellido) cae entre Soto y Suárez,
+ * que es donde la recepcionista va a mirar.
+ *
+ * Este es EL A–Z que se ve. El `orderBy` de `GET /clients` es el orden del
+ * cursor de paginación: `refreshClients()` se baja el tenant entero al caché
+ * y la lista se pinta desde aquí.
+ */
+export function clientSortKey(c: { firstName: string; lastName: string }): string {
+  return (c.lastName.trim() || c.firstName.trim());
+}
+
 export function sortClientsAz(items: ClientRow[]): ClientRow[] {
   return [...items].sort(
     (a, b) =>
-      a.lastName.localeCompare(b.lastName, "es") ||
+      clientSortKey(a).localeCompare(clientSortKey(b), "es") ||
       a.firstName.localeCompare(b.firstName, "es"),
   );
 }
@@ -222,7 +239,9 @@ export async function refreshClients(): Promise<ClientRow[]> {
 
 export interface CreateClientInput {
   firstName: string;
-  lastName: string;
+  // B-reservas-mostrador F3 · opcional. La API ya no lo exige y la columna
+  // guarda "" — sin migración.
+  lastName?: string;
   phone?: string;
   email?: string;
   birthdate?: string;
@@ -249,7 +268,9 @@ export async function createClient(
   const body: Record<string, unknown> = {
     externalId,
     firstName: input.firstName,
-    lastName: input.lastName,
+    // Se manda siempre, aunque sea "": la columna es NOT NULL y el outbox
+    // reenvía este mismo cuerpo tal cual.
+    lastName: input.lastName ?? "",
   };
   if (input.phone) body.phone = input.phone;
   if (input.email) body.email = input.email;
@@ -277,7 +298,7 @@ export async function createClient(
       id: externalId,
       externalId,
       firstName: input.firstName,
-      lastName: input.lastName,
+      lastName: input.lastName ?? "",
       phone: input.phone ?? null,
       email: input.email ?? null,
       birthdate: input.birthdate ?? null,
@@ -294,7 +315,7 @@ export async function createClient(
       kind: "client",
       path: "/clients",
       body,
-      label: `Cliente: ${clientFullName(input)}`,
+      label: `Cliente: ${clientFullName({ ...input, lastName: input.lastName ?? "" })}`,
       total: 0,
     });
     return { client: optimistic, queuedOffline: true };
