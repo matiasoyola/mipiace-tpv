@@ -117,6 +117,11 @@ services:
       # volume: los binarios los sube Matías por scp desde el Mac y tiene
       # que poder verlos y borrarlos sin entrar en Docker.
       RELEASES_DIR: /srv/releases
+      # A5 · capturas de pantalla de terminales. Named volume compartido con el
+      # worker, que es quien las borra a las 24 h. Son fotos de la pantalla de
+      # un TPV con datos de clientes: no van a la imagen ni al repo, y no se
+      # sirven por Caddy — el binario sale por la API, con sesión y auditado.
+      DEVICE_SCREENSHOT_DIR: /var/lib/mipiacetpv/device-screenshots
       # v1.5-hotfix3 · los Z van a un named volume (antes: FS del
       # contenedor → se perdían en cada recreate + EACCES con USER node).
       Z_REPORT_STORAGE_ROOT: /var/lib/mipiacetpv/z-reports
@@ -137,6 +142,9 @@ services:
       - product_images:/var/cache/mipiacetpv/product-images
       # v1.5-hotfix3 · informes Z persistentes.
       - z_reports:/var/lib/mipiacetpv/z-reports
+      # A5 · capturas de terminales. RW: la API escribe al recibirlas y el
+      # worker las borra al caducar.
+      - device_screenshots:/var/lib/mipiacetpv/device-screenshots
       # A3-distribución: los .apk publicados, en READ-ONLY. La API sólo los
       # sirve; quien escribe ahí es infra/publicar-apk.sh por scp. Si algún
       # día la API se compromete, no puede reemplazar el binario que se
@@ -195,6 +203,10 @@ services:
       SUPER_ADMIN_FROM_EMAIL: ${SUPER_ADMIN_FROM_EMAIL}
       SUPER_ADMIN_REPLY_TO_EMAIL: ${SUPER_ADMIN_REPLY_TO_EMAIL}
       PRODUCT_IMAGE_CACHE_DIR: /var/cache/mipiacetpv/product-images
+      # A5 · el worker es quien BORRA las capturas caducadas. Mismo directorio
+      # que la API, que es quien las escribe. Sin esta variable el barrido
+      # miraría en otro sitio y la retención de 24 h sería sólo una frase.
+      DEVICE_SCREENSHOT_DIR: /var/lib/mipiacetpv/device-screenshots
       # v1.5-consistencia-B · Lote 2: Sentry (ídem api).
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_RELEASE: ${IMAGE_TAG:-latest}
@@ -202,6 +214,8 @@ services:
       # Worker primario para B-ProductImages: descarga, valida y escribe
       # los binarios. Mismo volumen que el API y Caddy.
       - product_images:/var/cache/mipiacetpv/product-images
+      # A5 · el barrido de capturas caducadas necesita el mismo volumen.
+      - device_screenshots:/var/lib/mipiacetpv/device-screenshots
     deploy:
       resources:
         limits:
@@ -262,6 +276,7 @@ volumes:
   caddy_config:
   static_files:
   # v1.5-hotfix3 · informes Z (PDF) persistentes entre deploys.
+  device_screenshots:
   z_reports:
   # B-ProductImages: cache local de imágenes de producto desde Holded.
   # Compartido entre api (escribe ocasional), worker (escribe primario)

@@ -24,6 +24,12 @@ const ACTIONS = [
   { value: "delete_super_admin", label: "Eliminar super-admin" },
   { value: "create_apk_download_code", label: "Generar código de instalación" },
   { value: "apk_download", label: "Descarga de la APK" },
+  // A5 · acceso remoto. Sin estas entradas el registro pinta el slug crudo.
+  { value: "device_command", label: "Comando a un terminal" },
+  { value: "device_command_result", label: "Resultado de un comando" },
+  { value: "device_command_rejected", label: "Comando rechazado" },
+  { value: "device_screenshot", label: "Captura de un terminal" },
+  { value: "device_screenshot_viewed", label: "Captura abierta" },
 ];
 
 export const ACTION_LABEL: Record<string, string> = Object.fromEntries(

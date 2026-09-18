@@ -25,6 +25,7 @@ import { AdminsListPage } from "./superadmin/AdminsListPage.js";
 import { AuditLogPage } from "./superadmin/AuditLogPage.js";
 import { CreateTenantPage } from "./superadmin/CreateTenantPage.js";
 import { DescargasPage } from "./superadmin/DescargasPage.js";
+import { TerminalesPage } from "./superadmin/TerminalesPage.js";
 import { HubPage } from "./superadmin/HubPage.js";
 import { SuperAdminGate } from "./superadmin/SuperAdminGate.js";
 import { SuperAdminLoginPage } from "./superadmin/SuperAdminLoginPage.js";
@@ -146,6 +147,7 @@ export function App() {
         <Route path="/superadmin/hub" element={<SuperAdminGate><HubPage /></SuperAdminGate>} />
         {/* A3-distribución: versiones publicadas de la APK y códigos de instalación. */}
         <Route path="/superadmin/descargas" element={<SuperAdminGate><DescargasPage /></SuperAdminGate>} />
+        <Route path="/superadmin/terminales" element={<SuperAdminGate><TerminalesPage /></SuperAdminGate>} />
         <Route path="/superadmin/tenants" element={<SuperAdminGate><TenantsListPage /></SuperAdminGate>} />
         <Route path="/superadmin/tenants/new" element={<SuperAdminGate><CreateTenantPage /></SuperAdminGate>} />
         <Route path="/superadmin/tenants/:id" element={<SuperAdminGate><TenantDetailPage /></SuperAdminGate>} />

@@ -90,6 +90,44 @@ export async function superApi<T>(path: string, options: ApiOptions = {}): Promi
   return parsed as T;
 }
 
+/**
+ * A5 · descarga un binario protegido por la sesión super-admin.
+ *
+ * `superApi` sólo habla JSON, y un `<img src>` o un `<a href>` no llevan la
+ * cabecera `Authorization`: por eso las capturas se piden con fetch y se
+ * pintan desde un object URL. Es lo que permite que el endpoint del binario
+ * exija sesión de verdad en vez de ser una URL adivinable.
+ *
+ * Quien llame es responsable de `URL.revokeObjectURL`.
+ */
+export async function superApiBlob(
+  path: string,
+  retryOnUnauthorized = true,
+): Promise<Blob> {
+  const tokens = readSuperAdminTokens();
+  const headers: Record<string, string> = {};
+  if (tokens) headers.Authorization = `Bearer ${tokens.accessToken}`;
+  const res = await fetch(`/api${path}`, { headers });
+  if (res.status === 401 && retryOnUnauthorized && tokens) {
+    const refreshed = await tryRefresh(tokens.refreshToken);
+    if (refreshed) {
+      storeSuperAdminTokens(refreshed);
+      return superApiBlob(path, false);
+    }
+    clearSuperAdminTokens();
+  }
+  if (!res.ok) {
+    throw new SuperAdminApiError(
+      res.status,
+      `HTTP_${res.status}`,
+      res.status === 404
+        ? "Esa captura ya no existe o ha caducado."
+        : `No se pudo descargar (${res.status})`,
+    );
+  }
+  return res.blob();
+}
+
 async function tryRefresh(refreshToken: string): Promise<SuperAdminTokens | null> {
   try {
     const res = await fetch("/api/super-admin/auth/refresh", {

@@ -186,6 +186,15 @@ find_apksigner() {
 [ -f "$ANDROID_DIR/keystore.properties" ] \
   || die "falta $ANDROID_DIR/keystore.properties (copia keystore.properties.example y rellénalo)."
 
+# --- A5 · R5 · origen del WebView (incidente del 2026-09-04) ------------------
+# Va AQUÍ, antes de compilar nada: el origen malo no rompe el build, así que si
+# se comprobara al final habría dos minutos de Vite y un gradle de por medio.
+# La comprobación de lo que se empaqueta de verdad (el JSON sincronizado) está
+# en el paso 4; ésta es sobre la fuente.
+node "$ROOT/apps/tpv-android/scripts/verificar-origen.mjs" \
+  --ts "$ROOT/apps/tpv-android/capacitor.config.ts" \
+  || die "el APK NO se construye con este origen (R5). Ver arriba."
+
 echo "==> VITE_API_URL=$VITE_API_URL  VITE_TARGET=$VITE_TARGET  version=$VERSION_NAME ($VERSION_CODE)  commit=$GIT_SHA"
 
 echo "==> 1/6 build tpv-web (dist con backend de producción)"
@@ -261,20 +270,24 @@ echo "    OK · sin Service Worker en los assets del proyecto nativo (hallazgo A
 # NO PUEDE NI VINCULARSE — la petición a /devices/pair muere en el preflight.
 # Se valida sobre el JSON que `cap sync` deja en el proyecto nativo, que es lo
 # que se empaqueta, no sobre capacitor.config.ts.
+#
+# A5 · R5 · esta guarda se comía dos fallos y por eso NO paró el APK del
+# 2026-09-04:
+#
+#   1. Sólo miraba `hostname`. `androidScheme` cambia el origen igual de bien
+#      —https://mipiacetpv.com y http://mipiacetpv.com son orígenes DISTINTOS,
+#      con localStorage distinto— y no se comprobaba. Tampoco
+#      `allowMixedContent`, que es la pista de que alguien apuntó la APK a una
+#      API sin TLS.
+#   2. El valor esperado salía de `VITE_TPV_URL`, así que la guarda se apagaba
+#      exportando una variable. Una guarda con interruptor no es una guarda.
+#
+# Ahora los tres valores están fijados en scripts/origen-del-webview.mjs, sin
+# variable de entorno que los relaje, y el mismo módulo lo usa el test de R5.
 CAP_JSON="$ANDROID_DIR/app/src/main/assets/capacitor.config.json"
-# Sin sed: el BSD sed de macOS no entiende \? en regex básica y dejaba
-# EXPECTED_HOST="https:", con lo que el check tumbaba builds legítimos.
-EXPECTED_HOST="${VITE_TPV_URL:-https://mipiacetpv.com}"
-EXPECTED_HOST="${EXPECTED_HOST#*://}"
-EXPECTED_HOST="${EXPECTED_HOST%%/*}"
 [ -f "$CAP_JSON" ] || die "no encuentro $CAP_JSON. ¿El cap sync del paso 3 hizo algo?"
-if ! grep -qF "\"hostname\": \"$EXPECTED_HOST\"" "$CAP_JSON"; then
-  die "capacitor.config.json NO declara hostname=$EXPECTED_HOST.
-       Sin eso el WebView corre en https://localhost y la API lo rechaza por
-       CORS: el APK instala bien y no puede ni vincularse (hallazgo B2).
-       Revisa server.hostname en apps/tpv-android/capacitor.config.ts."
-fi
-echo "    OK · hostname=$EXPECTED_HOST en capacitor.config.json (origen != localhost)"
+node "$ROOT/apps/tpv-android/scripts/verificar-origen.mjs" --json "$CAP_JSON" \
+  || die "el APK NO se publica con este origen (R5). Ver arriba."
 
 echo "==> 5/6 gradlew assembleRelease (APK firmado)"
 ( cd "$ANDROID_DIR" && ./gradlew assembleRelease -PversionName="$VERSION_NAME" -PversionCode="$VERSION_CODE" )

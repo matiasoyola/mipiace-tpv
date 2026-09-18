@@ -16,9 +16,32 @@ const config: CapacitorConfig = {
     // El TPV asume HTTPS (WebUSB/cam/SW). En el WebView usamos esquema
     // https para que el Service Worker y los permisos se comporten como
     // en producción.
+    //
+    // NO PONER A `true`. Ver el aviso del origen, arriba de `server`.
     allowMixedContent: false,
   },
   server: {
+    // ⛔ ESTOS TRES VALORES NO SE TOCAN. NI «un momento», NI «para probar».
+    //
+    // `androidScheme` + `hostname` son el ORIGEN del WebView, y el WebView
+    // guarda `localStorage` POR ORIGEN. `mipiacetpv-device-token` y
+    // `mipiacetpv-device-me` —la vinculación del terminal— viven ahí. Cambiar
+    // el esquema o el host le da al TPV un almacén vacío: arranca DESVINCULADO
+    // y pide un código de 6 dígitos, con el bar abierto.
+    //
+    // No es hipotético. El 2026-09-04 esta config salió en una APK con
+    // `androidScheme: "http"` y `hostname: "a5-lab.mipiacetpv.com"` (puestas
+    // como TEMPORAL para una pasada de laboratorio de A5) y DEJÓ SIN COBRAR A
+    // UN CLIENTE REAL. El terminal no estaba roto: estaba mirando otro origen.
+    //
+    // Para probar contra una API local NO se toca esto: se levanta la API con
+    // TLS, o se usa `server.url` (hot-reload, comentado abajo), que no cambia
+    // el origen del bundle instalado.
+    //
+    // Blindado en `infra/test/origen-del-webview.test.ts` (R5) y en
+    // `scripts/build-release-apk.sh` y `build-release-aab.sh`, que se NIEGAN a
+    // compilar si no se cumplen.
+    //
     // Esquema https explícito (es el default de Capacitor 6, pero el SW
     // y los permisos del TPV dependen de él; no dejarlo implícito).
     androidScheme: "https",
