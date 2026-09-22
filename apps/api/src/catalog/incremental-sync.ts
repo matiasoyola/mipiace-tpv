@@ -493,6 +493,14 @@ async function upsertCatalogEntry(
     create: {
       tenantId,
       holdedProductId: raw.id,
+      // catalogo-local · lo que nace del sync nace HOLDED (ver la nota
+      // gemela en initial-sync.ts).
+      //
+      // La rama `update` de este upsert NO necesita puerta: la busca
+      // `tenantId_holdedProductId`, y un producto local tiene ese enlace
+      // a NULL, así que jamás puede casar con ella. El sync no tiene por
+      // dónde pisar una ficha local aunque quisiera.
+      source: "HOLDED",
       name: raw.name,
       sku,
       barcode,

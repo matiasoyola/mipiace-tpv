@@ -118,6 +118,10 @@ const fakePrisma = {
     // sobreescribir esta función.
     findUniqueOrThrow: vi.fn(async () => ({
       discountThresholdPct: { toString: () => "10" },
+      // catalogo-local · el fake declara que ESTE tenant tiene Holded.
+      // `shouldEnqueueHoldedUpload` lo exige para encolar, y lo que este
+      // test describe es el comercio con Holded de siempre.
+      holdedApiKeyCiphertext: "cipher",
     })),
   },
   user: {

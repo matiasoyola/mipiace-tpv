@@ -48,6 +48,8 @@ interface FakeTenant {
   cajaEnabled: boolean;
   crmEnabled: boolean;
   agendaEnabled: boolean;
+  // catalogo-local (addendum 3) · el interruptor de Holded.
+  holdedEnabled: boolean;
   createdAt: Date;
 }
 
@@ -110,6 +112,7 @@ const fakePrisma: any = {
         businessType: data.businessType ?? "RETAIL",
         initialSyncStatus: data.initialSyncStatus ?? "PENDING",
         cajaEnabled: data.cajaEnabled ?? true,
+        holdedEnabled: data.holdedEnabled ?? true,
         crmEnabled: data.crmEnabled ?? false,
         agendaEnabled: data.agendaEnabled ?? false,
         createdAt: new Date(),
@@ -340,6 +343,7 @@ describe("H1 · PATCH /super-admin/tenants/:id · mover módulos", () => {
       cajaEnabled: true,
       crmEnabled: false,
       agendaEnabled: false,
+      holdedEnabled: true,
       createdAt: new Date(),
       ...over,
     };
@@ -379,5 +383,106 @@ describe("H1 · PATCH /super-admin/tenants/:id · mover módulos", () => {
     await patch(app, t.id, { crmEnabled: true });
     const a = audits.find((x) => x.action === "update_tenant");
     expect(a!.metadata.changes.crmEnabled).toEqual({ before: false, after: true });
+  });
+
+  // ── catalogo-local · addendum 3 · el interruptor de Holded ──────────
+  //
+  // Decisión de Matías: lo apaga SÓLO el super-admin. El propietario no
+  // tiene ninguna salida de "trabajar sin Holded" en su onboarding,
+  // porque la implantación de Holded es una decisión de venta de Mi
+  // Piace y poner la salida barata a un clic en la misma pantalla donde
+  // se vende es regalarla.
+  describe("el interruptor de Holded", () => {
+    it("el super-admin lo apaga en una empresa SIN clave conectada", async () => {
+      const t = seed({ holdedEnabled: true, holdedApiKeyCiphertext: null });
+      const app = await buildApp();
+      const res = await patch(app, t.id, { holdedEnabled: false });
+      expect(res.statusCode).toBe(200);
+      expect(tenants.get(t.id)!.holdedEnabled).toBe(false);
+    });
+
+    it("EL SABOTAJE: apagarlo con la clave puesta → 409, y no lo apaga", async () => {
+      // Apagar Holded en un tenant que ya está subiendo tickets dejaría
+      // documentos a medias en su contabilidad y ventas sin subir sin que
+      // nadie se enterara. Y como el bloque es forward-only, no habría
+      // marcha atrás cómoda: lo cobrado en el periodo local no se sube.
+      const t = seed({ holdedEnabled: true, holdedApiKeyCiphertext: "v1:cipher" });
+      const app = await buildApp();
+      const res = await patch(app, t.id, { holdedEnabled: false });
+      expect(res.statusCode).toBe(409);
+      expect(res.json().error).toBe("HOLDED_ENABLED_HAS_KEY");
+      expect(tenants.get(t.id)!.holdedEnabled).toBe(true);
+    });
+
+    it("ENCENDERLO con clave sí se puede: es volver al camino de siempre", async () => {
+      const t = seed({ holdedEnabled: false, holdedApiKeyCiphertext: "v1:cipher" });
+      const app = await buildApp();
+      const res = await patch(app, t.id, { holdedEnabled: true });
+      expect(res.statusCode).toBe(200);
+      expect(tenants.get(t.id)!.holdedEnabled).toBe(true);
+    });
+
+    it("NO es un módulo: apagarlo no cuenta para el invariante de módulos", async () => {
+      // Una empresa con caja y sin Holded es una empresa completa, no una
+      // empresa vacía. Si `holdedEnabled` entrara en MODULE_FIELDS, este
+      // PATCH devolvería NO_MODULES_ENABLED.
+      const t = seed({ cajaEnabled: true, crmEnabled: false, agendaEnabled: false });
+      const app = await buildApp();
+      const res = await patch(app, t.id, { holdedEnabled: false });
+      expect(res.statusCode).toBe(200);
+      expect(tenants.get(t.id)!.cajaEnabled).toBe(true);
+    });
+
+    it("queda auditado con su antes y su después", async () => {
+      const t = seed({ holdedEnabled: true });
+      const app = await buildApp();
+      await patch(app, t.id, { holdedEnabled: false });
+      const a = audits.find((x) => x.action === "update_tenant");
+      expect(a!.metadata.changes.holdedEnabled).toEqual({ before: true, after: false });
+    });
+  });
+});
+
+// ── catalogo-local · addendum 3 · el alta con tres caminos ────────────
+describe("catalogo-local · POST /super-admin/tenants · el interruptor", () => {
+  it("por defecto nace ENCENDIDO: el alta de siempre no cambia", async () => {
+    const app = await buildApp();
+    await post(app, { legalName: "Peluquería Sole SL" });
+    expect([...tenants.values()][0]!.holdedEnabled).toBe(true);
+  });
+
+  it("`holdedEnabled: false` crea el comercio de catálogo local", async () => {
+    const app = await buildApp();
+    const res = await post(app, {
+      legalName: "Colegio Santa Ana",
+      holdedEnabled: false,
+    });
+    expect(res.statusCode).toBe(201);
+    const t = [...tenants.values()][0]!;
+    expect(t.holdedEnabled).toBe(false);
+    expect(t.initialSyncStatus).toBe("NOT_APPLICABLE");
+  });
+
+  it("apagarlo Y pasar clave a la vez → 400: hay que decidir una", async () => {
+    const app = await buildApp();
+    const res = await post(app, {
+      legalName: "Incoherente SL",
+      holdedEnabled: false,
+      holdedApiKey: "k".repeat(20),
+      holdedAccountId: "acc-1",
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("HOLDED_DISABLED_WITH_KEY");
+    expect(tenants.size).toBe(0);
+  });
+
+  it("sin clave y con el interruptor ENCENDIDO es el alta 'lo conectará más adelante'", async () => {
+    // Es el alta sin Holded de H1, que siempre quiso decir esto. Este
+    // tenant SÍ verá /onboarding, y debe.
+    const app = await buildApp();
+    await post(app, { legalName: "Bar Nuevo SL" });
+    const t = [...tenants.values()][0]!;
+    expect(t.holdedEnabled).toBe(true);
+    expect(t.holdedApiKeyCiphertext).toBeNull();
   });
 });

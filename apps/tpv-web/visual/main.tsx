@@ -58,6 +58,10 @@
 //         `GET /contacts/search` para el selector de cliente;
 //       · pantalla `clientes` (la sección Clientes con su ficha), donde vive
 //         la fecha de nacimiento con máscara.
+//   catalogo-local: `?sin-holded=1` apaga el interruptor de Holded (la venta
+//     del comercio que no lo usa: sin "Cliente" en el menú del ticket y sin
+//     "Fiado" en el cobro) y `?fiado=1` enciende la venta a crédito, que
+//     nace apagada y hace falta para ver que el botón desaparece.
 
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -785,12 +789,34 @@ function stubSession(): void {
     "mipiacetpv-catalog-crm-enabled",
     isAgendaScreen() ? "1" : "0",
   );
+  // catalogo-local · `?sin-holded=1` apaga el interruptor de Holded. Se
+  // lee en el PRIMER pintado, como el vertical y las capabilities: de él
+  // dependen la entrada "Cliente" del menú del ticket (el ContactSheet) y
+  // el botón "Fiado" del cobro. Sin el parámetro vale "1" — el default
+  // asimétrico del bloque: un TPV que no sabe se comporta como antes.
+  //
+  // `?fiado=1` enciende la venta a crédito. Va aparte a propósito: el
+  // flag nace apagado y encenderlo para todas las pantallas cambiaría
+  // capturas de otros bloques.
+  const params = new URLSearchParams(window.location.search);
+  localStorage.setItem(
+    "mipiacetpv-catalog-holded-enabled",
+    params.get("sin-holded") === "1" ? "0" : "1",
+  );
+  if (params.get("fiado") === "1") {
+    localStorage.setItem("mipiacetpv-catalog-credit-sales", "1");
+  }
 }
 
 // v1.14 · el banco necesita variar catálogo y vertical por pantalla: los
 // chips salen del catálogo y la barra superior del `businessType`.
 function benchScreen(): string {
   return new URLSearchParams(window.location.search).get("screen") ?? "checkout";
+}
+
+/** Un parámetro cualquiera de la query del banco. */
+function benchParam(name: string): string | null {
+  return new URLSearchParams(window.location.search).get(name);
 }
 
 function benchCatalog() {
@@ -1121,7 +1147,13 @@ function stubFetch(): void {
       businessType: benchBusinessType(),
       tpvIconPreset: null,
       tagAliases: [],
-      creditSalesEnabled: false,
+      // catalogo-local · los dos flags los manda el SERVIDOR en la primera
+      // página del catálogo, y `refreshCatalog()` los vuelca a la caché.
+      // Sembrar `localStorage` en `stubSession()` no basta: el refresco de
+      // SalePage llega después y lo pisa. Así que el stub los dice, como
+      // los diría la API de verdad.
+      creditSalesEnabled: benchParam("fiado") === "1",
+      holdedEnabled: benchParam("sin-holded") !== "1",
       crmEnabled: isAgendaScreen() || benchScreen() === "clientes",
       agendaEnabled: isAgendaScreen(),
     },

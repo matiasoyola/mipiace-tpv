@@ -42,9 +42,26 @@ export function CreateTenantPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // H1 · la bifurcación. Por defecto SÍ, que es el alta de hoy y la de
-  // los cuatro clientes con caja; el colegio es el caso nuevo.
-  const [usesHolded, setUsesHolded] = useState(true);
+  // H1 · la bifurcación. Por defecto "ahora", que es el alta de hoy y la
+  // de los cuatro clientes con caja.
+  //
+  // catalogo-local (addendum 3) · eran DOS opciones y hacían falta TRES.
+  // "No, sin Holded" significaba a la vez "lo conectará más adelante" y
+  // "no lo va a usar nunca", y esas dos empresas necesitan cosas
+  // opuestas: la primera tiene que ver la pantalla de conectar Holded, y
+  // la segunda no puede verla jamás o se queda encerrada en ella.
+  //
+  //   ahora     → holdedEnabled true,  con clave
+  //   mas-tarde → holdedEnabled true,  sin clave   (el alta "sin Holded"
+  //               de H1, que siempre quiso decir esto)
+  //   nunca     → holdedEnabled false, sin clave   (el comercio de este
+  //               bloque: su catálogo nace en la BD)
+  const [holdedModo, setHoldedModo] = useState<"ahora" | "mas-tarde" | "nunca">(
+    "ahora",
+  );
+  // Derivados, para que el resto del formulario siga leyéndose igual.
+  const usesHolded = holdedModo === "ahora";
+  const holdedEnabled = holdedModo !== "nunca";
 
   const [holdedApiKey, setHoldedApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
@@ -101,6 +118,11 @@ export function CreateTenantPage() {
           cajaEnabled,
           crmEnabled,
           agendaEnabled,
+          // catalogo-local (addendum 3) · el interruptor. Se manda
+          // siempre, también cuando va encendido: que el alta diga
+          // explícitamente qué empresa está creando es lo que evita que
+          // el default se convierta en una suposición.
+          holdedEnabled,
         },
       });
       navigate(`/superadmin/tenants/${res.tenant.id}`, { replace: true });
@@ -133,28 +155,37 @@ export function CreateTenantPage() {
           <legend className="block text-[12.5px] font-medium text-slate-700 mb-1.5">
             ¿La empresa tiene Holded? <span className="text-red-500">*</span>
           </legend>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <ChoiceCard
-              active={usesHolded}
-              onClick={() => setUsesHolded(true)}
-              title="Sí, con Holded"
+              active={holdedModo === "ahora"}
+              onClick={() => setHoldedModo("ahora")}
+              title="Sí, ahora"
               hint="Validamos la API key y el catálogo se sincroniza."
               testId="holded-si"
             />
             <ChoiceCard
-              active={!usesHolded}
-              onClick={() => setUsesHolded(false)}
-              title="No, sin Holded"
-              hint="Los datos fiscales se teclean. No hay sincronización."
+              active={holdedModo === "mas-tarde"}
+              onClick={() => setHoldedModo("mas-tarde")}
+              title="Sí, más adelante"
+              hint="Lo ha contratado y aún no lo conecta."
+              testId="holded-mas-tarde"
+            />
+            <ChoiceCard
+              active={holdedModo === "nunca"}
+              onClick={() => setHoldedModo("nunca")}
+              title="No lo usa"
+              hint="Su catálogo se gestiona en el TPV."
               testId="holded-no"
             />
           </div>
         </fieldset>
 
         <p className="text-[13px] text-slate-600">
-          {usesHolded
+          {holdedModo === "ahora"
             ? "Conecta la cuenta Holded del cliente con su API key. El equipo probará el TPV en modo prueba; el propietario sólo recibirá email cuando hayamos validado que todo funciona."
-            : "La empresa se crea sin tocar Holded: ni se valida clave, ni se sincroniza catálogo, ni se le pedirá conectarlo al propietario. Podrás conectarlo más tarde desde el detalle si algún día lo contrata."}
+            : holdedModo === "mas-tarde"
+              ? "La empresa se crea sin clave y el propietario verá la pantalla para conectar Holded al entrar. Hasta que la conecte, lo que cobre NO se subirá a su contabilidad: sale avisado en la salud del onboarding."
+              : "La empresa no usa Holded y no verá la pantalla de conectarlo. Da de alta sus productos en el TPV y sus tickets se quedan cobrados, sin subir a ningún sitio. Se puede encender después desde el detalle, pero es forward-only: lo cobrado en el periodo local no se sube."}
         </p>
 
         {usesHolded && (

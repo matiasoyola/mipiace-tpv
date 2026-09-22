@@ -75,6 +75,7 @@ import {
   getCachedCreditSalesEnabled,
   getCachedCrmEnabled,
   getCachedAgendaEnabled,
+  getCachedHoldedEnabled,
   getCachedTagAliases,
   getCachedTenantId,
   loadCatalogFromCache,
@@ -372,6 +373,10 @@ export function SalePage(props: SalePageProps) {
   // v1.8-Fiado · pantalla Deudas + flag de venta a crédito del tenant.
   const [showDebts, setShowDebts] = useState(false);
   const creditSalesEnabled = getCachedCreditSalesEnabled();
+  // catalogo-local · ¿está previsto que el comercio use Holded? De esto
+  // cuelgan el ContactSheet y el botón "Fiado" — ver el comentario largo
+  // en el render del ContactSheet, más abajo.
+  const holdedEnabled = getCachedHoldedEnabled();
   // B-reservas-1 · sección Clientes (CRM) + picker rápido F1. Sólo con la
   // capability activa (ADR-R6).
   const crmEnabled = getCachedCrmEnabled();
@@ -2092,7 +2097,23 @@ export function SalePage(props: SalePageProps) {
           }}
         />
       )}
-      {openSheet?.kind === "contact" && (
+      {/* catalogo-local · el ContactSheet adjunta un contacto DE HOLDED al
+          ticket para la factura (ADR-010). Sin Holded no hay factura, y
+          tampoco hay contactos: `Contact` se puebla SÓLO desde Holded —
+          el sync inicial, el cron de 15 min, el fallback por teléfono de
+          `/contacts/search` y el import CSV, y los cuatro exigen la clave
+          (`POST /contacts` responde 409 NO_HOLDED_KEY sin ella). Así que
+          en este comercio el buscador devuelve vacío SIEMPRE y "Crear
+          contacto" falla SIEMPRE. El panel no se queda encendido buscando
+          en una lista que nunca tendrá una fila: no se monta.
+
+          La condición va aquí Y en la entrada del menú (`TicketPanel`) a
+          propósito: la entrada es la cortesía, esto es la puerta. Hoy la
+          puerta no tiene llamador —quitada la entrada, nadie pone
+          `openSheet` en "contact"— y por eso NINGÚN test puede alcanzarla;
+          se queda como red para el próximo que añada un disparador. Dicho
+          en el done-doc §14 para que sea una decisión y no un adorno. */}
+      {openSheet?.kind === "contact" && holdedEnabled && (
         <ContactSheet
           current={contact}
           onClose={() => setOpenSheet(null)}
@@ -2144,7 +2165,21 @@ export function SalePage(props: SalePageProps) {
               : undefined
           }
           tableId={isTableMode ? tableContext?.id : null}
-          creditSalesEnabled={creditSalesEnabled}
+          // catalogo-local · el fiado exige deudor (`contactHoldedId`, 400
+          // CREDIT_SALE_REQUIRES_CONTACT en `tickets/routes.ts`) y el
+          // deudor sale del ContactSheet. Sin Holded ese contacto no
+          // existe ni puede crearse, así que el fiado YA era imposible
+          // antes de este frente: el cajero pulsaba "Fiado", leía "Un
+          // fiado necesita un cliente", abría el buscador, no encontraba a
+          // nadie y no podía crearlo. Un callejón sin salida.
+          //
+          // Al dejar de montar el sheet ese callejón se volvería MUDO — el
+          // aviso mandaría a abrir un panel que ya no aparece —, así que
+          // el botón se va con él. No se rompe ningún fiado: no había
+          // ninguno que romper, y `creditSalesEnabled` nace en `false`.
+          // "Deudas" NO se toca: lista lo ya fiado, y en este comercio
+          // sale vacía sola.
+          creditSalesEnabled={creditSalesEnabled && holdedEnabled}
           // v1.9.2-mesas-concurrencia · Frente 2: si el server rechaza el
           // cobro con PAYMENTS_MISMATCH (otra caja cambió la cuenta), el
           // modal refetchea la proyección y recalcula el total in situ.
@@ -3009,6 +3044,9 @@ function SaleWorkspace({
   // tenant tiene la agenda activa; en caso contrario queda vacío y el
   // ticket no muestra duraciones (base visual para B4).
   const agendaEnabled = getCachedAgendaEnabled();
+  // catalogo-local (addendum 3) · sólo decide una frase, la del catálogo
+  // vacío. No gatea nada: la puerta de la caja sigue siendo el servidor.
+  const holdedEnabled = getCachedHoldedEnabled();
   const durationByProduct = useMemo(() => {
     const map = new Map<string, number>();
     if (!agendaEnabled) return map;
@@ -3236,20 +3274,25 @@ function SaleWorkspace({
             Copy adaptado por vertical para que el dueño SERVICES no
             vea "productos" cuando vende servicios. Desde v1.9.1 exige
             además que no haya búsqueda activa (ese caso va arriba). */}
+        {/* catalogo-local (addendum 3) · la frase depende de DÓNDE nace
+            el catálogo de este comercio. Lo encontró el bucle visual: al
+            comercio de catálogo local se le decía "Configúralos en
+            Holded o sincroniza", que es mandarlo a un ERP que no ha
+            comprado y a un sync que no existe. Su catálogo se da de alta
+            en el panel, en "Catálogo". */}
         {!catalogError &&
           products.length === 0 &&
-          searchQuery.trim().length === 0 &&
-          (businessType === "SERVICES" ? (
+          searchQuery.trim().length === 0 && (
             <div className="text-[13px] text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4">
-              Aún no has cargado servicios. Configúralos en Holded o
-              sincroniza para verlos aquí.
+              {holdedEnabled
+                ? businessType === "SERVICES"
+                  ? "Aún no has cargado servicios. Configúralos en Holded o sincroniza para verlos aquí."
+                  : "Aún no has cargado productos. Configúralos en Holded o sincroniza para verlos aquí."
+                : businessType === "SERVICES"
+                  ? "Todavía no hay servicios. Se dan de alta desde el panel, en Catálogo, y aparecen aquí al momento."
+                  : "Todavía no hay productos. Se dan de alta desde el panel, en Catálogo, y aparecen aquí al momento."}
             </div>
-          ) : (
-            <div className="text-[13px] text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4">
-              Aún no has cargado productos. Configúralos en Holded o
-              sincroniza para verlos aquí.
-            </div>
-          ))}
+          )}
         {/* v1.3-Servicios-Pinta · Lote 5: filtro vacío (búsqueda, tag
             o ambos) con catálogo no vacío. SERVICES dice "servicios";
             RETAIL/HOSPITALITY mantienen "productos". */}
@@ -3582,13 +3625,28 @@ function TicketPanel({
   // Las siete secundarias, en el orden en que estaban en la fila de
   // chips. "Cancelar" va marcada como destructiva y el sheet la aparta
   // a su propia zona (hallazgo m1).
+  // catalogo-local · la entrada "Cliente" abre el ContactSheet, que sin
+  // Holded no se monta (ver SalePage). Un botón que no abre nada es peor
+  // que no tener el botón, así que se va de la lista. La rejilla es
+  // `grid-cols-2 sm:grid-cols-3` y refluye sola: no queda hueco.
+  //
+  // OJO, no confundir con el picker de clientes del CRM (F1,
+  // `useClientPicker`), que es otra lista y otra cosa: ése sigue
+  // funcionando sin Holded, y de hecho es lo único que le queda a este
+  // comercio para saber a quién está atendiendo.
   const moreActions: TicketAction[] = [
-    {
-      key: "contact",
-      label: contact ? `Cliente: ${contact.name.split(" ")[0]}` : "Cliente",
-      hint: contact ? `Cliente: ${contact.name}` : "Asignar cliente al ticket",
-      onClick: onClickContact,
-    },
+    ...(getCachedHoldedEnabled()
+      ? [
+          {
+            key: "contact",
+            label: contact ? `Cliente: ${contact.name.split(" ")[0]}` : "Cliente",
+            hint: contact
+              ? `Cliente: ${contact.name}`
+              : "Asignar cliente al ticket",
+            onClick: onClickContact,
+          },
+        ]
+      : []),
     {
       key: "discount",
       label: "Descuento",

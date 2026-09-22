@@ -118,7 +118,17 @@ export interface OnboardingHealth {
   ticketsSyncFailed: number;
   testCashierProvisioned: boolean;
   modules: TenantModules;
-  usesHolded: boolean;
+  // catalogo-local (addendum 3) · las dos preguntas, separadas. Sustituye
+  // al antiguo `usesHolded`, que sólo sabía contestar la segunda y se
+  // leía como si contestara la primera.
+  holded: {
+    /** ¿Está previsto que use Holded? (`Tenant.holdedEnabled`) */
+    enabled: boolean;
+    /** ¿Lo tiene conectado ya? */
+    connected: boolean;
+  };
+  /** Tickets en PAID sin fila de upload: cobros que no subirán nunca. */
+  ticketsCobradosSinSubir: number;
   readinessChecks: ReadinessCheck[];
   ready: boolean;
 }
@@ -138,6 +148,10 @@ export interface TenantDetail {
   // TPV. NULL = icono genérico del businessType.
   tpvIconPreset: string | null;
   holdedConnected: boolean;
+  // catalogo-local (addendum 3) · ¿está previsto que use Holded? Lo
+  // apaga el super-admin y sólo mientras no haya clave conectada (409 si
+  // la hay). Opcional para no romper si el front va por delante.
+  holdedEnabled?: boolean;
   holdedStatus: HoldedConnectionStatus;
   holdedAuthMode: string;
   // v1.3-SuperAdmin-Hub Lote 3: id del panel Holded del cliente. NULL

@@ -28,7 +28,12 @@ interface Escenario {
   cajaEnabled?: boolean;
   crmEnabled?: boolean;
   agendaEnabled?: boolean;
+  // catalogo-local (addendum 3) · ¿está previsto que use Holded? Antes
+  // esto se deducía de la clave, y deducirlo era el bug.
+  holdedEnabled?: boolean;
   holdedApiKeyCiphertext?: string | null;
+  // Tickets en PAID sin fila en holded_uploads (cobros que no subirán).
+  ticketsCobradosSinSubir?: number;
   initialSyncStatus?: string;
   fiscalProfile?: unknown;
   // Contadores del catálogo. Los defaults describen un tenant con caja
@@ -64,6 +69,7 @@ function prismaFor(e: Escenario): any {
         cajaEnabled: e.cajaEnabled ?? true,
         crmEnabled: e.crmEnabled ?? false,
         agendaEnabled: e.agendaEnabled ?? false,
+        holdedEnabled: e.holdedEnabled ?? true,
         holdedApiKeyCiphertext:
           e.holdedApiKeyCiphertext === undefined ? "v1:cipher" : e.holdedApiKeyCiphertext,
         fiscalProfile:
@@ -83,6 +89,10 @@ function prismaFor(e: Escenario): any {
     user: {
       findFirst: async () => ((e.testCashier ?? true) ? { id: "u-test" } : null),
     },
+    // catalogo-local (addendum 3) · el NOT EXISTS de los cobros que no
+    // subirán. Va por `$queryRaw` porque no hay relación Prisma entre
+    // Ticket y HoldedUpload — ver el comentario en onboarding-health.ts.
+    $queryRaw: async () => [{ n: e.ticketsCobradosSinSubir ?? 0 }],
   };
 }
 
@@ -97,7 +107,7 @@ function byId(h: Awaited<ReturnType<typeof health>>, id: string) {
 }
 
 describe("H1 · empresa CON caja y CON Holded: como en master", () => {
-  it("los siete checks aplican y está lista", async () => {
+  it("todos los checks aplican y está lista", async () => {
     const h = await health({});
     expect(h.readinessChecks.every((c) => c.applies)).toBe(true);
     expect(h.ready).toBe(true);
@@ -138,6 +148,15 @@ describe("H1 · empresa SIN caja y SIN Holded (el colegio)", () => {
   const COLEGIO: Escenario = {
     cajaEnabled: false,
     crmEnabled: true,
+    // catalogo-local (addendum 3) · EXPLÍCITO donde H1 lo deducía.
+    //
+    // H1 usaba "no tiene clave" como sinónimo de "no usa Holded", y esa
+    // es justo la señal de dos significados que el addendum parte en
+    // dos. El colegio de verdad —el que no lo va a conectar nunca— es
+    // ahora el que tiene el interruptor apagado. Un tenant sin clave y
+    // con el interruptor ENCENDIDO ya no es un colegio: es una empresa a
+    // mitad de su onboarding, y debe seguir sin poder activarse.
+    holdedEnabled: false,
     holdedApiKeyCiphertext: null,
     initialSyncStatus: "NOT_APPLICABLE",
     // Catálogo vacío y sin cajero técnico: en master esto era cinco
@@ -170,7 +189,11 @@ describe("H1 · empresa SIN caja y SIN Holded (el colegio)", () => {
   it("cada check dice de qué depende", async () => {
     const h = await health(COLEGIO);
     expect(byId(h, "sync-done").requires).toBe("holded");
-    expect(byId(h, "taxes-ratio").requires).toBe("caja");
+    // catalogo-local (addendum 3) · MUDADO de `caja` a `holded`.
+    // `TenantTax` se puebla sólo desde el sync de Holded, así que en un
+    // comercio sin Holded tiene cero filas por definición: el check no
+    // medía su salud, medía la existencia del sync.
+    expect(byId(h, "taxes-ratio").requires).toBe("holded");
     expect(byId(h, "products-sellable").requires).toBe("caja");
     expect(byId(h, "no-sync-failures").requires).toBe("caja");
     expect(byId(h, "test-cashier-provisioned").requires).toBe("caja");
@@ -181,7 +204,72 @@ describe("H1 · empresa SIN caja y SIN Holded (el colegio)", () => {
   it("la respuesta dice qué empresa es, para que la pantalla lo explique", async () => {
     const h = await health(COLEGIO);
     expect(h.modules).toEqual({ caja: false, crm: true, agenda: false });
-    expect(h.usesHolded).toBe(false);
+    expect(h.holded).toEqual({ enabled: false, connected: false });
+  });
+});
+
+// ── catalogo-local · addendum 3 ───────────────────────────────────────
+//
+// La empresa que compró Holded y todavía no lo ha conectado. H1 no podía
+// distinguirla del colegio: las dos "no tenían clave". Es el caso que da
+// sentido a la columna.
+describe("catalogo-local · a mitad del onboarding: previsto y sin conectar", () => {
+  const A_MEDIAS: Escenario = {
+    cajaEnabled: true,
+    holdedEnabled: true,
+    holdedApiKeyCiphertext: null,
+    initialSyncStatus: "NOT_APPLICABLE",
+    taxes: 0,
+    taxesWithRate: 0,
+  };
+
+  it("NO se puede activar: sigue sin estar lista", async () => {
+    // Esto es lo que hay que proteger al mover `taxes-ratio`. Antes del
+    // addendum, a esta empresa la bloqueaba `taxes-ratio` con sus cero
+    // filas de TenantTax. Ahora la bloquea `sync-done`, que es el check
+    // que lo dice de verdad. El resultado para el implantador es el
+    // mismo —no se activa— y por eso el cambio es seguro.
+    const h = await health(A_MEDIAS);
+    expect(h.ready).toBe(false);
+    expect(byId(h, "sync-done").applies).toBe(true);
+    expect(byId(h, "sync-done").ok).toBe(false);
+  });
+
+  it("los checks de Holded le APLICAN, al revés que al comercio sin Holded", async () => {
+    const h = await health(A_MEDIAS);
+    expect(byId(h, "taxes-ratio").applies).toBe(true);
+    expect(byId(h, "tickets-before-holded").applies).toBe(true);
+  });
+
+  it("la respuesta separa las dos preguntas", async () => {
+    const h = await health(A_MEDIAS);
+    expect(h.holded).toEqual({ enabled: true, connected: false });
+  });
+
+  it("los cobros anteriores a conectar Holded se cantan y bloquean", async () => {
+    // El hermano en pantalla del log.warn del gate: el warning sirve si
+    // alguien mira los logs ese día; esto sirve el resto de los días.
+    const h = await health({ ...A_MEDIAS, ticketsCobradosSinSubir: 12 });
+    const c = byId(h, "tickets-before-holded");
+    expect(c.ok).toBe(false);
+    expect(c.value).toContain("12");
+    expect(h.ready).toBe(false);
+  });
+
+  it("al comercio SIN Holded esos mismos cobros no le dicen nada", async () => {
+    // Que sus tickets no suban no es una anomalía: es el diseño. Si este
+    // check le aplicara, no podría activarse nunca en cuanto cobrara.
+    const h = await health({
+      cajaEnabled: true,
+      holdedEnabled: false,
+      holdedApiKeyCiphertext: null,
+      initialSyncStatus: "NOT_APPLICABLE",
+      taxes: 0,
+      taxesWithRate: 0,
+      ticketsCobradosSinSubir: 340,
+    });
+    expect(byId(h, "tickets-before-holded").applies).toBe(false);
+    expect(h.ready).toBe(true);
   });
 });
 
@@ -189,11 +277,18 @@ describe("H1 · caja local: con caja y sin Holded", () => {
   it("el sync no bloquea, porque depende de Holded y no de la caja", async () => {
     const h = await health({
       cajaEnabled: true,
+      // catalogo-local (addendum 3) · explícito, como el colegio. Éste es
+      // el comercio del bloque: cobra, y su catálogo nace en la BD.
+      holdedEnabled: false,
       holdedApiKeyCiphertext: null,
       initialSyncStatus: "NOT_APPLICABLE",
     });
     expect(byId(h, "sync-done").applies).toBe(false);
-    expect(byId(h, "taxes-ratio").applies).toBe(true);
+    // Y `taxes-ratio` TAMPOCO le aplica ya. Con cero filas en TenantTax
+    // —que es lo que tiene un tenant sin sync— este check lo dejaba
+    // permanentemente "no listo" por no tener sincronizados los
+    // impuestos de un ERP que no ha comprado.
+    expect(byId(h, "taxes-ratio").applies).toBe(false);
     expect(h.ready).toBe(true);
   });
 });

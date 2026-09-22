@@ -20,6 +20,7 @@ import {
 
 import { decryptSecret } from "../crypto.js";
 import { loadEnv } from "../env.js";
+import { captureAlert } from "../lib/sentry.js";
 import { enqueueTicketEmail } from "../queues/ticket-email.js";
 import { computeLine } from "./totals.js";
 
@@ -63,7 +64,13 @@ export async function uploadTicket(
       // si la línea va como `sku` (PRODUCT) o como `serviceId` (SERVICE).
       // Holded requiere `serviceId` para que la línea de un servicio resuelva
       // el precio. Confirmado empíricamente con drafts (probe7).
-      lines: { include: { product: { select: { kind: true, holdedProductId: true } } } },
+      // catalogo-local · `source` se trae para la puerta de más abajo:
+      // un producto LOCAL no puede entrar en el payload de Holded.
+      lines: {
+        include: {
+          product: { select: { id: true, name: true, kind: true, holdedProductId: true, source: true } },
+        },
+      },
       payments: true,
       tenant: { select: { id: true, holdedApiKeyCiphertext: true } },
       register: { select: { numSerieHolded: true } },
@@ -108,6 +115,58 @@ export async function uploadTicket(
   if (!ticket.tenant.holdedApiKeyCiphertext) {
     await markFailed(prisma, externalId, "no_holded_key");
     return { kind: "permanent_failure", reason: "no_holded_key" };
+  }
+
+  // catalogo-local · LA PUERTA: un producto LOCAL no entra jamás en el
+  // payload de un salesreceipt.
+  //
+  // Por qué existe, con nombre y apellidos. Si una línea llega a Holded
+  // sin identificador que allí resuelva —`serviceId` para servicios,
+  // `sku` para productos—, Holded NO la rechaza: la acepta con
+  // `price = 0`. El total no cuadra, el GET-back lo caza como
+  // `silent_reject` y el ticket entero se cae. Pasó con Peluquería Sole
+  // el 10-06-2026 (ticket 000022, 17,50 € contra 27,40 €) y está
+  // documentado en `buildTicketSalesreceiptPayload` más abajo. Un
+  // producto local que llegue ahí es dinero cobrado que se pierde sin
+  // aviso.
+  //
+  // Corta ANTES del POST y del `bumpAttempts`, y falla RUIDOSAMENTE:
+  //
+  //   · `permanent_failure` → el ticket queda SYNC_FAILED y sale en la
+  //     bandeja de errores del panel con un motivo que se lee. Es el
+  //     mismo camino que `no_holded_key`, no un estado nuevo.
+  //   · `captureAlert` → alerta con el producto y el ticket DENTRO. Si
+  //     esto salta alguna vez, lo que hace falta saber es CUÁL se coló y
+  //     por dónde, no que se coló.
+  //   · NO se reintenta: no hay reintento que arregle esto.
+  //
+  // Lo que esta puerta NO hace es tumbar la venta. El cobro ya ocurrió y
+  // el dinero está en la caja; cobrar siempre se puede, sincronizar ya
+  // se verá. Bloquear en `POST /tickets` habría dejado al cajero sin
+  // poder cobrar por una invariante nuestra.
+  const localLines = ticket.lines.filter((l) => l.product?.source === "LOCAL");
+  if (localLines.length > 0) {
+    const offenders = localLines.map((l) => ({
+      productId: l.product?.id ?? null,
+      productName: l.product?.name ?? l.nameSnapshot,
+      sku: l.sku,
+      lineId: l.id,
+    }));
+    log.error("producto LOCAL en el camino de subida a Holded — no se sube", {
+      externalId,
+      ticketId: ticket.id,
+      tenantId: ticket.tenant.id,
+      offenders,
+    });
+    captureAlert("catalogo-local: producto LOCAL en el payload de Holded", {
+      tenantId: ticket.tenant.id,
+      extra: { externalId, ticketId: ticket.id, offenders },
+    });
+    await markFailed(prisma, externalId, "local_product_in_holded_payload", {
+      step: "pre-POST salesreceipt",
+      offenders,
+    });
+    return { kind: "permanent_failure", reason: "local_product_in_holded_payload" };
   }
 
   const env = loadEnv();

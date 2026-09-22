@@ -33,6 +33,32 @@
 //
 // Y se añaden dos que valen para CUALQUIER empresa, tenga lo que tenga:
 // al menos un módulo encendido, y datos fiscales mínimos.
+//
+// ── catalogo-local, addendum 3 · la desambiguación ───────────────────
+//
+// Este fichero tenía un `usesHolded` que significaba "tiene clave". Con
+// `Tenant.holdedEnabled` son DOS preguntas distintas y tenerlas
+// llamándose parecido era un accidente esperando:
+//
+//   holdedEnabled  · ¿está PREVISTO que use Holded?   → `holded.enabled`
+//   hasHoldedKey   · ¿lo tiene conectado YA?          → `holded.connected`
+//
+// `applies.holded` pasa a ser la PRIMERA. Un comercio que no usa Holded
+// no puede salir "no listo" por no tener impuestos sincronizados de un
+// ERP que no ha comprado — exactamente el mismo criterio con el que H1
+// trató los checks de caja.
+//
+// Y eso obliga a mover `taxes-ratio` de `caja` a `holded`, que es donde
+// siempre debió estar: `TenantTax` se puebla SÓLO desde el sync
+// (`initial-sync.ts:129`, `incremental-sync.ts:185`), así que en un
+// tenant sin Holded tiene cero filas por definición y el check no medía
+// la salud de nadie, medía la existencia del sync.
+//
+// OJO al mover ese check, porque cambia QUIÉN bloquea a la empresa que
+// está a mitad de onboarding (previsto, sin clave todavía): antes la
+// bloqueaba `taxes-ratio` con sus cero taxes; ahora la bloquea
+// `sync-done`, que pasa a aplicarle. Sigue sin poder activarse, que es
+// lo que importa, pero por el check que lo dice de verdad. Hay test.
 
 import { TicketStatus, type PrismaClient } from "@mipiacetpv/db";
 
@@ -52,7 +78,8 @@ export interface ReadinessCheck {
     | "no-sync-failures"
     | "test-cashier-provisioned"
     | "modules-enabled"
-    | "fiscal-minimum";
+    | "fiscal-minimum"
+    | "tickets-before-holded";
   label: string;
   ok: boolean;
   value?: string;
@@ -97,7 +124,22 @@ export interface OnboardingHealth {
   // por qué la mitad de los checks dicen "No aplica" sin que el
   // implantador tenga que deducirlo.
   modules: { caja: boolean; crm: boolean; agenda: boolean };
-  usesHolded: boolean;
+  // catalogo-local (addendum 3) · las dos preguntas, separadas y con
+  // nombre propio. Sustituye al antiguo `usesHolded`, que sólo sabía
+  // contestar la segunda y se leía como si contestara la primera.
+  holded: {
+    /** ¿Está previsto que use Holded? (`Tenant.holdedEnabled`) */
+    enabled: boolean;
+    /** ¿Lo tiene conectado ya? (`holdedApiKeyCiphertext != null`) */
+    connected: boolean;
+  };
+  /**
+   * Tickets cobrados que no subirán nunca: están en `PAID` y no tienen
+   * fila en `holded_uploads`. En un comercio que no usa Holded es lo
+   * normal y no se mira. En uno que SÍ lo usa y aún no lo ha conectado
+   * es dinero que no llegará a su contabilidad.
+   */
+  ticketsCobradosSinSubir: number;
   readinessChecks: ReadinessCheck[];
   ready: boolean;
 }
@@ -125,6 +167,7 @@ export async function computeOnboardingHealth(
     ticketsTestLast,
     ticketsSyncFailed,
     cashierTest,
+    ticketsCobradosSinSubirRows,
   ] = await Promise.all([
     prisma.tenant.findUniqueOrThrow({
       where: { id: tenantId },
@@ -138,6 +181,8 @@ export async function computeOnboardingHealth(
         crmEnabled: true,
         agendaEnabled: true,
         holdedApiKeyCiphertext: true,
+        // catalogo-local (addendum 3) · la otra mitad de la pregunta.
+        holdedEnabled: true,
         fiscalProfile: true,
       },
     }),
@@ -166,7 +211,30 @@ export async function computeOnboardingHealth(
       where: { tenantId, isTestCashier: true, deletedAt: null },
       select: { id: true },
     }),
+    // catalogo-local (addendum 3) · los cobros que no subirán nunca.
+    //
+    // `$queryRaw` y no un `count` de Prisma porque hace falta un NOT
+    // EXISTS y NO hay relación entre `Ticket` y `HoldedUpload`: se casan
+    // por `external_id`, pero las filas de tipo REFUND apuntan al
+    // externalId del ABONO, que no es ningún ticket. Declarar la
+    // relación en Prisma generaría una FK que reventaría esas filas.
+    //
+    // Y no vale contar `status = 'PAID'` a secas: un fiado saldado en un
+    // tenant conectado pasa por PAID mientras su upload está en cola, y
+    // saldría como falso positivo hasta que el worker lo subiera.
+    prisma.$queryRaw<Array<{ n: number }>>`
+      SELECT COUNT(*)::int AS n
+        FROM tickets t
+       WHERE t.tenant_id = ${tenantId}::uuid
+         AND t.status = 'PAID'
+         AND NOT EXISTS (
+           SELECT 1 FROM holded_uploads u WHERE u.external_id = t.external_id
+         )
+    `,
   ]);
+  const ticketsCobradosSinSubir = Number(
+    ticketsCobradosSinSubirRows?.[0]?.n ?? 0,
+  );
 
   // Mensaje de error del sync extraído de los stats (si hay).
   const stats =
@@ -193,14 +261,25 @@ export async function computeOnboardingHealth(
   // columna es `@default(true)` y sólo un `false` explícito la apaga
   // (mismo criterio que `lib/caja-gate.ts`).
   const hasCaja = tenant.cajaEnabled !== false;
-  const usesHolded = tenant.holdedApiKeyCiphertext != null;
+  // catalogo-local (addendum 3) · las dos preguntas, cada una con su
+  // nombre. `holdedEnabled !== false` por lo mismo que `cajaEnabled`:
+  // la columna es `@default(true)` y sólo un `false` explícito la apaga.
+  const holdedPrevisto = tenant.holdedEnabled !== false;
+  const holdedConectado = tenant.holdedApiKeyCiphertext != null;
   const hasCrm = tenant.crmEnabled === true;
   const hasAgenda = tenant.agendaEnabled === true;
   const applies: Record<CheckRequirement, boolean> = {
     always: true,
     caja: hasCaja,
-    holded: usesHolded,
+    // La dependencia es "está previsto que use Holded", NO "lo tiene
+    // conectado". Si fuera lo segundo, la empresa a mitad de onboarding
+    // vería su `sync-done` como "No aplica" justo cuando es el único
+    // check que importa.
+    holded: holdedPrevisto,
   };
+  // Sólo es una anomalía si Holded está previsto. En un comercio de
+  // catálogo local, que sus tickets no suban es el diseño funcionando.
+  const cobrosHuerfanos = holdedPrevisto ? ticketsCobradosSinSubir : 0;
 
   // Datos fiscales mínimos: razón social y NIF válido en forma. No
   // validamos el dígito de control aquí — eso lo hace el alta con
@@ -244,14 +323,37 @@ export async function computeOnboardingHealth(
       value: tenant.initialSyncStatus,
       requires: "holded",
     },
-    // ── Dependen de la caja ───────────────────────────────────────────
     {
+      // catalogo-local (addendum 3) · MUDADO de `caja` a `holded`.
+      // `TenantTax` se puebla sólo desde el sync, así que sin Holded
+      // tiene cero filas por definición: exigirlo era condenar al
+      // comercio de catálogo local a no estar listo nunca.
       id: "taxes-ratio",
       label: `≥${TAXES_RATE_THRESHOLD_PCT}% de taxes con rate`,
       ok: taxes === 0 ? false : taxesPct >= TAXES_RATE_THRESHOLD_PCT,
       value: `${taxesWithRate}/${taxes} (${taxesPct}%)`,
-      requires: "caja",
+      requires: "holded",
     },
+    {
+      // catalogo-local (addendum 3) · el cobro que no llegará a su
+      // contabilidad. Es el hermano en pantalla del `log.warn` de
+      // `holded-upload-gate.ts`: el warning sirve si alguien mira los
+      // logs ese día, y esto sirve el resto de los días.
+      //
+      // Bloquea la activación a propósito. Si un tenant ha cobrado antes
+      // de conectar Holded, activarlo sin mirar deja esas ventas
+      // enterradas para siempre — nadie las va a echar de menos hasta el
+      // trimestre.
+      id: "tickets-before-holded",
+      label: "Sin cobros anteriores a conectar Holded",
+      ok: cobrosHuerfanos === 0,
+      value:
+        cobrosHuerfanos === 0
+          ? "0"
+          : `${cobrosHuerfanos} tickets cobrados antes de conectar Holded; no se subirán`,
+      requires: "holded",
+    },
+    // ── Dependen de la caja ───────────────────────────────────────────
     {
       id: "products-sellable",
       label: `≥${PRODUCTS_SELLABLE_THRESHOLD_PCT}% de productos sellable`,
@@ -314,7 +416,8 @@ export async function computeOnboardingHealth(
     ticketsSyncFailed,
     testCashierProvisioned: cashierTest != null,
     modules: { caja: hasCaja, crm: hasCrm, agenda: hasAgenda },
-    usesHolded,
+    holded: { enabled: holdedPrevisto, connected: holdedConectado },
+    ticketsCobradosSinSubir,
     readinessChecks: checks,
     // H1 · sólo cuenta lo que aplica. Los que aplican siguen igual de
     // duros que antes: ni un umbral se ha relajado.

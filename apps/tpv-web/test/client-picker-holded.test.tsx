@@ -30,6 +30,7 @@ vi.mock("../src/api.js", async () => {
 });
 
 import { useClientPicker } from "../src/hooks/useClientPicker.js";
+import { setCachedHoldedEnabled } from "../src/lib/catalog.js";
 import type { ClientRow } from "../src/lib/clients.js";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
@@ -101,6 +102,11 @@ function Anfitrion() {
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   (globalThis as Record<string, unknown>).indexedDB = new IDBFactory();
+  // catalogo-local · el caché del catálogo vive en `localStorage` y jsdom no
+  // lo tira entre tests del mismo fichero. Todo lo de arriba asume el default
+  // (el comercio usa Holded), así que se limpia aquí y sólo el bloque del
+  // gate lo apaga a propósito.
+  localStorage.removeItem("mipiacetpv-catalog-holded-enabled");
   clientesDelServidor = [CARMEN];
   contactosDeHolded = [];
   holdedCaido = false;
@@ -459,5 +465,87 @@ describe("sin conexión y sin contactos", () => {
     await teclear("dem");
     await pasaElDebounce();
     for (const l of busquedas()) expect(l).not.toContain("includeAll");
+  });
+});
+
+// ── catalogo-local · el comercio que NO usa Holded ────────────────────
+//
+// El done de reservas-mostrador (§8) lo dejó anotado para esta rama: la
+// sección «De Holded» no aparecía ya por el camino natural (cero contactos
+// sincronizados → cero resultados), pero se gastaba un `GET /contacts/search`
+// por cada búsqueda que en ese comercio siempre iba a volver vacío. Ahora la
+// petición ni sale.
+
+describe("catalogo-local · un comercio sin Holded no pregunta por Holded", () => {
+  it("NI UNA petición a /contacts/search, aunque hubiera contactos que devolver", async () => {
+    setCachedHoldedEnabled(false);
+    contactosDeHolded = [contacto("ct-1", "Demetria Salas", "h-1")];
+    await abrir();
+    await teclear("dem");
+    await pasaElDebounce();
+    expect(busquedas()).toHaveLength(0);
+  });
+
+  it("y no aparece NADA de Holded: ni sección, ni título, ni aviso de sin red", async () => {
+    setCachedHoldedEnabled(false);
+    contactosDeHolded = [contacto("ct-1", "Demetria Salas", "h-1")];
+    await abrir();
+    await teclear("dem");
+    await pasaElDebounce();
+    expect(seccionHolded()).toBeNull();
+    expect(texto()).not.toContain("De Holded");
+    // El aviso hablaría de un ERP que este comercio no ha comprado: es la
+    // misma mentira que el bloque le quita en el TPV y en el sidebar.
+    expect(container.querySelector("[data-aviso-sin-red]")).toBeNull();
+    expect(texto()).not.toContain("contactos de Holded");
+  });
+
+  it("el selector SIGUE funcionando: los del CRM salen igual", async () => {
+    setCachedHoldedEnabled(false);
+    await abrir();
+    await teclear("car");
+    await pasaElDebounce();
+    expect(texto()).toContain("Carmen Ruiz");
+  });
+
+  it("y el «Sin coincidencias» vuelve a decirse, porque ya no hay nada debajo", async () => {
+    setCachedHoldedEnabled(false);
+    contactosDeHolded = [contacto("ct-1", "Demetria Salas", "h-1")];
+    await abrir();
+    await teclear("zzz");
+    await pasaElDebounce();
+    expect(texto()).toContain("Sin coincidencias.");
+  });
+
+  it("EL DEFAULT ES ASIMÉTRICO: sin el flag en el caché se busca como antes", async () => {
+    // Un TPV que todavía no ha refrescado el catálogo no sabe nada del
+    // interruptor. Tiene que comportarse como antes del bloque, nunca dejar
+    // de buscar por no saberlo.
+    localStorage.removeItem("mipiacetpv-catalog-holded-enabled");
+    contactosDeHolded = [contacto("ct-1", "Demetria Salas", "h-1")];
+    await abrir();
+    await teclear("dem");
+    await pasaElDebounce();
+    expect(busquedas()).toHaveLength(1);
+    expect(texto()).toContain("Demetria Salas");
+  });
+
+  it("y SÓLO un «0» lo apaga: cualquier otro valor busca", async () => {
+    localStorage.setItem("mipiacetpv-catalog-holded-enabled", "");
+    contactosDeHolded = [contacto("ct-1", "Demetria Salas", "h-1")];
+    await abrir();
+    await teclear("dem");
+    await pasaElDebounce();
+    expect(busquedas()).toHaveLength(1);
+  });
+
+  it("con el interruptor ENCENDIDO explícitamente, todo como en master", async () => {
+    setCachedHoldedEnabled(true);
+    contactosDeHolded = [contacto("ct-1", "Demetria Salas", "h-1")];
+    await abrir();
+    await teclear("dem");
+    await pasaElDebounce();
+    expect(busquedas()).toHaveLength(1);
+    expect(seccionHolded()).not.toBeNull();
   });
 });

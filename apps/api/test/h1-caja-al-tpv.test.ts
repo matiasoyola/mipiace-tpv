@@ -92,6 +92,9 @@ beforeEach(() => {
     crmEnabled: true,
     agendaEnabled: true,
     cajaEnabled: true,
+    // catalogo-local (addendum 3) · el interruptor de Holded viaja con
+    // sus hermanos. Aquí NO gatea nada: el TPV lo usa para una frase.
+    holdedEnabled: true,
   };
 });
 
@@ -103,6 +106,33 @@ describe("H1 · GET /tpv/catalog/products con caja", () => {
     expect(body.cajaEnabled).toBe(true);
     expect(body.crmEnabled).toBe(true);
     expect(body.agendaEnabled).toBe(true);
+  });
+});
+
+// ── catalogo-local · addendum 3 ───────────────────────────────────────
+describe("catalogo-local · holdedEnabled viaja al TPV", () => {
+  it("va en la primera página, junto a los otros flags", async () => {
+    const body = (await pull()).json();
+    expect(body.holdedEnabled).toBe(true);
+  });
+
+  it("el comercio de catálogo local lo recibe en false", async () => {
+    // Es lo único que le permite al TPV acertar la frase del catálogo
+    // vacío. Sin este dato le decía "Configúralos en Holded o
+    // sincroniza", que es mandarlo a un ERP que no ha comprado.
+    row.holdedEnabled = false;
+    const body = (await pull()).json();
+    expect(body.holdedEnabled).toBe(false);
+    // Y NO cierra nada: sigue sirviendo su catálogo con normalidad.
+    expect(body.items).toBeDefined();
+  });
+
+  it("no se confunde con la caja: son dos interruptores distintos", async () => {
+    row.holdedEnabled = false;
+    row.cajaEnabled = true;
+    const body = (await pull()).json();
+    expect(body.cajaEnabled).toBe(true);
+    expect(body.holdedEnabled).toBe(false);
   });
 });
 

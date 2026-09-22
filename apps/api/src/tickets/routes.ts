@@ -31,7 +31,13 @@ import {
   type ShiftWindow,
 } from "../shift/impute.js";
 import { maybeEnqueueAutoEmail } from "./email-trigger.js";
-import { shouldEnqueueHoldedUpload } from "./holded-upload-gate.js";
+import {
+  holdedDestination,
+  logHoldedUploadSkipped,
+  paidTicketStatus,
+  shouldEnqueueHoldedRefundUpload,
+  shouldEnqueueHoldedUpload,
+} from "./holded-upload-gate.js";
 import {
   resolveModifierSelectionsForLines,
   type ModifierSelectionInput,
@@ -422,8 +428,20 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       // umbral, exigimos `authorizationToken` válido del encargado.
       const tenantForDiscount = await prisma.tenant.findUniqueOrThrow({
         where: { id: cashier.tid },
-        select: { discountThresholdPct: true, creditSalesEnabled: true },
+        select: {
+          discountThresholdPct: true,
+          creditSalesEnabled: true,
+          // catalogo-local · las dos columnas que lee `holdedDestination`.
+          // Se cuelan en este `select` que ya existía: cero consultas
+          // extra en el camino de cobro.
+          holdedEnabled: true,
+          holdedApiKeyCiphertext: true,
+        },
       });
+      // catalogo-local (addendum 3) · ¿hay destino en Holded, y de qué
+      // tipo? Se calcula una vez y lo usan los dos puntos de encolado del
+      // handler (la fila dentro de la transacción y el job de fuera).
+      const destinoHolded = holdedDestination(tenantForDiscount);
 
       // v1.8-Fiado · gate de venta a crédito. El tenant debe tenerlo
       // activado y el ticket debe llevar deudor (contactHoldedId).
@@ -549,7 +567,9 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             contactHoldedId: body.contactHoldedId ?? null,
             // v1.8-Fiado · un fiado nace ON_CREDIT con la deuda viva; una
             // venta normal nace PENDING_SYNC para subir a Holded ya.
-            status: isCredit ? TicketStatus.ON_CREDIT : TicketStatus.PENDING_SYNC,
+            // catalogo-local · sin Holded nace PAID, no PENDING_SYNC.
+            // Ver `paidTicketStatus` para las tres cosas que rompía.
+            status: isCredit ? TicketStatus.ON_CREDIT : paidTicketStatus(destinoHolded),
             creditPending: isCredit ? new Prisma.Decimal(totals.total) : null,
             total: new Prisma.Decimal(totals.total),
             totalTax: new Prisma.Decimal(totals.tax),
@@ -613,7 +633,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         // v1.8-Fiado · el gate único decide si se crea la fila de upload.
         // Un fiado (ON_CREDIT) NO se sube a Holded hasta saldarse: ni fila
         // ni job. Al saldar (POST /credit-payments) se crea entonces.
-        if (shouldEnqueueHoldedUpload(t.status)) {
+        if (shouldEnqueueHoldedUpload(t.status, destinoHolded)) {
           await tx.holdedUpload.upsert({
             where: { externalId: body.externalId },
             create: {
@@ -644,8 +664,9 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       });
 
       // 7. Encolar upload-ticket (idempotente; jobId determinista). Mismo
-      // gate: un fiado no encola nada (ver docs/design/fiado.md §7).
-      if (shouldEnqueueHoldedUpload(ticket.status)) {
+      // gate: un fiado no encola nada (ver docs/design/fiado.md §7), y
+      // un tenant sin Holded tampoco (catalogo-local).
+      if (shouldEnqueueHoldedUpload(ticket.status, destinoHolded)) {
         try {
           await enqueueTicketUpload(body.externalId);
         } catch (err) {
@@ -654,6 +675,20 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             `enqueue ticket upload falló: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
+      } else if (ticket.status !== TicketStatus.ON_CREDIT) {
+        // catalogo-local · el criterio 2 del bloque pide que se VEA en
+        // los logs que no se intenta. Un silencio sin línea es
+        // indistinguible de un olvido. El nivel lo decide el gate: info
+        // si el comercio no usa Holded, warning si lo usa y aún no lo ha
+        // conectado (addendum 3).
+        //
+        // El fiado queda fuera: no encolar un ON_CREDIT es la variante B
+        // funcionando, no una venta que se pierde.
+        logHoldedUploadSkipped(request.log, destinoHolded, {
+          externalId: body.externalId,
+          tenantId: cashier.tid,
+          camino: "ticket",
+        });
       }
 
       // Encolado de email auto (B-Print fase 1). Si el cajero introdujo
@@ -894,8 +929,19 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       // Validación de descuento (idéntica a POST /tickets B6 §2).
       const tenantForDiscount = await prisma.tenant.findUniqueOrThrow({
         where: { id: cashier.tid },
-        select: { discountThresholdPct: true },
+        select: {
+          discountThresholdPct: true,
+          holdedEnabled: true,
+          holdedApiKeyCiphertext: true,
+        },
       });
+      // catalogo-local · el cobro de mesa NUNCA pasó por
+      // `shouldEnqueueHoldedUpload`: creaba la fila y encolaba el job
+      // siempre. Un fiado no puede nacer aquí, así que la parte del
+      // estado no le aplicaba — pero la del destino sí, y sin ella este
+      // camino dejaba al tenant sin Holded con todos sus tickets de mesa
+      // en SYNC_FAILED.
+      const destinoHolded = holdedDestination(tenantForDiscount);
       const grossSubtotal = totals.subtotal + totals.discount;
       const effectiveDiscountPct =
         grossSubtotal > 0
@@ -1018,7 +1064,11 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           const t = await tx.ticket.update({
             where: { id: draft.id },
             data: {
-              status: TicketStatus.PENDING_SYNC,
+              // catalogo-local · idem venta rápida. El `updateMany` de
+              // arriba (el claim del DRAFT) se queda en PENDING_SYNC: es
+              // el cerrojo de la transacción, dura microsegundos y este
+              // update lo pisa antes de que nadie pueda leerlo.
+              status: paidTicketStatus(destinoHolded),
               internalNumber,
               // `shift_id` es columna sellada (S1 §2.4), pero AQUÍ el
               // ticket sigue siendo un DRAFT sin `sealed_at`: el guardián
@@ -1068,16 +1118,18 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             where: { id: resolution.shiftId },
             data: { lastActivityAt: new Date() },
           });
-          await tx.holdedUpload.upsert({
-            where: { externalId: draft.externalId },
-            create: {
-              externalId: draft.externalId,
-              tenantId: cashier.tid,
-              kind: "TICKET",
-              status: "PENDING",
-            },
-            update: {},
-          });
+          if (shouldEnqueueHoldedUpload(t.status, destinoHolded)) {
+            await tx.holdedUpload.upsert({
+              where: { externalId: draft.externalId },
+              create: {
+                externalId: draft.externalId,
+                tenantId: cashier.tid,
+                kind: "TICKET",
+                status: "PENDING",
+              },
+              update: {},
+            });
+          }
           // S1-sello · el cobro de mesa es el segundo camino de entrada.
           // El DRAFT vivía suelto (líneas que iban y venían, absorciones
           // entre mesas); el sello se pone AQUÍ, cuando deja de ser un
@@ -1173,13 +1225,23 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         });
       }
 
-      try {
-        await enqueueTicketUpload(draft.externalId);
-      } catch (err) {
-        request.log.error(
-          { externalId: draft.externalId },
-          `enqueue ticket upload (mesa) falló: ${err instanceof Error ? err.message : String(err)}`,
-        );
+      // catalogo-local · misma puerta que la fila de dentro de la
+      // transacción. Se usa el estado del ticket ya cobrado.
+      if (shouldEnqueueHoldedUpload(updated.status, destinoHolded)) {
+        try {
+          await enqueueTicketUpload(draft.externalId);
+        } catch (err) {
+          request.log.error(
+            { externalId: draft.externalId },
+            `enqueue ticket upload (mesa) falló: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      } else {
+        logHoldedUploadSkipped(request.log, destinoHolded, {
+          externalId: draft.externalId,
+          tenantId: cashier.tid,
+          camino: "ticket de mesa",
+        });
       }
 
       try {
@@ -1615,6 +1677,16 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       // nace marcado igual que su venta (status TEST → nunca sube a
       // Holded, ver más abajo). El resto de estados no efectivos siguen
       // rechazados.
+      // catalogo-local · ¿hay destino en Holded para el abono? Esta ruta
+      // es el CUARTO camino que encola, y era el único —junto al de
+      // mesa— que nunca miró la clave. Aquí sí hace falta una consulta
+      // propia: el handler del refund no leía el tenant para nada.
+      const tenantForUpload = await prisma.tenant.findUniqueOrThrow({
+        where: { id: cashier.tid },
+        select: { holdedEnabled: true, holdedApiKeyCiphertext: true },
+      });
+      const destinoHolded = holdedDestination(tenantForUpload);
+
       const isTestTicket = ticket.status === TicketStatus.TEST;
       if (
         !isTestTicket &&
@@ -1773,7 +1845,8 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             // Frente 1: el refund de un ticket TEST hereda el estado TEST
             // → el gate fiscal lo mantiene fuera de Holded igual que la
             // venta que lo originó.
-            status: isTestTicket ? TicketStatus.TEST : TicketStatus.PENDING_SYNC,
+            // catalogo-local · idem. El refund de prueba manda sobre todo.
+            status: isTestTicket ? TicketStatus.TEST : paidTicketStatus(destinoHolded),
             reason: body.reason ?? null,
             method,
             total: new Prisma.Decimal(total),
@@ -1793,25 +1866,31 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           },
           include: refundInclude(),
         });
-        await tx.holdedUpload.upsert({
-          where: { externalId: body.externalId },
-          create: {
-            externalId: body.externalId,
-            tenantId: cashier.tid,
-            kind: "REFUND",
-            // Refund de prueba → HoldedUpload nace SKIPPED (terminal),
-            // mismo tratamiento que la venta test en upload-ticket.
-            status: isTestTicket ? "SKIPPED" : "PENDING",
-            ...(isTestTicket ? { lastError: { skipped: "test_mode" } } : {}),
-          },
-          update: {},
-        });
+        // catalogo-local · sin Holded no se crea ni la fila. Antes se
+        // creaba siempre y quedaba PENDING para que el sweeper la
+        // reintentara cada 5 minutos contra un destino inexistente.
+        if (shouldEnqueueHoldedRefundUpload(destinoHolded)) {
+          await tx.holdedUpload.upsert({
+            where: { externalId: body.externalId },
+            create: {
+              externalId: body.externalId,
+              tenantId: cashier.tid,
+              kind: "REFUND",
+              // Refund de prueba → HoldedUpload nace SKIPPED (terminal),
+              // mismo tratamiento que la venta test en upload-ticket.
+              status: isTestTicket ? "SKIPPED" : "PENDING",
+              ...(isTestTicket ? { lastError: { skipped: "test_mode" } } : {}),
+            },
+            update: {},
+          });
+        }
         return r;
       });
 
       // Gate fiscal sagrado: un refund de prueba JAMÁS se encola contra
       // Holded. Sólo encolamos los refunds reales.
-      if (!isTestTicket) {
+      // catalogo-local · y sólo si hay Holded al otro lado.
+      if (!isTestTicket && shouldEnqueueHoldedRefundUpload(destinoHolded)) {
         try {
           await enqueueRefundUpload(body.externalId);
         } catch (err) {
@@ -1820,6 +1899,16 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             `enqueue refund upload falló: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
+      } else if (!isTestTicket) {
+        // catalogo-local · mismo criterio que la venta: el abono que no
+        // sube deja su línea. El refund de PRUEBA queda fuera a
+        // propósito — que no suba no es una anomalía, es el gate fiscal
+        // haciendo su trabajo, y una línea aquí sería ruido diario.
+        logHoldedUploadSkipped(request.log, destinoHolded, {
+          externalId: body.externalId,
+          tenantId: cashier.tid,
+          camino: "abono",
+        });
       }
 
       // Lote 4 v1.1 Thalia: ticket.refunded → otras cajas se enteran

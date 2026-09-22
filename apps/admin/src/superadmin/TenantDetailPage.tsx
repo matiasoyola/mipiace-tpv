@@ -16,6 +16,7 @@ import {
   Settings,
   Sparkles,
   Tags,
+  Unplug,
   X,
 } from "lucide-react";
 
@@ -161,6 +162,50 @@ export function TenantDetailPage() {
         body: { blocked: false },
       });
       setActionMessage("Cuenta desbloqueada.");
+      await reload();
+    } catch (err) {
+      setActionError(errToHuman(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // catalogo-local (addendum 3) · el interruptor de Holded.
+  //
+  // Sólo se mueve desde aquí: la implantación de Holded es una decisión
+  // de venta de Mi Piace, no una casilla que el cliente se marca solo en
+  // su onboarding. Y apagarlo es forward-only — lo que cobre en el
+  // periodo local no se sube después—, así que el confirm dice las
+  // consecuencias en vez de preguntar "¿seguro?".
+  //
+  // El 409 del servidor (apagar con clave conectada) llega aquí como
+  // mensaje y se pinta tal cual: es la guarda de verdad, no este confirm.
+  async function onToggleHolded(): Promise<void> {
+    if (!id || !tenant) return;
+    const apagando = tenant.holdedEnabled !== false;
+    if (apagando) {
+      if (
+        !confirm(
+          "Esta empresa dejará de usar Holded: no verá la pantalla de conectarlo, " +
+            "dará de alta sus productos en el TPV y sus tickets nacerán cobrados sin subir a ningún sitio.\n\n" +
+            "Lo que cobre a partir de ahora NO se sube después si algún día se reconecta. ¿Continuar?",
+        )
+      )
+        return;
+    }
+    setBusy(true);
+    setActionError(null);
+    setActionMessage(null);
+    try {
+      await superApi(`/super-admin/tenants/${id}`, {
+        method: "PATCH",
+        body: { holdedEnabled: !apagando },
+      });
+      setActionMessage(
+        apagando
+          ? "Holded apagado. Su catálogo se gestiona ahora desde el panel del cliente."
+          : "Holded encendido. El propietario verá la pantalla para conectarlo.",
+      );
       await reload();
     } catch (err) {
       setActionError(errToHuman(err));
@@ -622,6 +667,7 @@ export function TenantDetailPage() {
           onImpersonateReadonly={() => void onImpersonate("readonly")}
           onAskConfigure={() => setShowConfigureModal(true)}
           onDedupeTags={onDedupeTags}
+          onToggleHolded={() => void onToggleHolded()}
         />
       )}
 
@@ -914,7 +960,7 @@ function HealthPanel({
         </button>
       </div>
       {/* H1 · qué es esta empresa, en una línea, encima de la lista. */}
-      <ModuleChips modules={h.modules} usesHolded={h.usesHolded} />
+      <ModuleChips modules={h.modules} holded={h.holded} />
       <ul className="space-y-2 mb-5">
         {h.readinessChecks.map((c) => (
           <CheckRow key={c.id} check={c} />
@@ -1001,16 +1047,25 @@ function CheckRow({ check }: { check: ReadinessCheck }) {
 
 function ModuleChips({
   modules,
-  usesHolded,
+  holded,
 }: {
   modules: TenantModules;
-  usesHolded: boolean;
+  holded: { enabled: boolean; connected: boolean };
 }) {
+  // catalogo-local (addendum 3) · el chip de Holded decía sólo sí/no y
+  // se calculaba con la clave. Ahora dice cuál de los tres estados es:
+  // "Holded" (conectado), "Holded · sin conectar" (previsto y pendiente,
+  // que es el que hay que mirar) y tachado (no lo usa).
+  const etiquetaHolded = !holded.enabled
+    ? "Holded"
+    : holded.connected
+      ? "Holded"
+      : "Holded · sin conectar";
   const items: Array<[string, boolean]> = [
     ["Caja", modules.caja],
     ["CRM", modules.crm],
     ["Agenda", modules.agenda],
-    ["Holded", usesHolded],
+    [etiquetaHolded, holded.enabled],
   ];
   return (
     <div className="flex flex-wrap gap-1.5 mb-4">
@@ -1123,6 +1178,7 @@ function ActiveTenantActions({
   onImpersonateReadonly,
   onAskConfigure,
   onDedupeTags,
+  onToggleHolded,
 }: {
   blocked: boolean;
   tenant: TenantDetail;
@@ -1134,7 +1190,11 @@ function ActiveTenantActions({
   onImpersonateReadonly: () => void;
   onAskConfigure: () => void;
   onDedupeTags: () => void;
+  onToggleHolded: () => void;
 }) {
+  // catalogo-local (addendum 3) · las DOS preguntas, que hasta este
+  // bloque se contestaban con la misma señal.
+  const usaHolded = tenant.holdedEnabled !== false;
   return (
     <>
       {/* H1 · las métricas que no aplican no se pintan a cero: un cero es
@@ -1172,17 +1232,25 @@ function ActiveTenantActions({
               .join(" · ") || "—"
           }
         />
+        {/* catalogo-local (addendum 3) · antes esto decía "No lo usa" en
+            cuanto faltaba la clave, y era falso la mitad de las veces: el
+            cliente que compró Holded y aún no lo ha conectado SÍ lo usa,
+            y es el que tiene un problema. Tres estados, no dos. */}
         <CardMetric
           label="Holded"
           value={
-            tenant.holdedConnected
-              ? HOLDED_STATUS_LABEL[tenant.holdedStatus]
-              : "No lo usa"
+            !usaHolded
+              ? "No lo usa"
+              : tenant.holdedConnected
+                ? HOLDED_STATUS_LABEL[tenant.holdedStatus]
+                : "Sin conectar todavía"
           }
           accent={
-            tenant.holdedConnected
-              ? HOLDED_STATUS_ACCENT[tenant.holdedStatus]
-              : "neutral"
+            !usaHolded
+              ? "neutral"
+              : tenant.holdedConnected
+                ? HOLDED_STATUS_ACCENT[tenant.holdedStatus]
+                : "warning"
           }
         />
       </div>
@@ -1212,6 +1280,18 @@ function ActiveTenantActions({
               label="Limpiar tags duplicados"
             />
           )}
+          {/* catalogo-local (addendum 3) · apagar sólo se ofrece si no
+              hay clave conectada. El servidor lo vuelve a comprobar y
+              responde 409: el `disabled` es cortesía, la puerta es el
+              409. Mismo criterio que el botón de alta local. */}
+          <Action
+            onClick={onToggleHolded}
+            busy={busy}
+            icon={Unplug}
+            label={usaHolded ? "Apagar Holded" : "Encender Holded"}
+            tone={usaHolded ? "warning" : "neutral"}
+            disabled={usaHolded && tenant.holdedConnected}
+          />
           <Action
             onClick={onImpersonateReadonly}
             busy={busy}

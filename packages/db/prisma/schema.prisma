@@ -61,6 +61,29 @@ enum ProductKind {
   SERVICE
 }
 
+// catalogo-local · de quién es la AUTORIDAD sobre esta ficha de producto.
+// Escalón 2 de la independencia de Holded: hasta aquí el catálogo era
+// siempre "cache local de Holded" y `holded_product_id` era NOT NULL, así
+// que un cliente con caja no podía vender nada que no estuviera en Holded.
+//
+//   HOLDED · la ficha viene del sync y Holded manda. Editarla en el panel
+//            no sirve de nada: el incremental la pisa a los 15 minutos.
+//   LOCAL  · la ficha nació en mipiacetpv y no existe en Holded. El sync
+//            no la toca, la conciliación no la archiva y NUNCA entra en
+//            el payload de un salesreceipt.
+//
+// `@default(HOLDED)` es lo que hace la migración aditiva: todo lo que ya
+// existe nace HOLDED y se comporta exactamente igual que antes del
+// bloque. Mismo criterio que `caja_enabled` en H1 (ADR-016).
+//
+// Es `source` y no `externalSource`, y convive con `holdedProductId` sin
+// renombrarlo: el renombrado a `ErpAdapter` / `externalProductId` es el
+// escalón 1 y va en su propio bloque.
+enum ProductSource {
+  HOLDED
+  LOCAL
+}
+
 // B-reservas-2 · tipo de recurso reservable (cabina de spa, box/sala de
 // clínica, aparato). Vocabulario neutro (ADR-R6): un `resource` sirve
 // igual a belleza que a una clínica; el enum evita clavar el módulo a un
@@ -456,6 +479,33 @@ model Tenant {
   // los tenants de hoy exactamente como estaban. Un `false` explicito es
   // la unica forma de apagar la caja.
   cajaEnabled                    Boolean           @default(true) @map("caja_enabled")
+  // catalogo-local (addendum 3, ADR-017) · ¿está PREVISTO que esta
+  // empresa use Holded? No confundir con `holdedApiKeyCiphertext != null`,
+  // que responde a otra pregunta: ¿lo tiene conectado YA?
+  //
+  // Hasta este bloque `!hasHoldedKey` significaba las dos cosas a la vez y
+  // el código no podía distinguirlas:
+  //
+  //   · "todavía no lo ha conectado" → está a mitad del onboarding y el
+  //     muro de /onboarding es correcto.
+  //   · "no lo va a conectar nunca"  → es el comercio de catálogo local, y
+  //     el muro lo deja fuera de su propio panel para siempre.
+  //
+  // El interruptor no se deduce: deducirlo del catálogo sería circular
+  // (para crear productos hay que entrar, y para entrar habría que tener
+  // productos). Por eso es una columna explícita.
+  //
+  // Gobierno: lo apaga SÓLO el super-admin, y sólo mientras el tenant no
+  // tenga clave de Holded conectada (si la tiene, 409 — apagarlo dejaría
+  // documentos a medias y ventas sin subir sin que nadie se enterara). El
+  // propietario no tiene ninguna salida de "trabajar sin Holded" en su
+  // pantalla de onboarding: la implantación de Holded es una decisión de
+  // venta de Mi Piace, no una casilla que el cliente se marca solo.
+  //
+  // `@default(true)` y se lee `holdedEnabled !== false`, nunca
+  // `!holdedEnabled`: mismo criterio exacto que `cajaEnabled` arriba. Todo
+  // lo que existe hoy nace encendido y se comporta igual que antes.
+  holdedEnabled                  Boolean           @default(true) @map("holded_enabled")
   // B-reservas-7a · la RETÍCULA del centro: cada cuántos minutos empieza una
   // cita. 15 (el valor histórico de B4, `agenda/time.ts::SLOT_MINUTES`) o 30.
   // Peluquería Sole trabaja en franjas de 30 y hasta ahora le ofrecíamos
@@ -946,7 +996,18 @@ model PairingCode {
 model Product {
   id                   String      @id @default(uuid()) @db.Uuid
   tenantId             String      @map("tenant_id") @db.Uuid
-  holdedProductId      String      @map("holded_product_id")
+  // catalogo-local · NULLABLE desde el escalón 2. Deja de ser la
+  // IDENTIDAD del producto y pasa a ser sólo el ENLACE con Holded: un
+  // producto `source = LOCAL` no tiene ninguno y nunca lo tendrá en este
+  // bloque (el casamiento por SKU al conectar Holded es otro).
+  //
+  // El `@@unique([tenantId, holdedProductId])` de abajo NO se rediseña y
+  // sigue siendo la clave del sync: en Postgres un índice único trata los
+  // NULL como distintos entre sí, así que N productos locales conviven
+  // bajo la misma constraint sin chocar.
+  holdedProductId      String?     @map("holded_product_id")
+  // catalogo-local · quién manda sobre esta ficha. Ver `enum ProductSource`.
+  source               ProductSource @default(HOLDED)
   name                 String
   sku                  String?
   barcode              String?
@@ -1019,6 +1080,23 @@ model Product {
   @@index([tenantId, barcode])
   @@index([tenantId, sku])
   @@index([tenantId, needsSkuReview])
+  // catalogo-local · ÍNDICE QUE PRISMA NO PUEDE DECLARAR.
+  //
+  // La unicidad de SKU entre los productos locales de un tenant es un
+  // índice único PARCIAL:
+  //
+  //   CREATE UNIQUE INDEX "products_tenant_id_sku_local_key"
+  //     ON "products" ("tenant_id", "sku") WHERE "source" = 'LOCAL';
+  //
+  // Prisma 5 no tiene sintaxis para el `WHERE`, así que vive SÓLO en el
+  // SQL de la migración `20260913000000_catalogo_local`. Un `@@unique`
+  // a secas aquí sería otra cosa y peor: haría chocar los SKU que vienen
+  // de Holded, que llegan como llegan y no son asunto nuestro.
+  //
+  // CONSECUENCIA A VIGILAR: `prisma migrate dev` compara el schema con la
+  // base y verá este índice como deriva, ofreciendo borrarlo. NO
+  // aceptar. El test `catalogo-local-migracion.test.ts` guarda el
+  // contrato del SQL para que la pérdida salga en rojo.
   @@map("products")
 }
 

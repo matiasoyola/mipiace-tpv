@@ -103,7 +103,12 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
       const auth = request.auth!;
       const prisma = getPrisma();
       const items = await prisma.product.findMany({
-        where: { tenantId: auth.tenantId, needsSkuReview: true },
+        // catalogo-local · la bandeja es de productos DE HOLDED: son los
+        // que el auto-SKU intentó subir y Holded silenció (ADR-010). Un
+        // producto local no pasa nunca por el auto-SKU, así que nunca
+        // puede tener `needsSkuReview`; el filtro es la declaración de
+        // eso, y lo que impide que un cambio futuro cuele uno aquí.
+        where: { tenantId: auth.tenantId, needsSkuReview: true, source: "HOLDED" },
         orderBy: { name: "asc" },
         select: {
           id: true,
@@ -117,7 +122,11 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
         },
       });
       return {
-        items: items.map((p) => ({
+        // El `source: "HOLDED"` de la consulta garantiza el enlace, pero
+        // el tipo lo admite nullable desde que la columna lo es. El
+        // filtro deja fuera lo que no tenga enlace en vez de inventarle
+        // un id vacío a la pantalla.
+        items: items.flatMap((p) => (p.holdedProductId == null ? [] : [{
           id: p.id,
           holdedProductId: p.holdedProductId,
           name: p.name,
@@ -129,7 +138,7 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
           suggestedSku: buildAutoSku(p.holdedProductId),
           sellableViaTpv: p.sellableViaTpv,
           skuReviewAttempts: p.skuReviewAttempts,
-        })),
+        }])),
       };
     },
   );
@@ -164,10 +173,28 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
       const prisma = getPrisma();
       const product = await prisma.product.findFirst({
         where: { id: productId, tenantId: auth.tenantId },
-        select: { id: true, holdedProductId: true, needsSkuReview: true },
+        select: { id: true, holdedProductId: true, needsSkuReview: true, source: true },
       });
       if (!product) {
         return reply.code(404).send({ error: "PRODUCT_NOT_FOUND", message: "Producto no encontrado." });
+      }
+      // catalogo-local · esta ruta MANDA UN PUT A HOLDED. Un producto
+      // local no tiene ficha allí: el PUT iría contra `/products/null` y
+      // la rama 404 de más abajo lo marcaría `active = false`, que es
+      // exactamente la regresión que dejó invisibles 54 servicios de
+      // Peluquería Sole en mayo. Se corta antes, y con un 409 que dice
+      // por qué en vez de un 500.
+      //
+      // Se comprueban las DOS cosas —`source` y el enlace— porque
+      // protegen de fallos distintos: `source` es la regla de negocio, y
+      // el enlace nulo es lo que haría estallar la llamada. Cualquiera
+      // de las dos sin la otra dejaría un hueco.
+      if (product.source === "LOCAL" || product.holdedProductId == null) {
+        return reply.code(409).send({
+          error: "LOCAL_PRODUCT_NOT_IN_HOLDED",
+          message:
+            "Este producto es del catálogo local y no existe en Holded. Su SKU se cambia desde Catálogo.",
+        });
       }
 
       const env = loadEnv();

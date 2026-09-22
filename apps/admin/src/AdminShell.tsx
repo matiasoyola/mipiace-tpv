@@ -15,6 +15,7 @@ import {
   Package,
   Printer,
   RefreshCw,
+  ScanBarcode,
   Settings,
   Shield,
   Tag,
@@ -99,7 +100,26 @@ const NAV_ITEMS: NavItem[] = [
   // verdad. Sin Holded no tiene destino: el endpoint aborta y el
   // propietario se queda mirando un error. Se esconde.
   { to: "/admin/contacts-import", label: "Importar clientes", icon: UserPlus, ownerOnly: true, capability: "holded" },
-  { to: "/admin/products", label: "Productos", icon: Package, capability: "caja" },
+  // catalogo-local · el CRUD del catálogo propio. Es "dónde están mis
+  // productos" para cualquier comercio con caja, tenga Holded o no: con
+  // Holded se listan en sólo lectura, sin Holded se dan de alta aquí.
+  { to: "/admin/catalog", label: "Catálogo", icon: Package, capability: "caja" },
+  // catalogo-local · esta entrada se llamaba "Productos" y llevaba a la
+  // bandeja de SKUs que Holded silenció. Dos cambios y ninguno toca la
+  // pantalla por dentro:
+  //
+  //   · **El nombre.** Con "Catálogo" al lado, "Productos" era ambiguo:
+  //     dos etiquetas que significan lo mismo para cualquiera que no
+  //     haya escrito el código. "Revisión de SKU" dice lo que es, y
+  //     coincide con el título que ya se lee al entrar ("Productos
+  //     pendientes de SKU").
+  //   · **La capability pasa de `caja` a `holded`.** La bandeja existe
+  //     porque el auto-SKU subió un SKU a Holded y Holded lo descartó en
+  //     silencio (ADR-010). Sin Holded no puede tener ni una fila, y su
+  //     texto entero habla de Holded. Enseñarle al comercio de catálogo
+  //     local una sección permanentemente vacía que le habla de un ERP
+  //     que no usa es justo lo que H1 vino a quitar del panel.
+  { to: "/admin/products", label: "Revisión de SKU", icon: ScanBarcode, capability: "holded" },
   // B-reservas-2: catálogo de agenda (duración/pausas/canales + recursos).
   // Sólo visible si el tenant tiene la capability `agenda` activada.
   {
@@ -127,7 +147,14 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/admin/tag-sections", label: "Comanderas", icon: Printer, capability: "caja" },
   // v1.3-Operativa-Extra · Lote 2: panel para que el OWNER fuerce sync
   // con Holded sin pasar por super-admin.
-  { to: "/admin/holded", label: "Sync Holded", icon: RefreshCw, capability: "caja" },
+  //
+  // catalogo-local (addendum 3) · la capability pasa de `caja` a
+  // `holded`. Lo encontró el bucle visual, no un test: en la captura del
+  // comercio de catálogo local, "Sync Holded" seguía en su barra lateral.
+  // Es una sección cuyo único botón fuerza una sincronización que no
+  // existe, en una pantalla que le habla de un ERP que no ha comprado —
+  // exactamente lo que H1 vino a quitar del panel del colegio.
+  { to: "/admin/holded", label: "Sync Holded", icon: RefreshCw, capability: "holded" },
   { to: "/admin/gift-receipts", label: "Tickets regalo", icon: Gift, capability: "caja" },
   { to: "/admin/account", label: "Mi cuenta", icon: User },
   { to: "/admin/security", label: "Seguridad", icon: Shield },
@@ -178,13 +205,28 @@ function useHoldedHealth(enabled = true): HoldedHealth | null {
 // `blocked / no_api_key` en cuanto no hay clave, y el colegio lo vería
 // a ancho completo, en rojo y para siempre.
 //
-// El gate es `cajaEnabled`: sin caja no hay tickets que subir, así que
-// no hay nada que Holded pueda estar dejando de recibir. La empresa CON
-// caja y sin clave sí lo sigue viendo — ésa es exactamente la que tiene
-// un problema.
-function HoldedHealthBanner({ cajaEnabled }: { cajaEnabled: boolean }) {
-  const health = useHoldedHealth(cajaEnabled);
-  if (!cajaEnabled) return null;
+// El gate era sólo `cajaEnabled`: sin caja no hay tickets que subir, así
+// que no hay nada que Holded pueda estar dejando de recibir.
+//
+// catalogo-local (addendum 3) · falta la otra mitad, y es la del comercio
+// de este bloque: TIENE caja, así que el gate de H1 no le valía, y no
+// tiene clave, así que `getTenantHealthStatus` devuelve
+// `blocked / no_api_key`. Vería la barra roja "Holded está desconectado ·
+// reconecta la API Key" a ancho completo, todos los días, para siempre —
+// sobre un ERP que no ha comprado. Es la misma mentira que H1 le quitó al
+// colegio, servida por el otro lado.
+//
+// Quien SÍ usa Holded y no lo ha conectado la sigue viendo, y debe: ésa
+// es exactamente la empresa que tiene un problema.
+function HoldedHealthBanner({
+  cajaEnabled,
+  holdedEnabled,
+}: {
+  cajaEnabled: boolean;
+  holdedEnabled: boolean;
+}) {
+  const health = useHoldedHealth(cajaEnabled && holdedEnabled);
+  if (!cajaEnabled || !holdedEnabled) return null;
   if (!health || health.level !== "blocked") return null;
   const noKey = health.reason === "no_api_key";
   const hours = health.lastSyncAgeMs
@@ -278,7 +320,10 @@ export function AdminShell({
   return (
     <div className="min-h-screen bg-mipiace-stone flex flex-col font-sans">
       {impersonating && <ImpersonationBanner />}
-      <HoldedHealthBanner cajaEnabled={shellCaps?.caja === true} />
+      <HoldedHealthBanner
+        cajaEnabled={shellCaps?.caja === true}
+        holdedEnabled={shellCaps?.holdedEnabled !== false}
+      />
       <div className="flex flex-1 min-h-0">
       <DesktopSidebar onAskLogoutAll={() => setLogoutAllOpen(true)} />
 
@@ -415,6 +460,13 @@ interface TenantCapabilities {
   // H1 · no es una columna: es "tiene clave de Holded", que sale de
   // `/auth/me`. Se trata igual que las otras para gatear el sidebar.
   holded: boolean;
+  // catalogo-local (addendum 3) · ¿está PREVISTO que use Holded? Sí es
+  // una columna (`Tenant.holdedEnabled`). Se guarda aparte de `holded` a
+  // propósito, porque responden a preguntas distintas y confundirlas es
+  // el bug que el addendum viene a arreglar: `holded` gatea las
+  // secciones que sólo tienen sentido con el ERP conectado, y esta gatea
+  // la ALARMA de que el ERP no responde.
+  holdedEnabled: boolean;
 }
 
 function useTenantCapabilities(): TenantCapabilities | null {
@@ -425,7 +477,9 @@ function useTenantCapabilities(): TenantCapabilities | null {
       api<{ settings: { agendaEnabled?: boolean; cajaEnabled?: boolean } }>(
         "/admin/tenant/settings",
       ),
-      api<{ tenant: { hasHoldedKey?: boolean } }>("/auth/me"),
+      api<{ tenant: { hasHoldedKey?: boolean; holdedEnabled?: boolean } }>(
+        "/auth/me",
+      ),
     ])
       .then(([s, me]) => {
         if (cancelled) return;
@@ -433,10 +487,12 @@ function useTenantCapabilities(): TenantCapabilities | null {
           agenda: s.settings.agendaEnabled ?? false,
           caja: s.settings.cajaEnabled !== false,
           holded: me.tenant.hasHoldedKey === true,
+          holdedEnabled: me.tenant.holdedEnabled !== false,
         });
       })
       .catch(() => {
-        if (!cancelled) setCaps({ agenda: false, caja: true, holded: true });
+        if (!cancelled)
+          setCaps({ agenda: false, caja: true, holded: true, holdedEnabled: true });
       });
     return () => {
       cancelled = true;

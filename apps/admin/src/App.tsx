@@ -6,6 +6,7 @@ import { AdminShell } from "./AdminShell.js";
 import { CajaGate } from "./CajaGate.js";
 import { ImpersonationBootstrap } from "./components/ImpersonationBootstrap.js";
 import { CashiersPage } from "./pages/CashiersPage.js";
+import { CatalogoPage } from "./pages/CatalogoPage.js";
 import { DevicesPage } from "./pages/DevicesPage.js";
 import { GiftReceiptsPage } from "./pages/GiftReceiptsPage.js";
 import { HoldedPage } from "./pages/HoldedPage.js";
@@ -81,6 +82,13 @@ interface MeResponse {
     cajaEnabled?: boolean;
     crmEnabled?: boolean;
     agendaEnabled?: boolean;
+    // catalogo-local (addendum 3) · ¿está PREVISTO que use Holded? NO es
+    // lo mismo que `hasHoldedKey` ("¿lo tiene conectado ya?"), y esa
+    // confusión es justo lo que tenía a un tenant con caja y sin Holded
+    // encerrado en /onboarding. Opcional por la misma razón que los
+    // módulos: si el front va por delante del backend, `undefined` se
+    // comporta como el master de siempre.
+    holdedEnabled?: boolean;
   };
 }
 
@@ -114,6 +122,13 @@ export function App() {
             "Tiendas", "Personal", "Agenda · Catálogo" y "Agenda · Horario"
             NO se envuelven: valen sin caja. */}
         <Route path="/admin/account" element={<AccountPage />} />
+        {/* catalogo-local · el CRUD del catálogo propio. Va envuelto en
+            <CajaGate> como el resto de lo que cuelga de la caja: sin caja
+            no hay TPV que vender, así que no hay catálogo que mantener. */}
+        <Route path="/admin/catalog" element={<CajaGate title="Catálogo"><CatalogoPage /></CajaGate>} />
+        {/* catalogo-local · la bandeja de SKU sigue exactamente donde
+            estaba y como estaba. Lo único que cambió es su etiqueta en el
+            sidebar ("Revisión de SKU") y su capability (`holded`). */}
         <Route path="/admin/products" element={<CajaGate title="Productos"><SkuReviewPage /></CajaGate>} />
         <Route path="/admin/devices" element={<CajaGate title="Dispositivos"><DevicesPage /></CajaGate>} />
         <Route path="/admin/cashiers" element={<CajaGate title="Cajeros"><CashiersPage /></CajaGate>} />
@@ -191,6 +206,23 @@ export function RootRouter() {
         // módulos. Ni /onboarding, ni /onboarding/sync, ni sync alguno.
         if (me.tenant.cajaEnabled === false) {
           navigate(landingSinCaja(me.tenant), { replace: true });
+          return;
+        }
+        // catalogo-local (addendum 3) · EL MURO. Este orden importa y no
+        // es casual: primero "¿tiene caja?", luego "¿usa Holded?", y sólo
+        // al final "¿lo ha conectado?".
+        //
+        // El comercio que no usa Holded entra a su panel y no ve
+        // /onboarding jamás. Antes de esta línea caía en la pantalla de
+        // "Conectar Holded" y no salía de ahí: tenía caja, así que la
+        // puerta que H1 abrió (`cajaEnabled === false`) no le valía, y no
+        // tenía clave, así que el `if` de abajo se lo tragaba. El bloque
+        // entero le daba un catálogo local al que no podía llegar.
+        //
+        // `=== false` y no `!`: ver el comentario de la columna. Un
+        // `undefined` (backend viejo) tiene que comportarse como antes.
+        if (me.tenant.holdedEnabled === false) {
+          navigate("/admin/account", { replace: true });
           return;
         }
         if (!me.tenant.hasHoldedKey) navigate("/onboarding", { replace: true });

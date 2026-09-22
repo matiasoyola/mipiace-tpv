@@ -35,6 +35,7 @@ import {
   MINIMO_PARA_BUSCAR_EN_HOLDED,
   type ContactoHolded,
 } from "../lib/contacts.js";
+import { getCachedHoldedEnabled } from "../lib/catalog.js";
 import { maskPhone } from "../pages/SalePage.contact.privacy.js";
 import { ClientForm } from "../pages/ClientForm.js";
 
@@ -131,9 +132,32 @@ function ClientPickerSheet({
   // B-reservas-mostrador F6 · la búsqueda en Holded, con debounce y a partir
   // de dos letras. NO bloquea nada: mientras llega, los del CRM ya están en
   // pantalla y se pueden tocar.
+  //
+  // catalogo-local · y NO se pregunta siquiera si el comercio no usa Holded.
+  // El done de reservas-mostrador (§8) lo dejó anotado para esta rama: la
+  // sección ya no aparecía por el camino natural —un tenant sin contactos
+  // sincronizados devuelve cero resultados—, pero se gastaba un
+  // `GET /contacts/search` por cada búsqueda que en ese comercio siempre iba a
+  // volver vacío. Con el flag en el payload del catálogo (addendum 3) ya se
+  // puede cortar antes de salir a la red.
+  //
+  // `getCachedHoldedEnabled()` es `true` salvo que el servidor haya dicho
+  // explícitamente que no — el mismo default asimétrico que el resto del
+  // caché del catálogo. Un TPV que aún no haya refrescado busca como antes
+  // del bloque; nunca deja de buscar por no saberlo.
+  //
+  // Se apaga `sinRed` además de vaciar la lista: el aviso «Sin conexión: no se
+  // buscan contactos de Holded» hablaría de un ERP que este comercio no ha
+  // comprado, que es la misma mentira que el bloque le quita en el TPV y en el
+  // sidebar.
   useEffect(() => {
     const q = query.trim();
     setErrorEnlace(null);
+    if (!getCachedHoldedEnabled()) {
+      setHolded(null);
+      setSinRed(false);
+      return;
+    }
     if (q.length < MINIMO_PARA_BUSCAR_EN_HOLDED) {
       setHolded(null);
       setSinRed(false);

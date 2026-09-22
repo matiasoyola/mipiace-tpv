@@ -50,6 +50,9 @@ vi.mock("../src/lib/catalog.js", () => {
     getCachedBusinessType: () => "SERVICES" as const,
     getCachedCrmEnabled: () => true,
     getCachedAgendaEnabled: () => true,
+    // catalogo-local (addendum 3) · default TRUE, como en la caché real:
+    // un TPV que no ha refrescado se comporta como antes del bloque.
+    getCachedHoldedEnabled: () => true,
     // El tenant SÍ tiene fiado activado: es la única forma de comprobar
     // que en contexto de cita se explica por qué no está.
     getCachedCreditSalesEnabled: () => true,

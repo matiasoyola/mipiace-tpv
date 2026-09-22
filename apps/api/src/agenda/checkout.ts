@@ -155,9 +155,21 @@ export async function checkoutAppointment(
   }
 
   // Construir las líneas (una por item, en orden). units=1, sin descuento.
+  // catalogo-local · `holdedProductId` pasa a nullable, y aquí NO se
+  // silencia con un `!`.
+  //
+  // Lo que se copia a la línea es un SNAPSHOT del enlace en el momento
+  // del cobro (ver `TicketLine.holdedProductId` en el schema), y esa
+  // columna ya era nullable desde las líneas libres `TPV-OTROS-*`. O
+  // sea: el destino admitía NULL desde siempre y el único que lo tipaba
+  // duro era este intermedio. Un servicio LOCAL se cobra igual que
+  // cualquier otro y su línea viaja sin enlace, que es la verdad.
+  //
+  // Quién impide que esa línea acabe en Holded no es este fichero: es la
+  // puerta de `upload-ticket.ts`. Aquí sólo se cobra.
   const lineInputs: Array<{
     productId: string;
-    holdedProductId: string;
+    holdedProductId: string | null;
     sku: string;
     nameSnapshot: string;
     unitPrice: number;

@@ -40,6 +40,29 @@ export function buildAutoSku(holdedProductId: string): string {
   return `AUTO-${base.slice(0, 8)}`;
 }
 
+// catalogo-local · el SKU que se SUGIERE al dar de alta un producto
+// local. Mismo criterio que `buildAutoSku` —prefijo + los 8 primeros
+// caracteres alfanuméricos de un id estable— y distinto prefijo.
+//
+// Por qué no se reutiliza `buildAutoSku` tal cual: en este código
+// `AUTO-*` no es decorativo, significa una cosa concreta y comprobable
+// —"lo asignó `runAutoSku` y lo SUBIÓ a Holded con GET-back, así que
+// allí es canónico"—, y `buildTicketSalesreceiptPayload` se apoya en esa
+// promesa para mandarlo como identificador de línea (ver el incidente de
+// Peluquería Sole del 10-06-2026 en `upload-ticket.ts`). Un producto
+// local no ha estado en Holded ni va a estar. Ponerle `AUTO-` sería
+// escribir una mentira justo en el campo donde esa mentira cuesta
+// dinero.
+//
+// `LOC-` lo dice y cabe de sobra en los 64 caracteres de la columna.
+//
+// Es una SUGERENCIA: el propietario la borra y escribe la suya. El SKU
+// es su llave del casamiento el día que encienda Holded, y ahí manda él.
+export function buildLocalSku(seed: string): string {
+  const base = seed.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+  return `LOC-${base.slice(0, 8)}`;
+}
+
 export async function runAutoSku(options: AutoSkuOptions): Promise<AutoSkuResult> {
   const { tenantId, prisma, client } = options;
   const log = options.logger ?? consoleLogger();
@@ -65,10 +88,17 @@ export async function runAutoSku(options: AutoSkuOptions): Promise<AutoSkuResult
   // false` (regresión que dejó invisibles 54 servicios de Peluquería
   // Sole 2026-05-25). Para SERVICE asignamos un SKU local sintético
   // tras este bucle, sin tocar Holded.
+  // catalogo-local · el auto-SKU SUBE el SKU a Holded con GET-back. Sólo
+  // tiene sentido sobre fichas que existen allí. Un producto local nace
+  // con su SKU obligatorio desde el panel, así que no sería candidato de
+  // todas formas — pero el filtro lo deja dicho y protege del día que
+  // alguien relaje la obligatoriedad.
   const candidates = await prisma.product.findMany({
     where: {
       tenantId,
       kind: "PRODUCT",
+      source: "HOLDED",
+      holdedProductId: { not: null },
       OR: [{ sku: null }, { sku: "" }],
       needsSkuReview: false,
     },
@@ -77,6 +107,12 @@ export async function runAutoSku(options: AutoSkuOptions): Promise<AutoSkuResult
   result.candidatesScanned = candidates.length;
 
   for (const product of candidates) {
+    // `holdedProductId: { not: null }` ya lo garantiza en SQL, pero
+    // Prisma sigue tipándolo nullable: el estrechamiento hay que
+    // hacerlo aquí. `continue` y no `!`, que es lo que pedía el prompt:
+    // si algún día la consulta cambia, esto se salta la ficha en vez de
+    // mandarle `null` a Holded.
+    if (product.holdedProductId == null) continue;
     const newSku = buildAutoSku(product.holdedProductId);
     try {
       await updateProductWithGetBack(
@@ -185,16 +221,23 @@ export async function runAutoSku(options: AutoSkuOptions): Promise<AutoSkuResult
   // El SKU local es estable (deriva de holdedProductId), suficiente
   // para que el endpoint /tpv/catalog/products los devuelva y para
   // identificarlos a nivel de mipiacetpv.
+  // catalogo-local · misma puerta. Aquí no se llama a Holded, pero el
+  // SKU sintético DERIVA del `holdedProductId` (`buildAutoSku`): sin
+  // enlace no hay nada de lo que derivarlo.
   const serviceCandidates = await prisma.product.findMany({
     where: {
       tenantId,
       kind: "SERVICE",
+      source: "HOLDED",
+      holdedProductId: { not: null },
       OR: [{ sku: null }, { sku: "" }],
       needsSkuReview: false,
     },
     select: { id: true, holdedProductId: true, name: true },
   });
   for (const svc of serviceCandidates) {
+    // Ver la nota gemela del bucle de PRODUCT.
+    if (svc.holdedProductId == null) continue;
     const newSku = buildAutoSku(svc.holdedProductId);
     try {
       await prisma.product.update({
