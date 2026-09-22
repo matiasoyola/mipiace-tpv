@@ -468,6 +468,16 @@ tsc --noEmit         api, admin y tpv-web           limpio
 Los 3 saltados son los mismos de siempre. El e2e no se mueve: el frente es
 de pantalla y no toca ninguna ruta.
 
+**Y después de la integración con A5** (22-09, ver §15). Los 8 ficheros y 116
+tests que suben en la suite son **todos de A5**; el que sube en el e2e es el
+del cruce (§15.3), que sí es de aquí:
+
+```
+pnpm test            (desde la raíz)   225 ficheros · 2397 tests · 3 skipped · verde
+pnpm test:e2e        (Postgres real)    12 ficheros ·  156 tests · verde
+tsc --noEmit         api, admin y tpv-web           limpio
+```
+
 **Los 3 SALTADOS, dichos por su nombre** porque un recuento sin nombre no se puede auditar: son
 el `describe.skip("super-admin · crear tenant (legacy flow B-SuperAdmin)")` de
 `apps/api/test/super-admin.test.ts`. Los dejó **B-OnboardingV2** al partir
@@ -797,3 +807,267 @@ valor del servidor encima, así que sembrar sólo la caché daba una captura con
 2. Todo lo del §12 y del §13.6 sigue igual.
 
 **Ni push ni merge a master: eso lo hace Matías.**
+
+---
+
+## 15 · Integración con A5 (22-09-2026)
+
+La rama se integró con `master` el 18-09 (§13). Después de aquello entró en `master` **A5, el
+acceso remoto a los terminales** (merge `08caf79`): 13 commits que esta rama no tenía. El verde
+del §13 no había visto A5. Aquí no se abre nada nuevo: se pone `catalogo-local` en condiciones de
+entrar **encima** de A5.
+
+Base común `3e254b8`, la misma de la integración anterior. `master` en `08caf79`. La rama salía
+de `ef6bd54` y queda en `8360964`.
+
+### 15.1 Los conflictos: tampoco hubo ninguno, y las cuatro aportaciones conviven
+
+`git merge master` fusionó **sin un solo conflicto**. Los ficheros que tocan las dos partes desde
+la base común son **exactamente cuatro**, y los cuatro se miraron uno a uno, porque «auto-merge»
+no es «correcto». En los cuatro **se conservan las dos aportaciones**, y en los cuatro eso es lo
+correcto y no una componenda:
+
+| Fichero | Qué aporta cada lado | Veredicto |
+|---|---|---|
+| `apps/admin/src/App.tsx` | A5: `import TerminalesPage` + ruta `/superadmin/terminales`. Rama: `import CatalogoPage`, ruta `/admin/catalog`, el campo `holdedEnabled` de `MeResponse` y **el muro** de `RootRouter` | **Los dos.** Regiones distintas: A5 sólo toca el bloque de rutas de super-admin; la rama toca el bloque de `/admin/*` y el `RootRouter`. `Terminales` sigue **sin** `<CajaGate>`, como decidió A5 (§10.2 de su done): es pantalla de super-admin y no cuelga de la caja de ningún tenant. El muro de `holdedEnabled` no la afecta: vive en `RootRouter`, que es la ruta del propietario |
+| `apps/api/src/server.ts` | A5: `registerDeviceWebSocketRoute` (`/ws/device`). Rama: `registerLocalCatalogRoutes` (ADR-017) | **Los dos.** Son dos registros de ruta independientes, en dos puntos distintos de `main()`. Ninguno de los dos es condicional del otro |
+| `apps/api/src/superadmin/audit.ts` | A5: los cinco esquemas de metadatos (`device_command`, `…_result`, `…_rejected`, `device_screenshot`, `…_viewed`) + sus cinco entradas en `META_SCHEMAS`. Rama: el campo `holdedEnabled` en `CreateTenantDraftMeta` | **Los dos.** Aditivo por los dos lados y en sitios distintos del fichero: A5 añade esquemas nuevos al final, la rama añade un campo opcional a un esquema que ya existía |
+| `packages/db/prisma/schema.prisma` | A5: dos relaciones en `Device` y los modelos `DeviceHeartbeat` / `DeviceScreenshot`. Rama: `enum ProductSource`, `Tenant.holdedEnabled`, `Product.holdedProductId` nullable + `Product.source` | **Los dos.** No se rozan: A5 vive entre `Device` (línea 806) y `PairingCode`; la rama vive en el enum de cabecera (61), en `Tenant` (456) y en `Product` (895 en adelante). `prisma validate` en verde sobre el árbol fusionado |
+
+**Lo único que se dejó fuera a propósito.** `prisma format` sobre el schema fusionado realinea 17
+líneas del modelo `Product` — `ProductSource` es dos caracteres más ancho que `ProductKind` y
+mueve la columna de los atributos. **No es del merge**: la rama ya venía desalineada de su propio
+bloque (`catalogo-local:schema.prisma:915`), y `master` no toca `Product`. Se revirtió para que
+el commit de fusión no llevara 17 líneas de ruido que no son suyas. Queda anotado en §15.6.
+
+### 15.2 Las tres migraciones: el despliegue entra limpio
+
+Ahora son **tres** sin aplicar en producción (que sigue en `3e254b8`, 54 migraciones):
+
+| Migración | De quién | Dónde cae por nombre |
+|---|---|---|
+| `20260904100000_a5_device_heartbeats` | A5 | **Antes** de tres que ya están aplicadas |
+| `20260904110000_a5_device_screenshots` | A5 | **Antes** de tres que ya están aplicadas |
+| `20260913000000_catalogo_local` | esta rama | Después de todas |
+
+El done de A5 (§10.1) ya investigó la llegada fuera de orden de las suyas y salió limpia. Lo que
+**no** estaba investigado es la tercera, y su propio aviso lo decía: *«si antes de desplegar A5
+entrara en master otra migración que tocase estas tablas, hay que repetir la comprobación»*. Se ha
+repetido, entera, contra Postgres de verdad (`postgres:16-alpine`, Prisma 5.22):
+
+1. **Base A · limpia + las 57 de golpe.** `migrate deploy` → `All migrations have been
+   successfully applied`, salida 0. Es el despliegue «en orden».
+2. **Base B · producción de hoy.** Sólo las **54** migraciones de `3e254b8` → 54 filas en
+   `_prisma_migrations`. Eso es el VPS hoy.
+3. **Llegan las tres.** `migrate status` sobre B: *«Following migrations have not yet been
+   applied»* y las lista **las tres**, sin una palabra sobre el orden. `migrate deploy` →
+   `Applying 20260904100000…`, `…110000…`, `20260913000000_catalogo_local`,
+   `All migrations have been successfully applied`, salida 0. Ni aviso, ni error, ni reset.
+4. **La prueba que decide.**
+
+   ```
+   prisma migrate diff --from-url <B> --to-url <A> --exit-code
+   →  No difference detected.
+   ```
+
+   **El esquema que deja el despliegue fuera de orden es idéntico al que deja el despliegue en
+   orden.** Que es lo que había que saber.
+
+Y además, lo que no basta con que el esquema coincida — que las piezas de los dos bloques estén
+de verdad ahí, en las dos bases:
+
+- `products_tenant_id_sku_local_key` existe en A y en B, **con su `WHERE (source = 'LOCAL')`**.
+- `device_heartbeats` y `device_screenshots` existen en A y en B.
+- `products.holded_product_id` es nullable, `products.source` tiene `DEFAULT 'HOLDED'` y
+  `tenants.holded_enabled` tiene `DEFAULT true` en A y en B.
+
+**Veredicto: las tres entran limpias y NO hay que renombrar ninguna.** El motivo es el mismo que
+daba A5: no hay dependencia entre ellas. Las dos de A5 sólo cuelgan de `devices`, `tenants` y
+`super_admin_users`; `catalogo_local` sólo toca `products` y `tenants`. Lo único que comparten es
+`tenants`, y las dos le **añaden** columnas distintas (`holded_enabled` por un lado, nada por el
+otro) — no hay orden posible en el que una pise a la otra.
+
+**La deriva contra `schema.prisma` no es cero, y no es nueva.** `migrate diff
+--to-schema-datamodel` sale con seis tablas cambiadas:
+
+```
+apk_download_codes · appointment_assignments · appointment_items
+appointments · device_screenshots · products
+```
+
+Todas son SQL crudo que el datamodel de Prisma no sabe expresar (FKs a `super_admin_users`, el
+índice de `appointments` sobre `(tenant_id, timeslot)`, el GIN de `products.tags`). Lo que importa
+es de quién es cada una, y se midió por separado:
+
+- **Producción HOY**, 54 migraciones contra el `schema.prisma` de `3e254b8`: **5 tablas**. Es la
+  deriva que `master` ya arrastra, exactamente las que A5 contó.
+- **A5** añade la sexta: la FK `device_screenshots.requested_by_super_admin_id`.
+- **`catalogo_local` añade CERO.** Su índice parcial no aparece como deriva porque el motor de
+  diff de Prisma no modela índices parciales — por eso el contrato del SQL vive en
+  `catalogo-local-migracion.test.ts` (fila 2 de la tabla de sabotaje) y el comportamiento en el
+  e2e. La deriva de la base A y la de la base B son **idénticas byte a byte**: el desorden no
+  añade nada.
+
+Sigue vigente el segundo aviso de A5: esto vale para desplegar sobre la producción de HOY. Si
+entrara otra migración en `master` antes del despliegue, se repite.
+
+### 15.3 El cruce que nadie había mirado: el comercio sin Holded SÍ se atiende en remoto
+
+Ésta es la pregunta que ninguna de las dos suites había hecho nunca, porque ninguno de los dos
+bloques vio al otro: **¿puede un tenant con `holdedEnabled = false` vincular un terminal, abrir el
+canal de soporte y salir en la pantalla Terminales, igual que uno con Holded?**
+
+No era retórica. A5 dejó anotado (§10.6, pendiente 3) que su cruce **con H1 sí se rompe**: una
+empresa sin caja no abre el canal porque su terminal aterriza en `cajaDisabled`. Y `holdedEnabled`
+se escribió imitando a `cajaEnabled` (§2.12, ADR-017), así que podía haber heredado el efecto sin
+que nadie lo pretendiera.
+
+**No lo ha heredado. El camino sin Holded NO cae en nada parecido, y no hubo que arreglar nada.**
+Las dos razones, las dos comprobadas y no razonadas:
+
+- **`holdedEnabled` no gatea ninguna ruta de `apps/api/src/devices/`.** La puerta de H1
+  (`ensureCajaEnabled`) está en cinco rutas de ese fichero; de Holded no hay ninguna. `/ws/device`
+  no mira al tenant en absoluto.
+- **El camino sin Holded no crea ningún estado terminal en el TPV.** `BootstrapState` tiene
+  `loading`, `unpaired`, `cajaDisabled` y `paired`, y este bloque **no añadió ninguno**: lo que la
+  rama toca del TPV son frases y botones dentro de `paired`, nunca el arranque. El efecto de A5
+  exige `state.kind === "paired"` y lo obtiene.
+
+Y hay una diferencia estructural que conviene decir en voz alta, porque es la que hace que los dos
+casos no se parezcan: **la puerta de la caja está en el servidor y la del interruptor de Holded
+está donde tiene que estar** — en el alta local (`lib/catalogo-local-gate.ts`), en el encolado
+(`tickets/holded-upload-gate.ts`) y en lo que se pinta. Ninguna de las tres está en el arranque
+del terminal.
+
+Eso ahora está **ejecutado contra Postgres real**, no razonado, en
+`apps/api/test-e2e/catalogo-local-y-a5.e2e.ts` (11 tests). El comercio sin Holded genera código,
+vincula terminal, recibe **200** en `/devices/me`, abre `/ws/device`, su latido llega a
+`device_heartbeats` y sale **ONLINE** en `GET /super-admin/devices`. El comercio **con** Holded
+hace lo mismo al lado, para que el verde signifique algo.
+
+**Y de paso afina lo que decía el done de A5.** El fichero lleva el contraste, con la caja
+apagada, y el resultado no es exactamente el que A5 anotó: el terminal de una empresa sin caja no
+es que «no abra el canal», es que **no llega a existir**. `ensureCajaEnabled` cierra
+`POST /admin/registers/:id/pairing-codes` con 403, así que nunca hay nada que vincular. Ésa es la
+razón de que no salga en Terminales, y es anterior al canal.
+
+**Lo que NO se ha decidido aquí.** El pendiente 3 del §10.6 de A5 sigue abierto tal cual: si un
+terminal de una empresa sin caja debe salir o no en Terminales es una decisión de producto, no la
+toma esta integración, y este fichero se limita a dejar el comportamiento de hoy fijado por un
+test en vez de por casualidad. Ver §15.6.
+
+### 15.4 La tabla de sabotaje, revalidada entera sobre el árbol fusionado
+
+Otra vez **fila por fila**, y otra vez con el paso que la hace significar algo: **antes de romper
+nada se comprueba que el test está VERDE con el código intacto**, y después de romperlo se
+revierte. 21 sabotajes (las 19 filas del §3, con las filas 2 y 9 partidas en sus dos mitades).
+
+**21 de 21 confirmadas.** Ninguna garantía se ha vuelto irrompible: **A5 no tocó ninguna**, que es
+el hallazgo aburrido que uno quiere. Mensajes copiados de la salida real de `vitest`:
+
+| # | Sabotaje | Test que se pone rojo | Mensaje real |
+|---|---|---|---|
+| 1 | `DEFAULT 'LOCAL'` en `source` | `catalogo-local-migracion` · *NO nace nada como LOCAL* | `expected … not to match /DEFAULT\s+'LOCAL'/i` |
+| 2a | Quitar el `WHERE` del índice (dejarlo global) | `catalogo-local-migracion` · *el índice del SKU es PARCIAL, no global* **+** e2e *…y a la vez DEJA convivir dos SKU iguales de HOLDED* | `expected … to match /WHERE "source" = 'LOCAL'/` |
+| 2b | Borrar el índice entero (lo que ofrece `migrate dev`) | el de arriba **+** e2e *el índice PARCIAL rechaza dos SKU locales iguales en el mismo tenant* | `expected '\n' to match /WHERE "source" = 'LOCAL'/` |
+| 3 | `DEFAULT false` en `holded_enabled` | `catalogo-local-migracion` · *el interruptor NO nace apagado* | `expected … not to match /"holded_enabled"[^;]*DEFAULT\s+false/i` |
+| 4 | Quitar el filtro `source = HOLDED` del reconcile | `catalogo-local-sync-no-toca` · *el UPDATE que archiva lleva el filtro de source escrito, no implícito* | `expected undefined to be 'HOLDED'` |
+| 5 | Dejar que un producto LOCAL entre en el payload de Holded | `catalogo-local-upload` · los **cinco** tests del fichero | `TypeError: Cannot read properties of undefined (reading 'documentId')` |
+| 6 | Abrir el alta local por la clave en vez de por el interruptor | `catalogo-local-crud` · *403 TAMBIÉN si usa Holded y todavía NO lo ha conectado* | `expected 201 to be 403` |
+| 7 | Apagar el interruptor con la clave puesta | `h1-alta-sin-holded` · *EL SABOTAJE: apagarlo con la clave puesta → 409* | `expected 200 to be 409` |
+| 8 | Mover el `holdedEnabled` detrás de la clave en `App.tsx` | `catalogo-local-muro-onboarding` · *el interruptor manda sobre la clave, y no al revés* | `expected [ '/onboarding' ] to not include '/onboarding'` |
+| 9a | `!holdedEnabled` en el gate del encolado | `catalogo-local-encolado` · *un tenant sin la columna se comporta como el de siempre* | `expected 'NONE' to be 'READY'` |
+| 9b | `!holdedEnabled` en el muro de `App.tsx` | `catalogo-local-muro-onboarding` · *sin el campo se comporta como master* | `expected "spy" to be called with [ '/onboarding', { replace: true } ]` |
+| 10 | `NOT_CONNECTED_YET` → `PENDING_SYNC` | `catalogo-local-encolado` · *el que aún no ha conectado TAMPOCO va a PENDING_SYNC* | `expected 'PENDING_SYNC' to be 'PAID'` |
+| 11 | Unificar los dos logs | `catalogo-local-encolado` · *los dos motivos NO comparten la línea* | `expected 'ticket no encolado…' to not deeply equal 'ticket no encolado…'` |
+| 12 | Contar los huérfanos con `status = 'PAID'` a secas | e2e · *el falso positivo que el NOT EXISTS evita* | `expected 2 to be 1` |
+| 13 | Meter `holdedEnabled` en `MODULE_FIELDS` | `h1-alta-sin-holded` · *no puede dejar la empresa sin ningún módulo, ni apagando de uno en uno* | `expected 200 to be 400` |
+| 14 | `editable: p.source === "LOCAL"` sin mirar la puerta | `catalogo-local-crud` · *un producto LOCAL de antes sale editable:false* | `expected true to be false` |
+| 15 | Dar de alta sin SKU por la API | `catalogo-local-crud` (dos tests) **+** e2e *sólo espacios → rechazado, y no queda fila* | `expected 201 to be 400` |
+| 16 | Quitar el gate del selector de clientes | `client-picker-holded` · *NI UNA petición a /contacts/search* **+** *no aparece NADA de Holded* | `expected [ 'GET /contacts/search?q=dem' ] to have a length of +0 but got 1` |
+| 17 | Devolver la entrada "Cliente" sin su puerta | `catalogo-local-contact-sheet` · *la entrada «Cliente» no está en el menú* | `expected <button …> to be null` |
+| 18 | Quitar las DOS puertas | el de arriba **+** *se pulsa TODO el menú y el sheet no aparece por ninguna* | `expected true to be false` |
+| 19 | Devolver el botón "Fiado" sin mirar el interruptor | `catalogo-local-contact-sheet` · *el botón «Fiado» se va con él* | `expected <button …> to be null` |
+| **20** | **(§15.3) Poner una puerta de Holded en el acceso remoto** | `catalogo-local-y-a5` · *`/devices/me` contesta 200 sin Holded* **+** *nada de `devices/` mira `holdedEnabled`* | `expected 403 to be 200` · `el acceso remoto no puede depender del interruptor de Holded: expected [ 'routes.ts' ] to deeply equal []` |
+| **21** | **(§15.3) Filtrar Terminales por `holdedEnabled`** | `catalogo-local-y-a5` · *el terminal del comercio SIN Holded sale, y sale ONLINE* **+** *el listado SIN filtro mezcla los dos comercios* | `el terminal sin Holded tiene que salir en Terminales: expected undefined to be truthy` |
+
+**Dos apuntes honestos sobre esta pasada**, porque el valor de la tabla está en que diga la verdad
+y no en que salga bonita:
+
+- **La fila 13 la caza un test distinto del que la tabla nombra.** El §3 apunta a
+  `h1-alta-sin-holded.test.ts · "NO es un módulo"`, y ese test **NO se pone rojo** con este
+  sabotaje: siembra un tenant con caja encendida, así que `modulesAfter.some(Boolean)` sigue
+  siendo `true` aunque `holdedEnabled` entre en la lista y se apague. Quien lo caza es su vecino
+  del mismo fichero, *"no puede dejar la empresa sin ningún módulo, ni apagando de uno en uno"*.
+  **La garantía está guardada**; lo que está mal es el puntero de la tabla. Se deja dicho en vez
+  de corregirlo a la callada.
+- **La fila 5 se pone roja con un `TypeError`, no con una aserción.** Al vaciar el filtro de
+  líneas locales, el código sigue adelante y llama de verdad al cliente de Holded, que en el test
+  no está montado. Es rojo, y rojo **por el motivo correcto** —el producto LOCAL entró en el
+  camino de subida—, pero el mensaje no lo dice. Mejorarlo es trabajo del bloque, no de esta
+  integración.
+
+Las **dos filas nuevas (20 y 21)** son las del cruce del §15.3, y van en la tabla porque allí se
+escribió código. Las dos redes de la 20 caen juntas, como en R1 de A5: la de **comportamiento**
+(el 403 donde tenía que haber un 200) y la **estructural** (ningún fichero de `devices/` puede ni
+mencionar `holdedEnabled`). La estructural es la que sobrevive a un refactor.
+
+### 15.5 Cómo se corrió, y qué salió
+
+`pnpm db:generate` primero, y después **la suite entera desde la raíz**:
+
+- **Suite completa: 225 ficheros · 2397 verdes · 3 SALTADOS · 0 fallos.** Tras el frente del
+  §14 eran `217 · 2281 · 3`. Los **8 ficheros y 116 tests de más son de A5**; de esta rama no
+  entra ninguno (el fichero nuevo del §15.3 es e2e y va en la otra cuenta).
+- **Los 3 saltados son los de siempre y no son de ninguno de los dos bloques:** el
+  `describe.skip("super-admin · crear tenant (legacy flow B-SuperAdmin)")` de
+  `apps/api/test/super-admin.test.ts:566` — tres tests que B-OnboardingV2 apagó en `master` al
+  mudar su cobertura a `onboarding-v2.test.ts`. Es el único `.skip` del repo.
+- **e2e: 12 ficheros · 156 verdes · 0 fallos**, corridos **como los corre el CI**
+  (`E2E_DATABASE_URL`, `TZ=UTC`, `CI=true`). Eran `11 · 145`; el fichero que sube es el del
+  §15.3, con sus 11 tests. A5 **no trae ningún e2e propio** — y aun así los suyos pasan
+  por Postgres, porque el `globalSetup` aplica sus dos migraciones en cada pasada.
+- **`tsc --noEmit` limpio en `api`, `admin` y `tpv-web`.**
+
+**La primera pasada de la suite NO salió en verde, y hay que contarlo.** Fallaron 3 tests en 2
+ficheros: dos de `cashier-login.test.ts` (el rate limit) y uno de `super-admin.test.ts` (el
+must-change-password del OWNER). Los tres con el mismo mensaje, `Test timed out in 5000ms`. Se
+miró de dónde venían antes de tocar nada:
+
+- **Vienen de `master`, no de la rama.** Los dos ficheros son **idénticos** a los de `master`
+  (`git diff master HEAD` sobre ellos sale vacío) y la rama no toca ni `cashier-auth.ts` ni
+  `passwords.ts`. Lo que la rama sí toca de esa zona es `auth/routes.ts`, y no es lo que falla.
+- **Son de carga, no de código.** Corridos solos, los dos ficheros pasan enteros: **26 verdes**,
+  3 saltados, 0 fallos. Y la segunda pasada de la suite completa salió limpia. Los tres tests
+  hashean contraseñas de verdad contra un `testTimeout` de 5 s; con 225 ficheros en paralelo en
+  este portátil, a veces no llegan.
+
+**Base propia y desechable: `mipiacetpv_catalogo_e2e`**, creada para esta integración y **borrada
+al terminar**, igual que las tres bases (`mig_orden`, `mig_fuera`, `mig_prod54`) que se crearon
+para la comprobación de migraciones del §15.2. **No se tocó `mipiacetpv_e2e`**, la compartida: la
+suite hace `DROP SCHEMA`. Regla del §0, aplicada a las bases.
+
+### 15.6 Lo que queda pendiente
+
+1. **El pendiente 3 del §10.6 de A5 sigue abierto**, y no lo cierra esta integración: decidir si
+   un terminal de una empresa **sin caja** debe salir en Terminales. El §15.3 lo deja más preciso
+   —no es que el canal no se abra, es que el terminal no llega a existir, porque el código de
+   emparejamiento está cerrado— pero **es una decisión de producto** y se deja sin tomar. Si la
+   respuesta es que sí, el arreglo no es del TPV como decía A5, sino de
+   `POST /admin/registers/:id/pairing-codes`.
+2. **`prisma format` sigue queriendo realinear 17 líneas del modelo `Product`** (§15.1). Es ruido
+   cosmético que viene del propio bloque, no del merge, y se deja para que lo arregle quien toque
+   ese modelo. Quien corra `prisma format` verá el árbol sucio; no es nada.
+3. **El puntero de la fila 13 de la tabla de sabotaje está mal** (§15.4). Apunta a un test que no
+   cubre ese sabotaje. La garantía está guardada por otro test del mismo fichero.
+4. **La fila 5 se pone roja con un `TypeError` y no con una aserción** (§15.4).
+5. **Repetir la comprobación de migraciones si `master` se mueve otra vez** antes de desplegar
+   (§15.2). El argumento es «no hay dependencia entre ellas», no «el orden da igual siempre».
+6. **Todo lo del §12, el §13.6 y el §14.7 sigue en pie sin cambios.** Esta integración no mueve
+   ninguno: ni el casamiento por SKU, ni `SalePage.contact.tsx`, ni el repaso manual del §8.1.
+
+### 15.7 Lo que esta sesión NO ha hecho
+
+**Ni push ni merge a master: eso lo hace Matías.** La rama sale de `ef6bd54` y queda tres commits
+por delante: el merge `451d988`, el e2e del cruce `8360964` y este documento. Por delante de
+`master` (`08caf79`) y con `master` dentro.
