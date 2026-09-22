@@ -116,7 +116,13 @@ RUN mkdir -p /var/cache/mipiacetpv/product-images \
 # carpeta (EACCES, visto 2026-06-11 cerrando el turno colgado de Sole).
 # Ahora viven en un named volume (compose monta `z_reports` aquí y la
 # env Z_REPORT_STORAGE_ROOT apunta a esta ruta).
-RUN mkdir -p /var/lib/mipiacetpv/z-reports \
+#
+# A5 · las capturas de terminales van a otro named volume
+# (`device_screenshots`) bajo el mismo padre. Tiene que existir aquí con
+# ownership de `node`: si no, Docker crea el mountpoint como root, el volumen
+# nace root y la API (USER node) revienta con EACCES al guardar la primera
+# captura — el mismo fallo que tuvieron los Z el 2026-06-11.
+RUN mkdir -p /var/lib/mipiacetpv/z-reports /var/lib/mipiacetpv/device-screenshots \
   && chown -R node:node /var/lib/mipiacetpv
 
 ENV NODE_ENV=production
