@@ -12,6 +12,7 @@ import {
   FileClock,
   Home,
   LayoutDashboard,
+  MonitorSmartphone,
   Shield,
   ShieldAlert,
   ShoppingCart,
@@ -39,6 +40,10 @@ const NAV_ITEMS: Array<NavItem & { rootOnly?: boolean }> = [
   // A3-distribución: descargas de la APK. Va antes de Auditoría porque se
   // usa en cada implantación, no sólo cuando algo se investiga.
   { to: "/superadmin/descargas", label: "Descargas", icon: Download },
+  // A5 · la flota. Va junto a Descargas porque las dos pantallas se usan en la
+  // misma conversación: quién está desactualizado, y con qué código se le pasa
+  // la versión nueva.
+  { to: "/superadmin/terminales", label: "Terminales", icon: MonitorSmartphone },
   { to: "/superadmin/audit", label: "Auditoría", icon: FileClock },
   // B-Multi-Vertical SB4: panel multi super-admin.
   { to: "/superadmin/admins", label: "Super-admins", icon: Users, rootOnly: true },

@@ -21,6 +21,36 @@ interface CapacitorGlobal {
   Plugins?: Record<string, unknown>;
 }
 
+/**
+ * A5 · acceso a un plugin nativo por su nombre. `null` en navegador o si ese
+ * plugin no está registrado.
+ *
+ * **Por qué existe esta función, verificado en el AP11 el 2026-09-04:** el
+ * global que inyecta el bridge nativo **NO tiene `registerPlugin`**. Sus claves
+ * son `Plugins`, `toNative`, `nativePromise`, `isNativePlatform`… y nada más.
+ * `registerPlugin` lo aporta el paquete `@capacitor/core`, que el bundle de
+ * tpv-web NO carga a propósito (ver la nota de arriba). Así que todo el código
+ * que llamaba a `cap.registerPlugin(...)` obtenía `undefined` y degradaba en
+ * silencio: es la causa del cabo suelto de A4 —«la etiqueta del menú no enseña
+ * versionName (versionCode)»— y de que el primer heartbeat de A5 llegara sin
+ * red, sin IP y sin arranque.
+ *
+ * Lo correcto es leer `Capacitor.Plugins[name]`, que el bridge sí rellena con
+ * todos los plugins registrados en `MainActivity`. Se deja `registerPlugin`
+ * como respaldo por si un día el bundle sí carga `@capacitor/core`.
+ */
+export function getNativePlugin<T>(name: string): T | null {
+  const cap = getCapacitor();
+  if (!cap) return null;
+  const fromBridge = cap.Plugins?.[name];
+  if (fromBridge) return fromBridge as T;
+  try {
+    return cap.registerPlugin ? cap.registerPlugin<T>(name) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Acceso tipado al global `Capacitor` (o null en navegador). */
 export function getCapacitor(): CapacitorGlobal | null {
   const w = globalThis as unknown as { Capacitor?: CapacitorGlobal };

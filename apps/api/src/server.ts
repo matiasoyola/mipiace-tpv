@@ -39,6 +39,7 @@ import { registerShiftRoutes } from "./shift/routes.js";
 import { registerStaffRoutes } from "./staff/routes.js";
 import { registerStoresRoutes } from "./stores/routes.js";
 import { registerStoreWebSocketRoute } from "./realtime/ws-route.js";
+import { registerDeviceWebSocketRoute } from "./devices/ws-route.js";
 import {
   registerSuperAdminRoutes,
   registerTenantBlockGuard,
@@ -182,6 +183,10 @@ async function main() {
   await registerTableOperativaRoutes(app);
   await registerTableGroupingRoutes(app);
   await registerStoreWebSocketRoute(app);
+  // A5 · el canal de soporte del terminal (`/ws/device`). Ruta y
+  // autenticación propias: device token por `hello`, no cashier-session por
+  // query string (ADR-014).
+  await registerDeviceWebSocketRoute(app);
   await registerPublicTicketPdfRoute(app);
   await registerTicketRoutes(app);
   await registerCreditRoutes(app);

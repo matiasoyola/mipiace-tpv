@@ -856,13 +856,114 @@ model Device {
   // dispara primer login, cambio de país y re-aparición tras 30d.
   lastEmailAlertAt   DateTime? @map("last_email_alert_at") @db.Timestamptz()
 
-  tenant           Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  register         Register      @relation(fields: [registerId], references: [id], onDelete: Cascade)
-  consumedPairings PairingCode[] @relation("PairingCodeConsumedBy")
+  tenant           Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  register         Register           @relation(fields: [registerId], references: [id], onDelete: Cascade)
+  consumedPairings PairingCode[]      @relation("PairingCodeConsumedBy")
+  // A5 · última instantánea que el terminal publicó por su canal de
+  // soporte. 1:1, se sobreescribe en cada heartbeat.
+  heartbeat        DeviceHeartbeat?
+  // A5 · capturas de pantalla vivas de este terminal (24 h como mucho).
+  screenshots      DeviceScreenshot[]
 
   @@index([tenantId])
   @@index([registerId])
   @@map("devices")
+}
+
+// A5 · acceso remoto · la última instantánea de un terminal.
+//
+// UNA fila por device, sobreescrita en cada heartbeat. No es un histórico:
+// nadie iba a leer una tabla con quince terminales × un latido cada 30 s, y
+// mantenerla obligaría a purgarla. Lo único que hace falta del pasado —«¿desde
+// cuándo lleva la cola atascada?»— se guarda como `outboxStuckSince`, que el
+// servidor arrastra de una instantánea a la siguiente mientras la cola no se
+// vacíe.
+//
+// Todo lo que reporta el terminal es NULLABLE: un terminal viejo, o uno cuyo
+// plugin nativo no responde, tiene que poder anunciarse igual. Una columna
+// vacía se pinta como «—» en el panel; un heartbeat rechazado por falta de un
+// dato nos deja sin ver el terminal, que es justo lo contrario del bloque.
+model DeviceHeartbeat {
+  deviceId String @id @map("device_id") @db.Uuid
+  device   Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  // Hora del SERVIDOR al recibir el latido. La del terminal va aparte, en
+  // `deviceTime`, precisamente porque puede estar desviada.
+  reportedAt DateTime @map("reported_at") @db.Timestamptz()
+
+  // ── Qué está ejecutando ────────────────────────────────────────────────
+  // Hash del bundle EN EJECUCIÓN (VITE_BUILD_HASH del chunk que corre), no
+  // el de la imagen del servidor. La lección de A4.
+  bundleBuildHash String? @map("bundle_build_hash")
+  // "android" si el bundle salió del build de la APK, "" o null si es el de
+  // la web. Con `platform` = android y esto != android → bundle ajeno.
+  bundleTarget    String? @map("bundle_target")
+  platform        String?
+  // versionName/versionCode del APK instalado (Gradle). Null fuera de la APK.
+  appVersionName  String? @map("app_version_name")
+  appVersionCode  Int?    @map("app_version_code")
+
+  // ── Estado de la caja ──────────────────────────────────────────────────
+  shiftOpen        Boolean   @default(false) @map("shift_open")
+  shiftOpenedAt    DateTime? @map("shift_opened_at") @db.Timestamptz()
+  outboxPending    Int       @default(0) @map("outbox_pending")
+  outboxRejected   Int       @default(0) @map("outbox_rejected")
+  // Desde cuándo la cola no está vacía. Lo calcula el SERVIDOR: se pone al
+  // recibir el primer latido con cola > 0, se arrastra mientras siga > 0, y
+  // se borra en cuanto llega uno con cola vacía. No lo manda el terminal —
+  // su reloj puede estar desviado y su memoria se va con cada arranque.
+  outboxStuckSince DateTime? @map("outbox_stuck_since") @db.Timestamptz()
+
+  // ── Dónde está ─────────────────────────────────────────────────────────
+  // "wifi" | "cellular" | "ethernet" | "none" | "unknown".
+  network          String?
+  localIp          String?   @map("local_ip")
+  // Hora que dice el terminal, y su desvío contra la del servidor. Una hora
+  // desviada explica errores raros (tokens que caducan antes de tiempo,
+  // tickets con hora imposible), así que se guarda ya calculada.
+  deviceTime       DateTime? @map("device_time") @db.Timestamptz()
+  clockSkewSeconds Int?      @map("clock_skew_seconds")
+  bootedAt         DateTime? @map("booted_at") @db.Timestamptz()
+
+  @@map("device_heartbeats")
+}
+
+// A5 · Frente 4 · metadatos de una captura de pantalla de un terminal.
+//
+// El PNG NO vive aquí: vive en disco, bajo DEVICE_SCREENSHOT_DIR, igual que los
+// informes Z. Esta tabla guarda quién la pidió, por qué, y hasta cuándo existe.
+//
+// **Una captura de la pantalla de un TPV contiene datos de clientes.** De ahí
+// las tres reglas que esta tabla hace cumplir: retención corta y declarada
+// (`expiresAt`, 24 h), motivo obligatorio, y nada de capturas anónimas — cada
+// una cuelga del super-admin que la pidió.
+//
+// El barrido lo hace el worker (`device-screenshot-sweeper`): borra el fichero
+// y la fila. Si el worker no corriera, las capturas seguirían en disco: por eso
+// el barrido tiene su propio test y entra en la tabla de sabotaje.
+model DeviceScreenshot {
+  id       String @id @default(uuid()) @db.Uuid
+  deviceId String @map("device_id") @db.Uuid
+  device   Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  // Se copia el tenant en vez de leerlo por el device: si el device se borra,
+  // la traza de auditoría todavía tiene que poder decir de quién era.
+  tenantId String @map("tenant_id") @db.Uuid
+
+  requestedBySuperAdminId String @map("requested_by_super_admin_id") @db.Uuid
+  commandId               String @map("command_id") @db.Uuid
+  /// Por qué se pidió. Obligatorio, como en el comando.
+  reason                  String
+
+  /// Nombre del fichero dentro de DEVICE_SCREENSHOT_DIR. Nunca una ruta.
+  fileName  String   @map("file_name")
+  bytes     Int
+  mimeType  String   @map("mime_type")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  expiresAt DateTime @map("expires_at") @db.Timestamptz()
+
+  @@index([deviceId, createdAt])
+  @@index([expiresAt])
+  @@map("device_screenshots")
 }
 
 // Código efímero que el propietario/encargado entrega al dispositivo

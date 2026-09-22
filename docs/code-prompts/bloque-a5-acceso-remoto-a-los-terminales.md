@@ -147,6 +147,31 @@ entregarlo**. Incluida la decisión que hay que tomar ahora y no dentro de un a�
 Plantea la pregunta con datos y **no la decidas tú**: déjala escrita para Matías con las dos
 opciones y su coste.
 
+## Lo que no se puede romper
+
+Cuatro riesgos que este bloque introduce y que hay que blindar. Van también a la tabla de
+sabotaje y al done-doc.
+
+**R1 · El canal de soporte NO PUEDE DESVINCULAR NADA. Nunca.** Un fallo de autenticación en
+`/ws/device` se cierra con su propio código de socket y se reintenta con backoff: no llama a
+`unpair()`, no llama a `clearAllDeviceState()`, no pasa por `decideAfterBootstrapError()` y no
+comparte camino con `useDeviceBootstrap`. Y el servidor no puede responder `DEVICE_REVOKED` ni
+`DEVICE_TOKEN_EXPIRED` en el handshake del WS salvo que el device esté revocado **de verdad en
+BD**: nada de reutilizar esos códigos para un error transitorio. Sabotaje: haz que el `hello`
+devuelva `DEVICE_REVOKED` con el device sano → un test tiene que ponerse rojo demostrando que el
+cliente sigue emparejado.
+
+**R2 · El bloque no escribe en `Device` salvo `lastSeenAt` y su instantánea.** Ni
+`deviceTokenHash`, ni `revokedAt`, ni pairing. Ningún comando de la lista blanca puede
+desvincular.
+
+**R3 · No se toca `WebViewRescue` ni `WebViewRescueTest`.** A5 trae `versionCode` nuevo, así que
+el rescate se va a disparar en todos los terminales que actualicen: si el trabajo en
+`MainActivity` lo altera, se lleva la vinculación por delante. El done-doc tiene que decir
+explícitamente que ese test sigue verde con la APK de A5.
+
+**R4 · El comando `recargar` es un reload y nada más.** No limpia cachés, no toca storage.
+
 ## Restricciones
 
 - TypeScript estricto, JSON Schema en los bodies, nada de secretos en logs — como el resto del repo.
@@ -171,6 +196,9 @@ verdad sobre el código y revertidos. Como mínimo:
 | Saltarse la escritura en `SuperAdminAudit` | test de que todo comando deja registro |
 | Quitar el jitter del backoff | test de que N terminales no reconectan a la vez |
 | Dejar que un terminal lea el estado de otro tenant | test de aislamiento por tenant |
+| Que el `hello` responda `DEVICE_REVOKED` con el device sano (R1) | test de que el cliente sigue emparejado y sólo reintenta |
+| Que un comando escriba en `Device` algo que no sea `lastSeenAt` (R2) | test de que la vinculación no se toca |
+| Que `recargar` limpie storage o cachés (R4) | test de que sólo recarga |
 
 Y declara **qué NO cubre la suite**.
 

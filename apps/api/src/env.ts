@@ -113,6 +113,23 @@ export const EnvSchema = z.object({
   // reventar — un TPV no deja de cobrar porque no haya APKs publicadas.
   RELEASES_DIR: z.string().default("/srv/releases"),
 
+  // ── Capturas de pantalla de terminales (A5 · Frente 4) ─────────────
+  // Los PNG viven en disco, no en BD. Volumen propio en el compose, igual que
+  // los informes Z. Son fotos de la pantalla de un TPV con datos de clientes:
+  // el worker las borra a las DEVICE_SCREENSHOT_TTL_HOURS.
+  DEVICE_SCREENSHOT_DIR: z
+    .string()
+    .default("/var/lib/mipiacetpv/device-screenshots"),
+  // Retención declarada. 24 h: si hace falta otra captura, se pide otra.
+  DEVICE_SCREENSHOT_TTL_HOURS: z.coerce.number().int().positive().default(24),
+  // Tope por captura. Un PNG de 1280×800 de una UI plana ronda los 200 KB;
+  // este límite es la red de seguridad, no el objetivo.
+  DEVICE_SCREENSHOT_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(2 * 1024 * 1024),
+
   // ── Sentry (v1.5-consistencia-B · Lote 2) ──────────────────────────
   // Sin DSN, Sentry queda en no-op absoluto (initSentry no llama init).
   // Compose interpola `""` cuando la var no está en .env.production —

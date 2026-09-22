@@ -224,6 +224,15 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ""),
       },
+      // A5 · los WebSocket del TPV (`/ws/store/:id` de B7 y `/ws/device` del
+      // canal de soporte). En producción los proxea Caddy con su propio
+      // `handle /ws/*`; en dev no había forma de probarlos sin apuntar a
+      // producción, que es exactamente lo que no queremos hacer con un canal
+      // que acepta comandos.
+      "/ws": {
+        target: "ws://127.0.0.1:3001",
+        ws: true,
+      },
     },
   },
 });

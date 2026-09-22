@@ -410,3 +410,82 @@ Una página de rescate no puede depender de lo que está rescatando.
   producto. Un cambio de marca hay que replicarlo a mano ahí (son ~5 colores literales).
 - Los tests de esa página comprueban que no aparezcan `gap`, `grid`, `var(--` ni `<script`:
   el navegador que la va a abrir no perdona ninguno de los cuatro.
+
+## ADR-014 · Acceso remoto a la flota: el agente va dentro de nuestra APK
+
+**Contexto.** Tenemos terminales en casa de clientes y no hay forma de ver ninguno: ni si están
+encendidos, ni qué versión llevan, ni qué les pasa cuando alguien llama. Desde ADR de A4,
+además, actualizar un terminal exige instalar una APK a mano en el local.
+
+Con dos terminales se aguanta. Con quince es un negocio que no escala: cada versión son quince
+desplazamientos y cada "no me va" es un viaje a ciegas.
+
+Se evaluó comprar acceso remoto de terceros. Hechos verificados el 2026-09-04:
+
+- **AnyDesk y TeamViewer en Android sólo *ven* la pantalla.** Para *tocarla* necesitan un
+  plugin firmado por el fabricante del terminal. Hay ~40 fabricantes soportados y el Smart-tpv
+  del AP11 no está entre ellos. Sería pagar licencia por una sesión de sólo lectura.
+- **RustDesk sí controla sin root** (servicio de accesibilidad + MediaProjection), pero **exige
+  que alguien acepte la captura en el terminal tras cada reinicio**. Su propia documentación
+  recomienda tratarlo como soporte asistido. Un TPV que se reinicia un lunes a las 7:00 no
+  tiene a nadie que acepte nada.
+- **MDM con Device Owner** (Headwind autoalojado) sí resolvería la instalación silenciosa, pero
+  **exige reset de fábrica para enrolar**: diez minutos sobre un terminal nuevo en la mesa,
+  un desplazamiento sobre cada terminal ya entregado.
+
+**Decisión.** El agente de soporte lo llevamos **dentro de nuestra propia APK**.
+
+Nuestra app puede observarse a sí misma sin pedir permiso a Android, sin plugin de fabricante,
+sin licencia y sin depender de nadie. El canal es un **WebSocket saliente** del terminal a la
+API (`GET /ws/device`, autenticado con el device token que ya existía), así que funciona detrás
+del router de cualquier cliente y detrás de un 4G con CGNAT — que es exactamente el caso de Las
+Lomas, sin internet fijo.
+
+Sobre eso se construyen: el inventario con estado en vivo, una lista blanca cerrada de seis
+comandos, y la captura de **nuestra propia ventana**, que no necesita MediaProjection ni
+consentimiento porque no estamos capturando el dispositivo, sino lo nuestro.
+
+**Divergencias deliberadas respecto a `/ws/store/:storeId`, que ya existía.**
+
+- **Ruta y autenticación propias.** Aquel canal es del cajero (JWT de sesión, un store con N
+  suscriptores, eventos de mesa); éste es del terminal (device token, un socket por device).
+  Comparten forma y nada más. Mezclarlos obligaría a que el bus de mesas supiera de comandos y
+  a que revocar un device tocara la mensajería de sala.
+- **El token NO viaja en la query string.** `/ws/store` pasa su JWT por `?token=` y lo asume
+  porque es de TTL corto. El device token **no caduca nunca**: en la URL acabaría en los logs
+  de acceso de Caddy, en los de cualquier proxy y en el `request.log` de Fastify, donde no se
+  puede redactar lo que no es una cabecera. El socket se abre sin autenticar y el primer
+  mensaje es un `hello` con el token; si no llega en 5 s, se cierra.
+
+**Lo que este canal NO puede hacer, por diseño.**
+
+- **No puede desvincular nada.** Un fallo de autenticación cierra con su propio código y el
+  terminal reintenta con backoff; no llama a `unpair()` ni a `clearAllDeviceState()`, y no
+  comparte camino con `useDeviceBootstrap`. El servidor sólo responde `REVOKED` cuando el
+  device tiene `revokedAt` puesto **de verdad en BD**; un problema nuestro cierra como
+  transitorio. Un terminal desvinculado pide un código de 6 dígitos en la barra un lunes por la
+  mañana, y eso no lo puede provocar el canal de soporte.
+- **No escribe en `Device` salvo `lastSeenAt`** y su instantánea en `DeviceHeartbeat`.
+- **Ningún comando toca dinero.** Ni cerrar turnos, ni anular tickets, ni cobrar, ni arqueo. Si
+  el soporte necesita eso, se hace con un humano al teléfono.
+- **La lista de comandos es cerrada.** No hay comando genérico, ni evaluación de código, ni
+  ninguna ruta que acepte "ejecuta esto". Añadir uno es un cambio de código con su revisión y
+  su test.
+
+**Alternativa descartada.** Comprar AnyDesk/TeamViewer/RustDesk, por lo de arriba. La opción
+con más libertad resultó ser la que ya teníamos en la mano.
+
+**Consecuencias.**
+
+- **Controlar el táctil en remoto queda fuera.** Para eso está la escalada por adb + Tailscale
+  (`infra/terminal.sh`), que es lo único que además permite `adb install -r`. No se le promete
+  a ningún cliente.
+- **La instalación silenciosa de APK sigue sin resolverse.** Necesita Device Owner, es decir,
+  el bloque del MDM. La decisión queda planteada con sus costes en
+  `docs/implantacion/terminal-nuevo.md` §6, **sin decidir**.
+- Una captura de la pantalla de un TPV **contiene datos de clientes**: retención corta y
+  declarada, acceso sólo desde super-admin, cada captura auditada, y un indicador visible en el
+  terminal de que se acaba de tomar una. El contrato de encargado de tratamiento que ampare
+  eso es deuda **legal** pendiente.
+- El canal tiene que ser **irrelevante para el camarero**: si la API está caída, el TPV vende
+  igual y ninguna pantalla espera al canal de soporte.

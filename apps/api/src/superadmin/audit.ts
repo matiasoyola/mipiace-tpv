@@ -189,6 +189,60 @@ const ApkDownloadMeta = Base.extend({
   result: z.enum(["ok", "caducado", "agotado"]),
 });
 
+// A5 · comando enviado a un terminal. Se escribe ANTES de mandarlo: sin
+// registro no hay comando. `motivo` es obligatorio — un comando sin motivo no
+// se puede revisar seis meses después, que es cuando se revisa.
+const DeviceCommandMeta = Base.extend({
+  deviceId: z.string().uuid(),
+  commandId: z.string().uuid(),
+  accion: z.enum([
+    "recargar",
+    "volcar-logs",
+    "captura-de-pantalla",
+    "forzar-sync",
+    "reiniciar-app",
+    "decir-version",
+  ]),
+  motivo: z.string().min(1).max(300),
+});
+
+// A5 · lo que contestó el terminal. Va en su propia traza porque el resultado
+// llega hasta 25 s después: con una sola escrita al final, un comando que no
+// vuelve —el que hay que investigar— no dejaría rastro ninguno.
+const DeviceCommandResultMeta = Base.extend({
+  deviceId: z.string().uuid(),
+  commandId: z.string().uuid(),
+  accion: z.string(),
+  resultado: z.enum(["ok", "error", "sin-respuesta"]),
+});
+
+// A5 · alguien intentó mandar algo que no está en la lista blanca. No sale del
+// servidor, pero se registra: el intento es justo lo que hay que poder ver.
+const DeviceCommandRejectedMeta = Base.extend({
+  deviceId: z.string().uuid(),
+  accionSolicitada: z.string().max(120),
+  motivo: z.string(),
+});
+
+// A5 · captura de la pantalla de un terminal. Es una foto de un TPV con datos
+// de clientes dentro: cada una deja traza propia, con quién la pidió, por qué,
+// y cuándo se borra.
+const DeviceScreenshotMeta = Base.extend({
+  deviceId: z.string().uuid(),
+  commandId: z.string().uuid(),
+  screenshotId: z.string().uuid(),
+  motivo: z.string().min(1).max(300),
+  bytes: z.number().int().nonnegative(),
+  expiresAt: z.string(),
+});
+
+// A5 · alguien abrió una captura guardada. Mirar la foto es un acceso nuevo a
+// esos datos, distinto de haberla pedido, y se registra como tal.
+const DeviceScreenshotViewedMeta = Base.extend({
+  deviceId: z.string().uuid(),
+  screenshotId: z.string().uuid(),
+});
+
 const META_SCHEMAS = {
   create_tenant: CreateTenantMeta,
   create_tenant_draft: CreateTenantDraftMeta,
@@ -209,6 +263,11 @@ const META_SCHEMAS = {
   view_tenant_cashiers: ViewTenantCashiersMeta,
   create_apk_download_code: CreateApkDownloadCodeMeta,
   apk_download: ApkDownloadMeta,
+  device_command: DeviceCommandMeta,
+  device_command_result: DeviceCommandResultMeta,
+  device_command_rejected: DeviceCommandRejectedMeta,
+  device_screenshot: DeviceScreenshotMeta,
+  device_screenshot_viewed: DeviceScreenshotViewedMeta,
 } as const;
 
 export type SuperAdminAction = keyof typeof META_SCHEMAS;
