@@ -1,0 +1,24 @@
+-- F1 · el control horario es un módulo (ADR-016 §7, ADR-018).
+--
+-- H1 dejó que una empresa exista, se active y entre SIN caja y SIN Holded.
+-- Lo que le faltaba al colegio de Talavera para poder activarse era esto:
+-- un módulo que encender. Con el invariante "al menos un módulo encendido"
+-- de H1, hasta hoy se daba de alta como DRAFT y no salía de ahí.
+--
+-- Migración ADITIVA y de una sola línea útil. No toca ni una fila
+-- existente más allá del backfill del propio DEFAULT, y ese backfill deja
+-- a todos los tenants de hoy EXACTAMENTE como estaban: sin fichaje.
+--
+-- El backfill ES el DEFAULT: desde PG 11 un `ADD COLUMN ... NOT NULL
+-- DEFAULT <constante>` no reescribe la tabla — guarda el default en el
+-- catálogo y lo sirve a las filas antiguas. Sin bloqueo largo y sin UPDATE
+-- masivo. Mismo criterio que `caja_enabled` en H1.
+--
+-- `DEFAULT false` y no true, al contrario que `caja_enabled`: el default
+-- de una capability es "deja a los tenants de hoy como estaban". Todos
+-- tienen caja; el control horario no lo tiene nadie.
+--
+-- Las tablas del registro de jornada van en la migración hermana
+-- `20260923010000_fichaje_1_registro`, que es la que trae los triggers.
+
+ALTER TABLE "tenants" ADD COLUMN "fichaje_enabled" BOOLEAN NOT NULL DEFAULT false;

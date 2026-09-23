@@ -123,7 +123,7 @@ export interface OnboardingHealth {
   // H1 · en qué empresa estamos. La pantalla lo necesita para explicar
   // por qué la mitad de los checks dicen "No aplica" sin que el
   // implantador tenga que deducirlo.
-  modules: { caja: boolean; crm: boolean; agenda: boolean };
+  modules: { caja: boolean; crm: boolean; agenda: boolean; fichaje: boolean };
   // catalogo-local (addendum 3) · las dos preguntas, separadas y con
   // nombre propio. Sustituye al antiguo `usesHolded`, que sólo sabía
   // contestar la segunda y se leía como si contestara la primera.
@@ -180,6 +180,9 @@ export async function computeOnboardingHealth(
         cajaEnabled: true,
         crmEnabled: true,
         agendaEnabled: true,
+        // F1 · el cuarto módulo. Es el que permite que el colegio de
+        // Talavera pase el check `modules-enabled` y se pueda activar.
+        fichajeEnabled: true,
         holdedApiKeyCiphertext: true,
         // catalogo-local (addendum 3) · la otra mitad de la pregunta.
         holdedEnabled: true,
@@ -268,6 +271,9 @@ export async function computeOnboardingHealth(
   const holdedConectado = tenant.holdedApiKeyCiphertext != null;
   const hasCrm = tenant.crmEnabled === true;
   const hasAgenda = tenant.agendaEnabled === true;
+  // F1 · `=== true` y no `!== false`: la columna es `@default(false)`, así
+  // que lo explícito aquí es el encendido (espejo del criterio de la caja).
+  const hasFichaje = tenant.fichajeEnabled === true;
   const applies: Record<CheckRequirement, boolean> = {
     always: true,
     caja: hasCaja,
@@ -293,6 +299,7 @@ export async function computeOnboardingHealth(
     hasCaja ? "caja" : null,
     hasCrm ? "CRM" : null,
     hasAgenda ? "agenda" : null,
+    hasFichaje ? "control horario" : null,
   ].filter((x): x is string => x != null);
 
   const declared: Array<Omit<ReadinessCheck, "applies">> = [
@@ -415,7 +422,12 @@ export async function computeOnboardingHealth(
     },
     ticketsSyncFailed,
     testCashierProvisioned: cashierTest != null,
-    modules: { caja: hasCaja, crm: hasCrm, agenda: hasAgenda },
+    modules: {
+      caja: hasCaja,
+      crm: hasCrm,
+      agenda: hasAgenda,
+      fichaje: hasFichaje,
+    },
     holded: { enabled: holdedPrevisto, connected: holdedConectado },
     ticketsCobradosSinSubir,
     readinessChecks: checks,

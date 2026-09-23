@@ -99,6 +99,8 @@ function serializeDraftTenant(t: {
   cajaEnabled?: boolean;
   crmEnabled?: boolean;
   agendaEnabled?: boolean;
+  // F1 · opcional por la misma razón que sus hermanas.
+  fichajeEnabled?: boolean;
   holdedEnabled?: boolean;
 }) {
   return {
@@ -119,6 +121,8 @@ function serializeDraftTenant(t: {
       caja: t.cajaEnabled ?? true,
       crm: t.crmEnabled ?? false,
       agenda: t.agendaEnabled ?? false,
+      // F1 · el default reproduce el de la columna: apagado.
+      fichaje: t.fichajeEnabled ?? false,
     },
     // catalogo-local (addendum 3) · fuera de `modules` a propósito: no
     // es un módulo, es el interruptor del ERP. Mezclarlo ahí volvería a
@@ -411,6 +415,9 @@ export async function registerSuperAdminTenantsRoutes(
           caja: tenant.cajaEnabled,
           crm: tenant.crmEnabled,
           agenda: tenant.agendaEnabled,
+          // F1 (ADR-018) · el control horario, que para el colegio de
+          // Talavera es el único módulo que va a tener encendido.
+          fichaje: tenant.fichajeEnabled,
         },
         // catalogo-local (addendum 3) · el interruptor de Holded, para
         // que el detalle pueda pintarlo y moverlo.
@@ -515,6 +522,11 @@ export async function registerSuperAdminTenantsRoutes(
             cajaEnabled: { type: "boolean" },
             crmEnabled: { type: "boolean" },
             agendaEnabled: { type: "boolean" },
+            // F1 (ADR-018) · el control horario. Cuarto módulo, mismo
+            // gobierno que la caja (sólo super-admin) y default apagado.
+            // Con él, una empresa se puede dar de alta con el fichaje como
+            // ÚNICO módulo: es literalmente el alta del colegio.
+            fichajeEnabled: { type: "boolean" },
             // catalogo-local (addendum 3) · el interruptor de Holded. NO
             // es un módulo: no entra en el invariante de "al menos uno
             // encendido" (una empresa sin Holded es una empresa normal,
@@ -541,6 +553,7 @@ export async function registerSuperAdminTenantsRoutes(
         cajaEnabled?: boolean;
         crmEnabled?: boolean;
         agendaEnabled?: boolean;
+        fichajeEnabled?: boolean;
         holdedEnabled?: boolean;
       };
       const ctx = request.superAdmin!;
@@ -569,14 +582,16 @@ export async function registerSuperAdminTenantsRoutes(
       }
 
       // H1 · los módulos. Defaults = lo de hoy: caja sí, los otros no.
+      // F1 añade el cuarto, `fichajeEnabled`, también con default apagado.
       const cajaEnabled = body.cajaEnabled ?? true;
       const crmEnabled = body.crmEnabled ?? false;
       const agendaEnabled = body.agendaEnabled ?? false;
-      if (!cajaEnabled && !crmEnabled && !agendaEnabled) {
+      const fichajeEnabled = body.fichajeEnabled ?? false;
+      if (!cajaEnabled && !crmEnabled && !agendaEnabled && !fichajeEnabled) {
         return reply.code(400).send({
           error: "NO_MODULES_ENABLED",
           message:
-            "Enciende al menos un módulo (caja, CRM o agenda). Una empresa sin ningún módulo no puede activarse ni entrar a su panel.",
+            "Enciende al menos un módulo (caja, CRM, agenda o control horario). Una empresa sin ningún módulo no puede activarse ni entrar a su panel.",
         });
       }
 
@@ -753,6 +768,7 @@ export async function registerSuperAdminTenantsRoutes(
             cajaEnabled,
             crmEnabled,
             agendaEnabled,
+            fichajeEnabled,
             // catalogo-local (addendum 3) · el interruptor. Apagado, este
             // tenant no verá /onboarding nunca y su catálogo nace aquí.
             holdedEnabled,
@@ -777,7 +793,12 @@ export async function registerSuperAdminTenantsRoutes(
             // dio de alta esta empresa?" sin mirar el resto del sistema.
             usesHolded,
             holdedEnabled,
-            modules: { caja: cajaEnabled, crm: crmEnabled, agenda: agendaEnabled },
+            modules: {
+              caja: cajaEnabled,
+              crm: crmEnabled,
+              agenda: agendaEnabled,
+              fichaje: fichajeEnabled,
+            },
           },
         });
         return tenant;
@@ -877,6 +898,9 @@ export async function registerSuperAdminTenantsRoutes(
             cajaEnabled: { type: "boolean" },
             crmEnabled: { type: "boolean" },
             agendaEnabled: { type: "boolean" },
+            // F1 (ADR-018) · el control horario, con el mismo gobierno que
+            // la caja: se enciende y se apaga sólo desde aquí.
+            fichajeEnabled: { type: "boolean" },
             // catalogo-local (addendum 3) · el interruptor de Holded.
             // Sólo se mueve desde aquí, y apagarlo tiene guarda: ver más
             // abajo el 409.
@@ -904,6 +928,7 @@ export async function registerSuperAdminTenantsRoutes(
         cajaEnabled?: boolean;
         crmEnabled?: boolean;
         agendaEnabled?: boolean;
+        fichajeEnabled?: boolean;
         holdedEnabled?: boolean;
       };
       const ctx = request.superAdmin!;
@@ -1022,7 +1047,15 @@ export async function registerSuperAdminTenantsRoutes(
       // audit que el resto. Se aplican juntos para poder comprobar el
       // invariante DESPUÉS del cambio: una empresa no puede quedarse sin
       // ningún módulo encendido, ni siquiera apagando de uno en uno.
-      const MODULE_FIELDS = ["cajaEnabled", "crmEnabled", "agendaEnabled"] as const;
+      const MODULE_FIELDS = [
+        "cajaEnabled",
+        "crmEnabled",
+        "agendaEnabled",
+        // F1 · el cuarto módulo entra POR AQUÍ y no por un `if` propio: así
+        // el invariante de "al menos uno encendido" lo cuenta solo, y
+        // apagarle la caja a un colegio que ya ficha deja de ser un 400.
+        "fichajeEnabled",
+      ] as const;
       for (const field of MODULE_FIELDS) {
         const next = body[field];
         if (next === undefined || next === tenant[field]) continue;
@@ -1036,7 +1069,7 @@ export async function registerSuperAdminTenantsRoutes(
         return reply.code(400).send({
           error: "NO_MODULES_ENABLED",
           message:
-            "Una empresa tiene que conservar al menos un módulo encendido (caja, CRM o agenda).",
+            "Una empresa tiene que conservar al menos un módulo encendido (caja, CRM, agenda o control horario).",
         });
       }
 

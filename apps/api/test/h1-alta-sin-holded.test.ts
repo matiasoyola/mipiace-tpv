@@ -257,7 +257,13 @@ describe("H1 · alta SIN Holded", () => {
     const a = audits.find((x) => x.action === "create_tenant_draft");
     expect(a).toBeTruthy();
     expect(a!.metadata.usesHolded).toBe(false);
-    expect(a!.metadata.modules).toEqual({ caja: false, crm: true, agenda: false });
+    // F1 · con el cuarto módulo, apagado: un alta de hoy no lo enciende.
+    expect(a!.metadata.modules).toEqual({
+      caja: false,
+      crm: true,
+      agenda: false,
+      fichaje: false,
+    });
   });
 });
 
@@ -282,7 +288,13 @@ describe("H1 · alta CON Holded: sin cambios respecto a master", () => {
   it("con caja por defecto: la empresa de siempre nace con caja y sin CRM ni agenda", async () => {
     const app = await buildApp();
     const res = await post(app, CON_HOLDED);
-    expect(res.json().tenant.modules).toEqual({ caja: true, crm: false, agenda: false });
+    // F1 · ídem: el alta por defecto sigue siendo caja y nada más.
+    expect(res.json().tenant.modules).toEqual({
+      caja: true,
+      crm: false,
+      agenda: false,
+      fichaje: false,
+    });
   });
 
   it("con clave y sin id de cuenta sigue siendo 400 (media configuración es peor que ninguna)", async () => {

@@ -479,6 +479,22 @@ model Tenant {
   // los tenants de hoy exactamente como estaban. Un `false` explicito es
   // la unica forma de apagar la caja.
   cajaEnabled                    Boolean           @default(true) @map("caja_enabled")
+  // F1 (ADR-018) · capability del CONTROL HORARIO: empleados, móviles
+  // emparejados, fichajes, correcciones y el registro que se le enseña a
+  // la Inspección. Hermana de `cajaEnabled` en forma (columna booleana por
+  // tenant, ADR-R6) Y en gobierno: la mueve SÓLO el super-admin, porque
+  // encenderla es vender un producto. Por eso tampoco aparece en el POST
+  // de /admin/tenant/settings.
+  //
+  // `@default(false)` y NO true: al revés que `cajaEnabled`, y por la
+  // MISMA razón. El default de una capability es "deja a los tenants de
+  // hoy exactamente como estaban": todos tienen caja, así que la caja nace
+  // encendida; el control horario no lo tiene nadie, así que nace apagado.
+  //
+  // Se lee `=== true`, nunca `!== false` — el espejo exacto del criterio
+  // de `cajaEnabled`: sólo el valor explícito CONTRARIO al default cambia
+  // el comportamiento de nadie.
+  fichajeEnabled                 Boolean           @default(false) @map("fichaje_enabled")
   // catalogo-local (addendum 3, ADR-017) · ¿está PREVISTO que esta
   // empresa use Holded? No confundir con `holdedApiKeyCiphertext != null`,
   // que responde a otra pregunta: ¿lo tiene conectado YA?

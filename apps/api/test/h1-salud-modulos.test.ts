@@ -203,7 +203,14 @@ describe("H1 · empresa SIN caja y SIN Holded (el colegio)", () => {
 
   it("la respuesta dice qué empresa es, para que la pantalla lo explique", async () => {
     const h = await health(COLEGIO);
-    expect(h.modules).toEqual({ caja: false, crm: true, agenda: false });
+    // F1 · el mapa de módulos gana el cuarto. `false` para cualquier
+    // tenant de hoy: es la prueba de que la migración no enciende nada.
+    expect(h.modules).toEqual({
+      caja: false,
+      crm: true,
+      agenda: false,
+      fichaje: false,
+    });
     expect(h.holded).toEqual({ enabled: false, connected: false });
   });
 });

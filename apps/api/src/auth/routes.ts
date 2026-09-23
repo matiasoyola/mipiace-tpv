@@ -345,6 +345,10 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
           cajaEnabled: tenant.cajaEnabled,
           crmEnabled: tenant.crmEnabled,
           agendaEnabled: tenant.agendaEnabled,
+          // F1 (ADR-018) · el cuarto módulo. Es lo que hace que un colegio
+          // sin caja entre a "Control horario" en vez de a su cuenta
+          // (`landingSinCaja` en App.tsx). Sólo lectura, como `cajaEnabled`.
+          fichajeEnabled: tenant.fichajeEnabled,
         },
       };
     },

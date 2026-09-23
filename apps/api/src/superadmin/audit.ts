@@ -42,7 +42,15 @@ const CreateTenantDraftMeta = Base.extend({
   // vecina — los audit logs anteriores al bloque no la llevan.
   holdedEnabled: z.boolean().optional(),
   modules: z
-    .object({ caja: z.boolean(), crm: z.boolean(), agenda: z.boolean() })
+    .object({
+      caja: z.boolean(),
+      crm: z.boolean(),
+      agenda: z.boolean(),
+      // F1 · el cuarto módulo. Opcional por lo mismo que sus vecinas: los
+      // audit logs escritos antes de este bloque no lo llevan, y una
+      // auditoría vieja no debe invalidarse porque el producto crezca.
+      fichaje: z.boolean().optional(),
+    })
     .optional(),
 });
 
