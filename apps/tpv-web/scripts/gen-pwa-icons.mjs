@@ -14,7 +14,14 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const OUT_DIR = resolve(__dirname, "../public/icons");
+// F1 · el destino es parametrizable para poder generar el MISMO set de
+// marca en otra app sin duplicar el generador. Por defecto, el de siempre:
+//
+//   node apps/tpv-web/scripts/gen-pwa-icons.mjs
+//   ICONS_OUT_DIR=apps/admin/public/icons node apps/tpv-web/scripts/gen-pwa-icons.mjs
+const OUT_DIR = process.env.ICONS_OUT_DIR
+  ? resolve(process.cwd(), process.env.ICONS_OUT_DIR)
+  : resolve(__dirname, "../public/icons");
 
 // ---- Paleta (tokens.md §2) ----
 const INK = [0x1f, 0x29, 0x37]; // barras (logo sobre fondo claro)
@@ -225,4 +232,4 @@ for (const j of jobs) {
   writeFileSync(resolve(OUT_DIR, j.name), encodePng(data, size));
   console.log(`  ${j.name} (${size}x${size})`);
 }
-console.log("Iconos PWA generados en apps/tpv-web/public/icons/");
+console.log(`Iconos PWA generados en ${OUT_DIR}/`);
