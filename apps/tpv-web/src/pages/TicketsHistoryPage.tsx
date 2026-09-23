@@ -541,7 +541,14 @@ function TicketRowCard({
         className="w-full bg-white rounded-2xl border border-slate-200 hover:border-mipiace-coral/40 p-4 flex items-center gap-4 text-left cursor-pointer"
       >
         <div className="flex-1 min-w-0">
-          <div className="text-[14.5px] font-medium text-mipiace-ink truncate flex items-center gap-2">
+          {/* Bucle visual (390) · esta línea era `truncate` + `flex`, y
+              con la marca del email añadida el badge se cortaba a una
+              tira de dos píxeles en el handheld: justo el aviso que este
+              bloque existe para que se vea. Ahora envuelve en vez de
+              recortar — lo que se corta aquí no son adornos, son
+              estados. El texto largo (fecha, caja, líneas) sigue en la
+              línea de abajo, que sí trunca. */}
+          <div className="text-[14.5px] font-medium text-mipiace-ink flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="tabular-nums">#{ticket.internalNumber}</span>
             {ticket.holdedDocNumber && (
               <span className="text-[12.5px] text-slate-400 tabular-nums">
@@ -730,6 +737,10 @@ export function TicketDetailDrawer({
   // enviar" siga gritando el fallo viejo mientras tanto.
   const [justQueued, setJustQueued] = useState(false);
   const emailState = justQueued ? null : (ticket.email ?? null);
+  // ¿El bloque de estado de arriba ya está diciendo lo mismo, del mismo
+  // valor? Entonces el aviso del campo sobra.
+  const yaDichoArriba =
+    emailState?.status === "FAILED" && emailState.to === emailTrimmed;
   // v1.10.2-impresion-honesta · estado real de la reimpresión: enviando
   // / impreso / falló-con-motivo-y-reintento. Antes había un único
   // estado ("Enviado a impresora. La copia llevará marca COPIA.") que se
@@ -920,7 +931,12 @@ export function TicketDetailDrawer({
                 Enviar
               </button>
             </div>
-            {emailBad && (
+            {/* Bucle visual · el aviso del campo se calla cuando el
+                bloque de arriba ya está diciendo lo mismo del MISMO
+                valor: en el 000257 salían dos frases seguidas sobre
+                "abc", y dos avisos iguales pesan lo que medio aviso.
+                En cuanto Ana toca el campo y sigue sin valer, vuelve. */}
+            {emailBad && !yaDichoArriba && (
               <div
                 data-testid="resend-email-aviso"
                 className="text-[12px] text-amber-700 mt-1.5 leading-snug"
