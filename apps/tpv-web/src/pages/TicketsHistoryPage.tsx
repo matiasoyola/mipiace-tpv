@@ -21,6 +21,9 @@ import {
   XCircle,
 } from "lucide-react";
 
+// Sole · misma regla de email que la API y que la hoja de cobro.
+import { isValidEmail, normalizeEmail } from "@mipiacetpv/util-validation/email";
+
 import { ApiError, apiWithCashier } from "../api.js";
 import { getCachedBusinessType } from "../lib/catalog.js";
 import { syncNow } from "../lib/syncNow.js";
@@ -645,6 +648,14 @@ export function TicketDetailDrawer({
   const [email, setEmail] = useState(ticket.emailIntent ?? "");
   const [sending, setSending] = useState(false);
   const [sendStatus, setSendStatus] = useState<string | null>(null);
+  // Sole · la MISMA regla que la API, del mismo paquete. El botón no se
+  // ofrece sobre una dirección a la que no se puede escribir: aquí no
+  // hay venta que proteger, así que sí se puede exigir antes de mandar.
+  // Y el campo nace con `ticket.emailIntent`, que en un ticket como el
+  // 000257 es justamente la basura que hay que corregir.
+  const emailTrimmed = normalizeEmail(email);
+  const emailValid = isValidEmail(emailTrimmed);
+  const emailBad = emailTrimmed.length > 0 && !emailValid;
   // v1.10.2-impresion-honesta · estado real de la reimpresión: enviando
   // / impreso / falló-con-motivo-y-reintento. Antes había un único
   // estado ("Enviado a impresora. La copia llevará marca COPIA.") que se
@@ -655,13 +666,13 @@ export function TicketDetailDrawer({
     ticket.status !== "DRAFT" && ticket.status !== "VOIDED";
 
   async function resend() {
-    if (!email) return;
+    if (!emailValid) return;
     setSending(true);
     setSendStatus(null);
     try {
       await apiWithCashier(`/tickets/${ticket.id}/resend-email`, {
         method: "POST",
-        body: { email },
+        body: { email: emailTrimmed },
       });
       setSendStatus("Enviado a la cola. Llegará al cliente en cuanto Holded confirme el ticket.");
     } catch (err) {
@@ -752,18 +763,39 @@ export function TicketDetailDrawer({
               <input
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                type="email"
+                inputMode="email"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
                 placeholder="cliente@ejemplo.com"
-                className="flex-1 h-10 px-3 rounded-xl bg-mipiace-stone border border-transparent text-[13px] focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none"
+                aria-invalid={emailBad}
+                data-testid="resend-email-input"
+                className={
+                  "flex-1 h-10 px-3 rounded-xl border text-[13px] focus:bg-white focus:outline-none " +
+                  (emailBad
+                    ? "bg-amber-50 border-amber-300 focus:border-amber-400 focus:ring-2 focus:ring-amber-400"
+                    : "bg-mipiace-stone border-transparent focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30")
+                }
               />
               <button
                 onClick={resend}
-                disabled={!email || sending}
+                data-testid="resend-email-button"
+                disabled={!emailValid || sending}
                 className="h-10 px-3 rounded-xl bg-mipiace-coral text-white text-[13px] font-medium disabled:opacity-50 flex items-center gap-1.5"
               >
                 {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />}
                 Enviar
               </button>
             </div>
+            {emailBad && (
+              <div
+                data-testid="resend-email-aviso"
+                className="text-[12px] text-amber-700 mt-1.5 leading-snug"
+              >
+                Ese email no es válido. Corrígelo para poder enviarlo.
+              </div>
+            )}
             {sendStatus && (
               <div className="text-[12px] text-slate-500 mt-1.5">{sendStatus}</div>
             )}

@@ -4,3 +4,10 @@ export {
   generateTemporaryPassword,
   TEMPORARY_PASSWORD_ALPHABET,
 } from "./temporary-password.js";
+export {
+  EMAIL_MAX_LENGTH,
+  INVALID_EMAIL_MESSAGE,
+  isValidEmail,
+  normalizeEmail,
+  validEmailOrNull,
+} from "./email.js";

@@ -30,6 +30,12 @@ import {
   resolveShiftForSale,
   type ShiftWindow,
 } from "../shift/impute.js";
+import {
+  INVALID_EMAIL_MESSAGE,
+  validEmailOrNull,
+} from "@mipiacetpv/util-validation";
+
+import { decideEmailIntent } from "./email-intent.js";
 import { maybeEnqueueAutoEmail } from "./email-trigger.js";
 import {
   holdedDestination,
@@ -270,6 +276,21 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           message: "La caja del ticket no coincide con tu sesión.",
         });
       }
+      // Sole · 2.b El email se valida ANTES de escribirlo y ANTES de
+      // encolarlo, y NUNCA tumba la venta. Ver `email-intent.ts`.
+      const emailIntent = decideEmailIntent(body.emailIntent);
+      if (emailIntent.rejected) {
+        request.log.warn(
+          {
+            event: "ticket.email_intent_rejected",
+            externalId: body.externalId,
+            tenantId: cashier.tid,
+            registerId: cashier.rid,
+          },
+          "emailIntent descartado por formato: la venta sigue, el email no",
+        );
+      }
+
       // v1.11-cierre-de-dia · antes esto era `closedAt: null` a secas y un
       // 409 si no. Con el corte de día automático eso perdía las ventas de
       // un terminal que estuvo offline mientras el server cerraba su turno:
@@ -580,7 +601,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
                 ? new Prisma.Decimal(effectiveCashAmount)
                 : null,
             printIntent: body.printIntent ?? true,
-            emailIntent: body.emailIntent ?? null,
+            emailIntent: emailIntent.email,
             giftReceiptIntentAt: body.giftReceiptIntent ? new Date() : null,
             discountAuthorizedBy,
             attendedBy: body.attendedBy?.trim() ? body.attendedBy.trim() : null,
@@ -702,7 +723,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           ticketId: ticket.id,
           registerId: cashier.rid,
           contactHoldedId: body.contactHoldedId ?? null,
-          manualEmailIntent: body.emailIntent ?? null,
+          manualEmailIntent: emailIntent.email,
           requestedByUserId: cashier.sub,
           logger: { warn: (msg, extra) => request.log.warn(extra ?? {}, msg) },
         });
@@ -748,6 +769,11 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       return reply.code(201).send({
         ticket: serializeTicket(ticket),
         syncStatus: ticket.status,
+        // Sole · el TPV necesita saber que el email se quedó fuera para
+        // decirlo en la pantalla de "Ticket emitido". `null` en el 99% de
+        // los cobros; el contrato lo lleva siempre para que el cliente no
+        // tenga que distinguir "no venía" de "no lo entiendo".
+        emailIntentRejected: emailIntent.rejected,
       });
     },
   );
@@ -840,6 +866,22 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           message: "El ticket no pertenece a tu caja.",
         });
       }
+      // Sole · misma regla que la venta rápida: el email se valida antes
+      // de escribirlo y antes de encolarlo, y no tumba el cobro de la
+      // mesa. Ver `email-intent.ts`.
+      const emailIntent = decideEmailIntent(body.emailIntent);
+      if (emailIntent.rejected) {
+        request.log.warn(
+          {
+            event: "ticket.email_intent_rejected",
+            ticketId,
+            tenantId: cashier.tid,
+            registerId: cashier.rid,
+          },
+          "emailIntent descartado por formato: el cobro sigue, el email no",
+        );
+      }
+
       if (draft.status !== "DRAFT") {
         // v1.0-mesas-frontend · Lote 2: si este mismo checkout ya pasó
         // (reintento de red con el mismo externalId), GET-back como en
@@ -1082,7 +1124,11 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
                   ? new Prisma.Decimal(effectiveCashAmount)
                   : draft.cashAmount,
               printIntent: body.printIntent ?? draft.printIntent,
-              emailIntent: body.emailIntent ?? draft.emailIntent,
+              // Si el body no trae email, el del DRAFT se queda como
+              // estaba (comportamiento de siempre). Si lo trae, manda el
+              // validado — y si no valía, se queda en null.
+              emailIntent:
+                body.emailIntent != null ? emailIntent.email : draft.emailIntent,
               giftReceiptIntentAt: body.giftReceiptIntent
                 ? new Date()
                 : draft.giftReceiptIntentAt,
@@ -1250,7 +1296,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           ticketId: updated.id,
           registerId: cashier.rid,
           contactHoldedId: body.contactHoldedId ?? draft.contactHoldedId ?? null,
-          manualEmailIntent: body.emailIntent ?? null,
+          manualEmailIntent: emailIntent.email,
           requestedByUserId: cashier.sub,
           logger: { warn: (msg, extra) => request.log.warn(extra ?? {}, msg) },
         });
@@ -1307,6 +1353,9 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       return reply.code(200).send({
         ticket: serializeTicket(updated),
         syncStatus: updated.status,
+        // Sole · igual que la venta rápida: si el email se quedó fuera,
+        // el TPV tiene que poder decirlo en la pantalla de después.
+        emailIntentRejected: emailIntent.rejected,
       });
     },
   );
@@ -1457,6 +1506,18 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       const { ticketId } = request.params as { ticketId: string };
       const { email } = request.body as { email: string };
       const prisma = getPrisma();
+      // Sole · aquí SÍ se rechaza. Al contrario que en el cobro, esta
+      // petición existe sólo para mandar un email: no hay una venta
+      // detrás a la que perjudicar, y aceptar un 202 sobre una dirección
+      // imposible es exactamente la mentira que cierra este bloque — el
+      // cajero se queda tranquilo y la clienta no recibe nada.
+      const toEmail = validEmailOrNull(email);
+      if (!toEmail) {
+        return reply.code(400).send({
+          error: "INVALID_EMAIL",
+          message: INVALID_EMAIL_MESSAGE,
+        });
+      }
       const ticket = await prisma.ticket.findFirst({
         where: { id: ticketId, tenantId: cashier.tid },
         select: { id: true, status: true, holdedDocumentId: true },
@@ -1470,7 +1531,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         data: {
           id: randomUUID(),
           ticketId: ticket.id,
-          toEmail: email,
+          toEmail,
           requestedByUserId: cashier.sub,
           status: "PENDING",
         },
@@ -1484,7 +1545,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           `enqueue ticket email falló: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
-      return reply.code(202).send({ jobId: job.id });
+      return reply.code(202).send({ jobId: job.id, toEmail });
     },
   );
 

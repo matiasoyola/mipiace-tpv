@@ -34,6 +34,10 @@ import {
 } from "lucide-react";
 
 import { applyPaymentsToTotal } from "@mipiacetpv/ticket-model";
+// Sole · la regla de "¿esto es un email?" es UNA y vive en el paquete
+// compartido. El subpath `/email` evita arrastrar `node:crypto` (que sí
+// importa el índice del paquete) al bundle del TPV.
+import { isValidEmail, normalizeEmail } from "@mipiacetpv/util-validation/email";
 
 import { ApiError, apiWithCashier } from "../api.js";
 import { AmountField } from "../components/AmountField.js";
@@ -74,6 +78,10 @@ interface TicketResponse {
     holdedDocNumber: string | null;
   };
   syncStatus: string;
+  // Sole · la API descarta el email cuando no es una dirección a la que
+  // se pueda escribir, pero NO tumba la venta. Viene poblado sólo en ese
+  // caso, y la pantalla de después lo dice en vez de callárselo.
+  emailIntentRejected?: { reason: string; value: string } | null;
 }
 
 export function CheckoutOverlay(props: {
@@ -162,6 +170,10 @@ export function CheckoutOverlay(props: {
   const [printIntent, setPrintIntent] = useState(true);
   const [emailIntent, setEmailIntent] = useState<string>(props.contact?.email ?? "");
   const [emailEnabled, setEmailEnabled] = useState(!!props.contact?.email);
+  // Sole · el aviso aparece al SALIR del campo, no con cada tecla: a la
+  // tercera letra de "ana@…" ningún email es válido todavía y un aviso
+  // rojo mientras se escribe enseña a ignorar los avisos.
+  const [emailTouched, setEmailTouched] = useState(false);
   const [giftReceipt, setGiftReceipt] = useState(false);
   // v1.12 · fila de pago que está tecleando el CashPad. `null` = pad
   // cerrado. Una sola instancia de pad por hoja, abajo del todo.
@@ -228,6 +240,15 @@ export function CheckoutOverlay(props: {
     [payments],
   );
   const change = cashAmount > 0 ? Math.max(0, paymentsSum - total) : 0;
+  // Sole · la MISMA regla que la API, importada del mismo sitio. Si
+  // alguna vez cambia el criterio, cambia en los dos lados a la vez: eso
+  // es lo que evita que el TPV mande algo que la API va a descartar.
+  const emailIntentTrimmed = normalizeEmail(emailIntent);
+  const emailIntentValid = isValidEmail(emailIntentTrimmed);
+  // Hay algo escrito y no es un email. Mientras el cajero teclea no se
+  // dice nada (`emailTouched`); al salir del campo, sí.
+  const emailIntentBad =
+    emailEnabled && emailIntentTrimmed.length > 0 && !emailIntentValid;
   // v1.3 Lote 1.D · "Importe exacto" apunta a la primera row CASH y le
   // mete `total − Σ(otras rows)` para que la suma cierre sin cambio.
   const firstCashIdx = payments.findIndex((p) => p.method === "CASH");
@@ -517,7 +538,11 @@ export function CheckoutOverlay(props: {
         notes: props.notes || undefined,
         cashAmount: cashAmount > 0 ? cashAmount : undefined,
         printIntent,
-        emailIntent: emailEnabled && emailIntent ? emailIntent : undefined,
+        // Sole · sólo sale hacia el servidor lo que es un email. La misma
+        // regla que aplica la API (`@mipiacetpv/util-validation`), para que
+        // el TPV no mande nunca algo que la API vaya a descartar.
+        emailIntent:
+          emailEnabled && emailIntentValid ? emailIntentTrimmed : undefined,
         giftReceiptIntent: giftReceipt,
         authorizationToken: overrideToken ?? authToken ?? undefined,
         attendedBy:
@@ -1005,27 +1030,57 @@ export function CheckoutOverlay(props: {
             </button>
             {moreOptions && (
               <>
-            <Checkbox
-              checked={emailEnabled}
-              onChange={setEmailEnabled}
-              label="Enviar por email"
-              right={
-                emailEnabled ? (
-                  <input
-                    value={emailIntent}
-                    onChange={(e) => setEmailIntent(e.target.value)}
-                    onFocus={scrollFocusIntoView}
-                    type="email"
-                    inputMode="email"
-                    autoCapitalize="off"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    placeholder="cliente@ejemplo.com"
-                    className="h-touch px-3 rounded-xl bg-mipiace-stone border border-transparent text-[12.5px] focus:bg-white focus:border-mipiace-coral/30 focus:ring-1 focus:ring-mipiace-coral/30 focus:outline-none"
-                  />
-                ) : null
-              }
-            />
+            {/* Sole · el campo valida con la MISMA regla que la API y
+                avisa al lado, pero no bloquea el cobro: si el email no
+                vale, la venta entra igual y se cobra sin enviarlo. El
+                dinero nunca depende de un campo opcional. */}
+            <div>
+              <Checkbox
+                checked={emailEnabled}
+                onChange={setEmailEnabled}
+                label="Enviar por email"
+                right={
+                  emailEnabled ? (
+                    <input
+                      value={emailIntent}
+                      onChange={(e) => setEmailIntent(e.target.value)}
+                      onFocus={scrollFocusIntoView}
+                      onBlur={() => setEmailTouched(true)}
+                      type="email"
+                      inputMode="email"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      placeholder="cliente@ejemplo.com"
+                      aria-invalid={emailIntentBad && emailTouched}
+                      aria-describedby={
+                        emailIntentBad && emailTouched
+                          ? "email-intent-aviso"
+                          : undefined
+                      }
+                      data-testid="email-intent-input"
+                      className={
+                        "h-touch px-3 rounded-xl border text-[12.5px] focus:bg-white focus:outline-none " +
+                        (emailIntentBad && emailTouched
+                          ? "bg-amber-50 border-amber-300 focus:border-amber-400 focus:ring-1 focus:ring-amber-400"
+                          : "bg-mipiace-stone border-transparent focus:border-mipiace-coral/30 focus:ring-1 focus:ring-mipiace-coral/30")
+                      }
+                    />
+                  ) : null
+                }
+              />
+              {emailIntentBad && emailTouched && (
+                <div
+                  id="email-intent-aviso"
+                  role="status"
+                  data-testid="email-intent-aviso"
+                  className="mt-1.5 px-3 text-[11.5px] text-amber-700 leading-snug"
+                >
+                  Ese email no es válido. Se cobrará igual, pero sin
+                  enviarlo.
+                </div>
+              )}
+            </div>
             <Checkbox
               checked={giftReceipt}
               onChange={setGiftReceipt}
