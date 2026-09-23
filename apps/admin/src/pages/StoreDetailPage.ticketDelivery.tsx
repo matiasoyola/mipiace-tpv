@@ -8,9 +8,19 @@
 //     variables `{tienda}`, `{numero}`, `{total}`, `{fecha}`.
 
 import { useEffect, useState } from "react";
+import { MailWarning } from "lucide-react";
 
 import { api, ApiError, readEffectiveAuth, type AdminRole } from "../api.js";
 import { FieldError, OutlineButton, PrimaryButton, SuccessBanner } from "../ui.js";
+
+interface EmailFailure {
+  id: string;
+  internalNumber: string;
+  total: number;
+  createdAt: string;
+  registerName: string;
+  email: { to: string | null; status: string | null; reason: string | null };
+}
 
 interface TicketDeliverySettings {
   emailAutoIfCustomerHasEmail: boolean;
@@ -167,7 +177,87 @@ export function TicketDeliverySection({
           )}
         </div>
       )}
+
+      <EmailFailures storeId={storeId} />
     </section>
+  );
+}
+
+// Sole (23-09-2026) · los tickets de esta tienda cuyo email no salió.
+//
+// Va DEBAJO de la configuración que lo gobierna y no en una pantalla
+// nueva: el propietario que acaba de mirar "¿mando el ticket por email?"
+// es el mismo que tiene que enterarse de que alguno no llegó.
+//
+// Esto es el RESUMEN. El sitio donde se arregla es el histórico del TPV:
+// allí está Ana, allí está el botón de corregir la dirección y reenviar,
+// y allí es donde se trabaja en la peluquería. Si esta lista está vacía
+// no se pinta nada — una sección que dice "todo bien" todos los días
+// acaba siendo una sección que nadie lee.
+function EmailFailures({ storeId }: { storeId: string }) {
+  const [items, setItems] = useState<EmailFailure[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api<{ items: EmailFailure[] }>(
+      `/admin/stores/${storeId}/email-failures`,
+    )
+      .then((res) => {
+        if (!cancelled) setItems(res.items);
+      })
+      .catch(() => {
+        // Sin conexión o sin permiso: la sección no aparece. No se
+        // inventa un "0 fallos" que podría ser mentira.
+        if (!cancelled) setItems(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [storeId]);
+
+  if (!items || items.length === 0) return null;
+
+  return (
+    <div
+      data-testid="email-failures"
+      className="mt-6 pt-5 border-t border-slate-200"
+    >
+      <h3 className="text-[15px] font-semibold text-mipiace-ink tracking-tight flex items-center gap-2">
+        <MailWarning className="w-4 h-4 text-amber-600" />
+        No se pudieron enviar ({items.length})
+      </h3>
+      <p className="text-[12.5px] text-slate-500 mt-1 mb-3">
+        Se corrigen desde el TPV: abre el ticket en el historial, escribe
+        el email bueno y vuelve a enviarlo.
+      </p>
+      <ul className="divide-y divide-slate-100">
+        {items.map((t) => (
+          <li
+            key={t.id}
+            className="py-2.5 flex items-baseline gap-3 text-[13px]"
+          >
+            <span className="tabular-nums font-medium text-mipiace-ink shrink-0">
+              #{t.internalNumber}
+            </span>
+            <span className="tabular-nums text-slate-500 shrink-0">
+              {t.total.toFixed(2).replace(".", ",")} €
+            </span>
+            <span className="text-slate-500 shrink-0">
+              {new Date(t.createdAt).toLocaleDateString("es-ES", {
+                day: "2-digit",
+                month: "short",
+              })}
+            </span>
+            <span className="flex-1 min-w-0 truncate text-slate-600">
+              {t.email.to ?? "—"}
+            </span>
+            <span className="text-amber-700 shrink-0 text-[12.5px]">
+              {t.email.reason ?? "No se pudo enviar"}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

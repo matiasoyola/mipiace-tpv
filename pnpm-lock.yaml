@@ -206,6 +206,9 @@ importers:
       '@mipiacetpv/ticket-pdf':
         specifier: workspace:*
         version: link:../../packages/ticket-pdf
+      '@mipiacetpv/util-validation':
+        specifier: workspace:*
+        version: link:../../packages/util-validation
       '@sentry/react':
         specifier: ^10.57.0
         version: 10.57.0(react@19.2.6)

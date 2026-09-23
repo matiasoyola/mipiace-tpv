@@ -7,6 +7,11 @@
 //   - defer: ticket DRAFT → kind:"deferred", sin enviar.
 //   - skip: job ya en DONE → kind:"skipped".
 //   - failure: render falla → throw (BullMQ reintenta).
+//
+// Sole (23-09-2026) añade las dos que faltaban, y son las del incidente:
+//   - una dirección imposible NO se reintenta: queda FAILED con motivo.
+//   - un fallo terminal deja el job en estado TERMINAL y el ticket
+//     marcado. Antes el job se quedaba en PENDING para siempre.
 
 import { randomBytes } from "node:crypto";
 
@@ -73,6 +78,12 @@ const fakePrisma: any = {
     }),
   },
   ticket: {
+    // Sole · `markFailed` estampa también `Ticket.emailFailedAt`, que es
+    // lo que leen el resumen del panel y los contadores del super-admin.
+    update: vi.fn(async ({ data }: any) => {
+      ticketUpdates.push(data);
+      return { id: TICKET_ID };
+    }),
     findFirst: vi.fn(async ({ where }) => {
       if (where.id === TICKET_ID || where.publicSlug === baseTicket.publicSlug) {
         return {
@@ -123,6 +134,7 @@ vi.mock("../src/email/sender.js", () => ({
 const { sendTicketEmail } = await import("../src/tickets/send-ticket-email.js");
 
 const jobs = new Map<string, FakeJob>();
+const ticketUpdates: Array<Record<string, unknown>> = [];
 
 beforeEach(() => {
   jobs.clear();
@@ -135,6 +147,8 @@ beforeEach(() => {
   });
   fakePrisma.ticketEmailJob.update.mockClear();
   fakePrisma.ticket.findFirst.mockClear();
+  fakePrisma.ticket.update.mockClear();
+  ticketUpdates.length = 0;
 });
 
 function seedJob(overrides: Partial<FakeJob> = {}) {
@@ -221,5 +235,47 @@ describe("sendTicketEmail (B-Print fase 1)", () => {
     });
     expect(res.kind).toBe("skipped");
     expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  // ──────────────────────────────────────────────────────────────────
+  // Sole · el 000257
+  // ──────────────────────────────────────────────────────────────────
+
+  it("el 000257 · a 'abc' no se le insiste: FAILED con motivo, sin enviar y sin throw", async () => {
+    seedJob({ toEmail: "abc" });
+
+    // Antes de este bloque esto reventaba con ZodError dentro del render
+    // y BullMQ lo reintentaba tres veces con backoff de 60 s: cuatro
+    // minutos de cola para llegar al mismo sitio.
+    const res = await sendTicketEmail({
+      emailJobId: JOB_ID,
+      prisma: fakePrisma,
+      logger: { info: () => undefined, warn: () => undefined, error: () => undefined },
+    });
+
+    expect(res).toEqual({ kind: "failed", reason: "invalid_email" });
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(jobs.get(JOB_ID)!.status).toBe("FAILED");
+    expect(jobs.get(JOB_ID)!.lastError).toMatchObject({
+      reason: "invalid_email",
+    });
+    // Ni siquiera gasta un intento: no hay nada que intentar.
+    expect(jobs.get(JOB_ID)!.attempts).toBe(0);
+  });
+
+  it("un fallo terminal deja LAS DOS marcas: el job FAILED y el ticket marcado", async () => {
+    seedJob({ toEmail: "abc" });
+    await sendTicketEmail({
+      emailJobId: JOB_ID,
+      prisma: fakePrisma,
+      logger: { info: () => undefined, warn: () => undefined, error: () => undefined },
+    });
+
+    // La del job la lee el histórico del TPV; la del ticket, el resumen
+    // del panel y los contadores del super-admin. Marcar sólo una
+    // dejaba la mitad del sistema ciega — que es lo que pasaba antes.
+    expect(jobs.get(JOB_ID)!.status).toBe("FAILED");
+    expect(ticketUpdates).toHaveLength(1);
+    expect(ticketUpdates[0]!.emailFailedAt).toBeInstanceOf(Date);
   });
 });

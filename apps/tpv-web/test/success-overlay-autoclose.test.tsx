@@ -1,6 +1,13 @@
 // v1.9.2-mesas-concurrencia · Frente 3.1: el modal "Ticket emitido" de
 // venta rápida se autocierra a los 4 s (el camarero no debe pensar; las
 // acciones QR/PDF/email siguen en Tickets). Test aislado con fake timers.
+//
+// Sole (23-09-2026) · y el mismo fichero fija lo contrario para la
+// peluquería: con `businessType === "SERVICES"` esta pantalla NO se
+// cierra sola, porque allí ES la entrega (Ana manda el email o enseña
+// el QR a la clienta). Las dos mitades juntas a propósito: el riesgo de
+// este cambio no es que SERVICES siga cerrándose, es que hostelería
+// deje de hacerlo.
 
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -19,8 +26,11 @@ vi.mock("../src/api.js", async () => {
     }),
   };
 });
+const vertical = vi.hoisted(() => ({
+  value: "HOSPITALITY" as "HOSPITALITY" | "RETAIL" | "SERVICES",
+}));
 vi.mock("../src/lib/catalog.js", () => ({
-  getCachedBusinessType: () => "HOSPITALITY" as const,
+  getCachedBusinessType: () => vertical.value,
   getCachedCrmEnabled: () => false,
   getCachedAgendaEnabled: () => false,
   // catalogo-local (addendum 3) · default TRUE, como en la caché real:
@@ -52,6 +62,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  vertical.value = "HOSPITALITY";
   vi.useFakeTimers();
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -86,6 +97,107 @@ describe("SuccessOverlay · autocierre venta rápida", () => {
     // A los 4 s se cierra solo.
     await act(async () => {
       vi.advanceTimersByTime(1500);
+    });
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it("RETAIL también: la tienda se queda como estaba", async () => {
+    vertical.value = "RETAIL";
+    const onDone = vi.fn();
+    root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <SuccessOverlay
+          ticketId="t-2"
+          internalNumber="000011"
+          onDone={onDone}
+        />,
+      );
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(4500);
+    });
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it("con vuelta que devolver, los 8 s de v1.15 siguen siendo 8 s", async () => {
+    const onDone = vi.fn();
+    root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <SuccessOverlay
+          ticketId="t-3"
+          internalNumber="000012"
+          cash={{ total: 6.93, received: 10, change: 3.07 }}
+          onDone={onDone}
+        />,
+      );
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(4500);
+    });
+    expect(onDone).not.toHaveBeenCalled();
+    await act(async () => {
+      vi.advanceTimersByTime(4000);
+    });
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("SuccessOverlay · la peluquería de Sole (SERVICES)", () => {
+  it("NO se cierra sola: esta pantalla es la entrega, no un trámite", async () => {
+    vertical.value = "SERVICES";
+    const onDone = vi.fn();
+    root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <SuccessOverlay
+          ticketId="t-sole"
+          internalNumber="000257"
+          onDone={onDone}
+        />,
+      );
+    });
+
+    // Cuatro segundos: en un bar ya se habría ido.
+    await act(async () => {
+      vi.advanceTimersByTime(4500);
+    });
+    expect(onDone).not.toHaveBeenCalled();
+
+    // Ocho: tampoco, ni siquiera por el camino de la vuelta.
+    await act(async () => {
+      vi.advanceTimersByTime(8000);
+    });
+    expect(onDone).not.toHaveBeenCalled();
+
+    // Dos minutos enseñándole el QR a la clienta y la pantalla sigue ahí.
+    await act(async () => {
+      vi.advanceTimersByTime(120_000);
+    });
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
+  it("y se cierra con «Nuevo servicio», que es quien manda allí", async () => {
+    vertical.value = "SERVICES";
+    const onDone = vi.fn();
+    root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <SuccessOverlay
+          ticketId="t-sole"
+          internalNumber="000257"
+          onDone={onDone}
+        />,
+      );
+    });
+
+    const boton = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Nuevo servicio",
+    );
+    expect(boton).toBeDefined();
+    await act(async () => {
+      boton!.click();
     });
     expect(onDone).toHaveBeenCalledTimes(1);
   });

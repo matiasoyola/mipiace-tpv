@@ -7,7 +7,14 @@
 //     browser (con fechas ISO; el cliente las re-hidrata).
 //   - `ticketDelivery`: la config de la tienda (botones, captions).
 //   - `publicSlug` para el QR / link de descarga.
-//   - `emailedTo`: email al que se envió automáticamente (si lo hubo).
+//   - `email`: el estado REAL del envío (`PENDING` / `SENT` / `FAILED`),
+//     derivado en `email-status.ts`. Es lo que pinta el badge desde el
+//     bloque de Sole: al salir del cobro el envío está encolado, no
+//     enviado, y la pantalla dice "Se enviará a …".
+//   - `emailedTo`: el destinatario del último job. SE MANTIENE por
+//     compatibilidad — el TPV lleva su propio bundle desde A4 y un AP12
+//     sin APK nueva sigue leyendo este campo. Los bundles nuevos usan
+//     `email`, que es el que no miente.
 
 import type { FastifyInstance } from "fastify";
 
@@ -15,6 +22,10 @@ import { DEFAULT_TICKET_DELIVERY } from "../admin/ticket-delivery.js";
 import { getPrisma } from "../context.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
 import { loadTicketDocument } from "./build-document.js";
+import {
+  deriveTicketEmailState,
+  EMAIL_JOB_SELECT,
+} from "./email-status.js";
 import { ensureCajaEnabled } from "../lib/caja-gate.js";
 
 export async function registerTicketDigitalRoute(
@@ -45,10 +56,12 @@ export async function registerTicketDigitalRoute(
           register: {
             select: { store: { select: { ticketDelivery: true } } },
           },
+          emailIntent: true,
+          emailFailedAt: true,
           emailJobs: {
             orderBy: { createdAt: "desc" },
             take: 1,
-            select: { toEmail: true },
+            select: EMAIL_JOB_SELECT,
           },
         },
       });
@@ -69,6 +82,11 @@ export async function registerTicketDigitalRoute(
       return reply.code(200).send({
         publicSlug: ticket.publicSlug,
         emailedTo: ticket.emailJobs[0]?.toEmail ?? null,
+        email: deriveTicketEmailState({
+          jobs: ticket.emailJobs,
+          emailIntent: ticket.emailIntent,
+          emailFailedAt: ticket.emailFailedAt,
+        }),
         ticketDelivery: { ...DEFAULT_TICKET_DELIVERY, ...delivery },
         document: {
           ...doc,

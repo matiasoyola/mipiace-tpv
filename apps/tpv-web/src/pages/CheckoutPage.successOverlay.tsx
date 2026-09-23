@@ -18,6 +18,7 @@ import {
   Eye,
   Loader2,
   Mail,
+  MailWarning,
   Printer,
   QrCode,
   X,
@@ -57,9 +58,19 @@ interface TicketDelivery {
   qrCaption: string;
 }
 
+export interface TicketEmailState {
+  to: string | null;
+  status: "SENT" | "PENDING" | "FAILED" | "SKIPPED_TEST" | null;
+  reason: string | null;
+  at: string | null;
+}
+
 interface DigitalPayload {
   publicSlug: string;
   emailedTo: string | null;
+  // Sole · el estado REAL del envío. `emailedTo` sigue en el contrato
+  // por compatibilidad con bundles viejos, pero lo que se pinta es esto.
+  email?: TicketEmailState | null;
   ticketDelivery: TicketDelivery;
   document: Omit<TicketDocument, "ticket"> & {
     ticket: Omit<TicketDocument["ticket"], "issuedAt"> & { issuedAt: string };
@@ -78,12 +89,17 @@ export function SuccessOverlay({
   ticketId,
   internalNumber,
   cash,
+  emailIntentRejected,
   onDone,
   doneLabel,
 }: {
   ticketId: string;
   internalNumber: string;
   cash?: CashSummary;
+  // Sole · la API descartó el email del cobro por formato. Esta pantalla
+  // lo dice en vez de callárselo: es el único momento en que Ana tiene
+  // a la clienta delante y le puede pedir la dirección buena.
+  emailIntentRejected?: { reason: string; value: string } | null;
   onDone: () => void;
   // B-reservas-5 F8 · qué hace el botón de salir. En venta rápida abre
   // otra venta; cobrando una cita devuelve a la agenda, y llamarlo
@@ -111,6 +127,44 @@ export function SuccessOverlay({
   // v1.15-la-vuelta-existe §4 · sólo hay algo que enseñar si hay algo
   // que devolver. Medio céntimo de umbral, como el resto de la app.
   const hasChange = !!cash && cash.change > 0.005;
+
+  // Sole · qué dice el badge del email. Tres estados y ninguno afirma
+  // más de lo que se sabe en este segundo:
+  //   PENDING → "Se enviará a …"  (es lo normal al salir del cobro)
+  //   SENT    → "Enviado a …"     (sólo si el worker ya confirmó)
+  //   FAILED  → "No se pudo enviar a …" + el motivo
+  // `emailedTo` sin estado es el contrato viejo: se trata como encolado,
+  // que es lo más que se puede afirmar de él.
+  const emailState = digital?.email ?? null;
+  const emailTo = emailState?.to ?? digital?.emailedTo ?? null;
+  const emailBadge = !emailTo
+    ? null
+    : emailState?.status === "SENT"
+      ? {
+          testId: "email-sent-badge",
+          tone: "bg-emerald-50 text-emerald-800",
+          icon: <Check className="w-4 h-4 mt-0.5 shrink-0" />,
+          text: "Enviado por email a",
+          to: emailTo,
+          suffix: null as string | null,
+        }
+      : emailState?.status === "FAILED"
+        ? {
+            testId: "email-failed-badge",
+            tone: "bg-amber-50 text-amber-800",
+            icon: <MailWarning className="w-4 h-4 mt-0.5 shrink-0" />,
+            text: "No se pudo enviar a",
+            to: emailTo,
+            suffix: emailState.reason ? ` · ${emailState.reason}` : null,
+          }
+        : {
+            testId: "email-queued-badge",
+            tone: "bg-mipiace-stone text-mipiace-ink",
+            icon: <Mail className="w-4 h-4 mt-0.5 shrink-0" />,
+            text: "Se enviará a",
+            to: emailTo,
+            suffix: null as string | null,
+          };
 
   // Polling Holded para pintar el número fiscal cuando llegue.
   useEffect(() => {
@@ -165,11 +219,24 @@ export function SuccessOverlay({
   // número ya se había ido de la pantalla — que es exactamente lo que
   // denuncia C1. Con cambio el autocierre se estira a 8 s; sin cambio se
   // queda en los 4 s de v1.9.2 (el camarero de bar no debe pensar).
+  // Sole (23-09-2026) · en la peluquería esta pantalla NO se cierra sola.
+  //
+  // El autocierre de v1.9.2 está pensado para un bar: el ticket sale por
+  // la impresora, el camarero ya está con la siguiente mesa y la
+  // pantalla estorba. En una peluquería esta pantalla ES la entrega —
+  // Ana manda el email o le enseña el QR a la clienta mientras le cobra,
+  // y para eso cuatro segundos no son nada. Se cierra con "Nuevo
+  // servicio", que ya estaba ahí abajo.
+  //
+  // Hostelería y tiendas se quedan EXACTAMENTE igual: 4 s, 8 s si hay
+  // vuelta que contar, y las mismas pausas de siempre.
+  const autoCloses = businessType !== "SERVICES";
   useEffect(() => {
+    if (!autoCloses) return;
     if (autoClosePaused) return;
     const t = setTimeout(() => onDone(), hasChange ? 8_000 : 4_000);
     return () => clearTimeout(t);
-  }, [autoClosePaused, hasChange, onDone]);
+  }, [autoCloses, autoClosePaused, hasChange, onDone]);
 
   // Carga el payload digital — falla en silencio si la PWA está
   // offline; el QR queda deshabilitado, descargar/ver no se ofrecen
@@ -400,17 +467,47 @@ export function SuccessOverlay({
           </div>
         )}
 
-        {digital?.emailedTo && (
+        {/* Sole (23-09-2026) · aquí ponía "Enviado por email a …" en verde
+            en cuanto EXISTÍA un job. Existir un job no es haberse
+            enviado: este badge se pinta ~200 ms después del cobro y el
+            worker no ha corrido todavía. El 17-09 Ana leyó "Enviado"
+            sobre un envío que falló tres veces esa tarde.
+
+            El TPV no miente: al salir del cobro el envío está ENCOLADO,
+            así que lo que se dice es "Se enviará a …". El estado real
+            (enviado / pendiente / no se pudo) se ve en el histórico,
+            que es donde ya ha pasado el tiempo suficiente para saberlo. */}
+        {emailIntentRejected ? (
           <div
-            data-testid="email-sent-badge"
-            className="mt-4 flex items-start gap-2 bg-emerald-50 text-emerald-800 rounded-xl px-4 py-3 text-left"
+            data-testid="email-rejected-badge"
+            className="mt-4 flex items-start gap-2 bg-amber-50 text-amber-800 rounded-xl px-4 py-3 text-left"
           >
-            <Mail className="w-4 h-4 mt-0.5 shrink-0" />
+            <MailWarning className="w-4 h-4 mt-0.5 shrink-0" />
             <div className="text-[12.5px]">
-              Enviado por email a{" "}
-              <strong className="font-medium">{digital.emailedTo}</strong>
+              No se enviará por email: «
+              <strong className="font-medium break-all">
+                {emailIntentRejected.value}
+              </strong>
+              » no es una dirección válida. Puedes enviarlo desde{" "}
+              {vocab("historyTitle", businessType)} con el email correcto.
             </div>
           </div>
+        ) : (
+          emailBadge && (
+            <div
+              data-testid={emailBadge.testId}
+              className={`mt-4 flex items-start gap-2 rounded-xl px-4 py-3 text-left ${emailBadge.tone}`}
+            >
+              {emailBadge.icon}
+              <div className="text-[12.5px]">
+                {emailBadge.text}{" "}
+                <strong className="font-medium break-all">
+                  {emailBadge.to}
+                </strong>
+                {emailBadge.suffix}
+              </div>
+            </div>
+          )
         )}
 
         {(printerInfo || printState.phase === "no-printer") &&

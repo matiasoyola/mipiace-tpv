@@ -12,6 +12,7 @@
 //     usamos sólo internalNumber.
 
 import { type PrismaClient } from "@mipiacetpv/db";
+import { isValidEmail } from "@mipiacetpv/util-validation";
 import { renderTicketPdf } from "@mipiacetpv/ticket-pdf";
 import QRCode from "qrcode";
 
@@ -81,6 +82,27 @@ export async function sendTicketEmail(
       data: { status: "SKIPPED_TEST", sentAt: new Date() },
     });
     return { kind: "skipped", reason: "test_cashier" };
+  }
+
+  // Sole (23-09-2026) · a una dirección imposible no se le insiste.
+  //
+  // Antes de este bloque, un `to_email` como "abc" hacía `throw` dentro
+  // del render y BullMQ reintentaba tres veces con backoff exponencial
+  // de 60 s: cuatro minutos de cola para llegar al mismo sitio, y el
+  // job quedándose en PENDING para siempre. Desde el Frente 1 nadie
+  // puede crear un job así, pero los que están en la cola de producción
+  // desde el 17-09 sí lo son, y un reintento no va a arreglar una
+  // dirección que no existe.
+  //
+  // Estado terminal, motivo escrito, y NADA de `throw`: la cola no lo
+  // vuelve a tocar y el histórico del TPV puede decir por qué.
+  if (!isValidEmail(job.toEmail)) {
+    log.warn("destinatario inválido, no se reintenta", {
+      emailJobId,
+      ticketId: job.ticketId,
+    });
+    await markFailed(prisma, emailJobId, "invalid_email");
+    return { kind: "failed", reason: "invalid_email" };
   }
 
   // Ticket en DRAFT → no hay nada que mandar todavía (aún no cobrado).
@@ -172,15 +194,40 @@ export async function sendTicketEmail(
   return { kind: "sent" };
 }
 
-async function markFailed(
+// Sole · un fallo terminal deja DOS marcas, y hacen falta las dos:
+//
+//   - `ticket_email_jobs.status = FAILED` con el motivo, que es lo que
+//     lee el histórico del TPV para decir "No se pudo enviar" y por qué.
+//   - `tickets.email_failed_at`, que es lo que ya miran el resumen del
+//     panel y los contadores del super-admin (`superadmin/hub.ts`).
+//
+// Marcar sólo una dejaba la mitad del sistema ciega. `email_failed_at`
+// está en la lista de columnas que el guardián del sello deja escribir
+// sobre una venta sellada (S1 · `sello-de-la-venta.e2e.ts`), así que
+// esto no viola nada: un fallo de email no es un cambio económico.
+export async function markFailed(
   prisma: PrismaClient,
   emailJobId: string,
   reason: string,
+  extra?: Record<string, unknown>,
 ): Promise<void> {
-  await prisma.ticketEmailJob.update({
+  const job = await prisma.ticketEmailJob.update({
     where: { id: emailJobId },
-    data: { status: "FAILED", lastError: { reason } as object },
+    data: {
+      status: "FAILED",
+      lastError: { reason, ...(extra ?? {}) } as object,
+    },
+    select: { ticketId: true },
   });
+  await prisma.ticket
+    .update({
+      where: { id: job.ticketId },
+      data: { emailFailedAt: new Date() },
+    })
+    .catch(() => {
+      // El ticket puede haber desaparecido (tenant borrado en pruebas).
+      // El job ya quedó marcado, que es lo que no se puede perder.
+    });
 }
 
 function consoleLogger() {
