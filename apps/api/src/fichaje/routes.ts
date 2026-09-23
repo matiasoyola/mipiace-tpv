@@ -32,6 +32,7 @@ import {
 } from "./auth.js";
 import {
   recordTimeEntryCorrection,
+  correctionKind,
   listTimeEntryCorrections,
   TimeCorrectionRejectedError,
   CORRECTION_REASONS,
@@ -678,6 +679,7 @@ export async function registerFichajeRoutes(app: FastifyInstance): Promise<void>
       return reply.code(200).send({
         corrections: corrections.map((c) => ({
           ...c,
+          kind: correctionKind(c),
           createdAt: c.createdAt.toISOString(),
         })),
       });

@@ -359,8 +359,13 @@ BEGIN
     INSERT INTO time_entry_corrections
         (tenant_id, time_entry_id, field, old_value, new_value,
          reason_code, reason_text, author_kind, author, employee_id, user_id, txid)
+    -- El valor nuevo se renderiza EXACTAMENTE como el anterior
+    -- (`to_jsonb(...)->>`), no con `::text`. Si no, la misma hora quedaría
+    -- escrita de dos formas distintas en la misma fila —
+    -- `2026-09-22T06:00:00+00:00` contra `2026-09-22 06:00:00+00`— y el
+    -- PDF que firma el trabajador pintaría un cambio donde no lo hay.
     VALUES
-        (v_tenant_id, p_entry_id, p_field, v_old, p_new_value::text,
+        (v_tenant_id, p_entry_id, p_field, v_old, to_jsonb(p_new_value) #>> '{}',
          p_reason_code::"TimeEntryCorrectionReason",
          nullif(btrim(coalesce(p_reason_text, '')), ''),
          p_author_kind::"TimeEntryCorrectionAuthor",

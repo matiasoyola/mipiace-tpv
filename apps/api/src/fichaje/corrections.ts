@@ -112,6 +112,29 @@ export interface TimeCorrectionRow {
   createdAt: Date;
 }
 
+/**
+ * Qué clase de hecho cuenta una fila de la traza.
+ *
+ * `ALTA` cuando el valor anterior y el nuevo coinciden. No es un caso raro
+ * ni un bug: es el alta manual desde el panel, que pasa por la MISMA
+ * función y el MISMO motivo obligatorio que una corrección (lo pide el
+ * bloque, y con razón: para quien lee el registro, "esta jornada la metió
+ * la empresa porque X" y "esta hora la cambió la empresa porque Y" son la
+ * misma clase de hecho). La fila existe antes de que se escriba la traza,
+ * así que el valor anterior es el propio valor: lo que cambia no es la
+ * hora, es que la jornada aparece.
+ *
+ * Se DERIVA en vez de guardarse en una columna, por lo mismo que la marca
+ * de "enviado sin conexión": una columna puede desincronizarse de los dos
+ * valores que la justifican.
+ */
+export function correctionKind(row: {
+  oldValue: string | null;
+  newValue: string | null;
+}): "ALTA" | "CAMBIO" {
+  return row.oldValue === row.newValue ? "ALTA" : "CAMBIO";
+}
+
 /** Las correcciones de un fichaje, la más antigua primero: se lee como
  *  una historia, no como un log. Sin esto la tabla no sirve para lo único
  *  que existe, que es que alguien la mire. */
