@@ -42,11 +42,28 @@ export const TicketDocumentSchema = z.object({
     attendedBy: z.string().min(1).max(60).optional(),
     isReprint: z.boolean().optional(),
   }),
+  // Sole (23-09-2026) · `email` era `z.string().email()` y un email mal
+  // escrito invalidaba el DOCUMENTO ENTERO: el ticket 000257 de
+  // Peluquería Sole, cobrado con "abc" en el campo de email, devolvía
+  // 400 en su PDF público (QR y "Descargar") y reventaba la vista del
+  // TPV — `renderTicketPdf` valida antes de pintar y la ZodError sube
+  // hasta el manejador global. El cliente que escanea el QR no manda
+  // ningún email; lo que rompía el documento era una columna escrita
+  // seis días antes.
+  //
+  // El ticket no tiene la culpa de cómo se escribió el email. Mismo
+  // criterio que el aflojado de la cabecera fiscal de arriba: el
+  // documento existe y se entrega aunque un campo accesorio venga
+  // sucio. Quién puede escribir ahí un email válido se decide ANTES
+  // (validación del cobro y del reenvío, `@mipiacetpv/util-validation`)
+  // y QUÉ se pinta se decide AL LEER (`build-document.ts` descarta el
+  // que no vale, así que un ticket viejo se arregla solo sin tocar sus
+  // datos).
   customer: z
     .object({
       name: z.string().optional(),
       taxId: z.string().optional(),
-      email: z.string().email().optional(),
+      email: z.string().optional(),
     })
     .optional(),
   lines: z.array(TicketLineSchema).min(1),

@@ -10,6 +10,7 @@ import {
   type TicketDocument,
 } from "@mipiacetpv/ticket-model";
 import { type PrismaClient } from "@mipiacetpv/db";
+import { isValidEmail } from "@mipiacetpv/util-validation";
 
 export interface LoadTicketDocumentOptions {
   prisma: PrismaClient;
@@ -70,6 +71,23 @@ export async function loadTicketDocument(
   // (sin contacto vinculado). Lo usamos como fallback.
   if (!customerEmail && ticket.emailIntent) {
     customerEmail = ticket.emailIntent;
+  }
+
+  // Sole (23-09-2026) · AQUÍ se arregla el 000257 y cualquier ticket
+  // anterior igual, SIN tocar sus datos: al leer, no al escribir.
+  //
+  // `email_intent` de un ticket viejo puede ser cualquier cosa — "abc",
+  // un teléfono, un nombre. Lo mismo vale para el email cacheado de un
+  // contacto importado. Desde este bloque nadie puede escribir ahí algo
+  // que no sea un email (`email-intent.ts` y la validación del reenvío),
+  // pero los tickets emitidos antes ya están escritos y son documentos
+  // fiscales: no se reescriben ni se migran. Se leen bien.
+  //
+  // Lo que NO hace esto: inventarse un email. Si lo que hay no sirve,
+  // el documento sale sin la línea de email — el resto de la sección
+  // Cliente (nombre, NIF) se queda, y el ticket se entrega.
+  if (customerEmail && !isValidEmail(customerEmail)) {
+    customerEmail = undefined;
   }
 
   const input: BuildTicketDocumentInput = {

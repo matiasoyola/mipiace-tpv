@@ -60,6 +60,37 @@ function baseInput(): BuildTicketDocumentInput {
   };
 }
 
+describe("el email no invalida el documento (Sole · 000257)", () => {
+  it("un email basura NO tumba el documento entero", () => {
+    // El caso literal del 17-09-2026: `email_intent = "abc"`. Antes de
+    // este bloque `assertTicketDocument` lanzaba ZodError · customer.
+    // email · Invalid email, y esa excepción subía hasta el manejador
+    // global de la API convirtiendo el PDF público del ticket en un 400.
+    // El cliente que escanea el QR no manda ningún email: lo que rompía
+    // el documento era una columna escrita seis días antes.
+    const input = baseInput();
+    input.customer = { name: "Ana", email: "abc", taxId: undefined };
+    const doc = buildTicketDocument(input);
+    expect(() => assertTicketDocument(doc)).not.toThrow();
+  });
+
+  it("y sin email tampoco, que es como sale el 000257 ya arreglado", () => {
+    const input = baseInput();
+    input.customer = { name: "Ana", email: undefined, taxId: undefined };
+    const doc = buildTicketDocument(input);
+    expect(() => assertTicketDocument(doc)).not.toThrow();
+    expect(doc.customer?.email).toBeUndefined();
+  });
+
+  it("un email bueno sigue llegando al documento", () => {
+    const input = baseInput();
+    input.customer = { name: "Ana", email: "ana@ejemplo.com", taxId: undefined };
+    const doc = buildTicketDocument(input);
+    expect(() => assertTicketDocument(doc)).not.toThrow();
+    expect(doc.customer?.email).toBe("ana@ejemplo.com");
+  });
+});
+
 describe("buildTicketDocument", () => {
   it("monta cabecera fiscal y store", () => {
     const doc = buildTicketDocument(baseInput());

@@ -303,4 +303,124 @@ describe.skipIf(!e2eEnabled)("e2e · Sole · el ticket por email", () => {
     expect(jobs[0]!.status).toBe("PENDING");
     expect(encolados).toEqual([jobs[0]!.id]);
   });
+
+  // ────────────────────────────────────────────────────────────────────
+  // FRENTE 2 · un email malo no rompe el documento
+  // ────────────────────────────────────────────────────────────────────
+
+  /**
+   * El 000257 tal y como está HOY en la base de producción: cobrado y
+   * sellado, con "abc" en `email_intent`. Se escribe por SQL directo
+   * porque desde el Frente 1 la API ya no deja crearlo — y ése es
+   * justamente el punto: los tickets de antes siguen ahí y no se migran.
+   */
+  async function ticketComoEl000257(): Promise<{
+    id: string;
+    publicSlug: string;
+  }> {
+    const venta = await cobrar({ base: BASE_000257 });
+    await prisma.$executeRawUnsafe(
+      `UPDATE tickets SET email_intent = 'abc' WHERE id = '${venta.id}'`,
+    );
+    const t = await prisma.ticket.findUniqueOrThrow({
+      where: { id: venta.id },
+      select: { publicSlug: true, emailIntent: true },
+    });
+    expect(t.emailIntent).toBe("abc");
+    return { id: venta.id, publicSlug: t.publicSlug };
+  }
+
+  it("F2 · CANÓNICO · el PDF público del 000257 sale con 200, no con 400", async () => {
+    const t = await ticketComoEl000257();
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/tickets/${t.publicSlug}/pdf`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toBe("application/pdf");
+    // Y es un PDF de verdad, no un cuerpo vacío con la cabecera puesta.
+    expect(res.rawPayload.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+    expect(res.rawPayload.length).toBeGreaterThan(1000);
+  });
+
+  it("F2 · y su vista en el TPV también · el documento sale sin el email basura", async () => {
+    const t = await ticketComoEl000257();
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/tickets/${t.id}/digital`,
+      headers: auth(),
+    });
+    expect(res.statusCode).toBe(200);
+
+    // El documento que el TPV va a renderizar en el navegador con
+    // `renderTicketPdf` (mismo `assertTicketDocument` que el servidor):
+    // si "abc" siguiera ahí, la vista y "Descargar PDF" petarían en el
+    // AP12 igual que petaba el QR.
+    const doc = res.json().document;
+    expect(doc.customer?.email).toBeUndefined();
+
+    // Y la columna NO se ha tocado: el arreglo es al leer, no al
+    // escribir. Un ticket emitido no se reescribe.
+    const guardado = await prisma.ticket.findUniqueOrThrow({
+      where: { id: t.id },
+      select: { emailIntent: true },
+    });
+    expect(guardado.emailIntent).toBe("abc");
+  });
+
+  it("F2 · un ticket con email bueno sigue enseñándolo en el documento", async () => {
+    const venta = await cobrar({
+      base: BASE_000257,
+      emailIntent: "ana@ejemplo.com",
+    });
+    const res = await app.inject({
+      method: "GET",
+      url: `/tickets/${venta.id}/digital`,
+      headers: auth(),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().document.customer?.email).toBe("ana@ejemplo.com");
+  });
+
+  it("F2 · al worker no se le insiste con una dirección imposible", async () => {
+    // Un job de los que quedaron encolados en producción el 17-09: se
+    // crea por SQL porque la API ya no lo permite.
+    const t = await ticketComoEl000257();
+    const job = await prisma.ticketEmailJob.create({
+      data: {
+        id: randomUUID(),
+        ticketId: t.id,
+        toEmail: "abc",
+        requestedByUserId: cashierId,
+        status: "PENDING",
+      },
+      select: { id: true },
+    });
+
+    enviados.length = 0;
+    // No lanza: antes reventaba con ZodError para que BullMQ reintentara
+    // tres veces contra una dirección que nunca iba a existir.
+    const res = await sendTicketEmail({ emailJobId: job.id, prisma });
+    expect(res).toEqual({ kind: "failed", reason: "invalid_email" });
+    expect(enviados).toHaveLength(0);
+
+    // Y queda en estado TERMINAL, con el motivo escrito y las dos
+    // marcas puestas — la del job, que lee el TPV, y la del ticket, que
+    // leen el panel y los contadores del super-admin.
+    const after = await prisma.ticketEmailJob.findUniqueOrThrow({
+      where: { id: job.id },
+      select: { status: true, lastError: true },
+    });
+    expect(after.status).toBe("FAILED");
+    expect(after.lastError).toMatchObject({ reason: "invalid_email" });
+
+    const ticket = await prisma.ticket.findUniqueOrThrow({
+      where: { id: t.id },
+      select: { emailFailedAt: true },
+    });
+    expect(ticket.emailFailedAt).not.toBeNull();
+  });
 });
