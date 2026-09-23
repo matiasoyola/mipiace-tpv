@@ -23,6 +23,11 @@ import { registerContactImportRoutes } from "./contacts/import.js";
 import { registerCrmRoutes } from "./crm/routes.js";
 import { getPrisma, getRedis, shutdown } from "./context.js";
 import { registerDeviceRoutes } from "./devices/routes.js";
+// F1 (ADR-018) · el control horario. La API del empleado va versionada
+// desde el primer día (`/fichaje/v1`): es la que consumirá la app
+// nativa de la fase 2.
+import { registerFichajeRoutes } from "./fichaje/routes.js";
+import { registerFichajeAdminRoutes } from "./fichaje/admin-routes.js";
 import { registerReleasesRoutes } from "./releases/routes.js";
 import { loadEnv } from "./env.js";
 import { getAppVersion, SERVER_STARTED_AT } from "./version.js";
@@ -173,6 +178,8 @@ async function main() {
   await registerAgendaRoutes(app);
   await registerAgendaHoursRoutes(app);
   await registerDeviceRoutes(app);
+  await registerFichajeRoutes(app);
+  await registerFichajeAdminRoutes(app);
   // A3-distribución: /super-admin/releases* y el /apk público.
   await registerReleasesRoutes(app);
   await registerCashiersRoutes(app);

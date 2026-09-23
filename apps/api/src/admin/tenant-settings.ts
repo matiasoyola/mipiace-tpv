@@ -49,6 +49,11 @@ export async function registerAdminTenantSettingsRoutes(
           // caja es una decisión comercial y sólo la mueve el
           // super-admin. El panel la lee para esconder lo que no aplica.
           cajaEnabled: true,
+          // F1 (ADR-018) · exactamente lo mismo que `cajaEnabled`: se
+          // DEVUELVE para que el panel esconda la sección "Control
+          // horario" y `<FichajeGate>` pueda explicar por qué no está,
+          // pero NO se acepta en el POST. Encenderlo es vender un módulo.
+          fichajeEnabled: true,
         },
       });
       return {
@@ -67,6 +72,8 @@ export async function registerAdminTenantSettingsRoutes(
           agendaEnabled: tenant.agendaEnabled,
           // H1 · sólo lectura (ver el select de arriba).
           cajaEnabled: tenant.cajaEnabled,
+          // F1 · sólo lectura, por lo mismo.
+          fichajeEnabled: tenant.fichajeEnabled,
         },
       };
     },
@@ -113,6 +120,10 @@ export async function registerAdminTenantSettingsRoutes(
             // super-admin porque es una decisión comercial, no un ajuste
             // del negocio. `additionalProperties: false` hace que un
             // intento de mandarla devuelva 400, que es lo que queremos.
+            //
+            // F1 (ADR-018) · y `fichajeEnabled` TAMPOCO está aquí, por la
+            // misma razón y con la misma consecuencia: un propietario que
+            // intente encenderse el control horario recibe un 400.
           },
         },
       },

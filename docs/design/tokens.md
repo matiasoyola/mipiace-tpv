@@ -140,6 +140,22 @@ mientras que lo que se toca una vez (tarjetas de producto y de mesa)
 estaba de sobra a 22-26 mm. El mínimo razonable con dedo de camarero y
 prisa es 9-10 mm.
 
+**Fuera de la escala, con nombre propio** (F1, 2026-09-23):
+
+| Token | Valor | ≈ mm | Uso |
+|---|---|---|---|
+| `tap-fichar` | **208 px** | 24 mm | El botón de Entrar/Salir de la pantalla de fichar, y sólo ése. |
+
+De dónde sale: el botón de fichar no es "un control de uso diario", es
+**el acto**. Se pulsa entrando por una puerta con el bolso en la otra mano,
+sin mirar y a veces con guantes, una vez por jornada. Está en el orden de
+la tarjeta de producto del TPV (22-26 mm, que las pruebas físicas del
+27-08 dieron por sobradas) y no en el de una tecla. A 320 px de ancho —el
+suelo del bucle visual— deja 56 px de margen a cada lado.
+
+Es el único control del sistema fuera de la escala de tres peldaños, y
+está aquí para que siga siéndolo: cualquier otro se discute antes.
+
 **Regla:** no se suben alturas con `h-[52px]` sueltos. Si un control no
 entra en la escala, primero se discute el token; luego se implementa.
 

@@ -479,6 +479,22 @@ model Tenant {
   // los tenants de hoy exactamente como estaban. Un `false` explicito es
   // la unica forma de apagar la caja.
   cajaEnabled                    Boolean           @default(true) @map("caja_enabled")
+  // F1 (ADR-018) · capability del CONTROL HORARIO: empleados, móviles
+  // emparejados, fichajes, correcciones y el registro que se le enseña a
+  // la Inspección. Hermana de `cajaEnabled` en forma (columna booleana por
+  // tenant, ADR-R6) Y en gobierno: la mueve SÓLO el super-admin, porque
+  // encenderla es vender un producto. Por eso tampoco aparece en el POST
+  // de /admin/tenant/settings.
+  //
+  // `@default(false)` y NO true: al revés que `cajaEnabled`, y por la
+  // MISMA razón. El default de una capability es "deja a los tenants de
+  // hoy exactamente como estaban": todos tienen caja, así que la caja nace
+  // encendida; el control horario no lo tiene nadie, así que nace apagado.
+  //
+  // Se lee `=== true`, nunca `!== false` — el espejo exacto del criterio
+  // de `cajaEnabled`: sólo el valor explícito CONTRARIO al default cambia
+  // el comportamiento de nadie.
+  fichajeEnabled                 Boolean           @default(false) @map("fichaje_enabled")
   // catalogo-local (addendum 3, ADR-017) · ¿está PREVISTO que esta
   // empresa use Holded? No confundir con `holdedApiKeyCiphertext != null`,
   // que responde a otra pregunta: ¿lo tiene conectado YA?
@@ -555,6 +571,8 @@ model Tenant {
   bookingPolicies    BookingPolicy[]
   centerHours        CenterHours[]
   centerDays         CenterDay[]
+  // F1 (ADR-018) · el registro de jornada.
+  employees          Employee[]
 
   // v1.3-SuperAdmin-Hub Lote 3 · el backfill y el hub buscan/listan
   // tenants por `holded_account_id`. Sin índice eran scans completos
@@ -694,6 +712,17 @@ model User {
   staffProfile   StaffProfile?
   staffSkills    StaffSkill[]
   staffShifts    StaffShift[]
+
+  // F1 (ADR-018) · si este usuario es además un empleado que ficha. La
+  // relación es opcional y en un solo sentido: un profesor que sólo ficha
+  // no tiene `User`, y un propietario que no ficha no tiene `Employee`.
+  // NO hay enlace a `StaffProfile`: eso es la agenda (quién atiende qué
+  // servicio), y fichar no es atender.
+  //
+  // Lista por exigencia de Prisma, no porque pueda haber varios: la
+  // unicidad de verdad es `@@unique([tenantId, userId])` en `Employee`, y
+  // un `User` pertenece a un solo tenant, así que como mucho hay uno.
+  employees Employee[]
 
   @@index([tenantId])
   @@map("users")
@@ -2469,4 +2498,225 @@ model ApkDownloadCode {
   @@index([expiresAt])
   @@index([versionCode])
   @@map("apk_download_codes")
+}
+
+// ── F1 · el registro de jornada (ADR-018) ─────────────────────────────
+//
+// Art. 34.9 del Estatuto de los Trabajadores: registro diario de jornada
+// con la hora concreta de inicio y de fin de cada trabajador, conservado 4
+// años y a disposición del trabajador, de sus representantes y de la
+// Inspección de Trabajo.
+//
+// Lo que Prisma NO expresa y vive en `20260923010000_fichaje_1_registro`:
+// los dos índices parciales únicos (un móvil activo por empleado, un tramo
+// abierto por empleado), los CHECK de los motivos, los triggers que hacen
+// inalterable el registro y `record_time_entry_correction()`.
+
+/// Origen de un fichaje: lo tocó el empleado en su móvil, o lo metió la
+/// empresa desde el panel (un olvido que se corrige, un día que falta).
+enum TimeEntrySource {
+  MOBILE
+  PANEL
+}
+
+/// Quién firma una corrección. El CHECK de la migración exige que venga el
+/// id que corresponde a cada uno.
+enum TimeEntryCorrectionAuthor {
+  EMPLOYEE
+  PANEL
+}
+
+/// Motivo de una corrección. Cerrado a propósito: un desplegable de tres
+/// opciones se contesta de un toque, y un texto libre obligatorio acaba
+/// siendo "." El enum vive TAMBIÉN como CHECK en la base de datos.
+enum TimeEntryCorrectionReason {
+  OLVIDO
+  ERROR_HORA
+  /// El único que exige texto (CHECK en la migración).
+  OTRO
+}
+
+/// Quien ficha. Deliberadamente NO es un `User`: un colegio tiene
+/// profesores que no son ni cajeros ni propietarios y que no entran al
+/// panel jamás. Y deliberadamente NO cuelga de `StaffProfile`: eso es la
+/// agenda. Si alguien atiende citas y además ficha, las dos cosas cuelgan
+/// del mismo `User` por separado.
+model Employee {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  name          String
+  email         String?
+  phone         String?
+  /// Opcional. Sólo lo tiene quien además entra al panel.
+  userId        String?   @map("user_id") @db.Uuid
+  /// La baja DESACTIVA; no borra. Sus fichajes se conservan 4 años, y el
+  /// trigger de la migración impide borrarlos aunque alguien lo intente.
+  active        Boolean   @default(true)
+  deactivatedAt DateTime? @map("deactivated_at") @db.Timestamptz()
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user          User?                  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  devices       EmployeeDevice[]
+  pairingTokens EmployeePairingToken[]
+  timeEntries   TimeEntry[]
+
+  /// Un `User` no puede ser dos empleados del mismo tenant. Postgres
+  /// permite NULLs repetidos, así que los empleados sin usuario —la
+  /// mayoría— no chocan entre sí.
+  @@unique([tenantId, userId])
+  @@index([tenantId, active])
+  @@map("employees")
+}
+
+/// El móvil personal del empleado, emparejado con un enlace de un solo
+/// uso. Copia el patrón de `Device` (token de 32 bytes random, SHA-256,
+/// columna `@unique` para lookup O(1), revocación por `revokedAt`) pero
+/// NO cuelga de un `Register`: el colegio no tiene caja, y ésa es
+/// exactamente la razón de que esta tabla exista en vez de reutilizar
+/// aquélla.
+///
+/// Un empleado tiene UN móvil activo. Lo garantiza un índice parcial
+/// único de la migración, no el código.
+model EmployeeDevice {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  employeeId      String    @map("employee_id") @db.Uuid
+  deviceTokenHash String    @unique @map("device_token_hash")
+  pairedAt        DateTime  @default(now()) @map("paired_at") @db.Timestamptz()
+  lastSeenAt      DateTime? @map("last_seen_at") @db.Timestamptz()
+  revokedAt       DateTime? @map("revoked_at") @db.Timestamptz()
+  userAgent       String?   @map("user_agent")
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([employeeId, revokedAt])
+  @@map("employee_devices")
+}
+
+/// El enlace personal que la empresa genera y comparte. De un solo uso y
+/// con caducidad de 7 días.
+///
+/// Token de ALTA ENTROPÍA, no un código de 6 dígitos como `PairingCode`:
+/// aquél se teclea en un terminal y vive una hora; éste viaja en una URL
+/// por WhatsApp y vive una semana. Seis dígitos serían enumerables.
+model EmployeePairingToken {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId           String    @map("tenant_id") @db.Uuid
+  employeeId         String    @map("employee_id") @db.Uuid
+  tokenHash          String    @unique @map("token_hash")
+  expiresAt          DateTime  @map("expires_at") @db.Timestamptz()
+  /// El claim es atómico (`updateMany` con `consumedAt: null` en el
+  /// WHERE), igual que en `/devices/pair`: dos aperturas simultáneas del
+  /// mismo enlace no pueden emparejar dos móviles.
+  consumedAt         DateTime? @map("consumed_at") @db.Timestamptz()
+  consumedByDeviceId String?   @map("consumed_by_device_id") @db.Uuid
+  createdByUserId    String?   @map("created_by_user_id") @db.Uuid
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([employeeId, consumedAt])
+  @@map("employee_pairing_tokens")
+}
+
+/// Un tramo trabajado. La unidad del registro de jornada.
+///
+/// `startedAt` / `endedAt` son LA HORA QUE CUENTA: la del toque. Sólo se
+/// mueven a través de `record_time_entry_correction()`, y el trigger
+/// `time_entries_registro_guard` rechaza cualquier otro camino — incluido
+/// un UPDATE lanzado a mano en psql.
+///
+/// Las seis columnas de procedencia son INMUTABLES y el trigger las
+/// congela: dicen de dónde salió cada hora y no se corrigen nunca.
+model TimeEntry {
+  id         String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String @map("tenant_id") @db.Uuid
+  employeeId String @map("employee_id") @db.Uuid
+
+  /// Entrada. Se fija en el INSERT y ya no se mueve sin corrección.
+  startedAt DateTime  @map("started_at") @db.Timestamptz()
+  /// Salida. NULL mientras el tramo está en curso. Pasar de NULL a valor
+  /// es el fichaje de salida (la segunda mitad del mismo hecho, sin
+  /// corrección); cambiarlo después SÍ exige corrección, y volverlo a
+  /// NULL está prohibido siempre.
+  endedAt   DateTime? @map("ended_at") @db.Timestamptz()
+
+  /// Lo que marcó el reloj del MÓVIL al tocar. NULL cuando lo metió el
+  /// panel, que es cuando nadie tocó nada.
+  startedDeviceAt DateTime? @map("started_device_at") @db.Timestamptz()
+  /// Cuándo llegó al SERVIDOR. Si difiere del anterior en más de 10
+  /// minutos, el registro se marca "enviado sin conexión" — pero eso se
+  /// DERIVA de estas dos columnas, no se guarda: un flag podría quedar
+  /// desincronizado de lo que lo justifica.
+  startedServerAt DateTime  @map("started_server_at") @db.Timestamptz()
+  endedDeviceAt   DateTime? @map("ended_device_at") @db.Timestamptz()
+  endedServerAt   DateTime? @map("ended_server_at") @db.Timestamptz()
+
+  startSource TimeEntrySource  @map("start_source")
+  endSource   TimeEntrySource? @map("end_source")
+
+  /// Idempotencia de la cola offline del móvil, igual que
+  /// `Ticket.checkoutExternalId`: el mismo toque reenviado no crea un
+  /// segundo tramo.
+  startExternalId String? @unique @map("start_external_id")
+  endExternalId   String? @unique @map("end_external_id")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  employee    Employee              @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  corrections TimeEntryCorrection[]
+
+  @@index([tenantId, startedAt])
+  @@index([employeeId, startedAt])
+  @@map("time_entries")
+}
+
+/// La traza de cada cambio. Append-only por trigger, copiando
+/// `ticket_corrections` de S1 (ADR-015 §4.3).
+///
+/// Es lo que hace que el registro sea defendible ante la Inspección: el
+/// valor anterior sigue ahí, con quién lo cambió, cuándo y por qué. Sin
+/// esta tabla, "corregir" y "manipular" serían la misma operación.
+model TimeEntryCorrection {
+  id          String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String @map("tenant_id") @db.Uuid
+  timeEntryId String @map("time_entry_id") @db.Uuid
+
+  /// `started_at` o `ended_at` — el nombre de COLUMNA, no el del campo
+  /// Prisma: la función SQL trabaja con el catálogo de Postgres.
+  field    String
+  oldValue String? @map("old_value")
+  newValue String? @map("new_value")
+
+  reasonCode TimeEntryCorrectionReason @map("reason_code")
+  /// Obligatorio sólo con `OTRO`, por CHECK en la migración.
+  reasonText String?                   @map("reason_text")
+
+  authorKind TimeEntryCorrectionAuthor @map("author_kind")
+  /// Nombre legible de quien corrigió, congelado aquí. Un empleado que se
+  /// da de baja o un usuario que se borra no pueden dejar la traza muda.
+  author     String
+  employeeId String?                   @map("employee_id") @db.Uuid
+  userId     String?                   @map("user_id") @db.Uuid
+
+  /// `txid_current()` del momento del cambio. Es lo que el trigger
+  /// consulta para saber si la corrección y el UPDATE son la MISMA
+  /// transacción. Mismo mecanismo exacto que S1.
+  txid      BigInt
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  timeEntry TimeEntry @relation(fields: [timeEntryId], references: [id], onDelete: Cascade)
+
+  @@index([timeEntryId, createdAt])
+  @@index([tenantId, createdAt])
+  /// Lo consulta el trigger en CADA update de una columna de hora. El
+  /// nombre es el que generaría Prisma para este `@@index`: si no, el
+  /// siguiente `migrate dev` lo vería como sobrante y lo borraría.
+  @@index([txid, timeEntryId, field])
+  @@map("time_entry_corrections")
 }
