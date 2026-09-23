@@ -158,6 +158,17 @@ interface TicketRow {
   holdedDocNumber: string | null;
   contactHoldedId: string | null;
   emailIntent: string | null;
+  // Sole · el estado REAL del envío por email, derivado en el servidor
+  // (`email-status.ts`) para que el histórico, la pantalla post-cobro y
+  // el panel no puedan discrepar. `status: null` = este ticket no tiene
+  // ningún envío detrás. Opcional porque un TPV recién actualizado puede
+  // leer del caché del SW una respuesta del contrato anterior.
+  email?: {
+    to: string | null;
+    status: "SENT" | "PENDING" | "FAILED" | "SKIPPED_TEST" | null;
+    reason: string | null;
+    at: string | null;
+  } | null;
   notes: string | null;
   // v1.3-Servicios-Pinta · Lote 3: profesional que atendió (SERVICES).
   attendedBy: string | null;
@@ -543,6 +554,10 @@ function TicketRowCard({
                 pendiente {formatEur(ticket.creditPending)}
               </span>
             )}
+            {/* Sole · el ticket cuyo email no salió se ve DESDE LA LISTA.
+                Ana trabaja aquí, no en el panel: si hay que abrir cada
+                ticket para enterarse, nadie se entera. */}
+            <EmailBadge email={ticket.email} />
           </div>
           <div className="text-[12.5px] text-slate-500 mt-0.5 truncate">
             {new Date(ticket.createdAt).toLocaleString("es-ES")}
@@ -602,6 +617,55 @@ function TicketRowCard({
   );
 }
 
+// Sole · el estado del envío por email, en la lista y en la ficha.
+//
+// Tres estados y ninguno afirma más de lo que se sabe. El que importa es
+// FAILED: antes de este bloque un envío que agotaba sus tres intentos no
+// se veía en ninguna parte del TPV, y por eso el 000257 estuvo un día
+// entero sin que nadie lo supiera.
+export function EmailBadge({
+  email,
+  size = "sm",
+}: {
+  email: TicketRow["email"];
+  size?: "sm" | "md";
+}) {
+  if (!email?.status || email.status === "SKIPPED_TEST") return null;
+  const map = {
+    SENT: {
+      color: "bg-emerald-50 text-emerald-700",
+      label: "Email enviado",
+      testId: "email-badge-sent",
+    },
+    PENDING: {
+      color: "bg-slate-100 text-slate-600",
+      label: "Email pendiente",
+      testId: "email-badge-pending",
+    },
+    FAILED: {
+      color: "bg-amber-100 text-amber-800",
+      label: "No se pudo enviar",
+      testId: "email-badge-failed",
+    },
+  } as const;
+  const entry = map[email.status as keyof typeof map];
+  if (!entry) return null;
+  return (
+    <span
+      data-testid={entry.testId}
+      title={email.to ?? undefined}
+      className={
+        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-medium whitespace-nowrap " +
+        entry.color +
+        (size === "md" ? " text-[12px]" : " text-[11px]")
+      }
+    >
+      <Mail className="w-3 h-3 shrink-0" />
+      {entry.label}
+    </span>
+  );
+}
+
 function StatusBadge({ status }: { status: TicketRow["status"] }) {
   const map: Record<TicketRow["status"], { color: string; label: string }> = {
     DRAFT: { color: "bg-slate-100 text-slate-600", label: "Draft" },
@@ -645,7 +709,12 @@ export function TicketDetailDrawer({
   onRefund: () => void;
   onChanged: () => void;
 }) {
-  const [email, setEmail] = useState(ticket.emailIntent ?? "");
+  // Nace con el último destinatario conocido. En un ticket como el
+  // 000257 eso es justamente la basura que hay que corregir — y tenerla
+  // delante es mejor que un campo vacío: Ana ve QUÉ se escribió mal.
+  const [email, setEmail] = useState(
+    ticket.email?.to ?? ticket.emailIntent ?? "",
+  );
   const [sending, setSending] = useState(false);
   const [sendStatus, setSendStatus] = useState<string | null>(null);
   // Sole · la MISMA regla que la API, del mismo paquete. El botón no se
@@ -656,6 +725,11 @@ export function TicketDetailDrawer({
   const emailTrimmed = normalizeEmail(email);
   const emailValid = isValidEmail(emailTrimmed);
   const emailBad = emailTrimmed.length > 0 && !emailValid;
+  // Acabamos de encolar desde esta ficha: el badge del servidor tarda un
+  // refresco en llegar y no queremos que el bloque de "No se pudo
+  // enviar" siga gritando el fallo viejo mientras tanto.
+  const [justQueued, setJustQueued] = useState(false);
+  const emailState = justQueued ? null : (ticket.email ?? null);
   // v1.10.2-impresion-honesta · estado real de la reimpresión: enviando
   // / impreso / falló-con-motivo-y-reintento. Antes había un único
   // estado ("Enviado a impresora. La copia llevará marca COPIA.") que se
@@ -674,7 +748,17 @@ export function TicketDetailDrawer({
         method: "POST",
         body: { email: emailTrimmed },
       });
-      setSendStatus("Enviado a la cola. Llegará al cliente en cuanto Holded confirme el ticket.");
+      // Sole (23-09-2026) · aquí ponía "Llegará al cliente en cuanto
+      // Holded confirme el ticket". Falso desde B-Print fase 1: el PDF
+      // se genera local con `@mipiacetpv/ticket-pdf` y el worker no lee
+      // `holdedDocumentId` ni una sola vez. El email no espera a Holded.
+      setSendStatus(`Se enviará a ${emailTrimmed}.`);
+      setJustQueued(true);
+      // No se refresca la lista aquí a propósito: `onChanged` cierra la
+      // ficha, y arrancarle la pantalla a Ana justo después de pulsar
+      // Enviar le quita la confirmación que acaba de pedir. Al cerrar la
+      // ficha se refresca y la marca del ticket pasa a "Email pendiente"
+      // y, cuando el worker confirme, a "Email enviado".
     } catch (err) {
       setSendStatus(err instanceof ApiError ? err.message : "Error inesperado");
     } finally {
@@ -757,6 +841,54 @@ export function TicketDetailDrawer({
         )}
 
         <div className="mt-5 space-y-2.5">
+          {/* Sole · el estado del envío, antes del campo de reenvío: si
+              falló, el motivo está justo encima del sitio donde Ana
+              corrige la dirección y vuelve a mandarlo. */}
+          {emailState?.status && emailState.status !== "SKIPPED_TEST" && (
+            <div
+              data-testid={`email-state-${emailState.status.toLowerCase()}`}
+              className={
+                "rounded-xl px-3 py-2.5 text-[12.5px] leading-snug " +
+                (emailState.status === "SENT"
+                  ? "bg-emerald-50 text-emerald-800"
+                  : emailState.status === "FAILED"
+                    ? "bg-amber-50 text-amber-800"
+                    : "bg-mipiace-stone text-slate-600")
+              }
+            >
+              {emailState.status === "SENT" && (
+                <>
+                  Enviado a{" "}
+                  <strong className="font-medium break-all">
+                    {emailState.to}
+                  </strong>
+                  {emailState.at && (
+                    <> · {new Date(emailState.at).toLocaleString("es-ES")}</>
+                  )}
+                </>
+              )}
+              {emailState.status === "PENDING" && (
+                <>
+                  Se enviará a{" "}
+                  <strong className="font-medium break-all">
+                    {emailState.to}
+                  </strong>
+                  . Aún no ha salido.
+                </>
+              )}
+              {emailState.status === "FAILED" && (
+                <>
+                  No se pudo enviar a{" "}
+                  <strong className="font-medium break-all">
+                    {emailState.to}
+                  </strong>
+                  {emailState.reason ? ` · ${emailState.reason}` : ""}.
+                  {" "}Corrige el email aquí abajo y vuelve a enviarlo.
+                </>
+              )}
+            </div>
+          )}
+
           <div>
             <label className="block text-[12.5px] text-slate-500 mb-1">Reenviar por email</label>
             <div className="flex gap-2">

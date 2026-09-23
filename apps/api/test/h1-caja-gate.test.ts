@@ -221,7 +221,9 @@ describe("H1 · las rutas reales llevan la puerta puesta", () => {
     ["admin/modifier-groups.ts", 9],
     ["admin/tag-aliases.ts", 3],
     ["admin/tag-sections.ts", 3],
-    ["admin/ticket-delivery.ts", 2],
+    // Sole (23-09-2026) · 3 desde que "Comunicación de ticket" tiene
+    // también el resumen de envíos fallidos (GET …/email-failures).
+    ["admin/ticket-delivery.ts", 3],
     ["admin/manager-authorize.ts", 1],
     ["stores/routes.ts", 5],
   ];

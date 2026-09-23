@@ -70,6 +70,10 @@ const { registerErrorHandler } = await import("../src/lib/error-handler.js");
 const { registerLenientJsonParser } = await import("../src/lib/lenient-json.js");
 const { signCashierSession } = await import("../src/shift/cashier-session.js");
 const { sendTicketEmail } = await import("../src/tickets/send-ticket-email.js");
+const { registerAdminTicketDeliveryRoutes } = await import(
+  "../src/admin/ticket-delivery.js"
+);
+const { signAccessToken } = await import("../src/auth/tokens.js");
 
 describe.skipIf(!e2eEnabled)("e2e · Sole · el ticket por email", () => {
   if (!e2eEnabled) console.warn(`\n${SKIP_MESSAGE}\n`);
@@ -78,12 +82,16 @@ describe.skipIf(!e2eEnabled)("e2e · Sole · el ticket por email", () => {
   let app: FastifyInstance;
 
   let tenantId = "";
+  let storeId = "";
   let registerId = "";
   let cashierId = "";
   let token = "";
+  let ownerToken = "";
   let shiftId = "";
 
   const auth = () => ({ authorization: `Bearer ${token}` });
+  // La propietaria, para el resumen del panel.
+  const ownerAuth = () => ({ authorization: `Bearer ${ownerToken}` });
 
   /** Un cobro de peluquería, como lo manda el AP12 de Sole. `base` es el
    *  precio SIN IVA de la línea; el pago va por el total con IVA, que es
@@ -130,6 +138,7 @@ describe.skipIf(!e2eEnabled)("e2e · Sole · el ticket por email", () => {
     await registerTicketRoutes(app);
     await registerTicketDigitalRoute(app);
     await registerPublicTicketPdfRoute(app);
+    await registerAdminTicketDeliveryRoutes(app);
     await app.ready();
 
     const tenant = await prisma.tenant.create({
@@ -146,6 +155,7 @@ describe.skipIf(!e2eEnabled)("e2e · Sole · el ticket por email", () => {
       data: { tenantId, name: "Sole" },
       select: { id: true },
     });
+    storeId = store.id;
     const register = await prisma.register.create({
       data: { storeId: store.id, name: "Caja Sole" },
       select: { id: true },
@@ -171,6 +181,16 @@ describe.skipIf(!e2eEnabled)("e2e · Sole · el ticket por email", () => {
       },
       720,
     );
+
+    const owner = await prisma.user.create({
+      data: {
+        tenantId,
+        email: `sole-owner+${randomUUID()}@e2e.local`,
+        role: "OWNER",
+      },
+      select: { id: true },
+    });
+    ownerToken = signAccessToken({ sub: owner.id, tid: tenantId, role: "OWNER" });
 
     const opened = await app.inject({
       method: "POST",
@@ -422,5 +442,169 @@ describe.skipIf(!e2eEnabled)("e2e · Sole · el ticket por email", () => {
       select: { emailFailedAt: true },
     });
     expect(ticket.emailFailedAt).not.toBeNull();
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // FRENTES 3 y 4 · "enviado" sólo cuando se ha enviado, y el fallo se ve
+  // ────────────────────────────────────────────────────────────────────
+
+  it("F3 · recién cobrado el email está PENDIENTE, no enviado", async () => {
+    const venta = await cobrar({
+      base: BASE_000257,
+      emailIntent: "ana@ejemplo.com",
+    });
+
+    // Lo que lee la pantalla de "Ticket emitido". Antes decía "Enviado
+    // por email a …" porque existía la fila; el worker ni había
+    // arrancado. El badge se pinta ~200 ms después del cobro.
+    const digital = await app.inject({
+      method: "GET",
+      url: `/tickets/${venta.id}/digital`,
+      headers: auth(),
+    });
+    expect(digital.statusCode).toBe(200);
+    expect(digital.json().email).toMatchObject({
+      to: "ana@ejemplo.com",
+      status: "PENDING",
+      reason: null,
+    });
+
+    // Y lo que lee el histórico del TPV, por la misma derivación.
+    const hist = await app.inject({
+      method: "GET",
+      url: `/tickets/${venta.id}`,
+      headers: auth(),
+    });
+    expect(hist.json().ticket.email.status).toBe("PENDING");
+  });
+
+  it("F3 · cuando el worker confirma, y sólo entonces, pasa a ENVIADO", async () => {
+    const venta = await cobrar({
+      base: BASE_000257,
+      emailIntent: "ana@ejemplo.com",
+    });
+    const job = await prisma.ticketEmailJob.findFirstOrThrow({
+      where: { ticketId: venta.id },
+      select: { id: true },
+    });
+
+    enviados.length = 0;
+    const res = await sendTicketEmail({ emailJobId: job.id, prisma });
+    expect(res).toEqual({ kind: "sent" });
+    expect(enviados).toEqual([
+      expect.objectContaining({ to: "ana@ejemplo.com" }),
+    ]);
+
+    const hist = await app.inject({
+      method: "GET",
+      url: `/tickets/${venta.id}`,
+      headers: auth(),
+    });
+    expect(hist.json().ticket.email).toMatchObject({
+      to: "ana@ejemplo.com",
+      status: "SENT",
+    });
+  });
+
+  it("F4 · CANÓNICO · el recorrido entero de Sole: falla, se ve, se corrige y llega", async () => {
+    // 1. Un ticket del 17-09: cobrado con "abc" y con el envío muerto.
+    const t = await ticketComoEl000257();
+    const jobMalo = await prisma.ticketEmailJob.create({
+      data: {
+        id: randomUUID(),
+        ticketId: t.id,
+        toEmail: "abc",
+        requestedByUserId: cashierId,
+        status: "PENDING",
+      },
+      select: { id: true },
+    });
+    await sendTicketEmail({ emailJobId: jobMalo.id, prisma });
+
+    // 2. El TPV lo enseña como fallido, con el motivo en castellano.
+    //    Antes de este bloque esto decía "pendiente" para siempre.
+    const conFallo = await app.inject({
+      method: "GET",
+      url: `/tickets/${t.id}`,
+      headers: auth(),
+    });
+    expect(conFallo.json().ticket.email).toMatchObject({
+      to: "abc",
+      status: "FAILED",
+      reason: "La dirección no es válida",
+    });
+
+    // 3. Y el resumen del panel también, en la tienda de Sole.
+    const panel = await app.inject({
+      method: "GET",
+      url: `/admin/stores/${storeId}/email-failures`,
+      headers: ownerAuth(),
+    });
+    expect(panel.statusCode).toBe(200);
+    const fila = panel
+      .json()
+      .items.find((i: { internalNumber: string }) =>
+        i.internalNumber === conFallo.json().ticket.internalNumber,
+      );
+    expect(fila).toMatchObject({
+      email: { to: "abc", status: "FAILED", reason: "La dirección no es válida" },
+    });
+
+    // 4. Ana corrige el email desde el histórico y reenvía.
+    const reenvio = await app.inject({
+      method: "POST",
+      url: `/tickets/${t.id}/resend-email`,
+      headers: auth(),
+      payload: { email: "ana@ejemplo.com" },
+    });
+    expect(reenvio.statusCode).toBe(202);
+
+    // 5. Queda pendiente...
+    const pendiente = await app.inject({
+      method: "GET",
+      url: `/tickets/${t.id}`,
+      headers: auth(),
+    });
+    expect(pendiente.json().ticket.email).toMatchObject({
+      to: "ana@ejemplo.com",
+      status: "PENDING",
+    });
+
+    // 6. ...el worker lo manda...
+    enviados.length = 0;
+    const res = await sendTicketEmail({
+      emailJobId: reenvio.json().jobId,
+      prisma,
+    });
+    expect(res).toEqual({ kind: "sent" });
+    expect(enviados).toEqual([
+      expect.objectContaining({ to: "ana@ejemplo.com" }),
+    ]);
+
+    // 7. ...y el ticket dice ENVIADO. El fallo de antes queda tapado por
+    //    el reenvío bueno, igual que pasó el 18-09 a mano.
+    const enviado = await app.inject({
+      method: "GET",
+      url: `/tickets/${t.id}`,
+      headers: auth(),
+    });
+    expect(enviado.json().ticket.email).toMatchObject({
+      to: "ana@ejemplo.com",
+      status: "SENT",
+    });
+
+    // 8. Y desaparece del resumen del propietario: ya no hay nada que
+    //    perseguir. La marca vieja del ticket sigue ahí (es la huella de
+    //    lo que pasó), pero el último envío salió bien.
+    const panelDespues = await app.inject({
+      method: "GET",
+      url: `/admin/stores/${storeId}/email-failures`,
+      headers: ownerAuth(),
+    });
+    expect(
+      panelDespues
+        .json()
+        .items.some((i: { id: string }) => i.id === t.id),
+    ).toBe(false);
   });
 });

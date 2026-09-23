@@ -716,6 +716,10 @@ export function CheckoutOverlay(props: {
           ticketId={confirmed.res.ticket.id}
           internalNumber={confirmed.res.ticket.internalNumber}
           cash={cashSummary}
+          // Sole · si la API descartó el email, la pantalla de después lo
+          // dice. Callarlo aquí es lo que dejó a la clienta del 000257
+          // sin su ticket y a Ana sin enterarse.
+          emailIntentRejected={confirmed.res.emailIntentRejected ?? null}
           doneLabel={props.doneLabel}
           onDone={props.onConfirmed}
         />

@@ -36,6 +36,11 @@ import {
 } from "@mipiacetpv/util-validation";
 
 import { decideEmailIntent } from "./email-intent.js";
+import {
+  deriveTicketEmailState,
+  EMAIL_JOB_SELECT,
+  type EmailJobShape,
+} from "./email-status.js";
 import { maybeEnqueueAutoEmail } from "./email-trigger.js";
 import {
   holdedDestination,
@@ -2020,6 +2025,14 @@ function ticketInclude() {
     },
     refunds: { select: { id: true, externalId: true, total: true, createdAt: true, status: true } },
     register: { select: { id: true, name: true, store: { select: { name: true } } } },
+    // Sole · el histórico del TPV enseña el estado REAL del envío por
+    // email. Sólo el último job: un reenvío correcto tapa el fallo de
+    // antes, que es lo que pasó con el 000257 el 18-09.
+    emailJobs: {
+      orderBy: { createdAt: "desc" },
+      take: 1,
+      select: EMAIL_JOB_SELECT,
+    },
   } as const;
 }
 
@@ -2133,6 +2146,8 @@ function serializeTicket(t: DbTicket): Record<string, unknown> {
     holdedPdfUrl: string | null;
     printIntent: boolean;
     emailIntent: string | null;
+    emailFailedAt?: Date | null;
+    emailJobs?: EmailJobShape[];
     giftReceiptIntentAt: Date | null;
     attendedBy: string | null;
     syncError: unknown;
@@ -2201,6 +2216,15 @@ function serializeTicket(t: DbTicket): Record<string, unknown> {
     holdedPdfUrl: ticket.holdedPdfUrl,
     printIntent: ticket.printIntent,
     emailIntent: ticket.emailIntent,
+    // Sole · el estado real del envío, derivado en UN sitio
+    // (`email-status.ts`) para que el histórico, la pantalla post-cobro
+    // y el panel no puedan discrepar. `status: null` = este ticket no
+    // tiene ningún envío detrás.
+    email: deriveTicketEmailState({
+      jobs: ticket.emailJobs ?? [],
+      emailIntent: ticket.emailIntent,
+      emailFailedAt: ticket.emailFailedAt ?? null,
+    }),
     giftReceiptIntentAt: ticket.giftReceiptIntentAt?.toISOString() ?? null,
     attendedBy: ticket.attendedBy,
     syncError: ticket.syncError,

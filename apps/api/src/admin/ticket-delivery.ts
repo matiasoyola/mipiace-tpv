@@ -1,8 +1,18 @@
 // Endpoints admin de "Comunicación de ticket" por tienda
 // (B-Print fase 1 · Frente 6).
 //
-//   GET   /admin/stores/:storeId/ticket-delivery  → requireOwnerOrManager
-//   PATCH /admin/stores/:storeId/ticket-delivery  → requireOwner
+//   GET   /admin/stores/:storeId/ticket-delivery   → requireOwnerOrManager
+//   PATCH /admin/stores/:storeId/ticket-delivery   → requireOwner
+//   GET   /admin/stores/:storeId/email-failures    → requireOwnerOrManager
+//
+// Sole (23-09-2026) · el último es el resumen para el propietario: los
+// tickets de esta tienda cuyo email no salió. Vive AQUÍ, pegado a la
+// configuración que lo gobierna, y no en `/admin/tickets-errors`, que
+// se llama "Sincronización con Holded", filtra SYNC_FAILED y está
+// marcada `superAdminOnly` — Sole no la vería nunca, y el email de este
+// bloque no depende de Holded. El sitio principal donde esto se ve es
+// el histórico del TPV, que es donde la peluquería trabaja; esto es el
+// resumen de quien manda.
 //
 // La forma del JSON es libre en BD; aquí lo validamos contra un
 // esquema cerrado. Si la tienda nunca ha sido tocada (jsonb null),
@@ -14,6 +24,10 @@ import type { FastifyInstance } from "fastify";
 import { requireOwner, requireOwnerOrManager } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
 import { ensureCajaEnabled } from "../lib/caja-gate.js";
+import {
+  deriveTicketEmailState,
+  EMAIL_JOB_SELECT,
+} from "../tickets/email-status.js";
 
 export interface TicketDeliverySettings {
   emailAutoIfCustomerHasEmail: boolean;
@@ -158,6 +172,93 @@ export async function registerAdminTicketDeliveryRoutes(
         data: { ticketDelivery: validated as unknown as object },
       });
       return reply.code(200).send({ ticketDelivery: validated });
+    },
+  );
+
+  // ── GET /admin/stores/:storeId/email-failures ───────────────────────
+  // Los tickets de esta tienda cuyo envío por email no salió. Se mira
+  // `email_failed_at` (la marca del ticket) y no el estado del job
+  // porque es la que ya existía antes de este bloque: los tickets del
+  // 17-09 la tienen puesta con el job todavía en PENDING.
+  app.get(
+    "/admin/stores/:storeId/email-failures",
+    {
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
+      schema: {
+        params: {
+          type: "object",
+          required: ["storeId"],
+          properties: { storeId: { type: "string", format: "uuid" } },
+        },
+        querystring: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const auth = request.auth!;
+      const { storeId } = request.params as { storeId: string };
+      const { limit } = request.query as { limit?: number };
+      const prisma = getPrisma();
+      const store = await prisma.store.findFirst({
+        where: { id: storeId, tenantId: auth.tenantId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!store) {
+        return reply.code(404).send({
+          error: "STORE_NOT_FOUND",
+          message: "Tienda no encontrada",
+        });
+      }
+
+      const tickets = await prisma.ticket.findMany({
+        where: {
+          tenantId: auth.tenantId,
+          emailFailedAt: { not: null },
+          register: { storeId },
+        },
+        select: {
+          id: true,
+          internalNumber: true,
+          total: true,
+          createdAt: true,
+          emailIntent: true,
+          emailFailedAt: true,
+          register: { select: { name: true } },
+          emailJobs: {
+            orderBy: { createdAt: "desc" },
+            take: 1,
+            select: EMAIL_JOB_SELECT,
+          },
+        },
+        orderBy: { emailFailedAt: "desc" },
+        take: limit ?? 20,
+      });
+
+      return reply.code(200).send({
+        items: tickets
+          .map((t) => ({
+            id: t.id,
+            internalNumber: t.internalNumber,
+            total: Number(t.total.toString()),
+            createdAt: t.createdAt.toISOString(),
+            registerName: t.register.name,
+            email: deriveTicketEmailState({
+              jobs: t.emailJobs,
+              emailIntent: t.emailIntent,
+              emailFailedAt: t.emailFailedAt,
+            }),
+          }))
+          // Un ticket que ya se reenvió bien lleva la marca vieja puesta
+          // (no se limpia: es la huella de lo que pasó) pero su último
+          // job está DONE. Enseñarlo aquí sería pedirle al propietario
+          // que persiga algo que ya está resuelto.
+          .filter((t) => t.email.status === "FAILED"),
+      });
     },
   );
 }
