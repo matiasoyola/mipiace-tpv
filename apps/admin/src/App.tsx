@@ -4,6 +4,7 @@ import { Check, Eye, EyeOff, KeyRound, RotateCcw } from "lucide-react";
 
 import { AdminShell } from "./AdminShell.js";
 import { CajaGate } from "./CajaGate.js";
+import { FichajeGate } from "./FichajeGate.js";
 import { ImpersonationBootstrap } from "./components/ImpersonationBootstrap.js";
 import { CashiersPage } from "./pages/CashiersPage.js";
 import { CatalogoPage } from "./pages/CatalogoPage.js";
@@ -17,6 +18,10 @@ import { SettingsPage } from "./pages/SettingsPage.js";
 import { AgendaCatalogPage } from "./pages/AgendaCatalogPage.js";
 import { AgendaHorarioPage } from "./pages/AgendaHorarioPage.js";
 import { StaffPage } from "./pages/StaffPage.js";
+// F1 (ADR-018) · las tres pantallas del control horario.
+import { HoyPage } from "./pages/fichaje/HoyPage.js";
+import { EmpleadosPage } from "./pages/fichaje/EmpleadosPage.js";
+import { RegistroPage } from "./pages/fichaje/RegistroPage.js";
 import { ContactImportPage } from "./pages/ContactImportPage.js";
 import { StoreDetailPage, StoresPage } from "./pages/StoresPage.js";
 import { TagAliasesPage } from "./pages/TagAliasesPage.js";
@@ -82,6 +87,9 @@ interface MeResponse {
     cajaEnabled?: boolean;
     crmEnabled?: boolean;
     agendaEnabled?: boolean;
+    // F1 (ADR-018) · el cuarto módulo. Es lo que hace que un colegio sin
+    // caja entre a "Control horario" en vez de a su cuenta.
+    fichajeEnabled?: boolean;
     // catalogo-local (addendum 3) · ¿está PREVISTO que use Holded? NO es
     // lo mismo que `hasHoldedKey` ("¿lo tiene conectado ya?"), y esa
     // confusión es justo lo que tenía a un tenant con caja y sin Holded
@@ -99,6 +107,11 @@ interface MeResponse {
 // empresa con CRM y sin agenda aterriza en su cuenta.
 function landingSinCaja(tenant: MeResponse["tenant"]): string {
   if (tenant.agendaEnabled) return "/admin/agenda-catalog";
+  // F1 · el colegio de Talavera. Su panel entero es esta sección, así que
+  // aterriza en lo primero que va a mirar cada mañana: quién está dentro.
+  // Va DESPUÉS de la agenda para no mover a nadie de sitio: un tenant con
+  // agenda seguía entrando ahí antes de este bloque y sigue haciéndolo.
+  if (tenant.fichajeEnabled) return "/admin/fichaje";
   return "/admin/account";
 }
 
@@ -147,6 +160,13 @@ export function App() {
         {/* B-reservas-7a · el horario del centro NO va envuelto: es agenda,
             no caja. Misma regla que "Agenda · Catálogo". */}
         <Route path="/admin/agenda-hours" element={<AgendaHorarioPage />} />
+        {/* F1 (ADR-018) · el control horario. Envuelto en <FichajeGate>
+            por lo mismo que las de caja: esconder la entrada del sidebar
+            no basta, la URL sigue existiendo. Y NO va envuelto en
+            <CajaGate>: el cliente 0 es un colegio sin caja. */}
+        <Route path="/admin/fichaje" element={<FichajeGate title="Control horario"><HoyPage /></FichajeGate>} />
+        <Route path="/admin/fichaje/empleados" element={<FichajeGate title="Control horario"><EmpleadosPage /></FichajeGate>} />
+        <Route path="/admin/fichaje/registro" element={<FichajeGate title="Control horario"><RegistroPage /></FichajeGate>} />
         <Route path="/admin/tag-aliases" element={<CajaGate title="Etiquetas"><TagAliasesPage /></CajaGate>} />
         <Route path="/admin/tag-sections" element={<CajaGate title="Comanderas"><TagSectionsPage /></CajaGate>} />
         <Route path="/admin/printers" element={<CajaGate title="Impresoras"><PrintersPage /></CajaGate>} />

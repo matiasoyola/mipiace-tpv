@@ -157,6 +157,9 @@ importers:
       nodemon:
         specifier: ^3.1.7
         version: 3.1.14
+      pdf-parse:
+        specifier: ^1.1.1
+        version: 1.1.4
       pino-pretty:
         specifier: ^11.3.0
         version: 11.3.0

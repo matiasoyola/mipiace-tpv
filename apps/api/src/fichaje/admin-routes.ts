@@ -24,9 +24,11 @@ import { loadEnv } from "../env.js";
 import { requireOwnerOrManager } from "../auth/middleware.js";
 import { ensureFichajeEnabled } from "../lib/fichaje-gate.js";
 import { generatePairingToken } from "./auth.js";
+import { buildRegistroCsv, buildRegistroPdf, type ExportBlock } from "./export.js";
 import {
   CORRECTION_REASONS,
   correctionKind,
+  listTenantCorrections,
   listTimeEntryCorrections,
   recordTimeEntryCorrection,
   TimeCorrectionRejectedError,
@@ -463,6 +465,80 @@ export async function registerFichajeAdminRoutes(
 
   // ── Registro ─────────────────────────────────────────────────────────
 
+  /**
+   * El registro del mes, por empleado. Lo usan la pantalla y los dos
+   * exports, y por eso está aquí y no dentro del handler: si el PDF se
+   * construyera sobre otra consulta, el día que discrepen ganaría el PDF
+   * —que es el que se firma— y nadie sabría por qué.
+   */
+  async function construirRegistro(
+    tenantId: string,
+    month: string,
+    employeeId: string | null,
+  ): Promise<{
+    employees: Array<{ id: string; name: string; active: boolean }>;
+    blocks: ExportBlock[];
+    totalMinutes: number;
+    from: Date;
+    to: Date;
+  }> {
+    const { from, to } = monthRange(month);
+    const prisma = getPrisma();
+    const [employees, rows] = await Promise.all([
+      prisma.employee.findMany({
+        where: { tenantId },
+        select: { id: true, name: true, active: true },
+        orderBy: [{ active: "desc" }, { name: "asc" }],
+      }),
+      prisma.timeEntry.findMany({
+        where: {
+          tenantId,
+          startedAt: { gte: from, lt: to },
+          ...(employeeId ? { employeeId } : {}),
+        },
+        select: ENTRY_SELECT,
+        orderBy: { startedAt: "asc" },
+      }),
+    ]);
+    const correcciones = await prisma.timeEntryCorrection.groupBy({
+      by: ["timeEntryId"],
+      where: { timeEntryId: { in: rows.map((r) => r.id) } },
+      _count: { _all: true },
+    });
+    const counts = new Map(correcciones.map((c) => [c.timeEntryId, c._count._all]));
+    const nombre = new Map(employees.map((e) => [e.id, e.name]));
+
+    // Por EMPLEADO y no en una lista plana: el registro que firma cada
+    // trabajador es el suyo.
+    const porEmpleado = new Map<string, typeof rows>();
+    for (const r of rows) {
+      const l = porEmpleado.get(r.employeeId);
+      if (l) l.push(r);
+      else porEmpleado.set(r.employeeId, [r]);
+    }
+    const blocks: ExportBlock[] = [...porEmpleado.entries()]
+      .map(([id, list]) => {
+        const days = groupByDay(
+          list.map((r) => toEntryView(r as TimeEntryRow, counts.get(r.id) ?? 0)),
+        );
+        return {
+          employeeId: id,
+          employeeName: nombre.get(id) ?? "—",
+          days,
+          totalMinutes: totalMinutes(days),
+        };
+      })
+      .sort((a, b) => a.employeeName.localeCompare(b.employeeName));
+
+    return {
+      employees,
+      blocks,
+      totalMinutes: blocks.reduce((a, b) => a + b.totalMinutes, 0),
+      from,
+      to,
+    };
+  }
+
   app.get(
     "/admin/fichaje/entries",
     {
@@ -484,68 +560,18 @@ export async function registerFichajeAdminRoutes(
         employeeId?: string;
       };
       const mes = month ?? localDate(new Date()).slice(0, 7);
-      const { from, to } = monthRange(mes);
-      const prisma = getPrisma();
-
-      const [employees, rows] = await Promise.all([
-        prisma.employee.findMany({
-          where: { tenantId: auth.tenantId },
-          select: { id: true, name: true, active: true },
-          orderBy: [{ active: "desc" }, { name: "asc" }],
-        }),
-        prisma.timeEntry.findMany({
-          where: {
-            tenantId: auth.tenantId,
-            startedAt: { gte: from, lt: to },
-            ...(employeeId ? { employeeId } : {}),
-          },
-          select: ENTRY_SELECT,
-          orderBy: { startedAt: "asc" },
-        }),
-      ]);
-      const correcciones = await prisma.timeEntryCorrection.groupBy({
-        by: ["timeEntryId"],
-        where: { timeEntryId: { in: rows.map((r) => r.id) } },
-        _count: { _all: true },
-      });
-      const counts = new Map(correcciones.map((c) => [c.timeEntryId, c._count._all]));
-      const nombre = new Map(employees.map((e) => [e.id, e.name]));
-
-      // Por empleado, que es como se lee y como se exporta. "De todos" es
-      // la suma de los de uno, no una lista plana: el registro que firma
-      // cada trabajador es el suyo.
-      const porEmpleado = new Map<string, typeof rows>();
-      for (const r of rows) {
-        const l = porEmpleado.get(r.employeeId);
-        if (l) l.push(r);
-        else porEmpleado.set(r.employeeId, [r]);
-      }
-
-      const bloques = [...porEmpleado.entries()]
-        .map(([id, list]) => {
-          const days = groupByDay(
-            list.map((r) => toEntryView(r as TimeEntryRow, counts.get(r.id) ?? 0)),
-          );
-          return {
-            employeeId: id,
-            employeeName: nombre.get(id) ?? "—",
-            days,
-            totalMinutes: totalMinutes(days),
-          };
-        })
-        .sort((a, b) => a.employeeName.localeCompare(b.employeeName));
-
+      const r = await construirRegistro(
+        auth.tenantId,
+        mes,
+        employeeId ?? null,
+      );
       return {
         month: mes,
         timeZone: FICHAJE_TZ,
         employeeId: employeeId ?? null,
-        employees: employees.map((e) => ({
-          id: e.id,
-          name: e.name,
-          active: e.active,
-        })),
-        blocks: bloques,
-        totalMinutes: bloques.reduce((a, b) => a + b.totalMinutes, 0),
+        employees: r.employees,
+        blocks: r.blocks,
+        totalMinutes: r.totalMinutes,
       };
     },
   );
@@ -757,6 +783,143 @@ export async function registerFichajeAdminRoutes(
         where: { timeEntryId: entry.id },
       });
       return reply.code(201).send({ entry: toEntryView(fresco as TimeEntryRow, n) });
+    },
+  );
+
+  // ── el export a la Inspección ────────────────────────────────────────
+  //
+  // Mismo contenido en los dos formatos y sobre la MISMA consulta que la
+  // pantalla (`construirRegistro`). El PDF se firma; si sumara por su
+  // cuenta, el día que discrepara ganaría él.
+
+  const exportSchema = {
+    querystring: {
+      type: "object",
+      properties: {
+        month: { type: "string", pattern: "^\\d{4}-\\d{2}$" },
+        employeeId: { type: "string", format: "uuid" },
+      },
+    },
+  } as const;
+
+  async function datosDelExport(
+    tenantId: string,
+    month: string,
+    employeeId: string | null,
+  ) {
+    const prisma = getPrisma();
+    const registro = await construirRegistro(tenantId, month, employeeId);
+    const [tenant, corrections] = await Promise.all([
+      prisma.tenant.findUniqueOrThrow({
+        where: { id: tenantId },
+        select: { name: true, fiscalProfile: true },
+      }),
+      listTenantCorrections(prisma, {
+        tenantId,
+        from: registro.from,
+        to: registro.to,
+        employeeId,
+      }),
+    ]);
+    // Los datos fiscales existen desde H1 y son un check DURO de la
+    // activación: si faltan, el tenant no debería estar activo. Aun así
+    // se cae al nombre comercial en vez de reventar — un registro sin
+    // razón social es peor que ninguno, pero negarse a generarlo el día
+    // de una inspección es todavía peor.
+    const fp =
+      tenant.fiscalProfile &&
+      typeof tenant.fiscalProfile === "object" &&
+      !Array.isArray(tenant.fiscalProfile)
+        ? (tenant.fiscalProfile as Record<string, unknown>)
+        : {};
+    const str = (k: string) =>
+      typeof fp[k] === "string" && (fp[k] as string).trim() !== ""
+        ? (fp[k] as string).trim()
+        : null;
+    return {
+      tenantName: tenant.name,
+      legalName: str("legalName") ?? str("businessName"),
+      taxId: str("taxId") ?? str("nif") ?? str("fiscalNif"),
+      month,
+      timeZone: FICHAJE_TZ,
+      blocks: registro.blocks,
+      corrections,
+      generatedAt: new Date(),
+    };
+  }
+
+  /** "registro-jornada-2026-09-marta-ruiz.pdf" — el nombre lo va a ver
+   *  quien lo archive, y un `download.pdf` en la carpeta de descargas no
+   *  se encuentra nunca. */
+  function nombreFichero(
+    month: string,
+    blocks: ExportBlock[],
+    employeeId: string | null,
+    ext: string,
+  ): string {
+    const quien =
+      employeeId && blocks.length === 1
+        ? `-${blocks[0]!.employeeName
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/(^-|-$)/g, "")}`
+        : "";
+    return `registro-jornada-${month}${quien}.${ext}`;
+  }
+
+  app.get(
+    "/admin/fichaje/export.csv",
+    { ...guard, schema: exportSchema },
+    async (request, reply) => {
+      const auth = request.auth!;
+      const { month, employeeId } = request.query as {
+        month?: string;
+        employeeId?: string;
+      };
+      const mes = month ?? localDate(new Date()).slice(0, 7);
+      const datos = await datosDelExport(
+        auth.tenantId,
+        mes,
+        employeeId ?? null,
+      );
+      const csv = buildRegistroCsv(datos);
+      return reply
+        .code(200)
+        .header("Content-Type", "text/csv; charset=utf-8")
+        .header(
+          "Content-Disposition",
+          `attachment; filename="${nombreFichero(mes, datos.blocks, employeeId ?? null, "csv")}"`,
+        )
+        .send(csv);
+    },
+  );
+
+  app.get(
+    "/admin/fichaje/export.pdf",
+    { ...guard, schema: exportSchema },
+    async (request, reply) => {
+      const auth = request.auth!;
+      const { month, employeeId } = request.query as {
+        month?: string;
+        employeeId?: string;
+      };
+      const mes = month ?? localDate(new Date()).slice(0, 7);
+      const datos = await datosDelExport(
+        auth.tenantId,
+        mes,
+        employeeId ?? null,
+      );
+      const pdf = await buildRegistroPdf(datos);
+      return reply
+        .code(200)
+        .header("Content-Type", "application/pdf")
+        .header(
+          "Content-Disposition",
+          `attachment; filename="${nombreFichero(mes, datos.blocks, employeeId ?? null, "pdf")}"`,
+        )
+        .send(Buffer.from(pdf));
     },
   );
 

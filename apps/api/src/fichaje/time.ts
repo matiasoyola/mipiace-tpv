@@ -52,6 +52,30 @@ export function formatDuration(minutes: number): string {
   return `${h}h ${String(m).padStart(2, "0")}m`;
 }
 
+/** "Martes, 22 de septiembre" — como se lee un día en el PDF que se firma. */
+export function diaLargo(fecha: string, tz: string = FICHAJE_TZ): string {
+  // Anclado a mediodía UTC: ningún huso lo mueve de día al formatearlo.
+  const d = new Date(`${fecha}T12:00:00Z`);
+  const s = new Intl.DateTimeFormat("es-ES", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: tz,
+  }).format(d);
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** "Septiembre de 2026". */
+export function mesLargo(month: string): string {
+  const d = new Date(`${month}-15T12:00:00Z`);
+  const s = new Intl.DateTimeFormat("es-ES", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(d);
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 /** Primer instante UTC del mes local "YYYY-MM", y el primero del siguiente. */
 export function monthRange(month: string): { from: Date; to: Date } {
   const [y, m] = month.split("-").map(Number);

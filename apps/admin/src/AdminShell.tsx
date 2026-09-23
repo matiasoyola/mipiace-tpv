@@ -9,6 +9,8 @@ import {
   Building2,
   Calculator,
   CalendarClock,
+  ClipboardList,
+  Clock,
   Gift,
   KeyRound,
   Menu,
@@ -60,7 +62,11 @@ interface NavItem {
   // Esconder NO es gatear: cada una de estas secciones tiene además su
   // puerta de servidor (`lib/caja-gate.ts`). Esto es sólo para que el
   // propietario de un colegio no vea "Comanderas" en su barra lateral.
-  capability?: "agenda" | "caja" | "holded";
+  capability?: "agenda" | "caja" | "holded" | "fichaje";
+  // F1 · el activo se calcula por prefijo, y "Control horario"
+  // (`/admin/fichaje`) es prefijo de sus dos hermanas. Sin esto, las tres
+  // entradas se pintarían activas a la vez en cualquiera de ellas.
+  exact?: boolean;
 }
 
 const NAV_ITEMS: NavItem[] = [
@@ -140,6 +146,27 @@ const NAV_ITEMS: NavItem[] = [
   // v1.3-Operativa-Extra · Lote 1: editor de aliases de tags. Visible
   // a OWNER y MANAGER porque la operativa (renombrar categorías) es de
   // negocio, no técnica.
+  // F1 (ADR-018) · el control horario. Tres entradas y nada más. Para el
+  // colegio de Talavera ÉSTA es su barra lateral entera.
+  {
+    to: "/admin/fichaje",
+    label: "Control horario",
+    icon: Clock,
+    capability: "fichaje",
+    exact: true,
+  },
+  {
+    to: "/admin/fichaje/empleados",
+    label: "Empleados",
+    icon: Users,
+    capability: "fichaje",
+  },
+  {
+    to: "/admin/fichaje/registro",
+    label: "Registro de jornada",
+    icon: ClipboardList,
+    capability: "fichaje",
+  },
   { to: "/admin/tag-aliases", label: "Etiquetas", icon: Tag, capability: "caja" },
   // v1.4-Bar-Operativa-MVP Lote 2: mapa tag → sección de cocina/barra.
   // Sólo lo usan los tenants HOSPITALITY; en otros verticales queda
@@ -457,6 +484,9 @@ function MobileDrawer({
 interface TenantCapabilities {
   caja: boolean;
   agenda: boolean;
+  // F1 (ADR-018) · el control horario. `=== true` como las demás; la
+  // columna nace apagada y sólo el encendido explícito la abre.
+  fichaje: boolean;
   // H1 · no es una columna: es "tiene clave de Holded", que sale de
   // `/auth/me`. Se trata igual que las otras para gatear el sidebar.
   holded: boolean;
@@ -474,9 +504,13 @@ function useTenantCapabilities(): TenantCapabilities | null {
   useEffect(() => {
     let cancelled = false;
     Promise.all([
-      api<{ settings: { agendaEnabled?: boolean; cajaEnabled?: boolean } }>(
-        "/admin/tenant/settings",
-      ),
+      api<{
+        settings: {
+          agendaEnabled?: boolean;
+          cajaEnabled?: boolean;
+          fichajeEnabled?: boolean;
+        };
+      }>("/admin/tenant/settings"),
       api<{ tenant: { hasHoldedKey?: boolean; holdedEnabled?: boolean } }>(
         "/auth/me",
       ),
@@ -486,13 +520,20 @@ function useTenantCapabilities(): TenantCapabilities | null {
         setCaps({
           agenda: s.settings.agendaEnabled ?? false,
           caja: s.settings.cajaEnabled !== false,
+          fichaje: s.settings.fichajeEnabled === true,
           holded: me.tenant.hasHoldedKey === true,
           holdedEnabled: me.tenant.holdedEnabled !== false,
         });
       })
       .catch(() => {
         if (!cancelled)
-          setCaps({ agenda: false, caja: true, holded: true, holdedEnabled: true });
+          setCaps({
+            agenda: false,
+            caja: true,
+            fichaje: false,
+            holded: true,
+            holdedEnabled: true,
+          });
       });
     return () => {
       cancelled = true;
@@ -525,13 +566,16 @@ function NavList({
     if (item.capability === "agenda") return caps?.agenda === true;
     if (item.capability === "caja") return caps?.caja === true;
     if (item.capability === "holded") return caps?.holded === true;
+    if (item.capability === "fichaje") return caps?.fichaje === true;
     return true;
   });
   return (
     <nav className="space-y-1.5">
       {visibleItems.map((item) => {
         const Icon = item.icon;
-        const active = currentPath.startsWith(item.to);
+        const active = item.exact
+          ? currentPath === item.to
+          : currentPath.startsWith(item.to);
         const base =
           "w-full h-11 flex items-center gap-3 px-4 rounded-xl text-[14px] font-medium transition-colors";
         if (item.disabled) {
