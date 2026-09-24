@@ -44,10 +44,18 @@ import { AmountField } from "../components/AmountField.js";
 import { useBackGuard } from "../hooks/useBackGuard.js";
 import { CashPad } from "../components/CashPad.js";
 import type { ContactRef } from "./SalePage.contact.js";
-import { computeLine } from "../lib/cart.js";
+import { computeCartTaxBuckets, computeLine } from "../lib/cart.js";
 import type { CartLine, CartTotals } from "../lib/cart.js";
 import type { BusinessType } from "../lib/catalog.js";
+import {
+  FiscalNoConfiguradoError,
+  generarRegistroDeAnulacion,
+  generarRegistroDeVenta,
+  getFiscalConfig,
+  type RegistroDeVenta,
+} from "../lib/fiscal.js";
 import { newId } from "../lib/ids.js";
+import { captureError } from "../lib/sentry.js";
 import {
   isPermanentRejection,
   outboxAdd,
@@ -481,6 +489,48 @@ export function CheckoutOverlay(props: {
     // ¿Quedó la venta persistida en el outbox local? Sólo si es true
     // podemos prometer "venta guardada" cuando el POST falle.
     let persisted = false;
+    // V1-verifactu · el registro de facturación de esta venta, si el
+    // comercio emite. Vive fuera del `try` porque el `catch` lo necesita:
+    // un rechazo permanente deja un NÚMERO GASTADO, y un número gastado sin
+    // factura se cierra con un registro de anulación, no olvidándolo.
+    let registro: RegistroDeVenta | null = null;
+
+    // Descartar la venta cuando el servidor la rechaza para siempre.
+    //
+    // El número de factura NO se reutiliza jamás: dos facturas con el mismo
+    // número es peor que un hueco, y el hueco tiene arreglo — es
+    // exactamente para lo que existe el registro de anulación. Como el alta
+    // nunca llegó a la AEAT, la anulación va con `SinRegistroPrevio = S`
+    // (el caso «ANULACIÓN SIN REGISTRO PREVIO» del cuadro operativo del
+    // anexo).
+    async function descartarVenta() {
+      await outboxDelete(externalIdRef.current).catch(() => {});
+      if (!registro) return;
+      const gastado = registro;
+      registro = null;
+      try {
+        const anulacion = await generarRegistroDeAnulacion({
+          registerId: props.registerId,
+          numSerieFactura: gastado.numSerieFactura,
+          fechaExpedicion: gastado.fechaExpedicionIso,
+          sinRegistroPrevio: true,
+        });
+        await outboxAdd({
+          externalId: anulacion.body.externalId,
+          kind: "fiscal-void",
+          path: "/fiscal/anulaciones",
+          body: { fiscalRecord: anulacion.body },
+          label: `Anulación ${gastado.numSerieFactura}`,
+          total: 0,
+        });
+      } catch (err) {
+        captureError(err, {
+          registerId: props.registerId,
+          numSerieFactura: gastado.numSerieFactura,
+          motivo: "no se pudo anular un número de factura gastado",
+        });
+      }
+    }
     try {
       const linesPayload = props.lines.map((l) => ({
         productId: l.productId ?? undefined,
@@ -530,8 +580,39 @@ export function CheckoutOverlay(props: {
             })),
             total,
           ).payments;
+      // V1-verifactu (ADR-019) · el registro de facturación NACE AQUÍ, en
+      // el dispositivo, antes de salir hacia el servidor, y viaja dentro
+      // de la venta. La FAQ de la AEAT (§5) no admite otra cosa: no puede
+      // haber una factura sin su registro ni un registro sin su factura.
+      //
+      // Un fiado NO genera registro: la venta a crédito se entrega pero no
+      // se cobra, y su factura se emite al saldarla.
+      const fiscalConfig = getFiscalConfig(props.registerId);
+      if (!isCredit && fiscalConfig?.emite) {
+        try {
+          registro = await generarRegistroDeVenta({
+            registerId: props.registerId,
+            buckets: computeCartTaxBuckets(props.lines),
+            subtotal: props.totals.subtotalNet,
+            total,
+          });
+        } catch (err) {
+          // La factura no se ha podido generar. La VENTA SIGUE: cobrar
+          // siempre se puede, y un dato fiscal a medias con el cliente
+          // delante no puede tumbar un cobro. Queda en Sentry y la falta
+          // se ve en el panel de cadenas del comercio.
+          captureError(
+            err instanceof FiscalNoConfiguradoError
+              ? new Error(`verifactu: no se pudo generar el registro · ${err.motivo}`)
+              : err,
+            { registerId: props.registerId },
+          );
+        }
+      }
+
       const commonFields = {
         externalId: externalIdRef.current,
+        ...(registro ? { fiscalRecord: registro.body } : {}),
         payments: paymentsPayload,
         ...(isCredit ? { creditSale: true } : {}),
         contactHoldedId: props.contact?.holdedContactId,
@@ -614,7 +695,7 @@ export function CheckoutOverlay(props: {
           props.draftTicketId &&
           props.onDraftClosedElsewhere
         ) {
-          await outboxDelete(externalIdRef.current).catch(() => {});
+          await descartarVenta();
           setSubmitting(false);
           props.onDraftClosedElsewhere(
             "Esta mesa ya fue cobrada desde otra caja",
@@ -631,7 +712,7 @@ export function CheckoutOverlay(props: {
           props.draftTicketId &&
           props.onRefetchDraft
         ) {
-          await outboxDelete(externalIdRef.current).catch(() => {});
+          await descartarVenta();
           setServerMismatch(true);
           await props.onRefetchDraft().catch(() => {});
           setSubmitting(false);
@@ -640,7 +721,7 @@ export function CheckoutOverlay(props: {
         if (err.code === "MANAGER_AUTHORIZATION_REQUIRED") {
           // La venta no es definitiva hasta que el encargado autorice:
           // fuera del outbox (si se reenviase sola volvería a dar 403).
-          await outboxDelete(externalIdRef.current).catch(() => {});
+          await descartarVenta();
           const data = err.data as
             | { effectiveDiscountPct?: number; thresholdPct?: number }
             | null;
@@ -655,7 +736,7 @@ export function CheckoutOverlay(props: {
           err.code === "MANAGER_AUTHORIZATION_INVALID" ||
           err.code === "MANAGER_AUTHORIZATION_INSUFFICIENT"
         ) {
-          await outboxDelete(externalIdRef.current).catch(() => {});
+          await descartarVenta();
           setAuthToken(null);
           setAuthorizedBy(null);
           setError(err.message);
@@ -666,7 +747,7 @@ export function CheckoutOverlay(props: {
           // Error de validación con el cajero delante: lo ve inline,
           // corrige y recobra. No dejamos el item en el outbox para no
           // duplicar cuando reintente con el payload corregido.
-          await outboxDelete(externalIdRef.current).catch(() => {});
+          await descartarVenta();
           setError(err.message);
           setSubmitting(false);
           return;

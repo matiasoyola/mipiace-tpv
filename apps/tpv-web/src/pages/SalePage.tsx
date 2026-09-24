@@ -111,6 +111,7 @@ import { clientFullName } from "../lib/clients.js";
 import { useElapsedTime } from "../hooks/useElapsedTime.js";
 import { useStoreEventStream } from "../hooks/useStoreEventStream.js";
 import type { ModifierSelection } from "../lib/cart.js";
+import { refreshFiscalHead } from "../lib/fiscal.js";
 import { newId } from "../lib/ids.js";
 import {
   buildGroupsByProduct,
@@ -861,6 +862,13 @@ export function SalePage(props: SalePageProps) {
           );
         }
       }
+      // V1-verifactu (ADR-019) · la configuración fiscal de la caja y la
+      // cabeza de su cadena. Va aquí, junto al catálogo, y no en el cobro:
+      // en el cobro puede no haber red, y sin esto no se puede facturar.
+      // Falla en silencio a propósito — `refreshFiscalHead` ya se queda con
+      // lo cacheado si no hay red, y un comercio con Holded no usa nada de
+      // esto.
+      void refreshFiscalHead(props.registerId);
       try {
         const w = await loadWildcards();
         if (!cancelled) setWildcards(w);

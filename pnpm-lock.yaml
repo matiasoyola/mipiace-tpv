@@ -203,6 +203,9 @@ importers:
 
   apps/tpv-web:
     dependencies:
+      '@mipiacetpv/escpos-builder':
+        specifier: workspace:*
+        version: link:../../packages/escpos-builder
       '@mipiacetpv/ticket-model':
         specifier: workspace:*
         version: link:../../packages/ticket-model
@@ -212,6 +215,9 @@ importers:
       '@mipiacetpv/util-validation':
         specifier: workspace:*
         version: link:../../packages/util-validation
+      '@mipiacetpv/verifactu':
+        specifier: workspace:*
+        version: link:../../packages/verifactu
       '@sentry/react':
         specifier: ^10.57.0
         version: 10.57.0(react@19.2.6)

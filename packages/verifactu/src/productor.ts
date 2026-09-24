@@ -16,7 +16,12 @@
 // valida —el NIF con su dígito de control incluido— y se pone rojo si
 // alguna se vacía o se escribe mal.
 
-import { validateSpanishTaxId } from "@mipiacetpv/util-validation";
+// Por el SUBPATH y no por el barrel: `@mipiacetpv/util-validation` exporta
+// también `temporary-password`, que importa `node:crypto` — y este paquete
+// entra en el bundle del navegador. El barrel arrastraría Node entero al
+// TPV y la build de Vite se cae. Mismo motivo por el que `tpv-web` importa
+// `@mipiacetpv/util-validation/email` y no el índice.
+import { validateSpanishTaxId } from "@mipiacetpv/util-validation/spanish-tax-id";
 
 /** Nombre-razón social de la persona o entidad productora. Alfanumérico (120). */
 export const PRODUCTOR_NOMBRE_RAZON = "MI PIACE INTERNET SOLUTIONS SL";

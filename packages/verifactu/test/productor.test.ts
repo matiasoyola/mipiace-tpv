@@ -6,7 +6,7 @@
 // que se queden vacíos, mal escritos o fuera de los límites del anexo, que
 // es todo lo que un test puede hacer por un dato que vive fuera del repo.
 
-import { validateSpanishTaxId } from "@mipiacetpv/util-validation";
+import { validateSpanishTaxId } from "@mipiacetpv/util-validation/spanish-tax-id";
 import { describe, expect, it } from "vitest";
 
 import {

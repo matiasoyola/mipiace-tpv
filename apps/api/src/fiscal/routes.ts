@@ -182,6 +182,76 @@ export async function registerFiscalRoutes(app: FastifyInstance): Promise<void> 
     },
   );
 
+  // ── Anular un número gastado sin venta ───────────────────────────────
+  //
+  // El terminal generó el registro de alta y el servidor rechazó la venta
+  // para siempre (un descuento sin autorizar, una mesa que cobró otra caja).
+  // El número está gastado: reutilizarlo sería entregar dos facturas con el
+  // mismo número, que es peor que un hueco. Lo que cierra el hueco es este
+  // registro de anulación, que va con `SinRegistroPrevio = S` porque el alta
+  // nunca llegó a existir para la AEAT.
+  //
+  // No lleva `ticketId` a propósito: la venta no existe. Es lo único que lo
+  // distingue de `/tickets/:id/fiscal-void`.
+  app.post(
+    "/fiscal/anulaciones",
+    {
+      preHandler: [requireCashierSession, ensureCajaEnabled],
+      schema: {
+        body: {
+          type: "object",
+          required: ["fiscalRecord"],
+          additionalProperties: false,
+          properties: { fiscalRecord: FISCAL_RECORD_BODY_SCHEMA },
+        },
+      },
+    },
+    async (request, reply) => {
+      const cashier = request.cashier!;
+      const { fiscalRecord } = request.body as { fiscalRecord: FiscalRecordBody };
+      const prisma = getPrisma();
+
+      if (fiscalRecord.kind !== "ANULACION") {
+        return reply.code(400).send({
+          error: "FISCAL_RECORD_KIND",
+          message: "Esta ruta sólo acepta un registro de anulación.",
+        });
+      }
+      const tenant = await prisma.tenant.findUniqueOrThrow({
+        where: { id: cashier.tid },
+        select: { holdedEnabled: true },
+      });
+      if (!emiteMipiacetpv(tenant)) {
+        return reply.code(409).send({
+          error: "FISCAL_MODE_OFF",
+          message:
+            "Este comercio no emite sus propias facturas: el emisor es Holded.",
+        });
+      }
+
+      const resultado = await prisma.$transaction((tx) =>
+        ingestFiscalRecord({
+          tx,
+          tenantId: cashier.tid,
+          registerId: cashier.rid,
+          deviceId: cashier.did,
+          ticketId: null,
+          body: fiscalRecord,
+        }),
+      );
+      request.log.warn(
+        {
+          event: "fiscal.numero_gastado_anulado",
+          tenantId: cashier.tid,
+          registerId: cashier.rid,
+          chainStatus: resultado.chainStatus,
+        },
+        "se anuló un número de factura gastado sin venta",
+      );
+      return reply.code(201).send({ fiscalRecord: resultado });
+    },
+  );
+
   // ── El panel del comercio ────────────────────────────────────────────
   app.get(
     "/admin/fiscal/chains",

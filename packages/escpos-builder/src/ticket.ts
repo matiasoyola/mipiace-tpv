@@ -18,7 +18,7 @@
 // El binary devuelto va directo a la impresora (USB con WebUSB o WIFI
 // con TCP a :9100).
 
-import { allocateRoundingRemainder } from "@mipiacetpv/ticket-model";
+import { cuadrarDesglose } from "@mipiacetpv/ticket-model";
 
 import {
   concatBytes,
@@ -225,27 +225,23 @@ export function buildTicketReceipt(input: TicketReceiptInput): Uint8Array {
       input.subtotal != null
         ? input.subtotal
         : input.taxBreakdown.reduce((acc, b) => acc + b.base, 0);
-    const printed = allocateRoundingRemainder(
-      [
-        { key: "subtotal", amount: subtotalNet },
-        ...input.taxBreakdown.map((b, i) => ({
-          key: `tax:${i}`,
-          amount: b.tax,
-        })),
-      ],
-      input.total,
-    );
-    const printedByKey = new Map(printed.map((p) => [p.key, p.amount]));
-    input.taxBreakdown.forEach((b, i) => {
+    // V1-verifactu · el reparto del céntimo residual sale de
+    // `cuadrarDesglose`, en `@mipiacetpv/ticket-model`. Vivía aquí dentro
+    // hasta este bloque; ahora tiene un segundo consumidor con un requisito
+    // más duro: el `CuotaTotal` del registro de facturación, que entra en la
+    // huella. Si el papel y el registro difirieran en un céntimo, el cliente
+    // cotejaría su factura en la sede de la AEAT y no cuadraría.
+    const cuadrado = cuadrarDesglose({
+      subtotal: subtotalNet,
+      buckets: input.taxBreakdown,
+      total: input.total,
+    });
+    cuadrado.buckets.forEach((b) => {
       const label = `IVA ${b.rate}% s/${eur(b.base)}`;
-      parts.push(
-        escText(padBetween(label, eur(printedByKey.get(`tax:${i}`) ?? b.tax), COLUMNS)),
-      );
+      parts.push(escText(padBetween(label, eur(b.tax), COLUMNS)));
     });
     parts.push(
-      escText(
-        padBetween("Subtotal", eur(printedByKey.get("subtotal") ?? subtotalNet), COLUMNS),
-      ),
+      escText(padBetween("Subtotal", eur(cuadrado.subtotal), COLUMNS)),
     );
   }
 
