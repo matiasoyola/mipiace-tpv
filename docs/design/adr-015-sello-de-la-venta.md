@@ -3,6 +3,18 @@
 _2026-09-05. Decide cómo se hace inalterable el dato económico de una venta cobrada, sin
 convertir a mipiacetpv en SIF y sin partir la tabla `tickets`. Precede al bloque S1._
 
+> **NOTA (2026-09-24, bloque V1-verifactu).** El §2 de este ADR —«nada de encadenamiento de
+> huellas entre registros (…) esto no convierte a mipiacetpv en SIF»— **ya no describe el
+> sistema**. `docs/design/adr-019-cada-caja-es-un-sif.md` decide lo contrario para los
+> comercios que no usan Holded: cada caja es una instalación de SIF y emite facturas
+> simplificadas con registro encadenado.
+>
+> Lo que sigue vigente palabra por palabra es TODO LO DEMÁS: el sello de la venta (§4), su
+> trigger, la vía de corrección y los dos casos de borde del §5. El sello es por venta y sin
+> encadenar, la huella fiscal está encadenada y vive en otra tabla, y **conviven**: el sello
+> protege el dato económico, la huella prueba la integridad de la facturación. Ninguno de los
+> dos sustituye al otro.
+
 ---
 
 ## 0. Tesis en una frase
