@@ -12,18 +12,21 @@
 // dispositivo tiene en la mano: el carrito, los pagos, la cabecera fiscal
 // cacheada y el registro de facturación que acaba de generar.
 //
-// El módulo es PURO a propósito: sin `localStorage`, sin `fetch`, sin
-// React. Así lo puede importar el test que compara sus bytes con los del
-// camino del servidor (`apps/api/test/verifactu-un-solo-papel.test.ts`),
-// que es la red de seguridad contra que los dos caminos se separen.
+// El módulo vive AQUÍ, en el paquete del constructor de bytes, y no en
+// `apps/tpv-web`, por dos razones que son la misma: es puro —sin
+// `localStorage`, sin `fetch`, sin React— y así lo puede importar sin
+// contorsiones el test que compara sus bytes con los del camino del
+// servidor (`apps/api/test/verifactu-un-solo-papel.test.ts`), que es la red
+// de seguridad contra que los dos caminos se separen.
+
+import { changeFromCash } from "@mipiacetpv/ticket-model";
 
 import {
   buildTicketReceipt,
   type TicketLineEscpos,
   type TicketPaymentEscpos,
   type TicketReceiptInput,
-} from "@mipiacetpv/escpos-builder";
-import { changeFromCash, cuadrarDesglose } from "@mipiacetpv/ticket-model";
+} from "./ticket.js";
 
 /** La cabecera del comercio y de la tienda, tal y como la manda
  *  `GET /tpv/fiscal/head`. Los nombres son los de `TicketReceiptInput`
@@ -166,6 +169,3 @@ export function buildLocalTicketBytes(venta: VentaLocal): Uint8Array {
   return buildTicketReceipt(buildLocalTicketInput(venta));
 }
 
-/** Se re-exporta para que el test de los dos caminos pueda cuadrar el
- *  desglose igual que el papel sin volver a importarlo de otro sitio. */
-export { cuadrarDesglose };

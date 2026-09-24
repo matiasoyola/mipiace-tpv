@@ -24,14 +24,14 @@ process.env.JWT_REFRESH_SECRET = "b".repeat(40);
 process.env.SUPER_ADMIN_JWT_SECRET = "s".repeat(48);
 process.env.HOLDED_KEY_ENCRYPTION_SECRET = randomBytes(32).toString("base64");
 
-import { buildTicketReceipt } from "@mipiacetpv/escpos-builder";
+import {
+  buildLocalTicketInput,
+  buildTicketReceipt,
+  type VentaLocal,
+} from "@mipiacetpv/escpos-builder";
 import type { TicketTotals, TicketVerifactu } from "@mipiacetpv/ticket-model";
 import { describe, expect, it } from "vitest";
 
-import {
-  buildLocalTicketInput,
-  type VentaLocal,
-} from "../../tpv-web/src/lib/ticketLocal.js";
 import {
   ticketToEscposInput,
   type TicketForPrint,

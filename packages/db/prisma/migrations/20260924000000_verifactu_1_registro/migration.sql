@@ -114,6 +114,39 @@ CREATE INDEX "devices_revoked_by_device_id_idx"
 CREATE UNIQUE INDEX "devices_one_active_per_register_key"
     ON "devices"("register_id") WHERE "revoked_at" IS NULL;
 
+-- Y quien revoca al anterior es la BASE, no la ruta de emparejamiento.
+--
+-- La alternativa era hacerlo en `POST /devices/pair`. Se descartó por lo
+-- mismo que la identidad fiscal de la caja: habría que acordarse en cada
+-- camino que empareja un terminal, y olvidarse no da un error legible sino
+-- un 500 contra el índice de arriba en mitad de una implantación.
+--
+-- Aquí el índice único no se puede violar por construcción: cuando llega el
+-- INSERT, el anterior ya está revocado.
+--
+-- La traza de la pieza 1(b) la escribe este mismo trigger: `PAIRED_NEW` y a
+-- favor de quién. Por eso la clave ajena es DEFERRABLE INITIALLY DEFERRED —
+-- apunta a una fila que todavía no existe y se comprueba al hacer commit.
+CREATE FUNCTION mipiacetpv_devices_revoke_previous() RETURNS trigger
+LANGUAGE plpgsql AS $fn$
+BEGIN
+    IF NEW.revoked_at IS NOT NULL THEN
+        RETURN NEW;   -- alta de un device ya revocado: no releva a nadie
+    END IF;
+    UPDATE devices
+       SET revoked_at           = now(),
+           revoked_reason       = 'PAIRED_NEW',
+           revoked_by_device_id = NEW.id
+     WHERE register_id = NEW.register_id
+       AND revoked_at IS NULL;
+    RETURN NEW;
+END;
+$fn$;
+
+CREATE TRIGGER "devices_revoke_previous"
+    BEFORE INSERT ON "devices"
+    FOR EACH ROW EXECUTE FUNCTION mipiacetpv_devices_revoke_previous();
+
 -- ── 2 · la instalación SIF de la caja ──────────────────────────────────
 --
 -- La instalación cuelga de la CAJA y no del dispositivo. Si colgara del
@@ -252,7 +285,13 @@ BEGIN
     IF v_otra IS NOT NULL THEN
         RAISE EXCEPTION
             'SERIE_FISCAL_DUPLICADA: la serie "%" ya es la de la caja "%" en este comercio. Dos cajas con la misma serie parten la numeración correlativa.',
-            NEW.fiscal_series, v_otra USING ERRCODE = '23505';
+            NEW.fiscal_series, v_otra
+            -- 23514 (check_violation) y no 23505 (unique_violation), que es
+            -- lo que esto es semánticamente: el cliente Prisma convierte los
+            -- 23505 en un error estructurado y TIRA EL MENSAJE. Un mensaje
+            -- que explica el problema y que nadie puede leer no sirve de
+            -- nada; el resto de guardas de este bloque usan 23514 igual.
+            USING ERRCODE = '23514';
     END IF;
     RETURN NEW;
 END;

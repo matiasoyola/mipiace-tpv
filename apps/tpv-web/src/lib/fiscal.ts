@@ -37,7 +37,7 @@ import { cuadrarDesglose } from "@mipiacetpv/ticket-model";
 
 import { apiWithCashier } from "../api.js";
 import type { CartTaxBucket } from "./cart.js";
-import type { CabeceraTicketLocal } from "./ticketLocal.js";
+import type { CabeceraTicketLocal } from "@mipiacetpv/escpos-builder";
 import { newId } from "./ids.js";
 import { captureError } from "./sentry.js";
 

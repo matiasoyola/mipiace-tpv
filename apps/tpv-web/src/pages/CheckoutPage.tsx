@@ -33,6 +33,7 @@ import {
   Smartphone,
 } from "lucide-react";
 
+import { buildLocalTicketBytes } from "@mipiacetpv/escpos-builder";
 import { applyPaymentsToTotal } from "@mipiacetpv/ticket-model";
 // Sole · la regla de "¿esto es un email?" es UNA y vive en el paquete
 // compartido. El subpath `/email` evita arrastrar `node:crypto` (que sí
@@ -54,7 +55,6 @@ import {
   getFiscalConfig,
   type RegistroDeVenta,
 } from "../lib/fiscal.js";
-import { buildLocalTicketBytes } from "../lib/ticketLocal.js";
 import { newId } from "../lib/ids.js";
 import { getCashierSession } from "../storage.js";
 import { captureError } from "../lib/sentry.js";
