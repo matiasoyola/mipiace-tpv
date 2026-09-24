@@ -83,28 +83,38 @@ DECLARE
     v_cuenta int  := 0;
 BEGIN
     FOR v_fila IN
-        SELECT s.name AS store_name, r.name AS register_name, r.id AS register_id,
-               count(*) AS n
+        -- El COMERCIO va en la lista, y no por adorno: los seis clientes de
+        -- hoy tienen su tienda llamada «Tienda principal» y su caja «Caja 1».
+        -- Sin el nombre del comercio, esta lista dice dos veces lo mismo y
+        -- quien está desplegando tiene que ir a buscar el UUID a mano. Lo
+        -- vio el ensayo general sobre la copia de producción.
+        SELECT t.name AS tenant_name, s.name AS store_name, r.name AS register_name,
+               r.id AS register_id, count(*) AS n
           FROM devices d
           JOIN registers r ON r.id = d.register_id
           JOIN stores    s ON s.id = r.store_id
+          JOIN tenants   t ON t.id = s.tenant_id
          WHERE d.revoked_at IS NULL
            -- Sólo TERMINAL: el dispositivo del modo prueba no compite por
            -- la cadena de la caja y no puede abortar una migración.
            AND d.kind = 'TERMINAL'
-         GROUP BY s.name, r.name, r.id
+         -- Por `r.id`, que es lo único que identifica una caja. Agrupar por
+         -- nombre sumaría comercios distintos en una fila falsa. Las demás
+         -- columnas van al GROUP BY por exigencia del SQL, no porque
+         -- cambien el grano: `r.id` ya es la clave.
+         GROUP BY r.id, t.name, s.name, r.name
         HAVING count(*) > 1
-         ORDER BY s.name, r.name
+         ORDER BY t.name, s.name, r.name
     LOOP
         v_cuenta := v_cuenta + 1;
-        v_lista := v_lista || format(E'\n  · %s / %s (%s): %s dispositivos activos',
-                                     v_fila.store_name, v_fila.register_name,
-                                     v_fila.register_id, v_fila.n);
+        v_lista := v_lista || format(E'\n  · %s · %s / %s (%s): %s terminales activos',
+                                     v_fila.tenant_name, v_fila.store_name,
+                                     v_fila.register_name, v_fila.register_id, v_fila.n);
     END LOOP;
 
     IF v_cuenta > 0 THEN
         RAISE EXCEPTION
-            E'VERIFACTU_PRECONDICION: hay % caja(s) con más de un dispositivo activo:%\n\nDecide cuál se queda y revoca el resto desde el admin ANTES de volver a lanzar la migración. Esta migración no revoca nada por su cuenta.',
+            E'VERIFACTU_PRECONDICION: hay % caja(s) con más de un TERMINAL activo:%\n\nDecide cuál se queda y revoca el resto desde el admin ANTES de volver a lanzar la migración. Esta migración no revoca nada por su cuenta.',
             v_cuenta, v_lista
             USING ERRCODE = '23514';
     END IF;

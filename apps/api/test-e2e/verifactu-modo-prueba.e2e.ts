@@ -735,7 +735,7 @@ describe.skipIf(!e2eEnabled)("e2e · el modo prueba no es un terminal", () => {
         msg = err instanceof Error ? err.message : String(err);
       }
       expect(msg).toContain("VERIFACTU_PRECONDICION");
-      expect(msg).toContain("dispositivos activos");
+      expect(msg).toContain("terminales activos");
       // Y el índice sigue en su sitio: la transacción se deshizo entera.
       const vivos = await activos();
       expect(vivos.filter((d) => d.kind === "TERMINAL")).toHaveLength(1);

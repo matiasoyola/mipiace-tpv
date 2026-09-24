@@ -128,7 +128,11 @@ describe("verifactu-1b · las tres piezas filtran por tipo", () => {
     // Agrupar por nombre sumaría comercios distintos que se llaman igual
     // («Tienda principal / Caja 1»). `r.id` es lo único que identifica una
     // caja.
-    expect(bloque).toContain("GROUP BY s.name, r.name, r.id");
+    expect(bloque).toContain("GROUP BY r.id, t.name, s.name, r.name");
+    // Y nombra al comercio: los seis clientes de hoy tienen su tienda
+    // llamada «Tienda principal» y su caja «Caja 1», así que una lista sin
+    // el comercio dice seis veces lo mismo (lo vio el ensayo general).
+    expect(bloque).toContain("t.name AS tenant_name");
   });
 });
 
