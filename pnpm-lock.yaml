@@ -93,6 +93,9 @@ importers:
       '@mipiacetpv/util-validation':
         specifier: workspace:*
         version: link:../../packages/util-validation
+      '@mipiacetpv/verifactu':
+        specifier: workspace:*
+        version: link:../../packages/verifactu
       '@sentry/node':
         specifier: ^10.57.0
         version: 10.57.0

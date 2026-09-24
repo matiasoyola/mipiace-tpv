@@ -151,6 +151,67 @@ ALTER TABLE "registers"
     CHECK ("fiscal_series" IS NULL
            OR ("fiscal_series" ~ '^[ -~]{1,20}$' AND btrim("fiscal_series") = "fiscal_series"));
 
+-- La identidad fiscal de una caja NACE CON LA CAJA, y la pone la base.
+--
+-- La alternativa era ponerla en la ruta de alta de cajas y en la de
+-- activación del modo emisor. Dos caminos que hay que acordarse de tocar, y
+-- un tercero el día que aparezca otro — y una caja sin serie no puede
+-- facturar, así que olvidarse significa un comercio encendido que no puede
+-- cobrar. Aquí no hay nada que acordarse.
+--
+-- Se asigna SIEMPRE, también a las cajas de un comercio que factura con
+-- Holded. La columna se queda sin usar en ese caso, y a cambio el día que
+-- ese comercio pase a emitir ya tiene sus cajas listas. Dar la serie sólo a
+-- los que emiten obligaría a repartirla después, que es el reparto que este
+-- trigger existe para no tener que hacer.
+CREATE FUNCTION mipiacetpv_registers_fiscal_identity_default() RETURNS trigger
+LANGUAGE plpgsql AS $fn$
+DECLARE
+    v_tenant_id uuid;
+    v_n         int := 1;
+BEGIN
+    IF NEW.fiscal_installation_id IS NULL THEN
+        NEW.fiscal_installation_id := gen_random_uuid()::text;
+    END IF;
+    IF NEW.fiscal_series IS NULL THEN
+        SELECT s.tenant_id INTO v_tenant_id FROM stores s WHERE s.id = NEW.store_id;
+        -- El mismo lock que la comprobación de unicidad de abajo: dos altas
+        -- simultáneas en el mismo comercio no pueden salir las dos con C1.
+        PERFORM pg_advisory_xact_lock(hashtext('fiscal_series:' || v_tenant_id::text));
+        WHILE EXISTS (
+            SELECT 1 FROM registers r
+              JOIN stores s2 ON s2.id = r.store_id
+             WHERE s2.tenant_id = v_tenant_id
+               AND r.deleted_at IS NULL
+               AND r.fiscal_series = 'C' || v_n
+        ) LOOP
+            v_n := v_n + 1;
+        END LOOP;
+        NEW.fiscal_series := 'C' || v_n;
+    END IF;
+    RETURN NEW;
+END;
+$fn$;
+
+CREATE TRIGGER "registers_fiscal_identity_default"
+    BEFORE INSERT ON "registers"
+    FOR EACH ROW EXECUTE FUNCTION mipiacetpv_registers_fiscal_identity_default();
+
+-- Y el backfill de las cajas que ya existen. Aditivo: rellena dos columnas
+-- que hasta esta migración no existían, no toca ni un dato de negocio.
+UPDATE registers r
+   SET fiscal_installation_id = gen_random_uuid()::text,
+       fiscal_series = 'C' || sub.n
+  FROM (
+        SELECT r2.id,
+               row_number() OVER (PARTITION BY s.tenant_id ORDER BY r2.created_at, r2.id) AS n
+          FROM registers r2
+          JOIN stores s ON s.id = r2.store_id
+         WHERE r2.deleted_at IS NULL
+       ) sub
+ WHERE r.id = sub.id
+   AND r.fiscal_series IS NULL;
+
 -- Dos cajas del mismo comercio no pueden compartir serie: la numeración es
 -- «correlativa dentro de cada serie» (art. 7.1.a RD 1619/2012), y dos
 -- cadenas escribiendo en la misma serie la parten.

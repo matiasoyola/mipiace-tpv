@@ -64,6 +64,7 @@ import { startAgendaHoldTtlWorker } from "./workers/agenda-hold-ttl-worker.js";
 import { registerAgendaHoldTtlRepeatable } from "./queues/agenda-hold-ttl.js";
 import { startShiftDayCutWorker } from "./workers/shift-day-cut-worker.js";
 import { registerShiftDayCutRepeatable } from "./queues/shift-day-cut.js";
+import { registerFiscalRoutes } from "./fiscal/routes.js";
 import { registerTicketRoutes } from "./tickets/routes.js";
 import { registerCreditRoutes } from "./tickets/credit-routes.js";
 import { registerTicketDigitalRoute } from "./tickets/digital-route.js";
@@ -196,6 +197,8 @@ async function main() {
   await registerDeviceWebSocketRoute(app);
   await registerPublicTicketPdfRoute(app);
   await registerTicketRoutes(app);
+  // V1-verifactu (ADR-019) · el registro de facturación encadenado.
+  await registerFiscalRoutes(app);
   await registerCreditRoutes(app);
   await registerSendToKitchenRoute(app);
   await registerSendToKitchenEscposRoute(app);
