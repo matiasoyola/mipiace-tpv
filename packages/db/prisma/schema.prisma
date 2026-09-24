@@ -48,6 +48,29 @@ enum TicketStatus {
   ON_CREDIT
 }
 
+// V1-verifactu (ADR-019, addendum 1b) · qué es cada fila de `devices`.
+//
+// No todo lo que hay en esa tabla es un terminal de caja. El «modo prueba»
+// del super-admin (B-OnboardingV2) crea un dispositivo TÉCNICO en la caja del
+// cliente para validar el flujo del TPV antes de activarlo: no cobra, no
+// imprime y sus tickets se purgan al activar.
+//
+// La distinción va EN EL DATO y no en el nombre ni en el `user_agent`. Un
+// invariante que se decide comparando cadenas de texto se rompe el día que
+// alguien traduce el nombre, y lo que se rompía aquí era el terminal del
+// cliente: el trigger `devices_revoke_previous` lo revocaba al activar el
+// modo prueba, y el comercio se quedaba sin poder cobrar.
+enum DeviceKind {
+  // Un aparato del cliente emparejado con un código. Compite por la cadena
+  // de la caja: uno activo por caja, garantizado por el índice parcial
+  // `devices_one_active_per_register_key`.
+  TERMINAL
+  // El dispositivo del modo prueba. Ni releva a nadie al crearse o
+  // reactivarse, ni lo releva nadie al emparejar, ni cuenta para la
+  // precondición de la migración, ni genera registro de facturación.
+  TEST
+}
+
 // V1-verifactu (ADR-019) · por qué se revocó un dispositivo.
 enum DeviceRevokedReason {
   // Se emparejó otro a la misma caja. La caja tiene UN dispositivo activo:
@@ -930,15 +953,21 @@ model Device {
   pairedAt           DateTime             @default(now()) @map("paired_at") @db.Timestamptz()
   lastSeenAt         DateTime?            @map("last_seen_at") @db.Timestamptz()
   userAgent          String?              @map("user_agent")
+  // V1-verifactu addendum 1b · terminal de caja o dispositivo técnico del
+  // modo prueba. Ver `DeviceKind`. Default TERMINAL: todo lo emparejado con
+  // un código lo es, y el modo prueba lo pone explícito al crearlo.
+  kind               DeviceKind           @default(TERMINAL)
   deviceTokenHash    String               @unique @map("device_token_hash")
   // Si está revocado, la PWA detecta el rechazo y vuelve a la pantalla
   // de emparejamiento.
   revokedAt          DateTime?            @map("revoked_at") @db.Timestamptz()
   // V1-verifactu (ADR-019) · POR QUÉ se revocó, y a favor de quién.
   //
-  // Desde este bloque una caja tiene UN dispositivo activo, garantizado por
+  // Desde este bloque una caja tiene UN TERMINAL activo, garantizado por
   // el índice parcial `devices_one_active_per_register_key` (no expresable
-  // en Prisma; vive en la migración). Emparejar uno nuevo revoca el
+  // en Prisma; vive en la migración, y filtra `kind = 'TERMINAL'` — el
+  // dispositivo del modo prueba no compite por la cadena de la caja).
+  // Emparejar uno nuevo revoca el
   // anterior en la misma transacción, y estas dos columnas dejan la traza:
   // un laboratorio emparejado por error a la caja de un cliente se ve el
   // mismo día en el super-admin, en vez de descubrirse cuando la cadena de
