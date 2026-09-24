@@ -201,6 +201,43 @@ export function computeCart(lines: CartLine[]): CartTotals {
   };
 }
 
+// V1-verifactu (ADR-019) · el desglose por tipo de IVA del carrito.
+//
+// `computeCart` agrega por bucket y tira los buckets al salir, porque el
+// cajero sólo ve el total. El registro de facturación SÍ los necesita: el
+// `Desglose` del anexo lleva una entrada por tipo impositivo con su base y
+// su cuota.
+//
+// Mismo cálculo exacto que `computeCart` —netos crudos por bucket, redondeo
+// al final— para que el desglose y el total no puedan separarse. Lo que
+// cuadra el céntimo residual es `cuadrarDesglose`, compartido con el papel.
+export interface CartTaxBucket {
+  rate: number;
+  base: number;
+  tax: number;
+}
+
+export function computeCartTaxBuckets(lines: CartLine[]): CartTaxBucket[] {
+  const bucketNetByRate = new Map<number, number>();
+  for (const l of lines) {
+    const deltaPerUnit = sumModifierDeltas(l.modifierSelections) / 100;
+    const baseUnit =
+      l.unitPriceOverride != null ? l.unitPriceOverride : l.unitPrice;
+    const netPerUnit = (baseUnit + deltaPerUnit) * (1 - l.discountPct / 100);
+    bucketNetByRate.set(
+      l.taxRate,
+      (bucketNetByRate.get(l.taxRate) ?? 0) + netPerUnit * l.units,
+    );
+  }
+  return [...bucketNetByRate.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([rate, netSum]) => ({
+      rate,
+      base: round2(netSum),
+      tax: round2(netSum * (rate / 100)),
+    }));
+}
+
 export function getSuspendedCarts(): SuspendedCart[] {
   const raw = localStorage.getItem(SUSPENDED_KEY);
   if (!raw) return [];

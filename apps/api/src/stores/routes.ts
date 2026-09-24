@@ -16,6 +16,8 @@
 
 import type { FastifyInstance } from "fastify";
 
+import { serieEsValidaParaQr } from "@mipiacetpv/verifactu";
+
 import { requireOwner, requireOwnerOrManager } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
 import { ensureCajaEnabled } from "../lib/caja-gate.js";
@@ -469,6 +471,11 @@ export async function registerStoresRoutes(app: FastifyInstance): Promise<void> 
           message: "Tienda no encontrada",
         });
       }
+      // V1-verifactu (ADR-019) · esta ruta NO reparte serie ni número de
+      // instalación. Los pone la base al insertar (trigger
+      // `registers_fiscal_identity_default`), y por eso aquí no hay nada:
+      // si los repartiera la aplicación, habría que acordarse en cada
+      // camino que cree una caja, y una caja sin serie no puede facturar.
       const register = await prisma.register.create({
         data: {
           storeId,
@@ -536,6 +543,9 @@ export async function registerStoresRoutes(app: FastifyInstance): Promise<void> 
           properties: {
             name: { type: "string", minLength: 1, maxLength: 120 },
             numSerieHolded: { type: "string", maxLength: 64 },
+            // V1-verifactu · la serie de la FACTURA SIMPLIFICADA de esta
+            // caja. No es `numSerieHolded`: aquélla es la de Holded.
+            fiscalSeries: { type: "string", minLength: 1, maxLength: 20 },
             printerConfig: { type: "object", additionalProperties: true },
           },
         },
@@ -547,6 +557,7 @@ export async function registerStoresRoutes(app: FastifyInstance): Promise<void> 
       const body = request.body as {
         name?: string;
         numSerieHolded?: string;
+        fiscalSeries?: string;
         printerConfig?: Record<string, unknown>;
       };
       const prisma = getPrisma();
@@ -564,12 +575,36 @@ export async function registerStoresRoutes(app: FastifyInstance): Promise<void> 
           message: "Caja no encontrada",
         });
       }
+      // V1-verifactu · cambiar la serie con la cadena viva es cambiar el
+      // número de las facturas ya emitidas. Lo impide un trigger; aquí se
+      // contesta con un 409 legible en vez de dejar que reviente el motor.
+      if (body.fiscalSeries !== undefined) {
+        if (!serieEsValidaParaQr(body.fiscalSeries)) {
+          return reply.code(400).send({
+            error: "SERIE_FISCAL_INVALIDA",
+            message:
+              "La serie tiene que caber en el QR de la AEAT: sólo caracteres ASCII imprimibles, como mucho 20.",
+          });
+        }
+        const yaEmitio = await prisma.fiscalRecord.count({
+          where: { registerId },
+        });
+        if (yaEmitio > 0) {
+          return reply.code(409).send({
+            error: "SERIE_FISCAL_CONGELADA",
+            message:
+              "Esta caja ya ha emitido facturas. Su serie no se cambia: cambiarla cambiaría el número de las facturas ya entregadas.",
+          });
+        }
+      }
       const updated = await prisma.register.update({
         where: { id: registerId },
         data: {
           name: body.name,
           numSerieHolded:
             body.numSerieHolded === undefined ? undefined : body.numSerieHolded,
+          fiscalSeries:
+            body.fiscalSeries === undefined ? undefined : body.fiscalSeries,
           printerConfig: body.printerConfig
             ? (body.printerConfig as object)
             : undefined,
@@ -578,6 +613,7 @@ export async function registerStoresRoutes(app: FastifyInstance): Promise<void> 
           id: true,
           name: true,
           numSerieHolded: true,
+          fiscalSeries: true,
           printerConfig: true,
         },
       });

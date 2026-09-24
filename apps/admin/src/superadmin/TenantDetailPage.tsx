@@ -718,6 +718,10 @@ export function TenantDetailPage() {
           teléfono. La ficha administrativa ("Usuarios") sí se queda. */}
       {tenant.modules.caja && <CashiersPanel tenantId={tenant.id} />}
 
+      {/* V1-verifactu · las cadenas de facturación. Se pinta a sí mismo
+          sólo si el comercio emite; el propio panel decide. */}
+      {tenant.modules.caja && <FiscalChainsPanel tenantId={tenant.id} />}
+
       <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6">
         <h3 className="font-semibold text-slate-900 mb-4">
           Usuarios ({tenant.users.length})
@@ -2152,3 +2156,189 @@ function HoldedAccountIdPanel({
   );
 }
 
+
+// ── V1-verifactu (ADR-019) · las cadenas de facturación ─────────────────
+//
+// Sólo aparece cuando el comercio EMITE sus propias facturas. Un comercio
+// con Holded no tiene cadenas que mirar, y un panel vacío que dice «0
+// registros» invita a pensar que algo falla.
+//
+// Lo que este panel existe para enseñar: un registro que no encadena. El
+// servidor no lo descarta nunca —eso sería perder la prueba de que pasó— y
+// guardarlo sin enseñarlo sería la misma ceguera con más pasos.
+interface CadenaFiscal {
+  registerId: string;
+  registerName: string;
+  serie: string | null;
+  numeroInstalacion: string | null;
+  total: number;
+  integra: boolean;
+  primerFalloIndex: number | null;
+  marcadosBroken: number;
+  fallos: {
+    chain_index: number;
+    num_serie_factura: string;
+    huella_ok: boolean;
+    input_ok: boolean;
+    enlace_ok: boolean;
+    numeracion_ok: boolean;
+    chain_status: string;
+  }[];
+}
+
+interface RegistroRoto {
+  id: string;
+  registerId: string;
+  chainIndex: number;
+  numSerieFactura: string;
+  chainError: string | null;
+  generatedAt: string;
+  receivedAt: string;
+}
+
+interface FiscalPanelData {
+  emite: boolean;
+  entorno: "PRUEBAS" | "PRODUCCION";
+  cadenas: CadenaFiscal[];
+  rotos: RegistroRoto[];
+}
+
+export function FiscalChainsPanel({ tenantId }: { tenantId: string }) {
+  const [data, setData] = useState<FiscalPanelData | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function load(): Promise<void> {
+    setBusy(true);
+    setErr(null);
+    try {
+      setData(await superApi<FiscalPanelData>(`/super-admin/tenants/${tenantId}/fiscal`));
+    } catch (e) {
+      setErr(errToHuman(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantId]);
+
+  if (err) {
+    return (
+      <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6">
+        <h3 className="font-semibold text-slate-900 mb-2">Facturación (VERI*FACTU)</h3>
+        <p className="text-[12.5px] text-rose-700">{err}</p>
+      </div>
+    );
+  }
+  if (!data || !data.emite) return null;
+
+  const rota = data.cadenas.some((c) => !c.integra);
+
+  return (
+    <div
+      data-testid="fiscal-chains-panel"
+      className="bg-white border border-slate-200 rounded-xl p-6 mb-6"
+    >
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div>
+          <h3 className="font-semibold text-slate-900">Facturación (VERI*FACTU)</h3>
+          <p className="text-[12.5px] text-slate-500 mt-1">
+            Este comercio emite sus propias facturas simplificadas. Una cadena por caja.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void load()}
+          disabled={busy}
+          className="text-[12.5px] px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-50"
+        >
+          {busy ? "Verificando…" : "Verificar cadenas"}
+        </button>
+      </div>
+
+      {data.entorno === "PRUEBAS" && (
+        <p
+          data-testid="fiscal-entorno-pruebas"
+          className="text-[12.5px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4"
+        >
+          El QR de las facturas apunta al <strong>entorno de pruebas</strong> de la
+          AEAT. Los registros se generan y se conservan, pero todavía no se remiten:
+          un cliente que escanee su factura hoy no la encontrará.
+        </p>
+      )}
+
+      {data.cadenas.length === 0 ? (
+        <p className="text-[12.5px] text-slate-500">
+          Este comercio no tiene cajas todavía.
+        </p>
+      ) : (
+        <table className="w-full text-[13px] mb-4">
+          <thead className="text-slate-500 text-[11.5px] uppercase">
+            <tr>
+              <th className="text-left py-2">Caja</th>
+              <th className="text-left py-2">Serie</th>
+              <th className="text-right py-2">Registros</th>
+              <th className="text-left py-2 pl-4">Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.cadenas.map((c) => (
+              <tr key={c.registerId} className="border-t border-slate-100">
+                <td className="py-2">{c.registerName}</td>
+                <td className="py-2 font-mono text-[12px]">{c.serie ?? "—"}</td>
+                <td className="py-2 text-right tabular-nums">{c.total}</td>
+                <td className="py-2 pl-4">
+                  {c.integra ? (
+                    <span className="text-emerald-700">Íntegra</span>
+                  ) : (
+                    <span className="text-rose-700 font-medium">
+                      Rota desde el registro {c.primerFalloIndex}
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {rota && (
+        <p className="text-[12.5px] text-rose-800 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 mb-4">
+          Una cadena rota NO impide facturar y no se arregla sola: los registros ya
+          emitidos no se reescriben. Hay que mirar qué pasó antes de remitir nada a la
+          AEAT.
+        </p>
+      )}
+
+      <h4 className="font-medium text-slate-900 text-[13px] mb-2">
+        Registros que no encadenan ({data.rotos.length})
+      </h4>
+      {data.rotos.length === 0 ? (
+        <p className="text-[12.5px] text-slate-500">
+          Ninguno. Todos los registros recibidos encadenaron con el anterior de su caja.
+        </p>
+      ) : (
+        <ul className="space-y-2" data-testid="fiscal-rotos">
+          {data.rotos.map((r) => (
+            <li
+              key={r.id}
+              className="text-[12.5px] border border-rose-200 bg-rose-50 rounded-lg px-3 py-2"
+            >
+              <div className="font-mono text-[12px] text-slate-900">
+                {r.numSerieFactura} · posición {r.chainIndex}
+              </div>
+              <div className="text-rose-800 mt-0.5">{r.chainError}</div>
+              <div className="text-slate-500 mt-0.5">
+                Generado {new Date(r.generatedAt).toLocaleString("es-ES")} · recibido{" "}
+                {new Date(r.receivedAt).toLocaleString("es-ES")}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}

@@ -17,6 +17,12 @@ import type { FastifyInstance } from "fastify";
 
 import { verifyManagerAuthorization } from "../auth/manager-authorization.js";
 import { getPrisma } from "../context.js";
+import { ingestFiscalRecord, type IngestResult } from "../fiscal/ingest.js";
+import { comprobarGateFiscal } from "../fiscal/mode.js";
+import {
+  FISCAL_RECORD_BODY_SCHEMA,
+  type FiscalRecordBody,
+} from "../fiscal/payload.js";
 import { getStoreEventBus } from "../realtime/store-event-bus.js";
 import { emitTicketPaid, emitTicketRefunded } from "../realtime/emit-helpers.js";
 import { enqueueTicketUpload } from "../queues/ticket-upload.js";
@@ -153,6 +159,11 @@ interface CreateTicketBody {
   // venta. Ver `shift/impute.ts`. Opcional — los clientes viejos siguen
   // funcionando por el camino normal.
   occurredAt?: string;
+  // V1-verifactu (ADR-019) · el registro de facturación generado en el
+  // terminal al cobrar. Opcional: un comercio con Holded no lo manda nunca,
+  // y una APK vieja de un comercio que emite tampoco — y en ese caso la
+  // venta sigue adelante igual (ver `comprobarGateFiscal`).
+  fiscalRecord?: FiscalRecordBody;
 }
 
 export async function registerTicketRoutes(app: FastifyInstance): Promise<void> {
@@ -180,6 +191,13 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             attendedBy: { type: "string", minLength: 1, maxLength: 60 },
             creditSale: { type: "boolean" },
             occurredAt: { type: "string", format: "date-time" },
+            // V1-verifactu (ADR-019) · el registro de facturación que el
+            // terminal acaba de generar. Va DENTRO de la venta y no en una
+            // llamada aparte: la FAQ de la AEAT (§5) exige que no pueda
+            // haber facturas sin su registro ni registros sin su factura,
+            // así que los dos entran en la misma transacción o no entra
+            // ninguno. Opcional: un comercio con Holded no lo manda nunca.
+            fiscalRecord: FISCAL_RECORD_BODY_SCHEMA,
             lines: {
               type: "array",
               minItems: 1,
@@ -469,6 +487,35 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       // handler (la fila dentro de la transacción y el job de fuera).
       const destinoHolded = holdedDestination(tenantForDiscount);
 
+      // V1-verifactu (ADR-019) · nunca pueden emitir los dos.
+      //
+      // Un comercio con Holded que mandase un registro de facturación
+      // estaría emitiendo por dos vías a la vez, y eso sí se rechaza antes
+      // de cobrar: no es un dato a medias, es un cliente equivocado. Al
+      // revés —comercio que emite y APK vieja que no manda registro— la
+      // venta SIGUE: cobrar siempre se puede, y la falta se ve en el log y
+      // en el panel de cadenas.
+      const gateFiscal = comprobarGateFiscal(tenantForDiscount, body.fiscalRecord);
+      if (gateFiscal.rechazo) {
+        return reply.code(409).send(gateFiscal.rechazo);
+      }
+      if (gateFiscal.faltaRegistro) {
+        request.log.warn(
+          {
+            event: "fiscal.venta_sin_registro",
+            tenantId: cashier.tid,
+            registerId: cashier.rid,
+            externalId: body.externalId,
+          },
+          "el comercio emite sus facturas y esta venta llegó sin registro de facturación",
+        );
+      }
+      // Contenedor y no un `let` suelto: la asignación ocurre dentro del
+      // callback de la transacción, y el análisis de flujo de TypeScript no
+      // la ve — con un `let` el tipo se estrecharía a `null` justo donde
+      // hace falta leerlo.
+      const fiscal: { result: IngestResult | null } = { result: null };
+
       // v1.8-Fiado · gate de venta a crédito. El tenant debe tenerlo
       // activado y el ticket debe llevar deudor (contactHoldedId).
       if (isCredit) {
@@ -686,6 +733,23 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           // resultado para que la respuesta ya lo lleve sin releer.
           Object.assign(t, await sealTicket(tx, t.id));
         }
+        // V1-verifactu (ADR-019) · el registro de facturación, en la MISMA
+        // transacción que la venta. Si la venta se cae, el registro se cae
+        // con ella; si el registro reventara, la venta tampoco entra y el
+        // terminal la reintenta con el mismo externalId.
+        //
+        // Un registro que NO encadena no revienta: se guarda marcado. Por
+        // eso `ingestFiscalRecord` devuelve un veredicto en vez de lanzar.
+        if (body.fiscalRecord) {
+          fiscal.result = await ingestFiscalRecord({
+            tx,
+            tenantId: cashier.tid,
+            registerId: cashier.rid,
+            deviceId: cashier.did,
+            ticketId: t.id,
+            body: body.fiscalRecord,
+          });
+        }
         return t;
       });
 
@@ -771,6 +835,24 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       // no abrió). La trazabilidad de la imputación está donde tiene que
       // estar: el log `ticket.shift_imputed` del server, con el turno
       // pedido y el efectivo.
+      // V1-verifactu · si el registro no encadenó, se dice en el log con su
+      // motivo. No se le dice al cajero: la factura se ha entregado y es
+      // válida, y lo que hay que arreglar es la cadena, no la venta. Sale
+      // en el panel de cadenas y en el super-admin.
+      if (fiscal.result && fiscal.result.chainStatus !== "OK") {
+        request.log.error(
+          {
+            event: "fiscal.cadena_rota",
+            tenantId: cashier.tid,
+            registerId: cashier.rid,
+            ticketId: ticket.id,
+            fiscalRecordId: fiscal.result.id,
+            chainError: fiscal.result.chainError,
+          },
+          "registro de facturación guardado sin encadenar",
+        );
+      }
+
       return reply.code(201).send({
         ticket: serializeTicket(ticket),
         syncStatus: ticket.status,
@@ -779,6 +861,10 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         // los cobros; el contrato lo lleva siempre para que el cliente no
         // tenga que distinguir "no venía" de "no lo entiendo".
         emailIntentRejected: emailIntent.rejected,
+        // V1-verifactu · el veredicto de la cadena. El terminal no lo usa
+        // para decidir nada —la venta ya está cobrada— pero lo necesita
+        // para no reenviar un registro que ya entró.
+        fiscalRecord: fiscal.result,
       });
     },
   );
@@ -826,6 +912,9 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             giftReceiptIntent: { type: "boolean" },
             authorizationToken: { type: "string", minLength: 1, maxLength: 2048 },
             attendedBy: { type: "string", minLength: 1, maxLength: 60 },
+            // V1-verifactu (ADR-019) · el registro de facturación del cobro
+            // de mesa. Mismo contrato y mismo motivo que en `POST /tickets`.
+            fiscalRecord: FISCAL_RECORD_BODY_SCHEMA,
             payments: {
               type: "array",
               minItems: 1,
@@ -989,6 +1078,26 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       // camino dejaba al tenant sin Holded con todos sus tickets de mesa
       // en SYNC_FAILED.
       const destinoHolded = holdedDestination(tenantForDiscount);
+
+      // V1-verifactu (ADR-019) · el mismo gate y por las mismas razones que
+      // en `POST /tickets`.
+      const gateFiscal = comprobarGateFiscal(tenantForDiscount, body.fiscalRecord);
+      if (gateFiscal.rechazo) {
+        return reply.code(409).send(gateFiscal.rechazo);
+      }
+      if (gateFiscal.faltaRegistro) {
+        request.log.warn(
+          {
+            event: "fiscal.venta_sin_registro",
+            tenantId: cashier.tid,
+            registerId: cashier.rid,
+            ticketId,
+          },
+          "el comercio emite sus facturas y este cobro de mesa llegó sin registro de facturación",
+        );
+      }
+      const fiscal: { result: IngestResult | null } = { result: null };
+
       const grossSubtotal = totals.subtotal + totals.discount;
       const effectiveDiscountPct =
         grossSubtotal > 0
@@ -1188,6 +1297,19 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           // acaban de reescribir arriba (`deleteMany` + `create`) y eso
           // sólo es legal mientras el ticket no está sellado.
           Object.assign(t, await sealTicket(tx, t.id));
+          // V1-verifactu · el registro de facturación, en la misma
+          // transacción. Mismo sitio exacto que en `POST /tickets`: justo
+          // después del sello, cuando la venta ya es una venta.
+          if (body.fiscalRecord) {
+            fiscal.result = await ingestFiscalRecord({
+              tx,
+              tenantId: cashier.tid,
+              registerId: cashier.rid,
+              deviceId: cashier.did,
+              ticketId: t.id,
+              body: body.fiscalRecord,
+            });
+          }
           // La imputación sale de la tx para que el log y el Z
           // correctivo se hagan fuera, como en `POST /tickets`.
           return {
@@ -1355,12 +1477,27 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         "Mesa cobrada (DRAFT → PENDING_SYNC)",
       );
 
+      if (fiscal.result && fiscal.result.chainStatus !== "OK") {
+        request.log.error(
+          {
+            event: "fiscal.cadena_rota",
+            tenantId: cashier.tid,
+            registerId: cashier.rid,
+            ticketId: updated.id,
+            fiscalRecordId: fiscal.result.id,
+            chainError: fiscal.result.chainError,
+          },
+          "registro de facturación guardado sin encadenar",
+        );
+      }
+
       return reply.code(200).send({
         ticket: serializeTicket(updated),
         syncStatus: updated.status,
         // Sole · igual que la venta rápida: si el email se quedó fuera,
         // el TPV tiene que poder decirlo en la pantalla de después.
         emailIntentRejected: emailIntent.rejected,
+        fiscalRecord: fiscal.result,
       });
     },
   );

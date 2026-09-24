@@ -103,6 +103,20 @@ export interface TicketCreditNotice {
   amountDue: number;
 }
 
+// V1-verifactu (ADR-019) · la parte fiscal de una FACTURA SIMPLIFICADA.
+//
+// Presente sólo cuando el comercio emite sus propias facturas
+// (`holdedEnabled === false`). Cuando está, el documento deja de ser un
+// justificante y pasa a ser una factura del art. 7 del RD 1619/2012.
+export interface TicketVerifactu {
+  /** `C1/000123`. El NÚMERO DE LA FACTURA, no `internalNumber`. */
+  numSerieFactura: string;
+  /** La URL del servicio de cotejo de la AEAT que va dentro del QR. */
+  qrUrl: string;
+  /** `dd-mm-yyyy`, como la pide el QR y el registro. */
+  fechaExpedicion: string;
+}
+
 export interface TicketDocument {
   fiscal: TicketFiscal;
   store: TicketStore;
@@ -114,4 +128,5 @@ export interface TicketDocument {
   refund?: TicketRefund;
   footer: TicketFooter;
   creditNotice?: TicketCreditNotice;
+  verifactu?: TicketVerifactu;
 }

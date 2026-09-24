@@ -4,6 +4,7 @@ export default [
   "packages/ticket-model",
   "packages/ticket-pdf",
   "packages/util-validation",
+  "packages/verifactu",
   "apps/api",
   // A3-distribución: los guardias de los scripts de build y de publicación.
   // No son de ningún paquete —build-release-apk.sh vive en apps/tpv-android y

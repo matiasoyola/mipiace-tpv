@@ -1,0 +1,36 @@
+QR tributario:
+
+         [ ##### QR ##### ]
+VERI*FACTU
+------------------------------------------
+PELUQUERIA SOLE SL
+Peluqueria Sole
+NIF: B45902186
+C/ Mayor 10, 45600 Talavera de la Reina
+Tel. 925 80 12 34
+------------------------------------------
+Factura C1/000123
+24/09/2026 11:42   (ref. 000123)
+Cajero: Ana
+------------------------------------------
+Corte de pelo
+1 x 18,00 Õ                        21,78 Õ
+Tinte
+1 x 12,00 Õ                        14,52 Õ
+Champu reparador
+1 x 2,00 Õ                          2,20 Õ
+------------------------------------------
+IVA 10% s/2,00 Õ                    0,20 Õ
+IVA 21% s/30,00 Õ                   6,30 Õ
+Subtotal                           32,00 Õ
+TOTAL                              38,50 Õ
+Efectivo                           38,50 Õ
+  Entregado                        40,00 Õ
+  Cambio                            1,50 Õ
+
+         [ ##### QR ##### ]
+
+Ver ticket online:
+https://ticket.mipiace.es...89abcdef/pdf
+
+Gracias por tu visita

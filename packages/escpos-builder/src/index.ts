@@ -51,3 +51,16 @@ export {
   escSize,
   escText,
 } from "./helpers.js";
+
+// V1-verifactu · el mapeo de una venta del TPV al input del constructor,
+// para que el dispositivo pueda imprimir sin red con ESTE mismo builder.
+export {
+  buildLocalTicketBytes,
+  buildLocalTicketInput,
+} from "./venta-local.js";
+export type {
+  CabeceraTicketLocal,
+  LineaTicketLocal,
+  PagoTicketLocal,
+  VentaLocal,
+} from "./venta-local.js";

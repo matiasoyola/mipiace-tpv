@@ -16,6 +16,8 @@ import { isValidEmail } from "@mipiacetpv/util-validation";
 import { renderTicketPdf } from "@mipiacetpv/ticket-pdf";
 import QRCode from "qrcode";
 
+import { renderQrTributarioPng } from "../fiscal/qr-png.js";
+
 import { getEmailSender } from "../email/sender.js";
 import { loadEnv } from "../env.js";
 import { loadTicketDocument } from "./build-document.js";
@@ -152,6 +154,11 @@ export async function sendTicketEmail(
     pdfBytes = await renderTicketPdf(doc, {
       qrPngBytes: qrPng ? new Uint8Array(qrPng.buffer, qrPng.byteOffset, qrPng.byteLength) : undefined,
       qrCaption,
+      // V1-verifactu · el QR tributario, arriba del todo. `undefined` en un
+      // comercio que factura con Holded.
+      qrTributarioPngBytes: await renderQrTributarioPng(doc, (err) =>
+        log.warn("QR tributario falló (el PDF sale sin él)", { emailJobId, err }),
+      ),
     });
   } catch (err) {
     log.warn("renderTicketPdf falló", { emailJobId, err });

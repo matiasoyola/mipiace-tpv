@@ -10,7 +10,9 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@mipiacetpv/escpos-builder": "workspace:*",
     "@mipiacetpv/ticket-model": "workspace:*",
+    "@mipiacetpv/verifactu": "workspace:*",
     "@mipiacetpv/ticket-pdf": "workspace:*",
     "@mipiacetpv/util-validation": "workspace:*",
     "@sentry/react": "^10.57.0",

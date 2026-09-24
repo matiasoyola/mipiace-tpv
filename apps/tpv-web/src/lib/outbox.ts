@@ -52,7 +52,12 @@ export type OutboxKind =
   | "client"
   // B-reservas-4 · alta de cita creada sin red. POST /agenda/appointments
   // idempotente por externalId; mismo envío genérico que "client".
-  | "appointment";
+  | "appointment"
+  // V1-verifactu (ADR-019) · la anulación de un número de factura que se
+  // gastó y cuya venta el servidor rechazó para siempre. Va por el outbox
+  // como todo lo demás: el número ya está gastado desde que se generó, así
+  // que su anulación no puede depender de que haya red en ese momento.
+  | "fiscal-void";
 export type OutboxStatus = "pending" | "rejected";
 
 export interface OutboxItem {

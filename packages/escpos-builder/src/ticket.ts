@@ -18,7 +18,11 @@
 // El binary devuelto va directo a la impresora (USB con WebUSB o WIFI
 // con TCP a :9100).
 
-import { allocateRoundingRemainder } from "@mipiacetpv/ticket-model";
+import { cuadrarDesglose } from "@mipiacetpv/ticket-model";
+import {
+  LEYENDA_ENCIMA_DEL_QR,
+  LEYENDA_VERIFACTU,
+} from "@mipiacetpv/verifactu";
 
 import {
   concatBytes,
@@ -113,6 +117,21 @@ export interface TicketReceiptInput {
   notes: string[];
   // URL pública del ticket digital (qr). Si null, no se imprime QR.
   publicTicketUrl: string | null;
+  // V1-verifactu (ADR-019) · la parte FISCAL de la factura simplificada:
+  // su número con serie y el QR tributario de cotejo. Sólo viene cuando
+  // el comercio emite sus propias facturas (`holdedEnabled === false`);
+  // un comercio con Holded imprime exactamente el mismo papel que antes.
+  //
+  // Cuando viene, el ticket deja de ser un justificante y pasa a ser una
+  // FACTURA SIMPLIFICADA del art. 7 del RD 1619/2012 — y eso obliga a
+  // cosas que hasta ahora eran opcionales: el desglose por tipo de IVA
+  // (art. 7.1.f) y la numeración correlativa con serie (art. 7.1.a).
+  verifactu?: {
+    // `C1/000123`. Es el NÚMERO DE LA FACTURA, no `internalNumber`.
+    numSerieFactura: string;
+    // La URL del servicio de cotejo de la AEAT que va dentro del QR.
+    qrUrl: string;
+  } | null;
   // Pie configurable del tenant ("Gracias por su compra"). Opcional.
   footer: string | null;
   // v1.10.2-impresion-honesta · reimpresión. Cuando el cajero pide una
@@ -135,6 +154,35 @@ export function buildTicketReceipt(input: TicketReceiptInput): Uint8Array {
 
   parts.push(escInit());
   parts.push(escCodePagePc850());
+
+  // ── QR tributario (V1-verifactu) ─────────────────────────────────────
+  //
+  // VA EL PRIMERO, antes de la cabecera del comercio. No es una elección
+  // de maquetación: el documento de la AEAT (§3) dice que el QR «se
+  // situará al principio de la factura, antes de que empiece el contenido
+  // de ésta generado por el sistema informático de facturación» y que
+  // «será siempre el primer código QR que aparecerá en la factura» — y
+  // este ticket lleva un segundo QR al final, el del ticket digital.
+  //
+  // Encima va `QR tributario:`, que es el texto que «siempre deberá ir
+  // precediéndolo» y sirve para distinguirlo del otro. Debajo, la frase
+  // del art. 20.1.b.
+  if (input.verifactu) {
+    parts.push(escAlign("center"));
+    parts.push(escText(LEYENDA_ENCIMA_DEL_QR));
+    // Módulo 6 y nivel M (art. 21.1: entre 30×30 y 40×40 mm, nivel M).
+    //
+    // La aritmética, para que el siguiente que lo toque sepa por qué 6:
+    // una POS-80 imprime a 203 dpi ≈ 8 puntos/mm. La URL de cotejo mide
+    // entre 110 y 150 bytes, que en modo byte y nivel M cae en la versión
+    // 6 o 7 del QR — 41 o 45 módulos de lado. Con módulo 6: 41·6 = 246
+    // puntos ≈ 30,8 mm y 45·6 = 270 ≈ 33,8 mm. Los dos dentro del rango.
+    // Con módulo 7 el caso largo se iría a 39,4 mm, pegado al techo.
+    parts.push(escQrCode(input.verifactu.qrUrl, 6, "M"));
+    parts.push(escText(LEYENDA_VERIFACTU));
+    parts.push(escAlign("left"));
+    parts.push(escSeparator(COLUMNS));
+  }
 
   // Cabecera comercio: bloque fiscal (razón social + NIF + dirección
   // fiscal + teléfono) replicando el del PDF, y debajo el nombre del
@@ -192,10 +240,21 @@ export function buildTicketReceipt(input: TicketReceiptInput): Uint8Array {
   // por la derecha más tarde con padding manual.
   parts.push(escAlign("left"));
   parts.push(escBold(true));
-  parts.push(
-    escText(`${input.internalNumber}  ${formatDateTime(input.issuedAt)}`),
-  );
-  parts.push(escBold(false));
+  if (input.verifactu) {
+    // El número FISCAL es el que manda: es el que el cliente teclea para
+    // cotejar y el que identifica la factura ante la AEAT. `internalNumber`
+    // baja a referencia operativa, que es lo que siempre fue.
+    parts.push(escText(`Factura ${input.verifactu.numSerieFactura}`));
+    parts.push(escBold(false));
+    parts.push(
+      escText(`${formatDateTime(input.issuedAt)}   (ref. ${input.internalNumber})`),
+    );
+  } else {
+    parts.push(
+      escText(`${input.internalNumber}  ${formatDateTime(input.issuedAt)}`),
+    );
+    parts.push(escBold(false));
+  }
   parts.push(escText(`Cajero: ${input.cashierLabel}`));
   if (input.tableName) {
     parts.push(escText(`Mesa:   ${input.tableName}`));
@@ -225,27 +284,23 @@ export function buildTicketReceipt(input: TicketReceiptInput): Uint8Array {
       input.subtotal != null
         ? input.subtotal
         : input.taxBreakdown.reduce((acc, b) => acc + b.base, 0);
-    const printed = allocateRoundingRemainder(
-      [
-        { key: "subtotal", amount: subtotalNet },
-        ...input.taxBreakdown.map((b, i) => ({
-          key: `tax:${i}`,
-          amount: b.tax,
-        })),
-      ],
-      input.total,
-    );
-    const printedByKey = new Map(printed.map((p) => [p.key, p.amount]));
-    input.taxBreakdown.forEach((b, i) => {
+    // V1-verifactu · el reparto del céntimo residual sale de
+    // `cuadrarDesglose`, en `@mipiacetpv/ticket-model`. Vivía aquí dentro
+    // hasta este bloque; ahora tiene un segundo consumidor con un requisito
+    // más duro: el `CuotaTotal` del registro de facturación, que entra en la
+    // huella. Si el papel y el registro difirieran en un céntimo, el cliente
+    // cotejaría su factura en la sede de la AEAT y no cuadraría.
+    const cuadrado = cuadrarDesglose({
+      subtotal: subtotalNet,
+      buckets: input.taxBreakdown,
+      total: input.total,
+    });
+    cuadrado.buckets.forEach((b) => {
       const label = `IVA ${b.rate}% s/${eur(b.base)}`;
-      parts.push(
-        escText(padBetween(label, eur(printedByKey.get(`tax:${i}`) ?? b.tax), COLUMNS)),
-      );
+      parts.push(escText(padBetween(label, eur(b.tax), COLUMNS)));
     });
     parts.push(
-      escText(
-        padBetween("Subtotal", eur(printedByKey.get("subtotal") ?? subtotalNet), COLUMNS),
-      ),
+      escText(padBetween("Subtotal", eur(cuadrado.subtotal), COLUMNS)),
     );
   }
 

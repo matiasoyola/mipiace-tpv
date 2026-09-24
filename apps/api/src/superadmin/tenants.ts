@@ -18,6 +18,7 @@ import {
 
 import { hashPassword } from "../auth/passwords.js";
 import { getPrisma } from "../context.js";
+import { comprobarSueloFiscal } from "../fiscal/activacion.js";
 import { encryptSecret } from "../crypto.js";
 import { holdedConnectionStatus } from "../holded/connection-status.js";
 import { loadEnv } from "../env.js";
@@ -1101,6 +1102,27 @@ export async function registerSuperAdminTenantsRoutes(
             message:
               "Esta empresa tiene Holded conectado. Desconecta primero la API Key: apagar Holded con la clave puesta dejaría ventas sin subir y documentos a medias.",
           });
+        }
+        // V1-verifactu (ADR-019) · apagar Holded ya no es sólo «trabajar
+        // sin ERP»: es que el emisor de la factura pasa a ser mipiacetpv.
+        // A partir del siguiente cobro, cada venta lleva su registro de
+        // facturación, y un registro sin NIF del emisor no es un registro.
+        //
+        // Se comprueba AQUÍ y no al cobrar, y ésa es toda la decisión: si
+        // se comprobara al cobrar, un dato fiscal a medias tumbaría una
+        // venta con el cliente delante. Comprobado al encender, cobrar no
+        // puede fallar por esto porque los datos ya estaban antes de la
+        // primera factura.
+        if (body.holdedEnabled === false) {
+          const suelo = await comprobarSueloFiscal(prisma, id);
+          if (!suelo.ok) {
+            return reply.code(409).send({
+              error: "SUELO_FISCAL_INCOMPLETO",
+              message:
+                "Esta empresa pasaría a emitir sus propias facturas simplificadas y todavía le faltan datos fiscales.",
+              problemas: suelo.problemas,
+            });
+          }
         }
         changes.holdedEnabled = {
           before: tenant.holdedEnabled,

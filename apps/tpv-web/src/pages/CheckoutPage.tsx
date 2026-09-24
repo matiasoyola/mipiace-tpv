@@ -33,6 +33,7 @@ import {
   Smartphone,
 } from "lucide-react";
 
+import { buildLocalTicketBytes } from "@mipiacetpv/escpos-builder";
 import { applyPaymentsToTotal } from "@mipiacetpv/ticket-model";
 // Sole · la regla de "¿esto es un email?" es UNA y vive en el paquete
 // compartido. El subpath `/email` evita arrastrar `node:crypto` (que sí
@@ -44,17 +45,29 @@ import { AmountField } from "../components/AmountField.js";
 import { useBackGuard } from "../hooks/useBackGuard.js";
 import { CashPad } from "../components/CashPad.js";
 import type { ContactRef } from "./SalePage.contact.js";
-import { computeLine } from "../lib/cart.js";
+import { computeCartTaxBuckets, computeLine } from "../lib/cart.js";
 import type { CartLine, CartTotals } from "../lib/cart.js";
 import type { BusinessType } from "../lib/catalog.js";
+import {
+  FiscalNoConfiguradoError,
+  generarRegistroDeAnulacion,
+  generarRegistroDeVenta,
+  getFiscalConfig,
+  type RegistroDeVenta,
+} from "../lib/fiscal.js";
 import { newId } from "../lib/ids.js";
+import { getCashierSession } from "../storage.js";
+import { captureError } from "../lib/sentry.js";
 import {
   isPermanentRejection,
   outboxAdd,
   outboxDelete,
   outboxReleaseAfterFailure,
 } from "../lib/outbox.js";
-import { openCashDrawerIfAvailable } from "../lib/escposPrint.js";
+import {
+  openCashDrawerIfAvailable,
+  printEscposUsb,
+} from "../lib/escposPrint.js";
 import { formatAmount, formatEur, parseAmount } from "../lib/money.js";
 import { scrollFocusIntoView } from "../lib/visualViewportSync.js";
 import {
@@ -481,6 +494,120 @@ export function CheckoutOverlay(props: {
     // ¿Quedó la venta persistida en el outbox local? Sólo si es true
     // podemos prometer "venta guardada" cuando el POST falle.
     let persisted = false;
+    // V1-verifactu · el registro de facturación de esta venta, si el
+    // comercio emite. Vive fuera del `try` porque el `catch` lo necesita:
+    // un rechazo permanente deja un NÚMERO GASTADO, y un número gastado sin
+    // factura se cierra con un registro de anulación, no olvidándolo.
+    let registro: RegistroDeVenta | null = null;
+    // Fuera del `try` por lo mismo: la impresión sin red ocurre en el
+    // `catch`, y necesita los pagos ya topeados al total.
+    let paymentsPayload: { method: string; amount: number; meta?: unknown }[] = [];
+
+    // La misma etiqueta que `cashierLabelFrom` del servidor: alias si lo
+    // hay, y si no la parte local del email. No se reutiliza
+    // `cashierDisplayLabel` de `storage.ts` porque ésa devuelve el email
+    // ENTERO, y el papel del servidor imprime la parte local — y los dos
+    // papeles tienen que decir lo mismo.
+    function etiquetaDelCajero(): string {
+      const sesion = getCashierSession();
+      if (!sesion) return "";
+      const alias = sesion.alias?.trim();
+      if (alias) return alias;
+      const at = sesion.email.indexOf("@");
+      return at <= 0 ? sesion.email : sesion.email.slice(0, at);
+    }
+
+    // El papel de una venta que todavía no ha llegado al servidor.
+    //
+    // Sólo con parte fiscal: un comercio que factura con Holded no tiene
+    // factura que entregar hasta que el ticket sube, y su papel sigue
+    // saliendo del servidor exactamente igual que antes de este bloque.
+    async function imprimirFacturaLocal(
+      reg: RegistroDeVenta | null,
+      pagos: { method: string; amount: number }[],
+      efectivoEntregado: number,
+    ) {
+      if (!reg || !printIntent) return;
+      const cabecera = getFiscalConfig(props.registerId)?.cabecera;
+      if (!cabecera) return;
+      try {
+        const bytes = buildLocalTicketBytes({
+          cabecera,
+          cashierLabel: etiquetaDelCajero(),
+          tableName: props.tableId ? (props.draftLabel ?? null) : null,
+          issuedAt: new Date(),
+          lines: props.lines.map((l) => {
+            const t = computeLine(l);
+            return {
+              description: l.nameSnapshot,
+              units: l.units,
+              unitPrice:
+                l.unitPriceOverride != null ? l.unitPriceOverride : l.unitPrice,
+              lineTotal: t.totalGross,
+            };
+          }),
+          payments: pagos.map((p) => ({ method: p.method, amount: p.amount })),
+          cashAmount: efectivoEntregado > 0 ? efectivoEntregado : null,
+          buckets: computeCartTaxBuckets(props.lines),
+          subtotal: props.totals.subtotalNet,
+          total,
+          notes: props.notes || null,
+          // Sin red todavía no existen: los asigna el servidor al
+          // persistir. El papel sale con su número FISCAL, que es el que
+          // identifica la factura.
+          internalNumber: null,
+          publicTicketUrl: null,
+          verifactu: {
+            numSerieFactura: reg.numSerieFactura,
+            qrUrl: reg.qrUrl,
+          },
+        });
+        await printEscposUsb(bytes);
+      } catch (err) {
+        captureError(err, {
+          registerId: props.registerId,
+          numSerieFactura: reg.numSerieFactura,
+          motivo: "no se pudo imprimir la factura sin red",
+        });
+      }
+    }
+
+    // Descartar la venta cuando el servidor la rechaza para siempre.
+    //
+    // El número de factura NO se reutiliza jamás: dos facturas con el mismo
+    // número es peor que un hueco, y el hueco tiene arreglo — es
+    // exactamente para lo que existe el registro de anulación. Como el alta
+    // nunca llegó a la AEAT, la anulación va con `SinRegistroPrevio = S`
+    // (el caso «ANULACIÓN SIN REGISTRO PREVIO» del cuadro operativo del
+    // anexo).
+    async function descartarVenta() {
+      await outboxDelete(externalIdRef.current).catch(() => {});
+      if (!registro) return;
+      const gastado = registro;
+      registro = null;
+      try {
+        const anulacion = await generarRegistroDeAnulacion({
+          registerId: props.registerId,
+          numSerieFactura: gastado.numSerieFactura,
+          fechaExpedicion: gastado.fechaExpedicionIso,
+          sinRegistroPrevio: true,
+        });
+        await outboxAdd({
+          externalId: anulacion.body.externalId,
+          kind: "fiscal-void",
+          path: "/fiscal/anulaciones",
+          body: { fiscalRecord: anulacion.body },
+          label: `Anulación ${gastado.numSerieFactura}`,
+          total: 0,
+        });
+      } catch (err) {
+        captureError(err, {
+          registerId: props.registerId,
+          numSerieFactura: gastado.numSerieFactura,
+          motivo: "no se pudo anular un número de factura gastado",
+        });
+      }
+    }
     try {
       const linesPayload = props.lines.map((l) => ({
         productId: l.productId ?? undefined,
@@ -519,7 +646,7 @@ export function CheckoutOverlay(props: {
       // cajero teclea en otra un importe ≥ total, y mandar un pago de
       // 0,00 € en tarjeta ensucia el ticket, el desglose del Z y el
       // recibo de Holded con un cobro que no existió.
-      const paymentsPayload = isCredit
+      paymentsPayload = isCredit
         ? []
         : applyPaymentsToTotal(
             payments.map((p) => ({
@@ -530,8 +657,39 @@ export function CheckoutOverlay(props: {
             })),
             total,
           ).payments;
+      // V1-verifactu (ADR-019) · el registro de facturación NACE AQUÍ, en
+      // el dispositivo, antes de salir hacia el servidor, y viaja dentro
+      // de la venta. La FAQ de la AEAT (§5) no admite otra cosa: no puede
+      // haber una factura sin su registro ni un registro sin su factura.
+      //
+      // Un fiado NO genera registro: la venta a crédito se entrega pero no
+      // se cobra, y su factura se emite al saldarla.
+      const fiscalConfig = getFiscalConfig(props.registerId);
+      if (!isCredit && fiscalConfig?.emite) {
+        try {
+          registro = await generarRegistroDeVenta({
+            registerId: props.registerId,
+            buckets: computeCartTaxBuckets(props.lines),
+            subtotal: props.totals.subtotalNet,
+            total,
+          });
+        } catch (err) {
+          // La factura no se ha podido generar. La VENTA SIGUE: cobrar
+          // siempre se puede, y un dato fiscal a medias con el cliente
+          // delante no puede tumbar un cobro. Queda en Sentry y la falta
+          // se ve en el panel de cadenas del comercio.
+          captureError(
+            err instanceof FiscalNoConfiguradoError
+              ? new Error(`verifactu: no se pudo generar el registro · ${err.motivo}`)
+              : err,
+            { registerId: props.registerId },
+          );
+        }
+      }
+
       const commonFields = {
         externalId: externalIdRef.current,
+        ...(registro ? { fiscalRecord: registro.body } : {}),
         payments: paymentsPayload,
         ...(isCredit ? { creditSale: true } : {}),
         contactHoldedId: props.contact?.holdedContactId,
@@ -614,7 +772,7 @@ export function CheckoutOverlay(props: {
           props.draftTicketId &&
           props.onDraftClosedElsewhere
         ) {
-          await outboxDelete(externalIdRef.current).catch(() => {});
+          await descartarVenta();
           setSubmitting(false);
           props.onDraftClosedElsewhere(
             "Esta mesa ya fue cobrada desde otra caja",
@@ -631,7 +789,7 @@ export function CheckoutOverlay(props: {
           props.draftTicketId &&
           props.onRefetchDraft
         ) {
-          await outboxDelete(externalIdRef.current).catch(() => {});
+          await descartarVenta();
           setServerMismatch(true);
           await props.onRefetchDraft().catch(() => {});
           setSubmitting(false);
@@ -640,7 +798,7 @@ export function CheckoutOverlay(props: {
         if (err.code === "MANAGER_AUTHORIZATION_REQUIRED") {
           // La venta no es definitiva hasta que el encargado autorice:
           // fuera del outbox (si se reenviase sola volvería a dar 403).
-          await outboxDelete(externalIdRef.current).catch(() => {});
+          await descartarVenta();
           const data = err.data as
             | { effectiveDiscountPct?: number; thresholdPct?: number }
             | null;
@@ -655,7 +813,7 @@ export function CheckoutOverlay(props: {
           err.code === "MANAGER_AUTHORIZATION_INVALID" ||
           err.code === "MANAGER_AUTHORIZATION_INSUFFICIENT"
         ) {
-          await outboxDelete(externalIdRef.current).catch(() => {});
+          await descartarVenta();
           setAuthToken(null);
           setAuthorizedBy(null);
           setError(err.message);
@@ -666,7 +824,7 @@ export function CheckoutOverlay(props: {
           // Error de validación con el cajero delante: lo ve inline,
           // corrige y recobra. No dejamos el item en el outbox para no
           // duplicar cuando reintente con el payload corregido.
-          await outboxDelete(externalIdRef.current).catch(() => {});
+          await descartarVenta();
           setError(err.message);
           setSubmitting(false);
           return;
@@ -684,6 +842,17 @@ export function CheckoutOverlay(props: {
           .then(() => true)
           .catch(() => false));
       if (saved) {
+        // V1-verifactu (ADR-019) · SIN RED, EL PAPEL SALE IGUAL.
+        //
+        // Hasta este bloque los bytes se le pedían siempre al servidor, así
+        // que un cobro sin conexión dejaba al cliente sin nada. La FAQ de
+        // la AEAT no lo admite: la factura con su QR se entrega en el
+        // momento. Los bytes los arma el MISMO `buildTicketReceipt` de
+        // siempre, con la cabecera que el terminal tiene cacheada.
+        //
+        // Best-effort: si no hay impresora, o falla, la venta ya está a
+        // salvo en el outbox y el cajero lo ve en la pantalla.
+        void imprimirFacturaLocal(registro, paymentsPayload, cashAmount);
         setConfirmed({
           kind: "pendingLocal",
           externalId: externalIdRef.current,

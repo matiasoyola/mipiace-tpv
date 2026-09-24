@@ -13,7 +13,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@mipiacetpv/ticket-model": "workspace:*"
+    "@mipiacetpv/ticket-model": "workspace:*",
+    "@mipiacetpv/verifactu": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.16.10",

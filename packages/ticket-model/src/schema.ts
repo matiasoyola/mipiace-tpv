@@ -102,6 +102,20 @@ export const TicketDocumentSchema = z.object({
       amountDue: z.number(),
     })
     .optional(),
+  // V1-verifactu · la parte fiscal de la factura simplificada. Opcional: un
+  // comercio que factura con Holded no la lleva nunca.
+  //
+  // `qrUrl` NO se valida como URL con zod, y es deliberado: mismo criterio
+  // que el aflojado del email de arriba. Si por lo que sea llegase una URL
+  // rara, lo que hay que hacer es entregar el documento y que se vea, no
+  // reventar el PDF público del cliente.
+  verifactu: z
+    .object({
+      numSerieFactura: z.string().min(1),
+      qrUrl: z.string().min(1),
+      fechaExpedicion: z.string().min(1),
+    })
+    .optional(),
 });
 
 export function assertTicketDocument(doc: unknown): void {

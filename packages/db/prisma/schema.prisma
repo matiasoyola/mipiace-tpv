@@ -48,6 +48,38 @@ enum TicketStatus {
   ON_CREDIT
 }
 
+// V1-verifactu (ADR-019) · por qué se revocó un dispositivo.
+enum DeviceRevokedReason {
+  // Se emparejó otro a la misma caja. La caja tiene UN dispositivo activo:
+  // el nuevo entra y el anterior sale, en la misma transacción.
+  PAIRED_NEW
+  // Alguien lo revocó a mano desde el admin.
+  ADMIN
+}
+
+// V1-verifactu (ADR-019) · los dos tipos de registro de facturación de la
+// Orden HAC/1177/2024. No hay un tercero: una devolución NO es una
+// anulación —la venta existió— y va como rectificativa, que es V3.
+enum FiscalRecordKind {
+  ALTA
+  ANULACION
+}
+
+// V1-verifactu · ¿este registro encadena con el anterior de su caja?
+//
+// Lo decide el SERVIDOR al insertar y no se toca después: si fuera
+// actualizable, el trigger append-only tendría una puerta, y una puerta en
+// una tabla cuyo valor entero es no tener puertas no se paga. La
+// verificación (`mipiacetpv_verify_fiscal_chain`) sólo consulta.
+enum FiscalChainStatus {
+  OK
+  // Llegó y se guardó igual, marcado y visible en el super-admin. NUNCA se
+  // descarta en silencio y NUNCA se recompone: la FAQ de desarrolladores
+  // de la AEAT (§5) prohíbe expresamente que el servidor reprocese un
+  // registro producido por el terminal.
+  BROKEN
+}
+
 enum PaymentMethod {
   CASH
   CARD
@@ -573,6 +605,8 @@ model Tenant {
   centerDays         CenterDay[]
   // F1 (ADR-018) · el registro de jornada.
   employees          Employee[]
+  // V1-verifactu (ADR-019) · los registros de facturación de sus cajas.
+  fiscalRecords      FiscalRecord[]
 
   // v1.3-SuperAdmin-Hub Lote 3 · el backfill y el hub buscan/listan
   // tenants por `holded_account_id`. Sin índice eran scans completos
@@ -810,6 +844,27 @@ model Register {
   // fiscal separada por caja. Nullable: puede crearse sin asignarla y
   // configurarla después.
   numSerieHolded String?   @map("num_serie_holded")
+  // V1-verifactu (ADR-019) · la identidad de esta caja COMO SIF.
+  //
+  // Cada caja es una instalación de sistema informático de facturación con
+  // su serie, su numeración y su cadena de registros. La identidad cuelga de
+  // la CAJA y no del dispositivo: si colgara del aparato, cambiar de tablet
+  // partiría el SIF en dos y la cadena tendría que empezar de cero.
+  //
+  // `fiscalSeries` es la serie de la FACTURA SIMPLIFICADA que emite
+  // mipiacetpv — `C1`, `C2`… NO es `numSerieHolded`, que es la serie de
+  // Holded: mezclarlas es el error exacto que este bloque existe para no
+  // cometer. Dos cajas del mismo comercio no pueden compartir serie (lo
+  // hace cumplir el trigger `registers_fiscal_series_unique`).
+  //
+  // `fiscalInstallationId` es el `NumeroInstalacion` del diseño de registro
+  // de la AEAT. Se genera UNA vez y es único global: «no puede repetirse
+  // nunca», ni siquiera reinstalando el mismo software en el mismo aparato.
+  //
+  // Las dos son NULL mientras la caja no emita, y se congelan en cuanto hay
+  // un registro en su cadena (trigger `registers_fiscal_identity_guard`).
+  fiscalSeries         String?  @map("fiscal_series")
+  fiscalInstallationId String?  @unique @map("fiscal_installation_id")
   ticketCounter  Int       @default(0) @map("ticket_counter")
   printerConfig  Json?     @map("printer_config")
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz()
@@ -823,6 +878,8 @@ model Register {
   tickets        Ticket[]
   refunds        Refund[]
   printerConfigs PrinterConfig[]
+  // V1-verifactu · la cadena de registros de facturación de esta caja.
+  fiscalRecords  FiscalRecord[]
 
   @@index([storeId])
   @@map("registers")
@@ -877,6 +934,20 @@ model Device {
   // Si está revocado, la PWA detecta el rechazo y vuelve a la pantalla
   // de emparejamiento.
   revokedAt          DateTime? @map("revoked_at") @db.Timestamptz()
+  // V1-verifactu (ADR-019) · POR QUÉ se revocó, y a favor de quién.
+  //
+  // Desde este bloque una caja tiene UN dispositivo activo, garantizado por
+  // el índice parcial `devices_one_active_per_register_key` (no expresable
+  // en Prisma; vive en la migración). Emparejar uno nuevo revoca el
+  // anterior en la misma transacción, y estas dos columnas dejan la traza:
+  // un laboratorio emparejado por error a la caja de un cliente se ve el
+  // mismo día en el super-admin, en vez de descubrirse cuando la cadena de
+  // esa caja ya está rota.
+  //
+  // NULL en todo lo revocado antes de este bloque: no sabemos por qué se
+  // hizo y no se inventa.
+  revokedReason      DeviceRevokedReason? @map("revoked_reason")
+  revokedByDeviceId  String?   @map("revoked_by_device_id") @db.Uuid
   // ISO 3166-1 alfa-2 del país de la última IP vista (geoip-lite). Se
   // usa para detectar saltos de país y disparar alerta email (§17.4).
   lastKnownIpCountry String?   @map("last_known_ip_country")
@@ -888,6 +959,14 @@ model Device {
   tenant           Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   register         Register           @relation(fields: [registerId], references: [id], onDelete: Cascade)
   consumedPairings PairingCode[]      @relation("PairingCodeConsumedBy")
+  // V1-verifactu · a favor de qué dispositivo se revocó éste, y a cuáles
+  // revocó él. La FK es DEFERRABLE INITIALLY DEFERRED en la migración: hay
+  // que revocar el anterior ANTES de insertar el nuevo (índice único), y en
+  // ese momento el nuevo todavía no existe.
+  revokedBy        Device?            @relation("DeviceRevokedBy", fields: [revokedByDeviceId], references: [id], onDelete: SetNull)
+  revoked          Device[]           @relation("DeviceRevokedBy")
+  // Registros de facturación que generó este dispositivo.
+  fiscalRecords    FiscalRecord[]
   // A5 · última instantánea que el terminal publicó por su canal de
   // soporte. 1:1, se sobreescribe en cada heartbeat.
   heartbeat        DeviceHeartbeat?
@@ -896,6 +975,7 @@ model Device {
 
   @@index([tenantId])
   @@index([registerId])
+  @@index([revokedByDeviceId])
   @@map("devices")
 }
 
@@ -1488,6 +1568,10 @@ model Ticket {
   emailJobs       TicketEmailJob[]
   printIntents    PrintIntent[]
   corrections     TicketCorrection[]
+  // V1-verifactu (ADR-019) · el registro de facturación de esta venta, y el
+  // de su anulación si la hubo. Lista y no 1:0..1 porque los dos cuelgan de
+  // la misma venta.
+  fiscalRecords   FiscalRecord[]
   // B-reservas-4 · cita → caja: el ticket pre-poblado que abre "Cobrar en
   // caja". Como mucho una cita apunta a un ticket (puente 1:0..1).
   appointment     Appointment?
@@ -2719,4 +2803,116 @@ model TimeEntryCorrection {
   /// siguiente `migrate dev` lo vería como sobrante y lo borraría.
   @@index([txid, timeEntryId, field])
   @@map("time_entry_corrections")
+}
+
+// V1-verifactu (ADR-019) · EL REGISTRO DE FACTURACIÓN.
+//
+// Una fila por cada factura simplificada emitida (ALTA) y por cada una
+// anulada (ANULACION), encadenadas por huella dentro de la caja que las
+// emitió. Es el dato que exige el RD 1007/2023 y que V2 remitirá a la AEAT.
+//
+// Nace EN EL DISPOSITIVO, al cobrar, y viaja dentro de la venta por el
+// outbox. Las dos cosas vienen de la misma FAQ de desarrolladores de la
+// AEAT: el registro debe estar «íntegramente producido en el momento de
+// generar la factura y el código QR y entregarla al cliente» (§5), y «no
+// puede haber facturas expedidas sin sus RF generados, ni RF generados sin
+// sus correspondientes facturas expedidas» (§5). Como el TPV cobra sin red,
+// generarlo en el servidor obligaría a tener red para cobrar.
+//
+// APPEND-ONLY, sin vía de corrección, y esa ausencia es deliberada: S1
+// tiene `record_ticket_correction` y F1 tiene `record_time_entry_correction`
+// porque un importe mal tecleado y una hora olvidada son errores humanos
+// que hay que poder arreglar dejando traza. Un registro de facturación no
+// se arregla: se anula y se emite otro. Lo dice la norma, y es la razón de
+// ser del registro de anulación.
+//
+// Los triggers y la función de verificación viven en la migración
+// `20260924000000_verifactu_1_registro` (Prisma no los expresa).
+model FiscalRecord {
+  // `dbgenerated` y no `uuid()`: la columna tiene `DEFAULT gen_random_uuid()`
+  // en la base, igual que `employees` y `time_entries` (F1). Con `uuid()`
+  // Prisma vería la migración como sobrante y querría quitar el default.
+  id         String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String @map("tenant_id") @db.Uuid
+  registerId String @map("register_id") @db.Uuid
+  // Idempotencia del outbox: el mismo cobro reenviado no crea dos
+  // registros. Lo genera el dispositivo, igual que `Ticket.externalId`.
+  externalId String @unique @map("external_id") @db.Uuid
+
+  kind FiscalRecordKind
+
+  // Posición en la cadena de ESTA caja, 1-based. No es el número de la
+  // factura: una anulación ocupa posición y no gasta número.
+  chainIndex Int @map("chain_index")
+
+  serie  String
+  numero Int
+  // El literal completo `C1/000123`. Se guarda entero porque es lo que
+  // entró en la huella y lo que va en el QR: recomponerlo a trozos en otro
+  // sitio es una forma de que deje de coincidir.
+  numSerieFactura String   @map("num_serie_factura")
+  fechaExpedicion DateTime @map("fecha_expedicion") @db.Date
+  // Lista L2 del anexo. `F2` = factura simplificada.
+  tipoFactura     String   @map("tipo_factura")
+
+  cuotaTotal   Decimal @map("cuota_total") @db.Decimal(12, 2)
+  importeTotal Decimal @map("importe_total") @db.Decimal(12, 2)
+
+  // Hexadecimal en MAYÚSCULAS, 64 caracteres. El formato lo comprueba un
+  // CHECK de la base: una huella en minúsculas se compara distinto y la
+  // AEAT la devolvería como «Aceptado con errores».
+  huella         String
+  huellaAnterior String? @map("huella_anterior")
+  primerRegistro Boolean @map("primer_registro")
+
+  // La marca de tiempo que cuenta, como TEXTO y no como DateTime. El huso
+  // forma parte del dato («el que está usando el sistema informático de
+  // facturación en el momento de generar el registro», anexo) y un
+  // timestamptz lo normaliza a UTC — con lo que la huella, calculada sobre
+  // el texto con su huso, dejaría de poder recalcularse.
+  fechaHoraHusoGen String @map("fecha_hora_huso_gen")
+
+  // La cadena EXACTA sobre la que se aplicó SHA-256. Redundante a
+  // propósito: es lo que permite verificar la huella sin volver a formatear
+  // ni un importe, dentro del propio motor (`sha256()` de Postgres 16).
+  huellaInput String @map("huella_input")
+
+  // El registro completo tal y como lo generó el dispositivo. Es lo que V2
+  // remitirá, SIN TOCARLO.
+  payload Json
+
+  ticketId      String? @map("ticket_id") @db.Uuid
+  anulaRecordId String? @unique @map("anula_record_id") @db.Uuid
+  deviceId      String? @map("device_id") @db.Uuid
+
+  // Reloj del dispositivo y reloj del servidor. «Generado sin conexión» se
+  // DERIVA de la distancia entre los dos y no se guarda como flag: un flag
+  // puede quedar desincronizado de lo que lo justifica (lección de F1).
+  generatedAt DateTime @map("generated_at") @db.Timestamptz()
+  receivedAt  DateTime @default(now()) @map("received_at") @db.Timestamptz()
+
+  chainStatus FiscalChainStatus @map("chain_status")
+  chainError  String?           @map("chain_error")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant   Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  // Restrict y no Cascade: borrar una caja no se lleva por delante las
+  // facturas que emitió.
+  register Register      @relation(fields: [registerId], references: [id], onDelete: Restrict)
+  ticket   Ticket?       @relation(fields: [ticketId], references: [id], onDelete: Restrict)
+  anula    FiscalRecord? @relation("FiscalRecordAnula", fields: [anulaRecordId], references: [id], onDelete: Restrict)
+  anulado  FiscalRecord? @relation("FiscalRecordAnula")
+  device   Device?       @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  // LA CADENA. Dos registros no pueden ocupar la misma posición.
+  @@unique([registerId, chainIndex])
+  @@index([tenantId, receivedAt])
+  @@index([ticketId])
+  @@index([deviceId])
+  // Los índices PARCIALES —la unicidad de (caja, serie, número) sólo entre
+  // altas, la de `anula_record_id`, y el de los BROKEN— se crean vía SQL
+  // manual en la migración: Prisma no los expresa. Misma nota que el índice
+  // parcial de `v1_8_fiado`.
+  @@map("fiscal_records")
 }

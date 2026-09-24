@@ -93,6 +93,9 @@ importers:
       '@mipiacetpv/util-validation':
         specifier: workspace:*
         version: link:../../packages/util-validation
+      '@mipiacetpv/verifactu':
+        specifier: workspace:*
+        version: link:../../packages/verifactu
       '@sentry/node':
         specifier: ^10.57.0
         version: 10.57.0
@@ -200,6 +203,9 @@ importers:
 
   apps/tpv-web:
     dependencies:
+      '@mipiacetpv/escpos-builder':
+        specifier: workspace:*
+        version: link:../../packages/escpos-builder
       '@mipiacetpv/ticket-model':
         specifier: workspace:*
         version: link:../../packages/ticket-model
@@ -209,6 +215,9 @@ importers:
       '@mipiacetpv/util-validation':
         specifier: workspace:*
         version: link:../../packages/util-validation
+      '@mipiacetpv/verifactu':
+        specifier: workspace:*
+        version: link:../../packages/verifactu
       '@sentry/react':
         specifier: ^10.57.0
         version: 10.57.0(react@19.2.6)
@@ -298,6 +307,9 @@ importers:
       '@mipiacetpv/ticket-model':
         specifier: workspace:*
         version: link:../ticket-model
+      '@mipiacetpv/verifactu':
+        specifier: workspace:*
+        version: link:../verifactu
     devDependencies:
       '@types/node':
         specifier: ^20.16.10
@@ -342,6 +354,9 @@ importers:
       '@mipiacetpv/ticket-model':
         specifier: workspace:*
         version: link:../ticket-model
+      '@mipiacetpv/verifactu':
+        specifier: workspace:*
+        version: link:../verifactu
       pdf-lib:
         specifier: ^1.17.1
         version: 1.17.1
@@ -360,6 +375,22 @@ importers:
         version: 2.1.9(@types/node@20.19.40)(jsdom@29.1.1)(terser@5.47.1)
 
   packages/util-validation:
+    devDependencies:
+      '@types/node':
+        specifier: ^20.16.10
+        version: 20.19.40
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
+        version: 2.1.9(@types/node@20.19.40)(jsdom@29.1.1)(terser@5.47.1)
+
+  packages/verifactu:
+    dependencies:
+      '@mipiacetpv/util-validation':
+        specifier: workspace:*
+        version: link:../util-validation
     devDependencies:
       '@types/node':
         specifier: ^20.16.10

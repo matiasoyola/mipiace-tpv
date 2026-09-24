@@ -19,6 +19,14 @@
 
 import { loadEnv } from "../env.js";
 import {
+  ticketToEscposInput,
+  type TicketForPrint,
+} from "./escpos-input.js";
+// Se re-exporta porque `test/ticket-net-unit-price.test.ts` lo importa
+// desde aquí desde v1.8, y ese test es una red de seguridad del precio
+// unitario que no tiene por qué moverse por un refactor de este bloque.
+export { ticketToEscposInput };
+import {
   buildTicketReceipt,
   sendOverTcp,
   type TicketLineEscpos,
@@ -32,7 +40,7 @@ import { requireCashierSession } from "../shift/cashier-session.js";
 import { cashierLabelFrom } from "../users/display.js";
 import { loadTicketDocument } from "./build-document.js";
 import { changeFromCash } from "@mipiacetpv/ticket-model";
-import type { TicketTotals } from "@mipiacetpv/ticket-model";
+import type { TicketTotals, TicketVerifactu } from "@mipiacetpv/ticket-model";
 import { ensureCajaEnabled } from "../lib/caja-gate.js";
 
 interface PrintQuery {
@@ -94,9 +102,15 @@ export async function registerTicketPrintRoute(
       // importante que el desglose — si armar el documento falla por lo que
       // sea, el ticket sale igual que hasta ahora (sin desglose).
       let ticketTotals: TicketTotals | null = null;
+      // V1-verifactu · el número fiscal y el QR tributario salen del MISMO
+      // documento que el desglose. No se vuelven a componer aquí: el papel
+      // y el PDF tienen que decir lo mismo, y la forma de garantizarlo es
+      // que salgan del mismo sitio.
+      let verifactu: TicketVerifactu | null = null;
       try {
         const doc = await loadTicketDocument({ prisma, ticketId });
         ticketTotals = doc?.totals ?? null;
+        verifactu = doc?.verifactu ?? null;
       } catch (err) {
         request.log.warn(
           {
@@ -112,6 +126,7 @@ export async function registerTicketPrintRoute(
           env.PUBLIC_TICKET_URL,
           ticketTotals,
           copy === true,
+          verifactu,
         ),
       );
 
@@ -207,48 +222,6 @@ export async function registerTicketPrintRoute(
   );
 }
 
-interface TicketForPrint {
-  id: string;
-  registerId: string;
-  internalNumber: string;
-  publicSlug: string;
-  total: { toString(): string };
-  cashAmount: { toString(): string } | null;
-  notes: string | null;
-  paidAt: Date | null;
-  createdAt: Date;
-  // v1.8-Fiado · si el ticket es un fiado con deuda viva, imprimimos la
-  // leyenda PENDIENTE DE PAGO. debtorName se hidrata desde el contacto.
-  status: string;
-  creditPending: { toString(): string } | null;
-  debtorName?: string | null;
-  table: { name: string } | null;
-  user: { email: string; alias: string | null };
-  register: {
-    name: string;
-    store: {
-      name: string;
-      fiscalAddress: unknown;
-    };
-  };
-  tenant: {
-    name: string;
-    receiptFooter: string | null;
-    fiscalProfile: unknown;
-  };
-  lines: Array<{
-    nameSnapshot: string;
-    units: { toString(): string };
-    unitPrice: { toString(): string };
-    unitPriceOverride: { toString(): string } | null;
-    total: { toString(): string };
-  }>;
-  payments: Array<{
-    method: string;
-    amount: { toString(): string };
-  }>;
-}
-
 async function loadTicketForPrint(
   prisma: ReturnType<typeof getPrisma>,
   ticketId: string,
@@ -320,166 +293,6 @@ async function loadTicketForPrint(
 // Convierte el ticket cargado en input para el builder ESC/POS. Vive
 // en el endpoint (no en el package) porque depende del shape Prisma y
 // de la lógica de "dónde sacar la dirección" — el package es agnóstico.
-export function ticketToEscposInput(
-  ticket: TicketForPrint,
-  publicTicketUrlBase: string,
-  // v1.9.10 · totales del modelo compartido (con el desglose de IVA por
-  // tipo, idéntico al del PDF). Opcional: si es null el ticket sale sin
-  // desglose, como antes.
-  totals: TicketTotals | null = null,
-  // v1.10.2-impresion-honesta · reimpresión: el papel lleva "COPIA - no
-  // fiscal". El original (impresión tras el cobro) nunca la lleva.
-  isCopy = false,
-): TicketReceiptInput {
-  const lines: TicketLineEscpos[] = ticket.lines.map((l) => {
-    const baseUnit = Number(l.unitPrice.toString());
-    const override = l.unitPriceOverride != null
-      ? Number(l.unitPriceOverride.toString())
-      : null;
-    return {
-      description: l.nameSnapshot,
-      units: Number(l.units.toString()),
-      unitPrice: override ?? baseUnit,
-      lineTotal: Number(l.total.toString()),
-    };
-  });
-
-  // Pagos, con la vuelta colgando de la ÚLTIMA fila de efectivo.
-  //
-  // v1.15-la-vuelta-existe §3 · antes se comparaba `cashAmount` contra
-  // el importe de cada fila CASH por separado. Con el error de B1 dentro
-  // del ticket los dos números eran el mismo billete, así que la
-  // condición `cash > amount` no se cumplía nunca y **el térmico no
-  // imprimía la línea CAMBIO jamás**: el cliente se llevaba un papel con
-  // "Efectivo 5,00" bajo un "TOTAL 3,00" y ninguna vuelta.
-  //
-  // Ahora la vuelta se calcula una sola vez —entregado menos el total
-  // aplicado en efectivo, `changeFromCash`— y se cuelga de la última
-  // fila CASH. En un cobro mixto con dos filas de efectivo la vuelta es
-  // una sola, no una por fila.
-  const cashAmountNum =
-    ticket.cashAmount != null ? Number(ticket.cashAmount.toString()) : null;
-  const change = changeFromCash(
-    ticket.payments.map((p) => ({
-      method: p.method,
-      amount: Number(p.amount.toString()),
-    })),
-    cashAmountNum,
-  );
-  const lastCashIdx = ticket.payments.reduce(
-    (idx, p, i) => (p.method === "CASH" ? i : idx),
-    -1,
-  );
-  const payments: TicketPaymentEscpos[] = ticket.payments.map((p, i) => {
-    const amount = Number(p.amount.toString());
-    const base: TicketPaymentEscpos = {
-      label: methodLabel(p.method),
-      amount,
-    };
-    if (i === lastCashIdx && change > 0 && cashAmountNum != null) {
-      base.cashReceived = +cashAmountNum.toFixed(2);
-      base.cashChange = change;
-    }
-    return base;
-  });
-
-  const issuedAt = ticket.paidAt ?? ticket.createdAt;
-
-  const fiscal = extractFiscal(ticket.tenant.fiscalProfile);
-
-  return {
-    legalName: fiscal.legalName,
-    taxId: fiscal.taxId,
-    fiscalAddress: fiscal.address,
-    phone: fiscal.phone,
-    businessName:
-      ticket.register.store.name && ticket.register.store.name.length > 0
-        ? ticket.register.store.name
-        : ticket.tenant.name,
-    businessAddress: formatAddress(ticket.register.store.fiscalAddress),
-    internalNumber: ticket.internalNumber,
-    issuedAt,
-    isCopy,
-    cashierLabel: cashierLabelFrom(ticket.user),
-    tableName: ticket.table?.name ?? null,
-    lines,
-    total: Number(ticket.total.toString()),
-    // v1.9.10 · desglose IVA por tipo + neto, del modelo compartido. Los
-    // shapes coinciden: TicketTaxBucket {rate,base,tax} === TicketTaxBucketEscpos.
-    taxBreakdown: totals?.taxBreakdown ?? null,
-    subtotal: totals?.subtotal ?? null,
-    payments,
-    notes: ticket.notes ? [ticket.notes] : [],
-    publicTicketUrl: `${publicTicketUrlBase}/tickets/${ticket.publicSlug}/pdf`,
-    footer: ticket.tenant.receiptFooter,
-    // v1.8-Fiado · leyenda PENDIENTE DE PAGO si hay deuda viva.
-    creditNotice:
-      ticket.creditPending != null && Number(ticket.creditPending) > 0
-        ? {
-            debtorName: ticket.debtorName ?? null,
-            amountDue: Number(ticket.creditPending.toString()),
-          }
-        : null,
-  };
-}
-
-function methodLabel(method: string): string {
-  switch (method) {
-    case "CASH":
-      return "Efectivo";
-    case "CARD":
-      return "Tarjeta";
-    case "BIZUM":
-      return "Bizum";
-    case "VOUCHER":
-      return "Vale";
-    default:
-      return "Otro";
-  }
-}
-
-function formatAddress(raw: unknown): string | null {
-  if (!raw || typeof raw !== "object") return null;
-  const a = raw as Record<string, unknown>;
-  const street = typeof a.address === "string" ? a.address : null;
-  const city = typeof a.city === "string" ? a.city : null;
-  const zip = typeof a.postalCode === "string" ? a.postalCode : null;
-  const parts = [street, [zip, city].filter(Boolean).join(" ").trim()].filter(
-    (s) => s && s.length > 0,
-  );
-  return parts.length > 0 ? parts.join(", ") : null;
-}
-
-// Extrae la cabecera fiscal del `fiscalProfile` (jsonb libre del
-// onboarding/Holded o editado a mano). `address` puede venir como string
-// o como objeto estructurado (Holded a veces lo devuelve así), igual que
-// en el renderer del PDF. Devuelve null en los campos vacíos para que el
-// builder los omita.
-function extractFiscal(raw: unknown): {
-  legalName: string | null;
-  taxId: string | null;
-  address: string | null;
-  phone: string | null;
-} {
-  if (!raw || typeof raw !== "object") {
-    return { legalName: null, taxId: null, address: null, phone: null };
-  }
-  const fp = raw as Record<string, unknown>;
-  const str = (v: unknown): string | null =>
-    typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
-  let address: string | null = null;
-  if (typeof fp.address === "string") {
-    address = str(fp.address);
-  } else if (fp.address && typeof fp.address === "object") {
-    address = formatAddress(fp.address);
-  }
-  return {
-    legalName: str(fp.legalName),
-    taxId: str(fp.taxId),
-    address,
-    phone: str(fp.phone),
-  };
-}
 
 // Resuelve qué PrinterConfig usar para una impresión WIFI. Si el caller
 // pasó un `printerConfigId`, lo respetamos (validando que pertenezca al

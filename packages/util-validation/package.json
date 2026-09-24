@@ -7,7 +7,8 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./email": "./src/email.ts"
+    "./email": "./src/email.ts",
+    "./spanish-tax-id": "./src/spanish-tax-id.ts"
   },
   "scripts": {
     "test": "vitest run",
