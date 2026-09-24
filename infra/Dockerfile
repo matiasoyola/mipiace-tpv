@@ -41,6 +41,10 @@ COPY packages/holded-client/package.json packages/holded-client/
 COPY packages/ticket-model/package.json packages/ticket-model/
 COPY packages/ticket-pdf/package.json packages/ticket-pdf/
 COPY packages/util-validation/package.json packages/util-validation/
+# verifactu-1: el mismo olvido que escpos-builder en v1.9.4. Sin su manifest
+# el install no crea el enlace y el tsc del api no resuelve @mipiacetpv/verifactu.
+# infra/test/dockerfile-manifiestos.test.ts impide que vuelva a pasar.
+COPY packages/verifactu/package.json packages/verifactu/
 
 RUN pnpm install --frozen-lockfile
 
