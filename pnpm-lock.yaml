@@ -371,6 +371,22 @@ importers:
         specifier: ^2.1.4
         version: 2.1.9(@types/node@20.19.40)(jsdom@29.1.1)(terser@5.47.1)
 
+  packages/verifactu:
+    dependencies:
+      '@mipiacetpv/util-validation':
+        specifier: workspace:*
+        version: link:../util-validation
+    devDependencies:
+      '@types/node':
+        specifier: ^20.16.10
+        version: 20.19.40
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
+        version: 2.1.9(@types/node@20.19.40)(jsdom@29.1.1)(terser@5.47.1)
+
   spike/holded:
     dependencies:
       '@mipiacetpv/holded-client':
