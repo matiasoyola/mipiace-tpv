@@ -1,0 +1,3 @@
+bytes: 1236
+QR URL: https://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR?nif=B45902186&numserie=C1%2F000123&fecha=24-09-2026&importe=38.50
+numSerieFactura: C1/000123

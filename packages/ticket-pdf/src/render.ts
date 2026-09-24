@@ -224,7 +224,7 @@ export async function renderTicketPdf(
   const qrHeight = opts.qrPngBytes ? 30 * MM + LINE_HEIGHT * 2 : 0;
   // El QR tributario, su leyenda de encima, la de debajo y su blanco.
   const qrTributarioHeight = opts.qrTributarioPngBytes
-    ? (QR_TRIBUTARIO_MM + QR_TRIBUTARIO_MARGEN_MM * 2) * MM + LINE_HEIGHT * 3
+    ? (QR_TRIBUTARIO_MM + QR_TRIBUTARIO_MARGEN_MM * 3) * MM + LINE_HEIGHT * 3
     : 0;
   const pageHeight = baseHeight + qrHeight + qrTributarioHeight;
 
@@ -244,6 +244,10 @@ export async function renderTicketPdf(
   if (opts.qrTributarioPngBytes && doc.verifactu) {
     s.y -= QR_TRIBUTARIO_MARGEN_MM * MM;
     drawCenteredText(s, LEYENDA_ENCIMA_DEL_QR, FONT_SIZE_SMALL);
+    // El blanco de encima: `drawCenteredText` ya ha bajado una línea, pero
+    // los descendentes del texto se meterían en los 2 mm que el documento
+    // técnico (§3) exige dejar libres alrededor del código.
+    s.y -= QR_TRIBUTARIO_MARGEN_MM * MM;
     const qr = await pdf.embedPng(opts.qrTributarioPngBytes);
     const size = QR_TRIBUTARIO_MM * MM;
     page.drawImage(qr, {
@@ -252,9 +256,11 @@ export async function renderTicketPdf(
       width: size,
       height: size,
     });
-    s.y -= size + 4;
+    // Y el de debajo. Con los 4 pt que había aquí, la línea base de
+    // `VERI*FACTU` caía tan pegada que las mayúsculas SE METÍAN DENTRO del
+    // QR — se vio en la captura del bucle visual, no en un test.
+    s.y -= size + QR_TRIBUTARIO_MARGEN_MM * MM;
     drawCenteredText(s, LEYENDA_VERIFACTU, FONT_SIZE_NORMAL, true);
-    s.y -= QR_TRIBUTARIO_MARGEN_MM * MM;
     drawSeparator(s);
   }
 

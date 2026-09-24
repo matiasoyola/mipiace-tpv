@@ -183,6 +183,20 @@ export async function refreshFiscalHead(registerId: string): Promise<FiscalConfi
       : cabezaServidor;
 
   escribirEstado({ registerId, config, cabeza });
+
+  // Si este comercio emite y este aparato no sabe calcular la huella, hay
+  // que saberlo AHORA y no con un cliente delante. `crypto.subtle` está en
+  // toda WebView moderna, pero el camino de cobro no dependía de él hasta
+  // este bloque y un terminal viejo es exactamente el que no se prueba.
+  if (config.emite && !hasWebCrypto()) {
+    captureError(
+      new Error(
+        "verifactu: este terminal no expone crypto.subtle y el comercio emite sus facturas",
+      ),
+      { registerId, userAgent: navigator.userAgent },
+    );
+  }
+
   return config;
 }
 
