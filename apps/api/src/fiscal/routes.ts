@@ -24,7 +24,11 @@ import { requireSuperAdmin } from "../superadmin/middleware.js";
 import { chainSummary, readChainHead, verifyChain } from "./chain.js";
 import { entornoAeat } from "./entorno.js";
 import { ingestFiscalRecord } from "./ingest.js";
-import { emiteMipiacetpv, leerIdentidadFiscal } from "./mode.js";
+import {
+  emiteMipiacetpv,
+  leerIdentidadFiscal,
+  RECHAZO_ANULACION_DE_PRUEBA,
+} from "./mode.js";
 import { FISCAL_RECORD_BODY_SCHEMA, type FiscalRecordBody } from "./payload.js";
 
 export async function registerFiscalRoutes(app: FastifyInstance): Promise<void> {
@@ -43,6 +47,19 @@ export async function registerFiscalRoutes(app: FastifyInstance): Promise<void> 
     async (request) => {
       const cashier = request.cashier!;
       const prisma = getPrisma();
+      // V1-verifactu addendum 1b · el MODO PRUEBA no emite, aunque el
+      // comercio emita.
+      //
+      // Aquí es donde se corta de verdad: sin serie, sin instalación y sin
+      // cabeza de cadena, el terminal no genera nada y no gasta número. Las
+      // guardas de `POST /tickets` y de las anulaciones son el espejo por
+      // si llega un registro igual (APK vieja, outbox con cola de antes).
+      //
+      // Va ANTES de leer el tenant a propósito: lo que decide esto es quién
+      // llama, no cómo factura el comercio.
+      if (cashier.isTest) {
+        return { emite: false as const };
+      }
       const tenant = await prisma.tenant.findUniqueOrThrow({
         where: { id: cashier.tid },
         select: {
@@ -142,6 +159,21 @@ export async function registerFiscalRoutes(app: FastifyInstance): Promise<void> 
           error: "FISCAL_RECORD_KIND",
           message: "Esta ruta sólo acepta un registro de anulación.",
         });
+      }
+      // addendum 1b · el modo prueba no anula facturas reales. Aquí sí es
+      // un 409 y no un descarte silencioso: una anulación no cobra a nadie,
+      // así que rechazarla no deja a nadie sin poder cobrar.
+      if (cashier.isTest) {
+        request.log.error(
+          {
+            event: "fiscal.anulacion_de_prueba_rechazada",
+            tenantId: cashier.tid,
+            registerId: cashier.rid,
+            ticketId,
+          },
+          "registro de anulación de una sesión de prueba: rechazado",
+        );
+        return reply.code(409).send(RECHAZO_ANULACION_DE_PRUEBA);
       }
 
       const tenant = await prisma.tenant.findUniqueOrThrow({
@@ -243,6 +275,19 @@ export async function registerFiscalRoutes(app: FastifyInstance): Promise<void> 
           error: "FISCAL_RECORD_KIND",
           message: "Esta ruta sólo acepta un registro de anulación.",
         });
+      }
+      // addendum 1b · y por la misma razón que en `fiscal-void`: un número
+      // gastado en modo prueba no existe, porque el alta nunca entró.
+      if (cashier.isTest) {
+        request.log.error(
+          {
+            event: "fiscal.anulacion_de_prueba_rechazada",
+            tenantId: cashier.tid,
+            registerId: cashier.rid,
+          },
+          "anulación de un número gastado desde una sesión de prueba: rechazada",
+        );
+        return reply.code(409).send(RECHAZO_ANULACION_DE_PRUEBA);
       }
       const tenant = await prisma.tenant.findUniqueOrThrow({
         where: { id: cashier.tid },
