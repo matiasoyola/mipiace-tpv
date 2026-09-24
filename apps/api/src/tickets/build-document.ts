@@ -11,6 +11,24 @@ import {
 } from "@mipiacetpv/ticket-model";
 import { type PrismaClient } from "@mipiacetpv/db";
 import { isValidEmail } from "@mipiacetpv/util-validation";
+import {
+  buildQrUrl,
+  fechaAeatDeIso,
+  importeAeat,
+} from "@mipiacetpv/verifactu";
+
+import { entornoAeat } from "../fiscal/entorno.js";
+
+/** El NIF del emisor, leído del registro EMITIDO y no del perfil fiscal de
+ *  hoy: el perfil puede haber cambiado, y el QR tiene que llevar lo que se
+ *  emitió o el cotejo no cuadra. */
+function emisorDelRegistro(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return "";
+  const idFactura = (payload as Record<string, unknown>)["IDFactura"];
+  if (!idFactura || typeof idFactura !== "object") return "";
+  const v = (idFactura as Record<string, unknown>)["IDEmisorFactura"];
+  return typeof v === "string" ? v : "";
+}
 
 export interface LoadTicketDocumentOptions {
   prisma: PrismaClient;
@@ -46,6 +64,21 @@ export async function loadTicketDocument(
       user: { select: { email: true } },
       lines: { orderBy: { id: "asc" } },
       payments: true,
+      // V1-verifactu (ADR-019) · el registro de facturación de esta venta,
+      // si el comercio emite sus propias facturas. El ALTA es el que
+      // numera; la anulación, si existe, no cambia el número impreso — el
+      // documento entregado fue el que fue.
+      fiscalRecords: {
+        where: { kind: "ALTA" },
+        orderBy: { chainIndex: "asc" },
+        take: 1,
+        select: {
+          numSerieFactura: true,
+          fechaExpedicion: true,
+          importeTotal: true,
+          payload: true,
+        },
+      },
     },
   });
   if (!ticket) return null;
@@ -158,5 +191,35 @@ export async function loadTicketDocument(
       : undefined,
   };
 
-  return buildTicketDocument(input);
+  const doc = buildTicketDocument(input);
+
+  // V1-verifactu · la parte fiscal. El QR se RECONSTRUYE con los mismos
+  // cuatro datos que el terminal metió en el suyo, no se guarda: si se
+  // guardara habría dos sitios donde vive la misma URL y podrían separarse.
+  // El NIF sale del registro, que es lo que se emitió, y no del
+  // `fiscalProfile` de hoy — el perfil puede haber cambiado después.
+  // `?.[0]` y no `[0]`: el `include` de arriba siempre lo trae, pero esta
+  // función la llaman bancos de pruebas con filas construidas a mano, y un
+  // documento que revienta por una relación ausente es un PDF que el
+  // cliente no recibe.
+  const alta = ticket.fiscalRecords?.[0];
+  if (alta) {
+    const nif = emisorDelRegistro(alta.payload);
+    const fechaExpedicion = fechaAeatDeIso(
+      alta.fechaExpedicion.toISOString().slice(0, 10),
+    );
+    doc.verifactu = {
+      numSerieFactura: alta.numSerieFactura,
+      fechaExpedicion,
+      qrUrl: buildQrUrl({
+        entorno: entornoAeat(),
+        nif,
+        numSerieFactura: alta.numSerieFactura,
+        fechaExpedicion,
+        importeTotal: importeAeat(Number(alta.importeTotal.toString())),
+      }),
+    };
+  }
+
+  return doc;
 }

@@ -54,7 +54,9 @@ import {
   getFiscalConfig,
   type RegistroDeVenta,
 } from "../lib/fiscal.js";
+import { buildLocalTicketBytes } from "../lib/ticketLocal.js";
 import { newId } from "../lib/ids.js";
+import { getCashierSession } from "../storage.js";
 import { captureError } from "../lib/sentry.js";
 import {
   isPermanentRejection,
@@ -62,7 +64,10 @@ import {
   outboxDelete,
   outboxReleaseAfterFailure,
 } from "../lib/outbox.js";
-import { openCashDrawerIfAvailable } from "../lib/escposPrint.js";
+import {
+  openCashDrawerIfAvailable,
+  printEscposUsb,
+} from "../lib/escposPrint.js";
 import { formatAmount, formatEur, parseAmount } from "../lib/money.js";
 import { scrollFocusIntoView } from "../lib/visualViewportSync.js";
 import {
@@ -494,6 +499,78 @@ export function CheckoutOverlay(props: {
     // un rechazo permanente deja un NÚMERO GASTADO, y un número gastado sin
     // factura se cierra con un registro de anulación, no olvidándolo.
     let registro: RegistroDeVenta | null = null;
+    // Fuera del `try` por lo mismo: la impresión sin red ocurre en el
+    // `catch`, y necesita los pagos ya topeados al total.
+    let paymentsPayload: { method: string; amount: number; meta?: unknown }[] = [];
+
+    // La misma etiqueta que `cashierLabelFrom` del servidor: alias si lo
+    // hay, y si no la parte local del email. No se reutiliza
+    // `cashierDisplayLabel` de `storage.ts` porque ésa devuelve el email
+    // ENTERO, y el papel del servidor imprime la parte local — y los dos
+    // papeles tienen que decir lo mismo.
+    function etiquetaDelCajero(): string {
+      const sesion = getCashierSession();
+      if (!sesion) return "";
+      const alias = sesion.alias?.trim();
+      if (alias) return alias;
+      const at = sesion.email.indexOf("@");
+      return at <= 0 ? sesion.email : sesion.email.slice(0, at);
+    }
+
+    // El papel de una venta que todavía no ha llegado al servidor.
+    //
+    // Sólo con parte fiscal: un comercio que factura con Holded no tiene
+    // factura que entregar hasta que el ticket sube, y su papel sigue
+    // saliendo del servidor exactamente igual que antes de este bloque.
+    async function imprimirFacturaLocal(
+      reg: RegistroDeVenta | null,
+      pagos: { method: string; amount: number }[],
+      efectivoEntregado: number,
+    ) {
+      if (!reg || !printIntent) return;
+      const cabecera = getFiscalConfig(props.registerId)?.cabecera;
+      if (!cabecera) return;
+      try {
+        const bytes = buildLocalTicketBytes({
+          cabecera,
+          cashierLabel: etiquetaDelCajero(),
+          tableName: props.tableId ? (props.draftLabel ?? null) : null,
+          issuedAt: new Date(),
+          lines: props.lines.map((l) => {
+            const t = computeLine(l);
+            return {
+              description: l.nameSnapshot,
+              units: l.units,
+              unitPrice:
+                l.unitPriceOverride != null ? l.unitPriceOverride : l.unitPrice,
+              lineTotal: t.totalGross,
+            };
+          }),
+          payments: pagos.map((p) => ({ method: p.method, amount: p.amount })),
+          cashAmount: efectivoEntregado > 0 ? efectivoEntregado : null,
+          buckets: computeCartTaxBuckets(props.lines),
+          subtotal: props.totals.subtotalNet,
+          total,
+          notes: props.notes || null,
+          // Sin red todavía no existen: los asigna el servidor al
+          // persistir. El papel sale con su número FISCAL, que es el que
+          // identifica la factura.
+          internalNumber: null,
+          publicTicketUrl: null,
+          verifactu: {
+            numSerieFactura: reg.numSerieFactura,
+            qrUrl: reg.qrUrl,
+          },
+        });
+        await printEscposUsb(bytes);
+      } catch (err) {
+        captureError(err, {
+          registerId: props.registerId,
+          numSerieFactura: reg.numSerieFactura,
+          motivo: "no se pudo imprimir la factura sin red",
+        });
+      }
+    }
 
     // Descartar la venta cuando el servidor la rechaza para siempre.
     //
@@ -569,7 +646,7 @@ export function CheckoutOverlay(props: {
       // cajero teclea en otra un importe ≥ total, y mandar un pago de
       // 0,00 € en tarjeta ensucia el ticket, el desglose del Z y el
       // recibo de Holded con un cobro que no existió.
-      const paymentsPayload = isCredit
+      paymentsPayload = isCredit
         ? []
         : applyPaymentsToTotal(
             payments.map((p) => ({
@@ -765,6 +842,17 @@ export function CheckoutOverlay(props: {
           .then(() => true)
           .catch(() => false));
       if (saved) {
+        // V1-verifactu (ADR-019) · SIN RED, EL PAPEL SALE IGUAL.
+        //
+        // Hasta este bloque los bytes se le pedían siempre al servidor, así
+        // que un cobro sin conexión dejaba al cliente sin nada. La FAQ de
+        // la AEAT no lo admite: la factura con su QR se entrega en el
+        // momento. Los bytes los arma el MISMO `buildTicketReceipt` de
+        // siempre, con la cabecera que el terminal tiene cacheada.
+        //
+        // Best-effort: si no hay impresora, o falla, la venta ya está a
+        // salvo en el outbox y el cajero lo ve en la pantalla.
+        void imprimirFacturaLocal(registro, paymentsPayload, cashAmount);
         setConfirmed({
           kind: "pendingLocal",
           externalId: externalIdRef.current,

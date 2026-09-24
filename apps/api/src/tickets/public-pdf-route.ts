@@ -14,6 +14,7 @@ import type { FastifyInstance } from "fastify";
 
 import { getPrisma } from "../context.js";
 import { renderTicketPdf } from "@mipiacetpv/ticket-pdf";
+import { renderQrTributarioPng } from "../fiscal/qr-png.js";
 import { loadTicketDocument } from "./build-document.js";
 
 const SLUG_PATTERN = /^[0-9a-f]{16}$/;
@@ -56,7 +57,17 @@ export async function registerPublicTicketPdfRoute(
         return reply.code(404).send({ error: "TICKET_NOT_FOUND" });
       }
 
-      const pdfBytes = await renderTicketPdf(doc);
+      // V1-verifactu · el PDF público es el que abre el cliente desde el
+      // QR del papel. Si la factura es una factura simplificada propia,
+      // lleva su QR tributario arriba igual que el papel.
+      const pdfBytes = await renderTicketPdf(doc, {
+        qrTributarioPngBytes: await renderQrTributarioPng(doc, (err) =>
+          request.log.warn(
+            { publicSlug, err },
+            "QR tributario falló (el PDF sale sin él)",
+          ),
+        ),
+      });
       const internalNumber = doc.ticket.internalNumber;
       reply.header("Content-Type", "application/pdf");
       reply.header(

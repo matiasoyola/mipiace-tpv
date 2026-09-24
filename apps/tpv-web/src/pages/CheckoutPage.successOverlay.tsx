@@ -25,6 +25,8 @@ import {
 } from "lucide-react";
 import QRCode from "qrcode";
 
+import { qrTributarioPng } from "../lib/qrTributario.js";
+
 import {
   renderTicketPdf,
 } from "@mipiacetpv/ticket-pdf";
@@ -344,7 +346,11 @@ export function SuccessOverlay({
 
   async function downloadPdf() {
     if (!documentObj) return;
-    const bytes = await renderTicketPdf(documentObj);
+    const bytes = await renderTicketPdf(documentObj, {
+      // V1-verifactu · el PDF que se descarga lleva el QR tributario
+      // arriba, igual que el papel.
+      qrTributarioPngBytes: await qrTributarioPng(documentObj),
+    });
     // El compilador estrecha Uint8Array<ArrayBufferLike> y exige
     // ArrayBuffer en BlobPart bajo lib DOM 5.x; clonamos a un
     // Uint8Array recién creado para asegurar el tipo.
@@ -929,7 +935,9 @@ function ViewModal({
     let url: string | null = null;
     (async () => {
       try {
-        const bytes = await renderTicketPdf(document);
+        const bytes = await renderTicketPdf(document, {
+          qrTributarioPngBytes: await qrTributarioPng(document),
+        });
         if (cancelled) return;
         // El compilador estrecha Uint8Array<ArrayBufferLike> y exige
         // ArrayBuffer en BlobPart bajo lib DOM 5.x; clonamos a un

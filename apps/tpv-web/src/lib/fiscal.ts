@@ -37,6 +37,7 @@ import { cuadrarDesglose } from "@mipiacetpv/ticket-model";
 
 import { apiWithCashier } from "../api.js";
 import type { CartTaxBucket } from "./cart.js";
+import type { CabeceraTicketLocal } from "./ticketLocal.js";
 import { newId } from "./ids.js";
 import { captureError } from "./sentry.js";
 
@@ -44,6 +45,9 @@ const STATE_KEY = "mipiacetpv-fiscal-state";
 
 export interface FiscalConfig {
   emite: boolean;
+  /** La cabecera del papel, cacheada para poder IMPRIMIR sin red. Null en
+   *  un comercio que factura con Holded. */
+  cabecera: CabeceraTicketLocal | null;
   nif: string | null;
   razonSocial: string | null;
   serie: string | null;
@@ -149,6 +153,7 @@ export async function refreshFiscalHead(registerId: string): Promise<FiscalConfi
     entorno?: EntornoAeat;
     businessType?: string | null;
     cabeza?: CabezaDeCadena | null;
+    cabecera?: CabeceraTicketLocal | null;
   };
   try {
     res = await apiWithCashier("/tpv/fiscal/head");
@@ -159,6 +164,7 @@ export async function refreshFiscalHead(registerId: string): Promise<FiscalConfi
 
   const config: FiscalConfig = {
     emite: res.emite,
+    cabecera: res.cabecera ?? null,
     nif: res.nif ?? null,
     razonSocial: res.razonSocial ?? null,
     serie: res.serie ?? null,

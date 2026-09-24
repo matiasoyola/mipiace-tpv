@@ -15,6 +15,10 @@ import { requireOwnerOrManager } from "../auth/middleware.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
 import { ensureCajaEnabled } from "../lib/caja-gate.js";
 import { getAppVersion } from "../version.js";
+import {
+  extractFiscal,
+  formatAddress,
+} from "../tickets/escpos-input.js";
 import { requireSuperAdmin } from "../superadmin/middleware.js";
 
 import { chainSummary, readChainHead, verifyChain } from "./chain.js";
@@ -46,6 +50,7 @@ export async function registerFiscalRoutes(app: FastifyInstance): Promise<void> 
           fiscalProfile: true,
           holdedEnabled: true,
           businessType: true,
+          receiptFooter: true,
         },
       });
       if (!emiteMipiacetpv(tenant)) {
@@ -56,7 +61,12 @@ export async function registerFiscalRoutes(app: FastifyInstance): Promise<void> 
       }
       const register = await prisma.register.findUniqueOrThrow({
         where: { id: cashier.rid },
-        select: { fiscalSeries: true, fiscalInstallationId: true },
+        select: {
+          name: true,
+          fiscalSeries: true,
+          fiscalInstallationId: true,
+          store: { select: { name: true, fiscalAddress: true } },
+        },
       });
       const identidad = leerIdentidadFiscal(tenant);
       const cabeza = await readChainHead(prisma, cashier.rid);
@@ -74,6 +84,23 @@ export async function registerFiscalRoutes(app: FastifyInstance): Promise<void> 
         entorno: entornoAeat(),
         businessType: tenant.businessType,
         cabeza,
+        // V1-verifactu · la cabecera del papel, para que el terminal pueda
+        // IMPRIMIR la factura sin red. Sin esto, un cobro sin conexión
+        // generaría su registro y su QR y el cliente se iría con las manos
+        // vacías — y la FAQ de la AEAT exige entregar la factura con su QR
+        // en el momento, no cuando vuelva la línea.
+        //
+        // Los campos salen de `extractFiscal` y `formatAddress`, las MISMAS
+        // funciones que usa el camino del servidor (`escpos-input.ts`). Si
+        // aquí se reimplementaran, el papel del dispositivo y el del
+        // servidor se separarían en cuanto alguien tocara una de las dos.
+        cabecera: {
+          ...extractFiscal(tenant.fiscalProfile),
+          businessName: register.store.name || tenant.name,
+          businessAddress: formatAddress(register.store.fiscalAddress),
+          registerName: register.name,
+          receiptFooter: tenant.receiptFooter,
+        },
       };
     },
   );

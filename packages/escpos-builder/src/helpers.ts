@@ -59,9 +59,29 @@ export function escCodePagePc850(): Uint8Array {
   return new Uint8Array([ESC, 0x74, 0x02]);
 }
 
+/** Nivel de corrección de errores del QR (ESC/POS función 169). */
+export type QrErrorCorrection = "L" | "M" | "Q" | "H";
+
+const QR_EC_BYTE: Record<QrErrorCorrection, number> = {
+  L: 0x30,
+  M: 0x31,
+  Q: 0x32,
+  H: 0x33,
+};
+
 // QR code estándar ESC/POS (GS k). Tamaño 1..16, valor sensato 6
 // para 80mm que no satura el ancho.
-export function escQrCode(data: string, moduleSize = 6): Uint8Array {
+//
+// V1-verifactu · el nivel de corrección pasa a ser PARÁMETRO. Estaba fijo
+// en L, y el art. 21.1 de la Orden HAC/1177/2024 exige M para el QR
+// tributario: «Para la generación del código QR se empleará el nivel M
+// (medio) de corrección de errores». El QR del ticket digital se queda en
+// L, que es el default y lo que imprimía hasta hoy.
+export function escQrCode(
+  data: string,
+  moduleSize = 6,
+  ec: QrErrorCorrection = "L",
+): Uint8Array {
   const dataBytes = new TextEncoder().encode(data);
   const len = dataBytes.length + 3;
   const pL = len & 0xff;
@@ -72,8 +92,8 @@ export function escQrCode(data: string, moduleSize = 6): Uint8Array {
   parts.push(GS, 0x28, 0x6b, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00);
   // Module size
   parts.push(GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x43, moduleSize & 0xff);
-  // Error correction L
-  parts.push(GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x45, 0x30);
+  // Nivel de corrección de errores
+  parts.push(GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x45, QR_EC_BYTE[ec]);
   // Store data
   parts.push(GS, 0x28, 0x6b, pL, pH, 0x31, 0x50, 0x30);
   for (const b of dataBytes) parts.push(b);

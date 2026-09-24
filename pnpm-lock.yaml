@@ -307,6 +307,9 @@ importers:
       '@mipiacetpv/ticket-model':
         specifier: workspace:*
         version: link:../ticket-model
+      '@mipiacetpv/verifactu':
+        specifier: workspace:*
+        version: link:../verifactu
     devDependencies:
       '@types/node':
         specifier: ^20.16.10
@@ -351,6 +354,9 @@ importers:
       '@mipiacetpv/ticket-model':
         specifier: workspace:*
         version: link:../ticket-model
+      '@mipiacetpv/verifactu':
+        specifier: workspace:*
+        version: link:../verifactu
       pdf-lib:
         specifier: ^1.17.1
         version: 1.17.1

@@ -25,6 +25,10 @@ import {
   assertTicketDocument,
   type TicketDocument,
 } from "@mipiacetpv/ticket-model";
+import {
+  LEYENDA_ENCIMA_DEL_QR,
+  LEYENDA_VERIFACTU,
+} from "@mipiacetpv/verifactu";
 
 const MM = 2.83464567; // 1 mm en puntos
 const PAGE_WIDTH = 80 * MM;
@@ -40,7 +44,21 @@ const SEPARATOR = "----------------------------------------";
 export interface RenderTicketPdfOptions {
   qrPngBytes?: Uint8Array;
   qrCaption?: string;
+  // V1-verifactu (ADR-019) · el QR TRIBUTARIO, ya rasterizado. Se pasa
+  // como PNG porque este paquete no genera códigos QR: lo hace quien
+  // llama (la API con `qrcode`, el TPV con el mismo paquete).
+  //
+  // Va ARRIBA DEL TODO y a 33 mm, no en el pie a 25: el art. 21.1 de la
+  // Orden exige entre 30×30 y 40×40 mm, y el documento técnico (§3) que
+  // se sitúe «al principio de la factura, antes de que empiece el
+  // contenido de ésta». El QR del ticket digital se queda en el pie.
+  qrTributarioPngBytes?: Uint8Array;
 }
+
+// Tamaño del QR tributario (art. 21.1: entre 30 y 40 mm) y el blanco que
+// hay que dejarle alrededor (§3: mínimo 2 mm, recomendado 6).
+const QR_TRIBUTARIO_MM = 33;
+const QR_TRIBUTARIO_MARGEN_MM = 6;
 
 interface DrawState {
   page: PDFPage;
@@ -89,6 +107,7 @@ function computeLineCount(doc: TicketDocument): number {
   lines += 1; // store name
   if (doc.store.address) lines += 1;
   lines += 1; // numero + fecha
+  if (doc.verifactu) lines += 1; // ref. interna bajo el número fiscal
   lines += 1; // caja + cajero
   // v1.3-Servicios-Pinta · Lote 3: línea extra "Atendido por: X" en SERVICES.
   if (doc.ticket.businessType === "SERVICES" && doc.ticket.attendedBy) {
@@ -203,7 +222,11 @@ export async function renderTicketPdf(
   const lineCount = computeLineCount(doc);
   const baseHeight = lineCount * LINE_HEIGHT + 10 * MM; // margen vertical
   const qrHeight = opts.qrPngBytes ? 30 * MM + LINE_HEIGHT * 2 : 0;
-  const pageHeight = baseHeight + qrHeight;
+  // El QR tributario, su leyenda de encima, la de debajo y su blanco.
+  const qrTributarioHeight = opts.qrTributarioPngBytes
+    ? (QR_TRIBUTARIO_MM + QR_TRIBUTARIO_MARGEN_MM * 2) * MM + LINE_HEIGHT * 3
+    : 0;
+  const pageHeight = baseHeight + qrHeight + qrTributarioHeight;
 
   const page = pdf.addPage([PAGE_WIDTH, pageHeight]);
   const s: DrawState = {
@@ -212,6 +235,28 @@ export async function renderTicketPdf(
     font,
     fontBold,
   };
+
+  // ── QR tributario (V1-verifactu) ─────────────────────────────────
+  //
+  // Lo primero de la página, antes incluso de la marca de copia: el
+  // documento de la AEAT no admite que nada del contenido de la factura
+  // vaya por delante, y en un papel de 80 mm «arriba» es literal.
+  if (opts.qrTributarioPngBytes && doc.verifactu) {
+    s.y -= QR_TRIBUTARIO_MARGEN_MM * MM;
+    drawCenteredText(s, LEYENDA_ENCIMA_DEL_QR, FONT_SIZE_SMALL);
+    const qr = await pdf.embedPng(opts.qrTributarioPngBytes);
+    const size = QR_TRIBUTARIO_MM * MM;
+    page.drawImage(qr, {
+      x: MARGIN_X + (CONTENT_WIDTH - size) / 2,
+      y: s.y - size,
+      width: size,
+      height: size,
+    });
+    s.y -= size + 4;
+    drawCenteredText(s, LEYENDA_VERIFACTU, FONT_SIZE_NORMAL, true);
+    s.y -= QR_TRIBUTARIO_MARGEN_MM * MM;
+    drawSeparator(s);
+  }
 
   // ── Marca COPIA — no fiscal (sólo si es reimpresión) ────────────
   if (doc.ticket.isReprint) {
@@ -254,12 +299,27 @@ export async function renderTicketPdf(
   // ── Store + ticket meta ──────────────────────────────────────────
   drawText(s, truncate(doc.store.name, 38), FONT_SIZE_NORMAL, true);
   if (doc.store.address) drawText(s, truncate(doc.store.address, 38), FONT_SIZE_SMALL);
-  drawTwoColumn(
-    s,
-    `Nº ${doc.ticket.internalNumber}`,
-    formatDate(doc.ticket.issuedAt),
-    FONT_SIZE_NORMAL,
-  );
+  // V1-verifactu · con factura propia manda el NÚMERO FISCAL; es el que
+  // el cliente teclea para cotejar y el que identifica la factura ante la
+  // AEAT. `internalNumber` baja a referencia operativa, que es lo que
+  // siempre fue.
+  if (doc.verifactu) {
+    drawTwoColumn(
+      s,
+      `Factura ${doc.verifactu.numSerieFactura}`,
+      formatDate(doc.ticket.issuedAt),
+      FONT_SIZE_NORMAL,
+      true,
+    );
+    drawText(s, `ref. ${doc.ticket.internalNumber}`, FONT_SIZE_SMALL);
+  } else {
+    drawTwoColumn(
+      s,
+      `Nº ${doc.ticket.internalNumber}`,
+      formatDate(doc.ticket.issuedAt),
+      FONT_SIZE_NORMAL,
+    );
+  }
   drawTwoColumn(
     s,
     truncate(doc.ticket.registerName, 18),
