@@ -837,13 +837,13 @@ model Table {
 // dispositivo: para vender necesita además uno o más `device`
 // emparejados (§3.2).
 model Register {
-  id             String    @id @default(uuid()) @db.Uuid
-  storeId        String    @map("store_id") @db.Uuid
-  name           String
+  id                   String    @id @default(uuid()) @db.Uuid
+  storeId              String    @map("store_id") @db.Uuid
+  name                 String
   // Serie Holded para los salesreceipt de esta caja. Permite numeración
   // fiscal separada por caja. Nullable: puede crearse sin asignarla y
   // configurarla después.
-  numSerieHolded String?   @map("num_serie_holded")
+  numSerieHolded       String?   @map("num_serie_holded")
   // V1-verifactu (ADR-019) · la identidad de esta caja COMO SIF.
   //
   // Cada caja es una instalación de sistema informático de facturación con
@@ -863,13 +863,13 @@ model Register {
   //
   // Las dos son NULL mientras la caja no emita, y se congelan en cuanto hay
   // un registro en su cadena (trigger `registers_fiscal_identity_guard`).
-  fiscalSeries         String?  @map("fiscal_series")
-  fiscalInstallationId String?  @unique @map("fiscal_installation_id")
-  ticketCounter  Int       @default(0) @map("ticket_counter")
-  printerConfig  Json?     @map("printer_config")
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  fiscalSeries         String?   @map("fiscal_series")
+  fiscalInstallationId String?   @unique @map("fiscal_installation_id")
+  ticketCounter        Int       @default(0) @map("ticket_counter")
+  printerConfig        Json?     @map("printer_config")
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   // Soft-delete (B4 §0.2). Igual que Store.
-  deletedAt      DateTime? @map("deleted_at") @db.Timestamptz()
+  deletedAt            DateTime? @map("deleted_at") @db.Timestamptz()
 
   store          Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
   devices        Device[]
@@ -923,17 +923,17 @@ model PrinterConfig {
 // Navegador físico emparejado a una caja. El token de larga duración
 // vive en localStorage del navegador; aquí guardamos sólo su hash.
 model Device {
-  id                 String    @id @default(uuid()) @db.Uuid
-  tenantId           String    @map("tenant_id") @db.Uuid
-  registerId         String    @map("register_id") @db.Uuid
+  id                 String               @id @default(uuid()) @db.Uuid
+  tenantId           String               @map("tenant_id") @db.Uuid
+  registerId         String               @map("register_id") @db.Uuid
   name               String?
-  pairedAt           DateTime  @default(now()) @map("paired_at") @db.Timestamptz()
-  lastSeenAt         DateTime? @map("last_seen_at") @db.Timestamptz()
-  userAgent          String?   @map("user_agent")
-  deviceTokenHash    String    @unique @map("device_token_hash")
+  pairedAt           DateTime             @default(now()) @map("paired_at") @db.Timestamptz()
+  lastSeenAt         DateTime?            @map("last_seen_at") @db.Timestamptz()
+  userAgent          String?              @map("user_agent")
+  deviceTokenHash    String               @unique @map("device_token_hash")
   // Si está revocado, la PWA detecta el rechazo y vuelve a la pantalla
   // de emparejamiento.
-  revokedAt          DateTime? @map("revoked_at") @db.Timestamptz()
+  revokedAt          DateTime?            @map("revoked_at") @db.Timestamptz()
   // V1-verifactu (ADR-019) · POR QUÉ se revocó, y a favor de quién.
   //
   // Desde este bloque una caja tiene UN dispositivo activo, garantizado por
@@ -947,14 +947,14 @@ model Device {
   // NULL en todo lo revocado antes de este bloque: no sabemos por qué se
   // hizo y no se inventa.
   revokedReason      DeviceRevokedReason? @map("revoked_reason")
-  revokedByDeviceId  String?   @map("revoked_by_device_id") @db.Uuid
+  revokedByDeviceId  String?              @map("revoked_by_device_id") @db.Uuid
   // ISO 3166-1 alfa-2 del país de la última IP vista (geoip-lite). Se
   // usa para detectar saltos de país y disparar alerta email (§17.4).
-  lastKnownIpCountry String?   @map("last_known_ip_country")
+  lastKnownIpCountry String?              @map("last_known_ip_country")
   // Timestamp del último email de alerta enviado para este device. Sirve
   // de antispam — si la IP fluctúa de provincia no se reenvía. Sólo se
   // dispara primer login, cambio de país y re-aparición tras 30d.
-  lastEmailAlertAt   DateTime? @map("last_email_alert_at") @db.Timestamptz()
+  lastEmailAlertAt   DateTime?            @map("last_email_alert_at") @db.Timestamptz()
 
   tenant           Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   register         Register           @relation(fields: [registerId], references: [id], onDelete: Cascade)
@@ -1103,8 +1103,8 @@ model PairingCode {
 // ── Catálogo (cache local de Holded) ──────────────────────────────────
 
 model Product {
-  id                   String      @id @default(uuid()) @db.Uuid
-  tenantId             String      @map("tenant_id") @db.Uuid
+  id                   String        @id @default(uuid()) @db.Uuid
+  tenantId             String        @map("tenant_id") @db.Uuid
   // catalogo-local · NULLABLE desde el escalón 2. Deja de ser la
   // IDENTIDAD del producto y pasa a ser sólo el ENLACE con Holded: un
   // producto `source = LOCAL` no tiene ninguno y nunca lo tendrá en este
@@ -1114,61 +1114,61 @@ model Product {
   // sigue siendo la clave del sync: en Postgres un índice único trata los
   // NULL como distintos entre sí, así que N productos locales conviven
   // bajo la misma constraint sin chocar.
-  holdedProductId      String?     @map("holded_product_id")
+  holdedProductId      String?       @map("holded_product_id")
   // catalogo-local · quién manda sobre esta ficha. Ver `enum ProductSource`.
   source               ProductSource @default(HOLDED)
   name                 String
   sku                  String?
   barcode              String?
-  basePrice            Decimal     @map("base_price") @db.Decimal(12, 4)
-  taxRate              Decimal     @map("tax_rate") @db.Decimal(5, 2)
-  kind                 ProductKind @default(PRODUCT)
-  active               Boolean     @default(true)
+  basePrice            Decimal       @map("base_price") @db.Decimal(12, 4)
+  taxRate              Decimal       @map("tax_rate") @db.Decimal(5, 2)
+  kind                 ProductKind   @default(PRODUCT)
+  active               Boolean       @default(true)
   // True si el SKU lo asignó el script auto-SKU (patrón AUTO-<8>).
   // Permite distinguirlos del SKU manual del propietario.
-  skuAutoAssignedAt    DateTime?   @map("sku_auto_assigned_at") @db.Timestamptz()
+  skuAutoAssignedAt    DateTime?     @map("sku_auto_assigned_at") @db.Timestamptz()
   // True si el auto-SKU envió el PUT pero el GET-back demostró que
   // Holded silenció el cambio (ADR-010). Sale en la bandeja de
   // revisión del admin. El producto NO es vendible hasta resolverlo.
-  needsSkuReview       Boolean     @default(false) @map("needs_sku_review")
+  needsSkuReview       Boolean       @default(false) @map("needs_sku_review")
   // Contador de intentos de asignar SKU vía la bandeja (POST
   // /catalog/sku-review/:id/assign). Se incrementa tanto en éxito como
   // en silent reject — sirve para mostrar el contador "ha fallado N
   // veces" en el admin y para escalar a soporte (badge ámbar ≥3).
-  skuReviewAttempts    Int         @default(0) @map("sku_review_attempts")
+  skuReviewAttempts    Int           @default(0) @map("sku_review_attempts")
   // True si el TPV puede vender este ítem (sku no vacío y bajos
   // demás filtros). Spike §07.B: producto sin sku → línea inválida.
-  sellableViaTpv       Boolean     @default(true) @map("sellable_via_tpv")
+  sellableViaTpv       Boolean       @default(true) @map("sellable_via_tpv")
   // B-ProductImages: URL canónica de la imagen del producto tal como la
   // expone Holded (campo identificado en spike §13). NULL si el producto
   // no tiene imagen en Holded → el TPV cae al placeholder embebido. El
   // worker `image-cache-worker` descarga la imagen y la sirve cacheada
   // desde Caddy en `/product-images/<tenantId>/<productId>.<ext>`.
-  imageUrl             String?     @map("image_url")
+  imageUrl             String?       @map("image_url")
   // MIME del binario una vez descargado y validado por el worker
   // (`image/jpeg`, `image/png`, `image/webp`). NULL hasta que el worker
   // confirme una descarga válida; el TPV usa este campo como gate para
   // renderizar `<img>` vs. placeholder.
-  imageMime            String?     @map("image_mime")
+  imageMime            String?       @map("image_mime")
   // Cuándo el worker guardó por última vez el archivo en disco. Si la
   // URL cambia en un sync (Holded la rota), el sync pone `imageCachedAt
   // = null` para forzar re-descarga; el worker la detecta como pendiente.
-  imageCachedAt        DateTime?   @map("image_cached_at") @db.Timestamptz()
+  imageCachedAt        DateTime?     @map("image_cached_at") @db.Timestamptz()
   // B-Categorias-via-Tags: tags libres que el propietario asigna a
   // sus productos en Holded (campo `tags: string[]` en el payload de
   // /products). El TPV los usa como pseudo-categorías para construir
   // los chips de filtro arriba de la grid de productos. Si Holded no
   // envía tags, queda como array vacío. Tiene índice GIN
   // (products_tags_idx) para futuros filtros server-side @> y &&.
-  tags                 String[]    @default([])
+  tags                 String[]      @default([])
   // v1.9-sync-borrados: cuándo la conciliación (o un 404 de detalle)
   // detectó que la ficha ya no existe en Holded y la soft-archivó
   // (active=false + sellableViaTpv=false). Distingue "borrado en
   // Holded" de otras causas de inactividad (forSale=0, tax sin
   // resolver). NULL mientras el producto viva en Holded; el upsert
   // del sync lo limpia si la ficha reaparece (des-archivado).
-  archivedFromHoldedAt DateTime?   @map("archived_from_holded_at") @db.Timestamptz()
-  lastSyncedAt         DateTime    @default(now()) @map("last_synced_at") @db.Timestamptz()
+  archivedFromHoldedAt DateTime?     @map("archived_from_holded_at") @db.Timestamptz()
+  lastSyncedAt         DateTime      @default(now()) @map("last_synced_at") @db.Timestamptz()
   raw                  Json?
 
   tenant         Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -2845,8 +2845,8 @@ model FiscalRecord {
   // factura: una anulación ocupa posición y no gasta número.
   chainIndex Int @map("chain_index")
 
-  serie  String
-  numero Int
+  serie           String
+  numero          Int
   // El literal completo `C1/000123`. Se guarda entero porque es lo que
   // entró en la huella y lo que va en el QR: recomponerlo a trozos en otro
   // sitio es una forma de que deje de coincidir.
