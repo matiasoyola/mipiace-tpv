@@ -30,7 +30,7 @@
 
 import { randomInt } from "node:crypto";
 
-import { Prisma, type PrismaClient, TicketStatus } from "@mipiacetpv/db";
+import { DeviceKind, Prisma, type PrismaClient, TicketStatus } from "@mipiacetpv/db";
 
 import { hashPassword } from "../auth/passwords.js";
 import { generateDeviceToken } from "../devices/auth.js";
@@ -151,10 +151,18 @@ export async function provisionTestCashier(
   }
 
   // 4. Device técnico · uno por (tenant, register) reusando si ya
-  //    existe (matched por name canónico).
+  //    existe.
+  //
+  //    V1-verifactu addendum 1b · `kind: TEST`, y se busca POR EL TIPO y
+  //    no por el nombre. Esto no es cosmética: mientras el tipo vivía en el
+  //    nombre y en el user-agent, el trigger `devices_revoke_previous`
+  //    trataba a este aparato como un terminal más y REVOCABA el terminal
+  //    real del cliente al activar el modo prueba — un comercio sin poder
+  //    cobrar desde el super-admin. Con `kind = TEST` ni releva ni es
+  //    relevado, y el índice único de la caja no lo cuenta.
   const deviceName = "mipiacetpv · modo prueba";
   let device = await prisma.device.findFirst({
-    where: { tenantId, registerId: register.id, name: deviceName },
+    where: { tenantId, registerId: register.id, kind: DeviceKind.TEST },
     select: { id: true, deviceTokenHash: true, revokedAt: true },
   });
   let deviceTokenPlain: string;
@@ -183,6 +191,7 @@ export async function provisionTestCashier(
         tenantId,
         registerId: register.id,
         name: deviceName,
+        kind: DeviceKind.TEST,
         deviceTokenHash: hash,
         userAgent: "internal/mipiacetpv-test",
       },
@@ -327,10 +336,13 @@ export async function purgeTestData(
   }
 
   // 4. Device técnico · revocado (no se borra para preservar histórico).
+  //    Por TIPO y no por nombre, igual que el alta: un `name` es texto que
+  //    alguien puede traducir, y este `updateMany` sin acierto dejaría vivo
+  //    el modo prueba en un comercio ya activado.
   const deviceRes = await prisma.device.updateMany({
     where: {
       tenantId,
-      name: "mipiacetpv · modo prueba",
+      kind: DeviceKind.TEST,
       revokedAt: null,
     },
     data: { revokedAt: new Date() },

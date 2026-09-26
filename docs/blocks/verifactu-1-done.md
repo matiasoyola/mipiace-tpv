@@ -316,12 +316,49 @@ corre.
 Comprobarlo **antes**:
 
 ```sql
-SELECT s.name, r.name, count(*)
-  FROM devices d JOIN registers r ON r.id = d.register_id
-                 JOIN stores s    ON s.id = r.store_id
+SELECT t.name AS comercio, s.name AS tienda, r.name AS caja, r.id AS caja_id,
+       count(*) AS terminales_activos
+  FROM devices   d
+  JOIN registers r ON r.id = d.register_id
+  JOIN stores    s ON s.id = r.store_id
+  JOIN tenants   t ON t.id = s.tenant_id
  WHERE d.revoked_at IS NULL
- GROUP BY s.name, r.name HAVING count(*) > 1;
+   -- El dispositivo del «modo prueba» del super-admin NO es un terminal de
+   -- caja y no cuenta (verifactu-1b). La columna que lo dice, `devices.kind`,
+   -- la crea esta misma migración, así que ANTES de correrla hay que mirar
+   -- los dos marcadores que usa su backfill.
+   AND coalesce(d.user_agent, '') <> 'internal/mipiacetpv-test'
+   AND coalesce(d.name, '')       <> 'mipiacetpv · modo prueba'
+ GROUP BY r.id, t.name, s.name, r.name
+HAVING count(*) > 1
+ ORDER BY t.name, s.name, r.name;
 ```
+
+Se agrupa por **`r.id`** y se enseña el **comercio**. La versión anterior de esta consulta
+agrupaba por nombre de tienda y de caja, así que sumaba comercios distintos: tres clientes con
+una «Tienda principal / Caja 1» cada uno salían como una caja con tres terminales, y la lista no
+decía a quién llamar. La precondición de la migración siempre agrupó bien (`GROUP BY s.name,
+r.name, r.id`); la que estaba mal era esta copia del -done.
+
+Después de la migración, lo mismo sale de la columna:
+
+```sql
+SELECT t.name AS comercio, s.name AS tienda, r.name AS caja, r.id AS caja_id,
+       count(*) AS terminales_activos
+  FROM devices   d
+  JOIN registers r ON r.id = d.register_id
+  JOIN stores    s ON s.id = r.store_id
+  JOIN tenants   t ON t.id = s.tenant_id
+ WHERE d.revoked_at IS NULL AND d.kind = 'TERMINAL'
+ GROUP BY r.id, t.name, s.name, r.name
+HAVING count(*) > 1
+ ORDER BY t.name, s.name, r.name;
+```
+
+> **verifactu-1b.** El dispositivo técnico del modo prueba no es un terminal de caja: no cuenta
+> aquí, no releva a nadie y no genera registro de facturación. La migración de este bloque se
+> corrigió **en su sitio** porque nunca llegó a correr en producción. Ver
+> `docs/blocks/verifactu-1b-done.md`.
 
 ### 7.3 Variables de entorno
 

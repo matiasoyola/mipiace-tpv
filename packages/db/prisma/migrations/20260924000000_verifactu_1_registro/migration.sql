@@ -43,6 +43,39 @@
 -- migración, y una migración que apaga un terminal en mitad de un servicio
 -- es peor que una migración que no corre.
 
+-- ── 1(a) · pero no todo lo que hay en `devices` es un terminal de caja ──
+--
+-- El super-admin tiene un «modo prueba» (B-OnboardingV2) que crea un
+-- dispositivo TÉCNICO en la caja del cliente para validar el flujo del TPV
+-- antes de activarlo. No cobra a nadie, no imprime a nadie y sus tickets se
+-- purgan al activar. No es un terminal, y tratarlo como si lo fuera rompe
+-- las tres piezas de abajo a la vez:
+--
+--   · el trigger revocaría el terminal REAL del cliente al activar el modo
+--     prueba — un comercio sin poder cobrar desde el super-admin;
+--   · el índice único daría un 500 al reactivarlo;
+--   · esta precondición contaría dispositivos que no compiten por la
+--     cadena, y abortaría la migración de un comercio que está bien.
+--
+-- Por eso el tipo va EN EL DATO y no en el nombre ni en el `user_agent`. Un
+-- invariante que se decide comparando una cadena de texto se rompe el día
+-- que alguien traduce el nombre o cambia el user-agent del arranque.
+CREATE TYPE "DeviceKind" AS ENUM ('TERMINAL', 'TEST');
+
+ALTER TABLE "devices"
+    ADD COLUMN "kind" "DeviceKind" NOT NULL DEFAULT 'TERMINAL';
+
+-- El backfill. Los dos marcadores que ha llevado siempre el dispositivo del
+-- modo prueba (`provisionTestCashier`), con OR y no con AND: el `user_agent`
+-- sólo se escribe al CREARLO, así que uno reaprovisionado por una versión
+-- vieja podría llevar sólo el nombre. Marcar de menos aquí es volver al
+-- fallo; marcar de más no es posible, porque ningún terminal real de un
+-- cliente se llama así ni se anuncia con ese user-agent.
+UPDATE devices
+   SET kind = 'TEST'
+ WHERE user_agent = 'internal/mipiacetpv-test'
+    OR name = 'mipiacetpv · modo prueba';
+
 DO $do$
 DECLARE
     v_fila   record;
@@ -50,25 +83,38 @@ DECLARE
     v_cuenta int  := 0;
 BEGIN
     FOR v_fila IN
-        SELECT s.name AS store_name, r.name AS register_name, r.id AS register_id,
-               count(*) AS n
+        -- El COMERCIO va en la lista, y no por adorno: los seis clientes de
+        -- hoy tienen su tienda llamada «Tienda principal» y su caja «Caja 1».
+        -- Sin el nombre del comercio, esta lista dice dos veces lo mismo y
+        -- quien está desplegando tiene que ir a buscar el UUID a mano. Lo
+        -- vio el ensayo general sobre la copia de producción.
+        SELECT t.name AS tenant_name, s.name AS store_name, r.name AS register_name,
+               r.id AS register_id, count(*) AS n
           FROM devices d
           JOIN registers r ON r.id = d.register_id
           JOIN stores    s ON s.id = r.store_id
+          JOIN tenants   t ON t.id = s.tenant_id
          WHERE d.revoked_at IS NULL
-         GROUP BY s.name, r.name, r.id
+           -- Sólo TERMINAL: el dispositivo del modo prueba no compite por
+           -- la cadena de la caja y no puede abortar una migración.
+           AND d.kind = 'TERMINAL'
+         -- Por `r.id`, que es lo único que identifica una caja. Agrupar por
+         -- nombre sumaría comercios distintos en una fila falsa. Las demás
+         -- columnas van al GROUP BY por exigencia del SQL, no porque
+         -- cambien el grano: `r.id` ya es la clave.
+         GROUP BY r.id, t.name, s.name, r.name
         HAVING count(*) > 1
-         ORDER BY s.name, r.name
+         ORDER BY t.name, s.name, r.name
     LOOP
         v_cuenta := v_cuenta + 1;
-        v_lista := v_lista || format(E'\n  · %s / %s (%s): %s dispositivos activos',
-                                     v_fila.store_name, v_fila.register_name,
-                                     v_fila.register_id, v_fila.n);
+        v_lista := v_lista || format(E'\n  · %s · %s / %s (%s): %s terminales activos',
+                                     v_fila.tenant_name, v_fila.store_name,
+                                     v_fila.register_name, v_fila.register_id, v_fila.n);
     END LOOP;
 
     IF v_cuenta > 0 THEN
         RAISE EXCEPTION
-            E'VERIFACTU_PRECONDICION: hay % caja(s) con más de un dispositivo activo:%\n\nDecide cuál se queda y revoca el resto desde el admin ANTES de volver a lanzar la migración. Esta migración no revoca nada por su cuenta.',
+            E'VERIFACTU_PRECONDICION: hay % caja(s) con más de un TERMINAL activo:%\n\nDecide cuál se queda y revoca el resto desde el admin ANTES de volver a lanzar la migración. Esta migración no revoca nada por su cuenta.',
             v_cuenta, v_lista
             USING ERRCODE = '23514';
     END IF;
@@ -112,7 +158,8 @@ CREATE INDEX "devices_revoked_by_device_id_idx"
 -- emitiendo en la misma cadena. Copia literal de
 -- `employee_devices_one_active_key` (F1).
 CREATE UNIQUE INDEX "devices_one_active_per_register_key"
-    ON "devices"("register_id") WHERE "revoked_at" IS NULL;
+    ON "devices"("register_id")
+    WHERE "revoked_at" IS NULL AND "kind" = 'TERMINAL';
 
 -- Y quien revoca al anterior es la BASE, no la ruta de emparejamiento.
 --
@@ -133,12 +180,18 @@ BEGIN
     IF NEW.revoked_at IS NOT NULL THEN
         RETURN NEW;   -- alta de un device ya revocado: no releva a nadie
     END IF;
+    IF NEW.kind <> 'TERMINAL' THEN
+        RETURN NEW;   -- el modo prueba no releva al terminal del cliente
+    END IF;
     UPDATE devices
        SET revoked_at           = now(),
            revoked_reason       = 'PAIRED_NEW',
            revoked_by_device_id = NEW.id
      WHERE register_id = NEW.register_id
-       AND revoked_at IS NULL;
+       AND revoked_at IS NULL
+       -- Y tampoco se releva a nadie que no sea un terminal: emparejar una
+       -- tablet nueva no puede apagar el modo prueba del super-admin.
+       AND kind = 'TERMINAL';
     RETURN NEW;
 END;
 $fn$;

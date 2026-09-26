@@ -495,7 +495,11 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       // revés —comercio que emite y APK vieja que no manda registro— la
       // venta SIGUE: cobrar siempre se puede, y la falta se ve en el log y
       // en el panel de cadenas.
-      const gateFiscal = comprobarGateFiscal(tenantForDiscount, body.fiscalRecord);
+      const gateFiscal = comprobarGateFiscal(
+        tenantForDiscount,
+        body.fiscalRecord,
+        cashier,
+      );
       if (gateFiscal.rechazo) {
         return reply.code(409).send(gateFiscal.rechazo);
       }
@@ -508,6 +512,22 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             externalId: body.externalId,
           },
           "el comercio emite sus facturas y esta venta llegó sin registro de facturación",
+        );
+      }
+      // V1-verifactu addendum 1b · una venta del MODO PRUEBA no entra en la
+      // cadena de la caja. El registro se descarta y la venta sigue; queda
+      // aquí, en el log, porque significa que hay un terminal de prueba
+      // generando registros que no debería generar.
+      if (gateFiscal.descartarRegistro) {
+        request.log.error(
+          {
+            event: "fiscal.registro_de_prueba_descartado",
+            tenantId: cashier.tid,
+            registerId: cashier.rid,
+            deviceId: cashier.did,
+            externalId: body.externalId,
+          },
+          "registro de facturación de una venta de prueba: descartado, no entra en la cadena",
         );
       }
       // Contenedor y no un `let` suelto: la asignación ocurre dentro del
@@ -740,7 +760,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         //
         // Un registro que NO encadena no revienta: se guarda marcado. Por
         // eso `ingestFiscalRecord` devuelve un veredicto en vez de lanzar.
-        if (body.fiscalRecord) {
+        if (body.fiscalRecord && !gateFiscal.descartarRegistro) {
           fiscal.result = await ingestFiscalRecord({
             tx,
             tenantId: cashier.tid,
@@ -1081,7 +1101,11 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
 
       // V1-verifactu (ADR-019) · el mismo gate y por las mismas razones que
       // en `POST /tickets`.
-      const gateFiscal = comprobarGateFiscal(tenantForDiscount, body.fiscalRecord);
+      const gateFiscal = comprobarGateFiscal(
+        tenantForDiscount,
+        body.fiscalRecord,
+        cashier,
+      );
       if (gateFiscal.rechazo) {
         return reply.code(409).send(gateFiscal.rechazo);
       }
@@ -1094,6 +1118,20 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             ticketId,
           },
           "el comercio emite sus facturas y este cobro de mesa llegó sin registro de facturación",
+        );
+      }
+      // addendum 1b · lo mismo que en `POST /tickets`: el modo prueba no
+      // entra en la cadena.
+      if (gateFiscal.descartarRegistro) {
+        request.log.error(
+          {
+            event: "fiscal.registro_de_prueba_descartado",
+            tenantId: cashier.tid,
+            registerId: cashier.rid,
+            deviceId: cashier.did,
+            ticketId,
+          },
+          "registro de facturación de una venta de prueba: descartado, no entra en la cadena",
         );
       }
       const fiscal: { result: IngestResult | null } = { result: null };
@@ -1300,7 +1338,7 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           // V1-verifactu · el registro de facturación, en la misma
           // transacción. Mismo sitio exacto que en `POST /tickets`: justo
           // después del sello, cuando la venta ya es una venta.
-          if (body.fiscalRecord) {
+          if (body.fiscalRecord && !gateFiscal.descartarRegistro) {
             fiscal.result = await ingestFiscalRecord({
               tx,
               tenantId: cashier.tid,

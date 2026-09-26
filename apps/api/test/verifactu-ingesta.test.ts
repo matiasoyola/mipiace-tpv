@@ -168,7 +168,13 @@ describe("el gate de la venta", () => {
 
   it("no dice nada del comercio con Holded que no manda registro", () => {
     const gate = comprobarGateFiscal({ holdedEnabled: true }, undefined);
-    expect(gate).toEqual({ rechazo: null, faltaRegistro: false });
+    // `descartarRegistro` lo añade verifactu-1b: sin sesión de prueba
+    // delante, el gate se comporta exactamente igual que en verifactu-1.
+    expect(gate).toEqual({
+      rechazo: null,
+      faltaRegistro: false,
+      descartarRegistro: false,
+    });
   });
 });
 

@@ -40,6 +40,7 @@ import type { CartTaxBucket } from "./cart.js";
 import type { CabeceraTicketLocal } from "@mipiacetpv/escpos-builder";
 import { newId } from "./ids.js";
 import { captureError } from "./sentry.js";
+import { isTestModeActive } from "./test-mode.js";
 
 const STATE_KEY = "mipiacetpv-fiscal-state";
 
@@ -93,7 +94,28 @@ export interface RegistroDeVenta {
 
 // ── El estado local ────────────────────────────────────────────────────
 
+// V1-verifactu addendum 1b · el MODO PRUEBA no factura.
+//
+// Dos cosas a la vez, y las dos importan:
+//
+//   1. Una venta de prueba no puede generar registro ni gastar número.
+//      `fiscal_records` es append-only y el modo prueba purga sus tickets
+//      al activar el comercio: lo que quedaría es un número gastado que
+//      apunta a un ticket que ya no existe, o una factura de prueba en la
+//      cadena real del cliente. Ninguna de las dos se deshace.
+//   2. El estado fiscal vive en `localStorage`, que el modo prueba comparte
+//      con las sesiones reales del mismo navegador (sus tokens van en
+//      `sessionStorage` justo para no contaminarlas). Si el modo prueba
+//      escribiera aquí, le dejaría a un terminal real la configuración y la
+//      cabeza de cadena equivocadas.
+//
+// Por eso la puerta es «no leer y no escribir», y no «leer y no generar».
+function enModoPrueba(): boolean {
+  return isTestModeActive();
+}
+
 function leerEstado(): FiscalState | null {
+  if (enModoPrueba()) return null;
   try {
     const raw = localStorage.getItem(STATE_KEY);
     if (!raw) return null;
@@ -104,6 +126,7 @@ function leerEstado(): FiscalState | null {
 }
 
 function escribirEstado(state: FiscalState): void {
+  if (enModoPrueba()) return;
   try {
     localStorage.setItem(STATE_KEY, JSON.stringify(state));
   } catch {
@@ -124,6 +147,10 @@ export function getCabezaDeCadena(registerId: string): CabezaDeCadena | null {
 }
 
 export function clearFiscalState(): void {
+  // Tampoco BORRA en modo prueba: el estado que hay ahí es el del terminal
+  // real de este navegador, y salir del modo prueba no puede dejarle la
+  // caja sin configuración fiscal.
+  if (enModoPrueba()) return;
   localStorage.removeItem(STATE_KEY);
 }
 
@@ -155,6 +182,10 @@ export async function refreshFiscalHead(registerId: string): Promise<FiscalConfi
     cabeza?: CabezaDeCadena | null;
     cabecera?: CabeceraTicketLocal | null;
   };
+  // El servidor también contesta `emite: false` a una sesión de prueba
+  // (`GET /tpv/fiscal/head`); esto se ahorra la llamada y, sobre todo, no
+  // deja que el modo prueba pise el estado de un terminal real.
+  if (enModoPrueba()) return null;
   try {
     res = await apiWithCashier("/tpv/fiscal/head");
   } catch {
@@ -231,6 +262,11 @@ export interface DatosDeLaVenta {
 export async function generarRegistroDeVenta(
   datos: DatosDeLaVenta,
 ): Promise<RegistroDeVenta> {
+  if (enModoPrueba()) {
+    throw new FiscalNoConfiguradoError(
+      "el modo prueba no emite facturas: su venta no entra en la cadena de la caja",
+    );
+  }
   const estado = leerEstado();
   if (!estado || estado.registerId !== datos.registerId) {
     throw new FiscalNoConfiguradoError(
@@ -361,6 +397,11 @@ export interface DatosDeLaAnulacion {
 export async function generarRegistroDeAnulacion(
   datos: DatosDeLaAnulacion,
 ): Promise<{ body: FiscalRecordPayload; avisos: string[] }> {
+  if (enModoPrueba()) {
+    throw new FiscalNoConfiguradoError(
+      "el modo prueba no anula facturas: su venta no entra en la cadena de la caja",
+    );
+  }
   const estado = leerEstado();
   if (!estado || estado.registerId !== datos.registerId) {
     throw new FiscalNoConfiguradoError(
