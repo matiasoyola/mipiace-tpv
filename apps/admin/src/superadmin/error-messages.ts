@@ -22,6 +22,18 @@ export const ERROR_LABEL: Record<string, string> = {
     "Holded está limitando peticiones. La próxima sincronización irá un poco más lenta.",
   NO_HOLDED_KEY:
     "Esta cuenta aún no tiene API key de Holded configurada.",
+  // holded-desconectar (ADR-020) · los dos motivos que NO son un pendiente.
+  // Distintos de `NO_HOLDED_KEY` a propósito: ese dice "todavía no", y
+  // decirle "todavía no" a un comercio que dejó Holded es invitar a
+  // reconectarlo.
+  HOLDED_DESCONECTADO:
+    "Este comercio dejó de usar Holded. No queda nada que sincronizar ni subir, y volver a conectarlo es una operación aparte.",
+  HOLDED_NO_HABILITADO:
+    "Este comercio no usa Holded: su catálogo se gestiona desde el panel del cliente.",
+  DEJAR_HOLDED_BLOQUEADO:
+    "No se puede dejar Holded todavía. Revisa lo que la previsualización lista y vuelve a comprobarlo.",
+  CONFIRMACION_NO_COINCIDE:
+    "El nombre no coincide. Escríbelo exactamente como aparece.",
   INVALID_HOLDED_FISCAL_PROFILE:
     "Los datos fiscales de Holded no son válidos. El cliente tiene que completarlos en Holded.",
 

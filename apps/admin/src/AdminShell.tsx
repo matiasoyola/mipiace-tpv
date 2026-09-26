@@ -11,6 +11,7 @@ import {
   CalendarClock,
   ClipboardList,
   Clock,
+  FileWarning,
   Gift,
   KeyRound,
   Menu,
@@ -62,7 +63,10 @@ interface NavItem {
   // Esconder NO es gatear: cada una de estas secciones tiene además su
   // puerta de servidor (`lib/caja-gate.ts`). Esto es sólo para que el
   // propietario de un colegio no vea "Comanderas" en su barra lateral.
-  capability?: "agenda" | "caja" | "holded" | "fichaje";
+  // holded-desconectar (ADR-020) · `holdedDejado` es la única que se
+  // enciende al APAGAR Holded, no al encenderlo: la pantalla que gatea
+  // existe SÓLO en el comercio que lo dejó.
+  capability?: "agenda" | "caja" | "holded" | "fichaje" | "holdedDejado";
   // F1 · el activo se calcula por prefijo, y "Control horario"
   // (`/admin/fichaje`) es prefijo de sus dos hermanas. Sin esto, las tres
   // entradas se pintarían activas a la vez en cualquiera de ellas.
@@ -182,10 +186,27 @@ const NAV_ITEMS: NavItem[] = [
   // existe, en una pantalla que le habla de un ERP que no ha comprado —
   // exactamente lo que H1 vino a quitar del panel del colegio.
   { to: "/admin/holded", label: "Sync Holded", icon: RefreshCw, capability: "holded" },
+  // holded-desconectar (ADR-020) · el hueco que el corte deja abierto y que
+  // no se puede tapar con código: el abono de una devolución no existe en
+  // ningún sitio (en Holded porque ya no escribimos allí, y como factura
+  // rectificativa porque eso es V3). El dinero sale del cajón y el arqueo
+  // cuadra; lo que falta es el papel, y lo hace el asesor.
+  {
+    to: "/admin/devoluciones-asesor",
+    label: "Devoluciones · asesor",
+    icon: FileWarning,
+    capability: "holdedDejado",
+  },
   { to: "/admin/gift-receipts", label: "Tickets regalo", icon: Gift, capability: "caja" },
   { to: "/admin/account", label: "Mi cuenta", icon: User },
   { to: "/admin/security", label: "Seguridad", icon: Shield },
-  { to: "/admin/tickets-errors", label: "Holded", icon: KeyRound, badge: "syncErrors", superAdminOnly: true, capability: "caja" },
+  // holded-desconectar (ADR-020) · la capability pasa de `caja` a `holded`,
+  // mismo cambio y misma razón que "Revisión de SKU" en catalogo-local: esta
+  // bandeja lista los documentos que Holded rechazó, y sin Holded no puede
+  // tener ni una fila. Peor aún, `TicketsErrorsPage` calcula su propia salud
+  // en el cliente y pintaría "TPV bloqueado · Holded no responde" en rojo
+  // sobre un comercio que acabó de dejarlo a propósito.
+  { to: "/admin/tickets-errors", label: "Holded", icon: KeyRound, badge: "syncErrors", superAdminOnly: true, capability: "holded" },
   { to: "/admin/settings", label: "Ajustes", icon: Settings, superAdminOnly: true, capability: "caja" },
 ];
 
@@ -497,6 +518,11 @@ interface TenantCapabilities {
   // secciones que sólo tienen sentido con el ERP conectado, y esta gatea
   // la ALARMA de que el ERP no responde.
   holdedEnabled: boolean;
+  // holded-desconectar (ADR-020) · ¿DEJÓ Holded? Tercera pregunta, y no se
+  // deduce de las otras dos: `holdedEnabled === false` lo contestan igual el
+  // comercio que nació sin Holded y el que lo dejó con 270 facturas detrás.
+  // Sólo el segundo tiene devoluciones que llevarle al asesor a mano.
+  holdedDejado: boolean;
 }
 
 function useTenantCapabilities(): TenantCapabilities | null {
@@ -511,9 +537,13 @@ function useTenantCapabilities(): TenantCapabilities | null {
           fichajeEnabled?: boolean;
         };
       }>("/admin/tenant/settings"),
-      api<{ tenant: { hasHoldedKey?: boolean; holdedEnabled?: boolean } }>(
-        "/auth/me",
-      ),
+      api<{
+        tenant: {
+          hasHoldedKey?: boolean;
+          holdedEnabled?: boolean;
+          holdedDisconnectedAt?: string | null;
+        };
+      }>("/auth/me"),
     ])
       .then(([s, me]) => {
         if (cancelled) return;
@@ -523,6 +553,7 @@ function useTenantCapabilities(): TenantCapabilities | null {
           fichaje: s.settings.fichajeEnabled === true,
           holded: me.tenant.hasHoldedKey === true,
           holdedEnabled: me.tenant.holdedEnabled !== false,
+          holdedDejado: me.tenant.holdedDisconnectedAt != null,
         });
       })
       .catch(() => {
@@ -533,6 +564,10 @@ function useTenantCapabilities(): TenantCapabilities | null {
             fichaje: false,
             holded: true,
             holdedEnabled: true,
+            // Si `/auth/me` no contesta, se asume que NO ha dejado Holded:
+            // es el caso de casi todos y esconder una sección es más barato
+            // que enseñar una que no le toca.
+            holdedDejado: false,
           });
       });
     return () => {
@@ -567,6 +602,7 @@ function NavList({
     if (item.capability === "caja") return caps?.caja === true;
     if (item.capability === "holded") return caps?.holded === true;
     if (item.capability === "fichaje") return caps?.fichaje === true;
+    if (item.capability === "holdedDejado") return caps?.holdedDejado === true;
     return true;
   });
   return (

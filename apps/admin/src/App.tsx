@@ -9,6 +9,7 @@ import { ImpersonationBootstrap } from "./components/ImpersonationBootstrap.js";
 import { CashiersPage } from "./pages/CashiersPage.js";
 import { CatalogoPage } from "./pages/CatalogoPage.js";
 import { DevicesPage } from "./pages/DevicesPage.js";
+import { DevolucionesAsesorPage } from "./pages/DevolucionesAsesorPage.js";
 import { GiftReceiptsPage } from "./pages/GiftReceiptsPage.js";
 import { HoldedPage } from "./pages/HoldedPage.js";
 import { ForgotPasswordPage, ResetPasswordPage } from "./pages/PasswordResetPages.js";
@@ -171,6 +172,11 @@ export function App() {
         <Route path="/admin/tag-sections" element={<CajaGate title="Comanderas"><TagSectionsPage /></CajaGate>} />
         <Route path="/admin/printers" element={<CajaGate title="Impresoras"><PrintersPage /></CajaGate>} />
         <Route path="/admin/holded" element={<CajaGate title="Sync Holded"><HoldedPage /></CajaGate>} />
+        {/* holded-desconectar (ADR-020) · va con `CajaGate` porque una
+            devolución es de la caja; la pantalla además contesta "aquí no hay
+            nada de esto" en cualquier comercio que no haya dejado Holded, así
+            que no necesita puerta propia. */}
+        <Route path="/admin/devoluciones-asesor" element={<CajaGate title="Devoluciones · asesor"><DevolucionesAsesorPage /></CajaGate>} />
         <Route path="/admin/gift-receipts" element={<CajaGate title="Tickets regalo"><GiftReceiptsPage /></CajaGate>} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/admin/reset" element={<ResetPasswordPage />} />
