@@ -7,19 +7,43 @@ import type { SilentRejectMismatch } from "./errors.js";
 export interface SalesreceiptItem {
   name: string;
   units: number;
+  // PRECIO UNITARIO QUE HOLDED LEE DE VERDAD (bloque abonos-holded,
+  // probes K/P/Q/S/T del 26-09-2026 contra la cuenta PRUEBAS MIPIACE).
+  //
+  // Holded IGNORA `price` en el item de un `salesreceipt`. El campo que
+  // respeta es `subtotal`, y es el precio de UNA unidad (el `discount`
+  // se aplica encima, y `units` multiplica después):
+  //
+  //   · con `subtotal`                      → price almacenado = subtotal
+  //   · sin `subtotal`, con sku/serviceId    → price almacenado = el del
+  //                                            CATÁLOGO de Holded
+  //   · sin `subtotal` y sin identificador   → price almacenado = 0
+  //
+  // La tercera fila es el silent_reject de siempre. La SEGUNDA es la
+  // trampa silenciosa: un override del cajero o un modificador con
+  // recargo se perdía y Holded emitía el documento al precio de catálogo.
+  // Por eso `subtotal` es obligatorio aquí.
+  subtotal: number;
+  // Se sigue mandando con el MISMO valor que `subtotal` aunque Holded hoy
+  // lo ignore: es el campo que documenta su API y el que mandábamos desde
+  // el MVP. Si algún día lo empieza a leer, los dos dicen lo mismo.
   price: number;
   tax: number;
   discount?: number;
-  // SKU canónico Holded (spike §05.B). NO enviar `productId`.
-  // v1.3-hotfix7 · opcional: si el SKU es "AUTO-*" (marca local de
-  // mipiacetpv para servicios sin SKU en Holded) no se manda y Holded
-  // toma la línea como libre con name+price+tax. Antes era obligatorio.
+  // SKU canónico Holded del PRODUCTO (spike §05.B). NO enviar `productId`.
+  // Ya NO es el que decide el precio —eso lo hace `subtotal`—: sirve para
+  // que la línea quede enganchada al producto de Holded (stock, informes).
+  // Un sku que allí no resuelve se ignora sin ruido.
   sku?: string;
-  // v1.3-hotfix8 — identificador para líneas de SERVICIO. Holded NO
-  // resuelve el precio de un servicio con name+price+tax (deja todo en
-  // 0). El único campo que sí funciona en `salesreceipt` es `serviceId`
-  // con el id MongoDB del servicio (confirmado con probe7, 2026-05-27).
-  // Para productos seguimos usando `sku`; ambos campos son exclusivos.
+  // Identificador de la línea de SERVICIO (v1.3-hotfix8; id MongoDB del
+  // servicio). Mismo papel que `sku` en un producto: engancha la línea al
+  // servicio de Holded. Ambos son exclusivos entre sí.
+  //
+  // Matiz importante del hotfix8: su diagnóstico ("sin identificador
+  // Holded pone price=0") era cierto pero incompleto — lo que faltaba era
+  // `subtotal`. Con `subtotal` la línea lleva su precio incluso sin
+  // identificador ninguno (probe S). Se sigue mandando el identificador
+  // porque el enganche con el catálogo sí depende de él.
   serviceId?: string;
   // Descripción libre del item. B-Bar-Modifiers la usa para mostrar el
   // desglose textual de modificadores ("(Tipo de leche: Desnatada; ...)").
@@ -86,9 +110,15 @@ export interface CreateSalesreceiptOptions {
 // Lanza HoldedSilentRejectError si:
 //   - docNumber es null (documento no aprobado)
 //   - approvedAt es null
-//   - total no coincide con `expectedTotal` ± 0.05 €
+//   - total no coincide con `expectedTotal` ± 0.05 € (EN SIGNO Y EN VALOR:
+//     un abono nace con total negativo y eso es lo correcto)
 //   - notes no contiene `externalId`
 //   - paymentsPending != stored.total (el doc nace sin cobro)
+//
+// IMPORTANTE (bloque abonos-holded): cuando el POST sí creó el documento
+// y es el GET-back el que falla, el error lleva `document` con el id y el
+// número. El documento EXISTE en Holded, aprobado y numerado; el caller
+// tiene que guardar ese id antes de marcar el fallo o queda huérfano.
 export async function createSalesreceiptApproved(
   client: HoldedClient,
   payload: SalesreceiptPayload,
@@ -127,9 +157,14 @@ export async function createSalesreceiptApproved(
   if (stored.draft === true) {
     mismatches.push({ field: "draft", expected: "null|false", actual: stored.draft });
   }
+  // El total tiene que coincidir en VALOR y en SIGNO. La comprobación
+  // anterior era `!(storedTotal > 0)`, que daba por roto TODO abono: un
+  // salesreceipt de devolución nace con total negativo (units negativas,
+  // confirmado contra Holded el 26-09-2026: total -9.68, paymentsPending
+  // -9.68, y el /pay con amount negativo lo deja a 0).
   const storedTotal = Number(stored.total ?? 0);
   if (
-    !(storedTotal > 0) ||
+    Math.sign(storedTotal) !== Math.sign(options.expectedTotal) ||
     Math.abs(storedTotal - options.expectedTotal) > TOTAL_TOLERANCE_EUR
   ) {
     mismatches.push({
@@ -160,6 +195,7 @@ export async function createSalesreceiptApproved(
       `${SALESRECEIPT_PATH}/${documentId}`,
       mismatches,
       stored,
+      { id: documentId, docNumber: stored.docNumber ?? null },
     );
   }
 
@@ -197,7 +233,11 @@ export async function registerPaymentWithGetBack(
     `${SALESRECEIPT_PATH}/${documentId}`,
   );
   const prePending = Number(preCheck.paymentsPending ?? -1);
-  if (Number(preCheck.paymentsTotal ?? 0) > 0 && Math.abs(prePending) <= PAY_TOLERANCE_EUR) {
+  // `paymentsTotal` de un abono ya cobrado es NEGATIVO (-9.68 en el
+  // ensayo del 26-09-2026), así que la condición va en valor absoluto.
+  // Con `> 0` el pre-check no disparaba nunca en una devolución y el
+  // reintento duplicaba el pago negativo.
+  if (Math.abs(Number(preCheck.paymentsTotal ?? 0)) > 0 && Math.abs(prePending) <= PAY_TOLERANCE_EUR) {
     // Ya pagado en un intento previo. Devolvemos el estado actual; el
     // caller no distingue entre "acabo de pagar" y "ya estaba pagado".
     return preCheck;

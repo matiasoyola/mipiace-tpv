@@ -22,6 +22,15 @@ import { decryptSecret } from "../crypto.js";
 import { loadEnv } from "../env.js";
 import { captureAlert } from "../lib/sentry.js";
 import { enqueueTicketEmail } from "../queues/ticket-email.js";
+import {
+  describeMismatchedDocument,
+  inspectExistingDocument,
+} from "./holded-document.js";
+import {
+  SALE_SIGN,
+  buildHoldedLineItem,
+  type HoldedLineSnapshot,
+} from "./holded-line.js";
 import { computeLine } from "./totals.js";
 
 export interface UploadTicketOptions {
@@ -120,15 +129,16 @@ export async function uploadTicket(
   // catalogo-local · LA PUERTA: un producto LOCAL no entra jamás en el
   // payload de un salesreceipt.
   //
-  // Por qué existe, con nombre y apellidos. Si una línea llega a Holded
-  // sin identificador que allí resuelva —`serviceId` para servicios,
-  // `sku` para productos—, Holded NO la rechaza: la acepta con
-  // `price = 0`. El total no cuadra, el GET-back lo caza como
-  // `silent_reject` y el ticket entero se cae. Pasó con Peluquería Sole
-  // el 10-06-2026 (ticket 000022, 17,50 € contra 27,40 €) y está
-  // documentado en `buildTicketSalesreceiptPayload` más abajo. Un
-  // producto local que llegue ahí es dinero cobrado que se pierde sin
-  // aviso.
+  // Por qué existe, con nombre y apellidos. Un producto LOCAL no existe
+  // en Holded: su línea llega allí sin identificador que resuelva. Hasta
+  // el bloque abonos-holded eso era además una pérdida silenciosa de
+  // dinero —Holded ponía `price = 0`, el total no cuadraba y el ticket
+  // entero se caía en `silent_reject` (Peluquería Sole, 10-06-2026,
+  // ticket 000022: 17,50 € contra 27,40 €)—. Desde que el item lleva
+  // `subtotal` el importe ya no se pierde, pero la puerta se queda: una
+  // venta cuyo producto no existe en la contabilidad del comercio entra
+  // allí como línea suelta, sin enganche con el catálogo ni con el stock,
+  // y eso hay que verlo y arreglarlo, no dejarlo pasar en silencio.
   //
   // Corta ANTES del POST y del `bumpAttempts`, y falla RUIDOSAMENTE:
   //
@@ -180,8 +190,43 @@ export async function uploadTicket(
 
   await bumpAttempts(prisma, externalId);
 
+  const expectedTotal = Number(ticket.total);
   let documentId = ticket.holdedDocumentId;
   let docNumber = ticket.holdedDocNumber;
+
+  // FASE 0 (bloque abonos-holded) · si ya hay un documento guardado, se
+  // mira qué hay al otro lado antes de dar un paso más. Mismo criterio
+  // que en la devolución — ver `holded-document.ts`.
+  if (documentId) {
+    const verdict = await inspectExistingDocument(client, documentId, expectedTotal);
+    if (verdict.kind === "gone") {
+      log.warn("el documento guardado ya no existe en Holded — se crea de nuevo", {
+        externalId,
+        documentId,
+      });
+      await forgetDocument(prisma, externalId);
+      documentId = null;
+      docNumber = null;
+    } else if (verdict.kind === "total_mismatch") {
+      const message = describeMismatchedDocument(verdict);
+      log.error("documento de Holded con total distinto al del ticket", {
+        externalId,
+        documentId: verdict.documentId,
+        docNumber: verdict.docNumber,
+        storedTotal: verdict.storedTotal,
+        expectedTotal: verdict.expectedTotal,
+      });
+      await markFailed(prisma, externalId, "holded_document_total_mismatch", {
+        step: "pre-POST salesreceipt",
+        holdedDocumentId: verdict.documentId,
+        holdedDocNumber: verdict.docNumber,
+        holdedTotal: verdict.storedTotal,
+        expectedTotal: verdict.expectedTotal,
+        message,
+      });
+      return { kind: "permanent_failure", reason: "holded_document_total_mismatch" };
+    }
+  }
 
   // FASE 1: si no hay documentId, POST salesreceipt + GET-back.
   if (!documentId) {
@@ -191,30 +236,47 @@ export async function uploadTicket(
       const result = await createSalesreceiptApproved(
         client,
         payload,
-        { externalId, expectedTotal: Number(ticket.total) },
+        { externalId, expectedTotal },
       );
       documentId = result.documentId;
       docNumber = result.stored.docNumber ?? null;
-      await prisma.ticket.update({
-        where: { externalId },
-        data: {
-          holdedDocumentId: documentId,
-          holdedDocNumber: docNumber,
-        },
-      });
-      await prisma.holdedUpload.update({
-        where: { externalId },
-        data: { holdedDocumentId: documentId },
-      });
+      await saveDocument(prisma, externalId, documentId, docNumber);
     } catch (err) {
       if (err instanceof HoldedSilentRejectError) {
+        // El documento YA existe en Holded (el POST lo creó; el GET-back
+        // sólo demostró que no vale). Su id se guarda antes de marcar el
+        // fallo: así el reintento no crea un segundo documento y el
+        // propietario sabe cuál tiene que anular.
+        if (err.document) {
+          await saveDocument(
+            prisma,
+            externalId,
+            err.document.id,
+            err.document.docNumber,
+          );
+        }
         log.warn("salesreceipt silent reject", {
           externalId,
+          documentId: err.document?.id ?? null,
           mismatches: err.mismatches,
         });
         await markFailed(prisma, externalId, "silent_reject", {
           step: "POST salesreceipt",
           mismatches: err.mismatches,
+          ...(err.document
+            ? {
+                holdedDocumentId: err.document.id,
+                holdedDocNumber: err.document.docNumber,
+                message: describeMismatchedDocument({
+                  documentId: err.document.id,
+                  docNumber: err.document.docNumber,
+                  storedTotal: Number(
+                    err.mismatches.find((m) => m.field === "total")?.actual ?? 0,
+                  ),
+                  expectedTotal,
+                }),
+              }
+            : {}),
         });
         return { kind: "permanent_failure", reason: "silent_reject" };
       }
@@ -250,7 +312,7 @@ export async function uploadTicket(
   try {
     await registerPaymentWithGetBack(client, documentId, {
       date: Math.floor((ticket.paidAt ?? new Date()).getTime() / 1000),
-      amount: Number(ticket.total),
+      amount: expectedTotal,
       desc: composePayDesc(ticket.payments),
     });
   } catch (err) {
@@ -323,75 +385,16 @@ export function buildTicketSalesreceiptPayload(ticket: {
   externalId: string;
   notes: string | null;
   paidAt: Date | null;
-  lines: Array<{
-    nameSnapshot: string;
-    units: { toString(): string } | number;
-    unitPrice: { toString(): string } | number;
-    // v1.2-Lite Lote 4.B: si la línea lleva override (el cajero pulsó el
-    // lápiz), Holded recibe ese precio. unitPrice queda como histórico
-    // del catálogo y sirve para auditoría TPV.
-    unitPriceOverride?: { toString(): string } | number | null;
-    taxRate: { toString(): string } | number;
-    discountPct: { toString(): string } | number;
-    sku: string;
-    // v1.3-hotfix8 — discriminante producto vs servicio. Holded expone
-    // endpoints/identificadores distintos y `salesreceipt` requiere
-    // `serviceId` para las líneas de servicio (no `sku`).
-    product?: { kind: "PRODUCT" | "SERVICE"; holdedProductId: string | null } | null;
-    // Snapshot de modificadores (B-Bar-Modifiers). Puede ser:
-    //   - null               → línea sin modifiers
-    //   - string[] legacy    → ad-hoc tipeados; van a description literal
-    //   - object[] B-Bar-Mod → desnormalizados con label + priceDelta;
-    //                          se serializan como "(Grupo: Label; ...)"
-    // Holded recibe el precio ROLLED-UP (unitPrice + sum deltas / 100)
-    // porque el TPV ya ajustó subtotal/total al cobrar. El desglose
-    // textual va en `description` para que el cliente final lo lea.
-    modifiers?: unknown;
-  }>;
+  // La forma de la línea y todo lo que Holded hace con ella viven en
+  // `holded-line.ts`. Aquí sólo se dice de dónde salen.
+  lines: HoldedLineSnapshot[];
   register: { numSerieHolded: string | null };
 }): SalesreceiptPayload {
-  const items: SalesreceiptItem[] = ticket.lines.map((l) => {
-    const { rolledUpUnitPrice, description } = formatLineForHolded(l);
-    // v1.3-hotfix8 · silent_reject en cuentas SERVICES — fix definitivo.
-    //
-    // Diagnóstico (probe7, 2026-05-27): Holded NO acepta línea libre en
-    // `salesreceipt`. Si no hay identificador reconocido en la línea,
-    // asigna `price=0` → total=0 → silent_reject. El hotfix7 (omitir
-    // SKU "AUTO-*") no arregló el problema porque la línea sin SKU
-    // también caía a 0.
-    //
-    // Empíricamente, para servicios el campo correcto es `serviceId`
-    // (no `sku` ni `productId`) con el id MongoDB del servicio. Para
-    // productos sigue siendo `sku` con el SKU canónico asignado por
-    // `runAutoSku` durante onboarding.
-    const isService = l.product?.kind === "SERVICE";
-    const holdedId = l.product?.holdedProductId ?? null;
-    let identifierField: { sku?: string; serviceId?: string } = {};
-    if (isService && holdedId) {
-      identifierField = { serviceId: holdedId };
-    } else if (!isService && l.sku) {
-      // PRODUCT con SKU. Incluye los `AUTO-*`: runAutoSku los SUBE a
-      // Holded con GET-back, así que son canónicos allí. La exclusión
-      // anterior (`!l.sku.startsWith("AUTO-")`, resto del hotfix7 para
-      // servicios) hacía que la línea fuera SIN identificador → Holded
-      // la pone a price=0 → silent_reject por mismatch de total.
-      // Visto el 2026-06-10 en Peluquería Sole, ticket 000022 (SPRAY
-      // SALERM con AUTO-6819ba02 descartado: 17,50 € vs 27,40 €).
-      // Si el AUTO-* no llegó a Holded (needs_sku_review=true), mandar
-      // un sku desconocido produce el mismo price=0 que no mandarlo —
-      // no empeora ningún caso y arregla todos los auto-SKU válidos.
-      identifierField = { sku: l.sku };
-    }
-    return {
-      name: l.nameSnapshot,
-      units: Number(l.units),
-      price: rolledUpUnitPrice,
-      tax: Number(l.taxRate),
-      discount: Number(l.discountPct),
-      ...identifierField,
-      ...(description ? { desc: description } : {}),
-    };
-  });
+  // UNA sola construcción de línea para la venta y para el abono: ver
+  // `holded-line.ts`. Aquí sólo se elige el signo.
+  const items: SalesreceiptItem[] = ticket.lines.map((l) =>
+    buildHoldedLineItem(l, SALE_SIGN),
+  );
   const notes = composeNotes(ticket.externalId, ticket.notes);
   const numSerieId = ticket.register.numSerieHolded ?? undefined;
   return {
@@ -403,78 +406,46 @@ export function buildTicketSalesreceiptPayload(ticket: {
   };
 }
 
-// Construye precio rolled-up + descripción para una línea con modifiers.
-// El precio enviado a Holded incluye los deltas; Holded ve un solo
-// número por línea. El detalle textual va en `desc` (campo aceptado por
-// Holded en el item del salesreceipt, observado en fixtures Fase 0).
-function formatLineForHolded(line: {
-  unitPrice: { toString(): string } | number;
-  unitPriceOverride?: { toString(): string } | number | null;
-  modifiers?: unknown;
-}): { rolledUpUnitPrice: number; description: string | null } {
-  // v1.2-Lite Lote 4.B: override del cajero prevalece sobre el unitPrice
-  // del catálogo. Holded recibe lo cobrado realmente.
-  const baseUnitPrice =
-    line.unitPriceOverride != null
-      ? Number(line.unitPriceOverride)
-      : Number(line.unitPrice);
-  if (!Array.isArray(line.modifiers) || line.modifiers.length === 0) {
-    return { rolledUpUnitPrice: baseUnitPrice, description: null };
-  }
-  // Detección por tipo del primer elemento (mismo patrón que el renderer
-  // del TPV). string[] → ad-hoc; object[] → snapshot estructurado.
-  const first = line.modifiers[0];
-  if (typeof first === "string") {
-    const labels = (line.modifiers as string[]).filter((s) => typeof s === "string");
-    if (labels.length === 0) {
-      return { rolledUpUnitPrice: baseUnitPrice, description: null };
-    }
-    return {
-      rolledUpUnitPrice: baseUnitPrice,
-      description: `(${labels.join("; ")})`,
-    };
-  }
-  // Snapshot estructurado.
-  let deltaCents = 0;
-  const parts: string[] = [];
-  for (const entry of line.modifiers as unknown[]) {
-    if (
-      entry &&
-      typeof entry === "object" &&
-      "groupName" in entry &&
-      "label" in entry
-    ) {
-      const e = entry as {
-        groupName: string;
-        label: string;
-        priceDeltaCents?: number;
-      };
-      parts.push(`${e.groupName}: ${e.label}`);
-      if (typeof e.priceDeltaCents === "number") deltaCents += e.priceDeltaCents;
-    }
-  }
-  // v1.4-Precio-Decimales · b30: NO redondeamos el precio a 2 decimales
-  // al subir a Holded. Holded acepta 4 decimales en `price` y conservar
-  // la precisión es lo que elimina el drift entre el TPV y el documento
-  // emitido. `deltaCents/100` no añade nuevos decimales (los modifiers
-  // viven en céntimos enteros). Si `baseUnitPrice` tiene 4 decimales del
-  // NET, llegan intactos a Holded.
-  return {
-    rolledUpUnitPrice: round4(baseUnitPrice + deltaCents / 100),
-    description: parts.length > 0 ? `(${parts.join("; ")})` : null,
-  };
-}
-
-function round4(n: number): number {
-  return Math.round(n * 10000) / 10000;
-}
-
 function composePayDesc(payments: Array<{ method: string; amount: { toString(): string } }>): string {
   if (payments.length === 1) return `TPV ${payments[0]!.method}`;
   const parts = payments.map(
     (p) => `${p.method}: ${Number(p.amount.toString()).toFixed(2)}€`,
   );
   return `TPV mixto · ${parts.join(" · ")}`;
+}
+
+async function saveDocument(
+  prisma: PrismaClient,
+  externalId: string,
+  documentId: string,
+  docNumber: string | null,
+): Promise<void> {
+  await prisma.$transaction([
+    prisma.ticket.update({
+      where: { externalId },
+      data: { holdedDocumentId: documentId, holdedDocNumber: docNumber },
+    }),
+    prisma.holdedUpload.updateMany({
+      where: { externalId },
+      data: { holdedDocumentId: documentId },
+    }),
+  ]);
+}
+
+async function forgetDocument(
+  prisma: PrismaClient,
+  externalId: string,
+): Promise<void> {
+  await prisma.$transaction([
+    prisma.ticket.update({
+      where: { externalId },
+      data: { holdedDocumentId: null, holdedDocNumber: null },
+    }),
+    prisma.holdedUpload.updateMany({
+      where: { externalId },
+      data: { holdedDocumentId: null },
+    }),
+  ]);
 }
 
 async function bumpAttempts(prisma: PrismaClient, externalId: string): Promise<void> {

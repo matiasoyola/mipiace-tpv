@@ -1,7 +1,14 @@
 // Sube una devolución a Holded como un salesreceipt con importes
 // negativos (B4 §5.1, núcleo §10). Mismo patrón que upload-ticket:
-// POST + GET-back + /pay + GET-back. La diferencia es que `units` o
-// `price` van en negativo y las notas referencian el ticket original.
+// POST + GET-back + /pay + GET-back, y —desde el bloque abonos-holded—
+// EXACTAMENTE la misma construcción de líneas: `holded-line.ts`.
+//
+// La convención de signos ya no es una hipótesis: se probó contra la
+// cuenta Holded de PRUEBAS MIPIACE el 26-09-2026. `units` negativas y
+// precio unitario positivo → documento con total negativo
+// (paymentsPending negativo), y `/pay` con `amount` negativo lo deja a
+// cero. Ver `docs/blocks/abonos-holded-done.md` §4 con payload y
+// respuesta.
 
 import { Prisma, type PrismaClient, TicketStatus } from "@mipiacetpv/db";
 import {
@@ -17,6 +24,16 @@ import {
 
 import { decryptSecret } from "../crypto.js";
 import { loadEnv } from "../env.js";
+import {
+  describeMismatchedDocument,
+  inspectExistingDocument,
+} from "./holded-document.js";
+import {
+  REFUND_SIGN,
+  buildHoldedLineItem,
+  chargedLineTotal,
+  type HoldedLineSnapshot,
+} from "./holded-line.js";
 
 export interface UploadRefundOptions {
   externalId: string;
@@ -34,6 +51,24 @@ export type UploadRefundResult =
   | { kind: "success"; documentId: string; docNumber: string }
   | { kind: "permanent_failure"; reason: string };
 
+// Las líneas del abono llevan el precio del ticket original, que es un
+// snapshot fiscal inmutable. De ahí salen el override del lápiz y los
+// modificadores; de la `RefundLine`, las unidades devueltas.
+export function refundLineInclude() {
+  return {
+    include: {
+      ticketLine: {
+        select: {
+          unitPrice: true,
+          unitPriceOverride: true,
+          modifiers: true,
+          product: { select: { kind: true, holdedProductId: true } },
+        },
+      },
+    },
+  } as const;
+}
+
 function isPermanent4xx(err: unknown): boolean {
   if (err instanceof HoldedApiError) {
     const code = (err as { status?: number }).status;
@@ -50,7 +85,7 @@ export async function uploadRefund(
   const refund = await prisma.refund.findUnique({
     where: { externalId },
     include: {
-      lines: true,
+      lines: refundLineInclude(),
       originalTicket: { select: { id: true, holdedDocumentId: true, holdedDocNumber: true } },
       tenant: { select: { id: true, holdedApiKeyCiphertext: true } },
       register: { select: { numSerieHolded: true } },
@@ -85,17 +120,76 @@ export async function uploadRefund(
     ? options.buildClient(apiKey)
     : new ApiKeyClient(apiKey, { baseUrl: env.HOLDED_BASE_URL });
 
+  await bumpAttempts(prisma, externalId);
+
+  // El abono es dinero que SALE: el documento nace en negativo.
+  const expectedTotal = -Math.abs(Number(refund.total));
   let documentId = refund.holdedDocumentId;
+  let docNumber = refund.holdedDocNumber;
+
+  // FASE 0 · ya hay un documento guardado. No se vuelve a postear nunca
+  // sin mirar primero qué hay al otro lado (ver `holded-document.ts`).
+  if (documentId) {
+    const verdict = await inspectExistingDocument(client, documentId, expectedTotal);
+    if (verdict.kind === "gone") {
+      // El propietario borró en Holded el documento malo. Olvidamos el id
+      // y dejamos que la FASE 1 cree el bueno.
+      log.warn("el documento guardado ya no existe en Holded — se crea de nuevo", {
+        externalId,
+        documentId,
+      });
+      await forgetDocument(prisma, externalId);
+      documentId = null;
+      docNumber = null;
+    } else if (verdict.kind === "total_mismatch") {
+      const message = describeMismatchedDocument(verdict);
+      log.error("documento de Holded con total distinto al del abono", {
+        externalId,
+        documentId: verdict.documentId,
+        docNumber: verdict.docNumber,
+        storedTotal: verdict.storedTotal,
+        expectedTotal: verdict.expectedTotal,
+      });
+      await markFailed(prisma, externalId, "holded_document_total_mismatch", {
+        step: "pre-POST salesreceipt",
+        holdedDocumentId: verdict.documentId,
+        holdedDocNumber: verdict.docNumber,
+        holdedTotal: verdict.storedTotal,
+        expectedTotal: verdict.expectedTotal,
+        message,
+      });
+      return { kind: "permanent_failure", reason: "holded_document_total_mismatch" };
+    }
+  }
 
   if (!documentId) {
-    // Refund items: precios positivos, units negativas. La negociación
-    // de signos con Holded en MVP usa unidades negativas (alternativa:
-    // precios negativos; ambos producen total negativo). El spike §08.B
-    // no probó ninguno explícitamente — esta decisión sigue la
-    // convención del prompt B4 §5.1 ("importes en negativo") y se
-    // confirmará con el primer refund real en sandbox.
     const payload = buildRefundSalesreceiptPayload(refund);
-    const expectedTotal = -Math.abs(Number(refund.total));
+
+    // LA PUERTA DEL IMPORTE. El payload se construye con el precio
+    // COBRADO del ticket original; `refund.total` es el dinero que salió
+    // del cajón. Si no cuadran, el snapshot del abono se creó con otro
+    // precio (abonos anteriores a este bloque guardaban el precio de
+    // catálogo, sin el override del lápiz ni los modificadores). Antes eso
+    // acababa en un documento emitido con el importe equivocado; ahora
+    // corta ANTES del POST, sin dejar nada en Holded.
+    const payloadTotal = refundPayloadTotal(refund);
+    if (Math.abs(payloadTotal - Math.abs(Number(refund.total))) > 0.05) {
+      log.error("el importe del payload no coincide con el total del abono", {
+        externalId,
+        payloadTotal,
+        refundTotal: Number(refund.total),
+      });
+      await markFailed(prisma, externalId, "refund_snapshot_total_mismatch", {
+        step: "pre-POST salesreceipt",
+        payloadTotal,
+        refundTotal: Number(refund.total),
+        message:
+          `El abono guardó ${Number(refund.total).toFixed(2)} € pero sus líneas, ` +
+          `al precio realmente cobrado en el ticket original, suman ` +
+          `${payloadTotal.toFixed(2)} €. Hay que rehacer la devolución.`,
+      });
+      return { kind: "permanent_failure", reason: "refund_snapshot_total_mismatch" };
+    }
 
     try {
       const result = await createSalesreceiptApproved(
@@ -104,25 +198,44 @@ export async function uploadRefund(
         { externalId, expectedTotal },
       );
       documentId = result.documentId;
-      await prisma.refund.update({
-        where: { externalId },
-        data: {
-          holdedDocumentId: documentId,
-          holdedDocNumber: result.stored.docNumber ?? null,
-        },
-      });
-      await prisma.holdedUpload.update({
-        where: { externalId },
-        data: { holdedDocumentId: documentId },
-      });
+      docNumber = result.stored.docNumber ?? null;
+      await saveDocument(prisma, externalId, documentId, docNumber);
     } catch (err) {
       if (err instanceof HoldedSilentRejectError) {
+        // El POST creó el documento y es el GET-back el que lo desmiente.
+        // Se guarda el id ANTES de marcar el fallo: un documento que
+        // existe en Holded no se queda sin su id en nuestra base, y el
+        // reintento encuentra ese id y no crea un segundo documento.
+        if (err.document) {
+          await saveDocument(
+            prisma,
+            externalId,
+            err.document.id,
+            err.document.docNumber,
+          );
+        }
         log.warn("refund salesreceipt silent reject", {
           externalId,
+          documentId: err.document?.id ?? null,
           mismatches: err.mismatches,
         });
         await markFailed(prisma, externalId, "silent_reject", {
+          step: "POST salesreceipt",
           mismatches: err.mismatches,
+          ...(err.document
+            ? {
+                holdedDocumentId: err.document.id,
+                holdedDocNumber: err.document.docNumber,
+                message: describeMismatchedDocument({
+                  documentId: err.document.id,
+                  docNumber: err.document.docNumber,
+                  storedTotal: Number(
+                    err.mismatches.find((m) => m.field === "total")?.actual ?? 0,
+                  ),
+                  expectedTotal,
+                }),
+              }
+            : {}),
         });
         return { kind: "permanent_failure", reason: "silent_reject" };
       }
@@ -143,24 +256,28 @@ export async function uploadRefund(
     throw new Error("documentId missing after refund POST salesreceipt");
   }
 
-  // Registrar el "cobro" negativo (Holded admite amount negativo en
-  // /pay según Núcleo §10; si no, el total queda paymentsPending=-total
-  // y nos quedamos en SYNC_FAILED).
+  // Registrar el "cobro" negativo. Holded admite `amount` negativo en
+  // /pay y deja `paymentsPending` a 0 (probado el 26-09-2026 con el abono
+  // T2614948 de PRUEBAS MIPIACE: paymentsTotal -9.68, pending 0).
   try {
     await registerPaymentWithGetBack(client, documentId, {
       date: Math.floor(refund.createdAt.getTime() / 1000),
-      amount: -Math.abs(Number(refund.total)),
+      amount: expectedTotal,
       desc: `TPV refund · ${refund.method ?? "OTHER"}`,
     });
   } catch (err) {
     if (err instanceof HoldedSilentRejectError) {
       await markFailed(prisma, externalId, "pay_silent_reject", {
+        step: "POST pay",
+        holdedDocumentId: documentId,
         mismatches: err.mismatches,
       });
       return { kind: "permanent_failure", reason: "pay_silent_reject" };
     }
     if (isPermanent4xx(err)) {
       await markFailed(prisma, externalId, "pay_4xx", {
+        step: "POST pay",
+        holdedDocumentId: documentId,
         message: (err as Error).message,
       });
       return { kind: "permanent_failure", reason: "pay_4xx" };
@@ -183,7 +300,52 @@ export async function uploadRefund(
     }),
   ]);
 
-  return { kind: "success", documentId, docNumber: "" };
+  return { kind: "success", documentId, docNumber: docNumber ?? "" };
+}
+
+// La línea del abono, vista como la ve el constructor compartido: el
+// precio y los modificadores salen del ticket original (lo que de verdad
+// se cobró), las unidades y el sku del snapshot de la devolución —el sku
+// porque el panel permite corregirlo antes de reintentar.
+export interface RefundLineForPayload {
+  nameSnapshot: string;
+  sku: string;
+  units: { toString(): string } | number;
+  taxRate: { toString(): string } | number;
+  discountPct: { toString(): string } | number;
+  unitPrice: { toString(): string } | number;
+  ticketLine: {
+    unitPrice: { toString(): string } | number;
+    unitPriceOverride: { toString(): string } | number | null;
+    modifiers: unknown;
+    product: { kind: "PRODUCT" | "SERVICE"; holdedProductId: string | null } | null;
+  };
+}
+
+export function refundLineSnapshot(l: RefundLineForPayload): HoldedLineSnapshot {
+  return {
+    nameSnapshot: l.nameSnapshot,
+    sku: l.sku,
+    units: l.units,
+    taxRate: l.taxRate,
+    discountPct: l.discountPct,
+    unitPrice: l.ticketLine.unitPrice,
+    unitPriceOverride: l.ticketLine.unitPriceOverride,
+    modifiers: l.ticketLine.modifiers,
+    product: l.ticketLine.product,
+  };
+}
+
+// Suma con IVA de las líneas del abono al precio realmente cobrado. En
+// positivo: se compara con `refund.total`, que también es positivo.
+export function refundPayloadTotal(refund: {
+  lines: RefundLineForPayload[];
+}): number {
+  const sum = refund.lines.reduce(
+    (acc, l) => acc + chargedLineTotal(refundLineSnapshot(l)),
+    0,
+  );
+  return Math.round(sum * 100) / 100;
 }
 
 // Payload exacto que el worker enviará a Holded para una devolución.
@@ -192,28 +354,17 @@ export function buildRefundSalesreceiptPayload(refund: {
   externalId: string;
   createdAt: Date;
   total: { toString(): string } | number;
-  lines: Array<{
-    nameSnapshot: string;
-    units: { toString(): string } | number;
-    unitPrice: { toString(): string } | number;
-    taxRate: { toString(): string } | number;
-    discountPct: { toString(): string } | number;
-    sku: string;
-  }>;
+  lines: RefundLineForPayload[];
   originalTicket: {
     holdedDocumentId: string | null;
     holdedDocNumber: string | null;
   };
   register: { numSerieHolded: string | null } | null;
 }): SalesreceiptPayload {
-  const items: SalesreceiptItem[] = refund.lines.map((l) => ({
-    name: l.nameSnapshot,
-    units: -Math.abs(Number(l.units)),
-    price: Number(l.unitPrice),
-    tax: Number(l.taxRate),
-    discount: Number(l.discountPct),
-    sku: l.sku,
-  }));
+  // MISMO constructor que la venta. Lo único que cambia es el signo.
+  const items: SalesreceiptItem[] = refund.lines.map((l) =>
+    buildHoldedLineItem(refundLineSnapshot(l), REFUND_SIGN),
+  );
   const notes = `TPV-refund-uuid: ${refund.externalId} · original: ${
     refund.originalTicket.holdedDocNumber ??
     refund.originalTicket.holdedDocumentId ??
@@ -227,6 +378,47 @@ export function buildRefundSalesreceiptPayload(refund: {
     items,
     ...(numSerieId ? { numSerieId } : {}),
   };
+}
+
+async function saveDocument(
+  prisma: PrismaClient,
+  externalId: string,
+  documentId: string,
+  docNumber: string | null,
+): Promise<void> {
+  await prisma.$transaction([
+    prisma.refund.update({
+      where: { externalId },
+      data: { holdedDocumentId: documentId, holdedDocNumber: docNumber },
+    }),
+    prisma.holdedUpload.updateMany({
+      where: { externalId },
+      data: { holdedDocumentId: documentId },
+    }),
+  ]);
+}
+
+async function forgetDocument(
+  prisma: PrismaClient,
+  externalId: string,
+): Promise<void> {
+  await prisma.$transaction([
+    prisma.refund.update({
+      where: { externalId },
+      data: { holdedDocumentId: null, holdedDocNumber: null },
+    }),
+    prisma.holdedUpload.updateMany({
+      where: { externalId },
+      data: { holdedDocumentId: null },
+    }),
+  ]);
+}
+
+async function bumpAttempts(prisma: PrismaClient, externalId: string): Promise<void> {
+  await prisma.holdedUpload.updateMany({
+    where: { externalId },
+    data: { attempts: { increment: 1 }, lastAttemptAt: new Date() },
+  });
 }
 
 async function markFailed(

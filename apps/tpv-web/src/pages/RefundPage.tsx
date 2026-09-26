@@ -50,6 +50,14 @@ interface RefundResponse {
   };
 }
 
+// Lo cobrado por UNA unidad de la línea, con IVA y descuento ya dentro.
+// Es lo que el TPV tiene que devolver por unidad.
+function chargedPerUnit(l: OriginalLine): number {
+  if (l.units > 0) return l.total / l.units;
+  const grossPerUnit = l.unitPrice * (1 - l.discountPct / 100);
+  return grossPerUnit * (1 + l.taxRate / 100);
+}
+
 export function RefundOverlay(props: {
   ticket: OriginalTicket;
   onClose: () => void;
@@ -78,14 +86,18 @@ export function RefundOverlay(props: {
     }));
   }
 
+  // bloque abonos-holded · el importe a devolver sale del TOTAL de la
+  // línea, no de su `unitPrice`. `unitPrice` es el precio BASE del
+  // catálogo: no lleva el override del lápiz ni los recargos de los
+  // modificadores, así que con cualquiera de los dos la pantalla decía un
+  // importe distinto del que el servidor apunta en el abono. `total` ya es
+  // el dinero cobrado por esa línea, IVA y descuento incluidos.
   const refundTotal = useMemo(() => {
     let total = 0;
     for (const l of props.ticket.lines) {
       const refundUnits = unitsByLine[l.id] ?? 0;
       if (refundUnits <= 0) continue;
-      const grossPerUnit = l.unitPrice * (1 - l.discountPct / 100);
-      const lineTotal = grossPerUnit * refundUnits * (1 + l.taxRate / 100);
-      total += lineTotal;
+      total += chargedPerUnit(l) * refundUnits;
     }
     return Math.round(total * 100) / 100;
   }, [unitsByLine, props.ticket.lines]);
@@ -223,7 +235,7 @@ export function RefundOverlay(props: {
                       {l.nameSnapshot}
                     </div>
                     <div className="text-[12.5px] text-slate-500 tabular-nums">
-                      {l.units} ud. · {formatEur(l.unitPrice)} ud.
+                      {l.units} ud. · {formatEur(chargedPerUnit(l))} ud.
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
