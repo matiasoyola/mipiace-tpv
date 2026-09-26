@@ -21,6 +21,13 @@ import { getPrisma } from "../context.js";
 import { comprobarSueloFiscal } from "../fiscal/activacion.js";
 import { encryptSecret } from "../crypto.js";
 import { holdedConnectionStatus } from "../holded/connection-status.js";
+import {
+  DejarHoldedBloqueadoError,
+  ejecutarDejarHolded,
+  previsualizarDejarHolded,
+  TenantNoExisteError,
+} from "../holded/dejar-holded.js";
+import { vaciarColasDeHolded } from "../holded/dejar-holded-colas.js";
 import { loadEnv } from "../env.js";
 import { enqueueInitialSync } from "../queues/initial-sync.js";
 import { enqueueManualSync } from "../queues/catalog-incremental.js";
@@ -35,6 +42,11 @@ import { computeOnboardingHealth } from "./onboarding-health.js";
 import { issueTestCashierSession, purgeTestData } from "./test-cashier.js";
 import { signImpersonationToken } from "./tokens.js";
 import { sendOwnerWelcomeEmail } from "./welcome-email.js";
+import {
+  ERROR_SILENCIO,
+  MENSAJE_SILENCIO,
+  motivoSilencio,
+} from "../holded/silencio.js";
 
 const emailFormat = "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$";
 
@@ -423,6 +435,11 @@ export async function registerSuperAdminTenantsRoutes(
         // catalogo-local (addendum 3) · el interruptor de Holded, para
         // que el detalle pueda pintarlo y moverlo.
         holdedEnabled: tenant.holdedEnabled,
+        // holded-desconectar (ADR-020) · cuándo DEJÓ Holded, si lo dejó.
+        // El detalle lo necesita para saber qué botón enseñar: «Dejar
+        // Holded» al que lo tiene conectado y vendiendo, y nada al que ya
+        // lo dejó (reencenderlo es otro bloque, y el servidor lo rechaza).
+        holdedDisconnectedAt: tenant.holdedDisconnectedAt?.toISOString() ?? null,
         lastIncrementalSyncAt:
           tenant.lastIncrementalSyncAt?.toISOString() ?? null,
         createdAt: tenant.createdAt.toISOString(),
@@ -1103,6 +1120,23 @@ export async function registerSuperAdminTenantsRoutes(
               "Esta empresa tiene Holded conectado. Desconecta primero la API Key: apagar Holded con la clave puesta dejaría ventas sin subir y documentos a medias.",
           });
         }
+        // holded-desconectar (ADR-020) · y ENCENDERLO tampoco es ya "volver
+        // al camino de siempre" (ADR-017 §4.1) en el comercio que lo DEJÓ.
+        // Misma razón que en `PATCH …/holded-api-key`: sus fichas conservan
+        // `holded_product_id`, el upsert del sync casaría con ellas y las
+        // pisaría. El comercio que nunca lo tuvo sigue sin guarda, porque
+        // sus fichas locales tienen el enlace a NULL y el supuesto de
+        // ADR-017 sigue siendo cierto para él.
+        if (body.holdedEnabled === true && tenant.holdedDisconnectedAt != null) {
+          return reply.code(409).send({
+            error: "HOLDED_DESCONECTADO",
+            message:
+              "Este comercio dejó Holded el " +
+              tenant.holdedDisconnectedAt.toISOString().slice(0, 10) +
+              ". Volverlo a encender haría que el sync pisara su catálogo local. La vuelta a Holded " +
+              "es una operación aparte y todavía no está construida.",
+          });
+        }
         // V1-verifactu (ADR-019) · apagar Holded ya no es sólo «trabajar
         // sin ERP»: es que el emisor de la factura pasa a ser mipiacetpv.
         // A partir del siguiente cobro, cada venta lleva su registro de
@@ -1308,7 +1342,12 @@ export async function registerSuperAdminTenantsRoutes(
       const prisma = getPrisma();
       const tenant = await prisma.tenant.findUnique({
         where: { id },
-        select: { id: true, holdedApiKeyCiphertext: true },
+        select: {
+          id: true,
+          holdedApiKeyCiphertext: true,
+          holdedEnabled: true,
+          holdedDisconnectedAt: true,
+        },
       });
       if (!tenant) {
         return reply.code(404).send({
@@ -1316,11 +1355,14 @@ export async function registerSuperAdminTenantsRoutes(
           message: "Tenant no existe",
         });
       }
-      if (!tenant.holdedApiKeyCiphertext) {
-        return reply.code(409).send({
-          error: "NO_HOLDED_KEY",
-          message: "Este tenant aún no ha conectado Holded.",
-        });
+      // holded-desconectar (ADR-020) · "Este tenant aún no ha conectado
+      // Holded" es falso en un comercio que lo dejó, y ese "aún" invita a
+      // pegarle una clave. Cada motivo con su frase.
+      const silencio = motivoSilencio(tenant);
+      if (silencio != null) {
+        return reply
+          .code(409)
+          .send({ error: ERROR_SILENCIO[silencio], message: MENSAJE_SILENCIO[silencio] });
       }
       const job = await enqueueManualSync(id);
       const signals = extractRequestSignals(request);
@@ -1547,12 +1589,43 @@ export async function registerSuperAdminTenantsRoutes(
         // H1 · el estado del sync decide si esto es una rotación (la
         // clave de siempre, cuenta nueva) o el ESTRENO de Holded en una
         // empresa que nació sin él.
-        select: { id: true, name: true, initialSyncStatus: true },
+        select: {
+          id: true,
+          name: true,
+          initialSyncStatus: true,
+          // holded-desconectar (ADR-020) · la tercera opción, que hasta
+          // este bloque no existía.
+          holdedDisconnectedAt: true,
+        },
       });
       if (!tenant) {
         return reply.code(404).send({
           error: "TENANT_NOT_FOUND",
           message: "Tenant no existe",
+        });
+      }
+      // holded-desconectar (ADR-020) · LA PUERTA DE LA VUELTA.
+      //
+      // Pegarle una clave a un comercio que dejó Holded no es "volver al
+      // camino de siempre". Sus 86 fichas son `source = LOCAL` y CONSERVAN
+      // `holded_product_id`, así que el upsert del sync incremental —que
+      // casa por `(tenant_id, holded_product_id)`— entraría por la rama
+      // `update` y les pisaría nombre, precio, IVA y tags con lo que Holded
+      // tuviera guardado el día del corte. El precio que Ana cambió a las
+      // diez se desharía solo a las diez y cuarto.
+      //
+      // La vuelta (reconectar y casar por SKU) es un bloque aparte y tiene
+      // que decidir, entre otras cosas, qué se hace con lo cobrado en el
+      // periodo local. Hasta que exista, esto es un 409.
+      if (tenant.holdedDisconnectedAt != null) {
+        return reply.code(409).send({
+          error: "HOLDED_DESCONECTADO",
+          message:
+            "Este comercio dejó Holded el " +
+            tenant.holdedDisconnectedAt.toISOString().slice(0, 10) +
+            ". Volver a conectarlo no es pegar la clave: su catálogo es local y conserva el enlace " +
+            "con Holded, así que el sync pisaría las fichas del cliente. La vuelta es una operación " +
+            "aparte y todavía no está construida.",
         });
       }
       const client = new ApiKeyClient(holdedApiKey, {
@@ -1651,6 +1724,181 @@ export async function registerSuperAdminTenantsRoutes(
         // "he guardado la clave pero la cola está caída, dale a Re-sync".
         initialSyncStatus: estrenaHolded ? "PENDING" : tenant.initialSyncStatus,
         initialSyncQueued: syncQueued,
+      });
+    },
+  );
+
+  // ── Dejar Holded ────────────────────────────────────────────────────
+  //
+  // holded-desconectar (ADR-020) · el camino que faltaba.
+  //
+  // `PATCH /super-admin/tenants/:id` con `holdedEnabled: false` sigue
+  // devolviendo `409 HOLDED_ENABLED_HAS_KEY` y eso NO cambia: apagar el
+  // interruptor con la clave puesta dejaría el catálogo mandado desde un
+  // ERP que ya no se consulta y ventas sin subir. El toggle es para el
+  // comercio que no ha conectado nada.
+  //
+  // Esto son DOS rutas y no una porque la previsualización es parte del
+  // producto, no un lujo: lo que se va a hacer es poco reversible —la clave
+  // se borra, 86 fichas cambian de dueño— y el que pulsa tiene que poder
+  // leer los números de ESE comercio antes.
+  //
+  //   GET  …/dejar-holded  → el plan. Sólo lee. Se puede pedir mil veces.
+  //   POST …/dejar-holded  → lo aplica. Recalcula el plan DENTRO de su
+  //                          transacción y rechaza con los mismos bloqueos
+  //                          que enseñó el GET si algo cambió por medio.
+  app.get(
+    "/super-admin/tenants/:id/dejar-holded",
+    {
+      preHandler: requireSuperAdmin,
+      schema: {
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", format: "uuid" } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      try {
+        const previa = await previsualizarDejarHolded(getPrisma(), id);
+        return reply.code(200).send(previa);
+      } catch (err) {
+        if (err instanceof TenantNoExisteError) {
+          return reply
+            .code(404)
+            .send({ error: "TENANT_NOT_FOUND", message: "Tenant no existe" });
+        }
+        throw err;
+      }
+    },
+  );
+
+  app.post(
+    "/super-admin/tenants/:id/dejar-holded",
+    {
+      preHandler: requireSuperAdmin,
+      schema: {
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", format: "uuid" } },
+        },
+        body: {
+          type: "object",
+          required: ["confirmacion"],
+          additionalProperties: false,
+          properties: {
+            // El nombre del comercio, tecleado. No es teatro: es la misma
+            // clase de confirmación que pide un `DROP DATABASE`, y aquí lo
+            // que está en juego es el catálogo y la contabilidad de un
+            // negocio. Un botón "¿seguro?" se pulsa sin leer.
+            confirmacion: { type: "string", minLength: 1, maxLength: 200 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const { confirmacion } = request.body as { confirmacion: string };
+      const ctx = request.superAdmin!;
+      const prisma = getPrisma();
+
+      const tenant = await prisma.tenant.findUnique({
+        where: { id },
+        select: { id: true, name: true },
+      });
+      if (!tenant) {
+        return reply
+          .code(404)
+          .send({ error: "TENANT_NOT_FOUND", message: "Tenant no existe" });
+      }
+      if (confirmacion.trim() !== tenant.name.trim()) {
+        return reply.code(400).send({
+          error: "CONFIRMACION_NO_COINCIDE",
+          message:
+            "Escribe el nombre del comercio exactamente como aparece para confirmar.",
+        });
+      }
+
+      let resultado;
+      try {
+        resultado = await ejecutarDejarHolded({ prisma, tenantId: id });
+      } catch (err) {
+        if (err instanceof DejarHoldedBloqueadoError) {
+          // Los MISMOS bloqueos que enseñó la previsualización, con el
+          // mismo texto. Un 409 genérico obligaría a volver a la pantalla
+          // anterior a adivinar qué cambió.
+          return reply.code(409).send({
+            error: "DEJAR_HOLDED_BLOQUEADO",
+            message:
+              "No se puede dejar Holded todavía. Resuelve lo de abajo y vuelve a previsualizar.",
+            bloqueos: err.bloqueos,
+          });
+        }
+        if (err instanceof TenantNoExisteError) {
+          return reply
+            .code(404)
+            .send({ error: "TENANT_NOT_FOUND", message: "Tenant no existe" });
+        }
+        throw err;
+      }
+
+      // Las colas, DESPUÉS del commit y sin poder tumbar nada. Si Redis
+      // está caído el corte ya está hecho: se anota y el super-admin
+      // relanza la acción, que es idempotente.
+      const colas = await vaciarColasDeHolded({
+        tenantId: id,
+        log: (msg, extra) => request.log.info({ tenantId: id, ...extra }, msg),
+      });
+
+      const signals = extractRequestSignals(request);
+      await writeAudit({
+        prisma,
+        superAdminId: ctx.superAdminId,
+        action: "dejar_holded",
+        tenantId: id,
+        metadata: {
+          ...signals,
+          cortado: resultado.cortado,
+          productosConvertidos: resultado.productosConvertidos,
+          subidasHuerfanasCerradas: resultado.subidasHuerfanasCerradas,
+          holdedDisconnectedAt: resultado.holdedDisconnectedAt,
+          skuAcunados: resultado.skuAcunados,
+          foto: {
+            ticketsFacturadosPorHolded:
+              resultado.previa.devoluciones.ticketsFacturadosPorHolded,
+            contactos: resultado.previa.contactosYCrm.contactos,
+            clientesCrm: resultado.previa.contactosYCrm.clientesCrm,
+            deudaVivaTotal: resultado.previa.contactosYCrm.deudaVivaTotal,
+            turnosAbiertos: resultado.previa.ventasEnVuelo.turnosAbiertos,
+          },
+          colas: colas.porCola,
+          colasErrores: colas.errores,
+          repeatableQuitado: colas.repeatableQuitado,
+        },
+      });
+
+      request.log.warn(
+        {
+          event: "super_admin.dejar_holded",
+          tenantId: id,
+          cortado: resultado.cortado,
+          productosConvertidos: resultado.productosConvertidos,
+          skuAcunados: resultado.skuAcunados.length,
+        },
+        `${tenant.name} deja Holded`,
+      );
+
+      return reply.code(200).send({
+        ok: true,
+        cortado: resultado.cortado,
+        holdedDisconnectedAt: resultado.holdedDisconnectedAt,
+        productosConvertidos: resultado.productosConvertidos,
+        skuAcunados: resultado.skuAcunados,
+        subidasHuerfanasCerradas: resultado.subidasHuerfanasCerradas,
+        colas,
       });
     },
   );
