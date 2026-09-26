@@ -577,6 +577,42 @@ model Tenant {
   // `!holdedEnabled`: mismo criterio exacto que `cajaEnabled` arriba. Todo
   // lo que existe hoy nace encendido y se comporta igual que antes.
   holdedEnabled                  Boolean           @default(true) @map("holded_enabled")
+  // holded-desconectar (ADR-020) · CUÁNDO este comercio dejó Holded
+  // teniéndolo conectado y vendiendo. NULL en todos los demás: en el que
+  // nunca lo tuvo, en el que lo tiene, y en el que lo tendrá.
+  //
+  // No es redundante con `holdedEnabled = false`. Esa columna responde
+  // «¿está previsto que use Holded?» y la contestan igual DOS comercios
+  // que no se parecen en nada:
+  //
+  //   · el que nació sin él (catalogo-local, ADR-017): su catálogo nunca
+  //     estuvo en ningún ERP y no hay histórico que respetar.
+  //   · el que lo DEJÓ (este bloque): tiene 270 facturas emitidas por
+  //     Holded, 86 fichas con `holded_product_id` vivo y un asesor que
+  //     necesita saber dónde está la frontera.
+  //
+  // Tres cosas la necesitan y ninguna se puede deducir de las otras dos
+  // columnas:
+  //
+  //   1. **La frontera del abono.** Una devolución de después del corte
+  //      puede ser de una factura de Holded (antes) o de una factura
+  //      simplificada nuestra (después). El asesor las trata distinto y
+  //      el listado se construye comparando con esta fecha.
+  //   2. **La reanudación.** La acción es una transacción y un vaciado de
+  //      colas que NO es transaccional. Si el proceso muere entre los
+  //      dos, relanzarla ve esto puesto, no repite la parte hecha y
+  //      termina la que falta.
+  //   3. **La puerta de la vuelta.** Reencender Holded en un comercio que
+  //      lo dejó NO es «volver al camino de siempre» (ADR-017 §4.1): sus
+  //      fichas conservan `holded_product_id`, así que el upsert del sync
+  //      —que casa por `(tenant_id, holded_product_id)`— entraría por la
+  //      rama `update` y pisaría el catálogo local. Eso es otro bloque, y
+  //      hasta que exista esta columna es lo que lo impide.
+  //
+  // Su invariante vive en la BASE (`tenants_holded_desconectado_ck`): si
+  // está poblada, `holded_enabled = false` Y no hay clave. No se puede
+  // estar «a medio dejar».
+  holdedDisconnectedAt           DateTime?         @map("holded_disconnected_at") @db.Timestamptz()
   // B-reservas-7a · la RETÍCULA del centro: cada cuántos minutos empieza una
   // cita. 15 (el valor histórico de B4, `agenda/time.ts::SLOT_MINUTES`) o 30.
   // Peluquería Sole trabaja en franjas de 30 y hasta ahora le ofrecíamos
@@ -1849,6 +1885,27 @@ model HoldedUpload {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, status])
+  // holded-desconectar (ADR-020) · TRIGGER QUE PRISMA NO PUEDE DECLARAR.
+  //
+  //   holded_uploads_no_tras_el_corte  BEFORE INSERT
+  //
+  // Si el tenant tiene `holded_disconnected_at` poblado, la fila NACE
+  // `SKIPPED` con `last_error = {"skipped":"holded_desconectado"}` en vez
+  // de `PENDING`. Vive en la migración `20260926000000_holded_desconectar`.
+  //
+  // Por qué reescribe y NO lanza: esta tabla se escribe DENTRO de la
+  // transacción que cobra. Un `RAISE` aquí tumbaría una venta con el
+  // cliente delante por una invariante nuestra, y cobrar siempre se puede
+  // (misma razón por la que `comprobarGateFiscal` descarta el registro del
+  // modo prueba en vez de devolver 409). `SKIPPED` ya existe desde
+  // v1.5-consistencia-B §3.a y significa exactamente esto: terminal, el
+  // sweeper no lo recoge, nadie lo sube nunca.
+  //
+  // Es la SEGUNDA puerta, no la primera. La primera es
+  // `shouldEnqueueHoldedUpload` / `shouldEnqueueHoldedRefundUpload`, que
+  // no crean la fila. Cada una tiene su test y su sabotaje: quitar el gate
+  // deja una fila que no debería existir, quitar el trigger la deja
+  // PENDING y el sweeper la persigue.
   @@map("holded_uploads")
 }
 
