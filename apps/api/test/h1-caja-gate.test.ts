@@ -233,9 +233,17 @@ describe("H1 · las rutas reales llevan la puerta puesta", () => {
       new URL(`../src/${rel}`, import.meta.url),
       "utf8",
     );
-    // Contamos el cierre del array del preHandler, no el nombre suelto:
-    // el import y los comentarios también lo nombran.
-    const hits = src.match(/, ensureCajaEnabled\]/g) ?? [];
+    // Contamos el nombre EN POSICIÓN de preHandler, no el nombre suelto: el
+    // import y los comentarios también lo nombran.
+    //
+    // holded-desconectar (ADR-020) · el patrón admite ahora que venga OTRA
+    // puerta detrás (`, ensureCajaEnabled, ensureHoldedVivo]`). Antes exigía
+    // que `ensureCajaEnabled` fuera la última del array, y eso convertía
+    // "añadir una puerta" en "perder una puerta" a ojos de este guardia:
+    // `catalog/routes.ts` cayó de 5 a 3 sin que ninguna ruta se quedara sin
+    // gatear. Lo que este banco vigila es que la puerta de la CAJA esté
+    // puesta, no en qué orden.
+    const hits = src.match(/, ensureCajaEnabled[\],]/g) ?? [];
     expect(hits.length).toBe(n);
   });
 
