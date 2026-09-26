@@ -23,7 +23,17 @@ const VALID_PAYLOAD = {
   date: 1746979200,
   notes: `TPV-uuid: ${VALID_EXTERNAL_ID}`,
   items: [
-    { name: "Precinto", units: 1, price: 2.27273, tax: 21, discount: 0, sku: "8430173203748" },
+    {
+      name: "Precinto",
+      units: 1,
+      // `subtotal` es el precio unitario que Holded lee de verdad (bloque
+      // abonos-holded); `price` va con el mismo valor.
+      subtotal: 2.27273,
+      price: 2.27273,
+      tax: 21,
+      discount: 0,
+      sku: "8430173203748",
+    },
   ],
 };
 
@@ -188,5 +198,134 @@ describe("registerPaymentWithGetBack", () => {
     await expect(
       registerPaymentWithGetBack(client, "doc-1", { date: 1, amount: 2.75 }),
     ).rejects.toBeInstanceOf(HoldedSilentRejectError);
+  });
+});
+
+// ── bloque abonos-holded ──────────────────────────────────────────────
+
+const REFUND_EXTERNAL_ID = "3f02a454-508c-47da-a4da-364b6e72bc30";
+const REFUND_PAYLOAD = {
+  approveDoc: true as const,
+  date: 1789000000,
+  notes: `TPV-refund-uuid: ${REFUND_EXTERNAL_ID} · original: T261131`,
+  items: [
+    {
+      name: "CORTAR NIÑOS",
+      units: -1,
+      subtotal: 7.9339,
+      price: 7.9339,
+      tax: 21,
+      discount: 0,
+      serviceId: "696777c96aace215d9063740",
+    },
+  ],
+};
+
+describe("createSalesreceiptApproved · abonos (total negativo)", () => {
+  it("acepta un documento con total negativo cuando el esperado es negativo", async () => {
+    // Antes la comprobación era `!(storedTotal > 0)`: daba por roto TODO
+    // abono, incluso uno perfecto. Los valores son los del ensayo real
+    // contra Holded del 26-09-2026.
+    const client = mockClient([
+      { id: "doc-abono" },
+      {
+        id: "doc-abono",
+        docNumber: "T2614967",
+        approvedAt: 1789000000,
+        draft: null,
+        total: -9.6,
+        subtotal: -7.93,
+        tax: -1.67,
+        discount: 0,
+        notes: REFUND_PAYLOAD.notes,
+        paymentsTotal: 0,
+        paymentsPending: -9.6,
+        products: [],
+      },
+    ]);
+    const res = await createSalesreceiptApproved(client, REFUND_PAYLOAD, {
+      externalId: REFUND_EXTERNAL_ID,
+      expectedTotal: -9.6,
+    });
+    expect(res.documentId).toBe("doc-abono");
+    expect(res.stored.total).toBe(-9.6);
+  });
+
+  it("un abono que Holded deja a 0 sigue siendo silent_reject y trae el documento", async () => {
+    const client = mockClient([
+      { id: "doc-huerfano" },
+      {
+        id: "doc-huerfano",
+        docNumber: "T2600123",
+        approvedAt: 1789000000,
+        draft: null,
+        total: 0,
+        subtotal: 0,
+        tax: 0,
+        discount: 0,
+        notes: REFUND_PAYLOAD.notes,
+        paymentsTotal: 0,
+        paymentsPending: 0,
+        products: [],
+      },
+    ]);
+    const err = await createSalesreceiptApproved(client, REFUND_PAYLOAD, {
+      externalId: REFUND_EXTERNAL_ID,
+      expectedTotal: -9.6,
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(HoldedSilentRejectError);
+    const silent = err as HoldedSilentRejectError;
+    expect(silent.mismatches).toEqual([
+      { field: "total", expected: -9.6, actual: 0 },
+    ]);
+    // El documento existe en Holded: el error lo dice, para que el caller
+    // pueda guardarlo y nadie tenga que buscarlo a mano.
+    expect(silent.document).toEqual({ id: "doc-huerfano", docNumber: "T2600123" });
+  });
+
+  it("una venta con total negativo sigue siendo silent_reject (el signo importa)", async () => {
+    const client = mockClient([
+      { id: "doc-x" },
+      {
+        id: "doc-x",
+        docNumber: "T1",
+        approvedAt: 1,
+        draft: null,
+        total: -2.75,
+        notes: `TPV-uuid: ${VALID_EXTERNAL_ID}`,
+        paymentsTotal: 0,
+        paymentsPending: -2.75,
+        products: [],
+      },
+    ]);
+    const err = await createSalesreceiptApproved(client, VALID_PAYLOAD, {
+      externalId: VALID_EXTERNAL_ID,
+      expectedTotal: 2.75,
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(HoldedSilentRejectError);
+  });
+});
+
+describe("registerPaymentWithGetBack · cobro negativo", () => {
+  it("el pre-check idempotente también ve un abono ya pagado (paymentsTotal negativo)", async () => {
+    // Con la condición anterior (`paymentsTotal > 0`) el pre-check no
+    // disparaba nunca en un abono y el reintento duplicaba el pago.
+    const yaPagado = {
+      id: "doc-abono",
+      docNumber: "T2614967",
+      total: -9.6,
+      paymentsTotal: -9.6,
+      paymentsPending: 0,
+      notes: REFUND_PAYLOAD.notes,
+      products: [],
+    };
+    const client = mockClient([yaPagado]);
+    const stored = await registerPaymentWithGetBack(client, "doc-abono", {
+      date: 1789000000,
+      amount: -9.6,
+    });
+    expect(stored.paymentsPending).toBe(0);
+    // Una sola petición: el GET del pre-check. Ningún POST /pay.
+    expect((client.request as unknown as { mock: { calls: unknown[] } }).mock.calls).toHaveLength(1);
   });
 });
