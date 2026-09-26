@@ -31,6 +31,7 @@ import {
 import {
   buildTicketSalesreceiptPayload,
 } from "../tickets/upload-ticket.js";
+import { ensureHoldedVivo } from "../holded/silencio.js";
 
 export async function registerAdminTicketsErrorsRoutes(
   app: FastifyInstance,
@@ -264,7 +265,13 @@ export async function registerAdminTicketsErrorsRoutes(
   app.post(
     "/admin/tickets/:id/retry-sync",
     {
-      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
+      // holded-desconectar (ADR-020) · reintentar la subida de un comercio
+      // que dejó Holded encolaría un job que su runner va a saltar, y el
+      // botón diría "reintentando" sobre algo que no puede pasar. La acción
+      // no arranca mientras queden documentos en vuelo, así que después del
+      // corte esta bandeja está vacía por construcción; esto es la puerta
+      // para lo que llegue de otra manera.
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled, ensureHoldedVivo],
       schema: {
         params: {
           type: "object",
@@ -297,7 +304,13 @@ export async function registerAdminTicketsErrorsRoutes(
   app.post(
     "/admin/refunds/:id/retry-sync",
     {
-      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
+      // holded-desconectar (ADR-020) · reintentar la subida de un comercio
+      // que dejó Holded encolaría un job que su runner va a saltar, y el
+      // botón diría "reintentando" sobre algo que no puede pasar. La acción
+      // no arranca mientras queden documentos en vuelo, así que después del
+      // corte esta bandeja está vacía por construcción; esto es la puerta
+      // para lo que llegue de otra manera.
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled, ensureHoldedVivo],
       schema: {
         params: {
           type: "object",

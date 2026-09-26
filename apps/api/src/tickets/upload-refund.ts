@@ -52,7 +52,16 @@ export async function uploadRefund(
     include: {
       lines: true,
       originalTicket: { select: { id: true, holdedDocumentId: true, holdedDocNumber: true } },
-      tenant: { select: { id: true, holdedApiKeyCiphertext: true } },
+      tenant: {
+        select: {
+          id: true,
+          holdedApiKeyCiphertext: true,
+          // holded-desconectar (ADR-020) · ver la nota gemela de
+          // `upload-ticket.ts`.
+          holdedEnabled: true,
+          holdedDisconnectedAt: true,
+        },
+      },
       register: { select: { numSerieHolded: true } },
     },
   });
@@ -71,6 +80,22 @@ export async function uploadRefund(
   }
   if (refund.status === TicketStatus.SYNCED) {
     return { kind: "skipped", reason: "already_synced" };
+  }
+  // holded-desconectar (ADR-020) · la misma carrera que en la venta, y aquí
+  // importa más: un abono en `SYNC_FAILED` bloquea las devoluciones
+  // legítimas de esas líneas hasta que alguien lo anule a mano
+  // (v1.5-consistencia-A §3.c). Que el corte creara uno solo sería empezar
+  // la vida sin Holded con la bandeja encendida.
+  if (refund.tenant.holdedDisconnectedAt != null) {
+    await prisma.holdedUpload.updateMany({
+      where: { externalId },
+      data: {
+        status: "SKIPPED",
+        lastError: { skipped: "holded_desconectado" },
+      },
+    });
+    log.info("el comercio dejó Holded — skip upload del abono", { externalId });
+    return { kind: "skipped", reason: "holded_desconectado" };
   }
   if (!refund.tenant.holdedApiKeyCiphertext) {
     await markFailed(prisma, externalId, "no_holded_key");

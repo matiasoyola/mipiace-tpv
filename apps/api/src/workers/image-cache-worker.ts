@@ -90,12 +90,31 @@ export async function processImageCacheJob(
       imageUrl: true,
       imageMime: true,
       imageCachedAt: true,
-      tenant: { select: { holdedApiKeyCiphertext: true } },
+      tenant: {
+        select: {
+          holdedApiKeyCiphertext: true,
+          // holded-desconectar (ADR-020) · ver abajo.
+          holdedDisconnectedAt: true,
+        },
+      },
     },
   });
   if (!product) {
     log.warn("image-cache: producto no existe", { productId });
     return { status: "no-product", reason: "product-not-found" };
+  }
+  // holded-desconectar (ADR-020) · criterio 3. La `imageUrl` de una ficha
+  // que viene de Holded APUNTA A HOLDED, así que este worker es una llamada
+  // a Holded aunque no use el cliente de la API. Y las fichas conservan su
+  // URL tras el corte: se decidió no borrarla para no dejar sin foto una
+  // rejilla que funcionaba.
+  //
+  // Nada encola imágenes después del corte —lo hacen los dos syncs, que ya
+  // no corren—, pero un job encolado antes puede ejecutarse después. Lo que
+  // YA está cacheado en disco se sigue sirviendo desde Caddy y no se toca:
+  // esto sólo impide DESCARGAS nuevas.
+  if (product.tenant.holdedDisconnectedAt != null) {
+    return { status: "skipped", reason: "holded-desconectado" };
   }
   if (!product.imageUrl) {
     return { status: "no-image", reason: "image-url-null" };

@@ -24,6 +24,11 @@ import {
   type ContactImportResult,
   type ContactImportRow,
 } from "../queues/contact-import.js";
+import {
+  ERROR_SILENCIO,
+  MENSAJE_SILENCIO,
+  motivoSilencio,
+} from "../holded/silencio.js";
 
 const MAX_ROWS = 2_000;
 
@@ -74,10 +79,32 @@ export async function registerContactImportRoutes(
 
       // Sin API key de Holded no hay importación posible — Holded es la
       // fuente de verdad y no creamos contactos "solo locales".
+      //
+      // holded-desconectar (ADR-020) · el import CSV es el camino que más
+      // engaña de todo el inventario, porque suena a local y no lo es: crea
+      // cada contacto EN HOLDED y después lo espeja. Se cierra con el motivo
+      // puesto, que en un comercio que dejó Holded no es "configura la API
+      // key" sino "ya no hay ERP".
       const tenant = await prisma.tenant.findUniqueOrThrow({
         where: { id: auth.tenantId },
-        select: { holdedApiKeyCiphertext: true },
+        select: {
+          holdedApiKeyCiphertext: true,
+          holdedEnabled: true,
+          holdedDisconnectedAt: true,
+        },
       });
+      // El código de error de "sin clave" se queda como estaba
+      // (`NO_HOLDED_API_KEY`, y no el `NO_HOLDED_KEY` del resto del
+      // proyecto): es el contrato que esta ruta tiene publicado desde B7 y
+      // renombrarlo de paso sería cambiar una API por estética. Los DOS
+      // motivos nuevos son los que traen código nuevo.
+      const silencio = motivoSilencio(tenant);
+      if (silencio === "desconectado" || silencio === "no_lo_usa") {
+        return reply.code(409).send({
+          error: ERROR_SILENCIO[silencio],
+          message: MENSAJE_SILENCIO[silencio],
+        });
+      }
       if (!tenant.holdedApiKeyCiphertext) {
         return reply.code(409).send({
           error: "NO_HOLDED_API_KEY",

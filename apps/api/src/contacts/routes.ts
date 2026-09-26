@@ -34,6 +34,7 @@ import { getPrisma } from "../context.js";
 import { decryptSecret } from "../crypto.js";
 import { loadEnv } from "../env.js";
 import { mapHoldedType } from "./holded-type.js";
+import { ensureHoldedVivo } from "../holded/silencio.js";
 
 // Heurística simple: dígitos + opcional `+`, espacios o guiones, al
 // menos 6 dígitos en total. Suficiente para distinguir un teléfono
@@ -255,10 +256,14 @@ export async function registerContactsRoutes(app: FastifyInstance): Promise<void
     },
   );
 
+  // holded-desconectar (ADR-020) · `Contact` es el espejo de Holded y esta
+  // ruta CREA el contacto EN HOLDED antes de espejarlo (ADR-R2). Sin ERP no
+  // hay dónde crearlo, y crear sólo la fila local sería fabricar un contacto
+  // huérfano con un `holded_contact_id` inventado.
   app.post(
     "/contacts",
     {
-      preHandler: requireOwnerOrCashier,
+      preHandler: [requireOwnerOrCashier, ensureHoldedVivo],
       schema: {
         body: {
           type: "object",

@@ -29,12 +29,18 @@ import { buildAutoSku } from "../onboarding/auto-sku.js";
 import { enqueueManualSync } from "../queues/catalog-incremental.js";
 import { getTenantHealthStatus } from "../tickets/health.js";
 import { ensureCajaEnabled } from "../lib/caja-gate.js";
+import { ensureHoldedVivo } from "../holded/silencio.js";
 
 export async function registerCatalogRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     "/catalog/sync-now",
     {
-      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
+      // holded-desconectar (ADR-020) · antes de este bloque la ruta decía
+      // "Conecta tu cuenta de Holded antes de sincronizar" a un comercio que
+      // acababa de dejarlo. `ensureHoldedVivo` distingue los tres motivos y
+      // le da a cada uno su frase; el 409 de abajo se queda como red por si
+      // la clave desaparece entre el gate y el handler.
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled, ensureHoldedVivo],
       schema: { body: { type: "object", additionalProperties: false, properties: {} } },
     },
     async (request, reply) => {
@@ -146,10 +152,15 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
   // Asigna un SKU manual al producto (B2 §4.4). PUT a Holded con
   // GET-back. Si Holded vuelve a silenciar, devolvemos 502 y dejamos
   // needsSkuReview=true para que siga en la bandeja.
+  // holded-desconectar (ADR-020) · esta ruta hace `PUT /products/{id}` a
+  // Holded con GET-back (ADR-010): es escritura en el ERP del cliente, no
+  // una edición local. Tras el corte no hay ERP al que escribir y la
+  // bandeja entera deja de tener sentido (la acción limpia
+  // `needsSkuReview`). `ensureHoldedVivo` la cierra con el motivo puesto.
   app.post(
     "/catalog/sku-review/:productId/assign",
     {
-      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled, ensureHoldedVivo],
       schema: {
         params: {
           type: "object",

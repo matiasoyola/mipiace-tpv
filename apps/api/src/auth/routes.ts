@@ -335,6 +335,13 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
           // Sólo lectura aquí; se mueve desde el super-admin, igual que
           // `cajaEnabled`.
           holdedEnabled: tenant.holdedEnabled,
+          // holded-desconectar (ADR-020) · la tercera pregunta, y no es
+          // deducible de las dos de arriba: `holdedEnabled = false` lo
+          // contestan igual el comercio que NACIÓ sin Holded y el que lo
+          // DEJÓ con 270 facturas emitidas detrás. El panel las trata
+          // distinto — sólo el segundo tiene devoluciones que llevar a mano
+          // al asesor, y sólo a él se le enseña esa pantalla.
+          holdedDisconnectedAt: tenant.holdedDisconnectedAt?.toISOString() ?? null,
           initialSyncStatus: tenant.initialSyncStatus,
           fiscalProfile: tenant.fiscalProfile ?? null,
           lastIncrementalSyncAt: tenant.lastIncrementalSyncAt?.toISOString() ?? null,
@@ -437,6 +444,31 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const auth = request.auth!;
       const { apiKey } = request.body as { apiKey: string };
+
+      // holded-desconectar (ADR-020) · esta ruta es `requireOwner` y no
+      // tenía ninguna guarda: Ana podía pegar una clave y resucitar Holded
+      // en su comercio ella sola. Y el daño no sería teórico — sus fichas
+      // conservan `holded_product_id`, así que el sync entraría por la rama
+      // `update` del upsert y le desharía los precios que acaba de poner.
+      //
+      // Se comprueba ANTES del `probeHoldedKey`: no tiene sentido gastar una
+      // llamada a Holded para validar una clave que no vamos a guardar.
+      //
+      // El comercio que nunca tuvo Holded SÍ puede usarla: es el camino de
+      // H1 («encender Holded más tarde») y ahí no hay catálogo local que
+      // pisar. La puerta es la fecha del corte, no el interruptor.
+      const antes = await getPrisma().tenant.findUnique({
+        where: { id: auth.tenantId },
+        select: { holdedDisconnectedAt: true },
+      });
+      if (antes?.holdedDisconnectedAt != null) {
+        return reply.code(409).send({
+          error: "HOLDED_DESCONECTADO",
+          message:
+            "Este comercio dejó de usar Holded. Volver a conectarlo no es sólo pegar la clave: " +
+            "habla con Mi Piace antes de hacer nada.",
+        });
+      }
 
       const probe = await probeHoldedKey(apiKey);
       if (!probe.ok) {
