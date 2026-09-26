@@ -455,39 +455,57 @@ pre-check idempotente del `/pay` con `paymentsTotal` negativo).
 
 ---
 
-# 7 · El conflicto con `holded-desconectar`
+# 7 · El cruce con `holded-desconectar`
 
-Las dos ramas tocan `apps/api/src/tickets/upload-refund.ts`, `upload-ticket.ts` y
-`apps/api/src/admin/tickets-errors.ts`. Quien mergee segundo resuelve; esto es lo que choca:
+Las dos ramas tocan tres archivos comunes: `apps/api/src/tickets/upload-refund.ts`,
+`apps/api/src/tickets/upload-ticket.ts` y `apps/api/src/admin/tickets-errors.ts`.
 
-**`upload-refund.ts` · el `include` del `findUnique`.** Un solo bloque, las dos ramas dentro:
+**No hay conflicto.** Probado, no supuesto, con un merge en seco que no toca ningún árbol:
 
-- `holded-desconectar` cambia `tenant: { select: {...} }` para traerse `holdedEnabled` y
-  `holdedDisconnectedAt`.
-- `abonos-holded` cambia la línea de al lado, `lines: true` → `lines: refundLineInclude()`.
+```
+$ git merge-tree --write-tree --name-only abonos-holded holded-desconectar
+3043161edb6ff2910e44daa4c032fa6f4b2f9624      ← sólo el árbol, ninguna ruta en conflicto
+$ echo $?
+0
+```
 
-Resolución: **las dos**. El `include` final lleva `lines: refundLineInclude()` y el `tenant` con
-los cuatro campos.
+El árbol resultante no tiene ni un marcador `<<<<<<<` y lleva las piezas de las dos ramas. Esto es
+el `include` del `findUnique` de `uploadRefund` en el resultado del merge, que es el sitio donde las
+dos ramas escriben más cerca la una de la otra —línea contigua—:
 
-**`upload-refund.ts` · el cuerpo de `uploadRefund`.** `holded-desconectar` inserta su puerta
-(`if (refund.tenant.holdedDisconnectedAt != null) → SKIPPED`) entre el `already_synced` y el
-`no_holded_key`; `abonos-holded` reescribe todo lo que viene DESPUÉS de construir el cliente
-(FASE 0, la puerta del importe, el guardado del documento). No se pisan: la puerta de
-`holded-desconectar` va tal cual, antes de todo lo mío.
+```ts
+    include: {
+      lines: refundLineInclude(),                    // abonos-holded
+      originalTicket: { select: { id: true, holdedDocumentId: true, holdedDocNumber: true } },
+      tenant: {
+        select: {
+          id: true,
+          holdedApiKeyCiphertext: true,
+          // holded-desconectar (ADR-020) · ver la nota gemela de
+          // `upload-ticket.ts`.
+          holdedEnabled: true,                       // holded-desconectar
+          holdedDisconnectedAt: true,                // holded-desconectar
+        },
+      },
+      register: { select: { numSerieHolded: true } },
+    },
+```
 
-**`upload-ticket.ts`** · igual: su puerta del corte va arriba, mi FASE 0 y mi `saveDocument` van
-después del `bumpAttempts`.
+Dónde escribe cada una, para que quien mergee sepa qué mirar:
 
-**`tickets-errors.ts`** · **no choca.** `holded-desconectar` añade un `import` y mete
-`ensureHoldedVivo` en el `preHandler` de los dos `retry-sync`; yo toco otros tres sitios: el `enum`
-de `errorType` (tres valores nuevos), el `include` del preview del abono (`refundLineInclude()`) y
-`summarizeError`. Son hunks distintos del mismo archivo, así que git los junta solo; lo que hay que
-revisar a ojo después del merge es que el `import` de `refundLineInclude` siga en su bloque.
+| Archivo | `holded-desconectar` | `abonos-holded` |
+|---|---|---|
+| `upload-refund.ts` | `tenant: { select }` del `include`; la puerta del corte (`holdedDisconnectedAt != null → SKIPPED`) entre `already_synced` y `no_holded_key` | `lines: refundLineInclude()` en el `include`; todo lo que viene DESPUÉS de construir el cliente (FASE 0, la puerta del importe, el guardado del documento) |
+| `upload-ticket.ts` | su puerta del corte, arriba | FASE 0 y `saveDocument`, después del `bumpAttempts` |
+| `tickets-errors.ts` | un `import` y `ensureHoldedVivo` en el `preHandler` de los dos `retry-sync` | el `enum` de `errorType`, el `include` del preview del abono y `summarizeError` |
 
-Ninguna de las dos ramas cambia `packages/holded-client`, `holded-line.ts`, `holded-document.ts`,
-`routes.ts` ni `RefundPage.tsx`, así que ahí no hay nada que resolver.
+Son hunks distintos y git los junta solo. Lo único que conviene repasar a ojo después del merge es
+lo que ninguna herramienta comprueba: que la puerta del corte de `holded-desconectar` siga **antes**
+de la FASE 0 de este bloque —un comercio que dejó Holded no debe ni hacerle un GET— y que el
+typecheck de `apps/api` siga en verde, porque el `include` del `findUnique` ahora tiene dos dueños.
 
----
+Ninguna de las dos ramas toca `packages/holded-client`, `holded-line.ts`, `holded-document.ts`,
+`routes.ts`, `RefundPage.tsx` ni `TicketsErrorsPage.tsx`, así que ahí no hay nada que revisar.
 
 # 8 · Lo que queda fuera, dicho en voz alta
 
