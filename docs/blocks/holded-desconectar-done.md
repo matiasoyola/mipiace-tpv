@@ -684,4 +684,35 @@ ninguna ficha, ningún contacto, ningún ticket y ningún abono. No se ha tocado
 ha hecho la vuelta a Holded. No se han emitido registros Verifactu de nada anterior al corte. No
 se ha renombrado nada a `ErpAdapter`. No se ha hecho responsive la consola super-admin.
 
+---
+
+## 14 · Commits
+
+```
+3534bb4 feat(holded-desconectar): la fecha del corte, su CHECK y su trigger
+9b0926f feat(holded-desconectar): la acción, con su previsualización
+dd60698 feat(holded-desconectar): Holded se calla, por los diecinueve caminos
+52496ed feat(holded-desconectar): la barra roja del TPV, y el listado del asesor
+b15127e feat(holded-desconectar): la pantalla de «Dejar Holded» y la del asesor
+569050b test(holded-desconectar): 27 sabotajes, y los cuatro que salieron verdes
+4eb3232 docs(holded-desconectar): el done, el ensayo sobre prod y 23 capturas
+```
+
+---
+
+## 15 · Relación con otros documentos
+
+- [ADR-020](../design/adr-020-dejar-holded-es-un-camino.md) · las decisiones de dato y gobierno,
+  y qué cambia de ADR-017.
+- [ADR-017](../design/adr-017-el-catalogo-tiene-autoridad-local.md) · `source`, el interruptor y
+  el índice parcial del SKU. Su §4.1 queda **enmendado** por ADR-020 §5.
+- [ADR-019](../design/adr-019-cada-caja-es-un-sif.md) y
+  [verifactu-1-done](./verifactu-1-done.md) · quién emite la factura desde el corte. Su §9 dejaba
+  anotado «desconectar Holded en un comercio que ya lo tiene (bloque aparte)»: esto es ese bloque.
+- [catalogo-local-done](./catalogo-local-done.md) · el comercio que NACE sin Holded. Su §14 quitó
+  el panel de contacto y el fiado del TPV; §3.5 de aquí dice qué queda de eso en el que lo deja.
+- [`holded-desconectar-shots/`](./holded-desconectar-shots/) · el bucle visual.
+- [`holded-desconectar-ensayo/`](./holded-desconectar-ensayo/) · el SQL del ensayo y del
+  despliegue.
+
 **Ni push ni merge a master: eso lo hace Matías.**
