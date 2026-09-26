@@ -506,7 +506,7 @@ BEGIN;
 UPDATE devices SET revoked_at = now()
  WHERE revoked_at IS NULL
    AND id IN (
-     -- Cafetería Sirope · se queda 94ffd0dd (Android AP11-1006, visto 02-09)
+     -- Cafetería Sirope · se queda 94ffd0dd (el AP11-1006 de laboratorio)
      '11250e41-d67d-4eb2-8f5b-f1cb5cfb0b1d'::uuid,
      '96574fee-e162-439c-8c1c-7d9ebacde7a5'::uuid,
      '5e0fd499-b992-448a-9673-26337323ccb3'::uuid,
@@ -521,8 +521,18 @@ COMMIT;
 **Qué se mira:** `UPDATE 6`, y que la consulta del paso 1 ya no devuelve nada. **Si devuelve otro
 número**, se para: los `last_seen_at` han cambiado desde el ensayo y hay que volver a decidir.
 
-> Sirope y Cachitos se quedan sin las tablets que revocamos. Hay que **avisarlos antes**: si alguien
-> usaba una de esas, volverá a la pantalla de emparejar y necesita un código.
+**Sirope no pierde nada y no hay que avisarlo.** Sirope es nuestro tenant de pruebas, y el terminal
+que se queda —`94ffd0dd`, el AP11-1006— es **nuestro terminal de laboratorio** emparejado a él. Su
+AP nunca llegó a funcionar: Sirope no cobra con ningún terminal. Revocar los otros cuatro no le quita
+nada, y el día que se empareje el suyo de verdad, sustituirá al AP11 por el camino normal.
+
+Esto matiza el criterio del §4.4 («se queda el que se vio por última vez, y sólo si es una tablet»):
+en Sirope da el resultado correcto por casualidad, porque el que más recientemente se vio es
+justamente el de laboratorio.
+
+> **Cachitos sí.** Se queda sin las dos tablets que revocamos (`70e0e35e`, `338b65d3`). Hay que
+> **avisarlos antes**: si alguien usaba una de esas, volverá a la pantalla de emparejar y necesita
+> un código.
 
 ### Paso 3 · el despliegue
 
@@ -567,12 +577,15 @@ devuelve algo o (3) no es 0, se para y se vuelve atrás.**
 
 ### Paso 5 · el humo
 
-1. Un cobro real en Sirope desde su tablet. **Qué se mira:** sale el ticket, y en el log **no** hay
-   `fiscal.venta_sin_registro` (Sirope factura con Holded, no le toca).
-2. `GET /admin/fiscal/chains` desde el panel de Sirope. **Qué se mira:** responde, con las cadenas a
+1. `GET /admin/fiscal/chains` desde el panel de Sirope. **Qué se mira:** responde, con las cadenas a
    cero.
-3. El modo prueba de un comercio desde el super-admin. **Qué se mira:** el terminal real de esa caja
+2. El modo prueba de un comercio desde el super-admin. **Qué se mira:** el terminal real de esa caja
    **sigue activo** después de activarlo. Es el fallo que abre este bloque.
+
+**Aquí no va un cobro real.** Cobrar de verdad en Sirope desde el AP11 dejaría un documento en el
+Holded del cliente, y eso rompe el protocolo. El cobro de un comercio con Holded ya está probado
+contra datos reales en el ensayo (§4.6, punto 6.3), donde no podía salir nada hacia fuera: sin
+worker y con la clave de cifrado de Holded cambiada.
 
 ### Y la vuelta atrás
 
