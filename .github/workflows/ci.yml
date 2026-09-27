@@ -263,6 +263,20 @@ jobs:
       # nadie puede disparar esto por accidente contra su base de trabajo.
       # Sin la variable la suite se salta en local — pero en CI falla, que
       # es lo que evita un verde que miente.
+      # El caso 1 de agenda-carrera necesita que Postgres levante un deadlock
+      # DE VERDAD, y Postgres no busca ciclos hasta `deadlock_timeout` (1 s
+      # por defecto): 40 rondas no caben en ese segundo y el caso se saltaba
+      # siempre en CI (carrera-alta-409-plan.md §A.1). A 50 ms sí caben.
+      # `deadlock_timeout` se recarga sin reiniciar el servicio.
+      - name: deadlock_timeout a 50 ms para el e2e de la carrera
+        env:
+          PGPASSWORD: mipiacetpv
+        run: |
+          psql -h 127.0.0.1 -U mipiacetpv -d mipiacetpv_e2e -v ON_ERROR_STOP=1 \
+            -c "ALTER SYSTEM SET deadlock_timeout = '50ms'" \
+            -c "SELECT pg_reload_conf()"
+          psql -h 127.0.0.1 -U mipiacetpv -d mipiacetpv_e2e -Atc "SHOW deadlock_timeout"
+
       - name: e2e del ciclo de caja
         env:
           E2E_DATABASE_URL: postgresql://mipiacetpv:mipiacetpv@127.0.0.1:5432/mipiacetpv_e2e
