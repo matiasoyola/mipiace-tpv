@@ -141,6 +141,20 @@ ENV NODE_ENV=production
 ARG GIT_SHA=""
 ENV APP_VERSION=${GIT_SHA}
 
+# declaracion-responsable · la FECHA de esa versión, por el mismo camino y
+# por el mismo motivo. El apartado 1.l) de la declaración responsable del
+# SIF (art. 15 de la Orden HAC/1177/2024) pide la fecha en que el productor
+# la suscribe, que es la de la VERSIÓN y no la de hoy. Se hornea junto al
+# sha para que nadie la teclee en una plantilla y para que la imagen sepa de
+# cuándo es aunque se despliegue como :latest.
+#
+# Vacío por defecto (build local sin arg): getAppVersionDate() devuelve null
+# y la declaración dice que no hay fecha. SIN fallback a la fecha de hoy —
+# una fecha que cambia cada vez que se abre el documento no es la de ninguna
+# versión. El stage `worker` (FROM api) hereda este ENV.
+ARG GIT_COMMIT_DATE=""
+ENV APP_VERSION_DATE=${GIT_COMMIT_DATE}
+
 EXPOSE 3001
 
 USER node

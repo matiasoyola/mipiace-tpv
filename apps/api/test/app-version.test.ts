@@ -3,7 +3,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { getAppVersion } from "../src/version.js";
+import { getAppVersion, getAppVersionDate } from "../src/version.js";
 
 describe("getAppVersion (v1.9.8)", () => {
   let prevAppVersion: string | undefined;
@@ -56,5 +56,55 @@ describe("getAppVersion (v1.9.8)", () => {
   it("recorta espacios alrededor del sha", () => {
     process.env.APP_VERSION = "  c0ffee1  ";
     expect(getAppVersion()).toBe("c0ffee1");
+  });
+});
+
+// declaracion-responsable · la FECHA de esa versión, que es el apartado 1.l)
+// de la declaración responsable del SIF.
+//
+// Sabotajes que esto pone en rojo (tabla del done):
+//   · devolver la fecha de hoy cuando la env no está horneada
+//   · aceptar una fecha con otro formato como si fuera buena
+describe("getAppVersionDate (declaracion-responsable)", () => {
+  let previa: string | undefined;
+
+  beforeEach(() => {
+    previa = process.env.APP_VERSION_DATE;
+    delete process.env.APP_VERSION_DATE;
+  });
+
+  afterEach(() => {
+    if (previa === undefined) delete process.env.APP_VERSION_DATE;
+    else process.env.APP_VERSION_DATE = previa;
+  });
+
+  it("devuelve la fecha civil horneada", () => {
+    process.env.APP_VERSION_DATE = "2026-09-27";
+    expect(getAppVersionDate()).toBe("2026-09-27");
+  });
+
+  it("de un ISO completo se queda con la parte civil", () => {
+    // Una hora en un documento legal sólo añade la pregunta de en qué huso.
+    process.env.APP_VERSION_DATE = "2026-09-27T18:04:11Z";
+    expect(getAppVersionDate()).toBe("2026-09-27");
+  });
+
+  it("recorta espacios", () => {
+    process.env.APP_VERSION_DATE = "  2026-09-27  ";
+    expect(getAppVersionDate()).toBe("2026-09-27");
+  });
+
+  it("sin la env devuelve null, NO la fecha de hoy", () => {
+    // Lo importante de este test es el `null`. Una declaración responsable
+    // cuya fecha cambia cada vez que alguien abre el documento no es la
+    // declaración de ninguna versión.
+    expect(getAppVersionDate()).toBeNull();
+  });
+
+  it("vacío, 'latest' y basura son null, no fechas inventadas", () => {
+    for (const valor of ["", "   ", "latest", "ayer", "27/09/2026", "2026-9-7"]) {
+      process.env.APP_VERSION_DATE = valor;
+      expect(getAppVersionDate(), `«${valor}» se colaría como fecha`).toBeNull();
+    }
   });
 });
