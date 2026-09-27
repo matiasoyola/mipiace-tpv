@@ -87,6 +87,14 @@ export async function inspectExistingDocument(
 
 // El texto que lee el propietario en la bandeja de errores. Se guarda en
 // `syncError` para que el panel no tenga que reconstruirlo.
+//
+// No dice "bórralo" a secas: qué se hace con un documento que Holded dejó
+// con otro total es una decisión de contabilidad, no del TPV. Con los seis
+// abonos de Peluquería Sole se decidió CONSERVAR los documentos de 0 € —
+// borrarlos deja huecos en la numeración de la serie— y anotarlos al
+// asesor (ver `docs/blocks/abonos-holded-done.md` §2). Lo que el mensaje sí
+// tiene que dejar claro es lo único que es nuestro: que Reintentar no va a
+// crear otro documento mientras ése exista, y por qué.
 export function describeMismatchedDocument(v: {
   docNumber: string | null;
   documentId: string;
@@ -96,7 +104,9 @@ export function describeMismatchedDocument(v: {
   const name = v.docNumber ?? v.documentId;
   return (
     `Holded creó el documento ${name} con total ${v.storedTotal.toFixed(2)} € ` +
-    `en vez de ${v.expectedTotal.toFixed(2)} €. Hay que anularlo en Holded ` +
-    `(borrarlo) y volver a darle a Reintentar: entonces se crea el documento bueno.`
+    `en vez de ${v.expectedTotal.toFixed(2)} €. Mientras ese documento exista, ` +
+    `Reintentar no crea otro, para no duplicar el abono. Anótalo con el asesor: ` +
+    `si se decide borrarlo en Holded, al reintentar se crea el bueno solo; si se ` +
+    `conserva, hay que emitir el abono a mano allí y marcar esto como resuelto.`
   );
 }

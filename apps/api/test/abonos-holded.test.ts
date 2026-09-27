@@ -424,7 +424,11 @@ describe("4 · silent_reject tras un POST que sí creó documento", () => {
     const err = stored.syncError as Record<string, unknown>;
     expect(err.holdedDocumentId).toBe("doc-huerfano");
     expect(String(err.message)).toContain("T2600123");
-    expect(String(err.message)).toContain("anularlo en Holded");
+    // El mensaje dice lo único que es nuestro: que Reintentar no va a crear
+    // otro documento mientras ése exista. Qué se hace con el de 0 € lo
+    // decide la contabilidad (con los seis de Sole: conservarlo y anotarlo).
+    expect(String(err.message)).toContain("Reintentar no crea otro");
+    expect(String(err.message)).toContain("asesor");
     expect(creationPosts(calls)).toHaveLength(1);
   });
 });
