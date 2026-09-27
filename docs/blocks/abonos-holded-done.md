@@ -85,7 +85,8 @@ que guardó producción viene del GET-back: para poder comparar el total, Holded
 documento. Lo que no sabemos es su número, porque el id se perdía antes de guardarse — que es
 exactamente el punto 2 del bloque.
 
-Para averiguarlo hay un script **de solo lectura**, probado contra PRUEBAS MIPIACE:
+Para averiguarlo hay un script **de solo lectura**, probado contra PRUEBAS MIPIACE. Se guarda la
+salida en un archivo, porque **esa lista es la anotación que se le pasa al asesor** (punto 2):
 
 ```bash
 pnpm --filter @mipiacetpv/api exec tsx ../../scripts/holded-orphan-docs.ts \
@@ -95,7 +96,16 @@ pnpm --filter @mipiacetpv/api exec tsx ../../scripts/holded-orphan-docs.ts \
   --uuid 2daad459-8cc7-4183-8b35-08201380c195 \
   --uuid 92b0f1a4-4d95-4225-9ea9-0729eb0b758e \
   --uuid 6908dd60-d1a0-4f79-83f8-8492a66eb1de \
-  --uuid 3f02a454-508c-47da-a4da-364b6e72bc30
+  --uuid 3f02a454-508c-47da-a4da-364b6e72bc30 \
+  | tee ~/sole-ceros-antes-2026-09-10.txt
+```
+
+Y la misma consulta en JSON, si el asesor la quiere en un archivo manejable:
+
+```bash
+pnpm --filter @mipiacetpv/api exec tsx ../../scripts/holded-orphan-docs.ts \
+  --key <API_KEY_DE_SOLE> --from 2026-09-10 --to 2026-09-10 --json \
+  > ~/sole-ceros-antes-2026-09-10.json
 ```
 
 Lo lanza Matías. **Yo no lo he ejecutado contra ningún Holded de cliente**, sólo contra PRUEBAS
@@ -103,9 +113,15 @@ MIPIACE. Busca en las notas las dos etiquetas que escribe el TPV (`TPV-refund-uu
 `TPV-uuid:` para ventas) y devuelve fecha, tipo, número, total, pendiente, id y uuid, marcando:
 
 - `CERO` → el documento está a 0 € (los seis de Sole deberían salir así),
-- `DUPLICADO` → hay más de un documento con el mismo uuid (un huérfano más un reintento),
+- `DUPLICADO` → hay más de un documento con el mismo uuid,
 - `SIGNO` → un abono en positivo o una venta en negativo,
 - `SIN DOCUMENTO` → el uuid que se pidió no tiene ningún documento en Holded.
+
+**Ojo con `DUPLICADO`: a partir de la regularización deja de ser una alarma y pasa a ser lo
+esperado.** Como los documentos de 0 € se conservan (punto 2), cada uno de los seis uuid acabará con
+DOS documentos en el Holded de Sole: el de 0 € y el abono bueno. Lo que hay que leer entonces es la
+pareja: un `CERO` + un abono con su importe. Un uuid con dos documentos y ningún `CERO`, o con dos
+importes buenos, sí es un problema — eso sería un abono duplicado de verdad.
 
 Salida real contra PRUEBAS MIPIACE (los documentos del ensayo del punto 4 y de las pruebas):
 
@@ -128,10 +144,14 @@ sincronizar se limpia `lastError`), así que el censo sólo se puede hacer desde
 
 ```bash
 pnpm --filter @mipiacetpv/api exec tsx ../../scripts/holded-orphan-docs.ts \
-  --key <API_KEY_DE_SOLE> --from 2026-06-01 --to 2026-06-30
+  --key <API_KEY_DE_SOLE> --from 2026-06-01 --to 2026-06-30 \
+  | tee ~/sole-ceros-junio.txt
 ```
 
-y mirar las filas con `CERO` o `DUPLICADO`.
+Las filas con `CERO` de junio son ventas ya resueltas —el documento bueno existe, el ticket está
+`SYNCED`—, así que ahí **no hay nada que reintentar**: sólo que esos 0 € entren en la misma
+anotación para el asesor que los seis abonos. Es el mismo criterio del punto 2: los ceros se
+conservan y se explican.
 
 ---
 
@@ -139,7 +159,14 @@ y mirar las filas con `CERO` o `DUPLICADO`.
 
 Nada de esto se ha hecho. Son los pasos, en orden, para los seis abonos de Sole.
 
-## 2.0 Qué permite Holded con un ticket ya aprobado
+**La decisión, tomada y no abierta: los seis documentos de 0 € NO se borran.** Se quedan en el
+Holded de Sole, los abonos buenos se crean con «Reintentar» desde el panel una vez desplegado el
+arreglo, y esos seis ceros se le anotan al asesor para que los explique en la contabilidad. El
+motivo es la numeración: borrar deja huecos en la serie de tickets de Sole, y un hueco sin
+documento es más difícil de justificar ante un tercero que un documento a 0 € con su explicación al
+lado.
+
+## 2.0 Qué permite Holded con un ticket ya aprobado, y qué vamos a hacer
 
 Probado el 26-09-2026 contra PRUEBAS MIPIACE, no deducido:
 
@@ -152,52 +179,106 @@ GET del mismo documento después
 ```
 
 - **Un `salesreceipt` aprobado y numerado SE PUEDE BORRAR**, por API y (igual) desde la pantalla de
-  Holded. No hay "anular" ni rectificativa para este tipo de documento: se borra.
+  Holded. No hay "anular" ni rectificativa para este tipo de documento: se borra o se queda.
 - **El número no se recicla y queda un hueco.** El documento borrado era el `T2614950`; el
   siguiente que creó Holded fue el `T2614951`. La serie no se renumera.
 - Sole **no emite todavía por VeriFactu** (verifactu-1b: ninguno de los seis comercios lo tiene
-  encendido), así que el hueco no rompe ninguna cadena de registros fiscales. Es un hueco en la
-  numeración interna de sus tickets de Holded.
+  encendido), así que ni borrar ni conservar rompe ninguna cadena de registros fiscales. Lo que hay
+  en juego es sólo la numeración interna de sus tickets de Holded y lo que se le cuenta al asesor.
 
-**Recomendación:** borrarlos. Un ticket aprobado de 0 € miente sobre los ingresos del día; un hueco
-en la numeración no dice nada falso. Dicho esto, es decisión de quien lleva la contabilidad de
-Sole: si prefiere no tocar la numeración, la alternativa es dejarlos y anotar los seis en el cierre
-del mes como documentos anulados sin efecto. Lo que NO vale es dejarlos y no decirlo.
+**Se conservan.** O sea: se puede borrar, y se ha decidido no hacerlo. Lo que eso implica, dicho
+entero para que nadie se lo encuentre por sorpresa:
+
+- En el Holded de Sole quedarán, para el 10-09-2026, **seis tickets aprobados de 0 €** y, al lado,
+  los seis abonos buenos con su importe. Los ceros no suman ni restan nada en los totales del día.
+- Cada uno de los seis uuid tendrá **dos documentos** con la misma etiqueta `TPV-refund-uuid:`. El
+  script los marcará `DUPLICADO`, y a partir de la regularización eso es lo esperado, no una alarma
+  (ver el aviso del punto 1.3).
+- La conciliación diaria (`reconciliation.ts`) **no se entera de los ceros**: sólo recorre VENTAS
+  con `holdedDocumentId` no nulo — ni mira las devoluciones, ni puede mirar un documento cuyo id no
+  tenemos. No va a dar la voz por ellos. Que los ceros no molesten a nadie es precisamente lo que
+  hace viable conservarlos; que tampoco vigile los abonos buenos es otra cosa, y no es de este
+  bloque.
+- Los 0 € **se anotan una vez** y se acabó. Si en el futuro alguien audita la serie y ve un ticket
+  de 0 €, la explicación tiene que estar en la contabilidad, no en la memoria de nadie.
 
 ## 2.1 El procedimiento, paso a paso
 
-Para cada uno de los seis abonos (R-000219, R-000220, R-000221, R-000222, R-000223, R-000227):
+Requisito previo: **el arreglo desplegado**. Sin él, «Reintentar» vuelve a fallar exactamente igual
+(y ahora además guardaría el id del documento a 0 €, que es peor de deshacer — ver el punto 2.2).
 
-1. **Encontrar el documento a 0 €** con el script del punto 1.3, que devuelve su número y su id.
-   Apuntar la lista de números antes de tocar nada.
-2. **Borrar en Holded ese documento** (pantalla de Holded, con la lista delante). Sólo los
-   marcados `CERO` y cuyo uuid sea uno de los seis. Nada más.
-3. **Darle a «Reintentar» en la bandeja de errores del panel** (Panel → Errores de sincronización →
-   la devolución → Reintentar). Con los arreglos de los puntos 1-3, eso hace:
+1. **Antes de tocar nada, sacar la lista de los ceros** con el script del punto 1.3, guardada en un
+   archivo. Devuelve número, fecha, total e id de cada documento de 0 €. Esa lista es la anotación
+   del asesor y la referencia para comprobar después que nadie ha borrado ninguno.
+2. **En Holded, no se toca nada.** Ni borrar, ni editar, ni duplicar. Los seis ceros se quedan como
+   están.
+3. **«Reintentar» en la bandeja de errores del panel**, abono por abono (Panel → Errores de
+   sincronización → la devolución → Reintentar). Con los arreglos de los puntos 1-3 eso hace:
    `POST salesreceipt` con `serviceId` + `subtotal` → GET-back con total −3,00 € (o el que toque) →
    `POST /pay` con importe negativo → GET-back con pendiente 0 → el abono queda `SYNCED` con su
-   `holdedDocumentId` y su número guardados.
-4. **Comprobar** que la devolución sale de la bandeja y que en Holded hay un abono con su importe.
+   `holdedDocumentId` y su número guardados. **Crea un documento nuevo; no toca el de 0 €.**
+4. **Comprobar, abono por abono**, que sale de la bandeja y que en Holded hay un abono con su
+   importe y en negativo.
+5. **Al terminar los seis, volver a lanzar el script** con la misma ventana del paso 1 más el día
+   del reintento, y comparar:
 
-**Sí: el reintento desde el panel es el camino, y es seguro.** Los seis tienen
-`holded_document_id` vacío en la base, así que el reintento crea el documento bueno de cero; no hay
-que teclear ningún abono a mano. Y aunque alguien reintente antes de borrar el documento de 0 €, el
-arreglo del punto 3 lo protege: no se crea un segundo documento, el abono se queda en
-`SYNC_FAILED` y la bandeja dice `Holded creó el documento T26xxxxx con total 0,00 € en vez de
--3,00 €. Hay que anularlo en Holded (borrarlo) y volver a darle a Reintentar`. El orden correcto es
-borrar primero, pero equivocarse no rompe nada.
+   ```bash
+   pnpm --filter @mipiacetpv/api exec tsx ../../scripts/holded-orphan-docs.ts \
+     --key <API_KEY_DE_SOLE> --from 2026-09-10 --to <EL DÍA DEL REINTENTO> \
+     --uuid 492a8c07-b0bc-47e0-91af-3c700ee79153 \
+     --uuid 8b060780-a564-4ee8-be52-50e0e3bed387 \
+     --uuid 2daad459-8cc7-4183-8b35-08201380c195 \
+     --uuid 92b0f1a4-4d95-4225-9ea9-0729eb0b758e \
+     --uuid 6908dd60-d1a0-4f79-83f8-8492a66eb1de \
+     --uuid 3f02a454-508c-47da-a4da-364b6e72bc30 \
+     | tee ~/sole-ceros-despues.txt
+   ```
 
-**El orden importa en un punto:** los pasos 2 y 3 de cada abono, juntos, antes de pasar al
+   El `--to` tiene que llegar hasta el día del reintento: el abono bueno lleva la fecha del abono
+   original (10-09), pero es más barato ampliar la ventana que fiarse de eso. El resultado correcto
+   son **doce filas, seis parejas**: por cada uuid, un `CERO,DUPLICADO` con el mismo número que en el
+   paso 1 y un abono con su importe en negativo, también marcado `DUPLICADO`. Y al pie,
+   `6 documento(s) a 0 €`. Si algún uuid tiene tres documentos, o dos importes buenos, eso sí es un
+   abono duplicado: parar ahí y no seguir con el resto.
+6. **Pasarle al asesor** la lista del paso 1 (los seis números de 0 € del 10-09-2026, con la
+   explicación: documentos que el TPV creó sin importe por un fallo, sin efecto contable, con su
+   abono correcto emitido después) más los ceros de junio del punto 1.3, si los hay.
+
+**El reintento desde el panel es el camino y es seguro**, y con esta decisión lo es más todavía: los
+seis tienen `holded_document_id` vacío en la base, así que el reintento crea el documento bueno de
+cero sin mirar el de 0 € ni poder tocarlo. No hay que teclear ningún abono a mano.
+
+**El orden importa en un punto:** los pasos 3 y 4 de cada abono, juntos, antes de pasar al
 siguiente. Así, si algo sale raro, hay un solo abono a medias y no seis.
 
 ## 2.2 Si algún día aparece uno con documento guardado
 
-A partir de este bloque, un `silent_reject` guarda el `holdedDocumentId`. El circuito es el mismo y
-está automatizado: al borrar el documento en Holded, Holded contesta `not found` al GET, el worker
-lo detecta, **olvida el id guardado** y crea el documento bueno. O sea: borrar en Holded +
-Reintentar, siempre, sin tener que limpiar nada en la base a mano.
+A partir de este bloque, un `silent_reject` guarda el `holdedDocumentId`. Eso arregla el problema de
+fondo —ningún documento vuelve a quedarse sin su id en nuestra base— pero, **con la decisión de no
+borrar, deja un caso sin salida automática** y hay que decirlo:
 
----
+- El abono queda en `SYNC_FAILED` con motivo `holded_document_total_mismatch`.
+- «Reintentar» **no** crea otro documento: es justo la protección del punto 3, la que impide
+  duplicar.
+- Y como el documento de 0 € no se borra, el worker nunca ve el `not found` que le haría olvidar el
+  id. O sea: ese abono no se sincroniza solo, por diseño.
+
+Las salidas, en orden de preferencia:
+
+1. **Borrar en Holded ESE documento concreto**, como excepción a la política, decidida con el
+   asesor. En cuanto desaparece, el worker lo detecta al reintentar (`not found`), olvida el id y
+   crea el bueno, sin tocar nada en la base. Es la única vía que hoy está automatizada de punta a
+   punta.
+2. **Hacer el abono a mano en Holded** y dejar nuestra fila resuelta con «Marcar como resuelto» en
+   la bandeja. El dinero queda bien en la contabilidad y nuestra bandeja queda limpia, a cambio de
+   que el abono de Holded no lleve nuestro `holdedDocumentId`.
+3. **Lo que falta para no tener que elegir:** un botón en la bandeja del tipo «este documento se
+   queda, olvídalo y crea el bueno», que limpie `holdedDocumentId` con el id a la vista y lo deje
+   registrado. **No existe**: no lo he construido en este bloque. Es la pieza que convierte la
+   decisión de conservar los ceros en un camino completo, y el sitio natural es
+   `apps/api/src/admin/tickets-errors.ts`, al lado de `retry-sync`.
+
+Nada de esto afecta a los seis de Sole: su `holded_document_id` está vacío, nunca se guardó.
 
 # 3 · Lo que Holded hace de verdad (ensayo del punto 4)
 
@@ -361,8 +442,12 @@ emite.
   desmiente.
 - `uploadRefund` y `uploadTicket` guardan ese id y ese número **antes** de marcar el fallo, y meten
   en `syncError` un `message` que el panel enseña tal cual:
-  `Holded creó el documento T2600123 con total 0,00 € en vez de -3,00 €. Hay que anularlo en Holded
-  (borrarlo) y volver a darle a Reintentar: entonces se crea el documento bueno.`
+  `Holded creó el documento T2600123 con total 0,00 € en vez de -3,00 €. Mientras ese documento
+  exista, Reintentar no crea otro, para no duplicar el abono. Anótalo con el asesor: si se decide
+  borrarlo en Holded, al reintentar se crea el bueno solo; si se conserva, hay que emitir el abono a
+  mano allí y marcar esto como resuelto.` El mensaje no manda borrar: qué se hace con un documento
+  que Holded dejó con otro total es decisión de contabilidad (§2), y lo único que es nuestro es que
+  Reintentar no va a duplicar.
 - El total del GET-back se compara **en signo y en valor** (`packages/holded-client/salesreceipt.ts`).
   La comprobación anterior, `!(storedTotal > 0)`, daba por roto cualquier abono correcto.
 - El pre-check idempotente del `/pay` mira `Math.abs(paymentsTotal) > 0`: en un abono ya cobrado
@@ -377,7 +462,7 @@ de dar un paso más se mira qué hay al otro lado. Tres casos, los tres en la ve
 | Veredicto | Qué se hace |
 |---|---|
 | `usable` (el total cuadra) | se salta el POST y se va al `/pay`. **Cero documentos nuevos.** |
-| `gone` (Holded dice `not found`) | se olvida el id guardado y se crea el documento bueno. Es el camino de la regularización. |
+| `gone` (Holded dice `not found`) | se olvida el id guardado y se crea el documento bueno. Es la salida cuando alguien SÍ borra el documento malo en Holded — no es el camino de los seis de Sole, que se regularizan sin borrar nada porque su id nunca se guardó (§2.1, §2.2). |
 | `total_mismatch` (existe, con otro total) | no se toca nada: ni POST nuevo ni `/pay` sobre un documento equivocado. `SYNC_FAILED` con el número delante. |
 
 Holded contesta al GET de un documento borrado con **400 y `{"status":0,"info":"not found"}`**, no
