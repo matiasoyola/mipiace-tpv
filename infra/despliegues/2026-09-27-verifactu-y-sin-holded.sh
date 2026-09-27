@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Despliegue del 27-09-2026 · verifactu-1 + 1b + abonos-holded + holded-desconectar.
-# Producción pasa de 82902fc a la imagen 6ffa72e.
+# Producción pasa de 82902fc a la imagen 2310f6e (incluye el Reply-To del correo).
 #
 # Es el guion de `docs/blocks/verifactu-1b-done.md` §5 hecho script, con
 # puertas: si algo no coincide con lo esperado, PARA antes de tocar nada.
@@ -14,7 +14,7 @@
 # Uso, en el VPS:  cd /opt/mipiacetpv && git pull --ff-only && bash infra/despliegues/2026-09-27-verifactu-y-sin-holded.sh
 
 set -euo pipefail
-IMAGE_TAG=6ffa72e
+IMAGE_TAG=2310f6e
 REPO=/opt/mipiacetpv
 cd "$REPO"
 POSTGRES_USER=$(grep -E '^POSTGRES_USER=' infra/.env.production | cut -d= -f2- | tr -d '"[:space:]')
