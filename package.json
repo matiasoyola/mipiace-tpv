@@ -12,6 +12,7 @@
     "dev:admin": "pnpm --filter @mipiacetpv/admin dev",
     "dev:tpv": "pnpm --filter @mipiacetpv/tpv-web dev",
     "test": "vitest run",
+    "docs:declaracion": "pnpm --filter @mipiacetpv/api exec tsx ../../scripts/generar-declaracion-responsable.ts",
     "test:watch": "vitest",
     "test:e2e": "pnpm --filter @mipiacetpv/api run test:e2e",
     "db:generate": "pnpm --filter @mipiacetpv/db run generate",

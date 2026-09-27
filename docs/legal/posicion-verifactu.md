@@ -76,7 +76,10 @@ NombreSistemaInformatico   mipiacetpv
 ```
 
 ⚠ **Estos valores tienen que coincidir literalmente con los de la declaración responsable del
-SIF.** Viven en `packages/verifactu/src/productor.ts` con un test que los valida.
+SIF.** Viven en `packages/verifactu/src/productor.ts` con un test que los valida. Desde el
+bloque `declaracion-responsable` la coincidencia ya no depende de que nadie se despiste: la
+declaración se CONSTRUYE desde estas constantes (`packages/verifactu/src/declaracion.ts`), así
+que cambiarlas aquí la cambia allí, y un test mockea el módulo para demostrarlo.
 
 Y **cada caja registradora es una instalación distinta de SIF**, con su propio
 `NumeroInstalacion`, su serie y su cadena. La justificación, con las citas de la AEAT, está en
@@ -116,7 +119,17 @@ dos series**. Sus facturas no van 1, 2, 3 sino C1/1, C2/1, C1/2…
 ## 7. Pendiente
 
 - ☐ Validación formal por **asesor fiscal** de esta posición.
-- ☐ **Declaración responsable del SIF**, con los datos del §4 y firmada.
+- ☑ **Declaración responsable del SIF**, con los datos del §4. Hecha en el bloque
+  `declaracion-responsable`: el texto se genera desde las MISMAS constantes de
+  `packages/verifactu/src/productor.ts` que firman cada registro, la versión es la misma
+  `getAppVersion()` que va en el campo `Version`, y se ve en el panel de cada cuenta
+  («Declaración responsable», en el pie de la barra lateral y en Ajustes) y en el menú del
+  TPV. Se sirve en `GET /legal/declaracion-responsable` y
+  `GET /legal/declaracion-responsable.pdf`, **públicos y sin sesión**, que es lo que el art.
+  15 de la Orden pide: entrega gratuita, en papel o en formato electrónico, a clientes y
+  distribuidores. El texto también en `docs/legal/declaracion-responsable.md` (generado).
+  **Sigue pendiente la FIRMA** del documento por el productor: es un acto de Matías, no de
+  código.
 - ☐ Obtener y archivar la declaración de Holded sobre su adaptación (sigue siendo relevante
   para los comercios que lo usan).
 - ☐ Revisar la cláusula 2 del `contrato-piloto.md`: la frontera fiscal que describe ya no es
