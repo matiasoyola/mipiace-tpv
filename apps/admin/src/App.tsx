@@ -14,6 +14,7 @@ import { GiftReceiptsPage } from "./pages/GiftReceiptsPage.js";
 import { HoldedPage } from "./pages/HoldedPage.js";
 import { ForgotPasswordPage, ResetPasswordPage } from "./pages/PasswordResetPages.js";
 import { PrintersPage } from "./pages/PrintersPage.js";
+import { DeclaracionResponsablePage } from "./pages/DeclaracionResponsablePage.js";
 import { SecurityPage } from "./pages/SecurityPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 import { AgendaCatalogPage } from "./pages/AgendaCatalogPage.js";
@@ -148,6 +149,13 @@ export function App() {
         <Route path="/admin/cashiers" element={<CajaGate title="Cajeros"><CashiersPage /></CajaGate>} />
         <Route path="/admin/contacts-import" element={<ContactImportPage />} />
         <Route path="/admin/security" element={<SecurityPage />} />
+        {/* declaracion-responsable · el documento del art. 15. SIN CajaGate
+            y sin capability a propósito: la declaración es del productor del
+            sistema, no del comercio, y se ve igual use Holded o no. */}
+        <Route
+          path="/admin/declaracion-responsable"
+          element={<DeclaracionResponsablePage />}
+        />
         <Route path="/admin/stores" element={<StoresPage />} />
         <Route path="/admin/stores/:storeId" element={<StoreDetailPage />} />
         <Route path="/admin/tickets-errors" element={<CajaGate title="Holded"><TicketsErrorsPage /></CajaGate>} />

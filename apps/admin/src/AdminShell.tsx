@@ -11,6 +11,7 @@ import {
   CalendarClock,
   ClipboardList,
   Clock,
+  FileText,
   FileWarning,
   Gift,
   KeyRound,
@@ -435,8 +436,31 @@ function DesktopSidebar({ onAskLogoutAll }: { onAskLogoutAll: () => void }) {
       >
         Cerrar sesión en todos los dispositivos
       </button>
+      <DeclaracionFooterLink />
       <VersionFooter />
     </aside>
+  );
+}
+
+// declaracion-responsable · el enlace al documento del art. 15.
+//
+// Va en el PIE de la barra lateral, encima de la versión, y no en la lista
+// de secciones: la Orden pide que se llegue «de forma rápida, fácil e
+// intuitiva» desde cualquier pantalla, y el pie está en todas. Sin
+// capability ni gate de rol — la declaración es del PRODUCTOR del sistema,
+// así que la ve el OWNER y el MANAGER de cualquier comercio, use Holded o
+// no. Es también la razón de que NO esté en NAV_ITEMS: allí toda entrada
+// pasa por el filtro de capabilities.
+function DeclaracionFooterLink({ onNavigate }: { onNavigate?: () => void }) {
+  return (
+    <Link
+      to="/admin/declaracion-responsable"
+      onClick={onNavigate}
+      className="flex items-center gap-2 px-4 py-2 text-[12px] text-slate-400 hover:text-mipiace-coral-dark font-medium"
+    >
+      <FileText className="w-3.5 h-3.5 shrink-0" strokeWidth={2.1} />
+      <span>Declaración responsable</span>
+    </Link>
   );
 }
 
@@ -488,6 +512,7 @@ function MobileDrawer({
         >
           Cerrar sesión en todos los dispositivos
         </button>
+        <DeclaracionFooterLink onNavigate={onClose} />
         <VersionFooter />
       </aside>
     </div>

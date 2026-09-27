@@ -3,7 +3,8 @@
 // puede ver los valores actuales pero no editarlos.
 
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { FileText } from "lucide-react";
 
 import { AdminShell } from "../AdminShell.js";
 import {
@@ -284,6 +285,24 @@ export function SettingsPage() {
       </Section>
       </>
       )}
+
+      {/* declaracion-responsable · el segundo camino al documento del art.
+          15, el que pide el bloque además del pie de la barra lateral.
+          FUERA del bloque gateado por `cajaEnabled` de arriba: la
+          declaración es del productor del sistema y no depende de qué haya
+          comprado el comercio. */}
+      <Section
+        title="Declaración responsable del sistema de facturación"
+        subtitle="El documento del art. 15 de la Orden HAC/1177/2024 sobre la versión que estás usando. Se puede leer aquí y descargar en PDF."
+      >
+        <Link
+          to="/admin/declaracion-responsable"
+          className="inline-flex items-center gap-2 text-[14px] font-medium text-mipiace-coral hover:text-mipiace-coral-dark"
+        >
+          <FileText className="w-4 h-4" strokeWidth={2.1} />
+          Ver la declaración responsable
+        </Link>
+      </Section>
 
       {canEdit && (
         <div className="flex gap-2.5 mt-6">
