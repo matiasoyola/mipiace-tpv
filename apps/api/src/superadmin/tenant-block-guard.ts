@@ -14,6 +14,11 @@ const EXEMPT_PREFIXES = [
   "/auth/password-reset",
   "/auth/signup",
   "/health",
+  // declaracion-responsable · el documento del art. 15 de la Orden
+  // HAC/1177/2024 se entrega a cualquiera que lo pida, y el OWNER de una
+  // cuenta bloqueada lo abre desde su panel con su Bearer puesto. Un 423
+  // sobre esta URL escondería un documento legal por una deuda comercial.
+  "/legal",
 ];
 
 function isExempt(url: string): boolean {

@@ -66,6 +66,7 @@ import { registerAgendaHoldTtlRepeatable } from "./queues/agenda-hold-ttl.js";
 import { startShiftDayCutWorker } from "./workers/shift-day-cut-worker.js";
 import { registerShiftDayCutRepeatable } from "./queues/shift-day-cut.js";
 import { registerFiscalRoutes } from "./fiscal/routes.js";
+import { registerLegalRoutes } from "./legal/routes.js";
 import { registerTicketRoutes } from "./tickets/routes.js";
 import { registerCreditRoutes } from "./tickets/credit-routes.js";
 import { registerTicketDigitalRoute } from "./tickets/digital-route.js";
@@ -164,6 +165,11 @@ async function main() {
   // resto, si lleva Bearer de un tenant con blocked_at != null, recibe
   // 423 Locked. Cubre CASHIER tanto como OWNER/MANAGER.
   registerTenantBlockGuard(app);
+
+  // declaracion-responsable · el documento del art. 15, público y sin
+  // sesión. Se registra aquí arriba, con /health, porque no pertenece a
+  // ningún tenant: es la declaración del PRODUCTOR del sistema.
+  await registerLegalRoutes(app);
 
   await registerSuperAdminRoutes(app);
   await registerAuthRoutes(app);
