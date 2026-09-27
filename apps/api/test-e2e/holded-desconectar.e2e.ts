@@ -86,6 +86,16 @@ vi.mock("../src/queues/product-image-cache.js", () => ({
   enqueueProductImageCache: async () => undefined,
 }));
 
+// El throttle de `/catalog/sync-now` vive en Redis, y el job e2e de CI no
+// levanta Redis (sólo Postgres): sin este mock, el control del vecino se
+// queda colgado reconectando a 127.0.0.1:6379 hasta el timeout de 60 s.
+// Lo que prueba ese caso es la puerta de Holded, no el rate-limit, que
+// tiene sus propios tests.
+vi.mock("../src/auth/rate-limit.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/auth/rate-limit.js")>()),
+  throttle: async () => ({ exceeded: false, count: 1, retryAfterSeconds: 0 }),
+}));
+
 const { getPrisma, shutdown } = await import("../src/context.js");
 const { registerTicketRoutes } = await import("../src/tickets/routes.js");
 const { registerShiftRoutes } = await import("../src/shift/routes.js");
