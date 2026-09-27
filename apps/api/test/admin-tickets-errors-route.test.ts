@@ -91,6 +91,19 @@ const correctionStore: Array<{
 }> = [];
 
 const fakePrisma = {
+  // holded-desconectar (ADR-020) · la bandeja de errores de Holded sólo
+  // existe para un comercio que USA Holded, y desde este bloque las rutas de
+  // reintento lo comprueban (`ensureHoldedVivo`). El doble tenía que decir
+  // quién es el tenant: antes no lo decía, `comprobarSilencio` no podía
+  // leerlo y la puerta devolvía 503 — que es su fallo correcto, hacia
+  // cerrado, pero aquí escondía el test.
+  tenant: {
+    findUnique: vi.fn(async () => ({
+      holdedEnabled: true,
+      holdedApiKeyCiphertext: "cifrado",
+      holdedDisconnectedAt: null,
+    })),
+  },
   ticket: {
     findMany: vi.fn(async ({ where, include, orderBy, take }: any) => {
       void orderBy;

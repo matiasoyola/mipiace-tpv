@@ -6,7 +6,10 @@ import {
   type InitialSyncJob,
 } from "../queues/initial-sync.js";
 import { registerTenantRepeatable } from "../queues/catalog-incremental.js";
-import { runInitialSync } from "../onboarding/initial-sync.js";
+import {
+  InitialSyncSkippedError,
+  runInitialSync,
+} from "../onboarding/initial-sync.js";
 import { provisionTestCashier } from "../superadmin/test-cashier.js";
 
 export function startInitialSyncWorker(): Worker<InitialSyncJob> {
@@ -15,7 +18,22 @@ export function startInitialSyncWorker(): Worker<InitialSyncJob> {
     async (job) => {
       const { tenantId } = job.data;
       const prisma = getPrisma();
-      const stats = await runInitialSync({ tenantId, prisma });
+      // holded-desconectar (ADR-020) · un job encolado antes del corte y
+      // ejecutado después no es un fallo: es un job que ya no tiene destino.
+      // Se registra y se sale. Si se dejara propagar, Sentry cantaría un
+      // error por cada relanzamiento y —peor— `registerTenantRepeatable` de
+      // abajo volvería a poner el cron de 15 min que la acción acaba de
+      // quitar.
+      let stats;
+      try {
+        stats = await runInitialSync({ tenantId, prisma });
+      } catch (err) {
+        if (err instanceof InitialSyncSkippedError) {
+          console.log(`[initial-sync] skip ${tenantId} (${err.reason})`);
+          return { skipped: err.reason };
+        }
+        throw err;
+      }
       // Sync inicial OK → arrancar el cron de 15 min para este tenant
       // (B2 §2.1). El jobId determinista evita duplicación si por
       // alguna razón este worker corre dos veces.

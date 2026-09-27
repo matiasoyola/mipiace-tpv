@@ -152,6 +152,11 @@ export interface TenantDetail {
   // apaga el super-admin y sólo mientras no haya clave conectada (409 si
   // la hay). Opcional para no romper si el front va por delante.
   holdedEnabled?: boolean;
+  // holded-desconectar (ADR-020) · cuándo DEJÓ Holded. NULL en todos los
+  // demás: el que nunca lo tuvo, el que lo tiene y el que lo tendrá. No es
+  // deducible de `holdedEnabled === false`, que lo contestan igual el
+  // comercio que nació sin Holded y el que lo dejó con 270 facturas detrás.
+  holdedDisconnectedAt?: string | null;
   holdedStatus: HoldedConnectionStatus;
   holdedAuthMode: string;
   // v1.3-SuperAdmin-Hub Lote 3: id del panel Holded del cliente. NULL
@@ -354,4 +359,136 @@ export interface TenantCashiersResponse {
   tenantId: string;
   tenantName: string;
   cashiers: TenantCashier[];
+}
+
+// ── holded-desconectar (ADR-020) · la previsualización de «Dejar Holded» ──
+//
+// Espejo de `PrevisualizacionDejarHolded` en
+// `apps/api/src/holded/dejar-holded.ts`. Se escribe a mano y no se genera:
+// el resto de este fichero también, y un generador para una pantalla no se
+// paga. Lo que importa es que los nombres coincidan al carácter.
+
+export interface DejarHoldedBloqueo {
+  codigo: string;
+  mensaje: string;
+  cuantos?: number;
+}
+
+export interface DejarHoldedFila {
+  id: string;
+  numero: string | null;
+  estado: string;
+  total: string;
+  fecha: string;
+}
+
+export interface DejarHoldedChoqueSku {
+  codigo: string;
+  sku: string | null;
+  productos: Array<{ id: string; nombre: string; sku: string | null }>;
+  comoSeArregla: string;
+}
+
+export interface DejarHoldedPreview {
+  tenant: {
+    id: string;
+    nombre: string;
+    holdedEnabled: boolean;
+    holdedConectado: boolean;
+    holdedDisconnectedAt: string | null;
+    initialSyncStatus: string;
+  };
+  catalogo: {
+    seConvierten: number;
+    productos: number;
+    servicios: number;
+    yaLocales: number;
+    conservanEnlace: number;
+    archivados: number;
+    ivaSinResolver: number;
+    pasanAVendibles: number;
+    cuelgan: {
+      lineasDeTicket: number;
+      conAgenda: number;
+      conRecursos: number;
+      enCitas: number;
+      conModificadores: number;
+      conHabilidades: number;
+    };
+  };
+  sku: {
+    intactos: number;
+    cambios: Array<{
+      productoId: string;
+      nombre: string;
+      skuAntes: string | null;
+      skuDespues: string;
+      motivo: "vacio" | "duplicado";
+    }>;
+    choques: DejarHoldedChoqueSku[];
+  };
+  ventasEnVuelo: {
+    ticketsPendingSync: DejarHoldedFila[];
+    ticketsSyncFailed: DejarHoldedFila[];
+    abonosPendingSync: DejarHoldedFila[];
+    abonosSyncFailed: DejarHoldedFila[];
+    subidasVivas: Array<{ externalId: string; kind: string; creado: string }>;
+    subidasHuerfanas: Array<{ externalId: string; kind: string; creado: string }>;
+    subidasFallidas: number;
+    fiadosVivos: DejarHoldedFila[];
+    borradores: number;
+    turnosAbiertos: number;
+  };
+  contactosYCrm: {
+    contactos: number;
+    contactosActivos: number;
+    ticketsConContacto: number;
+    clientesCrm: number;
+    clientesConEnlaceHolded: number;
+    fiadosVivosConDeudor: number;
+    deudaVivaTotal: string;
+    emailsAutomaticosHistoricos: number;
+    emailsManualesHistoricos: number;
+  };
+  devoluciones: {
+    ticketsFacturadosPorHolded: number;
+    facturadosPorHoldedUltimos90d: number;
+    abonosPorMes: Array<{ mes: string; cuantos: number; total: string }>;
+  };
+  fiscal: {
+    suelo: { ok: boolean; problemas: string[] };
+    cajas: Array<{
+      id: string;
+      nombre: string | null;
+      tienda: string;
+      serie: string | null;
+      numeroInstalacion: string | null;
+      registrosFiscales: number;
+    }>;
+    terminales: Array<{
+      id: string;
+      nombre: string | null;
+      caja: string | null;
+      apkVersion: string | null;
+      apkCodigo: number | null;
+      ultimoLatido: string | null;
+    }>;
+    avisoApk: string;
+  };
+  puedeArrancar: boolean;
+  bloqueos: DejarHoldedBloqueo[];
+}
+
+export interface DejarHoldedResultado {
+  ok: true;
+  cortado: boolean;
+  holdedDisconnectedAt: string;
+  productosConvertidos: number;
+  skuAcunados: DejarHoldedPreview["sku"]["cambios"];
+  subidasHuerfanasCerradas: number;
+  colas: {
+    porCola: Record<string, number>;
+    repeatableQuitado: boolean;
+    errores: string[];
+  };
 }

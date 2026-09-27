@@ -251,6 +251,45 @@ const DeviceScreenshotViewedMeta = Base.extend({
   screenshotId: z.string().uuid(),
 });
 
+// holded-desconectar (ADR-020) · el comercio dejó Holded. Es la acción
+// menos reversible de la consola —la clave se borra y el catálogo cambia de
+// dueño—, así que la traza guarda EL PLAN ENTERO y no un resumen: cuántas
+// fichas se convirtieron, qué SKU se acuñó a cada una y cuál tenía antes.
+//
+// El SKU antiguo no se guarda en ninguna columna de `products` (ADR-020 §4)
+// y ésta es la única copia que queda. Es deliberado: el sitio de un dato
+// histórico que nadie consulta en caliente es el registro de auditoría, no
+// una columna nueva en la tabla del camino de cobro.
+const DejarHoldedMeta = Base.extend({
+  productosConvertidos: z.number().int().nonnegative(),
+  subidasHuerfanasCerradas: z.number().int().nonnegative(),
+  holdedDisconnectedAt: z.string(),
+  skuAcunados: z.array(
+    z.object({
+      productoId: z.string().uuid(),
+      nombre: z.string(),
+      skuAntes: z.string().nullable(),
+      skuDespues: z.string(),
+      motivo: z.enum(["vacio", "duplicado"]),
+    }),
+  ),
+  // La foto del comercio en el momento del corte, para poder contestar
+  // meses después "¿cuántas facturas había emitido Holded?" sin tener que
+  // reconstruirlo.
+  foto: z.object({
+    ticketsFacturadosPorHolded: z.number().int().nonnegative(),
+    contactos: z.number().int().nonnegative(),
+    clientesCrm: z.number().int().nonnegative(),
+    deudaVivaTotal: z.string(),
+    turnosAbiertos: z.number().int().nonnegative(),
+  }),
+  colas: z.record(z.number().int().nonnegative()).optional(),
+  colasErrores: z.array(z.string()).optional(),
+  repeatableQuitado: z.boolean().optional(),
+  /** `false` cuando esta llamada sólo remató un corte ya hecho. */
+  cortado: z.boolean(),
+});
+
 const META_SCHEMAS = {
   create_tenant: CreateTenantMeta,
   create_tenant_draft: CreateTenantDraftMeta,
@@ -267,6 +306,7 @@ const META_SCHEMAS = {
   delete_super_admin: DeleteSuperAdminMeta,
   resend_super_admin_invite: ResendSuperAdminInviteMeta,
   dedupe_tags: DedupeTagsMeta,
+  dejar_holded: DejarHoldedMeta,
   transfer_owner: TransferOwnerMeta,
   view_tenant_cashiers: ViewTenantCashiersMeta,
   create_apk_download_code: CreateApkDownloadCodeMeta,

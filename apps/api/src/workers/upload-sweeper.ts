@@ -70,8 +70,25 @@ export async function sweepOrphanUploads(deps: SweeperDeps = {}): Promise<SweepR
   const now = deps.now ?? new Date();
 
   const cutoff = new Date(now.getTime() - STALE_AFTER_MS);
+  // holded-desconectar (ADR-020) · el sweeper era el ÚNICO camino de este
+  // inventario sin ningún filtro por tenant: barría `status = PENDING` de
+  // toda la base. En la copia de prod del 24-09 eso son las dos filas del
+  // 26-05 de Peluquería Sole, sin ticket detrás, re-encoladas cada cinco
+  // minutos desde hace cuatro meses.
+  //
+  // El corte cierra esas dos como SKIPPED, así que después de la acción no
+  // queda nada que barrer. Este filtro es la red para lo que llegue
+  // DESPUÉS: una fila forzada a mano, un camino nuevo que se salte el gate.
+  // `holdedDisconnectedAt: null` y no `holdedApiKeyCiphertext: { not: null }`
+  // a propósito — el comercio que todavía no ha conectado su clave SÍ tiene
+  // que seguir barriéndose, porque su clave puede llegar mañana y sus
+  // subidas siguen teniendo destino. El que dejó Holded no.
   const pending = await prisma.holdedUpload.findMany({
-    where: { status: "PENDING", createdAt: { lt: cutoff } },
+    where: {
+      status: "PENDING",
+      createdAt: { lt: cutoff },
+      tenant: { holdedDisconnectedAt: null },
+    },
     select: { externalId: true, kind: true },
     orderBy: { createdAt: "asc" },
     take: 500,

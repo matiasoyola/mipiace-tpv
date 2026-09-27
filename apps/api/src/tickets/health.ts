@@ -11,6 +11,7 @@
 // cajero y la dirección decide qué hacer.
 
 import type { PrismaClient } from "@mipiacetpv/db";
+import { motivoSilencio } from "../holded/silencio.js";
 
 export type TenantHealthLevel = "ok" | "warning" | "blocked";
 
@@ -19,7 +20,11 @@ export type TenantHealthReason =
   | "no_sync_24h"
   | "no_sync_48h"
   | "no_api_key"
-  | "no_sync_ever";
+  | "no_sync_ever"
+  // holded-desconectar (ADR-020) · el comercio no usa Holded: ni lo dejó
+  // pendiente ni lo perdió. No hay salud que medir porque no hay
+  // integración. Ver la nota larga abajo.
+  | "no_aplica";
 
 export interface TenantHealth {
   level: TenantHealthLevel;
@@ -48,12 +53,52 @@ export async function getTenantHealthStatus(
     select: {
       lastIncrementalSyncAt: true,
       holdedApiKeyCiphertext: true,
+      // holded-desconectar (ADR-020) · las dos columnas que distinguen «no
+      // lo ha conectado todavía» de «no lo usa».
+      holdedEnabled: true,
+      holdedDisconnectedAt: true,
     },
   });
 
   const hasHoldedKey = !!tenant.holdedApiKeyCiphertext;
   const lastSyncAt = tenant.lastIncrementalSyncAt;
   const lastSyncAgeMs = lastSyncAt ? now.getTime() - lastSyncAt.getTime() : null;
+
+  // holded-desconectar (ADR-020) · LA MENTIRA QUE QUEDABA VIVA.
+  //
+  // `catalogo-local` gateó el banner rojo del ADMIN
+  // (`AdminShell.tsx::HoldedHealthBanner`) porque «Holded está desconectado»
+  // es una alarma para quien depende de Holded y una mentira para quien no.
+  // El banner del TPV —`SalePage.tsx::HealthBanner`— se quedó sin gatear, y
+  // es el que ve la cajera todo el día:
+  //
+  //   «Holded desconectado · La cuenta de Holded no está conectada. Puedes
+  //    seguir cobrando: los tickets se guardan y se subirán solos cuando el
+  //    propietario la reconecte. Avísale cuanto antes.»
+  //
+  // A Ana, el día después del corte y todos los siguientes. Cada palabra de
+  // esa frase es falsa en su comercio: no hay nada que reconectar, no hay
+  // tickets esperando y no hay a quién avisar.
+  //
+  // Se arregla AQUÍ y no en el componente a propósito. El endpoint lo
+  // consumen el TPV y el panel, y arreglar sólo el TPV dejaría la misma
+  // pregunta contestada de dos maneras según quién preguntara. Y el sitio
+  // donde vive «¿de quién es esta salud?» es la función que la calcula.
+  //
+  // `level: "ok"` y no un cuarto nivel: los tres niveles significan
+  // «opera con normalidad / avisa / alarma», y este comercio opera con
+  // normalidad. El motivo lleva la diferencia para quien la necesite.
+  const motivo = motivoSilencio(tenant);
+  if (motivo === "desconectado" || motivo === "no_lo_usa") {
+    return {
+      level: "ok",
+      reason: "no_aplica",
+      lastSuccessfulSyncAt: lastSyncAt?.toISOString() ?? null,
+      lastSyncAgeMs,
+      blockedAt: null,
+      hasHoldedKey: false,
+    };
+  }
 
   if (!hasHoldedKey) {
     return {

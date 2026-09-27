@@ -36,6 +36,7 @@ import {
 import { decryptSecret } from "../crypto.js";
 import { loadEnv } from "../env.js";
 import { captureAlert } from "../lib/sentry.js";
+import { motivoSilencio, type MotivoSilencio } from "../holded/silencio.js";
 
 // Si Holded devuelve menos del 50% de los productos locales vivos,
 // asumimos respuesta coja y abortamos sin archivar.
@@ -205,7 +206,12 @@ export interface RunCatalogReconcileOptions {
 }
 
 export class CatalogReconcileSkippedError extends Error {
-  constructor(public reason: "no-api-key" | "initial-sync-not-done") {
+  constructor(
+    // holded-desconectar · los tres motivos de `MotivoSilencio` entran aquí:
+    // el comercio que dejó Holded, el que nunca lo tuvo y el que no lo ha
+    // conectado todavía. Los tres son un skip y no un fallo.
+    public reason: "no-api-key" | "initial-sync-not-done" | MotivoSilencio,
+  ) {
     super(`catalog-reconcile skipped: ${reason}`);
     this.name = "CatalogReconcileSkippedError";
   }
@@ -222,6 +228,15 @@ export async function runCatalogReconcile(
   const log = options.logger ?? consoleLogger();
   const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
 
+  // holded-desconectar (ADR-020) · criterio 3. Esta pasada ARCHIVA lo que no
+  // encuentra en Holded (`active = false`, `sellable_via_tpv = false`). Sin
+  // clave no llegaría a listar nada, pero el fallo estaría a una línea de
+  // distancia: un listado vacío por cualquier motivo archivaría el catálogo
+  // entero del comercio. Se sale antes de tocar la red.
+  const silencio = motivoSilencio(tenant);
+  if (silencio != null) {
+    throw new CatalogReconcileSkippedError(silencio);
+  }
   if (!tenant.holdedApiKeyCiphertext) {
     throw new CatalogReconcileSkippedError("no-api-key");
   }

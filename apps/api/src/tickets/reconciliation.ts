@@ -29,6 +29,7 @@ import { decryptSecret } from "../crypto.js";
 import { getEmailSender, type EmailSender } from "../email/sender.js";
 import { loadEnv } from "../env.js";
 import { captureAlert } from "../lib/sentry.js";
+import { motivoSilencio } from "../holded/silencio.js";
 
 // Ventana de tickets a revisar y tolerancia de total. La tolerancia es
 // MENOR que un céntimo: el objetivo es exactamente cazar drifts de
@@ -93,8 +94,25 @@ export async function reconcileTenant(
 
   const tenant = await prisma.tenant.findUniqueOrThrow({
     where: { id: tenantId },
-    select: { holdedApiKeyCiphertext: true },
+    select: {
+      holdedApiKeyCiphertext: true,
+      holdedEnabled: true,
+      holdedDisconnectedAt: true,
+    },
   });
+  // holded-desconectar (ADR-020) · criterio 3. Este runner es el único que
+  // selecciona sus tenants por ACTIVIDAD y no por configuración:
+  // `runDailyReconciliation` hace un `groupBy` de tickets SYNCED con
+  // `holded_document_id` de las últimas 48 h. Un comercio que acaba de dejar
+  // Holded sigue teniendo 270 tickets así, y los más recientes caen dentro
+  // de la ventana: se le elegiría durante dos días después del corte.
+  // Sin clave no llegaría a llamar a nadie; con el motivo explícito, además,
+  // se lee en el log por qué no.
+  const silencio = motivoSilencio(tenant);
+  if (silencio != null) {
+    log.info(`tenant ${tenantId}: no se concilia (${silencio})`);
+    return { tenantId, ticketsChecked: 0, mismatches: [] };
+  }
   if (!tenant.holdedApiKeyCiphertext) {
     // Sin key no hay nada que conciliar (los tickets de este tenant no
     // pueden estar SYNCED de todos modos).

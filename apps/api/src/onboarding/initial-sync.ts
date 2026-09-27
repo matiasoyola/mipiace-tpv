@@ -26,6 +26,7 @@ import { loadEnv } from "../env.js";
 import { enqueueProductImageCache } from "../queues/product-image-cache.js";
 import { runAutoSku, type AutoSkuResult } from "./auto-sku.js";
 import { createTpvOtrosWildcards, type WildcardResult } from "./tpv-otros.js";
+import { motivoSilencio, type MotivoSilencio } from "../holded/silencio.js";
 
 export interface SyncStats {
   productsCount: number;
@@ -99,10 +100,33 @@ export interface RunInitialSyncOptions {
   buildClient?: (apiKey: string) => ApiKeyClient;
 }
 
+/** holded-desconectar · el sync inicial no aplica a este comercio. Clase
+ *  propia y no un `Error` a secas para que el worker pueda distinguir «no
+ *  tenía que correr» de «ha fallado», igual que
+ *  `IncrementalSyncSkippedError`. */
+export class InitialSyncSkippedError extends Error {
+  constructor(public readonly reason: MotivoSilencio) {
+    super(`initial sync skipped: ${reason}`);
+    this.name = "InitialSyncSkippedError";
+  }
+}
+
 export async function runInitialSync(options: RunInitialSyncOptions): Promise<SyncStats> {
   const { tenantId, prisma } = options;
   const log = options.logger ?? consoleLogger();
   const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+  // holded-desconectar (ADR-020) · la primera de las puertas del criterio 3.
+  //
+  // `markRunning` está tres líneas más abajo y escribe
+  // `initialSyncStatus = RUNNING`. Si un job del sync inicial aterrizara
+  // aquí después del corte —encolado antes, o relanzado a mano— pisaría el
+  // `NOT_APPLICABLE` que dejó la acción y el comercio volvería a aparecer
+  // "sincronizando" para siempre. Por eso se comprueba ANTES de cualquier
+  // escritura y no sólo antes de construir el cliente de Holded.
+  const silencio = motivoSilencio(tenant);
+  if (silencio != null) {
+    throw new InitialSyncSkippedError(silencio);
+  }
   if (!tenant.holdedApiKeyCiphertext) {
     throw new Error(`Tenant ${tenantId}: no Holded API key persisted yet`);
   }

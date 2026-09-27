@@ -13,6 +13,7 @@ import { registerAdminModifierGroupRoutes } from "./admin/modifier-groups.js";
 import { registerAdminPrinterConfigsRoutes } from "./admin/printer-configs.js";
 import { registerAdminTicketDeliveryRoutes } from "./admin/ticket-delivery.js";
 import { registerAdminTicketsErrorsRoutes } from "./admin/tickets-errors.js";
+import { registerDevolucionesAsesorRoutes } from "./admin/devoluciones-asesor.js";
 import { registerAuthRoutes } from "./auth/routes.js";
 import { registerPasswordResetRoutes } from "./auth/password-reset.js";
 import { registerCashiersRoutes } from "./cashiers/routes.js";
@@ -208,6 +209,7 @@ async function main() {
   await registerTicketDigitalRoute(app);
   await registerTpvCatalogRoutes(app);
   await registerAdminTicketsErrorsRoutes(app);
+  await registerDevolucionesAsesorRoutes(app);
   await registerManagerAuthorizationRoutes(app);
   await registerAdminTenantSettingsRoutes(app);
   await registerAdminTagAliasesRoutes(app);

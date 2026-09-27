@@ -23,9 +23,11 @@ import {
 import { superApi, SuperAdminApiError } from "./api.js";
 import { humanizeError } from "./error-messages.js";
 import { CashiersPanel } from "./CashiersPanel.js";
+import { DejarHoldedPanel } from "./DejarHoldedPanel.js";
 import { SuperAdminShell } from "./SuperAdminShell.js";
 import type {
   ActivateTenantResponse,
+  DejarHoldedResultado,
   BusinessType,
   HoldedConnectionStatus,
   ImpersonateResponse,
@@ -110,6 +112,8 @@ export function TenantDetailPage() {
   // v1.3-SuperAdmin-Hub Lote 1: modal de confirmación para impersonate
   // mode=full ("Configurar como OWNER"). El readonly entra directo.
   const [showConfigureModal, setShowConfigureModal] = useState(false);
+  // holded-desconectar (ADR-020) · el panel de «Dejar Holded», abierto o no.
+  const [dejarHolded, setDejarHolded] = useState(false);
 
   async function reload(): Promise<void> {
     if (!id) return;
@@ -668,6 +672,39 @@ export function TenantDetailPage() {
           onAskConfigure={() => setShowConfigureModal(true)}
           onDedupeTags={onDedupeTags}
           onToggleHolded={() => void onToggleHolded()}
+          setDejarHolded={setDejarHolded}
+        />
+      )}
+
+      {/* holded-desconectar (ADR-020) · el panel va FUERA de "Acciones" y a
+          ancho completo: hay que leerlo, y a 320 px un modal con esta
+          cantidad de información es una caja con scroll dentro de otra caja
+          con scroll. */}
+      {dejarHolded && (
+        <DejarHoldedPanel
+          tenantId={tenant.id}
+          tenantName={tenant.name}
+          onCerrar={() => setDejarHolded(false)}
+          onCortado={(r: DejarHoldedResultado) => {
+            setDejarHolded(false);
+            setActionMessage(
+              r.cortado
+                ? `${tenant.name} ha dejado Holded. ${r.productosConvertidos} ficha(s) pasan a ser suyas` +
+                  (r.skuAcunados.length > 0
+                    ? `, ${r.skuAcunados.length} con SKU nuevo`
+                    : "") +
+                  `. Su TPV emite ya factura simplificada: comprueba que el terminal tiene la APK al día.`
+                : "El corte ya estaba hecho; se ha rematado lo que faltaba (colas y repeatables).",
+            );
+            if (r.colas.errores.length > 0) {
+              setActionError(
+                "El corte está hecho, pero el vaciado de colas dio errores: " +
+                  r.colas.errores.join(" · ") +
+                  ". Vuelve a pulsar «Dejar Holded» cuando Redis responda — la acción es repetible.",
+              );
+            }
+            void reload();
+          }}
         />
       )}
 
@@ -1183,6 +1220,7 @@ function ActiveTenantActions({
   onAskConfigure,
   onDedupeTags,
   onToggleHolded,
+  setDejarHolded,
 }: {
   blocked: boolean;
   tenant: TenantDetail;
@@ -1195,6 +1233,7 @@ function ActiveTenantActions({
   onAskConfigure: () => void;
   onDedupeTags: () => void;
   onToggleHolded: () => void;
+  setDejarHolded: (v: boolean) => void;
 }) {
   // catalogo-local (addendum 3) · las DOS preguntas, que hasta este
   // bloque se contestaban con la misma señal.
@@ -1240,14 +1279,21 @@ function ActiveTenantActions({
             cuanto faltaba la clave, y era falso la mitad de las veces: el
             cliente que compró Holded y aún no lo ha conectado SÍ lo usa,
             y es el que tiene un problema. Tres estados, no dos. */}
+        {/* holded-desconectar (ADR-020) · CUATRO estados, no tres. "No lo
+            usa" lo contestaban igual el comercio que nació sin Holded y el
+            que lo dejó con 118 facturas emitidas detrás, y para el
+            implantador son dos situaciones distintas: al primero se le puede
+            encender Holded hoy, al segundo no. */}
         <CardMetric
           label="Holded"
           value={
-            !usaHolded
-              ? "No lo usa"
-              : tenant.holdedConnected
-                ? HOLDED_STATUS_LABEL[tenant.holdedStatus]
-                : "Sin conectar todavía"
+            tenant.holdedDisconnectedAt != null
+              ? `Lo dejó · ${new Date(tenant.holdedDisconnectedAt).toLocaleDateString("es-ES")}`
+              : !usaHolded
+                ? "No lo usa"
+                : tenant.holdedConnected
+                  ? HOLDED_STATUS_LABEL[tenant.holdedStatus]
+                  : "Sin conectar todavía"
           }
           accent={
             !usaHolded
@@ -1288,14 +1334,46 @@ function ActiveTenantActions({
               hay clave conectada. El servidor lo vuelve a comprobar y
               responde 409: el `disabled` es cortesía, la puerta es el
               409. Mismo criterio que el botón de alta local. */}
+          {/* holded-desconectar (ADR-020) · lo encontró el bucle visual, no un
+              test: después del corte esta acción se pintaba como "Encender
+              Holded", habilitada, y el servidor la rebotaba con un 409. Una
+              cortesía que miente es peor que no tenerla — el mismo criterio
+              con el que `local-products.ts` dejó de pintar "Editar" en una
+              ficha de Holded.
+
+              Se deja VISIBLE y deshabilitada, no se esconde: que el botón
+              exista y no se pueda pulsar dice «esto existe y aquí no toca»,
+              y esconderlo dejaría al implantador buscándolo. */}
           <Action
             onClick={onToggleHolded}
             busy={busy}
             icon={Unplug}
             label={usaHolded ? "Apagar Holded" : "Encender Holded"}
             tone={usaHolded ? "warning" : "neutral"}
-            disabled={usaHolded && tenant.holdedConnected}
+            disabled={
+              (usaHolded && tenant.holdedConnected) ||
+              tenant.holdedDisconnectedAt != null
+            }
           />
+          {/* holded-desconectar (ADR-020) · el camino que faltaba.
+              «Apagar Holded» de arriba sigue siendo para el comercio que no
+              ha conectado nada, y sigue saliendo `disabled` con la clave
+              puesta: apagar el interruptor sin convertir el catálogo dejaría
+              las fichas mandadas desde un ERP que ya nadie consulta.
+
+              Este botón aparece SÓLO en el caso que le toca —previsto,
+              conectado y sin corte previo— porque en cualquier otro no hay
+              nada que hacer, y un botón que existe para contestar «aquí no»
+              es peor que no tenerlo. */}
+          {usaHolded && tenant.holdedConnected && tenant.holdedDisconnectedAt == null && (
+            <Action
+              onClick={() => setDejarHolded(true)}
+              busy={busy}
+              icon={Unplug}
+              label="Dejar Holded"
+              tone="danger"
+            />
+          )}
           <Action
             onClick={onImpersonateReadonly}
             busy={busy}

@@ -59,6 +59,7 @@ import {
   archiveMissingProducts,
   type ArchiveMissingResult,
 } from "./reconcile.js";
+import { motivoSilencio, type MotivoSilencio } from "../holded/silencio.js";
 
 export interface IncrementalSyncStats {
   productsSeen: number;
@@ -138,7 +139,12 @@ export interface RunIncrementalSyncOptions {
 }
 
 export class IncrementalSyncSkippedError extends Error {
-  constructor(public reason: "no-api-key" | "initial-sync-not-done") {
+  constructor(
+    // holded-desconectar · los tres motivos de `MotivoSilencio` entran aquí:
+    // el comercio que dejó Holded, el que nunca lo tuvo y el que no lo ha
+    // conectado todavía. Los tres son un skip y no un fallo.
+    public reason: "no-api-key" | "initial-sync-not-done" | MotivoSilencio,
+  ) {
     super(`incremental-sync skipped: ${reason}`);
     this.name = "IncrementalSyncSkippedError";
   }
@@ -155,6 +161,19 @@ export async function runIncrementalSync(
   // Defensa: no correr sobre tenants sin onboarding completo. El cron
   // sólo registra repeatables para tenants con DONE, pero la cola
   // manual podría llegar antes.
+  // holded-desconectar (ADR-020) · el criterio 3, en el sitio donde el
+  // agujero era peor. Este runner no sólo LEE de Holded: hace `upsert` sobre
+  // `products` casando por `(tenant_id, holded_product_id)`, y el corte
+  // CONSERVA ese enlace. Una pasada después del corte entraría por la rama
+  // `update` y pisaría nombre, precio, IVA y tags de las fichas locales con
+  // lo que Holded tuviera — exactamente el precio que Ana acababa de
+  // cambiar. La nota de `upsertCatalogEntry` («un producto local tiene ese
+  // enlace a NULL, así que jamás puede casar») deja de ser cierta con este
+  // bloque, y esto es lo que ocupa su sitio.
+  const silencio = motivoSilencio(tenant);
+  if (silencio != null) {
+    throw new IncrementalSyncSkippedError(silencio);
+  }
   if (!tenant.holdedApiKeyCiphertext) {
     throw new IncrementalSyncSkippedError("no-api-key");
   }

@@ -81,7 +81,15 @@ export async function uploadTicket(
         },
       },
       payments: true,
-      tenant: { select: { id: true, holdedApiKeyCiphertext: true } },
+      tenant: {
+        select: {
+          id: true,
+          holdedApiKeyCiphertext: true,
+          // holded-desconectar (ADR-020) · para la carrera del corte, abajo.
+          holdedEnabled: true,
+          holdedDisconnectedAt: true,
+        },
+      },
       register: { select: { numSerieHolded: true } },
       user: { select: { isTestCashier: true } },
     },
@@ -120,6 +128,31 @@ export async function uploadTicket(
     });
     log.info("ticket en modo prueba — skip upload", { externalId });
     return { kind: "skipped", reason: "test_cashier" };
+  }
+  // holded-desconectar (ADR-020) · LA CARRERA DEL CORTE.
+  //
+  // La acción no arranca mientras queden subidas pendientes, así que en el
+  // momento del corte no hay filas PENDING. Pero un job puede estar
+  // EJECUTÁNDOSE justo cuando la transacción hace commit: entra con clave,
+  // llega aquí sin ella. Sin esta rama caería en `no_holded_key` y
+  // `markFailed` pondría el ticket en `SYNC_FAILED` — un ticket que estaba
+  // perfectamente bien acabaría en la bandeja de errores del panel a los
+  // dos segundos de dejar Holded, y ahí no hay nada que arreglar.
+  //
+  // `SKIPPED` en el upload y el ticket SIN TOCAR. El ticket se queda como
+  // estaba: si era `PENDING_SYNC` se queda ahí y el corte del día lo cuenta
+  // una vez, lo cual es ruido acotado y honesto; nunca `SYNC_FAILED`, que es
+  // una alarma sobre algo que nadie puede resolver.
+  if (ticket.tenant.holdedDisconnectedAt != null) {
+    await prisma.holdedUpload.updateMany({
+      where: { externalId },
+      data: {
+        status: "SKIPPED",
+        lastError: { skipped: "holded_desconectado" },
+      },
+    });
+    log.info("el comercio dejó Holded — skip upload", { externalId });
+    return { kind: "skipped", reason: "holded_desconectado" };
   }
   if (!ticket.tenant.holdedApiKeyCiphertext) {
     await markFailed(prisma, externalId, "no_holded_key");
