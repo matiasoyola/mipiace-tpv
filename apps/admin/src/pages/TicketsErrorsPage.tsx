@@ -149,6 +149,12 @@ const ERROR_TYPES: Array<{ value: string; label: string }> = [
   { value: "holded_4xx", label: "Error HTTP (POST)" },
   { value: "pay_4xx", label: "Error HTTP (/pay)" },
   { value: "no_holded_key", label: "Sin API Key" },
+  // bloque abonos-holded · un documento que quedó en Holded con un total
+  // que no es el nuestro (el caso de los abonos a 0 €), y un abono cuyo
+  // importe guardado no cuadra con lo cobrado en su ticket.
+  { value: "holded_document_total_mismatch", label: "Documento en Holded con otro total" },
+  { value: "refund_snapshot_total_mismatch", label: "Importe del abono descuadrado" },
+  { value: "local_product_in_holded_payload", label: "Producto local en el payload" },
 ];
 
 interface MeTenant {

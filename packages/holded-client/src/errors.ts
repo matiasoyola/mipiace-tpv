@@ -9,7 +9,11 @@
 //   3. `HoldedSilentRejectError` — 200 OK + `{ status: 1, info: "Updated" }`
 //                                pero el GET-back demuestra que Holded ha
 //                                descartado silenciosamente lo que enviamos
-//                                (ADR-010, spike §04.D).
+//                                (ADR-010, spike §04.D). Cuando el rechazo
+//                                se detecta DESPUÉS de crear un documento,
+//                                lleva `document` con su id y número: el
+//                                documento existe en Holded y hay que
+//                                poder encontrarlo.
 //   4. `HoldedSubscriptionSuspendedError` — caso especial del 402. La key es
 //                                válida pero la cuenta de Holded está
 //                                suspendida por impago (spike §01.A).
@@ -59,6 +63,13 @@ export class HoldedSilentRejectError extends Error {
     public readonly url: string,
     public readonly mismatches: SilentRejectMismatch[],
     public readonly storedSnapshot?: unknown,
+    // bloque abonos-holded · el documento que Holded YA creó antes de que
+    // el GET-back demostrara el rechazo. Un silent_reject de
+    // `POST salesreceipt` NO significa "no se creó nada": el documento
+    // existe, aprobado y numerado, y su id es la única forma de volver a
+    // encontrarlo. Sin esto el caller no tenía qué guardar y el documento
+    // quedaba huérfano en Holded (6 abonos de Peluquería Sole, 10-09-2026).
+    public readonly document?: { id: string; docNumber: string | null },
   ) {
     const summary = mismatches
       .map((m) => `${m.field}: expected ${JSON.stringify(m.expected)} got ${JSON.stringify(m.actual)}`)

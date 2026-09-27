@@ -42,6 +42,7 @@ import {
 } from "@mipiacetpv/util-validation";
 
 import { decideEmailIntent } from "./email-intent.js";
+import { chargedLineTotal, resolveChargedUnitPrice } from "./holded-line.js";
 import {
   deriveTicketEmailState,
   EMAIL_JOB_SELECT,
@@ -1995,11 +1996,18 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             ticketLineId: rl.ticketLineId,
           });
         }
-        const unitPrice = Number(original.unitPrice);
+        // bloque abonos-holded · el snapshot del abono guarda el precio
+        // COBRADO, no el del catálogo: el lápiz del cajero
+        // (`unitPriceOverride`) y los recargos de los modificadores forman
+        // parte del dinero que entró y por tanto del que sale. Antes esto
+        // era `Number(original.unitPrice)` a secas: una devolución de una
+        // línea con override devolvía al cliente el precio de catálogo —
+        // de menos o de más— y además hacía que el importe del abono no
+        // cuadrara nunca con el documento de Holded.
+        const unitPrice = resolveChargedUnitPrice(original);
         const discountPct = Number(original.discountPct);
         const taxRate = Number(original.taxRate);
-        const grossPerUnit = unitPrice * (1 - discountPct / 100);
-        const lineTotal = Math.round(grossPerUnit * rl.units * (1 + taxRate / 100) * 100) / 100;
+        const lineTotal = chargedLineTotal({ ...original, units: rl.units });
         refundLinesData.push({
           ticketLineId: rl.ticketLineId,
           units: rl.units,

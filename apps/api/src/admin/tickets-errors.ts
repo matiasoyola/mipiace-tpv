@@ -27,6 +27,7 @@ import {
 } from "../tickets/corrections.js";
 import {
   buildRefundSalesreceiptPayload,
+  refundLineInclude,
 } from "../tickets/upload-refund.js";
 import {
   buildTicketSalesreceiptPayload,
@@ -57,6 +58,13 @@ export async function registerAdminTicketsErrorsRoutes(
                 "pay_silent_reject",
                 "pay_4xx",
                 "no_holded_key",
+                // bloque abonos-holded · los dos motivos nuevos. Y
+                // `local_product_in_holded_payload`, que catalogo-local
+                // dejó fuera de esta lista: el filtro por ese motivo
+                // devolvía 400 aunque la bandeja sí lo mostrara.
+                "holded_document_total_mismatch",
+                "refund_snapshot_total_mismatch",
+                "local_product_in_holded_payload",
               ],
             },
             limit: { type: "integer", minimum: 1, maximum: 200, default: 100 },
@@ -249,7 +257,9 @@ export async function registerAdminTicketsErrorsRoutes(
       const refund = await getPrisma().refund.findFirst({
         where: { id: params.id, tenantId: auth.tenantId },
         include: {
-          lines: true,
+          // Mismo `include` que el worker: el preview no puede ver un
+          // payload distinto del que se va a mandar (B5 §2.1).
+          lines: refundLineInclude(),
           originalTicket: { select: { holdedDocumentId: true, holdedDocNumber: true } },
           register: { select: { numSerieHolded: true } },
         },
@@ -658,7 +668,18 @@ export async function registerAdminTicketsErrorsRoutes(
 
 function summarizeError(syncError: unknown, ourTotal: number): string {
   if (!syncError || typeof syncError !== "object") return "error desconocido";
-  const obj = syncError as { reason?: string; mismatches?: Array<{ field: string; expected: unknown; actual: unknown }>; message?: string };
+  const obj = syncError as {
+    reason?: string;
+    mismatches?: Array<{ field: string; expected: unknown; actual: unknown }>;
+    message?: string;
+    holdedDocumentId?: string;
+  };
+  // bloque abonos-holded · si el fallo dejó un documento vivo en Holded,
+  // eso es LO PRIMERO que el propietario necesita leer: el mensaje trae el
+  // número del documento y qué hacer con él.
+  if (typeof obj.message === "string" && obj.message.length > 0 && obj.holdedDocumentId) {
+    return obj.message;
+  }
   if (obj.reason === "silent_reject" || obj.reason === "pay_silent_reject") {
     if (obj.mismatches && obj.mismatches.length > 0) {
       const m = obj.mismatches[0]!;
