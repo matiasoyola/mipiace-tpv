@@ -10,6 +10,10 @@ export interface SentEmail {
   to: string;
   subject: string;
   text: string;
+  // Dirección a la que responde el cliente. Si no se indica, el sender
+  // pone la suya (SUPER_ADMIN_REPLY_TO_EMAIL). El From es un no-reply:
+  // sin esta cabecera, un "responde a este email" se pierde.
+  replyTo?: string;
   html?: string;
   attachments?: Array<{
     filename: string;
@@ -25,6 +29,7 @@ export interface EmailSender {
 export class ConsoleEmailSender implements EmailSender {
   async send(email: SentEmail): Promise<void> {
     const banner = "─".repeat(64);
+    const reply = email.replyTo ? `\nreply-to: ${email.replyTo}` : "";
     const attach = email.attachments?.length
       ? `\nattachments: ${email.attachments
           .map((a) => `${a.filename} (${a.content.length}B)`)
@@ -32,7 +37,7 @@ export class ConsoleEmailSender implements EmailSender {
       : "";
     // eslint-disable-next-line no-console
     console.log(
-      `\n${banner}\n[email] to=${email.to}\nsubject=${email.subject}${attach}\n${banner}\n${email.text}\n${banner}\n`,
+      `\n${banner}\n[email] to=${email.to}${reply}\nsubject=${email.subject}${attach}\n${banner}\n${email.text}\n${banner}\n`,
     );
   }
 }
@@ -40,6 +45,7 @@ export class ConsoleEmailSender implements EmailSender {
 export class SmtpEmailSender implements EmailSender {
   private readonly transporter: Transporter;
   private readonly from: string;
+  private readonly replyTo?: string;
 
   constructor(opts: {
     host: string;
@@ -47,8 +53,10 @@ export class SmtpEmailSender implements EmailSender {
     user: string;
     pass: string;
     from: string;
+    replyTo?: string;
   }) {
     this.from = opts.from;
+    this.replyTo = opts.replyTo;
     this.transporter = nodemailer.createTransport({
       host: opts.host,
       port: opts.port,
@@ -61,6 +69,7 @@ export class SmtpEmailSender implements EmailSender {
     await this.transporter.sendMail({
       from: this.from,
       to: email.to,
+      replyTo: email.replyTo ?? this.replyTo,
       subject: email.subject,
       text: email.text,
       html: email.html,
@@ -93,6 +102,7 @@ export function getEmailSender(): EmailSender {
       user: env.SMTP_USER,
       pass: env.SMTP_PASS,
       from: env.SMTP_FROM,
+      replyTo: env.SUPER_ADMIN_REPLY_TO_EMAIL,
     });
   } else {
     cached = new ConsoleEmailSender();
