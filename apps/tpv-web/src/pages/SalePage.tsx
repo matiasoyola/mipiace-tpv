@@ -27,6 +27,7 @@ import {
   GlassWater,
   LayoutGrid,
   Loader2,
+  FileText,
   Lock,
   Menu,
   Package,
@@ -108,6 +109,7 @@ import { DebtsScreen } from "./DebtsScreen.js";
 import { ClientsPage } from "./ClientsPage.js";
 import { useClientPicker } from "../hooks/useClientPicker.js";
 import { clientFullName } from "../lib/clients.js";
+import { urlDeclaracionResponsable } from "../lib/declaracionResponsable.js";
 import { useElapsedTime } from "../hooks/useElapsedTime.js";
 import { useStoreEventStream } from "../hooks/useStoreEventStream.js";
 import type { ModifierSelection } from "../lib/cart.js";
@@ -2601,6 +2603,28 @@ export function SalePage(props: SalePageProps) {
               />
               <span className="truncate">Bloquear ({props.cashierLabel})</span>
             </button>
+            {/* declaracion-responsable · el documento del art. 15 de la Orden
+                HAC/1177/2024, que obliga a tenerlo disponible dentro del
+                propio sistema informático. El terminal es la parte del
+                sistema que el cliente ve, así que aquí está su línea.
+
+                Abre el PDF público en otra pestaña —mismo patrón que «Abrir
+                en Holded» en TicketsHistoryPage— y no toca nada del cobro:
+                es un <a>, no un botón con estado. */}
+            <a
+              href={urlDeclaracionResponsable()}
+              target="_blank"
+              rel="noreferrer noopener"
+              onClick={() => setDrawerOpen(false)}
+              title="Declaración responsable del sistema informático de facturación"
+              className="w-full h-12 flex items-center gap-3 px-4 rounded-xl text-slate-600 hover:bg-slate-50 text-[14.5px] font-medium"
+            >
+              <FileText
+                className="w-[19px] h-[19px] text-slate-500 shrink-0"
+                strokeWidth={2.1}
+              />
+              <span className="truncate">Declaración responsable</span>
+            </a>
           </nav>
           {/* A3-distribución · Frente 2. `select-all` para que en soporte
               baste un toque para seleccionarlo y leerlo por teléfono. */}
