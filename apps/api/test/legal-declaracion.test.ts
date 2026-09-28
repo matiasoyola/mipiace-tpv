@@ -176,6 +176,33 @@ describe("GET /legal/declaracion-responsable", () => {
     await app.close();
   });
 
+  it("el cuerpo lleva la declaración Y NADA MÁS", async () => {
+    // El primer sabotaje de la tabla que salió VERDE: `{ declaracion,
+    // tenantId }` pasaba porque el test de abajo sólo mira el texto de los
+    // apartados. Lo que hay que fijar es la FORMA del cuerpo: una clave, la
+    // declaración. Cualquier campo de más en un endpoint público y sin
+    // sesión es una filtración esperando a pasar.
+    const app = await build();
+    const res = await app.inject({
+      method: "GET",
+      url: "/legal/declaracion-responsable",
+    });
+    expect(Object.keys(res.json())).toEqual(["declaracion"]);
+    expect(Object.keys(res.json().declaracion).sort()).toEqual([
+      "anexo",
+      "apartados",
+      "titulo",
+    ]);
+    // Y cada apartado, sus tres campos y ninguno más.
+    for (const a of [
+      ...res.json().declaracion.apartados,
+      ...res.json().declaracion.anexo,
+    ]) {
+      expect(Object.keys(a).sort()).toEqual(["clave", "rotulo", "valor"]);
+    }
+    await app.close();
+  });
+
   it("lleva los datos del productor y ni uno de ningún tenant", async () => {
     const app = await build();
     const res = await app.inject({
@@ -185,8 +212,9 @@ describe("GET /legal/declaracion-responsable", () => {
     const texto = textoDe(res.json());
     expect(texto).toContain("MI PIACE INTERNET SOLUTIONS SL");
     expect(texto).toContain("B45902186");
-    // Nada que huela a tenant. El fake de Prisma que explota cubre el
-    // camino; esto cubre el resultado.
+    // Nada que huela a tenant, ni en los apartados ni en el cuerpo crudo:
+    // `res.payload` pilla también un campo hermano de `declaracion`.
+    expect(res.payload.toLowerCase()).not.toContain("tenantid");
     for (const prohibido of [
       "tenantId",
       "tenant",

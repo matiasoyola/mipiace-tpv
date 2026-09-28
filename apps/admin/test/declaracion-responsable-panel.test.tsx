@@ -167,6 +167,17 @@ function enlacesALaDeclaracion(): HTMLAnchorElement[] {
   ];
 }
 
+/**
+ * Los enlaces que NO cuelgan de una barra lateral.
+ *
+ * El segundo sabotaje de la tabla que salió VERDE: `SettingsPage` se pinta
+ * DENTRO de `AdminShell`, que ya trae el enlace del pie. Contar enlaces en
+ * esa pantalla no dice nada de la sección de Ajustes — el del pie la tapaba.
+ */
+function enlacesFueraDeLaBarra(): HTMLAnchorElement[] {
+  return enlacesALaDeclaracion().filter((a) => a.closest("aside") === null);
+}
+
 describe("el enlace en la barra lateral", () => {
   // La matriz que importa: el bloque pide que se vea «de CUALQUIER comercio,
   // use Holded o no», para OWNER y MANAGER.
@@ -219,9 +230,12 @@ describe("el enlace en la barra lateral", () => {
 });
 
 describe("el enlace en Ajustes", () => {
-  it("está, y con su sección", async () => {
+  it("está en el cuerpo de la pantalla, no sólo en la barra lateral", async () => {
     await render(<SettingsPage />);
-    expect(enlacesALaDeclaracion().length).toBeGreaterThan(0);
+    expect(
+      enlacesFueraDeLaBarra().length,
+      "el enlace de Ajustes no está (el del pie no cuenta)",
+    ).toBeGreaterThan(0);
     expect(container.textContent).toContain(
       "Declaración responsable del sistema de facturación",
     );
@@ -232,7 +246,7 @@ describe("el enlace en Ajustes", () => {
     // La declaración no cuelga de la caja.
     cajaEnabled = false;
     await render(<SettingsPage />);
-    expect(enlacesALaDeclaracion().length).toBeGreaterThan(0);
+    expect(enlacesFueraDeLaBarra().length).toBeGreaterThan(0);
   });
 });
 
