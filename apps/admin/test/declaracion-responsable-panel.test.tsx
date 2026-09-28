@@ -207,6 +207,35 @@ describe("el enlace en la barra lateral", () => {
     });
   }
 
+  it("las barras se pueden desplazar, o el pie no se alcanza", async () => {
+    // Lo encontró el bucle visual a 320 px, no un test: con la barra entera
+    // el drawer mide 848 px de contenido en una caja de 720 y el `overflow`
+    // era `visible`. El pie —el enlace a la declaración, «Cerrar sesión en
+    // todos los dispositivos» y la versión— quedaba fuera de la pantalla y
+    // SIN scroll. No es que costara llegar: no se llegaba.
+    //
+    // jsdom no aplica Tailwind, así que se comprueba la clase, que es el
+    // mecanismo. La reachability de verdad la mide el bucle visual
+    // (docs/blocks/declaracion-responsable-shots/panel-320-menu.png).
+    await render(
+      <AdminShell title="Lo que sea">
+        <p>contenido</p>
+      </AdminShell>,
+    );
+    const menu = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Abrir menú"]',
+    );
+    await act(async () => {
+      menu!.click();
+    });
+    for (const aside of container.querySelectorAll("aside")) {
+      expect(
+        aside.className,
+        "una barra lateral sin scroll esconde su pie en una pantalla baja",
+      ).toContain("overflow-y-auto");
+    }
+  });
+
   it("está también en el drawer móvil, no sólo en el escritorio", async () => {
     await render(
       <AdminShell title="Lo que sea">
