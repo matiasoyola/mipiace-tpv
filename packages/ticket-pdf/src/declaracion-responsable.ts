@@ -249,5 +249,10 @@ export async function renderDeclaracionResponsablePdf(
     });
   });
 
-  return doc.save();
+  // Mismo motivo que en `render.ts`: con `useObjectStreams:false` el
+  // documento queda con tabla xref clásica y pdf.js (Mozilla / pdf-parse)
+  // lo lee sin reventar. El xref stream que genera pdf-lib por defecto no
+  // sólo falla al parsearse: deja al pdf.js del proceso en mal estado y
+  // tumba el SIGUIENTE parseo (en CI, el del ticket).
+  return doc.save({ useObjectStreams: false });
 }
