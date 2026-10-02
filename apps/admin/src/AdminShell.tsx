@@ -11,6 +11,7 @@ import {
   CalendarClock,
   ClipboardList,
   Clock,
+  FileText,
   FileWarning,
   Gift,
   KeyRound,
@@ -424,7 +425,7 @@ export function AdminShell({
 function DesktopSidebar({ onAskLogoutAll }: { onAskLogoutAll: () => void }) {
   const location = useLocation();
   return (
-    <aside className="hidden md:flex w-[240px] shrink-0 border-r border-slate-200 bg-white flex-col px-5 py-6">
+    <aside className="hidden md:flex w-[240px] shrink-0 border-r border-slate-200 bg-white flex-col overflow-y-auto px-5 py-6">
       <div className="mb-8">
         <Logo />
       </div>
@@ -435,8 +436,31 @@ function DesktopSidebar({ onAskLogoutAll }: { onAskLogoutAll: () => void }) {
       >
         Cerrar sesión en todos los dispositivos
       </button>
+      <DeclaracionFooterLink />
       <VersionFooter />
     </aside>
+  );
+}
+
+// declaracion-responsable · el enlace al documento del art. 15.
+//
+// Va en el PIE de la barra lateral, encima de la versión, y no en la lista
+// de secciones: la Orden pide que se llegue «de forma rápida, fácil e
+// intuitiva» desde cualquier pantalla, y el pie está en todas. Sin
+// capability ni gate de rol — la declaración es del PRODUCTOR del sistema,
+// así que la ve el OWNER y el MANAGER de cualquier comercio, use Holded o
+// no. Es también la razón de que NO esté en NAV_ITEMS: allí toda entrada
+// pasa por el filtro de capabilities.
+function DeclaracionFooterLink({ onNavigate }: { onNavigate?: () => void }) {
+  return (
+    <Link
+      to="/admin/declaracion-responsable"
+      onClick={onNavigate}
+      className="flex items-center gap-2 px-4 py-2 text-[12px] text-slate-400 hover:text-mipiace-coral-dark font-medium"
+    >
+      <FileText className="w-3.5 h-3.5 shrink-0" strokeWidth={2.1} />
+      <span>Declaración responsable</span>
+    </Link>
   );
 }
 
@@ -470,7 +494,13 @@ function MobileDrawer({
         className="absolute inset-0 bg-mipiace-ink/40 animate-in fade-in"
         onClick={onClose}
       />
-      <aside className="absolute inset-y-0 left-0 w-[260px] bg-white border-r border-slate-200 flex flex-col px-5 py-6 shadow-xl animate-in slide-in-from-left">
+      {/* declaracion-responsable · `overflow-y-auto`. Lo encontró el bucle
+          visual a 320 px: con la barra entera el contenido mide 848 px en
+          una caja de 720 y el `overflow` era `visible`, así que el pie
+          —«Cerrar sesión en todos los dispositivos», el enlace a la
+          declaración responsable y la versión— quedaba fuera de la pantalla
+          y SIN scroll: no se podía llegar, no es que costara. */}
+      <aside className="absolute inset-y-0 left-0 w-[260px] bg-white border-r border-slate-200 flex flex-col overflow-y-auto px-5 py-6 shadow-xl animate-in slide-in-from-left">
         <div className="flex items-center justify-between mb-8">
           <Logo />
           <button
@@ -488,6 +518,7 @@ function MobileDrawer({
         >
           Cerrar sesión en todos los dispositivos
         </button>
+        <DeclaracionFooterLink onNavigate={onClose} />
         <VersionFooter />
       </aside>
     </div>

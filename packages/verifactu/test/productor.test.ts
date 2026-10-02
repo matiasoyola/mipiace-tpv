@@ -1,10 +1,11 @@
 // Las constantes del productor del SIF.
 //
 // ⚠ Estos valores tienen que coincidir LITERALMENTE con los de la
-// declaración responsable del SIF. Si alguien los cambia aquí, este test
-// no puede saber si la declaración también cambió — pero sí puede impedir
-// que se queden vacíos, mal escritos o fuera de los límites del anexo, que
-// es todo lo que un test puede hacer por un dato que vive fuera del repo.
+// declaración responsable del SIF. Desde el bloque `declaracion-responsable`
+// eso ya no es un ruego: la declaración se construye DESDE estas constantes
+// (`src/declaracion.ts`) y `declaracion.test.ts` lo demuestra mockeando este
+// módulo. Aquí queda lo que sigue siendo cosa de este fichero — que no se
+// queden vacíos, mal escritos ni fuera de los límites del anexo.
 
 import { validateSpanishTaxId } from "@mipiacetpv/util-validation/spanish-tax-id";
 import { describe, expect, it } from "vitest";

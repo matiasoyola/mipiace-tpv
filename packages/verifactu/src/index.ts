@@ -59,6 +59,24 @@ export type {
 } from "./cadena.js";
 
 export {
+  buildDeclaracionResponsable,
+  DECLARACION_COMPONENTES,
+  DECLARACION_CUMPLIMIENTO,
+  DECLARACION_TIPOS_FIRMA,
+  DECLARACION_TITULO,
+  formatearFechaLarga,
+  PRODUCTOR_DIRECCION_POSTAL,
+  PRODUCTOR_LUGAR,
+  PRODUCTOR_WEB,
+} from "./declaracion.js";
+export type {
+  ApartadoDeclaracion,
+  DeclaracionInput,
+  DeclaracionResponsable,
+  VersionApk,
+} from "./declaracion.js";
+
+export {
   buildSistemaInformatico,
   ID_SISTEMA_INFORMATICO,
   INDICADOR_MULTIPLES_OT,

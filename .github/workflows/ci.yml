@@ -301,7 +301,12 @@ jobs:
 
       - name: Short SHA
         id: meta
-        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          # declaracion-responsable · la fecha del commit en formato civil
+          # YYYY-MM-DD (%cs). Alimenta APP_VERSION_DATE, que es el apartado
+          # 1.l) de la declaración responsable del SIF.
+          echo "commit_date=$(git show -s --format=%cs HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Setup buildx
         uses: docker/setup-buildx-action@v3
@@ -328,6 +333,7 @@ jobs:
             ghcr.io/matiasoyola/mipiacetpv-api:latest
           build-args: |
             GIT_SHA=${{ steps.meta.outputs.sha }}
+            GIT_COMMIT_DATE=${{ steps.meta.outputs.commit_date }}
             VITE_BUILD_HASH=${{ steps.meta.outputs.sha }}
             VITE_SENTRY_DSN=${{ secrets.VITE_SENTRY_DSN }}
           cache-from: type=gha

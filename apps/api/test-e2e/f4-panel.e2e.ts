@@ -451,12 +451,15 @@ describe.skipIf(!e2eEnabled)("e2e · el panel del control horario", () => {
 
   it("añadir un segundo tramo sin salida choca con la invariante", async () => {
     const marta = await altaEmpleado("Marta");
-    const hoy = localDate(new Date());
+    // Ayer, como en f3-fichar: una hora fija de HOY es futuro si la suite
+    // corre antes de esa hora en Madrid, y el alta manual al futuro da 400
+    // (ENTRY_IN_FUTURE) antes de llegar a la invariante.
+    const ayer = localDate(new Date(Date.now() - 86_400_000));
     await prisma.timeEntry.create({
       data: {
         tenantId,
         employeeId: marta,
-        startedAt: localToUtc(hoy, "08:00"),
+        startedAt: localToUtc(ayer, "08:00"),
         startedServerAt: new Date(),
         startSource: "MOBILE",
       },
@@ -467,7 +470,7 @@ describe.skipIf(!e2eEnabled)("e2e · el panel del control horario", () => {
       headers: auth(),
       payload: {
         employeeId: marta,
-        startedAt: localToUtc(hoy, "10:00").toISOString(),
+        startedAt: localToUtc(ayer, "10:00").toISOString(),
         reasonCode: "OLVIDO",
       } as never,
     });
