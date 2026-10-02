@@ -23,11 +23,19 @@ import { renderDeclaracionResponsablePdf } from "../src/declaracion-responsable.
 // un modo debug que lee un PDF de ejemplo del disco, así que se pide el
 // módulo interno por `createRequire`.
 const require = createRequire(import.meta.url);
-const pdfParse: (
+const pdfParseCrudo: (
   data: Uint8Array | Buffer,
 ) => Promise<{ text: string; numpages: number }> = require(
   "pdf-parse/lib/pdf-parse.js",
 );
+// pdf.js 1.10.100 (el de pdf-parse) lee mal un Buffer que venga del pool
+// compartido de Node (todo Buffer de menos de 4096 bytes): al trocear el
+// documento usa `bytes.buffer` y pierde el byteOffset, busca los objetos en
+// memoria ajena y da "bad XRef entry" según lo que se haya pedido antes al
+// pool. El ticket pesa ~3,2 KB y cae dentro. Un Uint8Array propio (offset 0)
+// lo evita siempre.
+const pdfParse: typeof pdfParseCrudo = (data) =>
+  pdfParseCrudo(new Uint8Array(data));
 
 const DECLARACION = buildDeclaracionResponsable({
   versionServidor: "2310f6e",
