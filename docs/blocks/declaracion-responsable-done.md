@@ -1,7 +1,7 @@
 # declaracion-responsable · la declaración del SIF, visible dentro de mipiacetpv — DONE
 
-**Rama:** `declaracion-responsable` (sale de `master` en 1ed5f46) · **Estado:** hecho, **sin push,
-sin merge, sin desplegar**.
+**Rama:** `declaracion-responsable` (sale de `master` en 1ed5f46) · **Estado:** **en master desde el
+02-10-2026** (merge `231db55`, PR #1, CI verde en `13f9933`), **sin desplegar**.
 
 mipiacetpv es un sistema informático de facturación (ADR-019, en producción desde el 27-09 con
 2310f6e). El art. 15 de la Orden HAC/1177/2024 obliga al productor a que la declaración
@@ -264,3 +264,13 @@ c488893  feat(admin): la declaración responsable, a un clic desde cualquier pan
 19eefb8  test(declaracion): cerrar los dos huecos que la tabla de sabotaje encontró
 fd863d2  fix(admin): la barra lateral se desplaza, o su pie no se alcanza
 ```
+
+---
+
+## Addendum 02-10 · lo que costó poner verde la CI de la PR #1
+
+Tres commits posteriores a este done:
+
+- `741c7f3` guarda la declaración sin object streams, como el ticket. Es inocuo, pero **no era la causa** del rojo.
+- `4596f3f` es el arreglo de verdad del «bad XRef entry»: pdf.js 1.10.100 (el de `pdf-parse`) lee mal un `Buffer` de menos de 4096 bytes, porque vive en el pool compartido de Node. El ticket pesa 3208 bytes y cae dentro; la declaración (7949) no. Los tres ficheros que usan `pdfParse` le pasan ahora un `Uint8Array` propio.
+- `13f9933` corrige `f4-panel.e2e.ts`: sembraba un tramo a las 10:00 de hoy y fallaba si la suite corría antes de las 09:55 de Madrid. La trampa ya estaba en master.
