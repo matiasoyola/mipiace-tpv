@@ -18,6 +18,11 @@ Leyenda: ☐ tarea · 🔑 lo hace Matías/super-admin · 🤖 automático del s
 - ☐ Confirmar **vertical** del cliente: retail / hostelería / servicios. Determina la configuración (mesas, modificadores, importador).
 - ☐ Confirmar que el cliente tiene **cuenta de Holded** activa y operativa.
 - ☐ 🔑 Obtener la **API key de Holded** del cliente (la genera él en su Holded; nosotros no la creamos).
+  **Tiene que ser una API Key v1**, no un «API Token» de los nuevos: los que empiezan por `pat_` **no**
+  funcionan con esta versión del TPV (no autentican contra la API v1; medido contra Holded el 03-10-2026,
+  `docs/blocks/holded-pat-spike.md`). Se genera en **Holded → Configuración → Más → Desarrolladores**. Si
+  pegas un `pat_`, el alta lo rechaza al momento con `HOLDED_API_KEY_V1_REQUIRED` y te dice dónde sacar la
+  buena — no es un fallo de red, no pierdas tiempo mirando la conexión.
 - ☐ Tener a mano el **NIF/CIF** del cliente (opcional en alta, pero recomendable para el check de unicidad).
 - ☐ Firmar / tener listos los **documentos legales** antes de la activación real: contrato piloto + DPA (`docs/legal/`). ⚠️ No activar para uso real sin ellos.
 - ☐ Verificar **catálogo en Holded** del cliente razonablemente limpio: productos con IVA correcto, precios, y SKU/código de barras si va a usar escáner.
@@ -27,7 +32,12 @@ Leyenda: ☐ tarea · 🔑 lo hace Matías/super-admin · 🤖 automático del s
 - ☐ 🔑 En `admin.mipiacetpv.com/superadmin` → **Crear tenant** con: `holdedApiKey` (+ `taxId` y `legalName` opcionales).
 - ☐ 🤖 El sistema valida la API key contra Holded (`listWarehouses`), extrae razón social y dirección del almacén por defecto, y crea el tenant en estado **DRAFT** (sin usuario OWNER todavía).
 - ☐ 🤖 Se encola el **sync inicial** automáticamente.
-- ⚠️ Si la creación falla: `HOLDED_API_KEY_INVALID` (key mal/permiso), `HOLDED_SUSPENDED` (cuenta Holded impagada), `TENANT_NIF_TAKEN` (NIF ya dado de alta), `HOLDED_INVALID_RESPONSE` (Holded devolvió HTML → reintentar).
+- ⚠️ Si la creación falla: `HOLDED_API_KEY_V1_REQUIRED` (han pegado un token `pat_`; pide la API Key v1 de
+  **Configuración → Más → Desarrolladores**), `HOLDED_API_KEY_INVALID` (Holded la rechaza: mal copiada,
+  revocada o de otra cuenta), `HOLDED_SUSPENDED` (cuenta Holded impagada), `TENANT_NIF_TAKEN` (NIF ya dado
+  de alta), `HOLDED_INVALID_RESPONSE` (Holded devolvió HTML → reintentar), `HOLDED_UNEXPECTED_STATUS`
+  (Holded contestó algo raro → reintenta y avisa), `HOLDED_UNREACHABLE` (**sólo** red, timeout o caída de
+  Holded → reintentar en unos minutos).
 
 ## Fase 2 — Verificar salud del onboarding (readinessChecks)
 
