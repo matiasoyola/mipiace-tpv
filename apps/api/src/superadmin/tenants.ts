@@ -5,9 +5,6 @@ import type { FastifyInstance } from "fastify";
 import { Prisma } from "@mipiacetpv/db";
 import {
   ApiKeyClient,
-  HoldedApiError,
-  HoldedInvalidResponseError,
-  HoldedSubscriptionSuspendedError,
   listWarehouses,
   type HoldedWarehouse,
 } from "@mipiacetpv/holded-client";
@@ -21,6 +18,11 @@ import { getPrisma } from "../context.js";
 import { comprobarSueloFiscal } from "../fiscal/activacion.js";
 import { encryptSecret } from "../crypto.js";
 import { holdedConnectionStatus } from "../holded/connection-status.js";
+import {
+  esTokenPat,
+  superAdminHoldedKeyFailure,
+  superAdminRechazoPat,
+} from "../holded/clave-rechazada.js";
 import {
   DejarHoldedBloqueadoError,
   ejecutarDejarHolded,
@@ -664,6 +666,18 @@ export async function registerSuperAdminTenantsRoutes(
       //    No es una optimización: una empresa sin Holded no tiene nada
       //    que validar, y un 502 de Holded no puede impedir dar de alta
       //    a un cliente que no lo usa.
+      //
+      //    holded-pat · un API Token nuevo (`pat_…`) se rechaza ANTES de
+      //    tocar la red: no entra en `/invoicing/v1/…` con ninguna
+      //    cabecera (spike §1), así que la llamada sólo serviría para
+      //    que el implantador leyera "no hemos podido contactar con
+      //    Holded" y se fuera a buscar un fallo de red que no existe.
+      if (usesHolded && esTokenPat(body.holdedApiKey!)) {
+        const fallo = superAdminRechazoPat();
+        return reply
+          .code(fallo.status)
+          .send({ error: fallo.error, message: fallo.message });
+      }
       let warehouses: HoldedWarehouse[] = [];
       try {
         if (usesHolded) {
@@ -673,37 +687,20 @@ export async function registerSuperAdminTenantsRoutes(
           warehouses = await listWarehouses(client);
         }
       } catch (err) {
-        if (
-          err instanceof HoldedApiError &&
-          (err.status === 401 || err.status === 403)
-        ) {
-          return reply.code(400).send({
-            error: "HOLDED_API_KEY_INVALID",
-            message: "Holded rechaza la API Key. Genera una nueva y reintenta.",
-          });
+        // holded-pat · qué respuesta de Holded significa «clave
+        // rechazada» lo decide `classifyHoldedKeyFailure`, y sólo ella.
+        // Este sitio ya no lo sabe: tenerlo escrito en tres rutas es lo
+        // que dejó el 400 "Invalid key" leyéndose como un fallo de red.
+        const fallo = superAdminHoldedKeyFailure(err);
+        if (fallo.error === "HOLDED_UNREACHABLE") {
+          request.log.error(
+            { event: "super_admin.create_tenant_holded_failed", err },
+            "Validación de API Holded falló en POST /super-admin/tenants",
+          );
         }
-        if (err instanceof HoldedSubscriptionSuspendedError) {
-          return reply.code(400).send({
-            error: "HOLDED_SUSPENDED",
-            message:
-              "La cuenta Holded está suspendida por impago. Regulariza el pago y reintenta.",
-          });
-        }
-        if (err instanceof HoldedInvalidResponseError) {
-          return reply.code(502).send({
-            error: "HOLDED_INVALID_RESPONSE",
-            message:
-              "Holded ha devuelto una respuesta no-JSON. Es posible que estén con incidencia.",
-          });
-        }
-        request.log.error(
-          { event: "super_admin.create_tenant_holded_failed", err },
-          "Validación de API Holded falló en POST /super-admin/tenants",
-        );
-        return reply.code(502).send({
-          error: "HOLDED_UNREACHABLE",
-          message: "No hemos podido contactar con Holded. Reintenta en unos minutos.",
-        });
+        return reply
+          .code(fallo.status)
+          .send({ error: fallo.error, message: fallo.message });
       }
 
       // 3. Construir fiscalProfile desde el warehouse default (ver spike §08).
@@ -1628,41 +1625,30 @@ export async function registerSuperAdminTenantsRoutes(
             "aparte y todavía no está construida.",
         });
       }
+      // holded-pat · igual que en el alta: el `pat_` se rechaza antes de
+      // la red, y el resto de respuestas las traduce un solo sitio.
+      if (esTokenPat(holdedApiKey)) {
+        const fallo = superAdminRechazoPat();
+        return reply
+          .code(fallo.status)
+          .send({ error: fallo.error, message: fallo.message });
+      }
       const client = new ApiKeyClient(holdedApiKey, {
         baseUrl: env.HOLDED_BASE_URL,
       });
       try {
         await listWarehouses(client);
       } catch (err) {
-        if (
-          err instanceof HoldedApiError &&
-          (err.status === 401 || err.status === 403)
-        ) {
-          return reply.code(400).send({
-            error: "HOLDED_API_KEY_INVALID",
-            message: "Holded rechaza la API Key. Genera una nueva y reintenta.",
-          });
+        const fallo = superAdminHoldedKeyFailure(err);
+        if (fallo.error === "HOLDED_UNREACHABLE") {
+          request.log.error(
+            { event: "super_admin.rotate_holded_key_failed", tenantId: id, err },
+            "Rotación de API key Holded falló",
+          );
         }
-        if (err instanceof HoldedSubscriptionSuspendedError) {
-          return reply.code(400).send({
-            error: "HOLDED_SUSPENDED",
-            message: "La cuenta Holded está suspendida por impago.",
-          });
-        }
-        if (err instanceof HoldedInvalidResponseError) {
-          return reply.code(502).send({
-            error: "HOLDED_INVALID_RESPONSE",
-            message: "Holded ha devuelto una respuesta no-JSON.",
-          });
-        }
-        request.log.error(
-          { event: "super_admin.rotate_holded_key_failed", tenantId: id, err },
-          "Rotación de API key Holded falló",
-        );
-        return reply.code(502).send({
-          error: "HOLDED_UNREACHABLE",
-          message: "No hemos podido contactar con Holded.",
-        });
+        return reply
+          .code(fallo.status)
+          .send({ error: fallo.error, message: fallo.message });
       }
       const ciphertext = encryptSecret(holdedApiKey, env.HOLDED_KEY_ENCRYPTION_SECRET);
       // H1 · encender Holded MÁS TARDE en una empresa que nació sin él.
