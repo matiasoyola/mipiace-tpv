@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 
 import { api, ApiError, readCurrentRole, readImpersonationState } from "./api.js";
+import { useTenantCapabilities } from "./capabilities.js";
 
 import { ImpersonationBanner } from "./components/ImpersonationBanner.js";
 import { LogoutEverywhereModal } from "./components/LogoutEverywhereModal.js";
@@ -208,7 +209,35 @@ const NAV_ITEMS: NavItem[] = [
   // en el cliente y pintaría "TPV bloqueado · Holded no responde" en rojo
   // sobre un comercio que acabó de dejarlo a propósito.
   { to: "/admin/tickets-errors", label: "Holded", icon: KeyRound, badge: "syncErrors", superAdminOnly: true, capability: "holded" },
-  { to: "/admin/settings", label: "Ajustes", icon: Settings, superAdminOnly: true, capability: "caja" },
+  // agenda-lista · "Ajustes" se queda SIN flags, y las dos razones son
+  // distintas. Se miró antes de tocarla: el `superAdminOnly` no lo puso H1
+  // ni "Dejar Holded" —la culpa del `git blame` es que ambos reescribieron
+  // la línea para añadirle la capability— sino B-OnboardingV2 (`850063e`),
+  // que escondió "secciones técnicas (Holded, Dispositivos, Ajustes) a
+  // OWNER/MANAGER" para que el alta supervisada dejara el panel del
+  // propietario sin complejidad técnica. Nació `ownerOnly` en B6.
+  //
+  //   · fuera `superAdminOnly`: dentro no hay NADA técnico. Las seis
+  //     secciones son decisiones de negocio y el servidor ya dice de quién
+  //     son (`GET` → requireOwnerOrManager, `POST` → requireOwner). Lo
+  //     único comercial, `cajaEnabled`, ya es de sólo lectura y el `POST`
+  //     lo rechaza con 400 por `additionalProperties: false`: está
+  //     protegido donde toca, no escondiendo una entrada del menú. Y la
+  //     dueña TIENE que llegar aquí: éste es el interruptor de la agenda.
+  //     Es la misma corrección que ya se le hizo a "Dispositivos" en
+  //     v1.3-piloto-feedback (ver arriba, "un error histórico").
+  //   · fuera `capability: "caja"`: lo dice el propio commit de H1 —
+  //     "Ajustes NO va envuelto a propósito: dentro vive «Módulos del
+  //     negocio» (CRM y agenda), que es justo lo que una empresa sin caja
+  //     viene a tocar". La página lo cumple (esa sección y la declaración
+  //     responsable quedan fuera de su gate) pero el menú la tapaba
+  //     entera, así que el tenant sin caja no llegaba a su único ajuste
+  //     útil. Lo de caja se sigue escondiendo DENTRO de la pantalla.
+  //
+  // Sin flags: OWNER ve y edita, MANAGER ve en gris con su tooltip. Es la
+  // misma escalera que impone el servidor. El super-admin impersonando
+  // sigue viéndola igual.
+  { to: "/admin/settings", label: "Ajustes", icon: Settings },
 ];
 
 // v1.5-consistencia-B §3.b: salud de la integración Holded para el
@@ -525,88 +554,15 @@ function MobileDrawer({
   );
 }
 
-// B-reservas-2, generalizado por H1: lee las capabilities del tenant una
-// vez para gatear las entradas del sidebar. `null` mientras carga → las
-// entradas con capability quedan ocultas hasta saber el valor real.
+// B-reservas-2, generalizado por H1: las capabilities del tenant gatean
+// las entradas del sidebar. `null` mientras carga → las entradas con
+// capability quedan ocultas hasta saber el valor real.
 //
-// Los defaults al fallar reproducen master: agenda apagada (era `false`
-// antes del bloque) y caja ENCENDIDA, porque `caja_enabled` es
-// `@default(true)` y esconderle la caja a quien cobra por un error de red
-// sería el peor fallo posible. Mismo criterio que `lib/caja-gate.ts`.
-interface TenantCapabilities {
-  caja: boolean;
-  agenda: boolean;
-  // F1 (ADR-018) · el control horario. `=== true` como las demás; la
-  // columna nace apagada y sólo el encendido explícito la abre.
-  fichaje: boolean;
-  // H1 · no es una columna: es "tiene clave de Holded", que sale de
-  // `/auth/me`. Se trata igual que las otras para gatear el sidebar.
-  holded: boolean;
-  // catalogo-local (addendum 3) · ¿está PREVISTO que use Holded? Sí es
-  // una columna (`Tenant.holdedEnabled`). Se guarda aparte de `holded` a
-  // propósito, porque responden a preguntas distintas y confundirlas es
-  // el bug que el addendum viene a arreglar: `holded` gatea las
-  // secciones que sólo tienen sentido con el ERP conectado, y esta gatea
-  // la ALARMA de que el ERP no responde.
-  holdedEnabled: boolean;
-  // holded-desconectar (ADR-020) · ¿DEJÓ Holded? Tercera pregunta, y no se
-  // deduce de las otras dos: `holdedEnabled === false` lo contestan igual el
-  // comercio que nació sin Holded y el que lo dejó con 270 facturas detrás.
-  // Sólo el segundo tiene devoluciones que llevarle al asesor a mano.
-  holdedDejado: boolean;
-}
-
-function useTenantCapabilities(): TenantCapabilities | null {
-  const [caps, setCaps] = useState<TenantCapabilities | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([
-      api<{
-        settings: {
-          agendaEnabled?: boolean;
-          cajaEnabled?: boolean;
-          fichajeEnabled?: boolean;
-        };
-      }>("/admin/tenant/settings"),
-      api<{
-        tenant: {
-          hasHoldedKey?: boolean;
-          holdedEnabled?: boolean;
-          holdedDisconnectedAt?: string | null;
-        };
-      }>("/auth/me"),
-    ])
-      .then(([s, me]) => {
-        if (cancelled) return;
-        setCaps({
-          agenda: s.settings.agendaEnabled ?? false,
-          caja: s.settings.cajaEnabled !== false,
-          fichaje: s.settings.fichajeEnabled === true,
-          holded: me.tenant.hasHoldedKey === true,
-          holdedEnabled: me.tenant.holdedEnabled !== false,
-          holdedDejado: me.tenant.holdedDisconnectedAt != null,
-        });
-      })
-      .catch(() => {
-        if (!cancelled)
-          setCaps({
-            agenda: false,
-            caja: true,
-            fichaje: false,
-            holded: true,
-            holdedEnabled: true,
-            // Si `/auth/me` no contesta, se asume que NO ha dejado Holded:
-            // es el caso de casi todos y esconder una sección es más barato
-            // que enseñar una que no le toca.
-            holdedDejado: false,
-          });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  return caps;
-}
+// agenda-lista · el hook y sus defaults se mudan a `capabilities.ts`.
+// Aquí sólo se consume. Las dos razones de la mudanza están escritas
+// allí; la que importa para este bloque es que ahora la pantalla de
+// Ajustes puede empujar un refresco al guardar, y el menú gana sus
+// secciones sin recargar.
 
 function NavList({
   currentPath,

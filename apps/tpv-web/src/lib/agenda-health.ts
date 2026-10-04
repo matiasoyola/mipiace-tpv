@@ -66,7 +66,27 @@ export interface HealthSnapshot {
   fetchedAt: string;
 }
 
-export function readHealthSnapshot(): HealthSnapshot | null {
+// agenda-lista (hallazgo ⚪ 7) · la última foto deja de ser sólo una
+// entrada de `localStorage` y pasa a tener oyentes.
+//
+// El fallo: el panel de salud guardaba la foto en SU `useState`. La dueña
+// marcaba las cuatro casillas de la matriz, volvía al panel —que no se
+// desmonta, la matriz se pinta encima— y la cifra seguía diciendo 2.
+// Había que pulsar «Actualizar». Acabas de arreglar algo y la pantalla te
+// dice que sigue roto: es exactamente lo que hace pensar que no ha
+// funcionado.
+//
+// Con esto, quien quiera que vuelva a pedir la salud —el panel, el botón
+// de la agenda, el cierre de la matriz— refresca a todos los demás. Una
+// foto, un sitio.
+//
+// `ultima` es además la identidad estable que necesita
+// `useSyncExternalStore`: si `readHealthSnapshot()` devolviera un objeto
+// nuevo en cada llamada, React se quedaría repintando para siempre.
+let ultima: HealthSnapshot | null | undefined;
+const oyentes = new Set<() => void>();
+
+function leerDeDisco(): HealthSnapshot | null {
   try {
     const raw = localStorage.getItem(SNAPSHOT_KEY);
     if (!raw) return null;
@@ -77,12 +97,33 @@ export function readHealthSnapshot(): HealthSnapshot | null {
   }
 }
 
+export function readHealthSnapshot(): HealthSnapshot | null {
+  if (ultima === undefined) ultima = leerDeDisco();
+  return ultima;
+}
+
+/** Avisa cuando llega una foto nueva. Devuelve cómo darse de baja. */
+export function subscribeHealthSnapshot(fn: () => void): () => void {
+  oyentes.add(fn);
+  return () => {
+    oyentes.delete(fn);
+  };
+}
+
+/** Sólo para las pruebas: olvida la foto en memoria y los oyentes. */
+export function __resetHealthSnapshotParaTests(): void {
+  ultima = undefined;
+  oyentes.clear();
+}
+
 function writeHealthSnapshot(snapshot: HealthSnapshot): void {
+  ultima = snapshot;
   try {
     localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snapshot));
   } catch {
     // Sin almacenamiento se vive: sólo se pierde la última foto.
   }
+  for (const fn of oyentes) fn();
 }
 
 /** Pide las seis tarjetas y guarda la foto con su hora. */

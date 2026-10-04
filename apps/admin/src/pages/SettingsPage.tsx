@@ -14,6 +14,7 @@ import {
   readEffectiveAuth,
   readonlyReasonLabel,
 } from "../api.js";
+import { refrescarCapacidades } from "../capabilities.js";
 import {
   CenteredLoader,
   FieldError,
@@ -91,6 +92,18 @@ export function SettingsPage() {
       setSettings(res.settings);
       setForm(res.settings);
       setSuccess("Ajustes guardados.");
+      // agenda-lista (hallazgo 🟡 3) · "Módulos del negocio" es lo que
+      // gatea medio menú. Sin esto, la dueña enciende la agenda, guarda,
+      // y la barra lateral sigue exactamente igual hasta que recargue:
+      // el shell leía las capacidades una sola vez al montar. Quien
+      // acaba de pulsar un interruptor y no ve cambiar nada concluye que
+      // no ha funcionado.
+      //
+      // Sin `await` a propósito: el "Ajustes guardados." ya está puesto y
+      // el guardado NO depende de que el refresco salga bien. Si falla,
+      // `capabilities.ts` cae en sus defaults y el menú se queda como
+      // estaba — que es el comportamiento de antes de este bloque.
+      void refrescarCapacidades();
     } catch (err) {
       if (err instanceof ApiError) setError(err.message);
       else setError("Error inesperado");

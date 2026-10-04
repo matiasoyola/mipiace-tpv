@@ -8,7 +8,14 @@
 // Gate por `agendaEnabled` en la UI (además del gate de ruta en el server).
 // Offline: lectura del día desde caché; alta por outbox con externalId.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   ArrowLeft,
   ChevronLeft,
@@ -65,6 +72,7 @@ import {
   fetchAgendaHealth,
   readHealthSnapshot,
   serviciosSinNadie,
+  subscribeHealthSnapshot,
 } from "../lib/agenda-health.js";
 import { AgendaHealthPanel } from "./AgendaHealthPanel.js";
 import { AgendaSkillMatrix } from "./AgendaSkillMatrix.js";
@@ -307,9 +315,18 @@ export function AgendaPage({
   // La cifra de la tarjeta nº 1 en el botón. Un panel que hay que abrir para
   // enterarse de que hay un problema es el mismo silencio de antes con otra
   // pantalla: el número tiene que verse desde la agenda.
-  const [sinNadie, setSinNadie] = useState<number | null>(
-    () => serviciosSinNadie(readHealthSnapshot()?.health ?? null),
+  //
+  // agenda-lista (hallazgo ⚪ 7) · sale de la foto compartida, no de un
+  // `useState` propio. Antes el badge y el panel llevaban cada uno su
+  // copia y se desincronizaban a la primera: el badge se enteraba al
+  // cerrar la matriz y el panel no. Ahora cualquiera que vuelva a pedir
+  // la salud los mueve a los dos.
+  const saludSnapshot = useSyncExternalStore(
+    subscribeHealthSnapshot,
+    readHealthSnapshot,
+    readHealthSnapshot,
   );
+  const sinNadie = serviciosSinNadie(saludSnapshot?.health ?? null);
   const [draft, setDraft] = useState<DraftBooking | null>(null);
   const [detail, setDetail] = useState<AgendaAppointment | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -755,15 +772,9 @@ export function AgendaPage({
   // pasa nada: el botón se queda con la cifra de la última foto, o sin
   // cifra. Nunca con un cero inventado.
   useEffect(() => {
-    let cancelado = false;
-    void fetchAgendaHealth()
-      .then((snap) => {
-        if (!cancelado) setSinNadie(serviciosSinNadie(snap.health));
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelado = true;
-    };
+    // El resultado no se guarda aquí: `fetchAgendaHealth` escribe la foto
+    // compartida y quien la mire se entera solo.
+    void fetchAgendaHealth().catch(() => undefined);
   }, []);
 
   return (
@@ -1200,11 +1211,13 @@ export function AgendaPage({
           focusServiceId={matriz.focusServiceId}
           onClose={() => {
             setMatriz(null);
-            // Al volver de arreglar la matriz, la cifra del botón se relee:
-            // si ya no hay servicios huérfanos, el aviso se va solo.
-            void fetchAgendaHealth()
-              .then((snap) => setSinNadie(serviciosSinNadie(snap.health)))
-              .catch(() => undefined);
+            // Al volver de arreglar la matriz se relee la salud: si ya no
+            // hay servicios huérfanos, el aviso se va solo.
+            //
+            // agenda-lista · y ahora esto refresca TAMBIÉN el panel de
+            // salud, que sigue montado debajo. Antes sólo movía el badge
+            // y el panel seguía diciendo 2 hasta pulsar «Actualizar».
+            void fetchAgendaHealth().catch(() => undefined);
           }}
         />
       )}
