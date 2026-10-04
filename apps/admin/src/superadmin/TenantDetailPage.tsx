@@ -1138,7 +1138,11 @@ function ModuleChips({
   );
 }
 
-function TestPanel({
+// catalogo-en-alta · exportado para poder probarlo solo. Lo que este
+// panel decide —si el botón que provisiona el cajero técnico se puede
+// pulsar— es lo que bloqueaba la activación de cualquier alta sin
+// Holded, y una regresión ahí no la cantaría ningún test del servidor.
+export function TestPanel({
   tenant,
   busy,
   onTestTpv,
