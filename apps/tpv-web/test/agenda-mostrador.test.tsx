@@ -57,6 +57,11 @@ vi.mock("../src/lib/clients.js", () => ({
     cacheMock.lecturasDeClientes++;
     return cacheMock.clientes;
   },
+  // agenda-lista · la agenda ya no espera a que alguien abra Clientes:
+  // al abrirse se asegura de tener los nombres. Aquí no se prueba eso
+  // (lo hace `agenda-lista-clientes-cache.test.ts`), así que basta con
+  // que el doble exista y no baje nada.
+  asegurarClientesEnCache: async () => false,
 }));
 
 // El selector es de B1 y tiene sus propios tests: aquí sólo hace falta poder

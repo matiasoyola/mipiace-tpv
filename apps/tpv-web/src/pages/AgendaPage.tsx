@@ -30,6 +30,7 @@ import {
 import { ApiError } from "../api.js";
 import { loadCatalogFromCache, type CatalogProduct } from "../lib/catalog.js";
 import {
+  asegurarClientesEnCache,
   clientFullName,
   loadClientsFromCache,
   type ClientRow,
@@ -70,7 +71,11 @@ import { useClientPicker } from "../hooks/useClientPicker.js";
 import { outboxRetry, subscribeOutbox } from "../lib/outbox.js";
 import {
   fetchAgendaHealth,
+  fetchSkillMatrix,
+  indexarMatrizPorProfesional,
+  noHaceNingunServicio,
   readHealthSnapshot,
+  serviciosQueSabeHacer,
   serviciosSinNadie,
   subscribeHealthSnapshot,
 } from "../lib/agenda-health.js";
@@ -312,6 +317,17 @@ export function AgendaPage({
   const [matriz, setMatriz] = useState<{ focusServiceId: string | null } | null>(
     null,
   );
+  // agenda-lista (hallazgo 🟡 4) · quién sabe hacer qué, para no ofrecer en
+  // la columna de Lucía un servicio que Lucía no hace. `null` = todavía no
+  // se sabe (o no hubo red): en ese caso no se filtra nada, ver
+  // `serviciosQueSabeHacer`.
+  const [skillsPorStaff, setSkillsPorStaff] = useState<Map<
+    string,
+    Set<string>
+  > | null>(null);
+  // Si la matriz es de sólo lectura para esta sesión, el aviso de «no hace
+  // ninguno» tiene que mandar a quien SÍ la puede tocar, no a la cajera.
+  const [matrizEditable, setMatrizEditable] = useState(true);
   // La cifra de la tarjeta nº 1 en el botón. Un panel que hay que abrir para
   // enterarse de que hay un problema es el mismo silencio de antes con otra
   // pantalla: el número tiene que verse desde la agenda.
@@ -329,6 +345,13 @@ export function AgendaPage({
   const sinNadie = serviciosSinNadie(saludSnapshot?.health ?? null);
   const [draft, setDraft] = useState<DraftBooking | null>(null);
   const [detail, setDetail] = useState<AgendaAppointment | null>(null);
+  // agenda-lista (hallazgo 🟡 6) · el «no» del motor al mover, con sus
+  // alternativas. Separado de `bookError` a propósito: son dos paneles
+  // distintos y un error del alta no puede pintarse en el detalle.
+  const [moveError, setMoveError] = useState<{
+    message: string;
+    alternatives: AvailabilitySlot[];
+  } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   // B-reservas-6a · el 409 del suelo NO es un error genérico: trae la frase
   // que se le lee a la clienta y los tres huecos que sí se le pueden dar.
@@ -421,6 +444,34 @@ export function AgendaPage({
   useEffect(() => {
     void loadDay(date);
   }, [date, loadDay]);
+
+  // agenda-lista (hallazgo 🟡 1) · la agenda se asegura de tener los
+  // nombres, en vez de esperar a que alguien abra Clientes.
+  //
+  // El caché de clientes lo llenaba SÓLO la pantalla Clientes, así que en
+  // un dispositivo recién emparejado la rejilla decía «Sin nombre» en
+  // todas las citas. Es el estado exacto del AP11 el primer día: lo
+  // emparejas, abres la agenda y la recepción no sabe de quién es la cita
+  // de las diez.
+  //
+  // Una vez al abrir la agenda, no en cada día que se pinta: `loadDay`
+  // corre cada vez que se toca el selector de fecha y esto se bajaría el
+  // tenant entero en cada toque. La decisión de si hace falta está en
+  // `necesitaRefrescoDeClientes`, y la bajada es la MISMA función que usa
+  // la pantalla Clientes (`refreshClients`, con su mezcla de altas
+  // offline). Sin red se queda con lo que haya: una agenda que no abre
+  // sería peor que algún «Sin nombre».
+  useEffect(() => {
+    let cancelado = false;
+    void asegurarClientesEnCache().then((hubo) => {
+      // Sólo se repinta si de verdad bajó algo. `refrescarCachesLocales`
+      // MEZCLA, no reemplaza: ver su comentario.
+      if (hubo && !cancelado) void refrescarCachesLocales();
+    });
+    return () => {
+      cancelado = true;
+    };
+  }, [refrescarCachesLocales]);
 
   // B-reservas-5 F4 · el aviso que viene de fuera (el cobro que no pudo
   // finalizar la cita) se enseña al abrir, que es cuando la cajera tiene
@@ -674,6 +725,59 @@ export function AgendaPage({
     await loadDay(date);
   }
 
+  /**
+   * agenda-lista (hallazgo 🟡 6) · mover una cita de día y hora.
+   *
+   * La API y el cliente ya lo sabían hacer (`PATCH /agenda/appointments/:id`
+   * con `start`, `patchAppointment`); lo que faltaba era la pantalla. En
+   * una peluquería las clientas cambian de hora todos los días, y hasta
+   * aquí el único camino era cancelar y volver a dar la cita — que pierde
+   * el histórico de la original.
+   *
+   * Tres cosas que conviene tener escritas:
+   *
+   *   · **El motor puede cambiar de profesional.** `reschedule` busca el
+   *     hueco con `staffUserId: null` (`engine.ts:775`, `:792`), así que
+   *     la cita movida puede caer en otra columna. El motor no se toca en
+   *     este bloque, así que lo que se hace es DECIRLO: si cambia, el
+   *     aviso lo nombra. Callarlo sería peor que el fallo.
+   *   · **Si falla no pasa nada.** `start` y `status` son ramas distintas
+   *     del PATCH: un movimiento rechazado no mueve la cita ni le cambia
+   *     el estado. El motivo y las alternativas son las que ya devuelve el
+   *     motor, las mismas del alta.
+   *   · **No hay camino offline.** `patchAppointment` no encola; el botón
+   *     lo dice en vez de prometer algo que no va a pasar.
+   */
+  async function doMove(id: string, startISO: string) {
+    const antes = staffDeLaCita(detail);
+    const res = await patchAppointment(id, { start: startISO });
+    if (!res.ok) {
+      setMoveError({ message: res.message, alternatives: res.alternatives ?? [] });
+      return;
+    }
+    setMoveError(null);
+    setDetail(res.appointment);
+    const diaNuevo = centerWallDate(res.appointment.start);
+    // Cambiar de día dispara `loadDay` por el efecto del selector; si se
+    // queda en el mismo día hay que recargarlo a mano.
+    if (diaNuevo !== date) setDate(diaNuevo);
+    else await loadDay(date);
+
+    const despues = staffDeLaCita(res.appointment);
+    const cuando = `${diaNuevo} a las ${localHHMM(res.appointment.start)}`;
+    flash(
+      despues && despues !== antes
+        ? `Cita movida al ${cuando} · ahora con ${nombreDeStaff(despues)}`
+        : `Cita movida al ${cuando}`,
+    );
+  }
+
+  function nombreDeStaff(userId: string): string {
+    return (
+      day?.staff.find((s) => s.userId === userId)?.displayName ?? "otra persona"
+    );
+  }
+
   // Tap en un hueco vacío de una columna → alta slot-first.
   function openSlotFirst(staffUserId: string | null, minutes: number) {
     // B-reservas-7a · se redondea HACIA ABAJO, no al más cercano. Con la
@@ -768,6 +872,15 @@ export function AgendaPage({
   // pasado (un día futuro).
   const pastUntilMin = isPastDay ? dayEndMin : isToday ? floorMin : null;
 
+  // agenda-lista · mover una cita NO tiene camino offline: el PATCH de
+  // `start` no pasa por el outbox. `offline` es que el día se pintó desde
+  // el caché; `navigator.onLine === false` es que el sistema ya sabe que
+  // no hay red. Cualquiera de las dos basta para apagar el botón con su
+  // motivo, en vez de prometer algo que no va a pasar.
+  const sinRed =
+    offline ||
+    (typeof navigator !== "undefined" && navigator.onLine === false);
+
   // B-reservas-9 · una sola lectura al abrir la agenda. Si no hay red no
   // pasa nada: el botón se queda con la cifra de la última foto, o sin
   // cifra. Nunca con un cero inventado.
@@ -776,6 +889,25 @@ export function AgendaPage({
     // compartida y quien la mire se entera solo.
     void fetchAgendaHealth().catch(() => undefined);
   }, []);
+
+  // agenda-lista (hallazgo 🟡 4) · la matriz servicio × profesional, para
+  // que el alta en la columna de alguien ofrezca sólo lo que esa persona
+  // hace. Una lectura al abrir la agenda, y otra al volver de tocarla.
+  const cargarMatriz = useCallback(async () => {
+    try {
+      const m = await fetchSkillMatrix();
+      setSkillsPorStaff(indexarMatrizPorProfesional(m));
+      setMatrizEditable(m.editable);
+    } catch {
+      // Sin red se ofrecen todos los servicios y el motor sigue siendo la
+      // puerta: inventarse un "no" por una lectura que falló sería peor.
+      setSkillsPorStaff(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void cargarMatriz();
+  }, [cargarMatriz]);
 
   return (
     <div className="fixed inset-0 z-40 bg-mipiace-stone flex flex-col font-sans">
@@ -1113,6 +1245,9 @@ export function AgendaPage({
               activeStaff.find((s) => s.userId === draft.staffUserId)
                 ?.displayName ?? null
             }
+            skillsPorStaff={skillsPorStaff}
+            matrizEditable={matrizEditable}
+            onAbrirMatriz={() => setMatriz({ focusServiceId: null })}
             bookError={bookError}
             onPickAlternative={(start) => {
               setDraft({ ...draft, start });
@@ -1139,9 +1274,19 @@ export function AgendaPage({
             appt={detail}
             client={clientLabel(detail.clientId)}
             serviceLabel={serviceNames(detail)}
-            onClose={() => setDetail(null)}
+            staffName={
+              staffDeLaCita(detail) ? nombreDeStaff(staffDeLaCita(detail)!) : null
+            }
+            sinRed={sinRed}
+            moveError={moveError}
+            onClose={() => {
+              setDetail(null);
+              setMoveError(null);
+            }}
             onStatus={(st) => changeStatus(detail.id, st)}
             onCheckout={() => doCheckout(detail.id)}
+            onMove={(start) => void doMove(detail.id, start)}
+            onClearMoveError={() => setMoveError(null)}
           />
         )}
       </div>
@@ -1218,10 +1363,24 @@ export function AgendaPage({
             // salud, que sigue montado debajo. Antes sólo movía el badge
             // y el panel seguía diciendo 2 hasta pulsar «Actualizar».
             void fetchAgendaHealth().catch(() => undefined);
+            // Y la matriz que se acaba de tocar: si la dueña le acaba de
+            // enseñar a Lucía a hacer mechas, el alta tiene que ofrecerlas
+            // sin salir y volver a entrar.
+            void cargarMatriz();
           }}
         />
       )}
     </div>
+  );
+}
+
+// agenda-lista · quién atiende una cita. La asignación de personal es la
+// que importa aquí; una cita puede llevar además recursos (una cabina) y
+// ésos no se nombran en el aviso de que se ha movido.
+function staffDeLaCita(appt: AgendaAppointment | null): string | null {
+  return (
+    appt?.assignments.find((a) => a.reservableType === "STAFF")?.staffUserId ??
+    null
   );
 }
 
@@ -1744,6 +1903,12 @@ function BookingPanel(props: {
   // hay huecos" deje de ser una sola frase para tres causas distintas.
   dayInfo: AgendaDayInfo | undefined;
   staffName: string | null;
+  // agenda-lista (hallazgo 🟡 4) · quién sabe hacer qué. `null` mientras
+  // no se sabe: entonces no se filtra nada.
+  skillsPorStaff: Map<string, Set<string>> | null;
+  /** Si esta sesión puede tocar la matriz (OWNER/MANAGER) o sólo mirarla. */
+  matrizEditable: boolean;
+  onAbrirMatriz: () => void;
   // El 409 del servidor con su frase y sus alternativas.
   bookError: { message: string; alternatives: AvailabilitySlot[] } | null;
   onPickAlternative: (start: string) => void;
@@ -1766,8 +1931,28 @@ function BookingPanel(props: {
     if (bookError) errorRef.current?.scrollIntoView?.({ block: "center" });
   }, [bookError]);
 
-  const bookableServices = services.filter(
+  // agenda-lista (hallazgo 🟡 4) · dos filtros, no uno.
+  //
+  // El de siempre: es un servicio y tiene duración (sin ficha de agenda no
+  // hay hueco que calcular). Y el nuevo: si la cita se está dando EN LA
+  // COLUMNA de alguien, sólo lo que esa persona hace. Antes se podía
+  // elegir «Mechas» con Lucía, que no las hace, y el «no» llegaba al
+  // pulsar Reservar hablando de huecos — la cajera veía que no había sitio
+  // a ninguna hora del día y no sabía por qué.
+  //
+  // Sin profesional elegida (alta desde «primer hueco libre») se ofrecen
+  // todos y el motor elige a quien sabe: eso no cambia.
+  const conDuracion = services.filter(
     (s) => s.kind === "SERVICE" && (s.durationMin ?? 0) > 0,
+  );
+  const bookableServices = serviciosQueSabeHacer(
+    conDuracion,
+    draft.staffUserId,
+    props.skillsPorStaff,
+  );
+  const noSabeHacerNada = noHaceNingunServicio(
+    draft.staffUserId,
+    props.skillsPorStaff,
   );
   const totalDuration = draft.serviceIds.reduce((sum, id) => {
     const s = services.find((x) => x.id === id);
@@ -1950,11 +2135,43 @@ function BookingPanel(props: {
             {endHHMM && ` · fin ${endHHMM}`}
           </label>
           <div className="mt-1 space-y-1 max-h-52 overflow-y-auto">
-            {bookableServices.length === 0 && (
-              <div className="text-[12px] text-slate-400 py-2">
-                No hay servicios con duración configurada.
-              </div>
-            )}
+            {/* agenda-lista · una lista vacía no es una frase. Tres causas
+                distintas, tres mensajes, porque se arreglan en sitios
+                distintos: el catálogo, la matriz, o nada. */}
+            {bookableServices.length === 0 &&
+              (noSabeHacerNada ? (
+                <div
+                  data-motivo="sin-servicios"
+                  className="py-2 space-y-2"
+                >
+                  <div className="text-[12.5px] leading-snug text-slate-600">
+                    {props.staffName ?? "Esta profesional"} no tiene ningún
+                    servicio asignado todavía.
+                  </div>
+                  {props.matrizEditable ? (
+                    <button
+                      data-accion="abrir-matriz"
+                      onClick={props.onAbrirMatriz}
+                      className="h-10 px-3 rounded-xl border border-slate-300 text-[13px] font-medium text-mipiace-ink hover:bg-slate-50"
+                    >
+                      Asignarle servicios en la matriz
+                    </button>
+                  ) : (
+                    <div className="text-[12px] text-slate-500">
+                      Lo asigna quien lleva el centro, en la matriz de
+                      servicios.
+                    </div>
+                  )}
+                </div>
+              ) : conDuracion.length === 0 ? (
+                <div className="text-[12px] text-slate-400 py-2">
+                  No hay servicios con duración configurada.
+                </div>
+              ) : (
+                <div className="text-[12px] text-slate-400 py-2">
+                  No hay servicios que pueda hacer.
+                </div>
+              ))}
             {bookableServices.map((s) => {
               const active = draft.serviceIds.includes(s.id);
               return (
@@ -2140,9 +2357,15 @@ function DetailPanel(props: {
   appt: AgendaAppointment;
   client: { nombre: string; desconocido: boolean };
   serviceLabel: string;
+  /** Quién la atiende ahora mismo. Se nombra si el motor la cambia. */
+  staffName: string | null;
+  sinRed: boolean;
+  moveError: { message: string; alternatives: AvailabilitySlot[] } | null;
   onClose: () => void;
   onStatus: (s: AppointmentStatus) => void;
   onCheckout: () => void;
+  onMove: (startISO: string) => void;
+  onClearMoveError: () => void;
 }) {
   const { appt } = props;
   const terminal =
@@ -2211,6 +2434,13 @@ function DetailPanel(props: {
           >
             Cobrar en caja
           </button>
+          <MoverCita
+            appt={appt}
+            sinRed={props.sinRed}
+            error={props.moveError}
+            onMove={props.onMove}
+            onClearError={props.onClearMoveError}
+          />
           <div className="grid grid-cols-2 gap-2">
             {appt.status === "PENDING" && (
               <StatusBtn label="Confirmar" onClick={() => props.onStatus("CONFIRMED")} />
@@ -2227,6 +2457,218 @@ function DetailPanel(props: {
             />
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── agenda-lista (hallazgo 🟡 6) · mover la cita ──────────────────────
+//
+// Arrastrar la tarjeta en la rejilla queda FUERA de este bloque a
+// propósito: un detalle claro con dedo de peluquera vale más que un
+// arrastre que falla en el AP12.
+//
+// El control es el MISMO que el alta, no uno nuevo: el `type="date"`
+// nativo para el día (que es el control bueno para una fecha de cita —
+// cae a semanas de hoy, que es justo donde abre el calendario del
+// sistema) y «Buscar hueco» con sus chips de hora. Dos maneras de pedir
+// una hora en la misma pantalla serían dos cosas que aprender.
+function MoverCita(props: {
+  appt: AgendaAppointment;
+  sinRed: boolean;
+  error: { message: string; alternatives: AvailabilitySlot[] } | null;
+  onMove: (startISO: string) => void;
+  onClearError: () => void;
+}) {
+  const { appt, sinRed } = props;
+  const [abierto, setAbierto] = useState(false);
+  const [dia, setDia] = useState(() => centerWallDate(appt.start));
+  const [slots, setSlots] = useState<AvailabilitySlot[]>([]);
+  const [buscando, setBuscando] = useState(false);
+  const [errorBusqueda, setErrorBusqueda] = useState<string | null>(null);
+  const [elegido, setElegido] = useState<string | null>(null);
+
+  // Si la cita se movió de verdad, la hoja arranca otra vez desde donde
+  // está ahora: dejarla con los chips del día viejo invita a mover dos
+  // veces la misma cita.
+  useEffect(() => {
+    setDia(centerWallDate(appt.start));
+    setSlots([]);
+    setElegido(null);
+    setErrorBusqueda(null);
+  }, [appt.id, appt.start]);
+
+  async function buscar() {
+    setBuscando(true);
+    setErrorBusqueda(null);
+    setElegido(null);
+    props.onClearError();
+    try {
+      const res = await searchAvailability({
+        // Los mismos servicios que ya tiene la cita, en su orden. Mover no
+        // es editar: lo que cambia es cuándo, no qué.
+        items: appt.items
+          .slice()
+          .sort((a, b) => a.sortOrder - b.sortOrder)
+          .map((it) => ({ serviceId: it.serviceId })),
+        // `null` porque la API de mover tampoco acepta profesional: pedir
+        // huecos de una sola columna enseñaría unas horas y movería a
+        // otras. Ver el comentario de `doMove`.
+        staffUserId: null,
+        from: dia,
+        to: dia,
+      });
+      setSlots(res);
+      if (res.length === 0) setErrorBusqueda("No hay huecos ese día.");
+    } catch (err) {
+      setErrorBusqueda(
+        err instanceof ApiError ? err.message : "Error buscando huecos.",
+      );
+    } finally {
+      setBuscando(false);
+    }
+  }
+
+  if (!abierto) {
+    return (
+      <div>
+        <button
+          data-accion="mover-cita"
+          onClick={() => setAbierto(true)}
+          disabled={sinRed}
+          className="w-full h-11 rounded-xl border border-slate-300 text-[14px] font-medium text-mipiace-ink hover:bg-slate-50 disabled:opacity-40"
+        >
+          Mover la cita
+        </button>
+        {/* Ningún botón mudo (`docs/ux-principles.md` §6): el motivo en
+            texto, nunca en un `title`. */}
+        {sinRed && (
+          <div
+            data-motivo="mover-cita"
+            className="text-[12px] text-slate-500 mt-1.5"
+          >
+            Hace falta conexión para mover una cita.
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      data-panel="mover-cita"
+      className="rounded-xl border border-slate-200 p-3 space-y-3"
+    >
+      <div className="flex items-center gap-2">
+        <h3 className="text-[13px] font-semibold text-mipiace-ink flex-1">
+          Mover la cita
+        </h3>
+        <button
+          onClick={() => {
+            setAbierto(false);
+            props.onClearError();
+          }}
+          className="text-[12px] text-slate-500"
+        >
+          cancelar
+        </button>
+      </div>
+
+      <div>
+        <label
+          htmlFor="mover-dia"
+          className="text-[12px] font-medium text-slate-500"
+        >
+          Día
+        </label>
+        <input
+          id="mover-dia"
+          type="date"
+          value={dia}
+          min={todayLocalDate()}
+          onChange={(e) => {
+            if (!e.target.value) return;
+            setDia(e.target.value);
+            setSlots([]);
+            setElegido(null);
+            setErrorBusqueda(null);
+            props.onClearError();
+          }}
+          aria-label="Mover al día"
+          className="mt-1 h-11 w-full px-2 rounded-xl bg-mipiace-stone border border-slate-200 text-[13px] font-medium tabular-nums text-mipiace-ink"
+        />
+      </div>
+
+      <div>
+        <button
+          data-accion="buscar-hueco-mover"
+          onClick={() => void buscar()}
+          disabled={buscando}
+          className="w-full h-10 rounded-xl bg-mipiace-ink text-white text-[13px] font-medium disabled:opacity-40"
+        >
+          {buscando ? "Buscando…" : "Buscar hueco"}
+        </button>
+        {errorBusqueda && (
+          <div className="text-[12px] text-slate-500 mt-1.5">{errorBusqueda}</div>
+        )}
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {slots.slice(0, 24).map((sl) => (
+            <button
+              key={sl.start}
+              onClick={() => setElegido(sl.start)}
+              aria-pressed={elegido === sl.start}
+              className={`h-9 px-2.5 rounded-lg text-[12.5px] tabular-nums ${
+                elegido === sl.start
+                  ? "bg-mipiace-ink text-white"
+                  : "bg-mipiace-stone hover:bg-slate-200"
+              }`}
+            >
+              {localHHMM(sl.start)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* El «no» del motor, con las alternativas que él mismo devuelve.
+          Mismo aviso que el alta y en el mismo sitio: pegado a la hora. */}
+      {props.error && (
+        <div
+          data-aviso="mover-cita"
+          className="rounded-xl border border-amber-300 bg-amber-50 p-3"
+        >
+          <div className="text-[13px] leading-snug text-amber-900">
+            {props.error.message}
+          </div>
+          {props.error.alternatives.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {props.error.alternatives.slice(0, 3).map((sl) => (
+                <button
+                  key={sl.start}
+                  onClick={() => {
+                    setDia(centerWallDate(sl.start));
+                    setElegido(sl.start);
+                    props.onClearError();
+                  }}
+                  className="h-11 px-3.5 rounded-xl bg-white border border-amber-300 text-[14px] font-semibold tabular-nums text-amber-900 hover:bg-amber-100"
+                >
+                  {localHHMM(sl.start)}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <button
+        data-accion="confirmar-mover"
+        onClick={() => elegido && props.onMove(elegido)}
+        disabled={!elegido}
+        className="w-full h-11 rounded-xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[14px] font-semibold disabled:opacity-40"
+      >
+        {elegido ? `Mover a las ${localHHMM(elegido)}` : "Mover"}
+      </button>
+      {!elegido && (
+        <div className="text-[12px] text-slate-500">Elige una hora.</div>
       )}
     </div>
   );

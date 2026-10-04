@@ -53,6 +53,11 @@ vi.mock("../src/lib/catalog.js", () => ({
 vi.mock("../src/lib/clients.js", () => ({
   clientFullName: () => "Rosa Marín",
   loadClientsFromCache: async () => [],
+  // agenda-lista · la agenda ya no espera a que alguien abra Clientes:
+  // al abrirse se asegura de tener los nombres. Aquí no se prueba eso
+  // (lo hace `agenda-lista-clientes-cache.test.ts`), así que basta con
+  // que el doble exista y no baje nada.
+  asegurarClientesEnCache: async () => false,
 }));
 vi.mock("../src/hooks/useClientPicker.js", () => ({
   useClientPicker: () => ({ open: () => {}, element: null }),
