@@ -9,6 +9,7 @@ import { requireCashierSession } from "../shift/cashier-session.js";
 import { getPrisma } from "../context.js";
 import { getTenantHealthStatus } from "../tickets/health.js";
 import { CAJA_DISABLED_MESSAGE, ensureCajaEnabled } from "../lib/caja-gate.js";
+import { brutoDesdeNeto } from "../catalog/local-product-rules.js";
 
 export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<void> {
   // Catálogo paginado. El TPV cachea el resultado en IndexedDB la primera
@@ -124,10 +125,13 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
         basePrice: Number(p.basePrice),
         // Precio CON IVA — lo que se muestra en pantalla. El TPV
         // re-calcula al construir el ticket.
-        priceGross:
-          Math.round(
-            Number(p.basePrice) * (1 + Number(p.taxRate) / 100) * 100,
-          ) / 100,
+        //
+        // catalogo-en-alta · la multiplicación estaba escrita aquí a
+        // mano. Ahora sale de `brutoDesdeNeto`, la MISMA función con la
+        // que el panel convierte el precio que se teclea y con la que el
+        // importador convierte la columna `precio_con_iva` del fichero.
+        // Tres sitios, una fórmula.
+        priceGross: brutoDesdeNeto(Number(p.basePrice), Number(p.taxRate)),
         taxRate: Number(p.taxRate),
         kind: p.kind,
         // B-ProductImages: si el worker ya cacheó la imagen, devolvemos
