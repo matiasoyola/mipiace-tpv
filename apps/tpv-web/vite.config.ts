@@ -220,7 +220,12 @@ export default defineConfig({
     port: 5174,
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:3001",
+        // agenda-lista · el destino sale del entorno para que el banco
+        // pueda levantar su propia stack en otros puertos sin pisar la
+        // sesión de otro worktree. Sin la variable, lo de siempre: con
+        // dos APIs vivas, un proxy clavado a :3001 manda la pantalla de
+        // esta sesión contra la base de la otra.
+        target: process.env.MIPIACETPV_API_PROXY ?? "http://127.0.0.1:3001",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ""),
       },
@@ -230,7 +235,11 @@ export default defineConfig({
       // producción, que es exactamente lo que no queremos hacer con un canal
       // que acepta comandos.
       "/ws": {
-        target: "ws://127.0.0.1:3001",
+        // Mismo destino que `/api`, en ws. Si uno se mueve y el otro no,
+        // la pantalla habla con dos APIs distintas a la vez.
+        target: (
+          process.env.MIPIACETPV_API_PROXY ?? "http://127.0.0.1:3001"
+        ).replace(/^http/, "ws"),
         ws: true,
       },
     },

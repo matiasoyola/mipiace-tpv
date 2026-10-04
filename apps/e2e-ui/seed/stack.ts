@@ -16,7 +16,11 @@ import { fileURLToPath } from "node:url";
 import { PrismaClient } from "@mipiacetpv/db";
 
 import { databaseUrl } from "./base-de-datos.js";
-import { sembrar } from "./peluqueria-demo.js";
+import {
+  esBaseDesechable,
+  nombreDeLaBase,
+  sembrar,
+} from "./peluqueria-demo.js";
 
 const RAIZ = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -35,10 +39,6 @@ function sh(cmd: string, args: string[], env?: NodeJS.ProcessEnv): string {
 
 function paso(texto: string): void {
   console.log(`· ${texto}`);
-}
-
-function nombreDeLaBase(url: string): string {
-  return decodeURIComponent(new URL(url).pathname.replace(/^\//, ""));
 }
 
 // Los contenedores se tocan POR NOMBRE, no por `docker compose`.
@@ -150,6 +150,23 @@ function migraciones(url: string): void {
 async function main(): Promise<void> {
   const url = databaseUrl();
   const nombre = nombreDeLaBase(url);
+  // agenda-lista · la misma guarda que el seed, pero ANTES de crear la
+  // base y de aplicarle migraciones. El seed ya se negaría, pero para
+  // entonces este script ya le habría hecho un `migrate deploy` a la base
+  // equivocada — que en la de otra sesión no es inocuo.
+  if (!esBaseDesechable(nombre)) {
+    throw new Error(
+      [
+        `La base "${nombre}" no es desechable: el nombre tiene que TERMINAR en "_e2e".`,
+        "El banco la vacía entera. Con varios worktrees abiertos, un",
+        "DATABASE_URL heredado de otra sesión es un accidente de un segundo.",
+        "",
+        "Si querías el banco de la agenda:",
+        "  DATABASE_URL=postgresql://…/mipiacetpv_agenda_banco_e2e pnpm e2e:agenda",
+        `o deja esa URL en ${"apps/api/.env"}.`,
+      ].join("\n"),
+    );
+  }
   console.log(`Preparando el banco de la agenda (base ${nombre}):`);
   contenedores();
   base(nombre);
