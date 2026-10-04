@@ -66,7 +66,10 @@ export const PUERTOS_PROPIOS = Boolean(
 // API DEL BANCO y no a la de :3001 de otra sesión. Es el otro lado de la
 // misma trampa: mover la API sin mover el proxy deja las pantallas
 // hablando con la stack equivocada.
-const ENV_DE_LAS_PANTALLAS = { MIPIACETPV_API_PROXY: API };
+const envDePantalla = (puerto: string) => ({
+  MIPIACETPV_API_PROXY: API,
+  MIPIACETPV_DEV_PORT: puerto,
+});
 
 export default defineConfig({
   testDir: "./specs",
@@ -127,23 +130,24 @@ export default defineConfig({
       stderr: "pipe",
     },
     {
-      // `--strictPort`: sin esto Vite se desliza al siguiente puerto libre
-      // y el banco se queda esperando en una URL donde no hay nadie.
-      command: `pnpm --filter @mipiacetpv/admin dev -- --port ${PUERTO_ADMIN} --strictPort`,
+      // El puerto va por `MIPIACETPV_DEV_PORT` y no por `--port`: pnpm le
+      // pasa el `--` literal a Vite y el argumento se pierde. Ver el
+      // comentario en `apps/admin/vite.config.ts`.
+      command: "pnpm --filter @mipiacetpv/admin dev",
       cwd: "../..",
       url: ADMIN,
       reuseExistingServer: !PUERTOS_PROPIOS,
-      env: ENV_DE_LAS_PANTALLAS,
+      env: envDePantalla(PUERTO_ADMIN),
       timeout: 120_000,
       stdout: "ignore",
       stderr: "pipe",
     },
     {
-      command: `pnpm --filter @mipiacetpv/tpv-web dev -- --port ${PUERTO_TPV} --strictPort`,
+      command: "pnpm --filter @mipiacetpv/tpv-web dev",
       cwd: "../..",
       url: TPV,
       reuseExistingServer: !PUERTOS_PROPIOS,
-      env: ENV_DE_LAS_PANTALLAS,
+      env: envDePantalla(PUERTO_TPV),
       timeout: 120_000,
       stdout: "ignore",
       stderr: "pipe",

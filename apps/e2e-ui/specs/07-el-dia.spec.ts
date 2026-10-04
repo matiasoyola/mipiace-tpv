@@ -43,6 +43,9 @@ const SEMANA = semanaDelVideo();
 const CORTE_DE_PILI = "09:30";
 /** La de Sonia: la que no viene. */
 const CORTE_DE_SONIA = "11:30";
+/** Las mechas de Mari Carmen (capítulo 6). Las mueve —y las devuelve— el
+ *  test de mover: sólo las hace Marta, así que no cambia de columna. */
+const MECHAS_DE_CARMEN = "12:30";
 
 async function abrirAgenda(page: import("@playwright/test").Page) {
   await entrarTpv(page, MARTA.email);
@@ -171,7 +174,7 @@ test.describe("en el mostrador", () => {
     );
   });
 
-  test("mover una cita: a un hueco libre, y conserva su id", async ({
+  test("mover una cita: a otra hora, y de vuelta, con el mismo id", async ({
     page,
   }) => {
     // agenda-lista (hallazgo 🟡 6) · ESTE TEST DECÍA QUE NO SE PODÍA.
@@ -179,26 +182,38 @@ test.describe("en el mostrador", () => {
     // La API lo soportaba desde B-reservas (`PATCH` con `start`) y el
     // cliente del TPV también (`patchAppointment`), pero la pantalla sólo
     // mandaba `status`. En una peluquería las clientas cambian de hora
-    // todos los días y el único camino era cancelar y volver a dar la
-    // cita — que PIERDE el histórico de la original. Por eso lo que aquí
-    // se comprueba, además de la hora, es que el id es el mismo.
+    // todos los días y el único camino era cancelar y volver a darla —
+    // que PIERDE el histórico de la cita original. Por eso lo que aquí se
+    // comprueba, además de la hora, es que el id NO cambia.
     //
     // Arrastrar la tarjeta sigue sin existir, y es una decisión: un
     // detalle claro con dedo de peluquera vale más que un arrastre que
     // falla en el AP12.
+    //
+    // SE MUEVE LAS MECHAS DE CARMEN (12:30), y se devuelven a su sitio al
+    // final. Dos razones, y las dos costaron una pasada:
+    //
+    //   · **el estado se arrastra entre capítulos.** El 8 cobra las citas
+    //     de Rosa de las 09:00 y las 10:15. La primera versión de este
+    //     test movía la de las 09:00 y dejaba el 8 y el 9 en rojo
+    //     («Expected: 40 · Received: 10» en el arqueo) por un cambio que
+    //     no tenía nada que ver con cobrar.
+    //   · **las mechas sólo las hace Marta** (la matriz del capítulo 3).
+    //     Mover reprograma con `staffUserId: null` —el motor elige a
+    //     quien sabe—, así que con cualquier otro servicio la cita podría
+    //     caer en otra columna y el test diría cosas distintas según el
+    //     día. Con las mechas no hay más candidata que Marta.
     await abrirAgenda(page);
 
-    const laDeLasNueve = (await citas()).find(
-      (c) => c.status !== "CANCELLED" && c.status !== "NO_SHOW",
-    );
-    const idAntes = (await tarjetaDeLaCita(page, MARTA.id, "09:00")
-      .first()
-      .getAttribute("data-cita")) as string;
-    expect(idAntes).toBeTruthy();
-    expect(laDeLasNueve).toBeDefined();
+    const tarjeta = tarjetaDeLaCita(page, MARTA.id, MECHAS_DE_CARMEN).first();
+    await expect(tarjeta).toBeVisible({ timeout: 20_000 });
+    const id = (await tarjeta.getAttribute("data-cita")) as string;
+    expect(id).toBeTruthy();
+    const antes = (await citas()).find((c) => c.id === id);
+    expect(antes).toBeDefined();
 
-    await tarjetaDeLaCita(page, MARTA.id, "09:00").first().click();
-    await rotulo(page, "Rosa no puede a las nueve: se mueve la cita.", CAP);
+    await tarjeta.click();
+    await rotulo(page, "Carmen no puede a las doce y media.", CAP);
     await esconder(page);
 
     await page.locator('[data-accion="mover-cita"]').click();
@@ -208,37 +223,58 @@ test.describe("en el mostrador", () => {
     await expect(hoja.locator("#mover-dia")).toHaveValue(SEMANA.diaNormal);
     await hoja.locator('[data-accion="buscar-hueco-mover"]').click();
 
-    // El último hueco del día: el más lejos de donde está ahora, para que
-    // «se ha movido» no se pueda confundir con «no se ha movido».
+    // El último hueco del día: el más lejos de donde está, para que «se ha
+    // movido» no se pueda confundir con «no se ha movido».
     const chips = hoja.locator("button[aria-pressed]");
     await expect(chips.first()).toBeVisible({ timeout: 20_000 });
-    const chip = chips.last();
-    const horaNueva = ((await chip.textContent()) ?? "").trim();
+    const horaNueva = ((await chips.last().textContent()) ?? "").trim();
     expect(horaNueva).toMatch(/^\d{2}:\d{2}$/);
-    await chip.click();
+    expect(horaNueva).not.toBe(MECHAS_DE_CARMEN);
+    await chips.last().click();
 
-    await expect(
-      hoja.locator('[data-accion="confirmar-mover"]'),
-    ).toHaveText(`Mover a las ${horaNueva}`);
+    await expect(hoja.locator('[data-accion="confirmar-mover"]')).toHaveText(
+      `Mover a las ${horaNueva}`,
+    );
     await hoja.locator('[data-accion="confirmar-mover"]').click();
 
-    // En pantalla: la tarjeta está en su hora nueva y ya no en las 09:00.
-    // Sin fijar la columna a propósito — ver el comentario de `doMove`: el
-    // motor reprograma con `staffUserId: null`, así que la cita PUEDE
-    // cambiar de profesional, y cuando lo hace el aviso lo dice.
+    // En pantalla: la MISMA tarjeta, en su hora nueva, y ya no a las 12:30.
     await expect(
-      page.locator(`[data-cita="${idAntes}"]`).filter({ hasText: horaNueva }),
+      page.locator(`[data-cita="${id}"]`).filter({ hasText: horaNueva }),
     ).toBeVisible({ timeout: 20_000 });
-    await expect(tarjetaDeLaCita(page, MARTA.id, "09:00")).toHaveCount(0);
+    await expect(
+      tarjetaDeLaCita(page, MARTA.id, MECHAS_DE_CARMEN),
+    ).toHaveCount(0);
     await rotulo(page, `Movida a las ${horaNueva}.`, CAP);
     await esconder(page);
 
-    // En la BD: LA MISMA FILA, con otra hora. Ni una cita cancelada y otra
-    // nueva: el histórico de la cita original se conserva.
-    const despues = (await citas()).find((c) => c.id === idAntes);
+    // En la BD: LA MISMA FILA con otra hora. Ni una cancelada y otra nueva.
+    const despues = (await citas()).find((c) => c.id === id);
     expect(despues).toBeDefined();
-    expect(despues!.status).toBe(laDeLasNueve!.status);
+    expect(despues!.status).toBe(antes!.status);
     expect(hhmmEnMadrid(despues!.inicio)).toBe(horaNueva);
+
+    // La hoja se pliega sola al acabar: el trámite está hecho y lo que
+    // tiene que verse es el detalle con su hora nueva. Dejarla abierta con
+    // los chips del día viejo pide a gritos mover dos veces la misma cita
+    // (lo destapó este mismo test, en la primera pasada).
+    await expect(hoja).toHaveCount(0);
+
+    // Y de vuelta a su sitio, que es lo que pasa cuando la clienta vuelve
+    // a llamar. Deja el día como estaba para los capítulos 8 y 9.
+    await page.locator(`[data-cita="${id}"]`).first().click();
+    await page.locator('[data-accion="mover-cita"]').click();
+    await hoja.locator('[data-accion="buscar-hueco-mover"]').click();
+    await hoja
+      .getByRole("button", { name: MECHAS_DE_CARMEN, exact: true })
+      .click();
+    await hoja.locator('[data-accion="confirmar-mover"]').click();
+
+    await expect(
+      tarjetaDeLaCita(page, MARTA.id, MECHAS_DE_CARMEN),
+    ).toHaveCount(1, { timeout: 20_000 });
+    const devuelta = (await citas()).find((c) => c.id === id);
+    expect(hhmmEnMadrid(devuelta!.inicio)).toBe(MECHAS_DE_CARMEN);
+    expect(devuelta!.fin.getTime()).toBe(antes!.fin.getTime());
   });
 
   test("mover a un día cerrado: el motivo con su nombre, y la BD no se mueve", async ({

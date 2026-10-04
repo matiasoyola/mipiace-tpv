@@ -38,7 +38,16 @@ function versionJsonPlugin(): Plugin {
 export default defineConfig({
   plugins: [react(), versionJsonPlugin()],
   server: {
-    port: 5173,
+    // agenda-lista · el puerto sale del entorno cuando se pide. `pnpm
+    // --filter X dev -- --port N` NO vale: pnpm le pasa el `--` literal a
+    // Vite, que lo trata como argumento y se queda con el puerto del
+    // fichero (se vio: «Port 5173 is in use, trying another one…» y el
+    // banco esperando en una URL vacía). Por env no hay ambigüedad.
+    port: Number(process.env.MIPIACETPV_DEV_PORT ?? 5173),
+    // Y si el puerto pedido está cogido, se cae en vez de deslizarse al
+    // siguiente: un servidor en otro puerto es un banco que espera a
+    // nadie, o peor, que habla con el de otra sesión.
+    strictPort: process.env.MIPIACETPV_DEV_PORT != null,
     proxy: {
       "/api": {
         // agenda-lista · el destino sale del entorno para que el banco

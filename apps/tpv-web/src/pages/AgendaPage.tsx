@@ -2488,10 +2488,15 @@ function MoverCita(props: {
   const [errorBusqueda, setErrorBusqueda] = useState<string | null>(null);
   const [elegido, setElegido] = useState<string | null>(null);
 
-  // Si la cita se movió de verdad, la hoja arranca otra vez desde donde
-  // está ahora: dejarla con los chips del día viejo invita a mover dos
-  // veces la misma cita.
+  // Si la cita se movió de verdad, la hoja se pliega y arranca otra vez
+  // desde donde está ahora.
+  //
+  // Lo de plegarla no es cosmético, lo destapó el banco: el trámite está
+  // hecho, y dejar la hoja abierta con los chips del día viejo pide a
+  // gritos mover dos veces la misma cita. Lo que tiene que verse al
+  // acabar es el detalle con su hora nueva.
   useEffect(() => {
+    setAbierto(false);
     setDia(centerWallDate(appt.start));
     setSlots([]);
     setElegido(null);
