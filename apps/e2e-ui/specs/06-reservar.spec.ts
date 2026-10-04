@@ -82,6 +82,8 @@ const CORTE_EN_LA_PAUSA = masMinutos(TINTE_APLICA, 30);
 const TINTE_LAVA = masMinutos(TINTE_APLICA, 30 + PAUSA_EXPOSICION_MIN);
 const CORTE_SONIA = "11:30";
 const MECHAS_CARMEN = "12:30";
+/** Un corte por la tarde en la columna de Lucía: Irene ya se ha ido. */
+const CORTE_DE_LUCIA = "16:00";
 
 test.use(AP11);
 
@@ -197,6 +199,40 @@ test("una clienta que ya está, buscada por su nombre", async ({ page }) => {
   expect((await citas()).some((c) => c.clientId === carmen.id)).toBe(true);
 });
 
+test("la cita cae en la columna que se ha tocado", async ({ page }) => {
+  await agendaDelDia(page);
+
+  // Esto es la promesa de la rejilla: tocar la columna de Lucía reserva CON
+  // LUCÍA, no «con quien pueda». Lo hace `openSlotFirst` fijando
+  // `staffUserId`, y el motor filtra los candidatos por él
+  // (`engine.ts:206-208`).
+  //
+  // Tiene test propio porque sin él NO ESTABA CUBIERTO: al sabotear ese
+  // filtro, el banco entero seguía en verde. El corte lo saben las tres y a
+  // esta hora Irene ya se ha ido, así que sin el filtro el motor elegiría a
+  // Marta — que es lo que pone rojo este test.
+  await rotulo(page, "Se toca la columna de Lucía: la cita es de Lucía.", CAP);
+  await esconder(page);
+
+  await pulsarFranja(page, LUCIA.id, CORTE_DE_LUCIA);
+  await elegirClienta(page, "Pili");
+  await elegirServicio(page, "Corte");
+  await reservar(page);
+
+  const asg = await asignaciones();
+  const aEsaHora = asg.filter(
+    (a) =>
+      a.active &&
+      a.inicio.toLocaleTimeString("es-ES", {
+        timeZone: "Europe/Madrid",
+        hour: "2-digit",
+        minute: "2-digit",
+      }) === CORTE_DE_LUCIA,
+  );
+  expect(aEsaHora).toHaveLength(1);
+  expect(aEsaHora[0]!.staffUserId).toBe(LUCIA.id);
+});
+
 test("el no del solape: la cita se alargaría sobre otra", async ({ page }) => {
   await agendaDelDia(page);
 
@@ -252,7 +288,9 @@ test("el no de quien no sabe: Lucía y las mechas", async ({ page }) => {
 
   await rotulo(page, "Mechas, pero en la columna de Lucía.", CAP);
   await esconder(page);
-  await pulsarFranja(page, LUCIA.id, "16:00");
+  // A las 17:00 y no a las 16:00: a esa hora Lucía ya tiene el corte de
+  // Pili del caso anterior, y una franja ocupada ni abre el alta.
+  await pulsarFranja(page, LUCIA.id, "17:00");
   await elegirClienta(page, "Mari Carmen");
 
   // EL SERVICIO SE OFRECE IGUAL. `bookableServices` sólo filtra por «es
