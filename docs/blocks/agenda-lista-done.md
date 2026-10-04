@@ -68,15 +68,12 @@ una hora en la misma pantalla serían dos cosas que aprender.
 
 Cuatro cosas que hay que tener escritas:
 
-- **El motor puede cambiar de profesional, y no se toca.** `reschedule` busca
-  el hueco con `staffUserId: null` (`engine.ts:775` y `:792`), así que la cita
-  movida puede caer en otra columna. El motor está fuera de alcance en este
-  bloque, así que lo que se hace es **decirlo**: si cambia, el aviso la nombra
-  («Cita movida al … · ahora con Lucía»). Callarlo sería peor que el fallo.
-- **El profesional NO se puede elegir al mover.** La API no lo acepta: el
-  cuerpo del PATCH es `{ status?, start? }` y nada más
-  (`apps/api/src/agenda/routes.ts:400-416`). No se ha inventado un selector que
-  no tendría dónde ir.
+- **Conserva la profesional.** La clienta cambia de HORA, no de peluquera. Ver
+  §2b: es lo único de este bloque que toca el motor, y por qué no había otra.
+- **El profesional NO se puede elegir al mover.** El cuerpo del PATCH sigue
+  siendo `{ status?, start? }` y nada más. Cambiar de profesional al mover **va
+  a la cola**, es otro bloque. No se ha inventado un selector que no tendría
+  dónde ir.
 - **Si falla no pasa nada.** `start` y `status` son ramas distintas del PATCH:
   un movimiento rechazado no mueve la cita ni le cambia el estado. El motivo y
   las alternativas son las que ya devuelve el motor, las mismas del alta y en
@@ -96,9 +93,61 @@ claro con dedo de peluquera vale más que un arrastre que falla en el AP12.
 
 **El spec.** `07 · mover una cita no se puede desde la agenda` se convierte en
 `mover una cita: a otra hora, y de vuelta, con el mismo id`. Comprueba la
-pantalla, la BD y —lo que de verdad importa— que **el id no cambia**. Y un
-segundo test para el «no»: mover a un día cerrado da el motivo con su nombre y
-la BD no se mueve.
+pantalla, la BD, que **el id no cambia** y que **la asignación sigue siendo de
+Marta**. Más dos tests: que las horas que ofrece la hoja son las de SU
+profesional, y que mover a un día cerrado da el motivo con su nombre sin tocar
+la BD.
+
+---
+
+## 2b · Mover conserva la profesional
+
+**Decisión de Dirección del 04-10, después de leer la primera versión de este
+done.** Hasta aquí `reschedule` buscaba el hueco con `staffUserId: null`, así
+que mover podía cambiar la cita de columna sin que nadie lo pidiera. En una
+peluquería eso es otra cosa: la clienta cambia de hora, no de peluquera.
+
+### El motor SE TOCA, y hay que decirlo
+
+La regla del bloque era «`engine.ts` no se toca». Se toca, y es lo único:
+`reschedule` gana un **cuarto parámetro opcional**, `staffUserId`.
+
+No había otra forma. La firma no admitía profesional, y el fijado vive en dos
+sitios dentro del motor (`AvailabilityParams.staffUserId` y el `fixed` de
+`planForStart`): desde la ruta no se puede alcanzar ninguno. Lo que **no** se
+hizo fue tocar esa lógica — el parámetro alimenta el mecanismo que ya usaba el
+alta slot-first, y **omitirlo deja el comportamiento anterior intacto**. Es
+aditivo de verdad: ningún otro llamante cambia.
+
+Se descartó resolverlo sólo en la ruta (comprobar disponibilidad con ella antes
+de llamar) porque no garantiza nada: aunque esté libre, el `planForStart` sin
+fijar puede elegir a otra, y una invariante que «casi siempre» se cumple no es
+una invariante.
+
+### Dónde vive la decisión
+
+**En la ruta, no en el motor.** El PATCH lee la asignación `STAFF` de la cita y
+la pasa; el motor se limita a obedecer a quien le fijen, igual que en el alta.
+El cuerpo sigue sin aceptar `staffUserId`.
+
+### Y las alternativas son SUYAS
+
+La fijada viaja también a `computeSlots`, así que un «no» por ocupación ofrece
+**las horas de ella**. Es lo que la cajera dice por teléfono: «con Marta no
+puede ser, pero a las cinco sí».
+
+La hoja del TPV busca huecos con su profesional por el mismo motivo: con `null`
+enseñaría horas en las que está libre otra, y el «no» llegaría sobre una hora
+que la pantalla acababa de ofrecer.
+
+### Qué lo prueba
+
+| Dónde | Qué |
+|---|---|
+| `agenda-suelo.e2e.ts` · 17 | mover no cambia de profesional: mismo id, misma asignación, y la otra profesional no gana ninguna |
+| `agenda-suelo.e2e.ts` · 18 | si ELLA no cabe → `409 NO_SLOT`, alternativas suyas (ninguna es la hora ocupada) y la cita se queda donde estaba |
+| `07 · mover una cita…` | la asignación activa en BD sigue siendo de Marta después de mover |
+| `07 · los huecos que ofrece mover son los de SU profesional` | a las 12:30 Marta tiene las mechas y Lucía está libre y sabe teñir: esa hora **no** se ofrece |
 
 ### Lo que el banco NO puede probar de esto, dicho con precisión
 
@@ -115,8 +164,9 @@ se queda donde estaba— **sí está cubierto, en la API**:
 **Y una consecuencia del motor que conviene saber**: `reschedule` carga la
 ocupación del día **sin excluir la propia cita que mueve**, así que los chips
 nunca ofrecen una hora que solape con donde está ahora. Mover una cita de 30
-minutos de las 12:30 a las 12:45 no se puede. No se arregla aquí (es motor);
-queda apuntado.
+minutos de las 12:30 a las 12:45 no se puede. Eso sí se ha dejado como estaba:
+el parámetro del §2b no lo toca, y arreglarlo es cambiar la lógica del motor,
+no añadirle un argumento.
 
 ---
 
@@ -272,10 +322,21 @@ timeouts de 120 s) y se devuelve la línea a su sitio. Comprobados el
 | 4 | **«Ajustes» vuelve a ser `superAdminOnly`** | `AdminShell.tsx:240` | `01 · el interruptor «Agenda de citas»` | `expect(locator).toBeVisible() failed · element(s) not found` sobre `getByRole('link', { name: 'Ajustes' })` |
 | 5 | **Guardar no refresca las capacidades** | `SettingsPage.tsx` · sin `refrescarCapacidades()` | `01 · el interruptor «Agenda de citas»` | `expect(locator).toBeVisible() failed` sobre `getByRole('link', { name: 'Personal' })` |
 | 6 | **La foto de salud no se actualiza** | `lib/agenda-health.ts` · `writeHealthSnapshot` sin `ultima = snapshot` | `05 · Marta ve el aviso, pero la matriz le sale en modo mirar` | `expect(locator).toHaveText(expected) failed · Expected: "2" · element(s) not found` sobre `[data-test="badge-salud"]` |
+| 7a | **La hoja de mover ofrece huecos de cualquiera** | `AgendaPage.tsx` · `searchAvailability({ staffUserId: null })` | `07 · los huecos que ofrece mover son los de SU profesional` | `expect(received).not.toContain(expected) // indexOf` (las 12:30 aparecen en la lista) |
+| 7b | **El PATCH deja de fijar la profesional** | `agenda/routes.ts` · `reschedule(…, null)` | **el banco se queda VERDE** · rojo en `agenda-suelo.e2e.ts · 18 · si ELLA no cabe` | `expected 200 to be 409` |
 
 Los sabotajes 4 y 5 ponen rojo **el mismo spec** por razones distintas, y eso
 está bien: el capítulo 1 es el camino entero de encender la agenda. El 4 no
 deja llegar a Ajustes; el 5 deja llegar y guardar, pero el menú no cambia.
+
+**El 7b deja el banco entero en verde, y la razón importa.** El fijado está en
+dos capas que van siempre juntas: la pantalla pide los huecos de ella y la
+ruta mueve fijando a ella. Desde la interfaz las dos son indistinguibles
+mientras coincidan — romper sólo la de abajo no cambia nada de lo que se ve,
+porque la de arriba sigue sin ofrecer una hora en la que ella no quepa. Lo que
+sí lo caza es la API, donde se puede pedir directamente una hora que la
+pantalla nunca ofrecería: `agenda-suelo.e2e.ts · 18`. Decir que el banco cubre
+el fijado del servidor sería mentir.
 
 Los cuatro primeros tienen además su gemelo sin navegador, y los tres hallazgos
 que se prueban en unitario también:
@@ -286,6 +347,11 @@ que se prueban en unitario también:
 | `writeHealthSnapshot` sin avisar a los oyentes | `agenda-lista-salud-refresco` → `al volver de la matriz…` | `expected '2' to be '0'` |
 
 ### Lo que los sabotajes enseñaron
+
+**Dos sabotajes de siete dejan el banco entero en verde** (el 6 en su primera
+versión y el 7b), y en los dos casos por lo mismo: una comprobación de la
+interfaz no alcanza a una capa que otra capa ya tapa. Conviene tenerlo escrito
+en vez de descubrirlo el día que alguien borre la línea.
 
 **Quitar el aviso a los oyentes de la foto de salud deja el banco ENTERO en
 verde.** Es el mismo tipo de hallazgo que la promesa de la columna en el banco
@@ -340,7 +406,9 @@ Y lo que no se ha podido hacer en esta sesión:
 
 ## 7 · La APK
 
-**`mipiacetpv-1.20.0-12000.apk`**, construida con el procedimiento de siempre,
+**`mipiacetpv-1.20.0-12000.apk`** (construida antes del §2b: hay que
+**rehacerla** con el fijado dentro antes de llevarla al AP12 — mismo comando,
+misma versión), construida con el procedimiento de siempre,
 sin variarlo:
 
 ```bash
@@ -388,8 +456,8 @@ laboratorio. Se deja apuntado para que nadie lo lea como el incidente del
 
 ## 8 · Cómo se cierra
 
-- [x] **`pnpm e2e:agenda` entero en verde dos veces seguidas** — 27 tests,
-      ~2,1 min por pasada, en puertos propios (§9) y contra
+- [x] **`pnpm e2e:agenda` entero en verde dos veces seguidas** — 28 tests,
+      ~2,0 min por pasada, en puertos propios (§9) y contra
       `mipiacetpv_agenda_banco_e2e`.
 - [x] **La suite normal, verde** — 269 ficheros, 2 931 tests, 3 saltados.
 - [x] **Lo que corre el job `ci`**, replicado en local: typecheck de la API, de
@@ -399,7 +467,8 @@ laboratorio. Se deja apuntado para que nadie lo lea como el incidente del
       manifest nuevo**, así que no hace falta ningún `COPY` nuevo en
       `infra/Dockerfile`.
 - [x] **El job `e2e`** — `E2E_DATABASE_URL=…/mipiacetpv_agenda_lista_e2e pnpm
-      test:e2e`: 21 ficheros, 331 tests verdes. Base **propia de esta sesión**:
+      test:e2e`: 21 ficheros, 333 tests verdes (los dos nuevos del fijado al
+      mover, §2b). Base **propia de esta sesión**:
       la suite hace `DROP SCHEMA public`.
 - [x] **Tests unitarios de lo que se puede probar sin navegador**: la decisión
       de refrescar la caché de clientes y el rellenado
