@@ -170,3 +170,59 @@ export async function clientas() {
     orderBy: { createdAt: "asc" },
   });
 }
+
+export interface TicketEnBd {
+  id: string;
+  total: string;
+  status: string;
+  /** El efectivo que puso la clienta: con esto y el total sale la vuelta. */
+  efectivoEntregado: string | null;
+  /** El turno en el que entró la venta: el del INSTANTE del cobro. */
+  turnoId: string;
+  pagos: Array<{ method: string; amount: string; turnoId: string | null }>;
+}
+
+/** Los tickets del tenant con sus pagos, en orden de creación. */
+export async function tickets(): Promise<TicketEnBd[]> {
+  const filas = await bd().ticket.findMany({
+    where: { tenantId: TENANT },
+    select: {
+      id: true,
+      total: true,
+      status: true,
+      cashAmount: true,
+      shiftId: true,
+      payments: {
+        select: { method: true, amount: true, collectedInShiftId: true },
+      },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+  return filas.map((t) => ({
+    id: t.id,
+    total: t.total.toString(),
+    status: String(t.status),
+    efectivoEntregado: t.cashAmount?.toString() ?? null,
+    turnoId: t.shiftId,
+    pagos: t.payments.map((p) => ({
+      method: String(p.method),
+      amount: p.amount.toString(),
+      turnoId: p.collectedInShiftId,
+    })),
+  }));
+}
+
+/** El turno abierto (o el último), con lo que hace falta para el arqueo. */
+export async function turnoActual() {
+  return bd().shift.findFirst({
+    where: { register: { store: { tenantId: TENANT } } },
+    select: {
+      id: true,
+      openedAt: true,
+      closedAt: true,
+      cashOpening: true,
+      cashCounted: true,
+    },
+    orderBy: { openedAt: "desc" },
+  });
+}

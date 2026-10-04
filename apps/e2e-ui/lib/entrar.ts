@@ -93,3 +93,25 @@ export async function turnoAbierto(page: Page, fondoEuros = 100): Promise<void> 
     await abrir.click();
   }
 }
+
+/**
+ * Pasa por la pantalla Clientes para que la agenda sepa los nombres.
+ *
+ * NO es un adorno del banco: en un dispositivo recién emparejado la rejilla
+ * de la agenda enseña «Sin nombre» en TODAS las citas, porque el nombre de la
+ * clienta sale de la caché local (`loadClientsFromCache`) y esa caché la
+ * llena la pantalla Clientes, no la agenda. Medido: antes de pasar por
+ * Clientes, «09:00 · Sin nombre»; después, «09:00 · Rosa». Va como hallazgo,
+ * y el capítulo 7 lo deja comprobado.
+ *
+ * Los capítulos que necesitan ver el nombre en pantalla llaman a esto antes,
+ * igual que tendría que hacer la cajera el primer día.
+ */
+export async function cebarNombresDeClientas(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "Clientes" }).click();
+  // La lista llega por red; basta con que aparezca una de las sembradas.
+  await expect(page.getByText("Carmen Ruiz").first()).toBeVisible({
+    timeout: 30_000,
+  });
+  await page.getByRole("button", { name: "Volver" }).first().click();
+}

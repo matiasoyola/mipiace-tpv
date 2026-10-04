@@ -17,7 +17,11 @@
 import { expect, test } from "@playwright/test";
 
 import { asignaciones, cerrarBd, citas } from "../lib/bd.js";
-import { entrarTpv, turnoAbierto } from "../lib/entrar.js";
+import {
+  cebarNombresDeClientas,
+  entrarTpv,
+  turnoAbierto,
+} from "../lib/entrar.js";
 import {
   elegirClienta,
   elegirServicio,
@@ -205,5 +209,50 @@ test.describe("en el móvil de una profesional", () => {
     await expect(
       page.locator(`[data-columna="${MARTA.id}"] [data-cita]`).first(),
     ).toBeVisible();
+  });
+});
+
+test.describe("el nombre de la clienta en un dispositivo nuevo", () => {
+  test.use(AP11);
+
+  test("la rejilla dice «Sin nombre» hasta que alguien abre Clientes", async ({
+    page,
+  }) => {
+    // EL HALLAZGO, comprobado. El nombre que pinta cada tarjeta sale de la
+    // caché local de clientes (`loadClientsFromCache`), y esa caché la llena
+    // la pantalla Clientes — la agenda no la pide nunca. En un dispositivo
+    // recién emparejado, que es exactamente el de la visita a Sole, la agenda
+    // abre con TODAS las citas diciendo «Sin nombre»: la recepción no sabe de
+    // quién es la cita de las diez.
+    //
+    // Se arregla con un toque (abrir Clientes una vez), y por eso no es
+    // 🔴 — pero es lo primero que se va a ver el primer día.
+    await entrarTpv(page, MARTA.email);
+    await turnoAbierto(page);
+    await page.getByRole("button", { name: "Agenda" }).click();
+    await irAlDia(page, SEMANA.diaNormal);
+
+    const tarjetas = page.locator(`[data-columna="${MARTA.id}"] [data-cita]`);
+    await expect(tarjetas.first()).toBeVisible({ timeout: 30_000 });
+    await expect(tarjetas.filter({ hasText: "Sin nombre" })).not.toHaveCount(0);
+    await expect(tarjetas.filter({ hasText: "Rosa" })).toHaveCount(0);
+
+    // Y después de pasar por Clientes, los nombres aparecen.
+    await page.getByRole("button", { name: "Volver" }).first().click();
+    await cebarNombresDeClientas(page);
+    await page.getByRole("button", { name: "Agenda" }).click();
+    await irAlDia(page, SEMANA.diaNormal);
+    await expect(
+      page.locator(`[data-columna="${MARTA.id}"] [data-cita]`).filter({
+        hasText: "Rosa",
+      }).first(),
+    ).toBeVisible({ timeout: 30_000 });
+    await rotulo(
+      page,
+      "El nombre de la clienta sale de la caché del TPV: hay que abrir " +
+        "Clientes una vez.",
+      CAP,
+    );
+    await esconder(page);
   });
 });
