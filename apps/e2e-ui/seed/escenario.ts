@@ -156,12 +156,17 @@ export const TINTE_SKUS = ["SVC-TINTE-APLICA", "SVC-TINTE-LAVA"] as const;
 /**
  * Los minutos de exposición entre la aplicación y el lavado.
  *
- * 40 y no 30: con 30 el hueco mide exactamente lo que un corte, y una cita
+ * 45 y no 30: con 30 el hueco mide exactamente lo que un corte, y una cita
  * que encaja al milímetro no prueba que el motor sepa meterla — prueba que
- * los números cuadran. Con 40 el corte entra y SOBRAN 10 minutos, que es lo
+ * los números cuadran. Con 45 el corte entra y SOBRAN 15 minutos, que es lo
  * que pasa en un mostrador de verdad.
+ *
+ * Y 45 en vez de 40 porque la retícula del centro es de 15 minutos
+ * (`agendaSlotMinutes`) y `openSlotFirst` redondea HACIA ABAJO: tocar las
+ * 10:10 abre un alta a las 10:00, no a las 10:10. Una hora que no cae en la
+ * retícula no se puede ni teclear — 45 sí cae (09:30 + 45 = 10:15).
  */
-export const PAUSA_EXPOSICION_MIN = 40;
+export const PAUSA_EXPOSICION_MIN = 45;
 
 export interface Clienta {
   firstName: string;

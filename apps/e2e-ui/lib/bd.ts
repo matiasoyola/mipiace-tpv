@@ -5,6 +5,10 @@
 // que es la mitad que de verdad protege a Sole: un rechazo que deja rastro en
 // la BD es peor que no rechazar nada.
 //
+// `$1::uuid` y no `$1` a secas: el parámetro llega como texto y Postgres no
+// tiene `uuid = text` — la consulta muere con 42883 «operator does not
+// exist». Prisma no infiere el tipo en una consulta cruda.
+//
 // Las columnas `tstzrange` (`appointments.timeslot`,
 // `appointment_assignments.slot`) Prisma no las lee: van por SQL crudo con
 // `lower()`/`upper()`, igual que hace `apps/api/src/agenda/store.ts`.
@@ -64,7 +68,7 @@ export async function citas(): Promise<CitaEnBd[]> {
             ticket_id AS "ticketId",
             lower(timeslot) AS inicio, upper(timeslot) AS fin
        FROM appointments
-      WHERE tenant_id = $1
+      WHERE tenant_id = $1::uuid
       ORDER BY lower(timeslot), created_at`,
     TENANT,
   );
@@ -89,7 +93,7 @@ export async function asignaciones(): Promise<AsignacionEnBd[]> {
     `SELECT appointment_id AS "appointmentId", staff_user_id AS "staffUserId",
             active, lower(slot) AS inicio, upper(slot) AS fin
        FROM appointment_assignments
-      WHERE tenant_id = $1
+      WHERE tenant_id = $1::uuid
       ORDER BY lower(slot)`,
     TENANT,
   );
