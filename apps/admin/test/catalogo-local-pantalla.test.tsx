@@ -28,6 +28,9 @@ interface FakeProduct {
   sku: string | null;
   barcode: string | null;
   basePrice: number;
+  // catalogo-en-alta · el precio CON IVA que calcula el servidor. Es el
+  // que la pantalla pinta y el que se teclea.
+  priceGross: number;
   taxRate: number;
   kind: "PRODUCT" | "SERVICE";
   active: boolean;
@@ -101,6 +104,9 @@ function product(p: Partial<FakeProduct> & { name: string }): FakeProduct {
     sku: "SKU-1",
     barcode: null,
     basePrice: 12.5,
+    // 12,50 netos al 21 % son 15,13 con IVA. Lo calcula el servidor; aquí
+    // se escribe el número porque el fake ES el servidor.
+    priceGross: 15.13,
     taxRate: 21,
     kind: "PRODUCT",
     active: true,
@@ -365,6 +371,33 @@ describe("catalogo-local · el formulario", () => {
     expect(posted).toHaveLength(0);
   });
 
+  it("editar y guardar sin tocar el precio lo deja igual (ida y vuelta)", async () => {
+    // catalogo-en-alta · condición de Matías: el formulario enseña el
+    // precio CON IVA y lo convierte al guardar. Un producto que se abre y
+    // se guarda sin tocar el campo tiene que salir con el mismo precio
+    // que tenía — si la pantalla abriera con el neto (12,50) y mandara
+    // eso como bruto, cada edición le bajaría el precio al comercio un
+    // 21 % acumulativo.
+    items = [product({ name: "Mascarilla", basePrice: 12.5, priceGross: 15.13, taxRate: 21 })];
+    localCount = 1;
+    await render();
+    await act(async () => {
+      buttonWith("Editar")!.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const price = container.querySelector("#cat-price") as HTMLInputElement;
+    expect(price.value).toBe("15,13");
+    await act(async () => {
+      container.querySelector("form")!.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+    });
+    expect(posted).toHaveLength(1);
+    expect((posted[0]!.body as { priceGross: number }).priceGross).toBe(15.13);
+  });
+
   it("el precio acepta coma: en un teclado español es lo natural", async () => {
     await openForm();
     const name = container.querySelector("#cat-name") as HTMLInputElement;
@@ -379,6 +412,11 @@ describe("catalogo-local · el formulario", () => {
       );
     });
     expect(posted).toHaveLength(1);
-    expect((posted[0]!.body as { basePrice: number }).basePrice).toBe(18.5);
+    // catalogo-en-alta · se manda `priceGross`, no `basePrice`: el campo
+    // dice «Precio con IVA» y la conversión a neto la hace el servidor.
+    // Mandar 18,50 como `basePrice` es lo que hacía que el TPV lo
+    // vendiera a 22,39.
+    expect((posted[0]!.body as { priceGross: number }).priceGross).toBe(18.5);
+    expect((posted[0]!.body as { basePrice?: number }).basePrice).toBeUndefined();
   });
 });

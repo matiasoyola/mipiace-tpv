@@ -18,6 +18,8 @@ const ACTIONS = [
   { value: "activate_tenant", label: "Activar cuenta" },
   { value: "force_logout", label: "Cerrar sesiones del tenant" },
   { value: "resync", label: "Re-sincronizar" },
+  // catalogo-en-alta · sin esta entrada el registro pinta el slug crudo.
+  { value: "catalog_import", label: "Cargar catálogo" },
   { value: "impersonate", label: "Impersonar OWNER" },
   { value: "test_cashier_session", label: "Sesión cajero de prueba" },
   { value: "create_super_admin", label: "Crear super-admin" },
