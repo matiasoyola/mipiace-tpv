@@ -290,6 +290,15 @@ const DejarHoldedMeta = Base.extend({
   cortado: z.boolean(),
 });
 
+// catalogo-en-alta · carga del catálogo local de un tenant desde un
+// fichero. Cuántas filas entraron y cuántas se saltaron, y NADA del
+// contenido: los nombres y los precios del fichero son el catálogo del
+// comercio, y una auditoría no es un sitio donde guardarlo.
+const CatalogImportMeta = Base.extend({
+  filasCreadas: z.number().int().nonnegative(),
+  filasSaltadas: z.number().int().nonnegative(),
+});
+
 const META_SCHEMAS = {
   create_tenant: CreateTenantMeta,
   create_tenant_draft: CreateTenantDraftMeta,
@@ -307,6 +316,7 @@ const META_SCHEMAS = {
   resend_super_admin_invite: ResendSuperAdminInviteMeta,
   dedupe_tags: DedupeTagsMeta,
   dejar_holded: DejarHoldedMeta,
+  catalog_import: CatalogImportMeta,
   transfer_owner: TransferOwnerMeta,
   view_tenant_cashiers: ViewTenantCashiersMeta,
   create_apk_download_code: CreateApkDownloadCodeMeta,
