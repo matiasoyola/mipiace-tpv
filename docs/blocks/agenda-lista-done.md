@@ -149,6 +149,14 @@ que la pantalla acababa de ofrecer.
 | `07 · mover una cita…` | la asignación activa en BD sigue siendo de Marta después de mover |
 | `07 · los huecos que ofrece mover son los de SU profesional` | a las 12:30 Marta tiene las mechas y Lucía está libre y sabe teñir: esa hora **no** se ofrece |
 
+De los cuatro, **el que de verdad muerde es el 18**. Con el fijado quitado, el
+17 sigue en verde: en ese escenario el motor elige a Sole igual aunque no se
+lo pidan, así que lo que fija es la invariante, no la detecta. El 18 sí, y por
+eso es el que aparece en la tabla de sabotajes (§5, fila 7b). Lo mismo que
+pasa con el `07 · mover una cita…`: la cita que mueve son las mechas, que sólo
+hace Marta, así que su aserción de la asignación enuncia la regla y no la
+caza.
+
 ### Lo que el banco NO puede probar de esto, dicho con precisión
 
 **El «no» por hueco OCUPADO no se puede pedir desde esta pantalla.** Los chips
@@ -385,8 +393,12 @@ Fuera de alcance, declarado en el prompt y respetado:
 - **El alta sin red que no cierra el trámite** (⚪ 8) y **las etiquetas sin
   `htmlFor` / el toast sin gancho** (⚪ 9).
 - **Arrastrar citas en la rejilla.**
-- **El motor** (`engine.ts`): ni una línea. El fijado duplicado de `:207` y
-  `:429` sigue donde estaba.
+- **El motor** (`engine.ts`): **una línea de firma y dos de uso**, contadas en
+  el §2b — el parámetro opcional que fija la profesional al mover. Nada más.
+  El fijado duplicado de `:207` y `:429` sigue donde estaba, y la lógica de
+  `planForStart` y `computeSlots` no se ha tocado.
+- **Elegir profesional al mover**: a la cola. El PATCH no acepta
+  `staffUserId`; lo único que hace es conservar la que la cita ya tenía.
 - **El cobro de la cita** (capítulo 8) y **el cierre** (9) no cambian.
 
 Y lo que no se ha podido hacer en esta sesión:
@@ -395,8 +407,8 @@ Y lo que no se ha podido hacer en esta sesión:
   La APK 1.20.0 está construida y comprobada **sobre el binario** (§7), pero el
   procedimiento de `project_pruebas_fisicas_ap11` —emparejar, encender la
   agenda desde el menú de la dueña, abrir la agenda sin pasar por Clientes, dar
-  una cita, moverla y el «no» de quien no sabe— **está pendiente**, y con él
-  las capturas de `docs/qa/`.
+  una cita, moverla —y ver que sigue siendo de la misma profesional— y el «no»
+  de quien no sabe— **está pendiente**, y con él las capturas de `docs/qa/`.
 - **La línea del frente B del tablero.** No hay ningún fichero de tablero en
   este repo (`docs/`, `docs/blocks/`, `docs/roadmap-master.md`: nada que lo
   sea). Si el tablero vive fuera del repo, lo actualiza Dirección con este
@@ -558,15 +570,19 @@ lo cubre; comprobado con `git check-ignore`).
 
 ## 10 · El vídeo
 
-`agenda-mover-cita.mp4` — **12 s, 1080p a 25 fps, 723 KB**. Mover la cita de
+`agenda-mover-cita.mp4` — **11 s, 1080p a 25 fps, 661 KB**. Mover la cita de
 Carmen de hora y devolverla a su sitio: es lo que se le va a enseñar a Sole.
 
 Rodado con el banco (`BANCO_VIDEO=1`), con sus rótulos en español pintados por
 el propio spec (la app no se toca). Son los capítulos 1 a 7 en modo vídeo —los
 que hacen falta para llegar al estado del 7— y de ahí se saca el trozo del test
 de mover, normalizado a 1080p con el mismo filtro lanczos de
-`video/montar.sh`. Esa pasada en modo vídeo salió **23 tests verdes**, que de
+`video/montar.sh`. Esa pasada en modo vídeo salió **24 tests verdes**, que de
 paso es una tercera confirmación del banco a otro ritmo.
+
+Se grabó dos veces, por lo mismo que la APK: el primer rodaje era de antes del
+§2b y la hoja de mover enseñaba huecos de cualquiera. Un vídeo que enseña a
+Sole algo que la app ya no hace es peor que no tener vídeo.
 
 **No entra en git**, como el resto: vive en
 `~/Developer/Claude/Projects/mipiacetpv-media/agenda/`.
@@ -587,6 +603,11 @@ De paso: el script `video` que este README y el done del banco ya citaban
 | `b2d8ac7` | Puntos 1, 2 y 3 en la pantalla, y los capítulos 6 y 7 del banco adaptados |
 | `59f1c23` | El banco no puede correr contra la stack de otra sesión (guardas, puertos, comprobación) |
 | `271121b` | La hoja de mover se pliega al acabar, y el banco en verde |
+| `82c9a44` | El done del bloque |
+| `8a88b5b` | Mover conserva la profesional (§2b): el parámetro del motor, el fijado en la ruta, y los dos casos de la API |
+| `b0a08f1` | La sonda del test de «los huecos son los suyos» pasa a las 12:30 (a las 09:00 Lucía ni había entrado) |
+| `8692fea` | El done cuenta el fijado y sus dos sabotajes |
+| `d330af5` | La APK se rehace con el fijado dentro |
 
 ---
 
