@@ -49,7 +49,17 @@ interface Product {
   name: string;
   sku: string | null;
   barcode: string | null;
+  /** NETO, que es lo que guarda la columna. */
   basePrice: number;
+  // catalogo-en-alta · el precio CON IVA, calculado en el servidor con la
+  // MISMA función que usa el TPV para la rejilla (`brutoDesdeNeto`). Es
+  // el que esta pantalla pinta y el que se teclea, porque es el de la
+  // carta; el neto no se le pide a nadie.
+  //
+  // Antes esta pantalla enseñaba y mandaba `basePrice` bajo una etiqueta
+  // que decía «Precio con IVA», así que un café tecleado a 1,60 se
+  // guardaba como neto y el TPV lo vendía a 1,76.
+  priceGross: number;
   taxRate: number;
   kind: Kind;
   active: boolean;
@@ -367,7 +377,7 @@ function ProductRow({ product, onEdit }: { product: Product; onEdit: () => void 
         </div>
         <div className="flex flex-col items-end gap-2 shrink-0">
           <span className="text-[15px] font-medium text-mipiace-ink tabular-nums">
-            {money(product.basePrice)}
+            {money(product.priceGross)}
           </span>
           {product.editable ? (
             <button
@@ -472,8 +482,11 @@ function ProductForm({
   const isNew = product == null;
   const [name, setName] = useState(product?.name ?? "");
   const [sku, setSku] = useState(product?.sku ?? "");
+  // Ida y vuelta: se abre con el precio CON IVA y se guarda convirtiendo
+  // a neto en el servidor. Un producto que se edita y se guarda sin tocar
+  // el campo tiene que quedar con el mismo precio que tenía.
   const [price, setPrice] = useState(
-    product ? product.basePrice.toFixed(2).replace(".", ",") : "",
+    product ? product.priceGross.toFixed(2).replace(".", ",") : "",
   );
   // 21 por defecto en el alta: es el caso normal de los verticales de
   // hoy, y un desplegable sin preselección invita a dejarlo sin tocar.
@@ -523,7 +536,7 @@ function ProductForm({
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    const basePrice = parsePrice(price);
+    const priceGross = parsePrice(price);
     if (name.trim().length === 0) {
       setError("El nombre es obligatorio.");
       return;
@@ -536,7 +549,7 @@ function ProductForm({
       setError("El SKU no puede llevar espacios. Usa guiones si necesitas separar.");
       return;
     }
-    if (basePrice === null) {
+    if (priceGross === null) {
       setError("El precio no es válido. Escribe un número, por ejemplo 12,50.");
       return;
     }
@@ -563,7 +576,9 @@ function ProductForm({
     const body = {
       name: name.trim(),
       sku: sku.trim(),
-      basePrice,
+      // Con IVA. La conversión a neto la hace el servidor con el mismo
+      // `normalizePrice` que usa la carga de fichero del super-admin.
+      priceGross,
       taxRate: effectiveTaxRate,
       kind,
       barcode: barcode.trim() === "" ? null : barcode.trim(),

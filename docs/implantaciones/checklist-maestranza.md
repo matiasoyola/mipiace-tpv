@@ -17,39 +17,32 @@ propio de La Maestranza.
 
 ---
 
-## 0 · ⛔ Bloqueo encontrado al preparar esto: un alta nueva sin Holded y con caja no se puede activar
+## 0 · ✅ Resuelto por el bloque `catalogo-en-alta` (04-10-2026)
 
-Leído en el código de `master` (`b629a31`), no probado en producción:
+El bloqueo que tenía este apartado **está resuelto en la rama `catalogo-en-alta`** (pendiente de
+merge y despliegue, que los decide Dirección). Lo que decía: un alta nueva sin Holded y con caja no
+se podía activar, porque `products-sellable` exige productos, los productos sólo entraban por el
+panel del OWNER, y el OWNER no nace hasta activar.
 
-1. La activación exige que la salud esté en verde, y el check `products-sellable` **aplica a todo
-   tenant con caja**: con 0 productos está en rojo (`superadmin/onboarding-health.ts:365`).
-2. Sin Holded no hay sync inicial, así que **los productos sólo pueden entrar por el catálogo
-   local** (`POST /catalog/products`), que exige sesión de OWNER o MANAGER.
-3. En DRAFT **no hay OWNER**: se crea al activar. Y la impersonación del super-admin necesita un
-   OWNER al que suplantar (`superadmin/tenants.ts:1507`, 409 `NO_OWNER`). No hay ruta de catálogo
-   en el super-admin.
+Al recorrer el camino entero contra el código de verdad aparecieron **dos** bloqueos, no uno, y los
+dos están arreglados:
 
-Resultado: **DRAFT sin productos → no se activa → sin OWNER no se cargan productos.** Los e2e que
-activan un alta sin Holded (`h1-empresa-sin-caja`, `f8-colegio`) son todos **sin caja**: el camino
-de un bar nuevo nunca se ha recorrido. Sole cortó Holded con su catálogo ya dentro; La Maestranza
-sería la primera.
+| Lo que bloqueaba | Cómo está resuelto |
+|---|---|
+| **El catálogo vacío** (`products-sellable` en rojo con 0 productos) | «Cargar catálogo» en la ficha del tenant: sube el CSV, enseña una vista previa y escribe al confirmar. Ver el §3 |
+| **El cajero técnico** (`test-cashier-provisioned` en rojo) — lo provisionaba sólo el worker del sync inicial, que sin Holded no corre nunca, y el botón «Probar TPV» estaba deshabilitado esperándolo | «Probar TPV» ya no espera a nadie: provisiona el cajero técnico la primera vez que se pulsa, que es lo que el endpoint hacía desde siempre |
 
-(El cajero técnico sí se resuelve: «Probar TPV» llama a `provisionTestCashier` y crea tienda, caja y
-cajero técnico en DRAFT.)
+Y una tercera cosa que no bloqueaba la activación pero ensuciaba el comercio: la **venta de ensayo**
+del modo prueba se quedaba como venta cobrada (`PAID`) en un comercio sin Holded, así que la purga de
+la activación no la borraba. Ahora nace `TEST` y la activación se la lleva.
 
-### Las dos salidas
+**Lo que NO entró en el bloque** (se puede hacer después de activar, sin facturas de prueba, con el
+dueño delante): la sala —zonas y mesas—, los cajeros reales y la impresora. Los tres se configuran
+desde el panel del propietario una vez activado. El ensayo del TPV se puede hacer igual sin mesas:
+la venta rápida de barra no las necesita.
 
-| | Rodeo sin código | Bloque pequeño en Code |
-|---|---|---|
-| Cómo | Alta con caja **apagada** y otro módulo → activar (nace el OWNER) → encender la caja → cargar catálogo, cajeros y sala desde el panel | El super-admin puede cargar el catálogo local de un tenant **DRAFT** sin Holded (importando `catalogo-tpv.csv`) |
-| Modo prueba antes de activar | **No existe**: el tenant ya está ACTIVE. Toda venta de ensayo es **una factura real** de la serie `C1` y hay que anularla | Sí, como cualquier alta: «Probar TPV» con el catálogo real y cero registros fiscales |
-| Camino probado | No (nadie ha encendido la caja después de activar) | Lo prueba el propio bloque |
-| Carga de 128 productos | A mano en el panel, uno a uno | Un fichero |
-| Sirve para el siguiente cliente sin Holded | Habría que repetir el rodeo | Sí |
-
-**Recomendación: el bloque.** El rodeo se salta la puerta que da sentido al protocolo
-anti-sustos (ensayar sin consecuencias) y deja facturas de prueba en la cadena del bar desde el
-primer día. Es un frente de desarrollo nuevo, así que lo coloca Dirección (§5 del tablero).
+Detalle del recorrido y de las decisiones: `docs/blocks/catalogo-en-alta-plan.md` y
+`docs/blocks/catalogo-en-alta-done.md`.
 
 ---
 
@@ -88,14 +81,26 @@ precio, no el relleno.
 
 ## 3 · Antes de salir (remoto)
 
-- [ ] Bloqueo del §0 resuelto (bloque desplegado, o rodeo decidido por escrito).
+- [ ] Bloqueo del §0 resuelto: `catalogo-en-alta` **mergeado y desplegado**. Se comprueba mirando la
+      ficha de un tenant sin Holded: tiene que salir el panel **«Cargar catálogo»**.
 - [ ] Producción sana: `curl -s https://api.mipiacetpv.com/health` y anotar el sha (rollback:
       `IMAGE_TAG=<sha> bash infra/deploy.sh`).
-- [ ] Alta en super-admin: «¿La empresa tiene Holded?» → **No**. Razón social y NIF reales.
-- [ ] Catálogo cargado y revisado en el TPV (chips, nombres a dos líneas, precios).
+- [ ] Alta en super-admin: «¿La empresa tiene Holded?» → **«No lo usa»**. Razón social y NIF reales.
+- [ ] **Cargar el catálogo** desde la ficha del tenant:
+      - [ ] «Cargar catálogo» → elegir `maestranza/catalogo-tpv.csv`.
+      - [ ] En la vista previa tienen que salir **128 filas que entran y ninguna saltada**. Si sale
+            alguna saltada, el motivo lleva el número de línea del fichero: se corrige y se vuelve a
+            subir (lo ya cargado no se duplica).
+      - [ ] Confirmar. El precio del fichero es **con IVA** y es el que el TPV va a pintar: el café
+            con leche tiene que verse a **1,60 €**, no a 1,76 €.
+- [ ] Catálogo revisado en el TPV de prueba (chips de categoría, nombres a dos líneas, precios de la
+      carta).
 - [ ] Sala creada según el §1.
-- [ ] «Probar TPV»: venta de dos líneas, cobro en efectivo y mixto, devolución, arqueo. **Ningún
-      registro fiscal** (el cajero técnico no emite, verifactu-1b).
+- [ ] «Probar TPV» (la primera vez que se pulsa, provisiona el cajero técnico y la salud se pone en
+      verde): venta de dos líneas, cobro en efectivo y mixto, devolución, arqueo. **Ningún registro
+      fiscal** — el panel de Facturación tiene que seguir con la serie `C1` a cero registros.
+- [ ] Comprobar que las ventas del ensayo quedan como **TEST**: al activar se purgan solas y el bar
+      empieza con el libro limpio.
 - [ ] Terminal preparado en el taller según `checklist-terminal.md` con la **APK 1.19.0**.
 - [ ] Declaración responsable de Mi Piace firmada (tarea humana 4 del tablero): el bar va a cobrar
       con nuestro SIF.

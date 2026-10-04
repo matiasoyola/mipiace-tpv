@@ -39,103 +39,48 @@ import {
 } from "../lib/catalogo-local-gate.js";
 import { buildLocalSku } from "../onboarding/auto-sku.js";
 
-// catalogo-local · el tipo de IVA del alta local (addendum 2).
+// catalogo-en-alta · las reglas ya no viven aquí.
 //
-// De dónde NO sale: de `TenantTax`. Esa tabla es el cache del catálogo
-// fiscal de Holded y la pueblan los dos syncs (`initial-sync.ts:129`,
-// `incremental-sync.ts:185`). El comercio que nos ocupa tiene CERO filas
-// ahí por definición, así que el desplegable no tendría de dónde salir.
-//
-// De dónde sale: esta constante. Los cuatro tramos peninsulares —general,
-// reducido, superreducido y exento—, con el 21 por delante porque es el
-// caso normal de los verticales de hoy.
-//
-// Y no es una lista cerrada: el handler acepta CUALQUIER tipo entre 0 y
-// 100 con dos decimales (ver `normalizeTaxRate`). Las dos mitades tienen
-// su motivo y son opuestas a propósito:
-//
-//   · La LISTA existe porque teclear `2,1` en vez de `21` se cobraría mal
-//     en todos los tickets hasta que alguien lo notara, y el papel no lo
-//     canta. Cuatro botones no se equivocan.
-//   · La VÍA DE ESCAPE existe porque el IGIC canario (7, 3, 0 %) —y
-//     cualquier tipo que cambie por ley— dejaría al cliente parado, sin
-//     poder dar de alta su producto, esperando a que toquemos código y
-//     despleguemos.
-//
-// Esto aplica SÓLO al alta local. Un `source = HOLDED` sigue trayendo su
-// `taxRate` del sync, exactamente igual que antes del bloque.
-export const LOCAL_TAX_RATES = [21, 10, 4, 0] as const;
+// Este fichero era el único que daba de alta un producto local, así que
+// las reglas estaban dentro. Ahora el super-admin carga el catálogo de
+// un comercio desde un fichero (`superadmin/tenant-catalog.ts`) y las
+// dos rutas tienen que validar y escribir IGUAL — no parecido. Lo que
+// se comparte está en `local-product-rules.ts`, con el por qué de cada
+// regla y con la conversión del precio.
+import {
+  brutoDesdeNeto,
+  buildLocalProductCreateData,
+  isLocalSkuConflict,
+  normalizeBarcode,
+  normalizeName,
+  normalizePrice,
+  normalizeSku,
+  normalizeTags,
+  normalizeTaxRate,
+  PRODUCT_BODY_PROPERTIES,
+  SKU_CONFLICT,
+  validateLocalProduct,
+} from "./local-product-rules.js";
 
-// Dos decimales, que es la precisión de la columna (`Decimal(5,2)`).
-// Más allá, la base redondearía en silencio y el producto quedaría con
-// un IVA distinto del que el propietario tecleó.
-const TAX_RATE_DECIMALS = 2;
+export { LOCAL_TAX_RATES } from "./local-product-rules.js";
 
-/**
- * Valida el tipo de IVA de un producto local. Fuera de rango es 400 con
- * una frase, nunca un 500 y nunca un redondeo callado.
- */
-function normalizeTaxRate(
-  raw: number,
-): { ok: true; taxRate: number } | { ok: false; message: string } {
-  if (!Number.isFinite(raw)) {
-    return { ok: false, message: "El tipo de IVA no es un número válido." };
-  }
-  if (raw < 0 || raw > 100) {
-    return { ok: false, message: "El tipo de IVA tiene que estar entre 0 y 100." };
-  }
-  const rounded = Math.round(raw * 10 ** TAX_RATE_DECIMALS) / 10 ** TAX_RATE_DECIMALS;
-  if (rounded !== raw) {
-    return {
-      ok: false,
-      message: "El tipo de IVA admite como mucho dos decimales.",
-    };
-  }
-  return { ok: true, taxRate: rounded };
-}
-
-const SKU_MAX = 64;
-const NAME_MAX = 200;
-const BARCODE_MAX = 64;
-const TAG_MAX = 40;
-const TAGS_MAX = 12;
+// Lo único que es de esta ruta y no de la regla: el tamaño de página del
+// listado. Los límites del producto viven en `local-product-rules.ts`.
 const PAGE_SIZE_DEFAULT = 50;
 const PAGE_SIZE_MAX = 200;
-
-// Precio máximo por unidad. La columna es Decimal(12,4), así que el
-// techo de verdad son 99.999.999,9999 €; este límite es de producto, no
-// de base de datos: un precio de siete cifras en un TPV de barrio es un
-// dedo en el teclado numérico, no una venta.
-const PRICE_MAX = 999999.99;
 
 interface ProductBody {
   name: string;
   sku: string;
-  basePrice: number;
+  // Una de las dos, no las dos. Lo exige `normalizePrice`.
+  basePrice?: number;
+  priceGross?: number;
   taxRate: number;
   kind?: "PRODUCT" | "SERVICE";
   barcode?: string | null;
   tags?: string[];
   active?: boolean;
 }
-
-const PRODUCT_BODY_PROPERTIES = {
-  name: { type: "string", minLength: 1, maxLength: NAME_MAX },
-  sku: { type: "string", minLength: 1, maxLength: SKU_MAX },
-  basePrice: { type: "number", minimum: 0, maximum: PRICE_MAX },
-  // El esquema deja pasar todo el rango; los dos decimales y el mensaje
-  // los pone `normalizeTaxRate`, que puede explicar el porqué. Un `enum`
-  // aquí habría cerrado la puerta al IGIC.
-  taxRate: { type: "number", minimum: 0, maximum: 100 },
-  kind: { type: "string", enum: ["PRODUCT", "SERVICE"] },
-  barcode: { type: ["string", "null"], maxLength: BARCODE_MAX },
-  tags: {
-    type: "array",
-    maxItems: TAGS_MAX,
-    items: { type: "string", minLength: 1, maxLength: TAG_MAX },
-  },
-  active: { type: "boolean" },
-} as const;
 
 const PRODUCT_SELECT = {
   id: true,
@@ -183,6 +128,12 @@ function serialize(p: ProductRow, escribible: boolean) {
     sku: p.sku,
     barcode: p.barcode,
     basePrice: Number(p.basePrice),
+    // catalogo-en-alta · el precio CON IVA, calculado en el servidor con
+    // la misma función que usa el TPV (`brutoDesdeNeto`). La pantalla lo
+    // pinta tal cual en un campo que se llama "Precio con IVA" y lo
+    // devuelve tal cual al guardar: ida y vuelta sin perder un céntimo,
+    // y sin que el front tenga una copia de la fórmula del IVA.
+    priceGross: brutoDesdeNeto(Number(p.basePrice), Number(p.taxRate)),
     taxRate: Number(p.taxRate),
     kind: p.kind,
     active: p.active,
@@ -197,69 +148,6 @@ function serialize(p: ProductRow, escribible: boolean) {
     editable: p.source === "LOCAL" && escribible,
   };
 }
-
-/**
- * Normaliza y valida un SKU de producto local.
- *
- * Las reglas son las del prompt del bloque, y cada una tiene su razón:
- *
- *  · **No vacío.** Es la regla madre: sin SKU el TPV no lo vende
- *    (`tpv-catalog/routes.ts` filtra `sku: { not: null }`) y el día del
- *    casamiento con Holded no hay por dónde casarlo.
- *  · **Sin espacios en los extremos.** Se recortan en silencio en vez de
- *    rechazar: un espacio pegado al pegar desde un Excel no es un error
- *    del propietario, es ruido del portapapeles.
- *  · **Sin espacios interiores.** Éste sí se rechaza. Un SKU con un
- *    espacio dentro viaja como identificador de línea a Holded y a la
- *    impresora térmica, y ahí parte el campo.
- */
-function normalizeSku(raw: string): { ok: true; sku: string } | { ok: false; message: string } {
-  const sku = raw.trim();
-  if (sku.length === 0) {
-    return { ok: false, message: "El SKU es obligatorio." };
-  }
-  if (/\s/.test(sku)) {
-    return {
-      ok: false,
-      message: "El SKU no puede llevar espacios. Usa guiones si necesitas separar.",
-    };
-  }
-  return { ok: true, sku };
-}
-
-// Los tags se guardan como Holded los entrega —lowercase y sin
-// duplicados— para que los chips de categoría del TPV salgan iguales
-// vengan de donde vengan. La misma normalización que hacen los dos
-// syncs; el TPV capitaliza al pintar.
-function normalizeTags(raw: string[] | undefined): string[] {
-  if (!raw) return [];
-  return Array.from(
-    new Set(raw.map((t) => t.trim().toLowerCase()).filter((t) => t.length > 0)),
-  ).slice(0, TAGS_MAX);
-}
-
-function normalizeBarcode(raw: string | null | undefined): string | null {
-  const v = (raw ?? "").trim();
-  return v.length === 0 ? null : v;
-}
-
-// ¿El error de Prisma es el choque del índice único parcial de SKU
-// local? P2002 es "unique constraint failed"; el `target` trae el nombre
-// del índice. Se comprueba el nombre y no sólo el código porque
-// `products` tiene DOS índices únicos y el otro —el del enlace con
-// Holded— significa una cosa completamente distinta.
-function isLocalSkuConflict(err: unknown): boolean {
-  if (!(err instanceof Prisma.PrismaClientKnownRequestError)) return false;
-  if (err.code !== "P2002") return false;
-  const target = err.meta?.target;
-  const asText = Array.isArray(target) ? target.join(",") : String(target ?? "");
-  return asText.includes("products_tenant_id_sku_local_key") || asText.includes("sku");
-}
-
-const SKU_CONFLICT = {
-  error: "SKU_ALREADY_EXISTS",
-  message: "Ya tienes otro producto con ese SKU. Cambia uno de los dos.",
-};
 
 export async function registerLocalCatalogRoutes(app: FastifyInstance): Promise<void> {
   // ── Listado ───────────────────────────────────────────────────────
@@ -386,7 +274,13 @@ export async function registerLocalCatalogRoutes(app: FastifyInstance): Promise<
           // La doble puerta es deliberada: el esquema es lo que hace que
           // un POST sin `sku` sea imposible por la API aunque alguien
           // toque el handler mañana.
-          required: ["name", "sku", "basePrice", "taxRate"],
+          //
+          // catalogo-en-alta · el precio sale de `required` porque ahora
+          // puede llegar por dos nombres. Que venga exactamente uno de
+          // los dos lo exige `normalizePrice`, con una frase que se
+          // entiende; un `oneOf` en el esquema contesta "body/ debe
+          // coincidir con exactamente un esquema en oneOf".
+          required: ["name", "sku", "taxRate"],
           additionalProperties: false,
           properties: PRODUCT_BODY_PROPERTIES,
         },
@@ -397,43 +291,28 @@ export async function registerLocalCatalogRoutes(app: FastifyInstance): Promise<
       const body = request.body as ProductBody;
       const prisma = getPrisma();
 
-      const name = body.name.trim();
-      if (name.length === 0) {
-        return reply.code(400).send({ error: "INVALID_NAME", message: "El nombre es obligatorio." });
-      }
-      const sku = normalizeSku(body.sku);
-      if (!sku.ok) {
-        return reply.code(400).send({ error: "INVALID_SKU", message: sku.message });
-      }
-      const tax = normalizeTaxRate(body.taxRate);
-      if (!tax.ok) {
-        return reply.code(400).send({ error: "INVALID_TAX_RATE", message: tax.message });
+      // catalogo-en-alta · LA misma función que usa la carga de fichero
+      // del super-admin. Nombre, SKU, IVA, precio (con la conversión de
+      // bruto a neto), etiquetas, código de barras y límites: todo con
+      // un solo `validateLocalProduct`.
+      const valid = validateLocalProduct(body);
+      if (!valid.ok) {
+        // El `error` nombrado se conserva campo a campo: la pantalla del
+        // catálogo los distingue y no todos se arreglan igual.
+        const code =
+          valid.field === "sku"
+            ? "INVALID_SKU"
+            : valid.field === "taxRate"
+              ? "INVALID_TAX_RATE"
+              : valid.field === "price"
+                ? "INVALID_PRICE"
+                : "INVALID_NAME";
+        return reply.code(400).send({ error: code, message: valid.message });
       }
 
       try {
         const row = await prisma.product.create({
-          data: {
-            tenantId: auth.tenantId,
-            // Lo que define el bloque entero. Sin enlace con Holded y
-            // con la autoridad en casa.
-            source: "LOCAL",
-            holdedProductId: null,
-            name,
-            sku: sku.sku,
-            barcode: normalizeBarcode(body.barcode),
-            basePrice: new Prisma.Decimal(body.basePrice),
-            taxRate: new Prisma.Decimal(tax.taxRate),
-            kind: body.kind ?? "PRODUCT",
-            active: body.active ?? true,
-            tags: normalizeTags(body.tags),
-            // Nace vendible: tiene SKU obligatorio, que es la única
-            // condición que el TPV pone (`tpv-catalog/routes.ts`).
-            sellableViaTpv: true,
-            // Un producto local no pasa por el auto-SKU ni por la
-            // bandeja de revisión: su SKU lo puso una persona.
-            needsSkuReview: false,
-            skuAutoAssignedAt: null,
-          },
+          data: buildLocalProductCreateData(auth.tenantId, valid.fields),
           select: PRODUCT_SELECT,
         });
         request.log.info(
@@ -485,7 +364,9 @@ export async function registerLocalCatalogRoutes(app: FastifyInstance): Promise<
 
       const existing = await prisma.product.findFirst({
         where: { id: productId, tenantId: auth.tenantId },
-        select: { id: true, source: true },
+        // catalogo-en-alta · el IVA ACTUAL hace falta para convertir un
+        // `priceGross` que llegue solo. Ver abajo.
+        select: { id: true, source: true, taxRate: true },
       });
       if (!existing) {
         return reply
@@ -504,28 +385,50 @@ export async function registerLocalCatalogRoutes(app: FastifyInstance): Promise<
 
       const data: Prisma.ProductUpdateInput = {};
       if (body.name !== undefined) {
-        const name = body.name.trim();
-        if (name.length === 0) {
-          return reply
-            .code(400)
-            .send({ error: "INVALID_NAME", message: "El nombre es obligatorio." });
+        const name = normalizeName(body.name);
+        if (!name.ok) {
+          return reply.code(400).send({ error: "INVALID_NAME", message: name.message });
         }
-        data.name = name;
+        data.name = name.value;
       }
       if (body.sku !== undefined) {
         const sku = normalizeSku(body.sku);
         if (!sku.ok) {
           return reply.code(400).send({ error: "INVALID_SKU", message: sku.message });
         }
-        data.sku = sku.sku;
+        data.sku = sku.value;
       }
-      if (body.basePrice !== undefined) data.basePrice = new Prisma.Decimal(body.basePrice);
+      // catalogo-en-alta · el IVA se resuelve ANTES del precio, porque el
+      // precio con IVA se convierte con él.
+      //
+      // Y el IVA que manda es el de la petición si viene, y el de la
+      // ficha si no: la pantalla edita un producto que ya tiene IVA, y
+      // cambiar sólo el precio no puede reinterpretarlo con un 21 por
+      // defecto. Un café al 10 % guardado como si fuera al 21 se cobra
+      // mal el resto de su vida.
+      let taxRate = Number(existing.taxRate);
       if (body.taxRate !== undefined) {
         const tax = normalizeTaxRate(body.taxRate);
         if (!tax.ok) {
           return reply.code(400).send({ error: "INVALID_TAX_RATE", message: tax.message });
         }
-        data.taxRate = new Prisma.Decimal(tax.taxRate);
+        taxRate = tax.value;
+        data.taxRate = new Prisma.Decimal(tax.value);
+      }
+      // Cambiar SÓLO el IVA deja el neto quieto a propósito: es lo que el
+      // propietario está diciendo —"esto va al 10, no al 21"— y mover el
+      // neto para conservar el precio de escaparate sería tomar por él
+      // una decisión fiscal. La pantalla manda los dos campos juntos.
+      if (body.basePrice !== undefined || body.priceGross !== undefined) {
+        const price = normalizePrice({
+          basePrice: body.basePrice,
+          priceGross: body.priceGross,
+          taxRate,
+        });
+        if (!price.ok) {
+          return reply.code(400).send({ error: "INVALID_PRICE", message: price.message });
+        }
+        data.basePrice = new Prisma.Decimal(price.value);
       }
       if (body.kind !== undefined) data.kind = body.kind;
       if (body.barcode !== undefined) data.barcode = normalizeBarcode(body.barcode);

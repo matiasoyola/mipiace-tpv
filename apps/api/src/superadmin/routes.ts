@@ -9,6 +9,7 @@ import {
 } from "./devices.js";
 import { registerSuperAdminHubRoutes } from "./hub.js";
 import { registerSuperAdminReconciliationRoutes } from "./reconciliation.js";
+import { registerSuperAdminTenantCatalogRoutes } from "./tenant-catalog.js";
 import { registerSuperAdminTenantCashiersRoutes } from "./tenant-cashiers.js";
 import { registerSuperAdminTenantsRoutes } from "./tenants.js";
 
@@ -25,6 +26,10 @@ export async function registerSuperAdminRoutes(
   // Bloque soporte-cajeros-superadmin: lista de cajeros de un tenant
   // (lectura, auditada) para atender "no puedo entrar" sin impersonar.
   await registerSuperAdminTenantCashiersRoutes(app);
+  // Bloque catalogo-en-alta: cargar el catálogo local de un comercio sin
+  // Holded desde un fichero, con vista previa. Es lo que permite activar
+  // un alta nueva con caja (ver la cabecera de `tenant-catalog.ts`).
+  await registerSuperAdminTenantCatalogRoutes(app);
   // A5 · inventario de terminales: quién está online, con qué versión y con
   // cuánta cola. Es la pantalla que decide a qué local hay que ir.
   await registerSuperAdminDevicesRoutes(app);

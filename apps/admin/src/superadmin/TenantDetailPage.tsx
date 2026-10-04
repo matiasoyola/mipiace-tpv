@@ -23,6 +23,7 @@ import {
 import { superApi, SuperAdminApiError } from "./api.js";
 import { humanizeError } from "./error-messages.js";
 import { CashiersPanel } from "./CashiersPanel.js";
+import { CatalogImportPanel } from "./CatalogImportPanel.js";
 import { DejarHoldedPanel } from "./DejarHoldedPanel.js";
 import { SuperAdminShell } from "./SuperAdminShell.js";
 import type {
@@ -715,6 +716,17 @@ export function TenantDetailPage() {
         onSaved={(next) => setTenant({ ...tenant, holdedAccountId: next })}
       />
 
+      {/* catalogo-en-alta · «Cargar catálogo».
+          Sólo para los comercios SIN Holded y CON caja, en DRAFT y en
+          ACTIVE: en DRAFT es lo que permite activar (sin productos,
+          `products-sellable` está en rojo) y en ACTIVE es cómo se le
+          añade media carta nueva sin teclearla ficha a ficha.
+          Un comercio CON Holded no lo ve, y su ruta responde 409: es el
+          catálogo mixto que ADR-017 prohíbe. */}
+      {tenant.modules.caja && tenant.holdedEnabled === false && (
+        <CatalogImportPanel tenantId={tenant.id} onCargado={() => void reload()} />
+      )}
+
       {/* H1 · el pie del ticket y el icono del catálogo del TPV son de la
           caja. Sin caja no hay tickets que imprimir ni catálogo que
           pintar; dejarlos visibles sólo da al implantador tres campos
@@ -1126,7 +1138,11 @@ function ModuleChips({
   );
 }
 
-function TestPanel({
+// catalogo-en-alta · exportado para poder probarlo solo. Lo que este
+// panel decide —si el botón que provisiona el cajero técnico se puede
+// pulsar— es lo que bloqueaba la activación de cualquier alta sin
+// Holded, y una regresión ahí no la cantaría ningún test del servidor.
+export function TestPanel({
   tenant,
   busy,
   onTestTpv,
@@ -1145,9 +1161,23 @@ function TestPanel({
         purgan.
       </p>
       <div className="flex items-center gap-3">
+        {/* catalogo-en-alta · este botón estaba `disabled` mientras
+            `testCashierProvisioned` fuera false, y ese flag lo encendía
+            SÓLO el worker del sync inicial
+            (`workers/initial-sync-worker.ts`). En un comercio sin Holded
+            el sync está en NOT_APPLICABLE y no corre nunca: el botón que
+            provisiona el cajero técnico estaba cerrado con la llave que
+            sólo él puede fabricar, y `test-cashier-provisioned` bloquea
+            la activación. Medido recorriendo el alta entera, ver
+            `docs/blocks/catalogo-en-alta-plan.md`.
+
+            El endpoint SÍ provisiona a demanda: `issueTestCashierSession`
+            llama a `provisionTestCashier` en su primera línea
+            (`superadmin/test-cashier.ts`). Así que la condición sobraba
+            —y mentía—. */}
         <button
           onClick={onTestTpv}
-          disabled={busy || !h.testCashierProvisioned}
+          disabled={busy}
           className="inline-flex items-center gap-2 h-10 px-4 bg-slate-900 text-white rounded-lg text-[13px] font-medium hover:bg-slate-800 disabled:opacity-40"
         >
           <FlaskConical className="w-4 h-4" />
@@ -1166,8 +1196,9 @@ function TestPanel({
       </div>
       {!h.testCashierProvisioned && (
         <p className="mt-3 text-[12px] text-amber-700">
-          Esperando a que el sync inicial termine para provisionar el cajero
-          técnico.
+          {tenant.onboardingHealth.holded.enabled
+            ? "El cajero técnico se crea al terminar el sync inicial, o la primera vez que pulses «Probar TPV»."
+            : "Esta empresa no usa Holded, así que no hay sync que esperar: el cajero técnico se crea la primera vez que pulses «Probar TPV»."}
         </p>
       )}
     </div>

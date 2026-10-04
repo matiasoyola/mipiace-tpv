@@ -177,6 +177,35 @@ export interface TenantDetail {
   onboardingHealth: OnboardingHealth;
 }
 
+// catalogo-en-alta · lo que contesta `POST /super-admin/tenants/:id/
+// catalog/import`. La MISMA forma en la vista previa y después de
+// escribir, con `escrito` diciendo cuál de las dos es: así la pantalla
+// no tiene dos maneras de contar lo que ha pasado.
+export interface CatalogImportFilaSaltada {
+  linea: number;
+  sku: string;
+  nombre: string;
+  motivo: string;
+}
+
+export interface CatalogImportResult {
+  escrito: boolean;
+  entran: Array<{
+    linea: number;
+    sku: string;
+    nombre: string;
+    /** El de la carta, con IVA. */
+    precioConIva: number;
+    /** El que se guarda, sin IVA y con 4 decimales. */
+    precioSinIva: number;
+    iva: number;
+    categorias: string[];
+  }>;
+  saltadas: CatalogImportFilaSaltada[];
+  /** Productos locales que el comercio ya tenía antes de esta carga. */
+  yaTenia: number;
+}
+
 export interface CreateTenantDraftResponse {
   tenant: {
     id: string;
