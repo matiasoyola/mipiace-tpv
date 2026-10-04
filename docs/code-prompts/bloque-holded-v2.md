@@ -74,9 +74,9 @@ producto, services, contacts y sus filtros, sales-receipt por id, PDF del sales-
    `X-RateLimit-*` y `Retry-After`.
 
 Para las **escrituras** (crear sales-receipt, pagarlo, abono, `PUT`/`POST` de producto, crear y
-editar contacto): **sólo en PRUEBAS y sólo si Matías lo confirma en la sesión**. Sin su OK, saca la
-forma del `openapi` y márcalo «no ensayado» en el done; y entonces la prueba de cierre (abajo) no se
-puede dar por buena para tickets.
+editar contacto): **autorizadas por Matías el 04-10-2026, sólo en la cuenta PRUEBAS MIPIACE**. Ensaya
+cada una por v1 y por v2 y compara lo que queda en Holded. Nunca en la cuenta de un cliente. Apunta en
+el done qué documentos de prueba has creado (número y fecha), para que se puedan identificar.
 
 **Puerta.** Si v2 no puede hacer algo que el TPV necesita hoy (p. ej. no hay forma de pagar un
 sales-receipt, o el ticket pierde un dato que exige Verifactu o la conciliación), **para**: escribe
@@ -179,8 +179,8 @@ el hallazgo en `docs/blocks/holded-v2-spike.md`, commit, push, y no sigas. Lo de
   log; la clave nunca en un log), qué línea rompes, qué test se pone rojo y con qué mensaje real.
 - **Qué NO cubre la suite**, por escrito.
 - **Prueba final contra Holded de verdad, en PRUEBAS**: alta con `pat_` completo, con `pat_` sin un
-  permiso y con basura; rotación de PRUEBAS de v1 a `pat_` y sync completo sin duplicados; y —si
-  Matías autorizó escrituras— un ticket con cobro mixto subido, pagado y con PDF, y un abono. Lo que
+  permiso y con basura; rotación de PRUEBAS de v1 a `pat_` y sync completo sin duplicados; y un
+  ticket con cobro mixto subido, pagado y con PDF, y un abono (escrituras autorizadas en PRUEBAS). Lo que
   ve el implantador y lo que queda en Holded, en cada caso. Y el `GET /api/v2/usage` antes y después.
 - `docs/blocks/holded-v2-done.md`: hallazgos del spike, el diff de formas, decisiones (**ADR-021**
   en `docs/design/`: dos versiones detrás de una cara, la fábrica por prefijo y la regla de cuota),
