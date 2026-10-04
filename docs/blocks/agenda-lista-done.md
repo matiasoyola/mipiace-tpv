@@ -406,9 +406,7 @@ Y lo que no se ha podido hacer en esta sesión:
 
 ## 7 · La APK
 
-**`mipiacetpv-1.20.0-12000.apk`** (construida antes del §2b: hay que
-**rehacerla** con el fijado dentro antes de llevarla al AP12 — mismo comando,
-misma versión), construida con el procedimiento de siempre,
+**`mipiacetpv-1.20.0-12000.apk`**, construida con el procedimiento de siempre,
 sin variarlo:
 
 ```bash
@@ -419,9 +417,9 @@ apps/tpv-android/scripts/build-release-apk.sh 1.20.0
 |---|---|
 | versionName | `1.20.0` |
 | versionCode | `12000` (la fórmula del script: `MAJOR*10000 + MINOR*100 + PATCH`, igual que la 1.19.0 → 11900) |
-| commit | `271121b` (árbol limpio, sin `-dirty`) |
-| tamaño | 8 559 909 bytes |
-| SHA-256 | `9d960a92169e07cf03077a705bf56f2f56b3cf04eee129e882c3019d7f0825cd` |
+| commit | `8692fea` (árbol limpio, sin `-dirty`) |
+| tamaño | 9 160 239 bytes |
+| SHA-256 | `c3ddbece75b3f20018b8c017b6d0b291649d4cbc2a1994210544139029436192` |
 | sidecar | `apps/tpv-android/build-releases/mipiacetpv-1.20.0-12000.apk.sha256` |
 | firma | `CN=mipiacetpv, O=mipiace, L=Madrid, C=ES` · SHA-256 del certificado `677d8620…05bfd6` |
 
@@ -442,6 +440,12 @@ del WebView no es el bueno (A5/R5). Además, sobre el `.apk` ya construido:
 | El backend de producción | `grep -F https://api.mipiacetpv.com` sobre `assets/public/assets/*.js` del APK | presente |
 | Sin Service Worker (A4) | `sw.js` / `registerSW.js` dentro del APK | no están |
 | El código de este bloque viaja dentro | `grep -F` de dos frases nuevas («Hace falta conexión para mover una cita», «no tiene ningún servicio asignado todavía») | presentes |
+
+Se construyó **dos veces**: la primera salió de `271121b`, antes de que
+Dirección pidiera el fijado al mover (§2b). Esa se tiró y se rehízo desde
+`8692fea`, porque el bundle del TPV cambió — una APK con la versión nueva y el
+comportamiento viejo dentro es exactamente el tipo de cosa que se descubre en
+el bar.
 
 **Una cosa que sale y no es un fallo**: el bundle contiene el literal
 `http://localhost:3001`. Es el fallback de SSR de
