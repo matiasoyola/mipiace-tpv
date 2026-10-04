@@ -48,9 +48,8 @@ Detalle del recorrido y de las decisiones: `docs/blocks/catalogo-en-alta-plan.md
 
 ## 1 · Datos que faltan del bar (se piden de uno en uno)
 
-- [ ] **Razón social y NIF** del titular (autónomo o sociedad). Sin ellos no pasa `fiscal-minimum`
-      ni se puede apagar Holded (409 con la lista de lo que falta).
-- [ ] Dirección fiscal y teléfono para la cabecera del ticket.
+- [x] **Razón social y NIF**: autónoma **Eguez García Pabla Salome**, NIE **Y8303186Q** (control verificado). Fuente: factura F260010 de Mi Piace (Kit Digital), 04-10.
+- [x] Dirección fiscal y teléfono: Calle Paseo de los Rosales, nº 6, 45542 El Casar de Escalona (Toledo) · 641 602 868 (de la factura F260010).
 - [ ] **Terminal**: ¿cuál y cuántos? ¿Lo pone Mi Piace (AP12) o ya tienen uno? Una caja = una
       serie; dos cajas = dos series (`C1/1`, `C2/1`…).
 - [ ] **Impresora** de tickets (modelo, USB o red) y si quieren comanda en cocina.
