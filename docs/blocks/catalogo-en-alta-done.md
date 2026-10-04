@@ -153,7 +153,7 @@ de 10 unidades, más una ronda entera de la carta en un solo ticket.
 
 | Suite | Resultado |
 |---|---|
-| `pnpm test` (workspace) | 269 ficheros · 2.965 tests · 3 saltados |
+| `pnpm test` (workspace) | 270 ficheros · 2.969 tests · 3 saltados |
 | `pnpm test:e2e` (Postgres real) | 22 ficheros · 350 tests |
 | `tsc --noEmit` api · `tsc -b` admin | limpio |
 
