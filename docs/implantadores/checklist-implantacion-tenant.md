@@ -27,6 +27,23 @@ Leyenda: ☐ tarea · 🔑 lo hace Matías/super-admin · 🤖 automático del s
 - ☐ Firmar / tener listos los **documentos legales** antes de la activación real: contrato piloto + DPA (`docs/legal/`). ⚠️ No activar para uso real sin ellos.
 - ☐ Verificar **catálogo en Holded** del cliente razonablemente limpio: productos con IVA correcto, precios, y SKU/código de barras si va a usar escáner.
 
+### Fase 0-bis — El cliente NO usa Holded (desde el 27-09-2026, el caso normal)
+
+Todo cliente nuevo empieza **sin Holded** (regla del 27-09) y, con una cuenta nueva, hoy no hay otra
+opción: a las cuentas nuevas Holded sólo les da tokens `pat_`, que esta versión del TPV no acepta.
+Cuando sea el caso, **el camino cambia en cinco puntos** y el resto del checklist vale igual:
+
+- ☐ En el alta, «¿La empresa tiene Holded?» → **«No lo usa»**. Razón social y NIF se teclean: sin
+      Holded no hay de dónde derivarlos, y sin ellos no pasa `fiscal-minimum`.
+- ☐ **El catálogo lo cargas tú**, desde «Cargar catálogo» en la ficha del tenant (ver Fase 2-bis). El
+      cliente no tiene panel todavía: en DRAFT no hay OWNER.
+- ☐ **El TPV es el SIF del comercio.** Cada caja tiene su serie (`C1`, `C2`…) y cada venta lleva
+      número correlativo, QR y leyenda. Hace falta la declaración responsable firmada antes de que
+      cobre de verdad.
+- ☐ En la Fase 2, **`sync-done` y `≥80% de taxes con rate` salen como «No aplica · sin Holded»**, y no
+      bloquean. Los que sí aplican siguen igual de duros.
+- ☐ En la Fase 6, **no hay bandeja de errores de Holded que mirar**: nada se sube a ningún sitio.
+
 ## Fase 1 — Alta DRAFT (super-admin)
 
 - ☐ 🔑 En `admin.mipiacetpv.com/superadmin` → **Crear tenant** con: `holdedApiKey` (+ `taxId` y `legalName` opcionales).
@@ -47,8 +64,33 @@ Abrir el detalle del tenant DRAFT y revisar el panel **onboardingHealth**. Todos
 - ☐ **≥80% de taxes con rate** — si está bajo, el catálogo del cliente tiene IVAs sin tipo en Holded (que los revise). Si tras limpiar sigue mal, ejecutar `resync-catalog`.
 - ☐ **≥50% de productos sellable** — productos no vendibles suelen ser por SKU faltante o tax sin resolver.
 - ☐ **Sin tickets SYNC_FAILED**.
-- ☐ **Cajero técnico provisionado** (🤖 se auto-crea tras el sync OK).
+- ☐ **Cajero técnico provisionado**. Con Holded se auto-crea tras el sync OK. **Sin Holded no hay sync,
+      así que se crea la primera vez que pulsas «Probar TPV»** — el botón está disponible desde el
+      primer momento y el check se pone verde solo al volver a la ficha.
 - ⚠️ Revisar también: nº de productos sin SKU (`products.withoutSku`) y servicios sellable (si el cliente vende servicios, recordar que las líneas SERVICE van con `serviceId`, no SKU).
+
+### Fase 2-bis — Cargar el catálogo (sólo sin Holded)
+
+Un comercio con caja y **0 productos** no pasa `products-sellable`, así que no se puede activar. Sin
+Holded no hay sync que los traiga y en DRAFT no hay OWNER que los dé de alta: el catálogo entra por
+aquí.
+
+- ☐ Preparar el fichero CSV con estas columnas exactas:
+      `sku,nombre,precio_con_iva,iva,categoria`. El de La Maestranza
+      (`docs/implantaciones/maestranza/catalogo-tpv.csv`) sirve de plantilla.
+- ☐ **El precio es el de la carta, con IVA.** El sistema guarda el neto y el TPV vuelve a pintar el de
+      la carta. No restes el IVA a mano.
+- ☐ El **SKU es obligatorio** y no puede llevar espacios: es la llave si algún día conectan Holded.
+- ☐ La **categoría** es el chip del TPV (cafés, raciones, bocadillos…). Varias, separadas por `;`.
+- ☐ Si el precio lleva **coma decimal**, entrecomíllalo (`"2,50"`) o usa el punto (`2.50`). Sin
+      comillas, la coma parte la fila y la carga lo rechaza diciendo cuántas columnas ha encontrado.
+- ☐ 🔑 Ficha del tenant → **«Cargar catálogo»** → elegir el fichero. Sale la **vista previa**: cuántas
+      filas entran, cuáles no y por qué, con el número de línea. **Todavía no se ha escrito nada.**
+- ☐ Revisar la vista previa y pulsar **«Cargar N productos»**. Entran todas o ninguna.
+- ☐ Un **SKU que ya exista no se pisa**: se salta y se dice. Así se puede volver a cargar el fichero
+      corregido sin duplicar nada.
+- ⚠️ Un comercio **con** Holded no tiene este panel, y la ruta le responde 409: el catálogo mixto está
+      prohibido (ADR-017).
 
 ## Fase 3 — Prueba completa en modo test (equipo mipiacetpv)
 
@@ -60,7 +102,9 @@ Abrir el detalle del tenant DRAFT y revisar el panel **onboardingHealth**. Todos
 - ☐ Probar **devolución** parcial y total.
 - ☐ Probar **apertura y cierre de turno** + **arqueo Z** (verificar desglose).
 - ☐ **Según vertical** (ver Fase 3-bis).
-- ☐ Verificar que las ventas test aparecen como **TEST/SKIPPED** y **no** han llegado a Holded.
+- ☐ Verificar que las ventas test aparecen como **TEST/SKIPPED** y **no** han llegado a Holded. Sin
+      Holded, además: **ni un registro fiscal** — el panel de Facturación (VERI*FACTU) tiene que seguir
+      con la serie a cero. El cajero técnico no emite ni gasta número.
 - ☐ Probar en el **hardware real** que usará el cliente (AP12 / handheld / móvil) y a su **resolución** (catálogo alcanzable, sin rebose lateral).
 
 ### Fase 3-bis — Específico por vertical
