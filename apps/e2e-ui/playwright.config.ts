@@ -37,8 +37,23 @@ export default defineConfig({
     locale: "es-ES",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
+    // EL TAMAÑO DEL VÍDEO, que tiene su historia.
+    //
+    // Playwright sólo escala el vídeo **hacia abajo**: pedirle 1920×1200 para
+    // un viewport de 1280×800 no amplía — pinta la página en la esquina de
+    // arriba a la izquierda y deja el resto en negro. Salió así una grabación
+    // entera.
+    //
+    // Y el tamaño NO se puede poner por pantalla: `use({ video })` dentro de
+    // un `describe` lo rechaza Playwright («forces a new worker»), y los
+    // capítulos 1 y 7 usan dos pantallas cada uno.
+    //
+    // Así que uno global, el del TPV, que son 20 de los 25 trozos: ése sale
+    // exacto. El panel (1280×900) y el móvil (390×844) son más grandes o más
+    // estrechos y Playwright los escala hacia abajo, que es lo que sí sabe
+    // hacer. De ahí a 1080p amplía `video/montar.sh`.
     video: MODO_VIDEO
-      ? { mode: "on", size: { width: 1920, height: 1200 } }
+      ? { mode: "on" as const, size: { width: 1280, height: 800 } }
       : "off",
     launchOptions: { slowMo: MODO_VIDEO ? 220 : 0 },
   },
