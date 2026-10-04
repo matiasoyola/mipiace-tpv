@@ -205,12 +205,123 @@ export function searchClientsLocal(
   return sortClientsAz(base).slice(0, limit);
 }
 
+// ─── ¿Hay que volver a bajarse los clientes? ──────────────────────────
+//
+// agenda-lista (hallazgo 🟡 1) · hasta este bloque el caché de clientes lo
+// llenaba SÓLO la pantalla Clientes. En un dispositivo recién emparejado
+// —que es el estado exacto del AP11 el primer día en casa de Sole— la
+// agenda pintaba «09:00 · Sin nombre» en todas las citas hasta que a
+// alguien se le ocurría abrir Clientes una vez. La recepción abre la
+// agenda y no sabe de quién es la cita de las diez.
+//
+// La decisión de refrescar se saca aparte, pura y sin IndexedDB, porque
+// es lo único de esto que se puede probar sin navegador.
+
+const LAST_SYNC_KEY = "mipiacetpv-clients-last-sync";
+
+/**
+ * Cuánto se da por buena la última bajada antes de volver a pedirla.
+ *
+ * 15 minutos es un compromiso, y conviene decir contra qué: la agenda se
+ * abre y se cierra decenas de veces en un turno, y `refreshClients()` se
+ * baja el tenant ENTERO paginando. Refrescar en cada apertura castigaría
+ * al WiFi del local sin ganar casi nada —una ficha dada de alta en ESTE
+ * dispositivo ya entra en el caché por `upsertClientInCache`—, y lo que
+ * esta ventana cubre es la clienta que dio de alta otra persona desde
+ * otro mostrador hace un rato.
+ */
+export const CLIENTS_CACHE_TTL_MS = 15 * 60_000;
+
+export function readClientsLastSyncAt(): number | null {
+  try {
+    const raw = localStorage.getItem(LAST_SYNC_KEY);
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeClientsLastSyncAt(ts: number): void {
+  try {
+    localStorage.setItem(LAST_SYNC_KEY, String(ts));
+  } catch {
+    // Sin almacenamiento se vive: se refrescará de más, no de menos.
+  }
+}
+
+/**
+ * Pura. `true` si merece la pena pedirle los clientes al servidor.
+ *
+ * Tres casos, y el orden importa:
+ *   · caché vacío → SÍ, siempre. Es el dispositivo recién emparejado.
+ *   · caché lleno pero sin marca de cuándo se llenó → SÍ. La marca nació
+ *     en este bloque, así que un TPV que viene de una versión anterior
+ *     tiene caché y no tiene marca: una vez y ya.
+ *   · caché lleno y marca dentro de la ventana → NO.
+ *
+ * Una marca en el futuro (reloj del hierro movido hacia atrás) cuenta
+ * como vencida: `ahora - ultimaSync` sale negativo y no pasa el `>=`, así
+ * que se compara el valor absoluto.
+ */
+export function necesitaRefrescoDeClientes(args: {
+  enCache: number;
+  ultimaSync: number | null;
+  ahora: number;
+  ttlMs?: number;
+}): boolean {
+  const { enCache, ultimaSync, ahora, ttlMs = CLIENTS_CACHE_TTL_MS } = args;
+  if (enCache === 0) return true;
+  if (ultimaSync == null) return true;
+  return Math.abs(ahora - ultimaSync) >= ttlMs;
+}
+
+/**
+ * Se asegura de que el caché de clientes sirve, y si no lo rellena.
+ *
+ * Reutiliza `refreshClients()` —la MISMA función que usa la pantalla
+ * Clientes, con su mezcla de altas offline incluida— en vez de duplicar
+ * la llamada. Devuelve `true` si bajó algo, para que quien la llame
+ * sepa si tiene que repintar.
+ *
+ * Sin red no rompe nada: se queda con lo que hubiera en el caché. Una
+ * agenda que no abre porque no hay WiFi sería peor que una agenda con
+ * algún «Sin nombre».
+ */
+export async function asegurarClientesEnCache(
+  ahora: number = Date.now(),
+): Promise<boolean> {
+  const enCache = (await loadClientsFromCache()).length;
+  if (
+    !necesitaRefrescoDeClientes({
+      enCache,
+      ultimaSync: readClientsLastSyncAt(),
+      ahora,
+    })
+  ) {
+    return false;
+  }
+  try {
+    await refreshClients(ahora);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ─── Sync con el servidor ─────────────────────────────────────────────
 
 // Descarga todos los clientes del tenant paginando por cursor y reemplaza
 // el caché local. Preserva las altas pendientes (offline) que el server
 // todavía no conoce, para que no desaparezcan de la lista al sincronizar.
-export async function refreshClients(): Promise<ClientRow[]> {
+export async function refreshClients(
+  // agenda-lista · el instante con el que se sella la marca. Por defecto
+  // el reloj, y explícito cuando quien llama ya tiene uno
+  // (`asegurarClientesEnCache`): dos relojes distintos en la misma
+  // decisión es cómo un caché recién bajado nace vencido.
+  ahora: number = Date.now(),
+): Promise<ClientRow[]> {
   const acc: ClientRow[] = [];
   let cursor: string | undefined;
   for (let safety = 0; safety < 200; safety++) {
@@ -234,6 +345,10 @@ export async function refreshClients(): Promise<ClientRow[]> {
   );
   const merged = [...acc, ...pending];
   await writeAll(merged);
+  // agenda-lista · la marca se pone AQUÍ y no en quien llama: así vale
+  // igual si el refresco lo pidió la pantalla Clientes o la agenda, y no
+  // hay forma de refrescar sin dejar constancia.
+  writeClientsLastSyncAt(ahora);
   return merged;
 }
 
