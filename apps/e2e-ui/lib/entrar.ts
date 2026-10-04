@@ -67,31 +67,51 @@ export async function entrarTpv(page: Page, email: string): Promise<void> {
 }
 
 /**
- * Deja el TPV en la rejilla de venta, pase lo que pase detrás del login:
- * el resumen del día anterior (hay que confirmarlo), la reanudación de un
- * turno abierto, o la apertura de uno nuevo con su fondo de caja.
+ * Deja el TPV en la rejilla de venta, pase lo que pase detrás del login.
+ *
+ * Detrás del PIN puede haber tres pantallas y NO se sabe cuál hasta que
+ * llega: el resumen del día anterior (que hay que confirmar), la
+ * reanudación de un turno que quedó abierto, o la apertura de uno nuevo con
+ * su fondo de caja.
+ *
+ * Y es un BUCLE, no tres `if` seguidos, porque eso fue un fallo real: el
+ * resumen del día lo trae una petición que todavía no había contestado
+ * cuando los tres `isVisible()` preguntaron, así que los tres dijeron «no» y
+ * el banco se quedaba mirando una tarjeta de resumen hasta agotar el
+ * tiempo. El síntoma era «no encuentro el botón Clientes», que no dice nada.
+ * Pasa justo después de cerrar un turno, o sea en el capítulo 10.
  */
 export async function turnoAbierto(page: Page, fondoEuros = 100): Promise<void> {
-  const resumen = page.getByRole("button", { name: /Confirmar/ });
-  if (await resumen.isVisible().catch(() => false)) {
-    await resumen.click();
-  }
+  const ventaLista = page.getByRole("button", { name: "Clientes" });
+  const resumen = page.getByRole("button", { name: /^Confirmar/ });
   const reanudar = page.getByRole("button", { name: /Reanudar turno/ });
-  if (await reanudar.isVisible().catch(() => false)) {
-    await reanudar.click();
-    return;
-  }
   const abrir = page.getByRole("button", { name: /^Abrir turno/ });
-  if (await abrir.isVisible().catch(() => false)) {
-    // El fondo NO se escribe: el campo es el `AmountField` de la app (un
-    // `div` con `aria-label`, no un `input`) y el importe se teclea con el
-    // CashPad propio — hallazgo H2 de v1.12, el teclado de Android no vale.
-    // Para el banco basta uno de los atajos de la propia pantalla.
-    await page
-      .getByRole("button", { name: `${fondoEuros},00 €`, exact: true })
-      .click();
-    await abrir.click();
+
+  const visible = async (l: typeof ventaLista) =>
+    l.isVisible().catch(() => false);
+
+  for (let intento = 0; intento < 40; intento++) {
+    if (await visible(ventaLista)) return;
+    if (await visible(resumen)) {
+      await resumen.click().catch(() => {});
+    } else if (await visible(reanudar)) {
+      await reanudar.click().catch(() => {});
+    } else if (await visible(abrir)) {
+      // El fondo NO se escribe: el campo es el `AmountField` de la app (un
+      // `div` con `aria-label`, no un `input`) y el importe se teclea con el
+      // CashPad propio — hallazgo H2 de v1.12, el teclado de Android no
+      // vale. Para el banco basta uno de los atajos de la propia pantalla.
+      await page
+        .getByRole("button", { name: `${fondoEuros},00 €`, exact: true })
+        .click()
+        .catch(() => {});
+      await abrir.click().catch(() => {});
+    }
+    await page.waitForTimeout(500);
   }
+  throw new Error(
+    "El TPV no llegó a la pantalla de venta: ni resumen, ni reanudar, ni abrir turno.",
+  );
 }
 
 /**

@@ -106,10 +106,24 @@ export async function portada(
   await esconder(page);
 }
 
-/** Quita el rótulo de en medio (para que no tape lo que hay que ver). */
+/**
+ * Quita el rótulo de en medio, y le BORRA el texto.
+ *
+ * Borrarlo no es cosmético: el rótulo vive en el DOM, y un `getByText` del
+ * propio spec lo encuentra igual que si fuera de la app. Un rótulo que decía
+ * «Cerrar el día» hizo fallar la comprobación de la pantalla que dice
+ * «Cerrar el día» — el banco se estaba leyendo a sí mismo. Al esconderlo se
+ * vacía, y así ningún rótulo viejo puede volver a mentir.
+ */
 export async function esconder(page: Page): Promise<void> {
   await page.evaluate((id) => {
-    document.getElementById(id)?.setAttribute("data-visible", "0");
+    const capa = document.getElementById(id);
+    if (!capa) return;
+    capa.setAttribute("data-visible", "0");
+    const cap = capa.querySelector(".cap");
+    const txt = capa.querySelector(".txt");
+    if (cap) cap.textContent = "";
+    if (txt) txt.textContent = "";
   }, ID_CAPA);
   await latido(page, 450);
 }
