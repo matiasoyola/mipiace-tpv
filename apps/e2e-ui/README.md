@@ -19,7 +19,7 @@ hacer.
 |---|---|
 | `pnpm e2e:agenda` | el banco entero |
 | `pnpm e2e:agenda:seed` | sólo volver a sembrar |
-| `pnpm --filter @mipiacetpv/e2e-ui run video` | lo mismo, grabando y a ritmo humano |
+| `pnpm --filter @mipiacetpv/e2e-ui run video` | lo mismo, grabando y a ritmo humano (`BANCO_VIDEO=1`) |
 | `pnpm --filter @mipiacetpv/e2e-ui run e2e:solo -- specs/06-*` | un capítulo suelto, sin sembrar |
 | `video/montar.sh` | monta los MP4 (un capítulo por fichero + uno completo) |
 
@@ -84,6 +84,10 @@ decir lo mismo: el seed, que lo mete en la base, y los specs, que lo teclean
 en la pantalla y lo comprueban.
 
 ## El vídeo
+
+El script `video` existe desde agenda-lista: este README y el done del banco
+ya lo citaban, pero no estaba en el `package.json` (había que exportar
+`BANCO_VIDEO=1` a mano).
 
 `BANCO_VIDEO=1` enciende tres cosas: la grabación, el `slowMo` y las pausas
 entre pasos. Los rótulos se pintan **siempre** (cuestan nada y hacen legible
