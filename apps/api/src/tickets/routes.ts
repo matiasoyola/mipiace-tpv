@@ -52,6 +52,7 @@ import { maybeEnqueueAutoEmail } from "./email-trigger.js";
 import {
   holdedDestination,
   logHoldedUploadSkipped,
+  nuevoTicketStatus,
   paidTicketStatus,
   shouldEnqueueHoldedRefundUpload,
   shouldEnqueueHoldedUpload,
@@ -662,8 +663,14 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             // v1.8-Fiado · un fiado nace ON_CREDIT con la deuda viva; una
             // venta normal nace PENDING_SYNC para subir a Holded ya.
             // catalogo-local · sin Holded nace PAID, no PENDING_SYNC.
-            // Ver `paidTicketStatus` para las tres cosas que rompía.
-            status: isCredit ? TicketStatus.ON_CREDIT : paidTicketStatus(destinoHolded),
+            // catalogo-en-alta · y una venta del modo prueba nace TEST,
+            // que antes sólo lo ponía el worker de subida —y en un
+            // comercio sin Holded ese worker no corre—. Ver
+            // `nuevoTicketStatus`.
+            status: nuevoTicketStatus(destinoHolded, {
+              esPrueba: cashier.isTest === true,
+              aCredito: isCredit,
+            }),
             creditPending: isCredit ? new Prisma.Decimal(totals.total) : null,
             total: new Prisma.Decimal(totals.total),
             totalTax: new Prisma.Decimal(totals.tax),
@@ -1263,7 +1270,12 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
               // arriba (el claim del DRAFT) se queda en PENDING_SYNC: es
               // el cerrojo de la transacción, dura microsegundos y este
               // update lo pisa antes de que nadie pueda leerlo.
-              status: paidTicketStatus(destinoHolded),
+              // catalogo-en-alta · el cobro de una MESA en modo prueba
+              // también nace TEST. Es el camino que usa el implantador en
+              // un bar, así que es justo el que no podía quedarse fuera.
+              status: nuevoTicketStatus(destinoHolded, {
+                esPrueba: cashier.isTest === true,
+              }),
               internalNumber,
               // `shift_id` es columna sellada (S1 §2.4), pero AQUÍ el
               // ticket sigue siendo un DRAFT sin `sealed_at`: el guardián

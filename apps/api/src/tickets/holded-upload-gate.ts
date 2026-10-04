@@ -172,6 +172,50 @@ export function paidTicketStatus(destination: HoldedDestination): TicketStatus {
     : TicketStatus.PAID;
 }
 
+/**
+ * El estado con el que NACE un ticket cobrado, con el ensayo incluido.
+ *
+ * ── catalogo-en-alta · por qué esto no estaba y hacía falta ────────────
+ *
+ * `TicketStatus.TEST` no lo ponía nadie al cobrar: lo ponía el WORKER de
+ * subida (`upload-ticket.ts`), que mira `User.isTestCashier` y marca el
+ * ticket TEST en vez de subirlo. Eso funciona en un comercio con Holded,
+ * donde el job existe.
+ *
+ * En un comercio SIN Holded ese job no se encola —es la razón de ser de
+ * este gate—, así que la venta de ensayo del modo prueba se quedaba
+ * **PAID para siempre**. Y `purgeTestData`, que corre al activar, borra
+ * los tickets `status = TEST`: la venta de ensayo del implantador
+ * sobrevivía a la activación y se quedaba en el comercio del cliente
+ * como una venta cobrada de verdad, en su arqueo y en su panel, sin
+ * registro fiscal detrás.
+ *
+ * Lo encontró el e2e del camino completo de La Maestranza
+ * (`test-e2e/catalogo-en-alta.e2e.ts`), que esperaba `TEST` y recibió
+ * `PAID`.
+ *
+ * Así que el estado de prueba se decide donde se cobra, con la señal que
+ * ya viaja en la sesión (`request.cashier.isTest`, que es
+ * `purpose === "test-cashier"` y lo pone sólo
+ * `issueTestCashierSession`). El worker sigue marcando TEST por su
+ * cuenta: es la red de debajo para los tickets de prueba que ya existen
+ * en los comercios con Holded.
+ *
+ * El orden de las tres ramas importa y es éste:
+ *
+ *   1. prueba    → TEST. Un ensayo no es un fiado ni una venta.
+ *   2. a crédito → ON_CREDIT (v1.8-Fiado).
+ *   3. el resto  → PENDING_SYNC o PAID según haya destino en Holded.
+ */
+export function nuevoTicketStatus(
+  destination: HoldedDestination,
+  opts: { esPrueba: boolean; aCredito?: boolean },
+): TicketStatus {
+  if (opts.esPrueba) return TicketStatus.TEST;
+  if (opts.aCredito) return TicketStatus.ON_CREDIT;
+  return paidTicketStatus(destination);
+}
+
 /** Lo mínimo de un logger de Fastify que este módulo necesita. */
 export interface HoldedGateLogger {
   info(obj: Record<string, unknown>, msg: string): void;
