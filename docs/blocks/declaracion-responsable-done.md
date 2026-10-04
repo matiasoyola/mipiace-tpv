@@ -1,7 +1,7 @@
 # declaracion-responsable · la declaración del SIF, visible dentro de mipiacetpv — DONE
 
 **Rama:** `declaracion-responsable` (sale de `master` en 1ed5f46) · **Estado:** **en master desde el
-02-10-2026** (merge `231db55`, PR #1, CI verde en `13f9933`), **sin desplegar**.
+02-10-2026** (merge `231db55`, PR #1, CI verde en `13f9933`), **desplegado el 02-10-2026** (`de4f915`).
 
 mipiacetpv es un sistema informático de facturación (ADR-019, en producción desde el 27-09 con
 2310f6e). El art. 15 de la Orden HAC/1177/2024 obliga al productor a que la declaración
