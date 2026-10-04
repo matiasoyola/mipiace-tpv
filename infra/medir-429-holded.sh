@@ -18,7 +18,9 @@ set -u
 cd /opt/mipiacetpv
 PGU=$(grep -E '^POSTGRES_USER=' infra/.env.production | cut -d= -f2-)
 PGD=$(grep -E '^POSTGRES_DB=' infra/.env.production | cut -d= -f2-)
-psql_q() { docker exec -i mipiacetpv-postgres psql -U "$PGU" -d "$PGD" -At -F '|' -c "$1"; }
+# OJO: el script llega por stdin (ssh ... 'bash -s' < script). Ningún comando puede leer
+# stdin o se come el resto del script: por eso los </dev/null y nada de `docker exec -i`.
+psql_q() { docker exec mipiacetpv-postgres psql -U "$PGU" -d "$PGD" -At -F "|" -c "$1" < /dev/null; }
 
 read -r -d '' LUA <<'EOF'
 local out = {}
@@ -45,7 +47,7 @@ EOF
 psql_q "select id, name from tenants" > /tmp/m429-tenants.txt
 docker exec mipiacetpv-redis redis-cli EVAL "$LUA" 0 \
   catalog-incremental ticket-upload refund-upload initial-sync \
-  reconciliation-daily product-image-cache > /tmp/m429-redis.txt
+  reconciliation-daily product-image-cache < /dev/null > /tmp/m429-redis.txt
 
 echo "== 1 · Colas de BullMQ (jobs fallidos que Redis conserva)"
 awk -F'|' '$1=="Q"{ o = ($5>0) ? strftime("%Y-%m-%d", int($5/1000)) : "—";
