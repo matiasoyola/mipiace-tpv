@@ -32,6 +32,9 @@ for _, q in ipairs(ARGV) do
     local f = tonumber(redis.call('HGET', k, 'finishedOn') or '') or 0
     if f > 0 and (oldest == nil or f < oldest) then oldest = f end
     local r = redis.call('HGET', k, 'failedReason') or ''
+    local d0 = redis.call('HGET', k, 'data') or ''
+    local t0 = string.match(d0, '"tenantId":"([^"]+)"') or '?'
+    table.insert(out, 'R|' .. q .. '|' .. t0 .. '|' .. string.sub((string.gsub((string.gsub(r, 'Url=.*', '')), '|', '/')), 1, 60))
     if string.find(r, '429', 1, true) then
       n429 = n429 + 1
       local d = redis.call('HGET', k, 'data') or ''
@@ -56,8 +59,14 @@ awk -F'|' '$1=="Q"{ o = ($5>0) ? strftime("%Y-%m-%d", int($5/1000)) : "—";
 echo "== 2 · 429 por cliente y día (sólo los que agotaron reintentos)"
 awk -F'|' 'NR==FNR { n[$1]=$2; next }
   $1=="J" { k = (($4 in n) ? n[$4] : $4) " · " $2 " · " strftime("%Y-%m-%d", int($3/1000)); c[k]++ }
-  END { if (length(c)==0) print "  (ninguno)"; for (k in c) printf "  %4d  %s\n", c[k], k }' \
+  END { m=0; for (k in c) { printf "  %4d  %s\n", c[k], k; m++ } if (m==0) print "  (ninguno)" }' \
   /tmp/m429-tenants.txt /tmp/m429-redis.txt | sort -k3
+
+echo "== 2b · De qué son los jobs fallidos que hay (cliente · cola · motivo)"
+awk -F'|' 'NR==FNR { n[$1]=$2; next }
+  $1=="R" { k = (($3 in n) ? n[$3] : $3) " · " $2 " · " $4; c[k]++ }
+  END { m=0; for (k in c) { printf "  %4d  %s\n", c[k], k; m++ } if (m==0) print "  (ninguno)" }' \
+  /tmp/m429-tenants.txt /tmp/m429-redis.txt | sort -rn
 
 echo "== 3 · holded_uploads con un 429 en last_error (no llegaron a DONE)"
 psql_q "select t.name, u.kind, u.status, count(*), to_char(max(u.last_attempt_at),'YYYY-MM-DD HH24:MI')
