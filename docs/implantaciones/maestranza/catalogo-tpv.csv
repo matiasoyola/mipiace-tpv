@@ -1,0 +1,129 @@
+sku,nombre,precio_con_iva,iva,categoria
+CAF-001,Café con leche,1.60,10,cafés
+CAF-002,Café solo,1.60,10,cafés
+CAF-003,Cortado,1.60,10,cafés
+CAF-004,Café bombon,2.00,10,cafés
+CAF-005,Carajillo,3.00,10,cafés
+CAF-006,Café para llevar,1.90,10,cafés
+CAF-007,"Infusión (manzanilla, poleo, tila…)",1.60,10,cafés
+CAF-008,Cola Cao,2.00,10,cafés
+CAF-009,Vaso de leche,2.00,10,cafés
+BOL-001,Croissant,2.50,10,desayunos
+BOL-002,Croissant york y queso,3.00,10,desayunos
+BOL-003,Napolitana de chocolate,2.50,10,desayunos
+BOL-004,Napolitana de crema,2.50,10,desayunos
+BOL-005,Napolitana de queso,2.50,10,desayunos
+BOL-006,Tostada de jamón,2.50,10,desayunos
+BOL-007,Tostada con mantequilla,1.50,10,desayunos
+BOL-008,Tostada de jamón York y queso,2.50,10,desayunos
+BOL-009,Tostada con tomate,2.50,10,desayunos
+BOL-010,Tostada de jamón ibérico,7.00,10,desayunos
+BOL-011,Dónut,1.50,10,desayunos
+BOL-012,Pincho de tortilla,3.00,10,desayunos
+BOL-013,Empanada de carne,3.50,10,desayunos
+BOL-014,Empanada de pollo,3.50,10,desayunos
+BOL-015,Arepa de jamón York y queso,3.60,10,desayunos
+BOL-016,Arepa,3.50,10,desayunos
+BOL-017,Tostada de pan molde con mantequilla,1.50,10,desayunos
+BOL-018,Sándwich mixto con huevo,3.50,10,desayunos
+BOL-019,Sándwich mixto,2.50,10,desayunos
+BOL-020,Sándwich vegetal,5.00,10,desayunos
+REF-001,Aquarius,2.50,10,refrescos
+REF-002,Coca-Cola,2.50,10,refrescos
+REF-003,Batido de chocolate,2.50,10,refrescos
+REF-004,Trina naranja,2.50,10,refrescos
+REF-005,Trina limón,2.50,10,refrescos
+REF-006,Fanta limón,2.50,10,refrescos
+REF-007,Fanta naranja,2.50,10,refrescos
+REF-008,Nestea,2.50,10,refrescos
+REF-009,Mosto,2.50,10,refrescos
+REF-010,Red Bull,3.00,10,refrescos
+REF-011,Tónica,2.50,10,refrescos
+REF-012,Zumo de bote,2.50,10,refrescos
+REF-013,Zumo natural mediano,3.00,10,refrescos
+REF-014,Tinto de verano,2.50,10,refrescos
+REF-015,Agua pequeña,1.00,10,refrescos
+REF-016,Agua grande,2.50,10,refrescos
+REF-017,Agua con gas,3.00,10,refrescos
+REF-018,Mixta,1.70,10,refrescos
+REF-019,Monster,2.50,10,refrescos
+REF-020,Bitter Kas,2.50,10,refrescos
+CER-001,Botellín tostada,1.70,10,cervezas
+CER-002,Caña mediana,1.70,10,cervezas
+CER-003,Copa de cerveza grande,2.50,10,cervezas
+CER-004,Heineken botellín,1.70,10,cervezas
+CER-005,Heineken tercio,2.70,10,cervezas
+CER-006,Jarra grande de cerveza,3.50,10,cervezas
+CER-007,Mahou botellín,1.70,10,cervezas
+CER-008,Mahou tercio,2.70,10,cervezas
+CER-009,Tubo de caña,2.00,10,cervezas
+CER-010,Cerveza especial tercio,3.00,10,cervezas
+CER-011,Coronita,3.00,10,cervezas
+CER-012,Radler botellín,1.70,10,cervezas
+CER-013,Radler tercio,2.70,10,cervezas
+CER-014,Estrella Galicia botellín,1.70,10,cervezas
+CER-015,Estrella Galicia tercio,2.70,10,cervezas
+CER-016,Vaso desechable de cerveza,3.00,10,cervezas
+VIN-001,Ribera,2.50,10,vinos
+VIN-002,Rioja,2.50,10,vinos
+VIN-003,Verdejo,2.50,10,vinos
+VIN-004,Chato,1.50,10,vinos
+VIN-005,Frizzante,2.50,10,vinos
+VIN-006,Beronia,2.50,10,vinos
+LIC-001,Johnnie Walker Etiqueta Negra,9.00,10,licores
+LIC-002,Johnnie Walker Etiqueta Roja,6.00,10,licores
+LIC-003,Jack Daniel's,9.00,10,licores
+LIC-004,Nordes,9.00,10,licores
+LIC-005,Tanqueray,6.00,10,licores
+LIC-006,Puerto de Indias,7.00,10,licores
+LIC-007,Vodka Absolut,6.00,10,licores
+LIC-008,Cacique,6.00,10,licores
+LIC-009,DYC,6.00,10,licores
+LIC-010,DYC 8 Años,9.00,10,licores
+LIC-011,Beefeater,6.00,10,licores
+LIC-012,JB,6.00,10,licores
+LIC-013,Seagram's,6.00,10,licores
+LIC-014,Larios,6.00,10,licores
+LIC-015,Brugal,5.00,10,licores
+LIC-016,Ballantine's,6.00,10,licores
+LIC-017,Barceló,5.00,10,licores
+LIC-018,Jägermeister,7.00,10,licores
+LIC-019,Crema de orujo,2.50,10,licores
+LIC-020,Licor de hierbas,2.50,10,licores
+LIC-021,Ponche,2.50,10,licores
+LIC-022,Chinchón,2.50,10,licores
+LIC-023,Martini,2.50,10,licores
+LIC-024,Limoncello,3.00,10,licores
+LIC-025,Pacharán,2.50,10,licores
+LIC-026,Licor de manzana,2.50,10,licores
+LIC-027,Licor de mora,2.50,10,licores
+LIC-028,Castellana,2.50,10,licores
+LIC-029,Magno,2.50,10,licores
+LIC-030,Soberano,2.50,10,licores
+LIC-031,White Label (copa),2.50,10,licores
+RAC-001,Ensaladilla rusa,7.00,10,raciones
+RAC-002,Alitas de pollo,10.00,10,raciones
+RAC-003,Gambas al ajillo,14.00,10,raciones
+RAC-004,Chopitos,12.00,10,raciones
+RAC-005,Fingers de pollo,10.00,10,raciones
+RAC-006,Croquetas,10.00,10,raciones
+RAC-007,Patatas bravas,10.00,10,raciones
+RAC-008,Patatas alioli,8.00,10,raciones
+RAC-009,Queso curado,12.00,10,raciones
+RAC-010,Jamón serrano,12.00,10,raciones
+RAC-011,Magro con tomate,10.00,10,raciones
+RAC-012,Calamares,12.00,10,raciones
+RAC-013,Torrezno,10.00,10,raciones
+RAC-014,Torrezno especial,15.00,10,raciones
+GRA-001,Limón granizado,2.50,10,refrescos
+BOC-001,Bocadillo,5.00,10,bocadillos
+BOC-002,Bocadillo especial,7.00,10,bocadillos
+BOC-003,Montado,2.50,10,bocadillos
+BOC-004,Montado especial,3.50,10,bocadillos
+BOC-005,Extra de ingrediente,0.50,10,bocadillos
+BOC-006,Hamburguesa normal,5.00,10,bocadillos
+BOC-007,Hamburguesa especial,7.00,10,bocadillos
+PLA-001,Plato combinado,10.00,10,platos
+PLA-002,Plato combinado de ternera,12.00,10,platos
+PLA-003,Ingrediente extra,1.00,10,platos
+BOL-021,Croissant mermelada y mantequilla,2.50,10,desayunos
