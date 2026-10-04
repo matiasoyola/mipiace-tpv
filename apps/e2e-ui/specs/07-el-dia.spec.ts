@@ -47,10 +47,9 @@ const CORTE_DE_SONIA = "11:30";
 /** Las mechas de Mari Carmen (capítulo 6). Las mueve —y las devuelve— el
  *  test de mover: sólo las hace Marta, así que no cambia de columna. */
 const MECHAS_DE_CARMEN = "12:30";
-/** El tinte de Rosa, en sus dos mitades (capítulo 6). Las dos las sabe
- *  hacer Marta Y Lucía desde el capítulo 5, que es lo que hace útil al
- *  test de «los huecos son los suyos». */
-const TINTE_APLICA_DE_ROSA = "09:00";
+/** La segunda mitad del tinte de Rosa (capítulo 6). La saben hacer Marta
+ *  Y Lucía desde el capítulo 5, que es lo que hace útil al test de «los
+ *  huecos son los suyos». */
 const TINTE_LAVA_DE_ROSA = "10:15";
 
 async function abrirAgenda(page: import("@playwright/test").Page) {
@@ -301,9 +300,14 @@ test.describe("en el mostrador", () => {
     // saldría un «no» sobre una hora que la pantalla acababa de ofrecer.
     //
     // Se mira con el tinte de las 10:15 de Rosa, que desde el capítulo 5
-    // saben hacer Marta Y Lucía: a las 09:00 Marta está con la primera
-    // mitad del tinte y Lucía está libre, así que esa hora sólo puede
-    // aparecer en la lista si alguien dejó de fijar a Marta.
+    // saben hacer Marta Y Lucía. La hora sonda es las 12:30: Marta está
+    // con las mechas de Carmen y Lucía está libre, así que esa hora sólo
+    // puede aparecer en la lista si alguien dejó de fijar a Marta.
+    //
+    // 12:30 y no 09:00, que fue el primer intento: el turno de Lucía
+    // empieza a las 10:00 (capítulo 3), así que a las nueve no está
+    // libre —está fuera de su jornada— y la sonda no probaba nada. Salía
+    // verde con el fijado y sin él.
     //
     // NO MUEVE NADA: abre la hoja, mira y cancela. Los capítulos 8 y 9
     // cobran estas citas.
@@ -317,7 +321,7 @@ test.describe("en el mostrador", () => {
     await expect(chips.first()).toBeVisible({ timeout: 20_000 });
     const horas = (await chips.allTextContents()).map((h) => h.trim());
     expect(horas.length).toBeGreaterThan(0);
-    expect(horas).not.toContain(TINTE_APLICA_DE_ROSA);
+    expect(horas).not.toContain(MECHAS_DE_CARMEN);
 
     await hoja.getByRole("button", { name: "cancelar" }).click();
     await expect(hoja).toHaveCount(0);
