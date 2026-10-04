@@ -26,8 +26,8 @@ function leerDelEnvDeLaApi(): string | null {
   }
   for (const linea of texto.split("\n")) {
     const m = /^\s*DATABASE_URL\s*=\s*(.*)\s*$/.exec(linea);
-    if (!m) continue;
-    // Quita comillas y comentario de final de línea.
+    if (!m?.[1]) continue;
+    // Quita las comillas de alrededor, si las lleva.
     return m[1].trim().replace(/^["']|["']$/g, "");
   }
   return null;

@@ -47,3 +47,7 @@ docs/manuales/
 # A4 · salidas temporales de infra/test/bundle-android.test.ts (dos vite build
 # a un outDir aparte para no pisar el dist de trabajo).
 apps/tpv-web/.a4-test-dist-*/
+
+# Banco de la agenda: resultados de Playwright (trazas, capturas, vídeos).
+apps/e2e-ui/resultados/
+apps/e2e-ui/playwright-report/

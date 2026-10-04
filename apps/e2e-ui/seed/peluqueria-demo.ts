@@ -70,17 +70,41 @@ function hashDeviceToken(plain: string): string {
   return createHash("sha256").update(plain, "utf8").digest("hex");
 }
 
+/**
+ * Vacía la base del banco antes de sembrar.
+ *
+ * El primer intento fue `tenant.deleteMany()` confiando en el ON DELETE
+ * CASCADE del tenant. No vale, y el fallo tardó una pasada en salir: en
+ * cuanto el TPV abre un turno hay una fila en `shifts` que apunta al usuario
+ * por `shifts_user_id_fkey`, y esa FK no cascadea desde el tenant. El borrado
+ * muere con «Foreign key constraint violated». Mañana la rompería otra FK
+ * nueva, así que no se arregla con un orden de borrados a mano.
+ *
+ * TRUNCATE de todas las tablas menos la de migraciones: la base es del banco
+ * y de nadie más (el guardarraíl de arriba lo exige), el orden deja de
+ * importar y ninguna FK futura puede volver a romper esto.
+ */
+async function vaciar(prisma: PrismaClient): Promise<void> {
+  const tablas = await prisma.$queryRaw<Array<{ nombre: string }>>`
+    SELECT tablename AS nombre
+      FROM pg_tables
+     WHERE schemaname = 'public'
+       AND tablename <> '_prisma_migrations'
+  `;
+  if (tablas.length === 0) return;
+  const lista = tablas.map((t) => `public."${t.nombre}"`).join(", ");
+  await prisma.$executeRawUnsafe(
+    `TRUNCATE TABLE ${lista} RESTART IDENTITY CASCADE`,
+  );
+}
+
 export async function sembrar(prisma: PrismaClient): Promise<void> {
   const pinHash = await argon2.hash(PIN, { type: argon2.argon2id });
   const passwordHash = await argon2.hash(PASSWORD_DUENA, {
     type: argon2.argon2id,
   });
 
-  // Por id Y por nombre: si una pasada anterior se quedó a medias con otro
-  // id (o alguien lo creó a mano desde el admin), también se va.
-  await prisma.tenant.deleteMany({
-    where: { OR: [{ id: ID.tenant }, { name: TENANT_NOMBRE }] },
-  });
+  await vaciar(prisma);
 
   await prisma.tenant.create({
     data: {
