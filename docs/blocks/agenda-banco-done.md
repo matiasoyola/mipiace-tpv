@@ -418,3 +418,19 @@ contaría la película al revés.
 - [x] **`docs/qa/agenda-banco-manual.md`** con lo que hay que mirar en hierro.
 - [x] **Ni una línea de producción tocada.** Los hallazgos van arriba con su
       severidad; los arregla quien Dirección diga, en otro bloque.
+
+## 9 · Commits
+
+| Hash | Qué |
+|---|---|
+| `f2f942f` | El plan de capítulos y los dos primeros hallazgos (leyendo el motor, antes de grabar) |
+| `870d49e` | El paquete `apps/e2e-ui` y el seed de «Peluquería Demo» |
+| `f36fc5a` | La maquinaria del banco (config, rótulos, mirada a la BD, arranque de la stack) y el capítulo 1 |
+| `5965012` | Capítulos 2, 3 y 4 — servicios, equipo y horario |
+| `287ed01` | Capítulo 5 — el panel de salud, con sus dos actos |
+| `85b702d` | Capítulo 6 — los sí y los no de reservar |
+| `c13e591` | Capítulo 7 — el día, y lo que no se puede hacer en él |
+| `e284628` | Capítulo 8 — cobrar la cita, en efectivo y mixto |
+| `22d425f` | Capítulos 9 y 10 — cerrar el día y el alta sin red |
+| `53ba6dc` | El vídeo (overlay + ffmpeg) y la pasada en hierro |
+| `85c7321` | El done, los sabotajes, y el test que faltaba |
