@@ -31,6 +31,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/api/package.json apps/api/
 COPY apps/admin/package.json apps/admin/
 COPY apps/tpv-web/package.json apps/tpv-web/
+COPY apps/e2e-ui/package.json apps/e2e-ui/
 COPY packages/db/package.json packages/db/
 # v1.9.4-fix: escpos-builder faltaba en esta lista desde su creación.
 # Era inofensivo hasta que su ticket.ts importó @mipiacetpv/ticket-model:

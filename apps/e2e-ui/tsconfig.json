@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    // DOM: los `page.evaluate` del overlay de rótulos y el sembrado del
+    // token del dispositivo corren DENTRO del navegador, no en Node.
+    "lib": ["ES2022", "DOM"]
+  },
+  "include": ["seed/**/*.ts", "lib/**/*.ts", "specs/**/*.ts", "playwright.config.ts"]
+}

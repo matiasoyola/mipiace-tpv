@@ -1,0 +1,22 @@
+{
+  "name": "@mipiacetpv/e2e-ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Banco de pruebas de la agenda por la interfaz real (Playwright). No entra en CI.",
+  "scripts": {
+    "stack": "tsx seed/stack.ts",
+    "seed": "tsx seed/peluqueria-demo.ts",
+    "e2e": "pnpm run stack && playwright test",
+    "e2e:ui": "pnpm run stack && playwright test --ui",
+    "e2e:solo": "playwright test"
+  },
+  "devDependencies": {
+    "@mipiacetpv/db": "workspace:*",
+    "@playwright/test": "^1.49.0",
+    "@types/node": "^20.16.10",
+    "argon2": "^0.41.1",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3"
+  }
+}
