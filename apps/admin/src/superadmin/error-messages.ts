@@ -11,13 +11,23 @@
 export const ERROR_LABEL: Record<string, string> = {
   // --- Holded API errors ---
   HOLDED_API_KEY_INVALID:
-    "La API key de Holded ya no es válida. Pide al cliente una nueva en Holded → Configuración → Desarrolladores.",
+    "La API key de Holded ya no es válida. Pide al cliente una nueva en Holded → Configuración → Más → Desarrolladores.",
+  // holded-pat · la clave nueva de Holded (`pat_…`) no sirve: no autentica
+  // contra la API v1, que es la única que habla esta versión del TPV. Se
+  // dice qué clave hace falta y dónde se saca, porque el implantador lo
+  // lee delante del cliente.
+  HOLDED_API_KEY_V1_REQUIRED:
+    "Esa clave es un API Token nuevo de Holded (empieza por «pat_») y esta versión del TPV necesita una API Key v1. Genérala en Holded → Configuración → Más → Desarrolladores y pega esa.",
+  // No es que Holded no responda: responde algo que no esperábamos. Se
+  // separa de HOLDED_UNREACHABLE para no mandar a nadie a mirar la red.
+  HOLDED_UNEXPECTED_STATUS:
+    "Holded ha respondido algo inesperado. Reintenta y, si sigue, avisa a Mi Piace.",
   HOLDED_SUSPENDED:
     "La cuenta Holded del cliente está suspendida. Tiene que regularizarla con Holded antes de seguir.",
   HOLDED_INVALID_RESPONSE:
     "Holded ha devuelto una respuesta inesperada. Si persiste, revisa el estado del servicio.",
   HOLDED_UNREACHABLE:
-    "No conseguimos contactar con Holded. Reintenta en unos minutos.",
+    "No conseguimos contactar con Holded (red, timeout o caída suya). Reintenta en unos minutos.",
   HOLDED_RATE_LIMITED:
     "Holded está limitando peticiones. La próxima sincronización irá un poco más lenta.",
   NO_HOLDED_KEY:

@@ -13,65 +13,45 @@
 // nada sobre la respuesta al cliente desde aquí, porque la traducción
 // puede variar según el contexto (rotación falla → 400; onboarding
 // falla → 401; etc.).
+//
+// holded-pat · QUÉ significa cada respuesta de Holded no se decide aquí:
+// vive en `clave-rechazada.ts`, que es el único sitio que lo sabe y por
+// el que pasan también el alta y la rotación del super-admin.
 
-import {
-  ApiKeyClient,
-  HoldedApiError,
-  HoldedInvalidResponseError,
-  HoldedSubscriptionSuspendedError,
-  listProductsPage,
-} from "@mipiacetpv/holded-client";
+import { ApiKeyClient, listProductsPage } from "@mipiacetpv/holded-client";
 
 import { loadEnv } from "../env.js";
 
-export type ProbeFailureCode =
-  | "INVALID_HOLDED_KEY"
-  | "HOLDED_SUSPENDED"
-  | "HOLDED_INVALID_RESPONSE"
-  | "HOLDED_UNREACHABLE";
+import {
+  classifyHoldedKeyFailure,
+  esTokenPat,
+  MENSAJES,
+  type HoldedKeyFailureCode,
+} from "./clave-rechazada.js";
+
+export type ProbeFailureCode = HoldedKeyFailureCode;
 
 export type ProbeResult =
   | { ok: true }
   | { ok: false; code: ProbeFailureCode; message: string };
 
-// Mensajes en español, listos para mostrar al propietario en admin.
-// Si en algún momento queremos i18n, los movemos a un map con keys.
-const MESSAGES: Record<ProbeFailureCode, string> = {
-  INVALID_HOLDED_KEY:
-    "Holded rechaza la API Key. Genera una nueva desde tu admin y reintenta.",
-  HOLDED_SUSPENDED:
-    "Tu cuenta de Holded está suspendida por impago. Regulariza el pago en Holded y vuelve a intentarlo.",
-  HOLDED_INVALID_RESPONSE:
-    "Holded ha devuelto una respuesta que no es JSON. Es posible que estén con incidencia.",
-  HOLDED_UNREACHABLE:
-    "No hemos podido contactar con Holded. Reintenta en unos minutos.",
-};
-
 export async function probeHoldedKey(apiKey: string): Promise<ProbeResult> {
+  // Antes de la red: un `pat_` no entra en v1 con ninguna cabecera.
+  if (esTokenPat(apiKey)) {
+    return {
+      ok: false,
+      code: "HOLDED_KEY_V1_REQUIRED",
+      message: MENSAJES.HOLDED_KEY_V1_REQUIRED,
+    };
+  }
   const env = loadEnv();
   const client = new ApiKeyClient(apiKey, { baseUrl: env.HOLDED_BASE_URL });
   try {
     await listProductsPage(client, 1);
     return { ok: true };
   } catch (err) {
-    if (err instanceof HoldedSubscriptionSuspendedError) {
-      return { ok: false, code: "HOLDED_SUSPENDED", message: MESSAGES.HOLDED_SUSPENDED };
-    }
-    if (err instanceof HoldedApiError && (err.status === 401 || err.status === 403)) {
-      return { ok: false, code: "INVALID_HOLDED_KEY", message: MESSAGES.INVALID_HOLDED_KEY };
-    }
-    if (err instanceof HoldedInvalidResponseError) {
-      return {
-        ok: false,
-        code: "HOLDED_INVALID_RESPONSE",
-        message: MESSAGES.HOLDED_INVALID_RESPONSE,
-      };
-    }
-    return {
-      ok: false,
-      code: "HOLDED_UNREACHABLE",
-      message: MESSAGES.HOLDED_UNREACHABLE,
-    };
+    const { code, message } = classifyHoldedKeyFailure(err);
+    return { ok: false, code, message };
   }
 }
 
@@ -82,9 +62,14 @@ export function probeFailureToHttpStatus(code: ProbeFailureCode): number {
   switch (code) {
     case "INVALID_HOLDED_KEY":
       return 401;
+    // Es un error de lo que se ha teclado, no de Holded: 400, y nunca
+    // un 502 que invite a reintentar con la misma clave.
+    case "HOLDED_KEY_V1_REQUIRED":
+      return 400;
     case "HOLDED_SUSPENDED":
       return 402;
     case "HOLDED_INVALID_RESPONSE":
+    case "HOLDED_UNEXPECTED_STATUS":
     case "HOLDED_UNREACHABLE":
       return 502;
   }
