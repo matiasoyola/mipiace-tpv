@@ -119,10 +119,26 @@ export interface BookingEngine {
   noShow(tenantId: string, id: string): Promise<AppointmentView | null>;
   setInService(tenantId: string, id: string): Promise<AppointmentView | null>;
   complete(tenantId: string, id: string): Promise<AppointmentView | null>;
+  /**
+   * Mueve una cita a otra hora.
+   *
+   * agenda-lista · `staffUserId` fija la profesional, igual que el alta
+   * slot-first. **Es el ÚNICO cambio del bloque en el motor**, y es
+   * aditivo: no toca la lógica de fijado —reutiliza la que ya existe,
+   * `AvailabilityParams.staffUserId` y el `fixed` de `planForStart`— y
+   * omitirlo deja el comportamiento de antes, intacto.
+   *
+   * Por qué hizo falta: hasta aquí `reschedule` buscaba el hueco con
+   * `null`, así que mover una cita podía cambiarla de columna sin que
+   * nadie lo pidiera. En una peluquería eso es otra cosa: la clienta
+   * cambia de HORA, no de peluquera. Elegir profesional al mover es un
+   * bloque aparte; esto sólo conserva la que ya tenía.
+   */
   reschedule(
     tenantId: string,
     id: string,
     newStartISO: string,
+    staffUserId?: string | null,
   ): Promise<HoldResult | { ok: false; reason: "NOT_FOUND"; alternatives: [] }>;
 }
 
@@ -752,7 +768,7 @@ export function createCitaEngine(
       return store.setStatus(tenantId, id, "COMPLETED");
     },
 
-    async reschedule(tenantId, id, newStartISO) {
+    async reschedule(tenantId, id, newStartISO, staffUserId) {
       const current = await store.getAppointmentView(tenantId, id);
       if (!current) return { ok: false, reason: "NOT_FOUND", alternatives: [] };
       const requestItems: RequestItem[] = current.items.map((it) => ({
@@ -766,10 +782,18 @@ export function createCitaEngine(
       const span = visitSpanMin(planned);
       const startUtc = new Date(newStartISO);
       const dateStr = utcToWallDate(startUtc, tz);
+      // agenda-lista · la profesional fijada, si quien llama la manda.
+      // `undefined` (nadie la manda) se comporta como antes del bloque.
+      // Viaja a los DOS sitios que ya saben fijar —los mismos que usa el
+      // alta slot-first— y, muy a propósito, también a `computeSlots`:
+      // si el «no» es porque ELLA no puede, las alternativas tienen que
+      // ser suyas. Ofrecer las horas de otra sería contestar a una
+      // pregunta que nadie ha hecho.
+      const fijada = staffUserId ?? null;
       const params: AvailabilityParams = {
         tenantId,
         items: requestItems,
-        staffUserId: null,
+        staffUserId: fijada,
         fromDate: dateStr,
         toDate: dateStr,
       };
@@ -791,7 +815,7 @@ export function createCitaEngine(
       if (rejected) return rejected;
 
       const ctx = await loadContext(params, reqMap);
-      const plan = planForStart(ctx, planned, startUtc, null);
+      const plan = planForStart(ctx, planned, startUtc, fijada);
       if (!plan) {
         const alternatives = await computeSlots(params, reqMap, planned, 10, floor);
         return { ok: false, reason: "NO_SLOT", alternatives };

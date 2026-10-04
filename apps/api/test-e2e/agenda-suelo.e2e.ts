@@ -572,6 +572,81 @@ describe.skipIf(!e2eEnabled)("e2e · el suelo y el EXCLUDE contra Postgres real"
     expect(adelante.statusCode).toBe(200);
   });
 
+  // ── 2b. Mover conserva la profesional (agenda-lista) ────────────────
+
+  it("17 · mover una cita NO la cambia de profesional", async () => {
+    // Hasta agenda-lista, `reschedule` buscaba el hueco con `null` y el
+    // motor elegía a quien estuviera libre: la clienta cambiaba de HORA y
+    // podía acabar con otra peluquera sin que nadie lo hubiera pedido. En
+    // una peluquería eso es otra cosa.
+    //
+    // Aquí Ana está LIBRE en el destino y Sole también: sin fijar, el
+    // motor tiene dos candidatas y puede coger cualquiera. Con la cita
+    // fijada a Sole, sólo cabe una respuesta.
+    const id = await sembrarCita(manana("09:00"), soleId);
+    const antesDeAna = await assignmentsDe(anaId);
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/agenda/appointments/${id}`,
+      headers: auth(),
+      payload: { start: manana("17:00").toISOString() },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+
+    const { appointment } = res.json() as {
+      appointment: {
+        id: string;
+        assignments: Array<{ reservableType: string; staffUserId: string | null }>;
+      };
+    };
+    // El mismo id (no es una cita nueva) y la misma profesional.
+    expect(appointment.id).toBe(id);
+    const suyas = appointment.assignments.filter(
+      (a) => a.reservableType === "STAFF",
+    );
+    expect(suyas).toHaveLength(1);
+    expect(suyas[0]!.staffUserId).toBe(soleId);
+    // Y Ana no ha ganado ninguna asignación por el camino.
+    expect(await assignmentsDe(anaId)).toBe(antesDeAna);
+  });
+
+  it("18 · si ELLA no cabe, es 409 y las alternativas son SUYAS", async () => {
+    // El destino lo ocupa la propia Sole con otra cita, y Ana está libre a
+    // esa hora. Antes de agenda-lista esto habría salido 200 moviendo la
+    // cita a la columna de Ana —un «sí» que nadie pidió—; ahora es un «no»
+    // con las horas de Sole, que es lo que la cajera dice por teléfono.
+    // 18:00 y 19:00: horas que no toca ningún otro caso de este fichero
+    // (el estado se arrastra dentro del describe y 11:00 y 15:00 ya tienen
+    // dueño — se vio con un ExclusionError al sembrar).
+    const ocupado = manana("18:00");
+    await sembrarCita(ocupado, soleId);
+    const id = await sembrarCita(manana("19:00"), soleId);
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/agenda/appointments/${id}`,
+      headers: auth(),
+      payload: { start: ocupado.toISOString() },
+    });
+    expect(res.statusCode, res.body).toBe(409);
+    const cuerpo = res.json() as {
+      error: string;
+      alternatives: Array<{ start: string; assignments?: unknown }>;
+    };
+    expect(cuerpo.error).toBe("NO_SLOT");
+    expect(cuerpo.alternatives.length).toBeGreaterThan(0);
+    // Ninguna alternativa puede ser la hora que Sole tiene ocupada.
+    expect(
+      cuerpo.alternatives.some((a) => a.start === ocupado.toISOString()),
+    ).toBe(false);
+
+    // Y la cita no se movió ni cambió de manos.
+    const sigue = await prisma.$queryRaw<Array<{ starts: Date }>>`
+      SELECT lower(timeslot) AS starts FROM appointments WHERE id = ${id}::uuid`;
+    expect(sigue[0]!.starts.toISOString()).toBe(manana("19:00").toISOString());
+  });
+
   // ── 3. El alta que se creó sin red (frente O) ───────────────────────
 
   it("11 · la franja era buena al escribirla: entra aunque llegue tarde", async () => {

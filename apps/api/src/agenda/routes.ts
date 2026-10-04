@@ -426,10 +426,27 @@ export async function registerAgendaRoutes(
 
       // Reprogramar (mover el slot).
       if (body.start) {
+        // agenda-lista · MOVER CONSERVA LA PROFESIONAL.
+        //
+        // El cuerpo no acepta `staffUserId` —cambiar de profesional al
+        // mover es otro bloque— así que la fijada es siempre la que la
+        // cita ya tiene. Antes se movía con `null` y el motor elegía a
+        // quien estuviera libre: la clienta cambiaba de HORA y podía
+        // acabar con otra peluquera sin que nadie lo hubiera pedido.
+        //
+        // La decisión se toma AQUÍ y no dentro del motor: el motor sólo
+        // obedece a quien le fijen, igual que en el alta slot-first.
+        // Si esa profesional no cabe, el «no» y las alternativas son
+        // suyas, que es lo que la cajera necesita decir por teléfono.
+        const actual = await store.getAppointmentView(auth.tenantId, id);
+        const suProfesional =
+          actual?.assignments.find((a) => a.reservableType === "STAFF")
+            ?.staffUserId ?? null;
         const moved = await engineFor(request).reschedule(
           auth.tenantId,
           id,
           body.start,
+          suProfesional,
         );
         if (moved.ok) return { appointment: moved.appointment };
         if (moved.reason === "NOT_FOUND") {

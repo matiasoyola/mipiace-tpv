@@ -12,9 +12,10 @@
 // agenda-lista · MOVER UNA CITA YA SE PUEDE, desde el detalle. Lo que se
 // comprueba aquí es lo que le importa a Sole: que la cita se mueve de
 // verdad (pantalla y BD), que CONSERVA SU ID —cancelar y volver a dar la
-// cita perdía el histórico, que era el único camino hasta ahora—, y que un
-// destino imposible se explica y no toca nada. Arrastrar la tarjeta sigue
-// sin existir, y es una decisión del bloque, no un olvido.
+// cita perdía el histórico, que era el único camino hasta ahora—, que
+// CONSERVA SU PROFESIONAL (la clienta cambia de hora, no de peluquera) y
+// que un destino imposible se explica y no toca nada. Arrastrar la
+// tarjeta sigue sin existir, y es una decisión del bloque, no un olvido.
 
 import { expect, test } from "@playwright/test";
 
@@ -46,6 +47,11 @@ const CORTE_DE_SONIA = "11:30";
 /** Las mechas de Mari Carmen (capítulo 6). Las mueve —y las devuelve— el
  *  test de mover: sólo las hace Marta, así que no cambia de columna. */
 const MECHAS_DE_CARMEN = "12:30";
+/** El tinte de Rosa, en sus dos mitades (capítulo 6). Las dos las sabe
+ *  hacer Marta Y Lucía desde el capítulo 5, que es lo que hace útil al
+ *  test de «los huecos son los suyos». */
+const TINTE_APLICA_DE_ROSA = "09:00";
+const TINTE_LAVA_DE_ROSA = "10:15";
 
 async function abrirAgenda(page: import("@playwright/test").Page) {
   await entrarTpv(page, MARTA.email);
@@ -253,6 +259,15 @@ test.describe("en el mostrador", () => {
     expect(despues!.status).toBe(antes!.status);
     expect(hhmmEnMadrid(despues!.inicio)).toBe(horaNueva);
 
+    // Y SIGUE SIENDO DE MARTA. Mover cambia la hora, no la peluquera:
+    // el PATCH fija la profesional que la cita ya tenía. Antes el motor
+    // reprogramaba con `null` y elegía a quien estuviera libre.
+    const suyaDespues = (await asignaciones()).filter(
+      (x) => x.appointmentId === id && x.active,
+    );
+    expect(suyaDespues).toHaveLength(1);
+    expect(suyaDespues[0]!.staffUserId).toBe(MARTA.id);
+
     // La hoja se pliega sola al acabar: el trámite está hecho y lo que
     // tiene que verse es el detalle con su hora nueva. Dejarla abierta con
     // los chips del día viejo pide a gritos mover dos veces la misma cita
@@ -275,6 +290,37 @@ test.describe("en el mostrador", () => {
     const devuelta = (await citas()).find((c) => c.id === id);
     expect(hhmmEnMadrid(devuelta!.inicio)).toBe(MECHAS_DE_CARMEN);
     expect(devuelta!.fin.getTime()).toBe(antes!.fin.getTime());
+  });
+
+  test("los huecos que ofrece mover son los de SU profesional", async ({
+    page,
+  }) => {
+    // El otro lado de «mover conserva la profesional»: si el PATCH la
+    // fija, la lista de horas tiene que ser la de ELLA. Con `null` la
+    // hoja enseñaría horas en las que está libre OTRA, y al pulsar Mover
+    // saldría un «no» sobre una hora que la pantalla acababa de ofrecer.
+    //
+    // Se mira con el tinte de las 10:15 de Rosa, que desde el capítulo 5
+    // saben hacer Marta Y Lucía: a las 09:00 Marta está con la primera
+    // mitad del tinte y Lucía está libre, así que esa hora sólo puede
+    // aparecer en la lista si alguien dejó de fijar a Marta.
+    //
+    // NO MUEVE NADA: abre la hoja, mira y cancela. Los capítulos 8 y 9
+    // cobran estas citas.
+    await abrirAgenda(page);
+    await tarjetaDeLaCita(page, MARTA.id, TINTE_LAVA_DE_ROSA).first().click();
+    await page.locator('[data-accion="mover-cita"]').click();
+    const hoja = page.locator('[data-panel="mover-cita"]');
+    await hoja.locator('[data-accion="buscar-hueco-mover"]').click();
+
+    const chips = hoja.locator("button[aria-pressed]");
+    await expect(chips.first()).toBeVisible({ timeout: 20_000 });
+    const horas = (await chips.allTextContents()).map((h) => h.trim());
+    expect(horas.length).toBeGreaterThan(0);
+    expect(horas).not.toContain(TINTE_APLICA_DE_ROSA);
+
+    await hoja.getByRole("button", { name: "cancelar" }).click();
+    await expect(hoja).toHaveCount(0);
   });
 
   test("mover a un día cerrado: el motivo con su nombre, y la BD no se mueve", async ({

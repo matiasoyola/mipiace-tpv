@@ -736,11 +736,11 @@ export function AgendaPage({
    *
    * Tres cosas que conviene tener escritas:
    *
-   *   · **El motor puede cambiar de profesional.** `reschedule` busca el
-   *     hueco con `staffUserId: null` (`engine.ts:775`, `:792`), así que
-   *     la cita movida puede caer en otra columna. El motor no se toca en
-   *     este bloque, así que lo que se hace es DECIRLO: si cambia, el
-   *     aviso lo nombra. Callarlo sería peor que el fallo.
+   *   · **Conserva la profesional.** El PATCH fija la que la cita ya
+   *     tiene (`routes.ts`, rama de `start`), así que la clienta cambia
+   *     de HORA y no de peluquera. Si con ella no cabe, el «no» y las
+   *     alternativas son suyas. Cambiar de profesional al mover es otro
+   *     bloque; aquí no se ofrece.
    *   · **Si falla no pasa nada.** `start` y `status` son ramas distintas
    *     del PATCH: un movimiento rechazado no mueve la cita ni le cambia
    *     el estado. El motivo y las alternativas son las que ya devuelve el
@@ -765,6 +765,9 @@ export function AgendaPage({
 
     const despues = staffDeLaCita(res.appointment);
     const cuando = `${diaNuevo} a las ${localHHMM(res.appointment.start)}`;
+    // El cambio de profesional ya no debería poder pasar —el PATCH la
+    // fija— pero si pasara, se dice. Un aviso que sobra no hace daño; uno
+    // que falta deja a la clienta en otra columna sin que nadie se entere.
     flash(
       despues && despues !== antes
         ? `Cita movida al ${cuando} · ahora con ${nombreDeStaff(despues)}`
@@ -2516,10 +2519,12 @@ function MoverCita(props: {
           .slice()
           .sort((a, b) => a.sortOrder - b.sortOrder)
           .map((it) => ({ serviceId: it.serviceId })),
-        // `null` porque la API de mover tampoco acepta profesional: pedir
-        // huecos de una sola columna enseñaría unas horas y movería a
-        // otras. Ver el comentario de `doMove`.
-        staffUserId: null,
+        // LA SUYA. Mover conserva la profesional (lo fija el PATCH, ver
+        // `doMove`), así que los huecos que se ofrecen tienen que ser los
+        // de ella: con `null` la lista enseñaría horas en las que está
+        // libre OTRA, y al pulsar Mover saldría un «no» sobre una hora
+        // que la pantalla acababa de ofrecer.
+        staffUserId: staffDeLaCita(appt),
         from: dia,
         to: dia,
       });
