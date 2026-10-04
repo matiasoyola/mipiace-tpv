@@ -63,10 +63,34 @@ export function panel(page: Page) {
   };
 }
 
-/** Lleva la agenda a un día concreto (el selector de la cabecera). */
+/**
+ * Lleva la agenda a un día concreto (el selector de la cabecera).
+ *
+ * Y lo ASIENTA, que es lo que costó una pasada: si se teclea la fecha
+ * mientras la agenda todavía está cargando el día, React vuelve a pintar con
+ * su `date` anterior y el campo revierte a hoy. El `toHaveValue` llegaba a
+ * pasar en la ventana de antes de la reversión, y el test seguía — con la
+ * agenda en OTRO día. El síntoma era absurdo: una rejilla sin ninguna cita y
+ * un fallo que decía «no encuentro la tarjeta de las 09:00».
+ *
+ * Así que se espera a que la rejilla esté montada, se teclea, y se comprueba
+ * que la fecha SIGUE puesta un momento después.
+ */
 export async function irAlDia(page: Page, fecha: string): Promise<void> {
-  await page.locator("[data-ir-a-dia]").fill(fecha);
-  await expect(page.locator("[data-ir-a-dia]")).toHaveValue(fecha);
+  const campo = page.locator("[data-ir-a-dia]");
+  await expect(campo).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator("[data-columna]").first()).toBeVisible({
+    timeout: 30_000,
+  });
+  for (let intento = 1; intento <= 4; intento++) {
+    await campo.fill(fecha);
+    await expect(campo).toHaveValue(fecha);
+    await page.waitForTimeout(400);
+    if ((await campo.inputValue()) === fecha) return;
+  }
+  throw new Error(
+    `El selector de día no se queda en ${fecha}: la agenda lo revierte.`,
+  );
 }
 
 /**

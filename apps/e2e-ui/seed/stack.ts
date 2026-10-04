@@ -68,9 +68,26 @@ function existeContenedor(nombre: string): boolean {
   }
 }
 
+/** El demonio. Sin esto el fallo que sale es «failed to connect to the
+ *  docker API at unix://…», que no dice qué hacer. */
+function demonioDeDocker(): void {
+  try {
+    sh("docker", ["info", "--format", "{{.ServerVersion}}"]);
+  } catch {
+    throw new Error(
+      [
+        "Docker no responde: el banco necesita el Postgres del compose.",
+        "Abre Docker Desktop (`open -a Docker`), espera a que arranque y",
+        "vuelve a lanzar `pnpm e2e:agenda`.",
+      ].join("\n"),
+    );
+  }
+}
+
 /** Postgres y Redis, esperando a que Postgres esté sano. */
 function contenedores(): void {
   paso("Postgres y Redis");
+  demonioDeDocker();
   const faltan = CONTENEDORES.filter((c) => !existeContenedor(c));
   if (faltan.length > 0) {
     // Máquina limpia: aquí el compose sí puede crearlos sin chocar.
