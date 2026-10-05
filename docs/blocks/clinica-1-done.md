@@ -572,7 +572,10 @@ bajo `packages/db/prisma/`, que entra por el `COPY . .`.
   capítulos muertos en `entrarAdmin` — que parece un fallo de la rama y no lo es. La segunda pasada,
   sin tocar nada, va limpia.
 - `tsc` de API, tpv-web y admin · limpio.
-- CI (`ci`, `smoke`, `e2e`) · pendiente del push; se anota el run aquí.
+- CI · **verde**, los tres jobs:
+  [run 37298987633](https://github.com/matiasoyola/mipiace-tpv/actions/runs/37298987633) —
+  `ci: success`, `smoke: success`, `e2e: success` (`publish` se salta, como toca fuera de master).
+  Las cuatro pasadas de la rama (dos de push, dos del PR) salieron en verde.
 
 ### Lo nuevo de este bloque
 
