@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F8F6F3">
+<title>Valoración inicial · mockup clinica-2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --coral:#E97058;--coral-dark:#C75A45;--coral-soft:#FDEAE3;
+  --ink:#1F2937;--ink-soft:#374151;--stone:#F8F6F3;
+  --slate-200:#E2E8F0;--slate-300:#CBD5E1;--slate-400:#94A3B8;--slate-500:#64748B;
+  --amber-50:#FFFBEB;--amber-300:#FCD34D;--amber-700:#B45309;
+  --red-50:#FEF2F2;--red-700:#B91C1C;
+  --em-50:#ECFDF5;--em-500:#10B981;--em-700:#047857;
+  --mp-ease-out:cubic-bezier(0.23,1,0.32,1);--mp-dur-press:120ms;--mp-dur-fast:150ms;
+}
+*{box-sizing:border-box}
+html{-webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%}
+body{margin:0;font-family:'DM Sans',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;font-feature-settings:'cv11','ss01';-webkit-font-smoothing:antialiased;background:#EDEAE5;color:var(--ink)}
+button{font:inherit;cursor:pointer;touch-action:manipulation;user-select:none;-webkit-user-select:none;border:0;transition:transform var(--mp-dur-press) var(--mp-ease-out),background-color var(--mp-dur-fast) ease}
+button:active{transform:scale(.97)}
+button:disabled{cursor:not-allowed;opacity:.45}
+button:disabled:active{transform:none}
+
+/* Barra del mockup (no es producto) */
+.mockbar{position:sticky;top:0;z-index:10;background:var(--ink);color:#fff;padding:10px 16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:13px}
+.mockbar strong{font-weight:600;margin-right:8px}
+.mockbar button{background:#374151;color:#fff;border-radius:10px;padding:8px 12px;font-size:13px}
+.mockbar button.on{background:var(--coral)}
+.mockbar .note{opacity:.7;margin-left:auto}
+
+.stage{display:flex;justify-content:center;padding:24px 16px 48px}
+.device{background:var(--stone);border-radius:28px;border:10px solid #2a2f38;width:100%;overflow:hidden}
+.device.tablet{max-width:1024px;min-height:700px}
+.device.phone{max-width:390px;min-height:760px}
+
+/* ===== Paciente ===== */
+.pt{min-height:680px;display:flex;flex-direction:column;padding:28px}
+.device.phone .pt{padding:20px;min-height:740px}
+.pt-top{display:flex;justify-content:space-between;align-items:center;font-size:15px;color:var(--ink-soft)}
+.pt-clinic{font-weight:500}
+.progress{height:8px;background:#E7E2DB;border-radius:8px;margin-top:14px;overflow:hidden}
+.progress>i{display:block;height:100%;background:var(--coral);border-radius:8px;transition:width 200ms var(--mp-ease-out)}
+.pt-body{flex:1;display:flex;flex-direction:column;justify-content:center;max-width:720px;margin:0 auto;width:100%}
+.q-count{font-size:17px;color:var(--slate-500);margin-bottom:12px}
+.q{font-size:38px;line-height:1.2;font-weight:600;letter-spacing:-0.02em;margin:0 0 14px}
+.device.phone .q{font-size:28px}
+.q-help{font-size:20px;color:var(--ink-soft);margin:0 0 32px;line-height:1.4}
+.device.phone .q-help{font-size:17px}
+.answers{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.ans{min-height:96px;border-radius:24px;font-size:30px;font-weight:600;background:#fff;color:var(--ink);border:2px solid var(--slate-200)}
+.device.phone .ans{min-height:80px;font-size:26px}
+.ans.yes{border-color:var(--coral)}
+.ans.sel{background:var(--coral);color:#fff;border-color:var(--coral)}
+.ans.dunno{grid-column:1/-1;min-height:64px;font-size:20px;font-weight:500;background:transparent;border:2px dashed var(--slate-300);color:var(--ink-soft)}
+.chips{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px}
+.chip-big{min-height:64px;padding:0 22px;border-radius:18px;font-size:20px;font-weight:500;background:#fff;border:2px solid var(--slate-200);color:var(--ink)}
+.chip-big.sel{background:var(--coral-soft);border-color:var(--coral);color:var(--coral-dark)}
+.pt-foot{display:flex;justify-content:space-between;align-items:center;margin-top:24px}
+.back{background:transparent;color:var(--ink-soft);font-size:18px;min-height:56px;padding:0 12px;border-radius:16px}
+.next{background:var(--coral);color:#fff;font-size:22px;font-weight:600;min-height:72px;padding:0 36px;border-radius:20px}
+.who{display:grid;gap:14px;margin-top:8px}
+.who .chip-big{width:100%;text-align:left;min-height:76px;font-size:22px}
+.done-ic{width:88px;height:88px;border-radius:24px;background:var(--em-50);display:flex;align-items:center;justify-content:center;margin-bottom:24px}
+.summary{background:#fff;border-radius:24px;border:1px solid var(--slate-200);padding:20px 24px;font-size:19px;line-height:1.6;margin-top:24px}
+
+/* ===== Sanitario ===== */
+.app{display:grid;grid-template-columns:240px 1fr;min-height:700px}
+.side{background:#fff;border-right:1px solid var(--slate-200);padding:20px 12px}
+.side .brand{font-weight:600;font-size:15px;padding:0 12px 16px}
+.side a{display:flex;align-items:center;gap:10px;height:46px;padding:0 14px;border-radius:14px;color:#475569;text-decoration:none;font-size:14.5px}
+.side a.on{background:var(--coral-soft);color:var(--coral-dark);font-weight:500}
+.main{padding:24px 28px}
+.pat-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}
+.pat-name{font-size:24px;font-weight:600;letter-spacing:-0.01em;margin:0}
+.pat-meta{color:var(--slate-500);font-size:13.5px;margin-top:4px}
+.pill{display:inline-flex;align-items:center;gap:6px;border-radius:12px;padding:6px 12px;font-size:12.5px;font-weight:500}
+.pill.amber{background:var(--amber-50);color:var(--amber-700)}
+.pill.green{background:var(--em-50);color:var(--em-700)}
+.alerts{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 4px;padding:12px 14px;background:var(--red-50);border-radius:16px;align-items:center}
+.alerts .lbl{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--red-700);font-weight:500;margin-right:4px}
+.alerts .a{background:#fff;color:var(--red-700);border-radius:12px;padding:6px 12px;font-size:13px;font-weight:500}
+.alerts.none{background:var(--stone);color:var(--slate-500);font-size:13px}
+.card{background:#fff;border:1px solid var(--slate-200);border-radius:24px;padding:20px 24px;margin-top:16px}
+.card h2{font-size:17px;font-weight:600;letter-spacing:-0.01em;margin:0}
+.card .sub{font-size:13px;color:var(--slate-500);margin:4px 0 12px}
+.row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:12px 0;border-top:1px solid #F1F5F9}
+.row:first-of-type{border-top:0}
+.row .t{font-size:14.5px}
+.row .who-ans{font-size:12px;color:var(--slate-500);margin-top:2px}
+.row.pending .t{color:var(--amber-700);font-weight:500}
+.seg{display:inline-flex;background:var(--stone);border-radius:14px;padding:4px;gap:4px}
+.seg button{min-width:56px;height:44px;border-radius:11px;background:transparent;color:var(--ink-soft);font-size:14px;font-weight:500}
+.seg button{color:var(--slate-400)}
+.seg button.pat{background:var(--coral);color:#fff;font-weight:600}
+.seg button.pat-old{background:#fff;color:var(--coral-dark);box-shadow:inset 0 0 0 2px var(--coral);font-weight:600}
+.seg button.fix{background:var(--ink);color:#fff;font-weight:600}
+.row.yes{background:linear-gradient(90deg,var(--coral-soft),transparent 60%);margin:0 -24px;padding-left:24px;padding-right:24px}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--slate-500);margin:-4px 0 8px}
+.legend i{display:inline-block;width:14px;height:14px;border-radius:5px;vertical-align:-2px;margin-right:6px}
+.checks{display:grid;gap:10px}
+.check{display:flex;align-items:center;gap:12px;min-height:56px;padding:0 16px;background:var(--stone);border-radius:16px;font-size:14.5px;text-align:left;color:var(--ink)}
+.check .box{width:24px;height:24px;border-radius:8px;border:2px solid var(--slate-300);display:flex;align-items:center;justify-content:center;flex:none;background:#fff}
+.check.on .box{background:var(--coral);border-color:var(--coral)}
+.cta-row{display:flex;align-items:center;gap:16px;margin-top:20px;flex-wrap:wrap}
+.cta{background:var(--coral);color:#fff;font-size:16px;font-weight:500;height:64px;padding:0 28px;border-radius:18px}
+.why{font-size:13.5px;color:var(--amber-700)}
+.ok-banner{display:flex;gap:12px;align-items:center;background:var(--em-50);color:var(--em-700);border-radius:16px;padding:14px 16px;font-size:14px;margin-top:16px}
+.ghost{background:var(--stone);color:var(--ink);font-weight:500;height:48px;padding:0 18px;border-radius:14px;font-size:14px}
+.hist{font-size:13px;color:var(--slate-500);margin-top:8px;line-height:1.6}
+
+.notes{max-width:1024px;margin:0 auto 40px;padding:0 16px;font-size:13.5px;color:var(--ink-soft);line-height:1.6}
+.notes h3{font-size:15px;font-weight:600;margin:0 0 6px}
+
+@media (max-width:760px){.app{grid-template-columns:1fr}.side{display:none}.main{padding:18px}.answers{gap:12px}}
+@media (prefers-reduced-motion:reduce){*{transition-property:opacity,color,background-color,border-color!important}button:active{transform:none}}
+</style>
+</head>
+<body>
+
+<div class="mockbar">
+  <strong>Mockup · clinica-2 valoración inicial</strong>
+  <button id="m-tablet" class="on">Paciente · tablet de la sala</button>
+  <button id="m-phone">Paciente · móvil (enlace del email)</button>
+  <button id="m-pro">Podóloga · validar</button>
+  <span class="note">Datos de ejemplo inventados</span>
+</div>
+
+<div class="stage"><div id="device" class="device tablet"><div id="screen"></div></div></div>
+
+<div class="notes">
+  <h3>Qué enseña este mockup</h3>
+  El paciente responde el test antes de su primera cita, en la tablet de la sala o desde el enlace del email, y la podóloga lo valida antes del primer tratamiento.
+  Prueba a contestar «No lo sé» en alguna pregunta y luego pasa a «Podóloga · validar»: el botón de validar no se activa hasta resolverla y marcar las tres confirmaciones, y dice por qué.
+  Las respuestas del paciente nunca se borran: lo que corrige la podóloga queda como corrección con su nombre.
+</div>
+
+<script>
+const CLINIC = "Clínica Podológica Demo";
+const PATIENT = { name:"Carmen", full:"Carmen Rodríguez López", age:78, phone:"600 123 456" };
+const PRO = { name:"Lucía Martín", col:"Col. 45-0312" };
+
+const Q = [
+  {id:"diab", q:"¿Tiene diabetes?", help:"Lo que la gente llama «tener azúcar».", alert:"Diabética", short:"Diabetes",
+   follow:{id:"insul", q:"¿Se pincha insulina?", help:"", alert:"Insulina", short:"Insulina"}},
+  {id:"antic", q:"¿Toma pastillas para que la sangre no coagule?", help:"Por ejemplo Sintrom, Adiro, Eliquis o Xarelto.", alert:"Anticoagulado", short:"Anticoagulantes"},
+  {id:"circ", q:"¿Tiene problemas de circulación en las piernas?", help:"Varices, pies muy fríos o heridas que tardan en curar.", alert:"Mala circulación", short:"Circulación"},
+  {id:"aler", q:"¿Es alérgico a algún medicamento o a la anestesia?", help:"También al látex o al yodo.", alert:"Alergias", short:"Alergias",
+   chips:["Anestesia del dentista","Penicilina","Látex","Yodo","Otro"]},
+  {id:"marca", q:"¿Lleva marcapasos?", help:"", alert:"Marcapasos", short:"Marcapasos"},
+  {id:"defen", q:"¿Toma cortisona o medicinas que bajan las defensas?", help:"Si no está seguro, puede responder «No lo sé».", alert:"Inmunodeprimido", short:"Cortisona / defensas"},
+  {id:"sens", q:"¿Nota los pies dormidos u hormigueo?", help:"", alert:"Sensibilidad reducida", short:"Pies dormidos"},
+  {id:"artr", q:"¿Tiene artrosis o artritis en los pies?", help:"", alert:null, short:"Artrosis / artritis"},
+  {id:"oper", q:"¿Le han operado de los pies alguna vez?", help:"", alert:null, short:"Operado de los pies"},
+  {id:"fuma", q:"¿Fuma?", help:"", alert:null, short:"Fuma"},
+];
+
+// Estado
+let mode = "tablet";
+let step = "welcome";      // welcome | who | q | chips | done
+let qi = 0;
+let inFollow = false;
+let answeredBy = null;
+const A = {};              // id -> "si" | "no" | "nose"
+const chipsSel = new Set();
+const corr = {};           // id -> valor corregido por la podóloga
+const checks = {aler:false, med:false, alert:false};
+let validated = false;
+
+const $ = s => document.querySelector(s);
+const el = (h) => { const d=document.createElement('div'); d.innerHTML=h.trim(); return d.firstElementChild; };
+
+function total(){ return Q.length; }
+function curQ(){ return inFollow ? Q[qi].follow : Q[qi]; }
+
+function render(){
+  const dev = $("#device");
+  dev.className = "device " + (mode==="phone" ? "phone" : "tablet");
+  $("#m-tablet").classList.toggle("on", mode==="tablet");
+  $("#m-phone").classList.toggle("on", mode==="phone");
+  $("#m-pro").classList.toggle("on", mode==="pro");
+  $("#screen").innerHTML = "";
+  $("#screen").appendChild(mode==="pro" ? renderPro() : renderPatient());
+}
+
+function cabecera(pct){
+  return `<div>
+    <div class="pt-top"><span class="pt-clinic">${CLINIC}</span><span>Antes de su primera visita</span></div>
+    ${pct==null?"":`<div class="progress"><i style="width:${pct}%"></i></div>`}
+  </div>`;
+}
+
+function renderPatient(){
+  if(step==="welcome"){
+    return el(`<div class="pt">${cabecera(null)}
+      <div class="pt-body">
+        <p class="q-count">Le llevará unos 3 minutos</p>
+        <h1 class="q">Hola, ${PATIENT.name}.</h1>
+        <p class="q-help">Antes de su primera visita, la podóloga necesita saber unas cosas de su salud. Son ${total()} preguntas y se contestan con «Sí» o «No».</p>
+        <div class="pt-foot"><span></span><button class="next" data-a="start">Empezar</button></div>
+      </div></div>`);
+  }
+  if(step==="who"){
+    return el(`<div class="pt">${cabecera(3)}
+      <div class="pt-body">
+        <h1 class="q">¿Quién está respondiendo?</h1>
+        <p class="q-help">Así la podóloga sabe quién ha contestado.</p>
+        <div class="who">
+          <button class="chip-big ${answeredBy==='yo'?'sel':''}" data-who="yo">Soy ${PATIENT.name}</button>
+          <button class="chip-big ${answeredBy==='fam'?'sel':''}" data-who="fam">Un familiar o acompañante</button>
+        </div>
+        <div class="pt-foot"><button class="back" data-a="back">‹ Atrás</button><button class="next" data-a="whoNext" ${answeredBy?'':'disabled'}>Seguir</button></div>
+      </div></div>`);
+  }
+  if(step==="chips"){
+    const q = Q[qi];
+    return el(`<div class="pt">${cabecera(Math.round((qi+0.6)/total()*100))}
+      <div class="pt-body">
+        <p class="q-count">Pregunta ${qi+1} de ${total()}</p>
+        <h1 class="q">¿A qué es alérgico?</h1>
+        <p class="q-help">Toque todas las que sean. Si no lo sabe, siga: la podóloga lo mirará con usted.</p>
+        <div class="chips">${q.chips.map(c=>`<button class="chip-big ${chipsSel.has(c)?'sel':''}" data-chip="${c}">${c}</button>`).join("")}</div>
+        <div class="pt-foot"><button class="back" data-a="back">‹ Atrás</button><button class="next" data-a="chipsNext">Seguir</button></div>
+      </div></div>`);
+  }
+  if(step==="q"){
+    const q = curQ();
+    const v = A[q.id];
+    return el(`<div class="pt">${cabecera(Math.round((qi+(inFollow?0.5:0))/total()*100))}
+      <div class="pt-body">
+        <p class="q-count">Pregunta ${qi+1} de ${total()}</p>
+        <h1 class="q">${q.q}</h1>
+        ${q.help?`<p class="q-help">${q.help}</p>`:`<p class="q-help">&nbsp;</p>`}
+        <div class="answers">
+          <button class="ans yes ${v==='si'?'sel':''}" data-ans="si">Sí</button>
+          <button class="ans ${v==='no'?'sel':''}" data-ans="no">No</button>
+          <button class="ans dunno ${v==='nose'?'sel':''}" data-ans="nose">No lo sé</button>
+        </div>
+        <div class="pt-foot"><button class="back" data-a="back">‹ Atrás</button><span></span></div>
+      </div></div>`);
+  }
+  // done
+  const nose = allIds().filter(id=>A[id]==="nose").length;
+  return el(`<div class="pt">${cabecera(100)}
+    <div class="pt-body">
+      <div class="done-ic"><svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#047857" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
+      <h1 class="q">Gracias, ${PATIENT.name}. Ya está.</h1>
+      <p class="q-help">${PRO.name} lo revisará con usted al empezar la visita.${nose?` Hay ${nose} ${nose===1?'pregunta':'preguntas'} que ha marcado como «No lo sé»: no se preocupe, ${nose===1?'la mirarán':'las mirarán'} juntos.`:''}</p>
+      ${mode==="tablet"?`<div class="summary">Puede devolver la tablet en el mostrador.</div>`:`<div class="summary">Ya puede cerrar esta página. Le esperamos en su cita.</div>`}
+    </div></div>`);
+}
+
+function allIds(){
+  const ids=[];
+  Q.forEach(q=>{ ids.push(q.id); if(q.follow && A[q.id]==="si") ids.push(q.follow.id); });
+  return ids;
+}
+function findQ(id){ for(const q of Q){ if(q.id===id) return q; if(q.follow&&q.follow.id===id) return q.follow; } }
+function val(id){ return corr[id] ?? A[id]; }
+
+function advance(){
+  const q = Q[qi];
+  if(!inFollow && q.follow && A[q.id]==="si"){ inFollow=true; return; }
+  if(!inFollow && q.chips && A[q.id]==="si"){ step="chips"; return; }
+  inFollow=false;
+  if(qi<Q.length-1){ qi++; } else { step="done"; }
+}
+function goBack(){
+  if(step==="who"){ step="welcome"; return; }
+  if(step==="chips"){ step="q"; return; }
+  if(step==="q"){
+    if(inFollow){ inFollow=false; return; }
+    if(qi===0){ step="who"; return; }
+    qi--; const p=Q[qi];
+    if(p.follow && A[p.id]==="si") inFollow=true;
+    else if(p.chips && A[p.id]==="si") step="chips";
+  }
+}
+
+function renderPro(){
+  // Si el paciente no ha respondido nada, rellenamos un ejemplo para poder ver la pantalla.
+  if(Object.keys(A).length===0){
+    Object.assign(A,{diab:"si",insul:"no",antic:"si",circ:"nose",aler:"si",marca:"no",defen:"nose",sens:"si",artr:"si",oper:"no",fuma:"no"});
+    chipsSel.add("Látex"); answeredBy="fam";
+  }
+  const ids = allIds();
+  const pending = ids.filter(id=>val(id)==="nose");
+  const allChecks = checks.aler && checks.med && checks.alert;
+  const canValidate = pending.length===0 && allChecks && !validated;
+  let why = "";
+  if(pending.length) why = pending.length===1 ? "Queda 1 respuesta «No lo sé» por resolver con el paciente." : `Quedan ${pending.length} respuestas «No lo sé» por resolver con el paciente.`;
+  else if(!allChecks) why = "Marca las tres confirmaciones.";
+
+  const alerts = [];
+  Q.forEach(q=>{
+    if(q.alert && val(q.id)==="si"){
+      if(q.id==="aler" && chipsSel.size) alerts.push("Alergia: "+[...chipsSel].join(", ").toLowerCase());
+      else alerts.push(q.alert);
+    }
+    if(q.follow && val(q.follow.id)==="si") alerts.push(q.follow.alert);
+  });
+
+  const rows = ids.map(id=>{
+    const q=findQ(id), v=val(id), orig=A[id], corrected = corr[id]!==undefined && corr[id]!==orig;
+    const label = {si:"Sí",no:"No",nose:"No lo sé"};
+    const extra = id==="aler" && chipsSel.size ? ` (${[...chipsSel].join(", ")})` : "";
+    const cls = (opt)=> corrected ? (opt===v?'fix':(opt===orig?'pat-old':'')) : (opt===v?'pat':'');
+    return `<div class="row ${v==='nose'?'pending':''} ${v==='si'?'yes':''}">
+      <div><div class="t">${q.short}${extra}</div>
+        <div class="who-ans">${corrected?`Paciente: ${label[orig]} · corregido por ${PRO.name}`:(answeredBy==='fam'?'Respondió un familiar':'Respondió el paciente')}</div></div>
+      <div class="seg">
+        <button data-c="${id}:si" class="${cls('si')}" ${validated?'disabled':''}>Sí</button>
+        <button data-c="${id}:no" class="${cls('no')}" ${validated?'disabled':''}>No</button>
+        <button data-c="${id}:nose" class="${cls('nose')}" ${validated?'disabled':''} aria-label="No lo sé">?</button>
+      </div></div>`;
+  }).join("");
+
+  const ck = (k,t)=>`<button class="check ${checks[k]?'on':''}" data-ck="${k}" ${validated?'disabled':''}><span class="box">${checks[k]?'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>':''}</span>${t}</button>`;
+
+  return el(`<div class="app">
+    <nav class="side"><div class="brand">${CLINIC}</div>
+      <a class="on">Hoy · mis citas</a><a>Pacientes</a><a>Agenda</a></nav>
+    <main class="main">
+      <div class="pat-head">
+        <div><h1 class="pat-name">${PATIENT.full}</h1>
+          <div class="pat-meta">${PATIENT.age} años · ${PATIENT.phone} · Primera visita hoy 10:30 · Primera valoración</div></div>
+        ${validated?`<span class="pill green">Valoración validada</span>`:`<span class="pill amber">Valoración por validar</span>`}
+      </div>
+      ${alerts.length?`<div class="alerts"><span class="lbl">Alertas</span>${alerts.map(a=>`<span class="a">${a}</span>`).join("")}</div>`:`<div class="alerts none">Sin alertas</div>`}
+
+      ${validated?`<div class="ok-banner"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        Validada hoy a las 10:34 por ${PRO.name} (${PRO.col}). Ya puedes registrar el primer tratamiento.</div>
+        <div class="cta-row"><button class="cta">Empezar primera sesión</button><button class="ghost" data-a="reset">Volver a empezar el mockup</button></div>
+        <div class="hist">Queda en la historia: lo que respondió ${answeredBy==='fam'?'el familiar':'la paciente'}, cada corrección con su autora y la hora de validación. No se puede editar; si algo cambia, se repasa con una valoración nueva.</div>`:""}
+
+      <div class="card">
+        <h2>Respuestas del test</h2>
+        <div class="sub">Rellenado hoy a las 10:22 en la tablet de la sala${answeredBy==='fam'?' · respondió un familiar':''}. Toca para corregir.</div>
+        <div class="legend"><span><i style="background:var(--coral)"></i>Lo que respondió el paciente</span><span><i style="background:var(--ink)"></i>Tu corrección</span></div>
+        ${rows}
+      </div>
+
+      ${validated?"":`<div class="card">
+        <h2>Antes del primer tratamiento</h2>
+        <div class="sub">Confírmalo con el paciente delante.</div>
+        <div class="checks">
+          ${ck("aler","He revisado las alergias con el paciente")}
+          ${ck("med","He revisado la medicación que toma")}
+          ${ck("alert","Las alertas de arriba son correctas")}
+        </div>
+        <div class="cta-row"><button class="cta" data-a="validate" ${canValidate?'':'disabled'}>Validar valoración</button>
+          ${why?`<span class="why">${why}</span>`:""}</div>
+      </div>`}
+    </main></div>`);
+}
+
+document.addEventListener("click", e=>{
+  const b = e.target.closest("button"); if(!b || b.disabled) return;
+  if(b.id==="m-tablet"){ mode="tablet"; return render(); }
+  if(b.id==="m-phone"){ mode="phone"; return render(); }
+  if(b.id==="m-pro"){ mode="pro"; return render(); }
+  const a=b.dataset.a;
+  if(a==="start"){ step="who"; }
+  else if(a==="back"){ goBack(); }
+  else if(a==="whoNext"){ step="q"; qi=0; inFollow=false; }
+  else if(a==="chipsNext"){ step="q"; inFollow=false; if(qi<Q.length-1) qi++; else step="done"; }
+  else if(a==="validate"){ validated=true; }
+  else if(a==="reset"){ location.reload(); return; }
+  else if(b.dataset.who){ answeredBy=b.dataset.who; }
+  else if(b.dataset.ans){ A[curQ().id]=b.dataset.ans; if(b.dataset.ans!=="si" && !inFollow && Q[qi].follow){ delete A[Q[qi].follow.id]; } advance(); }
+  else if(b.dataset.chip){ const c=b.dataset.chip; chipsSel.has(c)?chipsSel.delete(c):chipsSel.add(c); }
+  else if(b.dataset.c){ const [id,v]=b.dataset.c.split(":"); corr[id]=v; }
+  else if(b.dataset.ck){ checks[b.dataset.ck]=!checks[b.dataset.ck]; }
+  render();
+});
+
+render();
+</script>
+</body>
+</html>
