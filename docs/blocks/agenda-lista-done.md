@@ -476,7 +476,13 @@ laboratorio. Se deja apuntado para que nadie lo lea como el incidente del
       ~2,0 min por pasada, en puertos propios (§9) y contra
       `mipiacetpv_agenda_banco_e2e`.
 - [x] **La suite normal, verde** — 269 ficheros, 2 931 tests, 3 saltados.
-- [x] **Lo que corre el job `ci`**, replicado en local: typecheck de la API, de
+- [x] **La CI, verde de verdad y no sólo en local.** Los tres jobs del
+      workflow sobre `dad5481`: `ci`, `smoke` y `e2e` en `success`
+      (`publish` saltado, como toca fuera de `master`). Run del push:
+      [37281783209](https://github.com/matiasoyola/mipiace-tpv/actions/runs/37281783209).
+      Los tiempos: `ci` 4m03, `smoke` 4m06, `e2e` 1m18.
+- [x] **Lo que corre el job `ci`**, replicado también en local antes de
+      subir: typecheck de la API, de
       los seis paquetes de su lista, de `tpv-web` y del admin (`tsc -b`),
       `pnpm test`, y las dos builds de Vite. El test de manifests de
       `infra/test` en verde (51 tests): este bloque **no añade paquete ni
