@@ -613,14 +613,21 @@ De paso: el script `video` que este README y el done del banco ya citaban
 
 ## 12 · La rama
 
-Rama `agenda-lista`, **sin pushear y sin PR todavía**: el push se quedó
-bloqueado en esta sesión y lo tiene que lanzar Matías.
-
-```bash
-git push -u origin agenda-lista
-gh pr create --base master --head agenda-lista \
-  --title "agenda-lista · lo que falta para encender la agenda en Sole" \
-  --body-file docs/blocks/agenda-lista-done.md
-```
+Rama `agenda-lista` **pusheada**, y **PR #5 contra `master`**, abierto:
+<https://github.com/matiasoyola/mipiace-tpv/pull/5>. El cuerpo del PR es este
+mismo documento.
 
 Ni merges, ni despliegues, ni publicar la APK: eso lo hace Dirección.
+
+Lo que Dirección tiene delante para decidir, en una línea cada uno:
+
+- **El motor se tocó** (§2b), con un parámetro opcional y aditivo. La regla
+  del bloque decía que no; ahí está el porqué y lo que se descartó.
+- **La APK 1.20.0 no está publicada** (§7) y su huella es
+  `c3ddbece…436192`. `infra/publicar-apk.sh` la sube cuando toque.
+- **Falta la pasada en hierro** en el AP11 (§6): ninguna máquina de esta
+  sesión tenía terminal conectado (`adb devices`, vacío).
+- **No hay fichero de tablero** en el repo ni en los proyectos hermanos — se
+  buscó por `agenda-lista` en todo `~/Developer/Claude/Projects` y sólo
+  aparece el prompt. La línea del frente B la pone Dirección donde viva el
+  tablero.
