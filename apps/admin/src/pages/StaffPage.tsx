@@ -306,7 +306,12 @@ function ProfessionalCard({
                 existe para hacer. Fuera de la clínica el texto sale
                 igual de legible —"Cajero", "Propietaria"— así que se usa
                 siempre y no hay dos caminos que mantener. */}
-            {row.email} · {PUESTO_LABEL[puestoDe(row)]}
+            {/* El PUESTO va delante del email, y a 320 px se ve por qué:
+                esta línea trunca con `truncate`, y con el email delante lo
+                que se cortaba era justo el puesto — lo único que esta
+                pantalla existe para decir. El email es largo y variable;
+                el puesto es corto y fijo. Trunca el que sobra. */}
+            {PUESTO_LABEL[puestoDe(row)]} · {row.email}
           </div>
         </div>
         {isPro ? (
