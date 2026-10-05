@@ -6,6 +6,7 @@ import { AlertCircle, ChevronRight, CircleAlert, Delete, Eye, EyeOff, Loader2, P
 
 import { apiWithDevice, ApiError } from "../api.js";
 import { Logo } from "../Logo.js";
+import type { CashierRole } from "../lib/offlineAuth.js";
 import { offlineLogin, type OfflineShiftState } from "../lib/offlineSession.js";
 import {
   getRecentCashiers,
@@ -26,7 +27,11 @@ interface CashierLoginResponse {
     id: string;
     email: string;
     alias: string | null;
-    role: "MANAGER" | "CASHIER";
+    // clinica-1 · `CLINICIAN` es el sanitario sin caja. ES LA FUENTE del
+    // rol para todo el TPV (de aquí sale `CashierUser`), así que
+    // ensancharla aquí es lo que obliga a decidir en cada pantalla a la
+    // que el rol llega. Se usa el tipo compartido a propósito.
+    role: CashierRole;
   };
   shiftState:
     | { kind: "needsShiftOpen" }
@@ -201,7 +206,7 @@ export function PinScreen({
           id: res.user.id,
           email: res.user.email,
           alias: res.user.alias,
-          role: res.user.role as "MANAGER" | "CASHIER",
+          role: res.user.role,
         },
         shiftState: res.shiftState as OfflineShiftState,
         offline: true,

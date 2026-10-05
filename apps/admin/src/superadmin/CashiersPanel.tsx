@@ -48,6 +48,10 @@ const CASHIER_ROLE_LABEL: Record<TenantCashier["role"], string> = {
   OWNER: "Propietario",
   MANAGER: "Encargado",
   CASHIER: "Cajero",
+  // clinica-1 · el `Record` es exhaustivo, así que el typecheck es quien
+  // obligó a venir aquí. La etiqueta dice lo que el super-admin necesita
+  // saber de un golpe: entra al TPV, y no a la caja.
+  CLINICIAN: "Sanitario (sin caja)",
 };
 
 // Las fechas se dicen ENTERAS. Nada de "hace 3 días" sobre algo de

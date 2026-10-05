@@ -31,6 +31,35 @@
 // El gate es la puerta del SERVIDOR. El TPV y el panel además esconden
 // lo que no aplica, pero esconder no es gatear: el flag que cachea el
 // TPV es UI, y un catálogo cacheado no abre esta puerta.
+//
+// ── clinica-1 · y la segunda pregunta que contesta esta puerta ────────
+//
+// «¿Tiene ESTE USUARIO caja?» El sanitario sin caja (`UserRole.CLINICIAN`)
+// entra al TPV como un cajero —email y PIN— porque su agenda vive ahí, y
+// a partir de ese momento no puede nacer de él ni un cobro, ni un turno,
+// ni una apertura de cajón, ni un informe Z.
+//
+// La negativa va AQUÍ y no en cada ruta por una razón de cuentas: hay
+// las 103 rutas con `ensureCajaEnabled` en el `preHandler` repartidas
+// por tickets, turno, mesas, fiscal, fiado, impresión y catálogo del TPV.
+// Cien sitios donde acordarse son cien sitios donde olvidarse, y el
+// olvido aquí es un cobro firmado por quien no cobra. Este par de líneas
+// los cubre todos de golpe, y cubre también el que escriba alguien
+// mañana: si lleva el gate de la caja, lleva esto.
+//
+// Las dos rutas que NO llevan el gate de la caja siguen sin llevarlo, y
+// las dos están bien así:
+//
+//   · `POST /shift/cashier-login` SÍ lo lleva, pero cuando corre todavía
+//     no hay sesión ni rol que mirar (sólo el device token), así que el
+//     sanitario entra. Es lo que tiene que pasar.
+//   · `POST /shift/cashier-logout` no lo lleva a propósito desde H1
+//     (cerrar sesión tiene que funcionar siempre). El sanitario sale.
+//   · `GET /tpv/catalog/products` tampoco, también desde antes. Leer el
+//     catálogo no es cobrar, y la agenda necesita los servicios.
+//
+// Lo que esto NO es: esconder botones. El TPV además no pinta la pantalla
+// de venta a un sanitario, pero eso es UI; la frontera está aquí.
 
 import type { FastifyReply, FastifyRequest } from "fastify";
 
@@ -38,6 +67,9 @@ import { getPrisma } from "../context.js";
 
 export const CAJA_DISABLED_MESSAGE =
   "Esta empresa no tiene el módulo de caja activado. Si crees que debería tenerlo, avisa a Mi Piace.";
+
+export const CLINICIAN_NO_CAJA_MESSAGE =
+  "El personal sanitario no tiene acceso a la caja. Para cobrar, entra con un usuario de caja.";
 
 // Las tres puertas de auth, en el orden en que se pueblan. Devuelve null
 // cuando ninguna ha corrido todavía: en ese caso no hay nada que gatear
@@ -83,10 +115,96 @@ export async function cajaIsDisabled(tenantId: string): Promise<boolean> {
   }
 }
 
+/** El actor de esta petición, de las dos puertas que llevan rol. */
+function resolveActor(
+  request: FastifyRequest,
+): { userId: string; role: string } | null {
+  if (request.cashier) {
+    return { userId: request.cashier.userId, role: request.cashier.role };
+  }
+  if (request.auth) {
+    return { userId: request.auth.userId, role: request.auth.role };
+  }
+  // Ni sesión de TPV ni token de panel: sólo device, o nada. Un device
+  // token por sí solo no llega a una ruta de cobro sin sesión detrás.
+  return null;
+}
+
+/**
+ * clinica-1 · ¿el actor de esta petición es un sanitario sin caja?
+ *
+ * Dos comprobaciones, y hacen falta las dos:
+ *
+ *   1. **El rol del JWT.** Sin I/O, así que no puede fallar. Cubre a
+ *      cualquiera que fuera sanitario cuando entró — o sea, a todos los
+ *      sanitarios reales: su token dice `CLINICIAN` desde el login.
+ *
+ *   2. **El rol en la base.** Cierra la VENTANA DE TRANSICIÓN, que es un
+ *      agujero real y no una hipótesis: la sesión del TPV vive el turno
+ *      entero (`cashierSessionTtlMinutes`, por defecto 12 h) y su JWT NO
+ *      lleva `tokenVersion`, así que incrementarlo al cambiarle el rol
+ *      —como hace `PATCH /staff/:id/clinica`— invalida los tokens del
+ *      panel y NO el del TPV. Sin esta segunda comprobación, una cajera
+ *      que pasa a sanitaria seguiría pudiendo cobrar hasta medio día con
+ *      el token que dice `CASHIER`, y «ningún cobro nace de un
+ *      CLINICIAN» dejaría de ser verdad justo el día de la implantación,
+ *      que es el día en que se cambian los roles.
+ *
+ * La lectura **falla hacia ENCENDIDO**, igual que `cajaIsDisabled` y por
+ * la misma razón de la casa: una lectura que revienta no puede ser el
+ * motivo de que una venta no se cobre. Lo que se pierde al fallar es
+ * exactamente la ventana que ya existía; lo que NO se pierde nunca es la
+ * comprobación 1, que no depende de nada.
+ *
+ * Y el coste: una lectura por PK en las rutas que ya hacían una (la del
+ * tenant, dos líneas más abajo). Se evita cuando el JWT ya basta para
+ * decidir.
+ */
+export async function esSanitarioSinCaja(
+  request: FastifyRequest,
+): Promise<boolean> {
+  const actor = resolveActor(request);
+  if (!actor) return false;
+  // 1 · el JWT. Si ya lo dice, no hace falta preguntar nada.
+  if (actor.role === "CLINICIAN") return true;
+  // Un OWNER o un MANAGER no se vuelve `CLINICIAN`: el PATCH de la
+  // pantalla de personal sólo cambia el puesto entre CASHIER y CLINICIAN.
+  // Así la consulta extra se la comen las sesiones de cajero y no las de
+  // la propietaria, que son las que cobran todo el día en el piloto.
+  if (actor.role !== "CASHIER") return false;
+  // 2 · la base, para la ventana de transición.
+  const model = getPrisma().user as
+    | {
+        findUnique?: (args: unknown) => Promise<{ role?: string } | null>;
+      }
+    | undefined;
+  if (typeof model?.findUnique !== "function") return false;
+  try {
+    const row = await model.findUnique({
+      where: { id: actor.userId },
+      select: { role: true },
+    });
+    return row?.role === "CLINICIAN";
+  } catch {
+    return false;
+  }
+}
+
 export async function ensureCajaEnabled(
   request: FastifyRequest,
   reply: FastifyReply,
 ): Promise<void> {
+  // El usuario, ANTES del tenant. Un sanitario de una empresa con caja
+  // encendida es el caso que importa, y preguntar primero por el tenant
+  // lo dejaría pasar.
+  if (await esSanitarioSinCaja(request)) {
+    reply.code(403).send({
+      error: "CLINICIAN_NO_CAJA",
+      code: "CLINICIAN_NO_CAJA",
+      message: CLINICIAN_NO_CAJA_MESSAGE,
+    });
+    return;
+  }
   const tenantId = resolveTenantId(request);
   if (!tenantId) return;
   if (await cajaIsDisabled(tenantId)) {

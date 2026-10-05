@@ -13,7 +13,9 @@ import { loadEnv } from "../env.js";
 export interface MustChangePasswordPayload {
   sub: string; // userId
   tid: string; // tenantId
-  role: "OWNER" | "MANAGER" | "CASHIER";
+  // clinica-1 · por tipo, no por uso: este JWT sólo lo emite el alta de
+  // un OWNER hecha por el super-admin. Un sanitario no tiene password.
+  role: "OWNER" | "MANAGER" | "CASHIER" | "CLINICIAN";
   purpose: "must-change-password";
   tv: number;
 }

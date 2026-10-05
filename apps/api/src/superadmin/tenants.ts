@@ -945,6 +945,7 @@ export async function registerSuperAdminTenantsRoutes(
         agendaEnabled?: boolean;
         fichajeEnabled?: boolean;
         holdedEnabled?: boolean;
+        clinicalRecordsEnabled?: boolean;
       };
       const ctx = request.superAdmin!;
       const prisma = getPrisma();
@@ -1160,6 +1161,74 @@ export async function registerSuperAdminTenantsRoutes(
           after: body.holdedEnabled,
         };
         data.holdedEnabled = body.holdedEnabled;
+      }
+
+      // clinica-1 · EL INTERRUPTOR DE LA HISTORIA CLÍNICA.
+      //
+      // Fuera de `MODULE_FIELDS` a propósito, igual que `holdedEnabled`: no
+      // es un módulo que se venda solo, es una capacidad que se enciende
+      // ENCIMA del CRM y de la agenda. No entra en el invariante de "al
+      // menos uno encendido" porque un tenant cuyo único módulo fuera éste
+      // no tendría ni pacientes que fichar ni citas que asignar.
+      //
+      // Guarda en los DOS sentidos, y las dos la pide el propio producto:
+      //
+      //   · ENCENDERLA exige CRM y agenda. La historia cuelga de un
+      //     `Client` (CRM) y el acceso nace de una `Appointment` (agenda).
+      //     Sin las dos, el módulo existe y no hace nada: ni hay pacientes
+      //     a los que abrirles historia ni citas que llenen la selección de
+      //     un sanitario. Un 409 que lo dice es más útil que un tenant
+      //     encendido donde nada funciona.
+      //   · APAGARLA con historia dentro, NO. Apagar es dejar de servir las
+      //     rutas clínicas y esconder la ficha técnica: la historia se
+      //     queda en la base, intacta y sin que nadie pueda llegar a ella.
+      //     Eso no es apagar un módulo, es perder el acceso a un registro
+      //     legal que hay que conservar cinco años y enseñarle al paciente
+      //     si lo pide. Si de verdad hay que apagarlo, antes hay que
+      //     decidir qué se hace con lo escrito, y eso no cabe en un toggle.
+      if (
+        body.clinicalRecordsEnabled !== undefined &&
+        body.clinicalRecordsEnabled !== tenant.clinicalRecordsEnabled
+      ) {
+        if (body.clinicalRecordsEnabled === true) {
+          // Se leen del body cuando vienen en la misma llamada: encender
+          // los tres de golpe tiene que funcionar.
+          const crm = body.crmEnabled ?? tenant.crmEnabled;
+          const agenda = body.agendaEnabled ?? tenant.agendaEnabled;
+          const faltan = [
+            crm ? null : "CRM / ficha de cliente",
+            agenda ? null : "agenda",
+          ].filter((x): x is string => x != null);
+          if (faltan.length > 0) {
+            return reply.code(409).send({
+              error: "CLINICAL_RECORDS_NEEDS_MODULES",
+              message:
+                "La historia clínica cuelga del paciente y el acceso nace de la cita, así que necesita " +
+                faltan.join(" y ") +
+                " encendido. Enciéndelos primero (o en la misma llamada).",
+              faltan,
+            });
+          }
+        } else {
+          const conHistoria = await prisma.clinicalEntry.count({
+            where: { tenantId: id },
+          });
+          if (conHistoria > 0) {
+            return reply.code(409).send({
+              error: "CLINICAL_RECORDS_HAS_HISTORY",
+              message:
+                `Esta empresa tiene ${conHistoria} anotación(es) de historia clínica. Apagar el módulo ` +
+                "las dejaría guardadas y sin forma de llegar a ellas, y la ley obliga a conservarlas y a " +
+                "poder enseñárselas al paciente. Decide qué se hace con lo escrito antes de apagarlo.",
+              anotaciones: conHistoria,
+            });
+          }
+        }
+        changes.clinicalRecordsEnabled = {
+          before: tenant.clinicalRecordsEnabled,
+          after: body.clinicalRecordsEnabled,
+        };
+        data.clinicalRecordsEnabled = body.clinicalRecordsEnabled;
       }
 
       if (Object.keys(changes).length === 0) {

@@ -63,6 +63,7 @@ import { syncNow } from "../lib/syncNow.js";
 import { CloseShiftModal } from "./CloseShiftModal.js";
 import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
 import { formatEur } from "../lib/money.js";
+import type { CashierRole } from "../lib/offlineAuth.js";
 
 // El modal de cobro arrastra un grafo de dependencias grande (impresión,
 // outbox, overlays). Se carga en diferido para no engordar el arranque
@@ -144,7 +145,8 @@ export interface TableMapScreenProps {
   // ahora Arqueo X y Cerrar turno sin pasar por venta rápida. Requiere
   // el turno y el rol del cajero.
   shiftId?: string;
-  cashierRole?: "MANAGER" | "CASHIER";
+  // clinica-1 · el tipo compartido (ver la nota de CloseShiftModal).
+  cashierRole?: CashierRole;
   // v1.9.2-mesas-concurrencia · banner de expulsión / éxito. El padre
   // (App) lo setea al navegar de vuelta al mapa por un evento remoto.
   notice?: MapNotice | null;

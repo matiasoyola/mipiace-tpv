@@ -72,7 +72,14 @@ export async function registerCashierAuthRoutes(
           // v1.3-piloto-feedback · Lote 1: aceptamos OWNER. El activate
           // ya le coloca pinHash; sin esto, el dueño no podía abrir
           // turno en el TPV con su propio email.
-          role: { in: ["OWNER", "MANAGER", "CASHIER"] },
+          //
+          // clinica-1 · y CLINICIAN. El sanitario sin caja ENTRA AL TPV:
+          // es donde vive su agenda. Lo que no puede hacer al entrar es
+          // abrir turno ni cobrar, y eso no se decide aquí — lo decide
+          // `ensureCajaEnabled` en cada ruta de caja. Dejarlo fuera de
+          // esta lista habría sido esconder la negativa en la puerta de
+          // entrada, y la puerta de entrada no es donde se razona.
+          role: { in: ["OWNER", "MANAGER", "CASHIER", "CLINICIAN"] },
         },
         select: { id: true, role: true, pinHash: true, email: true, alias: true },
       });
@@ -111,7 +118,7 @@ export async function registerCashierAuthRoutes(
           tid: ctx.tenantId,
           did: ctx.deviceId,
           rid: ctx.registerId,
-          role: user.role as "OWNER" | "MANAGER" | "CASHIER",
+          role: user.role as "OWNER" | "MANAGER" | "CASHIER" | "CLINICIAN",
         },
         tenant.cashierSessionTtlMinutes,
       );
@@ -267,7 +274,9 @@ export async function registerCashierAuthRoutes(
         prisma.user.findMany({
           where: {
             tenantId: ctx.tenantId,
-            role: { in: ["OWNER", "MANAGER", "CASHIER"] },
+            // clinica-1 · el sanitario también está en el roster offline:
+            // sin red tiene que poder entrar a ver su agenda cacheada.
+            role: { in: ["OWNER", "MANAGER", "CASHIER", "CLINICIAN"] },
             pinHash: { not: null },
           },
           select: { id: true, email: true, alias: true, role: true, pinHash: true },

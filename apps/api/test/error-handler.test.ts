@@ -74,6 +74,44 @@ async function buildApp() {
       },
     );
   });
+  // clinica-1 · las tres formas EXACTAS con las que llega una negativa de
+  // la historia clínica. Dos triggers y un RESTRICT, y los tres por `P2010`
+  // («raw query failed») o `P2003`, que es la razón por la que hasta este
+  // bloque salían como «Error de base de datos» y nadie entendía nada.
+  app.delete("/clinica-borrar-entrada", async () => {
+    throw new Prisma.PrismaClientKnownRequestError(
+      "Invalid `prisma.$executeRawUnsafe()` invocation:\n\nRaw query failed. " +
+        "Code: `23514`. Message: `ERROR: HISTORIA_VIOLADA: la historia clínica " +
+        "no se borra (clinical_entries.1f0c...). Se conserva y se le añaden anotaciones.`",
+      {
+        code: "P2010",
+        clientVersion: "test",
+        meta: { code: "23514", message: "HISTORIA_VIOLADA" },
+      },
+    );
+  });
+  app.patch("/clinica-editar-entrada", async () => {
+    throw new Prisma.PrismaClientKnownRequestError(
+      "Raw query failed. Code: `23514`. Message: `ERROR: HISTORIA_VIOLADA: la " +
+        "historia clínica no se edita (clinical_entries.1f0c...). Lo escrito queda.`",
+      {
+        code: "P2010",
+        clientVersion: "test",
+        meta: { code: "23514", message: "HISTORIA_VIOLADA" },
+      },
+    );
+  });
+  app.delete("/clinica-borrar-paciente", async () => {
+    throw new Prisma.PrismaClientKnownRequestError(
+      "Foreign key constraint failed on the field: " +
+        "`clinical_entries_client_id_fkey`",
+      {
+        code: "P2003",
+        clientVersion: "test",
+        meta: { code: "23503", field_name: "clinical_entries_client_id_fkey" },
+      },
+    );
+  });
   app.get("/prisma-unique", async () => {
     throw new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
       code: "P2002",
@@ -178,5 +216,71 @@ describe("registerErrorHandler", () => {
     const body = res.json();
     expect(body.prismaCode).toBe("P2002");
     expect(body.sqlState).toBeUndefined();
+  });
+});
+
+// ── clinica-1 · la negativa de la historia se explica ────────────────
+//
+// Lo que se fija: que el motor diciendo NO no sale como un 500 «Error de
+// base de datos (P2010)». Hoy no hay ninguna ruta que borre un cliente ni
+// un tenant, así que esto no se dispara desde ninguna pantalla — está
+// para el día que alguien escriba `DELETE /clients/:id`, que lo escribirá
+// porque el RGPD tiene un derecho de supresión.
+describe("clinica-1 · lo clínico no se borra, y la negativa se explica", () => {
+  it("borrar una entrada → 409 que dice cómo se corrige", async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "DELETE",
+      url: "/clinica-borrar-entrada",
+    });
+    // 409 y no 500: no es una avería, es el sistema funcionando.
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("CLINICAL_RECORD_PROTECTED");
+    expect(res.json().message).toContain("no se borra");
+    expect(res.json().message).toContain("revoca el acceso");
+  });
+
+  it("editar una entrada → 409 que manda a la anotación", async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/clinica-editar-entrada",
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().message).toContain("añade una anotación");
+  });
+
+  it("borrar al paciente con historia → 409 por el RESTRICT", async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "DELETE",
+      url: "/clinica-borrar-paciente",
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("CLINICAL_RECORD_PROTECTED");
+    expect(res.json().message).toContain("cinco años");
+  });
+
+  it("y NO se reenvía el mensaje de Postgres al cliente", async () => {
+    // Esos mensajes llevan ids de fila y nombres de tabla: son para el
+    // log, no para una pantalla.
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "DELETE",
+      url: "/clinica-borrar-entrada",
+    });
+    const cuerpo = JSON.stringify(res.json());
+    expect(cuerpo).not.toContain("HISTORIA_VIOLADA");
+    expect(cuerpo).not.toContain("clinical_entries");
+    expect(cuerpo).not.toContain("23514");
+  });
+
+  it("un error de BD que NO es clínico sigue saliendo como antes", async () => {
+    // El sabotaje de este mapeo: si la detección fuera demasiado ancha,
+    // se comería los 500 de verdad y nadie los vería.
+    const app = await buildApp();
+    const res = await app.inject({ method: "GET", url: "/prisma-unique" });
+    expect(res.statusCode).toBe(500);
+    expect(res.json().error).toBe("DB_ERROR");
   });
 });

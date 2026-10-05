@@ -74,6 +74,14 @@ function matchContains(row: FakeClientRow, needle: string): boolean {
   );
 }
 
+// clinica-1 · el estado clínico del tenant y del actor, mutable por test.
+let clinicaDelTenant = false;
+let usuarioClinico: { isClinician: boolean; clinicalScope: "ALL" | "SELECTION" } = {
+  isClinician: false,
+  clinicalScope: "SELECTION",
+};
+const accesosVigentes: Array<{ clinicianUserId: string; clientId: string }> = [];
+
 const fakePrisma = {
   client: {
     findMany: vi.fn(async ({ where, take, cursor, skip }: any) => {
@@ -187,6 +195,29 @@ const fakePrisma = {
       return list;
     }),
   },
+  // clinica-1 · la ficha y el alta de ficha técnica pasan por
+  // `resolverAccesoClinico`, que lee estas tres. `clinicaDelTenant` y
+  // `usuarioClinico` son las palancas que usan los tests de abajo para
+  // encender la clínica y marcar al actor como sanitario; por defecto
+  // están como todos los tenants de hoy —clínica apagada— y el camino es
+  // exactamente el de antes del bloque.
+  tenant: {
+    findUnique: vi.fn(async () => ({
+      clinicalRecordsEnabled: clinicaDelTenant,
+    })),
+  },
+  user: {
+    findFirst: vi.fn(async () => usuarioClinico),
+  },
+  clinicalAccess: {
+    findFirst: vi.fn(async ({ where }: any) =>
+      accesosVigentes.some(
+        (a) => a.clinicianUserId === where.clinicianUserId && a.clientId === where.clientId,
+      )
+        ? { id: "acceso" }
+        : null,
+    ),
+  },
   // B-reservas-4: el historial ahora consulta citas del cliente vía la capa
   // de agenda (`createAgendaStore().listForClient`), que usa SQL crudo. Este
   // tenant de prueba no tiene citas → devolvemos vacío.
@@ -239,6 +270,12 @@ beforeEach(() => {
   consentStore.length = 0;
   noteStore.length = 0;
   ticketStore.length = 0;
+  // clinica-1 · se vuelve al estado de todos los tenants de hoy. Que el
+  // DEFAULT del harness sea "clínica apagada" es parte de lo que prueba la
+  // suite: los 3000 tests de siempre corren por el camino de siempre.
+  clinicaDelTenant = false;
+  usuarioClinico = { isClinician: false, clinicalScope: "SELECTION" };
+  accesosVigentes.length = 0;
 });
 
 const auth = { authorization: `Bearer ${TOKEN}` };
@@ -571,6 +608,139 @@ describe("F3 · apellidos opcionales", () => {
     expect(segunda.json().duplicate).toBe(true);
     expect(segunda.json().client.id).toBe(primera.json().client.id);
     expect(clientStore.size).toBe(1);
+    await app.close();
+  });
+});
+
+// ── clinica-1 · la ficha técnica en un tenant clínico ────────────────
+//
+// La garantía que se prueba: «sólo la ve quien debe». Y la otra mitad, que
+// es la que protege a los 15 clientes de hoy: en un tenant NO clínico no
+// cambia absolutamente nada.
+describe("clinica-1 · la ficha técnica deja de salir para quien no debe", () => {
+  function seedPacienteConNota() {
+    const c = seedClient({ firstName: "Pilar", lastName: "Ramos" });
+    noteStore.push({
+      id: randomUUID(),
+      tenantId: TENANT_ID,
+      clientId: c.id,
+      serviceId: null,
+      body: "Hiperqueratosis plantar derecha",
+      createdByUserId: USER_ID,
+      createdAt: new Date(),
+    });
+    return c;
+  }
+
+  it("tenant NORMAL (Sole): la cajera la sigue viendo, como siempre", async () => {
+    const c = seedPacienteConNota();
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "GET",
+      url: `/clients/${c.id}`,
+      headers: auth,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().technicalNotes).toHaveLength(1);
+    expect(res.json().technicalNotesHidden).toBe(false);
+    await app.close();
+  });
+
+  it("tenant CLÍNICO: la cajera NO la ve, y la respuesta lo dice", async () => {
+    clinicaDelTenant = true;
+    const c = seedPacienteConNota();
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "GET",
+      url: `/clients/${c.id}`,
+      headers: auth,
+    });
+    // 200 y no 403: la ficha del cliente se sigue abriendo —el teléfono y
+    // el email son suyos y la cajera los necesita—, lo que falta es la
+    // ficha técnica. Un 403 habría dejado a la recepcionista sin poder
+    // coger un teléfono.
+    expect(res.statusCode).toBe(200);
+    expect(res.json().technicalNotes).toEqual([]);
+    expect(res.json().technicalNotesHidden).toBe(true);
+    // Y la nota NO se ha borrado: sigue en la base, escondida.
+    expect(noteStore).toHaveLength(1);
+    await app.close();
+  });
+
+  it("tenant CLÍNICO: el sanitario CON acceso sí la ve", async () => {
+    clinicaDelTenant = true;
+    usuarioClinico = { isClinician: true, clinicalScope: "SELECTION" };
+    const c = seedPacienteConNota();
+    accesosVigentes.push({ clinicianUserId: USER_ID, clientId: c.id });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "GET",
+      url: `/clients/${c.id}`,
+      headers: auth,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().technicalNotes).toHaveLength(1);
+    expect(res.json().technicalNotesHidden).toBe(false);
+    await app.close();
+  });
+
+  it("tenant CLÍNICO: el sanitario SIN acceso a ESE paciente no la ve", async () => {
+    clinicaDelTenant = true;
+    usuarioClinico = { isClinician: true, clinicalScope: "SELECTION" };
+    const c = seedPacienteConNota();
+    // Tiene acceso a OTRO paciente, no a éste.
+    accesosVigentes.push({ clinicianUserId: USER_ID, clientId: randomUUID() });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "GET",
+      url: `/clients/${c.id}`,
+      headers: auth,
+    });
+    expect(res.json().technicalNotesHidden).toBe(true);
+    await app.close();
+  });
+
+  it("tenant CLÍNICO: el sanitario con alcance ALL la ve sin acceso por paciente", async () => {
+    clinicaDelTenant = true;
+    usuarioClinico = { isClinician: true, clinicalScope: "ALL" };
+    const c = seedPacienteConNota();
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "GET",
+      url: `/clients/${c.id}`,
+      headers: auth,
+    });
+    expect(res.json().technicalNotes).toHaveLength(1);
+    await app.close();
+  });
+
+  it("tenant CLÍNICO: quien no la ve tampoco la ESCRIBE", async () => {
+    clinicaDelTenant = true;
+    const c = seedClient({ firstName: "Pilar", lastName: "Ramos" });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/clients/${c.id}/technical-notes`,
+      headers: auth,
+      payload: { body: "No debería entrar" },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("NO_SANITARIO");
+    expect(noteStore).toHaveLength(0);
+    await app.close();
+  });
+
+  it("tenant NORMAL: escribir ficha técnica sigue funcionando igual", async () => {
+    const c = seedClient({ firstName: "Pilar", lastName: "Ramos" });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/clients/${c.id}/technical-notes`,
+      headers: auth,
+      payload: { body: "Tinte 7.3 + 20 vol" },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(noteStore).toHaveLength(1);
     await app.close();
   });
 });

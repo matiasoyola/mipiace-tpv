@@ -79,6 +79,7 @@ import {
   clearCashierSession,
   setCashierSession,
 } from "./storage.js";
+import type { CashierRole } from "./lib/offlineAuth.js";
 
 type CashierUser = CashierLoginResponse["user"] & { sessionTtlMinutes: number };
 
@@ -380,6 +381,67 @@ export function App() {
         onLoggedIn={(res) => handleLoggedIn(res)}
         onDeviceRevoked={unpair}
       />
+    );
+  }
+
+  // ── clinica-1 · EL TPV DEL SANITARIO SIN CAJA ──────────────────────
+  //
+  // Un `CLINICIAN` entra por la misma puerta que un cajero (PIN, sesión
+  // de cajero) y ve **sólo su agenda**. Ni venta, ni turno, ni cajón, ni
+  // informes.
+  //
+  // El desvío es ESTE `if` y nada más, y está aquí por lo que evita:
+  //
+  //   · **El turno era la puerta obligatoria.** Tras el login, un cajero
+  //     cae en `needsShiftOpen` → `ShiftOpenScreen`, y de ahí a
+  //     `SalePage`. Un sanitario que no cobra no tiene fondo de caja que
+  //     declarar, así que pedirle que abra turno para llegar a su agenda
+  //     es pedirle que haga un arqueo de una caja que no toca. Este `if`
+  //     va ANTES de toda la maquinaria de turno, así que se la salta
+  //     entera — no se desactiva nada, simplemente no se entra.
+  //   · **La pantalla de venta ya NO es la puerta a la agenda**, y eso no
+  //     lo arregla este bloque: lo arregló B-reservas-5 F1, que subió
+  //     `showAgenda` de `SalePage` a `App`. La agenda es un overlay
+  //     `fixed inset-0` colgado de aquí. Lo único que seguía viviendo en
+  //     `SalePage` era el BOTÓN de abrirla, y eso es un botón, no una
+  //     puerta: `AgendaPage` se monta igual sin que `SalePage` exista.
+  //     Por eso el mínimo de verdad son estas líneas y no un rediseño.
+  //
+  // Lo que NO hace este `if`: cerrar la caja. La caja la cierra la API
+  // (`ensureCajaEnabled`), y tiene que seguir siendo así — esconder la
+  // pantalla no es gatear, y un sanitario con curiosidad y la consola del
+  // navegador abierta llega a `/tickets` igual.
+  if (cashier.cashier.role === "CLINICIAN") {
+    return (
+      <LoggedInWrapper
+        autoLogoutMinutes={tenant.cashierAutoLogoutMinutes}
+        onAutoLogout={() => {
+          clearCashierSession();
+          setCashier({ kind: "needsLogin" });
+        }}
+      >
+        <AgendaPage
+          // Su día, de entrada. La decisión de producto es «ve su agenda,
+          // con sus citas por defecto»: el filtro arranca puesto en él y
+          // se puede quitar — las citas de las compañeras no son datos de
+          // salud (la agenda sólo enseña contacto), y necesita verlas para
+          // saber si la sala está ocupada.
+          staffFilterInicial={cashier.cashier.id}
+          // Sin `SalePage` detrás, «Volver» no tiene a dónde volver: es
+          // la salida de la sesión. Es la misma decisión que el botón
+          // Bloquear del cajero, con el único botón que esta pantalla
+          // tiene.
+          onClose={() => {
+            clearCashierSession();
+            setCashier({ kind: "needsLogin" });
+          }}
+          // Y cobrar una cita no se le ofrece: el botón no se pinta. Si
+          // alguien llamara al endpoint a mano, la API lo rechaza igual
+          // — esconder el botón es por no ofrecer una acción que siempre
+          // falla, no por seguridad.
+          puedeCobrar={false}
+        />
+      </LoggedInWrapper>
     );
   }
 
@@ -881,7 +943,8 @@ function ShiftOpenWithDaySummary({
   cashierRole,
   ...props
 }: React.ComponentProps<typeof ShiftOpenScreen> & {
-  cashierRole: "MANAGER" | "CASHIER";
+  // clinica-1 · el tipo compartido (ver la nota de CloseShiftModal).
+  cashierRole: CashierRole;
 }) {
   const [pending, setPending] = useState<ShiftDaySummary | null>(null);
   const [checking, setChecking] = useState(() => navigator.onLine);
@@ -973,7 +1036,10 @@ interface TestBootstrap {
     id: string;
     email: string;
     alias: string | null;
-    role: "MANAGER" | "CASHIER";
+    // El cajero técnico del modo prueba es siempre MANAGER, pero el tipo
+    // sale del mismo sitio que el del login para que no vuelvan a
+    // divergir.
+    role: CashierRole;
   };
   tenant: { id: string; name: string; cashierAutoLogoutMinutes: number };
   register: { id: string; name: string; numSerieHolded: string | null };

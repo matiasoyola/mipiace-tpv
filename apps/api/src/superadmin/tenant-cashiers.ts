@@ -70,7 +70,10 @@ interface CashierRow {
   id: string;
   alias: string | null;
   email: string;
-  role: "OWNER" | "MANAGER" | "CASHIER";
+  // clinica-1 · el sanitario sin caja aparece en este panel porque abre
+  // el TPV con su PIN como cualquiera, y la pregunta que el panel
+  // contesta —«¿puede entrar?»— es la misma para él.
+  role: "OWNER" | "MANAGER" | "CASHIER" | "CLINICIAN";
   status: CashierAccessStatus;
   canOpenTpv: boolean;
   isTestCashier: boolean;
@@ -139,7 +142,7 @@ export async function registerSuperAdminTenantCashiersRoutes(
           // Quien puede abrir turno en una caja del tenant. El OWNER
           // entra en la lista porque `activate` le pone pinHash y usa
           // el TPV como uno más.
-          role: { in: ["OWNER", "MANAGER", "CASHIER"] },
+          role: { in: ["OWNER", "MANAGER", "CASHIER", "CLINICIAN"] },
         },
         orderBy: { createdAt: "asc" },
         select: {
@@ -171,12 +174,19 @@ export async function registerSuperAdminTenantCashiersRoutes(
             id: u.id,
             alias: u.alias,
             email: u.email,
-            role: u.role as "OWNER" | "MANAGER" | "CASHIER",
+            role: u.role as "OWNER" | "MANAGER" | "CASHIER" | "CLINICIAN",
             status,
             canOpenTpv: hasPin && !revoked,
             isTestCashier: u.isTestCashier,
             lastLoginAt: u.lastLoginAt?.toISOString() ?? null,
-            lastLoginSource: u.role === "CASHIER" ? "TPV" : "TPV_O_ADMIN",
+            // clinica-1 · un CLINICIAN cuenta como el CASHIER: el login
+            // del panel lo rechaza (`CASHIER_NOT_ALLOWED_IN_ADMIN`), así
+            // que su última entrada es inequívocamente del TPV. Decirlo
+            // "TPV_O_ADMIN" sería dar por posible un camino cerrado.
+            lastLoginSource:
+              u.role === "CASHIER" || u.role === "CLINICIAN"
+                ? "TPV"
+                : "TPV_O_ADMIN",
             createdAt: u.createdAt.toISOString(),
           };
         })

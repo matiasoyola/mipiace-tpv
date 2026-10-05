@@ -37,6 +37,49 @@ function isHoldedError(
   );
 }
 
+/**
+ * clinica-1 · ¿este error es el motor negándose a tocar la historia
+ * clínica? Devuelve la frase que se le enseña a la persona, o `null`.
+ *
+ * Se reconoce por DOS vías, y hacen falta las dos:
+ *
+ *   · el prefijo `HISTORIA_VIOLADA` de los triggers (editar o borrar una
+ *     entrada, una anotación, un acceso o una línea del registro);
+ *   · el nombre de la constraint `clinical_*_fkey` del RESTRICT (borrar
+ *     el paciente, el tenant o el autor que tienen historia detrás).
+ *
+ * Lo que NO se hace: reenviar el mensaje de Postgres al cliente. Esos
+ * mensajes llevan ids de fila y nombres de tabla; son para el log, no
+ * para una pantalla. Lo que se enseña es una frase escrita para quien la
+ * lee.
+ */
+function negativaClinica(err: unknown): string | null {
+  const texto = err instanceof Error ? err.message : String(err);
+  if (texto.includes("HISTORIA_VIOLADA")) {
+    // El trigger ya distingue los casos en su propio mensaje; aquí se
+    // reparte en las dos frases que una persona necesita.
+    if (texto.includes("no se edita")) {
+      return (
+        "La historia clínica no se edita: lo escrito queda. Para corregirlo, " +
+        "añade una anotación — se guarda con tu nombre y la fecha."
+      );
+    }
+    return (
+      "La historia clínica no se borra. La ley obliga a conservarla y a poder " +
+      "enseñársela al paciente; para dejarla sin efecto se revoca el acceso, que " +
+      "también queda escrito."
+    );
+  }
+  if (sqlStateOf(err) === "23503" && /clinical_\w+_fkey/.test(texto)) {
+    return (
+      "No se puede borrar: hay historia clínica colgando de esto. La ley obliga a " +
+      "conservarla cinco años, así que decide qué se hace con lo escrito antes de " +
+      "quitar la ficha."
+    );
+  }
+  return null;
+}
+
 export function registerErrorHandler(app: FastifyInstance): void {
   app.setErrorHandler((err: FastifyError | Error, request, reply) => {
     const tenantId =
@@ -118,6 +161,39 @@ export function registerErrorHandler(app: FastifyInstance): void {
       return reply.code(statusCode).send({
         error: fastifyErr.code ?? "REQUEST_ERROR",
         message: err.message,
+      });
+    }
+
+    // 4.a-bis clinica-1 · LO CLÍNICO NO SE BORRA, y la negativa se
+    // explica.
+    //
+    // Las cuatro tablas clínicas cuelgan de `tenants` y de `clients` con
+    // `ON DELETE RESTRICT`, y llevan triggers que rechazan el UPDATE y el
+    // DELETE. Eso significa que el motor dice NO, y hasta aquí ese NO
+    // llegaba como un 500 «Error de base de datos (P2010)» — verdad, y
+    // completamente inútil para quien intentaba borrar una ficha.
+    //
+    // Hoy no hay ninguna ruta que borre un cliente ni un tenant (se
+    // buscaron todas; están en el done del bloque), así que este mapeo no
+    // se dispara desde ninguna pantalla. Está aquí precisamente por eso:
+    // el día que alguien escriba `DELETE /clients/:id` —y lo escribirá,
+    // porque el RGPD tiene un derecho de supresión— lo que se encuentre
+    // es un 409 que dice por qué, y no un 500 que parece una avería.
+    //
+    // 409 y no 500: no es un fallo del sistema, es el sistema
+    // funcionando. Y sin `captureError`: una negativa esperada no es una
+    // alarma de Sentry.
+    const mensajeClinico = negativaClinica(err);
+    if (mensajeClinico) {
+      request.log.warn(
+        { tenantId, requestId: request.id, sqlState: sqlStateOf(err) },
+        `negativa de la historia clínica en ${request.method} ${request.url}`,
+      );
+      return reply.code(409).send({
+        error: "CLINICAL_RECORD_PROTECTED",
+        code: "CLINICAL_RECORD_PROTECTED",
+        message: mensajeClinico,
+        requestId: request.id,
       });
     }
 

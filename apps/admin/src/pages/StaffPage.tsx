@@ -27,15 +27,85 @@ interface StaffProfile {
   active: boolean;
   color: string | null;
 }
+// clinica-1 · los tres nombres que se ven en pantalla. Los deriva LA API
+// (`staff/routes.ts::puestoVisible`) de cruzar el rol de negocio con la
+// marca sanitaria, y no esta pantalla: si cada pantalla lo dedujera por su
+// cuenta, dos acabarían llamando distinto a la misma persona.
+type PuestoVisible =
+  | "cajero"
+  | "cajero-sanitario"
+  | "sanitario"
+  | "propietaria"
+  | "propietaria-sanitaria"
+  | "encargado"
+  | "encargado-sanitario";
+
+interface ClinicaDelProfesional {
+  esSanitario: boolean;
+  colegiado: string | null;
+  alcance: "ALL" | "SELECTION";
+  puesto: PuestoVisible;
+}
+
 interface StaffRow {
   userId: string;
   alias: string | null;
   email: string;
-  role: "OWNER" | "MANAGER" | "CASHIER";
+  role: "OWNER" | "MANAGER" | "CASHIER" | "CLINICIAN";
   profile: StaffProfile | null;
   serviceIds: string[];
   skillCount: number;
+  // clinica-1 · la API SIEMPRE la manda (son columnas del user). Opcional
+  // en el tipo por la ventana del despliegue: los estáticos y la API se
+  // publican juntos pero no se recargan a la vez, y un `row.clinica.puesto`
+  // sobre un `undefined` es una pantalla en blanco. Ver `puestoDe`.
+  clinica?: ClinicaDelProfesional;
 }
+
+// clinica-1 · un paciente de la selección de un sanitario.
+interface PacienteAsignado {
+  accessId: string;
+  clientId: string;
+  name: string;
+  source: "APPOINTMENT" | "MANUAL";
+  grantedAt: string;
+}
+
+/**
+ * El puesto a pintar. Si la API es de antes del bloque (ventana de
+ * despliegue), se deriva del rol: el resultado es el mismo que daba la
+ * pantalla de ayer.
+ */
+function puestoDe(row: StaffRow): PuestoVisible {
+  if (row.clinica) return row.clinica.puesto;
+  switch (row.role) {
+    case "OWNER":
+      return "propietaria";
+    case "MANAGER":
+      return "encargado";
+    case "CLINICIAN":
+      return "sanitario";
+    default:
+      return "cajero";
+  }
+}
+
+const PUESTO_LABEL: Record<PuestoVisible, string> = {
+  cajero: "Cajero",
+  "cajero-sanitario": "Cajero-sanitario",
+  sanitario: "Sanitario",
+  propietaria: "Propietaria",
+  "propietaria-sanitaria": "Propietaria · sanitaria",
+  encargado: "Encargado",
+  "encargado-sanitario": "Encargado · sanitario",
+};
+
+// De dónde vino cada paciente de la selección. Es la pregunta que la
+// dueña hace al mirar la lista: «¿éste lo metí yo o salió de una cita?».
+const ORIGEN_LABEL: Record<PacienteAsignado["source"], string> = {
+  APPOINTMENT: "De la agenda",
+  MANUAL: "A mano",
+};
 interface ServiceRow {
   id: string;
   name: string;
@@ -85,6 +155,9 @@ function shiftSummary(s: Shift): string {
 export function StaffPage() {
   const navigate = useNavigate();
   const [agendaEnabled, setAgendaEnabled] = useState<boolean | null>(null);
+  // clinica-1 · sale del MISMO `GET /admin/tenant/settings` que ya se
+  // pedía para la agenda, así que la pantalla no hace una petición más.
+  const [clinicaEncendida, setClinicaEncendida] = useState(false);
   const [staff, setStaff] = useState<StaffRow[] | null>(null);
   const [services, setServices] = useState<ServiceRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -99,10 +172,16 @@ export function StaffPage() {
   useEffect(() => {
     (async () => {
       try {
-        const settings = await api<{ settings: { agendaEnabled: boolean } }>(
-          "/admin/tenant/settings",
-        );
+        const settings = await api<{
+          settings: {
+            agendaEnabled: boolean;
+            clinicalRecordsEnabled?: boolean;
+          };
+        }>("/admin/tenant/settings");
         setAgendaEnabled(settings.settings.agendaEnabled);
+        setClinicaEncendida(
+          settings.settings.clinicalRecordsEnabled === true,
+        );
         if (!settings.settings.agendaEnabled) return;
         const [staffRes, svcRes] = await Promise.all([
           api<{ staff: StaffRow[] }>("/staff"),
@@ -167,6 +246,7 @@ export function StaffPage() {
               personal={staff}
               services={services}
               canEdit={canEdit}
+              clinicaEncendida={clinicaEncendida}
               onChanged={refresh}
               onError={setError}
             />
@@ -182,6 +262,7 @@ function ProfessionalCard({
   personal,
   services,
   canEdit,
+  clinicaEncendida,
   onChanged,
   onError,
 }: {
@@ -189,6 +270,7 @@ function ProfessionalCard({
   personal: readonly StaffRow[];
   services: ServiceRow[];
   canEdit: boolean;
+  clinicaEncendida: boolean;
   onChanged: () => Promise<void>;
   onError: (m: string | null) => void;
 }) {
@@ -218,7 +300,18 @@ function ProfessionalCard({
             )}
           </div>
           <div className="text-[12.5px] text-slate-500 truncate">
-            {row.email} · {row.role.toLowerCase()}
+            {/* clinica-1 · el PUESTO y no `row.role.toLowerCase()`. En un
+                tenant clínico, "cashier" no distingue a la cajera de la
+                cajera-sanitaria, y es la distinción que esta pantalla
+                existe para hacer. Fuera de la clínica el texto sale
+                igual de legible —"Cajero", "Propietaria"— así que se usa
+                siempre y no hay dos caminos que mantener. */}
+            {/* El PUESTO va delante del email, y a 320 px se ve por qué:
+                esta línea trunca con `truncate`, y con el email delante lo
+                que se cortaba era justo el puesto — lo único que esta
+                pantalla existe para decir. El email es largo y variable;
+                el puesto es corto y fijo. Trunca el que sobra. */}
+            {PUESTO_LABEL[puestoDe(row)]} · {row.email}
           </div>
         </div>
         {isPro ? (
@@ -241,6 +334,16 @@ function ProfessionalCard({
             onChanged={onChanged}
             onError={onError}
           />
+          {/* clinica-1 · sólo en tenants con la clínica encendida. En Sole
+              y en los demás, esta tarjeta es exactamente la de hoy. */}
+          {clinicaEncendida && (
+            <ClinicaEditor
+              row={row}
+              canEdit={canEdit}
+              onChanged={onChanged}
+              onError={onError}
+            />
+          )}
           {isPro && (
             <>
               <SkillsEditor
@@ -381,6 +484,443 @@ function ProfileEditor({
         </div>
       )}
     </section>
+  );
+}
+
+// ── clinica-1 · la sección clínica del profesional ──────────────────
+//
+// Tres decisiones y una lista, en el orden en que se toman:
+//
+//   1. El PUESTO. Para un cajero, tres botones a un toque (cajero /
+//      cajero-sanitario / sanitario). Para la propietaria y el encargado,
+//      una casilla «es sanitario» — su puesto no se cambia desde aquí.
+//   2. El Nº DE COLEGIADO. Aparece al marcar sanitario y es obligatorio:
+//      va en la historia y en los informes que firma.
+//   3. El ALCANCE. Dos botones: todos los pacientes / sólo los suyos.
+//   4. Y si es «sólo los suyos», SU LISTA: de dónde vino cada paciente
+//      (agenda o a mano), añadir y revocar.
+//
+// Regla de Matías («mucho clic, poco escribir» y «que todo fluya»): lo
+// único que se teclea es el colegiado y el nombre al buscar un paciente.
+// Todo lo demás son botones.
+function ClinicaEditor({
+  row,
+  canEdit,
+  onChanged,
+  onError,
+}: {
+  row: StaffRow;
+  canEdit: boolean;
+  onChanged: () => Promise<void>;
+  onError: (m: string | null) => void;
+}) {
+  const clinica = row.clinica ?? {
+    esSanitario: false,
+    colegiado: null,
+    alcance: "SELECTION" as const,
+    puesto: puestoDe(row),
+  };
+  const [esSanitario, setEsSanitario] = useState(clinica.esSanitario);
+  const [colegiado, setColegiado] = useState(clinica.colegiado ?? "");
+  const [alcance, setAlcance] = useState(clinica.alcance);
+  const [puesto, setPuesto] = useState<"CASHIER" | "CLINICIAN">(
+    row.role === "CLINICIAN" ? "CLINICIAN" : "CASHIER",
+  );
+  const [busy, setBusy] = useState(false);
+  const [aviso, setAviso] = useState<string | null>(null);
+
+  // El puesto sólo se elige para quien no es propietaria ni encargado:
+  // cambiarle el rol de negocio a la dueña no es una decisión de esta
+  // pantalla, y la API lo rechaza con 409 si se intenta.
+  const puestoEditable = row.role === "CASHIER" || row.role === "CLINICIAN";
+
+  // Elegir «sanitario» implica la marca, así que la casilla no se ofrece
+  // por separado: sería un estado que la base rechaza por CHECK.
+  const sanitarioFinal = puestoEditable
+    ? puesto === "CLINICIAN" || esSanitario
+    : esSanitario;
+
+  const faltaColegiado = sanitarioFinal && colegiado.trim().length === 0;
+
+  async function guardar() {
+    onError(null);
+    setAviso(null);
+    setBusy(true);
+    try {
+      const res = await api<{ sesionesInvalidadas: boolean }>(
+        `/staff/${row.userId}/clinica`,
+        {
+          method: "PATCH",
+          body: {
+            ...(puestoEditable ? { puesto } : {}),
+            esSanitario: sanitarioFinal,
+            colegiado: colegiado.trim() || null,
+            alcance,
+          },
+        },
+      );
+      // Cambiar el puesto tira las sesiones. Decirlo evita el susto de
+      // «me ha echado del TPV sin avisar».
+      if (res.sesionesInvalidadas) {
+        setAviso(
+          "Guardado. Esta persona tendrá que volver a entrar en el TPV con su PIN.",
+        );
+      }
+      await onChanged();
+    } catch (err) {
+      onError(err instanceof ApiError ? err.message : "Error al guardar");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section>
+      <h3 className="text-[13px] font-semibold text-mipiace-ink mb-3">
+        Historia clínica
+      </h3>
+
+      {puestoEditable ? (
+        <div>
+          <label className="block text-[13px] font-medium text-mipiace-ink-soft mb-1.5">
+            Puesto
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                ["CASHIER", false, "Cajero", "Cobra. No ve historias."],
+                [
+                  "CASHIER",
+                  true,
+                  "Cajero-sanitario",
+                  "Cobra y ve historias.",
+                ],
+                [
+                  "CLINICIAN",
+                  true,
+                  "Sanitario",
+                  "Su agenda y las historias. No toca la caja.",
+                ],
+              ] as const
+            ).map(([p, marca, label, ayuda]) => {
+              const activo = puesto === p && sanitarioFinal === marca;
+              return (
+                <button
+                  key={`${p}-${String(marca)}`}
+                  type="button"
+                  disabled={!canEdit}
+                  title={ayuda}
+                  onClick={() => {
+                    setPuesto(p);
+                    setEsSanitario(marca);
+                  }}
+                  className={
+                    // 44 px de alto: área tocable del estándar de la casa
+                    // (docs/ux-principles.md §1.2). Esta pantalla se usa
+                    // en tablet.
+                    "h-11 px-4 rounded-xl text-[13.5px] font-medium border transition-colors disabled:opacity-50 " +
+                    (activo
+                      ? "bg-mipiace-coral text-white border-mipiace-coral"
+                      : "bg-mipiace-stone text-mipiace-ink border-transparent hover:border-slate-300")
+                  }
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[12px] text-slate-500 mt-1.5">
+            Un sanitario entra en el TPV con su PIN y ve sólo su agenda: ni
+            venta, ni turno, ni caja.
+          </p>
+        </div>
+      ) : (
+        <label className="flex items-center gap-2.5 text-[13.5px] text-mipiace-ink cursor-pointer">
+          <input
+            type="checkbox"
+            checked={esSanitario}
+            disabled={!canEdit}
+            onChange={(e) => setEsSanitario(e.target.checked)}
+            className="h-4.5 w-4.5 rounded border-slate-300 text-mipiace-coral focus:ring-mipiace-coral/30"
+          />
+          Es sanitario (ve las historias de sus pacientes)
+        </label>
+      )}
+
+      {sanitarioFinal && (
+        <>
+          <div className="mt-4 max-w-xs">
+            <label className="block text-[13px] font-medium text-mipiace-ink-soft mb-1.5">
+              Nº de colegiado
+            </label>
+            <input
+              value={colegiado}
+              disabled={!canEdit}
+              onChange={(e) => setColegiado(e.target.value)}
+              placeholder="28/1234"
+              data-colegiado
+              className="w-full h-11 px-3.5 rounded-xl bg-mipiace-stone border border-transparent text-[14px] focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none disabled:opacity-50"
+            />
+            {faltaColegiado && (
+              <p className="text-[12px] text-mipiace-coral-dark mt-1.5">
+                Hace falta: va en la historia y en los informes que firma.
+              </p>
+            )}
+          </div>
+
+          <div className="mt-4">
+            <label className="block text-[13px] font-medium text-mipiace-ink-soft mb-1.5">
+              Qué historias ve
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {(
+                [
+                  ["ALL", "Todos los pacientes"],
+                  ["SELECTION", "Sólo los suyos"],
+                ] as const
+              ).map(([valor, label]) => (
+                <button
+                  key={valor}
+                  type="button"
+                  disabled={!canEdit}
+                  onClick={() => setAlcance(valor)}
+                  className={
+                    "h-11 px-4 rounded-xl text-[13.5px] font-medium border transition-colors disabled:opacity-50 " +
+                    (alcance === valor
+                      ? "bg-mipiace-coral text-white border-mipiace-coral"
+                      : "bg-mipiace-stone text-mipiace-ink border-transparent hover:border-slate-300")
+                  }
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      {aviso && (
+        <p className="text-[12.5px] text-mipiace-ink-soft mt-3">{aviso}</p>
+      )}
+
+      {canEdit && (
+        <div className="mt-4">
+          <PrimaryButton
+            type="button"
+            onClick={guardar}
+            busy={busy}
+            disabled={faltaColegiado}
+            className="!w-auto px-5 !h-10 !text-[13.5px]"
+          >
+            Guardar
+          </PrimaryButton>
+        </div>
+      )}
+
+      {/* La lista de pacientes sólo tiene sentido con «sólo los suyos», y
+          sólo para quien YA está guardado como sanitario: con la marca sin
+          guardar, la API devolvería 409 NOT_A_CLINICIAN y la dueña no
+          entendería por qué. */}
+      {clinica.esSanitario && clinica.alcance === "SELECTION" && (
+        <PacientesDelSanitario
+          userId={row.userId}
+          canEdit={canEdit}
+          onError={onError}
+        />
+      )}
+    </section>
+  );
+}
+
+// ── clinica-1 · la selección de pacientes de un sanitario ───────────
+//
+// Se carga al abrirla y no con la tarjeta: un tenant con seis sanitarios
+// haría seis peticiones al desplegar la pantalla, y la lista sólo se mira
+// cuando se va a tocar.
+function PacientesDelSanitario({
+  userId,
+  canEdit,
+  onError,
+}: {
+  userId: string;
+  canEdit: boolean;
+  onError: (m: string | null) => void;
+}) {
+  const [abierto, setAbierto] = useState(false);
+  const [lista, setLista] = useState<PacienteAsignado[] | null>(null);
+  const [busqueda, setBusqueda] = useState("");
+  const [candidatos, setCandidatos] = useState<
+    Array<{ id: string; firstName: string; lastName: string }>
+  >([]);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const cargar = useCallback(async () => {
+    try {
+      const res = await api<{ clients: PacienteAsignado[] }>(
+        `/clinica/clinicians/${userId}/clients`,
+      );
+      setLista(res.clients);
+    } catch (err) {
+      onError(err instanceof ApiError ? err.message : "Error al cargar");
+    }
+  }, [userId, onError]);
+
+  useEffect(() => {
+    if (abierto && lista === null) void cargar();
+  }, [abierto, lista, cargar]);
+
+  // Buscar por nombre reusa `GET /clients?query=`, que es la búsqueda del
+  // CRM que ya existe. No se escribe una segunda.
+  useEffect(() => {
+    const q = busqueda.trim();
+    if (q.length < 2) {
+      setCandidatos([]);
+      return;
+    }
+    let cancelado = false;
+    const t = setTimeout(() => {
+      api<{ clients: Array<{ id: string; firstName: string; lastName: string }> }>(
+        `/clients?query=${encodeURIComponent(q)}&limit=8`,
+      )
+        .then((res) => {
+          if (!cancelado) setCandidatos(res.clients);
+        })
+        .catch(() => {
+          if (!cancelado) setCandidatos([]);
+        });
+    }, 250);
+    return () => {
+      cancelado = true;
+      clearTimeout(t);
+    };
+  }, [busqueda]);
+
+  async function dar(clientId: string) {
+    onError(null);
+    setBusy(clientId);
+    try {
+      await api(`/clinica/clinicians/${userId}/clients`, {
+        method: "POST",
+        body: { clientId },
+      });
+      setBusqueda("");
+      setCandidatos([]);
+      await cargar();
+    } catch (err) {
+      onError(err instanceof ApiError ? err.message : "Error al dar acceso");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function revocar(clientId: string) {
+    onError(null);
+    setBusy(clientId);
+    try {
+      await api(`/clinica/clinicians/${userId}/clients/${clientId}`, {
+        method: "DELETE",
+      });
+      await cargar();
+    } catch (err) {
+      onError(err instanceof ApiError ? err.message : "Error al revocar");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const yaEstan = new Set((lista ?? []).map((p) => p.clientId));
+
+  return (
+    <div className="mt-5 pt-4 border-t border-slate-100">
+      <button
+        type="button"
+        onClick={() => setAbierto((a) => !a)}
+        className="text-[13px] font-semibold text-mipiace-ink hover:text-mipiace-coral-dark"
+      >
+        Sus pacientes{lista ? ` (${lista.length})` : ""}
+        <span className="ml-1.5 text-slate-400">{abierto ? "▴" : "▾"}</span>
+      </button>
+
+      {abierto && (
+        <div className="mt-3">
+          {lista === null ? (
+            <p className="text-[13px] text-slate-500">Cargando…</p>
+          ) : lista.length === 0 ? (
+            <p className="text-[13px] text-slate-500">
+              Todavía ninguno. Se añaden solos al asignarle una cita, o a mano
+              aquí abajo.
+            </p>
+          ) : (
+            <ul className="space-y-1.5">
+              {lista.map((p) => (
+                <li
+                  key={p.accessId}
+                  className="flex items-center gap-2 bg-mipiace-stone rounded-xl px-3 py-2"
+                >
+                  <span className="text-[13.5px] text-mipiace-ink flex-1 truncate">
+                    {p.name}
+                  </span>
+                  <span className="text-[11.5px] text-slate-500 shrink-0">
+                    {ORIGEN_LABEL[p.source]}
+                  </span>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      disabled={busy === p.clientId}
+                      onClick={() => void revocar(p.clientId)}
+                      className="h-9 px-3 rounded-lg text-[12.5px] font-medium text-mipiace-coral-dark hover:bg-white disabled:opacity-50 shrink-0"
+                    >
+                      Revocar
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {canEdit && (
+            <div className="mt-3">
+              <input
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                placeholder="Añadir paciente por nombre…"
+                data-buscar-paciente
+                className="w-full h-11 px-3.5 rounded-xl bg-white border border-slate-200 text-[14px] focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none"
+              />
+              {candidatos.length > 0 && (
+                <ul className="mt-1.5 space-y-1">
+                  {candidatos.map((c) => {
+                    const nombre = `${c.firstName} ${c.lastName}`.trim();
+                    const puesto = yaEstan.has(c.id);
+                    return (
+                      <li key={c.id}>
+                        <button
+                          type="button"
+                          disabled={puesto || busy === c.id}
+                          onClick={() => void dar(c.id)}
+                          className="w-full h-11 px-3.5 rounded-xl text-left text-[13.5px] bg-mipiace-stone hover:bg-white border border-transparent hover:border-slate-200 disabled:opacity-40"
+                        >
+                          {nombre}
+                          {puesto && (
+                            <span className="ml-2 text-[11.5px] text-slate-500">
+                              ya lo tiene
+                            </span>
+                          )}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              <p className="text-[12px] text-slate-500 mt-1.5">
+                Revocar no borra nada: queda escrito quién pudo ver qué y
+                hasta cuándo.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

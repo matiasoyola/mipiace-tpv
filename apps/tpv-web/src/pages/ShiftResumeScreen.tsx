@@ -29,6 +29,7 @@ import { apiWithCashier, ApiError } from "../api.js";
 import { formatEur, parseAmount } from "../lib/money.js";
 import { Logo } from "../Logo.js";
 import { CloseShiftModal } from "./CloseShiftModal.js";
+import type { CashierRole } from "../lib/offlineAuth.js";
 
 interface StaleShift {
   id: string;
@@ -51,7 +52,8 @@ export function ShiftResumeScreen({
   onClosed,
 }: {
   shift: StaleShift;
-  cashierRole: "MANAGER" | "CASHIER";
+  // clinica-1 · el tipo compartido (ver la nota de CloseShiftModal).
+  cashierRole: CashierRole;
   // Si el negocio exige arqueo, el cierre entra directo por la tabla de
   // denominaciones en vez de por la tarjeta de resumen.
   requireCashCountOnClose?: boolean;

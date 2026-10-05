@@ -68,7 +68,9 @@ export interface TenantListResponse {
 export interface TenantUser {
   id: string;
   email: string;
-  role: "OWNER" | "MANAGER" | "CASHIER";
+  // clinica-1 · el sanitario sin caja. Abre el TPV con su PIN como
+  // cualquiera, así que el panel «¿puede entrar?» lo lista igual.
+  role: "OWNER" | "MANAGER" | "CASHIER" | "CLINICIAN";
   lastLoginAt: string | null;
   twoFactorEnabled: boolean;
   mustChangePassword: boolean;
@@ -375,7 +377,9 @@ export interface TenantCashier {
   id: string;
   alias: string | null;
   email: string;
-  role: "OWNER" | "MANAGER" | "CASHIER";
+  // clinica-1 · el sanitario sin caja. Abre el TPV con su PIN como
+  // cualquiera, así que el panel «¿puede entrar?» lo lista igual.
+  role: "OWNER" | "MANAGER" | "CASHIER" | "CLINICIAN";
   status: CashierAccessStatus;
   canOpenTpv: boolean;
   isTestCashier: boolean;

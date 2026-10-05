@@ -51,6 +51,11 @@ export interface TenantCapabilities {
   // comercio que nació sin Holded y el que lo dejó con 270 facturas detrás.
   // Sólo el segundo tiene devoluciones que llevarle al asesor a mano.
   holdedDejado: boolean;
+  // clinica-1 · la HISTORIA CLÍNICA. Columna del tenant, sólo la mueve el
+  // super-admin. La pantalla de Personal pinta la sección clínica —puesto,
+  // colegiado, alcance, pacientes— sólo si está encendida: en Sole y en
+  // los demás, Personal es exactamente la de hoy.
+  clinica: boolean;
 }
 
 // El valor con el que se sigue adelante si alguna de las dos peticiones
@@ -64,6 +69,10 @@ const POR_DEFECTO: TenantCapabilities = {
   holded: true,
   holdedEnabled: true,
   holdedDejado: false,
+  // clinica-1 · false al fallar, como `agenda` y `fichaje`: esconder una
+  // sección es más barato que enseñar una que no toca, y aquí la que no
+  // toca enseñaría datos de salud donde no los hay.
+  clinica: false,
 };
 
 let cache: TenantCapabilities | null = null;
@@ -82,6 +91,7 @@ async function pedir(): Promise<void> {
           agendaEnabled?: boolean;
           cajaEnabled?: boolean;
           fichajeEnabled?: boolean;
+          clinicalRecordsEnabled?: boolean;
         };
       }>("/admin/tenant/settings"),
       api<{
@@ -96,6 +106,7 @@ async function pedir(): Promise<void> {
       agenda: s.settings.agendaEnabled ?? false,
       caja: s.settings.cajaEnabled !== false,
       fichaje: s.settings.fichajeEnabled === true,
+      clinica: s.settings.clinicalRecordsEnabled === true,
       holded: me.tenant.hasHoldedKey === true,
       holdedEnabled: me.tenant.holdedEnabled !== false,
       holdedDejado: me.tenant.holdedDisconnectedAt != null,

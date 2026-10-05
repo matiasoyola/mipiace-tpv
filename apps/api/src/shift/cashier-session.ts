@@ -32,7 +32,13 @@ export interface CashierSessionPayload {
   // creado en super-admin/activate también lleva pinHash, así que el
   // mismo User funciona como cajero por defecto sin necesidad de crear
   // un CASHIER duplicado en el onboarding.
-  role: "OWNER" | "MANAGER" | "CASHIER";
+  //
+  // clinica-1 · y `CLINICIAN`. El sanitario sin caja ENTRA EN EL TPV por
+  // la misma puerta que un cajero —email + PIN en `/shift/cashier-login`—
+  // porque lo que necesita (su agenda) vive ahí. Lo que no puede es
+  // cobrar ni abrir turno, y eso no se decide aquí: lo decide
+  // `ensureCajaEnabled`, que lleva todas las rutas de caja.
+  role: "OWNER" | "MANAGER" | "CASHIER" | "CLINICIAN";
   type: "cashier";
   purpose?: CashierSessionPurpose;
 }

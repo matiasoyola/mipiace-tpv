@@ -44,6 +44,7 @@ import {
   type ShiftDaySummary,
 } from "../lib/shiftSummary.js";
 import { DaySummaryCard } from "./DaySummaryCard.js";
+import type { CashierRole } from "../lib/offlineAuth.js";
 
 // Mismo orden que `ALLOWED_DENOMINATIONS` del backend (de mayor a
 // menor). Si el backend cambia el set, también hay que tocarlo aquí —
@@ -106,7 +107,11 @@ type Phase = "summary" | "count" | "done";
 
 export function CloseShiftModal(props: {
   shiftId: string;
-  cashierRole: "MANAGER" | "CASHIER";
+  // clinica-1 · el tipo compartido. La unión literal que había aquí
+  // MENTÍA desde v1.3-piloto-feedback: el OWNER entra al TPV y abre turno
+  // con su propio PIN, así que por esta prop ya pasaba un "OWNER" que el
+  // tipo no admitía. Ensanchar el origen del rol lo destapó.
+  cashierRole: CashierRole;
   // "Z" (default) = cierre real. "X" = arqueo intermedio sin cerrar.
   mode?: "X" | "Z";
   // v1.11 · el negocio exige cuadrar caja para cerrar. Entra directo por
@@ -572,7 +577,13 @@ export function CloseShiftModal(props: {
         </label>
       )}
 
-      {(needsManager || props.cashierRole === "CASHIER" || pinReason === "sync_failed") && (
+      {/* clinica-1 · «no es encargado ni dueña» en vez de «es cajero». El
+          sentido es el mismo para los roles de antes y es el correcto
+          para los de después: un sanitario tampoco autoriza un cierre de
+          caja, y con el `=== "CASHIER"` de antes se habría colado. */}
+      {(needsManager ||
+        (props.cashierRole !== "MANAGER" && props.cashierRole !== "OWNER") ||
+        pinReason === "sync_failed") && (
         <>
           <label
             htmlFor="managerPin"

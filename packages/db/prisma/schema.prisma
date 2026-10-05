@@ -20,6 +20,70 @@ enum UserRole {
   OWNER
   MANAGER
   CASHIER
+  // clinica-1 · el sanitario SIN CAJA. Pasa consulta, ve su agenda y las
+  // historias de sus pacientes, y no toca la caja: ni venta, ni turno, ni
+  // cajón, ni informes.
+  //
+  // Es el único rol de negocio que el bloque añade, y el rol de negocio es
+  // sólo la mitad: la marca sanitaria vive aparte en `User.isClinician`
+  // (decisión de producto del 05-10-2026). Un `CLINICIAN` SIEMPRE lleva la
+  // marca puesta — lo hace cumplir el CHECK `users_clinician_implies_flag`
+  // de la migración `clinica_1_historia`, no un `if` de la aplicación.
+  //
+  // Los tres nombres que se ven en pantalla salen de cruzar las dos
+  // columnas: cajero (CASHIER, sin marca), cajero-sanitario (CASHIER, con
+  // marca) y sanitario (CLINICIAN). La dueña y el encargado conservan su
+  // rol y se marcan o no.
+  //
+  // La negativa al cobro vive en la API —`ensureCajaEnabled` rechaza a un
+  // CLINICIAN en las ~60 rutas de caja de un golpe— y no sólo en los
+  // botones que el TPV esconde.
+  CLINICIAN
+}
+
+// clinica-1 · a cuántos pacientes alcanza un sanitario.
+//
+//   ALL       · ve la historia de cualquier paciente del tenant. Es lo que
+//               quiere la podóloga que trabaja sola.
+//   SELECTION · ve sólo las de los pacientes a los que tiene acceso
+//               vigente (`ClinicalAccess`).
+//
+// `SELECTION` es el default y es deliberado: lo seguro es lo restrictivo.
+enum ClinicalScope {
+  ALL
+  SELECTION
+}
+
+// clinica-1 · de dónde salió un acceso a la historia de un paciente.
+enum ClinicalAccessSource {
+  // Lo creó la agenda sola al asignarle una cita de ese paciente. No lo
+  // concede una persona: lo concede el hecho de atenderlo.
+  APPOINTMENT
+  // Lo dio a mano la dueña o el encargado.
+  MANUAL
+}
+
+// clinica-1 · qué se hizo con la historia. `EXPORT` no lo usa ninguna ruta
+// todavía (el informe PDF es un bloque posterior) y entra ya para que el
+// registro no cambie de forma cuando llegue.
+enum ClinicalAccessAction {
+  READ
+  WRITE
+  EXPORT
+}
+
+// clinica-1 · y cómo acabó. Los intentos DENEGADOS también se apuntan: un
+// acceso que se niega es justo el que interesa ver en el registro.
+enum ClinicalAccessOutcome {
+  ALLOWED
+  DENIED
+}
+
+// clinica-1 · qué clase de pieza de historia es. Hoy sólo la anotación; la
+// valoración inicial, la exploración, la sesión y las fotos son bloques
+// siguientes y entrarán como valores nuevos de este enum.
+enum ClinicalEntryKind {
+  NOTE
 }
 
 enum HoldedAuthMode {
@@ -620,6 +684,21 @@ model Tenant {
   // BASE DE DATOS, no sólo en el schema de la ruta. Default 15: un tenant
   // que no la toque se comporta exactamente como antes de este bloque.
   agendaSlotMinutes              Int               @default(15) @map("agenda_slot_minutes")
+  // clinica-1 · capability de la HISTORIA CLÍNICA. Hermana de
+  // `agendaEnabled` en forma (columna booleana por tenant, ADR-R6) y de
+  // `cajaEnabled` / `fichajeEnabled` en gobierno: la mueve SÓLO el
+  // super-admin, porque encenderla es vender un producto y aceptar un
+  // marco legal (Ley 41/2002, art. 9 RGPD). Por eso no aparece en el POST
+  // de /admin/tenant/settings.
+  //
+  // `@default(false)`: el default de una capability es "deja a los tenants
+  // de hoy como estaban". Ninguno lleva historias clínicas.
+  //
+  // Apagada, las rutas clínicas responden **404 y no 403**: un bar no
+  // tiene por qué enterarse de que este módulo existe. Es la única
+  // capability de la casa que se esconde en lugar de explicarse, y la
+  // razón es el dato que protege.
+  clinicalRecordsEnabled         Boolean           @default(false) @map("clinical_records_enabled")
   // v1.3-Thalia Lote 6 · pie de ticket personalizado. NULL = no se
   // pinta nada extra (comportamiento previo). Si está set, el renderer
   // del ticket lo pinta arriba del QR/CIF tras el "Gracias por tu
@@ -666,6 +745,13 @@ model Tenant {
   employees          Employee[]
   // V1-verifactu (ADR-019) · los registros de facturación de sus cajas.
   fiscalRecords      FiscalRecord[]
+  // clinica-1 · la historia clínica. Las cuatro cuelgan con RESTRICT, no
+  // con Cascade: un tenant con historia NO SE BORRA. Ver el comentario de
+  // cada modelo.
+  clinicalAccesses   ClinicalAccess[]
+  clinicalAccessLogs ClinicalAccessLog[]
+  clinicalEntries    ClinicalEntry[]
+  clinicalAddenda    ClinicalAddendum[]
 
   // v1.3-SuperAdmin-Hub Lote 3 · el backfill y el hub buscan/listan
   // tenants por `holded_account_id`. Sin índice eran scans completos
@@ -789,6 +875,28 @@ model User {
   // CASHIER reales se bloquean vía `Tenant.blockedAt` o
   // `User.tokenVersion`. No se reutiliza para borrado de usuarios reales.
   deletedAt              DateTime? @map("deleted_at") @db.Timestamptz()
+  // clinica-1 · LA MARCA SANITARIA, separada del rol de negocio.
+  //
+  // Decisión de producto (Matías, 05-10-2026): en pantalla se ven tres
+  // nombres —cajero, cajero-sanitario, sanitario— pero por dentro el rol
+  // y la marca son dos columnas. Así mañana cabe otro rol de negocio sin
+  // rehacer permisos, y una dueña o un encargado pueden ser sanitarios sin
+  // dejar de ser dueña o encargado. Una dueña NO sanitaria administra el
+  // negocio y no ve historias.
+  //
+  // `role = CLINICIAN` implica esto en true, garantizado por el CHECK
+  // `users_clinician_implies_flag` (migración `clinica_1_historia`).
+  isClinician            Boolean   @default(false) @map("is_clinician")
+  // Nº de colegiado. Opcional EN LA BASE y **exigido por la API** al
+  // marcar a alguien como sanitario de un tenant con la clínica
+  // encendida: la condición cruza `users` y `tenants`, así que no cabe en
+  // un CHECK. Lo que sí hay en la base es que no se guarde en blanco
+  // (`users_clinician_license_not_blank`) — un colegiado " " convierte
+  // "tiene colegiado" en una comprobación que miente.
+  clinicianLicense       String?   @map("clinician_license")
+  // A cuántos pacientes alcanza. Sólo significa algo si `isClinician`.
+  // Default `SELECTION` a propósito: lo seguro es lo restrictivo.
+  clinicalScope          ClinicalScope @default(SELECTION) @map("clinical_scope")
 
   tenant         Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   shifts         Shift[]              @relation("ShiftOpenedBy")
@@ -816,6 +924,18 @@ model User {
   // unicidad de verdad es `@@unique([tenantId, userId])` en `Employee`, y
   // un `User` pertenece a un solo tenant, así que como mucho hay uno.
   employees Employee[]
+
+  // clinica-1 · los cuatro papeles que un usuario puede tener en la
+  // historia clínica. Listas por exigencia de Prisma; lo que importa de
+  // ellas es el `onDelete` que llevan las FKs al otro lado (ver cada
+  // modelo): RESTRICT en lo que es autoría o acceso, SET NULL en el
+  // "por quién" de una concesión.
+  clinicalAccesses       ClinicalAccess[]    @relation("ClinicalAccessClinician")
+  clinicalAccessesGiven  ClinicalAccess[]    @relation("ClinicalAccessGrantedBy")
+  clinicalAccessesTaken  ClinicalAccess[]    @relation("ClinicalAccessRevokedBy")
+  clinicalAccessLogs     ClinicalAccessLog[]
+  clinicalEntries        ClinicalEntry[]
+  clinicalAddenda        ClinicalAddendum[]
 
   @@index([tenantId])
   @@map("users")
@@ -1037,6 +1157,9 @@ model Device {
   heartbeat        DeviceHeartbeat?
   // A5 · capturas de pantalla vivas de este terminal (24 h como mucho).
   screenshots      DeviceScreenshot[]
+  // clinica-1 · desde qué terminal se abrió una historia. SET NULL al
+  // otro lado: revocar un aparato no borra la línea del registro.
+  clinicalAccessLogs ClinicalAccessLog[]
 
   @@index([tenantId])
   @@index([registerId])
@@ -2187,6 +2310,14 @@ model Client {
   consents       ClientConsent[]
   technicalNotes ClientTechnicalNote[]
   appointments   Appointment[]
+  // clinica-1 · la historia del paciente, sus accesos y el registro de
+  // quién la ha abierto. Las tres con RESTRICT al otro lado (y no Cascade
+  // como `consents` y `technicalNotes`): **un cliente con historia no se
+  // borra.** Esa es la diferencia de fondo entre una ficha de peluquería
+  // y una historia clínica.
+  clinicalAccesses   ClinicalAccess[]
+  clinicalAccessLogs ClinicalAccessLog[]
+  clinicalEntries    ClinicalEntry[]
 
   // Búsqueda por teléfono/email y orden alfabético (A–Z) por tenant.
   @@index([tenantId, phone])
@@ -2449,6 +2580,10 @@ model Appointment {
   ticket      Ticket?                 @relation(fields: [ticketId], references: [id], onDelete: SetNull)
   items       AppointmentItem[]
   assignments AppointmentAssignment[]
+  // clinica-1 · las anotaciones escritas en esta cita. SET NULL al otro
+  // lado: si la cita desapareciera, la anotación sigue en la historia y
+  // pierde el enlace, no el contenido.
+  clinicalEntries ClinicalEntry[]
 
   // El índice gist (tenant_id, timeslot) para consultas de rango se crea en
   // SQL (Prisma no expresa gist sobre Unsupported).
@@ -3001,4 +3136,148 @@ model FiscalRecord {
   // manual en la migración: Prisma no los expresa. Misma nota que el índice
   // parcial de `v1_8_fiado`.
   @@map("fiscal_records")
+}
+
+// ─── La historia clínica (clinica-1) ──────────────────────────────────
+//
+// Ley 41/2002 (arts. 15-19) y art. 9 RGPD. Cuatro garantías, y las cuatro
+// las hace cumplir EL MOTOR, no la aplicación (ADR-015 §1: la aplicación
+// no es la única puerta a Postgres):
+//
+//   · no se borra          → FKs `Restrict` + triggers de DELETE
+//   · sólo la ve quien debe→ `clinica/acceso.ts`, una sola función
+//   · todo acceso se apunta→ `ClinicalAccessLog`, sólo inserciones
+//   · autor y fecha        → `authorUserId` NOT NULL + inmutabilidad
+//
+// Los triggers y los índices parciales viven en la migración
+// `20261005010000_clinica_1_historia`: Prisma no los expresa.
+
+// Quién puede ver la historia de quién.
+//
+// NO SE BORRA NUNCA. Revocar rellena `revokedAt`; volver a dar acceso crea
+// OTRA FILA. Así el histórico contesta siempre "quién pudo ver qué y
+// cuándo", que es lo que se le enseña a un inspector o a un paciente.
+//
+// El «un acceso vigente por (sanitario, paciente)» lo garantiza el índice
+// ÚNICO PARCIAL `clinical_access_one_live_key` (sólo donde `revoked_at IS
+// NULL`), no un `if`. De ahí salen tres comportamientos a la vez: mover
+// una cita conservando a su profesional no crea filas nuevas; dos
+// terminales a la vez no crean dos accesos; y tras una revocación, una
+// cita nueva SÍ inserta otra fila y el sanitario recupera el acceso.
+model ClinicalAccess {
+  id               String               @id @default(uuid()) @db.Uuid
+  tenantId         String               @map("tenant_id") @db.Uuid
+  clinicianUserId  String               @map("clinician_user_id") @db.Uuid
+  clientId         String               @map("client_id") @db.Uuid
+  source           ClinicalAccessSource
+  grantedAt        DateTime             @default(now()) @map("granted_at") @db.Timestamptz()
+  // NULL cuando el acceso nace de la agenda: ahí no lo concede una
+  // persona. El CHECK `clinical_access_source_grantor` ata las dos cosas.
+  grantedByUserId  String?              @map("granted_by_user_id") @db.Uuid
+  revokedAt        DateTime?            @map("revoked_at") @db.Timestamptz()
+  revokedByUserId  String?              @map("revoked_by_user_id") @db.Uuid
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client    Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  clinician User   @relation("ClinicalAccessClinician", fields: [clinicianUserId], references: [id], onDelete: Restrict)
+  grantedBy User?  @relation("ClinicalAccessGrantedBy", fields: [grantedByUserId], references: [id], onDelete: SetNull)
+  revokedBy User?  @relation("ClinicalAccessRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, clientId])
+  @@index([clinicianUserId, revokedAt])
+  @@map("clinical_access")
+}
+
+// Quién ha abierto la historia. SÓLO INSERCIONES (trigger
+// `clinical_access_log_append_only`): ni UPDATE ni DELETE, desde la
+// aplicación ni desde psql.
+//
+// Lo escribe UN ÚNICO punto por el que pasan todas las rutas clínicas
+// (`clinica/registro.ts`), no cada handler a mano.
+//
+// Y lo que NO lleva, a propósito: **nada de salud**. Quién, a qué
+// paciente, cuándo, desde qué aparato, qué ruta y si se le dejó. Un
+// registro que guardara el contenido sería una segunda copia de la
+// historia sin ninguna de sus protecciones.
+model ClinicalAccessLog {
+  id       String                @id @default(uuid()) @db.Uuid
+  tenantId String                @map("tenant_id") @db.Uuid
+  userId   String                @map("user_id") @db.Uuid
+  clientId String                @map("client_id") @db.Uuid
+  action   ClinicalAccessAction
+  // Los DENEGADOS también se apuntan: son justo los que interesa ver.
+  outcome  ClinicalAccessOutcome
+  at       DateTime              @default(now()) @db.Timestamptz()
+  deviceId String?               @map("device_id") @db.Uuid
+  // La ruta sin querystring. Trazabilidad, no contenido.
+  route    String?
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client Client  @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  user   User    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, clientId, at])
+  @@index([tenantId, userId, at])
+  @@map("clinical_access_log")
+}
+
+// Una pieza de historia. INMUTABLE: no se edita y no se borra (trigger
+// `clinical_entries_inmutable`). Se le añaden `ClinicalAddendum` con autor
+// y fecha.
+//
+// Es el mismo principio del sello de la venta (ADR-015) y del registro de
+// jornada (ADR-018), aplicado a lo que la ley protege con más fuerza.
+model ClinicalEntry {
+  id            String            @id @default(uuid()) @db.Uuid
+  tenantId      String            @map("tenant_id") @db.Uuid
+  clientId      String            @map("client_id") @db.Uuid
+  // LA AUTORÍA. NOT NULL y Restrict: una línea de historia sin autor no es
+  // historia clínica, es una nota anónima.
+  authorUserId  String            @map("author_user_id") @db.Uuid
+  // De qué cita salió, si salió de una. Opcional: una anotación puede
+  // escribirse sin cita delante (una llamada del paciente).
+  appointmentId String?           @map("appointment_id") @db.Uuid
+  kind          ClinicalEntryKind @default(NOTE)
+  // JSON y no texto: lo que viene (valoración, exploración con el mapa del
+  // pie, sesión) es estructurado, y cambiar la forma del cuerpo dentro de
+  // un JSON no exige migrar una tabla append-only. El CHECK
+  // `clinical_entries_body_object` impide el objeto vacío.
+  //
+  // ESTE CAMPO NO SE ESCRIBE EN NINGÚN LOG. Ni en el de la aplicación, ni
+  // en Sentry, ni en un mensaje de error.
+  body          Json
+  createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client      Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  author      User               @relation(fields: [authorUserId], references: [id], onDelete: Restrict)
+  appointment Appointment?       @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  addenda     ClinicalAddendum[]
+
+  @@index([tenantId, clientId, createdAt])
+  @@index([appointmentId])
+  @@map("clinical_entries")
+}
+
+// La anotación a una entrada. Lo ÚNICO que se puede añadir a algo ya
+// escrito, y también inmutable: corregir una corrección es otra anotación.
+model ClinicalAddendum {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  entryId      String   @map("entry_id") @db.Uuid
+  authorUserId String   @map("author_user_id") @db.Uuid
+  body         Json
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  // Restrict y no Cascade, aunque la entrada padre no se pueda borrar: si
+  // mañana alguien le abriera una puerta a la entrada, esta FK impediría
+  // que la puerta se llevara también las anotaciones.
+  entry  ClinicalEntry @relation(fields: [entryId], references: [id], onDelete: Restrict)
+  author User          @relation(fields: [authorUserId], references: [id], onDelete: Restrict)
+
+  @@index([entryId, createdAt])
+  @@index([tenantId])
+  @@map("clinical_addenda")
 }

@@ -6,6 +6,7 @@ import { ChevronDown, Users } from "lucide-react";
 
 import { AdminShell } from "../AdminShell.js";
 import { api, ApiError, clearTokens, readCurrentRole } from "../api.js";
+import { useTenantCapabilities } from "../capabilities.js";
 import {
   CenteredLoader,
   FieldError,
@@ -23,7 +24,11 @@ interface CashierRow {
   // creados antes del bloque (el backfill de la migración lo rellena,
   // pero el cliente tolera null igualmente).
   alias: string | null;
-  role: "MANAGER" | "CASHIER";
+  // clinica-1 · `CLINICIAN` es el sanitario sin caja. Se da de alta por
+  // aquí porque es el MISMO acto —una persona del personal con su PIN para
+  // entrar al TPV— y un CRUD paralelo habría duplicado la unicidad del
+  // alias, el reset de PIN y la revocación.
+  role: "MANAGER" | "CASHIER" | "CLINICIAN";
   lastLoginAt: string | null;
   createdAt: string;
 }
@@ -31,6 +36,15 @@ interface CashierRow {
 function displayName(c: CashierRow): string {
   return c.alias?.trim() || c.email;
 }
+
+// clinica-1 · `Record` exhaustivo a propósito: añadir un rol al enum
+// vuelve a traer a quien lo haga por aquí, en vez de dejar un ternario
+// que pinta "Cajero" para todo lo que no sea encargado.
+const ROL_LABEL: Record<CashierRow["role"], string> = {
+  MANAGER: "Encargado",
+  CASHIER: "Cajero",
+  CLINICIAN: "Sanitario (sin caja)",
+};
 
 export function CashiersPage() {
   const navigate = useNavigate();
@@ -197,7 +211,7 @@ function CashierCard({
         <div className="text-[12.5px] text-slate-500 mt-0.5 truncate">
           {cashier.email}
           {" · "}
-          {cashier.role === "MANAGER" ? "Encargado" : "Cajero"}
+          {ROL_LABEL[cashier.role]}
           {" · "}
           {cashier.lastLoginAt
             ? `Último acceso ${formatRelative(cashier.lastLoginAt)}`
@@ -233,7 +247,11 @@ function CreateCashierModal({
 }) {
   const [email, setEmail] = useState("");
   const [alias, setAlias] = useState("");
-  const [role, setRole] = useState<"MANAGER" | "CASHIER">("CASHIER");
+  const [role, setRole] = useState<CashierRow["role"]>("CASHIER");
+  // clinica-1 · la opción «sanitario» sólo existe donde hay clínica. La
+  // API lo rechaza igual con un 409 si alguien la manda en un bar; esto
+  // es para no ofrecer un puesto que no va a funcionar.
+  const clinicaEncendida = useTenantCapabilities()?.clinica === true;
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -273,11 +291,23 @@ function CreateCashierModal({
         className="bg-white w-full max-w-md rounded-3xl border border-slate-200 p-6 md:p-7"
       >
         <h2 className="text-[18px] font-semibold text-mipiace-ink mb-1">
-          Añadir cajero
+          {/* clinica-1 · en una clínica, lo que se añade por aquí no es
+              siempre un cajero. */}
+          {clinicaEncendida ? "Añadir personal" : "Añadir cajero"}
         </h2>
         <p className="text-[13px] text-slate-500 mb-5">
           Comunica el PIN inicial al cajero por canal seguro. Podrás
           cambiárselo cuando quieras desde esta misma pantalla.
+          {clinicaEncendida && (
+            <>
+              {" "}
+              El nº de colegiado y qué historias ve se ponen en{" "}
+              <strong className="font-medium text-mipiace-ink-soft">
+                Personal
+              </strong>
+              .
+            </>
+          )}
         </p>
         <form onSubmit={onSubmit} className="space-y-4">
           <TextField
@@ -304,11 +334,16 @@ function CreateCashierModal({
             <div className="relative">
               <select
                 value={role}
-                onChange={(e) => setRole(e.target.value as "MANAGER" | "CASHIER")}
+                onChange={(e) => setRole(e.target.value as CashierRow["role"])}
                 className="w-full h-12 px-3.5 pr-9 rounded-xl bg-mipiace-stone border border-transparent text-[14.5px] text-mipiace-ink appearance-none focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none"
               >
                 <option value="CASHIER">Cajero (ventas)</option>
                 <option value="MANAGER">Encargado (todo lo del cajero + autorizar descuentos, cierres forzados)</option>
+                {clinicaEncendida && (
+                  <option value="CLINICIAN">
+                    Sanitario (su agenda y las historias; no toca la caja)
+                  </option>
+                )}
               </select>
               <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
             </div>

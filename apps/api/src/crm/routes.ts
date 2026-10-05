@@ -39,6 +39,10 @@ import { requireOwnerOrCashier } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
 import { createAgendaStore } from "../agenda/store.js";
 import {
+  comoPrismaParaAcceso,
+  resolverAccesoClinico,
+} from "../clinica/acceso.js";
+import {
   comoPrismaParaEnlace,
   enlazarContacto,
   esContactoDeCliente,
@@ -353,6 +357,32 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
   );
 
   // ── Ficha completa ──────────────────────────────────────────────────
+  //
+  // clinica-1 · LA FICHA TÉCNICA DEJA DE SALIR EN UN TENANT CLÍNICO.
+  //
+  // `ClientTechnicalNote` nació neutra: vale para la fórmula de color de
+  // una peluquería y para los parámetros de un tratamiento. En una clínica
+  // lo segundo es dato de salud (art. 9 RGPD), y hoy este endpoint lo
+  // devuelve a cualquier rol — una recepcionista lo leería entero.
+  //
+  // Así que: con `clinicalRecordsEnabled` encendido, las notas sólo salen
+  // para quien la función de acceso diga que puede ver la historia de ESE
+  // paciente. En el resto de tenants —Sole y todos los de hoy— no cambia
+  // absolutamente nada, porque la función contesta "clínica apagada" sin
+  // consultar nada más y el camino es el de siempre.
+  //
+  // `technicalNotesHidden` en la respuesta: un array vacío y un array
+  // escondido no son lo mismo, y la ficha tiene que poder decir «esto está
+  // en la historia clínica» en vez de parecer que no hay nada. Campo
+  // nuevo y opcional — contrato aditivo, ningún cliente viejo se rompe.
+  //
+  // Lo que NO se hizo aquí, y va dicho en el done: **no se apunta una
+  // línea en el registro de accesos.** Este endpoint es la ficha del
+  // cliente, por la que pasa la cajera cincuenta veces al día para coger
+  // un teléfono; apuntar un DENIED por cada una llenaría de ruido la lista
+  // de «quién ha abierto la historia de este paciente» justamente con lo
+  // que no es un intento de abrirla. El registro cubre las rutas
+  // clínicas, que es donde vive la historia.
   app.get(
     "/clients/:id",
     { preHandler: requireOwnerOrCashier },
@@ -362,7 +392,7 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
       const client = await loadOwnedClient(auth.tenantId, id);
       if (!client) return notFound(reply);
       const prisma = getPrisma();
-      const [consents, technicalNotes] = await Promise.all([
+      const [consents, technicalNotes, acceso] = await Promise.all([
         prisma.clientConsent.findMany({
           where: { clientId: id, tenantId: auth.tenantId },
           orderBy: { grantedAt: "desc" },
@@ -379,7 +409,17 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
             createdAt: true,
           },
         }),
+        resolverAccesoClinico(comoPrismaParaAcceso(prisma), {
+          tenantId: auth.tenantId,
+          userId: auth.userId,
+          clientId: id,
+        }),
       ]);
+      // Esconder sólo cuando la clínica está encendida. Un "no puede"
+      // porque el módulo está apagado no esconde nada: es el camino de
+      // siempre, y en él la ficha técnica es de la peluquería.
+      const esconderFichaTecnica =
+        acceso.estado.clinicaEncendida && !acceso.veredicto.puede;
       return {
         client: toClientView(client),
         consents: consents.map((c) => ({
@@ -388,13 +428,16 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
           grantedAt: c.grantedAt.toISOString(),
           docRef: c.docRef,
         })),
-        technicalNotes: technicalNotes.map((n) => ({
-          id: n.id,
-          serviceId: n.serviceId,
-          body: n.body,
-          createdByUserId: n.createdByUserId,
-          createdAt: n.createdAt.toISOString(),
-        })),
+        technicalNotes: esconderFichaTecnica
+          ? []
+          : technicalNotes.map((n) => ({
+              id: n.id,
+              serviceId: n.serviceId,
+              body: n.body,
+              createdByUserId: n.createdByUserId,
+              createdAt: n.createdAt.toISOString(),
+            })),
+        technicalNotesHidden: esconderFichaTecnica,
       };
     },
   );
@@ -610,6 +653,11 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
   );
 
   // ── Alta de ficha técnica por servicio ──────────────────────────────
+  //
+  // clinica-1 · simétrico a la lectura: en un tenant clínico, quien no
+  // puede VER la ficha técnica de un paciente tampoco puede ESCRIBIRLA.
+  // Sin esto, una recepcionista no podría leerla y sí añadirle una línea,
+  // que es la mitad peor de las dos.
   app.post(
     "/clients/:id/technical-notes",
     {
@@ -635,6 +683,18 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
       const client = await loadOwnedClient(auth.tenantId, id);
       if (!client) return notFound(reply);
       const prisma = getPrisma();
+      const acceso = await resolverAccesoClinico(
+        comoPrismaParaAcceso(prisma),
+        { tenantId: auth.tenantId, userId: auth.userId, clientId: id },
+      );
+      const veredicto = acceso.veredicto;
+      if (acceso.estado.clinicaEncendida && !veredicto.puede) {
+        return reply.code(403).send({
+          error: veredicto.motivo,
+          code: veredicto.motivo,
+          message: veredicto.mensaje,
+        });
+      }
       const note = await prisma.clientTechnicalNote.create({
         data: {
           tenantId: auth.tenantId,

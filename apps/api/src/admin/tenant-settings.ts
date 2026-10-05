@@ -54,6 +54,11 @@ export async function registerAdminTenantSettingsRoutes(
           // horario" y `<FichajeGate>` pueda explicar por qué no está,
           // pero NO se acepta en el POST. Encenderlo es vender un módulo.
           fichajeEnabled: true,
+          // clinica-1 · exactamente igual que `cajaEnabled` y
+          // `fichajeEnabled`: se DEVUELVE para que el panel sepa pintar la
+          // sección clínica de Personal, y NO se acepta en el POST.
+          // Encenderla es vender un producto y aceptar un marco legal.
+          clinicalRecordsEnabled: true,
         },
       });
       return {
@@ -74,6 +79,8 @@ export async function registerAdminTenantSettingsRoutes(
           cajaEnabled: tenant.cajaEnabled,
           // F1 · sólo lectura, por lo mismo.
           fichajeEnabled: tenant.fichajeEnabled,
+          // clinica-1 · sólo lectura, por lo mismo.
+          clinicalRecordsEnabled: tenant.clinicalRecordsEnabled,
         },
       };
     },
@@ -124,6 +131,13 @@ export async function registerAdminTenantSettingsRoutes(
             // F1 (ADR-018) · y `fichajeEnabled` TAMPOCO está aquí, por la
             // misma razón y con la misma consecuencia: un propietario que
             // intente encenderse el control horario recibe un 400.
+            //
+            // clinica-1 · ni `clinicalRecordsEnabled`, por lo mismo y por
+            // una razón más: encenderla es aceptar ser responsable de un
+            // registro legal de datos de salud. Eso se habla, no se
+            // marca en Ajustes. (Si Dirección decide que la dueña pueda,
+            // es añadir la línea aquí y el toggle en la pantalla — está
+            // dicho en el done del bloque.)
           },
         },
       },

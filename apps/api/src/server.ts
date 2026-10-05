@@ -21,6 +21,7 @@ import { registerCatalogRoutes } from "./catalog/routes.js";
 import { registerLocalCatalogRoutes } from "./catalog/local-products.js";
 import { registerContactsRoutes } from "./contacts/routes.js";
 import { registerContactImportRoutes } from "./contacts/import.js";
+import { registerClinicaRoutes } from "./clinica/routes.js";
 import { registerCrmRoutes } from "./crm/routes.js";
 import { getPrisma, getRedis, shutdown } from "./context.js";
 import { registerDeviceRoutes } from "./devices/routes.js";
@@ -181,6 +182,10 @@ async function main() {
   await registerContactsRoutes(app);
   await registerContactImportRoutes(app);
   await registerCrmRoutes(app);
+  // clinica-1 · la historia clínica. Gateada por tenant
+  // (`clinicalRecordsEnabled`), y con el módulo apagado cada ruta
+  // responde la 404 de Fastify como si no estuviera registrada.
+  await registerClinicaRoutes(app);
   await registerServicesRoutes(app);
   await registerStaffRoutes(app);
   await registerAgendaRoutes(app);

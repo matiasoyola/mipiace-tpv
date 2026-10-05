@@ -25,6 +25,7 @@ const { RRule } = rrulePkg;
 type RRule = InstanceType<typeof RRule>;
 import type { PrismaClient } from "@mipiacetpv/db";
 
+import { otorgarAccesoClinicoPorCita } from "../clinica/acceso-por-cita.js";
 import { sqlStateOf } from "../lib/sqlstate.js";
 import {
   resolveCenterSchedule,
@@ -198,6 +199,74 @@ async function withRaceRetry<T>(run: () => Promise<T>): Promise<T> {
       await esperaCorta();
     }
   }
+}
+
+// ── EL PUNTO ÚNICO donde nacen las asignaciones ──────────────────────
+//
+// Hasta clinica-1 el mismo INSERT estaba copiado en `insertHold` y en
+// `reschedule`: dos bucles con el mismo SQL y nada que garantizara que
+// seguirían siendo iguales. Esto los funde, y no por estética.
+//
+// La historia clínica necesita UN sitio donde engancharse: cuando a un
+// sanitario le asignan una cita, ese paciente entra en su selección, y
+// tiene que pasar **en la misma transacción que la cita** (ADR: media
+// operación deja a un sanitario con una cita cuya historia no puede
+// abrir). Enganchar en la ruta de alta no sirve, y no es una hipótesis:
+// `mover-con-otra` (PR #6) hace que mover una cita pueda cambiarla de
+// profesional, y ese camino pasa por `reschedule`, no por el alta.
+//
+// Así que: quien persiste assignments pasa por aquí, y quien pase por
+// aquí concede el acceso. Un camino nuevo que inserte assignments a mano
+// y se salte esta función es la única forma de romperlo, y es la razón de
+// que esta función exista y de que el SQL ya no esté en dos sitios.
+//
+// `itemIds` indexa por la misma posición que `PlannedAssignment
+// .appointmentItemIndex`. `clientId` es el paciente de la cita (null en
+// walk-in / reserva anónima: ahí no hay historia que conceder).
+async function persistirAssignments(
+  tx: {
+    $executeRawUnsafe: (sql: string, ...values: unknown[]) => Promise<number>;
+    $queryRawUnsafe: <T>(sql: string, ...values: unknown[]) => Promise<T>;
+  },
+  input: {
+    tenantId: string;
+    appointmentId: string;
+    clientId: string | null;
+    itemIds: Array<string | null | undefined>;
+    assignments: PlannedAssignment[];
+  },
+): Promise<void> {
+  for (const a of input.assignments) {
+    await tx.$executeRawUnsafe(
+      `INSERT INTO appointment_assignments
+         (id, tenant_id, appointment_id, appointment_item_id, reservable_type,
+          staff_user_id, resource_id, slot, active)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::"ReservableType",
+          $6::uuid, $7::uuid, tstzrange($8::timestamptz, $9::timestamptz, '[)'), true)`,
+      randomUUID(),
+      input.tenantId,
+      input.appointmentId,
+      a.appointmentItemIndex != null
+        ? input.itemIds[a.appointmentItemIndex] ?? null
+        : null,
+      a.reservableType,
+      a.staffUserId,
+      a.resourceId,
+      a.startsAt.toISOString(),
+      a.endsAt.toISOString(),
+    );
+  }
+
+  // clinica-1 · el acceso a la historia nace de la cita. No-op en todos
+  // los tenants de hoy (`clinical_records_enabled = false`), y la función
+  // lo comprueba dentro de esta misma transacción.
+  await otorgarAccesoClinicoPorCita(tx, {
+    tenantId: input.tenantId,
+    clientId: input.clientId,
+    staffUserIds: input.assignments
+      .filter((a) => a.reservableType === "STAFF")
+      .map((a) => a.staffUserId),
+  });
 }
 
 export interface HoldInput {
@@ -567,26 +636,13 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
               })),
             });
           }
-          for (const a of input.assignments) {
-            await tx.$executeRawUnsafe(
-              `INSERT INTO appointment_assignments
-                 (id, tenant_id, appointment_id, appointment_item_id, reservable_type,
-                  staff_user_id, resource_id, slot, active)
-               VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::"ReservableType",
-                  $6::uuid, $7::uuid, tstzrange($8::timestamptz, $9::timestamptz, '[)'), true)`,
-              randomUUID(),
-              input.tenantId,
-              apptId,
-              a.appointmentItemIndex != null
-                ? itemIds[a.appointmentItemIndex]
-                : null,
-              a.reservableType,
-              a.staffUserId,
-              a.resourceId,
-              a.startsAt.toISOString(),
-              a.endsAt.toISOString(),
-            );
-          }
+          await persistirAssignments(tx, {
+            tenantId: input.tenantId,
+            appointmentId: apptId,
+            clientId: input.clientId,
+            itemIds,
+            assignments: input.assignments,
+          });
         }),
       );
       const view = await this.getAppointmentView(input.tenantId, apptId);
@@ -679,7 +735,11 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
     async reschedule(tenantId, id, timeslotStart, timeslotEnd, assignments) {
       const owned = await prisma.appointment.findFirst({
         where: { tenantId, id },
-        select: { id: true },
+        // clinica-1 · `clientId` entra en este select para que
+        // `persistirAssignments` pueda conceder el acceso a la historia
+        // sin una segunda consulta. En walk-in viene null y el enganche
+        // es un no-op.
+        select: { id: true, clientId: true },
       });
       if (!owned) return null;
       const items = await prisma.appointmentItem.findMany({
@@ -705,26 +765,17 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
             timeslotStart.toISOString(),
             timeslotEnd.toISOString(),
           );
-          for (const a of assignments) {
-            await tx.$executeRawUnsafe(
-              `INSERT INTO appointment_assignments
-                 (id, tenant_id, appointment_id, appointment_item_id, reservable_type,
-                  staff_user_id, resource_id, slot, active)
-               VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::"ReservableType",
-                  $6::uuid, $7::uuid, tstzrange($8::timestamptz, $9::timestamptz, '[)'), true)`,
-              randomUUID(),
-              tenantId,
-              id,
-              a.appointmentItemIndex != null
-                ? items[a.appointmentItemIndex]?.id ?? null
-                : null,
-              a.reservableType,
-              a.staffUserId,
-              a.resourceId,
-              a.startsAt.toISOString(),
-              a.endsAt.toISOString(),
-            );
-          }
+          await persistirAssignments(tx, {
+            tenantId,
+            appointmentId: id,
+            // clinica-1 · mover también concede el acceso, y por eso
+            // `reschedule` lee el paciente: mover con OTRA sanitaria
+            // (`mover-con-otra`, PR #6) le da el acceso por este mismo
+            // camino, sin una línea suya aquí.
+            clientId: owned.clientId,
+            itemIds: items.map((it) => it.id),
+            assignments,
+          });
         }),
       );
       return this.getAppointmentView(tenantId, id);
