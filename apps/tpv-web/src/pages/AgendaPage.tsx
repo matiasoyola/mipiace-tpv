@@ -291,6 +291,22 @@ export interface AgendaPageProps {
   // toast que ya existe y se consume una sola vez.
   notice?: string | null;
   onNoticeShown?: () => void;
+  // clinica-1 · con quién arranca el filtro por profesional. Lo usa el
+  // TPV del sanitario sin caja para abrirle SU día. `undefined` = como
+  // siempre: "Todos".
+  //
+  // Es el valor INICIAL y no un bloqueo: el sanitario puede poner
+  // "Todos". Las citas de las compañeras no son datos de salud (la agenda
+  // sólo enseña contacto, decisión de producto del 05-10) y necesita
+  // verlas para saber si la sala está ocupada.
+  staffFilterInicial?: string | null;
+  // clinica-1 · ¿se le ofrece «Cobrar en caja»? `undefined` = sí, como
+  // siempre. El TPV del sanitario sin caja lo pone en false.
+  //
+  // Esconder el botón es UI, no la frontera: `ensureCajaEnabled` rechaza
+  // el checkout de un CLINICIAN en la API. Lo que se gana escondiéndolo
+  // es no ofrecerle una acción que siempre va a fallar.
+  puedeCobrar?: boolean;
   onEnterDraft?: (entry: {
     appointmentId: string;
     ticketId: string;
@@ -304,6 +320,8 @@ export function AgendaPage({
   onEnterDraft,
   notice,
   onNoticeShown,
+  staffFilterInicial,
+  puedeCobrar = true,
 }: AgendaPageProps) {
   const [date, setDate] = useState<string>(todayLocalDate());
   const [day, setDay] = useState<AgendaDay | null>(null);
@@ -311,7 +329,9 @@ export function AgendaPage({
   const [offline, setOffline] = useState(false);
   const [services, setServices] = useState<CatalogProduct[]>([]);
   const [clientsById, setClientsById] = useState<Map<string, ClientRow>>(new Map());
-  const [staffFilter, setStaffFilter] = useState<string | null>(null);
+  const [staffFilter, setStaffFilter] = useState<string | null>(
+    staffFilterInicial ?? null,
+  );
   // B-reservas-9 · el panel de salud y la matriz cuelgan de aquí: se entra y
   // se sale sin dejar la agenda.
   const [saludAbierta, setSaludAbierta] = useState(false);
@@ -1303,6 +1323,7 @@ export function AgendaPage({
             }}
             onStatus={(st) => changeStatus(detail.id, st)}
             onCheckout={() => doCheckout(detail.id)}
+            puedeCobrar={puedeCobrar}
             onMove={(start, staffUserId) =>
               void doMove(detail.id, start, staffUserId)
             }
@@ -2388,6 +2409,8 @@ function DetailPanel(props: {
   onClose: () => void;
   onStatus: (s: AppointmentStatus) => void;
   onCheckout: () => void;
+  /** clinica-1 · ¿se le ofrece «Cobrar en caja»? El sanitario sin caja, no. */
+  puedeCobrar: boolean;
   onMove: (startISO: string, staffUserId?: string) => void;
   onClearMoveError: () => void;
 }) {
@@ -2452,12 +2475,14 @@ function DetailPanel(props: {
 
       {!terminal && (
         <div className="p-4 border-t border-slate-100 space-y-2">
-          <button
-            onClick={props.onCheckout}
-            className="w-full h-12 rounded-xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[15px] font-semibold"
-          >
-            Cobrar en caja
-          </button>
+          {props.puedeCobrar && (
+            <button
+              onClick={props.onCheckout}
+              className="w-full h-12 rounded-xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[15px] font-semibold"
+            >
+              Cobrar en caja
+            </button>
+          )}
           <MoverCita
             appt={appt}
             staff={props.staff}

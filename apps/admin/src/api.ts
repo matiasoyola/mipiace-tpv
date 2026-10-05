@@ -147,7 +147,14 @@ export function clearTokens(): void {
   // gestiona el banner (botón "Salir de impersonación") o caducidad.
 }
 
-export type AdminRole = "OWNER" | "MANAGER" | "CASHIER";
+// clinica-1 · `CLINICIAN` entra por completitud del tipo, NO porque
+// pueda llegar al panel: el login lo rechaza con
+// `CASHIER_NOT_ALLOWED_IN_ADMIN` igual que a un cajero. Está aquí porque
+// `readCurrentRole` lee el rol del JWT y el JWT ya puede traerlo; sin
+// listarlo, un sanitario con un token en la mano caería al `null` de
+// "token corrupto" y la app forzaría re-login en bucle en vez de
+// contarle que entra por el TPV.
+export type AdminRole = "OWNER" | "MANAGER" | "CASHIER" | "CLINICIAN";
 
 // Lee el rol del JWT actual (B6 §1). El admin filtra sidebar y oculta
 // botones de mutación a MANAGER en función de este valor. Cuando no
@@ -161,7 +168,12 @@ export function readCurrentRole(): AdminRole | null {
     if (parts.length !== 3) return null;
     const payload = JSON.parse(atob(parts[1]!.replace(/-/g, "+").replace(/_/g, "/")));
     const role = payload?.role;
-    if (role === "OWNER" || role === "MANAGER" || role === "CASHIER") {
+    if (
+      role === "OWNER" ||
+      role === "MANAGER" ||
+      role === "CASHIER" ||
+      role === "CLINICIAN"
+    ) {
       return role;
     }
     return null;

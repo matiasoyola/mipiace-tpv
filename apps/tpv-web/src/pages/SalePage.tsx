@@ -147,6 +147,7 @@ import { vocab } from "../lib/vocab.js";
 // llegar a Sentry con transporte y motivo; antes moría en el catch.
 import { reportPrinterFailure } from "../platform/printer/telemetry.js";
 import { formatEur } from "../lib/money.js";
+import type { CashierRole } from "../lib/offlineAuth.js";
 
 // v1.10.3-barra · ventana de "Deshacer" tras borrar una línea. 4 s es
 // el deshacer estándar de la metodología UX de Mi Piace: da tiempo a
@@ -327,7 +328,8 @@ export interface SalePageProps {
   // v1.7-alias-cajeros: label de display (alias con fallback a email),
   // calculado en App con cashierDisplayLabel.
   cashierLabel: string;
-  cashierRole: "MANAGER" | "CASHIER";
+  // clinica-1 · el tipo compartido (ver la nota de CloseShiftModal).
+  cashierRole: CashierRole;
   registerName: string;
   registerId: string;
   storeName: string;
@@ -2862,7 +2864,8 @@ function SaleWorkspace({
   contact: ContactRef | null;
   notes: string;
   totals: ReturnType<typeof computeCart>;
-  cashierRole: "MANAGER" | "CASHIER";
+  // clinica-1 · el tipo compartido (ver la nota de CloseShiftModal).
+  cashierRole: CashierRole;
   // Mejora-02: contador de tickets emitidos en el turno actual (no
   // DRAFT, no VOIDED). null si aún no se ha resuelto el primer fetch.
   shiftTicketsCount: number | null;

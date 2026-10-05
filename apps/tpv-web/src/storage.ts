@@ -10,6 +10,7 @@
 // sin contaminar (ni perder) la sesión real del cliente en el mismo
 // navegador.
 
+import type { CashierRole } from "./lib/offlineAuth.js";
 import { readTestModeState } from "./lib/test-mode.js";
 
 const DEVICE_TOKEN_KEY = "mipiacetpv-device-token";
@@ -43,7 +44,10 @@ export interface CashierSession {
   // tolerar sesiones guardadas antes del bloque (sin alias) — el
   // display cae al email.
   alias?: string | null;
-  role: "MANAGER" | "CASHIER";
+  // clinica-1 · se usa el tipo compartido en vez de repetir la unión: era
+  // la cuarta copia de la misma lista en este frontend, y la que se
+  // olvidaba mandaba al TPV por un camino que no le toca.
+  role: CashierRole;
 }
 
 // Label de display del cajero: alias si existe, email si no. Único

@@ -35,7 +35,12 @@ export const MAX_ATTEMPTS = 5;
 export const ATTEMPT_WINDOW_MS = 5 * 60_000;
 export const LOCK_MS = 15 * 60_000;
 
-export type CashierRole = "OWNER" | "MANAGER" | "CASHIER";
+// clinica-1 · `CLINICIAN` es el sanitario SIN CAJA. Entra al TPV con su
+// PIN como cualquiera —el roster offline lo incluye, porque sin red tiene
+// que poder ver su agenda cacheada— y lo que no puede hacer es cobrar.
+// Quien lo impide es la API (`ensureCajaEnabled`); el TPV además no le
+// pinta la pantalla de venta, pero esconder no es gatear.
+export type CashierRole = "OWNER" | "MANAGER" | "CASHIER" | "CLINICIAN";
 
 export interface RosterEntry {
   id: string;
