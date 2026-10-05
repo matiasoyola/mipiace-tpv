@@ -222,6 +222,13 @@ export interface AgendaStore {
     serviceIds: string[],
   ): Promise<Map<string, ServiceRequirement>>;
   getSkilledStaff(tenantId: string, serviceId: string): Promise<string[]>;
+  // mover-con-otra · los nombres de los servicios de una cita, para que el
+  // «no» de la ruta diga "Ana no hace Tinte" y no "no se pudo mover". El
+  // motor no los necesita: es la frase que lee la cajera.
+  getServiceNames(
+    tenantId: string,
+    serviceIds: string[],
+  ): Promise<Map<string, string>>;
   getTemplateSlots(
     tenantId: string,
     userIds: string[],
@@ -348,6 +355,17 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
         select: { userId: true },
       });
       return rows.map((r) => r.userId);
+    },
+
+    async getServiceNames(tenantId, serviceIds) {
+      const map = new Map<string, string>();
+      if (serviceIds.length === 0) return map;
+      const rows = await prisma.product.findMany({
+        where: { tenantId, id: { in: serviceIds } },
+        select: { id: true, name: true },
+      });
+      for (const r of rows) map.set(r.id, r.name);
+      return map;
     },
 
     async getTemplateSlots(tenantId, userIds, fromDate, toDate) {

@@ -219,6 +219,37 @@ export function serviciosQueSabeHacer<T extends { id: string }>(
   return servicios.filter((s) => suyos.has(s.id));
 }
 
+/**
+ * mover-con-otra · a quién se le puede pasar ESTA cita.
+ *
+ * El espejo de `serviciosQueSabeHacer`, por el otro lado de la matriz: allí
+ * se fija la peluquera y se filtran los servicios; aquí se fijan los
+ * servicios de la cita y se filtran las peluqueras. Mismo cruce, misma
+ * fuente, y las mismas dos salidas sin filtrar:
+ *
+ *   · **matriz desconocida** (`null`: no llegó, o no hay red) → TODAS. El
+ *     motor sigue siendo la puerta de verdad, y esconder manos por una
+ *     lectura que falló es inventarse un «no» que nadie ha dicho.
+ *   · **de quien no se sabe nada** (no está en el mapa) → se ofrece. Es la
+ *     misma regla que el alta: la ignorancia no descarta.
+ *
+ * Tiene que saber hacerlos TODOS, no alguno: el motor encadena los items de
+ * la cita sobre la fijada, así que media cita no es media respuesta — y la
+ * ruta responde 409 `STAFF_NO_SKILL` si se le pide.
+ */
+export function profesionalesQuePuedenConLaCita<T extends { userId: string }>(
+  personal: T[],
+  serviceIds: string[],
+  porProfesional: Map<string, Set<string>> | null,
+): T[] {
+  if (!porProfesional || serviceIds.length === 0) return personal;
+  return personal.filter((p) => {
+    const suyos = porProfesional.get(p.userId);
+    if (!suyos) return true;
+    return serviceIds.every((sid) => suyos.has(sid));
+  });
+}
+
 /** `true` si la matriz dice, explícitamente, que no hace ninguno. */
 export function noHaceNingunServicio(
   staffUserId: string | null,

@@ -230,7 +230,11 @@ test.describe("en el mostrador", () => {
 
     // El último hueco del día: el más lejos de donde está, para que «se ha
     // movido» no se pueda confundir con «no se ha movido».
-    const chips = hoja.locator("button[aria-pressed]");
+    // `data-hueco` y no `button[aria-pressed]`: desde mover-con-otra la
+    // hoja tiene dos grupos de botones pulsables (las horas y «Con
+    // quién»), y el locator viejo contaba el nombre de la peluquera como
+    // si fuera una hora.
+    const chips = hoja.locator("button[data-hueco]");
     await expect(chips.first()).toBeVisible({ timeout: 20_000 });
     const horaNueva = ((await chips.last().textContent()) ?? "").trim();
     expect(horaNueva).toMatch(/^\d{2}:\d{2}$/);
@@ -317,11 +321,186 @@ test.describe("en el mostrador", () => {
     const hoja = page.locator('[data-panel="mover-cita"]');
     await hoja.locator('[data-accion="buscar-hueco-mover"]').click();
 
-    const chips = hoja.locator("button[aria-pressed]");
+    // `data-hueco` y no `button[aria-pressed]`: desde mover-con-otra la
+    // hoja tiene dos grupos de botones pulsables (las horas y «Con
+    // quién»), y el locator viejo contaba el nombre de la peluquera como
+    // si fuera una hora.
+    const chips = hoja.locator("button[data-hueco]");
     await expect(chips.first()).toBeVisible({ timeout: 20_000 });
     const horas = (await chips.allTextContents()).map((h) => h.trim());
     expect(horas.length).toBeGreaterThan(0);
     expect(horas).not.toContain(MECHAS_DE_CARMEN);
+
+    await hoja.getByRole("button", { name: "cancelar" }).click();
+    await expect(hoja).toHaveCount(0);
+  });
+
+  test("mover una cita a otra peluquera: de Marta a Lucía, mismo id", async ({
+    page,
+  }) => {
+    // mover-con-otra · «la agenda son huecos por peluquera» (Matías, antes
+    // de encenderla en el AP12). Si una no puede, la clienta se va con
+    // otra, y hasta este bloque la única salida era cancelar y volver a
+    // dar la cita — que PIERDE el histórico de la original. Por eso lo que
+    // se comprueba, además de la columna, es que el id NO cambia.
+    //
+    // SE MUEVE EL TINTE · LAVADO DE LAS 10:15 (Rosa), y se devuelve al
+    // final. Dos razones:
+    //
+    //   · **las dos mitades del tinte las saben Marta Y Lucía** desde el
+    //     capítulo 5, así que Lucía aparece de verdad en el selector. Con
+    //     las mechas de Carmen no habría a quién pasarla (sólo Marta), que
+    //     es justo lo que prueba el test siguiente.
+    //   · **el estado se arrastra**: los capítulos 8 y 9 cobran esta cita
+    //     y arquean la caja. Se devuelve a Marta a la misma hora para
+    //     dejar el día como estaba.
+    //
+    // A LA MISMA HORA, que es el caso que más se dice en el mostrador («a
+    // la misma hora, pero con Lucía»). Y es el que agenda-lista §2b dejó
+    // advertido: `reschedule` carga la ocupación del día SIN excluir la
+    // propia cita, así que había que ver con los ojos que para OTRA
+    // peluquera no estorba.
+    await abrirAgenda(page);
+
+    const tarjeta = tarjetaDeLaCita(page, MARTA.id, TINTE_LAVA_DE_ROSA).first();
+    await expect(tarjeta).toBeVisible({ timeout: 20_000 });
+    const id = (await tarjeta.getAttribute("data-cita")) as string;
+    expect(id).toBeTruthy();
+    const antes = (await citas()).find((c) => c.id === id);
+    expect(antes).toBeDefined();
+
+    await tarjeta.click();
+    await rotulo(page, "Marta no puede: la coge Lucía.", CAP);
+    await esconder(page);
+
+    await page.locator('[data-accion="mover-cita"]').click();
+    const hoja = page.locator('[data-panel="mover-cita"]');
+    await expect(hoja).toBeVisible({ timeout: 20_000 });
+
+    // El selector ARRANCA EN LA ACTUAL: con Marta elegida, la hoja se
+    // comporta exactamente como antes del bloque.
+    const selector = hoja.locator('[data-selector="mover-profesional"]');
+    await expect(selector.locator(`[data-staff="${MARTA.id}"]`)).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    // Se elige a Lucía, y los chips que había se limpian: eran de Marta.
+    await hoja.locator('[data-accion="buscar-hueco-mover"]').click();
+    await expect(hoja.locator("button[data-hueco]").first()).toBeVisible({
+      timeout: 20_000,
+    });
+    await selector.locator(`[data-staff="${LUCIA.id}"]`).click();
+    await expect(hoja.locator("button[data-hueco]")).toHaveCount(0);
+    await rotulo(page, "«Con quién»: Lucía.", CAP);
+    await esconder(page);
+
+    // Y los huecos nuevos son los de LUCÍA. Su hora actual tiene que estar
+    // entre ellos: es la clienta que no se mueve de hora, sólo de manos.
+    await hoja.locator('[data-accion="buscar-hueco-mover"]').click();
+    const suHora = hoja.locator(
+      `button[data-hueco][aria-pressed]:text-is("${TINTE_LAVA_DE_ROSA}")`,
+    );
+    await expect(suHora).toBeVisible({ timeout: 20_000 });
+    await suHora.click();
+
+    // El botón dice a quién, antes de pulsarlo.
+    await expect(hoja.locator('[data-accion="confirmar-mover"]')).toHaveText(
+      `Mover a las ${TINTE_LAVA_DE_ROSA} con ${LUCIA.alias}`,
+    );
+    await hoja.locator('[data-accion="confirmar-mover"]').click();
+
+    // En pantalla: LA MISMA tarjeta, en la columna de Lucía, a su hora.
+    await expect(
+      page
+        .locator(`[data-columna="${LUCIA.id}"] [data-cita="${id}"]`)
+        .filter({ hasText: TINTE_LAVA_DE_ROSA }),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(
+      page.locator(`[data-columna="${MARTA.id}"] [data-cita="${id}"]`),
+    ).toHaveCount(0);
+    // Y la hoja se pliega sola, como al mover de hora.
+    await expect(hoja).toHaveCount(0);
+    await rotulo(page, "La misma cita, en la columna de Lucía.", CAP);
+    await esconder(page);
+
+    // En la BD: LA MISMA FILA, misma hora, y la asignación STAFF activa es
+    // la de Lucía. Ni una cancelada y otra nueva.
+    const despues = (await citas()).find((c) => c.id === id);
+    expect(despues).toBeDefined();
+    expect(despues!.status).toBe(antes!.status);
+    expect(despues!.inicio.getTime()).toBe(antes!.inicio.getTime());
+    const activas = (await asignaciones()).filter(
+      (x) => x.appointmentId === id && x.active,
+    );
+    expect(activas).toHaveLength(1);
+    expect(activas[0]!.staffUserId).toBe(LUCIA.id);
+
+    // Y el hueco de Marta a esa hora queda LIBRE: su columna ya no tiene
+    // nada a las 10:15. Sin esto, mover sería duplicar la ocupación.
+    await expect(
+      tarjetaDeLaCita(page, MARTA.id, TINTE_LAVA_DE_ROSA),
+    ).toHaveCount(0);
+
+    // De vuelta a Marta, a la misma hora: deja el día como estaba para los
+    // capítulos 8 y 9.
+    await page.locator(`[data-cita="${id}"]`).first().click();
+    await page.locator('[data-accion="mover-cita"]').click();
+    await hoja.locator(`[data-staff="${MARTA.id}"]`).click();
+    await hoja.locator('[data-accion="buscar-hueco-mover"]').click();
+    await hoja
+      .locator(`button[data-hueco]:text-is("${TINTE_LAVA_DE_ROSA}")`)
+      .click();
+    await hoja.locator('[data-accion="confirmar-mover"]').click();
+
+    await expect(
+      tarjetaDeLaCita(page, MARTA.id, TINTE_LAVA_DE_ROSA),
+    ).toHaveCount(1, { timeout: 20_000 });
+    const devuelta = (await asignaciones()).filter(
+      (x) => x.appointmentId === id && x.active,
+    );
+    expect(devuelta).toHaveLength(1);
+    expect(devuelta[0]!.staffUserId).toBe(MARTA.id);
+    const final = (await citas()).find((c) => c.id === id);
+    expect(final!.inicio.getTime()).toBe(antes!.inicio.getTime());
+    expect(final!.fin.getTime()).toBe(antes!.fin.getTime());
+  });
+
+  test("el selector no ofrece a quien no sabe hacer el servicio", async ({
+    page,
+  }) => {
+    // Las mechas de Carmen: las sabe hacer SÓLO Marta (la matriz del
+    // capítulo 3). Ofrecer a Lucía acabaría en el 409 `STAFF_NO_SKILL` de
+    // la ruta, sobre un nombre que la pantalla acababa de ofrecer — que es
+    // exactamente el fallo que agenda-lista §3 arregló por el otro lado de
+    // la matriz.
+    //
+    // El selector NO se esconde por tener una sola candidata: se enseña
+    // con Marta sola y con el motivo escrito. Un control que desaparece no
+    // explica nada («lo oculto no existe»), y el motivo va en texto
+    // visible, nunca en un `title` (`docs/ux-principles.md` §6).
+    //
+    // NO MUEVE NADA: abre, mira y cancela.
+    await abrirAgenda(page);
+    await tarjetaDeLaCita(page, MARTA.id, MECHAS_DE_CARMEN).first().click();
+    await page.locator('[data-accion="mover-cita"]').click();
+    const hoja = page.locator('[data-panel="mover-cita"]');
+    const selector = hoja.locator('[data-selector="mover-profesional"]');
+    await expect(selector).toBeVisible({ timeout: 20_000 });
+
+    // Marta sí, y es la elegida. Lucía e Irene no: no hacen mechas.
+    await expect(selector.locator(`[data-staff="${MARTA.id}"]`)).toBeVisible();
+    await expect(selector.locator(`[data-staff="${LUCIA.id}"]`)).toHaveCount(0);
+    await expect(
+      selector.locator(`[data-staff="${PROFESIONALES[2]!.id}"]`),
+    ).toHaveCount(0);
+
+    // Y el motivo, en texto visible junto al selector.
+    await expect(
+      hoja.locator('[data-motivo="mover-profesional"]'),
+    ).toBeVisible();
+    await rotulo(page, "Las mechas sólo las hace Marta.", CAP);
+    await esconder(page);
 
     await hoja.getByRole("button", { name: "cancelar" }).click();
     await expect(hoja).toHaveCount(0);

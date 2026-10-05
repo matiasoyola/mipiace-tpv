@@ -439,7 +439,12 @@ export async function createAppointment(
 
 export async function patchAppointment(
   id: string,
-  change: { status?: AppointmentStatus; start?: string },
+  // mover-con-otra · `staffUserId` fija la peluquera al mover, y SÓLO vale
+  // junto a `start`: cambiar de peluquera es mover (la ruta responde 400 si
+  // llega solo). La pantalla lo manda únicamente cuando es distinta de la
+  // actual, así que mover «a otra hora con la misma» sigue siendo byte a
+  // byte la petición de agenda-lista.
+  change: { status?: AppointmentStatus; start?: string; staffUserId?: string },
 ): Promise<
   | { ok: true; appointment: AgendaAppointment }
   | { ok: false; error: string; message: string; alternatives?: AvailabilitySlot[] }
