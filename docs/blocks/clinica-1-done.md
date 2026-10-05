@@ -1,8 +1,8 @@
 # Bloque clinica-1 · done
 
 Rama `clinica-1`, worktree `~/Developer/Claude/Projects/mipiacetpv-clinica-1`, rebasada sobre
-`origin/master` = `f38afa0` (el merge de `mover-con-otra`, PR #6). Siete commits, 54 ficheros,
-+6716 / −104.
+`origin/master` = `f38afa0` (el merge de `mover-con-otra`, PR #6). Nueve commits, 55 ficheros,
++7344 / −106.
 
 **Este bloque no construye ninguna pantalla clínica.** Construye el suelo sobre el que van todas:
 quién puede abrir una historia, cómo se demuestra que la abrió, y por qué lo escrito no se puede
@@ -115,7 +115,7 @@ Añadir un valor a `UserRole` obliga a revisar cada comparación. Veinte sitios,
 | 4 | `auth/must-change-password.ts` | **Se ensancha por tipo, no por uso.** Ese JWT sólo lo emite el alta de un OWNER; un sanitario no tiene password. |
 | 5 | `auth/routes.ts:157` login del panel | **Comparte la rama del cajero.** `CASHIER_NOT_ALLOWED_IN_ADMIN`, con el mensaje ampliado. Caer al `NOT_OWNER_OR_MANAGER` de abajo le diría «sólo propietarios o encargados», que es verdad y es inútil: lo que necesita saber es por dónde SÍ entra. |
 | 6 | `shift/cashier-session.ts` payload | **Se ensancha.** El sanitario entra al TPV por la misma puerta. |
-| 7 | `shift/cashier-auth.ts:75` `/shift/cashier-login` | **Se añade al `role: { in: … }`.** Dejarlo fuera habría escondido la negativa en la puerta de entrada, y la puerta de entrada no es donde se razona. |
+| 7 | `shift/cashier-auth.ts:82` `/shift/cashier-login` | **Se añade al `role: { in: … }`.** Dejarlo fuera habría escondido la negativa en la puerta de entrada, y la puerta de entrada no es donde se razona. **Aquí estuvo el único bug de verdad del bloque — ver §10b.** |
 | 8 | `shift/cashier-auth.ts:270` roster offline | **Se añade.** Sin red tiene que poder entrar a ver su agenda cacheada. |
 | 9 | `shift/routes.ts:688` tipo del contexto | **Se ensancha**, pero ninguna ruta del fichero lo verá: todas llevan `ensureCajaEnabled`. |
 | 10 | `shift/routes.ts:899` candidatos a PIN de encargado | **NO se añade.** Un sanitario no autoriza cierres de caja. |
@@ -421,6 +421,33 @@ apagada» sin consultar nada más.
 | **404 y no 403** | `respondeComoRutaInexistente` → `reply.code(403)` | `clinica-rutas.test.ts` · «la 404 es INDISTINGUIBLE de la de una ruta que no existe» | `expected 403 to be 404` |
 | **Sole no nota nada** | `DEFAULT false` → `true` en `clinical_records_enabled` | `clinica-migracion.test.ts` + `crm-route.test.ts` «tenant NORMAL: la cajera la sigue viendo» | `expected [] to have a length of 1` |
 
+## 10b · El bug que la suite no vio, y por qué
+
+`/shift/cashier-login` busca al usuario con `role: { in: [...] }`, y esa lista **se quedó sin
+`CLINICIAN`**. Efecto: un sanitario tecleaba email y PIN y recibía `INVALID_CREDENTIALS`. No podía
+entrar al TPV de ninguna manera — justo lo que el punto 7 del bloque construye.
+
+El fichero tiene **dos** listas de rol (el login y el roster offline) y el valor sólo entró en la
+segunda.
+
+**Lo grave no es el fallo: es que la suite pasaba en verde.** El test que lo vigilaba decía:
+
+```ts
+expect(src).toContain('"OWNER", "MANAGER", "CASHIER", "CLINICIAN"');
+```
+
+Y la cadena aparecía… en el roster. **Un `toContain` sobre un fichero con dos sitios iguales no
+prueba nada sobre el sitio que importa.** Era un test que se sentía como cobertura y no lo era.
+
+Ahora cuenta las dos ocurrencias y comprueba que no queda ninguna lista corta. Verificado
+reintroduciendo el bug: rojo con `expected [ Array(1) ] to have a length of 2`.
+
+**Y lo destapó el banco de la agenda, no la suite** — por el camino largo: un `500` en el login del
+TPV que resultó ser otra cosa (el reinicio de nodemon, §14), y al descartarlo quedó a la vista que el
+diff de `cashier-auth.ts` sólo tenía un cambio donde debía tener dos. La lección que me llevo: un
+banco por la interfaz real encuentra lo que un test de cadenas no puede, y **un aserto sobre el
+TEXTO de un fichero tiene que contar, no buscar**.
+
 ### Lo que los sabotajes enseñaron
 
 Dos cosas que no sabía antes de hacerlos:
@@ -536,8 +563,8 @@ bajo `packages/db/prisma/`, que entra por el `COPY . .`.
 
 - `pnpm test` · **281 ficheros, 3127 tests, 3 skipped.** Verde.
 - `pnpm test:e2e` · **25 ficheros, 393 tests.** Verde, sobre `mipiacetpv_clinica1_e2e`.
-- `pnpm e2e:agenda` · verde, sobre `mipiacetpv_clinica1_banco_e2e` con puertos propios
-  (3111/5283/5284) y Redis propio (6392).
+- `pnpm e2e:agenda` · **30 passed**, sobre `mipiacetpv_clinica1_banco_e2e` y Redis propio (6392),
+  incluidos los capítulos de `mover-con-otra` (specs 22 y 23 de `07-el-dia`).
 
   **Y una trampa que costó dos pasadas, por si le pasa a alguien más:** el `webServer` del banco
   arranca la API con `nodemon`, que vigila `apps/api/src`. Editar un fichero del API **mientras el
@@ -570,6 +597,8 @@ c1aeea2 test(clinica-1): la tabla de casos del acceso, las rutas y los sabotajes
 a726b99 feat(clinica-1): la negativa de la historia clínica se explica
 f8bebb9 test(clinica-1): mover con otra sanitaria le da el acceso
 8bc06b0 docs(clinica-1): capturas de Personal, y el puesto delante del email
+8a5c54c fix(clinica-1): el sanitario no podía entrar al TPV
+<este>  docs(clinica-1): el done del bloque
 ```
 
 ## 16 · La rama

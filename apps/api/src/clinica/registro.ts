@@ -36,6 +36,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 
 import { getPrisma } from "../context.js";
+import { respondeComoRutaInexistente } from "./gate.js";
 import {
   comoPrismaParaAcceso,
   resolverAccesoClinico,
@@ -192,7 +193,6 @@ export async function conHistoria<T>(
   if (!veredicto.puede) {
     const status = HTTP_DEL_MOTIVO[veredicto.motivo];
     if (status === 404) {
-      const { respondeComoRutaInexistente } = await import("./gate.js");
       respondeComoRutaInexistente(request, reply);
       return undefined;
     }
