@@ -14,7 +14,12 @@ import {
 export interface AuthContext {
   userId: string;
   tenantId: string;
-  role: "OWNER" | "MANAGER" | "CASHIER";
+  // clinica-1 · el sanitario sin caja. Llega aquí por la puerta del TPV
+  // (`requireOwnerOrCashier` acepta la sesión de cajero) para la agenda y
+  // lo clínico. Lo que NO puede hacer con este contexto es cobrar ni
+  // abrir turno: lo corta `ensureCajaEnabled`, que está en el
+  // `preHandler` de todas las rutas de caja.
+  role: "OWNER" | "MANAGER" | "CASHIER" | "CLINICIAN";
   // Cuando el actor es un super-admin impersonando al OWNER del tenant,
   // este flag está true. Los handlers que mutan estado pueden usarlo
   // para decisiones específicas (la regla principal — bloquear mutaciones

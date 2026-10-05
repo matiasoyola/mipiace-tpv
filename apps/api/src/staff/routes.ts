@@ -6,6 +6,22 @@
 // profesional × servicio y los turnos (plantillas `rrule` RFC 5545 +
 // ventana de validez).
 //
+// clinica-1 · y la marca sanitaria del profesional:
+//
+//   GET    /staff                               — devuelve además
+//                                                `clinica` por fila
+//   PATCH  /staff/:userId/clinica               — cajero / cajero-sanitario
+//                                                / sanitario, nº de
+//                                                colegiado y alcance
+//
+// El PATCH lleva TRES puertas: `requireOwner` (quién ve datos de salud lo
+// decide la propietaria, igual que el alta de un usuario), la de la agenda
+// y la del módulo clínico. Con la clínica apagada contesta 404.
+//
+// Los pacientes de un sanitario (listar, añadir, revocar) NO están aquí:
+// viven en `clinica/routes.ts`, con el resto de lo clínico y con el mismo
+// gate. Aquí sólo se decide QUIÉN es sanitario y hasta dónde llega.
+//
 //   GET    /staff                              — usuarios del tenant como
 //                                                candidatos a profesional
 //                                                + su perfil/skills si los
@@ -45,7 +61,8 @@ const { RRule } = rrulePkg;
 type RRule = InstanceType<typeof RRule>;
 import type { Prisma } from "@mipiacetpv/db";
 
-import { requireOwnerOrManager } from "../auth/middleware.js";
+import { requireOwner, requireOwnerOrManager } from "../auth/middleware.js";
+import { ensureClinicaEnabled } from "../clinica/gate.js";
 import { getPrisma } from "../context.js";
 import {
   setSkillsForStaff,
@@ -200,6 +217,40 @@ function expandShiftToSlots(
 
 const guard = { preHandler: [requireOwnerOrManager, ensureAgendaEnabled] };
 
+// clinica-1 · los TRES puestos que se ven en pantalla, derivados del rol
+// de negocio y de la marca. Una sola función, y el `role` del user sigue
+// siendo la verdad: esto es sólo cómo se llama.
+//
+// `OWNER` y `MANAGER` conservan su puesto y se marcan o no — una dueña
+// sanitaria sigue siendo la dueña, y una dueña NO sanitaria (un gerente)
+// administra el negocio y no ve historias.
+export type PuestoVisible =
+  | "cajero"
+  | "cajero-sanitario"
+  | "sanitario"
+  | "propietaria"
+  | "propietaria-sanitaria"
+  | "encargado"
+  | "encargado-sanitario";
+
+export function puestoVisible(
+  role: "OWNER" | "MANAGER" | "CASHIER" | "CLINICIAN",
+  esSanitario: boolean,
+): PuestoVisible {
+  switch (role) {
+    case "OWNER":
+      return esSanitario ? "propietaria-sanitaria" : "propietaria";
+    case "MANAGER":
+      return esSanitario ? "encargado-sanitario" : "encargado";
+    case "CASHIER":
+      return esSanitario ? "cajero-sanitario" : "cajero";
+    case "CLINICIAN":
+      // Un `CLINICIAN` lleva la marca por CHECK de la base, así que el
+      // `esSanitario` no se mira: no hay estado en el que sea falso.
+      return "sanitario";
+  }
+}
+
 export async function registerStaffRoutes(app: FastifyInstance): Promise<void> {
   // ── Candidatos a profesional (usuarios del tenant) ──────────────────
   app.get("/staff", guard, async (request: FastifyRequest) => {
@@ -208,7 +259,11 @@ export async function registerStaffRoutes(app: FastifyInstance): Promise<void> {
     const users = await prisma.user.findMany({
       where: {
         tenantId: auth.tenantId,
-        role: { in: ["OWNER", "MANAGER", "CASHIER"] },
+        // clinica-1 · el sanitario es un profesional de la agenda de
+        // pleno derecho: sin esto no saldría en la pantalla de Personal,
+        // que es justo donde se le pone el alcance y se le gestionan los
+        // pacientes.
+        role: { in: ["OWNER", "MANAGER", "CASHIER", "CLINICIAN"] },
         deletedAt: null,
         isTestCashier: false,
       },
@@ -218,6 +273,12 @@ export async function registerStaffRoutes(app: FastifyInstance): Promise<void> {
         alias: true,
         email: true,
         role: true,
+        // clinica-1 · la marca sanitaria. Siempre en el contrato (es una
+        // columna del user, no una tabla aparte); la pantalla la pinta
+        // sólo si el tenant tiene la clínica encendida.
+        isClinician: true,
+        clinicianLicense: true,
+        clinicalScope: true,
         staffProfile: {
           select: {
             userId: true,
@@ -237,6 +298,16 @@ export async function registerStaffRoutes(app: FastifyInstance): Promise<void> {
         alias: u.alias,
         email: u.email,
         role: u.role,
+        // clinica-1 · los tres nombres de pantalla salen de cruzar `role`
+        // con `isClinician`, y se cruzan AQUÍ y no en el front: si cada
+        // pantalla lo dedujera por su cuenta, dos pantallas acabarían
+        // llamando distinto a la misma persona.
+        clinica: {
+          esSanitario: u.isClinician,
+          colegiado: u.clinicianLicense,
+          alcance: u.clinicalScope,
+          puesto: puestoVisible(u.role, u.isClinician),
+        },
         // null → todavía no es profesional; el panel puede darlo de alta.
         profile: u.staffProfile ? profileView(u.staffProfile) : null,
         serviceIds: u.staffSkills.map((s) => s.serviceId),
@@ -313,6 +384,159 @@ export async function registerStaffRoutes(app: FastifyInstance): Promise<void> {
         },
       });
       return { profile: profileView(profile) };
+    },
+  );
+
+  // ── clinica-1 · la marca sanitaria y el alcance ─────────────────────
+  //
+  // UN solo endpoint para las tres decisiones que van juntas en la
+  // pantalla (puesto, colegiado, alcance), y van juntas porque se toman
+  // juntas: marcar a alguien sanitario sin colegiado o sin alcance deja un
+  // estado a medias que la pantalla tendría que explicar.
+  //
+  // `requireOwner` y no `requireOwnerOrManager`: esto decide QUIÉN VE
+  // DATOS DE SALUD. Es la misma clase de decisión que crear un usuario
+  // —que ya es sólo del OWNER (`POST /cashiers`)— y una clase por encima
+  // de la operativa diaria que B6 §1 le dio al encargado. Lo que el
+  // encargado SÍ puede es dar y quitar pacientes a un sanitario ya
+  // marcado (`clinica/routes.ts`), que es exactamente lo que el prompt
+  // del bloque le atribuye.
+  app.patch(
+    "/staff/:userId/clinica",
+    {
+      preHandler: [requireOwner, ensureAgendaEnabled, ensureClinicaEnabled],
+      schema: {
+        params: {
+          type: "object",
+          required: ["userId"],
+          additionalProperties: false,
+          properties: { userId: { type: "string", format: "uuid" } },
+        },
+        body: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            esSanitario: { type: "boolean" },
+            // String vacío → null (quitar el colegiado). `maxLength` 40:
+            // un nº de colegiado real no pasa de una decena de
+            // caracteres, y el margen cubre prefijos de colegio.
+            colegiado: { type: ["string", "null"], maxLength: 40 },
+            alcance: { type: "string", enum: ["ALL", "SELECTION"] },
+            // El puesto de un no-propietario y no-encargado: cajero o
+            // sanitario sin caja. Para OWNER/MANAGER no se acepta —
+            // cambiarle el rol de negocio a la propietaria no es una
+            // decisión de esta pantalla.
+            puesto: { type: "string", enum: ["CASHIER", "CLINICIAN"] },
+          },
+        },
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const auth = request.auth!;
+      const { userId } = request.params as { userId: string };
+      const body = request.body as {
+        esSanitario?: boolean;
+        colegiado?: string | null;
+        alcance?: "ALL" | "SELECTION";
+        puesto?: "CASHIER" | "CLINICIAN";
+      };
+      const user = await loadTenantUser(auth.tenantId, userId);
+      if (!user) return notFoundUser(reply);
+      const prisma = getPrisma();
+
+      // Hay que mirar el estado actual para validar: marcar sanitario sin
+      // mandar colegiado es válido si ya lo tenía guardado.
+      const actual = await prisma.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: {
+          role: true,
+          isClinician: true,
+          clinicianLicense: true,
+          clinicalScope: true,
+        },
+      });
+
+      const rolFinal =
+        body.puesto !== undefined && (actual.role === "CASHIER" || actual.role === "CLINICIAN")
+          ? body.puesto
+          : actual.role;
+      if (
+        body.puesto !== undefined &&
+        actual.role !== "CASHIER" &&
+        actual.role !== "CLINICIAN"
+      ) {
+        return reply.code(409).send({
+          error: "PUESTO_NO_EDITABLE",
+          code: "PUESTO_NO_EDITABLE",
+          message:
+            "El puesto de la propietaria y del encargado no se cambia aquí: márcalos como sanitarios o no, y nada más.",
+        });
+      }
+
+      // `CLINICIAN` implica sanitario, y lo implica también cuando el
+      // cuerpo no lo diga: el CHECK de la base lo rechazaría, y un 500 de
+      // constraint es una forma pésima de contar una regla de producto.
+      const esSanitario =
+        rolFinal === "CLINICIAN" ? true : (body.esSanitario ?? actual.isClinician);
+
+      const colegiadoFinal =
+        body.colegiado === undefined
+          ? actual.clinicianLicense
+          : (body.colegiado?.trim() || null);
+
+      // EL Nº DE COLEGIADO ES OBLIGATORIO AL MARCAR SANITARIO. La regla
+      // cruza `users` y `tenants` (sólo aplica con la clínica encendida),
+      // así que no cabe en un CHECK y vive aquí — y aquí llega sólo si el
+      // gate del módulo ha dejado pasar, que es la mitad "con la clínica
+      // encendida" de la condición.
+      if (esSanitario && !colegiadoFinal) {
+        return reply.code(400).send({
+          error: "CLINICIAN_LICENSE_REQUIRED",
+          code: "CLINICIAN_LICENSE_REQUIRED",
+          message:
+            "El personal sanitario necesita su nº de colegiado: va en la historia y en los informes que firma.",
+        });
+      }
+
+      // Quitarle la marca a alguien no borra sus accesos ni su historia
+      // —nada clínico se borra— pero sí los deja sin efecto: la función de
+      // acceso contesta "no es sanitario" antes de mirar la selección.
+      const alcanceFinal = body.alcance ?? actual.clinicalScope;
+
+      const updated = await prisma.user.update({
+        where: { id: userId },
+        data: {
+          role: rolFinal,
+          isClinician: esSanitario,
+          clinicianLicense: esSanitario ? colegiadoFinal : null,
+          clinicalScope: alcanceFinal,
+          // Cambiar de rol invalida los tokens del PANEL. El del TPV no
+          // lleva `tokenVersion` y vive el turno entero, así que lo que
+          // de verdad cierra la ventana es la segunda comprobación de
+          // `esSanitarioSinCaja` (lee el rol de la base). Esto se queda
+          // porque la mitad del panel sí la cierra, y es gratis.
+          ...(rolFinal !== actual.role ? { tokenVersion: { increment: 1 } } : {}),
+        },
+        select: {
+          id: true,
+          role: true,
+          isClinician: true,
+          clinicianLicense: true,
+          clinicalScope: true,
+        },
+      });
+
+      return reply.code(200).send({
+        clinica: {
+          userId: updated.id,
+          esSanitario: updated.isClinician,
+          colegiado: updated.clinicianLicense,
+          alcance: updated.clinicalScope,
+          puesto: puestoVisible(updated.role, updated.isClinician),
+        },
+        // El TPV tiene que volver a loguearse si le han cambiado el rol.
+        sesionesInvalidadas: rolFinal !== actual.role,
+      });
     },
   );
 

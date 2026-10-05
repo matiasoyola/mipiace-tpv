@@ -267,7 +267,9 @@ export async function registerCashierAuthRoutes(
         prisma.user.findMany({
           where: {
             tenantId: ctx.tenantId,
-            role: { in: ["OWNER", "MANAGER", "CASHIER"] },
+            // clinica-1 · el sanitario también está en el roster offline:
+            // sin red tiene que poder entrar a ver su agenda cacheada.
+            role: { in: ["OWNER", "MANAGER", "CASHIER", "CLINICIAN"] },
             pinHash: { not: null },
           },
           select: { id: true, email: true, alias: true, role: true, pinHash: true },

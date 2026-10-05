@@ -685,7 +685,12 @@ type ExecuteShiftCloseResult =
 async function executeShiftClose(args: {
   prisma: ReturnType<typeof getPrisma>;
   log: { info: (obj: object, msg: string) => void; error: (obj: unknown, msg?: string) => void };
-  cashier: { tid: string; rid: string; sub: string; role: "OWNER" | "MANAGER" | "CASHIER" };
+  // clinica-1 · el tipo admite `CLINICIAN` porque el JWT lo admite, pero
+  // ninguna ruta de este fichero lo verá: todas llevan
+  // `ensureCajaEnabled` en el `preHandler` y ahí se le niega la caja. Lo
+  // que NO se hizo: meterlo en los candidatos a PIN de encargado de más
+  // abajo — un sanitario no autoriza cierres de caja.
+  cashier: { tid: string; rid: string; sub: string; role: "OWNER" | "MANAGER" | "CASHIER" | "CLINICIAN" };
   shiftId: string;
   body: {
     // v1.11-cierre-de-dia · `null` = nadie contó el efectivo. Es el caso

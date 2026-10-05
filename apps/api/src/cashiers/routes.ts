@@ -13,7 +13,25 @@ import { ensureCajaEnabled } from "../lib/caja-gate.js";
 // B6 §1: MANAGER puede listar cajeros y resetear su PIN (operativa diaria),
 // pero NO crearlos ni borrarlos (eso queda en el OWNER).
 //
-// Roles aceptados: MANAGER y CASHIER. OWNER se crea sólo vía /signup.
+// Roles aceptados: MANAGER, CASHIER y —clinica-1— CLINICIAN. OWNER se
+// crea sólo vía /signup.
+//
+// ── clinica-1 · por qué el sanitario entra en ESTE CRUD ──────────────
+//
+// Porque es el mismo acto: dar de alta a alguien del personal con su PIN
+// para que entre al TPV. Un CRUD paralelo "de sanitarios" habría
+// duplicado la unicidad del alias, el centinela de revocación y el reset
+// de PIN, y habría dejado dos sitios donde dar de alta a una persona.
+//
+// Las SEIS consultas de este fichero filtran por rol, y las seis llevan
+// ahora `CLINICIAN`: listar, crear, renombrar, resetear PIN, revocar y la
+// colisión de alias. Que falte en una sola significa un sanitario que
+// existe pero al que no se le puede cambiar el PIN, o que no sale en la
+// lista desde la que se le revoca.
+//
+// El alta con rol `CLINICIAN` exige que el tenant tenga la clínica
+// encendida: un rol que no se puede gestionar desde ninguna pantalla no
+// se debe poder crear por la API.
 
 const emailFormat = "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$";
 const pinFormat = "^[0-9]{4,8}$";
@@ -31,7 +49,7 @@ async function findAliasCollision(
   return prisma.user.findFirst({
     where: {
       tenantId,
-      role: { in: ["MANAGER", "CASHIER"] },
+      role: { in: ["MANAGER", "CASHIER", "CLINICIAN"] },
       alias: { equals: alias, mode: "insensitive" },
       NOT: [
         { email: { endsWith: "@revoked.local" } },
@@ -52,7 +70,7 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
       const users = await prisma.user.findMany({
         where: {
           tenantId: auth.tenantId,
-          role: { in: ["MANAGER", "CASHIER"] },
+          role: { in: ["MANAGER", "CASHIER", "CLINICIAN"] },
         },
         select: {
           id: true,
@@ -89,7 +107,10 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
           properties: {
             email: { type: "string", pattern: emailFormat, maxLength: 320 },
             alias: { type: "string", minLength: 1, maxLength: 40 },
-            role: { type: "string", enum: ["MANAGER", "CASHIER"] },
+            // clinica-1 · `CLINICIAN` sólo se acepta si el tenant tiene
+            // la clínica encendida — la comprobación va en el handler,
+            // porque el schema no puede leer la fila del tenant.
+            role: { type: "string", enum: ["MANAGER", "CASHIER", "CLINICIAN"] },
             pin: { type: "string", pattern: pinFormat },
           },
         },
@@ -100,7 +121,7 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
       const { email, alias, role, pin } = request.body as {
         email: string;
         alias: string;
-        role: "MANAGER" | "CASHIER";
+        role: "MANAGER" | "CASHIER" | "CLINICIAN";
         pin: string;
       };
       const lowerEmail = email.toLowerCase();
@@ -113,6 +134,26 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
         });
       }
       const prisma = getPrisma();
+
+      // clinica-1 · el rol del sanitario sólo existe donde hay clínica.
+      // Sin esta puerta, la API dejaría crear un `CLINICIAN` en un bar: un
+      // usuario que no puede cobrar, que no sale en ninguna pantalla donde
+      // se le pueda poner alcance, y al que nadie sabría por qué no le
+      // funciona el TPV.
+      if (role === "CLINICIAN") {
+        const tenant = await prisma.tenant.findUnique({
+          where: { id: auth.tenantId },
+          select: { clinicalRecordsEnabled: true },
+        });
+        if (tenant?.clinicalRecordsEnabled !== true) {
+          return reply.code(409).send({
+            error: "CLINICAL_RECORDS_DISABLED",
+            code: "CLINICAL_RECORDS_DISABLED",
+            message:
+              "Esta empresa no tiene el módulo de historia clínica activado, así que no puede tener personal sanitario.",
+          });
+        }
+      }
 
       const collision = await prisma.user.findUnique({
         where: { email: lowerEmail },
@@ -198,7 +239,7 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
         where: {
           id: cashierId,
           tenantId: auth.tenantId,
-          role: { in: ["MANAGER", "CASHIER"] },
+          role: { in: ["MANAGER", "CASHIER", "CLINICIAN"] },
         },
         select: { id: true },
       });
@@ -262,7 +303,7 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
         where: {
           id: cashierId,
           tenantId: auth.tenantId,
-          role: { in: ["MANAGER", "CASHIER"] },
+          role: { in: ["MANAGER", "CASHIER", "CLINICIAN"] },
         },
         select: { id: true },
       });
@@ -299,7 +340,7 @@ export async function registerCashiersRoutes(app: FastifyInstance): Promise<void
         where: {
           id: cashierId,
           tenantId: auth.tenantId,
-          role: { in: ["MANAGER", "CASHIER"] },
+          role: { in: ["MANAGER", "CASHIER", "CLINICIAN"] },
         },
         select: { id: true, _count: { select: { shifts: true, tickets: true } } },
       });

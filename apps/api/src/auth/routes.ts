@@ -154,14 +154,19 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         await registerRateLimitFailure(rlKey);
         return reply.code(401).send(GENERIC);
       }
-      if (user.role === "CASHIER") {
+      // clinica-1 · el sanitario sin caja entra por la MISMA puerta que
+      // el cajero: el TPV, con su PIN. Comparte la rama a propósito —
+      // caer al `NOT_OWNER_OR_MANAGER` de abajo le diría "sólo
+      // propietarios o encargados", que es verdad y es inútil: lo que
+      // necesita saber es por dónde SÍ entra.
+      if (user.role === "CASHIER" || user.role === "CLINICIAN") {
         // No es un fallo de credenciales (password correcto) — no aplicamos
         // rate-limit. El cajero entra al TPV con PIN, no al admin con
         // password.
         return reply.code(403).send({
           error: "CASHIER_NOT_ALLOWED_IN_ADMIN",
           message:
-            "Los cajeros sólo pueden acceder desde el TPV con su PIN.",
+            "Los cajeros y el personal sanitario sólo pueden acceder desde el TPV con su PIN.",
         });
       }
       if (user.role !== "OWNER" && user.role !== "MANAGER") {

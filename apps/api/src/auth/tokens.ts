@@ -5,7 +5,12 @@ import { loadEnv } from "../env.js";
 export interface AccessTokenPayload {
   sub: string; // userId
   tid: string; // tenantId
-  role: "OWNER" | "MANAGER" | "CASHIER";
+  // clinica-1 · `CLINICIAN` entra en el payload porque el JWT se firma
+  // desde `user.role` y el enum ya lo tiene. Firmarlo no le abre nada: el
+  // login del panel lo rechaza antes (ver `routes.ts`) y la caja también
+  // (`ensureCajaEnabled`). Lo que esto evita es un cast que esconda el
+  // valor y lo deje pasar sin que nadie haya decidido nada.
+  role: "OWNER" | "MANAGER" | "CASHIER" | "CLINICIAN";
   type: "access";
 }
 
