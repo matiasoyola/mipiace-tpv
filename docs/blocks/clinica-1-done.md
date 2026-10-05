@@ -603,5 +603,7 @@ f8bebb9 test(clinica-1): mover con otra sanitaria le da el acceso
 
 ## 16 · La rama
 
-Rebasada sobre `origin/master` = `f38afa0`. Pusheada y con PR contra `master` (se anota el número al
-abrirlo). **Ni merge ni despliegue: eso lo hace Dirección.**
+Rebasada sobre `origin/master` = `f38afa0`. **Pusheada**, y el PR contra `master` es el
+[**#7**](https://github.com/matiasoyola/mipiace-tpv/pull/7).
+
+**Ni merge ni despliegue: eso lo hace Dirección.**
