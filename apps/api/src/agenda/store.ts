@@ -211,8 +211,8 @@ async function withRaceRetry<T>(run: () => Promise<T>): Promise<T> {
 // sanitario le asignan una cita, ese paciente entra en su selección, y
 // tiene que pasar **en la misma transacción que la cita** (ADR: media
 // operación deja a un sanitario con una cita cuya historia no puede
-// abrir). Enganchar en la ruta de alta no sirve — la rama viva
-// `mover-con-otra` hace que mover una cita pueda cambiarla de
+// abrir). Enganchar en la ruta de alta no sirve, y no es una hipótesis:
+// `mover-con-otra` (PR #6) hace que mover una cita pueda cambiarla de
 // profesional, y ese camino pasa por `reschedule`, no por el alta.
 //
 // Así que: quien persiste assignments pasa por aquí, y quien pase por
@@ -769,9 +769,9 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
             tenantId,
             appointmentId: id,
             // clinica-1 · mover también concede el acceso, y por eso
-            // `reschedule` lee el paciente: cuando `mover-con-otra`
-            // entre, mover con OTRA sanitaria le dará el acceso por este
-            // mismo camino, sin tocar nada aquí.
+            // `reschedule` lee el paciente: mover con OTRA sanitaria
+            // (`mover-con-otra`, PR #6) le da el acceso por este mismo
+            // camino, sin una línea suya aquí.
             clientId: owned.clientId,
             itemIds: items.map((it) => it.id),
             assignments,

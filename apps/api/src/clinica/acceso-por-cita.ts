@@ -8,12 +8,16 @@
 //
 // En el PUNTO ÚNICO donde se persisten las asignaciones
 // (`agenda/store.ts::persistirAssignments`), no en la ruta de alta. Los
-// caminos que crean o mueven asignaciones son hoy dos (`insertHold` y
-// `reschedule`) y mañana más: la rama viva `mover-con-otra` hace que
-// mover una cita pueda CAMBIARLA DE PROFESIONAL, y cuando entre, el
-// sanitario nuevo tiene que recibir el acceso en esa misma transacción
-// sin que nadie se acuerde de añadir una línea aquí. Enganchado en el
-// punto de persistencia, lo hereda cualquier camino que reasigne.
+// caminos que crean o mueven asignaciones son hoy dos —`insertHold` y
+// `reschedule`— y mañana más.
+//
+// **Y ya se cobró el cheque.** `mover-con-otra` (PR #6) hace que mover una
+// cita pueda CAMBIARLA DE PROFESIONAL. Ese camino se escribió sin saber
+// que lo clínico existía, pasa por `reschedule` y no por el alta, y el
+// sanitario nuevo recibe el acceso en la misma transacción sin que aquel
+// bloque tocara una línea de aquí. Lo prueba el caso 4 de
+// `test-e2e/clinica-acceso-por-cita.e2e.ts`. Enganchado en la ruta de
+// alta, habría hecho falta acordarse — y nadie se acuerda.
 //
 // El motor de reservas (`engine.ts`) NO SE TOCA: esto no interviene en el
 // cálculo de huecos, sólo en la escritura.
