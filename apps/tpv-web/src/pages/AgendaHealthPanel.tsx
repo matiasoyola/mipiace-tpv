@@ -14,7 +14,7 @@
 //   · sin tooltips ni hover como única vía, targets ≥ 44 px, `tabular-nums`,
 //     sin emojis, iconografía Lucide.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -30,6 +30,7 @@ import {
   fetchAgendaHealth,
   fotoHora,
   readHealthSnapshot,
+  subscribeHealthSnapshot,
   unidad,
   type AgendaHealth,
   type HealthCard,
@@ -43,7 +44,18 @@ export function AgendaHealthPanel(props: {
   const { onClose, onOpenMatrix } = props;
   // La última foto se lee ANTES del primer fetch: si no hay red, la
   // pantalla abre con datos de antes en vez de con un error a secas.
-  const [snapshot, setSnapshot] = useState(() => readHealthSnapshot());
+  //
+  // agenda-lista (hallazgo ⚪ 7) · y ya no es estado de esta pantalla,
+  // sino la foto compartida de `agenda-health.ts`. Así el panel se entera
+  // de que la han arreglado aunque el refresco lo haya pedido otro: al
+  // cerrar la matriz es `AgendaPage` quien vuelve a pedir la salud, y
+  // antes de esto el panel seguía enseñando su copia vieja —la dueña
+  // marcaba cuatro casillas, volvía, y la cifra seguía diciendo 2.
+  const snapshot = useSyncExternalStore(
+    subscribeHealthSnapshot,
+    readHealthSnapshot,
+    readHealthSnapshot,
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
@@ -51,7 +63,7 @@ export function AgendaHealthPanel(props: {
     setLoading(true);
     setError(false);
     try {
-      setSnapshot(await fetchAgendaHealth());
+      await fetchAgendaHealth();
     } catch {
       setError(true);
     } finally {
@@ -61,6 +73,25 @@ export function AgendaHealthPanel(props: {
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  // agenda-lista · y al recuperar el foco. El AP12 se queda abierto en la
+  // agenda todo el día y la pestaña se va y vuelve (una llamada, el
+  // navegador en segundo plano, la pantalla bloqueada): volver a un panel
+  // de diagnóstico que lleva horas quieto es peor que no tenerlo. Sólo
+  // cuando la pestaña se hace visible y cuando la ventana recupera el
+  // foco; no hay polling.
+  useEffect(() => {
+    function alVolver() {
+      if (document.visibilityState === "hidden") return;
+      void load();
+    }
+    document.addEventListener("visibilitychange", alVolver);
+    window.addEventListener("focus", alVolver);
+    return () => {
+      document.removeEventListener("visibilitychange", alVolver);
+      window.removeEventListener("focus", alVolver);
+    };
   }, [load]);
 
   const health: AgendaHealth | null = snapshot?.health ?? null;

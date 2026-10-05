@@ -113,20 +113,23 @@ test("la dueña lo arregla y el panel queda limpio", async ({
   await page.getByRole("button", { name: "Volver", exact: true }).last().click();
   await expect(tarjeta).toBeVisible({ timeout: 20_000 });
 
-  // Y AQUÍ SIGUE DICIENDO 2. El panel no vuelve a preguntar al volver de la
-  // matriz: hay que pulsar «Actualizar». Es justo lo que hace pensar que el
-  // arreglo no ha funcionado —acabas de marcar cuatro casillas y la cifra no
-  // se mueve—, así que va como hallazgo 🟡.
-  await expect(tarjeta.locator('[data-test="cifra"]')).toHaveText("2");
-  await rotulo(page, "El panel no se entera solo: hay que actualizarlo.", CAP);
-  await esconder(page);
-  await page.getByRole("button", { name: "Actualizar" }).click();
-
+  // agenda-lista (hallazgo ⚪ 7) · y la cifra baja SOLA. Sin tocar
+  // «Actualizar». Hasta este bloque el panel seguía diciendo 2 —guardaba
+  // su propia copia de la foto y la matriz se pinta encima sin
+  // desmontarlo—, que es exactamente lo que hace pensar que el arreglo no
+  // ha funcionado: acabas de marcar cuatro casillas y la cifra no se
+  // mueve. Ahora la foto es compartida (`lib/agenda-health.ts`) y el
+  // refresco que ya pedía `AgendaPage` al cerrar la matriz mueve también
+  // al panel.
+  //
+  // El `toHaveText` reintenta hasta el timeout, así que esto NO prueba
+  // por sí solo que nadie haya pulsado nada: lo que lo prueba es que
+  // «Actualizar» no se toca en todo el test.
   await expect(tarjeta.locator('[data-test="cifra"]')).toHaveText("0", {
     timeout: 20_000,
   });
   await expect(tarjeta.locator('[data-test="buena-noticia"]')).toBeVisible();
-  await rotulo(page, "Panel limpio.", CAP);
+  await rotulo(page, "El panel se entera solo: limpio.", CAP);
   await esconder(page);
 
   // Y el badge del botón de salud desaparece: ya no hay nada que contar.

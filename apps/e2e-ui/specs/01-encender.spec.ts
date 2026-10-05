@@ -49,14 +49,16 @@ test.describe("la dueña la enciende en Ajustes", () => {
   test("el interruptor «Agenda de citas»", async ({ page }) => {
     await entrarAdmin(page);
     await rotulo(page, "La dueña entra en su panel.", CAP);
-    // Se va por URL y no por el menú: la entrada «Ajustes» está marcada
-    // `superAdminOnly` (`AdminShell.tsx:211`) y la dueña no la tiene. El
-    // interruptor sí lo puede tocar (`canEdit` es true para OWNER): lo que
-    // falta es el camino. Va como hallazgo del bloque.
-    await page.goto(`${ADMIN}/admin/settings`);
-    await expect(
-      page.getByRole("link", { name: "Ajustes" }),
-    ).toHaveCount(0);
+    // agenda-lista · POR EL MENÚ, no por URL. Hasta este bloque la entrada
+    // «Ajustes» estaba marcada `superAdminOnly` y la dueña no la veía: el
+    // interruptor sí lo podía tocar (`canEdit` es true para OWNER), lo que
+    // faltaba era el camino, y el banco se lo saltaba yendo a la URL. Un
+    // paso que el banco se salta es un paso que nadie prueba, y éste lo va
+    // a dar Matías delante de Sole.
+    const ajustes = page.getByRole("link", { name: "Ajustes" });
+    await expect(ajustes).toBeVisible({ timeout: 20_000 });
+    await ajustes.click();
+    await expect(page).toHaveURL(`${ADMIN}/admin/settings`);
     await rotulo(page, "Ajustes → «Agenda de citas».", CAP);
     await esconder(page);
 
@@ -69,15 +71,22 @@ test.describe("la dueña la enciende en Ajustes", () => {
     // En pantalla: el interruptor queda marcado.
     await expect(interruptor).toBeChecked();
 
-    // Pero el menú NO gana las secciones de la agenda todavía: el shell lee
-    // las capacidades UNA VEZ al montar (`useTenantCapabilities`), y guardar
-    // no las vuelve a pedir. Hay que recargar. Va como hallazgo: es
-    // exactamente lo que desconcierta a quien acaba de encenderla («lo he
-    // activado y no sale nada»).
-    await expect(page.getByRole("link", { name: "Personal" })).toHaveCount(0);
-
+    // Y el menú gana las tres secciones SIN RECARGAR. Antes de este bloque
+    // el shell leía las capacidades una sola vez al montar, así que la
+    // barra lateral se quedaba igual hasta un F5: quien acaba de pulsar un
+    // interruptor y no ve cambiar nada concluye que no ha funcionado.
+    // `AdminShell` las mira ahora en `src/capabilities.ts` y la pantalla de
+    // Ajustes empuja un refresco al guardar.
+    const SECCIONES = ["Personal", "Agenda · Catálogo", "Agenda · Horario"];
+    for (const entrada of SECCIONES) {
+      await expect(
+        page.getByRole("link", { name: entrada }),
+      ).toBeVisible({ timeout: 20_000 });
+    }
+    // Y siguen ahí tras recargar: lo de arriba no es un parpadeo de la
+    // pantalla, es el estado guardado.
     await page.reload();
-    for (const entrada of ["Personal", "Agenda · Catálogo", "Agenda · Horario"]) {
+    for (const entrada of SECCIONES) {
       await expect(
         page.getByRole("link", { name: entrada }),
       ).toBeVisible({ timeout: 20_000 });

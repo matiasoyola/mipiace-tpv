@@ -39,12 +39,30 @@ import {
 } from "./escenario.js";
 
 /**
- * La red de seguridad. El banco siembra borrando un tenant entero: si
- * alguien lanza esto con el `DATABASE_URL` de desarrollo —o peor— se lleva
- * por delante datos que no son suyos. El nombre de la base tiene que decir
- * que es desechable, igual que en `apps/api/test-e2e/e2e-env.ts`.
+ * La red de seguridad. El banco siembra haciendo `TRUNCATE` de la base
+ * entera: si alguien lanza esto con el `DATABASE_URL` de desarrollo —o
+ * peor— se lleva por delante datos que no son suyos.
+ *
+ * agenda-lista · la regla se APRIETA: el nombre tiene que **terminar** en
+ * `_e2e`, no sólo contener "banco", "e2e" o "test" en alguna parte.
+ *
+ * Por qué, y no es teórico. Con varios worktrees abiertos a la vez hay
+ * varias stacks de desarrollo vivas, cada una con su base, y un
+ * `DATABASE_URL` heredado del entorno o un `.env` copiado de otro árbol
+ * es un accidente de un segundo. La regla vieja dejaba pasar nombres de
+ * desarrollo perfectamente normales —`mipiacetpv_test_cliente`,
+ * `banco_mipiacetpv`, cualquier base de un piloto que lleve "test" en el
+ * nombre— y lo que hay detrás es un TRUNCATE sin vuelta.
+ *
+ * Un sufijo `_e2e` no se le pone por casualidad a una base que importa.
  */
-function exigirBaseDesechable(url: string): string {
+const SUFIJO_DESECHABLE = /_e2e$/;
+
+export function esBaseDesechable(nombre: string): boolean {
+  return SUFIJO_DESECHABLE.test(nombre);
+}
+
+export function nombreDeLaBase(url: string): string {
   let nombre: string;
   try {
     nombre = decodeURIComponent(new URL(url).pathname.replace(/^\//, ""));
@@ -52,11 +70,19 @@ function exigirBaseDesechable(url: string): string {
     throw new Error(`DATABASE_URL no es una URL válida: ${url}`);
   }
   if (!nombre) throw new Error("DATABASE_URL no incluye nombre de base.");
-  if (!/(banco|e2e|test)/i.test(nombre)) {
+  return nombre;
+}
+
+function exigirBaseDesechable(url: string): string {
+  const nombre = nombreDeLaBase(url);
+  if (!esBaseDesechable(nombre)) {
     throw new Error(
       [
-        `La base "${nombre}" no parece desechable y el seed BORRA el tenant «${TENANT_NOMBRE}» entero.`,
-        'Usa una base cuyo nombre contenga "banco", "e2e" o "test".',
+        `La base "${nombre}" no es desechable y el seed hace TRUNCATE de la base ENTERA`,
+        `(el tenant «${TENANT_NOMBRE}» y todo lo demás que haya dentro).`,
+        'El nombre tiene que TERMINAR en "_e2e". No vale que lo contenga:',
+        "con varios worktrees abiertos, un DATABASE_URL heredado de otra",
+        "sesión es un accidente de un segundo.",
         "Para crearla:",
         '  docker exec -i mipiacetpv-postgres psql -U mipiacetpv -c "CREATE DATABASE mipiacetpv_agenda_banco_e2e;"',
       ].join("\n"),

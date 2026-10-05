@@ -9,7 +9,8 @@
     "seed": "tsx seed/peluqueria-demo.ts",
     "e2e": "pnpm run stack && playwright test",
     "e2e:ui": "pnpm run stack && playwright test --ui",
-    "e2e:solo": "playwright test"
+    "e2e:solo": "playwright test",
+    "video": "pnpm run stack && BANCO_VIDEO=1 playwright test"
   },
   "devDependencies": {
     "@mipiacetpv/db": "workspace:*",

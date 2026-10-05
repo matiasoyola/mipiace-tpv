@@ -66,7 +66,27 @@ export interface HealthSnapshot {
   fetchedAt: string;
 }
 
-export function readHealthSnapshot(): HealthSnapshot | null {
+// agenda-lista (hallazgo ⚪ 7) · la última foto deja de ser sólo una
+// entrada de `localStorage` y pasa a tener oyentes.
+//
+// El fallo: el panel de salud guardaba la foto en SU `useState`. La dueña
+// marcaba las cuatro casillas de la matriz, volvía al panel —que no se
+// desmonta, la matriz se pinta encima— y la cifra seguía diciendo 2.
+// Había que pulsar «Actualizar». Acabas de arreglar algo y la pantalla te
+// dice que sigue roto: es exactamente lo que hace pensar que no ha
+// funcionado.
+//
+// Con esto, quien quiera que vuelva a pedir la salud —el panel, el botón
+// de la agenda, el cierre de la matriz— refresca a todos los demás. Una
+// foto, un sitio.
+//
+// `ultima` es además la identidad estable que necesita
+// `useSyncExternalStore`: si `readHealthSnapshot()` devolviera un objeto
+// nuevo en cada llamada, React se quedaría repintando para siempre.
+let ultima: HealthSnapshot | null | undefined;
+const oyentes = new Set<() => void>();
+
+function leerDeDisco(): HealthSnapshot | null {
   try {
     const raw = localStorage.getItem(SNAPSHOT_KEY);
     if (!raw) return null;
@@ -77,12 +97,33 @@ export function readHealthSnapshot(): HealthSnapshot | null {
   }
 }
 
+export function readHealthSnapshot(): HealthSnapshot | null {
+  if (ultima === undefined) ultima = leerDeDisco();
+  return ultima;
+}
+
+/** Avisa cuando llega una foto nueva. Devuelve cómo darse de baja. */
+export function subscribeHealthSnapshot(fn: () => void): () => void {
+  oyentes.add(fn);
+  return () => {
+    oyentes.delete(fn);
+  };
+}
+
+/** Sólo para las pruebas: olvida la foto en memoria y los oyentes. */
+export function __resetHealthSnapshotParaTests(): void {
+  ultima = undefined;
+  oyentes.clear();
+}
+
 function writeHealthSnapshot(snapshot: HealthSnapshot): void {
+  ultima = snapshot;
   try {
     localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snapshot));
   } catch {
     // Sin almacenamiento se vive: sólo se pierde la última foto.
   }
+  for (const fn of oyentes) fn();
 }
 
 /** Pide las seis tarjetas y guarda la foto con su hora. */
@@ -123,6 +164,69 @@ export interface SkillMatrix {
 
 export function fetchSkillMatrix(): Promise<SkillMatrix> {
   return apiWithCashier<SkillMatrix>("/agenda/skill-matrix");
+}
+
+// ── agenda-lista (hallazgo 🟡 4) · sólo lo que ella sabe hacer ─────────
+//
+// El panel de alta de una cita ofrecía TODOS los servicios con duración,
+// sin cruzar con la matriz. Se podía elegir «Mechas» en la columna de
+// Lucía, que no las hace, y el «no» llegaba al pulsar Reservar hablando
+// de HUECOS: la cajera veía que no había sitio con Lucía a ninguna hora
+// del día y no tenía forma de saber que el problema era otro.
+//
+// El cruce es puro y vive aquí, al lado de la matriz de la que sale.
+
+/** `staffUserId` → los servicios que da. Lo que la matriz dice, indexado. */
+export function indexarMatrizPorProfesional(
+  matriz: SkillMatrix,
+): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  // Se parte del personal, no de los servicios: una profesional que no da
+  // NINGUNO tiene que existir en el mapa con el conjunto vacío. Si se
+  // construyera recorriendo `services`, no aparecería, y «no sabe hacer
+  // nada» se confundiría con «no sé nada de ella».
+  for (const s of matriz.staff) out.set(s.userId, new Set());
+  for (const svc of matriz.services) {
+    for (const userId of svc.staffUserIds) {
+      const suyos = out.get(userId);
+      if (suyos) suyos.add(svc.id);
+      else out.set(userId, new Set([svc.id]));
+    }
+  }
+  return out;
+}
+
+/**
+ * Los servicios que se le pueden ofrecer a quien va a atender.
+ *
+ * Dos casos que NO filtran, y los dos a propósito:
+ *
+ *   · **sin profesional elegida** (alta desde «primer hueco libre»): se
+ *     ofrecen todos y que el motor elija a quien sabe. Es lo que ya hace.
+ *   · **matriz desconocida** (`null`: no ha llegado, o no hay red): se
+ *     ofrecen todos. Esconder servicios por una lectura que falló sería
+ *     inventarse un «no» que nadie ha dicho, y el motor sigue siendo la
+ *     puerta de verdad.
+ */
+export function serviciosQueSabeHacer<T extends { id: string }>(
+  servicios: T[],
+  staffUserId: string | null,
+  porProfesional: Map<string, Set<string>> | null,
+): T[] {
+  if (!staffUserId || !porProfesional) return servicios;
+  const suyos = porProfesional.get(staffUserId);
+  if (!suyos) return servicios;
+  return servicios.filter((s) => suyos.has(s.id));
+}
+
+/** `true` si la matriz dice, explícitamente, que no hace ninguno. */
+export function noHaceNingunServicio(
+  staffUserId: string | null,
+  porProfesional: Map<string, Set<string>> | null,
+): boolean {
+  if (!staffUserId || !porProfesional) return false;
+  const suyos = porProfesional.get(staffUserId);
+  return suyos != null && suyos.size === 0;
 }
 
 /** Lado A · desde el profesional: qué servicios da. */

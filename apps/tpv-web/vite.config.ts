@@ -217,10 +217,24 @@ export default defineConfig({
     }),
   ],
   server: {
-    port: 5174,
+    // agenda-lista · el puerto sale del entorno cuando se pide. `pnpm
+    // --filter X dev -- --port N` NO vale: pnpm le pasa el `--` literal a
+    // Vite, que lo trata como argumento y se queda con el puerto del
+    // fichero (se vio: «Port 5173 is in use, trying another one…» y el
+    // banco esperando en una URL vacía). Por env no hay ambigüedad.
+    port: Number(process.env.MIPIACETPV_DEV_PORT ?? 5174),
+    // Y si el puerto pedido está cogido, se cae en vez de deslizarse al
+    // siguiente: un servidor en otro puerto es un banco que espera a
+    // nadie, o peor, que habla con el de otra sesión.
+    strictPort: process.env.MIPIACETPV_DEV_PORT != null,
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:3001",
+        // agenda-lista · el destino sale del entorno para que el banco
+        // pueda levantar su propia stack en otros puertos sin pisar la
+        // sesión de otro worktree. Sin la variable, lo de siempre: con
+        // dos APIs vivas, un proxy clavado a :3001 manda la pantalla de
+        // esta sesión contra la base de la otra.
+        target: process.env.MIPIACETPV_API_PROXY ?? "http://127.0.0.1:3001",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ""),
       },
@@ -230,7 +244,11 @@ export default defineConfig({
       // producción, que es exactamente lo que no queremos hacer con un canal
       // que acepta comandos.
       "/ws": {
-        target: "ws://127.0.0.1:3001",
+        // Mismo destino que `/api`, en ws. Si uno se mueve y el otro no,
+        // la pantalla habla con dos APIs distintas a la vez.
+        target: (
+          process.env.MIPIACETPV_API_PROXY ?? "http://127.0.0.1:3001"
+        ).replace(/^http/, "ws"),
         ws: true,
       },
     },

@@ -282,29 +282,45 @@ test("el no del festivo: el centro está cerrado, y lo dice con su nombre", asyn
   expect(await fotoDeLaAgenda()).toBe(antes);
 });
 
-test("el no de quien no sabe: Lucía y las mechas", async ({ page }) => {
+test("el no de quien no sabe: Lucía y las mechas ni se ofrecen", async ({
+  page,
+}) => {
+  // agenda-lista (hallazgo 🟡 4) · ESTE TEST DECÍA OTRA COSA.
+  //
+  // Antes: el servicio se ofrecía igual, la cajera lo elegía, y el «no»
+  // llegaba al pulsar Reservar hablando de HUECOS. Veía que no había
+  // sitio con Lucía a ninguna hora del día y no tenía forma de saber que
+  // el problema era que Lucía no hace mechas.
+  //
+  // Ahora el «no» por matriz NO SE PUEDE PRODUCIR desde esta pantalla:
+  // en la columna de Lucía las mechas no están en la lista. Lo que se
+  // comprueba es justo eso, y que lo que sí hace sigue estando.
   await agendaDelDia(page);
   const antes = await fotoDeLaAgenda();
 
-  await rotulo(page, "Mechas, pero en la columna de Lucía.", CAP);
+  await rotulo(page, "En la columna de Lucía no hay mechas que elegir.", CAP);
   await esconder(page);
   // A las 17:00 y no a las 16:00: a esa hora Lucía ya tiene el corte de
   // Pili del caso anterior, y una franja ocupada ni abre el alta.
   await pulsarFranja(page, LUCIA.id, "17:00");
   await elegirClienta(page, "Mari Carmen");
 
-  // EL SERVICIO SE OFRECE IGUAL. `bookableServices` sólo filtra por «es
-  // servicio y tiene duración» (`AgendaPage.tsx:1756`): no cruza con lo que
-  // sabe hacer la profesional de la columna. Así que la cajera lo puede
-  // elegir, y el «no» llega después. Va como hallazgo 🟡: el mensaje habla
-  // de huecos, no de quién.
-  await elegirServicio(page, "Mechas");
-  const p = panel(page);
-  await p.reservar.click();
+  const servicio = (nombre: string) =>
+    page
+      .getByRole("button")
+      .filter({ hasText: new RegExp(`^${nombre}\\s*\\d+ min$`) });
 
-  const aviso = page.getByText(/no está disponible|no me queda|Te puedo dar|hueco/i);
-  await expect(aviso.first()).toBeVisible({ timeout: 20_000 });
-  await rotulo(page, "Lucía no sabe hacer mechas: no hay hueco con ella.", CAP);
+  // Lo que Lucía hace, está.
+  await expect(servicio("Corte").first()).toBeVisible({ timeout: 15_000 });
+  // Lo que no hace, no está. Ni «Mechas» ni los dos tintes.
+  await expect(servicio("Mechas")).toHaveCount(0);
+
+  // Y la misma franja en la columna de Marta SÍ las ofrece: lo que filtra
+  // es la matriz, no que las mechas hayan desaparecido del catálogo.
+  await page.getByRole("button", { name: "Cerrar" }).first().click();
+  await pulsarFranja(page, MARTA.id, "17:00");
+  await expect(servicio("Mechas").first()).toBeVisible({ timeout: 15_000 });
+  await rotulo(page, "Con Marta sí: lo que filtra es la matriz.", CAP);
   await esconder(page);
 
   expect(await fotoDeLaAgenda()).toBe(antes);
