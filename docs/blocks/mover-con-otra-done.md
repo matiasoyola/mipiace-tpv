@@ -186,7 +186,44 @@ Sembrar eso encima del suelo sería cambiar los casos 17 y 18, que son justo los
 
 ## 5 · La tabla de sabotajes
 
-_(pendiente: se rellena con los sabotajes medidos)_
+Cada uno: se rompe **una línea de producción**, se pasa lo que tenga que caer, y se devuelve la línea a su
+sitio. Los de la API van contra Postgres real (`agenda-mover-con-otra.e2e.ts`, y el 1 también contra
+`agenda-suelo.e2e.ts`); los de la pantalla pasan el banco con `-x`, que para en el primer rojo. Comprobados
+el 05-10-2026 sobre el commit `54d3e2a`; el repo quedó limpio detrás de los seis.
+
+| # | Lo que se rompe | Dónde | Qué se pone rojo | Con qué mensaje |
+|---|---|---|---|---|
+| 1 | **La ruta ignora `staffUserId`** | `agenda/routes.ts` · `reschedule(…, suProfesional)` en vez de `elegida ?? suProfesional` | **tres** casos del e2e (1, 2, 11) **y** el banco · `07 · mover una cita a otra peluquera` | `expected 409 to be 200` con un `NO_SLOT` de diez alternativas · y en el banco `expect(locator).toBeVisible() failed · element(s) not found` sobre la tarjeta en la columna de Lucía |
+| 2 | **Se deja de comprobar la skill** | `mover-staff.ts` · `sinSkill` siempre vacío | `04 · la que no hace el servicio es 409 STAFF_NO_SKILL` y `05 · en una cita de DOS servicios` | `expected 'NO_SLOT' to be 'STAFF_NO_SKILL'` · `expected 'No se pudo mover a ese hueco.' to be 'Ana no hace Tinte.'` |
+| 3 | **Se deja de comprobar de quién es** | `mover-staff.ts` · perfil inventado si no está, y las dos ramas de 404 apagadas | `06 · la peluquera de OTRO centro`, `07 · la del perfil apagado`, `10 · un uuid que no es de nadie` | `expected 409 to be 404`, con `{"error":"STAFF_NO_SKILL","message":"ella no hace Corte de pelo."}` |
+| 4 | **Desaparece el 400 de `staffUserId` sin `start`** | `agenda/routes.ts` · la guarda apagada | `08 · staffUserId sin start` y `09 · staffUserId con status` | `expected 'NO_CHANGE' to be 'STAFF_WITHOUT_START'` · y el 9 enseña el daño: `status: "CANCELLED"`, `expected 200 to be 400` — **la cita se cancela mientras se pide cambiar de peluquera** |
+| 5 | **El selector ofrece a todas** | `AgendaPage.tsx` · `candidatas = props.staff` | banco · `07 · el selector no ofrece a quien no sabe hacer el servicio` | `expect(locator).toHaveCount(expected) failed · unexpected value "1"` sobre `[data-staff="…lucia"]` |
+| 6 | **La búsqueda de huecos usa la ACTUAL en vez de la elegida** | `AgendaPage.tsx` · `searchAvailability({ staffUserId: staffDeLaCita(appt) })` | banco · `07 · mover una cita a otra peluquera` | `expect(locator).toBeVisible() failed · element(s) not found` sobre el chip de las 10:15 |
+
+### Lo que los sabotajes enseñaron
+
+**Ninguno de los seis deja todo en verde**, que es la diferencia con el 7b de agenda-lista. La razón es el
+caso 1 del e2e: **mover a la misma hora con otra peluquera** es un movimiento que la interfaz SÍ puede
+pedir y que el servidor tiene que ejecutar, así que el fijado del cuerpo no está tapado por la pantalla
+como lo estaba el de agenda-lista. El sabotaje nº 1 cae por los dos lados, y se comprobó corriendo las dos
+cosas, no deduciéndolo.
+
+**El sabotaje 6 muerde por donde no se esperaba, y conviene entenderlo.** Buscar los huecos de Marta
+cuando la elegida es Lucía no enseña «horas de más»: enseña **una hora de menos**, justo la que la clienta
+quiere. Las 10:15 son las de la propia cita, y `reschedule` carga la ocupación del día sin excluirla (§1),
+así que para Marta esa hora sale ocupada por ella misma. El «a la misma hora, pero con Lucía» se vuelve
+intecleable. Es la misma frontera del §1 vista desde la pantalla.
+
+**El 3 enseña que hay dos capas, y que una tapa a la otra a medias.** Sin la comprobación de quién es, una
+peluquera de otro centro no se cuela —la rama de skill la para, porque `getSkilledStaff` filtra por
+`tenant_id` y no está en la matriz de este tenant— pero sale como `409 STAFF_NO_SKILL` con el nombre
+inventado «ella». No hay asignación cruzada ni un 500 en ningún momento; lo que se rompe es **lo que la
+cajera lee**, y eso también cuenta.
+
+**El 2 tiene gemelo sin navegador**: con `sinSkill` vacío, cuatro de los diez casos de
+`agenda-mover-staff.test.ts` se ponen rojos (`expected null to deeply equal { status: 409, …(2) }`). El
+cruce puro y la ruta se vigilan por separado a propósito: el unitario dice que el cruce decide bien, el e2e
+dice que la ruta lo llama.
 
 ---
 
@@ -208,10 +245,78 @@ _(pendiente: se rellena con los sabotajes medidos)_
 
 ## 7 · La APK
 
-_(pendiente)_
+**`mipiacetpv-1.21.0-12100.apk`**, con el procedimiento de siempre, sin variarlo:
+
+```bash
+apps/tpv-android/scripts/build-release-apk.sh 1.21.0
+```
+
+| Dato | Valor |
+|---|---|
+| versionName | `1.21.0` |
+| versionCode | `12100` (la fórmula del script: `MAJOR*10000 + MINOR*100 + PATCH`, igual que 1.20.0 → 12000) |
+| commit | `54d3e2a` (árbol limpio, sin `-dirty`) |
+| tamaño | 8 560 497 bytes |
+| SHA-256 | `b04bb4dc1ec57312a9514fd966fbe1c91319c23aa178dd5f277b252759a7dc31` |
+| sidecar | `apps/tpv-android/build-releases/mipiacetpv-1.21.0-12100.apk.sha256` |
+| firma | `CN=mipiacetpv, O=mipiace, L=Madrid, C=ES` · SHA-256 del certificado `677d8620…05bfd6` (el mismo que la 1.20.0) |
+
+**NO se publica**: lo hace Dirección tras el merge, con `infra/publicar-apk.sh`.
+
+### Comprobado sobre el binario, no sobre el build
+
+| Qué | Cómo | Resultado |
+|---|---|---|
+| La versión que Android registra dentro | `aapt2 dump badging` | `versionCode='12100' versionName='1.21.0'`, `es.mipiace.tpv` |
+| La huella coincide con su sidecar | `shasum -a 256 -c …sha256` | `OK` |
+| El origen embebido | `unzip -p … assets/capacitor.config.json` | `androidScheme: https`, `hostname: mipiacetpv.com`, `allowMixedContent: false` |
+| El backend de producción | `grep -F https://api.mipiacetpv.com` sobre los `.js` del APK | 4 apariciones |
+| Sin Service Worker (A4) | `sw.js` / `registerSW.js` dentro del APK | no están |
+| **El código de ESTE bloque viaja dentro** | `grep -F` sobre `assets/public/assets/*.js` | `Sólo aparecen las que hacen estos servicios` ✓ · `Con quién` ✓ · `Mover a las` ✓ · y el `Hace falta conexión para mover una cita` de agenda-lista sigue ✓ |
+
+**El APK pesa 600 KB MENOS que la 1.20.0, y no falta nada.** Se comprobó en vez de suponerlo: los dos
+llevan **461 ficheros** y casi el mismo tamaño sin comprimir (9 749 503 vs 9 750 945 bytes), y la única
+entrada que cambia de nombre es el bundle con su hash (`index-DA_MgXzd.js` → el nuevo). La diferencia es
+compresión, no contenido.
 
 ---
 
 ## 8 · Cómo se cierra
 
-_(pendiente)_
+- [x] **Medido el motor antes de tocar nada** y contestadas las dos preguntas del prompt (§1), con una
+      tercera cosa que la medición destapó y que se deja dicha como frontera.
+- [x] **`engine.ts`: cero líneas.** El parámetro ya existía.
+- [x] **Sin migración.**
+- [x] **Unitarios**: 10 del cruce de la API + 7 del cruce del TPV.
+- [x] **E2E de la API**: 11 casos nuevos en `agenda-mover-con-otra.e2e.ts`, y la suite e2e entera en verde
+      (23 ficheros, 363 tests) con una base propia de esta sesión — **los casos 17 y 18 de agenda-lista
+      incluidos**, que son los que no se podían romper.
+- [x] **Suite normal**: 275 ficheros, 3 014 tests, verde.
+- [x] **Typecheck** de la API y de los dos frontends (`tsc -b`), y las dos builds de Vite — lo del job `ci`.
+- [x] **`pnpm e2e:agenda` entero en verde DOS veces**, con puertos propios (3103/5283/5284), base
+      `mipiacetpv_mover_banco_e2e` y **Redis propio** (contenedor `mipiacetpv-redis-mover`, 6380): **30
+      passed** las dos veces (2,4 min y 2,7 min).
+- [x] **Seis sabotajes** (§5), los tres que pedía el prompt entre ellos. Ninguno deja todo en verde. El repo
+      quedó limpio detrás de los seis.
+- [x] **APK 1.21.0** construida desde el commit final con árbol limpio y comprobada **sobre el binario**
+      (§7). **No publicada.**
+
+### Lo que hace falta para correr esto en otro árbol
+
+El worktree venía sin `node_modules` ni `apps/api/.env` (los dos gitignored). Para repetir el banco:
+
+```bash
+pnpm install && pnpm --filter @mipiacetpv/db run generate
+docker run -d --name mipiacetpv-redis-mover -p 6380:6379 redis:7-alpine
+# apps/api/.env con base y Redis propios (el patrón de agenda-lista), y:
+DATABASE_URL=…/mipiacetpv_mover_banco_e2e REDIS_URL=redis://127.0.0.1:6380/0 \
+  BANCO_API_PORT=3103 BANCO_ADMIN_PORT=5283 BANCO_TPV_PORT=5284 pnpm e2e:agenda
+```
+
+Y `apps/tpv-android/android/keystore.properties` para firmar la APK: también gitignored, se copia del árbol
+principal (mismo Mac, mismo keystore).
+
+### Lo que queda para Dirección
+
+Merge del PR contra `master`, despliegue y publicación de la APK con `infra/publicar-apk.sh`. Aquí no se ha
+hecho ninguna de las tres.
