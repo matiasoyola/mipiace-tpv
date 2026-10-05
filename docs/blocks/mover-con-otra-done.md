@@ -316,7 +316,18 @@ DATABASE_URL=…/mipiacetpv_mover_banco_e2e REDIS_URL=redis://127.0.0.1:6380/0 \
 Y `apps/tpv-android/android/keystore.properties` para firmar la APK: también gitignored, se copia del árbol
 principal (mismo Mac, mismo keystore).
 
+### La CI
+
+Verde en los dos runs de la rama, con los tres jobs:
+
+| Run | Evento | `ci` | `smoke` | `e2e` |
+|---|---|---|---|---|
+| [37293679011](https://github.com/matiasoyola/mipiace-tpv/actions/runs/37293679011) | push | ✓ | ✓ | ✓ |
+| [37293798740](https://github.com/matiasoyola/mipiace-tpv/actions/runs/37293798740) | pull_request (PR #6) | ✓ | ✓ | ✓ |
+
+`publish` queda **skipped**, que es lo correcto: sólo corre en push a `master`.
+
 ### Lo que queda para Dirección
 
-Merge del PR contra `master`, despliegue y publicación de la APK con `infra/publicar-apk.sh`. Aquí no se ha
+Merge del [PR #6](https://github.com/matiasoyola/mipiace-tpv/pull/6) contra `master`, despliegue y publicación de la APK con `infra/publicar-apk.sh`. Aquí no se ha
 hecho ninguna de las tres.
