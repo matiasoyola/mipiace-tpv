@@ -74,6 +74,7 @@ import {
   fetchSkillMatrix,
   indexarMatrizPorProfesional,
   noHaceNingunServicio,
+  profesionalesQuePuedenConLaCita,
   readHealthSnapshot,
   serviciosQueSabeHacer,
   serviciosSinNadie,
@@ -736,21 +737,33 @@ export function AgendaPage({
    *
    * Tres cosas que conviene tener escritas:
    *
-   *   · **Conserva la profesional.** El PATCH fija la que la cita ya
-   *     tiene (`routes.ts`, rama de `start`), así que la clienta cambia
-   *     de HORA y no de peluquera. Si con ella no cabe, el «no» y las
-   *     alternativas son suyas. Cambiar de profesional al mover es otro
-   *     bloque; aquí no se ofrece.
+   *   · **Conserva la profesional si nadie pide otra.** Sin
+   *     `staffUserId`, el PATCH fija la que la cita ya tiene
+   *     (`routes.ts`, rama de `start`), así que la clienta cambia de HORA
+   *     y no de peluquera. Si con ella no cabe, el «no» y las
+   *     alternativas son suyas.
+   *   · **mover-con-otra · y si la recepción pide otra, se manda.** La
+   *     hoja manda `staffUserId` SÓLO cuando la elegida es distinta de la
+   *     actual, así que «a otra hora con la misma» sigue siendo byte a
+   *     byte la petición de agenda-lista. La cita no cambia de id ni
+   *     pierde su histórico: es la misma, en otra columna.
    *   · **Si falla no pasa nada.** `start` y `status` son ramas distintas
    *     del PATCH: un movimiento rechazado no mueve la cita ni le cambia
    *     el estado. El motivo y las alternativas son las que ya devuelve el
-   *     motor, las mismas del alta.
+   *     motor, las mismas del alta — más los dos «no» que ahora da la
+   *     ruta antes de llamarlo (`STAFF_NO_SKILL`, `STAFF_NOT_FOUND`).
    *   · **No hay camino offline.** `patchAppointment` no encola; el botón
    *     lo dice en vez de prometer algo que no va a pasar.
    */
-  async function doMove(id: string, startISO: string) {
+  async function doMove(id: string, startISO: string, staffUserId?: string) {
     const antes = staffDeLaCita(detail);
-    const res = await patchAppointment(id, { start: startISO });
+    const res = await patchAppointment(id, {
+      start: startISO,
+      // Sólo si de verdad cambia de manos: mandar la actual sería pedirle
+      // a la ruta una comprobación de matriz que nadie necesita, y pasar
+      // por un camino distinto al de agenda-lista para el caso de siempre.
+      ...(staffUserId && staffUserId !== antes ? { staffUserId } : {}),
+    });
     if (!res.ok) {
       setMoveError({ message: res.message, alternatives: res.alternatives ?? [] });
       return;
@@ -765,9 +778,9 @@ export function AgendaPage({
 
     const despues = staffDeLaCita(res.appointment);
     const cuando = `${diaNuevo} a las ${localHHMM(res.appointment.start)}`;
-    // El cambio de profesional ya no debería poder pasar —el PATCH la
-    // fija— pero si pasara, se dice. Un aviso que sobra no hace daño; uno
-    // que falta deja a la clienta en otra columna sin que nadie se entere.
+    // mover-con-otra · ahora el cambio de columna puede ser LO PEDIDO, no
+    // una sorpresa — y se dice igual: es la confirmación de que la cita
+    // está donde la recepción quería. Si no cambia, el aviso no la nombra.
     flash(
       despues && despues !== antes
         ? `Cita movida al ${cuando} · ahora con ${nombreDeStaff(despues)}`
@@ -1280,6 +1293,8 @@ export function AgendaPage({
             staffName={
               staffDeLaCita(detail) ? nombreDeStaff(staffDeLaCita(detail)!) : null
             }
+            staff={activeStaff}
+            skillsPorStaff={skillsPorStaff}
             sinRed={sinRed}
             moveError={moveError}
             onClose={() => {
@@ -1288,7 +1303,9 @@ export function AgendaPage({
             }}
             onStatus={(st) => changeStatus(detail.id, st)}
             onCheckout={() => doCheckout(detail.id)}
-            onMove={(start) => void doMove(detail.id, start)}
+            onMove={(start, staffUserId) =>
+              void doMove(detail.id, start, staffUserId)
+            }
             onClearMoveError={() => setMoveError(null)}
           />
         )}
@@ -2362,12 +2379,16 @@ function DetailPanel(props: {
   serviceLabel: string;
   /** Quién la atiende ahora mismo. Se nombra si el motor la cambia. */
   staffName: string | null;
+  /** mover-con-otra · las columnas del día: de aquí sale «Con quién». */
+  staff: AgendaStaff[];
+  /** mover-con-otra · la matriz. `null` = no se sabe ⇒ se ofrecen todas. */
+  skillsPorStaff: Map<string, Set<string>> | null;
   sinRed: boolean;
   moveError: { message: string; alternatives: AvailabilitySlot[] } | null;
   onClose: () => void;
   onStatus: (s: AppointmentStatus) => void;
   onCheckout: () => void;
-  onMove: (startISO: string) => void;
+  onMove: (startISO: string, staffUserId?: string) => void;
   onClearMoveError: () => void;
 }) {
   const { appt } = props;
@@ -2439,6 +2460,8 @@ function DetailPanel(props: {
           </button>
           <MoverCita
             appt={appt}
+            staff={props.staff}
+            skillsPorStaff={props.skillsPorStaff}
             sinRed={props.sinRed}
             error={props.moveError}
             onMove={props.onMove}
@@ -2478,9 +2501,11 @@ function DetailPanel(props: {
 // una hora en la misma pantalla serían dos cosas que aprender.
 function MoverCita(props: {
   appt: AgendaAppointment;
+  staff: AgendaStaff[];
+  skillsPorStaff: Map<string, Set<string>> | null;
   sinRed: boolean;
   error: { message: string; alternatives: AvailabilitySlot[] } | null;
-  onMove: (startISO: string) => void;
+  onMove: (startISO: string, staffUserId?: string) => void;
   onClearError: () => void;
 }) {
   const { appt, sinRed } = props;
@@ -2490,6 +2515,42 @@ function MoverCita(props: {
   const [buscando, setBuscando] = useState(false);
   const [errorBusqueda, setErrorBusqueda] = useState<string | null>(null);
   const [elegido, setElegido] = useState<string | null>(null);
+  // mover-con-otra · «Con quién». ARRANCA EN LA ACTUAL: con ella elegida,
+  // todo se comporta exactamente como antes de este bloque (el PATCH no
+  // manda `staffUserId`, ver `doMove`).
+  const [conQuien, setConQuien] = useState<string | null>(() =>
+    staffDeLaCita(appt),
+  );
+
+  // Los servicios de la cita, en su orden. Los miran dos cosas que tienen
+  // que decir lo mismo: a quién se ofrece, y con qué se buscan los huecos.
+  const servicios = useMemo(
+    () =>
+      appt.items
+        .slice()
+        .sort((a, b) => a.sortOrder - b.sortOrder)
+        .map((it) => ({ serviceId: it.serviceId })),
+    [appt.items],
+  );
+
+  // Sólo las que saben hacer TODOS los servicios de la cita. Sin matriz
+  // (no llegó, o no hay red) todas, y el motor sigue siendo la puerta: el
+  // mismo criterio que el alta (agenda-lista §3).
+  //
+  // La ACTUAL se añade siempre, aunque la matriz diga que no sabe: la cita
+  // ya es suya. Esconderla dejaría el selector sin la opción que está
+  // seleccionada, y «no tocar nada» pasaría a ser imposible.
+  const candidatas = useMemo(() => {
+    const puede = profesionalesQuePuedenConLaCita(
+      props.staff,
+      servicios.map((s) => s.serviceId),
+      props.skillsPorStaff,
+    );
+    const actual = staffDeLaCita(appt);
+    if (!actual || puede.some((p) => p.userId === actual)) return puede;
+    const suya = props.staff.find((p) => p.userId === actual);
+    return suya ? [suya, ...puede] : puede;
+  }, [props.staff, props.skillsPorStaff, servicios, appt]);
 
   // Si la cita se movió de verdad, la hoja se pliega y arranca otra vez
   // desde donde está ahora.
@@ -2504,7 +2565,10 @@ function MoverCita(props: {
     setSlots([]);
     setElegido(null);
     setErrorBusqueda(null);
-  }, [appt.id, appt.start]);
+    // Y «Con quién» vuelve a la de la cita: si acaba de pasar de Ana a
+    // Isa, la hoja tiene que arrancar en Isa, que es de quien es ahora.
+    setConQuien(staffDeLaCita(appt));
+  }, [appt.id, appt.start, appt.assignments]);
 
   async function buscar() {
     setBuscando(true);
@@ -2514,17 +2578,14 @@ function MoverCita(props: {
     try {
       const res = await searchAvailability({
         // Los mismos servicios que ya tiene la cita, en su orden. Mover no
-        // es editar: lo que cambia es cuándo, no qué.
-        items: appt.items
-          .slice()
-          .sort((a, b) => a.sortOrder - b.sortOrder)
-          .map((it) => ({ serviceId: it.serviceId })),
-        // LA SUYA. Mover conserva la profesional (lo fija el PATCH, ver
-        // `doMove`), así que los huecos que se ofrecen tienen que ser los
-        // de ella: con `null` la lista enseñaría horas en las que está
-        // libre OTRA, y al pulsar Mover saldría un «no» sobre una hora
-        // que la pantalla acababa de ofrecer.
-        staffUserId: staffDeLaCita(appt),
+        // es editar: lo que cambia es cuándo (y con quién), no qué.
+        items: servicios,
+        // LA ELEGIDA, que por defecto es la suya. Los huecos tienen que ser
+        // de quien vaya a atender: con `null` la lista enseñaría horas en
+        // las que está libre OTRA, y al pulsar Mover saldría un «no» sobre
+        // una hora que la pantalla acababa de ofrecer. Por eso al cambiar
+        // de peluquera se limpian los chips — eran de la anterior.
+        staffUserId: conQuien,
         from: dia,
         to: dia,
       });
@@ -2584,6 +2645,63 @@ function MoverCita(props: {
         </button>
       </div>
 
+      {/* mover-con-otra · «Con quién», encima del día: primero quién la
+          atiende, después cuándo — es el orden en que se habla en el
+          mostrador («¿te va bien con Isa?» → «¿a qué hora?»).
+
+          Botones de dedo de peluquera (h-11), no un `select`: el AP12 se
+          toca con el pulgar y la lista son tres nombres. */}
+      {props.staff.length > 1 && (
+        <div>
+          <div className="text-[12px] font-medium text-slate-500">Con quién</div>
+          <div
+            data-selector="mover-profesional"
+            className="mt-1 flex flex-wrap gap-1.5"
+          >
+            {candidatas.map((p) => {
+              const elegida = conQuien === p.userId;
+              return (
+                <button
+                  key={p.userId}
+                  data-staff={p.userId}
+                  aria-pressed={elegida}
+                  onClick={() => {
+                    if (elegida) return;
+                    setConQuien(p.userId);
+                    // Los chips y el «no» eran de la anterior: con otra
+                    // peluquera enseñarían horas que no son suyas.
+                    setSlots([]);
+                    setElegido(null);
+                    setErrorBusqueda(null);
+                    props.onClearError();
+                  }}
+                  className={`h-11 px-3 rounded-xl text-[13px] font-medium ${
+                    elegida
+                      ? "bg-mipiace-ink text-white"
+                      : "bg-mipiace-stone text-mipiace-ink hover:bg-slate-200"
+                  }`}
+                >
+                  {p.displayName}
+                </button>
+              );
+            })}
+          </div>
+          {/* El motivo de lo que NO está, en texto visible y nunca en un
+              `title` (`docs/ux-principles.md` §6). Sólo cuando de verdad
+              se ha dejado a alguien fuera: un aviso que sale siempre deja
+              de leerse. */}
+          {props.skillsPorStaff &&
+            candidatas.length < props.staff.length && (
+              <div
+                data-motivo="mover-profesional"
+                className="text-[12px] text-slate-500 mt-1.5"
+              >
+                Sólo aparecen las que hacen estos servicios.
+              </div>
+            )}
+        </div>
+      )}
+
       <div>
         <label
           htmlFor="mover-dia"
@@ -2625,6 +2743,12 @@ function MoverCita(props: {
           {slots.slice(0, 24).map((sl) => (
             <button
               key={sl.start}
+              // mover-con-otra · `data-hueco` existe porque ahora hay DOS
+              // grupos de botones con `aria-pressed` en esta hoja (las
+              // horas y «Con quién»), y el banco localizaba los chips por
+              // ese atributo. Un locator ambiguo habría contado el nombre
+              // de la peluquera como si fuera una hora.
+              data-hueco={sl.start}
               onClick={() => setElegido(sl.start)}
               aria-pressed={elegido === sl.start}
               className={`h-9 px-2.5 rounded-lg text-[12.5px] tabular-nums ${
@@ -2671,11 +2795,21 @@ function MoverCita(props: {
 
       <button
         data-accion="confirmar-mover"
-        onClick={() => elegido && props.onMove(elegido)}
+        onClick={() =>
+          elegido && props.onMove(elegido, conQuien ?? undefined)
+        }
         disabled={!elegido}
         className="w-full h-11 rounded-xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[14px] font-semibold disabled:opacity-40"
       >
-        {elegido ? `Mover a las ${localHHMM(elegido)}` : "Mover"}
+        {elegido
+          ? conQuien && conQuien !== staffDeLaCita(appt)
+            ? // Cambia de columna: el botón lo dice ANTES de pulsarlo.
+              `Mover a las ${localHHMM(elegido)} con ${
+                candidatas.find((p) => p.userId === conQuien)?.displayName ??
+                "otra"
+              }`
+            : `Mover a las ${localHHMM(elegido)}`
+          : "Mover"}
       </button>
       {!elegido && (
         <div className="text-[12px] text-slate-500">Elige una hora.</div>

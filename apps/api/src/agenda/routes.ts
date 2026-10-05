@@ -55,6 +55,7 @@ import {
 import { buildAgendaDays } from "./day-view.js";
 import { resolveBookingNow, systemClock, type Clock } from "./floor.js";
 import { runAgendaHealth } from "./health.js";
+import { comprobarProfesional } from "./mover-staff.js";
 import {
   loadSkillMatrix,
   setSkillsForStaff,
@@ -412,6 +413,10 @@ export async function registerAgendaRoutes(
               ],
             },
             start: { type: "string", format: "date-time" },
+            // mover-con-otra · la peluquera que se fija al mover. SÓLO
+            // junto a `start`: cambiar de peluquera ES mover (lo rechaza
+            // el handler, no el schema, para poder decir por qué).
+            staffUserId: { type: "string", format: "uuid" },
           },
         },
       },
@@ -422,17 +427,33 @@ export async function registerAgendaRoutes(
       const body = request.body as {
         status?: AppointmentStatus;
         start?: string;
+        staffUserId?: string;
       };
+
+      // mover-con-otra · `staffUserId` sin `start` no es nada: no es un
+      // cambio de estado y no es un movimiento. Se dice en vez de
+      // ignorarlo en silencio, que es lo que haría un `additionalProperties`
+      // permisivo — y lo que el sabotaje «la ruta ignora staffUserId»
+      // simula.
+      if (body.staffUserId && !body.start) {
+        return reply.code(400).send({
+          error: "STAFF_WITHOUT_START",
+          message:
+            "Para cambiar de profesional hay que mover la cita: manda también `start`.",
+        });
+      }
 
       // Reprogramar (mover el slot).
       if (body.start) {
-        // agenda-lista · MOVER CONSERVA LA PROFESIONAL.
+        // agenda-lista · MOVER CONSERVA LA PROFESIONAL **SI NADIE PIDE
+        // OTRA**. mover-con-otra sólo añade la segunda mitad de esa frase.
         //
-        // El cuerpo no acepta `staffUserId` —cambiar de profesional al
-        // mover es otro bloque— así que la fijada es siempre la que la
-        // cita ya tiene. Antes se movía con `null` y el motor elegía a
-        // quien estuviera libre: la clienta cambiaba de HORA y podía
-        // acabar con otra peluquera sin que nadie lo hubiera pedido.
+        // Sin `staffUserId` en el cuerpo, la fijada es la que la cita ya
+        // tiene, igual que antes: ni un llamante existente cambia de
+        // comportamiento (los casos 17 y 18 de `agenda-suelo.e2e.ts` lo
+        // vigilan). Antes de agenda-lista se movía con `null` y el motor
+        // elegía a quien estuviera libre: la clienta cambiaba de HORA y
+        // podía acabar con otra peluquera sin que nadie lo hubiera pedido.
         //
         // La decisión se toma AQUÍ y no dentro del motor: el motor sólo
         // obedece a quien le fijen, igual que en el alta slot-first.
@@ -442,11 +463,58 @@ export async function registerAgendaRoutes(
         const suProfesional =
           actual?.assignments.find((a) => a.reservableType === "STAFF")
             ?.staffUserId ?? null;
+
+        // mover-con-otra · y si el cuerpo PIDE otra, es ella la fijada.
+        //
+        // Antes de llamar al motor se comprueba la matriz, porque el motor
+        // no distingue «no sabe hacerlo» de «no tiene hueco»: las dos
+        // salen como `NO_SLOT` con cero alternativas (ver
+        // `mover-staff.ts`). La comprobación es de la RUTA, el motor no se
+        // toca.
+        //
+        // `actual` nulo = cita que no existe: no hay servicios que cruzar,
+        // y el `reschedule` de abajo ya responde 404. Comprobar aquí
+        // contaría una historia de peluqueras sobre una cita fantasma.
+        const elegida = body.staffUserId ?? null;
+        if (elegida && actual) {
+          const serviceIds = [
+            ...new Set(actual.items.map((it) => it.serviceId)),
+          ];
+          const [perfiles, nombres, skilled] = await Promise.all([
+            store.getStaffProfiles(auth.tenantId),
+            store.getServiceNames(auth.tenantId, serviceIds),
+            Promise.all(
+              serviceIds.map((sid) =>
+                store.getSkilledStaff(auth.tenantId, sid),
+              ),
+            ),
+          ]);
+          const sabenHacer = new Map<string, Set<string>>();
+          serviceIds.forEach((sid, i) => {
+            sabenHacer.set(sid, new Set(skilled[i] ?? []));
+          });
+          const rechazo = comprobarProfesional({
+            staffUserId: elegida,
+            perfiles,
+            serviceIds,
+            sabenHacer,
+            nombres,
+          });
+          if (rechazo) {
+            return reply.code(rechazo.status).send({
+              error: rechazo.error,
+              code: rechazo.error,
+              message: rechazo.message,
+              alternatives: [],
+            });
+          }
+        }
+
         const moved = await engineFor(request).reschedule(
           auth.tenantId,
           id,
           body.start,
-          suProfesional,
+          elegida ?? suProfesional,
         );
         if (moved.ok) return { appointment: moved.appointment };
         if (moved.reason === "NOT_FOUND") {

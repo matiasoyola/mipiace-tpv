@@ -33,6 +33,9 @@ import type {
 export interface Seed {
   requirements: Record<string, ServiceRequirement>;
   skills: Record<string, string[]>; // serviceId -> userIds
+  // mover-con-otra · serviceId -> nombre. Sólo lo mira el «no» de skill de
+  // la ruta; ausente = el id hace de nombre, como en el resto de tests.
+  serviceNames?: Record<string, string>;
   templates: TemplateSlot[]; // por tenant implícito
   resourcesByKind?: Record<string, string[]>;
   blocks?: BlockInterval[];
@@ -135,6 +138,15 @@ export function makeFakeStore(
     },
     async getSkilledStaff(tenantId, serviceId) {
       return seedByTenant[tenantId]?.skills[serviceId] ?? [];
+    },
+    async getServiceNames(tenantId, serviceIds) {
+      const nombres = seedByTenant[tenantId]?.serviceNames ?? {};
+      const map = new Map<string, string>();
+      for (const id of serviceIds) {
+        const n = nombres[id];
+        if (n) map.set(id, n);
+      }
+      return map;
     },
     async getTemplateSlots(tenantId, userIds, from, to) {
       // B-reservas-6a · ANTES esto ignoraba la ventana `from`/`to` y
