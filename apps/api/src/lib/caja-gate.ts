@@ -40,9 +40,9 @@
 // ni una apertura de cajón, ni un informe Z.
 //
 // La negativa va AQUÍ y no en cada ruta por una razón de cuentas: hay
-// ~60 `preHandler: [requireCashierSession, ensureCajaEnabled]` repartidos
+// las 103 rutas con `ensureCajaEnabled` en el `preHandler` repartidas
 // por tickets, turno, mesas, fiscal, fiado, impresión y catálogo del TPV.
-// Sesenta sitios donde acordarse es sesenta sitios donde olvidarse, y el
+// Cien sitios donde acordarse son cien sitios donde olvidarse, y el
 // olvido aquí es un cobro firmado por quien no cobra. Este par de líneas
 // los cubre todos de golpe, y cubre también el que escriba alguien
 // mañana: si lleva el gate de la caja, lleva esto.

@@ -3,7 +3,7 @@
 // La garantía se comprueba EN LA API y no esconde botones, así que lo que
 // este banco prueba es la puerta, no la pantalla. Y la prueba en el único
 // sitio donde está escrita: `ensureCajaEnabled`, el `preHandler` que
-// llevan las ~93 rutas de caja que el guardia de cableado de
+// llevan las 103 rutas de caja que el guardia de cableado de
 // `h1-caja-gate.test.ts` cuenta una por una.
 //
 // Tres cosas, y la tercera es la que casi se quedó fuera:
@@ -211,15 +211,27 @@ describe("clinica-1 · las dos rutas que NO llevan el gate siguen sin llevarlo",
     expect(hasta).not.toContain("ensureCajaEnabled");
   });
 
-  it("y el login tampoco puede quedarse fuera: el sanitario entra al TPV", () => {
+  it("EL SANITARIO ENTRA AL TPV: las DOS listas de rol lo incluyen", () => {
     // `/shift/cashier-login` SÍ lleva el gate de la caja, pero cuando
     // corre todavía no hay sesión ni rol que mirar (sólo el device
-    // token), así que el sanitario pasa. Lo que se vigila aquí es que el
-    // rol siga estando en la lista de quien puede entrar.
+    // token), así que el sanitario pasa. Lo que decide si entra es el
+    // `role: { in: [...] }` del `findFirst`.
+    //
+    // SON DOS LISTAS Y HAY QUE CONTARLAS, no comprobar que el nombre
+    // aparece «alguna vez» en el fichero: una es el LOGIN y la otra el
+    // ROSTER OFFLINE. Este test nació contando una sola vez — y pasaba
+    // en verde con el login SIN `CLINICIAN`, o sea con un sanitario que
+    // no podía entrar al TPV de ninguna manera. Lo destapó el banco de
+    // la agenda, no la suite.
     const src = readFileSync(
       new URL("../src/shift/cashier-auth.ts", import.meta.url),
       "utf8",
     );
-    expect(src).toContain('"OWNER", "MANAGER", "CASHIER", "CLINICIAN"');
+    const conSanitario = src.match(
+      /role: \{ in: \["OWNER", "MANAGER", "CASHIER", "CLINICIAN"\] \}/g,
+    );
+    expect(conSanitario).toHaveLength(2);
+    // Y ninguna se ha quedado con la lista corta.
+    expect(src).not.toMatch(/role: \{ in: \["OWNER", "MANAGER", "CASHIER"\] \}/);
   });
 });
