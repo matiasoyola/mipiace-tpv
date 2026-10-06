@@ -572,4 +572,23 @@ e68733d test(clinica-2): el banco con navegador, y tres fallos que encontró
 
 ## 15 · La rama
 
-<!-- Se rellena al pushear: ver el final de este fichero en el commit del done. -->
+**NO está pusheada y NO hay PR todavía.** El `git push` lo bloqueó el clasificador de permisos de la
+sesión, así que los dos últimos pasos quedan para Dirección:
+
+```bash
+git push -u origin clinica-2
+gh pr create --base master --head clinica-2 \
+  --title "clinica-2 · la valoración inicial"
+```
+
+Todo lo demás está hecho y verde en local:
+
+- `pnpm test` · 285 ficheros, 3248 tests. Verde.
+- `pnpm test:e2e` · 26 ficheros, 437 tests. Verde.
+- `pnpm e2e:agenda` · 34 passed, con los diez capítulos de la peluquería intactos.
+- `tsc` de api, tpv-web, admin y e2e-ui · limpio.
+
+**La CI todavía no ha corrido**, porque corre sobre la rama pusheada. Es lo único del «cómo se
+cierra» del prompt que queda pendiente, y depende del push.
+
+**Ni merge ni despliegue: eso lo hace Dirección.**
