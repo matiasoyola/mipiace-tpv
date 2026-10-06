@@ -1,7 +1,7 @@
 // Pantalla 3 del reference (TpvShiftOpenScreen). Fondo de caja inicial
 // con quick keys.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
 
 import { apiWithCashier, ApiError } from "../api.js";
@@ -11,6 +11,8 @@ import { parseAmount } from "../lib/money.js";
 import { Logo } from "../Logo.js";
 import { outboxAdd } from "../lib/outbox.js";
 import { openLocalShift } from "../lib/offlineShift.js";
+import { OpenTablesNotice } from "../components/OpenTablesNotice.js";
+import { fetchOpenTables, type OpenTablesSummary } from "../lib/openTables.js";
 
 interface ShiftOpenResponse {
   shift: { id: string; openedAt: string; cashOpening: string };
@@ -42,6 +44,25 @@ export function ShiftOpenScreen({
   // v1.12-manos-de-camarero · el pad del fondo de caja. Cerrado al
   // entrar: el atajo de 100 € resuelve el caso normal de un toque.
   const [padOpen, setPadOpen] = useState(false);
+  // v1.22 §2 · el fondo de caja llega como "0,00" y hasta ahora pulsar 1
+  // encima no hacía nada: había que darle a "C" primero (el toque
+  // evitable del R1 de la auditoría). Ahora la primera tecla sustituye,
+  // y el campo lo enseña.
+  const [padReplacing, setPadReplacing] = useState(false);
+  // v1.22 §5 · hallazgo B2 · mesas heredadas del turno anterior. El
+  // 06-10 se reabrió turno con la M4 abierta y 55,00 € en sala y la
+  // pantalla de apertura no dijo nada. Best-effort: si el GET falla, se
+  // abre turno igual (ver `fetchOpenTables`).
+  const [openTables, setOpenTables] = useState<OpenTablesSummary | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void fetchOpenTables().then((s) => {
+      if (alive) setOpenTables(s);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // v1.12 · el parseo de importes va por `lib/money.ts` (v1.10.3), que
   // ya tolera coma, punto, espacios y el símbolo €.
@@ -157,6 +178,7 @@ export function ShiftOpenScreen({
               id="cashOpening"
               value={amount}
               active={padOpen}
+              replacing={padOpen && padReplacing}
               onActivate={() => setPadOpen(true)}
               size="lg"
               ariaLabel="Fondo de caja inicial"
@@ -192,10 +214,19 @@ export function ShiftOpenScreen({
                   Listo
                 </button>
               </div>
-              <CashPad value={amount} onChange={setAmount} />
+              <CashPad
+                value={amount}
+                onChange={setAmount}
+                onReplacingChange={setPadReplacing}
+              />
             </div>
           )}
           </div>
+          <OpenTablesNotice
+            summary={openTables}
+            variant="open"
+            className="mt-4"
+          />
           <div className="mb-4" />
           <button
             type="button"

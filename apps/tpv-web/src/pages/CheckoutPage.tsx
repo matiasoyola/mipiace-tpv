@@ -195,6 +195,11 @@ export function CheckoutOverlay(props: {
   // v1.12 · fila de pago que está tecleando el CashPad. `null` = pad
   // cerrado. Una sola instancia de pad por hoja, abajo del todo.
   const [padTarget, setPadTarget] = useState<number | null>(null);
+  // v1.22 §2 · el pad dice si la próxima tecla SUSTITUYE el importe
+  // pre-rellenado; la fila activa lo pinta como texto seleccionado. En
+  // el mixto es el caso normal: la segunda forma llega con el resto ya
+  // puesto, y hasta ahora pulsar un dígito encima no hacía nada.
+  const [padReplacing, setPadReplacing] = useState(false);
   // v1.12 · higiene de la hoja de cobro (§3): email y ticket regalo se
   // pliegan tras "Más opciones". En hora punta la pantalla es para el
   // dinero. Se abre solo si el contacto ya trae email (entonces el
@@ -1020,6 +1025,7 @@ export function CheckoutOverlay(props: {
                 showMethodPicker={isMixed}
                 autoFilled={isMixed && i === payments.length - 1 && !lastRowPinned}
                 active={padTarget === i}
+                replacing={padTarget === i && padReplacing}
                 onActivate={() => setPadTarget(i)}
                 onChange={(patch) => setPayment(i, patch)}
                 onMethodChange={(m) => setRowMethod(i, m)}
@@ -1382,7 +1388,20 @@ export function CheckoutOverlay(props: {
                   {labelFor(payments[padTarget]!.method)}
                 </span>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-[17px] font-semibold tabular-nums text-mipiace-ink">
+                  {/* v1.22 §2 · el eco del importe en la cabecera del pad
+                      lleva TAMBIÉN la marca de "para sustituir". El
+                      campo de la fila la lleva desde `AmountField`, pero
+                      con el pad abierto a 812 px la fila se queda por
+                      encima del pliegue del modal y la pista no se ve
+                      justo cuando hace falta (medido en el bucle visual
+                      a 1443 × 812). */}
+                  <span
+                    data-replacing={padReplacing ? "true" : undefined}
+                    className={
+                      "text-[17px] font-semibold tabular-nums text-mipiace-ink rounded-lg px-1.5 " +
+                      (padReplacing ? "bg-mipiace-coral-soft text-mipiace-coral-dark" : "")
+                    }
+                  >
                     {payments[padTarget]!.amount || "0,00"} €
                   </span>
                   <button
@@ -1397,6 +1416,7 @@ export function CheckoutOverlay(props: {
               <CashPad
                 value={payments[padTarget]!.amount}
                 onChange={(next) => setPayment(padTarget, { amount: next })}
+                onReplacingChange={setPadReplacing}
               />
             </div>
           )}
@@ -1589,6 +1609,7 @@ function PaymentRowEditor({
   showMethodPicker,
   autoFilled,
   active,
+  replacing,
   onActivate,
   onChange,
   onMethodChange,
@@ -1597,6 +1618,8 @@ function PaymentRowEditor({
   index: number;
   // v1.12 · esta fila es la que está escribiendo el CashPad.
   active: boolean;
+  // v1.22 §2 · y el importe que enseña está "para sustituir".
+  replacing: boolean;
   onActivate: () => void;
   // v1.10.3-barra · en mixto cada fila elige su método aquí mismo; en
   // simple lo eligen los tabs de arriba y la fila sólo lo enseña.
@@ -1652,6 +1675,7 @@ function PaymentRowEditor({
         <AmountField
           value={payment.amount}
           active={active}
+          replacing={replacing}
           onActivate={onActivate}
           ariaLabel={`Importe ${labelFor(payment.method)}`}
           className="flex-1 min-w-[84px]"
