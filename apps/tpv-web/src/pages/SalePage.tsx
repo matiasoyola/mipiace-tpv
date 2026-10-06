@@ -330,6 +330,11 @@ export interface SalePageProps {
   cashierLabel: string;
   // clinica-1 · el tipo compartido (ver la nota de CloseShiftModal).
   cashierRole: CashierRole;
+  // clinica-2 · LA MARCA sanitaria, separada del rol (clinica-1 §2). La
+  // ficha del paciente la usa para decidir si la pestaña «Valoración» pide
+  // las respuestas: en el piloto la podóloga es la DUEÑA, así que mirar el
+  // rol la dejaría fuera.
+  esSanitario?: boolean;
   registerName: string;
   registerId: string;
   storeName: string;
@@ -2304,7 +2309,12 @@ export function SalePage(props: SalePageProps) {
         />
       )}
       {/* B-reservas-1 · sección Clientes (CRM) + picker rápido F1. */}
-      {showClients && <ClientsPage onClose={() => setShowClients(false)} />}
+      {showClients && (
+        <ClientsPage
+          onClose={() => setShowClients(false)}
+          esSanitario={props.esSanitario ?? false}
+        />
+      )}
       {clientPicker.element}
       {/* v1.10.3-barra · hallazgo #2: deshacer de 4 s tras borrar una
           línea. z-[55] lo pone por encima del bottom-sheet del ticket

@@ -125,6 +125,28 @@ export interface ContextoClinico {
 }
 
 /**
+ * QUÉ hace falta para pasar. Dos predicados, UN solo punto de registro.
+ *
+ * `SANITARIO` es lo de clinica-1 y el caso normal: la función de acceso
+ * decide (clínica encendida, es sanitario, alcanza a este paciente).
+ *
+ * `PERSONAL_DEL_CENTRO` lo añade clinica-2 para los dos actos que **la
+ * recepcionista sí puede hacer** (decisión de producto 6): mandarle el
+ * test al paciente y abrirle la tablet. Ninguno de los dos enseña una
+ * respuesta, así que exigir acceso clínico sería negar un trabajo de
+ * mostrador; pero los dos ESCRIBEN en la historia (crean la valoración),
+ * así que los dos tienen que dejar línea.
+ *
+ * Y de ahí la forma que tiene esto: **el predicado cambia, la escritura
+ * de la línea no.** La alternativa era llamar a `apuntarAcceso` desde la
+ * ruta de enviar, y eso habría roto lo único que hace que el registro sea
+ * de fiar — que lo escribe un solo sitio. Con tres rutas se nota poco;
+ * con quince, el día que alguien añada la decimosexta sin acordarse, la
+ * historia se escribe sin dejar rastro.
+ */
+export type PermisoClinico = "SANITARIO" | "PERSONAL_DEL_CENTRO";
+
+/**
  * EL punto por el que pasa toda ruta clínica.
  *
  * Resuelve el acceso, apunta la línea (permitido o denegado), y sólo si
@@ -137,7 +159,13 @@ export interface ContextoClinico {
 export async function conHistoria<T>(
   request: FastifyRequest,
   reply: FastifyReply,
-  input: { clientId: string; action: AccionClinica },
+  input: {
+    clientId: string;
+    action: AccionClinica;
+    /** Por defecto `SANITARIO`: quien no lo diga, pasa por la función de
+     *  acceso. Un olvido cae del lado restrictivo. */
+    permiso?: PermisoClinico;
+  },
   handler: (ctx: ContextoClinico) => Promise<T>,
 ): Promise<T | undefined> {
   const actor = resolverActor(request);
@@ -158,14 +186,25 @@ export async function conHistoria<T>(
     },
   );
 
+  // ¿Pasa? Con `PERSONAL_DEL_CENTRO`, sí: ya pasó las puertas de la ruta
+  // (autenticado, de este tenant, con el módulo encendido) y lo que va a
+  // hacer no enseña ninguna respuesta.
+  const permiso = input.permiso ?? "SANITARIO";
+  const pasa = permiso === "PERSONAL_DEL_CENTRO" || veredicto.puede;
+
   // LA LÍNEA, ANTES DE TODO. Si no se puede escribir, no se pasa.
+  //
+  // El `outcome` dice si ESTE acto se permitió, no qué opinaba la función
+  // de acceso: una línea DENIED sobre un envío que sí ocurrió sería una
+  // línea falsa, y un registro con líneas falsas no sirve para lo que
+  // existe.
   try {
     await apuntarAcceso({
       tenantId: actor.tenantId,
       userId: actor.userId,
       clientId: input.clientId,
       action: input.action,
-      outcome: veredicto.puede ? "ALLOWED" : "DENIED",
+      outcome: pasa ? "ALLOWED" : "DENIED",
       deviceId: actor.deviceId,
       route: rutaDe(request),
     });
@@ -190,7 +229,10 @@ export async function conHistoria<T>(
     return undefined;
   }
 
-  if (!veredicto.puede) {
+  if (!pasa) {
+    // `pasa` sólo es falso cuando el permiso es `SANITARIO`, así que aquí
+    // el veredicto SIEMPRE trae motivo. El `if` es para el typecheck.
+    if (veredicto.puede) return handler(ctxDe(actor, input.clientId, veredicto));
     const status = HTTP_DEL_MOTIVO[veredicto.motivo];
     if (status === 404) {
       respondeComoRutaInexistente(request, reply);
@@ -204,11 +246,19 @@ export async function conHistoria<T>(
     return undefined;
   }
 
-  return handler({
+  return handler(ctxDe(actor, input.clientId, veredicto));
+}
+
+function ctxDe(
+  actor: Actor,
+  clientId: string,
+  veredicto: Veredicto,
+): ContextoClinico {
+  return {
     tenantId: actor.tenantId,
     userId: actor.userId,
-    clientId: input.clientId,
+    clientId,
     deviceId: actor.deviceId,
     veredicto,
-  });
+  };
 }

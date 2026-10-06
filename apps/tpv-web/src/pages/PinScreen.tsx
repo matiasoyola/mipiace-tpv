@@ -32,6 +32,16 @@ interface CashierLoginResponse {
     // ensancharla aquí es lo que obliga a decidir en cada pantalla a la
     // que el rol llega. Se usa el tipo compartido a propósito.
     role: CashierRole;
+    // clinica-2 · LA MARCA sanitaria, separada del rol (clinica-1 §2). La
+    // agenda la usa para decidir si ofrece abrir la valoración de un
+    // paciente: con el rol no basta, porque una cajera-sanitaria lleva
+    // `CASHIER` y una propietaria sanitaria `OWNER`.
+    //
+    // Opcional porque una sesión abierta ANTES de este bloque (o la del
+    // login offline, que no la lleva) no la trae: ausente se trata como
+    // `false`, y eso es lo correcto —no se ofrece el botón— porque lo
+    // clínico necesita red de todos modos.
+    isClinician?: boolean;
   };
   shiftState:
     | { kind: "needsShiftOpen" }

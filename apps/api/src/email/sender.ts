@@ -42,6 +42,53 @@ export class ConsoleEmailSender implements EmailSender {
   }
 }
 
+/**
+ * Escribe cada email a un fichero, una línea JSON por envío.
+ *
+ * SÓLO se usa cuando `EMAIL_OUTBOX_FILE` está puesta, y producción no la
+ * pone nunca. Existe por el banco de pruebas con navegador: ahí la API es
+ * un PROCESO de verdad, así que no se le puede inyectar un doble como
+ * hacen los tests de la suite (`vi.mock` de `getEmailSender`), y lo que el
+ * capítulo tiene que poder comprobar es el email REAL — su asunto, su
+ * cuerpo y el enlace que viaja dentro.
+ *
+ * El alternativo era leer el stdout del `ConsoleEmailSender`, y no vale:
+ * Playwright no le da a un test la salida de sus `webServer`.
+ *
+ * Se añade con el bloque clinica-2, donde el email ES parte de lo que hay
+ * que probar («el email no lleva ninguna palabra del cuestionario»), y
+ * sirve igual para cualquier capítulo futuro que mire un correo.
+ */
+export class FileEmailSender implements EmailSender {
+  constructor(
+    private readonly path: string,
+    private readonly tambienPorConsola = new ConsoleEmailSender(),
+  ) {}
+
+  async send(email: SentEmail): Promise<void> {
+    const { appendFile } = await import("node:fs/promises");
+    await appendFile(
+      this.path,
+      JSON.stringify({
+        at: new Date().toISOString(),
+        to: email.to,
+        subject: email.subject,
+        text: email.text,
+        html: email.html ?? null,
+        // Los adjuntos van por nombre y tamaño: el contenido de un PDF no
+        // tiene nada que hacer en un fichero de texto.
+        attachments: (email.attachments ?? []).map((a) => ({
+          filename: a.filename,
+          bytes: a.content.length,
+        })),
+      }) + "\n",
+      "utf8",
+    );
+    // Y también por consola, para que `pnpm dev` siga enseñándolo.
+    await this.tambienPorConsola.send(email);
+  }
+}
+
 export class SmtpEmailSender implements EmailSender {
   private readonly transporter: Transporter;
   private readonly from: string;
@@ -89,6 +136,13 @@ let cached: EmailSender | null = null;
 export function getEmailSender(): EmailSender {
   if (cached) return cached;
   const env = loadEnv();
+  // El buzón en fichero gana a todo lo demás: si alguien lo pide, es que
+  // está mirando los correos y no quiere que salgan de la máquina.
+  const buzon = process.env.EMAIL_OUTBOX_FILE;
+  if (buzon) {
+    cached = new FileEmailSender(buzon);
+    return cached;
+  }
   if (
     env.SMTP_HOST &&
     env.SMTP_PORT &&

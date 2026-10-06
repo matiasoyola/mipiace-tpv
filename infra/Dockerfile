@@ -37,6 +37,13 @@ COPY packages/db/package.json packages/db/
 # Era inofensivo hasta que su ticket.ts importó @mipiacetpv/ticket-model:
 # sin su manifest en el install, pnpm no crea su node_modules y el
 # typecheck del api (que atraviesa sus fuentes) no resuelve el módulo.
+# clinica-2: el cuestionario de la valoración y sus funciones puras (alertas,
+# validación, puerta del primer tratamiento). Lo importan el api Y tpv-web, así
+# que sin su manifest se cae el tsc de los dos. Lo pilló
+# infra/test/dockerfile-manifiestos.test.ts en la primera pasada de la suite,
+# que es para lo que existe: las dos veces anteriores se vio en el smoke del CI
+# después del merge.
+COPY packages/clinica-valoracion/package.json packages/clinica-valoracion/
 COPY packages/escpos-builder/package.json packages/escpos-builder/
 COPY packages/holded-client/package.json packages/holded-client/
 COPY packages/ticket-model/package.json packages/ticket-model/

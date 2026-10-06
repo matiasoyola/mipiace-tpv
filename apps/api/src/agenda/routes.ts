@@ -45,6 +45,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { requireOwnerOrCashier } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
+import { valoracionesPendientesDe } from "../clinica/valoracion-en-agenda.js";
 import type { PrismaClient } from "@mipiacetpv/db";
 import { checkoutAppointment } from "./checkout.js";
 import {
@@ -198,6 +199,23 @@ export async function registerAgendaRoutes(
         store.getStaffProfiles(auth.tenantId),
         store.listAppointments(auth.tenantId, from, to),
       ]);
+      // clinica-2 · qué pacientes de este rango tienen la valoración sin
+      // validar. La agenda lleva un AVISO DISCRETO («Valoración
+      // pendiente») y **ningún dato de salud**: la decisión de producto 6
+      // es que las alertas viven sólo dentro de la historia, y la agenda
+      // sólo enseña contacto.
+      //
+      // Va como un campo NUEVO y aparte (una lista de ids) en vez de
+      // dentro de cada cita, y por dos razones: la vista de la cita la
+      // construye el store —que es agenda y no sabe de clínica— y así
+      // quien no lea el campo no se entera de que existe. Cero consultas
+      // extra en los catorce tenants no clínicos: lo primero que mira el
+      // WHERE es la capability.
+      const valoracionesPendientes = await valoracionesPendientesDe(
+        prismaFor(),
+        auth.tenantId,
+        appointments.map((a) => a.clientId),
+      );
       // B-reservas-7a · la rejilla deja de ser ciega. Los cuatro campos de
       // antes siguen ahí y con el mismo nombre: quien no lea los nuevos no
       // se entera de que existen. Todo esto viaja a la caché offline del
@@ -220,6 +238,7 @@ export async function registerAgendaRoutes(
         appointments,
         slotMinutes: request.agendaSlotMinutes ?? SLOT_MINUTES,
         days,
+        valoracionesPendientes,
       };
     },
   );

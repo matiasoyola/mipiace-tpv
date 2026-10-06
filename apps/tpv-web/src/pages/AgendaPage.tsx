@@ -80,6 +80,7 @@ import {
   serviciosSinNadie,
   subscribeHealthSnapshot,
 } from "../lib/agenda-health.js";
+import { ValoracionSanitario } from "../clinica/ValoracionSanitario.js";
 import { AgendaHealthPanel } from "./AgendaHealthPanel.js";
 import { AgendaSkillMatrix } from "./AgendaSkillMatrix.js";
 
@@ -307,6 +308,16 @@ export interface AgendaPageProps {
   // el checkout de un CLINICIAN en la API. Lo que se gana escondiéndolo
   // es no ofrecerle una acción que siempre va a fallar.
   puedeCobrar?: boolean;
+  // clinica-2 · ¿lleva esta persona LA MARCA sanitaria? De ella depende
+  // que se le ofrezca abrir la valoración de un paciente.
+  //
+  // La marca y no el rol (clinica-1 §2): una cajera-sanitaria lleva
+  // `CASHIER` y una propietaria sanitaria `OWNER`, así que mirar el rol
+  // dejaría fuera a las dos. Y esconderlo no es la frontera —cada ruta
+  // clínica pasa por la función de acceso y por el registro—: lo que se
+  // gana es no pintarle a la recepcionista un botón que siempre le va a
+  // fallar y que le dejaría una línea DENIED por cada toque de curiosidad.
+  esSanitario?: boolean;
   onEnterDraft?: (entry: {
     appointmentId: string;
     ticketId: string;
@@ -322,6 +333,7 @@ export function AgendaPage({
   onNoticeShown,
   staffFilterInicial,
   puedeCobrar = true,
+  esSanitario = false,
 }: AgendaPageProps) {
   const [date, setDate] = useState<string>(todayLocalDate());
   const [day, setDay] = useState<AgendaDay | null>(null);
@@ -332,6 +344,12 @@ export function AgendaPage({
   const [staffFilter, setStaffFilter] = useState<string | null>(
     staffFilterInicial ?? null,
   );
+  // clinica-2 · la valoración de un paciente, como overlay sobre la
+  // agenda. Es la puerta del SANITARIO a la historia: su TPV no tiene
+  // `SalePage` detrás (clinica-1 §7), así que la sección Clientes —de
+  // donde cuelga la ficha— no existe para él. La cita es su entrada
+  // natural: es desde donde trabaja.
+  const [valoracionDe, setValoracionDe] = useState<string | null>(null);
   // B-reservas-9 · el panel de salud y la matriz cuelgan de aquí: se entra y
   // se sale sin dejar la agenda.
   const [saludAbierta, setSaludAbierta] = useState(false);
@@ -1324,6 +1342,18 @@ export function AgendaPage({
             onStatus={(st) => changeStatus(detail.id, st)}
             onCheckout={() => doCheckout(detail.id)}
             puedeCobrar={puedeCobrar}
+            // clinica-2 · el aviso discreto y, para el sanitario, la puerta
+            // a la valoración.
+            valoracionPendiente={
+              detail.clientId != null &&
+              (day?.valoracionesPendientes ?? []).includes(detail.clientId)
+            }
+            esSanitario={esSanitario}
+            onAbrirValoracion={
+              detail.clientId
+                ? () => setValoracionDe(detail.clientId!)
+                : undefined
+            }
             onMove={(start, staffUserId) =>
               void doMove(detail.id, start, staffUserId)
             }
@@ -1331,6 +1361,47 @@ export function AgendaPage({
           />
         )}
       </div>
+
+      {/* clinica-2 · la valoración del paciente de la cita. Overlay a
+          pantalla completa, como el resto de las hojas de esta pantalla:
+          lo que la podóloga está haciendo es revisar una historia, no
+          mirar un detalle de agenda de reojo. */}
+      {valoracionDe && (
+        <div className="fixed inset-0 z-50 bg-mipiace-stone flex flex-col font-sans">
+          <div className="flex items-center gap-3 px-4 md:px-6 h-16 bg-white border-b border-slate-200 shrink-0">
+            <button
+              onClick={() => {
+                setValoracionDe(null);
+                // Y SE RECARGA EL DÍA. El aviso «Valoración pendiente» sale
+                // de la respuesta de `/agenda`, que se pidió antes de entrar
+                // aquí: sin esto, la podóloga valida, vuelve, y la agenda le
+                // sigue diciendo que queda algo pendiente. Lo encontró el
+                // banco en la última línea del capítulo 11.
+                void loadDay(date);
+              }}
+              className="h-11 w-11 rounded-2xl hover:bg-slate-100 flex items-center justify-center text-mipiace-ink"
+              // «Volver a la agenda» y no «Volver» a secas: debajo hay otra
+              // pantalla con su propio «Volver», y dos botones con el mismo
+              // nombre accesible son dos botones que un lector de pantalla
+              // —y el banco— no pueden distinguir.
+              aria-label="Volver a la agenda"
+            >
+              <ArrowLeft className="w-5 h-5" strokeWidth={2.25} />
+            </button>
+            <h1 className="text-[18px] font-semibold text-mipiace-ink flex-1">
+              Valoración inicial · {clientLabel(valoracionDe).nombre}
+            </h1>
+          </div>
+          <div className="flex-1 overflow-y-auto px-4 md:px-6 py-4">
+            <div className="max-w-[760px] mx-auto">
+              <ValoracionSanitario
+                clientId={valoracionDe}
+                puedeLeer={esSanitario}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* B-reservas-7a · el alta de una ausencia, en TRES TOQUES como
           máximo: el ⋯ de la columna, "No está en todo el día", y ya. */}
@@ -2411,6 +2482,14 @@ function DetailPanel(props: {
   onCheckout: () => void;
   /** clinica-1 · ¿se le ofrece «Cobrar en caja»? El sanitario sin caja, no. */
   puedeCobrar: boolean;
+  /** clinica-2 · este paciente tiene la valoración sin validar. SIN NINGÚN
+   *  dato de salud: es un trámite pendiente, no un diagnóstico. */
+  valoracionPendiente: boolean;
+  /** clinica-2 · lleva la marca sanitaria (y por tanto se le ofrece abrir
+   *  la valoración). Ver la nota de `AgendaPageProps`. */
+  esSanitario: boolean;
+  /** `undefined` en una cita sin paciente (walk-in): no hay historia. */
+  onAbrirValoracion?: () => void;
   onMove: (startISO: string, staffUserId?: string) => void;
   onClearMoveError: () => void;
 }) {
@@ -2458,6 +2537,18 @@ function DetailPanel(props: {
             {localHHMM(appt.start)} – {localHHMM(appt.end)}
           </div>
         </div>
+        {/* clinica-2 · EL AVISO DISCRETO.
+            Discreto de verdad: una línea ámbar con cinco palabras, debajo
+            de los datos de la cita y sin icono de alarma. Lo que dice es
+            que falta un trámite —no qué tiene el paciente— y por eso lo
+            puede leer la recepcionista: es ella la que le pregunta si le
+            llegó el email. Las alertas de salud viven sólo dentro de la
+            historia (decisión de producto 6). */}
+        {props.valoracionPendiente && (
+          <div className="rounded-xl bg-amber-50 text-amber-700 px-3 py-2 text-[12.5px] leading-snug">
+            Valoración pendiente
+          </div>
+        )}
         <div>
           {/* B-reservas-mostrador F2 · el mismo tono que el filete de la
               tarjeta. Con `STATUS_COLOR` crudo este chip pintaba texto BLANCO
@@ -2472,6 +2563,22 @@ function DetailPanel(props: {
           </span>
         </div>
       </div>
+
+      {/* clinica-2 · la puerta del sanitario a la historia. Va FUERA del
+          `!terminal` a propósito: una cita ya completada o cancelada sigue
+          siendo el sitio desde el que se revisa lo que se escribió ese
+          día, y la historia no se cierra con la cita. */}
+      {props.esSanitario && props.onAbrirValoracion && (
+        <div className="p-4 border-t border-slate-100">
+          <button
+            onClick={props.onAbrirValoracion}
+            className="w-full min-h-touch rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[14px] font-medium text-mipiace-ink flex items-center justify-center gap-2"
+          >
+            <Stethoscope className="w-4 h-4" strokeWidth={2.25} />
+            Valoración inicial
+          </button>
+        </div>
+      )}
 
       {!terminal && (
         <div className="p-4 border-t border-slate-100 space-y-2">

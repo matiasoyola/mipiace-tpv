@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { PrismaClient } from "@mipiacetpv/db";
 
 import { databaseUrl } from "./base-de-datos.js";
+import { sembrarClinica } from "./clinica-demo.js";
 import {
   esBaseDesechable,
   nombreDeLaBase,
@@ -175,6 +176,11 @@ async function main(): Promise<void> {
   const prisma = new PrismaClient({ datasources: { db: { url } } });
   try {
     await sembrar(prisma);
+    // clinica-2 · la clínica va DESPUÉS y en su propio tenant: el
+    // `TRUNCATE` de la peluquería se lleva todo, así que sembrarla antes
+    // sería sembrarla para nada. Ver la cabecera de `clinica-demo.ts`.
+    paso("sembrando «Clínica Podológica Demo»");
+    await sembrarClinica(prisma);
   } finally {
     await prisma.$disconnect();
   }

@@ -66,6 +66,14 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
               // puerta aquí mismo y viajar al TPV para que esconda lo
               // que no aplica. La puerta es ésta; el flag cacheado es UI.
               cajaEnabled: true,
+              // clinica-2 · el TPV lo cachea con sus hermanos para decidir
+              // si ENSEÑA la pestaña «Valoración» en la ficha del paciente.
+              // Es UI y no una puerta: las rutas clínicas llevan su gate y
+              // contestan la 404 de Fastify con el módulo apagado
+              // (clinica-1 §1). Lo que se gana es no pintarle a un bar una
+              // pestaña que le cuenta que este sistema guarda datos de
+              // salud de otros clientes.
+              clinicalRecordsEnabled: true,
             },
           });
       if (tenant?.cajaEnabled === false) {
@@ -182,6 +190,8 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
               // catalogo-local (addendum 3) · viaja con sus hermanos y se
               // cachea igual. Es UI: aquí no gatea nada.
               holdedEnabled: tenant.holdedEnabled,
+              // clinica-2 · viaja con sus hermanos y se cachea igual.
+              clinicalRecordsEnabled: tenant.clinicalRecordsEnabled,
               // v1.3-Operativa-Extra · Lote 1: alias editable de tags
               // (`slug` tal como llega de Holded en lowercase → `label`
               // a pintar en el chip).

@@ -134,6 +134,21 @@ export interface AgendaDay {
   // El horario del centro y las ausencias, fecha a fecha. También en la
   // caché: sin red hay que poder decir "el centro está cerrado" igual.
   days?: AgendaDayInfo[];
+  // clinica-2 · los pacientes del día con la valoración inicial SIN
+  // VALIDAR. Sólo ids: ni una alerta, ni una respuesta, ni el estado
+  // concreto — las alertas de salud viven sólo dentro de la historia
+  // (decisión de producto 6) y la agenda sólo enseña contacto.
+  //
+  // Lo que sí es de agenda, y por eso está aquí: «a este paciente le falta
+  // un trámite antes de su primer tratamiento», que es lo que la
+  // recepcionista necesita para preguntarle si le llegó el email.
+  //
+  // Opcional y vacío por defecto, como `days`: un servidor anterior a este
+  // bloque no lo manda y la agenda sigue funcionando contra él (el APK se
+  // despliega aparte del servidor). Y NO entra en la caché offline: es
+  // información que cambia sin que la agenda se entere, y un aviso viejo
+  // sobre una valoración ya validada sería peor que no tenerlo.
+  valoracionesPendientes?: string[];
 }
 
 /** La retícula del día, con el valor de B4 como último recurso: caché
@@ -233,6 +248,7 @@ export async function fetchAgendaDay(date: string): Promise<AgendaDay> {
       // funcionando contra él (el APK se despliega aparte del servidor).
       slotMinutes?: number;
       days?: AgendaDayInfo[];
+      valoracionesPendientes?: string[];
     }>(`/agenda?date=${date}`);
     const day: AgendaDay = {
       date,
@@ -244,8 +260,17 @@ export async function fetchAgendaDay(date: string): Promise<AgendaDay> {
     // La caché guarda lo que dijo el SERVIDOR. Lo local se mezcla al
     // devolver, nunca se persiste: si se cacheara, una cita rechazada
     // sobreviviría a su propio item del outbox.
+    //
+    // clinica-2 · `valoracionesPendientes` se añade DESPUÉS de cachear, a
+    // propósito: el aviso no se guarda. Sin red no se puede saber si la
+    // podóloga acaba de validarla, y un aviso viejo sobre una valoración
+    // ya validada manda a alguien a mandar un test que no hace falta.
     await writeDay(day);
-    return { ...day, appointments: await mergePendingLocal(day) };
+    return {
+      ...day,
+      appointments: await mergePendingLocal(day),
+      valoracionesPendientes: res.valoracionesPendientes ?? [],
+    };
   } catch (err) {
     // Offline / 5xx: usa la caché del día si existe.
     const cached = await loadAgendaDayFromCache(date);

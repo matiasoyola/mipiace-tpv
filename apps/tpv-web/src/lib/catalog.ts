@@ -67,6 +67,14 @@ const CRM_ENABLED_KEY = "mipiacetpv-catalog-crm-enabled";
 // B-reservas-2 · capability flag de la agenda (ADR-R6). El TPV lo cachea
 // para pintar (o no) la duración por línea de servicio en el ticket.
 const AGENDA_ENABLED_KEY = "mipiacetpv-catalog-agenda-enabled";
+// clinica-2 · capability flag de la HISTORIA CLÍNICA. Mismo patrón que
+// sus hermanos, y el default al no saberlo es APAGADA: la columna es
+// `@default(false)` y «no lo sé» se parece mucho más a «no lo tiene».
+// Fallar hacia encendido pintaría una pestaña «Valoración» en la ficha de
+// un cliente de bar, que es contarle que este sistema guarda datos de
+// salud de otros. Es la misma dirección de fallo que el gate del servidor
+// (clinica-1 §1), y lo contrario que la caja.
+const CLINICA_ENABLED_KEY = "mipiacetpv-catalog-clinica-enabled";
 // H1 (ADR-016) · capability flag de la CAJA. Lo cacheamos igual que sus
 // hermanos, pero con una diferencia que importa: el default al no
 // saberlo es ENCENDIDA, porque `caja_enabled` es `@default(true)` y un
@@ -127,6 +135,15 @@ export function getCachedCrmEnabled(): boolean {
 
 export function setCachedCrmEnabled(value: boolean): void {
   localStorage.setItem(CRM_ENABLED_KEY, value ? "1" : "0");
+}
+
+// clinica-2 · true sólo si el tenant tiene la historia clínica encendida.
+export function getCachedClinicaEnabled(): boolean {
+  return localStorage.getItem(CLINICA_ENABLED_KEY) === "1";
+}
+
+export function setCachedClinicaEnabled(value: boolean): void {
+  localStorage.setItem(CLINICA_ENABLED_KEY, value ? "1" : "0");
 }
 
 // B-reservas-2 · true sólo si el tenant tiene la agenda activada (ADR-R6).
@@ -284,6 +301,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
   let lastTagAliases: Array<{ slug: string; label: string }> | undefined = undefined;
   let lastCreditSales: boolean | undefined = undefined;
   let lastCrmEnabled: boolean | undefined = undefined;
+  let lastClinicaEnabled: boolean | undefined = undefined;
   let lastAgendaEnabled: boolean | undefined = undefined;
   let lastCajaEnabled: boolean | undefined = undefined;
   let lastHoldedEnabled: boolean | undefined = undefined;
@@ -298,6 +316,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
       creditSalesEnabled?: boolean;
       crmEnabled?: boolean;
       agendaEnabled?: boolean;
+      clinicalRecordsEnabled?: boolean;
       cajaEnabled?: boolean;
       holdedEnabled?: boolean;
     }>(
@@ -329,6 +348,9 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
     if (res.agendaEnabled !== undefined) {
       lastAgendaEnabled = res.agendaEnabled;
     }
+    if (res.clinicalRecordsEnabled !== undefined) {
+      lastClinicaEnabled = res.clinicalRecordsEnabled;
+    }
     if (res.cajaEnabled !== undefined) {
       lastCajaEnabled = res.cajaEnabled;
     }
@@ -345,6 +367,9 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
   if (lastIconPreset !== undefined) setCachedIconPreset(lastIconPreset);
   if (lastCreditSales !== undefined) setCachedCreditSalesEnabled(lastCreditSales);
   if (lastCrmEnabled !== undefined) setCachedCrmEnabled(lastCrmEnabled);
+  if (lastClinicaEnabled !== undefined) {
+    setCachedClinicaEnabled(lastClinicaEnabled);
+  }
   if (lastAgendaEnabled !== undefined) setCachedAgendaEnabled(lastAgendaEnabled);
   if (lastCajaEnabled !== undefined) setCachedCajaEnabled(lastCajaEnabled);
   if (lastHoldedEnabled !== undefined) setCachedHoldedEnabled(lastHoldedEnabled);

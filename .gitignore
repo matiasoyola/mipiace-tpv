@@ -50,4 +50,11 @@ apps/tpv-web/.a4-test-dist-*/
 
 # Banco de la agenda: resultados de Playwright (trazas, capturas, vídeos).
 apps/e2e-ui/resultados/
+# clinica-2 · el buzón de correo del banco (una línea JSON por email). Va
+# fuera de `resultados/` porque Playwright limpia ese directorio en cada
+# pasada, y un capítulo que corre solo necesita el email del anterior.
+apps/e2e-ui/buzon-del-banco.jsonl
+# Y el `test-results/` que Playwright deja en la raíz cuando se le lanza
+# desde fuera de apps/e2e-ui.
+test-results/
 apps/e2e-ui/playwright-report/

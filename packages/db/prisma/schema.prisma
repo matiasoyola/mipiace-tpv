@@ -79,11 +79,82 @@ enum ClinicalAccessOutcome {
   DENIED
 }
 
-// clinica-1 · qué clase de pieza de historia es. Hoy sólo la anotación; la
-// valoración inicial, la exploración, la sesión y las fotos son bloques
-// siguientes y entrarán como valores nuevos de este enum.
+// clinica-1 · qué clase de pieza de historia es. La exploración, la sesión y
+// las fotos son bloques siguientes y entrarán como valores nuevos de este
+// enum.
 enum ClinicalEntryKind {
   NOTE
+  // clinica-2 · lo que contestó el paciente en la valoración inicial. Vive
+  // aquí y no en `clinical_assessments` por una razón de fondo: las
+  // respuestas del paciente son INMUTABLES, y la inmutabilidad ya la hace
+  // cumplir el motor sobre esta tabla (trigger `clinical_entries_inmutable`).
+  // Guardarlas en la tabla de la valoración —que SÍ cambia de estado— habría
+  // exigido un segundo mecanismo de inmutabilidad por columnas, que es la
+  // forma de fallo que este enum evita.
+  INITIAL_ASSESSMENT
+}
+
+// clinica-2 · en qué punto está una valoración inicial.
+//
+//   PENDIENTE_PACIENTE · se le mandó el test (o se le abrió la tablet) y
+//                        todavía no ha contestado.
+//   RESPONDIDA         · contestó. Las alertas ya se enseñan, marcadas
+//                        «por validar»: esconderlas hasta el visto bueno
+//                        dejaría a la podóloga sin el dato que ya existe.
+//   VALIDADA           · el sanitario la revisó con el paciente delante,
+//                        marcó las tres confirmaciones y firmó. **Desde
+//                        aquí no se edita**: si algo cambia, se repasa con
+//                        una valoración nueva (decisión de producto 7).
+//
+// El estado sólo avanza, y lo hace cumplir el trigger
+// `clinical_assessments_guard`.
+enum ClinicalAssessmentStatus {
+  PENDIENTE_PACIENTE
+  RESPONDIDA
+  VALIDADA
+}
+
+// clinica-2 · de dónde salió la valoración. MISMO vocabulario y misma
+// forma que `ClinicalAccessSource`, y por la misma razón: hay un camino que
+// lo hace una persona y otro que lo hace un hecho.
+//
+//   APPOINTMENT · la creó el alta de una cita de un servicio marcado
+//                 «primera valoración». No la pide nadie: la pide el hecho
+//                 de que se le ha dado esa cita. El alta pasa por
+//                 `agenda/store.ts`, donde no hay sesión de la que sacar un
+//                 usuario — y el motor (`engine.ts`) no se toca.
+//   MANUAL      · la pidió alguien, con «Enviar el test» o abriendo la
+//                 tablet, y queda su nombre.
+enum ClinicalAssessmentSource {
+  APPOINTMENT
+  MANUAL
+}
+
+// clinica-2 · por dónde contesta el paciente. Dos canales y no tres:
+// WhatsApp y SMS están fuera de alcance (no hay proveedor).
+enum ClinicalAssessmentChannel {
+  // Enlace en un email, al dar la cita de primera valoración.
+  EMAIL
+  // La tablet de la sala, bloqueada en el test.
+  TABLET
+}
+
+// clinica-2 · quién tecleó las respuestas. Decisión de producto: puede
+// responder un familiar, y queda dicho quién — una respuesta de segunda
+// mano se lee distinto, y la pantalla del sanitario lo dice en cada fila.
+enum ClinicalAnsweredBy {
+  PACIENTE
+  FAMILIAR
+}
+
+// clinica-2 · lo que puede contestar una persona. «No lo sé» ES una
+// respuesta y está siempre disponible (decisión de producto 4): un mayor
+// que no sabe si toma anticoagulantes tiene que poder decirlo en vez de
+// adivinar, y es justo lo que la validación obliga a resolver después.
+enum ClinicalAnswer {
+  SI
+  NO
+  NO_SE
 }
 
 enum HoldedAuthMode {
@@ -752,6 +823,11 @@ model Tenant {
   clinicalAccessLogs ClinicalAccessLog[]
   clinicalEntries    ClinicalEntry[]
   clinicalAddenda    ClinicalAddendum[]
+  // clinica-2 · las valoraciones iniciales y las correcciones del sanitario.
+  // RESTRICT al otro lado, como todo lo clínico: un tenant con historia no
+  // se borra.
+  clinicalAssessments ClinicalAssessment[]
+  clinicalAssessmentCorrections ClinicalAssessmentCorrection[]
 
   // v1.3-SuperAdmin-Hub Lote 3 · el backfill y el hub buscan/listan
   // tenants por `holded_account_id`. Sin índice eran scans completos
@@ -875,6 +951,34 @@ model User {
   // CASHIER reales se bloquean vía `Tenant.blockedAt` o
   // `User.tokenVersion`. No se reutiliza para borrado de usuarios reales.
   deletedAt              DateTime? @map("deleted_at") @db.Timestamptz()
+  // clinica-2 · EL ACTOR DE SISTEMA. Hoy hay uno y sólo uno: «Paciente (por
+  // enlace)», el autor de las respuestas que el paciente teclea desde el
+  // enlace del email o desde la tablet.
+  //
+  // Por qué existe: `ClinicalEntry.authorUserId` y
+  // `ClinicalAccessLog.userId` son NOT NULL con RESTRICT, y eso no es un
+  // descuido de clinica-1 — es la garantía legal de que ninguna línea de
+  // historia es anónima. El paciente no es un `User`, pero SÍ es un actor
+  // que escribe en su historia. Así que se le da una fila: la autoría sigue
+  // siendo NOT NULL, el registro de accesos no necesita un caso especial, y
+  // la pantalla puede escribir «Respondió el paciente» leyendo un `alias`
+  // como para cualquier otro autor.
+  //
+  // La alternativa era relajar esos NOT NULL con una columna
+  // discriminadora. Se descarta: convertir «ninguna línea sin autor» en
+  // «ninguna línea sin autor, salvo estas» es perder la invariante entera
+  // para ahorrar una fila.
+  //
+  // **No puede autenticarse NUNCA**, y no por omisión: el CHECK
+  // `users_system_actor_no_credentials` prohíbe que tenga `passwordHash` o
+  // `pinHash`. Sin hash no hay login de panel (exige password) ni de TPV
+  // (exige PIN), y la prohibición vive en el motor y no en la confianza de
+  // que nadie le ponga uno.
+  //
+  // Tampoco sale en ninguna lista de personas (`GET /cashiers`,
+  // `GET /staff`, candidatos a PIN, colisión de alias): es un actor, no
+  // alguien a quien dar de alta o quitar.
+  isSystemActor          Boolean   @default(false) @map("is_system_actor")
   // clinica-1 · LA MARCA SANITARIA, separada del rol de negocio.
   //
   // Decisión de producto (Matías, 05-10-2026): en pantalla se ven tres
@@ -936,6 +1040,12 @@ model User {
   clinicalAccessLogs     ClinicalAccessLog[]
   clinicalEntries        ClinicalEntry[]
   clinicalAddenda        ClinicalAddendum[]
+  // clinica-2 · los tres papeles en una valoración: quién mandó el test,
+  // quién la validó y quién firmó cada corrección. Los dos primeros son del
+  // personal; el tercero también (el paciente no corrige: contesta).
+  assessmentsRequested   ClinicalAssessment[] @relation("AssessmentRequestedBy")
+  assessmentsValidated   ClinicalAssessment[] @relation("AssessmentValidatedBy")
+  assessmentCorrections  ClinicalAssessmentCorrection[]
 
   @@index([tenantId])
   @@map("users")
@@ -2318,6 +2428,10 @@ model Client {
   clinicalAccesses   ClinicalAccess[]
   clinicalAccessLogs ClinicalAccessLog[]
   clinicalEntries    ClinicalEntry[]
+  // clinica-2 · sus valoraciones iniciales. Puede haber varias: la
+  // valoración se repasa creando una NUEVA, sin sobrescribir la anterior
+  // (decisión de producto 7).
+  clinicalAssessments ClinicalAssessment[]
 
   // Búsqueda por teléfono/email y orden alfabético (A–Z) por tenant.
   @@index([tenantId, phone])
@@ -2398,6 +2512,18 @@ model ServiceScheduling {
   // estable `{caja,ticket,agenda,online}` (jsonb). El front la lee tal
   // cual; `online` debe ir de la mano de `onlineBookable`.
   channels        Json     @default("{\"caja\":true,\"ticket\":true,\"agenda\":true,\"online\":false}")
+  // clinica-2 · «este servicio es la primera valoración».
+  //
+  // Al dar una cita de un servicio marcado así a un paciente que no tiene
+  // valoración, el alta crea la valoración PENDIENTE_PACIENTE y manda el
+  // email con el enlace. Es la marca que convierte «dar la cita» en «el
+  // paciente recibe el test», sin que nadie tenga que acordarse.
+  //
+  // Vive aquí y no en el producto de Holded porque es agenda, no catálogo
+  // (ADR-R1): Holded no modela esto y el precio/IVA del servicio siguen
+  // siendo suyos. Nace en `false` para los quince tenants de hoy, así que
+  // ningún alta de cita existente cambia de comportamiento.
+  primeraValoracion Boolean @default(false) @map("primera_valoracion")
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz()
 
@@ -2584,6 +2710,9 @@ model Appointment {
   // lado: si la cita desapareciera, la anotación sigue en la historia y
   // pierde el enlace, no el contenido.
   clinicalEntries ClinicalEntry[]
+  // clinica-2 · la valoración que esta cita disparó, si era de primera
+  // valoración. SET NULL al otro lado por la misma razón que las entradas.
+  clinicalAssessments ClinicalAssessment[]
 
   // El índice gist (tenant_id, timeslot) para consultas de rango se crea en
   // SQL (Prisma no expresa gist sobre Unsupported).
@@ -3254,6 +3383,9 @@ model ClinicalEntry {
   author      User               @relation(fields: [authorUserId], references: [id], onDelete: Restrict)
   appointment Appointment?       @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
   addenda     ClinicalAddendum[]
+  // clinica-2 · la valoración de la que esta entrada son las respuestas, si
+  // es de kind INITIAL_ASSESSMENT. Uno a uno (`entryId` es único allí).
+  assessment  ClinicalAssessment?
 
   @@index([tenantId, clientId, createdAt])
   @@index([appointmentId])
@@ -3280,4 +3412,136 @@ model ClinicalAddendum {
   @@index([entryId, createdAt])
   @@index([tenantId])
   @@map("clinical_addenda")
+}
+
+// ─── La valoración inicial (clinica-2) ────────────────────────────────
+//
+// «Nadie trata a un diabético anticoagulado sin saberlo.» El paciente
+// contesta un test de enfermedades crónicas ANTES de su primera cita (por
+// un enlace del email o en la tablet de la sala), el sanitario lo revisa
+// con él delante, marca tres confirmaciones y lo valida. Sin valoración
+// validada no se registra el primer tratamiento
+// (`clinica/primer-tratamiento.ts`, que usará `clinica-3`).
+//
+// DOS TABLAS Y UNA ENTRADA DE HISTORIA, y el reparto es el eje del bloque:
+//
+//   · `clinical_entries` (kind = INITIAL_ASSESSMENT) · **lo que contestó el
+//     paciente**. Inmutable por el motor, con autor (el actor «paciente por
+//     enlace») y fecha. No se toca nunca más.
+//   · `clinical_assessments` · **el estado**, que sí cambia: pendiente →
+//     respondida → validada, el canal, el token del enlace, las tres
+//     confirmaciones y la firma.
+//   · `clinical_assessment_corrections` · **lo que corrigió el sanitario**,
+//     append-only, con autor y hora, AL LADO de lo del paciente.
+//
+// Si todo viviera en una tabla habría que elegir entre «inmutable» (y
+// entonces el estado no puede avanzar) y «mutable» (y entonces las
+// respuestas del paciente son editables). Separarlo es lo que permite las
+// dos cosas a la vez sin un segundo mecanismo de inmutabilidad por
+// columnas.
+
+// El estado de una valoración. Lo que cambia, y sólo hacia adelante.
+//
+// No se borra (trigger `clinical_assessments_guard`), el estado sólo
+// avanza, lo ya contestado no se reescribe, y una vez VALIDADA la fila
+// queda congelada: validar es firmar.
+model ClinicalAssessment {
+  id            String                    @id @default(uuid()) @db.Uuid
+  tenantId      String                    @map("tenant_id") @db.Uuid
+  clientId      String                    @map("client_id") @db.Uuid
+  // De qué cita salió, si salió de una (la cita de primera valoración que
+  // disparó el email). SET NULL: si la cita desapareciera, la valoración
+  // sigue siendo parte de la historia.
+  appointmentId String?                   @map("appointment_id") @db.Uuid
+  // CON QUÉ VERSIÓN del cuestionario se contestó. Sin esto, una valoración
+  // de hace dos años se pintaría con las preguntas de hoy — que es decir
+  // que el paciente contestó algo que no se le preguntó.
+  questionnaireVersion Int                @map("questionnaire_version")
+  status        ClinicalAssessmentStatus  @default(PENDIENTE_PACIENTE)
+  channel       ClinicalAssessmentChannel
+  source        ClinicalAssessmentSource
+  // Quién mandó el test o abrió la tablet. Puede ser la recepcionista, y
+  // precisamente por eso queda escrito quién fue.
+  //
+  // NULL cuando `source = APPOINTMENT`: ahí no lo pide una persona. El
+  // CHECK `clinical_assessments_source_pedida_por` ata las dos cosas.
+  requestedByUserId String?               @map("requested_by_user_id") @db.Uuid
+  createdAt     DateTime                  @default(now()) @map("created_at") @db.Timestamptz()
+
+  // ── El enlace del email ──────────────────────────────────────────────
+  //
+  // Se guarda el SHA-256 del token, no el token. Es la diferencia con
+  // `Ticket.publicSlug` (que se guarda en claro) y la razón es el dato que
+  // protege: el slug de un ticket abre un PDF que su dueño ya tiene; este
+  // enlace abre el formulario de salud de una persona. Con el hash, una
+  // copia de la base no abre ningún enlace. El token en claro existe sólo
+  // en el email y en la URL del paciente.
+  linkTokenHash String?                   @unique @map("link_token_hash")
+  // Caduca a los 30 días. Una cita que se da para dentro de tres semanas
+  // tiene que seguir teniendo enlace vivo; un enlace de hace un año no.
+  linkExpiresAt DateTime?                 @map("link_expires_at") @db.Timestamptz()
+  // Y DE UN SOLO USO: al contestar se sella y el enlace deja de abrir.
+  // Reenviar el test rota el token (otro hash, otra caducidad).
+  linkUsedAt    DateTime?                 @map("link_used_at") @db.Timestamptz()
+
+  // ── Lo que contestó el paciente, que vive en la historia ─────────────
+  //
+  // Único: una entrada de historia pertenece a una valoración y no a dos.
+  entryId       String?                   @unique @map("entry_id") @db.Uuid
+  answeredAt    DateTime?                 @map("answered_at") @db.Timestamptz()
+  answeredBy    ClinicalAnsweredBy?       @map("answered_by")
+
+  // ── Las tres confirmaciones y la firma ───────────────────────────────
+  //
+  // Se escriben EN EL MISMO acto de validar, no una a una: la pantalla las
+  // marca en memoria y las manda con la validación. Media validación
+  // guardada (dos casillas y nadie que firme) no significa nada, y un
+  // CHECK garantiza que una fila VALIDADA las tiene las tres.
+  confirmedAllergies  Boolean             @default(false) @map("confirmed_allergies")
+  confirmedMedication Boolean             @default(false) @map("confirmed_medication")
+  confirmedAlerts     Boolean             @default(false) @map("confirmed_alerts")
+  validatedAt         DateTime?           @map("validated_at") @db.Timestamptz()
+  validatedByUserId   String?             @map("validated_by_user_id") @db.Uuid
+
+  tenant      Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client      Client         @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  appointment Appointment?   @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  entry       ClinicalEntry? @relation(fields: [entryId], references: [id], onDelete: Restrict)
+  requestedBy User?          @relation("AssessmentRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  validatedBy User?          @relation("AssessmentValidatedBy", fields: [validatedByUserId], references: [id], onDelete: Restrict)
+  corrections ClinicalAssessmentCorrection[]
+
+  @@index([tenantId, clientId, createdAt])
+  @@index([appointmentId])
+  @@map("clinical_assessments")
+}
+
+// Lo que el sanitario corrigió. APPEND-ONLY (trigger
+// `clinical_assessment_corrections_append_only`).
+//
+// Corregir dos veces la misma pregunta deja DOS filas; manda la última por
+// fecha y las dos se conservan. Es la misma decisión que
+// `clinical_addenda`: corregir una corrección es otra corrección, no una
+// edición. Y no toca la respuesta del paciente, que está en la entrada
+// inmutable: en pantalla se ven las dos a la vez.
+model ClinicalAssessmentCorrection {
+  id           String         @id @default(uuid()) @db.Uuid
+  tenantId     String         @map("tenant_id") @db.Uuid
+  assessmentId String         @map("assessment_id") @db.Uuid
+  // El id de la pregunta del cuestionario (`diab`, `insul`, …). Texto y no
+  // FK: el cuestionario es dato del módulo, no una tabla.
+  questionId   String         @map("question_id")
+  value        ClinicalAnswer
+  // LA FIRMA. NOT NULL y RESTRICT: una corrección anónima sobre una
+  // historia clínica no existe.
+  authorUserId String         @map("author_user_id") @db.Uuid
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant     Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  assessment ClinicalAssessment @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+  author     User               @relation(fields: [authorUserId], references: [id], onDelete: Restrict)
+
+  @@index([assessmentId, createdAt])
+  @@index([tenantId])
+  @@map("clinical_assessment_corrections")
 }

@@ -22,6 +22,8 @@ import { registerLocalCatalogRoutes } from "./catalog/local-products.js";
 import { registerContactsRoutes } from "./contacts/routes.js";
 import { registerContactImportRoutes } from "./contacts/import.js";
 import { registerClinicaRoutes } from "./clinica/routes.js";
+import { registerValoracionRoutes } from "./clinica/valoracion-routes.js";
+import { registerValoracionPublicaRoutes } from "./clinica/valoracion-publica.js";
 import { registerCrmRoutes } from "./crm/routes.js";
 import { getPrisma, getRedis, shutdown } from "./context.js";
 import { registerDeviceRoutes } from "./devices/routes.js";
@@ -186,6 +188,9 @@ async function main() {
   // (`clinicalRecordsEnabled`), y con el módulo apagado cada ruta
   // responde la 404 de Fastify como si no estuviera registrada.
   await registerClinicaRoutes(app);
+  // clinica-2 · la valoración inicial. Mismo gate y mismo registro de
+  // accesos que el resto de lo clínico.
+  await registerValoracionRoutes(app);
   await registerServicesRoutes(app);
   await registerStaffRoutes(app);
   await registerAgendaRoutes(app);
@@ -208,6 +213,11 @@ async function main() {
   // query string (ADR-014).
   await registerDeviceWebSocketRoute(app);
   await registerPublicTicketPdfRoute(app);
+  // clinica-2 · el test del paciente, SIN SESIÓN, por token opaco. Va con
+  // las públicas y no con lo clínico porque no tiene de dónde sacar un
+  // tenant hasta que resuelve el token: el gate del módulo lo aplica ella
+  // misma, con la misma 404 (ver su cabecera).
+  await registerValoracionPublicaRoutes(app);
   await registerTicketRoutes(app);
   // V1-verifactu (ADR-019) · el registro de facturación encadenado.
   await registerFiscalRoutes(app);
