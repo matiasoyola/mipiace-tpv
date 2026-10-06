@@ -18,7 +18,7 @@
 // El binary devuelto va directo a la impresora (USB con WebUSB o WIFI
 // con TCP a :9100).
 
-import { cuadrarDesglose } from "@mipiacetpv/ticket-model";
+import { cuadrarDesglose, cuadrarLineasImpresas } from "@mipiacetpv/ticket-model";
 import {
   LEYENDA_ENCIMA_DEL_QR,
   LEYENDA_VERIFACTU,
@@ -43,10 +43,15 @@ import {
 export interface TicketLineEscpos {
   description: string;
   units: number;
-  // En la divisa local; el builder formatea con 2 decimales.
-  unitPrice: number;
-  // Total línea (units × unitPrice) post descuentos. El caller lo
-  // calcula en el dominio y pasa el valor final.
+  // bloque ticket-con-iva · unitario CON IVA, al céntimo: el precio de la
+  // carta. Hasta este bloque el campo se llamaba `unitPrice` y traía el
+  // NETO, así que el papel decía «1 x 1,45 €» de un café con leche que la
+  // carta vende a 1,60 €. El nombre lleva el `Gross` para que no se pueda
+  // volver a pasar un neto por descuido.
+  unitPriceGross: number;
+  // Total línea CON IVA post descuentos. El caller lo calcula en el
+  // dominio y pasa el valor final; el builder lo cuadra contra `total`
+  // con `cuadrarLineasImpresas` antes de imprimirlo.
   lineTotal: number;
 }
 
@@ -106,8 +111,13 @@ export interface TicketReceiptInput {
   // cuadrados al céntimo contra `total`. Si falta (callers/fixtures
   // previos), el ticket sale igual que hoy: sólo líneas → TOTAL → pagos.
   taxBreakdown?: TicketTaxBucketEscpos[] | null;
-  // Neto sin IVA a mostrar en la línea "Subtotal". Sólo se usa si hay
-  // `taxBreakdown`. Es entrada: no se recalcula aquí.
+  // Neto sin IVA que calculó el caller agregando líneas.
+  //
+  // bloque ticket-con-iva · ya NO es lo que se imprime como "Subtotal":
+  // el subtotal impreso es Σ de las bases de `taxBreakdown`, para que la
+  // base imponible tenga un único valor en todo el documento. Se sigue
+  // aceptando porque es lo que el caller tiene a mano y porque sostiene
+  // el caso sin tramos.
   subtotal?: number | null;
   total: number;
   // Métodos del cobro (puede haber varios — efectivo + tarjeta).
@@ -263,22 +273,35 @@ export function buildTicketReceipt(input: TicketReceiptInput): Uint8Array {
 
   // Líneas. Formato:
   //   <descripción>
-  //   <uds> x <precio>          <line total>
+  //   <uds> x <precio con IVA>          <line total con IVA>
   // Si la descripción es larga la dejamos en la primera línea y
   // ponemos el detalle de precio en la segunda alineado a derecha.
-  for (const line of input.lines) {
+  //
+  // bloque ticket-con-iva · la columna de la derecha SUMA el TOTAL. Los
+  // brutos de línea se redondean por línea y el total se agrega por tramo
+  // de IVA: pueden separarse en un céntimo, y un ticket cuya columna no
+  // suma es un ticket roto. Mismo método del resto mayor que el desglose.
+  const lineTotalsImpresos = cuadrarLineasImpresas(
+    input.lines.map((l) => l.lineTotal),
+    input.total,
+  );
+  input.lines.forEach((line, i) => {
     parts.push(escText(line.description));
-    const left = `${formatUnits(line.units)} x ${eur(line.unitPrice)}`;
-    const right = eur(line.lineTotal);
+    const left = `${formatUnits(line.units)} x ${eur(line.unitPriceGross)}`;
+    const right = eur(lineTotalsImpresos[i] ?? line.lineTotal);
     parts.push(escText(padBetween(left, right, COLUMNS)));
-  }
+  });
 
   parts.push(escSeparator(COLUMNS));
 
   // v1.9.4 · desglose IVA cuadrado al céntimo (sólo si el caller lo pasa).
-  // Repartimos el residuo de redondeo entre subtotal + IVAs con el método
-  // del resto mayor para que la suma impresa coincida con el TOTAL. Las
-  // bases mostradas ("s/2,00") no cambian.
+  // El residuo de redondeo va a las cuotas con el método del resto mayor
+  // para que la suma impresa coincida con el TOTAL.
+  //
+  // bloque ticket-con-iva · la línea "Subtotal" sale de `cuadrado.subtotal`,
+  // que es Σ de las bases que acaban de imprimirse arriba. Antes el residuo
+  // se repartía también con el subtotal y el mismo papel decía
+  // "IVA 10 % s/13,26" y "Subtotal 13,27".
   if (input.taxBreakdown && input.taxBreakdown.length > 0) {
     const subtotalNet =
       input.subtotal != null

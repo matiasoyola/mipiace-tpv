@@ -939,6 +939,15 @@ function AccountPage() {
   // H1 · `!== false` y no `!`: la columna es `@default(true)` y el campo
   // puede faltar si el front va por delante del backend.
   const cajaEnabled = me?.tenant.cajaEnabled !== false;
+  // bloque ticket-con-iva §C · ¿está PREVISTO que este comercio use
+  // Holded? Mismo criterio `!== false` y por la misma razón. No es
+  // `hasHoldedKey` ("¿lo tiene conectado ya?"): un tenant que SÍ va a
+  // usar Holded y aún no ha pegado la clave tiene algo que conectar y
+  // debe seguir viendo el panel. El de La Maestranza, que factura él
+  // mismo con VERI*FACTU, no va a conectar nada nunca — y hasta este
+  // bloque leía "Conexión con Holded · No conectada" con un check verde
+  // y dos botones que no le sirven.
+  const holdedPrevisto = me?.tenant.holdedEnabled !== false;
 
   async function onTestConnection() {
     setTesting(true);
@@ -985,8 +994,11 @@ function AccountPage() {
           empresa sin caja no tiene ni lo uno ni lo otro, y este panel le
           enseñaba "No conectada" con un check verde y dos botones que no
           sirven. Una empresa CON caja y sin clave sí lo sigue viendo —
-          ésa es la que tiene algo que conectar. */}
-      {cajaEnabled && (
+          ésa es la que tiene algo que conectar.
+
+          bloque ticket-con-iva §C · y además `holdedEnabled`: con caja
+          pero sin Holded previsto tampoco hay nada que conectar. */}
+      {cajaEnabled && holdedPrevisto && (
       <section className="bg-white rounded-2xl border border-slate-200 p-6 md:p-7 mb-5">
         <h2 className="text-[17px] font-semibold text-mipiace-ink tracking-tight mb-1">
           Conexión con Holded

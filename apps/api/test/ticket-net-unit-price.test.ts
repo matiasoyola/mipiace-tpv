@@ -1,12 +1,18 @@
-// v1.8-Fiado · regresión precio unitario neto en ticket PDF y térmico.
+// v1.8-Fiado · regresión precio unitario (override) en ticket PDF y térmico.
 //
 // Cuando una línea lleva `unitPriceOverride` (el cajero editó el precio
-// con el lápiz), el precio unitario IMPRESO debe ser el neto efectivo
-// (override ?? catálogo), no el de catálogo. El bug: se imprimía
-// "1 x 5,12 → 4,13" (unit del catálogo, total con override) — confuso e
-// incoherente. Cubrimos los dos renderers:
+// con el lápiz), el precio unitario IMPRESO debe salir del override y no
+// del catálogo. El bug: se imprimía "1 x 5,12 → 4,13" (unit del catálogo,
+// total con override) — confuso e incoherente. Cubrimos los dos renderers:
 //   - térmico ESC/POS: apps/api/src/tickets/print.ts (ticketToEscposInput)
 //   - PDF / ticket digital: build-document.ts (loadTicketDocument)
+//
+// bloque ticket-con-iva · el papel ya no imprime el NETO: imprime el bruto
+// (`unitPriceGross`), que es el precio de la carta. Lo que este test
+// guarda sigue siendo lo mismo —que el override manda sobre el catálogo—
+// y además que la conversión a bruto se aplica al importe correcto: un
+// override de 4,13 € netos al 21 % tiene que imprimirse 5,00 €, no los
+// 6,20 € que saldrían del precio de catálogo.
 
 process.env.NODE_ENV = "test";
 process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
@@ -21,6 +27,10 @@ import { loadTicketDocument } from "../src/tickets/build-document.js";
 // Escenario del bug: catálogo 5,12 €, override 4,13 €, 1 unidad.
 const CATALOG_UNIT = 5.12;
 const OVERRIDE_UNIT = 4.13;
+// Los mismos netos al 21 %, en bruto: lo que se imprime desde el bloque
+// ticket-con-iva. 5,12 × 1,21 = 6,1952 → 6,20; 4,13 × 1,21 = 4,9973 → 5,00.
+const CATALOG_UNIT_GROSS = 6.2;
+const OVERRIDE_UNIT_GROSS = 5.0;
 
 describe("precio unitario neto (override) en impresión", () => {
   it("térmico: ticketToEscposInput usa el override, no el catálogo", () => {
@@ -47,6 +57,7 @@ describe("precio unitario neto (override) en impresión", () => {
             units: 1,
             unitPrice: CATALOG_UNIT,
             unitPriceOverride: OVERRIDE_UNIT,
+            taxRate: 21,
             total: 4.13,
           },
         ],
@@ -55,7 +66,7 @@ describe("precio unitario neto (override) en impresión", () => {
       "https://tickets.example",
     );
 
-    expect(input.lines[0]!.unitPrice).toBe(OVERRIDE_UNIT);
+    expect(input.lines[0]!.unitPriceGross).toBe(OVERRIDE_UNIT_GROSS);
     expect(input.lines[0]!.lineTotal).toBe(4.13);
   });
 
@@ -83,6 +94,7 @@ describe("precio unitario neto (override) en impresión", () => {
             units: 1,
             unitPrice: CATALOG_UNIT,
             unitPriceOverride: null,
+            taxRate: 21,
             total: 5.12,
           },
         ],
@@ -91,7 +103,7 @@ describe("precio unitario neto (override) en impresión", () => {
       "https://tickets.example",
     );
 
-    expect(input.lines[0]!.unitPrice).toBe(CATALOG_UNIT);
+    expect(input.lines[0]!.unitPriceGross).toBe(CATALOG_UNIT_GROSS);
   });
 
   it("PDF: loadTicketDocument mapea el override al unitPrice de la línea", async () => {
@@ -138,6 +150,10 @@ describe("precio unitario neto (override) en impresión", () => {
 
     const doc = await loadTicketDocument({ prisma, ticketId: "t1" });
     expect(doc).not.toBeNull();
+    // El neto efectivo sigue viajando en el documento (es el que sostiene
+    // el desglose); lo que se PINTA es el bruto.
     expect(doc!.lines[0]!.unitPrice).toBe(OVERRIDE_UNIT);
+    expect(doc!.lines[0]!.unitPriceGross).toBe(OVERRIDE_UNIT_GROSS);
+    expect(doc!.lines[0]!.totalGross).toBe(4.13);
   });
 });

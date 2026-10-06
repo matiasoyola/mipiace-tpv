@@ -264,6 +264,9 @@ async function loadTicketForPrint(
           units: true,
           unitPrice: true,
           unitPriceOverride: true,
+          // bloque ticket-con-iva · para convertir el unitario NETO
+          // persistido al bruto que se imprime.
+          taxRate: true,
           total: true,
         },
       },

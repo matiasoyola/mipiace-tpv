@@ -32,7 +32,15 @@ const BASE: TicketDocument = {
     registerName: "Caja 1",
   },
   lines: [
-    { description: "Corte", quantity: 1, unitPrice: 10, taxRate: 21, subtotal: 10 },
+    {
+      description: "Corte",
+      quantity: 1,
+      unitPrice: 10,
+      unitPriceGross: 12.1,
+      taxRate: 21,
+      subtotal: 10,
+      totalGross: 12.1,
+    },
   ],
   totals: {
     subtotal: 10,

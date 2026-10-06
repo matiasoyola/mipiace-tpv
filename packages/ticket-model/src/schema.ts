@@ -9,9 +9,15 @@ export const TicketLineSchema = z.object({
   sku: z.string().optional(),
   quantity: z.number().positive(),
   unitPrice: z.number().nonnegative(),
+  // bloque ticket-con-iva · el unitario y el total de línea CON IVA, que
+  // son los que se imprimen. Obligatorios: un documento sin ellos no se
+  // puede pintar sin volver a hacer aquí la aritmética fiscal, y el sitio
+  // donde se hace es `buildTicketDocument`.
+  unitPriceGross: z.number().nonnegative(),
   discount: z.number().min(0).max(100).optional(),
   taxRate: z.number().min(0).max(100),
   subtotal: z.number(),
+  totalGross: z.number(),
 });
 
 export const TicketDocumentSchema = z.object({

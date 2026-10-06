@@ -102,6 +102,7 @@ const TICKET_SERVIDOR: TicketForPrint = {
       units: { toString: () => "1" },
       unitPrice: { toString: () => "10.00" },
       unitPriceOverride: null,
+      taxRate: { toString: () => "21" },
       total: { toString: () => "12.10" },
     },
     {
@@ -109,6 +110,7 @@ const TICKET_SERVIDOR: TicketForPrint = {
       units: { toString: () => "1" },
       unitPrice: { toString: () => "3.09" },
       unitPriceOverride: null,
+      taxRate: { toString: () => "10" },
       total: { toString: () => "3.40" },
     },
   ],
@@ -130,8 +132,13 @@ const VENTA_DISPOSITIVO: VentaLocal = {
   tableName: "Mesa 7",
   issuedAt: ISSUED_AT,
   lines: [
-    { description: "Corte de pelo", units: 1, unitPrice: 10, lineTotal: 12.1 },
-    { description: "Champú", units: 1, unitPrice: 3.09, lineTotal: 3.4 },
+    // bloque ticket-con-iva · el unitario del papel va CON IVA. El
+    // servidor lo deriva del neto persistido y del `taxRate` de la línea;
+    // el dispositivo, del carrito (`unitPriceGrossOf`). Que los dos den lo
+    // mismo es parte de lo que guarda este test: 10,00 € al 21 % son
+    // 12,10 € y 3,09 € al 10 % son 3,40 €.
+    { description: "Corte de pelo", units: 1, unitPriceGross: 12.1, lineTotal: 12.1 },
+    { description: "Champú", units: 1, unitPriceGross: 3.4, lineTotal: 3.4 },
   ],
   payments: [{ method: "CASH", amount: 15.5 }],
   cashAmount: 20,
