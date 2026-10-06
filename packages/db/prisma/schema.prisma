@@ -92,6 +92,28 @@ enum ClinicalEntryKind {
   // exigido un segundo mecanismo de inmutabilidad por columnas, que es la
   // forma de fallo que este enum evita.
   INITIAL_ASSESSMENT
+  // clinica-3 · la EXPLORACIÓN del pie: pulso de cada pie, puntos sin
+  // sensibilidad al monofilamento sobre el mapa, y tipo de pie. Se hace en
+  // la primera visita y cuando la podóloga lo vea necesario (en diabéticos,
+  // una vez al año), y la siguiente parte de la última.
+  //
+  // Separada de la sesión por dos razones: van a ritmos distintos (la
+  // sesión es cada dos semanas), y **la exploración se puede registrar sin
+  // valoración validada** porque es parte de la primera visita — justo la
+  // que puede no tenerla todavía. Metida dentro de la sesión, no habría
+  // forma de registrarla el día que más falta hace.
+  FOOT_EXAM
+  // clinica-3 · la SESIÓN: tratamientos, dolor 0–10, evolución, consejos
+  // para casa, próxima cita propuesta, nota y lo marcado hoy en el mapa.
+  //
+  // Se escribe UNA VEZ, al cerrar, y desde ese instante está firmada y no
+  // se edita (sólo anotaciones) — el trigger `clinical_entries_inmutable`
+  // de clinica-1 lo hace cumplir, así que no hace falta nada nuevo.
+  //
+  // Y de una CITA sale UNA sola: el índice parcial
+  // `clinical_entries_una_sesion_por_cita` lo impone, y de ahí sale sin un
+  // solo `if` que cerrar dos veces no cree dos cobros.
+  TREATMENT_SESSION
 }
 
 // clinica-2 · en qué punto está una valoración inicial.
@@ -2524,6 +2546,19 @@ model ServiceScheduling {
   // siendo suyos. Nace en `false` para los quince tenants de hoy, así que
   // ningún alta de cita existente cambia de comportamiento.
   primeraValoracion Boolean @default(false) @map("primera_valoracion")
+  // clinica-3 · «este servicio es un tratamiento de la sesión».
+  //
+  // QUÉ BOTONES SALEN EN LA SESIÓN LO DECIDE EL CATÁLOGO. Es la misma
+  // forma y el mismo sitio que `primeraValoracion`, a propósito: la
+  // podóloga mantiene UNA pantalla (Catálogo de agenda) y no dos.
+  //
+  // El precio y el IVA de cada botón siguen saliendo del catálogo y no de
+  // la historia (prompt §1): la sesión guarda el NOMBRE del tratamiento
+  // —para que la historia se lea— y nunca su importe.
+  //
+  // Nace en `false`, así que ningún servicio de los tenants de hoy se
+  // convierte en un tratamiento de sesión.
+  tratamientoSesion Boolean @default(false) @map("tratamiento_sesion")
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz()
 
@@ -3389,6 +3424,18 @@ model ClinicalEntry {
 
   @@index([tenantId, clientId, createdAt])
   @@index([appointmentId])
+  // clinica-3 · «la última sesión / la última exploración de este
+  // paciente», que es la consulta que la pantalla de la sesión hace dos
+  // veces al abrirse: lo de la visita anterior para pintarlo en naranja
+  // suave y la última exploración para que la siguiente parta de ella.
+  //
+  // No sustituye al de arriba: aquél es el de la historia paginada.
+  @@index([tenantId, clientId, kind, createdAt])
+  // clinica-3 · **DE UNA CITA SALE UNA SOLA SESIÓN.** El índice parcial
+  // (`WHERE kind = 'TREATMENT_SESSION' AND appointment_id IS NOT NULL`) se
+  // crea en SQL — Prisma no expresa índices parciales. Es la garantía del
+  // «cerrar dos veces = un cobro»: el cobro se construye desde la sesión,
+  // y de una cita hay una. Ver `clinica_3_sesion/migration.sql` §1.
   @@map("clinical_entries")
 }
 

@@ -1,0 +1,77 @@
+-- clinica-3 · los dos valores del enum y la marca del servicio. Las tres
+-- piezas que la migración hermana NECESITA ya creadas.
+--
+-- ── Por qué son DOS migraciones y no una ──────────────────────────────
+--
+-- La tercera vez, y la misma razón exacta que en clinica-1
+-- (`clinica_1_modulo` + `clinica_1_historia`) y en clinica-2
+-- (`clinica_2_tipos` + `clinica_2_valoracion`): **Postgres prohíbe USAR un
+-- valor de enum en la misma transacción en la que se añade.** Prisma corre
+-- cada migración en una transacción, así que un `ALTER TYPE … ADD VALUE
+-- 'TREATMENT_SESSION'` y un índice parcial cuyo `WHERE` nombra ese valor no
+-- caben juntos: la migración aborta con «unsafe use of new value of enum
+-- type».
+--
+-- El índice `clinical_entries_una_sesion_por_cita` de la hermana nombra
+-- 'TREATMENT_SESSION' en su `WHERE`. Por eso el valor entra aquí y el
+-- índice allí.
+--
+-- ── Migración ADITIVA ─────────────────────────────────────────────────
+--
+-- Ni un DROP, ni un TRUNCATE, ni un DELETE, ni un UPDATE masivo. La columna
+-- nueva nace con `DEFAULT false`, y desde PG 11 un default constante NO
+-- reescribe la tabla. Los quince tenants de hoy no cambian de
+-- comportamiento: `tratamiento_sesion = false` en cada servicio, así que
+-- ninguna sesión ofrece ningún botón y ningún cobro de cita cambia.
+--
+-- ── El `down`, pensado ────────────────────────────────────────────────
+--
+--   ALTER TABLE "service_scheduling" DROP COLUMN "tratamiento_sesion";
+--   -- y los DOS valores del enum NO se quitan: `ALTER TYPE … DROP VALUE`
+--   -- no existe en Postgres. Hay que recrear el tipo entero, y sólo es
+--   -- seguro si ninguna fila de `clinical_entries` los lleva puestos.
+--   -- Igual que el 'CLINICIAN' de clinica-1 y el 'INITIAL_ASSESSMENT' de
+--   -- clinica-2.
+--
+-- Y con sesiones dentro, ese `down` ES el borrado de historia clínica que
+-- la migración existe para impedir. No se echa atrás: se conserva.
+
+-- ── 1 · los dos valores del enum ───────────────────────────────────────
+--
+-- La exploración y la sesión son piezas de historia como la valoración, y
+-- por eso viven en `clinical_entries`: ahí la inmutabilidad ya la hace
+-- cumplir el motor (trigger `clinical_entries_inmutable`, clinica-1). No
+-- hay tabla nueva en este bloque, y es a propósito —
+--
+--   · una sesión se escribe UNA VEZ, al cerrar, y a partir de ahí está
+--     firmada y no se edita. No hay estado que avanzar, así que no hace
+--     falta la pareja «entrada inmutable + tabla de estado» que clinica-2
+--     necesitó para la valoración;
+--   · y lo que la sesión va acumulando ANTES de cerrarse es memoria de la
+--     pantalla, no media sesión clínica. Guardarla obligaría a inventar un
+--     mecanismo de mutabilidad para algo que no se ha firmado.
+--
+-- Son DOS valores y no uno porque son dos actos con ritmos distintos: la
+-- sesión es cada dos semanas y la exploración una vez al año (o en la
+-- primera visita). Con un solo valor, «¿cuándo se le exploró?» sería
+-- «busca la sesión cuya copia de la exploración sea distinta de la
+-- anterior».
+ALTER TYPE "ClinicalEntryKind" ADD VALUE 'FOOT_EXAM';
+ALTER TYPE "ClinicalEntryKind" ADD VALUE 'TREATMENT_SESSION';
+
+-- ── 2 · «es un tratamiento de la sesión» ───────────────────────────────
+--
+-- QUÉ BOTONES SALEN EN LA SESIÓN LO DECIDE EL CATÁLOGO, igual que la marca
+-- «primera valoración» de clinica-2 decide qué cita manda el test. Es la
+-- misma forma y el mismo sitio, a propósito: la podóloga mantiene UNA
+-- pantalla (Catálogo de agenda) y no dos.
+--
+-- Vive en la extensión de agenda y no en el producto de Holded (ADR-R1):
+-- Holded no modela esto. **El precio y el IVA siguen siendo del catálogo**
+-- y no de la historia (prompt §1), que es justo lo que hace que esta marca
+-- baste: el botón sale de aquí y el dinero de `products`.
+--
+-- Nace en `false`, así que ningún servicio de los quince tenants de hoy se
+-- convierte en un tratamiento de sesión y ninguna pantalla cambia.
+ALTER TABLE "service_scheduling"
+    ADD COLUMN "tratamiento_sesion" BOOLEAN NOT NULL DEFAULT false;
