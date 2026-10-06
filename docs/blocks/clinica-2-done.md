@@ -2,7 +2,8 @@
 
 Rama `clinica-2`, worktree `~/Developer/Claude/Projects/mipiacetpv-clinica-2`, desde
 `9d39888` (la cabeza de `clinica-2` al empezar, que es `master` = `0357ce2` más el mockup y el
-prompt). Siete commits, 79 ficheros, +10 483 / −45.
+prompt), **y mergeada después con `origin/master` = `906b279`** (el merge de `ticket-con-iva`, PR
+#8, más la auditoría del AP13). Once commits, 81 ficheros.
 
 **Este bloque construye la primera pantalla clínica de verdad**, sobre el suelo que puso
 `clinica-1`. Y la construye entera: el test que contesta el paciente, las dos puertas por las que
@@ -425,10 +426,11 @@ comportamiento no siempre es la línea que uno escribió pensando que lo garanti
 
 ---
 
-## 11 · Lo que encontró el banco con navegador, y no la suite
+## 11 · Lo que encontraron el banco y la revisión, y no la suite
 
-Tres cosas, y ninguna la podía ver un test de la suite. Es el mismo argumento que clinica-1 dejó
-escrito en su §10b.
+Cuatro cosas. Tres las encontró el banco con navegador —ninguna la podía ver un test de la suite, que
+es el mismo argumento que clinica-1 dejó escrito en su §10b— y la cuarta la encontró Dirección
+revisando el despliegue antes del merge.
 
 ### 1 · Al paciente se le decía «ya está» antes de guardar
 
@@ -460,7 +462,29 @@ el camino que este bloque abre pasa justo por ahí: la podóloga que abre la fic
 recién citada se encuentra una pantalla blanca. El tipo pasa a ser una unión y las citas se pintan
 como citas.
 
-### 3 · El aviso de la agenda se quedaba pegado tras validar
+### 3 · `PUBLIC_TPV_URL` no llegaba a producción — **lo cazó Dirección, no yo**
+
+La variable entró en `env.ts` con su default de desarrollo y **no se añadió a
+`infra/docker-compose.prod.yml`**, que pasa las variables una a una. La que no está en esa lista no
+llega al contenedor.
+
+Y como la del schema tiene `.default()`, **el arranque no falla**: cae a
+`http://localhost:5174` y se queda tan tranquilo. El efecto no se ve en el despliegue; se ve tres
+días después, cuando una paciente llama diciendo que el enlace del correo no abre.
+
+Arreglado en los dos servicios (api y worker) y en `.env.production.example`. Y con el guardián que
+lo adelanta a la suite: `infra/test/env-publicas-en-produccion.test.ts` exige que toda `PUBLIC_*`
+del schema esté en los DOS bloques `environment` y en el ejemplo con una URL `https://` de verdad.
+
+Es la misma forma que `dockerfile-manifiestos.test.ts` —una lista a mano, un olvido silencioso, un
+test que lo caza— y la misma clase de fallo que ese test ya cubre para los paquetes. Que hicieran
+falta los dos dice algo: **esta casa tiene dos listas que hay que mantener a mano al añadir una
+pieza nueva, y las dos fallan en silencio.** Ahora las dos tienen guardián.
+
+Comprobado quitando la línea del worker: rojo con «`PUBLIC_TPV_URL: ${PUBLIC_TPV_URL}` aparece 1
+vez/veces en docker-compose.prod.yml».
+
+### 4 · El aviso de la agenda se quedaba pegado tras validar
 
 El aviso sale de la respuesta de `/agenda`, pedida antes de entrar a la valoración. Ahora se recarga
 el día al cerrar.
@@ -520,9 +544,11 @@ API.
    tablas nacen vacías.
 3. Para que una clínica lo use: marcar su servicio de primera visita con «Es la primera valoración»
    en Catálogo de agenda (sólo aparece con la historia clínica encendida).
-4. **Variable de entorno nueva**: `PUBLIC_TPV_URL` (la PWA del TPV; el enlace del email apunta
-   ahí). Tiene default `http://localhost:5174` para desarrollo; **en producción hay que ponerla a
-   `https://mipiacetpv.com`** o los enlaces saldrán apuntando a localhost.
+4. **Variable de entorno nueva**: `PUBLIC_TPV_URL` (la PWA del TPV; de ahí sale el enlace del
+   test que recibe el paciente). Ya está en `infra/docker-compose.prod.yml` —en los DOS servicios,
+   api y worker— y en `infra/.env.production.example` con su valor
+   (`https://mipiacetpv.com`). **Hay que ponerla en el `.env` del VPS**: tiene default
+   `http://localhost:5174` y, al tenerlo, su ausencia NO rompe el arranque (ver §11.4).
 5. `EMAIL_OUTBOX_FILE` es sólo para el banco de pruebas. Producción no la pone.
 6. **Sin cambios en `infra/Caddyfile`**: el `try_files {path} /index.html` de la PWA ya sirve
    `/valoracion/<token>`, y la llamada a la API va por `/api/*`, que ya se proxea.
@@ -531,9 +557,18 @@ API.
    existe — las dos veces anteriores (escpos-builder, verifactu) se vieron en el smoke del CI
    después del merge.
 
-### Verde
+### El merge con `origin/master`
 
-- `pnpm test` · **285 ficheros, 3248 tests, 3 skipped.** Verde.
+`master` avanzó con `ticket-con-iva` (PR #8) y la auditoría del AP13 mientras este bloque estaba en
+vuelo. **El merge entró sin un solo conflicto**, y no por suerte: los dos frentes no comparten ni un
+fichero (`comm -12` entre las dos listas de cambios sale vacío). `ticket-con-iva` toca el ticket, el
+carrito y el checkout; esto toca lo clínico, la agenda y el catálogo de servicios.
+
+Las tres suites se volvieron a pasar enteras DESPUÉS del merge, no sólo antes.
+
+### Verde (después del merge con `origin/master`)
+
+- `pnpm test` · **288 ficheros, 3276 tests, 3 skipped.** Verde.
 - `pnpm test:e2e` · **26 ficheros, 437 tests.** Verde, sobre `mipiacetpv_clinica2_e2e`.
 - `pnpm e2e:agenda` · **34 passed**, sobre `mipiacetpv_clinica2_banco_e2e` y Redis propio (6395),
   incluidos los diez capítulos de la peluquería **sin tocar una línea de sus specs**.
@@ -548,6 +583,8 @@ API.
 - `clinica-valoracion-migracion.test.ts` (35) · el contrato del SQL.
 - `clinica-valoracion.e2e.ts` (44) · los triggers y los CHECKs, contra Postgres.
 - `specs/11-clinica-valoracion.spec.ts` (4) · el viaje entero por las pantallas de verdad.
+- `infra/test/env-publicas-en-produccion.test.ts` (7) · toda `PUBLIC_*` del schema llega al
+  contenedor y al ejemplo de producción (ver §11.3).
 
 ### Capturas
 
@@ -567,28 +604,38 @@ a35432b test(clinica-2): el enlace, el email sin salud, la recepcionista y los s
 9eb33c3 feat(clinica-2): el test del paciente, la pantalla del sanitario y el aviso de la agenda
 e68733d test(clinica-2): el banco con navegador, y tres fallos que encontró
 491a5b0 docs(clinica-2): el bucle visual contra el mockup
-<este>  docs(clinica-2): el done del bloque
+afb9f73 docs(clinica-2): el done del bloque
+b1ce975 docs(clinica-2): la rama queda sin pushear (el push lo bloqueó el permiso)
+148af60 fix(clinica-2): PUBLIC_TPV_URL no llegaba a producción
+a727205 Merge remote-tracking branch 'origin/master' into clinica-2
+<este>  docs(clinica-2): el merge, el arreglo de producción y la CI
 ```
 
 ## 15 · La rama
 
-**NO está pusheada y NO hay PR todavía.** El `git push` lo bloqueó el clasificador de permisos de la
-sesión, así que los dos últimos pasos quedan para Dirección:
+**Pusheada**, y el PR contra `master` es el
+[**#9**](https://github.com/matiasoyola/mipiace-tpv/pull/9).
 
-```bash
-git push -u origin clinica-2
-gh pr create --base master --head clinica-2 \
-  --title "clinica-2 · la valoración inicial"
-```
+Mergeada con `origin/master` = `906b279` (`ticket-con-iva`, PR #8, más la auditoría del AP13) **sin
+un solo conflicto**, y las tres suites pasadas enteras después del merge (§13).
 
-Todo lo demás está hecho y verde en local:
+**CI verde** sobre el merge `a727205`, los tres jobs:
+[run 37500416737](https://github.com/matiasoyola/mipiace-tpv/actions/runs/37500416737) —
+`ci: success`, `smoke: success`, `e2e: success` (`publish` se salta, como toca fuera de master).
 
-- `pnpm test` · 285 ficheros, 3248 tests. Verde.
-- `pnpm test:e2e` · 26 ficheros, 437 tests. Verde.
-- `pnpm e2e:agenda` · 34 passed, con los diez capítulos de la peluquería intactos.
-- `tsc` de api, tpv-web, admin y e2e-ui · limpio.
+**Ni merge ni despliegue: eso lo hace Dirección.** Y al desplegar, lo único que hay que acordarse de
+poner en el `.env` del VPS es `PUBLIC_TPV_URL=https://mipiacetpv.com` (§13, punto 4).
 
-**La CI todavía no ha corrido**, porque corre sobre la rama pusheada. Es lo único del «cómo se
-cierra» del prompt que queda pendiente, y depende del push.
+---
 
-**Ni merge ni despliegue: eso lo hace Dirección.**
+## 16 · Una nota de proceso: dos sesiones en el mismo árbol
+
+A mitad del cierre apareció otra sesión de Claude Code trabajando en **este mismo worktree**, con el
+mismo HEAD y el árbol limpio, preguntando de quién era qué. Paró en cuanto se lo dije y no escribió
+nada; el PR #9 y el push de `b1ce975` salieron de ella.
+
+Lo que no se puede repetir, y por qué: con dos sesiones escribiendo en un árbol, el `push` de una
+se lleva por delante lo de la otra — y aquí había una migración de por medio. **Un árbol, un
+escritor.** Si hacen falta dos a la vez, `git worktree add` y cada una con su base, su Redis y su
+`apps/api/.env`; este árbol tiene ya los suyos (`mipiacetpv_clinica2_e2e`,
+`mipiacetpv_clinica2_banco_e2e`, Redis en 6395).
