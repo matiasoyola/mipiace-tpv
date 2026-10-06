@@ -194,6 +194,20 @@ describe("mapa de sala · una mesa mide lo mismo esté donde esté", () => {
     expect(cajasDeMesa()).toHaveLength(SALA.length);
   });
 
+  it("ninguna mesa lleva una medida ADEMÁS de la compartida", async () => {
+    await renderSala();
+    // La clase compartida no basta: una zona podría añadir la suya
+    // encima (`!w-[124px]`) y seguir pasando el test de arriba.
+    const compartidas = TABLE_CARD_SIZE_CLASS.split(" ");
+    const medidaSuelta = /^!?(sm:|md:|lg:|xl:)?(min-|max-)?[wh]-/;
+    for (const el of cajasDeMesa()) {
+      const sobra = clases(el).filter(
+        (c) => medidaSuelta.test(c) && !compartidas.includes(c),
+      );
+      expect(sobra).toEqual([]);
+    }
+  });
+
   it("la barra ya no pinta círculos de 84 px: mide como una mesa", async () => {
     await renderSala();
     const barra = [...container.querySelectorAll("[class]")].filter(
