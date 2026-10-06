@@ -24,12 +24,17 @@
 // = 48,4 px, que es el peldaño `touch` de la casa (`docs/design/tokens.md`
 // §4) y pasa de sobra el ≥ 44 px que pide el prompt.
 //
-// El ancho es un TOPE y no un fijo (`max-width`), así que a 320 px el pie
-// se encoge con la pantalla... y ahí el mínimo bajaría. Por eso en móvil
+// El ancho es un TOPE y no un fijo (`max-width`), así que si la columna es
+// más estrecha el pie se encoge CON ella y el mínimo baja. Por eso en móvil
 // los pies no van uno al lado del otro: **bajan a una fila cada uno**
-// (prompt §5), y una fila de 320 px menos los márgenes da 288, que es más
-// que 264. O sea: el pie nunca se pinta por debajo de su ancho nominal, y
-// el mínimo táctil se cumple en los tres tamaños del bucle visual.
+// (prompt §5). Y por eso la tarjeta del mapa lleva `px-3` por debajo de
+// 640: a 320 px de pantalla, con los 16 de página y los 20 de tarjeta a
+// cada lado quedaban 248 y la zona bajaba a 45,1 px — pasaba el 44 del
+// prompt y no el 48 de la casa. Con 12 quedan exactamente 264.
+//
+// **Esto se mide en la captura, no se deduce**: el test del mapa calcula
+// sobre el ancho NOMINAL, y el ancho nominal estaba bien. Quien lo cazó fue
+// `medidas-del-mapa.json` del bucle visual.
 //
 // ── La accesibilidad del mapa ────────────────────────────────────────
 //
@@ -81,7 +86,9 @@ export function MapaDelPie(props: {
   soloLectura?: boolean;
 }) {
   return (
-    <div className="flex flex-wrap justify-center gap-3">
+    // `gap-2` (8 px) y no 12: es lo que hace que dos pies de 264 quepan en
+    // la columna de 584 de 1024 (264+8+264+40 de tarjeta = 576).
+    <div className="flex flex-wrap justify-center gap-2">
       {PIES.map((pie) => (
         <div
           key={pie}

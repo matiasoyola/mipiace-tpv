@@ -1,0 +1,806 @@
+{
+  "zonas-1024": [
+    {
+      "zona": "L:h",
+      "etiqueta": "Pie izquierdo · Dedo gordo",
+      "ancho": 57.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "L:d2",
+      "etiqueta": "Pie izquierdo · 2.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "L:d3",
+      "etiqueta": "Pie izquierdo · 3.er dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "L:d4",
+      "etiqueta": "Pie izquierdo · 4.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "L:d5",
+      "etiqueta": "Pie izquierdo · 5.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "L:m1",
+      "etiqueta": "Pie izquierdo · Bajo el dedo gordo",
+      "ancho": 79.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "L:m2",
+      "etiqueta": "Pie izquierdo · Bajo el 2.º dedo",
+      "ancho": 57.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "L:m35",
+      "etiqueta": "Pie izquierdo · Bajo 3.º–5.º dedo",
+      "ancho": 74.8,
+      "alto": 61.6
+    },
+    {
+      "zona": "L:arco",
+      "etiqueta": "Pie izquierdo · Arco",
+      "ancho": 74.8,
+      "alto": 92.4
+    },
+    {
+      "zona": "L:lat",
+      "etiqueta": "Pie izquierdo · Borde exterior",
+      "ancho": 61.6,
+      "alto": 92.4
+    },
+    {
+      "zona": "L:talon",
+      "etiqueta": "Pie izquierdo · Talón",
+      "ancho": 114.4,
+      "alto": 92.4
+    },
+    {
+      "zona": "R:h",
+      "etiqueta": "Pie derecho · Dedo gordo",
+      "ancho": 57.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "R:d2",
+      "etiqueta": "Pie derecho · 2.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "R:d3",
+      "etiqueta": "Pie derecho · 3.er dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "R:d4",
+      "etiqueta": "Pie derecho · 4.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "R:d5",
+      "etiqueta": "Pie derecho · 5.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "R:m1",
+      "etiqueta": "Pie derecho · Bajo el dedo gordo",
+      "ancho": 79.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "R:m2",
+      "etiqueta": "Pie derecho · Bajo el 2.º dedo",
+      "ancho": 57.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "R:m35",
+      "etiqueta": "Pie derecho · Bajo 3.º–5.º dedo",
+      "ancho": 74.8,
+      "alto": 61.6
+    },
+    {
+      "zona": "R:arco",
+      "etiqueta": "Pie derecho · Arco",
+      "ancho": 74.8,
+      "alto": 92.4
+    },
+    {
+      "zona": "R:lat",
+      "etiqueta": "Pie derecho · Borde exterior",
+      "ancho": 61.6,
+      "alto": 92.4
+    },
+    {
+      "zona": "R:talon",
+      "etiqueta": "Pie derecho · Talón",
+      "ancho": 114.4,
+      "alto": 92.4
+    }
+  ],
+  "zonas-exploracion-1024": [
+    {
+      "zona": "L:h",
+      "etiqueta": "Pie izquierdo · Dedo gordo",
+      "ancho": 57.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "L:d2",
+      "etiqueta": "Pie izquierdo · 2.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "L:d3",
+      "etiqueta": "Pie izquierdo · 3.er dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "L:d4",
+      "etiqueta": "Pie izquierdo · 4.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "L:d5",
+      "etiqueta": "Pie izquierdo · 5.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "L:m1",
+      "etiqueta": "Pie izquierdo · Bajo el dedo gordo",
+      "ancho": 79.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "L:m2",
+      "etiqueta": "Pie izquierdo · Bajo el 2.º dedo",
+      "ancho": 57.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "L:m35",
+      "etiqueta": "Pie izquierdo · Bajo 3.º–5.º dedo",
+      "ancho": 74.8,
+      "alto": 61.6
+    },
+    {
+      "zona": "L:arco",
+      "etiqueta": "Pie izquierdo · Arco",
+      "ancho": 74.8,
+      "alto": 92.4
+    },
+    {
+      "zona": "L:lat",
+      "etiqueta": "Pie izquierdo · Borde exterior",
+      "ancho": 61.6,
+      "alto": 92.4
+    },
+    {
+      "zona": "L:talon",
+      "etiqueta": "Pie izquierdo · Talón",
+      "ancho": 114.4,
+      "alto": 92.4
+    },
+    {
+      "zona": "R:h",
+      "etiqueta": "Pie derecho · Dedo gordo",
+      "ancho": 57.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "R:d2",
+      "etiqueta": "Pie derecho · 2.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "R:d3",
+      "etiqueta": "Pie derecho · 3.er dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "R:d4",
+      "etiqueta": "Pie derecho · 4.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "R:d5",
+      "etiqueta": "Pie derecho · 5.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "R:m1",
+      "etiqueta": "Pie derecho · Bajo el dedo gordo",
+      "ancho": 79.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "R:m2",
+      "etiqueta": "Pie derecho · Bajo el 2.º dedo",
+      "ancho": 57.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "R:m35",
+      "etiqueta": "Pie derecho · Bajo 3.º–5.º dedo",
+      "ancho": 74.8,
+      "alto": 61.6
+    },
+    {
+      "zona": "R:arco",
+      "etiqueta": "Pie derecho · Arco",
+      "ancho": 74.8,
+      "alto": 92.4
+    },
+    {
+      "zona": "R:lat",
+      "etiqueta": "Pie derecho · Borde exterior",
+      "ancho": 61.6,
+      "alto": 92.4
+    },
+    {
+      "zona": "R:talon",
+      "etiqueta": "Pie derecho · Talón",
+      "ancho": 114.4,
+      "alto": 92.4
+    }
+  ],
+  "zonas-390": [
+    {
+      "zona": "L:h",
+      "etiqueta": "Pie izquierdo · Dedo gordo",
+      "ancho": 57.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "L:d2",
+      "etiqueta": "Pie izquierdo · 2.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "L:d3",
+      "etiqueta": "Pie izquierdo · 3.er dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "L:d4",
+      "etiqueta": "Pie izquierdo · 4.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "L:d5",
+      "etiqueta": "Pie izquierdo · 5.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "L:m1",
+      "etiqueta": "Pie izquierdo · Bajo el dedo gordo",
+      "ancho": 79.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "L:m2",
+      "etiqueta": "Pie izquierdo · Bajo el 2.º dedo",
+      "ancho": 57.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "L:m35",
+      "etiqueta": "Pie izquierdo · Bajo 3.º–5.º dedo",
+      "ancho": 74.8,
+      "alto": 61.6
+    },
+    {
+      "zona": "L:arco",
+      "etiqueta": "Pie izquierdo · Arco",
+      "ancho": 74.8,
+      "alto": 92.4
+    },
+    {
+      "zona": "L:lat",
+      "etiqueta": "Pie izquierdo · Borde exterior",
+      "ancho": 61.6,
+      "alto": 92.4
+    },
+    {
+      "zona": "L:talon",
+      "etiqueta": "Pie izquierdo · Talón",
+      "ancho": 114.4,
+      "alto": 92.4
+    },
+    {
+      "zona": "R:h",
+      "etiqueta": "Pie derecho · Dedo gordo",
+      "ancho": 57.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "R:d2",
+      "etiqueta": "Pie derecho · 2.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "R:d3",
+      "etiqueta": "Pie derecho · 3.er dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "R:d4",
+      "etiqueta": "Pie derecho · 4.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "R:d5",
+      "etiqueta": "Pie derecho · 5.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "R:m1",
+      "etiqueta": "Pie derecho · Bajo el dedo gordo",
+      "ancho": 79.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "R:m2",
+      "etiqueta": "Pie derecho · Bajo el 2.º dedo",
+      "ancho": 57.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "R:m35",
+      "etiqueta": "Pie derecho · Bajo 3.º–5.º dedo",
+      "ancho": 74.8,
+      "alto": 61.6
+    },
+    {
+      "zona": "R:arco",
+      "etiqueta": "Pie derecho · Arco",
+      "ancho": 74.8,
+      "alto": 92.4
+    },
+    {
+      "zona": "R:lat",
+      "etiqueta": "Pie derecho · Borde exterior",
+      "ancho": 61.6,
+      "alto": 92.4
+    },
+    {
+      "zona": "R:talon",
+      "etiqueta": "Pie derecho · Talón",
+      "ancho": 114.4,
+      "alto": 92.4
+    }
+  ],
+  "zonas-exploracion-390": [
+    {
+      "zona": "L:h",
+      "etiqueta": "Pie izquierdo · Dedo gordo",
+      "ancho": 57.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "L:d2",
+      "etiqueta": "Pie izquierdo · 2.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "L:d3",
+      "etiqueta": "Pie izquierdo · 3.er dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "L:d4",
+      "etiqueta": "Pie izquierdo · 4.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "L:d5",
+      "etiqueta": "Pie izquierdo · 5.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "L:m1",
+      "etiqueta": "Pie izquierdo · Bajo el dedo gordo",
+      "ancho": 79.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "L:m2",
+      "etiqueta": "Pie izquierdo · Bajo el 2.º dedo",
+      "ancho": 57.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "L:m35",
+      "etiqueta": "Pie izquierdo · Bajo 3.º–5.º dedo",
+      "ancho": 74.8,
+      "alto": 61.6
+    },
+    {
+      "zona": "L:arco",
+      "etiqueta": "Pie izquierdo · Arco",
+      "ancho": 74.8,
+      "alto": 92.4
+    },
+    {
+      "zona": "L:lat",
+      "etiqueta": "Pie izquierdo · Borde exterior",
+      "ancho": 61.6,
+      "alto": 92.4
+    },
+    {
+      "zona": "L:talon",
+      "etiqueta": "Pie izquierdo · Talón",
+      "ancho": 114.4,
+      "alto": 92.4
+    },
+    {
+      "zona": "R:h",
+      "etiqueta": "Pie derecho · Dedo gordo",
+      "ancho": 57.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "R:d2",
+      "etiqueta": "Pie derecho · 2.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "R:d3",
+      "etiqueta": "Pie derecho · 3.er dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "R:d4",
+      "etiqueta": "Pie derecho · 4.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "R:d5",
+      "etiqueta": "Pie derecho · 5.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "R:m1",
+      "etiqueta": "Pie derecho · Bajo el dedo gordo",
+      "ancho": 79.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "R:m2",
+      "etiqueta": "Pie derecho · Bajo el 2.º dedo",
+      "ancho": 57.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "R:m35",
+      "etiqueta": "Pie derecho · Bajo 3.º–5.º dedo",
+      "ancho": 74.8,
+      "alto": 61.6
+    },
+    {
+      "zona": "R:arco",
+      "etiqueta": "Pie derecho · Arco",
+      "ancho": 74.8,
+      "alto": 92.4
+    },
+    {
+      "zona": "R:lat",
+      "etiqueta": "Pie derecho · Borde exterior",
+      "ancho": 61.6,
+      "alto": 92.4
+    },
+    {
+      "zona": "R:talon",
+      "etiqueta": "Pie derecho · Talón",
+      "ancho": 114.4,
+      "alto": 92.4
+    }
+  ],
+  "zonas-320": [
+    {
+      "zona": "L:h",
+      "etiqueta": "Pie izquierdo · Dedo gordo",
+      "ancho": 56.8,
+      "alto": 61.1
+    },
+    {
+      "zona": "L:d2",
+      "etiqueta": "Pie izquierdo · 2.º dedo",
+      "ancho": 48,
+      "alto": 48
+    },
+    {
+      "zona": "L:d3",
+      "etiqueta": "Pie izquierdo · 3.er dedo",
+      "ancho": 48,
+      "alto": 48
+    },
+    {
+      "zona": "L:d4",
+      "etiqueta": "Pie izquierdo · 4.º dedo",
+      "ancho": 48,
+      "alto": 48
+    },
+    {
+      "zona": "L:d5",
+      "etiqueta": "Pie izquierdo · 5.º dedo",
+      "ancho": 48,
+      "alto": 48
+    },
+    {
+      "zona": "L:m1",
+      "etiqueta": "Pie izquierdo · Bajo el dedo gordo",
+      "ancho": 78.6,
+      "alto": 61.1
+    },
+    {
+      "zona": "L:m2",
+      "etiqueta": "Pie izquierdo · Bajo el 2.º dedo",
+      "ancho": 56.8,
+      "alto": 61.1
+    },
+    {
+      "zona": "L:m35",
+      "etiqueta": "Pie izquierdo · Bajo 3.º–5.º dedo",
+      "ancho": 74.2,
+      "alto": 61.1
+    },
+    {
+      "zona": "L:arco",
+      "etiqueta": "Pie izquierdo · Arco",
+      "ancho": 74.2,
+      "alto": 91.7
+    },
+    {
+      "zona": "L:lat",
+      "etiqueta": "Pie izquierdo · Borde exterior",
+      "ancho": 61.1,
+      "alto": 91.7
+    },
+    {
+      "zona": "L:talon",
+      "etiqueta": "Pie izquierdo · Talón",
+      "ancho": 113.5,
+      "alto": 91.7
+    },
+    {
+      "zona": "R:h",
+      "etiqueta": "Pie derecho · Dedo gordo",
+      "ancho": 56.8,
+      "alto": 61.1
+    },
+    {
+      "zona": "R:d2",
+      "etiqueta": "Pie derecho · 2.º dedo",
+      "ancho": 48,
+      "alto": 48
+    },
+    {
+      "zona": "R:d3",
+      "etiqueta": "Pie derecho · 3.er dedo",
+      "ancho": 48,
+      "alto": 48
+    },
+    {
+      "zona": "R:d4",
+      "etiqueta": "Pie derecho · 4.º dedo",
+      "ancho": 48,
+      "alto": 48
+    },
+    {
+      "zona": "R:d5",
+      "etiqueta": "Pie derecho · 5.º dedo",
+      "ancho": 48,
+      "alto": 48
+    },
+    {
+      "zona": "R:m1",
+      "etiqueta": "Pie derecho · Bajo el dedo gordo",
+      "ancho": 78.6,
+      "alto": 61.1
+    },
+    {
+      "zona": "R:m2",
+      "etiqueta": "Pie derecho · Bajo el 2.º dedo",
+      "ancho": 56.8,
+      "alto": 61.1
+    },
+    {
+      "zona": "R:m35",
+      "etiqueta": "Pie derecho · Bajo 3.º–5.º dedo",
+      "ancho": 74.2,
+      "alto": 61.1
+    },
+    {
+      "zona": "R:arco",
+      "etiqueta": "Pie derecho · Arco",
+      "ancho": 74.2,
+      "alto": 91.7
+    },
+    {
+      "zona": "R:lat",
+      "etiqueta": "Pie derecho · Borde exterior",
+      "ancho": 61.1,
+      "alto": 91.7
+    },
+    {
+      "zona": "R:talon",
+      "etiqueta": "Pie derecho · Talón",
+      "ancho": 113.5,
+      "alto": 91.7
+    }
+  ],
+  "zonas-exploracion-320": [
+    {
+      "zona": "L:h",
+      "etiqueta": "Pie izquierdo · Dedo gordo",
+      "ancho": 57.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "L:d2",
+      "etiqueta": "Pie izquierdo · 2.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "L:d3",
+      "etiqueta": "Pie izquierdo · 3.er dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "L:d4",
+      "etiqueta": "Pie izquierdo · 4.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "L:d5",
+      "etiqueta": "Pie izquierdo · 5.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "L:m1",
+      "etiqueta": "Pie izquierdo · Bajo el dedo gordo",
+      "ancho": 79.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "L:m2",
+      "etiqueta": "Pie izquierdo · Bajo el 2.º dedo",
+      "ancho": 57.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "L:m35",
+      "etiqueta": "Pie izquierdo · Bajo 3.º–5.º dedo",
+      "ancho": 74.8,
+      "alto": 61.6
+    },
+    {
+      "zona": "L:arco",
+      "etiqueta": "Pie izquierdo · Arco",
+      "ancho": 74.8,
+      "alto": 92.4
+    },
+    {
+      "zona": "L:lat",
+      "etiqueta": "Pie izquierdo · Borde exterior",
+      "ancho": 61.6,
+      "alto": 92.4
+    },
+    {
+      "zona": "L:talon",
+      "etiqueta": "Pie izquierdo · Talón",
+      "ancho": 114.4,
+      "alto": 92.4
+    },
+    {
+      "zona": "R:h",
+      "etiqueta": "Pie derecho · Dedo gordo",
+      "ancho": 57.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "R:d2",
+      "etiqueta": "Pie derecho · 2.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "R:d3",
+      "etiqueta": "Pie derecho · 3.er dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "R:d4",
+      "etiqueta": "Pie derecho · 4.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "R:d5",
+      "etiqueta": "Pie derecho · 5.º dedo",
+      "ancho": 48.4,
+      "alto": 48.4
+    },
+    {
+      "zona": "R:m1",
+      "etiqueta": "Pie derecho · Bajo el dedo gordo",
+      "ancho": 79.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "R:m2",
+      "etiqueta": "Pie derecho · Bajo el 2.º dedo",
+      "ancho": 57.2,
+      "alto": 61.6
+    },
+    {
+      "zona": "R:m35",
+      "etiqueta": "Pie derecho · Bajo 3.º–5.º dedo",
+      "ancho": 74.8,
+      "alto": 61.6
+    },
+    {
+      "zona": "R:arco",
+      "etiqueta": "Pie derecho · Arco",
+      "ancho": 74.8,
+      "alto": 92.4
+    },
+    {
+      "zona": "R:lat",
+      "etiqueta": "Pie derecho · Borde exterior",
+      "ancho": 61.6,
+      "alto": 92.4
+    },
+    {
+      "zona": "R:talon",
+      "etiqueta": "Pie derecho · Talón",
+      "ancho": 114.4,
+      "alto": 92.4
+    }
+  ]
+}

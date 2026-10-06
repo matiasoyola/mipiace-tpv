@@ -386,7 +386,19 @@ export function SesionPodologia(props: {
         }}
       />
 
-      <div className="grid gap-4 xl:grid-cols-[560px_1fr]">
+      {/* DOS COLUMNAS DESDE 1024, que es el iPad apaisado — y el iPad
+          apaisado manda (prompt §5). Estaba en `xl:` (1280) y en la
+          captura de 1024 salía en una sola columna, con el panel de la
+          sesión debajo del mapa y la podóloga haciendo scroll entre el pie
+          que acaba de marcar y el tratamiento que le corresponde. Lo cazó
+          la captura, no un test.
+          El ancho de la izquierda sale de UNA CUENTA y no de un gusto:
+          **los dos pies tienen que caber en una fila a 1024**. Dos pies de
+          264 px (su ancho nominal, el que da los 48 px de dedo) con 8 de
+          hueco son 536, más los 20+20 de la tarjeta, 576. Con 520 se
+          partían en dos filas y en la captura de 1024 sólo se veía el pie
+          izquierdo. */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,584px)_1fr]">
         {pestana === "sesion" ? (
           <>
             <div className="space-y-4">
@@ -862,14 +874,21 @@ function PanelDeLaSesion(props: {
       </Seccion>
 
       <Seccion titulo="Dolor hoy (0 = nada · 10 = el peor)">
-        <div className="grid grid-cols-11 gap-1">
+        {/* ONCE botones que ENVUELVEN, no una rejilla de once columnas.
+            Con `grid-cols-11`, el ancho de cada tecla es el de la columna
+            dividido entre once: a 1024 con el panel estrecho salían de
+            30 px, menos que en un móvil de 320. Con `flex-wrap` y
+            `min-w-touch`, ninguna baja del peldaño de la casa y la fila se
+            parte en dos cuando no caben — que es lo correcto para un
+            control que se toca con el dedo. */}
+        <div className="flex flex-wrap gap-1">
           {Array.from({ length: 11 }, (_, i) => (
             <button
               key={i}
               type="button"
               aria-pressed={props.dolor === i}
               onClick={() => props.onDolor(i)}
-              className={`h-touch rounded-xl font-semibold text-[16px] ${
+              className={`h-touch min-w-touch flex-1 rounded-xl font-semibold text-[16px] ${
                 props.dolor === i
                   ? "bg-mipiace-coral text-white"
                   : "bg-mipiace-stone text-mipiace-ink-soft"
@@ -1015,7 +1034,16 @@ function Tarjeta(props: {
   children: React.ReactNode;
 }) {
   return (
-    <div className="bg-white border border-slate-200 rounded-3xl px-5 py-4">
+    // `px-3` por debajo de 640 px y no `px-5`, Y LA CUENTA ESTÁ MEDIDA:
+    // a 320 px de ancho, con los 16 px de la página a cada lado quedan
+    // 288, y con 20 px de tarjeta a cada lado quedaban 248 — o sea un pie
+    // de 248 px en vez de los 264 nominales, y una zona de **45,1 px**.
+    // Pasaba el mínimo del prompt (44) y no el de la casa (48).
+    //
+    // Lo cazó la MEDICIÓN DE LA CAPTURA, no un test: el test del mapa
+    // calcula sobre el ancho nominal y el ancho nominal era correcto. Con
+    // 12 px a cada lado quedan exactamente 264 y la zona vuelve a 48,4.
+    <div className="bg-white border border-slate-200 rounded-3xl px-3 sm:px-5 py-4">
       <h2 className="text-[16.5px] font-semibold m-0 text-mipiace-ink">
         {props.titulo}
       </h2>

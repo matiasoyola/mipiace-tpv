@@ -82,6 +82,8 @@ import {
   serviciosSinNadie,
   subscribeHealthSnapshot,
 } from "../lib/agenda-health.js";
+import { createPortal } from "react-dom";
+
 import { CobrosPendientes } from "../clinica/CobrosPendientes.js";
 import { SesionPodologia } from "../clinica/SesionPodologia.js";
 import { ValoracionSanitario } from "../clinica/ValoracionSanitario.js";
@@ -1403,7 +1405,8 @@ export function AgendaPage({
           lo que la podóloga está haciendo es revisar una historia, no
           mirar un detalle de agenda de reojo. */}
       {valoracionDe && (
-        <div className="fixed inset-0 z-50 bg-mipiace-stone flex flex-col font-sans">
+        <AlFrente>
+        <div className="fixed inset-0 z-[70] bg-mipiace-stone flex flex-col font-sans">
           <div className="flex items-center gap-3 px-4 md:px-6 h-16 bg-white border-b border-slate-200 shrink-0">
             <button
               onClick={() => {
@@ -1437,6 +1440,7 @@ export function AgendaPage({
             </div>
           </div>
         </div>
+        </AlFrente>
       )}
 
       {/* clinica-3 · LA SESIÓN de la cita. Overlay a pantalla completa,
@@ -1444,7 +1448,8 @@ export function AgendaPage({
           apaisado y meterla en el panel de 320 px del detalle sería meter
           el mapa de los dos pies en una columna. */}
       {sesionDe && (
-        <div className="fixed inset-0 z-50 bg-mipiace-stone flex flex-col font-sans">
+        <AlFrente>
+        <div className="fixed inset-0 z-[70] bg-mipiace-stone flex flex-col font-sans">
           <div className="flex items-center gap-3 px-4 md:px-6 h-16 bg-white border-b border-slate-200 shrink-0">
             <button
               onClick={() => {
@@ -1490,12 +1495,14 @@ export function AgendaPage({
             </div>
           </div>
         </div>
+        </AlFrente>
       )}
 
       {/* clinica-3 · LOS COBROS PENDIENTES de la recepción. Hoja lateral y
           no pantalla completa: se consulta de paso, con el paciente
           delante en el mostrador. */}
       {verCobros && (
+        <AlFrente>
         <CobrosPendientes
           fecha={date}
           onCerrar={() => setVerCobros(false)}
@@ -1505,6 +1512,7 @@ export function AgendaPage({
           }}
           puedeCobrar={puedeCobrar}
         />
+        </AlFrente>
       )}
 
       {/* B-reservas-7a · el alta de una ausencia, en TRES TOQUES como
@@ -2568,6 +2576,40 @@ function BookingPanel(props: {
 }
 
 // ── Detalle de cita ────────────────────────────────────────────────────
+
+/**
+ * clinica-3 · saca una hoja de pantalla completa del contexto de apilado de
+ * la agenda y la monta en `document.body`.
+ *
+ * ── El fallo que esto arregla, y que lo encontró una captura ─────────
+ *
+ * `AgendaPage` es un `fixed inset-0 z-40`, y un z-index sobre un elemento
+ * posicionado **crea un contexto de apilado**: todo lo que vive dentro
+ * —incluidas estas hojas, que pedían `z-50`— queda encerrado en el
+ * peldaño 40. Y la pantalla de venta de detrás tiene, por debajo de
+ * 1024 px, su **barra inferior fija** (`SalePage.tsx`, «thumb-zone» de
+ * v1.0-handheld) también en `z-40`… pero más abajo en el DOM. Así que
+ * empata y gana ella: la barra «0 líneas · 0,00 €» se pinta ENCIMA de la
+ * hoja clínica y tapa justo el pie, que es donde está el botón de cerrar
+ * la sesión.
+ *
+ * Se vio en la captura de 390 px del bucle visual, no en un test: a
+ * 1024 px la barra no existe (`lg:hidden`) y la suite no mira píxeles.
+ *
+ * **Y NO ES SÓLO DE ESTE BLOQUE**: la hoja de la valoración de clinica-2
+ * tenía el mismo problema desde que nació, por la misma razón. Las dos
+ * pasan por aquí.
+ *
+ * Por qué un portal y no subir el `z-40` de la agenda: porque ese 40 lo
+ * comparten la agenda y la barra de la venta a propósito —los modales de
+ * la venta abren a 50 por encima de los dos (comentario de
+ * `SalePage.tsx:3467`)— y moverlo cambiaría el apilado de una pantalla que
+ * usan los quince clientes. El portal cambia SÓLO estas tres hojas.
+ */
+function AlFrente(props: { children: React.ReactNode }) {
+  if (typeof document === "undefined") return <>{props.children}</>;
+  return createPortal(props.children, document.body);
+}
 
 function DetailPanel(props: {
   appt: AgendaAppointment;
