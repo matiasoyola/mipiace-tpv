@@ -24,10 +24,20 @@
 //   2. **256 bits y no 64.** El slug del ticket son 16 hex (64 bits), que
 //      sobran para lo que protege. Aquí el espacio es 2^256: no hay
 //      fuerza bruta que valga ni con el rate-limit apagado.
-//   3. **Caduca**, a los 30 días. Una cita que se da para dentro de tres
-//      semanas necesita el enlace vivo; uno de hace un año, no.
+//   3. **Caduca.** 30 días por email, 4 horas en la tablet de la sala (ver
+//      los dos números más abajo).
 //   4. **De un solo uso.** Al contestar se sella (`link_used_at`) y el
 //      trigger de la base impide reabrirlo con un UPDATE.
+//
+// ── Un solo mecanismo para las dos puertas ────────────────────────────
+//
+// El token de la tablet es EL MISMO que el del email, con otra caducidad.
+// Es la mitad del «un solo test, dos puertas» que pide el prompt: con un
+// mecanismo por canal habría dos rutas públicas, dos formas de caducar y
+// dos sitios donde equivocarse. Y de paso sale gratis lo que hacía falta
+// de todos modos — **abrir la tablet invalida el enlace del email**,
+// porque rotar el token deja el hash anterior sin nada contra lo que
+// buscar.
 //
 // ── El rate-limit va por IP, tras el proxy ────────────────────────────
 //
@@ -46,8 +56,24 @@ const BYTES_DEL_TOKEN = 32;
 /** El formato que se comprueba antes de tocar la base. */
 export const PATRON_TOKEN = /^[A-Za-z0-9_-]{43}$/;
 
-/** Días que vive un enlace sin usar. */
+// Cuánto vive un enlace sin usar, según por dónde se le ofrece. Son dos
+// números porque son dos situaciones, no por configurabilidad:
+//
+//   · EMAIL · 30 días. Una cita que se da para dentro de tres semanas
+//     necesita el enlace vivo cuando el paciente lo abra; uno de hace un
+//     año, no.
+//   · TABLET · 4 horas. El paciente lo contesta ahí mismo, en la sala, con
+//     la tablet en la mano. Cuatro horas cubren una mañana entera de
+//     consulta con margen, y pasado eso el token que quedó en una tablet
+//     que alguien se llevó a casa ya no abre nada.
 export const DIAS_DE_VIDA_DEL_ENLACE = 30;
+export const HORAS_DE_VIDA_EN_TABLET = 4;
+
+function vidaEnMs(canal: "EMAIL" | "TABLET"): number {
+  return canal === "EMAIL"
+    ? DIAS_DE_VIDA_DEL_ENLACE * 24 * 60 * 60 * 1000
+    : HORAS_DE_VIDA_EN_TABLET * 60 * 60 * 1000;
+}
 
 export interface TokenNuevo {
   /** El token en claro. Existe SÓLO aquí, en el email y en la URL del
@@ -58,13 +84,23 @@ export interface TokenNuevo {
   expiraEn: Date;
 }
 
-/** Un token nuevo y su hash. `ahora` entra como parámetro para que el
- *  test pueda fijar la caducidad sin tocar el reloj del proceso. */
-export function nuevoTokenDeEnlace(ahora = new Date()): TokenNuevo {
+/**
+ * Un token nuevo y su hash.
+ *
+ * **El mismo token sirve para el email y para la tablet**, y eso es la
+ * mitad del «un solo test, dos puertas» del prompt: con un mecanismo
+ * distinto por canal habría dos rutas públicas, dos formas de caducar y
+ * dos sitios donde equivocarse. Lo único que cambia es cuánto vive.
+ *
+ * `ahora` entra como parámetro para que el test pueda fijar la caducidad
+ * sin tocar el reloj del proceso.
+ */
+export function nuevoTokenDeEnlace(
+  canal: "EMAIL" | "TABLET" = "EMAIL",
+  ahora = new Date(),
+): TokenNuevo {
   const token = randomBytes(BYTES_DEL_TOKEN).toString("base64url");
-  const expiraEn = new Date(
-    ahora.getTime() + DIAS_DE_VIDA_DEL_ENLACE * 24 * 60 * 60 * 1000,
-  );
+  const expiraEn = new Date(ahora.getTime() + vidaEnMs(canal));
   return { token, hash: hashDeToken(token), expiraEn };
 }
 

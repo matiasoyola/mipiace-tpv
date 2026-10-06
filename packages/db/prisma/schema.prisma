@@ -114,6 +114,22 @@ enum ClinicalAssessmentStatus {
   VALIDADA
 }
 
+// clinica-2 · de dónde salió la valoración. MISMO vocabulario y misma
+// forma que `ClinicalAccessSource`, y por la misma razón: hay un camino que
+// lo hace una persona y otro que lo hace un hecho.
+//
+//   APPOINTMENT · la creó el alta de una cita de un servicio marcado
+//                 «primera valoración». No la pide nadie: la pide el hecho
+//                 de que se le ha dado esa cita. El alta pasa por
+//                 `agenda/store.ts`, donde no hay sesión de la que sacar un
+//                 usuario — y el motor (`engine.ts`) no se toca.
+//   MANUAL      · la pidió alguien, con «Enviar el test» o abriendo la
+//                 tablet, y queda su nombre.
+enum ClinicalAssessmentSource {
+  APPOINTMENT
+  MANUAL
+}
+
 // clinica-2 · por dónde contesta el paciente. Dos canales y no tres:
 // WhatsApp y SMS están fuera de alcance (no hay proveedor).
 enum ClinicalAssessmentChannel {
@@ -3443,9 +3459,13 @@ model ClinicalAssessment {
   questionnaireVersion Int                @map("questionnaire_version")
   status        ClinicalAssessmentStatus  @default(PENDIENTE_PACIENTE)
   channel       ClinicalAssessmentChannel
-  // Quién mandó el test o abrió la tablet. NOT NULL y RESTRICT: puede ser
-  // la recepcionista, y precisamente por eso queda escrito quién fue.
-  requestedByUserId String                @map("requested_by_user_id") @db.Uuid
+  source        ClinicalAssessmentSource
+  // Quién mandó el test o abrió la tablet. Puede ser la recepcionista, y
+  // precisamente por eso queda escrito quién fue.
+  //
+  // NULL cuando `source = APPOINTMENT`: ahí no lo pide una persona. El
+  // CHECK `clinical_assessments_source_pedida_por` ata las dos cosas.
+  requestedByUserId String?               @map("requested_by_user_id") @db.Uuid
   createdAt     DateTime                  @default(now()) @map("created_at") @db.Timestamptz()
 
   // ── El enlace del email ──────────────────────────────────────────────
@@ -3487,7 +3507,7 @@ model ClinicalAssessment {
   client      Client         @relation(fields: [clientId], references: [id], onDelete: Restrict)
   appointment Appointment?   @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
   entry       ClinicalEntry? @relation(fields: [entryId], references: [id], onDelete: Restrict)
-  requestedBy User           @relation("AssessmentRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  requestedBy User?          @relation("AssessmentRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Restrict)
   validatedBy User?          @relation("AssessmentValidatedBy", fields: [validatedByUserId], references: [id], onDelete: Restrict)
   corrections ClinicalAssessmentCorrection[]
 

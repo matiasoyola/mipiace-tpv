@@ -72,6 +72,7 @@ const SELECT_VALORACION = {
   status: true,
   channel: true,
   createdAt: true,
+  source: true,
   linkExpiresAt: true,
   linkUsedAt: true,
   linkTokenHash: true,
@@ -169,7 +170,8 @@ export interface VistaValoracion {
     canal: CanalValoracion;
     version: number;
     creadaEn: string;
-    pedidaPor: string;
+    origen: OrigenValoracion;
+    pedidaPor: string | null;
     appointmentId: string | null;
     respondidaEn: string | null;
     respondioPor: RespondioPor | null;
@@ -271,7 +273,10 @@ export async function vistaDeLaValoracion(
       canal: fila.channel as CanalValoracion,
       version: fila.questionnaireVersion,
       creadaEn: fila.createdAt.toISOString(),
-      pedidaPor: nombreDe(fila.requestedBy),
+      origen: fila.source as OrigenValoracion,
+      // `null` cuando la pidió la cita: ahí no la pidió nadie, y la
+      // pantalla lo dice así («se mandó al dar la cita»).
+      pedidaPor: fila.requestedBy ? nombreDe(fila.requestedBy) : null,
       appointmentId: fila.appointmentId,
       respondidaEn: fila.answeredAt?.toISOString() ?? null,
       respondioPor: (fila.answeredBy as RespondioPor | null) ?? null,
@@ -349,6 +354,8 @@ async function cargarCorrecciones(
 
 // ── Crear / reenviar el test ──────────────────────────────────────────
 
+export type OrigenValoracion = "APPOINTMENT" | "MANUAL";
+
 export interface ValoracionAbierta {
   valoracionId: string;
   /** El token EN CLARO, sólo cuando se acaba de generar uno. Va al email y
@@ -383,7 +390,13 @@ export async function asegurarValoracionAbierta(
     tenantId: string;
     clientId: string;
     canal: CanalValoracion;
-    pedidaPorUserId: string;
+    /**
+     * De dónde sale. `APPOINTMENT` NO lleva usuario y `MANUAL` lo exige:
+     * lo ata el CHECK `clinical_assessments_source_pedida_por`, con el
+     * mismo criterio que `clinical_access` de clinica-1.
+     */
+    origen: OrigenValoracion;
+    pedidaPorUserId: string | null;
     appointmentId?: string | null;
     ahora?: Date;
   },
@@ -408,14 +421,14 @@ export async function asegurarValoracionAbierta(
     });
     return {
       valoracionId: abierta.id,
-      token: rotado?.token ?? null,
+      token: rotado.token,
       creada: false,
       estado: "PENDIENTE_PACIENTE",
-      caducaEn: rotado?.expiraEn ?? null,
+      caducaEn: rotado.expiraEn,
     };
   }
 
-  const nuevo = input.canal === "EMAIL" ? nuevoTokenDeEnlace(ahora) : null;
+  const nuevo = nuevoTokenDeEnlace(input.canal, ahora);
   try {
     const creada = await prisma.clinicalAssessment.create({
       data: {
@@ -424,18 +437,20 @@ export async function asegurarValoracionAbierta(
         appointmentId: input.appointmentId ?? null,
         questionnaireVersion: VERSION_VIGENTE,
         channel: input.canal,
-        requestedByUserId: input.pedidaPorUserId,
-        linkTokenHash: nuevo?.hash ?? null,
-        linkExpiresAt: nuevo?.expiraEn ?? null,
+        source: input.origen,
+        requestedByUserId:
+          input.origen === "MANUAL" ? input.pedidaPorUserId : null,
+        linkTokenHash: nuevo.hash,
+        linkExpiresAt: nuevo.expiraEn,
       },
       select: { id: true },
     });
     return {
       valoracionId: creada.id,
-      token: nuevo?.token ?? null,
+      token: nuevo.token,
       creada: true,
       estado: "PENDIENTE_PACIENTE",
-      caducaEn: nuevo?.expiraEn ?? null,
+      caducaEn: nuevo.expiraEn,
     };
   } catch (err) {
     // La carrera: otra petición creó la valoración abierta entre el
@@ -462,7 +477,7 @@ export async function asegurarValoracionAbierta(
 }
 
 /**
- * Le pone un enlace nuevo a una valoración pendiente, o se lo quita.
+ * Le pone un enlace nuevo a una valoración pendiente.
  *
  * **Rotar es lo que invalida el anterior**, y no «quemarlo»: el sello
  * `link_used_at` significa exactamente «se usó para contestar» y se
@@ -470,26 +485,20 @@ export async function asegurarValoracionAbierta(
  * esa columna pasaría a significar dos cosas y el trigger que la hace de
  * un solo uso dejaría de poder distinguirlas.
  *
- * Con canal TABLET el token se pone a NULL: la URL que viajó en el email
- * deja de resolver en el instante en que alguien abre la tablet, porque ya
- * no hay hash contra el que buscar.
+ * De aquí sale, gratis, lo que hacía falta de todos modos: **abrir la
+ * tablet invalida el enlace del email**. El hash anterior desaparece de la
+ * fila, así que la URL que el paciente tiene en el correo ya no resuelve
+ * contra nada — sin un camino aparte que «cancele» el email.
  */
 async function rotarEnlace(
   prisma: PrismaClient,
   input: { valoracionId: string; canal: CanalValoracion; ahora: Date },
-): Promise<TokenNuevo | null> {
-  if (input.canal === "TABLET") {
-    await prisma.clinicalAssessment.update({
-      where: { id: input.valoracionId },
-      data: { channel: "TABLET", linkTokenHash: null, linkExpiresAt: null },
-    });
-    return null;
-  }
-  const nuevo = nuevoTokenDeEnlace(input.ahora);
+): Promise<TokenNuevo> {
+  const nuevo = nuevoTokenDeEnlace(input.canal, input.ahora);
   await prisma.clinicalAssessment.update({
     where: { id: input.valoracionId },
     data: {
-      channel: "EMAIL",
+      channel: input.canal,
       linkTokenHash: nuevo.hash,
       linkExpiresAt: nuevo.expiraEn,
     },
@@ -562,7 +571,9 @@ export async function responderValoracion(
         data: {
           tenantId: input.tenantId,
           clientId: input.clientId,
-          authorUserId,
+          // EL AUTOR ES EL PACIENTE. No la podóloga, no la recepcionista:
+          // lo contestó él, y la historia dice quién lo escribió.
+          authorUserId: autorUserId,
           appointmentId: input.appointmentId,
           kind: "INITIAL_ASSESSMENT",
           body: cuerpo as unknown as Prisma.InputJsonValue,

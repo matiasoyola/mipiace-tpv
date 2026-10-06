@@ -69,6 +69,7 @@
 --   DROP TYPE "ClinicalAnswer";
 --   DROP TYPE "ClinicalAnsweredBy";
 --   DROP TYPE "ClinicalAssessmentChannel";
+--   DROP TYPE "ClinicalAssessmentSource";
 --   DROP TYPE "ClinicalAssessmentStatus";
 --
 -- Lo que NO se deshace está en la cabecera de la migración hermana: el
@@ -87,6 +88,22 @@ CREATE TYPE "ClinicalAssessmentStatus" AS ENUM (
     'RESPONDIDA',
     'VALIDADA'
 );
+
+-- De dónde salió la valoración. MISMO vocabulario y misma forma que
+-- `ClinicalAccessSource` de clinica-1, y por la misma razón:
+--
+--   APPOINTMENT · la creó el alta de una cita de un servicio marcado
+--                 «primera valoración». **No la pide una persona: la pide
+--                 el hecho de que se le ha dado esa cita.**
+--   MANUAL      · la pidió alguien, con el botón «Enviar el test» de la
+--                 ficha o abriendo la tablet. Y queda su nombre.
+--
+-- La distinción no es documental. El alta de una cita pasa por
+-- `agenda/store.ts`, donde NO hay sesión de la que sacar un usuario — y
+-- el motor de reservas (`engine.ts`) no se toca, así que no se le puede
+-- pedir que lleve uno. Inventarse un autor ahí sería escribir en una
+-- historia clínica que alguien pidió algo que no pidió.
+CREATE TYPE "ClinicalAssessmentSource" AS ENUM ('APPOINTMENT', 'MANUAL');
 
 -- Por dónde. Dos canales y no tres: WhatsApp y SMS están fuera de alcance
 -- (no hay proveedor), y una columna con un valor que nadie puede escribir
@@ -124,10 +141,15 @@ CREATE TABLE "clinical_assessments" (
     -- cambiar, si se mandó el email y luego se le abrió la tablet). Una vez
     -- contestada: por dónde contestó, y ya no cambia.
     "channel"              "ClinicalAssessmentChannel" NOT NULL,
+    "source"               "ClinicalAssessmentSource" NOT NULL,
     -- Quién mandó el test o abrió la tablet. **Puede ser la
     -- recepcionista**, que no lee las respuestas pero sí manda el test — y
     -- precisamente por eso queda escrito quién fue.
-    "requested_by_user_id" UUID NOT NULL,
+    --
+    -- NULL cuando `source = APPOINTMENT`: ahí no lo pide nadie. El CHECK
+    -- `clinical_assessments_source_pedida_por` ata las dos cosas, igual
+    -- que `clinical_access_source_grantor` en clinica-1.
+    "requested_by_user_id" UUID,
     "created_at"           TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     -- ── El enlace ──────────────────────────────────────────────────────
@@ -245,7 +267,16 @@ CREATE TABLE "clinical_assessments" (
         ),
     -- La versión del cuestionario es un número de versión, no un hueco.
     CONSTRAINT "clinical_assessments_version_positiva"
-        CHECK ("questionnaire_version" >= 1)
+        CHECK ("questionnaire_version" >= 1),
+    -- Un test que mandó alguien lleva su nombre; uno que salió de una cita
+    -- no lo lleva. Sin este CHECK, «lo mandó la recepcionista» y «lo mandó
+    -- la cita» serían indistinguibles en cuanto alguien olvidara el campo
+    -- — y entonces el registro no podría contestar quién.
+    CONSTRAINT "clinical_assessments_source_pedida_por"
+        CHECK (
+            ("source" = 'MANUAL'      AND "requested_by_user_id" IS NOT NULL)
+         OR ("source" = 'APPOINTMENT' AND "requested_by_user_id" IS NULL)
+        )
 );
 
 -- UNA VALORACIÓN ABIERTA POR PACIENTE, garantizado POR LA BASE.
@@ -370,6 +401,7 @@ BEGIN
        OR NEW.tenant_id             IS DISTINCT FROM OLD.tenant_id
        OR NEW.client_id             IS DISTINCT FROM OLD.client_id
        OR NEW.questionnaire_version IS DISTINCT FROM OLD.questionnaire_version
+       OR NEW.source                IS DISTINCT FROM OLD.source
        OR NEW.requested_by_user_id  IS DISTINCT FROM OLD.requested_by_user_id
        OR NEW.created_at            IS DISTINCT FROM OLD.created_at THEN
         RAISE EXCEPTION

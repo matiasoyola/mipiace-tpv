@@ -76,6 +76,7 @@ function schedulingView(s: {
   onlineBookable: boolean;
   family: string | null;
   channels: unknown;
+  primeraValoracion: boolean;
   updatedAt: Date;
 }) {
   return {
@@ -86,6 +87,11 @@ function schedulingView(s: {
     onlineBookable: s.onlineBookable,
     family: s.family,
     channels: toChannels(s.channels),
+    // clinica-2 · dar una cita de este servicio a un paciente sin
+    // valoración le manda el test. Viaja siempre (no sólo en tenants
+    // clínicos): un campo que aparece y desaparece según la capability
+    // obliga a cada lector a distinguir «false» de «no me lo han dicho».
+    primeraValoracion: s.primeraValoracion,
     updatedAt: s.updatedAt.toISOString(),
   };
 }
@@ -167,6 +173,7 @@ export async function registerServicesRoutes(
               onlineBookable: true,
               family: true,
               channels: true,
+              primeraValoracion: true,
               updatedAt: true,
             },
           },
@@ -213,6 +220,8 @@ export async function registerServicesRoutes(
             bufferAfterMin: { type: "integer", minimum: 0, maximum: 480 },
             staffRequired: { type: "integer", minimum: 1, maximum: 12 },
             onlineBookable: { type: "boolean" },
+            // clinica-2 · la marca de «primera valoración».
+            primeraValoracion: { type: "boolean" },
             family: { type: ["string", "null"], maxLength: 120 },
             channels: {
               type: "object",
@@ -237,6 +246,7 @@ export async function registerServicesRoutes(
         bufferAfterMin?: number;
         staffRequired?: number;
         onlineBookable?: boolean;
+        primeraValoracion?: boolean;
         family?: string | null;
         channels?: Partial<Channels>;
       };
@@ -257,6 +267,11 @@ export async function registerServicesRoutes(
       const bufferBeforeMin = body.bufferBeforeMin ?? 0;
       const bufferAfterMin = body.bufferAfterMin ?? 0;
       const staffRequired = body.staffRequired ?? 1;
+      // clinica-2 · ausente = false. Un PUT que no lo mande DESMARCA el
+      // servicio, igual que hace con `onlineBookable` y con los canales:
+      // esta ruta es un upsert del juego completo, no un parche. El panel
+      // manda siempre el valor actual.
+      const primeraValoracion = body.primeraValoracion ?? false;
 
       const saved = await prisma.serviceScheduling.upsert({
         where: { productId },
@@ -268,6 +283,7 @@ export async function registerServicesRoutes(
           bufferAfterMin,
           staffRequired,
           onlineBookable,
+          primeraValoracion,
           family,
           channels: channels as unknown as Prisma.InputJsonValue,
         },
@@ -277,6 +293,7 @@ export async function registerServicesRoutes(
           bufferAfterMin,
           staffRequired,
           onlineBookable,
+          primeraValoracion,
           family,
           channels: channels as unknown as Prisma.InputJsonValue,
         },
@@ -289,6 +306,7 @@ export async function registerServicesRoutes(
           onlineBookable: true,
           family: true,
           channels: true,
+          primeraValoracion: true,
           updatedAt: true,
         },
       });

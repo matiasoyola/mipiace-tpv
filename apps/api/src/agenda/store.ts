@@ -26,6 +26,11 @@ type RRule = InstanceType<typeof RRule>;
 import type { PrismaClient } from "@mipiacetpv/db";
 
 import { otorgarAccesoClinicoPorCita } from "../clinica/acceso-por-cita.js";
+import {
+  cumplirEncargoDeValoracion,
+  encargoDeValoracionPorCita,
+  type EncargoDeValoracion,
+} from "../clinica/valoracion-por-cita.js";
 import { sqlStateOf } from "../lib/sqlstate.js";
 import {
   resolveCenterSchedule,
@@ -593,6 +598,12 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
       const apptId = randomUUID();
       // ids de item por índice, para mapear assignments.
       const itemIds = input.items.map(() => randomUUID());
+      // clinica-2 · lo que haya que mandarle al paciente se AVERIGUA dentro
+      // de la transacción y se manda DESPUÉS del commit. Ver la cabecera de
+      // `clinica/valoracion-por-cita.ts`: un SMTP lento no puede tener
+      // abierta la transacción que compite por el EXCLUDE del anti-solape,
+      // y un SMTP caído no puede impedir dar una cita.
+      let encargoClinico: EncargoDeValoracion | null = null;
       // La transacción entera va dentro de `withRaceRetry`: es la unidad
       // que se reintenta si la carrera acaba en deadlock. `apptId` e
       // `itemIds` se generan FUERA a propósito — un intento abortado no
@@ -643,8 +654,24 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
             itemIds,
             assignments: input.assignments,
           });
+          // clinica-2 · ¿es una cita de primera valoración de un paciente
+          // que no tiene valoración? La lectura va DENTRO para ver el mismo
+          // estado que la escritura (si alguien apagara el módulo o
+          // desmarcara el servicio a mitad, esto y la cita ven lo mismo).
+          // Se reasigna en cada intento: `withRaceRetry` puede repetir la
+          // transacción, y un encargo de un intento abortado no vale.
+          encargoClinico = await encargoDeValoracionPorCita(tx, {
+            tenantId: input.tenantId,
+            clientId: input.clientId,
+            appointmentId: apptId,
+            serviceIds: input.items.map((it) => it.serviceId),
+          });
         }),
       );
+      // Fuera de la transacción, y no lanza nunca: la cita ya está dada.
+      if (encargoClinico) {
+        await cumplirEncargoDeValoracion(prisma, encargoClinico);
+      }
       const view = await this.getAppointmentView(input.tenantId, apptId);
       if (!view) throw new Error("appointment vanished after insert");
       return view;
