@@ -110,6 +110,13 @@ precio, no el relleno.
 
 - [ ] Terminal en el WiFi del local; densidad y pantalla siempre encendida.
 - [ ] Impresora real: un ticket con **serie, número, QR y leyenda** y la cabecera fiscal correcta.
+  - **Puerta de la impresora del bar** (se verá en el local). La APK sólo imprime de verdad
+    por **USB ESC/POS**. La «WiFi» la manda el servidor por TCP a `ip:puerto`, y desde el VPS no se
+    llega a una impresora de la red privada del bar. Bluetooth y serie no existen. Así que:
+    - USB y ESC/POS → se enchufa al D8 y se prueba el ticket.
+    - Sólo red, Bluetooth, o una impresora fiscal o propietaria → **no sirve**. Plan B: llevar una
+      térmica USB ESC/POS de 80 mm de repuesto (presupuesto con el 20 % de margen si se le vende).
+    - Mirar la etiqueta y apuntar el modelo en `docs/qa/ficha-terminal-ap13-kozen-d8.md`.
 - [ ] Modo avión 2 min: venta offline → reconectar → sube sola (y su registro fiscal no se repite).
 - [ ] Si hay dos cajas: expulsión pasiva y doble cobro simultáneo (`checklist-sirope.md` §3).
 - [ ] **Activar** con el email del dueño delante. Irreversible. Primer login, contraseña y PIN.

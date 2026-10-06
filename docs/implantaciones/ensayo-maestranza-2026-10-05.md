@@ -1,4 +1,4 @@
-# Ensayo completo de La Maestranza · lunes 05-10-2026 · AP11
+# Ensayo completo de La Maestranza · lunes 05-10-2026 · AP11 y AP13
 
 Objetivo: llegar a la visita al bar sabiendo que todo funciona, sin descubrir nada delante de
 Salomé. Al terminar el día hay que tener un **go / no-go** por escrito para instalarle el AP13.
@@ -105,16 +105,26 @@ Se escribe en `docs/qa/2026-10-05-ensayo-maestranza.md`:
 - **Go** solo si: los precios cuadran, el ticket impreso lleva el QR, sin red no se pierde ni se
   repite un número, el arqueo cuadra y está decidido qué se hace con las devoluciones.
 
-## El AP13 de Salomé
+## Carril C · el AP13 de Salomé, en el taller (≈ 1 h, en paralelo al B)
 
-Es un modelo que no hemos tenido nunca en el banco. Antes de que salga del taller, pasa por
-`checklist-terminal.md` completo:
+Lo tenemos en la oficina, todavía en la caja. Es un modelo que nunca ha pasado por el banco, así
+que se prepara mañana junto al AP11 con `checklist-terminal.md` completo:
 
-- Modelo y pulgadas.
-- Android.
-- **Chrome y WebView** (el WebView ≥ 84 o no vale; ver lo que pasó con el AP12 de Sole).
-- Densidad para que el lienzo quede en 1280×800.
-- APK 1.19.0 por `/apk`.
-- Impresora.
+- [ ] **Ficha del terminal**: modelo, pulgadas, resolución física, Android, versión de **Chrome** y
+      versión del **WebView del sistema**, por adb:
+      `adb shell getprop ro.build.version.release`
+      `adb shell dumpsys package com.google.android.webview | grep versionName`.
+      Se apunta en `docs/qa/2026-10-05-ensayo-maestranza.md`.
+- [ ] **WebView ≥ 84 o no vale.** Si viene más viejo, se actualiza «Android System WebView» desde
+      Play Store antes de seguir (lo que pasó con el AP12 de Sole: `project_ap12_webview_83`).
+- [ ] Densidad para que el lienzo quede en **1280×800** (`adb shell wm density …`), y comprobar que
+      sobrevive a un reinicio.
+- [ ] **APK de producción 1.19.0** desde `mipiacetpv.com/apk`. Nunca la de laboratorio del carril
+      B: a este terminal no le entra una APK con `capacitor.config.ts` tocado.
+- [ ] Impresora: ¿la trae integrada, va por USB o va por red? Ticket de prueba de la APK.
+- [ ] Pantalla siempre encendida mientras está en la base, brillo y bloqueo.
+- [ ] **No se vincula a nada.** Se vincula a la cuenta real de La Maestranza el día de la visita,
+      después de activarla con Salomé delante.
 
-Hasta tenerlo en la mano no se puede dar por bueno nada de lo que se haya probado en el AP11.
+Si el AP13 no pasa la ficha (WebView imposible de actualizar, densidad que no cuadra o impresora
+que la APK no ve), es un **no-go** para ese terminal, aunque el AP11 haya ido perfecto.
