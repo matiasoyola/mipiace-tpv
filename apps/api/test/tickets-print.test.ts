@@ -48,6 +48,10 @@ interface FakeTicket {
     units: number;
     unitPrice: number;
     unitPriceOverride: number | null;
+    // bloque ticket-con-iva · el papel imprime el unitario CON IVA, así
+    // que el mapeo necesita el tipo de la línea. Las fixtures de abajo lo
+    // llevan coherente con sus importes (`total` = neto × (1 + tipo)).
+    taxRate: number;
     total: number;
   }>;
   payments: Array<{ method: string; amount: number }>;
@@ -182,6 +186,7 @@ function seedTicket(overrides: Partial<FakeTicket> = {}): FakeTicket {
         units: 2,
         unitPrice: 1.5,
         unitPriceOverride: null,
+        taxRate: 0,
         total: 3,
       },
       {
@@ -189,6 +194,7 @@ function seedTicket(overrides: Partial<FakeTicket> = {}): FakeTicket {
         units: 1,
         unitPrice: 9.5,
         unitPriceOverride: null,
+        taxRate: 0,
         total: 9.5,
       },
     ],
@@ -337,6 +343,8 @@ describe("POST /tickets/:id/print/escpos", () => {
           units: 1,
           unitPrice: 2.7273,
           unitPriceOverride: null,
+          // 2,7273 € netos al 10 % son los 3,00 € del desayuno.
+          taxRate: 10,
           total: 3,
         },
       ],

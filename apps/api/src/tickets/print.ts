@@ -264,6 +264,11 @@ async function loadTicketForPrint(
           units: true,
           unitPrice: true,
           unitPriceOverride: true,
+          // bloque ticket-con-iva · para convertir el unitario NETO
+          // persistido al bruto que se imprime, y para sumarle los deltas
+          // de los modificadores (el `unitPrice` persistido es el base).
+          taxRate: true,
+          modifiers: true,
           total: true,
         },
       },

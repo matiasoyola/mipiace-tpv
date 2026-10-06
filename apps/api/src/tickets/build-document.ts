@@ -18,6 +18,7 @@ import {
 } from "@mipiacetpv/verifactu";
 
 import { entornoAeat } from "../fiscal/entorno.js";
+import { readUnitPriceDeltaCents } from "./totals.js";
 
 /** El NIF del emisor, leído del registro EMITIDO y no del perfil fiscal de
  *  hoy: el perfil puede haber cambiado, y el QR tiene que llevar lo que se
@@ -168,7 +169,15 @@ export async function loadTicketDocument(
         // térmico (tickets/print.ts). El subtotal/IVA se calculan
         // aparte desde los valores persistidos, así que esto sólo
         // corrige la columna de precio unitario mostrada.
-        unitPrice: l.unitPriceOverride ?? l.unitPrice,
+        //
+        // bloque ticket-con-iva · más los deltas de los modificadores
+        // (B-Bar-Modifiers): el `unitPrice` persistido es el precio BASE y
+        // los deltas viven en el snapshot, así que sin sumarlos el PDF
+        // pintaba "1 x 1,60 → 2,10" en una línea con avena. Mismo criterio
+        // que el térmico y que `computeTicket` al cobrar.
+        unitPrice:
+          Number(l.unitPriceOverride ?? l.unitPrice) +
+          readUnitPriceDeltaCents(l.modifiers) / 100,
         discountPct: l.discountPct,
         taxRate: l.taxRate,
         subtotal: l.subtotal,

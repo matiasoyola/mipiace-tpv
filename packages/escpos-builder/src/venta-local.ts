@@ -46,7 +46,9 @@ export interface CabeceraTicketLocal {
 export interface LineaTicketLocal {
   description: string;
   units: number;
-  unitPrice: number;
+  /** bloque ticket-con-iva · unitario CON IVA, el de la carta. */
+  unitPriceGross: number;
+  /** Total de línea CON IVA. */
   lineTotal: number;
 }
 
@@ -107,7 +109,7 @@ export function buildLocalTicketInput(venta: VentaLocal): TicketReceiptInput {
   const lines: TicketLineEscpos[] = venta.lines.map((l) => ({
     description: l.description,
     units: l.units,
-    unitPrice: l.unitPrice,
+    unitPriceGross: l.unitPriceGross,
     lineTotal: l.lineTotal,
   }));
 
@@ -135,7 +137,8 @@ export function buildLocalTicketInput(venta: VentaLocal): TicketReceiptInput {
 
   // El desglose se pasa SIN cuadrar: el cuadre lo hace `buildTicketReceipt`
   // con `cuadrarDesglose`, igual que con el desglose que le llega desde el
-  // servidor. Cuadrarlo aquí lo cuadraría dos veces.
+  // servidor. Cuadrarlo aquí lo cuadraría dos veces. Lo mismo vale para
+  // los totales de línea desde el bloque ticket-con-iva.
   return {
     legalName: venta.cabecera.legalName,
     taxId: venta.cabecera.taxId,

@@ -202,6 +202,42 @@ describe("renderTicketPdf", () => {
     expect(txt).toContain("5,40 €"); // total (entrada, no se recalcula)
   });
 
+  // bloque ticket-con-iva · el PDF es el ticket DIGITAL: el que se envía
+  // por email y el que la PWA pinta en la pantalla post-cobro. Hasta este
+  // bloque era el peor de los tres papeles — unitario neto Y importe de
+  // línea neto (`line.subtotal`), así que ninguna de sus dos columnas
+  // tenía que ver con el total pagado.
+  //
+  // La venta real del 06-10 en el Bar La Maestranza: café con leche de
+  // 1,60 + 2 cañas de 1,30 + una ración de 10,40, todo al 10 %, 14,60 €.
+  it("el ticket digital se lee como la carta y sus columnas suman", async () => {
+    const inp = input();
+    inp.ticket.total = 14.6;
+    inp.ticket.lines = [
+      // Netos de 4 decimales, como los persiste la BD (`Decimal(12,4)`).
+      { nameSnapshot: "Cafe con leche", units: 1, unitPrice: 1.4545, taxRate: 10, subtotal: 1.45, total: 1.6 },
+      { nameSnapshot: "Cana", units: 2, unitPrice: 1.1818, taxRate: 10, subtotal: 2.36, total: 2.6 },
+      { nameSnapshot: "Racion de la casa", units: 1, unitPrice: 9.4545, taxRate: 10, subtotal: 9.45, total: 10.4 },
+    ];
+    inp.ticket.payments = [{ method: "CASH", amount: 14.6 }];
+    inp.ticket.cashAmount = 14.6;
+    const doc = buildTicketDocument(inp);
+
+    const txt = (await pdfParse(Buffer.from(await renderTicketPdf(doc)))).text;
+    // Unitarios con IVA: los de la pizarra del bar.
+    expect(txt).toContain("1 x 1,60 €");
+    expect(txt).toContain("2 x 1,30 €");
+    expect(txt).toContain("1 x 10,40 €");
+    // Y ninguno de los netos que se imprimían antes.
+    expect(txt).not.toContain("1 x 1,45 €");
+    expect(txt).not.toContain("2 x 1,18 €");
+    expect(txt).not.toContain("1 x 9,45 €");
+    // Base imponible con UN valor: 13,26 en el tramo y en el subtotal.
+    expect(txt).toContain("IVA 10% s/13,26 €");
+    expect(txt).not.toContain("13,27 €");
+    expect(txt).toContain("14,60 €");
+  });
+
   it("crece la página verticalmente con más líneas", async () => {
     const single = await renderTicketPdf(buildTicketDocument(input()));
     const heavyInput = input();

@@ -15,10 +15,11 @@ import {
   type TicketPaymentEscpos,
   type TicketReceiptInput,
 } from "@mipiacetpv/escpos-builder";
-import { changeFromCash } from "@mipiacetpv/ticket-model";
+import { changeFromCash, netToGross } from "@mipiacetpv/ticket-model";
 import type { TicketTotals, TicketVerifactu } from "@mipiacetpv/ticket-model";
 
 import { cashierLabelFrom } from "../users/display.js";
+import { readUnitPriceDeltaCents } from "./totals.js";
 
 export interface TicketForPrint {
   id: string;
@@ -54,6 +55,14 @@ export interface TicketForPrint {
     units: { toString(): string };
     unitPrice: { toString(): string };
     unitPriceOverride: { toString(): string } | null;
+    // bloque ticket-con-iva · hace falta para imprimir el unitario CON
+    // IVA. El `unitPrice` persistido es NETO con 4 decimales.
+    taxRate: { toString(): string };
+    // bloque ticket-con-iva · snapshot de modificadores (B-Bar-Modifiers).
+    // El `unitPrice` persistido es el precio BASE y los deltas viven aquí,
+    // así que sin esto el unitario de "Café con leche + leche de avena"
+    // saldría sin los 50 céntimos de la avena.
+    modifiers?: unknown;
     total: { toString(): string };
   }>;
   payments: Array<{
@@ -83,10 +92,33 @@ export function ticketToEscposInput(
     const override = l.unitPriceOverride != null
       ? Number(l.unitPriceOverride.toString())
       : null;
+    // v1.8-Fiado · el unitario impreso es el efectivamente cobrado
+    // (override del cajero ?? catálogo), no el de catálogo.
+    //
+    // bloque ticket-con-iva · y se imprime CON IVA, que es el precio que
+    // el cliente conoce. El neto de 4 decimales (`1.4545`) se convierte
+    // con `netToGross`, la misma función con la que el cajero teclea
+    // precios sobre total: 1,4545 al 10 % vuelve a ser los 1,60 € de la
+    // carta. `l.total` ya era bruto y no se toca.
+    //
+    // Y suma los deltas de los modificadores, igual que `computeTicket` al
+    // cobrar y que el papel del dispositivo (`unitPriceGrossOf`). Sin
+    // ellos el unitario del servidor y el del dispositivo se separaban en
+    // cuanto la línea llevaba un modificador con precio — el agujero que
+    // el invariante de `verifactu-un-solo-papel` no veía porque su fixture
+    // no tenía ninguno.
+    const netUnit =
+      (override ?? baseUnit) + readUnitPriceDeltaCents(l.modifiers) / 100;
+    // DEFENSIVO: imprimir el ticket importa más que el IVA del unitario.
+    // La columna `tax_rate` es NOT NULL y el select de `print.ts` la pide,
+    // así que esto no debería dispararse nunca — pero si un caller llegara
+    // sin ella, el papel sale con el unitario neto (lo de antes de este
+    // bloque) en vez de con un 500 y el cliente sin ticket.
+    const taxRate = Number(l.taxRate?.toString() ?? "0");
     return {
       description: l.nameSnapshot,
       units: Number(l.units.toString()),
-      unitPrice: override ?? baseUnit,
+      unitPriceGross: netToGross(netUnit, Number.isFinite(taxRate) ? taxRate : 0),
       lineTotal: Number(l.total.toString()),
     };
   });
