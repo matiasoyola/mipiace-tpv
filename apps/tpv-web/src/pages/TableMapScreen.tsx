@@ -61,6 +61,7 @@ import type { ServerDraft } from "../lib/tableDraft.js";
 import { outboxBlockedTableIds, subscribeOutbox } from "../lib/outbox.js";
 import { syncNow } from "../lib/syncNow.js";
 import { CloseShiftModal } from "./CloseShiftModal.js";
+import { summarizeOpenTables } from "../lib/openTables.js";
 import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
 import { formatEur } from "../lib/money.js";
 import type { CashierRole } from "../lib/offlineAuth.js";
@@ -272,17 +273,15 @@ export function TableMapScreen(props: TableMapScreenProps) {
   // igual que el mockup). "€ en sala" = suma de totales de los DRAFTs
   // visibles — trazable a la misma respuesta de /tpv/tables, sin cálculo
   // nuevo en server.
-  const openCount = tables.filter(
-    (t) => t.state !== "FREE" && !t.groupedIntoTableId,
-  ).length;
+  //
+  // v1.22 §5 · la regla se ha mudado a `lib/openTables.ts` porque ahora
+  // la usan también el cierre del día y la apertura de turno (hallazgo
+  // B2). Si viviera en dos sitios, el aviso del cierre podría decir un
+  // número y esta cabecera otro.
+  const openSummary = summarizeOpenTables(tables);
+  const openCount = openSummary.count;
   const freeCount = tables.length - openCount;
-  const salaTotal = tables.reduce(
-    (sum, t) =>
-      t.activeTicket && !t.groupedIntoTableId
-        ? sum + Number(t.activeTicket.total)
-        : sum,
-    0,
-  );
+  const salaTotal = openSummary.total;
 
   const visible =
     zoneFilter === "ALL" ? tables : tables.filter((t) => t.zone === zoneFilter);
