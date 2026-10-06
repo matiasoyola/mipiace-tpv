@@ -4,8 +4,15 @@
 // jsdom no hace layout, así que esto no mide rects: comprueba que el
 // tamaño sale de UN sitio (`TABLE_CARD_SIZE_CLASS`) y que el lienzo ya
 // no lleva ninguna de las dos piezas que daban cuatro tamaños a la misma
-// mesa — la columna fija de 300 px y el `grid-cols-2`. Los rects de
-// verdad van en el bucle visual con Playwright (ver el `-done`).
+// mesa — la columna fija de 300 px, y el `grid-cols-2` aplicado a TODOS
+// los anchos. En handheld sí hay dos columnas, a propósito, y eso
+// también se comprueba. Los rects de verdad van en el bucle visual con
+// Playwright (ver el `-done`).
+//
+// Los tests de rejilla comparan contra literales (`grid-cols-2`,
+// `sm:flex-wrap`) y no contra `ROOM_GRID_CLASS`: codifican el REQUISITO,
+// no la constante. Comparar contra la constante haría que sabotearla
+// pasara el test.
 //
 // Mismo patrón sin testing-library que `table-map-visual.test.tsx`.
 
@@ -163,6 +170,19 @@ function cajasDeMesa(): Element[] {
   );
 }
 
+/**
+ * Las rejillas de mesas del lienzo: una por zona visible. Se identifican
+ * por contener tarjetas, no por su clase — así el test sigue valiendo si
+ * la clase cambia, y cae si la rejilla deja de ser la compartida.
+ */
+function rejillasDeMesas(): Element[] {
+  const padres = new Set<Element>();
+  for (const caja of cajasDeMesa()) {
+    if (caja.parentElement) padres.add(caja.parentElement);
+  }
+  return [...padres];
+}
+
 /** Las clases de un elemento, como lista. */
 function clases(el: Element): string[] {
   return (el.getAttribute("class") ?? "").split(/\s+/).filter(Boolean);
@@ -230,12 +250,37 @@ describe("mapa de sala · una mesa mide lo mismo esté donde esté", () => {
     expect(sospechosas).toHaveLength(0);
   });
 
-  it("ninguna zona se pinta con dos columnas fijas", async () => {
+  it("desde sm las columnas salen del ancho, no de un grid-cols-N", async () => {
     await renderSala();
+    // El `grid-cols-2` de handheld SÓLO vale por debajo de `sm`: a partir
+    // de ahí la rejilla es `flex-wrap` con tarjetas de ancho fijo y el
+    // número de columnas lo decide el ancho disponible. Quitar el
+    // `sm:flex-wrap` devuelve el terminal a dos columnas, que es el bug
+    // original.
+    const rejillas = rejillasDeMesas();
+    expect(rejillas.length).toBeGreaterThan(0);
+    for (const el of rejillas) {
+      expect(clases(el)).toContain("sm:flex");
+      expect(clases(el)).toContain("sm:flex-wrap");
+    }
+    // Y ninguna rejilla fija columnas DE sm para arriba.
     const sospechosas = [...container.querySelectorAll("[class]")].filter((el) =>
-      clases(el).some((c) => c === "grid-cols-2" || c.endsWith(":grid-cols-2")),
+      clases(el).some((c) => /^(sm|md|lg|xl|2xl):grid-cols-/.test(c)),
     );
     expect(sospechosas).toHaveLength(0);
+  });
+
+  it("en handheld la sala va a DOS columnas, no a una", async () => {
+    await renderSala();
+    // Una sola columna a 390 px da tarjetas de 320 y 2.614 px de scroll
+    // para 16 mesas. Con dos columnas la tarjeta mide 154 — por encima
+    // del objetivo táctil — y se ve el doble de sala por pantallazo.
+    const rejillas = rejillasDeMesas();
+    expect(rejillas.length).toBeGreaterThan(0);
+    for (const el of rejillas) {
+      expect(clases(el)).toContain("grid");
+      expect(clases(el)).toContain("grid-cols-2");
+    }
   });
 
   it("la vista filtrada por zona usa el mismo tamaño que la vista «Todas»", async () => {

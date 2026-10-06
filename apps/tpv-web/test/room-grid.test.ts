@@ -14,7 +14,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   ROOM_GRID_GAP,
+  ROOM_GRID_HANDHELD_COLUMNS,
   TABLE_CARD_HEIGHT,
+  handheldCardWidth,
   ZONE_BORDER,
   TABLE_CARD_SIZE_CLASS,
   TABLE_CARD_WIDTH,
@@ -59,6 +61,29 @@ describe("roomGrid · tamaño único de tarjeta", () => {
     const areaMesa = TABLE_CARD_WIDTH * TABLE_CARD_HEIGHT;
     const areaTaburete84 = 84 * 84;
     expect(areaMesa).toBeGreaterThanOrEqual(areaTaburete84);
+  });
+});
+
+describe("roomGrid · handheld", () => {
+  it("a 390 px la mesa mide 153 y no 320: dos columnas, no una", () => {
+    expect(ROOM_GRID_HANDHELD_COLUMNS).toBe(2);
+    // Medido en el navegador, no sumado sobre el papel: 153.
+    expect(handheldCardWidth(390)).toBe(153);
+    // Una sola columna daba 320 px de tarjeta y la mitad de sala por
+    // pantallazo.
+    expect(handheldCardWidth(390, 1)).toBe(320);
+  });
+
+  it("la mesa de handheld sigue siendo un objetivo tocable", () => {
+    // El suelo del bucle visual es 390; el estrecho de verdad, 320.
+    expect(handheldCardWidth(390)).toBeGreaterThanOrEqual(150);
+    expect(handheldCardWidth(320)).toBeGreaterThanOrEqual(64);
+    expect(TABLE_CARD_HEIGHT).toBeGreaterThanOrEqual(64);
+  });
+
+  it("tres columnas dejarían la tarjeta por debajo de lo utilizable", () => {
+    // Por si alguien quiere apretar más: a 390 px, tres columnas son 98.
+    expect(handheldCardWidth(390, 3)).toBeLessThan(150);
   });
 });
 

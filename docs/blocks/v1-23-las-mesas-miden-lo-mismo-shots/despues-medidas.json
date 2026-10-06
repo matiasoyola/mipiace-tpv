@@ -739,701 +739,17 @@
     },
     "vista": "todas",
     "scroll": {
-      "docScrollHeight": 2614,
+      "docScrollHeight": 1558,
       "docClientHeight": 844,
-      "mainScrollHeight": 2537,
-      "mainClientHeight": 2537,
+      "mainScrollHeight": 1481,
+      "mainClientHeight": 1481,
       "hayScroll": false
     },
     "lienzo": {
       "x": 16,
       "y": 336,
       "w": 358,
-      "h": 2262
-    },
-    "zonas": [
-      {
-        "zona": "SALÓN",
-        "x": 16,
-        "y": 336,
-        "w": 358,
-        "h": 816
-      },
-      {
-        "zona": "TERRAZA",
-        "x": 16,
-        "y": 1170,
-        "w": 358,
-        "h": 816
-      },
-      {
-        "zona": "BARRA",
-        "x": 16,
-        "y": 2004,
-        "w": 358,
-        "h": 594
-      }
-    ],
-    "mesas": [
-      {
-        "mesa": "M14",
-        "x": 35,
-        "y": 355,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "M24",
-        "x": 35,
-        "y": 487,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "M34",
-        "x": 35,
-        "y": 619,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "M44",
-        "x": 35,
-        "y": 751,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "M54",
-        "x": 35,
-        "y": 883,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "M64",
-        "x": 35,
-        "y": 1015,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "T14",
-        "x": 35,
-        "y": 1189,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "T2",
-        "x": 35,
-        "y": 1321,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "T34",
-        "x": 35,
-        "y": 1453,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "T44",
-        "x": 35,
-        "y": 1585,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "T54",
-        "x": 35,
-        "y": 1717,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "T64",
-        "x": 35,
-        "y": 1849,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "B14",
-        "x": 35,
-        "y": 2065,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "B24",
-        "x": 35,
-        "y": 2197,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "B34",
-        "x": 35,
-        "y": 2329,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "B44",
-        "x": 35,
-        "y": 2461,
-        "w": 320,
-        "h": 118
-      }
-    ]
-  },
-  {
-    "sala": "maestranza",
-    "viewport": {
-      "w": 390,
-      "h": 844
-    },
-    "vista": "salon",
-    "scroll": {
-      "docScrollHeight": 1168,
-      "docClientHeight": 844,
-      "mainScrollHeight": 1091,
-      "mainClientHeight": 1091,
-      "hayScroll": false
-    },
-    "lienzo": {
-      "x": 16,
-      "y": 336,
-      "w": 358,
-      "h": 816
-    },
-    "zonas": [
-      {
-        "zona": "SALÓN",
-        "x": 16,
-        "y": 336,
-        "w": 358,
-        "h": 816
-      }
-    ],
-    "mesas": [
-      {
-        "mesa": "M14",
-        "x": 35,
-        "y": 355,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "M24",
-        "x": 35,
-        "y": 487,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "M34",
-        "x": 35,
-        "y": 619,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "M44",
-        "x": 35,
-        "y": 751,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "M54",
-        "x": 35,
-        "y": 883,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "M64",
-        "x": 35,
-        "y": 1015,
-        "w": 320,
-        "h": 118
-      }
-    ]
-  },
-  {
-    "sala": "maestranza",
-    "viewport": {
-      "w": 390,
-      "h": 844
-    },
-    "vista": "terraza",
-    "scroll": {
-      "docScrollHeight": 1168,
-      "docClientHeight": 844,
-      "mainScrollHeight": 1091,
-      "mainClientHeight": 1091,
-      "hayScroll": false
-    },
-    "lienzo": {
-      "x": 16,
-      "y": 336,
-      "w": 358,
-      "h": 816
-    },
-    "zonas": [
-      {
-        "zona": "TERRAZA",
-        "x": 16,
-        "y": 336,
-        "w": 358,
-        "h": 816
-      }
-    ],
-    "mesas": [
-      {
-        "mesa": "T14",
-        "x": 35,
-        "y": 355,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "T2",
-        "x": 35,
-        "y": 487,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "T34",
-        "x": 35,
-        "y": 619,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "T44",
-        "x": 35,
-        "y": 751,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "T54",
-        "x": 35,
-        "y": 883,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "T64",
-        "x": 35,
-        "y": 1015,
-        "w": 320,
-        "h": 118
-      }
-    ]
-  },
-  {
-    "sala": "maestranza",
-    "viewport": {
-      "w": 390,
-      "h": 844
-    },
-    "vista": "barra",
-    "scroll": {
-      "docScrollHeight": 946,
-      "docClientHeight": 844,
-      "mainScrollHeight": 869,
-      "mainClientHeight": 869,
-      "hayScroll": false
-    },
-    "lienzo": {
-      "x": 16,
-      "y": 336,
-      "w": 358,
-      "h": 594
-    },
-    "zonas": [
-      {
-        "zona": "BARRA",
-        "x": 16,
-        "y": 336,
-        "w": 358,
-        "h": 594
-      }
-    ],
-    "mesas": [
-      {
-        "mesa": "B14",
-        "x": 35,
-        "y": 397,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "B24",
-        "x": 35,
-        "y": 529,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "B34",
-        "x": 35,
-        "y": 661,
-        "w": 320,
-        "h": 118
-      },
-      {
-        "mesa": "B44",
-        "x": 35,
-        "y": 793,
-        "w": 320,
-        "h": 118
-      }
-    ]
-  },
-  {
-    "sala": "sirope",
-    "viewport": {
-      "w": 1443,
-      "h": 812
-    },
-    "vista": "todas",
-    "scroll": {
-      "docScrollHeight": 812,
-      "docClientHeight": 812,
-      "mainScrollHeight": 735,
-      "mainClientHeight": 735,
-      "hayScroll": false
-    },
-    "lienzo": {
-      "x": 28,
-      "y": 212,
-      "w": 1387,
-      "h": 156
-    },
-    "zonas": [
-      {
-        "zona": "SALÓN",
-        "x": 28,
-        "y": 212,
-        "w": 570,
-        "h": 156
-      },
-      {
-        "zona": "TERRAZA",
-        "x": 616,
-        "y": 212,
-        "w": 206,
-        "h": 156
-      }
-    ],
-    "mesas": [
-      {
-        "mesa": "M14",
-        "x": 47,
-        "y": 231,
-        "w": 168,
-        "h": 118
-      },
-      {
-        "mesa": "M24",
-        "x": 229,
-        "y": 231,
-        "w": 168,
-        "h": 118
-      },
-      {
-        "mesa": "M44",
-        "x": 411,
-        "y": 231,
-        "w": 168,
-        "h": 118
-      },
-      {
-        "mesa": "T14",
-        "x": 635,
-        "y": 231,
-        "w": 168,
-        "h": 118
-      }
-    ]
-  },
-  {
-    "sala": "sirope",
-    "viewport": {
-      "w": 1443,
-      "h": 812
-    },
-    "vista": "salon",
-    "scroll": {
-      "docScrollHeight": 812,
-      "docClientHeight": 812,
-      "mainScrollHeight": 735,
-      "mainClientHeight": 735,
-      "hayScroll": false
-    },
-    "lienzo": {
-      "x": 28,
-      "y": 212,
-      "w": 1387,
-      "h": 156
-    },
-    "zonas": [
-      {
-        "zona": "SALÓN",
-        "x": 28,
-        "y": 212,
-        "w": 570,
-        "h": 156
-      }
-    ],
-    "mesas": [
-      {
-        "mesa": "M14",
-        "x": 47,
-        "y": 231,
-        "w": 168,
-        "h": 118
-      },
-      {
-        "mesa": "M24",
-        "x": 229,
-        "y": 231,
-        "w": 168,
-        "h": 118
-      },
-      {
-        "mesa": "M44",
-        "x": 411,
-        "y": 231,
-        "w": 168,
-        "h": 118
-      }
-    ]
-  },
-  {
-    "sala": "sirope",
-    "viewport": {
-      "w": 1443,
-      "h": 812
-    },
-    "vista": "terraza",
-    "scroll": {
-      "docScrollHeight": 812,
-      "docClientHeight": 812,
-      "mainScrollHeight": 735,
-      "mainClientHeight": 735,
-      "hayScroll": false
-    },
-    "lienzo": {
-      "x": 28,
-      "y": 212,
-      "w": 1387,
-      "h": 156
-    },
-    "zonas": [
-      {
-        "zona": "TERRAZA",
-        "x": 28,
-        "y": 212,
-        "w": 206,
-        "h": 156
-      }
-    ],
-    "mesas": [
-      {
-        "mesa": "T14",
-        "x": 47,
-        "y": 231,
-        "w": 168,
-        "h": 118
-      }
-    ]
-  },
-  {
-    "sala": "sirope",
-    "viewport": {
-      "w": 1280,
-      "h": 800
-    },
-    "vista": "todas",
-    "scroll": {
-      "docScrollHeight": 800,
-      "docClientHeight": 800,
-      "mainScrollHeight": 723,
-      "mainClientHeight": 723,
-      "hayScroll": false
-    },
-    "lienzo": {
-      "x": 28,
-      "y": 212,
-      "w": 1224,
-      "h": 156
-    },
-    "zonas": [
-      {
-        "zona": "SALÓN",
-        "x": 28,
-        "y": 212,
-        "w": 570,
-        "h": 156
-      },
-      {
-        "zona": "TERRAZA",
-        "x": 616,
-        "y": 212,
-        "w": 206,
-        "h": 156
-      }
-    ],
-    "mesas": [
-      {
-        "mesa": "M14",
-        "x": 47,
-        "y": 231,
-        "w": 168,
-        "h": 118
-      },
-      {
-        "mesa": "M24",
-        "x": 229,
-        "y": 231,
-        "w": 168,
-        "h": 118
-      },
-      {
-        "mesa": "M44",
-        "x": 411,
-        "y": 231,
-        "w": 168,
-        "h": 118
-      },
-      {
-        "mesa": "T14",
-        "x": 635,
-        "y": 231,
-        "w": 168,
-        "h": 118
-      }
-    ]
-  },
-  {
-    "sala": "sirope",
-    "viewport": {
-      "w": 1280,
-      "h": 800
-    },
-    "vista": "salon",
-    "scroll": {
-      "docScrollHeight": 800,
-      "docClientHeight": 800,
-      "mainScrollHeight": 723,
-      "mainClientHeight": 723,
-      "hayScroll": false
-    },
-    "lienzo": {
-      "x": 28,
-      "y": 212,
-      "w": 1224,
-      "h": 156
-    },
-    "zonas": [
-      {
-        "zona": "SALÓN",
-        "x": 28,
-        "y": 212,
-        "w": 570,
-        "h": 156
-      }
-    ],
-    "mesas": [
-      {
-        "mesa": "M14",
-        "x": 47,
-        "y": 231,
-        "w": 168,
-        "h": 118
-      },
-      {
-        "mesa": "M24",
-        "x": 229,
-        "y": 231,
-        "w": 168,
-        "h": 118
-      },
-      {
-        "mesa": "M44",
-        "x": 411,
-        "y": 231,
-        "w": 168,
-        "h": 118
-      }
-    ]
-  },
-  {
-    "sala": "sirope",
-    "viewport": {
-      "w": 1280,
-      "h": 800
-    },
-    "vista": "terraza",
-    "scroll": {
-      "docScrollHeight": 800,
-      "docClientHeight": 800,
-      "mainScrollHeight": 723,
-      "mainClientHeight": 723,
-      "hayScroll": false
-    },
-    "lienzo": {
-      "x": 28,
-      "y": 212,
-      "w": 1224,
-      "h": 156
-    },
-    "zonas": [
-      {
-        "zona": "TERRAZA",
-        "x": 28,
-        "y": 212,
-        "w": 206,
-        "h": 156
-      }
-    ],
-    "mesas": [
-      {
-        "mesa": "T14",
-        "x": 47,
-        "y": 231,
-        "w": 168,
-        "h": 118
-      }
-    ]
-  },
-  {
-    "sala": "sirope",
-    "viewport": {
-      "w": 390,
-      "h": 844
-    },
-    "vista": "todas",
-    "scroll": {
-      "docScrollHeight": 946,
-      "docClientHeight": 844,
-      "mainScrollHeight": 869,
-      "mainClientHeight": 869,
-      "hayScroll": false
-    },
-    "lienzo": {
-      "x": 16,
-      "y": 336,
-      "w": 358,
-      "h": 594
+      "h": 1206
     },
     "zonas": [
       {
@@ -1448,7 +764,14 @@
         "x": 16,
         "y": 774,
         "w": 358,
-        "h": 156
+        "h": 420
+      },
+      {
+        "zona": "BARRA",
+        "x": 16,
+        "y": 1212,
+        "w": 358,
+        "h": 330
       }
     ],
     "mesas": [
@@ -1456,34 +779,118 @@
         "mesa": "M14",
         "x": 35,
         "y": 355,
-        "w": 320,
+        "w": 153,
         "h": 118
       },
       {
         "mesa": "M24",
+        "x": 202,
+        "y": 355,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "M34",
         "x": 35,
         "y": 487,
-        "w": 320,
+        "w": 153,
         "h": 118
       },
       {
         "mesa": "M44",
+        "x": 202,
+        "y": 487,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "M54",
         "x": 35,
         "y": 619,
-        "w": 320,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "M64",
+        "x": 202,
+        "y": 619,
+        "w": 153,
         "h": 118
       },
       {
         "mesa": "T14",
         "x": 35,
         "y": 793,
-        "w": 320,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "T2",
+        "x": 202,
+        "y": 793,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "T34",
+        "x": 35,
+        "y": 925,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "T44",
+        "x": 202,
+        "y": 925,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "T54",
+        "x": 35,
+        "y": 1057,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "T64",
+        "x": 202,
+        "y": 1057,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "B14",
+        "x": 35,
+        "y": 1273,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "B24",
+        "x": 202,
+        "y": 1273,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "B34",
+        "x": 35,
+        "y": 1405,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "B44",
+        "x": 202,
+        "y": 1405,
+        "w": 153,
         "h": 118
       }
     ]
   },
   {
-    "sala": "sirope",
+    "sala": "maestranza",
     "viewport": {
       "w": 390,
       "h": 844
@@ -1516,21 +923,614 @@
         "mesa": "M14",
         "x": 35,
         "y": 355,
-        "w": 320,
+        "w": 153,
         "h": 118
       },
       {
         "mesa": "M24",
+        "x": 202,
+        "y": 355,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "M34",
         "x": 35,
         "y": 487,
-        "w": 320,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "M44",
+        "x": 202,
+        "y": 487,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "M54",
+        "x": 35,
+        "y": 619,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "M64",
+        "x": 202,
+        "y": 619,
+        "w": 153,
+        "h": 118
+      }
+    ]
+  },
+  {
+    "sala": "maestranza",
+    "viewport": {
+      "w": 390,
+      "h": 844
+    },
+    "vista": "terraza",
+    "scroll": {
+      "docScrollHeight": 844,
+      "docClientHeight": 844,
+      "mainScrollHeight": 767,
+      "mainClientHeight": 767,
+      "hayScroll": false
+    },
+    "lienzo": {
+      "x": 16,
+      "y": 336,
+      "w": 358,
+      "h": 420
+    },
+    "zonas": [
+      {
+        "zona": "TERRAZA",
+        "x": 16,
+        "y": 336,
+        "w": 358,
+        "h": 420
+      }
+    ],
+    "mesas": [
+      {
+        "mesa": "T14",
+        "x": 35,
+        "y": 355,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "T2",
+        "x": 202,
+        "y": 355,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "T34",
+        "x": 35,
+        "y": 487,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "T44",
+        "x": 202,
+        "y": 487,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "T54",
+        "x": 35,
+        "y": 619,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "T64",
+        "x": 202,
+        "y": 619,
+        "w": 153,
+        "h": 118
+      }
+    ]
+  },
+  {
+    "sala": "maestranza",
+    "viewport": {
+      "w": 390,
+      "h": 844
+    },
+    "vista": "barra",
+    "scroll": {
+      "docScrollHeight": 844,
+      "docClientHeight": 844,
+      "mainScrollHeight": 767,
+      "mainClientHeight": 767,
+      "hayScroll": false
+    },
+    "lienzo": {
+      "x": 16,
+      "y": 336,
+      "w": 358,
+      "h": 330
+    },
+    "zonas": [
+      {
+        "zona": "BARRA",
+        "x": 16,
+        "y": 336,
+        "w": 358,
+        "h": 330
+      }
+    ],
+    "mesas": [
+      {
+        "mesa": "B14",
+        "x": 35,
+        "y": 397,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "B24",
+        "x": 202,
+        "y": 397,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "B34",
+        "x": 35,
+        "y": 529,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "B44",
+        "x": 202,
+        "y": 529,
+        "w": 153,
+        "h": 118
+      }
+    ]
+  },
+  {
+    "sala": "sirope",
+    "viewport": {
+      "w": 1443,
+      "h": 812
+    },
+    "vista": "todas",
+    "scroll": {
+      "docScrollHeight": 812,
+      "docClientHeight": 812,
+      "mainScrollHeight": 735,
+      "mainClientHeight": 735,
+      "hayScroll": false
+    },
+    "lienzo": {
+      "x": 28,
+      "y": 212,
+      "w": 1387,
+      "h": 156
+    },
+    "zonas": [
+      {
+        "zona": "SALÓN",
+        "x": 28,
+        "y": 212,
+        "w": 570,
+        "h": 156
+      },
+      {
+        "zona": "TERRAZA",
+        "x": 616,
+        "y": 212,
+        "w": 206,
+        "h": 156
+      }
+    ],
+    "mesas": [
+      {
+        "mesa": "M14",
+        "x": 47,
+        "y": 231,
+        "w": 168,
+        "h": 118
+      },
+      {
+        "mesa": "M24",
+        "x": 229,
+        "y": 231,
+        "w": 168,
+        "h": 118
+      },
+      {
+        "mesa": "M44",
+        "x": 411,
+        "y": 231,
+        "w": 168,
+        "h": 118
+      },
+      {
+        "mesa": "T14",
+        "x": 635,
+        "y": 231,
+        "w": 168,
+        "h": 118
+      }
+    ]
+  },
+  {
+    "sala": "sirope",
+    "viewport": {
+      "w": 1443,
+      "h": 812
+    },
+    "vista": "salon",
+    "scroll": {
+      "docScrollHeight": 812,
+      "docClientHeight": 812,
+      "mainScrollHeight": 735,
+      "mainClientHeight": 735,
+      "hayScroll": false
+    },
+    "lienzo": {
+      "x": 28,
+      "y": 212,
+      "w": 1387,
+      "h": 156
+    },
+    "zonas": [
+      {
+        "zona": "SALÓN",
+        "x": 28,
+        "y": 212,
+        "w": 570,
+        "h": 156
+      }
+    ],
+    "mesas": [
+      {
+        "mesa": "M14",
+        "x": 47,
+        "y": 231,
+        "w": 168,
+        "h": 118
+      },
+      {
+        "mesa": "M24",
+        "x": 229,
+        "y": 231,
+        "w": 168,
+        "h": 118
+      },
+      {
+        "mesa": "M44",
+        "x": 411,
+        "y": 231,
+        "w": 168,
+        "h": 118
+      }
+    ]
+  },
+  {
+    "sala": "sirope",
+    "viewport": {
+      "w": 1443,
+      "h": 812
+    },
+    "vista": "terraza",
+    "scroll": {
+      "docScrollHeight": 812,
+      "docClientHeight": 812,
+      "mainScrollHeight": 735,
+      "mainClientHeight": 735,
+      "hayScroll": false
+    },
+    "lienzo": {
+      "x": 28,
+      "y": 212,
+      "w": 1387,
+      "h": 156
+    },
+    "zonas": [
+      {
+        "zona": "TERRAZA",
+        "x": 28,
+        "y": 212,
+        "w": 206,
+        "h": 156
+      }
+    ],
+    "mesas": [
+      {
+        "mesa": "T14",
+        "x": 47,
+        "y": 231,
+        "w": 168,
+        "h": 118
+      }
+    ]
+  },
+  {
+    "sala": "sirope",
+    "viewport": {
+      "w": 1280,
+      "h": 800
+    },
+    "vista": "todas",
+    "scroll": {
+      "docScrollHeight": 800,
+      "docClientHeight": 800,
+      "mainScrollHeight": 723,
+      "mainClientHeight": 723,
+      "hayScroll": false
+    },
+    "lienzo": {
+      "x": 28,
+      "y": 212,
+      "w": 1224,
+      "h": 156
+    },
+    "zonas": [
+      {
+        "zona": "SALÓN",
+        "x": 28,
+        "y": 212,
+        "w": 570,
+        "h": 156
+      },
+      {
+        "zona": "TERRAZA",
+        "x": 616,
+        "y": 212,
+        "w": 206,
+        "h": 156
+      }
+    ],
+    "mesas": [
+      {
+        "mesa": "M14",
+        "x": 47,
+        "y": 231,
+        "w": 168,
+        "h": 118
+      },
+      {
+        "mesa": "M24",
+        "x": 229,
+        "y": 231,
+        "w": 168,
+        "h": 118
+      },
+      {
+        "mesa": "M44",
+        "x": 411,
+        "y": 231,
+        "w": 168,
+        "h": 118
+      },
+      {
+        "mesa": "T14",
+        "x": 635,
+        "y": 231,
+        "w": 168,
+        "h": 118
+      }
+    ]
+  },
+  {
+    "sala": "sirope",
+    "viewport": {
+      "w": 1280,
+      "h": 800
+    },
+    "vista": "salon",
+    "scroll": {
+      "docScrollHeight": 800,
+      "docClientHeight": 800,
+      "mainScrollHeight": 723,
+      "mainClientHeight": 723,
+      "hayScroll": false
+    },
+    "lienzo": {
+      "x": 28,
+      "y": 212,
+      "w": 1224,
+      "h": 156
+    },
+    "zonas": [
+      {
+        "zona": "SALÓN",
+        "x": 28,
+        "y": 212,
+        "w": 570,
+        "h": 156
+      }
+    ],
+    "mesas": [
+      {
+        "mesa": "M14",
+        "x": 47,
+        "y": 231,
+        "w": 168,
+        "h": 118
+      },
+      {
+        "mesa": "M24",
+        "x": 229,
+        "y": 231,
+        "w": 168,
+        "h": 118
+      },
+      {
+        "mesa": "M44",
+        "x": 411,
+        "y": 231,
+        "w": 168,
+        "h": 118
+      }
+    ]
+  },
+  {
+    "sala": "sirope",
+    "viewport": {
+      "w": 1280,
+      "h": 800
+    },
+    "vista": "terraza",
+    "scroll": {
+      "docScrollHeight": 800,
+      "docClientHeight": 800,
+      "mainScrollHeight": 723,
+      "mainClientHeight": 723,
+      "hayScroll": false
+    },
+    "lienzo": {
+      "x": 28,
+      "y": 212,
+      "w": 1224,
+      "h": 156
+    },
+    "zonas": [
+      {
+        "zona": "TERRAZA",
+        "x": 28,
+        "y": 212,
+        "w": 206,
+        "h": 156
+      }
+    ],
+    "mesas": [
+      {
+        "mesa": "T14",
+        "x": 47,
+        "y": 231,
+        "w": 168,
+        "h": 118
+      }
+    ]
+  },
+  {
+    "sala": "sirope",
+    "viewport": {
+      "w": 390,
+      "h": 844
+    },
+    "vista": "todas",
+    "scroll": {
+      "docScrollHeight": 844,
+      "docClientHeight": 844,
+      "mainScrollHeight": 767,
+      "mainClientHeight": 767,
+      "hayScroll": false
+    },
+    "lienzo": {
+      "x": 16,
+      "y": 336,
+      "w": 358,
+      "h": 462
+    },
+    "zonas": [
+      {
+        "zona": "SALÓN",
+        "x": 16,
+        "y": 336,
+        "w": 358,
+        "h": 288
+      },
+      {
+        "zona": "TERRAZA",
+        "x": 16,
+        "y": 642,
+        "w": 358,
+        "h": 156
+      }
+    ],
+    "mesas": [
+      {
+        "mesa": "M14",
+        "x": 35,
+        "y": 355,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "M24",
+        "x": 202,
+        "y": 355,
+        "w": 153,
         "h": 118
       },
       {
         "mesa": "M44",
         "x": 35,
-        "y": 619,
-        "w": 320,
+        "y": 487,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "T14",
+        "x": 35,
+        "y": 661,
+        "w": 153,
+        "h": 118
+      }
+    ]
+  },
+  {
+    "sala": "sirope",
+    "viewport": {
+      "w": 390,
+      "h": 844
+    },
+    "vista": "salon",
+    "scroll": {
+      "docScrollHeight": 844,
+      "docClientHeight": 844,
+      "mainScrollHeight": 767,
+      "mainClientHeight": 767,
+      "hayScroll": false
+    },
+    "lienzo": {
+      "x": 16,
+      "y": 336,
+      "w": 358,
+      "h": 288
+    },
+    "zonas": [
+      {
+        "zona": "SALÓN",
+        "x": 16,
+        "y": 336,
+        "w": 358,
+        "h": 288
+      }
+    ],
+    "mesas": [
+      {
+        "mesa": "M14",
+        "x": 35,
+        "y": 355,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "M24",
+        "x": 202,
+        "y": 355,
+        "w": 153,
+        "h": 118
+      },
+      {
+        "mesa": "M44",
+        "x": 35,
+        "y": 487,
+        "w": 153,
         "h": 118
       }
     ]
@@ -1569,7 +1569,7 @@
         "mesa": "T14",
         "x": 35,
         "y": 355,
-        "w": 320,
+        "w": 153,
         "h": 118
       }
     ]

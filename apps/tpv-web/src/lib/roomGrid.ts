@@ -29,7 +29,7 @@
  * (6 Salón + 6 Terraza + 4 Barra) entra entera sin desplazar a
  * 1280 × 800, que es el suelo del bucle visual. A 1280 el lienzo útil
  * son 1224 px y una banda de 6 mesas pide `6·W + 5·14 + 36`; con 168 son
- * 1114, y las tres bandas suman 540 px de alto sobre los ~560
+ * 1114, y las tres bandas suman 546 px de alto sobre los 560
  * disponibles. Con 184 la banda cabría por 14 px y con 200 ya no cabe.
  *
  * No es un número de diseño "bonito": es el techo del caso real. Si
@@ -52,16 +52,55 @@ export const TABLE_CARD_HEIGHT = 118;
  * se separen, `room-grid.test.ts` comprueba que la clase y las
  * constantes dicen lo mismo.
  *
- * `w-full` por debajo de `sm`: en handheld la sala se apila en una
- * columna y la tarjeta ocupa el ancho entero. Ahí siguen midiendo todas
- * lo mismo — que es la invariante del bloque—, sólo que ese "lo mismo"
- * es el ancho de la pantalla.
+ * `w-full` por debajo de `sm`: en handheld la tarjeta llena **su celda**
+ * de la rejilla de dos columnas (ver `ROOM_GRID_CLASS`), no la pantalla.
+ * A 390 px eso son 153 px de ancho por tarjeta — el mismo para todas, en
+ * todas las zonas, que es la invariante del bloque: lo que cambia con el
+ * tamaño de pantalla es cuánto vale ese "lo mismo", nunca que dos mesas
+ * midan distinto a la vez.
+ *
+ * El alto NO cambia con la pantalla: 118 px en handheld igual que en el
+ * terminal. Una mesa no es más baja por mirarla en un móvil.
  *
  * **Una sola clase para toda mesa.** Si una zona necesitara su propio
  * tamaño, el sitio donde discutirlo es este fichero, no un `className`
  * suelto en el componente.
  */
 export const TABLE_CARD_SIZE_CLASS = "h-[118px] w-full sm:w-[168px]";
+
+/**
+ * La rejilla de mesas de una zona, en dos regímenes:
+ *
+ * - **Por debajo de `sm`**: `grid grid-cols-2`. DOS columnas fijas, con
+ *   la tarjeta a `w-full` de su celda. A 390 px —el handheld del bucle
+ *   visual— la celda mide 153 px: el main deja 358, el marco de zona se
+ *   lleva 36 de `p-[18px]` más 2 de borde, y el hueco de 14 se reparte.
+ *   Una sola columna daba tarjetas de 320 px y un mapa de 2.614 px de
+ *   scroll para 16 mesas; con dos, el camarero ve el doble de sala por
+ *   pantallazo sin bajar del objetivo táctil (153 × 118, muy por encima
+ *   de los 64 × 64 de `tokens.md`) — y el mapa baja a 1.481 px.
+ * - **Desde `sm`**: `flex flex-wrap` con la tarjeta a 168 px. Ahí el
+ *   número de columnas NO está escrito en ninguna parte: sale del ancho
+ *   disponible dividido por el tamaño de tarjeta (7 a 1443 px, 6 a
+ *   1280). Ése es el punto del bloque, y por eso el `grid-cols-2` de
+ *   handheld lleva siempre su `sm:flex sm:flex-wrap` detrás.
+ *
+ * Las dos mitades se comprueban por separado en `table-map-tamano-unico`:
+ * quitar el `grid-cols-2` devuelve el handheld a una columna, y quitar
+ * el `sm:flex-wrap` devuelve el terminal a dos.
+ */
+export const ROOM_GRID_CLASS = "grid grid-cols-2 gap-3.5 sm:flex sm:flex-wrap";
+
+/**
+ * Columnas de la rejilla de mesas por debajo de `sm`.
+ *
+ * No es un número de estilo: es el que hace que `handheldCardWidth` dé
+ * un ancho utilizable. Si sube a 3, a 390 px la tarjeta baja a 98.
+ */
+export const ROOM_GRID_HANDHELD_COLUMNS = 2;
+
+/** `p-4` del main por debajo de `md`, a cada lado. Medido: 16 px. */
+export const ROOM_PADDING_HANDHELD = 16;
 
 /** `gap-3.5` entre tarjetas dentro de una zona. Medido: 14 px. */
 export const ROOM_GRID_GAP = 14;
@@ -99,6 +138,24 @@ export const ROOM_TOP_CHROME = 212;
 
 /** `p-7` inferior del main. Medido: el lienzo termina a 28 px del borde. */
 export const ROOM_BOTTOM_CHROME = 28;
+
+/**
+ * Ancho de una tarjeta en handheld, donde no mide 168 sino lo que le
+ * toque de su celda. Sirve para afirmar en un test que a 390 px sigue
+ * siendo un objetivo tocable y no una miniatura.
+ */
+export function handheldCardWidth(
+  viewportWidth: number,
+  columns: number = ROOM_GRID_HANDHELD_COLUMNS,
+  gap: number = ROOM_GRID_GAP,
+): number {
+  // El marco de zona es `border-box`: su borde sale del ancho interior,
+  // igual que el padding. Sin contarlo la cuenta daba 154 y el navegador
+  // medía 153.
+  const inner =
+    viewportWidth - 2 * ROOM_PADDING_HANDHELD - 2 * ZONE_PADDING - ZONE_BORDER;
+  return Math.floor((inner - (columns - 1) * gap) / columns);
+}
 
 /**
  * Cuántas tarjetas caben a lo ancho en una caja de `innerWidth` px.

@@ -68,7 +68,7 @@ import type { CartLine, CartTotals } from "../lib/cart.js";
 import { mapServerDraftLines } from "../lib/tableDraft.js";
 import type { ServerDraft } from "../lib/tableDraft.js";
 import { outboxBlockedTableIds, subscribeOutbox } from "../lib/outbox.js";
-import { TABLE_CARD_SIZE_CLASS } from "../lib/roomGrid.js";
+import { ROOM_GRID_CLASS, TABLE_CARD_SIZE_CLASS } from "../lib/roomGrid.js";
 import { syncNow } from "../lib/syncNow.js";
 import { CloseShiftModal } from "./CloseShiftModal.js";
 import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
@@ -862,13 +862,14 @@ function ZoneFrame({
 
 // v1.23-las-mesas-miden-lo-mismo · la rejilla de una zona.
 //
-// Era `grid grid-cols-2`: DOS columnas tanto en los 1050 px de Salón
-// como en los 300 de Terraza, que es de donde salía el ×4 de ancho para
-// la misma mesa. Ahora es una fila que envuelve con tarjetas de tamaño
-// fijo (`TABLE_CARD_SIZE_CLASS`): el número de columnas lo decide el
-// ancho que haya, no un número escrito a mano.
+// Era `grid grid-cols-2` a secas: DOS columnas tanto en los 1050 px de
+// Salón como en los 300 de Terraza, que es de donde salía el ×4 de ancho
+// para la misma mesa. Ahora el número de columnas sale del ancho que
+// haya dividido por el tamaño de tarjeta — salvo en handheld, donde dos
+// columnas fijas aprovechan mejor una pantalla estrecha que una.
+// El reparto, y por qué, en `ROOM_GRID_CLASS`.
 function RoomGrid({ children }: { children: ReactNode }) {
-  return <div className="flex flex-wrap gap-3.5">{children}</div>;
+  return <div className={ROOM_GRID_CLASS}>{children}</div>;
 }
 
 function TableCard({
