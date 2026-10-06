@@ -89,10 +89,22 @@ export interface TicketLine {
   description: string;
   sku?: string;
   quantity: number;
+  /** Unitario NETO, sin IVA, con la precisión con la que se persiste
+   *  (`Decimal(12,4)`). Es el que va a Holded y el que sostiene el
+   *  cálculo del desglose. NO es el que se imprime. */
   unitPrice: number;
+  /** bloque ticket-con-iva · unitario CON IVA, al céntimo. Es el precio
+   *  de la carta / de la etiqueta, y es el que imprimen el papel, el PDF
+   *  y el ticket por email. */
+  unitPriceGross: number;
   discount?: number;
   taxRate: number;
+  /** Importe de línea NETO después del descuento. */
   subtotal: number;
+  /** bloque ticket-con-iva · importe de línea CON IVA. El que se imprime
+   *  en la columna de la derecha. Lo cuadra contra el TOTAL el renderer
+   *  con `cuadrarLineasImpresas`, no este campo. */
+  totalGross: number;
 }
 
 // v1.8-Fiado (variante B) · si el ticket es una venta a crédito con deuda

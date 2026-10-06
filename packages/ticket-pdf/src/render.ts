@@ -21,8 +21,9 @@ import {
 } from "pdf-lib";
 
 import {
-  allocateRoundingRemainder,
   assertTicketDocument,
+  cuadrarDesglose,
+  cuadrarLineasImpresas,
   type TicketDocument,
 } from "@mipiacetpv/ticket-model";
 import {
@@ -357,36 +358,51 @@ export async function renderTicketPdf(
   }
 
   // ── Líneas ───────────────────────────────────────────────────────
+  //
+  // bloque ticket-con-iva · unitario y total de línea CON IVA, y la
+  // columna de la derecha suma el TOTAL. Hasta este bloque el PDF era el
+  // peor de los tres papeles: pintaba el unitario NETO *y* el importe de
+  // línea NETO (`line.subtotal`), así que ninguna de sus dos columnas
+  // tenía nada que ver con el total que el cliente había pagado.
   drawSeparator(s);
-  for (const line of doc.lines) {
+  const lineTotalsImpresos = cuadrarLineasImpresas(
+    doc.lines.map((l) => l.totalGross),
+    doc.totals.total,
+  );
+  doc.lines.forEach((line, i) => {
     drawText(s, truncate(line.description, 38), FONT_SIZE_NORMAL);
-    const left = `${formatQuantity(line.quantity)} x ${formatEur(line.unitPrice)}` +
+    const left = `${formatQuantity(line.quantity)} x ${formatEur(line.unitPriceGross)}` +
       (line.discount ? ` -${line.discount}%` : "");
-    drawTwoColumn(s, left, formatEur(line.subtotal), FONT_SIZE_SMALL);
-  }
+    drawTwoColumn(
+      s,
+      left,
+      formatEur(lineTotalsImpresos[i] ?? line.totalGross),
+      FONT_SIZE_SMALL,
+    );
+  });
   drawSeparator(s);
 
   // ── Desglose IVA ─────────────────────────────────────────────────
-  // v1.9.4 · cuadramos los importes IMPRESOS (subtotal + cada IVA) contra
-  // el TOTAL con el método del resto mayor, para que sumar el papel a mano
-  // dé exactamente el TOTAL. Las bases mostradas ("s/2,64") no cambian.
-  const printed = allocateRoundingRemainder(
-    [
-      { key: "subtotal", amount: doc.totals.subtotal },
-      ...doc.totals.taxBreakdown.map((b, i) => ({
-        key: `tax:${i}`,
-        amount: (b.base * b.rate) / 100,
-      })),
-    ],
-    doc.totals.total,
-  );
-  const printedByKey = new Map(printed.map((p) => [p.key, p.amount]));
+  // v1.9.4 · cuadramos los importes IMPRESOS contra el TOTAL con el método
+  // del resto mayor, para que sumar el papel a mano dé exactamente el TOTAL.
+  //
+  // bloque ticket-con-iva · el cuadre sale de `cuadrarDesglose`, el MISMO
+  // del térmico y del registro de facturación. Este bloque llamaba por su
+  // cuenta a `allocateRoundingRemainder` con la lista de componentes
+  // montada aquí: dos implementaciones de la misma regla fiscal, y al
+  // cambiarla una se habría quedado atrás. La base imponible impresa es
+  // ahora un único valor (Σ bases === Subtotal).
+  const cuadrado = cuadrarDesglose({
+    subtotal: doc.totals.subtotal,
+    buckets: doc.totals.taxBreakdown,
+    total: doc.totals.total,
+  });
 
-  doc.totals.taxBreakdown.forEach((bucket, i) => {
+  cuadrado.buckets.forEach((bucket) => {
     drawTwoColumn(
       s,
       `IVA ${bucket.rate}% s/${formatEur(bucket.base)}`,
-      formatEur(printedByKey.get(`tax:${i}`) ?? bucket.tax),
+      formatEur(bucket.tax),
       FONT_SIZE_SMALL,
     );
   });
@@ -394,7 +410,7 @@ export async function renderTicketPdf(
   drawTwoColumn(
     s,
     "Subtotal",
-    formatEur(printedByKey.get("subtotal") ?? doc.totals.subtotal),
+    formatEur(cuadrado.subtotal),
     FONT_SIZE_NORMAL,
   );
   drawTwoColumn(

@@ -110,6 +110,13 @@ precio, no el relleno.
 
 - [ ] Terminal en el WiFi del local; densidad y pantalla siempre encendida.
 - [ ] Impresora real: un ticket con **serie, número, QR y leyenda** y la cabecera fiscal correcta.
+  - **Puerta de la impresora del bar** (se verá en el local). La APK sólo imprime de verdad
+    por **USB ESC/POS**. La «WiFi» la manda el servidor por TCP a `ip:puerto`, y desde el VPS no se
+    llega a una impresora de la red privada del bar. Bluetooth y serie no existen. Así que:
+    - USB y ESC/POS → se enchufa al D8 y se prueba el ticket.
+    - Sólo red, Bluetooth, o una impresora fiscal o propietaria → **no sirve**. Plan B: llevar una
+      térmica USB ESC/POS de 80 mm de repuesto (presupuesto con el 20 % de margen si se le vende).
+    - Mirar la etiqueta y apuntar el modelo en `docs/qa/ficha-terminal-ap13-kozen-d8.md`.
 - [ ] Modo avión 2 min: venta offline → reconectar → sube sola (y su registro fiscal no se repite).
 - [ ] Si hay dos cajas: expulsión pasiva y doble cobro simultáneo (`checklist-sirope.md` §3).
 - [ ] **Activar** con el email del dueño delante. Irreversible. Primer login, contraseña y PIN.
@@ -127,3 +134,54 @@ El criterio del protocolo dice «primera venta real en su Holded». Sin Holded s
 - [ ] Teléfono de soporte en la barra.
 
 Hasta entonces, La Maestranza está «validada en prueba», y se dice así.
+
+---
+
+## Hecho el 06-10 · carril A en producción
+
+- Cuenta creada sin Holded, en **DRAFT** (`81f2177b`). Razón social, NIE, dirección y teléfono
+  según la factura F260010. Hostelería y caja.
+- Pie de ticket: «Bar La Maestranza · Santa Olalla (Toledo)». El alta no tiene campo de nombre
+  comercial.
+- Catálogo: **128/128** cargados por CSV, 0 rechazados. Salud: todo en verde salvo el cajero
+  técnico, que se crea al pulsar «Probar TPV».
+- Modo prueba en el navegador: chips por categoría y precios iguales a la carta. Venta de 3 líneas
+  por **14,60 €** en efectivo con 20 € → cambio 5,40 €. Nace **PRUEBA** con número interno
+  #000001, sin serie fiscal. La cabecera del ticket sale con los datos de Salomé.
+
+### Hallazgos del ticket (no bloquean el cobro, sí la imagen)
+
+1. Las líneas salen con el **precio sin IVA** (café con leche «1 x 1,45 €») y el total con IVA
+   (14,60 €). En un bar el cliente lee el 1,60 de la carta y no le cuadra.
+2. **Un céntimo de diferencia en la base imponible dentro del mismo ticket**: «IVA 10 % s/13,26 €»
+   frente a «Subtotal 13,27 €». Las líneas suman 13,26; la base agregada es 13,27. En un documento
+   fiscal no puede salir la base con dos valores.
+3. La tienda se llama «Tienda principal». Hay que renombrarla a «Bar La Maestranza» desde el panel
+   del propietario, tras activar.
+
+Los puntos 1 y 2 son del render del ticket, no de esta cuenta. Probablemente salen igual en todos
+los comercios. Se miran antes de la visita.
+
+## Hecho el 06-10 · cuenta activada y lista para el miércoles 08-10
+
+- **Activada.** El propietario es `lamaestranza@mipiacetpv.com` (alias del buzón `no-reply@` en
+  Hostinger, creado el 06-10), con el nombre de Salomé Éguez. La contraseña temporal y el PIN de
+  Salomé los tiene Matías. Se le entregan en mano y se cambian en el primer login. Al activar se
+  purgaron la venta de ensayo y el cajero técnico.
+- **D8 (AP13) vinculado** a Tienda principal · Caja 1 con la APK 1.21.0. Arranca en la pantalla de
+  login del camarero.
+- **Sala**: barra B1-B4, salón M1-M6 y terraza T1-T6 (capacidad 4). Se cambia desde el panel →
+  Tiendas → Mesas y barra.
+- **Cajeros**: de momento solo Salomé, que es la propietaria y además tiene PIN de cajera. El
+  resto se da de alta el miércoles.
+- Desde la activación, **cualquier cobro es una factura real (serie C1)**. No se cobra nada de
+  prueba. La primera venta la hace Salomé en el bar.
+
+### En el bar el miércoles
+
+1. Conectar el D8 a la wifi del bar.
+2. Impresora del bar: ver si es USB ESC/POS (puerta de arriba).
+3. Salomé entra con su email y su PIN y cambia la contraseña del panel.
+4. Dar de alta a los camareros (panel → Cajeros) y renombrar la tienda a «Bar La Maestranza».
+5. Abrir turno, cobrar en mesa y en barra, y hacer arqueo. La primera venta real cierra el
+   criterio de «desplegado».

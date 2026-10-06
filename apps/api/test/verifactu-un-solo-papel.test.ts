@@ -102,6 +102,7 @@ const TICKET_SERVIDOR: TicketForPrint = {
       units: { toString: () => "1" },
       unitPrice: { toString: () => "10.00" },
       unitPriceOverride: null,
+      taxRate: { toString: () => "21" },
       total: { toString: () => "12.10" },
     },
     {
@@ -109,6 +110,7 @@ const TICKET_SERVIDOR: TicketForPrint = {
       units: { toString: () => "1" },
       unitPrice: { toString: () => "3.09" },
       unitPriceOverride: null,
+      taxRate: { toString: () => "10" },
       total: { toString: () => "3.40" },
     },
   ],
@@ -130,8 +132,13 @@ const VENTA_DISPOSITIVO: VentaLocal = {
   tableName: "Mesa 7",
   issuedAt: ISSUED_AT,
   lines: [
-    { description: "Corte de pelo", units: 1, unitPrice: 10, lineTotal: 12.1 },
-    { description: "Champú", units: 1, unitPrice: 3.09, lineTotal: 3.4 },
+    // bloque ticket-con-iva · el unitario del papel va CON IVA. El
+    // servidor lo deriva del neto persistido y del `taxRate` de la línea;
+    // el dispositivo, del carrito (`unitPriceGrossOf`). Que los dos den lo
+    // mismo es parte de lo que guarda este test: 10,00 € al 21 % son
+    // 12,10 € y 3,09 € al 10 % son 3,40 €.
+    { description: "Corte de pelo", units: 1, unitPriceGross: 12.1, lineTotal: 12.1 },
+    { description: "Champú", units: 1, unitPriceGross: 3.4, lineTotal: 3.4 },
   ],
   payments: [{ method: "CASH", amount: 15.5 }],
   cashAmount: 20,
@@ -177,6 +184,80 @@ describe("el mismo papel por los dos caminos", () => {
         VERIFACTU,
       ),
     );
+  });
+});
+
+// bloque ticket-con-iva · el agujero que este invariante no veía.
+//
+// `TicketLine.unitPrice` es el precio BASE y los deltas de los
+// modificadores viven en el snapshot `modifiers` (B-Bar-Modifiers). El
+// dispositivo arma su unitario del carrito, con los deltas dentro; el
+// servidor lo armaba del `unitPrice` persistido, sin ellos. Mientras los
+// dos imprimían NETO el fallo era de un dígito perdido entre dos columnas
+// que no cuadraban de todas formas; con el unitario en bruto es un café
+// con leche con avena anunciado a 1,60 € y cobrado a 2,10 €.
+//
+// La fixture de arriba no lleva modificadores, así que el byte-a-byte no
+// lo cogía. Ésta sí.
+describe("un modificador con precio también va en el unitario", () => {
+  const CON_AVENA: TicketForPrint = {
+    ...TICKET_SERVIDOR,
+    total: { toString: () => "3.70" },
+    cashAmount: null,
+    notes: null,
+    lines: [
+      {
+        nameSnapshot: "Cafe con leche",
+        units: { toString: () => "1" },
+        unitPrice: { toString: () => "1.4545" },
+        unitPriceOverride: null,
+        taxRate: { toString: () => "10" },
+        // +0,50 € de leche de avena, en céntimos y por unidad.
+        modifiers: [
+          {
+            groupId: "g1",
+            groupName: "Leche",
+            modifierId: "m1",
+            label: "De avena",
+            priceDeltaCents: 50,
+          },
+        ],
+        total: { toString: () => "2.20" },
+      },
+      {
+        nameSnapshot: "Tostada",
+        units: { toString: () => "1" },
+        unitPrice: { toString: () => "1.3636" },
+        unitPriceOverride: null,
+        taxRate: { toString: () => "10" },
+        total: { toString: () => "1.50" },
+      },
+    ],
+    payments: [{ method: "CASH", amount: { toString: () => "3.70" } }],
+  };
+
+  it("SABOTAJE · el unitario del servidor lleva el delta, como el del carrito", () => {
+    const input = ticketToEscposInput(CON_AVENA, PUBLIC_BASE, null, false, null);
+    // 1,4545 + 0,50 = 1,9545 netos; al 10 %, 2,15 €. Y la línea se cobró a
+    // 2,20 €... que es lo que `computeTicket` saca de 1,9545 × 1,1 = 2,14995
+    // → 2,15. La fixture dice 2,20 a propósito: así el test también mira que
+    // el bruto de LÍNEA sigue siendo el persistido y no uno derivado aquí.
+    expect(input.lines[0]!.unitPriceGross).toBe(2.15);
+    expect(input.lines[0]!.lineTotal).toBe(2.2);
+    // La segunda línea no tiene modificadores y no cambia.
+    expect(input.lines[1]!.unitPriceGross).toBe(1.5);
+  });
+
+  it("y el papel lo imprime", () => {
+    const t = Buffer.from(
+      buildTicketReceipt(
+        ticketToEscposInput(CON_AVENA, PUBLIC_BASE, null, false, null),
+      ),
+    )
+      .toString("latin1")
+      .replace(/[\x00-\x09\x0b-\x1f]/g, " ");
+    expect(t).toContain("1 x 2,15");
+    expect(t).not.toContain("1 x 1,60");
   });
 });
 

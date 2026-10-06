@@ -45,7 +45,11 @@ import { AmountField } from "../components/AmountField.js";
 import { useBackGuard } from "../hooks/useBackGuard.js";
 import { CashPad } from "../components/CashPad.js";
 import type { ContactRef } from "./SalePage.contact.js";
-import { computeCartTaxBuckets, computeLine } from "../lib/cart.js";
+import {
+  computeCartTaxBuckets,
+  computeLine,
+  unitPriceGrossOf,
+} from "../lib/cart.js";
 import type { CartLine, CartTotals } from "../lib/cart.js";
 import type { BusinessType } from "../lib/catalog.js";
 import {
@@ -541,8 +545,11 @@ export function CheckoutOverlay(props: {
             return {
               description: l.nameSnapshot,
               units: l.units,
-              unitPrice:
-                l.unitPriceOverride != null ? l.unitPriceOverride : l.unitPrice,
+              // bloque ticket-con-iva · el unitario del papel va CON IVA,
+              // igual que en el camino del servidor
+              // (`ticketToEscposInput`). El test de
+              // `verifactu-un-solo-papel` compara los bytes de los dos.
+              unitPriceGross: unitPriceGrossOf(l),
               lineTotal: t.totalGross,
             };
           }),

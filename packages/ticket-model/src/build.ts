@@ -7,6 +7,7 @@
 // o como Decimal (`{ toString(): string }`) y se normalizan aquí.
 
 import { changeFromCash } from "./payments.js";
+import { netToGross, round2 } from "./precios.js";
 import type {
   TicketBusinessType,
   TicketCustomer,
@@ -24,10 +25,6 @@ function num(v: Numericish | null | undefined): number {
   if (typeof v === "number") return v;
   if (typeof v === "string") return Number(v);
   return Number(v.toString());
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }
 
 // B-TPV-Bugfix v2 · Bug-05: Holded a veces devuelve la dirección como
@@ -178,17 +175,32 @@ export function buildTicketDocument(input: BuildTicketDocumentInput): TicketDocu
     const taxRate = num(l.taxRate);
     // Si la línea ya trae subtotal/total persistido lo usamos; si no,
     // lo derivamos (descuentos sin IVA — Holded suma IVA al final).
-    const gross = unitPrice * quantity * (1 - discount / 100);
+    const netoLinea = unitPrice * quantity * (1 - discount / 100);
     const subtotalLine =
-      l.subtotal != null ? num(l.subtotal) : round2(gross);
+      l.subtotal != null ? num(l.subtotal) : round2(netoLinea);
     return {
       description: l.nameSnapshot,
       sku: l.sku ?? undefined,
       quantity,
       unitPrice,
+      // bloque ticket-con-iva · el unitario que se imprime. Sale del neto
+      // persistido con sus 4 decimales, no del `subtotal` ya redondeado:
+      // así `netToGross(1.4545, 10)` devuelve los 1,60 € de la carta y no
+      // 1,59 €. Es la misma función con la que el cajero teclea precios
+      // sobre total (v1.6-Precio-Sobre-Total), de modo que el round-trip
+      // "teclear 1,60 → guardar neto → imprimir 1,60" está cerrado.
+      unitPriceGross: netToGross(unitPrice, taxRate),
       discount: discount > 0 ? discount : undefined,
       taxRate,
       subtotal: subtotalLine,
+      // El bruto de línea persistido (`TicketLine.total`, que `computeLine`
+      // calculó sobre el neto CRUDO) manda sobre cualquier derivación: es
+      // lo que se cobró. Sólo se deriva para fixtures/callers que no lo
+      // traen, y entonces se parte del neto crudo por el mismo motivo.
+      totalGross:
+        l.total != null
+          ? num(l.total)
+          : round2(netoLinea * (1 + taxRate / 100)),
     };
   });
 
