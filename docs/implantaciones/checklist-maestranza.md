@@ -134,3 +134,30 @@ El criterio del protocolo dice «primera venta real en su Holded». Sin Holded s
 - [ ] Teléfono de soporte en la barra.
 
 Hasta entonces, La Maestranza está «validada en prueba», y se dice así.
+
+---
+
+## Hecho el 06-10 · carril A en producción
+
+- Cuenta creada sin Holded, en **DRAFT** (`81f2177b`). Razón social, NIE, dirección y teléfono
+  según la factura F260010. Hostelería y caja.
+- Pie de ticket: «Bar La Maestranza · Santa Olalla (Toledo)». El alta no tiene campo de nombre
+  comercial.
+- Catálogo: **128/128** cargados por CSV, 0 rechazados. Salud: todo en verde salvo el cajero
+  técnico, que se crea al pulsar «Probar TPV».
+- Modo prueba en el navegador: chips por categoría y precios iguales a la carta. Venta de 3 líneas
+  por **14,60 €** en efectivo con 20 € → cambio 5,40 €. Nace **PRUEBA** con número interno
+  #000001, sin serie fiscal. La cabecera del ticket sale con los datos de Salomé.
+
+### Hallazgos del ticket (no bloquean el cobro, sí la imagen)
+
+1. Las líneas salen con el **precio sin IVA** (café con leche «1 x 1,45 €») y el total con IVA
+   (14,60 €). En un bar el cliente lee el 1,60 de la carta y no le cuadra.
+2. **Un céntimo de diferencia en la base imponible dentro del mismo ticket**: «IVA 10 % s/13,26 €»
+   frente a «Subtotal 13,27 €». Las líneas suman 13,26; la base agregada es 13,27. En un documento
+   fiscal no puede salir la base con dos valores.
+3. La tienda se llama «Tienda principal». Hay que renombrarla a «Bar La Maestranza» desde el panel
+   del propietario, tras activar.
+
+Los puntos 1 y 2 son del render del ticket, no de esta cuenta. Probablemente salen igual en todos
+los comercios. Se miran antes de la visita.
