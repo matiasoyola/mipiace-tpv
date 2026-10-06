@@ -501,7 +501,16 @@ export function SesionPodologia(props: {
 
       {/* ── El pie de la sesión ───────────────────────────────────── */}
       {pestana === "sesion" && resumen && (
-        <div className="flex items-center justify-between gap-4 flex-wrap bg-white border border-slate-200 rounded-3xl px-5 py-4">
+        <div
+          // El gancho del banco. Sin él, un `getByText("30,00 €")` casa
+          // también con la tarjeta de producto de la pantalla de VENTA que
+          // hay detrás del overlay —está en el DOM aunque no se vea— y
+          // Playwright lo canta como «strict mode violation». Es la misma
+          // lección que el `data-pregunta` de clinica-2: los ganchos se
+          // ponen donde el banco tiene que mirar, no se filtra por texto.
+          data-test="pie-de-sesion"
+          className="flex items-center justify-between gap-4 flex-wrap bg-white border border-slate-200 rounded-3xl px-5 py-4"
+        >
           <div className="text-[14px] text-mipiace-ink-soft">
             {resumen.faltaTratamiento
               ? "Marca al menos un tratamiento"

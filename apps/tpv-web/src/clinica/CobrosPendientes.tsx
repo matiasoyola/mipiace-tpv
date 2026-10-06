@@ -80,7 +80,10 @@ export function CobrosPendientes(props: {
         aria-label="Cerrar la lista de cobros"
         className="absolute inset-0 bg-mipiace-ink/30"
       />
-      <div className="relative w-full md:w-[420px] bg-white h-full flex flex-col shadow-xl">
+      <div
+        data-test="panel-cobros"
+        className="relative w-full md:w-[420px] bg-white h-full flex flex-col shadow-xl"
+      >
         <div className="flex items-center gap-2 h-16 px-4 border-b border-slate-200 shrink-0">
           <h2 className="text-[17px] font-semibold text-mipiace-ink flex-1">
             Por cobrar

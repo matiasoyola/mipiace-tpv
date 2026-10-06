@@ -175,6 +175,25 @@ Son los dos únicos controles del sistema fuera de la escala de tres
 peldaños, y están aquí para que sigan siendo dos: cualquier otro se discute
 antes.
 
+**Y uno que se quedó DENTRO de la escala a propósito** (clinica-3,
+2026-10-07): las **zonas táctiles del mapa del pie**. El prompt del bloque
+pedía «ninguna zona por debajo de 44 px»; el mínimo de la casa es 48, así que
+el mapa se dimensionó para cumplir el de la casa y no el del prompt — no hacía
+falta token nuevo, hacía falta elegir bien el ancho del pie.
+
+La cuenta vive en el paquete compartido, junto a la geometría que escala
+(`packages/clinica-sesion/src/mapa.ts`): el radio mínimo de una zona son **22
+unidades** de un `viewBox` de 240, y el pie se pinta a **264 px**
+(`ANCHO_DEL_PIE_PX`). O sea 2 × 22 × 264/240 = **48,4 px** de dedo. El ancho es
+un `max-width` y no un fijo, y por eso en móvil los pies **bajan a una fila
+cada uno**: una fila de 320 px menos márgenes da 288, que es más que 264, así
+que el pie nunca se pinta por debajo de su ancho nominal y el mínimo se cumple
+a 1024, a 390 y a 320.
+
+Se mide EN LA CAPTURA (`docs/qa/2026-10-07-clinica-3/`) y además lo cuenta un
+test zona por zona, sobre la geometría que el DOM lleva puesta y no sobre una
+constante.
+
 **Regla:** no se suben alturas con `h-[52px]` sueltos. Si un control no
 entra en la escala, primero se discute el token; luego se implementa.
 

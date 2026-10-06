@@ -78,7 +78,9 @@ export function SesionCerrada(props: {
   const { cerrada } = props;
   const prox = cerrada.cuerpo.proximaCita;
   return (
-    <div className="max-w-[760px] mx-auto py-6">
+    // `data-test` por lo mismo que el pie de la sesión: detrás del overlay
+    // sigue estando la pantalla de venta con sus precios.
+    <div className="max-w-[760px] mx-auto py-6" data-test="sesion-cerrada">
       <h1 className="text-[26px] font-semibold tracking-[-0.01em] text-mipiace-ink m-0 mb-1.5">
         Sesión cerrada
       </h1>
