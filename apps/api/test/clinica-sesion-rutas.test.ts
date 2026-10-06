@@ -1,0 +1,1596 @@
+// clinica-3 · las rutas de la sesión, con Prisma en memoria.
+//
+// Lo que se prueba aquí es lo que decide la APLICACIÓN. Lo que decide el
+// MOTOR (que una sesión cerrada no se edita ni se borra, que de una cita
+// sale una sola, que no se puede borrar al paciente con sesión dentro) lo
+// prueba `clinica-sesion.e2e.ts` contra Postgres de verdad, porque eso es
+// justo lo que un fake no puede probar.
+//
+// Las garantías de este fichero, una por bloque, y son las que el prompt
+// del bloque pide en «cómo se cierra»:
+//
+//   1. **Sin valoración validada no hay sesión.** Ni abrirla para cerrar,
+//      ni cerrarla. La exploración SÍ.
+//   2. **Cerrar dos veces = un cobro.** Una sola entrada y 200 la segunda.
+//   3. **Una sesión cerrada no se edita**: no hay PATCH ni DELETE en este
+//      bloque, y lo que sí hay es la anotación de clinica-1.
+//   4. **Un `CLINICIAN` no recibe precios en NINGUNA respuesta de este
+//      bloque**, y se comprueba recorriendo el JSON entero.
+//   5. **La recepción no recibe nada clínico** en su lista de cobros.
+//   6. **Módulo apagado → 404**, la de Fastify carácter por carácter.
+//   7. **Una cita que NO es clínica cobra igual que antes**, línea por
+//      línea.
+//   8. Y la recepcionista no abre una sesión — y el intento queda escrito.
+
+import { randomBytes, randomUUID } from "node:crypto";
+
+process.env.NODE_ENV = "test";
+process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
+process.env.REDIS_URL = "redis://localhost:6379";
+process.env.JWT_ACCESS_SECRET = "a".repeat(40);
+process.env.JWT_REFRESH_SECRET = "b".repeat(40);
+process.env.HOLDED_KEY_ENCRYPTION_SECRET = randomBytes(32).toString("base64");
+process.env.PUBLIC_TPV_URL = "https://mipiacetpv.com";
+
+import Fastify from "fastify";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { CUESTIONARIO_V1 } from "@mipiacetpv/clinica-valoracion";
+
+const TENANT_ID = "00000000-0000-0000-0000-000000000001";
+const DUENA_ID = "11111111-1111-1111-1111-111111111111";
+const SANITARIA_ID = "22222222-2222-2222-2222-222222222222";
+const RECEPCION_ID = "33333333-3333-3333-3333-333333333333";
+const PACIENTE_ID = "44444444-4444-4444-4444-444444444444";
+const CITA_ID = "55555555-5555-5555-5555-555555555551";
+const CITA_VIEJA_ID = "55555555-5555-5555-5555-555555555552";
+
+const QUIROPODIA = "66666666-6666-6666-6666-666666666661";
+const FRESADO = "66666666-6666-6666-6666-666666666662";
+const VERRUGA = "66666666-6666-6666-6666-666666666663";
+/** Un servicio que NO está marcado como tratamiento de sesión: es el que
+ *  prueba que lo que sale son los marcados y no «todos los servicios». */
+const PRIMERA_VISITA = "66666666-6666-6666-6666-666666666664";
+
+// ── Prisma en memoria ────────────────────────────────────────────────
+
+let clinicaEncendida = true;
+
+interface FakeUser {
+  id: string;
+  tenantId: string;
+  role: "OWNER" | "MANAGER" | "CASHIER" | "CLINICIAN";
+  isClinician: boolean;
+  clinicalScope: "ALL" | "SELECTION";
+  alias: string | null;
+  email: string;
+  clinicianLicense: string | null;
+  deletedAt: Date | null;
+  isSystemActor: boolean;
+}
+const users = new Map<string, FakeUser>();
+
+interface FakeEntry {
+  id: string;
+  tenantId: string;
+  clientId: string;
+  authorUserId: string;
+  appointmentId: string | null;
+  kind: string;
+  body: Record<string, unknown>;
+  createdAt: Date;
+}
+let entradas: FakeEntry[] = [];
+
+interface FakeAssessment {
+  id: string;
+  tenantId: string;
+  clientId: string;
+  status: "PENDIENTE_PACIENTE" | "RESPONDIDA" | "VALIDADA";
+  validatedAt: Date | null;
+  createdAt: Date;
+}
+let valoraciones: FakeAssessment[] = [];
+
+interface FakeCita {
+  id: string;
+  tenantId: string;
+  clientId: string | null;
+  status: string;
+  startsAt: Date;
+  ticketId: string | null;
+  items: Array<{ serviceId: string; sortOrder: number }>;
+  staffUserId: string | null;
+}
+let citas: FakeCita[] = [];
+
+interface FakeProducto {
+  id: string;
+  tenantId: string;
+  kind: string;
+  name: string;
+  sku: string | null;
+  basePrice: number;
+  taxRate: number;
+  active: boolean;
+  tratamientoSesion: boolean;
+}
+let productos: FakeProducto[] = [];
+
+let tickets: Array<{ id: string; status: string }> = [];
+
+interface FakeLog {
+  userId: string;
+  clientId: string;
+  action: string;
+  outcome: string;
+  route: string | null;
+}
+let registro: FakeLog[] = [];
+
+let accesos: Array<{ clinicianUserId: string; clientId: string }> = [];
+
+const clientes = new Map<
+  string,
+  {
+    id: string;
+    tenantId: string;
+    firstName: string;
+    lastName: string;
+    phone: string | null;
+    email: string | null;
+    birthdate: Date | null;
+  }
+>();
+
+/** Las zonas del mapa: `"L:h"` es la del dedo gordo izquierdo. */
+const ZONA = "L:h";
+
+function citaDe(id: string): FakeCita | undefined {
+  return citas.find((c) => c.id === id);
+}
+
+function entradaCoincide(e: FakeEntry, where: any): boolean {
+  if (where.tenantId != null && e.tenantId !== where.tenantId) return false;
+  if (where.clientId != null && e.clientId !== where.clientId) return false;
+  if (where.kind != null && e.kind !== where.kind) return false;
+  if (typeof where.appointmentId === "string") {
+    if (e.appointmentId !== where.appointmentId) return false;
+  }
+  if (where.appointmentId?.in != null) {
+    if (!where.appointmentId.in.includes(e.appointmentId)) return false;
+  }
+  if (where.NOT?.appointmentId != null) {
+    if (e.appointmentId === where.NOT.appointmentId) return false;
+  }
+  return true;
+}
+
+const fakePrisma: any = {
+  $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
+    fn(fakePrisma),
+  ),
+  // El `$queryRawUnsafe` del store y de los cobros pendientes. Se despacha
+  // por el texto del SQL, que es lo único que un fake puede hacer — y
+  // justo por eso el SQL de verdad lo prueba el e2e.
+  $queryRawUnsafe: vi.fn(async (sql: string, ...args: unknown[]) => {
+    if (sql.includes("FROM appointments a")) {
+      // La lista de cobros pendientes: citas del rango sin cobrar.
+      const desde = new Date(args[1] as string);
+      const hasta = new Date(args[2] as string);
+      return citas
+        .filter((c) => c.tenantId === args[0])
+        .filter((c) => c.clientId != null && c.status !== "CANCELLED")
+        .filter((c) => c.startsAt >= desde && c.startsAt < hasta)
+        .filter((c) => {
+          if (!c.ticketId) return true;
+          const t = tickets.find((x) => x.id === c.ticketId);
+          return t == null || t.status === "DRAFT";
+        })
+        .sort((a, b) => +a.startsAt - +b.startsAt)
+        .map((c) => ({
+          id: c.id,
+          client_id: c.clientId,
+          starts_at: c.startsAt,
+          ticket_status:
+            tickets.find((x) => x.id === c.ticketId)?.status ?? null,
+        }));
+    }
+    if (sql.includes("FROM appointments")) {
+      const c = citas.find((x) => x.tenantId === args[0] && x.id === args[1]);
+      return c
+        ? [
+            {
+              id: c.id,
+              client_id: c.clientId,
+              status: c.status,
+              starts_at: c.startsAt,
+              ticket_id: c.ticketId,
+            },
+          ]
+        : [];
+    }
+    throw new Error(`SQL no fingido en el test: ${sql.slice(0, 60)}`);
+  }),
+  tenant: {
+    findUnique: vi.fn(async () => ({
+      clinicalRecordsEnabled: clinicaEncendida,
+      cajaEnabled: true,
+      name: "Clínica Podológica Demo",
+    })),
+  },
+  user: {
+    findFirst: vi.fn(async ({ where }: any) => {
+      for (const u of users.values()) {
+        if (where.id != null && u.id !== where.id) continue;
+        if (where.tenantId != null && u.tenantId !== where.tenantId) continue;
+        return u;
+      }
+      return null;
+    }),
+    findUnique: vi.fn(async ({ where }: any) => users.get(where.id) ?? null),
+  },
+  client: {
+    findFirst: vi.fn(async ({ where }: any) => {
+      const c = clientes.get(where.id);
+      return c && c.tenantId === where.tenantId ? c : null;
+    }),
+    findFirstOrThrow: vi.fn(async ({ where }: any) => {
+      const c = clientes.get(where.id);
+      if (!c || c.tenantId !== where.tenantId) throw new Error("no existe");
+      return c;
+    }),
+    findMany: vi.fn(async ({ where }: any) =>
+      [...clientes.values()].filter(
+        (c) => c.tenantId === where.tenantId && where.id.in.includes(c.id),
+      ),
+    ),
+  },
+  product: {
+    findMany: vi.fn(async ({ where }: any) =>
+      productos
+        .filter((p) => p.tenantId === where.tenantId)
+        .filter((p) => (where.kind != null ? p.kind === where.kind : true))
+        .filter((p) => (where.active != null ? p.active === where.active : true))
+        .filter((p) =>
+          where.scheduling?.tratamientoSesion != null
+            ? p.tratamientoSesion === where.scheduling.tratamientoSesion
+            : true,
+        )
+        .filter((p) => (where.id?.in != null ? where.id.in.includes(p.id) : true))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    ),
+  },
+  ticket: {
+    findUnique: vi.fn(async ({ where }: any) =>
+      tickets.find((t) => t.id === where.id) ?? null,
+    ),
+  },
+  appointmentItem: {
+    findMany: vi.fn(async ({ where }: any) => {
+      const ids: string[] =
+        where.appointmentId?.in ?? [where.appointmentId].filter(Boolean);
+      return citas
+        .filter((c) => ids.includes(c.id))
+        .flatMap((c) =>
+          c.items.map((i) => ({
+            appointmentId: c.id,
+            serviceId: i.serviceId,
+            sortOrder: i.sortOrder,
+          })),
+        )
+        .sort((a, b) => a.sortOrder - b.sortOrder);
+    }),
+  },
+  appointmentAssignment: {
+    findMany: vi.fn(async ({ where }: any) => {
+      const c = citaDe(where.appointmentId);
+      return c?.staffUserId ? [{ staffUserId: c.staffUserId }] : [];
+    }),
+  },
+  clinicalAccess: {
+    findFirst: vi.fn(async ({ where }: any) =>
+      accesos.find(
+        (a) =>
+          a.clinicianUserId === where.clinicianUserId &&
+          a.clientId === where.clientId,
+      )
+        ? { id: "acc" }
+        : null,
+    ),
+  },
+  clinicalAccessLog: {
+    create: vi.fn(async ({ data }: any) => {
+      registro.push({
+        userId: data.userId,
+        clientId: data.clientId,
+        action: data.action,
+        outcome: data.outcome,
+        route: data.route ?? null,
+      });
+      return { id: randomUUID() };
+    }),
+  },
+  clinicalEntry: {
+    create: vi.fn(async ({ data }: any) => {
+      // EL ÍNDICE ÚNICO PARCIAL, también aquí: de una cita sale UNA sola
+      // sesión. Es lo que hace que el test de «cerrar dos veces» pruebe
+      // algo en vez de contar dos inserciones felices.
+      if (
+        data.kind === "TREATMENT_SESSION" &&
+        data.appointmentId != null &&
+        entradas.some(
+          (e) =>
+            e.kind === "TREATMENT_SESSION" &&
+            e.appointmentId === data.appointmentId,
+        )
+      ) {
+        const err: any = new Error(
+          'Unique constraint failed on the fields: (`appointment_id`)',
+        );
+        err.code = "P2002";
+        err.meta = { target: ["clinical_entries_una_sesion_por_cita"] };
+        throw err;
+      }
+      // Y el CHECK del cuerpo no vacío.
+      if (
+        data.body == null ||
+        typeof data.body !== "object" ||
+        Object.keys(data.body).length === 0
+      ) {
+        throw new Error(
+          'new row violates check constraint "clinical_entries_body_object"',
+        );
+      }
+      const row: FakeEntry = {
+        id: randomUUID(),
+        tenantId: data.tenantId,
+        clientId: data.clientId,
+        authorUserId: data.authorUserId,
+        appointmentId: data.appointmentId ?? null,
+        kind: data.kind,
+        body: data.body,
+        // +1 ms por fila para que «la última» sea determinista.
+        createdAt: new Date(Date.now() + entradas.length),
+      };
+      entradas.push(row);
+      return { id: row.id };
+    }),
+    findFirst: vi.fn(async ({ where, orderBy }: any) => {
+      let xs = entradas.filter((e) => entradaCoincide(e, where));
+      if (orderBy?.createdAt === "desc") {
+        xs = xs.slice().sort((a, b) => +b.createdAt - +a.createdAt);
+      }
+      const e = xs[0];
+      return e ? { ...e, author: usuarioVista(e.authorUserId) } : null;
+    }),
+    findMany: vi.fn(async ({ where, orderBy, take }: any) => {
+      let xs = entradas.filter((e) => entradaCoincide(e, where));
+      if (orderBy?.createdAt === "desc") {
+        xs = xs.slice().sort((a, b) => +b.createdAt - +a.createdAt);
+      }
+      if (take != null) xs = xs.slice(0, take);
+      return xs.map((e) => ({ ...e, author: usuarioVista(e.authorUserId) }));
+    }),
+    count: vi.fn(async ({ where }: any) =>
+      entradas.filter((e) => entradaCoincide(e, where)).length,
+    ),
+  },
+  clinicalAssessment: {
+    findMany: vi.fn(async ({ where }: any) =>
+      valoraciones.filter(
+        (v) =>
+          v.tenantId === where.tenantId &&
+          (where.clientId == null || v.clientId === where.clientId),
+      ),
+    ),
+    findFirst: vi.fn(async ({ where }: any) => {
+      const xs = valoraciones.filter(
+        (v) => v.tenantId === where.tenantId && v.clientId === where.clientId,
+      );
+      const v = xs.slice().sort((a, b) => +b.createdAt - +a.createdAt)[0];
+      return v
+        ? { ...v, requestedBy: null, validatedBy: null, entryId: null }
+        : null;
+    }),
+  },
+  clinicalAssessmentCorrection: {
+    findMany: vi.fn(async () => []),
+  },
+};
+
+function usuarioVista(id: string) {
+  const u = users.get(id);
+  return {
+    id,
+    alias: u?.alias ?? null,
+    email: u?.email ?? "x@x.com",
+    clinicianLicense: u?.clinicianLicense ?? null,
+  };
+}
+
+vi.mock("../src/context.js", () => ({
+  initContext: vi.fn(),
+  getPrisma: () => fakePrisma,
+  getRedis: () => ({}),
+  closeContext: vi.fn(),
+  shutdown: vi.fn(),
+}));
+
+const { registerSesionRoutes } = await import(
+  "../src/clinica/sesion-routes.js"
+);
+const { signAccessToken } = await import("../src/auth/tokens.js");
+const { cobrosPendientesDe } = await import(
+  "../src/clinica/cobros-pendientes.js"
+);
+const { lineasDeLaSesionCerrada } = await import(
+  "../src/clinica/lineas-de-la-sesion.js"
+);
+
+function tokenDe(userId: string, role: FakeUser["role"]) {
+  return signAccessToken({ sub: userId, tid: TENANT_ID, role });
+}
+const comoSanitaria = {
+  authorization: `Bearer ${tokenDe(SANITARIA_ID, "CLINICIAN")}`,
+};
+const comoDuena = { authorization: `Bearer ${tokenDe(DUENA_ID, "OWNER")}` };
+const comoRecepcion = {
+  authorization: `Bearer ${tokenDe(RECEPCION_ID, "CASHIER")}`,
+};
+
+async function buildApp() {
+  const app = Fastify({ logger: false });
+  await registerSesionRoutes(app);
+  await app.ready();
+  return app;
+}
+
+const CERRAR_MINIMO = {
+  tratamientos: [QUIROPODIA],
+  dolor: 4,
+};
+
+beforeEach(() => {
+  clinicaEncendida = true;
+  entradas = [];
+  valoraciones = [];
+  tickets = [];
+  registro = [];
+  accesos = [{ clinicianUserId: SANITARIA_ID, clientId: PACIENTE_ID }];
+  users.clear();
+  clientes.clear();
+
+  const base = {
+    tenantId: TENANT_ID,
+    clinicalScope: "ALL" as const,
+    deletedAt: null,
+    isSystemActor: false,
+  };
+  users.set(DUENA_ID, {
+    ...base,
+    id: DUENA_ID,
+    role: "OWNER",
+    // La dueña ES la sanitaria del piloto: la marca va separada del rol.
+    isClinician: true,
+    alias: "Lucía Martín",
+    email: "lucia@clinica.local",
+    clinicianLicense: "Col. 45-0312",
+  });
+  users.set(SANITARIA_ID, {
+    ...base,
+    id: SANITARIA_ID,
+    role: "CLINICIAN",
+    isClinician: true,
+    alias: "Ana Sanitaria",
+    email: "ana@clinica.local",
+    clinicianLicense: "Col. 45-0999",
+  });
+  users.set(RECEPCION_ID, {
+    ...base,
+    id: RECEPCION_ID,
+    role: "CASHIER",
+    isClinician: false,
+    alias: "Marta",
+    email: "marta@clinica.local",
+    clinicianLicense: null,
+  });
+
+  clientes.set(PACIENTE_ID, {
+    id: PACIENTE_ID,
+    tenantId: TENANT_ID,
+    firstName: "Carmen",
+    lastName: "Rodríguez López",
+    phone: "600 123 456",
+    email: "carmen@clinica.local",
+    birthdate: new Date("1948-03-12T00:00:00.000Z"),
+  });
+
+  productos = [
+    {
+      id: QUIROPODIA,
+      tenantId: TENANT_ID,
+      kind: "SERVICE",
+      name: "Quiropodia",
+      sku: "SVC-QUIRO",
+      basePrice: 30,
+      taxRate: 0,
+      active: true,
+      tratamientoSesion: true,
+    },
+    {
+      id: FRESADO,
+      tenantId: TENANT_ID,
+      kind: "SERVICE",
+      name: "Corte y fresado de uñas",
+      sku: "SVC-FRESADO",
+      basePrice: 0,
+      taxRate: 0,
+      active: true,
+      tratamientoSesion: true,
+    },
+    {
+      id: VERRUGA,
+      tenantId: TENANT_ID,
+      kind: "SERVICE",
+      name: "Tratamiento de verruga",
+      sku: "SVC-VERRUGA",
+      basePrice: 25,
+      taxRate: 0,
+      active: true,
+      tratamientoSesion: true,
+    },
+    {
+      id: PRIMERA_VISITA,
+      tenantId: TENANT_ID,
+      kind: "SERVICE",
+      name: "Primera visita · valoración",
+      sku: "SVC-VALORACION",
+      basePrice: 35,
+      taxRate: 0,
+      active: true,
+      tratamientoSesion: false,
+    },
+  ];
+
+  citas = [
+    {
+      id: CITA_ID,
+      tenantId: TENANT_ID,
+      clientId: PACIENTE_ID,
+      status: "IN_SERVICE",
+      startsAt: new Date("2026-10-07T08:30:00.000Z"),
+      ticketId: null,
+      items: [{ serviceId: QUIROPODIA, sortOrder: 0 }],
+      staffUserId: DUENA_ID,
+    },
+    {
+      id: CITA_VIEJA_ID,
+      tenantId: TENANT_ID,
+      clientId: PACIENTE_ID,
+      status: "COMPLETED",
+      startsAt: new Date("2026-09-21T08:30:00.000Z"),
+      ticketId: null,
+      items: [{ serviceId: QUIROPODIA, sortOrder: 0 }],
+      staffUserId: DUENA_ID,
+    },
+  ];
+});
+
+/** Le da a Carmen una valoración VALIDADA: la puerta abierta. */
+function conValoracionValidada() {
+  valoraciones.push({
+    id: randomUUID(),
+    tenantId: TENANT_ID,
+    clientId: PACIENTE_ID,
+    status: "VALIDADA",
+    validatedAt: new Date("2026-09-07T09:00:00.000Z"),
+    createdAt: new Date("2026-09-07T08:00:00.000Z"),
+  });
+}
+
+// ── 1 · LA PUERTA: sin valoración validada no hay sesión ─────────────
+
+describe("clinica-3 · la puerta de la valoración", () => {
+  it("sin NINGUNA valoración, cerrar la sesión da 409 y dice qué hacer", async () => {
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: CERRAR_MINIMO,
+    });
+    expect(r.statusCode).toBe(409);
+    expect(r.json().code).toBe("SIN_VALORACION_VALIDADA");
+    expect(r.json().message).toMatch(/no tiene valoración inicial/i);
+    // Y NO SE ESCRIBIÓ NADA.
+    expect(entradas).toHaveLength(0);
+  });
+
+  it("con la valoración RESPONDIDA y sin validar, tampoco — y el mensaje dice «válidala»", async () => {
+    valoraciones.push({
+      id: randomUUID(),
+      tenantId: TENANT_ID,
+      clientId: PACIENTE_ID,
+      status: "RESPONDIDA",
+      validatedAt: null,
+      createdAt: new Date("2026-10-01T08:00:00.000Z"),
+    });
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: CERRAR_MINIMO,
+    });
+    expect(r.statusCode).toBe(409);
+    expect(r.json().message).toMatch(/válidala antes del primer tratamiento/i);
+    expect(entradas).toHaveLength(0);
+  });
+
+  it("la pantalla SÍ se abre sin la valoración, y trae la puerta cerrada con su motivo", async () => {
+    // El mockup pide enseñar «falta validar la valoración inicial» con el
+    // camino para hacerlo, y para eso la pantalla tiene que poder abrirse.
+    // La puerta cierra el CIERRE, no la vista.
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().puerta).toMatchObject({
+      puede: false,
+      motivo: "SIN_VALORACION",
+    });
+  });
+
+  it("con la valoración VALIDADA se cierra", async () => {
+    conValoracionValidada();
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: CERRAR_MINIMO,
+    });
+    expect(r.statusCode).toBe(201);
+    expect(entradas.filter((e) => e.kind === "TREATMENT_SESSION")).toHaveLength(
+      1,
+    );
+  });
+
+  it("LA EXPLORACIÓN SÍ se registra sin valoración validada: es parte de la primera visita", async () => {
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/exploracion`,
+      headers: comoDuena,
+      payload: {
+        pulsos: { L: "DEBIL", R: "PRESENTE" },
+        sinSensibilidad: [ZONA],
+        tipoDePie: "CAVO",
+      },
+    });
+    expect(r.statusCode).toBe(201);
+    expect(entradas.filter((e) => e.kind === "FOOT_EXAM")).toHaveLength(1);
+    expect(r.json().exploracion).toMatchObject({
+      pulsos: { L: "DEBIL", R: "PRESENTE" },
+      sinSensibilidad: [ZONA],
+      tipoDePie: "CAVO",
+    });
+  });
+});
+
+// ── 2 · CERRAR DOS VECES = UN COBRO ─────────────────────────────────
+
+describe("clinica-3 · cerrar dos veces no crea dos sesiones ni dos cobros", () => {
+  it("el segundo cierre devuelve 200 con la MISMA sesión, y hay una sola entrada", async () => {
+    conValoracionValidada();
+    const app = await buildApp();
+    const primera = await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: { ...CERRAR_MINIMO, tratamientos: [QUIROPODIA, FRESADO] },
+    });
+    expect(primera.statusCode).toBe(201);
+    expect(primera.json().yaEstaba).toBe(false);
+
+    const segunda = await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      // Con OTRO contenido: lo que se devuelve es lo FIRMADO, no lo nuevo.
+      payload: { tratamientos: [VERRUGA], dolor: 9 },
+    });
+    expect(segunda.statusCode).toBe(200);
+    expect(segunda.json().yaEstaba).toBe(true);
+
+    expect(entradas.filter((e) => e.kind === "TREATMENT_SESSION")).toHaveLength(
+      1,
+    );
+    // Y lo firmado no cambió: el segundo intento no reescribe nada.
+    expect(segunda.json().cerrada.entryId).toBe(
+      primera.json().cerrada.entryId,
+    );
+    expect(segunda.json().cerrada.cuerpo.dolor).toBe(4);
+    expect(segunda.json().cerrada.resumen.total).toBe(30);
+  });
+
+  it("y DOS CIERRES SIMULTÁNEOS tampoco: el que pierde la carrera recibe la sesión del otro", async () => {
+    // Los dos pasan la comprobación previa sin ver nada y llegan los dos a
+    // la inserción. El índice único rechaza al segundo con 23505 y el
+    // `catch` le devuelve la sesión que acaba de escribir el primero —
+    // misma forma que el `ON CONFLICT DO NOTHING` del acceso por cita.
+    conValoracionValidada();
+    const app = await buildApp();
+    const [a, b] = await Promise.all([
+      app.inject({
+        method: "POST",
+        url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+        headers: comoDuena,
+        payload: CERRAR_MINIMO,
+      }),
+      app.inject({
+        method: "POST",
+        url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+        headers: comoDuena,
+        payload: CERRAR_MINIMO,
+      }),
+    ]);
+    expect([a.statusCode, b.statusCode].sort()).toEqual([200, 201]);
+    expect(entradas.filter((e) => e.kind === "TREATMENT_SESSION")).toHaveLength(
+      1,
+    );
+    expect(a.json().cerrada.entryId).toBe(b.json().cerrada.entryId);
+  });
+
+  it("y el COBRO sale de la sesión: una sola lista de líneas para esa cita", async () => {
+    conValoracionValidada();
+    const app = await buildApp();
+    await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: { tratamientos: [QUIROPODIA, VERRUGA], dolor: 2 },
+    });
+    await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: { tratamientos: [QUIROPODIA, VERRUGA], dolor: 2 },
+    });
+    // Lo que el camino de cobro va a leer: DOS líneas, no cuatro.
+    const lineas = await lineasDeLaSesionCerrada(fakePrisma, {
+      tenantId: TENANT_ID,
+      appointmentId: CITA_ID,
+    });
+    expect(lineas).toEqual([
+      { serviceId: QUIROPODIA },
+      { serviceId: VERRUGA },
+    ]);
+  });
+});
+
+// ── 3 · UNA SESIÓN CERRADA NO SE EDITA ──────────────────────────────
+
+describe("clinica-3 · la sesión cerrada es inmutable", () => {
+  it("no hay PATCH ni PUT ni DELETE de una sesión en este bloque", async () => {
+    conValoracionValidada();
+    const app = await buildApp();
+    await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: CERRAR_MINIMO,
+    });
+    for (const method of ["PATCH", "PUT", "DELETE"] as const) {
+      const r = await app.inject({
+        method,
+        url: `/clinica/appointments/${CITA_ID}/sesion`,
+        headers: comoDuena,
+        payload: { dolor: 0 },
+      });
+      // 404 y no 405: la ruta no existe. Y si alguien la escribiera, el
+      // trigger `clinical_entries_inmutable` la rechazaría igual — eso lo
+      // prueba el e2e contra Postgres.
+      expect(r.statusCode).toBe(404);
+    }
+  });
+
+  it("volver a abrir la pantalla trae la sesión CERRADA, no una en blanco", async () => {
+    conValoracionValidada();
+    const app = await buildApp();
+    await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: { ...CERRAR_MINIMO, nota: "  se le explicó la cura  " },
+    });
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(r.json().cerrada).not.toBeNull();
+    expect(r.json().cerrada.cuerpo.nota).toBe("se le explicó la cura");
+    expect(r.json().cerrada.firma).toMatchObject({
+      autorNombre: "Lucía Martín",
+      colegiado: "Col. 45-0312",
+    });
+  });
+
+  it("la firma se CONGELA: cambiarle el colegiado después no cambia lo firmado", async () => {
+    conValoracionValidada();
+    const app = await buildApp();
+    await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: CERRAR_MINIMO,
+    });
+    users.get(DUENA_ID)!.clinicianLicense = "Col. 99-0000";
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(r.json().cerrada.firma.colegiado).toBe("Col. 45-0312");
+  });
+});
+
+// ── 4 · UN `CLINICIAN` NO RECIBE PRECIOS. En ninguna respuesta. ─────
+
+/**
+ * Recorre un JSON ENTERO y devuelve las rutas de todo lo que huela a
+ * dinero. Es el guardián de la regla 8.
+ *
+ * Busca por NOMBRE DE CLAVE —es lo único que sigue valiendo cuando alguien
+ * añade un campo en dos bloques— **y además exige que el valor sea un
+ * número o un texto con cifras**. Esa segunda mitad es la que distingue un
+ * importe de una bandera: `verImportes: false` lleva «importes» en el
+ * nombre y no es dinero, y `ivaTexto: "IVA 21 %"` sí lo es.
+ *
+ * Un `total: null` también cuenta como ausencia, que es correcto: lo que
+ * la API hace es QUITAR la clave, pero si alguna vez pusiera `null` en vez
+ * de quitarla este guardián no se enteraría. Por eso hay además un test
+ * que comprueba la FORMA exacta de una línea (`toEqual` con sólo
+ * `serviceId` y `nombre`).
+ */
+function clavesDeDinero(x: unknown, ruta = "$"): string[] {
+  const SOSPECHOSAS = /precio|importe|total|iva|price|amount|eur|coste/i;
+  if (Array.isArray(x)) {
+    return x.flatMap((v, i) => clavesDeDinero(v, `${ruta}[${i}]`));
+  }
+  if (x != null && typeof x === "object") {
+    return Object.entries(x).flatMap(([k, v]) => {
+      const aqui = `${ruta}.${k}`;
+      const esDinero =
+        SOSPECHOSAS.test(k) &&
+        (typeof v === "number" || (typeof v === "string" && /\d/.test(v)));
+      return [...(esDinero ? [aqui] : []), ...clavesDeDinero(v, aqui)];
+    });
+  }
+  return [];
+}
+
+describe("clinica-3 · el sanitario sin caja no ve importes EN LA API", () => {
+  beforeEach(() => {
+    conValoracionValidada();
+    // La sanitaria sin caja atiende esta cita.
+    citaDe(CITA_ID)!.staffUserId = SANITARIA_ID;
+  });
+
+  it("la pantalla de la sesión no lleva NI UNA clave de dinero", async () => {
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoSanitaria,
+    });
+    expect(r.statusCode).toBe(200);
+    expect(clavesDeDinero(r.json())).toEqual([]);
+    // Y lo dice explícitamente, para que la pantalla no lo deduzca de un
+    // hueco (deducirlo de un hueco es cómo se escribe un `?? 0`).
+    expect(r.json().verImportes).toBe(false);
+    // Lo que SÍ trae: los botones con su nombre, y cuántos hay.
+    expect(r.json().tratamientos).toHaveLength(3);
+    expect(r.json().tratamientos[0]).toEqual({
+      serviceId: expect.any(String),
+      nombre: expect.any(String),
+    });
+  });
+
+  it("y al CERRAR tampoco — su botón dice «Cerrar sesión», sin «y cobrar»", async () => {
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoSanitaria,
+      payload: { tratamientos: [QUIROPODIA, VERRUGA], dolor: 6 },
+    });
+    expect(r.statusCode).toBe(201);
+    expect(clavesDeDinero(r.json())).toEqual([]);
+    expect(r.json().cerrada.resumen.textoDelBoton).toBe("Cerrar sesión");
+    // Las líneas están, con su nombre: tiene que poder ver QUÉ se le hizo.
+    expect(r.json().cerrada.resumen.lineas).toEqual([
+      { serviceId: QUIROPODIA, nombre: "Quiropodia" },
+      { serviceId: VERRUGA, nombre: "Tratamiento de verruga" },
+    ]);
+  });
+
+  it("ni al volver a abrir la sesión ya cerrada", async () => {
+    const app = await buildApp();
+    await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoSanitaria,
+      payload: CERRAR_MINIMO,
+    });
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoSanitaria,
+    });
+    expect(clavesDeDinero(r.json())).toEqual([]);
+  });
+
+  it("ni en el cuerpo de la historia: la sesión guarda el NOMBRE y nunca el precio", async () => {
+    const app = await buildApp();
+    await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoSanitaria,
+      payload: { tratamientos: [QUIROPODIA], dolor: 1 },
+    });
+    const cuerpo = entradas.find((e) => e.kind === "TREATMENT_SESSION")!.body;
+    expect(cuerpo.tratamientosNombre).toEqual({ [QUIROPODIA]: "Quiropodia" });
+    expect(clavesDeDinero(cuerpo)).toEqual([]);
+  });
+
+  it("LA DUEÑA SÍ los ve, y su botón dice «y cobrar»: no es que nadie los vea", async () => {
+    citaDe(CITA_ID)!.staffUserId = DUENA_ID;
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(r.json().verImportes).toBe(true);
+    expect(clavesDeDinero(r.json()).length).toBeGreaterThan(0);
+    expect(r.json().tratamientos[0]).toMatchObject({ precio: expect.any(Number) });
+
+    const cerrada = await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: { tratamientos: [QUIROPODIA, VERRUGA], dolor: 3 },
+    });
+    expect(cerrada.json().cerrada.resumen.total).toBe(55);
+    expect(cerrada.json().cerrada.resumen.textoDelBoton).toBe(
+      "Cerrar sesión y cobrar",
+    );
+  });
+
+  it("y el texto del IVA sale del CATÁLOGO, nunca dice «exento»", async () => {
+    // El mockup escribe «exento de IVA» porque su clínica lo es. Aquí el
+    // texto sale del catálogo: el IVA exento en Verifactu está fuera de
+    // alcance y `registro.ts` sigue declarando S1, así que escribir
+    // «exento» en una pantalla cuyo ticket va a declarar otra cosa sería
+    // escribirlo en el sitio donde más se cree.
+    for (const p of productos) p.taxRate = 21;
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: CERRAR_MINIMO,
+    });
+    expect(r.json().cerrada.resumen.ivaTexto).toBe("IVA 21 %");
+    expect(JSON.stringify(r.json())).not.toMatch(/exent/i);
+  });
+});
+
+// ── 5 · LA RECEPCIÓN no recibe nada clínico ─────────────────────────
+
+describe("clinica-3 · la lista de cobros pendientes no lleva historia", () => {
+  async function unaSesionCerrada() {
+    conValoracionValidada();
+    const app = await buildApp();
+    await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: {
+        tratamientos: [QUIROPODIA, VERRUGA],
+        dolor: 7,
+        evolucion: "PEOR",
+        consejos: ["calzado"],
+        proximaCita: "S4",
+        nota: "la úlcera del talón va peor",
+        marcas: { [ZONA]: { lesion: "herida", gravedad: "SEVERA" } },
+      },
+    });
+    return app;
+  }
+
+  const RANGO = {
+    tenantId: TENANT_ID,
+    desde: new Date("2026-10-07T00:00:00.000Z"),
+    hasta: new Date("2026-10-07T23:59:00.000Z"),
+  };
+
+  it("lleva la cita, el paciente y las líneas con precio", async () => {
+    await unaSesionCerrada();
+    const cobros = await cobrosPendientesDe(fakePrisma, RANGO);
+    expect(cobros).toHaveLength(1);
+    expect(cobros[0]).toMatchObject({
+      appointmentId: CITA_ID,
+      paciente: { id: PACIENTE_ID, nombre: "Carmen Rodríguez López" },
+      servicios: ["Quiropodia"],
+      total: 55,
+      ivaTexto: "IVA 0 %",
+    });
+    expect(cobros[0]!.lineas).toEqual([
+      { nombre: "Quiropodia", precio: 30, iva: 0 },
+      { nombre: "Tratamiento de verruga", precio: 25, iva: 0 },
+    ]);
+  });
+
+  it("y NI UNA PALABRA de la historia: ni lesión, ni dolor, ni evolución, ni consejo, ni nota", async () => {
+    await unaSesionCerrada();
+    const cobros = await cobrosPendientesDe(fakePrisma, RANGO);
+    const json = JSON.stringify(cobros);
+    for (const prohibido of [
+      "herida",
+      "SEVERA",
+      "dolor",
+      "PEOR",
+      "calzado",
+      "úlcera",
+      "marcas",
+      "L:h",
+      "S4",
+    ]) {
+      expect(json, `«${prohibido}» no puede estar en la lista de cobros`).not.toContain(
+        prohibido,
+      );
+    }
+  });
+
+  it("ni una alerta del paciente", async () => {
+    await unaSesionCerrada();
+    const cobros = await cobrosPendientesDe(fakePrisma, RANGO);
+    const json = JSON.stringify(cobros).toLowerCase();
+    for (const p of CUESTIONARIO_V1.preguntas) {
+      if (!p.alerta) continue;
+      expect(json).not.toContain(p.alerta.toLowerCase());
+    }
+  });
+
+  it("una cita YA COBRADA sale de la lista", async () => {
+    await unaSesionCerrada();
+    citaDe(CITA_ID)!.ticketId = "99999999-9999-4999-8999-999999999999";
+    tickets.push({ id: citaDe(CITA_ID)!.ticketId!, status: "PAID" });
+    expect(await cobrosPendientesDe(fakePrisma, RANGO)).toEqual([]);
+  });
+
+  it("pero una con el borrador abierto y sin pagar SIGUE pendiente", async () => {
+    // Un DRAFT es un cobro empezado y no terminado. Dejarlo fuera sería la
+    // forma de perder un cobro: la cita desaparecería del único sitio
+    // donde se mira qué queda por cobrar.
+    await unaSesionCerrada();
+    citaDe(CITA_ID)!.ticketId = "99999999-9999-4999-8999-999999999999";
+    tickets.push({ id: citaDe(CITA_ID)!.ticketId!, status: "DRAFT" });
+    expect(await cobrosPendientesDe(fakePrisma, RANGO)).toHaveLength(1);
+  });
+
+  it("una cita SIN sesión cerrada no está en la lista: no hay nada que cobrar todavía", async () => {
+    expect(await cobrosPendientesDe(fakePrisma, RANGO)).toEqual([]);
+  });
+
+  it("y con el módulo clínico apagado, la lista está VACÍA y no revienta", async () => {
+    await unaSesionCerrada();
+    clinicaEncendida = false;
+    expect(await cobrosPendientesDe(fakePrisma, RANGO)).toEqual([]);
+  });
+});
+
+// ── 6 · MÓDULO APAGADO → 404 ────────────────────────────────────────
+
+describe("clinica-3 · con la historia clínica apagada, las rutas no existen", () => {
+  const RUTAS = [
+    ["GET", `/clinica/appointments/${CITA_ID}/sesion`, undefined],
+    [
+      "POST",
+      `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      { tratamientos: [QUIROPODIA], dolor: 1 },
+    ],
+    [
+      "POST",
+      `/clinica/appointments/${CITA_ID}/sesion/exploracion`,
+      { pulsos: { L: "PRESENTE", R: "PRESENTE" }, tipoDePie: "NORMAL" },
+    ],
+  ] as const;
+
+  it.each(RUTAS)("%s %s → 404 indistinguible de una ruta que no existe", async (
+    method,
+    url,
+    payload,
+  ) => {
+    clinicaEncendida = false;
+    conValoracionValidada();
+    const app = await buildApp();
+    const r = await app.inject({
+      method: method as "GET" | "POST",
+      url,
+      headers: comoDuena,
+      ...(payload ? { payload } : {}),
+    });
+    expect(r.statusCode).toBe(404);
+    expect(r.json()).toEqual({
+      message: `Route ${method}:${url} not found`,
+      error: "Not Found",
+      statusCode: 404,
+    });
+  });
+
+  it("y no se escribe nada", async () => {
+    clinicaEncendida = false;
+    conValoracionValidada();
+    const app = await buildApp();
+    await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: CERRAR_MINIMO,
+    });
+    expect(entradas).toHaveLength(0);
+    expect(registro).toHaveLength(0);
+  });
+});
+
+// ── 7 · UNA CITA QUE NO ES CLÍNICA COBRA IGUAL QUE ANTES ────────────
+
+describe("clinica-3 · el camino de cobro de siempre no cambia", () => {
+  it("un tenant SIN clínica: lo clínico no le pregunta nada al cobro", async () => {
+    clinicaEncendida = false;
+    fakePrisma.clinicalEntry.findFirst.mockClear();
+    expect(
+      await lineasDeLaSesionCerrada(fakePrisma, {
+        tenantId: TENANT_ID,
+        appointmentId: CITA_ID,
+      }),
+    ).toBeNull();
+    // Y ni mira las entradas: la capability es lo primero. (Si mirara,
+    // los catorce tenants sin clínica pagarían una consulta por cobro.)
+    expect(fakePrisma.clinicalEntry.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("una cita de un tenant CON clínica pero SIN sesión: también null", async () => {
+    expect(
+      await lineasDeLaSesionCerrada(fakePrisma, {
+        tenantId: TENANT_ID,
+        appointmentId: CITA_ID,
+      }),
+    ).toBeNull();
+  });
+
+  it("y si la lectura REVIENTA, se cobra como antes: nunca se tumba el cobro", async () => {
+    const original = fakePrisma.clinicalEntry.findFirst;
+    fakePrisma.clinicalEntry.findFirst = vi.fn(async () => {
+      throw new Error("db down");
+    });
+    try {
+      expect(
+        await lineasDeLaSesionCerrada(fakePrisma, {
+          tenantId: TENANT_ID,
+          appointmentId: CITA_ID,
+        }),
+      ).toBeNull();
+    } finally {
+      fakePrisma.clinicalEntry.findFirst = original;
+    }
+  });
+
+  it("con sesión cerrada, lo que se cobra es LO QUE SE HIZO y no lo que se reservó", async () => {
+    // La cita se dio para «Quiropodia» y se le hicieron tres cosas. Cobrar
+    // el servicio de la cita sería cobrar la previsión, que es lo que la
+    // podóloga hace hoy en papel y de memoria.
+    conValoracionValidada();
+    const app = await buildApp();
+    await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: { tratamientos: [QUIROPODIA, FRESADO, VERRUGA], dolor: 5 },
+    });
+    expect(
+      await lineasDeLaSesionCerrada(fakePrisma, {
+        tenantId: TENANT_ID,
+        appointmentId: CITA_ID,
+      }),
+    ).toEqual([
+      { serviceId: QUIROPODIA },
+      { serviceId: FRESADO },
+      { serviceId: VERRUGA },
+    ]);
+  });
+});
+
+// ── 8 · QUIÉN ENTRA, Y QUE EL INTENTO QUEDA ESCRITO ─────────────────
+
+describe("clinica-3 · la sesión es de sanitario con acceso a ESE paciente", () => {
+  beforeEach(() => conValoracionValidada());
+
+  it("la recepcionista recibe 403 al abrir la sesión — Y QUEDA EN EL REGISTRO", async () => {
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoRecepcion,
+    });
+    expect(r.statusCode).toBe(403);
+    expect(r.json().code).toBe("NO_SANITARIO");
+    expect(registro).toEqual([
+      {
+        userId: RECEPCION_ID,
+        clientId: PACIENTE_ID,
+        action: "READ",
+        outcome: "DENIED",
+        route: `GET /clinica/appointments/${CITA_ID}/sesion`,
+      },
+    ]);
+  });
+
+  it("ni puede cerrarla", async () => {
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoRecepcion,
+      payload: CERRAR_MINIMO,
+    });
+    expect(r.statusCode).toBe(403);
+    expect(entradas).toHaveLength(0);
+    expect(registro[0]).toMatchObject({ action: "WRITE", outcome: "DENIED" });
+  });
+
+  it("una sanitaria SIN acceso a este paciente tampoco", async () => {
+    accesos = [];
+    users.get(SANITARIA_ID)!.clinicalScope = "SELECTION";
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoSanitaria,
+    });
+    expect(r.statusCode).toBe(403);
+    expect(r.json().code).toBe("SIN_ACCESO_AL_PACIENTE");
+    expect(registro[0]).toMatchObject({ outcome: "DENIED" });
+  });
+
+  it("la lectura permitida deja línea ALLOWED con su ruta", async () => {
+    const app = await buildApp();
+    await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(registro).toEqual([
+      {
+        userId: DUENA_ID,
+        clientId: PACIENTE_ID,
+        action: "READ",
+        outcome: "ALLOWED",
+        route: `GET /clinica/appointments/${CITA_ID}/sesion`,
+      },
+    ]);
+  });
+
+  it("una cita de OTRO tenant es 404 y NO deja línea: no hay paciente del que apuntarla", async () => {
+    citaDe(CITA_ID)!.tenantId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(r.statusCode).toBe(404);
+    expect(r.json().code).toBe("APPOINTMENT_NOT_FOUND");
+    expect(registro).toHaveLength(0);
+  });
+
+  it("una cita SIN paciente (walk-in) es 404: la sesión de nadie no existe", async () => {
+    citaDe(CITA_ID)!.clientId = null;
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(r.statusCode).toBe(404);
+  });
+});
+
+// ── 9 · La pantalla: lo que trae y de dónde ─────────────────────────
+
+describe("clinica-3 · la pantalla trae lo que el mockup pinta", () => {
+  beforeEach(() => conValoracionValidada());
+
+  it("la cabecera con sus fichas, y la edad calculada y no inventada", async () => {
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(r.json().cabecera).toMatchObject({
+      paciente: {
+        nombre: "Carmen Rodríguez López",
+        telefono: "600 123 456",
+      },
+      citaDeHoy: { servicios: ["Quiropodia"] },
+      atiende: { nombre: "Lucía Martín" },
+    });
+    expect(r.json().cabecera.paciente.edad).toBeGreaterThan(70);
+  });
+
+  it("sin fecha de nacimiento, la edad es null y no un número inventado", async () => {
+    clientes.get(PACIENTE_ID)!.birthdate = null;
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(r.json().cabecera.paciente.edad).toBeNull();
+  });
+
+  it("los botones son los tratamientos MARCADOS en el catálogo, no todos los servicios", async () => {
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    const ids = r.json().tratamientos.map((t: any) => t.serviceId);
+    expect(ids).toHaveLength(3);
+    // El servicio de primera visita NO es un tratamiento de sesión.
+    expect(ids).not.toContain(PRIMERA_VISITA);
+  });
+
+  it("un tratamiento SIN SKU no sale: no se podría cobrar y el botón sería una trampa", async () => {
+    productos.find((p) => p.id === VERRUGA)!.sku = "  ";
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(
+      r.json().tratamientos.map((t: any) => t.serviceId),
+    ).not.toContain(VERRUGA);
+  });
+
+  it("el número de visita cuenta la de hoy: con dos cerradas antes, hoy es la 3.ª", async () => {
+    entradas.push(
+      {
+        id: randomUUID(),
+        tenantId: TENANT_ID,
+        clientId: PACIENTE_ID,
+        authorUserId: DUENA_ID,
+        appointmentId: CITA_VIEJA_ID,
+        kind: "TREATMENT_SESSION",
+        body: { v: 1, dolor: 5, tratamientos: [QUIROPODIA] },
+        createdAt: new Date("2026-09-21T09:00:00.000Z"),
+      },
+      {
+        id: randomUUID(),
+        tenantId: TENANT_ID,
+        clientId: PACIENTE_ID,
+        authorUserId: DUENA_ID,
+        appointmentId: "55555555-5555-5555-5555-555555555553",
+        kind: "TREATMENT_SESSION",
+        body: { v: 1, dolor: 7, tratamientos: [QUIROPODIA] },
+        createdAt: new Date("2026-09-07T09:00:00.000Z"),
+      },
+    );
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(r.json().cabecera.numeroDeVisita).toBe(3);
+    // La gráfica del dolor, de la más antigua a la más reciente.
+    expect(r.json().dolorHistorico.map((p: any) => p.dolor)).toEqual([7, 5]);
+    // Y lo de la visita ANTERIOR, que es lo que «Igual que la última vez»
+    // va a sumar.
+    expect(r.json().anterior).toMatchObject({ dolor: 5 });
+  });
+
+  it("la exploración PARTE de la última, no de cero", async () => {
+    const app = await buildApp();
+    await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_VIEJA_ID}/sesion/exploracion`,
+      headers: comoDuena,
+      payload: {
+        pulsos: { L: "AUSENTE", R: "DEBIL" },
+        sinSensibilidad: [ZONA, "R:talon"],
+        tipoDePie: "PLANO",
+      },
+    });
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(r.json().exploracion.departeDe).toEqual({
+      pulsos: { L: "AUSENTE", R: "DEBIL" },
+      sinSensibilidad: [ZONA, "R:talon"],
+      tipoDePie: "PLANO",
+    });
+    expect(r.json().exploracion.ultima).toMatchObject({
+      autor: "Lucía Martín",
+    });
+  });
+
+  it("las listas con las que se pinta viajan en la respuesta, con su versión", async () => {
+    // Y no las lleva la pantalla por su cuenta: son la versión con la que
+    // se va a escribir, y la pantalla tiene que pintar ESA y no «la que
+    // tenga compilada».
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(r.json().listas.mapa.version).toBe(1);
+    expect(r.json().listas.mapa.zonas).toHaveLength(11);
+    expect(r.json().listas.lesiones.lesiones).toHaveLength(7);
+    expect(r.json().listas.consejos.consejos).toHaveLength(5);
+  });
+});
+
+// ── 10 · El servidor no se fía del front ────────────────────────────
+
+describe("clinica-3 · el servidor vuelve a decidirlo todo", () => {
+  beforeEach(() => conValoracionValidada());
+
+  it("la gravedad sin lesión no entra en la historia aunque la mande la pantalla", async () => {
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: {
+        ...CERRAR_MINIMO,
+        // El schema exige `lesion`, así que lo que puede llegar es una
+        // lesión que NO está en la lista: la marca entera se tira.
+        marcas: { [ZONA]: { lesion: "amputación", gravedad: "SEVERA" } },
+      },
+    });
+    expect(r.statusCode).toBe(201);
+    expect(r.json().cerrada.cuerpo.marcas).toEqual({});
+  });
+
+  it("una zona que no es del mapa se tira en silencio y la buena se queda", async () => {
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: {
+        ...CERRAR_MINIMO,
+        marcas: {
+          "L:oreja": { lesion: "callo", gravedad: "LEVE" },
+          [ZONA]: { lesion: "unero", gravedad: "MODERADA" },
+        },
+      },
+    });
+    expect(Object.keys(r.json().cerrada.cuerpo.marcas)).toEqual([ZONA]);
+    // Y se lee en palabras, con el vocabulario de SU versión.
+    expect(r.json().cerrada.marcas).toEqual([
+      {
+        clave: ZONA,
+        zona: "Pie izq. · Dedo gordo",
+        lesion: "Uña encarnada",
+        gravedad: "Moderada",
+      },
+    ]);
+  });
+
+  it("un tratamiento que no está marcado en el catálogo no se puede cobrar", async () => {
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: { tratamientos: [PRIMERA_VISITA], dolor: 3 },
+    });
+    expect(r.statusCode).toBe(409);
+    expect(r.json().code).toBe("SIN_TRATAMIENTOS");
+    expect(entradas).toHaveLength(0);
+  });
+
+  it("sin tratamientos, el schema lo rechaza antes de llegar", async () => {
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: { tratamientos: [], dolor: 3 },
+    });
+    expect(r.statusCode).toBe(400);
+  });
+
+  it("sin dolor tampoco: es obligatorio", async () => {
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: { tratamientos: [QUIROPODIA] },
+    });
+    expect(r.statusCode).toBe(400);
+  });
+
+  it("pero CERO sí vale: «ya no me duele» es una respuesta", async () => {
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: { tratamientos: [QUIROPODIA], dolor: 0 },
+    });
+    expect(r.statusCode).toBe(201);
+    expect(r.json().cerrada.cuerpo.dolor).toBe(0);
+  });
+
+  it("un dolor de 11 o de -1 no pasa el schema", async () => {
+    const app = await buildApp();
+    for (const dolor of [11, -1, 4.5]) {
+      const r = await app.inject({
+        method: "POST",
+        url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+        headers: comoDuena,
+        payload: { tratamientos: [QUIROPODIA], dolor },
+      });
+      expect(r.statusCode, `dolor ${dolor}`).toBe(400);
+    }
+  });
+
+  it("un consejo o una evolución inventados se tiran sin tumbar el cierre", async () => {
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: {
+        ...CERRAR_MINIMO,
+        consejos: ["calzado", "andar-descalzo"],
+        evolucion: null,
+      },
+    });
+    expect(r.statusCode).toBe(201);
+    expect(r.json().cerrada.cuerpo.consejos).toEqual(["calzado"]);
+    expect(r.json().cerrada.cuerpo.evolucion).toBeNull();
+  });
+
+  it("la próxima cita queda como PROPUESTA y no reserva nada", async () => {
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "POST",
+      url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+      headers: comoDuena,
+      payload: { ...CERRAR_MINIMO, proximaCita: "S4" },
+    });
+    expect(r.json().cerrada.cuerpo.proximaCita).toBe("S4");
+    // NO nació ninguna cita nueva: la recepción elige el hueco con el
+    // paciente delante (prompt §3).
+    expect(citas).toHaveLength(2);
+  });
+});
