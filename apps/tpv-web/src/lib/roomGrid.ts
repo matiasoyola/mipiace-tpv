@@ -73,6 +73,14 @@ export const ZONE_PADDING = 18;
 export const ZONE_GAP = 18;
 
 /**
+ * Lo que el borde del marco de zona añade al alto, sumando los dos
+ * lados. El borde es `border-[1.5px]` discontinuo, pero el navegador lo
+ * cuantiza a 1 px por lado: medido en el bucle visual, un marco de una
+ * fila mide 156 px (18 + 118 + 18 + 2), no 157.
+ */
+export const ZONE_BORDER = 2;
+
+/**
  * Lo que la zona BARRA añade por encima de su fila de mesas: el
  * mostrador dibujado (26 px) más el `mb-4` que lo separa (16), y el
  * reparto vertical propio del marco (`pt-4 pb-5` = 36 en vez de los 36
@@ -170,6 +178,7 @@ export function roomCanvasHeight(
     const rows = Math.max(1, Math.ceil(zone.tables / columns));
     const height =
       2 * ZONE_PADDING +
+      ZONE_BORDER +
       rows * cardHeight +
       (rows - 1) * ROOM_GRID_GAP +
       (zone.isBar ? BAR_COUNTER_HEIGHT : 0);

@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 import {
   ROOM_GRID_GAP,
   TABLE_CARD_HEIGHT,
+  ZONE_BORDER,
   TABLE_CARD_SIZE_CLASS,
   TABLE_CARD_WIDTH,
   ZONE_PADDING,
@@ -111,8 +112,10 @@ describe("roomGrid · la sala entera se ve sin desplazar", () => {
     // Tres bandas de 6/6/4 a 1443: Salón no deja sitio a Terraza en su
     // línea (1114 + 18 + 1114 > 1387), así que son tres líneas.
     const alto = roomCanvasHeight(MAESTRANZA, 1443 - 2 * 28);
-    // 154 (Salón) + 18 + 154 (Terraza) + 18 + 196 (Barra, con mostrador).
-    expect(alto).toBe(540);
+    // 156 (Salón) + 18 + 156 (Terraza) + 18 + 198 (Barra, con mostrador).
+    // Los tres números están medidos en el navegador, no sumados sobre
+    // el papel: ver el `-done` del bloque.
+    expect(alto).toBe(546);
   });
 
   it("una sala grande no se sale: las mesas pasan a varias filas", () => {
@@ -121,6 +124,7 @@ describe("roomGrid · la sala entera se ve sin desplazar", () => {
     const filas = Math.ceil(20 / roomColumnsFor(1280 - 2 * 28 - 2 * ZONE_PADDING));
     expect(alto).toBe(
       2 * ZONE_PADDING +
+        ZONE_BORDER +
         filas * TABLE_CARD_HEIGHT +
         (filas - 1) * ROOM_GRID_GAP,
     );

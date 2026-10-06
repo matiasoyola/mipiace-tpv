@@ -17,6 +17,15 @@
 //     de dinero. Al cobrar: banner de confirmación de v1.9.2.
 //   - Cabecera de sala: «N abiertas · M libres · X,XX € en sala».
 //
+// v1.23-las-mesas-miden-lo-mismo (2026-10-06): el tamaño de la tarjeta
+// deja de depender de la zona. Lo de v1.9.3 daba cuatro tamaños al mismo
+// objeto —508 × 118 en Salón, 124 × 118 en Terraza, 84 × 84 en Barra,
+// medido en el AP13— porque el ancho lo fijaba el lienzo
+// (`grid-cols-[minmax(0,1fr)_300px]`) y no las mesas. Ahora el tamaño
+// sale de `lib/roomGrid.ts` y es uno solo; las zonas fluyen con
+// `flex-wrap` y las columnas salen del ancho disponible. La Barra
+// conserva el mostrador dibujado, pero sus sitios son la misma tarjeta.
+//
 // Conserva el header/banners/drawer que dejó v1.9.2 (Tickets +
 // hamburguesa en el mapa, banners de concurrencia, Arqueo/Cerrar turno).
 //
@@ -544,7 +553,7 @@ export function TableMapScreen(props: TableMapScreenProps) {
           //
           // Por debajo de `sm` (handheld) las zonas se apilan y las
           // mesas van a una columna, como hasta ahora.
-          <div className="flex flex-col sm:flex-row sm:flex-wrap gap-[18px] items-start">
+          <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-start gap-[18px]">
             {ZONE_ORDER.map((zone) => {
               const zoneTables = visible.filter((t) => t.zone === zone);
               if (zoneTables.length === 0) return null;
