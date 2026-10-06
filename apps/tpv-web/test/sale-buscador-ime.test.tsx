@@ -354,6 +354,22 @@ describe("v1.22 §1 · el lector USB-HID sigue funcionando", () => {
     ).map((el) => el.textContent ?? "");
   }
 
+  // Consecuencia DECLARADA del §1, no un descuido: en un terminal
+  // detectado como táctil el refoco permanente no corre, así que el
+  // lector necesita que el campo tenga el foco (lo mismo que pasa en
+  // cualquier terminal de puntero grueso desde v1.3; lo nuevo es que el
+  // D8 ahora entra en ese grupo). Con el refoco vivo, Android sacaba el
+  // teclado en cada toque, que es lo que bloqueaba el cobro mixto.
+  it("en táctil el buscador NO se enfoca solo: el lector pide un toque en el campo", async () => {
+    restauraEntorno = montaEntornoD8();
+    await render();
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await settle();
+    expect(document.activeElement).not.toBe(buscador());
+  });
+
   it("ráfaga de código de barras + Enter con el buscador PLEGADO añade el producto", async () => {
     await render();
     expect(buscador().getAttribute("inputmode")).toBe("none");
