@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 
+import { getCachedClinicaEnabled } from "../lib/catalog.js";
 import { scrollFocusIntoView } from "../lib/visualViewportSync.js";
 import {
   addClientConsent,
@@ -32,9 +33,19 @@ import {
   type ClientRow,
   type ClientVouchers,
 } from "../lib/clients.js";
+import { ValoracionSanitario } from "../clinica/ValoracionSanitario.js";
 import { ClientForm } from "./ClientForm.js";
 
-export function ClientsPage({ onClose }: { onClose: () => void }) {
+export function ClientsPage({
+  onClose,
+  esSanitario = false,
+}: {
+  onClose: () => void;
+  // clinica-2 · LA MARCA sanitaria de quien está mirando. De ella depende
+  // que la pestaña «Valoración» pida las respuestas o enseñe sólo los dos
+  // botones que la recepcionista sí puede usar. Ver la nota del mount.
+  esSanitario?: boolean;
+}) {
   const [all, setAll] = useState<ClientRow[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -162,6 +173,8 @@ export function ClientsPage({ onClose }: { onClose: () => void }) {
           onUpdated={(c) =>
             setAll((prev) => prev.map((x) => (x.id === c.id ? c : x)))
           }
+          clinicaEncendida={getCachedClinicaEnabled()}
+          esSanitario={esSanitario}
         />
       )}
     </div>
@@ -210,16 +223,25 @@ function SidePanel({
   );
 }
 
-type Tab = "history" | "technical" | "vouchers";
+type Tab = "history" | "technical" | "vouchers" | "valoracion";
 
 function ClientDetailDrawer({
   clientId,
   onClose,
   onUpdated,
+  clinicaEncendida,
+  esSanitario,
 }: {
   clientId: string;
   onClose: () => void;
   onUpdated: (c: ClientRow) => void;
+  // clinica-2 · la pestaña de la valoración sólo existe con el módulo
+  // encendido. En un bar o en una peluquería no hay nada que enseñar, y
+  // una pestaña vacía que diga «Valoración» le cuenta a ese cliente que
+  // el sistema guarda datos de salud de otros — es la misma razón por la
+  // que las rutas clínicas contestan 404 y no 403 (clinica-1 §1).
+  clinicaEncendida: boolean;
+  esSanitario: boolean;
 }) {
   const [detail, setDetail] = useState<ClientDetail | null>(null);
   const [editing, setEditing] = useState(false);
@@ -282,6 +304,14 @@ function ClientDetailDrawer({
             <TabButton active={tab === "vouchers"} onClick={() => setTab("vouchers")}>
               Bonos
             </TabButton>
+            {clinicaEncendida && (
+              <TabButton
+                active={tab === "valoracion"}
+                onClick={() => setTab("valoracion")}
+              >
+                Valoración
+              </TabButton>
+            )}
           </div>
           {tab === "history" && <HistoryTab clientId={clientId} />}
           {tab === "technical" && (
@@ -292,6 +322,17 @@ function ClientDetailDrawer({
             />
           )}
           {tab === "vouchers" && <VouchersTab clientId={clientId} />}
+          {tab === "valoracion" && clinicaEncendida && (
+            <ValoracionSanitario
+              clientId={clientId}
+              // La recepcionista abre la pestaña y ve los dos botones que
+              // SÍ puede usar (mandar el test, abrir la tablet), sin pedir
+              // las respuestas. Así no se le deja una línea DENIED en el
+              // registro por cada vez que toca la pestaña, que es ruido
+              // justo en la lista de «quién ha abierto esta historia».
+              puedeLeer={esSanitario}
+            />
+          )}
         </>
       )}
     </SidePanel>

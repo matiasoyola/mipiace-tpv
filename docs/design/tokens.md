@@ -140,11 +140,13 @@ mientras que lo que se toca una vez (tarjetas de producto y de mesa)
 estaba de sobra a 22-26 mm. El mínimo razonable con dedo de camarero y
 prisa es 9-10 mm.
 
-**Fuera de la escala, con nombre propio** (F1, 2026-09-23):
+**Fuera de la escala, con nombre propio** (F1, 2026-09-23; clinica-2,
+2026-10-06):
 
 | Token | Valor | ≈ mm | Uso |
 |---|---|---|---|
 | `tap-fichar` | **208 px** | 24 mm | El botón de Entrar/Salir de la pantalla de fichar, y sólo ése. |
+| `tap-valoracion` | **96 px** (80 px a ≤390 px) | 11 mm | El «Sí» / «No» del test de la valoración inicial que contesta el paciente, y sólo ésos. |
 
 De dónde sale: el botón de fichar no es "un control de uso diario", es
 **el acto**. Se pulsa entrando por una puerta con el bolso en la otra mano,
@@ -153,8 +155,25 @@ la tarjeta de producto del TPV (22-26 mm, que las pruebas físicas del
 27-08 dieron por sobradas) y no en el de una tecla. A 320 px de ancho —el
 suelo del bucle visual— deja 56 px de margen a cada lado.
 
-Es el único control del sistema fuera de la escala de tres peldaños, y
-está aquí para que siga siéndolo: cualquier otro se discute antes.
+**De dónde sale `tap-valoracion`** (clinica-2): el test de la valoración lo
+contesta **el paciente**, no el personal. La clínica de podología atiende a
+muchas personas mayores y poco duchas en tecnología: una pregunta por
+pantalla, letra grande y dos botones enormes. No es «un control de uso
+diario» —se toca diez veces en la vida de ese paciente— y de lo que
+conteste depende que nadie la trate sin saber que está anticoagulada.
+
+El número no se ha elegido aquí: está en el mockup que Matías validó el
+05-10-2026 (`docs/mockups/clinica-2-valoracion.html`), y el prompt del
+bloque lo fija («los botones Sí/No del mockup son más grandes y así se
+quedan»). El resto del test respeta el mínimo de la casa: «No lo sé» 64 px,
+los botones de detalle 64 px, «Seguir» 72 px, «Atrás» 56 px.
+
+A 320 px de ancho —el suelo del bucle visual— dos botones de 96 px con
+12 px de hueco y 20 px de margen entran sin tocarse.
+
+Son los dos únicos controles del sistema fuera de la escala de tres
+peldaños, y están aquí para que sigan siendo dos: cualquier otro se discute
+antes.
 
 **Regla:** no se suben alturas con `h-[52px]` sueltos. Si un control no
 entra en la escala, primero se discute el token; luego se implementa.

@@ -15,15 +15,32 @@ export default {
       //   touch     48px ≈ 9 mm  · mínimo de cualquier control diario
       //   touch-pad 56px ≈ 10 mm · teclas del CashPad y del keypad de PIN
       //   touch-lg  64px ≈ 11 mm · barra de cobro y acciones primarias
+      //
+      // Y dos FUERA DE LA ESCALA, con nombre propio y justificación (la
+      // regla de docs/design/tokens.md §4):
+      //   tap-fichar     208px ≈ 24 mm · el botón de Entrar/Salir (F1)
+      //   tap-valoracion  96px ≈ 11 mm · el «Sí»/«No» del test del paciente
+      //
+      // El del test no es «un control de uso diario»: lo toca una persona
+      // de 78 años, diez veces, en una tablet que a lo mejor sostiene con
+      // una mano, y de lo que conteste depende que nadie la trate sin
+      // saber que está anticoagulada. El mockup validado por Matías los
+      // pone a 96 px (80 en móvil) y así se quedan — el prompt del bloque
+      // lo dice literalmente. A 320 px de ancho, dos de 96 px con 12 px de
+      // hueco entran de sobra.
       spacing: {
         touch: "48px",
         "touch-pad": "56px",
         "touch-lg": "64px",
+        "tap-valoracion": "96px",
+        "tap-valoracion-sm": "80px",
       },
       minHeight: {
         touch: "48px",
         "touch-pad": "56px",
         "touch-lg": "64px",
+        "tap-valoracion": "96px",
+        "tap-valoracion-sm": "80px",
       },
       colors: {
         mipiace: {

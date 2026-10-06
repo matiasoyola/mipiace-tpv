@@ -421,6 +421,12 @@ export function App() {
         }}
       >
         <AgendaPage
+          // clinica-2 · lleva la marca por construcción: `role=CLINICIAN`
+          // implica `isClinician` por CHECK de la base
+          // (`users_clinician_implies_flag`). Se lee del login de todos
+          // modos en vez de darlo por hecho — el día que el rol y la marca
+          // se desacoplaran, esta pantalla no tendría que acordarse.
+          esSanitario={cashier.cashier.isClinician ?? true}
           // Su día, de entrada. La decisión de producto es «ve su agenda,
           // con sus citas por defecto»: el filtro arranca puesto en él y
           // se puede quitar — las citas de las compañeras no son datos de
@@ -823,6 +829,13 @@ export function TpvHome(props: {
           notice={agendaNotice}
           onNoticeShown={() => setAgendaNotice(null)}
           onClose={() => setShowAgenda(false)}
+          // clinica-2 · la agenda del mostrador. Aquí la marca SÍ hay que
+          // leerla: una cajera-sanitaria y una propietaria sanitaria pasan
+          // por esta rama con rol `CASHIER` y `OWNER`, y son las que de
+          // verdad usan la clínica en el piloto (la podóloga es la dueña).
+          // `false` si no viene: una sesión vieja o la del login offline no
+          // la traen, y no ofrecer la valoración es el lado correcto.
+          esSanitario={props.cashier.isClinician ?? false}
           // B-reservas-5 F3 · cobrar una cita entra en contexto de
           // borrador por la MISMA puerta que abrir una mesa. No se
           // rehidratan líneas en el cliente: `enterDraft` las pide.
@@ -876,6 +889,9 @@ export function TpvHome(props: {
         shiftId={props.shiftId}
         cashierLabel={cashierDisplayLabel(props.cashier)}
         cashierRole={props.cashier.role}
+        // clinica-2 · la marca, no el rol: en el piloto la podóloga es la
+        // dueña, y un `OWNER` no se distingue de otro por el rol.
+        esSanitario={props.cashier.isClinician ?? false}
         registerName={props.registerName}
         registerId={props.registerId}
         storeName={props.storeName}

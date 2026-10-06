@@ -227,6 +227,9 @@ importers:
 
   apps/tpv-web:
     dependencies:
+      '@mipiacetpv/clinica-valoracion':
+        specifier: workspace:*
+        version: link:../../packages/clinica-valoracion
       '@mipiacetpv/escpos-builder':
         specifier: workspace:*
         version: link:../../packages/escpos-builder

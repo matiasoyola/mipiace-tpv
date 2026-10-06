@@ -61,6 +61,10 @@ interface Scheduling {
   onlineBookable: boolean;
   family: string | null;
   channels: Channels;
+  // clinica-2 · «este servicio es la primera valoración». Dar una cita de
+  // un servicio marcado así a un paciente sin valoración le manda el test
+  // del cuestionario de crónicas.
+  primeraValoracion: boolean;
   updatedAt: string;
 }
 
@@ -102,6 +106,7 @@ function blankScheduling(): Scheduling {
     onlineBookable: false,
     family: null,
     channels: { ...DEFAULT_CHANNELS },
+    primeraValoracion: false,
     updatedAt: "",
   };
 }
@@ -109,6 +114,9 @@ function blankScheduling(): Scheduling {
 export function AgendaCatalogPage() {
   const navigate = useNavigate();
   const [agendaEnabled, setAgendaEnabled] = useState<boolean | null>(null);
+  // clinica-2 · sale del MISMO `GET /admin/tenant/settings` que la pantalla
+  // ya pedía, así que no hay una petición más.
+  const [clinicaEnabled, setClinicaEnabled] = useState(false);
   const [services, setServices] = useState<ServiceRow[] | null>(null);
   const [resources, setResources] = useState<ResourceRow[] | null>(null);
   const [query, setQuery] = useState("");
@@ -134,11 +142,15 @@ export function AgendaCatalogPage() {
     let cancelled = false;
     async function load() {
       try {
-        const settings = await api<{ settings: { agendaEnabled: boolean } }>(
-          "/admin/tenant/settings",
-        );
+        const settings = await api<{
+          settings: {
+            agendaEnabled: boolean;
+            clinicalRecordsEnabled?: boolean;
+          };
+        }>("/admin/tenant/settings");
         if (cancelled) return;
         setAgendaEnabled(settings.settings.agendaEnabled);
+        setClinicaEnabled(settings.settings.clinicalRecordsEnabled === true);
         if (!settings.settings.agendaEnabled) return;
         const [svc, res] = await Promise.all([
           api<{ items: ServiceRow[] }>("/services/scheduling"),
@@ -250,6 +262,7 @@ export function AgendaCatalogPage() {
                   service={s}
                   resources={resources ?? []}
                   canEdit={canEdit}
+                  clinicaEnabled={clinicaEnabled}
                   onSaved={onSchedulingSaved}
                   onError={setError}
                   onSuccess={setSuccess}
@@ -409,6 +422,7 @@ function ServiceCard({
   service,
   resources,
   canEdit,
+  clinicaEnabled,
   onSaved,
   onError,
   onSuccess,
@@ -416,6 +430,9 @@ function ServiceCard({
   service: ServiceRow;
   resources: ResourceRow[];
   canEdit: boolean;
+  /** clinica-2 · con la historia clínica apagada, la casilla de «primera
+   *  valoración» no se enseña. Ver la nota junto a la casilla. */
+  clinicaEnabled: boolean;
   onSaved: (productId: string, scheduling: Scheduling) => void;
   onError: (msg: string | null) => void;
   onSuccess: (msg: string | null) => void;
@@ -470,6 +487,7 @@ function ServiceCard({
             bufferAfterMin: form.bufferAfterMin,
             staffRequired: form.staffRequired,
             onlineBookable: form.channels.online,
+            primeraValoracion: form.primeraValoracion,
             family: form.family?.trim() || null,
             channels: form.channels,
           },
@@ -618,6 +636,38 @@ function ServiceCard({
               (contrato para B4/B6).
             </p>
           </div>
+
+          {/* clinica-2 · la marca que convierte «dar la cita» en «el
+              paciente recibe el test». Sólo se enseña con la historia
+              clínica encendida: en una peluquería no significa nada, y una
+              casilla que habla de valoraciones clínicas le cuenta a ese
+              cliente que el sistema guarda datos de salud de otros — la
+              misma razón por la que las rutas clínicas contestan 404 y no
+              403 (clinica-1 §1). */}
+          {clinicaEnabled && (
+            <div>
+              <label className="flex items-start gap-2.5 text-[13.5px] text-mipiace-ink">
+                <input
+                  type="checkbox"
+                  checked={form.primeraValoracion}
+                  disabled={!canEdit}
+                  onChange={(e) =>
+                    setForm({ ...form, primeraValoracion: e.target.checked })
+                  }
+                  className="h-4 w-4 mt-0.5 rounded border-slate-300 text-mipiace-coral focus:ring-mipiace-coral/30 disabled:opacity-50"
+                />
+                <span>
+                  Es la primera valoración
+                  <span className="block text-[12px] text-slate-400 mt-0.5">
+                    Al dar una cita de este servicio a un paciente que no
+                    tiene valoración, se le manda por email el test de
+                    enfermedades crónicas. También se le puede abrir en la
+                    tablet de la sala.
+                  </span>
+                </span>
+              </label>
+            </div>
+          )}
 
           <div>
             <div className="text-[13px] font-medium text-mipiace-ink mb-2">

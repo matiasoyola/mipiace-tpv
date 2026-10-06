@@ -4,6 +4,10 @@ import { registerSW } from "virtual:pwa-register";
 
 import { App } from "./App.js";
 import {
+  ValoracionPublica,
+  tokenDeLaUrl,
+} from "./clinica/ValoracionPublica.js";
+import {
   ErrorBoundary,
   installGlobalErrorLogging,
 } from "./components/ErrorBoundary.js";
@@ -59,19 +63,47 @@ registerSW({ immediate: true });
 const root = document.getElementById("root");
 if (!root) throw new Error("Falta #root en index.html");
 
+// clinica-2 · EL TEST DEL PACIENTE, ANTES DEL TPV.
+//
+// `/valoracion/<token>` no es una pantalla del TPV: es el formulario que
+// abre un paciente desde el enlace de su email, o la tablet de la sala en
+// modo paciente. Se desvía AQUÍ, antes de montar `App`, y por lo que
+// evita:
+//
+//   · `App` arranca con `useDeviceBootstrap`, así que un móvil sin
+//     emparejar caería en la pantalla de pairing — que es lo que pasaba
+//     con la URL del PDF público del ticket antes de su `handle` en Caddy
+//     (B-TPV-Bugfix, Bug-04). Aquí el desvío es en el cliente y no hace
+//     falta regla nueva: el `try_files` de la PWA ya trae el index.html.
+//   · Y en la tablet, el modo paciente NO puede ser una pantalla DENTRO
+//     del TPV: si lo fuera, el paciente tendría detrás la sesión de la
+//     podóloga y «sin forma de salir» sería un adorno. Montando sólo
+//     esto, lo único que hay en pantalla es su test. Para volver al TPV se
+//     recarga la raíz y se teclea el PIN, que es el login de siempre.
+//
+const tokenDelTest = tokenDeLaUrl();
+
 // v1.12-manos-de-camarero · hallazgo H1: en el Chrome 81 de fábrica del
 // AP11 no existe `gap` en flexbox y la UI entera se pinta con los
 // textos pegados ("Sala5 abiertas", "GEgemmamgc720,00 €"). Se comprueba
 // ANTES de montar React y se bloquea con una pantalla honesta: no hay
 // polyfill que valga para 245 `gap-*`, y una UI descuadrada en barra es
 // peor que una puerta cerrada.
+//
+// clinica-2 · y va DELANTE del test del paciente a propósito, no sólo del
+// TPV: el test se ve en móviles viejos y en la tablet de la sala, y una
+// pantalla descuadrada ahí es un paciente que no contesta.
 if (!flexGapSupported()) {
   renderUnsupportedBrowser(root);
 } else {
   createRoot(root).render(
     <StrictMode>
       <ErrorBoundary>
-        <App />
+        {tokenDelTest ? (
+          <ValoracionPublica token={tokenDelTest} />
+        ) : (
+          <App />
+        )}
       </ErrorBoundary>
     </StrictMode>,
   );

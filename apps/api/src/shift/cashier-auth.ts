@@ -81,7 +81,25 @@ export async function registerCashierAuthRoutes(
           // entrada, y la puerta de entrada no es donde se razona.
           role: { in: ["OWNER", "MANAGER", "CASHIER", "CLINICIAN"] },
         },
-        select: { id: true, role: true, pinHash: true, email: true, alias: true },
+        select: {
+          id: true,
+          role: true,
+          pinHash: true,
+          email: true,
+          alias: true,
+          // clinica-2 · LA MARCA sanitaria, no el rol. La pantalla del TPV
+          // la necesita para decidir si OFRECE la valoración de un
+          // paciente: el rol no sirve, porque una cajera-sanitaria y una
+          // propietaria sanitaria llevan `CASHIER` y `OWNER`.
+          //
+          // No es una puerta —lo clínico lo gatea la API en cada ruta— sino
+          // lo que evita pintarle a la recepcionista un botón que siempre
+          // le va a fallar Y que le dejaría una línea DENIED en el registro
+          // de accesos por cada toque de curiosidad. Esa es exactamente la
+          // clase de ruido que clinica-1 decidió no meter en el registro
+          // (§11.1 de su done).
+          isClinician: true,
+        },
       });
       if (!user || !user.pinHash) {
         const state = await registerFailure(rlKey);
@@ -135,6 +153,7 @@ export async function registerCashierAuthRoutes(
           email: user.email,
           alias: user.alias,
           role: user.role,
+          isClinician: user.isClinician,
         },
         shiftState,
       });
