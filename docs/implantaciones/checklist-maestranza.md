@@ -162,7 +162,7 @@ Hasta entonces, La Maestranza está «validada en prueba», y se dice así.
 Los puntos 1 y 2 son del render del ticket, no de esta cuenta. Probablemente salen igual en todos
 los comercios. Se miran antes de la visita.
 
-## Hecho el 06-10 · cuenta activada y lista para el miércoles 08-10
+## Hecho el 06-10 · cuenta activada y lista para el miércoles 07-10 (corregido: decía 08-10)
 
 - **Activada.** El propietario es `lamaestranza@mipiacetpv.com` (alias del buzón `no-reply@` en
   Hostinger, creado el 06-10), con el nombre de Salomé Éguez. La contraseña temporal y el PIN de
@@ -185,3 +185,15 @@ los comercios. Se miran antes de la visita.
 4. Dar de alta a los camareros (panel → Cajeros) y renombrar la tienda a «Bar La Maestranza».
 5. Abrir turno, cobrar en mesa y en barra, y hacer arqueo. La primera venta real cierra el
    criterio de «desplegado».
+
+## 06-10 tarde · la cuenta 81f2177b NO es la que se entrega
+
+- La auditoría de usabilidad del AP13 (`docs/qa/2026-10-06-auditoria-ap13.md`) cobró sobre la
+  cuenta ya activada: facturas C1 #000002 (2,60 €) y #000003 (6,90 €), turno cerrado y reabierto.
+  `fiscal_records` es append-only por trigger: no se borran. Decisión de Matías: **esta noche se
+  monta una cuenta nueva desde cero** y la de ensayo se deja apartada. Plan completo:
+  `docs/implantaciones/maestranza/reset-noche-2026-10-06.md`.
+- Mesas M4 (55 €) y M6 (4,10 €) vaciadas sin cobrar. Zona horaria del D8 puesta en
+  Europe/Madrid (la automática le ponía Asia/Shanghai: sin SIM no sabe dónde está).
+- **Regla nueva de implantación: después de activar, nadie prueba en la cuenta.** Para probar
+  está «Probar TPV», que no factura.
