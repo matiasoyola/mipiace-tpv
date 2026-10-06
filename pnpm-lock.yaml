@@ -184,6 +184,9 @@ importers:
 
   apps/e2e-ui:
     devDependencies:
+      '@mipiacetpv/clinica-sesion':
+        specifier: workspace:*
+        version: link:../../packages/clinica-sesion
       '@mipiacetpv/clinica-valoracion':
         specifier: workspace:*
         version: link:../../packages/clinica-valoracion
@@ -233,6 +236,9 @@ importers:
 
   apps/tpv-web:
     dependencies:
+      '@mipiacetpv/clinica-sesion':
+        specifier: workspace:*
+        version: link:../../packages/clinica-sesion
       '@mipiacetpv/clinica-valoracion':
         specifier: workspace:*
         version: link:../../packages/clinica-valoracion
