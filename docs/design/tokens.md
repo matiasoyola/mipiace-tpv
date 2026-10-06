@@ -248,9 +248,14 @@ más, un catálogo a medio fotografiar dejaría la rejilla con filas rotas.
   billing (amber-50 + amber-300/60).
 - Layout interno: ID arriba izquierda, capacidad arriba derecha, info
   (tiempo, comensales, camarero, total) abajo.
-- Por debajo de `sm` la sala va a una columna y la tarjeta ocupa el ancho
-  entero. Sigue midiendo lo mismo que sus vecinas: lo que cambia es
-  cuánto es "lo mismo".
+- Por debajo de `sm` la rejilla de cada zona son **dos columnas**
+  (`ROOM_GRID_CLASS`) y la tarjeta ocupa el ancho de su celda: **153 ×
+  118** a 390 px. Sigue midiendo lo mismo que sus vecinas en todas las
+  zonas; lo que cambia con la pantalla es cuánto vale ese "lo mismo". El
+  alto no cambia nunca: una mesa no es más baja en un móvil.
+  Con una sola columna la tarjeta subía a 320 px y el mapa de 16 mesas a
+  2.614 px de largo; con dos son 1.481 y se ve el doble de sala por
+  pantallazo. Tres columnas dejarían la tarjeta en 98 px.
 
 De dónde sale el 168: es el mayor ancho con el que la sala del AP13
 (6 Salón + 6 Terraza + 4 Barra) entra entera **sin desplazar** a

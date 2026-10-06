@@ -28,7 +28,7 @@ Sirope (3 Salón + 1 Terraza). Capturas y rects completos en
 | Filtrada «Salón» · 1443 | la misma mesa | 668 × 118 | 168 × 118 |
 | Filtrada «Terraza» · 1443 | la misma mesa | 668 × 118 | 168 × 118 |
 | Filtrada «Barra» · 1443 | la misma mesa | 84 × 84 | 168 × 118 |
-| Handheld 390 × 844 | Salón / Barra | 153 × 118 / 84 × 84 | 320 × 118 en las dos |
+| Handheld 390 × 844 | Salón / Barra | 153 × 118 / **84 × 84** | **153 × 118** en las dos |
 
 La mesa que peor salía parada era la de barra: **7.056 px² contra 59.944** de una de Salón, y
 además sin PAX, sin minutos, sin cajero y sin botón de cobro. Ahora toda mesa son **19.824 px²**.
@@ -98,6 +98,26 @@ Resultado en La Maestranza: tres bandas (SALÓN 1116, TERRAZA 1116, BARRA 752), 
 546 px en total. Las bandas tienen anchos distintos **a propósito**: una zona de 4 mesas no ocupa
 lo mismo que una de 6.
 
+### Handheld: dos columnas, y por qué son una excepción razonable
+
+Por debajo de `sm` la rejilla **sí** fija columnas: `grid grid-cols-2`, con la tarjeta a `w-full`
+de su celda. No es una recaída en el bug —el bug era fijar DOS columnas a cualquier ancho, de 300
+a 1050 px—: a 390 px no hay ancho que repartir, y la pregunta deja de ser "cuántas caben" para ser
+"cuántas quiero". La respuesta son dos:
+
+| A 390 × 844 | Una columna | **Dos columnas** |
+|---|---|---|
+| Tarjeta | 320 × 118 | **153 × 118** |
+| Largo del mapa (16 mesas) | 2.614 px | **1.481 px** |
+| Sala por pantallazo | ~2 mesas y media | **~5 mesas** |
+
+153 × 118 sigue muy por encima del mínimo táctil de 64 de `tokens.md`, y por encima de los 150 px
+pedidos — **no hizo falta recortar el padding del marco**. Tres columnas sí lo habrían exigido: a
+390 px darían 98 px de tarjeta, y hay un test que lo deja escrito.
+
+La clave es que el `grid-cols-2` lleva siempre su `sm:flex sm:flex-wrap` detrás. Las dos mitades
+de `ROOM_GRID_CLASS` se comprueban por separado, y cada una tiene su sabotaje.
+
 ## 3 · Una vista, no dos
 
 La vista filtrada por zona metía Salón, Terraza y Reservados en un único `RoomGrid` de dos
@@ -113,9 +133,9 @@ de una mesa de Terraza, una séptima parte de una de Salón, y sin PAX, sin minu
 **sin el botón «Cobrar X €»** que sí tenían las demás. La zona de más rotación de un bar era la que
 peor se veía y la única desde la que no se podía cobrar.
 
-Ahora la BARRA pinta la misma `TableCard` que el resto de la sala. La identidad visual de la zona
-—el mostrador dibujado, que es lo que el prompt deja conservar— sigue ahí encima de las mesas.
-`BarStool` desaparece.
+Ahora la BARRA pinta la misma `TableCard` que el resto de la sala, con la misma `RoomGrid` — y por
+tanto también en dos columnas en handheld. La identidad visual de la zona —el mostrador dibujado,
+que es lo que el prompt deja conservar— sigue ahí encima de las mesas. `BarStool` desaparece.
 
 ---
 
@@ -128,8 +148,10 @@ suite de jsdom (estructura) y el comprobador de rects del bucle visual (navegado
 |---|---|---|
 | Volver a `lg:grid-cols-[minmax(0,1fr)_300px]` | `table-map-tamano-unico` › «el lienzo no reserva una columna fija de 300 px para Terraza» | `AssertionError: expected [ <div …(1)>…(4)</div> ] to have a length of +0 but got 1` |
 | ” | rects › sin desplazar | `× [1443x812] la sala no cabe: la página mide 1272 px sobre 812 visibles`<br>`× [1280x800] la sala no cabe: la página mide 1272 px sobre 800 visibles` |
-| Volver `RoomGrid` a `grid-cols-2` fijo | `table-map-tamano-unico` › «ninguna zona se pinta con dos columnas fijas» | `AssertionError: expected [ <div …(1)>…(4)</div>, …(3) ] to have a length of +0 but got 4` |
+| Volver `RoomGrid` a `grid-cols-2` fijo **a todos los anchos** (quitarle el `sm:flex sm:flex-wrap`) | `table-map-tamano-unico` › «desde sm las columnas salen del ancho, no de un grid-cols-N» | `AssertionError: expected [ 'grid', 'grid-cols-2', 'gap-3.5' ] to include 'sm:flex'` |
 | ” | rects › más de dos columnas | `× [1443x812] la zona de Salón pinta 2 columnas con 6 mesas (se esperaban más de 2)`<br>`× [1280x800] la zona de Salón pinta 2 columnas con 6 mesas (se esperaban más de 2)` |
+| Devolver el handheld a UNA columna: `w-full` sin rejilla (quitarle el `grid grid-cols-2`) | `table-map-tamano-unico` › «en handheld la sala va a DOS columnas, no a una» | `AssertionError: expected [ Array(5) ] to include 'grid'` |
+| ” | rects › dos columnas y largo del mapa en handheld | `× [390x844] la zona de Salón pinta 1 columna(s) en handheld (se esperaban 2)`<br>`× [390x844] el mapa de handheld mide 2614 px de largo (con dos columnas no debería pasar de 1700)` |
 | Volver los taburetes a 84 × 84 | `table-map-tamano-unico` › «la barra ya no pinta círculos de 84 px: mide como una mesa» | `AssertionError: expected '<div class="min-h-screen bg-mipiace-s…' not to contain 'w-[84px]'` |
 | ” | rects › área del taburete ≥ área de la mesa | `× [1443x812] la mesa de barra mide 84x84 = 7056 px² y la de salón 168x118 = 19824 px²`<br>`× [1443x812] las mesas NO miden lo mismo: 168x118 / 84x84 (… B1 84x84, B2 84x84, B3 84x84, B4 84x84)` |
 | Romper el tamaño compartido: Terraza con su propia clase (`!w-[124px]` en la tarjeta) | `table-map-tamano-unico` › «ninguna mesa lleva una medida ADEMÁS de la compartida» | `AssertionError: expected [ '!w-[124px]' ] to deeply equal []` |
@@ -159,17 +181,20 @@ real**. Lo que comprueba es:
 
 - que el tamaño sale de una constante compartida y que la clase y el número no se han separado;
 - que ninguna tarjeta lleva una medida propia además de la compartida;
-- que el lienzo no contiene la columna de 300 px ni ningún `grid-cols-2`;
+- que el lienzo no contiene la columna de 300 px, y que ninguna rejilla fija columnas de `sm` para
+  arriba (el `grid-cols-2` de handheld lleva siempre su `sm:flex sm:flex-wrap` detrás);
+- que la rejilla de handheld son dos columnas y no una;
 - que la barra no contiene `w-[84px]` / `h-[84px]`;
-- la aritmética (`roomColumnsFor`, `zoneOuterWidth`, `roomCanvasHeight`, `roomFitsWithoutScroll`)
-  alimentada por las constantes que el componente pinta.
+- la aritmética (`roomColumnsFor`, `zoneOuterWidth`, `roomCanvasHeight`, `roomFitsWithoutScroll`,
+  `handheldCardWidth`) alimentada por las constantes que el componente pinta.
 
 Queda **fuera de la suite** y sólo lo ve el bucle visual:
 
 1. Que el navegador reparta las zonas como dice `roomCanvasHeight` (la regla de corte de flexbox
    está *reproducida* en una función pura, no leída del navegador).
 2. Que dos mesas de zonas distintas acaben con el mismo rect en pantalla.
-3. Que la sala entre sin desplazar en un viewport concreto.
+3. Que la sala entre sin desplazar en un viewport concreto, y cuánto mide de largo el mapa de
+   handheld.
 4. Un override de tamaño colado en un envoltorio con variantes arbitrarias de Tailwind
    (`[&>*]:!w-[…]`), que jsdom no puede resolver porque es CSS.
 5. Nada de esto corre en CI: el comprobador de rects vive en el scratchpad de la sesión, no en el
@@ -193,9 +218,10 @@ existe para un camarero real y falsearía el reparto vertical.
 - **Medidas** en `antes-medidas.json` / `despues-medidas.json`: rect de cada mesa, rect de cada
   zona, rect del lienzo y `scrollHeight` / `clientHeight` del documento.
 
-Los cuatro criterios se comprueban a máquina (`comprobar.mjs`, en el scratchpad): mismo tamaño para
-toda mesa, más de dos columnas con 6 mesas, área de barra ≥ área de salón, y sala sin desplazar.
-En verde: `rects verdes: 4 comprobaciones x 2 tamaños`.
+Los criterios se comprueban a máquina (`comprobar.mjs`, en el scratchpad), en los tres tamaños:
+mismo tamaño para toda mesa, más de dos columnas con 6 mesas en el terminal, **dos columnas y
+≥ 150 px de tarjeta en handheld**, área de barra ≥ área de salón, sala sin desplazar en el
+terminal y mapa de handheld por debajo de 1.700 px. En verde: `rects verdes: 1443, 1280 y 390`.
 
 ---
 
@@ -219,8 +245,10 @@ En verde: `rects verdes: 4 comprobaciones x 2 tamaños`.
    razón de ser. Se borró, y con ella la segunda forma del mismo bug.
 6. **`ZONE_ORDER` fijo** (Salón → Terraza → Reservados → Barra) en vez del orden de llegada de la
    API. El mapa tiene que leerse igual todos los días.
-7. **En handheld, una columna literal.** El prompt dice que handheld sigue apilando en una columna;
-   antes eran dos columnas de 153 px. Ver «Efectos colaterales».
+7. **En handheld, dos columnas.** Primera versión del bloque: una columna literal, tarjetas de
+   320 px y un mapa de 2.614 px. Medido y corregido: `grid-cols-2` por debajo de `sm`, tarjeta de
+   153 × 118 y mapa de 1.481. Las zonas siguen apiladas una debajo de otra; lo que va a dos
+   columnas son las mesas dentro de cada marco. De `sm` para arriba no cambia nada.
 8. **`tokens.md` actualizado.** La ficha «Mesa card» decía `aspect 7/6, rounded-2xl` y llevaba
    obsoleta desde v1.9.3. El token manda: si una zona quisiera su propio tamaño, se discute ahí.
 
@@ -228,11 +256,9 @@ En verde: `rects verdes: 4 comprobaciones x 2 tamaños`.
 
 ## Efectos colaterales, declarados
 
-- **El mapa en handheld es más largo que antes.** A 390 × 844, La Maestranza pasa de 1488 px de
-  página a **2614**: una mesa por fila en vez de dos de 153 px. Es lo que pide «handheld sigue
-  apilando en una columna», y a cambio la mesa del móvil mide 320 × 118 en vez de 153 × 118 (y la
-  de barra, 320 × 118 en vez de 84 × 84). Si en un piloto con teléfono eso molesta, el arreglo es
-  una línea en `TABLE_CARD_SIZE_CLASS` — pero es una decisión de producto, no de este bloque.
+- **El mapa en handheld queda prácticamente igual de largo que antes**: 1.488 px → **1.481**. Lo
+  que cambia es que ahora la mesa de barra mide 153 × 118 como las demás, en vez de 84 × 84, y que
+  no hay dos tamaños en la misma pantalla.
 - **La barra ofrece cobro directo.** No es un cambio de flujo de dinero: es el mismo botón, el
   mismo `GET /tickets/:id` y el mismo `CheckoutOverlay` que ya tenían las demás mesas. Simplemente
   dejó de haber mesas de segunda.
@@ -271,18 +297,25 @@ En verde: `rects verdes: 4 comprobaciones x 2 tamaños`.
 
 Nuevos:
 
-- `apps/tpv-web/test/room-grid.test.ts` (12) — la clase y las constantes dicen lo mismo; mínimo
-  táctil; área de barra ≥ área de mesa; más de dos columnas con 6 mesas a 1443 y a 1280; la zona
-  pide el ancho de sus mesas y no 300 px; La Maestranza y Sirope caben en los dos tamaños; con la
-  tarjeta de 508 px **no** cabían; alto del lienzo = 546; una sala de 20 mesas pasa a varias filas.
-- `apps/tpv-web/test/table-map-tamano-unico.test.tsx` (7) — las nueve mesas del lienzo llevan la
+- `apps/tpv-web/test/room-grid.test.ts` (15) — la clase y las constantes dicen lo mismo; mínimo
+  táctil; área de barra ≥ área de mesa; **handheld: dos columnas, 153 px de tarjeta a 390, 320 con
+  una sola columna, y tres columnas bajarían de lo utilizable**; más de dos columnas con 6 mesas a
+  1443 y a 1280; la zona pide el ancho de sus mesas y no 300 px; La Maestranza y Sirope caben en
+  los dos tamaños; con la tarjeta de 508 px **no** cabían; alto del lienzo = 546; una sala de 20
+  mesas pasa a varias filas.
+- `apps/tpv-web/test/table-map-tamano-unico.test.tsx` (8) — las nueve mesas del lienzo llevan la
   misma clase de tamaño; ninguna lleva una medida además de la compartida; la barra no pinta
-  círculos de 84 px; no hay columna de 300 px; no hay `grid-cols-2`; la vista filtrada usa el mismo
-  tamaño que «Todas»; filtrando por Barra se sigue viendo el mostrador.
+  círculos de 84 px; no hay columna de 300 px; **desde `sm` las columnas salen del ancho**; **en
+  handheld la sala va a dos columnas**; la vista filtrada usa el mismo tamaño que «Todas»;
+  filtrando por Barra se sigue viendo el mostrador.
+
+Los dos tests de rejilla comparan contra literales (`grid-cols-2`, `sm:flex-wrap`) y **no** contra
+`ROOM_GRID_CLASS`: codifican el requisito, no la constante. Comparados contra la constante,
+sabotearla pasaría el test.
 
 Tocado: `apps/tpv-web/test/table-map-visual.test.tsx` (el orden de la barra, ver arriba).
 
-Verde: `npx vitest run` desde la raíz → **285 ficheros, 3167 tests, 3 skipped**. (En un worktree
+Verde: `npx vitest run` desde la raíz → **285 ficheros, 3171 tests, 3 skipped**. (En un worktree
 recién creado hay que correr `pnpm db:generate` antes, o los 68 ficheros de `api` fallan con
 `Cannot find module '.prisma/client/default'` y parece que el bloque ha roto el backend.)
 
@@ -310,8 +343,8 @@ recién creado hay que correr `pnpm db:generate` antes, o los 68 ficheros de `ap
 | La tarjeta sigue enseñando lo de hoy sin recortar el importe | ✅ nombre, PAX, minutos, cajero, importe y estados; el importe lleva `shrink-0` + `whitespace-nowrap` |
 | La Maestranza y Sirope sin scroll a 1443 × 812 y 1280 × 800 | ✅ 812/812 y 800/800 (antes 842/812 y 842/800) |
 | La Barra no queda la última fuera de pantalla | ✅ empieza en y = 560 y termina en 758 de 812 (antes: 650 → 814) |
-| Handheld sigue apilando en una columna | ✅ a 390, zonas apiladas y una mesa por fila |
-| Escala táctil y radios de `tokens.md`; tarjeta ≥ 64 × 64 | ✅ 168 × 118, `rounded-[18px]` |
+| Handheld: zonas apiladas, mesas en dos columnas | ✅ a 390, tarjeta 153 × 118 en las cuatro zonas; mapa de 1.481 px |
+| Escala táctil y radios de `tokens.md`; tarjeta ≥ 64 × 64 | ✅ 168 × 118 en el terminal, 153 × 118 en handheld, `rounded-[18px]` |
 | Sin cambios en datos, endpoints, estados, agrupación ni bloqueo | ✅ |
 | La cabecera de sala sin tocar (la usa v1.22) | ✅ |
 | Medidas y tabla de sabotajes en el `-done` | ✅ |
