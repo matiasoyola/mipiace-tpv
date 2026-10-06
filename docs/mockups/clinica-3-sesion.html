@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F8F6F3">
+<title>Sesión y mapa del pie · mockup clinica-3</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --coral:#E97058;--coral-dark:#C75A45;--coral-soft:#FDEAE3;
+  --ink:#1F2937;--ink-soft:#374151;--stone:#F8F6F3;
+  --slate-100:#F1F5F9;--slate-200:#E2E8F0;--slate-300:#CBD5E1;--slate-400:#94A3B8;--slate-500:#64748B;
+  --amber-50:#FFFBEB;--amber-700:#B45309;--red-50:#FEF2F2;--red-700:#B91C1C;
+  --em-50:#ECFDF5;--em-700:#047857;
+  --mp-ease-out:cubic-bezier(0.23,1,0.32,1);
+}
+*{box-sizing:border-box}
+html{-webkit-tap-highlight-color:transparent}
+body{margin:0;font-family:'DM Sans',-apple-system,system-ui,sans-serif;-webkit-font-smoothing:antialiased;background:#EDEAE5;color:var(--ink)}
+button{font:inherit;cursor:pointer;border:0;touch-action:manipulation;user-select:none;transition:transform 120ms var(--mp-ease-out),background-color 150ms ease}
+button:active{transform:scale(.97)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.mockbar{position:sticky;top:0;z-index:20;background:var(--ink);color:#fff;padding:10px 16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:13px}
+.mockbar strong{font-weight:600;margin-right:8px}
+.mockbar button{background:#374151;color:#fff;border-radius:10px;padding:8px 12px;font-size:13px}
+.mockbar button.on{background:var(--coral)}
+.mockbar .note{opacity:.7;margin-left:auto}
+.stage{display:flex;justify-content:center;padding:24px 16px 40px}
+.device{background:var(--stone);border-radius:28px;border:10px solid #2a2f38;width:100%;max-width:1180px;overflow:hidden}
+.main{padding:22px 26px 28px}
+.head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}
+.name{font-size:23px;font-weight:600;letter-spacing:-0.01em;margin:0}
+.meta{color:var(--slate-500);font-size:13.5px;margin-top:4px}
+.pill{display:inline-flex;border-radius:12px;padding:6px 12px;font-size:12.5px;font-weight:500;background:var(--coral-soft);color:var(--coral-dark)}
+.facts{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.fact{background:#fff;border:1px solid var(--slate-200);border-radius:12px;padding:6px 12px;font-size:14px;color:var(--ink)}
+.fact span{display:block;font-size:11px;color:var(--slate-500);letter-spacing:.04em}
+.alerts{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0 0;padding:14px 16px;background:#B91C1C;border-radius:16px;align-items:center;color:#fff}
+.alerts .lbl{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;margin-right:6px}
+.alerts .a{background:#fff;color:#991B1B;border-radius:12px;padding:8px 14px;font-size:16px;font-weight:600}
+.viewas{display:flex;gap:6px;margin-left:8px}
+.tabs{display:flex;gap:6px;margin:16px 0 0;background:#fff;border:1px solid var(--slate-200);border-radius:16px;padding:5px;width:max-content}
+.tabs button{height:44px;padding:0 18px;border-radius:12px;background:transparent;color:var(--slate-500);font-weight:500;font-size:14.5px}
+.tabs button.on{background:var(--coral-soft);color:var(--coral-dark)}
+.grid{display:grid;grid-template-columns:560px 1fr;gap:16px;margin-top:16px}
+.card{background:#fff;border:1px solid var(--slate-200);border-radius:24px;padding:18px 22px}
+.card h2{font-size:16.5px;font-weight:600;margin:0}
+.card .sub{font-size:13px;color:var(--slate-500);margin:3px 0 12px}
+.ghost{background:var(--stone);color:var(--ink);font-weight:500;height:48px;padding:0 16px;border-radius:14px;font-size:14px}
+.repeat{width:100%;height:56px;background:var(--coral-soft);color:var(--coral-dark);font-weight:600;border-radius:16px;font-size:15px;margin-bottom:14px}
+/* mapa */
+.feet{display:flex;flex-wrap:wrap;justify-content:center;gap:10px}
+.foot{display:flex;flex-direction:column;align-items:center;font-size:12px;color:var(--slate-500)}
+svg .outline{fill:var(--stone);stroke:var(--slate-300);stroke-width:2}
+svg .z{fill:#fff;stroke:var(--slate-300);stroke-width:1.5;cursor:pointer;transition:fill 150ms ease}
+svg .z.mark{fill:var(--coral);stroke:var(--coral-dark)}
+svg .z.prev{fill:var(--coral-soft);stroke:var(--coral)}
+svg .z.sel{stroke:var(--ink);stroke-width:3}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--slate-500);margin-top:10px;justify-content:center}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:6px;vertical-align:-1px;margin-right:5px}
+.zonepanel{margin-top:12px;background:var(--stone);border-radius:16px;padding:12px}
+.zonepanel .t{font-size:13.5px;font-weight:500;margin-bottom:8px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{min-height:44px;padding:0 14px;border-radius:14px;background:#fff;border:1.5px solid var(--slate-200);font-size:14px;color:var(--ink)}
+.chip.on{background:var(--coral);border-color:var(--coral);color:#fff;font-weight:500}
+.chip.soft.on{background:var(--coral-soft);color:var(--coral-dark);border-color:var(--coral)}
+.marks{margin-top:10px;font-size:13px;line-height:1.7}
+.marks b{font-weight:500}
+.sect{margin-top:16px}
+.sect:first-child{margin-top:0}
+.label{font-size:13px;font-weight:500;color:var(--ink-soft);margin-bottom:8px}
+.eva{display:grid;grid-template-columns:repeat(11,1fr);gap:4px}
+.eva button{height:52px;border-radius:12px;background:var(--stone);font-weight:600;font-size:16px;color:var(--ink-soft)}
+.eva button.on{background:var(--coral);color:#fff}
+.eva-ends{display:flex;justify-content:space-between;font-size:12px;color:var(--slate-500);margin-top:4px}
+.seg{display:flex;gap:8px}
+.seg button{flex:1;height:52px;border-radius:14px;background:var(--stone);font-weight:500;color:var(--ink)}
+.seg button.on{background:var(--ink);color:#fff}
+.spark{display:flex;align-items:flex-end;gap:10px;height:90px;padding:8px 4px 0;border-bottom:1px solid var(--slate-200)}
+.spark .b{flex:1;border-radius:8px 8px 0 0;background:var(--coral-soft);position:relative}
+.spark .b.now{background:var(--coral)}
+.spark .b span{position:absolute;top:-18px;left:0;right:0;text-align:center;font-size:12px;font-weight:600;color:var(--ink-soft)}
+.spark-l{display:flex;gap:10px;font-size:11.5px;color:var(--slate-500);padding:4px 4px 0}
+.spark-l span{flex:1;text-align:center}
+.foot-cta{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:16px;background:#fff;border:1px solid var(--slate-200);border-radius:24px;padding:16px 22px;flex-wrap:wrap}
+.foot-cta .sum{font-size:14px;color:var(--ink-soft)}
+.foot-cta .sum b{font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
+.cta{background:var(--coral);color:#fff;font-weight:500;font-size:16px;height:64px;padding:0 28px;border-radius:18px}
+details{margin-top:12px}
+summary{cursor:pointer;font-size:13.5px;color:var(--slate-500);min-height:44px;display:flex;align-items:center}
+textarea{width:100%;min-height:80px;border-radius:14px;border:1px solid var(--slate-200);background:var(--stone);padding:12px;font:inherit;font-size:16px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.pulse{display:grid;grid-template-columns:110px 1fr;gap:8px;align-items:center;margin-bottom:8px;font-size:14px}
+.done{padding:40px 26px;max-width:760px;margin:0 auto}
+.done h1{font-size:26px;font-weight:600;letter-spacing:-0.01em;margin:0 0 6px}
+.ticket{background:#fff;border:1px solid var(--slate-200);border-radius:24px;padding:18px 22px;margin-top:18px}
+.tl{display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--slate-100);font-size:14.5px}
+.tl:first-of-type{border-top:0}
+.tl .n{font-variant-numeric:tabular-nums}
+.cta-row{display:flex;gap:12px}
+.tl.tot{font-weight:600;font-size:16px;border-top:1px solid var(--slate-200);margin-top:4px}
+.small{font-size:12.5px;color:var(--slate-500)}
+.okb{display:flex;gap:10px;align-items:center;background:var(--em-50);color:var(--em-700);border-radius:16px;padding:12px 14px;font-size:14px;margin-top:14px}
+.notes{max-width:1180px;margin:0 auto 40px;padding:0 16px;font-size:13.5px;color:var(--ink-soft);line-height:1.6}
+@media (max-width:1100px){.grid,.row2{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){*{transition-property:opacity,color,background-color,border-color!important}button:active{transform:none}}
+</style>
+</head>
+<body>
+<div class="mockbar">
+  <strong>Mockup · clinica-3 sesión y mapa del pie</strong>
+  <button id="t-ses" class="on">Sesión de hoy</button>
+  <button id="t-exp">Exploración</button>
+  <button id="t-fin">Al cerrar</button>
+  <span class="viewas"><button id="v-own" class="on">Ver como: dueña sanitaria</button><button id="v-cli">Ver como: sanitario sin caja</button></span>
+  <span class="note">Datos de ejemplo inventados</span>
+</div>
+<div class="stage"><div class="device"><div id="screen"></div></div></div>
+<div class="notes">Tercera visita de Carmen. Prueba «Igual que la última vez», toca una zona del pie, marca el dolor y pulsa «Cerrar sesión y cobrar».</div>
+
+<script>
+const PRO="Lucía Martín", COL="Col. 45-0312";
+const ZONES={ // id: [cx,cy,rx,ry,label] · viewBox 240x400; ningún objetivo por debajo de 44 px
+  h:[42,48,26,28,"Dedo gordo"], d2:[94,34,22,22,"2.º dedo"], d3:[140,40,22,22,"3.er dedo"], d4:[182,56,22,22,"4.º dedo"], d5:[216,82,22,22,"5.º dedo"],
+  m1:[62,138,36,28,"Bajo el dedo gordo"], m2:[124,132,26,28,"Bajo el 2.º dedo"], m35:[184,146,34,28,"Bajo 3.º–5.º dedo"],
+  arco:[88,232,34,42,"Arco"], lat:[176,232,28,42,"Borde exterior"], talon:[124,336,52,42,"Talón"]
+};
+const LESIONES=["Callo (heloma)","Dureza","Uña encarnada","Hongos en la uña","Verruga","Herida / úlcera","Juanete / deformidad"];
+const TRAT=[{n:"Quiropodia",p:30},{n:"Corte y fresado de uñas",p:0,inc:true},{n:"Quitar callo",p:0,inc:true},{n:"Tratamiento de verruga",p:25},{n:"Cura",p:15},{n:"Descarga / vendaje",p:12},{n:"Molde para plantillas",p:40}];
+const CONSEJOS=["Calzado ancho","Hidratar cada día","Revisar los pies a diario","Cura en casa","No cortar callos en casa"];
+
+const prevMarks={"L:h":{les:"Uña encarnada",g:"Moderada"},"R:m1":{les:"Dureza",g:"Leve"},"R:talon":{les:"Dureza",g:"Leve"}};
+const prevTrat=["Quiropodia","Corte y fresado de uñas"];
+const prevCons=["Calzado ancho","Hidratar cada día"];
+const evaHist=[{d:"7 sep",v:7},{d:"21 sep",v:5}];
+
+let verComo="own", tab="ses", marks={}, sel=null, trat=new Set(), cons=new Set(), eva=null, evo=null, prox=null;
+let pulsos={L:"Presente",R:"Presente"}, mono={L:new Set(),R:new Set()}, tipo="Normal";
+
+function footSVG(side){
+  const flip = side==="L" ? "translate(240,0) scale(-1,1)" : "";
+  const z = Object.entries(ZONES).map(([id,[cx,cy,rx,ry]])=>{
+    const k=side+":"+id, cls=["z"]; if(marks[k]) cls.push("mark"); else if(prevMarks[k]&&tab==="ses") cls.push("prev"); if(sel===k) cls.push("sel");
+    const monoOn = tab==="exp" && mono[side].has(id);
+    return `<ellipse class="${cls.join(" ")}${monoOn?' mark':''}" data-z="${k}" cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}"/>`;
+  }).join("");
+  return `<svg width="250" height="417" viewBox="0 0 240 400"><g transform="${flip}">
+    <path class="outline" d="M28 104 Q120 82 236 112 Q246 190 222 270 Q206 372 140 390 Q78 398 58 352 Q44 306 52 262 Q58 214 30 168 Q14 128 28 104Z"/>${z}</g></svg>`;
+}
+function zoneName(k){ const [s,id]=k.split(":"); return (s==="L"?"Pie izq. · ":"Pie der. · ")+ZONES[id][4]; }
+function money(n){ return n.toFixed(2).replace(".",",")+" €"; }
+
+function render(){
+  ["ses","exp","fin"].forEach(t=>document.getElementById("t-"+t).classList.toggle("on",tab===t));
+  document.getElementById("v-own").classList.toggle("on",verComo==="own"); document.getElementById("v-cli").classList.toggle("on",verComo==="cli");
+  const s=document.getElementById("screen");
+  s.innerHTML = tab==="fin" ? fin() : `<div class="main">${head()}${tab==="ses"?sesion():explor()}</div>`;
+}
+function head(){
+  return `<div class="head"><div><h1 class="name">Carmen Rodríguez López</h1>
+    <div class="facts">
+      <div class="fact"><span>Edad</span>78 años</div>
+      <div class="fact"><span>Cita de hoy</span>10:30 · Quiropodia</div>
+      <div class="fact"><span>Visita</span>3.ª · la anterior, 21 sep</div>
+      <div class="fact"><span>Atiende</span>${PRO}</div>
+      <div class="fact"><span>Teléfono</span>600 123 456</div>
+    </div></div><span class="pill">Sesión en curso</span></div>
+    <div class="alerts" role="alert"><span class="lbl"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>Cuidado</span><span class="a">Diabética</span><span class="a">Anticoagulada</span><span class="a">Alérgica al látex</span></div>
+    <div class="tabs"><button data-tab="ses" class="${tab==='ses'?'on':''}">Sesión de hoy</button><button data-tab="exp" class="${tab==='exp'?'on':''}">Exploración</button></div>`;
+}
+function mapCard(title,sub){
+  const list = Object.entries(marks).map(([k,v])=>`<div>· <b>${zoneName(k)}</b>: ${v.les}${v.g?` (${v.g.toLowerCase()})`:""}</div>`).join("");
+  let panel="";
+  if(sel && tab==="ses"){
+    const m=marks[sel]||{};
+    panel=`<div class="zonepanel"><div class="t">${zoneName(sel)}</div>
+      <div class="chips">${LESIONES.map(l=>`<button class="chip soft ${m.les===l?'on':''}" data-les="${l}">${l}</button>`).join("")}</div>
+      <div class="label" style="margin-top:10px">Gravedad${m.les?"":" · elige antes la lesión"}</div>
+      <div class="chips">${["Leve","Moderada","Severa"].map(g=>`<button class="chip soft ${m.g===g?'on':''}" data-g="${g}" ${m.les?'':'disabled'}>${g}</button>`).join("")}
+      ${m.les?`<button class="chip" data-clear="1">Quitar</button>`:""}</div></div>`;
+  }
+  return `<div class="card"><h2>${title}</h2><div class="sub">${sub}</div>
+    <div class="feet"><div class="foot">${footSVG("L")}Izquierdo</div><div class="foot">${footSVG("R")}Derecho</div></div>
+    ${tab==="ses"?`<div class="legend"><span><i style="background:var(--coral-soft);border:1px solid var(--coral)"></i>Visita anterior</span><span><i style="background:var(--coral)"></i>Hoy</span></div>`:
+      `<div class="legend"><span><i style="background:var(--coral)"></i>No siente el monofilamento</span></div>`}
+    ${panel}${list&&tab==="ses"?`<div class="marks">${list}</div>`:""}</div>`;
+}
+function sesion(){
+  const total=[...trat].reduce((a,n)=>a+(TRAT.find(t=>t.n===n).p),0);
+  return `<div class="grid">
+    <div>${mapCard("Mapa del pie","Toca la zona y elige qué tiene.")}
+      <div class="card" style="margin-top:16px"><h2>Dolor, sesión a sesión</h2><div class="sub">Lo que marca el paciente al empezar.</div>
+        <div class="spark">${[...evaHist,{d:"Hoy",v:eva}].map((e,i,a)=>`<div class="b ${i===a.length-1?'now':''}" style="height:${e.v==null?2:Math.max(6,e.v*8)}px"><span>${e.v??"–"}</span></div>`).join("")}</div>
+        <div class="spark-l">${[...evaHist,{d:"Hoy"}].map(e=>`<span>${e.d}</span>`).join("")}</div></div>
+    </div>
+    <div class="card">
+      <button class="repeat" data-a="repeat">↺ Igual que la última vez</button>
+      <div class="sect"><div class="label">Tratamientos de hoy</div>
+        <div class="chips">${TRAT.map(t=>`<button class="chip ${trat.has(t.n)?'on':''}" data-t="${t.n}">${t.n}</button>`).join("")}</div></div>
+      <div class="sect"><div class="label">Dolor hoy (0 = nada · 10 = el peor)</div>
+        <div class="eva">${Array.from({length:11},(_,i)=>`<button class="${eva===i?'on':''}" data-eva="${i}">${i}</button>`).join("")}</div></div>
+      <div class="sect"><div class="label">Desde la última visita</div>
+        <div class="seg">${["Mejor","Igual","Peor"].map(e=>`<button class="${evo===e?'on':''}" data-evo="${e}">${e}</button>`).join("")}</div></div>
+      <div class="sect"><div class="label">Consejos para casa</div>
+        <div class="chips">${CONSEJOS.map(c=>`<button class="chip soft ${cons.has(c)?'on':''}" data-c="${c}">${c}</button>`).join("")}</div></div>
+      <div class="sect"><div class="label">Próxima cita</div>
+        <div class="seg">${["2 semanas","4 semanas","8 semanas","Sin cita"].map(p=>`<button class="${prox===p?'on':''}" data-p="${p}">${p}</button>`).join("")}</div></div>
+      <details><summary>+ Añadir una nota (opcional)</summary><textarea placeholder="Solo si algo no cabe en los botones"></textarea></details>
+    </div></div>
+    <div class="foot-cta"><div class="sum">${trat.size?`${trat.size} ${trat.size===1?'tratamiento':'tratamientos'}${verComo==="own"?` · <b>${money(total)}</b> · exento de IVA`:""}`:"Marca al menos un tratamiento"}${eva==null?" · falta el dolor de hoy":""}</div>
+      <button class="cta" data-a="close" ${trat.size&&eva!=null?'':'disabled'}>${verComo==="own"?"Cerrar sesión y cobrar":"Cerrar sesión"}</button></div>`;
+}
+function explor(){
+  const pul=s=>`<div class="pulse"><span>Pie ${s==="L"?"izquierdo":"derecho"}</span><div class="seg">${["Presente","Débil","Ausente"].map(p=>`<button class="${pulsos[s]===p?'on':''}" data-pul="${s}:${p}">${p}</button>`).join("")}</div></div>`;
+  return `<div class="grid"><div>${mapCard("Sensibilidad (monofilamento)","Toca los puntos donde NO siente el filamento.")}</div>
+    <div class="card"><div class="sect"><div class="label">Pulso del pie</div>${pul("L")}${pul("R")}</div>
+      <div class="sect"><div class="label">Tipo de pie</div><div class="seg">${["Plano","Normal","Cavo"].map(t=>`<button class="${tipo===t?'on':''}" data-tipo="${t}">${t}</button>`).join("")}</div></div>
+      <div class="sect small">Se hace en la primera visita y cuando la podóloga lo vea necesario (en diabéticos, una vez al año). La siguiente exploración parte de esta.</div></div></div>`;
+}
+function fin(){
+  const lines=[...trat].map(n=>TRAT.find(t=>t.n===n));
+  const total=lines.reduce((a,t)=>a+t.p,0);
+  return `<div class="done"><h1>Sesión cerrada</h1><div class="small">Firmada por ${PRO} (${COL}) · hoy 10:52 · ya no se puede editar, solo añadir anotaciones.</div>
+    ${verComo==="own"?`<div class="ticket"><div class="label">Pasa a caja</div>
+      ${lines.map(t=>`<div class="tl"><span>${t.n}</span><span class="n">${t.inc?"incluido":money(t.p)}</span></div>`).join("")}
+      <div class="tl tot"><span>Total · exento de IVA</span><span class="n">${money(total)}</span></div>
+      <div class="cta-row" style="margin-top:12px"><button class="cta">Cobrar ahora</button></div>
+      <div class="small" style="margin-top:8px">La recepción lo ve en caja sin ver nada de la historia.</div></div>`
+    :`<div class="ticket"><div class="label">Enviada a recepción para cobrar</div>
+      ${lines.map(t=>`<div class="tl"><span>${t.n}</span><span class="n">✓</span></div>`).join("")}
+      <div class="small" style="margin-top:8px">Sin importes: el sanitario sin caja no ve precios ni cobra. La recepción la tiene ya en su lista de pendientes de cobro.</div></div>`}
+    ${prox&&prox!=="Sin cita"?`<div class="okb">Próxima cita propuesta: dentro de ${prox}. Recepción elige el hueco con ella al cobrar.</div>`:""}
+    ${cons.size?`<div class="okb" style="background:var(--stone);color:var(--ink)">Hoja de consejos lista para imprimir o enviar: ${[...cons].join(" · ").toLowerCase()}.</div>`:""}
+    <div style="margin-top:18px"><button class="ghost" data-a="again">Volver a la sesión (mockup)</button></div></div>`;
+}
+
+document.addEventListener("click",e=>{
+  const b=e.target.closest("button,ellipse"); if(!b||b.disabled) return;
+  if(b.id==="v-own"){verComo="own";} else if(b.id==="v-cli"){verComo="cli";}
+  else if(b.id==="t-ses"){tab="ses";} else if(b.id==="t-exp"){tab="exp";sel=null;} else if(b.id==="t-fin"){ if(!trat.size){trat=new Set(prevTrat);eva=eva??3;} tab="fin"; }
+  else if(b.dataset.tab){tab=b.dataset.tab;sel=null;}
+  else if(b.dataset.z){ const k=b.dataset.z; if(tab==="exp"){const [s,id]=k.split(":"); mono[s].has(id)?mono[s].delete(id):mono[s].add(id);} else sel=(sel===k?null:k); }
+  else if(b.dataset.les){ marks[sel]={...(marks[sel]||{}),les:b.dataset.les}; }
+  else if(b.dataset.g){ if(marks[sel]) marks[sel].g=b.dataset.g; }
+  else if(b.dataset.clear){ delete marks[sel]; }
+  else if(b.dataset.a==="repeat"){ trat=new Set([...prevTrat,...trat]); cons=new Set([...prevCons,...cons]); marks={...JSON.parse(JSON.stringify(prevMarks)),...marks}; }
+  else if(b.dataset.t){ const n=b.dataset.t; trat.has(n)?trat.delete(n):trat.add(n); }
+  else if(b.dataset.c){ const n=b.dataset.c; cons.has(n)?cons.delete(n):cons.add(n); }
+  else if(b.dataset.eva){ eva=+b.dataset.eva; }
+  else if(b.dataset.evo){ evo=b.dataset.evo; }
+  else if(b.dataset.p){ prox=b.dataset.p; }
+  else if(b.dataset.pul){ const [s,v]=b.dataset.pul.split(":"); pulsos[s]=v; }
+  else if(b.dataset.tipo){ tipo=b.dataset.tipo; }
+  else if(b.dataset.a==="close"){ tab="fin"; }
+  else if(b.dataset.a==="again"){ tab="ses"; }
+  else return;
+  render();
+});
+render();
+</script>
+</body>
+</html>
