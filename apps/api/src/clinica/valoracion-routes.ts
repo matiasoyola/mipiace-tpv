@@ -89,6 +89,39 @@ function pacienteNoExiste(reply: FastifyReply) {
   });
 }
 
+/**
+ * LA respuesta de la pantalla del sanitario, y la misma para las tres
+ * rutas que la pintan (verla, corregir, validar).
+ *
+ * Un solo sitio la arma porque las tres acaban en la MISMA pantalla:
+ * corregir cambia las alertas y puede desbloquear «Validar», y validar
+ * enciende el aviso verde con la autora y el «ya puedes registrar el
+ * primer tratamiento». Si cada ruta devolviera su propia forma, el front
+ * tendría tres maneras de leer lo mismo — y la primera vez que una se
+ * quedara sin un campo (pasó aquí mismo: `validar` no traía
+ * `primerTratamiento` y el aviso verde no podía pintarse) el fallo sería
+ * una pantalla a medias después de firmar.
+ */
+async function respuestaDeLaPantalla(input: {
+  tenantId: string;
+  clientId: string;
+}) {
+  const prisma = getPrisma();
+  const [vista, primerTratamiento] = await Promise.all([
+    vistaDeLaValoracion(prisma, input),
+    resolverPrimerTratamiento(prisma, input),
+  ]);
+  return {
+    ...vista,
+    primerTratamiento,
+    // Los textos de las tres casillas viajan con la respuesta en vez de
+    // estar escritos en la pantalla: son parte de lo que se confirma, y el
+    // done del bloque los cita. Si la pantalla los llevara, cambiarlos
+    // sería cambiar lo que alguien firmó sin que se note en ningún sitio.
+    textosConfirmacion: TEXTO_CONFIRMACION,
+  };
+}
+
 export async function registerValoracionRoutes(
   app: FastifyInstance,
 ): Promise<void> {
@@ -116,29 +149,8 @@ export async function registerValoracionRoutes(
         request,
         reply,
         { clientId, action: "READ" },
-        async (ctx) => {
-          const prisma = getPrisma();
-          const [vista, primerTratamiento] = await Promise.all([
-            vistaDeLaValoracion(prisma, {
-              tenantId: ctx.tenantId,
-              clientId,
-            }),
-            resolverPrimerTratamiento(prisma, {
-              tenantId: ctx.tenantId,
-              clientId,
-            }),
-          ]);
-          return {
-            ...vista,
-            primerTratamiento,
-            // Los textos de las tres casillas viajan con la respuesta en
-            // vez de estar escritos en la pantalla: son parte de lo que se
-            // confirma, y el done del bloque los cita. Si la pantalla los
-            // llevara, cambiarlos sería cambiar lo que alguien firmó sin
-            // que se note en ningún sitio.
-            textosConfirmacion: TEXTO_CONFIRMACION,
-          };
-        },
+        async (ctx) =>
+          respuestaDeLaPantalla({ tenantId: ctx.tenantId, clientId }),
       );
     },
   );
@@ -200,18 +212,15 @@ export async function registerValoracionRoutes(
               .code(409)
               .send({ error: r.motivo, code: r.motivo, message: r.mensaje });
           }
-          // Se devuelve la vista entera y no un `{ok:true}`: corregir
+          // Se devuelve la pantalla entera y no un `{ok:true}`: corregir
           // cambia las alertas y puede desbloquear «Validar», y la
           // pantalla tiene que repintarse con lo que diga el SERVIDOR. Con
           // un `{ok:true}` el front recalcularía por su cuenta y, el día
           // que las dos cuentas se separen, el botón se activaría para una
           // validación que la API va a rechazar.
-          return reply.code(201).send(
-            await vistaDeLaValoracion(prisma, {
-              tenantId: ctx.tenantId,
-              clientId,
-            }),
-          );
+          return reply
+            .code(201)
+            .send(await respuestaDeLaPantalla({ tenantId: ctx.tenantId, clientId }));
         },
       );
     },
@@ -284,12 +293,9 @@ export async function registerValoracionRoutes(
               .code(409)
               .send({ error: r.motivo, code: r.motivo, message: r.mensaje });
           }
-          return reply.code(200).send(
-            await vistaDeLaValoracion(prisma, {
-              tenantId: ctx.tenantId,
-              clientId,
-            }),
-          );
+          return reply
+            .code(200)
+            .send(await respuestaDeLaPantalla({ tenantId: ctx.tenantId, clientId }));
         },
       );
     },

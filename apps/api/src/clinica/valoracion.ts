@@ -188,6 +188,25 @@ export interface VistaValoracion {
   detalles: Record<string, string[]>;
   correcciones: Correccion[];
   alertas: Alertas;
+  /**
+   * ¿Está TODO LO DEMÁS listo para validar?
+   *
+   * Se calcula **dando las tres confirmaciones por marcadas**, y eso es el
+   * contrato: las confirmaciones las marca la pantalla en memoria y viajan
+   * con la validación (ver `validarValoracion`), así que el servidor no
+   * sabe —ni tiene por qué— cuáles ha tocado la podóloga ahora mismo.
+   *
+   * Lo que esto contesta es lo que el servidor SÍ sabe: si queda algún «No
+   * lo sé» sin resolver, si el paciente ha contestado, si ya está
+   * validada, si el cuestionario se puede leer. La pantalla hace el AND
+   * con sus tres casillas usando la MISMA función pura, y de ahí sale el
+   * botón desactivado con su motivo al lado del mockup.
+   *
+   * Calcularlo con las confirmaciones de la FILA sería inútil: antes de
+   * validar son `false` las tres, así que el motivo sería siempre «marca
+   * las tres confirmaciones» y taparía el «queda 1 respuesta por
+   * resolver», que es el que hay que leer primero.
+   */
   validable: Validable;
   /** Las anteriores, para que la pantalla pueda decir «ésta es la tercera
    *  valoración de este paciente». Sin respuestas: sólo cuándo y quién. */
@@ -306,7 +325,8 @@ export async function vistaDeLaValoracion(
     validable: puedeValidarse({
       cuestionario,
       estado: fila.status as EstadoValoracion,
-      confirmaciones,
+      // Las tres por marcadas: ver la nota del campo en `VistaValoracion`.
+      confirmaciones: { alergias: true, medicacion: true, alertas: true },
       ...estado,
     }),
     anteriores: anteriores.map((a) => ({
