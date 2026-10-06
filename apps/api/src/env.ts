@@ -84,6 +84,16 @@ export const EnvSchema = z.object({
   // API local; en prod, al dominio expuesto detrás del proxy.
   // B-Print fase 1.
   PUBLIC_TICKET_URL: z.string().url().default("http://localhost:3001"),
+  // clinica-2 · URL pública de la PWA del TPV. Se usa para construir el
+  // enlace del test de la valoración (`${PUBLIC_TPV_URL}/valoracion/<token>`),
+  // que es lo que el paciente abre desde su email.
+  //
+  // Apunta a la PWA y no a la API porque el test ES una pantalla: la misma
+  // que la tablet de la sala (un solo test, dos puertas). En producción,
+  // `https://mipiacetpv.com`; el `try_files` de Caddy ya devuelve el
+  // index.html de la PWA para esa ruta, así que no hace falta regla nueva.
+  // En dev, el puerto de Vite.
+  PUBLIC_TPV_URL: z.string().url().default("http://localhost:5174"),
 
   // Base URL de la API de Holded. Lo usan los clientes ApiKeyClient
   // creados desde tenants reales (cifrado por tenant).
