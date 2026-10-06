@@ -1,8 +1,8 @@
 # Bloque clinica-3 · done
 
 Rama `clinica-3`, worktree `~/Developer/Claude/Projects/mipiacetpv-clinica-3`, desde
-`origin/master` = `6e5361a` (el merge de `clinica-2`, PR #9) más el mockup y el prompt
-(`4e701c9`). Siete commits, 70 ficheros.
+`origin/master` = `4e701c9` (el merge de `clinica-2` en el PR #9, más el mockup y el prompt de
+este bloque). Nueve commits, 71 ficheros.
 
 **Este bloque construye lo que pasa en cada visita.** La valoración ya dice quién es el paciente;
 esto dice qué tiene en el pie, qué se le hizo, cuánto le duele y cuándo vuelve — y lo convierte en
@@ -343,6 +343,32 @@ quién contestó. Es esa garantía funcionando.
 accesos**, y entonces la petición se corta con un 500 `CLINICAL_ACCESS_LOG_FAILED` — que es
 exactamente lo que clinica-1 decidió que pasara.
 
+### Y una del CI, que es la más instructiva
+
+**10 · Un aserto mío no probaba lo que decía probar.**
+
+Para comprobar que la sesión no guarda el precio del tratamiento había escrito:
+
+```ts
+expect(JSON.stringify(cuerpo)).not.toContain("30");
+```
+
+«30» es el precio de la quiropodia… y también aparece dentro de cualquier uuid que lo lleve. En
+local pasó cuatro pasadas seguidas; en el CI falló con un `appointment_id` que empezaba por «30».
+
+**Lo grave no es el fallo rojo: es que el aserto era inútil en las dos direcciones.** Un cuerpo que
+SÍ llevara el precio habría pasado igual mientras ningún id contuviera el número, y un cuerpo
+correcto fallaba cuando sí. Era un test que se sentía como cobertura y no lo era — **la misma forma
+exacta del `toContain` del §10b de clinica-1**, dos bloques después y escrito por mí sabiéndolo.
+
+Ahora se comprueba la FORMA: el juego exacto de claves del cuerpo, y un recorrido recursivo que
+busca claves de dinero **con valor numérico**. Las dos mitades hacen trabajo — el nombre de la
+clave es lo único que sigue valiendo cuando alguien añade un campo, y el valor numérico es lo que
+distingue un importe de una bandera.
+
+La lección, otra vez y ahora con el recibo: **un aserto sobre el texto tiene que contar, no
+buscar.**
+
 ---
 
 ## 8 · Decisiones tomadas sin preguntar
@@ -505,11 +531,27 @@ c71c683 feat(clinica-3): los kind de la exploración y la sesión, y «una sesi�
 22ed7f1 feat(clinica-3): la sesión, el mapa del pie y los cobros pendientes en pantalla
 ccde34b test(clinica-3): el capítulo 12 del banco, y el viaje entero por la interfaz
 ab33a4f docs(clinica-3): el bucle visual contra el mockup, y cuatro fallos de píxeles
-<este>  docs(clinica-3): el done del bloque
+49167a8 docs(clinica-3): el done del bloque
+3035698 fix(clinica-3): el aserto del precio buscaba texto en vez de contar
+<este>  docs(clinica-3): el hallazgo del CI y el resultado de la CI
 ```
 
 ## 13 · La rama
 
-Pendiente de completar al pushear: se rellena con el nº de PR y el resultado de la CI.
+**Pusheada**, y el PR contra `master` es el
+[**#11**](https://github.com/matiasoyola/mipiace-tpv/pull/11).
 
-**Ni merge ni despliegue: eso lo hace Dirección.**
+**`master` no se movió** mientras el bloque estaba en vuelo: `origin/master` seguía en `4e701c9`
+al pushear, que es la base. Sin merge y sin conflictos.
+
+**CI verde** sobre `3035698`, los tres jobs:
+[run 37525491001](https://github.com/matiasoyola/mipiace-tpv/actions/runs/37525491001) —
+`ci: pass` (4m0s), `smoke: pass`, `e2e: pass` (1m19s). `publish` se salta, como toca fuera de
+master.
+
+La primera pasada ([run 37524246051](https://github.com/matiasoyola/mipiace-tpv/actions/runs/37524246051))
+salió con el `e2e` en rojo, y el fallo era **mío y de un aserto**, no del código: ver §7.10. El
+arreglo es `3035698`.
+
+**Ni merge ni despliegue: eso lo hace Dirección.** Y al desplegar no hay nada que acordarse de
+poner en el `.env`: este bloque no añade ninguna variable.
