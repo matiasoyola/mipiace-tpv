@@ -916,7 +916,10 @@ type FiscalProfile = {
   legalName?: string;
 };
 
-function AccountPage() {
+// bloque ticket-con-iva §C · exportada para que
+// `apps/admin/test/mi-cuenta-sin-holded.test.tsx` pueda pintarla. Sigue
+// montándose por su ruta igual que antes.
+export function AccountPage() {
   const navigate = useNavigate();
   const [me, setMe] = useState<MeResponse | null>(null);
   // Estado de "Probar conexión" + "Cambiar API Key".

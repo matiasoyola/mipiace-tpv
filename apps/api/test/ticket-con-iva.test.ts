@@ -593,17 +593,19 @@ describe("4 · el papel de un comercio con Holded", () => {
 
   it("SNAPSHOT · el papel entero, antes y después del bloque", () => {
     const t = papel(venta, { verifactu: false });
-    // Lo que cambia respecto de `master` (6e6f0df), línea a línea. El
-    // papel completo de los dos lados está pegado en
-    // `docs/blocks/ticket-con-iva-done.md`.
+    // Lo que cambia respecto de `master` (6e6f0df): CINCO renglones y ni
+    // uno más. Los dos papeles completos, generados de verdad sobre cada
+    // commit, están pegados en `docs/blocks/ticket-con-iva-done.md` §1.
     //
     // ANTES                              DESPUÉS
-    //   1 x 1,45           1,60            1 x 1,60           1,60
-    //   2 x 1,18           2,60            2 x 1,30           2,60
-    //   1 x 9,45          10,40            1 x 10,40         10,40
-    //   IVA 10% s/13,26    1,33            IVA 10% s/13,26    1,34
-    //   Subtotal          13,27            Subtotal          13,26
-    //   TOTAL             14,60            TOTAL             14,60
+    //   1 x 1,45 €         1,60 €          1 x 1,60 €         1,60 €
+    //   2 x 1,18 €         2,60 €          2 x 1,30 €         2,60 €
+    //   1 x 9,45 €        10,40 €          1 x 10,40 €       10,40 €
+    //   IVA 10% s/13,26 €  1,33 €          IVA 10% s/13,26 €  1,34 €
+    //   Subtotal          13,27 €          Subtotal          13,26 €
+    //
+    // El TOTAL, los pagos, la cabecera y el QR del ticket digital no se
+    // mueven — y eso es la mitad de lo que este test guarda.
     const cuerpo = t
       .split("\n")
       .map((l) => l.trim())
