@@ -31,6 +31,28 @@ import {
   type TratamientoDelCatalogo,
 } from "../src/index.js";
 
+/**
+ * Las rutas de todo lo que huela a dinero dentro de un objeto.
+ *
+ * Por NOMBRE DE CLAVE y exigiendo que el valor sea numérico: es lo único
+ * que sigue valiendo cuando alguien añade un campo, y lo que distingue un
+ * importe de una bandera.
+ */
+function clavesDeDinero(x: unknown, ruta = "$"): string[] {
+  const SOSPECHOSAS = /precio|importe|total|iva|price|amount|eur|coste/i;
+  if (Array.isArray(x)) {
+    return x.flatMap((v, i) => clavesDeDinero(v, `${ruta}[${i}]`));
+  }
+  if (x != null && typeof x === "object") {
+    return Object.entries(x).flatMap(([k, v]) => {
+      const aqui = `${ruta}.${k}`;
+      const esDinero = SOSPECHOSAS.test(k) && typeof v === "number";
+      return [...(esDinero ? [aqui] : []), ...clavesDeDinero(v, aqui)];
+    });
+  }
+  return [];
+}
+
 // ── El catálogo de ejemplo ────────────────────────────────────────────
 //
 // Los del mockup, con sus precios. Dos a cero («incluido» en la pantalla
@@ -374,7 +396,27 @@ describe("normalizarSesion", () => {
     if (!r.ok) throw new Error("debería valer");
     expect(r.cuerpo.tratamientosNombre).toEqual({ [QUIROPODIA]: "Quiropodia" });
     // El precio y el IVA salen del catálogo al cobrar, no de la historia.
-    expect(JSON.stringify(r.cuerpo)).not.toContain("30");
+    //
+    // Se comprueba por la FORMA del cuerpo y no buscando el texto «30»:
+    // ese 30 aparece dentro de cualquier uuid que lo lleve, así que el
+    // aserto pasaba o fallaba según qué id tocara. Es la lección que
+    // clinica-1 dejó escrita en su §10b — **un aserto sobre el texto
+    // tiene que contar, no buscar** — y aquí la pagó el CI.
+    expect(Object.keys(r.cuerpo).sort()).toEqual([
+      "consejos",
+      "consejosVersion",
+      "dolor",
+      "evolucion",
+      "lesionesVersion",
+      "mapaVersion",
+      "marcas",
+      "nota",
+      "proximaCita",
+      "tratamientos",
+      "tratamientosNombre",
+      "v",
+    ]);
+    expect(clavesDeDinero(r.cuerpo)).toEqual([]);
   });
 
   it("una nota en blanco es `null`, no una cadena vacía", () => {

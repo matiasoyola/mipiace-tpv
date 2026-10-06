@@ -64,6 +64,24 @@ const { registerLenientJsonParser } = await import("../src/lib/lenient-json.js")
 const { signCashierSession } = await import("../src/shift/cashier-session.js");
 const { createAgendaStore } = await import("../src/agenda/store.js");
 
+/** Las rutas de todo lo que huela a dinero dentro de un objeto: por nombre
+ *  de clave y con valor numérico. Ver el caso 1 sobre por qué no se busca
+ *  el texto del precio. */
+function clavesDeDinero(x: unknown, ruta = "$"): string[] {
+  const SOSPECHOSAS = /precio|importe|total|iva|price|amount|eur|coste/i;
+  if (Array.isArray(x)) {
+    return x.flatMap((v, i) => clavesDeDinero(v, `${ruta}[${i}]`));
+  }
+  if (x != null && typeof x === "object") {
+    return Object.entries(x).flatMap(([k, v]) => {
+      const aqui = `${ruta}.${k}`;
+      const esDinero = SOSPECHOSAS.test(k) && typeof v === "number";
+      return [...(esDinero ? [aqui] : []), ...clavesDeDinero(v, aqui)];
+    });
+  }
+  return [];
+}
+
 describe.skipIf(!e2eEnabled)("e2e · el cobro de una sesión clínica", () => {
   if (!e2eEnabled) console.warn(`\n${SKIP_MESSAGE}\n`);
 
@@ -426,8 +444,29 @@ describe.skipIf(!e2eEnabled)("e2e · el cobro de una sesión clínica", () => {
       colegiado: "Col. 45-0312",
     });
     // Y el NOMBRE de cada tratamiento, nunca su precio.
+    //
+    // Por la FORMA del cuerpo y no buscando el texto «30»: ese 30 aparece
+    // dentro de cualquier uuid que lo lleve, así que el aserto pasaba o
+    // fallaba según qué id tocara — **y en el CI tocó uno que lo llevaba**.
+    // Es la lección del §10b de clinica-1: un aserto sobre el texto tiene
+    // que contar, no buscar.
     expect(cuerpo.tratamientosNombre[quiropodiaId]).toBe("Quiropodia");
-    expect(JSON.stringify(cuerpo)).not.toContain("30");
+    expect(Object.keys(cuerpo).sort()).toEqual([
+      "consejos",
+      "consejosVersion",
+      "dolor",
+      "evolucion",
+      "firma",
+      "lesionesVersion",
+      "mapaVersion",
+      "marcas",
+      "nota",
+      "proximaCita",
+      "tratamientos",
+      "tratamientosNombre",
+      "v",
+    ]);
+    expect(clavesDeDinero(cuerpo)).toEqual([]);
   });
 
   it("2 · «Cobrar» abre un borrador con LOS TRES TRATAMIENTOS, no con el servicio de la cita", async () => {
