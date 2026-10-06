@@ -43,6 +43,10 @@ COPY packages/db/package.json packages/db/
 # infra/test/dockerfile-manifiestos.test.ts en la primera pasada de la suite,
 # que es para lo que existe: las dos veces anteriores se vio en el smoke del CI
 # después del merge.
+# clinica-3: el mapa del pie, las lesiones, los consejos y las funciones puras
+# de la sesión. Mismo caso y mismo guardián — y esta vez también lo cantó el
+# test en la primera pasada, antes de llegar al CI. Tres de tres.
+COPY packages/clinica-sesion/package.json packages/clinica-sesion/
 COPY packages/clinica-valoracion/package.json packages/clinica-valoracion/
 COPY packages/escpos-builder/package.json packages/escpos-builder/
 COPY packages/holded-client/package.json packages/holded-client/

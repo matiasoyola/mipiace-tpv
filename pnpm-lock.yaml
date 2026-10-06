@@ -75,6 +75,9 @@ importers:
       '@fastify/websocket':
         specifier: ^11
         version: 11.2.0
+      '@mipiacetpv/clinica-sesion':
+        specifier: workspace:*
+        version: link:../../packages/clinica-sesion
       '@mipiacetpv/clinica-valoracion':
         specifier: workspace:*
         version: link:../../packages/clinica-valoracion

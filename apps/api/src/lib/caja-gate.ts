@@ -190,6 +190,45 @@ export async function esSanitarioSinCaja(
   }
 }
 
+/**
+ * clinica-3 · **sólo** la mitad del usuario: rechaza a un sanitario sin
+ * caja y NO mira la capability de la caja del tenant.
+ *
+ * Para qué existe: hay dos rutas de AGENDA que son de dinero y que por eso
+ * no llevan el gate de la caja —`POST /agenda/appointments/:id/checkout`,
+ * que abre el borrador pre-poblado, y `GET /agenda/cobros-pendientes`, que
+ * es la lista con precios de la recepción. Un `CLINICIAN` llega a las dos,
+ * y en las dos recibiría importes: exactamente lo que la regla 8 del
+ * bloque prohíbe (*el sanitario sin caja no ve importes en ninguna parte*,
+ * y comprobado en la API).
+ *
+ * ── Por qué no `ensureCajaEnabled` entero ────────────────────────────
+ *
+ * Porque añadirlo cambiaría el comportamiento de un tenant con la agenda
+ * encendida y la caja apagada: hoy esas dos rutas le funcionan, y con el
+ * gate completo dejarían de funcionar. No hay ninguno así todavía (duda 5
+ * de clinica-1 lo deja apuntado), pero el prompt de este bloque es
+ * explícito: *el camino de cobro de una cita que no es clínica no cambia
+ * ni una línea de comportamiento.* Esta función sólo rechaza a un
+ * `CLINICIAN`, y `CLINICIAN` es un rol que no existía antes de clinica-1 —
+ * así que **ningún tenant de hoy cambia de comportamiento, ni uno**.
+ *
+ * El mensaje y el código son los mismos que los de `ensureCajaEnabled`
+ * para este caso: desde fuera es la misma negativa, porque lo es.
+ */
+export async function ensureNoEsSanitarioSinCaja(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  if (await esSanitarioSinCaja(request)) {
+    reply.code(403).send({
+      error: "CLINICIAN_NO_CAJA",
+      code: "CLINICIAN_NO_CAJA",
+      message: CLINICIAN_NO_CAJA_MESSAGE,
+    });
+  }
+}
+
 export async function ensureCajaEnabled(
   request: FastifyRequest,
   reply: FastifyReply,

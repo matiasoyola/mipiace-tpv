@@ -22,6 +22,7 @@ import { registerLocalCatalogRoutes } from "./catalog/local-products.js";
 import { registerContactsRoutes } from "./contacts/routes.js";
 import { registerContactImportRoutes } from "./contacts/import.js";
 import { registerClinicaRoutes } from "./clinica/routes.js";
+import { registerSesionRoutes } from "./clinica/sesion-routes.js";
 import { registerValoracionRoutes } from "./clinica/valoracion-routes.js";
 import { registerValoracionPublicaRoutes } from "./clinica/valoracion-publica.js";
 import { registerCrmRoutes } from "./crm/routes.js";
@@ -191,6 +192,10 @@ async function main() {
   // clinica-2 · la valoración inicial. Mismo gate y mismo registro de
   // accesos que el resto de lo clínico.
   await registerValoracionRoutes(app);
+  // clinica-3 · la sesión y la exploración del pie. Mismo gate, mismo
+  // registro de accesos, y las tres rutas cuelgan de la CITA: la sesión se
+  // abre desde la cita del día y de una cita sale una sola sesión.
+  await registerSesionRoutes(app);
   await registerServicesRoutes(app);
   await registerStaffRoutes(app);
   await registerAgendaRoutes(app);
