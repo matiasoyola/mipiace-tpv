@@ -161,3 +161,27 @@ Hasta entonces, La Maestranza está «validada en prueba», y se dice así.
 
 Los puntos 1 y 2 son del render del ticket, no de esta cuenta. Probablemente salen igual en todos
 los comercios. Se miran antes de la visita.
+
+## Hecho el 06-10 · cuenta activada y lista para el miércoles 08-10
+
+- **Activada.** El propietario es `lamaestranza@mipiacetpv.com` (alias del buzón `no-reply@` en
+  Hostinger, creado el 06-10), con el nombre de Salomé Éguez. La contraseña temporal y el PIN de
+  Salomé los tiene Matías. Se le entregan en mano y se cambian en el primer login. Al activar se
+  purgaron la venta de ensayo y el cajero técnico.
+- **D8 (AP13) vinculado** a Tienda principal · Caja 1 con la APK 1.21.0. Arranca en la pantalla de
+  login del camarero.
+- **Sala**: barra B1-B4, salón M1-M6 y terraza T1-T6 (capacidad 4). Se cambia desde el panel →
+  Tiendas → Mesas y barra.
+- **Cajeros**: de momento solo Salomé, que es la propietaria y además tiene PIN de cajera. El
+  resto se da de alta el miércoles.
+- Desde la activación, **cualquier cobro es una factura real (serie C1)**. No se cobra nada de
+  prueba. La primera venta la hace Salomé en el bar.
+
+### En el bar el miércoles
+
+1. Conectar el D8 a la wifi del bar.
+2. Impresora del bar: ver si es USB ESC/POS (puerta de arriba).
+3. Salomé entra con su email y su PIN y cambia la contraseña del panel.
+4. Dar de alta a los camareros (panel → Cajeros) y renombrar la tienda a «Bar La Maestranza».
+5. Abrir turno, cobrar en mesa y en barra, y hacer arqueo. La primera venta real cierra el
+   criterio de «desplegado».
