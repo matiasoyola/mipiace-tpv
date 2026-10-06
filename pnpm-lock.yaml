@@ -181,6 +181,9 @@ importers:
 
   apps/e2e-ui:
     devDependencies:
+      '@mipiacetpv/clinica-valoracion':
+        specifier: workspace:*
+        version: link:../../packages/clinica-valoracion
       '@mipiacetpv/db':
         specifier: workspace:*
         version: link:../../packages/db

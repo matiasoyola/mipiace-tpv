@@ -1370,9 +1370,21 @@ export function AgendaPage({
         <div className="fixed inset-0 z-50 bg-mipiace-stone flex flex-col font-sans">
           <div className="flex items-center gap-3 px-4 md:px-6 h-16 bg-white border-b border-slate-200 shrink-0">
             <button
-              onClick={() => setValoracionDe(null)}
+              onClick={() => {
+                setValoracionDe(null);
+                // Y SE RECARGA EL DÍA. El aviso «Valoración pendiente» sale
+                // de la respuesta de `/agenda`, que se pidió antes de entrar
+                // aquí: sin esto, la podóloga valida, vuelve, y la agenda le
+                // sigue diciendo que queda algo pendiente. Lo encontró el
+                // banco en la última línea del capítulo 11.
+                void loadDay(date);
+              }}
               className="h-11 w-11 rounded-2xl hover:bg-slate-100 flex items-center justify-center text-mipiace-ink"
-              aria-label="Volver"
+              // «Volver a la agenda» y no «Volver» a secas: debajo hay otra
+              // pantalla con su propio «Volver», y dos botones con el mismo
+              // nombre accesible son dos botones que un lector de pantalla
+              // —y el banco— no pueden distinguir.
+              aria-label="Volver a la agenda"
             >
               <ArrowLeft className="w-5 h-5" strokeWidth={2.25} />
             </button>

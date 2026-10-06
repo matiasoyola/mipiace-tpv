@@ -34,13 +34,23 @@ export async function entrarAdmin(page: Page): Promise<void> {
   });
 }
 
-/** Siembra el token del dispositivo ANTES de que cargue la app. */
-export async function dispositivoEmparejado(page: Page): Promise<void> {
+/**
+ * Siembra el token del dispositivo ANTES de que cargue la app.
+ *
+ * `token` es parametrizable desde clinica-2: el capítulo de la valoración
+ * corre sobre OTRO tenant (la clínica) con su propio terminal, y un banco
+ * que entrara con el token de la peluquería estaría probando la clínica
+ * desde el mostrador de Sole.
+ */
+export async function dispositivoEmparejado(
+  page: Page,
+  token: string = DEVICE_TOKEN,
+): Promise<void> {
   await page.addInitScript(
-    ([clave, token]) => {
-      window.localStorage.setItem(clave as string, token as string);
+    ([clave, valor]) => {
+      window.localStorage.setItem(clave as string, valor as string);
     },
-    ["mipiacetpv-device-token", DEVICE_TOKEN],
+    ["mipiacetpv-device-token", token],
   );
 }
 
@@ -51,15 +61,19 @@ export async function dispositivoEmparejado(page: Page): Promise<void> {
  * como en el mostrador. No abre turno — eso lo pide el capítulo que lo
  * necesite, porque el capítulo 1 tiene que poder mirar la pantalla ANTES.
  */
-export async function entrarTpv(page: Page, email: string): Promise<void> {
-  await dispositivoEmparejado(page);
+export async function entrarTpv(
+  page: Page,
+  email: string,
+  opciones: { deviceToken?: string; pin?: string } = {},
+): Promise<void> {
+  await dispositivoEmparejado(page, opciones.deviceToken ?? DEVICE_TOKEN);
   await page.goto(TPV);
   const campoEmail = page.locator("#cashierEmail");
   await expect(campoEmail).toBeVisible({ timeout: 30_000 });
   await campoEmail.fill(email);
   // El PIN se marca en el teclado numérico de la pantalla, dígito a dígito:
   // es un pad de botones, no un input donde se pueda escribir.
-  for (const d of PIN) {
+  for (const d of opciones.pin ?? PIN) {
     await page.getByRole("button", { name: d, exact: true }).click();
   }
   await page.getByRole("button", { name: /^Entrar/ }).click();

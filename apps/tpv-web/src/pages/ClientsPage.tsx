@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
+  CalendarClock,
   Loader2,
   Plus,
   ReceiptText,
@@ -478,10 +479,14 @@ function HistoryTab({ clientId }: { clientId: string }) {
   if (data.entries.length === 0)
     return (
       <Empty>
-        Sin compras registradas. Las citas y bonos aparecerán aquí cuando estén
-        disponibles.
+        Sin compras ni citas registradas. Los bonos aparecerán aquí cuando
+        estén disponibles.
       </Empty>
     );
+  // El historial trae DOS clases de línea (`crm/routes.ts` las une desde
+  // B-reservas-4): compras y citas. Pintarlas todas como compras leía
+  // `e.total` en una cita, que no lo tiene, y tiraba la ficha entera a la
+  // pantalla del ErrorBoundary. Ver la nota del tipo en `lib/clients.ts`.
   return (
     <ul className="space-y-2">
       {data.entries.map((e) => (
@@ -489,10 +494,22 @@ function HistoryTab({ clientId }: { clientId: string }) {
           key={e.id}
           className="bg-white rounded-xl border border-slate-200 p-3 flex items-center gap-3"
         >
-          <TicketIcon className="w-4 h-4 text-slate-400 shrink-0" strokeWidth={2.25} />
+          {e.kind === "PURCHASE" ? (
+            <TicketIcon
+              className="w-4 h-4 text-slate-400 shrink-0"
+              strokeWidth={2.25}
+            />
+          ) : (
+            <CalendarClock
+              className="w-4 h-4 text-slate-400 shrink-0"
+              strokeWidth={2.25}
+            />
+          )}
           <div className="flex-1 min-w-0">
             <div className="text-[13.5px] font-medium text-mipiace-ink">
-              Ticket {e.holdedDocNumber ?? e.internalNumber}
+              {e.kind === "PURCHASE"
+                ? `Ticket ${e.holdedDocNumber ?? e.internalNumber}`
+                : "Cita"}
             </div>
             <div className="text-[12px] text-slate-500">
               {new Date(e.at).toLocaleDateString("es-ES", {
@@ -500,10 +517,20 @@ function HistoryTab({ clientId }: { clientId: string }) {
                 month: "short",
                 year: "numeric",
               })}
+              {e.kind === "APPOINTMENT" &&
+                ` · ${new Date(e.at).toLocaleTimeString("es-ES", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}`}
             </div>
           </div>
           <div className="text-[14px] font-semibold text-mipiace-ink">
-            {e.total.toLocaleString("es-ES", { style: "currency", currency: "EUR" })}
+            {e.kind === "PURCHASE"
+              ? e.total.toLocaleString("es-ES", {
+                  style: "currency",
+                  currency: "EUR",
+                })
+              : null}
           </div>
         </li>
       ))}

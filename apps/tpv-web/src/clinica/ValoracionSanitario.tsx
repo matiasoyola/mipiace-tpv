@@ -267,7 +267,7 @@ export function ValoracionSanitario(props: {
         </p>
         <BotonesDelTest ocupado={ocupado} onAccion={accion} />
         {aviso && <Aviso>{aviso}</Aviso>}
-        {error && <Error>{error}</Error>}
+        {error && <Mal>{error}</Mal>}
       </div>
     );
   }
@@ -281,7 +281,7 @@ export function ValoracionSanitario(props: {
     );
   }
 
-  if (error && !vista) return <Error>{error}</Error>;
+  if (error && !vista) return <Mal>{error}</Mal>;
   if (!vista) return null;
 
   const v = vista.valoracion;
@@ -325,7 +325,7 @@ export function ValoracionSanitario(props: {
         )}
       </div>
 
-      {error && <Error>{error}</Error>}
+      {error && <Mal>{error}</Mal>}
       {aviso && <Aviso>{aviso}</Aviso>}
 
       {/* ── Sin valoración: los dos caminos para crearla ───────────── */}
@@ -560,6 +560,11 @@ function FilasDeRespuestas(props: {
         return (
           <div
             key={p.id}
+            // El gancho de la fila. Lo pide el banco con navegador: sin él,
+            // la única forma de llegar al botón de corregir es filtrar
+            // `div` por su texto, y eso casa con el contenedor de dentro
+            // —el que NO lleva los botones— tan a menudo como con la fila.
+            data-pregunta={p.id}
             className={`grid grid-cols-[1fr_auto] gap-3 items-center py-3 ${
               i > 0 ? "border-t border-slate-100" : ""
             } ${
@@ -695,7 +700,13 @@ function Aviso(props: { children: React.ReactNode }) {
   );
 }
 
-function Error(props: { children: React.ReactNode }) {
+/** El aviso de que algo ha fallado.
+ *
+ * Se llama `Mal` y no `Error` a propósito: un componente llamado `Error`
+ * SOMBREA el constructor global dentro del módulo, y éste es justo un
+ * módulo lleno de `catch`. Hoy ninguno hace `new Error()`; el día que uno
+ * lo hiciera, construiría un elemento de React. */
+function Mal(props: { children: React.ReactNode }) {
   return (
     <div
       role="alert"

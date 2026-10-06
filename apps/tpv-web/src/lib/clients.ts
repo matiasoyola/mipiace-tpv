@@ -53,16 +53,36 @@ export interface ClientDetail {
   technicalNotes: ClientTechnicalNote[];
 }
 
-export type HistoryEntry = {
-  kind: "PURCHASE";
-  id: string;
-  at: string;
-  ticketId: string;
-  internalNumber: string;
-  holdedDocNumber: string | null;
-  status: string;
-  total: number;
-};
+// `GET /clients/:id/history` devuelve un array UNIFICADO de compras y citas
+// desde B-reservas-4 (`crm/routes.ts`: `[...purchaseEntries,
+// ...appointmentEntries]`). El tipo de aquí decía que todo era una compra, y
+// la pantalla leía `e.total` en todas: con una cita dentro, la ficha del
+// cliente reventaba entera (`Cannot read properties of undefined (reading
+// 'toLocaleString')` → pantalla del ErrorBoundary).
+//
+// Lo encontró el banco de clinica-2 al abrir la ficha de una paciente que
+// tenía cita y ninguna compra. Es un fallo de master, no del bloque, y
+// afecta a cualquier tenant con la agenda encendida.
+export type HistoryEntry =
+  | {
+      kind: "PURCHASE";
+      id: string;
+      at: string;
+      ticketId: string;
+      internalNumber: string;
+      holdedDocNumber: string | null;
+      status: string;
+      total: number;
+    }
+  | {
+      kind: "APPOINTMENT";
+      id: string;
+      at: string;
+      end: string;
+      status: string;
+      ticketId: string | null;
+      serviceIds: string[];
+    };
 
 export interface ClientHistory {
   entries: HistoryEntry[];

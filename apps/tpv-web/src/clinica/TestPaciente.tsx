@@ -40,6 +40,7 @@
 // «Atrás», ese error se queda en una historia clínica.
 
 import { useMemo, useState } from "react";
+import { Loader2 } from "lucide-react";
 
 import {
   preguntasEnJuego,
@@ -66,12 +67,26 @@ export interface TestPacienteProps {
   onEnviar: (r: RespuestasDelTest) => Promise<string | null>;
 }
 
-/** Los pasos, en el orden en que se ven. */
+/** Los pasos, en el orden en que se ven.
+ *
+ * `guardando` y `gracias` son DOS pasos y no uno, y eso lo encontró el
+ * banco de pruebas con navegador: la primera versión pintaba «Gracias, ya
+ * está» en cuanto se contestaba la última pregunta y mandaba las
+ * respuestas en segundo plano. El capítulo 11 leyó la base justo después
+ * de ver «Ya está» y la valoración seguía PENDIENTE.
+ *
+ * Como fallo de test era una carrera; como producto era peor: **a una
+ * persona de 78 años se le estaba diciendo que había terminado antes de
+ * que sus respuestas estuvieran guardadas.** Si cierra la página en ese
+ * instante —y la pantalla la invita a cerrarla— pierde el test y cree que
+ * lo hizo. Ahora no se le dice «ya está» hasta que el servidor lo
+ * confirma. */
 type Paso =
   | { tipo: "bienvenida" }
   | { tipo: "quien" }
   | { tipo: "pregunta"; pregunta: Pregunta; indice: number }
   | { tipo: "detalle"; pregunta: Pregunta; indice: number }
+  | { tipo: "guardando" }
   | { tipo: "gracias" };
 
 export function TestPaciente(props: TestPacienteProps) {
@@ -106,11 +121,19 @@ export function TestPaciente(props: TestPacienteProps) {
   function irA(indice: number) {
     const p = enJuego[indice];
     if (!p) {
-      setPaso({ tipo: "gracias" });
-      void enviar();
+      void terminar();
       return;
     }
     setPaso({ tipo: "pregunta", pregunta: p, indice });
+  }
+
+  /** Manda las respuestas y SÓLO ENTONCES dice «ya está». */
+  async function terminar(
+    r: Record<string, Respuesta> = respuestas,
+    d: Record<string, string[]> = detalles,
+  ) {
+    setPaso({ tipo: "guardando" });
+    await enviar(r, d);
   }
 
   function contestar(pregunta: Pregunta, valor: Respuesta, indice: number) {
@@ -145,8 +168,7 @@ export function TestPaciente(props: TestPacienteProps) {
     const posicion = nuevoJuego.findIndex((p) => p.id === pregunta.id);
     const siguiente = nuevoJuego[posicion + 1];
     if (!siguiente) {
-      setPaso({ tipo: "gracias" });
-      void enviar(siguientes, detalles);
+      void terminar(siguientes, detalles);
       return;
     }
     setPaso({ tipo: "pregunta", pregunta: siguiente, indice: posicion + 1 });
@@ -181,15 +203,16 @@ export function TestPaciente(props: TestPacienteProps) {
     setEnviando(false);
     if (fallo) {
       setError(fallo);
-      // Se vuelve a la última pregunta para que el botón de reintentar
-      // tenga sentido: dejarle la pantalla de «gracias» con un error
-      // debajo le diría que ya está cuando no está.
+      // Se vuelve a la última pregunta: dejarle la pantalla de «ya está»
+      // con un error debajo le diría que ha terminado cuando no.
       setPaso({
         tipo: "pregunta",
         pregunta: enJuego[enJuego.length - 1]!,
         indice: enJuego.length - 1,
       });
+      return;
     }
+    setPaso({ tipo: "gracias" });
   }
 
   const sinSaber = Object.values(respuestas).filter((v) => v === "NO_SE").length;
@@ -198,7 +221,7 @@ export function TestPaciente(props: TestPacienteProps) {
       ? null
       : paso.tipo === "quien"
         ? 3
-        : paso.tipo === "gracias"
+        : paso.tipo === "gracias" || paso.tipo === "guardando"
           ? 100
           : Math.round((numeroDe(paso.pregunta) - 0.5) * (100 / total));
 
@@ -376,8 +399,7 @@ export function TestPaciente(props: TestPacienteProps) {
                   );
                   const siguiente = nuevoJuego[pos + 1];
                   if (!siguiente) {
-                    setPaso({ tipo: "gracias" });
-                    void enviar();
+                    void terminar();
                     return;
                   }
                   setPaso({
@@ -393,26 +415,42 @@ export function TestPaciente(props: TestPacienteProps) {
           </>
         )}
 
+        {/* GUARDANDO. No dice «ya está» todavía, y no invita a cerrar la
+            página: todavía no se ha guardado nada. Ver la nota de `Paso`. */}
+        {paso.tipo === "guardando" && (
+          <>
+            <div className="w-[88px] h-[88px] rounded-3xl bg-mipiace-coral-soft flex items-center justify-center mb-6">
+              <Loader2
+                className="w-11 h-11 text-mipiace-coral animate-spin motion-reduce:animate-none"
+                strokeWidth={2.25}
+                aria-hidden="true"
+              />
+            </div>
+            <h1 className="text-[28px] md:text-[38px] font-semibold leading-tight tracking-[-0.02em] m-0 mb-3.5">
+              Estamos guardando sus respuestas…
+            </h1>
+            <p className="text-[17px] md:text-[20px] text-mipiace-ink-soft leading-snug m-0">
+              Un momento, por favor. No cierre esta página.
+            </p>
+          </>
+        )}
+
         {paso.tipo === "gracias" && (
           <>
             <div className="w-[88px] h-[88px] rounded-3xl bg-emerald-50 flex items-center justify-center mb-6">
-              {enviando ? (
-                <span className="text-[15px] text-emerald-700">Guardando…</span>
-              ) : (
-                <svg
-                  width="44"
-                  height="44"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="#047857"
-                  strokeWidth="2.25"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M20 6 9 17l-5-5" />
-                </svg>
-              )}
+              <svg
+                width="44"
+                height="44"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="#047857"
+                strokeWidth="2.25"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
             </div>
             <h1 className="text-[28px] md:text-[38px] font-semibold leading-tight tracking-[-0.02em] m-0 mb-3.5">
               Gracias, {props.nombrePila}. Ya está.

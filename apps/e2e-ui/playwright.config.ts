@@ -71,6 +71,19 @@ const envDePantalla = (puerto: string) => ({
   MIPIACETPV_DEV_PORT: puerto,
 });
 
+/**
+ * El buzón de correo del banco: un fichero con una línea JSON por email.
+ *
+ * **FUERA de `resultados/`**, que es el `outputDir`: Playwright LIMPIA ese
+ * directorio al empezar cada pasada, así que un buzón ahí dentro
+ * desaparecía al correr un capítulo solo (`-g`) y el capítulo se caía con
+ * «Cannot read properties of undefined». Costó una pasada.
+ *
+ * El capítulo que lo mira lo vacía al empezar, y `.gitignore` lo cubre.
+ */
+export const BUZON = new URL("./buzon-del-banco.jsonl", import.meta.url)
+  .pathname;
+
 export default defineConfig({
   testDir: "./specs",
   outputDir: "resultados",
@@ -124,7 +137,16 @@ export default defineConfig({
       cwd: "../..",
       url: `${API}/health`,
       reuseExistingServer: !PUERTOS_PROPIOS,
-      env: { PORT: PUERTO_API },
+      env: {
+        PORT: PUERTO_API,
+        // clinica-2 · el buzón de correo en fichero. La API del banco es un
+        // PROCESO, así que no se le puede inyectar un doble como hacen los
+        // tests de la suite: el capítulo de la valoración tiene que poder
+        // leer el email REAL que se mandó —su asunto, su cuerpo y el enlace
+        // que viaja dentro— y comprobar que no lleva ni una palabra del
+        // cuestionario. Ver `FileEmailSender` en `email/sender.ts`.
+        EMAIL_OUTBOX_FILE: BUZON,
+      },
       timeout: 120_000,
       stdout: "ignore",
       stderr: "pipe",
