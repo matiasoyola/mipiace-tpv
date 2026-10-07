@@ -20,14 +20,25 @@
 // El `verImportes` se usa para elegir el TEXTO y el botón, no para filtrar
 // datos — filtrar ya está hecho antes de que esto se monte.
 
-import { Check } from "lucide-react";
+import { AlertTriangle, Check } from "lucide-react";
 import {
+  COLOR_DE_TIPO_DE_VISITA,
+  NOMBRE_DE_NIVEL,
   NOMBRE_DE_PROXIMA_CITA,
+  NOMBRE_DE_TIPO_DE_VISITA,
+  TIPOS_DE_VISITA,
+  esCuerpoV2,
+  nombreDeActo,
   nombreDeConsejo,
+  nombreDeOpcionDeBloque,
+  pendienteLegible,
+  type BloquesDeLaSesion,
+  type PendienteCreado,
   type ProximaCita,
+  type TipoDeVisita,
 } from "@mipiacetpv/clinica-sesion";
 
-import { euros } from "./SesionPodologia.js";
+import { euros } from "./piezas.js";
 
 /** Lo que devuelve la API al cerrar (y en la vista, si ya estaba cerrada). */
 export interface SesionCerradaView {
@@ -39,12 +50,23 @@ export interface SesionCerradaView {
     firmadaEn: string;
   };
   cuerpo: {
+    /** 1 en una sesión de clinica-3, 2 desde clinica-5. */
+    v?: number;
     dolor: number;
     evolucion: string | null;
     consejos: string[];
     proximaCita: ProximaCita | null;
     nota: string | null;
     consejosVersion: number;
+    mapaVersion?: number;
+    // clinica-5 · lo de la sesión por tipos. TODO OPCIONAL, y es lo que
+    // hace que una sesión v1 se siga leyendo: en una v1 no está ninguno y
+    // esta pantalla no pinta nada de esto.
+    tipos?: TipoDeVisita[];
+    bloques?: BloquesDeLaSesion;
+    avisos?: string[];
+    pendientesCreados?: PendienteCreado[];
+    listas?: { actos?: number };
   };
   marcas: Array<{
     clave: string;
@@ -160,6 +182,13 @@ export function SesionCerrada(props: {
         </div>
       )}
 
+      {/* clinica-5 · QUÉ TIPO DE VISITA FUE y lo que cada tipo dejó
+          escrito. En una sesión v1 no se pinta nada: no es que falte, es
+          que esa sesión se escribió cuando los tipos no existían. */}
+      {esCuerpoV2(cerrada.cuerpo) && (
+        <LoDeLosTipos cuerpo={cerrada.cuerpo} />
+      )}
+
       {prox && prox !== "SIN_CITA" && (
         <Nota verde>
           Próxima cita propuesta: dentro de{" "}
@@ -209,6 +238,135 @@ export function SesionCerrada(props: {
       )}
     </div>
   );
+}
+
+/**
+ * Los tipos de la visita y lo que cada uno dejó escrito.
+ *
+ * Lee del cuerpo CONGELADO y no recalcula nada: el nivel y el riesgo que
+ * se enseñan son los que se decidieron ese día, no los que saldrían hoy
+ * con el criterio de hoy. Es la misma razón por la que se guardan.
+ */
+function LoDeLosTipos(props: { cuerpo: SesionCerradaView["cuerpo"] }) {
+  const tipos = (props.cuerpo.tipos ?? []).filter((t) =>
+    TIPOS_DE_VISITA.includes(t),
+  );
+  if (tipos.length === 0) return null;
+  const b = props.cuerpo.bloques ?? {};
+  const q = b.QUIROPODIA;
+  const r = b.PIE_RIESGO;
+  const c = b.CIRUGIA;
+  const bio = b.BIOMECANICA;
+  const pendientes = props.cuerpo.pendientesCreados ?? [];
+  return (
+    <div
+      className="bg-white border border-slate-200 rounded-3xl px-5 py-4 mt-4"
+      data-test="tipos-de-la-sesion"
+    >
+      <div className="flex flex-wrap gap-2">
+        {tipos.map((t) => (
+          <span
+            key={t}
+            className="inline-flex rounded-xl px-3 py-1.5 text-[13px] font-medium text-white"
+            style={{ backgroundColor: COLOR_DE_TIPO_DE_VISITA[t] }}
+          >
+            {NOMBRE_DE_TIPO_DE_VISITA[t]}
+          </span>
+        ))}
+      </div>
+
+      <div className="text-[13.5px] leading-relaxed mt-3 space-y-1.5">
+        {q && (
+          <div>
+            · <b className="font-medium">Quiropodia {NOMBRE_DE_NIVEL[q.nivelElegido].toLowerCase()}</b>
+            {q.nivelElegido !== q.nivelPropuesto && (
+              <span className="text-slate-500">
+                {" "}
+                (propuesta {NOMBRE_DE_NIVEL[q.nivelPropuesto].toLowerCase()},
+                cambiada a mano)
+              </span>
+            )}
+            {q.actos.length > 0 && (
+              <span>
+                {" · "}
+                {q.actos
+                  .map((a) =>
+                    nombreDeActo(a, props.cuerpo.listas?.actos).toLowerCase(),
+                  )
+                  .join(", ")}
+              </span>
+            )}
+          </div>
+        )}
+        {r?.riesgo && (
+          <div>
+            · <b className="font-medium">{r.riesgo.nombre}</b> ·{" "}
+            {r.riesgo.plazo.toLowerCase()}
+            <span className="text-slate-500"> · {r.riesgo.motivo}</span>
+          </div>
+        )}
+        {r && !r.riesgo && (
+          <div className="text-slate-500">
+            · Pie de riesgo sin clasificar: faltaban comprobaciones.
+          </div>
+        )}
+        {c && (
+          <div>
+            · <b className="font-medium">Revisión de la cirugía</b>
+            {c.herida && ` · herida: ${textoDeOpcion(c.herida)}`}
+            {c.puntos && ` · puntos: ${textoDeOpcion(c.puntos)}`}
+          </div>
+        )}
+        {bio && (
+          <div>
+            · <b className="font-medium">Biomecánica</b>
+            {bio.tipoDePie && ` · ${textoDeOpcion(bio.tipoDePie)}`}
+            {bio.pisada && ` · ${textoDeOpcion(bio.pisada)}`}
+            {bio.plantillas && " · plantillas a medida"}
+          </div>
+        )}
+      </div>
+
+      {/* LOS AVISOS QUE SE ENSEÑARON, tal como se enseñaron. No se
+          recalculan: la pregunta que hay que poder contestar es «¿se le
+          avisó?», y eso es un hecho de ese día. */}
+      {(props.cuerpo.avisos ?? []).length > 0 && (
+        <div className="mt-3 space-y-2">
+          {props.cuerpo.avisos!.map((a) => (
+            <div
+              key={a}
+              className="flex gap-2 items-center bg-red-50 text-red-700 rounded-2xl px-3.5 py-2.5 text-[13.5px]"
+            >
+              <AlertTriangle className="w-4 h-4 shrink-0" strokeWidth={2.25} />
+              {a}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {pendientes.length > 0 && (
+        <div className="mt-3 bg-mipiace-coral-soft text-mipiace-coral-dark rounded-2xl px-4 py-3 text-[13.5px] leading-relaxed">
+          <b className="font-medium">Para la próxima visita:</b>{" "}
+          {pendientes
+            .map((p) => {
+              const l = pendienteLegible(p, {
+                mapa: props.cuerpo.mapaVersion,
+              });
+              return [l.titulo, l.zona, l.nota].filter(Boolean).join(" · ");
+            })
+            .join(" | ")}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** El texto de una opción de bloque (herida, puntos, tipo de pie,
+ *  pisada), del paquete y no de un `Record` de esta pantalla: ese `Record`
+ *  habría sido una segunda redacción de «Signos de infección», y la
+ *  primera es la que la podóloga tocó al marcarlo. */
+function textoDeOpcion(id: string): string {
+  return nombreDeOpcionDeBloque(id).toLowerCase();
 }
 
 function Linea(props: { nombre: string; children: React.ReactNode }) {

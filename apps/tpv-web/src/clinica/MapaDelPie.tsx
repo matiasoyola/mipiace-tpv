@@ -63,6 +63,16 @@ export type EstadoDeZona =
   | "anterior"
   /** Seleccionada para elegir lesión: borde oscuro. */
   | "elegida"
+  /**
+   * clinica-5 · la CAPA DE SENSIBILIDAD de la sesión por tipos: aquí el
+   * paciente NO siente el monofilamento, según la última exploración.
+   *
+   * Rojo y no naranja a propósito: en esta capa el naranja ya significa
+   * «lesión marcada hoy», y dos cosas distintas del mismo color sobre el
+   * mismo dibujo es la clase de confusión que sobra en el pie de un
+   * diabético.
+   */
+  | "sinSensibilidad"
   /** Sin nada. */
   | "libre";
 
@@ -70,6 +80,7 @@ const RELLENO: Record<EstadoDeZona, string> = {
   hoy: "fill-mipiace-coral stroke-mipiace-coral-dark",
   anterior: "fill-mipiace-coral-soft stroke-mipiace-coral",
   elegida: "fill-white stroke-mipiace-ink",
+  sinSensibilidad: "fill-red-500 stroke-red-700",
   libre: "fill-white stroke-slate-300",
 };
 
@@ -189,15 +200,25 @@ function Pie(props: {
   );
 }
 
-/** La leyenda del mapa. Dos variantes, una por pestaña. */
-export function LeyendaDelMapa(props: { modo: "sesion" | "exploracion" }) {
+/** La leyenda del mapa. Tres variantes, una por capa. */
+export function LeyendaDelMapa(props: {
+  modo: "sesion" | "exploracion" | "sensibilidad";
+}) {
   const items =
     props.modo === "sesion"
       ? ([
           ["bg-mipiace-coral-soft border border-mipiace-coral", "Visita anterior"],
           ["bg-mipiace-coral", "Hoy"],
         ] as const)
-      : ([["bg-mipiace-coral", "No siente el monofilamento"]] as const);
+      : props.modo === "sensibilidad"
+        ? // clinica-5 · la capa de la sesión por tipos: se LEE, no se
+          // toca. Lo que se ve es la última exploración, y cambiarla es
+          // hacer una exploración nueva en su pestaña — que es lo que
+          // significa «la siguiente parte de la última» (clinica-3).
+          ([
+            ["bg-red-500", "No siente el monofilamento · última exploración"],
+          ] as const)
+        : ([["bg-mipiace-coral", "No siente el monofilamento"]] as const);
   return (
     <div className="flex gap-4 flex-wrap justify-center text-[12px] text-slate-500 mt-2.5">
       {items.map(([clase, texto]) => (

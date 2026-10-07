@@ -186,6 +186,7 @@ export {
   VERSION_DE_LOS_BLOQUES,
   esOpcionDe,
   nombreDeOpcion,
+  nombreDeOpcionDeBloque,
   opcionValida,
   type ListaDeOpciones,
   type Opcion,

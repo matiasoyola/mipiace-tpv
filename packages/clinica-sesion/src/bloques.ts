@@ -114,3 +114,35 @@ export function opcionValida(
 ): string | null {
   return esOpcionDe(lista, x) ? (x as string) : null;
 }
+
+/** Las cuatro listas de este fichero, juntas. */
+const TODAS: readonly ListaDeOpciones[] = [
+  ESTADOS_DE_HERIDA,
+  PUNTOS_DE_LA_HERIDA,
+  TIPOS_DE_PIE_BIOMECANICA,
+  PISADAS,
+];
+
+/**
+ * Cómo se lee una opción cualquiera de un bloque, sin decir de qué lista
+ * es.
+ *
+ * Existe para la pantalla de SESIÓN CERRADA, que lee un cuerpo firmado y
+ * sólo tiene la id: la respuesta del cierre no lleva las listas (sólo la
+ * de la pantalla), y pedirlas habría sido una llamada más para pintar
+ * cuatro palabras.
+ *
+ * Y está AQUÍ y no en un `Record` del `.tsx` por la razón de siempre: ese
+ * `Record` habría sido una segunda redacción de «Signos de infección», y
+ * la primera es la que la podóloga tocó al marcarlo.
+ *
+ * La id tal cual si no se reconoce, igual que `nombreDeZona`: lo escrito
+ * tiene que SEGUIR VIÉNDOSE.
+ */
+export function nombreDeOpcionDeBloque(id: string): string {
+  for (const lista of TODAS) {
+    const o = lista.opciones.find((x) => x.id === id);
+    if (o) return o.label;
+  }
+  return id;
+}
