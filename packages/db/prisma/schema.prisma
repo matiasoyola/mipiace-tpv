@@ -850,6 +850,9 @@ model Tenant {
   // se borra.
   clinicalAssessments ClinicalAssessment[]
   clinicalAssessmentCorrections ClinicalAssessmentCorrection[]
+  // enlaces-publicos · todos los enlaces públicos del negocio, de cualquier
+  // `purpose`. RESTRICT al otro lado: un tenant con enlaces no se borra.
+  publicLinks PublicLink[]
 
   // v1.3-SuperAdmin-Hub Lote 3 · el backfill y el hub buscan/listan
   // tenants por `holded_account_id`. Sin índice eran scans completos
@@ -1068,6 +1071,10 @@ model User {
   assessmentsRequested   ClinicalAssessment[] @relation("AssessmentRequestedBy")
   assessmentsValidated   ClinicalAssessment[] @relation("AssessmentValidatedBy")
   assessmentCorrections  ClinicalAssessmentCorrection[]
+  // enlaces-publicos · los enlaces públicos que esta persona creó (mandar el
+  // test, reenviar «mi cita»). RESTRICT: quién creó un enlace es parte de lo
+  // que el registro puede contestar.
+  publicLinksCreated     PublicLink[] @relation("PublicLinkCreatedBy")
 
   @@index([tenantId])
   @@map("users")
@@ -3566,20 +3573,28 @@ model ClinicalAssessment {
   requestedByUserId String?               @map("requested_by_user_id") @db.Uuid
   createdAt     DateTime                  @default(now()) @map("created_at") @db.Timestamptz()
 
-  // ── El enlace del email ──────────────────────────────────────────────
+  // ── El enlace del email · OBSOLETO desde `enlaces-publicos` ─────────
   //
-  // Se guarda el SHA-256 del token, no el token. Es la diferencia con
-  // `Ticket.publicSlug` (que se guarda en claro) y la razón es el dato que
-  // protege: el slug de un ticket abre un PDF que su dueño ya tiene; este
-  // enlace abre el formulario de salud de una persona. Con el hash, una
-  // copia de la base no abre ningún enlace. El token en claro existe sólo
-  // en el email y en la URL del paciente.
+  // NADIE LEE ESTAS TRES COLUMNAS. El enlace de la valoración vive en
+  // `PublicLink` con `purpose = VALORACION` y `targetType =
+  // CLINICAL_ASSESSMENT`, y la única cosa que resuelve un token es la
+  // puerta común (`apps/api/src/enlaces/puerta.ts`).
+  //
+  // Siguen aquí, y se siguen escribiendo, por una sola razón: la guardia
+  // de regresión de clinica-2 (`clinica-valoracion.e2e.ts` y
+  // `11-clinica-valoracion.spec.ts`) las mira, y el bloque que generaliza
+  // el mecanismo no es el que cambia la guardia que lo vigilaba. Expand
+  // ahora, contract después — borrarlas en la misma migración que las
+  // sustituye deja la vuelta atrás sin red.
+  //
+  // **Se quitan en el bloque que mueva esa guardia a `public_links`.**
+  // Hasta entonces: no se lee ninguna de las tres; escribirlas es un
+  // espejo del enlace de verdad, no una segunda fuente de verdad.
+  /// OBSOLETO (enlaces-publicos): la huella vive en `PublicLink.tokenHash`.
   linkTokenHash String?                   @unique @map("link_token_hash")
-  // Caduca a los 30 días. Una cita que se da para dentro de tres semanas
-  // tiene que seguir teniendo enlace vivo; un enlace de hace un año no.
+  /// OBSOLETO (enlaces-publicos): la caducidad vive en `PublicLink.expiresAt`.
   linkExpiresAt DateTime?                 @map("link_expires_at") @db.Timestamptz()
-  // Y DE UN SOLO USO: al contestar se sella y el enlace deja de abrir.
-  // Reenviar el test rota el token (otro hash, otra caducidad).
+  /// OBSOLETO (enlaces-publicos): el gasto vive en `PublicLink.usedCount`.
   linkUsedAt    DateTime?                 @map("link_used_at") @db.Timestamptz()
 
   // ── Lo que contestó el paciente, que vive en la historia ─────────────
@@ -3642,4 +3657,85 @@ model ClinicalAssessmentCorrection {
   @@index([assessmentId, createdAt])
   @@index([tenantId])
   @@map("clinical_assessment_corrections")
+}
+
+// ── enlaces-publicos · UNA SOLA PUERTA ────────────────────────────────────
+//
+// Todo lo que se abre SIN CUENTA: el test de la valoración (clinica-2, el
+// primer usuario), y los que vienen — leer un consentimiento antes de
+// firmarlo, «mi cita» para cambiar o anular, la encuesta post-visita y el
+// formulario del equipo.
+//
+// La fila guarda ESTADO. Lo que puede hacer el enlace (caducidad, usos,
+// perfil, en qué estado del objeto admite enlace, si deja rastro clínico,
+// si el límite va por IP o por token) lo declara el `purpose` EN CÓDIGO,
+// en el registro tipado de `apps/api/src/enlaces/reglas.ts`. Decisión S1
+// (07-10): si los topes vivieran en la fila, cada pantalla podría
+// aflojarlos con un UPDATE.
+//
+// `Ticket.publicSlug` queda FUERA (decisión S1.5): es la dirección de un
+// justificante que su dueño reabre las veces que haga falta, no un permiso
+// de un uso. Mezclarlo obligaría a aflojar las reglas de los demás.
+model PublicLink {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  // PARA QUÉ sirve, y A QUÉ APUNTA.
+  //
+  // Los dos son texto y no enums: un `purpose` nuevo nace en el bloque que
+  // lo necesita, sin migración (con un enum, cada uno obligaría a un
+  // `ALTER TYPE ... ADD VALUE`, que clinica-1 y clinica-2 ya pagaron dos
+  // veces). No se pierde nada: un `purpose` que no esté en el registro de
+  // la aplicación resuelve a la MISMA 404 que un token inventado.
+  //
+  // `targetId` SIN FK, a propósito: los objetivos son de tablas distintas
+  // y una FK por tipo exigiría una columna nula por tipo. Que el objetivo
+  // exista lo comprueba la puerta, y si no está contesta la misma 404.
+  purpose    String @map("purpose")
+  targetType String @map("target_type")
+  targetId   String @map("target_id") @db.Uuid
+
+  // LA HUELLA DEL TOKEN, nunca el token. El CHECK
+  // `public_links_token_hash_es_sha256` sólo admite 64 hex: el token en
+  // claro (43 caracteres base64url) NO CABE en esta columna. Es la
+  // garantía número uno del bloque, puesta en el motor y no en una
+  // revisión de código.
+  tokenHash String @unique @map("token_hash")
+
+  // Cuándo deja de abrir. NOT NULL: un token sin caducidad es un token que
+  // no caduca.
+  expiresAt DateTime @map("expires_at") @db.Timestamptz()
+
+  // Cuántas veces se puede gastar y cuántas se ha gastado. El tope lo pone
+  // el `purpose`; que no se pase lo garantiza un CHECK, y que no baje, el
+  // trigger `public_links_guard`.
+  maxUses   Int @map("max_uses")
+  usedCount Int @default(0) @map("used_count")
+
+  // Recepción lo anuló. No se des-anula (trigger).
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz()
+
+  // Quién lo creó. NULL cuando lo crea el sistema (el alta de una cita de
+  // primera valoración no la pide una persona). Mismo criterio que
+  // `ClinicalAssessment.requestedByUserId` con `source = APPOINTMENT`.
+  createdByUserId String?  @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  createdBy User?  @relation("PublicLinkCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  // «Los enlaces de este objeto» (revocar al mover o anular una cita) y
+  // «los de este negocio» (la pantalla de recepción, que vendrá con «mi
+  // cita»).
+  //
+  // NO está aquí, y está en la migración: el único PARCIAL
+  // `public_links_uno_vivo_key` sobre (`purpose`, `target_id`) con
+  // `WHERE revoked_at IS NULL AND used_count < max_uses`, que es lo que
+  // hace de «reenviar revoca el anterior» una invariante. Prisma no sabe
+  // declarar índices parciales — mismo caso que
+  // `clinical_assessments_one_open_key` de clinica-2.
+  @@index([targetType, targetId])
+  @@index([tenantId, createdAt])
+  @@index([expiresAt])
+  @@map("public_links")
 }
