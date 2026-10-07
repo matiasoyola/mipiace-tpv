@@ -672,6 +672,8 @@ describe("clinica-3 · la puerta de la valoración", () => {
       status: "RESPONDIDA",
       validatedAt: null,
       createdAt: new Date("2026-10-01T08:00:00.000Z"),
+      entryId: null,
+      questionnaireVersion: 1,
     });
     const app = await buildApp();
     const r = await app.inject({

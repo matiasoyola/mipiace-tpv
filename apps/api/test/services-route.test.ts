@@ -276,6 +276,7 @@ describe("GET /services/scheduling", () => {
       onlineBookable: true,
       family: "Peluquería",
       channels: { caja: true, ticket: true, agenda: true, online: true },
+      nivelQuiropodia: null,
       updatedAt: new Date(),
     });
     const app = await buildApp();
