@@ -21,83 +21,35 @@
 // que piden sus mesas, y el número de columnas sale del ancho disponible
 // dividido por ese tamaño — no de un `grid-cols-N` escrito a mano.
 
-/**
- * Ancho de la tarjeta de mesa, en px. **El mismo en Salón, Terraza,
- * Reservados y Barra**, en la vista «Todas» y en la filtrada.
- *
- * De dónde sale el 168: es el mayor ancho con el que La Maestranza
- * (6 Salón + 6 Terraza + 4 Barra) entra entera sin desplazar a
- * 1280 × 800, que es el suelo del bucle visual. A 1280 el lienzo útil
- * son 1224 px y una banda de 6 mesas pide `6·W + 5·14 + 36`; con 168 son
- * 1114, y las tres bandas suman 546 px de alto sobre los 560
- * disponibles. Con 184 la banda cabría por 14 px y con 200 ya no cabe.
- *
- * No es un número de diseño "bonito": es el techo del caso real. Si
- * mañana una sala pide más mesas por banda, lo que cede es el número de
- * columnas (las mesas bajan de fila), nunca el tamaño de la tarjeta.
- */
-export const TABLE_CARD_WIDTH = 168;
-
-/**
- * Alto de la tarjeta de mesa, en px. Se conserva el 118 de v1.9.3: era
- * ya el alto de TODAS las tarjetas (lo que variaba era el ancho) y la
- * tarjeta sigue enseñando lo mismo —nombre, PAX, minutos, cajero,
- * importe—. Muy por encima del mínimo táctil de 64 px de `tokens.md`.
- */
-export const TABLE_CARD_HEIGHT = 118;
-
-/**
- * La clase de Tailwind que pinta ese tamaño. Literal a propósito: el JIT
- * no compila `w-[${W}px]`, así que el número vive dos veces. Para que no
- * se separen, `room-grid.test.ts` comprueba que la clase y las
- * constantes dicen lo mismo.
- *
- * `w-full` por debajo de `sm`: en handheld la tarjeta llena **su celda**
- * de la rejilla de dos columnas (ver `ROOM_GRID_CLASS`), no la pantalla.
- * A 390 px eso son 153 px de ancho por tarjeta — el mismo para todas, en
- * todas las zonas, que es la invariante del bloque: lo que cambia con el
- * tamaño de pantalla es cuánto vale ese "lo mismo", nunca que dos mesas
- * midan distinto a la vez.
- *
- * El alto NO cambia con la pantalla: 118 px en handheld igual que en el
- * terminal. Una mesa no es más baja por mirarla en un móvil.
- *
- * **Una sola clase para toda mesa.** Si una zona necesitara su propio
- * tamaño, el sitio donde discutirlo es este fichero, no un `className`
- * suelto en el componente.
- */
-export const TABLE_CARD_SIZE_CLASS = "h-[118px] w-full sm:w-[168px]";
-
-/**
- * La rejilla de mesas de una zona, en dos regímenes:
- *
- * - **Por debajo de `sm`**: `grid grid-cols-2`. DOS columnas fijas, con
- *   la tarjeta a `w-full` de su celda. A 390 px —el handheld del bucle
- *   visual— la celda mide 153 px: el main deja 358, el marco de zona se
- *   lleva 36 de `p-[18px]` más 2 de borde, y el hueco de 14 se reparte.
- *   Una sola columna daba tarjetas de 320 px y un mapa de 2.614 px de
- *   scroll para 16 mesas; con dos, el camarero ve el doble de sala por
- *   pantallazo sin bajar del objetivo táctil (153 × 118, muy por encima
- *   de los 64 × 64 de `tokens.md`) — y el mapa baja a 1.481 px.
- * - **Desde `sm`**: `flex flex-wrap` con la tarjeta a 168 px. Ahí el
- *   número de columnas NO está escrito en ninguna parte: sale del ancho
- *   disponible dividido por el tamaño de tarjeta (7 a 1443 px, 6 a
- *   1280). Ése es el punto del bloque, y por eso el `grid-cols-2` de
- *   handheld lleva siempre su `sm:flex sm:flex-wrap` detrás.
- *
- * Las dos mitades se comprueban por separado en `table-map-tamano-unico`:
- * quitar el `grid-cols-2` devuelve el handheld a una columna, y quitar
- * el `sm:flex-wrap` devuelve el terminal a dos.
- */
-export const ROOM_GRID_CLASS = "grid grid-cols-2 gap-3.5 sm:flex sm:flex-wrap";
-
-/**
- * Columnas de la rejilla de mesas por debajo de `sm`.
- *
- * No es un número de estilo: es el que hace que `handheldCardWidth` dé
- * un ancho utilizable. Si sube a 3, a 390 px la tarjeta baja a 98.
- */
-export const ROOM_GRID_HANDHELD_COLUMNS = 2;
+// ──────────────────────────────────────────────────────────────────────
+// v2-H1-venta-y-sala · lo que v1.23 dejaba aquí y este bloque retira
+//
+// v1.23 pintaba la mesa con `TABLE_CARD_WIDTH = 168` /
+// `TABLE_CARD_HEIGHT = 118` y con `TABLE_CARD_SIZE_CLASS`, la clase
+// literal de Tailwind que repetía esos números —el JIT no compila
+// `w-[${W}px]`— con un test que vigilaba que la clase y las constantes
+// no se separaran. Y pintaba la rejilla con `ROOM_GRID_CLASS`, que metía
+// un `grid-cols-2` para handheld y su `sm:flex sm:flex-wrap` detrás.
+//
+// Todo eso se va, y se va porque la sala oscura lo hace mejor:
+//
+//   · El tamaño entra por `style` con `TABLE_SHAPE_SIZE`, así que el
+//     número vive UNA vez. Desaparece la clase, desaparece el test que
+//     vigilaba la copia y desaparece el hueco por el que un
+//     `[&>*]:!w-[124px]` colado en un envoltorio se escapaba de jsdom
+//     (lo dejó anotado v1.23 como «una variante del cuarto sabotaje se
+//     escapa»).
+//   · El `grid-cols-2` de handheld ya no hace falta: con una mesa
+//     cuadrada de 144 px, el `flex-wrap` da DOS columnas a 390 px por la
+//     regla general (312 px útiles ÷ 158 = 1,97), que es el reparto que
+//     v1.23 tuvo que escribir a mano. Una excepción menos.
+//
+// Lo que SÍ se queda es la aritmética del lienzo —`roomColumnsFor`,
+// `zoneOuterWidth`, `roomCanvasHeight`—, porque el motor de reparto
+// sigue siendo el mismo `flex-wrap` de marcos de zona. Sus valores por
+// defecto pasan a ser `TABLE_SHAPE_SIZE`: una sola medida en el módulo,
+// que es la regla que v1.23 vino a imponer.
+// ──────────────────────────────────────────────────────────────────────
 
 /** `p-4` del main por debajo de `md`, a cada lado. Medido: 16 px. */
 export const ROOM_PADDING_HANDHELD = 16;
@@ -127,34 +79,202 @@ export const ZONE_BORDER = 2;
  */
 export const BAR_COUNTER_HEIGHT = 26 + 16;
 
-/**
- * Lo que hay encima del lienzo y no es suyo, a 1280 × 800: cabecera de
- * la app (77), `p-7` superior del main (28), fila «Sala · N abiertas…»
- * con los chips de zona (48 + 16 de `mb-4`) y la leyenda de colores
- * (19 + 24 de `mb-6`). Medido en el navegador: el lienzo empieza en
- * y=212.
- */
-export const ROOM_TOP_CHROME = 212;
+// v2-H1 · aquí vivían `ROOM_TOP_CHROME = 212` y `ROOM_BOTTOM_CHROME`,
+// el chrome de la sala CLARA: barra de app (77), `p-7` del main, fila
+// «Sala · N abiertas…» con sus chips (64) y la leyenda intercalada (43).
+// La cabecera oscura mete todo eso en UNA fila de 80 px y la leyenda se
+// va al pie, así que los 212 px dejan de describir nada. Los reemplazan
+// `ROOM_HEADER_DARK` y compañía, más abajo, y los 108 px recuperados son
+// los que permiten que la mesa crezca de 19.824 a 20.736 px².
 
-/** `p-7` inferior del main. Medido: el lienzo termina a 28 px del borde. */
-export const ROOM_BOTTOM_CHROME = 28;
+// ──────────────────────────────────────────────────────────────────────
+// v2-H1-venta-y-sala · decisión 8 · las mesas como FORMAS del local
+//
+// La maqueta revisada con Matías pinta la sala en oscuro y con formas:
+// taburetes redondos sobre una franja de barra, mesas rectangulares en
+// el salón, redondas en la terraza. Y pinta cada forma de un tamaño
+// distinto (128 el taburete, 190 × 132 la del salón, 168 la de terraza).
+//
+// EL CONFLICTO, Y CÓMO SE RESUELVE
+//
+// Esos tres tamaños son exactamente el bug que v1.23 vino a matar: la
+// misma mesa de cuatro personas medía 509 × 118 en Salón, 124 × 118 en
+// Terraza y un círculo de 84 en Barra —7,1× de diferencia de área para
+// el mismo objeto— y el prompt de este bloque prohíbe regresar nada de
+// v1.23. El propio prompt lo zanja en su §2: «las formas se colocan por
+// zona con el layout que mida v1.23 (**mismo tamaño de mesa en todas las
+// zonas**…)».
+//
+// Así que la maqueta manda en la FORMA y v1.23 manda en el TAMAÑO: **una
+// sola caja para toda mesa**, y lo que cambia por zona es el radio. Las
+// posiciones absolutas de la maqueta (que están colocadas a mano para la
+// sala concreta de La Maestranza) se quedan como ilustración: el reparto
+// lo sigue haciendo el `flex-wrap` de v1.23, que es lo que funciona con
+// la sala de cualquier comercio y sin editor de posiciones.
+//
+// Una caja CUADRADA, y no la de 168 × 118 de v1.23, porque un círculo en
+// una caja 7:5 es una elipse: el taburete de la barra y la mesa redonda
+// de la terraza dejarían de ser «formas del local» para ser óvalos.
+// ──────────────────────────────────────────────────────────────────────
 
 /**
- * Ancho de una tarjeta en handheld, donde no mide 168 sino lo que le
- * toque de su celda. Sirve para afirmar en un test que a 390 px sigue
- * siendo un objetivo tocable y no una miniatura.
+ * El lado de la caja de una mesa en la sala de hostelería, en px. **El
+ * mismo en Barra, Salón, Terraza y Reservados**, y el mismo en la vista
+ * «Todas» y en la filtrada.
+ *
+ * De dónde sale el 144. La restricción dura es la de v1.23: La
+ * Maestranza (4 Barra + 6 Salón + 6 Terraza) entera y **sin desplazar**
+ * a 1280 × 800 y a 1443 × 812. Con la cabecera oscura de 80 px y la
+ * leyenda al pie, el lienzo dispone de 641 px a 800 y 653 a 812, y tres
+ * bandas de una fila piden `3·S + 192`:
+ *
+ * | S | alto | 1443 × 812 (653) | 1280 × 800 (641) | área |
+ * |---|---|---|---|---|
+ * | 144 | 624 | cabe, 29 de sobra | cabe, **17 de sobra** | 20.736 |
+ * | 148 | 636 | cabe, 17 de sobra | cabe, **5 de sobra** | 21.904 |
+ * | 152 | 648 | cabe, 5 de sobra | **NO cabe** | 23.104 |
+ *
+ * El techo del caso real es 148, y v1.23 habría cogido el techo. Aquí se
+ * coge 144 a propósito: `roomCanvasHeight` **reproduce** la regla de
+ * corte de flexbox, no la mide, y v1.23 ya dejó escrito que el borde de
+ * `1.5px` lo cuantiza el navegador a 1 px por lado. Cinco píxeles de
+ * margen están dentro del error de esa reproducción; diecisiete, no. Lo
+ * confirma el bucle visual.
+ *
+ * Y no es una regresión de v1.23: **20.736 px² contra los 19.824** de la
+ * tarjeta de 168 × 118. Toda mesa crece y toda mesa sigue midiendo lo
+ * mismo que sus vecinas.
  */
-export function handheldCardWidth(
+export const TABLE_SHAPE_SIZE = 144;
+
+/**
+ * El radio por zona. Es lo ÚNICO que distingue una zona de otra.
+ *
+ * Barra y Terraza son círculos (el taburete y la mesa redonda de la
+ * maqueta); Salón y Reservados son rectángulos de esquina blanda. La
+ * identidad de la Barra la refuerza además el mostrador dibujado encima,
+ * que v1.23 ya conservaba.
+ */
+export const TABLE_SHAPE_RADIUS: Record<
+  "SALON" | "TERRAZA" | "BARRA" | "RESERVADO",
+  number
+> = {
+  BARRA: TABLE_SHAPE_SIZE / 2,
+  TERRAZA: TABLE_SHAPE_SIZE / 2,
+  SALON: 20,
+  RESERVADO: 20,
+};
+
+/** Alto de la cabecera oscura de la sala. Medido en la maqueta. */
+export const ROOM_HEADER_DARK = 80;
+
+/** `pt-6` del lienzo oscuro. */
+export const ROOM_TOP_PADDING_DARK = 24;
+
+/** La leyenda al pie más su separación. Medido en la maqueta. */
+export const ROOM_LEGEND_DARK = 55;
+
+/** `px-5` del lienzo oscuro, a cada lado. */
+export const ROOM_SIDE_PADDING_DARK = 20;
+
+/**
+ * Alto disponible para el lienzo en la sala oscura.
+ *
+ * Reemplaza a `ROOM_TOP_CHROME`/`ROOM_BOTTOM_CHROME` —que medían la
+ * cabecera clara con su fila «Sala · N abiertas…» y su leyenda
+ * intercalada, 212 px en total— porque la cabecera oscura mete el
+ * título, el contador, los filtros de zona y «Venta rápida» en UNA fila
+ * de 80 px. Esos 108 px recuperados son los que permiten que la mesa
+ * crezca de 19.824 a 20.736 px² sin que la sala empiece a desplazar.
+ */
+export function roomAvailableHeightDark(viewportHeight: number): number {
+  return Math.max(
+    0,
+    viewportHeight -
+      ROOM_HEADER_DARK -
+      ROOM_TOP_PADDING_DARK -
+      ROOM_LEGEND_DARK,
+  );
+}
+
+/** Ancho disponible para el lienzo en la sala oscura. */
+export function roomAvailableWidthDark(viewportWidth: number): number {
+  return Math.max(0, viewportWidth - 2 * ROOM_SIDE_PADDING_DARK);
+}
+
+/**
+ * ¿Cabe la sala oscura entera sin desplazar?
+ *
+ * Es `roomFitsWithoutScroll` con el chrome de la pantalla nueva. La
+ * aritmética del lienzo (`roomCanvasHeight`) **no cambia**: sigue siendo
+ * la de v1.23, porque el motor de reparto sigue siendo el mismo
+ * `flex-wrap` de marcos de zona. Lo único que cambia es cuánto alto hay
+ * y cuánto mide una mesa.
+ */
+export function roomFitsWithoutScrollDark(
+  zones: RoomZone[],
   viewportWidth: number,
-  columns: number = ROOM_GRID_HANDHELD_COLUMNS,
-  gap: number = ROOM_GRID_GAP,
+  viewportHeight: number,
+  cardSize: number = TABLE_SHAPE_SIZE,
+): boolean {
+  return (
+    roomCanvasHeight(
+      zones,
+      roomAvailableWidthDark(viewportWidth),
+      cardSize,
+      cardSize,
+    ) <= roomAvailableHeightDark(viewportHeight)
+  );
+}
+
+/**
+ * Ancho de la línea de texto disponible a `offset` px del centro de una
+ * mesa REDONDA de lado `size`.
+ *
+ * Existe porque el importe de una mesa no se corta nunca (la lección de
+ * v1.22 en la tarjeta de mesa), y en un círculo el ancho útil **no es el
+ * lado**: en el centro vale el diámetro y a 20 px por debajo —donde va
+ * el importe, con el nombre encima— vale la cuerda. Medir contra el lado
+ * daría «cabe» a un importe que el círculo recorta por los lados.
+ *
+ * Cuerda a distancia `d` del centro de una circunferencia de radio `r`:
+ * `2·√(r² − d²)`.
+ */
+export function roundTableChordWidth(
+  offsetFromCenter: number,
+  size: number = TABLE_SHAPE_SIZE,
 ): number {
-  // El marco de zona es `border-box`: su borde sale del ancho interior,
-  // igual que el padding. Sin contarlo la cuenta daba 154 y el navegador
-  // medía 153.
-  const inner =
-    viewportWidth - 2 * ROOM_PADDING_HANDHELD - 2 * ZONE_PADDING - ZONE_BORDER;
-  return Math.floor((inner - (columns - 1) * gap) / columns);
+  const r = size / 2;
+  const d = Math.min(Math.abs(offsetFromCenter), r);
+  return 2 * Math.sqrt(r * r - d * d);
+}
+
+/** Tamaño del importe en la tarjeta oscura, en px. */
+export const TABLE_AMOUNT_FONT_PX_DARK = 22;
+
+/**
+ * Distancia del importe al centro de la mesa, en px. El nombre va encima
+ * y el importe debajo; medido sobre la maqueta.
+ */
+export const TABLE_AMOUNT_OFFSET_DARK = 20;
+
+/**
+ * ¿Cabe el importe entero en una mesa REDONDA de la sala oscura?
+ *
+ * `TABLE_AMOUNT_CHAR_WIDTH` está calibrado a 19 px (v1.22), así que se
+ * escala al tamaño de aquí en vez de medir otra cota: es la misma fuente
+ * con `tabular-nums` y el ancho por carácter es lineal con el tamaño.
+ */
+export function roundTableAmountFits(
+  amount: string = LONGEST_TABLE_AMOUNT,
+  size: number = TABLE_SHAPE_SIZE,
+  fontPx: number = TABLE_AMOUNT_FONT_PX_DARK,
+): boolean {
+  const charWidth = (TABLE_AMOUNT_CHAR_WIDTH * fontPx) / TABLE_AMOUNT_FONT_PX;
+  return (
+    amount.length * charWidth <=
+    roundTableChordWidth(TABLE_AMOUNT_OFFSET_DARK, size)
+  );
 }
 
 /**
@@ -167,7 +287,7 @@ export function handheldCardWidth(
  */
 export function roomColumnsFor(
   innerWidth: number,
-  cardWidth: number = TABLE_CARD_WIDTH,
+  cardWidth: number = TABLE_SHAPE_SIZE,
   gap: number = ROOM_GRID_GAP,
 ): number {
   if (innerWidth <= 0 || cardWidth <= 0) return 0;
@@ -182,7 +302,7 @@ export function roomColumnsFor(
  */
 export function zoneOuterWidth(
   columns: number,
-  cardWidth: number = TABLE_CARD_WIDTH,
+  cardWidth: number = TABLE_SHAPE_SIZE,
   gap: number = ROOM_GRID_GAP,
 ): number {
   if (columns <= 0) return 2 * ZONE_PADDING;
@@ -209,8 +329,8 @@ export interface RoomZone {
 export function roomCanvasHeight(
   zones: RoomZone[],
   availableWidth: number,
-  cardWidth: number = TABLE_CARD_WIDTH,
-  cardHeight: number = TABLE_CARD_HEIGHT,
+  cardWidth: number = TABLE_SHAPE_SIZE,
+  cardHeight: number = TABLE_SHAPE_SIZE,
 ): number {
   const maxColumns = roomColumnsFor(
     availableWidth - 2 * ZONE_PADDING,
@@ -249,27 +369,6 @@ export function roomCanvasHeight(
   return total;
 }
 
-/**
- * ¿Cabe la sala entera sin desplazar en un viewport de
- * `viewportWidth × viewportHeight`?
- *
- * `availableWidth` es el ancho del main menos su `p-7` a cada lado.
- */
-export function roomFitsWithoutScroll(
-  zones: RoomZone[],
-  viewportWidth: number,
-  viewportHeight: number,
-  cardWidth: number = TABLE_CARD_WIDTH,
-  cardHeight: number = TABLE_CARD_HEIGHT,
-): boolean {
-  const availableWidth = viewportWidth - 2 * 28;
-  const availableHeight = viewportHeight - ROOM_TOP_CHROME - ROOM_BOTTOM_CHROME;
-  return (
-    roomCanvasHeight(zones, availableWidth, cardWidth, cardHeight) <=
-    availableHeight
-  );
-}
-
 // ──────────────────────────────────────────────────────────────────────
 // El importe de una mesa ocupada no se corta nunca
 //
@@ -291,12 +390,11 @@ export function roomFitsWithoutScroll(
 // componente pinta y las que el test mide.
 // ──────────────────────────────────────────────────────────────────────
 
-/**
- * Lo que la tarjeta se come antes del contenido: `p-3.5` (14 px por
- * lado) y `border-2` (2 px por lado). El hueco útil de una tarjeta de
- * ancho W es `W - TABLE_CARD_CHROME_X`.
- */
-export const TABLE_CARD_CHROME_X = 2 * 14 + 2 * 2;
+// v2-H1 · aquí vivía `TABLE_CARD_CHROME_X` (el `p-3.5` más el
+// `border-2` que la tarjeta clara se comía antes del contenido). La
+// forma oscura centra su contenido sin padding, así que el cromo
+// horizontal es cero y lo que limita es la geometría del círculo: ver
+// `roundTableChordWidth`.
 
 /** Tamaño del importe en la tarjeta, en px. `text-[19px]`. */
 export const TABLE_AMOUNT_FONT_PX = 19;
@@ -335,31 +433,9 @@ export const TABLE_AMOUNT_CHAR_WIDTH = 11.5;
  */
 export const LONGEST_TABLE_AMOUNT = "1234,50 €";
 
-/** Ancho que ocupa un importe pintado en la tarjeta, en px. */
-export function tableAmountWidth(amount: string): number {
-  return amount.length * TABLE_AMOUNT_CHAR_WIDTH;
-}
-
-/**
- * Hueco útil para el contenido dentro de una tarjeta de mesa, en px.
- */
-export function tableCardContentWidth(
-  cardWidth: number = TABLE_CARD_WIDTH,
-): number {
-  return cardWidth - TABLE_CARD_CHROME_X;
-}
-
-/**
- * ¿Cabe el importe entero en la tarjeta, en su propia línea?
- *
- * Esto es lo que el test mide en 1443 × 812 (tarjeta de 168) y en
- * 390 × 844 (tarjeta de 153). Se pregunta por el importe SOLO: desde
- * este bloque no comparte línea con nadie, así que no entra en la cuenta
- * ni el avatar del camarero ni su alias.
- */
-export function tableAmountFits(
-  amount: string,
-  cardWidth: number = TABLE_CARD_WIDTH,
-): boolean {
-  return tableAmountWidth(amount) <= tableCardContentWidth(cardWidth);
-}
+// v2-H1 · y aquí vivían `tableAmountWidth`, `tableCardContentWidth` y
+// `tableAmountFits`, la cuenta rectangular de v1.22. Las sustituye
+// `roundTableAmountFits`, que mide contra la CUERDA del círculo: es
+// estrictamente más estrecha que el lado, así que un importe que entra
+// en la mesa redonda entra también en la rectangular del Salón. Una sola
+// cuenta, y la más exigente de las dos.

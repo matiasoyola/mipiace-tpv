@@ -541,10 +541,15 @@ describe("Frente 3 · navegación de bar", () => {
     expect(
       container.querySelector('button[aria-label="Abrir menú"]'),
     ).not.toBeNull();
-    const ticketsBtn = Array.from(container.querySelectorAll("button")).find(
-      (b) => (b.textContent ?? "").trim() === "Tickets",
+    // v2-H1 · la cabecera oscura mete título, contador, filtros de zona
+    // y «Venta rápida» en UNA fila de 80 px (son los 108 px que la mesa
+    // necesita para crecer), así que «Tickets» pasa a ser sólo icono.
+    // Sigue a un toque y en el mismo sitio: lo que se guarda es el
+    // destino, no el rótulo.
+    const ticketsBtn = container.querySelector(
+      'button[aria-label="Tickets pasados"]',
     );
-    expect(ticketsBtn).not.toBeUndefined();
+    expect(ticketsBtn).not.toBeNull();
 
     // Al abrir el menú aparecen Arqueo X y Cerrar turno.
     await act(async () => {

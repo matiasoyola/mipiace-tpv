@@ -255,7 +255,12 @@ function deleteCall() {
 }
 
 function enElMapa(): boolean {
-  return (container.textContent ?? "").includes("Nueva venta rápida");
+  // v2-H1 · el botón de la cabecera oscura de la sala dice «Venta
+  // rápida» (la maqueta revisada con Matías); antes decía «Nueva venta
+  // rápida». Se pregunta por la pantalla y no por el rótulo: el
+  // `data-testid` de la sala es lo que no va a cambiar con la siguiente
+  // pasada de copy.
+  return container.querySelector('[data-testid="room-screen"]') != null;
 }
 
 function porTestId(id: string): HTMLButtonElement {
@@ -322,7 +327,7 @@ describe("v1.12 addendum · salir de una mesa vacía la suelta", () => {
   it("el Atrás no inventa limpieza en venta rápida (no hay mesa que soltar)", async () => {
     mockApi();
     await renderHome();
-    await click(buttonIncluding("Nueva venta rápida"));
+    await click(buttonIncluding("Venta rápida"));
     expect(enElMapa()).toBe(false);
 
     await pulsarAtras();
