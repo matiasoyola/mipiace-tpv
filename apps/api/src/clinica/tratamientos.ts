@@ -36,7 +36,12 @@
 
 import { type CausaExencion, esCausaExencion } from "@mipiacetpv/ticket-model";
 import type { PrismaClient } from "@mipiacetpv/db";
-import type { TratamientoDelCatalogo } from "@mipiacetpv/clinica-sesion";
+import type {
+  ServicioDeSesion,
+  TratamientoDelCatalogo,
+} from "@mipiacetpv/clinica-sesion";
+
+import { tiposDeLosServicios } from "./tipos-de-visita.js";
 
 /**
  * Los tratamientos que la sesión ofrece HOY, en el orden del catálogo.
@@ -131,4 +136,46 @@ export async function tratamientosPorId(
         ? { causaExencion: p.exemptionCause as CausaExencion }
         : {}),
     }));
+}
+
+// ── clinica-5 · los mismos servicios, con su tipo y su nivel ───────────
+
+/**
+ * Los servicios de sesión de hoy, cada uno con el TIPO DE VISITA que
+ * hereda de su categoría y, si es uno de los tres niveles de quiropodia,
+ * con cuál.
+ *
+ * Es lo que la sesión por tipos necesita para agrupar los botones en
+ * tarjetas y para saber qué producto cobra el nivel elegido.
+ *
+ * ── Por qué una función envolvente y no un campo más en la de arriba ──
+ *
+ * Porque el tipo NO sale de `products` ni de `service_scheduling`: sale de
+ * cruzar `products.tags` con `tag_visit_types`, que es otra tabla y otra
+ * consulta. Metido dentro de `tratamientosDeLaSesion`, el cobro de una
+ * sesión ya cerrada —que llama a `tratamientosPorId` y no necesita
+ * tipos— habría empezado a pagar una consulta que no usa.
+ *
+ * Dos consultas y no N: `tiposDeLosServicios` pide las etiquetas de todos
+ * los servicios de golpe y el mapa del centro una sola vez.
+ */
+export async function serviciosDeSesionConTipo(
+  prisma: PrismaClient,
+  tenantId: string,
+): Promise<ServicioDeSesion[]> {
+  const base = await tratamientosDeLaSesion(prisma, tenantId);
+  if (base.length === 0) return [];
+  const tipos = await tiposDeLosServicios(
+    prisma,
+    tenantId,
+    base.map((t) => t.serviceId),
+  );
+  return base.map((t) => {
+    const extra = tipos.get(t.serviceId);
+    return {
+      ...t,
+      tipo: extra?.tipo ?? null,
+      nivelQuiropodia: extra?.nivel ?? null,
+    };
+  });
 }
