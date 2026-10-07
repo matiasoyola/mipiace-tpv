@@ -151,6 +151,10 @@ describe.skipIf(!e2eEnabled)("e2e · el cobro de una sesión clínica", () => {
     precio: string;
     iva: string;
     tratamientoSesion: boolean;
+    /** clinica-5 · la categoría, de la que sale el TIPO DE VISITA (S5). */
+    tags?: string[];
+    /** Y si es uno de los tres niveles de quiropodia, cuál. */
+    nivelQuiropodia?: number | null;
   }): Promise<string> {
     const p = await prisma.product.create({
       data: {
@@ -160,6 +164,7 @@ describe.skipIf(!e2eEnabled)("e2e · el cobro de una sesión clínica", () => {
         basePrice: input.precio,
         taxRate: input.iva,
         kind: "SERVICE",
+        tags: input.tags ?? ["podologia"],
       },
       select: { id: true },
     });
@@ -169,9 +174,26 @@ describe.skipIf(!e2eEnabled)("e2e · el cobro de una sesión clínica", () => {
         tenantId,
         durationMin: 30,
         tratamientoSesion: input.tratamientoSesion,
+        nivelQuiropodia: input.nivelQuiropodia ?? null,
       },
     });
     return p.id;
+  }
+
+  /** clinica-5 · el cuerpo del cierre en la forma v2.
+   *
+   *  Los tres servicios de este e2e están en la categoría «podologia», o
+   *  sea de tipo QUIROPODIA, que es lo que eran cuando no había tipos. */
+  function cerrarCon(
+    servicios: string[],
+    extra: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    return {
+      tipos: ["QUIROPODIA"],
+      bloques: { QUIROPODIA: { servicios } },
+      dolor: 4,
+      ...extra,
+    };
   }
 
   beforeAll(async () => {
@@ -303,6 +325,15 @@ describe.skipIf(!e2eEnabled)("e2e · el cobro de una sesión clínica", () => {
                now(), '${podologaId}')`,
     );
 
+    // clinica-5 · el mapa `categoría → tipo de visita` del centro (S5).
+    // Sin esta fila, los servicios de abajo no tienen tipo y la sesión no
+    // los ofrece en ninguna tarjeta — que es justo lo que la regla de S5
+    // garantiza, y lo que el test de las rutas comprueba por el otro
+    // lado.
+    await prisma.tagVisitType.create({
+      data: { tenantId, slug: "podologia", visitType: "QUIROPODIA" },
+    });
+
     primeraVisitaId = await crearServicio({
       nombre: "Primera visita · valoración",
       sku: "SVC-VALORACION",
@@ -419,15 +450,13 @@ describe.skipIf(!e2eEnabled)("e2e · el cobro de una sesión clínica", () => {
       // El panel manda `Authorization` del TPV: `requireOwnerOrCashier`
       // acepta las dos puertas.
       headers: cabecera(tokenPodologa),
-      payload: {
+      payload: cerrarCon([quiropodiaId, fresadoId, verrugaId], {
         marcas: { "L:h": { lesion: "unero", gravedad: "MODERADA" } },
-        tratamientos: [quiropodiaId, fresadoId, verrugaId],
-        dolor: 4,
         evolucion: "MEJOR",
         consejos: ["calzado", "hidratar"],
         proximaCita: "S4",
         nota: "se le explicó la cura",
-      },
+      }),
     });
     expect(r.statusCode).toBe(201);
     expect(await sesionesDeLaCita()).toBe(1);
@@ -451,20 +480,41 @@ describe.skipIf(!e2eEnabled)("e2e · el cobro de una sesión clínica", () => {
     // Es la lección del §10b de clinica-1: un aserto sobre el texto tiene
     // que contar, no buscar.
     expect(cuerpo.tratamientosNombre[quiropodiaId]).toBe("Quiropodia");
+    // LA FORMA DEL CUERPO v2, clave por clave. El aserto es exacto a
+    // propósito: el día que alguien añada un campo con un importe al
+    // cuerpo de la historia, esto se pone rojo antes de que el importe
+    // llegue a `clinical_entries`.
     expect(Object.keys(cuerpo).sort()).toEqual([
+      "avisos",
+      "bloques",
       "consejos",
       "consejosVersion",
       "dolor",
+      "especialidad",
       "evolucion",
       "firma",
       "lesionesVersion",
+      "listas",
       "mapaVersion",
       "marcas",
       "nota",
+      "pendientesCerrados",
+      "pendientesCreados",
       "proximaCita",
+      "tipos",
       "tratamientos",
       "tratamientosNombre",
       "v",
+    ]);
+    // Y lo que clinica-5 añade: el tipo, la especialidad congelada (S5) y
+    // el bloque con sus servicios.
+    expect(cuerpo.v).toBe(2);
+    expect(cuerpo.tipos).toEqual(["QUIROPODIA"]);
+    expect(cuerpo.especialidad).toBe("PODOLOGIA");
+    expect(cuerpo.bloques.QUIROPODIA.servicios).toEqual([
+      quiropodiaId,
+      fresadoId,
+      verrugaId,
     ]);
     expect(clavesDeDinero(cuerpo)).toEqual([]);
   });
@@ -531,7 +581,7 @@ describe.skipIf(!e2eEnabled)("e2e · el cobro de una sesión clínica", () => {
       url: `/clinica/appointments/${citaId}/sesion/cerrar`,
       headers: cabecera(tokenPodologa),
       // Con otro contenido: lo que se devuelve es lo FIRMADO.
-      payload: { tratamientos: [verrugaId], dolor: 9 },
+      payload: cerrarCon([verrugaId], { dolor: 9 }),
     });
     expect(r.statusCode).toBe(200);
     expect(r.json().yaEstaba).toBe(true);
@@ -589,14 +639,13 @@ describe.skipIf(!e2eEnabled)("e2e · el cobro de una sesión clínica", () => {
       method: "POST",
       url: `/clinica/appointments/${otra}/sesion/cerrar`,
       headers: cabecera(tokenPodologa),
-      payload: {
+      payload: cerrarCon([quiropodiaId], {
         marcas: { "R:talon": { lesion: "herida", gravedad: "SEVERA" } },
-        tratamientos: [quiropodiaId],
         dolor: 8,
         evolucion: "PEOR",
         consejos: ["cura"],
         nota: "la úlcera del talón va peor",
-      },
+      }),
     });
 
     const r = await app.inject({

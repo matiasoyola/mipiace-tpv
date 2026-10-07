@@ -41,7 +41,81 @@ export const CLINICA = {
   quiropodia: "33333333-3333-4333-8333-333333333362",
   fresado: "33333333-3333-4333-8333-333333333363",
   verruga: "33333333-3333-4333-8333-333333333364",
+  /** clinica-5 · los TRES NIVELES de la quiropodia, que son tres productos
+   *  (decisión 4). El nivel que la sesión propone elige cuál pasa a caja. */
+  basica: "33333333-3333-4333-8333-333333333371",
+  completa: "33333333-3333-4333-8333-333333333372",
+  extra: "33333333-3333-4333-8333-333333333373",
+  /** clinica-5 · la cura de la revisión de cirugía, en la categoría de
+   *  cirugía: es la segunda línea del «Pasa a caja» del mockup. */
+  cura: "33333333-3333-4333-8333-333333333374",
+  /** Y la consulta de pie de riesgo, para que ese tipo tenga cobro. */
+  consultaRiesgo: "33333333-3333-4333-8333-333333333375",
 } as const;
+
+/**
+ * clinica-5 · el mapa `categoría → tipo de visita` del centro (S5).
+ *
+ * Tres categorías para los tres tipos que el banco recorre. Sin estas
+ * filas los servicios no tienen tipo y la sesión no los ofrece en ninguna
+ * tarjeta — que es la regla de S5 funcionando, no un fallo del seed.
+ */
+export const CATEGORIAS_CLINICAS = [
+  { slug: "podologia", visitType: "QUIROPODIA" },
+  { slug: "cirugia", visitType: "CIRUGIA" },
+  { slug: "pie-de-riesgo", visitType: "PIE_RIESGO" },
+] as const;
+
+/**
+ * clinica-5 · los tres niveles de quiropodia y los dos servicios de los
+ * otros tipos.
+ *
+ * Los precios son los de Rosario (`docs/clinica/decisiones.md`): básica
+ * 25 €, completa 26 €, extra 27 €, los mismos 30 minutos. Exentos los
+ * cinco, como el resto de lo sanitario.
+ */
+export const SERVICIOS_POR_TIPO = [
+  {
+    id: CLINICA.basica,
+    name: "Quiropodia básica",
+    sku: "SVC-QUIRO-1",
+    basePrice: 25,
+    tags: ["podologia"],
+    nivelQuiropodia: 1,
+  },
+  {
+    id: CLINICA.completa,
+    name: "Quiropodia completa",
+    sku: "SVC-QUIRO-2",
+    basePrice: 26,
+    tags: ["podologia"],
+    nivelQuiropodia: 2,
+  },
+  {
+    id: CLINICA.extra,
+    name: "Quiropodia extra",
+    sku: "SVC-QUIRO-3",
+    basePrice: 27,
+    tags: ["podologia"],
+    nivelQuiropodia: 3,
+  },
+  {
+    id: CLINICA.cura,
+    name: "Cura",
+    sku: "SVC-CURA",
+    basePrice: 13,
+    tags: ["cirugia"],
+    nivelQuiropodia: null,
+  },
+  {
+    id: CLINICA.consultaRiesgo,
+    name: "Consulta de pie de riesgo",
+    sku: "SVC-RIESGO",
+    basePrice: 20,
+    tags: ["pie-de-riesgo"],
+    nivelQuiropodia: null,
+  },
+] as const;
 
 export const CLINICA_NOMBRE = "Clínica Podológica Demo";
 export const CLINICA_DEVICE_TOKEN = "banco-clinica-dispositivo-0001";
@@ -340,6 +414,10 @@ export async function sembrarClinica(prisma: PrismaClient): Promise<void> {
         holdedProductId: null,
         name: t.name,
         sku: t.sku,
+        // clinica-5 · la categoría de la que sale el TIPO DE VISITA (S5).
+        // Los tres de clinica-3 son de quiropodia, que es lo que eran
+        // cuando no había tipos.
+        tags: ["podologia"],
         basePrice: t.basePrice,
         // iva-exento-sanitario · exento ⇒ `taxRate = 0` SIEMPRE, y lo
         // garantiza el CHECK `products_exencion_sin_iva`: si alguien
@@ -354,6 +432,55 @@ export async function sembrarClinica(prisma: PrismaClient): Promise<void> {
             durationMin: 30,
             staffRequired: 1,
             tratamientoSesion: true,
+            channels: { caja: true, ticket: true, agenda: true, online: false },
+          },
+        },
+      },
+    });
+  }
+
+  // clinica-5 · el mapa `categoría → tipo de visita` (S5) y los servicios
+  // de cada tipo: los tres niveles de quiropodia, la cura de la revisión y
+  // la consulta de pie de riesgo.
+  //
+  // Es lo que hace que el banco pueda recorrer el mockup entero: sin los
+  // niveles, la tarjeta de quiropodia propone un nivel y no tiene producto
+  // que cobrar; sin la cura, la revisión de cirugía sale «sin cobro».
+  for (const c of CATEGORIAS_CLINICAS) {
+    await prisma.tagVisitType.create({
+      data: {
+        tenantId: CLINICA.tenant,
+        slug: c.slug,
+        visitType: c.visitType,
+      },
+    });
+  }
+
+  for (const s of SERVICIOS_POR_TIPO) {
+    await prisma.product.create({
+      data: {
+        id: s.id,
+        tenantId: CLINICA.tenant,
+        kind: "SERVICE",
+        source: "LOCAL",
+        holdedProductId: null,
+        name: s.name,
+        sku: s.sku,
+        tags: [...s.tags],
+        basePrice: s.basePrice,
+        // Exento ⇒ `taxRate = 0` SIEMPRE (CHECK
+        // `products_exencion_sin_iva`): un acto sanitario del art.
+        // 20.Uno.3º, como el resto.
+        taxRate: 0,
+        exemptionCause: "E1",
+        active: true,
+        scheduling: {
+          create: {
+            tenantId: CLINICA.tenant,
+            durationMin: 30,
+            staffRequired: 1,
+            tratamientoSesion: true,
+            nivelQuiropodia: s.nivelQuiropodia,
             channels: { caja: true, ticket: true, agenda: true, online: false },
           },
         },
@@ -387,6 +514,7 @@ export async function sembrarClinica(prisma: PrismaClient): Promise<void> {
     for (const serviceId of [
       SERVICIO_VALORACION.id,
       ...TRATAMIENTOS.map((t) => t.id),
+      ...SERVICIOS_POR_TIPO.map((s) => s.id),
     ]) {
       await prisma.staffSkill.create({
         data: { tenantId: CLINICA.tenant, userId, serviceId },

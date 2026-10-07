@@ -251,6 +251,7 @@ export {
   type ResumenPorTipos,
   type ServicioDeSesion,
   type SesionV2Normalizada,
+  type TipoSinCobro,
   type TiposDeLaSesion,
   type VersionesDeLasListas,
 } from "./sesion-v2.js";

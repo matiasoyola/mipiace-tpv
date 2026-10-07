@@ -392,13 +392,62 @@ describe("clinica-5 · dos tipos, dos líneas a caja (sabotaje)", () => {
       dolor: 3,
       verImportes: true,
     });
-    expect(resumen.sinCobro).toEqual(["PIE_RIESGO"]);
+    // En este catálogo no hay NINGÚN servicio de la categoría de pie de
+    // riesgo, así que el motivo es «sin servicio».
+    expect(resumen.sinCobro).toEqual([
+      { tipo: "PIE_RIESGO", motivo: "SIN_SERVICIO" },
+    ]);
     expect(resumen.total).toBe(25);
     expect(resumen.puedeCerrar).toBe(true);
     expect(textoSinCobro(resumen.sinCobro)).toBe(
-      "Pie de riesgo: sin cobro (no hay servicio asignado)",
+      "Pie de riesgo: sin cobro, no hay servicio en su categoría",
     );
     expect(textoSinCobro([])).toBeNull();
+  });
+
+  it("y «sin cobro» distingue «no hay servicio» de «no has marcado nada»", () => {
+    // Lo encontró el BUCLE VISUAL, no un test: la barra decía «no hay
+    // servicio asignado» de un pie de riesgo que tenía su consulta de
+    // 20 € ahí al lado, sin marcar. Son dos cosas distintas y piden cosas
+    // distintas: una es ir al catálogo, la otra es tocar un botón.
+    const conConsulta: ServicioDeSesion[] = [
+      ...CATALOGO,
+      {
+        serviceId: "99999999-9999-4999-8999-999999999999",
+        nombre: "Consulta de pie de riesgo",
+        precio: 20,
+        iva: 0,
+        tipo: "PIE_RIESGO",
+        nivelQuiropodia: null,
+      },
+    ];
+    const resumen = resumenPorTipos({
+      // GENERAL y no BIOMECANICA: el catálogo de arriba SÍ tiene una
+      // exploración biomecánica, así que ése saldría «no has marcado
+      // nada». GENERAL no tiene ninguno.
+      tipos: ["PIE_RIESGO", "GENERAL"],
+      bloques: {
+        PIE_RIESGO: {
+          sensibilidad: null,
+          pulsos: { L: null, R: null },
+          ulcera: null,
+          deformidad: null,
+          riesgo: null,
+          servicios: [],
+        },
+        GENERAL: { servicios: [] },
+      },
+      catalogo: conConsulta,
+      dolor: 3,
+      verImportes: true,
+    });
+    expect(resumen.sinCobro).toEqual([
+      { tipo: "PIE_RIESGO", motivo: "NADA_MARCADO" },
+      { tipo: "GENERAL", motivo: "SIN_SERVICIO" },
+    ]);
+    expect(textoSinCobro(resumen.sinCobro)).toBe(
+      "General: sin cobro, no hay servicio en su categoría · Pie de riesgo: sin cobro, no has marcado nada",
+    );
   });
 });
 

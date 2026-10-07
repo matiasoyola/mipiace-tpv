@@ -1540,7 +1540,14 @@ function ComunDeLaSesion(props: {
         {/* ONCE botones que ENVUELVEN, no una rejilla de once columnas:
             con `grid-cols-11` cada tecla salía de 30 px a 1024. Con
             `flex-wrap` y `min-w-touch`, ninguna baja del peldaño de la
-            casa y la fila se parte en dos cuando no caben. */}
+            casa y la fila se parte en dos cuando no caben.
+            El `max-w-[88px]` lo trajo el bucle visual de clinica-5: con
+            `flex-1` sin tope, a 1366 entraban diez en la fila y el «10»
+            se quedaba solo abajo ESTIRADO A TODO EL ANCHO — una tecla de
+            790 px al lado de diez de 74. Con el tope caben las once en
+            una fila a 1366 y, donde no quepan, la que sobra tiene el
+            tamaño de sus hermanas. A 390 no cambia nada (seis por fila de
+            55 px, por debajo del tope). */}
         <div className="flex flex-wrap gap-1">
           {Array.from({ length: 11 }, (_, i) => (
             <button
@@ -1548,7 +1555,7 @@ function ComunDeLaSesion(props: {
               type="button"
               aria-pressed={props.dolor === i}
               onClick={() => props.onDolor(i)}
-              className={`h-touch min-w-touch flex-1 rounded-xl font-semibold text-[16px] ${
+              className={`h-touch min-w-touch max-w-[88px] flex-1 rounded-xl font-semibold text-[16px] ${
                 props.dolor === i
                   ? "bg-mipiace-coral text-white"
                   : "bg-mipiace-stone text-mipiace-ink-soft"

@@ -393,11 +393,30 @@ export interface LineaPorTipo extends LineaDelResumen {
   tipo: TipoDeVisita;
 }
 
+/**
+ * Un tipo marcado que no pone ninguna línea, con POR QUÉ.
+ *
+ * Los dos motivos son cosas distintas y la barra de caja tiene que
+ * decirlas distinto —lo encontró el bucle visual, no un test:
+ *
+ *   · `SIN_SERVICIO` · el centro no le ha asignado ningún servicio a la
+ *     categoría de ese tipo. Hay algo que arreglar en el catálogo.
+ *   · `NADA_MARCADO` · sí lo hay y la podóloga no ha tocado ninguno. No
+ *     hay nada que arreglar: la visita se anota y no se cobra.
+ *
+ * Con un solo texto, la barra decía «no hay servicio asignado» de un pie
+ * de riesgo que tenía su consulta de 20 € ahí al lado, sin marcar.
+ */
+export interface TipoSinCobro {
+  tipo: TipoDeVisita;
+  motivo: "SIN_SERVICIO" | "NADA_MARCADO";
+}
+
 export interface ResumenPorTipos {
   lineas: readonly LineaPorTipo[];
-  /** Los tipos marcados que no ponen ninguna línea. Lo que la barra de
-   *  caja enseña como «sin cobro» (regla 11). */
-  sinCobro: readonly TipoDeVisita[];
+  /** Los tipos marcados que no ponen ninguna línea, con su motivo. Lo que
+   *  la barra de caja enseña como «sin cobro» (regla 11). */
+  sinCobro: readonly TipoSinCobro[];
   /** `null` para quien no ve importes. No es 0: **la clave no está**. */
   total: number | null;
   ivaTexto: string | null;
@@ -433,8 +452,14 @@ export function resumenPorTipos(input: {
 }): ResumenPorTipos {
   const porId = new Map(input.catalogo.map((s) => [s.serviceId, s]));
   const lineas: LineaPorTipo[] = [];
-  const sinCobro: TipoDeVisita[] = [];
+  const sinCobro: TipoSinCobro[] = [];
   const vistos = new Set<string>();
+  // ¿Tiene el centro ALGÚN servicio para este tipo? Para la quiropodia
+  // cuentan también los tres niveles, que no son chips pero sí son línea.
+  const hayServicioDe = (tipo: TipoDeVisita) =>
+    input.catalogo.some(
+      (s) => s.tipo === tipo || (tipo === "QUIROPODIA" && s.nivelQuiropodia != null),
+    );
 
   for (const tipo of TIPOS_DE_VISITA) {
     if (!input.tipos.includes(tipo)) continue;
@@ -465,7 +490,12 @@ export function resumenPorTipos(input: {
           : {}),
       });
     }
-    if (!puso) sinCobro.push(tipo);
+    if (!puso) {
+      sinCobro.push({
+        tipo,
+        motivo: hayServicioDe(tipo) ? "NADA_MARCADO" : "SIN_SERVICIO",
+      });
+    }
   }
 
   const elegidos = lineas
@@ -495,15 +525,35 @@ function redondearCentimos(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-/** Cómo se lee «sin cobro» en la barra. Se redacta aquí y no en la
- *  pantalla porque es una frase que explica un NO-cobro, y eso es de las
- *  cosas que no pueden tener dos redacciones. */
+/**
+ * Cómo se lee «sin cobro» en la barra.
+ *
+ * Se redacta aquí y no en la pantalla porque es una frase que explica un
+ * NO-cobro, y eso es de las cosas que no pueden tener dos redacciones. Y
+ * se agrupa por MOTIVO porque los dos motivos piden cosas distintas: uno
+ * es ir al catálogo, el otro es tocar un botón (o no, si de verdad no hay
+ * nada que cobrar).
+ */
 export function textoSinCobro(
-  sinCobro: readonly TipoDeVisita[],
+  sinCobro: readonly TipoSinCobro[],
 ): string | null {
   if (sinCobro.length === 0) return null;
-  const nombres = sinCobro.map((t) => NOMBRE_DE_TIPO_DE_VISITA[t]);
-  return `${nombres.join(" y ")}: sin cobro (no hay servicio asignado)`;
+  const partes: string[] = [];
+  const porMotivo = (motivo: TipoSinCobro["motivo"]) =>
+    sinCobro
+      .filter((x) => x.motivo === motivo)
+      .map((x) => NOMBRE_DE_TIPO_DE_VISITA[x.tipo]);
+  const sinServicio = porMotivo("SIN_SERVICIO");
+  if (sinServicio.length > 0) {
+    partes.push(
+      `${sinServicio.join(" y ")}: sin cobro, no hay servicio en su categoría`,
+    );
+  }
+  const nadaMarcado = porMotivo("NADA_MARCADO");
+  if (nadaMarcado.length > 0) {
+    partes.push(`${nadaMarcado.join(" y ")}: sin cobro, no has marcado nada`);
+  }
+  return partes.join(" · ");
 }
 
 // ── La normalización del cierre ───────────────────────────────────────
