@@ -13,6 +13,7 @@
     "video": "pnpm run stack && BANCO_VIDEO=1 playwright test"
   },
   "devDependencies": {
+    "@mipiacetpv/clinica-sesion": "workspace:*",
     "@mipiacetpv/clinica-valoracion": "workspace:*",
     "@mipiacetpv/db": "workspace:*",
     "@playwright/test": "^1.49.0",

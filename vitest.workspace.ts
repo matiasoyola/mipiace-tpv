@@ -1,4 +1,5 @@
 export default [
+  "packages/clinica-sesion",
   "packages/clinica-valoracion",
   "packages/escpos-builder",
   "packages/holded-client",

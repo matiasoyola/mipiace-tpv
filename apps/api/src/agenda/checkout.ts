@@ -10,12 +10,40 @@
 // normal, hace `PATCH /agenda/appointments/:id { status: COMPLETED }` (no se
 // puede enganchar en el cobro sin tocarlo). El DRAFT que se crea aquí es
 // idéntico al que abre una mesa (`tables/operativa.ts::getOrCreateDraftTicket`).
+//
+// ── clinica-3 · LO ÚNICO que este bloque cambia aquí ─────────────────
+//
+// **De dónde salen las líneas cuando la cita tiene una sesión clínica
+// cerrada**: de los TRATAMIENTOS que la podóloga marcó, en vez de de los
+// servicios con los que se dio la cita. Nada más. Ni el ticket, ni el
+// enlace, ni la idempotencia, ni el `/pay`, ni la imputación al turno
+// cambian una línea.
+//
+// Por qué aquí y no en un segundo camino de cobro: porque el prompt del
+// bloque lo pide así («reutiliza el camino que ya existe de la cita a la
+// caja: no inventes un segundo cobro») y porque es verdad que es el mismo
+// acto. Lo que la paciente paga es la visita; lo que cambia es que la
+// visita ya se sabe qué fue. Un endpoint propio habría duplicado el
+// GET-back del DRAFT, el 409 de «ya se cobró», la elección del turno y el
+// `IN_SERVICE` — cuatro cosas que B-reservas-5 pagó una vez.
+//
+// Y por qué los servicios de la cita NO bastan: la cita se da para
+// «Quiropodia» y lo que se hizo fueron tres cosas (quiropodia, quitar un
+// callo y un vendaje). Cobrar el servicio de la cita sería cobrar la
+// previsión y no el trabajo, que es exactamente lo que la podóloga hace
+// hoy en papel y de memoria.
+//
+// **Una cita que no es clínica no nota NADA.** La capability del tenant es
+// lo primero que se mira, así que los catorce tenants sin clínica no pagan
+// ni una consulta y recorren el mismo código con la misma lista de líneas
+// que antes de este bloque. Un test lo fija.
 
 import { randomUUID } from "node:crypto";
 
 import { Prisma } from "@mipiacetpv/db";
 import type { PrismaClient } from "@mipiacetpv/db";
 
+import { lineasDeLaSesionCerrada } from "../clinica/lineas-de-la-sesion.js";
 import { generatePublicSlug } from "../tickets/public-slug.js";
 import { computeTicket } from "../tickets/totals.js";
 import type { AgendaStore } from "./store.js";
@@ -115,7 +143,22 @@ export async function checkoutAppointment(
     // vieja; seguir adelante abre un borrador nuevo, que es lo correcto.
   }
 
-  if (appt.items.length === 0) {
+  // clinica-3 · ¿hay una sesión clínica cerrada de esta cita? Si la hay,
+  // LO QUE SE COBRA ES LO QUE SE HIZO, no lo que se reservó.
+  //
+  // `null` en los catorce tenants sin clínica y en cualquier cita sin
+  // sesión, y entonces todo lo de abajo es exactamente lo de antes.
+  const tratamientosDeLaSesion = await lineasDeLaSesionCerrada(prisma, {
+    tenantId: ctx.tenantId,
+    appointmentId,
+  });
+  // `appt.items` conserva los DUPLICADOS a propósito: dos veces el mismo
+  // servicio en una visita son dos líneas, y mapear por `serviceId` único
+  // se habría comido una. Por eso la lista es de items y no un `Set`.
+  const itemsACobrar: Array<{ serviceId: string }> =
+    tratamientosDeLaSesion ?? appt.items;
+
+  if (itemsACobrar.length === 0) {
     return {
       ok: false,
       status: 409,
@@ -125,7 +168,7 @@ export async function checkoutAppointment(
   }
 
   // Cargar los productos-servicio del visit (serviceId = product.id).
-  const serviceIds = [...new Set(appt.items.map((i) => i.serviceId))];
+  const serviceIds = [...new Set(itemsACobrar.map((i) => i.serviceId))];
   const products = await prisma.product.findMany({
     where: { tenantId: ctx.tenantId, id: { in: serviceIds }, kind: "SERVICE" },
     select: {
@@ -175,7 +218,7 @@ export async function checkoutAppointment(
     unitPrice: number;
     taxRate: number;
   }> = [];
-  for (const item of appt.items) {
+  for (const item of itemsACobrar) {
     const p = byId.get(item.serviceId);
     if (!p) {
       return {

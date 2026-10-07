@@ -149,6 +149,16 @@ export interface AgendaDay {
   // información que cambia sin que la agenda se entere, y un aviso viejo
   // sobre una valoración ya validada sería peor que no tenerlo.
   valoracionesPendientes?: string[];
+  // clinica-3 · qué CITAS de este día tienen la sesión cerrada y sin
+  // cobrar. Otra lista de ids y nada más, y con una razón propia además de
+  // las de arriba: esto es información de CAJA, no de salud. «A esta cita
+  // le queda cobrar» no dice nada de lo que se le hizo al paciente, y es
+  // justo lo que la recepción necesita ver para no dejarse un cobro.
+  //
+  // Tampoco entra en la caché offline, y aquí el argumento es el del
+  // dinero: un aviso viejo de «queda cobrar» sobre algo ya cobrado manda a
+  // la recepción a cobrar dos veces. Que sin red no salga es lo seguro.
+  sesionesPorCobrar?: string[];
 }
 
 /** La retícula del día, con el valor de B4 como último recurso: caché
@@ -249,6 +259,7 @@ export async function fetchAgendaDay(date: string): Promise<AgendaDay> {
       slotMinutes?: number;
       days?: AgendaDayInfo[];
       valoracionesPendientes?: string[];
+      sesionesPorCobrar?: string[];
     }>(`/agenda?date=${date}`);
     const day: AgendaDay = {
       date,
@@ -270,6 +281,7 @@ export async function fetchAgendaDay(date: string): Promise<AgendaDay> {
       ...day,
       appointments: await mergePendingLocal(day),
       valoracionesPendientes: res.valoracionesPendientes ?? [],
+      sesionesPorCobrar: res.sesionesPorCobrar ?? [],
     };
   } catch (err) {
     // Offline / 5xx: usa la caché del día si existe.

@@ -11,6 +11,9 @@
 //   POST  /agenda/appointments                — alta (presencial = confirmada)
 //   PATCH /agenda/appointments/:id            — transición de estado / mover
 //   POST  /agenda/appointments/:id/checkout   — cita → caja (ticket pre-poblado)
+//   GET   /agenda/cobros-pendientes?from=&to= — clinica-3: las sesiones
+//                                               cerradas sin cobrar, con sus
+//                                               líneas y NADA de la historia
 //   GET   /agenda/blocks?from=&to=            — bloqueos puntuales
 //   POST  /agenda/blocks                      — crear bloqueo puntual
 //   DELETE /agenda/blocks/:id                 — borrar bloqueo
@@ -45,7 +48,12 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { requireOwnerOrCashier } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
+import { ensureNoEsSanitarioSinCaja } from "../lib/caja-gate.js";
 import { valoracionesPendientesDe } from "../clinica/valoracion-en-agenda.js";
+import {
+  cobrosPendientesDe,
+  sesionesPorCobrarDe,
+} from "../clinica/cobros-pendientes.js";
 import type { PrismaClient } from "@mipiacetpv/db";
 import { checkoutAppointment } from "./checkout.js";
 import {
@@ -216,6 +224,23 @@ export async function registerAgendaRoutes(
         auth.tenantId,
         appointments.map((a) => a.clientId),
       );
+      // clinica-3 · qué citas de este rango tienen la sesión CERRADA y sin
+      // cobrar. Otra lista de ids y nada más, por las mismas dos razones
+      // que la de arriba — y con una tercera propia: es información de
+      // CAJA, no de salud. «A esta cita le queda cobrar» no dice nada de
+      // lo que se le hizo al paciente, y es justo lo que la recepción
+      // necesita ver en la rejilla para no dejarse un cobro sin hacer.
+      //
+      // Cero consultas extra en los catorce tenants no clínicos: igual
+      // que la de arriba, lo primero que mira es la capability. Y esta
+      // versión NO toca el catálogo ni los nombres de los pacientes (eso
+      // sólo lo hace el panel de cobros, que se abre una vez) porque la
+      // agenda se pinta cincuenta veces al día.
+      const sesionesPorCobrar = await sesionesPorCobrarDe(prismaFor(), {
+        tenantId: auth.tenantId,
+        desde: from,
+        hasta: to,
+      });
       // B-reservas-7a · la rejilla deja de ser ciega. Los cuatro campos de
       // antes siguen ahí y con el mismo nombre: quien no lea los nuevos no
       // se entera de que existen. Todo esto viaja a la caché offline del
@@ -239,6 +264,7 @@ export async function registerAgendaRoutes(
         slotMinutes: request.agendaSlotMinutes ?? SLOT_MINUTES,
         days,
         valoracionesPendientes,
+        sesionesPorCobrar,
       };
     },
   );
@@ -588,7 +614,17 @@ export async function registerAgendaRoutes(
   app.post(
     "/agenda/appointments/:id/checkout",
     {
-      preHandler: [requireOwnerOrCashier, ensureAgendaEnabled],
+      // clinica-3 · y la tercera puerta: un sanitario sin caja no abre un
+      // cobro. Esta ruta nunca llevó el gate de la caja (es agenda), así
+      // que un `CLINICIAN` llegaba hasta aquí y recibía el ticket con sus
+      // precios — justo lo que la regla 8 prohíbe. `ensureNoEsSanitario-
+      // SinCaja` es la mitad del usuario y nada más: ningún tenant de hoy
+      // cambia de comportamiento (ver su cabecera).
+      preHandler: [
+        requireOwnerOrCashier,
+        ensureAgendaEnabled,
+        ensureNoEsSanitarioSinCaja,
+      ],
       schema: {
         params: {
           type: "object",
@@ -632,6 +668,68 @@ export async function registerAgendaRoutes(
       return reply
         .code(result.alreadyLinked ? 200 : 201)
         .send({ ticket: result.ticket });
+    },
+  );
+
+  // ── clinica-3 · la lista de pendientes de cobro de la recepción ──────
+  //
+  // Las sesiones cerradas que todavía no se han cobrado, con la cita, el
+  // paciente y las líneas con precio. **Y NADA DE LA HISTORIA** (prompt
+  // §4): ni lesiones, ni dolor, ni evolución, ni consejos, ni la nota, ni
+  // las alertas. El tipo con el que se construye no tiene sitio para
+  // llevarlas — ver `clinica/sesion-view.ts`.
+  //
+  // Vive en AGENDA y no en `/clinica/*` a propósito, y se nota en las tres
+  // puertas que lleva:
+  //
+  //   · `ensureAgendaEnabled` y NO `ensureClinicaEnabled`. Con el módulo
+  //     clínico apagado contesta la lista VACÍA en vez de la 404 del
+  //     módulo, porque un tenant sin clínica no tiene sesiones y «no hay
+  //     nada por cobrar» es la verdad. La 404 existe para no contarle a un
+  //     bar que este sistema guarda datos de salud; una lista vacía no le
+  //     cuenta nada.
+  //   · `ensureNoEsSanitarioSinCaja`. Esto es todo importes, y el
+  //     sanitario sin caja no ve importes en ninguna parte.
+  //   · y **no pasa por `conHistoria`**: no se lee una sola respuesta de
+  //     salud, y apuntar un acceso cada vez que la recepción mira su lista
+  //     llenaría de ruido el registro de «quién ha abierto la historia de
+  //     este paciente». Misma decisión que clinica-1 con `GET /clients/:id`
+  //     y clinica-2 con el aviso de la agenda.
+  app.get(
+    "/agenda/cobros-pendientes",
+    {
+      preHandler: [
+        requireOwnerOrCashier,
+        ensureAgendaEnabled,
+        ensureNoEsSanitarioSinCaja,
+      ],
+      schema: {
+        querystring: {
+          type: "object",
+          required: ["from"],
+          additionalProperties: false,
+          properties: {
+            from: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+            to: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+          },
+        },
+      },
+    },
+    async (request: FastifyRequest) => {
+      const auth = request.auth!;
+      const { from, to } = request.query as { from: string; to?: string };
+      const hasta = to ?? from;
+      return {
+        from,
+        to: hasta,
+        // Horas de PARED del centro, igual que `GET /agenda`: sin eso, «el
+        // día» cambiaría con el reloj de la máquina.
+        cobros: await cobrosPendientesDe(prismaFor(), {
+          tenantId: auth.tenantId,
+          desde: wallTimeToUtc(from, "00:00"),
+          hasta: wallTimeToUtc(hasta, "23:59"),
+        }),
+      };
     },
   );
 

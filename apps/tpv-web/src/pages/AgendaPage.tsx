@@ -23,7 +23,9 @@ import {
   Loader2,
   MoreVertical,
   Plus,
+  Footprints,
   Stethoscope,
+  Wallet,
   X,
 } from "lucide-react";
 
@@ -80,6 +82,10 @@ import {
   serviciosSinNadie,
   subscribeHealthSnapshot,
 } from "../lib/agenda-health.js";
+import { createPortal } from "react-dom";
+
+import { CobrosPendientes } from "../clinica/CobrosPendientes.js";
+import { SesionPodologia } from "../clinica/SesionPodologia.js";
 import { ValoracionSanitario } from "../clinica/ValoracionSanitario.js";
 import { AgendaHealthPanel } from "./AgendaHealthPanel.js";
 import { AgendaSkillMatrix } from "./AgendaSkillMatrix.js";
@@ -350,6 +356,13 @@ export function AgendaPage({
   // donde cuelga la ficha— no existe para él. La cita es su entrada
   // natural: es desde donde trabaja.
   const [valoracionDe, setValoracionDe] = useState<string | null>(null);
+  // clinica-3 · la sesión de una CITA, como overlay a pantalla completa.
+  // Mismo patrón que la valoración y por la misma razón (clinica-2 §7): lo
+  // que la podóloga está haciendo es atender a una persona, no mirar un
+  // detalle de agenda de reojo.
+  const [sesionDe, setSesionDe] = useState<string | null>(null);
+  // clinica-3 · el panel de cobros pendientes de la recepción.
+  const [verCobros, setVerCobros] = useState(false);
   // B-reservas-9 · el panel de salud y la matriz cuelgan de aquí: se entra y
   // se sale sin dejar la agenda.
   const [saludAbierta, setSaludAbierta] = useState(false);
@@ -1132,6 +1145,25 @@ export function AgendaPage({
             ),
           )}
         </div>
+        {/* clinica-3 · POR COBRAR. Sólo si hay algo y sólo para quien
+            cobra: a un sanitario sin caja la ruta le contesta 403, así que
+            pintarle el botón sería ofrecerle una acción que siempre falla
+            (el mismo criterio que «Cobrar en caja», clinica-1 §7).
+            Y sólo aparece cuando hay cobros pendientes: en una peluquería
+            la lista está siempre vacía, y un botón que nunca tiene nada
+            dentro es ruido en la barra que más se usa. */}
+        {puedeCobrar && (day?.sesionesPorCobrar ?? []).length > 0 && (
+          <button
+            onClick={() => setVerCobros(true)}
+            className="ml-1 h-11 px-3 shrink-0 rounded-2xl text-[13px] font-medium flex items-center gap-1.5 bg-mipiace-coral-soft text-mipiace-coral-dark"
+            aria-label="Sesiones por cobrar"
+          >
+            <Wallet className="w-[18px] h-[18px]" strokeWidth={2.25} />
+            <span data-test="badge-por-cobrar" className="tabular-nums font-semibold">
+              {(day?.sesionesPorCobrar ?? []).length}
+            </span>
+          </button>
+        )}
         <button
           onClick={() => setSaludAbierta(true)}
           className={`ml-1 h-11 px-3 shrink-0 rounded-2xl text-[13px] font-medium flex items-center gap-1.5 ${
@@ -1354,6 +1386,12 @@ export function AgendaPage({
                 ? () => setValoracionDe(detail.clientId!)
                 : undefined
             }
+            // clinica-3 · la sesión cuelga de la CITA, no del paciente: de
+            // una cita sale una sola sesión.
+            onAbrirSesion={
+              detail.clientId ? () => setSesionDe(detail.id) : undefined
+            }
+            sesionPorCobrar={(day?.sesionesPorCobrar ?? []).includes(detail.id)}
             onMove={(start, staffUserId) =>
               void doMove(detail.id, start, staffUserId)
             }
@@ -1367,7 +1405,8 @@ export function AgendaPage({
           lo que la podóloga está haciendo es revisar una historia, no
           mirar un detalle de agenda de reojo. */}
       {valoracionDe && (
-        <div className="fixed inset-0 z-50 bg-mipiace-stone flex flex-col font-sans">
+        <AlFrente>
+        <div className="fixed inset-0 z-[70] bg-mipiace-stone flex flex-col font-sans">
           <div className="flex items-center gap-3 px-4 md:px-6 h-16 bg-white border-b border-slate-200 shrink-0">
             <button
               onClick={() => {
@@ -1401,6 +1440,79 @@ export function AgendaPage({
             </div>
           </div>
         </div>
+        </AlFrente>
+      )}
+
+      {/* clinica-3 · LA SESIÓN de la cita. Overlay a pantalla completa,
+          igual que la valoración: el mockup es una pantalla entera de iPad
+          apaisado y meterla en el panel de 320 px del detalle sería meter
+          el mapa de los dos pies en una columna. */}
+      {sesionDe && (
+        <AlFrente>
+        <div className="fixed inset-0 z-[70] bg-mipiace-stone flex flex-col font-sans">
+          <div className="flex items-center gap-3 px-4 md:px-6 h-16 bg-white border-b border-slate-200 shrink-0">
+            <button
+              onClick={() => {
+                setSesionDe(null);
+                // Y SE RECARGA EL DÍA, por lo mismo que la valoración: el
+                // aviso «Sesión cerrada · queda cobrarla» sale de la
+                // respuesta de `/agenda`, pedida antes de entrar aquí.
+                void loadDay(date);
+              }}
+              className="h-11 w-11 rounded-2xl hover:bg-slate-100 flex items-center justify-center text-mipiace-ink"
+              aria-label="Volver a la agenda"
+            >
+              <ArrowLeft className="w-5 h-5" strokeWidth={2.25} />
+            </button>
+            <h1 className="text-[18px] font-semibold text-mipiace-ink flex-1">
+              Sesión
+            </h1>
+          </div>
+          <div className="flex-1 overflow-y-auto px-4 md:px-6 py-4">
+            <div className="max-w-[1180px] mx-auto">
+              <SesionPodologia
+                appointmentId={sesionDe}
+                // «Cobrar ahora» de la pantalla de sesión cerrada hace
+                // EXACTAMENTE lo que «Cobrar en caja» de la agenda: llama
+                // al endpoint que ya existía. Es el mismo botón con otro
+                // nombre, no un segundo camino de cobro.
+                onCobrar={
+                  puedeCobrar
+                    ? (id) => {
+                        setSesionDe(null);
+                        void doCheckout(id);
+                      }
+                    : undefined
+                }
+                // «El camino para hacerlo» de la puerta de la valoración
+                // (prompt §2): se sale de la sesión y se entra en la
+                // valoración del mismo paciente.
+                onAbrirValoracion={(clientId) => {
+                  setSesionDe(null);
+                  setValoracionDe(clientId);
+                }}
+              />
+            </div>
+          </div>
+        </div>
+        </AlFrente>
+      )}
+
+      {/* clinica-3 · LOS COBROS PENDIENTES de la recepción. Hoja lateral y
+          no pantalla completa: se consulta de paso, con el paciente
+          delante en el mostrador. */}
+      {verCobros && (
+        <AlFrente>
+        <CobrosPendientes
+          fecha={date}
+          onCerrar={() => setVerCobros(false)}
+          onCobrar={(id) => {
+            setVerCobros(false);
+            void doCheckout(id);
+          }}
+          puedeCobrar={puedeCobrar}
+        />
+        </AlFrente>
       )}
 
       {/* B-reservas-7a · el alta de una ausencia, en TRES TOQUES como
@@ -2465,6 +2577,40 @@ function BookingPanel(props: {
 
 // ── Detalle de cita ────────────────────────────────────────────────────
 
+/**
+ * clinica-3 · saca una hoja de pantalla completa del contexto de apilado de
+ * la agenda y la monta en `document.body`.
+ *
+ * ── El fallo que esto arregla, y que lo encontró una captura ─────────
+ *
+ * `AgendaPage` es un `fixed inset-0 z-40`, y un z-index sobre un elemento
+ * posicionado **crea un contexto de apilado**: todo lo que vive dentro
+ * —incluidas estas hojas, que pedían `z-50`— queda encerrado en el
+ * peldaño 40. Y la pantalla de venta de detrás tiene, por debajo de
+ * 1024 px, su **barra inferior fija** (`SalePage.tsx`, «thumb-zone» de
+ * v1.0-handheld) también en `z-40`… pero más abajo en el DOM. Así que
+ * empata y gana ella: la barra «0 líneas · 0,00 €» se pinta ENCIMA de la
+ * hoja clínica y tapa justo el pie, que es donde está el botón de cerrar
+ * la sesión.
+ *
+ * Se vio en la captura de 390 px del bucle visual, no en un test: a
+ * 1024 px la barra no existe (`lg:hidden`) y la suite no mira píxeles.
+ *
+ * **Y NO ES SÓLO DE ESTE BLOQUE**: la hoja de la valoración de clinica-2
+ * tenía el mismo problema desde que nació, por la misma razón. Las dos
+ * pasan por aquí.
+ *
+ * Por qué un portal y no subir el `z-40` de la agenda: porque ese 40 lo
+ * comparten la agenda y la barra de la venta a propósito —los modales de
+ * la venta abren a 50 por encima de los dos (comentario de
+ * `SalePage.tsx:3467`)— y moverlo cambiaría el apilado de una pantalla que
+ * usan los quince clientes. El portal cambia SÓLO estas tres hojas.
+ */
+function AlFrente(props: { children: React.ReactNode }) {
+  if (typeof document === "undefined") return <>{props.children}</>;
+  return createPortal(props.children, document.body);
+}
+
 function DetailPanel(props: {
   appt: AgendaAppointment;
   client: { nombre: string; desconocido: boolean };
@@ -2490,6 +2636,13 @@ function DetailPanel(props: {
   esSanitario: boolean;
   /** `undefined` en una cita sin paciente (walk-in): no hay historia. */
   onAbrirValoracion?: () => void;
+  /** clinica-3 · abrir la sesión de esta cita. `undefined` en una cita sin
+   *  paciente: una sesión clínica es de una persona con historia. */
+  onAbrirSesion?: () => void;
+  /** clinica-3 · esta cita tiene la sesión CERRADA y sin cobrar. Es
+   *  información de CAJA y no de salud —«a esta cita le queda cobrar» no
+   *  dice nada de lo que se le hizo— así que la ve también la recepción. */
+  sesionPorCobrar: boolean;
   onMove: (startISO: string, staffUserId?: string) => void;
   onClearMoveError: () => void;
 }) {
@@ -2549,6 +2702,14 @@ function DetailPanel(props: {
             Valoración pendiente
           </div>
         )}
+        {/* clinica-3 · el otro aviso discreto, y de caja: la sesión está
+            cerrada y queda cobrarla. Lo lee la recepción, que es quien
+            cobra, y no cuenta nada de la historia. */}
+        {props.sesionPorCobrar && (
+          <div className="rounded-xl bg-mipiace-coral-soft text-mipiace-coral-dark px-3 py-2 text-[12.5px] leading-snug font-medium">
+            Sesión cerrada · queda cobrarla
+          </div>
+        )}
         <div>
           {/* B-reservas-mostrador F2 · el mismo tono que el filete de la
               tarjeta. Con `STATUS_COLOR` crudo este chip pintaba texto BLANCO
@@ -2569,7 +2730,22 @@ function DetailPanel(props: {
           siendo el sitio desde el que se revisa lo que se escribió ese
           día, y la historia no se cierra con la cita. */}
       {props.esSanitario && props.onAbrirValoracion && (
-        <div className="p-4 border-t border-slate-100">
+        <div className="p-4 border-t border-slate-100 space-y-2">
+          {/* clinica-3 · LA SESIÓN va primero y es el botón ancho: es el
+              acto de la visita. La valoración es el trámite de antes y se
+              hace una vez en la vida del paciente. Van los dos fuera del
+              `!terminal` por la misma razón que clinica-2 dio: una cita
+              completada sigue siendo el sitio desde el que se lee lo que
+              se escribió ese día, y la historia no se cierra con la cita. */}
+          {props.onAbrirSesion && (
+            <button
+              onClick={props.onAbrirSesion}
+              className="w-full min-h-touch rounded-xl bg-mipiace-coral-soft text-mipiace-coral-dark text-[14px] font-semibold flex items-center justify-center gap-2"
+            >
+              <Footprints className="w-4 h-4" strokeWidth={2.25} />
+              Sesión de hoy
+            </button>
+          )}
           <button
             onClick={props.onAbrirValoracion}
             className="w-full min-h-touch rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[14px] font-medium text-mipiace-ink flex items-center justify-center gap-2"

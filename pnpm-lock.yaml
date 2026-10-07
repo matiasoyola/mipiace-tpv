@@ -75,6 +75,9 @@ importers:
       '@fastify/websocket':
         specifier: ^11
         version: 11.2.0
+      '@mipiacetpv/clinica-sesion':
+        specifier: workspace:*
+        version: link:../../packages/clinica-sesion
       '@mipiacetpv/clinica-valoracion':
         specifier: workspace:*
         version: link:../../packages/clinica-valoracion
@@ -181,6 +184,9 @@ importers:
 
   apps/e2e-ui:
     devDependencies:
+      '@mipiacetpv/clinica-sesion':
+        specifier: workspace:*
+        version: link:../../packages/clinica-sesion
       '@mipiacetpv/clinica-valoracion':
         specifier: workspace:*
         version: link:../../packages/clinica-valoracion
@@ -230,6 +236,9 @@ importers:
 
   apps/tpv-web:
     dependencies:
+      '@mipiacetpv/clinica-sesion':
+        specifier: workspace:*
+        version: link:../../packages/clinica-sesion
       '@mipiacetpv/clinica-valoracion':
         specifier: workspace:*
         version: link:../../packages/clinica-valoracion
@@ -317,6 +326,18 @@ importers:
         version: 0.21.2(vite@6.4.2(@types/node@20.19.40)(jiti@1.21.7)(terser@5.47.1)(tsx@4.21.0))(workbox-build@7.4.1(@types/babel__core@7.20.5))(workbox-window@7.4.1)
       vitest:
         specifier: ^2
+        version: 2.1.9(@types/node@20.19.40)(jsdom@29.1.1)(terser@5.47.1)
+
+  packages/clinica-sesion:
+    devDependencies:
+      '@types/node':
+        specifier: ^20.16.10
+        version: 20.19.40
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
         version: 2.1.9(@types/node@20.19.40)(jsdom@29.1.1)(terser@5.47.1)
 
   packages/clinica-valoracion:

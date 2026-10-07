@@ -65,6 +65,7 @@ interface Scheduling {
   // un servicio marcado así a un paciente sin valoración le manda el test
   // del cuestionario de crónicas.
   primeraValoracion: boolean;
+  tratamientoSesion: boolean;
   updatedAt: string;
 }
 
@@ -107,6 +108,7 @@ function blankScheduling(): Scheduling {
     family: null,
     channels: { ...DEFAULT_CHANNELS },
     primeraValoracion: false,
+    tratamientoSesion: false,
     updatedAt: "",
   };
 }
@@ -488,6 +490,7 @@ function ServiceCard({
             staffRequired: form.staffRequired,
             onlineBookable: form.channels.online,
             primeraValoracion: form.primeraValoracion,
+            tratamientoSesion: form.tratamientoSesion,
             family: form.family?.trim() || null,
             channels: form.channels,
           },
@@ -663,6 +666,32 @@ function ServiceCard({
                     tiene valoración, se le manda por email el test de
                     enfermedades crónicas. También se le puede abrir en la
                     tablet de la sala.
+                  </span>
+                </span>
+              </label>
+              {/* clinica-3 · la marca hermana: qué botones salen en la
+                  sesión. Va PEGADA a la de arriba y en la misma pantalla
+                  porque son la misma clase de decisión («qué significa este
+                  servicio para la clínica») y la podóloga las mantiene de
+                  una pasada. Dos pantallas serían dos sitios a los que
+                  acordarse de ir. */}
+              <label className="flex items-start gap-2.5 text-[13.5px] text-mipiace-ink mt-3">
+                <input
+                  type="checkbox"
+                  checked={form.tratamientoSesion}
+                  disabled={!canEdit}
+                  onChange={(e) =>
+                    setForm({ ...form, tratamientoSesion: e.target.checked })
+                  }
+                  className="h-4 w-4 mt-0.5 rounded border-slate-300 text-mipiace-coral focus:ring-mipiace-coral/30 disabled:opacity-50"
+                />
+                <span>
+                  Es un tratamiento de la sesión
+                  <span className="block text-[12px] text-slate-400 mt-0.5">
+                    Sale como botón en la pantalla de la sesión, y lo que se
+                    marque pasa a caja con el precio y el IVA de este
+                    servicio. Un servicio sin SKU no puede cobrarse, así que
+                    tampoco sale.
                   </span>
                 </span>
               </label>

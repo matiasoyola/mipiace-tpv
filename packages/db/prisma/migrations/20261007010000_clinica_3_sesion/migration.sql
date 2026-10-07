@@ -1,0 +1,113 @@
+-- clinica-3 · la sesión y la exploración. UN COBRO POR CITA, y lo hace
+-- cumplir el motor.
+--
+-- La valoración ya dice quién es el paciente. Esto es lo que pasa en cada
+-- visita: qué tiene en el pie, qué se le hizo, cuánto le duele y cuándo
+-- vuelve. Al cerrar, la sesión queda firmada, no se edita, y pasa a caja
+-- con lo hecho.
+--
+-- ── NO HAY TABLA NUEVA, y es la decisión de fondo del bloque ──────────
+--
+-- Las dos piezas nuevas —la exploración y la sesión— son entradas de
+-- `clinical_entries` con sus `kind` (puestos por la migración hermana).
+-- Nada más. Por qué:
+--
+--   · Una sesión se escribe UNA VEZ, al cerrar. No hay estado que avanzar,
+--     así que no hace falta la pareja «entrada inmutable + tabla de
+--     estado» que clinica-2 sí necesitó para la valoración (donde el
+--     estado va de pendiente a respondida a validada).
+--   · Y la inmutabilidad, la autoría NOT NULL, el RESTRICT que impide
+--     borrar al paciente y el enlace a la cita YA ESTÁN en esa tabla desde
+--     clinica-1. Una tabla propia habría tenido que volver a montar las
+--     cuatro cosas, y la quinta vez que se monta una garantía es la vez en
+--     que una sale distinta.
+--
+-- Lo único que hace falta añadir es lo que `clinical_entries` todavía no
+-- sabía: **que de una cita sale UNA sesión y no dos.**
+--
+-- ── La garantía nueva, y quién la sostiene ────────────────────────────
+--
+--   1. **De una cita sale UNA sola sesión** → índice único PARCIAL. De
+--      aquí sale, sin un solo `if`, que cerrar dos veces no cree dos
+--      cobros: el cobro se construye desde la sesión, y de una cita hay
+--      una. Es la misma forma que `clinical_access_one_live_key` de
+--      clinica-1 y `clinical_assessments_one_open_key` de clinica-2.
+--
+--   2. (ya existía) Lo escrito no se edita ni se borra → el trigger
+--      `clinical_entries_inmutable` de clinica-1. Una sesión cerrada queda
+--      congelada por el motor, no por la ausencia de un PATCH.
+--
+--   3. (ya existía) El ticket de una cita es uno → `appointments.ticket_id`
+--      es UNIQUE desde B-reservas-4, y `checkoutAppointment` devuelve el
+--      borrador enlazado en vez de abrir otro. El cobro único lo sostienen
+--      LAS DOS capas, y conviene saber cuál es cuál.
+--
+-- Ninguna es un `if` de la aplicación: la aplicación no es la única puerta
+-- a Postgres (ADR-015 §1).
+--
+-- ── Migración ADITIVA ─────────────────────────────────────────────────
+--
+-- Dos índices y nada más. Ni una tabla, ni una columna, ni un DROP, ni un
+-- TRUNCATE, ni un DELETE, ni un UPDATE. Los quince tenants de hoy tienen
+-- `clinical_records_enabled = false` y `clinical_entries` vacía, así que
+-- los dos índices nacen sobre cero filas.
+--
+-- ── El `down`, pensado ────────────────────────────────────────────────
+--
+-- Reversible por completo, y de verdad: son dos índices.
+--
+--   DROP INDEX "clinical_entries_una_sesion_por_cita";
+--   DROP INDEX "clinical_entries_tenant_id_client_id_kind_created_at_idx";
+--
+-- (Y la hermana `clinica_3_tipos` es la que no se echa atrás del todo, por
+-- los valores del enum. Lo dice en su cabecera.)
+
+-- ── 1 · DE UNA CITA SALE UNA SOLA SESIÓN ───────────────────────────────
+--
+-- Es la garantía del «cerrar dos veces = un cobro» del prompt, puesta
+-- donde no se puede olvidar.
+--
+-- PARCIAL por las dos mitades del `WHERE`, y las dos hacen trabajo:
+--
+--   · `kind = 'TREATMENT_SESSION'` · una cita puede tener además su
+--     exploración y todas las anotaciones que haga falta. Lo que no puede
+--     tener son dos sesiones.
+--   · `appointment_id IS NOT NULL` · `clinical_entries.appointment_id` es
+--     `ON DELETE SET NULL` (clinica-1: si la cita desapareciera, la
+--     anotación sigue en la historia y pierde el enlace, no el
+--     contenido). Sin esta mitad, dos sesiones viejas que perdieran su
+--     cita chocarían entre ellas por la clave NULL — y en Postgres los
+--     NULL no chocan en un índice único, pero el día que alguien lo
+--     cambie a NOT NULL por limpieza esto sería una bomba. Escrito así,
+--     el índice dice lo que quiere decir: una sesión por cita que
+--     EXISTE.
+--
+-- Y lo que este índice NO impide, a propósito: que un paciente tenga
+-- muchas sesiones. Tiene una por visita, que es el punto.
+--
+-- Por qué no un CHECK «una sesión tiene cita»: porque convertiría el
+-- `ON DELETE SET NULL` de la cita en un error duro, y entonces borrar una
+-- cita con sesión fallaría con un mensaje de constraint en vez de dejar la
+-- sesión huérfana y legible. La regla «la sesión se abre desde la cita»
+-- vive en la ruta, que es donde nace; la que vive aquí es la que protege
+-- el dinero.
+CREATE UNIQUE INDEX "clinical_entries_una_sesion_por_cita"
+    ON "clinical_entries"("appointment_id")
+    WHERE "kind" = 'TREATMENT_SESSION' AND "appointment_id" IS NOT NULL;
+
+-- ── 2 · «la última sesión / la última exploración de este paciente» ────
+--
+-- Es la consulta que la pantalla hace DOS veces cada vez que la podóloga
+-- abre una sesión: lo de la visita anterior para pintarlo en naranja suave
+-- y para «Igual que la última vez», y la última exploración para que la
+-- siguiente parta de ella (decisión de producto 5).
+--
+-- El índice que ya había es `(tenant_id, client_id, created_at)`, que
+-- sirve para la historia entera pero obliga a leer todas las entradas del
+-- paciente para quedarse con la última de un `kind`. Con `kind` en medio,
+-- las dos consultas son un salto al final del índice.
+--
+-- No sustituye al de clinica-1: aquel sigue siendo el de «la historia de
+-- este paciente, lo más reciente primero», que es la ruta paginada.
+CREATE INDEX "clinical_entries_tenant_id_client_id_kind_created_at_idx"
+    ON "clinical_entries"("tenant_id", "client_id", "kind", "created_at" DESC);

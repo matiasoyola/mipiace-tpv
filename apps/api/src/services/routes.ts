@@ -77,6 +77,7 @@ function schedulingView(s: {
   family: string | null;
   channels: unknown;
   primeraValoracion: boolean;
+  tratamientoSesion: boolean;
   updatedAt: Date;
 }) {
   return {
@@ -92,6 +93,12 @@ function schedulingView(s: {
     // clínicos): un campo que aparece y desaparece según la capability
     // obliga a cada lector a distinguir «false» de «no me lo han dicho».
     primeraValoracion: s.primeraValoracion,
+    // clinica-3 · este servicio sale como botón en la sesión, y su precio
+    // y su IVA son los que se cobran. Viaja siempre, por la misma razón
+    // que `primeraValoracion`: un campo que aparece y desaparece según la
+    // capability obliga a cada lector a distinguir «false» de «no me lo
+    // han dicho».
+    tratamientoSesion: s.tratamientoSesion,
     updatedAt: s.updatedAt.toISOString(),
   };
 }
@@ -174,6 +181,7 @@ export async function registerServicesRoutes(
               family: true,
               channels: true,
               primeraValoracion: true,
+              tratamientoSesion: true,
               updatedAt: true,
             },
           },
@@ -222,6 +230,8 @@ export async function registerServicesRoutes(
             onlineBookable: { type: "boolean" },
             // clinica-2 · la marca de «primera valoración».
             primeraValoracion: { type: "boolean" },
+            // clinica-3 · la marca de «es un tratamiento de la sesión».
+            tratamientoSesion: { type: "boolean" },
             family: { type: ["string", "null"], maxLength: 120 },
             channels: {
               type: "object",
@@ -247,6 +257,7 @@ export async function registerServicesRoutes(
         staffRequired?: number;
         onlineBookable?: boolean;
         primeraValoracion?: boolean;
+        tratamientoSesion?: boolean;
         family?: string | null;
         channels?: Partial<Channels>;
       };
@@ -272,6 +283,10 @@ export async function registerServicesRoutes(
       // esta ruta es un upsert del juego completo, no un parche. El panel
       // manda siempre el valor actual.
       const primeraValoracion = body.primeraValoracion ?? false;
+      // clinica-3 · ausente = false, igual que la de arriba y por la misma
+      // razón: esta ruta es un upsert del juego completo, no un parche. El
+      // panel manda siempre el valor actual.
+      const tratamientoSesion = body.tratamientoSesion ?? false;
 
       const saved = await prisma.serviceScheduling.upsert({
         where: { productId },
@@ -284,6 +299,7 @@ export async function registerServicesRoutes(
           staffRequired,
           onlineBookable,
           primeraValoracion,
+          tratamientoSesion,
           family,
           channels: channels as unknown as Prisma.InputJsonValue,
         },
@@ -294,6 +310,7 @@ export async function registerServicesRoutes(
           staffRequired,
           onlineBookable,
           primeraValoracion,
+          tratamientoSesion,
           family,
           channels: channels as unknown as Prisma.InputJsonValue,
         },
@@ -307,6 +324,7 @@ export async function registerServicesRoutes(
           family: true,
           channels: true,
           primeraValoracion: true,
+          tratamientoSesion: true,
           updatedAt: true,
         },
       });

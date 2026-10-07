@@ -35,6 +35,12 @@ export const CLINICA = {
   paciente: "33333333-3333-4333-8333-333333333351",
   /** El servicio marcado «primera valoración». */
   servicioValoracion: "33333333-3333-4333-8333-333333333361",
+  /** clinica-3 · la sanitaria SIN caja: la que no ve importes y no cobra. */
+  sanitaria: "33333333-3333-4333-8333-333333333343",
+  /** clinica-3 · los tres tratamientos de la sesión, del catálogo. */
+  quiropodia: "33333333-3333-4333-8333-333333333362",
+  fresado: "33333333-3333-4333-8333-333333333363",
+  verruga: "33333333-3333-4333-8333-333333333364",
 } as const;
 
 export const CLINICA_NOMBRE = "Clínica Podológica Demo";
@@ -55,6 +61,16 @@ export const RECEPCION = {
   alias: "Marta",
 } as const;
 
+/** clinica-3 · la sanitaria sin caja. `role = CLINICIAN`, que implica la
+ *  marca por CHECK de la base. Es la que prueba la regla 8: cierra su
+ *  sesión sin ver un importe y la recepción la cobra. */
+export const SANITARIA = {
+  id: CLINICA.sanitaria,
+  email: "ana@clinicademo.local",
+  alias: "Ana Sanitaria",
+  colegiado: "Col. 45-0999",
+} as const;
+
 export const PACIENTE = {
   id: CLINICA.paciente,
   firstName: "Carmen",
@@ -71,6 +87,35 @@ export const SERVICIO_VALORACION = {
   sku: "SVC-VALORACION",
   durationMin: 30,
 } as const;
+
+/**
+ * clinica-3 · los tratamientos de la sesión, con su marca del catálogo.
+ *
+ * El de 0 € es el que el mockup pinta como «incluido»: en esta casa
+ * «incluido» es un precio de 0 en el catálogo, no una marca aparte. Y los
+ * tres llevan SKU porque el camino de cobro lo exige en la línea — un
+ * servicio sin SKU no sale como botón.
+ */
+export const TRATAMIENTOS = [
+  {
+    id: CLINICA.quiropodia,
+    name: "Quiropodia",
+    sku: "SVC-QUIROPODIA",
+    basePrice: 30,
+  },
+  {
+    id: CLINICA.fresado,
+    name: "Corte y fresado de uñas",
+    sku: "SVC-FRESADO",
+    basePrice: 0,
+  },
+  {
+    id: CLINICA.verruga,
+    name: "Tratamiento de verruga",
+    sku: "SVC-VERRUGA",
+    basePrice: 25,
+  },
+] as const;
 
 function hashDeviceToken(plain: string): string {
   return createHash("sha256").update(plain, "utf8").digest("hex");
@@ -162,6 +207,29 @@ export async function sembrarClinica(prisma: PrismaClient): Promise<void> {
     },
   });
 
+  // clinica-3 · la sanitaria SIN caja. Entra al TPV con su PIN como
+  // cualquiera, ve sólo su agenda, y de ella no puede nacer un cobro.
+  await prisma.user.create({
+    data: {
+      id: SANITARIA.id,
+      tenantId: CLINICA.tenant,
+      email: SANITARIA.email,
+      alias: SANITARIA.alias,
+      role: "CLINICIAN",
+      pinHash,
+      isClinician: true,
+      clinicianLicense: SANITARIA.colegiado,
+      clinicalScope: "ALL",
+      staffProfile: {
+        create: {
+          tenantId: CLINICA.tenant,
+          displayName: SANITARIA.alias,
+          color: "#3c7de8",
+        },
+      },
+    },
+  });
+
   await prisma.client.create({
     data: {
       id: PACIENTE.id,
@@ -203,15 +271,46 @@ export async function sembrarClinica(prisma: PrismaClient): Promise<void> {
     },
   });
 
-  // Y que la podóloga lo da: sin la matriz de skills, el motor no la
-  // propone y el capítulo no puede reservar.
-  await prisma.staffSkill.create({
-    data: {
-      tenantId: CLINICA.tenant,
-      userId: PODOLOGA.id,
-      serviceId: SERVICIO_VALORACION.id,
-    },
-  });
+  // clinica-3 · los tres tratamientos de la sesión, MARCADOS en el
+  // catálogo. La marca es lo que hace que salgan como botones, y el precio
+  // y el IVA de cada uno son los que pasan a caja.
+  for (const t of TRATAMIENTOS) {
+    await prisma.product.create({
+      data: {
+        id: t.id,
+        tenantId: CLINICA.tenant,
+        kind: "SERVICE",
+        name: t.name,
+        sku: t.sku,
+        basePrice: t.basePrice,
+        taxRate: 0,
+        active: true,
+        scheduling: {
+          create: {
+            tenantId: CLINICA.tenant,
+            durationMin: 30,
+            staffRequired: 1,
+            tratamientoSesion: true,
+            channels: { caja: true, ticket: true, agenda: true, online: false },
+          },
+        },
+      },
+    });
+  }
+
+  // Y quién da cada servicio: sin la matriz de skills, el motor no las
+  // propone y el capítulo no puede reservar. Las dos dan de todo: en una
+  // clínica de dos personas, la matriz completa es lo normal.
+  for (const userId of [PODOLOGA.id, SANITARIA.id]) {
+    for (const serviceId of [
+      SERVICIO_VALORACION.id,
+      ...TRATAMIENTOS.map((t) => t.id),
+    ]) {
+      await prisma.staffSkill.create({
+        data: { tenantId: CLINICA.tenant, userId, serviceId },
+      });
+    }
+  }
 
   // El horario del centro y el turno de la podóloga, de lunes a sábado y
   // de 9 a 20: así el capítulo encuentra hueco cualquier día en que corra.
@@ -233,17 +332,19 @@ export async function sembrarClinica(prisma: PrismaClient): Promise<void> {
         validFrom: DESDE,
       },
     });
-    await prisma.staffShift.create({
-      data: {
-        tenantId: CLINICA.tenant,
-        userId: PODOLOGA.id,
-        kind: "REGULAR",
-        rrule: `FREQ=WEEKLY;BYDAY=${DIAS[weekday - 1]}`,
-        startTime: "09:00",
-        endTime: "20:00",
-        validFrom: DESDE,
-      },
-    });
+    for (const userId of [PODOLOGA.id, SANITARIA.id]) {
+      await prisma.staffShift.create({
+        data: {
+          tenantId: CLINICA.tenant,
+          userId,
+          kind: "REGULAR",
+          rrule: `FREQ=WEEKLY;BYDAY=${DIAS[weekday - 1]}`,
+          startTime: "09:00",
+          endTime: "20:00",
+          validFrom: DESDE,
+        },
+      });
+    }
   }
 }
 
