@@ -341,16 +341,20 @@ describe("TableMapScreen · lienzo visual", () => {
     expect(container.textContent).toContain("aún no tiene mesas");
   });
 
-  it("barra: taburetes ordenados por barSeatIndex", async () => {
+  it("barra: mesas ordenadas por barSeatIndex", async () => {
     const tables: ApiTable[] = [
       table({ id: "B1", name: "B1", zone: "BARRA", barSeatIndex: 2 }),
       table({ id: "B2", name: "B2", zone: "BARRA", barSeatIndex: 0 }),
       table({ id: "B3", name: "B3", zone: "BARRA", barSeatIndex: 1 }),
     ];
     await renderWith(tables);
+    // v1.23 · la barra ya no pinta taburetes de 84 px con el nombre y
+    // nada más: pinta LA MISMA tarjeta que el resto de la sala, así que
+    // el texto del botón trae también el PAX.
     const names = [...container.querySelectorAll("button")]
       .map((b) => b.textContent?.trim() ?? "")
-      .filter((t) => /^B[123]$/.test(t));
+      .filter((t) => /^B[123]/.test(t))
+      .map((t) => t.slice(0, 2));
     expect(names).toEqual(["B2", "B3", "B1"]);
   });
 });

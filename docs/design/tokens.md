@@ -257,12 +257,42 @@ idéntico en todas) se veían dos.
 El alto no puede depender de si hay foto: si la tarjeta con foto midiera
 más, un catálogo a medio fotografiar dejaría la rejilla con filas rotas.
 
-### Mesa card (mapa de sala)
-- Aspect 7/6, `rounded-2xl`, border 2px.
+### Mesa card (mapa de sala) · v1.23
+- **168 × 118 px**, `rounded-[18px]`, border 2px. El tamaño sale de
+  `TABLE_CARD_WIDTH` / `TABLE_CARD_HEIGHT` en `lib/roomGrid.ts`, y la
+  clase que lo pinta es `TABLE_CARD_SIZE_CLASS`. **Un solo tamaño para
+  toda mesa**, en las cuatro zonas (Salón, Terraza, Reservados, Barra) y
+  en las dos vistas del mapa (Todas y filtrada por zona).
 - Estados: free (white + slate-200), open (coral-soft + coral/40),
   billing (amber-50 + amber-300/60).
 - Layout interno: ID arriba izquierda, capacidad arriba derecha, info
   (tiempo, comensales, camarero, total) abajo.
+- Por debajo de `sm` la rejilla de cada zona son **dos columnas**
+  (`ROOM_GRID_CLASS`) y la tarjeta ocupa el ancho de su celda: **153 ×
+  118** a 390 px. Sigue midiendo lo mismo que sus vecinas en todas las
+  zonas; lo que cambia con la pantalla es cuánto vale ese "lo mismo". El
+  alto no cambia nunca: una mesa no es más baja en un móvil.
+  Con una sola columna la tarjeta subía a 320 px y el mapa de 16 mesas a
+  2.614 px de largo; con dos son 1.481 y se ve el doble de sala por
+  pantallazo. Tres columnas dejarían la tarjeta en 98 px.
+
+De dónde sale el 168: es el mayor ancho con el que la sala del AP13
+(6 Salón + 6 Terraza + 4 Barra) entra entera **sin desplazar** a
+1280 × 800. Una banda de 6 mesas pide `6·W + 5·14 + 36`; con 168 son
+1114 de los 1224 útiles, y las tres bandas suman 546 px de alto sobre
+los 560 disponibles.
+
+Hasta v1.22 el tamaño lo fijaba la **zona**, no la mesa: el lienzo daba a
+Salón todo el ancho sobrante y encerraba Terraza en 300 px, y dentro de
+cada marco había un `grid-cols-2`. Medido en el AP13 a 1443 × 812, la
+misma mesa de 4 personas era 509 × 118 en Salón, 124 × 118 en Terraza y
+un círculo de 84 × 84 en Barra: **7,1× de diferencia de área para el
+mismo objeto** (E1 de la auditoría del 2026-09-02). El sitio de barra ya
+no es un taburete: es la misma tarjeta, y la identidad de la zona la da
+el mostrador dibujado encima.
+
+**Regla:** si una zona necesitara su propio tamaño de mesa, se discute
+aquí primero. No se añaden anchos sueltos en el componente.
 
 ### CashPad (teclado numérico propio) · v1.12
 - Grid de 3 columnas, mismas medidas que el keypad del PIN.
