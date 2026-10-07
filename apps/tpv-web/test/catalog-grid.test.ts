@@ -12,6 +12,7 @@ import {
   catalogRowsVisible,
   CATEGORY_CHIP_BLOCK_HEIGHT,
   PRODUCT_CARD_MIN_HEIGHT,
+  CATEGORY_RAIL_BLOCK_HEIGHT,
 } from "../src/lib/catalogGrid.js";
 
 describe("v1.14.1 · §1 · caben tres filas de producto a 1280×800", () => {
@@ -59,5 +60,34 @@ describe("catalogRowsVisible · casos de borde", () => {
     expect(cuatro).toBeLessThanOrEqual(disponible);
     const cinco = 5 * PRODUCT_CARD_MIN_HEIGHT + 4 * 14;
     expect(cinco).toBeGreaterThan(disponible);
+  });
+});
+
+// v1.22-el-terminal-del-bar · §4 · el rail de categorías no cuesta alto.
+//
+// SABOTAJE que tiene que caer: devolver la fila de chips a tablet. El
+// bloque de chips gastaba 72 px por encima de la rejilla; el rail vive a
+// la izquierda y los devuelve.
+describe("v1.22 §4 · el rail devuelve una fila de producto", () => {
+  it("a 1443 × 812 (el Kozen D8): cuatro filas con chips, cinco con rail", () => {
+    expect(
+      catalogRowsVisible(812, PRODUCT_CARD_MIN_HEIGHT, CATEGORY_CHIP_BLOCK_HEIGHT),
+    ).toBe(4);
+    expect(
+      catalogRowsVisible(812, PRODUCT_CARD_MIN_HEIGHT, CATEGORY_RAIL_BLOCK_HEIGHT),
+    ).toBe(5);
+  });
+
+  it("a 1280 × 800 (el AP11): lo mismo, cuatro y cinco", () => {
+    expect(
+      catalogRowsVisible(800, PRODUCT_CARD_MIN_HEIGHT, CATEGORY_CHIP_BLOCK_HEIGHT),
+    ).toBe(4);
+    expect(
+      catalogRowsVisible(800, PRODUCT_CARD_MIN_HEIGHT, CATEGORY_RAIL_BLOCK_HEIGHT),
+    ).toBe(5);
+  });
+
+  it("el rail no gasta alto: la constante es cero y está dicho", () => {
+    expect(CATEGORY_RAIL_BLOCK_HEIGHT).toBe(0);
   });
 });

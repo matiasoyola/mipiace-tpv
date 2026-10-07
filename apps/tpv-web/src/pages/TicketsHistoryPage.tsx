@@ -40,6 +40,7 @@ import {
 } from "../platform/printer/printJob.js";
 import { RefundOverlay } from "./RefundPage.js";
 import { formatEur } from "../lib/money.js";
+import { METHOD_LABEL } from "../lib/shiftSummary.js";
 
 // v1.10.2-impresion-honesta · estado de una reimpresión.
 //
@@ -873,7 +874,13 @@ export function TicketDetailDrawer({
             <div className="mt-3 space-y-1.5 text-[13px]">
               {ticket.payments.map((p) => (
                 <div key={p.id} className="flex justify-between text-slate-500">
-                  <span>{p.method}</span>
+                  {/* N6 · aquí se pintaba `p.method` tal cual, así que el
+                      desglose del ticket decía "CASH 6,90" y "CARD" en
+                      inglés, delante del cliente. El resto del TPV ya
+                      traducía con `METHOD_LABEL` (cierre de día, resumen,
+                      mixto) y el térmico con `methodLabel` de la API: el
+                      único sitio sin traducir era éste. */}
+                  <span>{METHOD_LABEL[p.method] ?? p.method}</span>
                   <span className="tabular-nums">{formatEur(p.amount)}</span>
                 </div>
               ))}

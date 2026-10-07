@@ -17,6 +17,7 @@
 //     importe (bruto · devoluciones · neto, fondo de caja, recuentos).
 //     Ninguna cifra de la tarjeta es un total opaco.
 
+import type { ReactNode } from "react";
 import { useState } from "react";
 import { AlertCircle, CheckCircle2, ChevronDown, Clock, Loader2 } from "lucide-react";
 
@@ -48,6 +49,7 @@ export function DaySummaryCard({
   onConfirm,
   onCountCash,
   error,
+  notice,
 }: {
   summary: ShiftDaySummary;
   title?: string;
@@ -57,6 +59,11 @@ export function DaySummaryCard({
   // pendiente de leer.
   confirmDisabled?: boolean;
   confirmLabel?: string;
+  // v1.22 §5 · bloque que se pinta justo ANTES del botón de confirmar
+  // (hoy: el aviso de mesas abiertas del cierre). Va aquí dentro y no
+  // debajo de la tarjeta porque lo que cuelga debajo del botón se lee
+  // cuando ya se ha pulsado.
+  notice?: ReactNode;
   onConfirm: () => void;
   // Ausente = este contexto no ofrece contar (p. ej. el turno ya está
   // cerrado y contado). Presente = enlace discreto "Cuadrar caja".
@@ -289,6 +296,8 @@ export function DaySummaryCard({
           <span>{error}</span>
         </div>
       )}
+
+      {notice && <div className="mb-3">{notice}</div>}
 
       {/* Un solo botón. Nada más al mismo nivel. */}
       <button

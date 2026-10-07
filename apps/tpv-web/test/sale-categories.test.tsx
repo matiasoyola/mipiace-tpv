@@ -293,11 +293,17 @@ describe("v1.14 · M1 · sin scroll horizontal", () => {
     expect(
       container.querySelector('[role="dialog"][aria-label="Más categorías"]'),
     ).toBeNull();
-    // La selección se ve sin abrir el sheet: el chip "Más (N)" se pone
-    // en coral cuando la categoría activa se ha quedado dentro.
-    const mas = chipByText("Más (");
+    // La selección se ve sin abrir el sheet: el chip de desbordamiento
+    // se pone en coral cuando la categoría activa se ha quedado dentro.
+    //
+    // v1.22 §4 · y además DICE SU NOMBRE en vez de "Más (N)". Hasta
+    // aquí el chip resaltado decía que se había elegido algo pero no
+    // qué, y en el AP13 una rejilla filtrada de Refrescos y otra de
+    // Vinos se parecen lo bastante para dudar.
+    const mas = chipByText(`Categoria ${numero}`);
     expect(mas.getAttribute("aria-pressed")).toBe("true");
     expect(mas.className).toContain("bg-mipiace-coral");
+    expect(mas.textContent).not.toContain("Más (");
     // Y el grid ha filtrado de verdad: queda un solo producto, el suyo.
     const seccion = container.querySelector("section")!;
     expect(seccion.textContent).toContain(`Producto de categoria-${numero}`);

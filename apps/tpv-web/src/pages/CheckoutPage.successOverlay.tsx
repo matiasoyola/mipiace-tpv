@@ -33,7 +33,10 @@ import {
 import type { TicketDocument } from "@mipiacetpv/ticket-model";
 
 import { apiWithCashier } from "../api.js";
-import { getCachedBusinessType } from "../lib/catalog.js";
+import {
+  getCachedBusinessType,
+  getCachedHoldedEnabled,
+} from "../lib/catalog.js";
 import type { BusinessType } from "../lib/catalog.js";
 import { formatEur } from "../lib/money.js";
 import { subscribeOutbox } from "../lib/outbox.js";
@@ -87,6 +90,12 @@ export interface CashSummary {
   change: number;
 }
 
+// N4 · estados en los que el ticket ya no va a cambiar de respuesta, así
+// que el polling se para. `SYNCED` y `SYNC_FAILED` eran los que la
+// condición original decía (sin conseguirlo, ver dentro); `PAID` y `TEST`
+// son los finales de un comercio SIN Holded, donde nunca hay subida.
+const ESTADO_FINAL = new Set(["SYNCED", "SYNC_FAILED", "PAID", "TEST"]);
+
 export function SuccessOverlay({
   ticketId,
   internalNumber,
@@ -110,6 +119,11 @@ export function SuccessOverlay({
 }) {
   const [docNumber, setDocNumber] = useState<string | null>(null);
   const [status, setStatus] = useState("PENDING_SYNC");
+  // N4 · un comercio SIN Holded no sincroniza nada: `PAID` es su estado
+  // final (ver `paidTicketStatus` en la API). La caché dice `true` salvo
+  // que el servidor haya dicho explícitamente que no, así que un TPV que
+  // todavía no ha refrescado se comporta igual que antes del bloque.
+  const holdedEnabled = getCachedHoldedEnabled();
   const [digital, setDigital] = useState<DigitalPayload | null>(null);
   const [digitalError, setDigitalError] = useState<string | null>(null);
   const [showQr, setShowQr] = useState(false);
@@ -172,6 +186,7 @@ export function SuccessOverlay({
   useEffect(() => {
     let cancelled = false;
     let attempts = 0;
+    let lastStatus = "PENDING_SYNC";
     async function tick() {
       attempts += 1;
       try {
@@ -179,17 +194,20 @@ export function SuccessOverlay({
           ticket: { holdedDocNumber: string | null; status: string };
         }>(`/tickets/${ticketId}`);
         if (cancelled) return;
+        lastStatus = res.ticket.status;
         setStatus(res.ticket.status);
         if (res.ticket.holdedDocNumber) setDocNumber(res.ticket.holdedDocNumber);
       } catch {
         /* sin red — el TPV puede estar offline, ignoramos y seguimos */
       }
-      if (
-        !cancelled &&
-        attempts < 60 &&
-        status !== "SYNCED" &&
-        status !== "SYNC_FAILED"
-      ) {
+      // N4 · esta condición leía `status`, que es el valor del PRIMER
+      // render (las deps son `[ticketId]`): valía siempre "PENDING_SYNC"
+      // y el bucle agotaba sus 60 vueltas aunque el ticket ya estuviese
+      // cerrado. Se decide con lo que acaba de contestar el servidor.
+      // `PAID` y `TEST` también son finales: sin Holded no hay nada que
+      // esperar, así que un comercio sin Holded dejaba 60 peticiones por
+      // venta a un endpoint que ya no iba a cambiar de respuesta.
+      if (!cancelled && attempts < 60 && !ESTADO_FINAL.has(lastStatus)) {
         setTimeout(tick, 1000);
       }
     }
@@ -458,6 +476,20 @@ export function SuccessOverlay({
                 Prueba
               </span>
               No se sube a Holded ni se envía email.
+            </div>
+          ) : !holdedEnabled ? (
+            // N4 · La Maestranza (y todo comercio sin Holded) veía aquí
+            // "Sincronizando con Holded…" con el spinner en CADA venta,
+            // para siempre: su ticket nace `PAID` y `PAID` caía en este
+            // último `else`. No hay nada sincronizando, y no hay Holded
+            // que nombrar. Va antes del spinner y no después de mirar el
+            // estado, así que el mensaje falso no se asoma ni un segundo
+            // mientras llega la primera respuesta del polling.
+            <div
+              data-testid="sin-holded-nada-que-sincronizar"
+              className="text-[13px] text-slate-500"
+            >
+              Cobrado. Nada pendiente de sincronizar.
             </div>
           ) : (
             <div className="text-[13px] text-slate-500 flex items-center justify-center gap-2">
