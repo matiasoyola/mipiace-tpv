@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Sala · mapa de mesas</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#F2A08F}a:hover{color:#FFFFFF}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="width: 1443px; height: 812px; box-sizing: border-box; display: flex; flex-direction: column; background: #0E1013; font-family: 'DM Sans', system-ui, sans-serif; color: #F1F3F5; font-feature-settings: 'cv11', 'ss01';">
+
+  <div style="height: 80px; flex-shrink: 0; display: flex; align-items: center; gap: 16px; padding: 0 20px; border-bottom: 1px solid #23272E;">
+    <div style="font-size: 28px; font-weight: 600; letter-spacing: -0.015em;">Sala</div>
+    <div style="font-size: 17px; color: #8B93A1; font-variant-numeric: tabular-nums;">4 abiertas · 85,00 €</div>
+    <div style="flex-grow: 1"></div>
+    <div style="display: flex; gap: 8px;">
+      <button style="height: 52px; padding: 0 20px; border-radius: 14px; border: 0; background: #F1F3F5; color: #0E1013; font-size: 18px; font-weight: 600;">Todas</button>
+      <button style="height: 52px; padding: 0 20px; border-radius: 14px; border: 0; background: #1C2026; color: #E4E7EB; font-size: 18px; font-weight: 500;">Barra</button>
+      <button style="height: 52px; padding: 0 20px; border-radius: 14px; border: 0; background: #1C2026; color: #E4E7EB; font-size: 18px; font-weight: 500;">Salón</button>
+      <button style="height: 52px; padding: 0 20px; border-radius: 14px; border: 0; background: #1C2026; color: #E4E7EB; font-size: 18px; font-weight: 500;">Terraza</button>
+    </div>
+    <button style="height: 56px; padding: 0 22px; border-radius: 16px; border: 0; background: #E97058; color: #FFFFFF; font-size: 19px; font-weight: 600;">Venta rápida</button>
+  </div>
+
+  <div style="position: relative; flex-grow: 1;">
+
+    <div style="position: absolute; left: 32px; top: 24px; font-size: 11px; font-weight: 500; letter-spacing: 0.1em; color: #8B93A1;">BARRA</div>
+    <div style="position: absolute; left: 32px; top: 48px; width: 620px; height: 22px; border-radius: 11px; background: #23272E;"></div>
+    <sc-for list="{{barra}}" as="t" hint-placeholder-count="4">
+      <a href="Oscuro.dc.html" style="position: absolute; top: 86px; width: 128px; height: 128px; border-radius: 64px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; text-decoration: none; {{t.pos}} {{t.look}}">
+        <span style="font-size: 26px; font-weight: 600;">{{t.n}}</span>
+        <span style="font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums;">{{t.amount}}</span>
+      </a>
+    </sc-for>
+
+    <div style="position: absolute; left: 32px; top: 248px; font-size: 11px; font-weight: 500; letter-spacing: 0.1em; color: #8B93A1;">SALÓN</div>
+    <sc-for list="{{salon}}" as="t" hint-placeholder-count="6">
+      <a href="Oscuro.dc.html" style="position: absolute; width: 190px; height: 132px; border-radius: 20px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-decoration: none; {{t.pos}} {{t.look}}">
+        <span style="font-size: 30px; font-weight: 600;">{{t.n}}</span>
+        <span style="font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums;">{{t.amount}}</span>
+        <span style="font-size: 15px; font-weight: 500; opacity: 0.85;">{{t.meta}}</span>
+      </a>
+    </sc-for>
+
+    <div style="position: absolute; left: 760px; top: 24px; width: 1px; height: 676px; background: #23272E;"></div>
+    <div style="position: absolute; left: 800px; top: 24px; font-size: 11px; font-weight: 500; letter-spacing: 0.1em; color: #8B93A1;">TERRAZA</div>
+    <sc-for list="{{terraza}}" as="t" hint-placeholder-count="6">
+      <a href="Oscuro.dc.html" style="position: absolute; width: 168px; height: 168px; border-radius: 84px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-decoration: none; {{t.pos}} {{t.look}}">
+        <span style="font-size: 30px; font-weight: 600;">{{t.n}}</span>
+        <span style="font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums;">{{t.amount}}</span>
+        <span style="font-size: 15px; font-weight: 500; opacity: 0.85;">{{t.meta}}</span>
+      </a>
+    </sc-for>
+
+    <div style="position: absolute; left: 32px; bottom: 20px; display: flex; gap: 22px; font-size: 15px; color: #8B93A1;">
+      <span style="display: flex; align-items: center; gap: 8px;"><span style="width: 14px; height: 14px; border-radius: 4px; background: #E9ECEF;"></span>Libre</span>
+      <span style="display: flex; align-items: center; gap: 8px;"><span style="width: 14px; height: 14px; border-radius: 4px; background: #E97058;"></span>Ocupada</span>
+      <span style="display: flex; align-items: center; gap: 8px;"><span style="width: 14px; height: 14px; border-radius: 4px; background: #E2B23A;"></span>Pide la cuenta</span>
+      <span style="display: flex; align-items: center; gap: 8px;"><span style="width: 14px; height: 14px; border-radius: 4px; background: #E97058; box-shadow: 0 0 0 3px #E2B23A;"></span>+45 min sin atender</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1443,"height":812}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const free = 'background: #E9ECEF; color: #0E1013;';
+    const busy = 'background: #E97058; color: #FFFFFF;';
+    const bill = 'background: #E2B23A; color: #1B1500;';
+    const late = 'background: #E97058; color: #FFFFFF; box-shadow: 0 0 0 4px #E2B23A;';
+    const T = (n, x, y, look, amount, meta) => ({ n, pos: `left: ${x}px; top: ${y}px;`, look, amount: amount || '', meta: meta || '' });
+    const barra = [T('B1',32,86,busy,'4,80 €'), T('B2',190,86,free), T('B3',348,86,free), T('B4',506,86,free)];
+    const salon = [
+      T('M1',32,280,busy,'17,50 €','12 min'), T('M2',254,280,free), T('M3',476,280,free),
+      T('M4',32,444,late,'55,00 €','48 min'), T('M5',254,444,free), T('M6',476,444,free)
+    ];
+    const terraza = [
+      T('T1',800,60,free), T('T2',1000,60,bill,'7,70 €','cuenta'), T('T3',1200,60,free),
+      T('T4',800,270,free), T('T5',1000,270,free), T('T6',1200,270,free)
+    ];
+    return { barra, salon, terraza };
+  }
+}
+</script>
+</body>
+</html>
