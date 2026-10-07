@@ -77,6 +77,7 @@ import {
   TABLE_SHAPE_RADIUS,
   TABLE_SHAPE_SIZE,
   ZONE_PADDING,
+  roundTableChordWidth,
 } from "../lib/roomGrid.js";
 import {
   BAR_COUNTER_FILL,
@@ -464,7 +465,10 @@ export function TableMapScreen(props: TableMapScreenProps) {
             className="tabular-nums truncate"
             style={{ fontSize: 17, color: DARK_TEXT_MUTED }}
           >
-            {openCount} abiertas · {formatEur(salaTotal)}
+            {/* «1 abierta», no «1 abiertas». Lo cazó el bucle visual en
+                la sala de Sirope, que tenía una sola mesa ocupada. */}
+            {openCount} {openCount === 1 ? "abierta" : "abiertas"} ·{" "}
+            {formatEur(salaTotal)}
           </div>
         </div>
         {offline && (
@@ -1176,13 +1180,19 @@ function TableCard({
                   {formatEur(Number(table.activeTicket.total))}
                 </span>
               )}
-              <span
-                title={`Abierta hace ${elapsed}`}
-                className="font-medium truncate max-w-full px-2"
-                style={{ fontSize: 15, opacity: 0.85 }}
-              >
-                {isBilling ? "cuenta" : elapsed}
-              </span>
+              {/* La meta cede su sitio al botón «Cobrar X €» cuando lo
+                  hay: el botón ya dice qué pasa con esta mesa, y en una
+                  forma de 144 px las dos cosas se pisan (medido en el
+                  bucle visual, T2 de La Maestranza). */}
+              {!showCobrar && (
+                <span
+                  title={`Abierta hace ${elapsed}`}
+                  className="font-medium truncate max-w-full px-2"
+                  style={{ fontSize: 15, opacity: 0.85 }}
+                >
+                  {isBilling ? "cuenta" : elapsed}
+                </span>
+              )}
             </>
           )
         )}
@@ -1219,9 +1229,20 @@ function TableCard({
           onClick={() => onCobrar(table)}
           disabled={cobroBusy}
           data-testid="table-cobrar"
-          className="absolute inset-x-2 bottom-3 rounded-xl font-semibold tabular-nums inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
+          className="absolute rounded-xl font-semibold tabular-nums inline-flex items-center justify-center gap-1.5 disabled:opacity-60 whitespace-nowrap"
           style={{
-            height: 36,
+            // El botón se centra y se acota al ancho REAL de la forma a
+            // su altura. En una mesa redonda ese ancho no es el lado: es
+            // la cuerda, y con `inset-x-2` el botón salía por los dos
+            // lados del círculo colgando como una etiqueta (medido en el
+            // bucle visual, T2 de La Maestranza a 1443 × 812).
+            left: "50%",
+            transform: "translateX(-50%)",
+            bottom: COBRAR_BOTTOM,
+            maxWidth: cobrarMaxWidth(table.zone),
+            paddingLeft: 10,
+            paddingRight: 10,
+            height: COBRAR_HEIGHT,
             fontSize: 15,
             background: TABLE_BILLING_TEXT,
             color: TABLE_BILLING_FILL,
@@ -1236,6 +1257,29 @@ function TableCard({
       )}
     </div>
   );
+}
+
+/** Alto del botón «Cobrar X €» de una mesa en BILLING. */
+const COBRAR_HEIGHT = 36;
+
+/** A qué altura del borde inferior se ancla. */
+const COBRAR_BOTTOM = 18;
+
+/**
+ * Ancho máximo del botón «Cobrar» dentro de la forma.
+ *
+ * En Salón y Reservados es el lado menos un margen. En Barra y Terraza
+ * —que son círculos— es la CUERDA a la altura del centro del botón: un
+ * círculo de 144 px mide 144 en su eje pero mucho menos a 36 px del
+ * borde, y ahí es donde el botón se apoya.
+ */
+function cobrarMaxWidth(zone: TableZone): number {
+  if (TABLE_SHAPE_RADIUS[zone] < TABLE_SHAPE_SIZE / 2) {
+    return TABLE_SHAPE_SIZE - 16;
+  }
+  const centroDelBoton = COBRAR_BOTTOM + COBRAR_HEIGHT / 2;
+  const offset = TABLE_SHAPE_SIZE / 2 - centroDelBoton;
+  return Math.floor(roundTableChordWidth(offset) - 8);
 }
 
 /**

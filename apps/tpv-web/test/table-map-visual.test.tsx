@@ -296,7 +296,15 @@ describe("TableMapScreen · lienzo visual", () => {
     const m3 = formaDeMesa("M3");
     expect(m3.getAttribute("data-state")).toBe("billing");
     expect(m3.style.background).toBe(hexToRgb(TABLE_BILLING_FILL));
-    expect(m3.textContent).toContain("cuenta");
+    // v2-H1 · con el botón «Cobrar X €» delante, la meta «cuenta» no se
+    // pinta: el botón ya dice qué pasa con esta mesa, y en una forma de
+    // 144 px las dos cosas se pisan (lo vio el bucle visual en la T2 de
+    // La Maestranza). El estado se lee del relleno ámbar y del botón.
+    const cobrar = m3
+      .closest("div")!
+      .querySelector('[data-testid="table-cobrar"]');
+    expect(cobrar).not.toBeNull();
+    expect(cobrar!.textContent).toContain("Cobrar");
     expect(m3.getAttribute("data-late")).toBe("true");
     // El aro sigue el radio de la forma: va por `box-shadow`, no por un
     // `ring` cuadrado alrededor de un círculo.

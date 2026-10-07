@@ -1,0 +1,1390 @@
+{
+  "venta-ahora-1443x812": {
+    "grid": {
+      "w": 991,
+      "h": 521,
+      "x": 436,
+      "y": 275,
+      "fontSize": "16px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "columnas": "4",
+    "filas": "5",
+    "cabe": "true",
+    "productosVisibles": 20,
+    "productosEnDom": 20,
+    "nombreProducto": {
+      "w": 102.2,
+      "h": 26.4,
+      "x": 452,
+      "y": 310,
+      "fontSize": "24px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "botonProducto": {
+      "w": 241.8,
+      "h": 97,
+      "x": 436,
+      "y": 275,
+      "fontSize": "16px",
+      "background": "rgb(243, 177, 207)",
+      "radius": "12px"
+    },
+    "familia": {
+      "w": 191.8,
+      "h": 76,
+      "x": 436,
+      "y": 16,
+      "fontSize": "21px",
+      "background": "rgb(241, 243, 245)",
+      "radius": "14px"
+    },
+    "comanda": {
+      "w": 420,
+      "h": 812,
+      "x": 0,
+      "y": 0,
+      "fontSize": "16px",
+      "background": "rgb(23, 26, 31)",
+      "radius": "0px"
+    },
+    "lineaEnviada": {
+      "w": 395,
+      "h": 52,
+      "x": 12,
+      "y": 181,
+      "fontSize": "16px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "12px"
+    },
+    "nombreLinea": {
+      "w": 267.3,
+      "h": 31.5,
+      "x": 62,
+      "y": 191,
+      "fontSize": "21px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "total": {
+      "w": 138.1,
+      "h": 69,
+      "x": 265,
+      "y": 647,
+      "fontSize": "46px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "cobrar": {
+      "w": 212,
+      "h": 68,
+      "x": 191,
+      "y": 728,
+      "fontSize": "22px",
+      "background": "rgb(233, 112, 88)",
+      "radius": "16px"
+    },
+    "qtyKey": {
+      "w": 64,
+      "h": 56,
+      "x": 513,
+      "y": 205,
+      "fontSize": "22px",
+      "background": "rgb(241, 243, 245)",
+      "radius": "12px"
+    },
+    "scroll": {
+      "scrollHeight": 812,
+      "clientHeight": 812,
+      "bodyScroll": 812
+    }
+  },
+  "venta-licores-1443x812": {
+    "columnas": "5",
+    "filas": "7",
+    "cabe": "true",
+    "productosEnDom": 31,
+    "productosVisibles": 31,
+    "botonProducto": {
+      "w": 191.8,
+      "h": 67,
+      "x": 436,
+      "y": 275,
+      "fontSize": "16px",
+      "background": "rgb(167, 201, 255)",
+      "radius": "12px"
+    },
+    "nombreProducto": {
+      "w": 106.8,
+      "h": 24.2,
+      "x": 452,
+      "y": 296,
+      "fontSize": "22px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "gridScroll": {
+      "scrollHeight": 521,
+      "clientHeight": 521
+    },
+    "scroll": {
+      "scrollHeight": 812,
+      "clientHeight": 812,
+      "bodyScroll": 812
+    }
+  },
+  "venta-sin-enviar-1443x812": {
+    "lineaPendiente": {
+      "w": 395,
+      "h": 68,
+      "x": 12,
+      "y": 331,
+      "fontSize": "16px",
+      "background": "rgba(233, 112, 88, 0.16)",
+      "radius": "14px"
+    },
+    "stepperMenos": {
+      "w": 56,
+      "h": 56,
+      "x": 20,
+      "y": 337,
+      "fontSize": "30px",
+      "background": "rgb(44, 49, 58)",
+      "radius": "14px"
+    },
+    "stepperMas": {
+      "w": 56,
+      "h": 56,
+      "x": 126,
+      "y": 337,
+      "fontSize": "30px",
+      "background": "rgb(44, 49, 58)",
+      "radius": "14px"
+    },
+    "qtyPendiente": {
+      "w": 30,
+      "h": 36,
+      "x": 86,
+      "y": 347,
+      "fontSize": "24px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "importePendiente": {
+      "w": 72.5,
+      "h": 34.5,
+      "x": 326,
+      "y": 348,
+      "fontSize": "23px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "nombrePendiente": {
+      "w": 124.5,
+      "h": 34.5,
+      "x": 192,
+      "y": 348,
+      "fontSize": "23px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "insignia": {
+      "w": 40,
+      "h": 40,
+      "x": 622,
+      "y": 315,
+      "fontSize": "20px",
+      "background": "rgb(21, 23, 27)",
+      "radius": "10px"
+    },
+    "total": {
+      "w": 141.1,
+      "h": 69,
+      "x": 262,
+      "y": 647,
+      "fontSize": "46px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "importeDentro": {
+      "desborde": -21
+    }
+  },
+  "venta-ahora-1280x800": {
+    "grid": {
+      "w": 828,
+      "h": 509,
+      "x": 436,
+      "y": 275,
+      "fontSize": "16px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "columnas": "4",
+    "filas": "5",
+    "cabe": "true",
+    "productosVisibles": 20,
+    "productosEnDom": 20,
+    "nombreProducto": {
+      "w": 102.2,
+      "h": 26.4,
+      "x": 452,
+      "y": 309,
+      "fontSize": "24px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "botonProducto": {
+      "w": 201,
+      "h": 95,
+      "x": 436,
+      "y": 275,
+      "fontSize": "16px",
+      "background": "rgb(243, 177, 207)",
+      "radius": "12px"
+    },
+    "familia": {
+      "w": 159.2,
+      "h": 76,
+      "x": 436,
+      "y": 16,
+      "fontSize": "21px",
+      "background": "rgb(241, 243, 245)",
+      "radius": "14px"
+    },
+    "comanda": {
+      "w": 420,
+      "h": 800,
+      "x": 0,
+      "y": 0,
+      "fontSize": "16px",
+      "background": "rgb(23, 26, 31)",
+      "radius": "0px"
+    },
+    "lineaEnviada": {
+      "w": 395,
+      "h": 52,
+      "x": 12,
+      "y": 181,
+      "fontSize": "16px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "12px"
+    },
+    "nombreLinea": {
+      "w": 267.3,
+      "h": 31.5,
+      "x": 62,
+      "y": 191,
+      "fontSize": "21px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "total": {
+      "w": 138.1,
+      "h": 69,
+      "x": 265,
+      "y": 635,
+      "fontSize": "46px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "cobrar": {
+      "w": 212,
+      "h": 68,
+      "x": 191,
+      "y": 716,
+      "fontSize": "22px",
+      "background": "rgb(233, 112, 88)",
+      "radius": "16px"
+    },
+    "qtyKey": {
+      "w": 64,
+      "h": 56,
+      "x": 513,
+      "y": 205,
+      "fontSize": "22px",
+      "background": "rgb(241, 243, 245)",
+      "radius": "12px"
+    },
+    "scroll": {
+      "scrollHeight": 800,
+      "clientHeight": 800,
+      "bodyScroll": 800
+    }
+  },
+  "venta-licores-1280x800": {
+    "columnas": "5",
+    "filas": "7",
+    "cabe": "true",
+    "productosEnDom": 31,
+    "productosVisibles": 31,
+    "botonProducto": {
+      "w": 159.2,
+      "h": 65,
+      "x": 436,
+      "y": 275,
+      "fontSize": "16px",
+      "background": "rgb(167, 201, 255)",
+      "radius": "12px"
+    },
+    "nombreProducto": {
+      "w": 97.1,
+      "h": 22,
+      "x": 452,
+      "y": 297,
+      "fontSize": "20px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "gridScroll": {
+      "scrollHeight": 509,
+      "clientHeight": 509
+    },
+    "scroll": {
+      "scrollHeight": 800,
+      "clientHeight": 800,
+      "bodyScroll": 800
+    }
+  },
+  "venta-sin-enviar-1280x800": {
+    "lineaPendiente": {
+      "w": 395,
+      "h": 68,
+      "x": 12,
+      "y": 331,
+      "fontSize": "16px",
+      "background": "rgba(233, 112, 88, 0.16)",
+      "radius": "14px"
+    },
+    "stepperMenos": {
+      "w": 56,
+      "h": 56,
+      "x": 20,
+      "y": 337,
+      "fontSize": "30px",
+      "background": "rgb(44, 49, 58)",
+      "radius": "14px"
+    },
+    "stepperMas": {
+      "w": 56,
+      "h": 56,
+      "x": 126,
+      "y": 337,
+      "fontSize": "30px",
+      "background": "rgb(44, 49, 58)",
+      "radius": "14px"
+    },
+    "qtyPendiente": {
+      "w": 30,
+      "h": 36,
+      "x": 86,
+      "y": 347,
+      "fontSize": "24px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "importePendiente": {
+      "w": 72.5,
+      "h": 34.5,
+      "x": 326,
+      "y": 348,
+      "fontSize": "23px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "nombrePendiente": {
+      "w": 124.5,
+      "h": 34.5,
+      "x": 192,
+      "y": 348,
+      "fontSize": "23px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "insignia": {
+      "w": 40,
+      "h": 40,
+      "x": 581,
+      "y": 315,
+      "fontSize": "20px",
+      "background": "rgb(21, 23, 27)",
+      "radius": "10px"
+    },
+    "total": {
+      "w": 141.1,
+      "h": 69,
+      "x": 262,
+      "y": 635,
+      "fontSize": "46px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "importeDentro": {
+      "desborde": -21
+    }
+  },
+  "sala-maestranza-1443x812": {
+    "scroll": {
+      "scrollHeight": 812,
+      "clientHeight": 812,
+      "bodyScroll": 812
+    },
+    "canvas": {
+      "w": 1403,
+      "h": 620,
+      "x": 20,
+      "y": 104,
+      "fontSize": "16px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "formas": [
+      {
+        "nombre": "B1",
+        "zona": "BARRA",
+        "estado": "busy",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 39,
+        "y": 161,
+        "radio": "72px",
+        "fondo": "rgb(233, 112, 88)"
+      },
+      {
+        "nombre": "B2",
+        "zona": "BARRA",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 197,
+        "y": 161,
+        "radio": "72px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "B3",
+        "zona": "BARRA",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 355,
+        "y": 161,
+        "radio": "72px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "B4",
+        "zona": "BARRA",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 513,
+        "y": 161,
+        "radio": "72px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "M1",
+        "zona": "SALON",
+        "estado": "busy",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 39,
+        "y": 361,
+        "radio": "20px",
+        "fondo": "rgb(233, 112, 88)"
+      },
+      {
+        "nombre": "M2",
+        "zona": "SALON",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 197,
+        "y": 361,
+        "radio": "20px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "M3",
+        "zona": "SALON",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 355,
+        "y": 361,
+        "radio": "20px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "M4",
+        "zona": "SALON",
+        "estado": "busy",
+        "tarde": "true",
+        "w": 144,
+        "h": 144,
+        "x": 513,
+        "y": 361,
+        "radio": "20px",
+        "fondo": "rgb(233, 112, 88)"
+      },
+      {
+        "nombre": "M5",
+        "zona": "SALON",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 671,
+        "y": 361,
+        "radio": "20px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "M6",
+        "zona": "SALON",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 829,
+        "y": 361,
+        "radio": "20px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "T1",
+        "zona": "TERRAZA",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 39,
+        "y": 561,
+        "radio": "72px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "T2",
+        "zona": "TERRAZA",
+        "estado": "billing",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 197,
+        "y": 561,
+        "radio": "72px",
+        "fondo": "rgb(226, 178, 58)"
+      },
+      {
+        "nombre": "T3",
+        "zona": "TERRAZA",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 355,
+        "y": 561,
+        "radio": "72px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "T4",
+        "zona": "TERRAZA",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 513,
+        "y": 561,
+        "radio": "72px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "T5",
+        "zona": "TERRAZA",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 671,
+        "y": 561,
+        "radio": "72px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "T6",
+        "zona": "TERRAZA",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 829,
+        "y": 561,
+        "radio": "72px",
+        "fondo": "rgb(233, 236, 239)"
+      }
+    ],
+    "bandas": [
+      {
+        "zona": "BARRA",
+        "x": 20,
+        "y": 104,
+        "w": 656,
+        "h": 220
+      },
+      {
+        "zona": "SALÓN",
+        "x": 20,
+        "y": 342,
+        "w": 972,
+        "h": 182
+      },
+      {
+        "zona": "TERRAZA",
+        "x": 20,
+        "y": 542,
+        "w": 972,
+        "h": 182
+      }
+    ],
+    "nombreMesa": {
+      "w": 26.5,
+      "h": 28,
+      "x": 98,
+      "y": 189,
+      "fontSize": "28px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "importeMesa": {
+      "w": 70.8,
+      "h": 33,
+      "x": 76,
+      "y": 219,
+      "fontSize": "22px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "cabecera": {
+      "w": 1443,
+      "h": 80,
+      "x": 0,
+      "y": 0,
+      "fontSize": "16px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "contador": "4 abiertas · 85,00 €",
+    "leyenda": {
+      "w": 1403,
+      "h": 42.5,
+      "x": 20,
+      "y": 750,
+      "fontSize": "15px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    }
+  },
+  "sala-filtrada-barra-1443x812": {
+    "formas": [
+      {
+        "w": 144,
+        "h": 144
+      },
+      {
+        "w": 144,
+        "h": 144
+      },
+      {
+        "w": 144,
+        "h": 144
+      },
+      {
+        "w": 144,
+        "h": 144
+      }
+    ],
+    "mostrador": {
+      "w": 618,
+      "h": 22,
+      "x": 39,
+      "y": 123,
+      "fontSize": "16px",
+      "background": "rgb(35, 39, 46)",
+      "radius": "11px"
+    }
+  },
+  "sala-maestranza-1280x800": {
+    "scroll": {
+      "scrollHeight": 800,
+      "clientHeight": 800,
+      "bodyScroll": 800
+    },
+    "canvas": {
+      "w": 1240,
+      "h": 620,
+      "x": 20,
+      "y": 104,
+      "fontSize": "16px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "formas": [
+      {
+        "nombre": "B1",
+        "zona": "BARRA",
+        "estado": "busy",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 39,
+        "y": 161,
+        "radio": "72px",
+        "fondo": "rgb(233, 112, 88)"
+      },
+      {
+        "nombre": "B2",
+        "zona": "BARRA",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 197,
+        "y": 161,
+        "radio": "72px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "B3",
+        "zona": "BARRA",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 355,
+        "y": 161,
+        "radio": "72px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "B4",
+        "zona": "BARRA",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 513,
+        "y": 161,
+        "radio": "72px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "M1",
+        "zona": "SALON",
+        "estado": "busy",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 39,
+        "y": 361,
+        "radio": "20px",
+        "fondo": "rgb(233, 112, 88)"
+      },
+      {
+        "nombre": "M2",
+        "zona": "SALON",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 197,
+        "y": 361,
+        "radio": "20px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "M3",
+        "zona": "SALON",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 355,
+        "y": 361,
+        "radio": "20px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "M4",
+        "zona": "SALON",
+        "estado": "busy",
+        "tarde": "true",
+        "w": 144,
+        "h": 144,
+        "x": 513,
+        "y": 361,
+        "radio": "20px",
+        "fondo": "rgb(233, 112, 88)"
+      },
+      {
+        "nombre": "M5",
+        "zona": "SALON",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 671,
+        "y": 361,
+        "radio": "20px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "M6",
+        "zona": "SALON",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 829,
+        "y": 361,
+        "radio": "20px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "T1",
+        "zona": "TERRAZA",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 39,
+        "y": 561,
+        "radio": "72px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "T2",
+        "zona": "TERRAZA",
+        "estado": "billing",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 197,
+        "y": 561,
+        "radio": "72px",
+        "fondo": "rgb(226, 178, 58)"
+      },
+      {
+        "nombre": "T3",
+        "zona": "TERRAZA",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 355,
+        "y": 561,
+        "radio": "72px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "T4",
+        "zona": "TERRAZA",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 513,
+        "y": 561,
+        "radio": "72px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "T5",
+        "zona": "TERRAZA",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 671,
+        "y": 561,
+        "radio": "72px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "T6",
+        "zona": "TERRAZA",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 829,
+        "y": 561,
+        "radio": "72px",
+        "fondo": "rgb(233, 236, 239)"
+      }
+    ],
+    "bandas": [
+      {
+        "zona": "BARRA",
+        "x": 20,
+        "y": 104,
+        "w": 656,
+        "h": 220
+      },
+      {
+        "zona": "SALÓN",
+        "x": 20,
+        "y": 342,
+        "w": 972,
+        "h": 182
+      },
+      {
+        "zona": "TERRAZA",
+        "x": 20,
+        "y": 542,
+        "w": 972,
+        "h": 182
+      }
+    ],
+    "nombreMesa": {
+      "w": 26.5,
+      "h": 28,
+      "x": 98,
+      "y": 189,
+      "fontSize": "28px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "importeMesa": {
+      "w": 70.8,
+      "h": 33,
+      "x": 76,
+      "y": 219,
+      "fontSize": "22px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "cabecera": {
+      "w": 1280,
+      "h": 80,
+      "x": 0,
+      "y": 0,
+      "fontSize": "16px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "contador": "4 abiertas · 85,00 €",
+    "leyenda": {
+      "w": 1240,
+      "h": 42.5,
+      "x": 20,
+      "y": 738,
+      "fontSize": "15px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    }
+  },
+  "sala-sirope-1443x812": {
+    "scroll": {
+      "scrollHeight": 812,
+      "clientHeight": 812,
+      "bodyScroll": 812
+    },
+    "canvas": {
+      "w": 1403,
+      "h": 182,
+      "x": 20,
+      "y": 104,
+      "fontSize": "16px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "formas": [
+      {
+        "nombre": "M1",
+        "zona": "SALON",
+        "estado": "busy",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 39,
+        "y": 123,
+        "radio": "20px",
+        "fondo": "rgb(233, 112, 88)"
+      },
+      {
+        "nombre": "M2",
+        "zona": "SALON",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 197,
+        "y": 123,
+        "radio": "20px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "M3",
+        "zona": "SALON",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 355,
+        "y": 123,
+        "radio": "20px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "T1",
+        "zona": "TERRAZA",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 555,
+        "y": 123,
+        "radio": "72px",
+        "fondo": "rgb(233, 236, 239)"
+      }
+    ],
+    "bandas": [
+      {
+        "zona": "SALÓN",
+        "x": 20,
+        "y": 104,
+        "w": 498,
+        "h": 182
+      },
+      {
+        "zona": "TERRAZA",
+        "x": 536,
+        "y": 104,
+        "w": 182,
+        "h": 182
+      }
+    ],
+    "nombreMesa": {
+      "w": 33.4,
+      "h": 28,
+      "x": 94,
+      "y": 151,
+      "fontSize": "28px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "importeMesa": {
+      "w": 82.4,
+      "h": 33,
+      "x": 70,
+      "y": 181,
+      "fontSize": "22px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "cabecera": {
+      "w": 1443,
+      "h": 80,
+      "x": 0,
+      "y": 0,
+      "fontSize": "16px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "contador": "1 abierta · 22,40 €",
+    "leyenda": {
+      "w": 1403,
+      "h": 42.5,
+      "x": 20,
+      "y": 750,
+      "fontSize": "15px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    }
+  },
+  "sala-sirope-1280x800": {
+    "scroll": {
+      "scrollHeight": 800,
+      "clientHeight": 800,
+      "bodyScroll": 800
+    },
+    "canvas": {
+      "w": 1240,
+      "h": 182,
+      "x": 20,
+      "y": 104,
+      "fontSize": "16px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "formas": [
+      {
+        "nombre": "M1",
+        "zona": "SALON",
+        "estado": "busy",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 39,
+        "y": 123,
+        "radio": "20px",
+        "fondo": "rgb(233, 112, 88)"
+      },
+      {
+        "nombre": "M2",
+        "zona": "SALON",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 197,
+        "y": 123,
+        "radio": "20px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "M3",
+        "zona": "SALON",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 355,
+        "y": 123,
+        "radio": "20px",
+        "fondo": "rgb(233, 236, 239)"
+      },
+      {
+        "nombre": "T1",
+        "zona": "TERRAZA",
+        "estado": "free",
+        "tarde": "false",
+        "w": 144,
+        "h": 144,
+        "x": 555,
+        "y": 123,
+        "radio": "72px",
+        "fondo": "rgb(233, 236, 239)"
+      }
+    ],
+    "bandas": [
+      {
+        "zona": "SALÓN",
+        "x": 20,
+        "y": 104,
+        "w": 498,
+        "h": 182
+      },
+      {
+        "zona": "TERRAZA",
+        "x": 536,
+        "y": 104,
+        "w": 182,
+        "h": 182
+      }
+    ],
+    "nombreMesa": {
+      "w": 33.4,
+      "h": 28,
+      "x": 94,
+      "y": 151,
+      "fontSize": "28px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "importeMesa": {
+      "w": 82.4,
+      "h": 33,
+      "x": 70,
+      "y": 181,
+      "fontSize": "22px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "cabecera": {
+      "w": 1280,
+      "h": 80,
+      "x": 0,
+      "y": 0,
+      "fontSize": "16px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "contador": "1 abierta · 22,40 €",
+    "leyenda": {
+      "w": 1240,
+      "h": 42.5,
+      "x": 20,
+      "y": 738,
+      "fontSize": "15px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    }
+  },
+  "sala-handheld-390": {
+    "scroll": {
+      "scrollHeight": 1607,
+      "clientHeight": 844,
+      "bodyScroll": 1607
+    },
+    "formas": [
+      {
+        "zona": "BARRA",
+        "w": 144,
+        "h": 144
+      },
+      {
+        "zona": "BARRA",
+        "w": 144,
+        "h": 144
+      },
+      {
+        "zona": "BARRA",
+        "w": 144,
+        "h": 144
+      },
+      {
+        "zona": "BARRA",
+        "w": 144,
+        "h": 144
+      },
+      {
+        "zona": "SALON",
+        "w": 144,
+        "h": 144
+      },
+      {
+        "zona": "SALON",
+        "w": 144,
+        "h": 144
+      },
+      {
+        "zona": "SALON",
+        "w": 144,
+        "h": 144
+      },
+      {
+        "zona": "SALON",
+        "w": 144,
+        "h": 144
+      },
+      {
+        "zona": "SALON",
+        "w": 144,
+        "h": 144
+      },
+      {
+        "zona": "SALON",
+        "w": 144,
+        "h": 144
+      },
+      {
+        "zona": "TERRAZA",
+        "w": 144,
+        "h": 144
+      },
+      {
+        "zona": "TERRAZA",
+        "w": 144,
+        "h": 144
+      },
+      {
+        "zona": "TERRAZA",
+        "w": 144,
+        "h": 144
+      },
+      {
+        "zona": "TERRAZA",
+        "w": 144,
+        "h": 144
+      },
+      {
+        "zona": "TERRAZA",
+        "w": 144,
+        "h": 144
+      },
+      {
+        "zona": "TERRAZA",
+        "w": 144,
+        "h": 144
+      }
+    ],
+    "columnasPorBanda": [
+      {
+        "mesas": 4,
+        "filas": 2
+      },
+      {
+        "mesas": 6,
+        "filas": 3
+      },
+      {
+        "mesas": 6,
+        "filas": 3
+      }
+    ]
+  },
+  "venta-handheld-390": {
+    "barra": {
+      "w": 390,
+      "h": 73,
+      "x": 0,
+      "y": 771,
+      "fontSize": "16px",
+      "background": "rgb(23, 26, 31)",
+      "radius": "0px"
+    },
+    "grid": {
+      "w": 358,
+      "h": 1022,
+      "x": 16,
+      "y": 709,
+      "fontSize": "16px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "familyBar": {
+      "w": 358,
+      "h": 328,
+      "x": 16,
+      "y": 218,
+      "fontSize": "16px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "familyCols": "3",
+    "nombreProducto": {
+      "w": 93.7,
+      "h": 24.2,
+      "x": 32,
+      "y": 744,
+      "fontSize": "22px",
+      "background": "rgba(0, 0, 0, 0)",
+      "radius": "0px"
+    },
+    "comandaEnFlujo": 0,
+    "buscadorMontado": 1,
+    "inputMode": "none",
+    "desbordeHorizontal": {
+      "scrollWidth": 390,
+      "clientWidth": 390
+    },
+    "qtyCols": "3",
+    "qtyKey": {
+      "w": 114,
+      "h": 56
+    },
+    "comandaEnHoja": 1
+  }
+}

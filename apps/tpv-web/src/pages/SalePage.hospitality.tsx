@@ -52,6 +52,7 @@ import {
   gridHeight,
   gridShapeFor,
   gridWidth,
+  maxGridRows,
   FAMILY_BAR_COLUMNS,
   FAMILY_BAR_COLUMNS_HANDHELD,
   GRID_GAP,
@@ -290,6 +291,18 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
     [visibleProducts.length, gridBox, familyButtonCount],
   );
 
+  // Las filas que se pintan de verdad: nunca más de las que caben con el
+  // mínimo de 64 px. `gridShapeFor` ya lo calcula, pero el componente lo
+  // vuelve a acotar contra la caja MEDIDA, que es la que manda sobre el
+  // papel.
+  const paintedRows = Math.max(
+    1,
+    Math.min(
+      shape.rows,
+      maxGridRows(gridBox?.h ?? gridHeight(800, familyButtonCount)),
+    ),
+  );
+
   const { sent, pending } = splitComanda(props.lines, props.sentLineIds);
 
   return (
@@ -360,21 +373,40 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
             productos. Ahí es donde la mano ya está: se toca la familia,
             se toca el número, se toca el producto. Debajo de la
             cuadrícula obligaría a subir y bajar. */}
+        {/* La fila de cantidad.
+            En el terminal es una fila: rótulo, seis teclas de 64 × 56 y
+            la pista. En handheld NO cabe —seis teclas de 56 más sus
+            huecos piden 376 px y a 390 hay 358, y a 320 (el suelo del
+            bucle visual) hay 288—, así que pasa a una rejilla de TRES
+            columnas y dos filas, con la tecla llenando su celda. El
+            rótulo y la pista se van: en una pantalla estrecha el sitio
+            es para las teclas, y los números del 1 al 6 encima de la
+            cuadrícula no necesitan que les pongan nombre.
+            Lo encontró el bucle visual: las teclas 5 y 6 se salían de la
+            pantalla por la derecha, que es scroll horizontal y está
+            prohibido por `ux-principles` §1.8. */}
         <div
           data-testid="qty-row"
-          className="shrink-0 flex items-center gap-2"
-          style={{ height: QTY_KEY_HEIGHT_PX }}
+          data-columns={handheld ? 3 : 6}
+          className={
+            handheld
+              ? "shrink-0 grid grid-cols-3 gap-2"
+              : "shrink-0 flex items-center gap-2"
+          }
+          style={handheld ? undefined : { height: QTY_KEY_HEIGHT_PX }}
         >
-          <span
-            className="font-medium mr-1.5 shrink-0"
-            style={{
-              fontSize: EYEBROW_PX,
-              letterSpacing: EYEBROW_TRACKING,
-              color: DARK_TEXT_MUTED,
-            }}
-          >
-            CANTIDAD
-          </span>
+          {!handheld && (
+            <span
+              className="font-medium mr-1.5 shrink-0"
+              style={{
+                fontSize: EYEBROW_PX,
+                letterSpacing: EYEBROW_TRACKING,
+                color: DARK_TEXT_MUTED,
+              }}
+            >
+              CANTIDAD
+            </span>
+          )}
           {QUANTITIES.map((n) => {
             const active = qty === n;
             return (
@@ -387,7 +419,11 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
                 data-qty={n}
                 className={`shrink-0 rounded-xl border-0 font-semibold tabular-nums ${PRESS_FEEDBACK_CLASS}`}
                 style={{
-                  width: QTY_KEY_WIDTH_PX,
+                  // En handheld la tecla llena su celda; en el terminal
+                  // mide los 64 px de la maqueta. Nunca por debajo del
+                  // suelo táctil: a 320 px, un tercio de la fila son 93.
+                  width: handheld ? "100%" : QTY_KEY_WIDTH_PX,
+                  minWidth: MIN_TOUCH_PX,
                   height: QTY_KEY_HEIGHT_PX,
                   fontSize: 22,
                   background: active ? DARK_TEXT : DARK_SURFACE,
@@ -398,12 +434,14 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
               </button>
             );
           })}
-          <span
-            className="ml-2.5 hidden xl:inline"
-            style={{ fontSize: 15, color: DARK_TEXT_MUTED }}
-          >
-            toca el número y luego el producto · vuelve a 1
-          </span>
+          {!handheld && (
+            <span
+              className="ml-2.5 hidden xl:inline"
+              style={{ fontSize: 15, color: DARK_TEXT_MUTED }}
+            >
+              toca el número y luego el producto · vuelve a 1
+            </span>
+          )}
         </div>
 
         {/* La cuadrícula. §3b · NUNCA paginación: ni páginas, ni flechas,
@@ -421,7 +459,33 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
             gridTemplateColumns: `repeat(${
               handheld ? PRODUCT_COLUMNS_HANDHELD : shape.columns
             }, minmax(0, 1fr))`,
-            gridAutoRows: `minmax(${shape.cardHeight}px, 1fr)`,
+            // Filas FRACCIONARIAS y explícitas, como la maqueta
+            // (`repeat(5, minmax(0, 1fr))`).
+            //
+            // La primera versión usaba `gridAutoRows: minmax(Npx, 1fr)`
+            // con la N que salía del reparto, y el bucle visual la pilló:
+            // ese `minmax` tiene un SUELO, así que cuando la caja medida
+            // y la caja real discrepaban aunque fuera por unos píxeles,
+            // la rejilla crecía por encima de su contenedor y la última
+            // fila quedaba cortada por el borde de la pantalla. Medido a
+            // 1443 × 812: «Agua» y «Rioja» partidas a la altura del
+            // viewport.
+            //
+            // Con `1fr` las filas se reparten EXACTAMENTE el alto que
+            // haya, así que no hay forma de desbordar. Que ese alto no
+            // baje de 64 px no lo garantiza el CSS: lo garantiza
+            // `gridShapeFor`, que es quien decide cuántas filas caben —y
+            // quien dice `fits: false` cuando no caben—.
+            gridTemplateRows: handheld
+              ? undefined
+              : `repeat(${paintedRows}, ${shape.cardHeight}px)`,
+            gridAutoRows: handheld ? `minmax(${shape.cardHeight}px, auto)` : undefined,
+            // Las filas se pegan ARRIBA. Con el alto acotado, una familia
+            // de cuatro productos deja hueco abajo en vez de repartirlo:
+            // centrado, la rejilla «flotaría» y el primer botón cambiaría
+            // de sitio al cambiar de familia, que es justo lo que rompe
+            // el reconocimiento por posición.
+            alignContent: handheld ? undefined : "start",
           }}
         >
           {visibleProducts.map((p) => (
