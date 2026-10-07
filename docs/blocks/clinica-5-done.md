@@ -459,10 +459,27 @@ bonos, dictado por voz y fisioterapia. Fuera de alcance declarado.
   `clinica-sesion.e2e.ts` se queda con su cuerpo v1 **a propósito**: lo que
   prueba son las garantías del motor, y de paso queda como guardia de que
   una v1 sigue entrando después de este bloque.
-- **Dos ficheros de e2e fallan por el reloj, no por la rama**:
-  `f3-fichar` y `f8-colegio`, corridos a las 00:06. Abren un fichaje «hace
-  cuatro horas» —que cae en el día local de ayer— y lo cierran hoy, lo que
-  da 409. La rama no toca ni un fichero de fichaje.
+- **Dos ficheros de e2e fallan por EL RELOJ, no por la rama**: `f3-fichar`
+  y `f8-colegio`. Abren un fichaje «hace cuatro horas» y lo cierran ahora;
+  si las dos marcas caen en días **locales** distintos, el cierre da 409.
+
+  Pasa entre las **00:00 y las ~04:00 de Madrid** (22:00–02:00 UTC), y pasó
+  las dos veces: en local a las 00:06 y en la CI del PR a las 01:21 de
+  Madrid. La prueba de que es el reloj y no la rama son las dos puntas:
+
+  | Dónde | Hora de Madrid | e2e |
+  | ----- | -------------- | --- |
+  | `master`, último verde | 23:25 | ✅ |
+  | esta rama, en la CI | 01:21 | ❌ los mismos 6 |
+  | esta rama, en local | 00:06 | ❌ los mismos 6 |
+
+  Y la rama **no toca ni un fichero de fichaje**
+  (`git diff --name-only master` no devuelve ninguno). Los 27 ficheros
+  restantes —los 29 menos esos dos— pasan, incluidos los tres de clinica.
+
+  **Se arregla relanzando el job fuera de esa franja.** Lo que lo
+  arreglaría de verdad es que esos dos e2e no usen el reloj de pared, y eso
+  es de su bloque, no de éste.
 
 ### Lo que queda abierto, y por qué no se ha hecho
 
