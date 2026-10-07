@@ -17,6 +17,15 @@
 //     de dinero. Al cobrar: banner de confirmación de v1.9.2.
 //   - Cabecera de sala: «N abiertas · M libres · X,XX € en sala».
 //
+// v1.23-las-mesas-miden-lo-mismo (2026-10-06): el tamaño de la tarjeta
+// deja de depender de la zona. Lo de v1.9.3 daba cuatro tamaños al mismo
+// objeto —508 × 118 en Salón, 124 × 118 en Terraza, 84 × 84 en Barra,
+// medido en el AP13— porque el ancho lo fijaba el lienzo
+// (`grid-cols-[minmax(0,1fr)_300px]`) y no las mesas. Ahora el tamaño
+// sale de `lib/roomGrid.ts` y es uno solo; las zonas fluyen con
+// `flex-wrap` y las columnas salen del ancho disponible. La Barra
+// conserva el mostrador dibujado, pero sus sitios son la misma tarjeta.
+//
 // Conserva el header/banners/drawer que dejó v1.9.2 (Tickets +
 // hamburguesa en el mapa, banners de concurrencia, Arqueo/Cerrar turno).
 //
@@ -59,6 +68,7 @@ import type { CartLine, CartTotals } from "../lib/cart.js";
 import { mapServerDraftLines } from "../lib/tableDraft.js";
 import type { ServerDraft } from "../lib/tableDraft.js";
 import { outboxBlockedTableIds, subscribeOutbox } from "../lib/outbox.js";
+import { ROOM_GRID_CLASS, TABLE_CARD_SIZE_CLASS } from "../lib/roomGrid.js";
 import { syncNow } from "../lib/syncNow.js";
 import { CloseShiftModal } from "./CloseShiftModal.js";
 import { summarizeOpenTables } from "../lib/openTables.js";
@@ -110,6 +120,10 @@ interface ApiResponse {
   registerId: string;
   tables: ApiTable[];
 }
+
+// v1.23-las-mesas-miden-lo-mismo · orden de las zonas en el lienzo. El
+// camarero lee la sala siempre en el mismo orden, esté filtrando o no.
+const ZONE_ORDER: TableZone[] = ["SALON", "TERRAZA", "RESERVADO", "BARRA"];
 
 const ZONE_LABEL: Record<TableZone | "ALL", string> = {
   ALL: "Todas",
@@ -298,11 +312,6 @@ export function TableMapScreen(props: TableMapScreenProps) {
       childrenByPrincipal.set(t.groupedIntoTableId, arr);
     }
   }
-
-  const salon = visible.filter((t) => t.zone === "SALON");
-  const terraza = visible.filter((t) => t.zone === "TERRAZA");
-  const reservado = visible.filter((t) => t.zone === "RESERVADO");
-  const bar = visible.filter((t) => t.zone === "BARRA");
 
   const canCobrar = !!props.shiftId && !!props.registerId;
 
@@ -528,63 +537,40 @@ export function TableMapScreen(props: TableMapScreenProps) {
 
         {tables.length === 0 ? (
           <EmptyState />
-        ) : zoneFilter !== "ALL" ? (
-          // Filtro de una zona: un único marco a ancho completo.
-          <div>
-            {bar.length > 0 ? (
-              <BarZone
-                tables={bar}
-                offline={offline}
-                blockedTableIds={blockedTableIds}
-                pickBusyTableId={props.pickBusyTableId ?? null}
-                onPick={props.onPickTable}
-              />
-            ) : (
-              (salon.length > 0 ||
-                terraza.length > 0 ||
-                reservado.length > 0) && (
-                <ZoneFrame label={ZONE_LABEL[zoneFilter]}>
-                  <RoomGrid>
-                    {[...salon, ...terraza, ...reservado].map(renderRoomCard)}
-                  </RoomGrid>
-                </ZoneFrame>
-              )
-            )}
-          </div>
         ) : (
-          // Lienzo espacial: Salón dominante a la izquierda, Terraza /
-          // Reservados apilados a la derecha, Barra a lo ancho abajo.
-          // En handheld todo se apila (una columna).
-          <div className="space-y-4 lg:space-y-0 lg:grid lg:grid-cols-[minmax(0,1fr)_300px] lg:gap-[18px]">
-            {salon.length > 0 && (
-              <ZoneFrame label="SALÓN" className="lg:col-start-1 lg:row-start-1">
-                <RoomGrid>{salon.map(renderRoomCard)}</RoomGrid>
-              </ZoneFrame>
-            )}
-            {(terraza.length > 0 || reservado.length > 0) && (
-              <div className="space-y-4 lg:space-y-[18px] lg:col-start-2 lg:row-start-1">
-                {terraza.length > 0 && (
-                  <ZoneFrame label="TERRAZA">
-                    <RoomGrid>{terraza.map(renderRoomCard)}</RoomGrid>
-                  </ZoneFrame>
-                )}
-                {reservado.length > 0 && (
-                  <ZoneFrame label="RESERVADOS">
-                    <RoomGrid>{reservado.map(renderRoomCard)}</RoomGrid>
-                  </ZoneFrame>
-                )}
-              </div>
-            )}
-            {bar.length > 0 && (
-              <BarZone
-                className="lg:col-span-2"
-                tables={bar}
-                offline={offline}
-                blockedTableIds={blockedTableIds}
-                pickBusyTableId={props.pickBusyTableId ?? null}
-                onPick={props.onPickTable}
-              />
-            )}
+          // v1.23-las-mesas-miden-lo-mismo · UN solo lienzo, el mismo
+          // para la vista «Todas» y para la filtrada por zona (antes la
+          // filtrada metía Salón, Terraza y Reservados en un único marco
+          // de dos columnas: el mismo problema con otra forma).
+          //
+          // Las zonas son cajas que miden lo que piden sus mesas y el
+          // `flex-wrap` las va colocando: la que no cabe en la línea en
+          // curso baja a la siguiente. Se acabó el
+          // `lg:grid-cols-[minmax(0,1fr)_300px]`, que daba a Salón todo
+          // el ancho sobrante y encerraba Terraza y Reservados en 300 px
+          // fijos.
+          //
+          // Por debajo de `sm` (handheld) las zonas se apilan y las
+          // mesas van a una columna, como hasta ahora.
+          <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-start gap-[18px]">
+            {ZONE_ORDER.map((zone) => {
+              const zoneTables = visible.filter((t) => t.zone === zone);
+              if (zoneTables.length === 0) return null;
+              if (zone === "BARRA") {
+                return (
+                  <BarZone
+                    key={zone}
+                    tables={zoneTables}
+                    renderCard={renderRoomCard}
+                  />
+                );
+              }
+              return (
+                <ZoneFrame key={zone} label={ZONE_LABEL[zone].toUpperCase()}>
+                  <RoomGrid>{zoneTables.map(renderRoomCard)}</RoomGrid>
+                </ZoneFrame>
+              );
+            })}
           </div>
         )}
       </main>
@@ -873,8 +859,16 @@ function ZoneFrame({
   );
 }
 
+// v1.23-las-mesas-miden-lo-mismo · la rejilla de una zona.
+//
+// Era `grid grid-cols-2` a secas: DOS columnas tanto en los 1050 px de
+// Salón como en los 300 de Terraza, que es de donde salía el ×4 de ancho
+// para la misma mesa. Ahora el número de columnas sale del ancho que
+// haya dividido por el tamaño de tarjeta — salvo en handheld, donde dos
+// columnas fijas aprovechan mejor una pantalla estrecha que una.
+// El reparto, y por qué, en `ROOM_GRID_CLASS`.
 function RoomGrid({ children }: { children: ReactNode }) {
-  return <div className="grid grid-cols-2 gap-3.5">{children}</div>;
+  return <div className={ROOM_GRID_CLASS}>{children}</div>;
 }
 
 function TableCard({
@@ -924,7 +918,7 @@ function TableCard({
         title={
           principal ? `Unida a ${principal.name}` : "Mesa unida a un grupo"
         }
-        className="relative rounded-[18px] border-2 border-mipiace-coral/45 bg-mipiace-coral-soft min-h-[118px] p-3.5 flex flex-col text-left opacity-55 disabled:cursor-not-allowed"
+        className={`relative rounded-[18px] border-2 border-mipiace-coral/45 bg-mipiace-coral-soft ${TABLE_CARD_SIZE_CLASS} p-3.5 flex flex-col text-left opacity-55 disabled:cursor-not-allowed`}
       >
         {/* puente visual hacia la principal (a su izquierda) */}
         <span className="absolute -left-[18px] top-1/2 w-[18px] h-[3px] bg-mipiace-coral/45" />
@@ -974,7 +968,9 @@ function TableCard({
     isBilling && canCobrar && !offline && !pendingCheckout && !anyOpening;
 
   return (
-    <div className="relative">
+    // v1.23 · el tamaño vive en el envoltorio y el botón lo llena: así la
+    // mesa mide lo mismo con botón de cobro encima y sin él.
+    <div className={`relative ${TABLE_CARD_SIZE_CLASS}`}>
       <button
         type="button"
         onClick={() => onPick(table)}
@@ -986,7 +982,7 @@ function TableCard({
               ? "Cobro pendiente de subir · mesa bloqueada en este dispositivo"
               : undefined
         }
-        className={`relative w-full rounded-[18px] border-2 min-h-[118px] p-3.5 flex flex-col text-left transition-transform hover:scale-[1.015] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 ${stateClass} ${
+        className={`relative w-full h-full rounded-[18px] border-2 p-3.5 flex flex-col text-left transition-transform hover:scale-[1.015] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 ${stateClass} ${
           olvidada ? "ring-2 ring-inset ring-amber-500" : ""
         }`}
       >
@@ -1098,21 +1094,23 @@ function TableCard({
   );
 }
 
-// Zona BARRA: mostrador dibujado + taburetes circulares, ordenados por
-// barSeatIndex (mockup .barrazona / .mostrador / .taburetes / .tab).
+// Zona BARRA: mostrador dibujado + las mesas de barra, ordenadas por
+// barSeatIndex (mockup .barrazona / .mostrador).
+//
+// v1.23-las-mesas-miden-lo-mismo · los taburetes eran círculos de
+// 84 × 84 px —la mitad del área de una mesa de Terraza y una séptima
+// parte de una de Salón— y además no enseñaban ni PAX, ni minutos, ni
+// cajero, ni el botón de cobro. Un sitio de barra es una mesa: ahora es
+// LA MISMA `TableCard`. La identidad de la zona la da el mostrador
+// dibujado encima, que es lo que el prompt deja conservar; lo que no
+// puede ser menor es el objetivo táctil.
 function BarZone({
   tables,
-  offline,
-  blockedTableIds,
-  pickBusyTableId,
-  onPick,
+  renderCard,
   className,
 }: {
   tables: ApiTable[];
-  offline: boolean;
-  blockedTableIds: Set<string>;
-  pickBusyTableId: string | null;
-  onPick: (t: ApiTable) => void;
+  renderCard: (t: ApiTable) => ReactNode;
   className?: string;
 }) {
   const sorted = tables
@@ -1120,79 +1118,15 @@ function BarZone({
     .sort((a, b) => (a.barSeatIndex ?? 0) - (b.barSeatIndex ?? 0));
   return (
     <div
-      className={`relative rounded-[22px] border-[1.5px] border-dashed border-slate-300 px-[22px] pt-4 pb-5 ${className ?? ""}`}
+      className={`relative rounded-[22px] border-[1.5px] border-dashed border-slate-300 p-[18px] ${className ?? ""}`}
     >
       <span className="absolute -top-[9px] left-[22px] bg-mipiace-stone px-2 text-[11px] tracking-[0.12em] font-semibold text-slate-500">
         BARRA
       </span>
       {/* mostrador */}
       <div className="h-[26px] rounded-[10px] bg-gradient-to-b from-[#EADFCE] to-[#DFD0B8] border border-[#D5C4A8] mb-4" />
-      <div className="flex flex-wrap gap-x-[22px] gap-y-4 pl-3.5">
-        {sorted.map((t) => (
-          <BarStool
-            key={t.id}
-            table={t}
-            offline={offline}
-            pendingCheckout={blockedTableIds.has(t.id)}
-            anyOpening={pickBusyTableId !== null}
-            onPick={onPick}
-          />
-        ))}
-      </div>
+      <RoomGrid>{sorted.map(renderCard)}</RoomGrid>
     </div>
-  );
-}
-
-function BarStool({
-  table,
-  offline,
-  pendingCheckout,
-  anyOpening,
-  onPick,
-}: {
-  table: ApiTable;
-  offline: boolean;
-  pendingCheckout: boolean;
-  anyOpening: boolean;
-  onPick: (t: ApiTable) => void;
-}) {
-  const disabled = offline || pendingCheckout || anyOpening;
-  const isFree = table.state === "FREE";
-  const isBilling = table.state === "BILLING";
-  const stateClass = pendingCheckout
-    ? "bg-slate-100 border-slate-300"
-    : isFree
-      ? "bg-white border-slate-200 hover:border-slate-300"
-      : isBilling
-        ? "bg-amber-100 border-amber-500/50"
-        : "bg-mipiace-coral-soft border-mipiace-coral/45";
-  return (
-    <button
-      type="button"
-      onClick={() => onPick(table)}
-      disabled={disabled}
-      title={
-        offline
-          ? "Sin conexión · operativa de mesas bloqueada"
-          : pendingCheckout
-            ? "Cobro pendiente de subir · mesa bloqueada en este dispositivo"
-            : undefined
-      }
-      className={`w-[84px] h-[84px] rounded-full border-2 ${stateClass} flex flex-col items-center justify-center transition-transform hover:scale-[1.05] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100`}
-    >
-      <span
-        className={`text-[15px] font-bold ${isFree ? "text-mipiace-ink" : isBilling ? "text-amber-700" : "text-mipiace-coral-dark"}`}
-      >
-        {table.name}
-      </span>
-      {table.activeTicket && (
-        <span
-          className={`text-[13px] font-bold tabular-nums whitespace-nowrap ${isBilling ? "text-amber-700" : "text-mipiace-coral-dark"}`}
-        >
-          {formatEur(Number(table.activeTicket.total))}
-        </span>
-      )}
-    </button>
   );
 }
 
