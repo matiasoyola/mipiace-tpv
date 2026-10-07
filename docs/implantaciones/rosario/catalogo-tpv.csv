@@ -1,0 +1,18 @@
+sku,nombre,precio_con_iva,iva,categoria,tipo,exencion,duracion_min
+POD-001,Consulta diagnóstico,20.00,0,consulta,SERVICE,E1,20
+POD-002,Quiropodia básica,25.00,0,quiropodia,SERVICE,E1,30
+POD-003,Quiropodia completa,26.00,0,quiropodia,SERVICE,E1,30
+POD-004,Quiropodia extra,27.00,0,quiropodia,SERVICE,E1,30
+POD-005,Quiropodia a domicilio,37.00,0,quiropodia,SERVICE,E1,60
+POD-006,Cura,13.00,0,quiropodia,SERVICE,E1,15
+POD-007,Sesión papiloma,12.00,0,quiropodia,SERVICE,E1,15
+POD-008,Exploración biomecánica,35.00,0,biomecánica,SERVICE,E1,30
+POD-009,Revisión biomecánica adultos,28.00,0,biomecánica,SERVICE,E1,15
+POD-010,Revisión biomecánica niños,0.00,0,biomecánica,SERVICE,E1,15
+POD-011,Entrega de órtesis plantares,0.00,0,biomecánica,SERVICE,E1,10
+POD-012,Órtesis de silicona pequeña,15.00,0,órtesis,SERVICE,E1,15
+POD-013,Órtesis de silicona mediana,20.00,0,órtesis,SERVICE,E1,15
+POD-014,Órtesis de silicona grande,25.00,0,órtesis,SERVICE,E1,15
+POD-015,Cirugía fenol 1 borde,180.00,0,cirugía,SERVICE,E1,120
+POD-016,Cirugía fenol 2 bordes,360.00,0,cirugía,SERVICE,E1,180
+POD-017,Avulsión ungueal,200.00,0,cirugía,SERVICE,E1,120
