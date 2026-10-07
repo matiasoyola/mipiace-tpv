@@ -130,6 +130,28 @@ import {
 import { layoutChips } from "../lib/chipRows.js";
 import { PRODUCT_CARD_MIN_HEIGHT } from "../lib/catalogGrid.js";
 import { isTouchDevice } from "../lib/touchDevice.js";
+import { SaleSearchInput } from "../components/SaleSearchInput.js";
+import {
+  clearSentState,
+  emptySentState,
+  markLinesSent,
+  reconcileSentState,
+  type SentState,
+} from "../lib/kitchenSentLines.js";
+import {
+  AHORA_LIMIT,
+  fetchAhora,
+  resolveAhora,
+  type AhoraResponse,
+} from "../lib/ahora.js";
+import {
+  resolveFamilyTones,
+  type FamilyTone,
+} from "../lib/hospitalityTheme.js";
+import {
+  HospitalityWorkspace,
+  type ChromeAction,
+} from "./SalePage.hospitality.js";
 import { CategoryRail, type RailCategory } from "../components/CategoryRail.js";
 import {
   fetchTopSellers,
@@ -138,6 +160,7 @@ import {
   type TopSellersResponse,
 } from "../lib/topSellers.js";
 import {
+  buildTicketActions,
   CategoriesSheet,
   TicketActionsSheet,
   type SheetCategory,
@@ -354,6 +377,12 @@ export interface SalePageProps {
   // endpoints; el carrito local de sessionStorage queda SOLO para la
   // venta rápida.
   initialDraftLines?: CartLine[];
+  // v2-H1 §5 · con qué comanda salió ya este DRAFT hacia cocina. Lo pasa
+  // `App` desde la respuesta del endpoint que abrió el borrador, así que
+  // no cuesta una petición extra por mesa abierta. Sin esto, la comanda
+  // de hostelería no puede partirse en «En cocina · hh:mm» y «Sin
+  // enviar» después de una recarga.
+  initialKitchen?: { lastSentAt: string | null; revision: number };
   // Sólo provisto cuando la tienda tiene mesas configuradas — permite
   // al cajero volver al mapa con un toque. Null en modo retail puro.
   onBackToMap?: (() => void) | null;
@@ -493,10 +522,21 @@ export function SalePage(props: SalePageProps) {
     props.tableContext?.activeTicketId ??
     props.appointmentContext?.activeTicketId ??
     null;
+  // v2-H1 §5 · al cambiar de mesa, la revisión arranca de lo que diga el
+  // servidor y no de cero.
+  //
+  // Hasta v1.22 arrancaba en 0 porque `SalePage` no recargaba el ticket
+  // entre interacciones, así que tras una recarga el botón volvía a
+  // rotular «Enviar» con la comanda nº 2 ya impresa en cocina. Ahora el
+  // dato llega con el borrador (`initialKitchen`) y el rótulo dice la
+  // verdad desde el primer pintado. El resto del efecto no cambia.
+  const initialKitchenAt = props.initialKitchen?.lastSentAt ?? null;
+  const initialKitchenRev = props.initialKitchen?.revision ?? 0;
   useEffect(() => {
-    setKitchenRevision(0);
+    setKitchenRevision(initialKitchenRev);
     setKitchenToast(null);
     setKitchenError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTicketId]);
 
   // v1.0-mesas-frontend · Lote 1: en contexto mesa el carrito es una
@@ -523,6 +563,33 @@ export function SalePage(props: SalePageProps) {
   );
   const lines = isDraftMode ? draftLines : quickLines;
   const setLines = isDraftMode ? setDraftLines : setQuickLines;
+
+  // v2-H1 §5 · qué líneas están EN COCINA y cuáles SIN ENVIAR.
+  //
+  // `TicketLine` no tiene marca de envío ni `createdAt` y el bloque
+  // prohíbe cambios de esquema, así que el QUÉ se lleva en local y el
+  // CUÁNDO lo da el servidor. El razonamiento completo —con lo
+  // descartado y el caso que esto no acierta— está en
+  // `lib/kitchenSentLines.ts`.
+  const [sentState, setSentState] = useState<SentState>(() => emptySentState());
+  useEffect(() => {
+    if (!activeTicketId) {
+      setSentState(emptySentState());
+      return;
+    }
+    setSentState(
+      reconcileSentState(
+        activeTicketId,
+        (props.initialDraftLines ?? []).map((l) => l.id),
+        initialKitchenAt,
+        initialKitchenRev,
+      ),
+    );
+    // Sólo al cambiar de ticket: reconciliar en cada cambio de líneas
+    // pisaría lo que `markLinesSent` acaba de escribir y las líneas
+    // recién enviadas volverían a «Sin enviar» con sus −/+ puestos.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTicketId]);
 
 
   // v1.14-la-comanda-se-ve · el núcleo del bloque (hallazgo C1).
@@ -707,6 +774,12 @@ export function SalePage(props: SalePageProps) {
       setDraftLines([]);
       setContact(null);
       setNotes("");
+      // v2-H1 §5 · la mesa se vació: el registro de «esto está en
+      // cocina» deja de valer. Sin esto, el id del ticket queda en
+      // `localStorage` para siempre — y aunque los ids no se reutilizan,
+      // el almacén del terminal no tiene por qué crecer sin tope.
+      clearSentState(activeTicketId);
+      setSentState(emptySentState());
       props.onBackToMap?.();
     } catch (err) {
       setTableError(tableErrorMessage(err));
@@ -810,6 +883,15 @@ export function SalePage(props: SalePageProps) {
     | { kind: "suspended" }
     | { kind: "checkout" }
     | { kind: "notes" }
+    // v2-H1 · las siete acciones secundarias del ticket.
+    //
+    // En el TPV claro este sheet lo abre `TicketPanel` desde su propio
+    // estado, porque la cabecera del panel lleva el botón «Más». La
+    // comanda oscura no tiene ese panel, así que el sheet sube aquí —
+    // al mismo sitio donde ya viven los otros seis. Las acciones y su
+    // orden son los mismos: se construyen una vez en
+    // `ticketActionsFor()` y las usan los dos.
+    | { kind: "ticketActions" }
     | null
   >(null);
 
@@ -1544,6 +1626,28 @@ export function SalePage(props: SalePageProps) {
         method: "POST",
       });
       setKitchenRevision(res.revision);
+      // v2-H1 §5 · lo que acaba de salir hacia cocina deja de ser
+      // corregible con −/+ y pasa al bloque «En cocina · hh:mm».
+      //
+      // Va ANTES del reparto de secciones impresas a propósito. Una
+      // impresora apagada es un problema de papel, no de estado: el
+      // despacho ya consumió la revisión en el servidor
+      // (`lastSentRevision` subió) y lo honesto es que la pantalla diga
+      // lo mismo que la base. El fallo de impresión se cuenta aparte, en
+      // su banner, con «Reintentar».
+      //
+      // Sólo si algo salió: con `partial-fail` total el backend NO toca
+      // `lastSentAt`, y entonces tampoco lo tocamos aquí.
+      if (res.sections.some((s) => s.ok)) {
+        setSentState(
+          markLinesSent(
+            tableContext.activeTicketId,
+            lines.map((l) => l.id),
+            res.sentAt,
+            res.revision,
+          ),
+        );
+      }
       // v1.10.2-impresion-honesta · el toast de éxito sólo lista las
       // secciones que la impresora ACEPTÓ. Antes listaba todas: si la
       // impresora de cocina estaba apagada, el cajero leía "Cocina: 2
@@ -1669,6 +1773,285 @@ export function SalePage(props: SalePageProps) {
     return fuzzySearch(catalog, query, 40);
   }, [catalog, query]);
 
+  // ── v2-H1 · los datos que sólo necesita la venta de hostelería ─────
+  //
+  // Todo este bloque está guardado por `isHospitality`: en RETAIL y
+  // SERVICES no se pide nada y no se calcula nada, que es la restricción
+  // dura del bloque («RETAIL y SERVICES no cambian»). Los `useMemo` se
+  // evalúan igual —los hooks no se pueden llamar condicionalmente— pero
+  // sobre listas vacías, así que no cuestan nada.
+
+  // «Ahora» (decisión 4). Se pide una vez por pantalla de venta y la
+  // caché de `lib/ahora.ts` la comparte entre mesas. No lanza nunca: si
+  // no hay red ni respuesta guardada devuelve `null` y `resolveAhora`
+  // cae al orden de familias.
+  const [ahoraRanking, setAhoraRanking] = useState<AhoraResponse | null>(null);
+  useEffect(() => {
+    if (!isHospitality) return;
+    let cancelled = false;
+    void (async () => {
+      const res = await fetchAhora(AHORA_LIMIT);
+      if (!cancelled && res) setAhoraRanking(res);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isHospitality]);
+
+  // Las familias del catálogo. Mismo origen que los chips del TPV claro
+  // (los tags de Holded) y mismo tag reservado excluido: `favoritos` no
+  // es una familia, es un atajo, y un botón «Favoritos» en la barra de
+  // familias filtraría a lo mismo que ya está arriba.
+  const hospitalityFamilies = useMemo(() => {
+    if (!isHospitality || !catalog) return [];
+    const tags = new Set<string>();
+    for (const p of catalog) {
+      for (const t of p.tags) {
+        if (t !== "favoritos") tags.add(t);
+      }
+    }
+    return [...tags].sort();
+  }, [isHospitality, catalog]);
+
+  const hospitalityTagAliases = useMemo(
+    () => (isHospitality ? getCachedTagAliases() : {}),
+    [isHospitality, hospitalityFamilies],
+  );
+  const hospitalityFamilyLabels = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const tag of hospitalityFamilies) {
+      out[tag] = renderTagLabel(tag, hospitalityTagAliases);
+    }
+    return out;
+  }, [hospitalityFamilies, hospitalityTagAliases]);
+
+  // El reparto tono ↔ familia, estable y persistido por tenant. Paleta
+  // de NUEVE, distinta de la de seis iconos del TPV claro: ver
+  // `tokens.md` §9.3.
+  const hospitalityFamilyTones = useMemo<Record<string, FamilyTone>>(
+    () =>
+      isHospitality
+        ? resolveFamilyTones(hospitalityFamilies, getCachedTenantId())
+        : {},
+    [isHospitality, hospitalityFamilies],
+  );
+
+  // De qué familia es un producto. **UNA sola regla**, usada por el
+  // color del botón, por el filtro de la cuadrícula y por el relleno de
+  // «Ahora». Si cada uno tuviera la suya, el relleno saldría de una
+  // familia y el botón se pintaría del color de otra.
+  //
+  // El primer tag que sea una familia de verdad, en el orden en que
+  // Holded los devuelve (que es estable). Sin tags, cadena vacía: el
+  // producto existe, se puede vender desde la búsqueda, y no aparece
+  // bajo ninguna familia porque no tiene ninguna.
+  const hospitalityFamilyOf = useCallback(
+    (p: CatalogProduct): string => {
+      for (const t of p.tags) {
+        if (t !== "favoritos" && hospitalityFamilyTones[t]) return t;
+      }
+      return "";
+    },
+    [hospitalityFamilyTones],
+  );
+
+  const ahoraProducts = useMemo(
+    () =>
+      isHospitality
+        ? resolveAhora(
+            ahoraRanking,
+            catalog ?? [],
+            hospitalityFamilyOf,
+            AHORA_LIMIT,
+          )
+        : [],
+    [isHospitality, ahoraRanking, catalog, hospitalityFamilyOf],
+  );
+
+  // La segunda línea de la cabecera de la comanda: zona, comensales y
+  // quién abrió. Lo mismo que el panel claro pone en su `ticket-meta`,
+  // porque es la misma información y se lee de reojo igual.
+  const hospitalityTableMeta = useMemo(() => {
+    const t = props.tableContext;
+    if (!t) return null;
+    const parts: string[] = [];
+    const zone = ZONE_LABEL_ES[t.zone];
+    if (zone) parts.push(zone);
+    if (t.diners != null) {
+      parts.push(`${t.diners} ${t.diners === 1 ? "comensal" : "comensales"}`);
+    }
+    const alias = t.openedByAlias ?? t.openedByEmail;
+    if (alias) parts.push(alias.split("@")[0] ?? alias);
+    return parts.length > 0 ? parts.join(" · ") : null;
+  }, [props.tableContext]);
+
+  // Los destinos de la barra superior, que en hostelería viven dentro de
+  // la comanda. **Mismos destinos y mismo número de toques que hoy**: es
+  // el requisito de §1 del alcance, y es por lo que esta lista existe en
+  // vez de haber borrado la barra sin más.
+  //
+  // «Mapa» no está aquí: es la flecha de volver de la cabecera, que es
+  // un toque igual que el botón «Mapa» de hoy.
+  const hospitalityChrome = useMemo<ChromeAction[]>(() => {
+    if (!isHospitality) return [];
+    const out: ChromeAction[] = [
+      {
+        key: "menu",
+        label: "Abrir menú",
+        icon: <Menu className="w-[22px] h-[22px]" strokeWidth={2.1} />,
+        onClick: () => setDrawerOpen(true),
+      },
+      {
+        key: "search",
+        label: "Buscar producto",
+        icon: <Search className="w-[21px] h-[21px]" strokeWidth={2.25} />,
+        onClick: () => setSearchOpen(true),
+      },
+    ];
+    if (hasCameraSupport()) {
+      out.push({
+        key: "scan",
+        label: "Escanear con cámara",
+        icon: <ScanLine className="w-[21px] h-[21px]" strokeWidth={2.25} />,
+        onClick: () => setShowCameraScan(true),
+      });
+    }
+    out.push(
+      {
+        key: "refresh",
+        label: "Refrescar catálogo",
+        icon: <RotateCw className="w-[21px] h-[21px]" strokeWidth={2.25} />,
+        spinning: refreshing,
+        onClick: () => {
+          void (async () => {
+            setRefreshing(true);
+            try {
+              const fresh = await refreshCatalog();
+              setCatalog(fresh);
+            } catch {
+              /* mantener cache */
+            } finally {
+              setRefreshing(false);
+            }
+          })();
+        },
+      },
+      {
+        key: "tickets",
+        label: "Tickets pasados",
+        icon: <ReceiptText className="w-[21px] h-[21px]" strokeWidth={2.25} />,
+        onClick: () => setShowHistory(true),
+      },
+      {
+        key: "more",
+        label: "Más acciones del ticket",
+        icon: <Ellipsis className="w-[22px] h-[22px]" strokeWidth={2.25} />,
+        onClick: () => setOpenSheet({ kind: "ticketActions" }),
+      },
+    );
+    if (creditSalesEnabled) {
+      out.push({
+        key: "debts",
+        label: "Deudas (fiado)",
+        icon: <FileText className="w-[21px] h-[21px]" strokeWidth={2.25} />,
+        onClick: () => setShowDebts(true),
+      });
+    }
+    if (crmEnabled) {
+      out.push({
+        key: "clients",
+        label: "Clientes",
+        icon: <Users className="w-[21px] h-[21px]" strokeWidth={2.25} />,
+        onClick: () => setShowClients(true),
+      });
+    }
+    if (agendaEnabled) {
+      out.push({
+        key: "agenda",
+        label: "Agenda",
+        icon: <CalendarDays className="w-[21px] h-[21px]" strokeWidth={2.25} />,
+        onClick: () => props.onOpenAgenda?.(),
+      });
+    }
+    // Venta rápida (sin mesa): «Pendientes» y «Nueva venta», igual que
+    // hoy. En mesa no se pintan — la mesa abierta YA es la venta en
+    // pausa, y «Nueva venta» vaciaría la proyección de un DRAFT que vive
+    // en el servidor.
+    if (!isDraftMode) {
+      out.push(
+        {
+          key: "suspended",
+          label: "Ventas pendientes",
+          icon: <Bookmark className="w-[21px] h-[21px]" strokeWidth={2.25} />,
+          onClick: () => setOpenSheet({ kind: "suspended" }),
+        },
+        {
+          key: "new",
+          label: "Nueva venta",
+          icon: <Plus className="w-[22px] h-[22px]" strokeWidth={2.25} />,
+          onClick: clearCart,
+        },
+      );
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    isHospitality,
+    isDraftMode,
+    refreshing,
+    creditSalesEnabled,
+    crmEnabled,
+    agendaEnabled,
+  ]);
+
+  // Los banners de salud y de operativa, dentro de la comanda.
+  //
+  // A ancho completo costaban ~40 px del ALTO del catálogo, y eso rompe
+  // el requisito de §3b justo cuando se cae la red: una familia de 31
+  // productos dejaría de caber en el momento en que aparece el aviso.
+  // Dentro de la comanda quedan a la altura de los ojos, bajo el nombre
+  // de la mesa, que es donde el camarero ya está mirando.
+  const hospitalityBanners = isHospitality ? (
+    <div className="shrink-0 px-4 pb-2 flex flex-col gap-2">
+      <HealthBannerDark health={health} />
+      {tableError && <DarkNotice tone="red">{tableError}</DarkNotice>}
+    </div>
+  ) : null;
+
+  // v2-H1 · el campo de búsqueda en la venta oscura.
+  //
+  // **No es decorativo: es N1 de v1.22.** Plegado, este input vive fuera
+  // de cuadro con `inputMode="none"`, y ése es a la vez el sitio donde
+  // aterriza el lector USB-HID y la capa que impide que Android saque el
+  // QWERTY al enfocarlo. La pantalla oscura no pinta la barra superior,
+  // así que si el input se quedara allí, la venta del bar perdería las
+  // dos cosas — y «no regresar nada de v1.22» empieza justamente por el
+  // teclado del sistema.
+  //
+  // Desplegado ocupa una fila de 56 px bajo la cabecera de la comanda.
+  // Sale de la lista de líneas y no del catálogo, por el mismo motivo
+  // que el chrome y los banners.
+  const hospitalitySearch = isHospitality ? (
+    <div
+      className={
+        searchCollapsed
+          ? // Fuera de cuadro pero enfocable. Igual que en el TPV claro.
+            "absolute -left-[9999px] top-0 w-px h-px overflow-hidden"
+          : "relative shrink-0 px-4 pb-3"
+      }
+    >
+      <SaleSearchInput
+        inputRef={searchRef}
+        value={query}
+        onChange={setQuery}
+        onKeyDown={onSearchKey}
+        collapsed={searchCollapsed}
+        businessType={businessType}
+        tone="dark"
+      />
+    </div>
+  ) : null;
+
   // ── Render ─────────────────────────────────────────────────────────
   return (
     <div
@@ -1679,7 +2062,13 @@ export function SalePage(props: SalePageProps) {
       // móvil de Matías). Mismo criterio que v1.5-hotfix4: el layout
       // fijo solo donde hay sitio; en pantallas pequeñas, flujo
       // natural con scroll de página.
-      className="min-h-screen [@media(min-width:1024px)_and_(min-height:700px)]:h-screen [@media(min-width:1024px)_and_(min-height:700px)]:overflow-hidden bg-mipiace-stone flex flex-col font-sans"
+      // v2-H1 · el lienzo. En hostelería es carbón y en RETAIL/SERVICES
+      // sigue siendo `stone`, exactamente el de hoy. Es un `template
+      // literal` y no dos clases sumadas para que Tailwind vea las dos
+      // literales en el fuente y las incluya en el bundle.
+      className={`min-h-screen [@media(min-width:1024px)_and_(min-height:700px)]:h-screen [@media(min-width:1024px)_and_(min-height:700px)]:overflow-hidden flex flex-col font-sans ${
+        isHospitality ? "bg-[#0E1013]" : "bg-mipiace-stone"
+      }`}
       // v1.3-UX-Iteración Lote 2: el padding-bottom dinámico empuja el
       // contenido hacia arriba cuando aparece el teclado virtual, así
       // los elementos críticos (footer del ticket, sheets) quedan
@@ -1695,8 +2084,61 @@ export function SalePage(props: SalePageProps) {
           {crossCajaToast.text}
         </div>
       )}
-      <div className="flex-1 min-h-0 flex max-w-[1680px] w-full mx-auto bg-white">
+      <div
+        className={`flex-1 min-h-0 flex max-w-[1680px] w-full mx-auto ${
+          isHospitality ? "bg-[#0E1013]" : "bg-white"
+        }`}
+      >
         <div className="flex-1 flex flex-col min-w-0">
+          {/* v2-H1-venta-y-sala · la bifurcación del bloque.
+
+              HOSTELERÍA pinta su propia pantalla, en oscuro, y NO lleva
+              ni la barra superior ni el pie informativo: los destinos de
+              la barra viajan dentro de la comanda (ver la cabecera de
+              `SalePage.hospitality.tsx`) porque conservarlos arriba
+              costaba 68 px de alto del catálogo y con eso los 31 Licores
+              de La Maestranza dejaban de caber a 1280 × 800, que es justo
+              lo que §3b prohíbe paginar.
+
+              RETAIL y SERVICES se quedan EXACTAMENTE como estaban. Es la
+              restricción dura del bloque: Thalía, Cachictos y Sole usan
+              esta misma pantalla. Por eso es una bifurcación de un
+              componente entero y no un reguero de `isHospitality` dentro
+              de `SaleWorkspace`. */}
+          {isHospitality ? (
+            <HospitalityWorkspace
+              products={filtered}
+              searchQuery={query}
+              catalogError={catalogError}
+              lines={lines}
+              totals={totals}
+              tableName={
+                props.tableContext ? `Mesa ${props.tableContext.name}` : null
+              }
+              tableMeta={hospitalityTableMeta}
+              families={hospitalityFamilies}
+              familyLabels={hospitalityFamilyLabels}
+              familyTones={hospitalityFamilyTones}
+              familyOf={hospitalityFamilyOf}
+              ahora={ahoraProducts}
+              sentLineIds={sentState.sentLineIds}
+              lastSentAt={sentState.lastSentAt}
+              lastTouchedLine={lastTouchedLine}
+              chromeActions={hospitalityChrome}
+              banners={hospitalityBanners}
+              searchField={hospitalitySearch}
+              onBackToMap={props.onBackToMap ?? null}
+              onClickProduct={(p, units) => addProduct(p, units)}
+              onClickLine={(line) => setOpenSheet({ kind: "line", line })}
+              onUpdateLineUnits={(id, units) => updateLine(id, { units })}
+              onRemoveLine={removeLine}
+              onClickCheckout={() => setOpenSheet({ kind: "checkout" })}
+              onSendToKitchen={() => void sendToKitchen()}
+              kitchenBusy={kitchenBusy}
+              kitchenLastRevision={kitchenRevision}
+            />
+          ) : (
+            <>
           {/* v1.0-handheld · Lote 0+1: en <1024px el header pasa a dos
               filas (identidad/acciones arriba, buscador+escáner a ancho
               completo debajo). Causa del overflow horizontal en 360px:
@@ -1787,46 +2229,13 @@ export function SalePage(props: SalePageProps) {
                       : "relative flex-1 min-w-0"
                 }
               >
-                <Search
-                  className="absolute left-4 md:left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"
-                  strokeWidth={2.25}
-                />
-                <input
-                  ref={searchRef}
+                <SaleSearchInput
+                  inputRef={searchRef}
                   value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  onChange={setQuery}
                   onKeyDown={onSearchKey}
-                  type="search"
-                  // v1.22 · hallazgo N1 · SEGUNDA capa del arreglo del
-                  // teclado del sistema, y la que protege aunque la
-                  // detección de táctil vuelva a fallar con el WebView
-                  // del próximo fabricante.
-                  //
-                  // Mientras el buscador está PLEGADO el input sigue
-                  // montado y enfocable —es donde aterriza el lector
-                  // USB-HID, que es toda su razón de existir—, pero con
-                  // `inputMode="none"` Android no saca el QWERTY al
-                  // enfocarlo. El lector escribe igual: entra como
-                  // eventos de teclado, no por el IME.
-                  //
-                  // Al DESPLEGARLO vuelve a `search`, que es cuando el
-                  // camarero acaba de pedir escribir y el teclado es lo
-                  // que espera ver.
-                  inputMode={searchCollapsed ? "none" : "search"}
-                  enterKeyHint="search"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  // Sólo cuando está plegado: emitir `aria-hidden="false"`
-                  // en retail sería ruido en el árbol de accesibilidad.
-                  aria-hidden={searchCollapsed ? true : undefined}
-                  tabIndex={searchCollapsed ? -1 : undefined}
-                  placeholder={
-                    businessType === "SERVICES"
-                      ? "Buscar servicio o cliente…"
-                      : "Buscar producto, código de barras o SKU…"
-                  }
-                  className="h-12 md:h-14 w-full min-w-0 pl-11 md:pl-12 pr-4 text-[14px] md:text-[14.5px] bg-mipiace-stone border border-transparent rounded-2xl focus:outline-none focus:ring-2 focus:ring-mipiace-coral/40 focus:bg-white focus:border-mipiace-coral/30"
+                  collapsed={searchCollapsed}
+                  businessType={businessType}
                 />
               </div>
               {/* Gemelo del botón Escanear pegado al buscador en la fila
@@ -2049,6 +2458,8 @@ export function SalePage(props: SalePageProps) {
               )}
             </div>
           </footer>
+            </>
+          )}
         </div>
       </div>
 
@@ -2145,6 +2556,61 @@ export function SalePage(props: SalePageProps) {
             setNotes(v);
             setOpenSheet(null);
           }}
+        />
+      )}
+      {/* v2-H1 · la hoja de las siete secundarias para la comanda
+          oscura, que no tiene el panel del ticket donde el TPV claro
+          monta este mismo sheet desde su propio estado. Las acciones
+          salen de `buildTicketActions`, la MISMA lista que usa
+          `TicketPanel`, así que las dos hojas no pueden divergir. */}
+      {openSheet?.kind === "ticketActions" && (
+        <TicketActionsSheet
+          actions={buildTicketActions({
+            holdedEnabled,
+            hasTable: isTableMode,
+            hasAppointment: appointmentContext != null,
+            hasGroupedTables,
+            contactName: contact?.name ?? null,
+            notes,
+            lineCount: lines.length,
+            ticketNounLower: vocab("ticketNoun", businessType).toLowerCase(),
+            onClickContact: () => setOpenSheet({ kind: "contact" }),
+            onClickDiscountGlobal: () => setOpenSheet({ kind: "discountGlobal" }),
+            onClickNotes: () => setOpenSheet({ kind: "notes" }),
+            onClickMoveTable: () => {
+              setOpenSheet(null);
+              setShowMoveTable(true);
+            },
+            onClickSplitBill: () => {
+              setOpenSheet(null);
+              setShowSplitBill(true);
+            },
+            onClickGroup: () => {
+              setOpenSheet(null);
+              setShowGroupPicker(true);
+            },
+            onClickUngroup: () => {
+              setOpenSheet(null);
+              void tableUngroup();
+            },
+            onCancel: () => {
+              setOpenSheet(null);
+              if (isTableMode) {
+                setConfirmAction("voidTable");
+                return;
+              }
+              if (appointmentContext) {
+                props.onBackToAgenda?.();
+                return;
+              }
+              if (lines.length === 0) {
+                clearCart();
+                return;
+              }
+              setConfirmAction("clearCart");
+            },
+          })}
+          onClose={() => setOpenSheet(null)}
         />
       )}
       {/* catalogo-local · el ContactSheet adjunta un contacto DE HOLDED al
@@ -2252,6 +2718,10 @@ export function SalePage(props: SalePageProps) {
                   setDraftLines([]);
                   setContact(null);
                   setNotes("");
+                  // v2-H1 §5 · mesa cobrada: el registro de «esto está
+                  // en cocina» ya no describe nada.
+                  if (activeTicketId) clearSentState(activeTicketId);
+                  setSentState(emptySentState());
                   // B-reservas-5 F2 · el aviso lo redacta quien sabe qué
                   // se cobró. Aquí siempre es una mesa.
                   exitToMap({
@@ -2860,6 +3330,100 @@ function HealthBanner({ health }: { health: HealthStatus | null }) {
 // `ModifierBreakdown` se extrajo a `SalePage.cartLineHelpers.tsx`
 // (v1.2-Lite-fix1 Lote 3) para compartirlo con `CartLineItem` sin
 // crear un import circular.
+
+// v2-H1 · el nombre de zona para la meta de la comanda. Es el mismo mapa
+// que `TableMapScreen`, en español y sin acrónimos: la cabecera dice
+// «Salón · 2 comensales · Gemma», no «SALON».
+const ZONE_LABEL_ES: Record<TableContext["zone"], string> = {
+  SALON: "Salón",
+  TERRAZA: "Terraza",
+  BARRA: "Barra",
+  RESERVADO: "Reservados",
+};
+
+/**
+ * v2-H1 · un aviso dentro de la comanda oscura.
+ *
+ * Los `bg-amber-50` / `bg-red-50` del banner claro sobre fondo carbón se
+ * leen como dos manchas pálidas sin jerarquía. Aquí el aviso es un
+ * bloque con el color al 14 % y el texto en el tono saturado, que es lo
+ * que mantiene el contraste de texto sobre carbón.
+ */
+function DarkNotice({
+  tone,
+  children,
+}: {
+  tone: "amber" | "red";
+  children: React.ReactNode;
+}) {
+  const fill = tone === "red" ? "rgba(233,112,88,0.14)" : "rgba(226,178,58,0.14)";
+  const text = tone === "red" ? "#F2A08F" : "#E2B23A";
+  return (
+    <div
+      role="status"
+      data-testid="comanda-aviso"
+      data-tone={tone}
+      className="rounded-xl px-3 py-2 flex items-start gap-2"
+      style={{ background: fill, color: text, fontSize: 13.5 }}
+    >
+      <CircleAlert className="w-4 h-4 shrink-0 mt-0.5" strokeWidth={2.1} />
+      <span className="leading-snug">{children}</span>
+    </div>
+  );
+}
+
+/**
+ * El mismo `HealthBanner`, con las mismas tres reglas y los mismos
+ * textos, pintado para fondo oscuro.
+ *
+ * Se duplica la decisión de QUÉ enseñar, y eso es deuda declarada: lo
+ * correcto sería un módulo puro `healthNotice(health)` que devolviera
+ * `{ tone, text }` y dos pintores. No se hace aquí porque tocar
+ * `HealthBanner` es tocar la pantalla de RETAIL, y la restricción del
+ * bloque es que RETAIL no cambie ni un píxel. Queda apuntado para v2-H2.
+ */
+function HealthBannerDark({ health }: { health: HealthStatus | null }) {
+  if (!health) return null;
+  if (health.level === "blocked") {
+    const hours = health.lastSyncAgeMs
+      ? Math.round(health.lastSyncAgeMs / 3_600_000)
+      : null;
+    if (health.reason === "no_api_key") {
+      return (
+        <DarkNotice tone="red">
+          <strong>Holded desconectado · </strong>
+          Puedes seguir cobrando: los tickets se guardan y se subirán solos
+          cuando el propietario lo reconecte.
+        </DarkNotice>
+      );
+    }
+    return (
+      <DarkNotice tone="red">
+        <strong>Sin conexión con Holded desde hace {hours ?? "+48"} h · </strong>
+        Los tickets se guardan y se subirán solos.
+      </DarkNotice>
+    );
+  }
+  if (health.level === "warning") {
+    const hours = health.lastSyncAgeMs
+      ? Math.round(health.lastSyncAgeMs / 3_600_000)
+      : null;
+    return (
+      <DarkNotice tone="amber">
+        Sincronización pendiente · {hours ?? "—"} h sin contacto con Holded.
+      </DarkNotice>
+    );
+  }
+  if (health.pendingSyncCount > 0 || health.syncFailedCount > 0) {
+    return (
+      <DarkNotice tone="amber">
+        Sincronizando {health.pendingSyncCount} ticket(s)
+        {health.syncFailedCount > 0 ? ` · ${health.syncFailedCount} con error` : ""}.
+      </DarkNotice>
+    );
+  }
+  return null;
+}
 
 function Banner({ color, children }: { color: "amber" | "red"; children: React.ReactNode }) {
   const style =
@@ -3794,102 +4358,27 @@ function TicketPanel({
     };
   }, [touchedId, nonce]);
 
-  // Las siete secundarias, en el orden en que estaban en la fila de
-  // chips. "Cancelar" va marcada como destructiva y el sheet la aparta
-  // a su propia zona (hallazgo m1).
-  // catalogo-local · la entrada "Cliente" abre el ContactSheet, que sin
-  // Holded no se monta (ver SalePage). Un botón que no abre nada es peor
-  // que no tener el botón, así que se va de la lista. La rejilla es
-  // `grid-cols-2 sm:grid-cols-3` y refluye sola: no queda hueco.
-  //
-  // OJO, no confundir con el picker de clientes del CRM (F1,
-  // `useClientPicker`), que es otra lista y otra cosa: ése sigue
-  // funcionando sin Holded, y de hecho es lo único que le queda a este
-  // comercio para saber a quién está atendiendo.
-  const moreActions: TicketAction[] = [
-    ...(getCachedHoldedEnabled()
-      ? [
-          {
-            key: "contact",
-            label: contact ? `Cliente: ${contact.name.split(" ")[0]}` : "Cliente",
-            hint: contact
-              ? `Cliente: ${contact.name}`
-              : "Asignar cliente al ticket",
-            onClick: onClickContact,
-          },
-        ]
-      : []),
-    {
-      key: "discount",
-      label: "Descuento",
-      hint: "Aplicar descuento global al ticket",
-      onClick: onClickDiscountGlobal,
-    },
-    {
-      key: "notes",
-      label: `Observaciones${notes ? " ●" : ""}`,
-      hint: `Observaciones internas del ${vocab("ticketNoun", businessType).toLowerCase()}`,
-      onClick: onClickNotes,
-    },
-  ];
-  if (tableContext) {
-    moreActions.push(
-      {
-        key: "move",
-        label: "Mover mesa",
-        hint: "Llevar este ticket a otra mesa",
-        onClick: onClickMoveTable,
-      },
-      {
-        key: "split",
-        label: "Partir cuenta",
-        hint: "Cobrar parte ahora y dejar el resto pendiente",
-        onClick: onClickSplitBill,
-      },
-      {
-        key: "group",
-        label: "Agrupar",
-        hint: "Unir las cuentas de otras mesas ocupadas a esta",
-        onClick: onClickGroup,
-      },
-    );
-    if (hasGroupedTables) {
-      moreActions.push({
-        key: "ungroup",
-        label: "Desagrupar",
-        hint: "Separar las mesas agrupadas (cada una recupera sus líneas)",
-        onClick: onClickUngroup,
-      });
-    }
-  }
-  moreActions.push({
-    key: "cancel",
-    // v1.9.7 · en modo mesa el botón NUNCA se deshabilita: una mesa con
-    // un DRAFT vacío figura ocupada, y si "Cancelar" está gris no hay
-    // forma de liberarla desde el TPV (implantación de Sirope,
-    // 2026-07-08). En venta rápida sin nada que destruir sí se apaga.
-    // B-reservas-5 F3 · en contexto CITA el botón NO destruye: sale a la
-    // agenda y deja el borrador donde está. Etiquetarlo "Cancelar" con
-    // el mismo aspecto destructivo que "Vaciar mesa" sería mentir sobre
-    // lo que hace.
-    label: tableContext
-      ? "Vaciar mesa"
-      : appointmentContext
-        ? "Volver a la agenda"
-        : "Cancelar",
-    hint: tableContext
-      ? "Cancela la cuenta y libera la mesa"
-      : appointmentContext
-        ? "El borrador de la cita se queda como está"
-        : `Vacía el ${vocab("ticketNoun", businessType).toLowerCase()} en curso`,
-    onClick: onCancel,
-    disabled:
-      !tableContext &&
-      !appointmentContext &&
-      lines.length === 0 &&
-      !contact &&
-      !notes,
-    destructive: !appointmentContext,
+  // v2-H1 · las siete secundarias salen de `buildTicketActions`, que es
+  // la MISMA lista que usa la comanda oscura de hostelería. Vivían aquí
+  // dentro; con la lista en dos sitios, añadir una acción a una hoja y
+  // olvidarla en la otra es cuestión de tiempo.
+  const moreActions: TicketAction[] = buildTicketActions({
+    holdedEnabled: getCachedHoldedEnabled(),
+    hasTable: tableContext != null,
+    hasAppointment: appointmentContext != null,
+    hasGroupedTables,
+    contactName: contact?.name ?? null,
+    notes,
+    lineCount: lines.length,
+    ticketNounLower: vocab("ticketNoun", businessType).toLowerCase(),
+    onClickContact,
+    onClickDiscountGlobal,
+    onClickNotes,
+    onClickMoveTable,
+    onClickSplitBill,
+    onClickGroup,
+    onClickUngroup,
+    onCancel,
   });
 
   // 1 · Cabecera compacta. Nombre de mesa + meta + un solo botón "Más".

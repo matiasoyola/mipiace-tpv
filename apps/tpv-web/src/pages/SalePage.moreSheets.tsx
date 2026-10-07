@@ -84,6 +84,136 @@ export interface TicketAction {
   destructive?: boolean;
 }
 
+/**
+ * v2-H1 · las siete acciones secundarias, construidas en UN sitio.
+ *
+ * Hasta ahora la lista vivía dentro de `TicketPanel`, que es el panel
+ * del TPV claro. La venta de hostelería no tiene ese panel —su comanda
+ * es otro componente— y necesita las MISMAS acciones con los MISMOS
+ * rótulos: mover mesa, partir cuenta, agrupar, vaciar mesa. Con la lista
+ * en dos sitios, añadir una acción a la hoja del bar y olvidarla en la
+ * del retail es cuestión de tiempo, y el síntoma sería «en mi TPV eso no
+ * está».
+ *
+ * Es una extracción literal: mismas claves, mismos rótulos, mismas
+ * pistas, mismo orden y las mismas tres condiciones (sin Holded no hay
+ * «Cliente»; sin mesa no hay mover/partir/agrupar; «Desagrupar» sólo con
+ * mesas absorbidas). El texto de la destructiva sigue dependiendo del
+ * contexto, que es lo que impide etiquetar «Volver a la agenda» con el
+ * aspecto de «Vaciar mesa».
+ */
+export function buildTicketActions(input: {
+  holdedEnabled: boolean;
+  hasTable: boolean;
+  hasAppointment: boolean;
+  hasGroupedTables: boolean;
+  contactName: string | null;
+  notes: string;
+  lineCount: number;
+  /** "Ticket" o "Comprobante", según el vertical. En minúsculas. */
+  ticketNounLower: string;
+  onClickContact: () => void;
+  onClickDiscountGlobal: () => void;
+  onClickNotes: () => void;
+  onClickMoveTable: () => void;
+  onClickSplitBill: () => void;
+  onClickGroup: () => void;
+  onClickUngroup: () => void;
+  onCancel: () => void;
+}): TicketAction[] {
+  const actions: TicketAction[] = [];
+  // catalogo-local · «Cliente» abre el ContactSheet, que sin Holded no
+  // se monta. Un botón que no abre nada es peor que no tener el botón.
+  //
+  // OJO, no confundir con el picker de clientes del CRM (F1): ése sigue
+  // funcionando sin Holded y de hecho es lo único que le queda a ese
+  // comercio para saber a quién atiende.
+  if (input.holdedEnabled) {
+    actions.push({
+      key: "contact",
+      label: input.contactName
+        ? `Cliente: ${input.contactName.split(" ")[0]}`
+        : "Cliente",
+      hint: input.contactName
+        ? `Cliente: ${input.contactName}`
+        : "Asignar cliente al ticket",
+      onClick: input.onClickContact,
+    });
+  }
+  actions.push(
+    {
+      key: "discount",
+      label: "Descuento",
+      hint: "Aplicar descuento global al ticket",
+      onClick: input.onClickDiscountGlobal,
+    },
+    {
+      key: "notes",
+      label: `Observaciones${input.notes ? " ●" : ""}`,
+      hint: `Observaciones internas del ${input.ticketNounLower}`,
+      onClick: input.onClickNotes,
+    },
+  );
+  if (input.hasTable) {
+    actions.push(
+      {
+        key: "move",
+        label: "Mover mesa",
+        hint: "Llevar este ticket a otra mesa",
+        onClick: input.onClickMoveTable,
+      },
+      {
+        key: "split",
+        label: "Partir cuenta",
+        hint: "Cobrar parte ahora y dejar el resto pendiente",
+        onClick: input.onClickSplitBill,
+      },
+      {
+        key: "group",
+        label: "Agrupar",
+        hint: "Unir las cuentas de otras mesas ocupadas a esta",
+        onClick: input.onClickGroup,
+      },
+    );
+    if (input.hasGroupedTables) {
+      actions.push({
+        key: "ungroup",
+        label: "Desagrupar",
+        hint: "Separar las mesas agrupadas (cada una recupera sus líneas)",
+        onClick: input.onClickUngroup,
+      });
+    }
+  }
+  actions.push({
+    key: "cancel",
+    // v1.9.7 · en modo mesa el botón NUNCA se deshabilita: una mesa con
+    // un DRAFT vacío figura ocupada, y con "Cancelar" en gris no hay
+    // forma de liberarla desde el TPV (implantación de Sirope,
+    // 2026-07-08). En venta rápida sin nada que destruir sí se apaga.
+    // B-reservas-5 F3 · en contexto CITA el botón NO destruye: sale a la
+    // agenda y deja el borrador donde está.
+    label: input.hasTable
+      ? "Vaciar mesa"
+      : input.hasAppointment
+        ? "Volver a la agenda"
+        : "Cancelar",
+    hint: input.hasTable
+      ? "Cancela la cuenta y libera la mesa"
+      : input.hasAppointment
+        ? "El borrador de la cita se queda como está"
+        : `Vacía el ${input.ticketNounLower} en curso`,
+    onClick: input.onCancel,
+    disabled:
+      !input.hasTable &&
+      !input.hasAppointment &&
+      input.lineCount === 0 &&
+      !input.contactName &&
+      !input.notes,
+    destructive: !input.hasAppointment,
+  });
+  return actions;
+}
+
 export function TicketActionsSheet({
   actions,
   onClose,
