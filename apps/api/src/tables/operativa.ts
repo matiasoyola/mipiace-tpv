@@ -1010,6 +1010,19 @@ interface SerializedDraft {
   totalTax: string;
   totalDiscount: string;
   createdAt: string;
+  // v2-H1 §5 · la comanda del TPV se parte en «En cocina · hh:mm» y «Sin
+  // enviar», y para eso el terminal necesita saber si este DRAFT ya salió
+  // hacia cocina y cuándo. Las dos columnas existen desde v1.4
+  // (`lastSentAt` / `lastSentRevision`); lo único que faltaba era
+  // enseñarlas en la lectura. **No es un cambio de esquema** — no hay
+  // migración, ni columna nueva, ni índice: es el mismo `include` de
+  // siempre devolviendo dos campos más.
+  //
+  // Sin esto, recargar la pantalla dejaba toda la comanda en «Sin
+  // enviar» con sus −/+ puestos, ofreciendo corregir unidades de algo
+  // que la cocina ya está preparando.
+  lastSentAt: string | null;
+  lastSentRevision: number;
   lines: Array<{
     id: string;
     // v1.0-mesas-frontend: el TPV reconstruye su carrito local desde
@@ -1053,6 +1066,9 @@ function serializeDraft(
     totalTax: t.totalTax.toString(),
     totalDiscount: t.totalDiscount.toString(),
     createdAt: t.createdAt.toISOString(),
+    // v2-H1 §5 · ver la nota del tipo: columnas existentes, lectura nueva.
+    lastSentAt: t.lastSentAt?.toISOString() ?? null,
+    lastSentRevision: t.lastSentRevision,
     lines: t.lines.map((l) => ({
       id: l.id,
       productId: l.productId,
