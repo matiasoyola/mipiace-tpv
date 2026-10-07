@@ -106,6 +106,47 @@ font-feature-settings: 'cv11', 'ss01';
   grandes (≥ 18px). Cuanto más grande, más apretado.
 - Importes siempre `tabular-nums` para alineación vertical.
 
+### 3.1 Escala TPV · la venta de hostelería (v2-H1)
+
+**Una escala POR ENCIMA de la general**, y sólo para la venta y la sala de
+hostelería. No es una excepción de gusto: es la respuesta a una medida.
+
+De dónde sale. El 07-10-2026 Matías aplazó la implantación de La Maestranza
+después de ver la pantalla de venta en el D8: «lo tiene que leer un humano, a
+toda velocidad y en pleno estrés, y la única distinción es una pequeña línea de
+color, con el texto diminuto». La escala general está pensada para que un
+administrativo lea una pantalla a 50 cm; ésta es para un camarero que mira una
+pantalla **a un brazo de distancia, de reojo, con una bandeja en la otra mano**.
+`ux-principles.md` §1.5 ya pedía 18-20 px en líneas de producto y 48 en el
+total; esta tabla lo sube donde el hierro demostró que 18 no basta.
+
+| Uso | Mínimo | Puesto en pantalla |
+|---|---|---|
+| Nombre de producto (botón de la cuadrícula) | **23 px** | 24 px / 600 |
+| Nombre de producto (cuadrícula apretada, ≥ 25 productos) | **20 px** | 20-22 px / 600 |
+| Línea de comanda · enviada | **20 px** | 21 px / 500 |
+| Línea de comanda · sin enviar | **20 px** | 23 px / 600 |
+| Cantidad de la línea sin enviar | — | 24 px / 600 |
+| Total a cobrar | **44 px** | 46 px / 600, `-0.025em` |
+| Botón «Cobrar» | **22 px** | 22 px / 600 |
+| Botón «Enviar» | — | 20 px / 600 |
+| Nombre de familia (barra de familias) | **21 px** | 21 px / 600 |
+| Nombre de mesa (mapa de sala) | **26 px** | 28 px / 600 |
+| Importe de mesa (mapa de sala) | **19 px** | 22 px / 600 `tabular-nums` |
+| Eyebrow de sección («EN COCINA», «SIN ENVIAR», «BARRA») | — | 11 px / 500, `0.1em` |
+
+**Los dos nombres de producto son el mismo token con dos peldaños**, no dos
+decisiones: 23 px es el tamaño de la cuadrícula normal (hasta 20 productos, que
+es 4 × 5) y 20 px es el suelo al que puede bajar una familia grande antes de
+que el bloque tenga que decir «esta familia no cabe». Nunca por debajo de 20:
+`v2-H1 §3b` prohíbe la paginación, no el tamaño legible.
+
+Las medidas viven en `apps/tpv-web/src/lib/hospitalityTheme.ts` como
+constantes, y las funciones puras de `hospitalityGrid.ts` las comen: un
+sabotaje que baje el nombre a 17 px cambia el número que entra en la función y
+el test cae. El resto del TPV (login, turno, cierre, tickets, cobro) y los
+verticales RETAIL y SERVICES **siguen con la escala general de §3**.
+
 ## 4. Espaciado y radios
 
 **Escala de radios** (consistente con `tailwind.config.reference.js`):
@@ -147,6 +188,7 @@ prisa es 9-10 mm.
 |---|---|---|---|
 | `tap-fichar` | **208 px** | 24 mm | El botón de Entrar/Salir de la pantalla de fichar, y sólo ése. |
 | `tap-valoracion` | **96 px** (80 px a ≤390 px) | 11 mm | El «Sí» / «No» del test de la valoración inicial que contesta el paciente, y sólo ésos. |
+| `tap-cobrar-hosteleria` | **68 px** | 12 mm | El botón «Cobrar» de la venta de HOSTELERÍA (§9), y sólo ése. En RETAIL y SERVICES «Cobrar» se queda en `touch-lg` (64). |
 
 De dónde sale: el botón de fichar no es "un control de uso diario", es
 **el acto**. Se pulsa entrando por una puerta con el bolso en la otra mano,
@@ -171,8 +213,22 @@ los botones de detalle 64 px, «Seguir» 72 px, «Atrás» 56 px.
 A 320 px de ancho —el suelo del bucle visual— dos botones de 96 px con
 12 px de hueco y 20 px de margen entran sin tocarse.
 
-Son los dos únicos controles del sistema fuera de la escala de tres
-peldaños, y están aquí para que sigan siendo dos: cualquier otro se discute
+**De dónde sale `tap-cobrar-hosteleria`** (v2-H1): lo fija el prompt del bloque
+(«Táctil: ningún objetivo < 56 px en tablet; Cobrar 68 px») y la maqueta que
+Matías revisó el 07-10-2026 (`docs/mockups/v2-hosteleria/venta-oscuro.dc.html`,
+`height: 68px`). Son **4 px por encima de `touch-lg`**, y no se han redondeado
+a 64 porque en esta pantalla «Cobrar» comparte fila con «Enviar» y la jerarquía
+entre los dos la construyen el ancho (`flex 1.3` contra `1`), el relleno (coral
+pleno contra borde) **y** el alto — exactamente el reparto de tres variables que
+v1.14.1 midió en el panel claro. Con los dos a 64 la fila vuelve a leerse como
+una pareja de iguales, que es el fallo que v1.14.1 documenta.
+
+Que sea un token con nombre y no un `h-[68px]` suelto es justo lo que esta
+sección pide: el número vive aquí, el componente lo lee, y hay test de que
+ningún componente de la venta oscura escribe una altura a mano.
+
+Son los tres únicos controles del sistema fuera de la escala de tres
+peldaños, y están aquí para que sigan siendo tres: cualquier otro se discute
 antes.
 
 **Y uno que se quedó DENTRO de la escala a propósito** (clinica-3,
@@ -474,17 +530,112 @@ Coherente, líneas finas, geometric. Combina con DM Sans.
   permitida con timing visible (banner desliza 200ms in, 200ms out,
   4000ms visible).
 
-## 9. Modo oscuro (futuro)
+## 9. Oscuro · hostelería (v2-H1)
 
-**En F1 no se implementa modo oscuro** automático. La UI por defecto es
-clara (cream/stone backgrounds). En B4+ cuando lleguen pantallas para
-hostelería oscura, evaluaremos un toggle manual de tema (no system-pref)
-porque cada local tiene iluminación propia.
+Llegó lo que §9 dejaba pendiente, y llegó **acotado**: el tema oscuro es de
+**la venta y la sala de HOSTELERÍA**, dos pantallas. No es un toggle, no es
+`prefers-color-scheme` y no es de todo el TPV. El login, la apertura y el
+cierre de turno, el cobro, los tickets, el arqueo y los verticales **RETAIL y
+SERVICES siguen claros** — Thalía, Cachictos y Sole usan la misma `SalePage` y
+no deben notar nada (hay test de render de las dos variantes).
 
-Cuando llegue: el coral se mantiene (`#E97058` luce bien sobre fondo
-oscuro), el ink se invierte (`#F8F6F3` → texto), el stone se hace
-profundo (`#1F2937` → background). Conservar las pruebas en mockups
-antes de implementar.
+Por qué sólo esas dos: son las dos pantallas que un camarero mira ocho horas
+seguidas en un local con poca luz, y las dos donde el contenido es **color
+plano sobre fondo** (el color de la familia, el estado de la mesa). Sobre fondo
+claro, nueve rellenos pastel compiten con el papel; sobre fondo carbón
+resaltan. El resto del TPV se mira de pasada y vive mejor en claro.
+
+Las constantes están en `apps/tpv-web/src/lib/hospitalityTheme.ts`. **Ningún
+hex suelto en un componente**: hay test que lo prohíbe.
+
+### 9.1 Superficies y texto
+
+| Token | Hex | Uso |
+|---|---|---|
+| `dark.canvas` | `#0E1013` | Fondo de la pantalla. Casi negro, no negro: el negro puro con texto claro produce halo en el WebView del D8. |
+| `dark.panel` | `#171A1F` | La comanda (panel izquierdo de la venta). Un peldaño por encima del fondo. |
+| `dark.surface` | `#1C2026` | Botones en reposo (cantidad no elegida, chip de zona no elegido). |
+| `dark.surface-raised` | `#23272E` | Separadores, botón de volver, franja de la barra en el mapa. |
+| `dark.surface-key` | `#2C313A` | Las teclas `−` / `+` de la línea sin enviar. Suben otro peldaño porque son lo único que se pulsa DENTRO de una lista. |
+| `dark.ink` | `#15171B` | Texto sobre un relleno claro (nombre de producto sobre el color de su familia, mesa libre). |
+| `dark.text` | `#F1F3F5` | Texto principal. |
+| `dark.text-soft` | `#E4E7EB` | Texto de botón en reposo. |
+| `dark.text-muted` | `#8B93A1` | Eyebrows, meta, líneas ya enviadas. **Nunca** para un importe ni para un nombre de producto (§4 del principio: nada de gris claro para información que se usa). |
+| `dark.link` | `#F2A08F` | Enlaces. Coral aclarado: el `#E97058` sobre `#0E1013` no llega a 4,5:1 en texto pequeño. |
+
+El **coral se mantiene** (`mipiace.coral` `#E97058`) y luce sobre carbón, como
+anticipaba el §9 viejo. Lo que cambia es la **regla de uso**: en estas dos
+pantallas el coral pleno es de **«Cobrar»**, de la **vista/familia activa
+especial** («Ahora») y del **estado «ocupada»** de una mesa. Tres sitios, y
+ninguno más — la regla de «un solo coral pleno por área de trabajo» de v1.14.1
+se amplía a tres porque son tres áreas distintas (el pie de la comanda, la
+barra de familias y el lienzo de la sala), no tres cosas en la misma.
+
+### 9.2 Estados de mesa
+
+| Estado | Relleno | Texto | Extra |
+|---|---|---|---|
+| Libre | `#E9ECEF` | `#0E1013` | sólo contorno si la zona lo pide |
+| Ocupada | `#E97058` | `#FFFFFF` | importe grande + minutos |
+| Pide la cuenta | `#E2B23A` | `#1B1500` | — |
+| +45 min sin atender | `#E97058` | `#FFFFFF` | aro `#E2B23A` de 4 px |
+
+El ámbar es `#E2B23A` y no el `amber-*` de Tailwind: sobre carbón los ámbar de
+la escala clara se van a marrón. Sigue siendo el ámbar de «atención / pidiendo
+cuenta» de §2, con el valor que ese fondo necesita.
+
+**La mesa libre es la más clara de la sala, a propósito.** Es el inverso de la
+pantalla clara, donde la libre era blanca con borde fino y desaparecía. En un
+bar lo que se busca de un vistazo es «dónde puedo sentar a estos cuatro», y eso
+tiene que ser lo que más salta.
+
+### 9.3 Paleta de familia · 9 tonos
+
+El color de la familia **pinta el botón entero**, no una banda de 4 px. Es la
+rectificación medida de v1.14.1: allí el tono se retiró del fondo porque el
+reparto era alfabético y el color no decía nada del contenido, y porque seis
+fondos competían con la señal de «cuál está seleccionado». En hostelería, con
+**familia primero y producto después**, la cuadrícula enseña UNA familia a la
+vez: ya no hay nueve colores compitiendo en la misma rejilla, y el color pasa
+de ruido a ser lo que te lleva a la familia correcta sin leer.
+
+| Tono | Hex | Pista de categoría |
+|---|---|---|
+| `hosp.cafes` | `#F3B992` | café, infusión, desayuno caliente |
+| `hosp.desayunos` | `#CACD8C` | tostada, bollería, pincho |
+| `hosp.cervezas` | `#E1C487` | cerveza, caña, tercio |
+| `hosp.refrescos` | `#86D5EE` | agua, refresco, zumo |
+| `hosp.vinos` | `#D8B8F1` | vino, copa |
+| `hosp.licores` | `#A7C9FF` | licor, destilado, combinado |
+| `hosp.raciones` | `#96D9B4` | ración, tapa, entrante |
+| `hosp.bocadillos` | `#F3B1CF` | bocadillo, montado, sándwich |
+| `hosp.platos` | `#B0D49D` | plato, menú, carne, pescado |
+
+Nueve y no seis porque una carta de bar tiene nueve familias (La Maestranza
+tiene nueve exactas) y con seis tonos dos familias vecinas comparten color, que
+es lo contrario de lo que el color viene a hacer aquí. Son pastel claro con
+texto `dark.ink` porque es lo que da contraste de texto sobre un relleno
+saturado sin pedir blanco (el blanco sobre pastel no llega a 4,5:1).
+
+**El reparto es estable por categoría y se persiste por tenant**, con la misma
+regla y el mismo almacén que `categoryTones.ts`: el color de «Cafés» es el
+mismo el lunes y el martes, porque lo que se aprende es el color y la posición,
+no el nombre. Si una categoría no cae en ninguna pista, se le asigna el tono
+menos usado y queda escrito.
+
+El coral **no está** en esta paleta, por la misma razón que no estaba en la de
+seis: lo lleva «Ahora», que es la vista especial.
+
+### 9.4 Lo que NO cambia
+
+- La escala táctil de §4 (48 / 56 / 64) sigue siendo el suelo. Esta pantalla usa
+  **56 como mínimo real** (`ux-principles` §1.2 pedía 64 en la pantalla
+  principal de venta; el prompt de v2-H1 fija 56 en tablet y 68 para «Cobrar»,
+  que es `touch-lg` + 4 — ver la nota de §4).
+- Los radios de §4.
+- La animación: sólo el feedback de pulsado (`scale(0.97)`, 120 ms).
+- DM Sans con los pesos 400/500/600. Nada de 700 — y por eso la tarjeta de mesa
+  del mapa oscuro baja de `font-bold` a 600, que es lo que §3 permite.
 
 ## 10. Referencias
 
