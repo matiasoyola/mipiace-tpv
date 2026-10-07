@@ -152,8 +152,14 @@ function computeLineCount(doc: TicketDocument): number {
     lines += doc.payment.received != null ? 2 : 1;
   }
   lines += 1; // separador
-  // La leyenda de la exención: hueco, borde, título, referencia, borde.
-  if (hayExento) lines += 5;
+  // La leyenda de la exención: el hueco de antes, los renglones del
+  // recuadro (el título puede partirse) y el hueco de después más su
+  // separador. Se cuenta con el MISMO `wrapText` que el render: contarlo
+  // mal deja el pie del ticket fuera del papel.
+  if (hayExento) {
+    const leyenda = leyendaExencion(doc.lines);
+    if (leyenda) lines += wrapText(leyenda.titulo, 36).length + 4;
+  }
   if (doc.creditNotice) lines += 5; // v1.8-Fiado · bloque PENDIENTE DE PAGO
   lines += 2; // footer thanks
   if (doc.footer.returnPolicy) lines += 2;
@@ -502,21 +508,44 @@ export async function renderTicketPdf(
   // frase.
   const leyenda = leyendaExencion(doc.lines);
   if (leyenda) {
-    const alto = LINE_HEIGHT * 2 + 8;
+    // ── EL RECUADRO SE DIBUJA ALREDEDOR DEL TEXTO, NO «POR AHÍ» ──────
+    //
+    // La primera versión ponía el borde en `s.y - LINE_HEIGHT + 2` con un
+    // alto fijo de dos renglones. En la captura del bucle visual (el
+    // ticket mixto de `docs/qa/2026-10-07-iva-exento-sanitario`) se vio lo
+    // que eso da: el borde de arriba pisaba el separador anterior y el
+    // de abajo CORTABA POR LA MITAD la línea del precepto. Ningún test lo
+    // veía — `pdf-parse` lee el texto y el texto estaba.
+    //
+    // Ahora el rectángulo se calcula de los renglones que va a contener:
+    // `y` es su BASE en pdf-lib, así que se parte del último renglón y se
+    // sube. `FONT_SIZE_NORMAL` por arriba cubre el ascendente de las
+    // mayúsculas y los 4 pt de abajo el descendente de la «p» de
+    // «operación».
+    const renglones = [...wrapText(leyenda.titulo, 36), leyenda.referencia];
+    const PADDING = 5;
+    // Un hueco antes: el separador de los pagos queda a su distancia y el
+    // recuadro no parece parte de él.
+    s.y -= PADDING;
+    const primeraBase = s.y;
+    const ultimaBase = primeraBase - (renglones.length - 1) * LINE_HEIGHT;
+    const arriba = primeraBase + FONT_SIZE_NORMAL + PADDING;
+    const abajo = ultimaBase - 4 - PADDING;
     page.drawRectangle({
       x: MARGIN_X,
-      y: s.y - LINE_HEIGHT + 2,
+      y: abajo,
       width: CONTENT_WIDTH,
-      height: alto,
+      height: arriba - abajo,
       borderColor: rgb(0, 0, 0),
       borderWidth: 1,
     });
-    s.y -= 2;
     for (const l of wrapText(leyenda.titulo, 36)) {
       drawCenteredText(s, l, FONT_SIZE_NORMAL, true);
     }
     drawCenteredText(s, leyenda.referencia, FONT_SIZE_SMALL, true);
-    s.y -= 6;
+    // Y el cursor baja hasta el borde de abajo, para que lo siguiente no
+    // se meta dentro del recuadro.
+    s.y = abajo - LINE_HEIGHT;
     drawSeparator(s);
   }
 

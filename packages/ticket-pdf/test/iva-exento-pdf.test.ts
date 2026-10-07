@@ -147,6 +147,43 @@ describe("iva-exento-sanitario · el ticket digital de la sesión", () => {
     expect(text).toContain("Ticket: 0123456789abcdef");
   });
 
+  it("el recuadro crece con el TÍTULO, no con un alto fijo", async () => {
+    // LO ENCONTRÓ EL BUCLE VISUAL, NO LA SUITE.
+    //
+    // La primera versión dibujaba el borde con un alto FIJO de dos
+    // renglones. En la captura del ticket mixto se vio lo que eso daba: el
+    // borde de arriba pisaba el separador y el de abajo cortaba por la
+    // mitad la línea del precepto. `pdf-parse` no lo veía porque el TEXTO
+    // estaba — lo que estaba mal era dónde se pintaba la caja.
+    //
+    // Este test cubre la mitad que un test puede cubrir: que el alto
+    // RESERVADO depende de cuántos renglones ocupa el título. Con tres
+    // líneas exentas de dos causas el título es «Operaciones exentas:
+    // operación exenta de IVA», que se parte en dos; con una, no.
+    const { PDFDocument } = await import("pdf-lib");
+    const altoDe = async (lineas: BuildTicketDocumentInput["ticket"]["lines"], total: number) => {
+      const pdf = await PDFDocument.load(await renderTicketPdf(doc(lineas, total)));
+      return pdf.getPage(0).getSize().height;
+    };
+    // Dos tickets con las MISMAS líneas y el mismo total: lo único que
+    // cambia es la causa de la segunda, y con ella el título de la
+    // leyenda (de «Quiropodia: …», que cabe, a «Operaciones exentas: …»,
+    // que se parte).
+    const unaCausa = await altoDe(
+      [QUIROPODIA, { ...QUIROPODIA, nameSnapshot: "Vendaje", sku: "LOC-V" }, CREMA],
+      82,
+    );
+    const dosCausas = await altoDe(
+      [
+        QUIROPODIA,
+        { ...QUIROPODIA, nameSnapshot: "Vendaje", sku: "LOC-V", exemptionCause: "E5" },
+        CREMA,
+      ],
+      82,
+    );
+    expect(dosCausas).toBeGreaterThan(unaCausa);
+  });
+
   it("el PDF exento es MÁS ALTO que el mismo ticket sin exención", async () => {
     // Dos líneas iguales, una exenta y la otra no: la diferencia de alto
     // es la leyenda. Si fueran iguales, la leyenda se estaría pintando
