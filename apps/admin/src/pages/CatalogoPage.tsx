@@ -29,7 +29,27 @@ import { Check, Package, Pencil, Plus, Search, X } from "lucide-react";
 
 import { AdminShell } from "../AdminShell.js";
 import { api, ApiError, clearTokens } from "../api.js";
+import { useTenantCapabilities } from "../capabilities.js";
 import { CenteredLoader, FieldError, OutlineButton, PrimaryButton } from "../ui.js";
+
+// iva-exento-sanitario · la única causa de exención que esta pantalla
+// ofrece, con su etiqueta y su referencia legal.
+//
+// E1 es «Exenta por el artículo 20» para la AEAT (lista L10 del diseño de
+// registro) y aquí se presenta como «Exento · sanitario · art. 20.Uno.3º»,
+// que es la única exención del art. 20 que este producto cubre (decisión 2
+// del bloque). Los textos están duplicados aquí a propósito y por la misma
+// razón que `TAX_RATES`: el admin y la API no comparten paquete, y sacar
+// dos frases a un `packages/` nuevo pesa más que la duplicación. La fuente
+// de verdad es `PRESENTACION.E1` en `@mipiacetpv/ticket-model`, y un test
+// comprueba que las dos dicen lo mismo.
+const EXENCION_SANITARIA = "E1";
+const EXENCION_ETIQUETA = "Exento · sanitario";
+const EXENCION_REFERENCIA = "art. 20.Uno.3º";
+// El aviso verde del mockup. Dice lo que cambia en la ficha, que es lo
+// único que el propietario necesita saber: con exento no hay conversión
+// neto/bruto, el precio ES el precio (decisión 4).
+const EXENCION_AVISO = "El precio es el que paga el paciente. Sin IVA.";
 
 // catalogo-local (addendum 2) · los cuatro tramos peninsulares, con el
 // 21 por delante. La misma constante que la API (`LOCAL_TAX_RATES` en
@@ -61,6 +81,10 @@ interface Product {
   // guardaba como neto y el TPV lo vendía a 1,76.
   priceGross: number;
   taxRate: number;
+  // iva-exento-sanitario · la causa de exención (lista L10) o null si la
+  // operación es sujeta. Un `taxRate` de 0 SIN causa es un 0 % sujeto, que
+  // es otra cosa: no se confunden nunca, ni aquí ni en el ticket.
+  exemptionCause: string | null;
   kind: Kind;
   active: boolean;
   tags: string[];
@@ -340,7 +364,15 @@ function ProductRow({ product, onEdit }: { product: Product; onEdit: () => void 
           <div className="text-[12.5px] text-slate-500 mt-1 tabular-nums flex flex-wrap gap-x-1.5">
             <span className="break-all">{product.sku ?? "Sin SKU"}</span>
             <span aria-hidden>·</span>
-            <span className="whitespace-nowrap">IVA {product.taxRate}%</span>
+            {/* iva-exento-sanitario · un producto exento no dice «IVA
+                0%»: dice que está exento. Es la misma confusión que el
+                bloque cierra en el ticket, y aquí la vería la podóloga
+                cada vez que repasa su catálogo. */}
+            <span className="whitespace-nowrap">
+              {product.exemptionCause
+                ? `${EXENCION_ETIQUETA} · ${EXENCION_REFERENCIA}`
+                : `IVA ${product.taxRate}%`}
+            </span>
             {product.barcode && (
               <>
                 <span aria-hidden>·</span>
@@ -480,6 +512,23 @@ function ProductForm({
   onSaved: () => void;
 }) {
   const isNew = product == null;
+  // iva-exento-sanitario · el chip de la exención SÓLO si el comercio
+  // tiene la historia clínica encendida (decisión 5 del bloque). Un bar no
+  // ve esa opción: una clínica es un tenant de quince, y un chip de
+  // exención sanitaria en el catálogo de La Maestranza es una invitación a
+  // dejar de cobrar el IVA de las cañas.
+  //
+  // `capacidades` es `null` mientras carga, y entonces el chip no se
+  // pinta: misma dirección que el resto de los gates del panel —esconder
+  // una opción que toca es un incordio, enseñar una que no toca se cobra
+  // mal durante meses.
+  const capacidades = useTenantCapabilities();
+  // Y si un producto exento llega a un comercio SIN clínica (no debería),
+  // el chip aparece igualmente, marcado, para poder quitarlo. Una ficha
+  // que cobra exento y una pantalla que dice que lleva el 21 % es peor que
+  // una opción de más.
+  const puedeExencion =
+    capacidades?.clinica === true || product?.exemptionCause != null;
   const [name, setName] = useState(product?.name ?? "");
   const [sku, setSku] = useState(product?.sku ?? "");
   // Ida y vuelta: se abre con el precio CON IVA y se guarda convirtiendo
@@ -501,6 +550,12 @@ function ProductForm({
     product != null && !TAX_RATES.includes(product.taxRate)
       ? String(product.taxRate).replace(".", ",")
       : "",
+  );
+  // iva-exento-sanitario · la causa de exención elegida. `null` = sujeta.
+  // Un producto ya marcado abre el formulario con el chip puesto, igual
+  // que el «Otro…» del addendum 2 con su número.
+  const [exemptionCause, setExemptionCause] = useState<string | null>(
+    product?.exemptionCause ?? null,
   );
   const [kind, setKind] = useState<Kind>(product?.kind ?? "PRODUCT");
   const [barcode, setBarcode] = useState(product?.barcode ?? "");
@@ -557,7 +612,19 @@ function ProductForm({
     // API. Las dos, no una: esta da el aviso al momento, la de allí es la
     // que impide que entre por otra vía.
     let effectiveTaxRate = taxRate;
-    if (customTax) {
+    // iva-exento-sanitario · exento ⇒ 0 %, y se fuerza aquí en vez de
+    // confiar en que los chips estén coherentes. La misma regla la aplican
+    // la API (`validateLocalProduct`) y el motor (CHECK
+    // `products_exencion_sin_iva`): tres puertas, una regla.
+    //
+    // Elegir «Exento · sanitario» APAGA el tipo tecleado y el «Otro…», que
+    // es lo que el chip significa. No hay forma de quedarse con los dos
+    // marcados —son un grupo de selección única— pero sí de abrir la ficha
+    // de un producto con «Otro… 7» y pulsar el chip de exento, y entonces
+    // el 7 no puede viajar.
+    if (exemptionCause != null) {
+      effectiveTaxRate = 0;
+    } else if (customTax) {
       const parsed = Number(customTaxText.replace(",", "."));
       if (customTaxText.trim().length === 0 || !Number.isFinite(parsed)) {
         setError("Escribe el tipo de IVA. Por ejemplo, 7 para el IGIC canario.");
@@ -580,6 +647,10 @@ function ProductForm({
       // `normalizePrice` que usa la carga de fichero del super-admin.
       priceGross,
       taxRate: effectiveTaxRate,
+      // `null` explícito y no `undefined`: en el PATCH, ausente significa
+      // «no toques la causa» y `null` significa «quítala». Al editar un
+      // producto exento y desmarcarlo hay que mandar el `null`.
+      exemptionCause,
       kind,
       barcode: barcode.trim() === "" ? null : barcode.trim(),
       tags: tags
@@ -654,45 +725,98 @@ function ProductForm({
           />
         </Field>
 
-        <div className="grid grid-cols-2 gap-3">
-          <Field id="cat-price" label="Precio con IVA">
-            <input
-              id="cat-price"
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
-              inputMode="decimal"
-              placeholder="0,00"
-              className={`${INPUT} tabular-nums`}
-            />
-          </Field>
-          <Field id="cat-tax" label="IVA">
-            <select
-              id="cat-tax"
-              value={customTax ? "OTHER" : String(taxRate)}
-              onChange={(e) => {
-                if (e.target.value === "OTHER") {
-                  setCustomTax(true);
-                  return;
-                }
-                setCustomTax(false);
-                setTaxRate(Number(e.target.value));
+        {/* iva-exento-sanitario · el precio y el IVA dejan de ir en la
+            misma rejilla de dos columnas.
+            El IVA pasa a CHIPS porque la opción de la exención no es un
+            número: es «Exento · sanitario  art. 20.Uno.3º», y eso no cabe
+            en un `<option>` de 90 px al lado del precio. Es el selector del
+            mockup validado el 07-10. */}
+        <Field id="cat-price" label={exemptionCause ? "Precio" : "Precio con IVA"}>
+          {/* El rótulo cambia con la exención, y no es un detalle: hasta
+              catalogo-en-alta esta pantalla enseñaba el NETO bajo una
+              etiqueta que decía «Precio con IVA» y un café tecleado a 1,60
+              se vendía a 1,76. Con exento no hay «precio con IVA» distinto
+              del precio —no hay IVA— y mantener el rótulo sería volver a
+              poner una etiqueta que no describe el campo (decisión 4). */}
+          <input
+            id="cat-price"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+            inputMode="decimal"
+            placeholder="0,00"
+            className={`${INPUT} tabular-nums`}
+          />
+        </Field>
+
+        <div>
+          <span className="block text-[13px] font-medium text-mipiace-ink-soft mb-1.5">
+            IVA
+          </span>
+          <div className="flex flex-wrap gap-2" role="group" aria-label="IVA">
+            {TAX_RATES.map((r) => (
+              <TaxChip
+                key={r}
+                label={`${r} %`}
+                active={exemptionCause == null && !customTax && taxRate === r}
+                onClick={() => {
+                  setExemptionCause(null);
+                  setCustomTax(false);
+                  setTaxRate(r);
+                }}
+              />
+            ))}
+            {/* La vía de escape del addendum 2. Sin ella, un comercio
+                canario (IGIC 7 / 3 / 0 %) se queda sin poder dar de alta
+                su producto hasta que despleguemos código. */}
+            <TaxChip
+              label="Otro…"
+              active={exemptionCause == null && customTax}
+              onClick={() => {
+                setExemptionCause(null);
+                setCustomTax(true);
               }}
-              className={`${INPUT} tabular-nums`}
-            >
-              {TAX_RATES.map((r) => (
-                <option key={r} value={r}>
-                  {r} %
-                </option>
-              ))}
-              {/* La vía de escape del addendum 2. Sin ella, un comercio
-                  canario (IGIC 7 / 3 / 0 %) se queda sin poder dar de
-                  alta su producto hasta que despleguemos código. */}
-              <option value="OTHER">Otro…</option>
-            </select>
-          </Field>
+            />
+            {puedeExencion && (
+              /* El chip ANCHO del mockup: ocupa la fila entera porque lleva
+                 dos textos —la etiqueta y el precepto— y porque es una
+                 elección de otra naturaleza que las de arriba. Las de
+                 arriba son «cuánto IVA»; ésta es «no hay IVA, y por este
+                 artículo». */
+              <button
+                type="button"
+                aria-pressed={exemptionCause != null}
+                onClick={() =>
+                  setExemptionCause((curr) =>
+                    curr != null ? null : EXENCION_SANITARIA,
+                  )
+                }
+                className={
+                  "basis-full h-11 px-3.5 rounded-xl text-[14.5px] font-medium text-left flex items-center gap-2.5 transition-colors " +
+                  (exemptionCause != null
+                    ? "bg-mipiace-coral text-white"
+                    : "bg-mipiace-stone text-mipiace-ink hover:bg-slate-100")
+                }
+              >
+                {EXENCION_ETIQUETA}
+                <span
+                  className={
+                    "text-[12.5px] font-normal " +
+                    (exemptionCause != null ? "text-white/85" : "text-slate-400")
+                  }
+                >
+                  {EXENCION_REFERENCIA}
+                </span>
+              </button>
+            )}
+          </div>
+          {exemptionCause != null && (
+            <p className="mt-2.5 text-[13px] text-emerald-700 bg-emerald-50 rounded-xl px-3 py-2.5">
+              {EXENCION_AVISO}
+            </p>
+          )}
         </div>
 
-        {customTax && (
+        {customTax && exemptionCause == null && (
           <Field
             id="cat-tax-custom"
             label="Otro tipo de IVA"
@@ -774,6 +898,38 @@ function ProductForm({
 
 const INPUT =
   "w-full h-11 px-3.5 rounded-xl bg-mipiace-stone border border-transparent text-[14.5px] text-mipiace-ink focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none";
+
+// iva-exento-sanitario · un chip del selector de IVA.
+//
+// Alto 44 px (`h-11`) como los `INPUT` de esta pantalla y no los 52 del
+// mockup: el mockup es un iPad y el panel se usa en el móvil del
+// propietario, donde la rejilla de esta ficha ya está calibrada a 44. Sigue
+// por encima del mínimo táctil de 44×44 de `docs/ux-principles.md`.
+function TaxChip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={
+        "h-11 min-w-[66px] px-3.5 rounded-xl text-[14.5px] font-medium tabular-nums transition-colors " +
+        (active
+          ? "bg-mipiace-coral text-white"
+          : "bg-mipiace-stone text-mipiace-ink hover:bg-slate-100")
+      }
+    >
+      {label}
+    </button>
+  );
+}
 
 function Field({
   id,

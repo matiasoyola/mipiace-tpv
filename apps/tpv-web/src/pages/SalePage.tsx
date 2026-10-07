@@ -1245,6 +1245,10 @@ export function SalePage(props: SalePageProps) {
         priceGross: p.priceGross,
         discountPct: 0,
         taxRate: p.taxRate,
+        // bloque iva-exento-sanitario · la causa viaja del catálogo a la
+        // línea. Sin esto la quiropodia de Rosario entraría al carrito
+        // como un 0 % SUJETO, que es otra operación.
+        exemptionCause: p.exemptionCause ?? null,
         modifiers: [],
         modifierSelections: sels.length > 0 ? sels : undefined,
       };
@@ -1293,6 +1297,7 @@ export function SalePage(props: SalePageProps) {
       priceGross: p.priceGross,
       discountPct: 0,
       taxRate: p.taxRate,
+      exemptionCause: p.exemptionCause ?? null,
       modifiers: [],
       modifierSelections: sels.length > 0 ? sels : undefined,
     };

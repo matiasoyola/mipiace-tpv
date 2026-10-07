@@ -29,6 +29,19 @@
 // pantalla diría una cosa y el servidor otra — y la que gana es la del
 // servidor, así que la podóloga vería un botón activo que falla.
 
+// bloque iva-exento-sanitario · la ÚNICA dependencia de paquete que tiene
+// este paquete, y es la del vocabulario fiscal de la casa.
+//
+// `@mipiacetpv/ticket-model` es igual de puro que éste —ni Prisma, ni
+// Fastify, ni React, ni reloj— y es donde viven la conversión neto↔bruto,
+// el cuadre del desglose y, desde este bloque, la lista L10 de causas de
+// exención con su presentación. El pie de la sesión enseña texto FISCAL
+// («Exento · sanitario»), así que lo lee de ahí: la alternativa era una
+// segunda redacción de la misma etiqueta, y la lección que ticket-con-iva
+// dejó escrita sobre las tres copias del mismo redondeo vale igual para
+// las dos copias del mismo rótulo.
+import { type CausaExencion, PRESENTACION } from "@mipiacetpv/ticket-model";
+
 import {
   VERSION_DEL_MAPA,
   clavesDelMapa,
@@ -282,11 +295,23 @@ export interface TratamientoDelCatalogo {
    *  catálogo: no hay una marca de «incluido» en ningún sitio. */
   precio: number;
   /** El tipo de IVA del catálogo, en %. **De aquí sale el texto del IVA
-   *  de la pantalla**, y no de una constante: el IVA exento en Verifactu
-   *  está fuera de alcance (`registro.ts` sigue declarando `S1`), así que
-   *  escribir «exento» en una pantalla cuyo ticket va a declarar otra cosa
-   *  sería escribirlo en el sitio donde más se cree. */
+   *  de la pantalla**, y no de una constante. */
   iva: number;
+  /** bloque iva-exento-sanitario · la causa de exención del catálogo
+   *  (lista L10 de la AEAT), o null si la operación es sujeta.
+   *
+   *  clinica-3 dejó aquí escrito por qué esta pantalla NO podía decir
+   *  «exento» todavía: «el IVA exento en Verifactu está fuera de alcance
+   *  (`registro.ts` sigue declarando `S1`), así que escribir "exento" en
+   *  una pantalla cuyo ticket va a declarar otra cosa sería escribirlo en
+   *  el sitio donde más se cree».
+   *
+   *  Ya no es verdad: `registro.ts` declara `OperacionExenta` y el papel
+   *  lleva su leyenda. Así que la pantalla puede decirlo —y TIENE que
+   *  decirlo, porque el pie de la sesión de Rosario diría «IVA 0 %» de
+   *  una operación exenta, que es exactamente la confusión que este
+   *  bloque existe para cerrar. */
+  causaExencion?: CausaExencion | null;
 }
 
 export interface LineaDelResumen {
@@ -296,6 +321,13 @@ export interface LineaDelResumen {
    *  que no hay nada que un `?? 0` pueda convertir en un precio. */
   precio: number | null;
   iva: number | null;
+  /** bloque iva-exento-sanitario · la causa de exención de la línea.
+   *
+   *  Va con los importes y no al lado: dice CÓMO se tributa lo que se
+   *  cobra, así que a quien no ve importes tampoco le llega —misma regla
+   *  que `precio` e `iva`, y por el mismo motivo de forma (la clave no
+   *  está, no vale 0). */
+  causaExencion?: CausaExencion | null;
 }
 
 export interface ResumenDeLaSesion {
@@ -355,6 +387,9 @@ export function resumenDeLaSesion(input: {
     nombre: t.nombre,
     precio: input.verImportes ? t.precio : null,
     iva: input.verImportes ? t.iva : null,
+    ...(input.verImportes && t.causaExencion
+      ? { causaExencion: t.causaExencion }
+      : {}),
   }));
 
   const total = input.verImportes
@@ -378,16 +413,35 @@ export function resumenDeLaSesion(input: {
   };
 }
 
-/** Sin «exento» en ningún sitio: el texto sale del catálogo (ver
- *  `TratamientoDelCatalogo.iva`). */
+/**
+ * El texto del IVA del pie de la sesión. Sale del catálogo y no de una
+ * constante (ver `TratamientoDelCatalogo`).
+ *
+ * bloque iva-exento-sanitario · un tramo EXENTO y un 0 % SUJETO valen los
+ * dos cero y son dos operaciones distintas, así que la clave del conjunto
+ * es el par (tipo, causa) y no el tipo solo — la misma clave que
+ * `claveTramo` usa para el desglose. Sin ella, «IVA 0 %» sería el texto de
+ * los dos y el pie de la sesión de Rosario diría que su quiropodia lleva
+ * un 0 % de IVA cuando lo que lleva es una exención del art. 20.
+ *
+ * La etiqueta sale de `PRESENTACION` en `@mipiacetpv/ticket-model`, que es
+ * de donde la saca el chip del catálogo: dos sitios que redacten
+ * «Exento · sanitario» acabarían discrepando, y uno de los dos es la
+ * pantalla donde la podóloga comprueba lo que va a cobrar.
+ */
 export function textoDelIva(
-  lineas: readonly { iva: number }[],
+  lineas: readonly { iva: number; causaExencion?: CausaExencion | null }[],
 ): string | null {
   if (lineas.length === 0) return null;
-  const tipos = new Set(lineas.map((l) => l.iva));
-  if (tipos.size > 1) return "IVA según cada tratamiento";
-  const unico = [...tipos][0]!;
-  return `IVA ${formatearPorcentaje(unico)} %`;
+  const tramos = new Set(
+    lineas.map((l) => `${l.iva}|${l.causaExencion ?? ""}`),
+  );
+  if (tramos.size > 1) return "IVA según cada tratamiento";
+  const primera = lineas[0]!;
+  if (primera.causaExencion) {
+    return PRESENTACION[primera.causaExencion].etiqueta;
+  }
+  return `IVA ${formatearPorcentaje(primera.iva)} %`;
 }
 
 function formatearPorcentaje(n: number): string {

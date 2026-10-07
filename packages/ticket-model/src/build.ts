@@ -6,6 +6,8 @@
 // al cliente generado. Los campos numéricos pueden venir como `number`
 // o como Decimal (`{ toString(): string }`) y se normalizan aquí.
 
+import type { CausaExencion } from "./exencion.js";
+import { claveTramo, esCausaExencion, leerClaveTramo } from "./exencion.js";
 import { changeFromCash } from "./payments.js";
 import { netToGross, round2 } from "./precios.js";
 import type {
@@ -110,6 +112,12 @@ export interface BuildTicketLineInput {
   taxRate: Numericish;
   subtotal?: Numericish | null;
   total?: Numericish | null;
+  // bloque iva-exento-sanitario · el snapshot de la causa de exención de
+  // la línea cobrada (`ticket_lines.exemption_cause`). Llega como el
+  // string de la columna y se valida contra la lista L10 al mapear: una
+  // fila con un código que no existe se trata como no exenta en vez de
+  // pintar un papel con una leyenda inventada.
+  exemptionCause?: string | null;
 }
 
 export interface BuildTicketPaymentInput {
@@ -201,28 +209,52 @@ export function buildTicketDocument(input: BuildTicketDocumentInput): TicketDocu
         l.total != null
           ? num(l.total)
           : round2(netoLinea * (1 + taxRate / 100)),
+      // bloque iva-exento-sanitario · el snapshot, tal como se cobró. Un
+      // código que no está en la lista L10 se descarta: la factura sale
+      // como sujeta, que es lo que el `taxRate` de la fila dice, en vez de
+      // con una leyenda de exención que no se puede respaldar.
+      ...(esCausaExencion(l.exemptionCause)
+        ? { exemptionCause: l.exemptionCause as CausaExencion }
+        : {}),
     };
   });
 
-  // Desglose IVA: agrupamos por tasa. Base = subtotal sin IVA; tax =
-  // base * rate/100. Hace falta separar las líneas por su `taxRate`
-  // porque el ticket puede tener IVA mixto (10% comida + 21% bebida).
-  const bucketByRate = new Map<number, { base: number; tax: number }>();
+  // Desglose IVA: agrupamos por tramo. Base = subtotal sin IVA; tax =
+  // base * rate/100. Hace falta separar las líneas porque el ticket puede
+  // tener IVA mixto (10% comida + 21% bebida).
+  //
+  // bloque iva-exento-sanitario · la clave del tramo es **(tasa, causa de
+  // exención)** y no la tasa sola. Con la tasa sola, la quiropodia exenta
+  // de Rosario y un producto al 0 % sujeto caerían en el mismo tramo —los
+  // dos valen 0— y el registro declararía uno de los dos por los dos.
+  // `claveTramo` vive en `exencion.ts` para que el servidor, el carrito y
+  // esto no puedan agrupar distinto.
+  const bucketByTramo = new Map<string, { base: number; tax: number }>();
   for (const line of lines) {
-    const bucket = bucketByRate.get(line.taxRate) ?? { base: 0, tax: 0 };
+    const clave = claveTramo(line.taxRate, line.exemptionCause ?? null);
+    const bucket = bucketByTramo.get(clave) ?? { base: 0, tax: 0 };
     const base = line.subtotal;
-    const tax = base * (line.taxRate / 100);
+    // Un tramo exento no tiene cuota. No es que salga 0 de multiplicar
+    // por un tipo del 0 %: es que no hay tipo que aplicar (§15.5).
+    const tax = line.exemptionCause ? 0 : base * (line.taxRate / 100);
     bucket.base += base;
     bucket.tax += tax;
-    bucketByRate.set(line.taxRate, bucket);
+    bucketByTramo.set(clave, bucket);
   }
-  const taxBreakdown: TicketTaxBucket[] = Array.from(bucketByRate.entries())
-    .sort(([a], [b]) => a - b)
-    .map(([rate, { base, tax }]) => ({
-      rate,
-      base: round2(base),
-      tax: round2(tax),
-    }));
+  const taxBreakdown: TicketTaxBucket[] = Array.from(bucketByTramo.entries())
+    .map(([clave, { base, tax }]) => {
+      const { rate, causa } = leerClaveTramo(clave);
+      return {
+        rate,
+        base: round2(base),
+        tax: round2(tax),
+        ...(causa ? { exemptionCause: causa } : {}),
+      };
+    })
+    // El orden lo fija `cuadrarDesglose` (exentos primero); aquí basta con
+    // que sea estable para que dos construcciones del mismo ticket den el
+    // mismo documento.
+    .sort((a, b) => a.rate - b.rate || (a.exemptionCause ?? "").localeCompare(b.exemptionCause ?? ""));
 
   const subtotalNet = round2(lines.reduce((acc, l) => acc + l.subtotal, 0));
   const total = round2(num(input.ticket.total));

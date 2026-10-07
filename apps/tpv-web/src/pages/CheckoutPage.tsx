@@ -551,6 +551,13 @@ export function CheckoutOverlay(props: {
               // `verifactu-un-solo-papel` compara los bytes de los dos.
               unitPriceGross: unitPriceGrossOf(l),
               lineTotal: t.totalGross,
+              // bloque iva-exento-sanitario · la causa viaja al papel sin
+              // red igual que al del servidor. De ella sale la leyenda
+              // «Operación exenta de IVA / art. 20.Uno.3º Ley 37/1992»:
+              // una factura exenta sin la referencia al precepto
+              // incumple el art. 6.1.j) del RD 1619/2012, y es el papel
+              // que la paciente se lleva en la mano.
+              exemptionCause: l.exemptionCause ?? null,
             };
           }),
           payments: pagos.map((p) => ({ method: p.method, amount: p.amount })),
@@ -628,6 +635,12 @@ export function CheckoutOverlay(props: {
           l.unitPriceOverride != null ? l.unitPriceOverride : undefined,
         discountPct: l.discountPct,
         taxRate: l.taxRate,
+        // bloque iva-exento-sanitario · lo que se persiste como snapshot
+        // en `ticket_lines.exemption_cause`. `undefined` y no `null`
+        // porque el esquema del POST es `additionalProperties: false` con
+        // campos opcionales: una clave a `null` no es «sin causa», es un
+        // tipo que el esquema rechaza.
+        exemptionCause: l.exemptionCause ?? undefined,
         modifiers: l.modifiers.length > 0 ? l.modifiers : undefined,
         modifierSelections:
           l.modifierSelections && l.modifierSelections.length > 0

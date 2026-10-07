@@ -39,6 +39,13 @@
 // (`test/catalogo-en-alta-precio.test.ts`).
 
 import { Prisma } from "@mipiacetpv/db";
+import {
+  admitidaEnRegimenGeneral,
+  CAUSAS_REGIMEN_GENERAL,
+  type CausaExencion,
+  esCausaExencion,
+  PRESENTACION,
+} from "@mipiacetpv/ticket-model";
 
 // catalogo-local · el tipo de IVA del alta local (addendum 2).
 //
@@ -66,6 +73,56 @@ import { Prisma } from "@mipiacetpv/db";
 // Esto aplica SÓLO al catálogo local. Un `source = HOLDED` sigue
 // trayendo su `taxRate` del sync.
 export const LOCAL_TAX_RATES = [21, 10, 4, 0] as const;
+
+// iva-exento-sanitario · LA CAUSA DE EXENCIÓN, validada en el servidor.
+//
+// Qué se admite y qué no, y las dos mitades tienen fuente distinta:
+//
+//   · La LISTA L10 la fija la AEAT (diseño de registro, hoja `6)Listas`) y
+//     la guarda el CHECK `products_exencion_en_l10`: E1–E6.
+//   · De esos seis, con `ClaveRegimen = "01"` —el único régimen que este
+//     SIF declara— las validaciones §15.5 PROHÍBEN E2 y E3. Un producto
+//     marcado así produciría un registro rechazado, con la factura ya
+//     entregada. Así que la API admite los cuatro que quedan
+//     (`CAUSAS_REGIMEN_GENERAL`) y no los seis.
+//
+// Esto contradice en parte el enunciado del bloque («que mañana quepan
+// E2–E6 sin migración»). Manda la AEAT: la COLUMNA admite los seis y no
+// hace falta migración ninguna; lo que no se puede es DECLARAR E2 o E3 en
+// régimen general. Si algún día este SIF emite con otra clave de régimen,
+// se abre aquí y la base ya está.
+//
+// Y de la UI sólo sale E1 (`CatalogoPage.tsx`, decisión 2 del bloque): un
+// desplegable con cuatro exenciones para una podóloga que sólo tiene una
+// es una forma de que se equivoque.
+export const EXEMPTION_CAUSES = CAUSAS_REGIMEN_GENERAL;
+
+/**
+ * Valida la causa de exención de un producto local.
+ *
+ * `null` y `undefined` son LO MISMO aquí y significan «operación sujeta»;
+ * el handler del PATCH distingue «no me mandes el campo» de «mándame
+ * null» antes de llegar aquí, porque en una edición parcial son dos cosas
+ * distintas (no tocar vs. quitar la marca).
+ */
+export function normalizeExemptionCause(
+  raw: string | null | undefined,
+): RuleResult<CausaExencion | null> {
+  if (raw == null || raw === "") return ok(null);
+  if (!esCausaExencion(raw)) {
+    return bad(
+      "La causa de exención no es válida. Usa una de la lista de la AEAT (E1–E6).",
+    );
+  }
+  if (!admitidaEnRegimenGeneral(raw)) {
+    // El mensaje nombra el régimen porque es la razón: no es que el
+    // código no exista, es que no se puede declarar con el nuestro.
+    return bad(
+      `La causa ${raw} no se puede declarar en régimen general del IVA (validaciones AEAT §15.5).`,
+    );
+  }
+  return ok(raw);
+}
 
 // Dos decimales, que es la precisión de la columna (`Decimal(5,2)`).
 // Más allá, la base redondearía en silencio y el producto quedaría con
@@ -256,6 +313,9 @@ export interface LocalProductInput {
   /** Sin IVA. Excluyente con `priceGross`. */
   basePrice?: number;
   taxRate: number;
+  /** iva-exento-sanitario · causa de la lista L10, o null/ausente si la
+   *  operación es sujeta. Con causa, `taxRate` TIENE que ser 0. */
+  exemptionCause?: string | null;
   kind?: "PRODUCT" | "SERVICE";
   barcode?: string | null;
   tags?: string[];
@@ -268,6 +328,7 @@ export interface LocalProductFields {
   /** NETO, 4 decimales. Lo que va a la columna. */
   basePrice: number;
   taxRate: number;
+  exemptionCause: CausaExencion | null;
   kind: "PRODUCT" | "SERVICE";
   barcode: string | null;
   tags: string[];
@@ -294,6 +355,34 @@ export function validateLocalProduct(
   const tax = normalizeTaxRate(input.taxRate);
   if (!tax.ok) return { ok: false, field: "taxRate", message: tax.message };
 
+  // iva-exento-sanitario · la causa se valida DESPUÉS del IVA y ANTES del
+  // precio, y las dos mitades del orden hacen trabajo:
+  //
+  //   · después del IVA, porque la coherencia «exento ⇒ 0 %» se comprueba
+  //     contra el tipo ya normalizado;
+  //   · antes del precio, porque con exento el precio bruto y el neto son
+  //     el mismo número (dividir por 1 + 0/100) y el mensaje de error del
+  //     precio tiene que salir con el tipo bueno.
+  const exencion = normalizeExemptionCause(input.exemptionCause);
+  if (!exencion.ok) {
+    return { ok: false, field: "exemptionCause", message: exencion.message };
+  }
+  // EXENTO ⇒ SIN IVA. El CHECK de la base lo impide igual, pero un 400
+  // con una frase que se entiende es mejor que un 500 con un error de
+  // constraint: ésta es la pantalla del propietario.
+  //
+  // Y no se CORRIGE poniendo el tipo a 0 por su cuenta: marcar «exento»
+  // sobre un producto al 21 % puede ser que el propietario quiera
+  // declararlo exento, o puede ser un dedo en el chip equivocado, y las
+  // dos se arreglan distinto. La pantalla manda los dos campos juntos.
+  if (exencion.value != null && tax.value !== 0) {
+    return {
+      ok: false,
+      field: "exemptionCause",
+      message: `Un producto ${PRESENTACION[exencion.value].etiqueta.toLowerCase()} no lleva IVA: su tipo tiene que ser 0 %.`,
+    };
+  }
+
   const price = normalizePrice({
     basePrice: input.basePrice,
     priceGross: input.priceGross,
@@ -308,6 +397,7 @@ export function validateLocalProduct(
       sku: sku.value,
       basePrice: price.value,
       taxRate: tax.value,
+      exemptionCause: exencion.value,
       kind: input.kind ?? "PRODUCT",
       barcode: normalizeBarcode(input.barcode),
       tags: normalizeTags(input.tags),
@@ -335,6 +425,7 @@ export function buildLocalProductCreateData(
     barcode: f.barcode,
     basePrice: new Prisma.Decimal(f.basePrice),
     taxRate: new Prisma.Decimal(f.taxRate),
+    exemptionCause: f.exemptionCause,
     kind: f.kind,
     active: f.active,
     tags: f.tags,
@@ -381,6 +472,16 @@ export const PRODUCT_BODY_PROPERTIES = {
   // los pone `normalizeTaxRate`, que puede explicar el porqué. Un `enum`
   // aquí habría cerrado la puerta al IGIC.
   taxRate: { type: "number", minimum: 0, maximum: 100 },
+  // iva-exento-sanitario · la causa de exención. El esquema deja pasar los
+  // SEIS códigos de la lista L10 (es lo que la columna admite) y `null`
+  // para quitar la marca; que E2 y E3 no se puedan declarar en régimen
+  // general lo dice `normalizeExemptionCause` con una frase que explica
+  // por qué, porque un `enum` del esquema contesta «body/exemptionCause
+  // debe ser igual a uno de los valores permitidos» y eso no enseña nada.
+  exemptionCause: {
+    type: ["string", "null"],
+    enum: ["E1", "E2", "E3", "E4", "E5", "E6", null],
+  },
   kind: { type: "string", enum: ["PRODUCT", "SERVICE"] },
   barcode: { type: ["string", "null"], maxLength: BARCODE_MAX },
   tags: {

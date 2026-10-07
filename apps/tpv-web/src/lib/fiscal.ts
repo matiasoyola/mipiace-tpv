@@ -320,6 +320,12 @@ export async function generarRegistroDeVenta(
       tipoImpositivo: b.rate,
       baseImponible: b.base,
       cuotaRepercutida: b.tax,
+      // bloque iva-exento-sanitario · con causa, `buildDesglose` emite el
+      // `DetalleDesglose` exento: `OperacionExenta` y el importe, SIN
+      // `CalificacionOperacion`, SIN `TipoImpositivo` y SIN
+      // `CuotaRepercutida` (validaciones AEAT §15.5 y el `<choice>` del
+      // XSD). El tipo de TS hace imposible mezclar las dos formas.
+      ...(b.exemptionCause ? { causaExencion: b.exemptionCause } : {}),
     })),
     cuotaTotal: cuadrado.cuotaTotal,
     importeTotal: datos.total,

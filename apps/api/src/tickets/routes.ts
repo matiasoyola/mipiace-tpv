@@ -111,6 +111,18 @@ interface TicketLineBody {
   unitPriceOverride?: number;
   discountPct: number;
   taxRate: number;
+  // bloque iva-exento-sanitario · la causa de exención de la lista L10
+  // (hoy sólo E1) con la que se cobró esta línea, o ausente si la
+  // operación es SUJETA. Se persiste como SNAPSHOT en
+  // `ticket_lines.exemption_cause`: lo que se cobró no cambia si mañana se
+  // edita el producto.
+  //
+  // La pareja (causa, `taxRate` ≠ 0) la rechaza el motor con
+  // `ticket_lines_exencion_sin_iva`, no un `if` de este handler: el
+  // terminal puede llegar con el catálogo cacheado viejo, y la invariante
+  // tiene que valer también para el borrador que abre la agenda y para la
+  // línea que nazca mañana desde un bono de sesiones.
+  exemptionCause?: string;
   // Legacy: array de strings tipeados ad-hoc por el cajero ("Sin azúcar").
   // No tiene precio asociado; el cálculo de subtotal ignora estos.
   modifiers?: string[];
@@ -218,6 +230,18 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
                   unitPriceOverride: { type: "number", minimum: 0, maximum: 100000 },
                   discountPct: { type: "number", minimum: 0, maximum: 100 },
                   taxRate: { type: "number", minimum: 0, maximum: 100 },
+                  // bloque iva-exento-sanitario · la lista L10 como `enum`
+                  // del esquema, y no texto libre: un código que la AEAT
+                  // no conozca se rechaza al remitir (§15.5) y entonces la
+                  // factura ya está entregada. Los seis están aquí porque
+                  // la columna los admite; cuál se puede ELEGIR lo decide
+                  // el catálogo (`local-product-rules.ts`), que es quien
+                  // sabe que con `ClaveRegimen = "01"` la AEAT prohíbe E2
+                  // y E3.
+                  exemptionCause: {
+                    type: "string",
+                    enum: ["E1", "E2", "E3", "E4", "E5", "E6"],
+                  },
                   modifiers: {
                     type: "array",
                     items: { type: "string", maxLength: 80 },
@@ -402,6 +426,10 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             lineBaseUnitPrice[i]! + lineModifierResolutions[i]!.unitPriceDeltaCents / 100,
           discountPct: l.discountPct,
           taxRate: l.taxRate,
+          // bloque iva-exento-sanitario · el tramo es (tasa, causa). Con
+          // la tasa sola, una quiropodia exenta y un 0 % sujeto en el
+          // mismo ticket caerían en el mismo tramo.
+          exemptionCause: l.exemptionCause ?? null,
         })),
       );
       const paymentsSum = body.payments.reduce((acc, p) => acc + p.amount, 0);
@@ -709,6 +737,10 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
                     : null,
                 discountPct: new Prisma.Decimal(l.discountPct),
                 taxRate: new Prisma.Decimal(l.taxRate),
+                // bloque iva-exento-sanitario · el snapshot de la causa.
+                // `null` y no `undefined`: la columna es nullable y «sin
+                // causa» es NULL, que es lo que el CHECK compara.
+                exemptionCause: l.exemptionCause ?? null,
                 subtotal: new Prisma.Decimal(totals.lines[i]!.subtotal),
                 total: new Prisma.Decimal(totals.lines[i]!.total),
                 modifiers: buildModifiersSnapshot(
@@ -1055,6 +1087,11 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             Number(l.unitPrice) + readUnitPriceDeltaCents(l.modifiers) / 100,
           discountPct: Number(l.discountPct),
           taxRate: Number(l.taxRate),
+          // bloque iva-exento-sanitario · el borrador que abre la agenda
+          // ya trae la causa en sus líneas (`agenda/checkout.ts`), y por
+          // aquí pasa el cobro de la sesión de Rosario. El tramo es (tasa,
+          // causa) también al recalcular.
+          exemptionCause: l.exemptionCause,
         })),
       );
       const paymentsSum = body.payments.reduce((acc, p) => acc + p.amount, 0);
@@ -2362,6 +2399,7 @@ function serializeTicket(t: DbTicket): Record<string, unknown> {
       unitPrice: { toString(): string };
       discountPct: { toString(): string };
       taxRate: { toString(): string };
+      exemptionCause: string | null;
       subtotal: { toString(): string };
       total: { toString(): string };
       modifiers: unknown;
@@ -2450,6 +2488,12 @@ function serializeTicket(t: DbTicket): Record<string, unknown> {
       unitPrice: Number(l.unitPrice.toString()),
       discountPct: Number(l.discountPct.toString()),
       taxRate: Number(l.taxRate.toString()),
+      // bloque iva-exento-sanitario · el snapshot de la causa, para que la
+      // vista del histórico del TPV pueda pintar el tramo «Exento» y la
+      // leyenda de la exención. Es el tercero de los tres caminos que
+      // pintan un ticket y tiene que decir lo mismo que el papel y que el
+      // PDF.
+      exemptionCause: l.exemptionCause ?? null,
       subtotal: Number(l.subtotal.toString()),
       total: Number(l.total.toString()),
       modifiers: serializeLineModifiers(l.modifiers),

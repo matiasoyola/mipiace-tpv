@@ -180,6 +180,10 @@ export async function loadTicketDocument(
           readUnitPriceDeltaCents(l.modifiers) / 100,
         discountPct: l.discountPct,
         taxRate: l.taxRate,
+        // bloque iva-exento-sanitario · el snapshot de la causa. De aquí
+        // sale el tramo «Exento» del desglose (`buildTicketDocument`
+        // agrupa por (tasa, causa)) y la leyenda del PDF.
+        exemptionCause: l.exemptionCause,
         subtotal: l.subtotal,
         total: l.total,
       })),

@@ -110,6 +110,11 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
           barcode: true,
           basePrice: true,
           taxRate: true,
+          // iva-exento-sanitario · la causa de exención del producto.
+          // ÉSTE es el camino por el que la quiropodia de Rosario llega al
+          // carrito con su exención puesta: sin ella la línea entraría
+          // como 0 % SUJETO, que ante la AEAT es otra operación.
+          exemptionCause: true,
           kind: true,
           imageMime: true,
           // B-Categorias-via-Tags: el TPV usa los tags para filtrar la
@@ -141,6 +146,10 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
         // Tres sitios, una fórmula.
         priceGross: brutoDesdeNeto(Number(p.basePrice), Number(p.taxRate)),
         taxRate: Number(p.taxRate),
+        // Con exención `priceGross === basePrice`: `brutoDesdeNeto` divide
+        // por `1 + 0/100`, así que el precio del catálogo ES el que paga
+        // la paciente (decisión 4 del bloque) sin ningún caso especial.
+        exemptionCause: p.exemptionCause,
         kind: p.kind,
         // B-ProductImages: si el worker ya cacheó la imagen, devolvemos
         // el MIME. El TPV usa este campo como gate para renderizar

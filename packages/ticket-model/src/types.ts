@@ -5,6 +5,8 @@
 // La validación con zod vive en `./schema.ts` y se aplica antes de
 // renderizar.
 
+import type { CausaExencion } from "./exencion.js";
+
 export interface TicketFiscal {
   legalName: string;
   taxId: string;
@@ -54,6 +56,10 @@ export interface TicketTaxBucket {
   rate: number;
   base: number;
   tax: number;
+  // bloque iva-exento-sanitario · la causa de la lista L10 cuando el tramo
+  // es EXENTO. Ausente en un tramo sujeto — incluido el 0 % sujeto, que es
+  // otra cosa y se declara con `CalificacionOperacion = "S1"`.
+  exemptionCause?: CausaExencion | null;
 }
 
 export interface TicketTotals {
@@ -105,6 +111,16 @@ export interface TicketLine {
    *  en la columna de la derecha. Lo cuadra contra el TOTAL el renderer
    *  con `cuadrarLineasImpresas`, no este campo. */
   totalGross: number;
+  /** bloque iva-exento-sanitario · SNAPSHOT de la causa de exención del
+   *  producto en el momento del cobro. Que esté en la línea y no se lea
+   *  del catálogo al imprimir es lo que hace que un ticket de hace un año
+   *  siga diciendo lo que dijo: si Rosario desmarca «Exento · sanitario»
+   *  mañana, sus facturas de ayer no cambian. Misma razón que
+   *  `nameSnapshot` y `holdedProductId`.
+   *
+   *  Con causa, `taxRate` es 0 SIEMPRE y lo garantiza un CHECK de la base,
+   *  no este tipo. */
+  exemptionCause?: CausaExencion | null;
 }
 
 // v1.8-Fiado (variante B) · si el ticket es una venta a crédito con deuda

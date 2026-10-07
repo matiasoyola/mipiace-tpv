@@ -19,6 +19,7 @@
 // servidor (`apps/api/test/verifactu-un-solo-papel.test.ts`), que es la red
 // de seguridad contra que los dos caminos se separen.
 
+import type { CausaExencion } from "@mipiacetpv/ticket-model";
 import { changeFromCash } from "@mipiacetpv/ticket-model";
 
 import {
@@ -50,6 +51,11 @@ export interface LineaTicketLocal {
   unitPriceGross: number;
   /** Total de línea CON IVA. */
   lineTotal: number;
+  /** bloque iva-exento-sanitario · la causa de exención de la línea. El
+   *  constructor la usa para la LEYENDA; el desglose ya viene agrupado en
+   *  `buckets`. Si no viaja, el papel sin red sale sin la leyenda y el del
+   *  servidor con ella: dos facturas distintas de la misma venta. */
+  exemptionCause?: CausaExencion | null;
 }
 
 export interface PagoTicketLocal {
@@ -66,8 +72,14 @@ export interface VentaLocal {
   payments: PagoTicketLocal[];
   /** Efectivo ENTREGADO por el cliente, si hubo. */
   cashAmount: number | null;
-  /** Los tramos de IVA del carrito, sin cuadrar. */
-  buckets: { rate: number; base: number; tax: number }[];
+  /** Los tramos de IVA del carrito, sin cuadrar. Desde el bloque
+   *  iva-exento-sanitario el tramo es (tasa, causa) y no sólo tasa. */
+  buckets: {
+    rate: number;
+    base: number;
+    tax: number;
+    exemptionCause?: CausaExencion | null;
+  }[];
   subtotal: number;
   total: number;
   notes: string | null;
@@ -111,6 +123,7 @@ export function buildLocalTicketInput(venta: VentaLocal): TicketReceiptInput {
     units: l.units,
     unitPriceGross: l.unitPriceGross,
     lineTotal: l.lineTotal,
+    ...(l.exemptionCause ? { exemptionCause: l.exemptionCause } : {}),
   }));
 
   // La vuelta se cuelga de la ÚLTIMA fila de efectivo, exactamente igual

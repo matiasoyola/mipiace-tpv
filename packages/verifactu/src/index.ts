@@ -111,10 +111,14 @@ export {
   IMPUESTO,
   LIMITES_REGISTRO,
   MAX_DETALLE_DESGLOSE,
+  OPERACION_EXENTA,
+  OPERACION_EXENTA_PROHIBIDA_REGIMEN_GENERAL,
   TIPO_FACTURA,
 } from "./tipos.js";
 export type {
   DetalleDesglose,
+  DetalleDesgloseExenta,
+  DetalleDesgloseSujeta,
   Encadenamiento,
   IDFacturaAlta,
   IDFacturaAnulada,

@@ -39,20 +39,31 @@ import {
   IMPUESTO,
   LIMITES_REGISTRO,
   MAX_DETALLE_DESGLOSE,
+  OPERACION_EXENTA_PROHIBIDA_REGIMEN_GENERAL,
   type RegistroAlta,
   type RegistroAnulacion,
   TIPO_FACTURA,
 } from "./tipos.js";
 
-/** Un tramo del desglose por tipo impositivo. Sale de `computeTicket` del
- *  TPV: una entrada por cada IVA presente en el ticket. */
+/** Un tramo del desglose. Sale de `cuadrarDesglose`: una entrada por cada
+ *  par (tipo impositivo, causa de exención) presente en el ticket.
+ *
+ *  bloque iva-exento-sanitario · con `causaExencion` el tramo es EXENTO y
+ *  `tipoImpositivo` y `cuotaRepercutida` se ignoran — no se declaran
+ *  (§15.5). Se siguen aceptando en la forma de entrada porque el caller
+ *  tiene un `DesgloseCuadrado` con los cuatro campos y partir el tipo
+ *  también aquí obligaría a dos ramas en los tres callers; lo que no se
+ *  puede construir es el DetalleDesglose mezclado, y eso lo impide
+ *  `DetalleDesglose`. */
 export interface BucketDesglose {
   /** Porcentaje: 21, 10, 4, 0. */
   tipoImpositivo: number;
-  /** Base imponible del tramo. */
+  /** Base imponible del tramo, o importe de la operación exenta. */
   baseImponible: number;
-  /** Cuota repercutida del tramo. */
+  /** Cuota repercutida del tramo. 0 —y no declarada— si es exento. */
   cuotaRepercutida: number;
+  /** Causa de la lista L10 si el tramo es exento. */
+  causaExencion?: string | null;
 }
 
 /** Lo que devuelve cualquiera de los dos constructores.
@@ -94,14 +105,50 @@ function buildDesglose(buckets: BucketDesglose[]): DetalleDesglose[] {
       `Desglose de ${buckets.length} tramos: el diseño de registro admite como mucho ${MAX_DETALLE_DESGLOSE}`,
     );
   }
-  return buckets.map((b) => ({
-    Impuesto: IMPUESTO.IVA,
-    ClaveRegimen: CLAVE_REGIMEN.GENERAL,
-    CalificacionOperacion: CALIFICACION_OPERACION.SUJETA_NO_EXENTA,
-    TipoImpositivo: porcentajeAeat(b.tipoImpositivo),
-    BaseImponibleOimporteNoSujeto: importeAeat(b.baseImponible),
-    CuotaRepercutida: importeAeat(b.cuotaRepercutida),
-  }));
+  return buckets.map((b) => {
+    if (b.causaExencion) {
+      // §15.5 con `ClaveRegimen = "01"`: «no pueden marcarse los valores de
+      // OperacionExenta "E2" y "E3"». Un registro así se rechaza, y
+      // rechazado es peor que no generado: la factura ya está entregada.
+      //
+      // Hoy esto es inalcanzable —la única causa que el catálogo deja
+      // guardar es E1 (`local-product-rules.ts`)— y está aquí por lo
+      // mismo que el tope de doce tramos de abajo: si llegara, que se vea
+      // al generar y no al remitir seis meses después. El cobro NO se cae
+      // por esto: `generarRegistroDeVenta` se llama dentro de un `try` que
+      // deja pasar la venta y manda el fallo a Sentry (CheckoutPage,
+      // «cobrar siempre se puede»).
+      if (
+        (OPERACION_EXENTA_PROHIBIDA_REGIMEN_GENERAL as readonly string[]).includes(
+          b.causaExencion,
+        )
+      ) {
+        throw new RangeError(
+          `OperacionExenta ${b.causaExencion} no se admite con ClaveRegimen ${CLAVE_REGIMEN.GENERAL} (validaciones AEAT §15.5)`,
+        );
+      }
+      // Sin CalificacionOperacion, sin TipoImpositivo y sin
+      // CuotaRepercutida. Las claves NO van a `undefined`: van ausentes,
+      // porque lo que se guarda en `fiscal_records.payload` es lo que V2
+      // serializará a XML sin volver a tocarlo, y un `undefined` que
+      // sobrevive un `JSON.parse` de ida y vuelta es un campo que no está
+      // — pero uno que alguien puede leer como que sí.
+      return {
+        Impuesto: IMPUESTO.IVA,
+        ClaveRegimen: CLAVE_REGIMEN.GENERAL,
+        OperacionExenta: b.causaExencion,
+        BaseImponibleOimporteNoSujeto: importeAeat(b.baseImponible),
+      };
+    }
+    return {
+      Impuesto: IMPUESTO.IVA,
+      ClaveRegimen: CLAVE_REGIMEN.GENERAL,
+      CalificacionOperacion: CALIFICACION_OPERACION.SUJETA_NO_EXENTA,
+      TipoImpositivo: porcentajeAeat(b.tipoImpositivo),
+      BaseImponibleOimporteNoSujeto: importeAeat(b.baseImponible),
+      CuotaRepercutida: importeAeat(b.cuotaRepercutida),
+    };
+  });
 }
 
 export interface RegistroAltaParams {
@@ -122,8 +169,16 @@ export interface RegistroAltaParams {
   desglose: BucketDesglose[];
   /** Suma de las cuotas. Se pasa en vez de sumarse aquí porque tiene que
    *  ser EXACTAMENTE la que imprime el papel: el reparto del céntimo de
-   *  redondeo ya lo resolvió `allocateRoundingRemainder`, y volver a
-   *  sumar aquí podría dar un céntimo distinto del que ve el cliente. */
+   *  redondeo ya lo resolvió `cuadrarDesglose`, y volver a sumar aquí
+   *  podría dar un céntimo distinto del que ve el cliente.
+   *
+   *  bloque iva-exento-sanitario · los tramos exentos NO suman: §16 valida
+   *  `CuotaTotal` contra «Ʃ (CuotaRepercutida + CuotaRecargoEquivalencia)
+   *  de todas las líneas de detalle de desglose», y un tramo exento no
+   *  informa `CuotaRepercutida`. En una factura íntegramente exenta
+   *  `CuotaTotal` es 0,00 y `ImporteTotal = Ʃ
+   *  BaseImponibleOimporteNoSujeto` (§17), que es exactamente lo que
+   *  `cuadrarDesglose` garantiza al céntimo. */
   cuotaTotal: number;
   importeTotal: number;
   cabeza: CabezaDeCadena | null;

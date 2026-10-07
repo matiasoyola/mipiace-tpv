@@ -4,6 +4,8 @@
 
 import { z } from "zod";
 
+import { CAUSAS_EXENCION } from "./exencion.js";
+
 export const TicketLineSchema = z.object({
   description: z.string().min(1),
   sku: z.string().optional(),
@@ -18,6 +20,17 @@ export const TicketLineSchema = z.object({
   taxRate: z.number().min(0).max(100),
   subtotal: z.number(),
   totalGross: z.number(),
+  // bloque iva-exento-sanitario · la causa de la lista L10, validada
+  // contra la lista y no como texto libre: un código que la AEAT no
+  // conozca se rechaza al remitir (§15.5, «deberá estar contenido en
+  // lista L10») y entonces ya es tarde.
+  //
+  // Y la regla de que un exento va a `taxRate = 0` **no se valida aquí**:
+  // la hace cumplir un CHECK de la base (`ticket_lines_exencion_sin_iva`),
+  // que es el único sitio del que no se puede escapar. El schema valida un
+  // documento ya construido; la invariante tiene que valer también para la
+  // fila que alguien escriba por SQL.
+  exemptionCause: z.enum(CAUSAS_EXENCION as unknown as [string, ...string[]]).nullish(),
 });
 
 export const TicketDocumentSchema = z.object({
@@ -80,6 +93,9 @@ export const TicketDocumentSchema = z.object({
         rate: z.number().min(0).max(100),
         base: z.number(),
         tax: z.number(),
+        exemptionCause: z
+          .enum(CAUSAS_EXENCION as unknown as [string, ...string[]])
+          .nullish(),
       }),
     ),
     total: z.number(),
