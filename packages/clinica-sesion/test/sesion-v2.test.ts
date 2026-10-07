@@ -352,6 +352,31 @@ describe("clinica-5 · dos tipos, dos líneas a caja (sabotaje)", () => {
     expect(resumen.ivaTexto).toBe("Exento · sanitario");
   });
 
+  it("la DERIVACIÓN quita el repetido: un servicio en dos bloques es UNA línea", () => {
+    // Directo sobre `serviciosDeLaSesion` y no por el cierre: el cierre
+    // ya tira el servicio que no es del tipo del bloque, así que por ahí
+    // el caso no llega nunca y el `vistos` quedaba sin probar. Lo cazó el
+    // sabotaje («el mismo servicio en dos tipos se cobra dos veces» salía
+    // VERDE), que es exactamente para lo que está.
+    //
+    // Y sí puede darse: basta con que una etiqueta nueva de Holded le
+    // cambie el tipo a un servicio ya marcado en dos bloques de una
+    // sesión que se está cerrando. Dos líneas iguales en un ticket son
+    // dos cobros de lo mismo.
+    expect(
+      serviciosDeLaSesion(["QUIROPODIA", "GENERAL"], {
+        QUIROPODIA: {
+          actos: [],
+          nivelPropuesto: 1,
+          nivelElegido: 1,
+          productoDelNivel: PAPILOMA,
+          servicios: [PAPILOMA],
+        },
+        GENERAL: { servicios: [PAPILOMA] },
+      }),
+    ).toEqual([PAPILOMA]);
+  });
+
   it("el MISMO servicio tocado en dos tipos es UNA línea", () => {
     // Dos líneas iguales en un ticket son dos cobros de lo mismo.
     const r = normalizarSesionV2(
