@@ -5,6 +5,11 @@
 // Diseño: lista paginada con cursor. La pantalla la abre el cajero
 // desde la SalePage (botón Caja → Tickets); se monta como overlay full.
 
+import {
+  type CausaExencion,
+  esCausaExencion,
+  leyendaExencion,
+} from "@mipiacetpv/ticket-model";
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
@@ -186,6 +191,12 @@ interface TicketRow {
     total: number;
     discountPct: number;
     taxRate: number;
+    // bloque iva-exento-sanitario · la causa de exención con la que se
+    // cobró la línea (snapshot). Opcional porque el TPV cachea respuestas
+    // en el Service Worker: un terminal que lea del caché una respuesta
+    // del contrato anterior no la trae, y una línea sin el campo es
+    // exactamente una línea sujeta.
+    exemptionCause?: string | null;
     // Mixto: array de strings (legacy ad-hoc) o array de
     // ModifierSnapshotEntry (B-Bar-Modifiers). El renderer del histórico
     // discrimina por tipo del primer elemento.
@@ -782,6 +793,35 @@ export function TicketDetailDrawer({
     [ticket.lines],
   );
 
+  // bloque iva-exento-sanitario · el TERCER camino que pinta un ticket.
+  //
+  // Esta ficha no lleva desglose de IVA —nunca lo ha llevado— y este
+  // bloque no se lo añade: lo que añade es lo que un papel exento NO puede
+  // dejar de decir, el tramo exento y la leyenda del precepto. Si la
+  // reimpresión térmica de esta misma venta lleva la leyenda y la pantalla
+  // desde la que se reimprime no, el cajero no puede comprobar que lo que
+  // va a salir es lo que tiene que salir.
+  //
+  // El importe del tramo sale de los totales de LÍNEA y no de un desglose
+  // recalculado, y es exacto: en una línea exenta el neto y el bruto son
+  // el mismo número (no hay IVA que sumar), así que Σ de los totales de
+  // las líneas exentas ES el `BaseImponibleOimporteNoSujeto` del tramo.
+  const exencion = useMemo(() => {
+    const lineas = ticket.lines.map((l) => ({
+      description: l.nameSnapshot,
+      exemptionCause: esCausaExencion(l.exemptionCause)
+        ? (l.exemptionCause as CausaExencion)
+        : null,
+    }));
+    const leyenda = leyendaExencion(lineas);
+    if (!leyenda) return null;
+    const importe = ticket.lines.reduce(
+      (acc, l) => (esCausaExencion(l.exemptionCause) ? acc + l.total : acc),
+      0,
+    );
+    return { leyenda, importe };
+  }, [ticket.lines]);
+
   return (
     <div
       className="fixed inset-0 z-50 bg-mipiace-ink/40 flex items-end sm:items-center justify-end p-0 sm:p-4 font-sans"
@@ -827,6 +867,7 @@ export function TicketDetailDrawer({
 
         <div className="mt-4 pt-3 border-t border-slate-200">
           <Row label="Subtotal líneas" value={subtotal} />
+          {exencion && <Row label="Exento" value={exencion.importe} />}
           <Row label="Total" value={ticket.total} strong />
           {ticket.payments.length > 0 && (
             <div className="mt-3 space-y-1.5 text-[13px]">
@@ -839,6 +880,24 @@ export function TicketDetailDrawer({
             </div>
           )}
         </div>
+
+        {/* La leyenda, con el MISMO texto que el papel y el PDF: lo
+            redacta `leyendaExencion` una vez para los tres. El recuadro
+            aquí es un borde de CSS en vez de dos filas de asteriscos,
+            porque esto es una pantalla; la frase es idéntica. */}
+        {exencion && (
+          <div
+            data-testid="leyenda-exencion"
+            className="mt-4 border-2 border-mipiace-ink rounded-xl p-3 text-center"
+          >
+            <div className="text-[13px] font-semibold text-mipiace-ink">
+              {exencion.leyenda.titulo}
+            </div>
+            <div className="text-[12.5px] font-medium text-mipiace-ink">
+              {exencion.leyenda.referencia}
+            </div>
+          </div>
+        )}
 
         {ticket.notes && (
           <div className="mt-4 bg-mipiace-stone rounded-xl p-3 text-[12.5px] text-slate-600">

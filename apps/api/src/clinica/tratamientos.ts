@@ -34,6 +34,7 @@
 //     (`SERVICE_NOT_SELLABLE`). Un servicio sin SKU no es cobrable, y es
 //     mejor que no salga el botón que un 409 con la paciente delante.
 
+import { type CausaExencion, esCausaExencion } from "@mipiacetpv/ticket-model";
 import type { PrismaClient } from "@mipiacetpv/db";
 import type { TratamientoDelCatalogo } from "@mipiacetpv/clinica-sesion";
 
@@ -64,6 +65,10 @@ export async function tratamientosDeLaSesion(
       sku: true,
       basePrice: true,
       taxRate: true,
+      // iva-exento-sanitario · la causa de exención del servicio. De aquí
+      // sale el texto del pie de la sesión: sin ella diría «IVA 0 %» de
+      // una operación exenta, que es la confusión que este bloque cierra.
+      exemptionCause: true,
     },
   });
   return filas
@@ -73,6 +78,9 @@ export async function tratamientosDeLaSesion(
       nombre: p.name,
       precio: Number(p.basePrice),
       iva: Number(p.taxRate),
+      ...(esCausaExencion(p.exemptionCause)
+        ? { causaExencion: p.exemptionCause as CausaExencion }
+        : {}),
     }));
 }
 
@@ -105,6 +113,7 @@ export async function tratamientosPorId(
       name: true,
       basePrice: true,
       taxRate: true,
+      exemptionCause: true,
     },
   });
   const porId = new Map(filas.map((p) => [p.id, p]));
@@ -118,5 +127,8 @@ export async function tratamientosPorId(
       nombre: p.name,
       precio: Number(p.basePrice),
       iva: Number(p.taxRate),
+      ...(esCausaExencion(p.exemptionCause)
+        ? { causaExencion: p.exemptionCause as CausaExencion }
+        : {}),
     }));
 }

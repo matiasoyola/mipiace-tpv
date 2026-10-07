@@ -12,6 +12,9 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
+  "dependencies": {
+    "@mipiacetpv/ticket-model": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "^20.16.10",
     "typescript": "^5.6.3",

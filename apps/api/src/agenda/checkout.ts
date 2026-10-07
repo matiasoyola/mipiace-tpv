@@ -77,6 +77,12 @@ export interface SerializedCheckoutTicket {
     unitPrice: string;
     discountPct: string;
     taxRate: string;
+    // bloque iva-exento-sanitario · la causa de exención de la línea del
+    // borrador. El TPV no la usa para pintar, pero viaja en el contrato
+    // para que un cliente que lea este ticket sepa que la línea es exenta
+    // sin tener que deducirlo de un `taxRate = 0` (que también lo tiene un
+    // 0 % sujeto, que es otra operación).
+    exemptionCause: string | null;
     subtotal: string;
     total: string;
   }>;
@@ -178,6 +184,14 @@ export async function checkoutAppointment(
       name: true,
       basePrice: true,
       taxRate: true,
+      // bloque iva-exento-sanitario · la causa de exención del servicio.
+      // ÉSTE es el camino por el que la quiropodia exenta de Rosario llega
+      // a la caja: la sesión cerrada dice QUÉ tratamientos se hicieron
+      // (clinica-3) y de aquí sale con qué fiscalidad se cobran. Sin esta
+      // columna en el `select`, el cobro de una sesión saldría como 0 %
+      // SUJETO y el registro declararía `S1` con `TipoImpositivo = 0` en
+      // vez de `OperacionExenta = "E1"`.
+      exemptionCause: true,
     },
   });
   const byId = new Map(products.map((p) => [p.id, p]));
@@ -217,6 +231,7 @@ export async function checkoutAppointment(
     nameSnapshot: string;
     unitPrice: number;
     taxRate: number;
+    exemptionCause: string | null;
   }> = [];
   for (const item of itemsACobrar) {
     const p = byId.get(item.serviceId);
@@ -245,6 +260,9 @@ export async function checkoutAppointment(
       nameSnapshot: p.name,
       unitPrice: Number(p.basePrice),
       taxRate: Number(p.taxRate),
+      // El snapshot, igual que el nombre y el precio: lo que se cobró no
+      // cambia si mañana se edita el servicio.
+      exemptionCause: p.exemptionCause,
     });
   }
 
@@ -254,6 +272,7 @@ export async function checkoutAppointment(
       unitPrice: l.unitPrice,
       discountPct: 0,
       taxRate: l.taxRate,
+      exemptionCause: l.exemptionCause,
     })),
   );
 
@@ -288,6 +307,7 @@ export async function checkoutAppointment(
               unitPrice: new Prisma.Decimal(l.unitPrice),
               discountPct: new Prisma.Decimal(0),
               taxRate: new Prisma.Decimal(l.taxRate),
+              exemptionCause: l.exemptionCause,
               subtotal: new Prisma.Decimal(cl.subtotal),
               total: new Prisma.Decimal(cl.total),
             };
@@ -333,6 +353,7 @@ async function loadTicket(
           unitPrice: true,
           discountPct: true,
           taxRate: true,
+          exemptionCause: true,
           subtotal: true,
           total: true,
         },
@@ -357,6 +378,7 @@ async function loadTicket(
       unitPrice: l.unitPrice.toString(),
       discountPct: l.discountPct.toString(),
       taxRate: l.taxRate.toString(),
+      exemptionCause: l.exemptionCause,
       subtotal: l.subtotal.toString(),
       total: l.total.toString(),
     })),

@@ -101,21 +101,51 @@ export const TRATAMIENTOS = [
     id: CLINICA.quiropodia,
     name: "Quiropodia",
     sku: "SVC-QUIROPODIA",
-    basePrice: 30,
+    // iva-exento-sanitario · 35 € y EXENTO, que es el ticket del mockup
+    // validado el 07-10. Antes eran 30 € sin causa; se cambia porque el
+    // escenario del banco tiene que ser el del bloque, y el bloque es
+    // exactamente éste: el servicio sanitario de la podóloga sale exento.
+    basePrice: 35,
+    exemptionCause: "E1" as const,
   },
   {
     id: CLINICA.fresado,
     name: "Corte y fresado de uñas",
     sku: "SVC-FRESADO",
     basePrice: 0,
+    // «Incluido» es un precio de 0 en el catálogo, no una marca aparte
+    // (clinica-3) — y sigue siendo un acto sanitario, así que exento. En
+    // el desglose no se nota (0 € no mueve ningún tramo) y en el papel sí:
+    // es una de las líneas que la leyenda ampara.
+    exemptionCause: "E1" as const,
   },
   {
     id: CLINICA.verruga,
     name: "Tratamiento de verruga",
     sku: "SVC-VERRUGA",
     basePrice: 25,
+    exemptionCause: "E1" as const,
   },
 ] as const;
+
+/**
+ * iva-exento-sanitario · LO QUE LA CLÍNICA VENDE CON IVA.
+ *
+ * Es la mitad del bloque que no se ve si todo el catálogo está exento: una
+ * clínica vende también cremas y plantillas de serie, y el mismo ticket
+ * mezcla los dos tramos. Sin esta ficha, el banco sólo podría enseñar el
+ * ticket «Sólo sesión» del mockup y nunca el «Sesión + crema».
+ *
+ * `basePrice` es el NETO de cuatro decimales que persiste el catálogo
+ * (`netoDesdeBruto(12, 21)`), igual que lo guardaría el alta del panel.
+ */
+export const CREMA = {
+  id: "33333333-3333-4333-8333-333333333365",
+  name: "Crema urea 20%",
+  sku: "LOC-CREMA-UREA",
+  basePrice: 9.9174,
+  taxRate: 21,
+} as const;
 
 function hashDeviceToken(plain: string): string {
   return createHash("sha256").update(plain, "utf8").digest("hex");
@@ -148,6 +178,22 @@ export async function sembrarClinica(prisma: PrismaClient): Promise<void> {
       agendaEnabled: true,
       clinicalRecordsEnabled: true,
       agendaSlotMinutes: 15,
+      // iva-exento-sanitario · la CABECERA FISCAL.
+      //
+      // `holdedEnabled: false` significa que esta clínica EMITE SUS
+      // PROPIAS FACTURAS (V1-verifactu): su papel lleva número de serie,
+      // QR tributario y registro de facturación. Sin estos tres campos el
+      // papel sale con la razón social y el NIF vacíos — que es lo que el
+      // banco enseñaba antes de este bloque, y lo que hacía imposible
+      // capturar el ticket del mockup.
+      //
+      // Los datos son de mentira y lo dicen: «Ejemplo», y el NIF es el
+      // 00000000T del mockup validado.
+      fiscalProfile: {
+        legalName: "PODOLOGÍA ROSARIO",
+        taxId: "00000000T",
+        address: "C/ Ejemplo 1, 45600 Talavera de la Reina",
+      },
       stores: {
         create: {
           id: CLINICA.store,
@@ -249,10 +295,15 @@ export async function sembrarClinica(prisma: PrismaClient): Promise<void> {
       id: SERVICIO_VALORACION.id,
       tenantId: CLINICA.tenant,
       kind: "SERVICE",
+      source: "LOCAL",
+      holdedProductId: null,
       name: SERVICIO_VALORACION.name,
       sku: SERVICIO_VALORACION.sku,
       basePrice: 35,
       taxRate: 0,
+      // iva-exento-sanitario · la primera visita también es un acto
+      // sanitario: exenta por el art. 20.Uno.3º, como los tratamientos.
+      exemptionCause: "E1",
       active: true,
       scheduling: {
         create: {
@@ -280,10 +331,22 @@ export async function sembrarClinica(prisma: PrismaClient): Promise<void> {
         id: t.id,
         tenantId: CLINICA.tenant,
         kind: "SERVICE",
+        // iva-exento-sanitario · `source = LOCAL`, que es lo que una
+        // clínica sin Holded tiene de verdad (ADR-017, catalogo-local). El
+        // seed los dejaba en el `HOLDED` por defecto y entonces el panel
+        // los lista pero NO ofrece editarlos — así que la pantalla que
+        // este bloque cambia no se podía ni abrir en el banco.
+        source: "LOCAL",
+        holdedProductId: null,
         name: t.name,
         sku: t.sku,
         basePrice: t.basePrice,
+        // iva-exento-sanitario · exento ⇒ `taxRate = 0` SIEMPRE, y lo
+        // garantiza el CHECK `products_exencion_sin_iva`: si alguien
+        // cambiara una de las dos cosas aquí, el seed se cae con un error
+        // de constraint en vez de sembrar una ficha imposible.
         taxRate: 0,
+        exemptionCause: t.exemptionCause,
         active: true,
         scheduling: {
           create: {
@@ -297,6 +360,25 @@ export async function sembrarClinica(prisma: PrismaClient): Promise<void> {
       },
     });
   }
+
+  // iva-exento-sanitario · la crema del mostrador, SUJETA al 21 %. No es
+  // un tratamiento de sesión (no lleva `scheduling`): se vende por la
+  // rejilla del TPV como cualquier producto, y es lo que hace posible el
+  // ticket mixto del mockup.
+  await prisma.product.create({
+    data: {
+      id: CREMA.id,
+      tenantId: CLINICA.tenant,
+      kind: "PRODUCT",
+      source: "LOCAL",
+      holdedProductId: null,
+      name: CREMA.name,
+      sku: CREMA.sku,
+      basePrice: CREMA.basePrice,
+      taxRate: CREMA.taxRate,
+      active: true,
+    },
+  });
 
   // Y quién da cada servicio: sin la matriz de skills, el motor no las
   // propone y el capítulo no puede reservar. Las dos dan de todo: en una

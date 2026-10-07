@@ -52,6 +52,7 @@ import {
   buildLocalProductCreateData,
   isLocalSkuConflict,
   normalizeBarcode,
+  normalizeExemptionCause,
   normalizeName,
   normalizePrice,
   normalizeSku,
@@ -76,6 +77,9 @@ interface ProductBody {
   basePrice?: number;
   priceGross?: number;
   taxRate: number;
+  // iva-exento-sanitario · la causa de la lista L10, o `null` para quitar
+  // la marca. Ausente en el PATCH = «no toques la causa».
+  exemptionCause?: string | null;
   kind?: "PRODUCT" | "SERVICE";
   barcode?: string | null;
   tags?: string[];
@@ -89,6 +93,7 @@ const PRODUCT_SELECT = {
   barcode: true,
   basePrice: true,
   taxRate: true,
+  exemptionCause: true,
   kind: true,
   active: true,
   tags: true,
@@ -104,6 +109,7 @@ type ProductRow = {
   barcode: string | null;
   basePrice: Prisma.Decimal;
   taxRate: Prisma.Decimal;
+  exemptionCause: string | null;
   kind: "PRODUCT" | "SERVICE";
   active: boolean;
   tags: string[];
@@ -135,6 +141,17 @@ function serialize(p: ProductRow, escribible: boolean) {
     // y sin que el front tenga una copia de la fórmula del IVA.
     priceGross: brutoDesdeNeto(Number(p.basePrice), Number(p.taxRate)),
     taxRate: Number(p.taxRate),
+    // iva-exento-sanitario · la causa de exención. La pantalla la usa
+    // para preseleccionar el chip «Exento · sanitario» al editar y para
+    // cambiar la etiqueta del campo de precio: con exento no hay «precio
+    // con IVA» distinto del precio (decisión 4 del bloque), y una
+    // etiqueta que miente es el bug que catalogo-en-alta vino a arreglar.
+    //
+    // Se manda SIEMPRE, también a un comercio sin clínica: si un producto
+    // exento llega ahí (no debería), la ficha se enseña marcada y se puede
+    // quitar la marca. Esconderlo dejaría un producto que cobra exento y
+    // una pantalla que dice que lleva el 21 %.
+    exemptionCause: p.exemptionCause,
     kind: p.kind,
     active: p.active,
     tags: p.tags,
@@ -366,7 +383,10 @@ export async function registerLocalCatalogRoutes(app: FastifyInstance): Promise<
         where: { id: productId, tenantId: auth.tenantId },
         // catalogo-en-alta · el IVA ACTUAL hace falta para convertir un
         // `priceGross` que llegue solo. Ver abajo.
-        select: { id: true, source: true, taxRate: true },
+        // iva-exento-sanitario · la causa ACTUAL hace falta por lo mismo
+        // que el IVA actual: un PATCH que sólo cambia el tipo tiene que
+        // comprobarse contra la marca que la ficha ya tiene.
+        select: { id: true, source: true, taxRate: true, exemptionCause: true },
       });
       if (!existing) {
         return reply
@@ -414,6 +434,36 @@ export async function registerLocalCatalogRoutes(app: FastifyInstance): Promise<
         }
         taxRate = tax.value;
         data.taxRate = new Prisma.Decimal(tax.value);
+      }
+      // iva-exento-sanitario · la causa, con la MISMA regla que el alta:
+      // el IVA que manda es el de la petición si viene y el de la ficha si
+      // no. Es la segunda mitad de la lección de catalogo-en-alta —
+      // reinterpretar el campo que no se tocó con un valor por defecto es
+      // lo que hacía que un café al 10 % se guardara como si fuera al 21.
+      //
+      // Aquí el agujero concreto que cierra: un PATCH que manda SÓLO
+      // `taxRate: 21` sobre un producto ya marcado como exento. Sin esta
+      // comprobación el handler escribiría el 21 y el CHECK de la base lo
+      // rechazaría con un error de constraint —un 500— en vez de con la
+      // frase que explica qué pasa.
+      let exemptionCause =
+        existing.exemptionCause as string | null;
+      if (body.exemptionCause !== undefined) {
+        const causa = normalizeExemptionCause(body.exemptionCause);
+        if (!causa.ok) {
+          return reply
+            .code(400)
+            .send({ error: "INVALID_EXEMPTION_CAUSE", message: causa.message });
+        }
+        exemptionCause = causa.value;
+        data.exemptionCause = causa.value;
+      }
+      if (exemptionCause != null && taxRate !== 0) {
+        return reply.code(400).send({
+          error: "INVALID_EXEMPTION_CAUSE",
+          message:
+            "Un producto exento no lleva IVA: su tipo tiene que ser 0 %. Cambia los dos campos a la vez.",
+        });
       }
       // Cambiar SÓLO el IVA deja el neto quieto a propósito: es lo que el
       // propietario está diciendo —"esto va al 10, no al 21"— y mover el

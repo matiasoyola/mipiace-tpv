@@ -3,6 +3,8 @@
 // a la red; al primer login (o cuando el tenant emita el banner
 // "Sincronizando"), refresca contra `/tpv/catalog/products`.
 
+import type { CausaExencion } from "@mipiacetpv/ticket-model";
+
 import { apiWithCashier } from "../api.js";
 
 export interface CatalogProduct {
@@ -20,6 +22,12 @@ export interface CatalogProduct {
   basePrice: number;
   priceGross: number;
   taxRate: number;
+  // bloque iva-exento-sanitario · causa de exención de la lista L10 (hoy
+  // sólo E1, «Exento · sanitario») o null/ausente si la operación es
+  // SUJETA. Opcional porque el TPV cachea el catálogo en IndexedDB: un
+  // terminal que no ha refrescado todavía tiene fichas del contrato
+  // anterior, y una ficha sin el campo es exactamente una ficha sujeta.
+  exemptionCause?: CausaExencion | null;
   kind: "PRODUCT" | "SERVICE";
   // B-ProductImages: MIME del binario cacheado por el worker. Null si
   // Holded no expone imagen o si el worker aún no descargó. El TPV usa

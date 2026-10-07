@@ -15,8 +15,12 @@ import {
   type TicketPaymentEscpos,
   type TicketReceiptInput,
 } from "@mipiacetpv/escpos-builder";
-import { changeFromCash, netToGross } from "@mipiacetpv/ticket-model";
-import type { TicketTotals, TicketVerifactu } from "@mipiacetpv/ticket-model";
+import { changeFromCash, esCausaExencion, netToGross } from "@mipiacetpv/ticket-model";
+import type {
+  CausaExencion,
+  TicketTotals,
+  TicketVerifactu,
+} from "@mipiacetpv/ticket-model";
 
 import { cashierLabelFrom } from "../users/display.js";
 import { readUnitPriceDeltaCents } from "./totals.js";
@@ -63,6 +67,11 @@ export interface TicketForPrint {
     // así que sin esto el unitario de "Café con leche + leche de avena"
     // saldría sin los 50 céntimos de la avena.
     modifiers?: unknown;
+    // bloque iva-exento-sanitario · el snapshot de la causa de exención de
+    // la línea. Hace falta aquí para la LEYENDA del papel (el desglose ya
+    // viene agrupado en `totals`): con una sola línea exenta en una venta
+    // mixta el térmico dice «Quiropodia: operación exenta de IVA».
+    exemptionCause?: string | null;
     total: { toString(): string };
   }>;
   payments: Array<{
@@ -120,6 +129,12 @@ export function ticketToEscposInput(
       units: Number(l.units.toString()),
       unitPriceGross: netToGross(netUnit, Number.isFinite(taxRate) ? taxRate : 0),
       lineTotal: Number(l.total.toString()),
+      // Un código fuera de la lista L10 se descarta en vez de pintar una
+      // leyenda que no se puede respaldar. El CHECK de la base hace que no
+      // pueda llegar; esto es por si el papel se arma desde una fixture.
+      ...(esCausaExencion(l.exemptionCause)
+        ? { exemptionCause: l.exemptionCause as CausaExencion }
+        : {}),
     };
   });
 

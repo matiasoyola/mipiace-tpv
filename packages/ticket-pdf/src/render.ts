@@ -24,6 +24,7 @@ import {
   assertTicketDocument,
   cuadrarDesglose,
   cuadrarLineasImpresas,
+  leyendaExencion,
   type TicketDocument,
 } from "@mipiacetpv/ticket-model";
 import {
@@ -129,8 +130,21 @@ function computeLineCount(doc: TicketDocument): number {
     lines += 1; // cant x precio = subtotal
   }
   lines += 1; // separador
-  lines += doc.totals.taxBreakdown.length; // IVA breakdown
-  lines += 1; // SUBTOTAL
+  // bloque iva-exento-sanitario · el desglose cambia de alto cuando hay
+  // tramo exento: un renglón por tramo exento, DOS por cada tramo sujeto
+  // («Base X %» y «IVA X %») y ninguno de «Subtotal». Si se cuenta mal,
+  // el ticket sale cortado por abajo — es el bug que `computeLineCount`
+  // existe para no tener.
+  const hayExento = doc.totals.taxBreakdown.some((b) => b.exemptionCause);
+  if (hayExento) {
+    const exentos = doc.totals.taxBreakdown.filter((b) => b.exemptionCause);
+    const sujetos = doc.totals.taxBreakdown.filter((b) => !b.exemptionCause);
+    lines += exentos.length;
+    lines += sujetos.length === 0 ? 1 : sujetos.length * 2;
+  } else {
+    lines += doc.totals.taxBreakdown.length; // IVA breakdown
+    lines += 1; // SUBTOTAL
+  }
   lines += 1; // TOTAL (resaltado)
   lines += 1; // metodo pago
   // v1.15-la-vuelta-existe §3 · Entregado + Cambio.
@@ -138,6 +152,14 @@ function computeLineCount(doc: TicketDocument): number {
     lines += doc.payment.received != null ? 2 : 1;
   }
   lines += 1; // separador
+  // La leyenda de la exención: el hueco de antes, los renglones del
+  // recuadro (el título puede partirse) y el hueco de después más su
+  // separador. Se cuenta con el MISMO `wrapText` que el render: contarlo
+  // mal deja el pie del ticket fuera del papel.
+  if (hayExento) {
+    const leyenda = leyendaExencion(doc.lines);
+    if (leyenda) lines += wrapText(leyenda.titulo, 36).length + 4;
+  }
   if (doc.creditNotice) lines += 5; // v1.8-Fiado · bloque PENDIENTE DE PAGO
   lines += 2; // footer thanks
   if (doc.footer.returnPolicy) lines += 2;
@@ -398,21 +420,53 @@ export async function renderTicketPdf(
     total: doc.totals.total,
   });
 
-  cuadrado.buckets.forEach((bucket) => {
-    drawTwoColumn(
-      s,
-      `IVA ${bucket.rate}% s/${formatEur(bucket.base)}`,
-      formatEur(bucket.tax),
-      FONT_SIZE_SMALL,
-    );
-  });
-
-  drawTwoColumn(
-    s,
-    "Subtotal",
-    formatEur(cuadrado.subtotal),
-    FONT_SIZE_NORMAL,
-  );
+  // bloque iva-exento-sanitario · las dos formas del desglose, las mismas
+  // que el térmico y por las mismas razones (ver
+  // `escpos-builder/src/ticket.ts`): sin tramo exento el papel no cambia
+  // ni un carácter, y con tramo exento se imprime «Exento», luego «Base
+  // X %» / «IVA X %» por tramo sujeto —o un «IVA 0,00 €» si no hay
+  // ninguno— y NO se imprime «Subtotal», porque Σ bases mezclaría una
+  // base imponible con el importe de una operación exenta.
+  const exentos = cuadrado.buckets.filter((b) => b.exemptionCause != null);
+  const sujetos = cuadrado.buckets.filter((b) => b.exemptionCause == null);
+  if (exentos.length === 0) {
+    sujetos.forEach((bucket) => {
+      drawTwoColumn(
+        s,
+        `IVA ${bucket.rate}% s/${formatEur(bucket.base)}`,
+        formatEur(bucket.tax),
+        FONT_SIZE_SMALL,
+      );
+    });
+    drawTwoColumn(s, "Subtotal", formatEur(cuadrado.subtotal), FONT_SIZE_NORMAL);
+  } else {
+    exentos.forEach((bucket) => {
+      drawTwoColumn(
+        s,
+        exentos.length > 1 ? `Exento (${bucket.exemptionCause})` : "Exento",
+        formatEur(bucket.base),
+        FONT_SIZE_NORMAL,
+      );
+    });
+    if (sujetos.length === 0) {
+      drawTwoColumn(s, "IVA", formatEur(0), FONT_SIZE_NORMAL);
+    } else {
+      sujetos.forEach((bucket) => {
+        drawTwoColumn(
+          s,
+          `Base ${bucket.rate} %`,
+          formatEur(bucket.base),
+          FONT_SIZE_SMALL,
+        );
+        drawTwoColumn(
+          s,
+          `IVA ${bucket.rate} %`,
+          formatEur(bucket.tax),
+          FONT_SIZE_SMALL,
+        );
+      });
+    }
+  }
   drawTwoColumn(
     s,
     "TOTAL",
@@ -444,6 +498,56 @@ export async function renderTicketPdf(
   }
 
   drawSeparator(s);
+
+  // ── bloque iva-exento-sanitario · la leyenda de la exención ───────
+  //
+  // El MISMO texto que el térmico, redactado una sola vez en
+  // `leyendaExencion`. Aquí el recuadro sí puede ser un rectángulo de
+  // verdad (`drawRectangle`) en vez de dos filas de asteriscos: es un PDF
+  // y no una impresora de 42 columnas. Lo que no puede diferir es la
+  // frase.
+  const leyenda = leyendaExencion(doc.lines);
+  if (leyenda) {
+    // ── EL RECUADRO SE DIBUJA ALREDEDOR DEL TEXTO, NO «POR AHÍ» ──────
+    //
+    // La primera versión ponía el borde en `s.y - LINE_HEIGHT + 2` con un
+    // alto fijo de dos renglones. En la captura del bucle visual (el
+    // ticket mixto de `docs/qa/2026-10-07-iva-exento-sanitario`) se vio lo
+    // que eso da: el borde de arriba pisaba el separador anterior y el
+    // de abajo CORTABA POR LA MITAD la línea del precepto. Ningún test lo
+    // veía — `pdf-parse` lee el texto y el texto estaba.
+    //
+    // Ahora el rectángulo se calcula de los renglones que va a contener:
+    // `y` es su BASE en pdf-lib, así que se parte del último renglón y se
+    // sube. `FONT_SIZE_NORMAL` por arriba cubre el ascendente de las
+    // mayúsculas y los 4 pt de abajo el descendente de la «p» de
+    // «operación».
+    const renglones = [...wrapText(leyenda.titulo, 36), leyenda.referencia];
+    const PADDING = 5;
+    // Un hueco antes: el separador de los pagos queda a su distancia y el
+    // recuadro no parece parte de él.
+    s.y -= PADDING;
+    const primeraBase = s.y;
+    const ultimaBase = primeraBase - (renglones.length - 1) * LINE_HEIGHT;
+    const arriba = primeraBase + FONT_SIZE_NORMAL + PADDING;
+    const abajo = ultimaBase - 4 - PADDING;
+    page.drawRectangle({
+      x: MARGIN_X,
+      y: abajo,
+      width: CONTENT_WIDTH,
+      height: arriba - abajo,
+      borderColor: rgb(0, 0, 0),
+      borderWidth: 1,
+    });
+    for (const l of wrapText(leyenda.titulo, 36)) {
+      drawCenteredText(s, l, FONT_SIZE_NORMAL, true);
+    }
+    drawCenteredText(s, leyenda.referencia, FONT_SIZE_SMALL, true);
+    // Y el cursor baja hasta el borde de abajo, para que lo siguiente no
+    // se meta dentro del recuadro.
+    s.y = abajo - LINE_HEIGHT;
+    drawSeparator(s);
+  }
 
   // ── v1.8-Fiado · leyenda PENDIENTE DE PAGO ────────────────────────
   // Venta a crédito con deuda viva. Bloque destacado: no es el documento

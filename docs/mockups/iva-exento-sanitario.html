@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IVA exento sanitario · mockup</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --coral:#E97058;--coral-dark:#C75A45;--coral-soft:#FDEAE3;
+  --ink:#1F2937;--stone:#F8F6F3;
+  --slate-200:#E2E8F0;--slate-300:#CBD5E1;--slate-500:#64748B;
+  --em-50:#ECFDF5;--em-700:#047857;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:'DM Sans',-apple-system,system-ui,sans-serif;background:#EDEAE5;color:var(--ink);-webkit-font-smoothing:antialiased}
+button{font:inherit;cursor:pointer;border:0;touch-action:manipulation}
+.mockbar{position:sticky;top:0;z-index:5;background:var(--ink);color:#fff;padding:10px 16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:13px}
+.mockbar strong{font-weight:600;margin-right:8px}
+.mockbar button{background:#374151;color:#fff;border-radius:10px;padding:8px 12px;font-size:13px}
+.mockbar button.on{background:var(--coral)}
+.wrap{display:flex;flex-wrap:wrap;gap:24px;justify-content:center;padding:24px 16px 48px;align-items:flex-start}
+.card{background:#fff;border:1px solid var(--slate-200);border-radius:24px;padding:20px 22px;width:100%;max-width:460px}
+.card h2{font-size:17px;font-weight:600;margin:0 0 4px}
+.sub{font-size:13px;color:var(--slate-500);margin:0 0 16px}
+label.f{display:block;font-size:12px;color:var(--slate-500);letter-spacing:.04em;margin:14px 0 6px}
+.input{height:52px;border:1px solid var(--slate-200);border-radius:14px;padding:0 14px;display:flex;align-items:center;font-size:16px;background:var(--stone)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{height:52px;min-width:64px;padding:0 16px;border-radius:14px;background:var(--stone);border:1px solid var(--slate-200);font-size:16px;font-weight:500;color:var(--ink)}
+.chip.on{background:var(--coral);border-color:var(--coral-dark);color:#fff}
+.chip.ex{flex:1 1 100%;text-align:left;display:flex;align-items:center;gap:10px}
+.chip.ex small{font-weight:400;opacity:.85;font-size:13px}
+.price{display:flex;gap:10px}
+.price .input{flex:1}
+.hint{margin-top:10px;font-size:13px;color:var(--em-700);background:var(--em-50);border-radius:12px;padding:10px 12px;display:none}
+.hint.show{display:block}
+/* papel */
+.paper{background:#fff;width:302px;padding:18px 16px 22px;font-family:'Courier New',ui-monospace,monospace;font-size:12.5px;line-height:1.45;box-shadow:0 8px 24px rgba(0,0,0,.12);color:#111}
+.paper .c{text-align:center}
+.paper .b{font-weight:700}
+.paper .row{display:flex;justify-content:space-between;gap:8px}
+.paper hr{border:0;border-top:1px dashed #555;margin:8px 0}
+.paper .tot{font-size:15px;font-weight:700}
+.paper .legal{border:1.5px solid #111;padding:6px 8px;margin:10px 0 6px;font-weight:700;text-align:center}
+.qr{width:96px;height:96px;margin:10px auto 4px;background:
+  conic-gradient(#111 25%,#fff 0 50%,#111 0 75%,#fff 0) 0 0/16px 16px;border:6px solid #fff;outline:2px solid #111}
+.cap{font-size:12px;color:var(--slate-500);text-align:center;margin-top:10px;max-width:302px}
+</style>
+</head>
+<body>
+<div class="mockbar">
+  <strong>Mockup · IVA exento sanitario</strong>
+  Venta:
+  <button id="m1" class="on" onclick="venta('solo')">Sólo sesión</button>
+  <button id="m2" onclick="venta('mixta')">Sesión + crema</button>
+</div>
+
+<div class="wrap">
+  <!-- Ficha del servicio en el catálogo -->
+  <div class="card">
+    <h2>Servicio</h2>
+    <p class="sub">Catálogo · Podología Rosario</p>
+    <label class="f">NOMBRE</label>
+    <div class="input">Quiropodia</div>
+    <label class="f">PRECIO</label>
+    <div class="price"><div class="input">35,00 €</div></div>
+    <label class="f">IVA</label>
+    <div class="chips" id="iva">
+      <button class="chip" onclick="iva(this,false)">21 %</button>
+      <button class="chip" onclick="iva(this,false)">10 %</button>
+      <button class="chip" onclick="iva(this,false)">4 %</button>
+      <button class="chip ex on" onclick="iva(this,true)">Exento · sanitario <small>art. 20.Uno.3º</small></button>
+    </div>
+    <div class="hint show" id="hint">El precio es el que paga el paciente. Sin IVA.</div>
+  </div>
+
+  <!-- Ticket -->
+  <div>
+    <div class="paper" id="paper"></div>
+    <p class="cap">Ticket de 80 mm. Factura simplificada.</p>
+  </div>
+</div>
+
+<script>
+function iva(btn, exento){
+  document.querySelectorAll('#iva .chip').forEach(c=>c.classList.remove('on'));
+  btn.classList.add('on');
+  document.getElementById('hint').classList.toggle('show', exento);
+}
+const eur = n => n.toFixed(2).replace('.',',')+' €';
+function venta(tipo){
+  document.getElementById('m1').classList.toggle('on', tipo==='solo');
+  document.getElementById('m2').classList.toggle('on', tipo==='mixta');
+  const mixta = tipo==='mixta';
+  const crema = 12.00, base21 = 9.92, cuota21 = 2.08;
+  const total = 35 + (mixta ? crema : 0);
+  document.getElementById('paper').innerHTML = `
+    <div class="c b">PODOLOGÍA ROSARIO</div>
+    <div class="c">Rosario Ejemplo · NIF 00000000T</div>
+    <div class="c">C/ Ejemplo 1 · Talavera de la Reina</div>
+    <hr>
+    <div class="row"><span>Factura simpl.</span><span>C1/000042</span></div>
+    <div class="row"><span>07-10-2026</span><span>10:42</span></div>
+    <hr>
+    <div class="row"><span>1 x Quiropodia</span><span>35,00 €</span></div>
+    ${mixta ? `<div class="row"><span>1 x Crema urea 20%</span><span>12,00 €</span></div>` : ''}
+    <hr>
+    ${mixta ? `
+    <div class="row"><span>Exento</span><span>35,00 €</span></div>
+    <div class="row"><span>Base 21 %</span><span>${eur(base21)}</span></div>
+    <div class="row"><span>IVA 21 %</span><span>${eur(cuota21)}</span></div>
+    ` : `
+    <div class="row"><span>Exento</span><span>35,00 €</span></div>
+    <div class="row"><span>IVA</span><span>0,00 €</span></div>
+    `}
+    <hr>
+    <div class="row tot"><span>TOTAL</span><span>${eur(total)}</span></div>
+    <div class="row"><span>Tarjeta</span><span>${eur(total)}</span></div>
+    <div class="legal">${mixta ? 'Quiropodia: o' : 'O'}peración exenta de IVA<br>art. 20.Uno.3º Ley 37/1992</div>
+    <div class="qr"></div>
+    <div class="c">Factura verificable en la sede<br>electrónica de la AEAT</div>
+    <div class="c b">VERI*FACTU</div>
+  `;
+}
+venta('solo');
+</script>
+</body>
+</html>

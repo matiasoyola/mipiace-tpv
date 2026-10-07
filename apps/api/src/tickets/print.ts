@@ -269,6 +269,12 @@ async function loadTicketForPrint(
           // de los modificadores (el `unitPrice` persistido es el base).
           taxRate: true,
           modifiers: true,
+          // bloque iva-exento-sanitario · el snapshot de la causa, para la
+          // leyenda de la exención del papel. Sin esto, el térmico que
+          // reimprime una factura exenta la imprimiría sin su leyenda —y
+          // una factura exenta sin la referencia al precepto incumple el
+          // art. 6.1.j) del RD 1619/2012.
+          exemptionCause: true,
           total: true,
         },
       },

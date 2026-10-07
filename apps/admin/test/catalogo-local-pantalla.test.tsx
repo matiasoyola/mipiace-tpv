@@ -164,6 +164,22 @@ function setValue(el: HTMLInputElement | HTMLSelectElement, value: string): void
 
 const text = () => container.textContent ?? "";
 
+// bloque iva-exento-sanitario · los chips del grupo «IVA», en orden. El
+// grupo se localiza por su `aria-label` y no por una clase: lo que el test
+// fija es lo que un lector de pantalla y un dedo encuentran, no el
+// Tailwind de este mes.
+function chipsDeIva(): HTMLButtonElement[] {
+  const grupo = container.querySelector('[role="group"][aria-label="IVA"]');
+  if (!grupo) return [];
+  return [...grupo.querySelectorAll("button")] as HTMLButtonElement[];
+}
+
+function chipDeIva(label: string): HTMLButtonElement {
+  const chip = chipsDeIva().find((c) => (c.textContent ?? "").includes(label));
+  if (!chip) throw new Error(`no hay chip de IVA «${label}»`);
+  return chip;
+}
+
 function buttonWith(label: string): HTMLButtonElement | undefined {
   return [...container.querySelectorAll("button")].find((b) =>
     (b.textContent ?? "").includes(label),
@@ -328,21 +344,33 @@ describe("catalogo-local · el formulario", () => {
     expect(posted).toHaveLength(0);
   });
 
+  // bloque iva-exento-sanitario · el selector de IVA pasó de un `<select>`
+  // a CHIPS, porque la opción de la exención no es un número: es
+  // «Exento · sanitario  art. 20.Uno.3º» y no cabe en un `<option>` de 90
+  // px. Es el selector del mockup validado el 07-10.
+  //
+  // Lo que estos tres tests comprueban NO cambia —los cuatro tramos
+  // peninsulares, la vía de escape del IGIC y que un tipo fuera de rango
+  // no llega a la API—, sólo cómo se toca.
   it("el IVA ofrece los cuatro tramos y la vía de escape", async () => {
     await openForm();
-    const select = container.querySelector("#cat-tax") as HTMLSelectElement;
-    const values = [...select.options].map((o) => o.value);
-    expect(values).toEqual(["21", "10", "4", "0", "OTHER"]);
+    const chips = chipsDeIva();
+    expect(chips.map((c) => c.textContent)).toEqual([
+      "21 %",
+      "10 %",
+      "4 %",
+      "0 %",
+      "Otro…",
+    ]);
     // El 21 preseleccionado: es el caso normal de los verticales de hoy.
-    expect(select.value).toBe("21");
+    expect(chips[0]!.getAttribute("aria-pressed")).toBe("true");
   });
 
   it('elegir "Otro…" abre el campo libre (el IGIC canario)', async () => {
     await openForm();
-    const select = container.querySelector("#cat-tax") as HTMLSelectElement;
     expect(container.querySelector("#cat-tax-custom")).toBeNull();
     await act(async () => {
-      setValue(select, "OTHER");
+      chipDeIva("Otro…").click();
     });
     expect(container.querySelector("#cat-tax-custom")).not.toBeNull();
     expect(text()).toContain("IGIC");
@@ -352,11 +380,10 @@ describe("catalogo-local · el formulario", () => {
     await openForm();
     const name = container.querySelector("#cat-name") as HTMLInputElement;
     const price = container.querySelector("#cat-price") as HTMLInputElement;
-    const select = container.querySelector("#cat-tax") as HTMLSelectElement;
     await act(async () => {
       setValue(name, "Producto");
       setValue(price, "10");
-      setValue(select, "OTHER");
+      chipDeIva("Otro…").click();
     });
     const custom = container.querySelector("#cat-tax-custom") as HTMLInputElement;
     await act(async () => {

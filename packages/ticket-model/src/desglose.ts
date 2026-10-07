@@ -34,22 +34,54 @@
 // El residuo para que `Σ bases + Σ cuotas === total` se reparte SÓLO
 // entre las cuotas, que es donde nace el redondeo. `total` sigue siendo
 // entrada autoritativa y no se recalcula.
+//
+// bloque iva-exento-sanitario · EL TRAMO YA NO ES «POR TASA».
+//
+// Es «por (tasa, causa de exención)». Un 0 % sujeto y un exento valen los
+// dos cero y son dos operaciones distintas ante la AEAT: la primera
+// declara `CalificacionOperacion = "S1"` con `TipoImpositivo = 0`, la
+// segunda `OperacionExenta = "E1"` y **sin** tipo ni cuota. Con la tasa
+// sola como clave caían en el mismo tramo y el registro declaraba una de
+// las dos por las dos — con los importes cuadrando, así que nadie se
+// enteraría. Ver `exencion.ts` para las citas de la AEAT.
+//
+// Y el tramo exento **no recibe céntimos de reparto**: su cuota es 0 por
+// definición, no por redondeo. Lo que esto obliga a decidir es dónde cae
+// el residuo cuando NO hay ningún tramo sujeto, y está resuelto abajo.
 
+import type { CausaExencion } from "./exencion.js";
+import { compararTramos } from "./exencion.js";
 import { round2 } from "./precios.js";
 
 export interface BucketIva {
-  /** Porcentaje: 21, 10, 4, 0. */
+  /** Porcentaje: 21, 10, 4, 0. En un tramo exento es 0 y no se declara
+   *  (§15.5: con `OperacionExenta` no se puede informar
+   *  `TipoImpositivo`). */
   rate: number;
-  /** Base imponible del tramo. */
+  /** Base imponible del tramo — o, en un tramo exento, el IMPORTE de la
+   *  operación exenta. Los dos van al mismo campo del registro,
+   *  `BaseImponibleOimporteNoSujeto` («Magnitud dineraria sobre la que se
+   *  aplica el tipo impositivo / Importe no sujeto», diseño de registro). */
   base: number;
-  /** Cuota del tramo, SIN cuadrar. */
+  /** Cuota del tramo, SIN cuadrar. En un tramo exento es siempre 0 y el
+   *  cuadre no la toca. */
   tax: number;
+  /** bloque iva-exento-sanitario · la causa de la lista L10 si el tramo es
+   *  EXENTO; ausente o `null` si es sujeto. Es lo que separa este tramo
+   *  del 0 % sujeto. */
+  exemptionCause?: CausaExencion | null;
 }
 
 export interface DesgloseCuadrado {
   /** Neto que se imprime como «Subtotal». Desde el bloque ticket-con-iva
    *  es, por construcción, Σ `base` de `buckets`: el documento no tiene
-   *  dos valores para la base imponible. */
+   *  dos valores para la base imponible.
+   *
+   *  bloque iva-exento-sanitario · la invariante sigue siendo ésta y los
+   *  tests la fijan, pero en un papel CON tramo exento la línea
+   *  «Subtotal» no se imprime: ahí Σ bases mezclaría una base imponible
+   *  con el importe de una operación exenta, que no es una base imponible
+   *  de nada. Ver `escpos-builder/src/ticket.ts`. */
   subtotal: number;
   /** Los mismos tramos, con la cuota ya cuadrada. */
   buckets: BucketIva[];
@@ -100,22 +132,60 @@ export function cuadrarDesglose(input: {
       total: input.total,
     };
   }
+  // Los tramos se ordenan como se imprimen: los EXENTOS primero (el orden
+  // del mockup validado) y dentro de cada grupo por tipo ascendente, que
+  // es el orden que el desglose tenía hasta este bloque. Se ordena aquí
+  // —y no en cada renderer— para que los tres papeles y el registro de
+  // facturación listen los tramos en el mismo orden: el cliente coteja su
+  // factura en la sede de la AEAT línea por línea.
+  const entrada = [...input.buckets].sort(compararTramos);
   // Las bases, al céntimo. Los callers ya las pasan redondeadas
   // (`buildTicketDocument`, `computeCartTaxBuckets`); redondear aquí
   // otra vez es gratis y hace que la invariante se cumpla incluso si
   // mañana alguien pasa el neto crudo del bucket.
-  const bases = input.buckets.map((b) => round2(b.base));
-  const subtotal = round2(bases.reduce((acc, b) => acc + b, 0));
+  let bases = entrada.map((b) => round2(b.base));
+  const exento = entrada.map((b) => b.exemptionCause != null);
+  const haySujeto = exento.some((e) => !e);
   // Lo que les queda a las cuotas para que el papel sume el total.
-  const objetivoCuotas = Math.round(input.total * 100) - Math.round(subtotal * 100);
-  const cuotas = repartirCuotas(
-    input.buckets.map((b) => b.tax),
-    objetivoCuotas,
-  );
-  const buckets = input.buckets.map((b, i) => ({
+  const objetivo =
+    Math.round(input.total * 100) -
+    bases.reduce((acc, b) => acc + Math.round(b * 100), 0);
+
+  // bloque iva-exento-sanitario · DÓNDE CAE EL RESIDUO.
+  //
+  // Con al menos un tramo sujeto, donde siempre: en las cuotas, que es
+  // donde nace el redondeo (ticket-con-iva). Los tramos exentos quedan
+  // fuera del reparto — su cuota es 0 porque la operación está exenta, no
+  // porque un redondeo haya dado 0, y §15.5 prohíbe informarla.
+  //
+  // SIN ningún tramo sujeto no hay ninguna cuota donde ponerlo, y
+  // entonces cae en el IMPORTE del tramo exento. No es una excepción a la
+  // regla de la base única, es la misma regla: en una factura
+  // íntegramente exenta `ImporteTotal = Σ BaseImponibleOimporteNoSujeto`
+  // (§17, y aquí sin margen que gastar porque no hay cuotas), así que ese
+  // importe TIENE que ser lo que se cobró. Un céntimo de diferencia entre
+  // los 35,00 € que pagó la paciente y los 34,99 € declarados no es un
+  // redondeo: es una factura que no cuadra consigo misma.
+  let cuotas: number[];
+  if (haySujeto) {
+    const cuotasSujetas = repartirCuotas(
+      entrada.filter((_, i) => !exento[i]).map((b) => b.tax),
+      objetivo,
+    );
+    let k = 0;
+    cuotas = entrada.map((_, i) => (exento[i] ? 0 : cuotasSujetas[k++]!));
+  } else {
+    cuotas = entrada.map(() => 0);
+    if (objetivo !== 0) {
+      bases = repartirCuotas(bases, objetivo + bases.reduce((a, b) => a + Math.round(b * 100), 0));
+    }
+  }
+  const subtotal = round2(bases.reduce((acc, b) => acc + b, 0));
+  const buckets = entrada.map((b, i) => ({
     rate: b.rate,
     base: bases[i]!,
     tax: cuotas[i]!,
+    ...(b.exemptionCause != null ? { exemptionCause: b.exemptionCause } : {}),
   }));
   return {
     subtotal,
@@ -153,6 +223,13 @@ export function cuadrarDesglose(input: {
  * tres órdenes de magnitud de la tolerancia que admite la AEAT (±10,00 €
  * en §15.7); el barrido de `apps/api/test/ticket-con-iva.test.ts` fija el
  * máximo que se ha observado.
+ *
+ * bloque iva-exento-sanitario · esta misma función reparte las BASES
+ * cuando la factura es íntegramente exenta y no hay ninguna cuota donde
+ * colocar el residuo. El método es el mismo —resto mayor, y a igualdad de
+ * resto el de mayor importe— y el objetivo también: que la suma dé el
+ * total exacto. Ahí el importe declarado y el cobrado tienen que ser el
+ * mismo número, porque no hay cuota que absorba nada.
  */
 function repartirCuotas(
   cuotasCrudas: number[],

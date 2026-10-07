@@ -329,6 +329,10 @@ importers:
         version: 2.1.9(@types/node@20.19.40)(jsdom@29.1.1)(terser@5.47.1)
 
   packages/clinica-sesion:
+    dependencies:
+      '@mipiacetpv/ticket-model':
+        specifier: workspace:*
+        version: link:../ticket-model
     devDependencies:
       '@types/node':
         specifier: ^20.16.10

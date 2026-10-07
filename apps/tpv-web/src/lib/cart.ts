@@ -2,7 +2,14 @@
 // persiste suspender/recuperar en localStorage, y CheckoutPage lo
 // transforma al payload para POST /tickets.
 
-import { grossToNet, netToGross, round2 } from "@mipiacetpv/ticket-model";
+import {
+  type CausaExencion,
+  claveTramo,
+  grossToNet,
+  leerClaveTramo,
+  netToGross,
+  round2,
+} from "@mipiacetpv/ticket-model";
 
 // B-Bar-Modifiers: cada selección estructurada lleva el desnormalizado
 // completo. El TPV lo calcula a partir del catálogo en memoria al
@@ -40,6 +47,15 @@ export interface CartLine {
   priceGross: number; // unitPrice * (1 + taxRate/100) — sin modifiers
   discountPct: number;
   taxRate: number;
+  // bloque iva-exento-sanitario · la causa de exención del producto, tal
+  // como la trae el catálogo. Con causa, `taxRate` es 0 y `priceGross`
+  // coincide con `unitPrice`: no hay conversión neto↔bruto que hacer
+  // porque no hay IVA que añadir.
+  //
+  // Viaja en la línea del carrito —y no se vuelve a leer del catálogo al
+  // cobrar— porque es lo que se manda en el POST y lo que se persiste como
+  // snapshot en `ticket_lines.exemption_cause`.
+  exemptionCause?: CausaExencion | null;
   // Modificadores ad-hoc tipeados por el cajero ("Sin azúcar").
   modifiers: string[];
   // Modificadores estructurados (selección desde el modal).
@@ -213,27 +229,49 @@ export interface CartTaxBucket {
   rate: number;
   base: number;
   tax: number;
+  // bloque iva-exento-sanitario · presente sólo en los tramos EXENTOS.
+  exemptionCause?: CausaExencion | null;
 }
 
+// bloque iva-exento-sanitario · la clave del tramo es (tasa, causa).
+//
+// Es la misma función `claveTramo` que usa `buildTicketDocument` en el
+// servidor, importada y no reescrita: si el dispositivo agrupara distinto
+// que el servidor, el papel que sale sin red y el que sale del histórico
+// declararían desgloses distintos de la misma venta — y el test
+// byte-a-byte de `verifactu-un-solo-papel` sólo lo vería si su fixture
+// llevara una línea exenta.
 export function computeCartTaxBuckets(lines: CartLine[]): CartTaxBucket[] {
-  const bucketNetByRate = new Map<number, number>();
+  const bucketNetByTramo = new Map<string, number>();
   for (const l of lines) {
     const deltaPerUnit = sumModifierDeltas(l.modifierSelections) / 100;
     const baseUnit =
       l.unitPriceOverride != null ? l.unitPriceOverride : l.unitPrice;
     const netPerUnit = (baseUnit + deltaPerUnit) * (1 - l.discountPct / 100);
-    bucketNetByRate.set(
-      l.taxRate,
-      (bucketNetByRate.get(l.taxRate) ?? 0) + netPerUnit * l.units,
+    const clave = claveTramo(l.taxRate, l.exemptionCause ?? null);
+    bucketNetByTramo.set(
+      clave,
+      (bucketNetByTramo.get(clave) ?? 0) + netPerUnit * l.units,
     );
   }
-  return [...bucketNetByRate.entries()]
-    .sort(([a], [b]) => a - b)
-    .map(([rate, netSum]) => ({
-      rate,
-      base: round2(netSum),
-      tax: round2(netSum * (rate / 100)),
-    }));
+  return [...bucketNetByTramo.entries()]
+    .map(([clave, netSum]) => {
+      const { rate, causa } = leerClaveTramo(clave);
+      return {
+        rate,
+        base: round2(netSum),
+        // Un tramo exento no tiene cuota: no hay tipo que aplicar (§15.5).
+        tax: causa ? 0 : round2(netSum * (rate / 100)),
+        ...(causa ? { exemptionCause: causa } : {}),
+      };
+    })
+    // El orden de impresión (exentos primero) lo fija `cuadrarDesglose`;
+    // aquí sólo hace falta que sea estable.
+    .sort(
+      (a, b) =>
+        a.rate - b.rate ||
+        (a.exemptionCause ?? "").localeCompare(b.exemptionCause ?? ""),
+    );
 }
 
 export function getSuspendedCarts(): SuspendedCart[] {

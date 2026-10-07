@@ -1,0 +1,29 @@
+ @ t  a QR tributario:
+ (k  1A2  (k  1C  (k  1E1 (ku 1P0https://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR?nif=00000000T&numserie=C1%2F000001&fecha=07-10-2026&importe=35.00 (k  1Q0VERI*FACTU
+ a ------------------------------------------
+ a  E  ! PODOLOGÍA ROSARIO
+ !  E Clínica Podológica Demo
+NIF: 00000000T
+C/ Ejemplo 1, 45600 Talavera de la Reina
+------------------------------------------
+ a  E Factura C1/000001
+ E 07/10/2026 21:12   (ref. 000001)
+Cajero: Lucía Martín
+------------------------------------------
+Quiropodia
+1 x 35,00 €                        35,00 €
+------------------------------------------
+Exento                             35,00 €
+IVA                                 0,00 €
+ E  ! TOTAL                              35,00 €
+ !  E Tarjeta                            35,00 €
+
+ a  E ******************************************
+Operación exenta de IVA
+art. 20.Uno.3º Ley 37/1992
+******************************************
+ E  a
+ a  (k  1A2  (k  1C  (k  1E0 (k5 1P0http://localhost:3001/tickets/3356c9d5acb85159/pdf (k  1Q0
+Ver ticket online:
+http://localhost:3001/tic...acb85159/pdf
+ a  d  V

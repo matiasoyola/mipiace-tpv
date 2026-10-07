@@ -16,11 +16,17 @@
 //   UNA SOLA VEZ al final (esquema fiscal correcto). Así el total del
 //   TPV coincide con el de Holded.
 
+import { claveTramo, leerClaveTramo } from "@mipiacetpv/ticket-model";
+
 export interface TicketLineInput {
   units: number;
   unitPrice: number; // bruto antes de descuento — precisión 4 decimales
   discountPct: number; // 0..100
   taxRate: number; // 0..100
+  // bloque iva-exento-sanitario · la causa de exención de la lista L10, o
+  // null/ausente si la operación es SUJETA. Ver abajo por qué entra en la
+  // clave del bucket aunque los totales salgan iguales.
+  exemptionCause?: string | null;
 }
 
 export interface ComputedLine {
@@ -79,23 +85,38 @@ export function computeTicket(lines: TicketLineInput[]): TicketTotals {
     (l) => l.unitPrice * (1 - l.discountPct / 100) * l.units,
   );
 
-  // Bucket: { taxRate → suma de netos crudos }. Una clave por cada tipo
-  // de IVA presente en el ticket. Aplicamos el % de IVA al agregado del
-  // bucket, no a cada línea por separado.
-  const bucketsByTaxRate = new Map<number, number>();
+  // Bucket: { (taxRate, causa de exención) → suma de netos crudos }. Una
+  // clave por cada tramo presente en el ticket. Aplicamos el % de IVA al
+  // agregado del bucket, no a cada línea por separado.
+  //
+  // bloque iva-exento-sanitario · LA CLAVE LLEVA LA CAUSA, y aquí no hace
+  // falta para que los totales salgan bien: un exento y un 0 % sujeto
+  // aportan los mismos cero euros de cuota, así que agrupados o separados
+  // el total es el mismo.
+  //
+  // Está igual, y es deliberado: `claveTramo` es LA clave del tramo en
+  // esta casa —la usan `buildTicketDocument` y `computeCartTaxBuckets`— y
+  // dos funciones que agrupan la misma venta con claves distintas son el
+  // sitio donde el día que alguien añada un campo al tramo lo añada en una
+  // sola. El coste de tenerlas iguales es un `split` por línea; el de
+  // tenerlas distintas lo paga un ticket.
+  const bucketsByTramo = new Map<string, number>();
   for (let i = 0; i < lines.length; i += 1) {
-    const rate = lines[i]!.taxRate;
-    bucketsByTaxRate.set(
-      rate,
-      (bucketsByTaxRate.get(rate) ?? 0) + netPerLineRaw[i]!,
+    const l = lines[i]!;
+    const clave = claveTramo(l.taxRate, l.exemptionCause ?? null);
+    bucketsByTramo.set(
+      clave,
+      (bucketsByTramo.get(clave) ?? 0) + netPerLineRaw[i]!,
     );
   }
 
   let subtotalAgg = 0;
   let taxAgg = 0;
   let totalAgg = 0;
-  for (const [taxRate, netSum] of bucketsByTaxRate) {
-    const taxForBucket = netSum * (taxRate / 100);
+  for (const [clave, netSum] of bucketsByTramo) {
+    const { rate, causa } = leerClaveTramo(clave);
+    // Un tramo exento no tiene cuota: no hay tipo que aplicar (§15.5).
+    const taxForBucket = causa ? 0 : netSum * (rate / 100);
     subtotalAgg += netSum;
     taxAgg += taxForBucket;
     totalAgg += netSum + taxForBucket;

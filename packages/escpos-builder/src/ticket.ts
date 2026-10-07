@@ -18,7 +18,12 @@
 // El binary devuelto va directo a la impresora (USB con WebUSB o WIFI
 // con TCP a :9100).
 
-import { cuadrarDesglose, cuadrarLineasImpresas } from "@mipiacetpv/ticket-model";
+import {
+  type CausaExencion,
+  cuadrarDesglose,
+  cuadrarLineasImpresas,
+  leyendaExencion,
+} from "@mipiacetpv/ticket-model";
 import {
   LEYENDA_ENCIMA_DEL_QR,
   LEYENDA_VERIFACTU,
@@ -53,6 +58,12 @@ export interface TicketLineEscpos {
   // dominio y pasa el valor final; el builder lo cuadra contra `total`
   // con `cuadrarLineasImpresas` antes de imprimirlo.
   lineTotal: number;
+  // bloque iva-exento-sanitario · la causa de exención de la línea, si la
+  // tiene. El builder NO la usa para el desglose —eso viene ya agrupado en
+  // `taxBreakdown`— sino para la LEYENDA: con una sola línea exenta en una
+  // venta mixta el papel dice «Quiropodia: operación exenta de IVA», y el
+  // nombre sale de aquí.
+  exemptionCause?: CausaExencion | null;
 }
 
 export interface TicketPaymentEscpos {
@@ -76,6 +87,11 @@ export interface TicketTaxBucketEscpos {
   rate: number;
   base: number;
   tax: number;
+  // bloque iva-exento-sanitario · si viene, el tramo es EXENTO: se imprime
+  // como «Exento   35,00 €» y no como «IVA 0% s/35,00». Un tramo con
+  // `rate: 0` y SIN causa sigue siendo un 0 % sujeto y se imprime como
+  // hasta hoy.
+  exemptionCause?: CausaExencion | null;
 }
 
 export interface TicketReceiptInput {
@@ -318,13 +334,73 @@ export function buildTicketReceipt(input: TicketReceiptInput): Uint8Array {
       buckets: input.taxBreakdown,
       total: input.total,
     });
-    cuadrado.buckets.forEach((b) => {
-      const label = `IVA ${b.rate}% s/${eur(b.base)}`;
-      parts.push(escText(padBetween(label, eur(b.tax), COLUMNS)));
-    });
-    parts.push(
-      escText(padBetween("Subtotal", eur(cuadrado.subtotal), COLUMNS)),
-    );
+    const exentos = cuadrado.buckets.filter((b) => b.exemptionCause != null);
+    const sujetos = cuadrado.buckets.filter((b) => b.exemptionCause == null);
+
+    if (exentos.length === 0) {
+      // ── Papel SIN exención: byte a byte el de ticket-con-iva ────────
+      //
+      // Los quince comercios de hoy entran por aquí y su ticket no cambia
+      // ni un carácter. No es prudencia: ticket-con-iva arregló estos dos
+      // renglones el 06-10 con el Bar La Maestranza a dos días de
+      // desplegar, y volver a moverlos para un bloque de clínica sería
+      // cambiarle el papel a quince clientes por una razón que no es la
+      // suya.
+      sujetos.forEach((b) => {
+        const label = `IVA ${b.rate}% s/${eur(b.base)}`;
+        parts.push(escText(padBetween(label, eur(b.tax), COLUMNS)));
+      });
+      parts.push(
+        escText(padBetween("Subtotal", eur(cuadrado.subtotal), COLUMNS)),
+      );
+    } else {
+      // ── Papel CON exención: el del mockup validado el 07-10 ─────────
+      //
+      //   Exento                              35,00 €
+      //   IVA                                   0,00 €     ← si no hay sujetos
+      //   Base 21 %                             9,92 €     ← si los hay
+      //   IVA 21 %                              2,08 €
+      //
+      // Dos cosas que no son evidentes:
+      //
+      // 1 · **No se imprime «Subtotal».** El mockup no lo lleva, y la
+      //     razón es más que de maquetación: «Subtotal» es LA BASE
+      //     IMPONIBLE del documento (ticket-con-iva), y Σ bases en un
+      //     papel mixto sumaría una base imponible con el importe de una
+      //     operación exenta — que no es base imponible de nada. 35,00 +
+      //     9,92 = 44,92 no es un número que signifique algo, y un papel
+      //     fiscal no puede llevar uno.
+      //     La invariante `subtotal === Σ bases` SIGUE cumpliéndose en el
+      //     dato (`cuadrarDesglose` la garantiza y los tests la fijan);
+      //     lo que no se hace es imprimirla donde miente.
+      //
+      // 2 · **«IVA 0,00 €» cuando no hay ningún tramo sujeto.** Es el
+      //     mockup, y dice algo que hace falta: que el total cobrado no
+      //     lleva IVA dentro. Sin esa línea, un papel con «Exento 35,00»
+      //     y «TOTAL 35,00» deja al lector preguntándose si el IVA está
+      //     incluido en algún sitio.
+      exentos.forEach((b) => {
+        // Con más de un tramo exento el código de la causa desempata.
+        // Hoy no puede pasar —la única causa que el catálogo deja guardar
+        // es E1— y dos renglones idénticos con importes distintos serían
+        // ilegibles el día que pase.
+        const label =
+          exentos.length > 1 ? `Exento (${b.exemptionCause})` : "Exento";
+        parts.push(escText(padBetween(label, eur(b.base), COLUMNS)));
+      });
+      if (sujetos.length === 0) {
+        parts.push(escText(padBetween("IVA", eur(0), COLUMNS)));
+      } else {
+        sujetos.forEach((b) => {
+          parts.push(
+            escText(padBetween(`Base ${b.rate} %`, eur(b.base), COLUMNS)),
+          );
+          parts.push(
+            escText(padBetween(`IVA ${b.rate} %`, eur(b.tax), COLUMNS)),
+          );
+        });
+      }
+    }
   }
 
   // Total grande + bold + derecha.
@@ -348,6 +424,38 @@ export function buildTicketReceipt(input: TicketReceiptInput): Uint8Array {
       }
       parts.push(escText(padBetween("  Cambio", eur(pay.cashChange), COLUMNS)));
     }
+  }
+
+  // ── bloque iva-exento-sanitario · la leyenda de la exención ────────
+  //
+  // En recuadro y después de los pagos, que es donde la pone el mockup
+  // validado. No es decoración: el art. 6.1.j) del RD 1619/2012 obliga a
+  // mencionar «la referencia a las disposiciones correspondientes» cuando
+  // la operación está exenta, y el papel es la factura.
+  //
+  // El recuadro se dibuja con las dos filas de asteriscos que es lo único
+  // que una POS-80 hace sin gráficos: `escSeparator` usa guiones y aquí
+  // hace falta que se distinga del resto de los separadores del papel.
+  // Centrado y en negrita, como el «PENDIENTE DE PAGO» de v1.8.
+  //
+  // El TEXTO lo redacta `leyendaExencion` en `@mipiacetpv/ticket-model`, y
+  // no aquí, porque los tres papeles —térmico, PDF y la vista del
+  // histórico— tienen que decir exactamente lo mismo. Tres redacciones de
+  // la misma frase legal acaban discrepando, y la que el cliente tiene en
+  // la mano no sería la que su reimpresión le enseña.
+  const leyenda = leyendaExencion(input.lines);
+  if (leyenda) {
+    parts.push(escText(""));
+    parts.push(escAlign("center"));
+    parts.push(escBold(true));
+    parts.push(escText(marcoExencion(COLUMNS)));
+    for (const l of wrapText(leyenda.titulo, COLUMNS - 4)) {
+      parts.push(escText(l));
+    }
+    parts.push(escText(leyenda.referencia));
+    parts.push(escText(marcoExencion(COLUMNS)));
+    parts.push(escBold(false));
+    parts.push(escAlign("left"));
   }
 
   // v1.8-Fiado · leyenda destacada de venta a crédito. Un fiado no lleva
@@ -432,6 +540,14 @@ export function buildTestPrint(now: Date = new Date()): Uint8Array {
 function formatDateTime(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// bloque iva-exento-sanitario · la línea de asteriscos del recuadro de la
+// leyenda. Asteriscos y no guiones para que no se confunda con los
+// `escSeparator` que parten el resto del papel: el recuadro del mockup es
+// un borde, no una división.
+function marcoExencion(width: number): string {
+  return "*".repeat(width);
 }
 
 function eur(n: number): string {
