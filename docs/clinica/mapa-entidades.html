@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mapa de la clínica</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--coral:#E97058;--coral-dark:#C75A45;--coral-soft:#FDEAE3;--ink:#1F2937;--stone:#F8F6F3;--line:#CBD5E1;--muted:#64748B;--em:#047857;--em-soft:#ECFDF5}
+*{box-sizing:border-box}
+body{margin:0;font-family:'DM Sans',system-ui,sans-serif;background:#EDEAE5;color:var(--ink);-webkit-font-smoothing:antialiased}
+.wrap{max-width:1280px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:22px;margin:0 0 4px;font-weight:600}
+.sub{color:var(--muted);font-size:14px;margin:0 0 16px}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:13px;margin-bottom:18px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:16px;height:16px;border-radius:5px;border:1.5px solid var(--line);background:#fff}
+.sw.new{background:var(--coral-soft);border-color:var(--coral)}
+.sw.cli{background:var(--em-soft);border-color:#6EE7B7}
+#d{background:#fff;border-radius:24px;padding:16px;overflow-x:auto}
+#d svg{max-width:100%;height:auto}
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:16px}
+.n{background:#fff;border-radius:18px;padding:14px 16px;font-size:14px;line-height:1.45}
+.n b{display:block;margin-bottom:4px}
+.n.new{border:2px solid var(--coral)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>La clínica en mipiacetpv</h1>
+  <p class="sub">De arriba abajo: la clínica, su equipo y su catálogo, el paciente, la cita, la historia y el cobro.</p>
+  <div class="legend">
+    <span><i class="sw"></i>Ya existe (reservas, caja)</span>
+    <span><i class="sw cli"></i>Ya existe (clínica 1–3)</span>
+    <span><i class="sw new"></i>Nuevo / propuesto</span>
+  </div>
+  <div id="d"><pre class="mermaid">
+flowchart TB
+  CLI["<b>CLÍNICA</b><br/>el comercio<br/><i>clínica activada</i>"]
+
+  subgraph EQ["Equipo"]
+    direction TB
+    U["<b>Persona del equipo</b><br/>dueña · encargado · cajero<br/><i>¿sanitario? · nº colegiado<br/>ve TODOS o una SELECCIÓN</i>"]
+    T["<b>Turnos</b><br/>horario recurrente"]
+  end
+
+  subgraph CAT["Catálogo"]
+    direction TB
+    S["<b>Servicio</b><br/>precio · IVA"]
+    SE["<b>Especialidad del servicio</b><br/>podología · fisioterapia"]
+    EX["<b>IVA exento</b><br/>art. 20 · E1"]
+    SK["<b>Quién lo sabe dar</b><br/>sanitario × servicio"]
+  end
+
+  subgraph SAL["Sala"]
+    direction TB
+    R["<b>Recursos</b><br/>camilla · sala · aparato"]
+  end
+
+  SEDE["<b>Sedes</b> y <b>cajas</b>"]
+
+  P["<b>PACIENTE</b><br/>contacto · consentimientos"]
+
+  C["<b>CITA</b><br/>servicio · sanitario · camilla"]
+
+  subgraph HC["Historia clínica · no se borra ni se edita"]
+    direction TB
+    AC["<b>Acceso</b><br/>se concede al asignar la cita<br/>o a mano · se revoca"]
+    LOG["<b>Registro de accesos</b><br/>quién abrió qué y cuándo"]
+    V["<b>Valoración inicial</b><br/>test del paciente + validación"]
+    E["<b>Entradas firmadas</b><br/>exploración · sesión<br/><i>+ anotaciones posteriores</i>"]
+    MAPA["<b>Pantalla según especialidad</b><br/>mapa del pie · mapa del cuerpo"]
+  end
+
+  TK["<b>COBRO</b><br/>ticket · líneas con su IVA o exención"]
+  BONO["<b>Bono</b><br/>sesiones prepagadas"]
+
+  CLI --> EQ
+  CLI --> CAT
+  CLI --> SAL
+  CLI --> SEDE
+  CLI --> P
+  U --- T
+  S --- SE
+  S --- EX
+  U --> SK
+  S --> SK
+  P --> C
+  S --> C
+  U -->|atiende| C
+  R -->|se usa| C
+  C -->|da acceso| AC
+  P --> V
+  C --> E
+  SE -->|decide| MAPA
+  MAPA --> E
+  AC --> LOG
+  C -->|se cobra| TK
+  BONO -.-> TK
+  SEDE --> TK
+
+  classDef base fill:#fff,stroke:#CBD5E1,color:#1F2937
+  classDef cli fill:#ECFDF5,stroke:#6EE7B7,color:#1F2937
+  classDef nuevo fill:#FDEAE3,stroke:#E97058,stroke-width:2px,color:#1F2937
+  classDef top fill:#1F2937,stroke:#1F2937,color:#fff
+  class CLI top
+  class S,SK,T,R,SEDE,P,C,TK base
+  class U,AC,LOG,V,E cli
+  class SE,EX,MAPA,BONO nuevo
+  </pre></div>
+
+  <div class="notes">
+    <div class="n new"><b>Especialidad en el servicio</b>«Quiropodia» es podología y «Punción seca» es fisioterapia. Al abrir la sesión de una cita, el servicio decide qué pantalla sale. Lo que hace cada sanitario sale de «quién lo sabe dar», sin configurarlo dos veces.</div>
+    <div class="n new"><b>IVA exento</b>En cada servicio, no en la clínica. Está en Code ahora mismo (bloque iva-exento-sanitario).</div>
+    <div class="n new"><b>Bono</b>La cita ya guarda a qué bono pertenece, pero el bono todavía no tiene su propia tabla. Hay que hacerla para descontar sesiones.</div>
+    <div class="n"><b>Lo que no cambia</b>Equipo, turnos, recursos, agenda, sedes y caja son los de reservas, tal cual. La clínica es el comercio: no hay una entidad nueva por encima.</div>
+  </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.0/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true,theme:'base',flowchart:{htmlLabels:true,curve:'basis'},themeVariables:{fontFamily:'DM Sans, system-ui, sans-serif',fontSize:'14px',clusterBkg:'#F8F6F3',clusterBorder:'#E2E8F0'}});</script>
+</body>
+</html>

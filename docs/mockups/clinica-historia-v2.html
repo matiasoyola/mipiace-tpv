@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Historia viva · mockup clínica</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--coral:#E97058;--coral-dark:#C75A45;--coral-soft:#FDEAE3;--ink:#1F2937;--ink-soft:#4B5563;--stone:#F8F6F3;
+--line:#E7E2DC;--muted:#6B7280;--red:#DC2626;--red-d:#B91C1C;--red-s:#FEE2E2;--amber:#F59E0B;--amber-s:#FEF3C7;--green:#10B981;--green-d:#047857;--green-s:#D1FAE5;
+--blue:#3B82F6;--blue-s:#DBEAFE;--violet:#8B5CF6;--violet-s:#EDE9FE;--rose:#E11D48;--rose-s:#FFE4E6;--ease:cubic-bezier(0.23,1,0.32,1)}
+*{box-sizing:border-box}html{-webkit-tap-highlight-color:transparent}
+body{margin:0;font-family:'DM Sans',-apple-system,system-ui,sans-serif;-webkit-font-smoothing:antialiased;background:#E9E5DF;color:var(--ink)}
+button{font:inherit;cursor:pointer;border:0;background:none;color:inherit;touch-action:manipulation;user-select:none;transition:transform 140ms var(--ease),background-color 160ms ease,box-shadow 160ms ease}
+button:active{transform:scale(.97)}
+.mockbar{position:sticky;top:0;z-index:30;background:var(--ink);color:#fff;padding:10px 16px;display:flex;gap:10px;align-items:center;font-size:13px;flex-wrap:wrap}
+.mockbar strong{font-weight:600}.mockbar .note{opacity:.7;margin-left:auto}
+.stage{display:flex;justify-content:center;padding:22px 16px 40px}
+.device{background:var(--stone);border-radius:30px;border:10px solid #23272f;width:100%;max-width:1200px;overflow:hidden;position:relative}
+.main{padding:22px 24px 28px}
+/* cabecera */
+.top{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.avatar{width:60px;height:60px;border-radius:20px;background:linear-gradient(135deg,#F4A48F,#E97058);color:#fff;font-weight:700;font-size:22px;display:flex;align-items:center;justify-content:center;flex:none}
+.who{flex:1;min-width:220px}.who h1{margin:0;font-size:24px;font-weight:700;letter-spacing:-.01em}
+.who .sub{color:var(--muted);font-size:14px;margin-top:2px}
+.cta{background:var(--ink);color:#fff;height:56px;padding:0 22px;border-radius:18px;font-weight:600;font-size:16px;display:flex;align-items:center;gap:10px;box-shadow:0 6px 18px rgba(31,41,55,.18)}
+.cta .plus{width:26px;height:26px;border-radius:9px;background:var(--coral);display:flex;align-items:center;justify-content:center;font-size:18px}
+.alerts{margin-top:16px;background:var(--red-d);color:#fff;border-radius:18px;padding:12px 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.alerts .lbl{display:flex;gap:8px;align-items:center;font-weight:700;font-size:15px;margin-right:4px}
+.alerts .a{background:#fff;color:var(--red-d);font-weight:700;border-radius:12px;padding:8px 14px;font-size:16px}
+/* 10 segundos */
+.brief{margin-top:16px;display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:10px}
+.tile{background:#fff;border-radius:20px;padding:14px 16px;border:1px solid var(--line);display:flex;flex-direction:column;gap:6px;min-height:104px}
+.tile .k{font-size:12px;color:var(--muted);font-weight:500;display:flex;align-items:center;gap:6px}
+.tile .val{font-size:17px;font-weight:700;line-height:1.25}
+.tile .x{font-size:13px;color:var(--ink-soft)}
+.tile.hoy{background:linear-gradient(135deg,#FF9A76,#E97058);color:#fff;border:0;box-shadow:0 10px 24px rgba(233,112,88,.35);position:relative}
+.tile.hoy .k{color:#fff;font-weight:700}.tile.hoy .x{color:#FFF1EC}.tile.hoy .val{font-size:19px}
+.tile.hoy{text-align:left;cursor:pointer}.tile.hoy .go{margin-top:auto;align-self:flex-start;background:#fff;color:var(--coral-dark);font-weight:700;font-size:15px;border-radius:14px;padding:10px 16px;display:inline-flex;gap:8px;align-items:center}
+.tile.hoy .dotp{width:10px;height:10px;border-radius:50%;background:#fff;box-shadow:0 0 0 0 rgba(255,255,255,.8);animation:beat 1.6s infinite}
+@keyframes beat{70%{box-shadow:0 0 0 10px rgba(255,255,255,0)}100%{box-shadow:0 0 0 0 rgba(255,255,255,0)}}
+.tile.warn{background:var(--red-s);border-color:#FECACA}.tile.warn .val{color:var(--red-d)}
+.mini{display:flex;align-items:flex-end;gap:5px;height:30px}
+.mini i{display:block;width:16px;border-radius:5px}
+/* segmented */
+.seg{margin-top:18px;display:inline-flex;background:#fff;border:1px solid var(--line);border-radius:16px;padding:4px;gap:4px}
+.seg button{height:44px;padding:0 18px;border-radius:12px;font-size:15px;font-weight:500;color:var(--muted)}
+.seg button.on{background:var(--ink);color:#fff}
+/* pie vivo */
+.live{margin-top:14px;display:grid;grid-template-columns:minmax(360px,1fr) minmax(360px,1.15fr);gap:14px}
+.card{background:#fff;border:1px solid var(--line);border-radius:24px;padding:16px 18px}
+.card h2{margin:0;font-size:17px;font-weight:700}.card .hint{font-size:13px;color:var(--muted);margin-top:2px}
+.layers{display:flex;gap:6px;margin-top:12px}
+.layers button{height:40px;padding:0 14px;border-radius:12px;font-size:14px;background:var(--stone);color:var(--ink-soft);font-weight:500}
+.layers button.on{background:var(--coral-soft);color:var(--coral-dark)}
+.feet{display:flex;justify-content:center;gap:18px;margin-top:8px}
+.foot{display:flex;flex-direction:column;align-items:center;font-size:13px;color:var(--muted);gap:4px}
+svg .sole{fill:#FBF8F5;stroke:#D8D0C7;stroke-width:2}
+svg .toe{fill:#FBF8F5;stroke:#D8D0C7;stroke-width:2}
+svg .hit{cursor:pointer}
+svg .st{transition:r 200ms var(--ease)}
+@keyframes pulse{0%{r:16}70%{r:26;opacity:0}100%{r:26;opacity:0}}
+svg .ring{fill:none;stroke:var(--red);stroke-width:3;animation:pulse 1.8s infinite}
+.legend{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:10px;font-size:13px;color:var(--ink-soft)}
+.legend span{display:flex;align-items:center;gap:6px}.legend i{width:12px;height:12px;border-radius:50%}
+/* zona */
+.zhead{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.state{border-radius:12px;padding:6px 12px;font-weight:700;font-size:14px}
+.state.activa{background:var(--red-s);color:var(--red-d)}.state.mejora{background:var(--amber-s);color:#92400E}.state.curada{background:var(--green-s);color:var(--green-d)}
+.steps{display:flex;align-items:stretch;gap:0;margin-top:14px;overflow-x:auto}
+.step{flex:1;min-width:110px;position:relative;padding-top:22px;text-align:center}
+.step:before{content:"";position:absolute;top:9px;left:0;right:0;height:3px;background:var(--line)}
+.step:first-child:before{left:50%}.step:last-child:before{right:50%}
+.step .pt{position:absolute;top:2px;left:50%;transform:translateX(-50%);width:17px;height:17px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 1px var(--line)}
+.step .d{font-size:12px;color:var(--muted)}.step .g{font-size:14px;font-weight:600;margin-top:2px}.step .t{font-size:12.5px;color:var(--ink-soft)}
+.compare{margin-top:16px;position:relative;height:200px;border-radius:18px;overflow:hidden;user-select:none}
+.ph{position:absolute;inset:0;display:flex;align-items:flex-end;padding:10px 12px;font-weight:700;color:#fff;font-size:14px;text-shadow:0 1px 3px rgba(0,0,0,.35)}
+.ph.antes{background:radial-gradient(circle at 38% 42%,#B5655A 0 22px,#D99A86 23px 40px,transparent 41px),linear-gradient(160deg,#E9C3AF,#CFA08A)}
+.ph.hoy{background:radial-gradient(circle at 38% 42%,#E3B4A2 0 22px,#E8BFAD 23px 40px,transparent 41px),linear-gradient(160deg,#EFCDBB,#D8AE98);justify-content:flex-end}
+.compare input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:ew-resize;margin:0}
+.knob{position:absolute;top:0;bottom:0;width:3px;background:#fff;pointer-events:none}
+.knob:after{content:"⇆";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:40px;height:40px;border-radius:50%;background:#fff;color:var(--ink);display:flex;align-items:center;justify-content:center;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+.nophoto{margin-top:16px;height:120px;border-radius:18px;border:2px dashed var(--line);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:14px;gap:8px}
+/* visitas */
+.visits{margin-top:14px;display:grid;gap:10px}
+.v{display:grid;grid-template-columns:128px 1fr auto;gap:14px;align-items:center;background:#fff;border:1px solid var(--line);border-radius:20px;padding:12px 16px;text-align:left;width:100%}
+.badge{justify-self:start;border-radius:12px;padding:6px 11px;font-size:13px;font-weight:700;white-space:nowrap}
+.v .tt{font-weight:700;font-size:16px}.v .dd{color:var(--muted);font-size:13px;margin-left:6px;font-weight:400}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.chips span{background:var(--stone);border-radius:10px;padding:4px 10px;font-size:13px}
+.lvl{display:inline-flex;align-items:center;gap:8px;margin-left:8px;vertical-align:2px}
+.lvl .bars{display:inline-flex;gap:3px}.lvl .bars i{width:14px;height:8px;border-radius:4px;background:#F1E6E1}.lvl .bars i.on{background:var(--coral)}
+.lvl b{font-size:13px;color:var(--coral-dark);font-weight:700}
+.pain{width:52px;height:52px;border-radius:16px;color:#fff;font-size:24px;font-weight:700;display:flex;align-items:center;justify-content:center}
+/* hoja tipo de visita */
+.veil{position:absolute;inset:0;background:rgba(17,24,39,.45);display:flex;align-items:flex-end;justify-content:center;z-index:20;animation:fade 200ms ease}
+@keyframes fade{from{opacity:0}}@keyframes up{from{transform:translateY(40px);opacity:0}}
+.sheet{background:var(--stone);width:100%;border-radius:28px 28px 0 0;padding:20px 22px 26px;animation:up 260ms var(--ease)}
+.sheet h3{margin:0;font-size:20px}.sheet .hint{color:var(--muted);font-size:14px;margin-top:2px}
+.types{margin-top:16px;display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.type{background:#fff;border:2px solid var(--line);border-radius:22px;padding:16px 12px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px;min-height:150px;position:relative}
+.type .ic{width:52px;height:52px;border-radius:17px;display:flex;align-items:center;justify-content:center}
+.type .n{font-weight:700;font-size:16px}.type .w{font-size:12.5px;color:var(--muted);line-height:1.35}
+.type.sug{border-color:var(--coral);box-shadow:0 8px 22px rgba(233,112,88,.25)}
+.type .tag{position:absolute;top:-11px;left:50%;transform:translateX(-50%);background:var(--coral);color:#fff;font-size:12px;font-weight:700;border-radius:10px;padding:3px 10px;white-space:nowrap}
+.close{margin-top:14px;width:100%;height:50px;border-radius:16px;background:#fff;border:1px solid var(--line);font-weight:600}
+@media (max-width:900px){.brief{grid-template-columns:1fr 1fr}.live{grid-template-columns:minmax(0,1fr)}.types{grid-template-columns:1fr 1fr}}
+@media (max-width:520px){.main{padding:16px}.foot svg{width:130px;height:216px}.feet{gap:4px}.v{grid-template-columns:1fr auto}.v .badge{grid-column:1/-1;justify-self:start}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="mockbar"><strong>Mockup · historia viva</strong><span>Toca una zona del pie · arrastra la foto · «Nueva visita»</span><span class="note">Datos inventados</span></div>
+<div class="stage"><div class="device" id="dev"><div class="main" id="screen"></div></div></div>
+<script>
+const COL={activa:"#DC2626",mejora:"#F59E0B",curada:"#10B981"};
+const NAME={activa:"Activa",mejora:"Mejorando",curada:"Curada"};
+const TYPES={
+  quiro:{n:"Quiropodia",c:"#E97058",s:"#FDEAE3",w:"Durezas, uñas, callos"},
+  riesgo:{n:"Pie de riesgo",c:"#E11D48",s:"#FFE4E6",w:"Diabetes, úlceras, sensibilidad"},
+  bio:{n:"Biomecánica",c:"#3B82F6",s:"#DBEAFE",w:"Pisada, plantillas, órtesis"},
+  ciru:{n:"Cirugía",c:"#8B5CF6",s:"#EDE9FE",w:"Uña, anestesia, consentimiento"},
+  gen:{n:"General",c:"#6B7280",s:"#F3F4F6",w:"Revisión o consulta"}};
+const ICON={
+  quiro:'<path d="M6 18c4-1 8-5 9-10M15 8l3-3"/><circle cx="18" cy="5" r="2"/>',
+  riesgo:'<path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17h.01"/>',
+  bio:'<path d="M7 20c-2-4 0-9 3-12s7-3 8 0-2 6-5 8-4 4-6 4z"/>',
+  ciru:'<path d="M4 20l9-9M14 4l6 6-5 1-2-2z"/>',
+  gen:'<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>'};
+// zonas en coordenadas de un pie de 120x200 (izquierdo; el derecho se refleja)
+const Z={t1:[34,26],t2:[56,18],t3:[74,22],t4:[88,30],t5:[99,42],m1:[40,66],m23:[66,64],m45:[90,72],arco:[48,116],borde:[94,118],talon:[62,170]};
+const ZN={t1:"Dedo gordo",t2:"2.º dedo",t3:"3.er dedo",t4:"4.º dedo",t5:"5.º dedo",m1:"Bajo el dedo gordo",m23:"Bajo el 2.º y 3.º",m45:"Bajo el 4.º y 5.º",arco:"Arco",borde:"Borde exterior",talon:"Talón"};
+const ZONES=[
+ {id:"i-t1",pie:"i",z:"t1",l:"Uña encarnada",st:"mejora",foto:true,h:[["7 sep","Leve","Revisión","#F59E0B"],["21 sep","Moderada","Empeora: se programa cirugía","#DC2626"],["6 oct","Operada","Matricectomía parcial","#8B5CF6"],["Hoy","Mejorando","Toca revisión de 4 semanas","#F59E0B"]]},
+ {id:"i-m1",pie:"i",z:"m1",l:"Dureza",st:"curada",foto:false,h:[["7 sep","Moderada","Deslaminado","#DC2626"],["21 sep","Leve","Fresado + crema de urea","#F59E0B"],["6 oct","Curada","Sin dureza","#10B981"]]},
+ {id:"i-talon",pie:"i",z:"talon",l:"Dureza con grieta",st:"mejora",foto:true,h:[["7 sep","Moderada","Deslaminado","#DC2626"],["21 sep","Leve","Fresado","#F59E0B"],["6 oct","Leve","Crema de urea, calcetín de algodón","#F59E0B"]]},
+ {id:"d-talon",pie:"d",z:"talon",l:"Dureza",st:"curada",foto:false,h:[["7 sep","Leve","Deslaminado","#F59E0B"],["21 sep","Curada","Sin dureza","#10B981"]]}];
+const VIS=[
+ {t:"ciru",n:"Cirugía de uña",d:"6 oct",dolor:3,ch:["Matricectomía parcial","Anestesia local","Consentimiento firmado"]},
+ {t:"riesgo",n:"Revisión pie de riesgo",d:"21 sep",dolor:5,ch:["Monofilamento: siente todo","Pulsos presentes","Fresado"]},
+ {t:"quiro",n:"Quiropodia",nivel:2,d:"7 sep",dolor:7,ch:["Corte de uñas","Deslaminado","Helomas"]}];
+let sug="riesgo", sel="i-t1", vista="pie", capa="lesiones", sheet=false, cmp=50;
+const PCOL=n=>n>=7?"#DC2626":n>=4?"#F59E0B":"#10B981";
+const ico=(k,c,sz=26)=>`<svg width="${sz}" height="${sz}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${ICON[k]}</svg>`;
+
+function foot(pie){
+  const flip=pie==="i"; const T=flip?'transform="translate(120,0) scale(-1,1)"':'';
+  let g=`<g ${T}><path class="sole" d="M22 52 C14 92 22 130 34 160 C42 186 58 196 72 194 C92 192 100 172 98 150 C96 124 108 104 108 80 C108 60 100 46 86 44 C66 40 34 38 22 52Z"/>`;
+  [[34,26,15],[56,18,10],[74,22,9],[88,30,8],[99,42,7]].forEach(([x,y,r])=>g+=`<circle class="toe" cx="${x}" cy="${y}" r="${r}"/>`);
+  if(capa==="lesiones"){
+    ZONES.filter(z=>z.pie===pie).forEach(z=>{const [x,y]=Z[z.z];const on=sel===z.id;
+      if(z.st==="activa"||on&&z.st!=="curada") g+=`<circle class="ring" cx="${x}" cy="${y}" r="16" style="stroke:${COL[z.st]}"/>`;
+      g+=`<circle class="st" cx="${x}" cy="${y}" r="${on?15:12}" fill="${COL[z.st]}" stroke="#fff" stroke-width="${on?4:3}"/>`;});
+  } else {
+    ["t1","t3","t5","m1","m23","m45","arco","borde","talon"].forEach(k=>{const [x,y]=Z[k];g+=`<circle cx="${x}" cy="${y}" r="9" fill="#10B981" stroke="#fff" stroke-width="2.5"/><path d="M${x-4} ${y} l3 3 l5 -6" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`;});
+  }
+  g+=`</g>`;
+  // zonas táctiles (≥ 44px en pantalla)
+  let hits="";
+  if(capa==="lesiones") ZONES.filter(z=>z.pie===pie).forEach(z=>{let [x,y]=Z[z.z]; if(flip)x=120-x; hits+=`<circle class="hit" data-z="${z.id}" cx="${x}" cy="${y}" r="24" fill="transparent"/>`;});
+  return `<div class="foot"><svg width="190" height="316" viewBox="-6 0 132 200">${g}${hits}</svg>${pie==="i"?"Izquierdo":"Derecho"}</div>`;
+}
+function zonePanel(){
+  if(capa!=="lesiones") return `<div class="card"><div class="zhead"><div><h2>Sensibilidad</h2><div class="hint">Monofilamento · 21 sep</div></div><span class="state curada">Normal</span></div>
+    <div class="steps">${[["7 sep","9 de 9"],["21 sep","9 de 9"]].map(([d,g])=>`<div class="step"><span class="pt" style="background:#10B981"></span><div class="d">${d}</div><div class="g">${g}</div><div class="t">puntos con sensibilidad</div></div>`).join("")}</div>
+    <div class="nophoto">Pulsos pedios presentes en los dos pies</div></div>`;
+  const z=ZONES.find(x=>x.id===sel);
+  return `<div class="card"><div class="zhead"><div><h2>${z.l}</h2><div class="hint">${ZN[z.z]} · pie ${z.pie==="i"?"izquierdo":"derecho"}</div></div><span class="state ${z.st}">${NAME[z.st]}</span></div>
+   <div class="steps">${z.h.map(([d,g,t,c])=>`<div class="step"><span class="pt" style="background:${c}"></span><div class="d">${d}</div><div class="g">${g}</div><div class="t">${t}</div></div>`).join("")}</div>
+   ${z.foto?`<div class="compare"><div class="ph hoy">Hoy</div><div class="ph antes" style="clip-path:inset(0 ${100-cmp}% 0 0)">7 sep</div><div class="knob" style="left:${cmp}%"></div><input type="range" min="0" max="100" value="${cmp}" aria-label="Comparar fotos"></div>`
+   :`<div class="nophoto"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>Sin fotos de esta zona</div>`}</div>`;
+}
+function render(){
+  let h=`<div class="top"><div class="avatar">CR</div><div class="who"><h1>Carmen Rodríguez López</h1><div class="sub">78 años · 600 123 456 · paciente desde sep 2026</div></div>
+    <button class="cta" data-a="nueva"><span class="plus">+</span>Nueva visita</button></div>
+   <div class="alerts" role="alert"><span class="lbl"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>Cuidado</span><span class="a">Diabética</span><span class="a">Anticoagulada</span><span class="a">Alérgica al látex</span></div>
+   <div class="brief">
+    <button class="tile hoy" data-a="hoy"><div class="k"><span class="dotp"></span>HOY TOCA</div><div class="val">Revisar la uña operada</div><div class="x">4 semanas desde la cirugía · dedo gordo izquierdo</div><span class="go">Empezar esta revisión →</span></button>
+    <div class="tile"><div class="k">DOLOR</div><div style="display:flex;justify-content:space-between;align-items:flex-end"><div class="val">7 → 3</div><div class="mini">${[7,5,3].map(n=>`<i style="height:${n*4}px;background:${PCOL(n)}"></i>`).join("")}</div></div><div class="x">Mejora en cada visita</div></div>
+    <div class="tile"><div class="k">ÚLTIMA VEZ · 6 OCT</div><div class="val">Cirugía de uña</div><div class="x">Dedo gordo izquierdo</div></div>
+    <div class="tile warn"><div class="k" style="color:#B91C1C">OJO HOY</div><div class="val">Anticoagulada</div><div class="x">Más sangrado si hay que cortar</div></div>
+   </div>
+   <div class="seg"><button data-v="pie" class="${vista==='pie'?'on':''}">Pie</button><button data-v="visitas" class="${vista==='visitas'?'on':''}">Visitas</button><button data-v="docs" class="${vista==='docs'?'on':''}">Documentos</button></div>`;
+  if(vista==="pie"){
+    h+=`<div class="live"><div class="card"><h2>Cómo están sus pies</h2><div class="hint">Toca una zona para ver su historia</div>
+      <div class="layers"><button data-l="lesiones" class="${capa==='lesiones'?'on':''}">Lesiones</button><button data-l="sens" class="${capa==='sens'?'on':''}">Sensibilidad</button></div>
+      <div class="feet">${foot("i")}${foot("d")}</div>
+      ${capa==="lesiones"?`<div class="legend"><span><i style="background:#DC2626"></i>Activa</span><span><i style="background:#F59E0B"></i>Mejorando</span><span><i style="background:#10B981"></i>Curada</span></div>`:`<div class="legend"><span><i style="background:#10B981"></i>Siente el monofilamento</span></div>`}
+     </div>${zonePanel()}</div>`;
+  } else if(vista==="visitas"){
+    h+=`<div class="visits">${VIS.map(v=>{const T=TYPES[v.t];return `<button class="v"><span class="badge" style="background:${T.s};color:${T.c}">${T.n}</span>
+      <div><div><span class="tt">${v.n}${v.nivel?` ${["","básica","completa","extra"][v.nivel]}`:""}</span>${v.nivel?`<span class="lvl"><span class="bars">${[1,2,3].map(i=>`<i class="${i<=v.nivel?"on":""}"></i>`).join("")}</span></span>`:""}<span class="dd">${v.d}</span></div><div class="chips">${v.ch.map(c=>`<span>${c}</span>`).join("")}</div></div>
+      <div class="pain" style="background:${PCOL(v.dolor)}">${v.dolor}</div></button>`}).join("")}</div>`;
+  } else {
+    h+=`<div class="visits"><button class="v"><span class="badge" style="background:#DBEAFE;color:#1D4ED8">Consentimiento</span><div><div><span class="tt">Cirugía de uña</span><span class="dd">6 oct</span></div><div class="chips"><span>Firmado en consulta</span><span>Informó Lucía Martín</span></div></div><span class="badge" style="background:var(--stone)">PDF</span></button>
+      <button class="v"><span class="badge" style="background:#D1FAE5;color:#047857">Valoración</span><div><div><span class="tt">Valoración inicial · validada</span><span class="dd">7 sep</span></div><div class="chips"><span>Respondió su hija Ana</span><span>1 corrección</span></div></div><span></span></button></div>`;
+  }
+  if(sheet){
+    h+=`<div class="veil" data-a="cerrar"><div class="sheet" onclick="event.stopPropagation()"><h3>¿Qué visita es hoy?</h3><div class="hint">Cada tipo abre su pantalla, con sus botones. Nada que escribir.</div>
+     <div class="types">${Object.entries(TYPES).map(([k,T])=>`<button class="type ${k===sug?'sug':''}">${k===sug?`<span class="tag">${sug==='ciru'?'Lo que toca hoy · revisión':'Recomendada · es diabética'}</span>`:''}<span class="ic" style="background:${T.s}">${ico(k,T.c)}</span><span class="n">${T.n}</span><span class="w">${T.w}</span></button>`).join("")}</div>
+     <button class="close" data-a="cerrar">Cancelar</button></div></div>`;
+  }
+  document.getElementById("screen").innerHTML=h;
+  const r=document.querySelector(".compare input");
+  if(r) r.addEventListener("input",e=>{cmp=+e.target.value;document.querySelector(".ph.antes").style.clipPath=`inset(0 ${100-cmp}% 0 0)`;document.querySelector(".knob").style.left=cmp+"%";});
+}
+document.addEventListener("click",e=>{
+  const z=e.target.closest("[data-z]"); if(z){sel=z.dataset.z;cmp=50;render();return;}
+  const b=e.target.closest("button,[data-a]"); if(!b) return; const d=b.dataset;
+  if(d.v) vista=d.v; else if(d.l) capa=d.l; else if(d.a==="nueva") {sheet=true;sug="riesgo";} else if(d.a==="hoy") {sheet=true;sug="ciru";} else if(d.a==="cerrar") sheet=false; else return;
+  render();
+});
+render();
+</script>
+</body>
+</html>
