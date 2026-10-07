@@ -397,7 +397,37 @@ const fakePrisma: any = {
   clinicalAssessmentCorrection: {
     findMany: vi.fn(async () => []),
   },
+  // enlaces-publicos · la pantalla de la sesión lee la valoración por
+  // `vistaDeLaValoracion`, y ésa pregunta ahora por el ENLACE de la
+  // valoración en `public_links` (el enlace del test ya no vive en
+  // `clinical_assessments`). Las valoraciones de este fichero son
+  // VALIDADAS y nunca tuvieron enlace, así que la tabla está vacía — y
+  // vacía de verdad, con su filtro, no un `null` a pelo: el día que un
+  // caso de aquí necesite un enlace, basta con empujar la fila.
+  publicLink: {
+    findFirst: vi.fn(async ({ where }: any) => {
+      const xs = enlacesPublicos.filter(
+        (l) =>
+          l.tenantId === where.tenantId &&
+          l.purpose === where.purpose &&
+          l.targetId === where.targetId,
+      );
+      return xs.slice().sort((a, b) => +b.createdAt - +a.createdAt)[0] ?? null;
+    }),
+  },
 };
+
+/** enlaces-publicos · `public_links`, vacía en este fichero. */
+const enlacesPublicos: Array<{
+  tenantId: string;
+  purpose: string;
+  targetId: string;
+  expiresAt: Date;
+  maxUses: number;
+  usedCount: number;
+  revokedAt: Date | null;
+  createdAt: Date;
+}> = [];
 
 function usuarioVista(id: string) {
   const u = users.get(id);
