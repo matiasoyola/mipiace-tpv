@@ -717,7 +717,54 @@ describe("iva-exento-sanitario · la ficha del catálogo", () => {
   });
 });
 
-// ═══ 5 · Las dos copias de la etiqueta, atadas ════════════════════════
+// ═══ 5 · Los `select` que alimentan los tres caminos ═════════════════
+
+describe("iva-exento-sanitario · ningún `select` se olvida del snapshot", () => {
+  // ESTE BANCO EXISTE POR UN SABOTAJE QUE NO SE PUSO ROJO.
+  //
+  // Quitar `exemptionCause: true` del `select` de `print.ts` **compila sin
+  // una queja**: el campo es opcional en `TicketForPrint`, el `as` del
+  // final de `loadTicketForPrint` acepta un objeto al que le falta, y los
+  // tests de papel construyen su propia fixture en vez de pasar por la
+  // consulta. Resultado del sabotaje: la reimpresión de una factura exenta
+  // sale SIN su leyenda y en verde — y una factura exenta sin la
+  // referencia al precepto incumple el art. 6.1.j) del RD 1619/2012.
+  //
+  // No es un problema de este campo: es la clase de bug de «un `select` se
+  // olvida de una columna», que el typecheck no ve nunca porque un objeto
+  // con menos campos sigue siendo asignable. Hacerlo obligatorio en el
+  // tipo no lo arregla (el `as` lo salta igual), así que lo que se fija es
+  // la CONSULTA, leyendo la fuente — la misma mecánica con la que los
+  // bancos de migración leen el SQL.
+  //
+  // Los cuatro `select` son los cuatro sitios por los que la causa viaja:
+  // del catálogo al TPV, del catálogo a la línea de la agenda, y de la
+  // línea al papel y al histórico.
+  function fuenteDe(ruta: string): string {
+    return readFileSync(new URL(`../src/${ruta}`, import.meta.url), "utf8");
+  }
+
+  it.each([
+    ["tickets/print.ts", "el papel térmico y su reimpresión"],
+    ["tpv-catalog/routes.ts", "el catálogo que el TPV mete en el carrito"],
+    ["agenda/checkout.ts", "la línea del borrador de la cita"],
+    ["catalog/local-products.ts", "la ficha que el panel pinta y edita"],
+  ])("%s pide `exemptionCause` en su select (%s)", (ruta) => {
+    expect(fuenteDe(ruta)).toContain("exemptionCause: true");
+  });
+
+  it("y `build-document.ts` trae la línea ENTERA, así que no puede olvidarse", () => {
+    // El cuarto camino —el PDF— no enumera columnas: pide `lines` con un
+    // `orderBy` y nada más, así que Prisma devuelve todas. Se comprueba
+    // que sigue siendo así: el día que alguien le ponga un `select` para
+    // ahorrar bytes, este test le recuerda que tiene que incluir la causa.
+    const fuente = fuenteDe("tickets/build-document.ts");
+    expect(fuente).toContain('lines: { orderBy: { id: "asc" } }');
+    expect(fuente).toContain("exemptionCause: l.exemptionCause");
+  });
+});
+
+// ═══ 6 · Las dos copias de la etiqueta, atadas ════════════════════════
 
 describe("iva-exento-sanitario · la etiqueta del panel no se separa de la fiscal", () => {
   // `apps/admin` NO depende de `@mipiacetpv/ticket-model`, y es
