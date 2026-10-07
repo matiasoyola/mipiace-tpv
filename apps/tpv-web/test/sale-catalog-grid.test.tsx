@@ -70,7 +70,21 @@ const CATALOGO = vi.hoisted(() => {
 vi.mock("../src/lib/catalog.js", () => ({
   findByBarcode: () => null,
   fuzzySearch: () => CATALOGO,
-  getCachedBusinessType: () => "HOSPITALITY" as const,
+  // v2-H1-venta-y-sala · este fichero pasa de HOSPITALITY a RETAIL.
+    //
+    // Lo que prueba —el rail de categorías, la fila de chips, la
+    // jerarquía del panel del ticket, los atajos del hueco, la
+    // aritmética de la rejilla clara, el stepper de la línea— sigue
+    // existiendo y sigue teniendo que funcionar, pero ya NO en
+    // hostelería: v2-H1 sustituye ahí la fila de chips y el rail por la
+    // barra de familias, y el panel del ticket por la comanda oscura.
+    //
+    // Se re-apunta en vez de borrarse porque esa pantalla es la de
+    // Thalía, Cachictos y Sole, y es exactamente la que el bloque se
+    // compromete a NO cambiar. Borrar el fichero habría dejado al
+    // componente sin red justo en el bloque que lo deja de usar en un
+    // vertical.
+    getCachedBusinessType: () => "RETAIL" as const,
   getCachedCrmEnabled: () => false,
   getCachedAgendaEnabled: () => false,
   // catalogo-local (addendum 3) · default TRUE, como en la caché real:

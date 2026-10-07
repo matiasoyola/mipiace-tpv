@@ -235,6 +235,33 @@ function buttonByText(text: string, exact = true): HTMLButtonElement {
   return btn as HTMLButtonElement;
 }
 
+// v2-H1-venta-y-sala · este fichero prueba el CABLEADO de la mesa con la
+// API (POST de línea con `lineExternalId`, reconciliación, 403/409,
+// checkout) y eso no ha cambiado. Lo que ha cambiado es la pantalla
+// donde se pulsa: en hostelería la comanda oscura sustituye al panel del
+// ticket, así que los selectores y los rótulos se actualizan y las
+// aserciones de cableado se quedan igual.
+//
+// Tres sustituciones concretas:
+//   · «1 ud.» / «2 uds.» → la comanda pinta la cantidad desnuda al lado
+//     del nombre; se lee con `cantidadesDeLaComanda()`.
+//   · botón «Mapa» → la flecha de volver (`comanda-back`), que es el
+//     mismo toque.
+//   · botón «Más» → el botón de chrome `more`, que abre la MISMA hoja
+//     (`buildTicketActions`, compartida con el panel claro).
+function byTestId(id: string): HTMLButtonElement {
+  const el = container.querySelector(`[data-testid="${id}"]`);
+  if (!el) throw new Error(`"${id}" no encontrado`);
+  return el as HTMLButtonElement;
+}
+
+/** Las cantidades que la comanda tiene pintadas, enviadas y sin enviar. */
+function cantidadesDeLaComanda(): string[] {
+  return Array.from(
+    container.querySelectorAll<HTMLElement>('[data-testid="pendiente-qty"]'),
+  ).map((el) => el.textContent?.trim() ?? "");
+}
+
 async function click(btn: HTMLButtonElement) {
   await act(async () => {
     btn.click();
@@ -267,7 +294,7 @@ describe("SalePage · v1.12 addendum · la salida al mapa no se envuelve aquí",
     );
 
     await renderSalePage([]);
-    await click(buttonByText("Mapa"));
+    await click(byTestId("comanda-back"));
 
     expect(onBackToMap).toHaveBeenCalledTimes(1);
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
@@ -285,7 +312,7 @@ describe("SalePage · v1.12 addendum · la salida al mapa no se envuelve aquí",
     );
 
     await renderSalePage([serverLine()]);
-    await click(buttonByText("Mapa"));
+    await click(byTestId("comanda-back"));
 
     expect(onBackToMap).toHaveBeenCalledTimes(1);
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
@@ -320,7 +347,7 @@ describe("SalePage · mesa cableada a la API", () => {
     expect(typeof capturedBody!.lineExternalId).toBe("string");
     // La línea reconciliada del servidor se pinta en el panel.
     expect(container.textContent).toContain("Café solo");
-    expect(container.textContent).toContain("1 ud.");
+    expect(cantidadesDeLaComanda()).toEqual(["1"]);
   });
 
   it("retomar mesa ocupada: pinta el DRAFT del servidor, no el carrito local", async () => {
@@ -365,7 +392,11 @@ describe("SalePage · mesa cableada a la API", () => {
     expect(container.textContent).toContain("Café solo");
     expect(container.textContent).toContain("Tostada");
     expect(container.textContent).not.toContain("Producto fantasma");
-    expect(container.textContent).toContain("2 uds.");
+    // DOS líneas, cada una de una unidad. El «2 uds.» de antes era el
+    // contador de artículos de la meta del panel claro, no una cantidad:
+    // la comanda oscura pinta la cantidad de cada línea, así que lo que
+    // se afirma es el reparto real.
+    expect(cantidadesDeLaComanda()).toEqual(["1", "1"]);
   });
 
   it("editar desde otra caja → 403 REGISTER_MISMATCH: revert + toast", async () => {
@@ -385,7 +416,7 @@ describe("SalePage · mesa cableada a la API", () => {
     );
 
     await renderSalePage([serverLine()]);
-    expect(container.textContent).toContain("1 ud.");
+    expect(cantidadesDeLaComanda()).toEqual(["1"]);
 
     const plus = container.querySelector(
       'button[aria-label="Sumar una unidad"]',
@@ -395,8 +426,7 @@ describe("SalePage · mesa cableada a la API", () => {
 
     // Toast con el mensaje del backend y unidades revertidas.
     expect(container.textContent).toContain("El ticket no pertenece a tu caja.");
-    expect(container.textContent).toContain("1 ud.");
-    expect(container.textContent).not.toContain("2 uds.");
+    expect(cantidadesDeLaComanda()).toEqual(["1"]);
   });
 
   it("agrupar una mesa ya agrupada → 409 TABLE_ALREADY_GROUPED: toast en español", async () => {
@@ -430,7 +460,9 @@ describe("SalePage · mesa cableada a la API", () => {
     // secundarias del ticket viven ahora tras el botón "Más". Ocupaban
     // 135 px del mejor sitio del panel para usarse una de cada veinte
     // veces; el sitio se lo ha quedado el desglose de artículos.
-    await click(buttonByText("Más", false));
+    await click(
+      container.querySelector('[data-chrome-action="more"]') as HTMLButtonElement,
+    );
     await click(buttonByText("Agrupar"));
     // Picker: marcar Mesa 2 y confirmar.
     await click(buttonByText("Mesa 2", false));
@@ -472,10 +504,22 @@ describe("SalePage · mesa cableada a la API", () => {
     );
 
     await renderSalePage([serverLine()]);
-    // Abre el overlay de cobro (botón del panel: "Cobrar 1,65 €").
-    await click(buttonByText("Cobrar", false));
-    // Confirma dentro del overlay (botón exacto "Cobrar").
-    await click(buttonByText("Cobrar"));
+    // Abre el overlay de cobro desde la comanda. Por testid y no por
+    // rótulo: el botón de la comanda dice «Cobrar» a secas (el importe
+    // vive en el total de 46 px justo encima), así que un `startsWith`
+    // volvería a encontrarlo a él en vez del confirmar del overlay.
+    await click(byTestId("comanda-cobrar"));
+    // Confirma dentro del overlay. Se excluye explícitamente el botón de
+    // la comanda: ahora los dos dicen «Cobrar» a secas, así que buscar
+    // por rótulo volvería a encontrar el de la comanda —que está antes
+    // en el DOM— y el test pasaría sin haber tocado el overlay.
+    const confirmar = Array.from(container.querySelectorAll("button")).find(
+      (b) =>
+        (b.textContent?.trim() ?? "") === "Cobrar" &&
+        b.getAttribute("data-testid") !== "comanda-cobrar",
+    );
+    expect(confirmar).toBeTruthy();
+    await click(confirmar as HTMLButtonElement);
 
     expect(checkoutPath).toBe(`/tickets/${TICKET_1}/checkout`);
     expect(checkoutBody).not.toBeNull();

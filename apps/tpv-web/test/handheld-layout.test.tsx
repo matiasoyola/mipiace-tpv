@@ -12,6 +12,26 @@
 //   - contexto mesa: "Comanda" accesible desde la barra inferior →
 //     POST /tickets/:id/send-to-kitchen/escpos.
 //
+// v2-H1-venta-y-sala · la venta de hostelería se pinta ahora con su
+// propio componente, y el reparto de handheld deja de decidirse SÓLO con
+// clases `lg:`: el número de columnas de la barra de familias y de la
+// cuadrícula entra por `grid-template-columns` calculado (el JIT de
+// Tailwind no compila `grid-cols-${n}`), así que la pantalla pregunta
+// por `matchMedia`.
+//
+// Consecuencia para los tests, y es importante: **jsdom no implementa
+// `matchMedia`**, así que sin un doble la pantalla asume terminal y el
+// layout de handheld no existe en el árbol. Antes los dos convivían
+// (`lg:hidden` contra `hidden lg:flex`) y bastaba leer clases. Ahora se
+// monta uno u otro, lo que es mejor —no hay DOM muerto— pero obliga a
+// declarar el tamaño. Lo hace `montaHandheld()`.
+//
+// Dos tests de este fichero se van a RETAIL: la estructura del aside
+// clásico y las guardas anti-overflow del header son del TPV claro, y en
+// hostelería ya no hay ni aside ni header. Siguen siendo la pantalla de
+// Thalía, Cachictos y Sole, así que la cobertura se re-apunta en vez de
+// borrarse.
+//
 // Mismo patrón sin testing-library que table-sale-flow.test.tsx:
 // createRoot + act + eventos nativos; módulos pesados mockeados.
 
@@ -22,6 +42,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const apiMock = vi.hoisted(() => ({ apiWithCashier: vi.fn() }));
+const vertical = vi.hoisted(() => ({
+  actual: "HOSPITALITY" as "HOSPITALITY" | "RETAIL" | "SERVICES",
+}));
 
 vi.mock("../src/api.js", async () => {
   const actual = await vi.importActual<typeof import("../src/api.js")>(
@@ -44,7 +67,7 @@ vi.mock("../src/lib/catalog.js", () => {
   return {
     findByBarcode: () => null,
     fuzzySearch: () => [CAFE],
-    getCachedBusinessType: () => "HOSPITALITY" as const,
+    getCachedBusinessType: () => vertical.actual,
     getCachedCrmEnabled: () => false,
     getCachedAgendaEnabled: () => false,
     // catalogo-local (addendum 3) · default TRUE, como en la caché real:
@@ -157,6 +180,9 @@ beforeEach(() => {
     throw new Error(`ruta inesperada: ${path}`);
   });
   sessionStorage.clear();
+  vertical.actual = "HOSPITALITY";
+  // Por defecto, handheld: es de lo que va este fichero.
+  declaraPantalla(true);
   container = document.createElement("div");
   document.body.appendChild(container);
 });
@@ -242,6 +268,43 @@ function ticketSheet(): HTMLElement | null {
   return container.querySelector('[role="dialog"][aria-label="Ticket"]');
 }
 
+/** El botón grande de la barra inferior de la comanda oscura. */
+function barraDeComanda(): HTMLButtonElement {
+  const btn = container.querySelector('button[aria-label="Abrir la comanda"]');
+  if (!btn) throw new Error("barra inferior de la comanda no encontrada");
+  return btn as HTMLButtonElement;
+}
+
+/** El bottom-sheet de la comanda oscura. */
+function comandaSheet(): HTMLElement | null {
+  return container.querySelector('[role="dialog"][aria-label="Comanda"]');
+}
+
+/**
+ * Declara el tamaño de pantalla para `useIsHandheld`.
+ *
+ * jsdom no trae `matchMedia`, y sin él la venta de hostelería asume
+ * terminal. El doble es mínimo a propósito: contesta a la consulta y
+ * acepta listeners que nunca se disparan, porque ningún test de este
+ * fichero cambia de tamaño a mitad.
+ */
+function declaraPantalla(handheld: boolean): void {
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    configurable: true,
+    value: (query: string) => ({
+      matches: handheld && query.includes("max-width"),
+      media: query,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    }),
+  });
+}
+
 async function click(el: HTMLElement) {
   await act(async () => {
     (el as HTMLButtonElement).click();
@@ -251,15 +314,18 @@ async function click(el: HTMLElement) {
 
 describe("SalePage · layout handheld", () => {
   it("la barra inferior muestra nº de líneas y total al añadir productos", async () => {
+    // v2-H1 · misma barra y mismo contenido, en oscuro. El rótulo
+    // accesible pasa de «Abrir ticket» a «Abrir la comanda», que es como
+    // se llama en un bar lo que hay dentro.
     await renderQuickSale();
 
-    expect(mobileBarButton().textContent).toContain("0 líneas");
-    expect(mobileBarButton().textContent).toContain("0,00 €");
+    expect(barraDeComanda().textContent).toContain("0 líneas");
+    expect(barraDeComanda().textContent).toContain("0,00 €");
 
     await click(productTile());
     await click(productTile()); // mismo producto → agrupa en 1 línea, 2 uds
 
-    const bar = mobileBarButton();
+    const bar = barraDeComanda();
     expect(bar.textContent).toContain("1 línea");
     // 2 × 1,65 € (priceGross del mock con IVA 10%)
     expect(bar.textContent).toContain("3,30 €");
@@ -269,28 +335,61 @@ describe("SalePage · layout handheld", () => {
     await renderQuickSale();
     await click(productTile());
 
-    expect(ticketSheet()).toBeNull();
-    await click(mobileBarButton());
+    expect(comandaSheet()).toBeNull();
+    await click(barraDeComanda());
 
-    const sheet = ticketSheet();
+    const sheet = comandaSheet();
     expect(sheet).not.toBeNull();
     expect(sheet!.textContent).toContain("Café solo");
     expect(sheet!.textContent).toContain("1,65");
 
     const close = sheet!.querySelector(
-      'button[aria-label="Cerrar ticket"]',
+      'button[aria-label="Cerrar la comanda"]',
     ) as HTMLButtonElement;
     await click(close);
 
-    expect(ticketSheet()).toBeNull();
+    expect(comandaSheet()).toBeNull();
     // El estado no se perdió: la barra sigue contando la línea y al
-    // reabrir el sheet la línea sigue dentro.
-    expect(mobileBarButton().textContent).toContain("1 línea");
-    await click(mobileBarButton());
-    expect(ticketSheet()!.textContent).toContain("Café solo");
+    // reabrir la hoja la línea sigue dentro. Las líneas viven en
+    // `SalePage`, así que la hoja es sólo presentación.
+    expect(barraDeComanda().textContent).toContain("1 línea");
+    await click(barraDeComanda());
+    expect(comandaSheet()!.textContent).toContain("Café solo");
   });
 
-  it("estructura ≥1024px intacta: aside lg, barra y sheet sólo móvil", async () => {
+  it("la comanda existe UNA vez en el árbol: o columna o hoja", async () => {
+    // Antes el aside y la barra convivían con clases `lg:`. Ahora se
+    // monta uno u otro, y eso es lo que impide que un sabotaje deje dos
+    // comandas con estados distintos en la misma pantalla.
+    await renderQuickSale();
+    expect(container.querySelectorAll('[data-testid="comanda"]')).toHaveLength(
+      0,
+    );
+    await click(barraDeComanda());
+    expect(container.querySelectorAll('[data-testid="comanda"]')).toHaveLength(
+      1,
+    );
+
+    await act(async () => root.unmount());
+    container.remove();
+    declaraPantalla(false);
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    await renderQuickSale();
+    // En terminal: la comanda es la columna y no hay barra inferior.
+    expect(container.querySelectorAll('[data-testid="comanda"]')).toHaveLength(
+      1,
+    );
+    expect(container.querySelector('[data-testid="handheld-bar"]')).toBeNull();
+  });
+
+  it("RETAIL · estructura ≥1024px intacta: aside lg, barra y sheet sólo móvil", async () => {
+    // v2-H1 · este test describe el layout del TPV CLARO (aside con
+    // Subtotal/Total, barra `lg:hidden`, footer `hidden lg:grid`). En
+    // hostelería no hay ninguno de los tres, pero sigue siendo el layout
+    // de Thalía, Cachictos y Sole — el que el bloque se compromete a no
+    // cambiar—, así que se comprueba ahí.
+    vertical.actual = "RETAIL";
     await renderQuickSale();
 
     // El aside del ticket existe y sólo se pinta en escritorio.
@@ -321,10 +420,14 @@ describe("SalePage · layout handheld", () => {
   // arranca plegada tras una lupa —ocupaba el 60 % del ancho en una
   // pantalla donde casi no se usa—, así que las guardas anti-overflow se
   // comprueban con el campo desplegado, que es cuando puede desbordar.
-  it("Lote 0 · guardas anti-overflow del header presentes", async () => {
+  it("RETAIL · Lote 0 · guardas anti-overflow del header presentes", async () => {
+    // v2-H1 · las guardas son del HEADER, y la venta de hostelería no
+    // tiene header: su buscador es un bloque dentro de una columna de
+    // 420 px, no un `flex-1` compitiendo por el ancho con un cluster de
+    // botones, que era la causa del desborde de 360 px. El header sigue
+    // existiendo en RETAIL y la guarda sigue haciendo falta ahí.
+    vertical.actual = "RETAIL";
     await renderQuickSale();
-
-    await click(searchToggle());
 
     const search = container.querySelector(
       'input[type="search"]',
@@ -350,6 +453,9 @@ describe("SalePage · layout handheld", () => {
   // desmontarlo dejaría sin escáner a los tenants con lector USB, que es
   // peor que el 60 % de ancho que el pliegue viene a arreglar.
   it("M3 · la búsqueda plegada sigue montada y fuera de cuadro", async () => {
+    // Sigue siendo N1 de v1.22, y sigue vigente en la pantalla oscura:
+    // el campo plegado vive fuera de cuadro, enfocable, con
+    // `inputMode="none"`. Es donde aterriza el lector USB-HID.
     await renderQuickSale();
 
     const search = container.querySelector(
@@ -392,12 +498,14 @@ describe("SalePage · layout handheld", () => {
 
     await renderTableSale([serverLine()]);
 
-    const bar = mobileBarButton().parentElement!;
+    const bar = container.querySelector(
+      '[data-testid="handheld-bar"]',
+    ) as HTMLElement;
     const comanda = Array.from(bar.querySelectorAll("button")).find(
       (b) => b.textContent?.trim() === "Comanda",
     ) as HTMLButtonElement;
     expect(comanda).not.toBeUndefined();
-    expect(mobileBarButton().textContent).toContain("Mesa 1");
+    expect(barraDeComanda().textContent).toContain("Mesa 1");
 
     await click(comanda);
     expect(kitchenCalls).toBe(1);

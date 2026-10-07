@@ -235,32 +235,58 @@ function searchInput(): HTMLInputElement {
   return container.querySelector('input[type="search"]') as HTMLInputElement;
 }
 
-describe("v1.14 · M4 · el mapa es el ancla de la barra", () => {
-  it("HOSPITALITY · 'Mapa' es CTA grande a la izquierda, con icono y texto", async () => {
+// v2-H1-venta-y-sala · M4 sigue vigente en el FONDO y cambia de FORMA.
+//
+// Lo que M4 arregló es que volver al mapa —la navegación nº 1 del turno—
+// estaba enterrado en un chip de 9 px dentro del panel del ticket. Subió
+// a la barra superior como CTA grande.
+//
+// v2-H1 quita la barra superior de la venta de hostelería (la maqueta no
+// la tiene, y conservarla costaba 68 px de alto del catálogo con los que
+// los 31 Licores dejaban de caber a 1280 × 800). El ancla se va a la
+// cabecera de la comanda, como flecha de volver: sigue arriba a la
+// izquierda, sigue a UN toque y sigue por encima del suelo táctil.
+//
+// Lo que se afirma es eso, y no el rótulo: un toque, `onBackToMap`, 56 px
+// y arriba a la izquierda. El hallazgo —que no esté enterrado en el panel—
+// se guarda igual.
+describe("v2-H1 · M4 · volver a la sala es el ancla de la pantalla", () => {
+  it("HOSPITALITY · la flecha de volver abre el mapa, a 56 px y la primera", async () => {
     await render();
 
-    const mapa = mapButton();
-    expect(mapa).not.toBeNull();
-    // ≥ 64 px de alto: `touch-lg`, la escala de acciones primarias.
-    expect(mapa!.className).toContain("h-touch-lg");
-    expect(mapa!.querySelector("svg")).not.toBeNull();
-    expect(mapa!.textContent).toContain("Mapa");
-    // A la izquierda: sólo el botón de menú va antes.
-    const botones = Array.from(header().querySelectorAll("button"));
-    expect(botones.indexOf(mapa!)).toBeLessThanOrEqual(1);
+    const atras = container.querySelector(
+      '[data-testid="comanda-back"]',
+    ) as HTMLButtonElement;
+    expect(atras).not.toBeNull();
+    expect(atras.getAttribute("aria-label")).toBe("Volver a la sala");
+    expect(atras.querySelector("svg")).not.toBeNull();
+    // El suelo táctil del bloque. Entra por `style` con la constante que
+    // el test lee, no por una clase suelta.
+    expect(atras.style.width).toBe("56px");
+    expect(atras.style.height).toBe("56px");
 
-    await click(mapa!);
+    // La primera de la pantalla: nada se pulsa antes que ella.
+    const botones = Array.from(
+      container.querySelectorAll<HTMLButtonElement>("button"),
+    );
+    expect(botones.indexOf(atras)).toBe(0);
+
+    await click(atras);
     expect(onBackToMap).toHaveBeenCalled();
   });
 
-  it("HOSPITALITY en MESA · el 'Mapa' sigue en la barra, no en el ticket", async () => {
+  it("HOSPITALITY en MESA · el ancla sigue fuera de la lista de líneas", async () => {
     await render({ table: true });
 
-    // Antes sólo existía dentro del panel del ticket y sólo en mesa: el
-    // sitio donde de verdad hace falta volver al mapa.
-    expect(mapButton()).not.toBeNull();
-    const aside = container.querySelector("aside.rounded-3xl") as HTMLElement;
-    expect(aside.textContent).not.toContain("Mapa");
+    const atras = container.querySelector('[data-testid="comanda-back"]');
+    expect(atras).not.toBeNull();
+    // El hallazgo de M4 era que vivía DENTRO del panel, compitiendo con
+    // el nombre de la mesa. La lista de líneas no puede volver a
+    // contenerlo.
+    const lineas = container.querySelector(
+      '[data-testid="comanda-lineas"]',
+    ) as HTMLElement;
+    expect(lineas.contains(atras!)).toBe(false);
   });
 });
 
@@ -308,21 +334,23 @@ describe("v1.14 · M3 · la búsqueda según el vertical", () => {
   });
 
   it("HOSPITALITY · la búsqueda se pliega en una lupa y se despliega al pulsarla", async () => {
+    // v2-H1 · misma conducta y misma etiqueta accesible; la lupa vive
+    // ahora en el chrome de la comanda, a 56 px. Plegado, el campo sigue
+    // fuera de cuadro con `aria-hidden` — que es N1 de v1.22: ahí es
+    // donde aterriza el lector USB-HID sin que Android saque el teclado.
     await render();
 
     const lupa = container.querySelector(
       'button[aria-label="Buscar producto o escanear código"]',
     ) as HTMLButtonElement;
     expect(lupa).not.toBeNull();
-    expect(lupa.className).toContain("h-touch-lg");
-    expect(lupa.getAttribute("aria-expanded")).toBe("false");
-    // Plegada, la barra NO le da el 60 % del ancho.
-    const wrapper = searchInput().parentElement!.parentElement!;
-    expect(wrapper.className).not.toContain("lg:flex-1");
+    expect(lupa.style.width).toBe("56px");
+    expect(searchInput().getAttribute("aria-hidden")).toBe("true");
+    expect(searchInput().getAttribute("inputmode")).toBe("none");
 
     await click(lupa);
-    expect(lupa.getAttribute("aria-expanded")).toBe("true");
     expect(searchInput().getAttribute("aria-hidden")).toBeNull();
+    expect(searchInput().getAttribute("inputmode")).toBe("search");
   });
 
   it("al plegar la lupa se limpia la búsqueda (no deja un filtro invisible)", async () => {
@@ -349,7 +377,22 @@ describe("v1.14 · M3 · la búsqueda según el vertical", () => {
   });
 });
 
-describe("v1.14 · §4 · estado vacío del ticket con inteligencia", () => {
+// v2-H1-venta-y-sala · este bloque se re-apunta a RETAIL.
+//
+// El estado vacío con los más vendidos es del PANEL DEL TICKET, y en
+// hostelería ese panel ya no existe: la comanda oscura lo sustituye y su
+// vacío dice «Toca una familia y luego el producto», porque ahí el atajo
+// útil ya está en pantalla — es «Ahora», que son los veinte más pedidos
+// de esta franja ocupando el centro entero (decisión 4).
+//
+// El panel claro con sus atajos sigue vivo y sigue siendo el de Thalía,
+// Cachictos y Sole, así que la cobertura se queda apuntando ahí en vez de
+// borrarse.
+describe("v1.14 · §4 · estado vacío del ticket (RETAIL)", () => {
+  beforeEach(() => {
+    state.businessType = "RETAIL";
+  });
+
   it("mesa recién abierta · pinta los más vendidos del turno, tocables", async () => {
     topSellersResponse = {
       source: "shift",

@@ -1903,9 +1903,17 @@ export function SalePage(props: SalePageProps) {
       },
       {
         key: "search",
-        label: "Buscar producto",
+        // MISMA etiqueta accesible que la lupa del TPV claro: es el
+        // contrato que comprueba el test de N1, y dos cadenas distintas
+        // para el mismo botón harían que el guardia del teclado del
+        // sistema dejara de vigilar esta pantalla sin ponerse rojo.
+        label: "Buscar producto o escanear código",
         icon: <Search className="w-[21px] h-[21px]" strokeWidth={2.25} />,
-        onClick: () => setSearchOpen(true),
+        // Alterna, igual que la lupa del TPV claro. Con un
+        // `setSearchOpen(true)` el campo no se podía volver a plegar, y
+        // plegarlo es lo que devuelve el `inputMode` a `none` —o sea, lo
+        // que vuelve a cerrarle la puerta al teclado de Android—.
+        onClick: () => setSearchOpen((v) => !v),
       },
     ];
     if (hasCameraSupport()) {
