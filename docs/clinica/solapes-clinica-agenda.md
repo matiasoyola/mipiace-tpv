@@ -26,7 +26,7 @@
 | # | Pieza | Estado | Bloque que lo toca |
 |---|---|---|---|
 | S3 | Consentimiento firmado | **decidido** (07-10) | clinica-4 |
-| S1 | Enlace público con token | **decidido** (07-10) | B-11 / clinica-2 (ya en master) |
+| S1 | Enlace público con token | **decidido** (07-10) · **construido en `enlaces-publicos`** | `enlaces-publicos` (la puerta común + `VALORACION`) |
 | S2 | Cuestionario que contesta el cliente | **decidido** (07-10) | clinica-2 (ya en master) / encuesta post-visita |
 | S4 | Notas sobre el cliente por servicio | **decidido** (07-10, por delegación) | B-1 / clinica-3 |
 | S5 | Agrupar servicios (familia / especialidad) | **decidido** (07-10, por delegación) | especialidades / iva-exento |
@@ -188,6 +188,23 @@ sólo la origina. Por eso:
 Encaja tal cual en «cada `purpose` declara sus reglas»; no cambia la puerta común.
 
 **Decisión (07-10, OK de Matías).** Una sola tabla y una sola puerta de enlaces públicos, con los tres perfiles (solo escribir / solo leer / leer y actuar sobre su cita), topes por `purpose`, dos límites de peticiones (por IP para tokens inexistentes; por token para los del equipo), rotación al reenviar y recalculo/revocación en la misma transacción al mover o anular una cita. La valoración apunta a la valoración, no a la cita. `Ticket.publicSlug` queda fuera. La valoración de clinica-2 migra a la tabla común; el bloque que la construya (B-11 o uno propio antes) lo decide Dirección.
+
+**CONSTRUIDO en `enlaces-publicos`** (08-10). Done: `docs/blocks/enlaces-publicos-done.md`.
+
+- La tabla es `public_links` y la puerta `apps/api/src/enlaces/puerta.ts`. Los topes, el perfil, el
+  estado admitido, si deja rastro clínico y si el límite va por IP o por token los declara el
+  `purpose` en el registro tipado `apps/api/src/enlaces/reglas.ts`.
+- **Hoy sólo está dado de alta `VALORACION`.** Los cuatro que faltan —consentimiento para leer (S3),
+  «mi cita», encuesta post-visita (S2) y formulario del equipo (B9)— **sólo tienen que añadir su
+  entrada en `reglas.ts`**: caducidad, usos, perfil, qué objeto cargan y en qué estado lo admiten. No
+  vuelven a escribir seguridad, ni cabeceras, ni la 404, ni los límites.
+- Lo que el bloque dejó listo y todavía no usa nadie: los tres perfiles, el límite **por token** de
+  los `purpose` del equipo (con test), `revocarEnlace` / `revocarEnlacesDe` para la pantalla de
+  recepción, y el rastro clínico declarativo (`registraAccesoClinico`).
+- `Ticket.publicSlug` no se tocó. Las tres columnas `link_*` de `clinical_assessments` quedan
+  **obsoletas y escritas como espejo**: nadie las lee, y se borran en el bloque que mueva la guardia
+  de regresión de clinica-2 a `public_links`.
+- La pantalla de recepción para ver y anular enlaces **sigue pendiente**: la trae «mi cita».
 
 ---
 
