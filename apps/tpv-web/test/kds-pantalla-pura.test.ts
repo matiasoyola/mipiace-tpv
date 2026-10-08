@@ -298,19 +298,26 @@ describe("kds-1c · SABOTAJE · que «+N» use otro orden que la rejilla", () =>
       tarjeta({
         id: `c${i}`,
         tableName: `M${i}`,
-        firedAt: haceMin(((i * 7) % 14) + 1),
+        // `5 × i mod 14` recorre los catorce restos (5 y 14 son primos
+        // entre sí): minutos todos distintos y en un orden que NO sigue al
+        // id, que es lo que el sabotaje necesita para delatarse.
+        firedAt: haceMin(((i * 5) % 14) + 1),
         lines: [linea(), linea(), linea()],
       }),
     );
     const r = repartirTarjetas(servicio, ZONA_1280);
     expect(r.extra.length).toBeGreaterThan(0);
-    const ultimoVisible = Math.min(
+    // Más NUEVA = marca MÁS GRANDE, así que la más nueva de las visibles es
+    // el MÁXIMO. Ninguna oculta puede ser más antigua que ella: si lo
+    // fuera, el «+N» estaría escondiendo lo que más espera.
+    const masNuevaVisible = Math.max(
       ...r.visibles.map((t) => Date.parse(t.firedAt!)),
     );
     for (const oculta of r.extra) {
-      // Más NUEVA = marca MÁS GRANDE. Ninguna oculta puede ser más antigua
-      // que la más nueva que se ve.
-      expect(Date.parse(oculta.firedAt!)).toBeGreaterThanOrEqual(ultimoVisible);
+      expect(
+        Date.parse(oculta.firedAt!),
+        `${oculta.tableName} oculta`,
+      ).toBeGreaterThanOrEqual(masNuevaVisible);
     }
   });
 
