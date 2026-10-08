@@ -35,9 +35,7 @@ import { useMemo, useState } from "react";
 import { ALERGENOS, LISTA_ALERGENOS, type Alergeno } from "@mipiacetpv/ticket-model";
 
 import {
-  CORAL,
   DARK_CANVAS,
-  DARK_ON_CORAL,
   DARK_PANEL,
   DARK_SURFACE,
   DARK_SURFACE_RAISED,
@@ -168,8 +166,11 @@ export function AlergiasSheet(props: AlergiasSheetProps) {
           className={`rounded-[14px] px-8 font-semibold disabled:opacity-40 ${PRESS_FEEDBACK_CLASS}`}
           style={{
             minHeight: MIN_TOUCH_PX,
-            background: CORAL,
-            color: DARK_ON_CORAL,
+            // EN CLARO, como el «Listo» de la maqueta, y no en coral: el
+            // coral es de «Cobrar» (principio de venta bajo estrés, regla
+            // 1). Guardar una alergia no cobra nada.
+            background: DARK_TEXT,
+            color: DARK_CANVAS,
             fontSize: 18,
           }}
         >
@@ -201,6 +202,26 @@ export function AlergiasSheet(props: AlergiasSheetProps) {
             {(cuantasPorSilla.get(null) ?? 0) > 0 &&
               ` · ${cuantasPorSilla.get(null)}`}
           </button>
+
+          {/* **LA REFERENCIA DE LA BARRA.**
+              Faltaba, y la maqueta la lleva. Es lo que hace que la
+              numeración de las sillas sea SIEMPRE LA MISMA: sin un punto
+              de partida, el camarero que viene del otro lado de la mesa
+              cuenta la silla 1 donde otro contó la 3, y «silla 3 ·
+              celíaco» deja de nombrar a nadie. Con la barra como norte, la
+              1 es la que la toca y se sigue en el sentido del reloj —que
+              es lo que hace `posicionSilla`—. */}
+          <span
+            data-testid="alergias-referencia"
+            className="uppercase font-bold text-center shrink-0"
+            style={{
+              fontSize: 13,
+              letterSpacing: "0.1em",
+              color: DARK_TEXT_MUTED,
+            }}
+          >
+            La barra está a este lado
+          </span>
 
           {/* El tablero. Redondo si la mesa es redonda, para que el dibujo
               se parezca a la mesa que el camarero tiene delante. */}
@@ -240,7 +261,11 @@ export function AlergiasSheet(props: AlergiasSheetProps) {
                     fontSize: 20,
                     background: cuantas > 0 ? ROJO_ALERGIA : DARK_SURFACE,
                     color: cuantas > 0 ? ROJO_ALERGIA_TEXT : DARK_TEXT,
-                    outline: elegida ? `3px solid ${CORAL}` : "none",
+                    // El contorno de la silla elegida, BLANCO. En coral
+                    // competía con «Cobrar»; y sobre una silla ya roja por
+                    // tener alergia, un contorno coral casi no se
+                    // distinguía del relleno.
+                    outline: elegida ? "3px solid #FFFFFF" : "none",
                     outlineOffset: 2,
                   }}
                 >
@@ -301,8 +326,11 @@ export function AlergiasSheet(props: AlergiasSheetProps) {
  * Dónde va la silla `n` de `total` alrededor del tablero, en porcentaje del
  * contenedor.
  *
- * Repartidas en círculo y empezando ARRIBA (−90°), que es de donde el
- * camarero empieza a contar cuando mira la mesa de pie. Vale igual para la
+ * Repartidas en círculo y empezando ARRIBA (−90°), que en el dibujo es **el
+ * lado de la barra** —lo dice la etiqueta de encima del tablero—. Ésa es la
+ * referencia que hace que la silla 3 sea la misma silla para los dos
+ * camareros del turno: sin punto de partida, el que viene del otro lado de
+ * la mesa cuenta la 1 donde el otro contó la 3. Vale igual para la
  * mesa redonda y para la rectangular: el reparto queda por fuera del
  * tablero en los dos casos, y lo que importa es el ORDEN y la posición
  * relativa, no la geometría exacta de la mesa.

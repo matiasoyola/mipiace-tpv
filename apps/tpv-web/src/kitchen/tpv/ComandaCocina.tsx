@@ -23,7 +23,7 @@ import { useState } from "react";
 import { ALERGENOS, avisoChoque, type Alergeno } from "@mipiacetpv/ticket-model";
 
 import {
-  CORAL,
+  DARK_CANVAS,
   DARK_SURFACE,
   DARK_SURFACE_KEY,
   DARK_SURFACE_RAISED,
@@ -37,6 +37,18 @@ import {
   STEPPER_KEY_PX,
 } from "../../lib/hospitalityTheme.js";
 import { ROJO_ALERGIA, ROJO_ALERGIA_TEXT, ROJO_ANULADO } from "../../lib/kitchenTheme.js";
+
+/**
+ * **EL CLARO, que es lo que el coral deja de ser.**
+ *
+ * Regla 1 del principio de venta bajo estrés: el coral se reserva para
+ * «Cobrar». Lo que estaba en coral y no era «Cobrar» —«Marchar 2º», el
+ * chip «Espera» encendido, la tecla del tiempo elegido, «Guardar» de la
+ * hoja de alergias— pasa a claro o a neutro con contorno, que es lo que la
+ * maqueta usa para los estados y las acciones que no cobran.
+ */
+const CLARO = DARK_TEXT;
+const CLARO_TEXTO = DARK_CANVAS;
 import {
   alergenosDeSilla,
   etiquetaMarchar,
@@ -322,8 +334,14 @@ export function ChipsDeLinea(props: ChipsDeLineaProps) {
           className={`rounded-[12px] px-4 font-semibold ${PRESS_FEEDBACK_CLASS}`}
           style={{
             minHeight: MIN_TOUCH_PX,
-            background: props.course >= TIEMPO_ESPERA ? CORAL : DARK_SURFACE,
-            color: props.course >= TIEMPO_ESPERA ? "#FFFFFF" : DARK_TEXT_SOFT,
+            // EL CORAL ES SÓLO DE «COBRAR» (principio de venta bajo
+            // estrés, regla 1). El chip encendido va en CLARO, que es lo
+            // que la maqueta usa para el «En espera» de una línea, y
+            // apagado con contorno, como el «Enviar».
+            background: props.course >= TIEMPO_ESPERA ? CLARO : "transparent",
+            border:
+              props.course >= TIEMPO_ESPERA ? "none" : `1px solid ${DARK_SURFACE_RAISED}`,
+            color: props.course >= TIEMPO_ESPERA ? CLARO_TEXTO : DARK_TEXT_SOFT,
             fontSize: 17,
           }}
         >
@@ -402,8 +420,10 @@ export function FilaDeTiempos(props: FilaDeTiemposProps) {
             className={`flex-1 rounded-[14px] font-semibold ${PRESS_FEEDBACK_CLASS}`}
             style={{
               minHeight: MIN_TOUCH_PX,
-              background: elegido ? CORAL : DARK_SURFACE,
-              color: elegido ? "#FFFFFF" : DARK_TEXT_SOFT,
+              // Tampoco coral: el tiempo elegido es un estado, no la
+              // acción de cobrar.
+              background: elegido ? CLARO : DARK_SURFACE,
+              color: elegido ? CLARO_TEXTO : DARK_TEXT_SOFT,
               fontSize: 18,
             }}
           >
@@ -478,8 +498,14 @@ export function AccionesCocina(props: AccionesCocinaProps) {
           className={`rounded-[14px] px-4 font-semibold ${PRESS_FEEDBACK_CLASS}`}
           style={{
             minHeight: MIN_TOUCH_PX,
-            background: CORAL,
-            color: "#FFFFFF",
+            // «Marchar 2º» NEUTRO CON CONTORNO, como el «Enviar» de la
+            // maqueta. Iba en coral, y el coral de esta casa es el de
+            // «Cobrar»: dos botones del mismo color a 2 cm uno de otro, en
+            // una comanda que se toca con el móvil en la otra mano, es un
+            // cobro por accidente.
+            background: "transparent",
+            border: `1px solid ${DARK_SURFACE_RAISED}`,
+            color: DARK_TEXT,
             fontSize: 17,
           }}
         >
