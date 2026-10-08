@@ -53,8 +53,13 @@ function isHoldedError(
  * para una pantalla. Lo que se enseña es una frase escrita para quien la
  * lee.
  */
+/** El mensaje del error, venga como `Error` o como lo que venga. */
+function textoDeError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 function negativaClinica(err: unknown): string | null {
-  const texto = err instanceof Error ? err.message : String(err);
+  const texto = textoDeError(err);
   if (texto.includes("HISTORIA_VIOLADA")) {
     // El trigger ya distingue los casos en su propio mensaje; aquí se
     // reparte en las dos frases que una persona necesita.
@@ -193,6 +198,34 @@ export function registerErrorHandler(app: FastifyInstance): void {
         error: "CLINICAL_RECORD_PROTECTED",
         code: "CLINICAL_RECORD_PROTECTED",
         message: mensajeClinico,
+        requestId: request.id,
+      });
+    }
+
+    // 4.a-ter enlaces-publicos · UN ENLACE PÚBLICO NO SE REVIVE.
+    //
+    // El trigger `public_links_guard` rechaza borrar un enlace,
+    // des-anularlo, estirarle la caducidad, bajarle los usos o pasárselos
+    // del tope. Ninguna de esas escrituras la hace la puerta —hace dos: un
+    // `revoked_at` y un `used_count + 1`—, así que si este mapeo se
+    // dispara es un camino nuevo que se equivocó.
+    //
+    // Está aquí por lo mismo que el de arriba: para que ese día lo que
+    // llegue sea un 409 que dice por qué y no «Error de base de datos
+    // (P2010)», que es lo que el cliente recibía. Mismo 409 y misma
+    // ausencia de `captureError`: el motor negándose no es una avería.
+    if (textoDeError(err).includes("ENLACE_VIOLADO")) {
+      request.log.warn(
+        { tenantId, requestId: request.id, sqlState: sqlStateOf(err) },
+        `negativa del enlace público en ${request.method} ${request.url}`,
+      );
+      return reply.code(409).send({
+        error: "PUBLIC_LINK_PROTECTED",
+        code: "PUBLIC_LINK_PROTECTED",
+        message:
+          "Ese enlace ya no se puede cambiar: un enlace público no se borra, " +
+          "no se des-anula y no se le alarga la caducidad. Si hace falta uno, " +
+          "se crea uno nuevo y el anterior queda anulado.",
         requestId: request.id,
       });
     }

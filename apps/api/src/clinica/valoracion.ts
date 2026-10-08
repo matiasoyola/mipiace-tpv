@@ -42,8 +42,15 @@ import {
   type ValoracionParaPuerta,
 } from "@mipiacetpv/clinica-valoracion";
 
+import {
+  consumirEnlace,
+  crearEnlace,
+  revocarEnlacesDe,
+  type EnlaceCreado,
+} from "../enlaces/puerta.js";
+import { REGLAS_VALORACION } from "../enlaces/reglas.js";
+import { huellaDeToken } from "../enlaces/token.js";
 import { comoPrismaParaActor, resolverActorPaciente } from "./actor-paciente.js";
-import { nuevoTokenDeEnlace, type TokenNuevo } from "./enlace.js";
 
 // ── La forma de lo que se guarda en la entrada de historia ────────────
 //
@@ -73,9 +80,12 @@ const SELECT_VALORACION = {
   channel: true,
   createdAt: true,
   source: true,
-  linkExpiresAt: true,
-  linkUsedAt: true,
-  linkTokenHash: true,
+  // Las tres columnas del enlace NO SE SELECCIONAN desde
+  // `enlaces-publicos`: están obsoletas y nadie las lee. El estado del
+  // enlace sale de `public_links` (`enlaceDeLaValoracion`). Quitarlas de
+  // aquí es la mitad de «se dejan de leer» que no se ve en ningún test:
+  // mientras siguieran en el `select`, el día que alguien las volviera a
+  // usar no habría nada que lo frenara.
   entryId: true,
   answeredAt: true,
   answeredBy: true,
@@ -178,9 +188,11 @@ export interface VistaValoracion {
     validadaEn: string | null;
     validadaPor: { nombre: string; colegiado: string | null } | null;
     confirmaciones: Confirmaciones;
-    /** El estado del enlace, NUNCA el token. Lo que la pantalla necesita
-     *  saber es si hay uno vivo y hasta cuándo, para poder decir «el test
-     *  se mandó y caduca el día X» y ofrecer reenviarlo. */
+    /** El estado del enlace, NUNCA el token ni su huella. Lo que la
+     *  pantalla necesita saber es si hay uno vivo y hasta cuándo, para
+     *  poder decir «el test se mandó y caduca el día X» y ofrecer
+     *  reenviarlo. Desde `enlaces-publicos` sale de `public_links` (ver
+     *  `enlaceDeLaValoracion`), no de las columnas obsoletas. */
     enlace: { activo: boolean; caducaEn: string | null } | null;
   } | null;
   cuestionario: Cuestionario | null;
@@ -248,9 +260,14 @@ export async function vistaDeLaValoracion(
     };
   }
 
-  const [cuerpo, correcciones, anteriores] = await Promise.all([
+  const [cuerpo, correcciones, enlace, anteriores] = await Promise.all([
     cargarCuerpo(prisma, fila),
     cargarCorrecciones(prisma, fila.id),
+    enlaceDeLaValoracion(prisma, {
+      tenantId: input.tenantId,
+      valoracionId: fila.id,
+      estado: fila.status as EstadoValoracion,
+    }),
     prisma.clinicalAssessment.findMany({
       where: {
         tenantId: input.tenantId,
@@ -307,15 +324,7 @@ export async function vistaDeLaValoracion(
           }
         : null,
       confirmaciones,
-      enlace: fila.linkTokenHash
-        ? {
-            activo:
-              fila.linkUsedAt == null &&
-              fila.status === "PENDIENTE_PACIENTE" &&
-              (fila.linkExpiresAt?.getTime() ?? 0) > Date.now(),
-            caducaEn: fila.linkExpiresAt?.toISOString() ?? null,
-          }
-        : null,
+      enlace,
     },
     cuestionario,
     respuestasPaciente: estado.respuestasPaciente,
@@ -334,6 +343,54 @@ export async function vistaDeLaValoracion(
       estado: a.status as EstadoValoracion,
       validadaEn: a.validatedAt?.toISOString() ?? null,
     })),
+  };
+}
+
+/**
+ * El estado del enlace de una valoración, leído de `public_links`.
+ *
+ * Devuelve el ÚLTIMO enlace de esta valoración, vivo o no, porque eso es
+ * lo que la pantalla tiene que poder decir: «se mandó y caduca el día X»,
+ * «se usó» o «lo anularon». `null` cuando nunca hubo enlace.
+ *
+ * **Ni el token ni su huella salen de aquí.** Tres datos: si abre, hasta
+ * cuándo, y nada más — la pantalla del sanitario no necesita el enlace
+ * para nada (para reenviarlo hay un botón que crea otro), y una huella en
+ * una respuesta HTTP es una huella en el historial de un navegador.
+ *
+ * El estado de la valoración entra por parámetro porque es la mitad del
+ * «activo»: la defensa en profundidad de clinica-2 (§8 de su done) son dos
+ * líneas independientes —el gasto del enlace y el estado del objeto— y
+ * aquí se preguntan las dos, igual que en `REGLAS_VALORACION.admiteEnlace`.
+ */
+async function enlaceDeLaValoracion(
+  prisma: PrismaClient,
+  input: { tenantId: string; valoracionId: string; estado: EstadoValoracion },
+  ahora = new Date(),
+): Promise<{ activo: boolean; caducaEn: string | null } | null> {
+  const fila = await prisma.publicLink.findFirst({
+    where: {
+      tenantId: input.tenantId,
+      purpose: REGLAS_VALORACION.purpose,
+      targetType: REGLAS_VALORACION.targetType,
+      targetId: input.valoracionId,
+    },
+    orderBy: { createdAt: "desc" },
+    select: {
+      expiresAt: true,
+      maxUses: true,
+      usedCount: true,
+      revokedAt: true,
+    },
+  });
+  if (!fila) return null;
+  return {
+    activo:
+      fila.revokedAt == null &&
+      fila.usedCount < fila.maxUses &&
+      fila.expiresAt.getTime() > ahora.getTime() &&
+      input.estado === "PENDIENTE_PACIENTE",
+    caducaEn: fila.expiresAt.toISOString(),
   };
 }
 
@@ -435,8 +492,10 @@ export async function asegurarValoracionAbierta(
       };
     }
     const rotado = await rotarEnlace(prisma, {
+      tenantId: input.tenantId,
       valoracionId: abierta.id,
       canal: input.canal,
+      creadoPorUserId: input.pedidaPorUserId,
       ahora,
     });
     return {
@@ -448,29 +507,45 @@ export async function asegurarValoracionAbierta(
     };
   }
 
-  const nuevo = nuevoTokenDeEnlace(input.canal, ahora);
   try {
-    const creada = await prisma.clinicalAssessment.create({
-      data: {
+    // La valoración y su enlace nacen EN LA MISMA TRANSACCIÓN, y el orden
+    // no se puede invertir: el enlace apunta a la valoración, así que su
+    // `target_id` no existe hasta que la fila está. Juntos porque una
+    // valoración pendiente sin enlace es un test que nadie puede contestar
+    // y un enlace sin valoración no abre nada.
+    const creada = await prisma.$transaction(async (tx) => {
+      const fila = await tx.clinicalAssessment.create({
+        data: {
+          tenantId: input.tenantId,
+          clientId: input.clientId,
+          appointmentId: input.appointmentId ?? null,
+          questionnaireVersion: VERSION_VIGENTE,
+          channel: input.canal,
+          source: input.origen,
+          requestedByUserId:
+            input.origen === "MANUAL" ? input.pedidaPorUserId : null,
+        },
+        select: { id: true },
+      });
+      const enlace = await crearEnlace(tx, REGLAS_VALORACION, {
         tenantId: input.tenantId,
-        clientId: input.clientId,
-        appointmentId: input.appointmentId ?? null,
-        questionnaireVersion: VERSION_VIGENTE,
-        channel: input.canal,
-        source: input.origen,
-        requestedByUserId:
+        targetId: fila.id,
+        canal: input.canal,
+        // NULL cuando lo pidió la cita: ahí no lo pide una persona. Mismo
+        // criterio que `requested_by_user_id` con `source = APPOINTMENT`.
+        creadoPorUserId:
           input.origen === "MANUAL" ? input.pedidaPorUserId : null,
-        linkTokenHash: nuevo.hash,
-        linkExpiresAt: nuevo.expiraEn,
-      },
-      select: { id: true },
+        ahora,
+      });
+      await espejoDelEnlaceObsoleto(tx, fila.id, input.canal, enlace);
+      return { id: fila.id, enlace };
     });
     return {
       valoracionId: creada.id,
-      token: nuevo.token,
+      token: creada.enlace.token,
       creada: true,
       estado: "PENDIENTE_PACIENTE",
-      caducaEn: nuevo.expiraEn,
+      caducaEn: creada.enlace.expiraEn,
     };
   } catch (err) {
     // La carrera: otra petición creó la valoración abierta entre el
@@ -481,8 +556,10 @@ export async function asegurarValoracionAbierta(
     const rotado =
       ganadora.status === "PENDIENTE_PACIENTE"
         ? await rotarEnlace(prisma, {
+            tenantId: input.tenantId,
             valoracionId: ganadora.id,
             canal: input.canal,
+            creadoPorUserId: input.pedidaPorUserId,
             ahora,
           })
         : null;
@@ -497,33 +574,96 @@ export async function asegurarValoracionAbierta(
 }
 
 /**
- * Le pone un enlace nuevo a una valoración pendiente.
+ * Le pone un enlace nuevo a una valoración pendiente, y ANULA EL ANTERIOR.
  *
- * **Rotar es lo que invalida el anterior**, y no «quemarlo»: el sello
- * `link_used_at` significa exactamente «se usó para contestar» y se
- * escribe una sola vez, al contestar. Si reenviar sellara el token viejo,
- * esa columna pasaría a significar dos cosas y el trigger que la hace de
- * un solo uso dejaría de poder distinguirlas.
+ * **Rotar es lo que invalida el anterior**, y no «quemarlo»: gastar un uso
+ * significa exactamente «se usó para contestar» y se escribe una sola vez,
+ * al contestar. Si reenviar gastara el token viejo, el contador pasaría a
+ * significar dos cosas y el trigger que hace el enlace de un solo uso
+ * dejaría de poder distinguirlas.
+ *
+ * Desde `enlaces-publicos` son DOS filas de `public_links` —la vieja
+ * anulada, la nueva viva— y no una fila con el hash sobrescrito, que es la
+ * decisión S1.5. Lo que se gana: la anulación queda ESCRITA, con su fecha,
+ * en vez de desaparecer; y el único parcial `public_links_uno_vivo_key`
+ * convierte «se anula el anterior» en una invariante — si este `revocar`
+ * se cayera, el `crearEnlace` de la línea siguiente fallaría con 23505 en
+ * vez de dejar dos enlaces vivos del mismo test.
+ *
+ * Las dos van en la MISMA transacción: un enlace nuevo con el viejo todavía
+ * vivo, o un viejo anulado sin nuevo, son los dos estados que no pueden
+ * quedar.
  *
  * De aquí sale, gratis, lo que hacía falta de todos modos: **abrir la
- * tablet invalida el enlace del email**. El hash anterior desaparece de la
- * fila, así que la URL que el paciente tiene en el correo ya no resuelve
- * contra nada — sin un camino aparte que «cancele» el email.
+ * tablet invalida el enlace del email**. La fila del email queda anulada,
+ * así que la URL que el paciente tiene en el correo ya no resuelve contra
+ * nada — sin un camino aparte que «cancele» el email.
  */
 async function rotarEnlace(
   prisma: PrismaClient,
-  input: { valoracionId: string; canal: CanalValoracion; ahora: Date },
-): Promise<TokenNuevo> {
-  const nuevo = nuevoTokenDeEnlace(input.canal, input.ahora);
-  await prisma.clinicalAssessment.update({
-    where: { id: input.valoracionId },
+  input: {
+    tenantId: string;
+    valoracionId: string;
+    canal: CanalValoracion;
+    creadoPorUserId: string | null;
+    ahora: Date;
+  },
+): Promise<EnlaceCreado> {
+  return prisma.$transaction(async (tx) => {
+    await revocarEnlacesDe(tx, {
+      tenantId: input.tenantId,
+      targetType: REGLAS_VALORACION.targetType,
+      targetId: input.valoracionId,
+      purpose: REGLAS_VALORACION.purpose,
+      ahora: input.ahora,
+    });
+    const enlace = await crearEnlace(tx, REGLAS_VALORACION, {
+      tenantId: input.tenantId,
+      targetId: input.valoracionId,
+      canal: input.canal,
+      creadoPorUserId: input.creadoPorUserId,
+      ahora: input.ahora,
+    });
+    await espejoDelEnlaceObsoleto(tx, input.valoracionId, input.canal, enlace);
+    return enlace;
+  });
+}
+
+/**
+ * EL ESPEJO DE LAS TRES COLUMNAS OBSOLETAS. Transitorio, y por una sola
+ * razón.
+ *
+ * `clinical_assessments.link_token_hash` / `link_expires_at` /
+ * `link_used_at` **ya no las lee nadie**: el enlace de la valoración vive
+ * en `public_links` y la única cosa que resuelve un token es la puerta
+ * común. Se siguen escribiendo porque la guardia de regresión de clinica-2
+ * las mira —`clinica-valoracion.e2e.ts` contra los CHECK y los triggers de
+ * `clinical_assessments`, y `11-clinica-valoracion.spec.ts` contra la fila
+ * real— y el bloque que generaliza el mecanismo no es el que cambia la
+ * guardia que lo vigilaba. Expand ahora, contract después.
+ *
+ * **Se borra, con sus columnas, en el bloque que mueva esa guardia a
+ * `public_links`.** Hasta entonces es un espejo y no una segunda fuente de
+ * verdad: nada lo lee, así que no puede discrepar de nada.
+ *
+ * `channel` NO es obsoleto y se escribe aquí porque es el mismo UPDATE: lo
+ * lee la pantalla del sanitario y la respuesta de la ruta pública (la
+ * despedida de la tablet no es la del email).
+ */
+async function espejoDelEnlaceObsoleto(
+  tx: PrismaClient | Prisma.TransactionClient,
+  valoracionId: string,
+  canal: CanalValoracion,
+  enlace: EnlaceCreado,
+): Promise<void> {
+  await tx.clinicalAssessment.update({
+    where: { id: valoracionId },
     data: {
-      channel: input.canal,
-      linkTokenHash: nuevo.hash,
-      linkExpiresAt: nuevo.expiraEn,
+      channel: canal,
+      linkTokenHash: huellaDeToken(enlace.token),
+      linkExpiresAt: enlace.expiraEn,
     },
   });
-  return nuevo;
 }
 
 // ── Lo que contesta el paciente ───────────────────────────────────────
@@ -540,11 +680,19 @@ export type ResultadoResponder =
  *      tenant;
  *   2. la ENTRADA DE HISTORIA con las respuestas (inmutable desde ese
  *      instante);
- *   3. la valoración, que pasa a RESPONDIDA y sella el enlace.
+ *   3. la valoración, que pasa a RESPONDIDA;
+ *   4. **el uso del enlace**, dentro de esta misma transacción.
  *
  * Si la 3 fallara después de la 2, quedaría una entrada de historia que
  * ninguna valoración reclama: respuestas sin contexto que nadie va a
  * revisar, y el enlace seguiría abierto para contestar otra vez.
+ *
+ * Y la 4 va aquí, y no antes ni después, por lo mismo: un enlace gastado
+ * con la respuesta sin guardar deja al paciente sin poder contestar y sin
+ * nada contestado, y una respuesta guardada con el enlace sin gastar le
+ * deja contestar dos veces. `consumirEnlace` recibe el `tx` justamente
+ * para eso (decisión S1: «incrementa usos dentro de la transacción del
+ * acto que lo gasta»).
  *
  * El `updateMany` con `status: "PENDIENTE_PACIENTE"` en el WHERE es el
  * cierre de la carrera: si dos envíos del formulario llegan a la vez, el
@@ -564,9 +712,16 @@ export async function responderValoracion(
     respondioPor: RespondioPor;
     respuestas: Record<string, Respuesta>;
     detalles: Record<string, string[]>;
-    /** Se sella sólo si se entró por el enlace. Por la tablet no hay
-     *  enlace que gastar. */
-    sellarEnlace: boolean;
+    /**
+     * El enlace por el que se entró, que se gasta en esta transacción.
+     * `null` cuando no se entró por un enlace.
+     *
+     * (Las dos puertas del test SÍ son enlaces —el email y la tablet usan
+     * el mismo token con otra caducidad—, así que hoy siempre viene con
+     * valor desde la ruta pública. Se admite `null` porque la firma tiene
+     * que poder decir «esto no gastó ningún enlace».)
+     */
+    enlaceId: string | null;
     ahora?: Date;
   },
 ): Promise<ResultadoResponder> {
@@ -612,7 +767,12 @@ export async function responderValoracion(
           entryId: entrada.id,
           answeredAt: ahora,
           answeredBy: input.respondioPor,
-          ...(input.sellarEnlace ? { linkUsedAt: ahora } : {}),
+          // El espejo obsoleto del sello. Ver `espejoDelEnlaceObsoleto`:
+          // no lo lee nadie, y se va con las columnas en el bloque que
+          // mueva la guardia de clinica-2 a `public_links`. El «un solo
+          // uso» de verdad lo hace `consumirEnlace`, cuatro líneas más
+          // abajo.
+          ...(input.enlaceId ? { linkUsedAt: ahora } : {}),
         },
       });
       if (movidas.count !== 1) {
@@ -621,6 +781,18 @@ export async function responderValoracion(
         // (que vigila DELETE, no el deshacer de una inserción propia).
         throw new CarreraDeRespuesta();
       }
+
+      // EL USO DEL ENLACE, aquí dentro. `false` cuando ya no quedaba (o
+      // ya estaba anulado): dos envíos del formulario a la vez, y el
+      // segundo se cae con toda su transacción.
+      if (input.enlaceId) {
+        const gastado = await consumirEnlace(tx, {
+          enlaceId: input.enlaceId,
+          maxUsos: REGLAS_VALORACION.maxUsos,
+        });
+        if (!gastado) throw new CarreraDeRespuesta();
+      }
+
       return { ok: true as const, entryId: entrada.id };
     });
   } catch (err) {

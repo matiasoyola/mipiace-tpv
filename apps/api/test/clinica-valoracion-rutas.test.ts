@@ -21,6 +21,24 @@
 //      respuestas recibe 403 — Y QUEDA EN EL REGISTRO.
 //   6. EL PACIENTE POR ENLACE deja línea `WRITE` con el actor de sistema.
 //   7. Validar y corregir: el servidor no se fía del front.
+//
+// ── Lo único que `enlaces-publicos` tocó aquí, y por qué ─────────────
+//
+// **Ni un assert.** Las siete garantías de arriba y los 60 casos que las
+// prueban están como clinica-2 los dejó.
+//
+// Lo que cambió es el Prisma EN MEMORIA, porque el de verdad cambió: el
+// enlace del test ya no vive en `clinical_assessments` sino en
+// `public_links`, y la puerta común lo busca ahí. Así que el fake tiene
+// ahora esa tabla (`enlaces`), con las dos cosas que Postgres impone sobre
+// ella —la huella tiene que ser un SHA-256 y hay un solo enlace vivo por
+// objetivo—, y `conEnlace()` deja la fila del enlace al lado de la fila de
+// la valoración, igual que la hace el código de verdad.
+//
+// Las tres columnas viejas (`link_*`) se siguen escribiendo como espejo y
+// nadie las lee (ver `valoracion.ts::espejoDelEnlaceObsoleto`), que es lo
+// que permite que los asserts que las miran sigan valiendo hasta el bloque
+// que las quite.
 
 import { randomBytes, randomUUID } from "node:crypto";
 
@@ -88,6 +106,23 @@ interface FakeAssessment {
 }
 const valoraciones: FakeAssessment[] = [];
 
+// enlaces-publicos · `public_links`. La tabla que la puerta común busca.
+interface FakeLink {
+  id: string;
+  tenantId: string;
+  purpose: string;
+  targetType: string;
+  targetId: string;
+  tokenHash: string;
+  expiresAt: Date;
+  maxUses: number;
+  usedCount: number;
+  revokedAt: Date | null;
+  createdByUserId: string | null;
+  createdAt: Date;
+}
+const enlaces: FakeLink[] = [];
+
 interface FakeCorrection {
   id: string;
   tenantId: string;
@@ -146,11 +181,28 @@ function usuarioVista(id: string) {
   };
 }
 
-function conRelaciones(a: FakeAssessment) {
+function conRelaciones(a: FakeAssessment, select?: Record<string, unknown>) {
   return {
     ...a,
     requestedBy: a.requestedByUserId ? usuarioVista(a.requestedByUserId) : null,
     validatedBy: a.validatedByUserId ? usuarioVista(a.validatedByUserId) : null,
+    // enlaces-publicos · `client` y `tenant` sólo cuando se piden. El
+    // `cargarObjetivo` del `purpose` VALORACION las pide (es lo que la
+    // pantalla del paciente necesita: el nombre de la clínica y su nombre
+    // de pila), y antes sólo las traía `findUnique`.
+    ...(select?.client ? { client: clienteVista(a.clientId) } : {}),
+    ...(select?.tenant ? { tenant: tenantVista() } : {}),
+  };
+}
+
+function clienteVista(clientId: string) {
+  return { firstName: clientes.get(clientId)?.firstName ?? "" };
+}
+
+function tenantVista() {
+  return {
+    name: "Clínica Podológica Demo",
+    clinicalRecordsEnabled: clinicaEncendida,
   };
 }
 
@@ -171,6 +223,21 @@ function coincide(a: FakeAssessment, where: Record<string, unknown>): boolean {
     if (st.in != null && !st.in.includes(a.status)) return false;
   }
   if ((where.id as { not?: string } | undefined)?.not === a.id) return false;
+  return true;
+}
+
+/** El `where` que la puerta y la vista usan sobre `public_links`. */
+function coincideEnlace(l: FakeLink, where: Record<string, unknown>): boolean {
+  if (where.id != null && l.id !== where.id) return false;
+  if (where.tenantId != null && l.tenantId !== where.tenantId) return false;
+  if (where.purpose != null && l.purpose !== where.purpose) return false;
+  if (where.targetType != null && l.targetType !== where.targetType) {
+    return false;
+  }
+  if (where.targetId != null && l.targetId !== where.targetId) return false;
+  if (where.revokedAt === null && l.revokedAt !== null) return false;
+  const uc = where.usedCount as { lt?: number } | undefined;
+  if (uc?.lt != null && !(l.usedCount < uc.lt)) return false;
   return true;
 }
 
@@ -286,32 +353,28 @@ const fakePrisma = {
     }),
   },
   clinicalAssessment: {
-    findFirst: vi.fn(async ({ where, orderBy }: any) => {
+    findFirst: vi.fn(async ({ where, orderBy, select }: any) => {
       let xs = valoraciones.filter((a) => coincide(a, where));
       if (orderBy?.createdAt === "desc") {
         xs = xs.slice().sort((a, b) => +b.createdAt - +a.createdAt);
       }
-      return xs[0] ? conRelaciones(xs[0]) : null;
+      return xs[0] ? conRelaciones(xs[0], select) : null;
     }),
     findUnique: vi.fn(async ({ where }: any) => {
       const a = valoraciones.find((x) => coincide(x, where));
       if (!a) return null;
-      const c = clientes.get(a.clientId)!;
       return {
         ...a,
-        client: { firstName: c.firstName },
-        tenant: {
-          name: "Clínica Podológica Demo",
-          clinicalRecordsEnabled: clinicaEncendida,
-        },
+        client: clienteVista(a.clientId),
+        tenant: tenantVista(),
       };
     }),
-    findMany: vi.fn(async ({ where, orderBy }: any) => {
+    findMany: vi.fn(async ({ where, orderBy, select }: any) => {
       let xs = valoraciones.filter((a) => coincide(a, where));
       if (orderBy?.createdAt === "desc") {
         xs = xs.slice().sort((a, b) => +b.createdAt - +a.createdAt);
       }
-      return xs.map(conRelaciones);
+      return xs.map((a) => conRelaciones(a, select));
     }),
     create: vi.fn(async ({ data }: any) => {
       // El índice único PARCIAL, también aquí: una sola abierta por
@@ -366,6 +429,80 @@ const fakePrisma = {
     updateMany: vi.fn(async ({ where, data }: any) => {
       const xs = valoraciones.filter((a) => coincide(a, where));
       for (const a of xs) Object.assign(a, data);
+      return { count: xs.length };
+    }),
+  },
+  // enlaces-publicos · la tabla común de enlaces. Con las DOS cosas que
+  // Postgres impone sobre ella, por la misma razón que el fake de
+  // `clinicalAssessment` impone su índice parcial y su CHECK: si no, los
+  // tests que prueban «la huella no es el token» y «reenviar revoca el
+  // anterior» no probarían nada.
+  publicLink: {
+    create: vi.fn(async ({ data }: any) => {
+      // El CHECK `public_links_token_hash_es_sha256`. El token en claro
+      // (43 caracteres base64url) NO CABE en la columna.
+      if (!/^[0-9a-f]{64}$/.test(data.tokenHash)) {
+        throw new Error(
+          'new row violates check constraint "public_links_token_hash_es_sha256"',
+        );
+      }
+      // El único PARCIAL `public_links_uno_vivo_key`: un solo enlace vivo
+      // por (`purpose`, objetivo). Es lo que hace que «reenviar revoca el
+      // anterior» sea una invariante y no una costumbre.
+      const yaVivo = enlaces.some(
+        (l) =>
+          l.purpose === data.purpose &&
+          l.targetId === data.targetId &&
+          l.revokedAt === null &&
+          l.usedCount < l.maxUses,
+      );
+      if (yaVivo) {
+        throw new Error(
+          'duplicate key value violates unique constraint "public_links_uno_vivo_key"',
+        );
+      }
+      if (enlaces.some((l) => l.tokenHash === data.tokenHash)) {
+        throw new Error(
+          'duplicate key value violates unique constraint "public_links_token_hash_key"',
+        );
+      }
+      const row: FakeLink = {
+        id: randomUUID(),
+        tenantId: data.tenantId,
+        purpose: data.purpose,
+        targetType: data.targetType,
+        targetId: data.targetId,
+        tokenHash: data.tokenHash,
+        expiresAt: data.expiresAt,
+        maxUses: data.maxUses,
+        usedCount: data.usedCount ?? 0,
+        revokedAt: data.revokedAt ?? null,
+        createdByUserId: data.createdByUserId ?? null,
+        // +1 ms por fila para que «el último enlace» sea determinista en un
+        // test que rota dos veces en el mismo milisegundo.
+        createdAt: new Date(Date.now() + enlaces.length),
+      };
+      enlaces.push(row);
+      return { id: row.id };
+    }),
+    findUnique: vi.fn(async ({ where }: any) =>
+      enlaces.find((l) => l.tokenHash === where.tokenHash) ?? null,
+    ),
+    findFirst: vi.fn(async ({ where, orderBy }: any) => {
+      let xs = enlaces.filter((l) => coincideEnlace(l, where));
+      if (orderBy?.createdAt === "desc") {
+        xs = xs.slice().sort((a, b) => +b.createdAt - +a.createdAt);
+      }
+      return xs[0] ?? null;
+    }),
+    updateMany: vi.fn(async ({ where, data }: any) => {
+      const xs = enlaces.filter((l) => coincideEnlace(l, where));
+      for (const l of xs) {
+        if (data.revokedAt !== undefined) l.revokedAt = data.revokedAt;
+        if (data.usedCount?.increment != null) {
+          l.usedCount += data.usedCount.increment;
+        }
+      }
       return { count: xs.length };
     }),
   },
@@ -500,6 +637,7 @@ beforeEach(() => {
   redisKeys.clear();
   users.clear();
   valoraciones.length = 0;
+  enlaces.length = 0;
   correcciones.length = 0;
   entradas.length = 0;
   registro.length = 0;
@@ -550,11 +688,34 @@ beforeEach(() => {
   });
 });
 
-/** Deja una valoración PENDIENTE con su token, y devuelve el token. */
+/**
+ * Deja una valoración PENDIENTE con su token, y devuelve el token.
+ *
+ * Dos filas, como en la base de verdad desde `enlaces-publicos`: la
+ * valoración y SU ENLACE en `public_links`. Las tres columnas `link_*` de
+ * la valoración se rellenan igual porque el código de verdad las sigue
+ * escribiendo como espejo (nadie las lee) y hay asserts que las miran.
+ */
 function conEnlace(opts: { expiraEn?: Date; usada?: boolean } = {}): string {
   const t = nuevoTokenDeEnlace("EMAIL");
-  valoraciones.push({
+  const valoracionId = randomUUID();
+  enlaces.push({
     id: randomUUID(),
+    tenantId: TENANT_ID,
+    purpose: "VALORACION",
+    targetType: "CLINICAL_ASSESSMENT",
+    targetId: valoracionId,
+    tokenHash: t.hash,
+    expiresAt: opts.expiraEn ?? t.expiraEn,
+    maxUses: 1,
+    // «Ya usado» es el uso gastado, que es lo que la puerta mira.
+    usedCount: opts.usada ? 1 : 0,
+    revokedAt: null,
+    createdByUserId: RECEPCION_ID,
+    createdAt: new Date(Date.now() + enlaces.length),
+  });
+  valoraciones.push({
+    id: valoracionId,
     tenantId: TENANT_ID,
     clientId: PACIENTE_ID,
     appointmentId: null,
@@ -1173,9 +1334,24 @@ describe("clinica-2 · EL PACIENTE POR ENLACE deja línea WRITE", () => {
     valoraciones[0]!.clientId = otro; // un enlace del otro paciente
     valoraciones.length = 0;
     const t2 = nuevoTokenDeEnlace("EMAIL");
+    const v2 = randomUUID();
+    enlaces.push({
+      id: randomUUID(),
+      tenantId: TENANT_ID,
+      purpose: "VALORACION",
+      targetType: "CLINICAL_ASSESSMENT",
+      targetId: v2,
+      tokenHash: t2.hash,
+      expiresAt: t2.expiraEn,
+      maxUses: 1,
+      usedCount: 0,
+      revokedAt: null,
+      createdByUserId: RECEPCION_ID,
+      createdAt: new Date(Date.now() + enlaces.length),
+    });
     valoraciones.push({
       ...({} as FakeAssessment),
-      id: randomUUID(),
+      id: v2,
       tenantId: TENANT_ID,
       clientId: otro,
       appointmentId: null,
