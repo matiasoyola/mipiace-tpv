@@ -132,11 +132,23 @@ describe("kds-1 · la pantalla tiene secciones y el terminal no", () => {
   it("`devices_kitchen_sections` obliga a las dos mitades", () => {
     expect(COCINA_SQL).toMatch(/CONSTRAINT "devices_kitchen_sections"/);
     expect(COCINA_SQL).toMatch(
-      /"kind" = 'KITCHEN' AND array_length\("kitchen_sections", 1\) >= 1/,
+      /"kind" = 'KITCHEN' AND cardinality\("kitchen_sections"\) >= 1/,
     );
     expect(COCINA_SQL).toMatch(
-      /"kind" <> 'KITCHEN' AND "kitchen_sections" = '\{\}'/,
+      /"kind" <> 'KITCHEN' AND cardinality\("kitchen_sections"\) = 0/,
     );
+  });
+
+  it("y usa `cardinality`, NO `array_length`: con array_length no prohíbe nada", () => {
+    // Lo encontró el e2e. `array_length('{}', 1)` devuelve NULL, así que
+    // `array_length(…) >= 1` sobre el array vacío es NULL, la rama entera
+    // es NULL, y **un CHECK que evalúa a NULL se considera satisfecho**:
+    // el CHECK estaba escrito, se veía bien, y dejaba entrar exactamente
+    // la fila que existía para prohibir.
+    //
+    // El guardia vive aquí además del e2e porque éste corre siempre y el
+    // e2e sólo con `E2E_DATABASE_URL`.
+    expect(COCINA_SQL).not.toMatch(/array_length\("kitchen_sections"/);
   });
 
   it("y el código de emparejamiento lleva el mismo CHECK", () => {

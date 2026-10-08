@@ -104,11 +104,19 @@ ALTER TABLE "devices"
 -- Una pantalla de cocina SIN secciones no enseñaría nada, y el fallo se
 -- vería en el servicio y no al emparejar. Y al revés: un terminal de caja
 -- con secciones es un emparejamiento mal hecho que hay que ver ya.
+--
+-- `cardinality()` y NO `array_length(…, 1)`, y lo encontró su propio test
+-- e2e: **`array_length('{}', 1)` devuelve NULL, no 0**. Así que
+-- `array_length(…) >= 1` sobre un array vacío es NULL, la rama entera es
+-- NULL, `NULL OR false` es NULL — y un CHECK que evalúa a NULL SE
+-- CONSIDERA SATISFECHO. O sea: el CHECK estaba escrito, se veía bien, y
+-- dejaba entrar exactamente la fila que existía para prohibir.
+-- `cardinality()` devuelve 0 para el array vacío y la comparación es real.
 ALTER TABLE "devices"
     ADD CONSTRAINT "devices_kitchen_sections"
     CHECK (
-        ("kind" = 'KITCHEN' AND array_length("kitchen_sections", 1) >= 1)
-        OR ("kind" <> 'KITCHEN' AND "kitchen_sections" = '{}')
+        ("kind" = 'KITCHEN' AND cardinality("kitchen_sections") >= 1)
+        OR ("kind" <> 'KITCHEN' AND cardinality("kitchen_sections") = 0)
     );
 
 -- El GET de cocina pregunta «las pantallas vivas de esta tienda» para el
@@ -130,11 +138,14 @@ ALTER TABLE "pairing_codes"
     ADD COLUMN "kind" "DeviceKind" NOT NULL DEFAULT 'TERMINAL',
     ADD COLUMN "kitchen_sections" "KitchenSection"[] NOT NULL DEFAULT '{}';
 
+-- `cardinality()` por lo mismo que el de `devices`: con
+-- `array_length('{}', 1)` el CHECK evalúa a NULL y Postgres lo considera
+-- satisfecho.
 ALTER TABLE "pairing_codes"
     ADD CONSTRAINT "pairing_codes_kitchen_sections"
     CHECK (
-        ("kind" = 'KITCHEN' AND array_length("kitchen_sections", 1) >= 1)
-        OR ("kind" <> 'KITCHEN' AND "kitchen_sections" = '{}')
+        ("kind" = 'KITCHEN' AND cardinality("kitchen_sections") >= 1)
+        OR ("kind" <> 'KITCHEN' AND cardinality("kitchen_sections") = 0)
     );
 
 -- ──────────────────────────────────────────────────────────────────────
