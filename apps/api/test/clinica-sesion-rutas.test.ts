@@ -133,6 +133,10 @@ let productos: FakeProducto[] = [];
  *  es lo que eran en clinica-3, cuando no había tipos. */
 let mapaDeTipos: Array<{ slug: string; visitType: string }> = [];
 
+/** clinica-4 · qué consentimientos pide cada servicio. Vacío en este
+ *  fichero: la puerta de los consentimientos tiene su propio test. */
+const consentimientosPorServicio = new Map<string, string[]>();
+
 let tickets: Array<{ id: string; status: string }> = [];
 
 interface FakeLog {
@@ -425,6 +429,28 @@ const fakePrisma: any = {
   // VALIDADAS y nunca tuvieron enlace, así que la tabla está vacía — y
   // vacía de verdad, con su filtro, no un `null` a pelo: el día que un
   // caso de aquí necesite un enlace, basta con empujar la fila.
+  // clinica-4 · la sesión tiene ahora una SEGUNDA puerta: los
+  // consentimientos que pide el servicio de la cita (decisión 7).
+  //
+  // En este fichero ningún servicio pide ninguno —`consentimientosPorServicio`
+  // nace vacío—, así que la puerta está abierta y las 81 garantías de
+  // clinica-3 y -5 siguen probando lo suyo. Los dos casos en que la puerta
+  // se cierra viven en `clinica-consentimientos-rutas.test.ts`, que es de
+  // donde es la regla.
+  serviceScheduling: {
+    findMany: vi.fn(async ({ where }: any) =>
+      (where.productId?.in ?? [])
+        .filter((id: string) => consentimientosPorServicio.has(id))
+        .map((id: string) => ({
+          productId: id,
+          consentimientos: consentimientosPorServicio.get(id) ?? [],
+        })),
+    ),
+  },
+  clientConsent: {
+    findMany: vi.fn(async () => []),
+    findFirst: vi.fn(async () => null),
+  },
   publicLink: {
     findFirst: vi.fn(async ({ where }: any) => {
       const xs = enlacesPublicos.filter(

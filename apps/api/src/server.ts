@@ -24,6 +24,9 @@ import { registerContactsRoutes } from "./contacts/routes.js";
 import { registerContactImportRoutes } from "./contacts/import.js";
 import { registerClinicaRoutes } from "./clinica/routes.js";
 import { registerHistoriaRoutes } from "./clinica/historia-routes.js";
+import { registerConsentimientosRoutes } from "./clinica/consentimientos-routes.js";
+import { registerFotosRoutes } from "./clinica/fotos-routes.js";
+import { registerInformeRoutes } from "./clinica/informe-routes.js";
 import { registerSesionRoutes } from "./clinica/sesion-routes.js";
 import { registerValoracionRoutes } from "./clinica/valoracion-routes.js";
 import { registerValoracionPublicaRoutes } from "./clinica/valoracion-publica.js";
@@ -202,6 +205,13 @@ async function main() {
   // historia no es de un día) y deja su línea en el registro de accesos
   // en cada apertura, igual que el resto de lo clínico.
   await registerHistoriaRoutes(app);
+  // clinica-4 · consentimientos, fotos e informe. Mismo gate y mismo
+  // registro de accesos. Las de consentimiento y foto escriben; la del
+  // informe deja línea con `action = EXPORT`, que es la que distingue
+  // «abrió la historia» de «se llevó una copia».
+  await registerConsentimientosRoutes(app);
+  await registerFotosRoutes(app);
+  await registerInformeRoutes(app);
   await registerServicesRoutes(app);
   await registerStaffRoutes(app);
   await registerAgendaRoutes(app);

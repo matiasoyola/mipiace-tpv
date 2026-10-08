@@ -61,6 +61,10 @@ import type { PuertaPrimerTratamiento } from "@mipiacetpv/clinica-valoracion";
 
 import { resolverPrimerTratamiento } from "./primer-tratamiento.js";
 import {
+  puertaDeConsentimientos,
+  type PuertaDeConsentimientos,
+} from "./consentimientos.js";
+import {
   serviciosDeSesionConTipo,
   tratamientosPorId,
 } from "./tratamientos.js";
@@ -490,6 +494,17 @@ export interface VistaDeLaSesion {
   cabecera: CabeceraDeLaSesion;
   /** La puerta: sin valoración validada no hay sesión (prompt §2). */
   puerta: PuertaPrimerTratamiento;
+  /**
+   * clinica-4 · LA SEGUNDA PUERTA: los consentimientos que pide el
+   * servicio de esta cita (decisión 7).
+   *
+   * Viaja con la vista para que la pantalla pinte el aviso y el botón
+   * «Firmar ahora» —no un error rojo— y para que el botón de cerrar salga
+   * desactivado con su motivo al lado, igual que hace con la valoración.
+   * El servidor vuelve a comprobarla al cerrar: la pantalla ayuda, la ruta
+   * garantiza.
+   */
+  consentimientos: PuertaDeConsentimientos;
   /** Los botones de tratamiento, del catálogo, cada uno con su TIPO DE
    *  VISITA y su nivel de quiropodia si lo es (clinica-5). Sin importes
    *  para quien no los ve — lo quita la serialización de la ruta. */
@@ -577,6 +592,7 @@ export async function vistaDeLaSesion(
     paciente,
     valoracion,
     puerta,
+    consentimientos,
     catalogo,
     anterior,
     dolorHistorico,
@@ -600,6 +616,12 @@ export async function vistaDeLaSesion(
     // `CabeceraDeLaSesion.alertas`.
     vistaDeLaValoracion(prisma, { tenantId, clientId }),
     resolverPrimerTratamiento(prisma, { tenantId, clientId }),
+    // clinica-4 · la segunda puerta, con los servicios de ESTA cita.
+    puertaDeConsentimientos(prisma, {
+      tenantId,
+      clientId,
+      servicioIds: cita.servicioIds,
+    }),
     serviciosDeSesionConTipo(prisma, tenantId),
     ultimaSesion(prisma, { tenantId, clientId, exceptoCita: cita.id }),
     historialDeDolor(prisma, { tenantId, clientId, exceptoCita: cita.id }),
@@ -640,6 +662,7 @@ export async function vistaDeLaSesion(
       alertaIds: valoracion.alertas.alertas.map((a) => a.preguntaId),
     },
     puerta,
+    consentimientos,
     tratamientos: catalogo,
     // En el orden de la lista de tipos y sin repetidos: una cita con
     // «Quiropodia» y «Cura» marca los dos, una vez cada uno.
@@ -796,7 +819,13 @@ export type CierreDeSesion =
   | { ok: true; yaEstaba: boolean; cerrada: SesionCerradaView }
   | {
       ok: false;
-      motivo: "SIN_VALORACION_VALIDADA" | "FALTA_DOLOR" | "SIN_TIPOS";
+      motivo:
+        | "SIN_VALORACION_VALIDADA"
+        // clinica-4 · la sesión no empieza si su servicio pide un
+        // consentimiento que no está firmado y vigente (decisión 7).
+        | "SIN_CONSENTIMIENTO"
+        | "FALTA_DOLOR"
+        | "SIN_TIPOS";
       mensaje: string;
     };
 
@@ -890,6 +919,28 @@ export async function cerrarSesion(
       ok: false,
       motivo: "SIN_VALORACION_VALIDADA",
       mensaje: puerta.mensaje,
+    };
+  }
+
+  // 1b · clinica-4 · LA SEGUNDA PUERTA: los consentimientos que pide el
+  // servicio de esta cita, firmados y vigentes (decisión 7).
+  //
+  // Va DESPUÉS de la valoración y no antes, y el orden importa: a un
+  // paciente nuevo le falta todo, y lo primero que hay que hacer con él es
+  // validar su valoración —ahí salen las alergias y la medicación, que es
+  // lo que hay que saber ANTES de ponerle delante un consentimiento de
+  // anestesia—. Contestar «falta el consentimiento» primero sería mandar a
+  // la podóloga a firmar antes de saber si puede anestesiar.
+  const consentimientos = await puertaDeConsentimientos(prisma, {
+    tenantId,
+    clientId: cita.clientId,
+    servicioIds: cita.servicioIds,
+  });
+  if (!consentimientos.puede) {
+    return {
+      ok: false,
+      motivo: "SIN_CONSENTIMIENTO",
+      mensaje: consentimientos.mensaje,
     };
   }
 
