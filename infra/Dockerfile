@@ -48,6 +48,7 @@ COPY packages/db/package.json packages/db/
 # test en la primera pasada, antes de llegar al CI. Tres de tres.
 COPY packages/clinica-sesion/package.json packages/clinica-sesion/
 COPY packages/clinica-valoracion/package.json packages/clinica-valoracion/
+COPY packages/consentimientos/package.json packages/consentimientos/
 COPY packages/escpos-builder/package.json packages/escpos-builder/
 COPY packages/holded-client/package.json packages/holded-client/
 COPY packages/ticket-model/package.json packages/ticket-model/

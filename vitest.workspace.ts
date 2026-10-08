@@ -1,6 +1,7 @@
 export default [
   "packages/clinica-sesion",
   "packages/clinica-valoracion",
+  "packages/consentimientos",
   "packages/escpos-builder",
   "packages/holded-client",
   "packages/ticket-model",

@@ -22,6 +22,7 @@
     "@fastify/websocket": "^11",
     "@mipiacetpv/clinica-sesion": "workspace:*",
     "@mipiacetpv/clinica-valoracion": "workspace:*",
+    "@mipiacetpv/consentimientos": "workspace:*",
     "@mipiacetpv/db": "workspace:*",
     "@mipiacetpv/escpos-builder": "workspace:*",
     "@mipiacetpv/holded-client": "workspace:*",
