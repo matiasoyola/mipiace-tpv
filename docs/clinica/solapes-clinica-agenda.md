@@ -31,7 +31,7 @@
 | S4 | Notas sobre el cliente por servicio | **decidido** (07-10, por delegación) | B-1 / clinica-3 |
 | S5 | Agrupar servicios (familia / especialidad) | **decidido** (07-10, por delegación) | especialidades / iva-exento |
 | S6 | Bono de sesiones | **decidido** (07-10, OK de Matías) | B-reservas-8 |
-| S7 | Paciente y familiar | propuesta (clínica) | B-1b / clinica-2 |
+| S7 | Paciente y familiar | propuesta (clínica) + lado agenda | B-1b / clinica-2 |
 
 ---
 
@@ -501,6 +501,11 @@ consumo queda parametrizado y **no se enciende en producción sin la respuesta d
 bonos en papel se dan de alta a mano como «alta inicial». Que B-8 entre en el frente C lo decide
 Dirección.
 
+**Ratificado por Matías (07-10, 22:07), en la conversación de reservas.** «Los bonos se abonan de una
+y se van descontando cuando se canjea la sesión», como ya se decidió en Raquel Torres. La reserva al
+dar la cita **no descuenta**: sólo aparta la sesión para que no se den más citas de bono que sesiones
+quedan. Matías confirma mantenerla.
+
 ---
 
 ## S7 · Paciente y familiar — `propuesta`
@@ -542,7 +547,31 @@ Propuesta:
    **relacionadas** por esta tabla, y cada sesión sigue yendo a la historia del paciente que la
    recibe. Eso es regla de B-8 y lo decide agenda.
 
-**Lado agenda.** _(pendiente)_
+**Lado agenda (07-10).** De acuerdo con los cinco, y con separar acompañante de representante. Lo
+que añade la capa común, desde RT (B12) y desde los otros centros:
+
+1. **La marca «representante legal» no puede ser sólo clínica.** S3 ya decidió que el consentimiento
+   del spa también lo firma «paciente o representante», y en estética hay menores (depilación,
+   tratamientos faciales) cuyo consentimiento firma el padre o la madre. Propuesta: la marca existe en
+   todos los centros; lo que es **sólo clínico** es su efecto sobre la historia (pedir acceso, punto 4).
+2. **Con un solo móvil y varias fichas, nunca se elige en silencio** (RT, B12). Orden fijo: vínculo ya
+   conocido → ficha única con ese móvil → el nombre distingue a una → si no, **se marca «revisar
+   ficha»** y lo decide recepción. Vale para el mostrador y para la reserva online. Con módulo
+   clínico, además, la regla 2 de clínica: nunca se fusiona automáticamente una ficha con historia.
+3. **La relación no copia datos.** La ficha de la hija no hereda el móvil de la madre ni al revés:
+   cada ficha guarda su contacto y la relación dice quién puede recibir avisos de quién. Así, si la
+   hija cambia de móvil, se cambia en un sitio.
+4. **Los avisos a un contacto compartido van con el nombre del paciente delante** («Cita de Carmen
+   López, jueves 10:30»), y con el nombre neutro del servicio cuando es clínico, como dice clínica.
+   Lo mismo para «mi cita» (S1): el enlace va atado a la ficha, y al contacto compartido le llega
+   uno por paciente.
+5. **Bonos compartidos: no en la primera versión de B-8.** Un bono es de una ficha. Si un centro lo
+   pide, se hace después sobre esta tabla, como propone clínica. RT tampoco los tuvo: sus programas
+   iban atados a un móvil y eso fue justo lo que dio problemas con las familias.
+
+Estado: **acordado** por los dos lados si clínica acepta el punto 1 (la marca de representante en
+todos los centros). No toca dinero ni ley nueva más allá de S3: se puede cerrar **por delegación**.
+
 **Decisión.** _(pendiente)_
 
 ---

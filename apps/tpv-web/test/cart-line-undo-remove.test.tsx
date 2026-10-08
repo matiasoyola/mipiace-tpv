@@ -262,8 +262,12 @@ describe("v1.10.3-barra · papelera de línea sin trampa de tiempo", () => {
     await addCafe();
     const trash = buttonByLabel("Eliminar Café solo");
     expect(trash.getAttribute("aria-label")).not.toContain("de nuevo");
-    // Sigue siendo un target de 44 px (h-11/w-11 de Tailwind).
-    expect(trash.className).toContain("h-11");
-    expect(trash.className).toContain("w-11");
+    // v1.22 §3 · sube de 44 a 48 px (hallazgo C8 de la auditoría del
+    // 06-10: la papelera medía 44 × 44 y −/+ 44 × 36). 48 es el peldaño
+    // `touch` de la escala cerrada de `tokens.md` §4 — `h-touch` /
+    // `w-touch`, no un `h-12` suelto.
+    expect(trash.className).toContain("h-touch");
+    expect(trash.className).toContain("w-touch");
+    expect(trash.className).not.toContain("h-11");
   });
 });

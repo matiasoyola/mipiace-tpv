@@ -269,3 +269,97 @@ export function roomFitsWithoutScroll(
     availableHeight
   );
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// El importe de una mesa ocupada no se corta nunca
+//
+// Hallazgo del hierro (AP13, 07-10-2026, 22:08): en la tarjeta de M2 el
+// «37,30 €» salía cortado por la derecha. Medido sobre la captura del
+// propio terminal, la tinta del importe acababa 25 px físicos (19 px
+// CSS) MÁS ALLÁ del borde derecho de la tarjeta.
+//
+// La causa: el pie era una sola fila `flex-wrap` donde el camarero pedía
+// `min-w-[92px]` y el importe iba `shrink-0`. Con 136 px de hueco útil,
+// 92 + 8 de hueco + el importe no caben, y lo que sobresalía era el
+// dinero. El arreglo de v1.10.3 (hallazgo #5) le dio al importe el
+// `shrink-0` para que no se partiera en dos líneas, pero compartir fila
+// con el camarero seguía siendo el problema: `shrink-0` no recorta, se
+// desborda.
+//
+// Ahora el importe tiene su propia línea. El camarero va encima y se
+// trunca; el importe no cede nunca. Estas constantes son las que el
+// componente pinta y las que el test mide.
+// ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Lo que la tarjeta se come antes del contenido: `p-3.5` (14 px por
+ * lado) y `border-2` (2 px por lado). El hueco útil de una tarjeta de
+ * ancho W es `W - TABLE_CARD_CHROME_X`.
+ */
+export const TABLE_CARD_CHROME_X = 2 * 14 + 2 * 2;
+
+/** Tamaño del importe en la tarjeta, en px. `text-[19px]`. */
+export const TABLE_AMOUNT_FONT_PX = 19;
+
+/**
+ * Ancho por carácter del importe: DM Sans a 19 px, peso 700, con
+ * `tabular-nums`.
+ *
+ * Como en `lineName.ts` y `chipRows.ts`, es una cota SUPERIOR medida, no
+ * el ancho medio: con `tabular-nums` todos los dígitos ocupan lo mismo
+ * (~11,4 px medidos sobre la captura del D8 a 1443 × 812) y el resto de
+ * glifos de un importe —`.`, `,`, el espacio y el `€`— son más
+ * estrechos. 11,5 no subestima ningún importe.
+ *
+ * El error tiene un solo lado que importa: subestimar devuelve «cabe» a
+ * un importe que el navegador acaba cortando, que es justo el fallo que
+ * este bloque arregla. Sobrestimar sólo haría saltar el test antes de
+ * tiempo.
+ */
+export const TABLE_AMOUNT_CHAR_WIDTH = 11.5;
+
+/**
+ * El importe más largo que la tarjeta tiene que aguantar.
+ *
+ * Cuatro cifras de euros es el techo realista de una mesa de bar (La
+ * Maestranza cerró la M4 del ensayo en 55,00 €); si algún día hiciera
+ * falta una quinta, lo que cambia es esta constante y el test dice si
+ * sigue cabiendo.
+ *
+ * **Sin separador de millares, a propósito**: `formatEur` no lo pone
+ * (`formatAmount(n) + " €"`), así que meterlo aquí habría inflado la
+ * cuenta en un carácter que el TPV no pinta. `room-grid-importe.test.ts`
+ * ata esta constante a `formatEur` para que, si el formateador cambiara
+ * y empezara a separar millares, el test lo diga en vez de dejar la
+ * medida corta en silencio.
+ */
+export const LONGEST_TABLE_AMOUNT = "1234,50 €";
+
+/** Ancho que ocupa un importe pintado en la tarjeta, en px. */
+export function tableAmountWidth(amount: string): number {
+  return amount.length * TABLE_AMOUNT_CHAR_WIDTH;
+}
+
+/**
+ * Hueco útil para el contenido dentro de una tarjeta de mesa, en px.
+ */
+export function tableCardContentWidth(
+  cardWidth: number = TABLE_CARD_WIDTH,
+): number {
+  return cardWidth - TABLE_CARD_CHROME_X;
+}
+
+/**
+ * ¿Cabe el importe entero en la tarjeta, en su propia línea?
+ *
+ * Esto es lo que el test mide en 1443 × 812 (tarjeta de 168) y en
+ * 390 × 844 (tarjeta de 153). Se pregunta por el importe SOLO: desde
+ * este bloque no comparte línea con nadie, así que no entra en la cuenta
+ * ni el avatar del camarero ni su alias.
+ */
+export function tableAmountFits(
+  amount: string,
+  cardWidth: number = TABLE_CARD_WIDTH,
+): boolean {
+  return tableAmountWidth(amount) <= tableCardContentWidth(cardWidth);
+}

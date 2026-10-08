@@ -16,6 +16,7 @@
 export function AmountField({
   value,
   active,
+  replacing = false,
   onActivate,
   placeholder = "0,00",
   suffix = "€",
@@ -28,6 +29,10 @@ export function AmountField({
 }: {
   value: string;
   active: boolean;
+  // v1.22 §2 · el pad está abierto sobre un importe que vino
+  // pre-rellenado y la próxima tecla lo SUSTITUYE. Se pinta como texto
+  // seleccionado (ver la nota del fondo más abajo).
+  replacing?: boolean;
   onActivate: () => void;
   placeholder?: string;
   // "€" en importes; sin sufijo en los conteos del arqueo.
@@ -43,9 +48,25 @@ export function AmountField({
     size === "lg" ? "h-touch-lg" : size === "sm" ? "h-touch" : "h-touch";
   const text =
     size === "lg" ? "text-[26px]" : size === "sm" ? "text-[15px]" : "text-[17px]";
-  const ring = active
-    ? "border-mipiace-coral bg-white ring-2 ring-mipiace-coral/30"
-    : "border-slate-200 bg-white hover:bg-slate-50";
+  // v1.22 §2 · tres estados, no dos.
+  //
+  // El "para sustituir" se pinta como TEXTO SELECCIONADO: el importe
+  // sobre `coral-soft`, que es lo que `tokens.md` §2 reserva para fondos
+  // suaves de elemento coral, con el borde y el ring del estado activo
+  // ya puestos. Es la convención que cualquiera ha usado mil veces en un
+  // campo de un ordenador —lo seleccionado se reemplaza al teclear— y no
+  // necesita aprenderse.
+  //
+  // La alternativa que se descartó era ATENUAR el importe (`opacity`):
+  // atenuado es exactamente como se pinta `disabled` dos líneas más
+  // abajo, así que el mismo gris diría "no puedes tocar esto" y "escribe
+  // encima" en la misma pantalla. Entre dos señales ambiguas y una
+  // prestada, la prestada.
+  const ring = replacing
+    ? "border-mipiace-coral bg-mipiace-coral-soft ring-2 ring-mipiace-coral/30"
+    : active
+      ? "border-mipiace-coral bg-white ring-2 ring-mipiace-coral/30"
+      : "border-slate-200 bg-white hover:bg-slate-50";
 
   return (
     <div className={"relative " + className}>
@@ -55,6 +76,9 @@ export function AmountField({
         placeholder={placeholder}
         aria-label={ariaLabel}
         aria-current={active ? "true" : undefined}
+        // Asa estable para el banco visual y para la suite: nunca se
+        // pregunta por una clase de Tailwind.
+        data-replacing={replacing ? "true" : undefined}
         disabled={disabled}
         // Sólo lectura de verdad: el pad es el único que escribe.
         readOnly

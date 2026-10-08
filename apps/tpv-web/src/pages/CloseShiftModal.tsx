@@ -44,6 +44,8 @@ import {
   type ShiftDaySummary,
 } from "../lib/shiftSummary.js";
 import { DaySummaryCard } from "./DaySummaryCard.js";
+import { OpenTablesNotice } from "../components/OpenTablesNotice.js";
+import { fetchOpenTables, type OpenTablesSummary } from "../lib/openTables.js";
 import type { CashierRole } from "../lib/offlineAuth.js";
 
 // Mismo orden que `ALLOWED_DENOMINATIONS` del backend (de mayor a
@@ -150,6 +152,10 @@ export function CloseShiftModal(props: {
   // CashPad. `null` = pad cerrado. Aquí se cuentan UNIDADES, no euros:
   // el pad va sin coma (`maxDecimals = 0`).
   const [padDenom, setPadDenom] = useState<string | null>(null);
+  // v1.22 §2 · en el arqueo el pre-relleno es la cuenta que ya había de
+  // esa denominación. Al volver a una fila contada, la primera tecla
+  // SUSTITUYE: es lo que hace cierto el «escribe encima si no cuadra».
+  const [padReplacing, setPadReplacing] = useState(false);
   // v1.12 · el Atrás cierra el pad, y sólo después el modal. En las
   // pruebas físicas el Atrás durante el arqueo acabó en el escritorio
   // de Android con el turno abierto (H6).
@@ -181,6 +187,22 @@ export function CloseShiftModal(props: {
     });
     return () => cancelAnimationFrame(raf);
   }, [padDenom]);
+  // v1.22 §5 · hallazgo B2 · mesas que siguen abiertas. Se pregunta
+  // AQUÍ y no por prop porque este modal se monta desde cinco sitios
+  // (mapa, venta, menú, turno colgado y el arqueo a posteriori de la
+  // apertura): con una prop, el aviso aparecería en los sitios que se
+  // acordasen de pasarla. Es el mismo GET /tpv/tables de la cabecera del
+  // mapa, sin endpoint nuevo.
+  const [openTables, setOpenTables] = useState<OpenTablesSummary | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void fetchOpenTables().then((s) => {
+      if (alive) setOpenTables(s);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
   const [syncFailureAccepted, setSyncFailureAccepted] = useState(false);
   const [managerPin, setManagerPin] = useState("");
   const [needsManager, setNeedsManager] = useState(false);
@@ -632,6 +654,10 @@ export function CloseShiftModal(props: {
                 setPhase("count");
               }}
               error={error}
+              // v1.22 §5 · antes del botón de cerrar, dentro de la
+              // tarjeta: un bloque debajo se lee cuando ya se ha
+              // pulsado.
+              notice={<OpenTablesNotice summary={openTables} variant="close" />}
             />
             {(failedDocs.length > 0 || hasCloseReason || needsManager) && (
               <div className="mt-4">{syncBlock}</div>
@@ -727,6 +753,15 @@ export function CloseShiftModal(props: {
           <ResultPanel result={xResult} alert={showXDescuadreAlert ?? false} />
         ) : (
           <>
+            {/* v1.22 §5 · y el aviso de mesas abiertas delante del
+                esperado: el efectivo que falta por entrar en el cajón
+                explica parte del descuadre que el cajero está a punto
+                de mirar. */}
+            <OpenTablesNotice
+              summary={openTables}
+              variant="close"
+              className="mb-4 shrink-0"
+            />
             {/* v1.11 · el esperado va DELANTE, mientras se cuenta. */}
             {expectedCash != null && (
               <div className="mb-4 rounded-2xl bg-mipiace-stone px-4 py-3 shrink-0">
@@ -803,6 +838,7 @@ export function CloseShiftModal(props: {
                           <AmountField
                             value={counts[d.key] ?? ""}
                             active={padDenom === d.key}
+                            replacing={padDenom === d.key && padReplacing}
                             onActivate={() => setPadDenom(d.key)}
                             placeholder="0"
                             suffix={null}
@@ -898,7 +934,16 @@ export function CloseShiftModal(props: {
                 Contando {DENOMINATIONS.find((d) => d.key === padDenom)?.label}
               </span>
               <div className="flex items-center gap-2 shrink-0">
-                <span className="text-[17px] font-semibold tabular-nums text-mipiace-ink">
+                {/* v1.22 §2 · mismo eco "para sustituir" que en el
+                    cobro: con el pad abierto la fila que se está
+                    contando puede quedar fuera de cuadro. */}
+                <span
+                  data-replacing={padReplacing ? "true" : undefined}
+                  className={
+                    "text-[17px] font-semibold tabular-nums text-mipiace-ink rounded-lg px-1.5 " +
+                    (padReplacing ? "bg-mipiace-coral-soft text-mipiace-coral-dark" : "")
+                  }
+                >
                   {counts[padDenom] || "0"}
                 </span>
                 <button
@@ -914,6 +959,7 @@ export function CloseShiftModal(props: {
               value={counts[padDenom] ?? ""}
               maxDecimals={0}
               onChange={(next) => setCount(padDenom, next)}
+              onReplacingChange={setPadReplacing}
             />
           </div>
         )}

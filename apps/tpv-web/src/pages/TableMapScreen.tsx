@@ -71,6 +71,7 @@ import { outboxBlockedTableIds, subscribeOutbox } from "../lib/outbox.js";
 import { ROOM_GRID_CLASS, TABLE_CARD_SIZE_CLASS } from "../lib/roomGrid.js";
 import { syncNow } from "../lib/syncNow.js";
 import { CloseShiftModal } from "./CloseShiftModal.js";
+import { summarizeOpenTables } from "../lib/openTables.js";
 import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
 import { formatEur } from "../lib/money.js";
 import type { CashierRole } from "../lib/offlineAuth.js";
@@ -286,17 +287,15 @@ export function TableMapScreen(props: TableMapScreenProps) {
   // igual que el mockup). "€ en sala" = suma de totales de los DRAFTs
   // visibles — trazable a la misma respuesta de /tpv/tables, sin cálculo
   // nuevo en server.
-  const openCount = tables.filter(
-    (t) => t.state !== "FREE" && !t.groupedIntoTableId,
-  ).length;
+  //
+  // v1.22 §5 · la regla se ha mudado a `lib/openTables.ts` porque ahora
+  // la usan también el cierre del día y la apertura de turno (hallazgo
+  // B2). Si viviera en dos sitios, el aviso del cierre podría decir un
+  // número y esta cabecera otro.
+  const openSummary = summarizeOpenTables(tables);
+  const openCount = openSummary.count;
   const freeCount = tables.length - openCount;
-  const salaTotal = tables.reduce(
-    (sum, t) =>
-      t.activeTicket && !t.groupedIntoTableId
-        ? sum + Number(t.activeTicket.total)
-        : sum,
-    0,
-  );
+  const salaTotal = openSummary.total;
 
   const visible =
     zoneFilter === "ALL" ? tables : tables.filter((t) => t.zone === zoneFilter);
@@ -1030,37 +1029,39 @@ function TableCard({
           </span>
         )}
 
-        {/* pie: camarero (avatar+alias) + total */}
-        {/* v1.10.3-barra · hallazgo #5: el importe no llevaba `shrink-0`
-            y con la tarjeta estrecha "0,00 €" se partía en dos líneas
-            mientras el alias del cajero quedaba en "m..". El dinero es
-            lo que no se puede leer a medias: gana el ancho que necesita
-            y lo que se recorta es el nombre, que además va en `title`. */}
+        {/* pie: camarero arriba, importe en SU PROPIA línea debajo */}
+        {/* v1.10.3-barra · hallazgo #5 le dio `shrink-0` al importe para
+            que "0,00 €" no se partiera en dos líneas. No bastaba:
+            `shrink-0` no recorta, DESBORDA. Compartiendo fila con el
+            camarero (que pedía `min-w-[92px]`) el importe se salía de la
+            tarjeta — medido en el AP13 el 07-10, «37,30 €» acababa 25 px
+            físicos más allá del borde derecho, con el € ya fuera.
+
+            Así que dejan de compartir fila. El importe tiene la suya,
+            entera, y nunca cede: `whitespace-nowrap` y sin encogerse. El
+            camarero va encima y se trunca, que para eso su nombre
+            completo está en el `title`. Lo que cabe se comprueba con
+            `tableAmountFits` en `room-grid-importe.test.ts`, con el
+            importe más largo y los dos anchos de tarjeta reales. */}
         {!isFree && table.activeTicket && (
-          <div className="mt-auto pt-1 flex flex-wrap items-end justify-between gap-x-2 gap-y-1">
-            {alias ? (
+          <div className="mt-auto pt-1 flex flex-col gap-0.5 min-w-0">
+            {alias && (
               <span
                 title={aliasName(alias)}
-                // `min-w-[92px]` + `flex-wrap` en el contenedor: si el
-                // camarero y el importe no caben en la misma línea, el
-                // camarero se lleva una línea entera para él en vez de
-                // quedarse en "m..". Con importes normales siguen en la
-                // misma fila, como hasta ahora.
-                className="flex items-center gap-1.5 text-[11.5px] text-slate-500 min-w-[92px] flex-1"
+                className="flex items-center gap-1.5 text-[11.5px] text-slate-500 min-w-0"
               >
                 <span className="w-5 h-5 rounded-[7px] bg-mipiace-ink text-white text-[9.5px] font-bold inline-flex items-center justify-center shrink-0">
                   {avatarInitials(alias)}
                 </span>
                 <span className="truncate">{aliasName(alias)}</span>
               </span>
-            ) : (
-              <span className="min-w-[92px] flex-1" />
             )}
             {/* En BILLING el total cede su sitio al botón Cobrar (overlay
                 a la derecha); reservamos el hueco. */}
             {!showCobrar && (
               <span
-                className={`shrink-0 ml-auto whitespace-nowrap text-[19px] font-bold tabular-nums tracking-tight ${totalColor}`}
+                data-testid="table-card-amount"
+                className={`block text-right whitespace-nowrap text-[19px] font-bold tabular-nums tracking-tight ${totalColor}`}
               >
                 {formatEur(Number(table.activeTicket.total))}
               </span>

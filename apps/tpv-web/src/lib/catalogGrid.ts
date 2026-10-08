@@ -45,6 +45,25 @@ export const CATALOG_GRID_GAP = 14;
 export const CATEGORY_CHIP_BLOCK_HEIGHT = 48 + 24;
 
 /**
+ * Lo que cuesta de ALTO el bloque de categorías en TABLET desde v1.22:
+ * nada.
+ *
+ * El rail vertical de `CategoryRail` vive a la izquierda del catálogo y
+ * no por encima, así que la rejilla recupera los 72 px que gastaba la
+ * fila de chips. Medido en el navegador con la carta de La Maestranza:
+ * cuatro filas completas antes, CINCO después, tanto a 1443 × 812 como
+ * a 1280 × 800.
+ *
+ * El rail cuesta ancho (144 px), no alto: a 1443 la tarjeta pasa de 189
+ * a 157 px y a 1280 de 157 a 125, sin perder ninguna de las cinco
+ * columnas.
+ *
+ * La constante de arriba se queda porque el reparto de HANDHELD sigue
+ * siendo la fila de chips con "Más (N)".
+ */
+export const CATEGORY_RAIL_BLOCK_HEIGHT = 0;
+
+/**
  * Lo que hay por encima de la rejilla y no es suyo: barra superior
  * (100 px) más el `p-7` del workspace (28 px). Medido en el navegador:
  * la columna del catálogo empieza en y=128.

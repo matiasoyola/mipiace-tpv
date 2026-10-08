@@ -129,6 +129,8 @@ import {
 } from "../lib/categoryTones.js";
 import { layoutChips } from "../lib/chipRows.js";
 import { PRODUCT_CARD_MIN_HEIGHT } from "../lib/catalogGrid.js";
+import { isTouchDevice } from "../lib/touchDevice.js";
+import { CategoryRail, type RailCategory } from "../components/CategoryRail.js";
 import {
   fetchTopSellers,
   resolveTopSellers,
@@ -183,6 +185,10 @@ const CHIP_IDLE =
   "bg-white border-slate-200 text-mipiace-ink hover:border-mipiace-coral/40";
 const CHIP_SELECTED =
   "bg-mipiace-coral-soft border-mipiace-coral text-mipiace-coral-dark";
+// v1.22 §4 · el toggle Servicios/Productos dentro del rail: mismo
+// lenguaje que un chip, pero a ancho completo de la columna.
+const RAIL_LEADING_BASE =
+  "h-touch w-full px-3.5 rounded-2xl border text-[14px] font-medium flex items-center shrink-0";
 
 // Iconos Lucide por categoría (hallazgo M2). `categoryTones.ts` decide
 // el NOMBRE; la resolución al componente vive aquí para que el módulo de
@@ -830,6 +836,11 @@ export function SalePage(props: SalePageProps) {
   const isHospitality = businessType === "HOSPITALITY";
   const compactSearch = isHospitality;
   const [searchOpen, setSearchOpen] = useState(false);
+  // v1.22 · "plegado" tenía tres copias de la misma condición repartidas
+  // por el JSX del buscador. Ahora es un nombre: es el estado del que
+  // depende el `inputMode` del input (hallazgo N1), y una cuarta copia
+  // que se desincronizara volvería a abrir el teclado de Android.
+  const searchCollapsed = compactSearch && !searchOpen;
   // Al desplegar la lupa, el foco va al campo: si hubiera que tocarlo
   // otra vez, el botón sería un paso de más en vez de un atajo.
   useEffect(() => {
@@ -838,8 +849,8 @@ export function SalePage(props: SalePageProps) {
   // Al plegarse, la búsqueda se limpia: dejar un filtro activo detrás de
   // una lupa cerrada es cómo se llega a "no me salen los productos".
   useEffect(() => {
-    if (compactSearch && !searchOpen) setQuery("");
-  }, [compactSearch, searchOpen]);
+    if (searchCollapsed) setQuery("");
+  }, [searchCollapsed]);
   // v1.10.3-barra · línea borrada a la espera de "Deshacer" (4 s).
   const [undoRemove, setUndoRemove] = useState<
     null | { line: CartLine; index: number }
@@ -1131,14 +1142,16 @@ export function SalePage(props: SalePageProps) {
   // tiene sentido). En táctil el cajero tiene que tocar el input
   // explícitamente para escribir, y el scan se hace con cámara
   // (botón Escanear del header).
+  //
+  // v1.22 · hallazgo N1 · la pregunta "¿es táctil?" ya no se hace con
+  // una sola media query aquí dentro: vive en `isTouchDevice`, que
+  // además de `(pointer: coarse)` mira `(any-pointer: coarse)` y
+  // `maxTouchPoints > 0` con `(hover: none)`. El WebView 101 del Kozen
+  // D8 dice que su puntero es FINO sobre una pantalla goodix, así que
+  // con la consulta sola este efecto corría en cada toque y Android
+  // sacaba el teclado encima del CashPad del cobro mixto.
   useEffect(() => {
-    if (
-      typeof window !== "undefined" &&
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(pointer: coarse)").matches
-    ) {
-      return;
-    }
+    if (isTouchDevice()) return;
     function refocus() {
       if (
         document.activeElement === document.body ||
@@ -1765,7 +1778,7 @@ export function SalePage(props: SalePageProps) {
               )}
               <div
                 className={
-                  compactSearch && !searchOpen
+                  searchCollapsed
                     ? // Fuera de cuadro pero enfocable: el lector USB-HID
                       // sigue escribiendo aquí.
                       "absolute -left-[9999px] top-0 w-px h-px overflow-hidden"
@@ -1784,15 +1797,30 @@ export function SalePage(props: SalePageProps) {
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={onSearchKey}
                   type="search"
-                  inputMode="search"
+                  // v1.22 · hallazgo N1 · SEGUNDA capa del arreglo del
+                  // teclado del sistema, y la que protege aunque la
+                  // detección de táctil vuelva a fallar con el WebView
+                  // del próximo fabricante.
+                  //
+                  // Mientras el buscador está PLEGADO el input sigue
+                  // montado y enfocable —es donde aterriza el lector
+                  // USB-HID, que es toda su razón de existir—, pero con
+                  // `inputMode="none"` Android no saca el QWERTY al
+                  // enfocarlo. El lector escribe igual: entra como
+                  // eventos de teclado, no por el IME.
+                  //
+                  // Al DESPLEGARLO vuelve a `search`, que es cuando el
+                  // camarero acaba de pedir escribir y el teclado es lo
+                  // que espera ver.
+                  inputMode={searchCollapsed ? "none" : "search"}
                   enterKeyHint="search"
                   autoCapitalize="off"
                   autoCorrect="off"
                   spellCheck={false}
                   // Sólo cuando está plegado: emitir `aria-hidden="false"`
                   // en retail sería ruido en el árbol de accesibilidad.
-                  aria-hidden={compactSearch && !searchOpen ? true : undefined}
-                  tabIndex={compactSearch && !searchOpen ? -1 : undefined}
+                  aria-hidden={searchCollapsed ? true : undefined}
+                  tabIndex={searchCollapsed ? -1 : undefined}
                   placeholder={
                     businessType === "SERVICES"
                       ? "Buscar servicio o cliente…"
@@ -2740,20 +2768,34 @@ function ProductTile({
         <span
           className={
             imgSrc
-              ? "line-clamp-2 text-[13.5px] font-medium leading-tight text-white drop-shadow"
-              : "line-clamp-2 text-[13.5px] font-medium leading-tight text-mipiace-ink"
+              ? "line-clamp-2 text-[16.5px] font-medium leading-tight text-white drop-shadow"
+              : "line-clamp-2 text-[16.5px] font-medium leading-tight text-mipiace-ink"
           }
         >
           {product.name}
         </span>
-        {/* Jerarquía: el precio pesa MÁS que el nombre (15/600 contra
-            13,5/500). En una barra el nombre se reconoce de memoria y lo
-            que se comprueba de un vistazo es el importe. */}
+        {/* v1.22 §3 · hallazgo N5 · se INVIERTE la jerarquía de v1.14.1.
+            Allí el precio pesaba más que el nombre (15/600 contra
+            13,5/500) con el argumento de que en una barra el nombre se
+            reconoce de memoria. Medido en el AP13, el argumento no
+            aguanta: 13,5 px en un lienzo de 1443 px son ~18 px físicos
+            en una pantalla de 157 dpi, por debajo del mínimo de 16 px
+            que pide `ux-principles` §1.5 para cualquier texto operativo,
+            y el camarero de La Maestranza es nuevo — no tiene la carta
+            de memoria, y tiene pares (Hamburguesa normal / especial,
+            Bocadillo / especial) que sólo se distinguen leyendo.
+            El nombre pasa a 16,5/500 y es LO MÁS GRANDE de la tarjeta;
+            el precio baja a 14/600, donde el peso sigue haciéndolo la
+            cifra que se comprueba sin ser la que manda.
+            El alto de la tarjeta NO cambia: 2 líneas de 16,5 (41 px) más
+            el precio (18) más los paddings (22) son 81 de los 104 de
+            `PRODUCT_CARD_MIN_HEIGHT`, así que la rejilla sigue repartida
+            igual. */}
         <span
           className={
             imgSrc
-              ? "mt-1.5 text-[15px] font-semibold tabular-nums text-white drop-shadow"
-              : "mt-1.5 text-[15px] font-semibold tabular-nums text-mipiace-ink"
+              ? "mt-1.5 text-[14px] font-semibold tabular-nums text-white drop-shadow"
+              : "mt-1.5 text-[14px] font-semibold tabular-nums text-mipiace-ink"
           }
         >
           {formatEur(product.priceGross)}
@@ -3064,6 +3106,34 @@ function SaleWorkspace({
     () => displayTags.slice(chipLayout.visibleCount),
     [displayTags, chipLayout.visibleCount],
   );
+  // v1.22 §4 · el rail de tablet lleva TODAS las categorías: no hay
+  // reparto que calcular ni "Más (N)" que reservar. `displayTags` entero,
+  // en el mismo orden (el orden por frecuencia es otro bloque, C6).
+  const railCategories = useMemo<RailCategory[]>(
+    () =>
+      displayTags.map((tag) => {
+        const tone = toneAssignments[tag] ?? "stone";
+        const Icon = CATEGORY_ICONS[iconNameForTag(tag, tone)];
+        const active = selectedTag === tag;
+        return {
+          tag,
+          label: renderTagLabel(tag, tagAliases),
+          icon: (
+            <Icon
+              className={`w-[18px] h-[18px] shrink-0 ${active ? "" : TONE_STYLES[tone].icon}`}
+              strokeWidth={2.25}
+            />
+          ),
+        };
+      }),
+    [displayTags, toneAssignments, tagAliases, selectedTag],
+  );
+  // v1.22 §4 · handheld: la etiqueta del chip de desbordamiento cuando
+  // la categoría elegida se ha quedado dentro del sheet.
+  const hiddenActiveLabel =
+    selectedTag != null && overflowTags.includes(selectedTag)
+      ? renderTagLabel(selectedTag, tagAliases)
+      : null;
   const [categoriesSheetOpen, setCategoriesSheetOpen] = useState(false);
   // Si el desbordamiento desaparece (el propietario borró categorías en
   // Holded y llegó un sync), la hoja no puede quedarse abierta y vacía.
@@ -3167,10 +3237,19 @@ function SaleWorkspace({
             no se había resuelto. `flex-nowrap` es la garantía dura de
             que el reparto estimado no puede abrir una segunda fila si
             se queda corto con la fuente del Chrome del AP11. */}
+        {/* v1.22 §4 · hallazgo N2 · la fila de chips es de HANDHELD.
+            En tablet (≥ lg, el mismo umbral con el que este layout
+            decide panel lateral contra bottom-sheet) las categorías van
+            al rail vertical de la izquierda, donde se ven TODAS y no
+            hay "Más (N)". El eje que sobra en una pantalla apaisada es
+            el horizontal: a 1443 px el catálogo tiene 1003 y la rejilla
+            cabe en 843. Y de paso el bloque de chips deja de costar sus
+            72 px de alto, que son los que convierten cuatro filas de
+            producto en cinco. */}
         <div
           ref={chipRowRef}
           data-testid="category-chips"
-          className="flex flex-nowrap items-center gap-2 mb-4 md:mb-6 shrink-0 overflow-hidden"
+          className="lg:hidden flex flex-nowrap items-center gap-2 mb-4 md:mb-6 shrink-0 overflow-hidden"
         >
           {/* P-1 (v1.1 peluquería): toggle Servicios/Productos para
               verticales SERVICES. Va delante de los chips de tag y
@@ -3254,14 +3333,56 @@ function SaleWorkspace({
               }`}
             >
               <ChevronDown className="w-[18px] h-[18px] shrink-0" strokeWidth={2.25} />
-              Más ({overflowTags.length})
+              {/* v1.22 §4 · si la categoría activa se ha quedado dentro
+                  del sheet, el chip dice SU NOMBRE. Con "Más (4)"
+                  resaltado el camarero sabía que había elegido algo
+                  pero no qué: en el AP13 la rejilla filtrada de
+                  Refrescos y la de Vinos se parecen lo bastante para
+                  dudar. El `aria-pressed` de arriba ya decía el estado;
+                  faltaba decir el contenido. */}
+              {hiddenActiveLabel ?? `Más (${overflowTags.length})`}
             </button>
           )}
         </div>
+        {/* v1.22 §4 · rail + rejilla en fila. El rail es `shrink-0` y
+            vive FUERA de la zona de scroll: las categorías no se van de
+            la pantalla al desplazar el catálogo (el mismo motivo por el
+            que la fila de chips estaba fuera desde v1.3). */}
+        <div className="flex-1 min-h-0 flex lg:gap-4">
+        <CategoryRail
+          className="hidden lg:flex"
+          categories={railCategories}
+          selectedTag={selectedTag}
+          onSelect={setSelectedTag}
+          {...(showKindToggle
+            ? {
+                leading: (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setKindFilter("SERVICE")}
+                      aria-pressed={kindFilter === "SERVICE"}
+                      className={`${RAIL_LEADING_BASE} ${kindFilter === "SERVICE" ? CHIP_SELECTED : CHIP_IDLE}`}
+                    >
+                      Servicios
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setKindFilter("PRODUCT")}
+                      aria-pressed={kindFilter === "PRODUCT"}
+                      className={`${RAIL_LEADING_BASE} ${kindFilter === "PRODUCT" ? CHIP_SELECTED : CHIP_IDLE}`}
+                    >
+                      Productos
+                    </button>
+                  </>
+                ),
+              }
+            : {})}
+        />
         {/* Zona scrollable: favoritos + grid + estados vacíos. min-h-0
             es crítico para que flex-1 + overflow-y funcionen dentro de
             un flex container. */}
-        <div className="flex-1 min-h-0 lg:overflow-y-auto">
+        <div className="flex-1 min-w-0 min-h-0 lg:overflow-y-auto">
         {/* v1.2-Lite Lote 4.A · T-9 Atajos: sub-grid de favoritos arriba.
             Sólo aparece si hay productos con el tag reservado `favoritos`.
             Se respeta el toggle Servicios/Productos (productsForTags ya
@@ -3384,6 +3505,7 @@ function SaleWorkspace({
             derecha como chips secundarios agrupados con el resto de
             acciones del ticket. El workspace izquierdo queda solo con
             el grid de productos. */}
+        </div>
         </div>
         {/* Hueco para que la barra inferior fija (handheld) no tape
             las últimas filas del catálogo. */}

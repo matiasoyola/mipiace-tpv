@@ -16,17 +16,24 @@
 // El pad NO tiene estado: el importe lo posee el formulario. Aquí sólo
 // se aplican las reglas de escritura.
 
+import { useEffect, useState } from "react";
 import { Delete } from "lucide-react";
 
 export function CashPad({
   value,
   onChange,
+  onReplacingChange,
   maxDecimals = 2,
   disabled = false,
   className = "",
 }: {
   value: string;
   onChange: (next: string) => void;
+  // v1.22 §2 · el pad avisa de si el valor que hay está "para
+  // sustituir", para que el campo que lo enseña pueda pintarlo como
+  // seleccionado. Opcional: sin cablearlo el comportamiento es el mismo,
+  // sólo falta la pista visual.
+  onReplacingChange?: (replacing: boolean) => void;
   // 2 = importe en euros con coma decimal. 0 = conteo entero (las
   // denominaciones del arqueo son unidades, no euros: la tecla de la
   // coma ni se pinta).
@@ -36,9 +43,31 @@ export function CashPad({
 }) {
   const withComma = maxDecimals > 0;
 
+  // v1.22-el-terminal-del-bar · §2 (hallazgo C2).
+  //
+  // El pad sigue sin poseer el importe: lo posee el formulario. Lo único
+  // que recuerda es el último valor que EMITIÓ él. Si el que le llega es
+  // otro, ese valor viene de fuera (se acaba de abrir sobre el resto del
+  // mixto, sobre el `0,00` del fondo de apertura, o el formulario ha
+  // movido el objetivo a otra fila) y la primera tecla lo sustituye.
+  //
+  // Es una comparación y no un `pristine` que se arme al montar porque
+  // el pad NO se desmonta al cambiar de fila: en el arqueo se pasa de
+  // una denominación a otra con el pad abierto, y en el mixto de la
+  // tarjeta al efectivo. Con un flag de montaje, la segunda fila no se
+  // podría sustituir.
+  const [lastEmitted, setLastEmitted] = useState<string | null>(null);
+  const replacing = lastEmitted !== value;
+
+  useEffect(() => {
+    onReplacingChange?.(replacing);
+  }, [replacing, onReplacingChange]);
+
   function press(key: string): void {
     if (disabled) return;
-    onChange(applyKey(value, key, maxDecimals));
+    const next = applyKey(value, key, maxDecimals, { replace: replacing });
+    setLastEmitted(next);
+    onChange(next);
   }
 
   const keyClass =
@@ -123,11 +152,34 @@ export function CashPad({
 //     (no redondean: el cajero ve exactamente lo que ha metido).
 //   - Campo vacío ≠ "0,00". Vacío significa "no introducido" y el
 //     formulario mantiene bloqueado su botón de acción.
-export function applyKey(value: string, key: string, maxDecimals = 2): string {
-  const v = value ?? "";
+//
+// v1.22-el-terminal-del-bar · §2 · `replace` (hallazgo C2).
+//
+// Con el importe ya en dos decimales (`6,90` del resto del mixto,
+// `0,00` del fondo de apertura) `room` era 0 y el dígito se IGNORABA:
+// pulsar 4 sobre 6,90 no hacía nada, y borrando uno se pegaba detrás
+// (6,9 + 4 = 6,94). Había que pulsar "C" primero, y la ayuda del campo
+// decía «escribe encima si no cuadra».
+//
+// Con `replace`, la primera pulsación de dígito, de `00` o de la coma
+// escribe sobre campo VACÍO en vez de sobre el valor. Las siguientes
+// escriben normal: la sustitución dura UNA tecla, no un modo.
+// "C" y borrar no la consumen ni la necesitan.
+export function applyKey(
+  value: string,
+  key: string,
+  maxDecimals = 2,
+  opts: { replace?: boolean } = {},
+): string {
+  // `00` sobre un pre-relleno deja el campo VACÍO, no "00": el convenio
+  // de arriba dice que `00` no antepone ceros sobre campo vacío, y vacío
+  // es "no introducido", que es lo honesto cuando el cajero acaba de
+  // borrar el importe que había. El botón de la acción se queda
+  // bloqueado hasta que teclee algo.
+  const v = opts.replace && key !== "C" && key !== "back" ? "" : (value ?? "");
 
   if (key === "C") return "";
-  if (key === "back") return v.slice(0, -1);
+  if (key === "back") return (value ?? "").slice(0, -1);
 
   if (key === ",") {
     if (maxDecimals <= 0) return v; // conteos enteros: no hay coma
