@@ -253,6 +253,32 @@ servidor en el mismo `106f0d3`:
    se tiene que seguir reconociendo **de un vistazo** sobre la venta oscura, que es para lo que el
    color está ahí. Nueve familias, nueve rellenos distinguibles entre sí y legibles en oscuro —
    «más bonito» no puede salir a costa de que dos familias vecinas se confundan a velocidad.
+
+   **ELEGIDA el 08-10** en la maqueta de paletas, opción **«A2 · entre pastel y mate»**. Sustituye a
+   `FAMILY_FILL` en `apps/tpv-web/src/lib/hospitalityTheme.ts:181`. El texto **no cambia**: sigue
+   siendo `DARK_INK` **#15171B** en las nueve (`FAMILY_TEXT`, línea 194).
+
+   | familia | hoy | A2 (elegida) |
+   |---|---|---|
+   | cafes | `#F3B992` | **`#F1B499`** |
+   | desayunos | `#CACD8C` | **`#BFCC90`** |
+   | cervezas | `#E1C487` | **`#DCC188`** |
+   | refrescos | `#86D5EE` | **`#8AD0EB`** |
+   | vinos | `#D8B8F1` | **`#D8B5E8`** |
+   | licores | `#A7C9FF` | **`#A8C5F9`** |
+   | raciones | `#96D9B4` | **`#8BD6C1`** |
+   | bocadillos | `#F3B1CF` | **`#F3AFB3`** |
+   | platos | `#B0D49D` | **`#9FD3A9`** |
+
+   Lo que hace que la paleta funcione, y que hay que conservar si alguien la retoca: **las nueve
+   tienen el mismo brillo y la misma intensidad** (OKLCH L 0,82 · C 0,08) y **sólo cambia el tono**,
+   para que ninguna familia destaque sobre otra — si una brillara más, el ojo iría siempre a la
+   misma y el reconocimiento por color dejaría de repartirse. El contraste del texto queda entre
+   **9,9 y 10,7 a 1** en todas.
+
+   Motivo de Matías: que sea agradable para quien pasa muchas horas delante, sin perder la puerta 1.
+   **Se valida en el D8 en la pasada de v2-H2**, no sólo en el monitor: el brillo y el ángulo de la
+   pantalla del terminal no son los del Mac.
 3. **El plano de sala no ocupa la pantalla**: a 1920 px las bandas acaban en 1320 y el tercio
    derecho queda en negro. Con 16 mesas sobra sitio y no se usa.
 4. **El importe del cambio tiene que verse mucho más grande.** Hoy «Cambio 12,70 €» sale a la mitad
