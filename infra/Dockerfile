@@ -50,6 +50,9 @@ COPY packages/clinica-sesion/package.json packages/clinica-sesion/
 COPY packages/clinica-valoracion/package.json packages/clinica-valoracion/
 COPY packages/escpos-builder/package.json packages/escpos-builder/
 COPY packages/holded-client/package.json packages/holded-client/
+# kds-2-wifi · el contrato del camino directo por la wifi del local. Lo
+# importa la API (reparte la clave de la tienda) y el TPV (cierra el sobre).
+COPY packages/kitchen-lan/package.json packages/kitchen-lan/
 COPY packages/ticket-model/package.json packages/ticket-model/
 COPY packages/ticket-pdf/package.json packages/ticket-pdf/
 COPY packages/util-validation/package.json packages/util-validation/
