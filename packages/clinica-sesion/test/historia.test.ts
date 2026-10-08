@@ -397,18 +397,19 @@ describe("visitaLegible", () => {
           CIRUGIA: { herida: "BIEN", puntos: "RETIRADOS", servicios: [] },
         },
         dolor: 3,
-        // Un servicio del catálogo que se llama IGUAL que el tipo.
-        tratamientosNombre: { s1: "Cirugía", s2: "Matricectomía parcial" },
+        // Un servicio del catálogo que se llama EXACTAMENTE como uno de
+        // los tipos marcados («Quiropodia»), que es como se llama de
+        // verdad en el catálogo de una podóloga. Y otro que no.
+        tratamientosNombre: { s1: "Quiropodia", s2: "Matricectomía parcial" },
       } as never,
       META,
     );
     expect(v.titulo).toBe("Quiropodia básica + Cirugía · revisión");
     expect(v.chips).toContain("Evoluciona bien");
     expect(v.chips).toContain("Matricectomía parcial");
+    // «Quiropodia» ya está en la columna del tipo: no se repite de chip.
+    expect(v.chips).not.toContain("Quiropodia");
     expect(v.chips).not.toContain("Cirugía · revisión");
-    // El servicio que se llama «Cirugía» a secas SÍ es un chip: lo que no
-    // se repite es el NOMBRE DEL TIPO, que es «Cirugía · revisión».
-    expect(v.chips).toContain("Cirugía");
   });
 
   it("un cuerpo roto no revienta la historia", () => {
