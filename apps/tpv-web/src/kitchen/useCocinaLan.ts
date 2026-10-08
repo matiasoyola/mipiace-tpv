@@ -392,6 +392,9 @@ export function useCocinaLan(opts: {
   // Se publica en la pieza nativa cada vez que cambia lo que hay listo:
   // así el TPV sin internet recibe el «LISTO» en milisegundos, sin que el
   // WebView tenga que despertarse para contestar.
+  const firmaDeListas = opts.listas
+    .map((c) => `${c.id}:${c.readyAt ?? ""}`)
+    .join("|");
   useEffect(() => {
     const snapshot: PayloadRespuesta = {
       listas: listasRef.current.map((c) => ({
@@ -408,7 +411,14 @@ export function useCocinaLan(opts: {
       deviceName: me.device.name,
     };
     void publicarRespuestaLan(snapshot);
-  }, [opts.listas, pendientes.length, me.sections, me.device.name, ahora]);
+    // La dependencia es una FIRMA de lo que hay listo, no el array: ese
+    // array nace nuevo en cada render (`vista?.ready ?? []`), así que
+    // dependiendo de él se publicaría una instantánea en cada repintado —
+    // y la pantalla repinta cada segundo por el reloj del semáforo. Con la
+    // firma se publica cuando CAMBIA lo que hay listo, que es lo que el
+    // sondeo del TPV va a leer.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firmaDeListas, pendientes.length, me.sections, me.device.name, ahora]);
 
   // ── 4 · las marcas de cuando no hay red ─────────────────────────────
   const apuntarMarca = useCallback(
