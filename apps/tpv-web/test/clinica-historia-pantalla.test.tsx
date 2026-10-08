@@ -465,7 +465,18 @@ describe("el pie vivo", () => {
     await montar(vista({ conPendiente: true }));
     const zonas = [...host.querySelectorAll("[data-zona]")];
     expect(zonas).toHaveLength(MAPA_PIE_V1.zonas.length * 2);
-    const escala = ANCHO_DEL_PIE_PX / VIEWBOX.ancho;
+    // La escala se lee DEL SVG QUE SE HA PINTADO, no de la constante del
+    // paquete. La diferencia la encontró un sabotaje: encoger el pie a
+    // 200 px dejaba la zona en 36,6 px y el test seguía verde, porque
+    // calculaba sobre el ancho nominal — que seguía siendo correcto. Es
+    // la misma trampa del §7.3 de clinica-3, y ahí la cazó la medición de
+    // la captura en vez del test.
+    // Y es EL SVG DEL PIE, no el primero del DOM: los iconos de lucide
+    // también llevan `viewBox`, y el primero es el de la franja roja.
+    const svg = zonas[0]!.closest("svg") as SVGElement;
+    const ancho = Number.parseFloat(svg.style.maxWidth);
+    expect(ancho).toBe(ANCHO_DEL_PIE_PX);
+    const escala = ancho / VIEWBOX.ancho;
     for (const z of zonas) {
       const rx = Number(z.getAttribute("rx"));
       const ry = Number(z.getAttribute("ry"));
