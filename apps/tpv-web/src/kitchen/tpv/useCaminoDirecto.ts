@@ -132,6 +132,31 @@ export const SONDEO_MS = 4_000;
  */
 export const WIFI_VIVA_MS = SONDEO_MS * 2 + 4_000;
 
+/**
+ * **EL PAPEL SÓLO SALE SI FALLAN LOS DOS CAMINOS** (decisión 9).
+ *
+ * El servidor dice si la pantalla da señales por la nube; lo que el
+ * servidor NO puede saber es si le está llegando por la wifi del local,
+ * porque esa conversación no pasa por él. Así que su `needsPaperFallback`
+ * es sólo la MITAD, y aquí se le resta lo que la wifi acusa.
+ *
+ * Es una función y no una línea dentro del hook por una razón concreta: es
+ * la regla que decide si se gasta papel en mitad de un servicio, y una
+ * regla tiene que poder sabotearse y ponerse roja. Escrita dentro del
+ * hook, el test tenía que reimplementar la resta y entonces el sabotaje
+ * pasaba en verde — que es la lección del §4.1 de kds-1, otra vez.
+ *
+ * Tiene su fila en la tabla de sabotajes: «papel con la wifi funcionando».
+ */
+export function saleElPapel(opts: {
+  /** El servidor no ve latido de ninguna pantalla de esa sección. */
+  servidorPidePapel: boolean;
+  /** Alguna pantalla acusó recibo por la wifi hace poco. */
+  wifiViva: boolean;
+}): boolean {
+  return opts.servidorPidePapel && !opts.wifiViva;
+}
+
 export function useCaminoDirecto(opts: {
   /** `Tenant.kitchenDisplayEnabled`. Apagado, no se pide nada. */
   moduloEncendido: boolean;
@@ -271,16 +296,11 @@ export function useCaminoDirecto(opts: {
 
   const wifiViva = ultimoAcuse > 0 && Date.now() - ultimoAcuse < WIFI_VIVA_MS;
 
-  // **EL PAPEL SÓLO SALE SI FALLAN LOS DOS CAMINOS** (decisión 9). El
-  // servidor dice si la pantalla da señales por la nube; lo que el servidor
-  // no puede saber es si le está llegando por la wifi del local, porque esa
-  // conversación no pasa por él. Así que el `needsPaperFallback` del
-  // servidor es sólo la MITAD: aquí se le resta lo que la wifi acusa.
-  //
-  // Tiene su fila en la tabla de sabotajes: «papel con la wifi
-  // funcionando».
-  const cocinaNoRecibe =
-    pantallas?.sections.some((s) => s.needsPaperFallback) === true && !wifiViva;
+  const cocinaNoRecibe = saleElPapel({
+    servidorPidePapel:
+      pantallas?.sections.some((s) => s.needsPaperFallback) === true,
+    wifiViva,
+  });
 
   return {
     pantallas,

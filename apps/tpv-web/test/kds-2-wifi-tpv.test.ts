@@ -31,6 +31,7 @@ import {
   type RespuestaDePantalla,
 } from "../src/kitchen/tpv/envioLan.js";
 import { diagnosticar } from "../src/kitchen/tpv/pruebaConexion.js";
+import { saleElPapel } from "../src/kitchen/tpv/useCaminoDirecto.js";
 import { estadoCocinaVacio } from "../src/lib/kitchenComanda.js";
 
 const CLAVE = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
@@ -516,12 +517,13 @@ function respuestaFalsa(ok: boolean): RespuestaDePantalla {
 }
 
 describe("kds-2 · SABOTAJE · papel con la wifi funcionando", () => {
-  // La regla vive en `useCaminoDirecto`: el `needsPaperFallback` del
-  // servidor es sólo la mitad —dice que la pantalla no le da señales A
-  // ÉL— y hay que restarle lo que la wifi acusa. Aquí se prueba la
-  // aritmética de esa resta, que es lo que decide si se gasta papel.
+  // **Se llama a la función de producción**, no se reimplementa la resta
+  // aquí. La primera versión de este test sí la reimplementaba, y el
+  // sabotaje —quitar el `&& !wifiViva` de `useCaminoDirecto`— pasaba en
+  // VERDE. Es la lección del §4.1 de kds-1 otra vez: un test que protege
+  // una regla no puede llevar su propia copia de la regla.
   const papel = (servidorDice: boolean, wifiViva: boolean) =>
-    servidorDice && !wifiViva;
+    saleElPapel({ servidorPidePapel: servidorDice, wifiViva });
 
   it("sin internet pero con wifi, NO sale papel", () => {
     expect(papel(true, true)).toBe(false);
