@@ -83,6 +83,29 @@ import type { CashierRole } from "./lib/offlineAuth.js";
 
 type CashierUser = CashierLoginResponse["user"] & { sessionTtlMinutes: number };
 
+/**
+ * v2-H1 §5 · el estado de envío a cocina de un DRAFT, tal como lo
+ * devuelven los endpoints que abren un borrador.
+ *
+ * Se extrae aquí, en una línea, para que no haya dos sitios leyendo los
+ * mismos dos campos con criterios distintos: la comanda del TPV parte
+ * sus líneas en «En cocina» y «Sin enviar» a partir de esto, y si una
+ * rama dijera `0` donde la otra dice `null` el camarero vería −/+ sobre
+ * algo que ya está en la plancha.
+ *
+ * Los `?? null` / `?? 0` cubren la respuesta de una API sin desplegar
+ * todavía: ahí el campo no viene, y «no viene» es «no se ha enviado».
+ */
+function kitchenFromDraft(t: ServerDraft): {
+  lastSentAt: string | null;
+  revision: number;
+} {
+  return {
+    lastSentAt: t.lastSentAt ?? null,
+    revision: t.lastSentRevision ?? 0,
+  };
+}
+
 type CashierState =
   | { kind: "needsLogin" }
   | { kind: "needsShiftOpen"; cashier: CashierUser }
@@ -621,6 +644,12 @@ export function TpvHome(props: {
         // (las líneas que ya tenía la mesa al retomarla). null en venta
         // rápida.
         initialDraftLines?: CartLine[];
+        // v2-H1 §5 · con qué comanda salió ya este DRAFT hacia cocina.
+        // Viaja desde el endpoint que abrió el borrador para que la
+        // comanda del TPV pueda partirse en «En cocina · hh:mm» y «Sin
+        // enviar» SIN pedir otra vez el ticket: la respuesta de
+        // `POST /tables/:id/open` ya lo trae.
+        initialKitchen?: { lastSentAt: string | null; revision: number };
       }
   >(skipTables ? { kind: "sale", tableContext: null } : { kind: "map" });
   // v1.0-mesas-frontend: tocar una mesa abre (o retoma) el DRAFT
@@ -655,19 +684,25 @@ export function TpvHome(props: {
     appointmentContext?: AppointmentContext | null;
     lines?: CartLine[];
     ticketId?: string;
+    // v2-H1 §5 · lo trae quien ya tenga el DRAFT en la mano (la mesa);
+    // en la rama que lo pide con GET se lee de la respuesta.
+    kitchen?: { lastSentAt: string | null; revision: number };
   }): Promise<void> {
     let lines = entry.lines;
+    let kitchen = entry.kitchen;
     if (!lines && entry.ticketId) {
       const res = await apiWithCashier<{ ticket: ServerDraft }>(
         `/tickets/${entry.ticketId}`,
       );
       lines = mapServerDraftLines(res.ticket.lines);
+      kitchen = kitchenFromDraft(res.ticket);
     }
     setView({
       kind: "sale",
       tableContext: entry.tableContext ?? null,
       appointmentContext: entry.appointmentContext ?? null,
       initialDraftLines: lines ?? [],
+      initialKitchen: kitchen,
     });
   }
 
@@ -694,6 +729,7 @@ export function TpvHome(props: {
           activeTicketId: res.ticket.id,
         },
         lines: mapServerDraftLines(res.ticket.lines),
+        kitchen: kitchenFromDraft(res.ticket),
       });
     } catch (err) {
       // 409 TABLE_GROUPED / SHIFT_NOT_OPEN llegan con mensaje en
@@ -897,6 +933,7 @@ export function TpvHome(props: {
         storeName={props.storeName}
         tableContext={view.tableContext}
         initialDraftLines={view.initialDraftLines}
+        initialKitchen={view.initialKitchen}
         // La salida al mapa ya viene con la limpieza dentro: `SalePage` no
         // envuelve nada, sólo llama.
         onBackToMap={hasTables ? () => void goToMap() : null}

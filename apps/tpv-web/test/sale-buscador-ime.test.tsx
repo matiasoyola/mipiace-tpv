@@ -289,8 +289,11 @@ describe("v1.22 §1 · el entorno del D8 y el foco", () => {
     await render();
 
     // El recorrido del criterio: entrar en venta y tocar un producto.
+    // v2-H1 · en hostelería el botón de producto es el de la cuadrícula
+    // oscura (`product-button`); el `product-tile` del TPV claro sigue
+    // vivo y lo cubre `sale-catalog-grid`, ahora apuntado a RETAIL.
     const tiles = Array.from(
-      container.querySelectorAll<HTMLButtonElement>('[data-testid="product-tile"]'),
+      container.querySelectorAll<HTMLButtonElement>('[data-testid="product-button"]'),
     );
     expect(tiles.length).toBeGreaterThan(0);
     await click(tiles[0]!);

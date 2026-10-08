@@ -1,18 +1,27 @@
 // v1.23-las-mesas-miden-lo-mismo · el mapa pinta TODA mesa con el mismo
 // tamaño, en las cuatro zonas y en las dos vistas.
 //
-// jsdom no hace layout, así que esto no mide rects: comprueba que el
-// tamaño sale de UN sitio (`TABLE_CARD_SIZE_CLASS`) y que el lienzo ya
-// no lleva ninguna de las dos piezas que daban cuatro tamaños a la misma
-// mesa — la columna fija de 300 px, y el `grid-cols-2` aplicado a TODOS
-// los anchos. En handheld sí hay dos columnas, a propósito, y eso
-// también se comprueba. Los rects de verdad van en el bucle visual con
-// Playwright (ver el `-done`).
+// v2-H1-venta-y-sala · la invariante NO cambia; cambia cómo se afirma.
 //
-// Los tests de rejilla comparan contra literales (`grid-cols-2`,
-// `sm:flex-wrap`) y no contra `ROOM_GRID_CLASS`: codifican el REQUISITO,
-// no la constante. Comparar contra la constante haría que sabotearla
-// pasara el test.
+// La decisión 8 pide mesas como FORMAS del local —taburetes redondos en
+// la barra, rectángulos en el salón, redondas en la terraza— y la maqueta
+// las pinta además de tres tamaños distintos. Eso último es exactamente
+// el bug que v1.23 mató (509 × 118 / 124 × 118 / 84 × 84 para la misma
+// mesa de cuatro), y el propio prompt lo zanja: «mismo tamaño de mesa en
+// todas las zonas». Así que **la forma cambia por zona y el tamaño no**,
+// y lo que este fichero vigila sigue siendo lo segundo.
+//
+// Lo que cambia en la MANERA de vigilarlo, y es a mejor: el tamaño ya no
+// entra por una clase literal de Tailwind (`TABLE_CARD_SIZE_CLASS`, que
+// obligaba a tener el número escrito dos veces y a un test que
+// comprobara que no se separaban) sino por `style` con la constante
+// `TABLE_SHAPE_SIZE`. Se puede afirmar el píxel directamente, y ya no
+// existe el hueco por el que un `!w-[124px]` colado en un envoltorio se
+// escapaba de jsdom.
+//
+// jsdom sigue sin hacer layout: lo que NO se puede afirmar aquí es cómo
+// reparte el navegador las bandas ni que la sala entre sin desplazar.
+// Eso va en el bucle visual, con sus medidas, en el `-done`.
 //
 // Mismo patrón sin testing-library que `table-map-visual.test.tsx`.
 
@@ -50,7 +59,10 @@ vi.mock("../src/pages/CheckoutPage.js", () => ({
 }));
 
 import { TableMapScreen, type ApiTable } from "../src/pages/TableMapScreen.js";
-import { TABLE_CARD_SIZE_CLASS } from "../src/lib/roomGrid.js";
+import {
+  TABLE_SHAPE_RADIUS,
+  TABLE_SHAPE_SIZE,
+} from "../src/lib/roomGrid.js";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -156,29 +168,30 @@ async function filtrarPor(label: string) {
   });
 }
 
-/**
- * Las cajas que ocupan una mesa en el lienzo. Son los elementos que
- * llevan la clase de tamaño compartida — y la gracia del test es
- * justamente contar que hay una por mesa: si una zona se saliera con su
- * propia clase, su mesa no aparecería aquí.
- */
-function cajasDeMesa(): Element[] {
-  // `getAttribute("class")` y no `.className`: los `<svg>` de los iconos
-  // lo devuelven como `SVGAnimatedString`, que no tiene `.split`.
-  return [...container.querySelectorAll("[class]")].filter((el) =>
-    TABLE_CARD_SIZE_CLASS.split(" ").every((c) => clases(el).includes(c)),
-  );
+/** Las formas de mesa del lienzo, una por mesa visible. */
+function formasDeMesa(): HTMLElement[] {
+  return [
+    ...container.querySelectorAll<HTMLElement>('[data-testid="table-shape"]'),
+  ];
+}
+
+/** El tamaño que cada forma lleva PUESTO, leído del `style`. */
+function tamanos(): string[] {
+  return formasDeMesa().map((el) => `${el.style.width}x${el.style.height}`);
 }
 
 /**
  * Las rejillas de mesas del lienzo: una por zona visible. Se identifican
- * por contener tarjetas, no por su clase — así el test sigue valiendo si
- * la clase cambia, y cae si la rejilla deja de ser la compartida.
+ * por contener formas, no por su clase — así el test sigue valiendo si la
+ * clase cambia, y cae si la rejilla deja de ser la compartida.
  */
 function rejillasDeMesas(): Element[] {
   const padres = new Set<Element>();
-  for (const caja of cajasDeMesa()) {
-    if (caja.parentElement) padres.add(caja.parentElement);
+  for (const forma of formasDeMesa()) {
+    // La forma ocupada va dentro de un envoltorio `relative` (para el
+    // botón «Cobrar»), así que se sube un nivel más cuando hace falta.
+    const grid = forma.closest('[data-testid="room-grid"]');
+    if (grid) padres.add(grid);
   }
   return [...padres];
 }
@@ -207,36 +220,79 @@ afterEach(async () => {
 });
 
 describe("mapa de sala · una mesa mide lo mismo esté donde esté", () => {
-  it("las nueve mesas del lienzo llevan la MISMA clase de tamaño", async () => {
+  it("TODA mesa del lienzo mide exactamente lo mismo", async () => {
     await renderSala();
-    // Una caja por mesa: Salón (4, una de ellas absorbida), Terraza (2),
-    // Reservados (1) y Barra (2). Ninguna zona con tamaño propio.
-    expect(cajasDeMesa()).toHaveLength(SALA.length);
+    // Una forma por mesa: Salón (4, una de ellas absorbida), Terraza (2),
+    // Reservados (1) y Barra (2).
+    expect(formasDeMesa()).toHaveLength(SALA.length);
+    // Y un solo tamaño entre todas. Esto es la invariante de v1.23 dicha
+    // en píxeles en vez de en nombres de clase: antes había que
+    // comprobar aparte que la clase y la constante no se habían
+    // separado, y aun así un `!w-[124px]` colado en un envoltorio se
+    // escapaba de jsdom. Ahora no hay por dónde.
+    const unicos = new Set(tamanos());
+    expect([...unicos]).toEqual([`${TABLE_SHAPE_SIZE}px x${TABLE_SHAPE_SIZE}px`.replace(" ", "")]);
   });
 
   it("ninguna mesa lleva una medida ADEMÁS de la compartida", async () => {
     await renderSala();
-    // La clase compartida no basta: una zona podría añadir la suya
-    // encima (`!w-[124px]`) y seguir pasando el test de arriba.
-    const compartidas = TABLE_CARD_SIZE_CLASS.split(" ");
-    const medidaSuelta = /^!?(sm:|md:|lg:|xl:)?(min-|max-)?[wh]-/;
-    for (const el of cajasDeMesa()) {
+    // Una zona podría añadir la suya encima (`!w-[124px]`) y seguir
+    // pasando el test de arriba si el tamaño viviera en clases. Con el
+    // tamaño en `style` lo que hay que prohibir es la clase de ancho o
+    // alto, que es lo que pisaría el `style` si llevara `!`.
+    const medidaSuelta = /^!?(sm:|md:|lg:|xl:|2xl:)?(min-|max-)?[wh]-/;
+    // `w-full` / `h-full` SÍ se permiten, y es importante que se
+    // permitan: no son una medida, son «llena a tu padre», que es
+    // justamente lo que mantiene el tamaño en UN sitio. La forma ocupada
+    // vive dentro de un envoltorio que lleva el `style` con el lado, y
+    // el botón de dentro lo rellena.
+    const rellenar = ["w-full", "h-full"];
+    for (const el of formasDeMesa()) {
       const sobra = clases(el).filter(
-        (c) => medidaSuelta.test(c) && !compartidas.includes(c),
+        (c) => medidaSuelta.test(c) && !rellenar.includes(c),
       );
       expect(sobra).toEqual([]);
     }
   });
 
-  it("la barra ya no pinta círculos de 84 px: mide como una mesa", async () => {
+  it("la FORMA cambia por zona y el tamaño no", async () => {
     await renderSala();
-    const barra = [...container.querySelectorAll("[class]")].filter(
-      (el) =>
-        /^B[12]/.test(el.textContent?.trim() ?? "") &&
-        clases(el).includes("rounded-[18px]"),
+    // Decisión 8 · taburete redondo en la barra, rectángulo de esquina
+    // blanda en el salón, redonda en la terraza. Lo único que distingue
+    // una zona de otra es el radio.
+    const porZona = new Map<string, Set<string>>();
+    for (const el of formasDeMesa()) {
+      const zona = el.getAttribute("data-zone") ?? "?";
+      const radios = porZona.get(zona) ?? new Set<string>();
+      radios.add(el.style.borderRadius);
+      porZona.set(zona, radios);
+    }
+    // Dentro de una zona, un solo radio.
+    for (const radios of porZona.values()) expect(radios.size).toBe(1);
+    // La barra y la terraza son círculos (radio = mitad del lado); el
+    // salón y los reservados, no.
+    expect(porZona.get("BARRA")).toEqual(
+      new Set([`${TABLE_SHAPE_RADIUS.BARRA}px`]),
+    );
+    expect(porZona.get("TERRAZA")).toEqual(
+      new Set([`${TABLE_SHAPE_RADIUS.TERRAZA}px`]),
+    );
+    expect(porZona.get("SALON")).toEqual(
+      new Set([`${TABLE_SHAPE_RADIUS.SALON}px`]),
+    );
+    expect(TABLE_SHAPE_RADIUS.BARRA).toBe(TABLE_SHAPE_SIZE / 2);
+    expect(TABLE_SHAPE_RADIUS.SALON).toBeLessThan(TABLE_SHAPE_SIZE / 2);
+  });
+
+  it("la barra no vuelve a los círculos de 84 px de v1.9.3", async () => {
+    await renderSala();
+    const barra = formasDeMesa().filter(
+      (el) => el.getAttribute("data-zone") === "BARRA",
     );
     expect(barra.length).toBeGreaterThan(0);
-    // El taburete de v1.9.3 era `w-[84px] h-[84px] rounded-full`.
+    for (const el of barra) {
+      expect(el.style.width).toBe(`${TABLE_SHAPE_SIZE}px`);
+    }
     const html = container.innerHTML;
     expect(html).not.toContain("w-[84px]");
     expect(html).not.toContain("h-[84px]");
@@ -250,51 +306,35 @@ describe("mapa de sala · una mesa mide lo mismo esté donde esté", () => {
     expect(sospechosas).toHaveLength(0);
   });
 
-  it("desde sm las columnas salen del ancho, no de un grid-cols-N", async () => {
+  it("las columnas salen del ancho, no de un grid-cols-N", async () => {
     await renderSala();
-    // El `grid-cols-2` de handheld SÓLO vale por debajo de `sm`: a partir
-    // de ahí la rejilla es `flex-wrap` con tarjetas de ancho fijo y el
-    // número de columnas lo decide el ancho disponible. Quitar el
-    // `sm:flex-wrap` devuelve el terminal a dos columnas, que es el bug
-    // original.
+    // Es el punto del bloque v1.23 y sigue vigente: la rejilla de una
+    // zona es `flex-wrap` con formas de tamaño fijo, así que el número
+    // de columnas lo decide el ancho disponible. Un `grid-cols-N` lo
+    // fijaría de antemano y volvería a dar dos columnas en 1.050 px y
+    // dos en 300, que es de donde salía el ×4 de ancho.
     const rejillas = rejillasDeMesas();
     expect(rejillas.length).toBeGreaterThan(0);
     for (const el of rejillas) {
-      expect(clases(el)).toContain("sm:flex");
-      expect(clases(el)).toContain("sm:flex-wrap");
+      expect(clases(el)).toContain("flex");
+      expect(clases(el)).toContain("flex-wrap");
     }
-    // Y ninguna rejilla fija columnas DE sm para arriba.
+    // Y ninguna rejilla fija columnas, en ningún breakpoint.
     const sospechosas = [...container.querySelectorAll("[class]")].filter((el) =>
-      clases(el).some((c) => /^(sm|md|lg|xl|2xl):grid-cols-/.test(c)),
+      clases(el).some((c) => /^((sm|md|lg|xl|2xl):)?grid-cols-/.test(c)),
     );
     expect(sospechosas).toHaveLength(0);
   });
 
-  it("en handheld la sala va a DOS columnas, no a una", async () => {
-    await renderSala();
-    // Una sola columna a 390 px da tarjetas de 320 y 2.614 px de scroll
-    // para 16 mesas. Con dos columnas la tarjeta mide 154 — por encima
-    // del objetivo táctil — y se ve el doble de sala por pantallazo.
-    const rejillas = rejillasDeMesas();
-    expect(rejillas.length).toBeGreaterThan(0);
-    for (const el of rejillas) {
-      expect(clases(el)).toContain("grid");
-      expect(clases(el)).toContain("grid-cols-2");
-    }
-  });
-
   it("la vista filtrada por zona usa el mismo tamaño que la vista «Todas»", async () => {
     await renderSala();
-    const todas = cajasDeMesa();
+    const todas = formasDeMesa();
     await filtrarPor("Terraza");
-    const filtradas = cajasDeMesa();
+    const filtradas = formasDeMesa();
     expect(filtradas).toHaveLength(2);
-    // Mismo tamaño que las de la vista «Todas»: la clase de tamaño está
-    // en las dos y no hay ninguna clase de ancho alternativa.
     for (const el of filtradas) {
-      for (const c of TABLE_CARD_SIZE_CLASS.split(" ")) {
-        expect(clases(el)).toContain(c);
-      }
+      expect(el.style.width).toBe(`${TABLE_SHAPE_SIZE}px`);
+      expect(el.style.height).toBe(`${TABLE_SHAPE_SIZE}px`);
     }
     expect(todas.length).toBeGreaterThan(filtradas.length);
   });
@@ -303,6 +343,20 @@ describe("mapa de sala · una mesa mide lo mismo esté donde esté", () => {
     await renderSala();
     await filtrarPor("Barra");
     expect(container.textContent).toContain("BARRA");
-    expect(cajasDeMesa()).toHaveLength(2);
+    expect(
+      container.querySelector('[data-testid="bar-counter"]'),
+    ).not.toBeNull();
+    expect(formasDeMesa()).toHaveLength(2);
+  });
+
+  it("la BARRA es la primera banda del lienzo", async () => {
+    await renderSala();
+    // Decisión 8 · iba la última desde v1.9.3, residuo de cuando sus
+    // sitios eran taburetes de 84 px, y en el AP13 empezaba fuera de
+    // pantalla. En un bar es lo primero que se mira.
+    const rotulos = [
+      ...container.querySelectorAll<HTMLElement>('[data-zone-label]'),
+    ].map((el) => el.getAttribute("data-zone-label"));
+    expect(rotulos[0]).toBe("BARRA");
   });
 });

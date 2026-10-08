@@ -140,7 +140,16 @@ describe("TableMapScreen · operador con alias", () => {
     vi.useRealTimers();
   });
 
-  it("chip usa iniciales del alias si viene; fallback a email si no", async () => {
+  // v2-H1 · el alias del camarero sale de la FORMA de la mesa y se queda
+  // en su `title`.
+  //
+  // El motivo está en `TableCard`: en una forma de 144 px caben tres
+  // líneas —nombre a 28, importe a 22 y la meta a 15— y la decisión 8
+  // pide exactamente esas tres. El avatar de dos letras competía con el
+  // importe, que es el dato que se comprueba. Lo que este test guarda
+  // sigue siendo lo de v1.7: que manda el ALIAS y no el local-part del
+  // email, y que un usuario legacy sin alias no se queda sin nada.
+  it("la mesa nombra al camarero por su ALIAS, no por su email", async () => {
     apiMock.apiWithCashier.mockResolvedValue({
       storeId: "00000000-0000-0000-0000-0000000000s1",
       registerId: "00000000-0000-0000-0000-0000000000r1",
@@ -155,15 +164,16 @@ describe("TableMapScreen · operador con alias", () => {
       root.render(<TableMapScreen {...defaultProps()} />);
     });
 
-    const mesa1 = [...container.querySelectorAll("button")].find((b) =>
-      b.textContent?.includes("Mesa 1"),
-    );
-    const mesa2 = [...container.querySelectorAll("button")].find((b) =>
-      b.textContent?.includes("Mesa 2"),
-    );
-    expect(mesa1?.textContent).toContain("MG");
-    expect(mesa1?.textContent).not.toContain("Z");
-    expect(mesa2?.textContent).toContain("C");
+    const formas = [
+      ...container.querySelectorAll<HTMLElement>('[data-testid="table-shape"]'),
+    ];
+    const mesa1 = formas.find((b) => b.textContent?.includes("Mesa 1"));
+    const mesa2 = formas.find((b) => b.textContent?.includes("Mesa 2"));
+    // Manda el alias: "maria.garcia", no el "zz" del email.
+    expect(mesa1?.getAttribute("title")).toContain("maria.garcia");
+    expect(mesa1?.getAttribute("title")).not.toContain("zz");
+    // Legacy sin alias: el local-part del email como respaldo.
+    expect(mesa2?.getAttribute("title")).toContain("caja1");
 
     // El botón del header muestra el label del cajero logueado (alias).
     expect(container.textContent).toContain("María");

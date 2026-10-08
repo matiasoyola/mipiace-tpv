@@ -46,7 +46,6 @@ import {
   Loader2,
   Lock,
   Menu,
-  Plus,
   PowerOff,
   ReceiptText,
   RotateCw,
@@ -68,7 +67,41 @@ import type { CartLine, CartTotals } from "../lib/cart.js";
 import { mapServerDraftLines } from "../lib/tableDraft.js";
 import type { ServerDraft } from "../lib/tableDraft.js";
 import { outboxBlockedTableIds, subscribeOutbox } from "../lib/outbox.js";
-import { ROOM_GRID_CLASS, TABLE_CARD_SIZE_CLASS } from "../lib/roomGrid.js";
+import {
+  ROOM_GRID_GAP,
+  ROOM_HEADER_DARK,
+  ROOM_SIDE_PADDING_DARK,
+  ROOM_TOP_PADDING_DARK,
+  TABLE_AMOUNT_FONT_PX_DARK,
+  ZONE_GAP,
+  TABLE_SHAPE_RADIUS,
+  TABLE_SHAPE_SIZE,
+  ZONE_PADDING,
+  roundTableChordWidth,
+} from "../lib/roomGrid.js";
+import {
+  BAR_COUNTER_FILL,
+  CORAL,
+  DARK_CANVAS,
+  DARK_ON_CORAL,
+  DARK_SURFACE,
+  DARK_SURFACE_RAISED,
+  DARK_TEXT,
+  DARK_TEXT_MUTED,
+  DARK_TEXT_SOFT,
+  EYEBROW_PX,
+  EYEBROW_TRACKING,
+  MIN_TOUCH_PX,
+  TABLE_BILLING_FILL,
+  TABLE_BILLING_TEXT,
+  TABLE_BUSY_FILL,
+  TABLE_BUSY_TEXT,
+  TABLE_FREE_FILL,
+  TABLE_FREE_TEXT,
+  TABLE_LATE_RING,
+  TABLE_LATE_RING_WIDTH,
+  TABLE_NAME_PX,
+} from "../lib/hospitalityTheme.js";
 import { syncNow } from "../lib/syncNow.js";
 import { CloseShiftModal } from "./CloseShiftModal.js";
 import { summarizeOpenTables } from "../lib/openTables.js";
@@ -123,7 +156,16 @@ interface ApiResponse {
 
 // v1.23-las-mesas-miden-lo-mismo · orden de las zonas en el lienzo. El
 // camarero lee la sala siempre en el mismo orden, esté filtrando o no.
-const ZONE_ORDER: TableZone[] = ["SALON", "TERRAZA", "RESERVADO", "BARRA"];
+//
+// v2-H1-venta-y-sala · decisión 8 · **la Barra es la primera.**
+//
+// Iba la última desde v1.9.3 y eso era un residuo de cuando sus sitios
+// eran taburetes de 84 px: la zona de más rotación del bar, la que se
+// atiende de pie y sin sentarse, estaba al final de la lectura y en el
+// AP13 empezaba fuera de pantalla (hallazgo E1 de la auditoría del
+// 2026-09-02). En un bar la barra es lo primero que se mira porque es lo
+// que más veces se cobra en un turno.
+const ZONE_ORDER: TableZone[] = ["BARRA", "SALON", "TERRAZA", "RESERVADO"];
 
 const ZONE_LABEL: Record<TableZone | "ALL", string> = {
   ALL: "Todas",
@@ -294,7 +336,13 @@ export function TableMapScreen(props: TableMapScreenProps) {
   // número y esta cabecera otro.
   const openSummary = summarizeOpenTables(tables);
   const openCount = openSummary.count;
-  const freeCount = tables.length - openCount;
+  // v2-H1 · ya no se pinta («N abiertas · X €», decisión 8) pero el
+  // cálculo se queda: sale de `summarizeOpenTables`, que es el módulo
+  // que v1.22 comparte con el aviso de mesas abiertas del cierre, y el
+  // prompt dice explícitamente que ese cálculo no se toca. Si mañana la
+  // cabecera vuelve a querer el dato, está aquí y dice lo mismo que el
+  // cierre.
+  void (tables.length - openCount);
   const salaTotal = openSummary.total;
 
   const visible =
@@ -363,54 +411,125 @@ export function TableMapScreen(props: TableMapScreenProps) {
   };
 
   return (
-    <div className="min-h-screen bg-mipiace-stone flex flex-col font-sans">
-      <header className="bg-white border-b border-slate-200 px-5 md:px-7 py-3.5 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          {/* v1.9.2-mesas-concurrencia · Frente 3.3: menú de caja
-              (Arqueo X, Cerrar turno, Sincronizar catálogo, Bloquear)
-              accesible desde el mapa. */}
-          <button
-            type="button"
-            onClick={() => setDrawerOpen(true)}
-            title="Abrir menú"
-            aria-label="Abrir menú"
-            className="h-touch w-touch shrink-0 rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-600"
+    <div
+      data-testid="room-screen"
+      data-theme="dark"
+      className="min-h-screen flex flex-col font-sans"
+      style={{ background: DARK_CANVAS, color: DARK_TEXT }}
+    >
+      {/* ── Cabecera ──────────────────────────────────────────────────
+          UNA fila de 80 px con todo: identidad, el contador de sala, los
+          filtros de zona y «Venta rápida». La cabecera clara repartía lo
+          mismo en TRES bloques —barra de app, fila «Sala · N abiertas…»
+          y leyenda— que sumaban 212 px antes de la primera mesa. Esos
+          108 px recuperados son los que permiten que la mesa crezca de
+          19.824 a 20.736 px² sin que la sala empiece a desplazar.
+
+          El menú, Tickets y el cajero siguen a un toque, a la izquierda,
+          como hasta ahora. */}
+      <header
+        className="shrink-0 flex items-center gap-4 px-5 border-b"
+        style={{ height: ROOM_HEADER_DARK, borderColor: DARK_SURFACE_RAISED }}
+      >
+        <button
+          type="button"
+          onClick={() => setDrawerOpen(true)}
+          title="Abrir menú"
+          aria-label="Abrir menú"
+          className="shrink-0 rounded-[14px] flex items-center justify-center"
+          style={{
+            width: MIN_TOUCH_PX,
+            height: MIN_TOUCH_PX,
+            background: DARK_SURFACE,
+            color: DARK_TEXT_SOFT,
+          }}
+        >
+          <Menu className="w-5 h-5" strokeWidth={2.1} />
+        </button>
+        <div className="min-w-0">
+          <div
+            className="font-semibold leading-tight"
+            style={{ fontSize: 28, letterSpacing: "-0.015em" }}
           >
-            <Menu className="w-5 h-5" strokeWidth={2.1} />
-          </button>
-          <Logo />
-          <div className="hidden sm:block text-[12.5px] text-slate-500">
-            {props.storeName} · {props.registerName}
+            Sala
+          </div>
+          {/* «N abiertas · X €», tal cual lo pide la decisión 8.
+              El «M libres» de la cabecera clara se va: con la mesa libre
+              siendo ahora lo MÁS claro del lienzo, contarlas es repetir
+              con un número lo que la sala ya dice de un vistazo. El
+              cálculo no se toca —sigue siendo `summarizeOpenTables`, que
+              comparte con el aviso del cierre de v1.22— y `freeCount`
+              sigue saliendo de él, sólo que ya no se pinta aquí. */}
+          <div
+            data-testid="room-counter"
+            className="tabular-nums truncate"
+            style={{ fontSize: 17, color: DARK_TEXT_MUTED }}
+          >
+            {/* «1 abierta», no «1 abiertas». Lo cazó el bucle visual en
+                la sala de Sirope, que tenía una sola mesa ocupada. */}
+            {openCount} {openCount === 1 ? "abierta" : "abiertas"} ·{" "}
+            {formatEur(salaTotal)}
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          {offline && (
-            <span className="hidden md:flex items-center gap-1.5 text-[12px] text-red-600">
-              <WifiOff className="w-3.5 h-3.5" /> Sin conexión
-            </span>
-          )}
-          {/* v1.9.2-mesas-concurrencia · Frente 3.3: "Tickets" en el
-              header del mapa (mismo peso que en venta rápida). */}
-          <button
-            type="button"
-            onClick={() => {
-              setHistoryQuery(undefined);
-              setShowHistory(true);
-            }}
-            title="Tickets pasados"
-            className="h-touch px-3.5 rounded-xl bg-mipiace-stone hover:bg-slate-100 flex items-center gap-2 text-[13px] font-medium text-mipiace-ink"
+        {offline && (
+          <span
+            className="hidden md:flex items-center gap-1.5 shrink-0"
+            style={{ fontSize: 14, color: "#F2A08F" }}
           >
-            <ReceiptText className="w-[17px] h-[17px]" strokeWidth={2.25} />
-            <span className="hidden sm:inline">Tickets</span>
-          </button>
-          <button
-            type="button"
-            onClick={props.onLogoutCashier}
-            className="h-touch px-3.5 rounded-xl bg-mipiace-stone hover:bg-slate-100 text-[13px] text-mipiace-ink max-w-[45vw] truncate"
-          >
-            {props.cashierLabel.split("@")[0]}
-          </button>
-        </div>
+            <WifiOff className="w-4 h-4" /> Sin conexión
+          </span>
+        )}
+        <div className="flex-grow" />
+        <ZoneChips
+          zoneFilter={zoneFilter}
+          setZoneFilter={setZoneFilter}
+          counts={counts}
+        />
+        <button
+          type="button"
+          onClick={() => {
+            setHistoryQuery(undefined);
+            setShowHistory(true);
+          }}
+          title="Tickets pasados"
+          aria-label="Tickets pasados"
+          className="shrink-0 rounded-[14px] flex items-center justify-center"
+          style={{
+            width: MIN_TOUCH_PX,
+            height: MIN_TOUCH_PX,
+            background: DARK_SURFACE,
+            color: DARK_TEXT_SOFT,
+          }}
+        >
+          <ReceiptText className="w-[19px] h-[19px]" strokeWidth={2.25} />
+        </button>
+        <button
+          type="button"
+          onClick={props.onLogoutCashier}
+          title={`Bloquear (${props.cashierLabel})`}
+          className="shrink-0 rounded-[14px] px-4 max-w-[20vw] truncate"
+          style={{
+            height: MIN_TOUCH_PX,
+            background: DARK_SURFACE,
+            color: DARK_TEXT_SOFT,
+            fontSize: 15,
+          }}
+        >
+          {props.cashierLabel.split("@")[0]}
+        </button>
+        <button
+          type="button"
+          onClick={props.onQuickSale}
+          className="shrink-0 rounded-2xl px-5 font-semibold"
+          style={{
+            height: MIN_TOUCH_PX,
+            background: CORAL,
+            color: DARK_ON_CORAL,
+            fontSize: 19,
+          }}
+        >
+          Venta rápida
+        </button>
       </header>
 
       {/* v1.9.2-mesas-concurrencia · banner inline de expulsión / éxito.
@@ -456,83 +575,28 @@ export function TableMapScreen(props: TableMapScreenProps) {
         </div>
       )}
 
-      <main className="flex-1 p-4 md:p-7 overflow-y-auto">
+      <main
+        className="flex-1 flex flex-col overflow-y-auto"
+        style={{
+          paddingLeft: ROOM_SIDE_PADDING_DARK,
+          paddingRight: ROOM_SIDE_PADDING_DARK,
+          paddingTop: ROOM_TOP_PADDING_DARK,
+          paddingBottom: ROOM_SIDE_PADDING_DARK,
+        }}
+      >
         {offline && (
-          <div className="mb-5 flex items-start gap-3 rounded-2xl border border-red-300 bg-red-50 text-red-800 px-4 py-3">
-            <WifiOff className="w-5 h-5 mt-0.5 shrink-0" />
-            <div className="text-[13.5px] leading-snug">
-              <div className="font-semibold">
-                Sin conexión · operativa de mesas bloqueada
-              </div>
-              <div className="text-[12.5px] opacity-90 mt-0.5">
-                No se pueden abrir, retomar ni cobrar mesas hasta que vuelva la
-                red. La venta rápida sigue disponible.
-              </div>
-            </div>
-          </div>
+          <DarkRoomNotice tone="red" testid="room-offline">
+            <span className="font-semibold">
+              Sin conexión · operativa de mesas bloqueada
+            </span>
+            <br />
+            No se pueden abrir, retomar ni cobrar mesas hasta que vuelva la red.
+            La venta rápida sigue disponible.
+          </DarkRoomNotice>
         )}
-
-        {/* ── Cabecera de sala ─────────────────────────────────────── */}
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-3 mb-4">
-          <h1 className="text-[22px] md:text-[24px] font-semibold text-mipiace-ink tracking-tight">
-            Sala
-          </h1>
-          <div className="text-[13px] text-slate-500 tabular-nums">
-            <span className="font-semibold text-mipiace-ink">{openCount}</span>{" "}
-            abiertas ·{" "}
-            <span className="font-semibold text-mipiace-ink">{freeCount}</span>{" "}
-            libres ·{" "}
-            <span className="font-semibold text-mipiace-ink">
-              {formatEur(salaTotal)}
-            </span>{" "}
-            en sala
-          </div>
-          <div className="ml-auto flex flex-wrap items-center gap-2">
-            <ZoneChips
-              zoneFilter={zoneFilter}
-              setZoneFilter={setZoneFilter}
-              counts={counts}
-            />
-            <button
-              type="button"
-              onClick={props.onQuickSale}
-              className="h-touch px-4 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[13px] font-medium flex items-center gap-1.5 shrink-0"
-            >
-              <Plus className="w-4 h-4" strokeWidth={2.25} />
-              Nueva venta rápida
-            </button>
-          </div>
-        </div>
-
-        {/* Leyenda */}
-        <div className="flex flex-wrap items-center gap-4 mb-6 text-[12.5px] text-slate-500">
-          <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-[4px] border border-slate-300 bg-white" />{" "}
-            Libre
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-[4px] bg-mipiace-coral-soft border border-mipiace-coral/45" />{" "}
-            Ocupada
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-[4px] bg-amber-100 border border-amber-500/50" />{" "}
-            Pidiendo cuenta
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-[4px] bg-white ring-2 ring-inset ring-amber-500" />{" "}
-            +45 min sin atender
-          </div>
-        </div>
-
-        {error && (
-          <div className="mb-4 text-[13px] text-red-700 bg-red-50 rounded-xl px-3.5 py-2.5">
-            {error}
-          </div>
-        )}
+        {error && <DarkRoomNotice tone="red">{error}</DarkRoomNotice>}
         {props.pickError && (
-          <div className="mb-4 text-[13px] text-red-700 bg-red-50 rounded-xl px-3.5 py-2.5">
-            {props.pickError}
-          </div>
+          <DarkRoomNotice tone="red">{props.pickError}</DarkRoomNotice>
         )}
 
         {tables.length === 0 ? (
@@ -552,7 +616,11 @@ export function TableMapScreen(props: TableMapScreenProps) {
           //
           // Por debajo de `sm` (handheld) las zonas se apilan y las
           // mesas van a una columna, como hasta ahora.
-          <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-start gap-[18px]">
+          <div
+            data-testid="room-canvas"
+            className="flex flex-col sm:flex-row sm:flex-wrap sm:items-start"
+            style={{ gap: ZONE_GAP }}
+          >
             {ZONE_ORDER.map((zone) => {
               const zoneTables = visible.filter((t) => t.zone === zone);
               if (zoneTables.length === 0) return null;
@@ -573,6 +641,27 @@ export function TableMapScreen(props: TableMapScreenProps) {
             })}
           </div>
         )}
+
+        {/* ── Leyenda, al PIE ───────────────────────────────────────────
+            Sube del medio de la pantalla al pie por una razón de
+            reparto: intercalada entre la cabecera y la primera mesa
+            costaba 43 px de los que el lienzo necesita, y lo que explica
+            no se consulta cada vez — se aprende una vez y se olvida.
+            Abajo sigue estando para quien la necesite el primer día. */}
+        <div
+          data-testid="room-legend"
+          className="mt-auto pt-5 flex flex-wrap items-center gap-x-6 gap-y-2"
+          style={{ fontSize: 15, color: DARK_TEXT_MUTED }}
+        >
+          <LegendDot fill={TABLE_FREE_FILL} label="Libre" />
+          <LegendDot fill={TABLE_BUSY_FILL} label="Ocupada" />
+          <LegendDot fill={TABLE_BILLING_FILL} label="Pide la cuenta" />
+          <LegendDot
+            fill={TABLE_BUSY_FILL}
+            ring={TABLE_LATE_RING}
+            label="+45 min sin atender"
+          />
+        </div>
       </main>
 
       {/* v1.9.2-mesas-concurrencia · Frente 3.3: drawer de caja del mapa,
@@ -799,16 +888,19 @@ function ZoneChips({
   setZoneFilter: (z: TableZone | "ALL") => void;
   counts: Record<TableZone, number>;
 }) {
+  // El orden de los chips sigue a `ZONE_ORDER`: Barra primero, como el
+  // lienzo. Con un orden aquí y otro abajo, el camarero aprendería dos.
   const items: Array<{ id: TableZone | "ALL"; label: string; count?: number }> =
     [
       { id: "ALL", label: ZONE_LABEL.ALL },
-      { id: "SALON", label: ZONE_LABEL.SALON, count: counts.SALON },
-      { id: "TERRAZA", label: ZONE_LABEL.TERRAZA, count: counts.TERRAZA },
-      { id: "BARRA", label: ZONE_LABEL.BARRA, count: counts.BARRA },
-      { id: "RESERVADO", label: ZONE_LABEL.RESERVADO, count: counts.RESERVADO },
+      ...ZONE_ORDER.map((z) => ({
+        id: z,
+        label: ZONE_LABEL[z],
+        count: counts[z],
+      })),
     ];
   return (
-    <div className="flex gap-2 overflow-x-auto lg:flex-wrap lg:overflow-x-visible">
+    <div className="flex gap-2 shrink-0">
       {items.map((item) => {
         if (item.id !== "ALL" && (item.count ?? 0) === 0) return null;
         const active = zoneFilter === item.id;
@@ -817,18 +909,19 @@ function ZoneChips({
             key={item.id}
             type="button"
             onClick={() => setZoneFilter(item.id)}
-            className={`h-touch px-4 shrink-0 rounded-2xl text-[13px] font-medium transition-colors flex items-center gap-1.5 ${
-              active
-                ? "bg-mipiace-coral-soft text-mipiace-coral-dark border border-mipiace-coral/40"
-                : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
-            }`}
+            aria-pressed={active}
+            data-testid="zone-chip"
+            data-zone={item.id}
+            className="rounded-[14px] px-5 shrink-0 font-medium"
+            style={{
+              height: 52,
+              fontSize: 18,
+              fontWeight: active ? 600 : 500,
+              background: active ? DARK_TEXT : DARK_SURFACE,
+              color: active ? DARK_CANVAS : DARK_TEXT_SOFT,
+            }}
           >
             {item.label}
-            {typeof item.count === "number" && (
-              <span className="text-[11px] text-slate-400 font-medium">
-                {item.count}
-              </span>
-            )}
           </button>
         );
       })}
@@ -836,41 +929,75 @@ function ZoneChips({
   );
 }
 
-// Marco de zona: borde discontinuo con label flotante, tal cual el
-// mockup (.zona + .zona>label).
+/**
+ * Marco de zona: rótulo flotante y borde discontinuo, como v1.9.3, en
+ * oscuro. La zona mide lo que piden sus mesas (v1.23): no se estira.
+ */
 function ZoneFrame({
   label,
-  className,
   children,
+  extraTop,
 }: {
   label: string;
-  className?: string;
   children: ReactNode;
+  /** El mostrador dibujado de la Barra. */
+  extraTop?: ReactNode;
 }) {
   return (
     <section
-      className={`relative rounded-[22px] border-[1.5px] border-dashed border-slate-300 p-[18px] bg-gradient-to-b from-white/50 to-transparent ${className ?? ""}`}
+      data-testid="zone-frame"
+      data-zone-label={label}
+      className="relative rounded-[22px] border-[1.5px] border-dashed"
+      style={{ padding: ZONE_PADDING, borderColor: DARK_SURFACE_RAISED }}
     >
-      <span className="absolute -top-[9px] left-[22px] bg-mipiace-stone px-2 text-[11px] tracking-[0.12em] font-semibold text-slate-500">
+      <span
+        className="absolute -top-[9px] left-[22px] px-2 font-medium"
+        style={{
+          background: DARK_CANVAS,
+          color: DARK_TEXT_MUTED,
+          fontSize: EYEBROW_PX,
+          letterSpacing: EYEBROW_TRACKING,
+        }}
+      >
         {label}
       </span>
+      {extraTop}
       {children}
     </section>
   );
 }
 
-// v1.23-las-mesas-miden-lo-mismo · la rejilla de una zona.
-//
-// Era `grid grid-cols-2` a secas: DOS columnas tanto en los 1050 px de
-// Salón como en los 300 de Terraza, que es de donde salía el ×4 de ancho
-// para la misma mesa. Ahora el número de columnas sale del ancho que
-// haya dividido por el tamaño de tarjeta — salvo en handheld, donde dos
-// columnas fijas aprovechan mejor una pantalla estrecha que una.
-// El reparto, y por qué, en `ROOM_GRID_CLASS`.
+/**
+ * La rejilla de una zona. Sigue siendo la de v1.23: `flex-wrap` con
+ * mesas de tamaño fijo, de modo que **el número de columnas sale del
+ * ancho** y no de un `grid-cols-N` escrito a mano. Lo único que cambia
+ * es que la mesa es cuadrada.
+ */
 function RoomGrid({ children }: { children: ReactNode }) {
-  return <div className={ROOM_GRID_CLASS}>{children}</div>;
+  return (
+    <div
+      data-testid="room-grid"
+      className="flex flex-wrap"
+      style={{ gap: ROOM_GRID_GAP }}
+    >
+      {children}
+    </div>
+  );
 }
 
+/**
+ * Una mesa.
+ *
+ * v2-H1 · **una sola caja para toda mesa** (`TABLE_SHAPE_SIZE`), y lo
+ * único que cambia por zona es el radio: círculo en Barra y Terraza,
+ * rectángulo de esquina blanda en Salón y Reservados. El razonamiento
+ * —por qué la maqueta pinta tres tamaños y aquí hay uno— está en
+ * `roomGrid.ts`, junto a la constante.
+ *
+ * Libre = relleno claro, que es LO MÁS claro del lienzo: en un bar lo
+ * que se busca de un vistazo es dónde sentar a cuatro. Ocupada = coral
+ * con el importe grande y los minutos. Cuenta = ámbar. +45 min = el aro.
+ */
 function TableCard({
   table,
   principal,
@@ -885,13 +1012,9 @@ function TableCard({
   onCobrar,
 }: {
   table: ApiTable;
-  // Si la mesa está absorbida, `principal` es la mesa que la absorbió.
   principal: ApiTable | null;
-  // Mesas absorbidas EN esta mesa (cuando es la principal de un grupo).
   groupedChildren: ApiTable[];
   offline: boolean;
-  // v1.0-mesas-frontend: checkout en tránsito en este dispositivo —
-  // la mesa queda bloqueada localmente hasta que el outbox confirme.
   pendingCheckout: boolean;
   opening: boolean;
   anyOpening: boolean;
@@ -903,30 +1026,37 @@ function TableCard({
   const elapsed = useElapsedTime(table.activeTicket?.openedAt);
   const minutes = useElapsedMinutes(table.activeTicket?.openedAt);
   const absorbed = !!table.groupedIntoTableId;
-  // v1.0-pilotos · Lote 1: sin conexión, la operativa de mesas se
-  // bloquea ENTERA (abrir, retomar, mover, cobrar).
   const disabled = offline || pendingCheckout || anyOpening;
+  const radius = TABLE_SHAPE_RADIUS[table.zone];
+  const box = {
+    width: TABLE_SHAPE_SIZE,
+    height: TABLE_SHAPE_SIZE,
+    borderRadius: radius,
+  };
 
-  // ── Mesa absorbida: atenuada, con puente hacia la principal y sin
-  //    contenido. El click lleva a la principal. ──────────────────────
+  // ── Mesa absorbida: atenuada, con puente hacia la principal. ───────
   if (absorbed) {
     return (
       <button
         type="button"
         onClick={() => onPick(principal ?? table)}
         disabled={disabled}
-        title={
-          principal ? `Unida a ${principal.name}` : "Mesa unida a un grupo"
-        }
-        className={`relative rounded-[18px] border-2 border-mipiace-coral/45 bg-mipiace-coral-soft ${TABLE_CARD_SIZE_CLASS} p-3.5 flex flex-col text-left opacity-55 disabled:cursor-not-allowed`}
+        data-testid="table-shape"
+        data-zone={table.zone}
+        data-state="grouped"
+        title={principal ? `Unida a ${principal.name}` : "Mesa unida a un grupo"}
+        className="relative box-border flex flex-col items-center justify-center gap-1 opacity-55 disabled:cursor-not-allowed"
+        style={{ ...box, background: TABLE_BUSY_FILL, color: TABLE_BUSY_TEXT }}
       >
-        {/* puente visual hacia la principal (a su izquierda) */}
-        <span className="absolute -left-[18px] top-1/2 w-[18px] h-[3px] bg-mipiace-coral/45" />
-        <span className="text-[19px] font-bold tracking-tight text-mipiace-coral-dark">
+        <span
+          className="absolute -left-[14px] top-1/2 w-[14px] h-[3px]"
+          style={{ background: TABLE_BUSY_FILL }}
+        />
+        <span className="font-semibold" style={{ fontSize: TABLE_NAME_PX }}>
           {table.name}
         </span>
-        <span className="text-[10.5px] uppercase tracking-wider font-semibold text-slate-500 mt-1">
-          — unida a {principal?.name ?? "grupo"}
+        <span className="font-medium" style={{ fontSize: 14, opacity: 0.9 }}>
+          unida a {principal?.name ?? "grupo"}
         </span>
       </button>
     );
@@ -936,8 +1066,6 @@ function TableCard({
   const isBilling = table.state === "BILLING";
   const olvidada =
     !isFree && minutes != null && minutes >= FORGOTTEN_TABLE_MINUTES;
-  // Pax mostrado: la propia capacidad + la de las mesas absorbidas
-  // (grupo fundido → pax sumados).
   const pax =
     table.capacity + groupedChildren.reduce((s, c) => s + c.capacity, 0);
   const groupBadge =
@@ -945,21 +1073,21 @@ function TableCard({
       ? "+" + groupedChildren.map((c) => c.name).join(", ")
       : null;
 
-  const stateClass = pendingCheckout
-    ? "bg-slate-100 border-slate-300"
+  const fill = pendingCheckout
+    ? DARK_SURFACE_RAISED
     : isFree
-      ? "bg-white border-slate-200 hover:border-slate-300"
+      ? TABLE_FREE_FILL
       : isBilling
-        ? "bg-amber-100 border-amber-500/50"
-        : "bg-mipiace-coral-soft border-mipiace-coral/45";
-  const nameColor = pendingCheckout
-    ? "text-slate-500"
+        ? TABLE_BILLING_FILL
+        : TABLE_BUSY_FILL;
+  const text = pendingCheckout
+    ? DARK_TEXT_MUTED
     : isFree
-      ? "text-mipiace-ink"
+      ? TABLE_FREE_TEXT
       : isBilling
-        ? "text-amber-700"
-        : "text-mipiace-coral-dark";
-  const totalColor = isBilling ? "text-amber-700" : "text-mipiace-coral-dark";
+        ? TABLE_BILLING_TEXT
+        : TABLE_BUSY_TEXT;
+
   const alias =
     table.activeTicket?.openedByAlias ??
     table.activeTicket?.openedByEmail ??
@@ -968,122 +1096,157 @@ function TableCard({
     isBilling && canCobrar && !offline && !pendingCheckout && !anyOpening;
 
   return (
-    // v1.23 · el tamaño vive en el envoltorio y el botón lo llena: así la
-    // mesa mide lo mismo con botón de cobro encima y sin él.
-    <div className={`relative ${TABLE_CARD_SIZE_CLASS}`}>
+    <div className="relative" style={{ ...box }}>
       <button
         type="button"
         onClick={() => onPick(table)}
         disabled={disabled}
+        data-testid="table-shape"
+        data-zone={table.zone}
+        data-state={
+          pendingCheckout
+            ? "pending"
+            : isFree
+              ? "free"
+              : isBilling
+                ? "billing"
+                : "busy"
+        }
+        data-late={olvidada ? "true" : "false"}
+        // v2-H1 · el alias del camarero sale de la FORMA y se queda en
+        // el `title`.
+        //
+        // Es una pérdida respecto a v1.23 y se dice en voz alta: ahí la
+        // tarjeta de 168 × 118 enseñaba nombre, PAX, minutos, cajero e
+        // importe. En una forma de 144 px caben tres líneas —nombre a
+        // 28, importe a 22 y la meta a 15— y la decisión 8 pide
+        // exactamente esas tres («ocupada = relleno coral con importe
+        // grande y minutos»). Una cuarta línea obligaba a bajar el
+        // importe de 22 px, que es el dato que se comprueba.
+        //
+        // El cajero sigue a un toque: la cabecera de la comanda lo pinta
+        // («Salón · 2 comensales · Gemma») en cuanto se entra en la mesa.
         title={
           offline
             ? "Sin conexión · operativa de mesas bloqueada"
             : pendingCheckout
               ? "Cobro pendiente de subir · mesa bloqueada en este dispositivo"
-              : undefined
+              : alias
+                ? `${table.name} · abierta hace ${elapsed} por ${aliasName(alias)}`
+                : undefined
         }
-        className={`relative w-full h-full rounded-[18px] border-2 p-3.5 flex flex-col text-left transition-transform hover:scale-[1.015] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 ${stateClass} ${
-          olvidada ? "ring-2 ring-inset ring-amber-500" : ""
-        }`}
+        className="relative w-full h-full box-border flex flex-col items-center justify-center gap-0.5 text-center disabled:opacity-50 disabled:cursor-not-allowed"
+        style={{
+          ...box,
+          background: fill,
+          color: text,
+          // El aro de «+45 min sin atender». Va por `box-shadow` y no por
+          // `ring` de Tailwind para que siga el radio de la forma: en un
+          // círculo, un aro cuadrado sería un marco alrededor de la mesa.
+          boxShadow: olvidada
+            ? `0 0 0 ${TABLE_LATE_RING_WIDTH}px ${TABLE_LATE_RING}`
+            : undefined,
+        }}
       >
-        {/* nombre + badge de grupo/cuenta en línea */}
-        <div className="pr-14">
-          <span className={`text-[19px] font-bold tracking-tight ${nameColor}`}>
-            {table.name}
-          </span>
-          {groupBadge && (
-            <span className="ml-2 align-[2px] inline-flex items-center text-[9px] tracking-wider font-bold px-1.5 py-0.5 rounded-md bg-mipiace-coral/15 text-mipiace-coral-dark">
-              {groupBadge}
-            </span>
-          )}
-          {isBilling && (
-            <span className="ml-2 align-[2px] inline-flex items-center text-[9px] tracking-wider font-bold px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-700">
-              CUENTA
-            </span>
-          )}
-        </div>
-
-        {/* pax arriba-dcha */}
-        <span className="absolute top-2.5 right-3 text-[10px] uppercase tracking-wider font-semibold text-slate-500">
-          {pax} PAX
+        <span
+          data-testid="table-name"
+          className="font-semibold leading-none"
+          style={{ fontSize: TABLE_NAME_PX, letterSpacing: "-0.015em" }}
+        >
+          {table.name}
         </span>
-        {/* pendingCheckout badge bajo pax (compat v1.7) */}
+        {isFree ? (
+          <span
+            className="font-medium"
+            style={{ fontSize: 14, opacity: 0.65 }}
+          >
+            {pax} pax
+          </span>
+        ) : (
+          table.activeTicket && (
+            <>
+              {/* El importe NUNCA se recorta: va en su propia línea, sin
+                  encogerse y sin compartir fila con nada. Es la lección
+                  de v1.22, donde `shrink-0` sin fila propia no recortaba
+                  sino que desbordaba y el € acabó fuera de la tarjeta.
+                  Que entre en el círculo lo comprueba
+                  `roundTableAmountFits` con la cuerda, no con el lado. */}
+              {!showCobrar && (
+                <span
+                  data-testid="table-card-amount"
+                  className="font-semibold tabular-nums whitespace-nowrap"
+                  style={{ fontSize: TABLE_AMOUNT_FONT_PX_DARK }}
+                >
+                  {formatEur(Number(table.activeTicket.total))}
+                </span>
+              )}
+              {/* La meta cede su sitio al botón «Cobrar X €» cuando lo
+                  hay: el botón ya dice qué pasa con esta mesa, y en una
+                  forma de 144 px las dos cosas se pisan (medido en el
+                  bucle visual, T2 de La Maestranza). */}
+              {!showCobrar && (
+                <span
+                  title={`Abierta hace ${elapsed}`}
+                  className="font-medium truncate max-w-full px-2"
+                  style={{ fontSize: 15, opacity: 0.85 }}
+                >
+                  {isBilling ? "cuenta" : elapsed}
+                </span>
+              )}
+            </>
+          )
+        )}
+        {groupBadge && (
+          <span
+            className="absolute top-1.5 inset-x-0 font-bold truncate px-2"
+            style={{ fontSize: 10, letterSpacing: "0.06em", opacity: 0.8 }}
+          >
+            {groupBadge}
+          </span>
+        )}
         {pendingCheckout && (
-          <span className="absolute top-[30px] right-3 text-[9px] font-semibold uppercase tracking-wider bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">
+          <span
+            className="absolute bottom-2 inset-x-0 font-semibold uppercase"
+            style={{ fontSize: 10, letterSpacing: "0.08em" }}
+          >
             cobro pendiente
           </span>
         )}
-        {/* tiempo abierto bajo pax (ámbar si olvidada).
-            v1.10.3-barra · hallazgo #5: con 4 dígitos de duración el
-            contador se comía la línea entera. Ahora llega en unidades
-            humanas ("42 días", ver `formatElapsed`) y además va acotado
-            a media tarjeta para que nunca pise el nombre de la mesa. */}
-        {!isFree && !pendingCheckout && (
-          <span
-            title={`Abierta hace ${elapsed}`}
-            className={`absolute top-[30px] right-3 max-w-[calc(100%-24px)] truncate text-[11px] font-semibold tabular-nums ${
-              olvidada ? "text-amber-700" : "text-slate-500"
-            }`}
-          >
-            {elapsed}
-          </span>
-        )}
-
-        {/* pie: camarero arriba, importe en SU PROPIA línea debajo */}
-        {/* v1.10.3-barra · hallazgo #5 le dio `shrink-0` al importe para
-            que "0,00 €" no se partiera en dos líneas. No bastaba:
-            `shrink-0` no recorta, DESBORDA. Compartiendo fila con el
-            camarero (que pedía `min-w-[92px]`) el importe se salía de la
-            tarjeta — medido en el AP13 el 07-10, «37,30 €» acababa 25 px
-            físicos más allá del borde derecho, con el € ya fuera.
-
-            Así que dejan de compartir fila. El importe tiene la suya,
-            entera, y nunca cede: `whitespace-nowrap` y sin encogerse. El
-            camarero va encima y se trunca, que para eso su nombre
-            completo está en el `title`. Lo que cabe se comprueba con
-            `tableAmountFits` en `room-grid-importe.test.ts`, con el
-            importe más largo y los dos anchos de tarjeta reales. */}
-        {!isFree && table.activeTicket && (
-          <div className="mt-auto pt-1 flex flex-col gap-0.5 min-w-0">
-            {alias && (
-              <span
-                title={aliasName(alias)}
-                className="flex items-center gap-1.5 text-[11.5px] text-slate-500 min-w-0"
-              >
-                <span className="w-5 h-5 rounded-[7px] bg-mipiace-ink text-white text-[9.5px] font-bold inline-flex items-center justify-center shrink-0">
-                  {avatarInitials(alias)}
-                </span>
-                <span className="truncate">{aliasName(alias)}</span>
-              </span>
-            )}
-            {/* En BILLING el total cede su sitio al botón Cobrar (overlay
-                a la derecha); reservamos el hueco. */}
-            {!showCobrar && (
-              <span
-                data-testid="table-card-amount"
-                className={`block text-right whitespace-nowrap text-[19px] font-bold tabular-nums tracking-tight ${totalColor}`}
-              >
-                {formatEur(Number(table.activeTicket.total))}
-              </span>
-            )}
-          </div>
-        )}
-
         {opening && (
-          <span className="absolute inset-0 flex items-center justify-center bg-white/60 rounded-[18px]">
-            <Loader2 className="w-5 h-5 animate-spin text-slate-500" />
+          <span
+            className="absolute inset-0 flex items-center justify-center"
+            style={{ background: "rgba(14,16,19,0.45)", borderRadius: radius }}
+          >
+            <Loader2 className="w-5 h-5 animate-spin" style={{ color: DARK_TEXT }} />
           </span>
         )}
       </button>
 
-      {/* Cobro directo (sólo BILLING). Botón separado —no anidado— sobre
-          el pie de la tarjeta. */}
+      {/* Cobro directo (sólo BILLING). Botón separado —no anidado—. */}
       {showCobrar && table.activeTicket && (
         <button
           type="button"
           onClick={() => onCobrar(table)}
           disabled={cobroBusy}
-          className="absolute bottom-3 right-3 h-8 px-3 rounded-[10px] bg-amber-700 hover:bg-amber-800 text-white text-[13px] font-semibold tabular-nums inline-flex items-center gap-1.5 disabled:opacity-60"
+          data-testid="table-cobrar"
+          className="absolute rounded-xl font-semibold tabular-nums inline-flex items-center justify-center gap-1.5 disabled:opacity-60 whitespace-nowrap"
+          style={{
+            // El botón se centra y se acota al ancho REAL de la forma a
+            // su altura. En una mesa redonda ese ancho no es el lado: es
+            // la cuerda, y con `inset-x-2` el botón salía por los dos
+            // lados del círculo colgando como una etiqueta (medido en el
+            // bucle visual, T2 de La Maestranza a 1443 × 812).
+            left: "50%",
+            transform: "translateX(-50%)",
+            bottom: COBRAR_BOTTOM,
+            maxWidth: cobrarMaxWidth(table.zone),
+            paddingLeft: 10,
+            paddingRight: 10,
+            height: COBRAR_HEIGHT,
+            fontSize: 15,
+            background: TABLE_BILLING_TEXT,
+            color: TABLE_BILLING_FILL,
+          }}
         >
           {cobroBusy ? (
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -1096,45 +1259,122 @@ function TableCard({
   );
 }
 
-// Zona BARRA: mostrador dibujado + las mesas de barra, ordenadas por
-// barSeatIndex (mockup .barrazona / .mostrador).
-//
-// v1.23-las-mesas-miden-lo-mismo · los taburetes eran círculos de
-// 84 × 84 px —la mitad del área de una mesa de Terraza y una séptima
-// parte de una de Salón— y además no enseñaban ni PAX, ni minutos, ni
-// cajero, ni el botón de cobro. Un sitio de barra es una mesa: ahora es
-// LA MISMA `TableCard`. La identidad de la zona la da el mostrador
-// dibujado encima, que es lo que el prompt deja conservar; lo que no
-// puede ser menor es el objetivo táctil.
+/** Alto del botón «Cobrar X €» de una mesa en BILLING. */
+const COBRAR_HEIGHT = 36;
+
+/** A qué altura del borde inferior se ancla. */
+const COBRAR_BOTTOM = 18;
+
+/**
+ * Ancho máximo del botón «Cobrar» dentro de la forma.
+ *
+ * En Salón y Reservados es el lado menos un margen. En Barra y Terraza
+ * —que son círculos— es la CUERDA a la altura del centro del botón: un
+ * círculo de 144 px mide 144 en su eje pero mucho menos a 36 px del
+ * borde, y ahí es donde el botón se apoya.
+ */
+function cobrarMaxWidth(zone: TableZone): number {
+  if (TABLE_SHAPE_RADIUS[zone] < TABLE_SHAPE_SIZE / 2) {
+    return TABLE_SHAPE_SIZE - 16;
+  }
+  const centroDelBoton = COBRAR_BOTTOM + COBRAR_HEIGHT / 2;
+  const offset = TABLE_SHAPE_SIZE / 2 - centroDelBoton;
+  return Math.floor(roundTableChordWidth(offset) - 8);
+}
+
+/**
+ * Zona BARRA: el mostrador dibujado y, encima, los taburetes ordenados
+ * por `barSeatIndex`.
+ *
+ * El mostrador es lo que da identidad a la zona —v1.23 ya lo conservaba
+ * al quitarle a los taburetes su tamaño propio—, y ahora además los
+ * sitios vuelven a ser redondos, que es lo que son: taburetes. Lo que NO
+ * vuelve es que midan menos que una mesa.
+ */
 function BarZone({
   tables,
   renderCard,
-  className,
 }: {
   tables: ApiTable[];
   renderCard: (t: ApiTable) => ReactNode;
-  className?: string;
 }) {
   const sorted = tables
     .slice()
     .sort((a, b) => (a.barSeatIndex ?? 0) - (b.barSeatIndex ?? 0));
   return (
-    <div
-      className={`relative rounded-[22px] border-[1.5px] border-dashed border-slate-300 p-[18px] ${className ?? ""}`}
+    <ZoneFrame
+      label={ZONE_LABEL.BARRA.toUpperCase()}
+      extraTop={
+        <div
+          data-testid="bar-counter"
+          className="rounded-[11px] mb-4"
+          style={{ height: 22, background: BAR_COUNTER_FILL }}
+        />
+      }
     >
-      <span className="absolute -top-[9px] left-[22px] bg-mipiace-stone px-2 text-[11px] tracking-[0.12em] font-semibold text-slate-500">
-        BARRA
-      </span>
-      {/* mostrador */}
-      <div className="h-[26px] rounded-[10px] bg-gradient-to-b from-[#EADFCE] to-[#DFD0B8] border border-[#D5C4A8] mb-4" />
       <RoomGrid>{sorted.map(renderCard)}</RoomGrid>
+    </ZoneFrame>
+  );
+}
+
+/** Un punto de la leyenda. */
+function LegendDot({
+  fill,
+  ring,
+  label,
+}: {
+  fill: string;
+  ring?: string;
+  label: string;
+}) {
+  return (
+    <span className="flex items-center gap-2">
+      <span
+        className="w-3.5 h-3.5 rounded-[4px] shrink-0"
+        style={{
+          background: fill,
+          boxShadow: ring ? `0 0 0 3px ${ring}` : undefined,
+        }}
+      />
+      {label}
+    </span>
+  );
+}
+
+/** Un aviso de la sala oscura. Mismo criterio que el de la comanda. */
+function DarkRoomNotice({
+  tone,
+  testid,
+  children,
+}: {
+  tone: "amber" | "red";
+  testid?: string;
+  children: ReactNode;
+}) {
+  const fill = tone === "red" ? "rgba(233,112,88,0.14)" : "rgba(226,178,58,0.14)";
+  const color = tone === "red" ? "#F2A08F" : TABLE_BILLING_FILL;
+  return (
+    <div
+      role="status"
+      data-testid={testid}
+      className="mb-4 rounded-2xl px-4 py-3 shrink-0"
+      style={{ background: fill, color, fontSize: 14.5 }}
+    >
+      {children}
     </div>
   );
 }
 
 function EmptyState() {
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-6 text-center text-[13.5px] text-slate-500">
+    <div
+      className="rounded-2xl p-6 text-center"
+      style={{
+        background: DARK_SURFACE,
+        color: DARK_TEXT_MUTED,
+        fontSize: 15,
+      }}
+    >
       Esta tienda aún no tiene mesas. Pide al propietario que las configure
       desde el panel de admin.
     </div>
@@ -1159,13 +1399,9 @@ function aliasName(label: string): string {
   return local.trim();
 }
 
-// 2 iniciales del alias para el avatar (fallback email). "Matías Tapia"
-// → "MT"; "Matías" → "MA"; "matias.oyola@…" → "MO".
-function avatarInitials(label: string): string {
-  const local = label.includes("@") ? (label.split("@")[0] ?? "") : label;
-  const parts = local.trim().split(/[\s._-]+/).filter(Boolean);
-  const a = parts[0];
-  const b = parts[1];
-  if (a && b) return (a[0]! + b[0]!).toUpperCase();
-  return ((a ?? "").slice(0, 2) || "?").toUpperCase();
-}
+// v2-H1 · aquí vivía `avatarInitials`, las dos letras del alias para el
+// avatar cuadrado del pie de la tarjeta. Se va con el avatar: en una
+// forma de 144 px el cajero se queda en el `title` (ver la nota de
+// `TableCard`), y un avatar de 20 px con dos letras dentro de un círculo
+// de mesa competía con el importe sin decir nada que no estuviera a un
+// toque. `aliasName` sigue, porque el `title` lo usa.

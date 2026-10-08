@@ -3,13 +3,115 @@
 // pantalla de venta (B4 §2).
 
 import type { FastifyInstance } from "fastify";
-import type { TicketStatus } from "@mipiacetpv/db";
+import { Prisma, type TicketStatus } from "@mipiacetpv/db";
 
 import { requireCashierSession } from "../shift/cashier-session.js";
 import { getPrisma } from "../context.js";
 import { getTenantHealthStatus } from "../tickets/health.js";
 import { CAJA_DISABLED_MESSAGE, ensureCajaEnabled } from "../lib/caja-gate.js";
 import { brutoDesdeNeto } from "../catalog/local-product-rules.js";
+import { CENTER_TZ } from "../agenda/time.js";
+
+// ──────────────────────────────────────────────────────────────────────
+// v2-H1-venta-y-sala §3 · los parámetros de la vista «Ahora».
+//
+// Van aquí arriba y con nombre porque son los tres números que un
+// implantador querrá mover si «Ahora» no acierta en un local concreto, y
+// porque el test de la ruta los lee en vez de repetirlos.
+// ──────────────────────────────────────────────────────────────────────
+
+/** Cuántos productos trae «Ahora». Es el 4 × 5 de la maqueta. */
+const NOW_LIMIT = 20;
+
+/**
+ * Media anchura de la franja, en horas. ±1 h sobre la hora actual, o
+ * sea tres horas de muestra.
+ *
+ * Con una sola hora un bar tranquilo entre semana no junta ventas
+ * suficientes para que el orden signifique algo; con ±2 la franja del
+ * desayuno se mezcla con la del aperitivo, que es lo que esta vista
+ * viene a separar.
+ */
+const NOW_BAND_HOURS = 1;
+
+/**
+ * Profundidad de la muestra, en días. **Cuatro semanas exactas**, para
+ * que haya el mismo número de lunes que de sábados: con 30 días dos días
+ * de la semana pesan un 25 % más que los otros cinco, y en un bar el
+ * sábado no se pide lo que el martes.
+ */
+const NOW_WINDOW_DAYS = 28;
+
+/** La zona del local. La misma que usa el resto del sistema. */
+const NOW_TZ = CENTER_TZ;
+
+/**
+ * El relleno de «Ahora»: los primeros productos de cada familia, en su
+ * orden, repartiendo por turnos (uno de cada familia, luego el segundo
+ * de cada una…).
+ *
+ * Por turnos y no familia a familia: con 9 familias y 20 huecos,
+ * volcarlas en orden dejaría «Ahora» con los veinte productos de las dos
+ * primeras familias alfabéticas y ninguno del resto. Un comercio nuevo
+ * abriría el TPV y vería veinte cafés — peor que una pantalla vacía,
+ * porque parece que el catálogo está mal cargado.
+ *
+ * «Su orden» es el del catálogo (`name: asc`), que es el mismo con el que
+ * `/tpv/catalog/products` alimenta la rejilla: lo que «Ahora» ofrece de
+ * relleno está en el mismo sitio relativo que en su familia.
+ */
+async function firstOfEachFamily(
+  prisma: ReturnType<typeof getPrisma>,
+  tenantId: string,
+  needed: number,
+  exclude: Set<string>,
+): Promise<Array<{ productId: string; units: number }>> {
+  if (needed <= 0) return [];
+  const products = await prisma.product.findMany({
+    where: {
+      tenantId,
+      active: true,
+      sellableViaTpv: true,
+      sku: { not: null },
+    },
+    orderBy: { name: "asc" },
+    select: { id: true, tags: true },
+  });
+
+  // Un producto puede llevar varios tags en Holded (`cafes` + `favoritos`
+  // + `desayuno`). Se le asigna el PRIMERO, que es el mismo criterio con
+  // el que el TPV decide de qué familia es el botón: si aquí dijéramos
+  // otra cosa, el relleno saldría de una familia y el botón se pintaría
+  // del color de otra.
+  const byFamily = new Map<string, string[]>();
+  for (const p of products) {
+    if (exclude.has(p.id)) continue;
+    const family = p.tags[0] ?? "";
+    const bucket = byFamily.get(family);
+    if (bucket) bucket.push(p.id);
+    else byFamily.set(family, [p.id]);
+  }
+
+  // Familias en orden alfabético para que el relleno de un comercio no
+  // cambie de un día para otro sin que su catálogo haya cambiado.
+  const families = [...byFamily.keys()].sort();
+  const out: Array<{ productId: string; units: number }> = [];
+  let round = 0;
+  while (out.length < needed) {
+    let addedThisRound = false;
+    for (const family of families) {
+      if (out.length >= needed) break;
+      const id = byFamily.get(family)?.[round];
+      if (!id) continue;
+      // `units: 0` dice la verdad: este producto NO está aquí por ventas.
+      out.push({ productId: id, units: 0 });
+      addedThisRound = true;
+    }
+    if (!addedThisRound) break; // se agotó el catálogo antes que los huecos
+    round += 1;
+  }
+  return out;
+}
 
 export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<void> {
   // Catálogo paginado. El TPV cachea el resultado en IndexedDB la primera
@@ -387,6 +489,147 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
         items: ranked
           .filter((r) => alive.has(r.productId))
           .map((r) => ({ productId: r.productId, units: r.units })),
+      };
+    },
+  );
+
+  // v2-H1-venta-y-sala §3 · GET /tpv/catalog/now · la vista «Ahora».
+  //
+  // «Ahora» es la PRIMERA pestaña de la venta de hostelería y la que
+  // abre por defecto (decisión 4): los productos más pedidos en ESE
+  // comercio en ESTA franja horaria. Es la única vista que se reordena
+  // sola; dentro de una familia el orden no cambia nunca, porque lo que
+  // el camarero aprende es la posición.
+  //
+  // Por qué no vale `/tpv/catalog/top-sellers`, que ya existe: ése
+  // rankea el TURNO entero (o el último mes) y alimenta cinco huecos del
+  // estado vacío del ticket. «Ahora» necesita la FRANJA: a las ocho de la
+  // mañana lo que se pide son cafés y tostadas, y a las ocho de la tarde
+  // cañas — un ranking del turno de mañana entero le pone las tostadas
+  // delante al camarero del aperitivo. Son dos preguntas distintas con
+  // dos ventanas distintas, así que son dos rutas.
+  //
+  // La ventana: **franja de ±1 h sobre la hora actual, en los últimos 28
+  // días**. Los 28 son cuatro semanas exactas, así que la muestra tiene
+  // el mismo número de lunes que de sábados — con 30 días, dos días de
+  // la semana pesan un 25 % más que los otros cinco, y en un bar el
+  // sábado no se pide lo mismo que el martes. La ±1 h da tres horas de
+  // muestra: con una sola hora, un bar tranquilo entre semana no junta
+  // ventas suficientes para que el orden signifique algo.
+  //
+  // Sin migraciones: se lee de `ticket_lines` y `tickets`, que es lo
+  // mismo que lee `top-sellers`.
+  app.get(
+    "/tpv/catalog/now",
+    {
+      preHandler: [requireCashierSession, ensureCajaEnabled],
+      schema: {
+        querystring: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            limit: { type: "integer", minimum: 1, maximum: 40 },
+          },
+        },
+      },
+    },
+    async (request) => {
+      const cashier = request.cashier!;
+      const q = request.query as { limit?: number };
+      const limit = q.limit ?? NOW_LIMIT;
+      const prisma = getPrisma();
+
+      // La franja se calcula EN SQL, con `AT TIME ZONE`, y no en JS.
+      // `created_at` es `timestamptz` y lo que se compara es la hora de
+      // PARED del local: a las 21:00 de Madrid le corresponden las 19:00
+      // UTC en verano y las 20:00 en invierno, así que extraer la hora en
+      // UTC mezclaría la franja del aperitivo de julio con la de la cena
+      // de enero. `AT TIME ZONE 'Europe/Madrid'` aplica las reglas DST
+      // fila a fila, que es justo lo que no se puede hacer con un offset
+      // fijo. Misma zona que el resto del sistema (`agenda/time.ts`).
+      //
+      // La franja se compara en aritmética modular de 24 h para que
+      // envuelva la medianoche: a las 00:30 la franja es 23:00–01:00, o
+      // sea «hora >= 23 OR hora <= 1», y un `BETWEEN` daría vacío. Un
+      // bar de copas cierra a las tres: si la vista se quedara en blanco
+      // justo en su hora punta, «Ahora» no serviría para nada.
+      //
+      // Sólo ventas de verdad, con el mismo criterio que `top-sellers`:
+      // DRAFT es una mesa abierta, VOIDED una mesa vaciada y TEST el
+      // cajero técnico del onboarding. Ninguno mueve el ranking.
+      const ranked = await prisma.$queryRaw<
+        Array<{ product_id: string; units: number | bigint | { toString(): string } }>
+      >(Prisma.sql`
+        SELECT l.product_id AS product_id, SUM(l.units) AS units
+        FROM ticket_lines l
+        JOIN tickets t ON t.id = l.ticket_id
+        WHERE t.tenant_id = ${cashier.tid}::uuid
+          AND t.status IN ('PAID', 'PENDING_SYNC', 'SYNCED', 'SYNC_FAILED', 'ON_CREDIT')
+          AND t.created_at >= NOW() - ${`${NOW_WINDOW_DAYS} days`}::interval
+          AND l.product_id IS NOT NULL
+          AND (
+            (EXTRACT(HOUR FROM t.created_at AT TIME ZONE ${NOW_TZ})::int
+              - EXTRACT(HOUR FROM NOW() AT TIME ZONE ${NOW_TZ})::int + 24) % 24
+            <= ${NOW_BAND_HOURS}
+            OR
+            (EXTRACT(HOUR FROM NOW() AT TIME ZONE ${NOW_TZ})::int
+              - EXTRACT(HOUR FROM t.created_at AT TIME ZONE ${NOW_TZ})::int + 24) % 24
+            <= ${NOW_BAND_HOURS}
+          )
+        GROUP BY l.product_id
+        ORDER BY SUM(l.units) DESC
+        LIMIT ${limit}
+      `);
+
+      // Lo que ya no está en el catálogo no se ofrece. Se filtra aquí y
+      // no en el TPV, que sólo sabe pintar: un botón que añade un
+      // producto borrado de Holded es una línea que el sync rechaza.
+      const vendidos = ranked
+        .map((r) => ({ productId: r.product_id, units: Number(r.units) }))
+        .filter((r) => r.productId);
+      const vivos =
+        vendidos.length > 0
+          ? await prisma.product.findMany({
+              where: {
+                id: { in: vendidos.map((r) => r.productId) },
+                tenantId: cashier.tid,
+                active: true,
+                sellableViaTpv: true,
+              },
+              select: { id: true },
+            })
+          : [];
+      const aliveIds = new Set(vivos.map((p) => p.id));
+      const items = vendidos
+        .filter((r) => aliveIds.has(r.productId))
+        .map((r) => ({ productId: r.productId, units: r.units }));
+
+      // El relleno. «Si hay menos de 20 con ventas, se completa con los
+      // primeros de cada familia en su orden» — y un comercio NUEVO, sin
+      // un solo ticket, ve «Ahora» = primeros de cada familia.
+      //
+      // Esto se hace en el servidor y no en el TPV a propósito: así la
+      // respuesta siempre trae veinte productos y el terminal no tiene
+      // dos caminos para pintar la misma vista. El sabotaje «"Ahora" sin
+      // ventas devuelve vacío» cae con un test de API, no con uno de
+      // render.
+      const filled = items.length < limit
+        ? [...items, ...(await firstOfEachFamily(
+            prisma,
+            cashier.tid,
+            limit - items.length,
+            new Set(items.map((i) => i.productId)),
+          ))]
+        : items;
+
+      return {
+        // De dónde sale lo que se está viendo. El TPV no lo pinta hoy,
+        // pero sin esto no hay forma de distinguir «este bar pide cañas a
+        // esta hora» de «este bar es nuevo» al depurar una implantación.
+        source: items.length === 0 ? "families" : items.length < limit ? "mixed" : "sales",
+        bandHours: NOW_BAND_HOURS,
+        windowDays: NOW_WINDOW_DAYS,
+        items: filled,
       };
     },
   );

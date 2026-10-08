@@ -255,7 +255,24 @@ function deleteCall() {
 }
 
 function enElMapa(): boolean {
-  return (container.textContent ?? "").includes("Nueva venta rápida");
+  // v2-H1 · el botón de la cabecera oscura de la sala dice «Venta
+  // rápida» (la maqueta revisada con Matías); antes decía «Nueva venta
+  // rápida». Se pregunta por la pantalla y no por el rótulo: el
+  // `data-testid` de la sala es lo que no va a cambiar con la siguiente
+  // pasada de copy.
+  return container.querySelector('[data-testid="room-screen"]') != null;
+}
+
+function porTestId(id: string): HTMLButtonElement {
+  const el = container.querySelector(`[data-testid="${id}"]`);
+  if (!el) throw new Error(`"${id}" no encontrado`);
+  return el as HTMLButtonElement;
+}
+
+function porChromeAction(key: string): HTMLButtonElement {
+  const el = container.querySelector(`[data-chrome-action="${key}"]`);
+  if (!el) throw new Error(`acción de chrome "${key}" no encontrada`);
+  return el as HTMLButtonElement;
 }
 
 describe("v1.12 addendum · salir de una mesa vacía la suelta", () => {
@@ -276,12 +293,16 @@ describe("v1.12 addendum · salir de una mesa vacía la suelta", () => {
     expect(enElMapa()).toBe(true);
   });
 
-  it("con el botón «Mapa»: exactamente lo mismo que antes del addendum", async () => {
+  it("con la flecha de volver a la sala: exactamente lo mismo que antes del addendum", async () => {
     mockApi();
     await renderHome();
     await entrarEnLaMesa();
 
-    await click(buttonIncluding("Mapa"));
+    // v2-H1 · la salida al mapa en hostelería es la flecha de volver de
+    // la cabecera de la comanda, no un botón rotulado «Mapa» en una
+    // barra superior que esta pantalla ya no tiene. Un toque igual que
+    // antes, y la misma limpieza.
+    await click(porTestId("comanda-back"));
 
     expect(deleteCall()!.path).toContain("onlyIfEmpty=true");
     expect(enElMapa()).toBe(true);
@@ -294,7 +315,9 @@ describe("v1.12 addendum · salir de una mesa vacía la suelta", () => {
     await renderHome();
     await entrarEnLaMesa();
 
-    await click(buttonIncluding("Tickets"));
+    // «Tickets» es ahora un botón de chrome, sólo icono, dentro de la
+    // comanda: sigue a un toque y abre el mismo historial.
+    await click(porChromeAction("tickets"));
     await click(buttonIncluding("Mesas"));
 
     expect(deleteCall()!.path).toContain("onlyIfEmpty=true");
@@ -304,7 +327,7 @@ describe("v1.12 addendum · salir de una mesa vacía la suelta", () => {
   it("el Atrás no inventa limpieza en venta rápida (no hay mesa que soltar)", async () => {
     mockApi();
     await renderHome();
-    await click(buttonIncluding("Nueva venta rápida"));
+    await click(buttonIncluding("Venta rápida"));
     expect(enElMapa()).toBe(false);
 
     await pulsarAtras();

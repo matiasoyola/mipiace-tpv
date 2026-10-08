@@ -229,6 +229,28 @@ async function settle() {
   }
 }
 
+// v2-H1 · los dos «Cobrar» de la pantalla.
+//
+// La comanda oscura rotula su botón «Cobrar» a secas (el importe vive en
+// el total de 46 px justo encima), igual que el confirmar del overlay.
+// Buscar por rótulo encontraría siempre el de la comanda —está antes en
+// el DOM— y el test pasaría sin haber tocado el overlay.
+function comandaCobrar(): HTMLButtonElement {
+  const el = container.querySelector('[data-testid="comanda-cobrar"]');
+  if (!el) throw new Error("«Cobrar» de la comanda no encontrado");
+  return el as HTMLButtonElement;
+}
+
+function confirmarCobro(): HTMLButtonElement {
+  const el = Array.from(container.querySelectorAll("button")).find(
+    (b) =>
+      (b.textContent?.trim() ?? "") === "Cobrar" &&
+      b.getAttribute("data-testid") !== "comanda-cobrar",
+  );
+  if (!el) throw new Error("«Cobrar» del overlay no encontrado");
+  return el as HTMLButtonElement;
+}
+
 function buttonByText(text: string, exact = true): HTMLButtonElement {
   const btn = Array.from(container.querySelectorAll("button")).find((b) => {
     const t = b.textContent?.trim() ?? "";
@@ -373,8 +395,8 @@ describe("Frente 2 · los errores del servidor se ven", () => {
     );
 
     await renderTableSalePage([serverLine()]);
-    await click(buttonByText("Cobrar", false)); // abre el overlay
-    await click(buttonByText("Cobrar")); // confirma → 400
+    await click(comandaCobrar()); // abre el overlay
+    await click(confirmarCobro()); // confirma → 400
 
     // Aviso inline dentro del modal + total recalculado (4,40 €).
     expect(container.textContent).toContain("La cuenta ha cambiado desde otra caja");
@@ -402,8 +424,8 @@ describe("Frente 2 · los errores del servidor se ven", () => {
     );
 
     await renderTableSalePage([serverLine()]);
-    await click(buttonByText("Cobrar", false));
-    await click(buttonByText("Cobrar"));
+    await click(comandaCobrar());
+    await click(confirmarCobro());
 
     expect(onExitToMap).toHaveBeenCalledTimes(1);
     const notice = onExitToMap.mock.calls[0]![0] as { text: string };
@@ -440,11 +462,17 @@ describe("Frente 2 · los errores del servidor se ven", () => {
 });
 
 describe("Frente 3 · navegación de bar", () => {
-  // v1.14-la-comanda-se-ve (hallazgo M4): el botón se llama "Mapa" —el
-  // mismo rótulo que tenía enterrado en el panel del ticket, que es de
-  // donde sube— y en hostelería es la CTA grande de la izquierda a
-  // `touch-lg`. Volver al mapa es la navegación nº 1 del turno.
-  it("(7) 'Mapa' visible en el header de venta rápida", async () => {
+  // v1.14-la-comanda-se-ve (hallazgo M4): volver al mapa es la
+  // navegación nº 1 del turno, y el botón subió del panel del ticket a
+  // la barra como CTA grande de la izquierda.
+  //
+  // v2-H1 · sigue siendo la navegación nº 1 y sigue a UN toque, pero ya
+  // no es un botón rotulado en una barra superior que esta pantalla no
+  // tiene: es la flecha de volver de la cabecera de la comanda, que es
+  // lo que la maqueta revisada con Matías pone ahí. Lo que el test
+  // guarda es lo que importa —un solo toque y `onBackToMap`— y además
+  // que el objetivo no baje del suelo táctil de 56 px del bloque.
+  it("(7) volver a la sala está a un toque en la venta de hostelería", async () => {
     apiMock.apiWithCashier.mockImplementation(async (path: string) => {
       const bg = backgroundRoutes(path);
       if (bg !== undefined) return bg;
@@ -471,8 +499,16 @@ describe("Frente 3 · navegación de bar", () => {
     });
     await settle();
 
-    const mapa = buttonByText("Mapa", false);
-    expect(mapa.className).toContain("h-touch-lg");
+    const mapa = container.querySelector(
+      '[data-testid="comanda-back"]',
+    ) as HTMLButtonElement;
+    expect(mapa).not.toBeNull();
+    expect(mapa.getAttribute("aria-label")).toBe("Volver a la sala");
+    // El tamaño entra por `style` con la constante que lee el test, no
+    // por una clase suelta: así un sabotaje que lo baje a 48 cambia el
+    // número que entra y esto se pone rojo.
+    expect(mapa.style.width).toBe("56px");
+    expect(mapa.style.height).toBe("56px");
     await click(mapa);
     expect(onBackToMap).toHaveBeenCalled();
   });
@@ -505,10 +541,15 @@ describe("Frente 3 · navegación de bar", () => {
     expect(
       container.querySelector('button[aria-label="Abrir menú"]'),
     ).not.toBeNull();
-    const ticketsBtn = Array.from(container.querySelectorAll("button")).find(
-      (b) => (b.textContent ?? "").trim() === "Tickets",
+    // v2-H1 · la cabecera oscura mete título, contador, filtros de zona
+    // y «Venta rápida» en UNA fila de 80 px (son los 108 px que la mesa
+    // necesita para crecer), así que «Tickets» pasa a ser sólo icono.
+    // Sigue a un toque y en el mismo sitio: lo que se guarda es el
+    // destino, no el rótulo.
+    const ticketsBtn = container.querySelector(
+      'button[aria-label="Tickets pasados"]',
     );
-    expect(ticketsBtn).not.toBeUndefined();
+    expect(ticketsBtn).not.toBeNull();
 
     // Al abrir el menú aparecen Arqueo X y Cerrar turno.
     await act(async () => {

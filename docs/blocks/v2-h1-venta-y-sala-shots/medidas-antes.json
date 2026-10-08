@@ -1,0 +1,48 @@
+{
+  "sala-1443x812": {
+    "importeMesa": "19px",
+    "nombreMesa": "19px",
+    "tamanosDeMesa": [
+      "168x118"
+    ],
+    "scrollHeight": 812,
+    "clientHeight": 812
+  },
+  "venta-1443x812": {
+    "productosEnDom": 62,
+    "productosVisibles": 25,
+    "nombreProducto": "16px",
+    "lineaComanda": "14.5px",
+    "total": "32px",
+    "cobrarAlto": 64,
+    "scrollHeight": 812,
+    "clientHeight": 812
+  },
+  "venta-licores-1443x812": {
+    "productosEnDom": 31,
+    "productosVisibles": 25
+  },
+  "sala-1280x800": {
+    "importeMesa": "19px",
+    "nombreMesa": "19px",
+    "tamanosDeMesa": [
+      "168x118"
+    ],
+    "scrollHeight": 800,
+    "clientHeight": 800
+  },
+  "venta-1280x800": {
+    "productosEnDom": 62,
+    "productosVisibles": 25,
+    "nombreProducto": "16px",
+    "lineaComanda": "14.5px",
+    "total": "32px",
+    "cobrarAlto": 64,
+    "scrollHeight": 800,
+    "clientHeight": 800
+  },
+  "venta-licores-1280x800": {
+    "productosEnDom": 31,
+    "productosVisibles": 25
+  }
+}

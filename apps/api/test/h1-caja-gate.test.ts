@@ -206,7 +206,11 @@ describe("H1 · las rutas reales llevan la puerta puesta", () => {
   const ESPERADAS: Array<[string, number]> = [
     ["shift/routes.ts", 10],
     ["shift/cashier-auth.ts", 3],
-    ["tpv-catalog/routes.ts", 4],
+    // v2-H1 · sube a 5 con `GET /tpv/catalog/now`, que lleva su
+    // `ensureCajaEnabled` como las demás. El guardia hace su trabajo:
+    // añadir una ruta de caja sin la puerta tiene que ponerlo rojo, y
+    // añadirla CON la puerta obliga a tocar el número aquí a mano.
+    ["tpv-catalog/routes.ts", 5],
     ["devices/routes.ts", 5],
     ["cashiers/routes.ts", 5],
     ["tickets/routes.ts", 8],

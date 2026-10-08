@@ -43,6 +43,10 @@ vi.mock("../src/pages/CheckoutPage.js", () => ({
 }));
 
 import { TableMapScreen, type ApiTable } from "../src/pages/TableMapScreen.js";
+import {
+  LONGEST_TABLE_AMOUNT,
+  roundTableAmountFits,
+} from "../src/lib/roomGrid.js";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -135,34 +139,41 @@ describe("El importe de la mesa ocupada va en su propia línea", () => {
     expect(importe().textContent).toContain("€");
   });
 
-  it("el pie es una COLUMNA: el importe no comparte fila con el camarero", async () => {
-    await renderSala();
-    const pie = importe().parentElement!;
-    expect(clases(pie)).toContain("flex-col");
-    // La fila que desbordaba era `flex-wrap ... justify-between`.
-    expect(clases(pie)).not.toContain("flex-wrap");
-  });
-
   it("el importe no se parte en dos líneas", async () => {
     await renderSala();
     expect(clases(importe())).toContain("whitespace-nowrap");
   });
 
-  it("el importe no se trunca: el que se recorta es el camarero", async () => {
+  it("el importe no se trunca nunca", async () => {
+    // v2-H1 · el hallazgo del AP13 era que el importe compartía fila con
+    // el camarero y, con `shrink-0`, en vez de recortarse DESBORDABA: el
+    // € acabó 25 px físicos más allá del borde de la tarjeta.
+    //
+    // La forma nueva lo resuelve por construcción y de otra manera: el
+    // contenido de la mesa es una COLUMNA centrada de tres líneas
+    // —nombre, importe, meta— y el camarero ya no está en ella (se fue
+    // al `title`, ver `TableCard`). O sea que no hay nadie con quien
+    // compartir fila. Lo que se sigue afirmando es lo que importa: el
+    // importe no se recorta y no se parte.
     await renderSala();
     expect(clases(importe())).not.toContain("truncate");
-
-    const pie = importe().parentElement!;
-    const alias = [...pie.children].find((c) => c !== importe());
-    expect(alias).toBeTruthy();
-    // El alias largo del hallazgo sigue ahí, recortado y con title.
-    expect(alias!.querySelector(".truncate")).not.toBeNull();
+    expect(clases(importe())).not.toContain("overflow-hidden");
   });
 
-  it("el importe NO está dentro de la caja del camarero", async () => {
+  it("la columna de la mesa es eso, una columna", async () => {
     await renderSala();
-    const pie = importe().parentElement!;
-    const alias = [...pie.children].find((c) => c !== importe())!;
-    expect(alias.contains(importe())).toBe(false);
+    const forma = importe().closest('[data-testid="table-shape"]')!;
+    expect(clases(forma)).toContain("flex-col");
+    // La fila que desbordaba era `flex-wrap ... justify-between`.
+    expect(clases(forma)).not.toContain("flex-wrap");
+  });
+
+  it("el importe cabe DENTRO del círculo, medido con la cuerda", async () => {
+    // El complemento aritmético de esto vive en
+    // `room-grid-importe.test.ts`, y en la forma redonda la cuenta
+    // cambia: el ancho útil de un círculo a la altura del importe no es
+    // el lado, es la cuerda. Medir contra el lado daría «cabe» a un
+    // importe que el círculo recorta por los lados.
+    expect(roundTableAmountFits(LONGEST_TABLE_AMOUNT)).toBe(true);
   });
 });

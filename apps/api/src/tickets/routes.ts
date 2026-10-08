@@ -2388,6 +2388,9 @@ function serializeTicket(t: DbTicket): Record<string, unknown> {
     syncedAt: Date | null;
     sealedHash: string | null;
     sealedAt: Date | null;
+    // v2-H1 §5 · columnas de v1.4 que hasta ahora no viajaban al TPV.
+    lastSentAt?: Date | null;
+    lastSentRevision?: number;
     lines: Array<{
       id: string;
       productId: string | null;
@@ -2470,6 +2473,13 @@ function serializeTicket(t: DbTicket): Record<string, unknown> {
     // una venta anterior al despliegue del sello, no una venta rota.
     sealedAt: ticket.sealedAt?.toISOString() ?? null,
     sealedHash: ticket.sealedHash,
+    // v2-H1 §5 · con qué comanda salió este ticket hacia cocina y cuándo.
+    // El TPV de hostelería lo usa para partir la comanda en «En cocina ·
+    // hh:mm» y «Sin enviar» y para rotular «Reenviar (nº N)» después de
+    // una recarga. `undefined` en los selects que no lo piden (el
+    // histórico), `null` cuando el ticket nunca se envió.
+    lastSentAt: ticket.lastSentAt?.toISOString() ?? null,
+    lastSentRevision: ticket.lastSentRevision ?? 0,
     register: ticket.register
       ? {
           id: ticket.register.id,

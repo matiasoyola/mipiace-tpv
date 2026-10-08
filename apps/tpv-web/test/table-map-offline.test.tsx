@@ -100,7 +100,7 @@ function tableButton(name: string): HTMLButtonElement {
 
 function quickSaleButton(): HTMLButtonElement {
   const btn = [...container.querySelectorAll("button")].find((b) =>
-    b.textContent?.includes("Nueva venta rápida"),
+    b.textContent?.trim() === "Venta rápida",
   );
   if (!btn) throw new Error("botón de venta rápida no encontrado");
   return btn as HTMLButtonElement;

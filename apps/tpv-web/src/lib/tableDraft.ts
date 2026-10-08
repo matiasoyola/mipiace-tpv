@@ -42,6 +42,14 @@ export interface ServerDraft {
   diners: number | null;
   total: string | number;
   createdAt: string;
+  // v2-H1 §5 · si este DRAFT ya salió hacia cocina y cuándo. Lo
+  // devuelven `serializeDraft` (operativa.ts) y `serializeTicket`
+  // (tickets/routes.ts) desde las columnas que v1.4 ya escribía.
+  // Opcionales porque hay respuestas viejas en vuelo —un terminal con el
+  // bundle nuevo contra una API sin despliegue— y porque el campo no
+  // existe en los serializadores del histórico.
+  lastSentAt?: string | null;
+  lastSentRevision?: number;
   lines: ServerDraftLine[];
 }
 

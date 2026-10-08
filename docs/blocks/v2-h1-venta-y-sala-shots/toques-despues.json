@@ -1,0 +1,16 @@
+{
+  "1443x812": {
+    "pantalla": "oscura (v2-H1)",
+    "toquesComanda": 7,
+    "msComanda": 1744,
+    "toquesCobro": 4,
+    "msCobro": 2278
+  },
+  "1280x800": {
+    "pantalla": "oscura (v2-H1)",
+    "toquesComanda": 7,
+    "msComanda": 1741,
+    "toquesCobro": 4,
+    "msCobro": 2290
+  }
+}
