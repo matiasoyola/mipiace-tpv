@@ -111,11 +111,11 @@ En la cuenta ENSAYO, con la APK nueva y el servidor desplegado.
 
 | | Antes (1.22.0) | Después (v2-H1) |
 |---|---|---|
-| Comanda típica · toques | **10** (10 / 10 / 10) | |
-| Comanda típica · segundos (mediana de 3) | **26,5** (30 / 26,5 / 15,1) | |
-| Cobro en efectivo · toques | **4** (4 / 4 / 4) | |
-| Cobro en efectivo · segundos (mediana de 3) | **15,1** la 1.ª · **5,8** entrenado | |
-| Dónde tuvo que pararse a leer | buscar la familia y el producto dentro: 7,0 s hasta Cafés, 4,4 s hasta Desayunos, 5,5 s la tostada, 4,4 s hasta Cervezas | |
+| Comanda típica · toques | **10** (10 / 10 / 10) | **9** (9 / 9 / 10) |
+| Comanda típica · segundos (mediana de 3) | **26,5** (30 / 26,5 / 15,1) | **12,9** (32,7 / 12,9 / 9,9) |
+| Cobro en efectivo · toques | **4** (4 / 4 / 4) | **4** (4 / — / 4) |
+| Cobro en efectivo · segundos (mediana de 3) | **15,1** la 1.ª · **5,8** entrenado | **6,2** la 1.ª · **4,0** entrenado |
+| Dónde tuvo que pararse a leer | buscar la familia y el producto dentro: 7,0 s hasta Cafés, 4,4 s hasta Desayunos, 5,5 s la tostada, 4,4 s hasta Cervezas | ya no hay paradas largas; la única fue 10,9 s buscando la Tostada dentro de Desayunos |
 
 Cómo se midió el «antes» (08-10, cuenta ENSAYO `81f2177b`, APK 1.22.0):
 
@@ -133,24 +133,59 @@ Cómo se midió el «antes» (08-10, cuenta ENSAYO `81f2177b`, APK 1.22.0):
   Matías ya vendrá entrenado, así que la comparación honesta de **tiempos** es contra los ~15 s;
   la cifra limpia son los **toques**.
 
+El «después» se midió el 08-10 a las 16:00, misma cuenta, mismo cesto, APK 1.23.0 (`106f0d3`) y el
+servidor en el mismo `106f0d3`:
+
+- **Toques: 10 → 9.** La ruta del después es «Ahora» (que abre sola) → Café con leche ×2 →
+  Desayunos → Tostada con tomate → Cervezas → Caña mediana ×2 → Enviar. Se ahorra el toque de
+  entrar en Cafés, porque el café ya está en «Ahora». **No se ahorran más porque la Tostada con
+  tomate NO está entre los 20 de «Ahora»**: si estuviera, serían 8.
+- **Segundos, entrenado contra entrenado: 15,1 → 9,9** en la comanda, y **5,8 → 4,0** en el cobro.
+  Un tercio menos en los dos.
+- La 3.ª repetición salió en 10 toques porque uno fue **una corrección**: pulsó Cafés y rectificó a
+  Cervezas, familias vecinas de la misma fila. En tres pasadas a velocidad, una familia equivocada.
+- La 2.ª repetición del cobro no cuenta en tiempo: se cobró el **importe exacto**, sin vuelta. Dato
+  suelto que vale: **el cobro justo son 3 toques**, uno menos que con vuelta.
+
 ### Puertas (cada una ✅ / ❌ con captura)
 
 1. **Se reconoce sin leer**: cada familia de un vistazo; la de Licores entera sin desplazar.
+   *Después (08-10): ✅ Licores sale en 5 × 7, los 31 enteros y sin desplazar. Color de familia en
+   todo el botón. **Pero el botón de producto ya no lleva el precio**, y eso no lo declara ni el
+   prompt ni el `-done` (ver §8).*
 2. **«Ahora»** abre por defecto y tiene sentido para la hora del día.
+   *Después (08-10): ✅ abre sola y es la primera. A las 16:00 encabezan Café con leche, Montado y
+   Caña mediana, que es razonable. Dos peros: **no trae la Tostada con tomate** del cesto, e
+   **«Ingrediente extra» gasta uno de los 20 huecos** siendo un añadido de modificador.*
 3. **La comanda**: se ve qué está enviado y qué no; − y + sobre la línea funcionan con un dedo.
    *Antes (08-10): no se pudo probar — en 1.22.0 «Enviar comanda» falla con «Sin impresora
    configurada» y no envía nada. Es la puerta 11.*
+   *Después (08-10): **sigue sin poderse probar**, mismo mensaje en 1.23.0. Lo que sí se ve: la
+   comanda separa «SIN ENVIAR» como bloque, con − y + grandes sobre la línea, y la cantidad aparece
+   dentro del propio botón del producto.*
 4. **La sala**: Barra arriba; ocupada se distingue de libre de reojo; el importe cabe en la tarjeta.
+   *Después (08-10): ✅ las tres. Oscuro, Barra la primera, taburetes redondos y mesas
+   rectangulares del mismo tamaño, ocupada en relleno coral con el importe grande dentro.
+   ❌ **El plano no se reparte**: las bandas acaban a 1320 px de los 1920 del D8 y el tercio derecho
+   queda en negro. Con 16 mesas sobra pantalla y no se usa (Matías, 08-10).*
 5. **N1 · teclado del sistema**: no sale el QWERTY al entrar en la venta, tras cobrar, tras la
    comanda, ni encima del pad del cobro mixto (lo arregló v1.22; se confirma en el hierro).
    *Antes (08-10): ✅ sobre el pad del cobro. Falta confirmar los otros tres momentos.*
+   *Después (08-10): ✅ los cuatro. En tres comandas y tres cobros seguidos no salió el QWERTY
+   ni una vez.*
 6. **Cobro mixto** con el pad: el importe pre-relleno se puede corregir (C2).
    *Antes (08-10): ✅ viene el importe exacto y hay chips 5/10/20/50/100 y C.*
+   *Después (08-10): ✅ igual, la hoja no cambió. **El importe del cambio sigue pequeño**: con 50 €
+   sobre 37,30, «Cambio 12,70 €» sale a la mitad de tamaño que «TOTAL 37,30 €», y lo mismo se dice
+   dos veces y con dos palabras («sobran» arriba, «Cambio» abajo). Ver §8.*
 7. **Las hojas en claro** sobre la pantalla oscura: ¿molestan para abrir o no? (Lo decide Matías.
    Si molestan, v2-H2 entra antes de la fecha.)
+   *Después (08-10): capturada la hoja de cobro en claro sobre la venta oscura. **Pendiente del
+   juicio de Matías.***
 8. **Cierre de turno con mesas abiertas** avisa (B2).
 9. **Textos en español** (sin CASH, CARD, DRAFT) y sin «Sincronizando con Holded…» (N4, N6, en v1.22).
    *Antes (08-10): ✅ en la hoja de cobro — Efectivo / Tarjeta / Bizum / Vale / Mixto.*
+   *Después (08-10): ✅ sin cambios.*
 
 ### En la cuenta NUEVA, en DRAFT («Probar TPV»)
 
@@ -201,6 +236,15 @@ Cómo se midió el «antes» (08-10, cuenta ENSAYO `81f2177b`, APK 1.22.0):
   la comanda no sale. Ésa es la razón de la puerta, no un punto aparte.
 - **Fallo a investigar**: con la mesa **B1, de Barra**, el error de envío habla de la sección
   **SALON**. La sección que se usa para enrutar la comanda no es la de la mesa.
+- **El plano de sala no se reparte por la pantalla** (puerta 4, Matías el 08-10): a 1920 px las
+  bandas acaban en 1320 y el tercio derecho queda en negro. Con 16 mesas sobra sitio y no se usa.
+- **El botón de producto perdió el precio** y el cambio no está declarado: no aparece ni en el
+  prompt del bloque ni en el `-done` (§6 «decisiones sin preguntar» ni §10 «diferencias»). En
+  1.22.0 cada tarjeta llevaba nombre y precio. Decidir si se queda así y declararlo.
+- **«Ingrediente extra» ocupa uno de los 20 huecos de «Ahora»**, siendo un añadido de modificador y
+  no algo que se comande solo.
+- **La Tostada con tomate no entra en «Ahora»**, así que la comanda típica no se resuelve entera
+  desde la vista que abre: cuesta un toque más ir a Desayunos.
 - **El importe del cambio tiene que verse mucho más grande** (Matías, 08-10): es lo que el camarero
   lee con el cliente delante, y hoy no manda en la pantalla del cobro.
 - **El aviso de error no caduca**: el cartel de «Sin impresora configurada» seguía tapando el nombre
