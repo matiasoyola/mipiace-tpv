@@ -21,32 +21,59 @@
 
 import type { Prisma, PrismaClient } from "@mipiacetpv/db";
 import {
+  ACTOS_QUIROPODIA_V1,
   CONSEJOS_V1,
+  ESTADOS_DE_HERIDA,
+  FUENTE_DEL_RIESGO,
   LESIONES_V1,
   MAPA_PIE_V1,
+  PENDIENTES_V1,
+  PISADAS,
+  PUNTOS_DE_LA_HERIDA,
+  TIPOS_DE_PIE_BIOMECANICA,
+  TIPOS_DE_VISITA,
   VERSION_DE_LA_EXPLORACION,
   VERSION_DEL_CUERPO,
+  VERSION_DEL_CUERPO_V2,
   marcasLegibles,
   normalizarExploracion,
-  normalizarSesion,
+  normalizarSesionV2,
   partirDeLaUltima,
+  pendientesAbiertos,
   resumenDeLaSesion,
+  tiposDeLaSesion,
+  versionesDeHoy,
   type CuerpoDeExploracion,
   type CuerpoDeSesion,
+  type CuerpoDeSesionCualquiera,
+  type CuerpoDeSesionV2,
+  type EntradaDeCierreV2,
   type ExploracionEnPantalla,
   type Marcas,
+  type PendienteCerrado,
+  type PendienteCreado,
   type ResumenDeLaSesion,
+  type ServicioDeSesion,
   type SesionAnterior,
-  type TratamientoDelCatalogo,
+  type TipoDeVisita,
 } from "@mipiacetpv/clinica-sesion";
 import type { PuertaPrimerTratamiento } from "@mipiacetpv/clinica-valoracion";
 
 import { resolverPrimerTratamiento } from "./primer-tratamiento.js";
-import { tratamientosDeLaSesion, tratamientosPorId } from "./tratamientos.js";
+import {
+  serviciosDeSesionConTipo,
+  tratamientosPorId,
+} from "./tratamientos.js";
+import { tiposDeLosServicios } from "./tipos-de-visita.js";
 import { vistaDeLaValoracion } from "./valoracion.js";
 
 /** Cuántas sesiones anteriores entran en la gráfica del dolor. */
 const SESIONES_EN_LA_GRAFICA = 6;
+
+/** Cuántas sesiones hacia atrás se miran buscando la última cirugía. Una
+ *  cirugía que hay que revisar es de hace semanas; doce visitas de
+ *  quiropodia son medio año. */
+const SESIONES_PARA_LA_CIRUGIA = 12;
 
 // ── La cita de la que nace la sesión ──────────────────────────────────
 
@@ -58,6 +85,11 @@ export interface CitaDeLaSesion {
   status: string;
   /** Los servicios de la cita, en su orden: «Quiropodia». */
   servicios: readonly string[];
+  /** Y sus ids, que es de donde sale el tipo de visita sugerido
+   *  (clinica-5): «al abrir la sesión de una cita vienen marcados los
+   *  tipos de los servicios de la cita» (decisión 3). Con los nombres no
+   *  se puede: el tipo cuelga de la categoría del producto. */
+  servicioIds: readonly string[];
   /** Quién atiende, de los assignments de STAFF. `null` en una cita sin
    *  profesional (no debería darse en una clínica, y no se inventa). */
   atiende: { userId: string; nombre: string } | null;
@@ -131,6 +163,7 @@ export async function cargarCitaDeLaSesion(
     servicios: items
       .map((i) => nombrePorId.get(i.serviceId))
       .filter((n): n is string => n != null),
+    servicioIds: serviceIds,
     atiende: staff
       ? { userId: staff.id, nombre: staff.alias ?? staff.email ?? "—" }
       : null,
@@ -195,7 +228,93 @@ export async function ultimaSesion(
     tratamientos: cuerpo.tratamientos ?? [],
     consejos: cuerpo.consejos ?? [],
     dolor: cuerpo.dolor ?? 0,
+    // clinica-5 · de aquí sale «Hoy toca». `tiposDeLaSesion` contesta las
+    // dos versiones: en una v1 devuelve la lista vacía, y entonces la
+    // banda no sale. No hay tabla de pendientes y no hace falta: lo
+    // abierto está siempre en la última sesión, porque al cerrar se
+    // vuelve a crear lo que no se hizo (ver `pendientes.ts`).
+    pendientesCreados: tiposDeLaSesion(
+      cuerpo as CuerpoDeSesionCualquiera,
+    ).pendientesCreados,
   };
+}
+
+// ── clinica-5 · LA ÚLTIMA CIRUGÍA, para la cabecera de su tarjeta ─────
+
+export interface UltimaCirugia {
+  /** ISO-8601 de la visita en la que se operó. */
+  fecha: string;
+  /** La TÉCNICA: los nombres de los servicios de esa visita de cirugía
+   *  («Matricectomía parcial», «Fenol»). Sale del `tratamientosNombre`
+   *  congelado en el cuerpo y no del catálogo de hoy, así que una
+   *  cirugía de hace dos años sigue diciendo con qué nombre se cobró. */
+  tecnica: readonly string[];
+  /** Y la ZONA: las zonas que estaban marcadas ese día, en palabras. */
+  zonas: readonly string[];
+}
+
+/**
+ * La última visita de tipo CIRUGÍA de este paciente, para la cabecera de
+ * la tarjeta de revisión («Matricectomía parcial · dedo gordo izq. · 6
+ * oct», decisión 7).
+ *
+ * ── Por qué se deduce de las sesiones y no hay tabla de cirugías ──────
+ *
+ * Porque todavía no existe el acto quirúrgico como pieza propia: hoy una
+ * cirugía ES una visita de tipo CIRUGIA, con sus servicios y sus zonas
+ * marcadas. Inventar aquí una tabla `cirugias` con técnica, lateralidad y
+ * anestesia sería diseñar la pieza de clinica-4 (consentimientos e
+ * informe) desde el sitio equivocado y sin que nadie la haya validado.
+ *
+ * Lo que esto da es lo que el mockup pinta y nada más: cuándo, con qué
+ * servicio y dónde. Y lo da LEYENDO EL CUERPO CONGELADO, así que no
+ * depende de que el catálogo siga teniendo ese servicio.
+ *
+ * `null` si no hay ninguna, y entonces la tarjeta lo dice en vez de
+ * inventarse una fecha.
+ */
+export async function ultimaCirugia(
+  prisma: PrismaClient,
+  input: { tenantId: string; clientId: string; exceptoCita?: string | null },
+): Promise<UltimaCirugia | null> {
+  // Las últimas N y no todas: una cirugía que hay que revisar es de hace
+  // semanas, no de hace cinco años. Con `take` se lee una página del
+  // índice `(tenant, client, kind, created_at DESC)` de clinica-3 y no la
+  // historia entera de una paciente con ochenta visitas.
+  const filas = await prisma.clinicalEntry.findMany({
+    where: {
+      tenantId: input.tenantId,
+      clientId: input.clientId,
+      kind: "TREATMENT_SESSION",
+      ...(input.exceptoCita
+        ? { NOT: { appointmentId: input.exceptoCita } }
+        : {}),
+    },
+    orderBy: { createdAt: "desc" },
+    take: SESIONES_PARA_LA_CIRUGIA,
+    select: { body: true, createdAt: true },
+  });
+  for (const fila of filas) {
+    const cuerpo = fila.body as unknown as CuerpoDeSesionCualquiera | null;
+    if (cuerpo == null || typeof cuerpo !== "object") continue;
+    const leido = tiposDeLaSesion(cuerpo);
+    if (!leido.tipos.includes("CIRUGIA")) continue;
+    const c = cuerpo as CuerpoDeSesionV2;
+    const nombres = c.tratamientosNombre ?? {};
+    const tecnica = (leido.bloques.CIRUGIA?.servicios ?? [])
+      .map((id) => nombres[id])
+      .filter((n): n is string => n != null);
+    return {
+      fecha: fila.createdAt.toISOString(),
+      tecnica,
+      zonas: marcasLegibles({
+        marcas: (c.marcas ?? {}) as Marcas,
+        mapaVersion: c.mapaVersion ?? MAPA_PIE_V1.version,
+        lesionesVersion: c.lesionesVersion ?? LESIONES_V1.version,
+      }).map((m) => m.zona),
+    };
+  }
+  return null;
 }
 
 /** La sesión YA CERRADA de esta cita, si la hay. Es lo que convierte la
@@ -353,6 +472,17 @@ export interface CabeceraDeLaSesion {
    * una persona está anticoagulada.
    */
   alertas: readonly string[];
+  /**
+   * clinica-5 · LAS IDS de esas alertas, para las alertas cruzadas.
+   *
+   * Van además de los textos y no en su lugar. La tabla de cruces
+   * (`ALERTAS_CRUZADAS_V1`) cruza por `preguntaId` del cuestionario de
+   * clinica-2 (`diab`, `antic`…) y nunca por el texto: el texto lo escribe
+   * el cuestionario y se puede reescribir mañana sin que nadie piense en
+   * la tabla, y una alerta que deja de dispararse porque alguien corrigió
+   * una tilde es el peor fallo posible en una señal de seguridad.
+   */
+  alertaIds: readonly string[];
 }
 
 export interface VistaDeLaSesion {
@@ -360,9 +490,25 @@ export interface VistaDeLaSesion {
   cabecera: CabeceraDeLaSesion;
   /** La puerta: sin valoración validada no hay sesión (prompt §2). */
   puerta: PuertaPrimerTratamiento;
-  /** Los botones de tratamiento, del catálogo. Sin importes para quien no
-   *  los ve — lo quita la serialización de la ruta. */
-  tratamientos: readonly TratamientoDelCatalogo[];
+  /** Los botones de tratamiento, del catálogo, cada uno con su TIPO DE
+   *  VISITA y su nivel de quiropodia si lo es (clinica-5). Sin importes
+   *  para quien no los ve — lo quita la serialización de la ruta. */
+  tratamientos: readonly ServicioDeSesion[];
+  /**
+   * clinica-5 · los tipos que vienen MARCADOS al abrir (decisión 3): los
+   * de los servicios de la cita. Se pueden añadir y quitar.
+   *
+   * Vacío si los servicios de la cita no tienen tipo todavía, y entonces
+   * la podóloga marca el que sea. Lo que no se hace es sugerir uno por
+   * defecto: «quiropodia porque es lo más normal» sería escribir en la
+   * historia el tipo que no se eligió.
+   */
+  tiposSugeridos: readonly TipoDeVisita[];
+  /** clinica-5 · «Hoy toca»: lo que la sesión anterior dejó apuntado.
+   *  Vacío si la anterior es una v1 o si no dejó nada. */
+  pendientes: readonly PendienteCreado[];
+  /** clinica-5 · la cabecera de la tarjeta de revisión de cirugía. */
+  ultimaCirugia: UltimaCirugia | null;
   /** Lo de la visita anterior, para el naranja suave y para «Igual que la
    *  última vez». */
   anterior: SesionAnterior | null;
@@ -384,6 +530,21 @@ export interface VistaDeLaSesion {
     mapa: typeof MAPA_PIE_V1;
     lesiones: typeof LESIONES_V1;
     consejos: typeof CONSEJOS_V1;
+    // clinica-5 · y las de este bloque, por la MISMA razón que las tres
+    // de arriba: son la versión con la que se va a ESCRIBIR, y una
+    // pantalla que pintara «la que tiene compilada» podría ofrecer un
+    // acto o un pendiente que el servidor va a tirar.
+    actos: typeof ACTOS_QUIROPODIA_V1;
+    estadosDeHerida: typeof ESTADOS_DE_HERIDA;
+    puntos: typeof PUNTOS_DE_LA_HERIDA;
+    tiposDePieBiomecanica: typeof TIPOS_DE_PIE_BIOMECANICA;
+    pisadas: typeof PISADAS;
+    pendientes: typeof PENDIENTES_V1;
+    /** Las versiones de todas ellas, como van a quedar en el cuerpo. */
+    versiones: ReturnType<typeof versionesDeHoy>;
+    /** La cita de la guía del riesgo, para que la tarjeta la escriba con
+     *  las mismas palabras que el código. */
+    fuenteDelRiesgo: string;
   };
 }
 
@@ -422,6 +583,8 @@ export async function vistaDeLaSesion(
     exploracion,
     cerradaFila,
     visitas,
+    cirugia,
+    tiposDeLaCita,
   ] = await Promise.all([
     prisma.client.findFirstOrThrow({
       where: { id: clientId, tenantId },
@@ -437,12 +600,16 @@ export async function vistaDeLaSesion(
     // `CabeceraDeLaSesion.alertas`.
     vistaDeLaValoracion(prisma, { tenantId, clientId }),
     resolverPrimerTratamiento(prisma, { tenantId, clientId }),
-    tratamientosDeLaSesion(prisma, tenantId),
+    serviciosDeSesionConTipo(prisma, tenantId),
     ultimaSesion(prisma, { tenantId, clientId, exceptoCita: cita.id }),
     historialDeDolor(prisma, { tenantId, clientId, exceptoCita: cita.id }),
     ultimaExploracion(prisma, { tenantId, clientId }),
     sesionDeLaCita(prisma, { tenantId, appointmentId: cita.id }),
     visitasCerradas(prisma, { tenantId, clientId }),
+    ultimaCirugia(prisma, { tenantId, clientId, exceptoCita: cita.id }),
+    // clinica-5 · los tipos de los SERVICIOS DE LA CITA, que son los que
+    // vienen marcados al abrir (decisión 3).
+    tiposDeLosServicios(prisma, tenantId, cita.servicioIds),
   ]);
 
   const cerrada = cerradaFila
@@ -470,9 +637,17 @@ export async function vistaDeLaSesion(
       visitaAnterior: anterior?.fecha ?? null,
       atiende: cita.atiende,
       alertas: valoracion.alertas.alertas.map((a) => a.texto),
+      alertaIds: valoracion.alertas.alertas.map((a) => a.preguntaId),
     },
     puerta,
     tratamientos: catalogo,
+    // En el orden de la lista de tipos y sin repetidos: una cita con
+    // «Quiropodia» y «Cura» marca los dos, una vez cada uno.
+    tiposSugeridos: TIPOS_DE_VISITA.filter((t) =>
+      [...tiposDeLaCita.values()].some((x) => x.tipo === t),
+    ),
+    pendientes: pendientesAbiertos(anterior),
+    ultimaCirugia: cirugia,
     anterior,
     dolorHistorico,
     exploracion: {
@@ -486,6 +661,14 @@ export async function vistaDeLaSesion(
       mapa: MAPA_PIE_V1,
       lesiones: LESIONES_V1,
       consejos: CONSEJOS_V1,
+      actos: ACTOS_QUIROPODIA_V1,
+      estadosDeHerida: ESTADOS_DE_HERIDA,
+      puntos: PUNTOS_DE_LA_HERIDA,
+      tiposDePieBiomecanica: TIPOS_DE_PIE_BIOMECANICA,
+      pisadas: PISADAS,
+      pendientes: PENDIENTES_V1,
+      versiones: versionesDeHoy(),
+      fuenteDelRiesgo: FUENTE_DEL_RIESGO,
     },
   };
 }
@@ -613,7 +796,7 @@ export type CierreDeSesion =
   | { ok: true; yaEstaba: boolean; cerrada: SesionCerradaView }
   | {
       ok: false;
-      motivo: "SIN_VALORACION_VALIDADA" | "FALTA_DOLOR" | "SIN_TRATAMIENTOS";
+      motivo: "SIN_VALORACION_VALIDADA" | "FALTA_DOLOR" | "SIN_TIPOS";
       mensaje: string;
     };
 
@@ -672,13 +855,27 @@ export async function cerrarSesion(
     cita: CitaDeLaSesion;
     autorUserId: string;
     verImportes: boolean;
+    // clinica-5 · lo que la pantalla manda ahora: los tipos y sus
+    // bloques. `tratamientos` ya no viaja — LO DERIVA EL SERVIDOR de los
+    // bloques (`serviciosDeLaSesion`) y lo congela en el cuerpo. Dejarlo
+    // llegar de fuera habría sido dejar que la pantalla eligiera qué se
+    // cobra sin pasar por la regla del nivel.
+    tipos: readonly unknown[];
+    bloques: EntradaDeCierreV2["bloques"];
     marcas: Record<string, unknown>;
-    tratamientos: readonly string[];
     dolor: unknown;
     evolucion: unknown;
     consejos: readonly string[];
     proximaCita: unknown;
     nota: unknown;
+    /** Los que la podóloga ha cerrado a mano o contestando el diálogo. */
+    pendientesCerrados: readonly PendienteCerrado[];
+    /** Y lo que apunta para la próxima visita. */
+    pendientesNuevos: readonly {
+      id: string;
+      zona: string | null;
+      nota: string | null;
+    }[];
   },
 ): Promise<CierreDeSesion> {
   const { tenantId, cita } = input;
@@ -718,16 +915,43 @@ export async function cerrarSesion(
 
   // 3 · lo que tiene mal SENTIDO (el schema ya rechazó lo que tiene mala
   // forma). La misma función pura que la pantalla usa para el botón.
-  const catalogo = await tratamientosDeLaSesion(prisma, tenantId);
-  const normal = normalizarSesion({
+  //
+  // Y DOS lecturas más que la v1 no necesitaba, las dos porque el servidor
+  // vuelve a decidir en vez de creerse lo que llega:
+  //
+  //   · las ALERTAS vigentes, para recalcular los avisos cruzados que se
+  //     dan por enseñados. Si la pantalla mandara la lista, una sesión
+  //     podría constar como «avisada» sin que nadie viera el aviso.
+  //   · los PENDIENTES abiertos de la última sesión, para que el cierre
+  //     automático se calcule con lo que de verdad se ha marcado hoy y
+  //     para que lo que no se hizo se arrastre. Es la garantía del
+  //     prompt: un pendiente sin hacer no se cae, haga lo que haga la
+  //     pantalla.
+  const [catalogo, valoracion, anterior] = await Promise.all([
+    serviciosDeSesionConTipo(prisma, tenantId),
+    vistaDeLaValoracion(prisma, { tenantId, clientId: cita.clientId }),
+    ultimaSesion(prisma, {
+      tenantId,
+      clientId: cita.clientId,
+      exceptoCita: cita.id,
+    }),
+  ]);
+  const normal = normalizarSesionV2({
+    tipos: input.tipos,
+    bloques: input.bloques,
     marcas: input.marcas as never,
-    tratamientos: input.tratamientos,
-    tratamientosDelCatalogo: catalogo,
+    catalogo,
     dolor: input.dolor,
     evolucion: input.evolucion,
     consejos: input.consejos,
     proximaCita: input.proximaCita,
     nota: input.nota,
+    alertaIds: valoracion.alertas.alertas.map((a) => a.preguntaId),
+    pendientesAbiertos: pendientesAbiertos(anterior),
+    pendientesCerradosAMano: input.pendientesCerrados,
+    pendientesNuevos: input.pendientesNuevos,
+    // El reloj entra como dato: el paquete no tiene ninguno.
+    hoy: new Date().toISOString(),
   });
   if (!normal.ok) {
     return { ok: false, motivo: normal.motivo, mensaje: normal.mensaje };
@@ -735,7 +959,7 @@ export async function cerrarSesion(
 
   // 4 · LA FIRMA y la escritura.
   const firma = await firmaDe(prisma, tenantId, input.autorUserId);
-  const cuerpo: CuerpoDeSesion = { ...normal.cuerpo, firma };
+  const cuerpo: CuerpoDeSesionV2 = { ...normal.cuerpo, firma };
 
   let entryId: string;
   try {

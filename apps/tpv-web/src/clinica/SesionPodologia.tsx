@@ -1,28 +1,38 @@
-// clinica-3 · la pantalla de la sesión y de la exploración.
+// clinica-5 · LA SESIÓN POR TIPO DE VISITA.
 //
-// Es el mockup validado (`docs/mockups/clinica-3-sesion.html`) con sus
-// piezas en su orden: cabecera de fichas, FRANJA ROJA de alertas, las dos
-// pestañas, el mapa de los dos pies, la gráfica del dolor, el panel de la
-// sesión y el pie con el resumen y el botón. Y, al cerrar, la pantalla
-// «Sesión cerrada» en sus dos variantes de rol.
+// Es el mockup validado el 07-10 (`docs/mockups/clinica-sesion-v2.html`)
+// con sus piezas en su orden: cabecera y FRANJA ROJA de alertas, chips de
+// tipo en multiselección, banda de «Hoy toca», el pie fijo a la izquierda
+// —con su capa de sensibilidad si hay pie de riesgo—, las tarjetas de cada
+// tipo apiladas a la derecha, el dolor y la evolución, la barra de caja y
+// el diálogo del pendiente.
+//
+// Lo de clinica-3 que sigue aquí: la pestaña de exploración
+// (monofilamento, pulsos, tipo de pie), que escribe su propia entrada
+// `FOOT_EXAM` y su propio endpoint. El mockup de este bloque no la pinta
+// porque habla de la sesión, pero la exploración es la pieza que se puede
+// registrar SIN la valoración validada (prompt §2 de clinica-3) y quitarla
+// habría sido quitar una pantalla que funciona por un mockup que no la
+// menciona. Va dicho en el `-done`.
 //
 // ── La forma del trabajo: mucho clic, poco escribir ──────────────────
 //
-// Decisión de producto 1. **Todo son botones** menos una nota plegada, y
-// eso manda en cómo está escrita esta pantalla: no hay un solo `input` de
-// texto fuera del `<details>`, y el estado vive en memoria hasta que se
-// cierra. La mayoría de visitas son «igual que la última vez», y para eso
-// hay un botón que SUMA lo de la visita anterior a lo marcado hoy.
+// Decisión de producto 1 de clinica-3, y aquí se dobla: cinco tarjetas y
+// ni un `input` de texto fuera de la nota plegada y la línea del pendiente
+// «Otro». El estado vive en memoria hasta que se cierra.
 //
 // ── Quién decide, y por qué nada se calcula dos veces ────────────────
 //
-// `resumenDeLaSesion`, `igualQueLaUltimaVez` y `gravedadDisponible` son
-// las MISMAS funciones puras que usa la API
-// (`@mipiacetpv/clinica-sesion`). El servidor manda —vuelve a decidirlo al
-// recibir el cierre— y aquí se usan para pintar el pie, el botón y los
-// chips de gravedad desactivados sin ir y volver. Con dos cálculos, el día
-// que se separaran el botón se activaría para un cierre que la API va a
-// rechazar.
+// `nivelPropuesto`, `riesgoDelPie`, `avisosCruzados`, `resumenPorTipos`,
+// `seCierraSolo` y `pendientesQuePreguntar` son las MISMAS funciones puras
+// que usa la API (`@mipiacetpv/clinica-sesion`). El servidor manda —vuelve
+// a decidirlo al recibir el cierre— y aquí se usan para pintar el nivel,
+// el riesgo, los avisos, la barra de caja y el diálogo sin ir y volver.
+//
+// Con dos cálculos, el día que se separaran la podóloga vería «riesgo
+// moderado» en pantalla y la historia guardaría «bajo». En una
+// clasificación que decide cada cuánto se revisa el pie de un diabético,
+// eso no es una discrepancia de interfaz.
 //
 // Lo único que esta pantalla NO calcula es el dinero: `verImportes` viene
 // del servidor y, cuando es `false`, **las claves de precio no están en la
@@ -30,51 +40,113 @@
 //
 // ── Las listas vienen del servidor ───────────────────────────────────
 //
-// El mapa, las lesiones y los consejos los manda `GET …/sesion` con su
-// versión. No se importan del paquete para pintar: son la versión con la
-// que se va a ESCRIBIR, y una pantalla que pintara «la que tiene
-// compilada» podría ofrecer una zona que el servidor va a tirar.
+// El mapa, las lesiones, los consejos, los actos, los estados de herida,
+// los pendientes y la cita de la guía del riesgo los manda
+// `GET …/sesion` con su versión. No se importan del paquete para pintar:
+// son la versión con la que se va a ESCRIBIR, y una pantalla que pintara
+// «la que tiene compilada» podría ofrecer un acto que el servidor va a
+// tirar.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Check, Loader2 } from "lucide-react";
 
 import {
+  COLOR_DE_TIPO_DE_VISITA,
+  EVOLUCIONES,
   GRAVEDADES,
   NOMBRE_DE_EVOLUCION,
   NOMBRE_DE_GRAVEDAD,
   NOMBRE_DE_PROXIMA_CITA,
   NOMBRE_DE_PULSO,
   NOMBRE_DE_TIPO_DE_PIE,
+  NOMBRE_DE_TIPO_DE_VISITA,
   PROXIMAS_CITAS,
   PULSOS,
   TIPOS_DE_PIE,
-  EVOLUCIONES,
+  TIPOS_DE_VISITA,
+  avisosCruzados,
+  claveDePendiente,
+  comprobacionesVacias,
   gravedadDisponible,
   igualQueLaUltimaVez,
-  resumenDeLaSesion,
+  nivelPropuesto,
+  pendientesQuePreguntar,
+  productoDelNivel,
+  resumenPorTipos,
+  seCierraSolo,
+  serviciosPorTipo,
+  textoSinCobro,
+  type ComprobacionesDelPie,
   type Consejo,
   type Evolucion,
   type ExploracionEnPantalla,
   type Gravedad,
   type Lesion,
+  type ListaDeActos,
   type ListaDeConsejos,
   type ListaDeLesiones,
+  type ListaDeOpciones,
+  type ListaDePendientes,
   type MapaDelPie as MapaVersionado,
   type MarcaDeZona,
   type Marcas,
+  type NivelDeQuiropodia,
+  type PendienteCerrado,
+  type PendienteCreado,
   type Pie,
   type ProximaCita,
   type Pulso,
-  type TipoDePie,
-  type TratamientoDelCatalogo,
+  type PulsoPedio,
+  type Sensibilidad,
+  type ServicioDeSesion,
+  type SiNo,
+  type TipoDeVisita,
 } from "@mipiacetpv/clinica-sesion";
 
 import { ApiError, apiWithCashier } from "../api.js";
 import { LeyendaDelMapa, MapaDelPie, type EstadoDeZona } from "./MapaDelPie.js";
 import { GraficaDolor, type PuntoDeDolor } from "./GraficaDolor.js";
 import { SesionCerrada, type SesionCerradaView } from "./SesionCerrada.js";
+import {
+  BandaDeHoyToca,
+  DialogoDePendiente,
+  ParaLaProxima,
+  type PendienteEnPantalla,
+  type PendienteNuevo,
+} from "./Pendientes.js";
+import {
+  AvisoCruzado,
+  TarjetaBiomecanica,
+  TarjetaCirugia,
+  TarjetaGeneral,
+  TarjetaPieDeRiesgo,
+  TarjetaQuiropodia,
+  type ServiciosDelTipo,
+} from "./TarjetasDeTipo.js";
+import {
+  Chip,
+  Mal,
+  Seccion,
+  Segmentos,
+  Tarjeta,
+  diaCorto,
+  euros,
+  hora,
+} from "./piezas.js";
 
 // ── La forma que devuelve la API ─────────────────────────────────────
+
+/** Un servicio del catálogo tal como llega. `precio` e `iva` NO VIENEN si
+ *  `verImportes` es `false`; `tipo` y `nivelQuiropodia` vienen siempre
+ *  (no son importes, son en qué tarjeta va el botón). */
+export type ServicioEnPantalla = Pick<
+  ServicioDeSesion,
+  "serviceId" | "nombre"
+> &
+  Partial<Pick<ServicioDeSesion, "precio" | "iva" | "causaExencion">> & {
+    tipo: TipoDeVisita | null;
+    nivelQuiropodia: NivelDeQuiropodia | null;
+  };
 
 export interface VistaDeLaSesion {
   cita: {
@@ -83,6 +155,7 @@ export interface VistaDeLaSesion {
     empieza: string;
     status: string;
     servicios: string[];
+    servicioIds: string[];
     atiende: { userId: string; nombre: string } | null;
     ticketId: string | null;
   };
@@ -98,15 +171,20 @@ export interface VistaDeLaSesion {
     visitaAnterior: string | null;
     atiende: { userId: string; nombre: string } | null;
     alertas: string[];
+    /** Las IDS, para las alertas cruzadas. Ver `alertas-cruzadas.ts`. */
+    alertaIds: string[];
   };
   puerta:
     | { puede: true; valoracionId: string; validadaEn: string }
     | { puede: false; motivo: string; mensaje: string };
-  /** `precio` e `iva` NO VIENEN si `verImportes` es `false`. */
-  tratamientos: Array<
-    Pick<TratamientoDelCatalogo, "serviceId" | "nombre"> &
-      Partial<Pick<TratamientoDelCatalogo, "precio" | "iva">>
-  >;
+  tratamientos: ServicioEnPantalla[];
+  tiposSugeridos: TipoDeVisita[];
+  pendientes: PendienteCreado[];
+  ultimaCirugia: {
+    fecha: string;
+    tecnica: string[];
+    zonas: string[];
+  } | null;
   anterior: {
     entryId: string;
     fecha: string;
@@ -114,6 +192,7 @@ export interface VistaDeLaSesion {
     tratamientos: string[];
     consejos: string[];
     dolor: number;
+    pendientesCreados?: PendienteCreado[];
   } | null;
   dolorHistorico: PuntoDeDolor[];
   exploracion: {
@@ -125,18 +204,60 @@ export interface VistaDeLaSesion {
     mapa: MapaVersionado;
     lesiones: ListaDeLesiones;
     consejos: ListaDeConsejos;
+    actos: ListaDeActos;
+    estadosDeHerida: ListaDeOpciones;
+    puntos: ListaDeOpciones;
+    tiposDePieBiomecanica: ListaDeOpciones;
+    pisadas: ListaDeOpciones;
+    pendientes: ListaDePendientes;
+    versiones: Record<string, number>;
+    fuenteDelRiesgo: string;
   };
   verImportes: boolean;
 }
 
 type Pestana = "sesion" | "exploracion";
+type Capa = "lesiones" | "sensibilidad";
+
+/** El estado de los bloques, uno por tipo. Plano y no anidado: lo que la
+ *  pantalla hace con él es un `set` por campo, y un objeto anidado habría
+ *  obligado a un spread de dos niveles en cada toque. */
+interface EstadoDeLosBloques {
+  actos: string[];
+  /** `null` = se queda con el propuesto, y así el nivel SIGUE moviéndose
+   *  al tocar más actos. Con una copia del propuesto, el primer toque lo
+   *  habría congelado. */
+  nivelAMano: NivelDeQuiropodia | null;
+  riesgo: ComprobacionesDelPie;
+  herida: string | null;
+  puntos: string | null;
+  bioTipoDePie: string | null;
+  bioPisada: string | null;
+  bioPlantillas: boolean;
+  /** Los servicios tocados, por tipo. */
+  servicios: Partial<Record<TipoDeVisita, string[]>>;
+}
+
+function bloquesVacios(): EstadoDeLosBloques {
+  return {
+    actos: [],
+    nivelAMano: null,
+    riesgo: comprobacionesVacias(),
+    herida: null,
+    puntos: null,
+    bioTipoDePie: null,
+    bioPisada: null,
+    bioPlantillas: false,
+    servicios: {},
+  };
+}
 
 export function SesionPodologia(props: {
   appointmentId: string;
   /** Para volver a la agenda tras cobrar. */
   onCobrar?: (appointmentId: string) => void;
   /** Para llevar a la valoración cuando la puerta está cerrada: es «el
-   *  camino para hacerlo» que pide el prompt §2. */
+   *  camino para hacerlo» que pide el prompt §2 de clinica-3. */
   onAbrirValoracion?: (clientId: string) => void;
 }) {
   const [vista, setVista] = useState<VistaDeLaSesion | null>(null);
@@ -144,21 +265,37 @@ export function SesionPodologia(props: {
   const [error, setError] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [pestana, setPestana] = useState<Pestana>("sesion");
+  const [capa, setCapa] = useState<Capa>("lesiones");
 
   // ── El estado de la sesión, EN MEMORIA hasta que se cierra ────────
   //
   // No hay «guardar borrador» en el mockup y no hay estado intermedio que
   // signifique nada: media sesión guardada no es una sesión clínica
-  // incompleta, es una pantalla a medio rellenar. Es la misma decisión que
-  // clinica-2 tomó con las tres confirmaciones de la validación.
+  // incompleta, es una pantalla a medio rellenar.
+  const [tipos, setTipos] = useState<TipoDeVisita[]>([]);
+  const [bloques, setBloques] = useState<EstadoDeLosBloques>(bloquesVacios);
   const [marcas, setMarcas] = useState<Record<string, MarcaDeZona>>({});
   const [zonaAbierta, setZonaAbierta] = useState<string | null>(null);
-  const [tratamientos, setTratamientos] = useState<string[]>([]);
   const [dolor, setDolor] = useState<number | null>(null);
   const [evolucion, setEvolucion] = useState<Evolucion | null>(null);
   const [consejos, setConsejos] = useState<string[]>([]);
   const [proximaCita, setProximaCita] = useState<ProximaCita | null>(null);
   const [nota, setNota] = useState("");
+
+  // ── Los pendientes ───────────────────────────────────────────────
+  //
+  // `cerradosAMano` guarda CÓMO se cerró cada uno —tocando la banda o
+  // contestando el diálogo— porque no son lo mismo al leer la historia:
+  // una es «lo marqué mientras trabajaba» y la otra «me lo preguntó al
+  // salir».
+  const [cerradosAMano, setCerradosAMano] = useState<
+    Record<string, "MANO" | "PREGUNTA">
+  >({});
+  const [pendientesNuevos, setPendientesNuevos] = useState<PendienteNuevo[]>(
+    [],
+  );
+  /** La cola de preguntas del cierre. `null` = no se está cerrando. */
+  const [cola, setCola] = useState<PendienteCreado[] | null>(null);
 
   // ── Y el de la exploración, que SÍ parte de la última ─────────────
   const [exploracion, setExploracion] =
@@ -172,9 +309,9 @@ export function SesionPodologia(props: {
         `/clinica/appointments/${props.appointmentId}/sesion`,
       );
       setVista(v);
-      // «La siguiente parte de la última» (decisión de producto 5): el
-      // estado de la exploración arranca con lo que el servidor dice, no
-      // en blanco.
+      // Decisión 3: al abrir la sesión de una cita vienen marcados los
+      // tipos de los servicios de la cita. Se pueden añadir o quitar.
+      setTipos(v.tiposSugeridos.filter((t) => TIPOS_DE_VISITA.includes(t)));
       setExploracion(v.exploracion.departeDe);
     } catch (err) {
       setError(
@@ -189,46 +326,177 @@ export function SesionPodologia(props: {
     void cargar();
   }, [cargar]);
 
-  // ── El resumen del pie: la MISMA función que usa la API ───────────
+  // ── Lo derivado, con las funciones puras del paquete ─────────────
+
+  const catalogo = useMemo<ServicioDeSesion[]>(() => {
+    if (!vista) return [];
+    // Sin importes, `precio`/`iva` no vienen. Se rellenan a 0 para las
+    // funciones puras PORQUE el resultado que se va a leer no lleva
+    // dinero: `verImportes: false` pone `total`, `ivaTexto` y los precios
+    // de las líneas en `null`. O sea: estos ceros no pueden llegar a
+    // ninguna pantalla.
+    return vista.tratamientos.map((t) => ({
+      serviceId: t.serviceId,
+      nombre: t.nombre,
+      precio: t.precio ?? 0,
+      iva: t.iva ?? 0,
+      tipo: t.tipo,
+      nivelQuiropodia: t.nivelQuiropodia,
+      ...(t.causaExencion ? { causaExencion: t.causaExencion } : {}),
+    }));
+  }, [vista]);
+
+  const porTipo = useMemo(() => serviciosPorTipo(catalogo), [catalogo]);
+  const niveles = useMemo(
+    () => catalogo.filter((s) => s.nivelQuiropodia != null),
+    [catalogo],
+  );
+
+  /** Los bloques en la forma del paquete, para las funciones puras y para
+   *  el POST. Se arma UNA vez y la usan la barra de caja, los pendientes y
+   *  el cierre: así lo que se pinta y lo que se manda no pueden separarse. */
+  const bloquesDelPaquete = useMemo(() => {
+    const serviciosDe = (t: TipoDeVisita) => bloques.servicios[t] ?? [];
+    const nivelElegido =
+      bloques.nivelAMano ??
+      // La propuesta se recalcula aquí y no se guarda en estado: guardarla
+      // habría sido un segundo sitio desde el que puede quedar vieja.
+      nivelPropuestoDe(bloques.actos);
+    const salida: Parameters<typeof resumenPorTipos>[0]["bloques"] = {};
+    if (tipos.includes("QUIROPODIA")) {
+      salida.QUIROPODIA = {
+        actos: bloques.actos,
+        nivelPropuesto: nivelPropuestoDe(bloques.actos),
+        nivelElegido,
+        productoDelNivel: productoDelNivel(catalogo, nivelElegido),
+        servicios: serviciosDe("QUIROPODIA"),
+      };
+    }
+    if (tipos.includes("PIE_RIESGO")) {
+      salida.PIE_RIESGO = {
+        ...bloques.riesgo,
+        riesgo: null,
+        servicios: serviciosDe("PIE_RIESGO"),
+      };
+    }
+    if (tipos.includes("CIRUGIA")) {
+      salida.CIRUGIA = {
+        herida: bloques.herida,
+        puntos: bloques.puntos,
+        servicios: serviciosDe("CIRUGIA"),
+      };
+    }
+    if (tipos.includes("BIOMECANICA")) {
+      salida.BIOMECANICA = {
+        tipoDePie: bloques.bioTipoDePie,
+        pisada: bloques.bioPisada,
+        plantillas: bloques.bioPlantillas,
+        servicios: serviciosDe("BIOMECANICA"),
+      };
+    }
+    if (tipos.includes("GENERAL")) {
+      salida.GENERAL = { servicios: serviciosDe("GENERAL") };
+    }
+    return salida;
+  }, [tipos, bloques, catalogo]);
+
   const resumen = useMemo(() => {
     if (!vista) return null;
-    return resumenDeLaSesion({
-      tratamientos,
-      // Sin importes, los `precio`/`iva` no vienen. Se rellenan a 0 para
-      // la función pura PORQUE el resultado que se va a leer no lleva
-      // dinero: `verImportes: false` pone `total` e `ivaTexto` en `null`
-      // y los precios de las líneas también. O sea: estos ceros no pueden
-      // llegar a ninguna pantalla.
-      catalogo: vista.tratamientos.map((t) => ({
-        serviceId: t.serviceId,
-        nombre: t.nombre,
-        precio: t.precio ?? 0,
-        iva: t.iva ?? 0,
-      })),
+    return resumenPorTipos({
+      tipos,
+      bloques: bloquesDelPaquete,
+      catalogo,
       dolor,
       verImportes: vista.verImportes,
     });
-  }, [vista, tratamientos, dolor]);
+  }, [vista, tipos, bloquesDelPaquete, catalogo, dolor]);
 
-  function alternar(lista: string[], id: string): string[] {
+  /** Los avisos cruzados, con la MISMA función que el servidor. */
+  const avisos = useMemo(() => {
+    if (!vista) return [];
+    return avisosCruzados({
+      alertaIds: vista.cabecera.alertaIds,
+      tipos,
+      actos: bloques.actos,
+      herida: bloques.herida,
+    });
+  }, [vista, tipos, bloques.actos, bloques.herida]);
+
+  /** Qué pendientes están abiertos y cómo va cada uno. */
+  const loDeHoy = useMemo(
+    () => ({
+      zonasTocadas: Object.keys(marcas),
+      herida: tipos.includes("CIRUGIA") ? bloques.herida : null,
+      tipos,
+    }),
+    [marcas, tipos, bloques.herida],
+  );
+
+  const pendientes = useMemo<PendienteEnPantalla[]>(() => {
+    if (!vista) return [];
+    return vista.pendientes.map((p) => ({
+      pendiente: p,
+      solo: seCierraSolo(p, loDeHoy),
+      aMano: cerradosAMano[claveDePendiente(p)] != null,
+    }));
+  }, [vista, loDeHoy, cerradosAMano]);
+
+  // ── Los toques ───────────────────────────────────────────────────
+
+  function alternar(lista: readonly string[], id: string): string[] {
     return lista.includes(id)
       ? lista.filter((x) => x !== id)
       : [...lista, id];
+  }
+
+  /** Marcar y desmarcar un tipo. **Como mínimo uno** (decisión 1): el
+   *  último marcado no se puede quitar, igual que en el mockup. */
+  function alternarTipo(t: TipoDeVisita) {
+    setTipos((xs) => {
+      if (!xs.includes(t)) {
+        return TIPOS_DE_VISITA.filter((x) => x === t || xs.includes(x));
+      }
+      if (xs.length <= 1) return xs;
+      const sin = xs.filter((x) => x !== t);
+      // Al quitar el pie de riesgo, la capa de sensibilidad deja de tener
+      // sentido: el selector desaparece y había que volver a lesiones o la
+      // pantalla se quedaría en una capa sin selector.
+      if (t === "PIE_RIESGO") setCapa("lesiones");
+      return sin;
+    });
+  }
+
+  function servicioDe(t: TipoDeVisita, serviceId: string) {
+    setBloques((b) => ({
+      ...b,
+      servicios: {
+        ...b.servicios,
+        [t]: alternar(b.servicios[t] ?? [], serviceId),
+      },
+    }));
+  }
+
+  function serviciosDelTipo(t: TipoDeVisita): ServiciosDelTipo {
+    return {
+      disponibles: porTipo[t],
+      elegidos: bloques.servicios[t] ?? [],
+      onServicio: (id) => servicioDe(t, id),
+      verImportes: vista?.verImportes ?? false,
+    };
   }
 
   /** «Igual que la última vez»: SUMA lo de la anterior. Nunca borra. */
   function repetir() {
     if (!vista?.anterior) return;
     const sumado = igualQueLaUltimaVez(
-      { marcas, tratamientos, consejos },
+      { marcas, tratamientos: [], consejos },
       {
         marcas: vista.anterior.marcas,
-        tratamientos: vista.anterior.tratamientos,
+        tratamientos: [],
         consejos: vista.anterior.consejos,
       },
     );
     setMarcas({ ...sumado.marcas });
-    setTratamientos([...sumado.tratamientos]);
     setConsejos([...sumado.consejos]);
   }
 
@@ -246,8 +514,41 @@ export function SesionPodologia(props: {
       );
       return;
     }
+    // La capa de sensibilidad de la sesión SE LEE: lo que enseña es la
+    // última exploración, y cambiarla es hacer una exploración nueva en su
+    // pestaña.
+    if (capa === "sensibilidad") return;
     setZonaAbierta((z) => (z === clave ? null : clave));
   }
+
+  function marcarPendienteAMano(p: PendienteCreado) {
+    const clave = claveDePendiente(p);
+    setCerradosAMano((xs) => {
+      if (xs[clave]) {
+        const { [clave]: _fuera, ...resto } = xs;
+        return resto;
+      }
+      return { ...xs, [clave]: "MANO" };
+    });
+  }
+
+  function alternarPendienteNuevo(id: string) {
+    const clase = vista?.listas.pendientes.clases.find((c) => c.id === id);
+    if (!clase) return;
+    setPendientesNuevos((xs) => {
+      if (xs.some((x) => x.id === id)) return xs.filter((x) => x.id !== id);
+      return [
+        ...xs,
+        {
+          id,
+          zona: clase.pideZona ? zonaAbierta : null,
+          nota: null,
+        },
+      ];
+    });
+  }
+
+  // ── Guardar y cerrar ─────────────────────────────────────────────
 
   async function guardarExploracion() {
     if (ocupado || !exploracion) return;
@@ -258,21 +559,15 @@ export function SesionPodologia(props: {
       const r = await apiWithCashier<{
         exploracion: ExploracionEnPantalla | null;
         ultima: { fecha: string; autor: string } | null;
-      }>(
-        `/clinica/appointments/${props.appointmentId}/sesion/exploracion`,
-        {
-          method: "POST",
-          body: {
-            pulsos: exploracion.pulsos,
-            sinSensibilidad: exploracion.sinSensibilidad,
-            tipoDePie: exploracion.tipoDePie,
-          },
+      }>(`/clinica/appointments/${props.appointmentId}/sesion/exploracion`, {
+        method: "POST",
+        body: {
+          pulsos: exploracion.pulsos,
+          sinSensibilidad: exploracion.sinSensibilidad,
+          tipoDePie: exploracion.tipoDePie,
         },
-      );
-      // Se repinta con lo que dice EL SERVIDOR y no con lo que se mandó:
-      // lo que se guardó pasó por `normalizar`, así que puede no ser
-      // idéntico. Misma razón por la que corregir una valoración devuelve
-      // la pantalla entera en clinica-2.
+      });
+      // Se repinta con lo que dice EL SERVIDOR y no con lo que se mandó.
       if (r.exploracion) setExploracion(r.exploracion);
       setAvisoExploracion("Exploración guardada en la historia.");
       setVista((v) =>
@@ -297,8 +592,55 @@ export function SesionPodologia(props: {
     }
   }
 
-  async function cerrar() {
-    if (ocupado || !resumen?.puedeCerrar) return;
+  /**
+   * El botón de cerrar. ANTES de mandar nada, comprueba si queda algún
+   * pendiente sin hacer y lo PREGUNTA, de uno en uno (decisión 10).
+   *
+   * Contestar «todavía no» cierra igual: lo que hace es que el pendiente
+   * pase a la siguiente visita. No es un bloqueo — es que nadie se entere
+   * tarde.
+   */
+  function pulsarCerrar() {
+    if (!vista || ocupado || !resumen?.puedeCerrar) return;
+    const quePreguntar = pendientesQuePreguntar(
+      vista.pendientes,
+      cerradosDelCuerpo(cerradosAMano, vista.pendientes),
+      loDeHoy,
+    );
+    if (quePreguntar.length > 0) {
+      setCola([...quePreguntar]);
+      return;
+    }
+    void cerrar(cerradosAMano);
+  }
+
+  /**
+   * Una respuesta del diálogo. Cuando se contesta la última, cierra.
+   *
+   * El mapa de cerrados se calcula AQUÍ y se le pasa a `cerrar`, en vez de
+   * dejar que lo lea del estado: `setCerradosAMano` no ha corrido todavía
+   * cuando toca mandar el POST, y leerlo del estado mandaba el mapa de
+   * antes — o sea, un «sí, revisada» que no llegaba a la historia. Es el
+   * mismo motivo por el que la cola también se calcula sin el `setState`.
+   */
+  function contestar(si: boolean) {
+    if (!cola || cola.length === 0) return;
+    const [primero, ...resto] = cola;
+    const siguiente = { ...cerradosAMano };
+    if (si && primero) siguiente[claveDePendiente(primero)] = "PREGUNTA";
+    setCerradosAMano(siguiente);
+    if (resto.length > 0) {
+      setCola(resto);
+      return;
+    }
+    setCola(null);
+    void cerrar(siguiente);
+  }
+
+  async function cerrar(
+    cerradosForzados: Record<string, "MANO" | "PREGUNTA"> | null,
+  ) {
+    if (!vista || ocupado) return;
     setOcupado(true);
     setError(null);
     try {
@@ -308,13 +650,19 @@ export function SesionPodologia(props: {
       }>(`/clinica/appointments/${props.appointmentId}/sesion/cerrar`, {
         method: "POST",
         body: {
+          tipos,
+          bloques: paraElServidor(bloquesDelPaquete),
           marcas,
-          tratamientos,
           dolor,
           evolucion,
           consejos,
           proximaCita,
           nota: nota.trim() === "" ? null : nota,
+          pendientesCerrados: cerradosDelCuerpo(
+            cerradosForzados ?? cerradosAMano,
+            vista.pendientes,
+          ),
+          pendientesNuevos,
         },
       });
       setVista((v) => (v == null ? v : { ...v, cerrada: r.cerrada }));
@@ -358,15 +706,15 @@ export function SesionPodologia(props: {
 
   const lesiones = vista.listas.lesiones.lesiones;
   const marcaAbierta = zonaAbierta ? marcas[zonaAbierta] : undefined;
+  const hayRiesgo = tipos.includes("PIE_RIESGO");
+  const sinSensibilidad = vista.exploracion.departeDe.sinSensibilidad;
+  const avisosDe = (clase: "ACTO" | "TIPO" | "HERIDA") =>
+    avisos.filter((a) => a.disparador.clase === clase).map((a) => a.aviso);
 
   return (
     <div className="space-y-4">
       <Cabecera vista={vista} />
 
-      {/* La puerta de la valoración. Cuando está cerrada, la sesión no se
-          puede cerrar — y lo que se enseña es qué falta y el camino para
-          hacerlo (prompt §2). La EXPLORACIÓN sí se puede guardar, así que
-          la pantalla no se bloquea: se bloquea el cierre. */}
       {!vista.puerta.puede && (
         <PuertaCerrada
           mensaje={vista.puerta.mensaje}
@@ -386,66 +734,115 @@ export function SesionPodologia(props: {
         }}
       />
 
+      {pestana === "sesion" && (
+        <>
+          <ChipsDeTipo tipos={tipos} onAlternar={alternarTipo} />
+          <BandaDeHoyToca
+            pendientes={pendientes}
+            mapaVersion={vista.listas.mapa.version}
+            onMarcar={marcarPendienteAMano}
+          />
+        </>
+      )}
+
       {/* DOS COLUMNAS DESDE 1024, que es el iPad apaisado — y el iPad
-          apaisado manda (prompt §5). Estaba en `xl:` (1280) y en la
-          captura de 1024 salía en una sola columna, con el panel de la
-          sesión debajo del mapa y la podóloga haciendo scroll entre el pie
-          que acaba de marcar y el tratamiento que le corresponde. Lo cazó
-          la captura, no un test.
-          El ancho de la izquierda sale de UNA CUENTA y no de un gusto:
-          **los dos pies tienen que caber en una fila a 1024**. Dos pies de
-          264 px (su ancho nominal, el que da los 48 px de dedo) con 8 de
-          hueco son 536, más los 20+20 de la tarjeta, 576. Con 520 se
-          partían en dos filas y en la captura de 1024 sólo se veía el pie
-          izquierdo. */}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,584px)_1fr]">
+          apaisado manda (prompt §2). El ancho de la izquierda sale de UNA
+          CUENTA y no de un gusto: **los dos pies tienen que caber en una
+          fila a 1024**. Dos pies de 264 px (su ancho nominal, el que da
+          los 48 px de dedo) con 8 de hueco son 536, más los 20+20 de la
+          tarjeta, 576. Con 520 se partían en dos filas y en la captura de
+          1024 sólo se veía el pie izquierdo. */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,584px)_1fr] items-start">
         {pestana === "sesion" ? (
           <>
-            <div className="space-y-4">
+            <div className="space-y-4 lg:sticky lg:top-2">
               <Tarjeta
-                titulo="Mapa del pie"
-                sub="Toca la zona y elige qué tiene."
+                titulo="Qué tiene hoy"
+                sub="Toca la zona del pie y elige qué tiene."
               >
+                {/* El selector de capa sale SÓLO con pie de riesgo
+                    marcado: en una quiropodia normal es un botón que no
+                    hace falta, y el mockup lo esconde igual. */}
+                {hayRiesgo && (
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    <Chip
+                      on={capa === "lesiones"}
+                      onClick={() => setCapa("lesiones")}
+                    >
+                      Lesiones
+                    </Chip>
+                    <Chip
+                      on={capa === "sensibilidad"}
+                      onClick={() => {
+                        setCapa("sensibilidad");
+                        setZonaAbierta(null);
+                      }}
+                    >
+                      Sensibilidad
+                    </Chip>
+                  </div>
+                )}
                 <MapaDelPie
                   mapa={vista.listas.mapa}
-                  seleccionada={zonaAbierta}
+                  seleccionada={capa === "lesiones" ? zonaAbierta : null}
                   onTocar={tocarZona}
                   estadoDe={(clave) =>
-                    estadoDeLaSesion(clave, marcas, vista.anterior?.marcas)
+                    capa === "sensibilidad"
+                      ? sinSensibilidad.includes(clave)
+                        ? "sinSensibilidad"
+                        : "libre"
+                      : estadoDeLaSesion(clave, marcas, vista.anterior?.marcas)
                   }
                 />
-                <LeyendaDelMapa modo="sesion" />
-                {zonaAbierta && (
-                  <PanelDeZona
-                    clave={zonaAbierta}
-                    mapa={vista.listas.mapa}
-                    lesiones={lesiones}
-                    marca={marcaAbierta}
-                    onLesion={(lesion) =>
-                      setMarcas((m) => ({
-                        ...m,
-                        [zonaAbierta]: {
-                          lesion,
-                          gravedad: m[zonaAbierta]?.gravedad ?? null,
-                        },
-                      }))
-                    }
-                    onGravedad={(gravedad) =>
-                      setMarcas((m) =>
-                        m[zonaAbierta]
-                          ? { ...m, [zonaAbierta]: { ...m[zonaAbierta]!, gravedad } }
-                          : m,
-                      )
-                    }
-                    onQuitar={() =>
-                      setMarcas((m) => {
-                        const { [zonaAbierta]: _fuera, ...resto } = m;
-                        return resto;
-                      })
-                    }
-                  />
+                <LeyendaDelMapa
+                  modo={capa === "sensibilidad" ? "sensibilidad" : "sesion"}
+                />
+                {capa === "sensibilidad" ? (
+                  <p className="text-[12.5px] text-slate-500 mt-2 leading-relaxed">
+                    {vista.exploracion.ultima
+                      ? `De la exploración del ${diaCorto(vista.exploracion.ultima.fecha)}, de ${vista.exploracion.ultima.autor}. Para cambiarla, haz una exploración nueva en su pestaña.`
+                      : "Todavía no hay ninguna exploración: hazla en su pestaña."}
+                  </p>
+                ) : (
+                  zonaAbierta && (
+                    <PanelDeZona
+                      clave={zonaAbierta}
+                      mapa={vista.listas.mapa}
+                      lesiones={lesiones}
+                      marca={marcaAbierta}
+                      onLesion={(lesion) =>
+                        setMarcas((m) => ({
+                          ...m,
+                          [zonaAbierta]: {
+                            lesion,
+                            gravedad: m[zonaAbierta]?.gravedad ?? null,
+                          },
+                        }))
+                      }
+                      onGravedad={(gravedad) =>
+                        setMarcas((m) =>
+                          m[zonaAbierta]
+                            ? {
+                                ...m,
+                                [zonaAbierta]: { ...m[zonaAbierta]!, gravedad },
+                              }
+                            : m,
+                        )
+                      }
+                      onQuitar={() =>
+                        setMarcas((m) => {
+                          const { [zonaAbierta]: _fuera, ...resto } = m;
+                          return resto;
+                        })
+                      }
+                    />
+                  )
                 )}
-                <ListaDeMarcas marcas={marcas} mapa={vista.listas.mapa} lesiones={lesiones} />
+                <ListaDeMarcas
+                  marcas={marcas}
+                  mapa={vista.listas.mapa}
+                  lesiones={lesiones}
+                />
               </Tarjeta>
 
               <Tarjeta
@@ -456,23 +853,161 @@ export function SesionPodologia(props: {
               </Tarjeta>
             </div>
 
-            <PanelDeLaSesion
-              vista={vista}
-              tratamientos={tratamientos}
-              dolor={dolor}
-              evolucion={evolucion}
-              consejos={consejos}
-              proximaCita={proximaCita}
-              nota={nota}
-              hayAnterior={vista.anterior != null}
-              onRepetir={repetir}
-              onTratamiento={(id) => setTratamientos((t) => alternar(t, id))}
-              onDolor={setDolor}
-              onEvolucion={setEvolucion}
-              onConsejo={(id) => setConsejos((c) => alternar(c, id))}
-              onProximaCita={setProximaCita}
-              onNota={setNota}
-            />
+            {/* LAS TARJETAS DE CADA TIPO, apiladas en el orden de la
+                lista y no en el que se tocaron: el orden de la lista es
+                el que la podóloga tiene memorizado del programa de hoy. */}
+            <div className="grid gap-4 content-start">
+              {tipos.includes("QUIROPODIA") && (
+                <TarjetaQuiropodia
+                  lista={vista.listas.actos}
+                  actos={bloques.actos}
+                  nivelAMano={bloques.nivelAMano}
+                  niveles={niveles}
+                  servicios={serviciosDelTipo("QUIROPODIA")}
+                  avisos={avisosDe("ACTO")}
+                  verImportes={vista.verImportes}
+                  onActo={(id) =>
+                    setBloques((b) => ({
+                      ...b,
+                      actos: alternar(b.actos, id),
+                      // Al cambiar los actos se suelta el nivel puesto a
+                      // mano: si no, la propuesta dejaría de servir y la
+                      // frase de «cambiado a mano» mentiría sobre qué se
+                      // había propuesto.
+                      nivelAMano: null,
+                    }))
+                  }
+                  onNivel={(n) =>
+                    setBloques((b) => ({
+                      ...b,
+                      nivelAMano:
+                        n === nivelPropuestoDe(b.actos) ? null : n,
+                    }))
+                  }
+                />
+              )}
+              {hayRiesgo && (
+                <TarjetaPieDeRiesgo
+                  comprobaciones={bloques.riesgo}
+                  servicios={serviciosDelTipo("PIE_RIESGO")}
+                  fuente={vista.listas.fuenteDelRiesgo}
+                  onSensibilidad={(v: Sensibilidad) =>
+                    setBloques((b) => ({
+                      ...b,
+                      riesgo: { ...b.riesgo, sensibilidad: v },
+                    }))
+                  }
+                  onPulso={(pie: Pie, v: PulsoPedio) =>
+                    setBloques((b) => ({
+                      ...b,
+                      riesgo: {
+                        ...b.riesgo,
+                        pulsos: { ...b.riesgo.pulsos, [pie]: v },
+                      },
+                    }))
+                  }
+                  onUlcera={(v: SiNo) =>
+                    setBloques((b) => ({
+                      ...b,
+                      riesgo: { ...b.riesgo, ulcera: v },
+                    }))
+                  }
+                  onDeformidad={(v: SiNo) =>
+                    setBloques((b) => ({
+                      ...b,
+                      riesgo: { ...b.riesgo, deformidad: v },
+                    }))
+                  }
+                />
+              )}
+              {tipos.includes("CIRUGIA") && (
+                <TarjetaCirugia
+                  estados={vista.listas.estadosDeHerida}
+                  puntosLista={vista.listas.puntos}
+                  herida={bloques.herida}
+                  puntos={bloques.puntos}
+                  ultimaCirugia={vista.ultimaCirugia}
+                  servicios={serviciosDelTipo("CIRUGIA")}
+                  avisos={[...avisosDe("HERIDA"), ...avisosDe("TIPO")]}
+                  onHerida={(id) =>
+                    setBloques((b) => ({
+                      ...b,
+                      herida: b.herida === id ? null : id,
+                    }))
+                  }
+                  onPuntos={(id) =>
+                    setBloques((b) => ({
+                      ...b,
+                      puntos: b.puntos === id ? null : id,
+                    }))
+                  }
+                />
+              )}
+              {tipos.includes("BIOMECANICA") && (
+                <TarjetaBiomecanica
+                  tiposDePie={vista.listas.tiposDePieBiomecanica}
+                  pisadas={vista.listas.pisadas}
+                  tipoDePie={bloques.bioTipoDePie}
+                  pisada={bloques.bioPisada}
+                  plantillas={bloques.bioPlantillas}
+                  servicios={serviciosDelTipo("BIOMECANICA")}
+                  onTipoDePie={(id) =>
+                    setBloques((b) => ({
+                      ...b,
+                      bioTipoDePie: b.bioTipoDePie === id ? null : id,
+                    }))
+                  }
+                  onPisada={(id) =>
+                    setBloques((b) => ({
+                      ...b,
+                      bioPisada: b.bioPisada === id ? null : id,
+                    }))
+                  }
+                  onPlantillas={() =>
+                    setBloques((b) => ({
+                      ...b,
+                      bioPlantillas: !b.bioPlantillas,
+                    }))
+                  }
+                />
+              )}
+              {tipos.includes("GENERAL") && (
+                <TarjetaGeneral servicios={serviciosDelTipo("GENERAL")} />
+              )}
+
+              {/* El aviso cruzado que no cabe en ninguna tarjeta: el que
+                  dispara el TIPO cuando no hay tarjeta de cirugía abierta
+                  no puede darse —el disparador de tipo es CIRUGIA— pero si
+                  mañana la tabla gana una fila con otro tipo, el aviso
+                  tiene que salir en algún sitio y no desaparecer. */}
+              {tipos.length > 0 && !tipos.includes("CIRUGIA") && (
+                <AvisoCruzado avisos={avisosDe("TIPO")} />
+              )}
+
+              <ComunDeLaSesion
+                listas={vista.listas}
+                dolor={dolor}
+                evolucion={evolucion}
+                consejos={consejos}
+                proximaCita={proximaCita}
+                nota={nota}
+                pendientesNuevos={pendientesNuevos}
+                zonaAbierta={zonaAbierta}
+                hayAnterior={vista.anterior != null}
+                onRepetir={repetir}
+                onDolor={setDolor}
+                onEvolucion={setEvolucion}
+                onConsejo={(id) => setConsejos((c) => alternar(c, id))}
+                onProximaCita={setProximaCita}
+                onNota={setNota}
+                onPendienteNuevo={alternarPendienteNuevo}
+                onNotaDePendiente={(id, texto) =>
+                  setPendientesNuevos((xs) =>
+                    xs.map((x) => (x.id === id ? { ...x, nota: texto } : x)),
+                  )
+                }
+              />
+            </div>
           </>
         ) : (
           <>
@@ -497,7 +1032,9 @@ export function SesionPodologia(props: {
               aviso={avisoExploracion}
               onPulso={(pie, pulso) =>
                 setExploracion((e) =>
-                  e == null ? e : { ...e, pulsos: { ...e.pulsos, [pie]: pulso } },
+                  e == null
+                    ? e
+                    : { ...e, pulsos: { ...e.pulsos, [pie]: pulso } },
                 )
               }
               onTipoDePie={(tipoDePie) =>
@@ -511,41 +1048,61 @@ export function SesionPodologia(props: {
 
       {error && <Mal>{error}</Mal>}
 
-      {/* ── El pie de la sesión ───────────────────────────────────── */}
+      {/* ── LA BARRA DE CAJA ──────────────────────────────────────── */}
       {pestana === "sesion" && resumen && (
         <div
           // El gancho del banco. Sin él, un `getByText("30,00 €")` casa
           // también con la tarjeta de producto de la pantalla de VENTA que
-          // hay detrás del overlay —está en el DOM aunque no se vea— y
-          // Playwright lo canta como «strict mode violation». Es la misma
-          // lección que el `data-pregunta` de clinica-2: los ganchos se
-          // ponen donde el banco tiene que mirar, no se filtra por texto.
+          // hay detrás del overlay. Los ganchos se ponen donde el banco
+          // tiene que mirar, no se filtra por texto.
           data-test="pie-de-sesion"
           className="flex items-center justify-between gap-4 flex-wrap bg-white border border-slate-200 rounded-3xl px-5 py-4"
         >
-          <div className="text-[14px] text-mipiace-ink-soft">
-            {resumen.faltaTratamiento
-              ? "Marca al menos un tratamiento"
-              : `${resumen.tratamientos} ${
-                  resumen.tratamientos === 1 ? "tratamiento" : "tratamientos"
-                }`}
-            {/* El importe sólo si viene. `total` es `null` cuando la
-                respuesta no trae precios, así que no hay nada que pintar
-                a 0. */}
-            {resumen.total != null && (
-              <>
-                {" · "}
-                <b className="font-semibold text-mipiace-ink tabular-nums">
-                  {euros(resumen.total)}
-                </b>
-                {resumen.ivaTexto && ` · ${resumen.ivaTexto.toLowerCase()}`}
-              </>
+          <div className="text-[14px] text-mipiace-ink-soft min-w-0">
+            {resumen.lineas.length === 0 ? (
+              <span>
+                {resumen.faltaTipo
+                  ? "Marca al menos un tipo de visita"
+                  : "Nada que cobrar en esta visita"}
+              </span>
+            ) : (
+              <span>
+                <b className="font-semibold text-mipiace-ink">Pasa a caja:</b>{" "}
+                {resumen.lineas
+                  .map(
+                    (l) =>
+                      `${l.nombre}${l.precio != null ? ` · ${euros(l.precio)}` : ""}`,
+                  )
+                  .join(" + ")}
+                {/* El total sólo si viene. `total` es `null` cuando la
+                    respuesta no trae precios, así que no hay nada que
+                    pintar a 0. */}
+                {resumen.total != null && resumen.lineas.length > 1 && (
+                  <>
+                    {" = "}
+                    <b className="font-semibold text-mipiace-ink tabular-nums">
+                      {euros(resumen.total)}
+                    </b>
+                  </>
+                )}
+                {resumen.ivaTexto && (
+                  <span className="text-slate-500">
+                    {" · "}
+                    {resumen.ivaTexto.toLowerCase()}
+                  </span>
+                )}
+              </span>
             )}
-            {resumen.faltaDolor && " · falta el dolor de hoy"}
+            <div className="text-[13px] text-slate-500 mt-0.5">
+              {textoSinCobro(resumen.sinCobro) ??
+                (resumen.faltaDolor
+                  ? "Falta el dolor de hoy"
+                  : "La sesión queda firmada y no se edita")}
+            </div>
           </div>
           <button
             type="button"
-            onClick={() => void cerrar()}
+            onClick={pulsarCerrar}
             disabled={!resumen.puedeCerrar || ocupado || !vista.puerta.puede}
             className="h-touch-lg px-7 rounded-[18px] bg-mipiace-coral text-white font-medium text-[16px] disabled:opacity-45 disabled:cursor-not-allowed active:scale-[0.98] transition-transform motion-reduce:transform-none"
           >
@@ -553,11 +1110,95 @@ export function SesionPodologia(props: {
           </button>
         </div>
       )}
+
+      {cola && cola.length > 0 && cola[0] && (
+        <DialogoDePendiente
+          pendiente={cola[0]}
+          mapaVersion={vista.listas.mapa.version}
+          quedan={cola.length - 1}
+          ocupado={ocupado}
+          onSi={() => contestar(true)}
+          onNo={() => contestar(false)}
+        />
+      )}
     </div>
   );
 }
 
-// ── Cómo se pinta cada zona en la pestaña de sesión ─────────────────
+// ── Lo derivado que no necesita estado ──────────────────────────────
+
+/**
+ * El número del nivel propuesto, sin el motivo.
+ *
+ * La misma función del paquete que llama la tarjeta y que llama el
+ * servidor; aquí sólo hace falta el número, para decidir si el nivel que
+ * la podóloga toca ES el propuesto (y entonces `nivelAMano` vuelve a
+ * `null` y el nivel sigue moviéndose con los actos).
+ *
+ * No se guarda en estado a propósito: guardarlo habría sido un segundo
+ * sitio desde el que puede quedar viejo.
+ */
+function nivelPropuestoDe(actos: readonly string[]): NivelDeQuiropodia {
+  return nivelPropuesto(actos).nivel;
+}
+
+/**
+ * Los pendientes cerrados A MANO que de verdad estaban abiertos, en la
+ * forma del cuerpo.
+ *
+ * Se filtra por los abiertos antes de mandarlo porque el servidor lo va a
+ * filtrar igual (cerrar a mano algo que nadie apuntó no cuenta), y mandar
+ * lo que se va a tirar sólo sirve para que el cuerpo del POST no diga lo
+ * que la pantalla cree.
+ */
+function cerradosDelCuerpo(
+  aMano: Record<string, "MANO" | "PREGUNTA">,
+  abiertos: readonly PendienteCreado[],
+): PendienteCerrado[] {
+  return abiertos
+    .filter((p) => aMano[claveDePendiente(p)] != null)
+    .map((p) => ({
+      id: p.id,
+      zona: p.zona,
+      como: aMano[claveDePendiente(p)]!,
+    }));
+}
+
+/**
+ * Los bloques, listos para el POST: sin los campos que el servidor
+ * calcula.
+ *
+ * `nivelPropuesto`, `productoDelNivel` y `riesgo` NO se mandan. Los
+ * calcula el servidor con los mismos actos y las mismas comprobaciones, y
+ * mandarlos habría sido dejar que la pantalla eligiera el nivel que se
+ * cobra y la categoría de riesgo que consta en la historia.
+ */
+function paraElServidor(
+  bloques: Parameters<typeof resumenPorTipos>[0]["bloques"],
+): Record<string, unknown> {
+  const salida: Record<string, unknown> = {};
+  if (bloques.QUIROPODIA) {
+    salida.QUIROPODIA = {
+      actos: bloques.QUIROPODIA.actos,
+      nivelElegido: bloques.QUIROPODIA.nivelElegido,
+      servicios: bloques.QUIROPODIA.servicios,
+    };
+  }
+  if (bloques.PIE_RIESGO) {
+    const b = bloques.PIE_RIESGO;
+    salida.PIE_RIESGO = {
+      sensibilidad: b.sensibilidad,
+      pulsos: b.pulsos,
+      ulcera: b.ulcera,
+      deformidad: b.deformidad,
+      servicios: b.servicios,
+    };
+  }
+  if (bloques.CIRUGIA) salida.CIRUGIA = bloques.CIRUGIA;
+  if (bloques.BIOMECANICA) salida.BIOMECANICA = bloques.BIOMECANICA;
+  if (bloques.GENERAL) salida.GENERAL = bloques.GENERAL;
+  return salida;
+}
 
 function estadoDeLaSesion(
   clave: string,
@@ -567,6 +1208,61 @@ function estadoDeLaSesion(
   if (hoy[clave]) return "hoy";
   if (anterior?.[clave]) return "anterior";
   return "libre";
+}
+
+// ── Los chips de tipo ───────────────────────────────────────────────
+
+/**
+ * Multiselección, y **como mínimo uno**: el último marcado no se puede
+ * quitar (decisión 1).
+ *
+ * El color sale del paquete (`COLOR_DE_TIPO_DE_VISITA`) y no de una tabla
+ * de esta pantalla porque clinica-6 va a pintar los mismos chips en la
+ * historia viva, y dos tablas de colores son dos chips del mismo tipo de
+ * distinto color.
+ */
+function ChipsDeTipo(props: {
+  tipos: readonly TipoDeVisita[];
+  onAlternar: (t: TipoDeVisita) => void;
+}) {
+  const ultimo = props.tipos.length <= 1;
+  return (
+    <div
+      data-test="chips-de-tipo"
+      className="flex gap-2 flex-wrap items-center"
+    >
+      {TIPOS_DE_VISITA.map((t) => {
+        const on = props.tipos.includes(t);
+        const color = COLOR_DE_TIPO_DE_VISITA[t];
+        return (
+          <button
+            key={t}
+            type="button"
+            aria-pressed={on}
+            disabled={on && ultimo}
+            onClick={() => props.onAlternar(t)}
+            style={on ? { backgroundColor: color, borderColor: color } : {}}
+            className={`h-touch px-4 rounded-[15px] border-2 font-medium text-[15px] flex items-center gap-2 ${
+              on
+                ? "text-white"
+                : "bg-white border-slate-200 text-mipiace-ink"
+            } disabled:cursor-default`}
+          >
+            <i
+              aria-hidden
+              className="w-2.5 h-2.5 rounded-full"
+              style={{ backgroundColor: on ? "#fff" : color }}
+            />
+            {on && <span aria-hidden>✓</span>}
+            {NOMBRE_DE_TIPO_DE_VISITA[t]}
+          </button>
+        );
+      })}
+      <span className="text-[13px] text-slate-500 self-center">
+        Puedes marcar varios: se anotan y se cobran todos
+      </span>
+    </div>
+  );
 }
 
 // ── La cabecera: fichas con título y la FRANJA ROJA ─────────────────
@@ -580,9 +1276,6 @@ function Cabecera(props: { vista: VistaDeLaSesion }) {
           <h1 className="text-[23px] font-semibold tracking-[-0.01em] text-mipiace-ink m-0">
             {c.paciente.nombre}
           </h1>
-          {/* Las FICHAS CON TÍTULO del mockup (decisión de producto 7):
-              cada dato con su etiqueta encima, para que no haya que
-              adivinar si «3.ª» es la visita o la sala. */}
           <div className="flex flex-wrap gap-2 mt-2.5">
             {c.paciente.edad != null && (
               <Ficha titulo="Edad">{c.paciente.edad} años</Ficha>
@@ -627,15 +1320,11 @@ function Ficha(props: { titulo: string; children: React.ReactNode }) {
 /**
  * LA FRANJA ROJA INTENSA, con icono, «Cuidado» y letra grande.
  *
- * Decisión de producto 7, y el prompt la subraya: *aquí no prima la
- * estética: si es alerta, se ve.* Por eso el fondo es rojo pleno
- * (`red-700`) y no el `red-50` discreto que usa la pantalla de la
- * valoración — es la misma información y son dos momentos distintos: allí
- * se está revisando el test, aquí se está a punto de meter un bisturí en
- * el pie de una persona anticoagulada.
- *
- * `role="alert"` para que un lector de pantalla la anuncie sin que haya
- * que llegar a ella navegando.
+ * Decisión de producto 7 de clinica-3: *aquí no prima la estética: si es
+ * alerta, se ve.* Dice lo que el paciente TIENE, siempre, y se lee una vez
+ * al entrar. El aviso de clinica-5 es otra cosa y va DENTRO de la tarjeta
+ * que lo dispara: no «es anticoagulada», sino «vas a enuclear un heloma a
+ * una anticoagulada».
  */
 function FranjaRoja(props: { alertas: string[] }) {
   if (props.alertas.length === 0) {
@@ -693,8 +1382,6 @@ function PuertaCerrada(props: {
   );
 }
 
-// ── Las dos pestañas ────────────────────────────────────────────────
-
 function Pestanas(props: {
   valor: Pestana;
   onCambiar: (p: Pestana) => void;
@@ -739,9 +1426,6 @@ function PanelDeZona(props: {
   onGravedad: (g: Gravedad) => void;
   onQuitar: () => void;
 }) {
-  // LA GRAVEDAD SE ELIGE DESPUÉS DE LA LESIÓN, y el motivo lo redacta la
-  // función pura — la misma que usa la API. Dos sitios que lo redactaran
-  // acabarían discrepando.
   const gravedad = gravedadDisponible(props.marca);
   return (
     <div className="mt-3 bg-mipiace-stone rounded-2xl p-3">
@@ -811,8 +1495,7 @@ function ListaDeMarcas(props: {
 }
 
 /** El nombre de la zona con el mapa QUE MANDA EL SERVIDOR, no con el
- *  compilado: si la versión no coincidiera, el nombre saldría del mapa de
- *  la respuesta y no del que esta pantalla trae dentro. */
+ *  compilado. */
 function nombreDeZonaConMapa(clave: string, mapa: MapaVersionado): string {
   const corte = clave.indexOf(":");
   const pie = clave.slice(0, corte) as Pie;
@@ -821,29 +1504,29 @@ function nombreDeZonaConMapa(clave: string, mapa: MapaVersionado): string {
   return zona ? `${lado} · ${zona.label}` : clave;
 }
 
-// ── El panel de la sesión ───────────────────────────────────────────
+// ── Lo común a todos los tipos: dolor, evolución y lo de siempre ────
 
-function PanelDeLaSesion(props: {
-  vista: VistaDeLaSesion;
-  tratamientos: string[];
+function ComunDeLaSesion(props: {
+  listas: VistaDeLaSesion["listas"];
   dolor: number | null;
   evolucion: Evolucion | null;
   consejos: string[];
   proximaCita: ProximaCita | null;
   nota: string;
+  pendientesNuevos: readonly PendienteNuevo[];
+  zonaAbierta: string | null;
   hayAnterior: boolean;
   onRepetir: () => void;
-  onTratamiento: (id: string) => void;
   onDolor: (n: number) => void;
   onEvolucion: (e: Evolucion) => void;
   onConsejo: (id: string) => void;
   onProximaCita: (p: ProximaCita) => void;
   onNota: (s: string) => void;
+  onPendienteNuevo: (id: string) => void;
+  onNotaDePendiente: (id: string, nota: string) => void;
 }) {
   return (
     <div className="bg-white border border-slate-200 rounded-3xl p-5">
-      {/* «Igual que la última vez» SUMA. Desactivado en la primera visita,
-          porque no hay última. */}
       <button
         type="button"
         onClick={props.onRepetir}
@@ -853,34 +1536,18 @@ function PanelDeLaSesion(props: {
         ↺ Igual que la última vez
       </button>
 
-      <Seccion titulo="Tratamientos de hoy">
-        <div className="flex flex-wrap gap-2">
-          {props.vista.tratamientos.map((t) => (
-            <Chip
-              key={t.serviceId}
-              on={props.tratamientos.includes(t.serviceId)}
-              onClick={() => props.onTratamiento(t.serviceId)}
-            >
-              {t.nombre}
-            </Chip>
-          ))}
-        </div>
-        {props.vista.tratamientos.length === 0 && (
-          <p className="text-[13px] text-slate-500 leading-relaxed">
-            No hay tratamientos marcados en el catálogo. Márcalos en Catálogo
-            de agenda con «Es un tratamiento de la sesión».
-          </p>
-        )}
-      </Seccion>
-
       <Seccion titulo="Dolor hoy (0 = nada · 10 = el peor)">
-        {/* ONCE botones que ENVUELVEN, no una rejilla de once columnas.
-            Con `grid-cols-11`, el ancho de cada tecla es el de la columna
-            dividido entre once: a 1024 con el panel estrecho salían de
-            30 px, menos que en un móvil de 320. Con `flex-wrap` y
-            `min-w-touch`, ninguna baja del peldaño de la casa y la fila se
-            parte en dos cuando no caben — que es lo correcto para un
-            control que se toca con el dedo. */}
+        {/* ONCE botones que ENVUELVEN, no una rejilla de once columnas:
+            con `grid-cols-11` cada tecla salía de 30 px a 1024. Con
+            `flex-wrap` y `min-w-touch`, ninguna baja del peldaño de la
+            casa y la fila se parte en dos cuando no caben.
+            El `max-w-[88px]` lo trajo el bucle visual de clinica-5: con
+            `flex-1` sin tope, a 1366 entraban diez en la fila y el «10»
+            se quedaba solo abajo ESTIRADO A TODO EL ANCHO — una tecla de
+            790 px al lado de diez de 74. Con el tope caben las once en
+            una fila a 1366 y, donde no quepan, la que sobra tiene el
+            tamaño de sus hermanas. A 390 no cambia nada (seis por fila de
+            55 px, por debajo del tope). */}
         <div className="flex flex-wrap gap-1">
           {Array.from({ length: 11 }, (_, i) => (
             <button
@@ -888,7 +1555,7 @@ function PanelDeLaSesion(props: {
               type="button"
               aria-pressed={props.dolor === i}
               onClick={() => props.onDolor(i)}
-              className={`h-touch min-w-touch flex-1 rounded-xl font-semibold text-[16px] ${
+              className={`h-touch min-w-touch max-w-[88px] flex-1 rounded-xl font-semibold text-[16px] ${
                 props.dolor === i
                   ? "bg-mipiace-coral text-white"
                   : "bg-mipiace-stone text-mipiace-ink-soft"
@@ -910,7 +1577,7 @@ function PanelDeLaSesion(props: {
 
       <Seccion titulo="Consejos para casa">
         <div className="flex flex-wrap gap-2">
-          {props.vista.listas.consejos.consejos.map((c: Consejo) => (
+          {props.listas.consejos.consejos.map((c: Consejo) => (
             <Chip
               key={c.id}
               suave
@@ -923,6 +1590,15 @@ function PanelDeLaSesion(props: {
         </div>
       </Seccion>
 
+      <ParaLaProxima
+        clases={props.listas.pendientes.clases}
+        elegidos={props.pendientesNuevos}
+        zonaAbierta={props.zonaAbierta}
+        nombreDeZona={(clave) => nombreDeZonaConMapa(clave, props.listas.mapa)}
+        onAlternar={props.onPendienteNuevo}
+        onNota={props.onNotaDePendiente}
+      />
+
       <Seccion titulo="Próxima cita">
         <Segmentos
           opciones={PROXIMAS_CITAS.map((p) => [p, NOMBRE_DE_PROXIMA_CITA[p]])}
@@ -934,7 +1610,7 @@ function PanelDeLaSesion(props: {
         </p>
       </Seccion>
 
-      {/* LA ÚNICA caja de texto del bloque, y plegada. */}
+      {/* LA ÚNICA caja de texto larga del bloque, y plegada. */}
       <details className="mt-3">
         <summary className="cursor-pointer text-[13.5px] text-slate-500 min-h-touch flex items-center">
           + Añadir una nota (opcional)
@@ -951,7 +1627,7 @@ function PanelDeLaSesion(props: {
   );
 }
 
-// ── El panel de la exploración ──────────────────────────────────────
+// ── El panel de la exploración (clinica-3, sin cambios) ─────────────
 
 function PanelDeExploracion(props: {
   exploracion: ExploracionEnPantalla | null;
@@ -959,7 +1635,7 @@ function PanelDeExploracion(props: {
   ocupado: boolean;
   aviso: string | null;
   onPulso: (pie: Pie, p: Pulso) => void;
-  onTipoDePie: (t: TipoDePie) => void;
+  onTipoDePie: (t: (typeof TIPOS_DE_PIE)[number]) => void;
   onGuardar: () => void;
 }) {
   if (!props.exploracion) return null;
@@ -1002,12 +1678,11 @@ function PanelDeExploracion(props: {
         )}
       </p>
 
-      {/* El botón que el mockup no pinta, y por qué está.
-          El mockup sólo tiene pie de página en la pestaña de sesión. Pero
-          la exploración se guarda APARTE —se puede registrar sin la
-          valoración validada, que es su razón de existir (prompt §2)— así
-          que necesita su propio acto. Una pestaña cuyo estado no se puede
-          guardar es una pestaña que miente. Va declarado en el done. */}
+      {/* El botón que el mockup no pinta, y por qué está: la exploración
+          se guarda APARTE —se puede registrar sin la valoración validada,
+          que es su razón de existir— así que necesita su propio acto. Una
+          pestaña cuyo estado no se puede guardar es una pestaña que
+          miente. */}
       <button
         type="button"
         onClick={props.onGuardar}
@@ -1024,119 +1699,4 @@ function PanelDeExploracion(props: {
       )}
     </div>
   );
-}
-
-// ── Piezas sueltas ──────────────────────────────────────────────────
-
-function Tarjeta(props: {
-  titulo: string;
-  sub: string;
-  children: React.ReactNode;
-}) {
-  return (
-    // `px-3` por debajo de 640 px y no `px-5`, Y LA CUENTA ESTÁ MEDIDA:
-    // a 320 px de ancho, con los 16 px de la página a cada lado quedan
-    // 288, y con 20 px de tarjeta a cada lado quedaban 248 — o sea un pie
-    // de 248 px en vez de los 264 nominales, y una zona de **45,1 px**.
-    // Pasaba el mínimo del prompt (44) y no el de la casa (48).
-    //
-    // Lo cazó la MEDICIÓN DE LA CAPTURA, no un test: el test del mapa
-    // calcula sobre el ancho nominal y el ancho nominal era correcto. Con
-    // 12 px a cada lado quedan exactamente 264 y la zona vuelve a 48,4.
-    <div className="bg-white border border-slate-200 rounded-3xl px-3 sm:px-5 py-4">
-      <h2 className="text-[16.5px] font-semibold m-0 text-mipiace-ink">
-        {props.titulo}
-      </h2>
-      <div className="text-[13px] text-slate-500 mt-0.5 mb-3">{props.sub}</div>
-      {props.children}
-    </div>
-  );
-}
-
-function Seccion(props: { titulo: string; children: React.ReactNode }) {
-  return (
-    <div className="mt-4 first:mt-0">
-      <div className="text-[13px] font-medium text-mipiace-ink-soft mb-2">
-        {props.titulo}
-      </div>
-      {props.children}
-    </div>
-  );
-}
-
-function Chip(props: {
-  on: boolean;
-  suave?: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  const activo = props.suave
-    ? "bg-mipiace-coral-soft text-mipiace-coral-dark border-mipiace-coral"
-    : "bg-mipiace-coral text-white border-mipiace-coral font-medium";
-  return (
-    <button
-      type="button"
-      aria-pressed={props.on}
-      disabled={props.disabled}
-      onClick={props.onClick}
-      className={`min-h-touch px-3.5 rounded-2xl border-[1.5px] text-[14px] ${
-        props.on ? activo : "bg-white border-slate-200 text-mipiace-ink"
-      } disabled:opacity-45 disabled:cursor-not-allowed`}
-    >
-      {props.children}
-    </button>
-  );
-}
-
-function Segmentos<T extends string>(props: {
-  opciones: ReadonlyArray<readonly [T, string]>;
-  valor: T | null;
-  onElegir: (v: T) => void;
-}) {
-  return (
-    <div className="flex gap-2">
-      {props.opciones.map(([id, texto]) => (
-        <button
-          key={id}
-          type="button"
-          aria-pressed={props.valor === id}
-          onClick={() => props.onElegir(id)}
-          className={`flex-1 h-touch rounded-2xl font-medium text-[14px] ${
-            props.valor === id
-              ? "bg-mipiace-ink text-white"
-              : "bg-mipiace-stone text-mipiace-ink"
-          }`}
-        >
-          {texto}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function Mal(props: { children: React.ReactNode }) {
-  return (
-    <div className="bg-red-50 text-red-700 rounded-2xl px-4 py-3 text-[13.5px]">
-      {props.children}
-    </div>
-  );
-}
-
-export function euros(n: number): string {
-  return `${n.toFixed(2).replace(".", ",")} €`;
-}
-
-function hora(iso: string): string {
-  return new Date(iso).toLocaleTimeString("es-ES", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function diaCorto(iso: string): string {
-  return new Date(iso).toLocaleDateString("es-ES", {
-    day: "numeric",
-    month: "short",
-  });
 }

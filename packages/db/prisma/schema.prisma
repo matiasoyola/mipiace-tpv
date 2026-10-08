@@ -822,6 +822,7 @@ model Tenant {
   modifierGroups     ModifierGroup[]
   tagAliases         TagAlias[]
   tagSections        TagSection[]
+  tagVisitTypes      TagVisitType[]
   reconciliationRuns ReconciliationRun[]
   clients            Client[]
   serviceSchedulings ServiceScheduling[]
@@ -901,6 +902,56 @@ model TagSection {
 
   @@unique([tenantId, slug])
   @@map("tag_sections")
+}
+
+// clinica-5 · mapeo `tag → tipo de visita` por tenant. EL MISMO PATRÓN que
+// `TagSection` de arriba, y no es una coincidencia: S5 («Agrupar
+// servicios», decidido el 07-10) eligió este patrón precisamente porque ya
+// existía y resuelve lo mismo —un grupo que el centro crea apuntando a un
+// comportamiento de una lista cerrada en código.
+//
+// Rosario marca «Podología → Quiropodia» una vez y todos los servicios de
+// esa categoría lo heredan. De ahí sale qué tarjeta abre la sesión y de
+// qué tipo se cobra cada línea.
+//
+// ── Por qué el tipo es TEXTO con CHECK y no un enum de Postgres ───────
+//
+// La misma razón que `products.exemption_cause` (iva-exento-sanitario), y
+// la factura ya está pagada tres veces: un `enum` de Postgres sólo crece
+// (`ALTER TYPE … DROP VALUE` no existe) y **no se puede usar un valor
+// nuevo en la misma transacción en la que se añade**, así que cada valor
+// nuevo obliga a partir la migración en dos. clinica-1, -2 y -3 lo
+// pagaron. Con los cinco códigos escritos en el CHECK, admitir un tipo
+// nuevo es desplegar y migrar una sola vez.
+//
+// El CHECK vive en la migración (`tag_visit_types_tipo_valido`) y no es
+// expresable en Prisma 5. CONSECUENCIA A VIGILAR: `prisma migrate dev` lo
+// verá como deriva y ofrecerá borrarlo. NO aceptar — el guardia es
+// `apps/api/test/clinica-tipos-migracion.test.ts`.
+//
+// ── Por qué no cuelga del producto ───────────────────────────────────
+//
+// Porque sería el cuarto agrupador. S5 lo dejó dicho: un producto puede
+// tener varias etiquetas y el agrupador único del TPV es la categoría.
+// Poner el tipo en cada servicio habría obligado a Rosario a marcarlo
+// ciento veinte veces y a que el catálogo de la caja y el de la agenda
+// pudieran discrepar.
+model TagVisitType {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  slug      String   @db.VarChar(60)
+  // QUIROPODIA | PIE_RIESGO | CIRUGIA | BIOMECANICA | GENERAL. La lista
+  // cerrada vive en `@mipiacetpv/clinica-sesion` (`TIPOS_DE_VISITA`) y el
+  // CHECK de la migración la repite: es el único sitio que cubre las
+  // cuatro puertas de escritura a esta tabla (ADR-015 §1).
+  visitType String   @map("visit_type") @db.VarChar(20)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, slug])
+  @@map("tag_visit_types")
 }
 
 // Tipos de IVA del catálogo Holded del tenant. Spike §03.A: array de 103
@@ -2617,6 +2668,35 @@ model ServiceScheduling {
   // Nace en `false`, así que ningún servicio de los tenants de hoy se
   // convierte en un tratamiento de sesión.
   tratamientoSesion Boolean @default(false) @map("tratamiento_sesion")
+  // clinica-5 · «este servicio ES el nivel N de la quiropodia».
+  //
+  // 1 básica · 2 completa · 3 extra. NULL = no es ninguno de los tres (lo
+  // normal: una cura, un papiloma, una exploración biomecánica).
+  //
+  // ── Por qué hace falta una columna y no basta la categoría ───────────
+  //
+  // Decisión 4: «el nivel elegido decide QUÉ PRODUCTO del catálogo pasa a
+  // caja (los tres niveles son tres productos)». La categoría dice que los
+  // tres son de quiropodia; no dice cuál de ellos es «extra». Sin esto, la
+  // sesión propondría un nivel y no sabría qué línea cobrar.
+  //
+  // Lo que NO se hizo es deducirlo del nombre del producto («…extra»):
+  // sería una regla de negocio escrita en una cadena de texto que la
+  // dueña puede renombrar desde Holded sin enterarse.
+  //
+  // Vive aquí, junto a `primeraValoracion` y `tratamientoSesion`, por la
+  // misma razón que ellas: la podóloga mantiene UNA pantalla (Catálogo de
+  // agenda) y no dos. Nace en NULL, así que ningún servicio de los quince
+  // tenants de hoy es el nivel de nada.
+  //
+  // DOS garantías en la migración, ninguna expresable en Prisma 5:
+  //
+  //   · `service_scheduling_nivel_quiropodia_valido` — CHECK 1..3.
+  //   · `service_scheduling_un_servicio_por_nivel` — índice ÚNICO PARCIAL
+  //     por (tenant, nivel). Dos servicios que digan ser «quiropodia
+  //     extra» es una sesión que no sabe cuál cobrar, y es mejor que
+  //     falle al configurarlo que con la paciente delante.
+  nivelQuiropodia Int?     @map("nivel_quiropodia")
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz()
 

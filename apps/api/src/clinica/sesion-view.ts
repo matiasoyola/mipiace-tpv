@@ -30,7 +30,7 @@
 import type {
   LineaDelResumen,
   ResumenDeLaSesion,
-  TratamientoDelCatalogo,
+  ServicioDeSesion,
 } from "@mipiacetpv/clinica-sesion";
 
 import type { SesionCerradaView, VistaDeLaSesion } from "./sesion.js";
@@ -38,15 +38,32 @@ import type { SesionCerradaView, VistaDeLaSesion } from "./sesion.js";
 /** Un tratamiento tal como sale por el cable. Sin `precio` ni `iva` para
  *  quien no los ve: las claves no están. */
 type TratamientoSerializado =
-  | TratamientoDelCatalogo
-  | Pick<TratamientoDelCatalogo, "serviceId" | "nombre">;
+  | ServicioDeSesion
+  | Pick<
+      ServicioDeSesion,
+      "serviceId" | "nombre" | "tipo" | "nivelQuiropodia"
+    >;
 
 function serializarTratamiento(
-  t: TratamientoDelCatalogo,
+  t: ServicioDeSesion,
   verImportes: boolean,
 ): TratamientoSerializado {
   if (verImportes) return t;
-  return { serviceId: t.serviceId, nombre: t.nombre };
+  // clinica-5 · `tipo` y `nivelQuiropodia` SÍ salen siempre, y no es una
+  // grieta en la regla 8: no son importes, son en qué tarjeta va el botón
+  // y si es uno de los tres niveles. Sin ellos, la pantalla del sanitario
+  // sin caja no sabría agrupar nada y pintaría los seis botones en una
+  // lista plana — o sea, la regla de «no ve importes» le quitaría la
+  // pantalla entera.
+  //
+  // La frontera sigue siendo la misma y se lee en el `Pick`: lo que no
+  // está es `precio`, `iva` y `causaExencion`.
+  return {
+    serviceId: t.serviceId,
+    nombre: t.nombre,
+    tipo: t.tipo ?? null,
+    nivelQuiropodia: t.nivelQuiropodia ?? null,
+  };
 }
 
 type LineaSerializada =
@@ -116,6 +133,13 @@ export function serializarVista(
     tratamientos: v.tratamientos.map((t) =>
       serializarTratamiento(t, verImportes),
     ),
+    // clinica-5 · ninguno de los tres es un importe, así que los tres
+    // salen igual para los dos roles: qué tipos vienen marcados, qué
+    // quedó pendiente de la última visita y de qué cirugía habla la
+    // tarjeta de revisión.
+    tiposSugeridos: v.tiposSugeridos,
+    pendientes: v.pendientes,
+    ultimaCirugia: v.ultimaCirugia,
     anterior: v.anterior,
     dolorHistorico: v.dolorHistorico,
     exploracion: v.exploracion,

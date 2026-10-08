@@ -48,6 +48,7 @@ import {
   nombreDeZona,
   type Pie,
 } from "./mapa.js";
+import type { PendienteCreado } from "./pendientes.js";
 import {
   NOMBRE_DE_GRAVEDAD,
   VERSION_DE_LAS_LESIONES,
@@ -146,6 +147,16 @@ export interface SesionAnterior {
   tratamientos: readonly string[];
   consejos: readonly string[];
   dolor: number;
+  /**
+   * clinica-5 · lo que esa sesión dejó apuntado PARA HOY (decisión 10).
+   *
+   * Vive aquí y no en una estructura aparte porque es exactamente lo que
+   * «la sesión anterior» significa en este bloque: la fuente de «Hoy
+   * toca». Y es opcional porque una sesión v1 de clinica-3 no lo tiene —
+   * no es que no tuviera pendientes, es que el concepto no existía cuando
+   * se escribió.
+   */
+  pendientesCreados?: readonly PendienteCreado[];
 }
 
 // ── 1 · La gravedad se elige DESPUÉS de la lesión ─────────────────────

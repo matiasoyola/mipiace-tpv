@@ -27,6 +27,9 @@ interface ProductRow {
   taxRate: number;
   kind: "PRODUCT" | "SERVICE";
   active: boolean;
+  // clinica-5 · las categorías del producto. De ellas sale el tipo de
+  // visita (S5), y por eso la ruta las pide ahora.
+  tags: string[];
 }
 
 interface SchedulingRow {
@@ -39,6 +42,8 @@ interface SchedulingRow {
   onlineBookable: boolean;
   family: string | null;
   channels: unknown;
+  // clinica-5 · «este servicio ES el nivel N de la quiropodia».
+  nivelQuiropodia: number | null;
   updatedAt: Date;
 }
 
@@ -56,19 +61,40 @@ interface NeedRow {
   qty: number;
 }
 
+/** clinica-5 · ¿este centro tiene la historia clínica encendida? Sólo ahí
+ *  valen las dos negativas de S5. Por defecto NO: los tests de
+ *  B-reservas-2 son los de un centro normal. */
+let centroClinico = false;
+
+/** clinica-5 · el mapa `categoría → tipo de visita` del centro. */
+let mapaDeTipos: Array<{ slug: string; visitType: string }> = [];
+
 const productStore = new Map<string, ProductRow>();
 const schedulingStore = new Map<string, SchedulingRow>();
 const resourceStore: ResourceRow[] = [];
 const needStore: NeedRow[] = [];
 
 const fakePrisma = {
+  // clinica-5 · las dos lecturas que la ruta hace ahora para resolver el
+  // tipo de visita de un servicio (S5). En este test el tenant NO es
+  // clínico y no hay ni un mapeo de categorías, así que las dos negativas
+  // de S5 no se disparan y el catálogo de un centro normal se guarda
+  // exactamente como antes — que es justo lo que estos tests guardan.
+  tenant: {
+    findUnique: vi.fn(async () => ({
+      clinicalRecordsEnabled: centroClinico,
+    })),
+  },
+  tagVisitType: {
+    findMany: vi.fn(async () => mapaDeTipos),
+  },
   product: {
     findFirst: vi.fn(async ({ where }: any) => {
       for (const p of productStore.values()) {
         if (where.id && p.id !== where.id) continue;
         if (where.tenantId && p.tenantId !== where.tenantId) continue;
         if (where.kind && p.kind !== where.kind) continue;
-        return { id: p.id };
+        return { id: p.id, tags: p.tags ?? [] };
       }
       return null;
     }),
@@ -96,6 +122,7 @@ const fakePrisma = {
           basePrice: p.basePrice,
           taxRate: p.taxRate,
           active: p.active,
+          tags: p.tags ?? [],
           scheduling: s
             ? {
                 productId: s.productId,
@@ -106,6 +133,7 @@ const fakePrisma = {
                 onlineBookable: s.onlineBookable,
                 family: s.family,
                 channels: s.channels,
+                nivelQuiropodia: s.nivelQuiropodia ?? null,
                 updatedAt: s.updatedAt,
               }
             : null,
@@ -118,7 +146,7 @@ const fakePrisma = {
       const existing = schedulingStore.get(where.productId);
       const row: SchedulingRow = existing
         ? { ...existing, ...update, updatedAt: new Date() }
-        : { ...create, updatedAt: new Date() };
+        : { nivelQuiropodia: null, ...create, updatedAt: new Date() };
       schedulingStore.set(where.productId, row);
       return row;
     }),
@@ -213,6 +241,7 @@ function seedService(opts: Partial<ProductRow>): ProductRow {
     taxRate: opts.taxRate ?? 21,
     kind: opts.kind ?? "SERVICE",
     active: opts.active ?? true,
+    tags: opts.tags ?? [],
   };
   productStore.set(id, row);
   return row;
@@ -229,6 +258,8 @@ beforeEach(() => {
   schedulingStore.clear();
   resourceStore.length = 0;
   needStore.length = 0;
+  centroClinico = false;
+  mapaDeTipos = [];
 });
 
 describe("GET /services/scheduling", () => {
@@ -245,6 +276,7 @@ describe("GET /services/scheduling", () => {
       onlineBookable: true,
       family: "Peluquería",
       channels: { caja: true, ticket: true, agenda: true, online: true },
+      nivelQuiropodia: null,
       updatedAt: new Date(),
     });
     const app = await buildApp();
@@ -470,5 +502,187 @@ describe("necesidades de recurso", () => {
     });
     expect(res.statusCode).toBe(404);
     await app.close();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// clinica-5 · EL TIPO DE VISITA DEL SERVICIO (S5) y el nivel de quiropodia
+// ═══════════════════════════════════════════════════════════════════════
+//
+// Las dos negativas de S5 se aplican aquí porque aquí nace la mezcla: es
+// el único sitio desde el que la dueña puede marcar un servicio como
+// tratamiento de sesión.
+//
+// Y los tests de arriba siguen pasando sin tocar nada, que es la mitad del
+// punto: en un centro sin historia clínica (los catorce de hoy) ninguna de
+// las dos reglas se dispara.
+
+/** Pone el centro en modo clínico con el mapa de Rosario. */
+function clinicaDeRosario() {
+  centroClinico = true;
+  mapaDeTipos = [
+    { slug: "podologia", visitType: "QUIROPODIA" },
+    { slug: "cirugia", visitType: "CIRUGIA" },
+    { slug: "promocion", visitType: "" as never },
+  ].filter((m) => m.visitType !== "");
+}
+
+const SCHEDULING_BASE = { durationMin: 30 };
+
+async function guardar(
+  productId: string,
+  body: Record<string, unknown>,
+): Promise<ReturnType<Awaited<ReturnType<typeof buildApp>>["inject"]>> {
+  const app = await buildApp();
+  return app.inject({
+    method: "PUT",
+    url: `/services/${productId}/scheduling`,
+    headers: auth,
+    payload: { ...SCHEDULING_BASE, ...body },
+  });
+}
+
+describe("clinica-5 · el tipo de visita sale de la categoría", () => {
+  it("el GET lo enseña, heredado y de sólo lectura", async () => {
+    clinicaDeRosario();
+    seedService({ name: "Quiropodia básica", tags: ["podologia"] });
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: "/services/scheduling",
+      headers: auth,
+    });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().items[0]).toMatchObject({
+      tipoDeVisita: "QUIROPODIA",
+      tipoDeVisitaMotivo: null,
+    });
+  });
+
+  it("una etiqueta transversal no estorba", async () => {
+    clinicaDeRosario();
+    seedService({ name: "Quiropodia", tags: ["promocion", "podologia"] });
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: "/services/scheduling",
+      headers: auth,
+    });
+    expect(r.json().items[0].tipoDeVisita).toBe("QUIROPODIA");
+  });
+
+  it("DOS TIPOS DISTINTOS: el GET lo dice con su motivo…", async () => {
+    clinicaDeRosario();
+    seedService({ name: "Mezcla", tags: ["podologia", "cirugia"] });
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: "/services/scheduling",
+      headers: auth,
+    });
+    expect(r.json().items[0].tipoDeVisita).toBeNull();
+    expect(r.json().items[0].tipoDeVisitaMotivo).toMatch(/quita una/i);
+  });
+
+  it("…y GUARDARLO SE RECHAZA, con el motivo que la dueña puede usar", async () => {
+    clinicaDeRosario();
+    const s = seedService({ name: "Mezcla", tags: ["podologia", "cirugia"] });
+    const r = await guardar(s.id, { tratamientoSesion: true });
+    expect(r.statusCode).toBe(409);
+    expect(r.json().code).toBe("DOS_TIPOS");
+    expect(r.json().message).toContain("Quiropodia");
+    expect(r.json().message).toContain("Cirugía");
+    // Y no se guardó a medias.
+    expect(schedulingStore.has(s.id)).toBe(false);
+  });
+
+  it("y se rechaza TAMBIÉN sin marcar «tratamiento de sesión»", async () => {
+    // La regla es del servicio, no de la marca: dos categorías con tipos
+    // distintos es un servicio que no se sabe de qué es.
+    clinicaDeRosario();
+    const s = seedService({ name: "Mezcla", tags: ["podologia", "cirugia"] });
+    const r = await guardar(s.id, {});
+    expect(r.statusCode).toBe(409);
+  });
+
+  it("SERVICIO DE SESIÓN SIN TIPO: tampoco se guarda", async () => {
+    clinicaDeRosario();
+    const s = seedService({ name: "Suelto", tags: ["promocion"] });
+    const r = await guardar(s.id, { tratamientoSesion: true });
+    expect(r.statusCode).toBe(409);
+    expect(r.json().code).toBe("SESION_SIN_TIPO");
+    expect(r.json().message).toMatch(/categoría/i);
+  });
+
+  it("pero el mismo servicio SIN la marca se guarda sin problema", async () => {
+    clinicaDeRosario();
+    const s = seedService({ name: "Suelto", tags: ["promocion"] });
+    const r = await guardar(s.id, {});
+    expect(r.statusCode).toBe(200);
+  });
+
+  it("y en un centro SIN historia clínica, ninguna de las dos se dispara", async () => {
+    // Los catorce tenants de hoy. `centroClinico` es false y el mapa está
+    // vacío, así que un servicio marcado (que ahí no significa nada) se
+    // guarda igual que antes de este bloque.
+    const s = seedService({ name: "Corte de pelo", tags: ["cortes"] });
+    const r = await guardar(s.id, { tratamientoSesion: true });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().scheduling.tratamientoSesion).toBe(true);
+  });
+});
+
+describe("clinica-5 · el nivel de quiropodia", () => {
+  it("se guarda en un servicio de la categoría de quiropodia", async () => {
+    clinicaDeRosario();
+    const s = seedService({ name: "Quiropodia extra", tags: ["podologia"] });
+    const r = await guardar(s.id, {
+      tratamientoSesion: true,
+      nivelQuiropodia: 3,
+    });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().scheduling.nivelQuiropodia).toBe(3);
+  });
+
+  it("en un servicio que NO es de quiropodia, se rechaza", async () => {
+    // «Quiropodia extra» marcado sobre una cura sería una línea de ticket
+    // que el nivel de la quiropodia elige y que no es una quiropodia.
+    clinicaDeRosario();
+    const s = seedService({ name: "Cura", tags: ["cirugia"] });
+    const r = await guardar(s.id, {
+      tratamientoSesion: true,
+      nivelQuiropodia: 2,
+    });
+    expect(r.statusCode).toBe(409);
+    expect(r.json().code).toBe("NIVEL_SIN_QUIROPODIA");
+  });
+
+  it("un nivel que no es 1, 2 ni 3 no pasa el schema", async () => {
+    clinicaDeRosario();
+    const s = seedService({ name: "Quiropodia", tags: ["podologia"] });
+    // `"2"` NO está en la lista: el ajv de Fastify coacciona tipos
+    // (`coerceTypes`, la configuración de la casa) y una cadena numérica
+    // entra como número. No es un agujero —el CHECK de la base sigue
+    // siendo 1..3— pero conviene que esté dicho y no que alguien lo
+    // descubra añadiéndolo aquí.
+    for (const nivel of [0, 4, 2.5]) {
+      const r = await guardar(s.id, {
+        tratamientoSesion: true,
+        nivelQuiropodia: nivel,
+      });
+      expect(r.statusCode, `nivel ${nivel}`).toBe(400);
+    }
+  });
+
+  it("null lo quita, y ausente también: esta ruta es un upsert completo", async () => {
+    clinicaDeRosario();
+    const s = seedService({ name: "Quiropodia", tags: ["podologia"] });
+    await guardar(s.id, { tratamientoSesion: true, nivelQuiropodia: 1 });
+    expect(schedulingStore.get(s.id)!.nivelQuiropodia).toBe(1);
+    await guardar(s.id, { tratamientoSesion: true, nivelQuiropodia: null });
+    expect(schedulingStore.get(s.id)!.nivelQuiropodia).toBeNull();
+    await guardar(s.id, { tratamientoSesion: true, nivelQuiropodia: 1 });
+    await guardar(s.id, { tratamientoSesion: true });
+    expect(schedulingStore.get(s.id)!.nivelQuiropodia).toBeNull();
   });
 });

@@ -29,9 +29,27 @@
 // cita —el comportamiento de master— y la podóloga ve un importe que no es
 // el que esperaba, que es un problema de un ticket y no una venta perdida.
 // Es la memoria de la casa: «cobrar siempre se puede».
+//
+// ── clinica-5 · POR QUÉ ESTE FICHERO NO CAMBIÓ AL LLEGAR LOS TIPOS ───
+//
+// El prompt pide que las líneas sean las de **todos** los tipos marcados,
+// «con el mismo camino de cobro de siempre (sin rama paralela)». Y la
+// forma de cumplirlo de verdad fue no tocar esto:
+//
+// Al cerrar, `serviciosDeLaSesion` resuelve los servicios de todos los
+// tipos —para la quiropodia, el producto del NIVEL elegido; para el resto,
+// los servicios tocados— y el resultado se CONGELA en `tratamientos`, la
+// misma clave que leía la v1. Así que aquí se sigue leyendo una lista de
+// ids y este fichero no sabe que existen los tipos, ni los niveles, ni el
+// riesgo del pie.
+//
+// La alternativa era recorrer los bloques desde aquí, y entonces el cobro
+// tendría que saber qué es un nivel de quiropodia. La derivación vive en
+// UNA función pura con su test (`sesion-v2.test.ts`, «dos tipos, dos
+// líneas a caja») y el cobro lee lo que esa función dejó escrito.
 
 import type { PrismaClient } from "@mipiacetpv/db";
-import type { CuerpoDeSesion } from "@mipiacetpv/clinica-sesion";
+import type { CuerpoDeSesionCualquiera } from "@mipiacetpv/clinica-sesion";
 
 /**
  * Los tratamientos de la sesión cerrada de esta cita, en el orden en que
@@ -68,15 +86,25 @@ export async function lineasDeLaSesionCerrada(
     });
     if (!sesion) return null;
 
-    const cuerpo = sesion.body as unknown as CuerpoDeSesion | null;
+    const cuerpo = sesion.body as unknown as CuerpoDeSesionCualquiera | null;
     const tratamientos = cuerpo?.tratamientos;
     if (!Array.isArray(tratamientos) || tratamientos.length === 0) {
-      // Una sesión sin tratamientos no se puede cerrar
-      // (`normalizarSesion` lo impide y el schema de la ruta también), así
-      // que esto es un cuerpo de una versión que no se sabe leer. Y
-      // entonces lo honesto es NO inventarse las líneas: se cae al camino
-      // de siempre, que cobra los servicios de la cita. Cobrar cero
-      // habría sido peor que cobrar la previsión.
+      // DOS casos caen aquí, y los dos acaban igual a propósito:
+      //
+      //   · un cuerpo de una versión que no se sabe leer (en la v1 una
+      //     sesión sin tratamientos no se podía cerrar siquiera);
+      //   · y, desde clinica-5, una sesión v2 legítima en la que NINGÚN
+      //     tipo marcado tiene servicio asignado — la pantalla lo enseña
+      //     como «sin cobro» (regla 11 del prompt).
+      //
+      // En los dos, lo honesto es NO inventarse las líneas: se cae al
+      // camino de siempre, que cobra los servicios de la cita. Y hay una
+      // razón de más para el segundo caso: `checkoutAppointment` contesta
+      // `APPOINTMENT_EMPTY` con cero líneas, así que devolver `[]` aquí
+      // sería bloquear el cobro de una cita que tiene su previsión. Cobrar
+      // la previsión es un importe que la dueña puede corregir en el
+      // ticket; no poder cobrar es una venta perdida con la paciente
+      // delante. «Cobrar siempre se puede».
       return null;
     }
     return tratamientos.map((serviceId) => ({ serviceId }));
