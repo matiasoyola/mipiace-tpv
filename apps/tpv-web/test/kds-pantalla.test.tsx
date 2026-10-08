@@ -36,10 +36,8 @@ vi.mock("../src/storage.js", async () => {
 import { KitchenScreen } from "../src/kitchen/KitchenScreen.js";
 import type { Comanda, KitchenMe, VistaCocina } from "../src/kitchen/types.js";
 import {
-  ALERGIA_PX,
   PULSO_CLASS_ROJO,
   PULSO_CLASS_TARJETA,
-  ROJO_ALERGIA,
   TARJETA_CUERPO,
 } from "../src/lib/kitchenTheme.js";
 
@@ -323,10 +321,10 @@ describe("kds-1 · SABOTAJE · la alergia en cocina", () => {
     );
     // El icono de aviso, y la franja en rojo de ancho completo.
     expect(franja.querySelector("svg")).not.toBeNull();
-    expect(franja.style.background).toBe(rgb(ROJO_ALERGIA));
+    expect(franja.style.background).toBe("rgb(200, 16, 46)");
     expect(
       $('[data-testid="kds-franja-alergia-titulo"]')!.style.fontSize,
-    ).toBe(`${ALERGIA_PX}px`);
+    ).toBe("21px");
   });
 
   it("el plato de la silla alérgica que lleva SU alérgeno: recuadro y «¡LLEVA GLUTEN!»", async () => {
@@ -358,7 +356,7 @@ describe("kds-1 · SABOTAJE · la alergia en cocina", () => {
     // La caja ENTERA en rojo y parpadeando: es lo único que no puede
     // esperar. Y el pulso va de rojo a rojo, no de rojo a carbón.
     expect(linea.dataset.alarma).toBe("1");
-    expect(linea.style.background).toBe(rgb(ROJO_ALERGIA));
+    expect(linea.style.background).toBe("rgb(200, 16, 46)");
     expect(linea.className).toContain(PULSO_CLASS_ROJO);
   });
 
