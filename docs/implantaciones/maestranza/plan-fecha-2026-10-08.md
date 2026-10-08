@@ -92,8 +92,15 @@ y La Maestranza todavía no vende.
    construyó en el worktree `mipiacetpv-v1-22`, retirado el 08-10, así que su binario ya no está en
    disco; no hace falta, la nueva la sustituye. El script aborta si no está firmada o si no lleva el
    backend de producción.
-2. `adb install -r <apk>` en el D8. **Sin `pm clear` todavía**: se queda emparejado a ENSAYO para la
+2. **Cerrar la app ANTES de instalar**: `adb shell am force-stop es.mipiace.tpv` y luego
+   `adb install -r <apk>` en el D8. **Sin `pm clear` todavía**: se queda emparejado a ENSAYO para la
    pasada.
+   Si se instala con la app abierta, el D8 arranca **en blanco**: Android marca como malo el proceso
+   aislado del WebView (`cr_ChildProcessConn: Failed to establish the service connection`,
+   `ActivityManager: ... process is bad`) y ni `force-stop` ni `kill-all` ni relanzar lo quitan —
+   sólo el reinicio del terminal, que cuesta volver a sacar el puerto de depuración inalámbrica a
+   mano (§6). Pasó el 08-10 instalando la 1.23.0. **No es un fallo de v2-H1 con WebView 101**: tras
+   reiniciar, el proceso hijo arranca limpio y la app entra.
 3. Publicarla en /apk (`infra/publicar-apk.sh`) **después** de la pasada, no antes.
 
 ## 5 · La pasada en el D8 · el «después» y las puertas
