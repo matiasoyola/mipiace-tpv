@@ -126,8 +126,15 @@ En la cuenta ENSAYO, con la APK nueva y el servidor desplegado.
 
 10. Una venta de 3 líneas: el ticket enseña las líneas con IVA, **una sola base imponible** (10 %) y
     el total. Es la primera vez que `ticket-con-iva` se ve en una cuenta sin Holded.
-11. **Impresora**: sólo vale USB ESC/POS. ¿Hay ya una de 80 mm para el bar y se ha probado impresa
-    desde el D8? Si no, esta puerta queda abierta y la fecha depende de ella.
+11. **Comandas a cocina — DECIDIDO por Matías el 08-10: van a una PANTALLA de gestión de comandas
+    en cocina, NO a impresora.** Hoy esa pantalla **no existe** en el producto: «Enviar a cocina»
+    genera PDFs y emite el evento en tiempo real `ticket.sent_to_kitchen`
+    (`apps/api/src/realtime/store-events.ts`), que es la base sobre la que se construiría. Es un
+    bloque nuevo (pantalla de cocina: comandas por mesa en orden de llegada, marcar en
+    preparación / lista, qué hay nuevo desde el último envío) y **la fecha depende de él**. Pasa
+    por la ficha del §5 del tablero de Dirección antes de escribir su prompt.
+    La impresora térmica USB ESC/POS queda solo para el ticket del cliente, si Salomé lo quiere en
+    papel.
 
 ## 6 · El D8 · cómo se conduce
 
@@ -158,7 +165,8 @@ En la cuenta ENSAYO, con la APK nueva y el servidor desplegado.
 
 - **Las hojas en claro** (puerta 7) y **el orden de las familias**: si Matías dice que impiden abrir,
   v2-H2 entra antes de la fecha.
-- **Impresora** (puerta 11).
+- **Pantalla de comandas en cocina** (puerta 11): decidida el 08-10, sin construir. Es lo que más
+  puede mover la fecha.
 - **Botella de vino VIN-007** sin precio, fuera del catálogo.
 - **Devoluciones sin Holded**: las rectificativas (V3) no existen; hace falta una instrucción de uso
   para Salomé.
