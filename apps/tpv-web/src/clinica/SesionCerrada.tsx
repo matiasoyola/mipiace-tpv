@@ -74,7 +74,13 @@ export interface SesionCerradaView {
     lesion: string;
     gravedad: string | null;
   }>;
-  resumen: {
+  /**
+   * El pie de caja. **Opcional desde clinica-6**: la historia viva abre
+   * esta misma pantalla para LEER una visita, y ahí no hay bloque de
+   * cobro — es historia, no caja (decisión 8 de clinica-6). Sin
+   * `resumen`, el bloque entero no se pinta; no se pinta vacío ni a cero.
+   */
+  resumen?: {
     tratamientos: number;
     /** `precio` e `iva` NO VIENEN si el actor no ve importes. */
     lineas: Array<{
@@ -87,7 +93,7 @@ export interface SesionCerradaView {
     ivaTexto?: string | null;
     textoDelBoton: string;
   };
-  yaCobrada: boolean;
+  yaCobrada?: boolean;
 }
 
 export function SesionCerrada(props: {
@@ -114,7 +120,7 @@ export function SesionCerrada(props: {
         anotaciones.
       </div>
 
-      {props.verImportes ? (
+      {cerrada.resumen == null ? null : props.verImportes ? (
         <div className="bg-white border border-slate-200 rounded-3xl px-5 py-4 mt-4">
           <div className="text-[13px] font-medium text-mipiace-ink-soft mb-1">
             Pasa a caja

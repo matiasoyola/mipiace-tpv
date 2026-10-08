@@ -73,6 +73,15 @@ export type EstadoDeZona =
    * diabético.
    */
   | "sinSensibilidad"
+  /**
+   * clinica-6 · los tres estados del PIE VIVO de la historia. Son los
+   * colores del mockup validado (rojo / ámbar / verde) y no los corales
+   * de la sesión, y la diferencia es de significado: en la sesión el
+   * color dice «marcado hoy», y aquí dice «cómo va esto».
+   */
+  | "activa"
+  | "mejorando"
+  | "curada"
   /** Sin nada. */
   | "libre";
 
@@ -81,6 +90,9 @@ const RELLENO: Record<EstadoDeZona, string> = {
   anterior: "fill-mipiace-coral-soft stroke-mipiace-coral",
   elegida: "fill-white stroke-mipiace-ink",
   sinSensibilidad: "fill-red-500 stroke-red-700",
+  activa: "fill-red-600 stroke-red-800",
+  mejorando: "fill-amber-500 stroke-amber-600",
+  curada: "fill-emerald-500 stroke-emerald-700",
   libre: "fill-white stroke-slate-300",
 };
 
@@ -128,11 +140,25 @@ function Pie(props: {
   onTocar: (clave: string) => void;
   soloLectura: boolean;
 }) {
-  // El derecho es el izquierdo espejado, que es lo que un pie es. Se
-  // espeja el GRUPO entero (contorno y zonas juntos) para que las zonas no
-  // se puedan desalinear del contorno ni por un píxel.
+  // ── El pie que se espeja es el IZQUIERDO ──────────────────────────
+  //
+  // `CONTORNO_DEL_PIE` dibuja un pie con el dedo gordo a la izquierda del
+  // lienzo, y los TRES mockups validados (clinica-3, la sesión v2 y la
+  // historia viva) espejan el IZQUIERDO para que, con los dos pies uno al
+  // lado del otro, **los dedos gordos queden hacia dentro** — que es como
+  // se ve un par de pies de frente.
+  //
+  // Hasta clinica-6 aquí se espejaba el derecho, así que los dedos gordos
+  // salían hacia fuera: un fallo de píxeles de clinica-3 que ninguna suite
+  // podía ver (el test del mapa mide tamaños, no lados). Se arregla en el
+  // sitio ÚNICO donde se dibuja el pie, porque dos pantallas que no se
+  // pongan de acuerdo en cuál es el pie izquierdo son peores que las dos
+  // equivocadas igual.
+  //
+  // Se espeja el GRUPO entero (contorno y zonas juntos) para que las zonas
+  // no se puedan desalinear del contorno ni por un píxel.
   const flip =
-    props.pie === "R" ? `translate(${VIEWBOX.ancho},0) scale(-1,1)` : undefined;
+    props.pie === "L" ? `translate(${VIEWBOX.ancho},0) scale(-1,1)` : undefined;
   return (
     <svg
       viewBox={`0 0 ${VIEWBOX.ancho} ${VIEWBOX.alto}`}

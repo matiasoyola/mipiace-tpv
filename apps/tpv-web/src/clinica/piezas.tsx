@@ -11,6 +11,7 @@
 // (`docs/design/tokens.md` §4), y la segunda copia es la que un día sale
 // a 44 y nadie lo mide.
 
+import { AlertTriangle } from "lucide-react";
 import type React from "react";
 
 export function Tarjeta(props: {
@@ -201,4 +202,47 @@ export function cuantoHace(iso: string, ahora: Date = new Date()): string {
   if (semanas < 9) return `hace ${semanas} semanas`;
   const meses = Math.floor(dias / 30);
   return meses === 1 ? "hace un mes" : `hace ${meses} meses`;
+}
+
+/**
+ * LA FRANJA ROJA INTENSA, con icono, «Cuidado» y letra grande.
+ *
+ * Decisión de producto 7 de clinica-3: *aquí no prima la estética: si es
+ * alerta, se ve.* Dice lo que el paciente TIENE, siempre, y se lee una vez
+ * al entrar. El aviso de clinica-5 es otra cosa y va DENTRO de la tarjeta
+ * que lo dispara: no «es anticoagulada», sino «vas a enuclear un heloma a
+ * una anticoagulada».
+ *
+ * clinica-6 · vive aquí desde que la historia viva también la pinta. Una
+ * señal de seguridad con dos copias es la que un día sale en rosa pálido
+ * en una de las dos pantallas — el mismo argumento que movió las piezas
+ * táctiles a este fichero, y aquí pesa más.
+ */
+export function FranjaRoja(props: { alertas: readonly string[] }) {
+  if (props.alertas.length === 0) {
+    return (
+      <div className="bg-mipiace-stone text-slate-500 rounded-2xl px-4 py-3 text-[13px]">
+        Sin alertas
+      </div>
+    );
+  }
+  return (
+    <div
+      role="alert"
+      className="flex flex-wrap gap-2.5 items-center bg-red-700 rounded-2xl px-4 py-3.5 text-white"
+    >
+      <span className="flex items-center gap-2 text-[15px] font-semibold mr-1.5">
+        <AlertTriangle className="w-[22px] h-[22px]" strokeWidth={2.25} />
+        Cuidado
+      </span>
+      {props.alertas.map((a) => (
+        <span
+          key={a}
+          className="bg-white text-red-800 rounded-xl px-3.5 py-2 text-[16px] font-semibold"
+        >
+          {a}
+        </span>
+      ))}
+    </div>
+  );
 }

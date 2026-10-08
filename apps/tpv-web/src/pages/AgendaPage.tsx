@@ -24,6 +24,7 @@ import {
   MoreVertical,
   Plus,
   Footprints,
+  NotebookText,
   Stethoscope,
   Wallet,
   X,
@@ -84,7 +85,10 @@ import {
 } from "../lib/agenda-health.js";
 import { createPortal } from "react-dom";
 
+import type { TipoDeVisita } from "@mipiacetpv/clinica-sesion";
+
 import { CobrosPendientes } from "../clinica/CobrosPendientes.js";
+import { HistoriaViva } from "../clinica/HistoriaViva.js";
 import { SesionPodologia } from "../clinica/SesionPodologia.js";
 import { ValoracionSanitario } from "../clinica/ValoracionSanitario.js";
 import { AgendaHealthPanel } from "./AgendaHealthPanel.js";
@@ -361,6 +365,18 @@ export function AgendaPage({
   // que la podóloga está haciendo es atender a una persona, no mirar un
   // detalle de agenda de reojo.
   const [sesionDe, setSesionDe] = useState<string | null>(null);
+  // clinica-6 · LA HISTORIA VIVA del paciente de la cita. Guarda las dos
+  // mitades: de quién es la historia y DE QUÉ CITA se abrió — porque
+  // «Empezar esta revisión» abre la sesión, y una sesión cuelga de una
+  // cita (clinica-3 §8.6). Sin el `appointmentId` el botón no podría
+  // cumplir, y entonces no sale.
+  const [historiaDe, setHistoriaDe] = useState<
+    { clientId: string; appointmentId: string } | null
+  >(null);
+  // Y con qué tipos se abre la sesión al venir de la historia.
+  const [tiposIniciales, setTiposIniciales] = useState<TipoDeVisita[] | null>(
+    null,
+  );
   // clinica-3 · el panel de cobros pendientes de la recepción.
   const [verCobros, setVerCobros] = useState(false);
   // B-reservas-9 · el panel de salud y la matriz cuelgan de aquí: se entra y
@@ -1374,6 +1390,16 @@ export function AgendaPage({
             onStatus={(st) => changeStatus(detail.id, st)}
             onCheckout={() => doCheckout(detail.id)}
             puedeCobrar={puedeCobrar}
+            // clinica-6 · la historia viva del paciente, desde la cita.
+            onAbrirHistoria={
+              detail.clientId
+                ? () =>
+                    setHistoriaDe({
+                      clientId: detail.clientId!,
+                      appointmentId: detail.id,
+                    })
+                : undefined
+            }
             // clinica-2 · el aviso discreto y, para el sanitario, la puerta
             // a la valoración.
             valoracionPendiente={
@@ -1399,6 +1425,50 @@ export function AgendaPage({
           />
         )}
       </div>
+
+      {/* clinica-6 · LA HISTORIA VIVA del paciente. Overlay a pantalla
+          completa, el mismo patrón que la valoración y la sesión: es una
+          pantalla entera de iPad apaisado y lo que se está haciendo es
+          leer una historia, no mirar la agenda de reojo. */}
+      {historiaDe && (
+        <AlFrente>
+        <div className="fixed inset-0 z-[70] bg-mipiace-stone flex flex-col font-sans">
+          <div className="flex items-center gap-3 px-4 md:px-6 h-16 bg-white border-b border-slate-200 shrink-0">
+            <button
+              onClick={() => setHistoriaDe(null)}
+              className="h-11 w-11 rounded-2xl hover:bg-slate-100 flex items-center justify-center text-mipiace-ink"
+              aria-label="Volver a la agenda"
+            >
+              <ArrowLeft className="w-5 h-5" strokeWidth={2.25} />
+            </button>
+            <h1 className="text-[18px] font-semibold text-mipiace-ink flex-1">
+              Historia · {clientLabel(historiaDe.clientId).nombre}
+            </h1>
+          </div>
+          <div className="flex-1 overflow-y-auto px-4 md:px-6 py-4">
+            <div className="max-w-[1180px] mx-auto">
+              <HistoriaViva
+                clientId={historiaDe.clientId}
+                // «Empezar esta revisión →» y «Nueva visita»: se sale de la
+                // historia y se entra en la sesión DE ESTA CITA con el tipo
+                // ya marcado. Lo único que este bloque le pasa a clinica-5.
+                onEmpezarVisita={(tipos) => {
+                  const cita = historiaDe.appointmentId;
+                  setHistoriaDe(null);
+                  setTiposIniciales(tipos);
+                  setSesionDe(cita);
+                }}
+                onAbrirValoracion={() => {
+                  const quien = historiaDe.clientId;
+                  setHistoriaDe(null);
+                  setValoracionDe(quien);
+                }}
+              />
+            </div>
+          </div>
+        </div>
+        </AlFrente>
+      )}
 
       {/* clinica-2 · la valoración del paciente de la cita. Overlay a
           pantalla completa, como el resto de las hojas de esta pantalla:
@@ -1454,6 +1524,7 @@ export function AgendaPage({
             <button
               onClick={() => {
                 setSesionDe(null);
+                setTiposIniciales(null);
                 // Y SE RECARGA EL DÍA, por lo mismo que la valoración: el
                 // aviso «Sesión cerrada · queda cobrarla» sale de la
                 // respuesta de `/agenda`, pedida antes de entrar aquí.
@@ -1472,6 +1543,10 @@ export function AgendaPage({
             <div className="max-w-[1180px] mx-auto">
               <SesionPodologia
                 appointmentId={sesionDe}
+                // clinica-6 · los tipos con los que se abre cuando se
+                // viene de «Hoy toca» o de «Nueva visita». `null` = los de
+                // los servicios de la cita, como siempre.
+                tiposIniciales={tiposIniciales ?? undefined}
                 // «Cobrar ahora» de la pantalla de sesión cerrada hace
                 // EXACTAMENTE lo que «Cobrar en caja» de la agenda: llama
                 // al endpoint que ya existía. Es el mismo botón con otro
@@ -1480,6 +1555,7 @@ export function AgendaPage({
                   puedeCobrar
                     ? (id) => {
                         setSesionDe(null);
+                        setTiposIniciales(null);
                         void doCheckout(id);
                       }
                     : undefined
@@ -2636,6 +2712,8 @@ function DetailPanel(props: {
   esSanitario: boolean;
   /** `undefined` en una cita sin paciente (walk-in): no hay historia. */
   onAbrirValoracion?: () => void;
+  /** clinica-6 · abrir la historia viva del paciente de esta cita. */
+  onAbrirHistoria?: () => void;
   /** clinica-3 · abrir la sesión de esta cita. `undefined` en una cita sin
    *  paciente: una sesión clínica es de una persona con historia. */
   onAbrirSesion?: () => void;
@@ -2744,6 +2822,20 @@ function DetailPanel(props: {
             >
               <Footprints className="w-4 h-4" strokeWidth={2.25} />
               Sesión de hoy
+            </button>
+          )}
+          {/* clinica-6 · LA HISTORIA, encima de la valoración: desde aquí
+              se ve todo de un vistazo —incluida la valoración, que tiene
+              su fila en Documentos— y desde la valoración no se ve la
+              historia. La valoración sigue teniendo su botón porque es
+              donde se VALIDA, y validar no es leer. */}
+          {props.onAbrirHistoria && (
+            <button
+              onClick={props.onAbrirHistoria}
+              className="w-full min-h-touch rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[14px] font-medium text-mipiace-ink flex items-center justify-center gap-2"
+            >
+              <NotebookText className="w-4 h-4" strokeWidth={2.25} />
+              Historia del paciente
             </button>
           )}
           <button

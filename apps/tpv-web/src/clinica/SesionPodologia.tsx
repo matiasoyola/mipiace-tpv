@@ -48,7 +48,7 @@
 // tirar.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Check, Loader2 } from "lucide-react";
+import { Check, Loader2 } from "lucide-react";
 
 import {
   COLOR_DE_TIPO_DE_VISITA,
@@ -125,6 +125,7 @@ import {
 } from "./TarjetasDeTipo.js";
 import {
   Chip,
+  FranjaRoja,
   Mal,
   Seccion,
   Segmentos,
@@ -259,6 +260,16 @@ export function SesionPodologia(props: {
   /** Para llevar a la valoración cuando la puerta está cerrada: es «el
    *  camino para hacerlo» que pide el prompt §2 de clinica-3. */
   onAbrirValoracion?: (clientId: string) => void;
+  /**
+   * clinica-6 · con qué tipos se abre, cuando se viene de la historia
+   * viva («Hoy toca» o «Nueva visita»).
+   *
+   * `undefined` = los de los servicios de la cita, que es la decisión 3 de
+   * clinica-5 y lo de siempre. Es lo ÚNICO que clinica-6 le pasa a esta
+   * pantalla: no cambia ni lo que hace ni lo que guarda, sólo con qué
+   * chips arranca — y la podóloga los puede quitar y poner igual.
+   */
+  tiposIniciales?: readonly TipoDeVisita[];
 }) {
   const [vista, setVista] = useState<VistaDeLaSesion | null>(null);
   const [cargando, setCargando] = useState(true);
@@ -311,7 +322,16 @@ export function SesionPodologia(props: {
       setVista(v);
       // Decisión 3: al abrir la sesión de una cita vienen marcados los
       // tipos de los servicios de la cita. Se pueden añadir o quitar.
-      setTipos(v.tiposSugeridos.filter((t) => TIPOS_DE_VISITA.includes(t)));
+      //
+      // clinica-6 · salvo que se venga de la historia viva, que manda los
+      // suyos: ahí la podóloga acaba de decir a qué viene hoy, y eso pesa
+      // más que lo que diga el catálogo de los servicios de la cita.
+      setTipos(
+        (props.tiposIniciales && props.tiposIniciales.length > 0
+          ? props.tiposIniciales
+          : v.tiposSugeridos
+        ).filter((t) => TIPOS_DE_VISITA.includes(t)),
+      );
       setExploracion(v.exploracion.departeDe);
     } catch (err) {
       setError(
@@ -320,6 +340,7 @@ export function SesionPodologia(props: {
     } finally {
       setCargando(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.appointmentId]);
 
   useEffect(() => {
@@ -1313,44 +1334,6 @@ function Ficha(props: { titulo: string; children: React.ReactNode }) {
         {props.titulo}
       </span>
       {props.children}
-    </div>
-  );
-}
-
-/**
- * LA FRANJA ROJA INTENSA, con icono, «Cuidado» y letra grande.
- *
- * Decisión de producto 7 de clinica-3: *aquí no prima la estética: si es
- * alerta, se ve.* Dice lo que el paciente TIENE, siempre, y se lee una vez
- * al entrar. El aviso de clinica-5 es otra cosa y va DENTRO de la tarjeta
- * que lo dispara: no «es anticoagulada», sino «vas a enuclear un heloma a
- * una anticoagulada».
- */
-function FranjaRoja(props: { alertas: string[] }) {
-  if (props.alertas.length === 0) {
-    return (
-      <div className="bg-mipiace-stone text-slate-500 rounded-2xl px-4 py-3 text-[13px]">
-        Sin alertas
-      </div>
-    );
-  }
-  return (
-    <div
-      role="alert"
-      className="flex flex-wrap gap-2.5 items-center bg-red-700 rounded-2xl px-4 py-3.5 text-white"
-    >
-      <span className="flex items-center gap-2 text-[15px] font-semibold mr-1.5">
-        <AlertTriangle className="w-[22px] h-[22px]" strokeWidth={2.25} />
-        Cuidado
-      </span>
-      {props.alertas.map((a) => (
-        <span
-          key={a}
-          className="bg-white text-red-800 rounded-xl px-3.5 py-2 text-[16px] font-semibold"
-        >
-          {a}
-        </span>
-      ))}
     </div>
   );
 }
