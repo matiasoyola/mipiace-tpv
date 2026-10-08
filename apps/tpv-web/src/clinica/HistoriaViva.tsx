@@ -58,6 +58,7 @@ import {
 import {
   COLOR_DE_TIPO_DE_VISITA,
   DESCRIPCION_DE_TIPO_DE_VISITA,
+  ANCHO_DE_LOS_DOS_PIES_PX,
   NOMBRE_DE_ESTADO_DE_ZONA,
   NOMBRE_DE_PULSO,
   NOMBRE_DE_TIPO_DE_VISITA,
@@ -170,6 +171,35 @@ const ICONO_DE_TIPO: Record<TipoDeVisita, typeof Scissors> = {
   CIRUGIA: Syringe,
   GENERAL: Clock,
 };
+
+/**
+ * El padding lateral de la tarjeta del mapa, los dos lados: `sm:px-5`.
+ *
+ * Se nombra porque entra en la cuenta de la columna, y una cuenta con un
+ * 40 suelto dentro es una cuenta que nadie puede revisar.
+ */
+const PADDING_DE_LA_TARJETA_PX = 40;
+
+/**
+ * LA COLUMNA DEL PIE VIVO, de `lg` para arriba: 576 px.
+ *
+ * Es la pareja de pies a tamaño nominal (536, del paquete) más el padding
+ * de su tarjeta. No es decoración: es lo que hace que a 1024 **los dos
+ * pies quepan uno al lado del otro**, que es como los pone la maqueta
+ * validada.
+ *
+ * Antes la rejilla era `lg:grid-cols-2`, o sea 480 px a 1024, y el pie
+ * derecho se iba bajo el pliegue: para ver el estado completo del pie
+ * había que hacer scroll — justo lo que esta pantalla existe para no
+ * pedir. Es la misma cuenta que clinica-3 hizo para la sesión (§7.2), y
+ * ahora sale de una constante en vez de estar escrita dos veces.
+ *
+ * Se EXPORTA sólo para su test: es quien compara este número con el 576
+ * que la clase de Tailwind lleva literal, y el que se pone rojo si los dos
+ * se separan.
+ */
+export const COLUMNA_DEL_PIE_PX =
+  ANCHO_DE_LOS_DOS_PIES_PX + PADDING_DE_LA_TARJETA_PX;
 
 const INSIGNIA: Record<EstadoDeZonaViva, string> = {
   ACTIVA: "bg-red-100 text-red-800",
@@ -454,7 +484,16 @@ export function HistoriaViva(props: {
       </div>
 
       {pestania === "pie" && (
-        <div className="mt-3.5 grid gap-3.5 grid-cols-1 lg:grid-cols-2">
+        <div
+          // El 576 va LITERAL y no interpolado: Tailwind genera las clases
+          // leyendo el fichero, y una clase construida en tiempo de
+          // ejecución no existiría en el CSS. La copia la ata su test, que
+          // la compara con `COLUMNA_DEL_PIE_PX` — el mismo trato que
+          // `clinica-tipos-panel.test.ts` le da a las listas duplicadas del
+          // panel.
+          className="mt-3.5 grid gap-3.5 grid-cols-1 lg:grid-cols-[576px_minmax(0,1fr)]"
+          data-test="historia-pie-vivo"
+        >
           <div className="bg-white border border-slate-200 rounded-3xl px-3 sm:px-5 py-4">
             <h2 className="m-0 text-[17px] font-bold text-mipiace-ink">
               Cómo están sus pies
@@ -493,6 +532,9 @@ export function HistoriaViva(props: {
             </div>
             <div className="mt-2">
               <MapaDelPie
+                // Los dos pies en UNA fila de `lg` para arriba. A 390 se
+                // apilan a propósito: ver `COLUMNA_DEL_PIE_PX`.
+                unaFilaDesdeLg
                 mapa={vista.listas.mapa}
                 estadoDe={(clave) => {
                   if (capa === "sensibilidad") {

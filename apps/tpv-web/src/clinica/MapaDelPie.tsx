@@ -1,8 +1,12 @@
 // clinica-3 · EL MAPA DE LOS DOS PIES, con zonas táctiles.
 //
 // Es el mapa del mockup validado (`docs/mockups/clinica-3-sesion.html`):
-// el contorno del pie y once elipses por pie, el derecho espejado. Se toca
-// la zona y se elige qué tiene.
+// el contorno del pie y once elipses por pie, **el IZQUIERDO espejado**.
+// Se toca la zona y se elige qué tiene.
+//
+// (Decía «el derecho espejado» hasta clinica-6, y el código hacía eso: era
+// el fallo de píxeles que dejaba los dedos gordos hacia fuera. Ver el
+// porqué entero en `Pie`, abajo.)
 //
 // ── Por qué SVG y no once botones absolutos ──────────────────────────
 //
@@ -32,6 +36,23 @@
 // cada lado quedaban 248 y la zona bajaba a 45,1 px — pasaba el 44 del
 // prompt y no el 48 de la casa. Con 12 quedan exactamente 264.
 //
+// ── `unaFilaDesdeLg`: los dos pies SIEMPRE juntos (clinica-6) ────────
+//
+// El `flex-wrap` de aquí abajo parte la fila cuando los dos pies no caben,
+// y eso es lo correcto en móvil. En un iPad apaisado NO lo es: a 1024 la
+// historia viva dejaba el pie derecho bajo el pliegue, y había que hacer
+// scroll para ver el estado completo del pie — justo lo que esa pantalla
+// existe para no pedir. La maqueta validada los pone siempre lado a lado.
+//
+// Con la prop puesta, de `lg` para arriba la fila NO se parte. Lo que la
+// hace caber de verdad no es esta clase: es que quien la usa le reserve
+// `ANCHO_DE_LOS_DOS_PIES_PX` (536) más el padding de su tarjeta. Esta
+// clase es la GARANTÍA de que, si alguien estrecha la columna, los pies se
+// encogen juntos en vez de irse uno debajo del otro sin avisar.
+//
+// La sesión de clinica-5 NO la pasa, y no le hace falta: su columna son
+// 584 px desde clinica-3 (§7.2) y ahí los dos caben a 264.
+//
 // **Esto se mide en la captura, no se deduce**: el test del mapa calcula
 // sobre el ancho NOMINAL, y el ancho nominal estaba bien. Quien lo cazó fue
 // `medidas-del-mapa.json` del bucle visual.
@@ -46,6 +67,7 @@
 
 import {
   ANCHO_DEL_PIE_PX,
+  HUECO_ENTRE_PIES_PX,
   CONTORNO_DEL_PIE,
   NOMBRE_DEL_PIE,
   PIES,
@@ -107,15 +129,28 @@ export function MapaDelPie(props: {
   onTocar: (clave: string) => void;
   /** Por si el mapa se pinta sólo para mirar (una sesión ya cerrada). */
   soloLectura?: boolean;
+  /** clinica-6 · de `lg` para arriba, los dos pies en UNA fila pase lo que
+   *  pase. Ver la cabecera. */
+  unaFilaDesdeLg?: boolean;
 }) {
   return (
-    // `gap-2` (8 px) y no 12: es lo que hace que dos pies de 264 quepan en
-    // la columna de 584 de 1024 (264+8+264+40 de tarjeta = 576).
-    <div className="flex flex-wrap justify-center gap-2">
+    // El hueco sale del paquete (8 px y no 12): es lo que hace que dos pies
+    // de 264 quepan en 536 + el padding de la tarjeta.
+    <div
+      className={`flex flex-wrap justify-center ${
+        props.unaFilaDesdeLg ? "lg:flex-nowrap" : ""
+      }`}
+      style={{ gap: HUECO_ENTRE_PIES_PX }}
+      data-test="mapa-los-dos-pies"
+    >
       {PIES.map((pie) => (
         <div
           key={pie}
-          className="flex flex-col items-center text-[12px] text-slate-500"
+          // `min-w-0` para que, con la fila sin partir, los dos pies se
+          // ENCOJAN juntos si la columna no da: el mínimo de un flex item
+          // es `auto`, y sin esto desbordarían la tarjeta en vez de
+          // ajustarse. Con la columna bien reservada no llega a pasar.
+          className="flex min-w-0 flex-col items-center text-[12px] text-slate-500"
         >
           <Pie
             pie={pie}

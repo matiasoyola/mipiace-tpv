@@ -26,6 +26,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   ANCHO_DEL_PIE_PX,
+  ANCHO_DE_LOS_DOS_PIES_PX,
   MAPA_PIE_V1,
   VIEWBOX,
 } from "@mipiacetpv/clinica-sesion";
@@ -39,7 +40,10 @@ vi.mock("../src/api.js", async () => {
   return { ...actual, apiWithCashier: apiMock.apiWithCashier };
 });
 
-import { HistoriaViva } from "../src/clinica/HistoriaViva.js";
+import {
+  COLUMNA_DEL_PIE_PX,
+  HistoriaViva,
+} from "../src/clinica/HistoriaViva.js";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -484,6 +488,39 @@ describe("el pie vivo", () => {
         48,
       );
     }
+  });
+
+  it("LOS DOS PIES VAN EN UNA FILA de `lg` para arriba", async () => {
+    // Lo encontró la revisión del PR sobre las capturas de 1024: con la
+    // rejilla a `lg:grid-cols-2` la columna del pie eran 480 px, los dos
+    // pies de 264 no cabían, el `flex-wrap` partía la fila y el pie
+    // DERECHO se iba bajo el pliegue. Para ver el estado completo del pie
+    // había que hacer scroll — justo lo que esta pantalla existe para no
+    // pedir, y la maqueta validada los pone siempre lado a lado.
+    //
+    // Son las DOS mitades, y las dos hacen trabajo: la fila que no se
+    // parte, y la columna que le reserva sitio para que no tenga que
+    // encogerlos.
+    await montar(vista({ conPendiente: true }));
+    const fila = host.querySelector('[data-test="mapa-los-dos-pies"]')!;
+    expect(fila.className).toContain("lg:flex-nowrap");
+    const rejilla = host.querySelector('[data-test="historia-pie-vivo"]')!;
+    expect(rejilla.className).toContain(
+      `lg:grid-cols-[${COLUMNA_DEL_PIE_PX}px_minmax(0,1fr)]`,
+    );
+  });
+
+  it("…y la columna es la pareja de pies más el padding de su tarjeta", () => {
+    // La clase de arriba lleva el 576 LITERAL porque Tailwind lee el
+    // fichero y no puede generar una clase construida en ejecución. Esto
+    // es lo que impide que las dos copias se separen: si alguien encoge
+    // el pie o cambia el hueco, el número de la clase deja de cuadrar.
+    expect(ANCHO_DE_LOS_DOS_PIES_PX).toBe(2 * ANCHO_DEL_PIE_PX + 8);
+    expect(COLUMNA_DEL_PIE_PX).toBe(ANCHO_DE_LOS_DOS_PIES_PX + 40);
+    // Y la cuenta de verdad: a 264 por pie, la zona mide 48,4 px.
+    expect((2 * 22 * ANCHO_DEL_PIE_PX) / VIEWBOX.ancho).toBeGreaterThanOrEqual(
+      48,
+    );
   });
 
   it("EL ESPEJO ES EL DEL PIE IZQUIERDO: los dedos gordos van hacia dentro", async () => {
