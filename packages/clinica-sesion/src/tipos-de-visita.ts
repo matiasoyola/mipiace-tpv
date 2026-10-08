@@ -72,6 +72,23 @@ export const COLOR_DE_TIPO_DE_VISITA: Record<TipoDeVisita, string> = {
   GENERAL: "#64748B",
 };
 
+/**
+ * clinica-6 · la línea de debajo del nombre en la hoja de «¿Qué visita es
+ * hoy?» («Durezas, uñas, callos»).
+ *
+ * Es el texto del mockup validado, y vive aquí por la misma razón que el
+ * color y que la geometría del mapa: es dato de presentación COMPARTIDO.
+ * Un tipo nuevo sin su línea es un tipo que la hoja ofrece sin decir qué
+ * es, y el typecheck de este `Record` lo pide completo.
+ */
+export const DESCRIPCION_DE_TIPO_DE_VISITA: Record<TipoDeVisita, string> = {
+  QUIROPODIA: "Durezas, uñas, callos",
+  PIE_RIESGO: "Diabetes, úlceras, sensibilidad",
+  CIRUGIA: "Uña, anestesia, consentimiento",
+  BIOMECANICA: "Pisada, plantillas, órtesis",
+  GENERAL: "Revisión o consulta",
+};
+
 export function esTipoDeVisita(x: unknown): x is TipoDeVisita {
   return (
     typeof x === "string" &&
