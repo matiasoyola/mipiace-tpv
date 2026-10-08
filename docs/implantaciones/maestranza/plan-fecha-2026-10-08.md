@@ -226,6 +226,12 @@ servidor en el mismo `106f0d3`:
   montar la sala (Barra B1–B4, Salón M1–M6, Terraza T1–T6, capacidad 4), generar código, emparejar
   el D8, wifi, impresora, camareros como cajeros, y la primera venta real = factura C1 nº 1, con el
   papel mirado y el arqueo hecho.
+- **El ticket con IVA en PAPEL queda sin probar en el hierro.** La puerta 10 se comprobó en el
+  navegador del Mac (pantalla), no impreso: no hay impresora térmica conectada todavía, así que
+  nadie ha visto cómo salen las líneas con IVA, la base imponible única y el total **en el papel de
+  80 mm**. Se comprueba en **la primera venta real**, mirando el ticket impreso, **antes de dar la
+  implantación por buena**. Si ahí falla, falla con Salomé delante: es el riesgo que se asume por no
+  tener impresora antes de la fecha.
 
 ## 8 · Abierto, que puede mover la fecha
 
