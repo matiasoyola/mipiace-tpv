@@ -1,0 +1,172 @@
+erDiagram
+    %% ===== LA CLÍNICA (comercio) =====
+    TENANT {
+        uuid id PK
+        string name "la clínica"
+        bool clinicalRecordsEnabled "clinica-1"
+    }
+    STORE {
+        uuid id PK
+        string name "sede"
+    }
+    REGISTER {
+        uuid id PK
+        string serie "caja"
+    }
+
+    %% ===== PERSONAS =====
+    USER {
+        uuid id PK
+        enum role "dueña, encargado, cajero, sanitario"
+        bool isClinician "clinica-1"
+        string clinicianLicense "nº colegiado"
+        enum clinicalScope "TODOS o SELECCION"
+    }
+    STAFF_PROFILE {
+        uuid userId PK
+        string displayName
+        string color
+    }
+    STAFF_SHIFT {
+        uuid id PK
+        string rrule "turno recurrente"
+        string startTime
+        string endTime
+    }
+
+    %% ===== CATÁLOGO =====
+    PRODUCT {
+        uuid id PK
+        string name "servicio o producto"
+        enum kind "SERVICE o PRODUCT"
+        decimal basePrice
+        decimal taxRate
+        enum exencionIva "NUEVO iva-exento: E1"
+    }
+    SERVICE_SCHEDULING {
+        uuid productId PK
+        int durationMin
+        bool primeraValoracion "clinica-2"
+        bool tratamientoSesion "clinica-3"
+        enum especialidad "NUEVO: PODOLOGIA, FISIOTERAPIA"
+    }
+    STAFF_SKILL {
+        uuid userId PK
+        uuid serviceId PK
+    }
+    RESOURCE {
+        uuid id PK
+        string name "camilla, sala, aparato"
+        enum kind "CABIN, ROOM, DEVICE"
+    }
+    SERVICE_RESOURCE_NEED {
+        uuid serviceId FK
+        enum resourceKind
+        int qty
+    }
+
+    %% ===== PACIENTE Y AGENDA =====
+    CLIENT {
+        uuid id PK
+        string firstName "paciente"
+        string phone
+        date birthdate
+    }
+    CLIENT_CONSENT {
+        uuid id PK
+        enum kind
+    }
+    APPOINTMENT {
+        uuid id PK
+        tstzrange timeslot "cita"
+        enum status
+        uuid voucherId "bono: sin tabla todavía"
+        uuid ticketId
+    }
+    APPOINTMENT_ITEM {
+        uuid id PK
+        uuid serviceId FK
+    }
+    APPOINTMENT_ASSIGNMENT {
+        uuid id PK
+        uuid staffUserId "sanitario"
+        uuid resourceId "camilla o sala"
+    }
+
+    %% ===== HISTORIA CLÍNICA (inmutable) =====
+    CLINICAL_ACCESS {
+        uuid id PK
+        enum source "AGENDA o MANUAL"
+        datetime revokedAt
+    }
+    CLINICAL_ACCESS_LOG {
+        uuid id PK
+        enum action
+        datetime at
+    }
+    CLINICAL_ASSESSMENT {
+        uuid id PK
+        int questionnaireVersion "valoración"
+        enum status
+        datetime validatedAt
+    }
+    CLINICAL_ASSESSMENT_CORRECTION {
+        uuid id PK
+        string questionId
+    }
+    CLINICAL_ENTRY {
+        uuid id PK
+        enum kind "VALORACION, FOOT_EXAM, TREATMENT_SESSION..."
+        json body "versionado"
+        enum especialidad "NUEVO: copia del servicio"
+    }
+    CLINICAL_ADDENDUM {
+        uuid id PK
+        json body "anotación posterior"
+    }
+
+    %% ===== COBRO =====
+    TICKET {
+        uuid id PK
+        string numero
+    }
+    TICKET_LINE {
+        uuid id PK
+        decimal taxRate
+        enum exencionIva "NUEVO iva-exento: copia"
+    }
+
+    TENANT ||--o{ STORE : "tiene sedes"
+    STORE ||--o{ REGISTER : "tiene cajas"
+    TENANT ||--o{ USER : "equipo"
+    USER ||--o| STAFF_PROFILE : "en agenda"
+    USER ||--o{ STAFF_SHIFT : "turnos"
+    USER ||--o{ STAFF_SKILL : "sabe dar"
+    PRODUCT ||--o{ STAFF_SKILL : "lo dan"
+    PRODUCT ||--o| SERVICE_SCHEDULING : "config de agenda"
+    PRODUCT ||--o{ SERVICE_RESOURCE_NEED : "necesita"
+    TENANT ||--o{ RESOURCE : "camillas y salas"
+    TENANT ||--o{ PRODUCT : "catálogo"
+    TENANT ||--o{ CLIENT : "pacientes"
+    CLIENT ||--o{ CLIENT_CONSENT : "consentimientos"
+    CLIENT ||--o{ APPOINTMENT : "citas"
+    APPOINTMENT ||--|{ APPOINTMENT_ITEM : "servicios"
+    PRODUCT ||--o{ APPOINTMENT_ITEM : "qué servicio"
+    APPOINTMENT ||--o{ APPOINTMENT_ASSIGNMENT : "quién y dónde"
+    USER ||--o{ APPOINTMENT_ASSIGNMENT : "atiende"
+    RESOURCE ||--o{ APPOINTMENT_ASSIGNMENT : "se usa"
+    USER ||--o{ CLINICAL_ACCESS : "puede ver"
+    CLIENT ||--o{ CLINICAL_ACCESS : "visto por"
+    USER ||--o{ CLINICAL_ACCESS_LOG : "abrió"
+    CLIENT ||--o{ CLINICAL_ACCESS_LOG : "historia abierta"
+    CLIENT ||--o{ CLINICAL_ASSESSMENT : "valoraciones"
+    CLINICAL_ASSESSMENT ||--o{ CLINICAL_ASSESSMENT_CORRECTION : "corrige el sanitario"
+    CLIENT ||--o{ CLINICAL_ENTRY : "historia"
+    USER ||--o{ CLINICAL_ENTRY : "firma"
+    APPOINTMENT ||--o{ CLINICAL_ENTRY : "de esta cita"
+    CLINICAL_ENTRY ||--o{ CLINICAL_ADDENDUM : "anotaciones"
+    CLINICAL_ASSESSMENT |o--o| CLINICAL_ENTRY : "validada queda en"
+    APPOINTMENT |o--o| TICKET : "se cobra en"
+    REGISTER ||--o{ TICKET : "emite"
+    TICKET ||--|{ TICKET_LINE : "líneas"
+    PRODUCT ||--o{ TICKET_LINE : "se vende"

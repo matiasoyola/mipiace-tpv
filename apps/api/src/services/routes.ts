@@ -32,11 +32,21 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ResourceKind, type Prisma } from "@mipiacetpv/db";
+import {
+  NIVELES_DE_QUIROPODIA,
+  tipoDelServicio,
+  type NivelDeQuiropodia,
+  type TipoDeVisita,
+} from "@mipiacetpv/clinica-sesion";
 
 import {
   requireOwner,
   requireOwnerOrManager,
 } from "../auth/middleware.js";
+import {
+  resolverTipoDelServicio,
+  tipoPorEtiqueta,
+} from "../clinica/tipos-de-visita.js";
 import { getPrisma } from "../context.js";
 
 // Forma estable de los flags de canal. El front la lee tal cual; `online`
@@ -78,6 +88,7 @@ function schedulingView(s: {
   channels: unknown;
   primeraValoracion: boolean;
   tratamientoSesion: boolean;
+  nivelQuiropodia: number | null;
   updatedAt: Date;
 }) {
   return {
@@ -99,6 +110,12 @@ function schedulingView(s: {
     // capability obliga a cada lector a distinguir «false» de «no me lo
     // han dicho».
     tratamientoSesion: s.tratamientoSesion,
+    // clinica-5 · «este servicio ES el nivel N de la quiropodia» (1
+    // básica, 2 completa, 3 extra). `null` = ninguno, que es lo normal.
+    // Viaja siempre, por la misma razón que las dos de arriba: un campo
+    // que aparece y desaparece según la capability obliga a cada lector a
+    // distinguir «null» de «no me lo han dicho».
+    nivelQuiropodia: s.nivelQuiropodia,
     updatedAt: s.updatedAt.toISOString(),
   };
 }
@@ -119,6 +136,51 @@ function serviceNotFound(reply: FastifyReply) {
     error: "SERVICE_NOT_FOUND",
     message: "Servicio no encontrado.",
   });
+}
+
+// clinica-5 · el tipo de visita que el servicio HEREDA de sus categorías,
+// en la forma en la que viaja al panel.
+//
+// Dos claves y no una: `tipoDeVisita` (el tipo, o `null`) y
+// `tipoDeVisitaMotivo` (por qué no hay tipo, cuando el motivo es que dos
+// categorías se pelean). La segunda existe porque «sin tipo» y «con dos
+// tipos» se pintan distinto: lo primero es un servicio normal, lo segundo
+// es algo que hay que arreglar y que va a impedir guardarlo si se marca
+// como tratamiento de sesión.
+//
+// El motivo lo redacta la función pura del paquete, la misma que usa el
+// PUT para rechazar. Dos redacciones del mismo problema acabarían
+// discrepando, y una de las dos es la que la dueña lee para arreglarlo.
+function tipoDeVisitaDelProducto(
+  etiquetas: readonly string[],
+  tipoPorTag: Readonly<Record<string, TipoDeVisita>>,
+): { tipoDeVisita: TipoDeVisita | null; tipoDeVisitaMotivo: string | null } {
+  const r = tipoDelServicio({
+    etiquetas,
+    tipoPorTag,
+    // `false` las dos: aquí sólo se pregunta «qué tipo tiene», no «se
+    // puede guardar». La negativa de «servicio de sesión sin tipo» la
+    // aplica el PUT con el valor que se va a guardar, que es el único que
+    // importa.
+    esCentroClinico: false,
+    tratamientoSesion: false,
+  });
+  if (r.ok) return { tipoDeVisita: r.tipo, tipoDeVisitaMotivo: null };
+  return { tipoDeVisita: null, tipoDeVisitaMotivo: r.mensaje };
+}
+
+/** El 23505 del índice «un servicio por nivel», y sólo ése. Cualquier
+ *  otro error sube: un fallo de base no se puede confundir con una
+ *  configuración duplicada. Misma forma que `esChoqueDeSesionUnica` de
+ *  clinica-3. */
+function esChoqueDeNivel(err: unknown): boolean {
+  const e = err as { code?: string; meta?: { target?: unknown } } | null;
+  if (e?.code !== "P2002") return false;
+  const target = JSON.stringify(e.meta?.target ?? "");
+  return (
+    target.includes("service_scheduling_un_servicio_por_nivel") ||
+    target.includes("nivel_quiropodia")
+  );
 }
 
 const RESOURCE_KINDS = ["CABIN", "ROOM", "DEVICE"] as const;
@@ -170,6 +232,10 @@ export async function registerServicesRoutes(
           basePrice: true,
           taxRate: true,
           active: true,
+          // clinica-5 · las categorías del producto. De ellas sale el
+          // tipo de visita (S5), y vienen en la MISMA consulta: una por
+          // servicio habría sido quinientas.
+          tags: true,
           scheduling: {
             select: {
               productId: true,
@@ -182,11 +248,17 @@ export async function registerServicesRoutes(
               channels: true,
               primeraValoracion: true,
               tratamientoSesion: true,
+              nivelQuiropodia: true,
               updatedAt: true,
             },
           },
         },
       });
+
+      // clinica-5 · el mapa `categoría → tipo de visita` del centro, UNA
+      // vez para los quinientos servicios. Vacío en los catorce tenants
+      // sin clínica, y entonces todos los `tipoDeVisita` salen `null`.
+      const tipoPorTag = await tipoPorEtiqueta(prisma, auth.tenantId);
 
       return {
         items: services.map((s) => ({
@@ -202,6 +274,12 @@ export async function registerServicesRoutes(
           // null → el servicio aún no tiene overlay de agenda: no es
           // reservable ni tiene duración. El panel ofrece "añadir".
           scheduling: s.scheduling ? schedulingView(s.scheduling) : null,
+          // clinica-5 · el tipo HEREDADO de sus categorías, de sólo
+          // lectura: no se edita aquí, se edita en el mapa de categorías.
+          // El panel lo enseña para que la dueña vea qué va a pasar antes
+          // de marcar «es un tratamiento de la sesión», y el motivo si hay
+          // dos categorías que se pelean.
+          ...tipoDeVisitaDelProducto(s.tags, tipoPorTag),
         })),
       };
     },
@@ -232,6 +310,14 @@ export async function registerServicesRoutes(
             primeraValoracion: { type: "boolean" },
             // clinica-3 · la marca de «es un tratamiento de la sesión».
             tratamientoSesion: { type: "boolean" },
+            // clinica-5 · «este servicio ES el nivel N de la quiropodia».
+            // `null` para quitarlo. El CHECK de la base dice lo mismo, y
+            // el índice único por (tenant, nivel) es lo que impide que dos
+            // servicios digan ser el mismo nivel.
+            nivelQuiropodia: {
+              type: ["integer", "null"],
+              enum: [...NIVELES_DE_QUIROPODIA, null],
+            },
             family: { type: ["string", "null"], maxLength: 120 },
             channels: {
               type: "object",
@@ -258,6 +344,7 @@ export async function registerServicesRoutes(
         onlineBookable?: boolean;
         primeraValoracion?: boolean;
         tratamientoSesion?: boolean;
+        nivelQuiropodia?: number | null;
         family?: string | null;
         channels?: Partial<Channels>;
       };
@@ -287,8 +374,58 @@ export async function registerServicesRoutes(
       // razón: esta ruta es un upsert del juego completo, no un parche. El
       // panel manda siempre el valor actual.
       const tratamientoSesion = body.tratamientoSesion ?? false;
+      // clinica-5 · ausente = null, igual que las dos de arriba: esta ruta
+      // es un upsert del juego completo y el panel manda siempre el valor
+      // actual.
+      const nivelQuiropodia =
+        body.nivelQuiropodia == null
+          ? null
+          : (body.nivelQuiropodia as NivelDeQuiropodia);
 
-      const saved = await prisma.serviceScheduling.upsert({
+      // ── LAS DOS NEGATIVAS DE S5 ─────────────────────────────────────
+      //
+      // Se comprueban AQUÍ porque aquí nace la mezcla: es el único sitio
+      // desde el que la dueña puede marcar un servicio como tratamiento de
+      // sesión. Y con el valor QUE SE VA A GUARDAR, no con el que hay en
+      // la fila: si no, marcar la casilla por primera vez pasaría.
+      //
+      // 409 y no 400: la petición está bien formada: es el sistema
+      // diciendo que esa combinación no se puede guardar. Misma elección
+      // que el cierre de sesión de clinica-3 hace con sus negativas.
+      const tipo = await resolverTipoDelServicio(prisma, {
+        tenantId: auth.tenantId,
+        productId,
+        tratamientoSesion,
+      });
+      if (!tipo.ok) {
+        return reply
+          .code(409)
+          .send({ error: tipo.motivo, code: tipo.motivo, message: tipo.mensaje });
+      }
+
+      // Y la tercera, que es de este bloque y no de S5: un nivel de
+      // quiropodia en un servicio que no es de quiropodia. «Quiropodia
+      // extra» marcado sobre una exploración biomecánica sería una línea
+      // de ticket que el nivel de la quiropodia elige y que no es una
+      // quiropodia.
+      if (nivelQuiropodia != null && tipo.tipo !== "QUIROPODIA") {
+        return reply.code(409).send({
+          error: "NIVEL_SIN_QUIROPODIA",
+          code: "NIVEL_SIN_QUIROPODIA",
+          message:
+            "El nivel (básica, completa, extra) sólo vale en un servicio de la categoría de quiropodia.",
+        });
+      }
+
+      // El upsert envuelto, y el `catch` NO es defensivo: es la mitad
+      // legible de la garantía «un servicio por nivel». El índice único
+      // parcial de la migración es la garantía de verdad (cubre también el
+      // psql de una implantación), y aquí se traduce su 23505 a una frase
+      // que la dueña puede usar. Sin esto, marcar «extra» en un segundo
+      // servicio contestaría un 500.
+      let saved;
+      try {
+        saved = await prisma.serviceScheduling.upsert({
         where: { productId },
         create: {
           productId,
@@ -300,6 +437,7 @@ export async function registerServicesRoutes(
           onlineBookable,
           primeraValoracion,
           tratamientoSesion,
+          nivelQuiropodia,
           family,
           channels: channels as unknown as Prisma.InputJsonValue,
         },
@@ -311,6 +449,7 @@ export async function registerServicesRoutes(
           onlineBookable,
           primeraValoracion,
           tratamientoSesion,
+          nivelQuiropodia,
           family,
           channels: channels as unknown as Prisma.InputJsonValue,
         },
@@ -325,9 +464,21 @@ export async function registerServicesRoutes(
           channels: true,
           primeraValoracion: true,
           tratamientoSesion: true,
+          nivelQuiropodia: true,
           updatedAt: true,
         },
-      });
+        });
+      } catch (err) {
+        if (esChoqueDeNivel(err)) {
+          return reply.code(409).send({
+            error: "NIVEL_YA_ASIGNADO",
+            code: "NIVEL_YA_ASIGNADO",
+            message:
+              "Otro servicio ya es ese nivel de quiropodia. Quítaselo a ése antes de ponérselo a éste.",
+          });
+        }
+        throw err;
+      }
       return { scheduling: schedulingView(saved) };
     },
   );

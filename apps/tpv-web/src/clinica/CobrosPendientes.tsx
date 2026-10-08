@@ -26,7 +26,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Loader2, X } from "lucide-react";
 
 import { ApiError, apiWithCashier } from "../api.js";
-import { euros } from "./SesionPodologia.js";
+import { euros } from "./piezas.js";
 
 interface CobroPendiente {
   appointmentId: string;

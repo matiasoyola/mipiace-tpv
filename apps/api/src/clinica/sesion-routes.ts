@@ -38,13 +38,25 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
+  ACTOS_QUIROPODIA_V1,
   DOLOR_MAXIMO,
   DOLOR_MINIMO,
+  ESTADOS_DE_HERIDA,
   EVOLUCIONES,
   GRAVEDADES,
+  NIVELES_DE_QUIROPODIA,
+  PENDIENTES_V1,
+  PISADAS,
   PROXIMAS_CITAS,
   PULSOS,
+  PULSOS_PEDIOS,
+  PUNTOS_DE_LA_HERIDA,
+  SENSIBILIDADES,
+  SI_NO,
   TIPOS_DE_PIE,
+  TIPOS_DE_PIE_BIOMECANICA,
+  TIPOS_DE_VISITA,
+  type PendienteCerrado,
 } from "@mipiacetpv/clinica-sesion";
 
 import { requireOwnerOrCashier } from "../auth/middleware.js";
@@ -74,6 +86,24 @@ const PARAMS_CITA = {
 /** La nota de la sesión. Es la ÚNICA caja de texto del bloque y tiene
  *  techo: una historia clínica no es un cuaderno. */
 const NOTA_MAXIMA = 2000;
+
+/** clinica-5 · la nota de un pendiente «Otro». Corta a propósito: es un
+ *  recordatorio de una línea («pedirle la analítica»), no una nota
+ *  clínica — esa es la de arriba. */
+const NOTA_PENDIENTE = 200;
+
+/** Cuántos pendientes caben en una visita. Cinco clases por los dos pies
+ *  y las zonas de cada uno dan de sobra con diez; más que eso no es una
+ *  visita, es alguien probando el endpoint. */
+const TECHO_DE_PENDIENTES = 10;
+
+/** Los servicios tocados de un tipo. El mismo techo que tenía
+ *  `tratamientos` en la v1 (clinica-3), ahora por bloque. */
+const SERVICIOS = {
+  type: "array",
+  maxItems: 20,
+  items: { type: "string", format: "uuid" },
+} as const;
 
 function citaNoExiste(reply: FastifyReply) {
   return reply.code(404).send({
@@ -260,7 +290,7 @@ export async function registerSesionRoutes(
         params: PARAMS_CITA,
         body: {
           type: "object",
-          required: ["tratamientos", "dolor"],
+          required: ["tipos", "dolor"],
           additionalProperties: false,
           properties: {
             // `"L:h"` → qué tiene. Techo de 22: las zonas del mapa por los
@@ -281,11 +311,106 @@ export async function registerSesionRoutes(
                 },
               },
             },
-            tratamientos: {
+            // clinica-5 · LOS TIPOS. Como mínimo uno (decisión 1) y como
+            // máximo los cinco que hay: una visita con el mismo tipo
+            // repetido seis veces no es una visita, es alguien probando el
+            // endpoint. El orden que llegue da igual —el servidor los
+            // guarda en el de la lista— y los repetidos los quita
+            // `normalizarSesionV2`.
+            tipos: {
               type: "array",
               minItems: 1,
-              maxItems: 20,
-              items: { type: "string", format: "uuid" },
+              maxItems: TIPOS_DE_VISITA.length,
+              items: { type: "string", enum: [...TIPOS_DE_VISITA] },
+            },
+            // Y sus bloques. `additionalProperties: false` en todos: lo
+            // que la pantalla manda de más no se guarda en silencio, se
+            // rechaza — al contrario que las marcas de una zona
+            // inexistente, que sí se tiran calladas. La diferencia es que
+            // una zona de más puede venir de una versión del mapa vieja y
+            // una clave de más sólo puede venir de un cliente que no es el
+            // nuestro.
+            bloques: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                QUIROPODIA: {
+                  type: ["object", "null"],
+                  additionalProperties: false,
+                  properties: {
+                    actos: {
+                      type: "array",
+                      maxItems: ACTOS_QUIROPODIA_V1.actos.length,
+                      items: { type: "string", maxLength: 40 },
+                    },
+                    nivelElegido: {
+                      type: ["integer", "null"],
+                      enum: [...NIVELES_DE_QUIROPODIA, null],
+                    },
+                    servicios: SERVICIOS,
+                  },
+                },
+                PIE_RIESGO: {
+                  type: ["object", "null"],
+                  additionalProperties: false,
+                  properties: {
+                    sensibilidad: {
+                      type: ["string", "null"],
+                      enum: [...SENSIBILIDADES, null],
+                    },
+                    pulsos: {
+                      type: ["object", "null"],
+                      additionalProperties: false,
+                      properties: {
+                        L: { type: ["string", "null"], enum: [...PULSOS_PEDIOS, null] },
+                        R: { type: ["string", "null"], enum: [...PULSOS_PEDIOS, null] },
+                      },
+                    },
+                    ulcera: { type: ["string", "null"], enum: [...SI_NO, null] },
+                    deformidad: { type: ["string", "null"], enum: [...SI_NO, null] },
+                    servicios: SERVICIOS,
+                  },
+                },
+                CIRUGIA: {
+                  type: ["object", "null"],
+                  additionalProperties: false,
+                  properties: {
+                    herida: {
+                      type: ["string", "null"],
+                      enum: [...ESTADOS_DE_HERIDA.opciones.map((o) => o.id), null],
+                    },
+                    puntos: {
+                      type: ["string", "null"],
+                      enum: [...PUNTOS_DE_LA_HERIDA.opciones.map((o) => o.id), null],
+                    },
+                    servicios: SERVICIOS,
+                  },
+                },
+                BIOMECANICA: {
+                  type: ["object", "null"],
+                  additionalProperties: false,
+                  properties: {
+                    tipoDePie: {
+                      type: ["string", "null"],
+                      enum: [
+                        ...TIPOS_DE_PIE_BIOMECANICA.opciones.map((o) => o.id),
+                        null,
+                      ],
+                    },
+                    pisada: {
+                      type: ["string", "null"],
+                      enum: [...PISADAS.opciones.map((o) => o.id), null],
+                    },
+                    plantillas: { type: "boolean" },
+                    servicios: SERVICIOS,
+                  },
+                },
+                GENERAL: {
+                  type: ["object", "null"],
+                  additionalProperties: false,
+                  properties: { servicios: SERVICIOS },
+                },
+              },
             },
             // OBLIGATORIO, y 0 es una respuesta («ya no me duele»).
             dolor: {
@@ -304,6 +429,45 @@ export async function registerSesionRoutes(
               enum: [...PROXIMAS_CITAS, null],
             },
             nota: { type: ["string", "null"], maxLength: NOTA_MAXIMA },
+            // clinica-5 · los pendientes que la podóloga cierra a mano
+            // (tocando la banda) o contestando el diálogo del cierre.
+            // El cierre AUTOMÁTICO no viaja: lo recalcula el servidor con
+            // lo que de verdad se ha marcado.
+            pendientesCerrados: {
+              type: "array",
+              maxItems: TECHO_DE_PENDIENTES,
+              items: {
+                type: "object",
+                required: ["id", "como"],
+                additionalProperties: false,
+                properties: {
+                  id: {
+                    type: "string",
+                    enum: PENDIENTES_V1.clases.map((c) => c.id),
+                  },
+                  zona: { type: ["string", "null"], maxLength: 40 },
+                  como: { type: "string", enum: ["MANO", "PREGUNTA"] },
+                },
+              },
+            },
+            // Y lo que apunta PARA LA PRÓXIMA VISITA.
+            pendientesNuevos: {
+              type: "array",
+              maxItems: TECHO_DE_PENDIENTES,
+              items: {
+                type: "object",
+                required: ["id"],
+                additionalProperties: false,
+                properties: {
+                  id: {
+                    type: "string",
+                    enum: PENDIENTES_V1.clases.map((c) => c.id),
+                  },
+                  zona: { type: ["string", "null"], maxLength: 40 },
+                  nota: { type: ["string", "null"], maxLength: NOTA_PENDIENTE },
+                },
+              },
+            },
           },
         },
       },
@@ -316,13 +480,20 @@ export async function registerSesionRoutes(
           { clientId: cita.clientId, action: "WRITE" },
           async (ctx) => {
             const body = request.body as {
+              tipos: string[];
+              bloques?: Record<string, unknown>;
               marcas?: Record<string, unknown>;
-              tratamientos: string[];
               dolor: number;
               evolucion?: string | null;
               consejos?: string[];
               proximaCita?: string | null;
               nota?: string | null;
+              pendientesCerrados?: PendienteCerrado[];
+              pendientesNuevos?: Array<{
+                id: string;
+                zona?: string | null;
+                nota?: string | null;
+              }>;
             };
             const verImportes = await puedeVerImportes(request);
             const r = await cerrarSesion(getPrisma(), {
@@ -330,13 +501,20 @@ export async function registerSesionRoutes(
               cita,
               autorUserId: ctx.userId,
               verImportes,
+              tipos: body.tipos,
+              bloques: (body.bloques ?? {}) as never,
               marcas: body.marcas ?? {},
-              tratamientos: body.tratamientos,
               dolor: body.dolor,
               evolucion: body.evolucion ?? null,
               consejos: body.consejos ?? [],
               proximaCita: body.proximaCita ?? null,
               nota: body.nota ?? null,
+              pendientesCerrados: body.pendientesCerrados ?? [],
+              pendientesNuevos: (body.pendientesNuevos ?? []).map((p) => ({
+                id: p.id,
+                zona: p.zona ?? null,
+                nota: p.nota ?? null,
+              })),
             });
             if (!r.ok) {
               // 409 y no 400: no es una petición mal formada, es el

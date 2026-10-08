@@ -67,6 +67,12 @@ describe.skipIf(!e2eEnabled)("e2e · la sesión no se reescribe y de una cita sa
   let otraCitaId = randomUUID();
   let sesionId = randomUUID();
 
+  // UN CUERPO v1, el que escribía clinica-3, y se queda así A PROPÓSITO:
+  // lo que este fichero prueba son las garantías del MOTOR (una sesión por
+  // cita, inmutabilidad, RESTRICT del paciente), que no miran dentro del
+  // JSON. Y de paso queda como guardia de que una sesión v1 sigue
+  // entrando y leyéndose después de clinica-5 — que es la promesa del
+  // prompt («las sesiones v1 se siguen leyendo igual que hoy»).
   const CUERPO =
     '{"v":1,"mapaVersion":1,"lesionesVersion":1,"consejosVersion":1,' +
     '"marcas":{"L:h":{"lesion":"unero","gravedad":"MODERADA"}},' +

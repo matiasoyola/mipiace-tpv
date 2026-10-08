@@ -89,6 +89,11 @@ interface FakeAssessment {
   status: "PENDIENTE_PACIENTE" | "RESPONDIDA" | "VALIDADA";
   validatedAt: Date | null;
   createdAt: Date;
+  /** clinica-5 · la entrada con las respuestas. Sin ella no hay alertas
+   *  que calcular, y las alertas son la mitad izquierda de la tabla de
+   *  alertas cruzadas. */
+  entryId: string | null;
+  questionnaireVersion: number;
 }
 let valoraciones: FakeAssessment[] = [];
 
@@ -114,8 +119,19 @@ interface FakeProducto {
   taxRate: number;
   active: boolean;
   tratamientoSesion: boolean;
+  // clinica-5 · las categorías del producto y el nivel de quiropodia. De
+  // las primeras sale el TIPO DE VISITA (S5) y del segundo, qué producto
+  // cobra el nivel elegido.
+  tags: string[];
+  scheduling: { nivelQuiropodia: number | null };
 }
 let productos: FakeProducto[] = [];
+
+/** clinica-5 · el mapa `categoría → tipo de visita` del centro
+ *  (`tag_visit_types`). Los tres servicios de sesión de este test están en
+ *  la categoría «podologia», así que los tres son de tipo QUIROPODIA — que
+ *  es lo que eran en clinica-3, cuando no había tipos. */
+let mapaDeTipos: Array<{ slug: string; visitType: string }> = [];
 
 let tickets: Array<{ id: string; status: string }> = [];
 
@@ -219,6 +235,9 @@ const fakePrisma: any = {
       name: "Clínica Podológica Demo",
     })),
   },
+  tagVisitType: {
+    findMany: vi.fn(async () => mapaDeTipos),
+  },
   user: {
     findFirst: vi.fn(async ({ where }: any) => {
       for (const u of users.values()) {
@@ -312,6 +331,10 @@ const fakePrisma: any = {
     }),
   },
   clinicalEntry: {
+    findUnique: vi.fn(async ({ where }: any) => {
+      const e = entradas.find((x) => x.id === where.id);
+      return e ? { body: e.body } : null;
+    }),
     create: vi.fn(async ({ data }: any) => {
       // EL ÍNDICE ÚNICO PARCIAL, también aquí: de una cita sale UNA sola
       // sesión. Es lo que hace que el test de «cerrar dos veces» pruebe
@@ -389,15 +412,43 @@ const fakePrisma: any = {
         (v) => v.tenantId === where.tenantId && v.clientId === where.clientId,
       );
       const v = xs.slice().sort((a, b) => +b.createdAt - +a.createdAt)[0];
-      return v
-        ? { ...v, requestedBy: null, validatedBy: null, entryId: null }
-        : null;
+      return v ? { ...v, requestedBy: null, validatedBy: null } : null;
     }),
   },
   clinicalAssessmentCorrection: {
     findMany: vi.fn(async () => []),
   },
+  // enlaces-publicos · la pantalla de la sesión lee la valoración por
+  // `vistaDeLaValoracion`, y ésa pregunta ahora por el ENLACE de la
+  // valoración en `public_links` (el enlace del test ya no vive en
+  // `clinical_assessments`). Las valoraciones de este fichero son
+  // VALIDADAS y nunca tuvieron enlace, así que la tabla está vacía — y
+  // vacía de verdad, con su filtro, no un `null` a pelo: el día que un
+  // caso de aquí necesite un enlace, basta con empujar la fila.
+  publicLink: {
+    findFirst: vi.fn(async ({ where }: any) => {
+      const xs = enlacesPublicos.filter(
+        (l) =>
+          l.tenantId === where.tenantId &&
+          l.purpose === where.purpose &&
+          l.targetId === where.targetId,
+      );
+      return xs.slice().sort((a, b) => +b.createdAt - +a.createdAt)[0] ?? null;
+    }),
+  },
 };
+
+/** enlaces-publicos · `public_links`, vacía en este fichero. */
+const enlacesPublicos: Array<{
+  tenantId: string;
+  purpose: string;
+  targetId: string;
+  expiresAt: Date;
+  maxUses: number;
+  usedCount: number;
+  revokedAt: Date | null;
+  createdAt: Date;
+}> = [];
 
 function usuarioVista(id: string) {
   const u = users.get(id);
@@ -446,10 +497,33 @@ async function buildApp() {
   return app;
 }
 
-const CERRAR_MINIMO = {
-  tratamientos: [QUIROPODIA],
-  dolor: 4,
-};
+/**
+ * clinica-5 · el cuerpo del cierre, en la forma v2.
+ *
+ * Lo que en clinica-3 era `tratamientos: [...]` es ahora «el bloque del
+ * tipo con sus servicios tocados». Los tres servicios de sesión de este
+ * test están en la categoría «podologia», así que todos caen en el bloque
+ * de QUIROPODIA.
+ *
+ * El helper existe para que lo que estos tests guardan siga siendo lo que
+ * guardaban —la puerta, el doble cierre, la inmutabilidad, los importes
+ * por rol— y no se conviertan en tests de la forma del JSON. Lo nuevo de
+ * clinica-5 (niveles, riesgo, pendientes, dos tipos) tiene su propio
+ * fichero: `clinica-tipos-rutas.test.ts`.
+ */
+function cerrarCon(
+  servicios: string[],
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    tipos: ["QUIROPODIA"],
+    bloques: { QUIROPODIA: { servicios } },
+    dolor: 4,
+    ...extra,
+  };
+}
+
+const CERRAR_MINIMO = cerrarCon([QUIROPODIA]);
 
 beforeEach(() => {
   clinicaEncendida = true;
@@ -460,6 +534,7 @@ beforeEach(() => {
   accesos = [{ clinicianUserId: SANITARIA_ID, clientId: PACIENTE_ID }];
   users.clear();
   clientes.clear();
+  mapaDeTipos = [{ slug: "podologia", visitType: "QUIROPODIA" }];
 
   const base = {
     tenantId: TENANT_ID,
@@ -517,6 +592,8 @@ beforeEach(() => {
       taxRate: 0,
       active: true,
       tratamientoSesion: true,
+      tags: ["podologia"],
+      scheduling: { nivelQuiropodia: null },
     },
     {
       id: FRESADO,
@@ -528,6 +605,8 @@ beforeEach(() => {
       taxRate: 0,
       active: true,
       tratamientoSesion: true,
+      tags: ["podologia"],
+      scheduling: { nivelQuiropodia: null },
     },
     {
       id: VERRUGA,
@@ -539,6 +618,8 @@ beforeEach(() => {
       taxRate: 0,
       active: true,
       tratamientoSesion: true,
+      tags: ["podologia"],
+      scheduling: { nivelQuiropodia: null },
     },
     {
       id: PRIMERA_VISITA,
@@ -550,6 +631,8 @@ beforeEach(() => {
       taxRate: 0,
       active: true,
       tratamientoSesion: false,
+      tags: ["podologia"],
+      scheduling: { nivelQuiropodia: null },
     },
   ];
 
@@ -586,6 +669,10 @@ function conValoracionValidada() {
     status: "VALIDADA",
     validatedAt: new Date("2026-09-07T09:00:00.000Z"),
     createdAt: new Date("2026-09-07T08:00:00.000Z"),
+    // Sin respuestas: Carmen no tiene alertas en los tests de clinica-3.
+    // `conAlertasDeCarmen()` (clinica-5) le engancha la entrada.
+    entryId: null,
+    questionnaireVersion: 1,
   });
 }
 
@@ -615,6 +702,8 @@ describe("clinica-3 · la puerta de la valoración", () => {
       status: "RESPONDIDA",
       validatedAt: null,
       createdAt: new Date("2026-10-01T08:00:00.000Z"),
+      entryId: null,
+      questionnaireVersion: 1,
     });
     const app = await buildApp();
     const r = await app.inject({
@@ -692,7 +781,7 @@ describe("clinica-3 · cerrar dos veces no crea dos sesiones ni dos cobros", () 
       method: "POST",
       url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
       headers: comoDuena,
-      payload: { ...CERRAR_MINIMO, tratamientos: [QUIROPODIA, FRESADO] },
+      payload: cerrarCon([QUIROPODIA, FRESADO]),
     });
     expect(primera.statusCode).toBe(201);
     expect(primera.json().yaEstaba).toBe(false);
@@ -702,7 +791,7 @@ describe("clinica-3 · cerrar dos veces no crea dos sesiones ni dos cobros", () 
       url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
       headers: comoDuena,
       // Con OTRO contenido: lo que se devuelve es lo FIRMADO, no lo nuevo.
-      payload: { tratamientos: [VERRUGA], dolor: 9 },
+      payload: cerrarCon([VERRUGA], { dolor: 9 }),
     });
     expect(segunda.statusCode).toBe(200);
     expect(segunda.json().yaEstaba).toBe(true);
@@ -753,13 +842,13 @@ describe("clinica-3 · cerrar dos veces no crea dos sesiones ni dos cobros", () 
       method: "POST",
       url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
       headers: comoDuena,
-      payload: { tratamientos: [QUIROPODIA, VERRUGA], dolor: 2 },
+      payload: cerrarCon([QUIROPODIA, VERRUGA], { dolor: 2 }),
     });
     await app.inject({
       method: "POST",
       url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
       headers: comoDuena,
-      payload: { tratamientos: [QUIROPODIA, VERRUGA], dolor: 2 },
+      payload: cerrarCon([QUIROPODIA, VERRUGA], { dolor: 2 }),
     });
     // Lo que el camino de cobro va a leer: DOS líneas, no cuatro.
     const lineas = await lineasDeLaSesionCerrada(fakePrisma, {
@@ -896,9 +985,16 @@ describe("clinica-3 · el sanitario sin caja no ve importes EN LA API", () => {
     expect(r.json().verImportes).toBe(false);
     // Lo que SÍ trae: los botones con su nombre, y cuántos hay.
     expect(r.json().tratamientos).toHaveLength(3);
+    // clinica-5 · `tipo` y `nivelQuiropodia` SÍ salen: no son importes,
+    // son en qué tarjeta va el botón. Sin ellos, el sanitario sin caja
+    // vería los seis botones en una lista plana — la regla de «no ve
+    // importes» le quitaría la pantalla entera. Lo que no está sigue
+    // siendo `precio`, `iva` y `causaExencion`.
     expect(r.json().tratamientos[0]).toEqual({
       serviceId: expect.any(String),
       nombre: expect.any(String),
+      tipo: "QUIROPODIA",
+      nivelQuiropodia: null,
     });
   });
 
@@ -908,7 +1004,7 @@ describe("clinica-3 · el sanitario sin caja no ve importes EN LA API", () => {
       method: "POST",
       url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
       headers: comoSanitaria,
-      payload: { tratamientos: [QUIROPODIA, VERRUGA], dolor: 6 },
+      payload: cerrarCon([QUIROPODIA, VERRUGA], { dolor: 6 }),
     });
     expect(r.statusCode).toBe(201);
     expect(clavesDeDinero(r.json())).toEqual([]);
@@ -942,7 +1038,7 @@ describe("clinica-3 · el sanitario sin caja no ve importes EN LA API", () => {
       method: "POST",
       url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
       headers: comoSanitaria,
-      payload: { tratamientos: [QUIROPODIA], dolor: 1 },
+      payload: cerrarCon([QUIROPODIA], { dolor: 1 }),
     });
     const cuerpo = entradas.find((e) => e.kind === "TREATMENT_SESSION")!.body;
     expect(cuerpo.tratamientosNombre).toEqual({ [QUIROPODIA]: "Quiropodia" });
@@ -965,7 +1061,7 @@ describe("clinica-3 · el sanitario sin caja no ve importes EN LA API", () => {
       method: "POST",
       url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
       headers: comoDuena,
-      payload: { tratamientos: [QUIROPODIA, VERRUGA], dolor: 3 },
+      payload: cerrarCon([QUIROPODIA, VERRUGA], { dolor: 3 }),
     });
     expect(cerrada.json().cerrada.resumen.total).toBe(55);
     expect(cerrada.json().cerrada.resumen.textoDelBoton).toBe(
@@ -1002,15 +1098,14 @@ describe("clinica-3 · la lista de cobros pendientes no lleva historia", () => {
       method: "POST",
       url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
       headers: comoDuena,
-      payload: {
-        tratamientos: [QUIROPODIA, VERRUGA],
+      payload: cerrarCon([QUIROPODIA, VERRUGA], {
         dolor: 7,
         evolucion: "PEOR",
         consejos: ["calzado"],
         proximaCita: "S4",
         nota: "la úlcera del talón va peor",
         marcas: { [ZONA]: { lesion: "herida", gravedad: "SEVERA" } },
-      },
+      }),
     });
     return app;
   }
@@ -1105,7 +1200,7 @@ describe("clinica-3 · con la historia clínica apagada, las rutas no existen", 
     [
       "POST",
       `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
-      { tratamientos: [QUIROPODIA], dolor: 1 },
+      cerrarCon([QUIROPODIA], { dolor: 1 }),
     ],
     [
       "POST",
@@ -1204,7 +1299,7 @@ describe("clinica-3 · el camino de cobro de siempre no cambia", () => {
       method: "POST",
       url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
       headers: comoDuena,
-      payload: { tratamientos: [QUIROPODIA, FRESADO, VERRUGA], dolor: 5 },
+      payload: cerrarCon([QUIROPODIA, FRESADO, VERRUGA], { dolor: 5 }),
     });
     expect(
       await lineasDeLaSesionCerrada(fakePrisma, {
@@ -1503,26 +1598,48 @@ describe("clinica-3 · el servidor vuelve a decidirlo todo", () => {
     ]);
   });
 
-  it("un tratamiento que no está marcado en el catálogo no se puede cobrar", async () => {
+  it("un servicio que no está marcado en el catálogo no pone línea", async () => {
+    // clinica-3 contestaba 409 SIN_TRATAMIENTOS: una sesión sin
+    // tratamientos no se podía cerrar. **clinica-5 lo cambia a propósito**
+    // (regla 11 del prompt): un tipo sin servicio asignado se ve «sin
+    // cobro», y la visita se registra igual. Negarse a escribir la
+    // historia de algo que PASÓ por una casilla del catálogo era perder
+    // la historia, no proteger el cobro.
+    //
+    // Lo que sigue siendo verdad es que el servicio no entra: `PRIMERA_
+    // VISITA` no está marcado como tratamiento de sesión, así que no es
+    // una línea.
+    conValoracionValidada();
     const app = await buildApp();
     const r = await app.inject({
       method: "POST",
       url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
       headers: comoDuena,
-      payload: { tratamientos: [PRIMERA_VISITA], dolor: 3 },
+      payload: cerrarCon([PRIMERA_VISITA], { dolor: 3 }),
     });
-    expect(r.statusCode).toBe(409);
-    expect(r.json().code).toBe("SIN_TRATAMIENTOS");
-    expect(entradas).toHaveLength(0);
+    expect(r.statusCode).toBe(201);
+    expect(r.json().cerrada.cuerpo.tratamientos).toEqual([]);
+    expect(r.json().cerrada.resumen.lineas).toEqual([]);
+    // Y el cobro cae al camino de siempre (los servicios de la cita), que
+    // es lo que impide un ticket vacío. «Cobrar siempre se puede».
+    expect(
+      await lineasDeLaSesionCerrada(fakePrisma, {
+        tenantId: TENANT_ID,
+        appointmentId: CITA_ID,
+      }),
+    ).toBeNull();
   });
 
-  it("sin tratamientos, el schema lo rechaza antes de llegar", async () => {
+  it("sin TIPOS, el schema lo rechaza antes de llegar", async () => {
+    // Era «sin tratamientos». Lo obligatorio pasó a ser el tipo de visita
+    // (decisión 1: como mínimo uno), porque una visita sin tipo no se sabe
+    // qué fue.
     const app = await buildApp();
     const r = await app.inject({
       method: "POST",
       url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
       headers: comoDuena,
-      payload: { tratamientos: [], dolor: 3 },
+      payload: { tipos: [], dolor: 3 },
     });
     expect(r.statusCode).toBe(400);
   });
@@ -1533,7 +1650,7 @@ describe("clinica-3 · el servidor vuelve a decidirlo todo", () => {
       method: "POST",
       url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
       headers: comoDuena,
-      payload: { tratamientos: [QUIROPODIA] },
+      payload: { tipos: ["QUIROPODIA"], bloques: { QUIROPODIA: { servicios: [QUIROPODIA] } } },
     });
     expect(r.statusCode).toBe(400);
   });
@@ -1544,7 +1661,7 @@ describe("clinica-3 · el servidor vuelve a decidirlo todo", () => {
       method: "POST",
       url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
       headers: comoDuena,
-      payload: { tratamientos: [QUIROPODIA], dolor: 0 },
+      payload: cerrarCon([QUIROPODIA], { dolor: 0 }),
     });
     expect(r.statusCode).toBe(201);
     expect(r.json().cerrada.cuerpo.dolor).toBe(0);
@@ -1557,7 +1674,7 @@ describe("clinica-3 · el servidor vuelve a decidirlo todo", () => {
         method: "POST",
         url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
         headers: comoDuena,
-        payload: { tratamientos: [QUIROPODIA], dolor },
+        payload: cerrarCon([QUIROPODIA], { dolor }),
       });
       expect(r.statusCode, `dolor ${dolor}`).toBe(400);
     }
@@ -1592,5 +1709,606 @@ describe("clinica-3 · el servidor vuelve a decidirlo todo", () => {
     // NO nació ninguna cita nueva: la recepción elige el hueco con el
     // paciente delante (prompt §3).
     expect(citas).toHaveLength(2);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// clinica-5 · LA SESIÓN POR TIPO DE VISITA
+// ═══════════════════════════════════════════════════════════════════════
+//
+// Lo de arriba sigue siendo verdad y por eso no se ha tocado: la puerta,
+// el doble cierre, la inmutabilidad, los importes por rol. Esto es lo que
+// el bloque añade, contra las rutas de verdad.
+
+const BASICA = "77777777-7777-4777-8777-777777777771";
+const COMPLETA = "77777777-7777-4777-8777-777777777772";
+const EXTRA = "77777777-7777-4777-8777-777777777773";
+const CURA = "77777777-7777-4777-8777-777777777774";
+const CONSULTA_RIESGO = "77777777-7777-4777-8777-777777777775";
+
+/** El catálogo de Rosario: los tres niveles de quiropodia y la cura de la
+ *  revisión de cirugía, cada uno en su categoría. */
+function conCatalogoDeRosario(options: { conServicioDeRiesgo?: boolean } = {}) {
+  mapaDeTipos = [
+    { slug: "podologia", visitType: "QUIROPODIA" },
+    { slug: "cirugia", visitType: "CIRUGIA" },
+    { slug: "pie-de-riesgo", visitType: "PIE_RIESGO" },
+  ];
+  const base = {
+    tenantId: TENANT_ID,
+    kind: "SERVICE",
+    taxRate: 0,
+    active: true,
+    tratamientoSesion: true,
+  };
+  productos.push(
+    {
+      ...base,
+      id: BASICA,
+      name: "Quiropodia básica",
+      sku: "Q-1",
+      basePrice: 25,
+      tags: ["podologia"],
+      scheduling: { nivelQuiropodia: 1 },
+    },
+    {
+      ...base,
+      id: COMPLETA,
+      name: "Quiropodia completa",
+      sku: "Q-2",
+      basePrice: 26,
+      tags: ["podologia"],
+      scheduling: { nivelQuiropodia: 2 },
+    },
+    {
+      ...base,
+      id: EXTRA,
+      name: "Quiropodia extra",
+      sku: "Q-3",
+      basePrice: 27,
+      tags: ["podologia"],
+      scheduling: { nivelQuiropodia: 3 },
+    },
+    {
+      ...base,
+      id: CURA,
+      name: "Cura",
+      sku: "Q-CURA",
+      basePrice: 13,
+      tags: ["cirugia"],
+      scheduling: { nivelQuiropodia: null },
+    },
+  );
+  if (options.conServicioDeRiesgo) {
+    productos.push({
+      ...base,
+      id: CONSULTA_RIESGO,
+      name: "Consulta de pie de riesgo",
+      sku: "Q-RIESGO",
+      basePrice: 20,
+      tags: ["pie-de-riesgo"],
+      scheduling: { nivelQuiropodia: null },
+    });
+  }
+}
+
+/** Le da a Carmen las alertas de la valoración validada: diabética y
+ *  anticoagulada. Salen de la entrada `INITIAL_ASSESSMENT`, igual que en
+ *  la pantalla de la valoración. */
+function conAlertasDeCarmen() {
+  const entryId = randomUUID();
+  entradas.push({
+    id: entryId,
+    tenantId: TENANT_ID,
+    clientId: PACIENTE_ID,
+    authorUserId: DUENA_ID,
+    appointmentId: null,
+    kind: "INITIAL_ASSESSMENT",
+    body: { v: 1, respuestas: { diab: "SI", antic: "SI" } },
+    createdAt: new Date("2026-09-07T08:00:00.000Z"),
+  });
+  // La valoración apunta a su entrada, como en la base: las respuestas no
+  // viven en la fila de estado, viven en la entrada inmutable.
+  valoraciones[valoraciones.length - 1]!.entryId = entryId;
+}
+
+async function cerrarV2(payload: Record<string, unknown>) {
+  const app = await buildApp();
+  return app.inject({
+    method: "POST",
+    url: `/clinica/appointments/${CITA_ID}/sesion/cerrar`,
+    headers: comoDuena,
+    payload,
+  });
+}
+
+describe("clinica-5 · el nivel de quiropodia decide qué producto se cobra", () => {
+  beforeEach(() => {
+    conValoracionValidada();
+    conCatalogoDeRosario();
+  });
+
+  it("los actos proponen el nivel y el nivel pone la línea", async () => {
+    // Corte + enucleación = completa (26 €), y la línea que pasa a caja es
+    // el PRODUCTO de ese nivel. No hay que tocar ningún chip de precio.
+    const r = await cerrarV2({
+      tipos: ["QUIROPODIA"],
+      bloques: { QUIROPODIA: { actos: ["corte", "helomas"] } },
+      dolor: 3,
+    });
+    expect(r.statusCode).toBe(201);
+    const cuerpo = r.json().cerrada.cuerpo;
+    expect(cuerpo.bloques.QUIROPODIA.nivelPropuesto).toBe(2);
+    expect(cuerpo.bloques.QUIROPODIA.nivelElegido).toBe(2);
+    expect(cuerpo.tratamientos).toEqual([COMPLETA]);
+    expect(r.json().cerrada.resumen.total).toBe(26);
+  });
+
+  it("cambiarlo a mano queda escrito: «propuesto completa, cobrado extra»", async () => {
+    const r = await cerrarV2({
+      tipos: ["QUIROPODIA"],
+      bloques: { QUIROPODIA: { actos: ["corte", "helomas"], nivelElegido: 3 } },
+      dolor: 3,
+    });
+    const b = r.json().cerrada.cuerpo.bloques.QUIROPODIA;
+    // LAS DOS COSAS escritas, no una: es lo que hace auditable el cobro.
+    expect(b.nivelPropuesto).toBe(2);
+    expect(b.nivelElegido).toBe(3);
+    expect(r.json().cerrada.cuerpo.tratamientos).toEqual([EXTRA]);
+    expect(r.json().cerrada.resumen.total).toBe(27);
+  });
+
+  it("el SERVIDOR recalcula el nivel propuesto: no se cree a la pantalla", async () => {
+    // La pantalla manda «fresado» (extra) y dice que el propuesto era
+    // básica. El cuerpo guarda lo que dicen los actos.
+    const r = await cerrarV2({
+      tipos: ["QUIROPODIA"],
+      bloques: { QUIROPODIA: { actos: ["fresado"] } },
+      dolor: 3,
+    });
+    expect(r.json().cerrada.cuerpo.bloques.QUIROPODIA.nivelPropuesto).toBe(3);
+  });
+
+  it("el nivel sin producto en el catálogo es «sin cobro», no un cobro a cero", async () => {
+    productos = productos.filter((p) => p.id !== EXTRA);
+    const r = await cerrarV2({
+      tipos: ["QUIROPODIA"],
+      bloques: { QUIROPODIA: { actos: ["fresado"] } },
+      dolor: 3,
+    });
+    expect(r.statusCode).toBe(201);
+    expect(r.json().cerrada.cuerpo.bloques.QUIROPODIA.productoDelNivel).toBeNull();
+    expect(r.json().cerrada.cuerpo.tratamientos).toEqual([]);
+  });
+
+  it("los tres niveles NO salen como botones sueltos de la tarjeta", async () => {
+    // Un chip de «Quiropodia extra» al lado del selector de nivel sería la
+    // misma línea cobrable por dos caminos.
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    const niveles = r
+      .json()
+      .tratamientos.filter((t: any) => t.nivelQuiropodia != null);
+    expect(niveles.map((t: any) => t.nivelQuiropodia).sort()).toEqual([1, 2, 3]);
+    // Están en la respuesta (el selector de nivel los necesita), pero
+    // marcados: la pantalla los saca de los chips por este campo.
+    expect(
+      r.json().tratamientos.find((t: any) => t.serviceId === CURA),
+    ).toMatchObject({ tipo: "CIRUGIA", nivelQuiropodia: null });
+  });
+});
+
+describe("clinica-5 · DOS TIPOS, DOS LÍNEAS a caja", () => {
+  beforeEach(() => {
+    conValoracionValidada();
+    conCatalogoDeRosario();
+  });
+
+  it("quiropodia completa + cura = 39 €, y el cobro lo lee tal cual", async () => {
+    const r = await cerrarV2({
+      tipos: ["QUIROPODIA", "CIRUGIA"],
+      bloques: {
+        QUIROPODIA: { actos: ["corte", "helomas"] },
+        CIRUGIA: { herida: "BIEN", puntos: "RETIRADOS", servicios: [CURA] },
+      },
+      dolor: 4,
+    });
+    expect(r.statusCode).toBe(201);
+    expect(r.json().cerrada.cuerpo.tipos).toEqual(["QUIROPODIA", "CIRUGIA"]);
+    expect(r.json().cerrada.resumen.lineas.map((l: any) => l.nombre)).toEqual([
+      "Quiropodia completa",
+      "Cura",
+    ]);
+    expect(r.json().cerrada.resumen.total).toBe(39);
+    // Y el camino de cobro de siempre, sin saber que existen los tipos.
+    expect(
+      await lineasDeLaSesionCerrada(fakePrisma, {
+        tenantId: TENANT_ID,
+        appointmentId: CITA_ID,
+      }),
+    ).toEqual([{ serviceId: COMPLETA }, { serviceId: CURA }]);
+  });
+
+  it("un tipo sin servicio asignado se cierra igual y no pone línea", async () => {
+    const r = await cerrarV2({
+      tipos: ["QUIROPODIA", "PIE_RIESGO"],
+      bloques: {
+        QUIROPODIA: { actos: ["corte"] },
+        PIE_RIESGO: {
+          sensibilidad: "NORMAL",
+          pulsos: { L: "PRESENTE", R: "PRESENTE" },
+          ulcera: "NO",
+          deformidad: "NO",
+        },
+      },
+      dolor: 2,
+    });
+    expect(r.statusCode).toBe(201);
+    expect(r.json().cerrada.cuerpo.tratamientos).toEqual([BASICA]);
+    expect(r.json().cerrada.resumen.total).toBe(25);
+  });
+
+  it("y con su servicio asignado, sí", async () => {
+    productos.length = 0;
+    conCatalogoDeRosario({ conServicioDeRiesgo: true });
+    const r = await cerrarV2({
+      tipos: ["PIE_RIESGO"],
+      bloques: { PIE_RIESGO: { servicios: [CONSULTA_RIESGO] } },
+      dolor: 2,
+    });
+    expect(r.json().cerrada.cuerpo.tratamientos).toEqual([CONSULTA_RIESGO]);
+    expect(r.json().cerrada.resumen.total).toBe(20);
+  });
+
+  it("los tipos de los SERVICIOS DE LA CITA vienen marcados al abrir", async () => {
+    citaDe(CITA_ID)!.items = [
+      { serviceId: BASICA, sortOrder: 0 },
+      { serviceId: CURA, sortOrder: 1 },
+    ];
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(r.json().tiposSugeridos).toEqual(["QUIROPODIA", "CIRUGIA"]);
+  });
+
+  it("sin tipos no se cierra, y el motivo se lee", async () => {
+    const r = await cerrarV2({ tipos: ["QUIROPODIA"], dolor: 2 });
+    expect(r.statusCode).toBe(201);
+    const sinTipo = await cerrarV2({ tipos: [], dolor: 2 });
+    expect(sinTipo.statusCode).toBe(400);
+  });
+});
+
+describe("clinica-5 · el pie de riesgo (IWGDF) se calcula y se congela", () => {
+  beforeEach(() => {
+    conValoracionValidada();
+    conCatalogoDeRosario({ conServicioDeRiesgo: true });
+  });
+
+  it("riesgo alto con su plazo, y las señales que lo sostienen", async () => {
+    const r = await cerrarV2({
+      tipos: ["PIE_RIESGO"],
+      bloques: {
+        PIE_RIESGO: {
+          sensibilidad: "PERDIDA",
+          pulsos: { L: "AUSENTE", R: "PRESENTE" },
+          ulcera: "SI",
+          deformidad: "NO",
+          servicios: [CONSULTA_RIESGO],
+        },
+      },
+      dolor: 5,
+    });
+    expect(r.statusCode).toBe(201);
+    const riesgo = r.json().cerrada.cuerpo.bloques.PIE_RIESGO.riesgo;
+    expect(riesgo.categoria).toBe(3);
+    expect(riesgo.plazo).toBe("Revisión cada 1–3 meses");
+    expect(riesgo.senales).toEqual({
+      perdidaDeSensibilidad: true,
+      pulsosAusentes: true,
+      ulcera: true,
+      deformidad: false,
+    });
+  });
+
+  it("sin las cuatro comprobaciones, el riesgo es null y la sesión se cierra", async () => {
+    const r = await cerrarV2({
+      tipos: ["PIE_RIESGO"],
+      bloques: { PIE_RIESGO: { sensibilidad: "PERDIDA" } },
+      dolor: 5,
+    });
+    expect(r.statusCode).toBe(201);
+    expect(r.json().cerrada.cuerpo.bloques.PIE_RIESGO.riesgo).toBeNull();
+  });
+
+  it("la guía viaja con la pantalla, para que la tarjeta la cite igual", async () => {
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(r.json().listas.fuenteDelRiesgo).toContain("IWGDF");
+  });
+});
+
+describe("clinica-5 · las alertas cruzadas con lo que se hace", () => {
+  beforeEach(() => {
+    conValoracionValidada();
+    conAlertasDeCarmen();
+    conCatalogoDeRosario();
+  });
+
+  it("las IDS de las alertas viajan con la cabecera, no sólo los textos", async () => {
+    // La tabla de cruces cruza por `preguntaId` y nunca por el texto: una
+    // alerta que deja de dispararse porque alguien corrigió una tilde es
+    // el peor fallo posible en una señal de seguridad.
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(r.json().cabecera.alertaIds).toEqual(["diab", "antic"]);
+    expect(r.json().cabecera.alertas).toEqual(["Diabetes", "Anticoagulación"]);
+  });
+
+  it("anticoagulada + enucleación: el aviso queda ESCRITO en la sesión", async () => {
+    const r = await cerrarV2({
+      tipos: ["QUIROPODIA"],
+      bloques: { QUIROPODIA: { actos: ["corte", "helomas"] } },
+      dolor: 3,
+    });
+    const avisos = r.json().cerrada.cuerpo.avisos;
+    expect(avisos).toHaveLength(1);
+    expect(avisos[0]).toMatch(/anticoagulada/i);
+  });
+
+  it("diabética + signos de infección: el aviso de las 48 h también", async () => {
+    const r = await cerrarV2({
+      tipos: ["CIRUGIA"],
+      bloques: { CIRUGIA: { herida: "INFECCION", servicios: [CURA] } },
+      dolor: 3,
+    });
+    const avisos = r.json().cerrada.cuerpo.avisos;
+    // Dos: el de la infección y el de cortar (hay cirugía hoy).
+    expect(avisos.some((a: string) => /48 h/.test(a))).toBe(true);
+  });
+
+  it("sin el acto que choca, no se escribe ningún aviso", async () => {
+    const r = await cerrarV2({
+      tipos: ["QUIROPODIA"],
+      bloques: { QUIROPODIA: { actos: ["corte", "durezas"] } },
+      dolor: 3,
+    });
+    expect(r.json().cerrada.cuerpo.avisos).toEqual([]);
+  });
+
+  it("el servidor NO se cree una lista de avisos que mande la pantalla", async () => {
+    // `avisos` no está en el schema del cuerpo, así que Fastify lo quita
+    // antes de llegar al handler (`removeAdditional`, el ajv de la casa) y
+    // lo que se escribe es lo que la tabla de cruces dice con los actos de
+    // verdad. Una sesión no puede constar como «avisada» sin que nadie
+    // viera el aviso, y aquí no hay ni por dónde colarlo.
+    const r = await cerrarV2({
+      tipos: ["QUIROPODIA"],
+      bloques: { QUIROPODIA: { actos: ["corte"] } },
+      dolor: 3,
+      avisos: ["me lo invento"],
+    });
+    expect(r.statusCode).toBe(201);
+    expect(r.json().cerrada.cuerpo.avisos).toEqual([]);
+  });
+});
+
+describe("clinica-5 · «Hoy toca» y el pendiente que no se cae", () => {
+  beforeEach(() => {
+    conValoracionValidada();
+    conCatalogoDeRosario();
+  });
+
+  /** Una sesión anterior que dejó apuntado «revisar la uña operada». */
+  function conPendienteDeLaUltima() {
+    entradas.push({
+      id: randomUUID(),
+      tenantId: TENANT_ID,
+      clientId: PACIENTE_ID,
+      authorUserId: DUENA_ID,
+      appointmentId: CITA_VIEJA_ID,
+      kind: "TREATMENT_SESSION",
+      body: {
+        v: 2,
+        tipos: ["CIRUGIA"],
+        bloques: { CIRUGIA: { herida: "BIEN", puntos: "NO_LLEVA", servicios: [CURA] } },
+        tratamientos: [CURA],
+        tratamientosNombre: { [CURA]: "Cura" },
+        marcas: { [ZONA]: { lesion: "unero", gravedad: "LEVE" } },
+        dolor: 6,
+        pendientesCreados: [
+          { id: "revisar_una", zona: ZONA, nota: null, desde: "2026-09-21T09:00:00.000Z" },
+        ],
+        pendientesCerrados: [],
+      },
+      createdAt: new Date("2026-09-21T09:00:00.000Z"),
+    });
+  }
+
+  it("la pantalla lo trae arriba, con su zona y su fecha de origen", async () => {
+    conPendienteDeLaUltima();
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(r.json().pendientes).toEqual([
+      {
+        id: "revisar_una",
+        zona: ZONA,
+        nota: null,
+        desde: "2026-09-21T09:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("se cierra SOLO al tocar esa zona", async () => {
+    conPendienteDeLaUltima();
+    const r = await cerrarV2({
+      tipos: ["QUIROPODIA"],
+      bloques: { QUIROPODIA: { actos: ["corte"] } },
+      marcas: { [ZONA]: { lesion: "unero", gravedad: "LEVE" } },
+      dolor: 3,
+    });
+    const cuerpo = r.json().cerrada.cuerpo;
+    expect(cuerpo.pendientesCerrados).toEqual([
+      { id: "revisar_una", zona: ZONA, como: "ZONA" },
+    ]);
+    expect(cuerpo.pendientesCreados).toEqual([]);
+  });
+
+  it("SIN tocarla, PASA A LA SIGUIENTE con su fecha original", async () => {
+    // El eslabón que no se puede romper: un pendiente sin hacer no se cae
+    // nunca, haga lo que haga la pantalla.
+    conPendienteDeLaUltima();
+    const r = await cerrarV2({
+      tipos: ["QUIROPODIA"],
+      bloques: { QUIROPODIA: { actos: ["corte"] } },
+      dolor: 3,
+    });
+    const cuerpo = r.json().cerrada.cuerpo;
+    expect(cuerpo.pendientesCerrados).toEqual([]);
+    expect(cuerpo.pendientesCreados).toEqual([
+      {
+        id: "revisar_una",
+        zona: ZONA,
+        nota: null,
+        desde: "2026-09-21T09:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("y cerrarlo a mano SIN haber estado abierto no cuenta", async () => {
+    // Un pendiente cerrado que nadie apuntó es un dato inventado en una
+    // historia clínica.
+    const r = await cerrarV2({
+      tipos: ["QUIROPODIA"],
+      bloques: { QUIROPODIA: { actos: ["corte"] } },
+      dolor: 3,
+      pendientesCerrados: [
+        { id: "revisar_una", zona: ZONA, como: "PREGUNTA" },
+      ],
+    });
+    expect(r.json().cerrada.cuerpo.pendientesCerrados).toEqual([]);
+  });
+
+  it("contestar «sí, revisada» en el diálogo SÍ lo cierra", async () => {
+    conPendienteDeLaUltima();
+    const r = await cerrarV2({
+      tipos: ["QUIROPODIA"],
+      bloques: { QUIROPODIA: { actos: ["corte"] } },
+      dolor: 3,
+      pendientesCerrados: [
+        { id: "revisar_una", zona: ZONA, como: "PREGUNTA" },
+      ],
+    });
+    expect(r.json().cerrada.cuerpo.pendientesCerrados).toEqual([
+      { id: "revisar_una", zona: ZONA, como: "PREGUNTA" },
+    ]);
+    expect(r.json().cerrada.cuerpo.pendientesCreados).toEqual([]);
+  });
+
+  it("lo que se apunta hoy para la próxima queda con la fecha de hoy", async () => {
+    const r = await cerrarV2({
+      tipos: ["QUIROPODIA"],
+      bloques: { QUIROPODIA: { actos: ["corte"] } },
+      dolor: 3,
+      pendientesNuevos: [{ id: "control_riesgo" }],
+    });
+    const creados = r.json().cerrada.cuerpo.pendientesCreados;
+    expect(creados).toHaveLength(1);
+    expect(creados[0].id).toBe("control_riesgo");
+    expect(typeof creados[0].desde).toBe("string");
+  });
+
+  it("una sesión anterior v1 no trae pendientes: el concepto no existía", async () => {
+    entradas.push({
+      id: randomUUID(),
+      tenantId: TENANT_ID,
+      clientId: PACIENTE_ID,
+      authorUserId: DUENA_ID,
+      appointmentId: CITA_VIEJA_ID,
+      kind: "TREATMENT_SESSION",
+      body: { v: 1, dolor: 5, tratamientos: [QUIROPODIA], marcas: {} },
+      createdAt: new Date("2026-09-21T09:00:00.000Z"),
+    });
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(r.json().pendientes).toEqual([]);
+    // Y la sesión v1 se sigue leyendo como lo de la visita anterior.
+    expect(r.json().anterior.dolor).toBe(5);
+  });
+});
+
+describe("clinica-5 · la cabecera de la tarjeta de revisión de cirugía", () => {
+  beforeEach(() => {
+    conValoracionValidada();
+    conCatalogoDeRosario();
+  });
+
+  it("sale de la última visita de tipo CIRUGÍA: fecha, técnica y zona", async () => {
+    entradas.push({
+      id: randomUUID(),
+      tenantId: TENANT_ID,
+      clientId: PACIENTE_ID,
+      authorUserId: DUENA_ID,
+      appointmentId: CITA_VIEJA_ID,
+      kind: "TREATMENT_SESSION",
+      body: {
+        v: 2,
+        mapaVersion: 1,
+        lesionesVersion: 1,
+        tipos: ["CIRUGIA"],
+        bloques: { CIRUGIA: { herida: "BIEN", puntos: "NO_LLEVA", servicios: [CURA] } },
+        tratamientos: [CURA],
+        tratamientosNombre: { [CURA]: "Cura" },
+        marcas: { [ZONA]: { lesion: "unero", gravedad: "LEVE" } },
+        dolor: 6,
+        pendientesCreados: [],
+        pendientesCerrados: [],
+      },
+      createdAt: new Date("2026-10-06T09:00:00.000Z"),
+    });
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(r.json().ultimaCirugia).toEqual({
+      fecha: "2026-10-06T09:00:00.000Z",
+      tecnica: ["Cura"],
+      zonas: ["Pie izq. · Dedo gordo"],
+    });
+  });
+
+  it("sin ninguna cirugía en la historia: null, no una fecha inventada", async () => {
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(r.json().ultimaCirugia).toBeNull();
   });
 });

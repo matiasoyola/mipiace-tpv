@@ -7,6 +7,7 @@ import websocket from "@fastify/websocket";
 import { registerManagerAuthorizationRoutes } from "./admin/manager-authorize.js";
 import { registerAdminTagAliasesRoutes } from "./admin/tag-aliases.js";
 import { registerAdminTagSectionsRoutes } from "./admin/tag-sections.js";
+import { registerAdminTagVisitTypesRoutes } from "./admin/tag-visit-types.js";
 import { registerAdminTenantSettingsRoutes } from "./admin/tenant-settings.js";
 import { registerAdminGiftReceiptRoutes } from "./admin/gift-receipts.js";
 import { registerAdminModifierGroupRoutes } from "./admin/modifier-groups.js";
@@ -240,6 +241,9 @@ async function main() {
   await registerAdminTenantSettingsRoutes(app);
   await registerAdminTagAliasesRoutes(app);
   await registerAdminTagSectionsRoutes(app);
+  // clinica-5 · el mapa `categoría → tipo de visita`. Tras la capability
+  // de la historia clínica, no la de caja (ver la cabecera del fichero).
+  await registerAdminTagVisitTypesRoutes(app);
   await registerAdminGiftReceiptRoutes(app);
   await registerAdminModifierGroupRoutes(app);
   await registerAdminPrinterConfigsRoutes(app);
