@@ -506,3 +506,25 @@ f156d88 test(clinica-6): queda atado qué pie se espeja
 e4ee7c6 fix(clinica-6): el bucle visual, y tres fallos que ninguna suite veía
 <este>  docs(clinica-6): el done del bloque
 ```
+
+---
+
+## 12 · La rama
+
+**Pusheada**, y el PR contra `master` es el
+[**#17**](https://github.com/matiasoyola/mipiace-tpv/pull/17).
+
+**CI VERDE a la primera** sobre `a9c82f2`, los tres jobs:
+[run 37771119737](https://github.com/matiasoyola/mipiace-tpv/actions/runs/37771119737)
+— `ci: success` · `smoke: success` · `e2e: success` (9m35s). `publish` se
+salta, como toca fuera de master.
+
+**`master` se movió** mientras el bloque estaba en vuelo: de `c6192f5` a
+`391b6d2`, dos commits de documentación de la implantación de Maestranza.
+`git diff --name-only c6192f5 origin/master` devuelve **un solo fichero**
+(`docs/implantaciones/maestranza/plan-fecha-2026-10-08.md`), que este bloque
+no toca. Sin conflictos, y sin merge: eso es de Dirección.
+
+**Ni merge ni despliegue.** Y al desplegar no hay nada que acordarse de
+poner: ni migración, ni variables (§9).
+
