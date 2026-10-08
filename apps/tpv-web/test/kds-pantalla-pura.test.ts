@@ -404,41 +404,17 @@ describe("kds-1 · SABOTAJE · cortar una tarjeta", () => {
     expect(usado).toBeLessThanOrEqual(zona.alto);
   });
 
-  it("se corta por FILAS: media fila fuera rompería el orden de lectura", () => {
+  it("media tarjeta dentro, nunca: con sitio para fila y media, 4 y 4", () => {
     const tarjetas = Array.from({ length: 8 }, (_, i) => tarjeta({ id: `t${i}` }));
     const alto = altoTarjeta(tarjetas[0]!);
-    // Sitio para una fila y media.
+    // Sitio para una fila y media. La segunda fila empieza DEBAJO de la
+    // primera, así que a media tarjeta no le toca ninguna.
     const r = repartirTarjetas(tarjetas, {
       ancho: ZONA_1280.ancho,
       alto: alto + TARJETA_HUECO_PX + Math.floor(alto / 2),
     });
     expect(r.visibles).toHaveLength(4);
     expect(r.extra).toHaveLength(4);
-  });
-
-  it("cada fila mide lo que su tarjeta MÁS ALTA (decisión 7, literal)", () => {
-    const corta = tarjeta({ id: "corta" });
-    const larga = tarjeta({
-      id: "larga",
-      allergyBands: [{ titulo: "SILLA 3 · CELÍACO", alergenos: "Gluten" }],
-      lines: Array.from({ length: 6 }, () =>
-        linea({
-          notes: ["Sin cebolla", "Poco hecho"],
-          allergyWarning: "¡LLEVA GLUTEN!",
-          seat: 3,
-          voidPending: true,
-        }),
-      ),
-    });
-    expect(altoTarjeta(larga)).toBeGreaterThan(altoTarjeta(corta));
-    // Con sitio justo para la CORTA, la fila entera se va: la larga no
-    // cabe y partir la fila rompería el orden de lectura.
-    const r = repartirTarjetas([corta, larga, corta], {
-      ancho: ZONA_1280.ancho,
-      alto: altoTarjeta(corta),
-    });
-    expect(r.visibles).toHaveLength(0);
-    expect(r.extra).toHaveLength(3);
   });
 
   it("ni con una sola tarjeta enorme se corta: va al «+N»", () => {

@@ -16,6 +16,9 @@
 //     fila y se escondían mesas que cabían.
 //   · **Una tarjeta que no cabe entera NO SE CORTA** y pasa a la franja
 //     vertical del borde, con el «+N» y las mesas.
+//   · **SE LLENA POR ORDEN Y SE CORTA EN LA PRIMERA QUE NO CABE**
+//     (kds-1d), no por filas enteras: una comanda larga ya no se lleva por
+//     delante a las cortas que caben detrás de ella. Ver `repartirTarjetas`.
 //
 // ── POR QUÉ SE ESTIMA LA ALTURA EN VEZ DE MEDIRLA ─────────────────────
 //
@@ -332,14 +335,32 @@ export interface Reparto<T> {
  * `visibles` y `extra` salen de la misma lista: lo que se esconde son
  * siempre las más nuevas. El llamador puede pasar la lista como le llegue.
  *
- * El empaquetado imita lo que hará la cuadrícula del navegador: se rellena
- * fila a fila de izquierda a derecha, y **cada fila mide lo que su tarjeta
- * más alta** (decisión 7, literal). Cuando la siguiente fila no cabe
- * entera en el alto disponible, todo lo que queda se va al «+N».
+ * El empaquetado imita lo que hará la cuadrícula del navegador: se llena
+ * **por orden de lectura** —izquierda a derecha y después la fila de
+ * abajo—, y **la fila de abajo empieza donde acaba la tarjeta más alta de
+ * la de arriba**, que es lo que hace el `grid` con `items-start` y lo que
+ * mantiene una fila legible como fila.
  *
- * Se corta por FILAS y no por tarjetas sueltas: dejar media fila dentro y
- * media fuera rompería el orden de lectura, que es justo lo que la
- * corrección del 08-10 vino a arreglar.
+ * ── Y SE CORTA EN LA PRIMERA QUE NO CABE, NO POR FILAS ──────────────
+ *
+ * Hasta kds-1c se cortaba por filas enteras: el alto de la fila era el de
+ * su tarjeta más alta, así que una sola comanda larga se llevaba por
+ * delante a sus tres compañeras. La captura de kds-1c lo enseñó —cuatro
+ * tarjetas y un «+7» con 390 px de pantalla vacía debajo, porque la M5 del
+ * celíaco (~486 px) no cabía en la segunda fila—. En un día fuerte eso es
+ * ver 4 comandas teniendo sitio para 6 (kds-1d).
+ *
+ * Ahora cada tarjeta se mira sola: si cabe ENTERA en el alto que queda, se
+ * coloca; si no cabe, **ahí se para** —esa tarjeta y todas las siguientes
+ * van al «+N»—.
+ *
+ * **Lo que NO se hace es saltar a una más corta de detrás.** Rellenar el
+ * hueco con la siguiente que quepa adelantaría una comanda más nueva a una
+ * más antigua, que es exactamente el defecto que kds-1c vino a cerrar: el
+ * orden de `ordenarParaLaPantalla` tiene que ser el orden de lectura y el
+ * del «+N», sin excepciones. Y como la fila de abajo empieza más abajo que
+ * la de arriba, lo que no cabe en el hueco de ahora tampoco cabe luego:
+ * pararse es lo correcto, no una aproximación.
  */
 export function repartirTarjetas<T extends TarjetaMedible>(
   sinOrdenar: readonly T[],
@@ -355,16 +376,29 @@ export function repartirTarjetas<T extends TarjetaMedible>(
   );
   const visibles: T[] = [];
   const extra: T[] = [];
-  let usado = 0;
+  /** El borde de ARRIBA de la fila que se está llenando. */
+  let filaTop = 0;
+  /** Lo que mide la más alta de las ya colocadas en esta fila. */
+  let altoDeLaFila = 0;
+  /** Cuántas van colocadas en esta fila. */
+  let enLaFila = 0;
   let i = 0;
-  while (i < tarjetas.length) {
-    const fila = tarjetas.slice(i, i + columnas);
-    const altoFila = Math.max(...fila.map((t) => altoTarjeta(t, mostrarSeccion)));
-    const conHueco = usado === 0 ? altoFila : usado + TARJETA_HUECO_PX + altoFila;
-    if (conHueco > viewport.alto) break;
-    visibles.push(...fila);
-    usado = conHueco;
-    i += columnas;
+  for (; i < tarjetas.length; i += 1) {
+    const t = tarjetas[i]!;
+    const alto = altoTarjeta(t, mostrarSeccion);
+    if (enLaFila === columnas) {
+      // Fila llena: la siguiente empieza donde acaba la más alta de ésta.
+      filaTop += altoDeLaFila + TARJETA_HUECO_PX;
+      altoDeLaFila = 0;
+      enLaFila = 0;
+    }
+    // No cabe entera. Se para aquí: ni se corta, ni se salta a una más
+    // corta de detrás. Y tampoco cabría en la fila de abajo, que empieza
+    // más abajo que ésta.
+    if (filaTop + alto > viewport.alto) break;
+    visibles.push(t);
+    altoDeLaFila = Math.max(altoDeLaFila, alto);
+    enLaFila += 1;
   }
   extra.push(...tarjetas.slice(i));
   return { visibles, extra, columnas };
