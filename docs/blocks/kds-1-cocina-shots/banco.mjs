@@ -299,12 +299,41 @@ const browser = await chromium.launch({ executablePath: CHROME });
         },
       ).length;
     }),
+    // ── kds-1c · LA PRUEBA DE QUE ORDENA LA PANTALLA ──────────────────
+    //
+    // `COMANDAS` se queda EN EL MISMO ORDEN DESORDENADO de la captura de
+    // kds-1b a propósito (T4 → M5 → M1 → M2 → M4 → …): si el banco lo
+    // mandara ordenado, la captura no probaría nada. Lo que se compara en
+    // el `-done` es `ordenQueMandaElBanco` contra `ordenDelDom`.
+    ordenQueMandaElBanco: COMANDAS.map((c) => ({
+      mesa: c.tableName,
+      urgente: c.urgent ? "1" : "0",
+      minutos: Math.floor((ahora.getTime() - Date.parse(c.firedAt)) / 60_000),
+    })),
     ordenDelDom: await page.evaluate(() =>
       [...document.querySelectorAll('[data-testid="kds-comanda"]')].map((el) => ({
         mesa: el.dataset.comandaId,
         urgente: el.dataset.urgente,
         tono: el.dataset.tono,
+        // Los minutos QUE PINTA la tarjeta: son los que tienen que ir de
+        // mayor a menor por detrás de las urgentes. Del `<span>` y no de un
+        // `match` sobre la tarjeta entera: el nombre de la mesa pega su
+        // número al de los minutos y «T4» + «2 min» se leía «42 min».
+        minutos:
+          el.querySelector('[data-testid="kds-minutos"]')?.textContent ?? null,
       })),
+    ),
+    // Y las que NO caben, que son las que la franja «+N» nombra: tienen que
+    // ser las MÁS NUEVAS, nunca una más antigua que la última visible.
+    mesasOcultas: await page.evaluate(
+      () =>
+        document
+          .querySelector('[data-testid="kds-mas-n-mesas"]')
+          ?.textContent?.trim() ?? null,
+    ),
+    colorDeLaFranja: await page.evaluate(
+      () =>
+        document.querySelector('[data-testid="kds-mas-n"]')?.dataset.color ?? null,
     ),
     tarjeta: await rect(page, '[data-testid="kds-comanda"]'),
     // ── LOS SEIS SABOTAJES VISUALES DE kds-1b ─────────────────────────
@@ -1002,6 +1031,45 @@ for (const { name, viewport } of [
     guardarFondo: await page.evaluate(() => {
       const el = document.querySelector('[data-testid="alergias-guardar"]');
       return el ? getComputedStyle(el).backgroundColor : null;
+    }),
+    // ── kds-1c · EL ROJO ES LA ALERGIA, EL ANILLO LO QUE EDITAS ───────
+    //
+    // La captura anterior sacaba en rojo a la vez «TODA LA MESA» y la
+    // silla 3. Esto mide las dos cosas por separado: el FONDO (que dice si
+    // tiene alergia) y el CONTORNO (que dice qué estás editando). El
+    // escenario del banco declara `{ seat: 3, allergen: GLUTEN }`, así que
+    // la única roja tiene que ser la 3, y la 3 tiene que ser la elegida.
+    quienEstaRojo: await page.evaluate(() => {
+      const uno = (el) =>
+        el
+          ? {
+              fondo: getComputedStyle(el).backgroundColor,
+              anillo: getComputedStyle(el).outlineColor,
+              anilloAncho: getComputedStyle(el).outlineWidth,
+              anilloEstilo: getComputedStyle(el).outlineStyle,
+              elegida: el.dataset.elegida,
+              conAlergia: el.dataset.conAlergia,
+              texto: el.textContent.trim(),
+            }
+          : null;
+      return {
+        todaLaMesa: uno(
+          document.querySelector('[data-testid="alergias-toda-la-mesa"]'),
+        ),
+        sillas: [...document.querySelectorAll('[data-testid="alergias-silla"]')].map(
+          (el) => ({ silla: el.dataset.silla, ...uno(el) }),
+        ),
+        // Lo que la rejilla de la derecha dice que está editando, y los
+        // alérgenos que trae marcados: la captura anterior decía «Toda la
+        // mesa» con ninguno marcado.
+        editando: document.querySelector('[data-testid="alergias-rejilla"]')
+          ?.previousElementSibling?.textContent,
+        marcados: [
+          ...document.querySelectorAll(
+            '[data-testid="alergias-opcion"][data-marcado="1"]',
+          ),
+        ].map((el) => el.dataset.alergeno),
+      };
     }),
     scroll: await page.evaluate(() => ({
       scrollHeight: document.documentElement.scrollHeight,

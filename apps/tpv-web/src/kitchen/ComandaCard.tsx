@@ -267,6 +267,7 @@ export function ComandaCard(props: ComandaCardProps) {
           )}
         </span>
         <span
+          data-testid="kds-minutos"
           className="font-bold leading-none shrink-0 tabular-nums"
           style={{ fontSize: minutos == null ? ALERGIA_PX : MINUTOS_PX }}
         >
