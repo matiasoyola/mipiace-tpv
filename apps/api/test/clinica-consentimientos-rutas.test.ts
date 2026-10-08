@@ -16,7 +16,7 @@
 //   7. **Módulo apagado → 404**, la de Fastify carácter por carácter.
 //   8. El paciente de otro tenant no existe.
 
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -217,6 +217,31 @@ describe("clinica-4 · la huella SHA-256 del PDF cuadra con el fichero", () => {
     expect(nombre).toMatch(/^[0-9a-f-]{36}-[0-9a-f]{12}\.pdf$/);
     expect(nombre.toLowerCase()).not.toContain("carmen");
     expect(nombre.toLowerCase()).not.toContain("cirugia");
+    await app.close();
+  });
+
+  it("y si el PDF del disco NO cuadra, la cabecera lo DICE", async () => {
+    // Este test existe por un sabotaje que salió VERDE: con
+    // `huellaCuadra: true` fijo, todo seguía en verde porque ningún caso
+    // ejercitaba el camino en que NO cuadra. La comprobación habría sido
+    // código muerto y nadie se habría enterado.
+    //
+    // Y lo que se enseña es el documento CON el aviso, no un 404: un PDF
+    // que no cuadra es justo el que alguien tiene que mirar, y esconderlo
+    // borra la única pista.
+    const app = await buildApp();
+    await firmar(app);
+    const fila = mundo.consents[0]!;
+    const ruta = join(DIRECTORIO, "consentimientos", fila.pdfFileName!);
+    // Alguien cambia el fichero en el volumen, por detrás de la API.
+    writeFileSync(ruta, Buffer.concat([readFileSync(ruta), Buffer.from("x")]));
+    const res = await app.inject({
+      method: "GET",
+      url: `/clinica/clients/${PACIENTE_ID}/consentimientos/${fila.id}/pdf`,
+      headers: comoSanitaria,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["x-huella-cuadra"]).toBe("NO");
     await app.close();
   });
 
@@ -572,6 +597,134 @@ describe("clinica-4 · la vista de consentimientos", () => {
     expect(fila.plantillaId).toBeNull();
     expect(fila.tienePdf).toBe(false);
     await app.close();
+  });
+});
+
+// ── 6b · «Documentos» de la historia viva ────────────────────────────
+//
+// Este bloque existe por un sabotaje que salió VERDE: el fichero de
+// clinica-6 trae el paciente SIN consentimientos y SIN informes, así que
+// esconderlos no rompía nada. La fila de un consentimiento firmado tiene
+// que estar en «Documentos» —es la decisión 19 del prompt— y hasta aquí
+// ningún test la pedía con datos dentro.
+
+describe("clinica-4 · «Documentos» enseña lo que hay de verdad", () => {
+  it("el consentimiento firmado sale con su PDF y su informante", async () => {
+    const app = await buildApp();
+    await firmar(app);
+    const { vistaDeLaHistoria } = await import("../src/clinica/historia.js");
+    const historia = await vistaDeLaHistoria(mundo.prisma, {
+      tenantId: TENANT_ID,
+      clientId: PACIENTE_ID,
+      ahora: new Date("2026-10-09T09:00:00.000Z"),
+    });
+    const doc = historia.documentos.find((d) => d.clase === "CONSENTIMIENTO");
+    expect(doc).toBeDefined();
+    expect(doc!.titulo).toBe(
+      "Consentimiento para cirugía de uña (matricectomía)",
+    );
+    // Se abre: es la fila que lleva al PDF.
+    expect(doc!.abre).toBe("PDF_CONSENTIMIENTO");
+    expect(doc!.id).toBe(mundo.consents[0]!.id);
+    expect(doc!.revocado).toBe(false);
+    expect(doc!.detalles.join(" · ")).toContain("Firmó el paciente");
+    expect(doc!.detalles.join(" · ")).toContain("Informó Lucía Martín");
+    await app.close();
+  });
+
+  it("y uno REVOCADO sigue saliendo, marcado y con su motivo", async () => {
+    // Es historia: lo que se firmó un día no se esconde por haber dejado
+    // de valer. Lo que cambia es que la fila lo dice.
+    const app = await buildApp();
+    await firmar(app);
+    await app.inject({
+      method: "POST",
+      url: `/clinica/clients/${PACIENTE_ID}/consentimientos/${mundo.consents[0]!.id}/revocar`,
+      headers: comoSanitaria,
+      payload: { motivo: "Se lo pensó mejor" },
+    });
+    const { vistaDeLaHistoria } = await import("../src/clinica/historia.js");
+    const historia = await vistaDeLaHistoria(mundo.prisma, {
+      tenantId: TENANT_ID,
+      clientId: PACIENTE_ID,
+      ahora: new Date("2026-10-09T09:00:00.000Z"),
+    });
+    const docs = historia.documentos.filter(
+      (d) => d.clase === "CONSENTIMIENTO",
+    );
+    // UNA fila, no dos: la revocación no es un documento aparte.
+    expect(docs).toHaveLength(1);
+    expect(docs[0]!.revocado).toBe(true);
+    expect(docs[0]!.titulo).toContain("REVOCADO");
+    expect(docs[0]!.detalles.join(" · ")).toContain(
+      "Revocado: Se lo pensó mejor",
+    );
+    await app.close();
+  });
+
+  it("el INFORME entregado sale con su canal y quién lo entregó", async () => {
+    mundo.deliveries.push({
+      id: "ent-1",
+      tenantId: TENANT_ID,
+      clientId: PACIENTE_ID,
+      report: "DERIVACION",
+      channel: "EMAIL",
+      recipient: "PROFESIONAL",
+      recipientEmail: "traumatologia@hospital.es",
+      pdfSha256: "f".repeat(64),
+      userId: SANITARIA_ID,
+      at: new Date("2026-10-09T10:00:00.000Z"),
+    });
+    const { vistaDeLaHistoria } = await import("../src/clinica/historia.js");
+    const historia = await vistaDeLaHistoria(mundo.prisma, {
+      tenantId: TENANT_ID,
+      clientId: PACIENTE_ID,
+      ahora: new Date("2026-10-09T11:00:00.000Z"),
+    });
+    const doc = historia.documentos.find((d) => d.clase === "INFORME");
+    expect(doc).toBeDefined();
+    expect(doc!.titulo).toBe("Informe de derivación");
+    // No se abre: el PDF de un informe no se guarda (ver `informe-routes`).
+    expect(doc!.abre).toBeNull();
+    expect(doc!.detalles.join(" · ")).toContain(
+      "Enviado por email a traumatologia@hospital.es",
+    );
+    expect(doc!.detalles.join(" · ")).toContain("Para otro profesional");
+    expect(doc!.detalles.join(" · ")).toContain("Lo entregó Lucía Martín");
+  });
+
+  it("y el ALTA MANUAL del spa también, diciendo que no tiene documento", async () => {
+    mundo.consents.push({
+      id: "manual-2",
+      tenantId: TENANT_ID,
+      clientId: PACIENTE_ID,
+      kind: "DATA",
+      grantedAt: new Date("2026-08-01T10:00:00.000Z"),
+      docRef: null,
+      templateId: null,
+      templateVersion: null,
+      textSha256: null,
+      pdfSha256: null,
+      pdfFileName: null,
+      clinical: false,
+      signer: null,
+      signerName: null,
+      signerRelation: null,
+      informerUserId: null,
+      revokesConsentId: null,
+      revokeReason: null,
+      createdByUserId: RECEPCION_ID,
+    });
+    const { vistaDeLaHistoria } = await import("../src/clinica/historia.js");
+    const historia = await vistaDeLaHistoria(mundo.prisma, {
+      tenantId: TENANT_ID,
+      clientId: PACIENTE_ID,
+      ahora: new Date("2026-10-09T09:00:00.000Z"),
+    });
+    const doc = historia.documentos.find((d) => d.clase === "CONSENTIMIENTO");
+    expect(doc!.titulo).toBe("Consentimiento de datos · alta manual");
+    expect(doc!.abre).toBeNull();
+    expect(doc!.detalles).toContain("Alta manual, sin documento");
   });
 });
 

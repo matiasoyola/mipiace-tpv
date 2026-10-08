@@ -53,7 +53,9 @@ vi.mock("../src/context.js", () => ({
 }));
 
 const { registerFotosRoutes } = await import("../src/clinica/fotos-routes.js");
-const { comparadorPorZona } = await import("../src/clinica/fotos.js");
+const { comparadorPorZona, guardarFoto } = await import(
+  "../src/clinica/fotos.js"
+);
 const { signAccessToken } = await import("../src/auth/tokens.js");
 
 function tokenDe(userId: string, role: "OWNER" | "CLINICIAN" | "CASHIER") {
@@ -225,6 +227,30 @@ describe("clinica-4 · la zona se elige antes de disparar", () => {
     expect(res.json().code).toBe("FOTO_INVALIDA");
     expect(mundo.photos).toHaveLength(0);
     await app.close();
+  });
+
+  it("y la NEGATIVA de la zona está en guardarFoto, no sólo en el schema", async () => {
+    // Este test existe por un sabotaje que salió VERDE: el `enum` del
+    // schema rechaza la zona mala antes de llegar a `guardarFoto`, así
+    // que la comprobación de dentro no se ejercitaba desde la ruta. Es la
+    // forma exacta del #26 de clinica-5 — una regla con dos capas y sólo
+    // la de fuera probada.
+    //
+    // Y la de dentro hace falta: el `enum` se arma con el mapa VIGENTE, y
+    // el día que el mapa gane una versión la ruta podría aceptar una zona
+    // que `guardarFoto` tiene que seguir rechazando.
+    const r = await guardarFoto(mundo.prisma, {
+      tenantId: TENANT_ID,
+      clientId: PACIENTE_ID,
+      appointmentId: CITA_ID,
+      autorUserId: SANITARIA_ID,
+      zona: "L:no-existe",
+      jpeg: Buffer.from(JPEG_BASE64, "base64"),
+      hayConsentimiento: true,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.motivo).toBe("ZONA_DESCONOCIDA");
+    expect(mundo.photos).toHaveLength(0);
   });
 
   it("la fila guarda la zona Y la versión del mapa", async () => {
