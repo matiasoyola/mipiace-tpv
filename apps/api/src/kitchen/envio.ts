@@ -38,8 +38,22 @@
 //      devolver «el mismo resultado» de algo que todavía no tiene
 //      resultado, y lo que NO se puede hacer es imprimir dos veces.
 //
-// Y queda preparado para kds-2 (decisión 9): el mismo id viajará a la nube
-// y a la tablet por la wifi, y el que llegue segundo se descartará por él.
+// Y es lo que kds-2 usa: el MISMO id viaja a la nube y a la tablet por la
+// wifi, y el que llegue segundo se descarta por él. La tablet lo descarta
+// en memoria; aquí lo descarta la ventana 2 de arriba.
+//
+// ── kds-2 · LAS MARCAS QUE LLEGARON ANTES QUE SU ENVÍO ────────────────
+//
+// Cuando vuelve internet, la tablet y el terminal suben cada uno lo suyo y
+// **no hay orden garantizado**: la tablet puede tener cobertura antes que
+// el terminal, o el camarero puede tardar en volver a la barra. Así que
+// una marca de cocina («las bravas están tachadas») puede llegar al
+// servidor antes que el envío que creó esas bravas.
+//
+// Esas marcas quedan en `kitchen_lan_marks` con `applied_at` NULL y las
+// aplica ESTE fichero, al final, en cuanto las tarjetas existen. Sin esto,
+// una marca que se adelanta a su envío se quedaría en el libro para
+// siempre y el informe del dueño diría que ese plato no se tachó nunca.
 //
 // ── EL ORDEN DE LAS COSAS, Y POR QUÉ ──────────────────────────────────
 //
@@ -87,6 +101,7 @@ import {
   type DestinoSeccion,
 } from "./destinos.js";
 import { emitirComandaCreada } from "./eventos.js";
+import { aplicarMarcasPendientes } from "./lan.js";
 
 export interface EnvioCtx {
   tenantId: string;
@@ -580,6 +595,20 @@ export async function enviarComanda(
     });
     return body;
   });
+
+  // kds-2-wifi · ¿había marcas de cocina esperando a este envío?
+  //
+  // Fuera de la transacción y con el fallo tragado: lo que no puede pasar
+  // es que un envío se caiga porque una marca vieja de la tablet no se
+  // pudo aplicar. La marca sigue en el libro con `applied_at` NULL y se
+  // vuelve a intentar en la siguiente subida de la tablet.
+  if (clientSendId && paraEmitir.length > 0) {
+    try {
+      await aplicarMarcasPendientes(clientSendId, prisma);
+    } catch {
+      /* el envío ya está hecho; la marca espera a la siguiente subida */
+    }
+  }
 
   // Los eventos van FUERA de la transacción: son avisos, y la verdad está
   // en el GET de cocina. Emitirlos dentro haría que una pantalla pidiera

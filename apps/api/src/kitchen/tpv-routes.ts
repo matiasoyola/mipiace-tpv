@@ -10,6 +10,8 @@
 //   PUT    /tickets/:ticketId/allergies            la hoja de alergias, entera
 //   GET    /kitchen/listas                         lo LISTO de la tienda (banda + etiqueta)
 //   GET    /kitchen/estado                         ¿hay pantalla? ¿está viva?
+//                                                  y kds-2: dónde escucha y con
+//                                                  qué clave se le habla
 //   GET    /kitchen/comandas/:orderId/escpos       los bytes del papel de respaldo
 //
 // Todas van por la puerta del TPV (`requireCashierSession`): las firma un
@@ -28,6 +30,11 @@ import {
   type Alergeno,
 } from "@mipiacetpv/ticket-model";
 
+import {
+  EDAD_MAXIMA_MS,
+  PUERTO_LAN_POR_DEFECTO,
+} from "@mipiacetpv/kitchen-lan";
+
 import { getPrisma } from "../context.js";
 import { ensureCajaEnabled } from "../lib/caja-gate.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
@@ -38,6 +45,7 @@ import {
   resolverSeccion,
   SECCIONES,
 } from "./destinos.js";
+import { asegurarClaveLan } from "./lan.js";
 import { notasDeModificadores } from "./envio.js";
 import {
   emitirComandaServida,
@@ -929,6 +937,10 @@ export async function registerKitchenTpvRoutes(
           name: true,
           kitchenSections: true,
           lastSeenAt: true,
+          // kds-2-wifi · dónde escucha cada pantalla en la wifi del local.
+          kitchenLanIp: true,
+          kitchenLanPort: true,
+          kitchenLanAt: true,
         },
       });
       const destinos = await resolverDestinos({
@@ -944,8 +956,28 @@ export async function registerKitchenTpvRoutes(
           vivasPorSeccion.set(sec, (vivasPorSeccion.get(sec) ?? false) || viva);
         }
       }
+      // kds-2-wifi · LA CLAVE DEL CAMINO DIRECTO.
+      //
+      // Se le da al terminal **sólo si la tienda tiene alguna pantalla de
+      // cocina**. Un bar sin pantalla no necesita la clave, y una clave
+      // repartida es una clave que puede filtrarse: emitirla donde no hace
+      // falta es trabajo gratis a cambio de superficie.
+      //
+      // Va en el estado que el TPV ya pide cada 30 s, y no en una ruta
+      // nueva, porque es ASÍ como el terminal se entera de que la clave se
+      // rotó (se revocó un aparato de la tienda) sin reiniciar nada.
+      const lan =
+        pantallas.length > 0
+          ? {
+              key: await asegurarClaveLan(register.storeId),
+              defaultPort: PUERTO_LAN_POR_DEFECTO,
+              maxAgeMs: EDAD_MAXIMA_MS,
+            }
+          : null;
+
       return {
         heartbeatWindowMs: LATIDO_VIVO_MS,
+        lan,
         screens: pantallas.map((p) => ({
           id: p.id,
           name: p.name,
@@ -954,6 +986,12 @@ export async function registerKitchenTpvRoutes(
             p.lastSeenAt != null &&
             now - p.lastSeenAt.getTime() < LATIDO_VIVO_MS,
           lastSeenAt: p.lastSeenAt ? p.lastSeenAt.toISOString() : null,
+          // La última dirección conocida. El TPV la prueba primero y, si
+          // no contesta, redescubre por NSD: el router de un bar reasigna
+          // las IP y sin internet nadie se lo puede contar al servidor.
+          lanIp: p.kitchenLanIp,
+          lanPort: p.kitchenLanPort,
+          lanAt: p.kitchenLanAt ? p.kitchenLanAt.toISOString() : null,
         })),
         sections: SECCIONES.map((sec) => ({
           section: sec,

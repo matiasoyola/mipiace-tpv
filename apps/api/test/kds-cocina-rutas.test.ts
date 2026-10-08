@@ -193,6 +193,7 @@ function sembrar(opts: { moduloEncendido?: boolean } = {}) {
     urgentByDeviceId: null,
     sentAt: new Date(),
     lateArrival: false,
+    lanReceivedAt: null,
     readyAt: null,
     readyByDeviceId: null,
     servedAt: null,

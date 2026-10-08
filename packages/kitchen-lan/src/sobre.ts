@@ -163,18 +163,64 @@ export function cabeceraCanonica(s: Omit<SobreLan, "ct">): string {
   ].join("\n");
 }
 
-function subtle(): SubtleCrypto {
-  const c = (globalThis as { crypto?: Crypto }).crypto;
-  if (!c?.subtle) {
-    throw new Error("kitchen-lan: este entorno no tiene crypto.subtle");
-  }
-  return c.subtle;
+// ── El mínimo de Web Crypto que hace falta, declarado AQUÍ ───────────
+//
+// Y no importado de `lib.dom`: este paquete lo cargan el WebView del TPV
+// (que tiene DOM) y la API en Node (que no la incluye en su `tsconfig`).
+// Declarar los cuatro métodos que se usan es más barato que meterle
+// `lib: ["DOM"]` a la API, que arrastraría `window`, `document` y la
+// tentación de usarlos en el servidor.
+//
+// En tiempo de ejecución es el mismo objeto en los dos sitios:
+// `globalThis.crypto`, que Node trae desde la 19 y el WebView desde
+// siempre (en contexto seguro, que `https://` lo es).
+
+interface ParametrosGcm {
+  name: "AES-GCM";
+  iv: Uint8Array;
+  additionalData: Uint8Array;
+  tagLength: 128;
+}
+
+interface SubtleMinima {
+  importKey(
+    formato: "raw",
+    clave: Uint8Array,
+    algoritmo: { name: "AES-GCM" },
+    exportable: boolean,
+    usos: string[],
+  ): Promise<unknown>;
+  encrypt(
+    params: ParametrosGcm,
+    clave: unknown,
+    datos: Uint8Array,
+  ): Promise<ArrayBuffer>;
+  decrypt(
+    params: ParametrosGcm,
+    clave: unknown,
+    datos: Uint8Array,
+  ): Promise<ArrayBuffer>;
+}
+
+interface CryptoMinimo {
+  subtle?: SubtleMinima;
+  getRandomValues(buffer: Uint8Array): Uint8Array;
+}
+
+function elCrypto(): CryptoMinimo {
+  const c = (globalThis as unknown as { crypto?: CryptoMinimo }).crypto;
+  if (!c) throw new Error("kitchen-lan: este entorno no tiene crypto");
+  return c;
+}
+
+function subtle(): SubtleMinima {
+  const s = elCrypto().subtle;
+  if (!s) throw new Error("kitchen-lan: este entorno no tiene crypto.subtle");
+  return s;
 }
 
 function azar(n: number): Uint8Array {
-  const out = new Uint8Array(n);
-  (globalThis as { crypto?: Crypto }).crypto!.getRandomValues(out);
-  return out;
+  return elCrypto().getRandomValues(new Uint8Array(n));
 }
 
 /** La clave de tienda: 32 bytes en base64url. La emite el servidor. */
@@ -182,7 +228,7 @@ export function generarClaveTienda(): string {
   return aBase64Url(azar(32));
 }
 
-async function importar(claveB64: string): Promise<CryptoKey> {
+async function importar(claveB64: string): Promise<unknown> {
   const raw = deBase64Url(claveB64);
   if (raw.length !== 32) {
     throw new Error("kitchen-lan: la clave de tienda no son 32 bytes");
