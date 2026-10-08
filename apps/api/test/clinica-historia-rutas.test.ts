@@ -249,6 +249,7 @@ const { registerHistoriaRoutes } = await import(
   "../src/clinica/historia-routes.js"
 );
 const { signAccessToken } = await import("../src/auth/tokens.js");
+const { VISITAS_DE_LA_HISTORIA } = await import("../src/clinica/historia.js");
 
 function tokenDe(userId: string, role: FakeUser["role"]) {
   return signAccessToken({ sub: userId, tid: TENANT_ID, role });
@@ -613,6 +614,18 @@ describe("una historia mezclada se lee entera", () => {
     expect(body.zonas).toHaveLength(1);
     expect(body.zonas[0].estado).toBe("MEJORANDO");
     expect(body.zonas[0].pasos).toHaveLength(2);
+  });
+
+  it("EL TOPE NO SE CALLA: 205 visitas salen 200, y el total dice 205", async () => {
+    for (let i = 0; i < 205; i += 1) {
+      sesion(
+        { v: 2, tipos: ["QUIROPODIA"], bloques: {}, dolor: 3, marcas: {} },
+        { dia: 1 + (i % 28) },
+      );
+    }
+    const body = (await abrirHistoria()).json();
+    expect(body.visitas).toHaveLength(VISITAS_DE_LA_HISTORIA);
+    expect(body.totalDeVisitas).toBe(205);
   });
 
   it("un paciente SIN NADA no revienta: estados vacíos honestos", async () => {
