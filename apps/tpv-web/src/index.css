@@ -40,3 +40,82 @@
     color: #1f2937;
   }
 }
+
+/* ── kds-1-cocina · EL PARPADEO DE LA PANTALLA DE COCINA ──────────────
+   Decisión 8: **sin sonidos; avisa el parpadeo**. Y Matías, al ver la
+   maqueta: «más lento, para no volvernos locos».
+
+   De ahí los 2.500 ms, que están también en `lib/kitchenTheme.ts` como
+   `PULSO_MS` (es el número que los tests comen). Dos cosas que el número
+   garantiza:
+
+     · 0,4 destellos por segundo, muy por debajo del umbral de 3/s de las
+       pautas de fotosensibilidad (WCAG 2.3.1);
+     · a 1 s, una cocina con seis comandas nuevas sería una discoteca.
+
+   Y **sube y baja el fondo, sin destello seco**: por eso la curva es
+   `ease-in-out` y el extremo es un fondo un peldaño más claro, no blanco.
+
+   NUNCA LA PANTALLA ENTERA: estas tres clases se ponen en la tarjeta o en
+   la línea, jamás en un contenedor de página. Lo que parpadea es lo que
+   hay que mirar; una pantalla que parpadea entera no señala nada.
+
+   `prefers-reduced-motion`: se quita la animación y queda el fondo del
+   extremo FIJO. No se queda sin aviso — se queda sin movimiento. */
+
+@keyframes kds-pulso-neutro {
+  0%,
+  100% {
+    background-color: #171a1f;
+  }
+  50% {
+    background-color: #272c35;
+  }
+}
+
+@keyframes kds-pulso-rojo {
+  0%,
+  100% {
+    background-color: inherit;
+  }
+  50% {
+    background-color: #7e2318;
+  }
+}
+
+@keyframes kds-pulso-ambar {
+  0%,
+  100% {
+    background-color: inherit;
+  }
+  50% {
+    background-color: #6b5410;
+  }
+}
+
+.kds-pulso-tarjeta {
+  animation: kds-pulso-neutro 2500ms ease-in-out infinite;
+}
+
+.kds-pulso-rojo {
+  animation: kds-pulso-rojo 2500ms ease-in-out infinite;
+}
+
+.kds-pulso-ambar {
+  animation: kds-pulso-ambar 2500ms ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kds-pulso-tarjeta {
+    animation: none;
+    background-color: #272c35;
+  }
+  .kds-pulso-rojo {
+    animation: none;
+    background-color: #7e2318;
+  }
+  .kds-pulso-ambar {
+    animation: none;
+    background-color: #6b5410;
+  }
+}

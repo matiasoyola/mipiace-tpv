@@ -53,6 +53,7 @@ import { clearTestMode, isTestModeActive } from "./lib/test-mode.js";
 import { startVisualViewportSync } from "./lib/visualViewportSync.js";
 import { installBackGuard, setBackFallback } from "./hooks/useBackGuard.js";
 import { OutboxChip } from "./pages/CheckoutPage.outboxChip.js";
+import { KitchenScreen } from "./kitchen/KitchenScreen.js";
 import { PairScreen } from "./pages/PairScreen.js";
 import { PinScreen, type CashierLoginResponse } from "./pages/PinScreen.js";
 import {
@@ -375,6 +376,20 @@ export function App() {
   // emparejado; el día que le enciendan la caja, recargar basta.
   if (state.kind === "cajaDisabled") {
     return <CajaDisabledScreen message={state.message} onRetry={refresh} />;
+  }
+  // kds-1-cocina (decisión 1) · LA MISMA APK EN «MODO COCINA».
+  //
+  // Se corta ANTES del PIN y antes de cualquier cosa de la caja, y eso es
+  // la mitad de la decisión: una pantalla de cocina **no abre turno, no
+  // cobra y no emite registro de facturación**, así que no tiene por qué
+  // pasar por el login de cajero. Su identidad es el dispositivo.
+  //
+  // Nada de lo que hay debajo de esta línea se monta en una pantalla de
+  // cocina: ni el outbox, ni el canal de soporte del terminal, ni el
+  // cierre de día. El servidor lo garantiza igual (403 en todas las rutas
+  // del TPV), pero el front tampoco lo intenta.
+  if (state.kind === "kitchen") {
+    return <KitchenScreen me={state.data} />;
   }
 
   const { register, store, tenant } = state.data;

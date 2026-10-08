@@ -19,7 +19,22 @@ export interface DeviceMeResponse {
     // Ausente en la caché de un device bootstrapeado antes de v1.11 →
     // se trata como false, que es el default nuevo.
     requireCashCountOnClose?: boolean;
+    // kds-1-cocina · la capability del módulo «Cocina». Ausente en la
+    // caché de un device bootstrapeado antes del bloque → se trata como
+    // false, que es el default de la columna.
+    kitchenDisplayEnabled?: boolean;
   };
+  // kds-1-cocina · los ajustes de cocina de ESTA tienda, o `null` con el
+  // módulo apagado. El TPV los necesita al arrancar para saber si pinta
+  // «Espera» o la fila de tiempos y si el botón de silla va siempre
+  // visible.
+  kitchen?: {
+    courseMode: "ESPERA" | "TIEMPOS";
+    seatMode: "ALERGIA" | "SIEMPRE";
+    greenMaxMin: number;
+    amberMaxMin: number;
+    readyBeep: boolean;
+  } | null;
 }
 
 export type BootstrapState =
@@ -29,7 +44,19 @@ export type BootstrapState =
   // reintenta, no se desempareja y no se vuelve al PIN. `message` es la
   // frase que mandó el servidor, para no tener dos textos que mantener.
   | { kind: "cajaDisabled"; message: string }
+  // kds-1-cocina · esta tablet es una PANTALLA DE COCINA. La misma APK,
+  // otra pantalla (decisión 1). Se llega aquí porque `/devices/me`
+  // devolvió 403 KITCHEN_DEVICE_NOT_ALLOWED, que es la respuesta correcta
+  // y no un error: el corte vive en la puerta de todas las rutas del TPV.
+  | { kind: "kitchen"; data: KitchenMeResponse }
   | { kind: "paired"; data: DeviceMeResponse };
+
+export interface KitchenMeResponse {
+  device: { id: string; name: string | null };
+  store: { id: string; name: string };
+  sections: Array<"BARRA" | "COCINA" | "SALON">;
+  settings: { greenMaxMin: number; amberMaxMin: number; readyBeep: boolean };
+}
 
 // v1.10-offline-un-terminal: cacheamos el device-me en localStorage. Un
 // terminal ya bootstrapeado que recarga la PWA SIN red (modo avión, VPS
@@ -88,6 +115,22 @@ export function useDeviceBootstrap(): {
               ? err.message
               : "Esta empresa no tiene el módulo de caja activado.",
         });
+        return;
+      }
+      // kds-1-cocina · «modo cocina». Se pregunta a `/kitchen/me`, que es
+      // la única puerta que acepta un `KITCHEN`. Si ESA también falla —el
+      // módulo se apagó con la tablet emparejada— se cae a `retry`, que es
+      // lo correcto: el aparato sigue emparejado y el día que lo
+      // reenciendan arranca sin volver a emparejarlo. Mismo criterio que
+      // `cajaDisabled`.
+      if (decision === "kitchen") {
+        try {
+          const k = await apiWithDevice<KitchenMeResponse>("/kitchen/me");
+          setState({ kind: "kitchen", data: k });
+        } catch {
+          setState({ kind: "loading" });
+          setTimeout(refresh, 3000);
+        }
         return;
       }
       if (decision === "purge") {
