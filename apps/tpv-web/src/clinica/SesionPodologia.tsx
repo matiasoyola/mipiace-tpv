@@ -104,6 +104,8 @@ import {
 } from "@mipiacetpv/clinica-sesion";
 
 import { ApiError, apiWithCashier } from "../api.js";
+import { Consentimientos } from "./Consentimientos.js";
+import { Fotos } from "./Fotos.js";
 import { LeyendaDelMapa, MapaDelPie, type EstadoDeZona } from "./MapaDelPie.js";
 import { GraficaDolor, type PuntoDeDolor } from "./GraficaDolor.js";
 import { SesionCerrada, type SesionCerradaView } from "./SesionCerrada.js";
@@ -178,6 +180,13 @@ export interface VistaDeLaSesion {
   puerta:
     | { puede: true; valoracionId: string; validadaEn: string }
     | { puede: false; motivo: string; mensaje: string };
+  /** clinica-4 · la SEGUNDA puerta: los consentimientos que pide el
+   *  servicio de esta cita (decisión 7). */
+  consentimientos: {
+    puede: boolean;
+    faltan: Array<{ id: string; titulo: string }>;
+    mensaje: string;
+  };
   tratamientos: ServicioEnPantalla[];
   tiposSugeridos: TipoDeVisita[];
   pendientes: PendienteCreado[];
@@ -217,7 +226,10 @@ export interface VistaDeLaSesion {
   verImportes: boolean;
 }
 
-type Pestana = "sesion" | "exploracion";
+// clinica-4 · dos pestañas más. Las fotos y los consentimientos son de
+// la VISITA (se hacen y se firman con el paciente delante), así que viven
+// aquí y no en la historia — la historia los LEE, que es otra cosa.
+type Pestana = "sesion" | "exploracion" | "fotos" | "consentimientos";
 type Capa = "lesiones" | "sensibilidad";
 
 /** El estado de los bloques, uno por tipo. Plano y no anidado: lo que la
@@ -276,6 +288,9 @@ export function SesionPodologia(props: {
   const [error, setError] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [pestana, setPestana] = useState<Pestana>("sesion");
+  // clinica-4 · con qué consentimiento entrar abierto cuando se llega
+  // desde «Firmar ahora» o desde «Firmar consentimiento de fotos».
+  const [plantillaInicial, setPlantillaInicial] = useState<string | null>(null);
   const [capa, setCapa] = useState<Capa>("lesiones");
 
   // ── El estado de la sesión, EN MEMORIA hasta que se cierra ────────
@@ -747,6 +762,21 @@ export function SesionPodologia(props: {
         />
       )}
 
+      {/* clinica-4 · LA SEGUNDA PUERTA. Un aviso con el camino para
+          arreglarlo —«Firmar ahora», que lleva a su pestaña—, y no un
+          error rojo: es la decisión 7 del prompt. El botón de cerrar sale
+          desactivado abajo y el servidor se niega igual. */}
+      {!vista.consentimientos.puede && (
+        <FaltaConsentimiento
+          mensaje={vista.consentimientos.mensaje}
+          plantillaId={vista.consentimientos.faltan[0]?.id ?? null}
+          onFirmar={(plantillaId) => {
+            setPlantillaInicial(plantillaId);
+            setPestana("consentimientos");
+          }}
+        />
+      )}
+
       <Pestanas
         valor={pestana}
         onCambiar={(p) => {
@@ -754,6 +784,34 @@ export function SesionPodologia(props: {
           setZonaAbierta(null);
         }}
       />
+
+      {/* ── Fotos y consentimientos: las dos pestañas de clinica-4 ── */}
+      {pestana === "fotos" && (
+        <Fotos
+          clientId={vista.cabecera.paciente.id}
+          mapa={vista.listas.mapa}
+          appointmentId={props.appointmentId}
+          // Las zonas marcadas HOY se ofrecen primero en la cámara: lo
+          // normal es fotografiar lo que se acaba de marcar.
+          zonasDeHoy={Object.keys(marcas)}
+          onFirmarConsentimiento={(plantillaId) => {
+            setPlantillaInicial(plantillaId);
+            setPestana("consentimientos");
+          }}
+        />
+      )}
+
+      {pestana === "consentimientos" && (
+        <Consentimientos
+          clientId={vista.cabecera.paciente.id}
+          paciente={vista.cabecera.paciente.nombre}
+          appointmentId={props.appointmentId}
+          plantillaInicial={plantillaInicial}
+          // Al firmar se recarga la sesión: la puerta de arriba y el botón
+          // de cerrar tienen que enterarse sin que nadie refresque.
+          onFirmado={() => void cargar()}
+        />
+      )}
 
       {pestana === "sesion" && (
         <>
@@ -773,6 +831,10 @@ export function SesionPodologia(props: {
           los 48 px de dedo) con 8 de hueco son 536, más los 20+20 de la
           tarjeta, 576. Con 520 se partían en dos filas y en la captura de
           1024 sólo se veía el pie izquierdo. */}
+      {/* clinica-4 · la rejilla de dos columnas es de la sesión y de la
+          exploración. Las pestañas de fotos y consentimientos traen su
+          propia tarjeta (y el informe vive en la historia, no aquí). */}
+      {(pestana === "sesion" || pestana === "exploracion") && (
       <div className="grid gap-4 lg:grid-cols-[minmax(0,584px)_1fr] items-start">
         {pestana === "sesion" ? (
           <>
@@ -1066,6 +1128,7 @@ export function SesionPodologia(props: {
           </>
         )}
       </div>
+      )}
 
       {error && <Mal>{error}</Mal>}
 
@@ -1124,7 +1187,15 @@ export function SesionPodologia(props: {
           <button
             type="button"
             onClick={pulsarCerrar}
-            disabled={!resumen.puedeCerrar || ocupado || !vista.puerta.puede}
+            disabled={
+              !resumen.puedeCerrar ||
+              ocupado ||
+              !vista.puerta.puede ||
+              // clinica-4 · y sin los consentimientos que pide el
+              // servicio tampoco se cierra (decisión 7). El motivo lo
+              // dice la banda de arriba, no este botón.
+              !vista.consentimientos.puede
+            }
             className="h-touch-lg px-7 rounded-[18px] bg-mipiace-coral text-white font-medium text-[16px] disabled:opacity-45 disabled:cursor-not-allowed active:scale-[0.98] transition-transform motion-reduce:transform-none"
           >
             {ocupado ? "Cerrando…" : resumen.textoDelBoton}
@@ -1365,6 +1436,48 @@ function PuertaCerrada(props: {
   );
 }
 
+/**
+ * clinica-4 · EL AVISO DE LA SEGUNDA PUERTA, con el camino para arreglarlo.
+ *
+ * Ámbar y no rojo, y con un botón que lleva a firmarlo: decisión 7 del
+ * prompt («hoy: un aviso y el botón "Firmar ahora", no un error»). La
+ * negativa de verdad la pone el servidor al cerrar; esto es lo que hace
+ * que la podóloga sepa qué hacer **antes** de llegar a ella, con la
+ * paciente delante.
+ *
+ * Misma forma que `PuertaCerrada` de la valoración, a propósito: son dos
+ * puertas de la misma clase y se leen igual.
+ */
+function FaltaConsentimiento(props: {
+  mensaje: string;
+  plantillaId: string | null;
+  onFirmar: (plantillaId: string | null) => void;
+}) {
+  return (
+    <div
+      data-test="falta-consentimiento"
+      className="bg-amber-50 text-amber-700 rounded-2xl px-4 py-3.5 text-[14px] leading-snug space-y-3"
+    >
+      <div className="font-medium text-[15px]">
+        Falta el consentimiento de hoy
+      </div>
+      <div>{props.mensaje}</div>
+      <button
+        type="button"
+        data-test="firmar-ahora"
+        onClick={() => props.onFirmar(props.plantillaId)}
+        className="h-touch px-4 rounded-2xl bg-white text-amber-800 font-medium text-[14px] border border-amber-200"
+      >
+        Firmar ahora
+      </button>
+      <div className="text-[13px]">
+        Se lee con el paciente y se firma aquí, con el dedo. Lo demás de la
+        sesión se puede ir marcando: lo que no se puede es cerrarla.
+      </div>
+    </div>
+  );
+}
+
 function Pestanas(props: {
   valor: Pestana;
   onCambiar: (p: Pestana) => void;
@@ -1372,6 +1485,8 @@ function Pestanas(props: {
   const items: Array<[Pestana, string]> = [
     ["sesion", "Sesión de hoy"],
     ["exploracion", "Exploración"],
+    ["fotos", "Fotos"],
+    ["consentimientos", "Consentimientos"],
   ];
   return (
     <div

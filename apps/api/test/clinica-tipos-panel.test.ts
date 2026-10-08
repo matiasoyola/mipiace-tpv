@@ -24,6 +24,11 @@ import {
   NOMBRE_DE_TIPO_DE_VISITA,
   TIPOS_DE_VISITA,
 } from "@mipiacetpv/clinica-sesion";
+import {
+  PLANTILLAS_DE_SERVICIO,
+  PLANTILLA_DE_FOTOS,
+  plantillaVigente,
+} from "@mipiacetpv/consentimientos";
 import { describe, expect, it } from "vitest";
 
 const fuente = readFileSync(
@@ -98,5 +103,59 @@ describe("clinica-5 · el panel manda lo que la ruta espera", () => {
     expect(fuente).toMatch(
       /\{clinicaEnabled && \(\s*<TiposDeVisitaSection/,
     );
+  });
+});
+
+// ── clinica-4 · y las DOS copias de la lista de consentimientos ──────
+//
+// Mismo trato y misma razón que los tipos de arriba: el panel es lo que la
+// dueña ELIGE y el paquete es lo que la sesión EXIGE. Un consentimiento
+// que el panel ofrece y la sesión no conoce es un servicio que pide un
+// documento que nadie puede firmar — o sea, una sesión que no se puede
+// cerrar nunca.
+
+describe("clinica-4 · el panel ofrece los MISMOS consentimientos atables", () => {
+  it("la lista del panel es la del paquete, en el mismo orden", () => {
+    const m =
+      /const CONSENTIMIENTOS_DE_SERVICIO: ConsentimientoId\[\] = \[([\s\S]*?)\];/.exec(
+        fuente,
+      );
+    expect(m).not.toBeNull();
+    const delPanel = [...m![1]!.matchAll(/"([a-z-]+)"/g)].map((x) => x[1]);
+    expect(delPanel).toEqual([...PLANTILLAS_DE_SERVICIO]);
+  });
+
+  it("y el título de cada uno es el de su plantilla vigente", () => {
+    // Lo que la dueña marca en el panel tiene que llamarse igual que lo
+    // que el paciente firma: si el panel dice «anestesia» y el documento
+    // dice otra cosa, la dueña no sabe qué está pidiendo.
+    for (const id of PLANTILLAS_DE_SERVICIO) {
+      expect(fuente, id).toContain(
+        `"${id}": "${plantillaVigente(id)!.titulo}"`,
+      );
+    }
+  });
+
+  it("el `type` del panel no admite ninguno de más", () => {
+    const m = /type ConsentimientoId =([\s\S]*?);/.exec(fuente);
+    expect(m).not.toBeNull();
+    const enElTipo = [...m![1]!.matchAll(/"([a-z-]+)"/g)].map((x) => x[1]);
+    expect(enElTipo.sort()).toEqual([...PLANTILLAS_DE_SERVICIO].sort());
+  });
+
+  it("«FOTOS CLÍNICAS» NO está en el panel, y no es un olvido", () => {
+    // Decisión 4: no se ata a ningún servicio — la pide la primera foto,
+    // en la visita que sea. Si estuviera, una paciente a la que se le hace
+    // una foto en una quiropodia normal se quedaría sin consentimiento.
+    expect(PLANTILLAS_DE_SERVICIO).not.toContain(PLANTILLA_DE_FOTOS);
+    const m =
+      /const CONSENTIMIENTOS_DE_SERVICIO: ConsentimientoId\[\] = \[([\s\S]*?)\];/.exec(
+        fuente,
+      );
+    expect(m![1]).not.toContain(PLANTILLA_DE_FOTOS);
+  });
+
+  it("y el panel manda `consentimientos` en el PUT del servicio", () => {
+    expect(fuente).toContain("consentimientos: form.consentimientos");
   });
 });

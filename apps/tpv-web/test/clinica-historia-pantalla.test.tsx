@@ -250,8 +250,17 @@ function vista(opts: {
         fecha: "2026-09-02T09:00:00.000Z",
         detalles: ["Respondió un familiar", "1 corrección"],
         abre: "VALORACION",
+        id: "val-1",
+        revocado: false,
       },
     ],
+    // clinica-4 · lo que la respuesta ganó: las fotos y su comparador.
+    // Vacíos aquí a propósito — este fichero es el de clinica-6 y lo que
+    // vigila es que el hueco siga diciendo que no hay fotos. Las fotos
+    // llenas son de `clinica-4-pantallas.test.tsx`.
+    fotos: [],
+    comparador: [],
+    consentimientoDeFotos: { puede: false, plantillaId: "fotos-clinicas" },
     recomendada: { tipo: "PIE_RIESGO", motivo: "Recomendada · tiene diabetes" },
     pendientes: [],
     listas: { mapa: MAPA_PIE_V1 },
@@ -459,7 +468,12 @@ describe("el pie vivo", () => {
     expect(panel.textContent).toContain("Ya no estaba marcada");
   });
 
-  it("LAS FOTOS SON DE CLINICA-4: el hueco lo dice y no hay subida", async () => {
+  it("SIN FOTOS de la zona, el hueco lo sigue diciendo", async () => {
+    // clinica-6 dejó este hueco escrito y clinica-4 lo llenó con el
+    // comparador. Lo que no cambia es el caso vacío: una zona sin fotos lo
+    // dice, y **nunca hay un `input[type=file]`** — la cámara es la de la
+    // app (decisión 9), porque un `input file` pasa por la app de cámara
+    // del sistema y deja la foto en la galería de la tablet.
     await montar(vista({ conPendiente: true }));
     expect(texto()).toContain("Sin fotos de esta zona");
     expect(host.querySelector('input[type="file"]')).toBeNull();
