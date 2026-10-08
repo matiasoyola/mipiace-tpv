@@ -444,7 +444,7 @@ export function validateLocalProduct(
  * formulario del panel manda lo primero y el CSV de implantación lo
  * segundo.
  */
-function normalizeAllergens(
+export function normalizeAllergens(
   raw: string[] | undefined,
 ): { ok: true; value: Alergeno[] } | { ok: false; message: string } {
   if (!raw || raw.length === 0) return { ok: true, value: [] };
@@ -555,4 +555,19 @@ export const PRODUCT_BODY_PROPERTIES = {
     items: { type: "string", minLength: 1, maxLength: TAG_MAX },
   },
   active: { type: "boolean" },
+  // kds-1-cocina · los alérgenos del plato. El esquema admite el valor
+  // del enum (`GLUTEN`) **y** el código de dos letras del generador de
+  // cartas (`GL`), porque las dos puertas existen: la ficha del panel
+  // manda lo primero y el CSV de implantación lo segundo.
+  //
+  // `maxItems: 28` y no 14 a propósito: 14 valores × 2 formas de
+  // escribirlos. Lo que de verdad cierra la puerta es
+  // `normalizeAllergens`, que **rechaza la fila** si no reconoce un
+  // código en vez de descartarlo en silencio — un alérgeno perdido deja
+  // un plato diciendo que no lleva lo que lleva.
+  allergens: {
+    type: "array",
+    maxItems: 28,
+    items: { type: "string", minLength: 2, maxLength: 20 },
+  },
 } as const;

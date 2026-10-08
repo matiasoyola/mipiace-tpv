@@ -27,6 +27,12 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Check, Package, Pencil, Plus, Search, X } from "lucide-react";
 
+// kds-1-cocina · LA MISMA lista de los 14 que usan el TPV, la pantalla de
+// cocina y el papel de la comanda. Una copia aquí acabaría en que el panel
+// dice «Lácteos» y el papel «Leche», y en una alergia eso no es un detalle
+// de estilo (ver la cabecera de `ticket-model/alergenos.ts`).
+import { ALERGENOS, LISTA_ALERGENOS } from "@mipiacetpv/ticket-model";
+
 import { AdminShell } from "../AdminShell.js";
 import { api, ApiError, clearTokens } from "../api.js";
 import { useTenantCapabilities } from "../capabilities.js";
@@ -85,6 +91,10 @@ interface Product {
   // operación es sujeta. Un `taxRate` de 0 SIN causa es un 0 % sujeto, que
   // es otra cosa: no se confunden nunca, ni aquí ni en el ticket.
   exemptionCause: string | null;
+  // kds-1-cocina · los alérgenos del plato. Opcional porque la respuesta
+  // de antes del bloque no los trae y la lista tiene que seguir
+  // pintándose: sin el campo, ninguno marcado.
+  allergens?: string[];
   kind: Kind;
   active: boolean;
   tags: string[];
@@ -529,6 +539,13 @@ function ProductForm({
   // una opción de más.
   const puedeExencion =
     capacidades?.clinica === true || product?.exemptionCause != null;
+  // kds-1-cocina · los alérgenos SÓLO en hostelería. Y si un producto ya
+  // los tiene en un vertical que no es hostelería (una importación, un
+  // cambio de vertical), el bloque se pinta igualmente para poder
+  // quitarlos: mismo criterio que la exención de arriba.
+  const esHosteleria =
+    capacidades?.businessType === "HOSPITALITY" ||
+    (product?.allergens?.length ?? 0) > 0;
   const [name, setName] = useState(product?.name ?? "");
   const [sku, setSku] = useState(product?.sku ?? "");
   // Ida y vuelta: se abre con el precio CON IVA y se guarda convirtiendo
@@ -558,6 +575,17 @@ function ProductForm({
     product?.exemptionCause ?? null,
   );
   const [kind, setKind] = useState<Kind>(product?.kind ?? "PRODUCT");
+  // kds-1-cocina · los alérgenos del plato.
+  //
+  // **Sin gatear por el módulo «Cocina»**, y es la decisión 10: informar
+  // de alérgenos es una obligación legal de cualquier bar, no una función
+  // que se vende. Lo que se cobra es la pantalla; esto va de serie.
+  //
+  // Se pinta sólo en HOSTELERÍA, eso sí: en una peluquería o una papelería
+  // catorce casillas de alérgenos serían catorce casillas de ruido.
+  const [alergenos, setAlergenos] = useState<string[]>(
+    product?.allergens ?? [],
+  );
   const [barcode, setBarcode] = useState(product?.barcode ?? "");
   const [tags, setTags] = useState(product?.tags.join(", ") ?? "");
   const [active, setActive] = useState(product?.active ?? true);
@@ -658,6 +686,10 @@ function ProductForm({
         .map((t) => t.trim())
         .filter((t) => t.length > 0),
       active,
+      // kds-1-cocina · la lista ENTERA, como los tags: lo que queda es
+      // exactamente lo que está marcado. Vacía es un estado válido y
+      // significa «no informado».
+      allergens: alergenos,
     };
     setBusy(true);
     try {
@@ -880,6 +912,55 @@ function ProductForm({
           />
           Activo — se puede vender en el TPV
         </label>
+
+        {/* kds-1-cocina · LOS ALÉRGENOS. De serie en hostelería: informar
+            de ellos es obligación legal (Reglamento UE 1169/2011), no una
+            función del módulo de cocina.
+
+            Catorce casillas y no un desplegable: el propietario las
+            repasa de un golpe mirando su propia receta, y lo que tiene
+            que poder ver sin abrir nada es QUÉ hay marcado. */}
+        {esHosteleria && (
+          <div className="sm:col-span-2" data-testid="cat-alergenos">
+            <div className="text-[13px] font-medium text-mipiace-ink-soft mb-1.5">
+              Alérgenos
+            </div>
+            <p className="text-[12px] text-slate-500 mb-2">
+              Los catorce de declaración obligatoria. Si no marcas ninguno,
+              queda como <strong>no informado</strong> — que no es lo mismo que
+              «sin alérgenos»: la pantalla de cocina no puede avisar de lo que
+              no sabe.
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {LISTA_ALERGENOS.map((a) => {
+                const puesto = alergenos.includes(a);
+                return (
+                  <button
+                    key={a}
+                    type="button"
+                    data-testid="cat-alergeno"
+                    data-alergeno={a}
+                    data-puesto={puesto ? "1" : "0"}
+                    aria-pressed={puesto}
+                    onClick={() =>
+                      setAlergenos((prev) =>
+                        puesto ? prev.filter((x) => x !== a) : [...prev, a],
+                      )
+                    }
+                    className={
+                      "h-9 px-3 rounded-lg text-[13px] font-medium border " +
+                      (puesto
+                        ? "bg-red-600 text-white border-red-600"
+                        : "bg-mipiace-stone text-mipiace-ink border-transparent hover:bg-slate-100")
+                    }
+                  >
+                    {ALERGENOS[a].etiqueta}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       <FieldError message={error} />

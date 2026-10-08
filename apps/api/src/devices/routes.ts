@@ -179,6 +179,13 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
           userAgent: true,
           revokedAt: true,
           lastKnownIpCountry: true,
+          // kds-1-cocina · QUÉ es cada aparato. El panel lo necesita para
+          // distinguir la pantalla de cocina del terminal de la caja: las
+          // dos conviven en la misma caja y sólo una factura, así que quien
+          // mire esta lista buscando «por qué no cobra» tiene que ver de un
+          // golpe cuál es cuál.
+          kind: true,
+          kitchenSections: true,
           register: {
             select: { id: true, name: true, store: { select: { name: true } } },
           },
@@ -194,6 +201,8 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
           userAgent: d.userAgent,
           revokedAt: d.revokedAt?.toISOString() ?? null,
           lastKnownIpCountry: d.lastKnownIpCountry,
+          kind: d.kind,
+          kitchenSections: d.kitchenSections,
           registerId: d.register.id,
           registerName: d.register.name,
           storeName: d.register.store.name,
