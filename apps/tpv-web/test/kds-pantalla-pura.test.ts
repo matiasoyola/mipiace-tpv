@@ -25,8 +25,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   altoTarjeta,
-  etiquetaMasN,
+  colorMasN,
+  cuentaMasN,
   masNParpadea,
+  mesasMasN,
   repartirTarjetas,
   TARJETAS_NORMALES_A_1280,
   type TarjetaMedible,
@@ -38,6 +40,9 @@ import {
   tonoSemaforo,
 } from "../src/lib/kitchenSemaforo.js";
 import {
+  ALERGIA_PX,
+  COLUMNAS_A_1280,
+  NOTA_PX,
   PULSO_CLASS_AMBAR,
   PULSO_CLASS_ROJO,
   PULSO_CLASS_TARJETA,
@@ -51,6 +56,36 @@ import {
 
 const UMBRALES = { greenMaxMin: 10, amberMaxMin: 20 };
 
+/**
+ * La zona de CONTENIDO a 1280 × 800, que es lo que `repartirTarjetas`
+ * recibe de la pantalla:
+ *
+ *   ancho = 1280 − 160 («Listas») − 60 (la franja «+N») − 24 (padding)
+ *   alto  = 800 − 60 (la barra superior) − 24 (padding)
+ */
+const ZONA_1280 = { ancho: 1036, alto: 716 };
+
+/** La hora contra la que se cuentan los minutos en estos tests. */
+const AHORA = "2026-10-08T14:00:00.000Z";
+const haceMin = (m: number) =>
+  new Date(Date.parse(AHORA) - m * 60_000).toISOString();
+
+function linea(over: Partial<TarjetaMedible["lines"][number]> = {}) {
+  return {
+    // Doce caracteres: un nombre que cabe en una línea a 22 px en una
+    // tarjeta de cuatro columnas. Los que no caben se parten, y eso lo
+    // mide `altoTarjeta` — tiene su propio test más abajo.
+    name: "Croquetas",
+    notes: [],
+    allergyWarning: null,
+    seat: null,
+    voidPending: false,
+    changePending: false,
+    fired: true,
+    ...over,
+  };
+}
+
 function tarjeta(over: Partial<TarjetaMedible> = {}): TarjetaMedible {
   return {
     id: "t1",
@@ -58,17 +93,9 @@ function tarjeta(over: Partial<TarjetaMedible> = {}): TarjetaMedible {
     number: 1,
     urgent: false,
     isNew: false,
+    firedAt: AHORA,
     allergyBands: [],
-    lines: [
-      {
-        notes: [],
-        allergyWarning: null,
-        seat: null,
-        voidPending: false,
-        changePending: false,
-        fired: true,
-      },
-    ],
+    lines: [linea()],
     ...over,
   };
 }
@@ -133,11 +160,40 @@ describe("kds-1 · SABOTAJE · orden por columnas", () => {
     expect(r.visibles.map((t) => t.id)).toEqual(orden);
   });
 
-  it("a 1280 × 800 entran TRES columnas", () => {
-    const r = repartirTarjetas([tarjeta()], { ancho: 1016, alto: 700 });
-    expect(r.columnas).toBe(3);
-    // La cuenta: 3 × 320 + 2 × 16 = 992 ≤ 1016.
-    expect(3 * TARJETA_ANCHO_PX + 2 * TARJETA_HUECO_PX).toBeLessThanOrEqual(1016);
+  it("el reparto conserva el orden también cuando va al «+N»", () => {
+    const orden = Array.from({ length: 10 }, (_, i) => `t${i}`);
+    const r = repartirTarjetas(
+      orden.map((id) => tarjeta({ id, lines: [linea(), linea(), linea()] })),
+      ZONA_1280,
+    );
+    expect([...r.visibles, ...r.extra].map((t) => t.id)).toEqual(orden);
+  });
+});
+
+describe("kds-1b · SABOTAJE · tres columnas a 1280 px", () => {
+  it("a 1280 × 800 entran CUATRO columnas, no tres", () => {
+    // Era el cuarto defecto de kds-1b: con tres sólo caben 3 comandas por
+    // fila y se escondían mesas que cabían. El ancho de la cuarta sale de
+    // «Listas» (240 → 160) y del indicador (96 → 60).
+    const r = repartirTarjetas([tarjeta()], ZONA_1280);
+    expect(r.columnas).toBe(4);
+    expect(COLUMNAS_A_1280).toBe(4);
+    // La cuenta: 4 × 248 + 3 × 10 = 1.022 ≤ 1.036.
+    expect(
+      COLUMNAS_A_1280 * TARJETA_ANCHO_PX + (COLUMNAS_A_1280 - 1) * TARJETA_HUECO_PX,
+    ).toBeLessThanOrEqual(ZONA_1280.ancho);
+  });
+
+  it("y la primera fila lleva CUATRO comandas normales", () => {
+    // El sabotaje, literal: cuatro comandas normales de tres platos tienen
+    // que caber las cuatro en la primera fila.
+    const cuatro = ["M1", "M2", "M3", "M4"].map((n) =>
+      tarjeta({ id: n, tableName: n, lines: [linea(), linea(), linea()] }),
+    );
+    const r = repartirTarjetas(cuatro, ZONA_1280);
+    expect(r.columnas).toBe(4);
+    expect(r.visibles.map((t) => t.id)).toEqual(["M1", "M2", "M3", "M4"]);
+    expect(r.extra).toHaveLength(0);
   });
 });
 
@@ -146,11 +202,11 @@ describe("kds-1 · SABOTAJE · cortar una tarjeta", () => {
     // Nueve tarjetas de un plato en una zona que sólo da para dos filas.
     const tarjetas = Array.from({ length: 9 }, (_, i) => tarjeta({ id: `t${i}` }));
     const alto = altoTarjeta(tarjetas[0]!);
-    const zona = { ancho: 1016, alto: alto * 2 + TARJETA_HUECO_PX };
+    const zona = { ancho: ZONA_1280.ancho, alto: alto * 2 + TARJETA_HUECO_PX };
     const r = repartirTarjetas(tarjetas, zona);
-    // Dos filas de tres = seis visibles; tres al indicador.
-    expect(r.visibles).toHaveLength(6);
-    expect(r.extra).toHaveLength(3);
+    // Dos filas de cuatro = ocho visibles; una a la franja «+N».
+    expect(r.visibles).toHaveLength(8);
+    expect(r.extra).toHaveLength(1);
     // Y lo visible CABE: la suma de las filas no pasa del alto.
     const filas = Math.ceil(r.visibles.length / r.columnas);
     const usado = filas * alto + (filas - 1) * TARJETA_HUECO_PX;
@@ -158,36 +214,36 @@ describe("kds-1 · SABOTAJE · cortar una tarjeta", () => {
   });
 
   it("se corta por FILAS: media fila fuera rompería el orden de lectura", () => {
-    const tarjetas = Array.from({ length: 6 }, (_, i) => tarjeta({ id: `t${i}` }));
+    const tarjetas = Array.from({ length: 8 }, (_, i) => tarjeta({ id: `t${i}` }));
     const alto = altoTarjeta(tarjetas[0]!);
     // Sitio para una fila y media.
     const r = repartirTarjetas(tarjetas, {
-      ancho: 1016,
+      ancho: ZONA_1280.ancho,
       alto: alto + TARJETA_HUECO_PX + Math.floor(alto / 2),
     });
-    expect(r.visibles).toHaveLength(3);
-    expect(r.extra).toHaveLength(3);
+    expect(r.visibles).toHaveLength(4);
+    expect(r.extra).toHaveLength(4);
   });
 
   it("cada fila mide lo que su tarjeta MÁS ALTA (decisión 7, literal)", () => {
     const corta = tarjeta({ id: "corta" });
     const larga = tarjeta({
       id: "larga",
-      allergyBands: ["⚠ SILLA 3 · SIN GLUTEN"],
-      lines: Array.from({ length: 6 }, () => ({
-        notes: ["Sin cebolla", "Poco hecho"],
-        allergyWarning: "¡LLEVA GLUTEN!",
-        seat: 3,
-        voidPending: true,
-        changePending: false,
-        fired: true,
-      })),
+      allergyBands: [{ titulo: "SILLA 3 · CELÍACO", alergenos: "Gluten" }],
+      lines: Array.from({ length: 6 }, () =>
+        linea({
+          notes: ["Sin cebolla", "Poco hecho"],
+          allergyWarning: "¡LLEVA GLUTEN!",
+          seat: 3,
+          voidPending: true,
+        }),
+      ),
     });
     expect(altoTarjeta(larga)).toBeGreaterThan(altoTarjeta(corta));
     // Con sitio justo para la CORTA, la fila entera se va: la larga no
     // cabe y partir la fila rompería el orden de lectura.
     const r = repartirTarjetas([corta, larga, corta], {
-      ancho: 1016,
+      ancho: ZONA_1280.ancho,
       alto: altoTarjeta(corta),
     });
     expect(r.visibles).toHaveLength(0);
@@ -197,78 +253,128 @@ describe("kds-1 · SABOTAJE · cortar una tarjeta", () => {
   it("ni con una sola tarjeta enorme se corta: va al «+N»", () => {
     const enorme = tarjeta({
       id: "enorme",
-      lines: Array.from({ length: 40 }, () => ({
-        notes: [],
-        allergyWarning: null,
-        seat: null,
-        voidPending: false,
-        changePending: false,
-        fired: true,
-      })),
+      lines: Array.from({ length: 40 }, () => linea()),
     });
-    const r = repartirTarjetas([enorme], { ancho: 1016, alto: 400 });
+    const r = repartirTarjetas([enorme], { ancho: ZONA_1280.ancho, alto: 400 });
     expect(r.visibles).toHaveLength(0);
     expect(r.extra.map((t) => t.id)).toEqual(["enorme"]);
   });
 
-  it("a 1280 × 800 caben SEIS comandas normales, y las demás van al «+N»", () => {
-    // **La diferencia con la decisión 7, medida y clavada aquí.**
-    //
-    // La decisión 7 pide «unas 8». Con 320 px de ancho de tarjeta y 56 px
-    // de línea de plato caben SEIS, y la 7ª y la 8ª van al indicador, que
-    // es el mecanismo que la propia decisión 7 manda usar en vez de
-    // paginar. El porqué de no subirlo a ocho —haría falta bajar la
-    // tarjeta a 244 px, donde «Croquetas de jamón» a 26 px ya no cabe en
-    // una línea— está en `TARJETAS_NORMALES_A_1280`.
+  it("a 1280 × 800 caben las OCHO comandas normales de la decisión 7", () => {
+    // **Ya no hay diferencia con la decisión 7.** Pedía «unas 8 comandas
+    // normales en 1280 × 800 sin desplazar»; con tres columnas de 320 px
+    // entraban 6 y había que explicarlo en el `-done`. Con los tokens de
+    // la maqueta —cuatro columnas de ~251, plato a 22 px— entran las 8.
     //
     // El número vive en el test a propósito: si alguien engorda la
-    // cabecera o el pie y bajan a cinco, esto se pone rojo en vez de
+    // cabecera o el pie y bajan a cuatro, esto se pone rojo en vez de
     // descubrirse en la pared de una cocina.
-    //
-    // La zona real a 1280 × 800, MEDIDA en el navegador por el bucle
-    // visual: 1040 × 728 (1280 − 240 de la columna «Listas»; 800 − 72 de
-    // la barra superior). El padding de la zona va por dentro, así que no
-    // se resta aquí.
     const normales = Array.from({ length: 12 }, (_, i) =>
       tarjeta({
         id: `n${i}`,
-        lines: Array.from({ length: 3 }, () => ({
-          notes: [],
-          allergyWarning: null,
-          seat: null,
-          voidPending: false,
-          changePending: false,
-          fired: true,
-        })),
+        tableName: `M${i}`,
+        lines: [linea(), linea(), linea()],
       }),
     );
-    const r = repartirTarjetas(normales, { ancho: 1040, alto: 728 });
+    const r = repartirTarjetas(normales, ZONA_1280);
     expect(r.visibles).toHaveLength(TARJETAS_NORMALES_A_1280);
-    expect(r.extra).toHaveLength(6);
-    // Y las que faltan se nombran en el indicador.
-    expect(etiquetaMasN(r.extra)).toMatch(/^\+6 · M5 · M5 · M5 · …$/);
+    expect(TARJETAS_NORMALES_A_1280).toBeGreaterThanOrEqual(8);
+    expect(r.extra).toHaveLength(4);
+    // Y las que faltan se nombran en la franja.
+    expect(cuentaMasN(r.extra)).toBe("+4");
+    expect(mesasMasN(r.extra)).toEqual(["M8", "M9", "M10", "…"]);
   });
 
-  it("el indicador nombra las mesas y parpadea si alguna es nueva", () => {
+  it("un nombre largo se PARTE EN DOS, y la estimación lo cuenta", () => {
+    // El cuarto defecto de kds-1b decía «un nombre largo pasa a dos
+    // líneas; no se corta ni baja de 22 px». Eso cuesta alto, y si la
+    // estimación no lo contara el reparto creería que la fila cabe y la
+    // tarjeta SE CORTARÍA, que es lo que la decisión 7 prohíbe.
+    const corto = tarjeta({ lines: [linea({ name: "Torrezno" })] });
+    const largo = tarjeta({
+      lines: [linea({ name: "Croquetas de jamón (sin gluten)" })],
+    });
+    expect(altoTarjeta(largo)).toBeGreaterThan(altoTarjeta(corto));
+  });
+
+  it("la franja nombra las mesas y parpadea si alguna es nueva", () => {
     const extra = [
       tarjeta({ id: "a", tableName: "M1", isNew: false }),
       tarjeta({ id: "b", tableName: "T2", isNew: true }),
     ];
-    expect(etiquetaMasN(extra)).toBe("+2 · M1 · T2");
+    expect(cuentaMasN(extra)).toBe("+2");
+    expect(mesasMasN(extra)).toEqual(["M1", "T2"]);
     expect(masNParpadea(extra)).toBe(true);
     expect(masNParpadea([extra[0]!])).toBe(false);
-    expect(etiquetaMasN([])).toBe("");
+    expect(cuentaMasN([])).toBe("");
+    expect(mesasMasN([])).toEqual([]);
   });
 
-  it("con más de tres, el indicador corta: dejaría de ser una pista", () => {
+  it("con más de tres, la franja corta: dejaría de ser una pista", () => {
     const extra = ["M1", "M2", "M3", "M4", "M5"].map((n, i) =>
       tarjeta({ id: `x${i}`, tableName: n }),
     );
-    expect(etiquetaMasN(extra)).toBe("+5 · M1 · M2 · M3 · …");
+    expect(cuentaMasN(extra)).toBe("+5");
+    expect(mesasMasN(extra)).toEqual(["M1", "M2", "M3", "…"]);
   });
 
   it("una venta rápida sin mesa se nombra por su nº de comanda", () => {
-    expect(etiquetaMasN([tarjeta({ tableName: null, number: 7 })])).toBe("+1 · #7");
+    expect(mesasMasN([tarjeta({ tableName: null, number: 7 })])).toEqual(["#7"]);
+  });
+});
+
+describe("kds-1b · SABOTAJE · «+N» en rojo sin ninguna oculta en rojo", () => {
+  it("con nuevas escondidas pero ninguna pasada, la franja va en VERDE", () => {
+    // Era el cuarto defecto de kds-1b: la franja salía en rojo en cuanto
+    // había algo escondido. «+2 · M1 · T2» no es una urgencia, es una
+    // pista — y una franja roja permanente le quita el crédito al rojo de
+    // la franja «URGENTE» de al lado.
+    const extra = [
+      tarjeta({ id: "a", tableName: "M1", isNew: true, firedAt: haceMin(2) }),
+      tarjeta({ id: "b", tableName: "T2", isNew: false, firedAt: haceMin(5) }),
+    ];
+    expect(colorMasN(extra, UMBRALES, AHORA)).toBe("verde");
+  });
+
+  it("sin nuevas y sin ninguna pasada, NEUTRA", () => {
+    const extra = [tarjeta({ isNew: false, firedAt: haceMin(5) })];
+    expect(colorMasN(extra, UMBRALES, AHORA)).toBe("neutro");
+  });
+
+  it("y sin nada escondido, también neutra", () => {
+    expect(colorMasN([], UMBRALES, AHORA)).toBe("neutro");
+  });
+
+  it("rojo SÓLO si una de las escondidas ya pasó a rojo en el semáforo", () => {
+    // Ése es el único caso en que la franja puede ir en rojo: hay una mesa
+    // que lleva 25 minutos y no se ve.
+    const extra = [
+      tarjeta({ id: "a", tableName: "M1", isNew: true, firedAt: haceMin(2) }),
+      tarjeta({ id: "b", tableName: "T2", isNew: false, firedAt: haceMin(25) }),
+    ];
+    expect(colorMasN(extra, UMBRALES, AHORA)).toBe("rojo");
+  });
+
+  it("un tiempo RETENIDO escondido no pone la franja en rojo", () => {
+    // `firedAt` null = EN ESPERA: no ha empezado a contar, así que no
+    // puede estar «pasado».
+    const extra = [tarjeta({ isNew: false, firedAt: null })];
+    expect(colorMasN(extra, UMBRALES, AHORA)).toBe("neutro");
+  });
+});
+
+describe("kds-1b · SABOTAJE · la franja de alergia y las notas", () => {
+  it("la franja de la alergia no baja de 21 px", () => {
+    // El sabotaje, literal: «franja de alergia con menos de 21 px». Es el
+    // tamaño de la maqueta, y la franja es lo que condiciona cómo se
+    // cocina todo lo demás de esa mesa.
+    expect(ALERGIA_PX).toBeGreaterThanOrEqual(21);
+  });
+
+  it("un modificador no baja de 17 px", () => {
+    // «El cocinero que no lee "sin limón" lo pone.» En gris y a 13 px era
+    // una etiqueta de sistema.
+    expect(NOTA_PX).toBeGreaterThanOrEqual(17);
   });
 });
 
@@ -330,11 +436,13 @@ describe("kds-1 · SABOTAJE · parpadeo de 1 s o de pantalla entera", () => {
       ),
       "utf8",
     );
-    // La pantalla sólo usa la clase roja en el indicador «+N», que es una
-    // caja pequeña del borde.
+    // La pantalla sólo usa el pulso NEUTRO, y sólo en la franja «+N», que
+    // es una caja de 60 px del borde. La clase roja ni se importa aquí:
+    // vive en la tarjeta, en el plato que lleva el alérgeno de su silla.
     const usos = [...pantalla.matchAll(/PULSO_CLASS_\w+/g)].map((m) => m[0]);
-    expect(usos).toEqual(["PULSO_CLASS_ROJO", "PULSO_CLASS_ROJO"]);
-    expect(pantalla).toMatch(/data-testid="kds-mas-n"[\s\S]{0,200}masNParpadea/);
+    expect(usos).toEqual(["PULSO_CLASS_TARJETA", "PULSO_CLASS_TARJETA"]);
+    expect(usos).not.toContain("PULSO_CLASS_ROJO");
+    expect(pantalla).toMatch(/data-testid="kds-mas-n"[\s\S]{0,400}PULSO_CLASS_TARJETA/);
   });
 });
 

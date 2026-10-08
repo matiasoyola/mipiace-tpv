@@ -739,6 +739,75 @@ describe("kds-1 · decisión 9 · «Cocina no recibe» y el papel", () => {
   });
 });
 
+describe("kds-1b · SABOTAJE · coral en un botón de la comanda que no sea «Cobrar»", () => {
+  /**
+   * **Regla 1 del principio de venta bajo estrés: el coral es de
+   * «Cobrar».**
+   *
+   * Iban en coral y no cobran nada: «Marchar 2º», el chip «Espera»
+   * encendido y la tecla del tiempo elegido. Dos botones del mismo color a
+   * 2 cm uno de otro, en una comanda que se toca con el móvil en la otra
+   * mano, es un cobro por accidente.
+   *
+   * El test barre TODOS los botones de la comanda y mira su fondo: así no
+   * hay que acordarse de añadir una fila cada vez que nace un botón.
+   */
+  const CORAL_RGB = "rgb(233, 112, 88)";
+
+  function fondosDeLaComanda(): Array<{ testid: string; fondo: string }> {
+    const comanda = container.querySelector('[data-testid="comanda"]')!;
+    return [...comanda.querySelectorAll<HTMLElement>("button")].map((b) => ({
+      testid: b.dataset.testid ?? b.textContent?.trim() ?? "(sin nombre)",
+      fondo: b.style.background || b.style.backgroundColor || "",
+    }));
+  }
+
+  it("con todo encendido, el único botón coral de la comanda es «Cobrar»", async () => {
+    banco({ pantalla: true, allergies: [{ seat: 3, allergen: "GLUTEN" }] });
+    await render();
+    await click(producto("Caña"));
+    // Se enciende todo lo que podía estar en coral: el chip «Espera» —que
+    // además hace salir «Marchar 2º»— y «Urgente».
+    await click($('[data-testid="chip-espera"]'));
+    await click($('[data-testid="boton-urgente"]'));
+
+    const corales = fondosDeLaComanda().filter((b) => b.fondo === CORAL_RGB);
+    expect(corales.map((b) => b.testid)).toEqual(["comanda-cobrar"]);
+  });
+
+  it("«Marchar 2º» va neutro con contorno, como «Enviar»", async () => {
+    banco({ pantalla: true });
+    await render();
+    await click(producto("Caña"));
+    await click($('[data-testid="chip-espera"]'));
+    const marchar = $('[data-testid="boton-marchar"]')!;
+    expect(marchar.style.background).toBe("transparent");
+    expect(marchar.style.border).toMatch(/1px solid/);
+  });
+
+  it("el chip «Espera» encendido va en claro, no en coral", async () => {
+    banco({ pantalla: true });
+    await render();
+    await click(producto("Caña"));
+    await click($('[data-testid="chip-espera"]'));
+    const espera = $('[data-testid="chip-espera"]')!;
+    expect(espera.dataset.activo).toBe("1");
+    expect(espera.style.background).not.toBe(CORAL_RGB);
+  });
+
+  it("y «Guardar» de la hoja de alergias tampoco: va claro, como el «Listo»", async () => {
+    banco({ pantalla: true });
+    await render();
+    await click($('[data-testid="boton-alergias"]'));
+    const guardar = $('[data-testid="alergias-guardar"]')!;
+    expect(guardar.style.background).not.toBe(CORAL_RGB);
+    // Y la referencia que hace que la silla 3 sea siempre la misma silla.
+    expect($('[data-testid="alergias-referencia"]')!.textContent).toMatch(
+      /barra está a este lado/i,
+    );
+  });
+});
+
 describe("kds-1 · SABOTAJE · RETAIL tocado", () => {
   it("en RETAIL no se pinta NADA de cocina", async () => {
     vertical.actual = "RETAIL";

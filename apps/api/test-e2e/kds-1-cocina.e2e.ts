@@ -667,7 +667,9 @@ describe.skipIf(!e2eEnabled)("e2e · kds-1 · la cocina, contra Postgres", () =>
         .json()
         .orders.find((o: { id: string }) => o.id === orderId);
       expect(tarjeta.tableName).toBe("M5");
-      expect(tarjeta.allergyBands).toEqual(["⚠ SILLA 3 · SIN GLUTEN"]);
+      expect(tarjeta.allergyBands).toEqual([
+        { titulo: "SILLA 3 · CELÍACO", alergenos: "Gluten" },
+      ]);
       const plato = tarjeta.lines[0];
       expect(plato.name).toBe("Patatas bravas");
       expect(plato.seat).toBe(3);

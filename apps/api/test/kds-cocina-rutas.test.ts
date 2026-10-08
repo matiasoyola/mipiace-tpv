@@ -681,7 +681,7 @@ describe("kds-1 · las tres capas de la alergia", () => {
       headers: { "x-device-token": token(PANTALLA) },
     });
     expect(res.json().orders[0].allergyBands).toEqual([
-      "⚠ TODA LA MESA · SIN GLUTEN",
+      { titulo: "TODA LA MESA · CELÍACO", alergenos: "Gluten" },
     ]);
   });
 
@@ -696,7 +696,12 @@ describe("kds-1 · las tres capas de la alergia", () => {
       headers: { "x-device-token": token(PANTALLA) },
     });
     const body = res.json();
-    expect(body.orders[0].allergyBands).toEqual(["⚠ SILLA 3 · SIN GLUTEN"]);
+    expect(body.orders[0].allergyBands).toEqual([
+      { titulo: "SILLA 3 · CELÍACO", alergenos: "Gluten" },
+    ]);
+    // Y el «SIN GLUTEN» que kds-1b sacó de la franja: ahora va en el
+    // recuadro del plato de esa silla.
+    expect(body.orders[0].lines[0].seatAllergy).toBe("SIN GLUTEN");
     expect(body.orders[0].lines[0].allergyWarning).toBe("¡LLEVA GLUTEN!");
     expect(body.orders[0].lines[0].seat).toBe(3);
   });
@@ -728,7 +733,7 @@ describe("kds-1 · las tres capas de la alergia", () => {
     // franja roja llegaría sólo a las comandas siguientes y justo la que
     // está en la plancha se cocinaría sin saberlo.
     expect(despues.json().orders[0].allergyBands).toEqual([
-      "⚠ SILLA 3 · SIN GLUTEN",
+      { titulo: "SILLA 3 · CELÍACO", alergenos: "Gluten" },
     ]);
   });
 

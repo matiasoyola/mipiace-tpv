@@ -258,8 +258,22 @@ export function franjaAlergiaPantalla(
     alergenos.length === 1 ? (PERSONA[alergenos[0]!] ?? "ALÉRGICO") : "ALÉRGICO";
   return {
     titulo: `${quien} · ${persona}`,
-    alergenos: alergenos.map((a) => ALERGENOS[a].etiqueta).join(" · "),
+    alergenos: alergenos.map(nombreCortoDeAlergeno).join(" · "),
   };
+}
+
+/**
+ * «Gluten», «Lácteos», «Frutos de cáscara».
+ *
+ * Sale de `corta` sin el «SIN» y en caja de frase, no de `etiqueta`: la
+ * etiqueta es el nombre LEGAL del anexo II («Cereales con gluten»,
+ * «Huevo») y es el que tiene que salir en la ficha del producto y en la
+ * carta. En la segunda línea de una franja de 15 px lo que hace falta es
+ * la palabra, y es la que la maqueta escribe.
+ */
+export function nombreCortoDeAlergeno(a: Alergeno): string {
+  const sin = ALERGENOS[a].corta.replace(/^SIN /, "");
+  return sin.charAt(0) + sin.slice(1).toLocaleLowerCase("es-ES");
 }
 
 /**

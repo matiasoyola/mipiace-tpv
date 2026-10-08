@@ -36,9 +36,20 @@ vi.mock("../src/storage.js", async () => {
 import { KitchenScreen } from "../src/kitchen/KitchenScreen.js";
 import type { Comanda, KitchenMe, VistaCocina } from "../src/kitchen/types.js";
 import {
+  ALERGIA_PX,
+  AMBAR_NOTA,
+  NOTA_PX,
   PULSO_CLASS_ROJO,
   PULSO_CLASS_TARJETA,
+  ROJO_ALERGIA,
+  TARJETA_CUERPO,
 } from "../src/lib/kitchenTheme.js";
+
+/** De «#1A1D23» a «rgb(26, 29, 35)», que es lo que devuelve el DOM. */
+function rgb(hex: string): string {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
+}
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -87,6 +98,7 @@ function comanda(over: Partial<Comanda> = {}): Comanda {
         changeNote: null,
         changePending: false,
         carries: [],
+        seatAllergy: null,
         allergyWarning: null,
       },
     ],
@@ -222,7 +234,9 @@ describe("kds-1 · lo que la tarjeta dice y lo que no", () => {
     const tarjeta = $('[data-testid="kds-comanda"]')!;
     expect(tarjeta.textContent).toMatch(/M5/);
     expect(tarjeta.textContent).toMatch(/2ª COMANDA/);
-    expect(tarjeta.textContent).toMatch(/2 Patatas bravas/);
+    // La cantidad va en su propia columna de 30 px, para que los nombres
+    // de los platos alineen entre líneas (la maqueta).
+    expect(tarjeta.textContent).toMatch(/2Patatas bravas/);
     expect(tarjeta.textContent).not.toMatch(/€|EUR|caja1|Salomé|comensal/i);
   });
 
@@ -241,19 +255,23 @@ describe("kds-1 · lo que la tarjeta dice y lo que no", () => {
     );
     await render();
     const notas = $$('[data-testid="kds-nota"]').map((n) => n.textContent);
-    expect(notas).toEqual(["· Sin pimentón", "· Punto: poco hecho"]);
-    // 19 px, que es el token: una nota a 12 px no se lee a un metro.
-    expect($('[data-testid="kds-nota"]')!.style.fontSize).toBe("19px");
+    // Con «— » delante, como la maqueta. Con «·» se leían como una lista
+    // de etiquetas del sistema y no como lo que el camarero escribió.
+    expect(notas).toEqual(["— Sin pimentón", "— Punto: poco hecho"]);
   });
 
   it("«⚡ URGENTE» arriba, en blanco sobre rojo, y la tarjeta con borde rojo", async () => {
     monta(vista([comanda({ urgent: true })]));
     await render();
     const franja = $('[data-testid="kds-franja-urgente"]')!;
-    expect(franja.textContent).toBe("⚡ URGENTE");
+    // El rayo es un SVG, como en la maqueta; el texto es «URGENTE».
+    expect(franja.textContent).toBe("URGENTE");
+    expect(franja.querySelector("svg")).not.toBeNull();
     expect(franja.style.fontSize).toBe("26px");
     expect(franja.style.color).toMatch(/#FFFFFF|rgb\(255, 255, 255\)/);
-    expect($('[data-testid="kds-comanda"]')!.style.border).toMatch(/3px solid/);
+    // El anillo de 4 px va por `box-shadow` y no por `border`: con cuatro
+    // columnas, 8 px de borde serían un nombre de plato partido.
+    expect($('[data-testid="kds-comanda"]')!.style.boxShadow).toMatch(/4px/);
   });
 
   it("«LLEGÓ TARDE» cuando la comanda llegó al volver la red (decisión 9)", async () => {
@@ -280,7 +298,9 @@ describe("kds-1 · lo que la tarjeta dice y lo que no", () => {
       ]),
     );
     await render();
-    expect($('[data-testid="kds-bloque-espera"]')!.textContent).toBe("EN ESPERA");
+    expect($('[data-testid="kds-bloque-espera"]')!.textContent).toBe(
+      "EN ESPERA · SALE CUANDO LO MARCHEN",
+    );
     const retenida = $$('[data-testid="kds-linea"]').find(
       (l) => l.dataset.lineaId === "retenido",
     )!;
@@ -292,22 +312,35 @@ describe("kds-1 · lo que la tarjeta dice y lo que no", () => {
 
 describe("kds-1 · SABOTAJE · la alergia en cocina", () => {
   it("una alergia SIN silla sale como «⚠ TODA LA MESA» y PARPADEA en rojo", async () => {
-    monta(vista([comanda({ allergyBands: ["⚠ TODA LA MESA · SIN GLUTEN"] })]));
+    monta(vista([comanda({
+        allergyBands: [{ titulo: "TODA LA MESA · CELÍACO", alergenos: "Gluten" }],
+      })]));
     await render();
     const franja = $('[data-testid="kds-franja-alergia"]')!;
-    expect(franja.textContent).toBe("⚠ TODA LA MESA · SIN GLUTEN");
-    expect(franja.className).toContain(PULSO_CLASS_ROJO);
+    expect($('[data-testid="kds-franja-alergia-titulo"]')!.textContent).toBe(
+      "TODA LA MESA · CELÍACO",
+    );
+    expect($('[data-testid="kds-franja-alergia-alergeno"]')!.textContent).toBe(
+      "Gluten",
+    );
+    // El icono de aviso, y la franja en rojo de ancho completo.
+    expect(franja.querySelector("svg")).not.toBeNull();
+    expect(franja.style.background).toBe(rgb(ROJO_ALERGIA));
+    expect(
+      $('[data-testid="kds-franja-alergia-titulo"]')!.style.fontSize,
+    ).toBe(`${ALERGIA_PX}px`);
   });
 
   it("el plato de la silla alérgica que lleva SU alérgeno: recuadro y «¡LLEVA GLUTEN!»", async () => {
     monta(
       vista([
         comanda({
-          allergyBands: ["⚠ SILLA 3 · SIN GLUTEN"],
+          allergyBands: [{ titulo: "SILLA 3 · CELÍACO", alergenos: "Gluten" }],
           lines: [
             {
               ...comanda().lines[0]!,
               seat: 3,
+              seatAllergy: "SIN GLUTEN",
               allergyWarning: "¡LLEVA GLUTEN!",
             },
           ],
@@ -324,9 +357,37 @@ describe("kds-1 · SABOTAJE · la alergia en cocina", () => {
     );
     expect($$('[data-testid="kds-lleva"]')).toHaveLength(0);
     const linea = $('[data-testid="kds-linea"]')!;
-    // Recuadrado en rojo y parpadeando.
-    expect(linea.style.border).toMatch(/3px solid/);
+    // La caja ENTERA en rojo y parpadeando: es lo único que no puede
+    // esperar. Y el pulso va de rojo a rojo, no de rojo a carbón.
+    expect(linea.dataset.alarma).toBe("1");
+    expect(linea.style.background).toBe(rgb(ROJO_ALERGIA));
     expect(linea.className).toContain(PULSO_CLASS_ROJO);
+  });
+
+  it("y un plato de la silla alérgica que NO choca va recuadrado, no relleno", async () => {
+    monta(
+      vista([
+        comanda({
+          allergyBands: [{ titulo: "SILLA 3 · CELÍACO", alergenos: "Gluten" }],
+          lines: [
+            {
+              ...comanda().lines[0]!,
+              name: "Magro con tomate",
+              seat: 3,
+              seatAllergy: "SIN GLUTEN",
+            },
+          ],
+        }),
+      ]),
+    );
+    await render();
+    // El «SIN GLUTEN» que kds-1b sacó de la franja: aquí es una
+    // instrucción sobre un plato, y en la franja era una repetición.
+    expect($('[data-testid="kds-silla"]')!.textContent).toBe("SILLA 3 · SIN GLUTEN");
+    const linea = $('[data-testid="kds-linea"]')!;
+    expect(linea.dataset.alarma).toBe("0");
+    expect(linea.style.border).toMatch(/2px solid/);
+    expect(linea.className).not.toContain(PULSO_CLASS_ROJO);
   });
 
   it("un plato que lleva el alérgeno pero SIN silla avisa en ámbar, no en rojo", async () => {
@@ -336,7 +397,7 @@ describe("kds-1 · SABOTAJE · la alergia en cocina", () => {
     monta(
       vista([
         comanda({
-          allergyBands: ["⚠ TODA LA MESA · SIN GLUTEN"],
+          allergyBands: [{ titulo: "TODA LA MESA · CELÍACO", alergenos: "Gluten" }],
           lines: [
             { ...comanda().lines[0]!, seat: null, carries: ["lleva gluten"] },
           ],
@@ -345,6 +406,7 @@ describe("kds-1 · SABOTAJE · la alergia en cocina", () => {
     );
     await render();
     expect($('[data-testid="kds-carries"]')!.textContent).toBe("lleva gluten");
+    expect($('[data-testid="kds-linea"]')!.dataset.alarma).toBe("0");
     expect($$('[data-testid="kds-lleva"]')).toHaveLength(0);
     expect($('[data-testid="kds-linea"]')!.className).not.toContain(
       PULSO_CLASS_ROJO,
@@ -373,7 +435,7 @@ describe("kds-1 · SABOTAJE · anulado que desaparece sin «Visto»", () => {
     expect($('[data-testid="kds-anulado"]')!.textContent).toBe("ERAN 3 · −1");
     expect($('[data-testid="kds-visto"]')).not.toBeNull();
     // El plato sigue ahí, con sus 2 unidades vivas.
-    expect($('[data-testid="kds-linea"]')!.textContent).toMatch(/2 Patatas bravas/);
+    expect($('[data-testid="kds-linea"]')!.textContent).toMatch(/2Patatas bravas/);
   });
 
   it("un anulado COMPLETO dice «ANULADO» y queda tachado", async () => {
@@ -472,16 +534,85 @@ describe("kds-1 · decisión 8 · el parpadeo", () => {
     expect(porId.get("tocada")!.className).not.toContain(PULSO_CLASS_TARJETA);
   });
 
-  it("una nueva CON alergia parpadea en ROJO, no en neutro", async () => {
+  it("una nueva CON alergia parpadea en NEUTRO, no en rojo", async () => {
+    // **Era el primer defecto de kds-1b.** El pulso rojo se ponía en la
+    // tarjeta entera, así que el cuerpo de la M5 salía rojo oscuro y la
+    // franja de la alergia dejaba de destacar sobre él: la regla del rojo
+    // deshecha por su propio aviso.
     monta(
       vista([
-        comanda({ isNew: true, allergyBands: ["⚠ SILLA 3 · SIN GLUTEN"] }),
+        comanda({
+          isNew: true,
+          allergyBands: [{ titulo: "SILLA 3 · CELÍACO", alergenos: "Gluten" }],
+        }),
       ]),
     );
     await render();
     const tarjeta = $('[data-testid="kds-comanda"]')!;
-    expect(tarjeta.className).toContain(PULSO_CLASS_ROJO);
-    expect(tarjeta.className).not.toContain(PULSO_CLASS_TARJETA);
+    expect(tarjeta.className).toContain(PULSO_CLASS_TARJETA);
+    expect(tarjeta.className).not.toContain(PULSO_CLASS_ROJO);
+  });
+});
+
+describe("kds-1b · SABOTAJE · fondo rojo en el cuerpo de una tarjeta", () => {
+  it("el cuerpo va NEUTRO en la urgente, en la de la alergia y en la normal", async () => {
+    monta(
+      vista([
+        comanda({ id: "urgente", urgent: true, isNew: true }),
+        comanda({
+          id: "alergia",
+          isNew: true,
+          allergyBands: [{ titulo: "SILLA 3 · CELÍACO", alergenos: "Gluten" }],
+        }),
+        comanda({ id: "normal", isNew: false }),
+      ]),
+    );
+    await render();
+    for (const tarjeta of $$('[data-testid="kds-comanda"]')) {
+      // El fondo declarado, que es el que manda: la animación de lo nuevo
+      // va del cuerpo a un verde apagado, nunca a un rojo.
+      expect(tarjeta.style.background, tarjeta.dataset.comandaId).toBe(
+        rgb(TARJETA_CUERPO),
+      );
+      expect(tarjeta.className).not.toContain(PULSO_CLASS_ROJO);
+    }
+  });
+});
+
+describe("kds-1b · SABOTAJE · la franja de alergia y los modificadores", () => {
+  it("la franja de la mesa va en ROJO y a 21 px, con el alérgeno debajo", async () => {
+    monta(
+      vista([
+        comanda({
+          allergyBands: [{ titulo: "SILLA 3 · CELÍACO", alergenos: "Gluten" }],
+        }),
+      ]),
+    );
+    await render();
+    const franja = $('[data-testid="kds-franja-alergia"]')!;
+    expect(franja.style.background).toBe(rgb(ROJO_ALERGIA));
+    const titulo = $('[data-testid="kds-franja-alergia-titulo"]')!;
+    expect(titulo.textContent).toBe("SILLA 3 · CELÍACO");
+    expect(Number.parseInt(titulo.style.fontSize, 10)).toBeGreaterThanOrEqual(21);
+    expect($('[data-testid="kds-franja-alergia-alergeno"]')!.textContent).toBe(
+      "Gluten",
+    );
+  });
+
+  it("los modificadores van en ÁMBAR y a 17 px, no en gris y pequeños", async () => {
+    monta(
+      vista([
+        comanda({
+          lines: [{ ...comanda().lines[0]!, notes: ["Sin limón"] }],
+        }),
+      ]),
+    );
+    await render();
+    const nota = $('[data-testid="kds-nota"]')!;
+    expect(nota.textContent).toBe("— Sin limón");
+    expect(Number.parseInt(nota.style.fontSize, 10)).toBeGreaterThanOrEqual(NOTA_PX);
+    expect(nota.style.color).toBe(rgb(AMBAR_NOTA));
+    expect(nota.style.fontWeight).toBe("600");
   });
 });
 
