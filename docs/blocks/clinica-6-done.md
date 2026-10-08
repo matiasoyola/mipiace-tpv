@@ -173,6 +173,43 @@ bloque: dos dibujos distintos del mismo pie en el mismo producto son dos
 sitios donde una zona puede caer en distinto sitio, y lo que se marca ahí es
 una úlcera. Es la primera divergencia declarada (§7).
 
+### Y LOS DOS PIES VAN JUNTOS en iPad, con la cuenta en el paquete
+
+La maqueta los pone **siempre lado a lado**. La primera versión de esta
+pantalla no: a 1024 la rejilla era `lg:grid-cols-2`, o sea 480 px de
+columna, los dos pies de 264 no cabían, el `flex-wrap` partía la fila y el
+pie **derecho quedaba bajo el pliegue**. Para ver el estado completo del pie
+había que hacer scroll, que es justo lo que esta pantalla existe para no
+pedir. Lo vio la revisión del PR en las capturas (§5.5).
+
+Se sostiene por **dos mitades**, y las dos hacen trabajo:
+
+- **la columna reserva sitio**: `ANCHO_DE_LOS_DOS_PIES_PX` (536 = 2 × 264 +
+  8 de hueco), nuevo en el paquete junto al ancho del pie, más los 40 de
+  padding de la tarjeta → **576 px**. Es la misma cuenta que clinica-3 hizo
+  para la sesión (§7.2 de su done), que hasta ahora estaba escrita a mano en
+  dos sitios;
+- **y la fila no se parte**: `unaFilaDesdeLg` en `MapaDelPie` pone
+  `lg:flex-nowrap`. Si alguien estrecha la columna, los pies se encogen
+  JUNTOS en vez de irse uno debajo del otro sin avisar.
+
+Así **a 1024 y a 1366 los dos pies caben a 264 px**, sin encoger, con la
+zona en sus 48,4. Es mejor de lo que hace la maqueta: ella los encoge a 190
+px (130 por debajo de 520), pero su geometría es otra —viewBox de 132 y
+radio 24— así que a 190 px sus zonas siguen midiendo 69. Con la nuestra,
+190 px dejarían la zona en **35 px**.
+
+**A 390 se apilan, y es una decisión, no una herencia.** Ahí la tarjeta deja
+334 px útiles: lado a lado serían 163 px por pie, o sea zonas de **30 px** —
+por debajo del 44 del prompt y muy por debajo del 48 de la casa. Apilados
+van a 264 y la zona se queda en 48,4. **En un móvil el pie se mira de uno en
+uno; lo que no se puede es que no se pueda tocar.** Medido en la captura
+(§5).
+
+`SesionPodologia` **no pasa la prop y no le hace falta**: su columna son 584
+px desde clinica-3 y ahí los dos ya caben. No cambia una línea de cómo se
+ve.
+
 ### Las tres piezas compartidas que se tocaron
 
 1. **`MapaDelPie` gana tres estados** (activa / mejorando / curada) **y
@@ -242,11 +279,16 @@ historia **mezclada v1 + v2**.
 sigue montada la agenda, con sus botones de 32 px — la misma trampa del
 `getByText("30,00 €")` de clinica-3, aquí en la medición):
 
-| Ancho | Zonas | La más pequeña | Botón más pequeño | Scroll horizontal |
-| ----- | ----- | -------------- | ----------------- | ----------------- |
-| 1366 | 22 | **48,4 px** | 48 px | no |
-| 1024 | 22 | **48,4 px** | 48 px | no |
-| 390 | 22 | **48,4 px** | 48 px | no |
+| Ancho | Zonas | La más pequeña | Ancho de un pie | Los dos en una fila | Scroll horizontal |
+| ----- | ----- | -------------- | --------------- | ------------------- | ----------------- |
+| 1366 | 22 | **48,2 px** | 263 px | **sí** | no |
+| 1024 | 22 | **48,2 px** | 263 px | **sí** | no |
+| 390 | 22 | **48,4 px** | 264 px | no (apilados, §3) | no |
+
+(263 y no 264 por el redondeo subpíxel de la rejilla; la zona se queda en
+48,2 y el peldaño de la casa son 48.)
+
+El botón más pequeño de la pantalla mide 48 px en los tres anchos.
 
 ### Cuatro hallazgos, los cuatro arreglados
 
@@ -280,6 +322,16 @@ Se arregla en el ÚNICO sitio donde se dibuja el pie, así que lo hereda
 también la sesión de clinica-5. Dos pantallas que no se pongan de acuerdo en
 cuál es el pie izquierdo son peores que las dos equivocadas igual. **No lo
 sostenía ningún test** —el sabotaje que lo devolvía salía verde— y ahora sí.
+
+**5 · A 1024 los dos pies se apilaban y el derecho quedaba bajo el
+pliegue.** Lo vio la revisión del PR sobre las capturas `1024-01` y
+`1024-02`, no la primera pasada del bucle: las capturas estaban, pero nadie
+había medido si los dos pies caían en la misma fila. Ahora se mide
+(`piesEnLaMismaFila`), y el arreglo está en §3.
+
+La lección es la de siempre con una capa más: **una captura tampoco dice si
+dos cosas están una al lado de la otra — hay que preguntárselo a la
+página.** El bucle ya medía tamaños; le faltaba medir la disposición.
 
 ### Y tres cosas del banco que costaron media hora
 
@@ -351,6 +403,11 @@ Cada garantía rota a propósito y **vista en rojo**, restaurando con
 | 35 | un importe se cuela en la lista de visitas | `HistoriaViva.tsx` | 🔴 1 |
 | 36 | la franja de alertas deja de ser `role="alert"` | `piezas.tsx` | 🔴 1 |
 | 37 | **el espejo vuelve al pie derecho** | `MapaDelPie.tsx` | 🟢 → 🔴 1 |
+| **Los dos pies en una fila (revisión del PR)** |
+| 38 | **la columna del pie vuelve a ser media pantalla** | `HistoriaViva.tsx` | 🔴 1 |
+| 39 | la historia deja de pedir la fila sin partir | `HistoriaViva.tsx` | 🔴 1 |
+| 40 | el hueco entre pies cambia y la clase se queda con el número viejo | `mapa.ts` | 🔴 2 |
+| 41 | el pie nominal se encoge a 200 px | `mapa.ts` | 🔴 3 |
 
 ### Los cuatro que salieron VERDES, que son los que enseñaron algo
 
@@ -377,6 +434,17 @@ no el primero del DOM: los iconos de lucide también llevan `viewBox`.)
 **#37 · el arreglo del espejo no lo sostenía nada.** Un fallo de píxeles
 arreglado y sin test es un fallo que vuelve.
 
+### Y una lección cara de los cuatro últimos
+
+Los sabotajes **38–41 hubo que hacerlos dos veces**. La primera, el
+`git checkout --` que restaura después de cada uno se llevó por delante los
+cambios del arreglo, que todavía no estaban commiteados — y el siguiente
+sabotaje corrió sobre un fichero que ya no tenía lo que se quería romper.
+El síntoma salió lejos: la API no arrancaba, con un
+`does not provide an export named 'ANCHO_DE_LOS_DOS_PIES_PX'`.
+
+**Commitear antes de sabotear**, siempre.
+
 ---
 
 ## 7 · Divergencias declaradas con el mockup
@@ -394,7 +462,11 @@ arreglado y sin test es un fallo que vuelve.
 7. **Los iconos de los cinco tipos** son los de la casa (lucide) con el
    mismo significado que los del mockup: tijeras, triángulo, huella, jeringa
    y reloj.
-8. **En el mockup, «Cancelar» de la hoja de tipos no funciona** y las
+8. **Los pies no se encogen para caber: se les reserva sitio.** La maqueta
+   los pone lado a lado encogiéndolos (190 px, y 130 por debajo de 520);
+   aquí van lado a lado **a tamaño completo** en iPad, y apilados en móvil.
+   Es la misma intención con otra geometría — la cuenta entera, en §3.
+9. **En el mockup, «Cancelar» de la hoja de tipos no funciona** y las
    tarjetas tampoco: el `.sheet` lleva un `stopPropagation` que deja al
    listener de `document` sin ver los clics de dentro. En el producto los
    dos hacen lo suyo. (No es una divergencia de diseño: es un fallo del
@@ -427,6 +499,11 @@ arreglado y sin test es un fallo que vuelve.
    antes de dar el número por bueno.
 5. **El pie se espejaba al revés** hasta este bloque (§5.4). Conviene
    enseñarle las dos versiones y que diga cuál lee ella sin pensar.
+6. **Los dos pies apilados en móvil** (§3). En el iPad, que es la
+   referencia, van lado a lado; en el móvil hubo que elegir entre eso y
+   poder tocarlos, y se eligió poder tocarlos. Si ella mira la historia en
+   el móvil más de lo previsto, hay una tercera vía —lado a lado y una lupa
+   al tocar— que no se ha hecho porque nadie la ha pedido.
 
 ---
 
@@ -452,7 +529,9 @@ arreglado y sin test es un fallo que vuelve.
      recepción no le cambia nada;
    - **el mapa del pie espeja el otro pie** — también en la sesión de
      clinica-5. Es el arreglo de §5.4 y es lo único de este bloque que
-     cambia una pantalla que ya estaba.
+     cambia una pantalla que ya estaba. La disposición de los dos pies
+     (§3) sólo cambia en la historia: la sesión no pasa la prop nueva y se
+     ve exactamente igual que antes.
 6. **Una historia con sesiones v1 y v2 mezcladas se lee entera**, y es lo
    que el bucle visual recorrió. No hay nada que migrar en
    `clinical_entries`.

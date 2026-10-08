@@ -32,13 +32,20 @@ El paciente es Carmen, con una historia **mezclada v1 + v2**:
 la historia (detrás del overlay sigue montada la agenda, con sus botones de
 32 px):
 
-| Ancho | Zonas del pie | La más pequeña | Botón más pequeño | Scroll horizontal |
-| ----- | ------------- | -------------- | ----------------- | ----------------- |
-| 1366 | 22 | **48,4 px** | 48 px | no |
-| 1024 | 22 | **48,4 px** | 48 px | no |
-| 390 | 22 | **48,4 px** | 48 px | no |
+| Ancho | Zonas | La más pequeña | Ancho de un pie | Los dos en una fila | Botón más pequeño | Scroll horizontal |
+| ----- | ----- | -------------- | --------------- | ------------------- | ----------------- | ----------------- |
+| 1366 | 22 | **48,2 px** | 263 px | **sí** | 48 px | no |
+| 1024 | 22 | **48,2 px** | 263 px | **sí** | 48 px | no |
+| 390 | 22 | **48,4 px** | 264 px | no (apilados) | 48 px | no |
 
-El prompt pide ≥ 44 px; el mínimo de la casa es 48.
+El prompt pide ≥ 44 px; el mínimo de la casa es 48. Los 263 px (en vez de
+264) son el redondeo subpíxel de la rejilla.
+
+**Los dos pies van lado a lado en iPad y apilados en móvil**, y eso también
+se mide (`piesEnLaMismaFila`) en vez de mirarlo. A 390, lado a lado serían
+163 px por pie —zonas de 30 px— así que se apilan a tamaño completo: en un
+móvil el pie se mira de uno en uno, pero tocarse tiene que poder tocar. El
+porqué entero, en `docs/blocks/clinica-6-done.md` §3.
 
 ## Lo que encontró el bucle y no la suite
 
@@ -54,3 +61,10 @@ El prompt pide ≥ 44 px; el mínimo de la casa es 48.
 4. **El pie se espejaba al revés desde clinica-3**: los tres mockups
    validados espejan el IZQUIERDO, para que los dedos gordos queden hacia
    dentro. Arreglado en el único sitio donde se dibuja el pie.
+5. **A 1024 los dos pies se apilaban y el derecho quedaba bajo el
+   pliegue** — había que hacer scroll para ver el estado completo del pie.
+   Lo vio la revisión del PR sobre estas mismas capturas, no la primera
+   pasada del bucle: las capturas estaban, pero nadie había MEDIDO si los
+   dos pies caían en la misma fila. Ahora se mide. Una captura tampoco dice
+   si dos cosas están una al lado de la otra: hay que preguntárselo a la
+   página.

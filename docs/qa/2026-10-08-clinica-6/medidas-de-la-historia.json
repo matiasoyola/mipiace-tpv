@@ -1,6 +1,8 @@
 {
   "390": {
     "zonasDelPie": 22,
+    "piesEnLaMismaFila": false,
+    "anchoDeUnPie": 264,
     "zonaMasPequena": 48.39990234375,
     "cincoBotonesMasPequenos": [
       {
@@ -30,7 +32,9 @@
   },
   "1024": {
     "zonasDelPie": 22,
-    "zonaMasPequena": 48.39990234375,
+    "piesEnLaMismaFila": true,
+    "anchoDeUnPie": 263,
+    "zonaMasPequena": 48.216064453125,
     "cincoBotonesMasPequenos": [
       {
         "texto": "Pie",
@@ -59,7 +63,9 @@
   },
   "1366": {
     "zonasDelPie": 22,
-    "zonaMasPequena": 48.39996337890625,
+    "piesEnLaMismaFila": true,
+    "anchoDeUnPie": 263,
+    "zonaMasPequena": 48.216064453125,
     "cincoBotonesMasPequenos": [
       {
         "texto": "Pie",
