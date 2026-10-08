@@ -1,6 +1,9 @@
 # Bloque kds-1 · la pantalla de comandas en cocina — HECHO
 
-Prompt: `docs/code-prompts/bloque-kds-1-cocina.md`.
+Prompts: `docs/code-prompts/bloque-kds-1-cocina.md` y, la corrección visual
+contra la maqueta, `docs/code-prompts/bloque-kds-1b-como-la-maqueta.md`.
+Maqueta validada: `docs/kds/maqueta/` (`Main.dc.html`, `Comanda.dc.html`,
+`Alergias.dc.html`).
 Decisiones: `docs/kds/00-decisiones.md` (las 10, validadas una a una con Matías).
 Rama `kds-1-cocina` desde `master` (con v2-H1 dentro, merge `106f0d3`). PR contra
 `master`. **Ni merge, ni despliegue, ni APK publicada.**
@@ -24,8 +27,11 @@ de cocina.
   último es una clave ajena que no existe, no una costumbre.
 - El `−`/`+` vuelve a lo enviado **sólo donde hay pantalla**, con «Deshacer» de
   5 s. Es la vuelta deliberada al sabotaje 5 de v2-H1.
-- **20 sabotajes, 20 rojos**, cada uno con su mensaje real abajo. Suite: 336
-  ficheros, 4.262 tests. E2E contra Postgres: 25.
+- **28 sabotajes, 28 rojos**, cada uno con su mensaje real abajo. Suite: 336
+  ficheros, 4.285 tests. E2E contra Postgres: 25.
+- **kds-1b**: la maqueta validada entró al repo (`docs/kds/maqueta/`) y la
+  pantalla se corrigió contra ella. Las cinco diferencias del prompt, más lo
+  que el bucle visual enseñó al volver a medir, en la §7.
 
 ---
 
@@ -295,6 +301,19 @@ restauró con `git checkout -- .`. El guion está en
 | Módulo apagado | ✅ | `expected false to be true` (se creó una comanda de pantalla) |
 | RETAIL tocado | ✅ | cubierto en `kds-tpv-cocina.test.tsx`: en RETAIL no se monta `HospitalityWorkspace` ni nada de cocina |
 
+Y los ocho de **kds-1b**, los de la corrección contra la maqueta:
+
+| Sabotaje | Cayó | El mensaje real del rojo |
+|---|---|---|
+| Fondo rojo en el cuerpo de una tarjeta urgente o con alergia | ✅ | `urgente: expected 'rgb(74, 22, 16)' to be 'rgb(26, 29, 35)'` |
+| Franja de alergia sin fondo rojo | ✅ | `expected 'rgb(35, 39, 46)' to be 'rgb(200, 16, 46)'` |
+| Franja de alergia con menos de 21 px | ✅ | `expected 16 to be greater than or equal to 21` |
+| Modificador a menos de 17 px | ✅ | `expected 13 to be greater than or equal to 17` |
+| Modificador en gris | ✅ | `expected 'rgb(139, 147, 161)' to be 'rgb(246, 207, 122)'` |
+| 3 columnas a 1280 px | ✅ | `expected 3 to be 4` (y la primera fila con 3 tarjetas en vez de 4) |
+| «+N» en rojo sin ninguna oculta en rojo | ✅ | `expected 'rojo' to be 'verde'`, y dos veces `expected 'rojo' to be 'neutro'` |
+| Coral en un botón de la comanda que no sea «Cobrar» | ✅ | `expected [ 'boton-marchar', 'comanda-cobrar' ] to deeply equal [ 'comanda-cobrar' ]` |
+
 ### 4.1 · Un sabotaje descubrió una debilidad del propio test
 
 «La alergia llega a `Client`» NO cayó la primera vez. El test buscaba la palabra
@@ -302,6 +321,13 @@ restauró con `git checkout -- .`. El guion está en
 columna sin `@relation`, que es exactamente como alguien «guardaría de quién es
 la alergia» sin pensarlo— pasaba por debajo. Ahora se mira sin distinguir
 mayúsculas y sólo sobre las líneas de CAMPO, no sobre los comentarios.
+
+Y volvió a pasar en kds-1b, con **«modificador a menos de 17 px»**. El test
+comparaba el tamaño pintado contra el token `NOTA_PX`, así que bajar el token
+bajaba también el listón y el sabotaje pasaba en verde. Los números de la
+maqueta —17 px y `#F6CF7A` para los modificadores, 21 px para la franja de la
+alergia— van ahora **a pelo** en el test. La regla que deja esto: *un test que
+protege un valor de diseño no puede leer ese valor del sitio que se sabotea*.
 
 ---
 
@@ -335,44 +361,72 @@ el scratchpad, Chromium de `ms-playwright`, `vite` sirviendo `apps/tpv-web` y
 
 ### 6.1 · La pantalla de cocina, a 1280 × 800
 
-| | medido |
-|---|---|
-| Barra superior | 1280 × **72** |
-| Zona de tarjetas | **1040 × 728** |
-| Columna «Listas» | 240 × 728 |
-| Tarjeta | **320** de ancho · 3 columnas |
-| Mesa | **40 px** · minutos **36 px** |
-| Franja «⚡ URGENTE» | 314 × 57, texto **26 px** en blanco sobre rojo |
-| Franja de alergia | 294 × 51, texto **22 px** |
-| Línea de plato | 290 × **56** |
-| Nota / modificador | **19 px** |
-| «Lista» | 290 × **56** |
-| «Hoy» | 88,8 × **56** |
-| Indicador «+N» | 215 × 116, texto **28 px** |
-| Pulso | **2,5 s** |
-| Elementos `<audio>` | **0** |
-| Desplazamiento de la página | 800 / 800 · **ninguno** |
-| **Tarjetas cortadas** | **0** |
+Las medidas son las de **después de kds-1b**, o sea contra la maqueta.
 
-### 6.2 · Cuántas comandas caben, que es la diferencia con la decisión 7
+| | medido | la maqueta |
+|---|---|---|
+| Barra superior | 1280 × **60** | 60 |
+| Zona de tarjetas | **1060 × 740** (contenido: 1036 × 716) | — |
+| Franja «+N» | **60** × 740 | 60 |
+| Columna «Listas» | **160** × 740 | 160 |
+| Tarjeta | **251,5** de ancho · **4 columnas** | 4 × `1fr` |
+| Fondo del cuerpo | **`#1A1D23`** en las cuatro | `#1A1D23` |
+| Cabecera del semáforo | 251,5 × **54** · verde `#8FD9A8` sobre `#15171B` | igual |
+| Mesa | **34 px** · minutos **28 px** | 34 / 28 |
+| Franja «URGENTE» | 251,5 × **52**, texto **26 px** blanco sobre `#C8102E` | 52 / 26 |
+| Anillo de la urgente | **4 px** por `box-shadow` | 4 px |
+| Franja de alergia | 251,5 × **65,6** · `#C8102E` · título **21 px**, alérgeno **15 px** | 21 / 15 |
+| Sub-franja «SILLA 3 · SIN GLUTEN» | 227,5 × 27,5 · **13 px** sobre `#C8102E` | 13 |
+| Línea de plato | 223,5 × **56** | ~45 (ver §7) |
+| Nota / modificador | **17 px**, peso **600**, `rgb(246, 207, 122)` | 17 / 600 / `#F6CF7A` |
+| «Lista» | 223,5 × **56**, neutro `#2C313A` | `#2C313A` |
+| «Hoy» | 71,4 × **56** | 44 (ver §7) |
+| «+N» | texto **30 px**; en rojo usa el rojo del SEMÁFORO (`#E0533F`) | 30 |
+| Pastilla «Listas» | «M3 · esperando · 2 min» sobre `#8FD9A8` | igual |
+| La hora en la barra | **sí**, `21:54`, del servidor | sí |
+| Pulso | **2,5 s** (tarjeta, «+N» nueva, rojo y ámbar) | 2,5 s |
+| Elementos `<audio>` | **0** | — |
+| Desplazamiento de la página | 800 / 800 · **ninguno** | — |
+| **Tarjetas cortadas** | **0** | — |
 
-La decisión 7 pide «unas 8 comandas normales en 1280 × 800 sin desplazar».
-Medido:
+### 6.2 · Cuántas comandas caben
 
-- **comandas normales** (3 platos, sin alergia): **6** — dos filas de tres. La
-  tarjeta mide 322 px reales y la estimación 348; dos filas son 712 ≤ 728.
-- **con una comanda de alergia por silla en pantalla** (franja + «SILLA 3 ·
-  ¡LLEVA GLUTEN!» por plato): **3**. Esa tarjeta mide 490 px y, como cada fila
-  mide lo que su tarjeta más alta (decisión 7, literal), se come la fila.
+**Con los tokens de la maqueta entran las ocho que pide la decisión 7**, y ésa
+es una diferencia que kds-1b cerró: con tres columnas de 320 px entraban seis.
 
-**Las que no caben van al indicador «+N · M2 · M4 · T2 · …», que es exactamente
-el mecanismo que la decisión 7 manda usar en vez de paginar**, y entran según
+- **comandas normales** (hasta tres platos de nombre corto, sin alergia): **8**
+  — dos filas de cuatro. Estimadas en 336 px; dos filas son 682 ≤ 716.
+- **con la comanda de alergia por silla en la primera fila**: **4**. Esa
+  tarjeta mide **500,3 px** reales —franja de dos líneas, recuadro por plato de
+  la silla y la pastilla «lleva gluten»— y, como cada fila mide lo que su
+  tarjeta más alta (decisión 7, literal), se come la fila entera. Es lo mismo
+  que dibuja `Main.dc.html`: **una fila de cuatro y un «+2» en el borde**.
+
+Las que no caben van a la franja «+N» con las mesas debajo, que es exactamente
+el mecanismo que la decisión 7 manda usar en vez de paginar, y entran según
 salen las primeras. Ninguna tarjeta se corta: 0 medidas.
 
-Subir a 8 exigía CUATRO columnas, o sea tarjetas de 244 px, donde «Croquetas de
-jamón» a 26 px ya no cabe en una línea — y el nombre del plato es lo primero que
-la decisión 3 manda que se lea. **Esto es lo que hay que mirar con Matías contra
-la maqueta.**
+### 6.2.1 · La estimación, calibrada y VIGILADA
+
+`altoTarjeta` estima en vez de medir (medir pide dos pasadas y parpadea). La
+estimación tiene que ir **por lo alto**: por lo bajo, el reparto cree que una
+fila cabe cuando no cabe y una tarjeta se corta.
+
+El banco guarda ahora el alto REAL de cada tarjeta pintada **y lo bastante para
+rehacerla** (el nombre de cada plato y sus marcas), y `kds-pantalla-pura.test.ts`
+la rehace y comprueba la desigualdad **en cada `pnpm test`**. El bucle visual ya
+no es algo que haya que acordarse de correr: su medida queda vigilada.
+
+| tarjeta | real | estimada |
+|---|---|---|
+| T4 · urgente, 2 platos, 1 nota | 327,9 | 385 |
+| M5 · alergia por silla, 3 platos | 500,3 | 518 |
+| M1 · 3 platos | 324 | 350 |
+| M2 · 2 platos, 1 nota | 275,9 | 303 |
+
+Y las piezas, medidas: cabecera 54 · franja «URGENTE» 52 · franja de alergia
+65,6 · plato 56 · plato con nota 69,9 · plato de silla con recuadro 100,3 ·
+plato que choca 83,5 · plato con «lleva gluten» 73,4 · «Lista» 56.
 
 ### 6.3 · El TPV, a 1443 × 812 y a 1280 × 800
 
@@ -382,14 +436,36 @@ la maqueta.**
 | `−` de lo enviado | **56 × 56**, sólo contorno rojo (`transparent` de fondo) |
 | `+` de lo enviado | **56 × 56** |
 | Chip «→ Silla 3» | 90,9 × **56** |
-| Chip «Espera» | 88,3 × **56** |
+| Chip «Espera» | 90,3 × **56**, **sin fondo** (contorno) |
 | «⚡ Urgente» | 122,2 × **56** |
-| «Marchar 2º» | 122,2 × **56** |
+| «Marchar 2º» | 124,2 × **56**, **sin fondo** (contorno), como «Enviar» |
 | «⚠ Alergias · 1» | 136,4 × **56** |
+| «Cobrar» | 212 × 68 · **el único botón coral de la comanda** |
 | Banda «M4 · listo para servir» | 395 × **56**, texto 21 px |
-| «Bravas −1 · Deshacer» | 395 × **56** |
+| «Magro con tomate −1 · Deshacer» | 395 × **56** |
 | Desborde del importe fuera de la comanda | **−21 px** (o sea, 21 px DENTRO) |
 | Desplazamiento de la página | ninguno en los dos tamaños |
+
+**El sabotaje del coral, medido**: se barre el fondo calculado de TODOS los
+botones de dentro de `[data-testid="comanda"]` y se filtra por el coral
+(`rgb(233, 112, 88)`). Resultado con todo encendido —chip «Espera» puesto,
+«Marchar 2º» a la vista y «Urgente» activo—: `[{ testid: "comanda-cobrar" }]`.
+Uno, y es el que cobra.
+
+### 6.3.1 · «Espera» y «¡Lleva gluten!», que la primera captura no enseñaba
+
+Existen los dos. No salían porque en el escenario del banco las cuatro líneas de
+la M5 **ya estaban en cocina**, y los dos sólo viven sobre una línea PENDIENTE:
+«Espera» no significa nada sobre un plato que ya marchó, y el aviso de la capa 3
+salta cuando el camarero asigna la silla.
+
+El banco deja ahora las bravas sin enviar y sin silla —que es lo que dibuja
+`Comanda.dc.html`— y toca «→ Silla 3». Medido:
+
+- los chips de la línea pendiente: `→ Silla 3Espera`;
+- el aviso: **`¡LLEVA GLUTEN! · toca para cerrar`**, que avisa **sin bloquear**
+  (decisión 3, capa 3: a veces la cocina tiene la versión sin gluten);
+- captura: `tpv-comanda-espera-1443x812.png` y `-1280x800.png`.
 
 ### 6.4 · La hoja de alergias
 
@@ -397,62 +473,122 @@ la maqueta.**
 alergia, los **14** alérgenos en la rejilla, silla de **56 × 56**, opción de
 236,8 × **56**. Sin desplazamiento.
 
-### 6.5 · Los cuatro defectos que el bucle enseñó
+Lo que kds-1b le cambió: **«La barra está a este lado»** encima del tablero —la
+referencia que hace que la silla 3 sea la misma silla para los dos camareros del
+turno; sin ella, el que viene del otro lado cuenta la 1 donde el otro contó la
+3— y **«Guardar» en claro** (`rgb(241, 243, 245)`) en vez de coral.
+
+### 6.5 · Los defectos que el bucle enseñó
+
+De la primera pasada (kds-1):
 
 1. **`altoTarjeta` estimaba por debajo** (21 px en una tarjeta urgente, 82 en una
    con alergia): la dirección peligrosa, porque con la estimación corta el
-   reparto cree que una fila cabe y una tarjeta se corta. Las piezas están ahora
-   calibradas contra el navegador y el banco compara la estimación con el alto
-   REAL de cada tarjeta pintada.
+   reparto cree que una fila cabe y una tarjeta se corta.
 2. **El nombre del plato se truncaba** en la comanda del TPV: «Magro con…»,
    «Patatas br…». v2-H1 subió el nombre a 23 px precisamente para que se leyera.
    Ahora va en su propia fila a ancho completo cuando la línea lleva `−`/`+`.
 3. **«Espera» salía en líneas que ya estaban en cocina**, donde no significa
    nada: ese plato ya marchó.
 4. **El pico del pulso rojo era el rojo de la alarma**: la tarjeta entera se leía
-   como «esta comanda es roja» y la franja «⚡ URGENTE» dejaba de destacar sobre
-   ella — la regla del rojo deshecha por el propio aviso.
+   como «esta comanda es roja».
+
+De la segunda, la de kds-1b contra la maqueta:
+
+5. **Cada plato medía 72 px y no 56.** Los `8 + 8` de relleno de la maqueta
+   estaban FUERA del botón, así que se sumaban al mínimo táctil en vez de vivir
+   dentro de él. Tres platos por tarjeta son 48 px: justo lo que cuesta la
+   segunda fila. Con `box-sizing: border-box`, el relleno va dentro y un plato
+   de una línea mide 56 justos.
+6. **El pulso de lo nuevo teñía la tarjeta de VERDE.** La primera captura de
+   kds-1b usó el `#2B4636` de la maqueta en la tarjeta entera, y lo que se leía
+   era «esta comanda es verde» —que en esta pantalla ya significa «va bien» en
+   el semáforo y «ya está» en «Listas»—. Es el mismo error que el rojo del punto
+   4, con otro color. El verde se queda donde la maqueta lo pone, que es la
+   franja «+N» de 60 px; la tarjeta pulsa a un carbón un peldaño más claro.
+7. **La franja «+N» en rojo no se leía**: texto gris sobre rojo, y «no caben»
+   partido en dos palabras en 60 px de ancho. Ahora usa el rojo del SEMÁFORO
+   (`#E0533F`) con su tinta oscura —lo que informa es un estado del semáforo, no
+   una alarma— y sólo lleva palabra cuando son nuevas.
+8. **El «Visto» estaba dentro del botón de tachar.** Un botón dentro de otro no
+   es HTML válido, y en la línea anulada del todo el de fuera va `disabled`: el
+   cocinero no habría podido quitar el aviso nunca.
 
 Y un cambio de forma que sale de la propia decisión 3: la silla y el grito van en
-UNA línea, «SILLA 3 · ¡LLEVA GLUTEN!». Es lo que la decisión dice literalmente, y
-son 41 px menos por plato asignado.
+UNA línea, «SILLA 3 · ¡LLEVA GLUTEN!». Es lo que la decisión dice literalmente.
 
 ---
 
 ## 7 · Las diferencias con la maqueta
 
-**LA MAQUETA NO FUE ACCESIBLE DESDE LA SESIÓN QUE ESCRIBIÓ ESTE BLOQUE.** El
-lienzo «Cocina · pantalla de comandas»
-(`https://claude.ai/artifact/7tzGuSKVRHBRUWC85g4U7t`) no está compartido con este
-usuario: tanto la lectura por la herramienta de documentos como el `fetch`
-devuelven «no compartido / no existe».
+**La maqueta ya está en el repo**: `docs/kds/maqueta/`, tres HTML con los
+estilos en línea, así que cada hex y cada px de abajo se puede comprobar con un
+`grep`. La sesión que escribió kds-1 no pudo abrirla —el lienzo de Design no
+estaba compartido— y dedujo los valores de lo que `docs/kds/00-decisiones.md`
+describe con palabras. **kds-1b es la corrección: donde la maqueta y la
+deducción no coinciden, manda la maqueta.**
 
-Así que **los colores y los tamaños de la entrega NO están comparados con la
-maqueta**. Salen de:
+### 7.1 · Las cinco del prompt
 
-- lo que `docs/kds/00-decisiones.md` describe con palabras: verde/ámbar/rojo con
-  el ámbar y el rojo oscurecidos, «⚡ URGENTE» a 26 px en blanco sobre franja
-  roja, pulso cada 2,5 s, cabecera entera de color, orden de lectura por filas;
-- la escala y la paleta del tema oscuro de v2-H1, que Matías YA validó
-  (`lib/hospitalityTheme.ts`).
+| # | La diferencia | Estado | Qué se hizo |
+|---|---|---|---|
+| 1 | El cuerpo de la T4 (urgente) y el de la M5 (alergia) salían en rojo oscuro | **corregida** | `TARJETA_CUERPO = #1A1D23` en TODAS. El pulso rojo se ponía en el `<article>` entero; ahora una comanda nueva pulsa en neutro y el rojo vive sólo en la franja «URGENTE» (más su anillo de 4 px), la franja de la alergia, el recuadro del plato de la silla y el plato que lleva el alérgeno |
+| 2 | La alergia de la mesa era una cajita oscura con «⚠ SILLA 3 · SIN GLUTEN» | **corregida** | Franja roja (`#C8102E`) de ancho completo bajo la cabecera, con icono, «SILLA 3 · CELÍACO» a 21 px / peso 700 y «Gluten» a 15 px debajo. El «SIN GLUTEN» se fue **al recuadro del plato** de esa silla, que es donde dice algo |
+| 3 | Modificadores y notas en gris, pequeños y con «·» | **corregida** | Ámbar `#F6CF7A`, **17 px**, peso **600**, con «— » delante |
+| 4 | Tres columnas, nombres truncados y «+N» en rojo al pie de «Listas» | **corregida** | **Cuatro columnas** a 1280 px (de «Listas» 240 → 160 y del indicador 96 → 60); el nombre **se parte en dos líneas** y nunca baja de 22 px; el «+N» pasa a una **franja vertical neutra** en el borde de las tarjetas, con las mesas debajo, que **parpadea en verde** si hay nuevas y sólo va en rojo si una de las ocultas ya pasó a rojo en el semáforo |
+| 5 | Coral en «Marchar 2º» y en «Guardar» | **corregida** | «Marchar 2º» neutro con contorno, como «Enviar»; «Guardar» en claro, como el «Listo» de la maqueta. Y de paso el chip «Espera» encendido, la tecla del tiempo elegido y el contorno de la silla elegida, que también eran coral. **El único coral de la comanda es «Cobrar»**, y hay un sabotaje que barre todos sus botones |
 
-**Lo que hay que hacer antes de cerrar**: abrir la maqueta al lado de
-`docs/blocks/kds-1-cocina-shots/cocina-1280x800.png` y
-`tpv-comanda-1443x812.png` y anotar cada diferencia. Lo que sí se puede decir ya:
+### 7.2 · Lo que se miró y se anota
 
-| | la entrega | pendiente de comparar |
+| Lo observado | Estado | El porqué |
 |---|---|---|
-| Comandas visibles a 1280 × 800 | 6 normales, 3 con una de alergia | la decisión 7 dice «unas 8» · §6.2 |
-| Silla + alérgeno del plato | una línea, «SILLA 3 · ¡LLEVA GLUTEN!» | la maqueta puede tenerlo en dos |
-| Tonos del semáforo | `#2E6B4A` / `#9A6B12` / `#A33124` | los hex exactos de la maqueta |
-| Pico del pulso rojo | `#4A1610` | — |
-| Ancho de tarjeta | 320 px | — |
-| Columna «Listas» | 240 px | — |
+| «Listas» era gris y decía «1 plato»; la maqueta la pinta verde con «esperando · 3 min» | **corregida** | Cuántos platos lleva no es asunto de nadie una vez están hechos; lo que hace falta saber es **cuánto lleva en el pase enfriándose**. Pastilla `#8FD9A8` con «esperando · N min» |
+| La barra superior no llevaba la hora | **corregida** | En una cocina sin reloj de pared, «14 min» no dice a qué hora entró la comanda. Es la hora del SERVIDOR, igual que los minutos del semáforo |
+| En la hoja de alergias faltaba la referencia de dónde queda la barra | **corregida** | Es lo que hace que la numeración de las sillas sea siempre la misma: sin punto de partida, el camarero que viene del otro lado cuenta la 1 donde el otro contó la 3, y «silla 3 · celíaco» deja de nombrar a nadie |
+| No se veían «Espera» ni «¡Lleva gluten!» en la captura de la comanda | **existen, y ya salen** | Sólo viven sobre una línea PENDIENTE, y en el escenario del banco las cuatro estaban ya en cocina. Ver §6.3.1 y `tpv-comanda-espera-*.png` |
 
-Y la tercera lámina, `Alergias.dc.html`, estaba **pendiente de validar** en el
-propio documento de decisiones: la hoja entregada es una interpretación de la
-decisión 3 capa 1 (dibujo de la mesa, sillas numeradas, «toda la mesa», rejilla
-de los 14) y necesita el visto bueno de Matías igualmente.
+### 7.3 · Lo que se corrigió además, porque la maqueta lo dice
+
+El prompt lista cinco; la maqueta dice más cosas, y la instrucción es que **sus
+colores, tamaños y textos son los de entrega**. Lo que cambió por eso, con su
+razón:
+
+| | antes (deducido del texto) | ahora (la maqueta) |
+|---|---|---|
+| Tonos del semáforo | oscurecidos: `#2E6B4A` / `#9A6B12` / `#A33124`, texto claro | **claros con tinta oscura**: `#8FD9A8` / `#E9A93E` / `#E0533F` sobre `#15171B`. La decisión 3 decía «el ámbar y el rojo, oscurecidos»; la maqueta que Matías validó los pinta claros, y una cabecera clara sobre el carbón del fondo se reconoce de un metro sin leerla |
+| Rojo de la alarma | `#C2301F` / `#B82B1C` | **`#C8102E`**, uno solo para el urgente y la alergia |
+| Pico del pulso rojo | `#4A1610` (rojo → carbón) | **`#C8102E` ↔ `#7A0A1C`**: de rojo a rojo, así lo que parpadea sigue siendo rojo todo el rato |
+| Escala | mesa 40, minutos 36, plato 26, nota 19 | **34 / 28 / 22 / 17**. Bajan porque con cuatro columnas la tarjeta mide 251 px y un plato a 26 px se parte en tres líneas |
+| El eyebrow («2ª COMANDA») | debajo de la cabecera, en gris | **dentro de la cabecera**, bajo la mesa. Son 19 px por tarjeta, y 19 × 2 filas es lo que separa «caben ocho» de «caben cuatro» |
+| Botón «Lista» | verde `#2F8F5B` | **neutro `#2C313A`**. El verde de esta pantalla significa «ya está», y «Lista» es el botón que hay que tocar para que lo esté |
+| «⚡ URGENTE» | el emoji | **un SVG de rayo** y la palabra «URGENTE», con tracking `0.12em` |
+| «lleva gluten» informativo | texto ámbar separado por «·» | **pastilla con contorno `#FF8A99`** a 14 px, una por alérgeno |
+| «EN ESPERA» | dos palabras | **«EN ESPERA · SALE CUANDO LO MARCHEN»**, con filete de puntos encima |
+| Plato tachado | fondo distinto | **`opacity: 0.42`** y tachado |
+| «Visto» | gris sobre la línea | **en claro**: sobre la caja roja de un anulado, un botón gris no se ve |
+| «En línea» | «EN LÍNEA» | **«En línea»**, en pastilla `#16241C` con punto verde |
+
+### 7.4 · Lo que NO se ha puesto como la maqueta, y a propósito
+
+| | la maqueta | la entrega | el porqué |
+|---|---|---|---|
+| Alto de una línea de plato | ~45 px | **56 px** | «Ningún objetivo por debajo de 56 px en cocina» es una **restricción del bloque**, no una decisión de estilo, y el prompt dice que no se reabren decisiones. La línea entera es lo que se toca para tachar. **Cuesta una fila de tarjetas** cuando hay una comanda de alergia en pantalla (§6.2), y es el precio que se paga a sabiendas |
+| Botón «Hoy» | 44 px | **56 px** | Lo mismo |
+| «Visto» | 44 px | **44 px** | Es la única excepción de esa restricción y ya estaba acotada: vive DENTRO de una línea que ya es de 56 |
+| Nombre del alérgeno en la rejilla de los 14 | «Gluten», «Huevos» | **«Cereales con gluten», «Huevo»** | `etiqueta` es el nombre LEGAL del anexo II y es el que tiene que cuadrar con la carta y con la ficha del producto en el panel. El nombre corto —«Gluten»— sí se usa donde la maqueta lo usa: la segunda línea de la franja de cocina |
+| «Toda la mesa» en la hoja de alergias | botón tenue al pie, «No sé la silla · toda la mesa» | botón rojo arriba, «TODA LA MESA» | Es de v2-H1/kds-1 y no estaba en las cinco. **Pendiente del visto bueno de Matías**: la maqueta lo quiere más discreto |
+| La rejilla de los 14 | 4 × 4 llenando el alto | rejilla fija arriba, con hueco debajo | Lo mismo: no estaba en las cinco. Se ve en `tpv-alergias-1443x812.png` |
+| La pastilla del cobro en la barra inferior compacta | — | sigue en coral | Es de v2-H1 y NO es un botón de la comanda: es el resumen que la abre. Se deja, y por eso el sabotaje del coral mira sólo dentro de `[data-testid="comanda"]` |
+
+### 7.5 · Lo que la maqueta dibuja y la pantalla no puede dibujar igual
+
+En `Main.dc.html` caben cuatro tarjetas en una fila y sobra medio lienzo, con un
+«+2» en el borde. **La entrega sale igual**: una fila de cuatro, el resto a la
+franja. No es un fallo del reparto — es lo que mide una tarjeta de alergia por
+silla (500 px) cuando cada fila mide lo que su tarjeta más alta.
+
+Con cuatro comandas normales, las ocho entran en dos filas (§6.2), que es lo que
+pedía la decisión 7 y lo que la versión de tres columnas no conseguía.
 
 ---
 
@@ -511,7 +647,7 @@ DATABASE_URL='postgresql://mipiacetpv:mipiacetpv_dev@localhost:5432/mipiacetpv_k
   pnpm --filter @mipiacetpv/db exec prisma migrate deploy
 
 # 2 · la suite
-pnpm vitest run                       # 336 ficheros · 4.262 tests
+pnpm vitest run                       # 336 ficheros · 4.285 tests
 
 # 3 · el e2e contra Postgres (lo único que prueba el trigger y los CHECK)
 docker compose exec -T postgres psql -U mipiacetpv -c "CREATE DATABASE mipiacetpv_e2e_kds1;"
@@ -519,8 +655,13 @@ E2E_DATABASE_URL='postgresql://mipiacetpv:mipiacetpv_dev@127.0.0.1:5432/mipiacet
   pnpm --filter @mipiacetpv/api test:e2e
 
 # 4 · el bucle visual
+#     `playwright-core` NO está en el repo: se instala en el scratchpad y el
+#     banco se corre desde ahí (si no, `ERR_MODULE_NOT_FOUND`).
 pnpm --filter @mipiacetpv/tpv-web dev --port 5281   # en otra terminal
-BANCO_OUT=docs/blocks/kds-1-cocina-shots node docs/blocks/kds-1-cocina-shots/banco.mjs
+mkdir -p /tmp/banco && cd /tmp/banco && npm i playwright-core@1.49
+cp docs/blocks/kds-1-cocina-shots/banco.mjs /tmp/banco/
+BANCO_URL=http://localhost:5281 \
+  BANCO_OUT=$PWD/docs/blocks/kds-1-cocina-shots node /tmp/banco/banco.mjs
 
 # 5 · los alérgenos de La Maestranza (EN SECO por defecto)
 pnpm --filter @mipiacetpv/api alergenos:maestranza -- <tenantId>
