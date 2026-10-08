@@ -96,9 +96,39 @@ export function SentLineCocina(props: SentLineCocinaProps) {
       data-puede-corregir={props.puedeCorregir ? "1" : "0"}
       className="rounded-xl"
     >
+      {/* EL NOMBRE, EN SU PROPIA FILA cuando la línea lleva `−`/`+`.
+          Lo encontró el bucle visual: con el `−`, la cantidad, el `+`, el
+          nombre y el importe en la misma fila de 420 px, «Magro con
+          tomate» se quedaba en «Magro con…» y «Patatas bravas» en «Patatas
+          br…». v2-H1 subió el nombre de 16 a 23 px precisamente para que
+          se LEYERA; truncarlo deshace su decisión 1.
+
+          Sin `−`/`+` (la regla por destino, sin pantalla) la fila es la de
+          v2-H1 y no se toca: ahí el nombre tiene todo el ancho. */}
+      {props.puedeCorregir && (
+        <button
+          type="button"
+          onClick={props.onClick}
+          data-testid="cart-line-name"
+          className="w-full flex items-baseline gap-2 px-2.5 pt-2 text-left"
+        >
+          <span
+            className="flex-grow min-w-0 truncate font-medium"
+            style={{ fontSize: SENT_LINE_NAME_PX, color: DARK_TEXT_SOFT }}
+          >
+            {props.nombre}
+          </span>
+          <span
+            className="shrink-0 font-medium tabular-nums whitespace-nowrap"
+            style={{ fontSize: SENT_LINE_AMOUNT_PX, color: DARK_TEXT_MUTED }}
+          >
+            {props.importe}
+          </span>
+        </button>
+      )}
       <div
         className="flex items-center gap-2.5 px-2.5"
-        style={{ minHeight: props.puedeCorregir ? 68 : 52, color: DARK_TEXT_MUTED }}
+        style={{ minHeight: props.puedeCorregir ? 60 : 52, color: DARK_TEXT_MUTED }}
       >
         {props.puedeCorregir ? (
           <>
@@ -156,21 +186,26 @@ export function SentLineCocina(props: SentLineCocinaProps) {
             {props.units}
           </span>
         )}
-        <button
-          type="button"
-          onClick={props.onClick}
-          data-testid="cart-line-name"
-          className="flex-grow min-w-0 truncate font-medium text-left"
-          style={{ fontSize: SENT_LINE_NAME_PX }}
-        >
-          {props.nombre}
-        </button>
-        <span
-          className="shrink-0 font-medium tabular-nums whitespace-nowrap"
-          style={{ fontSize: SENT_LINE_AMOUNT_PX }}
-        >
-          {props.importe}
-        </span>
+        {/* Sin `−`/`+`, la fila es la de v2-H1: nombre e importe aquí. */}
+        {!props.puedeCorregir && (
+          <>
+            <button
+              type="button"
+              onClick={props.onClick}
+              data-testid="cart-line-name"
+              className="flex-grow min-w-0 truncate font-medium text-left"
+              style={{ fontSize: SENT_LINE_NAME_PX }}
+            >
+              {props.nombre}
+            </button>
+            <span
+              className="shrink-0 font-medium tabular-nums whitespace-nowrap"
+              style={{ fontSize: SENT_LINE_AMOUNT_PX }}
+            >
+              {props.importe}
+            </span>
+          </>
+        )}
       </div>
       {props.chips}
     </div>
@@ -183,6 +218,15 @@ export function SentLineCocina(props: SentLineCocinaProps) {
 
 export interface ChipsDeLineaProps {
   lineId: string;
+  /**
+   * `true` en el bloque «EN COCINA».
+   *
+   * Lo encontró el bucle visual: el botón «Espera» salía también en las
+   * líneas YA ENVIADAS, y ahí no significa nada — ese plato ya marchó y
+   * retenerlo no lo devuelve de la plancha. Lo que se hace con algo que
+   * ya está en cocina es anularlo, que es el `−` de al lado.
+   */
+  enviada?: boolean;
   /** Los alérgenos del plato, del catálogo. `[]` = no informado. */
   alergenosDelPlato: readonly string[];
   seat: number | null;
@@ -222,7 +266,9 @@ export function ChipsDeLinea(props: ChipsDeLineaProps) {
   };
 
   const hayAlgo =
-    (mostrarSillas && sillas.length > 0) || props.courseMode === "ESPERA";
+    (mostrarSillas && sillas.length > 0) ||
+    (props.courseMode === "ESPERA" && !props.enviada) ||
+    (props.courseMode === "TIEMPOS" && props.course > 1);
   if (!hayAlgo) return null;
 
   return (
@@ -263,8 +309,9 @@ export function ChipsDeLinea(props: ChipsDeLineaProps) {
         })}
 
       {/* Modo «Todo a la vez + Espera»: UN botón, y por debajo es el
-          tiempo 2. Cero toques más en el caso normal (decisión 3). */}
-      {props.courseMode === "ESPERA" && (
+          tiempo 2. Cero toques más en el caso normal (decisión 3).
+          Nunca sobre algo que YA está en cocina. */}
+      {props.courseMode === "ESPERA" && !props.enviada && (
         <button
           type="button"
           data-testid="chip-espera"
@@ -373,6 +420,14 @@ export function FilaDeTiempos(props: FilaDeTiemposProps) {
 // ──────────────────────────────────────────────────────────────────────
 
 export interface AccionesCocinaProps {
+  /**
+   * `Tenant.kitchenDisplayEnabled`. Apagado, se pinta SÓLO «Alergias».
+   *
+   * «Urgente» y «Marchar» son del módulo —son órdenes a una pantalla que
+   * no existe—; «Alergias» es de serie en hostelería porque informar de
+   * alérgenos es obligación legal (decisión 10).
+   */
+  moduloEncendido: boolean;
   estado: EstadoCocinaMesa;
   /** El toggle de «Urgente» que viaja EN el próximo envío (decisión 3). */
   urgentePendiente: boolean;
@@ -392,21 +447,23 @@ export function AccionesCocina(props: AccionesCocinaProps) {
       className="shrink-0 flex flex-wrap items-center gap-2 px-3 pb-2"
     >
       {/* «Urgente», junto a «Enviar» (decisión 3). Un toque. */}
-      <button
-        type="button"
-        data-testid="boton-urgente"
-        data-activo={props.urgentePendiente ? "1" : "0"}
-        onClick={props.onUrgente}
-        className={`rounded-[14px] px-4 font-semibold ${PRESS_FEEDBACK_CLASS}`}
-        style={{
-          minHeight: MIN_TOUCH_PX,
-          background: props.urgentePendiente ? ROJO_ANULADO : DARK_SURFACE,
-          color: props.urgentePendiente ? "#FFFFFF" : DARK_TEXT_SOFT,
-          fontSize: 17,
-        }}
-      >
-        ⚡ Urgente
-      </button>
+      {props.moduloEncendido && (
+        <button
+          type="button"
+          data-testid="boton-urgente"
+          data-activo={props.urgentePendiente ? "1" : "0"}
+          onClick={props.onUrgente}
+          className={`rounded-[14px] px-4 font-semibold ${PRESS_FEEDBACK_CLASS}`}
+          style={{
+            minHeight: MIN_TOUCH_PX,
+            background: props.urgentePendiente ? ROJO_ANULADO : DARK_SURFACE,
+            color: props.urgentePendiente ? "#FFFFFF" : DARK_TEXT_SOFT,
+            fontSize: 17,
+          }}
+        >
+          ⚡ Urgente
+        </button>
+      )}
 
       {/* «Marchar 2º». Sólo si hay un tiempo retenido con algo dentro: un
           botón que no hace nada ocupa 56 px de una pantalla donde no

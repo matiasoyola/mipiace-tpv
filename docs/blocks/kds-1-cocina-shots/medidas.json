@@ -1,0 +1,517 @@
+{
+  "cocina-1280x800": {
+    "barra": {
+      "w": 1280,
+      "h": 72,
+      "x": 0,
+      "y": 0,
+      "fontSize": "16px",
+      "background": "rgba(0, 0, 0, 0)",
+      "animationDuration": "0s"
+    },
+    "zona": {
+      "w": 1040,
+      "h": 728,
+      "x": 0,
+      "y": 72,
+      "fontSize": "16px",
+      "background": "rgba(0, 0, 0, 0)",
+      "animationDuration": "0s"
+    },
+    "columnaListas": {
+      "w": 240,
+      "h": 728,
+      "x": 1040,
+      "y": 72,
+      "fontSize": "16px",
+      "background": "rgb(23, 26, 31)",
+      "animationDuration": "0s"
+    },
+    "tarjetasEnDom": 3,
+    "tarjetasQueCaben": 3,
+    "tarjetasCortadas": 0,
+    "ordenDelDom": [
+      {
+        "mesa": "o-t4",
+        "urgente": "1",
+        "tono": "verde"
+      },
+      {
+        "mesa": "o-m5",
+        "urgente": "0",
+        "tono": "verde"
+      },
+      {
+        "mesa": "o-m1",
+        "urgente": "0",
+        "tono": "verde"
+      }
+    ],
+    "tarjeta": {
+      "w": 320,
+      "h": 361.5,
+      "x": 16,
+      "y": 88,
+      "fontSize": "16px",
+      "background": "rgba(74, 22, 16, 0.918)",
+      "animationDuration": "2.5s"
+    },
+    "cabecera": {
+      "w": 314,
+      "h": 60,
+      "x": 19,
+      "y": 148,
+      "fontSize": "16px",
+      "background": "rgb(46, 107, 74)",
+      "animationDuration": "0s"
+    },
+    "mesa": {
+      "w": 47.5,
+      "h": 40,
+      "x": 35,
+      "y": 158,
+      "fontSize": "40px",
+      "background": "rgba(0, 0, 0, 0)",
+      "animationDuration": "0s"
+    },
+    "franjaUrgente": {
+      "w": 314,
+      "h": 57,
+      "x": 19,
+      "y": 91,
+      "fontSize": "26px",
+      "background": "rgb(194, 48, 31)",
+      "animationDuration": "0s"
+    },
+    "franjaAlergia": {
+      "w": 294,
+      "h": 51,
+      "x": 365,
+      "y": 183,
+      "fontSize": "22px",
+      "background": "rgba(74, 22, 16, 0.996)",
+      "animationDuration": "2.5s"
+    },
+    "lleva": null,
+    "linea": {
+      "w": 290,
+      "h": 56,
+      "x": 31,
+      "y": 222,
+      "fontSize": "16px",
+      "background": "rgba(0, 0, 0, 0)",
+      "animationDuration": "0s"
+    },
+    "nota": {
+      "w": 266,
+      "h": 28.5,
+      "x": 43,
+      "y": 338,
+      "fontSize": "19px",
+      "background": "rgba(0, 0, 0, 0)",
+      "animationDuration": "0s"
+    },
+    "lista": {
+      "w": 290,
+      "h": 56,
+      "x": 31,
+      "y": 383,
+      "fontSize": "26px",
+      "background": "rgb(47, 143, 91)",
+      "animationDuration": "0s"
+    },
+    "visto": null,
+    "masN": {
+      "w": 215,
+      "h": 116,
+      "x": 1053,
+      "y": 672,
+      "fontSize": "28px",
+      "background": "rgb(71, 22, 17)",
+      "animationDuration": "2.5s"
+    },
+    "masNTexto": "+5 · M2 · M4 · T2 · …",
+    "alturasReales": [
+      {
+        "id": "o-t4",
+        "alto": 361.5,
+        "lineas": 2,
+        "notas": 1,
+        "bandas": 0,
+        "urgente": true,
+        "sillas": 0,
+        "avisos": 0,
+        "anulados": 0,
+        "espera": 0
+      },
+      {
+        "id": "o-m5",
+        "alto": 490.5,
+        "lineas": 3,
+        "notas": 0,
+        "bandas": 1,
+        "urgente": false,
+        "sillas": 2,
+        "avisos": 0,
+        "anulados": 0,
+        "espera": 0
+      },
+      {
+        "id": "o-m1",
+        "alto": 324,
+        "lineas": 3,
+        "notas": 0,
+        "bandas": 0,
+        "urgente": false,
+        "sillas": 0,
+        "avisos": 0,
+        "anulados": 0,
+        "espera": 0
+      }
+    ],
+    "hoy": {
+      "w": 88.8,
+      "h": 56,
+      "x": 1171,
+      "y": 8,
+      "fontSize": "22px",
+      "background": "rgb(35, 39, 46)",
+      "animationDuration": "0s"
+    },
+    "pulsoTarjeta": null,
+    "pulsoRojo": "2.5s",
+    "scroll": {
+      "scrollHeight": 800,
+      "clientHeight": 800
+    },
+    "audio": 0
+  },
+  "tpv-comanda-1443x812": {
+    "comanda": {
+      "w": 420,
+      "h": 812,
+      "x": 0,
+      "y": 0,
+      "fontSize": "16px",
+      "background": "rgb(23, 26, 31)",
+      "animationDuration": "0s"
+    },
+    "lineasEnviadas": 4,
+    "lineasPendientes": 1,
+    "menosEnviado": {
+      "w": 56,
+      "h": 56,
+      "x": 22,
+      "y": 286,
+      "fontSize": "26px",
+      "background": "rgba(0, 0, 0, 0)",
+      "animationDuration": "0s"
+    },
+    "masEnviado": {
+      "w": 56,
+      "h": 56,
+      "x": 128,
+      "y": 286,
+      "fontSize": "26px",
+      "background": "rgb(44, 49, 58)",
+      "animationDuration": "0s"
+    },
+    "chipSilla": {
+      "w": 90.9,
+      "h": 56,
+      "x": 22,
+      "y": 344,
+      "fontSize": "17px",
+      "background": "rgb(184, 43, 28)",
+      "animationDuration": "0s"
+    },
+    "chipEspera": {
+      "w": 88.3,
+      "h": 56,
+      "x": 121,
+      "y": 1021,
+      "fontSize": "17px",
+      "background": "rgb(233, 112, 88)",
+      "animationDuration": "0s"
+    },
+    "botonUrgente": {
+      "w": 122.2,
+      "h": 56,
+      "x": 12,
+      "y": 504,
+      "fontSize": "17px",
+      "background": "rgb(28, 32, 38)",
+      "animationDuration": "0s"
+    },
+    "botonMarchar": {
+      "w": 122.2,
+      "h": 56,
+      "x": 142,
+      "y": 504,
+      "fontSize": "17px",
+      "background": "rgb(233, 112, 88)",
+      "animationDuration": "0s"
+    },
+    "botonAlergias": {
+      "w": 136.4,
+      "h": 56,
+      "x": 271,
+      "y": 568,
+      "fontSize": "17px",
+      "background": "rgb(184, 43, 28)",
+      "animationDuration": "0s"
+    },
+    "bandaListo": {
+      "w": 395,
+      "h": 56,
+      "x": 12,
+      "y": 156,
+      "fontSize": "21px",
+      "background": "rgb(47, 143, 91)",
+      "animationDuration": "0s"
+    },
+    "bandaListoTexto": "M4 · listo para servirServido",
+    "enviar": {
+      "w": 165,
+      "h": 68,
+      "x": 16,
+      "y": 728,
+      "fontSize": "20px",
+      "background": "rgba(0, 0, 0, 0)",
+      "animationDuration": "0s"
+    },
+    "cobrar": {
+      "w": 212,
+      "h": 68,
+      "x": 191,
+      "y": 728,
+      "fontSize": "22px",
+      "background": "rgb(233, 112, 88)",
+      "animationDuration": "0s"
+    },
+    "scroll": {
+      "scrollHeight": 812,
+      "clientHeight": 812
+    },
+    "desbordeImporte": -21,
+    "deshacer": {
+      "w": 395,
+      "h": 56,
+      "x": 12,
+      "y": 220,
+      "fontSize": "16px",
+      "background": "rgb(35, 39, 46)",
+      "animationDuration": "0s"
+    },
+    "deshacerTexto": "Magro con tomate −1Deshacer"
+  },
+  "tpv-alergias-1443x812": {
+    "hoja": {
+      "w": 1443,
+      "h": 812,
+      "x": 0,
+      "y": 0,
+      "fontSize": "16px",
+      "background": "rgb(14, 16, 19)",
+      "animationDuration": "0s"
+    },
+    "sillas": 4,
+    "sillaConAlergia": 1,
+    "silla": {
+      "w": 56,
+      "h": 56,
+      "x": 182,
+      "y": 201,
+      "fontSize": "20px",
+      "background": "rgb(28, 32, 38)",
+      "animationDuration": "0s"
+    },
+    "opciones": 14,
+    "opcion": {
+      "w": 236.8,
+      "h": 56,
+      "x": 440,
+      "y": 134,
+      "fontSize": "19px",
+      "background": "rgb(28, 32, 38)",
+      "animationDuration": "0s"
+    },
+    "tablero": {
+      "w": 212.2,
+      "h": 300.5,
+      "x": 103,
+      "y": 299,
+      "fontSize": "16px",
+      "background": "rgb(35, 39, 46)",
+      "animationDuration": "0s"
+    },
+    "scroll": {
+      "scrollHeight": 812,
+      "clientHeight": 812
+    }
+  },
+  "tpv-comanda-1280x800": {
+    "comanda": {
+      "w": 420,
+      "h": 800,
+      "x": 0,
+      "y": 0,
+      "fontSize": "16px",
+      "background": "rgb(23, 26, 31)",
+      "animationDuration": "0s"
+    },
+    "lineasEnviadas": 4,
+    "lineasPendientes": 1,
+    "menosEnviado": {
+      "w": 56,
+      "h": 56,
+      "x": 22,
+      "y": 286,
+      "fontSize": "26px",
+      "background": "rgba(0, 0, 0, 0)",
+      "animationDuration": "0s"
+    },
+    "masEnviado": {
+      "w": 56,
+      "h": 56,
+      "x": 128,
+      "y": 286,
+      "fontSize": "26px",
+      "background": "rgb(44, 49, 58)",
+      "animationDuration": "0s"
+    },
+    "chipSilla": {
+      "w": 90.9,
+      "h": 56,
+      "x": 22,
+      "y": 344,
+      "fontSize": "17px",
+      "background": "rgb(184, 43, 28)",
+      "animationDuration": "0s"
+    },
+    "chipEspera": {
+      "w": 88.3,
+      "h": 56,
+      "x": 121,
+      "y": 1021,
+      "fontSize": "17px",
+      "background": "rgb(233, 112, 88)",
+      "animationDuration": "0s"
+    },
+    "botonUrgente": {
+      "w": 122.2,
+      "h": 56,
+      "x": 12,
+      "y": 492,
+      "fontSize": "17px",
+      "background": "rgb(28, 32, 38)",
+      "animationDuration": "0s"
+    },
+    "botonMarchar": {
+      "w": 122.2,
+      "h": 56,
+      "x": 142,
+      "y": 492,
+      "fontSize": "17px",
+      "background": "rgb(233, 112, 88)",
+      "animationDuration": "0s"
+    },
+    "botonAlergias": {
+      "w": 136.4,
+      "h": 56,
+      "x": 271,
+      "y": 556,
+      "fontSize": "17px",
+      "background": "rgb(184, 43, 28)",
+      "animationDuration": "0s"
+    },
+    "bandaListo": {
+      "w": 395,
+      "h": 56,
+      "x": 12,
+      "y": 156,
+      "fontSize": "21px",
+      "background": "rgb(47, 143, 91)",
+      "animationDuration": "0s"
+    },
+    "bandaListoTexto": "M4 · listo para servirServido",
+    "enviar": {
+      "w": 165,
+      "h": 68,
+      "x": 16,
+      "y": 716,
+      "fontSize": "20px",
+      "background": "rgba(0, 0, 0, 0)",
+      "animationDuration": "0s"
+    },
+    "cobrar": {
+      "w": 212,
+      "h": 68,
+      "x": 191,
+      "y": 716,
+      "fontSize": "22px",
+      "background": "rgb(233, 112, 88)",
+      "animationDuration": "0s"
+    },
+    "scroll": {
+      "scrollHeight": 800,
+      "clientHeight": 800
+    },
+    "desbordeImporte": -21,
+    "deshacer": {
+      "w": 395,
+      "h": 56,
+      "x": 12,
+      "y": 220,
+      "fontSize": "16px",
+      "background": "rgb(35, 39, 46)",
+      "animationDuration": "0s"
+    },
+    "deshacerTexto": "Magro con tomate −1Deshacer"
+  },
+  "tpv-alergias-1280x800": {
+    "hoja": {
+      "w": 1280,
+      "h": 800,
+      "x": 0,
+      "y": 0,
+      "fontSize": "16px",
+      "background": "rgb(14, 16, 19)",
+      "animationDuration": "0s"
+    },
+    "sillas": 4,
+    "sillaConAlergia": 1,
+    "silla": {
+      "w": 56,
+      "h": 56,
+      "x": 182,
+      "y": 200,
+      "fontSize": "20px",
+      "background": "rgb(28, 32, 38)",
+      "animationDuration": "0s"
+    },
+    "opciones": 14,
+    "opcion": {
+      "w": 196,
+      "h": 57,
+      "x": 440,
+      "y": 134,
+      "fontSize": "19px",
+      "background": "rgb(28, 32, 38)",
+      "animationDuration": "0s"
+    },
+    "tablero": {
+      "w": 212.2,
+      "h": 294.3,
+      "x": 103,
+      "y": 296,
+      "fontSize": "16px",
+      "background": "rgb(35, 39, 46)",
+      "animationDuration": "0s"
+    },
+    "scroll": {
+      "scrollHeight": 800,
+      "clientHeight": 800
+    }
+  }
+}

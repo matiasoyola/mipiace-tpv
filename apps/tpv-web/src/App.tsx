@@ -1158,10 +1158,26 @@ interface TestBootstrap {
     // divergir.
     role: CashierRole;
   };
-  tenant: { id: string; name: string; cashierAutoLogoutMinutes: number };
+  tenant: {
+    id: string;
+    name: string;
+    cashierAutoLogoutMinutes: number;
+    // kds-1-cocina · el modo prueba es con lo que se DEMUESTRA el
+    // producto. Una demo sin la pantalla de comandas en una cuenta que la
+    // tiene comprada es una demo que miente, así que el flag viaja también
+    // por aquí.
+    kitchenDisplayEnabled?: boolean;
+  };
   register: { id: string; name: string; numSerieHolded: string | null };
   store: { id: string; name: string };
   shift: { id: string; openedAt: string; cashOpening: string } | null;
+  kitchen?: {
+    courseMode: "ESPERA" | "TIEMPOS";
+    seatMode: "ALERGIA" | "SIEMPRE";
+    greenMaxMin: number;
+    amberMaxMin: number;
+    readyBeep: boolean;
+  } | null;
 }
 
 function TestModeTpv({
@@ -1209,10 +1225,8 @@ function TestModeTpv({
           registerName={bootstrap.register.name}
           registerId={bootstrap.register.id}
           storeName={bootstrap.store.name}
-          // El modo prueba del super-admin no empareja pantallas: el
-          // módulo queda apagado y el TPV no pinta nada de cocina.
-          kitchenDisplayEnabled={false}
-          kitchenSettings={null}
+          kitchenDisplayEnabled={bootstrap.tenant.kitchenDisplayEnabled === true}
+          kitchenSettings={bootstrap.kitchen ?? null}
           onLogoutCashier={async () => {
             // "Salir" en el banner es la salida canónica del modo
             // prueba. El cashier-logout aquí cierra el shift no

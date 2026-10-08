@@ -225,8 +225,10 @@ describe("kds-1 · SABOTAJE · cortar una tarjeta", () => {
     // cabecera o el pie y bajan a cinco, esto se pone rojo en vez de
     // descubrirse en la pared de una cocina.
     //
-    // La zona real a 1280 × 800: 1280 − 240 (columna «Listas») − 24 de
-    // padding ≈ 1016 de ancho, y 800 − 72 (barra) − 32 ≈ 696 de alto.
+    // La zona real a 1280 × 800, MEDIDA en el navegador por el bucle
+    // visual: 1040 × 728 (1280 − 240 de la columna «Listas»; 800 − 72 de
+    // la barra superior). El padding de la zona va por dentro, así que no
+    // se resta aquí.
     const normales = Array.from({ length: 12 }, (_, i) =>
       tarjeta({
         id: `n${i}`,
@@ -240,7 +242,7 @@ describe("kds-1 · SABOTAJE · cortar una tarjeta", () => {
         })),
       }),
     );
-    const r = repartirTarjetas(normales, { ancho: 1016, alto: 696 });
+    const r = repartirTarjetas(normales, { ancho: 1040, alto: 728 });
     expect(r.visibles).toHaveLength(TARJETAS_NORMALES_A_1280);
     expect(r.extra).toHaveLength(6);
     // Y las que faltan se nombran en el indicador.

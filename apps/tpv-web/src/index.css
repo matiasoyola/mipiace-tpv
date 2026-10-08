@@ -73,13 +73,19 @@
   }
 }
 
+/* El pico del pulso rojo es un ROJO APAGADO, no el rojo de la alarma.
+   Lo enseñó la primera captura del bucle visual: con `#7E2318` la tarjeta
+   entera se leía como «esta comanda es roja» y no como «esta comanda
+   parpadea», y entonces la franja «⚡ URGENTE» y el «¡LLEVA GLUTEN!»
+   dejaban de destacar sobre ella — la regla del rojo deshecha por el
+   propio aviso. */
 @keyframes kds-pulso-rojo {
   0%,
   100% {
     background-color: inherit;
   }
   50% {
-    background-color: #7e2318;
+    background-color: #4a1610;
   }
 }
 
@@ -112,7 +118,7 @@
   }
   .kds-pulso-rojo {
     animation: none;
-    background-color: #7e2318;
+    background-color: #4a1610;
   }
   .kds-pulso-ambar {
     animation: none;

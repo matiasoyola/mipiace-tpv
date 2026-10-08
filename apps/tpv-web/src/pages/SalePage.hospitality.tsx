@@ -1118,6 +1118,7 @@ function Comanda({
                     chips={
                       <ChipsDeLinea
                         lineId={l.id}
+                        enviada
                         alergenosDelPlato={l.allergens ?? []}
                         seat={sillaDeLinea(props.kitchen.estado, l.id)}
                         course={tiempoDeLinea(props.kitchen.estado, l.id)}
@@ -1216,6 +1217,7 @@ function Comanda({
           «Alergias» va SIEMPRE (de serie en hostelería, decisión 10); las
           otras dos sólo con el módulo encendido. */}
       <AccionesCocina
+        moduloEncendido={props.kitchen.enabled}
         estado={props.kitchen.estado}
         urgentePendiente={props.kitchen.urgentePendiente}
         onUrgente={props.kitchen.onUrgentePendiente}

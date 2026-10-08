@@ -182,7 +182,7 @@ export function ComandaCard(props: ComandaCardProps) {
 
       {/* El eyebrow: «2ª COMANDA», la sección y «llegó tarde». */}
       <div
-        className="px-4 pt-2 flex items-center gap-2 uppercase font-semibold"
+        className="px-4 pt-1.5 flex items-center gap-2 uppercase font-semibold"
         style={{
           fontSize: EYEBROW_COCINA_PX,
           letterSpacing: EYEBROW_COCINA_TRACKING,
@@ -264,7 +264,10 @@ export function ComandaCard(props: ComandaCardProps) {
           type="button"
           data-testid="kds-lista"
           onClick={props.onLista}
-          className="mx-3 mb-3 mt-3 rounded-[12px] font-bold"
+          // `mb-2 mt-2` y no `mb-3 mt-3`: a 728 px de alto de zona, esos
+          // 8 px son los que hacen que entre la SEGUNDA fila de tarjetas.
+          // Medido en el bucle visual.
+          className="mx-3 mb-2 mt-2 rounded-[12px] font-bold"
           style={{
             height: LISTA_HEIGHT_PX,
             minHeight: LISTA_HEIGHT_PX,
@@ -316,14 +319,29 @@ function Linea(props: {
         opacity: l.fired ? 1 : 0.55,
       }}
     >
-      {/* «SILLA 3», encima del plato */}
+      {/* LA MARCA DE LA SILLA, EN UNA SOLA LÍNEA sobre el plato.
+          Decisión 3, capa 2, literal: «en cocina ese plato va recuadrado en
+          rojo con "SILLA 3 · SIN GLUTEN"». Una línea, no dos.
+
+          Y cuando ADEMÁS choca (capa 3), el grito va en la MISMA línea:
+          «SILLA 3 · ¡LLEVA GLUTEN!». Lo midió el bucle visual — en dos
+          líneas, cada plato de la silla alérgica costaba 79 px de alto y
+          una mesa con tres platos asignados se comía la pantalla. Y leerlo
+          junto es además lo correcto: lo que el cocinero necesita saber de
+          un golpe es «esto es de la 3 y NO puede llevarlo». */}
       {l.seat != null && (
         <div
           data-testid="kds-silla"
-          className="px-3 pt-2 font-bold uppercase"
-          style={{ fontSize: SILLA_PX, color: ROJO_ALERGIA }}
+          className="px-3 pt-1.5 font-bold uppercase"
+          style={{
+            fontSize: SILLA_PX,
+            color: l.allergyWarning ? ROJO_ALERGIA_TEXT : ROJO_ALERGIA,
+            background: l.allergyWarning ? ROJO_ALERGIA : "transparent",
+            paddingBottom: l.allergyWarning ? 6 : 0,
+          }}
         >
           SILLA {l.seat}
+          {l.allergyWarning ? ` · ${l.allergyWarning}` : ""}
         </div>
       )}
 
@@ -333,14 +351,14 @@ function Linea(props: {
         // puede tachar: todavía no se está cocinando.
         disabled={!l.fired || anuladaDelTodo}
         onClick={() => props.onTachar(l.id, !l.done)}
-        className="w-full text-left flex items-center gap-3 px-3"
+        className="w-full text-left flex items-center gap-2 px-3"
         style={{
           minHeight: LINEA_HEIGHT_PX,
           color: DARK_TEXT,
         }}
       >
         <span
-          className="font-bold"
+          className="font-bold min-w-0"
           style={{
             fontSize: PLATO_PX,
             // Decisión 4 · un toque TACHA. Literalmente: el plato queda
@@ -354,8 +372,9 @@ function Linea(props: {
         </span>
       </button>
 
-      {/* Capa 3 · el grito */}
-      {l.allergyWarning && (
+      {/* Capa 3 · el grito, cuando el plato NO tiene silla asignada.
+          Con silla va arriba, en la misma línea que ella. */}
+      {l.allergyWarning && l.seat == null && (
         <div
           data-testid="kds-lleva"
           className="px-3 pb-2 font-bold"

@@ -57,32 +57,62 @@ export interface TarjetaMedible {
 
 // ── Las piezas de una tarjeta, en píxeles ─────────────────────────────
 
+// ── LAS PIEZAS, CALIBRADAS CONTRA EL NAVEGADOR ───────────────────────
+//
+// No son números a ojo: salen del bucle visual
+// (`docs/blocks/kds-1-cocina-shots/banco.mjs`, campo `alturasReales`), que
+// mide la altura de cada tarjeta PINTADA a 1280 × 800 y la compara con lo
+// que devuelve `altoTarjeta`.
+//
+// La primera versión las puso a ojo y se quedó CORTA —21 px en una tarjeta
+// urgente y 82 en una con alergia y sillas—, que es la dirección peligrosa:
+// con la estimación por debajo, el reparto cree que una fila cabe cuando no
+// cabe y una tarjeta SE CORTA, que es justo lo que la decisión 7 prohíbe.
+// Lo que miden ahora, en el navegador: cabecera 60 + eyebrow, franja
+// urgente 57, franja de alergia 51, «¡LLEVA GLUTEN!» 41, nota 28,5, línea
+// 56, «Lista» 56.
+//
+// Y se quedan POR ENCIMA a propósito, con el margen justo: pasarse de
+// generoso cuesta una fila entera de tarjetas (a 728 px de alto, 12 px de
+// más en el pie son tres comandas menos en pantalla).
+
 /** Padding arriba + abajo del cuerpo de la tarjeta. */
 const PADDING_PX = 16;
 /**
- * La cabecera del semáforo: mesa y minutos en grande, más el eyebrow de
- * «2ª COMANDA» / la sección / «LLEGÓ TARDE».
+ * La cabecera del semáforo —mesa y minutos en grande— más el eyebrow de
+ * «2ª COMANDA» / la sección / «LLEGÓ TARDE», que va debajo en su línea.
  *
- * El eyebrow comparte fila con nada —va debajo— pero su línea es la que
- * hace que la cabecera mida esto. 20 px de respiro arriba y abajo.
+ * Medido: 60 de cabecera + 17 de eyebrow + 3 de respiro = 80.
  */
-const CABECERA_PX = MESA_PX + EYEBROW_COCINA_PX + 20;
-/** La franja «⚡ URGENTE». */
-const FRANJA_URGENTE_PX = URGENTE_PX + 18;
-/** Cada franja de alergia. */
-const FRANJA_ALERGIA_PX = ALERGIA_PX + 18;
-/** Una nota o un modificador bajo un plato. */
-const NOTA_LINEA_PX = NOTA_PX + 6;
-/** El «¡LLEVA GLUTEN!» de un plato. */
-const AVISO_PX = 28;
-/** El «SILLA 3» de un plato asignado. */
-const SILLA_LINEA_PX = 26;
+const CABECERA_PX = MESA_PX + EYEBROW_COCINA_PX + 27;
+/** La franja «⚡ URGENTE». Medida: 57, más los 4 del borde de 3 px. */
+const FRANJA_URGENTE_PX = URGENTE_PX + 40;
+/** Cada franja de alergia. Medida: 51, más los 8 de su margen. */
+const FRANJA_ALERGIA_PX = ALERGIA_PX + 38;
+/** Una nota o un modificador bajo un plato. Medida: 28,5. */
+const NOTA_LINEA_PX = NOTA_PX + 12;
+/**
+ * El «¡LLEVA GLUTEN!» de un plato SIN silla. Medido: 41.
+ *
+ * Con silla no suma nada: va pegado al «SILLA 3» en la misma línea
+ * (decisión 3, «SILLA 3 · SIN GLUTEN»), y esa línea ya la cuenta
+ * `SILLA_LINEA_PX`.
+ */
+const AVISO_PX = 44;
+/**
+ * La línea «SILLA 3 · ¡LLEVA GLUTEN!» de un plato asignado.
+ *
+ * UNA línea para las dos cosas. El bucle visual midió que en dos líneas
+ * —silla arriba y grito debajo— cada plato de la silla alérgica costaba
+ * 79 px, y una mesa con tres platos asignados se comía la pantalla.
+ */
+const SILLA_LINEA_PX = 38;
 /** «ANULADO · ERAN 3 · −1» con su «Visto» de 44 px. */
-const ANULADO_LINEA_PX = 48;
+const ANULADO_LINEA_PX = 52;
 /** El encabezado del bloque «EN ESPERA». */
-const BLOQUE_ESPERA_PX = EYEBROW_COCINA_PX + 14;
-/** El botón «Lista» del pie. */
-const PIE_PX = LISTA_HEIGHT_PX + 12;
+const BLOQUE_ESPERA_PX = EYEBROW_COCINA_PX + 16;
+/** El botón «Lista» del pie, con sus márgenes de 8. */
+const PIE_PX = LISTA_HEIGHT_PX + 16;
 
 /**
  * Lo que se añade a cada tarjeta para no cortarla nunca.
@@ -90,6 +120,9 @@ const PIE_PX = LISTA_HEIGHT_PX + 12;
  * 12 px: una línea de texto que se parte en dos por un nombre largo cabe
  * en ese margen. Más sería dejar hueco visible al final de cada fila;
  * menos sería apostar a que ningún plato de ninguna carta se parte.
+ *
+ * El bucle visual comprueba que `altoTarjeta` queda por encima del alto
+ * REAL de cada tarjeta pintada. El `-done` lleva los tres números.
  */
 const MARGEN_SEGURIDAD_PX = 12;
 
@@ -101,15 +134,15 @@ const MARGEN_SEGURIDAD_PX = 12;
  * van al indicador «+N» — que es exactamente el mecanismo que la misma
  * decisión 7 manda usar en vez de paginar.
  *
- * La aritmética, para que se pueda discutir con números:
+ * La aritmética, con la zona MEDIDA en el navegador (1040 × 728: 1280 −
+ * 240 de la columna «Listas»; 800 − 72 de la barra superior):
  *
- *   zona de tarjetas a 1280 × 800 ≈ 1016 × 696 px
- *     (1280 − 240 de la columna «Listas» − 24 de padding;
- *      800 − 72 de la barra superior − 32 de padding)
- *   tarjeta de TRES platos = 16 (padding) + 73 (cabecera) + 168 (3 × 56)
- *                            + 68 (pie «Lista») + 12 (margen) = 337 px
- *   dos filas = 337 × 2 + 16 = 690 ≤ 696  →  2 × 3 = **6 tarjetas**
- *   tres filas = 337 × 3 + 32 = 1.043  →  no cabe
+ *   tarjeta de TRES platos, estimada = 16 (padding) + 80 (cabecera)
+ *     + 168 (3 × 56) + 72 (pie «Lista») + 12 (margen) = 348 px
+ *   dos filas = 348 × 2 + 16 = 712 ≤ 728  →  2 × 3 = **6 tarjetas**
+ *   (medida real de esa tarjeta: 322 px, así que la estimación va por
+ *    encima, que es el lado que no corta)
+ *   tres filas = 348 × 3 + 32 = 1.076  →  no cabe
  *
  * Subirlo a 8 exigía CUATRO columnas, o sea tarjetas de 244 px. A 244 px,
  * «Croquetas de jamón» a 26 px ya no cabe en una línea, y el nombre del
@@ -117,6 +150,10 @@ const MARGEN_SEGURIDAD_PX = 12;
  * nombres partidos y ver seis enteros con dos en el indicador, se elige lo
  * segundo: el indicador nombra las mesas que faltan y entran en cuanto
  * salen las primeras.
+ *
+ * Y una comanda con alergia por silla ocupa más (la franja, el «SILLA n»
+ * de cada plato y el «¡LLEVA GLUTEN!»): con una de ésas en pantalla caben
+ * tres. Es correcto — esa tarjeta es la que hay que leer entera.
  *
  * Queda anotado como diferencia en el `-done`.
  */
@@ -133,7 +170,9 @@ export function altoTarjeta(t: TarjetaMedible): number {
     alto += LINEA_HEIGHT_PX;
     alto += l.notes.length * NOTA_LINEA_PX;
     if (l.seat != null) alto += SILLA_LINEA_PX;
-    if (l.allergyWarning) alto += AVISO_PX;
+    // El grito suma SÓLO si el plato no tiene silla: con silla va en la
+    // misma línea que ella.
+    if (l.allergyWarning && l.seat == null) alto += AVISO_PX;
     if (l.voidPending || l.changePending) alto += ANULADO_LINEA_PX;
   }
   alto += PIE_PX;

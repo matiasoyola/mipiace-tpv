@@ -315,8 +315,14 @@ describe("kds-1 · SABOTAJE · la alergia en cocina", () => {
       ]),
     );
     await render();
-    expect($('[data-testid="kds-silla"]')!.textContent).toBe("SILLA 3");
-    expect($('[data-testid="kds-lleva"]')!.textContent).toBe("¡LLEVA GLUTEN!");
+    // UNA línea para las dos cosas, como dice la decisión 3 («SILLA 3 ·
+    // SIN GLUTEN»). En dos líneas cada plato asignado costaba 79 px de
+    // alto y una mesa con tres se comía la pantalla — lo midió el bucle
+    // visual.
+    expect($('[data-testid="kds-silla"]')!.textContent).toBe(
+      "SILLA 3 · ¡LLEVA GLUTEN!",
+    );
+    expect($$('[data-testid="kds-lleva"]')).toHaveLength(0);
     const linea = $('[data-testid="kds-linea"]')!;
     // Recuadrado en rojo y parpadeando.
     expect(linea.style.border).toMatch(/3px solid/);
