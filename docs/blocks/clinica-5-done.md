@@ -460,24 +460,32 @@ bonos, dictado por voz y fisioterapia. Fuera de alcance declarado.
   prueba son las garantías del motor, y de paso queda como guardia de que
   una v1 sigue entrando después de este bloque.
 - **Dos ficheros de e2e fallan por EL RELOJ, no por la rama**: `f3-fichar`
-  y `f8-colegio`. Abren un fichaje «hace cuatro horas» y lo cierran ahora;
-  si las dos marcas caen en días **locales** distintos, el cierre da 409.
+  y `f8-colegio`. Abren un fichaje «hace N horas» y lo cierran ahora; si
+  las dos marcas caen en días **locales** distintos, el cierre da 409.
 
-  Pasa entre las **00:00 y las ~04:00 de Madrid** (22:00–02:00 UTC), y pasó
-  las dos veces: en local a las 00:06 y en la CI del PR a las 01:21 de
-  Madrid. La prueba de que es el reloj y no la rama son las dos puntas:
+  La franja mala es, por fichero, **de las 00:00 a las N:00 de Madrid**:
+  `f3-fichar` ficha hace 4 h y `f8-colegio` hace 6, así que el segundo
+  tarda dos horas más en curarse.
 
-  | Dónde | Hora de Madrid | e2e |
-  | ----- | -------------- | --- |
-  | `master`, último verde | 23:25 | ✅ |
-  | esta rama, en la CI | 01:21 | ❌ los mismos 6 |
-  | esta rama, en local | 00:06 | ❌ los mismos 6 |
+  Las tres corridas lo dejan atado, y la tercera es la que lo demuestra —
+  `f3` se curó solo al pasar de las 04:00 y `f8` no, que es exactamente lo
+  que predice la diferencia de horas:
+
+  | Hora de Madrid | `f3-fichar` (4 h) | `f8-colegio` (6 h) |
+  | -------------- | ----------------- | ------------------ |
+  | 00:06 (local) | ❌ | ❌ |
+  | 01:21 (CI) | ❌ | ❌ |
+  | 05:04 (CI) | ✅ | ❌ |
+  | ≥ 06:00 | ✅ | ✅ |
+
+  (El último verde de `master` fue a las 23:25 de Madrid, fuera de la
+  franja por los pelos.)
 
   Y la rama **no toca ni un fichero de fichaje**
-  (`git diff --name-only master` no devuelve ninguno). Los 27 ficheros
-  restantes —los 29 menos esos dos— pasan, incluidos los tres de clinica.
+  (`git diff --name-only master` no devuelve ninguno). A las 05:04 pasaban
+  28 ficheros de 29 y 480 tests de 485; los tres de clinica, entre ellos.
 
-  **Se arregla relanzando el job fuera de esa franja.** Lo que lo
+  **Se arregla relanzando el job pasadas las 06:00 de Madrid.** Lo que lo
   arreglaría de verdad es que esos dos e2e no usen el reloj de pared, y eso
   es de su bloque, no de éste.
 
