@@ -1,0 +1,49 @@
+{
+  "clave": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "sobre": {
+    "v": 1,
+    "storeId": "11111111-1111-4111-8111-111111111111",
+    "deviceId": "22222222-2222-4222-8222-222222222222",
+    "kind": "COMANDA",
+    "opId": "33333333-3333-4333-8333-333333333333",
+    "sentAt": "2026-10-09T12:34:56.000Z",
+    "nonce": "oKGio6Slpqeoqaqr",
+    "ct": "nTofQiiqbNsDFqXpXAHivRzFPH7m5CcC-EdCpEWJRjLhRXTMnBF-DmyvN-U9SbDKaiN1e1H9KU1ybThtl0O2g4ePp0MS1oGDgIuQdq307vmCSOLqhOO1WJocXfHU7gTwrb4Jnzeau6-q7zJ9sbzZHAlkVZrqGKMIG_vzkIBhxnnxJYRL53a0NRt7iupwJvSf7PuXBcu8lqDfudyXw6J6Sqt9PYuUJ3U0rihFVwKw05NVHMy0IBPcWefsAhtm5H47R1Ng6xO01ZmyKWL1axYCh2TE1dgSU-Hs3PNi1mn871FGYQIR40_1HaHQLjowbDk9atOmTKtoK_xJ2cQeEF9HsC0dms6jgOPAVYOVMkdoJZ0YVkYF7_-NCNRFd7aHwuNI9Sc1gBogOqGQGStC0dLbcvp7tztuFeGZKdtP2fzu3mahknq-mzxRNan6XjyiMeGSTvarJKN7At1sKqH_RQLxeHQ-l2XjBB1tz_Q2qUaWMeLvgm884B844vRlOXGphqDJSLnATJQxtC9aLcoBX96K8S3LPva-T-AICNT96j8IHAP3KCMpIMOXqH5VAZ2gKvoZaJn0sFufpBWCM6eBz14Gwz3c04je4OGWqfPybopRcKmgupphCU_dWw7ugUCzHNSdM4ruLbk_MNPEcl8B9Cctfkv-mpoQ9bFukCBtt5mtf2UvUPf2XiFzccgsmdqSRWuy4GWAFgG2XLfrrU_z1A"
+  },
+  "payload": {
+    "comandas": [
+      {
+        "clientSendId": "33333333-3333-4333-8333-333333333333",
+        "section": "COCINA",
+        "ticketId": "44444444-4444-4444-8444-444444444444",
+        "tableId": null,
+        "tableName": "M5",
+        "number": 1,
+        "urgent": false,
+        "sentAt": "2026-10-09T12:34:56.000Z",
+        "allergyBands": [
+          {
+            "titulo": "SILLA 3 · SIN GLUTEN",
+            "alergenos": "Gluten"
+          }
+        ],
+        "lines": [
+          {
+            "ticketLineId": "55555555-5555-4555-8555-555555555555",
+            "name": "Patatas bravas",
+            "units": 2,
+            "notes": [
+              "Sin picante"
+            ],
+            "course": 1,
+            "seat": 3,
+            "fired": true,
+            "carries": [],
+            "seatAllergy": "SIN GLUTEN",
+            "allergyWarning": null
+          }
+        ]
+      }
+    ]
+  }
+}
