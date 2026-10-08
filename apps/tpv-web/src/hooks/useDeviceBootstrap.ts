@@ -56,6 +56,24 @@ export interface KitchenMeResponse {
   store: { id: string; name: string };
   sections: Array<"BARRA" | "COCINA" | "SALON">;
   settings: { greenMaxMin: number; amberMaxMin: number; readyBeep: boolean };
+  /**
+   * kds-2-wifi · la hora del SERVIDOR al arrancar. Con ella la tablet
+   * calcula su desvío de reloj, y con el desvío mide si un mensaje de la
+   * wifi es «demasiado viejo». El reloj de una tablet que lleva horas sin
+   * internet no vale para eso.
+   *
+   * Opcional: una pantalla contra una API de antes del bloque sigue
+   * arrancando, sólo que sin camino directo.
+   */
+  serverTime?: string;
+  /**
+   * kds-2-wifi · con qué clave se firma y en qué puerto se escucha.
+   *
+   * Sin esto la tablet **no abre el servidor local**: una pantalla que
+   * escuchara sin clave aceptaría cualquier cosa de cualquiera que esté en
+   * la wifi del bar.
+   */
+  lan?: { key: string; port: number; maxAgeMs: number };
 }
 
 // v1.10-offline-un-terminal: cacheamos el device-me en localStorage. Un

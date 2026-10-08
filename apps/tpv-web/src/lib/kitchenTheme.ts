@@ -158,6 +158,27 @@ export const AMBAR_NOTA = "#F6CF7A";
 export const ROJO_SIN_CONEXION = "#8E1D11";
 
 /**
+ * kds-2-wifi · **«Sin internet · recibiendo por la wifi del local»**: una
+ * franja ámbar arriba, y NO la pantalla roja.
+ *
+ * La regla del rojo de la decisión 7 dice que el rojo se reserva para lo
+ * que no puede esperar. Aquí las comandas SÍ están llegando —por el camino
+ * directo— así que ponerse roja sería el aviso que nadie se cree a la
+ * tercera vez, y el cocinero que ve rojo deja de mirar la pantalla y
+ * empieza a preguntar a voces.
+ *
+ * Ámbar y no verde porque algo pasa y hay que decirlo: el camarero está
+ * sin «LISTO» inmediato y las estadísticas van con retraso. Es el mismo
+ * ámbar del semáforo oscurecido de kds-1b, para que la pantalla no tenga
+ * dos ámbares distintos.
+ */
+export const AMBAR_SOLO_WIFI = "#8A6410";
+export const AMBAR_SOLO_WIFI_TEXT = "#FFFFFF";
+
+/** El alto de esa franja. Legible desde la plancha, sin comerse una fila. */
+export const FRANJA_WIFI_PX = 44;
+
+/**
  * El verde de «hecho»: la pastilla de la columna «Listas» y el punto de
  * «En línea». NO es el del semáforo —aunque la maqueta los dibuje con el
  * mismo hex— porque lo que dice es otra cosa: «esto ya está».

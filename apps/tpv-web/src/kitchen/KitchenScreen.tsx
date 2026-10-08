@@ -25,6 +25,12 @@ import { useEffect, useRef, useState } from "react";
 
 import { apiWithDevice } from "../api.js";
 import {
+  clientSendIdDe,
+  esDeLaWifi,
+  useCocinaLan,
+  type MarcaLocal,
+} from "./useCocinaLan.js";
+import {
   colorMasN,
   cuentaMasN,
   mesasMasN,
@@ -32,6 +38,8 @@ import {
 } from "../lib/kitchenLayout.js";
 import { minutosDesdeMarchado } from "../lib/kitchenSemaforo.js";
 import {
+  AMBAR_SOLO_WIFI,
+  AMBAR_SOLO_WIFI_TEXT,
   BARRA_SUPERIOR_PX,
   COLUMNA_LISTAS_PX,
   COLUMNAS_A_1280,
@@ -42,6 +50,7 @@ import {
   DARK_TEXT_MUTED,
   EN_LINEA_PX,
   EYEBROW_COCINA_PX,
+  FRANJA_WIFI_PX,
   EYEBROW_COCINA_TRACKING,
   HOY_PX,
   INDICADOR_MAS_N_PX,
@@ -162,37 +171,118 @@ export function KitchenScreen({ me }: KitchenScreenProps) {
     return () => ro.disconnect();
   }, []);
 
+  // kds-2-wifi · un contador para repintar cuando llega algo por la wifi:
+  // ese camino no pasa por el `GET`, así que no hay respuesta de red que
+  // dispare el render.
+  const [, setTick] = useState(0);
+
   const vista = feed.vista;
   const settings = vista?.settings ?? me.settings;
   const mostrarSeccion = me.sections.length > 1;
 
-  const tachar = async (lineId: string, done: boolean) => {
-    await apiWithDevice(`/kitchen/lineas/${lineId}/hecho`, {
-      method: "POST",
-      body: { done },
+  // ── kds-2-wifi · UN TOQUE NO SE PIERDE NUNCA ────────────────────────
+  //
+  // Cada marca intenta primero la nube, que es la verdad. Si no hay red —o
+  // si la tarjeta sólo existe aquí, porque llegó por la wifi y el servidor
+  // todavía no la conoce— se apunta en el LIBRO DE MARCAS local, con la
+  // hora de esta tablet, y se sube al volver.
+  //
+  // El orden es ése y no el contrario: con red, el servidor manda y la
+  // pantalla se recarga de él. El libro es para cuando no hay servidor.
+  const marcar = async (
+    c: Comanda,
+    marca: Omit<MarcaLocal, "markId" | "at" | "clientSendId" | "section">,
+    enLaNube: () => Promise<unknown>,
+  ) => {
+    // Una tarjeta de la wifi no tiene id de servidor: su marca va al libro
+    // directamente. Llamar a la nube con un `lan:…` daría un 404.
+    if (!esDeLaWifi(c)) {
+      try {
+        await enLaNube();
+        feed.recargar();
+        return;
+      } catch {
+        // Sin red. Sigue abajo: se apunta y se aplica aquí.
+      }
+    }
+    lanCocina.apuntarMarca({
+      ...marca,
+      clientSendId: clientSendIdDe(c),
+      section: c.section,
     });
-    feed.recargar();
   };
-  const visto = async (lineId: string) => {
-    await apiWithDevice(`/kitchen/lineas/${lineId}/visto`, { method: "POST" });
-    feed.recargar();
-  };
-  const lista = async (orderId: string) => {
-    await apiWithDevice(`/kitchen/comandas/${orderId}/lista`, { method: "POST" });
-    feed.recargar();
-  };
+
+  const tachar = (c: Comanda) => async (lineId: string, done: boolean) =>
+    marcar(
+      c,
+      { kind: "HECHO", ticketLineId: lineId, done },
+      () =>
+        apiWithDevice(`/kitchen/lineas/${lineId}/hecho`, {
+          method: "POST",
+          body: { done },
+        }),
+    );
+  const visto = (c: Comanda) => async (lineId: string) =>
+    marcar(c, { kind: "VISTO", ticketLineId: lineId, done: null }, () =>
+      apiWithDevice(`/kitchen/lineas/${lineId}/visto`, { method: "POST" }),
+    );
+  const lista = (c: Comanda) => async () =>
+    marcar(c, { kind: "LISTA", ticketLineId: null, done: null }, () =>
+      apiWithDevice(`/kitchen/comandas/${c.id}/lista`, { method: "POST" }),
+    );
+  // El urgente NO va al libro: es del TPV, no de la cocina (decisión 9), y
+  // el toque largo de la pantalla es una cortesía. Sin red se queda sin
+  // hacer y se verá al volver; lo que no puede pasar es que la tablet
+  // suba un estado que no le toca y pise lo que diga el TPV.
   const urgente = async (orderId: string, urgent: boolean) => {
-    await apiWithDevice(`/kitchen/comandas/${orderId}/urgente`, {
-      method: "POST",
-      body: { urgent },
-    });
+    try {
+      await apiWithDevice(`/kitchen/comandas/${orderId}/urgente`, {
+        method: "POST",
+        body: { urgent },
+      });
+    } catch {
+      /* sin red, el urgente de cocina espera */
+    }
     feed.recargar();
   };
 
   // Sin ordenar: ordena `repartirTarjetas`, que es el único sitio donde se
   // ordena (kds-1c). Pasarla por aquí ya ordenada volvería a dar dos
   // ordenaciones que pueden discrepar, y la que discrepa esconde mesas.
-  const abiertas: Comanda[] = vista?.orders ?? [];
+  // ── kds-2-wifi · LO QUE LLEGA POR LA WIFI ───────────────────────────
+  //
+  // `extras` son las tarjetas que **sólo** existen en esta tablet: las que
+  // entraron por el camino directo mientras no había internet. Al volver
+  // la red, el servidor recibe el mismo `clientSendId`, crea la tarjeta de
+  // verdad, y el hook suelta las suyas: por eso no se duplican.
+  //
+  // Mientras conviven, se descarta por `clientSendId`: si una tarjeta de la
+  // wifi tiene ya su gemela en el GET, la que se pinta es la del servidor,
+  // que es la verdad y la que lleva los ids con los que se puede tachar.
+  // Es la fila «al volver internet, duplicar» de la tabla de sabotajes.
+  const lanCocina = useCocinaLan({
+    me,
+    offline: feed.offline,
+    listas: feed.listas,
+    onCambio: () => setTick((t) => t + 1),
+  });
+
+  const yaEnLaNube = new Set(
+    (vista?.orders ?? []).map((o) => `${o.ticketId}:${o.section}:${o.number}`),
+  );
+  const soloDeLaWifi = lanCocina.extras.filter(
+    (c) =>
+      c.servedAt == null &&
+      !yaEnLaNube.has(`${c.ticketId}:${c.section}:${c.number}`),
+  );
+
+  // Y las marcas que el cocinero hizo sin red se aplican ENCIMA de lo que
+  // se pinte, venga del servidor o de la wifi: el `GET` que no se pudo
+  // hacer no sabe nada de ellas, y el toque tiene que verse en el momento.
+  const abiertas: Comanda[] = conMarcasLocales(
+    [...(vista?.orders ?? []), ...soloDeLaWifi],
+    lanCocina.pendientes,
+  );
   const reparto = repartirTarjetas(abiertas, zona, mostrarSeccion);
   const colorFranja = colorMasN(reparto.extra, settings, feed.ahora);
 
@@ -203,10 +293,47 @@ export function KitchenScreen({ me }: KitchenScreenProps) {
       className="h-screen w-screen overflow-hidden flex flex-col font-sans select-none"
       style={{ background: DARK_CANVAS, color: DARK_TEXT }}
     >
+      {/* ── kds-2-wifi · SIN INTERNET PERO RECIBIENDO POR LA WIFI ────
+          Franja ámbar arriba, y la pantalla NO se pone roja: las comandas
+          están llegando por el camino directo. La regla del rojo
+          (decisión 7) lo reserva para lo que no puede esperar, y un rojo
+          que miente es el aviso que nadie se cree a la tercera vez.
+
+          Lo que el ámbar sí dice: el camarero no tiene «LISTO» inmediato
+          y los tiempos de cocina van con retraso hasta que vuelva la red.
+
+          Tiene su fila en la tabla de sabotajes: «pantalla roja con la
+          wifi funcionando». */}
+      {feed.offline && lanCocina.recibiendoPorWifi && (
+        <div
+          data-testid="kds-solo-wifi"
+          className="shrink-0 flex items-center justify-center gap-3 font-bold"
+          style={{
+            height: FRANJA_WIFI_PX,
+            background: AMBAR_SOLO_WIFI,
+            color: AMBAR_SOLO_WIFI_TEXT,
+            fontSize: EN_LINEA_PX + 3,
+          }}
+        >
+          <span>Sin internet · recibiendo por la wifi del local</span>
+          {lanCocina.pendientes.length > 0 && (
+            <span
+              data-testid="kds-marcas-pendientes"
+              style={{ fontSize: EN_LINEA_PX, fontWeight: 600, opacity: 0.9 }}
+            >
+              · {lanCocina.pendientes.length} por subir
+            </span>
+          )}
+        </div>
+      )}
+
       {/* ── Decisión 9 · SIN CONEXIÓN: la pantalla ENTERA en rojo ──────
           Entera y no un icono: lo que hay que entender desde la plancha,
-          sin acercarse, es que lo que se ve ya no es lo que hay. */}
-      {feed.offline && (
+          sin acercarse, es que lo que se ve ya no es lo que hay.
+
+          kds-2-wifi · **sólo si tampoco llega por la wifi**. Ni internet ni
+          wifi es cuando de verdad las comandas no llegan. */}
+      {feed.offline && !lanCocina.recibiendoPorWifi && (
         <div
           data-testid="kds-sin-conexion"
           className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 text-center px-10"
@@ -247,7 +374,15 @@ export function KitchenScreen({ me }: KitchenScreenProps) {
               height: 36,
               padding: "0 12px",
               borderRadius: 18,
-              background: feed.offline ? ROJO_SIN_CONEXION : VERDE_EN_LINEA_FONDO,
+              // kds-2-wifi · TRES estados y no dos: en línea, por la wifi
+              // del local, y sin conexión. El de en medio es el que este
+              // bloque añade, y es el que evita que el cocinero vea rojo
+              // mientras las comandas están entrando.
+              background: !feed.offline
+                ? VERDE_EN_LINEA_FONDO
+                : lanCocina.recibiendoPorWifi
+                ? AMBAR_SOLO_WIFI
+                : ROJO_SIN_CONEXION,
               color: feed.offline ? "#FFFFFF" : VERDE_LISTA,
               fontSize: EN_LINEA_PX,
             }}
@@ -260,7 +395,11 @@ export function KitchenScreen({ me }: KitchenScreenProps) {
                 background: feed.offline ? "#FFFFFF" : VERDE_LISTA,
               }}
             />
-            {feed.offline ? "SIN CONEXIÓN" : "En línea"}
+            {!feed.offline
+              ? "En línea"
+              : lanCocina.recibiendoPorWifi
+              ? "POR LA WIFI"
+              : "SIN CONEXIÓN"}
           </span>
           {/* LA HORA. La maqueta la lleva y la primera captura no: en una
               cocina sin reloj de pared, «14 min» no dice a qué hora entró
@@ -325,9 +464,9 @@ export function KitchenScreen({ me }: KitchenScreenProps) {
               settings={settings}
               ahora={feed.ahora}
               mostrarSeccion={mostrarSeccion}
-              onTachar={tachar}
-              onVisto={visto}
-              onLista={() => void lista(c.id)}
+              onTachar={(lineId, done) => void tachar(c)(lineId, done)}
+              onVisto={(lineId) => void visto(c)(lineId)}
+              onLista={() => void lista(c)()}
               onUrgente={(u) => void urgente(c.id, u)}
             />
           ))}
@@ -601,4 +740,59 @@ function horaCorta(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/**
+ * kds-2-wifi · las marcas que se hicieron SIN RED, aplicadas encima.
+ *
+ * El `GET /kitchen/comandas` que no se pudo hacer no sabe nada de ellas, y
+ * un toque que no se ve en el momento es un toque que el cocinero repite.
+ *
+ * Se aplican **en orden de `at`** porque tachar y destachar el mismo plato
+ * tiene que acabar como acabó de verdad, no como venga la lista. Es la
+ * misma regla que aplica el servidor al recibir el libro.
+ */
+export function conMarcasLocales(
+  comandas: Comanda[],
+  marcas: MarcaLocal[],
+): Comanda[] {
+  if (marcas.length === 0) return comandas;
+  const ordenadas = [...marcas].sort(
+    (a, b) => Date.parse(a.at) - Date.parse(b.at),
+  );
+  return comandas.map((c) => {
+    const envio = clientSendIdDe(c);
+    const mias = ordenadas.filter(
+      (m) => m.clientSendId === envio && m.section === c.section,
+    );
+    if (mias.length === 0) return c;
+    let out = c;
+    for (const m of mias) {
+      if (m.kind === "LISTA") {
+        out = { ...out, readyAt: out.readyAt ?? m.at };
+        continue;
+      }
+      out = {
+        ...out,
+        lines: out.lines.map((l) => {
+          if (l.id !== m.ticketLineId) return l;
+          if (m.kind === "VISTO") {
+            return { ...l, voidPending: false, changePending: false };
+          }
+          return { ...l, done: m.done === true };
+        }),
+      };
+    }
+    // Todos tachados → «Lista» sola, igual que en el servidor (decisión 4).
+    // Las que están EN ESPERA no cuentan y las anuladas por completo
+    // tampoco: la cocina no tiene que tachar lo que ya no se hace.
+    const pendientes = out.lines.filter(
+      (l) => l.fired && !l.done && l.units > 0,
+    ).length;
+    if (pendientes === 0 && out.readyAt == null && out.lines.length > 0) {
+      const ultima = mias[mias.length - 1]!;
+      out = { ...out, readyAt: ultima.at };
+    }
+    return out;
+  });
 }

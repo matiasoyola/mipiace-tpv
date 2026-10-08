@@ -95,4 +95,8 @@ export interface KitchenMe {
   store: { id: string; name: string };
   sections: KitchenSection[];
   settings: AjustesCocina;
+  /** kds-2-wifi · la hora del servidor al arrancar (para el desvío). */
+  serverTime?: string;
+  /** kds-2-wifi · la clave de la tienda y el puerto del servidor local. */
+  lan?: { key: string; port: number; maxAgeMs: number };
 }
