@@ -56,6 +56,7 @@ function linea(id, name, units, over = {}) {
     changeNote: null,
     changePending: false,
     carries: [],
+    seatAllergy: null,
     allergyWarning: null,
     ...over,
   };
@@ -100,14 +101,15 @@ const COMANDAS = [
   comanda("o-m5", "M5", 7, {
     number: 2,
     isNew: true,
-    allergyBands: ["⚠ SILLA 3 · SIN GLUTEN"],
+    allergyBands: [{ titulo: "SILLA 3 · CELÍACO", alergenos: "Gluten" }],
     lines: [
-      linea("o-m5-l1", "Magro con tomate", 1, { seat: 3 }),
+      linea("o-m5-l1", "Magro con tomate", 1, { seat: 3, seatAllergy: "SIN GLUTEN" }),
       linea("o-m5-l2", "Patatas bravas", 1, {
         seat: 3,
+        seatAllergy: "SIN GLUTEN",
         allergyWarning: "¡LLEVA GLUTEN!",
       }),
-      linea("o-m5-l3", "Croquetas", 2),
+      linea("o-m5-l3", "Croquetas", 2, { carries: ["lleva gluten"] }),
     ],
   }),
   // Verde.
@@ -151,6 +153,19 @@ const COMANDAS = [
   comanda("o-b1", "B1", 3, {
     isNew: true,
     lines: [linea("o-b1-l1", "Torrezno", 1), linea("o-b1-l2", "Fingers de pollo", 2)],
+  }),
+  // Con cuatro columnas caben ocho, así que hacen falta más para que la
+  // franja «+N» tenga trabajo. La B3 es NUEVA: la franja tiene que
+  // parpadear en VERDE, no en rojo.
+  comanda("o-b3", "B3", 1, {
+    isNew: true,
+    lines: [linea("o-b3-l1", "Ensaladilla rusa", 1)],
+  }),
+  comanda("o-t1", "T1", 6, {
+    lines: [linea("o-t1-l1", "Queso curado", 1), linea("o-t1-l2", "Torrezno especial", 1)],
+  }),
+  comanda("o-m7", "M7", 8, {
+    lines: [linea("o-m7-l1", "Gambas al ajillo", 2)],
   }),
 ];
 
@@ -292,13 +307,70 @@ const browser = await chromium.launch({ executablePath: CHROME });
       })),
     ),
     tarjeta: await rect(page, '[data-testid="kds-comanda"]'),
+    // ── LOS SEIS SABOTAJES VISUALES DE kds-1b ─────────────────────────
+    //
+    // 1 · el cuerpo de TODAS las tarjetas, neutro. Se lee el estilo EN
+    //     LÍNEA y no el calculado: el calculado de una tarjeta nueva está
+    //     a mitad de la animación del pulso y devuelve un valor distinto
+    //     en cada captura.
+    cuerposDeTarjeta: await page.evaluate(() =>
+      [...document.querySelectorAll('[data-testid="kds-comanda"]')].map((el) => ({
+        id: el.dataset.comandaId,
+        urgente: el.dataset.urgente === "1",
+        bandas: el.querySelectorAll('[data-testid="kds-franja-alergia"]').length,
+        fondo: el.style.background,
+        pulso: el.className.match(/kds-pulso-\w+/)?.[0] ?? null,
+      })),
+    ),
+    // 2 · la franja de la alergia: fondo rojo y 21 px.
+    franjaAlergiaTitulo: await rect(page, '[data-testid="kds-franja-alergia-titulo"]'),
+    franjaAlergiaAlergeno: await rect(
+      page,
+      '[data-testid="kds-franja-alergia-alergeno"]',
+    ),
+    // 3 · los modificadores: ámbar y 17 px.
+    // 4 · cuántas tarjetas hay en la PRIMERA FILA.
+    tarjetasEnPrimeraFila: await page.evaluate(() => {
+      const tarjetas = [...document.querySelectorAll('[data-testid="kds-comanda"]')];
+      if (tarjetas.length === 0) return 0;
+      const y0 = Math.round(tarjetas[0].getBoundingClientRect().top);
+      return tarjetas.filter(
+        (el) => Math.abs(Math.round(el.getBoundingClientRect().top) - y0) <= 2,
+      ).length;
+    }),
+    // 5 · el color de la franja «+N».
+    masNColor: await page.evaluate(() => {
+      const el = document.querySelector('[data-testid="kds-mas-n"]');
+      if (!el) return null;
+      return {
+        estado: el.dataset.color,
+        fondo: el.style.background,
+        pulso: el.className.match(/kds-pulso-\w+/)?.[0] ?? null,
+      };
+    }),
+    hora: await page
+      .locator('[data-testid="kds-hora"]')
+      .textContent()
+      .catch(() => null),
+    listaItemTexto: await page
+      .locator('[data-testid="kds-lista-item"]')
+      .first()
+      .textContent()
+      .catch(() => null),
     cabecera: await rect(page, '[data-testid="kds-cabecera"]'),
     mesa: await rect(page, '[data-testid="kds-cabecera"] span'),
     franjaUrgente: await rect(page, '[data-testid="kds-franja-urgente"]'),
     franjaAlergia: await rect(page, '[data-testid="kds-franja-alergia"]'),
+    silla: await rect(page, '[data-testid="kds-silla"]'),
     lleva: await rect(page, '[data-testid="kds-lleva"]'),
     linea: await rect(page, '[data-testid="kds-linea"] button'),
     nota: await rect(page, '[data-testid="kds-nota"]'),
+    notaColor: await page.evaluate(() => {
+      const el = document.querySelector('[data-testid="kds-nota"]');
+      if (!el) return null;
+      const cs = getComputedStyle(el);
+      return { fontSize: cs.fontSize, color: cs.color, fontWeight: cs.fontWeight };
+    }),
     lista: await rect(page, '[data-testid="kds-lista"]'),
     visto: await rect(page, '[data-testid="kds-visto"]'),
     masN: await rect(page, '[data-testid="kds-mas-n"]'),
@@ -317,6 +389,13 @@ const browser = await chromium.launch({ executablePath: CHROME });
     //
     // Esto es lo que lo comprueba contra el navegador de verdad: la altura
     // REAL de cada tarjeta pintada. El `-done` lleva el número.
+    // **Y SE GUARDA LO BASTANTE PARA REHACER LA TARJETA**: el nombre de
+    // cada plato y sus marcas. Con eso, `kds-pantalla-pura.test.ts` puede
+    // volver a pasar cada tarjeta medida por `altoTarjeta` y comprobar que
+    // la estimación queda POR ENCIMA del alto real. Si no lo estuviera, el
+    // reparto creería que una fila cabe cuando no cabe y una tarjeta SE
+    // CORTARÍA, que es lo que la decisión 7 prohíbe. El bucle visual deja
+    // el dato y el test lo vigila en cada `pnpm test`.
     alturasReales: await page.evaluate(() =>
       [...document.querySelectorAll('[data-testid="kds-comanda"]')].map((el) => ({
         id: el.dataset.comandaId,
@@ -329,12 +408,71 @@ const browser = await chromium.launch({ executablePath: CHROME });
         avisos: el.querySelectorAll('[data-testid="kds-lleva"]').length,
         anulados: el.querySelectorAll('[data-testid="kds-anulado"]').length,
         espera: el.querySelectorAll('[data-testid="kds-bloque-espera"]').length,
+        eyebrow: el.querySelectorAll('[data-testid="kds-numero"]').length,
+        platos: [...el.querySelectorAll('[data-testid="kds-linea"]')].map((li) => ({
+          name: li.querySelector('[data-testid="kds-plato"]')?.textContent ?? "",
+          notes: li.querySelectorAll('[data-testid="kds-nota"]').length,
+          carries: li.querySelectorAll('[data-testid="kds-carries"]').length,
+          seat: li.querySelectorAll('[data-testid="kds-silla"]').length > 0,
+          lleva: li.querySelectorAll('[data-testid="kds-lleva"]').length > 0,
+          anulado: li.querySelectorAll('[data-testid="kds-anulado"]').length > 0,
+          espera: li.dataset.espera === "1",
+        })),
       })),
     ),
+    // ── LA CALIBRACIÓN, PIEZA A PIEZA ────────────────────────────────
+    //
+    // `altoTarjeta` suma piezas, así que para calibrarla hace falta medir
+    // las piezas y no sólo el total. `getClientRects().length` sobre el
+    // `<span>` del nombre dice EN CUÁNTAS LÍNEAS se partió, que es lo que
+    // el reparto tiene que adivinar sin pintar.
+    piezasReales: await page.evaluate(() => {
+      const uno = (sel) => {
+        const el = document.querySelector(sel);
+        return el ? Math.round(el.getBoundingClientRect().height * 10) / 10 : null;
+      };
+      return {
+        cabecera: uno('[data-testid="kds-cabecera"]'),
+        franjaUrgente: uno('[data-testid="kds-franja-urgente"]'),
+        franjaAlergia: uno('[data-testid="kds-franja-alergia"]'),
+        bloqueEspera: uno('[data-testid="kds-bloque-espera"]'),
+        lista: uno('[data-testid="kds-lista"]'),
+        lineas: [...document.querySelectorAll('[data-testid="kds-linea"]')].map(
+          (el) => {
+            const nombre = el.querySelector('[data-testid="kds-plato"]');
+            return {
+              plato: nombre?.textContent ?? null,
+              caracteres: (nombre?.textContent ?? "").length,
+              // CUÁNTAS LÍNEAS ocupó el nombre. No vale
+              // `getClientRects().length`: el `<span>` es hijo de un flex,
+              // o sea un bloque, y un bloque devuelve UN rectángulo
+              // aunque su texto vaya en tres líneas. Se divide su alto por
+              // el `line-height` y se redondea.
+              lineasDeTexto: nombre
+                ? Math.round(
+                    nombre.getBoundingClientRect().height /
+                      Number.parseFloat(getComputedStyle(nombre).lineHeight),
+                  )
+                : 0,
+              alto: Math.round(el.getBoundingClientRect().height * 10) / 10,
+              notas: el.querySelectorAll('[data-testid="kds-nota"]').length,
+              silla: el.querySelectorAll('[data-testid="kds-silla"]').length,
+              lleva: el.querySelectorAll('[data-testid="kds-lleva"]').length,
+              carries: el.querySelectorAll('[data-testid="kds-carries"]').length,
+              anulado: el.querySelectorAll('[data-testid="kds-anulado"]').length,
+            };
+          },
+        ),
+      };
+    }),
     hoy: await rect(page, '[data-testid="kds-hoy"]'),
     // El parpadeo: lo que la decisión 8 fija en 2,5 s.
     pulsoTarjeta: await page.evaluate(() => {
       const el = document.querySelector(".kds-pulso-tarjeta");
+      return el ? getComputedStyle(el).animationDuration : null;
+    }),
+    pulsoNueva: await page.evaluate(() => {
+      const el = document.querySelector(".kds-pulso-nueva");
       return el ? getComputedStyle(el).animationDuration : null;
     }),
     pulsoRojo: await page.evaluate(() => {
@@ -518,16 +656,21 @@ function lineaTpv(id, prod, units, over = {}) {
   };
 }
 
+// **LAS BRAVAS SE QUEDAN SIN ENVIAR Y SIN SILLA**, que es lo que dibuja
+// `docs/kds/maqueta/Comanda.dc.html` y lo que la primera captura no
+// enseñaba: con las cuatro líneas ya en cocina no hay ninguna pendiente, y
+// «Espera» y el aviso de «¡Lleva gluten!» sólo existen sobre una línea
+// pendiente. El banco las deja así y luego toca «→ Silla 3» para que salte
+// el aviso, que es el camino real del camarero.
 const LINEAS_TPV = [
   lineaTpv("l-magro", "Magro con tomate", 1, { seat: 3 }),
-  lineaTpv("l-bravas", "Patatas bravas", 1, { seat: 3 }),
+  lineaTpv("l-bravas", "Patatas bravas", 1, { seat: null }),
   lineaTpv("l-croquetas", "Croquetas", 2),
   lineaTpv("l-cana", "Caña", 2),
   lineaTpv("l-filete", "Filete de ternera", 2, { course: 2 }),
 ];
 const ENVIADAS = {
   "l-magro": 1,
-  "l-bravas": 1,
   "l-croquetas": 2,
   "l-cana": 2,
 };
@@ -774,6 +917,52 @@ for (const { name, viewport } of [
     }),
   };
 
+  // ── «ESPERA» Y «¡LLEVA GLUTEN!», que es lo que faltaba en la captura ──
+  //
+  // Las bravas están pendientes, así que llevan sus chips. Se toca
+  // «→ Silla 3» —la silla celíaca— y salta el aviso de la capa 3, que
+  // avisa SIN BLOQUEAR (decisión 3): a veces la cocina tiene la versión
+  // sin gluten y el camarero sabe cosas que el catálogo no.
+  {
+    const chips = page.locator(
+      '[data-testid="comanda-linea-chips"][data-line-id="l-bravas"]',
+    );
+    medidas[`tpv-comanda-${name}`].chipsDeLaPendiente = await chips
+      .textContent()
+      .catch(() => null);
+    const silla = chips.locator('[data-testid="chip-silla"]').first();
+    if (await silla.count()) {
+      await silla.click();
+      await page.waitForTimeout(350);
+    }
+    await page.screenshot({ path: `${OUT}/tpv-comanda-espera-${name}.png` });
+    medidas[`tpv-comanda-${name}`].avisoAlergeno = await page
+      .locator('[data-testid="aviso-alergeno"]')
+      .textContent()
+      .catch(() => null);
+    medidas[`tpv-comanda-${name}`].chipEsperaVisible =
+      (await chips.locator('[data-testid="chip-espera"]').count()) > 0;
+
+    // EL SABOTAJE DEL CORAL, medido: el fondo de TODOS los botones de la
+    // comanda. El único coral tiene que ser «Cobrar».
+    medidas[`tpv-comanda-${name}`].botonesDeLaComanda = await page.evaluate(() => {
+      const comanda = document.querySelector('[data-testid="comanda"]');
+      if (!comanda) return null;
+      return [...comanda.querySelectorAll("button")]
+        .map((b) => ({
+          testid: b.dataset.testid ?? (b.textContent ?? "").trim().slice(0, 24),
+          fondo: getComputedStyle(b).backgroundColor,
+        }))
+        .filter((b) => b.fondo === "rgb(233, 112, 88)");
+    });
+    // Y se cierra el aviso para que el resto de las capturas no lo lleven.
+    const cerrar = page.locator('[data-testid="aviso-alergeno"]');
+    if (await cerrar.count()) {
+      await cerrar.click();
+      await page.waitForTimeout(250);
+    }
+  }
+
   // El «Deshacer» de 5 s: se toca el `−` de una línea enviada.
   const menos = page.locator('[data-testid="stepper-menos-enviado"]').first();
   if (await menos.count()) {
@@ -806,6 +995,14 @@ for (const { name, viewport } of [
     opciones: await page.locator('[data-testid="alergias-opcion"]').count(),
     opcion: await rect(page, '[data-testid="alergias-opcion"]'),
     tablero: await rect(page, '[data-testid="alergias-tablero"]'),
+    referencia: await page
+      .locator('[data-testid="alergias-referencia"]')
+      .textContent()
+      .catch(() => null),
+    guardarFondo: await page.evaluate(() => {
+      const el = document.querySelector('[data-testid="alergias-guardar"]');
+      return el ? getComputedStyle(el).backgroundColor : null;
+    }),
     scroll: await page.evaluate(() => ({
       scrollHeight: document.documentElement.scrollHeight,
       clientHeight: document.documentElement.clientHeight,

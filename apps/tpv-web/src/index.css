@@ -65,7 +65,24 @@
    `prefers-reduced-motion`: se quita la animación y queda el fondo del
    extremo FIJO. No se queda sin aviso — se queda sin movimiento. */
 
+/* El pulso de una TARJETA nueva: del cuerpo a un carbón un peldaño más
+   claro. Neutro de verdad, no un verde: el verde de esta pantalla
+   significa «va bien» en el semáforo y «ya está» en «Listas», y una
+   tarjeta que se tiñe de verde entera dice las dos cosas a la vez. */
 @keyframes kds-pulso-tarjeta {
+  0%,
+  100% {
+    background-color: #1a1d23;
+  }
+  50% {
+    background-color: #272c35;
+  }
+}
+
+/* El pulso de la franja «+N» cuando lo que hay detrás es NUEVO: ése sí va
+   al verde de la maqueta (`@keyframes pulso`). Es una franja de 60 px en
+   el borde, no una tarjeta, y lo que dice es «ha entrado algo». */
+@keyframes kds-pulso-nueva {
   0%,
   100% {
     background-color: #1a1d23;
@@ -107,6 +124,10 @@
   animation: kds-pulso-tarjeta 2500ms ease-in-out infinite;
 }
 
+.kds-pulso-nueva {
+  animation: kds-pulso-nueva 2500ms ease-in-out infinite;
+}
+
 .kds-pulso-rojo {
   animation: kds-pulso-rojo 2500ms ease-in-out infinite;
 }
@@ -117,6 +138,10 @@
 
 @media (prefers-reduced-motion: reduce) {
   .kds-pulso-tarjeta {
+    animation: none;
+    background-color: #272c35;
+  }
+  .kds-pulso-nueva {
     animation: none;
     background-color: #2b4636;
   }

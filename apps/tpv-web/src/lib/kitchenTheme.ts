@@ -352,15 +352,28 @@ export const PULSO_MS = 2500;
 export const PULSO_SELECTORES = ["tarjeta", "linea"] as const;
 
 /**
- * El pulso de lo NUEVO: `#1A1D23` ↔ `#2B4636`, o sea del cuerpo de la
- * tarjeta a un verde apagado. Es la `@keyframes pulso` de la maqueta.
+ * El pulso de una TARJETA nueva: `#1A1D23` ↔ `#272C35`, del cuerpo a un
+ * carbón un peldaño más claro.
  *
  * **Es el único pulso que lleva una tarjeta.** Una comanda nueva —urgente
  * o con alergia incluidas— parpadea con éste: lo que el parpadeo dice es
  * «nadie ha mirado esto todavía», y eso no es rojo. El rojo ya está donde
  * tiene que estar, en la franja y en el plato.
+ *
+ * Y tampoco es verde: la primera captura de kds-1b lo probó con el verde
+ * de la maqueta (`#2B4636`) y la tarjeta entera se leía como una tarjeta
+ * VERDE, que en esta pantalla ya significa «va bien» en el semáforo y «ya
+ * está» en «Listas». El verde se queda donde la maqueta lo pone, que es
+ * la franja «+N».
  */
 export const PULSO_CLASS_TARJETA = "kds-pulso-tarjeta";
+
+/**
+ * El pulso de la franja «+N» cuando lo que no cabe es NUEVO: `#1A1D23` ↔
+ * `#2B4636`, la `@keyframes pulso` de la maqueta. Una franja de 60 px en
+ * el borde puede permitirse el verde; una tarjeta entera no.
+ */
+export const PULSO_CLASS_NUEVA = "kds-pulso-nueva";
 
 /**
  * El pulso de la ALARMA: `#C8102E` ↔ `#7A0A1C`, la `pulsorojo` de la

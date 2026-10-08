@@ -44,6 +44,7 @@ import {
   COLUMNAS_A_1280,
   NOTA_PX,
   PULSO_CLASS_AMBAR,
+  PULSO_CLASS_NUEVA,
   PULSO_CLASS_ROJO,
   PULSO_CLASS_TARJETA,
   PULSO_MS,
@@ -77,6 +78,7 @@ function linea(over: Partial<TarjetaMedible["lines"][number]> = {}) {
     // mide `altoTarjeta` — tiene su propio test más abajo.
     name: "Croquetas",
     notes: [],
+    carries: [],
     allergyWarning: null,
     seat: null,
     voidPending: false,
@@ -94,6 +96,7 @@ function tarjeta(over: Partial<TarjetaMedible> = {}): TarjetaMedible {
     urgent: false,
     isNew: false,
     firedAt: AHORA,
+    lateArrival: false,
     allergyBands: [],
     lines: [linea()],
     ...over,
@@ -378,6 +381,97 @@ describe("kds-1b · SABOTAJE · la franja de alergia y las notas", () => {
   });
 });
 
+describe("kds-1b · la estimación de altura, contra lo que mide el navegador", () => {
+  /**
+   * **EL CIERRE DEL BUCLE VISUAL, dentro de la suite.**
+   *
+   * `altoTarjeta` ESTIMA la altura de los tokens en vez de medirla con el
+   * DOM (ver su cabecera: medir pide dos pasadas y parpadea en cada
+   * cambio). La estimación tiene que ir POR LO ALTO: por lo bajo, el
+   * reparto cree que una fila cabe cuando no cabe y una tarjeta SE CORTA,
+   * que es lo que la decisión 7 prohíbe.
+   *
+   * El bucle visual deja en `medidas.json` el alto REAL de cada tarjeta
+   * pintada a 1280 × 800 y lo bastante para rehacerla. Este test las
+   * rehace y comprueba la desigualdad. Así el bucle visual no es algo que
+   * haya que acordarse de correr: su medida queda vigilada en cada
+   * `pnpm test`.
+   *
+   * La primera versión de kds-1b se quedó CORTA en dos tarjetas —29 px en
+   * una de tres platos y 52 en la de la alergia— porque sumaba los 8 + 8
+   * de relleno de la maqueta FUERA del mínimo táctil de 56 px y porque no
+   * contaba la pastilla «lleva gluten». Esto es lo que lo enseñó.
+   */
+  const MEDIDAS = JSON.parse(
+    readFileSync(
+      path.join(
+        path.dirname(fileURLToPath(import.meta.url)),
+        "..",
+        "..",
+        "..",
+        "docs",
+        "blocks",
+        "kds-1-cocina-shots",
+        "medidas.json",
+      ),
+      "utf8",
+    ),
+  ) as {
+    "cocina-1280x800": {
+      alturasReales: Array<{
+        id: string;
+        alto: number;
+        urgente: boolean;
+        bandas: number;
+        eyebrow: number;
+        platos: Array<{
+          name: string;
+          notes: number;
+          carries: number;
+          seat: boolean;
+          lleva: boolean;
+          anulado: boolean;
+          espera: boolean;
+        }>;
+      }>;
+    };
+  };
+
+  const reales = MEDIDAS["cocina-1280x800"].alturasReales;
+
+  it("hay tarjetas medidas: si no, el bucle visual no corrió", () => {
+    expect(reales.length).toBeGreaterThan(0);
+  });
+
+  for (const r of reales) {
+    it(`la estimación de ${r.id} queda por encima de sus ${r.alto} px reales`, () => {
+      const rehecha: TarjetaMedible = {
+        id: r.id,
+        tableName: r.id,
+        // El eyebrow se cuenta por `number > 1`, que es cómo lo pinta la
+        // tarjeta; el bucle visual guarda si salió.
+        number: r.eyebrow > 0 ? 2 : 1,
+        urgent: r.urgente,
+        isNew: false,
+        firedAt: AHORA,
+        lateArrival: false,
+        allergyBands: Array.from({ length: r.bandas }, () => ({})),
+        lines: r.platos.map((p) => ({
+          name: p.name,
+          notes: Array.from({ length: p.notes }, (_, i) => `n${i}`),
+          carries: Array.from({ length: p.carries }, (_, i) => `c${i}`),
+          allergyWarning: p.lleva ? "¡LLEVA GLUTEN!" : null,
+          seat: p.seat ? 3 : null,
+          voidPending: p.anulado,
+          changePending: false,
+          fired: !p.espera,
+        })),
+      };
+      expect(altoTarjeta(rehecha)).toBeGreaterThanOrEqual(r.alto);
+    });
+  }
+});
+
 describe("kds-1 · SABOTAJE · parpadeo de 1 s o de pantalla entera", () => {
   const CSS = readFileSync(
     path.join(
@@ -393,8 +487,13 @@ describe("kds-1 · SABOTAJE · parpadeo de 1 s o de pantalla entera", () => {
     expect(PULSO_MS).toBeGreaterThanOrEqual(2500);
   });
 
-  it("las tres animaciones del CSS usan ESE número", () => {
-    for (const clase of [PULSO_CLASS_TARJETA, PULSO_CLASS_ROJO, PULSO_CLASS_AMBAR]) {
+  it("las cuatro animaciones del CSS usan ESE número", () => {
+    for (const clase of [
+      PULSO_CLASS_TARJETA,
+      PULSO_CLASS_NUEVA,
+      PULSO_CLASS_ROJO,
+      PULSO_CLASS_AMBAR,
+    ]) {
       const bloque = CSS.match(
         new RegExp(`\\.${clase}\\s*\\{([\\s\\S]*?)\\}`),
       );
@@ -436,13 +535,13 @@ describe("kds-1 · SABOTAJE · parpadeo de 1 s o de pantalla entera", () => {
       ),
       "utf8",
     );
-    // La pantalla sólo usa el pulso NEUTRO, y sólo en la franja «+N», que
-    // es una caja de 60 px del borde. La clase roja ni se importa aquí:
-    // vive en la tarjeta, en el plato que lleva el alérgeno de su silla.
+    // La pantalla sólo usa el pulso de la franja «+N», que es una caja de
+    // 60 px del borde. La clase roja ni se importa aquí: vive en la
+    // tarjeta, en el plato que lleva el alérgeno de su silla.
     const usos = [...pantalla.matchAll(/PULSO_CLASS_\w+/g)].map((m) => m[0]);
-    expect(usos).toEqual(["PULSO_CLASS_TARJETA", "PULSO_CLASS_TARJETA"]);
+    expect(usos).toEqual(["PULSO_CLASS_NUEVA", "PULSO_CLASS_NUEVA"]);
     expect(usos).not.toContain("PULSO_CLASS_ROJO");
-    expect(pantalla).toMatch(/data-testid="kds-mas-n"[\s\S]{0,400}PULSO_CLASS_TARJETA/);
+    expect(pantalla).toMatch(/data-testid="kds-mas-n"[\s\S]{0,400}PULSO_CLASS_NUEVA/);
   });
 });
 

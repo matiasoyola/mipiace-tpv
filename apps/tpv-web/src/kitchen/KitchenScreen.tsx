@@ -51,10 +51,11 @@ import {
   MESA_PX,
   MIN_TOUCH_COCINA_PX,
   PLATO_PX,
-  PULSO_CLASS_TARJETA,
+  PULSO_CLASS_NUEVA,
   RELOJ_PX,
-  ROJO_ALERGIA,
   ROJO_SIN_CONEXION,
+  SEMAFORO_FILL,
+  SEMAFORO_TEXT,
   SUBTITULO_BARRA_PX,
   TARJETA_CUERPO,
   TARJETA_HUECO_PX,
@@ -187,7 +188,7 @@ export function KitchenScreen({ me }: KitchenScreenProps) {
   };
 
   const abiertas: Comanda[] = vista?.orders ?? [];
-  const reparto = repartirTarjetas(abiertas, zona);
+  const reparto = repartirTarjetas(abiertas, zona, mostrarSeccion);
   const colorFranja = colorMasN(reparto.extra, settings, feed.ahora);
 
   return (
@@ -254,7 +255,7 @@ export function KitchenScreen({ me }: KitchenScreenProps) {
                 background: feed.offline ? "#FFFFFF" : VERDE_LISTA,
               }}
             />
-            {feed.offline ? "SIN CONEXIÓN" : "EN LÍNEA"}
+            {feed.offline ? "SIN CONEXIÓN" : "En línea"}
           </span>
           {/* LA HORA. La maqueta la lleva y la primera captura no: en una
               cocina sin reloj de pared, «14 min» no dice a qué hora entró
@@ -348,13 +349,17 @@ export function KitchenScreen({ me }: KitchenScreenProps) {
           data-testid="kds-mas-n"
           data-color={colorFranja}
           className={`shrink-0 flex flex-col items-center justify-center gap-1 border-l ${
-            colorFranja === "verde" ? PULSO_CLASS_TARJETA : ""
+            colorFranja === "verde" ? PULSO_CLASS_NUEVA : ""
           }`}
           style={{
             width: INDICADOR_MAS_N_PX,
             borderColor: DARK_SURFACE_RAISED,
-            background: colorFranja === "rojo" ? ROJO_ALERGIA : TARJETA_CUERPO,
-            color: DARK_TEXT,
+            // En rojo usa el rojo DEL SEMÁFORO (`#E0533F`) y no el de la
+            // alarma: lo que informa es que una de las escondidas lleva
+            // mucho, que es exactamente lo que dice el semáforo. El rojo
+            // de la alarma es de la alergia y del urgente.
+            background: colorFranja === "rojo" ? SEMAFORO_FILL.rojo : TARJETA_CUERPO,
+            color: colorFranja === "rojo" ? SEMAFORO_TEXT.rojo : DARK_TEXT,
           }}
         >
           {reparto.extra.length > 0 && (
@@ -362,22 +367,24 @@ export function KitchenScreen({ me }: KitchenScreenProps) {
               <span className="font-bold" style={{ fontSize: MAS_N_PX }}>
                 {cuentaMasN(reparto.extra)}
               </span>
-              <span
-                className="font-bold"
-                style={{
-                  fontSize: MAS_N_ETIQUETA_PX,
-                  color: colorFranja === "verde" ? VERDE_LISTA : DARK_TEXT_MUTED,
-                }}
-              >
-                {colorFranja === "verde" ? "nuevas" : "no caben"}
-              </span>
+              {/* «nuevas» SÓLO cuando lo son: en 60 px de ancho no cabe
+                  otra palabra, y «+7» con las mesas debajo ya dice lo que
+                  hay que saber. */}
+              {colorFranja === "verde" && (
+                <span
+                  className="font-bold"
+                  style={{ fontSize: MAS_N_ETIQUETA_PX, color: VERDE_LISTA }}
+                >
+                  nuevas
+                </span>
+              )}
               <span
                 data-testid="kds-mas-n-mesas"
                 className="font-semibold text-center"
                 style={{
                   fontSize: MAS_N_MESAS_PX,
-                  lineHeight: 1.2,
-                  color: colorFranja === "rojo" ? "#FFFFFF" : DARK_TEXT_MUTED,
+                  lineHeight: 1.3,
+                  color: colorFranja === "rojo" ? SEMAFORO_TEXT.rojo : DARK_TEXT_MUTED,
                 }}
               >
                 {mesasMasN(reparto.extra).map((m) => (

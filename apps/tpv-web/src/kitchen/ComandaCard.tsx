@@ -447,8 +447,8 @@ function Linea(props: {
           anulada del todo tiene el de fuera `disabled` —con el «Visto»
           dentro, el cocinero no podría quitar el aviso nunca—. */}
       <div
-        className="flex items-start gap-[10px]"
-        style={{ padding: enCaja ? "8px 10px" : "8px 14px" }}
+        className="flex items-stretch"
+        style={{ paddingLeft: enCaja ? 10 : 14, paddingRight: enCaja ? 10 : 14 }}
       >
         <button
           type="button"
@@ -456,8 +456,15 @@ function Linea(props: {
           // puede tachar: todavía no se está cocinando.
           disabled={!l.fired || anuladaDelTodo}
           onClick={() => props.onTachar(l.id, !l.done)}
-          className="flex-grow min-w-0 text-left flex items-start gap-[10px]"
-          style={{ minHeight: LINEA_HEIGHT_PX }}
+          className="flex-grow min-w-0 text-left flex items-center gap-[10px]"
+          // EL RELLENO VA DENTRO DEL BOTÓN, no en la fila que lo envuelve.
+          // Puesto fuera, los 8 + 8 de la maqueta se SUMABAN a los 56 px
+          // de objetivo táctil y cada plato medía 72 en vez de 56: tres
+          // platos por tarjeta son 48 px, que es lo que cuesta la segunda
+          // fila de tarjetas. Con `box-sizing: border-box` el relleno vive
+          // dentro del mínimo y un plato de una línea mide 56 justos, que
+          // es lo que la maqueta aparenta.
+          style={{ minHeight: LINEA_HEIGHT_PX, padding: "8px 0" }}
         >
           <span
             className="shrink-0 font-bold"
@@ -575,7 +582,7 @@ function Linea(props: {
             type="button"
             data-testid="kds-visto"
             onClick={() => props.onVisto(l.id)}
-            className="shrink-0 rounded-[10px] px-3 font-bold"
+            className="shrink-0 self-center ml-[10px] rounded-[10px] px-3 font-bold"
             style={{
               height: VISTO_HEIGHT_PX,
               minHeight: VISTO_HEIGHT_PX,

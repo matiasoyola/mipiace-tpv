@@ -29,8 +29,6 @@
 // decisión 7 prohíbe. El error prudente es el que deja sitio.
 
 import {
-  ALERGIA_ALERGENO_PX,
-  ALERGIA_PX,
   CANTIDAD_ANCHO_PX,
   EYEBROW_COCINA_PX,
   FRANJA_URGENTE_ALTO_PX,
@@ -53,12 +51,16 @@ export interface TarjetaMedible {
   isNew: boolean;
   /** De dónde cuenta el semáforo. Lo usa el color de la franja «+N». */
   firedAt: string | null;
+  /** «LLEGÓ TARDE» en el eyebrow, que ocupa su línea. */
+  lateArrival: boolean;
   /** Sólo importa CUÁNTAS son: cada franja mide lo mismo. */
   allergyBands: readonly unknown[];
   lines: Array<{
     /** El nombre, para saber en cuántas líneas se va a partir. */
     name: string;
     notes: string[];
+    /** La pastilla «lleva gluten», que va bajo el nombre. */
+    carries: string[];
     allergyWarning: string | null;
     seat: number | null;
     voidPending: boolean;
@@ -81,16 +83,26 @@ export interface TarjetaMedible {
 /** Padding arriba + abajo de la lista de platos. La maqueta: `10px 0`. */
 const PADDING_PX = 20;
 
+/** El hueco entre dos platos. */
+const HUECO_LINEA_PX = 6;
+
 /**
- * La cabecera del semáforo: mesa y minutos en grande, más el eyebrow de
- * «2ª COMANDA» / la sección / «LLEGÓ TARDE», que la maqueta pone DENTRO de
- * la cabecera y no debajo.
+ * La cabecera del semáforo: mesa y minutos en grande.
  *
- * `10 + 10` de padding + la mesa (34, `line-height: 1`) + 2 de respiro +
- * la línea del eyebrow (~17). Se cuenta el eyebrow siempre, aunque esta
- * tarjeta no lo lleve: es la estimación por lo alto.
+ * `10 + 10` de padding más la mesa (34, `line-height: 1`). **Medido en el
+ * navegador: 54.**
  */
-const CABECERA_PX = 20 + MESA_PX + 2 + EYEBROW_COCINA_PX + 4;
+const CABECERA_PX = 20 + MESA_PX;
+
+/**
+ * La línea del eyebrow —«2ª COMANDA» / la sección / «LLEGÓ TARDE»—, que
+ * la maqueta pone DENTRO de la cabecera y no debajo.
+ *
+ * Se cuenta SÓLO si esta tarjeta lo lleva. Contarlo siempre costaba 19 px
+ * por tarjeta, y 19 px × 2 filas es exactamente lo que separa «caben ocho
+ * comandas» de «caben cuatro».
+ */
+const EYEBROW_LINEA_PX = 19;
 
 /** La franja «URGENTE», más los 8 del anillo de 4 px que la rodea. */
 const FRANJA_URGENTE_PX = FRANJA_URGENTE_ALTO_PX + 8;
@@ -98,37 +110,33 @@ const FRANJA_URGENTE_PX = FRANJA_URGENTE_ALTO_PX + 8;
 /**
  * Cada franja de alergia de la mesa: `10 + 10` de padding más sus dos
  * líneas («SILLA 3 · CELÍACO» a 21 con `line-height: 1.1` y «Gluten» a
- * 15). El icono mide 26 y cabe dentro.
+ * 15). El icono mide 26 y cabe dentro. **Medido: 65,6.**
  */
-const FRANJA_ALERGIA_PX =
-  20 + Math.round(ALERGIA_PX * 1.1) + Math.round(ALERGIA_ALERGENO_PX * 1.3) + 2;
+const FRANJA_ALERGIA_PX = 68;
 
 /** Una nota o un modificador bajo un plato: 17 px y 2 de margen. */
 const NOTA_LINEA_PX = Math.round(NOTA_PX * 1.3) + 2;
 
-/**
- * La sub-franja del recuadro de un plato de silla: «SILLA 3 · SIN
- * GLUTEN». `4 + 4` de padding, 13 px de texto y los 4 del borde de 2 px
- * que lleva el recuadro arriba y abajo.
- */
-const SILLA_LINEA_PX = 30;
-
-/**
- * El «¡LLEVA GLUTEN!» de un plato SIN silla: su propia sub-franja.
- *
- * Con silla no suma nada aparte: va en la MISMA sub-franja que ella
- * («SILLA 3 · ¡LLEVA GLUTEN!»), y esa línea ya la cuenta
- * `SILLA_LINEA_PX`.
- */
-const AVISO_PX = 26;
+/** La pastilla «lleva gluten», con su margen de 4. */
+const CARRIES_LINEA_PX = 30;
 
 /** «ANULADO» / «ERAN 3 · −1», que va bajo el nombre del plato. */
 const ANULADO_LINEA_PX = Math.round(16 * 1.3) + 2;
 
+/**
+ * La sub-franja del recuadro de un plato de silla: «SILLA 3 · SIN
+ * GLUTEN». `4 + 4` de padding, 13 px de texto y los 4 del borde de 2 px
+ * que lleva el recuadro arriba y abajo. **Medido: 31,5.**
+ *
+ * Vale igual para el plato que CHOCA: su caja no lleva borde, así que mide
+ * 28, y estimar 32 se queda por el lado seguro.
+ */
+const SILLA_LINEA_PX = 32;
+
 /** El encabezado «EN ESPERA · SALE CUANDO LO MARCHEN», con su filete. */
 const BLOQUE_ESPERA_PX = 8 + 2 + Math.round(EYEBROW_COCINA_PX * 1.3) + 8;
 
-/** El botón «Lista» del pie, con su margen inferior de 14. */
+/** El botón «Lista» del pie, con su margen inferior de 14. Medido: 70. */
 const PIE_PX = LISTA_HEIGHT_PX + 14;
 
 /**
@@ -151,7 +159,13 @@ const MARGEN_SEGURIDAD_PX = 12;
  * y peso 600, DM Sans gasta ~0,52 em por carácter de media en castellano,
  * o sea ~11,4 px: **16 caracteres por línea**.
  *
- * El número es una media y por eso la estimación lleva su margen encima.
+ * El bucle visual lo comprueba de verdad: mide
+ * `getClientRects().length` del `<span>` del nombre, que es EN CUÁNTAS
+ * LÍNEAS se partió. Con los nombres de la carta de La Maestranza
+ * —«Ensaladilla rusa» y «Magro con tomate», los dos de 16— ninguno se
+ * parte, así que el número está calibrado justo en el límite y por eso la
+ * estimación lleva su margen encima.
+ *
  * Lo que NO se hace es truncar: el nombre del plato es lo primero que la
  * decisión 3 manda que se lea, y «Croquetas de jamón (sin gluten)» leído
  * «Croquetas de jamó…» es un plato distinto.
@@ -163,28 +177,52 @@ const CHARS_POR_LINEA = Math.max(
   ),
 );
 
-/** El alto de la fila de un plato, con el nombre partido si no cabe. */
-function altoNombre(name: string): number {
-  const lineas = Math.max(1, Math.ceil(name.length / CHARS_POR_LINEA));
-  // `8 + 8` de padding de la fila.
-  return Math.max(LINEA_HEIGHT_PX, 16 + lineas * Math.round(PLATO_PX * 1.2));
+/**
+ * El alto de una línea de plato.
+ *
+ * **El relleno vive DENTRO del mínimo táctil**, porque el botón tiene
+ * `box-sizing: border-box`: un plato de una línea mide 56 justos, y sólo
+ * crece cuando lo que lleva dentro —nombre partido, notas, «ERAN 3 · −1»,
+ * la pastilla «lleva gluten»— pasa de 40. Puesto fuera, como estaba en la
+ * primera versión de kds-1b, cada plato medía 72 y tres platos por tarjeta
+ * costaban la segunda fila entera.
+ */
+function altoLinea(l: TarjetaMedible["lines"][number]): number {
+  // Dentro de un recuadro de silla caben DOS caracteres menos: el marco de
+  // 2 px y los 10 de margen le quitan 16 px al nombre. Medido — «Magro con
+  // tomate» entra en una línea en una tarjeta normal y se parte en dos
+  // dentro del recuadro de la silla 3.
+  const enRecuadro = l.seat != null || l.allergyWarning != null;
+  const cabenEnLinea = CHARS_POR_LINEA - (enRecuadro ? 2 : 0);
+  const lineasDeNombre = Math.max(1, Math.ceil(l.name.length / cabenEnLinea));
+  const dentro =
+    lineasDeNombre * Math.ceil(PLATO_PX * 1.2) +
+    l.notes.length * NOTA_LINEA_PX +
+    (l.carries.length > 0 && l.allergyWarning == null ? CARRIES_LINEA_PX : 0) +
+    (l.voidPending || l.changePending ? ANULADO_LINEA_PX : 0);
+  // `8 + 8` de relleno vertical, dentro del mínimo.
+  return Math.max(LINEA_HEIGHT_PX, 16 + dentro);
 }
 
-/** La altura que ocupará esta tarjeta. Estimada por lo alto. */
-export function altoTarjeta(t: TarjetaMedible): number {
+/**
+ * La altura que ocupará esta tarjeta. Estimada por lo alto.
+ *
+ * `mostrarSeccion` es lo mismo que la prop del componente: con más de una
+ * sección en pantalla, TODAS las tarjetas llevan el eyebrow.
+ */
+export function altoTarjeta(t: TarjetaMedible, mostrarSeccion = false): number {
   let alto = PADDING_PX + CABECERA_PX;
+  if (t.number > 1 || t.lateArrival || mostrarSeccion) alto += EYEBROW_LINEA_PX;
   if (t.urgent) alto += FRANJA_URGENTE_PX;
   alto += t.allergyBands.length * FRANJA_ALERGIA_PX;
   const hayEspera = t.lines.some((l) => !l.fired);
   if (hayEspera) alto += BLOQUE_ESPERA_PX;
+  alto += Math.max(0, t.lines.length - 1) * HUECO_LINEA_PX;
   for (const l of t.lines) {
-    alto += altoNombre(l.name);
-    alto += l.notes.length * NOTA_LINEA_PX;
+    alto += altoLinea(l);
+    // La sub-franja del recuadro, tanto la de «SILLA 3 · SIN GLUTEN» como
+    // la del plato que choca.
     if (l.seat != null || l.allergyWarning != null) alto += SILLA_LINEA_PX;
-    // El grito suma su propia sub-franja SÓLO si el plato no tiene silla:
-    // con silla va en la misma que ella.
-    if (l.allergyWarning && l.seat == null) alto += AVISO_PX - SILLA_LINEA_PX;
-    if (l.voidPending || l.changePending) alto += ANULADO_LINEA_PX;
   }
   alto += PIE_PX;
   return alto + MARGEN_SEGURIDAD_PX;
@@ -238,6 +276,7 @@ export interface Reparto<T> {
 export function repartirTarjetas<T extends TarjetaMedible>(
   tarjetas: readonly T[],
   viewport: { ancho: number; alto: number },
+  mostrarSeccion = false,
 ): Reparto<T> {
   const columnas = Math.max(
     1,
@@ -251,7 +290,7 @@ export function repartirTarjetas<T extends TarjetaMedible>(
   let i = 0;
   while (i < tarjetas.length) {
     const fila = tarjetas.slice(i, i + columnas);
-    const altoFila = Math.max(...fila.map((t) => altoTarjeta(t)));
+    const altoFila = Math.max(...fila.map((t) => altoTarjeta(t, mostrarSeccion)));
     const conHueco = usado === 0 ? altoFila : usado + TARJETA_HUECO_PX + altoFila;
     if (conHueco > viewport.alto) break;
     visibles.push(...fila);

@@ -663,11 +663,11 @@ describe("kds-1 · decisión 9 · sin conexión", () => {
     );
   });
 
-  it("con el GET bien, dice «EN LÍNEA» y no hay aviso rojo", async () => {
+  it("con el GET bien, dice «En línea» y no hay aviso rojo", async () => {
     monta(vista([comanda()]));
     await render();
     expect($$('[data-testid="kds-sin-conexion"]')).toHaveLength(0);
-    expect($('[data-testid="kds-en-linea"]')!.textContent).toMatch(/EN LÍNEA/);
+    expect($('[data-testid="kds-en-linea"]')!.textContent).toMatch(/En línea/);
   });
 
   it("un 403 del módulo apagado NO es «sin conexión»: el servidor contestó", async () => {
