@@ -92,6 +92,23 @@ describe("estadoDeLasZonas", () => {
     expect(peor[0]!.estado).toBe("ACTIVA");
   });
 
+  it("se compara con LA ANTERIOR, no con la primera de todas", () => {
+    // Leve → severa → moderada. Respecto a la ANTERIOR (severa) ha
+    // bajado, así que mejora; respecto a la PRIMERA (leve) ha subido.
+    // Lo que la podóloga necesita saber es si va mejor que la última vez
+    // que la vio, no que el primer día.
+    //
+    // Este caso lo pidió un sabotaje que salió verde: con dos pasos, «la
+    // anterior» y «la primera» son la misma, así que ningún test de los
+    // de arriba podía cazar el cambio.
+    const zonas = estadoDeLasZonas([
+      visita({ fecha: "2026-09-07T10:00:00Z", marcas: { "L:talon": DUREZA_LEVE } }),
+      visita({ fecha: "2026-09-21T10:00:00Z", marcas: { "L:talon": DUREZA_SEVERA } }),
+      visita({ fecha: "2026-10-06T10:00:00Z", marcas: { "L:talon": DUREZA_MODERADA } }),
+    ]);
+    expect(zonas[0]!.estado).toBe("MEJORANDO");
+  });
+
   it("una gravedad que falta NO cuenta como bajada", () => {
     const zonas = estadoDeLasZonas([
       visita({ fecha: "2026-09-07T10:00:00Z", marcas: { "L:talon": DUREZA_SEVERA } }),
