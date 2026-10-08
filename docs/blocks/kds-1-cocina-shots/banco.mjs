@@ -367,6 +367,51 @@ const browser = await chromium.launch({ executablePath: CHROME });
         (el) => Math.abs(Math.round(el.getBoundingClientRect().top) - y0) <= 2,
       ).length;
     }),
+    // ── kds-1d · CUÁNTAS ENSEÑA LA SEGUNDA FILA ──────────────────────
+    //
+    // El reparto ya no corta por filas enteras, así que la segunda fila
+    // puede salir a medias: eso es lo que hay que medir. `filas` agrupa las
+    // tarjetas por su borde de arriba —que es lo que el ojo lee como una
+    // fila— y `huecoDebajo` dice cuánta pantalla queda vacía por debajo de
+    // la última. El defecto de kds-1c eran 390 px de hueco con la T2 y la
+    // M7 escondidas en el «+7».
+    filas: await page.evaluate(() => {
+      const zona = document.querySelector('[data-testid="kds-zona"]');
+      const z = zona.getBoundingClientRect();
+      const cs = getComputedStyle(zona);
+      const abajo = z.bottom - Number.parseFloat(cs.paddingBottom);
+      const tarjetas = [...document.querySelectorAll('[data-testid="kds-comanda"]')];
+      const porFila = [];
+      for (const el of tarjetas) {
+        const r = el.getBoundingClientRect();
+        const fila = porFila.find((f) => Math.abs(f.top - r.top) <= 2);
+        const mesa = el.dataset.comandaId;
+        if (fila) {
+          fila.mesas.push(mesa);
+          fila.alto = Math.max(fila.alto, Math.round(r.height * 10) / 10);
+        } else {
+          porFila.push({
+            top: Math.round(r.top),
+            alto: Math.round(r.height * 10) / 10,
+            mesas: [mesa],
+          });
+        }
+      }
+      const ultima = tarjetas.at(-1)?.getBoundingClientRect();
+      return {
+        filas: porFila.map((f) => ({ mesas: f.mesas, alto: f.alto })),
+        // Lo que queda de pantalla por debajo de la fila más baja.
+        huecoDebajo: ultima
+          ? Math.round(
+              (abajo -
+                Math.max(
+                  ...tarjetas.map((el) => el.getBoundingClientRect().bottom),
+                )) *
+                10,
+            ) / 10
+          : null,
+      };
+    }),
     // 5 · el color de la franja «+N».
     masNColor: await page.evaluate(() => {
       const el = document.querySelector('[data-testid="kds-mas-n"]');

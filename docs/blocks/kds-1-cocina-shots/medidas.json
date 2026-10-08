@@ -27,8 +27,8 @@
       "background": "rgb(23, 26, 31)",
       "animationDuration": "0s"
     },
-    "tarjetasEnDom": 4,
-    "tarjetasQueCaben": 4,
+    "tarjetasEnDom": 6,
+    "tarjetasQueCaben": 6,
     "tarjetasCortadas": 0,
     "ordenQueMandaElBanco": [
       {
@@ -111,9 +111,21 @@
         "urgente": "0",
         "tono": "ambar",
         "minutos": "11 min"
+      },
+      {
+        "mesa": "o-t2",
+        "urgente": "0",
+        "tono": "verde",
+        "minutos": "9 min"
+      },
+      {
+        "mesa": "o-m7",
+        "urgente": "0",
+        "tono": "verde",
+        "minutos": "8 min"
       }
     ],
-    "mesasOcultas": "T2M7M5…",
+    "mesasOcultas": "M5T1M1…",
     "colorDeLaFranja": "verde",
     "tarjeta": {
       "w": 251.5,
@@ -152,17 +164,52 @@
         "bandas": 0,
         "fondo": "rgb(26, 29, 35)",
         "pulso": null
+      },
+      {
+        "id": "o-t2",
+        "urgente": false,
+        "bandas": 0,
+        "fondo": "rgb(26, 29, 35)",
+        "pulso": null
+      },
+      {
+        "id": "o-m7",
+        "urgente": false,
+        "bandas": 0,
+        "fondo": "rgb(26, 29, 35)",
+        "pulso": null
       }
     ],
     "franjaAlergiaTitulo": null,
     "franjaAlergiaAlergeno": null,
     "tarjetasEnPrimeraFila": 4,
+    "filas": {
+      "filas": [
+        {
+          "mesas": [
+            "o-t4",
+            "o-m4",
+            "o-m2",
+            "o-m6"
+          ],
+          "alto": 327.9
+        },
+        {
+          "mesas": [
+            "o-t2",
+            "o-m7"
+          ],
+          "alto": 321
+        }
+      ],
+      "huecoDebajo": 57.1
+    },
     "masNColor": {
       "estado": "verde",
       "fondo": "rgb(26, 29, 35)",
       "pulso": "kds-pulso-nueva"
     },
-    "hora": "22:54",
+    "hora": "23:20",
     "listaItemTexto": "M3esperando · 2 min",
     "cabecera": {
       "w": 251.5,
@@ -244,7 +291,7 @@
       "background": "rgb(42, 68, 53)",
       "animationDuration": "2.5s"
     },
-    "masNTexto": "+7nuevasT2M7M5…",
+    "masNTexto": "+5nuevasM5T1M1…",
     "alturasReales": [
       {
         "id": "o-t4",
@@ -368,13 +415,70 @@
             "espera": false
           }
         ]
+      },
+      {
+        "id": "o-t2",
+        "alto": 321,
+        "lineas": 2,
+        "notas": 0,
+        "bandas": 0,
+        "urgente": false,
+        "sillas": 0,
+        "avisos": 0,
+        "anulados": 0,
+        "espera": 1,
+        "eyebrow": 0,
+        "platos": [
+          {
+            "name": "Patatas alioli",
+            "notes": 0,
+            "carries": 0,
+            "seat": false,
+            "lleva": false,
+            "anulado": false,
+            "espera": false
+          },
+          {
+            "name": "Filete de ternera",
+            "notes": 0,
+            "carries": 0,
+            "seat": false,
+            "lleva": false,
+            "anulado": false,
+            "espera": true
+          }
+        ]
+      },
+      {
+        "id": "o-m7",
+        "alto": 200,
+        "lineas": 1,
+        "notas": 0,
+        "bandas": 0,
+        "urgente": false,
+        "sillas": 0,
+        "avisos": 0,
+        "anulados": 0,
+        "espera": 0,
+        "eyebrow": 0,
+        "platos": [
+          {
+            "name": "Gambas al ajillo",
+            "notes": 0,
+            "carries": 0,
+            "seat": false,
+            "lleva": false,
+            "anulado": false,
+            "espera": false
+          }
+        ]
       }
     ],
     "piezasReales": {
       "cabecera": 54,
       "franjaUrgente": 52,
       "franjaAlergia": null,
-      "bloqueEspera": null,
+      "bloqueEspera": 49,
       "lista": 56,
       "lineas": [
         {
@@ -449,6 +553,39 @@
           "lineasDeTexto": 2,
           "alto": 96.3,
           "notas": 1,
+          "silla": 0,
+          "lleva": 0,
+          "carries": 0,
+          "anulado": 0
+        },
+        {
+          "plato": "Patatas alioli",
+          "caracteres": 14,
+          "lineasDeTexto": 1,
+          "alto": 56,
+          "notas": 0,
+          "silla": 0,
+          "lleva": 0,
+          "carries": 0,
+          "anulado": 0
+        },
+        {
+          "plato": "Filete de ternera",
+          "caracteres": 17,
+          "lineasDeTexto": 1,
+          "alto": 56,
+          "notas": 0,
+          "silla": 0,
+          "lleva": 0,
+          "carries": 0,
+          "anulado": 0
+        },
+        {
+          "plato": "Gambas al ajillo",
+          "caracteres": 16,
+          "lineasDeTexto": 1,
+          "alto": 56,
+          "notas": 0,
           "silla": 0,
           "lleva": 0,
           "carries": 0,
