@@ -672,6 +672,10 @@ lo que hay que discutir es si una fila puede medir lo que su tarjeta más baja y
 dejar que la alta se vaya sola al «+N» — con el coste de romper el orden de
 lectura, que es lo que la corrección del 08-10 vino a arreglar.
 
+> **Resuelto en kds-1d (§12).** Matías lo miró y pidió arreglarlo: ahora se
+> llena por orden y se corta en la primera que no cabe, sin tocar el orden. En
+> este mismo escenario se ven **seis**.
+
 ### 8.4 · La hoja de alergias: qué está seleccionado y qué tiene alergia
 
 En `tpv-alergias-1443x812.png` salían **en rojo a la vez** «TODA LA MESA» y la
@@ -820,3 +824,95 @@ PATCH /super-admin/tenants/:id   { "kitchenDisplayEnabled": true }
 Después, en el panel del cliente: **Dispositivos → Generar código → «Pantalla de
 cocina» → secciones**, y **Tiendas → (la tienda) → Cocina** para los umbrales y
 el modo de órdenes.
+
+
+---
+
+## 12 · kds-1d · la segunda fila enseña lo que cabe
+
+Prompt: `docs/code-prompts/bloque-kds-1d-segunda-fila.md`. Sale de mirar la
+captura de kds-1c: es el §8.3, el que se anotó y se dejó sin tocar.
+
+### 12.1 · Media pantalla vacía con dos comandas que cabían
+
+`cocina-1280x800.png` pintaba **T4 · M4 · M2 · M6** y por debajo quedaban
+**390 px de alto en negro**, con un «+7» que escondía la T2 y la M7 — dos
+tarjetas cortas que caben de sobra en ese hueco.
+
+La causa no era el orden: era que **la fila se trataba entera**. El alto de una
+fila era el de su tarjeta más alta, y como la **M5** —la del celíaco, con su
+franja de alergia, dos recuadros de silla y el «¡LLEVA GLUTEN!», ~486 px— no
+cabía, caía la fila completa y con ella sus tres compañeras. En un día fuerte el
+cocinero veía **4 comandas teniendo sitio para 6**.
+
+### 12.2 · La regla, y lo que NO cambia
+
+Se llena por orden y se corta en la primera tarjeta que no cabe entera
+(`repartirTarjetas`, `kitchenLayout.ts`):
+
+- se recorren las comandas **en el orden de `ordenarParaLaPantalla`**, que no se
+  toca;
+- cada una se coloca en la siguiente casilla en **orden de lectura** —izquierda
+  a derecha, y después la fila de abajo—;
+- **la fila de abajo empieza donde acaba la tarjeta más alta de la de arriba**,
+  igual que antes: es lo que hace el `grid` con `items-start` y lo que mantiene
+  una fila legible como fila;
+- si una tarjeta **no cabe entera** en el alto que queda, se para ahí: **esa y
+  todas las siguientes** van al «+N».
+
+**Lo que no se hace es saltar a una más corta de detrás.** Rellenar el hueco con
+la siguiente que quepa adelantaría una comanda más nueva a una más antigua, que
+es justo el defecto que kds-1c vino a cerrar. Y no es una aproximación: como la
+fila de abajo empieza más abajo que la de arriba, lo que no cabe en el hueco de
+ahora tampoco cabría luego. **Pararse es lo correcto.**
+
+Nada se corta a medias y no hay desplazamiento: eso no cambia.
+
+### 12.3 · Lo que mide la captura, antes y después
+
+Mismo banco, misma zona (1036 × 716). `medidas.json`, `cocina-1280x800`:
+
+| | antes (kds-1c) | ahora (kds-1d) |
+|---|---|---|
+| `tarjetasEnDom` / `tarjetasQueCaben` | 4 / 4 | **6 / 6** |
+| la primera fila | T4 · M4 · M2 · M6 | T4 · M4 · M2 · M6 (igual) |
+| la segunda fila | — | **T2 · M7** |
+| `huecoDebajo` | ~388 px † | **57,1 px** |
+| `tarjetasCortadas` | 0 | **0** |
+| `masNTexto` | «+7 · T2 · M7 · M5 · …» | **«+5 · M5 · T1 · M1 · …»** |
+| `colorDeLaFranja` | verde | verde |
+| `scroll` | 800 = 800 | 800 = 800 |
+
+El «+N» empieza en la **M5**, que es la primera que no cupo, y las que quedan
+detrás siguen siendo las más nuevas. La fila de arriba mide 327,9 (la T4) y la
+de abajo 321 (la T2): la M5, con sus ~486, no entra en los **378 px** que
+quedaban por debajo de la primera fila —y por eso se para ahí—.
+
+† El campo es nuevo, así que el «antes» no está medido: sale de la captura
+anterior (fila de 327,9 px dentro de una zona de 716). La diferencia se ve a
+simple vista comparando las dos imágenes.
+
+`filas` y `huecoDebajo` son nuevos en el banco: agrupan las tarjetas por su
+borde de arriba y miden lo que sobra por debajo de la más baja. Hacían falta
+porque la segunda fila ya puede salir a medias, y «cuántas caben» dejó de poder
+leerse contando filas completas.
+
+### 12.4 · Los cuatro sabotajes de kds-1d
+
+| Sabotaje | Cayó | El mensaje real del rojo |
+|---|---|---|
+| Volver a esconder la fila entera si una de sus tarjetas no cabe | ✅ | `expected [ 'T4', 'M4', 'M2', 'M6' ] to deeply equal [ 'T4', 'M4', 'M2', 'M6', 'T2', 'M7' ]` — los cuatro de la captura vieja contra los seis de la nueva. Y dos más: `expected 'T2' to be 'M5'` (el «+N» volvía a empezar por la T2) y `expected [ 'a1', 'a2', 'a3', 'a4' ] to deeply equal [ 'a1', 'a2', 'a3', 'a4', 'b1' ]` |
+| Saltar a una más corta posterior cuando una no cabe (`continue` en vez de `break`) | ✅ | `expected [ 'a1', 'a2', 'a3', 'a4', 'b1', 'b3' ] to deeply equal [ 'a1', 'a2', 'a3', 'a4', 'b1' ]` — la `b3` se colaba por delante de la `ALTA`. Y con el banco entero, `expected [ 'M5', 'B1', 'B3' ] to deeply equal [ 'M5', 'T1', 'M1', '…' ]`: el «+N» quedaba con las que el hueco no pudo tragarse |
+| Cortar una tarjeta a medias (basta con que empiece dentro del área) | ✅ | `M5 se sale: expected 887 to be less than or equal to 716` — y otros seis rojos, entre ellos `expected [ { id: 'enorme', …(8) } ] to have a length of +0 but got 1` |
+| Que el «+N» no empiece en la primera que no cupo (la primera que no cabe se va al final de la franja) | ✅ | `expected 'T1' to be 'M5'`; y cuatro más, que es lo que cuesta tocar el orden del «+N»: `expected [ 'M1', 'M5' ] to deeply equal [ 'M5', 'M1' ]` y `expected [ 'M9', 'M10', 'M11', '…' ] to deeply equal [ 'M8', 'M9', 'M10', '…' ]` |
+
+### 12.5 · Lo que esto deja a la vista
+
+La última fila puede quedar **a medias** —aquí dos tarjetas de cuatro
+columnas—, y eso es nuevo. Se ve bien: las dos van pegadas a la izquierda, que
+es donde el ojo va después de leer la fila de arriba. Lo que no puede pasar es
+que el hueco de la derecha se rellene con una comanda de detrás, y eso tiene su
+sabotaje.
+
+Y sigue sin tocarse el **orden**: lo que se ve son siempre las más antiguas, y
+lo que esconde el «+N» son las más nuevas a partir de la primera que no cupo.
