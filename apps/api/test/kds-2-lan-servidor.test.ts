@@ -411,6 +411,59 @@ describe("kds-2 · AL VOLVER INTERNET, SIN DUPLICAR", () => {
   });
 });
 
+describe("kds-2 · el libro sólo acepta marcas DE COCINA", () => {
+  // La decisión 9 reparte: cocina manda en el tachado, «Lista» y «Visto»;
+  // el TPV en envíos, anulaciones, marchas, urgentes y «Servido». Si la
+  // ruta aceptara un `kind` cualquiera, una tablet podría subir un
+  // «URGENTE» con su hora y pisar lo que dijo el camarero.
+  it("un `kind` que no es de cocina se rechaza en el esquema de la ruta", async () => {
+    const a = await app();
+    const res = await a.inject({
+      method: "POST",
+      url: "/kitchen/sincronizar",
+      headers: { "x-device-token": PANTALLA },
+      payload: {
+        marcas: [
+          {
+            markId: randomUUID(),
+            kind: "URGENTE",
+            clientSendId: ENVIO,
+            section: "COCINA",
+            at: new Date().toISOString(),
+          },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("y los tres que sí son de cocina pasan", async () => {
+    const a = await app();
+    for (const kind of ["HECHO", "VISTO", "LISTA"] as const) {
+      const res = await a.inject({
+        method: "POST",
+        url: "/kitchen/sincronizar",
+        headers: { "x-device-token": PANTALLA },
+        payload: {
+          marcas: [
+            {
+              markId: randomUUID(),
+              kind,
+              clientSendId: ENVIO,
+              section: "COCINA",
+              ...(kind === "LISTA"
+                ? {}
+                : { ticketLineId: LINEA, ...(kind === "HECHO" ? { done: true } : {}) }),
+              at: new Date().toISOString(),
+            },
+          ],
+        },
+      });
+      expect(res.statusCode).toBe(200);
+    }
+  });
+});
+
 describe("kds-2 · QUIÉN MANDA EN CADA ESTADO", () => {
   it("SABOTAJE · la hora del TPV no pisa la de cocina en un tachado", async () => {
     await enviarComanda(TICKET, ctx, { clientSendId: ENVIO });
