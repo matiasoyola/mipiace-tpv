@@ -105,6 +105,7 @@ import {
 import { syncNow } from "../lib/syncNow.js";
 import { CloseShiftModal } from "./CloseShiftModal.js";
 import { summarizeOpenTables } from "../lib/openTables.js";
+import { VERDE_LISTA } from "../lib/kitchenTheme.js";
 import { TicketsHistoryPage } from "./TicketsHistoryPage.js";
 import { formatEur } from "../lib/money.js";
 import type { CashierRole } from "../lib/offlineAuth.js";
@@ -212,6 +213,22 @@ export interface TableMapScreenProps {
   // queda con spinner; si falla, el error se pinta en el banner.
   pickBusyTableId?: string | null;
   pickError?: string | null;
+  /**
+   * kds-1-cocina (decisión 5) · las mesas con algo LISTO en el pase.
+   *
+   * La etiqueta verde «LISTO» de la mesa. **Verde y no coral**: el coral ya
+   * significa «ocupada» y «Cobrar», y un tercer significado para el mismo
+   * color convierte el color en ruido. El verde es el de «Lista» de la
+   * pantalla de cocina, que es de donde viene el aviso.
+   *
+   * Lo pasa el padre (`TpvHome`) desde `useAvisosListo`, que es de la
+   * TIENDA: la misma lista que alimenta la banda de arriba en todos los
+   * TPV. Un toque en la etiqueta marca «Servido», igual que la banda.
+   */
+  mesasListas?: Set<string>;
+  onServido?: (orderId: string) => void;
+  /** `tableId → orderId` de la comanda más antigua lista de esa mesa. */
+  comandaListaPorMesa?: Map<string, string>;
 }
 
 // v1.9.3-mapa-visual · estado del cobro directo desde tarjeta: mesa +
@@ -404,6 +421,11 @@ export function TableMapScreen(props: TableMapScreenProps) {
         anyOpening={props.pickBusyTableId != null}
         cobroBusy={cobroBusyId === t.id}
         canCobrar={canCobrar}
+        lista={props.mesasListas?.has(t.id) === true}
+        onServido={() => {
+          const orderId = props.comandaListaPorMesa?.get(t.id);
+          if (orderId && props.onServido) props.onServido(orderId);
+        }}
         onPick={props.onPickTable}
         onCobrar={openCobro}
       />
@@ -1008,6 +1030,8 @@ function TableCard({
   anyOpening,
   cobroBusy,
   canCobrar,
+  lista,
+  onServido,
   onPick,
   onCobrar,
 }: {
@@ -1020,6 +1044,9 @@ function TableCard({
   anyOpening: boolean;
   cobroBusy: boolean;
   canCobrar: boolean;
+  /** kds-1-cocina (decisión 5) · hay algo de esta mesa listo en el pase. */
+  lista: boolean;
+  onServido: () => void;
   onPick: (t: ApiTable) => void;
   onCobrar: (t: ApiTable) => void;
 }) {
@@ -1097,6 +1124,37 @@ function TableCard({
 
   return (
     <div className="relative" style={{ ...box }}>
+      {/* kds-1-cocina · decisión 5 · la etiqueta «LISTO» VERDE.
+          Encima de la forma, arriba a la izquierda, y un toque marca
+          «Servido» sin entrar en la mesa: lo que el camarero hace al pasar
+          por delante es coger el plato, no abrir la cuenta.
+
+          Verde y no coral porque el coral ya dice «ocupada» y «Cobrar», y
+          un tercer significado para el mismo color convierte el color en
+          ruido. */}
+      {lista && (
+        <button
+          type="button"
+          data-testid="table-listo"
+          onClick={(e) => {
+            // Que no se propague al botón de la mesa: tocar la etiqueta es
+            // «Servido», no «abrir la mesa».
+            e.stopPropagation();
+            onServido();
+          }}
+          className="absolute z-10 rounded-[10px] px-2.5 font-bold"
+          style={{
+            top: -8,
+            left: 6,
+            height: 30,
+            background: VERDE_LISTA,
+            color: "#FFFFFF",
+            fontSize: 15,
+          }}
+        >
+          LISTO
+        </button>
+      )}
       <button
         type="button"
         onClick={() => onPick(table)}
@@ -1113,6 +1171,7 @@ function TableCard({
                 : "busy"
         }
         data-late={olvidada ? "true" : "false"}
+        data-lista={lista ? "true" : "false"}
         // v2-H1 · el alias del camarero sale de la FORMA y se queda en
         // el `title`.
         //

@@ -56,6 +56,20 @@ export interface TenantCapabilities {
   // colegiado, alcance, pacientes— sólo si está encendida: en Sole y en
   // los demás, Personal es exactamente la de hoy.
   clinica: boolean;
+  // kds-1-cocina · el módulo «COCINA». Columna del tenant, sólo la mueve
+  // el super-admin (se cobra por pantalla). El panel la mira para pintar
+  // los ajustes de cocina de la tienda y la opción de emparejar una
+  // pantalla; lo que NO gatea son los alérgenos del producto, que son de
+  // serie en hostelería porque informar de ellos es una obligación legal
+  // (decisión 10).
+  cocina: boolean;
+  // kds-1-cocina · el vertical del negocio. No es una capability, pero se
+  // consulta desde los mismos sitios y por la misma razón: decidir qué se
+  // pinta. Los alérgenos de la ficha del producto van SÓLO en hostelería.
+  //
+  // `null` mientras no se sabe: quien lo mire decide, y lo prudente aquí
+  // es no pintar.
+  businessType: "HOSPITALITY" | "RETAIL" | "SERVICES" | null;
 }
 
 // El valor con el que se sigue adelante si alguna de las dos peticiones
@@ -73,6 +87,11 @@ const POR_DEFECTO: TenantCapabilities = {
   // sección es más barato que enseñar una que no toca, y aquí la que no
   // toca enseñaría datos de salud donde no los hay.
   clinica: false,
+  // kds-1-cocina · false al fallar, por lo mismo: enseñar «empareja una
+  // pantalla de cocina» a quien no compró el módulo acaba en un código de
+  // emparejamiento que la API rechaza con un 403.
+  cocina: false,
+  businessType: null,
 };
 
 let cache: TenantCapabilities | null = null;
@@ -92,6 +111,7 @@ async function pedir(): Promise<void> {
           cajaEnabled?: boolean;
           fichajeEnabled?: boolean;
           clinicalRecordsEnabled?: boolean;
+          kitchenDisplayEnabled?: boolean;
         };
       }>("/admin/tenant/settings"),
       api<{
@@ -99,6 +119,7 @@ async function pedir(): Promise<void> {
           hasHoldedKey?: boolean;
           holdedEnabled?: boolean;
           holdedDisconnectedAt?: string | null;
+          businessType?: "HOSPITALITY" | "RETAIL" | "SERVICES";
         };
       }>("/auth/me"),
     ]);
@@ -107,9 +128,11 @@ async function pedir(): Promise<void> {
       caja: s.settings.cajaEnabled !== false,
       fichaje: s.settings.fichajeEnabled === true,
       clinica: s.settings.clinicalRecordsEnabled === true,
+      cocina: s.settings.kitchenDisplayEnabled === true,
       holded: me.tenant.hasHoldedKey === true,
       holdedEnabled: me.tenant.holdedEnabled !== false,
       holdedDejado: me.tenant.holdedDisconnectedAt != null,
+      businessType: me.tenant.businessType ?? null,
     };
   } catch {
     cache = POR_DEFECTO;

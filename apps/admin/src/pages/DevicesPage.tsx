@@ -8,6 +8,7 @@ import { Calculator, Check, ChevronDown, Copy } from "lucide-react";
 
 import { AdminShell } from "../AdminShell.js";
 import { api, ApiError, clearTokens } from "../api.js";
+import { useTenantCapabilities } from "../capabilities.js";
 import {
   CenteredLoader,
   FieldError,
@@ -27,7 +28,19 @@ interface DeviceRow {
   registerId: string;
   registerName: string;
   storeName: string;
+  // kds-1-cocina · qué es este aparato. Opcional porque la respuesta de
+  // `/admin/devices` de antes del bloque no lo trae y la pantalla tiene
+  // que seguir pintando la lista: sin `kind`, es un terminal.
+  kind?: "TERMINAL" | "TEST" | "KITCHEN";
+  kitchenSections?: Array<"BARRA" | "COCINA" | "SALON">;
 }
+
+/** kds-1-cocina · las secciones que puede mostrar una pantalla. */
+const SECCIONES_COCINA = [
+  { valor: "COCINA" as const, etiqueta: "Cocina" },
+  { valor: "BARRA" as const, etiqueta: "Barra" },
+  { valor: "SALON" as const, etiqueta: "Sala" },
+];
 
 interface ActiveCodeRow {
   id: string;
@@ -221,6 +234,15 @@ function DeviceRow({
           <span className="truncate">
             {device.name ?? device.userAgent ?? "Dispositivo sin nombre"}
           </span>
+          {/* kds-1-cocina · que una pantalla de cocina se distinga del
+              terminal de la caja ES el aviso: las dos conviven en la misma
+              caja y sólo una factura. Quien mire esta lista buscando «por
+              qué no cobra» tiene que ver de un golpe cuál es cuál. */}
+          {device.kind === "KITCHEN" && (
+            <span className="text-[10.5px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 shrink-0">
+              Pantalla de cocina
+            </span>
+          )}
           {inactive && (
             <span className="text-[10.5px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 shrink-0">
               Inactivo &gt; 7 días
@@ -228,6 +250,19 @@ function DeviceRow({
           )}
         </div>
         <div className="text-[12.5px] text-slate-500 mt-0.5 truncate">
+          {device.kind === "KITCHEN" &&
+            device.kitchenSections &&
+            device.kitchenSections.length > 0 && (
+              <>
+                {device.kitchenSections
+                  .map(
+                    (x) =>
+                      SECCIONES_COCINA.find((o) => o.valor === x)?.etiqueta ?? x,
+                  )
+                  .join(" + ")}
+                {" · "}
+              </>
+            )}
           {device.storeName} · {device.registerName}
           {device.lastKnownIpCountry && ` · ${device.lastKnownIpCountry}`}
           {" · "}
@@ -272,6 +307,21 @@ function GenerateCodeModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generated, setGenerated] = useState<{ code: string; expiresAt: string } | null>(null);
+  // kds-1-cocina (decisión 1) · QUÉ se va a emparejar, decidido AQUÍ.
+  //
+  // Y aquí y no en la pantalla del aparato: si `POST /devices/pair`
+  // aceptara el tipo del cuerpo, cualquiera con un código de caja se
+  // emparejaría como pantalla de cocina. Y una pantalla no releva al
+  // terminal, así que el resultado sería una caja con dos aparatos vivos
+  // donde el segundo no factura y nadie se enteró.
+  const [kind, setKind] = useState<"TERMINAL" | "KITCHEN">("TERMINAL");
+  const [secciones, setSecciones] = useState<Array<"BARRA" | "COCINA" | "SALON">>(
+    ["COCINA"],
+  );
+  // El módulo «Cocina» lo enciende Mi Piace y se cobra por pantalla. Sin
+  // él, la opción no se ofrece: la API la rechazaría con un 403 y el
+  // propietario se habría quedado con un código que no vale.
+  const caps = useTenantCapabilities();
 
   useEffect(() => {
     // B4 introdujo `/admin/registers` con la gestión de Tiendas. Antes
@@ -299,9 +349,20 @@ function GenerateCodeModal({
     setBusy(true);
     setError(null);
     try {
+      if (kind === "KITCHEN" && secciones.length === 0) {
+        setError("Elige al menos una sección para la pantalla.");
+        setBusy(false);
+        return;
+      }
       const res = await api<{ code: string; expiresAt: string }>(
         `/admin/registers/${registerId}/pairing-codes`,
-        { method: "POST", body: {} },
+        {
+          method: "POST",
+          body:
+            kind === "KITCHEN"
+              ? { kind, kitchenSections: secciones }
+              : {},
+        },
       );
       setGenerated(res);
     } catch (err) {
@@ -363,6 +424,80 @@ function GenerateCodeModal({
             <p className="text-[13px] text-slate-500 mb-5">
               Elige la caja a la que se va a asociar. El código vivirá 1 hora.
             </p>
+
+            {/* kds-1-cocina · terminal o pantalla de cocina. */}
+            {caps?.cocina === true && (
+              <>
+                <label className="block text-[13px] font-medium text-mipiace-ink-soft mb-2">
+                  Qué se empareja
+                </label>
+                <div className="flex gap-2 mb-4">
+                  {([
+                    { v: "TERMINAL" as const, t: "Terminal de caja" },
+                    { v: "KITCHEN" as const, t: "Pantalla de cocina" },
+                  ]).map((o) => (
+                    <button
+                      key={o.v}
+                      type="button"
+                      data-testid="pair-kind"
+                      data-kind={o.v}
+                      data-elegido={kind === o.v ? "1" : "0"}
+                      onClick={() => setKind(o.v)}
+                      className={
+                        kind === o.v
+                          ? "flex-1 h-12 rounded-xl text-[14px] font-medium bg-mipiace-coral text-white"
+                          : "flex-1 h-12 rounded-xl text-[14px] font-medium bg-mipiace-stone text-mipiace-ink"
+                      }
+                    >
+                      {o.t}
+                    </button>
+                  ))}
+                </div>
+                {kind === "KITCHEN" && (
+                  <>
+                    <label className="block text-[13px] font-medium text-mipiace-ink-soft mb-2">
+                      Qué secciones muestra
+                    </label>
+                    <div className="flex gap-2 mb-2">
+                      {SECCIONES_COCINA.map((o) => {
+                        const puesta = secciones.includes(o.valor);
+                        return (
+                          <button
+                            key={o.valor}
+                            type="button"
+                            data-testid="pair-seccion"
+                            data-seccion={o.valor}
+                            data-puesta={puesta ? "1" : "0"}
+                            onClick={() =>
+                              setSecciones((prev) =>
+                                puesta
+                                  ? prev.filter((x) => x !== o.valor)
+                                  : [...prev, o.valor],
+                              )
+                            }
+                            className={
+                              puesta
+                                ? "flex-1 h-12 rounded-xl text-[14px] font-medium bg-emerald-600 text-white"
+                                : "flex-1 h-12 rounded-xl text-[14px] font-medium bg-mipiace-stone text-mipiace-ink"
+                            }
+                          >
+                            {o.etiqueta}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[12.5px] text-slate-500 mb-5">
+                      La sección va por producto, no por mesa: una mesa con
+                      cañas y bravas sale en la pantalla de barra con las
+                      cañas y en la de cocina con las bravas. Esta pantalla
+                      no cobra, no abre turno y no releva al terminal de la
+                      caja.
+                    </p>
+                  </>
+                )}
+              </>
+            )}
+
             <label className="block text-[13px] font-medium text-mipiace-ink-soft mb-2">
               Caja
             </label>

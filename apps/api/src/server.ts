@@ -52,6 +52,10 @@ import { registerStaffRoutes } from "./staff/routes.js";
 import { registerStoresRoutes } from "./stores/routes.js";
 import { registerStoreWebSocketRoute } from "./realtime/ws-route.js";
 import { registerDeviceWebSocketRoute } from "./devices/ws-route.js";
+import { registerKitchenAjustesRoutes } from "./kitchen/ajustes-routes.js";
+import { registerKitchenRoutes } from "./kitchen/routes.js";
+import { registerKitchenTpvRoutes } from "./kitchen/tpv-routes.js";
+import { registerKitchenWebSocketRoute } from "./kitchen/ws-route.js";
 import {
   registerSuperAdminRoutes,
   registerTenantBlockGuard,
@@ -223,6 +227,10 @@ async function main() {
   // autenticación propias: device token por `hello`, no cashier-session por
   // query string (ADR-014).
   await registerDeviceWebSocketRoute(app);
+  // kds-1-cocina · el socket de la pantalla (`/ws/kitchen`). Device token
+  // por `hello` como `/ws/device`, y por lo mismo: el token de un
+  // dispositivo no caduca nunca y no puede viajar en una query string.
+  await registerKitchenWebSocketRoute(app);
   await registerPublicTicketPdfRoute(app);
   // clinica-2 · el test del paciente, SIN SESIÓN, por token opaco. Va con
   // las públicas y no con lo clínico porque no tiene de dónde sacar un
@@ -235,6 +243,16 @@ async function main() {
   await registerCreditRoutes(app);
   await registerSendToKitchenRoute(app);
   await registerSendToKitchenEscposRoute(app);
+  // kds-1-cocina · las rutas de la PANTALLA (`/kitchen/*`, device token de
+  // un `KITCHEN`) y las del TPV sobre la cocina (anular lo enviado,
+  // marchar un tiempo, urgente, «Servido», la hoja de alergias). Dos
+  // puertas que no se cruzan: ver `kitchen/auth.ts`.
+  await registerKitchenRoutes(app);
+  await registerKitchenTpvRoutes(app);
+  // kds-1-cocina · los ajustes de cocina del panel del restaurante, las
+  // pantallas con su latido y los alérgenos del plato. Lo último NO está
+  // detrás del módulo: la alergia es de serie en hostelería (decisión 10).
+  await registerKitchenAjustesRoutes(app);
   await registerTicketPrintRoute(app);
   await registerTpvPrinterInfoRoute(app);
   await registerPartialPaymentRoute(app);

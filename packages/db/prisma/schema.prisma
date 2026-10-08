@@ -226,6 +226,16 @@ enum DeviceKind {
   // reactivarse, ni lo releva nadie al emparejar, ni cuenta para la
   // precondición de la migración, ni genera registro de facturación.
   TEST
+  // kds-1-cocina (decisión 1) · la tablet de la cocina. La MISMA APK en
+  // «modo cocina»: ve comandas y marca platos, y nada más. No abre turno,
+  // no cobra, no emite registro de facturación y —esto es lo que hay que
+  // probar, no suponer— NO releva al terminal de la caja: ni el trigger
+  // `devices_revoke_previous` ni el índice parcial
+  // `devices_one_active_per_register_key` la miran, porque los dos filtran
+  // `kind = 'TERMINAL'` desde `verifactu-1`. Un bar con una caja y dos
+  // pantallas (cocina y barra) tiene tres dispositivos vivos en la misma
+  // caja y sólo uno de ellos factura.
+  KITCHEN
 }
 
 // V1-verifactu (ADR-019) · por qué se revocó un dispositivo.
@@ -350,6 +360,61 @@ enum KitchenSection {
   BARRA
   COCINA
   SALON
+}
+
+// kds-1-cocina (decisión 3, capa 3) · los 14 alérgenos de declaración
+// obligatoria del Reglamento (UE) 1169/2011, anexo II.
+//
+// Catorce y no más: la lista la fija la norma. Por eso aquí SÍ es un enum
+// de Postgres —el argumento contra el enum que `Product.exemptionCause`
+// documenta (un enum sólo crece y cada valor nuevo parte la migración en
+// dos) no aplica a una lista cerrada por ley desde 2011.
+//
+// El comentario de cada valor es el código corto del generador de cartas de
+// La Maestranza (`docs/implantaciones/maestranza/generador/maestranza_carta.py`),
+// para que importar sus alérgenos sea una tabla de equivalencias y no una
+// traducción a ojo.
+enum Allergen {
+  GLUTEN // GL
+  CRUSTACEOS // CR
+  HUEVOS // HU
+  PESCADO // PE
+  CACAHUETES // CA
+  SOJA // SO
+  LACTEOS // LA
+  FRUTOS_CASCARA // FC
+  APIO // AP
+  MOSTAZA // MO
+  SESAMO // SE
+  SULFITOS // SU
+  ALTRAMUCES // AL
+  MOLUSCOS // MC
+}
+
+// kds-1-cocina (decisión 3, órdenes de salida) · cómo enseña el TPV los
+// tiempos de salida. **Los dos modos son la misma estructura por debajo**
+// (`TicketLine.course` + `TicketCourse.firedAt`): esto sólo decide qué
+// botones se pintan, así que cambiar de modo no migra nada.
+//
+//   ESPERA  — bares (La Maestranza): un botón «Espera» en la línea, que
+//             por debajo es «tiempo 2». Cero toques más en el caso normal.
+//   TIEMPOS — a la carta: fila 1º · 2º · 3º · Postre que SE QUEDA PUESTA;
+//             lo que se pulse después cae en ese tiempo.
+enum KitchenCourseMode {
+  ESPERA
+  TIEMPOS
+}
+
+// kds-1-cocina (decisión 3, capa 2) · cuándo se ve el botón «→ Silla n» en
+// la línea de la comanda.
+//
+//   ALERGIA — sólo si la mesa tiene alguna alergia declarada (bares).
+//   SIEMPRE — siempre visible (restaurante a la carta: cocina y camarero
+//             saben de quién es cada plato, y mañana se parte la cuenta por
+//             silla con el mismo dato).
+enum KitchenSeatMode {
+  ALERGIA
+  SIEMPRE
 }
 
 // v1.4-Impresoras-Fase-1 Lote 1 · modo físico de la impresora térmica.
@@ -792,6 +857,24 @@ model Tenant {
   // capability de la casa que se esconde en lugar de explicarse, y la
   // razón es el dato que protege.
   clinicalRecordsEnabled         Boolean           @default(false) @map("clinical_records_enabled")
+  // kds-1-cocina (decisión 10) · capability del módulo «COCINA»: pantalla
+  // de comandas, órdenes de salida, semáforo, aviso de «Listo» y los datos
+  // de los que saldrán sus estadísticas. Hermana de `agendaEnabled` en
+  // forma (columna booleana por tenant, ADR-R6) y de `cajaEnabled` /
+  // `fichajeEnabled` / `clinicalRecordsEnabled` en gobierno: la mueve SÓLO
+  // el super-admin, porque **se cobra por pantalla** (cocina + barra = dos).
+  // Por eso no aparece en el POST de /admin/tenant/settings.
+  //
+  // `@default(false)`: apagada, la hostelería se comporta exactamente como
+  // antes de este bloque — ni pantalla, ni banda «LISTO», ni eventos
+  // nuevos. Lo único que cambia con el módulo apagado es que el envío a la
+  // impresora deja de reimprimir la mesa entera, y eso es un arreglo.
+  //
+  // Lo que NO va detrás de esta capability: los **alérgenos del producto**
+  // y las **alergias por silla**, que la decisión 10 pone de serie en todo
+  // TPV de hostelería (obligación legal de informar). Sin pantalla, la
+  // alergia sale en el papel de la comanda.
+  kitchenDisplayEnabled          Boolean           @default(false) @map("kitchen_display_enabled")
   // v1.3-Thalia Lote 6 · pie de ticket personalizado. NULL = no se
   // pinta nada extra (comportamiento previo). Si está set, el renderer
   // del ticket lo pinta arriba del QR/CIF tras el "Gracias por tu
@@ -807,53 +890,54 @@ model Tenant {
   createdAt                      DateTime          @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt                      DateTime          @updatedAt @map("updated_at") @db.Timestamptz()
 
-  users              User[]
-  stores             Store[]
-  devices            Device[]
-  pairingCodes       PairingCode[]
-  products           Product[]
-  contacts           Contact[]
-  warehouses         Warehouse[]
-  taxes              TenantTax[]
-  tickets            Ticket[]
-  refunds            Refund[]
-  syncOutbox         SyncOutbox[]
-  holdedUploads      HoldedUpload[]
-  modifierGroups     ModifierGroup[]
-  tagAliases         TagAlias[]
-  tagSections        TagSection[]
-  tagVisitTypes      TagVisitType[]
-  reconciliationRuns ReconciliationRun[]
-  clients            Client[]
-  serviceSchedulings ServiceScheduling[]
-  resources          Resource[]
-  staffProfiles      StaffProfile[]
-  staffSkills        StaffSkill[]
-  staffShifts        StaffShift[]
-  appointments       Appointment[]
-  bookingBlocks      BookingBlock[]
-  bookingPolicies    BookingPolicy[]
-  centerHours        CenterHours[]
-  centerDays         CenterDay[]
+  users                         User[]
+  stores                        Store[]
+  devices                       Device[]
+  pairingCodes                  PairingCode[]
+  products                      Product[]
+  contacts                      Contact[]
+  warehouses                    Warehouse[]
+  taxes                         TenantTax[]
+  tickets                       Ticket[]
+  refunds                       Refund[]
+  syncOutbox                    SyncOutbox[]
+  holdedUploads                 HoldedUpload[]
+  modifierGroups                ModifierGroup[]
+  tagAliases                    TagAlias[]
+  tagSections                   TagSection[]
+  tagVisitTypes                 TagVisitType[]
+  reconciliationRuns            ReconciliationRun[]
+  clients                       Client[]
+  serviceSchedulings            ServiceScheduling[]
+  resources                     Resource[]
+  staffProfiles                 StaffProfile[]
+  staffSkills                   StaffSkill[]
+  staffShifts                   StaffShift[]
+  appointments                  Appointment[]
+  bookingBlocks                 BookingBlock[]
+  bookingPolicies               BookingPolicy[]
+  centerHours                   CenterHours[]
+  centerDays                    CenterDay[]
   // F1 (ADR-018) · el registro de jornada.
-  employees          Employee[]
+  employees                     Employee[]
   // V1-verifactu (ADR-019) · los registros de facturación de sus cajas.
-  fiscalRecords      FiscalRecord[]
+  fiscalRecords                 FiscalRecord[]
   // clinica-1 · la historia clínica. Las cuatro cuelgan con RESTRICT, no
   // con Cascade: un tenant con historia NO SE BORRA. Ver el comentario de
   // cada modelo.
-  clinicalAccesses   ClinicalAccess[]
-  clinicalAccessLogs ClinicalAccessLog[]
-  clinicalEntries    ClinicalEntry[]
-  clinicalAddenda    ClinicalAddendum[]
+  clinicalAccesses              ClinicalAccess[]
+  clinicalAccessLogs            ClinicalAccessLog[]
+  clinicalEntries               ClinicalEntry[]
+  clinicalAddenda               ClinicalAddendum[]
   // clinica-2 · las valoraciones iniciales y las correcciones del sanitario.
   // RESTRICT al otro lado, como todo lo clínico: un tenant con historia no
   // se borra.
-  clinicalAssessments ClinicalAssessment[]
+  clinicalAssessments           ClinicalAssessment[]
   clinicalAssessmentCorrections ClinicalAssessmentCorrection[]
   // enlaces-publicos · todos los enlaces públicos del negocio, de cualquier
   // `purpose`. RESTRICT al otro lado: un tenant con enlaces no se borra.
-  publicLinks PublicLink[]
+  publicLinks                   PublicLink[]
+  KitchenDispatch               KitchenDispatch[]
 
   // v1.3-SuperAdmin-Hub Lote 3 · el backfill y el hub buscan/listan
   // tenants por `holded_account_id`. Sin índice eran scans completos
@@ -975,9 +1059,9 @@ model TenantTax {
 }
 
 model User {
-  id                     String    @id @default(uuid()) @db.Uuid
-  tenantId               String    @map("tenant_id") @db.Uuid
-  email                  String    @unique
+  id                     String        @id @default(uuid()) @db.Uuid
+  tenantId               String        @map("tenant_id") @db.Uuid
+  email                  String        @unique
   // v1.7-alias-cajeros: nombre visible del cajero ("María"). Sustituye
   // al email en todos los puntos de display (TPV, ticket, comandas,
   // informe Z, admin); el email queda como credencial y canal.
@@ -986,33 +1070,33 @@ model User {
   // mostrar. Unicidad por tenant entre cajeros activos validada en la
   // API (case-insensitive), no como constraint: "María" puede existir
   // en dos tenants distintos.
-  alias                  String?   @map("alias")
-  passwordHash           String?   @map("password_hash")
+  alias                  String?       @map("alias")
+  passwordHash           String?       @map("password_hash")
   // PIN sólo lo tienen cajeros/encargados que tocan el TPV físico.
-  pinHash                String?   @map("pin_hash")
+  pinHash                String?       @map("pin_hash")
   role                   UserRole
   // Incrementa con `POST /auth/logout-everywhere` (B2 §4.3). Los
   // refresh tokens llevan este `tv` en su payload; si no coincide con
   // el de BD, el refresh se rechaza. Permite invalidación masiva sin
   // mantener una blacklist por jti.
-  tokenVersion           Int       @default(0) @map("token_version")
+  tokenVersion           Int           @default(0) @map("token_version")
   // 2FA TOTP (§17.3). Secret AES-GCM versionado (`v1:` prefix) con la
   // misma clave que la API key Holded. `twoFactorEnabledAt` actúa como
   // flag y timestamp: NULL → 2FA off; valor → on.
-  twoFactorSecret        String?   @map("two_factor_secret")
-  twoFactorEnabledAt     DateTime? @map("two_factor_enabled_at") @db.Timestamptz()
+  twoFactorSecret        String?       @map("two_factor_secret")
+  twoFactorEnabledAt     DateTime?     @map("two_factor_enabled_at") @db.Timestamptz()
   // Array JSON de objetos `{ hash: <argon2id>, usedAt: ISO|null }`.
   // Códigos de un solo uso; cuando se usa uno se marca `usedAt` (no se
   // borra para que el contador del admin pueda mostrar "X/10 sin
   // usar").
-  twoFactorRecoveryCodes Json?     @map("two_factor_recovery_codes")
-  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz()
-  lastLoginAt            DateTime? @map("last_login_at") @db.Timestamptz()
+  twoFactorRecoveryCodes Json?         @map("two_factor_recovery_codes")
+  createdAt              DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+  lastLoginAt            DateTime?     @map("last_login_at") @db.Timestamptz()
   // B-SuperAdmin: cuando un super-admin crea un OWNER, su password
   // temporal viene marcada con must_change_password_at = now(). El
   // siguiente login redirige obligatoriamente a /change-password-initial.
   // Al cambiarla se pone a NULL y se incrementa tokenVersion.
-  mustChangePasswordAt   DateTime? @map("must_change_password_at") @db.Timestamptz()
+  mustChangePasswordAt   DateTime?     @map("must_change_password_at") @db.Timestamptz()
   // B-OnboardingV2: marca el cajero técnico que el equipo mipiacetpv usa
   // para probar el TPV antes de que el cliente toque nada. El worker
   // `ticket-upload-worker` mira este flag (a través de `ticket.user`)
@@ -1020,13 +1104,13 @@ model User {
   // no mandar correos a clientes reales. Al activar el tenant
   // (POST /super-admin/tenants/:id/activate), los tickets TEST se
   // borran y este user queda soft-deleted (deletedAt poblado abajo).
-  isTestCashier          Boolean   @default(false) @map("is_test_cashier")
+  isTestCashier          Boolean       @default(false) @map("is_test_cashier")
   // B-OnboardingV2: soft-delete del cajero técnico tras activar el
   // tenant. Permite conservar histórico ligero sin que la UI lo liste.
   // Sólo se aplica a usuarios `isTestCashier=true`; los OWNER/MANAGER/
   // CASHIER reales se bloquean vía `Tenant.blockedAt` o
   // `User.tokenVersion`. No se reutiliza para borrado de usuarios reales.
-  deletedAt              DateTime? @map("deleted_at") @db.Timestamptz()
+  deletedAt              DateTime?     @map("deleted_at") @db.Timestamptz()
   // clinica-2 · EL ACTOR DE SISTEMA. Hoy hay uno y sólo uno: «Paciente (por
   // enlace)», el autor de las respuestas que el paciente teclea desde el
   // enlace del email o desde la tablet.
@@ -1054,7 +1138,7 @@ model User {
   // Tampoco sale en ninguna lista de personas (`GET /cashiers`,
   // `GET /staff`, candidatos a PIN, colisión de alias): es un actor, no
   // alguien a quien dar de alta o quitar.
-  isSystemActor          Boolean   @default(false) @map("is_system_actor")
+  isSystemActor          Boolean       @default(false) @map("is_system_actor")
   // clinica-1 · LA MARCA SANITARIA, separada del rol de negocio.
   //
   // Decisión de producto (Matías, 05-10-2026): en pantalla se ven tres
@@ -1066,33 +1150,42 @@ model User {
   //
   // `role = CLINICIAN` implica esto en true, garantizado por el CHECK
   // `users_clinician_implies_flag` (migración `clinica_1_historia`).
-  isClinician            Boolean   @default(false) @map("is_clinician")
+  isClinician            Boolean       @default(false) @map("is_clinician")
   // Nº de colegiado. Opcional EN LA BASE y **exigido por la API** al
   // marcar a alguien como sanitario de un tenant con la clínica
   // encendida: la condición cruza `users` y `tenants`, así que no cabe en
   // un CHECK. Lo que sí hay en la base es que no se guarde en blanco
   // (`users_clinician_license_not_blank`) — un colegiado " " convierte
   // "tiene colegiado" en una comprobación que miente.
-  clinicianLicense       String?   @map("clinician_license")
+  clinicianLicense       String?       @map("clinician_license")
   // A cuántos pacientes alcanza. Sólo significa algo si `isClinician`.
   // Default `SELECTION` a propósito: lo seguro es lo restrictivo.
   clinicalScope          ClinicalScope @default(SELECTION) @map("clinical_scope")
 
-  tenant         Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  shifts         Shift[]              @relation("ShiftOpenedBy")
-  closedShifts   Shift[]              @relation("ShiftClosedBy")
-  tickets        Ticket[]
-  voidedTickets  Ticket[]             @relation("TicketVoidedBy")
-  pairingCodes   PairingCode[]
-  resetTokens    PasswordResetToken[]
-  refunds        Refund[]
-  emailJobsAsked TicketEmailJob[]
-  printIntents   PrintIntent[]
+  tenant              Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  shifts              Shift[]              @relation("ShiftOpenedBy")
+  closedShifts        Shift[]              @relation("ShiftClosedBy")
+  tickets             Ticket[]
+  voidedTickets       Ticket[]             @relation("TicketVoidedBy")
+  pairingCodes        PairingCode[]
+  resetTokens         PasswordResetToken[]
+  refunds             Refund[]
+  emailJobsAsked      TicketEmailJob[]
+  printIntents        PrintIntent[]
   // B-reservas-3 · el `user` ES el profesional (ADR-R1: no tabla Staff
   // paralela). Perfil de agenda 1:1, matriz de skills y turnos.
-  staffProfile   StaffProfile?
-  staffSkills    StaffSkill[]
-  staffShifts    StaffShift[]
+  staffProfile        StaffProfile?
+  staffSkills         StaffSkill[]
+  staffShifts         StaffShift[]
+  // kds-1-cocina · quién envió cada comanda, quién marchó cada tiempo,
+  // quién anuló unidades ya enviadas y quién marcó «Servido». Las cuatro
+  // son RESTRICT: el registro de quién anuló lo enviado es, sin PIN, la
+  // única protección contra anular para quedarse con el dinero
+  // (decisión 6), así que no puede quedarse huérfano.
+  kitchenDispatches   KitchenDispatch[]
+  firedCourses        TicketCourse[]
+  voidedKitchenLines  KitchenOrderLine[]   @relation("KitchenOrderLineVoidedBy")
+  servedKitchenOrders KitchenOrder[]       @relation("KitchenOrderServedBy")
 
   // F1 (ADR-018) · si este usuario es además un empleado que ficha. La
   // relación es opcional y en un solo sentido: un profesor que sólo ficha
@@ -1110,33 +1203,33 @@ model User {
   // ellas es el `onDelete` que llevan las FKs al otro lado (ver cada
   // modelo): RESTRICT en lo que es autoría o acceso, SET NULL en el
   // "por quién" de una concesión.
-  clinicalAccesses       ClinicalAccess[]    @relation("ClinicalAccessClinician")
-  clinicalAccessesGiven  ClinicalAccess[]    @relation("ClinicalAccessGrantedBy")
-  clinicalAccessesTaken  ClinicalAccess[]    @relation("ClinicalAccessRevokedBy")
-  clinicalAccessLogs     ClinicalAccessLog[]
-  clinicalEntries        ClinicalEntry[]
-  clinicalAddenda        ClinicalAddendum[]
+  clinicalAccesses      ClinicalAccess[]               @relation("ClinicalAccessClinician")
+  clinicalAccessesGiven ClinicalAccess[]               @relation("ClinicalAccessGrantedBy")
+  clinicalAccessesTaken ClinicalAccess[]               @relation("ClinicalAccessRevokedBy")
+  clinicalAccessLogs    ClinicalAccessLog[]
+  clinicalEntries       ClinicalEntry[]
+  clinicalAddenda       ClinicalAddendum[]
   // clinica-2 · los tres papeles en una valoración: quién mandó el test,
   // quién la validó y quién firmó cada corrección. Los dos primeros son del
   // personal; el tercero también (el paciente no corrige: contesta).
-  assessmentsRequested   ClinicalAssessment[] @relation("AssessmentRequestedBy")
-  assessmentsValidated   ClinicalAssessment[] @relation("AssessmentValidatedBy")
-  assessmentCorrections  ClinicalAssessmentCorrection[]
+  assessmentsRequested  ClinicalAssessment[]           @relation("AssessmentRequestedBy")
+  assessmentsValidated  ClinicalAssessment[]           @relation("AssessmentValidatedBy")
+  assessmentCorrections ClinicalAssessmentCorrection[]
   // enlaces-publicos · los enlaces públicos que esta persona creó (mandar el
   // test, reenviar «mi cita»). RESTRICT: quién creó un enlace es parte de lo
   // que el registro puede contestar.
-  publicLinksCreated     PublicLink[] @relation("PublicLinkCreatedBy")
+  publicLinksCreated    PublicLink[]                   @relation("PublicLinkCreatedBy")
 
   @@index([tenantId])
   @@map("users")
 }
 
 model Store {
-  id                String    @id @default(uuid()) @db.Uuid
-  tenantId          String    @map("tenant_id") @db.Uuid
-  name              String
-  fiscalAddress     Json?     @map("fiscal_address")
-  warehouseHoldedId String?   @map("warehouse_holded_id")
+  id                 String            @id @default(uuid()) @db.Uuid
+  tenantId           String            @map("tenant_id") @db.Uuid
+  name               String
+  fiscalAddress      Json?             @map("fiscal_address")
+  warehouseHoldedId  String?           @map("warehouse_holded_id")
   // Config de entrega del ticket digital (B-Print fase 1):
   //   {
   //     emailAutoIfCustomerHasEmail: boolean,
@@ -1149,16 +1242,36 @@ model Store {
   //   }
   // Defaults sensatos al crear (todo true, plantillas ES). El TPV lo
   // lee al cobrar para mostrar los botones correctos en post-cobro.
-  ticketDelivery    Json?     @map("ticket_delivery")
-  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  ticketDelivery     Json?             @map("ticket_delivery")
+  // ── kds-1-cocina · ajustes de cocina POR RESTAURANTE ────────────────
+  //
+  // Viven en la TIENDA y no en el tenant porque lo que cambia de un local a
+  // otro es configuración, no desarrollo (regla de alcance de Matías,
+  // 08-10): una cadena con un bar y un restaurante a la carta necesita los
+  // dos modos a la vez. Columnas explícitas y no un `Json?` como
+  // `ticketDelivery`: el semáforo lo lee la pantalla de cocina en cada
+  // repintado y los umbrales tienen que poder llevar CHECK en la base
+  // (verde < ámbar, los dos > 0), que un JSON no puede.
+  //
+  // Los defaults son los de la decisión 3: verde < 10 min, ámbar 10–20,
+  // rojo > 20. Una tienda que no los toque se comporta como La Maestranza.
+  kitchenGreenMaxMin Int               @default(10) @map("kitchen_green_max_min")
+  kitchenAmberMaxMin Int               @default(20) @map("kitchen_amber_max_min")
+  kitchenCourseMode  KitchenCourseMode @default(ESPERA) @map("kitchen_course_mode")
+  kitchenSeatMode    KitchenSeatMode   @default(ALERGIA) @map("kitchen_seat_mode")
+  // Decisión 8: el pitido del «LISTO» del TPV queda como ajuste, APAGADO
+  // de serie, por coherencia con «sin sonidos; avisa el parpadeo».
+  kitchenReadyBeep   Boolean           @default(false) @map("kitchen_ready_beep")
+  createdAt          DateTime          @default(now()) @map("created_at") @db.Timestamptz()
   // Soft-delete (B4 §0.2). Las FKs a Register/Shift/Ticket son Restrict
   // — borrar duro rompería histórico fiscal. `deletedAt != null` saca la
   // tienda del listado pero preserva todo lo demás.
-  deletedAt         DateTime? @map("deleted_at") @db.Timestamptz()
+  deletedAt          DateTime?         @map("deleted_at") @db.Timestamptz()
 
-  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  registers Register[]
-  tables    Table[]
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  registers     Register[]
+  tables        Table[]
+  kitchenOrders KitchenOrder[]
 
   @@index([tenantId])
   @@map("stores")
@@ -1191,10 +1304,11 @@ model Table {
   deletedAt          DateTime? @map("deleted_at") @db.Timestamptz()
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz()
 
-  store          Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  store          Store          @relation(fields: [storeId], references: [id], onDelete: Cascade)
   tickets        Ticket[]
-  groupedInto    Table?   @relation("TableGrouping", fields: [groupedIntoTableId], references: [id])
-  absorbedTables Table[]  @relation("TableGrouping")
+  groupedInto    Table?         @relation("TableGrouping", fields: [groupedIntoTableId], references: [id])
+  absorbedTables Table[]        @relation("TableGrouping")
+  kitchenOrders  KitchenOrder[]
 
   @@unique([storeId, name])
   @@index([storeId, zone])
@@ -1330,26 +1444,44 @@ model Device {
   // de antispam — si la IP fluctúa de provincia no se reenvía. Sólo se
   // dispara primer login, cambio de país y re-aparición tras 30d.
   lastEmailAlertAt   DateTime?            @map("last_email_alert_at") @db.Timestamptz()
+  // kds-1-cocina (decisión 2) · qué secciones muestra esta pantalla.
+  // Vacío en todo `kind != KITCHEN` y obligatoriamente no vacío en una
+  // pantalla de cocina (CHECK `devices_kitchen_sections` en la migración):
+  // una pantalla sin secciones no enseñaría nada y el fallo se vería en el
+  // servicio, no al emparejar.
+  //
+  // Es una LISTA y no una columna: «COCINA, BARRA o las dos» (y mañana
+  // SALON, si un pase lo pide). La sección vive por LÍNEA, así que la misma
+  // mesa sale en la pantalla de barra con las cañas y en la de cocina con
+  // las bravas.
+  kitchenSections    KitchenSection[]     @default([]) @map("kitchen_sections")
 
-  tenant           Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  register         Register           @relation(fields: [registerId], references: [id], onDelete: Cascade)
-  consumedPairings PairingCode[]      @relation("PairingCodeConsumedBy")
+  tenant              Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  register            Register            @relation(fields: [registerId], references: [id], onDelete: Cascade)
+  consumedPairings    PairingCode[]       @relation("PairingCodeConsumedBy")
   // V1-verifactu · a favor de qué dispositivo se revocó éste, y a cuáles
   // revocó él. La FK es DEFERRABLE INITIALLY DEFERRED en la migración: hay
   // que revocar el anterior ANTES de insertar el nuevo (índice único), y en
   // ese momento el nuevo todavía no existe.
-  revokedBy        Device?            @relation("DeviceRevokedBy", fields: [revokedByDeviceId], references: [id], onDelete: SetNull)
-  revoked          Device[]           @relation("DeviceRevokedBy")
+  revokedBy           Device?             @relation("DeviceRevokedBy", fields: [revokedByDeviceId], references: [id], onDelete: SetNull)
+  revoked             Device[]            @relation("DeviceRevokedBy")
   // Registros de facturación que generó este dispositivo.
-  fiscalRecords    FiscalRecord[]
+  fiscalRecords       FiscalRecord[]
   // A5 · última instantánea que el terminal publicó por su canal de
   // soporte. 1:1, se sobreescribe en cada heartbeat.
-  heartbeat        DeviceHeartbeat?
+  heartbeat           DeviceHeartbeat?
   // A5 · capturas de pantalla vivas de este terminal (24 h como mucho).
-  screenshots      DeviceScreenshot[]
+  screenshots         DeviceScreenshot[]
   // clinica-1 · desde qué terminal se abrió una historia. SET NULL al
   // otro lado: revocar un aparato no borra la línea del registro.
-  clinicalAccessLogs ClinicalAccessLog[]
+  clinicalAccessLogs  ClinicalAccessLog[]
+  // kds-1-cocina · lo que esta pantalla de cocina ha marcado. `SetNull` al
+  // otro lado: revocar o reemparejar la tablet no borra la traza de qué
+  // plato se tachó y cuándo —de ahí salen las estadísticas del dueño— pero
+  // tampoco impide borrar el dispositivo.
+  kitchenOrdersReady  KitchenOrder[]      @relation("KitchenOrderReadyBy")
+  kitchenOrdersUrgent KitchenOrder[]      @relation("KitchenOrderUrgentBy")
+  kitchenLinesDone    KitchenOrderLine[]  @relation("KitchenOrderLineDoneBy")
 
   @@index([tenantId])
   @@index([registerId])
@@ -1457,15 +1589,28 @@ model DeviceScreenshot {
 // nuevo. 6 dígitos; vida útil típica 1h. Unique compound (tenantId,
 // code) para evitar colisiones del RNG dentro del mismo tenant.
 model PairingCode {
-  id                 String    @id @default(uuid()) @db.Uuid
-  tenantId           String    @map("tenant_id") @db.Uuid
-  registerId         String    @map("register_id") @db.Uuid
+  id                 String           @id @default(uuid()) @db.Uuid
+  tenantId           String           @map("tenant_id") @db.Uuid
+  registerId         String           @map("register_id") @db.Uuid
   code               String
-  createdByUserId    String    @map("created_by_user_id") @db.Uuid
-  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz()
-  expiresAt          DateTime  @map("expires_at") @db.Timestamptz()
-  consumedAt         DateTime? @map("consumed_at") @db.Timestamptz()
-  consumedByDeviceId String?   @map("consumed_by_device_id") @db.Uuid
+  createdByUserId    String           @map("created_by_user_id") @db.Uuid
+  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz()
+  expiresAt          DateTime         @map("expires_at") @db.Timestamptz()
+  consumedAt         DateTime?        @map("consumed_at") @db.Timestamptz()
+  consumedByDeviceId String?          @map("consumed_by_device_id") @db.Uuid
+  // kds-1-cocina · QUÉ se empareja con este código, decidido por quien lo
+  // genera (propietario o encargado desde el panel) y NO por el aparato.
+  //
+  // Lo contrario —que `POST /devices/pair` aceptase `kind: "KITCHEN"` del
+  // cuerpo— dejaría que cualquiera con un código de caja se emparejase como
+  // pantalla de cocina, y una pantalla de cocina no releva al terminal: el
+  // resultado sería una caja con dos aparatos vivos donde el segundo no
+  // factura y nadie se enteró. La intención vive en el código, que lo crea
+  // alguien autenticado.
+  kind               DeviceKind       @default(TERMINAL)
+  // Las secciones de la pantalla, copiadas al dispositivo al consumir el
+  // código. Vacío salvo en `kind = KITCHEN`.
+  kitchenSections    KitchenSection[] @default([]) @map("kitchen_sections")
 
   tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   register         Register @relation(fields: [registerId], references: [id], onDelete: Cascade)
@@ -1573,6 +1718,22 @@ model Product {
   // envía tags, queda como array vacío. Tiene índice GIN
   // (products_tags_idx) para futuros filtros server-side @> y &&.
   tags                 String[]      @default([])
+  // kds-1-cocina (decisión 3, capa 3) · los alérgenos de este plato, de la
+  // lista cerrada de los 14 del Reglamento (UE) 1169/2011.
+  //
+  // Editable en la ficha del producto e importable por CSV. Para La
+  // Maestranza se importan del generador de sus cartas, que ya los lleva
+  // por plato (`maestranza_carta.py`). Sirve a tres cosas: el cruce que
+  // hace que la pantalla grite «¡LLEVA GLUTEN!» cuando un plato asignado a
+  // la silla alérgica lleva su alérgeno, el aviso del TPV al asignarlo, y
+  // mañana la carta digital.
+  //
+  // `@default([])` y vacío NO significa «sin alérgenos»: significa «no
+  // informado». La capa 3 se apaga sola para los productos vacíos y las
+  // capas 1 y 2 (la alergia de la mesa y la silla del plato) siguen
+  // funcionando igual. Un producto vacío no puede hacer que la pantalla
+  // calle una alergia que el camarero SÍ declaró.
+  allergens            Allergen[]    @default([])
   // v1.9-sync-borrados: cuándo la conciliación (o un 404 de detalle)
   // detectó que la ficha ya no existe en Holded y la soft-archivó
   // (active=false + sellableViaTpv=false). Distingue "borrado en
@@ -1968,25 +2129,34 @@ model Ticket {
   sealedHash           String?           @map("sealed_hash")
   sealedAt             DateTime?         @map("sealed_at") @db.Timestamptz()
 
-  tenant          Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  register        Register               @relation(fields: [registerId], references: [id], onDelete: Restrict)
-  shift           Shift                  @relation(fields: [shiftId], references: [id], onDelete: Restrict)
-  user            User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
-  voidedBy        User?                  @relation("TicketVoidedBy", fields: [voidedByUserId], references: [id], onDelete: Restrict)
-  lines           TicketLine[]
-  payments        TicketPayment[]
-  partialPayments TicketPartialPayment[]
-  refunds         Refund[]
-  emailJobs       TicketEmailJob[]
-  printIntents    PrintIntent[]
-  corrections     TicketCorrection[]
+  tenant            Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  register          Register               @relation(fields: [registerId], references: [id], onDelete: Restrict)
+  shift             Shift                  @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  user              User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
+  voidedBy          User?                  @relation("TicketVoidedBy", fields: [voidedByUserId], references: [id], onDelete: Restrict)
+  lines             TicketLine[]
+  payments          TicketPayment[]
+  partialPayments   TicketPartialPayment[]
+  refunds           Refund[]
+  emailJobs         TicketEmailJob[]
+  printIntents      PrintIntent[]
+  corrections       TicketCorrection[]
   // V1-verifactu (ADR-019) · el registro de facturación de esta venta, y el
   // de su anulación si la hubo. Lista y no 1:0..1 porque los dos cuelgan de
   // la misma venta.
-  fiscalRecords   FiscalRecord[]
+  fiscalRecords     FiscalRecord[]
   // B-reservas-4 · cita → caja: el ticket pre-poblado que abre "Cobrar en
   // caja". Como mucho una cita apunta a un ticket (puente 1:0..1).
-  appointment     Appointment?
+  appointment       Appointment?
+  // kds-1-cocina · todo lo de cocina de esta mesa cuelga del TICKET y se va
+  // con él (`Cascade`): las alergias de la decisión 3 **no se cuelgan de
+  // `Client` ni de nadie**, viven en la mesa de ESTE servicio y mueren con
+  // ella. Es la garantía de privacidad de la decisión 3, escrita como una
+  // clave ajena y no como una costumbre.
+  kitchenDispatches KitchenDispatch[]
+  kitchenOrders     KitchenOrder[]
+  allergies         TicketAllergy[]
+  courses           TicketCourse[]
 
   @@unique([registerId, internalNumber])
   @@index([tenantId, status])
@@ -2078,11 +2248,55 @@ model TicketLine {
   // queda registrado el origen. Permite desagrupar reversiblemente
   // (B7 §5.3).
   originalTableId   String?  @map("original_table_id") @db.Uuid
+  // ── kds-1-cocina · LO QUE COCINA YA TIENE DE ESTA LÍNEA ──────────────
+  //
+  // **La invariante central del bloque**: cuántas unidades de esta línea ha
+  // recibido ya la cocina. El envío manda la DIFERENCIA (`units -
+  // sentUnits`), no la mesa entera.
+  //
+  // Es exactamente el agujero que v2-H1 documentó y no pudo tapar
+  // (`apps/tpv-web/src/lib/kitchenSentLines.ts`): `lastSentAt` vive en el
+  // TICKET, así que el servidor sabía CUÁNDO se envió pero no QUÉ. El front
+  // lo esquivaba con un conjunto de ids en `localStorage` sembrado con
+  // `lastSentAt`, y ese apaño se equivoca —por el lado prudente, pero se
+  // equivoca— en cuanto hay dos terminales. Una pantalla de cocina no puede
+  // apoyarse en eso.
+  //
+  // Decimal y no Int por la misma razón que `units`: hay catálogos que
+  // venden 0,5 raciones.
+  //
+  // Dos CHECK en la migración, ninguno expresable en Prisma:
+  //   · `ticket_lines_sent_units_range`  — 0 ≤ sentUnits ≤ units.
+  //   · `ticket_lines_course_positive`   — course ≥ 1.
+  // El primero es el que importa: un `sentUnits > units` haría que el
+  // siguiente envío mandase una diferencia NEGATIVA, o sea nada, y la
+  // cocina no vería un plato que el cliente ya pidió.
+  sentUnits         Decimal  @default(0) @map("sent_units") @db.Decimal(10, 3)
+  // kds-1-cocina (decisión 3) · el TIEMPO de salida de esta línea: 1, 2,
+  // 3… El 1 marcha al enviar; los demás esperan a su «Marchar». Un solo
+  // modelo para los dos modos del restaurante (ver `KitchenCourseMode`):
+  // el botón «Espera» del modo bar es, por debajo, «course = 2».
+  course            Int      @default(1)
+  // kds-1-cocina (decisión 3, capa 2) · la SILLA a la que va este plato.
+  //
+  // Es un dato de la LÍNEA y no algo propio de las alergias: el mismo
+  // campo sirve al bar que sólo lo usa cuando hay un celíaco y al
+  // restaurante a la carta que lo pone siempre (`KitchenSeatMode`), y
+  // mañana a partir la cuenta por silla. Mismo dato, otro ajuste.
+  //
+  // NULL = «para la mesa», que es el caso normal. Numerada desde 1 y
+  // acotada por `Ticket.diners` en la API, no en la base: una mesa puede
+  // cambiar de comensales a mitad de servicio y no queremos que eso
+  // invalide filas ya escritas.
+  seat              Int?
 
-  ticket      Ticket          @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  product     Product?        @relation(fields: [productId], references: [id])
-  variant     ProductVariant? @relation(fields: [variantId], references: [id])
-  refundLines RefundLine[]
+  ticket            Ticket             @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  product           Product?           @relation(fields: [productId], references: [id])
+  variant           ProductVariant?    @relation(fields: [variantId], references: [id])
+  refundLines       RefundLine[]
+  // kds-1-cocina · las copias que viajaron a cocina. `SetNull`: borrar la
+  // línea de la venta no borra lo que la cocina ya vio.
+  kitchenOrderLines KitchenOrderLine[]
 
   @@index([ticketId])
   @@map("ticket_lines")
@@ -2547,18 +2761,18 @@ model Client {
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
 
-  tenant         Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  consents       ClientConsent[]
-  technicalNotes ClientTechnicalNote[]
-  appointments   Appointment[]
+  tenant              Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  consents            ClientConsent[]
+  technicalNotes      ClientTechnicalNote[]
+  appointments        Appointment[]
   // clinica-1 · la historia del paciente, sus accesos y el registro de
   // quién la ha abierto. Las tres con RESTRICT al otro lado (y no Cascade
   // como `consents` y `technicalNotes`): **un cliente con historia no se
   // borra.** Esa es la diferencia de fondo entre una ficha de peluquería
   // y una historia clínica.
-  clinicalAccesses   ClinicalAccess[]
-  clinicalAccessLogs ClinicalAccessLog[]
-  clinicalEntries    ClinicalEntry[]
+  clinicalAccesses    ClinicalAccess[]
+  clinicalAccessLogs  ClinicalAccessLog[]
+  clinicalEntries     ClinicalEntry[]
   // clinica-2 · sus valoraciones iniciales. Puede haber varias: la
   // valoración se repasa creando una NUEVA, sin sobrescribir la anterior
   // (decisión de producto 7).
@@ -2626,23 +2840,23 @@ model ServiceScheduling {
   // PK = FK al producto (relación 1:1 con product.kind=SERVICE). No hay
   // id propio: la extensión ES el producto. `Unsupported`/soft: Prisma no
   // puede exigir kind=SERVICE a nivel de BD; lo valida el endpoint.
-  productId       String   @id @map("product_id") @db.Uuid
-  tenantId        String   @map("tenant_id") @db.Uuid
-  durationMin     Int      @map("duration_min")
-  bufferBeforeMin Int      @default(0) @map("buffer_before_min")
-  bufferAfterMin  Int      @default(0) @map("buffer_after_min")
+  productId         String   @id @map("product_id") @db.Uuid
+  tenantId          String   @map("tenant_id") @db.Uuid
+  durationMin       Int      @map("duration_min")
+  bufferBeforeMin   Int      @default(0) @map("buffer_before_min")
+  bufferAfterMin    Int      @default(0) @map("buffer_after_min")
   // Nº de profesionales simultáneos que requiere el servicio (Sinfonía a
   // 4 manos = 2, a 8 = 4). El motor de disponibilidad (B4) lo usa.
-  staffRequired   Int      @default(1) @map("staff_required")
+  staffRequired     Int      @default(1) @map("staff_required")
   // Contrato para B4/B6: un servicio con onlineBookable=false queda
   // marcado como NO ofrecible en reserva online.
-  onlineBookable  Boolean  @default(false) @map("online_bookable")
+  onlineBookable    Boolean  @default(false) @map("online_bookable")
   // Familia/agrupación libre del servicio (p.ej. "Faciales", "Corte").
-  family          String?
+  family            String?
   // Flags de canal: en qué superficies aparece el servicio. Forma
   // estable `{caja,ticket,agenda,online}` (jsonb). El front la lee tal
   // cual; `online` debe ir de la mano de `onlineBookable`.
-  channels        Json     @default("{\"caja\":true,\"ticket\":true,\"agenda\":true,\"online\":false}")
+  channels          Json     @default("{\"caja\":true,\"ticket\":true,\"agenda\":true,\"online\":false}")
   // clinica-2 · «este servicio es la primera valoración».
   //
   // Al dar una cita de un servicio marcado así a un paciente que no tiene
@@ -2654,7 +2868,7 @@ model ServiceScheduling {
   // (ADR-R1): Holded no modela esto y el precio/IVA del servicio siguen
   // siendo suyos. Nace en `false` para los quince tenants de hoy, así que
   // ningún alta de cita existente cambia de comportamiento.
-  primeraValoracion Boolean @default(false) @map("primera_valoracion")
+  primeraValoracion Boolean  @default(false) @map("primera_valoracion")
   // clinica-3 · «este servicio es un tratamiento de la sesión».
   //
   // QUÉ BOTONES SALEN EN LA SESIÓN LO DECIDE EL CATÁLOGO. Es la misma
@@ -2667,7 +2881,7 @@ model ServiceScheduling {
   //
   // Nace en `false`, así que ningún servicio de los tenants de hoy se
   // convierte en un tratamiento de sesión.
-  tratamientoSesion Boolean @default(false) @map("tratamiento_sesion")
+  tratamientoSesion Boolean  @default(false) @map("tratamiento_sesion")
   // clinica-5 · «este servicio ES el nivel N de la quiropodia».
   //
   // 1 básica · 2 completa · 3 extra. NULL = no es ninguno de los tres (lo
@@ -2696,9 +2910,9 @@ model ServiceScheduling {
   //     por (tenant, nivel). Dos servicios que digan ser «quiropodia
   //     extra» es una sesión que no sabe cuál cobrar, y es mejor que
   //     falle al configurarlo que con la paciente delante.
-  nivelQuiropodia Int?     @map("nivel_quiropodia")
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
-  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+  nivelQuiropodia   Int?     @map("nivel_quiropodia")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz()
 
   tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -2874,15 +3088,15 @@ model Appointment {
   createdAt    DateTime                 @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt    DateTime                 @updatedAt @map("updated_at") @db.Timestamptz()
 
-  tenant      Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  client      Client?                 @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  ticket      Ticket?                 @relation(fields: [ticketId], references: [id], onDelete: SetNull)
-  items       AppointmentItem[]
-  assignments AppointmentAssignment[]
+  tenant              Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client              Client?                 @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  ticket              Ticket?                 @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  items               AppointmentItem[]
+  assignments         AppointmentAssignment[]
   // clinica-1 · las anotaciones escritas en esta cita. SET NULL al otro
   // lado: si la cita desapareciera, la anotación sigue en la historia y
   // pierde el enlace, no el contenido.
-  clinicalEntries ClinicalEntry[]
+  clinicalEntries     ClinicalEntry[]
   // clinica-2 · la valoración que esta cita disparó, si era de primera
   // valoración. SET NULL al otro lado por la misma razón que las entradas.
   clinicalAssessments ClinicalAssessment[]
@@ -3467,17 +3681,17 @@ model FiscalRecord {
 // terminales a la vez no crean dos accesos; y tras una revocación, una
 // cita nueva SÍ inserta otra fila y el sanitario recupera el acceso.
 model ClinicalAccess {
-  id               String               @id @default(uuid()) @db.Uuid
-  tenantId         String               @map("tenant_id") @db.Uuid
-  clinicianUserId  String               @map("clinician_user_id") @db.Uuid
-  clientId         String               @map("client_id") @db.Uuid
-  source           ClinicalAccessSource
-  grantedAt        DateTime             @default(now()) @map("granted_at") @db.Timestamptz()
+  id              String               @id @default(uuid()) @db.Uuid
+  tenantId        String               @map("tenant_id") @db.Uuid
+  clinicianUserId String               @map("clinician_user_id") @db.Uuid
+  clientId        String               @map("client_id") @db.Uuid
+  source          ClinicalAccessSource
+  grantedAt       DateTime             @default(now()) @map("granted_at") @db.Timestamptz()
   // NULL cuando el acceso nace de la agenda: ahí no lo concede una
   // persona. El CHECK `clinical_access_source_grantor` ata las dos cosas.
-  grantedByUserId  String?              @map("granted_by_user_id") @db.Uuid
-  revokedAt        DateTime?            @map("revoked_at") @db.Timestamptz()
-  revokedByUserId  String?              @map("revoked_by_user_id") @db.Uuid
+  grantedByUserId String?              @map("granted_by_user_id") @db.Uuid
+  revokedAt       DateTime?            @map("revoked_at") @db.Timestamptz()
+  revokedByUserId String?              @map("revoked_by_user_id") @db.Uuid
 
   tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   client    Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
@@ -3551,10 +3765,10 @@ model ClinicalEntry {
   body          Json
   createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz()
 
-  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  client      Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
-  author      User               @relation(fields: [authorUserId], references: [id], onDelete: Restrict)
-  appointment Appointment?       @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client      Client              @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  author      User                @relation(fields: [authorUserId], references: [id], onDelete: Restrict)
+  appointment Appointment?        @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
   addenda     ClinicalAddendum[]
   // clinica-2 · la valoración de la que esta entrada son las respuestas, si
   // es de kind INITIAL_ASSESSMENT. Uno a uno (`entryId` es único allí).
@@ -3631,27 +3845,27 @@ model ClinicalAddendum {
 // avanza, lo ya contestado no se reescribe, y una vez VALIDADA la fila
 // queda congelada: validar es firmar.
 model ClinicalAssessment {
-  id            String                    @id @default(uuid()) @db.Uuid
-  tenantId      String                    @map("tenant_id") @db.Uuid
-  clientId      String                    @map("client_id") @db.Uuid
+  id                   String                    @id @default(uuid()) @db.Uuid
+  tenantId             String                    @map("tenant_id") @db.Uuid
+  clientId             String                    @map("client_id") @db.Uuid
   // De qué cita salió, si salió de una (la cita de primera valoración que
   // disparó el email). SET NULL: si la cita desapareciera, la valoración
   // sigue siendo parte de la historia.
-  appointmentId String?                   @map("appointment_id") @db.Uuid
+  appointmentId        String?                   @map("appointment_id") @db.Uuid
   // CON QUÉ VERSIÓN del cuestionario se contestó. Sin esto, una valoración
   // de hace dos años se pintaría con las preguntas de hoy — que es decir
   // que el paciente contestó algo que no se le preguntó.
-  questionnaireVersion Int                @map("questionnaire_version")
-  status        ClinicalAssessmentStatus  @default(PENDIENTE_PACIENTE)
-  channel       ClinicalAssessmentChannel
-  source        ClinicalAssessmentSource
+  questionnaireVersion Int                       @map("questionnaire_version")
+  status               ClinicalAssessmentStatus  @default(PENDIENTE_PACIENTE)
+  channel              ClinicalAssessmentChannel
+  source               ClinicalAssessmentSource
   // Quién mandó el test o abrió la tablet. Puede ser la recepcionista, y
   // precisamente por eso queda escrito quién fue.
   //
   // NULL cuando `source = APPOINTMENT`: ahí no lo pide una persona. El
   // CHECK `clinical_assessments_source_pedida_por` ata las dos cosas.
-  requestedByUserId String?               @map("requested_by_user_id") @db.Uuid
-  createdAt     DateTime                  @default(now()) @map("created_at") @db.Timestamptz()
+  requestedByUserId    String?                   @map("requested_by_user_id") @db.Uuid
+  createdAt            DateTime                  @default(now()) @map("created_at") @db.Timestamptz()
 
   // ── El enlace del email · OBSOLETO desde `enlaces-publicos` ─────────
   //
@@ -3671,18 +3885,18 @@ model ClinicalAssessment {
   // Hasta entonces: no se lee ninguna de las tres; escribirlas es un
   // espejo del enlace de verdad, no una segunda fuente de verdad.
   /// OBSOLETO (enlaces-publicos): la huella vive en `PublicLink.tokenHash`.
-  linkTokenHash String?                   @unique @map("link_token_hash")
+  linkTokenHash String?   @unique @map("link_token_hash")
   /// OBSOLETO (enlaces-publicos): la caducidad vive en `PublicLink.expiresAt`.
-  linkExpiresAt DateTime?                 @map("link_expires_at") @db.Timestamptz()
+  linkExpiresAt DateTime? @map("link_expires_at") @db.Timestamptz()
   /// OBSOLETO (enlaces-publicos): el gasto vive en `PublicLink.usedCount`.
-  linkUsedAt    DateTime?                 @map("link_used_at") @db.Timestamptz()
+  linkUsedAt    DateTime? @map("link_used_at") @db.Timestamptz()
 
   // ── Lo que contestó el paciente, que vive en la historia ─────────────
   //
   // Único: una entrada de historia pertenece a una valoración y no a dos.
-  entryId       String?                   @unique @map("entry_id") @db.Uuid
-  answeredAt    DateTime?                 @map("answered_at") @db.Timestamptz()
-  answeredBy    ClinicalAnsweredBy?       @map("answered_by")
+  entryId    String?             @unique @map("entry_id") @db.Uuid
+  answeredAt DateTime?           @map("answered_at") @db.Timestamptz()
+  answeredBy ClinicalAnsweredBy? @map("answered_by")
 
   // ── Las tres confirmaciones y la firma ───────────────────────────────
   //
@@ -3690,18 +3904,18 @@ model ClinicalAssessment {
   // marca en memoria y las manda con la validación. Media validación
   // guardada (dos casillas y nadie que firme) no significa nada, y un
   // CHECK garantiza que una fila VALIDADA las tiene las tres.
-  confirmedAllergies  Boolean             @default(false) @map("confirmed_allergies")
-  confirmedMedication Boolean             @default(false) @map("confirmed_medication")
-  confirmedAlerts     Boolean             @default(false) @map("confirmed_alerts")
-  validatedAt         DateTime?           @map("validated_at") @db.Timestamptz()
-  validatedByUserId   String?             @map("validated_by_user_id") @db.Uuid
+  confirmedAllergies  Boolean   @default(false) @map("confirmed_allergies")
+  confirmedMedication Boolean   @default(false) @map("confirmed_medication")
+  confirmedAlerts     Boolean   @default(false) @map("confirmed_alerts")
+  validatedAt         DateTime? @map("validated_at") @db.Timestamptz()
+  validatedByUserId   String?   @map("validated_by_user_id") @db.Uuid
 
-  tenant      Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  client      Client         @relation(fields: [clientId], references: [id], onDelete: Restrict)
-  appointment Appointment?   @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
-  entry       ClinicalEntry? @relation(fields: [entryId], references: [id], onDelete: Restrict)
-  requestedBy User?          @relation("AssessmentRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Restrict)
-  validatedBy User?          @relation("AssessmentValidatedBy", fields: [validatedByUserId], references: [id], onDelete: Restrict)
+  tenant      Tenant                         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client      Client                         @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  appointment Appointment?                   @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  entry       ClinicalEntry?                 @relation(fields: [entryId], references: [id], onDelete: Restrict)
+  requestedBy User?                          @relation("AssessmentRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  validatedBy User?                          @relation("AssessmentValidatedBy", fields: [validatedByUserId], references: [id], onDelete: Restrict)
   corrections ClinicalAssessmentCorrection[]
 
   @@index([tenantId, clientId, createdAt])
@@ -3818,4 +4032,292 @@ model PublicLink {
   @@index([tenantId, createdAt])
   @@index([expiresAt])
   @@map("public_links")
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// kds-1-cocina · LA PANTALLA DE COMANDAS EN COCINA
+//
+// Cinco tablas y una idea: **el servidor sabe siempre cuántas unidades de
+// cada línea ha recibido la cocina, en qué envío y cuántas se anularon
+// después**. Todo lo demás (el semáforo, el orden, el parpadeo, las
+// capas de alergia) se deriva de eso.
+//
+// La forma, de arriba abajo:
+//
+//   KitchenDispatch   un «Enviar» del camarero. Idempotente por el id que
+//                     genera el terminal. Es la unidad de reintento.
+//   KitchenOrder      una TARJETA de la pantalla: un envío × una sección
+//                     con destino pantalla. «2ª COMANDA · M5».
+//   KitchenOrderLine  un plato de esa tarjeta, con su copia del nombre,
+//                     sus modificadores, su tiempo, su silla y los
+//                     alérgenos del producto EN ESE MOMENTO.
+//   TicketCourse      si el tiempo 2 de esta mesa está retenido o marchado.
+//   TicketAllergy     las alergias de la mesa de ESTE servicio, por silla.
+//
+// Por qué la comanda COPIA en vez de leer la venta: la pantalla tiene que
+// seguir diciendo lo que dijo. Si el camarero cambia la línea, baja
+// unidades o la anula, la tarjeta no puede reescribirse en silencio —
+// cocina tiene que ver «ERAN 3 · −1» y tocar «Visto» (decisión 6). Una
+// tarjeta que se recalculase de la venta haría desaparecer el plato
+// anulado, que es justo el fallo que el bloque existe para no cometer.
+// ──────────────────────────────────────────────────────────────────────
+
+// Un «Enviar». La unidad de IDEMPOTENCIA.
+//
+// Un envío puede crear varias tarjetas (cocina y barra), imprimir en otra
+// sección y marcar como enviada una tercera que no tiene destino. Si el
+// terminal pierde la respuesta y reintenta, las tres cosas tienen que
+// volver a pasar CERO veces y la respuesta tiene que ser la misma. Por eso
+// la llave de idempotencia vive aquí y no en `KitchenOrder`: cubre el
+// envío completo, impresión incluida, y no sólo las tarjetas.
+//
+// `result` guarda la respuesta que se dio, literal. Un reintento la
+// reproduce sin volver a tocar nada. Es el mismo patrón que
+// `Ticket.checkoutExternalId`, con la respuesta persistida porque aquí no
+// hay un objeto final del que reconstruirla.
+model KitchenDispatch {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  ticketId String @map("ticket_id") @db.Uuid
+
+  /// UUID v4 generado EN EL TERMINAL antes de mandar. Único global.
+  ///
+  /// Se deja preparado aquí el camino directo por la wifi de kds-2
+  /// (decisión 9): el mismo envío viajará a la nube y a la tablet, y el
+  /// que llegue segundo se descarta por este id. Hoy sólo sirve para el
+  /// reintento de red, pero el modelo ya es el que hará falta.
+  clientSendId String @unique @map("client_send_id") @db.Uuid
+
+  /// Nº de comanda de esta mesa: 1ª, 2ª, 3ª. Copia de
+  /// `Ticket.lastSentRevision` tras incrementarlo.
+  revision Int
+  /// El camarero tocó «Urgente» junto a «Enviar» (decisión 3).
+  urgent   Boolean @default(false)
+
+  sentAt       DateTime @default(now()) @map("sent_at") @db.Timestamptz()
+  sentByUserId String   @map("sent_by_user_id") @db.Uuid
+
+  /// La respuesta que se devolvió, para reproducirla en un reintento.
+  result Json
+
+  tenant Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ticket Ticket         @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  sentBy User           @relation(fields: [sentByUserId], references: [id], onDelete: Restrict)
+  orders KitchenOrder[]
+
+  @@index([ticketId, sentAt])
+  @@index([tenantId, sentAt])
+  @@map("kitchen_dispatches")
+}
+
+// Una TARJETA de la pantalla de cocina: un envío × una sección.
+//
+// Sólo nacen para las secciones cuyo destino es una PANTALLA. Las de
+// impresora siguen saliendo por ESC/POS (ahora por diferencia) y las que
+// no tienen destino se marcan como enviadas sin más: el envío no falla por
+// falta de destino (decisión 2).
+model KitchenOrder {
+  id         String @id @default(uuid()) @db.Uuid
+  dispatchId String @map("dispatch_id") @db.Uuid
+  ticketId   String @map("ticket_id") @db.Uuid
+  /// La tienda es la que manda en el GET de cocina: una pantalla ve las
+  /// comandas de SU tienda y de SUS secciones, y nada más. Copiada aquí
+  /// para que el filtro sea un índice y no un `join` por la caja.
+  storeId    String @map("store_id") @db.Uuid
+
+  tableId   String? @map("table_id") @db.Uuid
+  /// «M5». Copia del nombre de la mesa al enviar: renombrar la mesa en el
+  /// panel no puede reescribir lo que la cocina está leyendo. NULL en una
+  /// venta rápida sin mesa —que en hostelería es la barra— y entonces la
+  /// tarjeta se titula con el nº de comanda.
+  tableName String? @map("table_name")
+
+  section KitchenSection
+  /// 1ª, 2ª, 3ª comanda de esta mesa. Lo que pinta «2ª COMANDA».
+  number  Int
+
+  /// Decisión 3: urgente es UNA sola cosa (no hay «prioridad» aparte).
+  /// Lo marca el camarero al enviar o la cocina con un toque largo.
+  urgent           Boolean   @default(false)
+  urgentAt         DateTime? @map("urgent_at") @db.Timestamptz()
+  urgentByDeviceId String?   @map("urgent_by_device_id") @db.Uuid
+
+  /// Cuándo entró en la pantalla. El semáforo NO cuenta desde aquí: cuenta
+  /// desde que el grupo MARCHA (`KitchenOrderLine.firedAt`), que es lo que
+  /// decidió la decisión 3. Una comanda con el tiempo 2 retenido lleva
+  /// media hora en pantalla y su bloque retenido marca 0 min al marchar.
+  sentAt DateTime @default(now()) @map("sent_at") @db.Timestamptz()
+
+  /// Decisión 9 · llegó cuando la pantalla volvió de estar sin red. Se
+  /// pinta «llegó tarde» para que el cocinero no lo lea como recién hecho.
+  lateArrival Boolean @default(false) @map("late_arrival")
+
+  /// Decisión 4 · la tarjeta pasó a «Lista»: todos los platos tachados, o
+  /// el botón grande. Es lo que avisa al camarero (decisión 5).
+  readyAt         DateTime? @map("ready_at") @db.Timestamptz()
+  readyByDeviceId String?   @map("ready_by_device_id") @db.Uuid
+
+  /// Decisión 5 · un toque del camarero en la banda o en la etiqueta verde.
+  /// Hasta entonces la tarjeta vive en la columna «Listas».
+  servedAt       DateTime? @map("served_at") @db.Timestamptz()
+  servedByUserId String?   @map("served_by_user_id") @db.Uuid
+
+  /// Decisión 7 · «Hoy» devolvió esta tarjeta a la pantalla (se tachó sin
+  /// querer). No se borra `readyAt`/`servedAt` del histórico: se apunta
+  /// que volvió, porque de estas marcas salen los tiempos del dueño y una
+  /// recuperación es una anomalía que el informe tiene que poder ver.
+  recoveredAt DateTime? @map("recovered_at") @db.Timestamptz()
+
+  dispatch KitchenDispatch    @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
+  ticket   Ticket             @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  store    Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  table    Table?             @relation(fields: [tableId], references: [id], onDelete: SetNull)
+  urgentBy Device?            @relation("KitchenOrderUrgentBy", fields: [urgentByDeviceId], references: [id], onDelete: SetNull)
+  readyBy  Device?            @relation("KitchenOrderReadyBy", fields: [readyByDeviceId], references: [id], onDelete: SetNull)
+  servedBy User?              @relation("KitchenOrderServedBy", fields: [servedByUserId], references: [id], onDelete: Restrict)
+  lines    KitchenOrderLine[]
+
+  /// Un envío produce COMO MUCHO UNA tarjeta por sección. Es la mitad
+  /// de la idempotencia que se puede expresar en la base; la otra —no
+  /// reimprimir, no remarcar— la da `KitchenDispatch.clientSendId`.
+  @@unique([dispatchId, section])
+  /// El GET de cocina: «las comandas abiertas de mi tienda». El índice
+  /// lleva `servedAt` porque lo que se pide es «las no servidas».
+  @@index([storeId, section, servedAt])
+  @@index([ticketId])
+  @@map("kitchen_orders")
+}
+
+// Un plato de una tarjeta.
+model KitchenOrderLine {
+  id      String @id @default(uuid()) @db.Uuid
+  orderId String @map("order_id") @db.Uuid
+
+  /// De qué línea de la venta salió. `SetNull`: borrar la línea de la
+  /// venta no borra lo que la cocina vio, y la tarjeta tiene que poder
+  /// seguir diciendo «ANULADO» después.
+  ticketLineId String? @map("ticket_line_id") @db.Uuid
+
+  // ── La copia, hecha al enviar ───────────────────────────────────────
+  /// El nombre tal como se mandó. Mismo criterio que
+  /// `TicketLine.nameSnapshot`: editar el catálogo no reescribe lo que
+  /// está en la plancha.
+  nameSnapshot String     @map("name_snapshot")
+  /// Unidades de ESTE envío (la diferencia), no las de la mesa.
+  units        Decimal    @db.Decimal(10, 3)
+  /// Copia de `TicketLine.modifiers` (los dos shapes históricos: `string[]`
+  /// legacy y el estructurado de B-Bar-Modifiers). Son las notas y los
+  /// modificadores que la decisión 3 manda pintar bien visibles bajo cada
+  /// plato.
+  modifiers    Json?
+  course       Int        @default(1)
+  seat         Int?
+  /// Los alérgenos del producto EN ESE MOMENTO. Copiados y no leídos:
+  /// un plato que salió marcado «lleva gluten» tiene que seguir
+  /// marcándolo aunque alguien corrija la ficha a media mañana.
+  allergens    Allergen[] @default([])
+
+  // ── Lo que pasa después ─────────────────────────────────────────────
+  /// Cuándo MARCHÓ este plato: el instante desde el que cuenta el
+  /// semáforo. El tiempo 1 marcha al enviar (`= order.sentAt`); los demás
+  /// quedan NULL —«EN ESPERA», gris, sin semáforo— hasta «Marchar 2º».
+  /// Lo que va a la pantalla de BARRA no se retiene nunca: la bebida sale
+  /// ya, así que su `firedAt` se pone siempre al enviar.
+  firedAt        DateTime? @map("fired_at") @db.Timestamptz()
+  /// Decisión 4 · un toque tacha el plato. Se destacha con otro toque
+  /// (dedo gordo), y de aquí sale el tiempo por plato del informe.
+  doneAt         DateTime? @map("done_at") @db.Timestamptz()
+  doneByDeviceId String?   @map("done_by_device_id") @db.Uuid
+
+  // ── Decisión 6 · el cambio después de enviar ────────────────────────
+  /// Cuántas de las `units` de esta tarjeta se anularon después. No se
+  /// descuenta de `units`: la tarjeta tiene que decir «2 Croquetas · ERAN
+  /// 3 · −1», y para eso hace falta el antes y el después.
+  voidedUnits    Decimal   @default(0) @map("voided_units") @db.Decimal(10, 3)
+  voidedAt       DateTime? @map("voided_at") @db.Timestamptz()
+  voidedByUserId String?   @map("voided_by_user_id") @db.Uuid
+  /// La cocina tocó «Visto». Hasta entonces el «ANULADO» no desaparece y
+  /// la línea parpadea (decisión 8).
+  voidSeenAt     DateTime? @map("void_seen_at") @db.Timestamptz()
+  /// **MERMA**: la cocina ya lo había tachado cuando se anuló. O sea,
+  /// comida hecha y tirada. Se calcula en el momento de anular y se
+  /// guarda, porque `doneAt` puede cambiar después (destachar) y entonces
+  /// el informe del dueño mentiría.
+  doneBeforeVoid Boolean   @default(false) @map("done_before_void")
+
+  /// Decisión 6 · la nota o los modificadores cambiaron después de enviar:
+  /// «CAMBIO» en ámbar sobre el plato hasta «Visto». Se guarda el texto
+  /// nuevo porque la copia de arriba es la que se mandó.
+  changedAt    DateTime? @map("changed_at") @db.Timestamptz()
+  changeNote   String?   @map("change_note")
+  changeSeenAt DateTime? @map("change_seen_at") @db.Timestamptz()
+
+  order      KitchenOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  ticketLine TicketLine?  @relation(fields: [ticketLineId], references: [id], onDelete: SetNull)
+  doneBy     Device?      @relation("KitchenOrderLineDoneBy", fields: [doneByDeviceId], references: [id], onDelete: SetNull)
+  voidedBy   User?        @relation("KitchenOrderLineVoidedBy", fields: [voidedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([ticketLineId])
+  @@map("kitchen_order_lines")
+}
+
+// kds-1-cocina (decisión 3) · si un TIEMPO de esta mesa está retenido o
+// marchado.
+//
+// Una fila por (ticket, tiempo) y sólo cuando el tiempo YA MARCHÓ: la
+// ausencia de fila es «retenido». Se eligió así y no con un booleano
+// porque lo que hace falta guardar es el INSTANTE del marchado —de ahí
+// cuenta el semáforo— y un booleano no lo lleva.
+//
+// El tiempo 1 se inserta en el propio envío. Los demás los inserta
+// «Marchar 2º», que además pone el `firedAt` de las líneas de ese tiempo
+// que ya están en pantalla.
+model TicketCourse {
+  id       String @id @default(uuid()) @db.Uuid
+  ticketId String @map("ticket_id") @db.Uuid
+  course   Int
+
+  firedAt       DateTime @default(now()) @map("fired_at") @db.Timestamptz()
+  firedByUserId String   @map("fired_by_user_id") @db.Uuid
+
+  ticket  Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  firedBy User   @relation(fields: [firedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([ticketId, course])
+  @@map("ticket_courses")
+}
+
+// kds-1-cocina (decisión 3, capa 1) · las alergias de LA MESA DE ESTE
+// SERVICIO, por silla.
+//
+// LO QUE ESTA TABLA GARANTIZA, y es la mitad de por qué existe: la alergia
+// **no sale del ticket**. Cuelga del `Ticket` con `Cascade`, no tiene
+// nombre de nadie y **no hay ninguna clave hacia `Client`**. Cobrar o
+// anular la mesa se la lleva. No es un dato de salud de una persona
+// identificada: es «en la silla 3 de la mesa 5 de esta comida no puede
+// entrar gluten».
+//
+// `seat` NULL = «toda la mesa», que es lo que se marca cuando el camarero
+// no sabe quién es. Vale igual: en cocina sale la franja «⚠ TODA LA MESA».
+model TicketAllergy {
+  id       String   @id @default(uuid()) @db.Uuid
+  ticketId String   @map("ticket_id") @db.Uuid
+  seat     Int?
+  allergen Allergen
+
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  createdByUserId String?  @map("created_by_user_id") @db.Uuid
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  /// Marcar dos veces el mismo alérgeno en la misma silla no crea dos
+  /// filas. En Postgres los NULL son distintos entre sí, así que este
+  /// `@@unique` NO cubre «toda la mesa» (`seat IS NULL`): eso lo hace el
+  /// índice PARCIAL `ticket_allergies_mesa_key` de la migración, que
+  /// Prisma no sabe declarar. Mismo caso que
+  /// `products_tenant_id_sku_local_key`.
+  @@unique([ticketId, seat, allergen])
+  @@index([ticketId])
+  @@map("ticket_allergies")
 }

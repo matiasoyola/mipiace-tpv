@@ -88,13 +88,31 @@ import {
   PRESS_FEEDBACK_CLASS,
   QTY_KEY_HEIGHT_PX,
   QTY_KEY_WIDTH_PX,
-  SENT_LINE_AMOUNT_PX,
-  SENT_LINE_NAME_PX,
   TOTAL_PX,
   familyFillFor,
   type FamilyTone,
 } from "../lib/hospitalityTheme.js";
-import { kitchenSectionLabel, splitComanda } from "../lib/kitchenSentLines.js";
+import {
+  etiquetaEnCocina,
+  partirComanda,
+  puedeCorregirEnviado,
+  sillaDeLinea,
+  tiempoDeLinea,
+  tiemposPorMarchar,
+  unidadesEnCocina,
+  type EstadoCocinaMesa,
+} from "../lib/kitchenComanda.js";
+import {
+  AccionesCocina,
+  ChipsDeLinea,
+  FilaDeTiempos,
+  SentLineCocina,
+} from "../kitchen/tpv/ComandaCocina.js";
+import {
+  DeshacerToast,
+  type AnulacionPendiente,
+} from "../kitchen/tpv/DeshacerToast.js";
+import { ListoBanner, type AvisoListo } from "../kitchen/tpv/ListoBanner.js";
 
 /**
  * La fila «Cantidad» va de 1 a 6 (decisión 3c).
@@ -172,8 +190,20 @@ export interface HospitalityWorkspaceProps {
   familyOf: (p: CatalogProduct) => string;
   /** Los 20 de «Ahora», ya resueltos contra el catálogo local. */
   ahora: CatalogProduct[];
-  /** Ids de línea que la cocina ya tiene. */
-  sentLineIds: Set<string>;
+  /**
+   * kds-1-cocina · EL ESTADO DE COCINA DE ESTA MESA, tal como lo dice el
+   * servidor.
+   *
+   * Sustituye a `sentLineIds` de v2-H1, que era un conjunto de ids en
+   * `localStorage` porque `TicketLine` no tenía marca de envío. Ahora la
+   * verdad es `TicketLine.sentUnits` y viene de la API, así que dos
+   * terminales ven lo mismo y recargar no inventa nada.
+   *
+   * Va SIEMPRE, también con el módulo «Cocina» apagado: el envío por
+   * diferencias es un arreglo del servidor y aplica igual. Lo que el
+   * módulo enciende es `enabled`.
+   */
+  kitchen: ComandaCocinaWiring;
   /** ISO del último envío con éxito, para el rótulo «EN COCINA · hh:mm». */
   lastSentAt: string | null;
   lastTouchedLine: { id: string; nonce: number } | null;
@@ -198,6 +228,48 @@ export interface HospitalityWorkspaceProps {
   onSendToKitchen: () => void;
   kitchenBusy: boolean;
   kitchenLastRevision: number;
+}
+
+/**
+ * kds-1-cocina · todo lo que la cocina añade a la comanda, en un objeto.
+ *
+ * En uno y no en catorce props sueltas porque son catorce cosas que se
+ * mueven juntas, y porque con el módulo apagado lo que se apaga es el
+ * objeto entero: `enabled: false` deja la comanda como la dejó v2-H1,
+ * salvo que lo enviado sale de `sentUnits` y no de `localStorage`.
+ *
+ * Lo que NO depende de `enabled`: las **alergias** y la **silla** del
+ * plato. La decisión 10 las pone de serie en todo TPV de hostelería porque
+ * informar de alérgenos es una obligación legal, no una función que se
+ * vende. Sin pantalla, la alergia sale en el papel de la comanda.
+ */
+export interface ComandaCocinaWiring {
+  /** `Tenant.kitchenDisplayEnabled`. */
+  enabled: boolean;
+  estado: EstadoCocinaMesa;
+  courseMode: "ESPERA" | "TIEMPOS";
+  seatMode: "ALERGIA" | "SIEMPRE";
+  /** El tiempo elegido en la fila del modo «Por tiempos». Se queda puesto. */
+  courseElegido: number;
+  onCourseElegido: (course: number) => void;
+  urgentePendiente: boolean;
+  onUrgentePendiente: () => void;
+  onMarchar: (course: number) => void;
+  onSilla: (lineId: string, seat: number | null) => void;
+  onTiempo: (lineId: string, course: number) => void;
+  /** El `−` de una línea YA ENVIADA. Arranca el «Deshacer» de 5 s. */
+  onAnularEnviado: (lineId: string, nombre: string, units: number) => void;
+  onAbrirAlergias: () => void;
+  /** Las bandas «M4 · listo para servir», y el toque que marca «Servido». */
+  avisosListo: AvisoListo[];
+  onServido: (orderId: string) => void;
+  /** Las anulaciones dentro de su ventana de 5 s, con su «Deshacer». */
+  anulaciones: AnulacionPendiente[];
+  onDeshacer: (key: string) => void;
+  /** Decisión 9 · alguna sección tiene pantalla y la pantalla no responde. */
+  cocinaNoRecibe: boolean;
+  /** `Store.kitchenReadyBeep`. Apagado de serie (decisión 8). */
+  readyBeep: boolean;
 }
 
 /**
@@ -303,7 +375,11 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
     ),
   );
 
-  const { sent, pending } = splitComanda(props.lines, props.sentLineIds);
+  // kds-1-cocina · la comanda se parte POR UNIDADES y no por líneas: una
+  // misma línea puede estar con 2 unidades en «EN COCINA» y 1 en «SIN
+  // ENVIAR», que es lo que la decisión 6 pide leer («2 en cocina + 1 sin
+  // enviar») y lo que hace que cada mitad se corrija distinto.
+  const { sent, pending } = partirComanda(props.lines, props.kitchen.estado);
 
   return (
     <div
@@ -783,31 +859,45 @@ function ProductButton({
  */
 function PendingLine({
   line,
+  units,
   highlighted,
   onClick,
   onLess,
   onMore,
+  chips,
 }: {
   line: CartLine;
+  /**
+   * kds-1-cocina · las unidades DE ESTE TROZO, que con una línea partida
+   * («2 en cocina + 1 sin enviar») no son las de la línea.
+   *
+   * El importe también se pinta sobre ellas: el bloque «SIN ENVIAR» tiene
+   * que decir lo que cuesta lo que todavía no ha salido, no lo que cuesta
+   * la línea entera — que ya está contado arriba.
+   */
+  units: number;
   highlighted: boolean;
   onClick: () => void;
   onLess: () => void;
   onMore: () => void;
+  /** Los chips de silla y de tiempo, bajo la fila. */
+  chips?: React.ReactNode;
 }) {
   return (
     <div
       data-testid="comanda-linea-pendiente"
       data-line-id={line.id}
-      className="flex items-center gap-2.5 min-h-[68px] px-2 rounded-[14px]"
+      className="rounded-[14px]"
       style={highlighted ? { background: DARK_LINE_HIGHLIGHT } : undefined}
     >
+      <div className="flex items-center gap-2.5 min-h-[68px] px-2">
       {/* El rótulo accesible dice lo que el botón VA a hacer, que con
           una sola unidad no es restar sino quitar la línea (decisión
           3d). En el panel claro el `−` se deshabilita a una unidad y
           manda a la papelera; aquí no hay papelera porque el `−` ES la
           papelera, y el lector de pantalla tiene que poder distinguirlo. */}
       <StepperKey
-        label={line.units <= 1 ? "Quitar la línea" : "Restar una unidad"}
+        label={units <= 1 ? "Quitar la línea" : "Restar una unidad"}
         onClick={onLess}
         glyph="−"
       />
@@ -816,7 +906,7 @@ function PendingLine({
         className="shrink-0 w-[30px] text-center font-semibold tabular-nums"
         style={{ fontSize: PENDING_LINE_QTY_PX }}
       >
-        {line.units}
+        {units}
       </span>
       {/* MISMO rótulo que el `+` del panel claro: es la misma acción y un
           sólo contrato para quien lo busca. */}
@@ -837,8 +927,10 @@ function PendingLine({
         className="shrink-0 font-semibold tabular-nums whitespace-nowrap"
         style={{ fontSize: PENDING_LINE_AMOUNT_PX }}
       >
-        {formatEur(lineGross(line))}
+        {formatEur(lineGross({ ...line, units }))}
       </span>
+      </div>
+      {chips}
     </div>
   );
 }
@@ -892,8 +984,10 @@ function Comanda({
   inSheet = false,
   ...props
 }: HospitalityWorkspaceProps & {
-  sent: CartLine[];
-  pending: CartLine[];
+  // kds-1-cocina · trozos y no líneas: una línea puede estar en los dos
+  // bloques con unidades distintas en cada uno.
+  sent: Array<{ line: CartLine; units: number }>;
+  pending: Array<{ line: CartLine; units: number }>;
   /** `true` dentro del bottom-sheet de handheld. */
   inSheet?: boolean;
 }) {
@@ -930,6 +1024,40 @@ function Comanda({
       {!inSheet && props.searchField}
       {props.banners}
 
+      {/* kds-1-cocina · decisión 5 · la banda «M4 · listo para servir»,
+          apilada de más antigua a más nueva. Un toque = «Servido», y el
+          aviso desaparece en TODOS los TPV de la tienda (lo hace el evento
+          del bus). Sólo con el módulo encendido: es lo que se cobra. */}
+      {props.kitchen.enabled && (
+        <ListoBanner
+          avisos={props.kitchen.avisosListo}
+          beep={props.kitchen.readyBeep}
+          onServido={props.kitchen.onServido}
+        />
+      )}
+
+      {/* kds-1-cocina · decisión 6 · «Bravas −1 · Deshacer» durante 5 s.
+          Si se deshace a tiempo no se llama a ninguna ruta y la cocina no
+          ve ni un parpadeo. */}
+      <DeshacerToast
+        pendientes={props.kitchen.anulaciones}
+        onDeshacer={props.kitchen.onDeshacer}
+      />
+
+      {/* kds-1-cocina · decisión 9 · «Cocina no recibe». No bloquea el
+          envío: avisa, y al enviar sale además el papel por la USB del
+          terminal. Lo que no se puede es que la comanda se quede sin
+          camino y nadie lo diga. */}
+      {props.kitchen.enabled && props.kitchen.cocinaNoRecibe && (
+        <div
+          data-testid="cocina-no-recibe"
+          className="shrink-0 mx-3 mt-2 rounded-[12px] px-4 py-2.5 font-semibold"
+          style={{ background: "#7E2318", color: "#FFFFFF", fontSize: 18 }}
+        >
+          Cocina no recibe · al enviar saldrá en papel
+        </div>
+      )}
+
       {/* Las líneas. Es el único bloque flexible de la comanda. */}
       <div
         data-testid="comanda-lineas"
@@ -944,9 +1072,23 @@ function Comanda({
           </p>
         ) : (
           <>
-            {/* ── En cocina ── Atenuadas y SIN −/+: quitar algo ya
-                enviado sigue siendo la anulación de siempre, que vive
-                en la hoja de la línea (decisión 3d). */}
+            {/* ── En cocina ──────────────────────────────────────────
+                kds-1-cocina · decisión 6 · **esto REVIERTE a propósito la
+                regla de v2-H1**, y sólo donde hay pantalla.
+
+                v2-H1 quitó el `−`/`+` de lo enviado por un motivo
+                concreto: sin pantalla, un `−` quitaba el plato de la
+                cuenta mientras el papel seguía en la plancha y cocina
+                nunca se enteraba. Con pantalla la anulación LLEGA, así que
+                ese motivo desaparece y queda sólo el riesgo del dedo
+                gordo, que cubre el «Deshacer» de 5 s.
+
+                Sin pantalla (impresora o nada) el motivo sigue en pie y se
+                mantiene lo de v2-H1: sin `−`/`+`, y «Anular» en la hoja de
+                la línea con el aviso «cocina ya tiene el papel: díselo».
+                Es por SECCIÓN, porque una mesa puede tener las dos cosas:
+                las bravas a la pantalla de cocina y las cañas a la
+                impresora de la barra. */}
             {sent.length > 0 && (
               <>
                 <div
@@ -958,38 +1100,37 @@ function Comanda({
                     color: DARK_TEXT_MUTED,
                   }}
                 >
-                  {kitchenSectionLabel(props.lastSentAt)}
+                  {etiquetaEnCocina(props.lastSentAt)}
                 </div>
-                {sent.map((l) => (
-                  <button
-                    key={l.id}
-                    type="button"
-                    data-testid="comanda-linea-enviada"
-                    data-line-id={l.id}
+                {sent.map(({ line: l, units }) => (
+                  <SentLineCocina
+                    key={`sent-${l.id}`}
+                    lineId={l.id}
+                    nombre={l.nameSnapshot}
+                    units={units}
+                    importe={formatEur(lineGross({ ...l, units }))}
+                    puedeCorregir={puedeCorregirEnviado(props.kitchen.estado, l.id)}
                     onClick={() => props.onClickLine(l)}
-                    className="flex items-center gap-3 min-h-[52px] px-2.5 rounded-xl text-left w-full"
-                    style={{ color: DARK_TEXT_MUTED }}
-                  >
-                    <span
-                      className="w-7 shrink-0 font-semibold tabular-nums"
-                      style={{ fontSize: SENT_LINE_AMOUNT_PX }}
-                    >
-                      {l.units}
-                    </span>
-                    <span
-                      data-testid="cart-line-name"
-                      className="flex-grow min-w-0 truncate font-medium"
-                      style={{ fontSize: SENT_LINE_NAME_PX }}
-                    >
-                      {l.nameSnapshot}
-                    </span>
-                    <span
-                      className="shrink-0 font-medium tabular-nums whitespace-nowrap"
-                      style={{ fontSize: SENT_LINE_AMOUNT_PX }}
-                    >
-                      {formatEur(lineGross(l))}
-                    </span>
-                  </button>
+                    onAnular={() =>
+                      props.kitchen.onAnularEnviado(l.id, l.nameSnapshot, 1)
+                    }
+                    onSumar={() => props.onUpdateLineUnits(l.id, l.units + 1)}
+                    chips={
+                      <ChipsDeLinea
+                        lineId={l.id}
+                        enviada
+                        alergenosDelPlato={l.allergens ?? []}
+                        seat={sillaDeLinea(props.kitchen.estado, l.id)}
+                        course={tiempoDeLinea(props.kitchen.estado, l.id)}
+                        estado={props.kitchen.estado}
+                        courseMode={props.kitchen.courseMode}
+                        seatMode={props.kitchen.seatMode}
+                        diners={props.kitchen.estado.diners}
+                        onSilla={(seat) => props.kitchen.onSilla(l.id, seat)}
+                        onTiempo={(c) => props.kitchen.onTiempo(l.id, c)}
+                      />
+                    }
+                  />
                 ))}
               </>
             )}
@@ -1011,20 +1152,44 @@ function Comanda({
                 >
                   SIN ENVIAR
                 </div>
-                {pending.map((l) => (
+                {pending.map(({ line: l, units }) => (
                   <PendingLine
-                    key={l.id}
+                    key={`pend-${l.id}`}
                     line={l}
+                    units={units}
                     highlighted={props.lastTouchedLine?.id === l.id}
                     onClick={() => props.onClickLine(l)}
                     onLess={() => {
                       // Decisión 3d · un toque = UNA unidad. Con una
                       // sola unidad, el `−` quita la línea: dejarla a
                       // cero sería una línea fantasma en la comanda.
-                      if (l.units <= 1) props.onRemoveLine(l.id);
-                      else props.onUpdateLineUnits(l.id, l.units - 1);
+                      //
+                      // kds-1-cocina · «una sola unidad» es ahora «una sola
+                      // unidad SIN ENVIAR». Una línea con 2 en cocina y 1
+                      // sin enviar baja a 2 y se queda: el `−` de aquí
+                      // nunca toca lo que la cocina ya tiene, que es lo que
+                      // anula el `−` del bloque de arriba.
+                      if (units <= 1 && unidadesEnCocina(props.kitchen.estado, l.id) === 0) {
+                        props.onRemoveLine(l.id);
+                      } else {
+                        props.onUpdateLineUnits(l.id, l.units - 1);
+                      }
                     }}
                     onMore={() => props.onUpdateLineUnits(l.id, l.units + 1)}
+                    chips={
+                      <ChipsDeLinea
+                        lineId={l.id}
+                        alergenosDelPlato={l.allergens ?? []}
+                        seat={sillaDeLinea(props.kitchen.estado, l.id)}
+                        course={tiempoDeLinea(props.kitchen.estado, l.id)}
+                        estado={props.kitchen.estado}
+                        courseMode={props.kitchen.courseMode}
+                        seatMode={props.kitchen.seatMode}
+                        diners={props.kitchen.estado.diners}
+                        onSilla={(seat) => props.kitchen.onSilla(l.id, seat)}
+                        onTiempo={(c) => props.kitchen.onTiempo(l.id, c)}
+                      />
+                    }
                   />
                 ))}
               </>
@@ -1032,6 +1197,39 @@ function Comanda({
           </>
         )}
       </div>
+
+      {/* kds-1-cocina · decisión 3 · la fila de tiempos del modo «Por
+          tiempos», que **SE QUEDA PUESTA**: los productos que se pulsen
+          después van a ese tiempo hasta que se cambie. Comandar una mesa de
+          cuatro a la carta cuesta 2-3 toques más, no uno por plato.
+
+          Va justo encima del pie y debajo de las líneas, que es donde está
+          la fila de cantidad del catálogo: el camarero elige el tiempo y
+          sigue pulsando productos sin mover la mano de zona. */}
+      {props.kitchen.enabled && props.kitchen.courseMode === "TIEMPOS" && (
+        <FilaDeTiempos
+          course={props.kitchen.courseElegido}
+          onCourse={props.kitchen.onCourseElegido}
+        />
+      )}
+
+      {/* kds-1-cocina · «Urgente», «Marchar 2º» y «Alergias».
+          «Alergias» va SIEMPRE (de serie en hostelería, decisión 10); las
+          otras dos sólo con el módulo encendido. */}
+      <AccionesCocina
+        moduloEncendido={props.kitchen.enabled}
+        estado={props.kitchen.estado}
+        urgentePendiente={props.kitchen.urgentePendiente}
+        onUrgente={props.kitchen.onUrgentePendiente}
+        porMarchar={
+          props.kitchen.enabled
+            ? tiemposPorMarchar(props.kitchen.estado)
+            : []
+        }
+        onMarchar={props.kitchen.onMarchar}
+        onAlergias={props.kitchen.onAbrirAlergias}
+        alergias={props.kitchen.estado.allergies.length}
+      />
 
       {/* El pie: total y las dos acciones. */}
       <div

@@ -56,6 +56,7 @@ import {
   normalizeName,
   normalizePrice,
   normalizeSku,
+  normalizeAllergens,
   normalizeTags,
   normalizeTaxRate,
   PRODUCT_BODY_PROPERTIES,
@@ -84,6 +85,11 @@ interface ProductBody {
   barcode?: string | null;
   tags?: string[];
   active?: boolean;
+  // kds-1-cocina · los alérgenos del plato. Admite el valor del enum
+  // (`GLUTEN`) y el código de dos letras del generador (`GL`): lo
+  // normaliza `normalizeAllergens`. Ausente en el PATCH = «no toques los
+  // alérgenos»; `[]` = «no informado», que es un estado válido.
+  allergens?: string[];
 }
 
 const PRODUCT_SELECT = {
@@ -100,6 +106,8 @@ const PRODUCT_SELECT = {
   source: true,
   sellableViaTpv: true,
   holdedProductId: true,
+  // kds-1-cocina · la ficha los pinta marcados al editar.
+  allergens: true,
 } as const;
 
 type ProductRow = {
@@ -116,6 +124,7 @@ type ProductRow = {
   source: "HOLDED" | "LOCAL";
   sellableViaTpv: boolean;
   holdedProductId: string | null;
+  allergens: string[];
 };
 
 // `escribible` es si la PUERTA del alta local está abierta para este
@@ -155,6 +164,7 @@ function serialize(p: ProductRow, escribible: boolean) {
     kind: p.kind,
     active: p.active,
     tags: p.tags,
+    allergens: p.allergens,
     source: p.source,
     // Lo que el TPV necesita para venderlo. Se manda para que la
     // pantalla pueda avisar de "creado pero no vendible" sin tener que
@@ -484,6 +494,23 @@ export async function registerLocalCatalogRoutes(app: FastifyInstance): Promise<
       if (body.barcode !== undefined) data.barcode = normalizeBarcode(body.barcode);
       if (body.tags !== undefined) data.tags = normalizeTags(body.tags);
       if (body.active !== undefined) data.active = body.active;
+      // kds-1-cocina · los alérgenos. Se MANDAN ENTEROS, como los tags:
+      // lo que queda es exactamente lo que el propietario dejó marcado en
+      // la pantalla. Una lista vacía es un estado válido y significa «no
+      // informado», que no es lo mismo que «sin alérgenos».
+      //
+      // Un código que no se reconoce devuelve 400 con la frase, no se
+      // descarta: un alérgeno perdido deja un plato diciendo que no lleva
+      // lo que lleva.
+      if (body.allergens !== undefined) {
+        const al = normalizeAllergens(body.allergens);
+        if (!al.ok) {
+          return reply
+            .code(400)
+            .send({ error: "INVALID_ALLERGENS", message: al.message });
+        }
+        data.allergens = al.value;
+      }
 
       try {
         const row = await prisma.product.update({

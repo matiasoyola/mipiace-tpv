@@ -131,13 +131,8 @@ import { layoutChips } from "../lib/chipRows.js";
 import { PRODUCT_CARD_MIN_HEIGHT } from "../lib/catalogGrid.js";
 import { isTouchDevice } from "../lib/touchDevice.js";
 import { SaleSearchInput } from "../components/SaleSearchInput.js";
-import {
-  clearSentState,
-  emptySentState,
-  markLinesSent,
-  reconcileSentState,
-  type SentState,
-} from "../lib/kitchenSentLines.js";
+import { useKitchenMesa } from "../kitchen/tpv/useKitchenMesa.js";
+import { AlergiasSheet } from "../kitchen/tpv/AlergiasSheet.js";
 import {
   AHORA_LIMIT,
   fetchAhora,
@@ -383,6 +378,37 @@ export interface SalePageProps {
   // de hostelería no puede partirse en «En cocina · hh:mm» y «Sin
   // enviar» después de una recarga.
   initialKitchen?: { lastSentAt: string | null; revision: number };
+  /**
+   * kds-1-cocina · `Tenant.kitchenDisplayEnabled`, de `/devices/me`.
+   *
+   * Apagado, el TPV no pinta nada de cocina: ni «Urgente», ni «Espera», ni
+   * «Marchar», ni la banda «LISTO». Lo que SÍ pinta es «Alergias», que es
+   * de serie en hostelería (decisión 10). Y lo que sobrevive al apagado
+   * por debajo es el envío por diferencias, que es un arreglo del
+   * servidor.
+   */
+  kitchenDisplayEnabled?: boolean;
+  /**
+   * kds-1-cocina (decisión 5) · lo que está LISTO en toda la tienda.
+   *
+   * Lo pasa `TpvHome` porque la misma lista alimenta la etiqueta verde de
+   * la sala: dos fuentes para el mismo aviso acabarían en una banda
+   * encendida sobre una mesa sin etiqueta.
+   */
+  avisosListo?: Array<{
+    orderId: string;
+    tableName: string | null;
+    readyAt: string;
+  }>;
+  onServido?: (orderId: string) => void;
+  /** Los ajustes de cocina de ESTA tienda. `null` con el módulo apagado. */
+  kitchenSettings?: {
+    courseMode: "ESPERA" | "TIEMPOS";
+    seatMode: "ALERGIA" | "SIEMPRE";
+    greenMaxMin: number;
+    amberMaxMin: number;
+    readyBeep: boolean;
+  } | null;
   // Sólo provisto cuando la tienda tiene mesas configuradas — permite
   // al cajero volver al mapa con un toque. Null en modo retail puro.
   onBackToMap?: (() => void) | null;
@@ -530,7 +556,6 @@ export function SalePage(props: SalePageProps) {
   // rotular «Enviar» con la comanda nº 2 ya impresa en cocina. Ahora el
   // dato llega con el borrador (`initialKitchen`) y el rótulo dice la
   // verdad desde el primer pintado. El resto del efecto no cambia.
-  const initialKitchenAt = props.initialKitchen?.lastSentAt ?? null;
   const initialKitchenRev = props.initialKitchen?.revision ?? 0;
   useEffect(() => {
     setKitchenRevision(initialKitchenRev);
@@ -564,32 +589,31 @@ export function SalePage(props: SalePageProps) {
   const lines = isDraftMode ? draftLines : quickLines;
   const setLines = isDraftMode ? setDraftLines : setQuickLines;
 
-  // v2-H1 §5 · qué líneas están EN COCINA y cuáles SIN ENVIAR.
+  // kds-1-cocina · EL ESTADO DE COCINA DE LA MESA, del servidor.
   //
-  // `TicketLine` no tiene marca de envío ni `createdAt` y el bloque
-  // prohíbe cambios de esquema, así que el QUÉ se lleva en local y el
-  // CUÁNDO lo da el servidor. El razonamiento completo —con lo
-  // descartado y el caso que esto no acierta— está en
-  // `lib/kitchenSentLines.ts`.
-  const [sentState, setSentState] = useState<SentState>(() => emptySentState());
-  useEffect(() => {
-    if (!activeTicketId) {
-      setSentState(emptySentState());
-      return;
-    }
-    setSentState(
-      reconcileSentState(
-        activeTicketId,
-        (props.initialDraftLines ?? []).map((l) => l.id),
-        initialKitchenAt,
-        initialKitchenRev,
-      ),
-    );
-    // Sólo al cambiar de ticket: reconciliar en cada cambio de líneas
-    // pisaría lo que `markLinesSent` acaba de escribir y las líneas
-    // recién enviadas volverían a «Sin enviar» con sus −/+ puestos.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTicketId]);
+  // Aquí muere el apaño de v2-H1 (`lib/kitchenSentLines.ts`): un conjunto
+  // de ids de línea en `localStorage`, sembrado con `lastSentAt`, porque
+  // `TicketLine` no tenía marca de envío y aquel bloque no podía migrar.
+  // Dejaba escrito el caso que no acertaba —una línea que OTRO terminal
+  // añade después del último envío se pintaba como «En cocina» sin
+  // estarlo— y lo dejaba como carryover. **Este bloque es el carryover**:
+  // `TicketLine.sentUnits` lo dice el servidor y los dos terminales ven lo
+  // mismo. Nada se guarda en el navegador.
+  const kitchen = useKitchenMesa({
+    ticketId: activeTicketId,
+    moduloEncendido: props.kitchenDisplayEnabled === true,
+  });
+  // El tiempo elegido en la fila del modo «Por tiempos». **SE QUEDA
+  // PUESTO** (decisión 3): lo que se pulse después va a ese tiempo hasta
+  // que se cambie. Vive aquí y no en la comanda porque lo consume
+  // `addProduct`.
+  const [courseElegido, setCourseElegido] = useState(1);
+  // Decisión 3 · «Urgente» es un toque junto a «Enviar»: el estado vive
+  // hasta el envío y se apaga después. Un urgente pegado marcaría urgente
+  // la 3ª comanda de la mesa sin que nadie lo pidiera — el mismo fallo que
+  // la cantidad pegada del sabotaje 3 de v2-H1.
+  const [urgentePendiente, setUrgentePendiente] = useState(false);
+  const [alergiasAbiertas, setAlergiasAbiertas] = useState(false);
 
 
   // v1.14-la-comanda-se-ve · el núcleo del bloque (hallazgo C1).
@@ -774,12 +798,12 @@ export function SalePage(props: SalePageProps) {
       setDraftLines([]);
       setContact(null);
       setNotes("");
-      // v2-H1 §5 · la mesa se vació: el registro de «esto está en
-      // cocina» deja de valer. Sin esto, el id del ticket queda en
-      // `localStorage` para siempre — y aunque los ids no se reutilizan,
-      // el almacén del terminal no tiene por qué crecer sin tope.
-      clearSentState(activeTicketId);
-      setSentState(emptySentState());
+      // kds-1-cocina · la mesa se vació. Ya no hay registro local que
+      // limpiar (eso era v2-H1): lo que sí hay que hacer es mandar las
+      // anulaciones que estén dentro de su ventana de 5 s, porque lo que
+      // no puede pasar es que un plato desaparezca de la cuenta y se quede
+      // en la plancha.
+      kitchen.vaciarAnulaciones();
       props.onBackToMap?.();
     } catch (err) {
       setTableError(tableErrorMessage(err));
@@ -1082,6 +1106,14 @@ export function SalePage(props: SalePageProps) {
   // refetch de la proyección; cobro/absorción remota → expulsión al
   // mapa con aviso. Reutiliza el mismo WS ya conectado.
   const wsStatus = useStoreEventStream(storeId, (ev) => {
+    // kds-1-cocina · los avisos de cocina. No se aplican al estado local:
+    // ninguno lleva la comanda dentro (ver `realtime/store-events.ts`), así
+    // que lo que hacen es pedir otra vez la verdad. La banda «LISTO» la
+    // refresca `useAvisosListo` en `TpvHome`, que es de la tienda.
+    if (ev.type.startsWith("kitchen.")) {
+      kitchen.recargar();
+      return;
+    }
     // ── Eventos ticket-level (contador cross-caja) ──────────────────
     if (ev.type === "ticket.paid") {
       // Si la MESA abierta aquí la cobró OTRA caja → expulsión.
@@ -1344,12 +1376,31 @@ export function SalePage(props: SalePageProps) {
         // línea. Sin esto la quiropodia de Rosario entraría al carrito
         // como un 0 % SUJETO, que es otra operación.
         exemptionCause: p.exemptionCause ?? null,
+        // kds-1-cocina · los alérgenos del plato viajan del catálogo a la
+        // línea, igual que la causa de exención y por lo mismo: es lo que
+        // se necesita en el gesto, sin pedirlo otra vez.
+        allergens: p.allergens,
         modifiers: [],
         modifierSelections: sels.length > 0 ? sels : undefined,
       };
       setDraftLines((curr) => [...curr, newLine]);
       touchLine(newLine.id);
-      void tableCreateLine(newLine);
+      // kds-1-cocina · el TIEMPO ELEGIDO SE QUEDA PUESTO (decisión 3).
+      //
+      // En el modo «Por tiempos» la fila 1º·2º·3º·Postre no se resetea
+      // después de cada producto: lo que se pulse después cae en ese
+      // tiempo. Es lo que hace que comandar una mesa de cuatro a la carta
+      // cueste 2-3 toques más y no uno por plato.
+      //
+      // Va DESPUÉS de crear la línea porque el `PUT` necesita el id que el
+      // servidor acepta; si fallara, la línea se queda en el tiempo 1, que
+      // es el lado prudente: sale a cocina ya en vez de quedarse retenida
+      // esperando un «Marchar» que nadie va a pulsar.
+      void tableCreateLine(newLine).then(() => {
+        if (courseElegido > 1) {
+          void kitchen.ponerTiempo(newLine.id, courseElegido);
+        }
+      });
       return;
     }
     // Agrupar con línea previa sólo si NINGUNA tiene modifiers — dos
@@ -1393,6 +1444,7 @@ export function SalePage(props: SalePageProps) {
       discountPct: 0,
       taxRate: p.taxRate,
       exemptionCause: p.exemptionCause ?? null,
+      allergens: p.allergens,
       modifiers: [],
       modifierSelections: sels.length > 0 ? sels : undefined,
     };
@@ -1613,19 +1665,83 @@ export function SalePage(props: SalePageProps) {
     setKitchenError(null);
     try {
       const { apiWithCashier } = await import("../api.js");
+      // kds-1-cocina · EL ID DEL ENVÍO, generado AQUÍ.
+      //
+      // Es la llave de idempotencia: si la respuesta se pierde por el
+      // camino y el camarero vuelve a pulsar, el servidor devuelve el
+      // mismo resultado sin duplicar la comanda ni reimprimir. Y queda
+      // preparado el camino directo por la wifi de kds-2 (decisión 9): el
+      // mismo id viajará a la nube y a la tablet, y el que llegue segundo
+      // se descartará por él.
+      const clientSendId = newId();
       const res = await apiWithCashier<{
         revision: number;
         sentAt: string;
+        nothingNew: boolean;
+        replayed: boolean;
         sections: Array<{
           section: "BARRA" | "COCINA" | "SALON";
+          destino: "PANTALLA" | "IMPRESORA" | "PANTALLA_E_IMPRESORA" | "NINGUNO";
           ok: boolean;
           lineCount: number;
+          units: number;
+          orderId?: string;
           error?: string;
         }>;
       }>(`/tickets/${tableContext.activeTicketId}/send-to-kitchen/escpos`, {
         method: "POST",
+        body: { clientSendId, urgent: urgentePendiente },
       });
       setKitchenRevision(res.revision);
+      // El urgente no se queda pegado: viajó en ESTE envío.
+      setUrgentePendiente(false);
+      // La verdad de qué tiene la cocina la dice el servidor, así que se
+      // vuelve a pedir en vez de deducirla aquí.
+      kitchen.recargar();
+
+      // kds-1-cocina · decisión 3 · «Reenviar» que no cambió nada.
+      //
+      // No gasta número de comanda y no inventa una tarjeta vacía en la
+      // pantalla del cocinero. Se dice, porque el camarero acaba de pulsar
+      // y tiene que saber que su toque no se perdió.
+      if (res.nothingNew) {
+        setKitchenToast({ sections: [], revision: res.revision });
+        return;
+      }
+
+      // kds-1-cocina · decisión 9 · EL PAPEL DE RESPALDO.
+      //
+      // Si una sección tiene pantalla y la pantalla no da señales, la
+      // comanda se creó igual (la espera y le llega marcada «llegó tarde»
+      // cuando vuelva) y ADEMÁS sale en papel por la impresora USB del
+      // propio terminal. Las dos cosas y no una: el papel es para AHORA y
+      // la comanda es para que el servicio quede registrado.
+      //
+      // Los bytes los construye el SERVIDOR (`/kitchen/comandas/:id/escpos`)
+      // para que el papel de respaldo sea EL MISMO papel que sale cuando la
+      // impresora de la sección funciona.
+      const sinLatido = new Set(
+        (kitchen.pantallas?.sections ?? [])
+          .filter((x) => x.needsPaperFallback)
+          .map((x) => x.section),
+      );
+      const aPapel = res.sections
+        .filter((x) => x.orderId && sinLatido.has(x.section))
+        .map((x) => x.orderId!);
+      if (aPapel.length > 0) {
+        await kitchen.sacarPapelDeRespaldo(aPapel).catch((err) => {
+          reportPrinterFailure(err, {
+            operation: "kitchen",
+            transport: "usb",
+            ticketId: tableContext.activeTicketId!,
+          });
+          setKitchenError({
+            kind: "failed",
+            message:
+              "Cocina no recibe y el papel tampoco salió. Cántale la comanda.",
+          });
+        });
+      }
       // v2-H1 §5 · lo que acaba de salir hacia cocina deja de ser
       // corregible con −/+ y pasa al bloque «En cocina · hh:mm».
       //
@@ -1636,18 +1752,6 @@ export function SalePage(props: SalePageProps) {
       // lo mismo que la base. El fallo de impresión se cuenta aparte, en
       // su banner, con «Reintentar».
       //
-      // Sólo si algo salió: con `partial-fail` total el backend NO toca
-      // `lastSentAt`, y entonces tampoco lo tocamos aquí.
-      if (res.sections.some((s) => s.ok)) {
-        setSentState(
-          markLinesSent(
-            tableContext.activeTicketId,
-            lines.map((l) => l.id),
-            res.sentAt,
-            res.revision,
-          ),
-        );
-      }
       // v1.10.2-impresion-honesta · el toast de éxito sólo lista las
       // secciones que la impresora ACEPTÓ. Antes listaba todas: si la
       // impresora de cocina estaba apagada, el cajero leía "Cocina: 2
@@ -2114,6 +2218,28 @@ export function SalePage(props: SalePageProps) {
               componente entero y no un reguero de `isHospitality` dentro
               de `SaleWorkspace`. */}
           {isHospitality ? (
+            <>
+            {/* kds-1-cocina · decisión 3, capa 1 · la hoja de alergias por
+                silla. Encima de todo y a pantalla completa: se abre, se
+                tocan dos cosas y se cierra. No es un panel que convivir
+                con la venta — es una interrupción corta y deliberada. */}
+            {alergiasAbiertas && (
+              <AlergiasSheet
+                diners={kitchen.estado.diners}
+                shape={
+                  props.tableContext?.zone === "TERRAZA" ? "redonda" : "rectangular"
+                }
+                tableName={
+                  props.tableContext ? `Mesa ${props.tableContext.name}` : "Mesa"
+                }
+                inicial={kitchen.estado.allergies.map((a) => ({
+                  seat: a.seat,
+                  allergen: a.allergen,
+                }))}
+                onCerrar={() => setAlergiasAbiertas(false)}
+                onGuardar={kitchen.guardarAlergias}
+              />
+            )}
             <HospitalityWorkspace
               products={filtered}
               searchQuery={query}
@@ -2129,8 +2255,41 @@ export function SalePage(props: SalePageProps) {
               familyTones={hospitalityFamilyTones}
               familyOf={hospitalityFamilyOf}
               ahora={ahoraProducts}
-              sentLineIds={sentState.sentLineIds}
-              lastSentAt={sentState.lastSentAt}
+              kitchen={{
+                enabled: props.kitchenDisplayEnabled === true,
+                estado: kitchen.estado,
+                courseMode: props.kitchenSettings?.courseMode ?? "ESPERA",
+                seatMode: props.kitchenSettings?.seatMode ?? "ALERGIA",
+                courseElegido,
+                onCourseElegido: setCourseElegido,
+                urgentePendiente,
+                onUrgentePendiente: () => {
+                  // Un toque enciende y otro apaga. Si la mesa YA tiene
+                  // comandas vivas, el toque además las marca en cocina:
+                  // el camarero que se acuerda después no tiene que
+                  // reenviar nada.
+                  const siguiente = !urgentePendiente;
+                  setUrgentePendiente(siguiente);
+                  if (kitchen.estado.orders.length > 0) {
+                    void kitchen.marcarUrgente(siguiente);
+                  }
+                },
+                onMarchar: (c) => void kitchen.marcharTiempo(c),
+                onSilla: (lineId, seat) => void kitchen.ponerSilla(lineId, seat),
+                onTiempo: (lineId, c) => void kitchen.ponerTiempo(lineId, c),
+                onAnularEnviado: kitchen.anularEnviado,
+                onAbrirAlergias: () => setAlergiasAbiertas(true),
+                avisosListo: props.avisosListo ?? [],
+                onServido: (orderId) => {
+                  props.onServido?.(orderId);
+                  kitchen.recargar();
+                },
+                anulaciones: kitchen.anulaciones,
+                onDeshacer: kitchen.deshacerAnulacion,
+                cocinaNoRecibe: kitchen.cocinaNoRecibe,
+                readyBeep: props.kitchenSettings?.readyBeep === true,
+              }}
+              lastSentAt={props.initialKitchen?.lastSentAt ?? null}
               lastTouchedLine={lastTouchedLine}
               chromeActions={hospitalityChrome}
               banners={hospitalityBanners}
@@ -2145,6 +2304,7 @@ export function SalePage(props: SalePageProps) {
               kitchenBusy={kitchenBusy}
               kitchenLastRevision={kitchenRevision}
             />
+            </>
           ) : (
             <>
           {/* v1.0-handheld · Lote 0+1: en <1024px el header pasa a dos
@@ -2726,10 +2886,11 @@ export function SalePage(props: SalePageProps) {
                   setDraftLines([]);
                   setContact(null);
                   setNotes("");
-                  // v2-H1 §5 · mesa cobrada: el registro de «esto está
-                  // en cocina» ya no describe nada.
-                  if (activeTicketId) clearSentState(activeTicketId);
-                  setSentState(emptySentState());
+                  // kds-1-cocina · mesa cobrada. Las anulaciones dentro
+                  // de su ventana de 5 s salen YA: cobrar sin mandarlas
+                  // dejaría un plato fuera de la cuenta y dentro de la
+                  // plancha.
+                  kitchen.vaciarAnulaciones();
                   // B-reservas-5 F2 · el aviso lo redacta quien sabe qué
                   // se cobró. Aquí siempre es una mesa.
                   exitToMap({

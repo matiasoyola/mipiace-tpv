@@ -15,7 +15,8 @@
     "super-admin:create": "tsx src/scripts/create-super-admin.ts",
     "backfill:holded-account-id": "tsx src/scripts/backfill-holded-account-id.ts",
     "backfill:vuelta": "tsx src/scripts/backfill-vuelta.ts",
-    "audit:appointment-drafts": "tsx src/scripts/audit-appointment-drafts.ts"
+    "audit:appointment-drafts": "tsx src/scripts/audit-appointment-drafts.ts",
+    "alergenos:maestranza": "tsx src/scripts/importar-alergenos-maestranza.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",

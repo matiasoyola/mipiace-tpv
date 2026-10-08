@@ -59,6 +59,11 @@ export async function registerAdminTenantSettingsRoutes(
           // sección clínica de Personal, y NO se acepta en el POST.
           // Encenderla es vender un producto y aceptar un marco legal.
           clinicalRecordsEnabled: true,
+          // kds-1-cocina · lo mismo que las tres de arriba: se DEVUELVE
+          // para que el panel pinte los ajustes de cocina de la tienda y
+          // el menú de emparejar una pantalla, y NO se acepta en el POST.
+          // Encender el módulo es vender una pantalla.
+          kitchenDisplayEnabled: true,
         },
       });
       return {
@@ -81,6 +86,8 @@ export async function registerAdminTenantSettingsRoutes(
           fichajeEnabled: tenant.fichajeEnabled,
           // clinica-1 · sólo lectura, por lo mismo.
           clinicalRecordsEnabled: tenant.clinicalRecordsEnabled,
+          // kds-1-cocina · sólo lectura, por lo mismo.
+          kitchenDisplayEnabled: tenant.kitchenDisplayEnabled,
         },
       };
     },

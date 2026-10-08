@@ -41,9 +41,14 @@
 import { Prisma } from "@mipiacetpv/db";
 import {
   admitidaEnRegimenGeneral,
+  alergenoDesdeCodigo,
+  ALERGENOS,
+  type Alergeno,
   CAUSAS_REGIMEN_GENERAL,
   type CausaExencion,
+  esAlergeno,
   esCausaExencion,
+  LISTA_ALERGENOS,
   PRESENTACION,
 } from "@mipiacetpv/ticket-model";
 
@@ -320,6 +325,17 @@ export interface LocalProductInput {
   barcode?: string | null;
   tags?: string[];
   active?: boolean;
+  /**
+   * kds-1-cocina · los alérgenos del plato, de la lista cerrada de los 14
+   * del anexo II del Reglamento (UE) 1169/2011.
+   *
+   * Ausente o `[]` significa **no informado**, que no es lo mismo que
+   * «sin alérgenos»: el cruce de la capa 3 se apaga solo donde no hay
+   * dato, y las capas 1 y 2 —la alergia de la mesa y la silla del plato—
+   * siguen avisando igual. Un producto sin informar no puede hacer que la
+   * pantalla calle una alergia que el camarero SÍ declaró.
+   */
+  allergens?: string[];
 }
 
 export interface LocalProductFields {
@@ -333,6 +349,7 @@ export interface LocalProductFields {
   barcode: string | null;
   tags: string[];
   active: boolean;
+  allergens: Alergeno[];
 }
 
 /**
@@ -390,6 +407,11 @@ export function validateLocalProduct(
   });
   if (!price.ok) return { ok: false, field: "price", message: price.message };
 
+  const alergenos = normalizeAllergens(input.allergens);
+  if (!alergenos.ok) {
+    return { ok: false, field: "allergens", message: alergenos.message };
+  }
+
   return {
     ok: true,
     fields: {
@@ -402,8 +424,50 @@ export function validateLocalProduct(
       barcode: normalizeBarcode(input.barcode),
       tags: normalizeTags(input.tags),
       active: input.active ?? true,
+      allergens: alergenos.value,
     },
   };
+}
+
+/**
+ * kds-1-cocina · los alérgenos, de la lista cerrada.
+ *
+ * **Un código que no se reconoce es un ERROR, no un valor que se ignora.**
+ * Y es la decisión importante de esta función: un alérgeno silenciosamente
+ * descartado deja un plato en el catálogo diciendo que no lleva lo que
+ * lleva, y eso acaba en un celíaco comiendo gluten. Si el fichero dice
+ * `GLU` en vez de `GL`, la fila se rechaza con el código escrito en el
+ * mensaje para que el implantador lo arregle.
+ *
+ * Admite el valor del enum (`GLUTEN`) y el código corto del generador de
+ * cartas de La Maestranza (`GL`), porque las dos puertas existen: el
+ * formulario del panel manda lo primero y el CSV de implantación lo
+ * segundo.
+ */
+export function normalizeAllergens(
+  raw: string[] | undefined,
+): { ok: true; value: Alergeno[] } | { ok: false; message: string } {
+  if (!raw || raw.length === 0) return { ok: true, value: [] };
+  const out: Alergeno[] = [];
+  for (const entry of raw) {
+    const t = entry.trim();
+    if (t.length === 0) continue;
+    const arriba = t.toUpperCase();
+    const porEnum = esAlergeno(arriba) ? (arriba as Alergeno) : null;
+    const porCodigo = porEnum ?? alergenoDesdeCodigo(arriba);
+    if (!porCodigo) {
+      return {
+        ok: false,
+        message:
+          `«${t}» no es uno de los 14 alérgenos. Usa el código de dos letras ` +
+          `(${LISTA_ALERGENOS.map((a) => ALERGENOS[a].codigo).join(", ")}).`,
+      };
+    }
+    if (!out.includes(porCodigo)) out.push(porCodigo);
+  }
+  // En el orden del anexo II, no en el que vino el fichero: es el de la
+  // rejilla del TPV y el de la leyenda del papel.
+  return { ok: true, value: LISTA_ALERGENOS.filter((a) => out.includes(a)) };
 }
 
 /**
@@ -429,6 +493,7 @@ export function buildLocalProductCreateData(
     kind: f.kind,
     active: f.active,
     tags: f.tags,
+    allergens: f.allergens,
     sellableViaTpv: true,
     needsSkuReview: false,
     skuAutoAssignedAt: null,
@@ -490,4 +555,19 @@ export const PRODUCT_BODY_PROPERTIES = {
     items: { type: "string", minLength: 1, maxLength: TAG_MAX },
   },
   active: { type: "boolean" },
+  // kds-1-cocina · los alérgenos del plato. El esquema admite el valor
+  // del enum (`GLUTEN`) **y** el código de dos letras del generador de
+  // cartas (`GL`), porque las dos puertas existen: la ficha del panel
+  // manda lo primero y el CSV de implantación lo segundo.
+  //
+  // `maxItems: 28` y no 14 a propósito: 14 valores × 2 formas de
+  // escribirlos. Lo que de verdad cierra la puerta es
+  // `normalizeAllergens`, que **rechaza la fila** si no reconoce un
+  // código en vez de descartarlo en silencio — un alérgeno perdido deja
+  // un plato diciendo que no lleva lo que lleva.
+  allergens: {
+    type: "array",
+    maxItems: 28,
+    items: { type: "string", minLength: 2, maxLength: 20 },
+  },
 } as const;
