@@ -21,6 +21,23 @@
 // que mira a la barra, y luego en el sentido de las agujas del reloj). Es
 // formación del camarero, no código: aquí sólo se ven numeradas.
 //
+// ── EL ROJO ES LA ALERGIA, EL ANILLO ES LO QUE EDITAS (kds-1c) ───────
+//
+// Dos cosas distintas que la primera captura pintaba igual: salían en rojo
+// a la vez «TODA LA MESA» y la silla 3, y la derecha decía «Toda la mesa»
+// sin ningún alérgeno marcado. No se sabía qué se estaba editando.
+//
+//   · **ROJO = TIENE ALERGIA.** Y sólo eso. Es el mismo rojo de la franja
+//     de la comanda (`ROJO_ALERGIA`), así que tiene que querer decir lo
+//     mismo en las dos pantallas: aquí hay un alérgeno declarado.
+//   · **ANILLO BLANCO = ES LO QUE ESTÁS EDITANDO.** No cambia el color,
+//     porque lo seleccionado no es una alergia. Blanco y no coral: el
+//     coral es de «Cobrar» (principio de venta bajo estrés, regla 1), y
+//     sobre una silla ya roja un anillo coral no se distinguía del relleno.
+//   · Y la hoja **abre en la primera silla con alergia**, o en «toda la
+//     mesa» si no hay ninguna: lo que el camarero viene a mirar casi
+//     siempre es lo que ya está declarado.
+//
 // ── PRIVACIDAD, QUE ES PARTE DEL DISEÑO ───────────────────────────────
 //
 // **No hay ningún sitio donde escribir un nombre.** La alergia vive en la
@@ -32,7 +49,12 @@
 
 import { useMemo, useState } from "react";
 
-import { ALERGENOS, LISTA_ALERGENOS, type Alergeno } from "@mipiacetpv/ticket-model";
+import {
+  ALERGENOS,
+  LISTA_ALERGENOS,
+  nombreCortoDeAlergeno,
+  type Alergeno,
+} from "@mipiacetpv/ticket-model";
 
 import {
   DARK_CANVAS,
@@ -78,14 +100,28 @@ const SILLAS_POR_DEFECTO = 4;
 /** Tope de sillas que se dibujan. Por encima, el dibujo deja de leerse. */
 const SILLAS_MAX = 12;
 
+/**
+ * **EL ANILLO DE LO QUE ESTÁS EDITANDO.** Blanco, 3 px.
+ *
+ * Una sola constante para la silla y para «toda la mesa»: son la misma
+ * cosa —lo que la rejilla de la derecha está editando— y tienen que
+ * señalarse igual. Si cada una pusiera su propio contorno, mañana una de
+ * las dos se quedaría sin él en un cambio de color.
+ */
+const ANILLO_ELEGIDA = "3px solid #FFFFFF";
+
 export function AlergiasSheet(props: AlergiasSheetProps) {
   const sillas = Math.min(
     SILLAS_MAX,
     Math.max(1, props.diners ?? SILLAS_POR_DEFECTO),
   );
-  // `null` = la pestaña «TODA LA MESA», que es donde abre: es lo que se
-  // marca cuando no se sabe quién es, y es el caso rápido.
-  const [seat, setSeat] = useState<number | null>(null);
+  // Abre en lo que ya hay declarado (kds-1c). `useState(() => …)` y no un
+  // efecto: lo seleccionado al abrir no «cambia» después de pintar, y un
+  // efecto haría un primer pintado con «Toda la mesa» y otro con «Silla 3»
+  // —el parpadeo que la captura enseñaba al revés—.
+  const [seat, setSeat] = useState<number | null>(() =>
+    primeraSillaConAlergia(props.inicial),
+  );
   const [alergias, setAlergias] = useState<AlergiaDeclarada[]>(props.inicial);
   const [guardando, setGuardando] = useState(false);
 
@@ -97,14 +133,20 @@ export function AlergiasSheet(props: AlergiasSheetProps) {
     [alergias, seat],
   );
 
-  const cuantasPorSilla = useMemo(() => {
-    const m = new Map<number | null, number>();
+  // Los alérgenos de cada silla, no sólo cuántos: la maqueta escribe
+  // «gluten» debajo del número, y lo que el camarero necesita leer de un
+  // golpe es QUÉ, no cuántos.
+  const porSilla = useMemo(() => {
+    const m = new Map<number | null, string[]>();
     for (const a of alergias) {
       const k = a.seat ?? null;
-      m.set(k, (m.get(k) ?? 0) + 1);
+      m.set(k, [...(m.get(k) ?? []), a.allergen]);
     }
     return m;
   }, [alergias]);
+
+  /** Los de «toda la mesa», que es lo que decide SU color. */
+  const deLaMesa = porSilla.get(null) ?? [];
 
   const alternar = (allergen: Alergeno) => {
     setAlergias((prev) => {
@@ -185,22 +227,29 @@ export function AlergiasSheet(props: AlergiasSheetProps) {
           className="shrink-0 lg:w-[420px] p-5 flex flex-col gap-3 border-b lg:border-b-0 lg:border-r"
           style={{ borderColor: DARK_SURFACE_RAISED, background: DARK_PANEL }}
         >
+          {/* **NEUTRA si no tiene alérgenos** (kds-1c). Antes se pintaba
+              roja por estar seleccionada, y en la captura salían rojas a la
+              vez «TODA LA MESA» y la silla 3: dos rojos que querían decir
+              cosas distintas. El rojo es la alergia; el anillo, lo que
+              estás editando. */}
           <button
             type="button"
             data-testid="alergias-toda-la-mesa"
             data-elegida={seat == null ? "1" : "0"}
+            data-con-alergia={deLaMesa.length > 0 ? "1" : "0"}
             onClick={() => setSeat(null)}
             className={`rounded-[14px] px-4 font-semibold text-left ${PRESS_FEEDBACK_CLASS}`}
             style={{
               minHeight: MIN_TOUCH_PX,
-              background: seat == null ? ROJO_ALERGIA : DARK_SURFACE,
-              color: seat == null ? ROJO_ALERGIA_TEXT : DARK_TEXT,
+              background: deLaMesa.length > 0 ? ROJO_ALERGIA : DARK_SURFACE,
+              color: deLaMesa.length > 0 ? ROJO_ALERGIA_TEXT : DARK_TEXT,
               fontSize: 19,
+              outline: seat == null ? ANILLO_ELEGIDA : "none",
+              outlineOffset: 2,
             }}
           >
             TODA LA MESA
-            {(cuantasPorSilla.get(null) ?? 0) > 0 &&
-              ` · ${cuantasPorSilla.get(null)}`}
+            {deLaMesa.length > 0 && ` · ${etiquetaDeAlergenos(deLaMesa)}`}
           </button>
 
           {/* **LA REFERENCIA DE LA BARRA.**
@@ -239,8 +288,9 @@ export function AlergiasSheet(props: AlergiasSheetProps) {
             />
             {Array.from({ length: sillas }, (_, i) => i + 1).map((n) => {
               const pos = posicionSilla(n, sillas);
-              const cuantas = cuantasPorSilla.get(n) ?? 0;
+              const suyos = porSilla.get(n) ?? [];
               const elegida = seat === n;
+              const etiqueta = etiquetaDeAlergenos(suyos);
               return (
                 <button
                   key={n}
@@ -248,28 +298,49 @@ export function AlergiasSheet(props: AlergiasSheetProps) {
                   data-testid="alergias-silla"
                   data-silla={n}
                   data-elegida={elegida ? "1" : "0"}
-                  data-con-alergia={cuantas > 0 ? "1" : "0"}
+                  data-con-alergia={suyos.length > 0 ? "1" : "0"}
                   onClick={() => setSeat(n)}
-                  aria-label={`Silla ${n}${cuantas > 0 ? `, ${cuantas} alergias` : ""}`}
-                  className={`absolute rounded-full font-bold flex items-center justify-center ${PRESS_FEEDBACK_CLASS}`}
+                  aria-label={`Silla ${n}${etiqueta ? `, ${etiqueta}` : ""}${
+                    elegida ? ", editando" : ""
+                  }`}
+                  aria-pressed={elegida}
+                  className={`absolute font-bold flex flex-col items-center justify-center leading-none ${PRESS_FEEDBACK_CLASS}`}
                   style={{
                     left: `${pos.x}%`,
                     top: `${pos.y}%`,
                     transform: "translate(-50%, -50%)",
-                    width: MIN_TOUCH_PX,
+                    // Redonda cuando sólo lleva el número, y un rectángulo
+                    // redondeado como el de la maqueta cuando lleva el
+                    // alérgeno debajo: «gluten» no cabe en 56 px de círculo
+                    // y truncarlo dejaría «glu…», que no es un alérgeno.
+                    minWidth: MIN_TOUCH_PX,
                     height: MIN_TOUCH_PX,
-                    fontSize: 20,
-                    background: cuantas > 0 ? ROJO_ALERGIA : DARK_SURFACE,
-                    color: cuantas > 0 ? ROJO_ALERGIA_TEXT : DARK_TEXT,
+                    padding: etiqueta ? "0 10px" : 0,
+                    borderRadius: etiqueta ? 18 : 999,
+                    gap: 2,
+                    // **ROJO = TIENE ALERGIA**, no «está seleccionada».
+                    background: suyos.length > 0 ? ROJO_ALERGIA : DARK_SURFACE,
+                    color: suyos.length > 0 ? ROJO_ALERGIA_TEXT : DARK_TEXT,
                     // El contorno de la silla elegida, BLANCO. En coral
                     // competía con «Cobrar»; y sobre una silla ya roja por
                     // tener alergia, un contorno coral casi no se
                     // distinguía del relleno.
-                    outline: elegida ? "3px solid #FFFFFF" : "none",
+                    outline: elegida ? ANILLO_ELEGIDA : "none",
                     outlineOffset: 2,
                   }}
                 >
-                  {n}
+                  <span style={{ fontSize: 20 }}>{n}</span>
+                  {/* «gluten» debajo, como la maqueta. En minúscula: es la
+                      palabra, no un grito — el grito es el «¡LLEVA
+                      GLUTEN!» de la comanda. */}
+                  {etiqueta && (
+                    <span
+                      data-testid="alergias-silla-alergeno"
+                      style={{ fontSize: 13, fontWeight: 700 }}
+                    >
+                      {etiqueta}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -320,6 +391,54 @@ export function AlergiasSheet(props: AlergiasSheetProps) {
       </div>
     </div>
   );
+}
+
+/**
+ * **DÓNDE ABRE LA HOJA**: la primera silla con alergia, o «toda la mesa».
+ *
+ * La primera POR NÚMERO DE SILLA y no por orden de la lista: la lista llega
+ * como la devuelva el servidor, y una hoja que abre en la silla 3 unas
+ * veces y en la 1 otras, con los mismos datos, es una hoja en la que no se
+ * puede confiar. Lo de «toda la mesa» (`seat` null) no cuenta como silla:
+ * es el destino cuando no hay ninguna.
+ */
+export function primeraSillaConAlergia(
+  alergias: readonly AlergiaDeclarada[],
+): number | null {
+  const sillas = alergias
+    .map((a) => a.seat)
+    .filter((s): s is number => s != null);
+  return sillas.length === 0 ? null : Math.min(...sillas);
+}
+
+/**
+ * «gluten», «gluten +2». Lo que va debajo del número de la silla.
+ *
+ * En minúscula porque es la palabra y no un grito: el grito es el «¡LLEVA
+ * GLUTEN!» de la comanda, y gritar aquí también le quitaría fuerza allí.
+ *
+ * Con más de uno se escribe el primero y se cuentan los demás: dos nombres
+ * seguidos no caben bajo un número, y el camarero que necesita el detalle
+ * toca la silla y lo ve marcado en la rejilla de los 14.
+ */
+export function etiquetaDeAlergenos(alergenos: readonly string[]): string {
+  if (alergenos.length === 0) return "";
+  const primero = nombreDeAlergeno(alergenos[0]!);
+  return alergenos.length === 1 ? primero : `${primero} +${alergenos.length - 1}`;
+}
+
+/**
+ * «gluten» a partir del código `GLUTEN`.
+ *
+ * Un código que no esté en los catorce se escribe tal cual en minúscula en
+ * vez de desaparecer: un alérgeno guardado que la pantalla no reconoce
+ * sigue siendo una alergia, y callarlo es el único fallo que esta hoja no
+ * puede tener.
+ */
+function nombreDeAlergeno(codigo: string): string {
+  const conocido = codigo in ALERGENOS;
+  const nombre = conocido ? nombreCortoDeAlergeno(codigo as Alergeno) : codigo;
+  return nombre.toLocaleLowerCase("es-ES");
 }
 
 /**

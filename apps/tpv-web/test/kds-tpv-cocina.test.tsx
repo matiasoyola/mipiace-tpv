@@ -11,6 +11,12 @@
 //   | RETAIL tocado | render RETAIL idéntico
 //   | Módulo apagado | sin `kitchenDisplayEnabled`, ni pantalla, ni banda
 //
+// Y las dos de kds-1c, de la hoja de alergias:
+//
+//   | Pintar en rojo «toda la mesa» sin alérgenos | color de fondo neutro
+//   | Que la selección cambie el color en vez de poner el anillo | la silla
+//   | seleccionada sin alergia tiene fondo neutro y anillo
+//
 // El banco es el mismo de `v2-h1-sabotajes.test.tsx` en forma —doble de
 // `apiWithCashier` con un DRAFT en memoria— y se escribe aparte a
 // propósito: aquel fichero prueba que v2-H1 no se ha regresado, y mezclar
@@ -805,6 +811,119 @@ describe("kds-1b · SABOTAJE · coral en un botón de la comanda que no sea «Co
     expect($('[data-testid="alergias-referencia"]')!.textContent).toMatch(
       /barra está a este lado/i,
     );
+  });
+});
+
+// ── kds-1c · EL ROJO ES LA ALERGIA, EL ANILLO ES LO QUE EDITAS ───────
+//
+// Las dos filas del apartado 2 de kds-1c. El defecto: en
+// `tpv-alergias-1443x812.png` salían en rojo a la vez «TODA LA MESA» y la
+// silla 3, y la derecha decía «Toda la mesa» sin ningún alérgeno marcado.
+describe("kds-1c · SABOTAJE · la hoja de alergias", () => {
+  // A pelo y no con los tokens importados: si alguien cambia
+  // `ROJO_ALERGIA` por un rojo distinto del de la franja de la comanda,
+  // esto se pone rojo. Es el mismo criterio que el coral de más arriba.
+  const ROJO_RGB = "rgb(200, 16, 46)"; // ROJO_ALERGIA, #C8102E
+  const NEUTRO_RGB = "rgb(28, 32, 38)"; // DARK_SURFACE, #1C2026
+  // jsdom no normaliza el atajo `outline`, así que vuelve tal cual se
+  // escribió. El fondo sí lo normaliza a `rgb(...)`.
+  const ANILLO = "3px solid #FFFFFF";
+
+  const abrirHoja = async (
+    allergies: Array<{ seat: number | null; allergen: string }>,
+  ) => {
+    banco({ pantalla: true, allergies });
+    await render();
+    await click($('[data-testid="boton-alergias"]'));
+  };
+
+  const silla = (n: number) =>
+    $(`[data-testid="alergias-silla"][data-silla="${n}"]`)!;
+
+  it("«toda la mesa» SIN alérgenos va neutra, aunque sea lo seleccionado", async () => {
+    // El sabotaje, literal: pintar en rojo «toda la mesa» sin alérgenos.
+    await abrirHoja([]);
+    const toda = $('[data-testid="alergias-toda-la-mesa"]')!;
+    // Sin ninguna silla declarada, la hoja abre aquí…
+    expect(toda.dataset.elegida).toBe("1");
+    // …con el anillo, que es lo que dice «esto es lo que editas»…
+    expect(toda.style.outline).toBe(ANILLO);
+    // …y NEUTRA, porque no tiene ningún alérgeno.
+    expect(toda.dataset.conAlergia).toBe("0");
+    expect(toda.style.background).toBe(NEUTRO_RGB);
+  });
+
+  it("y en rojo SÓLO cuando los tiene", async () => {
+    await abrirHoja([{ seat: null, allergen: "GLUTEN" }]);
+    const toda = $('[data-testid="alergias-toda-la-mesa"]')!;
+    expect(toda.dataset.conAlergia).toBe("1");
+    expect(toda.style.background).toBe(ROJO_RGB);
+    expect(toda.textContent).toMatch(/gluten/);
+  });
+
+  it("la selección pone el ANILLO, no el color: silla sin alergia, neutra", async () => {
+    // El segundo sabotaje: que la selección cambie el color en vez de
+    // poner el anillo.
+    await abrirHoja([{ seat: 3, allergen: "GLUTEN" }]);
+    await click(silla(1));
+    const s1 = silla(1);
+    expect(s1.dataset.elegida).toBe("1");
+    expect(s1.dataset.conAlergia).toBe("0");
+    expect(s1.style.outline).toBe(ANILLO);
+    expect(s1.style.background).toBe(NEUTRO_RGB);
+    // Y la 3, que SÍ tiene alergia, sigue roja aunque ya no se edite.
+    expect(silla(3).dataset.elegida).toBe("0");
+    expect(silla(3).style.background).toBe(ROJO_RGB);
+  });
+
+  it("la silla con alergia va roja y con «gluten» debajo, como la maqueta", async () => {
+    await abrirHoja([{ seat: 3, allergen: "GLUTEN" }]);
+    const s3 = silla(3);
+    expect(s3.dataset.conAlergia).toBe("1");
+    expect(s3.style.background).toBe(ROJO_RGB);
+    expect(
+      s3.querySelector('[data-testid="alergias-silla-alergeno"]')!.textContent,
+    ).toBe("gluten");
+    // Y las que no tienen nada no inventan etiqueta.
+    expect(
+      silla(1).querySelector('[data-testid="alergias-silla-alergeno"]'),
+    ).toBeNull();
+  });
+
+  it("abre en la primera silla con alergia, no en «toda la mesa»", async () => {
+    // El otro medio defecto de la captura: la derecha decía «Toda la mesa»
+    // sin ningún alérgeno marcado, y no se sabía qué se estaba editando.
+    await abrirHoja([{ seat: 3, allergen: "GLUTEN" }]);
+    expect(silla(3).dataset.elegida).toBe("1");
+    expect(silla(3).style.outline).toBe(ANILLO);
+    expect($('[data-testid="alergias-toda-la-mesa"]')!.dataset.elegida).toBe("0");
+    // Y la rejilla de los 14 abre con el gluten MARCADO, que es lo que la
+    // captura no tenía.
+    const gluten = $('[data-testid="alergias-opcion"][data-alergeno="GLUTEN"]')!;
+    expect(gluten.dataset.marcado).toBe("1");
+  });
+
+  it("y con dos sillas tocadas, en la MÁS BAJA: con los mismos datos, el mismo sitio", async () => {
+    await abrirHoja([
+      { seat: 4, allergen: "GLUTEN" },
+      { seat: 2, allergen: "LACTEOS" },
+    ]);
+    expect(silla(2).dataset.elegida).toBe("1");
+    expect(silla(4).dataset.elegida).toBe("0");
+    // Las dos rojas: el rojo es la alergia, y hay dos.
+    expect(silla(2).style.background).toBe(ROJO_RGB);
+    expect(silla(4).style.background).toBe(ROJO_RGB);
+  });
+
+  it("dos alérgenos en una silla: «gluten +1», que es lo que cabe", async () => {
+    await abrirHoja([
+      { seat: 3, allergen: "GLUTEN" },
+      { seat: 3, allergen: "LACTEOS" },
+    ]);
+    expect(
+      silla(3).querySelector('[data-testid="alergias-silla-alergeno"]')!
+        .textContent,
+    ).toBe("gluten +1");
   });
 });
 
