@@ -184,6 +184,17 @@ servidor en el mismo `106f0d3`:
    venta oscura **ayudan a leer, porque centran la vista**. No se cambian, y esto sale del alcance
    de v2-H2.*
 8. **Cierre de turno con mesas abiertas** avisa (B2).
+   *Después (08-10): ✅ **y bien**. Con tres mesas abiertas, «Cerrar el día» saca un aviso en
+   amarillo: «Quedas 3 mesas abiertas en sala · 138,30 €», las lista una a una (M2 37,30 · M4 55,00
+   · M6 46,00) y dice qué pasa con ellas: «El cierre no las cobra ni las vacía: siguen abiertas en
+   el mapa». Encima, el arqueo cuadra: ventas 54,60 € en 6 tickets y «efectivo esperado en el
+   cajón 154,60 € = fondo 100,00 + efectivo neto 54,60». **El turno NO se cerró**: se salió del
+   modal sin tocar «Cerrar turno».*
+   *⚠️ Pero **C11 muerde en el hierro**: el «Cancelar» de ese modal se dibuja **fuera** del modal,
+   sobre el fondo oscuro, y **el borde inferior de la pantalla del D8 lo corta por la mitad**. La
+   única salida que no es cerrar el turno queda recortada; hubo que salir con el botón atrás de
+   Android. El `-done` de v2-H1 lo dejó «anotado y sin tocar», pero medido aquí ya no es cosmético.
+   Ver §8.*
 9. **Textos en español** (sin CASH, CARD, DRAFT) y sin «Sincronizando con Holded…» (N4, N6, en v1.22).
    *Antes (08-10): ✅ en la hoja de cobro — Efectivo / Tarjeta / Bizum / Vale / Mixto.*
    *Después (08-10): ✅ sin cambios.*
@@ -310,7 +321,13 @@ servidor en el mismo `106f0d3`:
      mismo patrón está en la **línea 305**, en el impersonate, así que el fallo es doble. Bloque
      pequeño, de panel, independiente de v2-H2.
 
-7. **«Ahora» no entiende de modificadores**: «Ingrediente extra» ocupa uno de los 20 huecos de la
+7. **C11 · el «Cancelar» de «Cerrar el día» se sale de la pantalla** (puerta 8, 08-10). Se dibuja
+   fuera del modal, sobre el fondo, y en el D8 (1920 × 1080) **el borde inferior lo corta por la
+   mitad**: la única salida del modal que no sea cerrar el turno no se puede pulsar con seguridad.
+   Se salió con el botón atrás de Android, que un camarero no tiene por qué saber. Venía «anotado y
+   sin tocar» de v1.22; medido en el hierro sube de cosmético a trampa.
+
+8. **«Ahora» no entiende de modificadores**: «Ingrediente extra» ocupa uno de los 20 huecos de la
    vista que existe para ganar velocidad, siendo un añadido y no algo que se comande solo. Se
    arregla solo en cuanto exista el 1.
 
