@@ -180,8 +180,9 @@ servidor en el mismo `106f0d3`:
    dos veces y con dos palabras («sobran» arriba, «Cambio» abajo). Ver §8.*
 7. **Las hojas en claro** sobre la pantalla oscura: ¿molestan para abrir o no? (Lo decide Matías.
    Si molestan, v2-H2 entra antes de la fecha.)
-   *Después (08-10): capturada la hoja de cobro en claro sobre la venta oscura. **Pendiente del
-   juicio de Matías.***
+   *Después (08-10): **✅ JUZGADO POR MATÍAS: se quedan como están.** Las hojas en claro sobre la
+   venta oscura **ayudan a leer, porque centran la vista**. No se cambian, y esto sale del alcance
+   de v2-H2.*
 8. **Cierre de turno con mesas abiertas** avisa (B2).
 9. **Textos en español** (sin CASH, CARD, DRAFT) y sin «Sincronizando con Holded…» (N4, N6, en v1.22).
    *Antes (08-10): ✅ en la hoja de cobro — Efectivo / Tarjeta / Bizum / Vale / Mixto.*
@@ -228,25 +229,45 @@ servidor en el mismo `106f0d3`:
 
 ## 8 · Abierto, que puede mover la fecha
 
-- **Las hojas en claro** (puerta 7) y **el orden de las familias**: si Matías dice que impiden abrir,
-  v2-H2 entra antes de la fecha.
+- **Las hojas en claro** (puerta 7): **resuelto el 08-10, no se tocan.** Matías las juzgó en el D8 y
+  ayudan a leer porque centran la vista. Fuera del alcance de v2-H2.
+- **El orden de las familias** sigue siendo alfabético, no el de la carta.
+
+### Alcance de v2-H2 (lo que salió de la pasada del 08-10 en el D8)
+
+1. **No se pueden combinar productos.** Un plato combinado con ingrediente extra se comanda como
+   **producto aparte**: no dice qué ingrediente es ni a qué plato acompaña. Para la cocina y para el
+   ticket, eso es una línea huérfana.
+   El soporte existe desde B-Bar-Modifiers —`ModifierGroup`, `Modifier`, `ProductModifierGroup` en
+   el esquema, y el CRUD entero en la API (`apps/api/src/admin/modifier-groups.ts`: listar, crear,
+   editar, borrar)—, pero **el panel no tiene pantalla para crearlos**: no llama a
+   `/admin/modifier-groups` ni una vez. Sin esa pantalla, quien monta una carta no puede más que
+   hacer lo que se hizo aquí: el catálogo de La Maestranza cargó **`BOC-005` «Extra de ingrediente»
+   (0,50 €)** y **`PLA-003` «Ingrediente extra» (1,00 €)** como productos sueltos.
+   Es el punto más gordo de los cinco: los otros son de pantalla, éste es de datos.
+2. **Los colores de las categorías no gustan** (Matías, 08-10, en el hierro). El qué poner en su
+   sitio está **pendiente de decidir**; lo que está decidido es que los de ahora no se quedan.
+3. **El plano de sala no ocupa la pantalla**: a 1920 px las bandas acaban en 1320 y el tercio
+   derecho queda en negro. Con 16 mesas sobra sitio y no se usa.
+4. **El importe del cambio tiene que verse mucho más grande.** Hoy «Cambio 12,70 €» sale a la mitad
+   de tamaño que «TOTAL 37,30 €», que en ese momento ya no sirve, y lo mismo se dice dos veces con
+   dos palabras distintas («sobran» arriba, «Cambio» abajo).
+5. **El precio volvió a desaparecer del botón de producto**, y el cambio no está declarado en
+   ninguna parte: ni en el prompt del bloque ni en el `-done` (§6 «decisiones sin preguntar» ni §10
+   «diferencias»). En 1.22.0 cada tarjeta llevaba nombre y precio. Decidir si se queda así —y, si se
+   queda, declararlo.
+6. **«Ahora» no entiende de modificadores**: «Ingrediente extra» ocupa uno de los 20 huecos de la
+   vista que existe para ganar velocidad, siendo un añadido y no algo que se comande solo. Se
+   arregla solo en cuanto exista el 1.
+
 - **Pantalla de comandas en cocina** (puerta 11): decidida el 08-10, sin construir. Es lo que más
   puede mover la fecha. Medido en el hierro el 08-10: hoy **no se puede comandar en absoluto** —
   «Enviar comanda» falla con «Sin impresora configurada · falta impresora WIFI para la sección» y
   la comanda no sale. Ésa es la razón de la puerta, no un punto aparte.
 - **Fallo a investigar**: con la mesa **B1, de Barra**, el error de envío habla de la sección
   **SALON**. La sección que se usa para enrutar la comanda no es la de la mesa.
-- **El plano de sala no se reparte por la pantalla** (puerta 4, Matías el 08-10): a 1920 px las
-  bandas acaban en 1320 y el tercio derecho queda en negro. Con 16 mesas sobra sitio y no se usa.
-- **El botón de producto perdió el precio** y el cambio no está declarado: no aparece ni en el
-  prompt del bloque ni en el `-done` (§6 «decisiones sin preguntar» ni §10 «diferencias»). En
-  1.22.0 cada tarjeta llevaba nombre y precio. Decidir si se queda así y declararlo.
-- **«Ingrediente extra» ocupa uno de los 20 huecos de «Ahora»**, siendo un añadido de modificador y
-  no algo que se comande solo.
 - **La Tostada con tomate no entra en «Ahora»**, así que la comanda típica no se resuelve entera
   desde la vista que abre: cuesta un toque más ir a Desayunos.
-- **El importe del cambio tiene que verse mucho más grande** (Matías, 08-10): es lo que el camarero
-  lee con el cliente delante, y hoy no manda en la pantalla del cobro.
 - **El aviso de error no caduca**: el cartel de «Sin impresora configurada» seguía tapando el nombre
   de la mesa seis minutos después; hay que cerrarlo a mano con «Entendido».
 - **El catálogo no tiene «Tostada» ni «Caña» a secas**: seis tostadas y dos cañas (Caña mediana,
