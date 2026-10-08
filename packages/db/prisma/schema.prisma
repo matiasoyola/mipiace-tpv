@@ -1262,6 +1262,21 @@ model Store {
   // Decisión 8: el pitido del «LISTO» del TPV queda como ajuste, APAGADO
   // de serie, por coherencia con «sin sonidos; avisa el parpadeo».
   kitchenReadyBeep   Boolean           @default(false) @map("kitchen_ready_beep")
+  /// kds-2-wifi · LA CLAVE DE LA TIENDA del camino directo por la wifi.
+  ///
+  /// 32 bytes en base64url. Con ella van cifrados y autenticados todos los
+  /// mensajes que el TPV manda a la tablet de cocina por la red local
+  /// (AES-256-GCM; ver `packages/kitchen-lan`).
+  ///
+  /// NULL = no hay camino directo en esta tienda. Nace la primera vez que
+  /// una pantalla de cocina la pide y **se borra sola al revocar cualquier
+  /// aparato de la tienda** — lo hace el trigger `stores_rotate_lan_key`
+  /// de la migración, no el código de ninguna ruta.
+  ///
+  /// Vive en la TIENDA: una cadena con dos bares tiene dos wifis, y la
+  /// clave de un local no puede abrir la cocina del otro.
+  kitchenLanKey      String?           @map("kitchen_lan_key")
+  kitchenLanKeyAt    DateTime?         @map("kitchen_lan_key_at") @db.Timestamptz()
   createdAt          DateTime          @default(now()) @map("created_at") @db.Timestamptz()
   // Soft-delete (B4 §0.2). Las FKs a Register/Shift/Ticket son Restrict
   // — borrar duro rompería histórico fiscal. `deletedAt != null` saca la
@@ -1272,6 +1287,7 @@ model Store {
   registers     Register[]
   tables        Table[]
   kitchenOrders KitchenOrder[]
+  kitchenLanMarks KitchenLanMark[]
 
   @@index([tenantId])
   @@map("stores")
@@ -1455,6 +1471,20 @@ model Device {
   // mesa sale en la pantalla de barra con las cañas y en la de cocina con
   // las bravas.
   kitchenSections    KitchenSection[]     @default([]) @map("kitchen_sections")
+  // kds-2-wifi · DÓNDE ESCUCHA ESTA PANTALLA en la red local.
+  //
+  // La tablet lo anuncia en su latido (`POST /kitchen/latido`) y el TPV lo
+  // lee de `GET /kitchen/estado`. Si el router le cambia la IP sin
+  // internet, el TPV la redescubre por NSD; esto es la última conocida,
+  // que es con la que se reintenta antes de redescubrir.
+  //
+  // **Las tres sólo pueden tener valor en un `KITCHEN`**, y eso no es una
+  // costumbre: es el CHECK `devices_kitchen_lan_solo_cocina` de la
+  // migración. Un terminal de caja no escucha en ningún puerto y aquí no se
+  // puede ni apuntar que lo haya hecho (lección A5).
+  kitchenLanIp       String?              @map("kitchen_lan_ip")
+  kitchenLanPort     Int?                 @map("kitchen_lan_port")
+  kitchenLanAt       DateTime?            @map("kitchen_lan_at") @db.Timestamptz()
 
   tenant              Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   register            Register            @relation(fields: [registerId], references: [id], onDelete: Cascade)
@@ -1482,6 +1512,9 @@ model Device {
   kitchenOrdersReady  KitchenOrder[]      @relation("KitchenOrderReadyBy")
   kitchenOrdersUrgent KitchenOrder[]      @relation("KitchenOrderUrgentBy")
   kitchenLinesDone    KitchenOrderLine[]  @relation("KitchenOrderLineDoneBy")
+  // kds-2-wifi · las marcas que esta pantalla hizo SIN INTERNET y subió
+  // después. CASCADE: el libro de marcas no tiene sentido sin su aparato.
+  kitchenLanMarks     KitchenLanMark[]
 
   @@index([tenantId])
   @@index([registerId])
@@ -4152,6 +4185,16 @@ model KitchenOrder {
   /// pinta «llegó tarde» para que el cocinero no lo lea como recién hecho.
   lateArrival Boolean @default(false) @map("late_arrival")
 
+  /// kds-2-wifi · la tablet ya tenía este envío por la wifi del local.
+  ///
+  /// Lo pone la subida de la tablet al volver internet. Significa: esta
+  /// tarjeta NO es nueva —el cocinero la lleva viendo veinte minutos— así
+  /// que no se pinta como nueva y `lateArrival` no se enciende: llegó, sólo
+  /// que por el otro camino.
+  ///
+  /// Y es el dato que contesta «cuántos servicios salieron sin internet».
+  lanReceivedAt DateTime? @map("lan_received_at") @db.Timestamptz()
+
   /// Decisión 4 · la tarjeta pasó a «Lista»: todos los platos tachados, o
   /// el botón grande. Es lo que avisa al camarero (decisión 5).
   readyAt         DateTime? @map("ready_at") @db.Timestamptz()
@@ -4260,6 +4303,67 @@ model KitchenOrderLine {
   @@index([orderId])
   @@index([ticketLineId])
   @@map("kitchen_order_lines")
+}
+
+/// kds-2-wifi · EL LIBRO DE MARCAS de la cocina sin internet.
+///
+/// Una fila por cada cosa que la tablet marcó mientras no había red: un
+/// tachado (o un destachado), un «Lista» o un «Visto». Se suben todas al
+/// volver y se aplican por `at`.
+///
+/// POR QUÉ UN LIBRO Y NO «SUBIR EL ESTADO FINAL»: la decisión 9 dice que
+/// en estos tres estados manda la cocina y que gana **la marca de tiempo
+/// del aparato que manda en ese estado**. Con el estado final no se puede
+/// ordenar nada: dos pantallas que tachan y destachan el mismo plato
+/// darían el resultado del que subiera último, no del que lo hiciera
+/// último. Con el libro, el resultado es el mismo en cualquier orden de
+/// llegada — y de aquí salen los tiempos por plato de kds-3.
+///
+/// LAS COORDENADAS SON LAS DEL CAMINO DIRECTO (`clientSendId` + `section`
+/// + `ticketLineId`) y no los ids del servidor, porque la tablet marca
+/// sobre una tarjeta que el servidor TODAVÍA NO CONOCE: el `KitchenOrder`
+/// nace cuando el envío sube por la nube. Si la marca llega antes que su
+/// envío, queda con `appliedAt` NULL y la aplica el propio envío al entrar.
+model KitchenLanMark {
+  /// UUID v4 generado EN LA TABLET. La llave de idempotencia: subir dos
+  /// veces la misma marca no mueve nada.
+  markId String @id @map("mark_id") @db.Uuid
+
+  /// Qué pantalla marcó. De aquí sale el «quién» del informe del dueño.
+  deviceId String @map("device_id") @db.Uuid
+  storeId  String @map("store_id") @db.Uuid
+
+  /// `HECHO` (tachar/destachar), `VISTO` (un anulado o un cambio) o
+  /// `LISTA`. Texto con CHECK y no enum: son tres valores de NUESTRO
+  /// protocolo, no de una norma, y un enum nuevo obliga a partir la
+  /// migración en dos (Postgres prohíbe usar un valor de enum en la misma
+  /// transacción en la que se añade).
+  kind String
+
+  clientSendId String         @map("client_send_id") @db.Uuid
+  section      KitchenSection
+  /// NULL en una marca de TARJETA (`LISTA`): no apunta a un plato.
+  ticketLineId String?        @map("ticket_line_id") @db.Uuid
+  /// Para `HECHO`: tachado o destachado. NULL en las demás.
+  done         Boolean?
+
+  /// **La hora de la TABLET.** Es la que gana en estos tres estados, nunca
+  /// la del TPV (decisión 9).
+  at         DateTime  @map("at") @db.Timestamptz()
+  receivedAt DateTime  @default(now()) @map("received_at") @db.Timestamptz()
+  /// NULL = llegó antes que su envío y está esperándolo.
+  appliedAt  DateTime? @map("applied_at") @db.Timestamptz()
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  store  Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  /// `kitchen_lan_marks_pendientes_idx` es PARCIAL sobre
+  /// `applied_at IS NULL` y vive sólo en el SQL de la migración: es lo que
+  /// el envío consulta al entrar («¿hay marcas esperándome?») y Prisma no
+  /// sabe declarar un índice parcial. NO SE PUEDE BORRAR; lo guarda
+  /// `kds-2-migracion.test.ts`.
+  @@index([storeId, at])
+  @@map("kitchen_lan_marks")
 }
 
 // kds-1-cocina (decisión 3) · si un TIEMPO de esta mesa está retenido o
