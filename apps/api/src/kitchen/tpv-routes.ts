@@ -8,7 +8,9 @@
 //   PUT    /tickets/:ticketId/lines/:lineId/kitchen  tiempo y silla de una línea
 //   GET    /tickets/:ticketId/allergies            las alergias de la mesa
 //   PUT    /tickets/:ticketId/allergies            la hoja de alergias, entera
+//   GET    /kitchen/listas                         lo LISTO de la tienda (banda + etiqueta)
 //   GET    /kitchen/estado                         ¿hay pantalla? ¿está viva?
+//   GET    /kitchen/comandas/:orderId/escpos       los bytes del papel de respaldo
 //
 // Todas van por la puerta del TPV (`requireCashierSession`): las firma un
 // camarero, no una pantalla. Las dos puertas no se cruzan — ver
@@ -17,12 +19,26 @@
 import type { FastifyInstance } from "fastify";
 
 import { Prisma, type KitchenSection } from "@mipiacetpv/db";
-import { LISTA_ALERGENOS } from "@mipiacetpv/ticket-model";
+import { buildKitchenComanda } from "@mipiacetpv/escpos-builder";
+import {
+  avisoChoque,
+  choqueAlergenos,
+  franjaAlergia,
+  LISTA_ALERGENOS,
+  type Alergeno,
+} from "@mipiacetpv/ticket-model";
 
 import { getPrisma } from "../context.js";
 import { ensureCajaEnabled } from "../lib/caja-gate.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
-import { construirDestinos, destinoDe, SECCIONES } from "./destinos.js";
+import { cashierLabelFrom } from "../users/display.js";
+import {
+  construirDestinos,
+  destinoDe,
+  resolverSeccion,
+  SECCIONES,
+} from "./destinos.js";
+import { notasDeModificadores } from "./envio.js";
 import {
   emitirComandaServida,
   emitirPlatoAnulado,
@@ -422,7 +438,16 @@ export async function registerKitchenTpvRoutes(
           diners: true,
           lastSentRevision: true,
           register: { select: { storeId: true } },
-          lines: { select: { id: true, units: true, sentUnits: true, course: true, seat: true } },
+          lines: {
+            select: {
+              id: true,
+              productId: true,
+              units: true,
+              sentUnits: true,
+              course: true,
+              seat: true,
+            },
+          },
           courses: { select: { course: true, firedAt: true } },
           allergies: { select: { seat: true, allergen: true } },
           kitchenOrders: {
@@ -444,15 +469,52 @@ export async function registerKitchenTpvRoutes(
         registerId: cashier.rid,
         storeId: ticket.register.storeId,
       });
+      // El mapa `etiqueta → sección`, para resolver la sección de cada
+      // línea con la MISMA función que usa el envío.
+      const productIds = ticket.lines
+        .map((l) => l.productId)
+        .filter((x): x is string => x != null);
+      const [productos, etiquetas] = await Promise.all([
+        productIds.length > 0
+          ? prisma.product.findMany({
+              where: { id: { in: productIds }, tenantId: cashier.tid },
+              select: { id: true, tags: true },
+            })
+          : Promise.resolve([] as Array<{ id: string; tags: string[] }>),
+        prisma.tagSection.findMany({
+          where: { tenantId: cashier.tid },
+          select: { slug: true, section: true },
+        }),
+      ]);
+      const etiquetasPorProducto = new Map<string, string[]>(
+        productos.map((p) => [p.id, p.tags]),
+      );
+      const seccionPorEtiqueta = new Map<string, KitchenSection>(
+        etiquetas.map((e) => [e.slug, e.section]),
+      );
       return {
         diners: ticket.diners,
         revision: ticket.lastSentRevision,
+        // kds-1-cocina · LA SECCIÓN VA POR LÍNEA, y la resuelve el
+        // servidor.
+        //
+        // El TPV la necesita para la regla por destino de la decisión 6
+        // (el `−`/`+` sobre lo enviado sólo donde hay pantalla), y
+        // resolverla en el front obligaría a bajar el mapa
+        // `etiqueta → sección` al navegador y a repetir ahí la misma regla
+        // de `destinos.ts`. Dos copias de esa regla es como una mesa acaba
+        // ofreciendo corregir unidades de algo que está en la plancha.
         lines: ticket.lines.map((l) => ({
           id: l.id,
           units: Number(l.units),
           sentUnits: Number(l.sentUnits),
           course: l.course,
           seat: l.seat,
+          section: resolverSeccion(
+            l.productId,
+            etiquetasPorProducto,
+            seccionPorEtiqueta,
+          ),
         })),
         firedCourses: ticket.courses.map((c) => ({
           course: c.course,
@@ -644,6 +706,198 @@ export async function registerKitchenTpvRoutes(
         }),
       ]);
       return { ok: true, count: unicas.size };
+    },
+  );
+
+  // ── Decisión 5 · LO QUE ESTÁ LISTO, DE TODA LA TIENDA ───────────────
+  //
+  //   GET /kitchen/listas
+  //
+  // De la TIENDA y no de una mesa, y eso es la decisión 5: la banda «M4 ·
+  // listo para servir» sale en **todos los TPV del local**, para que se
+  // entere cualquier camarero y también el de la terraza. Un endpoint por
+  // mesa sólo avisaría al camarero que ya está mirando esa mesa, que es
+  // precisamente el que no necesita el aviso.
+  //
+  // De aquí salen las dos señales de la decisión 5: la banda de arriba y
+  // la etiqueta «LISTO» verde de la mesa en la sala.
+  app.get(
+    "/kitchen/listas",
+    { preHandler: [requireCashierSession, ensureCajaEnabled] },
+    async (request) => {
+      const cashier = request.cashier!;
+      const prisma = getPrisma();
+      const [tenant, register] = await Promise.all([
+        prisma.tenant.findUniqueOrThrow({
+          where: { id: cashier.tid },
+          select: { kitchenDisplayEnabled: true },
+        }),
+        prisma.register.findUniqueOrThrow({
+          where: { id: cashier.rid },
+          select: { storeId: true },
+        }),
+      ]);
+      // Con el módulo apagado, lista vacía y no 403: la banda es una
+      // función que se cobra, pero el TPV pregunta por ella en cada
+      // arranque y un 403 por ciclo ensuciaría los logs del terminal de un
+      // bar que nunca compró la pantalla.
+      if (!tenant.kitchenDisplayEnabled) {
+        return { ready: [] };
+      }
+      const listas = await prisma.kitchenOrder.findMany({
+        where: {
+          storeId: register.storeId,
+          readyAt: { not: null },
+          servedAt: null,
+        },
+        // De más ANTIGUA a más nueva (decisión 5): el camarero coge lo que
+        // lleva más tiempo en el pase, así que lo primero que lee tiene que
+        // ser eso.
+        orderBy: { readyAt: "asc" },
+        select: {
+          id: true,
+          ticketId: true,
+          tableId: true,
+          tableName: true,
+          section: true,
+          number: true,
+          readyAt: true,
+        },
+      });
+      return {
+        ready: listas.map((o) => ({
+          orderId: o.id,
+          ticketId: o.ticketId,
+          tableId: o.tableId,
+          tableName: o.tableName,
+          section: o.section,
+          number: o.number,
+          readyAt: o.readyAt!.toISOString(),
+        })),
+      };
+    },
+  );
+
+  // ── Decisión 9 · EL PAPEL DE RESPALDO ───────────────────────────────
+  //
+  //   GET /kitchen/comandas/:orderId/escpos
+  //
+  // Los bytes ESC/POS de una comanda que YA existe, para que el TPV la
+  // saque por la impresora USB del propio terminal cuando la pantalla de
+  // esa sección no da señales.
+  //
+  // ── Por qué los construye el SERVIDOR ─────────────────────────────
+  //
+  // Porque el papel de respaldo tiene que ser EL MISMO papel. Si el TPV
+  // compusiera la comanda por su cuenta con los datos que tiene a mano, el
+  // papel que sale cuando la wifi se cae diría cosas ligeramente distintas
+  // del que sale cuando la impresora de la sección funciona —otro orden,
+  // otra franja de alergia, otra forma de escribir la silla— y la
+  // diferencia se descubriría en el único momento en que el papel importa.
+  //
+  // Un solo constructor (`buildKitchenComanda`), un solo formato.
+  app.get(
+    "/kitchen/comandas/:orderId/escpos",
+    {
+      preHandler: [requireCashierSession, ensureCajaEnabled],
+      schema: {
+        params: {
+          type: "object",
+          required: ["orderId"],
+          properties: { orderId: { type: "string", format: "uuid" } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const cashier = request.cashier!;
+      const { orderId } = request.params as { orderId: string };
+      const prisma = getPrisma();
+      const order = await prisma.kitchenOrder.findFirst({
+        where: { id: orderId, ticket: { tenantId: cashier.tid } },
+        select: {
+          section: true,
+          number: true,
+          tableName: true,
+          sentAt: true,
+          urgent: true,
+          ticket: {
+            select: {
+              diners: true,
+              notes: true,
+              allergies: { select: { seat: true, allergen: true } },
+            },
+          },
+          dispatch: {
+            select: { sentBy: { select: { email: true, alias: true } } },
+          },
+          lines: {
+            select: {
+              nameSnapshot: true,
+              units: true,
+              voidedUnits: true,
+              modifiers: true,
+              course: true,
+              seat: true,
+              allergens: true,
+            },
+          },
+        },
+      });
+      if (!order) return reply.code(404).send({ error: "ORDER_NOT_FOUND" });
+
+      const porSilla = new Map<number | null, Alergeno[]>();
+      for (const a of order.ticket.allergies) {
+        const k = a.seat ?? null;
+        porSilla.set(k, [...(porSilla.get(k) ?? []), a.allergen as Alergeno]);
+      }
+      const deLaMesa = porSilla.get(null) ?? [];
+      const franjas: string[] = [];
+      if (deLaMesa.length > 0) franjas.push(franjaAlergia(null, deLaMesa));
+      for (const seat of [...porSilla.keys()]
+        .filter((k): k is number => k != null)
+        .sort((a, b) => a - b)) {
+        franjas.push(franjaAlergia(seat, porSilla.get(seat)!));
+      }
+      const deSilla = (seat: number | null): Alergeno[] =>
+        seat == null
+          ? deLaMesa
+          : [...new Set([...(porSilla.get(seat) ?? []), ...deLaMesa])];
+
+      const bytes = buildKitchenComanda({
+        section: order.section,
+        tableName: order.tableName,
+        revision: order.number,
+        issuedAt: order.sentAt,
+        cashierLabel: cashierLabelFrom(order.dispatch.sentBy),
+        diners: order.ticket.diners,
+        ticketNotes: order.ticket.notes,
+        urgent: order.urgent,
+        allergyBands: franjas,
+        lines: order.lines
+          // Lo anulado no se imprime: este papel sale DESPUÉS, cuando la
+          // pantalla ya no recibió, así que lo que tiene que decir es lo
+          // que hay que cocinar ahora. El «ERAN 3 · −1» es de la pantalla,
+          // que es la que puede tachar en vivo.
+          .filter((l) => Number(l.units) > Number(l.voidedUnits))
+          .map((l) => ({
+            units: Number(l.units) - Number(l.voidedUnits),
+            description: l.nameSnapshot,
+            notes: notasDeModificadores(l.modifiers),
+            seat: l.seat,
+            course: l.course,
+            allergyWarning:
+              l.seat != null
+                ? avisoChoque(
+                    choqueAlergenos(l.allergens as Alergeno[], deSilla(l.seat)),
+                  )
+                : null,
+          })),
+      });
+      return {
+        section: order.section,
+        number: order.number,
+        escposBase64: Buffer.from(bytes).toString("base64"),
+      };
     },
   );
 

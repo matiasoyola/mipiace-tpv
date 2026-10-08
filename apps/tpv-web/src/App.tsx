@@ -54,6 +54,7 @@ import { startVisualViewportSync } from "./lib/visualViewportSync.js";
 import { installBackGuard, setBackFallback } from "./hooks/useBackGuard.js";
 import { OutboxChip } from "./pages/CheckoutPage.outboxChip.js";
 import { KitchenScreen } from "./kitchen/KitchenScreen.js";
+import { useAvisosListo } from "./kitchen/tpv/useAvisosListo.js";
 import { PairScreen } from "./pages/PairScreen.js";
 import { PinScreen, type CashierLoginResponse } from "./pages/PinScreen.js";
 import {
@@ -557,6 +558,8 @@ export function App() {
           registerName={register.name}
           registerId={register.id}
           storeName={store.name}
+          kitchenDisplayEnabled={tenant.kitchenDisplayEnabled === true}
+          kitchenSettings={state.data.kitchen ?? null}
           onLogoutCashier={async () => {
             try {
               await apiWithCashier("/shift/cashier-logout", { method: "POST", body: {} });
@@ -634,6 +637,19 @@ export function TpvHome(props: {
   registerName: string;
   registerId: string;
   storeName: string;
+  // kds-1-cocina · el módulo «Cocina» y los ajustes de ESTA tienda, tal
+  // como los trae `/devices/me`. Bajan por props y no por un contexto
+  // nuevo porque son dos valores que no cambian durante la sesión: los
+  // pone el super-admin y el panel del restaurante, y el terminal los
+  // relee al arrancar.
+  kitchenDisplayEnabled?: boolean;
+  kitchenSettings?: {
+    courseMode: "ESPERA" | "TIEMPOS";
+    seatMode: "ALERGIA" | "SIEMPRE";
+    greenMaxMin: number;
+    amberMaxMin: number;
+    readyBeep: boolean;
+  } | null;
   onLogoutCashier: () => void | Promise<void>;
   onCloseShift: () => void;
 }) {
@@ -644,6 +660,25 @@ export function TpvHome(props: {
   // primera sesión post-deploy) pregunta a /tpv/tables.
   const businessType = getCachedBusinessType();
   const skipTables = businessType !== null && businessType !== "HOSPITALITY";
+  // kds-1-cocina (decisión 5) · LO QUE ESTÁ LISTO, de toda la tienda.
+  //
+  // Vive AQUÍ, en `TpvHome`, y no dentro de la sala ni dentro de la venta,
+  // porque las dos pantallas enseñan el mismo aviso y tienen que decir lo
+  // mismo: la banda «M4 · listo para servir» arriba de la comanda y la
+  // etiqueta «LISTO» verde en la mesa de la sala. Dos fuentes para el mismo
+  // aviso acabarían en una banda encendida sobre una mesa sin etiqueta.
+  const avisosListo = useAvisosListo({
+    moduloEncendido: props.kitchenDisplayEnabled === true,
+  });
+  const comandaListaPorMesa = new Map<string, string>();
+  for (const l of avisosListo.listas) {
+    // La más ANTIGUA de cada mesa, que es la primera de la lista (viene
+    // ordenada por `readyAt` ascendente): tocar la etiqueta sirve lo que
+    // lleva más tiempo en el pase.
+    if (l.tableId && !comandaListaPorMesa.has(l.tableId)) {
+      comandaListaPorMesa.set(l.tableId, l.orderId);
+    }
+  }
   const [hasTables, setHasTables] = useState<boolean | null>(
     skipTables ? false : null,
   );
@@ -867,6 +902,9 @@ export function TpvHome(props: {
         }}
         pickBusyTableId={openingTableId}
         pickError={openTableError}
+        mesasListas={avisosListo.mesasListas}
+        comandaListaPorMesa={comandaListaPorMesa}
+        onServido={(orderId) => void avisosListo.marcarServido(orderId)}
         onLogoutCashier={props.onLogoutCashier}
         onCloseShift={props.onCloseShift}
       />
@@ -914,6 +952,17 @@ export function TpvHome(props: {
           "quick-sale"
         }
         onOpenAgenda={() => setShowAgenda(true)}
+        // kds-1-cocina · el módulo «Cocina» y los ajustes de ESTA tienda,
+        // tal como los trae `/devices/me`. Van por props y no por un
+        // contexto nuevo porque son dos valores que no cambian durante la
+        // sesión: los pone el super-admin y el panel del restaurante, y el
+        // terminal los relee al arrancar.
+        kitchenDisplayEnabled={props.kitchenDisplayEnabled === true}
+        kitchenSettings={props.kitchenSettings ?? null}
+        // La banda «M4 · listo para servir» de TODA la tienda, no sólo de
+        // la mesa abierta: se entera cualquier camarero (decisión 5).
+        avisosListo={avisosListo.listas}
+        onServido={(orderId) => void avisosListo.marcarServido(orderId)}
         appointmentContext={view.appointmentContext ?? null}
         // Salir del cobro de una cita devuelve a la agenda, que es de
         // donde se vino. En SERVICES no hay mapa al que caer.
@@ -1160,6 +1209,10 @@ function TestModeTpv({
           registerName={bootstrap.register.name}
           registerId={bootstrap.register.id}
           storeName={bootstrap.store.name}
+          // El modo prueba del super-admin no empareja pantallas: el
+          // módulo queda apagado y el TPV no pinta nada de cocina.
+          kitchenDisplayEnabled={false}
+          kitchenSettings={null}
           onLogoutCashier={async () => {
             // "Salir" en el banner es la salida canónica del modo
             // prueba. El cashier-logout aquí cierra el shift no
