@@ -38,13 +38,64 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
         body: {
           type: "object",
           additionalProperties: false,
-          properties: { name: { type: "string", maxLength: 80 } },
+          properties: {
+            name: { type: "string", maxLength: 80 },
+            // kds-1-cocina (decisión 1) · QUÉ se va a emparejar con este
+            // código. Lo decide quien lo genera —propietario o encargado,
+            // autenticado— y NO el aparato que se empareja.
+            //
+            // Si `POST /devices/pair` aceptase `kind` del cuerpo,
+            // cualquiera con un código de caja podría emparejarse como
+            // pantalla de cocina. Y una pantalla no releva al terminal, así
+            // que el resultado sería una caja con dos aparatos vivos donde
+            // el segundo no factura y nadie se enteró.
+            kind: { type: "string", enum: ["TERMINAL", "KITCHEN"] },
+            // Las secciones de la pantalla (decisión 2): COCINA, BARRA o
+            // las dos. Obligatorias y no vacías con `kind: KITCHEN`, y
+            // prohibidas en lo demás — lo garantiza el CHECK
+            // `pairing_codes_kitchen_sections` de la base, y aquí se
+            // responde con un mensaje en vez de con un 500.
+            kitchenSections: {
+              type: "array",
+              minItems: 1,
+              maxItems: 3,
+              uniqueItems: true,
+              items: { type: "string", enum: ["BARRA", "COCINA", "SALON"] },
+            },
+          },
         },
       },
     },
     async (request, reply) => {
       const auth = request.auth!;
       const { registerId } = request.params as { registerId: string };
+      const body = (request.body ?? {}) as {
+        name?: string;
+        kind?: "TERMINAL" | "KITCHEN";
+        kitchenSections?: Array<"BARRA" | "COCINA" | "SALON">;
+      };
+      const kind = body.kind ?? "TERMINAL";
+      const kitchenSections = kind === "KITCHEN" ? (body.kitchenSections ?? []) : [];
+      if (kind === "KITCHEN" && kitchenSections.length === 0) {
+        return reply.code(400).send({
+          error: "KITCHEN_SECTIONS_REQUIRED",
+          message:
+            "Una pantalla de cocina tiene que decir qué secciones muestra: cocina, barra o las dos.",
+        });
+      }
+      if (kind === "KITCHEN") {
+        const tenant = await getPrisma().tenant.findUniqueOrThrow({
+          where: { id: auth.tenantId },
+          select: { kitchenDisplayEnabled: true },
+        });
+        if (!tenant.kitchenDisplayEnabled) {
+          return reply.code(403).send({
+            error: "KITCHEN_MODULE_DISABLED",
+            message:
+              "El módulo de cocina no está activo en esta cuenta. Lo enciende Mi Piace.",
+          });
+        }
+      }
       const prisma = getPrisma();
 
       const register = await prisma.register.findFirst({
@@ -92,12 +143,16 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
             code,
             createdByUserId: auth.userId,
             expiresAt,
+            kind,
+            kitchenSections,
           },
-          select: { code: true, expiresAt: true },
+          select: { code: true, expiresAt: true, kind: true, kitchenSections: true },
         });
         return reply.code(201).send({
           code: created.code,
           expiresAt: created.expiresAt.toISOString(),
+          kind: created.kind,
+          kitchenSections: created.kitchenSections,
         });
       }
       return reply.code(503).send({
@@ -217,6 +272,9 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
           id: true,
           tenantId: true,
           registerId: true,
+          // kds-1-cocina · lo que el código dice que se empareja.
+          kind: true,
+          kitchenSections: true,
           register: {
             select: {
               id: true,
@@ -271,6 +329,17 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
             name: deviceName ?? null,
             deviceTokenHash: hash,
             userAgent: userAgent ?? null,
+            // kds-1-cocina · copiados del código, no leídos del cuerpo.
+            //
+            // Y el trigger `devices_revoke_previous` NO releva al terminal
+            // de esta caja cuando esto es `KITCHEN`, porque filtra
+            // `kind = 'TERMINAL'` desde verifactu-1. Igual que el índice
+            // parcial `devices_one_active_per_register_key`. O sea: tres
+            // aparatos vivos en la misma caja (el terminal, la pantalla de
+            // cocina y la de barra) y sólo uno factura. Se prueba, no se
+            // supone: es su fila en la tabla de sabotajes del bloque.
+            kind: target.kind,
+            kitchenSections: target.kitchenSections,
           },
           select: { id: true },
         });
@@ -297,6 +366,11 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
         registerId: target.registerId,
         registerName: target.register.name,
         storeName: target.register.store.name,
+        // kds-1-cocina · la APK lee esto para decidir si arranca en modo
+        // TPV o en «modo cocina». Es la misma APK (decisión 1): lo que
+        // cambia es la pantalla que pinta al arrancar.
+        kind: target.kind,
+        kitchenSections: target.kitchenSections,
       });
     },
   );
@@ -315,11 +389,27 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
           id: true,
           name: true,
           pairedAt: true,
+          kind: true,
+          kitchenSections: true,
           register: {
             select: {
               id: true,
               name: true,
-              store: { select: { id: true, name: true } },
+              store: {
+                select: {
+                  id: true,
+                  name: true,
+                  // kds-1-cocina · los ajustes de cocina POR RESTAURANTE.
+                  // El TPV los necesita al arrancar para saber si pinta
+                  // «Espera» o la fila de tiempos, si el botón de silla va
+                  // siempre visible y si el «LISTO» pita.
+                  kitchenCourseMode: true,
+                  kitchenSeatMode: true,
+                  kitchenGreenMaxMin: true,
+                  kitchenAmberMaxMin: true,
+                  kitchenReadyBeep: true,
+                },
+              },
               numSerieHolded: true,
             },
           },
@@ -333,6 +423,11 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
               // ON va directo a la tabla de denominaciones; con el flag OFF
               // (default) enseña la tarjeta de resumen y un botón.
               requireCashCountOnClose: true,
+              // kds-1-cocina · la capability del módulo «Cocina». Apagada,
+              // el TPV no pinta nada de cocina: ni «Urgente», ni «Espera»,
+              // ni la banda «LISTO». Lo único que sobrevive al apagado es
+              // el envío por diferencias, que es un arreglo del servidor.
+              kitchenDisplayEnabled: true,
             },
           },
         },
@@ -361,7 +456,21 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
           name: device.tenant.name,
           cashierAutoLogoutMinutes: device.tenant.cashierAutoLogoutMinutes,
           requireCashCountOnClose: device.tenant.requireCashCountOnClose,
+          kitchenDisplayEnabled: device.tenant.kitchenDisplayEnabled,
         },
+        // kds-1-cocina · los ajustes de cocina de ESTA tienda. Van planos y
+        // no dentro de `store` para no cambiarle la forma a quien ya lo
+        // lee; `null` cuando el módulo está apagado, porque lo que no se
+        // compró no tiene por qué llegar a la pantalla.
+        kitchen: device.tenant.kitchenDisplayEnabled
+          ? {
+              courseMode: device.register.store.kitchenCourseMode,
+              seatMode: device.register.store.kitchenSeatMode,
+              greenMaxMin: device.register.store.kitchenGreenMaxMin,
+              amberMaxMin: device.register.store.kitchenAmberMaxMin,
+              readyBeep: device.register.store.kitchenReadyBeep,
+            }
+          : null,
       };
     },
   );

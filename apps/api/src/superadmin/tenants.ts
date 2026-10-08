@@ -117,6 +117,8 @@ function serializeDraftTenant(t: {
   // F1 · opcional por la misma razón que sus hermanas.
   fichajeEnabled?: boolean;
   holdedEnabled?: boolean;
+  // kds-1-cocina · opcional por la misma razón que sus hermanas.
+  kitchenDisplayEnabled?: boolean;
 }) {
   return {
     id: t.id,
@@ -143,6 +145,11 @@ function serializeDraftTenant(t: {
     // es un módulo, es el interruptor del ERP. Mezclarlo ahí volvería a
     // juntar dos ideas que este addendum separa.
     holdedEnabled: t.holdedEnabled ?? true,
+    // kds-1-cocina · fuera de `modules` a propósito, como `holdedEnabled`:
+    // no es un módulo que sostenga a una empresa, es un añadido a la caja
+    // que se cobra por pantalla. Dentro de `modules` entraría en el
+    // invariante de «al menos uno encendido» y no debe.
+    kitchenDisplayEnabled: t.kitchenDisplayEnabled ?? false,
   };
 }
 
@@ -437,6 +444,9 @@ export async function registerSuperAdminTenantsRoutes(
         // catalogo-local (addendum 3) · el interruptor de Holded, para
         // que el detalle pueda pintarlo y moverlo.
         holdedEnabled: tenant.holdedEnabled,
+        // kds-1-cocina · el módulo «Cocina», para que el detalle lo pueda
+        // pintar y moverlo. Fuera de `modules`, ver `resumenTenant`.
+        kitchenDisplayEnabled: tenant.kitchenDisplayEnabled,
         // holded-desconectar (ADR-020) · cuándo DEJÓ Holded, si lo dejó.
         // El detalle lo necesita para saber qué botón enseñar: «Dejar
         // Holded» al que lo tiene conectado y vendiendo, y nada al que ya
@@ -920,6 +930,11 @@ export async function registerSuperAdminTenantsRoutes(
             // Sólo se mueve desde aquí, y apagarlo tiene guarda: ver más
             // abajo el 409.
             holdedEnabled: { type: "boolean" },
+            // kds-1-cocina (decisión 10) · el módulo «COCINA»: pantalla de
+            // comandas, órdenes de salida, semáforo y aviso de «Listo». Se
+            // cobra POR PANTALLA (cocina + barra = dos), así que se mueve
+            // sólo desde aquí, igual que la caja y el control horario.
+            kitchenDisplayEnabled: { type: "boolean" },
           },
         },
       },
@@ -946,6 +961,7 @@ export async function registerSuperAdminTenantsRoutes(
         fichajeEnabled?: boolean;
         holdedEnabled?: boolean;
         clinicalRecordsEnabled?: boolean;
+        kitchenDisplayEnabled?: boolean;
       };
       const ctx = request.superAdmin!;
       const prisma = getPrisma();
@@ -1231,6 +1247,53 @@ export async function registerSuperAdminTenantsRoutes(
         data.clinicalRecordsEnabled = body.clinicalRecordsEnabled;
       }
 
+      // kds-1-cocina (decisión 10) · EL MÓDULO «COCINA».
+      //
+      // Fuera de `MODULE_FIELDS` a propósito, como `holdedEnabled` y la
+      // historia clínica: no es un módulo que sostenga a una empresa por sí
+      // solo, es un añadido a la caja. Una empresa no puede quedarse «sólo
+      // con cocina».
+      //
+      // La guarda, y es sólo una: **no se puede encender sin la caja**. La
+      // comanda nace en el TPV; una pantalla de comandas sin caja sería una
+      // pantalla a la que nunca llega nada, y el cliente descubriría el
+      // error en el servicio y no al comprarlo. Mismo criterio que el 409
+      // de la historia clínica sin CRM ni agenda.
+      //
+      // APAGARLO **no tiene guarda**, y es deliberado: aquí no hay un
+      // registro legal que se quede inaccesible (eso es lo clínico). Las
+      // comandas del día son operativas y se van con el ticket. Lo que pasa
+      // al apagarlo está dicho: las tablets emparejadas reciben
+      // `403 KITCHEN_MODULE_DISABLED`, que es un mensaje legible, y la
+      // respuesta devuelve cuántas se quedan a oscuras para que el
+      // super-admin lo sepa antes de colgar el teléfono.
+      let pantallasAfectadas = 0;
+      if (
+        body.kitchenDisplayEnabled !== undefined &&
+        body.kitchenDisplayEnabled !== tenant.kitchenDisplayEnabled
+      ) {
+        if (body.kitchenDisplayEnabled === true) {
+          const caja = body.cajaEnabled ?? tenant.cajaEnabled;
+          if (!caja) {
+            return reply.code(409).send({
+              error: "KITCHEN_NEEDS_CAJA",
+              message:
+                "La pantalla de comandas vive de lo que el TPV envía, así que necesita la caja encendida. " +
+                "Enciéndela primero (o en la misma llamada).",
+            });
+          }
+        } else {
+          pantallasAfectadas = await prisma.device.count({
+            where: { tenantId: id, kind: "KITCHEN", revokedAt: null },
+          });
+        }
+        changes.kitchenDisplayEnabled = {
+          before: tenant.kitchenDisplayEnabled,
+          after: body.kitchenDisplayEnabled,
+        };
+        data.kitchenDisplayEnabled = body.kitchenDisplayEnabled;
+      }
+
       if (Object.keys(changes).length === 0) {
         return reply.code(200).send({ noChanges: true });
       }
@@ -1255,6 +1318,9 @@ export async function registerSuperAdminTenantsRoutes(
           plan: updated.plan,
           fiscalProfile: updated.fiscalProfile,
         },
+        // kds-1-cocina · cuántas pantallas de cocina se quedan a oscuras
+        // con este cambio. 0 en todo lo demás.
+        ...(pantallasAfectadas > 0 ? { kitchenScreensAffected: pantallasAfectadas } : {}),
       });
     },
   );

@@ -228,6 +228,18 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
           // línea de servicio cuando el tenant tiene `agendaEnabled`. Null
           // si el servicio no tiene fila `service_scheduling`.
           scheduling: { select: { durationMin: true } },
+          // kds-1-cocina (decisión 3, capa 3) · los alérgenos del plato.
+          //
+          // ÉSTE es el camino por el que el TPV puede avisar «¡Lleva
+          // gluten!» en el momento en que el camarero asigna las bravas a
+          // la silla 3 de la celíaca — **sin bloquear**, porque a veces la
+          // cocina tiene la versión sin gluten. Sin este campo en el
+          // catálogo del TPV, el aviso llegaría sólo a la pantalla de
+          // cocina y el camarero se iría de la mesa sin saberlo.
+          //
+          // `[]` significa «no informado», no «sin alérgenos»: el TPV no
+          // pinta nada y las capas 1 y 2 avisan igual.
+          allergens: true,
         },
       });
       const hasMore = products.length > limit;
@@ -263,6 +275,7 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
         // duración; el resto (productos, servicios sin scheduling) va
         // como null y el TPV no pinta nada.
         durationMin: p.scheduling?.durationMin ?? null,
+        allergens: p.allergens,
       }));
       return {
         items,

@@ -52,6 +52,7 @@ import { registerStaffRoutes } from "./staff/routes.js";
 import { registerStoresRoutes } from "./stores/routes.js";
 import { registerStoreWebSocketRoute } from "./realtime/ws-route.js";
 import { registerDeviceWebSocketRoute } from "./devices/ws-route.js";
+import { registerKitchenAjustesRoutes } from "./kitchen/ajustes-routes.js";
 import { registerKitchenRoutes } from "./kitchen/routes.js";
 import { registerKitchenTpvRoutes } from "./kitchen/tpv-routes.js";
 import { registerKitchenWebSocketRoute } from "./kitchen/ws-route.js";
@@ -248,6 +249,10 @@ async function main() {
   // puertas que no se cruzan: ver `kitchen/auth.ts`.
   await registerKitchenRoutes(app);
   await registerKitchenTpvRoutes(app);
+  // kds-1-cocina · los ajustes de cocina del panel del restaurante, las
+  // pantallas con su latido y los alérgenos del plato. Lo último NO está
+  // detrás del módulo: la alergia es de serie en hostelería (decisión 10).
+  await registerKitchenAjustesRoutes(app);
   await registerTicketPrintRoute(app);
   await registerTpvPrinterInfoRoute(app);
   await registerPartialPaymentRoute(app);
