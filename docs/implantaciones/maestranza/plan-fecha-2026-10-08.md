@@ -54,6 +54,8 @@ tenga la 1.22.0. **Esto va primero.**
 - Por cada una: **toques** (los cuenta Claude en el espejo) y **segundos** (cronómetro de Matías,
   tres repeticiones, se apunta la mediana). Y la nota de Matías: dónde tuvo que pararse a leer.
 - Se apunta en la tabla del §5.
+- **HECHO el 08-10, 12:30–13:40.** Resultado en el §5. El D8 venía del `pm clear` de anoche:
+  hubo que volver a vincularlo (código nuevo) y entrar con email y PIN, no sólo PIN.
 
 ## 2 · v2-H1: al día con master, revisión y merge
 
@@ -102,25 +104,46 @@ En la cuenta ENSAYO, con la APK nueva y el servidor desplegado.
 
 | | Antes (1.22.0) | Después (v2-H1) |
 |---|---|---|
-| Comanda típica · toques | | |
-| Comanda típica · segundos (mediana de 3) | | |
-| Cobro en efectivo · toques | | |
-| Cobro en efectivo · segundos (mediana de 3) | | |
-| Dónde tuvo que pararse a leer | | |
+| Comanda típica · toques | **10** (10 / 10 / 10) | |
+| Comanda típica · segundos (mediana de 3) | **26,5** (30 / 26,5 / 15,1) | |
+| Cobro en efectivo · toques | **4** (4 / 4 / 4) | |
+| Cobro en efectivo · segundos (mediana de 3) | **15,1** la 1.ª · **5,8** entrenado | |
+| Dónde tuvo que pararse a leer | buscar la familia y el producto dentro: 7,0 s hasta Cafés, 4,4 s hasta Desayunos, 5,5 s la tostada, 4,4 s hasta Cervezas | |
+
+Cómo se midió el «antes» (08-10, cuenta ENSAYO `81f2177b`, APK 1.22.0):
+
+- **Cesto fijo**, el mismo para el después: 2 × Café con leche + 1 × Tostada con tomate +
+  2 × Caña mediana = **9,10 €**. El §1 decía «2 cafés con leche + 1 tostada + 2 cañas», pero en el
+  catálogo no existen «Tostada» ni «Caña» a secas (seis tostadas, dos cañas), así que se concretó.
+- **Secuencia medida**: del toque en la mesa al toque en el botón final (Enviar comanda / Cobrar).
+  El toque de «Mapa» para volver a la sala queda fuera.
+- **Comanda** en B1, B2 y B3 (una mesa libre por repetición, misma condición de partida).
+  **Cobro** sobre esas mismas tres, en efectivo con el chip rápido de 20 € (vuelta de 10,90 €).
+- Toques y segundos salen del **driver táctil del D8** (`/dev/input/event2`): cada toque con su
+  marca de tiempo y su coordenada, no contados a ojo en el espejo. La 2.ª repetición del cobro
+  se descarta en tiempo (41,3 s, con un hueco de 37,4 s escribiendo); sus toques sí valen.
+- **El aprendizaje pesa**: 30 → 26,5 → 15,1 s con los mismos 10 toques. Cuando se mida el después,
+  Matías ya vendrá entrenado, así que la comparación honesta de **tiempos** es contra los ~15 s;
+  la cifra limpia son los **toques**.
 
 ### Puertas (cada una ✅ / ❌ con captura)
 
 1. **Se reconoce sin leer**: cada familia de un vistazo; la de Licores entera sin desplazar.
 2. **«Ahora»** abre por defecto y tiene sentido para la hora del día.
 3. **La comanda**: se ve qué está enviado y qué no; − y + sobre la línea funcionan con un dedo.
+   *Antes (08-10): no se pudo probar — en 1.22.0 «Enviar comanda» falla con «Sin impresora
+   configurada» y no envía nada. Es la puerta 11.*
 4. **La sala**: Barra arriba; ocupada se distingue de libre de reojo; el importe cabe en la tarjeta.
 5. **N1 · teclado del sistema**: no sale el QWERTY al entrar en la venta, tras cobrar, tras la
    comanda, ni encima del pad del cobro mixto (lo arregló v1.22; se confirma en el hierro).
+   *Antes (08-10): ✅ sobre el pad del cobro. Falta confirmar los otros tres momentos.*
 6. **Cobro mixto** con el pad: el importe pre-relleno se puede corregir (C2).
+   *Antes (08-10): ✅ viene el importe exacto y hay chips 5/10/20/50/100 y C.*
 7. **Las hojas en claro** sobre la pantalla oscura: ¿molestan para abrir o no? (Lo decide Matías.
    Si molestan, v2-H2 entra antes de la fecha.)
 8. **Cierre de turno con mesas abiertas** avisa (B2).
 9. **Textos en español** (sin CASH, CARD, DRAFT) y sin «Sincronizando con Holded…» (N4, N6, en v1.22).
+   *Antes (08-10): ✅ en la hoja de cobro — Efectivo / Tarjeta / Bizum / Vale / Mixto.*
 
 ### En la cuenta NUEVA, en DRAFT («Probar TPV»)
 
@@ -166,7 +189,19 @@ En la cuenta ENSAYO, con la APK nueva y el servidor desplegado.
 - **Las hojas en claro** (puerta 7) y **el orden de las familias**: si Matías dice que impiden abrir,
   v2-H2 entra antes de la fecha.
 - **Pantalla de comandas en cocina** (puerta 11): decidida el 08-10, sin construir. Es lo que más
-  puede mover la fecha.
+  puede mover la fecha. Medido en el hierro el 08-10: hoy **no se puede comandar en absoluto** —
+  «Enviar comanda» falla con «Sin impresora configurada · falta impresora WIFI para la sección» y
+  la comanda no sale. Ésa es la razón de la puerta, no un punto aparte.
+- **Fallo a investigar**: con la mesa **B1, de Barra**, el error de envío habla de la sección
+  **SALON**. La sección que se usa para enrutar la comanda no es la de la mesa.
+- **El importe del cambio tiene que verse mucho más grande** (Matías, 08-10): es lo que el camarero
+  lee con el cliente delante, y hoy no manda en la pantalla del cobro.
+- **El aviso de error no caduca**: el cartel de «Sin impresora configurada» seguía tapando el nombre
+  de la mesa seis minutos después; hay que cerrarlo a mano con «Entendido».
+- **El catálogo no tiene «Tostada» ni «Caña» a secas**: seis tostadas y dos cañas (Caña mediana,
+  Tubo de caña). Para un camarero nuevo es una duda en cada comanda.
+- **Tras un `pm clear`, la primera entrada pide email completo**, no sólo PIN (no hay cajeros
+  recientes). A prever en el guion del §7: entra Matías una vez y ya quedan guardados.
 - **Botella de vino VIN-007** sin precio, fuera del catálogo.
 - **Devoluciones sin Holded**: las rectificativas (V3) no existen; hace falta una instrucción de uso
   para Salomé.
