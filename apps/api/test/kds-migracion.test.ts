@@ -213,17 +213,33 @@ describe("kds-1 · la alergia NO sale del ticket", () => {
     );
   });
 
-  it("SABOTAJE · y NO hay ninguna clave hacia `clients`", () => {
+  it("SABOTAJE · y NO hay ninguna clave hacia `clients`, ni una COLUMNA", () => {
     // La invariante de privacidad de la decisión 3, escrita como la
     // ausencia de una clave ajena. El bloque de la tabla se aísla para que
     // una FK de otra tabla a `clients` no haga pasar el test.
+    //
+    // **Y no basta con buscar la relación de Prisma**: lo descubrió el
+    // propio banco de sabotajes. Un `clientId String?` suelto —una columna
+    // sin `@relation`, que es exactamente como alguien «guardaría de quién
+    // es la alergia» sin pensarlo— no contiene la palabra `Client` con
+    // mayúscula y pasaba el test anterior. Se mira SIN distinguir
+    // mayúsculas, y sobre el nombre de cada campo, no sobre el comentario.
     const bloque = COCINA_SQL.match(
       /CREATE TABLE "ticket_allergies" \(([\s\S]*?)\n\);/,
     );
     expect(bloque).toBeTruthy();
-    expect(bloque![1]).not.toMatch(/clients/);
-    // Y en el esquema, el modelo tampoco tiene relación con Client.
+    expect(bloque![1]).not.toMatch(/client/i);
+
     const modelo = SCHEMA.match(/model TicketAllergy \{([\s\S]*?)\n\}/);
-    expect(modelo![1]).not.toMatch(/Client/);
+    expect(modelo).toBeTruthy();
+    // Sólo las líneas de CAMPO (las que no son comentario): la cabecera
+    // del modelo explica justamente que no hay clave hacia `Client`, y un
+    // test que mirase el texto entero se pondría rojo por su propia
+    // documentación.
+    const campos = modelo![1]!
+      .split("\n")
+      .filter((l) => !l.trimStart().startsWith("//") && !l.trimStart().startsWith("///"))
+      .join("\n");
+    expect(campos).not.toMatch(/client/i);
   });
 });

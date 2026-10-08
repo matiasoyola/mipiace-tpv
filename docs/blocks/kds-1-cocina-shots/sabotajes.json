@@ -1,0 +1,122 @@
+[
+  {
+    "id": "diferencias",
+    "titulo": "Volver a mandar todas las líneas en cada envío",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected 3 to be 1 // Object.is equality"
+  },
+  {
+    "id": "idempotencia",
+    "titulo": "Quitar la idempotencia de clientSendId",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected false to be true // Object.is equality"
+  },
+  {
+    "id": "sin-destino",
+    "titulo": "Fallar el envío por no tener destino",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected 500 to be 200 // Object.is equality"
+  },
+  {
+    "id": "anular-sin-avisar",
+    "titulo": "Anular sin avisar a cocina",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected [] to include 'kitchen.line_voided'"
+  },
+  {
+    "id": "anulado-sin-visto",
+    "titulo": "Anulado que desaparece sin «Visto»",
+    "estado": "ROJO",
+    "mensaje": "expected false to be true // Object.is equality"
+  },
+  {
+    "id": "retener-barra",
+    "titulo": "Retener la barra",
+    "estado": "ROJO",
+    "mensaje": "expected null not to be null"
+  },
+  {
+    "id": "semaforo-desde-la-nota",
+    "titulo": "El semáforo cuenta desde la nota",
+    "estado": "ROJO",
+    "mensaje": "expected 30 to be null"
+  },
+  {
+    "id": "orden-por-columnas",
+    "titulo": "Orden por columnas",
+    "estado": "ROJO",
+    "mensaje": "expected [ Array(4) ] to deeply equal [ Array(4) ]"
+  },
+  {
+    "id": "cortar-tarjeta",
+    "titulo": "Cortar una tarjeta",
+    "estado": "ROJO",
+    "mensaje": "expected [ { id: 't0', …(6) }, …(8) ] to have a length of 6 but got 9"
+  },
+  {
+    "id": "alergia-sin-silla",
+    "titulo": "Alergia sin silla que no sale en cocina",
+    "estado": "ROJO",
+    "mensaje": "expected [] to deeply equal [ '⚠ TODA LA MESA · SIN GLUTEN' ]"
+  },
+  {
+    "id": "plato-silla-alergeno",
+    "titulo": "No marcar el plato de la silla que lleva su alérgeno",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected null to be '¡LLEVA GLUTEN!' // Object.is equality"
+  },
+  {
+    "id": "parpadeo-1s",
+    "titulo": "Parpadeo de 1 s",
+    "estado": "ROJO",
+    "mensaje": "expected 1000 to be greater than or equal to 2500"
+  },
+  {
+    "id": "sonido-en-cocina",
+    "titulo": "Sonido en cocina",
+    "estado": "ROJO",
+    "mensaje": "expected \"spy\" to not be called at all, but actually been called 3 times"
+  },
+  {
+    "id": "mas-menos-sin-pantalla",
+    "titulo": "−/+ en lo enviado sin pantalla",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected { screen: false, printer: true, …(1) } to deeply equal { screen: false, printer: true, …(1) }"
+  },
+  {
+    "id": "servido-no-limpia",
+    "titulo": "«Servido» que no limpia",
+    "estado": "ROJO",
+    "mensaje": "expected [ { …(7) } ] to have a length of +0 but got 1"
+  },
+  {
+    "id": "modulo-apagado",
+    "titulo": "Módulo apagado",
+    "estado": "ROJO",
+    "mensaje": "expected false to be true // Object.is equality"
+  },
+  {
+    "id": "terminal-tacha",
+    "titulo": "Un terminal puede tachar en cocina",
+    "estado": "ROJO",
+    "mensaje": "expected 404 to be 403 // Object.is equality"
+  },
+  {
+    "id": "kitchen-cobra",
+    "titulo": "Un KITCHEN cobra o abre turno",
+    "estado": "ROJO",
+    "mensaje": "expected 200 to be 403 // Object.is equality"
+  },
+  {
+    "id": "otra-tienda",
+    "titulo": "Cocina ve otra tienda u otra sección",
+    "estado": "ROJO",
+    "mensaje": "expected [ { …(17) } ] to have a length of +0 but got 1"
+  },
+  {
+    "id": "alergia-a-client",
+    "titulo": "La alergia llega a Client",
+    "estado": "ROJO",
+    "mensaje": "expected '\\n  clientId String?  @map(\"client_id…' not to match /client/i"
+  }
+]
