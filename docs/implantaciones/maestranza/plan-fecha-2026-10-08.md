@@ -245,8 +245,14 @@ servidor en el mismo `106f0d3`:
    hacer lo que se hizo aquí: el catálogo de La Maestranza cargó **`BOC-005` «Extra de ingrediente»
    (0,50 €)** y **`PLA-003` «Ingrediente extra» (1,00 €)** como productos sueltos.
    Es el punto más gordo de los cinco: los otros son de pantalla, éste es de datos.
-2. **Los colores de las categorías no gustan** (Matías, 08-10, en el hierro). El qué poner en su
-   sitio está **pendiente de decidir**; lo que está decidido es que los de ahora no se quedan.
+2. **Rehacer la paleta de las familias.** Matías la juzgó en el hierro el 08-10: los colores de las
+   categorías **no le gustan**; quiere **tonos más bonitos, más estéticos y más modernos**. Los de
+   ahora no se quedan.
+   Cómo entra: **se valida en maqueta antes de pasar por Code**, no se prueban tonos sobre el
+   código. Y la restricción que no se puede perder por el camino es la **puerta 1**: cada familia
+   se tiene que seguir reconociendo **de un vistazo** sobre la venta oscura, que es para lo que el
+   color está ahí. Nueve familias, nueve rellenos distinguibles entre sí y legibles en oscuro —
+   «más bonito» no puede salir a costa de que dos familias vecinas se confundan a velocidad.
 3. **El plano de sala no ocupa la pantalla**: a 1920 px las bandas acaban en 1320 y el tercio
    derecho queda en negro. Con 16 mesas sobra sitio y no se usa.
 4. **El importe del cambio tiene que verse mucho más grande.** Hoy «Cambio 12,70 €» sale a la mitad
