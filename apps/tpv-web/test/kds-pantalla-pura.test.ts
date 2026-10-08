@@ -11,6 +11,15 @@
 //   | 0 min al marchar
 //   | Parpadeo de 1 s | la animación dura ≥ 2,5 s
 //
+// Y las tres de kds-1c, que son del MISMO reparto:
+//
+//   | Quitar el ordenado en la pantalla | lista barajada → las visibles son
+//   | las N más antiguas (urgentes delante) y en orden de lectura
+//   | Ordenar por `sentAt` en vez de por la marcha | un tiempo 2 marchado
+//   | tarde se coloca por su marcha
+//   | Que «+N» use otro orden que la rejilla | los ocultos son siempre más
+//   | nuevos que el último visible
+//
 // Puras y no dentro del componente por lo de siempre en esta casa: así un
 // sabotaje se ve en rojo sin mirar una captura. jsdom no hace layout
 // (`getBoundingClientRect` devuelve ceros), así que el reparto de tarjetas
@@ -29,6 +38,7 @@ import {
   cuentaMasN,
   masNParpadea,
   mesasMasN,
+  ordenarParaLaPantalla,
   repartirTarjetas,
   TARJETAS_NORMALES_A_1280,
   type TarjetaMedible,
@@ -152,13 +162,13 @@ describe("kds-1 · SABOTAJE · el semáforo cuenta desde la nota", () => {
 });
 
 describe("kds-1 · SABOTAJE · orden por columnas", () => {
-  it("el reparto conserva el ORDEN DE LA LISTA, que es el de lectura", () => {
-    // La lista llega ordenada del servidor (urgentes primero, luego por
-    // llegada). Lo que este reparto NO puede hacer es reordenarla: el
-    // `flex-wrap` pinta en orden del DOM, de izquierda a derecha y luego la
+  it("el reparto pinta en ORDEN DE LECTURA, de izquierda a derecha", () => {
+    // El `grid` pinta en orden del DOM, de izquierda a derecha y luego la
     // fila de abajo, así que el orden del array ES el orden de lectura.
     const orden = ["urgente", "vieja", "media", "nueva", "ultima"];
-    const tarjetas = orden.map((id) => tarjeta({ id }));
+    const tarjetas = orden.map((id, i) =>
+      tarjeta({ id, urgent: id === "urgente", firedAt: haceMin(20 - i) }),
+    );
     const r = repartirTarjetas(tarjetas, { ancho: 1016, alto: 2000 });
     expect(r.visibles.map((t) => t.id)).toEqual(orden);
   });
@@ -166,10 +176,181 @@ describe("kds-1 · SABOTAJE · orden por columnas", () => {
   it("el reparto conserva el orden también cuando va al «+N»", () => {
     const orden = Array.from({ length: 10 }, (_, i) => `t${i}`);
     const r = repartirTarjetas(
-      orden.map((id) => tarjeta({ id, lines: [linea(), linea(), linea()] })),
+      orden.map((id, i) =>
+        tarjeta({
+          id,
+          firedAt: haceMin(30 - i),
+          lines: [linea(), linea(), linea()],
+        }),
+      ),
       ZONA_1280,
     );
     expect([...r.visibles, ...r.extra].map((t) => t.id)).toEqual(orden);
+  });
+});
+
+// ── kds-1c · LA PANTALLA ORDENA SOLA ─────────────────────────────────
+//
+// Las tres filas de la tabla de sabotajes de kds-1c, apartado 1. El
+// defecto que vienen a cerrar es el de la captura de kds-1b: T4 → M5 → M1
+// → **M2**, con la M4 de 26 min escondida en el «+7» mientras la M1 de 4
+// se veía.
+describe("kds-1c · SABOTAJE · quitar el ordenado en la pantalla", () => {
+  /** El servicio de la captura de kds-1b, EN EL ORDEN EN QUE LLEGÓ. */
+  const DESORDENADO = [
+    tarjeta({ id: "o-t4", tableName: "T4", urgent: true, firedAt: haceMin(2) }),
+    tarjeta({ id: "o-m5", tableName: "M5", firedAt: haceMin(7) }),
+    tarjeta({ id: "o-m1", tableName: "M1", firedAt: haceMin(4) }),
+    tarjeta({ id: "o-m2", tableName: "M2", firedAt: haceMin(14) }),
+    tarjeta({ id: "o-m4", tableName: "M4", firedAt: haceMin(26) }),
+    tarjeta({ id: "o-t2", tableName: "T2", firedAt: haceMin(9) }),
+  ];
+
+  it("la lista barajada se ordena: urgentes delante, luego de la más antigua", () => {
+    expect(ordenarParaLaPantalla(DESORDENADO).map((t) => t.tableName)).toEqual([
+      // La urgente, aunque lleve 2 min: es una decisión del camarero.
+      "T4",
+      // Y después de la que más espera a la que menos.
+      "M4",
+      "M2",
+      "T2",
+      "M5",
+      "M1",
+    ]);
+  });
+
+  it("y las VISIBLES son las más antiguas: la M4 de 26 min no se esconde", () => {
+    // El defecto de la captura, literal: con sitio para cuatro, la M1 de 4
+    // min se veía y la M4 de 26 estaba en el «+N».
+    const r = repartirTarjetas(DESORDENADO, {
+      ancho: ZONA_1280.ancho,
+      alto: altoTarjeta(DESORDENADO[0]!),
+    });
+    expect(r.visibles.map((t) => t.tableName)).toEqual(["T4", "M4", "M2", "T2"]);
+    expect(r.extra.map((t) => t.tableName)).toEqual(["M5", "M1"]);
+  });
+
+  it("el reparto ordena ÉL, sin que nadie le pase la lista ordenada", () => {
+    // Es la prueba de que ordena la pantalla y no el servidor: la misma
+    // lista barajada entra y sale colocada.
+    const r = repartirTarjetas(DESORDENADO, { ancho: ZONA_1280.ancho, alto: 4000 });
+    expect(r.visibles.map((t) => t.tableName)).toEqual([
+      "T4",
+      "M4",
+      "M2",
+      "T2",
+      "M5",
+      "M1",
+    ]);
+  });
+});
+
+describe("kds-1c · SABOTAJE · ordenar por `sentAt` en vez de por la marcha", () => {
+  it("un tiempo 2 marchado TARDE se coloca por su marcha, no por su envío", () => {
+    // La mesa pidió hace media hora y el camarero acaba de marchar el
+    // segundo: la tarjeta pinta «1 min», y ése es el sitio que le toca.
+    // Ordenada por el envío se colaría delante de una mesa que lleva
+    // veinte esperando de verdad.
+    const tiempo2 = tarjeta({ id: "tiempo2", tableName: "T2", firedAt: haceMin(1) });
+    const vieja = tarjeta({ id: "vieja", tableName: "M4", firedAt: haceMin(20) });
+    expect(ordenarParaLaPantalla([tiempo2, vieja]).map((t) => t.id)).toEqual([
+      "vieja",
+      "tiempo2",
+    ]);
+    // Y los minutos que pinta la tarjeta dicen lo mismo que el orden.
+    expect(minutosDesdeMarchado(tiempo2.firedAt, AHORA)).toBe(1);
+    expect(minutosDesdeMarchado(vieja.firedAt, AHORA)).toBe(20);
+  });
+
+  it("un tiempo RETENIDO va al final: no ha empezado a contar", () => {
+    const retenida = tarjeta({ id: "retenida", firedAt: null });
+    const nueva = tarjeta({ id: "nueva", firedAt: haceMin(1) });
+    expect(ordenarParaLaPantalla([retenida, nueva]).map((t) => t.id)).toEqual([
+      "nueva",
+      "retenida",
+    ]);
+  });
+
+  it("y con la misma marca manda el id, para que no salten de sitio", () => {
+    const a = tarjeta({ id: "a", firedAt: haceMin(5) });
+    const b = tarjeta({ id: "b", firedAt: haceMin(5) });
+    expect(ordenarParaLaPantalla([b, a]).map((t) => t.id)).toEqual(["a", "b"]);
+    expect(ordenarParaLaPantalla([a, b]).map((t) => t.id)).toEqual(["a", "b"]);
+  });
+
+  it("ordenar no toca la lista que le dan", () => {
+    // Si mutara el array del `feed`, el repintado siguiente ordenaría sobre
+    // lo ya ordenado y el sabotaje no se vería nunca.
+    const entrada = [
+      tarjeta({ id: "b", firedAt: haceMin(1) }),
+      tarjeta({ id: "a", firedAt: haceMin(9) }),
+    ];
+    ordenarParaLaPantalla(entrada);
+    expect(entrada.map((t) => t.id)).toEqual(["b", "a"]);
+  });
+});
+
+describe("kds-1c · SABOTAJE · que «+N» use otro orden que la rejilla", () => {
+  it("los ocultos son SIEMPRE más nuevos que el último visible", () => {
+    // Un servicio entero con marcas repartidas, y la lista barajada a
+    // propósito: el id no sigue al reloj.
+    const servicio = Array.from({ length: 14 }, (_, i) =>
+      tarjeta({
+        id: `c${i}`,
+        tableName: `M${i}`,
+        firedAt: haceMin(((i * 7) % 14) + 1),
+        lines: [linea(), linea(), linea()],
+      }),
+    );
+    const r = repartirTarjetas(servicio, ZONA_1280);
+    expect(r.extra.length).toBeGreaterThan(0);
+    const ultimoVisible = Math.min(
+      ...r.visibles.map((t) => Date.parse(t.firedAt!)),
+    );
+    for (const oculta of r.extra) {
+      // Más NUEVA = marca MÁS GRANDE. Ninguna oculta puede ser más antigua
+      // que la más nueva que se ve.
+      expect(Date.parse(oculta.firedAt!)).toBeGreaterThanOrEqual(ultimoVisible);
+    }
+  });
+
+  it("«rojo oculto» queda para cuando hay MÁS ROJAS DE LAS QUE CABEN", () => {
+    // La consecuencia del orden único: si una oculta está en rojo, todas
+    // las visibles no urgentes están en rojo también —son más antiguas—.
+    // Ya no puede salir un «+7» rojo con una verde de 4 min en pantalla.
+    const servicio = Array.from({ length: 14 }, (_, i) =>
+      tarjeta({
+        id: `c${i}`,
+        tableName: `M${i}`,
+        // De 29 a 2 min, barajadas por el id.
+        firedAt: haceMin(((i * 5) % 14) * 2 + 2),
+        lines: [linea(), linea(), linea()],
+      }),
+    );
+    const r = repartirTarjetas(servicio, ZONA_1280);
+    if (colorMasN(r.extra, UMBRALES, AHORA) === "rojo") {
+      for (const visible of r.visibles.filter((t) => !t.urgent)) {
+        expect(
+          tonoSemaforo(minutosDesdeMarchado(visible.firedAt, AHORA), UMBRALES),
+        ).toBe("rojo");
+      }
+    }
+    // Y con las rojas cabiendo, la franja NO va en rojo: la M4 de 26 min
+    // está en pantalla, que es lo que pide la decisión 7.
+    const pocasRojas = [
+      tarjeta({ id: "a", tableName: "M4", firedAt: haceMin(26) }),
+      ...Array.from({ length: 13 }, (_, i) =>
+        tarjeta({
+          id: `n${i}`,
+          tableName: `M${i}`,
+          firedAt: haceMin(3),
+          lines: [linea(), linea(), linea()],
+        }),
+      ),
+    ];
+    const r2 = repartirTarjetas(pocasRojas, ZONA_1280);
+    expect(r2.visibles[0]!.tableName).toBe("M4");
+    expect(colorMasN(r2.extra, UMBRALES, AHORA)).toBe("neutro");
   });
 });
 
@@ -276,6 +457,9 @@ describe("kds-1 · SABOTAJE · cortar una tarjeta", () => {
       tarjeta({
         id: `n${i}`,
         tableName: `M${i}`,
+        // De más antigua a más nueva: el reparto ORDENA (kds-1c), así que
+        // la M0 es la que más espera y la M11 la que menos.
+        firedAt: haceMin(24 - i),
         lines: [linea(), linea(), linea()],
       }),
     );

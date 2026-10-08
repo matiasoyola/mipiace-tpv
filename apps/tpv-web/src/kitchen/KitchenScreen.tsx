@@ -8,7 +8,9 @@
 //
 //   · barra de arriba con «En línea», LA HORA y «Hoy»;
 //   · tarjetas en ORDEN DE LECTURA, de izquierda a derecha y luego la
-//     fila de abajo, en CUATRO columnas (decisión 7);
+//     fila de abajo, en CUATRO columnas (decisión 7), y **ordenadas por
+//     la propia pantalla**: urgentes delante y después de la más antigua
+//     a la más nueva, venga como venga la lista del servidor (kds-1c);
 //   · franja vertical «+N» en el borde derecho de las tarjetas para lo
 //     que no cabe entero, con las mesas debajo;
 //   · columna estrecha «Listas» hasta que el camarero marca «Servido»;
@@ -187,6 +189,9 @@ export function KitchenScreen({ me }: KitchenScreenProps) {
     feed.recargar();
   };
 
+  // Sin ordenar: ordena `repartirTarjetas`, que es el único sitio donde se
+  // ordena (kds-1c). Pasarla por aquí ya ordenada volvería a dar dos
+  // ordenaciones que pueden discrepar, y la que discrepa esconde mesas.
   const abiertas: Comanda[] = vista?.orders ?? [];
   const reparto = repartirTarjetas(abiertas, zona, mostrarSeccion);
   const colorFranja = colorMasN(reparto.extra, settings, feed.ahora);
@@ -297,7 +302,12 @@ export function KitchenScreen({ me }: KitchenScreenProps) {
             derecha. El orden del DOM es el orden de lectura, de izquierda
             a derecha y después la fila de abajo — en columnas el ojo se
             saltaba la segunda más antigua, que es la corrección del
-            08-10. */}
+            08-10.
+
+            **Y el orden lo pone `repartirTarjetas`, no el servidor**
+            (kds-1c): `visibles` y `extra` salen de la MISMA lista ya
+            ordenada, así que lo que se va al «+N» son siempre las más
+            nuevas. Lo que llega en `vista.orders` se pasa tal cual. */}
         <div
           ref={zonaRef}
           data-testid="kds-zona"

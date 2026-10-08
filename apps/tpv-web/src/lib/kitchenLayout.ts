@@ -4,11 +4,13 @@
 //
 //   · **Orden de LECTURA, no por columnas** (decisión 7, corrección del
 //     08-10 al ver la maqueta): las tarjetas se colocan como se lee un
-//     libro, de izquierda a derecha y después la fila de abajo. En
-//     columnas el ojo se saltaba la segunda más antigua. Esto lo garantiza
-//     el ORDEN DEL DOM —la lista ya viene ordenada del servidor y se
-//     pinta en una cuadrícula—, así que su sabotaje («las 4 primeras en el
-//     DOM son las 4 más antiguas») se comprueba sobre el array.
+//     libro, de izquierda a derecha y después la fila de abajo. Esto lo
+//     garantiza el ORDEN DEL DOM —una lista ordenada pintada en una
+//     cuadrícula—, así que su sabotaje («las 4 primeras en el DOM son las
+//     4 más antiguas») se comprueba sobre el array.
+//   · **Y LA ORDENA LA PANTALLA**, no el servidor (kds-1c): el reparto
+//     empieza por `ordenarParaLaPantalla` y nadie más ordena. Ver su
+//     comentario.
 //   · **CUATRO columnas a 1280 px**, que es lo que dibuja la maqueta. Era
 //     el cuarto defecto de kds-1b: con tres sólo caben 3 comandas por
 //     fila y se escondían mesas que cabían.
@@ -252,6 +254,68 @@ export function altoTarjeta(t: TarjetaMedible, mostrarSeccion = false): number {
  */
 export const TARJETAS_NORMALES_A_1280 = 8;
 
+/**
+ * **LA PANTALLA ORDENA SOLA.** (kds-1c)
+ *
+ * Venga como venga la lista del servidor. Lo pide la decisión 7 —«el
+ * cocinero tiene que ver primero lo que más espera»— y la primera captura
+ * de kds-1b enseñó por qué no basta con que el servidor lo intente: pintaba
+ * T4 → M5 → M1 → **M2**, y en el «+7» quedaba escondida la M4 con 26
+ * minutos mientras la M1 con 4 se veía. Eso es exactamente lo que la
+ * decisión 7 quiere impedir.
+ *
+ * Tres criterios, en este orden:
+ *
+ *   1. **las urgentes primero.** Es una decisión del camarero, y pesa más
+ *      que el reloj: «esta mesa tiene prisa» no se discute con minutos.
+ *   2. **por la MARCA DE MARCHA, de la más antigua a la más nueva.** Es la
+ *      MISMA que pinta los minutos (`firedAt`, ver `kitchenSemaforo.ts`), y
+ *      por eso no puede ser `sentAt`: un tiempo 2 enviado hace media hora y
+ *      marchado hace uno pinta «1 min», y ordenado por el envío se colaría
+ *      delante de una mesa que lleva veinte esperando de verdad. **La
+ *      pantalla se ordena por lo que la pantalla DICE.**
+ *   3. **por el id**, para que dos tarjetas con la misma marca no se
+ *      intercambien de sitio entre dos repintados. Una tarjeta que salta de
+ *      columna cada 5 s es una tarjeta que el cocinero no encuentra.
+ *
+ * Un tiempo RETENIDO (`firedAt` null) va al final de su grupo: no ha
+ * empezado a contar, así que no espera nada todavía. Por el mismo motivo
+ * `tonoSemaforo` lo pinta gris y no verde.
+ *
+ * **Y ES LA ÚNICA.** La llama `repartirTarjetas`, y de ahí salen a la vez
+ * `visibles` y `extra`: así lo que va al «+N» son SIEMPRE las más nuevas.
+ * Si la rejilla y la franja ordenaran cada una por su cuenta, el «+N»
+ * podría esconder una mesa más antigua que la última visible —que es el
+ * defecto que este bloque viene a arreglar— y nadie lo notaría hasta tener
+ * la captura delante.
+ */
+export function ordenarParaLaPantalla<T extends TarjetaMedible>(
+  tarjetas: readonly T[],
+): T[] {
+  return [...tarjetas].sort((a, b) => {
+    if (a.urgent !== b.urgent) return a.urgent ? -1 : 1;
+    const ma = marcaDeMarcha(a);
+    const mb = marcaDeMarcha(b);
+    if (ma !== mb) return ma - mb;
+    return a.id.localeCompare(b.id);
+  });
+}
+
+/**
+ * La marca de marcha en milisegundos, e `Infinity` si no hay.
+ *
+ * `Date.parse` y no comparar las cadenas: el servidor manda siempre
+ * `toISOString()` y comparar texto funcionaría, pero una marca con otro
+ * desplazamiento horario («…+02:00») se ordenaría por el texto y no por el
+ * instante. `Infinity` para lo retenido y para lo ilegible — las dos cosas
+ * son «todavía no cuenta», y el último sitio es el que no estorba.
+ */
+function marcaDeMarcha(t: TarjetaMedible): number {
+  if (!t.firedAt) return Number.POSITIVE_INFINITY;
+  const ms = Date.parse(t.firedAt);
+  return Number.isNaN(ms) ? Number.POSITIVE_INFINITY : ms;
+}
+
 export interface Reparto<T> {
   /** Las que caben ENTERAS, en orden de lectura. */
   visibles: T[];
@@ -264,6 +328,10 @@ export interface Reparto<T> {
 /**
  * Reparte las tarjetas entre lo que se ve y la franja «+N».
  *
+ * **Lo primero que hace es ORDENAR** (`ordenarParaLaPantalla`), y por eso
+ * `visibles` y `extra` salen de la misma lista: lo que se esconde son
+ * siempre las más nuevas. El llamador puede pasar la lista como le llegue.
+ *
  * El empaquetado imita lo que hará la cuadrícula del navegador: se rellena
  * fila a fila de izquierda a derecha, y **cada fila mide lo que su tarjeta
  * más alta** (decisión 7, literal). Cuando la siguiente fila no cabe
@@ -274,10 +342,11 @@ export interface Reparto<T> {
  * corrección del 08-10 vino a arreglar.
  */
 export function repartirTarjetas<T extends TarjetaMedible>(
-  tarjetas: readonly T[],
+  sinOrdenar: readonly T[],
   viewport: { ancho: number; alto: number },
   mostrarSeccion = false,
 ): Reparto<T> {
+  const tarjetas = ordenarParaLaPantalla(sinOrdenar);
   const columnas = Math.max(
     1,
     Math.floor(
