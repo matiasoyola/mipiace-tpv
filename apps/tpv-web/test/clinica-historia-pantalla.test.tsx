@@ -486,6 +486,21 @@ describe("el pie vivo", () => {
     }
   });
 
+  it("EL ESPEJO ES EL DEL PIE IZQUIERDO: los dedos gordos van hacia dentro", async () => {
+    await montar(vista({ conPendiente: true }));
+    // `CONTORNO_DEL_PIE` dibuja un pie con el dedo gordo a la izquierda
+    // del lienzo, así que espejar el IZQUIERDO es lo que deja los dos
+    // dedos gordos mirándose — como se ve un par de pies de frente, y
+    // como lo pintan los tres mockups validados.
+    const grupo = (clave: string) =>
+      host
+        .querySelector(`[data-zona="${clave}"]`)!
+        .closest("g")!
+        .getAttribute("transform");
+    expect(grupo("L:h")).toContain("scale(-1,1)");
+    expect(grupo("R:h")).toBeNull();
+  });
+
   it("la capa de sensibilidad es de LECTURA y lo dice", async () => {
     await montar(vista({ conPendiente: true }));
     await pulsar(botonQueContiene("Sensibilidad"));
