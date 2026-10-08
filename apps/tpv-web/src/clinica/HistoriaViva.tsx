@@ -43,7 +43,17 @@
 // una úlcera. Va dicho en el `-done`.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarPlus, Camera, ChevronRight, Loader2 } from "lucide-react";
+import {
+  AlertTriangle,
+  CalendarPlus,
+  Camera,
+  ChevronRight,
+  Clock,
+  Footprints,
+  Loader2,
+  Scissors,
+  Syringe,
+} from "lucide-react";
 
 import {
   COLOR_DE_TIPO_DE_VISITA,
@@ -141,6 +151,24 @@ const PINTURA: Record<EstadoDeZonaViva, EstadoDeZona> = {
   ACTIVA: "activa",
   MEJORANDO: "mejorando",
   CURADA: "curada",
+};
+
+/**
+ * El icono de cada tipo en la hoja de «¿Qué visita es hoy?».
+ *
+ * Los del mockup validado, con lo que la casa ya tiene: la lima de la
+ * quiropodia es unas tijeras, el triángulo del pie de riesgo es el mismo,
+ * la huella de la biomecánica es `Footprints` (el mismo icono con el que
+ * la agenda abre la sesión), el bisturí de la cirugía es la jeringa de la
+ * anestesia y el reloj de «General» es el mismo reloj. Son cinco y están
+ * en un `Record`, así que un tipo nuevo sin icono no compila.
+ */
+const ICONO_DE_TIPO: Record<TipoDeVisita, typeof Scissors> = {
+  QUIROPODIA: Scissors,
+  PIE_RIESGO: AlertTriangle,
+  BIOMECANICA: Footprints,
+  CIRUGIA: Syringe,
+  GENERAL: Clock,
 };
 
 const INSIGNIA: Record<EstadoDeZonaViva, string> = {
@@ -448,7 +476,12 @@ export function HistoriaViva(props: {
                   type="button"
                   aria-pressed={capa === id}
                   onClick={() => setCapa(id)}
-                  className={`h-10 px-3.5 rounded-xl text-[14px] font-medium ${
+                  // `min-h-touch` (48) y no el `height: 40px` del mockup:
+                  // la MEDICIÓN de la captura los pilló en 40 px, por
+                  // debajo del 44 del prompt y del 48 de la casa. El
+                  // mockup es la spec de lo que se ve, no del peldaño
+                  // táctil — ése lo pone `docs/design/tokens.md` §4.
+                  className={`min-h-touch px-3.5 rounded-xl text-[14px] font-medium ${
                     capa === id
                       ? "bg-mipiace-coral-soft text-mipiace-coral-dark"
                       : "bg-mipiace-stone text-mipiace-ink-soft"
@@ -999,6 +1032,7 @@ function HojaDeTipo(props: {
         <div className="mt-4 grid gap-2.5 grid-cols-2 lg:grid-cols-5">
           {TIPOS_DE_VISITA.map((t) => {
             const esSugerido = t === props.sugerido;
+            const Icono = ICONO_DE_TIPO[t];
             return (
               <button
                 key={t}
@@ -1017,14 +1051,14 @@ function HojaDeTipo(props: {
                   </span>
                 )}
                 <span
-                  className="w-[52px] h-[52px] rounded-[17px] flex items-center justify-center text-[20px] font-bold"
+                  className="w-[52px] h-[52px] rounded-[17px] flex items-center justify-center"
                   style={{
                     backgroundColor: `${COLOR_DE_TIPO_DE_VISITA[t]}1A`,
                     color: COLOR_DE_TIPO_DE_VISITA[t],
                   }}
                   aria-hidden
                 >
-                  {NOMBRE_DE_TIPO_DE_VISITA[t].charAt(0)}
+                  <Icono className="w-6 h-6" strokeWidth={2.2} />
                 </span>
                 <span className="font-bold text-[16px]">
                   {NOMBRE_DE_TIPO_DE_VISITA[t]}

@@ -381,6 +381,33 @@ describe("visitaLegible", () => {
     expect(v.chips.length).toBeGreaterThan(0);
   });
 
+  it("el chip NO repite el NIVEL que ya está en el título", () => {
+    // Lo encontró el bucle visual: el servicio del nivel se llama
+    // «Quiropodia completa», que es palabra por palabra el título de la
+    // fila — con sus tres barras al lado.
+    const v = visitaLegible(
+      {
+        v: 2,
+        tipos: ["QUIROPODIA"],
+        bloques: {
+          QUIROPODIA: {
+            actos: ["corte"],
+            nivelPropuesto: 2,
+            nivelElegido: 2,
+            productoDelNivel: "s1",
+            servicios: [],
+          },
+        },
+        dolor: 5,
+        tratamientosNombre: { s1: "Quiropodia completa", s2: "Cura" },
+      } as never,
+      META,
+    );
+    expect(v.titulo).toBe("Quiropodia completa");
+    expect(v.chips).not.toContain("Quiropodia completa");
+    expect(v.chips).toContain("Cura");
+  });
+
   it("dos tipos salen los dos, y el chip NO repite el nombre del tipo", () => {
     const v = visitaLegible(
       {

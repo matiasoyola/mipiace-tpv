@@ -28,6 +28,7 @@ import {
   NOMBRE_DE_TIPO_DE_VISITA,
   TIPOS_DE_VISITA,
   esCuerpoV2,
+  esProximaCita,
   nombreDeActo,
   nombreDeConsejo,
   nombreDeOpcionDeBloque,
@@ -195,7 +196,15 @@ export function SesionCerrada(props: {
         <LoDeLosTipos cuerpo={cerrada.cuerpo} />
       )}
 
-      {prox && prox !== "SIN_CITA" && (
+      {/* clinica-6 · `esProximaCita` y no sólo `prox !== "SIN_CITA"`.
+          Lo encontró el bucle visual: con un valor que este despliegue no
+          conoce, `NOMBRE_DE_PROXIMA_CITA[prox]` es `undefined` y el
+          `.toLowerCase()` tumba la pantalla entera contra el
+          ErrorBoundary. Y la pantalla que se cae es la de LEER una visita
+          de la historia — un registro legal al que el paciente tiene
+          derecho de acceso. La regla ya estaba escrita en
+          `tiposDeLaSesion`: abrir una historia no puede reventar. */}
+      {esProximaCita(prox) && prox !== "SIN_CITA" && (
         <Nota verde>
           Próxima cita propuesta: dentro de{" "}
           {NOMBRE_DE_PROXIMA_CITA[prox].toLowerCase()}. La recepción elige el

@@ -556,7 +556,10 @@ export function visitaLegible(
     evolucionNombre: c.evolucion
       ? (NOMBRE_DE_EVOLUCION[c.evolucion as Evolucion] ?? null)
       : null,
-    chips: chipsDeLaVisita(cuerpo, leido, tiposNombre),
+    chips: chipsDeLaVisita(cuerpo, leido, tiposNombre, [
+      titulo,
+      ...(nivel != null ? [`Quiropodia ${NOMBRE_DE_NIVEL[nivel]}`] : []),
+    ]),
   };
 }
 
@@ -564,6 +567,8 @@ function chipsDeLaVisita(
   cuerpo: CuerpoDeSesionCualquiera | null | undefined,
   leido: ReturnType<typeof tiposDeLaSesion>,
   tiposNombre: readonly string[],
+  /** Lo que ya se lee en el título de la fila y no se repite de chip. */
+  extra: readonly string[] = [],
 ): readonly string[] {
   const c = (cuerpo ?? {}) as Partial<CuerpoDeSesionV2 & CuerpoDeSesion>;
   const chips: string[] = [];
@@ -612,10 +617,17 @@ function chipsDeLaVisita(
     if (typeof nombre === "string") chips.push(nombre);
   }
 
-  // Nunca el tipo repetido, y sin duplicados: la columna de la izquierda
-  // ya dice «Quiropodia», y un servicio del catálogo que se llame igual
-  // pintaría la misma palabra dos veces en la misma fila.
-  const fuera = new Set(tiposNombre.map((n) => n.toLowerCase()));
+  // Nunca lo que ya está escrito en la fila, y sin duplicados.
+  //
+  // Son DOS cosas y las dos las encontró el bucle visual: el nombre del
+  // TIPO (la columna de la izquierda ya dice «Quiropodia») y el del
+  // NIVEL, que es un servicio del catálogo llamado «Quiropodia completa»
+  // — exactamente el título de la visita, con sus tres barras al lado.
+  // Un chip que repite el título no es información: es ruido en la fila
+  // que la podóloga lee de un vistazo.
+  const fuera = new Set(
+    [...tiposNombre, ...extra].map((n) => n.toLowerCase()),
+  );
   const vistos = new Set<string>();
   return chips.filter((ch) => {
     const k = ch.toLowerCase();

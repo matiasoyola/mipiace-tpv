@@ -543,6 +543,41 @@ describe("las visitas", () => {
     expect(texto()).not.toContain("Enviada a recepción");
   });
 
+  it("UNA VISITA CON UN VALOR QUE NO SE CONOCE SE ABRE IGUAL", async () => {
+    // Lo encontró el bucle visual: una `proximaCita` que este despliegue
+    // no sabe leer tumbaba la pantalla entera contra el ErrorBoundary, y
+    // la pantalla que se caía es la de LEER la historia — un registro
+    // legal al que el paciente tiene derecho de acceso.
+    await montar(vista({ conPendiente: true }), {
+      detalle: {
+        entryId: "v1",
+        cerradaEn: "2026-09-07T09:00:00.000Z",
+        firma: {
+          autorNombre: "Lucía Martín",
+          colegiado: null,
+          firmadaEn: "2026-09-07T09:00:00.000Z",
+        },
+        cuerpo: {
+          v: 1,
+          dolor: 7,
+          evolucion: null,
+          consejos: [],
+          proximaCita: "DENTRO_DE_UN_MES",
+          nota: null,
+          consejosVersion: 1,
+        },
+        marcas: [],
+      },
+    });
+    await pestania("Visitas");
+    await pulsar(
+      host.querySelectorAll('[data-test="historia-visita-fila"]')[0]!,
+    );
+    expect(host.querySelector('[data-test="historia-visita"]')).not.toBeNull();
+    expect(texto()).toContain("Firmada por Lucía Martín");
+    expect(texto()).not.toContain("Próxima cita propuesta");
+  });
+
   it("y se puede volver", async () => {
     await montar(vista({ conPendiente: true }));
     await pestania("Visitas");
