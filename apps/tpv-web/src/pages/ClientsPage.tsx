@@ -34,6 +34,7 @@ import {
   type ClientRow,
   type ClientVouchers,
 } from "../lib/clients.js";
+import { HistoriaViva } from "../clinica/HistoriaViva.js";
 import { ValoracionSanitario } from "../clinica/ValoracionSanitario.js";
 import { ClientForm } from "./ClientForm.js";
 
@@ -224,7 +225,7 @@ function SidePanel({
   );
 }
 
-type Tab = "history" | "technical" | "vouchers" | "valoracion";
+type Tab = "history" | "technical" | "vouchers" | "valoracion" | "historia";
 
 function ClientDetailDrawer({
   clientId,
@@ -305,14 +306,32 @@ function ClientDetailDrawer({
             <TabButton active={tab === "vouchers"} onClick={() => setTab("vouchers")}>
               Bonos
             </TabButton>
-            {clinicaEncendida && (
-              <TabButton
-                active={tab === "valoracion"}
-                onClick={() => setTab("valoracion")}
-              >
-                Valoración
-              </TabButton>
-            )}
+            {/* clinica-6 · AL SANITARIO se le da LA HISTORIA, que ya
+                lleva la valoración dentro (en Documentos). A quien no
+                lleva la marca sanitaria se le sigue dando la pestaña de
+                la valoración, y por la razón de clinica-2: la
+                recepcionista usa ahí los dos botones que SÍ puede usar
+                (mandar el test, abrir la tablet) sin pedir una sola
+                respuesta — y por tanto sin dejar una línea DENIED en el
+                registro cada vez que toca la pestaña. La historia viva
+                pide SANITARIO en la API, así que ofrecérsela sería
+                ofrecerle un 403 con su línea. */}
+            {clinicaEncendida &&
+              (esSanitario ? (
+                <TabButton
+                  active={tab === "historia"}
+                  onClick={() => setTab("historia")}
+                >
+                  Historia
+                </TabButton>
+              ) : (
+                <TabButton
+                  active={tab === "valoracion"}
+                  onClick={() => setTab("valoracion")}
+                >
+                  Valoración
+                </TabButton>
+              ))}
           </div>
           {tab === "history" && <HistoryTab clientId={clientId} />}
           {tab === "technical" && (
@@ -323,6 +342,28 @@ function ClientDetailDrawer({
             />
           )}
           {tab === "vouchers" && <VouchersTab clientId={clientId} />}
+          {tab === "historia" && clinicaEncendida && esSanitario && (
+            <HistoriaViva
+              clientId={clientId}
+              // Sin `onEmpezarVisita`: desde la ficha de un cliente no hay
+              // CITA, y una sesión clínica cuelga de una cita desde
+              // clinica-3 (§8.6). La tarjeta de «Hoy toca» se ve igual
+              // —que es lo que hace falta saber— y dice dónde se empieza,
+              // en vez de ofrecer un botón que no puede cumplir.
+              onAbrirValoracion={() => setTab("valoracion")}
+            />
+          )}
+          {tab === "valoracion" && clinicaEncendida && esSanitario && (
+            // Al sanitario la pestaña «Valoración» ya no existe: llega
+            // aquí desde Documentos, así que lo que necesita es la vuelta.
+            <button
+              type="button"
+              onClick={() => setTab("historia")}
+              className="min-h-touch px-4 mb-3 rounded-2xl bg-white border border-slate-200 text-[14px] font-medium"
+            >
+              ← Volver a la historia
+            </button>
+          )}
           {tab === "valoracion" && clinicaEncendida && (
             <ValoracionSanitario
               clientId={clientId}

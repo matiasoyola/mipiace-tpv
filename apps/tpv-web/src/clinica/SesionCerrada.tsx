@@ -28,6 +28,7 @@ import {
   NOMBRE_DE_TIPO_DE_VISITA,
   TIPOS_DE_VISITA,
   esCuerpoV2,
+  esProximaCita,
   nombreDeActo,
   nombreDeConsejo,
   nombreDeOpcionDeBloque,
@@ -74,7 +75,13 @@ export interface SesionCerradaView {
     lesion: string;
     gravedad: string | null;
   }>;
-  resumen: {
+  /**
+   * El pie de caja. **Opcional desde clinica-6**: la historia viva abre
+   * esta misma pantalla para LEER una visita, y ahí no hay bloque de
+   * cobro — es historia, no caja (decisión 8 de clinica-6). Sin
+   * `resumen`, el bloque entero no se pinta; no se pinta vacío ni a cero.
+   */
+  resumen?: {
     tratamientos: number;
     /** `precio` e `iva` NO VIENEN si el actor no ve importes. */
     lineas: Array<{
@@ -87,7 +94,7 @@ export interface SesionCerradaView {
     ivaTexto?: string | null;
     textoDelBoton: string;
   };
-  yaCobrada: boolean;
+  yaCobrada?: boolean;
 }
 
 export function SesionCerrada(props: {
@@ -114,7 +121,7 @@ export function SesionCerrada(props: {
         anotaciones.
       </div>
 
-      {props.verImportes ? (
+      {cerrada.resumen == null ? null : props.verImportes ? (
         <div className="bg-white border border-slate-200 rounded-3xl px-5 py-4 mt-4">
           <div className="text-[13px] font-medium text-mipiace-ink-soft mb-1">
             Pasa a caja
@@ -189,7 +196,15 @@ export function SesionCerrada(props: {
         <LoDeLosTipos cuerpo={cerrada.cuerpo} />
       )}
 
-      {prox && prox !== "SIN_CITA" && (
+      {/* clinica-6 · `esProximaCita` y no sólo `prox !== "SIN_CITA"`.
+          Lo encontró el bucle visual: con un valor que este despliegue no
+          conoce, `NOMBRE_DE_PROXIMA_CITA[prox]` es `undefined` y el
+          `.toLowerCase()` tumba la pantalla entera contra el
+          ErrorBoundary. Y la pantalla que se cae es la de LEER una visita
+          de la historia — un registro legal al que el paciente tiene
+          derecho de acceso. La regla ya estaba escrita en
+          `tiposDeLaSesion`: abrir una historia no puede reventar. */}
+      {esProximaCita(prox) && prox !== "SIN_CITA" && (
         <Nota verde>
           Próxima cita propuesta: dentro de{" "}
           {NOMBRE_DE_PROXIMA_CITA[prox].toLowerCase()}. La recepción elige el

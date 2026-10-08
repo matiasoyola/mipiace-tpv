@@ -95,6 +95,33 @@ export const VIEWBOX = { ancho: 240, alto: 400 } as const;
 export const ANCHO_DEL_PIE_PX = 264;
 
 /**
+ * El hueco entre los dos pies cuando van uno al lado del otro.
+ *
+ * Ocho y no doce: es lo que hace que la pareja quepa en la columna de la
+ * sesión a 1024 (clinica-3 §7.2). Vive aquí con el ancho del pie porque
+ * los dos números son la misma cuenta mirada por sus dos mitades.
+ */
+export const HUECO_ENTRE_PIES_PX = 8;
+
+/**
+ * Lo que mide LA PAREJA de pies a tamaño nominal: 536 px.
+ *
+ * clinica-6 · existe porque hay DOS pantallas que tienen que reservarle
+ * sitio —la sesión y la historia viva— y la cuenta se hacía a mano en
+ * cada una. A 1024 la historia partía la fila y el pie derecho se iba bajo
+ * el pliegue: había que hacer scroll para ver el estado completo del pie,
+ * que es justo lo que esa pantalla existe para no pedir.
+ *
+ * Quien reserve la columna tiene que sumarle el padding de su tarjeta. Y
+ * el test de la pantalla ata su clase de Tailwind a esta constante, igual
+ * que `clinica-tipos-panel.test.ts` ata la lista del panel a la del
+ * paquete: dos copias de un número que tiene que cuadrar son una copia que
+ * un día no cuadra.
+ */
+export const ANCHO_DE_LOS_DOS_PIES_PX =
+  2 * ANCHO_DEL_PIE_PX + HUECO_ENTRE_PIES_PX;
+
+/**
  * El contorno del pie IZQUIERDO. El derecho es el mismo espejado
  * (`transform="translate(240,0) scale(-1,1)"`), que es lo que un pie es.
  */

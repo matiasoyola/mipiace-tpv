@@ -18,6 +18,8 @@
 
 export {
   ANCHO_DEL_PIE_PX,
+  ANCHO_DE_LOS_DOS_PIES_PX,
+  HUECO_ENTRE_PIES_PX,
   CONTORNO_DEL_PIE,
   MAPA_PIE_V1,
   NOMBRE_CORTO_DEL_PIE,
@@ -115,6 +117,7 @@ export {
 
 export {
   COLOR_DE_TIPO_DE_VISITA,
+  DESCRIPCION_DE_TIPO_DE_VISITA,
   ESPECIALIDADES,
   ESPECIALIDAD_DE_TIPO,
   NOMBRE_DE_ESPECIALIDAD,
@@ -255,3 +258,31 @@ export {
   type TiposDeLaSesion,
   type VersionesDeLasListas,
 } from "./sesion-v2.js";
+
+// ── clinica-6 · la historia viva ──────────────────────────────────────
+
+export {
+  ESTADOS_DE_ZONA,
+  NOMBRE_DE_ESTADO_DE_ZONA,
+  TIPOS_QUE_MIRAN_EL_PIE,
+  TIPO_SUGERIDO_POR_PENDIENTE,
+  estadoDeLasZonas,
+  exploroElPie,
+  hoyToca,
+  ojoDeHoy,
+  tendenciaDelDolor,
+  tipoRecomendado,
+  ultimaVisita,
+  visitaDeLaHistoria,
+  visitaLegible,
+  type EstadoDeZonaViva,
+  type HoyToca,
+  type OjoDeHoy,
+  type PasoDeZona,
+  type PuntoDeDolor,
+  type Recomendada,
+  type TendenciaDelDolor,
+  type VisitaDeLaHistoria,
+  type VisitaLegible,
+  type ZonaViva,
+} from "./historia.js";

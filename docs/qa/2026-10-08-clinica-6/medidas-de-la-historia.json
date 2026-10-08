@@ -1,0 +1,95 @@
+{
+  "390": {
+    "zonasDelPie": 22,
+    "piesEnLaMismaFila": false,
+    "anchoDeUnPie": 264,
+    "zonaMasPequena": 48.39990234375,
+    "cincoBotonesMasPequenos": [
+      {
+        "texto": "Pie",
+        "lado": 48
+      },
+      {
+        "texto": "Visitas",
+        "lado": 48
+      },
+      {
+        "texto": "Documentos",
+        "lado": 48
+      },
+      {
+        "texto": "Lesiones",
+        "lado": 48
+      },
+      {
+        "texto": "Sensibilidad",
+        "lado": 48
+      }
+    ],
+    "scrollHorizontal": false,
+    "anchoDocumento": 390,
+    "anchoVentana": 390
+  },
+  "1024": {
+    "zonasDelPie": 22,
+    "piesEnLaMismaFila": true,
+    "anchoDeUnPie": 263,
+    "zonaMasPequena": 48.216064453125,
+    "cincoBotonesMasPequenos": [
+      {
+        "texto": "Pie",
+        "lado": 48
+      },
+      {
+        "texto": "Visitas",
+        "lado": 48
+      },
+      {
+        "texto": "Documentos",
+        "lado": 48
+      },
+      {
+        "texto": "Lesiones",
+        "lado": 48
+      },
+      {
+        "texto": "Sensibilidad",
+        "lado": 48
+      }
+    ],
+    "scrollHorizontal": false,
+    "anchoDocumento": 1024,
+    "anchoVentana": 1024
+  },
+  "1366": {
+    "zonasDelPie": 22,
+    "piesEnLaMismaFila": true,
+    "anchoDeUnPie": 263,
+    "zonaMasPequena": 48.216064453125,
+    "cincoBotonesMasPequenos": [
+      {
+        "texto": "Pie",
+        "lado": 48
+      },
+      {
+        "texto": "Visitas",
+        "lado": 48
+      },
+      {
+        "texto": "Documentos",
+        "lado": 48
+      },
+      {
+        "texto": "Lesiones",
+        "lado": 48
+      },
+      {
+        "texto": "Sensibilidad",
+        "lado": 48
+      }
+    ],
+    "scrollHorizontal": false,
+    "anchoDocumento": 1366,
+    "anchoVentana": 1366
+  }
+}
