@@ -23,6 +23,7 @@ import { registerLocalCatalogRoutes } from "./catalog/local-products.js";
 import { registerContactsRoutes } from "./contacts/routes.js";
 import { registerContactImportRoutes } from "./contacts/import.js";
 import { registerClinicaRoutes } from "./clinica/routes.js";
+import { registerHistoriaRoutes } from "./clinica/historia-routes.js";
 import { registerSesionRoutes } from "./clinica/sesion-routes.js";
 import { registerValoracionRoutes } from "./clinica/valoracion-routes.js";
 import { registerValoracionPublicaRoutes } from "./clinica/valoracion-publica.js";
@@ -197,6 +198,10 @@ async function main() {
   // registro de accesos, y las tres rutas cuelgan de la CITA: la sesión se
   // abre desde la cita del día y de una cita sale una sola sesión.
   await registerSesionRoutes(app);
+  // clinica-6 · la historia viva del paciente. Cuelga del PACIENTE (la
+  // historia no es de un día) y deja su línea en el registro de accesos
+  // en cada apertura, igual que el resto de lo clínico.
+  await registerHistoriaRoutes(app);
   await registerServicesRoutes(app);
   await registerStaffRoutes(app);
   await registerAgendaRoutes(app);
