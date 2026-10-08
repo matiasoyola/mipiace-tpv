@@ -580,6 +580,30 @@ día» se sigue dibujando fuera del modal.
    la carta y la sala reales de La Maestranza reconstruidas en el guion
    (`shots/comun.mjs`), no un volcado de su base.
 
+8. **`GET /tpv/catalog/now` no filtra por tienda.** La consulta lleva
+   `t.tenant_id` y nada más, así que un tenant con dos locales mezcla las ventas
+   de los dos en una vista que el propio bloque describe como «los más pedidos en
+   ESE comercio». El filtro es posible —la sesión de cajero trae `rid` y
+   `Register` tiene `storeId`—. Es el mismo hueco que ya tenía `top-sellers`, no
+   una regresión de este bloque. Hoy no afecta a ningún comercio en producción,
+   que tienen una tienda.
+
+9. **La franja y la vuelta de medianoche no tienen test contra Postgres, y el
+   relleno tapa el fallo.** `catalog-ahora-route.test.ts` corre contra un prisma
+   falso: comprueba que la plantilla SQL lleva `AT TIME ZONE`, el `% 24` y los
+   parámetros, no que la base los resuelva. Y si la franja devolviera vacío a las
+   00:30, «Ahora» **no se vería rota**: el relleno del servidor la completa con
+   los primeros de cada familia y la pantalla parece correcta, mientras un bar de
+   copas tiene la vista muerta en su hora punta. **Es el primero de esta lista a
+   cerrar**, con un e2e que fije la hora a las 00:30 y compruebe que la franja
+   23:00–01:00 devuelve las ventas de esas horas.
+
+10. **`lib/ahora.ts` no tiene tests propios de los peldaños 2 y 3.** Ningún test
+    importa el módulo: lo que se prueba es la pantalla con la API mockeada
+    (sabotaje 1), o sea el peldaño bueno. La última respuesta guardada en
+    `localStorage` y el orden de familias calculado en local —los dos que
+    sostienen el «nunca una rejilla vacía» cuando se cae la red— van sin prueba.
+
 ---
 
 ## 14 · Ficheros
