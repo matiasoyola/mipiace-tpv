@@ -15,9 +15,11 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  aBase64Url,
   abrirSobre,
   cabeceraCanonica,
   cerrarSobre,
+  deBase64Url,
   EDAD_MAXIMA_MS,
   generarClaveTienda,
   MemoriaDeOperaciones,
@@ -46,6 +48,39 @@ describe("kds-2 · el vector congelado", () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.payload).toEqual(VECTOR.payload);
+  });
+
+  it("y re-cifrarlo da el MISMO `ct` byte a byte", async () => {
+    // Descifrar sólo prueba que el AAD y la etiqueta cuadran; re-cifrar
+    // prueba además que el ORDEN de los campos de la cabecera es idéntico,
+    // que es justo lo que alguien podría cambiar sin darse cuenta. El test
+    // de Java hace esta misma comprobación sobre el mismo vector.
+    const r = await abrirSobre(VECTOR.sobre, {
+      clave: VECTOR.clave,
+      storeId: TIENDA,
+      ahora: AHORA,
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const { ct: _ct, ...cabecera } = VECTOR.sobre;
+    const clave = await crypto.subtle.importKey(
+      "raw",
+      deBase64Url(VECTOR.clave),
+      { name: "AES-GCM" },
+      false,
+      ["encrypt"],
+    );
+    const reCt = await crypto.subtle.encrypt(
+      {
+        name: "AES-GCM",
+        iv: deBase64Url(VECTOR.sobre.nonce),
+        additionalData: new TextEncoder().encode(cabeceraCanonica(cabecera)),
+        tagLength: 128,
+      },
+      clave,
+      new TextEncoder().encode(JSON.stringify(r.payload)),
+    );
+    expect(aBase64Url(new Uint8Array(reCt))).toBe(VECTOR.sobre.ct);
   });
 
   it("la cabecera canónica son siete campos separados por saltos de línea", () => {

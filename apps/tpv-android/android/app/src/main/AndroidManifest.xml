@@ -39,6 +39,22 @@
 
     <!-- Permissions -->
 
+    <!-- INTERNET cubre también el camino directo de kds-2: el socket que la
+         tablet de cocina abre en la wifi del local y el POST que el terminal
+         le hace por el puente nativo.
+
+         kds-2 · POR QUÉ NO HAY PERMISO NUEVO:
+           · NsdManager (el redescubrimiento cuando el router le cambia la IP
+             a la tablet) no pide ninguno;
+           · la IP local se lee enumerando interfaces, que es información del
+             propio proceso (mismo criterio que A5).
+
+         kds-2 · SOBRE `usesCleartextTraffic` Y LA LECCIÓN A5: el WebView
+         sigue cargando SÓLO https, y en la APK no hay ningún origen http.
+         Lo que viaja en claro por TCP es el sobre de `kitchen-lan`, y el
+         sobre va CIFRADO con la clave de la tienda (AES-256-GCM): dentro de
+         él no hay nada legible, ni la comanda ni la alergia. La bandera ya
+         estaba puesta antes de este bloque. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- A5 · acceso remoto · el heartbeat del canal de soporte dice en qué red
