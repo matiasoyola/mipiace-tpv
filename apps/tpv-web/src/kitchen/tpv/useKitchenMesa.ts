@@ -16,8 +16,21 @@
 //
 // Se recarga: al abrir la mesa, tras cada envío, tras cada anulación y
 // cuando llega un evento de cocina por el bus de la tienda.
+//
+// ── kds-2-wifi · LOS DOS CAMINOS ──────────────────────────────────────
+//
+// Cada operación de cocina sale a la nube **y además** por la wifi del
+// local a las pantallas de la tienda, con el mismo id. Las dos salidas van
+// en paralelo y ninguna espera a la otra: con internet el directo es sólo
+// refuerzo, y sin internet es lo único que hay.
+//
+// Lo que NO cambia: el «Deshacer» de 5 s sigue viviendo aquí y sin red (un
+// deshacer que necesite red no es un deshacer), y el cobro, el turno y el
+// offline de v1.10 no se tocan.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+
+import { newId } from "../../lib/ids.js";
 
 import { ApiError, apiWithCashier } from "../../api.js";
 import {
@@ -32,25 +45,17 @@ import {
   type AnulacionPendiente,
 } from "./DeshacerToast.js";
 import type { AlergiaDeclarada } from "./AlergiasSheet.js";
+import type { EnvioLan, LanDeLaTienda, PantallaLan } from "./envioLan.js";
+import type {
+  CaminoDirecto,
+  EstadoPantallas,
+  OperacionLan,
+} from "./useCaminoDirecto.js";
 
-export interface EstadoPantallas {
-  heartbeatWindowMs: number;
-  screens: Array<{
-    id: string;
-    name: string | null;
-    sections: KitchenSection[];
-    alive: boolean;
-    lastSeenAt: string | null;
-  }>;
-  sections: Array<{
-    section: KitchenSection;
-    screen: boolean;
-    printer: boolean;
-    canCorrectSent: boolean;
-    /** La sección tiene pantalla y NINGUNA de las suyas da señales. */
-    needsPaperFallback: boolean;
-  }>;
-}
+// `EstadoPantallas` se mudó a `useCaminoDirecto`: es de la TIENDA, no de
+// una mesa, y ahora lo consumen dos sitios. Se re-exporta para no obligar a
+// cambiar los imports de quien ya lo pedía aquí.
+export type { EstadoPantallas } from "./useCaminoDirecto.js";
 
 export interface EnvioRespuesta {
   revision: number;
@@ -88,16 +93,37 @@ export interface KitchenMesa {
   guardarAlergias: (alergias: AlergiaDeclarada[]) => Promise<void>;
   /** Saca el papel de respaldo de estas comandas por la USB del terminal. */
   sacarPapelDeRespaldo: (orderIds: string[]) => Promise<void>;
+
+  // ── kds-2-wifi ──────────────────────────────────────────────────────
+  /** Las pantallas de la tienda, con su dirección en la wifi del local. */
+  pantallasLan: PantallaLan[];
+  /** La clave y la identidad con la que se firma, o null. */
+  lan: LanDeLaTienda | null;
+  /** Manda una operación por el camino directo. **Nunca lanza.** */
+  mandarPorWifi: (
+    kind: OperacionLan,
+    opId: string,
+    payload: unknown,
+  ) => Promise<EnvioLan | null>;
 }
 
 export function useKitchenMesa(opts: {
   ticketId: string | null;
   /** `Tenant.kitchenDisplayEnabled`. Apagado, el hook no pide nada. */
   moduloEncendido: boolean;
+  /**
+   * kds-2-wifi · el camino directo de la TIENDA, que lo monta `TpvHome`.
+   * Aquí sólo se usa; quien decide si hay wifi, si la nube está caída y si
+   * sale papel es él.
+   */
+  camino: CaminoDirecto;
 }): KitchenMesa {
-  const { ticketId, moduloEncendido } = opts;
+  // `moduloEncendido` ya no se lee aquí: lo que dependía de él (pedir el
+  // estado de las pantallas) vive en `useCaminoDirecto`. Se conserva en la
+  // firma porque es quien lo consume el que sabe si el módulo está
+  // comprado, y quitarlo obligaría a que `SalePage` lo mirara dos veces.
+  const { ticketId, camino } = opts;
   const [estado, setEstado] = useState<EstadoCocinaMesa>(estadoCocinaVacio);
-  const [pantallas, setPantallas] = useState<EstadoPantallas | null>(null);
 
   const recargar = useCallback(() => {
     if (!ticketId) {
@@ -130,31 +156,10 @@ export function useKitchenMesa(opts: {
 
   useEffect(recargar, [recargar]);
 
-  // El estado de las pantallas no depende de la mesa: es de la tienda. Se
-  // pide al abrir y cada `LATIDO_REFRESCO_MS`, porque es lo que decide si
-  // «Enviar» avisa y saca papel.
-  useEffect(() => {
-    if (!moduloEncendido) {
-      setPantallas(null);
-      return;
-    }
-    let vivo = true;
-    const pedir = () => {
-      void apiWithCashier<EstadoPantallas>("/kitchen/estado")
-        .then((d) => {
-          if (vivo) setPantallas(d);
-        })
-        .catch(() => {
-          /* el aviso de «Cocina no recibe» no puede bloquear la venta */
-        });
-    };
-    pedir();
-    const id = setInterval(pedir, LATIDO_REFRESCO_MS);
-    return () => {
-      vivo = false;
-      clearInterval(id);
-    };
-  }, [moduloEncendido]);
+  // kds-2-wifi · lo de la TIENDA (la clave, las IP, si la nube contesta,
+  // si sale papel) lo lleva `useCaminoDirecto`, que lo monta `TpvHome`.
+  // Aquí sólo se usa.
+  const { pantallas, lan, pantallasLan, mandarPorWifi } = camino;
 
   // ── Las anulaciones, con su ventana de 5 s ──────────────────────────
   const ticketRef = useRef(ticketId);
@@ -163,6 +168,15 @@ export function useKitchenMesa(opts: {
     (a: AnulacionPendiente) => {
       const id = ticketRef.current;
       if (!id) return;
+      // kds-2-wifi · LOS DOS CAMINOS. El id de la operación es la clave del
+      // «Deshacer» (lleva la hora y un sufijo aleatorio, así que es único
+      // por anulación), y es por él por lo que la tablet descarta el
+      // duplicado si llegan los dos.
+      void mandarPorWifi("ANULACION", a.opId ?? newId(), {
+        ticketId: id,
+        ticketLineId: a.lineId,
+        units: a.units,
+      });
       void apiWithCashier(`/tickets/${id}/kitchen/void-units`, {
         method: "POST",
         body: { lineId: a.lineId, units: a.units },
@@ -177,7 +191,7 @@ export function useKitchenMesa(opts: {
         })
         .finally(recargar);
     },
-    [recargar],
+    [recargar, mandarPorWifi],
   );
   const cola = useAnulacionesPendientes(anular);
 
@@ -190,6 +204,11 @@ export function useKitchenMesa(opts: {
         lineId,
         nombre,
         units,
+        // kds-2-wifi · el id con el que esta anulación viaja por los DOS
+        // caminos. Se genera al encolar, no al mandar: si se generara al
+        // mandar, la nube y la wifi llevarían ids distintos y la cocina
+        // vería la anulación dos veces.
+        opId: newId(),
       });
     },
     [cola],
@@ -198,25 +217,41 @@ export function useKitchenMesa(opts: {
   const marcharTiempo = useCallback(
     async (course: number) => {
       if (!ticketId) return;
-      await apiWithCashier(`/tickets/${ticketId}/kitchen/fire`, {
-        method: "POST",
-        body: { course },
-      });
+      // kds-2-wifi · los dos caminos, en paralelo y sin que uno espere al
+      // otro. `allSettled` y no `all`: sin internet la nube falla y la
+      // marcha TIENE que llegar igual por la wifi — si se usara `all`, el
+      // rechazo de la nube se llevaría por delante el camino bueno.
+      const opId = newId();
+      await Promise.allSettled([
+        apiWithCashier(`/tickets/${ticketId}/kitchen/fire`, {
+          method: "POST",
+          body: { course },
+        }),
+        mandarPorWifi("MARCHA", opId, {
+          ticketId,
+          course,
+          firedAt: new Date().toISOString(),
+        }),
+      ]);
       recargar();
     },
-    [ticketId, recargar],
+    [ticketId, recargar, mandarPorWifi],
   );
 
   const marcarUrgente = useCallback(
     async (urgent: boolean) => {
       if (!ticketId) return;
-      await apiWithCashier(`/tickets/${ticketId}/kitchen/urgent`, {
-        method: "POST",
-        body: { urgent },
-      });
+      const opId = newId();
+      await Promise.allSettled([
+        apiWithCashier(`/tickets/${ticketId}/kitchen/urgent`, {
+          method: "POST",
+          body: { urgent },
+        }),
+        mandarPorWifi("URGENTE", opId, { ticketId, urgent }),
+      ]);
       recargar();
     },
-    [ticketId, recargar],
+    [ticketId, recargar, mandarPorWifi],
   );
 
   const ponerSilla = useCallback(
@@ -267,8 +302,9 @@ export function useKitchenMesa(opts: {
     }
   }, []);
 
-  const cocinaNoRecibe =
-    pantallas?.sections.some((s) => s.needsPaperFallback) === true;
+  // **EL PAPEL SÓLO SALE SI FALLAN LOS DOS CAMINOS** (decisión 9): lo
+  // decide `useCaminoDirecto`, que es el único que sabe si la wifi acusó.
+  const cocinaNoRecibe = camino.cocinaNoRecibe;
 
   return {
     estado,
@@ -285,15 +321,13 @@ export function useKitchenMesa(opts: {
     ponerTiempo,
     guardarAlergias,
     sacarPapelDeRespaldo,
+    pantallasLan,
+    lan,
+    mandarPorWifi,
   };
 }
 
-/**
- * Cada 30 s se vuelve a preguntar si las pantallas viven.
- *
- * La ventana del servidor son 90 s, así que 30 da tres oportunidades de
- * enterarse antes de que el dato se quede viejo. Más a menudo sería pedirle
- * a la API un dato que cambia cada minuto y medio; menos, enterarse de que
- * la cocina no recibe tres minutos después de que dejara de recibir.
- */
-export const LATIDO_REFRESCO_MS = 30_000;
+// `LATIDO_REFRESCO_MS` y `SONDEO_MS` se mudaron a `useCaminoDirecto` con
+// el resto de lo que es de la TIENDA. Se re-exportan porque los tests y la
+// comanda los nombran.
+export { LATIDO_REFRESCO_MS, SONDEO_MS } from "./useCaminoDirecto.js";

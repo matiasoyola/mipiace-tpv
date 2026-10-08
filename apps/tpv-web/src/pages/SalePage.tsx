@@ -132,6 +132,11 @@ import { PRODUCT_CARD_MIN_HEIGHT } from "../lib/catalogGrid.js";
 import { isTouchDevice } from "../lib/touchDevice.js";
 import { SaleSearchInput } from "../components/SaleSearchInput.js";
 import { useKitchenMesa } from "../kitchen/tpv/useKitchenMesa.js";
+import {
+  CAMINO_APAGADO,
+  type CaminoDirecto,
+} from "../kitchen/tpv/useCaminoDirecto.js";
+import { componerComandasLan } from "../kitchen/tpv/envioLan.js";
 import { AlergiasSheet } from "../kitchen/tpv/AlergiasSheet.js";
 import {
   AHORA_LIMIT,
@@ -389,6 +394,14 @@ export interface SalePageProps {
    */
   kitchenDisplayEnabled?: boolean;
   /**
+   * kds-2-wifi · el camino directo por la wifi del local.
+   *
+   * Lo monta `TpvHome` porque es de la TIENDA, no de la mesa, y porque trae
+   * la clave con la que se firma: dos consumidores pidiéndolo por separado
+   * podrían firmar con claves distintas el minuto en que se rota.
+   */
+  camino?: CaminoDirecto;
+  /**
    * kds-1-cocina (decisión 5) · lo que está LISTO en toda la tienda.
    *
    * Lo pasa `TpvHome` porque la misma lista alimenta la etiqueta verde de
@@ -512,7 +525,29 @@ export function SalePage(props: SalePageProps) {
   const [kitchenToast, setKitchenToast] = useState<{
     sections: Array<{ section: string; lineCount: number }>;
     revision: number;
+    /**
+     * kds-2-wifi · la comanda salió SÓLO por la wifi del local (internet
+     * caído). Se dice, y no se calla: el camarero tiene que saber que la
+     * cocina la tiene y que la caja la subirá cuando vuelva la red. Un
+     * «enviada» a secas en mitad de un apagón no se cree nadie.
+     */
+    porWifi?: boolean;
   } | null>(null);
+  /**
+   * kds-2-wifi · lo que la TABLET tiene y el SERVIDOR todavía no sabe.
+   *
+   * `TicketLine.sentUnits` vive en el servidor, así que sin internet no se
+   * puede subir y la mesa seguiría pintando «sin enviar» algo que ya está
+   * en la plancha. Esto es la marca «enviado» que pone **el primer acuse
+   * que llega**, y se queda hasta que el outbox confirma y el servidor
+   * contesta con el `sentUnits` de verdad.
+   *
+   * Al montar se reconstruye de los `kitchen-send` pendientes del outbox:
+   * así sobrevive a una recarga del terminal en mitad del apagón.
+   */
+  const [enviadoPorWifi, setEnviadoPorWifi] = useState<Map<string, number>>(
+    new Map(),
+  );
   // v1.10.2-impresion-honesta · el fallo de comanda deja de ser un
   // string suelto: distinguimos "no hay impresora para esa sección"
   // (nada que reintentar, hay que configurarla) de "la impresora falló"
@@ -599,9 +634,31 @@ export function SalePage(props: SalePageProps) {
   // estarlo— y lo dejaba como carryover. **Este bloque es el carryover**:
   // `TicketLine.sentUnits` lo dice el servidor y los dos terminales ven lo
   // mismo. Nada se guarda en el navegador.
+  // kds-2-wifi · la marca «enviado» del primer acuse, y su reconstrucción.
+  //
+  // Se reconstruye de los `kitchen-send` que el outbox tenga pendientes de
+  // ESTA mesa: si el terminal se recarga en mitad del apagón —o se le
+  // apaga la pantalla y vuelve— lo que la cocina ya tiene sigue pintándose
+  // como «en cocina», que es lo que el camarero está viendo en la tablet.
+  const marcarEnviadoPorWifi = useCallback(
+    (unidades: Array<{ lineId: string; units: number }>) => {
+      setEnviadoPorWifi((prev) => {
+        const next = new Map(prev);
+        for (const u of unidades) {
+          next.set(u.lineId, (next.get(u.lineId) ?? 0) + u.units);
+        }
+        return next;
+      });
+    },
+    [],
+  );
+
   const kitchen = useKitchenMesa({
     ticketId: activeTicketId,
     moduloEncendido: props.kitchenDisplayEnabled === true,
+    // Sin camino (un banco de pruebas, un test de la comanda) el TPV se
+    // comporta como antes de kds-2: sólo la nube.
+    camino: props.camino ?? CAMINO_APAGADO,
   });
   // El tiempo elegido en la fila del modo «Por tiempos». **SE QUEDA
   // PUESTO** (decisión 3): lo que se pulse después va a ese tiempo hasta
@@ -1663,17 +1720,47 @@ export function SalePage(props: SalePageProps) {
     if (!tableContext?.activeTicketId) return;
     setKitchenBusy(true);
     setKitchenError(null);
+    // kds-1-cocina · EL ID DEL ENVÍO, generado AQUÍ.
+    //
+    // Es la llave de idempotencia: si la respuesta se pierde por el camino
+    // y el camarero vuelve a pulsar, el servidor devuelve el mismo
+    // resultado sin duplicar la comanda ni reimprimir. Y es lo que kds-2
+    // usa para el camino directo (decisión 9): el mismo id viaja a la nube
+    // y a la tablet, y el que llegue segundo se descarta por él.
+    //
+    // kds-2-wifi · vive FUERA del `try` porque el `catch` lo necesita: si
+    // la nube falla, el envío se encola en el outbox con este mismo id.
+    const clientSendId = newId();
+
+    // ── kds-2-wifi · EL CAMINO DIRECTO, EN PARALELO ───────────────────
+    //
+    // La comanda sale **a la nube y a la vez por la wifi del local**, con
+    // el mismo `clientSendId`. Las dos salidas arrancan juntas y ninguna
+    // espera a la otra: con internet el directo es refuerzo, y sin
+    // internet es lo único que hay.
+    //
+    // La compone el TPV (ver `envioLan.ts`) porque sin internet no hay
+    // servidor al que preguntar, con los datos que ya están en pantalla y
+    // con las mismas funciones de alergias que usa `envio.ts`.
+    const porWifi = (async () => {
+      const comandas = componerComandasLan({
+        ticketId: tableContext.activeTicketId!,
+        tableId: tableContext.id,
+        tableName: tableContext.name,
+        clientSendId,
+        urgent: urgentePendiente,
+        estado: kitchen.estado,
+        alergenosPorLinea: new Map(lines.map((l) => [l.id, l.allergens ?? []])),
+        nombrePorLinea: new Map(lines.map((l) => [l.id, l.nameSnapshot])),
+        notasPorLinea: new Map(lines.map((l) => [l.id, notasDeLineaLan(l)])),
+        ahora: new Date(),
+      });
+      if (comandas.length === 0) return null;
+      return kitchen.mandarPorWifi("COMANDA", clientSendId, { comandas });
+    })();
+
     try {
       const { apiWithCashier } = await import("../api.js");
-      // kds-1-cocina · EL ID DEL ENVÍO, generado AQUÍ.
-      //
-      // Es la llave de idempotencia: si la respuesta se pierde por el
-      // camino y el camarero vuelve a pulsar, el servidor devuelve el
-      // mismo resultado sin duplicar la comanda ni reimprimir. Y queda
-      // preparado el camino directo por la wifi de kds-2 (decisión 9): el
-      // mismo id viajará a la nube y a la tablet, y el que llegue segundo
-      // se descartará por él.
-      const clientSendId = newId();
       const res = await apiWithCashier<{
         revision: number;
         sentAt: string;
@@ -1720,14 +1807,29 @@ export function SalePage(props: SalePageProps) {
       // Los bytes los construye el SERVIDOR (`/kitchen/comandas/:id/escpos`)
       // para que el papel de respaldo sea EL MISMO papel que sale cuando la
       // impresora de la sección funciona.
+      //
+      // ── kds-2-wifi · EL PAPEL SÓLO SI FALLAN LOS DOS CAMINOS ────────
+      //
+      // El `needsPaperFallback` del servidor es la mitad: dice que la
+      // pantalla no le da señales A ÉL. Lo que el servidor no puede saber
+      // es si la comanda le está llegando por la wifi del local, porque esa
+      // conversación no pasa por él. Así que se espera al acuse del camino
+      // directo de ESTE envío y, si llegó, **no sale papel**.
+      //
+      // Tiene su fila en la tabla de sabotajes: «papel con la wifi
+      // funcionando».
+      const acuseWifi = await porWifi;
+      const llegoPorWifi = acuseWifi?.alguna === true;
       const sinLatido = new Set(
         (kitchen.pantallas?.sections ?? [])
           .filter((x) => x.needsPaperFallback)
           .map((x) => x.section),
       );
-      const aPapel = res.sections
-        .filter((x) => x.orderId && sinLatido.has(x.section))
-        .map((x) => x.orderId!);
+      const aPapel = llegoPorWifi
+        ? []
+        : res.sections
+            .filter((x) => x.orderId && sinLatido.has(x.section))
+            .map((x) => x.orderId!);
       if (aPapel.length > 0) {
         await kitchen.sacarPapelDeRespaldo(aPapel).catch((err) => {
           reportPrinterFailure(err, {
@@ -1738,7 +1840,7 @@ export function SalePage(props: SalePageProps) {
           setKitchenError({
             kind: "failed",
             message:
-              "Cocina no recibe y el papel tampoco salió. Cántale la comanda.",
+              "Cocina no recibe ni por internet ni por la wifi, y el papel tampoco salió. Cántale la comanda.",
           });
         });
       }
@@ -1799,6 +1901,63 @@ export function SalePage(props: SalePageProps) {
         setKitchenError({ kind: "no-printer", message: err.message });
         return;
       }
+
+      // ── kds-2-wifi · LA NUBE FALLÓ: ¿llegó por la wifi? ─────────────
+      //
+      // Éste es EL caso del bloque: internet caído, el camarero pulsa
+      // «Enviar», y la comanda tiene que aparecer en la tablet igual.
+      //
+      // Dos cosas, y las dos hacen falta:
+      //
+      //   1. se espera el acuse del camino directo. Si llegó, **el envío
+      //      fue bien**: se dice «por la wifi del local» y no se saca
+      //      papel. La marca «enviado» la pone el primer acuse que llegue,
+      //      y aquí el primero es el único;
+      //   2. el envío a la nube se **encola en el outbox** con el mismo
+      //      `clientSendId`. Al volver la red, el servidor lo recibe, no
+      //      duplica la tarjeta (idempotencia de kds-1) y sube
+      //      `sentUnits`, que es lo que hace que la mesa deje de parecer
+      //      «sin enviar». Sin esto, la cocina tendría la comanda y el
+      //      servidor no se enteraría nunca.
+      const acuseWifi = await porWifi.catch(() => null);
+      const llegoPorWifi = acuseWifi?.alguna === true;
+      const unidadesDeEsteEnvio = kitchen.estado.lines
+        .map((l) => ({
+          lineId: l.id,
+          units: Math.round((l.units - l.sentUnits) * 1000) / 1000,
+        }))
+        .filter((x) => x.units > 0);
+
+      if (esFalloDeRed(err)) {
+        try {
+          const { outboxAdd } = await import("../lib/outbox.js");
+          await outboxAdd({
+            externalId: clientSendId,
+            kind: "kitchen-send",
+            path: `/tickets/${tableContext.activeTicketId}/send-to-kitchen/escpos`,
+            body: { clientSendId, urgent: urgentePendiente },
+            label: `Comanda ${tableContext.name}`,
+            total: 0,
+            tableId: tableContext.id,
+            kitchenLines: unidadesDeEsteEnvio,
+          });
+        } catch {
+          /* IndexedDB lleno o modo privado: queda el camino directo */
+        }
+      }
+
+      if (llegoPorWifi) {
+        // El urgente viajó en ESTE envío, igual que en el camino bueno.
+        setUrgentePendiente(false);
+        marcarEnviadoPorWifi(unidadesDeEsteEnvio);
+        setKitchenToast({
+          sections: [],
+          revision: kitchen.estado.revision + 1,
+          porWifi: true,
+        });
+        return;
+      }
+
       reportPrinterFailure(err, {
         operation: "kitchen",
         transport: "wifi",
@@ -2116,6 +2275,81 @@ export function SalePage(props: SalePageProps) {
     agendaEnabled,
   ]);
 
+  // kds-2-wifi · EL ESTADO QUE PINTA LA COMANDA, con lo que ya está en la
+  // tablet aunque el servidor no lo sepa.
+  //
+  // `sentUnits` lo dice el servidor y eso no cambia (es la invariante de
+  // kds-1 y el fin del apaño de `localStorage` de v2-H1). Lo que se suma
+  // encima es sólo lo que ESTE terminal mandó por la wifi y el outbox
+  // todavía no ha podido subir: en cuanto el servidor confirma, su
+  // `sentUnits` ya lo incluye y la superposición se apaga sola —se acota
+  // con `Math.min(units, …)`, así que nunca puede decir que la cocina
+  // tiene más de lo que la mesa pidió.
+  const estadoCocina = useMemo(() => {
+    if (enviadoPorWifi.size === 0) return kitchen.estado;
+    return {
+      ...kitchen.estado,
+      lines: kitchen.estado.lines.map((l) => {
+        const extra = enviadoPorWifi.get(l.id) ?? 0;
+        if (extra <= 0) return l;
+        return {
+          ...l,
+          sentUnits: Math.min(l.units, l.sentUnits + extra),
+        };
+      }),
+    };
+  }, [kitchen.estado, enviadoPorWifi]);
+
+  // Cuando el servidor ya sabe lo que la wifi entregó, la superposición
+  // deja de hacer falta: quedársela sería un segundo sitio donde vive la
+  // misma verdad, que es exactamente lo que `kitchenSentLines.ts` hacía.
+  useEffect(() => {
+    if (enviadoPorWifi.size === 0) return;
+    const sobran: string[] = [];
+    for (const [lineId, units] of enviadoPorWifi) {
+      const linea = kitchen.estado.lines.find((l) => l.id === lineId);
+      if (!linea || linea.sentUnits >= Math.min(linea.units, units)) {
+        sobran.push(lineId);
+      }
+    }
+    if (sobran.length === 0) return;
+    setEnviadoPorWifi((prev) => {
+      const next = new Map(prev);
+      for (const id of sobran) next.delete(id);
+      return next;
+    });
+  }, [kitchen.estado, enviadoPorWifi]);
+
+  // Y al montar la mesa se reconstruye de lo que el outbox tenga
+  // pendiente: una recarga del terminal en mitad del apagón no puede
+  // hacer que la comanda vuelva a pintar «sin enviar» lo que el cocinero
+  // está viendo en la tablet.
+  useEffect(() => {
+    if (!activeTicketId) return;
+    let vivo = true;
+    void (async () => {
+      try {
+        const { outboxList } = await import("../lib/outbox.js");
+        const items = await outboxList();
+        if (!vivo) return;
+        const acumulado = new Map<string, number>();
+        for (const it of items) {
+          if (it.kind !== "kitchen-send") continue;
+          if (!it.path.includes(activeTicketId)) continue;
+          for (const l of it.kitchenLines ?? []) {
+            acumulado.set(l.lineId, (acumulado.get(l.lineId) ?? 0) + l.units);
+          }
+        }
+        if (acumulado.size > 0) setEnviadoPorWifi(acumulado);
+      } catch {
+        /* sin IndexedDB no hay nada que reconstruir */
+      }
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [activeTicketId]);
+
   // Los banners de salud y de operativa, dentro de la comanda.
   //
   // A ancho completo costaban ~40 px del ALTO del catálogo, y eso rompe
@@ -2225,14 +2459,14 @@ export function SalePage(props: SalePageProps) {
                 con la venta — es una interrupción corta y deliberada. */}
             {alergiasAbiertas && (
               <AlergiasSheet
-                diners={kitchen.estado.diners}
+                diners={estadoCocina.diners}
                 shape={
                   props.tableContext?.zone === "TERRAZA" ? "redonda" : "rectangular"
                 }
                 tableName={
                   props.tableContext ? `Mesa ${props.tableContext.name}` : "Mesa"
                 }
-                inicial={kitchen.estado.allergies.map((a) => ({
+                inicial={estadoCocina.allergies.map((a) => ({
                   seat: a.seat,
                   allergen: a.allergen,
                 }))}
@@ -2257,7 +2491,7 @@ export function SalePage(props: SalePageProps) {
               ahora={ahoraProducts}
               kitchen={{
                 enabled: props.kitchenDisplayEnabled === true,
-                estado: kitchen.estado,
+                estado: estadoCocina,
                 courseMode: props.kitchenSettings?.courseMode ?? "ESPERA",
                 seatMode: props.kitchenSettings?.seatMode ?? "ALERGIA",
                 courseElegido,
@@ -2270,7 +2504,7 @@ export function SalePage(props: SalePageProps) {
                   // reenviar nada.
                   const siguiente = !urgentePendiente;
                   setUrgentePendiente(siguiente);
-                  if (kitchen.estado.orders.length > 0) {
+                  if (estadoCocina.orders.length > 0) {
                     void kitchen.marcarUrgente(siguiente);
                   }
                 },
@@ -3022,6 +3256,7 @@ export function SalePage(props: SalePageProps) {
         <KitchenToast
           sections={kitchenToast.sections}
           revision={kitchenToast.revision}
+          porWifi={kitchenToast.porWifi === true}
           onClose={() => setKitchenToast(null)}
         />
       )}
@@ -5240,10 +5475,12 @@ const SECTION_LABEL_ES: Record<string, string> = {
 function KitchenToast({
   sections,
   revision,
+  porWifi,
   onClose,
 }: {
   sections: Array<{ section: string; lineCount: number }>;
   revision: number;
+  porWifi?: boolean;
   onClose: () => void;
 }) {
   // Auto-cierre a los 5s — el cajero quiere ver el feedback pero no
@@ -5257,6 +5494,18 @@ function KitchenToast({
       <div className="text-[13.5px] font-semibold mb-1">
         Comanda nº {revision} enviada
       </div>
+      {/* kds-2-wifi · sin internet se dice POR DÓNDE salió. El camarero
+          tiene que saber que la cocina la tiene y que la caja la subirá
+          cuando vuelva la red; un «enviada» a secas en mitad de un apagón
+          no se lo cree nadie. */}
+      {porWifi && (
+        <div
+          data-testid="comanda-por-wifi"
+          className="text-[12.5px] font-semibold mb-1"
+        >
+          Sin internet · ha llegado por la wifi del local
+        </div>
+      )}
       <div className="text-[12.5px] space-y-0.5">
         {sections.map((s) => (
           <div key={s.section}>
@@ -5326,4 +5575,49 @@ function KitchenErrorBanner({
       </div>
     </div>
   );
+}
+
+/**
+ * kds-2-wifi · los modificadores y las notas de una línea, aplanados.
+ *
+ * Es lo que va bajo el plato en la tarjeta de cocina, y tiene que decir lo
+ * MISMO que dice el servidor en `notasDeModificadores` de `envio.ts`: los
+ * dos shapes históricos (el `string[]` tipeado a mano, vivo en barras
+ * pequeñas, y el estructurado de B-Bar-Modifiers) aplanados a
+ * «Grupo: etiqueta».
+ *
+ * Son dos implementaciones de la misma regla y eso es una deuda, dicha en
+ * voz alta: aquí se parte de `CartLine` (lo que el camarero tiene en
+ * pantalla) y allí de `TicketLine.modifiers` (lo que está en la base), y
+ * los dos tipos no son el mismo. Lo que las ata es el sabotaje «la comanda
+ * de la wifi dice algo distinto que la de la nube».
+ */
+function notasDeLineaLan(l: CartLine): string[] {
+  const out: string[] = [];
+  for (const sel of l.modifierSelections ?? []) {
+    out.push(sel.groupName ? `${sel.groupName}: ${sel.label}` : sel.label);
+  }
+  for (const m of l.modifiers ?? []) {
+    if (typeof m === "string" && m.length > 0) out.push(m);
+  }
+  return out;
+}
+
+/**
+ * kds-2-wifi · ¿el envío a la nube falló por RED, o lo rechazó el servidor?
+ *
+ * Importa mucho y no es un detalle: sólo un fallo de red se encola en el
+ * outbox para reintentarlo. Un rechazo del servidor —la mesa ya se cobró,
+ * el ticket no existe, el turno está cerrado— reintentado cada 15 s para
+ * siempre es un item que nunca se va de la cola y un chip de pendientes
+ * que miente.
+ *
+ * Un `ApiError` significa que el servidor CONTESTÓ, así que no es red; con
+ * una excepción, el 408, que es lo que devuelve un proxy cuando la
+ * petición no llegó a tiempo. Cualquier otra cosa (TypeError de `fetch`,
+ * DNS, el 4G del bar a cero) sí lo es.
+ */
+function esFalloDeRed(err: unknown): boolean {
+  if (err instanceof ApiError) return err.status === 408 || err.status >= 500;
+  return true;
 }

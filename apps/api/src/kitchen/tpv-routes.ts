@@ -972,6 +972,13 @@ export async function registerKitchenTpvRoutes(
               key: await asegurarClaveLan(register.storeId),
               defaultPort: PUERTO_LAN_POR_DEFECTO,
               maxAgeMs: EDAD_MAXIMA_MS,
+              // La tienda y el aparato con los que este terminal FIRMA sus
+              // mensajes. Van de aquí y no del front porque el front no los
+              // sabe: su identidad está dentro del JWT de la sesión de
+              // cajero, y sacarla de ahí en el navegador sería decodificar
+              // un token para leerse a sí mismo.
+              storeId: register.storeId,
+              deviceId: cashier.did,
             }
           : null;
 

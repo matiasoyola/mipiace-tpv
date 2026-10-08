@@ -89,6 +89,11 @@ export interface FakePantalla {
    * `X-Device-Token`.
    */
   deviceTokenHash: string;
+  // kds-2-wifi · dónde escucha, si es una pantalla. Opcionales porque los
+  // tests de kds-1 siembran pantallas sin anunciar nada.
+  kitchenLanIp?: string | null;
+  kitchenLanPort?: number | null;
+  kitchenLanAt?: Date | null;
 }
 
 export interface FakeDispatch {
