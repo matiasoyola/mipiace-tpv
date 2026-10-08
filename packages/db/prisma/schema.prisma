@@ -851,6 +851,13 @@ model Tenant {
   // se borra.
   clinicalAssessments ClinicalAssessment[]
   clinicalAssessmentCorrections ClinicalAssessmentCorrection[]
+  // clinica-4 · los consentimientos firmados, las fotos clínicas y las
+  // entregas de informes. Las tres con RESTRICT al otro lado: un tenant
+  // con historia no se borra. `consents` lo gana en este bloque — antes
+  // la tabla no tenía ni FK al tenant.
+  consents            ClientConsent[]
+  clinicalPhotos      ClinicalPhoto[]
+  reportDeliveries    ClinicalReportDelivery[]
   // enlaces-publicos · todos los enlaces públicos del negocio, de cualquier
   // `purpose`. RESTRICT al otro lado: un tenant con enlaces no se borra.
   publicLinks PublicLink[]
@@ -1122,6 +1129,13 @@ model User {
   assessmentsRequested   ClinicalAssessment[] @relation("AssessmentRequestedBy")
   assessmentsValidated   ClinicalAssessment[] @relation("AssessmentValidatedBy")
   assessmentCorrections  ClinicalAssessmentCorrection[]
+  // clinica-4 · los cuatro papeles de este bloque: quién informó un
+  // consentimiento, quién hizo una foto, quién la retiró y quién entregó
+  // un informe. Los cuatro con RESTRICT al otro lado: es autoría.
+  consentsInformed       ClientConsent[]   @relation("ClientConsentInformer")
+  clinicalPhotos         ClinicalPhoto[]   @relation("ClinicalPhotoAuthor")
+  clinicalPhotosWithdrawn ClinicalPhoto[]  @relation("ClinicalPhotoWithdrawnBy")
+  reportDeliveries       ClinicalReportDelivery[] @relation("ClinicalReportDeliveryUser")
   // enlaces-publicos · los enlaces públicos que esta persona creó (mandar el
   // test, reenviar «mi cita»). RESTRICT: quién creó un enlace es parte de lo
   // que el registro puede contestar.
@@ -2548,14 +2562,18 @@ model Client {
   updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
 
   tenant         Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  // clinica-4 · `consents` pasó a RESTRICT (S3, condición 1): un paciente
+  // con un consentimiento firmado NO se borra, y ya no es «lo que se
+  // puede perder con la ficha». `technicalNotes` sigue en Cascade: es
+  // ficha técnica, no historia.
   consents       ClientConsent[]
   technicalNotes ClientTechnicalNote[]
   appointments   Appointment[]
   // clinica-1 · la historia del paciente, sus accesos y el registro de
   // quién la ha abierto. Las tres con RESTRICT al otro lado (y no Cascade
-  // como `consents` y `technicalNotes`): **un cliente con historia no se
-  // borra.** Esa es la diferencia de fondo entre una ficha de peluquería
-  // y una historia clínica.
+  // como `technicalNotes`): **un cliente con historia no se borra.** Esa
+  // es la diferencia de fondo entre una ficha de peluquería y una
+  // historia clínica.
   clinicalAccesses   ClinicalAccess[]
   clinicalAccessLogs ClinicalAccessLog[]
   clinicalEntries    ClinicalEntry[]
@@ -2563,6 +2581,10 @@ model Client {
   // valoración se repasa creando una NUEVA, sin sobrescribir la anterior
   // (decisión de producto 7).
   clinicalAssessments ClinicalAssessment[]
+  // clinica-4 · sus fotos clínicas y las entregas de sus informes. Las
+  // dos con RESTRICT, por lo mismo: son historia.
+  clinicalPhotos      ClinicalPhoto[]
+  reportDeliveries    ClinicalReportDelivery[]
 
   // Búsqueda por teléfono/email y orden alfabético (A–Z) por tenant.
   @@index([tenantId, phone])
@@ -2572,24 +2594,162 @@ model Client {
   @@map("clients")
 }
 
-// Consentimientos RGPD del cliente (B1: campos + alta manual; la firma
-// digital es fase 2, fuera de alcance). `tenantId` redundante con el del
-// cliente pero presente por la regla de aislamiento por fila.
+// Consentimientos del cliente. Nació en B1 para el RGPD (campos + alta
+// manual) y **desde clinica-4 es LA tabla del consentimiento informado**,
+// la misma para el spa y para la clínica (solape S3, decidido el 07-10).
+// `tenantId` redundante con el del cliente pero presente por la regla de
+// aislamiento por fila.
+//
+// ── Lo que clinica-4 le añadió, y por qué ─────────────────────────────
+//
+// Cinco condiciones de S3, y las cinco están en la migración
+// `20261008010000_clinica_4_consentimientos_fotos_informe`:
+//
+//   1. **No se borra**: `client_id` pasó de CASCADE a **RESTRICT** y la
+//      tabla es de **solo inserción** (trigger `client_consents_append_only`).
+//   2. **Revocar sin editar**: `revokesConsentId` apunta a la fila que
+//      esta revoca. Vale igual para `DATA` (RGPD) que para `TREATMENT`.
+//   3. **Qué se firmó exactamente**: plantilla + versión + huella del
+//      texto + huella SHA-256 del PDF.
+//   4. **Quién firma y quién informa**: firmante (paciente o
+//      representante con su relación) e informante (`User`).
+//   5. **Lo clínico se ve como historia**: `clinical` copia la marca de
+//      la plantilla, y con ella el PDF pasa por `conHistoria`.
+//
+// Las filas que ya existían se quedan como **alta manual sin plantilla**:
+// `templateId` NULL, sin versión y sin huella. No se les inventa nada.
 model ClientConsent {
   id        String            @id @default(uuid()) @db.Uuid
   tenantId  String            @map("tenant_id") @db.Uuid
   clientId  String            @map("client_id") @db.Uuid
   kind      ClientConsentKind
   grantedAt DateTime          @default(now()) @map("granted_at") @db.Timestamptz()
-  // Referencia opcional al documento firmado (URL / id externo). La
-  // firma digital en sí es fase 2.
+  // Referencia opcional al documento firmado (URL / id externo). Con
+  // plantilla clínica es el id del PDF que sirve la API; en el alta
+  // manual del spa sigue siendo lo que la dueña escriba.
   docRef    String?           @map("doc_ref")
   createdAt DateTime          @default(now()) @map("created_at") @db.Timestamptz()
 
-  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  // ── clinica-4 · la plantilla congelada ──────────────────────────────
+  // Id y versión de `@mipiacetpv/consentimientos`, y la huella del texto
+  // canónico que se leyó. Los tres juntos o los tres NULL (CHECK
+  // `client_consents_plantilla_completa`): media plantilla es una fila
+  // que dice que se informó de un texto que no se sabe cuál fue.
+  templateId      String? @map("template_id") @db.VarChar(40)
+  templateVersion Int?    @map("template_version")
+  textSha256      String? @map("text_sha256") @db.Char(64)
+  // El PDF firmado: su huella y su fichero en el volumen clínico. Se
+  // vuelve a calcular sobre el fichero para comprobar que nadie lo tocó.
+  pdfSha256       String? @map("pdf_sha256") @db.Char(64)
+  pdfFileName     String? @map("pdf_file_name") @db.VarChar(100)
+  // Copia de la marca «clínica» de la plantilla. Copiada y no consultada:
+  // si mañana una plantilla deja de ser clínica, lo firmado ayer siguió
+  // siendo contenido de una historia clínica.
+  clinical        Boolean @default(false)
+  // PACIENTE | REPRESENTANTE, con nombre y relación sólo en el segundo
+  // caso (CHECK `client_consents_firmante_valido`).
+  signer          String? @db.VarChar(20)
+  signerName      String? @map("signer_name") @db.VarChar(120)
+  signerRelation  String? @map("signer_relation") @db.VarChar(60)
+  // Quién informó. Obligatorio si `clinical` (CHECK); que ADEMÁS sea
+  // sanitario lo exige la API, porque cruza dos tablas.
+  informerUserId  String? @map("informer_user_id") @db.Uuid
+  // La fila que esta revoca. Una fila con esto puesto NO concede nada.
+  revokesConsentId String? @map("revokes_consent_id") @db.Uuid
+  revokeReason     String? @map("revoke_reason") @db.VarChar(200)
+  createdByUserId  String? @map("created_by_user_id") @db.Uuid
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  informer User? @relation("ClientConsentInformer", fields: [informerUserId], references: [id], onDelete: Restrict)
+  revoca   ClientConsent?  @relation("ClientConsentRevocacion", fields: [revokesConsentId], references: [id], onDelete: Restrict)
+  revocadoPor ClientConsent[] @relation("ClientConsentRevocacion")
 
   @@index([tenantId, clientId])
   @@map("client_consents")
+}
+
+// clinica-4 · LAS FOTOS CLÍNICAS.
+//
+// El JPEG vive en el volumen de ficheros clínicos (`CLINICAL_FILES_DIR`),
+// **no en Postgres y no en nada que se sirva en estático** (decisión 11):
+// se sirve sólo por la API, por `conHistoria`, y cada apertura deja su
+// línea en `ClinicalAccessLog`. El mismo reparto que las capturas de
+// terminal de A5 (`device_screenshots`), con una diferencia de fondo: una
+// captura caduca a las 24 h y **una foto de la historia no caduca nunca**.
+//
+// Y no se borra: se **retira** con autor y motivo (decisión 13). Deja de
+// verse en el comparador y sigue en la historia. El trigger
+// `clinical_photos_guard` deja pasar esa única transición y nada más.
+model ClinicalPhoto {
+  id            String  @id @default(uuid()) @db.Uuid
+  tenantId      String  @map("tenant_id") @db.Uuid
+  clientId      String  @map("client_id") @db.Uuid
+  // La cita de la que salió. SET NULL como en `ClinicalEntry`: si la cita
+  // desapareciera, la foto sigue en la historia y pierde el enlace, no el
+  // contenido. (En la práctica el guard lo convierte en «una cita con
+  // fotos no se borra», que es la garantía más fuerte que clinica-3 §6.1
+  // descubrió con el mismo patrón.)
+  appointmentId String? @map("appointment_id") @db.Uuid
+  // `"L:h"` y la versión del mapa con la que se eligió la zona.
+  zona          String  @db.VarChar(40)
+  mapaVersion   Int     @map("mapa_version")
+  fileName      String  @map("file_name") @db.VarChar(100)
+  sha256        String  @db.Char(64)
+  bytes         Int
+  mimeType      String  @map("mime_type") @db.VarChar(40)
+  authorUserId  String  @map("author_user_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  withdrawnAt       DateTime? @map("withdrawn_at") @db.Timestamptz()
+  withdrawnByUserId String?   @map("withdrawn_by_user_id") @db.Uuid
+  withdrawReason    String?   @map("withdraw_reason") @db.VarChar(200)
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client      Client       @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  appointment Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  author      User         @relation("ClinicalPhotoAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
+  withdrawnBy User?        @relation("ClinicalPhotoWithdrawnBy", fields: [withdrawnByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([fileName])
+  @@index([tenantId, clientId, createdAt])
+  @@map("clinical_photos")
+}
+
+// clinica-4 · LAS ENTREGAS DEL INFORME. Solo inserciones.
+//
+// Contesta «¿qué se le entregó a quién?»: el informe, el canal, el
+// destinatario, la huella del PDF, quién y cuándo. La otra mitad —«¿quién
+// ha abierto esta historia?»— la contesta `ClinicalAccessLog`, que recibe
+// su línea con `action = EXPORT` porque la ruta pasa por `conHistoria`.
+// Las dos, porque ninguna puede contestar la pregunta de la otra: el
+// registro de accesos no tiene sitio para el canal ni el destinatario, y
+// clinica-1 lo dejó estrecho a propósito.
+//
+// **Ni un dato de salud**: no se guarda el PDF, ni su contenido, ni el
+// motivo de la derivación.
+model ClinicalReportDelivery {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  clientId       String   @map("client_id") @db.Uuid
+  // RESUMEN | SESIONES | DERIVACION | COMPLETA (CHECK en la migración).
+  report         String   @db.VarChar(20)
+  // PRINT | EMAIL.
+  channel        String   @db.VarChar(20)
+  // PACIENTE | PROFESIONAL.
+  recipient      String   @db.VarChar(20)
+  // Sólo con canal EMAIL (CHECK `..._email_segun_canal`).
+  recipientEmail String?  @map("recipient_email") @db.VarChar(200)
+  pdfSha256      String   @map("pdf_sha256") @db.Char(64)
+  userId         String   @map("user_id") @db.Uuid
+  at             DateTime @default(now()) @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  user   User   @relation("ClinicalReportDeliveryUser", fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, clientId, at])
+  @@map("clinical_report_deliveries")
 }
 
 // Ficha técnica mínima: notas por servicio. Vale igual para peluquería
@@ -2697,6 +2857,24 @@ model ServiceScheduling {
   //     extra» es una sesión que no sabe cuál cobrar, y es mejor que
   //     falle al configurarlo que con la paciente delante.
   nivelQuiropodia Int?     @map("nivel_quiropodia")
+  // clinica-4 · QUÉ CONSENTIMIENTOS PIDE ESTE SERVICIO.
+  //
+  // Decisión 4 del prompt: la dueña los marca en el servicio, en el sitio
+  // donde hoy se configura el servicio — aquí, junto a las tres marcas de
+  // arriba, porque la podóloga mantiene UNA pantalla y no dos.
+  //
+  // Ids de plantilla de `@mipiacetpv/consentimientos`. Un array y no una
+  // tabla de cruce: son como mucho tres ids de una lista CERRADA EN
+  // CÓDIGO, y una tabla de cruce habría pedido una FK a una tabla de
+  // plantillas que no existe (decisión 3: versionadas en código).
+  //
+  // «Fotos clínicas» NO se puede marcar aquí y la ruta lo rechaza: no se
+  // ata a ningún servicio, la pide la primera foto. Atarla habría dejado
+  // sin consentimiento a la paciente a la que se le hace una foto en una
+  // quiropodia normal.
+  //
+  // Nace en `{}`: ningún servicio de los quince tenants de hoy pide nada.
+  consentimientos String[] @default([]) @map("consentimientos") @db.VarChar(40)
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz()
 
@@ -2886,6 +3064,9 @@ model Appointment {
   // clinica-2 · la valoración que esta cita disparó, si era de primera
   // valoración. SET NULL al otro lado por la misma razón que las entradas.
   clinicalAssessments ClinicalAssessment[]
+  // clinica-4 · las fotos hechas en esta cita. SET NULL al otro lado,
+  // igual que las entradas.
+  clinicalPhotos ClinicalPhoto[]
 
   // El índice gist (tenant_id, timeslot) para consultas de rango se crea en
   // SQL (Prisma no expresa gist sobre Unsupported).
