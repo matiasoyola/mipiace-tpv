@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Cocina · comandas en servicio</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#F2A08F}a:hover{color:#FFFFFF}
+button{font-family:inherit;cursor:pointer}
+@keyframes pulso{0%,100%{background:#1A1D23}50%{background:#2B4636}}
+@keyframes pulsorojo{0%,100%{background:#C8102E}50%{background:#7A0A1C}}
+.nueva{animation:pulso 2.5s ease-in-out infinite}
+.alerta{animation:pulsorojo 2.5s ease-in-out infinite}
+</style>
+</helmet>
+<div style="width: 1280px; height: 800px; box-sizing: border-box; display: flex; flex-direction: column; background: #0E1013; font-family: 'DM Sans', system-ui, sans-serif; color: #F1F3F5;">
+
+  <!-- Barra superior -->
+  <div style="height: 60px; flex-shrink: 0; display: flex; align-items: center; gap: 16px; padding: 0 16px; border-bottom: 1px solid #23272E;">
+    <span style="font-size: 24px; font-weight: 700; letter-spacing: -0.01em;">Cocina</span>
+    <span style="font-size: 16px; color: #9AA2AF;">La Maestranza</span>
+    <span style="flex-grow: 1;"></span>
+    <span style="display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; border-radius: 18px; background: #16241C; color: #8FD9A8; font-size: 15px; font-weight: 600;">
+      <span style="width: 10px; height: 10px; border-radius: 5px; background: #8FD9A8;"></span>En línea
+    </span>
+    <span style="font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums;">13:41</span>
+    <button style="height: 44px; padding: 0 18px; border-radius: 12px; border: 1px solid #3A404A; background: transparent; color: #F1F3F5; font-size: 18px; font-weight: 600;">Hoy</button>
+  </div>
+
+  <div style="flex-grow: 1; min-height: 0; display: flex;">
+
+    <!-- Comandas en orden de lectura: izquierda → derecha, luego fila de abajo -->
+    <div style="flex-grow: 1; min-width: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 12px; box-sizing: border-box; align-items: start; align-content: start; overflow: hidden;">
+
+      <!-- 1 · T4 · urgente -->
+      <div style="background: #1A1D23; border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 0 0 4px #C8102E;">
+        <div style="display: flex; align-items: center; justify-content: center; gap: 10px; height: 52px; background: #C8102E; color: #FFFFFF;">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg>
+          <span style="font-size: 26px; font-weight: 800; letter-spacing: 0.12em;">URGENTE</span>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: #8FD9A8; color: #15171B;">
+          <span style="font-size: 34px; font-weight: 700; letter-spacing: -0.02em; line-height: 1;">T4</span>
+          <span style="font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums;">6 min</span>
+        </div>
+        <div style="display: flex; flex-direction: column; padding: 6px 0;">
+          <div style="display: flex; gap: 10px; padding: 8px 14px;">
+            <span style="width: 30px; flex-shrink: 0; font-size: 26px; font-weight: 700; line-height: 1.1;">2</span>
+            <div style="display: flex; flex-direction: column;">
+              <span style="font-size: 22px; font-weight: 600; line-height: 1.2;">Hamburguesa especial</span>
+              <span style="font-size: 17px; font-weight: 600; color: #F6CF7A; margin-top: 2px;">— poco hecha</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 10px; padding: 8px 14px;">
+            <span style="width: 30px; flex-shrink: 0; font-size: 26px; font-weight: 700; line-height: 1.1;">1</span>
+            <span style="font-size: 22px; font-weight: 600; line-height: 1.2;">Patatas bravas</span>
+          </div>
+        </div>
+        <button style="margin: 0 14px 14px; height: 56px; border-radius: 12px; border: 0; background: #2C313A; color: #F1F3F5; font-size: 22px; font-weight: 600;">Lista</button>
+      </div>
+
+      <!-- 2 · M2 · rojo, con cantidad bajada y plato en espera -->
+      <div style="background: #1A1D23; border-radius: 14px; overflow: hidden; display: flex; flex-direction: column;">
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: #E0533F; color: #15171B;">
+          <span style="font-size: 34px; font-weight: 700; letter-spacing: -0.02em; line-height: 1;">M2</span>
+          <span style="font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums;">23 min</span>
+        </div>
+        <div style="display: flex; flex-direction: column; padding: 6px 0;">
+          <div style="display: flex; gap: 10px; padding: 8px 14px; opacity: 0.42;">
+            <span style="width: 30px; flex-shrink: 0; font-size: 26px; font-weight: 700; line-height: 1.1;">1</span>
+            <span style="font-size: 22px; font-weight: 600; line-height: 1.2; text-decoration: line-through;">Plato combinado de ternera</span>
+          </div>
+          <div style="display: flex; gap: 10px; padding: 8px 14px; align-items: center; background: rgba(224, 83, 63, 0.16);">
+            <span style="width: 30px; flex-shrink: 0; font-size: 26px; font-weight: 700; line-height: 1.1;">2</span>
+            <div style="flex-grow: 1; display: flex; flex-direction: column;">
+              <span style="font-size: 22px; font-weight: 600; line-height: 1.2;">Croquetas</span>
+              <span style="font-size: 16px; font-weight: 700; color: #FF8A99; margin-top: 2px;">ERAN 3 · −1</span>
+            </div>
+            <button style="flex-shrink: 0; height: 44px; padding: 0 12px; border-radius: 10px; border: 0; background: #F1F3F5; color: #0E1013; font-size: 16px; font-weight: 700;">Visto</button>
+          </div>
+          <div style="display: flex; gap: 10px; padding: 8px 14px;">
+            <span style="width: 30px; flex-shrink: 0; font-size: 26px; font-weight: 700; line-height: 1.1;">1</span>
+            <span style="font-size: 22px; font-weight: 600; line-height: 1.2;">Calamares</span>
+          </div>
+          <div style="margin: 6px 14px 0; padding-top: 8px; border-top: 2px dashed #3A404A; font-size: 13px; font-weight: 700; letter-spacing: 0.08em; color: #9AA2AF;">EN ESPERA · SALE CUANDO LO MARCHEN</div>
+          <div style="display: flex; gap: 10px; padding: 8px 14px; color: #8B93A1;">
+            <span style="width: 30px; flex-shrink: 0; font-size: 26px; font-weight: 700; line-height: 1.1;">1</span>
+            <span style="font-size: 22px; font-weight: 600; line-height: 1.2;">Plato combinado</span>
+          </div>
+        </div>
+        <button style="margin: 0 14px 14px; height: 56px; border-radius: 12px; border: 0; background: #2C313A; color: #F1F3F5; font-size: 22px; font-weight: 600;">Lista</button>
+      </div>
+
+      <!-- 3 · M5 · ámbar, celíaco en silla 3 -->
+      <div style="background: #1A1D23; border-radius: 14px; overflow: hidden; display: flex; flex-direction: column;">
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: #E9A93E; color: #15171B;">
+          <span style="font-size: 34px; font-weight: 700; letter-spacing: -0.02em; line-height: 1;">M5</span>
+          <span style="font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums;">14 min</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #C8102E; color: #FFFFFF;">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+          <div style="display: flex; flex-direction: column;">
+            <span style="font-size: 21px; font-weight: 700; line-height: 1.1;">SILLA 3 · CELÍACO</span>
+            <span style="font-size: 15px; font-weight: 600; opacity: 0.9;">Gluten</span>
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 6px; padding: 10px 0;">
+          <div style="margin: 0 10px; border: 2px solid #FF5A6E; border-radius: 12px; overflow: hidden;">
+            <div style="padding: 4px 10px; background: #C8102E; color: #FFFFFF; font-size: 13px; font-weight: 700; letter-spacing: 0.06em;">SILLA 3 · SIN GLUTEN</div>
+            <div style="display: flex; gap: 10px; padding: 8px 10px;">
+              <span style="width: 30px; flex-shrink: 0; font-size: 26px; font-weight: 700; line-height: 1.1;">1</span>
+              <span style="font-size: 22px; font-weight: 600; line-height: 1.2;">Magro con tomate</span>
+            </div>
+          </div>
+          <div class="alerta" style="margin: 0 10px; border-radius: 12px; overflow: hidden; background: #C8102E; color: #FFFFFF;">
+            <div style="padding: 4px 10px; background: #7A0A1C; font-size: 13px; font-weight: 700; letter-spacing: 0.06em;">SILLA 3 · ¡LLEVA GLUTEN!</div>
+            <div style="display: flex; gap: 10px; padding: 8px 10px;">
+              <span style="width: 30px; flex-shrink: 0; font-size: 26px; font-weight: 700; line-height: 1.1;">1</span>
+              <span style="font-size: 22px; font-weight: 700; line-height: 1.2;">Patatas bravas</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 10px; padding: 8px 14px;">
+            <span style="width: 30px; flex-shrink: 0; font-size: 26px; font-weight: 700; line-height: 1.1;">2</span>
+            <div style="display: flex; flex-direction: column; gap: 4px; align-items: flex-start;">
+              <span style="font-size: 22px; font-weight: 600; line-height: 1.2;">Croquetas</span>
+              <span style="padding: 2px 8px; border-radius: 6px; border: 1.5px solid #FF8A99; color: #FF8A99; font-size: 14px; font-weight: 700;">lleva gluten</span>
+            </div>
+          </div>
+        </div>
+        <button style="margin: 0 14px 14px; height: 56px; border-radius: 12px; border: 0; background: #2C313A; color: #F1F3F5; font-size: 22px; font-weight: 600;">Lista</button>
+      </div>
+
+      <!-- 4 · B2 · 2ª comanda con anulado -->
+      <div style="background: #1A1D23; border-radius: 14px; overflow: hidden; display: flex; flex-direction: column;">
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: #8FD9A8; color: #15171B;">
+          <div style="display: flex; flex-direction: column;">
+            <span style="font-size: 34px; font-weight: 700; letter-spacing: -0.02em; line-height: 1;">B2</span>
+            <span style="font-size: 13px; font-weight: 700; letter-spacing: 0.08em; margin-top: 2px;">2ª COMANDA</span>
+          </div>
+          <span style="font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums;">9 min</span>
+        </div>
+        <div style="display: flex; flex-direction: column; padding: 6px 0;">
+          <div style="display: flex; gap: 10px; padding: 8px 14px;">
+            <span style="width: 30px; flex-shrink: 0; font-size: 26px; font-weight: 700; line-height: 1.1;">1</span>
+            <span style="font-size: 22px; font-weight: 600; line-height: 1.2;">Torrezno</span>
+          </div>
+          <div style="display: flex; gap: 10px; padding: 8px 14px;">
+            <span style="width: 30px; flex-shrink: 0; font-size: 26px; font-weight: 700; line-height: 1.1;">1</span>
+            <div style="display: flex; flex-direction: column;">
+              <span style="font-size: 22px; font-weight: 600; line-height: 1.2;">Montado</span>
+              <span style="font-size: 17px; font-weight: 600; color: #F6CF7A; margin-top: 2px;">— sin tomate</span>
+            </div>
+          </div>
+          <div class="alerta" style="display: flex; gap: 10px; padding: 8px 14px; align-items: center; color: #FFFFFF;">
+            <span style="width: 30px; flex-shrink: 0; font-size: 26px; font-weight: 700; line-height: 1.1; text-decoration: line-through;">1</span>
+            <div style="flex-grow: 1; display: flex; flex-direction: column;">
+              <span style="font-size: 22px; font-weight: 600; line-height: 1.2; text-decoration: line-through;">Chopitos</span>
+              <span style="font-size: 15px; font-weight: 700; letter-spacing: 0.06em; margin-top: 2px;">ANULADO</span>
+            </div>
+            <button style="flex-shrink: 0; height: 44px; padding: 0 12px; border-radius: 10px; border: 0; background: #FFFFFF; color: #0E1013; font-size: 16px; font-weight: 700;">Visto</button>
+          </div>
+        </div>
+        <button style="margin: 0 14px 14px; height: 56px; border-radius: 12px; border: 0; background: #2C313A; color: #F1F3F5; font-size: 22px; font-weight: 600;">Lista</button>
+      </div>
+    </div>
+
+    <!-- +2 nuevas que no caben -->
+    <div class="nueva" style="width: 60px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; background: #1A1D23; border-left: 1px solid #23272E;">
+      <span style="font-size: 30px; font-weight: 700;">+2</span>
+      <span style="font-size: 14px; font-weight: 700; color: #8FD9A8;">nuevas</span>
+      <span style="font-size: 13px; font-weight: 600; color: #9AA2AF; text-align: center; line-height: 1.2;">M1<br>T2</span>
+    </div>
+
+    <!-- Listas -->
+    <div style="width: 160px; flex-shrink: 0; display: flex; flex-direction: column; gap: 10px; padding: 12px; box-sizing: border-box; background: #14171B; border-left: 1px solid #23272E;">
+      <span style="font-size: 13px; font-weight: 700; letter-spacing: 0.1em; color: #9AA2AF;">LISTAS</span>
+      <div style="display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 12px; background: #8FD9A8; color: #15171B;">
+        <span style="font-size: 28px; font-weight: 700; line-height: 1;">M6</span>
+        <span style="font-size: 14px; font-weight: 600;">esperando · 3 min</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 12px; background: #8FD9A8; color: #15171B;">
+        <span style="font-size: 28px; font-weight: 700; line-height: 1;">B4</span>
+        <span style="font-size: 14px; font-weight: 600;">esperando · 1 min</span>
+      </div>
+      <span style="flex-grow: 1;"></span>
+      <span style="font-size: 14px; color: #9AA2AF; line-height: 1.35;">Se van solas cuando el camarero marca «Servido».</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

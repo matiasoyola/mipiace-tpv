@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>TPV · comanda con cocina</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#F2A08F}a:hover{color:#FFFFFF}
+button{font-family:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="width: 1443px; height: 812px; box-sizing: border-box; display: flex; flex-direction: column; background: #0E1013; font-family: 'DM Sans', system-ui, sans-serif; color: #F1F3F5;">
+
+  <!-- Banda LISTO -->
+  <div style="height: 56px; flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: #14241B; border-bottom: 1px solid #23272E;">
+    <button style="height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-radius: 12px; border: 0; background: #8FD9A8; color: #15171B; font-size: 20px; font-weight: 700;">
+      <span>M6 · listo para servir</span>
+      <span style="font-size: 14px; font-weight: 600; opacity: 0.8;">toca = Servido</span>
+    </button>
+    <button style="height: 44px; padding: 0 16px; border-radius: 12px; border: 0; background: #8FD9A8; color: #15171B; font-size: 20px; font-weight: 700;">B4 · listo</button>
+  </div>
+
+  <div style="flex-grow: 1; min-height: 0; display: flex;">
+
+    <!-- Comanda -->
+    <div style="width: 470px; flex-shrink: 0; display: flex; flex-direction: column; background: #171A1F; border-right: 1px solid #23272E; position: relative;">
+      <div style="height: 72px; flex-shrink: 0; display: flex; align-items: center; gap: 12px; padding: 0 16px;">
+        <a href="#" style="display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: 14px; background: #23272E; color: #F1F3F5; text-decoration: none;" aria-label="Volver a mesas">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </a>
+        <div style="display: flex; flex-direction: column; flex-grow: 1;">
+          <span style="font-size: 26px; font-weight: 600; letter-spacing: -0.015em; line-height: 1.1;">M5</span>
+          <span style="font-size: 15px; color: #9AA2AF;">Salón · 4 comensales</span>
+        </div>
+        <button style="height: 48px; display: flex; align-items: center; gap: 8px; padding: 0 14px; border-radius: 12px; border: 0; background: #C8102E; color: #FFFFFF; font-size: 17px; font-weight: 700;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+          Silla 3 · gluten
+        </button>
+      </div>
+
+      <div style="flex-grow: 1; padding: 4px 12px; display: flex; flex-direction: column; gap: 4px; overflow: hidden;">
+        <div style="padding: 6px 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.1em; color: #9AA2AF;">EN COCINA · 13:27</div>
+
+        <!-- Línea enviada: − con contorno rojo -->
+        <div style="display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; border-radius: 12px; color: #C3C9D2;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <button style="flex-shrink: 0; width: 56px; height: 56px; border-radius: 14px; border: 2px solid #FF5A6E; background: transparent; color: #FF8A99; font-size: 30px; font-weight: 600; line-height: 1;" aria-label="Anular una">−</button>
+            <span style="flex-shrink: 0; width: 28px; text-align: center; font-size: 23px; font-weight: 600; font-variant-numeric: tabular-nums;">1</span>
+            <button style="flex-shrink: 0; width: 56px; height: 56px; border-radius: 14px; border: 0; background: #2C313A; color: #FFFFFF; font-size: 30px; font-weight: 600; line-height: 1;" aria-label="Una más">+</button>
+            <span style="flex-grow: 1; min-width: 0; font-size: 21px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Magro con tomate</span>
+            <span style="flex-shrink: 0; font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums;">10,00 €</span>
+          </div>
+          <div style="display: flex; gap: 8px; padding-left: 4px;">
+            <span style="height: 32px; display: flex; align-items: center; padding: 0 10px; border-radius: 8px; background: #C8102E; color: #FFFFFF; font-size: 14px; font-weight: 700;">→ Silla 3</span>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 12px; color: #C3C9D2;">
+          <button style="flex-shrink: 0; width: 56px; height: 56px; border-radius: 14px; border: 2px solid #FF5A6E; background: transparent; color: #FF8A99; font-size: 30px; font-weight: 600; line-height: 1;" aria-label="Anular una">−</button>
+          <span style="flex-shrink: 0; width: 28px; text-align: center; font-size: 23px; font-weight: 600; font-variant-numeric: tabular-nums;">2</span>
+          <button style="flex-shrink: 0; width: 56px; height: 56px; border-radius: 14px; border: 0; background: #2C313A; color: #FFFFFF; font-size: 30px; font-weight: 600; line-height: 1;" aria-label="Una más">+</button>
+          <span style="flex-grow: 1; min-width: 0; font-size: 21px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Croquetas</span>
+          <span style="flex-shrink: 0; font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums;">20,00 €</span>
+        </div>
+
+        <div style="padding: 12px 8px 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.1em; color: #F2A08F;">SIN ENVIAR</div>
+
+        <!-- Sin enviar: bravas para la silla 3, con aviso de gluten -->
+        <div style="display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; border-radius: 14px; background: rgba(233,112,88,0.14);">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <button style="flex-shrink: 0; width: 56px; height: 56px; border-radius: 14px; border: 0; background: #2C313A; color: #FFFFFF; font-size: 30px; font-weight: 600; line-height: 1;" aria-label="Una menos">−</button>
+            <span style="flex-shrink: 0; width: 28px; text-align: center; font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums;">1</span>
+            <button style="flex-shrink: 0; width: 56px; height: 56px; border-radius: 14px; border: 0; background: #2C313A; color: #FFFFFF; font-size: 30px; font-weight: 600; line-height: 1;" aria-label="Una más">+</button>
+            <span style="flex-grow: 1; min-width: 0; font-size: 23px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Patatas bravas</span>
+            <span style="flex-shrink: 0; font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums;">10,00 €</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; padding-left: 4px;">
+            <button style="height: 44px; padding: 0 12px; border-radius: 10px; border: 0; background: #C8102E; color: #FFFFFF; font-size: 16px; font-weight: 700;">→ Silla 3</button>
+            <button style="height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid #3A404A; background: transparent; color: #C3C9D2; font-size: 16px; font-weight: 600;">Espera</button>
+            <span style="font-size: 15px; font-weight: 700; color: #FF8A99;">¡Lleva gluten!</span>
+          </div>
+        </div>
+
+        <!-- Sin enviar: plato combinado en espera -->
+        <div style="display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; border-radius: 14px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <button style="flex-shrink: 0; width: 56px; height: 56px; border-radius: 14px; border: 0; background: #2C313A; color: #FFFFFF; font-size: 30px; font-weight: 600; line-height: 1;" aria-label="Una menos">−</button>
+            <span style="flex-shrink: 0; width: 28px; text-align: center; font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums;">1</span>
+            <button style="flex-shrink: 0; width: 56px; height: 56px; border-radius: 14px; border: 0; background: #2C313A; color: #FFFFFF; font-size: 30px; font-weight: 600; line-height: 1;" aria-label="Una más">+</button>
+            <span style="flex-grow: 1; min-width: 0; font-size: 23px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Plato combinado</span>
+            <span style="flex-shrink: 0; font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums;">9,00 €</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; padding-left: 4px;">
+            <button style="height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid #3A404A; background: transparent; color: #C3C9D2; font-size: 16px; font-weight: 600;">→ Silla 3</button>
+            <button style="height: 44px; padding: 0 12px; border-radius: 10px; border: 0; background: #F1F3F5; color: #0E1013; font-size: 16px; font-weight: 700;">En espera</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Deshacer -->
+      <div style="margin: 0 12px 10px; height: 52px; display: flex; align-items: center; gap: 12px; padding: 0 8px 0 16px; border-radius: 12px; background: #F1F3F5; color: #0E1013;">
+        <span style="flex-grow: 1; font-size: 18px; font-weight: 600;">Croquetas −1 · a cocina en 4 s</span>
+        <button style="height: 40px; padding: 0 14px; border-radius: 10px; border: 0; background: #0E1013; color: #FFFFFF; font-size: 16px; font-weight: 700;">Deshacer</button>
+      </div>
+
+      <div style="padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 12px; border-top: 1px solid #23272E;">
+        <div style="display: flex; justify-content: space-between; align-items: baseline;">
+          <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.1em; color: #9AA2AF;">TOTAL</span>
+          <span style="font-size: 46px; font-weight: 600; letter-spacing: -0.025em; font-variant-numeric: tabular-nums;">49,00 €</span>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <button style="width: 112px; flex-shrink: 0; height: 68px; border-radius: 16px; border: 1px solid #3A404A; background: transparent; color: #F1F3F5; font-size: 17px; font-weight: 700;">Urgente</button>
+          <button style="flex: 1; height: 68px; border-radius: 16px; border: 1px solid #3A404A; background: transparent; color: #F1F3F5; font-size: 20px; font-weight: 600;">Enviar</button>
+          <button style="flex: 1.2; height: 68px; border-radius: 16px; border: 0; background: #E97058; color: #FFFFFF; font-size: 22px; font-weight: 600;">Cobrar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Productos: Raciones -->
+    <div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; padding: 16px; gap: 14px; box-sizing: border-box;">
+      <div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; flex-shrink: 0;">
+        <sc-for list="{{fams}}" as="f" hint-placeholder-count="10">
+          <button style="height: 64px; border: 0; border-radius: 14px; font-size: 21px; font-weight: 600; {{f.style}}">{{f.label}}</button>
+        </sc-for>
+      </div>
+      <div style="height: 1px; background: #23272E; flex-shrink: 0;"></div>
+      <div style="flex-grow: 1; min-height: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: repeat(4, minmax(0, 1fr)); gap: 8px;">
+        <sc-for list="{{items}}" as="p" hint-placeholder-count="14">
+          <button style="border: 0; border-radius: 12px; padding: 0 16px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 10px; text-align: left; background: #96D9B4; color: #15171B;">
+            <span style="font-size: 24px; font-weight: 600; line-height: 1.1; letter-spacing: -0.01em;">{{p.name}}</span>
+            <sc-if value="{{p.hasQty}}" hint-placeholder-val="{{false}}">
+              <span style="flex-shrink: 0; min-width: 40px; height: 40px; padding: 0 8px; box-sizing: border-box; border-radius: 10px; background: #15171B; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 600;">{{p.qty}}</span>
+            </sc-if>
+          </button>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1443,"height":812}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const C = [
+      ['Cafés','#F3B992'],['Desayunos','#CACD8C'],['Cervezas','#E1C487'],['Refrescos','#86D5EE'],
+      ['Vinos','#D8B8F1'],['Licores','#A7C9FF'],['Raciones','#96D9B4'],['Bocatas','#F3B1CF'],['Platos','#B0D49D']
+    ];
+    const fams = [{ label: 'Ahora', style: 'background: #23272E; color: #F1F3F5;' }].concat(
+      C.map(([label, c]) => ({ label, style: label === 'Raciones'
+        ? `background: ${c}; color: #15171B; box-shadow: 0 0 0 3px #0E1013, 0 0 0 6px ${c};`
+        : `background: ${c}; color: #15171B;` })));
+    const names = ['Ensaladilla rusa','Alitas de pollo','Gambas al ajillo','Chopitos','Fingers de pollo','Croquetas','Patatas bravas','Patatas alioli','Queso curado','Jamón serrano','Magro con tomate','Calamares','Torrezno','Torrezno especial'];
+    const q = { 'Croquetas': 2, 'Patatas bravas': 1, 'Magro con tomate': 1 };
+    const items = names.map(name => ({ name, hasQty: !!q[name], qty: '×' + (q[name] || 0) }));
+    return { fams, items };
+  }
+}
+</script>
+</body>
+</html>
