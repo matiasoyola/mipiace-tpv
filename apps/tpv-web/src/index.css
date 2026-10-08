@@ -54,7 +54,9 @@
      · a 1 s, una cocina con seis comandas nuevas sería una discoteca.
 
    Y **sube y baja el fondo, sin destello seco**: por eso la curva es
-   `ease-in-out` y el extremo es un fondo un peldaño más claro, no blanco.
+   `ease-in-out` y el extremo es un peldaño del mismo color, no un blanco.
+   Los dos extremos salen de la maqueta (`docs/kds/maqueta/Main.dc.html`,
+   `@keyframes pulso` y `@keyframes pulsorojo`).
 
    NUNCA LA PANTALLA ENTERA: estas tres clases se ponen en la tarjeta o en
    la línea, jamás en un contenedor de página. Lo que parpadea es lo que
@@ -63,29 +65,31 @@
    `prefers-reduced-motion`: se quita la animación y queda el fondo del
    extremo FIJO. No se queda sin aviso — se queda sin movimiento. */
 
-@keyframes kds-pulso-neutro {
+@keyframes kds-pulso-tarjeta {
   0%,
   100% {
-    background-color: #171a1f;
+    background-color: #1a1d23;
   }
   50% {
-    background-color: #272c35;
+    background-color: #2b4636;
   }
 }
 
-/* El pico del pulso rojo es un ROJO APAGADO, no el rojo de la alarma.
-   Lo enseñó la primera captura del bucle visual: con `#7E2318` la tarjeta
-   entera se leía como «esta comanda es roja» y no como «esta comanda
-   parpadea», y entonces la franja «⚡ URGENTE» y el «¡LLEVA GLUTEN!»
-   dejaban de destacar sobre ella — la regla del rojo deshecha por el
-   propio aviso. */
+/* EL PULSO DE LA ALARMA, y lo que kds-1b corrigió en él.
+   Antes iba de `inherit` a `#4A1610` y se ponía en la TARJETA ENTERA: el
+   cuerpo de la T4 y el de la M5 salían rojo oscuro y la franja «URGENTE»
+   dejaba de destacar sobre ellos — la regla del rojo deshecha por el
+   propio aviso.
+   Ahora va de rojo a rojo (`#C8102E` ↔ `#7A0A1C`, la `pulsorojo` de la
+   maqueta) y SÓLO se pone en cajas que ya son rojas: el plato que lleva el
+   alérgeno de su silla y la línea anulada sin «Visto». */
 @keyframes kds-pulso-rojo {
   0%,
   100% {
-    background-color: inherit;
+    background-color: #c8102e;
   }
   50% {
-    background-color: #4a1610;
+    background-color: #7a0a1c;
   }
 }
 
@@ -100,7 +104,7 @@
 }
 
 .kds-pulso-tarjeta {
-  animation: kds-pulso-neutro 2500ms ease-in-out infinite;
+  animation: kds-pulso-tarjeta 2500ms ease-in-out infinite;
 }
 
 .kds-pulso-rojo {
@@ -114,11 +118,11 @@
 @media (prefers-reduced-motion: reduce) {
   .kds-pulso-tarjeta {
     animation: none;
-    background-color: #272c35;
+    background-color: #2b4636;
   }
   .kds-pulso-rojo {
     animation: none;
-    background-color: #4a1610;
+    background-color: #7a0a1c;
   }
   .kds-pulso-ambar {
     animation: none;
