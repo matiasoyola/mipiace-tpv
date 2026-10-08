@@ -545,7 +545,7 @@ fisioterapia y la app iOS. Fuera de alcance declarado.
 
 ## 10 · Verde
 
-- **Suite de unidad: verde.** 329 ficheros, **4.071 tests**, 3 skipped
+- **Suite de unidad: verde.** 329 ficheros, **4.073 tests**, 3 skipped
   (desde 312 / 3.819 en clinica-5). Se corre desde la raíz (`pnpm test`).
 - **e2e contra Postgres de verdad: verde.** 30 ficheros, **521 tests**,
   sobre una base propia de este worktree (`mipiacetpv_clinica6_e2e`), con
@@ -564,10 +564,11 @@ fisioterapia y la app iOS. Fuera de alcance declarado.
 - `apps/api/test/clinica-historia-rutas.test.ts` (25) · el registro de
   accesos, ni un importe para nadie, la historia mezclada, el gate y el
   aislamiento.
-- `apps/tpv-web/test/clinica-historia-pantalla.test.tsx` (21) · la pantalla
+- `apps/tpv-web/test/clinica-historia-pantalla.test.tsx` (23) · la pantalla
   montada: los diez segundos, «hoy toca» con y sin cita, el pie vivo con sus
-  22 zonas medidas sobre el SVG pintado, el espejo, el hueco de las fotos y
-  el detalle sin caja.
+  22 zonas medidas sobre el SVG pintado, el espejo, **los dos pies en una
+  fila con su columna reservada**, el hueco de las fotos y el detalle sin
+  caja.
 
 ---
 
@@ -583,8 +584,16 @@ bed80ef feat(clinica-6): la historia viva en la API, con su registro de accesos
 47c6e26 test(clinica-6): el mínimo táctil se mide sobre el SVG pintado
 f156d88 test(clinica-6): queda atado qué pie se espeja
 e4ee7c6 fix(clinica-6): el bucle visual, y tres fallos que ninguna suite veía
-<este>  docs(clinica-6): el done del bloque
+a9c82f2 docs(clinica-6): el done del bloque
+dd92db2 docs(clinica-6): el resultado de la CI y el estado de la rama
+557cf36 fix(clinica-6): los dos pies lado a lado a 1024, no uno bajo el pliegue
+a051740 docs(clinica-6): las capturas de 1024 y 390 rehechas, y el porqué del móvil
+<este>  docs(clinica-6): el done, tras la revisión del PR
 ```
+
+Los dos últimos salen de la **revisión del PR #17**: a 1024 los dos pies se
+apilaban y el derecho quedaba bajo el pliegue. Ver §3, §5.5 y los sabotajes
+38–41.
 
 ---
 
