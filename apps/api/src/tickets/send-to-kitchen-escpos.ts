@@ -1,18 +1,23 @@
-// v1.4-Impresoras-Fase-1 Lote 2 (refactor Lote 4) · enviar comandas
-// vía ESC/POS WIFI.
+// v1.4-Impresoras-Fase-1 Lote 2 (refactor Lote 4) · enviar comandas vía
+// ESC/POS WIFI. kds-1-cocina · y a la PANTALLA, y por diferencias.
 //
 //   POST /tickets/:ticketId/send-to-kitchen/escpos
 //
 // Mismo comportamiento que `/send-to-kitchen` (sin fallback PDF). Se
 // mantiene como URL hermana para que el TPV pueda llamar a la versión
-// "limpia" sin riesgo de degradación accidental al endpoint legacy.
-// Toda la lógica vive en `kitchen-dispatch.ts`.
+// «limpia» sin riesgo de degradación accidental al endpoint legacy.
+// Toda la lógica vive en `kitchen/envio.ts`; la traducción a HTTP, en
+// `send-to-kitchen.ts`.
+//
+// El nombre ya no es exacto —esta URL manda a pantallas tanto como a
+// impresoras— y se queda igual a propósito: es la que el TPV desplegado
+// llama, y renombrarla obligaría a desplegar las dos cosas a la vez.
 
 import type { FastifyInstance } from "fastify";
 
 import { requireCashierSession } from "../shift/cashier-session.js";
-import { dispatchKitchenTicket } from "./kitchen-dispatch.js";
 import { ensureCajaEnabled } from "../lib/caja-gate.js";
+import { ENVIO_BODY_SCHEMA, responderEnvio } from "./send-to-kitchen.js";
 
 export async function registerSendToKitchenEscposRoute(
   app: FastifyInstance,
@@ -27,36 +32,26 @@ export async function registerSendToKitchenEscposRoute(
           required: ["ticketId"],
           properties: { ticketId: { type: "string", format: "uuid" } },
         },
+        body: ENVIO_BODY_SCHEMA,
       },
     },
     async (request, reply) => {
       const cashier = request.cashier!;
       const { ticketId } = request.params as { ticketId: string };
-      const result = await dispatchKitchenTicket(ticketId, {
-        tenantId: cashier.tid,
-        registerId: cashier.rid,
-        cashierId: cashier.sub,
-      });
-      if ("kind" in result) {
-        switch (result.kind) {
-          case "not-found":
-            return reply.code(404).send({
-              error: "TICKET_NOT_FOUND_OR_NOT_DRAFT",
-              message: "Sólo se envían comandas de un ticket DRAFT.",
-            });
-          case "register-mismatch":
-            return reply.code(403).send({
-              error: "REGISTER_MISMATCH",
-              message: "El ticket no pertenece a tu caja.",
-            });
-          case "empty":
-            return reply.code(400).send({
-              error: "EMPTY_TICKET",
-              message: "El ticket no tiene líneas. Añade alguna antes de enviar.",
-            });
-        }
-      }
-      return reply.code(result.http).send(result.body);
+      const body = (request.body ?? {}) as {
+        clientSendId?: string;
+        urgent?: boolean;
+      };
+      return responderEnvio(
+        reply,
+        ticketId,
+        {
+          tenantId: cashier.tid,
+          registerId: cashier.rid,
+          cashierId: cashier.sub,
+        },
+        body,
+      );
     },
   );
 }

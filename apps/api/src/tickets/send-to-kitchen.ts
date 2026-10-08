@@ -1,28 +1,22 @@
 // v1.4-Impresoras-Fase-1 Lote 4 · enviar comanda a cocina/barra/salón.
-//
-// Antes (v1.4-Bar-Operativa-MVP Lote 2) este endpoint generaba un PDF
-// por sección y el TPV los abría en pestañas para imprimir desde el
-// navegador. Con Fase 1 de Impresoras (spike 2026-06-02 + POS-80
-// confirmando que rasterizar PDF satura el buffer) lo reemplazamos
-// por ESC/POS plano sobre TCP a cada impresora WIFI.
+// kds-1-cocina · el motor pasa a ser el envío POR DIFERENCIAS.
 //
 //   POST /tickets/:ticketId/send-to-kitchen[?fallback=pdf]
-//     → por defecto: agrupa líneas por sección, manda comanda
-//       ESC/POS por TCP a la impresora WIFI configurada de cada
-//       sección. Devuelve `{revision, sentAt, sections:[{section,
-//       ok, lineCount, error?}]}`.
-//     → `?fallback=pdf`: ruta legacy que aún genera los PDFs en
-//       base64. Pensada como red de seguridad mientras se despliegan
-//       las impresoras en cuentas piloto. Se removerá en una fase
-//       posterior.
 //
-// El TPV (Lote 3 de Impresoras-Fase-1) llama al endpoint hermano
-// `/send-to-kitchen/escpos` que es exactamente lo mismo sin el
-// query param fallback — ambos son alias del mismo `dispatchKitchenTicket`.
+// Antes (v1.4-Bar-Operativa-MVP Lote 2) este endpoint generaba un PDF por
+// sección y el TPV los abría en pestañas. Con Fase 1 de Impresoras se
+// reemplazó por ESC/POS plano sobre TCP. Con kds-1 lo que cambia no es el
+// transporte sino QUÉ se manda: la diferencia y no la mesa entera, con un
+// id de envío idempotente y con tarjetas para las secciones que tienen
+// pantalla. Todo eso vive en `kitchen/envio.ts`.
+//
+// El TPV llama al endpoint hermano `/send-to-kitchen/escpos`, que es
+// exactamente lo mismo sin el query param — los dos son alias del mismo
+// `enviarComanda`.
 
 import type { FastifyInstance } from "fastify";
 
-import { KitchenSection } from "@mipiacetpv/db";
+import { KitchenSection, Prisma } from "@mipiacetpv/db";
 import {
   renderKitchenTicketPdf,
   type KitchenLine,
@@ -32,13 +26,30 @@ import {
 import { getPrisma } from "../context.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
 import { cashierLabelFrom } from "../users/display.js";
-import { dispatchKitchenTicket } from "./kitchen-dispatch.js";
+import { dispatchKitchenTicket, notasDeModificadores } from "./kitchen-dispatch.js";
 import { ensureCajaEnabled } from "../lib/caja-gate.js";
+import { resolverSeccion } from "../kitchen/destinos.js";
 
 interface ProductWithTags {
   id: string;
   tags: string[];
 }
+
+/** El esquema del cuerpo, compartido por las dos URL hermanas. */
+export const ENVIO_BODY_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    // kds-1-cocina · UUID v4 generado EN EL TERMINAL antes de mandar. Es
+    // la llave de idempotencia: un reintento de red con el mismo id
+    // devuelve el mismo resultado sin duplicar la comanda ni reimprimir.
+    // Opcional porque un TPV viejo no lo manda, y entonces el servidor
+    // genera uno que no protege de nada pero deja la fila completa.
+    clientSendId: { type: "string", format: "uuid" },
+    // El camarero tocó «Urgente» junto a «Enviar» (decisión 3).
+    urgent: { type: "boolean" },
+  },
+} as const;
 
 export async function registerSendToKitchenRoute(
   app: FastifyInstance,
@@ -59,49 +70,89 @@ export async function registerSendToKitchenRoute(
             fallback: { type: "string", enum: ["pdf"] },
           },
         },
+        body: ENVIO_BODY_SCHEMA,
       },
     },
     async (request, reply) => {
       const cashier = request.cashier!;
       const { ticketId } = request.params as { ticketId: string };
       const { fallback } = request.query as { fallback?: "pdf" };
+      const body = (request.body ?? {}) as {
+        clientSendId?: string;
+        urgent?: boolean;
+      };
 
       if (fallback === "pdf") {
         return handleLegacyPdfFallback(request, reply, ticketId, cashier);
       }
 
-      const result = await dispatchKitchenTicket(ticketId, {
+      return responderEnvio(reply, ticketId, {
         tenantId: cashier.tid,
         registerId: cashier.rid,
         cashierId: cashier.sub,
-      });
-      if ("kind" in result) {
-        switch (result.kind) {
-          case "not-found":
-            return reply.code(404).send({
-              error: "TICKET_NOT_FOUND_OR_NOT_DRAFT",
-              message: "Sólo se envían comandas de un ticket DRAFT.",
-            });
-          case "register-mismatch":
-            return reply.code(403).send({
-              error: "REGISTER_MISMATCH",
-              message: "El ticket no pertenece a tu caja.",
-            });
-          case "empty":
-            return reply.code(400).send({
-              error: "EMPTY_TICKET",
-              message: "El ticket no tiene líneas. Añade alguna antes de enviar.",
-            });
-        }
-      }
-      return reply.code(result.http).send(result.body);
+      }, body);
     },
   );
 }
 
-// Legacy: genera PDFs por sección sin pasar por impresoras físicas.
-// Útil mientras un piloto no tiene las impresoras desplegadas (el
-// cajero abre cada PDF en pestaña e imprime con el flujo del navegador).
+/**
+ * La traducción de `Envio` a HTTP, compartida por las dos URL.
+ *
+ * El 409 de «falta impresora» ya no existe: una sección sin destino se
+ * marca como enviada y el envío sigue (decisión 2). El 409 que SÍ hay es
+ * nuevo y es otra cosa — dos peticiones del mismo `clientSendId` en vuelo
+ * a la vez.
+ */
+export async function responderEnvio(
+  reply: import("fastify").FastifyReply,
+  ticketId: string,
+  ctx: { tenantId: string; registerId: string; cashierId: string },
+  body: { clientSendId?: string; urgent?: boolean },
+): Promise<unknown> {
+  const result = await dispatchKitchenTicket(ticketId, ctx, {
+    clientSendId: body.clientSendId,
+    urgent: body.urgent,
+  });
+  if (result.kind !== "ok") {
+    switch (result.kind) {
+      case "not-found":
+        return reply.code(404).send({
+          error: "TICKET_NOT_FOUND_OR_NOT_DRAFT",
+          message: "Sólo se envían comandas de un ticket DRAFT.",
+        });
+      case "register-mismatch":
+        return reply.code(403).send({
+          error: "REGISTER_MISMATCH",
+          message: "El ticket no pertenece a tu caja.",
+        });
+      case "empty":
+        return reply.code(400).send({
+          error: "EMPTY_TICKET",
+          message: "El ticket no tiene líneas. Añade alguna antes de enviar.",
+        });
+      case "in-flight":
+        return reply.code(409).send({
+          error: "DISPATCH_IN_FLIGHT",
+          message: "Ese envío ya está en curso. Reintenta en un momento.",
+        });
+    }
+  }
+  return reply.code(result.http).send(result.body);
+}
+
+// Legacy: genera PDFs por sección sin pasar por impresoras físicas. Útil
+// mientras un piloto no tiene las impresoras desplegadas (el cajero abre
+// cada PDF en pestaña e imprime con el flujo del navegador).
+//
+// kds-1-cocina · también va POR DIFERENCIAS y también marca `sentUnits`.
+// No se dejó como estaba a propósito: si este camino bajara
+// `lastSentRevision` sin tocar `sentUnits`, el siguiente envío por ESC/POS
+// volvería a mandar la mesa entera y la invariante central del bloque
+// tendría un agujero del tamaño de un query param.
+//
+// Lo que NO hace es crear tarjetas de pantalla: es un fallback de papel
+// para un piloto sin impresoras, y un piloto sin impresoras no tiene
+// pantalla de cocina. Si la tuviera, usaría la URL normal.
 async function handleLegacyPdfFallback(
   request: import("fastify").FastifyRequest,
   reply: import("fastify").FastifyReply,
@@ -126,6 +177,9 @@ async function handleLegacyPdfFallback(
           productId: true,
           nameSnapshot: true,
           units: true,
+          sentUnits: true,
+          course: true,
+          seat: true,
           modifiers: true,
         },
       },
@@ -173,16 +227,30 @@ async function handleLegacyPdfFallback(
   );
 
   const grouped = new Map<KitchenSection, KitchenLine[]>();
+  const marcadas = new Map<string, number>();
   for (const line of ticket.lines) {
-    const section = resolveSection(line.productId, productTagMap, tagToSection);
+    const pendiente =
+      Math.round((Number(line.units) - Number(line.sentUnits)) * 1000) / 1000;
+    if (pendiente <= 0) continue;
+    const section = resolverSeccion(line.productId, productTagMap, tagToSection);
     const kl: KitchenLine = {
-      units: Number(line.units),
+      units: pendiente,
       description: line.nameSnapshot,
-      notes: extractNotes(line.modifiers),
+      notes: notasDeModificadores(line.modifiers),
     };
     const bucket = grouped.get(section);
     if (bucket) bucket.push(kl);
     else grouped.set(section, [kl]);
+    marcadas.set(line.id, Number(line.units));
+  }
+
+  if (grouped.size === 0) {
+    return reply.code(200).send({
+      revision: ticket.lastSentRevision,
+      sentAt: new Date().toISOString(),
+      nothingNew: true,
+      sections: [],
+    });
   }
 
   const revision = ticket.lastSentRevision + 1;
@@ -219,56 +287,34 @@ async function handleLegacyPdfFallback(
     });
   }
 
-  await prisma.ticket.update({
-    where: { id: ticket.id },
-    data: { lastSentAt: issuedAt, lastSentRevision: revision },
+  await prisma.$transaction(async (tx) => {
+    for (const [lineId, total] of marcadas) {
+      await tx.ticketLine.update({
+        where: { id: lineId },
+        data: { sentUnits: new Prisma.Decimal(total) },
+      });
+    }
+    await tx.ticketCourse.createMany({
+      data: [
+        { ticketId: ticket.id, course: 1, firedAt: issuedAt, firedByUserId: cashier.sub },
+      ],
+      skipDuplicates: true,
+    });
+    await tx.ticket.update({
+      where: { id: ticket.id },
+      data: { lastSentAt: issuedAt, lastSentRevision: revision },
+    });
   });
 
   request.log.info(
-    {
-      tenantId: cashier.tid,
-      ticketId,
-      sections: sections.length,
-    },
+    { tenantId: cashier.tid, ticketId, sections: sections.length },
     "send-to-kitchen LEGACY PDF fallback",
   );
 
   return reply.code(200).send({
     revision,
     sentAt: issuedAt.toISOString(),
+    nothingNew: false,
     sections,
   });
-}
-
-function resolveSection(
-  productId: string | null,
-  productTagMap: Map<string, string[]>,
-  tagToSection: Map<string, KitchenSection>,
-): KitchenSection {
-  if (!productId) return "SALON";
-  const tags = productTagMap.get(productId) ?? [];
-  for (const t of tags) {
-    const sec = tagToSection.get(t);
-    if (sec) return sec;
-  }
-  return "SALON";
-}
-
-function extractNotes(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  const out: string[] = [];
-  for (const entry of raw) {
-    if (typeof entry === "string") {
-      out.push(entry);
-      continue;
-    }
-    if (entry && typeof entry === "object") {
-      const e = entry as { label?: unknown; groupName?: unknown };
-      const label = typeof e.label === "string" ? e.label : null;
-      const group = typeof e.groupName === "string" ? e.groupName : null;
-      if (label && group) out.push(`${group}: ${label}`);
-      else if (label) out.push(label);
-    }
-  }
-  return out;
 }

@@ -90,12 +90,35 @@ export async function requireDeviceToken(
       tenantId: true,
       registerId: true,
       revokedAt: true,
+      kind: true,
     },
   });
   if (!device || device.revokedAt) {
     reply
       .code(401)
       .send({ error: "DEVICE_REVOKED", message: "Dispositivo revocado o desconocido" });
+    return;
+  }
+  // kds-1-cocina (decisión 1) · UNA PANTALLA DE COCINA NO ES UN TPV.
+  //
+  // Este preHandler es la puerta de TODAS las rutas del TPV —cobro, turno,
+  // registro de facturación, arqueo, cierre, catálogo, devoluciones— y
+  // también la del login de cajero. Cortar aquí es lo que hace que un
+  // dispositivo `KITCHEN` no pueda cobrar, abrir turno ni emitir un
+  // registro: el 403 cae ANTES del PIN, así que nunca llega a tener una
+  // sesión de cajero con la que intentarlo.
+  //
+  // Aquí y no en cada ruta a propósito. Son decenas, y acordarse de añadir
+  // un `if` en cada una es la forma de que falte en la próxima; igual que
+  // el trigger `devices_revoke_previous` está en la base y no en
+  // `POST /devices/pair`. Las rutas de cocina tienen su propia puerta
+  // (`kitchen/auth.ts`), que es la única que acepta un `KITCHEN`.
+  if (device.kind === "KITCHEN") {
+    reply.code(403).send({
+      error: "KITCHEN_DEVICE_NOT_ALLOWED",
+      message:
+        "Una pantalla de cocina no vende: ni cobra, ni abre turno, ni emite registros.",
+    });
     return;
   }
   request.device = {
