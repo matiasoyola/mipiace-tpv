@@ -37,8 +37,6 @@ import { KitchenScreen } from "../src/kitchen/KitchenScreen.js";
 import type { Comanda, KitchenMe, VistaCocina } from "../src/kitchen/types.js";
 import {
   ALERGIA_PX,
-  AMBAR_NOTA,
-  NOTA_PX,
   PULSO_CLASS_ROJO,
   PULSO_CLASS_TARJETA,
   ROJO_ALERGIA,
@@ -590,9 +588,11 @@ describe("kds-1b · SABOTAJE · la franja de alergia y los modificadores", () =>
     );
     await render();
     const franja = $('[data-testid="kds-franja-alergia"]')!;
-    expect(franja.style.background).toBe(rgb(ROJO_ALERGIA));
+    expect(franja.style.background).toBe("rgb(200, 16, 46)");
     const titulo = $('[data-testid="kds-franja-alergia-titulo"]')!;
     expect(titulo.textContent).toBe("SILLA 3 · CELÍACO");
+    // 21 a pelo, por lo mismo: contra `ALERGIA_PX` el sabotaje se
+    // llevaría el listón consigo.
     expect(Number.parseInt(titulo.style.fontSize, 10)).toBeGreaterThanOrEqual(21);
     expect($('[data-testid="kds-franja-alergia-alergeno"]')!.textContent).toBe(
       "Gluten",
@@ -608,10 +608,14 @@ describe("kds-1b · SABOTAJE · la franja de alergia y los modificadores", () =>
       ]),
     );
     await render();
+    // **LOS NÚMEROS, A PELO.** Contra el token no valdría: bajar
+    // `NOTA_PX` a 13 bajaría también el listón del test y el sabotaje
+    // pasaría en verde. Es la misma debilidad que encontró el sabotaje de
+    // «la alergia llega a `Client`» en kds-1 (§4.1).
     const nota = $('[data-testid="kds-nota"]')!;
     expect(nota.textContent).toBe("— Sin limón");
-    expect(Number.parseInt(nota.style.fontSize, 10)).toBeGreaterThanOrEqual(NOTA_PX);
-    expect(nota.style.color).toBe(rgb(AMBAR_NOTA));
+    expect(Number.parseInt(nota.style.fontSize, 10)).toBeGreaterThanOrEqual(17);
+    expect(nota.style.color).toBe("rgb(246, 207, 122)");
     expect(nota.style.fontWeight).toBe("600");
   });
 });

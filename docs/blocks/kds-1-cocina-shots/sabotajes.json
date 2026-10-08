@@ -118,5 +118,53 @@
     "titulo": "La alergia llega a Client",
     "estado": "ROJO",
     "mensaje": "expected '\\n  clientId String?  @map(\"client_id…' not to match /client/i"
+  },
+  {
+    "id": "cuerpo-rojo",
+    "titulo": "Fondo rojo en el cuerpo de una tarjeta urgente o con alergia",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: urgente: expected 'rgb(74, 22, 16)' to be 'rgb(26, 29, 35)' // Object.is equality"
+  },
+  {
+    "id": "franja-sin-rojo",
+    "titulo": "Franja de alergia sin fondo rojo",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected 'rgb(35, 39, 46)' to be 'rgb(200, 16, 46)' // Object.is equality"
+  },
+  {
+    "id": "franja-pequena",
+    "titulo": "Franja de alergia con menos de 21 px",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected 16 to be greater than or equal to 21"
+  },
+  {
+    "id": "modificador-pequeno",
+    "titulo": "Modificador a menos de 17 px",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected 13 to be greater than or equal to 17"
+  },
+  {
+    "id": "modificador-gris",
+    "titulo": "Modificador en gris",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected 'rgb(139, 147, 161)' to be 'rgb(246, 207, 122)' // Object.is equality"
+  },
+  {
+    "id": "tres-columnas",
+    "titulo": "3 columnas a 1280 px",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected 3 to be 4 // Object.is equality"
+  },
+  {
+    "id": "mas-n-rojo",
+    "titulo": "«+N» en rojo sin ninguna oculta en rojo",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected 'rojo' to be 'verde' // Object.is equality (y dos veces «expected 'rojo' to be 'neutro'»)"
+  },
+  {
+    "id": "coral-fuera-de-cobrar",
+    "titulo": "Coral en un botón de la comanda que no sea «Cobrar»",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected [ 'boton-marchar', 'comanda-cobrar' ] to deeply equal [ 'comanda-cobrar' ]"
   }
 ]
