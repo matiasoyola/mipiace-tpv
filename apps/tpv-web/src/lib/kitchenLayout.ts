@@ -58,8 +58,14 @@ export interface TarjetaMedible {
 // ── Las piezas de una tarjeta, en píxeles ─────────────────────────────
 
 /** Padding arriba + abajo del cuerpo de la tarjeta. */
-const PADDING_PX = 24;
-/** La cabecera del semáforo: mesa y minutos en grande, más el eyebrow. */
+const PADDING_PX = 16;
+/**
+ * La cabecera del semáforo: mesa y minutos en grande, más el eyebrow de
+ * «2ª COMANDA» / la sección / «LLEGÓ TARDE».
+ *
+ * El eyebrow comparte fila con nada —va debajo— pero su línea es la que
+ * hace que la cabecera mida esto. 20 px de respiro arriba y abajo.
+ */
 const CABECERA_PX = MESA_PX + EYEBROW_COCINA_PX + 20;
 /** La franja «⚡ URGENTE». */
 const FRANJA_URGENTE_PX = URGENTE_PX + 18;
@@ -86,6 +92,35 @@ const PIE_PX = LISTA_HEIGHT_PX + 12;
  * menos sería apostar a que ningún plato de ninguna carta se parte.
  */
 const MARGEN_SEGURIDAD_PX = 12;
+
+/**
+ * **CUÁNTAS COMANDAS CABEN DE VERDAD, y la diferencia con la decisión 7.**
+ *
+ * La decisión 7 pide «unas 8 comandas normales en 1280 × 800 sin
+ * desplazar». Con los tokens de este bloque **entran 6**, y las que sobran
+ * van al indicador «+N» — que es exactamente el mecanismo que la misma
+ * decisión 7 manda usar en vez de paginar.
+ *
+ * La aritmética, para que se pueda discutir con números:
+ *
+ *   zona de tarjetas a 1280 × 800 ≈ 1016 × 696 px
+ *     (1280 − 240 de la columna «Listas» − 24 de padding;
+ *      800 − 72 de la barra superior − 32 de padding)
+ *   tarjeta de TRES platos = 16 (padding) + 73 (cabecera) + 168 (3 × 56)
+ *                            + 68 (pie «Lista») + 12 (margen) = 337 px
+ *   dos filas = 337 × 2 + 16 = 690 ≤ 696  →  2 × 3 = **6 tarjetas**
+ *   tres filas = 337 × 3 + 32 = 1.043  →  no cabe
+ *
+ * Subirlo a 8 exigía CUATRO columnas, o sea tarjetas de 244 px. A 244 px,
+ * «Croquetas de jamón» a 26 px ya no cabe en una línea, y el nombre del
+ * plato es lo primero que la decisión 3 manda que se lea. Entre ver ocho
+ * nombres partidos y ver seis enteros con dos en el indicador, se elige lo
+ * segundo: el indicador nombra las mesas que faltan y entran en cuanto
+ * salen las primeras.
+ *
+ * Queda anotado como diferencia en el `-done`.
+ */
+export const TARJETAS_NORMALES_A_1280 = 6;
 
 /** La altura que ocupará esta tarjeta. Estimada por lo alto. */
 export function altoTarjeta(t: TarjetaMedible): number {

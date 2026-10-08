@@ -101,6 +101,52 @@ export function estadoCocinaVacio(): EstadoCocinaMesa {
   };
 }
 
+/**
+ * Normaliza lo que llega de `GET /tickets/:id/kitchen` a un estado COMPLETO.
+ *
+ * No es paranoia defensiva: es que **la comanda es la pantalla de la venta
+ * y no puede caerse por una respuesta rara**. Tres caminos reales dan un
+ * 200 con la forma incompleta:
+ *
+ *   · un terminal con el bundle nuevo contra una API vieja, que es lo
+ *     normal durante los minutos de un despliegue;
+ *   · un proxy o una pantalla cautiva que devuelve un 200 con otro cuerpo;
+ *   · un banco de pruebas que no conoce esta ruta.
+ *
+ * Sin esto, un `allergies` ausente tiraba el render entero de la comanda
+ * —`estado.allergies.length` sobre `undefined`— y el camarero se quedaba
+ * con la pantalla en blanco en mitad de una mesa. Lo encontraron dos
+ * ficheros de tests de v1.12 al correr la suite completa.
+ */
+export function normalizarEstado(raw: unknown): EstadoCocinaMesa {
+  const vacio = estadoCocinaVacio();
+  if (!raw || typeof raw !== "object") return vacio;
+  const r = raw as Partial<EstadoCocinaMesa>;
+  const destinos = { ...vacio.destinations };
+  if (r.destinations && typeof r.destinations === "object") {
+    for (const sec of ["BARRA", "COCINA", "SALON"] as const) {
+      const d = (r.destinations as Record<string, unknown>)[sec];
+      if (d && typeof d === "object") {
+        const x = d as Partial<DestinoSeccionTpv>;
+        destinos[sec] = {
+          screen: x.screen === true,
+          printer: x.printer === true,
+          canCorrectSent: x.canCorrectSent === true,
+        };
+      }
+    }
+  }
+  return {
+    diners: typeof r.diners === "number" ? r.diners : null,
+    revision: typeof r.revision === "number" ? r.revision : 0,
+    lines: Array.isArray(r.lines) ? r.lines : [],
+    firedCourses: Array.isArray(r.firedCourses) ? r.firedCourses : [],
+    allergies: Array.isArray(r.allergies) ? r.allergies : [],
+    orders: Array.isArray(r.orders) ? r.orders : [],
+    destinations: destinos,
+  };
+}
+
 /** Cuántas unidades de esta línea tiene la cocina. 0 si no la conoce. */
 export function unidadesEnCocina(
   estado: EstadoCocinaMesa,

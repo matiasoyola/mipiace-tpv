@@ -117,11 +117,20 @@ export const VERDE_LISTA_TEXT = "#FFFFFF";
 // la comanda del TPV.
 // ──────────────────────────────────────────────────────────────────────
 
-/** La mesa. Lo primero que se busca. */
-export const MESA_PX = 44;
+/**
+ * La mesa. Lo primero que se busca.
+ *
+ * 40 y no 44: a 44 px, una tarjeta de tres platos medía 349 px y a
+ * 1280 × 800 sólo entraban tres (una fila). Los 4 px de la cabecera, más 8
+ * de padding, son lo que hace que entren DOS filas. Medido en
+ * `kitchenLayout.ts` y comprobado en `kds-pantalla-pura.test.ts`: el
+ * número está en el test, así que subirlo otra vez pone el reparto en rojo
+ * en vez de descubrirse en la pared de una cocina.
+ */
+export const MESA_PX = 40;
 
 /** Los minutos, al lado de la mesa y del mismo peso. */
-export const MINUTOS_PX = 40;
+export const MINUTOS_PX = 36;
 
 /** «2ª COMANDA», «BARRA», «llegó tarde». */
 export const EYEBROW_COCINA_PX = 13;

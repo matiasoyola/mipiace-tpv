@@ -22,6 +22,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, apiWithCashier } from "../../api.js";
 import {
   estadoCocinaVacio,
+  normalizarEstado,
   type EstadoCocinaMesa,
 } from "../../lib/kitchenComanda.js";
 import { printEscposUsb } from "../../lib/escposPrint.js";
@@ -99,19 +100,33 @@ export function useKitchenMesa(opts: {
   const [pantallas, setPantallas] = useState<EstadoPantallas | null>(null);
 
   const recargar = useCallback(() => {
-    if (!moduloEncendido || !ticketId) {
+    if (!ticketId) {
       setEstado(estadoCocinaVacio());
       return;
     }
-    void apiWithCashier<EstadoCocinaMesa>(`/tickets/${ticketId}/kitchen`)
-      .then(setEstado)
+    // **SE PIDE TAMBIÉN CON EL MÓDULO APAGADO**, y es deliberado: el envío
+    // por diferencias es un ARREGLO del servidor y aplica igual, así que
+    // `sentUnits` es la verdad de «qué está en cocina» con módulo o sin él.
+    // Es lo que hace que la comanda siga partiéndose en «EN COCINA» y «SIN
+    // ENVIAR» en un bar que nunca compró la pantalla —que es como v2-H1 la
+    // dejó— sin volver al conjunto de ids en `localStorage`.
+    //
+    // Lo que el módulo apaga es lo de arriba: `canCorrectSent` vuelve false
+    // (lo decide el servidor), y el TPV no pinta «Urgente», «Espera»,
+    // «Marchar» ni la banda «LISTO».
+    void apiWithCashier<unknown>(`/tickets/${ticketId}/kitchen`)
+      // `normalizarEstado` y no el objeto tal cual: la comanda es la
+      // pantalla de la venta y no puede caerse por un 200 con la forma
+      // incompleta (una API vieja durante un despliegue, un proxy que
+      // contesta otra cosa). Ver su cabecera.
+      .then((raw) => setEstado(normalizarEstado(raw)))
       .catch(() => {
         // Sin red, el TPV sigue vendiendo: es la regla de la casa («cobrar
         // siempre se puede»). Lo que no se puede es inventar que la cocina
         // tiene algo, así que se deja el estado anterior y la comanda
         // seguirá pintando lo último que se supo.
       });
-  }, [ticketId, moduloEncendido]);
+  }, [ticketId]);
 
   useEffect(recargar, [recargar]);
 

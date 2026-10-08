@@ -221,6 +221,17 @@ function montaApi(
   } = {},
 ) {
   const lineas: ServerDraftLine[] = (opts.lineasIniciales ?? []).slice();
+  // kds-1-cocina · `TicketLine.sentUnits` por línea, que es de donde sale
+  // ahora el reparto «En cocina» / «Sin enviar». Antes lo llevaba el
+  // navegador en `localStorage`; ahora lo dice el servidor, así que el
+  // banco tiene que decirlo también.
+  const enviadas = new Map<string, number>();
+  if (opts.lastSentAt) {
+    for (const l of lineas) enviadas.set(l.id, Number(l.units));
+  }
+  const kitchen = opts.lastSentAt
+    ? { lastSentAt: opts.lastSentAt, revision: opts.revision ?? 1 }
+    : null;
   const draft = () =>
     serverDraft(lineas.slice(), {
       lastSentAt: opts.lastSentAt ?? null,
@@ -283,16 +294,62 @@ function montaApi(
         return { ticket: draft() };
       }
       if (path.includes("/send-to-kitchen/escpos")) {
+        // kds-1-cocina · el envío marca `sentUnits` en el servidor. Este
+        // banco lo imita: lo que acaba de salir pasa a estar en cocina.
+        for (const l of lineas) enviadas.set(l.id, Number(l.units));
         return {
           revision: 1,
           sentAt: "2026-10-08T10:07:00.000Z",
-          sections: [{ section: "BARRA", ok: true, lineCount: lineas.length }],
+          nothingNew: false,
+          replayed: false,
+          sections: [
+            {
+              section: "BARRA",
+              destino: "NINGUNO",
+              ok: true,
+              lineCount: lineas.length,
+              units: lineas.length,
+            },
+          ],
         };
       }
+      // ── kds-1-cocina · el estado de cocina de la mesa ───────────────
+      //
+      // ESTE banco NO tiene pantalla de cocina (`destinations` todo a
+      // false), y es a propósito: v2-H1 se escribió sin pantalla, así que
+      // sus trece sabotajes tienen que seguir cayendo exactamente igual.
+      // La regla por destino de kds-1 se prueba con pantalla en
+      // `kds-tpv-cocina.test.tsx`.
+      if (path.endsWith("/kitchen") && (o?.method ?? "GET") === "GET") {
+        return {
+          diners: 4,
+          revision: kitchen?.revision ?? 0,
+          lines: lineas.map((l) => ({
+            id: l.id,
+            units: Number(l.units),
+            sentUnits: enviadas.get(l.id) ?? 0,
+            course: 1,
+            seat: null,
+            section: "BARRA",
+          })),
+          firedCourses: [],
+          allergies: [],
+          orders: [],
+          destinations: {
+            BARRA: { screen: false, printer: false, canCorrectSent: false },
+            COCINA: { screen: false, printer: false, canCorrectSent: false },
+            SALON: { screen: false, printer: false, canCorrectSent: false },
+          },
+        };
+      }
+      if (path === "/kitchen/estado") {
+        return { heartbeatWindowMs: 90000, screens: [], sections: [] };
+      }
+      if (path === "/kitchen/listas") return { ready: [] };
       throw new Error(`ruta inesperada: ${path}`);
     },
   );
-  return { lineas };
+  return { lineas, enviadas };
 }
 
 let container: HTMLDivElement;
@@ -589,16 +646,39 @@ describe("v2-H1 · sabotajes 4 y 10 · lo que hace el «−»", () => {
   });
 });
 
-describe("v2-H1 · sabotaje 5 · «En cocina» no lleva −/+", () => {
+describe("v2-H1 · sabotaje 5 · «En cocina» no lleva −/+ · SIN PANTALLA", () => {
+  // ── EL SABOTAJE DADO LA VUELTA, Y SÓLO LA MITAD ───────────────────
+  //
+  // kds-1-cocina revierte este sabotaje A PROPÓSITO (decisión 6), pero
+  // **sólo donde hay pantalla de cocina**. El motivo por el que v2-H1 lo
+  // quitó era concreto: sin pantalla, un `−` quitaba el plato de la cuenta
+  // mientras el papel seguía en la plancha y cocina nunca se enteraba.
+  // Con pantalla la anulación llega, así que el motivo desaparece; sin
+  // pantalla sigue en pie.
+  //
+  // Este `describe` se queda tal cual porque el banco de v2-H1 **no tiene
+  // pantalla** (`destinations` todo a false), que es el caso de v2-H1 y el
+  // de La Maestranza hasta que compre el módulo. La mitad invertida —con
+  // pantalla, `−`/`+` sí— vive en `kds-tpv-cocina.test.tsx`.
   it("una línea ya enviada se pinta SIN los steppers", async () => {
     // Decisión 3d · quitar algo ya enviado sigue siendo la anulación que
     // existe hoy, que vive en la hoja de la línea. Un `−` sobre algo que
     // está en la plancha es pedirle a la cocina que adivine.
-    montaApi({ lastSentAt: "2026-10-08T10:07:00.000Z", revision: 1 });
-    await render(
-      [serverLine({ id: "l-enviada", nameSnapshot: "Tostada tomate" })],
-      { lastSentAt: "2026-10-08T10:07:00.000Z", revision: 1 },
-    );
+    // kds-1-cocina · la línea hay que sembrarla también en el BANCO: lo
+    // que está en cocina lo dice ahora `GET /tickets/:id/kitchen` con el
+    // `sentUnits` de cada línea, no un conjunto de ids del navegador. Un
+    // banco que no la conozca devuelve `sentUnits = 0` y la línea se
+    // pintaría en «Sin enviar», que es el estado contrario.
+    const enviada = serverLine({ id: "l-enviada", nameSnapshot: "Tostada tomate" });
+    montaApi({
+      lastSentAt: "2026-10-08T10:07:00.000Z",
+      revision: 1,
+      lineasIniciales: [enviada],
+    });
+    await render([enviada], {
+      lastSentAt: "2026-10-08T10:07:00.000Z",
+      revision: 1,
+    });
 
     // La línea llegó con el DRAFT y el ticket dice que ya se envió: está
     // en cocina.
@@ -609,8 +689,13 @@ describe("v2-H1 · sabotaje 5 · «En cocina» no lleva −/+", () => {
   });
 
   it("el rótulo de la sección lleva la hora del envío", async () => {
-    montaApi({ lastSentAt: "2026-10-08T10:07:00.000Z", revision: 1 });
-    await render([serverLine({ id: "l-enviada" })], {
+    const enviada = serverLine({ id: "l-enviada" });
+    montaApi({
+      lastSentAt: "2026-10-08T10:07:00.000Z",
+      revision: 1,
+      lineasIniciales: [enviada],
+    });
+    await render([enviada], {
       lastSentAt: "2026-10-08T10:07:00.000Z",
       revision: 1,
     });

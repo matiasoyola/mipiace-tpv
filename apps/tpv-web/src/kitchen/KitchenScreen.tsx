@@ -107,9 +107,25 @@ export function KitchenScreen({ me }: KitchenScreenProps) {
   useEffect(() => {
     const el = zonaRef.current;
     if (!el) return;
-    const medir = () =>
-      setZona({ ancho: el.clientWidth, alto: el.clientHeight });
+    const medir = () => {
+      // **UNA MEDIDA DE 0 NO SE CREE.** Significa «todavía no hay layout»
+      // —primer pintado, pestaña en segundo plano, contenedor con
+      // `display:none`— y no «no cabe nada». Creérsela mandaría TODAS las
+      // comandas al indicador «+N» y dejaría la cocina mirando una
+      // pantalla vacía con un «+9» en la esquina.
+      //
+      // El valor inicial del estado es el de 1280 × 800, que es el peor
+      // caso para el que esta pantalla se diseñó: mientras no haya una
+      // medida de verdad, se reparte contra ése.
+      if (el.clientWidth > 0 && el.clientHeight > 0) {
+        setZona({ ancho: el.clientWidth, alto: el.clientHeight });
+      }
+    };
     medir();
+    // `ResizeObserver` no existe en todos los WebView viejos ni en jsdom.
+    // Sin él, la medida inicial es la que vale: una tablet en un soporte
+    // de pared no cambia de tamaño.
+    if (typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(medir);
     ro.observe(el);
     return () => ro.disconnect();

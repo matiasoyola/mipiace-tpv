@@ -133,6 +133,11 @@ export const PRISMA_FIELD_BY_COLUMN: Readonly<Record<string, string>> = {
 export const NOT_SEALED_MONEY_COLUMNS: Readonly<Record<string, string>> = {
   "tickets.credit_pending":
     "ADR-015 §5.1 · campo derivado que baja con cada cobro de deuda. La verdad son los TicketPayment, que se crean como filas nuevas.",
+  "ticket_lines.sent_units":
+    "kds-1-cocina · NO ES UN IMPORTE. Cuenta cuántas unidades de la línea ha recibido la COCINA, y no entra en ningún cálculo de dinero: el total sale de `units`, que sí está sellado. " +
+    "Sellarla además tendría un coste real y ninguna ganancia: cambiar la receta del hash dejaría sin verificar todos los tickets sellados antes de este bloque (ADR-015 §5.2: no se sella retroactivamente). " +
+    "Y no queda sin proteger — el trigger de `ticket_lines` bloquea CUALQUIER columna de una fila sellada, así que un `sent_units` de un ticket cobrado tampoco se puede mover. " +
+    "Lo que la columna gobierna (qué se manda a cocina) sólo pasa en DRAFT.",
 };
 
 /** Tablas que el trigger vigila, en el orden en que se crean. */
