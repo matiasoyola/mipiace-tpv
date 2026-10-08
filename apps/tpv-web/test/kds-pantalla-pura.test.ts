@@ -493,6 +493,195 @@ describe("kds-1 · SABOTAJE · cortar una tarjeta", () => {
   });
 });
 
+// ── kds-1d · LA SEGUNDA FILA ENSEÑA LO QUE CABE ──────────────────────
+//
+// Las cuatro filas de la tabla de sabotajes de kds-1d. El defecto que
+// vienen a cerrar es el de la captura de kds-1c: cuatro tarjetas en la
+// primera fila y **390 px de pantalla vacía** debajo, con la T2 y la M7
+// —cortas, caben— escondidas en el «+7» porque la M5 del celíaco (~486 px)
+// no cabía y se llevaba la fila entera.
+describe("kds-1d · SABOTAJE · esconder la fila entera si una no cabe", () => {
+  /**
+   * **EL SERVICIO DE LA CAPTURA, tarjeta por tarjeta.**
+   *
+   * No son tarjetas de laboratorio: es el banco del bucle visual
+   * (`docs/blocks/kds-1-cocina-shots/banco.mjs`, `COMANDAS`) con lo que el
+   * reparto mide de cada una —platos, notas, franjas, sillas, el eyebrow
+   * del tiempo 2 y el bloque de espera—, y en el MISMO orden desordenado
+   * en que llega. Así el test dice lo que dirá la captura.
+   */
+  const SERVICIO = [
+    tarjeta({
+      id: "o-t4",
+      tableName: "T4",
+      urgent: true,
+      isNew: true,
+      firedAt: haceMin(2),
+      lines: [linea(), linea({ name: "Calamares", notes: ["Sin limón"] })],
+    }),
+    // La de la alergia por silla con cruce: ~486 px pintados, la que no
+    // cabe en la segunda fila.
+    tarjeta({
+      id: "o-m5",
+      tableName: "M5",
+      number: 2,
+      isNew: true,
+      firedAt: haceMin(7),
+      allergyBands: [{ titulo: "SILLA 3 · CELÍACO", alergenos: "Gluten" }],
+      lines: [
+        linea({ name: "Magro con tomate", seat: 3 }),
+        linea({ name: "Patatas bravas", seat: 3, allergyWarning: "¡LLEVA GLUTEN!" }),
+        linea({ carries: ["lleva gluten"] }),
+      ],
+    }),
+    tarjeta({
+      id: "o-m1",
+      tableName: "M1",
+      firedAt: haceMin(4),
+      lines: [
+        linea({ name: "Ensaladilla rusa" }),
+        linea({ name: "Jamón serrano" }),
+        linea({ name: "Queso curado" }),
+      ],
+    }),
+    tarjeta({
+      id: "o-m2",
+      tableName: "M2",
+      firedAt: haceMin(14),
+      lines: [
+        linea({ name: "Calamares", notes: ["Punto: poco hecho"] }),
+        linea({ name: "Chopitos" }),
+      ],
+    }),
+    tarjeta({
+      id: "o-m4",
+      tableName: "M4",
+      number: 2,
+      firedAt: haceMin(26),
+      lines: [linea({ voidPending: true }), linea({ name: "Alitas de pollo" })],
+    }),
+    tarjeta({
+      id: "o-t2",
+      tableName: "T2",
+      firedAt: haceMin(9),
+      lines: [
+        linea({ name: "Patatas alioli" }),
+        linea({ name: "Filete de ternera", fired: false }),
+      ],
+    }),
+    tarjeta({
+      id: "o-m6",
+      tableName: "M6",
+      firedAt: haceMin(11),
+      lines: [linea({ name: "Hamburguesa especial", notes: ["Sin cebolla"] })],
+    }),
+    tarjeta({
+      id: "o-b1",
+      tableName: "B1",
+      isNew: true,
+      firedAt: haceMin(3),
+      lines: [linea({ name: "Torrezno" }), linea({ name: "Fingers de pollo" })],
+    }),
+    tarjeta({
+      id: "o-b3",
+      tableName: "B3",
+      isNew: true,
+      firedAt: haceMin(1),
+      lines: [linea({ name: "Ensaladilla rusa" })],
+    }),
+    tarjeta({
+      id: "o-t1",
+      tableName: "T1",
+      firedAt: haceMin(6),
+      lines: [linea({ name: "Queso curado" }), linea({ name: "Torrezno especial" })],
+    }),
+    tarjeta({
+      id: "o-m7",
+      tableName: "M7",
+      firedAt: haceMin(8),
+      lines: [linea({ name: "Gambas al ajillo" })],
+    }),
+  ];
+
+  it("con el banco de la captura se ven SEIS, no cuatro", () => {
+    // El número de la captura: antes 4 (T4 · M4 · M2 · M6) con casi media
+    // pantalla vacía; ahora la segunda fila enseña la T2 y la M7, que son
+    // cortas y caben en el hueco que dejaba la primera.
+    const r = repartirTarjetas(SERVICIO, ZONA_1280);
+    expect(r.visibles.map((t) => t.tableName)).toEqual([
+      "T4",
+      "M4",
+      "M2",
+      "M6",
+      "T2",
+      "M7",
+    ]);
+  });
+
+  it("y el «+N» empieza en la PRIMERA que no cupo: la M5", () => {
+    // Si el corte no empezara ahí, el «+N» estaría escondiendo algo más
+    // antiguo que lo que ya hay dentro —el defecto de kds-1c—.
+    const r = repartirTarjetas(SERVICIO, ZONA_1280);
+    expect(r.extra.map((t) => t.tableName)[0]).toBe("M5");
+    expect(mesasMasN(r.extra)).toEqual(["M5", "T1", "M1", "…"]);
+  });
+
+  it("NO se salta a una más corta de detrás: el orden manda", () => {
+    // [corta, ALTA, corta] en la segunda fila. Rellenar el hueco con la
+    // corta de detrás adelantaría una comanda más nueva a una más antigua,
+    // que es justo lo que kds-1c vino a cerrar.
+    const corta = (id: string) => tarjeta({ id, tableName: id, lines: [linea()] });
+    const primeraFila = ["a1", "a2", "a3", "a4"].map(corta);
+    // El id ordena a los que empatan en la marca, así que los de la
+    // segunda fila van `b1 · b2 · b3` y la ALTA es la de en medio.
+    const alta = tarjeta({
+      id: "b2",
+      tableName: "ALTA",
+      lines: Array.from({ length: 4 }, () => linea()),
+    });
+    const segundaFila = [corta("b1"), alta, corta("b3")];
+    const altoCorta = altoTarjeta(primeraFila[0]!);
+    // Sitio para la primera fila y para UNA corta debajo, pero no para la
+    // ALTA.
+    const alto = altoCorta + TARJETA_HUECO_PX + altoCorta;
+    expect(altoTarjeta(alta)).toBeGreaterThan(altoCorta);
+    const r = repartirTarjetas(
+      // Con la misma marca manda el id, así que el orden es el del array.
+      [...primeraFila, ...segundaFila],
+      { ancho: ZONA_1280.ancho, alto },
+    );
+    expect(r.visibles.map((t) => t.tableName)).toEqual([
+      "a1",
+      "a2",
+      "a3",
+      "a4",
+      "b1",
+    ]);
+    expect(r.extra.map((t) => t.tableName)).toEqual(["ALTA", "b3"]);
+  });
+
+  it("nada de lo visible se sale del área: ni la fila de abajo", () => {
+    // La aritmética del reparto, repetida aquí sobre `visibles`: cada fila
+    // empieza donde acaba la más alta de la de arriba, y la última tiene
+    // que caber ENTERA. Es el sabotaje «cortar una tarjeta» medido sobre el
+    // reparto nuevo, que es el que puede dejar filas a medias.
+    const r = repartirTarjetas(SERVICIO, ZONA_1280);
+    let filaTop = 0;
+    let altoDeLaFila = 0;
+    r.visibles.forEach((t, i) => {
+      if (i > 0 && i % r.columnas === 0) {
+        filaTop += altoDeLaFila + TARJETA_HUECO_PX;
+        altoDeLaFila = 0;
+      }
+      const alto = altoTarjeta(t);
+      altoDeLaFila = Math.max(altoDeLaFila, alto);
+      expect(filaTop + alto, `${t.tableName} se sale`).toBeLessThanOrEqual(
+        ZONA_1280.alto,
+      );
+    });
+  });
+});
+
 describe("kds-1b · SABOTAJE · «+N» en rojo sin ninguna oculta en rojo", () => {
   it("con nuevas escondidas pero ninguna pasada, la franja va en VERDE", () => {
     // Era el cuarto defecto de kds-1b: la franja salía en rojo en cuanto
