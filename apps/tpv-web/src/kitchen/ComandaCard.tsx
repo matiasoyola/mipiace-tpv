@@ -2,45 +2,73 @@
 //
 // Lo que el cocinero mira. De arriba abajo, y el orden ES la decisión 3:
 //
-//   1. franja «⚡ URGENTE», si lo es — lo primero porque cambia el orden
-//      en que se cocina todo lo demás;
+//   1. franja «URGENTE», si lo es — lo primero porque cambia el orden en
+//      que se cocina todo lo demás;
 //   2. cabecera del SEMÁFORO, con la mesa y los minutos en grande: el
 //      color de la cabecera entera, no un puntito («se reconoce, no se
 //      lee»);
-//   3. franjas de ALERGIA de la mesa, antes de los platos, porque
-//      condicionan cómo se cocinan;
+//   3. franja de ALERGIA de la mesa, roja y de ancho completo, antes de
+//      los platos, porque condiciona cómo se cocinan;
 //   4. los platos MARCHADOS, con su cantidad, sus modificadores y sus
 //      notas bien visibles;
 //   5. los platos EN ESPERA, en gris y al final, sin semáforo;
 //   6. el botón «Lista», de 56 px.
 //
 // Y lo que NO lleva: precios, hora exacta, camarero, comensales.
+//
+// ── EL CUERPO VA NEUTRO. SIEMPRE ──────────────────────────────────────
+//
+// `TARJETA_CUERPO` en las cuatro tarjetas de la maqueta, y es la
+// corrección de fondo de kds-1b. El rojo vive en cuatro sitios y en
+// ninguno más: la franja «URGENTE» con su anillo de 4 px, la franja de la
+// alergia de la mesa, el recuadro del plato de la silla con alergia, y el
+// plato que lleva el alérgeno de SU silla.
+//
+// Antes el pulso rojo se ponía en el `<article>` entero, así que el cuerpo
+// de la T4 (urgente) y el de la M5 (alergia) salían rojo oscuro. Sobre un
+// cuerpo rojo, la franja «URGENTE» deja de destacar: la tarjeta dice «esta
+// comanda es roja» en vez de «esto de aquí dentro no puede esperar». Lo
+// que parpadea cuando la comanda es nueva es `PULSO_CLASS_TARJETA`, que va
+// del cuerpo a un verde apagado.
 
 import { useEffect, useRef } from "react";
 
 import {
+  ALERGIA_ALERGENO_PX,
   ALERGIA_PX,
   AMBAR_CAMBIO,
   AMBAR_CAMBIO_TEXT,
+  AMBAR_NOTA,
+  ANILLO_URGENTE_PX,
   ANULADO_PX,
-  DARK_PANEL,
-  DARK_SURFACE,
+  CANTIDAD_ANCHO_PX,
+  CANTIDAD_PX,
+  CARRIES_PX,
+  DARK_CANVAS,
   DARK_SURFACE_RAISED,
   DARK_TEXT,
   DARK_TEXT_MUTED,
   EYEBROW_COCINA_PX,
   EYEBROW_COCINA_TRACKING,
+  FRANJA_URGENTE_ALTO_PX,
   LINEA_HEIGHT_PX,
+  LISTA_FONDO,
   LISTA_HEIGHT_PX,
+  LISTA_LABEL_PX,
+  LISTA_TEXTO,
   LLEVA_PX,
   MESA_PX,
   MINUTOS_PX,
+  NOTA_PREFIJO,
   NOTA_PX,
+  NOTA_WEIGHT,
   PLATO_PX,
   PULSO_CLASS_AMBAR,
   PULSO_CLASS_ROJO,
   PULSO_CLASS_TARJETA,
   ROJO_ALERGIA,
+  ROJO_ALERGIA_BORDE,
+  ROJO_ALERGIA_FONDO,
   ROJO_ALERGIA_TEXT,
   ROJO_ANULADO,
   ROJO_URGENTE,
@@ -48,9 +76,9 @@ import {
   SEMAFORO_FILL,
   SEMAFORO_TEXT,
   SILLA_PX,
+  TARJETA_CUERPO,
+  TARJETA_RADIO_PX,
   URGENTE_PX,
-  VERDE_LISTA,
-  VERDE_LISTA_TEXT,
   VISTO_HEIGHT_PX,
 } from "../lib/kitchenTheme.js";
 import { etiquetaMinutos, minutosDesdeMarchado, tonoSemaforo } from "../lib/kitchenSemaforo.js";
@@ -79,20 +107,48 @@ export interface ComandaCardProps {
 /** Cuánto es un «toque largo». 600 ms: no se dispara al tachar. */
 const TOQUE_LARGO_MS = 600;
 
+/** El rayo de la franja «URGENTE». El mismo trazo que la maqueta. */
+function IconoUrgente() {
+  return (
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" />
+    </svg>
+  );
+}
+
+/** El triángulo de aviso de la franja de la alergia. */
+function IconoAlergia() {
+  return (
+    <svg
+      width="26"
+      height="26"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ flexShrink: 0 }}
+    >
+      <path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z" />
+      <path d="M12 9v4" />
+      <path d="M12 17h.01" />
+    </svg>
+  );
+}
+
 export function ComandaCard(props: ComandaCardProps) {
   const { comanda: c, settings, ahora } = props;
   const minutos = minutosDesdeMarchado(c.firedAt, ahora);
   const tono = tonoSemaforo(minutos, settings);
 
-  // Decisión 8 · el parpadeo. Rojo si urgente o con alergia; neutro si
-  // sólo es nueva. Y NUNCA la pantalla entera: esta clase va en la
-  // tarjeta.
-  const parpadeo =
-    c.isNew && (c.urgent || c.allergyBands.length > 0)
-      ? PULSO_CLASS_ROJO
-      : c.isNew
-        ? PULSO_CLASS_TARJETA
-        : "";
+  // Decisión 8 · el parpadeo de lo NUEVO, y SIEMPRE el neutro: va del
+  // cuerpo de la tarjeta a un verde apagado. Lo que dice es «nadie ha
+  // mirado esto todavía», y eso no es rojo —ni cuando la comanda es
+  // urgente ni cuando tiene alergia—. El rojo ya está donde tiene que
+  // estar: en la franja y en el plato.
+  const parpadeo = c.isNew ? PULSO_CLASS_TARJETA : "";
 
   const marchados = c.lines.filter((l) => l.fired);
   const enEspera = c.lines.filter((l) => !l.fired);
@@ -121,6 +177,14 @@ export function ComandaCard(props: ComandaCardProps) {
     [],
   );
 
+  const eyebrow = [
+    c.number > 1 ? `${c.number}ª COMANDA` : null,
+    props.mostrarSeccion ? ETIQUETA_SECCION[c.section] : null,
+    // Decisión 9 · llegó cuando la pantalla volvió de estar sin red. Se
+    // dice para que el cocinero no lo lea como recién hecho.
+    c.lateArrival ? "LLEGÓ TARDE" : null,
+  ].filter((x): x is string => x != null);
+
   return (
     <article
       data-testid="kds-comanda"
@@ -128,32 +192,41 @@ export function ComandaCard(props: ComandaCardProps) {
       data-urgente={c.urgent ? "1" : "0"}
       data-nueva={c.isNew ? "1" : "0"}
       data-tono={tono}
-      className={`rounded-[14px] overflow-hidden flex flex-col ${parpadeo}`}
+      className={`overflow-hidden flex flex-col ${parpadeo}`}
       style={{
-        background: DARK_PANEL,
-        // El borde rojo de la tarjeta urgente (decisión 7), que se suma a
+        // EL CUERPO, NEUTRO. En las cuatro tarjetas de la maqueta.
+        background: TARJETA_CUERPO,
+        borderRadius: TARJETA_RADIO_PX,
+        // El anillo rojo de la tarjeta urgente (decisión 7), que se suma a
         // la franja. Dos señales para lo mismo porque es lo único que
-        // cambia el ORDEN del trabajo.
-        border: c.urgent ? `3px solid ${ROJO_URGENTE}` : `1px solid ${DARK_SURFACE_RAISED}`,
+        // cambia el ORDEN del trabajo. Va por `box-shadow` y no por
+        // `border` —como en la maqueta— para que no reste ancho al
+        // contenido: con cuatro columnas, 8 px de borde serían un nombre
+        // de plato partido.
+        boxShadow: c.urgent
+          ? `0 0 0 ${ANILLO_URGENTE_PX}px ${ROJO_URGENTE}`
+          : undefined,
       }}
     >
-      {/* 1 · ⚡ URGENTE */}
+      {/* 1 · URGENTE */}
       {c.urgent && (
         <div
           data-testid="kds-franja-urgente"
-          className="flex items-center justify-center font-bold"
+          className="shrink-0 flex items-center justify-center gap-[10px] font-extrabold"
           style={{
+            height: FRANJA_URGENTE_ALTO_PX,
             background: ROJO_URGENTE,
             color: ROJO_URGENTE_TEXT,
             fontSize: URGENTE_PX,
-            padding: "9px 0",
+            letterSpacing: "0.12em",
           }}
         >
-          ⚡ URGENTE
+          <IconoUrgente />
+          URGENTE
         </div>
       )}
 
-      {/* 2 · la cabecera del semáforo */}
+      {/* 2 · la cabecera del semáforo, con el eyebrow DENTRO */}
       <button
         type="button"
         data-testid="kds-cabecera"
@@ -161,69 +234,84 @@ export function ComandaCard(props: ComandaCardProps) {
         onPointerUp={cancelarToqueLargo}
         onPointerLeave={cancelarToqueLargo}
         onContextMenu={(e) => e.preventDefault()}
-        className="w-full text-left flex items-baseline gap-3 px-4"
+        className="w-full text-left shrink-0 flex items-center justify-between gap-2"
         style={{
           background: SEMAFORO_FILL[tono],
           color: SEMAFORO_TEXT[tono],
-          paddingTop: 10,
-          paddingBottom: 10,
+          padding: "10px 14px",
         }}
       >
-        <span className="font-bold leading-none" style={{ fontSize: MESA_PX }}>
-          {c.tableName ?? `#${c.number}`}
+        <span className="flex flex-col min-w-0">
+          <span
+            className="font-bold leading-none"
+            style={{ fontSize: MESA_PX, letterSpacing: "-0.02em" }}
+          >
+            {c.tableName ?? `#${c.number}`}
+          </span>
+          {eyebrow.length > 0 && (
+            <span
+              data-testid="kds-numero"
+              className="uppercase font-bold flex gap-2"
+              style={{
+                fontSize: EYEBROW_COCINA_PX,
+                letterSpacing: EYEBROW_COCINA_TRACKING,
+                marginTop: 2,
+              }}
+            >
+              {eyebrow.map((e) => (
+                <span key={e} data-testid={e === "LLEGÓ TARDE" ? "kds-tarde" : undefined}>
+                  {e}
+                </span>
+              ))}
+            </span>
+          )}
         </span>
         <span
-          className="font-semibold leading-none ml-auto"
+          className="font-bold leading-none shrink-0 tabular-nums"
           style={{ fontSize: minutos == null ? ALERGIA_PX : MINUTOS_PX }}
         >
           {etiquetaMinutos(minutos)}
         </span>
       </button>
 
-      {/* El eyebrow: «2ª COMANDA», la sección y «llegó tarde». */}
-      <div
-        className="px-4 pt-1.5 flex items-center gap-2 uppercase font-semibold"
-        style={{
-          fontSize: EYEBROW_COCINA_PX,
-          letterSpacing: EYEBROW_COCINA_TRACKING,
-          color: DARK_TEXT_MUTED,
-        }}
-      >
-        {c.number > 1 && <span data-testid="kds-numero">{c.number}ª COMANDA</span>}
-        {props.mostrarSeccion && <span>{ETIQUETA_SECCION[c.section]}</span>}
-        {/* Decisión 9 · llegó cuando la pantalla volvió de estar sin red.
-            Se dice para que el cocinero no lo lea como recién hecho. */}
-        {c.lateArrival && (
-          <span data-testid="kds-tarde" style={{ color: AMBAR_CAMBIO }}>
-            LLEGÓ TARDE
-          </span>
-        )}
-      </div>
-
-      {/* 3 · las alergias de la mesa */}
+      {/* 3 · la alergia de la mesa: franja ROJA de ancho completo */}
       {c.allergyBands.map((banda) => (
         <div
-          key={banda}
+          key={banda.titulo}
           data-testid="kds-franja-alergia"
-          className={`mx-3 mt-2 rounded-[8px] font-bold text-center ${PULSO_CLASS_ROJO}`}
+          className="shrink-0 flex items-center gap-[10px]"
           style={{
             background: ROJO_ALERGIA,
             color: ROJO_ALERGIA_TEXT,
-            fontSize: ALERGIA_PX,
-            padding: "9px 8px",
+            padding: "10px 14px",
           }}
         >
-          {banda}
+          <IconoAlergia />
+          <span className="flex flex-col min-w-0">
+            <span
+              data-testid="kds-franja-alergia-titulo"
+              className="font-bold"
+              style={{ fontSize: ALERGIA_PX, lineHeight: 1.1 }}
+            >
+              {banda.titulo}
+            </span>
+            <span
+              data-testid="kds-franja-alergia-alergeno"
+              className="font-semibold"
+              style={{ fontSize: ALERGIA_ALERGENO_PX, opacity: 0.9 }}
+            >
+              {banda.alergenos}
+            </span>
+          </span>
         </div>
       ))}
 
       {/* 4 · los platos marchados */}
-      <ul className="px-3 pt-2 flex flex-col gap-1">
+      <ul className="flex flex-col gap-[6px]" style={{ padding: "10px 0" }}>
         {marchados.map((l) => (
           <Linea
             key={l.id}
             linea={l}
-            compacta={props.compacta === true}
             onTachar={props.onTachar}
             onVisto={props.onVisto}
           />
@@ -235,21 +323,23 @@ export function ComandaCard(props: ComandaCardProps) {
         <>
           <div
             data-testid="kds-bloque-espera"
-            className="px-4 pt-3 uppercase font-semibold"
+            className="uppercase font-bold"
             style={{
+              margin: "0 14px",
+              paddingTop: 8,
+              borderTop: `2px dashed ${DARK_SURFACE_RAISED}`,
               fontSize: EYEBROW_COCINA_PX,
               letterSpacing: EYEBROW_COCINA_TRACKING,
               color: DARK_TEXT_MUTED,
             }}
           >
-            EN ESPERA
+            EN ESPERA · SALE CUANDO LO MARCHEN
           </div>
-          <ul className="px-3 pt-1 pb-1 flex flex-col gap-1">
+          <ul className="flex flex-col gap-[6px]" style={{ padding: "8px 0" }}>
             {enEspera.map((l) => (
               <Linea
                 key={l.id}
                 linea={l}
-                compacta
                 onTachar={props.onTachar}
                 onVisto={props.onVisto}
               />
@@ -258,22 +348,22 @@ export function ComandaCard(props: ComandaCardProps) {
         </>
       )}
 
-      {/* 6 · «Lista» */}
+      {/* 6 · «Lista», NEUTRO: el verde de esta pantalla significa «ya
+          está», y éste es el botón que hay que tocar para que lo esté. */}
       {!props.compacta && (
         <button
           type="button"
           data-testid="kds-lista"
           onClick={props.onLista}
-          // `mb-2 mt-2` y no `mb-3 mt-3`: a 728 px de alto de zona, esos
-          // 8 px son los que hacen que entre la SEGUNDA fila de tarjetas.
-          // Medido en el bucle visual.
-          className="mx-3 mb-2 mt-2 rounded-[12px] font-bold"
+          className="mt-auto shrink-0 font-semibold"
           style={{
+            margin: "0 14px 14px",
+            borderRadius: 12,
             height: LISTA_HEIGHT_PX,
             minHeight: LISTA_HEIGHT_PX,
-            background: VERDE_LISTA,
-            color: VERDE_LISTA_TEXT,
-            fontSize: PLATO_PX,
+            background: LISTA_FONDO,
+            color: LISTA_TEXTO,
+            fontSize: LISTA_LABEL_PX,
           }}
         >
           Lista
@@ -285,20 +375,36 @@ export function ComandaCard(props: ComandaCardProps) {
 
 function Linea(props: {
   linea: LineaComanda;
-  compacta: boolean;
   onTachar: (lineId: string, done: boolean) => void;
   onVisto: (lineId: string) => void;
 }) {
   const l = props.linea;
   const anuladaDelTodo = l.units <= 0;
-  // Decisión 8 · la línea afectada parpadea hasta «Visto».
-  const parpadeo = l.voidPending
-    ? PULSO_CLASS_ROJO
-    : l.changePending
-      ? PULSO_CLASS_AMBAR
-      : l.allergyWarning
-        ? PULSO_CLASS_ROJO
-        : "";
+
+  // ── LAS TRES FORMAS QUE PUEDE TOMAR UNA LÍNEA ──────────────────────
+  //
+  // Y las tres salen de la maqueta:
+  //
+  //   · RECUADRO ROJO (borde `#FF5A6E`) con la sub-franja «SILLA 3 · SIN
+  //     GLUTEN»: el plato de una silla con alergia. El cuerpo sigue
+  //     neutro — lo que es rojo es el marco y la etiqueta.
+  //   · CAJA ROJA ENTERA que parpadea, con «SILLA 3 · ¡LLEVA GLUTEN!»:
+  //     el plato que lleva el alérgeno de su silla, o la línea anulada
+  //     sin «Visto». Aquí sí es roja entera: es lo único que no puede
+  //     esperar.
+  //   · PLANA: todo lo demás.
+  const alarma = l.allergyWarning != null || l.voidPending;
+  const recuadrada = !alarma && l.seat != null;
+  const enCaja = alarma || recuadrada;
+
+  /** La sub-franja del recuadro. `null` si la línea no lleva recuadro. */
+  const subFranja = l.allergyWarning
+    ? [l.seat != null ? `SILLA ${l.seat}` : null, l.allergyWarning]
+        .filter(Boolean)
+        .join(" · ")
+    : recuadrada
+      ? [`SILLA ${l.seat}`, l.seatAllergy].filter(Boolean).join(" · ")
+      : null;
 
   return (
     <li
@@ -306,173 +412,182 @@ function Linea(props: {
       data-linea-id={l.id}
       data-hecha={l.done ? "1" : "0"}
       data-espera={l.fired ? "0" : "1"}
-      className={`rounded-[10px] ${parpadeo}`}
+      data-alarma={alarma ? "1" : "0"}
+      className={alarma ? PULSO_CLASS_ROJO : l.changePending ? PULSO_CLASS_AMBAR : ""}
       style={{
-        // Capa 3 · el plato de la silla alérgica que lleva SU alérgeno va
-        // RECUADRADO en rojo. Es la única línea que lleva borde.
-        border: l.allergyWarning
-          ? `3px solid ${ROJO_ALERGIA}`
-          : l.seat != null
-            ? `2px solid ${ROJO_ALERGIA}`
-            : "none",
-        background: l.done ? DARK_SURFACE : "transparent",
-        opacity: l.fired ? 1 : 0.55,
+        margin: enCaja ? "0 10px" : undefined,
+        borderRadius: enCaja ? 12 : undefined,
+        overflow: enCaja ? "hidden" : undefined,
+        border: recuadrada ? `2px solid ${ROJO_ALERGIA_BORDE}` : undefined,
+        background: alarma ? ROJO_ALERGIA : undefined,
+        color: alarma ? ROJO_ALERGIA_TEXT : l.fired ? DARK_TEXT : DARK_TEXT_MUTED,
+        // Un plato TACHADO se apaga, no cambia de fondo: la tarjeta tiene
+        // que seguir diciendo lo que se pidió (decisión 4).
+        opacity: l.done && !alarma ? 0.42 : 1,
       }}
     >
-      {/* LA MARCA DE LA SILLA, EN UNA SOLA LÍNEA sobre el plato.
-          Decisión 3, capa 2, literal: «en cocina ese plato va recuadrado en
-          rojo con "SILLA 3 · SIN GLUTEN"». Una línea, no dos.
-
-          Y cuando ADEMÁS choca (capa 3), el grito va en la MISMA línea:
-          «SILLA 3 · ¡LLEVA GLUTEN!». Lo midió el bucle visual — en dos
-          líneas, cada plato de la silla alérgica costaba 79 px de alto y
-          una mesa con tres platos asignados se comía la pantalla. Y leerlo
-          junto es además lo correcto: lo que el cocinero necesita saber de
-          un golpe es «esto es de la 3 y NO puede llevarlo». */}
-      {l.seat != null && (
+      {subFranja && (
         <div
-          data-testid="kds-silla"
-          className="px-3 pt-1.5 font-bold uppercase"
+          data-testid={l.allergyWarning && l.seat == null ? "kds-lleva" : "kds-silla"}
+          className="font-bold uppercase"
           style={{
-            fontSize: SILLA_PX,
-            color: l.allergyWarning ? ROJO_ALERGIA_TEXT : ROJO_ALERGIA,
-            background: l.allergyWarning ? ROJO_ALERGIA : "transparent",
-            paddingBottom: l.allergyWarning ? 6 : 0,
+            padding: "4px 10px",
+            background: l.allergyWarning ? ROJO_ALERGIA_FONDO : ROJO_ALERGIA,
+            color: ROJO_ALERGIA_TEXT,
+            fontSize: l.allergyWarning ? LLEVA_PX : SILLA_PX,
+            letterSpacing: "0.06em",
           }}
         >
-          SILLA {l.seat}
-          {l.allergyWarning ? ` · ${l.allergyWarning}` : ""}
+          {subFranja}
         </div>
       )}
 
-      <button
-        type="button"
-        // Un toque tacha el plato; otro lo destacha. EN ESPERA no se
-        // puede tachar: todavía no se está cocinando.
-        disabled={!l.fired || anuladaDelTodo}
-        onClick={() => props.onTachar(l.id, !l.done)}
-        className="w-full text-left flex items-center gap-2 px-3"
-        style={{
-          minHeight: LINEA_HEIGHT_PX,
-          color: DARK_TEXT,
-        }}
+      {/* LA FILA. El `<button>` de tachar NO envuelve al «Visto»: un
+          botón dentro de otro no es HTML válido, y además la línea
+          anulada del todo tiene el de fuera `disabled` —con el «Visto»
+          dentro, el cocinero no podría quitar el aviso nunca—. */}
+      <div
+        className="flex items-start gap-[10px]"
+        style={{ padding: enCaja ? "8px 10px" : "8px 14px" }}
       >
-        <span
-          className="font-bold min-w-0"
-          style={{
-            fontSize: PLATO_PX,
-            // Decisión 4 · un toque TACHA. Literalmente: el plato queda
-            // tachado, no desaparece — la tarjeta tiene que seguir
-            // diciendo lo que se pidió.
-            textDecoration: l.done || anuladaDelTodo ? "line-through" : "none",
-            color: anuladaDelTodo ? ROJO_ANULADO : DARK_TEXT,
-          }}
+        <button
+          type="button"
+          // Un toque tacha el plato; otro lo destacha. EN ESPERA no se
+          // puede tachar: todavía no se está cocinando.
+          disabled={!l.fired || anuladaDelTodo}
+          onClick={() => props.onTachar(l.id, !l.done)}
+          className="flex-grow min-w-0 text-left flex items-start gap-[10px]"
+          style={{ minHeight: LINEA_HEIGHT_PX }}
         >
-          {formatearUnidades(l.units)} {l.name}
-        </span>
-      </button>
-
-      {/* Capa 3 · el grito, cuando el plato NO tiene silla asignada.
-          Con silla va arriba, en la misma línea que ella. */}
-      {l.allergyWarning && l.seat == null && (
-        <div
-          data-testid="kds-lleva"
-          className="px-3 pb-2 font-bold"
-          style={{ fontSize: LLEVA_PX, color: ROJO_ALERGIA_TEXT, background: ROJO_ALERGIA }}
-        >
-          {l.allergyWarning}
-        </div>
-      )}
-
-      {/* Capa 3 informativa · sin rojo y sin parpadeo: es un aviso, no una
-          alarma, y la regla del rojo dice que el rojo es para lo que no
-          puede esperar. */}
-      {l.allergyWarning == null && l.carries.length > 0 && (
-        <div
-          data-testid="kds-carries"
-          className="px-3 pb-1"
-          style={{ fontSize: NOTA_PX, color: AMBAR_CAMBIO }}
-        >
-          {l.carries.join(" · ")}
-        </div>
-      )}
-
-      {/* Modificadores y notas, BIEN VISIBLES (decisión 3). */}
-      {l.notes.length > 0 && (
-        <ul className="px-3 pb-2 flex flex-col gap-[2px]">
-          {l.notes.map((n, i) => (
-            <li
-              key={`${l.id}-n${i}`}
-              data-testid="kds-nota"
-              style={{ fontSize: NOTA_PX, color: DARK_TEXT }}
+          <span
+            className="shrink-0 font-bold"
+            style={{
+              width: CANTIDAD_ANCHO_PX,
+              fontSize: CANTIDAD_PX,
+              lineHeight: 1.1,
+              textDecoration: l.done || anuladaDelTodo ? "line-through" : "none",
+            }}
+          >
+            {formatearUnidades(l.units)}
+          </span>
+          <span className="flex flex-col min-w-0 flex-grow">
+            {/* EL NOMBRE SE PARTE EN DOS LÍNEAS, NO SE CORTA. Con cuatro
+                columnas la tarjeta mide ~251 px y «Hamburguesa especial»
+                no cabe en una línea; truncarlo escondería lo primero que
+                la decisión 3 manda que se lea. */}
+            <span
+              data-testid="kds-plato"
+              className="font-semibold"
+              style={{
+                fontSize: PLATO_PX,
+                lineHeight: 1.2,
+                textDecoration: l.done || anuladaDelTodo ? "line-through" : "none",
+              }}
             >
-              · {n}
-            </li>
-          ))}
-        </ul>
-      )}
+              {l.name}
+            </span>
 
-      {/* Decisión 6 · el anulado y el cambio, con su «Visto». No
-          desaparecen hasta que el cocinero lo toca. */}
-      {l.voidPending && (
-        <div className="px-3 pb-2 flex items-center gap-3">
-          <span
-            data-testid="kds-anulado"
-            className="font-bold"
-            style={{ fontSize: ANULADO_PX, color: ROJO_ANULADO }}
-          >
-            {anuladaDelTodo
-              ? "ANULADO"
-              : `ERAN ${formatearUnidades(l.unitsOriginal ?? l.units)} · −${formatearUnidades(l.voidedUnits)}`}
-            {l.doneBeforeVoid ? " · YA ESTABA HECHO" : ""}
+            {/* Modificadores y notas, BIEN VISIBLES (decisión 3): ámbar,
+                17 px y peso 600, con «— » delante. En gris y pequeños eran
+                una etiqueta de sistema, y el cocinero que no lee «sin
+                limón» lo pone. */}
+            {l.notes.map((n, i) => (
+              <span
+                key={`${l.id}-n${i}`}
+                data-testid="kds-nota"
+                style={{
+                  fontSize: NOTA_PX,
+                  fontWeight: NOTA_WEIGHT,
+                  color: alarma ? ROJO_ALERGIA_TEXT : AMBAR_NOTA,
+                  marginTop: 2,
+                }}
+              >
+                {NOTA_PREFIJO}
+                {n}
+              </span>
+            ))}
+
+            {/* Decisión 6 · el anulado y el cambio. No desaparecen hasta
+                que el cocinero toca «Visto». */}
+            {l.voidPending && (
+              <span
+                data-testid="kds-anulado"
+                className="font-bold uppercase"
+                style={{ fontSize: ANULADO_PX, letterSpacing: "0.06em", marginTop: 2 }}
+              >
+                {anuladaDelTodo
+                  ? "ANULADO"
+                  : `ERAN ${formatearUnidades(l.unitsOriginal ?? l.units)} · −${formatearUnidades(l.voidedUnits)}`}
+                {l.doneBeforeVoid ? " · YA ESTABA HECHO" : ""}
+              </span>
+            )}
+            {!l.voidPending && l.changePending && (
+              <span
+                data-testid="kds-cambio"
+                className="font-bold self-start rounded-[6px] px-2"
+                style={{
+                  fontSize: ANULADO_PX,
+                  background: AMBAR_CAMBIO,
+                  color: AMBAR_CAMBIO_TEXT,
+                  marginTop: 2,
+                }}
+              >
+                CAMBIO{l.changeNote ? ` · ${l.changeNote}` : ""}
+              </span>
+            )}
+
+            {/* Capa 3 informativa · una pastilla con contorno, sin fondo
+                rojo y sin parpadeo: es un aviso, no una alarma, y la regla
+                del rojo dice que el rojo es para lo que no puede
+                esperar. */}
+            {l.allergyWarning == null && l.carries.length > 0 && (
+              <span
+                data-testid="kds-carries"
+                className="flex flex-wrap gap-1"
+                style={{ marginTop: 4 }}
+              >
+                {l.carries.map((a) => (
+                  <span
+                    key={a}
+                    className="font-bold"
+                    style={{
+                      padding: "2px 8px",
+                      borderRadius: 6,
+                      border: `1.5px solid ${ROJO_ANULADO}`,
+                      color: ROJO_ANULADO,
+                      fontSize: CARRIES_PX,
+                    }}
+                  >
+                    {a}
+                  </span>
+                ))}
+              </span>
+            )}
           </span>
+        </button>
+
+        {/* «Visto» · 44 px, la única excepción de la restricción táctil, y
+            acotada: vive DENTRO de una línea que ya es de 56. En claro,
+            como en la maqueta: sobre la caja roja de un anulado, un botón
+            gris no se ve. */}
+        {(l.voidPending || l.changePending) && (
           <button
             type="button"
             data-testid="kds-visto"
             onClick={() => props.onVisto(l.id)}
-            className="ml-auto rounded-[8px] px-4 font-semibold"
+            className="shrink-0 rounded-[10px] px-3 font-bold"
             style={{
               height: VISTO_HEIGHT_PX,
               minHeight: VISTO_HEIGHT_PX,
-              background: DARK_SURFACE_RAISED,
-              color: DARK_TEXT,
+              background: DARK_TEXT,
+              color: DARK_CANVAS,
               fontSize: ANULADO_PX,
             }}
           >
             Visto
           </button>
-        </div>
-      )}
-      {!l.voidPending && l.changePending && (
-        <div className="px-3 pb-2 flex items-center gap-3">
-          <span
-            data-testid="kds-cambio"
-            className="font-bold rounded-[6px] px-2"
-            style={{
-              fontSize: ANULADO_PX,
-              background: AMBAR_CAMBIO,
-              color: AMBAR_CAMBIO_TEXT,
-            }}
-          >
-            CAMBIO{l.changeNote ? ` · ${l.changeNote}` : ""}
-          </span>
-          <button
-            type="button"
-            data-testid="kds-visto"
-            onClick={() => props.onVisto(l.id)}
-            className="ml-auto rounded-[8px] px-4 font-semibold"
-            style={{
-              height: VISTO_HEIGHT_PX,
-              minHeight: VISTO_HEIGHT_PX,
-              background: DARK_SURFACE_RAISED,
-              color: DARK_TEXT,
-              fontSize: ANULADO_PX,
-            }}
-          >
-            Visto
-          </button>
-        </div>
-      )}
+        )}
+      </div>
     </li>
   );
 }
