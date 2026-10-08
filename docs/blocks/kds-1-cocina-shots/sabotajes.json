@@ -166,5 +166,35 @@
     "titulo": "Coral en un botón de la comanda que no sea «Cobrar»",
     "estado": "ROJO",
     "mensaje": "AssertionError: expected [ 'boton-marchar', 'comanda-cobrar' ] to deeply equal [ 'comanda-cobrar' ]"
+  },
+  {
+    "id": "sin-ordenar-en-la-pantalla",
+    "titulo": "Quitar el ordenado en la pantalla",
+    "estado": "ROJO",
+    "mensaje": "expected [ 'T4', 'M5', 'M1', 'M2' ] to deeply equal [ 'T4', 'M4', 'M2', 'T2' ]"
+  },
+  {
+    "id": "ordenar-por-sentat",
+    "titulo": "Ordenar por `sentAt` en vez de por la marca que pinta los minutos",
+    "estado": "ROJO",
+    "mensaje": "expected [ 'tiempo2', 'vieja' ] to deeply equal [ 'vieja', 'tiempo2' ]"
+  },
+  {
+    "id": "mas-n-con-otro-orden",
+    "titulo": "Que «+N» use otro orden que la rejilla",
+    "estado": "ROJO",
+    "mensaje": "M8 oculta: expected 1791467220000 to be greater than or equal to 1791467580000 (y «expected 'ambar' to be 'rojo'»)"
+  },
+  {
+    "id": "toda-la-mesa-roja-sin-alergenos",
+    "titulo": "Pintar en rojo «toda la mesa» sin alérgenos",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected 'rgb(200, 16, 46)' to be 'rgb(28, 32, 38)' // Object.is equality"
+  },
+  {
+    "id": "seleccion-por-color-sin-anillo",
+    "titulo": "Que la selección cambie el color en vez de poner el anillo",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected 'none' to be '3px solid #FFFFFF' // Object.is equality"
   }
 ]

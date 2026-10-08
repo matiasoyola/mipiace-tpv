@@ -31,7 +31,9 @@ de cocina.
   ficheros, 4.285 tests. E2E contra Postgres: 25.
 - **kds-1b**: la maqueta validada entró al repo (`docs/kds/maqueta/`) y la
   pantalla se corrigió contra ella. Las cinco diferencias del prompt, más lo
-  que el bucle visual enseñó al volver a medir, en la §7.
+  que el bucle visual enseñó al volver a medir, en la §7. **kds-1c** es la
+  segunda: la pantalla ordena sola y el rojo de la hoja de alergias significa
+  una sola cosa, en la §8.
 
 ---
 
@@ -576,7 +578,7 @@ razón:
 | Botón «Hoy» | 44 px | **56 px** | Lo mismo |
 | «Visto» | 44 px | **44 px** | Es la única excepción de esa restricción y ya estaba acotada: vive DENTRO de una línea que ya es de 56 |
 | Nombre del alérgeno en la rejilla de los 14 | «Gluten», «Huevos» | **«Cereales con gluten», «Huevo»** | `etiqueta` es el nombre LEGAL del anexo II y es el que tiene que cuadrar con la carta y con la ficha del producto en el panel. El nombre corto —«Gluten»— sí se usa donde la maqueta lo usa: la segunda línea de la franja de cocina |
-| «Toda la mesa» en la hoja de alergias | botón tenue al pie, «No sé la silla · toda la mesa» | botón rojo arriba, «TODA LA MESA» | Es de v2-H1/kds-1 y no estaba en las cinco. **Pendiente del visto bueno de Matías**: la maqueta lo quiere más discreto |
+| «Toda la mesa» en la hoja de alergias | botón tenue al pie, «No sé la silla · toda la mesa» | botón arriba, «TODA LA MESA», **neutro salvo que tenga alérgenos** (kds-1c, §8.4) | Es de v2-H1/kds-1 y no estaba en las cinco. Lo de que saliera rojo siempre se arregló en kds-1c: el rojo es la alergia. **Sigue pendiente del visto bueno de Matías** dónde va y cómo se llama: la maqueta lo quiere al pie y más discreto |
 | La rejilla de los 14 | 4 × 4 llenando el alto | rejilla fija arriba, con hueco debajo | Lo mismo: no estaba en las cinco. Se ve en `tpv-alergias-1443x812.png` |
 | La pastilla del cobro en la barra inferior compacta | — | sigue en coral | Es de v2-H1 y NO es un botón de la comanda: es el resumen que la abre. Se deja, y por eso el sabotaje del coral mira sólo dentro de `[data-testid="comanda"]` |
 
@@ -585,14 +587,155 @@ razón:
 En `Main.dc.html` caben cuatro tarjetas en una fila y sobra medio lienzo, con un
 «+2» en el borde. **La entrega sale igual**: una fila de cuatro, el resto a la
 franja. No es un fallo del reparto — es lo que mide una tarjeta de alergia por
-silla (500 px) cuando cada fila mide lo que su tarjeta más alta.
+silla (500 px) cuando cada fila mide lo que su tarjeta más alta. Con el orden
+de kds-1c esa tarjeta cae a la segunda fila y el hueco se ve más; se anota en
+la §8.3 y no se toca.
 
 Con cuatro comandas normales, las ocho entran en dos filas (§6.2), que es lo que
 pedía la decisión 7 y lo que la versión de tres columnas no conseguía.
 
 ---
 
-## 8 · La pasada en el hierro
+## 8 · kds-1c · la pantalla ordena sola, y la hoja de alergias
+
+Sale de comparar la captura de kds-1b con la decisión 7 y con la maqueta. Dos
+cosas: una grave —el orden— y una menor —qué está seleccionado en la hoja de
+alergias—.
+
+### 8.1 · El orden estaba roto, y la pantalla no lo arreglaba
+
+`cocina-1280x800.png` pintaba **T4 (urgente) → M5 (7 min) → M1 (4 min) → M2 (14
+min)**, y en el «+7», **en rojo**, quedaban escondidas mesas más antiguas que las
+que se veían: la **M4 con 26 minutos estaba oculta** mientras la M1 con 4 se
+veía. Es justo lo que la decisión 7 quiere impedir.
+
+La causa: la pantalla pintaba las comandas **en el orden en que le llegaban**.
+Confiaba en que el servidor se las mandara ordenadas (`vista.ts` las ordena por
+`orderAt`), y el banco del bucle visual —que es un doble de la API— no las
+ordenaba. O sea: **la decisión 7 dependía de quién le hablase a la pantalla.**
+
+Ahora ordena ella, en `ordenarParaLaPantalla` (`kitchenLayout.ts`), venga como
+venga la lista:
+
+1. **las urgentes primero** — es una decisión del camarero y pesa más que el
+   reloj;
+2. **por la marca de marcha (`firedAt`), de la más antigua a la más nueva** — la
+   **misma** que pinta los minutos de la cabecera. Por eso no puede ser
+   `sentAt`: un tiempo 2 enviado hace media hora y marchado hace uno pinta «1
+   min», y ordenado por el envío se colaría delante de una mesa que lleva veinte
+   esperando de verdad. **La pantalla se ordena por lo que la pantalla dice;**
+3. **por el id** al empatar, para que dos tarjetas con la misma marca no se
+   intercambien de columna entre dos repintados.
+
+Un tiempo retenido (`firedAt` null) va al final: no ha empezado a contar.
+
+**La función es UNA.** La llama `repartirTarjetas`, y de la misma lista ya
+ordenada salen `visibles` y `extra`, así que lo que va al «+N» son siempre **las
+más nuevas**. Si la rejilla y la franja ordenaran cada una por su cuenta, el
+«+N» podría esconder una mesa más antigua que la última visible y nadie lo
+notaría hasta tener la captura delante — que es exactamente como se encontró.
+
+**Consecuencia sobre el rojo del «+N»:** ya no puede salir un «+7» rojo con una
+verde de 4 min en pantalla. Si una oculta está en rojo, todas las visibles no
+urgentes son más antiguas que ella y están en rojo también; o sea, el caso
+queda reservado a **cuando de verdad hay más rojas de las que caben**. Tiene su
+test, y el sabotaje de quitar el orden lo pone en rojo.
+
+### 8.2 · La prueba: el banco sigue desordenado
+
+`COMANDAS` se queda **en el mismo orden desordenado** de la captura anterior a
+propósito. Si el banco mandara la lista ordenada, la captura no probaría nada.
+Lo que el bucle visual mide ahora (`medidas.json`, `cocina-1280x800`):
+
+| | el orden |
+|---|---|
+| `ordenQueMandaElBanco` | T4!/2 · M5/7 · M1/4 · M2/14 · M4/26 · T2/9 · M6/11 · B1/3 · B3/1 · T1/6 · M7/8 |
+| `ordenDelDom` | **T4! 2 min · M4 26 min · M2 14 min · M6 11 min** |
+| `mesasOcultas` | T2 · M7 · M5 · … |
+| `colorDeLaFranja` | **verde** (antes: rojo) |
+
+La urgente delante; detrás, 26 → 14 → 11, de mayor a menor. Las ocultas son las
+más nuevas (9, 8, 7 y por debajo), y la franja ya no va en rojo porque la M4 —la
+que llevaba 26 minutos— **está en pantalla**.
+
+### 8.3 · Lo que esto deja a la vista, y no se ha tocado
+
+Siguen cabiendo **cuatro** tarjetas en este escenario, con media pantalla vacía
+y un «+7». No es nuevo —la captura de kds-1b enseñaba lo mismo— ni es del
+orden: es lo que mide una comanda de alergia por silla (la M5, ~486 px) cuando
+**cada fila mide lo que su tarjeta más alta** y se corta por filas (decisión 7,
+§7.5). Con el orden nuevo la M5 cae a la segunda fila, y esa fila ya no cabe.
+
+Se anota y **no se toca**: cambiarlo es reabrir el reparto por filas, y el
+prompt dice que no se reabren decisiones. Si Matías quiere recuperar esas filas,
+lo que hay que discutir es si una fila puede medir lo que su tarjeta más baja y
+dejar que la alta se vaya sola al «+N» — con el coste de romper el orden de
+lectura, que es lo que la corrección del 08-10 vino a arreglar.
+
+### 8.4 · La hoja de alergias: qué está seleccionado y qué tiene alergia
+
+En `tpv-alergias-1443x812.png` salían **en rojo a la vez** «TODA LA MESA» y la
+silla 3, y la derecha decía «Toda la mesa» **sin ningún alérgeno marcado**. Dos
+rojos que querían decir cosas distintas, y ninguna pista de qué se estaba
+editando.
+
+La regla, ahora, y es una por cosa:
+
+| | significa | cómo se pinta |
+|---|---|---|
+| **Rojo** `#C8102E` | **tiene alergia** | fondo de la silla (o de «toda la mesa») que tenga algún alérgeno declarado. El mismo rojo que la franja de la comanda, para que quiera decir lo mismo en las dos pantallas |
+| **Anillo blanco** 3 px | **es lo que estás editando** | contorno. **No cambia el color**: lo seleccionado no es una alergia |
+
+Y «toda la mesa» va **neutra** (`#1C2026`) si no tiene alérgenos. La silla con
+alergia lleva **su palabra debajo del número** —«gluten», en minúscula, como la
+maqueta—; con más de uno, «gluten +1», y el detalle se ve tocando la silla.
+
+**La hoja abre en la primera silla con alergia** (la de número más bajo, para
+que con los mismos datos abra siempre en el mismo sitio), o en «toda la mesa»
+si no hay ninguna. Era la otra mitad del defecto: abría en «toda la mesa» y la
+rejilla de los 14 salía sin nada marcado.
+
+Lo que mide el bucle visual (`medidas.json`, `tpv-alergias-1443x812`,
+`quienEstaRojo`), con el escenario del banco —`{ seat: 3, allergen: GLUTEN }`—:
+
+| | fondo | contorno | `data-elegida` | `data-con-alergia` |
+|---|---|---|---|---|
+| TODA LA MESA | `rgb(28, 32, 38)` | `none` | 0 | 0 |
+| silla 1 · 2 · 4 | `rgb(28, 32, 38)` | `none` | 0 | 0 |
+| **silla 3** | **`rgb(200, 16, 46)`** | **`3px solid rgb(255,255,255)`** | **1** | **1** |
+
+Y la derecha: `editando: "Silla 3"`, `marcados: ["GLUTEN"]`.
+
+### 8.5 · Los cinco sabotajes de kds-1c
+
+| Sabotaje | Cayó | El mensaje real del rojo |
+|---|---|---|
+| Quitar el ordenado en la pantalla (`repartirTarjetas` se queda con la lista tal cual) | ✅ | `expected [ 'T4', 'M5', 'M1', 'M2' ] to deeply equal [ 'T4', 'M4', 'M2', 'T2' ]` — la captura, literal. Y dos más: `expected [ 'T4', 'M5', 'M1', 'M2', 'M4', 'T2' ] to deeply equal [ 'T4', 'M4', 'M2', 'T2', 'M5', 'M1' ]` y `expected 'verde' to be 'rojo'` |
+| Ordenar por `sentAt` en vez de por la marca que pinta los minutos | ✅ | `expected [ 'tiempo2', 'vieja' ] to deeply equal [ 'vieja', 'tiempo2' ]` (y seis rojos más: ordenar por el envío descoloca el servicio entero) |
+| Que «+N» use otro orden que la rejilla (`extra` sale de la lista sin ordenar) | ✅ | `M8 oculta: expected 1791467220000 to be greater than or equal to 1791467580000`, y `expected 'ambar' to be 'rojo'` en la invariante del rojo oculto |
+| Pintar en rojo «toda la mesa» sin alérgenos | ✅ | `expected 'rgb(200, 16, 46)' to be 'rgb(28, 32, 38)'` |
+| Que la selección cambie el color en vez de poner el anillo | ✅ | `expected 'none' to be '3px solid #FFFFFF'`; y con el anillo puesto pero el color atado a la selección, `expected 'rgb(200, 16, 46)' to be 'rgb(28, 32, 38)'` |
+
+### 8.6 · Un sabotaje volvió a descubrir una debilidad del propio test
+
+Van tres (§4.1). **«Que «+N» use otro orden que la rejilla» pasó en verde la
+primera vez**, y por dos motivos a la vez en el mismo test:
+
+- el banco usaba `7 × i mod 14` para repartir los minutos, y 7 y 14 no son
+  primos entre sí: sólo salían **dos** minutos distintos (1 y 8). Con el
+  servicio entero empatado, cualquier orden valía;
+- la comparación miraba el **mínimo** de las marcas visibles, que es la **más
+  antigua**, no la más nueva. Con las marcas al revés de como se leen —más
+  nueva = número mayor—, el `toBeGreaterThanOrEqual` no decía nada.
+
+`5 × i mod 14` recorre los catorce restos, y la comparación va contra el máximo.
+Cae, y el mensaje nombra la mesa oculta. La regla que deja: *un banco con
+empates no prueba un orden*, y *una comparación sobre marcas de tiempo se
+escribe con la palabra («la más nueva») al lado del `Math.max`*.
+
+---
+
+## 9 · La pasada en el hierro
 
 **NO SE HA HECHO.** Es el criterio de cierre del prompt y está sin cumplir.
 
@@ -619,7 +762,7 @@ servicio, y que el papel por USB sale de verdad por la impresora del D8.
 
 ---
 
-## 9 · Lo que queda fuera, y dicho
+## 10 · Lo que queda fuera, y dicho
 
 - **kds-2 · el camino directo por la wifi.** Aquí sólo el modelo preparado:
   `clientSendId` idempotente generado en el terminal y el estado de la pantalla
@@ -637,7 +780,7 @@ servicio, y que el papel por USB sale de verdad por la impresora del D8.
 
 ---
 
-## 10 · Cómo probarlo a mano
+## 11 · Cómo probarlo a mano
 
 ```bash
 # 1 · la base
