@@ -137,6 +137,10 @@ import {
   type CaminoDirecto,
 } from "../kitchen/tpv/useCaminoDirecto.js";
 import { componerComandasLan } from "../kitchen/tpv/envioLan.js";
+import {
+  diagnosticar,
+  type Diagnostico,
+} from "../kitchen/tpv/pruebaConexion.js";
 import { AlergiasSheet } from "../kitchen/tpv/AlergiasSheet.js";
 import {
   AHORA_LIMIT,
@@ -634,6 +638,27 @@ export function SalePage(props: SalePageProps) {
   // estarlo— y lo dejaba como carryover. **Este bloque es el carryover**:
   // `TicketLine.sentUnits` lo dice el servidor y los dos terminales ven lo
   // mismo. Nada se guarda en el navegador.
+  // kds-2-wifi · el resultado de «Probar conexión directa con cocina».
+  const [pruebaCocina, setPruebaCocina] = useState<
+    | { estado: "probando" }
+    | { estado: "hecha"; diagnostico: Diagnostico; faltaba: string | null }
+    | null
+  >(null);
+
+  const probarCocina = useCallback(async () => {
+    const camino = props.camino ?? CAMINO_APAGADO;
+    setPruebaCocina({ estado: "probando" });
+    const respuestas = await camino.probar();
+    setPruebaCocina({
+      estado: "hecha",
+      diagnostico: diagnosticar({
+        porQueNoHayWifi: camino.porQueNoHayWifi,
+        respuestas,
+      }),
+      faltaba: camino.porQueNoHayWifi,
+    });
+  }, [props.camino]);
+
   // kds-2-wifi · la marca «enviado» del primer acuse, y su reconstrucción.
   //
   // Se reconstruye de los `kitchen-send` que el outbox tenga pendientes de
@@ -3260,6 +3285,16 @@ export function SalePage(props: SalePageProps) {
           onClose={() => setKitchenToast(null)}
         />
       )}
+      {/* kds-2-wifi · el resultado de la prueba, en palabras. Lo que lee
+          el implantador no es un código: es qué hacer. */}
+      {pruebaCocina?.estado === "hecha" && (
+        <PruebaCocinaSheet
+          diagnostico={pruebaCocina.diagnostico}
+          faltaba={pruebaCocina.faltaba}
+          onReintentar={() => void probarCocina()}
+          onClose={() => setPruebaCocina(null)}
+        />
+      )}
       {kitchenError && (
         <KitchenErrorBanner
           message={kitchenError.message}
@@ -3480,6 +3515,45 @@ export function SalePage(props: SalePageProps) {
                   : "Sincronizar catálogo"}
               </span>
             </button>
+            {/* kds-2-wifi · LA PUERTA DE LA IMPLANTACIÓN.
+                «Probar conexión directa con cocina»: manda un mensaje
+                firmado por la wifi del local y dice si llega, cuánto tarda
+                y, si no llega, qué hacer. Va al guion de implantación —sin
+                esto en verde, el bar depende del papel cuando se va
+                internet.
+
+                Vive en el cajón del TPV y no en el panel de
+                administración a propósito: la prueba tiene que salir DEL
+                TERMINAL, que es el que está en la wifi del bar y el que
+                tiene el puente nativo. Desde el navegador del
+                implantador no se puede probar nada de esto.
+
+                Sólo con el módulo encendido: sin pantalla de cocina no hay
+                nada que probar. */}
+            {props.kitchenDisplayEnabled === true && (
+              <button
+                data-testid="probar-cocina-wifi"
+                onClick={() => {
+                  setDrawerOpen(false);
+                  void probarCocina();
+                }}
+                title="Manda un mensaje firmado a la tablet de cocina por la wifi del local"
+                className="w-full h-12 flex items-center gap-3 px-4 rounded-xl text-slate-600 hover:bg-slate-50 text-[14.5px] font-medium"
+              >
+                {pruebaCocina?.estado === "probando" ? (
+                  <Loader2
+                    className="w-[19px] h-[19px] text-slate-500 shrink-0 animate-spin"
+                    strokeWidth={2.1}
+                  />
+                ) : (
+                  <Wifi
+                    className="w-[19px] h-[19px] text-slate-500 shrink-0"
+                    strokeWidth={2.1}
+                  />
+                )}
+                <span>Probar conexión directa con cocina</span>
+              </button>
+            )}
             <button
               onClick={() => {
                 setDrawerOpen(false);
@@ -5620,4 +5694,83 @@ function notasDeLineaLan(l: CartLine): string[] {
 function esFalloDeRed(err: unknown): boolean {
   if (err instanceof ApiError) return err.status === 408 || err.status >= 500;
   return true;
+}
+
+/**
+ * kds-2-wifi · la hoja con el resultado de «Probar conexión directa».
+ *
+ * No se auto-cierra, a diferencia del toast de la comanda: el implantador
+ * la está leyendo de pie, con el router en la otra mano, y tiene que poder
+ * seguir el «qué hacer» sin que la pantalla se le vaya a los cinco
+ * segundos.
+ */
+function PruebaCocinaSheet({
+  diagnostico,
+  faltaba,
+  onReintentar,
+  onClose,
+}: {
+  diagnostico: Diagnostico;
+  faltaba: string | null;
+  onReintentar: () => void;
+  onClose: () => void;
+}) {
+  const borde =
+    diagnostico.veredicto === "VERDE"
+      ? "border-emerald-300 bg-emerald-50"
+      : diagnostico.veredicto === "AMBAR"
+      ? "border-amber-300 bg-amber-50"
+      : "border-red-300 bg-red-50";
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/40 px-3 pb-3 sm:pb-0">
+      <div
+        data-testid="prueba-cocina"
+        data-veredicto={diagnostico.veredicto}
+        className={`w-full max-w-md rounded-2xl border p-4 shadow-xl ${borde}`}
+      >
+        <div className="text-[15px] font-bold mb-2 text-slate-900">
+          {diagnostico.titulo}
+        </div>
+        {faltaba && (
+          <p className="text-[13.5px] text-slate-700 mb-2">{faltaba}</p>
+        )}
+        <div className="flex flex-col gap-2">
+          {diagnostico.pantallas.map((p) => (
+            <div
+              key={p.pantallaId}
+              data-testid="prueba-cocina-pantalla"
+              className="rounded-xl bg-white/70 px-3 py-2"
+            >
+              <div className="text-[13.5px] font-semibold text-slate-900">
+                {p.nombre ?? "Pantalla de cocina"}
+                {p.ms != null ? ` · ${p.ms} ms` : ""}
+              </div>
+              <div className="text-[13px] text-slate-700">{p.mensaje}</div>
+              {p.queHacer && (
+                <div className="text-[13px] font-medium text-slate-900 mt-1">
+                  {p.queHacer}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2 mt-3">
+          <button
+            data-testid="prueba-cocina-reintentar"
+            onClick={onReintentar}
+            className="flex-1 h-11 rounded-xl border border-slate-300 bg-white text-[14px] font-semibold text-slate-800"
+          >
+            Volver a probar
+          </button>
+          <button
+            data-testid="prueba-cocina-cerrar"
+            onClick={onClose}
+            className="flex-1 h-11 rounded-xl bg-slate-900 text-white text-[14px] font-semibold"
+          >
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }

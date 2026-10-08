@@ -27,6 +27,7 @@ import { apiWithDevice } from "../api.js";
 import {
   clientSendIdDe,
   esDeLaWifi,
+  sinDuplicados,
   useCocinaLan,
   type MarcaLocal,
 } from "./useCocinaLan.js";
@@ -267,14 +268,7 @@ export function KitchenScreen({ me }: KitchenScreenProps) {
     onCambio: () => setTick((t) => t + 1),
   });
 
-  const yaEnLaNube = new Set(
-    (vista?.orders ?? []).map((o) => `${o.ticketId}:${o.section}:${o.number}`),
-  );
-  const soloDeLaWifi = lanCocina.extras.filter(
-    (c) =>
-      c.servedAt == null &&
-      !yaEnLaNube.has(`${c.ticketId}:${c.section}:${c.number}`),
-  );
+  const soloDeLaWifi = sinDuplicados(vista?.orders ?? [], lanCocina.extras);
 
   // Y las marcas que el cocinero hizo sin red se aplican ENCIMA de lo que
   // se pinte, venga del servidor o de la wifi: el `GET` que no se pudo

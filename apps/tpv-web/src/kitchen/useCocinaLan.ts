@@ -484,6 +484,29 @@ export function useCocinaLan(opts: {
   };
 }
 
+/**
+ * kds-2-wifi · las tarjetas de la wifi que TODAVÍA hacen falta.
+ *
+ * Una que ya tiene su gemela en el `GET` no se pinta: cuando vuelve
+ * internet, el servidor recibe el mismo `clientSendId`, crea la tarjeta de
+ * verdad, y ésa es la que vale —es la que lleva los ids con los que se
+ * puede tachar—. La llave del cruce es **mesa + sección + nº de comanda**,
+ * que es lo único que los dos caminos comparten: el `clientSendId` vive en
+ * el despacho y la vista de cocina no lo trae.
+ *
+ * Y una ya servida no vuelve, aunque siga en memoria.
+ *
+ * Es la fila «al volver internet, duplicar» de la tabla de sabotajes.
+ */
+export function sinDuplicados(
+  delServidor: Comanda[],
+  deLaWifi: Comanda[],
+): Comanda[] {
+  const llave = (c: Comanda) => `${c.ticketId}:${c.section}:${c.number}`;
+  const yaEstan = new Set(delServidor.map(llave));
+  return deLaWifi.filter((c) => c.servedAt == null && !yaEstan.has(llave(c)));
+}
+
 /** El id local de una tarjeta que sólo ha llegado por la wifi. */
 export function idLan(clientSendId: string, section: string): string {
   return `lan:${clientSendId}:${section}`;

@@ -117,6 +117,19 @@ precio, no el relleno.
     - Sólo red, Bluetooth, o una impresora fiscal o propietaria → **no sirve**. Plan B: llevar una
       térmica USB ESC/POS de 80 mm de repuesto (presupuesto con el 20 % de margen si se le vende).
     - Mirar la etiqueta y apuntar el modelo en `docs/qa/ficha-terminal-ap13-kozen-d8.md`.
+- [ ] **Probar conexión directa con cocina** (kds-2). En el TPV, menú ☰ → «Probar conexión
+      directa con cocina». **Tiene que salir en VERDE.** Mide los ms y, si falla, dice qué hacer.
+  - **Sin esto en verde, el bar depende del papel cuando se va internet**: la comanda no llega a
+    la tablet y hay que cantarla. Es puerta, no mejora.
+  - La causa número uno de un rojo es el router con **«aislamiento de clientes»** (viene encendido
+    en casi todas las redes de invitados): deja a cada aparato hablar con internet y con nadie
+    más. Se desactiva en el router, o se ponen el D8 y la tablet en la wifi normal del local.
+  - Se prueba **desde el terminal**, no desde el navegador del implantador: la llamada sale por el
+    puente nativo de la APK y tiene que salir del aparato que está en la wifi del bar.
+- [ ] **Cable de internet fuera del router, wifi encendida** (no vale el modo avión, que corta
+      también la wifi): comanda de una mesa → aparece en la tablet, franja **ámbar** arriba
+      («Sin internet · recibiendo por la wifi del local»), **no roja**. Se vuelve a enchufar →
+      el panel tiene esa comanda **una sola vez** y con los tiempos de cocina buenos.
 - [ ] Modo avión 2 min: venta offline → reconectar → sube sola (y su registro fiscal no se repite).
 - [ ] Si hay dos cajas: expulsión pasiva y doble cobro simultáneo (`checklist-sirope.md` §3).
 - [ ] **Activar** con el email del dueño delante. Irreversible. Primer login, contraseña y PIN.
