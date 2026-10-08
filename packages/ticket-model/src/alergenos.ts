@@ -214,6 +214,64 @@ export function franjaAlergia(
 }
 
 /**
+ * Cómo se nombra a la PERSONA de esa silla, para la primera línea de la
+ * franja de la pantalla.
+ *
+ * La maqueta escribe «SILLA 3 · CELÍACO». En una cocina española el
+ * celíaco tiene su propia palabra y es la que se usa; para los otros trece
+ * no hay una palabra corriente («sulfítico» no existe) y se dice
+ * «ALÉRGICO». Con dos o más alérgenos en la misma silla también
+ * «ALÉRGICO»: «CELÍACO Y ALÉRGICO A LOS LÁCTEOS» no cabe a 21 px en una
+ * tarjeta de 251 px, y lo que hace falta leer de un golpe es que esa silla
+ * tiene algo — el QUÉ va en la segunda línea, con el nombre del alérgeno.
+ */
+const PERSONA: Partial<Record<Alergeno, string>> = { GLUTEN: "CELÍACO" };
+
+/** La franja de alergia de la tarjeta de cocina, en sus dos líneas. */
+export interface FranjaAlergiaPantalla {
+  /** «SILLA 3 · CELÍACO» / «TODA LA MESA · ALÉRGICO». 21 px, negrita. */
+  titulo: string;
+  /** «Gluten» / «Gluten · Lácteos». 15 px, debajo. */
+  alergenos: string;
+}
+
+/**
+ * La misma franja, pero para la PANTALLA y no para el papel.
+ *
+ * El papel sigue llevando la de arriba, en una línea y en mayúsculas, que
+ * es lo que cabe en 42 caracteres de una térmica de 80 mm. La pantalla
+ * tiene dos líneas y las usa, porque es lo que la maqueta dibuja y lo que
+ * kds-1b vino a corregir: antes era una cajita oscura con «⚠ SILLA 3 · SIN
+ * GLUTEN», y ahora es una franja roja ancha de ancho completo justo debajo
+ * de la cabecera de la mesa.
+ *
+ * El «SIN GLUTEN» no desaparece: se va **al recuadro del plato** de esa
+ * silla, que es donde dice algo — ahí es una instrucción sobre un plato
+ * concreto, y en la franja era sólo una repetición del alérgeno.
+ */
+export function franjaAlergiaPantalla(
+  seat: number | null,
+  alergenos: readonly Alergeno[],
+): FranjaAlergiaPantalla {
+  const quien = seat == null ? "TODA LA MESA" : `SILLA ${seat}`;
+  const persona =
+    alergenos.length === 1 ? (PERSONA[alergenos[0]!] ?? "ALÉRGICO") : "ALÉRGICO";
+  return {
+    titulo: `${quien} · ${persona}`,
+    alergenos: alergenos.map((a) => ALERGENOS[a].etiqueta).join(" · "),
+  };
+}
+
+/**
+ * Lo que va en la sub-franja del recuadro del plato de una silla con
+ * alergia: «SIN GLUTEN». Vacío si esa silla no tiene nada declarado.
+ */
+export function sinAlergenos(alergenos: readonly Alergeno[]): string | null {
+  if (alergenos.length === 0) return null;
+  return alergenos.map((a) => ALERGENOS[a].corta).join(" · ");
+}
+
+/**
  * Los alérgenos de un plato que chocan con los de su silla.
  *
  * Es la capa 3 de la decisión 3: un plato **de la silla alérgica que lleva

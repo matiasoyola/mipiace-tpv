@@ -41,8 +41,10 @@ import {
   ALERGENOS,
   avisoChoque,
   choqueAlergenos,
-  franjaAlergia,
+  franjaAlergiaPantalla,
+  sinAlergenos,
   type Alergeno,
+  type FranjaAlergiaPantalla,
 } from "@mipiacetpv/ticket-model";
 
 import { getPrisma } from "../context.js";
@@ -71,6 +73,16 @@ export interface LineaVista {
   changePending: boolean;
   /** Capa 3 · este plato lleva un alérgeno de la mesa. Informativo. */
   carries: string[];
+  /**
+   * Capa 2 · lo que va en la sub-franja del recuadro de este plato:
+   * «SIN GLUTEN». `null` si su silla no tiene nada declarado, o si el
+   * plato no va a ninguna silla.
+   *
+   * Es el texto que kds-1b sacó de la franja de la mesa y puso aquí: en la
+   * franja repetía el alérgeno que ya decía la segunda línea; aquí es una
+   * instrucción sobre un plato concreto.
+   */
+  seatAllergy: string | null;
   /**
    * Capa 3, el grito: este plato es de la silla alérgica y lleva SU
    * alérgeno. Rojo y parpadeando. `null` en todo lo demás.
@@ -101,8 +113,15 @@ export interface ComandaVista {
   recoveredAt: string | null;
   /** Decisión 8 · parpadea hasta el primer tachado. */
   isNew: boolean;
-  /** «⚠ SILLA 3 · SIN GLUTEN». «Toda la mesa» primero. */
-  allergyBands: string[];
+  /**
+   * «SILLA 3 · CELÍACO» + «Gluten». «Toda la mesa» primero.
+   *
+   * Dos líneas y no una cadena: la pantalla las pinta a 21 y a 15 px
+   * dentro de una franja roja de ancho completo (la maqueta). El papel de
+   * la comanda sigue llevando la cadena de una línea de `franjaAlergia`,
+   * que es lo que cabe en 42 caracteres de una térmica.
+   */
+  allergyBands: FranjaAlergiaPantalla[];
   lines: LineaVista[];
 }
 
@@ -288,12 +307,14 @@ function aVista(o: {
       ? deLaMesa
       : [...new Set([...(porSilla.get(seat) ?? []), ...deLaMesa])];
 
-  const allergyBands: string[] = [];
-  if (deLaMesa.length > 0) allergyBands.push(franjaAlergia(null, deLaMesa));
+  const allergyBands: FranjaAlergiaPantalla[] = [];
+  if (deLaMesa.length > 0) {
+    allergyBands.push(franjaAlergiaPantalla(null, deLaMesa));
+  }
   for (const seat of [...porSilla.keys()]
     .filter((k): k is number => k != null)
     .sort((a, b) => a - b)) {
-    allergyBands.push(franjaAlergia(seat, porSilla.get(seat)!));
+    allergyBands.push(franjaAlergiaPantalla(seat, porSilla.get(seat)!));
   }
 
   const lines: LineaVista[] = o.lines.map((l) => {
@@ -328,6 +349,7 @@ function aVista(o: {
       changeNote: l.changeNote,
       changePending: l.changedAt != null && l.changeSeenAt == null,
       carries,
+      seatAllergy: l.seat != null ? sinAlergenos(deSilla(l.seat)) : null,
       allergyWarning: avisoChoque(choque),
     };
   });

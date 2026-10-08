@@ -10,6 +10,20 @@
 
 import type { KitchenSection } from "./secciones.js";
 
+/**
+ * La franja roja de la alergia de la mesa, en sus dos líneas.
+ *
+ * Espejo de `FranjaAlergiaPantalla` de `ticket-model`. Se escribe aquí
+ * también porque la pantalla no importa de `@mipiacetpv/ticket-model`: lo
+ * único que cruza es JSON.
+ */
+export interface FranjaAlergia {
+  /** «SILLA 3 · CELÍACO». 21 px, negrita. */
+  titulo: string;
+  /** «Gluten». 15 px, debajo. */
+  alergenos: string;
+}
+
 export interface LineaComanda {
   id: string;
   name: string;
@@ -32,6 +46,8 @@ export interface LineaComanda {
   changePending: boolean;
   /** Capa 3 informativa: «lleva gluten». Sin rojo y sin parpadeo. */
   carries: string[];
+  /** Capa 2 · la sub-franja del recuadro de este plato: «SIN GLUTEN». */
+  seatAllergy: string | null;
   /** Capa 3, el grito: «¡LLEVA GLUTEN!». Rojo y parpadeando. */
   allergyWarning: string | null;
 }
@@ -54,7 +70,8 @@ export interface Comanda {
   recoveredAt: string | null;
   /** Parpadea hasta el primer tachado. */
   isNew: boolean;
-  allergyBands: string[];
+  /** «SILLA 3 · CELÍACO» + «Gluten». «Toda la mesa» primero. */
+  allergyBands: FranjaAlergia[];
   lines: LineaComanda[];
 }
 
