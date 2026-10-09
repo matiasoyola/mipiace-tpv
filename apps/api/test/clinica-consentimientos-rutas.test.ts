@@ -451,6 +451,27 @@ describe("clinica-4 · lo clínico lo firma el sanitario", () => {
     await app.close();
   });
 
+  it("y el «Col.» que venga DENTRO del número no se duplica", async () => {
+    // El campo lo teclea la dueña en Personal y es texto libre: la mitad
+    // escribe «45-0312» y la otra «Col. 45-0312». Todo lo que lo imprime
+    // le pone su propio rótulo delante, así que con el prefijo dentro
+    // salía «Col. Col. 45-0312» **en el documento que se entrega**. Lo
+    // vio el bucle visual, en la pestaña de Documentos.
+    mundo.users.get(SANITARIA_ID)!.clinicianLicense = "Col. 45-0312";
+    const app = await buildApp();
+    const res = await firmar(app);
+    expect(res.json().consentimiento.informante.colegiado).toBe("45-0312");
+    await app.close();
+  });
+
+  it("y un colegiado en blanco sigue siendo null, no una cadena vacía", async () => {
+    mundo.users.get(SANITARIA_ID)!.clinicianLicense = "  Col.  ";
+    const app = await buildApp();
+    const res = await firmar(app);
+    expect(res.json().consentimiento.informante.colegiado).toBeNull();
+    await app.close();
+  });
+
   it("una dueña NO sanitaria no firma un consentimiento clínico", async () => {
     // La condición cruza `users.is_clinician` con la marca de la
     // plantilla, así que no cabe en un CHECK: la comprueba la API.

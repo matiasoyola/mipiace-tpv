@@ -153,6 +153,26 @@ function nombreDeUsuario(u: {
   return u.alias?.trim() || u.email;
 }
 
+/**
+ * EL NÚMERO DE COLEGIADO, sin el «Col.» que a veces viene dentro.
+ *
+ * El campo lo teclea la dueña en Personal y es texto libre: la mitad
+ * escribirá «45-0312» y la otra mitad «Col. 45-0312». Todo lo que lo
+ * imprime le pone delante su propio rótulo («Col. …», «Nº de colegiado
+ * …»), y con el prefijo dentro salía **«Col. Col. 45-0312»** — en el
+ * documento que se entrega. Lo vio el bucle visual, en la pestaña de
+ * Documentos.
+ *
+ * Se normaliza AQUÍ, en el borde de la API, y no en cada pantalla: tres
+ * sitios que lo limpien son dos que algún día no lo limpian. Lo que se
+ * guardó en una sesión firmada no se toca — eso ya está congelado.
+ */
+export function numeroDeColegiado(raw: string | null): string | null {
+  if (!raw) return null;
+  const limpio = raw.trim().replace(/^(col\.?|n[.ºo]*\s*col\.?)\s*/i, "").trim();
+  return limpio === "" ? null : limpio;
+}
+
 /** La forma que la cuenta pura necesita. */
 function paraLaCuenta(filas: readonly FilaDeBase[]): readonly FilaFirmada[] {
   return filas.map((f) => ({
@@ -207,7 +227,7 @@ function aPantalla(
     informante: fila.informer
       ? {
           nombre: nombreDeUsuario(fila.informer),
-          colegiado: fila.informer.clinicianLicense,
+          colegiado: numeroDeColegiado(fila.informer.clinicianLicense),
         }
       : null,
     pdfSha256: fila.pdfSha256,
@@ -551,7 +571,7 @@ export async function firmarConsentimiento(
     firmante: input.firmante,
     informante: {
       nombre: nombreDeUsuario(quien),
-      colegiado: quien.clinicianLicense,
+      colegiado: numeroDeColegiado(quien.clinicianLicense),
     },
     fecha: `${fechaLarga(input.ahora)}, ${horaDelCentro(input.ahora)}`,
     firmaPng: input.firmaPng,

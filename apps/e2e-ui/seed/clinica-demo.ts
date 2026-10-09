@@ -577,12 +577,31 @@ export async function borrarClinica(prisma: PrismaClient): Promise<void> {
     ["clinical_addenda", "clinical_addenda_inmutable"],
     ["clinical_access_log", "clinical_access_log_append_only"],
     ["clinical_access", "clinical_access_guard"],
+    // clinica-4 · las tres tablas del bloque: el consentimiento firmado,
+    // la foto y la entrega del informe. Las tres cuelgan del tenant con
+    // RESTRICT, así que sin borrarlas antes el `DELETE FROM tenants` de
+    // abajo se cae con `client_consents_tenant_id_fkey`.
+    //
+    // **Lo descubrió el bucle visual**, al rehacer la semilla entre dos
+    // anchos: el consentimiento firmado en el primero impedía borrar el
+    // tenant en el segundo. Es la garantía de S3 funcionando —un tenant
+    // con consentimientos no se borra— y lo que hay que arreglar es el
+    // seed, no la garantía.
+    ["client_consents", "client_consents_append_only"],
+    ["clinical_photos", "clinical_photos_guard"],
+    ["clinical_report_deliveries", "clinical_report_deliveries_append_only"],
   ];
   for (const [tabla, trg] of triggers) {
     await prisma.$executeRawUnsafe(
       `ALTER TABLE ${tabla} DISABLE TRIGGER ${trg}`,
     );
   }
+  // clinica-4 · las REVOCACIONES primero: una fila de revocación apunta a
+  // la que revoca con RESTRICT, así que un `DELETE` de toda la tabla de
+  // golpe choca contra sí mismo.
+  await prisma.$executeRawUnsafe(
+    `DELETE FROM client_consents WHERE tenant_id = '${CLINICA.tenant}' AND revokes_consent_id IS NOT NULL`,
+  );
   for (const t of [
     "clinical_assessment_corrections",
     "clinical_assessments",
@@ -590,6 +609,9 @@ export async function borrarClinica(prisma: PrismaClient): Promise<void> {
     "clinical_entries",
     "clinical_access_log",
     "clinical_access",
+    "client_consents",
+    "clinical_photos",
+    "clinical_report_deliveries",
   ]) {
     await prisma.$executeRawUnsafe(
       `DELETE FROM ${t} WHERE tenant_id = '${CLINICA.tenant}'`,

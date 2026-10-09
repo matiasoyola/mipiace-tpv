@@ -51,6 +51,7 @@ import {
   datosDelCentro,
   diaCorto,
   fechaLarga,
+  numeroDeColegiado,
 } from "./consentimientos.js";
 import { huellaDe } from "./ficheros.js";
 import { vistaDeLaHistoria } from "./historia.js";
@@ -166,7 +167,7 @@ export async function armarInforme(
     centro,
     profesional: {
       nombre: quien.alias?.trim() || quien.email,
-      colegiado: quien.clinicianLicense,
+      colegiado: numeroDeColegiado(quien.clinicianLicense),
       titulo: TITULO_DEL_PROFESIONAL,
     },
     paciente: {

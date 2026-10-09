@@ -791,9 +791,17 @@ export function SesionPodologia(props: {
           clientId={vista.cabecera.paciente.id}
           mapa={vista.listas.mapa}
           appointmentId={props.appointmentId}
-          // Las zonas marcadas HOY se ofrecen primero en la cámara: lo
-          // normal es fotografiar lo que se acaba de marcar.
-          zonasDeHoy={Object.keys(marcas)}
+          // Las zonas marcadas se ofrecen primero en la cámara: lo normal
+          // es fotografiar lo que se acaba de marcar, y si todavía no se
+          // ha marcado nada, lo que el paciente ya tenía de la visita
+          // anterior. Con las 22 del mapa delante, la podóloga lee una
+          // lista en vez de tocar una zona.
+          zonasDeHoy={[
+            ...new Set([
+              ...Object.keys(marcas),
+              ...Object.keys(vista.anterior?.marcas ?? {}),
+            ]),
+          ]}
           onFirmarConsentimiento={(plantillaId) => {
             setPlantillaInicial(plantillaId);
             setPestana("consentimientos");
@@ -1470,9 +1478,13 @@ function FaltaConsentimiento(props: {
       >
         Firmar ahora
       </button>
+      {/* El mensaje de arriba ya dice que se lee y se firma aquí: esta
+          línea sólo añade lo que NO dice, que es qué se puede hacer
+          mientras. Lo vio el bucle visual — las dos frases seguidas
+          repetían «se lee con el paciente y se firma aquí». */}
       <div className="text-[13px]">
-        Se lee con el paciente y se firma aquí, con el dedo. Lo demás de la
-        sesión se puede ir marcando: lo que no se puede es cerrarla.
+        Lo demás de la sesión se puede ir marcando: lo que no se puede es
+        cerrarla.
       </div>
     </div>
   );

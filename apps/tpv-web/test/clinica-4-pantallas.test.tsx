@@ -367,6 +367,65 @@ describe("clinica-4 · las fotos", () => {
     expect(yPuede.disabled).toBe(false);
   });
 
+  it("con MUCHAS zonas la fila se desliza y el visor NO se va abajo", async () => {
+    // El caso normal del primer día: al paciente no se le ha marcado
+    // nada, así que se ofrecen las 22 del mapa. Con `flex-wrap` eran
+    // cinco filas de chips y el visor quedaba bajo el pliegue a 390 — lo
+    // vio el bucle visual. Una sola fila que se desliza.
+    apiMock.apiWithCashier.mockResolvedValue({
+      fotos: [],
+      comparador: [],
+      consentimiento: { puede: true, plantillaId: "fotos-clinicas", mensaje: "" },
+      mapaVersion: 1,
+    });
+    await act(async () => {
+      root.render(
+        <Fotos
+          clientId={PACIENTE}
+          mapa={MAPA_PIE_V1}
+          appointmentId={CITA}
+          // SIN zonas marcadas: el primer día del paciente.
+          zonasDeHoy={[]}
+          onFirmarConsentimiento={() => undefined}
+        />,
+      );
+    });
+    await pulsar(host.querySelector('[data-test="hacer-foto"]'));
+    expect(host.querySelectorAll('[data-test^="zona-"]')).toHaveLength(
+      MAPA_PIE_V1.zonas.length * 2,
+    );
+    const fila = host.querySelector('[data-test="zona-L:h"]')!.parentElement!;
+    expect(fila.className).toContain("flex-nowrap");
+    expect(fila.className).toContain("overflow-x-auto");
+    expect(fila.className).not.toContain("flex-wrap ");
+  });
+
+  it("y con pocas (las marcadas) se reparten en filas como siempre", async () => {
+    apiMock.apiWithCashier.mockResolvedValue({
+      fotos: [],
+      comparador: [],
+      consentimiento: { puede: true, plantillaId: "fotos-clinicas", mensaje: "" },
+      mapaVersion: 1,
+    });
+    await act(async () => {
+      root.render(
+        <Fotos
+          clientId={PACIENTE}
+          mapa={MAPA_PIE_V1}
+          appointmentId={CITA}
+          zonasDeHoy={["L:h", "R:talon"]}
+          onFirmarConsentimiento={() => undefined}
+        />,
+      );
+    });
+    await pulsar(host.querySelector('[data-test="hacer-foto"]'));
+    const fila = host.querySelector('[data-test="zona-L:h"]')!.parentElement!;
+    expect(fila.className).toContain("flex-wrap");
+    // Y sólo las dos marcadas, más «Otra zona…».
+    expect(host.querySelectorAll('[data-test^="zona-"]')).toHaveLength(2);
+    expect(texto()).toContain("Otra zona…");
+  });
+
   it("la cámara NO usa un input[type=file]: es getUserMedia en la app", async () => {
     // Decisión 9, y la razón no es de estilo: un `input file` abre la app
     // de cámara del sistema, que guarda la foto en la galería del aparato

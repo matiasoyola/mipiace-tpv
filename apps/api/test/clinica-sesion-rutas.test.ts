@@ -2338,3 +2338,50 @@ describe("clinica-5 · la cabecera de la tarjeta de revisión de cirugía", () =
     expect(r.json().ultimaCirugia).toBeNull();
   });
 });
+
+// ── clinica-4 · la segunda puerta SALE POR EL CABLE ──────────────────
+//
+// Este bloque existe por un fallo que encontró el BUCLE VISUAL y no la
+// suite: `serializarVista` es un allowlist campo a campo, y el campo
+// nuevo no estaba en la lista. La respuesta real no llevaba
+// `consentimientos`, y la sesión se caía contra el ErrorBoundary con
+// «Cannot read properties of undefined (reading 'puede')».
+//
+// Los tests de la pantalla no lo veían porque mockean la respuesta; los
+// de la vista no lo veían porque miran el objeto, no el serializado. Lo
+// que lo vio fue abrir la sesión en el producto — y lo que lo fija es
+// mirar el JSON que SALE.
+
+describe("clinica-4 · la vista serializada lleva la segunda puerta", () => {
+  it("el JSON de la sesión trae `consentimientos` con su forma", async () => {
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(r.statusCode).toBe(200);
+    // La forma entera, no sólo la clave: con `faltan` ausente la pantalla
+    // se caería igual al pintar la banda.
+    expect(r.json().consentimientos).toEqual({
+      puede: true,
+      faltan: [],
+      mensaje: "",
+    });
+  });
+
+  it("y la trae TAMBIÉN para el sanitario sin caja", async () => {
+    // El serializador tiene dos caminos por rol (la regla 8 de los
+    // importes). Un campo que sólo salga en uno de los dos es una
+    // pantalla que se cae para la mitad del personal.
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoSanitaria,
+    });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().consentimientos).toBeDefined();
+    expect(r.json().consentimientos.puede).toBe(true);
+  });
+});

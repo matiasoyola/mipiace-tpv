@@ -299,7 +299,19 @@ function Camara(props: {
         ¿De qué zona es? Elige antes de disparar.
       </div>
 
-      <div className="flex flex-wrap gap-2 mt-3">
+      {/* UNA SOLA FILA que se desliza cuando hay muchas zonas.
+          Con `flex-wrap`, las 22 del mapa ocupaban cinco filas y dejaban
+          el visor por debajo del pliegue a 390 — lo vio el bucle visual.
+          Y hay muchas justo en el caso normal del primer día: cuando al
+          paciente no se le ha marcado nada todavía, se ofrecen todas.
+          Con pocas (las marcadas) se reparten en filas como siempre. */}
+      <div
+        className={`gap-2 mt-3 ${
+          ofrecidas.length > 6
+            ? "flex flex-nowrap overflow-x-auto pb-1.5"
+            : "flex flex-wrap"
+        }`}
+      >
         {ofrecidas.map((clave) => (
           <button
             key={clave}
@@ -307,7 +319,7 @@ function Camara(props: {
             data-test={`zona-${clave}`}
             aria-pressed={zona === clave}
             onClick={() => setZona(clave)}
-            className={`min-h-touch px-3.5 rounded-xl text-[14px] border ${
+            className={`min-h-touch px-3.5 rounded-xl text-[14px] border whitespace-nowrap shrink-0 ${
               zona === clave
                 ? "bg-mipiace-coral-soft border-mipiace-coral text-mipiace-coral-dark font-medium"
                 : "bg-white border-slate-200 text-mipiace-ink"
@@ -320,7 +332,7 @@ function Camara(props: {
           <button
             type="button"
             onClick={() => setTodasLasZonas(true)}
-            className="min-h-touch px-3.5 rounded-xl text-[14px] border bg-white border-slate-200 text-mipiace-ink"
+            className="min-h-touch px-3.5 rounded-xl text-[14px] border bg-white border-slate-200 text-mipiace-ink whitespace-nowrap shrink-0"
           >
             Otra zona…
           </button>
@@ -361,7 +373,14 @@ function Camara(props: {
             <SwitchCamera className="w-4 h-4" /> Cambiar cámara
           </button>
         )}
-        <div className="absolute bottom-5 left-4 right-4 text-center">
+        {/* ENCIMA del disparador y sin recibir toques.
+            Lo cazó el bucle visual: con el aviso a `bottom-5` y el
+            disparador a `bottom-4`, el texto quedaba POR DELANTE del
+            botón — Playwright se negó a pulsarlo («element would receive
+            the click»), y en la tablet la podóloga habría tocado el
+            disparador sin que pasara nada. `pointer-events-none` y por
+            encima: el aviso informa, no estorba. */}
+        <div className="absolute bottom-28 left-4 right-4 text-center pointer-events-none">
           {error ? (
             <span className="inline-flex items-center gap-2 bg-red-600/90 text-white px-3.5 py-2 rounded-xl text-[13.5px]">
               <AlertCircle className="w-4 h-4 shrink-0" />
