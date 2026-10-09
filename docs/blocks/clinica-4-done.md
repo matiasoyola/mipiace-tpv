@@ -549,7 +549,32 @@ cfe0463 fix(clinica-4): el bucle visual, y cinco fallos que ninguna suite veía
 <este>  docs(clinica-4): el done del bloque
 ```
 
-## 12 · La rama
+## 12 · La CI
+
+**`ci: success` · `smoke: success` · `e2e: failure`** sobre `01f882b`
+([run 37864167997](https://github.com/matiasoyola/mipiace-tpv/actions/runs/37864167997)).
+`publish` se salta, como toca fuera de master.
+
+El `e2e` falla con **2 ficheros de 31** y son `f3-fichar` y `f8-colegio`:
+**el reloj, no la rama.** Es el problema que clinica-5 dejó documentado en
+su §10 — abren un fichaje «hace N horas» y lo cierran ahora, y si las dos
+marcas caen en días locales distintos el cierre da 409. La CI corrió a las
+**02:19 de Madrid**, dentro de la franja mala de los dos (00:00–04:00 para
+`f3`, 00:00–06:00 para `f8`).
+
+Lo que lo sostiene:
+
+- los otros **29 ficheros pasan**, incluidos los seis clínicos y los 25
+  casos de este bloque;
+- la rama **no toca ni un fichero de fichaje**:
+  `git diff --name-only master | grep -i fichaje` no devuelve nada;
+- en local pasó lo mismo a la 01:00 y a las 02:14, y los mismos seis casos.
+
+**Se arregla relanzando el job pasadas las 06:00 de Madrid**, que es lo que
+clinica-5 hizo. Lo que lo arreglaría de verdad es que esos dos e2e no usen
+el reloj de pared, y eso es de su bloque.
+
+## 13 · La rama
 
 **Ni merge ni despliegue: eso es de Dirección.** Y al desplegar hay tres
 cosas que acordarse de hacer, no una: la migración, el volumen nuevo y la
