@@ -327,10 +327,26 @@ async function main() {
   console.log(`\nAplicado: ${aCambiar.length} productos actualizados.\n`);
 }
 
-main()
-  .then(() => shutdown())
-  .catch(async (err) => {
-    console.error(err);
-    await shutdown();
-    process.exit(1);
-  });
+// Sólo arrancamos `main` si el módulo se EJECUTA directamente. Mismo
+// guardia que `backfill-contact-type.ts`, y aquí hacía falta igual:
+// `kds-alergenos-maestranza.test.ts` importa `leerCarta` y
+// `normalizarNombre` de este fichero, y al importarlo corría `main` sin
+// argumentos → «Uso: …» y `process.exit(2)`.
+//
+// Lo que eso hacía, y por qué costó verlo: los 341 ficheros de la suite
+// PASABAN y vitest cortaba igual, con un «Unhandled Rejection:
+// process.exit unexpectedly called with 2» que no nombra a ningún test.
+// En CI es un rojo sin fichero al que ir.
+const isDirectRun =
+  import.meta.url === `file://${process.argv[1]}` ||
+  process.argv[1]?.endsWith("importar-alergenos-maestranza.ts");
+
+if (isDirectRun) {
+  main()
+    .then(() => shutdown())
+    .catch(async (err) => {
+      console.error(err);
+      await shutdown();
+      process.exit(1);
+    });
+}
