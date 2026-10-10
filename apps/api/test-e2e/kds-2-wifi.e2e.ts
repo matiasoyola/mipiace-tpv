@@ -101,6 +101,19 @@ describe.skipIf(!e2eEnabled)(
       });
     }
 
+    /**
+     * Instantes relativos a AHORA, que es como los produce una tablet de
+     * verdad.
+     *
+     * La primera versión de este fichero clavaba `2026-10-09T14:10:00Z`, y
+     * el día que el calendario pasó por encima el test se cayó contra
+     * Postgres: la marca quedaba ANTERIOR al `sent_at` de su tarjeta y el
+     * CHECK `kitchen_orders_cronologia` la rechazaba. El fallo era de
+     * verdad —ver el test de la cronología de abajo— pero el fixture lo
+     * disparaba por el motivo equivocado y sólo en algunas fechas.
+     */
+    const haceMin = (m: number) => new Date(Date.now() - m * 60_000);
+
     async function abrirMesaConBravas(units: number): Promise<string> {
       const ticket = await prisma.ticket.create({
         data: {
@@ -241,6 +254,20 @@ describe.skipIf(!e2eEnabled)(
     });
 
     afterAll(async () => {
+      // ── NO DEJAR MESAS ABIERTAS DETRÁS ──────────────────────────────
+      //
+      // El barrido de mesas abandonadas (`tables/abandoned.ts`) mira los
+      // DRAFT con mesa **de TODOS los tenants**: es una pasada de
+      // plataforma, y así tiene que ser en producción. La consecuencia en la
+      // suite e2e, que comparte una sola base, es que las mesas que deje
+      // abiertas este fichero las CUENTA el `scanned` de
+      // `ciclo-de-caja.e2e.ts`, que es anterior y afirma un número exacto.
+      //
+      // Eso fue justo lo que rompió el e2e de esta rama: `expected 9 to be 3`
+      // — los 3 suyos más los 2 que dejaba este fichero. El arreglo es
+      // aislar los datos nuevos, no relajar la aserción del test viejo: el
+      // número exacto es lo que hace que ese test valga para algo.
+      await prisma.ticket.deleteMany({ where: { tenantId, status: "DRAFT" } });
       await app?.close();
       await shutdown();
     });
@@ -377,11 +404,14 @@ describe.skipIf(!e2eEnabled)(
       it("el libro de marcas es idempotente por el `markId` de la tablet", async () => {
         const ticketId = await abrirMesaConBravas(2);
         const clientSendId = randomUUID();
+        // El camarero pulsó «Enviar» hace una hora, sin internet. El
+        // outbox sube el envío AHORA, con su sello.
+        const pulsado = haceMin(60);
         const envio = await app.inject({
           method: "POST",
           url: `/tickets/${ticketId}/send-to-kitchen/escpos`,
           headers: { authorization: `Bearer ${sesionCajero()}` },
-          payload: { clientSendId },
+          payload: { clientSendId, sentAt: pulsado.toISOString() },
         });
         expect(envio.statusCode).toBe(200);
         const orderId = envio.json().sections[0].orderId as string;
@@ -390,7 +420,8 @@ describe.skipIf(!e2eEnabled)(
           select: { ticketLineId: true },
         });
 
-        const marcado = new Date("2026-10-09T13:05:00.000Z");
+        // Y la cocina lo tachó veinte minutos después de recibirlo.
+        const marcado = haceMin(40);
         const marca = {
           markId: randomUUID(),
           kind: "HECHO",
@@ -445,7 +476,8 @@ describe.skipIf(!e2eEnabled)(
       it("una marca que llega ANTES que su envío la aplica el envío", async () => {
         const ticketId = await abrirMesaConBravas(1);
         const clientSendId = randomUUID();
-        const marcado = new Date("2026-10-09T14:10:00.000Z");
+        const pulsado = haceMin(60);
+        const marcado = haceMin(40);
 
         // La tablet sube antes que el terminal: pasa de verdad, porque la
         // tablet puede tener cobertura antes.
@@ -471,7 +503,7 @@ describe.skipIf(!e2eEnabled)(
           method: "POST",
           url: `/tickets/${ticketId}/send-to-kitchen/escpos`,
           headers: { authorization: `Bearer ${sesionCajero()}` },
-          payload: { clientSendId },
+          payload: { clientSendId, sentAt: pulsado.toISOString() },
         });
         expect(envio.statusCode).toBe(200);
         const orderId = envio.json().sections[0].orderId as string;
@@ -488,6 +520,92 @@ describe.skipIf(!e2eEnabled)(
             where: { clientSendId, appliedAt: null },
           }),
         ).toBe(0);
+      });
+
+      it("SIN EL SELLO del terminal, el «Lista» de la cocina se perdería", async () => {
+        // EL FALLO DE PRODUCCIÓN QUE ENCONTRÓ EL E2E, en una línea: la
+        // cocina marca «Lista» a las 13:20, el outbox sube el envío a las
+        // 14:00, y si la tarjeta nace con `sent_at = 14:00` entonces
+        // `ready_at < sent_at` viola `kitchen_orders_cronologia`. La marca
+        // no se puede escribir y el trabajo del cocinero desaparece.
+        //
+        // Aquí se manda SIN `sentAt` —como lo haría una APK anterior a
+        // este arreglo— y se comprueba que:
+        //   · la tarjeta nace con `sent_at` = ahora, que es lo que el
+        //     servidor sabe;
+        //   · la marca anterior NO se aplica, pero **tampoco se pierde**:
+        //     se queda pendiente en el libro para el siguiente intento.
+        //
+        // Lo segundo es la red de seguridad; lo primero es lo que el sello
+        // de `sentAt` arregla, y se ve en el test de arriba.
+        const ticketId = await abrirMesaConBravas(1);
+        const clientSendId = randomUUID();
+        const marcado = haceMin(40);
+
+        await app.inject({
+          method: "POST",
+          url: "/kitchen/sincronizar",
+          headers: { "x-device-token": pantallaToken },
+          payload: {
+            marcas: [
+              {
+                markId: randomUUID(),
+                kind: "LISTA",
+                clientSendId,
+                section: "COCINA",
+                at: marcado.toISOString(),
+              },
+            ],
+          },
+        });
+
+        const envio = await app.inject({
+          method: "POST",
+          url: `/tickets/${ticketId}/send-to-kitchen/escpos`,
+          headers: { authorization: `Bearer ${sesionCajero()}` },
+          payload: { clientSendId },
+        });
+        // El envío NO se cae por esto: la comanda es lo primero.
+        expect(envio.statusCode).toBe(200);
+        const orderId = envio.json().sections[0].orderId as string;
+
+        const order = await prisma.kitchenOrder.findUniqueOrThrow({
+          where: { id: orderId },
+          select: { readyAt: true, sentAt: true },
+        });
+        expect(order.sentAt.getTime()).toBeGreaterThan(marcado.getTime());
+        expect(order.readyAt).toBeNull();
+
+        // Y la marca sigue en el libro, SIN aplicar, para reintentarla.
+        expect(
+          await prisma.kitchenLanMark.count({
+            where: { clientSendId, appliedAt: null },
+          }),
+        ).toBe(1);
+      });
+
+      it("y el sello del terminal NO se cree a un reloj del futuro", async () => {
+        // Un terminal adelantado haría una comanda que todavía no ha
+        // pasado, y el semáforo de cocina contaría en negativo. Se recorta
+        // a ahora, que es como se comportaba antes de kds-2.
+        const ticketId = await abrirMesaConBravas(1);
+        const antes = Date.now();
+        const envio = await app.inject({
+          method: "POST",
+          url: `/tickets/${ticketId}/send-to-kitchen/escpos`,
+          headers: { authorization: `Bearer ${sesionCajero()}` },
+          payload: {
+            clientSendId: randomUUID(),
+            sentAt: new Date(Date.now() + 3 * 60 * 60_000).toISOString(),
+          },
+        });
+        expect(envio.statusCode).toBe(200);
+        const order = await prisma.kitchenOrder.findUniqueOrThrow({
+          where: { id: envio.json().sections[0].orderId as string },
+          select: { sentAt: true },
+        });
+        expect(order.sentAt.getTime()).toBeGreaterThanOrEqual(antes);
+        expect(order.sentAt.getTime()).toBeLessThanOrEqual(Date.now());
       });
 
       it("y el CHECK de las coordenadas no admite una marca incoherente", async () => {
