@@ -130,6 +130,16 @@ export function serializarVista(
     cita: v.cita,
     cabecera: v.cabecera,
     puerta: v.puerta,
+    // clinica-4 · LA SEGUNDA PUERTA. Tiene que pasar por aquí, y lo
+    // descubrió el bucle visual: la pantalla la pide y este serializador
+    // es un allowlist campo a campo, así que sin esta línea la respuesta
+    // real no la llevaba y la sesión se caía contra el ErrorBoundary con
+    // «Cannot read properties of undefined (reading 'puede')».
+    //
+    // Los tests de la pantalla no lo veían porque mockean la respuesta, y
+    // los de la ruta no lo veían porque miran la vista, no el serializado.
+    // Lo que lo vio fue abrir la sesión en el producto.
+    consentimientos: v.consentimientos,
     tratamientos: v.tratamientos.map((t) =>
       serializarTratamiento(t, verImportes),
     ),

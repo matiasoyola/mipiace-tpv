@@ -133,6 +133,10 @@ let productos: FakeProducto[] = [];
  *  es lo que eran en clinica-3, cuando no había tipos. */
 let mapaDeTipos: Array<{ slug: string; visitType: string }> = [];
 
+/** clinica-4 · qué consentimientos pide cada servicio. Vacío en este
+ *  fichero: la puerta de los consentimientos tiene su propio test. */
+const consentimientosPorServicio = new Map<string, string[]>();
+
 let tickets: Array<{ id: string; status: string }> = [];
 
 interface FakeLog {
@@ -425,6 +429,28 @@ const fakePrisma: any = {
   // VALIDADAS y nunca tuvieron enlace, así que la tabla está vacía — y
   // vacía de verdad, con su filtro, no un `null` a pelo: el día que un
   // caso de aquí necesite un enlace, basta con empujar la fila.
+  // clinica-4 · la sesión tiene ahora una SEGUNDA puerta: los
+  // consentimientos que pide el servicio de la cita (decisión 7).
+  //
+  // En este fichero ningún servicio pide ninguno —`consentimientosPorServicio`
+  // nace vacío—, así que la puerta está abierta y las 81 garantías de
+  // clinica-3 y -5 siguen probando lo suyo. Los dos casos en que la puerta
+  // se cierra viven en `clinica-consentimientos-rutas.test.ts`, que es de
+  // donde es la regla.
+  serviceScheduling: {
+    findMany: vi.fn(async ({ where }: any) =>
+      (where.productId?.in ?? [])
+        .filter((id: string) => consentimientosPorServicio.has(id))
+        .map((id: string) => ({
+          productId: id,
+          consentimientos: consentimientosPorServicio.get(id) ?? [],
+        })),
+    ),
+  },
+  clientConsent: {
+    findMany: vi.fn(async () => []),
+    findFirst: vi.fn(async () => null),
+  },
   publicLink: {
     findFirst: vi.fn(async ({ where }: any) => {
       const xs = enlacesPublicos.filter(
@@ -2310,5 +2336,52 @@ describe("clinica-5 · la cabecera de la tarjeta de revisión de cirugía", () =
       headers: comoDuena,
     });
     expect(r.json().ultimaCirugia).toBeNull();
+  });
+});
+
+// ── clinica-4 · la segunda puerta SALE POR EL CABLE ──────────────────
+//
+// Este bloque existe por un fallo que encontró el BUCLE VISUAL y no la
+// suite: `serializarVista` es un allowlist campo a campo, y el campo
+// nuevo no estaba en la lista. La respuesta real no llevaba
+// `consentimientos`, y la sesión se caía contra el ErrorBoundary con
+// «Cannot read properties of undefined (reading 'puede')».
+//
+// Los tests de la pantalla no lo veían porque mockean la respuesta; los
+// de la vista no lo veían porque miran el objeto, no el serializado. Lo
+// que lo vio fue abrir la sesión en el producto — y lo que lo fija es
+// mirar el JSON que SALE.
+
+describe("clinica-4 · la vista serializada lleva la segunda puerta", () => {
+  it("el JSON de la sesión trae `consentimientos` con su forma", async () => {
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoDuena,
+    });
+    expect(r.statusCode).toBe(200);
+    // La forma entera, no sólo la clave: con `faltan` ausente la pantalla
+    // se caería igual al pintar la banda.
+    expect(r.json().consentimientos).toEqual({
+      puede: true,
+      faltan: [],
+      mensaje: "",
+    });
+  });
+
+  it("y la trae TAMBIÉN para el sanitario sin caja", async () => {
+    // El serializador tiene dos caminos por rol (la regla 8 de los
+    // importes). Un campo que sólo salga en uno de los dos es una
+    // pantalla que se cae para la mitad del personal.
+    const app = await buildApp();
+    const r = await app.inject({
+      method: "GET",
+      url: `/clinica/appointments/${CITA_ID}/sesion`,
+      headers: comoSanitaria,
+    });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().consentimientos).toBeDefined();
+    expect(r.json().consentimientos.puede).toBe(true);
   });
 });

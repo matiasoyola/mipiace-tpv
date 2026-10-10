@@ -12,6 +12,7 @@
   "dependencies": {
     "@mipiacetpv/clinica-sesion": "workspace:*",
     "@mipiacetpv/clinica-valoracion": "workspace:*",
+    "@mipiacetpv/consentimientos": "workspace:*",
     "@mipiacetpv/escpos-builder": "workspace:*",
     "@mipiacetpv/ticket-model": "workspace:*",
     "@mipiacetpv/verifactu": "workspace:*",

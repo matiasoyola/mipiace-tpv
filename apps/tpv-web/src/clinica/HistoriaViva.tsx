@@ -46,8 +46,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   CalendarPlus,
-  Camera,
   ChevronRight,
+  FileText,
   Clock,
   Footprints,
   Loader2,
@@ -72,8 +72,15 @@ import {
   type ZonaViva,
 } from "@mipiacetpv/clinica-sesion";
 
-import { ApiError, apiWithCashier } from "../api.js";
+import { ApiError, apiBlobWithCashier, apiWithCashier } from "../api.js";
 import { MapaDelPie, type EstadoDeZona } from "./MapaDelPie.js";
+import {
+  ComparadorAntesDespues,
+  Fotos,
+  type ComparadorDeZona,
+  type FotoDeLaHistoria,
+} from "./Fotos.js";
+import { Informe } from "./Informe.js";
 import { FranjaRoja, Mal, cuantoHace, diaCorto } from "./piezas.js";
 import { SesionCerrada, type SesionCerradaView } from "./SesionCerrada.js";
 
@@ -126,7 +133,14 @@ interface VistaDeLaHistoria {
     fecha: string | null;
     detalles: string[];
     abre: string | null;
+    id: string | null;
+    revocado: boolean;
   }>;
+  /** clinica-4 · las fotos y el comparador por zona, ya elegidos por el
+   *  servidor: «la más antigua y la última» es una regla de la historia. */
+  fotos: FotoDeLaHistoria[];
+  comparador: ComparadorDeZona[];
+  consentimientoDeFotos: { puede: boolean; plantillaId: string };
   recomendada: { tipo: TipoDeVisita; motivo: string } | null;
   listas: { mapa: MapaVersionado };
   ahora: string;
@@ -142,7 +156,11 @@ interface DetalleDeVisita {
   marcas: SesionCerradaView["marcas"];
 }
 
-type Pestania = "pie" | "visitas" | "docs";
+// clinica-4 · dos pestañas más: las fotos del paciente y el informe. La
+// historia LEE las fotos y los consentimientos (hacerlos y firmarlos es de
+// la visita, en la sesión); el informe sí se saca desde aquí, que es donde
+// se tiene delante la historia entera (decisión 15).
+type Pestania = "pie" | "visitas" | "fotos" | "docs" | "informe";
 type Capa = "lesiones" | "sensibilidad";
 
 /** El color de cada estado, en las clases del mapa. Es la traducción de
@@ -291,6 +309,31 @@ export function HistoriaViva(props: {
   function abrirConTipo(tipo: TipoDeVisita | null) {
     setHoja(null);
     props.onEmpezarVisita?.(tipo ? [tipo] : []);
+  }
+
+  /**
+   * El PDF de un consentimiento firmado.
+   *
+   * Pasa por la API con sesión —el volumen no lo sirve Caddy— y por tanto
+   * **la apertura deja su línea en el registro de accesos**. El
+   * `objectURL` se suelta al minuto: un PDF con datos de salud retenido en
+   * la memoria de una tablet compartida es un dato de salud ahí dentro.
+   */
+  async function abrirPdfDeConsentimiento(consentimientoId: string) {
+    try {
+      const { blob } = await apiBlobWithCashier(
+        `/clinica/clients/${props.clientId}/consentimientos/${consentimientoId}/pdf`,
+      );
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "No se pudo abrir el documento.",
+      );
+    }
   }
 
   async function abrirVisita(entryId: string) {
@@ -457,13 +500,18 @@ export function HistoriaViva(props: {
       <div
         role="tablist"
         aria-label="Historia del paciente"
-        className="mt-5 inline-flex bg-white border border-slate-200 rounded-2xl p-1 gap-1"
+        // clinica-4 · ya son CINCO. `max-w-full` con su propio scroll
+        // horizontal: lo que no puede pasar es que la tira empuje el ancho
+        // de la página y la historia entera se mueva a lo ancho a 390.
+        className="mt-5 inline-flex max-w-full overflow-x-auto bg-white border border-slate-200 rounded-2xl p-1 gap-1"
       >
         {(
           [
             ["pie", "Pie"],
             ["visitas", "Visitas"],
+            ["fotos", "Fotos"],
             ["docs", "Documentos"],
+            ["informe", "Informe"],
           ] as ReadonlyArray<readonly [Pestania, string]>
         ).map(([id, texto]) => (
           <button
@@ -559,7 +607,19 @@ export function HistoriaViva(props: {
           </div>
 
           {capa === "lesiones" ? (
-            <PanelDeZona zona={zona} />
+            <PanelDeZona
+              zona={zona}
+              clientId={props.clientId}
+              // clinica-4 · el comparador de ESTA zona. El hueco de
+              // clinica-6 («Sin fotos de esta zona») deja de ser un hueco
+              // cuando hay fotos (decisión 14).
+              comparador={
+                zona
+                  ? (vista.comparador.find((c) => c.zona === zona.clave) ??
+                    null)
+                  : null
+              }
+            />
           ) : (
             <PanelDeSensibilidad sensibilidad={vista.sensibilidad} />
           )}
@@ -588,45 +648,99 @@ export function HistoriaViva(props: {
         </div>
       )}
 
+      {/* clinica-4 · LAS FOTOS del paciente, de solo lectura: aquí no hay
+          cámara porque no hay cita detrás (las fotos se hacen desde la
+          sesión, decisión 9). La pieza es la MISMA que la de la sesión y
+          se le pasa sin `appointmentId`: ella dice dónde se hacen, en vez
+          de ofrecer un botón que no puede cumplir — la decisión que
+          clinica-6 tomó con «Hoy toca». */}
+      {pestania === "fotos" && (
+        <div className="mt-3.5" data-test="historia-fotos">
+          <Fotos clientId={props.clientId} mapa={vista.listas.mapa} />
+        </div>
+      )}
+
       {pestania === "docs" && (
         <div className="mt-3.5 grid gap-2.5" data-test="historia-documentos">
           {vista.documentos.length === 0 && (
-            <Vacio>No tiene valoración todavía.</Vacio>
+            <Vacio>
+              Todavía no hay documentos: ni valoración, ni consentimientos
+              firmados, ni informes entregados.
+            </Vacio>
           )}
-          {vista.documentos.map((d) => (
-            <button
-              key={d.clase}
-              type="button"
-              disabled={d.abre == null || !props.onAbrirValoracion}
-              onClick={() => props.onAbrirValoracion?.()}
-              className="w-full text-left grid grid-cols-[112px_1fr_auto] gap-3.5 items-center bg-white border border-slate-200 rounded-[20px] px-4 py-3 disabled:cursor-default"
-            >
-              <span className="justify-self-start rounded-xl px-2.5 py-1.5 text-[13px] font-bold bg-emerald-100 text-emerald-800">
-                Valoración
-              </span>
-              <span>
-                <span className="font-bold text-[16px]">{d.titulo}</span>
-                {d.fecha && (
-                  <span className="text-slate-500 text-[13px] ml-1.5">
-                    {diaCorto(d.fecha)}
-                  </span>
-                )}
-                <span className="flex flex-wrap gap-1.5 mt-1.5">
-                  {d.detalles.map((x) => (
-                    <span
-                      key={x}
-                      className="bg-mipiace-stone rounded-[10px] px-2.5 py-1 text-[13px]"
-                    >
-                      {x}
-                    </span>
-                  ))}
+          {vista.documentos.map((d) => {
+            // Qué hace la fila al tocarla. Tres clases, tres destinos, y
+            // la que no abre nada sale sin flecha en vez de parecer que se
+            // puede abrir: una fila que no hace nada al tocarla es la que
+            // la podóloga toca tres veces.
+            const abreValoracion =
+              d.abre === "VALORACION" && props.onAbrirValoracion != null;
+            const abrePdf = d.abre === "PDF_CONSENTIMIENTO" && d.id != null;
+            return (
+              <button
+                key={`${d.clase}-${d.id ?? d.titulo}`}
+                type="button"
+                data-test={`documento-${d.clase}`}
+                disabled={!abreValoracion && !abrePdf}
+                onClick={() => {
+                  if (abreValoracion) props.onAbrirValoracion!();
+                  else if (abrePdf) void abrirPdfDeConsentimiento(d.id!);
+                }}
+                className="w-full text-left grid grid-cols-[112px_1fr_auto] gap-3.5 items-center bg-white border border-slate-200 rounded-[20px] px-4 py-3 disabled:cursor-default"
+              >
+                <span
+                  className={`justify-self-start rounded-xl px-2.5 py-1.5 text-[13px] font-bold ${
+                    d.clase === "VALORACION"
+                      ? "bg-emerald-100 text-emerald-800"
+                      : d.clase === "CONSENTIMIENTO"
+                        ? d.revocado
+                          ? "bg-slate-200 text-slate-600"
+                          : "bg-mipiace-coral-soft text-mipiace-coral-dark"
+                        : "bg-slate-100 text-slate-700"
+                  }`}
+                >
+                  {d.clase === "VALORACION"
+                    ? "Valoración"
+                    : d.clase === "CONSENTIMIENTO"
+                      ? "Consent."
+                      : "Informe"}
                 </span>
-              </span>
-              {d.abre && props.onAbrirValoracion && (
-                <ChevronRight className="w-5 h-5 text-slate-400" />
-              )}
-            </button>
-          ))}
+                <span>
+                  <span className="font-bold text-[16px]">{d.titulo}</span>
+                  {d.fecha && (
+                    <span className="text-slate-500 text-[13px] ml-1.5">
+                      {diaCorto(d.fecha)}
+                    </span>
+                  )}
+                  <span className="flex flex-wrap gap-1.5 mt-1.5">
+                    {d.detalles.map((x) => (
+                      <span
+                        key={x}
+                        className="bg-mipiace-stone rounded-[10px] px-2.5 py-1 text-[13px]"
+                      >
+                        {x}
+                      </span>
+                    ))}
+                  </span>
+                </span>
+                {(abreValoracion || abrePdf) &&
+                  (abrePdf ? (
+                    <FileText className="w-5 h-5 text-slate-400" />
+                  ) : (
+                    <ChevronRight className="w-5 h-5 text-slate-400" />
+                  ))}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* clinica-4 · EL INFORME. Se saca desde aquí (decisión 15): es
+          donde se tiene delante la historia entera, que es lo que el
+          informe resume. */}
+      {pestania === "informe" && (
+        <div className="mt-3.5" data-test="historia-informe">
+          <Informe clientId={props.clientId} />
         </div>
       )}
 
@@ -810,8 +924,12 @@ function Leyenda(props: { capa: Capa }) {
   );
 }
 
-/** La línea de evolución de una zona, y el hueco de las fotos. */
-function PanelDeZona(props: { zona: ZonaViva | null }) {
+/** La línea de evolución de una zona, y su comparador de fotos. */
+function PanelDeZona(props: {
+  zona: ZonaViva | null;
+  clientId: string;
+  comparador: ComparadorDeZona | null;
+}) {
   const z = props.zona;
   if (!z) {
     return (
@@ -897,12 +1015,24 @@ function PanelDeZona(props: { zona: ZonaViva | null }) {
         ))}
       </ol>
 
-      {/* EL HUECO DE LAS FOTOS. Las fotos son de clinica-4: aquí se deja
-          dicho que no hay y el sitio donde van a ir. No se construye ni
-          la subida ni el comparador. */}
-      <div className="mt-4 h-[120px] rounded-[18px] border-2 border-dashed border-slate-200 flex items-center justify-center gap-2 text-slate-500 text-[14px]">
-        <Camera className="w-[18px] h-[18px]" />
-        Sin fotos de esta zona
+      {/* clinica-4 · EL COMPARADOR de esta zona. Con dos fotos o más,
+          antes y última con su fecha; con una, la que hay y por qué no se
+          compara; sin ninguna, el hueco que clinica-6 dejó escrito.
+          Las tres variantes las decide `ComparadorAntesDespues`, que es la
+          MISMA pieza que usa la pestaña de fotos — un comparador con dos
+          implementaciones es el que un día enseña distinto en cada sitio. */}
+      <div className="mt-4">
+        <ComparadorAntesDespues
+          clientId={props.clientId}
+          comparador={
+            props.comparador ?? {
+              zona: props.zona?.clave ?? "",
+              antes: null,
+              ultima: null,
+              cuantas: 0,
+            }
+          }
+        />
       </div>
     </div>
   );

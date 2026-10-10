@@ -81,6 +81,9 @@ importers:
       '@mipiacetpv/clinica-valoracion':
         specifier: workspace:*
         version: link:../../packages/clinica-valoracion
+      '@mipiacetpv/consentimientos':
+        specifier: workspace:*
+        version: link:../../packages/consentimientos
       '@mipiacetpv/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -242,6 +245,9 @@ importers:
       '@mipiacetpv/clinica-valoracion':
         specifier: workspace:*
         version: link:../../packages/clinica-valoracion
+      '@mipiacetpv/consentimientos':
+        specifier: workspace:*
+        version: link:../../packages/consentimientos
       '@mipiacetpv/escpos-builder':
         specifier: workspace:*
         version: link:../../packages/escpos-builder
@@ -345,6 +351,18 @@ importers:
         version: 2.1.9(@types/node@20.19.40)(jsdom@29.1.1)(terser@5.47.1)
 
   packages/clinica-valoracion:
+    devDependencies:
+      '@types/node':
+        specifier: ^20.16.10
+        version: 20.19.40
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
+        version: 2.1.9(@types/node@20.19.40)(jsdom@29.1.1)(terser@5.47.1)
+
+  packages/consentimientos:
     devDependencies:
       '@types/node':
         specifier: ^20.16.10

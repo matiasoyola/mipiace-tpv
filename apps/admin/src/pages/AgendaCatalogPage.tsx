@@ -86,6 +86,28 @@ const NOMBRE_DE_NIVEL: Record<NivelDeQuiropodia, string> = {
   3: "Extra",
 };
 
+// clinica-4 · LOS CONSENTIMIENTOS QUE SE PUEDEN ATAR A UN SERVICIO.
+//
+// Duplicados aquí por lo mismo que los tipos de arriba, y atados a la
+// fuente de verdad (`PLANTILLAS_DE_SERVICIO` de
+// `@mipiacetpv/consentimientos`) por `apps/api/test/clinica-tipos-panel.test.ts`,
+// que lee esta fuente.
+//
+// **«Fotos clínicas» NO está en esta lista y no es un olvido**: no se ata
+// a ningún servicio — la pide la primera foto del paciente, en la visita
+// que sea (decisión 4). La ruta lo rechaza con un 409 si alguien lo manda.
+type ConsentimientoId = "cirugia-ungueal" | "anestesia-local";
+
+const CONSENTIMIENTOS_DE_SERVICIO: ConsentimientoId[] = [
+  "cirugia-ungueal",
+  "anestesia-local",
+];
+
+const NOMBRE_DE_CONSENTIMIENTO: Record<ConsentimientoId, string> = {
+  "cirugia-ungueal": "Consentimiento para cirugía de uña (matricectomía)",
+  "anestesia-local": "Consentimiento para anestesia local",
+};
+
 const RESOURCE_KINDS: ResourceKind[] = ["CABIN", "ROOM", "DEVICE"];
 
 const RESOURCE_KIND_LABEL: Record<ResourceKind, string> = {
@@ -117,6 +139,9 @@ interface Scheduling {
   // clinica-5 · «este servicio ES el nivel N de la quiropodia» (1 básica,
   // 2 completa, 3 extra). `null` = ninguno, que es lo normal.
   nivelQuiropodia: number | null;
+  // clinica-4 · qué consentimientos pide este servicio. Una cita suya no
+  // se puede cerrar sin ellos firmados y vigentes.
+  consentimientos: string[];
   updatedAt: string;
 }
 
@@ -167,6 +192,7 @@ function blankScheduling(): Scheduling {
     primeraValoracion: false,
     tratamientoSesion: false,
     nivelQuiropodia: null,
+    consentimientos: [],
     updatedAt: "",
   };
 }
@@ -579,6 +605,7 @@ function ServiceCard({
             primeraValoracion: form.primeraValoracion,
             tratamientoSesion: form.tratamientoSesion,
             nivelQuiropodia: form.nivelQuiropodia,
+            consentimientos: form.consentimientos,
             family: form.family?.trim() || null,
             channels: form.channels,
           },
@@ -852,6 +879,52 @@ function ServiceCard({
                   </p>
                 </div>
               )}
+
+              {/* clinica-4 · QUÉ CONSENTIMIENTOS PIDE ESTE SERVICIO.
+                  Va aquí, pegado a las otras tres marcas y en la misma
+                  pantalla, porque son la misma clase de decisión («qué
+                  significa este servicio para la clínica») y la podóloga
+                  las mantiene de una pasada.
+
+                  «Fotos clínicas» no sale en la lista: no se ata a un
+                  servicio, la pide la primera foto. Decirlo en la línea de
+                  ayuda evita la pregunta de soporte. */}
+              <div className="mt-3">
+                <div className="text-[13px] font-medium text-mipiace-ink mb-1.5">
+                  ¿Pide algún consentimiento firmado?
+                </div>
+                <div className="space-y-2">
+                  {CONSENTIMIENTOS_DE_SERVICIO.map((c) => (
+                    <label
+                      key={c}
+                      className="flex items-start gap-2.5 text-[13.5px] text-mipiace-ink"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={form.consentimientos.includes(c)}
+                        disabled={!canEdit}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            consentimientos: e.target.checked
+                              ? [...form.consentimientos, c]
+                              : form.consentimientos.filter((x) => x !== c),
+                          })
+                        }
+                        className="h-4 w-4 mt-0.5 rounded border-slate-300 text-mipiace-coral focus:ring-mipiace-coral/30 disabled:opacity-50"
+                      />
+                      <span>{NOMBRE_DE_CONSENTIMIENTO[c]}</span>
+                    </label>
+                  ))}
+                </div>
+                <p className="text-[12px] text-slate-400 mt-1.5">
+                  La sesión de una cita de este servicio no se puede cerrar
+                  hasta que estén firmados y vigentes. Se firman en la
+                  consulta, con el sanitario delante. El de fotos no se pone
+                  aquí: lo pide la primera foto del paciente, en la visita
+                  que sea.
+                </p>
+              </div>
             </div>
           )}
 
