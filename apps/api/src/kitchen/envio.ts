@@ -38,8 +38,22 @@
 //      devolver «el mismo resultado» de algo que todavía no tiene
 //      resultado, y lo que NO se puede hacer es imprimir dos veces.
 //
-// Y queda preparado para kds-2 (decisión 9): el mismo id viajará a la nube
-// y a la tablet por la wifi, y el que llegue segundo se descartará por él.
+// Y es lo que kds-2 usa: el MISMO id viaja a la nube y a la tablet por la
+// wifi, y el que llegue segundo se descarta por él. La tablet lo descarta
+// en memoria; aquí lo descarta la ventana 2 de arriba.
+//
+// ── kds-2 · LAS MARCAS QUE LLEGARON ANTES QUE SU ENVÍO ────────────────
+//
+// Cuando vuelve internet, la tablet y el terminal suben cada uno lo suyo y
+// **no hay orden garantizado**: la tablet puede tener cobertura antes que
+// el terminal, o el camarero puede tardar en volver a la barra. Así que
+// una marca de cocina («las bravas están tachadas») puede llegar al
+// servidor antes que el envío que creó esas bravas.
+//
+// Esas marcas quedan en `kitchen_lan_marks` con `applied_at` NULL y las
+// aplica ESTE fichero, al final, en cuanto las tarjetas existen. Sin esto,
+// una marca que se adelanta a su envío se quedaría en el libro para
+// siempre y el informe del dueño diría que ese plato no se tachó nunca.
 //
 // ── EL ORDEN DE LAS COSAS, Y POR QUÉ ──────────────────────────────────
 //
@@ -87,6 +101,7 @@ import {
   type DestinoSeccion,
 } from "./destinos.js";
 import { emitirComandaCreada } from "./eventos.js";
+import { aplicarMarcasPendientes } from "./lan.js";
 
 export interface EnvioCtx {
   tenantId: string;
@@ -99,6 +114,11 @@ export interface EnvioOpts {
   clientSendId?: string;
   /** El camarero tocó «Urgente» junto a «Enviar». */
   urgent?: boolean;
+  /**
+   * kds-2-wifi · cuándo se pulsó «Enviar», sellado en el terminal. Ver
+   * `acotarSentAt` y el comentario de `ENVIO_BODY_SCHEMA`.
+   */
+  sentAt?: string;
 }
 
 export type TipoDestino =
@@ -143,6 +163,50 @@ export type Envio =
   | { kind: "ok"; http: number; body: CuerpoEnvio };
 
 const EN_CURSO = { estado: "EN_CURSO" } as const;
+
+/**
+ * kds-2-wifi · CUÁNDO SE MANDÓ ESTA COMANDA A LA COCINA.
+ *
+ * Hasta kds-2 esto era siempre `new Date()`, porque «cuando el servidor se
+ * entera» y «cuando el camarero pulsa Enviar» eran el mismo instante. Con
+ * el camino directo dejan de serlo: sin internet la comanda llega a la
+ * cocina por la wifi y el servidor no la ve hasta que el outbox la sube.
+ *
+ * Y la diferencia no es cosmética. Con `sentAt = ahora`:
+ *
+ *   · la cocina marca «Lista» a las 13:20, el servidor crea la tarjeta a
+ *     las 14:00, y `ready_at < sent_at` **viola el CHECK
+ *     `kitchen_orders_cronologia`**. El «Lista» del cocinero se pierde;
+ *   · el semáforo cuenta desde las 14:00, así que una mesa que llevaba una
+ *     hora esperando aparece en verde a 0 min.
+ *
+ * ── LO QUE SE ACOTA, Y POR QUÉ ────────────────────────────────────────
+ *
+ * El sello lo pone el terminal, o sea un reloj que no controlamos:
+ *
+ *   · **nada del futuro**. Un terminal adelantado haría una comanda que
+ *     todavía no ha pasado, y el semáforo contaría en negativo. Se recorta
+ *     a ahora, que es como se comportaba antes de este bloque.
+ *   · **nada de hace más de `MAX_RETRASO_MS`**. Un reloj a 1970 —que pasa
+ *     en estos terminales cuando se quedan sin batería— pondría la mesa en
+ *     rojo para siempre y rompería el informe del dueño.
+ *
+ * Dentro de la ventana se cree al terminal. La contrapartida, dicha: un
+ * terminal con el reloj atrasado unos minutos mueve el semáforo esos
+ * minutos. Es el mismo trato que v1.11 aceptó con `occurredAt` del outbox,
+ * y el desvío de cada terminal se vigila aparte (`clockSkewSeconds` del
+ * canal de soporte de A5).
+ */
+const MAX_RETRASO_MS = 24 * 60 * 60 * 1000;
+
+export function acotarSentAt(sellado: string | undefined, ahora = new Date()): Date {
+  if (!sellado) return ahora;
+  const t = Date.parse(sellado);
+  if (Number.isNaN(t)) return ahora;
+  if (t > ahora.getTime()) return ahora;
+  if (ahora.getTime() - t > MAX_RETRASO_MS) return ahora;
+  return new Date(t);
+}
 
 /** Redondeo a las 3 decimales de `Decimal(10,3)`. */
 function u3(n: number): number {
@@ -359,7 +423,7 @@ export async function enviarComanda(
     else porSeccion.set(section, [entrada]);
   }
 
-  const issuedAt = new Date();
+  const issuedAt = acotarSentAt(opts.sentAt);
 
   if (porSeccion.size === 0) {
     // Nada nuevo. No se reserva `clientSendId`, no se sube la revisión y
@@ -580,6 +644,30 @@ export async function enviarComanda(
     });
     return body;
   });
+
+  // kds-2-wifi · ¿había marcas de cocina esperando a este envío?
+  //
+  // Fuera de la transacción y con el fallo tragado: lo que no puede pasar
+  // es que un envío se caiga porque una marca vieja de la tablet no se
+  // pudo aplicar. La marca sigue en el libro con `applied_at` NULL y se
+  // vuelve a intentar en la siguiente subida de la tablet.
+  if (clientSendId && paraEmitir.length > 0) {
+    try {
+      await aplicarMarcasPendientes(clientSendId, prisma);
+    } catch (err) {
+      // El envío ya está hecho y no se puede tumbar por esto; la marca
+      // espera a la siguiente subida de la tablet. Pero se DICE: un
+      // `catch` mudo aquí es lo que escondió que las marcas de «Lista»
+      // anteriores al `sent_at` de su tarjeta se estaban perdiendo.
+      console.warn(
+        JSON.stringify({
+          event: "kitchen.lan_marks.fallo_al_aplicar",
+          clientSendId,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+  }
 
   // Los eventos van FUERA de la transacción: son avisos, y la verdad está
   // en el GET de cocina. Emitirlos dentro haría que una pantalla pidiera

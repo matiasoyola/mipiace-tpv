@@ -55,6 +55,7 @@ import { installBackGuard, setBackFallback } from "./hooks/useBackGuard.js";
 import { OutboxChip } from "./pages/CheckoutPage.outboxChip.js";
 import { KitchenScreen } from "./kitchen/KitchenScreen.js";
 import { useAvisosListo } from "./kitchen/tpv/useAvisosListo.js";
+import { useCaminoDirecto } from "./kitchen/tpv/useCaminoDirecto.js";
 import { PairScreen } from "./pages/PairScreen.js";
 import { PinScreen, type CashierLoginResponse } from "./pages/PinScreen.js";
 import {
@@ -667,8 +668,16 @@ export function TpvHome(props: {
   // mismo: la banda «M4 · listo para servir» arriba de la comanda y la
   // etiqueta «LISTO» verde en la mesa de la sala. Dos fuentes para el mismo
   // aviso acabarían en una banda encendida sobre una mesa sin etiqueta.
+  // kds-2-wifi · el camino directo por la wifi del local. Se monta AQUÍ,
+  // una sola vez, porque es de la TIENDA y porque trae la clave con la que
+  // se firma: dos consumidores pidiéndola por separado podrían firmar con
+  // claves distintas el minuto en que se rota (al revocar un aparato).
+  const camino = useCaminoDirecto({
+    moduloEncendido: props.kitchenDisplayEnabled === true,
+  });
   const avisosListo = useAvisosListo({
     moduloEncendido: props.kitchenDisplayEnabled === true,
+    camino,
   });
   const comandaListaPorMesa = new Map<string, string>();
   for (const l of avisosListo.listas) {
@@ -958,6 +967,7 @@ export function TpvHome(props: {
         // sesión: los pone el super-admin y el panel del restaurante, y el
         // terminal los relee al arrancar.
         kitchenDisplayEnabled={props.kitchenDisplayEnabled === true}
+        camino={camino}
         kitchenSettings={props.kitchenSettings ?? null}
         // La banda «M4 · listo para servir» de TODA la tienda, no sólo de
         // la mesa abierta: se entera cualquier camarero (decisión 5).

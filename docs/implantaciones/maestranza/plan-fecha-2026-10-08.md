@@ -184,6 +184,17 @@ servidor en el mismo `106f0d3`:
    venta oscura **ayudan a leer, porque centran la vista**. No se cambian, y esto sale del alcance
    de v2-H2.*
 8. **Cierre de turno con mesas abiertas** avisa (B2).
+   *Después (08-10): ✅ **y bien**. Con tres mesas abiertas, «Cerrar el día» saca un aviso en
+   amarillo: «Quedas 3 mesas abiertas en sala · 138,30 €», las lista una a una (M2 37,30 · M4 55,00
+   · M6 46,00) y dice qué pasa con ellas: «El cierre no las cobra ni las vacía: siguen abiertas en
+   el mapa». Encima, el arqueo cuadra: ventas 54,60 € en 6 tickets y «efectivo esperado en el
+   cajón 154,60 € = fondo 100,00 + efectivo neto 54,60». **El turno NO se cerró**: se salió del
+   modal sin tocar «Cerrar turno».*
+   *⚠️ Pero **C11 muerde en el hierro**: el «Cancelar» de ese modal se dibuja **fuera** del modal,
+   sobre el fondo oscuro, y **el borde inferior de la pantalla del D8 lo corta por la mitad**. La
+   única salida que no es cerrar el turno queda recortada; hubo que salir con el botón atrás de
+   Android. El `-done` de v2-H1 lo dejó «anotado y sin tocar», pero medido aquí ya no es cosmético.
+   Ver §8.*
 9. **Textos en español** (sin CASH, CARD, DRAFT) y sin «Sincronizando con Holded…» (N4, N6, en v1.22).
    *Antes (08-10): ✅ en la hoja de cobro — Efectivo / Tarjeta / Bizum / Vale / Mixto.*
    *Después (08-10): ✅ sin cambios.*
@@ -192,6 +203,12 @@ servidor en el mismo `106f0d3`:
 
 10. Una venta de 3 líneas: el ticket enseña las líneas con IVA, **una sola base imponible** (10 %) y
     el total. Es la primera vez que `ticket-con-iva` se ve en una cuenta sin Holded.
+    *✅ **HECHO el 08-10 por Dirección**, en el Chrome de Matías, cuenta `8c1c7863` en modo prueba.
+    Venta de 3 líneas: Alitas de pollo 10,00 · Caña mediana 1,70 · Café con leche 1,60, en efectivo.
+    El ticket sale con la cabecera fiscal de Salomé, **«IVA 10 % s/12,09 € → 1,21 €» como única
+    base**, Subtotal 12,09, **TOTAL 13,30**, el pie de La Maestranza y marcado **PRUEBA**. **Ni
+    rastro de Holded ni de email.** Tres detalles menores, en el §8.
+    Lo que esto NO prueba: el ticket **en papel** — ver §7.*
 11. **Comandas a cocina — DECIDIDO por Matías el 08-10: van a una PANTALLA de gestión de comandas
     en cocina, NO a impresora.** Hoy esa pantalla **no existe** en el producto: «Enviar a cocina»
     genera PDFs y emite el evento en tiempo real `ticket.sent_to_kitchen`
@@ -294,7 +311,23 @@ servidor en el mismo `106f0d3`:
    ninguna parte: ni en el prompt del bloque ni en el `-done` (§6 «decisiones sin preguntar» ni §10
    «diferencias»). En 1.22.0 cada tarjeta llevaba nombre y precio. Decidir si se queda así —y, si se
    queda, declararlo.
-6. **«Ahora» no entiende de modificadores**: «Ingrediente extra» ocupa uno de los 20 huecos de la
+6. **Tres detalles menores del ticket y del panel** (puerta 10, 08-10). Ninguno mueve la fecha:
+   - **(a)** las líneas del ticket salen en **orden inverso** al que se comandaron;
+   - **(b)** la línea del IVA va **antes** del Subtotal, cuando lo natural es base → IVA → total;
+   - **(c)** **«Probar TPV» no abre la pestaña**: Chrome la bloquea **en silencio**, sin aviso de
+     pop-up. El motivo está en `apps/admin/src/superadmin/TenantDetailPage.tsx:333` — el
+     `window.open` se llama **después** del `await` del token, o sea fuera del gesto del usuario.
+     Se arregla abriendo la ventana **en el mismo clic** y navegándola cuando llegue el token. El
+     mismo patrón está en la **línea 305**, en el impersonate, así que el fallo es doble. Bloque
+     pequeño, de panel, independiente de v2-H2.
+
+7. **C11 · el «Cancelar» de «Cerrar el día» se sale de la pantalla** (puerta 8, 08-10). Se dibuja
+   fuera del modal, sobre el fondo, y en el D8 (1920 × 1080) **el borde inferior lo corta por la
+   mitad**: la única salida del modal que no sea cerrar el turno no se puede pulsar con seguridad.
+   Se salió con el botón atrás de Android, que un camarero no tiene por qué saber. Venía «anotado y
+   sin tocar» de v1.22; medido en el hierro sube de cosmético a trampa.
+
+8. **«Ahora» no entiende de modificadores**: «Ingrediente extra» ocupa uno de los 20 huecos de la
    vista que existe para ganar velocidad, siendo un añadido y no algo que se comande solo. Se
    arregla solo en cuanto exista el 1.
 

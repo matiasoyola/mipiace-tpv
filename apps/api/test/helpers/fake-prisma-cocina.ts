@@ -89,6 +89,11 @@ export interface FakePantalla {
    * `X-Device-Token`.
    */
   deviceTokenHash: string;
+  // kds-2-wifi · dónde escucha, si es una pantalla. Opcionales porque los
+  // tests de kds-1 siembran pantallas sin anunciar nada.
+  kitchenLanIp?: string | null;
+  kitchenLanPort?: number | null;
+  kitchenLanAt?: Date | null;
 }
 
 export interface FakeDispatch {
@@ -140,11 +145,28 @@ export interface FakeOrder {
   urgentByDeviceId: string | null;
   sentAt: Date;
   lateArrival: boolean;
+  /** kds-2-wifi · la tablet ya tenía este envío por la wifi. */
+  lanReceivedAt: Date | null;
   readyAt: Date | null;
   readyByDeviceId: string | null;
   servedAt: Date | null;
   servedByUserId: string | null;
   recoveredAt: Date | null;
+}
+
+/** kds-2-wifi · una fila de `kitchen_lan_marks`. */
+export interface FakeMarcaLan {
+  markId: string;
+  deviceId: string;
+  storeId: string;
+  kind: "HECHO" | "VISTO" | "LISTA";
+  clientSendId: string;
+  section: Seccion;
+  ticketLineId: string | null;
+  done: boolean | null;
+  at: Date;
+  receivedAt: Date;
+  appliedAt: Date | null;
 }
 
 export interface EstadoFalso {
@@ -156,6 +178,8 @@ export interface EstadoFalso {
   dispatches: Map<string, FakeDispatch>;
   orders: Map<string, FakeOrder>;
   orderLines: Map<string, FakeOrderLine>;
+  /** kds-2-wifi · el libro de marcas de la tablet. */
+  marcas: Map<string, FakeMarcaLan>;
   stores: Map<
     string,
     {
@@ -183,6 +207,7 @@ export function nuevoEstado(): EstadoFalso {
     dispatches: new Map(),
     orders: new Map(),
     orderLines: new Map(),
+    marcas: new Map(),
     stores: new Map(),
     tenants: new Map(),
     seq: 0,
@@ -205,6 +230,7 @@ function coincide(valor: unknown, filtro: unknown): boolean {
       return valor !== f.not;
     }
     if ("gte" in f) return (valor as Date) >= (f.gte as Date);
+    if ("gt" in f) return valor != null && (valor as Date) > (f.gt as Date);
   }
   return valor === filtro;
 }
@@ -340,6 +366,7 @@ export function construirFakePrisma(state: EstadoFalso) {
         urgentByDeviceId: null,
         sentAt: data.sentAt ?? new Date(),
         lateArrival: false,
+        lanReceivedAt: null,
         readyAt: null,
         readyByDeviceId: null,
         servedAt: null,
@@ -412,6 +439,12 @@ export function construirFakePrisma(state: EstadoFalso) {
         if (where?.storeId && o.storeId !== where.storeId) continue;
         if (where?.ticketId && o.ticketId !== where.ticketId) continue;
         if (where?.section?.in && !where.section.in.includes(o.section)) continue;
+        // kds-2-wifi · `aplicarMarcasPendientes` busca las tarjetas de UN
+        // envío por su `clientSendId`, que vive en el despacho.
+        if (where?.dispatch?.clientSendId) {
+          const d = state.dispatches.get(o.dispatchId);
+          if (!d || !coincide(d.clientSendId, where.dispatch.clientSendId)) continue;
+        }
         if (where && "servedAt" in where && !coincide(o.servedAt, where.servedAt)) {
           continue;
         }
@@ -435,8 +468,30 @@ export function construirFakePrisma(state: EstadoFalso) {
     updateMany: vi.fn(async ({ where, data }: any) => {
       let count = 0;
       for (const o of state.orders.values()) {
+        if (where.id && o.id !== where.id) continue;
         if (where.ticketId && o.ticketId !== where.ticketId) continue;
+        if (where.storeId && o.storeId !== where.storeId) continue;
+        if (where.section?.in && !where.section.in.includes(o.section)) continue;
         if ("servedAt" in where && !coincide(o.servedAt, where.servedAt)) continue;
+        if ("lanReceivedAt" in where && !coincide(o.lanReceivedAt, where.lanReceivedAt)) {
+          continue;
+        }
+        if (where.dispatch?.clientSendId) {
+          const d = state.dispatches.get(o.dispatchId);
+          if (!d || !coincide(d.clientSendId, where.dispatch.clientSendId)) continue;
+        }
+        // El `OR` de `aplicarMarca`: «no está lista, o lo está con una hora
+        // posterior a la de mi marca». Si el falso lo ignorara, el test de
+        // «la hora de cocina no se pisa» pasaría sin que el código la
+        // respetase.
+        if (Array.isArray(where.OR)) {
+          const alguna = where.OR.some((rama: any) =>
+            Object.entries(rama).every(([campo, filtro]) =>
+              coincide((o as never as Record<string, unknown>)[campo], filtro),
+            ),
+          );
+          if (!alguna) continue;
+        }
         Object.assign(o, data);
         count += 1;
       }
@@ -491,6 +546,7 @@ export function construirFakePrisma(state: EstadoFalso) {
         const o = state.orders.get(l.orderId);
         if (where.id && l.id !== where.id) continue;
         if (where.orderId && l.orderId !== where.orderId) continue;
+        if (where.ticketLineId && l.ticketLineId !== where.ticketLineId) continue;
         if (where.course !== undefined && l.course !== where.course) continue;
         if ("firedAt" in where && !coincide(l.firedAt, where.firedAt)) continue;
         if (where.order?.ticketId && o?.ticketId !== where.order.ticketId) continue;
@@ -550,6 +606,81 @@ export function construirFakePrisma(state: EstadoFalso) {
   prisma.kitchenDispatch = kitchenDispatch;
   prisma.kitchenOrder = kitchenOrder;
   prisma.kitchenOrderLine = kitchenOrderLine;
+  // kds-2-wifi · el libro de marcas. La PK es el `markId` de la tablet, y
+  // el falso lanza el MISMO P2002 que Postgres: es lo que hace que el test
+  // de «subir dos veces el mismo servicio» pruebe la idempotencia de
+  // verdad y no la del falso.
+  prisma.kitchenLanMark = {
+    create: vi.fn(async ({ data }: any) => {
+      if (state.marcas.has(data.markId)) {
+        const err = Object.assign(new Error("Unique constraint failed"), {
+          code: "P2002",
+          clientVersion: "fake",
+          meta: { target: ["mark_id"] },
+        });
+        Object.setPrototypeOf(err, PrismaKnownError.prototype);
+        throw err;
+      }
+      const m: FakeMarcaLan = {
+        markId: data.markId,
+        deviceId: data.deviceId,
+        storeId: data.storeId,
+        kind: data.kind,
+        clientSendId: data.clientSendId,
+        section: data.section,
+        ticketLineId: data.ticketLineId ?? null,
+        done: data.done ?? null,
+        at: new Date(data.at),
+        receivedAt: new Date(),
+        appliedAt: null,
+      };
+      state.marcas.set(m.markId, m);
+      return m;
+    }),
+    findMany: vi.fn(async ({ where, orderBy }: any) => {
+      let out = [...state.marcas.values()].filter((m) => {
+        if (where?.clientSendId && m.clientSendId !== where.clientSendId) return false;
+        if (where && "appliedAt" in where && !coincide(m.appliedAt, where.appliedAt)) {
+          return false;
+        }
+        if (where?.storeId && m.storeId !== where.storeId) return false;
+        return true;
+      });
+      if (orderBy?.at === "asc") {
+        out = [...out].sort((a, b) => a.at.getTime() - b.at.getTime());
+      }
+      return out;
+    }),
+    findFirst: vi.fn(async ({ where }: any) => {
+      for (const m of state.marcas.values()) {
+        if (where?.kind && m.kind !== where.kind) continue;
+        if (where?.ticketLineId && m.ticketLineId !== where.ticketLineId) continue;
+        if (where && "appliedAt" in where && !coincide(m.appliedAt, where.appliedAt)) {
+          continue;
+        }
+        if (where?.at && !coincide(m.at, where.at)) continue;
+        return m;
+      }
+      return null;
+    }),
+    update: vi.fn(async ({ where, data }: any) => {
+      const m = state.marcas.get(where.markId);
+      if (!m) throw new Error("marca no está en el falso");
+      Object.assign(m, data);
+      return m;
+    }),
+    count: vi.fn(async ({ where }: any) => {
+      let n = 0;
+      for (const m of state.marcas.values()) {
+        if (where?.storeId && m.storeId !== where.storeId) continue;
+        if (where && "appliedAt" in where && !coincide(m.appliedAt, where.appliedAt)) {
+          continue;
+        }
+        n += 1;
+      }
+      return n;
+    }),
+  };
   prisma.product = {
     findMany: vi.fn(async ({ where }: any) => {
       const ids: string[] = where?.id?.in ?? [];
@@ -646,6 +777,24 @@ export function construirFakePrisma(state: EstadoFalso) {
       if (!s) throw new Error("tienda no está en el falso");
       Object.assign(s, data);
       return s;
+    }),
+    // kds-2-wifi · `asegurarClaveLan` emite la clave de la tienda con un
+    // `updateMany` condicionado a que siga NULL (la carrera de dos
+    // pantallas pidiéndola a la vez). El falso respeta la condición: si no
+    // la respetara, el test de la carrera pasaría sin que el código la
+    // resolviese.
+    updateMany: vi.fn(async ({ where, data }: any) => {
+      const s = state.stores.get(where.id);
+      if (!s) return { count: 0 };
+      if (
+        Object.prototype.hasOwnProperty.call(where, "kitchenLanKey") &&
+        where.kitchenLanKey === null &&
+        (s as any).kitchenLanKey != null
+      ) {
+        return { count: 0 };
+      }
+      Object.assign(s, data);
+      return { count: 1 };
     }),
   };
   prisma.tenant = {

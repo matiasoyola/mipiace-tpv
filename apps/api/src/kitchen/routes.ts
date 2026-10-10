@@ -9,6 +9,8 @@
 //   POST /kitchen/comandas/:orderId/urgente toque largo (decisión 3)
 //   POST /kitchen/comandas/:orderId/recuperar  devolver una tarjeta
 //   POST /kitchen/latido                    la pantalla dice que está viva
+//                                           y DÓNDE ESCUCHA en la wifi (kds-2)
+//   POST /kitchen/sincronizar               kds-2 · lo que marcó sin internet
 //
 // Todas con la misma puerta: `requireKitchenDevice`. Lo que hace que una
 // pantalla no vea otra tienda ni otra sección NO es un parámetro de la
@@ -21,8 +23,18 @@
 
 import type { FastifyInstance } from "fastify";
 
+import {
+  EDAD_MAXIMA_MS,
+  PUERTO_LAN_POR_DEFECTO,
+} from "@mipiacetpv/kitchen-lan";
+
 import { getPrisma } from "../context.js";
 import { requireKitchenDevice } from "./auth.js";
+import {
+  asegurarClaveLan,
+  sincronizarDesdeLaTablet,
+  type MarcaDeCocina,
+} from "./lan.js";
 import {
   emitirComandaLista,
   emitirPlatoHecho,
@@ -65,6 +77,18 @@ export async function registerKitchenRoutes(
         where: { id: k.deviceId },
         data: { lastSeenAt: new Date() },
       });
+      // kds-2-wifi · LA CLAVE DE LA TIENDA Y SU PUERTO.
+      //
+      // Va en `/kitchen/me` y no en una ruta aparte porque es lo primero
+      // que la pantalla pide al arrancar, y sin la clave no puede abrir el
+      // servidor local: una tablet que escuchara sin clave aceptaría
+      // cualquier cosa de cualquiera que esté en la wifi del bar.
+      //
+      // Y va **la hora del servidor**: es con ella con la que la tablet
+      // mide si un mensaje es demasiado viejo. El reloj de una tablet que
+      // lleva horas sin internet no vale, y rechazar por un reloj
+      // desviado dejaría la cocina sin comandas justo el día que importa.
+      const ahora = new Date();
       return {
         device: { id: k.deviceId, name: k.deviceName },
         store: { id: store.id, name: store.name },
@@ -73,6 +97,12 @@ export async function registerKitchenRoutes(
           greenMaxMin: store.kitchenGreenMaxMin,
           amberMaxMin: store.kitchenAmberMaxMin,
           readyBeep: store.kitchenReadyBeep,
+        },
+        serverTime: ahora.toISOString(),
+        lan: {
+          key: await asegurarClaveLan(k.storeId),
+          port: PUERTO_LAN_POR_DEFECTO,
+          maxAgeMs: EDAD_MAXIMA_MS,
         },
       };
     },
@@ -357,15 +387,130 @@ export async function registerKitchenRoutes(
   // papel por la impresora USB del terminal.
   app.post(
     "/kitchen/latido",
-    { preHandler: [requireKitchenDevice] },
+    {
+      preHandler: [requireKitchenDevice],
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            // kds-2-wifi · DÓNDE ESCUCHA ESTA PANTALLA.
+            //
+            // La IP no se valida de forma: es la IP privada que la tablet
+            // ve de sí misma y sólo sirve para que el TPV le hable. Mismo
+            // criterio que `localIp` del heartbeat de A5. Se acota el
+            // tamaño y ya.
+            lanIp: { type: "string", maxLength: 60 },
+            lanPort: { type: "integer", minimum: 1024, maximum: 65535 },
+            // `false` cuando el servidor local no arrancó (el puerto
+            // estaba ocupado, la pieza nativa no está en esta APK). Se
+            // borra lo anunciado: el TPV tiene que saber que ahí no hay
+            // nadie escuchando, y no reintentar contra una IP muerta.
+            lanListening: { type: "boolean" },
+          },
+        },
+      },
+    },
     async (request) => {
       const k = request.kitchen!;
+      const body = (request.body ?? {}) as {
+        lanIp?: string;
+        lanPort?: number;
+        lanListening?: boolean;
+      };
       const now = new Date();
+      const escucha = body.lanListening !== false && body.lanIp != null;
       await getPrisma().device.update({
         where: { id: k.deviceId },
-        data: { lastSeenAt: now },
+        data: {
+          lastSeenAt: now,
+          kitchenLanIp: escucha ? body.lanIp! : null,
+          kitchenLanPort: escucha
+            ? body.lanPort ?? PUERTO_LAN_POR_DEFECTO
+            : null,
+          kitchenLanAt: escucha ? now : null,
+        },
       });
-      return { ok: true, serverTime: now.toISOString() };
+      return {
+        ok: true,
+        serverTime: now.toISOString(),
+        // La clave viaja en cada latido y no sólo al arrancar: es cómo la
+        // tablet se entera de que se rotó (se revocó un aparato de la
+        // tienda) sin tener que reiniciarse.
+        lan: { key: await asegurarClaveLan(k.storeId) },
+      };
+    },
+  );
+
+  // ── kds-2-wifi · LO QUE LA COCINA MARCÓ SIN INTERNET ─────────────────
+  //
+  // La tablet guarda sus tachados, sus «Lista» y sus «Visto» mientras no
+  // hay red, y los sube todos aquí al volver. Con ellos sube qué envíos
+  // recibió por la wifi, para que esas tarjetas no se pinten como nuevas.
+  //
+  // Idempotente por el `markId` que genera la tablet: puede reintentar
+  // tantas veces como quiera, y de hecho lo hace (manda hasta que el
+  // servidor contesta 200, como el outbox del terminal).
+  //
+  // El cuerpo es un lote y no una marca por petición a propósito: lo que
+  // vuelve es un servicio entero de golpe, y cien peticiones con el 4G del
+  // bar a medio gas es cien oportunidades de que la mitad se quede sin
+  // subir.
+  app.post(
+    "/kitchen/sincronizar",
+    {
+      preHandler: [requireKitchenDevice],
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            marcas: {
+              type: "array",
+              maxItems: 500,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["markId", "kind", "clientSendId", "section", "at"],
+                properties: {
+                  markId: { type: "string", format: "uuid" },
+                  kind: { type: "string", enum: ["HECHO", "VISTO", "LISTA"] },
+                  clientSendId: { type: "string", format: "uuid" },
+                  section: {
+                    type: "string",
+                    enum: ["BARRA", "COCINA", "SALON"],
+                  },
+                  ticketLineId: {
+                    type: ["string", "null"],
+                    format: "uuid",
+                  },
+                  done: { type: ["boolean", "null"] },
+                  at: { type: "string", format: "date-time" },
+                },
+              },
+            },
+            recibidas: {
+              type: "array",
+              maxItems: 500,
+              items: { type: "string", format: "uuid" },
+            },
+          },
+        },
+      },
+    },
+    async (request) => {
+      const k = request.kitchen!;
+      const body = (request.body ?? {}) as {
+        marcas?: MarcaDeCocina[];
+        recibidas?: string[];
+      };
+      return sincronizarDesdeLaTablet({
+        deviceId: k.deviceId,
+        storeId: k.storeId,
+        sections: k.sections,
+        marcas: body.marcas ?? [],
+        recibidas: body.recibidas ?? [],
+      });
     },
   );
 }

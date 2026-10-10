@@ -25,6 +25,7 @@
 
 import "fake-indexeddb/auto";
 import { IDBFactory } from "fake-indexeddb";
+import type * as React from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -129,6 +130,7 @@ import {
   type ServerDraftLine,
 } from "../src/lib/tableDraft.js";
 import { DESHACER_MS } from "../src/kitchen/tpv/DeshacerToast.js";
+import { useCaminoDirecto } from "../src/kitchen/tpv/useCaminoDirecto.js";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -405,6 +407,26 @@ async function settle() {
   }
 }
 
+/**
+ * kds-2-wifi · el envoltorio que monta el CAMINO DIRECTO, igual que
+ * `TpvHome` en producción.
+ *
+ * Antes `GET /kitchen/estado` lo pedía `useKitchenMesa` y bastaba con
+ * montar `SalePage`. Ahora lo pide `useCaminoDirecto`, que vive arriba
+ * porque la clave de la tienda la comparten la comanda y la banda «LISTO».
+ * Montarlo aquí es lo que hace que estos tests sigan probando la cadena
+ * entera —incluido el «Cocina no recibe» y el papel— en vez de una
+ * `SalePage` con el camino apagado.
+ */
+function ConCamino(props: Omit<SalePagePropsDeTest, "camino">) {
+  const camino = useCaminoDirecto({
+    moduloEncendido: props.kitchenDisplayEnabled === true,
+  });
+  return <SalePage {...props} camino={camino} />;
+}
+
+type SalePagePropsDeTest = React.ComponentProps<typeof SalePage>;
+
 async function render(opts: {
   lineas?: ServerDraftLine[];
   modulo?: boolean;
@@ -414,7 +436,7 @@ async function render(opts: {
   root = createRoot(container);
   await act(async () => {
     root.render(
-      <SalePage
+      <ConCamino
         shiftId="shift-1"
         cashierLabel="caja1@bar.es"
         cashierRole="CASHIER"

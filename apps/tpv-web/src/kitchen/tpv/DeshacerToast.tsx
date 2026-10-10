@@ -45,6 +45,17 @@ export interface AnulacionPendiente {
   lineId: string;
   nombre: string;
   units: number;
+  /**
+   * kds-2-wifi · el id de LA OPERACIÓN, un UUID generado al encolar.
+   *
+   * Es por lo que la tablet descarta el duplicado si la anulación le llega
+   * por la nube y por la wifi. Va aquí y no se genera al mandar porque
+   * tiene que ser EL MISMO en los dos caminos, y los dos salen del mismo
+   * sitio: el temporizador de 5 s.
+   *
+   * Opcional para tolerar una cola ya en memoria de antes del bloque.
+   */
+  opId?: string;
 }
 
 export interface DeshacerToastProps {

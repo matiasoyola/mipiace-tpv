@@ -283,6 +283,20 @@ describe.skipIf(!e2eEnabled)("e2e · kds-1 · la cocina, contra Postgres", () =>
   });
 
   afterAll(async () => {
+    // ── NO DEJAR MESAS ABIERTAS DETRÁS ──────────────────────────────
+    //
+    // El barrido de mesas abandonadas (`tables/abandoned.ts`) mira los
+    // DRAFT con mesa **de TODOS los tenants**: es una pasada de
+    // plataforma, y así tiene que ser en producción. La consecuencia en la
+    // suite e2e, que comparte una sola base, es que las mesas que deje
+    // abiertas este fichero las CUENTA el `scanned` de
+    // `ciclo-de-caja.e2e.ts`, que es anterior y afirma un número exacto.
+    //
+    // Eso fue justo lo que rompió el e2e de esta rama: `expected 9 to be 3`
+    // — los 3 suyos más los 6 que dejaba este fichero. El arreglo es
+    // aislar los datos nuevos, no relajar la aserción del test viejo: el
+    // número exacto es lo que hace que ese test valga para algo.
+    await prisma.ticket.deleteMany({ where: { tenantId, status: "DRAFT" } });
     await app?.close();
     await shutdown();
   });

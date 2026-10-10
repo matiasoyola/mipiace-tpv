@@ -41,6 +41,7 @@ export async function registerSendToKitchenEscposRoute(
       const body = (request.body ?? {}) as {
         clientSendId?: string;
         urgent?: boolean;
+        sentAt?: string;
       };
       return responderEnvio(
         reply,

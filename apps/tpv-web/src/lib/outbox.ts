@@ -57,7 +57,19 @@ export type OutboxKind =
   // gastó y cuya venta el servidor rechazó para siempre. Va por el outbox
   // como todo lo demás: el número ya está gastado desde que se generó, así
   // que su anulación no puede depender de que haya red en ese momento.
-  | "fiscal-void";
+  | "fiscal-void"
+  // kds-2-wifi · la comanda que salió por la wifi del local y que la nube
+  // no pudo recibir. Idempotente por `clientSendId` en el cuerpo, así que
+  // el envío genérico (POST path+body, borrar al 2xx) tampoco necesita
+  // casos especiales.
+  //
+  // POR QUÉ PASA POR EL OUTBOX Y NO SE PIERDE: `TicketLine.sentUnits`
+  // —qué tiene ya la cocina— vive en el SERVIDOR. Sin internet, la tablet
+  // recibe la comanda por la wifi pero el servidor no se entera, y la mesa
+  // seguiría pareciendo «sin enviar» para siempre. Con el outbox, al
+  // volver la red el servidor recibe el MISMO `clientSendId`: no duplica la
+  // tarjeta (la idempotencia de kds-1) y sí sube `sentUnits`.
+  | "kitchen-send";
 export type OutboxStatus = "pending" | "rejected";
 
 export interface OutboxItem {
@@ -86,6 +98,15 @@ export interface OutboxItem {
   // mesa. Mientras el item exista (pending o rejected), ESTE dispositivo
   // bloquea reabrir/editar esa mesa — está "cobrada en tránsito".
   tableId?: string;
+  // kds-2-wifi · qué unidades de qué líneas iban en esta comanda. SÓLO
+  // LOCAL: nunca se envía (el esquema del envío es
+  // `additionalProperties: false`), igual que `durationMin` de B-6a.
+  //
+  // Sirve para que la comanda del TPV pueda pintar como «en cocina» lo que
+  // la tablet ya tiene aunque el servidor no lo sepa todavía: es la marca
+  // «enviado» que pone el primer acuse que llega, y sobrevive a una recarga
+  // del terminal en mitad del apagón.
+  kitchenLines?: Array<{ lineId: string; units: number }>;
   // v1.10-offline: localId del turno local al que pertenece este item
   // (el shift-open que lo establece, o el ticket/arqueo que depende de
   // él). Mientras el shift-open siga en la cola, los dependientes NO se
@@ -233,6 +254,7 @@ export async function outboxAdd(
     method?: "POST" | "PATCH";
     durationMin?: number;
     tableId?: string;
+    kitchenLines?: Array<{ lineId: string; units: number }>;
     // v1.10-offline: explícito para las operaciones de turno
     // (shift-open/cash-count). Para tickets se auto-deduce del
     // body.shiftId vía el lookup registrado — CheckoutPage no cambia.
@@ -497,6 +519,27 @@ async function sendItem(
         emit({ type: "change" });
         return;
       }
+    }
+    // kds-2-wifi · un 409 `DISPATCH_IN_FLIGHT` NO es un rechazo
+    // permanente: significa que ese mismo envío está a medio procesar en el
+    // servidor (se murió entre imprimir y marcar). Hay que reintentarlo, no
+    // archivarlo como rechazado — archivarlo dejaría `sentUnits` sin subir
+    // y la mesa volvería a mandar la comanda entera en el siguiente
+    // «Enviar».
+    if (
+      item.kind === "kitchen-send" &&
+      err instanceof ApiError &&
+      err.status === 409 &&
+      err.code === "DISPATCH_IN_FLIGHT"
+    ) {
+      await rawPatch(item.externalId, {
+        attempts: item.attempts + 1,
+        lastError: "DISPATCH_IN_FLIGHT: el servidor lo tiene a medias",
+        lockedAt: null,
+        lockOwner: null,
+      });
+      emit({ type: "change" });
+      return;
     }
     if (err instanceof ApiError && isPermanentRejection(err)) {
       const reason = rejectionReason(err);

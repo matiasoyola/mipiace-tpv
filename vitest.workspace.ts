@@ -3,6 +3,7 @@ export default [
   "packages/clinica-valoracion",
   "packages/escpos-builder",
   "packages/holded-client",
+  "packages/kitchen-lan",
   "packages/ticket-model",
   "packages/ticket-pdf",
   "packages/util-validation",
