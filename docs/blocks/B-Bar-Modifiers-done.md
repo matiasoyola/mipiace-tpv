@@ -280,6 +280,42 @@ Total: 26 tests nuevos. Suite completa de `apps/api` corre
   los endpoints REST). Pequeña pantalla CRUD para OWNER/MANAGER que
   pinta los grupos, permite editarlos y asocia productos. Los 2 bares
   piloto pueden arrancar con seed manual vía cURL mientras tanto.
+
+  **CASO REAL DE PARTIDA · La Maestranza, 08-10-2026.** El «mientras
+  tanto» ya se cobró su precio. Nadie hizo el seed por cURL, así que
+  quien montó la carta hizo lo único que el panel permite: **cargar los
+  extras como productos sueltos** — `BOC-005` «Extra de ingrediente»
+  (0,50 €) y `PLA-003` «Ingrediente extra» (1,00 €) en
+  `docs/implantaciones/maestranza/catalogo-tpv.csv`.
+
+  Lo que eso produce, medido en el hierro: el ticket DRAFT
+  `bafab3e8-46f3-4ccb-991d-f97935b62c39` (mesa M6, 46,00 €, creado el
+  08-10 a las 16:08:20 de Madrid desde el D8, cuenta de ensayo
+  `81f2177b`) lleva estas tres líneas:
+
+  | producto | uds |
+  |---|---|
+  | Plato combinado | 3 |
+  | Plato combinado de ternera | 1 |
+  | **Ingrediente extra** | **4** |
+
+  Cuatro extras sueltos y cuatro platos, **sin decir qué extra va en
+  qué plato**. Para la cocina es una comanda que no se puede preparar, y
+  para el ticket del cliente una línea huérfana. No es un fallo de los
+  modificadores: es lo que pasa cuando existen en la API y en el modelo
+  pero **no hay pantalla para crearlos**, que es justo este carryover.
+
+  Dos efectos colaterales ya vistos: «Ingrediente extra» **ocupa uno de
+  los 20 huecos de la vista «Ahora»** de v2-H1, siendo un añadido y no
+  algo que se comande solo; y el extra entra al ranking de más vendidos
+  como si fuera un producto.
+
+  La pantalla entra en **v2-H2** (`docs/implantaciones/maestranza/
+  plan-fecha-2026-10-08.md` §8, punto 1: el único de datos de los
+  siete). Cuando se construya, **el criterio de que está bien es que
+  este ticket se pueda rehacer** diciendo qué ingrediente lleva cada
+  plato, y que el catálogo de La Maestranza pierda `BOC-005` y
+  `PLA-003` como productos.
 - **Tests React de `<ModifierSelector>`** (spec listaba
   `SalePage.modifiers.test.tsx`). La infra de tests React en `tpv-web`
   está aún diferida (memoria del proyecto) — el día que se monte
