@@ -240,7 +240,31 @@ export async function aplicarMarcasPendientes(
       });
       continue;
     }
-    await aplicarMarca({ marca: m, orderId: order.id, prisma });
+    try {
+      await aplicarMarca({ marca: m, orderId: order.id, prisma });
+    } catch (err) {
+      // UNA marca que no se puede escribir NO se lleva por delante a las
+      // demás del lote, y **se ve**. Así es como se escondió el fallo que
+      // encontró el e2e: una marca de «Lista» anterior al `sent_at` de su
+      // tarjeta violaba `kitchen_orders_cronologia`, la excepción subía
+      // hasta el `catch` mudo de `envio.ts`, y el «Lista» del cocinero
+      // desaparecía sin una línea de log.
+      //
+      // Se deja SIN aplicar (`applied_at` NULL) a propósito: la siguiente
+      // subida de la tablet lo reintenta, y mientras tanto la fila está en
+      // el libro para que alguien la pueda mirar.
+      console.warn(
+        JSON.stringify({
+          event: "kitchen.lan_mark.no_aplicada",
+          markId: m.markId,
+          kind: m.kind,
+          orderId: order.id,
+          at: m.at.toISOString(),
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+      continue;
+    }
     await prisma.kitchenLanMark.update({
       where: { markId: m.markId },
       data: { appliedAt: new Date() },

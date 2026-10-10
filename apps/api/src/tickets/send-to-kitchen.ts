@@ -48,6 +48,24 @@ export const ENVIO_BODY_SCHEMA = {
     clientSendId: { type: "string", format: "uuid" },
     // El camarero tocó «Urgente» junto a «Enviar» (decisión 3).
     urgent: { type: "boolean" },
+    // kds-2-wifi · CUÁNDO SE PULSÓ «ENVIAR», sellado en el terminal.
+    //
+    // Hasta aquí, `KitchenOrder.sentAt` era «cuándo se enteró el
+    // servidor». Con el camino directo eso deja de ser lo mismo: sin
+    // internet la comanda llega a la cocina por la wifi y el servidor no
+    // la ve hasta que el outbox puede subirla, que pueden ser horas. Y
+    // entonces pasaban dos cosas malas:
+    //
+    //   · la cocina marcaba «Lista» a las 13:20 y el servidor creaba la
+    //     tarjeta a las 14:00 → `ready_at < sent_at` → el CHECK
+    //     `kitchen_orders_cronologia` la rechazaba y **el «Lista» del
+    //     cocinero se perdía**;
+    //   · el semáforo contaba desde las 14:00, así que una mesa que
+    //     llevaba una hora esperando entraba en verde a 0 min.
+    //
+    // Mismo sello y mismo motivo que `occurredAt` del outbox en v1.11.
+    // Acotado en el servidor: ver `acotarSentAt` en `kitchen/envio.ts`.
+    sentAt: { type: "string", format: "date-time" },
   },
 } as const;
 
@@ -80,6 +98,7 @@ export async function registerSendToKitchenRoute(
       const body = (request.body ?? {}) as {
         clientSendId?: string;
         urgent?: boolean;
+        sentAt?: string;
       };
 
       if (fallback === "pdf") {
@@ -107,11 +126,14 @@ export async function responderEnvio(
   reply: import("fastify").FastifyReply,
   ticketId: string,
   ctx: { tenantId: string; registerId: string; cashierId: string },
-  body: { clientSendId?: string; urgent?: boolean },
+  body: { clientSendId?: string; urgent?: boolean; sentAt?: string },
 ): Promise<unknown> {
   const result = await dispatchKitchenTicket(ticketId, ctx, {
     clientSendId: body.clientSendId,
     urgent: body.urgent,
+    // kds-2-wifi · el sello del terminal. Se pasa TAL CUAL; quien decide
+    // si creérselo es `acotarSentAt`, en el servidor.
+    sentAt: body.sentAt,
   });
   if (result.kind !== "ok") {
     switch (result.kind) {

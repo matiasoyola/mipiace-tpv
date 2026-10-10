@@ -1767,6 +1767,16 @@ export function SalePage(props: SalePageProps) {
     // La compone el TPV (ver `envioLan.ts`) porque sin internet no hay
     // servidor al que preguntar, con los datos que ya están en pantalla y
     // con las mismas funciones de alergias que usa `envio.ts`.
+    // kds-2-wifi · UN SOLO INSTANTE para los dos caminos.
+    //
+    // Es cuándo el camarero pulsó «Enviar», y va sellado en los dos: en la
+    // comanda de la wifi y en el cuerpo del POST a la nube. Si el envío a
+    // la nube acaba en el outbox y sube dos horas después, el servidor
+    // sigue sabiendo cuándo salió de verdad — y sin eso, el «Lista» que la
+    // cocina marcó mientras tanto es ANTERIOR al `sentAt` de su tarjeta y
+    // el servidor no lo puede guardar (`kitchen_orders_cronologia`).
+    const pulsadoEn = new Date();
+
     const porWifi = (async () => {
       const comandas = componerComandasLan({
         ticketId: tableContext.activeTicketId!,
@@ -1778,7 +1788,7 @@ export function SalePage(props: SalePageProps) {
         alergenosPorLinea: new Map(lines.map((l) => [l.id, l.allergens ?? []])),
         nombrePorLinea: new Map(lines.map((l) => [l.id, l.nameSnapshot])),
         notasPorLinea: new Map(lines.map((l) => [l.id, notasDeLineaLan(l)])),
-        ahora: new Date(),
+        ahora: pulsadoEn,
       });
       if (comandas.length === 0) return null;
       return kitchen.mandarPorWifi("COMANDA", clientSendId, { comandas });
@@ -1802,7 +1812,11 @@ export function SalePage(props: SalePageProps) {
         }>;
       }>(`/tickets/${tableContext.activeTicketId}/send-to-kitchen/escpos`, {
         method: "POST",
-        body: { clientSendId, urgent: urgentePendiente },
+        body: {
+          clientSendId,
+          urgent: urgentePendiente,
+          sentAt: pulsadoEn.toISOString(),
+        },
       });
       setKitchenRevision(res.revision);
       // El urgente no se queda pegado: viajó en ESTE envío.
@@ -1960,7 +1974,13 @@ export function SalePage(props: SalePageProps) {
             externalId: clientSendId,
             kind: "kitchen-send",
             path: `/tickets/${tableContext.activeTicketId}/send-to-kitchen/escpos`,
-            body: { clientSendId, urgent: urgentePendiente },
+            body: {
+              clientSendId,
+              urgent: urgentePendiente,
+              // El sello viaja EN EL OUTBOX: es justo el caso en que el
+              // servidor se entera tarde.
+              sentAt: pulsadoEn.toISOString(),
+            },
             label: `Comanda ${tableContext.name}`,
             total: 0,
             tableId: tableContext.id,

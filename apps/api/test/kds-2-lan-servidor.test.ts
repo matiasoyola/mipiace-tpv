@@ -68,7 +68,7 @@ vi.mock("../src/realtime/store-event-bus.js", () => ({
 
 const { registerKitchenRoutes } = await import("../src/kitchen/routes.js");
 const { registerKitchenTpvRoutes } = await import("../src/kitchen/tpv-routes.js");
-const { enviarComanda } = await import("../src/kitchen/envio.js");
+const { enviarComanda, acotarSentAt } = await import("../src/kitchen/envio.js");
 const { hashDeviceToken } = await import("../src/devices/auth.js");
 const { signCashierSession } = await import("../src/shift/cashier-session.js");
 
@@ -165,6 +165,66 @@ function sembrar() {
 beforeEach(sembrar);
 
 const ctx = { tenantId: TENANT, registerId: REGISTER, cashierId: CASHIER };
+
+describe("kds-2 · CUÁNDO SE MANDÓ la comanda, y a qué reloj se cree", () => {
+  // Hasta kds-2, `KitchenOrder.sentAt` era siempre «cuando el servidor se
+  // entera». Con el camino directo deja de ser lo mismo: sin internet la
+  // comanda llega a la cocina por la wifi y el servidor no la ve hasta que
+  // el outbox la sube. Si la tarjeta naciera con la hora de la subida, el
+  // «Lista» que la cocina marcó mientras tanto sería ANTERIOR a su propio
+  // `sent_at` y el CHECK `kitchen_orders_cronologia` lo rechazaría — o
+  // sea, el trabajo del cocinero se perdería. Lo encontró el e2e.
+  const AHORA = new Date("2026-10-10T12:00:00.000Z");
+
+  it("sin sello, la hora del servidor (como antes del bloque)", () => {
+    expect(acotarSentAt(undefined, AHORA)).toEqual(AHORA);
+  });
+
+  it("con un sello razonable, se cree al terminal", () => {
+    const haceUnaHora = new Date(AHORA.getTime() - 60 * 60_000);
+    expect(acotarSentAt(haceUnaHora.toISOString(), AHORA)).toEqual(haceUnaHora);
+  });
+
+  it("SABOTAJE · un reloj del FUTURO se recorta a ahora", () => {
+    // Una comanda que todavía no ha pasado haría contar al semáforo en
+    // negativo.
+    const dentroDeTresHoras = new Date(AHORA.getTime() + 3 * 60 * 60_000);
+    expect(acotarSentAt(dentroDeTresHoras.toISOString(), AHORA)).toEqual(AHORA);
+  });
+
+  it("SABOTAJE · un reloj a 1970 se recorta a ahora", () => {
+    // Pasa de verdad en estos terminales cuando se quedan sin batería.
+    // Sin el tope, la mesa se quedaría en rojo para siempre y el informe
+    // del dueño contaría cincuenta años de cocina.
+    expect(acotarSentAt(new Date(0).toISOString(), AHORA)).toEqual(AHORA);
+  });
+
+  it("y una fecha que no es una fecha tampoco tumba el envío", () => {
+    expect(acotarSentAt("ayer por la tarde", AHORA)).toEqual(AHORA);
+  });
+
+  it("el tope son 24 h: justo dentro se cree, justo fuera no", () => {
+    const justoDentro = new Date(AHORA.getTime() - 24 * 60 * 60_000 + 1_000);
+    const justoFuera = new Date(AHORA.getTime() - 24 * 60 * 60_000 - 1_000);
+    expect(acotarSentAt(justoDentro.toISOString(), AHORA)).toEqual(justoDentro);
+    expect(acotarSentAt(justoFuera.toISOString(), AHORA)).toEqual(AHORA);
+  });
+
+  it("y la comanda nace con esa hora, no con la de ahora", async () => {
+    const pulsado = new Date(Date.now() - 45 * 60_000);
+    const r = await enviarComanda(TICKET, ctx, {
+      clientSendId: ENVIO,
+      sentAt: pulsado.toISOString(),
+    });
+    expect(r.kind).toBe("ok");
+    const order = [...state.orders.values()][0]!;
+    expect(order.sentAt.toISOString()).toBe(pulsado.toISOString());
+    // Y el tiempo 1 marcha con ella: el semáforo cuenta desde que la mesa
+    // mandó, no desde que el servidor se enteró.
+    const linea = [...state.orderLines.values()][0]!;
+    expect(linea.firedAt?.toISOString()).toBe(pulsado.toISOString());
+  });
+});
 
 describe("kds-2 · la clave de la tienda", () => {
   it("nace cuando la pantalla la pide, y es la MISMA en los dos lados", async () => {
