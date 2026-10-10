@@ -139,7 +139,7 @@ RUN mkdir -p /var/cache/mipiacetpv/product-images \
 # ownership de `node`: si no, Docker crea el mountpoint como root, el volumen
 # nace root y la API (USER node) revienta con EACCES al guardar la primera
 # captura — el mismo fallo que tuvieron los Z el 2026-06-11.
-RUN mkdir -p /var/lib/mipiacetpv/z-reports /var/lib/mipiacetpv/device-screenshots \
+RUN mkdir -p /var/lib/mipiacetpv/z-reports /var/lib/mipiacetpv/device-screenshots /var/lib/mipiacetpv/clinical-files \
   && chown -R node:node /var/lib/mipiacetpv
 
 ENV NODE_ENV=production
