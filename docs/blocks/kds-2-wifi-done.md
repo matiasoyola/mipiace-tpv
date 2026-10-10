@@ -27,6 +27,8 @@ Terminales: **D8 (AP13)** como TPV, **AP11** 1280 × 800 como pantalla de cocina
   servidor es la mitad: él no puede saber si la comanda está llegando por la
   wifi, porque esa conversación no pasa por él.
 - **La pantalla NO se pone roja** mientras le llegan comandas: franja ámbar.
+- **El `sentAt` lo sella el terminal** (§2.6b): sin eso, el «Lista» que la
+  cocina marcó durante el apagón se perdía al volver la red, en silencio.
 - **15 sabotajes, 15 rojos** — dos de ellos sólo después de arreglar el test,
   que es el hallazgo del bloque (§6.1). Suite: 341 ficheros, 4.400 tests.
   E2E contra Postgres: 12 nuevos.
@@ -175,6 +177,40 @@ Con un caso especial: un **409 `DISPATCH_IN_FLIGHT` no es un rechazo
 permanente**. Significa que ese envío está a medio procesar en el servidor (se
 murió entre imprimir y marcar). Archivarlo como rechazado dejaría `sentUnits`
 sin subir y la mesa volvería a mandar la comanda entera.
+
+### 2.6b · `sentAt` lo sella el TERMINAL, no el servidor
+
+**Esto no estaba en la primera versión del bloque: es un fallo que encontró
+el e2e contra Postgres.** Hasta kds-2, `KitchenOrder.sentAt` era siempre
+«cuándo se enteró el servidor», porque coincidía con «cuándo pulsó el
+camarero». Con el camino directo dejan de coincidir, y por horas.
+
+Lo que pasaba con `sentAt = ahora`:
+
+- la cocina marcaba «Lista» a las 13:20, el outbox subía el envío a las 14:00,
+  y `ready_at < sent_at` **violaba el CHECK `kitchen_orders_cronologia`**. La
+  marca no se podía escribir y **el «Lista» del cocinero desaparecía**, sin
+  una línea de log, porque `envio.ts` se tragaba la excepción;
+- y el semáforo contaba desde las 14:00: una mesa que llevaba una hora
+  esperando entraba en verde a 0 min.
+
+O sea que `ready_at < sent_at` no es un caso raro: **es el caso normal de un
+servicio sin internet**. El CHECK de kds-1 daba por hecho que el servidor se
+entera antes de que la cocina pueda tocar nada; era verdad en kds-1 y es
+mentira en kds-2.
+
+Así que el terminal sella cuándo pulsó «Enviar» y el sello viaja también en el
+outbox — mismo patrón y mismo motivo que el `occurredAt` de v1.11. El servidor
+lo acota (`acotarSentAt`): nada del futuro (un reloj adelantado haría contar al
+semáforo en negativo) y nada de hace más de 24 h (un reloj a 1970, que pasa
+cuando el terminal se queda sin batería, dejaría la mesa en rojo para siempre).
+Dentro de la ventana se cree al terminal, y la contrapartida está dicha: un
+reloj atrasado unos minutos mueve el semáforo esos minutos.
+
+Y lo segundo, que es lo que lo escondió: **una marca que no se puede escribir
+ya no se traga en silencio**. Se registra (`kitchen.lan_mark.no_aplicada`), no
+se lleva por delante al resto del lote, y se queda sin aplicar en el libro para
+el siguiente intento.
 
 ### 2.7 · La marca «enviado» la pone el primer acuse, y se reconstruye del outbox
 
@@ -493,6 +529,22 @@ esquema de la ruta (`HECHO`/`VISTO`/`LISTA`) y su test. Importa: si la ruta
 aceptara un `kind` cualquiera, una tablet podría subir un «URGENTE» con su hora
 y pisar lo que dijo el camarero, que es justo lo que la decisión 9 reparte.
 
+### 6.2 · Y un tercero, que sólo vio Postgres
+
+Los dos de arriba los encontró el sabotaje. El tercero no lo encontró ningún
+test escrito a propósito: lo encontró **el e2e contra Postgres el día que el
+calendario pasó por encima de una fecha clavada en el fixture**.
+
+El test de «una marca que llega ANTES que su envío» usaba
+`2026-10-09T14:10:00Z` a pelo. Mientras «hoy» fue el 9, la marca caía en el
+futuro y pasaba; el día 10 cayó en el pasado y se puso roja, con el mensaje
+menos informativo posible (`expected undefined to be …`). Debajo había un
+fallo de producción de verdad: el de la §2.6b.
+
+**La regla que deja esto: un fixture con una fecha absoluta prueba una cosa
+distinta cada día.** Los instantes de ese fichero son ahora relativos a
+`Date.now()`, que además es lo que produce una tablet de verdad.
+
 ---
 
 ## 7 · El bucle visual
@@ -602,21 +654,37 @@ BANCO_URL=http://localhost:5282 BANCO_OUT=docs/blocks/kds-2-wifi-shots \
   node docs/blocks/kds-2-wifi-shots/banco.mjs
 ```
 
-### 10.1 · Los rojos PREEXISTENTES de la suite e2e
+### 10.1 · Lo que la suite e2e decía, y la corrección
 
-`npx vitest run --config vitest.e2e.config.ts` entero da **7 rojos que no son
-de este bloque**. Se comprobó quitando `kds-2-wifi.e2e.ts`: siguen los mismos.
+**La primera versión de este `-done` decía que los 7 rojos de la suite e2e
+eran preexistentes. Era falso en dos de ellos, y la comprobación estaba mal
+hecha**: se quitó `kds-2-wifi.e2e.ts`, siguió en rojo, y de ahí se concluyó
+«no es del bloque». Lo que faltaba mirar es que el otro fichero nuevo
+—`kds-1-cocina.e2e.ts`— era el que más contaminaba.
 
-- **5 de fichaje** (`f3-fichar`, `f8-colegio`): correr de madrugada cruza el día
-  local y el servidor contesta 409.
-- **2 del barrido de mesas** de `ciclo-de-caja`: cuenta los DRAFT con mesa de
-  **todos** los ficheros de la misma base (`expected 9 to be 3`). Ya pasaba con
-  los DRAFT que crea el e2e de kds-1.
+Lo que de verdad pasaba, medido:
 
-Y en la suite normal hay **un `Unhandled Rejection`** (`process.exit` desde
-`importar-alergenos-maestranza.ts`, de kds-1) que no tumba ningún fichero.
+| | ficheros | tests |
+|---|---|---|
+| `origin/master`, suite e2e entera | 31 | **546 verdes** |
+| esta rama, antes del arreglo | 32 | 2 rojos |
+| esta rama, ahora | 32 | **560 verdes** |
 
----
+- **El barrido de mesas** (`ciclo-de-caja`, «expected 9 to be 3») **sí era de
+  esta rama.** `tables/abandoned.ts` mira los DRAFT con mesa de **todos los
+  tenants** —es una pasada de plataforma y así tiene que ser—, y la suite e2e
+  comparte una sola base. Los dos ficheros nuevos dejaban mesas abiertas
+  detrás: 6 el de kds-1 y 2 el de kds-2, más los 3 suyos = 9. El arreglo es
+  **aislar los datos nuevos** (`deleteMany` de sus DRAFT en el `afterAll`), no
+  relajar el número exacto del test viejo: ese número es lo que lo hace valer.
+- **Los 5 de fichaje** (`f3-fichar`, `f8-colegio`) sí son ajenos y dependen de
+  la hora: a las 00:06 de Madrid, «hace tres horas» cruza el día local y el
+  servidor contesta 409. A las 11:20 pasan, y pasan también en `master`.
+- Y el **`Unhandled Rejection`** de la suite normal (`process.exit` desde
+  `importar-alergenos-maestranza.ts`) era de kds-1 y **estaba tirando el CI de
+  las dos ramas**: 341 ficheros en verde y vitest cortando igual, sin nombrar
+  ningún test. Arreglado con la guardia de ejecución directa, y con un test que
+  se la exige a todo script que un test importe.
 
 ## 11 · Qué hay que mirar en la revisión
 
