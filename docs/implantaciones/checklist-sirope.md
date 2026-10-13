@@ -173,3 +173,36 @@ terminal (la precondición de verifactu-1 no deja dos terminales en la misma caj
 - [ ] Teléfono de soporte en la barra.
 
 Hasta entonces, Sirope está «validada en prueba», y se dice así.
+
+---
+
+## Hecho el 13-10 · Sirope ha dejado Holded (primer corte en producción)
+
+- **SKU** (A3): los tres cambiados por SQL en producción con guardas. Quedan `CAF-DES-03-SG`,
+  `CAF-DES-04-SG` y `SKU215-Z`. Después la previsualización salió sin bloqueos.
+- **Laboratorio fuera** (A1): el AP11-1006 (emparejamiento `wv`) revocado desde Dispositivos. La
+  previsualización pasó a «Sin terminales activos emparejados». Queda el dispositivo «mipiacetpv ·
+  modo prueba», que es el de «Probar TPV» y no factura.
+- **Corte** (A5): 13-10-2026 a las 18:01:57 UTC. El panel dice «191 fichas pasan a ser suyas».
+  Holded aparece como «Lo dejó · 13/10/2026», «Encender Holded» sale deshabilitado y la caja tiene
+  la serie `C1` con 0 registros, «Íntegra».
+- **Foto antes/después** (A6): el diff sólo toca a Cafetería Sirope, en tres sitios: el tenant
+  (sin interruptor ni clave, con fecha de corte y sync `NOT_APPLICABLE`), el catálogo
+  (121 + 70 de `HOLDED` a `LOCAL`, el resto de columnas idénticas) y el md5 de su catálogo. Los
+  otros siete comercios no cambian ni un byte.
+- **No se cobró venta de prueba**: la `C1/1` será la primera venta real de Sirope.
+
+### Lo que ha salido para la Parte B
+
+1. **El QR de la factura apunta al entorno de pruebas de la AEAT** y los registros no se remiten
+   (lo dice el panel de Facturación). Hay que decidirlo antes de la primera venta real de Sirope.
+   La Maestranza está igual.
+2. **La razón social difiere entre pantallas**: el super-admin dice «Cafetería Sirope» y el panel de
+   la dueña (Mi cuenta) «Gemma María Gómez Cid - Cafetería Sirope», con dirección en Avenida
+   Francisco Aguirre 240, Talavera. Hay que comprobar cuál sale impresa en el ticket y dejar
+   la de la titular.
+3. **Mi cuenta de la dueña seguía diciendo «Conectada correctamente · última sincronización hace 6
+   min»** con la suscripción suspendida. Se comprueba que tras el corte ya no lo dice.
+
+### Para Sirope antes que nada
+- [ ] Aviso corto a la dueña (A7).
