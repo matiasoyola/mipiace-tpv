@@ -278,6 +278,17 @@ export function PlanResidentePage() {
         </div>
       </div>
 
+      {plan.lineas.length > 0 && (
+        // Una línea de «cada turno» cae en los tres grupos, así que la
+        // lista de abajo tiene más filas que líneas tiene el plan. Se dice
+        // en vez de dejar que alguien las cuente y crea que sobran:
+        // agrupar por turno es lo que la auxiliar de la tarde necesita, y
+        // no se va a cambiar por el recuento.
+        <p className="-mt-2 mb-3 text-[12.5px] text-slate-500">
+          Una línea que toca en varios turnos aparece en cada uno de ellos.
+        </p>
+      )}
+
       {plan.lineas.length === 0 && (
         <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-[13.5px] text-amber-900">
           Su plan está vacío. Si acaba de ingresar, puede que la plantilla de su
