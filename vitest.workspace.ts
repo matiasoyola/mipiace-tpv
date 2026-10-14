@@ -4,6 +4,7 @@ export default [
   "packages/consentimientos",
   "packages/escpos-builder",
   "packages/holded-client",
+  "packages/kitchen-lan",
   "packages/ticket-model",
   "packages/ticket-pdf",
   "packages/util-validation",

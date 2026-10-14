@@ -36,8 +36,26 @@ import {
   validateLocalProduct,
 } from "./local-product-rules.js";
 
-/** Las cinco columnas, en el orden del fichero de implantación. */
+/** Las cinco columnas OBLIGATORIAS, en el orden del fichero de implantación. */
 export const COLUMNAS = ["sku", "nombre", "precio_con_iva", "iva", "categoria"] as const;
+
+/**
+ * kds-1-cocina · la sexta columna, OPCIONAL.
+ *
+ *     sku,nombre,precio_con_iva,iva,categoria,alergenos
+ *     RAC-004,Patatas bravas,10.00,10,raciones,GL
+ *     DES-012,Croissant,2.50,10,desayunos,GL;HU;LA
+ *
+ * Opcional y no obligatoria porque los ficheros de implantación que ya
+ * existen —el de La Maestranza entre ellos— no la tienen, y un bloque que
+ * invalide los CSV de ayer obliga a rehacerlos antes de poder usar nada.
+ *
+ * Los códigos son los de dos letras del generador de cartas
+ * (`maestranza_carta.py`), separados por `;` como las categorías. Un
+ * código que no se reconoce **rechaza la fila**: ver `normalizeAllergens`
+ * en `local-product-rules.ts` para el porqué.
+ */
+export const COLUMNA_ALERGENOS = "alergenos";
 
 export interface FilaBuena {
   /** Número de línea en el fichero, contando la cabecera. Para que el
@@ -149,6 +167,8 @@ export function parseCatalogoCsv(texto: string): CsvParseResult {
   const col = Object.fromEntries(
     COLUMNAS.map((c) => [c, cabecera.indexOf(c)]),
   ) as Record<(typeof COLUMNAS)[number], number>;
+  // -1 si el fichero no la trae, que es el caso de los CSV de ayer.
+  const colAlergenos = cabecera.indexOf(COLUMNA_ALERGENOS);
 
   const buenas: FilaBuena[] = [];
   const malas: FilaMala[] = [];
@@ -220,12 +240,22 @@ export function parseCatalogoCsv(texto: string): CsvParseResult {
     // panel del propietario: el precio del fichero es BRUTO y entra como
     // `priceGross`, así que la conversión a neto la hace la regla y no
     // este parser.
+    // kds-1-cocina · los alérgenos, si el fichero los trae.
+    const alergenos =
+      colAlergenos >= 0
+        ? (campos[colAlergenos] ?? "")
+            .split(";")
+            .map((a) => a.trim())
+            .filter((a) => a.length > 0)
+        : [];
+
     const valid = validateLocalProduct({
       name: nombre,
       sku,
       priceGross: precio,
       taxRate: iva,
       tags: categorias,
+      allergens: alergenos,
     });
     if (!valid.ok) {
       malas.push({ linea, sku, nombre, motivo: valid.message });

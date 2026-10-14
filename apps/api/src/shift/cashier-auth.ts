@@ -204,12 +204,33 @@ export async function registerCashierAuthRoutes(
             id: true,
             name: true,
             numSerieHolded: true,
-            store: { select: { id: true, name: true } },
+            store: {
+              select: {
+                id: true,
+                name: true,
+                // kds-1-cocina · los ajustes de cocina de la tienda, para
+                // que el MODO PRUEBA pinte la cocina igual que un
+                // terminal de verdad. El modo prueba es con lo que se
+                // demuestra el producto: una demo sin la pantalla de
+                // comandas en una cuenta que la tiene es una demo que
+                // miente.
+                kitchenCourseMode: true,
+                kitchenSeatMode: true,
+                kitchenGreenMaxMin: true,
+                kitchenAmberMaxMin: true,
+                kitchenReadyBeep: true,
+              },
+            },
           },
         }),
         prisma.tenant.findUnique({
           where: { id: ctx.tid },
-          select: { id: true, name: true, cashierAutoLogoutMinutes: true },
+          select: {
+            id: true,
+            name: true,
+            cashierAutoLogoutMinutes: true,
+            kitchenDisplayEnabled: true,
+          },
         }),
         prisma.shift.findFirst({
           where: { registerId: ctx.rid, userId: ctx.sub, closedAt: null },
@@ -229,6 +250,7 @@ export async function registerCashierAuthRoutes(
           id: tenant.id,
           name: tenant.name,
           cashierAutoLogoutMinutes: tenant.cashierAutoLogoutMinutes,
+          kitchenDisplayEnabled: tenant.kitchenDisplayEnabled,
         },
         register: {
           id: register.id,
@@ -236,6 +258,17 @@ export async function registerCashierAuthRoutes(
           numSerieHolded: register.numSerieHolded,
         },
         store: { id: register.store.id, name: register.store.name },
+        // kds-1-cocina · `null` con el módulo apagado, igual que en
+        // `/devices/me`: lo que no se compró no llega a la pantalla.
+        kitchen: tenant.kitchenDisplayEnabled
+          ? {
+              courseMode: register.store.kitchenCourseMode,
+              seatMode: register.store.kitchenSeatMode,
+              greenMaxMin: register.store.kitchenGreenMaxMin,
+              amberMaxMin: register.store.kitchenAmberMaxMin,
+              readyBeep: register.store.kitchenReadyBeep,
+            }
+          : null,
         shift: shift
           ? {
               id: shift.id,

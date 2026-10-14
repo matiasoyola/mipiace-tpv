@@ -28,6 +28,17 @@ export interface CatalogProduct {
   // terminal que no ha refrescado todavía tiene fichas del contrato
   // anterior, y una ficha sin el campo es exactamente una ficha sujeta.
   exemptionCause?: CausaExencion | null;
+  // kds-1-cocina (decisión 3, capa 3) · los alérgenos del plato, de los 14
+  // del anexo II. **Opcional, y vacío NO significa «sin alérgenos»**:
+  // significa «no informado». Un terminal con el catálogo cacheado de
+  // antes de este bloque tiene fichas sin el campo, y la capa 3 se apaga
+  // sola para ellas — las capas 1 y 2 (la alergia de la mesa y la silla
+  // del plato) siguen avisando igual.
+  //
+  // Éste es el camino por el que el TPV puede avisar «¡Lleva gluten!» en
+  // el momento en que el camarero asigna las bravas a la silla de la
+  // celíaca, SIN BLOQUEAR: a veces la cocina tiene la versión sin gluten.
+  allergens?: string[];
   kind: "PRODUCT" | "SERVICE";
   // B-ProductImages: MIME del binario cacheado por el worker. Null si
   // Holded no expone imagen o si el worker aún no descargó. El TPV usa

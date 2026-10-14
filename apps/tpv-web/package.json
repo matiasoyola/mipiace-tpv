@@ -14,6 +14,7 @@
     "@mipiacetpv/clinica-valoracion": "workspace:*",
     "@mipiacetpv/consentimientos": "workspace:*",
     "@mipiacetpv/escpos-builder": "workspace:*",
+    "@mipiacetpv/kitchen-lan": "workspace:*",
     "@mipiacetpv/ticket-model": "workspace:*",
     "@mipiacetpv/verifactu": "workspace:*",
     "@mipiacetpv/ticket-pdf": "workspace:*",

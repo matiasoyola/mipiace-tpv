@@ -1,0 +1,288 @@
+=== 1 · quitar el descarte por id (sobre.ts) ===
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL |@mipiacetpv/kitchen-lan|  test/sobre.test.ts > kds-2 · SABOTAJE · lo que el que recibe tiene que rechazar > el mismo opId dos veces → REPETIDO (es el descarte del doble camino)
+AssertionError: expected { ok: true, …(2) } to deeply equal { ok: false, motivo: 'REPETIDO' }
+
+- Expected
++ Received
+
+  Object {
+-   "motivo": "REPETIDO",
+
+=== 2 · aceptar un mensaje sin firma o con la clave de otra tienda ===
+ FAIL |tpv-web|  apps/tpv-web/test/kds-2-wifi-tpv.test.ts > kds-2 · el sobre que sale del TPV > SABOTAJE · con la clave de OTRA tienda no se abre
+AssertionError: expected { ok: true, …(2) } to deeply equal { ok: false, motivo: 'FIRMA' }
+
+- Expected
++ Received
+
+--
+ FAIL |@mipiacetpv/kitchen-lan|  test/sobre.test.ts > kds-2 · SABOTAJE · lo que el que recibe tiene que rechazar > un cuerpo sin firma (ct tocado) → FIRMA
+AssertionError: expected { ok: true, …(2) } to deeply equal { ok: false, motivo: 'FIRMA' }
+
+- Expected
++ Received
+
+--
+ FAIL |@mipiacetpv/kitchen-lan|  test/sobre.test.ts > kds-2 · SABOTAJE · lo que el que recibe tiene que rechazar > la clave de OTRA tienda → FIRMA, y no se descifra nada
+AssertionError: expected { ok: true, …(2) } to deeply equal { ok: false, motivo: 'FIRMA' }
+
+- Expected
++ Received
+
+
+=== 3 · aceptar un mensaje firmado de hace 10 min ===
+ FAIL |@mipiacetpv/kitchen-lan|  test/sobre.test.ts > kds-2 · SABOTAJE · lo que el que recibe tiene que rechazar > firmado hace 10 min → VIEJO
+AssertionError: expected { ok: true, …(2) } to deeply equal { ok: false, motivo: 'VIEJO' }
+
+- Expected
++ Received
+
+--
+ FAIL |@mipiacetpv/kitchen-lan|  test/sobre.test.ts > kds-2 · SABOTAJE · lo que el que recibe tiene que rechazar > y el filo de la ventana es simétrico: también se rechaza el del futuro
+AssertionError: expected { ok: true, …(2) } to deeply equal { ok: false, motivo: 'VIEJO' }
+
+- Expected
++ Received
+
+
+=== 4a · abrir el servidor local sin clave de tienda (front) ===
+ FAIL |tpv-web|  apps/tpv-web/test/kds-2-wifi-pantalla.test.tsx > kds-2 · la pantalla abre el servidor local > SABOTAJE · sin clave de tienda NO abre ningún puerto
+AssertionError: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+
+=== 4b · quitar el CHECK devices_kitchen_lan_solo_cocina (el motor) ===
+ FAIL |@mipiacetpv/api|  test/kds-2-migracion.test.ts > kds-2 · UN TERMINAL NO ESCUCHA EN NINGÚN PUERTO > el CHECK `devices_kitchen_lan_solo_cocina` existe
+AssertionError: expected '\nALTER TABLE "stores"\n    ADD COLUM…' to contain 'devices_kitchen_lan_solo_cocina'
+
+- Expected
++ Received
+
+--
+ FAIL |@mipiacetpv/api|  test/kds-2-migracion.test.ts > kds-2 · UN TERMINAL NO ESCUCHA EN NINGÚN PUERTO > y tapa LAS TRES columnas, no sólo el puerto
+AssertionError: expected '' to contain '"kitchen_lan_ip" IS NULL'
+
+- Expected
++ Received
+
+ FAIL |api-e2e|  test-e2e/kds-2-wifi.e2e.ts > e2e · kds-2 · el camino directo, contra Postgres > SABOTAJE · abrir el servidor local en un TERMINAL > y el TERMINAL no, ni escribiéndolo A MANO en la base
+AssertionError: promise resolved "1" instead of rejecting
+
+- Expected: 
+[Error: rejected promise]
+
++ Received: 
+--
+ FAIL |api-e2e|  test-e2e/kds-2-wifi.e2e.ts > e2e · kds-2 · el camino directo, contra Postgres > SABOTAJE · abrir el servidor local en un TERMINAL > ni sólo el puerto, ni sólo la hora
+AssertionError: promise resolved "1" instead of rejecting
+
+- Expected: 
+[Error: rejected promise]
+
++ Received: 
+
+=== 5 · sin internet, el TPV no manda por la wifi ===
+ FAIL |tpv-web|  apps/tpv-web/test/kds-2-wifi-tpv.test.ts > kds-2 · el sobre que sale del TPV > va firmado con la clave de la tienda y lo abre quien la tiene
+AssertionError: expected [] to have a length of 1 but got +0
+
+- Expected
++ Received
+
+--
+ FAIL |tpv-web|  apps/tpv-web/test/kds-2-wifi-tpv.test.ts > kds-2 · el sobre que sale del TPV > SABOTAJE · con la clave de OTRA tienda no se abre
+TypeError: Cannot read properties of undefined (reading 'sobre')
+ ❯ apps/tpv-web/test/kds-2-wifi-tpv.test.ts:185:39
+    183|       payload: {},
+    184|     });
+    185|     const sobre = plugin.llamadas[0]!.sobre;
+--
+ FAIL |tpv-web|  apps/tpv-web/test/kds-2-wifi-tpv.test.ts > kds-2 · el sobre que sale del TPV > un 200 cuenta como entregado, también el «ya lo tenía»
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+
+=== 6a · quitar el descarte de la tarjeta ya subida (la pantalla) ===
+ FAIL |tpv-web|  apps/tpv-web/test/kds-2-wifi-pantalla.test.tsx > kds-2 · SABOTAJE · al volver internet, duplicar > la tarjeta de la wifi se suelta cuando el servidor trae la suya
+AssertionError: expected [ { id: 'lan:x:COCINA', …(16) } ] to deeply equal []
+
+- Expected
++ Received
+
+- Array []
++ Array [
+--
+ FAIL |tpv-web|  apps/tpv-web/test/kds-2-wifi-pantalla.test.tsx > kds-2 · SABOTAJE · al volver internet, duplicar > una tarjeta de la wifi ya SERVIDA no vuelve a la pantalla
+AssertionError: expected [ { id: 'lan:x:COCINA', …(16) } ] to deeply equal []
+
+- Expected
++ Received
+
+- Array []
++ Array [
+
+=== 6b · quitar la idempotencia del libro de marcas (el servidor) ===
+ FAIL |@mipiacetpv/api|  test/kds-2-lan-servidor.test.ts > kds-2 · AL VOLVER INTERNET, SIN DUPLICAR > los tachados de la tablet suben con SU hora y una sola vez
+AssertionError: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
+
+=== 7 · pisar la hora de cocina con la del servidor en un tachado ===
+ FAIL |@mipiacetpv/api|  test/kds-2-lan-servidor.test.ts > kds-2 · AL VOLVER INTERNET, SIN DUPLICAR > los tachados de la tablet suben con SU hora y una sola vez
+AssertionError: expected '2026-10-08T23:31:04.549Z' to be '2026-10-09T13:05:00.000Z' // Object.is equality
+
+Expected: "2026-10-09T13:05:00.000Z"
+Received: "2026-10-08T23:31:04.549Z"
+
+ ❯ test/kds-2-lan-servidor.test.ts:355:41
+    353| 
+--
+ FAIL |@mipiacetpv/api|  test/kds-2-lan-servidor.test.ts > kds-2 · QUIÉN MANDA EN CADA ESTADO > SABOTAJE · la hora del TPV no pisa la de cocina en un tachado
+AssertionError: expected '2026-10-08T23:31:04.661Z' to be '2026-10-09T13:05:00.000Z' // Object.is equality
+
+Expected: "2026-10-09T13:05:00.000Z"
+Received: "2026-10-08T23:31:04.661Z"
+
+ ❯ test/kds-2-lan-servidor.test.ts:447:41
+    445|     expect(anulado.statusCode).toBe(200);
+
+=== 8 · papel con la wifi funcionando (useCaminoDirecto) ===
+El test de la regla (la resta) vive en kds-2-wifi-tpv.test.ts y es PURO, así que
+este sabotaje NO lo pone rojo: lo que se sabotea es la línea, no la regla.
+      Tests  25 passed (25)
+
+=== 8 (SEGUNDA PASADA, tras extraer saleElPapel) ===
+ FAIL |tpv-web|  apps/tpv-web/test/kds-2-wifi-tpv.test.ts > kds-2 · SABOTAJE · papel con la wifi funcionando > sin internet pero con wifi, NO sale papel
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+
+=== 9 · pantalla roja con la wifi funcionando ===
+ FAIL |tpv-web|  apps/tpv-web/test/kds-2-wifi-pantalla.test.tsx > kds-2 · SABOTAJE · sin internet, la comanda llega por la wifi > se pinta con su mesa, su alergia y su silla, y la pantalla NO se pone roja
+AssertionError: expected <div …(3)>…(2)</div> to be null
+
+- Expected: 
+null
+
++ Received: 
+
+=== 9b · quitar la franja ámbar «recibiendo por la wifi del local» ===
+ FAIL |tpv-web|  apps/tpv-web/test/kds-2-wifi-pantalla.test.tsx > kds-2 · SABOTAJE · sin internet, la comanda llega por la wifi > se pinta con su mesa, su alergia y su silla, y la pantalla NO se pone roja
+AssertionError: expected null not to be null
+ ❯ apps/tpv-web/test/kds-2-wifi-pantalla.test.tsx:329:24
+    327|     expect($('[data-testid="kds-sin-conexion"]')).toBeNull();
+    328|     const franja = $('[data-testid="kds-solo-wifi"]');
+    329|     expect(franja).not.toBeNull();
+       |                        ^
+--
+ FAIL |tpv-web|  apps/tpv-web/test/kds-2-wifi-pantalla.test.tsx > kds-2 · el libro de marcas > un tachado sin red se guarda con la hora de la tablet y se sube al volver
+TypeError: Cannot read properties of null (reading 'textContent')
+ ❯ apps/tpv-web/test/kds-2-wifi-pantalla.test.tsx:440:53
+    438|     // La franja dice cuántas quedan por subir: el cocinero tiene que …
+
+=== 10 · la IP de la tablet cambia sin internet y no se redescubre ===
+ FAIL |tpv-web|  apps/tpv-web/test/kds-2-wifi-tpv.test.ts > kds-2 · SABOTAJE · la IP de la tablet cambia sin internet > redescubre en la red del local y la comanda llega
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
+
+=== 11 · clave sin rotar al revocar un aparato (quitar el trigger) ===
+ FAIL |@mipiacetpv/api|  test/kds-2-migracion.test.ts > kds-2 · LA CLAVE SE ROTA AL REVOCAR, en el motor > el trigger existe y cuelga de `devices`
+AssertionError: expected '\nALTER TABLE "stores"\n    ADD COLUM…' to contain 'CREATE TRIGGER "stores_rotate_lan_key"'
+
+- Expected
++ Received
+
+--
+ FAIL |@mipiacetpv/api|  test/kds-2-migracion.test.ts > kds-2 · LA CLAVE SE ROTA AL REVOCAR, en el motor > sólo en la transición de vivo a revocado
+AssertionError: expected '\nALTER TABLE "stores"\n    ADD COLUM…' to match /WHEN \(OLD\."revoked_at" IS NULL AND …/
+
+- Expected: 
+/WHEN \(OLD\."revoked_at" IS NULL AND NEW\."revoked_at" IS NOT NULL\)/
+
+ FAIL |api-e2e|  test-e2e/kds-2-wifi.e2e.ts > e2e · kds-2 · el camino directo, contra Postgres > SABOTAJE · clave sin rotar al revocar un aparato > REVOCAR un aparato la borra: lo hace el TRIGGER, no la ruta
+AssertionError: expected 'dFtsPNuvXTfejrCNyWbdeaugMxzkrjH_iwqR_…' to be null
+
+- Expected: 
+null
+
++ Received: 
+"dFtsPNuvXTfejrCNyWbdeaugMxzkrjH_iwqR_1kJEXk"
+
+=== 12 · aceptar en el libro una marca que no es de cocina ===
+      Tests  33 passed (33)
+(verde: el esquema de la ruta se relaja pero el CHECK del motor sigue; su rojo es el e2e)
+
+=== 12 (SEGUNDA PASADA, tras pinchar el enum de la ruta) ===
+ FAIL |@mipiacetpv/api|  test/kds-2-lan-servidor.test.ts > kds-2 · el libro sólo acepta marcas DE COCINA > un `kind` que no es de cocina se rechaza en el esquema de la ruta
+AssertionError: expected 200 to be 400 // Object.is equality
+
+- Expected
++ Received
+
+
+=== 13 · la comanda y la alergia viajan EN CLARO por la wifi del bar ===
+ FAIL |tpv-web|  apps/tpv-web/test/kds-2-wifi-tpv.test.ts > kds-2 · el sobre que sale del TPV > va firmado con la clave de la tienda y lo abre quien la tiene
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
+--
+ FAIL |tpv-web|  apps/tpv-web/test/kds-2-wifi-tpv.test.ts > kds-2 · «Probar conexión directa con cocina» > en verde dice los milisegundos
+AssertionError: expected 'ROJO' to be 'VERDE' // Object.is equality
+
+Expected: "VERDE"
+Received: "ROJO"
+
+ ❯ apps/tpv-web/test/kds-2-wifi-tpv.test.ts:298:25
+--
+
+=== 14 · la pantalla no vacía la cola de la pieza nativa ===
+ FAIL |tpv-web|  apps/tpv-web/test/kds-2-wifi-pantalla.test.tsx > kds-2 · SABOTAJE · sin internet, la comanda llega por la wifi > se pinta con su mesa, su alergia y su silla, y la pantalla NO se pone roja
+AssertionError: expected null not to be null
+ ❯ apps/tpv-web/test/kds-2-wifi-pantalla.test.tsx:320:25
+    318| 
+    319|     const tarjeta = $('[data-testid="kds-comanda"]');
+    320|     expect(tarjeta).not.toBeNull();
+       |                         ^
+--
+ FAIL |tpv-web|  apps/tpv-web/test/kds-2-wifi-pantalla.test.tsx > kds-2 · SABOTAJE · al volver internet, duplicar > en pantalla, mientras la nube no contesta, hay UNA sola tarjeta
+AssertionError: expected [] to have a length of 1 but got +0
+
+- Expected
++ Received
+
+
+=== 13 (el mensaje de kitchen-lan, que quedó cortado) ===
+ FAIL |@mipiacetpv/kitchen-lan|  test/sobre.test.ts > kds-2 · ida y vuelta > lo que se cierra se abre
+AssertionError: expected false to be 'cocina' // Object.is equality
+
+- Expected: 
+"cocina"
+
++ Received: 
+--
+
+=== 15 · el libro de marcas no sobrevive a un reinicio de la tablet ===
+ FAIL |tpv-web|  apps/tpv-web/test/kds-2-wifi-pantalla.test.tsx > kds-2 · el libro de marcas > un tachado sin red se guarda con la hora de la tablet y se sube al volver
+AssertionError: expected [] to have a length of 1 but got +0
+
+- Expected
++ Received
+
+- 1

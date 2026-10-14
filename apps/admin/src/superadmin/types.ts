@@ -92,6 +92,21 @@ export interface TenantModules {
   agenda: boolean;
 }
 
+/**
+ * kds-1-cocina · el módulo «Cocina» NO está en `TenantModules`, y es a
+ * propósito.
+ *
+ * `TenantModules` es el conjunto que cuenta para el invariante «una
+ * empresa conserva al menos un módulo encendido» del PATCH. La cocina no
+ * sostiene a una empresa por sí sola: es un añadido a la caja que se cobra
+ * por pantalla, igual que `holdedEnabled` no es un módulo. Metido ahí,
+ * una empresa podría quedarse «sólo con cocina».
+ *
+ * Viaja plano en la respuesta (`kitchenDisplayEnabled`), como
+ * `holdedEnabled`.
+ */
+export type KitchenDisplayEnabled = boolean;
+
 // H1 (ADR-016) · de qué depende un check. `always` vale para cualquier
 // empresa; `caja` y `holded` sólo cuando el tenant los tiene.
 export type CheckRequirement = "always" | "caja" | "holded";
@@ -168,6 +183,8 @@ export interface TenantDetail {
   holdedAccountId: string | null;
   initialSyncStatus: string;
   modules: TenantModules;
+  /** kds-1-cocina · el módulo «Cocina». Fuera de `modules`, ver arriba. */
+  kitchenDisplayEnabled?: boolean;
   lastIncrementalSyncAt: string | null;
   createdAt: string;
   blockedAt: string | null;

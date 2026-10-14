@@ -347,6 +347,13 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
           // distinto — sólo el segundo tiene devoluciones que llevar a mano
           // al asesor, y sólo a él se le enseña esa pantalla.
           holdedDisconnectedAt: tenant.holdedDisconnectedAt?.toISOString() ?? null,
+          // kds-1-cocina · el VERTICAL del negocio. El panel lo necesita
+          // para pintar los alérgenos en la ficha del producto SÓLO en
+          // hostelería: en una peluquería o una papelería, catorce
+          // casillas de alérgenos son catorce casillas de ruido.
+          //
+          // Es sólo lectura y lo mueve el super-admin, como `cajaEnabled`.
+          businessType: tenant.businessType,
           initialSyncStatus: tenant.initialSyncStatus,
           fiscalProfile: tenant.fiscalProfile ?? null,
           lastIncrementalSyncAt: tenant.lastIncrementalSyncAt?.toISOString() ?? null,

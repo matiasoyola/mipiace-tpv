@@ -12,6 +12,7 @@ import { api, ApiError, clearTokens, readCurrentRole } from "../api.js";
 import { useCajaEnabled } from "../CajaGate.js";
 import { AbandonedTablesSection } from "./StoreDetailPage.abandonedTables.js";
 import { TablesSection } from "./StoreDetailPage.tables.js";
+import { KitchenSection } from "./StoreDetailPage.kitchen.js";
 import { TicketDeliverySection } from "./StoreDetailPage.ticketDelivery.js";
 import {
   CenteredLoader,
@@ -431,6 +432,9 @@ export function StoreDetailPage() {
           <AbandonedTablesSection storeId={store.id} role={readCurrentRole()} />
           <TablesSection storeId={store.id} role={readCurrentRole()} />
           <TicketDeliverySection storeId={store.id} role={readCurrentRole()} />
+          {/* kds-1-cocina · los ajustes de cocina de ESTE restaurante. Con
+              el módulo apagado la sección no se pinta sola. */}
+          <KitchenSection storeId={store.id} role={readCurrentRole()} />
         </>
       )}
 

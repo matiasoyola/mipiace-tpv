@@ -121,6 +121,60 @@ export type StoreEvent =
       sections: Array<{ section: "BARRA" | "COCINA" | "SALON"; lineCount: number }>;
       byEmail: string;
       at: string;
+    
+    }
+  // kds-1-cocina · los siete avisos de cocina. Espejo de
+  // `apps/api/src/realtime/store-events.ts`, mantenido a mano como el
+  // resto de este tipo.
+  //
+  // El TPV sólo usa de verdad tres: `order_ready` y `order_served` —que
+  // levantan y apagan la banda «M4 · listo para servir» y la etiqueta
+  // verde de la sala— y `order_created`, para refrescar el estado de la
+  // mesa abierta. Los otros cuatro están tipados porque LLEGAN: un
+  // `default` que no los conozca es un `console.warn` por evento en una
+  // cocina con servicio.
+  | {
+      type: "kitchen.order_created";
+      orderId: string;
+      section: "BARRA" | "COCINA" | "SALON";
+      ticketId: string;
+      tableId: string | null;
+      tableName: string | null;
+      number: number;
+      urgent: boolean;
+      at: string;
+    }
+  | {
+      type: "kitchen.line_voided";
+      ticketId: string;
+      ticketLineId: string;
+      orderIds: string[];
+      at: string;
+    }
+  | { type: "kitchen.course_fired"; ticketId: string; course: number; at: string }
+  | { type: "kitchen.order_urgent"; orderId: string; urgent: boolean; at: string }
+  | {
+      type: "kitchen.line_done";
+      orderId: string;
+      lineId: string;
+      done: boolean;
+      at: string;
+    }
+  | {
+      type: "kitchen.order_ready";
+      orderId: string;
+      ticketId: string;
+      tableId: string | null;
+      tableName: string | null;
+      section: "BARRA" | "COCINA" | "SALON";
+      at: string;
+    }
+  | {
+      type: "kitchen.order_served";
+      orderId: string;
+      ticketId: string;
+      tableId: string | null;
+      at: string;
     };
 
 export type StreamStatus = "connecting" | "open" | "degraded";

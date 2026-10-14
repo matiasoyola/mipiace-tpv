@@ -31,6 +31,21 @@ export interface ServerDraftLine {
   // B-Bar-Modifiers ({groupId, groupName, modifierId, label,
   // priceDeltaCents}). Discriminamos por tipo de elemento.
   modifiers: unknown[] | null;
+  // ── kds-1-cocina ──────────────────────────────────────────────────
+  // El tiempo y la silla de la línea, y los alérgenos de su producto.
+  //
+  // Los tres van EN EL DRAFT porque el TPV reconstruye el carrito desde
+  // esta respuesta en cada mutación: sin ellos, asignar una silla o pulsar
+  // «Espera» se perdería en el primer viaje de ida y vuelta, y el aviso
+  // «¡Lleva gluten!» dejaría de salir en silencio — que es lo peor que le
+  // puede pasar a un aviso de alergia.
+  //
+  // Opcionales porque un cliente viejo o un banco de pruebas que construya
+  // el DRAFT a mano siguen valiendo: sin `course` es tiempo 1, sin `seat`
+  // es «para la mesa» y sin `allergens` es «no informado».
+  course?: number;
+  seat?: number | null;
+  product?: { allergens: string[] } | null;
 }
 
 export interface ServerDraft {
@@ -91,6 +106,7 @@ export function mapServerLineToCartLine(l: ServerDraftLine): CartLine {
     taxRate,
     modifiers: legacy,
     modifierSelections: structured.length > 0 ? structured : undefined,
+    allergens: l.product?.allergens,
   };
 }
 

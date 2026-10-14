@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@mipiacetpv/ticket-model": "workspace:*",
     "@sentry/react": "^10.57.0",
     "exceljs": "^4.4.0",
     "lucide-react": "^1.14.0",

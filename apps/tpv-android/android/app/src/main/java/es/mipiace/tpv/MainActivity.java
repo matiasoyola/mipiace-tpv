@@ -38,6 +38,12 @@ public class MainActivity extends BridgeActivity {
         // A5 · lo que el terminal sabe de sí mismo y el WebView no: red, IP
         // local, arranque, y la captura de su propia ventana.
         registerPlugin(SupportAgentPlugin.class);
+        // kds-2-wifi · el camino directo por la wifi del local. Los dos
+        // papeles en el mismo plugin porque es la MISMA APK: la tablet de
+        // cocina abre el servidor local y el terminal de caja manda por él.
+        // Registrarlo NO abre ningún puerto: el servidor sólo arranca cuando
+        // el JS de la pantalla de cocina lo pide con la clave de la tienda.
+        registerPlugin(KitchenLanPlugin.class);
         super.onCreate(savedInstanceState);
     }
 

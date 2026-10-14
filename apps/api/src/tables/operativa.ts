@@ -824,7 +824,17 @@ async function ensureTableContext(
 }
 
 const DRAFT_INCLUDE = {
-  lines: true,
+  // kds-1-cocina · `include: true` trae ya `course`, `seat` y `sentUnits`
+  // sin tocar nada. Lo que hay que añadir a mano son los ALÉRGENOS DEL
+  // PRODUCTO, que no están en la línea sino en su ficha.
+  //
+  // Por qué hacen falta aquí: el TPV reconstruye el carrito desde esta
+  // respuesta en cada mutación (`mapServerDraftLines`). Sin los alérgenos
+  // en el DRAFT, una línea perdería los suyos en el primer viaje de ida y
+  // vuelta y el aviso «¡Lleva gluten!» al asignar la silla dejaría de
+  // salir — en silencio, que es lo peor que le puede pasar a un aviso de
+  // alergia.
+  lines: { include: { product: { select: { allergens: true } } } },
   table: { select: { id: true, name: true, zone: true, capacity: true } },
 } as const;
 

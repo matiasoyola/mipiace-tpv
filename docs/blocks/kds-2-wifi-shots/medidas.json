@@ -1,0 +1,44 @@
+{
+  "cocina-solo-wifi-1280x800": {
+    "franjaAmbar": {
+      "w": 1280,
+      "h": 44,
+      "y": 0,
+      "fontSize": "18px",
+      "background": "rgb(138, 100, 16)",
+      "texto": "Sin internet · recibiendo por la wifi del local"
+    },
+    "pantallaRoja": null,
+    "pastilla": {
+      "w": 129.2,
+      "h": 36,
+      "y": 56,
+      "fontSize": "15px",
+      "background": "rgb(138, 100, 16)",
+      "texto": "POR LA WIFI"
+    },
+    "tarjetasEnDom": 1,
+    "desplaza": false
+  },
+  "cocina-ni-wifi-1280x800": {
+    "franjaAmbar": null,
+    "pantallaRoja": {
+      "w": 1280,
+      "h": 800,
+      "y": 0,
+      "fontSize": "16px",
+      "background": "rgb(142, 29, 17)",
+      "texto": "SIN CONEXIÓNlas comandas no llegan"
+    },
+    "pastilla": {
+      "w": 147.6,
+      "h": 36,
+      "y": 12,
+      "fontSize": "15px",
+      "background": "rgb(142, 29, 17)",
+      "texto": "SIN CONEXIÓN"
+    },
+    "tarjetasEnDom": 0,
+    "desplaza": false
+  }
+}

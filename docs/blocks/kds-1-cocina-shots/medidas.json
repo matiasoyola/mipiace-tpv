@@ -1,0 +1,1078 @@
+{
+  "cocina-1280x800": {
+    "barra": {
+      "w": 1280,
+      "h": 60,
+      "x": 0,
+      "y": 0,
+      "fontSize": "16px",
+      "background": "rgba(0, 0, 0, 0)",
+      "animationDuration": "0s"
+    },
+    "zona": {
+      "w": 1060,
+      "h": 740,
+      "x": 0,
+      "y": 60,
+      "fontSize": "16px",
+      "background": "rgba(0, 0, 0, 0)",
+      "animationDuration": "0s"
+    },
+    "columnaListas": {
+      "w": 160,
+      "h": 740,
+      "x": 1120,
+      "y": 60,
+      "fontSize": "16px",
+      "background": "rgb(23, 26, 31)",
+      "animationDuration": "0s"
+    },
+    "tarjetasEnDom": 6,
+    "tarjetasQueCaben": 6,
+    "tarjetasCortadas": 0,
+    "ordenQueMandaElBanco": [
+      {
+        "mesa": "T4",
+        "urgente": "1",
+        "minutos": 2
+      },
+      {
+        "mesa": "M5",
+        "urgente": "0",
+        "minutos": 7
+      },
+      {
+        "mesa": "M1",
+        "urgente": "0",
+        "minutos": 4
+      },
+      {
+        "mesa": "M2",
+        "urgente": "0",
+        "minutos": 14
+      },
+      {
+        "mesa": "M4",
+        "urgente": "0",
+        "minutos": 26
+      },
+      {
+        "mesa": "T2",
+        "urgente": "0",
+        "minutos": 9
+      },
+      {
+        "mesa": "M6",
+        "urgente": "0",
+        "minutos": 11
+      },
+      {
+        "mesa": "B1",
+        "urgente": "0",
+        "minutos": 3
+      },
+      {
+        "mesa": "B3",
+        "urgente": "0",
+        "minutos": 1
+      },
+      {
+        "mesa": "T1",
+        "urgente": "0",
+        "minutos": 6
+      },
+      {
+        "mesa": "M7",
+        "urgente": "0",
+        "minutos": 8
+      }
+    ],
+    "ordenDelDom": [
+      {
+        "mesa": "o-t4",
+        "urgente": "1",
+        "tono": "verde",
+        "minutos": "2 min"
+      },
+      {
+        "mesa": "o-m4",
+        "urgente": "0",
+        "tono": "rojo",
+        "minutos": "26 min"
+      },
+      {
+        "mesa": "o-m2",
+        "urgente": "0",
+        "tono": "ambar",
+        "minutos": "14 min"
+      },
+      {
+        "mesa": "o-m6",
+        "urgente": "0",
+        "tono": "ambar",
+        "minutos": "11 min"
+      },
+      {
+        "mesa": "o-t2",
+        "urgente": "0",
+        "tono": "verde",
+        "minutos": "9 min"
+      },
+      {
+        "mesa": "o-m7",
+        "urgente": "0",
+        "tono": "verde",
+        "minutos": "8 min"
+      }
+    ],
+    "mesasOcultas": "M5T1M1…",
+    "colorDeLaFranja": "verde",
+    "tarjeta": {
+      "w": 251.5,
+      "h": 327.9,
+      "x": 12,
+      "y": 72,
+      "fontSize": "16px",
+      "background": "rgb(38, 43, 52)",
+      "animationDuration": "2.5s"
+    },
+    "cuerposDeTarjeta": [
+      {
+        "id": "o-t4",
+        "urgente": true,
+        "bandas": 0,
+        "fondo": "rgb(26, 29, 35)",
+        "pulso": "kds-pulso-tarjeta"
+      },
+      {
+        "id": "o-m4",
+        "urgente": false,
+        "bandas": 0,
+        "fondo": "rgb(26, 29, 35)",
+        "pulso": null
+      },
+      {
+        "id": "o-m2",
+        "urgente": false,
+        "bandas": 0,
+        "fondo": "rgb(26, 29, 35)",
+        "pulso": null
+      },
+      {
+        "id": "o-m6",
+        "urgente": false,
+        "bandas": 0,
+        "fondo": "rgb(26, 29, 35)",
+        "pulso": null
+      },
+      {
+        "id": "o-t2",
+        "urgente": false,
+        "bandas": 0,
+        "fondo": "rgb(26, 29, 35)",
+        "pulso": null
+      },
+      {
+        "id": "o-m7",
+        "urgente": false,
+        "bandas": 0,
+        "fondo": "rgb(26, 29, 35)",
+        "pulso": null
+      }
+    ],
+    "franjaAlergiaTitulo": null,
+    "franjaAlergiaAlergeno": null,
+    "tarjetasEnPrimeraFila": 4,
+    "filas": {
+      "filas": [
+        {
+          "mesas": [
+            "o-t4",
+            "o-m4",
+            "o-m2",
+            "o-m6"
+          ],
+          "alto": 327.9
+        },
+        {
+          "mesas": [
+            "o-t2",
+            "o-m7"
+          ],
+          "alto": 321
+        }
+      ],
+      "huecoDebajo": 57.1
+    },
+    "masNColor": {
+      "estado": "verde",
+      "fondo": "rgb(26, 29, 35)",
+      "pulso": "kds-pulso-nueva"
+    },
+    "hora": "23:20",
+    "listaItemTexto": "M3esperando · 2 min",
+    "cabecera": {
+      "w": 251.5,
+      "h": 54,
+      "x": 12,
+      "y": 124,
+      "fontSize": "16px",
+      "background": "rgb(143, 217, 168)",
+      "animationDuration": "0s"
+    },
+    "mesa": {
+      "w": 39,
+      "h": 34,
+      "x": 26,
+      "y": 134,
+      "fontSize": "16px",
+      "background": "rgba(0, 0, 0, 0)",
+      "animationDuration": "0s"
+    },
+    "franjaUrgente": {
+      "w": 251.5,
+      "h": 52,
+      "x": 12,
+      "y": 72,
+      "fontSize": "26px",
+      "background": "rgb(200, 16, 46)",
+      "animationDuration": "0s"
+    },
+    "franjaAlergia": null,
+    "silla": null,
+    "lleva": null,
+    "linea": {
+      "w": 223.5,
+      "h": 56,
+      "x": 26,
+      "y": 188,
+      "fontSize": "16px",
+      "background": "rgba(0, 0, 0, 0)",
+      "animationDuration": "0s"
+    },
+    "nota": {
+      "w": 183.5,
+      "h": 25.5,
+      "x": 66,
+      "y": 286,
+      "fontSize": "17px",
+      "background": "rgba(0, 0, 0, 0)",
+      "animationDuration": "0s"
+    },
+    "notaColor": {
+      "fontSize": "17px",
+      "color": "rgb(246, 207, 122)",
+      "fontWeight": "600"
+    },
+    "lista": {
+      "w": 223.5,
+      "h": 56,
+      "x": 26,
+      "y": 330,
+      "fontSize": "22px",
+      "background": "rgb(44, 49, 58)",
+      "animationDuration": "0s"
+    },
+    "visto": {
+      "w": 64.4,
+      "h": 44,
+      "x": 441,
+      "y": 170,
+      "fontSize": "16px",
+      "background": "rgb(241, 243, 245)",
+      "animationDuration": "0s"
+    },
+    "masN": {
+      "w": 60,
+      "h": 740,
+      "x": 1060,
+      "y": 60,
+      "fontSize": "16px",
+      "background": "rgb(42, 68, 53)",
+      "animationDuration": "2.5s"
+    },
+    "masNTexto": "+5nuevasM5T1M1…",
+    "alturasReales": [
+      {
+        "id": "o-t4",
+        "alto": 327.9,
+        "lineas": 2,
+        "notas": 1,
+        "bandas": 0,
+        "urgente": true,
+        "sillas": 0,
+        "avisos": 0,
+        "anulados": 0,
+        "espera": 0,
+        "eyebrow": 0,
+        "platos": [
+          {
+            "name": "Croquetas",
+            "notes": 0,
+            "carries": 0,
+            "seat": false,
+            "lleva": false,
+            "anulado": false,
+            "espera": false
+          },
+          {
+            "name": "Calamares",
+            "notes": 1,
+            "carries": 0,
+            "seat": false,
+            "lleva": false,
+            "anulado": false,
+            "espera": false
+          }
+        ]
+      },
+      {
+        "id": "o-m4",
+        "alto": 295.9,
+        "lineas": 2,
+        "notas": 0,
+        "bandas": 0,
+        "urgente": false,
+        "sillas": 0,
+        "avisos": 0,
+        "anulados": 1,
+        "espera": 0,
+        "eyebrow": 1,
+        "platos": [
+          {
+            "name": "Croquetas",
+            "notes": 0,
+            "carries": 0,
+            "seat": false,
+            "lleva": false,
+            "anulado": true,
+            "espera": false
+          },
+          {
+            "name": "Alitas de pollo",
+            "notes": 0,
+            "carries": 0,
+            "seat": false,
+            "lleva": false,
+            "anulado": false,
+            "espera": false
+          }
+        ]
+      },
+      {
+        "id": "o-m2",
+        "alto": 275.9,
+        "lineas": 2,
+        "notas": 1,
+        "bandas": 0,
+        "urgente": false,
+        "sillas": 0,
+        "avisos": 0,
+        "anulados": 0,
+        "espera": 0,
+        "eyebrow": 0,
+        "platos": [
+          {
+            "name": "Calamares",
+            "notes": 1,
+            "carries": 0,
+            "seat": false,
+            "lleva": false,
+            "anulado": false,
+            "espera": false
+          },
+          {
+            "name": "Chopitos",
+            "notes": 0,
+            "carries": 0,
+            "seat": false,
+            "lleva": false,
+            "anulado": false,
+            "espera": false
+          }
+        ]
+      },
+      {
+        "id": "o-m6",
+        "alto": 240.3,
+        "lineas": 1,
+        "notas": 1,
+        "bandas": 0,
+        "urgente": false,
+        "sillas": 0,
+        "avisos": 0,
+        "anulados": 0,
+        "espera": 0,
+        "eyebrow": 0,
+        "platos": [
+          {
+            "name": "Hamburguesa especial",
+            "notes": 1,
+            "carries": 0,
+            "seat": false,
+            "lleva": false,
+            "anulado": false,
+            "espera": false
+          }
+        ]
+      },
+      {
+        "id": "o-t2",
+        "alto": 321,
+        "lineas": 2,
+        "notas": 0,
+        "bandas": 0,
+        "urgente": false,
+        "sillas": 0,
+        "avisos": 0,
+        "anulados": 0,
+        "espera": 1,
+        "eyebrow": 0,
+        "platos": [
+          {
+            "name": "Patatas alioli",
+            "notes": 0,
+            "carries": 0,
+            "seat": false,
+            "lleva": false,
+            "anulado": false,
+            "espera": false
+          },
+          {
+            "name": "Filete de ternera",
+            "notes": 0,
+            "carries": 0,
+            "seat": false,
+            "lleva": false,
+            "anulado": false,
+            "espera": true
+          }
+        ]
+      },
+      {
+        "id": "o-m7",
+        "alto": 200,
+        "lineas": 1,
+        "notas": 0,
+        "bandas": 0,
+        "urgente": false,
+        "sillas": 0,
+        "avisos": 0,
+        "anulados": 0,
+        "espera": 0,
+        "eyebrow": 0,
+        "platos": [
+          {
+            "name": "Gambas al ajillo",
+            "notes": 0,
+            "carries": 0,
+            "seat": false,
+            "lleva": false,
+            "anulado": false,
+            "espera": false
+          }
+        ]
+      }
+    ],
+    "piezasReales": {
+      "cabecera": 54,
+      "franjaUrgente": 52,
+      "franjaAlergia": null,
+      "bloqueEspera": 49,
+      "lista": 56,
+      "lineas": [
+        {
+          "plato": "Croquetas",
+          "caracteres": 9,
+          "lineasDeTexto": 1,
+          "alto": 56,
+          "notas": 0,
+          "silla": 0,
+          "lleva": 0,
+          "carries": 0,
+          "anulado": 0
+        },
+        {
+          "plato": "Calamares",
+          "caracteres": 9,
+          "lineasDeTexto": 1,
+          "alto": 69.9,
+          "notas": 1,
+          "silla": 0,
+          "lleva": 0,
+          "carries": 0,
+          "anulado": 0
+        },
+        {
+          "plato": "Croquetas",
+          "caracteres": 9,
+          "lineasDeTexto": 1,
+          "alto": 68.4,
+          "notas": 0,
+          "silla": 0,
+          "lleva": 0,
+          "carries": 0,
+          "anulado": 1
+        },
+        {
+          "plato": "Alitas de pollo",
+          "caracteres": 15,
+          "lineasDeTexto": 1,
+          "alto": 56,
+          "notas": 0,
+          "silla": 0,
+          "lleva": 0,
+          "carries": 0,
+          "anulado": 0
+        },
+        {
+          "plato": "Calamares",
+          "caracteres": 9,
+          "lineasDeTexto": 1,
+          "alto": 69.9,
+          "notas": 1,
+          "silla": 0,
+          "lleva": 0,
+          "carries": 0,
+          "anulado": 0
+        },
+        {
+          "plato": "Chopitos",
+          "caracteres": 8,
+          "lineasDeTexto": 1,
+          "alto": 56,
+          "notas": 0,
+          "silla": 0,
+          "lleva": 0,
+          "carries": 0,
+          "anulado": 0
+        },
+        {
+          "plato": "Hamburguesa especial",
+          "caracteres": 20,
+          "lineasDeTexto": 2,
+          "alto": 96.3,
+          "notas": 1,
+          "silla": 0,
+          "lleva": 0,
+          "carries": 0,
+          "anulado": 0
+        },
+        {
+          "plato": "Patatas alioli",
+          "caracteres": 14,
+          "lineasDeTexto": 1,
+          "alto": 56,
+          "notas": 0,
+          "silla": 0,
+          "lleva": 0,
+          "carries": 0,
+          "anulado": 0
+        },
+        {
+          "plato": "Filete de ternera",
+          "caracteres": 17,
+          "lineasDeTexto": 1,
+          "alto": 56,
+          "notas": 0,
+          "silla": 0,
+          "lleva": 0,
+          "carries": 0,
+          "anulado": 0
+        },
+        {
+          "plato": "Gambas al ajillo",
+          "caracteres": 16,
+          "lineasDeTexto": 1,
+          "alto": 56,
+          "notas": 0,
+          "silla": 0,
+          "lleva": 0,
+          "carries": 0,
+          "anulado": 0
+        }
+      ]
+    },
+    "hoy": {
+      "w": 71.4,
+      "h": 56,
+      "x": 1193,
+      "y": 2,
+      "fontSize": "18px",
+      "background": "rgba(0, 0, 0, 0)",
+      "animationDuration": "0s"
+    },
+    "pulsoTarjeta": "2.5s",
+    "pulsoNueva": "2.5s",
+    "pulsoRojo": "2.5s",
+    "scroll": {
+      "scrollHeight": 800,
+      "clientHeight": 800
+    },
+    "audio": 0
+  },
+  "tpv-comanda-1443x812": {
+    "comanda": {
+      "w": 420,
+      "h": 812,
+      "x": 0,
+      "y": 0,
+      "fontSize": "16px",
+      "background": "rgb(23, 26, 31)",
+      "animationDuration": "0s"
+    },
+    "lineasEnviadas": 3,
+    "lineasPendientes": 2,
+    "menosEnviado": {
+      "w": 56,
+      "h": 56,
+      "x": 22,
+      "y": 286,
+      "fontSize": "26px",
+      "background": "rgba(0, 0, 0, 0)",
+      "animationDuration": "0s"
+    },
+    "masEnviado": {
+      "w": 56,
+      "h": 56,
+      "x": 128,
+      "y": 286,
+      "fontSize": "26px",
+      "background": "rgb(44, 49, 58)",
+      "animationDuration": "0s"
+    },
+    "chipSilla": {
+      "w": 90.9,
+      "h": 56,
+      "x": 22,
+      "y": 344,
+      "fontSize": "17px",
+      "background": "rgb(200, 16, 46)",
+      "animationDuration": "0s"
+    },
+    "chipEspera": {
+      "w": 90.3,
+      "h": 56,
+      "x": 125,
+      "y": 854,
+      "fontSize": "17px",
+      "background": "rgba(0, 0, 0, 0)",
+      "animationDuration": "0s"
+    },
+    "botonUrgente": {
+      "w": 122.2,
+      "h": 56,
+      "x": 12,
+      "y": 504,
+      "fontSize": "17px",
+      "background": "rgb(28, 32, 38)",
+      "animationDuration": "0s"
+    },
+    "botonMarchar": {
+      "w": 124.2,
+      "h": 56,
+      "x": 142,
+      "y": 504,
+      "fontSize": "17px",
+      "background": "rgba(0, 0, 0, 0)",
+      "animationDuration": "0s"
+    },
+    "botonAlergias": {
+      "w": 136.4,
+      "h": 56,
+      "x": 271,
+      "y": 568,
+      "fontSize": "17px",
+      "background": "rgb(200, 16, 46)",
+      "animationDuration": "0s"
+    },
+    "bandaListo": {
+      "w": 395,
+      "h": 56,
+      "x": 12,
+      "y": 156,
+      "fontSize": "21px",
+      "background": "rgb(143, 217, 168)",
+      "animationDuration": "0s"
+    },
+    "bandaListoTexto": "M4 · listo para servirServido",
+    "enviar": {
+      "w": 165,
+      "h": 68,
+      "x": 16,
+      "y": 728,
+      "fontSize": "20px",
+      "background": "rgba(0, 0, 0, 0)",
+      "animationDuration": "0s"
+    },
+    "cobrar": {
+      "w": 212,
+      "h": 68,
+      "x": 191,
+      "y": 728,
+      "fontSize": "22px",
+      "background": "rgb(233, 112, 88)",
+      "animationDuration": "0s"
+    },
+    "scroll": {
+      "scrollHeight": 812,
+      "clientHeight": 812
+    },
+    "desbordeImporte": -21,
+    "chipsDeLaPendiente": "→ Silla 3Espera",
+    "avisoAlergeno": "¡LLEVA GLUTEN! · toca para cerrar",
+    "chipEsperaVisible": true,
+    "botonesDeLaComanda": [
+      {
+        "testid": "comanda-cobrar",
+        "fondo": "rgb(233, 112, 88)"
+      }
+    ],
+    "deshacer": {
+      "w": 395,
+      "h": 56,
+      "x": 12,
+      "y": 220,
+      "fontSize": "16px",
+      "background": "rgb(35, 39, 46)",
+      "animationDuration": "0s"
+    },
+    "deshacerTexto": "Magro con tomate −1Deshacer"
+  },
+  "tpv-alergias-1443x812": {
+    "hoja": {
+      "w": 1443,
+      "h": 812,
+      "x": 0,
+      "y": 0,
+      "fontSize": "16px",
+      "background": "rgb(14, 16, 19)",
+      "animationDuration": "0s"
+    },
+    "sillas": 4,
+    "sillaConAlergia": 1,
+    "silla": {
+      "w": 56,
+      "h": 56,
+      "x": 182,
+      "y": 229,
+      "fontSize": "16px",
+      "background": "rgb(28, 32, 38)",
+      "animationDuration": "0s"
+    },
+    "opciones": 14,
+    "opcion": {
+      "w": 236.8,
+      "h": 56,
+      "x": 440,
+      "y": 134,
+      "fontSize": "19px",
+      "background": "rgb(200, 16, 46)",
+      "animationDuration": "0s"
+    },
+    "tablero": {
+      "w": 212.2,
+      "h": 284.2,
+      "x": 103,
+      "y": 323,
+      "fontSize": "16px",
+      "background": "rgb(35, 39, 46)",
+      "animationDuration": "0s"
+    },
+    "referencia": "La barra está a este lado",
+    "guardarFondo": "rgb(241, 243, 245)",
+    "quienEstaRojo": {
+      "todaLaMesa": {
+        "fondo": "rgb(28, 32, 38)",
+        "anillo": "rgb(241, 243, 245)",
+        "anilloAncho": "3px",
+        "anilloEstilo": "none",
+        "elegida": "0",
+        "conAlergia": "0",
+        "texto": "TODA LA MESA"
+      },
+      "sillas": [
+        {
+          "silla": "1",
+          "fondo": "rgb(28, 32, 38)",
+          "anillo": "rgb(241, 243, 245)",
+          "anilloAncho": "3px",
+          "anilloEstilo": "none",
+          "elegida": "0",
+          "conAlergia": "0",
+          "texto": "1"
+        },
+        {
+          "silla": "2",
+          "fondo": "rgb(28, 32, 38)",
+          "anillo": "rgb(241, 243, 245)",
+          "anilloAncho": "3px",
+          "anilloEstilo": "none",
+          "elegida": "0",
+          "conAlergia": "0",
+          "texto": "2"
+        },
+        {
+          "silla": "3",
+          "fondo": "rgb(200, 16, 46)",
+          "anillo": "rgb(255, 255, 255)",
+          "anilloAncho": "3px",
+          "anilloEstilo": "solid",
+          "elegida": "1",
+          "conAlergia": "1",
+          "texto": "3gluten"
+        },
+        {
+          "silla": "4",
+          "fondo": "rgb(28, 32, 38)",
+          "anillo": "rgb(241, 243, 245)",
+          "anilloAncho": "3px",
+          "anilloEstilo": "none",
+          "elegida": "0",
+          "conAlergia": "0",
+          "texto": "4"
+        }
+      ],
+      "editando": "Silla 3",
+      "marcados": [
+        "GLUTEN"
+      ]
+    },
+    "scroll": {
+      "scrollHeight": 812,
+      "clientHeight": 812
+    }
+  },
+  "tpv-comanda-1280x800": {
+    "comanda": {
+      "w": 420,
+      "h": 800,
+      "x": 0,
+      "y": 0,
+      "fontSize": "16px",
+      "background": "rgb(23, 26, 31)",
+      "animationDuration": "0s"
+    },
+    "lineasEnviadas": 3,
+    "lineasPendientes": 2,
+    "menosEnviado": {
+      "w": 56,
+      "h": 56,
+      "x": 22,
+      "y": 286,
+      "fontSize": "26px",
+      "background": "rgba(0, 0, 0, 0)",
+      "animationDuration": "0s"
+    },
+    "masEnviado": {
+      "w": 56,
+      "h": 56,
+      "x": 128,
+      "y": 286,
+      "fontSize": "26px",
+      "background": "rgb(44, 49, 58)",
+      "animationDuration": "0s"
+    },
+    "chipSilla": {
+      "w": 90.9,
+      "h": 56,
+      "x": 22,
+      "y": 344,
+      "fontSize": "17px",
+      "background": "rgb(200, 16, 46)",
+      "animationDuration": "0s"
+    },
+    "chipEspera": {
+      "w": 90.3,
+      "h": 56,
+      "x": 125,
+      "y": 854,
+      "fontSize": "17px",
+      "background": "rgba(0, 0, 0, 0)",
+      "animationDuration": "0s"
+    },
+    "botonUrgente": {
+      "w": 122.2,
+      "h": 56,
+      "x": 12,
+      "y": 492,
+      "fontSize": "17px",
+      "background": "rgb(28, 32, 38)",
+      "animationDuration": "0s"
+    },
+    "botonMarchar": {
+      "w": 124.2,
+      "h": 56,
+      "x": 142,
+      "y": 492,
+      "fontSize": "17px",
+      "background": "rgba(0, 0, 0, 0)",
+      "animationDuration": "0s"
+    },
+    "botonAlergias": {
+      "w": 136.4,
+      "h": 56,
+      "x": 271,
+      "y": 556,
+      "fontSize": "17px",
+      "background": "rgb(200, 16, 46)",
+      "animationDuration": "0s"
+    },
+    "bandaListo": {
+      "w": 395,
+      "h": 56,
+      "x": 12,
+      "y": 156,
+      "fontSize": "21px",
+      "background": "rgb(143, 217, 168)",
+      "animationDuration": "0s"
+    },
+    "bandaListoTexto": "M4 · listo para servirServido",
+    "enviar": {
+      "w": 165,
+      "h": 68,
+      "x": 16,
+      "y": 716,
+      "fontSize": "20px",
+      "background": "rgba(0, 0, 0, 0)",
+      "animationDuration": "0s"
+    },
+    "cobrar": {
+      "w": 212,
+      "h": 68,
+      "x": 191,
+      "y": 716,
+      "fontSize": "22px",
+      "background": "rgb(233, 112, 88)",
+      "animationDuration": "0s"
+    },
+    "scroll": {
+      "scrollHeight": 800,
+      "clientHeight": 800
+    },
+    "desbordeImporte": -21,
+    "chipsDeLaPendiente": "→ Silla 3Espera",
+    "avisoAlergeno": "¡LLEVA GLUTEN! · toca para cerrar",
+    "chipEsperaVisible": true,
+    "botonesDeLaComanda": [
+      {
+        "testid": "comanda-cobrar",
+        "fondo": "rgb(233, 112, 88)"
+      }
+    ],
+    "deshacer": {
+      "w": 395,
+      "h": 56,
+      "x": 12,
+      "y": 220,
+      "fontSize": "16px",
+      "background": "rgb(35, 39, 46)",
+      "animationDuration": "0s"
+    },
+    "deshacerTexto": "Magro con tomate −1Deshacer"
+  },
+  "tpv-alergias-1280x800": {
+    "hoja": {
+      "w": 1280,
+      "h": 800,
+      "x": 0,
+      "y": 0,
+      "fontSize": "16px",
+      "background": "rgb(14, 16, 19)",
+      "animationDuration": "0s"
+    },
+    "sillas": 4,
+    "sillaConAlergia": 1,
+    "silla": {
+      "w": 56,
+      "h": 56,
+      "x": 182,
+      "y": 228,
+      "fontSize": "16px",
+      "background": "rgb(28, 32, 38)",
+      "animationDuration": "0s"
+    },
+    "opciones": 14,
+    "opcion": {
+      "w": 196,
+      "h": 57,
+      "x": 440,
+      "y": 134,
+      "fontSize": "19px",
+      "background": "rgb(200, 16, 46)",
+      "animationDuration": "0s"
+    },
+    "tablero": {
+      "w": 212.2,
+      "h": 277.9,
+      "x": 103,
+      "y": 320,
+      "fontSize": "16px",
+      "background": "rgb(35, 39, 46)",
+      "animationDuration": "0s"
+    },
+    "referencia": "La barra está a este lado",
+    "guardarFondo": "rgb(241, 243, 245)",
+    "quienEstaRojo": {
+      "todaLaMesa": {
+        "fondo": "rgb(28, 32, 38)",
+        "anillo": "rgb(241, 243, 245)",
+        "anilloAncho": "3px",
+        "anilloEstilo": "none",
+        "elegida": "0",
+        "conAlergia": "0",
+        "texto": "TODA LA MESA"
+      },
+      "sillas": [
+        {
+          "silla": "1",
+          "fondo": "rgb(28, 32, 38)",
+          "anillo": "rgb(241, 243, 245)",
+          "anilloAncho": "3px",
+          "anilloEstilo": "none",
+          "elegida": "0",
+          "conAlergia": "0",
+          "texto": "1"
+        },
+        {
+          "silla": "2",
+          "fondo": "rgb(28, 32, 38)",
+          "anillo": "rgb(241, 243, 245)",
+          "anilloAncho": "3px",
+          "anilloEstilo": "none",
+          "elegida": "0",
+          "conAlergia": "0",
+          "texto": "2"
+        },
+        {
+          "silla": "3",
+          "fondo": "rgb(200, 16, 46)",
+          "anillo": "rgb(255, 255, 255)",
+          "anilloAncho": "3px",
+          "anilloEstilo": "solid",
+          "elegida": "1",
+          "conAlergia": "1",
+          "texto": "3gluten"
+        },
+        {
+          "silla": "4",
+          "fondo": "rgb(28, 32, 38)",
+          "anillo": "rgb(241, 243, 245)",
+          "anilloAncho": "3px",
+          "anilloEstilo": "none",
+          "elegida": "0",
+          "conAlergia": "0",
+          "texto": "4"
+        }
+      ],
+      "editando": "Silla 3",
+      "marcados": [
+        "GLUTEN"
+      ]
+    },
+    "scroll": {
+      "scrollHeight": 800,
+      "clientHeight": 800
+    }
+  }
+}

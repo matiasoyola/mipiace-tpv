@@ -1,0 +1,200 @@
+[
+  {
+    "id": "diferencias",
+    "titulo": "Volver a mandar todas las líneas en cada envío",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected 3 to be 1 // Object.is equality"
+  },
+  {
+    "id": "idempotencia",
+    "titulo": "Quitar la idempotencia de clientSendId",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected false to be true // Object.is equality"
+  },
+  {
+    "id": "sin-destino",
+    "titulo": "Fallar el envío por no tener destino",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected 500 to be 200 // Object.is equality"
+  },
+  {
+    "id": "anular-sin-avisar",
+    "titulo": "Anular sin avisar a cocina",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected [] to include 'kitchen.line_voided'"
+  },
+  {
+    "id": "anulado-sin-visto",
+    "titulo": "Anulado que desaparece sin «Visto»",
+    "estado": "ROJO",
+    "mensaje": "expected false to be true // Object.is equality"
+  },
+  {
+    "id": "retener-barra",
+    "titulo": "Retener la barra",
+    "estado": "ROJO",
+    "mensaje": "expected null not to be null"
+  },
+  {
+    "id": "semaforo-desde-la-nota",
+    "titulo": "El semáforo cuenta desde la nota",
+    "estado": "ROJO",
+    "mensaje": "expected 30 to be null"
+  },
+  {
+    "id": "orden-por-columnas",
+    "titulo": "Orden por columnas",
+    "estado": "ROJO",
+    "mensaje": "expected [ Array(4) ] to deeply equal [ Array(4) ]"
+  },
+  {
+    "id": "cortar-tarjeta",
+    "titulo": "Cortar una tarjeta",
+    "estado": "ROJO",
+    "mensaje": "expected [ { id: 't0', …(6) }, …(8) ] to have a length of 6 but got 9"
+  },
+  {
+    "id": "alergia-sin-silla",
+    "titulo": "Alergia sin silla que no sale en cocina",
+    "estado": "ROJO",
+    "mensaje": "expected [] to deeply equal [ '⚠ TODA LA MESA · SIN GLUTEN' ]"
+  },
+  {
+    "id": "plato-silla-alergeno",
+    "titulo": "No marcar el plato de la silla que lleva su alérgeno",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected null to be '¡LLEVA GLUTEN!' // Object.is equality"
+  },
+  {
+    "id": "parpadeo-1s",
+    "titulo": "Parpadeo de 1 s",
+    "estado": "ROJO",
+    "mensaje": "expected 1000 to be greater than or equal to 2500"
+  },
+  {
+    "id": "sonido-en-cocina",
+    "titulo": "Sonido en cocina",
+    "estado": "ROJO",
+    "mensaje": "expected \"spy\" to not be called at all, but actually been called 3 times"
+  },
+  {
+    "id": "mas-menos-sin-pantalla",
+    "titulo": "−/+ en lo enviado sin pantalla",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected { screen: false, printer: true, …(1) } to deeply equal { screen: false, printer: true, …(1) }"
+  },
+  {
+    "id": "servido-no-limpia",
+    "titulo": "«Servido» que no limpia",
+    "estado": "ROJO",
+    "mensaje": "expected [ { …(7) } ] to have a length of +0 but got 1"
+  },
+  {
+    "id": "modulo-apagado",
+    "titulo": "Módulo apagado",
+    "estado": "ROJO",
+    "mensaje": "expected false to be true // Object.is equality"
+  },
+  {
+    "id": "terminal-tacha",
+    "titulo": "Un terminal puede tachar en cocina",
+    "estado": "ROJO",
+    "mensaje": "expected 404 to be 403 // Object.is equality"
+  },
+  {
+    "id": "kitchen-cobra",
+    "titulo": "Un KITCHEN cobra o abre turno",
+    "estado": "ROJO",
+    "mensaje": "expected 200 to be 403 // Object.is equality"
+  },
+  {
+    "id": "otra-tienda",
+    "titulo": "Cocina ve otra tienda u otra sección",
+    "estado": "ROJO",
+    "mensaje": "expected [ { …(17) } ] to have a length of +0 but got 1"
+  },
+  {
+    "id": "alergia-a-client",
+    "titulo": "La alergia llega a Client",
+    "estado": "ROJO",
+    "mensaje": "expected '\\n  clientId String?  @map(\"client_id…' not to match /client/i"
+  },
+  {
+    "id": "cuerpo-rojo",
+    "titulo": "Fondo rojo en el cuerpo de una tarjeta urgente o con alergia",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: urgente: expected 'rgb(74, 22, 16)' to be 'rgb(26, 29, 35)' // Object.is equality"
+  },
+  {
+    "id": "franja-sin-rojo",
+    "titulo": "Franja de alergia sin fondo rojo",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected 'rgb(35, 39, 46)' to be 'rgb(200, 16, 46)' // Object.is equality"
+  },
+  {
+    "id": "franja-pequena",
+    "titulo": "Franja de alergia con menos de 21 px",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected 16 to be greater than or equal to 21"
+  },
+  {
+    "id": "modificador-pequeno",
+    "titulo": "Modificador a menos de 17 px",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected 13 to be greater than or equal to 17"
+  },
+  {
+    "id": "modificador-gris",
+    "titulo": "Modificador en gris",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected 'rgb(139, 147, 161)' to be 'rgb(246, 207, 122)' // Object.is equality"
+  },
+  {
+    "id": "tres-columnas",
+    "titulo": "3 columnas a 1280 px",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected 3 to be 4 // Object.is equality"
+  },
+  {
+    "id": "mas-n-rojo",
+    "titulo": "«+N» en rojo sin ninguna oculta en rojo",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected 'rojo' to be 'verde' // Object.is equality (y dos veces «expected 'rojo' to be 'neutro'»)"
+  },
+  {
+    "id": "coral-fuera-de-cobrar",
+    "titulo": "Coral en un botón de la comanda que no sea «Cobrar»",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected [ 'boton-marchar', 'comanda-cobrar' ] to deeply equal [ 'comanda-cobrar' ]"
+  },
+  {
+    "id": "sin-ordenar-en-la-pantalla",
+    "titulo": "Quitar el ordenado en la pantalla",
+    "estado": "ROJO",
+    "mensaje": "expected [ 'T4', 'M5', 'M1', 'M2' ] to deeply equal [ 'T4', 'M4', 'M2', 'T2' ]"
+  },
+  {
+    "id": "ordenar-por-sentat",
+    "titulo": "Ordenar por `sentAt` en vez de por la marca que pinta los minutos",
+    "estado": "ROJO",
+    "mensaje": "expected [ 'tiempo2', 'vieja' ] to deeply equal [ 'vieja', 'tiempo2' ]"
+  },
+  {
+    "id": "mas-n-con-otro-orden",
+    "titulo": "Que «+N» use otro orden que la rejilla",
+    "estado": "ROJO",
+    "mensaje": "M8 oculta: expected 1791467220000 to be greater than or equal to 1791467580000 (y «expected 'ambar' to be 'rojo'»)"
+  },
+  {
+    "id": "toda-la-mesa-roja-sin-alergenos",
+    "titulo": "Pintar en rojo «toda la mesa» sin alérgenos",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected 'rgb(200, 16, 46)' to be 'rgb(28, 32, 38)' // Object.is equality"
+  },
+  {
+    "id": "seleccion-por-color-sin-anillo",
+    "titulo": "Que la selección cambie el color en vez de poner el anillo",
+    "estado": "ROJO",
+    "mensaje": "AssertionError: expected 'none' to be '3px solid #FFFFFF' // Object.is equality"
+  }
+]

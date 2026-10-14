@@ -56,6 +56,13 @@ export interface CartLine {
   // cobrar— porque es lo que se manda en el POST y lo que se persiste como
   // snapshot en `ticket_lines.exemption_cause`.
   exemptionCause?: CausaExencion | null;
+  // kds-1-cocina · los alérgenos del plato, copiados del catálogo al
+  // añadir la línea. Viajan EN LA LÍNEA y no se vuelven a leer del
+  // catálogo porque es lo que permite avisar «¡Lleva gluten!» al asignar
+  // la silla sin un viaje a la API en medio del gesto. El cruce de verdad
+  // —el que la pantalla de cocina grita— lo hace el servidor con el
+  // snapshot de `KitchenOrderLine.allergens`.
+  allergens?: string[];
   // Modificadores ad-hoc tipeados por el cajero ("Sin azúcar").
   modifiers: string[];
   // Modificadores estructurados (selección desde el modal).

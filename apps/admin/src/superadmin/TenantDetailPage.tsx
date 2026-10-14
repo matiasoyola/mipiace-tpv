@@ -1301,6 +1301,12 @@ function ActiveTenantActions({
               tenant.modules.caja ? "Caja" : null,
               tenant.modules.crm ? "CRM" : null,
               tenant.modules.agenda ? "Agenda" : null,
+              // kds-1-cocina · se pinta aquí y no en `modules` porque no
+              // es uno de los que sostienen a una empresa: es un añadido
+              // a la caja que se cobra POR PANTALLA. Se enseña para que el
+              // implantador sepa si esta cuenta lo tiene comprado antes de
+              // ponerse a emparejar una tablet de cocina.
+              tenant.kitchenDisplayEnabled === true ? "Cocina" : null,
             ]
               .filter(Boolean)
               .join(" · ") || "—"
