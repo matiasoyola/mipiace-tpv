@@ -205,6 +205,9 @@ importers:
       '@mipiacetpv/clinica-valoracion':
         specifier: workspace:*
         version: link:../../packages/clinica-valoracion
+      '@mipiacetpv/contrato-encargado':
+        specifier: workspace:*
+        version: link:../../packages/contrato-encargado
       '@mipiacetpv/db':
         specifier: workspace:*
         version: link:../../packages/db

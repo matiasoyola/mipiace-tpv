@@ -15,6 +15,7 @@
   "devDependencies": {
     "@mipiacetpv/clinica-sesion": "workspace:*",
     "@mipiacetpv/clinica-valoracion": "workspace:*",
+    "@mipiacetpv/contrato-encargado": "workspace:*",
     "@mipiacetpv/db": "workspace:*",
     "@playwright/test": "^1.49.0",
     "@types/node": "^20.16.10",
