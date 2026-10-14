@@ -4,6 +4,10 @@
 // Edificio: cada habitación con quién ocupa cada cama y qué tablet es su
 // puerta.
 //
+// ── Quién puede verlas ───────────────────────────────────────────────
+//
+// **OWNER/MANAGER, también para leer.** Ver la nota de `PUERTAS_LECTURA`.
+//
 // ── Lo que estas rutas NO enseñan ────────────────────────────────────
 //
 // **Ni un dato de salud.** La vista del edificio lleva el NOMBRE de quien
@@ -27,15 +31,24 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { getPrisma } from "../context.js";
-import {
-  requireOwnerOrCashier,
-  requireOwnerOrManager,
-} from "../auth/middleware.js";
+import { requireOwnerOrManager } from "../auth/middleware.js";
 import { ensureClinicaEnabled } from "../clinica/gate.js";
 import { ensureResidenciaEnabled } from "./gate.js";
 
+// Leer el edificio es de OWNER/MANAGER, igual que escribirlo, y es una
+// decisión y no una copia-pega: la vista trae **quién ocupa cada cama** de
+// todo el centro, y la lista de residentes de al lado filtra por la zona de
+// quien mira. Dejar esta abierta a cualquiera del tenant habría hecho que
+// la auxiliar de la primera planta no pueda abrir la ficha del residente de
+// la segunda —la función de acceso se lo niega— pero sí vea su nombre en la
+// cama 201-A. Dos pantallas contestando cosas distintas a la misma pregunta
+// es peor que una pantalla de menos.
+//
+// Y no se filtra el edificio por zona en vez de restringirlo porque el
+// edificio es el PLANO: medio plano no es un plano, y quien lo necesita es
+// la dirección.
 const PUERTAS_LECTURA = [
-  requireOwnerOrCashier,
+  requireOwnerOrManager,
   ensureClinicaEnabled,
   ensureResidenciaEnabled,
 ];
@@ -58,11 +71,6 @@ export async function registerResidenciaEdificioRoutes(
     "/residencia/edificio",
     { preHandler: PUERTAS_LECTURA },
     async (request: FastifyRequest) => {
-      // `requireOwnerOrCashier` puebla SIEMPRE `request.auth`, también
-      // cuando el token es una sesión de TPV: ahí copia el `sub`, el `tid`
-      // y el rol del cajero. Así que una sola lectura, sin `??` sobre
-      // `request.cashier` — que era una rama que no se alcanza nunca y un
-      // `!` que nadie volvería a comprobar.
       const tenantId = request.auth!.tenantId;
       const prisma = getPrisma();
 

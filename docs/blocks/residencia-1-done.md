@@ -508,7 +508,13 @@ Para Jardín de Gredos ÉSAS son su barra lateral, junto a Personal.
 - **Residentes** · lista de una línea por residente con habitación, cama, nivel y plaza, y las dos
   acciones que se usan a diario —cambiar de habitación y dar de alta— en la propia línea, no dentro
   de la ficha. Alta, ficha (con el histórico de habitaciones) y el aviso del ingreso pendiente.
-- **Edificio** · un árbol y no tres listas, porque así es el edificio y así lo nombra el personal.
+- **Edificio** · **de la dirección, también para leer** (`requireOwnerOrManager`), y es una decisión:
+  la vista trae quién ocupa cada cama de todo el centro, y la lista de residentes de al lado filtra
+  por zona. Abierta a cualquiera del tenant, la auxiliar de la primera planta no podría abrir la
+  ficha del residente de la segunda —la función de acceso se lo niega— pero sí vería su nombre en la
+  cama 201-A: dos pantallas contestando cosas distintas a la misma pregunta. No se filtra el plano
+  por zona porque medio plano no es un plano, y quien lo necesita es la dirección.
+  Un árbol y no tres listas, porque así es el edificio y así lo nombra el personal.
   Cada habitación con quién ocupa cada cama y qué tablet es su puerta; el alta de una habitación crea
   sus camas de una vez (30 habitaciones y 49 camas de una en una era media mañana de alguien).
 - **Turnos** · los tres, el «ahora» (que calcula el servidor con la misma función que usará la
@@ -561,6 +567,7 @@ error del colegiado, y la pantalla de la puerta de la 112 en una tablet de pared
 | **La puerta no cobra ni abre turno** | Quitar el `if (device.kind === "ROOM")` de `requireDeviceToken` | `residencia-rutas.test.ts` · «un ROOM recibe 403 en la puerta de TODAS las rutas del TPV» | `expected 200 to be 403` |
 | **…ni factura** | — (no hay línea que quitar: `fiscal_records.register_id` es NOT NULL) | e2e · «UN `ROOM` NO EMITE REGISTRO DE FACTURACIÓN» | `Code: 23502` |
 | **Y un terminal no lee una puerta** | Quitar `if (device.kind !== "ROOM") return NOT_ROOM` | rutas · «un TERMINAL no puede leer la puerta» | `expected 200 to be 403` |
+| **El plano es de la dirección** | `requireOwnerOrManager` → `requireOwnerOrCashier` en `PUERTAS_LECTURA` de `edificio-routes.ts` | `residencia-rutas.test.ts` · «la AUXILIAR no puede leer el plano del centro» | `expected 200 to be 403` |
 | **La puerta no enseña salud** | Añadir `dependencyLevel` al select de `puerta/me` | rutas · «NI UN DATO DE SALUD» + `residencia-puerta.test.tsx` | `expected '…DEPENDIENTE…' not to contain 'DEPENDIENTE'` |
 | **404 y no 403** | `respondeComoRutaInexistente` → `reply.code(403)` | rutas · «la 404 es LA MISMA que la de una ruta que no existe» | `expected 403 to be 404` |
 | **La noche cruza medianoche** | `minutos >= inicio \|\| minutos < fin` → `&&` | `residencia-turnos.test.ts` · «LAS 02:30 SON DE LA NOCHE» + el barrido de 1.440 min | `expected undefined to be 'N'` |
@@ -697,7 +704,7 @@ bajo `apps/` y `packages/db/prisma/`, que entran por el `COPY . .`.
 
 ### Verde
 
-- `pnpm test` · **356 ficheros, 4.742 tests, 3 skipped.** Verde.
+- `pnpm test` · **356 ficheros, 4.744 tests, 3 skipped.** Verde.
 - `pnpm test:e2e` · **34 ficheros, 629 tests.** Verde, sobre `mipiacetpv_residencia1_e2e`.
 - `pnpm e2e:agenda` · **34 passed, 1 failed, 5 did not run.** Los capítulos **1 a 11 van enteros en
   verde** (los 34); el 12 es `mode: "serial"` y se para en su cuarto test, así que los dos que le
@@ -743,7 +750,7 @@ README lo dice.
 - `residencia-acceso.test.ts` (22) · la tabla de casos de la función y la economía de consultas.
 - `residencia-turnos.test.ts` (14) · la noche, el barrido del día y los dos cambios de hora.
 - `residencia-migracion.test.ts` (31) · el contrato del SQL.
-- `residencia-rutas.test.ts` (21) · el gate, el registro, la puerta y los datos de salud.
+- `residencia-rutas.test.ts` (23) · el gate, el registro, la puerta, el plano y los datos de salud.
 - `residencia-interruptor.test.ts` (17) · las guardas, la semilla y el bug de `clinicalRecordsEnabled`.
 - `residencia-1.e2e.ts` (44) · los sabotajes contra Postgres.
 - `residencia-pantallas.test.tsx` (20) · las cuatro pantallas y el tenant que no las ve.

@@ -375,6 +375,55 @@ const fakePrisma = {
   centerShift: {
     findMany: vi.fn(async () => turnos),
   },
+  // El plano del centro, como lo pide `GET /residencia/edificio`: plantas →
+  // habitaciones → camas, con la ocupación vigente y la puerta viva.
+  floor: {
+    findMany: vi.fn(async () =>
+      [...plantas.values()].map((p) => ({
+        id: p.id,
+        name: p.name,
+        sortOrder: p.sortOrder,
+        rooms: [...habitaciones.values()]
+          .filter((h) => h.floorId === p.id)
+          .map((h) => ({
+            id: h.id,
+            number: h.number,
+            name: h.name,
+            active: h.active,
+            beds: [...camas.values()]
+              .filter((c) => c.roomId === h.id)
+              .map((c) => {
+                const o = ocupaciones.find(
+                  (x) => x.bedId === c.id && x.toAt == null,
+                );
+                const cliente = o ? clientes.get(o.clientId)! : null;
+                return {
+                  id: c.id,
+                  label: c.label,
+                  active: c.active,
+                  assignments:
+                    o && cliente
+                      ? [
+                          {
+                            id: o.id,
+                            fromAt: o.fromAt,
+                            client: {
+                              id: cliente.id,
+                              firstName: cliente.firstName,
+                              lastName: cliente.lastName,
+                            },
+                          },
+                        ]
+                      : [],
+                };
+              }),
+            devices: [...dispositivos.values()]
+              .filter((d) => d.kind === "ROOM" && d.roomId === h.id && d.revokedAt == null)
+              .map((d) => ({ id: d.id, name: d.name, lastSeenAt: null })),
+          })),
+      })),
+    ),
+  },
   device: {
     findUnique: vi.fn(async ({ where }: any) => {
       for (const d of dispositivos.values()) {
@@ -908,6 +957,52 @@ describe("residencia-1 · `GET /residencia/puerta/me` · nombre y nada más", ()
       headers: { "x-device-token": PUERTA_TOKEN },
     });
     expect(registro).toHaveLength(0);
+  });
+});
+
+describe("residencia-1 · el edificio es de la dirección", () => {
+  it("la AUXILIAR no puede leer el plano del centro", async () => {
+    // La vista del edificio trae quién ocupa cada cama de TODO el centro, y
+    // la lista de residentes de al lado filtra por zona. Abierta a
+    // cualquiera del tenant, la auxiliar de la primera planta no podría
+    // abrir la ficha del residente de la segunda —la función de acceso se
+    // lo niega— pero sí vería su nombre en la cama 201-A. Dos pantallas
+    // contestando cosas distintas a la misma pregunta.
+    const { registerResidenciaEdificioRoutes } = await import(
+      "../src/residencia/edificio-routes.js"
+    );
+    const app = Fastify();
+    await registerResidenciaEdificioRoutes(app);
+    const res = await app.inject({
+      method: "GET",
+      url: "/residencia/edificio",
+      headers: comoAuxiliar,
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("y la DIRECTORA sí, con quién ocupa cada cama", async () => {
+    const { registerResidenciaEdificioRoutes } = await import(
+      "../src/residencia/edificio-routes.js"
+    );
+    const app = Fastify();
+    await registerResidenciaEdificioRoutes(app);
+    const res = await app.inject({
+      method: "GET",
+      url: "/residencia/edificio",
+      headers: comoDirectora,
+    });
+    expect(res.statusCode).toBe(200);
+    const plantas = res.json().plantas;
+    expect(plantas).toHaveLength(2);
+    const camas = plantas.flatMap((p: any) =>
+      p.habitaciones.flatMap((h: any) => h.camas),
+    );
+    expect(camas.find((c: any) => c.ocupa)?.ocupa.nombre).toBe("Carmen Gómez");
+    // Y NI UN DATO DE SALUD en el plano: esta pantalla se mira de pie.
+    for (const prohibido of ["DEPENDIENTE", "CONCERTADA", "11111111H"]) {
+      expect(res.payload).not.toContain(prohibido);
+    }
   });
 });
 
