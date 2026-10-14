@@ -29,7 +29,10 @@ process.env.HOLDED_KEY_ENCRYPTION_SECRET = randomBytes(32).toString("base64");
 process.env.CLINICAL_KEK = randomBytes(32).toString("base64");
 process.env.CLINICAL_KEK_ID = "test";
 
-import { llaveroFake } from "./clinica-7-claves-fake.js";
+import {
+  contratoFake,
+  llaveroFake,
+} from "./clinica-7-claves-fake.js";
 import Fastify from "fastify";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -101,6 +104,7 @@ const anotaciones: Array<{
   entryId: string;
   authorUserId: string;
   body: unknown;
+  bodyCifrado: string | null;
   createdAt: Date;
 }> = [];
 
@@ -117,9 +121,13 @@ let registroRoto = false;
 
 // clinica-7 · el llavero de la clínica, en memoria.
 const llavero = llaveroFake();
+// Y el contrato de encargado, ACEPTADO: es el estado normal de una clínica
+// que funciona. Sin él, toda escritura clínica contesta 423.
+const contrato = contratoFake(TENANT_ID, DUENA_ID);
 
 const fakePrisma = {
   clinicalTenantKey: llavero.modelo,
+  clinicalProcessorAgreement: contrato.modelo,
   tenant: {
     findUnique: vi.fn(async () => ({
       clinicalRecordsEnabled: clinicaEncendida,
@@ -660,6 +668,7 @@ describe("clinica-1 · la anotación tiene autor y no se edita", () => {
       authorUserId: SANITARIA_ID,
       appointmentId: null,
       kind: "NOTE",
+      bodyCifrado: null,
       body: { texto: "x" },
       createdAt: new Date(),
     });

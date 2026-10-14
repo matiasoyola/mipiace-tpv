@@ -54,7 +54,11 @@ process.env.CLINICAL_KEK = randomBytes(32).toString("base64");
 process.env.CLINICAL_KEK_ID = "test";
 process.env.PUBLIC_TPV_URL = "https://mipiacetpv.com";
 
-import { cuerpoClaroDe, llaveroFake } from "./clinica-7-claves-fake.js";
+import {
+  contratoFake,
+  cuerpoClaroDe,
+  llaveroFake,
+} from "./clinica-7-claves-fake.js";
 import Fastify from "fastify";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -253,9 +257,13 @@ let registroRoto = false;
 
 // clinica-7 · el llavero de la clínica, en memoria.
 const llavero = llaveroFake();
+// Y el contrato de encargado, ACEPTADO: es el estado normal de una clínica
+// que funciona. Sin él, toda escritura clínica contesta 423.
+const contrato = contratoFake(TENANT_ID, DUENA_ID);
 
 const fakePrisma = {
   clinicalTenantKey: llavero.modelo,
+  clinicalProcessorAgreement: contrato.modelo,
   $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
     fn(fakePrisma),
   ),
@@ -1510,6 +1518,7 @@ describe("clinica-2 · corregir y validar, y el servidor no se fía del front", 
       assessmentId: v.id,
       questionId: "circ",
       value: "NO",
+      correccionCifrada: null,
       authorUserId: SANITARIA_ID,
       createdAt: new Date(),
     });

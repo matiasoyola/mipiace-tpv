@@ -17,7 +17,11 @@
 //   · `clinical_photos` admite UNA transición: la retirada.
 //   · `clinical_report_deliveries` es de solo inserción.
 
-import { kekDePrueba, llaveroFake } from "../clinica-7-claves-fake.js";
+import {
+  contratoFake,
+  kekDePrueba,
+  llaveroFake,
+} from "../clinica-7-claves-fake.js";
 
 // clinica-7 · la KEK, ANTES de cualquier import que llame a `loadEnv`.
 kekDePrueba();
@@ -153,6 +157,9 @@ export interface MundoDeLaClinica {
    *  el camino de «el fichero descifra pero su contenido no es el que la
    *  fila dice». Sin esto, ese camino sería código muerto. */
   llavero: ReturnType<typeof llaveroFake>;
+  /** clinica-7 · el contrato de encargado. Nace ACEPTADO; `revocar()` lo
+   *  pone en solo lectura y `vaciar()` lo deja sin aceptar nunca. */
+  contrato: ReturnType<typeof contratoFake>;
   /** La DEK de la clínica de prueba, o `null` si nadie ha escrito nada. */
   dekDeLaClinica(tenantId?: string): Promise<Buffer | null>;
   reset(): void;
@@ -190,6 +197,12 @@ export function crearMundo(): MundoDeLaClinica {
   // clinica-7 · el llavero de esta clínica, en memoria.
   const llavero = llaveroFake();
   mundo.llavero = llavero;
+  // clinica-7 · el contrato de encargado, ACEPTADO: es el estado normal de
+  // una clínica que funciona. Sin él, `conHistoria` contesta 423 a toda
+  // escritura y los sesenta tests de este mundo irían a rojo por algo que
+  // no va del contrato.
+  const contrato = contratoFake(TENANT_ID, DUENA_ID);
+  mundo.contrato = contrato;
   mundo.dekDeLaClinica = async (tenantId = TENANT_ID) => {
     const { dekONada } = await import("../../src/clinica/claves.js");
     return dekONada(tenantId, m.prisma);
@@ -208,6 +221,7 @@ export function crearMundo(): MundoDeLaClinica {
     m.pideElServicio = new Map();
     m.serviciosDeLaCita = [];
     llavero.reset();
+    contrato.reset();
     // Y las cachés del proceso: la clave y el «¿es clínico?» viven 60 s,
     // así que entre dos tests del mismo fichero se arrastrarían.
     olvidarClaves();
@@ -597,6 +611,7 @@ export function crearMundo(): MundoDeLaClinica {
     // clinica-7 · el llavero. Sin él, `dekONada` revienta y toda ruta
     // clínica contesta 500.
     clinicalTenantKey: llavero.modelo,
+    clinicalProcessorAgreement: contrato.modelo,
     clinicalEntry: {
       findUnique: async ({ where }: any) => {
         const e = m.entradas.find((x) => x.id === where.id);

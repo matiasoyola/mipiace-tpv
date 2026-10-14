@@ -143,3 +143,162 @@ export async function cuerpoClaroDe(
   const dek = await dekONada(fila.tenantId, prisma as never);
   return cuerpoDeEntrada(fila as never, dek) as any;
 }
+
+// ── El contrato de encargado, en memoria ─────────────────────────────
+//
+// Los siete ficheros de tests clínicos de unidad dan por hecho una clínica
+// que FUNCIONA, y desde clinica-7 una clínica que funciona es una que tiene
+// el contrato aceptado: sin él, `conHistoria` contesta 423 a toda
+// escritura. Así que este doble **nace con el contrato aceptado**, que es
+// el estado normal, y deja revocarlo al test que quiera probar el 423.
+//
+// Nace aceptado y no vacío a propósito: lo contrario habría significado
+// añadir una línea de `aceptar()` a los sesenta `beforeEach` de la casa, y
+// el que se la olvidara vería 423 en un test que no va del contrato.
+
+import { createHash } from "node:crypto";
+
+import {
+  CONTRATO_VIGENTE,
+  textoCanonico,
+  VERSION_VIGENTE,
+} from "@mipiacetpv/contrato-encargado";
+
+export interface FilaDeContrato {
+  id: string;
+  tenantId: string;
+  version: number;
+  textSha256: string;
+  userId: string;
+  at: Date;
+  deviceId: string | null;
+  ip: string | null;
+  userAgent: string | null;
+  revokesAgreementId: string | null;
+}
+
+export interface ContratoFake {
+  modelo: {
+    findMany: (args: any) => Promise<any[]>;
+    create: (args: any) => Promise<any>;
+    createMany: (args: any) => Promise<{ count: number }>;
+  };
+  filas: FilaDeContrato[];
+  /** La huella del texto vigente, la de verdad. */
+  huella: string;
+  /** Lo deja aceptado (es el estado de partida del `reset`). */
+  aceptar: (opciones?: { version?: number; userId?: string }) => FilaDeContrato;
+  /** Lo revoca: una fila nueva por cada aceptación viva. */
+  revocar: () => void;
+  /** Lo deja SIN aceptar nunca. */
+  vaciar: () => void;
+  reset: () => void;
+}
+
+export function contratoFake(
+  tenantId: string,
+  duenaId: string,
+): ContratoFake {
+  const huella = createHash("sha256")
+    .update(textoCanonico(CONTRATO_VIGENTE), "utf8")
+    .digest("hex");
+  let filas: FilaDeContrato[] = [];
+  let n = 0;
+
+  const aceptar = (opciones: { version?: number; userId?: string } = {}) => {
+    const fila: FilaDeContrato = {
+      id: `acuerdo-${++n}`,
+      tenantId,
+      version: opciones.version ?? VERSION_VIGENTE,
+      textSha256: huella,
+      userId: opciones.userId ?? duenaId,
+      at: new Date("2026-10-14T08:00:00.000Z"),
+      deviceId: null,
+      ip: null,
+      userAgent: null,
+      revokesAgreementId: null,
+    };
+    filas.push(fila);
+    return fila;
+  };
+
+  const revocar = () => {
+    const revocadas = new Set(
+      filas.map((f) => f.revokesAgreementId).filter((x): x is string => x != null),
+    );
+    for (const viva of filas.filter(
+      (f) => f.revokesAgreementId == null && !revocadas.has(f.id),
+    )) {
+      filas.push({
+        ...viva,
+        id: `revoca-${++n}`,
+        at: new Date("2026-10-14T09:00:00.000Z"),
+        revokesAgreementId: viva.id,
+      });
+    }
+  };
+
+  const api: ContratoFake = {
+    filas,
+    huella,
+    aceptar,
+    revocar,
+    vaciar: () => {
+      filas.length = 0;
+    },
+    reset: () => {
+      filas.length = 0;
+      n = 0;
+      aceptar();
+    },
+    modelo: {
+      findMany: async ({ where, select, orderBy }: any) => {
+        let xs = filas.filter((f) => f.tenantId === where.tenantId);
+        if (orderBy?.at === "desc") {
+          xs = xs.slice().sort((a, b) => +b.at - +a.at);
+        }
+        return xs.map((f) => ({
+          ...f,
+          ...(select?.user ? { user: { alias: null, email: "d@d.es" } } : {}),
+          ...(select?.device ? { device: null } : {}),
+        }));
+      },
+      create: async ({ data }: any) => {
+        const fila: FilaDeContrato = {
+          id: `acuerdo-${++n}`,
+          tenantId: data.tenantId,
+          version: data.version,
+          textSha256: data.textSha256,
+          userId: data.userId,
+          at: data.at ?? new Date(),
+          deviceId: data.deviceId ?? null,
+          ip: data.ip ?? null,
+          userAgent: data.userAgent ?? null,
+          revokesAgreementId: data.revokesAgreementId ?? null,
+        };
+        filas.push(fila);
+        return fila;
+      },
+      createMany: async ({ data }: any) => {
+        for (const d of data) {
+          filas.push({
+            id: `revoca-${++n}`,
+            tenantId: d.tenantId,
+            version: d.version,
+            textSha256: d.textSha256,
+            userId: d.userId,
+            at: d.at ?? new Date(),
+            deviceId: d.deviceId ?? null,
+            ip: d.ip ?? null,
+            userAgent: d.userAgent ?? null,
+            revokesAgreementId: d.revokesAgreementId ?? null,
+          });
+        }
+        return { count: data.length };
+      },
+    },
+  };
+  // El estado de partida: aceptado.
+  aceptar();
+  return api;
+}

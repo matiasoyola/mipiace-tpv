@@ -36,7 +36,11 @@ process.env.CLINICAL_KEK = randomBytes(32).toString("base64");
 process.env.CLINICAL_KEK_ID = "test";
 process.env.PUBLIC_TPV_URL = "https://mipiacetpv.com";
 
-import { cuerpoClaroDe, llaveroFake } from "./clinica-7-claves-fake.js";
+import {
+  contratoFake,
+  cuerpoClaroDe,
+  llaveroFake,
+} from "./clinica-7-claves-fake.js";
 import Fastify from "fastify";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -195,9 +199,13 @@ function entradaCoincide(e: FakeEntry, where: any): boolean {
 
 // clinica-7 · el llavero de la clínica, en memoria.
 const llavero = llaveroFake();
+// Y el contrato de encargado, ACEPTADO: es el estado normal de una clínica
+// que funciona. Sin él, toda escritura clínica contesta 423.
+const contrato = contratoFake(TENANT_ID, DUENA_ID);
 
 const fakePrisma: any = {
   clinicalTenantKey: llavero.modelo,
+  clinicalProcessorAgreement: contrato.modelo,
   $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
     fn(fakePrisma),
   ),
@@ -1526,6 +1534,7 @@ describe("clinica-3 · la pantalla trae lo que el mockup pinta", () => {
         authorUserId: DUENA_ID,
         appointmentId: CITA_VIEJA_ID,
         kind: "TREATMENT_SESSION",
+        bodyCifrado: null,
         body: { v: 1, dolor: 5, tratamientos: [QUIROPODIA] },
         createdAt: new Date("2026-09-21T09:00:00.000Z"),
       },
@@ -1536,6 +1545,7 @@ describe("clinica-3 · la pantalla trae lo que el mockup pinta", () => {
         authorUserId: DUENA_ID,
         appointmentId: "55555555-5555-5555-5555-555555555553",
         kind: "TREATMENT_SESSION",
+        bodyCifrado: null,
         body: { v: 1, dolor: 7, tratamientos: [QUIROPODIA] },
         createdAt: new Date("2026-09-07T09:00:00.000Z"),
       },
@@ -1852,6 +1862,7 @@ function conAlertasDeCarmen() {
     authorUserId: DUENA_ID,
     appointmentId: null,
     kind: "INITIAL_ASSESSMENT",
+    bodyCifrado: null,
     body: { v: 1, respuestas: { diab: "SI", antic: "SI" } },
     createdAt: new Date("2026-09-07T08:00:00.000Z"),
   });
@@ -2171,6 +2182,7 @@ describe("clinica-5 · «Hoy toca» y el pendiente que no se cae", () => {
       authorUserId: DUENA_ID,
       appointmentId: CITA_VIEJA_ID,
       kind: "TREATMENT_SESSION",
+      bodyCifrado: null,
       body: {
         v: 2,
         tipos: ["CIRUGIA"],
@@ -2293,6 +2305,7 @@ describe("clinica-5 · «Hoy toca» y el pendiente que no se cae", () => {
       authorUserId: DUENA_ID,
       appointmentId: CITA_VIEJA_ID,
       kind: "TREATMENT_SESSION",
+      bodyCifrado: null,
       body: { v: 1, dolor: 5, tratamientos: [QUIROPODIA], marcas: {} },
       createdAt: new Date("2026-09-21T09:00:00.000Z"),
     });
@@ -2322,6 +2335,7 @@ describe("clinica-5 · la cabecera de la tarjeta de revisión de cirugía", () =
       authorUserId: DUENA_ID,
       appointmentId: CITA_VIEJA_ID,
       kind: "TREATMENT_SESSION",
+      bodyCifrado: null,
       body: {
         v: 2,
         mapaVersion: 1,

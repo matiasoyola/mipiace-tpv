@@ -33,9 +33,14 @@
 // manos, pero aquí nadie ha perdido nada si la lectura no ocurre. Lo que
 // no se puede perder es la prueba de que ocurrió.
 
+import {
+  CODIGO_CONTRATO_NO_VIGENTE,
+  MENSAJE_CONTRATO_NO_VIGENTE,
+} from "@mipiacetpv/contrato-encargado";
 import type { FastifyReply, FastifyRequest } from "fastify";
 
 import { getPrisma } from "../context.js";
+import { puedeEscribirClinico } from "./contrato.js";
 import { respondeComoRutaInexistente } from "./gate.js";
 import {
   comoPrismaParaAcceso,
@@ -45,6 +50,45 @@ import {
 } from "./acceso.js";
 
 export type AccionClinica = "READ" | "WRITE" | "EXPORT";
+
+// ── clinica-7 · Y ANTES DE ESCRIBIR, EL CONTRATO ─────────────────────
+//
+// Decisión 4: con el contrato de encargado no vigente, la historia pasa a
+// SOLO LECTURA. Se puede leer y exportar todo, y no se puede escribir nada
+// clínico — las rutas de escritura contestan **423** con su código propio.
+//
+// ── Por qué el guard va AQUÍ y no en cada ruta ──────────────────────
+//
+// Por la razón por la que `conHistoria` existe: «cada handler se acuerda»
+// es la forma de fallo que clinica-1 cerró. Hoy hay nueve rutas que
+// escriben historia; dentro de dos bloques habrá quince, y la decimosexta
+// la escribirá alguien con prisa. Con el guard en el envoltorio, **una
+// ruta de escritura nueva nace respetando el contrato sin que su autor lo
+// sepa.**
+//
+// ── Por qué 423 y no 403 ni 409 ─────────────────────────────────────
+//
+// 423 Locked dice exactamente lo que pasa: el recurso existe, tienes
+// permiso, y está bloqueado por un estado que se puede cambiar. Un 403
+// diría «no tienes permiso» —y la podóloga lo tiene— y un 409 diría que
+// hay un conflicto con lo que mandó, y no lo hay: lo que mandó está bien.
+//
+// ── Y el orden: LA LÍNEA DEL REGISTRO PRIMERO ───────────────────────
+//
+// El 423 se comprueba DESPUÉS de apuntar el acceso, no antes. Un intento
+// de escribir con el contrato revocado es justo uno de los que interesa
+// ver en el registro — igual que los denegados por falta de acceso, que
+// clinica-1 decidió apuntar por lo mismo. Se apunta con el `outcome` que
+// le corresponde: `DENIED`, porque el acto no ocurrió.
+//
+// ── Lo que el 423 NO toca ───────────────────────────────────────────
+//
+// `READ` y `EXPORT`. Leer y exportar siguen funcionando con el contrato
+// revocado, y es deliberado: lo que hay en la historia se escribió con el
+// contrato aceptado, y además la Ley 41/2002 obliga a la clínica a
+// conservarla cinco años y a dársela al paciente que la pida. Apagar la
+// lectura al revocar convertiría una revocación administrativa en una
+// infracción sanitaria.
 
 /** Quién hace la petición, resuelto desde las dos puertas de auth. */
 interface Actor {
@@ -242,6 +286,37 @@ export async function conHistoria<T>(
       error: veredicto.motivo,
       code: veredicto.motivo,
       message: veredicto.mensaje,
+    });
+    return undefined;
+  }
+
+  // clinica-7 · EL CONTRATO, y solo para las escrituras. Ver la cabecera:
+  // va después de la línea del registro (un intento de escribir con el
+  // contrato revocado es de los que interesa ver) y antes del handler.
+  if (input.action === "WRITE" && !(await puedeEscribirClinico(actor.tenantId))) {
+    try {
+      await apuntarAcceso({
+        tenantId: actor.tenantId,
+        userId: actor.userId,
+        clientId: input.clientId,
+        action: "WRITE",
+        // DENIED porque el acto NO ocurrió. Una línea ALLOWED sobre una
+        // escritura que se rechazó sería una línea falsa, y un registro
+        // con líneas falsas no sirve para lo que existe.
+        outcome: "DENIED",
+        deviceId: actor.deviceId,
+        route: rutaDe(request),
+      });
+    } catch (err) {
+      request.log.error(
+        { event: "clinical_access_log_failed", err },
+        "no se pudo registrar el intento de escritura con el contrato no vigente",
+      );
+    }
+    reply.code(423).send({
+      error: CODIGO_CONTRATO_NO_VIGENTE,
+      code: CODIGO_CONTRATO_NO_VIGENTE,
+      message: MENSAJE_CONTRATO_NO_VIGENTE,
     });
     return undefined;
   }
