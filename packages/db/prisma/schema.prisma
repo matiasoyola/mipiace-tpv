@@ -693,6 +693,191 @@ enum CareRoleCategory {
   DIRECTIVO
 }
 
+// ── residencia-2 · el catálogo de controles y el plan de cuidados ──────
+//
+// El catálogo de controles es DATO y no código (D-11): dar de alta un
+// control nuevo en 2028 tiene que ser rellenar una fila, no desplegar un
+// `switch`. Lo que SÍ son enums son estas cinco listas, y la frontera es
+// la misma de siempre: es enum lo que, si cambiara, cambiaría el código
+// que lo lee.
+//
+//   · `ControlLayer`     — qué SIGNIFICA el dato. Cada capa se pinta y se
+//     valida distinto, así que añadir una capa es desarrollo.
+//   · `ControlNature`    — si se cumple, si sólo se cuenta o si la genera
+//     el sistema. De aquí sale si un incumplimiento es un incumplimiento.
+//   · `ControlValueDomain` — de qué tipo es el valor. Lo lee el teclado de
+//     la pantalla y el validador del registro.
+//   · `ControlScope`     — del producto o del centro. Es la frontera de
+//     quién puede tocar qué (rama de controles §10).
+//   · `CareFrequencyKind` — cómo se reparte en el tiempo. Cada valor es
+//     una rama de `queToca`, o sea código.
+//
+// Lo que NO es enum y es a propósito: el CÓDIGO del control
+// (`HIGIENE_PERSONAL`, `TEMPERATURA`…), el indicador ISO al que alimenta y
+// las opciones de una escala ordinal. Los tres son dato — el primero
+// porque un centro crea los suyos (`ControlScope.CENTER`), el segundo
+// porque los indicadores de AENOR cambian con la revisión de la norma y no
+// con un despliegue, y el tercero porque el vocabulario de ánimo y
+// cognición es editable por decisión expresa (D-59).
+
+// residencia-2 (rama de controles §2) · LA CAPA de un control: qué clase
+// de pregunta es.
+//
+// Las cuatro capas más la subcapa de escalas, en el orden en que cuesta
+// contestarlas:
+//
+//   · `EXEC`    — ¿se hizo? Un sí/no o un «cuánto comió». Es el 80 % de lo
+//     que una auxiliar registra en un turno.
+//   · `OBS`     — ¿cómo está hoy? Una dimensión con vocabulario ordinal
+//     corto. Se pregunta POR RESIDENTE y no por dimensión (D-16): un
+//     «como siempre» da por buenas todas las dimensiones activas.
+//   · `MEASURE` — una constante: cuánto. Lleva unidad, rango de entrada y
+//     rango de referencia.
+//   · `SCALE`   — una escala validada (Barthel, Lobo, Tinetti, Norton).
+//     Existe en el tipo y **no se siembra en este bloque**: es Fase 2
+//     (D-40, D-55), y se pasará con `ClinicalAssessment`.
+//   · `EVENT`   — lo que genera el sistema por umbral o por ausencia
+//     (D-20). Existe en el tipo y se siembra en residencia-4.
+//
+// El bloque residencia-2 siembra `EXEC`, `OBS` y `MEASURE`. Los otros dos
+// están en el enum desde ya porque el día que se siembren no tiene que
+// haber migración de tipo: añadir un valor de enum en Postgres obliga a
+// partir la migración en dos (lección pagada cuatro veces en este repo).
+enum ControlLayer {
+  EXEC
+  OBS
+  MEASURE
+  SCALE
+  EVENT
+}
+
+// residencia-2 (decisión de producto 3) · LA NATURALEZA de un control: qué
+// significa que no esté registrado.
+//
+//   · `SCHEDULED` — tiene agenda: se CUMPLE o se INCUMPLE. Un cambio
+//     postural que tocaba a las 02:00 y no está es un incumplimiento, y en
+//     residencia-4 un evento por ausencia.
+//   · `ON_DEMAND` — no tiene agenda: sólo se CUENTA. La higiene extra
+//     porque se ha manchado, una deposición. Que no haya ninguno no es un
+//     fallo de nadie; que no haya ninguno en tres días sí es un evento
+//     (D-20), pero eso lo decide el umbral y no la naturaleza.
+//   · `DERIVED`   — la genera el sistema, no una persona. Nada la registra
+//     a mano. Se siembra en residencia-4.
+//
+// La diferencia entre las dos primeras es la razón de que esto no sea un
+// booleano `tieneAgenda`: `queToca` devuelve ocurrencias de las
+// `SCHEDULED` y **ninguna** de las `ON_DEMAND` —el botón está en la
+// pantalla, pero nada «toca»— y un tercer valor sin registro manual no
+// cabría en un booleano.
+enum ControlNature {
+  SCHEDULED
+  ON_DEMAND
+  DERIVED
+}
+
+// residencia-2 · EL DOMINIO DEL VALOR de un control. Lo lee el teclado de
+// la pantalla de la puerta (residencia-3) y el validador del registro.
+//
+//   · `BOOL`       — hecho / no hecho. Un botón.
+//   · `ORDINAL`    — una de las opciones de `ControlTypeOption`, ordenadas
+//     de mejor a peor. «Todo / la mitad / poco / nada».
+//   · `NUMERIC`    — un número con unidad, rango de entrada y rango de
+//     referencia. Las constantes.
+//   · `SCORE`      — la puntuación total de una escala validada. Fase 2.
+//   · `TEXT_SHORT` — texto libre corto. Es lo que lleva el botón «algo no
+//     va bien» (D-46: texto corto opcional, nunca voz en la v1).
+//
+// `ORDINAL` y `SCORE` no son lo mismo aunque los dos sean «un número»: un
+// ordinal tiene cuatro opciones con nombre y un orden, y un `SCORE` tiene
+// un rango continuo y un algoritmo detrás.
+enum ControlValueDomain {
+  BOOL
+  ORDINAL
+  NUMERIC
+  SCORE
+  TEXT_SHORT
+}
+
+// residencia-2 (rama de controles §10, D-21, D-57) · DE QUIÉN ES ESTE
+// CONTROL.
+//
+//   · `STANDARD` — **del producto**. Global (`tenantId` NULL), versionado,
+//     lo mantiene Mi Piace y lo valida la médica del cliente cero (D-57).
+//     Cuando cambia una guía se actualiza aquí y BAJA A TODOS LOS CENTROS
+//     a la vez. El centro no puede tocar ni la capa, ni la naturaleza, ni
+//     el dominio, ni la unidad, ni los rangos, ni el indicador, ni la
+//     lista de frecuencias permitidas.
+//   · `CENTER`   — **del centro** (`tenantId` NOT NULL). Un centro puede
+//     inventarse los suyos; no se mezclan con los de serie y **no bajan a
+//     ningún otro centro**.
+//
+// La correspondencia `scope ⇔ tenantId` la garantiza el CHECK
+// `control_types_scope_exige_tenant` de la migración, no una costumbre:
+// un control de serie con tenant sería un control que una residencia cree
+// que es del producto y que nadie actualiza, y un control de centro sin
+// tenant lo verían los quince clientes de hoy.
+//
+// Es justo al revés que `CareRole`, que residencia-1 sembró POR TENANT
+// (`tenantId` NOT NULL, §4 de su done). La diferencia es quién tiene que
+// poder cambiarlo: que un centro llame «gerocultora» a la auxiliar es
+// suyo y no le interesa a nadie más; que la guía de prevención de úlceras
+// pase de tres horas a dos tiene que llegar a los cinco centros sin un
+// backfill.
+enum ControlScope {
+  STANDARD
+  CENTER
+}
+
+// residencia-2 (alcance §4) · CÓMO SE REPARTE UN CONTROL EN EL TIEMPO.
+//
+// Cada valor es una rama de `queToca` (`packages/residencia-plan`), o sea
+// código, y de ahí que sea un enum y no una tabla. Los parámetros de cada
+// uno van en columnas aparte, y qué columnas exige cada `kind` lo
+// garantiza un CHECK en el motor (`…_frecuencia_coherente`) y no la ruta
+// que escribe: un `EVERY_N_HOURS` sin horas es una línea de plan que la
+// puerta leería y no sabría cuándo pedir.
+//
+//   · `EVERY_SHIFT`   — en cada uno de los turnos indicados. Transferencias.
+//   · `DAILY`         — una vez al día, en UN turno. Hidratación cutánea.
+//   · `MOMENTS`       — en los momentos del día del centro (desayuno,
+//     comida, merienda, cena, noche), con la hora que el centro les ponga
+//     (`CenterMoment`). Las comidas y la medicación.
+//   · `EVERY_N_HOURS` — cada N horas, **también de noche**: los cambios
+//     posturales cada 2–3 h, que es la única frecuencia del catálogo que
+//     no se deja describir con turnos.
+//   · `WEEKDAYS`      — días concretos de la semana, en un turno. La
+//     gimnasia de mantenimiento, lunes-miércoles-viernes.
+//   · `EVERY_N_DAYS`  — cada N días. Una analítica semestral.
+//   · `MONTHLY`       — un día del mes. La visita médica.
+//   · `ON_DEMAND`     — **sin agenda**: el botón está en la pantalla y
+//     nada «toca». `queToca` no devuelve ni una ocurrencia.
+enum CareFrequencyKind {
+  EVERY_SHIFT
+  DAILY
+  MOMENTS
+  EVERY_N_HOURS
+  WEEKDAYS
+  EVERY_N_DAYS
+  MONTHLY
+  ON_DEMAND
+}
+
+// residencia-2 (alcance §5) · DE DÓNDE SALIÓ UNA LÍNEA DEL PLAN.
+//
+//   · `PROFILE_TEMPLATE` — la puso la plantilla del nivel de dependencia
+//     del residente al darle de alta o al cambiarle el nivel.
+//   · `MANUAL`           — la puso una persona para este residente.
+//
+// La diferencia es la que sostiene el cambio de nivel: al pasar a un nivel
+// nuevo se cierran las líneas de plantilla del nivel ANTERIOR que no estén
+// en la nueva, se abren las que falten y **las manuales no se tocan**. Sin
+// esta columna, cambiar el nivel de dependencia borraría el ajuste que la
+// DUE hizo a mano, que es justo el trabajo que nadie quiere repetir.
+enum CarePlanItemSource {
+  PROFILE_TEMPLATE
+  MANUAL
+}
+
 // ── Multi-tenant raíz ─────────────────────────────────────────────────
 
 model Tenant {
@@ -1049,6 +1234,14 @@ model Tenant {
   bedAssignments                BedAssignment[]
   careRoles                     CareRole[]
   careRoleAssignments           CareRoleAssignment[]
+  // residencia-2 · el catálogo propio del centro (los `STANDARD` no
+  // cuelgan de ningún tenant), sus ajustes de cada control, sus momentos
+  // del día, sus plantillas por nivel y el plan de sus residentes.
+  controlTypes                  ControlType[]
+  centerControlSettings         CenterControlSetting[]
+  centerMoments                 CenterMoment[]
+  carePlanTemplateItems         CarePlanTemplateItem[]
+  carePlanItems                 CarePlanItem[]
   careZoneAssignments           CareZoneAssignment[]
   centerShifts                  CenterShift[]
 
@@ -1355,6 +1548,10 @@ model User {
   careZoneAssignments     CareZoneAssignment[]           @relation("CareZoneAssignmentUser")
   careZonesGranted        CareZoneAssignment[]           @relation("CareZoneAssignmentGrantedBy")
   bedAssignmentsCreated   BedAssignment[]                @relation("BedAssignmentCreatedBy")
+  // residencia-2 · quién abrió y quién cerró una línea del plan. `SetNull`
+  // a los dos lados: dar de baja a la DUE no borra que ajustó el plan.
+  carePlanItemsCreated    CarePlanItem[]                 @relation("CarePlanItemCreatedBy")
+  carePlanItemsClosed     CarePlanItem[]                 @relation("CarePlanItemClosedBy")
 
   @@index([tenantId])
   @@map("users")
@@ -3025,6 +3222,9 @@ model Client {
   // que lo clínico y por la misma ley.
   residentProfile     ResidentProfile?
   bedAssignments      BedAssignment[]
+  // residencia-2 · su plan de cuidados. `Restrict`: un residente con plan
+  // no se borra.
+  carePlanItems       CarePlanItem[]
 
   // Búsqueda por teléfono/email y orden alfabético (A–Z) por tenant.
   @@index([tenantId, phone])
@@ -4834,7 +5034,7 @@ model ResidentProfile {
 
   /// Cuándo ingresó. `@db.Date` y no timestamp: nadie apunta la hora del
   /// ingreso y pedirla sería un campo que se rellena mal.
-  admissionDate DateTime @map("admission_date") @db.Date
+  admissionDate   DateTime  @map("admission_date") @db.Date
   /// Cuándo se le dio de alta, y por qué. NULL en quien sigue viviendo
   /// aquí. El motivo es texto corto y libre a propósito: «se va con su
   /// hija», «traslado a hospital», «fallecimiento». Un enum habría
@@ -4926,9 +5126,9 @@ model Room {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  floor  Floor  @relation(fields: [floorId], references: [id], onDelete: Restrict)
-  beds   Bed[]
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  floor        Floor         @relation(fields: [floorId], references: [id], onDelete: Restrict)
+  beds         Bed[]
   /// La tablet de esta puerta (como mucho una viva, por el índice parcial
   /// `devices_one_active_per_room_key`) y los códigos pendientes de
   /// emparejar.
@@ -5002,12 +5202,12 @@ model BedAssignment {
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
   createdByUserId String?  @map("created_by_user_id") @db.Uuid
 
-  tenant    Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  bed       Bed     @relation(fields: [bedId], references: [id], onDelete: Restrict)
-  client    Client  @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  bed       Bed    @relation(fields: [bedId], references: [id], onDelete: Restrict)
+  client    Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
   /// `SetNull`: dar de baja a la encargada que movió de habitación a doña
   /// Carmen no puede borrar el hecho de que se movió.
-  createdBy User?   @relation("BedAssignmentCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdBy User?  @relation("BedAssignmentCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
 
   @@index([tenantId])
   @@index([bedId])
@@ -5106,8 +5306,8 @@ model CareRoleAssignment {
   fromAt DateTime  @map("from_at") @db.Timestamptz()
   toAt   DateTime? @map("to_at") @db.Timestamptz()
 
-  grantedAt       DateTime @default(now()) @map("granted_at") @db.Timestamptz()
-  grantedByUserId String?  @map("granted_by_user_id") @db.Uuid
+  grantedAt       DateTime  @default(now()) @map("granted_at") @db.Timestamptz()
+  grantedByUserId String?   @map("granted_by_user_id") @db.Uuid
   /// La REVOCACIÓN, que es otra cosa que `toAt`: una fecha de fin prevista
   /// la pone quien da el rol; una revocación la pone quien lo quita, el día
   /// que lo quita. Las dos quitan el rol; sólo una dice que alguien lo
@@ -5182,16 +5382,16 @@ model CareZoneAssignment {
 /// pared de `Europe/Madrid` y compara — y sabe que la noche CRUZA
 /// MEDIANOCHE (`endsAt <= startsAt`).
 model CenterShift {
-  id       String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
+  id        String @id @default(uuid()) @db.Uuid
+  tenantId  String @map("tenant_id") @db.Uuid
   /// `M`, `T`, `N` en los de serie. Único por centro: es como lo nombra el
   /// cuadrante.
-  code     String
-  name     String
+  code      String
+  name      String
   /// «HH:MM», 24 h. CHECK de formato en la migración.
-  startsAt String @map("starts_at")
-  endsAt   String @map("ends_at")
-  sortOrder Int   @default(0) @map("sort_order")
+  startsAt  String @map("starts_at")
+  endsAt    String @map("ends_at")
+  sortOrder Int    @default(0) @map("sort_order")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
@@ -5201,4 +5401,537 @@ model CenterShift {
   @@unique([tenantId, code])
   @@index([tenantId])
   @@map("center_shifts")
+}
+
+// ══ residencia-2 · el catálogo de controles y el plan de cuidados ══════
+//
+// Lo que este bloque construye es **qué se registra, a quién y cuándo**.
+// No registra nada: eso es la pantalla de la puerta (residencia-3), que
+// sólo tendrá que llamar a `queToca`.
+//
+// Hoy esto vive en prosa dentro del PAI («hidratación cutánea diaria»,
+// «toma de peso según protocolo») y en la cabeza del personal. Nadie puede
+// sacar de ahí un plan del día sin releerlo, y nadie puede contar un
+// indicador de AENOR sin repasar 49 carpetas. Por eso el catálogo es DATO
+// (D-11) y por eso cada control sabe a qué indicador alimenta.
+//
+// ── Las cinco piezas y en qué orden se leen ──────────────────────────
+//
+//   1. `ControlType`           — el catálogo. Global y versionado para lo
+//      de serie; por tenant para lo que el centro se invente.
+//   2. `ControlTypeOption`     — las opciones de un control ordinal, con
+//      cuál es su «como siempre» (D-16, D-59).
+//   3. `CenterControlSetting`  — qué decide el centro de cada control,
+//      SIEMPRE dentro de lo que el producto permite.
+//   4. `CenterMoment`          — los momentos del día del centro, con su
+//      hora. El desayuno de Jardín de Gredos es a las nueve.
+//   5. `CarePlanTemplateItem` + `CarePlanItem` — qué le toca a un nivel de
+//      dependencia y qué le toca a una persona.
+//
+// Decisiones en `docs/residencia/00-decisiones.md` (D-11, D-16, D-21,
+// D-53, D-57, D-59, D-60) y el mapa en `01-modelo-datos.md`.
+
+/// residencia-2 (D-11, rama de controles §1) · EL CATÁLOGO DE CONTROLES.
+///
+/// Una fila = «una cosa que se registra de un residente», con todo lo que
+/// hace falta para pintarla, validarla, agendarla y contarla. Dar de alta
+/// un control nuevo es un INSERT, no un despliegue: ésa es la decisión
+/// entera (D-11).
+///
+/// ── GLOBAL Y VERSIONADO, no una copia por tenant ─────────────────────
+///
+/// Lo de serie (`scope = STANDARD`) tiene `tenantId` NULL y **lo ven todos
+/// los centros**. Cuando cambia una guía clínica se actualiza en el
+/// producto y baja a todos a la vez (D-21, D-57). Es justo lo contrario
+/// que `CareRole`, que residencia-1 sembró por tenant, y la diferencia es
+/// quién tiene que poder cambiarlo: que un centro llame «gerocultora» a la
+/// auxiliar no le interesa a nadie más; que la prevención de úlceras pase
+/// de tres horas a dos tiene que llegar a los cinco centros sin backfill.
+///
+/// ── UNA VERSIÓN USADA NO SE EDITA ────────────────────────────────────
+///
+/// Se crea la siguiente con su `validFrom` y se le pone `supersededAt` a
+/// la anterior. Lo que ya se registró sigue apuntando a la versión con la
+/// que se registró (residencia-3 guardará `controlTypeId`, no el código),
+/// así que «¿qué rango de referencia tenía la temperatura cuando se apuntó
+/// esto?» se puede contestar tres años después — que es lo que una
+/// auditoría pregunta.
+///
+/// **Una sola versión vigente por código**, y hacen falta DOS índices
+/// parciales para decirlo (ver la migración): en Postgres los NULL son
+/// distintos entre sí, así que un único índice sobre
+/// `(scope, tenant_id, code) WHERE superseded_at IS NULL` dejaría entrar
+/// dos versiones vigentes de un control de serie. Misma lección exacta que
+/// `care_zone_assignments_one_live_centro_key` en residencia-1.
+///
+/// ── LO QUE EL CENTRO NO PUEDE TOCAR ──────────────────────────────────
+///
+/// Todas las columnas de esta tabla, en los de serie. La capa, la
+/// naturaleza, el dominio, la unidad, los rangos, las opciones ordinales,
+/// el indicador ISO y **la lista de frecuencias permitidas** son del
+/// producto (rama de controles §10). Lo que el centro decide vive en
+/// `CenterControlSetting`, y lo que decide es un subconjunto de lo que
+/// aquí se permite.
+///
+/// Los **umbrales** que disparan eventos NO están aquí: son residencia-4
+/// (`ClinicalThreshold`, versionado aparte, con excepción por residente
+/// por prescripción médica, D-21/D-22). `refMin`/`refMax` es «lo normal»
+/// para pintarlo en gris o en ámbar, no «avisa a la DUE».
+model ControlType {
+  id String @id @default(uuid()) @db.Uuid
+
+  /// De quién es este control y de qué centro. `tenantId` es NULL si y
+  /// sólo si `scope = STANDARD`, por el CHECK
+  /// `control_types_scope_exige_tenant`.
+  scope    ControlScope
+  tenantId String?      @map("tenant_id") @db.Uuid
+
+  /// El código estable del control: `HIGIENE_PERSONAL`, `TEMPERATURA`,
+  /// `ANIMO`. **Es la identidad del control a través de las versiones**, y
+  /// por eso es lo que referencian `CenterControlSetting`,
+  /// `CarePlanTemplateItem` y `CarePlanItem`: un ajuste del centro y una
+  /// línea de plan sobreviven a una versión nueva del catálogo.
+  code    String
+  /// La versión de ESTE código, desde 1. Lo que sube la versión es un
+  /// cambio del producto (una guía nueva), no un cambio del centro.
+  version Int    @default(1)
+
+  /// Cómo lo llama el producto. El centro puede ponerle un alias en su
+  /// glosario local (`CenterControlSetting.alias`) sin tocar esto.
+  name String
+
+  layer       ControlLayer
+  nature      ControlNature
+  valueDomain ControlValueDomain @map("value_domain")
+
+  /// ── Sólo `MEASURE` / `NUMERIC` ────────────────────────────────────
+  ///
+  /// `unit` es el texto que se pinta junto al número («°C», «mmHg»).
+  ///
+  /// `inputMin`/`inputMax` es **lo que la pantalla deja teclear**: una
+  /// temperatura de 3,65 °C es un dedo que se saltó una tecla, y atajarlo
+  /// en el teclado cuesta cero y evita un evento falso en residencia-4.
+  ///
+  /// `refMin`/`refMax` es **lo normal**, para pintar el valor en gris o en
+  /// ámbar. NO es un umbral de aviso: los umbrales son residencia-4 y van
+  /// en su propia tabla versionada, porque admiten excepción por residente
+  /// con prescripción médica firmada (D-21, D-22) y un rango de referencia
+  /// no.
+  unit     String?
+  inputMin Decimal? @map("input_min") @db.Decimal(10, 2)
+  inputMax Decimal? @map("input_max") @db.Decimal(10, 2)
+  refMin   Decimal? @map("ref_min") @db.Decimal(10, 2)
+  refMax   Decimal? @map("ref_max") @db.Decimal(10, 2)
+
+  /// residencia-2 · controles que se TOMAN JUNTOS y se pintan juntos.
+  ///
+  /// Hoy sólo la tensión: `TA_SISTOLICA` y `TA_DIASTOLICA` llevan los dos
+  /// `groupCode = "TA"`. Son dos controles y no uno compuesto —la decisión
+  /// está explicada en el done del bloque— porque un umbral de
+  /// residencia-4 es por valor («sistólica ≥ 180», plantilla de gravedad
+  /// de D-56) y un dominio `NUMERIC` tiene una unidad y un rango, no dos.
+  /// Lo que la agrupación compra es que la pantalla pida «120 / 80» de una
+  /// vez en vez de abrir dos veces el teclado.
+  groupCode String? @map("group_code")
+
+  /// ── La frontera, en dos listas ────────────────────────────────────
+  ///
+  /// `allowedFrequencies` · las frecuencias que el producto admite para
+  /// este control. El centro elige **dentro** de ésta y no puede
+  /// ensancharla: una analítica no se hace «cada turno» por mucho que la
+  /// pantalla lo dejara teclear.
+  ///
+  /// `allowedCareRoleCodes` · los roles de cuidado que pueden registrarlo.
+  /// El centro puede ESTRECHARLO (que la medicación la dé sólo la DUE) y
+  /// no ensancharlo (que la dé la limpiadora). Son CÓDIGOS de `CareRole` y
+  /// no FKs a propósito: `CareRole` es por tenant (residencia-1 §4) y este
+  /// catálogo es global, así que una FK sería imposible de escribir para
+  /// una fila `STANDARD`. La validación cruzada vive en la ruta, como el
+  /// requisito de colegiado de residencia-1.
+  allowedFrequencies   CareFrequencyKind[] @default([]) @map("allowed_frequencies")
+  allowedCareRoleCodes String[]            @default([]) @map("allowed_care_role_codes")
+
+  /// ── La frecuencia DE SERIE ────────────────────────────────────────
+  ///
+  /// La que el centro se encuentra puesta al encender el módulo, y que
+  /// puede cambiar por otra de `allowedFrequencies`. Qué parámetros exige
+  /// cada `kind` lo garantiza el CHECK `control_types_frecuencia_coherente`
+  /// y no la ruta que escribe.
+  ///
+  /// Columnas explícitas y no un `Json`, por la misma razón que el
+  /// semáforo de cocina (`Store.kitchenGreenMaxMin`): esto tiene que poder
+  /// llevar CHECK en la base, y un JSON no puede. Y porque `queToca` lo
+  /// recorre en bucle por residente y por línea: un parse por línea sería
+  /// trabajo por nada, y una forma que la base no garantiza obliga a la
+  /// función pura a defenderse de datos imposibles.
+  defaultFrequencyKind CareFrequencyKind @map("default_frequency_kind")
+  defaultEveryNHours   Int?              @map("default_every_n_hours")
+  defaultEveryNDays    Int?              @map("default_every_n_days")
+  defaultWeekdays      Int[]             @default([]) @map("default_weekdays")
+  defaultMonthDay      Int?              @map("default_month_day")
+  defaultShiftCodes    String[]          @default([]) @map("default_shift_codes")
+  defaultMomentCodes   String[]          @default([]) @map("default_moment_codes")
+
+  /// A qué indicador de calidad alimenta este control (ISO 9001 / AENOR).
+  /// Texto y no enum: los indicadores cambian con la revisión de la norma
+  /// y con lo que la auditoría pida, y eso no puede ser una migración.
+  /// residencia-5 los cuenta.
+  isoIndicatorCode String? @map("iso_indicator_code")
+
+  /// Visibilidad para la familia **por defecto**: interno (D-60). El
+  /// centro la cambia en su ajuste. No hay portal en la v1; la columna
+  /// está desde ya porque es una columna hoy y un bloque mañana.
+  familyVisibleDefault Boolean @default(false) @map("family_visible_default")
+
+  /// En qué orden se pinta dentro de su capa. No se deduce del nombre: el
+  /// desayuno va antes que la comida y alfabéticamente no.
+  sortOrder Int @default(0) @map("sort_order")
+
+  /// Desde cuándo rige esta versión, y desde cuándo la sustituyó la
+  /// siguiente. `supersededAt` NULL = **versión vigente**, y es lo que
+  /// miran los dos índices parciales.
+  validFrom    DateTime  @map("valid_from") @db.Timestamptz()
+  supersededAt DateTime? @map("superseded_at") @db.Timestamptz()
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  /// `Cascade` al tenant y sólo alcanza a los `CENTER`: los `STANDARD` no
+  /// tienen tenant y no los borra nadie. Un control propio de un centro
+  /// que se da de baja se va con él, igual que sus plantas.
+  tenant  Tenant?             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  options ControlTypeOption[]
+
+  @@index([scope, code])
+  @@index([tenantId])
+  @@index([layer, sortOrder])
+  @@map("control_types")
+}
+
+/// residencia-2 (D-16, D-59) · LAS OPCIONES DE UN CONTROL ORDINAL.
+///
+/// «Todo / la mitad / poco / nada» para una comida; «bien / apagado /
+/// triste / inquieto / agresivo» para el ánimo. Ordenadas de mejor a peor,
+/// que es como se pintan y como las lee un indicador.
+///
+/// ── `isAsUsual`, que es la mitad del producto ────────────────────────
+///
+/// D-16: el coste de registrar es proporcional a la anomalía. La
+/// observación diaria se pregunta POR RESIDENTE y no por dimensión: un
+/// solo toque en «como siempre» da por buenas **todas** las dimensiones
+/// `OBS` activas, y sólo se despliega lo que se desvía. Para que ese toque
+/// sepa qué guardar en cada dimensión, cada dimensión tiene que declarar
+/// cuál es su valor «como siempre» — y eso es esta columna.
+///
+/// **Como mucho una por control**, por índice parcial
+/// (`control_type_options_un_como_siempre_key`): con dos, el toque de
+/// «como siempre» tendría que elegir y acabaría eligiendo el orden de la
+/// lista. Con ninguna, la dimensión simplemente no entra en el atajo y se
+/// pregunta siempre — que es correcto para una comida («todo» no es «como
+/// siempre», es «se lo comió todo hoy»).
+///
+/// Tabla y no un `Json` en `ControlType` por eso mismo: la unicidad del
+/// «como siempre» es un invariante del motor, y un JSON no lleva índice
+/// parcial.
+model ControlTypeOption {
+  id            String @id @default(uuid()) @db.Uuid
+  controlTypeId String @map("control_type_id") @db.Uuid
+
+  /// El código estable de la opción (`MITAD`, `APAGADO`). Es lo que
+  /// guardará el registro de residencia-3, para que cambiarle el texto no
+  /// reescriba el histórico.
+  code  String
+  /// Lo que lee el personal. Es el vocabulario del cliente y es editable
+  /// (D-59): cambiarlo no es un desarrollo.
+  label String
+
+  /// El orden: de mejor a peor. Lo pinta la pantalla y lo usa el
+  /// indicador.
+  sortOrder Int @default(0) @map("sort_order")
+
+  /// ¿Es ésta la opción que da por buena el toque de «como siempre»?
+  /// Como mucho una por control.
+  isAsUsual Boolean @default(false) @map("is_as_usual")
+
+  controlType ControlType @relation(fields: [controlTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([controlTypeId, code])
+  @@index([controlTypeId, sortOrder])
+  @@map("control_type_options")
+}
+
+/// residencia-2 (alcance §2, rama de controles §10) · LO QUE EL CENTRO
+/// DECIDE DE CADA CONTROL.
+///
+/// La otra mitad de la frontera. Aquí vive **todo** lo que un centro puede
+/// tocar, y nada más: si lo activa, cómo lo llama en su glosario, cada
+/// cuánto lo quiere de serie, quién lo registra y si lo ve la familia.
+///
+/// ── La clave es el CÓDIGO, no el id de la versión ────────────────────
+///
+/// `(tenantId, controlCode)`. Y es la decisión del fichero: una versión
+/// nueva de un control de serie **conserva** el ajuste del centro. Si la
+/// clave fuera `controlTypeId`, cada actualización del catálogo clínico
+/// dejaría a los cinco centros con sus ajustes huérfanos y la DUE tendría
+/// que volver a decir que la medicación la da ella.
+///
+/// Cuando una versión nueva deja el ajuste inválido —p. ej. retira la
+/// frecuencia que el centro había elegido— el ajuste se **reconduce** a la
+/// de serie y queda anotado (`reconductedAt` y las dos columnas que lo
+/// acompañan) para que el panel lo diga. Reconducir en silencio es cambiar
+/// el plan de 49 personas sin decírselo a nadie.
+///
+/// Y de ahí sale una regla que la ruta tiene que vigilar: **un control
+/// propio del centro no puede llevar el código de uno de serie**. Si
+/// pudiera, `(tenantId, code)` ya no sabría de cuál de los dos es el
+/// ajuste. La ruta de crear un control propio contesta 409; tiene su test.
+model CenterControlSetting {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  /// El código del control, de serie o propio. No es una FK por lo dicho
+  /// arriba: apunta a la IDENTIDAD del control, no a una de sus versiones.
+  controlCode String @map("control_code")
+
+  /// ¿Lo usa este centro? Un control desactivado **no «toca» nunca**
+  /// —`queToca` no devuelve ocurrencias suyas— y su botón no sale en la
+  /// puerta. Desactivar no borra las líneas de plan que lo nombran: el
+  /// centro puede volver a activarlo y el plan sigue ahí.
+  active Boolean @default(true)
+
+  /// El glosario local. `NULL` = se usa el nombre del producto. Que un
+  /// centro llame «aseo» a la higiene personal es suyo, igual que llamar
+  /// «gerocultora» a la auxiliar.
+  alias String?
+
+  /// La frecuencia POR DEFECTO de este centro, que tiene que estar en
+  /// `ControlType.allowedFrequencies` de la versión vigente. Lo valida la
+  /// ruta (es una regla que cruza dos tablas, así que no cabe en un CHECK,
+  /// igual que el colegiado de residencia-1); el CHECK de la base garantiza
+  /// la coherencia entre el `kind` y sus parámetros.
+  frequencyKind CareFrequencyKind @map("frequency_kind")
+  everyNHours   Int?              @map("every_n_hours")
+  everyNDays    Int?              @map("every_n_days")
+  weekdays      Int[]             @default([])
+  monthDay      Int?              @map("month_day")
+  shiftCodes    String[]          @default([]) @map("shift_codes")
+  momentCodes   String[]          @default([]) @map("moment_codes")
+
+  /// Quién lo registra en ESTE centro. Subconjunto de
+  /// `ControlType.allowedCareRoleCodes`: se puede estrechar, no ensanchar.
+  /// Vacío = los que el producto permite.
+  careRoleCodes String[] @default([]) @map("care_role_codes")
+
+  /// ¿Lo ve la familia? Nace en `ControlType.familyVisibleDefault`, que es
+  /// `false` (D-60: todo interno por defecto). No hay portal en la v1.
+  familyVisible Boolean @default(false) @map("family_visible")
+
+  /// ── La reconducción, anotada ──────────────────────────────────────
+  ///
+  /// Se rellenan cuando una versión nueva del control deja este ajuste
+  /// inválido y el sistema lo lleva a la frecuencia de serie. El panel lo
+  /// pinta; nadie lo borra salvo el centro al volver a elegir.
+  reconductedAt          DateTime? @map("reconducted_at") @db.Timestamptz()
+  reconductedFromVersion Int?      @map("reconducted_from_version")
+  reconductedReason      String?   @map("reconducted_reason")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, controlCode])
+  @@index([tenantId])
+  @@index([tenantId, active])
+  @@map("center_control_settings")
+}
+
+/// residencia-2 (alcance §4) · LOS MOMENTOS DEL DÍA DEL CENTRO.
+///
+/// Desayuno, comida, merienda, cena y noche, **con su hora**. El desayuno
+/// de Jardín de Gredos es a las nueve y el de otro centro a las ocho y
+/// media, y eso cambia a qué hora «toca» la medicación del desayuno.
+///
+/// Se llama `CenterMoment` y no `MealMoment` (que es como lo nombraba el
+/// prompt) porque la noche no es una comida y la medicación nocturna
+/// cuelga de ella.
+///
+/// Por tenant, con los cinco de serie sembrados al encender el módulo —la
+/// misma decisión que `CenterShift`, y por la misma razón: una pantalla
+/// con «añade tu primer momento» es una pantalla que no sabe lo que hace
+/// una residencia.
+///
+/// La hora es de PARED «HH:MM», como `CenterShift.startsAt` y por lo
+/// mismo: «el desayuno es a las nueve» no cambia el día del cambio de
+/// hora, y guardarlo como instante obligaría a reescribir filas dos veces
+/// al año.
+model CenterMoment {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  /// `DESAYUNO`, `COMIDA`, `MERIENDA`, `CENA`, `NOCHE` en los de serie.
+  /// Es lo que referencian `momentCodes`.
+  code String
+  name String
+
+  /// «HH:MM», 24 h. CHECK de formato en la migración, el mismo que
+  /// `center_shifts`.
+  atTime String @map("at_time")
+
+  sortOrder Int @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("center_moments")
+}
+
+/// residencia-2 (alcance §5, D-53) · LA PLANTILLA DE UN NIVEL DE
+/// DEPENDENCIA: qué lleva un válido, un semiasistido y un dependiente.
+///
+/// Una fila = un control dentro de la plantilla de un nivel, con la
+/// frecuencia que ese nivel le pone. Al dar de alta a un residente se le
+/// aplican las filas de su nivel; al cambiarle el nivel se recalcula (y
+/// las líneas manuales no se tocan).
+///
+/// ── La de serie vive en el PRODUCTO, no en esta tabla ────────────────
+///
+/// Esta tabla es **la copia del centro**, editable, con `tenantId` NOT
+/// NULL. La plantilla de serie vive en un fichero de datos del repo
+/// (`residencia/catalogo/plantillas-de-serie.ts`) y de ahí se copia al
+/// encender el módulo.
+///
+/// Es una decisión y está en el done: los únicos dos que leen la plantilla
+/// de serie son la semilla y el botón de «volver a la de serie», y los dos
+/// leen el fichero. Meterla también en la base habría obligado a un
+/// `scope`/`tenantId?` con sus dos índices parciales —la misma factura que
+/// paga `ControlType`— para una tabla que nadie consulta en caliente.
+///
+/// Sin tabla padre: la plantilla ES su lista de filas. Un nivel sin
+/// ninguna fila es un nivel sin plan por defecto, que es un estado
+/// legítimo (el válido lleva poco) y no hace falta una fila para decirlo.
+model CarePlanTemplateItem {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  /// A qué nivel de dependencia pertenece esta línea de plantilla.
+  dependencyLevel DependencyLevel @map("dependency_level")
+  /// El código del control. Como en `CenterControlSetting`, no es una FK:
+  /// apunta a la identidad del control y sobrevive a sus versiones.
+  controlCode     String          @map("control_code")
+
+  /// La frecuencia que este NIVEL le pone al control, que puede no ser la
+  /// del centro: el dependiente lleva cambios posturales cada 3 h y el
+  /// válido no los lleva en absoluto. Mismo CHECK de coherencia.
+  frequencyKind CareFrequencyKind @map("frequency_kind")
+  everyNHours   Int?              @map("every_n_hours")
+  everyNDays    Int?              @map("every_n_days")
+  weekdays      Int[]             @default([])
+  monthDay      Int?              @map("month_day")
+  shiftCodes    String[]          @default([]) @map("shift_codes")
+  momentCodes   String[]          @default([]) @map("moment_codes")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, dependencyLevel, controlCode])
+  @@index([tenantId, dependencyLevel])
+  @@map("care_plan_template_items")
+}
+
+/// residencia-2 (alcance §5, D-53) · EL PLAN DE CUIDADOS DE UN RESIDENTE,
+/// como dato.
+///
+/// Una fila = «a esta persona le toca este control con esta frecuencia,
+/// desde este día». Es lo que `queToca` lee y lo que la puerta pedirá en
+/// residencia-3. Nada se lee del PAI en prosa.
+///
+/// ── UNA LÍNEA NO SE BORRA NI SE EDITA: se CIERRA ─────────────────────
+///
+/// `toAt` con fecha, y la fila se queda. Dos razones, y la segunda es la
+/// que manda:
+///
+///   1. «¿Qué le tocaba a doña Carmen el 3 de marzo?» es una pregunta que
+///      una residencia tiene que poder contestar a una familia, a la
+///      Consejería o a un juzgado. Con líneas editables, la respuesta
+///      sería siempre la de hoy.
+///   2. Por eso la frecuencia está **materializada aquí** y no se hereda
+///      del ajuste del centro: si se heredara, cambiar hoy el defecto del
+///      centro reescribiría el plan de los últimos tres años. La línea se
+///      crea copiando la frecuencia que el centro tenía puesta en ese
+///      momento, y cambiarle la frecuencia es **cerrar una y abrir otra**,
+///      en la misma transacción y en ese orden — exactamente como cambiar
+///      de habitación en `BedAssignment`.
+///
+/// Lo único mutable de una fila es `toAt` y su motivo de cierre.
+///
+/// **Una línea viva por (residente, control)**, por índice parcial
+/// (`care_plan_items_one_live_key`, `WHERE to_at IS NULL`): dos líneas
+/// vivas del mismo control con frecuencias distintas son dos respuestas a
+/// «¿cada cuánto se le cambia de postura?», y la puerta tendría que elegir.
+/// El histórico cabe porque el índice es parcial — misma lección que
+/// `bed_assignments_one_live_per_client_key`.
+model CarePlanItem {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  clientId String @map("client_id") @db.Uuid
+
+  controlCode String @map("control_code")
+
+  frequencyKind CareFrequencyKind @map("frequency_kind")
+  everyNHours   Int?              @map("every_n_hours")
+  everyNDays    Int?              @map("every_n_days")
+  weekdays      Int[]             @default([])
+  monthDay      Int?              @map("month_day")
+  shiftCodes    String[]          @default([]) @map("shift_codes")
+  momentCodes   String[]          @default([]) @map("moment_codes")
+
+  /// Desde cuándo rige y hasta cuándo. `toAt` NULL = **línea viva**, y es
+  /// lo que mira el índice parcial. `fromAt` es lo que hace que un
+  /// residente dado de alta a mitad del periodo no tenga ocurrencias
+  /// antes de ingresar: tiene su caso en la tabla de `queToca`.
+  fromAt DateTime  @map("from_at") @db.Timestamptz()
+  toAt   DateTime? @map("to_at") @db.Timestamptz()
+
+  /// De dónde salió. De esto depende el cambio de nivel: se cierran las de
+  /// plantilla del nivel anterior que no estén en la nueva y **las
+  /// manuales no se tocan**.
+  source CarePlanItemSource
+
+  /// De QUÉ nivel era la plantilla que la puso. NULL en las manuales. Sin
+  /// esta columna, al cambiar de nivel no se podría distinguir «esto lo
+  /// puso la plantilla de semiasistido» de «esto lo puso la plantilla de
+  /// dependiente», y el recálculo cerraría líneas que siguen vigentes.
+  sourceLevel DependencyLevel? @map("source_level")
+
+  /// Por qué se abrió y por qué se cerró. Texto corto: «alta»,
+  /// «cambio a dependiente», «lo pide la DUE». No alimenta nada
+  /// automático.
+  reason      String?
+  closeReason String? @map("close_reason")
+
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  createdByUserId String?  @map("created_by_user_id") @db.Uuid
+  closedByUserId  String?  @map("closed_by_user_id") @db.Uuid
+
+  /// `Restrict` al tenant y al residente, igual que `BedAssignment`: el
+  /// plan de una persona es parte de lo que se conserva cinco años, y un
+  /// residente con plan no se borra.
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client    Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  /// `SetNull` en las dos personas: dar de baja a la DUE que ajustó el
+  /// plan no puede borrar el hecho de que lo ajustó.
+  createdBy User?  @relation("CarePlanItemCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  closedBy  User?  @relation("CarePlanItemClosedBy", fields: [closedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([tenantId, clientId])
+  @@index([clientId, controlCode])
+  @@map("care_plan_items")
 }
