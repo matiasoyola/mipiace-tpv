@@ -767,6 +767,7 @@ fe94480 feat(residencia-1): las pantallas del centro y el modo puerta de la APK
 
 ## 15 · La rama
 
-<pendiente de completar al hacer push y abrir el PR>
+Sobre `master` = `3c15954`. **Pusheada**, y el PR contra `master` es el
+[**#21**](https://github.com/matiasoyola/mipiace-tpv/pull/21).
 
 **Ni merge ni despliegue: eso lo hace Dirección.**
