@@ -73,6 +73,7 @@ import {
 } from "@mipiacetpv/clinica-sesion";
 
 import { ApiError, apiBlobWithCashier, apiWithCashier } from "../api.js";
+import { GuardaDelContrato } from "./ContratoDeTratamiento.js";
 import { MapaDelPie, type EstadoDeZona } from "./MapaDelPie.js";
 import {
   ComparadorAntesDespues,
@@ -381,6 +382,17 @@ export function HistoriaViva(props: {
   }
 
   return (
+    // clinica-7 · LA GUARDA DEL CONTRATO.
+    //
+    // Envuelve la pantalla entera: sin contrato aceptado, lo de dentro NO
+    // SE MONTA (la API no da datos, así que no hay historia que pintar) y
+    // se ve la pantalla de aceptación o el aviso. En solo lectura, la banda
+    // arriba y la historia debajo.
+    //
+    // Va DENTRO del componente y no en quien lo monta, a propósito:
+    // `HistoriaViva` se abre desde la agenda y desde la ficha del cliente,
+    // y el día que se abra desde un tercer sitio seguirá protegida.
+    <GuardaDelContrato>
     <div className="pb-6" data-test="historia-viva">
       {/* ── La cabecera ─────────────────────────────────────────── */}
       <div className="flex gap-4 items-center flex-wrap">
@@ -757,6 +769,7 @@ export function HistoriaViva(props: {
         />
       )}
     </div>
+    </GuardaDelContrato>
   );
 }
 

@@ -200,6 +200,58 @@ export async function apiBlobWithCashier(
   }
 }
 
+/**
+ * clinica-7 · un BINARIO sin sesión. El hermano público de
+ * `apiBlobWithCashier`.
+ *
+ * Lo usa la pantalla del informe por enlace: el PDF lo sirve la ruta
+ * pública, y quien lo abre no es un usuario del sistema — su credencial es
+ * la URL más la clave de 6 cifras, que va en el cuerpo del POST.
+ *
+ * Y no se hace con `send` + una bandera: `send` lee el cuerpo con
+ * `res.text()`, y un PDF leído como texto llega corrupto. Es la misma
+ * razón por la que `apiBlobWithCashier` existe aparte.
+ */
+export async function apiBlobPublic(
+  path: string,
+  opts: ApiOpts = {},
+): Promise<{ blob: Blob; headers: Headers }> {
+  const url = path.startsWith("http") ? path : `${BASE_URL}${path}`;
+  const res = await fetch(url, {
+    method: opts.method ?? "GET",
+    headers: {
+      ...(opts.body !== undefined
+        ? { "Content-Type": "application/json" }
+        : {}),
+      ...opts.headers,
+    },
+    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    signal: opts.signal,
+  });
+  if (!res.ok) {
+    // El cuerpo de error SÍ es JSON, y su mensaje está escrito para la
+    // persona que tiene la pantalla delante: se lee y se propaga.
+    const texto = await res.text();
+    let data: unknown = null;
+    try {
+      data = texto.length > 0 ? JSON.parse(texto) : null;
+    } catch {
+      data = texto;
+    }
+    const errBody =
+      data && typeof data === "object"
+        ? (data as { error?: string; message?: string })
+        : null;
+    throw new ApiError(
+      res.status,
+      errBody?.message ?? res.statusText ?? "Request failed",
+      errBody?.error,
+      data,
+    );
+  }
+  return { blob: await res.blob(), headers: res.headers };
+}
+
 export async function apiWithCashier<T>(
   path: string,
   opts: ApiOpts = {},

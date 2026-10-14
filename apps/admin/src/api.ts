@@ -325,6 +325,46 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
   return parsed as T;
 }
 
+/**
+ * clinica-7 · un BINARIO con la sesión del propietario.
+ *
+ * Lo usan el PDF del contrato de encargado y el ZIP de la devolución de
+ * datos. Aparte de `api()` por lo mismo que en el TPV: `api()` lee el
+ * cuerpo con `res.text()`, y un PDF leído como texto llega corrupto.
+ *
+ * **Sin el reintento del 401.** Un 401 aquí es una sesión caducada a
+ * mitad de una descarga; lo que hace el panel es mandarte al login, y
+ * reintentar una descarga de un ZIP de varios megas en silencio no es lo
+ * que nadie quiere.
+ */
+export async function apiBlob(path: string): Promise<Blob> {
+  const tokens = readTokens();
+  const headers: Record<string, string> = {};
+  if (tokens) headers.Authorization = `Bearer ${tokens.accessToken}`;
+  const res = await fetch(`/api${path}`, { headers });
+  if (!res.ok) {
+    // El cuerpo de error SÍ es JSON y su mensaje está escrito para quien
+    // tiene la pantalla delante: se propaga.
+    const texto = await res.text();
+    let parsed: unknown = null;
+    try {
+      parsed = texto ? JSON.parse(texto) : null;
+    } catch {
+      parsed = { raw: texto };
+    }
+    const code =
+      parsed && typeof parsed === "object" && "error" in parsed
+        ? String((parsed as { error: unknown }).error)
+        : `HTTP_${res.status}`;
+    const message =
+      parsed && typeof parsed === "object" && "message" in parsed
+        ? String((parsed as { message: unknown }).message)
+        : `Request failed (${res.status})`;
+    throw new ApiError(res.status, code, message, parsed);
+  }
+  return res.blob();
+}
+
 async function tryRefresh(refreshToken: string): Promise<AuthTokens | null> {
   try {
     const res = await fetch(`/api/auth/refresh`, {

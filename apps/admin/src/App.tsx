@@ -14,6 +14,7 @@ import { GiftReceiptsPage } from "./pages/GiftReceiptsPage.js";
 import { HoldedPage } from "./pages/HoldedPage.js";
 import { ForgotPasswordPage, ResetPasswordPage } from "./pages/PasswordResetPages.js";
 import { PrintersPage } from "./pages/PrintersPage.js";
+import { ContratoTratamientoPage } from "./pages/ContratoTratamientoPage.js";
 import { DeclaracionResponsablePage } from "./pages/DeclaracionResponsablePage.js";
 import { SecurityPage } from "./pages/SecurityPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
@@ -155,6 +156,15 @@ export function App() {
         <Route
           path="/admin/declaracion-responsable"
           element={<DeclaracionResponsablePage />}
+        />
+        {/* clinica-7 · el contrato de encargado del tratamiento. SIN
+            `CajaGate`, como la declaración responsable: no depende de que
+            el comercio haya comprado la caja. Lo que decide si existe es la
+            capability de la historia clínica, y eso lo contesta la API con
+            la 404 de siempre. */}
+        <Route
+          path="/admin/contrato-tratamiento"
+          element={<ContratoTratamientoPage />}
         />
         <Route path="/admin/stores" element={<StoresPage />} />
         <Route path="/admin/stores/:storeId" element={<StoreDetailPage />} />

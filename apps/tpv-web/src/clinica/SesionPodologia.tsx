@@ -105,6 +105,7 @@ import {
 
 import { ApiError, apiWithCashier } from "../api.js";
 import { Consentimientos } from "./Consentimientos.js";
+import { GuardaDelContrato } from "./ContratoDeTratamiento.js";
 import { Fotos } from "./Fotos.js";
 import { LeyendaDelMapa, MapaDelPie, type EstadoDeZona } from "./MapaDelPie.js";
 import { GraficaDolor, type PuntoDeDolor } from "./GraficaDolor.js";
@@ -748,6 +749,14 @@ export function SesionPodologia(props: {
     avisos.filter((a) => a.disparador.clase === clase).map((a) => a.aviso);
 
   return (
+    // clinica-7 · LA GUARDA DEL CONTRATO. Ver `HistoriaViva` para el por
+    // qué de envolver dentro del componente y no en quien lo monta.
+    //
+    // Aquí la banda importa más que en la historia: ésta es la pantalla que
+    // ESCRIBE, y con el contrato revocado cerrar la sesión va a dar 423. La
+    // banda es lo que hace que la podóloga lo sepa ANTES de pasar media
+    // hora rellenándola.
+    <GuardaDelContrato>
     <div className="space-y-4">
       <Cabecera vista={vista} />
 
@@ -1222,6 +1231,7 @@ export function SesionPodologia(props: {
         />
       )}
     </div>
+    </GuardaDelContrato>
   );
 }
 
