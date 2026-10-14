@@ -75,11 +75,44 @@ cd ~/Developer/Claude/Projects/mipiacetpv && ssh root@76.13.142.28 'cd /opt/mipi
       Holded. Cancelarla es cosa de la clienta.
 - [ ] **Aviso a la clienta**: sólo si sigue siéndolo (ver la decisión abierta).
 
-## Decisión abierta (antes de F2)
+## Decisión (14-10, Matías)
 
-**¿Fouzia sigue siendo clienta?** (tarea humana 10)
+**Fouzia sigue siendo clienta.** Pasa al TPV sin Holded y **se le regalan unos meses de cuota**
+(número de meses por cerrar). Se sigue este checklist tal cual, con el aviso del §9.4 adaptado:
+precios desde Catálogo, factura simplificada `C1`, devoluciones con su gestor, sin vuelta atrás
+desde el panel, y los meses de cuota regalados.
 
-- **Sí** → este checklist tal cual, y el aviso del §9.4 adaptado (precios desde Catálogo, factura
-  simplificada `C1`, devoluciones con su gestor, sin vuelta atrás desde el panel).
-- **No** → el corte sigue sirviendo para callar el sync, pero entonces **antes** hay que decidir si
-  la cuenta se queda en DRAFT o se da de baja. Dar de baja no está en este checklist.
+## F1 · Resultado (14-10, 10:27)
+
+Foto en `~/Desktop/fouzia-antes.txt`. Todo coincide con lo esperado: Holded encendido con clave y
+sync `DONE`; 52 productos `HOLDED` con enlace y 52 SKU distintos; sin SKU repetidos; 1 ticket
+`TEST` de 37,50 €; 1 subida `SKIPPED` y ningún `PENDING`; sin turnos abiertos; 8 contactos, 0 CRM,
+0 fiado; Caja 1 con serie `C1` y 0 registros; md5 del catálogo `70ae6854…`, igual que el 24-09.
+
+## F2 · Hallazgo (14-10, 10:40) · en DRAFT no hay botón
+
+- El super-admin pinta «Dejar Holded» **sólo en ACTIVE** (`TenantDetailPage.tsx`: en DRAFT la
+  página enseña Salud, Modo prueba y Activar, y no el bloque de acciones). La API
+  (`holded/dejar-holded.ts`) no mira el estado: es un límite de la pantalla, no de la regla.
+- **Su Holded tiene la suscripción suspendida** («el sync está parado»), como Sirope. El tablero
+  decía que seguía sincronizando cada 15 min: es falso.
+- Datos fiscales: «Fouzia Attaoui Batah» · NIF `02333696R` → la previsualización no se parará por
+  esto. Todos los checks del onboarding, en verde.
+- Camino: **Activar cuenta** (crea el OWNER, le manda el email con credenciales y purga el ticket
+  de prueba) → la ficha pasa a ACTIVE → **Dejar Holded**. Activar es irreversible y el email le
+  llega en el acto: va después de hablar con ella.
+
+## F3 · Corte hecho (14-10-2026, 08:57:10 UTC)
+
+- **En DRAFT, sin activar la cuenta**: se llamó a la API desde la sesión de super-admin
+  (`GET` y luego `POST /super-admin/tenants/:id/dejar-holded` con el nombre tecleado), porque la
+  pantalla no pinta el botón en DRAFT. Así no sale el email de activación a la clienta.
+- Previsualización: `puedeArrancar: true`, sin bloqueos. 52 fichas (52 productos, 0 servicios),
+  52 SKU intactos, 0 IVA sin resolver, sin ventas en vuelo, 8 contactos, 0 CRM, 0 deuda, suelo
+  fiscal OK, Caja 1 serie `C1` 0 registros, sin terminales.
+- Respuesta: `cortado: true`, 52 productos convertidos, 0 SKU acuñados, 0 subidas huérfanas, colas
+  vacías, tarea repetible del sync quitada, sin errores.
+- Comprobado en código antes del corte: tras él, `holdedEnabled = false` y los checks de Holded del
+  onboarding dejan de aplicar, así que **«Activar cuenta» sigue disponible** para cuando se hable
+  con ella.
+- Defecto para la cola: el botón «Dejar Holded» no sale en DRAFT aunque la API lo admite.
