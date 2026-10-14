@@ -33,6 +33,9 @@ import {
 } from "../auth/middleware.js";
 import { ensureClinicaEnabled } from "../clinica/gate.js";
 import { conHistoria } from "../clinica/registro.js";
+// residencia-2 · el plan de cuidados, que se precarga al dar de alta a un
+// residente y se recalcula al cambiarle el nivel (D-53).
+import { aplicarPlantilla, cerrarPlanPorAlta } from "./plan.js";
 import { ensureResidenciaEnabled } from "./gate.js";
 
 const PUERTAS_LECTURA = [
@@ -453,6 +456,28 @@ export async function registerResidenciaResidentesRoutes(
             });
           }
 
+          // ── residencia-2 · EL PLAN, precargado por su nivel ───────
+          //
+          // En la MISMA transacción que el perfil y la cama, y eso es la
+          // decisión: si el plan se abriera después, en otra transacción,
+          // un fallo dejaría a un residente dado de alta sin plan — y eso
+          // no se ve hasta el primer turno, cuando la puerta no le pide
+          // nada a nadie.
+          //
+          // `fromAt` es la FECHA DE INGRESO y no «ahora»: así `queToca`
+          // no le pide nada de antes de llegar al centro, que es el caso
+          // del residente que ingresa a mediodía y no tiene el turno de
+          // la mañana de ese día.
+          await aplicarPlantilla(tx, {
+            tenantId: auth.tenantId,
+            clientId,
+            nivel: body.dependencyLevel,
+            nivelAnterior: null,
+            desde: admissionDate,
+            userId: auth.userId,
+            motivo: "ingreso",
+          });
+
           return tx.residentProfile.findUniqueOrThrow({
             where: { clientId },
             select: PERFIL_SELECT,
@@ -669,12 +694,64 @@ export async function registerResidenciaResidentesRoutes(
               data[campo] = v === "" ? null : v;
             }
           }
-          const perfil = await prisma.residentProfile.update({
+          // ── residencia-2 · CAMBIAR EL NIVEL recalcula el plan ────
+          //
+          // Hay que leer el nivel de ANTES para saber qué cerrar, y las
+          // dos cosas —el `update` del perfil y el recálculo— van en la
+          // misma transacción: un perfil en «dependiente» con el plan de
+          // un «válido» es un residente al que nadie gira, y lo contrario
+          // es un válido con ocho rondas nocturnas que nadie entiende.
+          //
+          // Y sólo si el nivel CAMBIA de verdad. Guardar la ficha para
+          // corregir un teléfono no puede tocar el plan de nadie.
+          const antes = await prisma.residentProfile.findUniqueOrThrow({
             where: { clientId },
-            data,
-            select: PERFIL_SELECT,
+            select: { dependencyLevel: true },
           });
-          return { residente: vistaResidente(perfil) };
+          const nivelNuevo = data.dependencyLevel as
+            | (typeof NIVELES)[number]
+            | undefined;
+          const cambiaElNivel =
+            nivelNuevo !== undefined && nivelNuevo !== antes.dependencyLevel;
+
+          const { perfil, plan } = await prisma.$transaction(async (tx) => {
+            const perfil = await tx.residentProfile.update({
+              where: { clientId },
+              data,
+              select: PERFIL_SELECT,
+            });
+            if (!cambiaElNivel) return { perfil, plan: null };
+            const plan = await aplicarPlantilla(tx, {
+              tenantId: auth.tenantId,
+              clientId,
+              nivel: nivelNuevo!,
+              nivelAnterior: antes.dependencyLevel,
+              // «Ahora» y no la fecha de ingreso: la línea nueva empieza
+              // cuando se cambia el nivel. Si empezara en el ingreso se
+              // solaparía con la que se acaba de cerrar, y «¿qué le
+              // tocaba en marzo?» tendría dos respuestas.
+              desde: new Date(),
+              userId: auth.userId,
+              motivo: `cambio de nivel: ${antes.dependencyLevel} → ${nivelNuevo}`,
+            });
+            return { perfil, plan };
+          });
+
+          return {
+            residente: vistaResidente(perfil),
+            // Lo que el recálculo hizo, para que la pantalla lo diga en
+            // vez de dejar que la dirección lo descubra abriendo el plan.
+            // `null` si el nivel no cambió.
+            plan: plan
+              ? {
+                  abiertas: plan.abiertas,
+                  cerradas: plan.cerradas,
+                  // Las que ya tenía y NO se han tocado: ahí están las
+                  // manuales, que es la promesa del cambio de nivel.
+                  intactas: plan.yaTenian,
+                }
+              : null,
+          };
         },
       );
     },
@@ -761,6 +838,23 @@ export async function registerResidenciaResidentesRoutes(
             await tx.bedAssignment.updateMany({
               where: { tenantId: auth.tenantId, clientId, toAt: null },
               data: { toAt: dischargeDate, reason: "alta" },
+            });
+            // ── residencia-2 · y su PLAN se cierra ──────────────────
+            //
+            // Por lo mismo que su ocupación de cama: si el plan se
+            // quedara abierto, la puerta seguiría pidiendo el cambio
+            // postural de alguien que ya no vive aquí y el panel lo
+            // contaría como incumplido todos los turnos.
+            //
+            // Se CIERRA, no se borra. El plan de una persona es parte de
+            // lo que se conserva cinco años (D-45), y «¿qué le tocaba
+            // cuando se fue?» es una pregunta legítima.
+            await cerrarPlanPorAlta(tx, {
+              tenantId: auth.tenantId,
+              clientId,
+              cuando: dischargeDate,
+              userId: auth.userId,
+              motivo: "alta del residente",
             });
           });
           const actualizado = await prisma.residentProfile.findUniqueOrThrow({

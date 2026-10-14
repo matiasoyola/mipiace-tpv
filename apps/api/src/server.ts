@@ -64,6 +64,10 @@ import { registerResidenciaResidentesRoutes } from "./residencia/residentes-rout
 import { registerResidenciaEdificioRoutes } from "./residencia/edificio-routes.js";
 import { registerResidenciaRolesRoutes } from "./residencia/roles-routes.js";
 import { registerResidenciaTurnosRoutes } from "./residencia/turnos-routes.js";
+// residencia-2 · el catálogo de controles, los ajustes del centro, los
+// momentos del día, las plantillas por nivel y el plan de cada residente.
+import { registerResidenciaControlesRoutes } from "./residencia/controles-routes.js";
+import { registerResidenciaPlanRoutes } from "./residencia/plan-routes.js";
 import { registerResidenciaPuertaRoutes } from "./residencia/puerta-routes.js";
 // residencia-2 · el seed del catálogo de controles de serie (D-11, D-21).
 import { cargarCatalogoDeSerie } from "./residencia/catalogo/cargar-catalogo.js";
@@ -277,6 +281,14 @@ async function main() {
   await registerResidenciaEdificioRoutes(app);
   await registerResidenciaRolesRoutes(app);
   await registerResidenciaTurnosRoutes(app);
+  // residencia-2 · las dos familias nuevas. Mismas puertas que las de
+  // residencia-1 (clínica + gate de la residencia) y, en las del plan de
+  // un residente, además `conHistoria`: el plan de cuidados de alguien ES
+  // un dato de salud (dice que tiene riesgo de úlceras y que no se levanta
+  // solo), y que lo diga una línea de plan en vez de un diagnóstico no lo
+  // hace menos.
+  await registerResidenciaControlesRoutes(app);
+  await registerResidenciaPlanRoutes(app);
   await registerResidenciaPuertaRoutes(app);
   await registerKitchenRoutes(app);
   await registerKitchenTpvRoutes(app);
