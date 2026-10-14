@@ -33,15 +33,11 @@
 // manos, pero aquí nadie ha perdido nada si la lectura no ocurre. Lo que
 // no se puede perder es la prueba de que ocurrió.
 
-import {
-  CODIGO_CONTRATO_NO_VIGENTE,
-  MENSAJE_CONTRATO_NO_VIGENTE,
-} from "@mipiacetpv/contrato-encargado";
 import type { FastifyReply, FastifyRequest } from "fastify";
 
 import { getPrisma } from "../context.js";
-import { puedeEscribirClinico } from "./contrato.js";
-import { respondeComoRutaInexistente } from "./gate.js";
+import { negativaClinica } from "./contrato.js";
+import { esMiPiaceMirando, respondeComoRutaInexistente } from "./gate.js";
 import {
   comoPrismaParaAcceso,
   resolverAccesoClinico,
@@ -212,6 +208,30 @@ export async function conHistoria<T>(
   },
   handler: (ctx: ContextoClinico) => Promise<T>,
 ): Promise<T | undefined> {
+  // clinica-7 · decisión 24 · MI PIACE NO MIRA, y aquí otra vez.
+  //
+  // `ensureClinicaEnabled` ya lo corta en las rutas que lo llevan de
+  // `preHandler`. Esto es defensa en profundidad en el ÚNICO punto por el
+  // que pasa toda ruta clínica: una ruta nueva que se registrara sin el
+  // gate (como pasó con las del contrato, que no pueden llevarlo) seguiría
+  // sin dejar que Mi Piace abra una historia.
+  //
+  // Y NO se apunta en el registro de accesos, a propósito. El registro
+  // contesta «¿quién ha abierto la historia de este paciente?» y su
+  // `user_id` es NOT NULL: una línea aquí tendría que decir «la dueña» —
+  // porque el token de impersonación lleva el id de la dueña— y eso sería
+  // una línea FALSA en el registro que existe para no tener líneas falsas.
+  // Lo que queda es el `super_admin_audit`, que es donde una acción del
+  // superadmin tiene que constar.
+  if (esMiPiaceMirando(request)) {
+    request.log.warn(
+      { event: "clinica_impersonacion_rechazada", route: rutaDe(request) },
+      "una sesión de impersonación ha intentado abrir una historia clínica",
+    );
+    respondeComoRutaInexistente(request, reply);
+    return undefined;
+  }
+
   const actor = resolverActor(request);
   if (!actor) {
     reply
@@ -290,19 +310,34 @@ export async function conHistoria<T>(
     return undefined;
   }
 
-  // clinica-7 · EL CONTRATO, y solo para las escrituras. Ver la cabecera:
-  // va después de la línea del registro (un intento de escribir con el
-  // contrato revocado es de los que interesa ver) y antes del handler.
-  if (input.action === "WRITE" && !(await puedeEscribirClinico(actor.tenantId))) {
+  // clinica-7 · EL CONTRATO. Ver la cabecera: va después de la línea del
+  // registro (un intento con el contrato revocado es de los que interesa
+  // ver) y antes del handler.
+  //
+  // **Y mira la LECTURA además de la escritura**, que es lo que un test
+  // encontró: con el contrato nunca aceptado, la decisión 4 dice «ni una
+  // ruta clínica responde con datos». Un guard que solo mirara las
+  // escrituras habría servido la historia entera de una clínica recién
+  // encendida antes de que nadie aceptara nada.
+  //
+  // Qué cuenta como escritura: `WRITE` y nada más. `EXPORT` es una lectura
+  // que se lleva una copia, y tiene que seguir funcionando con el contrato
+  // revocado — es la devolución de datos del art. 28.3.g, y se pide
+  // justamente cuando se revoca.
+  const negativa = await negativaClinica(
+    actor.tenantId,
+    input.action === "WRITE" ? "ESCRIBIR" : "LEER",
+  );
+  if (negativa) {
     try {
       await apuntarAcceso({
         tenantId: actor.tenantId,
         userId: actor.userId,
         clientId: input.clientId,
-        action: "WRITE",
-        // DENIED porque el acto NO ocurrió. Una línea ALLOWED sobre una
-        // escritura que se rechazó sería una línea falsa, y un registro
-        // con líneas falsas no sirve para lo que existe.
+        action: input.action,
+        // DENIED porque el acto NO ocurrió. Una línea ALLOWED sobre algo
+        // que se rechazó sería una línea falsa, y un registro con líneas
+        // falsas no sirve para lo que existe.
         outcome: "DENIED",
         deviceId: actor.deviceId,
         route: rutaDe(request),
@@ -310,13 +345,13 @@ export async function conHistoria<T>(
     } catch (err) {
       request.log.error(
         { event: "clinical_access_log_failed", err },
-        "no se pudo registrar el intento de escritura con el contrato no vigente",
+        "no se pudo registrar el intento con el contrato no vigente",
       );
     }
     reply.code(423).send({
-      error: CODIGO_CONTRATO_NO_VIGENTE,
-      code: CODIGO_CONTRATO_NO_VIGENTE,
-      message: MENSAJE_CONTRATO_NO_VIGENTE,
+      error: negativa.code,
+      code: negativa.code,
+      message: negativa.message,
     });
     return undefined;
   }

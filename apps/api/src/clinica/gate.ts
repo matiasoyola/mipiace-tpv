@@ -26,6 +26,37 @@
 //
 // El gate es la puerta del SERVIDOR. El panel esconde además la sección y
 // el TPV no pinta el botón, pero esconder no es gatear.
+//
+// ── clinica-7 · Y UNA TERCERA: MI PIACE NO MIRA ──────────────────────
+//
+// Decisión 24: «el superadmin no abre historias: ni rutas, ni
+// suplantación, ni soporte de cajeros».
+//
+// Lo de «ni suplantación» hacía falta DE VERDAD, y es lo que este bloque
+// encontró. `signImpersonationToken` firma `sub: owner.id` — **el id del
+// usuario real de la dueña** — y `applyAuthContext` le pone `role:
+// "OWNER"`. Así que, para todo lo que mira `request.auth`, una sesión de
+// impersonación ES la dueña.
+//
+// Y la dueña de una clínica es sanitaria (`isClinician`, alcance `ALL`).
+// O sea: hasta este bloque, un superadmin que abriera «configurar» sobre
+// la clínica de Rosario podía leer la historia de cualquier paciente, y la
+// única huella sería una línea de `clinical_access_log` con el nombre de
+// Rosario. **Eso es lo contrario de lo que el contrato de encargado
+// promete** en su letra b).
+//
+// Así que lo clínico mira `isImpersonation` y contesta **la misma 404 de
+// siempre**. No un 403: un 403 le confirmaría al superadmin que ahí hay
+// una historia, y la respuesta correcta a «Mi Piace quiere leer una
+// historia» es que esa ruta no existe.
+//
+// ── Y lo que NO se cierra, a propósito ──────────────────────────────
+//
+// El interruptor del módulo (`clinicalRecordsEnabled`) sigue siendo del
+// superadmin: encender la historia clínica de una clínica es una decisión
+// comercial, no una lectura de datos de salud. Y la impersonación sigue
+// valiendo para todo lo demás — caja, catálogo, agenda — que es para lo
+// que existe.
 
 import type { FastifyReply, FastifyRequest } from "fastify";
 
@@ -84,10 +115,35 @@ export function respondeComoRutaInexistente(
   });
 }
 
+/**
+ * clinica-7 · `true` si esta petición viene de una sesión de Mi Piace y no
+ * de una persona del centro.
+ *
+ * Hoy es una cosa: la impersonación del superadmin. Vive en una función y
+ * no en un `if` porque lo que contesta es **«¿es Mi Piace quien pregunta?»**,
+ * y el día que aparezca otra forma de que lo sea (un token de soporte, un
+ * cajero de prueba con más permisos) se añade aquí y las cuatro puertas
+ * clínicas la heredan.
+ *
+ * El cajero de prueba (`is_test_cashier`) NO cuenta: es un CASHIER sin
+ * `is_clinician`, así que la función de acceso de clinica-1 ya le dice que
+ * no es sanitario. Añadirlo aquí sería tapar con dos cosas lo que una ya
+ * tapa, y el día que alguien quite una pensaría que la otra sobra.
+ */
+export function esMiPiaceMirando(request: FastifyRequest): boolean {
+  return request.auth?.isImpersonation === true;
+}
+
 export async function ensureClinicaEnabled(
   request: FastifyRequest,
   reply: FastifyReply,
 ): Promise<void> {
+  // clinica-7 · decisión 24 · LO PRIMERO, y antes de tocar la base: Mi
+  // Piace no abre historias. La misma 404 que una ruta que no existe.
+  if (esMiPiaceMirando(request)) {
+    respondeComoRutaInexistente(request, reply);
+    return;
+  }
   const tenantId = resolveTenantId(request);
   // Sin tenant no hay nada que gatear: el `preHandler` de auth que va
   // delante ya habrá respondido 401.

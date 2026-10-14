@@ -263,3 +263,24 @@ export function loadEnv(): AppEnv {
   cached = EnvSchema.parse(process.env);
   return cached;
 }
+
+/**
+ * Olvida el entorno leído. **Para los tests y nada más.**
+ *
+ * Lo pide clinica-7: los casos del arranque (decisión 17) son «hay
+ * clínicas y FALTA la KEK», «hay clínicas y la KEK es de otro entorno»…, y
+ * cada uno es un `process.env` distinto. Con la caché de una sola lectura,
+ * el segundo caso de un fichero de test corre con el entorno del primero y
+ * el test pasa sin probar nada.
+ *
+ * Lo encontró justamente eso: cuatro casos del arranque y de la rotación
+ * salían verdes porque `delete process.env.CLINICAL_KEK` no tenía ningún
+ * efecto después de la primera llamada.
+ *
+ * No se llama desde `src/`: la caché existe porque leer y validar el
+ * entorno en cada petición sería tirar CPU, y en producción el entorno no
+ * cambia sin reiniciar.
+ */
+export function olvidarEnv(): void {
+  cached = null;
+}

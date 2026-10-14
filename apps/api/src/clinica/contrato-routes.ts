@@ -50,7 +50,11 @@ import {
   vistaDelContrato,
 } from "./contrato.js";
 import { ZipDemasiadoGrande, exportarElCentro } from "./exportacion.js";
-import { clinicaIsEnabled, respondeComoRutaInexistente } from "./gate.js";
+import {
+  clinicaIsEnabled,
+  esMiPiaceMirando,
+  respondeComoRutaInexistente,
+} from "./gate.js";
 
 /**
  * ¿Está la cuenta bloqueada?
@@ -101,6 +105,37 @@ async function esLaDuena(tenantId: string, userId: string): Promise<boolean> {
   return fila?.role === "OWNER";
 }
 
+/**
+ * clinica-7 · decisión 24 · **MI PIACE NO ACEPTA EL CONTRATO.**
+ *
+ * Estas rutas no llevan `ensureClinicaEnabled` (no pueden: la pantalla de
+ * aceptación tiene que abrirse antes de que la historia funcione), así que
+ * el corte va aquí.
+ *
+ * Y aquí importa más que en ninguna otra ruta clínica. El token de
+ * impersonación lleva `sub: owner.id`, así que una aceptación hecha desde
+ * una sesión de Mi Piace escribiría una fila que dice **«Rosario aceptó el
+ * contrato el 14 de octubre»** — y esa fila es la prueba jurídica de que
+ * la clínica autorizó a Mi Piace a tratar datos de salud. Una prueba que
+ * Mi Piace se puede firmar a sí misma no es una prueba.
+ *
+ * Las de LEER también se cortan, por consistencia con el resto de lo
+ * clínico: el superadmin no necesita leer el contrato de una clínica desde
+ * dentro de su sesión — lo tiene en el repo, versionado.
+ */
+function respondeSiEsMiPiace(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): boolean {
+  if (!esMiPiaceMirando(request)) return false;
+  request.log.warn(
+    { event: "clinica_contrato_impersonacion_rechazada", route: request.url },
+    "una sesión de impersonación ha intentado tocar el contrato de encargado",
+  );
+  respondeComoRutaInexistente(request, reply);
+  return true;
+}
+
 /** La IP, con el proxy delante. Fastify ya la resuelve con `trustProxy`
  *  cuando está configurado; aquí solo se recorta. */
 function ipDe(request: FastifyRequest): string | null {
@@ -131,6 +166,7 @@ export async function registerContratoRoutes(
     "/clinica/contrato",
     { preHandler: [requireOwnerOrCashier] },
     async (request: FastifyRequest, reply: FastifyReply) => {
+      if (respondeSiEsMiPiace(request, reply)) return reply;
       const tenantId = request.auth?.tenantId ?? request.cashier?.tid;
       if (tenantId == null) {
         return reply
@@ -173,6 +209,7 @@ export async function registerContratoRoutes(
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
+      if (respondeSiEsMiPiace(request, reply)) return reply;
       const tenantId = request.auth?.tenantId ?? request.cashier?.tid;
       if (tenantId == null) {
         return reply
@@ -254,6 +291,7 @@ export async function registerContratoRoutes(
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
+      if (respondeSiEsMiPiace(request, reply)) return reply;
       const tenantId = request.auth?.tenantId ?? request.cashier?.tid;
       const userId = request.auth?.userId ?? request.cashier?.userId;
       if (tenantId == null || userId == null) {
@@ -320,6 +358,7 @@ export async function registerContratoRoutes(
     "/clinica/exportacion",
     { preHandler: [requireOwner] },
     async (request: FastifyRequest, reply: FastifyReply) => {
+      if (respondeSiEsMiPiace(request, reply)) return reply;
       const auth = request.auth!;
       if (!(await clinicaIsEnabled(auth.tenantId))) {
         return respondeComoRutaInexistente(request, reply);
@@ -398,6 +437,7 @@ export async function registerContratoRoutes(
     "/clinica/contrato/revocar",
     { preHandler: [requireOwner] },
     async (request: FastifyRequest, reply: FastifyReply) => {
+      if (respondeSiEsMiPiace(request, reply)) return reply;
       const auth = request.auth!;
       if (!(await clinicaIsEnabled(auth.tenantId))) {
         return respondeComoRutaInexistente(request, reply);

@@ -180,6 +180,7 @@ export interface FilaDeContrato {
 export interface ContratoFake {
   modelo: {
     findMany: (args: any) => Promise<any[]>;
+    findFirst: (args: any) => Promise<any>;
     create: (args: any) => Promise<any>;
     createMany: (args: any) => Promise<{ count: number }>;
   };
@@ -252,6 +253,22 @@ export function contratoFake(
       aceptar();
     },
     modelo: {
+      // La usa el PDF del contrato: «¿quién aceptó esta versión y cuándo?».
+      findFirst: async ({ where, orderBy }: any) => {
+        let xs = filas.filter(
+          (f) =>
+            f.tenantId === where.tenantId &&
+            (where.version == null || f.version === where.version) &&
+            (where.revokesAgreementId !== null || f.revokesAgreementId == null),
+        );
+        if (orderBy?.at === "desc") {
+          xs = xs.slice().sort((a, b) => +b.at - +a.at);
+        }
+        const f = xs[0];
+        return f == null
+          ? null
+          : { ...f, user: { alias: null, email: "d@d.es" } };
+      },
       findMany: async ({ where, select, orderBy }: any) => {
         let xs = filas.filter((f) => f.tenantId === where.tenantId);
         if (orderBy?.at === "desc") {

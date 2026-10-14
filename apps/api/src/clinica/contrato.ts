@@ -30,6 +30,7 @@ import {
   VERSION_VIGENTE,
   contratoDe,
   estadoDelModuloClinico,
+  negativaDelContrato,
   permiteEscribirHistoria,
   textoCanonico,
   type EstadoDelModuloClinico,
@@ -113,7 +114,25 @@ export async function estadoDelTenant(
   return estado;
 }
 
-/** Atajo para el guard de escritura, que es quien más pregunta. */
+/**
+ * Lo que el guard de `conHistoria` necesita: `null` si esta acción se
+ * puede hacer, y el código y el mensaje del 423 si no.
+ *
+ * **Lee Y escribe pasan por aquí**, y es lo que un test encontró: con el
+ * contrato NUNCA aceptado, la decisión 4 dice «ni una ruta clínica
+ * responde con datos» — lectura incluida. El guard original solo miraba
+ * las escrituras, así que una clínica recién encendida servía la historia
+ * entera antes de que nadie aceptara nada.
+ */
+export async function negativaClinica(
+  tenantId: string,
+  accion: "LEER" | "ESCRIBIR",
+  prisma?: Ejecutor,
+): Promise<{ code: string; message: string } | null> {
+  return negativaDelContrato(await estadoDelTenant(tenantId, prisma), accion);
+}
+
+/** Atajo para quien solo quiere el sí o el no de escribir. */
 export async function puedeEscribirClinico(
   tenantId: string,
   prisma?: Ejecutor,

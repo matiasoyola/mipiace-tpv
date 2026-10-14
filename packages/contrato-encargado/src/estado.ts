@@ -209,13 +209,62 @@ export const AVISO_SOLO_LA_DUENA =
 export const BANDA_SOLO_LECTURA =
   "Historia clínica en solo lectura: el contrato de tratamiento no está vigente.";
 
-/** El código y el mensaje del 423 de las escrituras. Uno solo para todas
- *  las rutas de escritura: con uno por ruta, el día que alguien ajuste el
- *  de una, dos rutas dirían cosas distintas del mismo estado. */
+/** El código y el mensaje del 423. Uno solo para todas las rutas: con uno
+ *  por ruta, el día que alguien ajuste el de una, dos rutas dirían cosas
+ *  distintas del mismo estado. */
 export const CODIGO_CONTRATO_NO_VIGENTE = "CONTRATO_ENCARGADO_NO_VIGENTE";
 
 export const MENSAJE_CONTRATO_NO_VIGENTE =
   "La historia clínica está en solo lectura: el contrato de tratamiento de datos no está vigente. Se puede leer y exportar todo; para escribir, la dueña tiene que aceptarlo en Ajustes › Contrato de tratamiento de datos.";
+
+/**
+ * Y el mensaje de cuando NO SE HA ACEPTADO NUNCA, que es otro estado y
+ * otra frase.
+ *
+ * La diferencia importa y la encontró un test: con `SIN_CONTRATO` **la
+ * lectura también se niega** (decisión 4: «ni una ruta clínica responde con
+ * datos»), así que decir «está en solo lectura» sería mentir — no se puede
+ * ni leer. Lo que hay que decir es que falta aceptarlo y quién lo acepta.
+ *
+ * El código HTTP es el mismo 423: el recurso existe, hay permiso, y está
+ * bloqueado por un estado que se puede cambiar.
+ */
+export const CODIGO_CONTRATO_SIN_ACEPTAR = "CONTRATO_ENCARGADO_SIN_ACEPTAR";
+
+export const MENSAJE_CONTRATO_SIN_ACEPTAR =
+  "La historia clínica todavía no está activa: la dueña tiene que aceptar el contrato de tratamiento de datos en Ajustes › Contrato de tratamiento de datos. Hasta entonces no se puede ni leer ni escribir nada clínico.";
+
+/**
+ * El código y el mensaje que le toca a un estado, para una acción.
+ *
+ * Una sola función y no un `if` en cada guard: el día que aparezca un
+ * quinto estado, el compilador obliga a decidir qué contesta aquí, y las
+ * rutas lo heredan.
+ *
+ * `null` = esta acción SÍ se puede hacer en este estado.
+ */
+export function negativaDelContrato(
+  estado: EstadoDelModuloClinico,
+  accion: "LEER" | "ESCRIBIR",
+): { code: string; message: string } | null {
+  if (accion === "LEER") {
+    if (permiteLeerHistoria(estado)) return null;
+  } else if (permiteEscribirHistoria(estado)) {
+    return null;
+  }
+  // `APAGADO` no llega aquí: el gate contesta 404 antes, y el módulo
+  // apagado no es «falta el contrato» sino «este módulo no existe».
+  if (estado.estado === "SIN_CONTRATO" || estado.estado === "APAGADO") {
+    return {
+      code: CODIGO_CONTRATO_SIN_ACEPTAR,
+      message: MENSAJE_CONTRATO_SIN_ACEPTAR,
+    };
+  }
+  return {
+    code: CODIGO_CONTRATO_NO_VIGENTE,
+    message: MENSAJE_CONTRATO_NO_VIGENTE,
+  };
+}
 
 /** El del 409 de aceptar sin ser la dueña. */
 export const CODIGO_SOLO_LA_DUENA = "SOLO_LA_DUENA_ACEPTA";
