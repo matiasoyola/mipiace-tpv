@@ -219,6 +219,73 @@ export function TenantDetailPage() {
     }
   }
 
+  // clinica-1 / residencia-1 · LOS DOS INTERRUPTORES DE SALUD.
+  //
+  // Hasta aquí no había pantalla para ninguno: la clínica se encendía «por
+  // API, igual que `fichajeEnabled`, que tampoco la tiene» (clinica-1 §13),
+  // y el bloque de residencia pide la casilla «junto a la de la clínica».
+  // Así que entran las dos, y la de la clínica es la que faltaba.
+  //
+  // Un `confirm` con las CONSECUENCIAS y no un «¿seguro?», mismo criterio
+  // que el de Holded: encender esto es aceptar que Mi Piace es encargado de
+  // tratamiento de datos de salud (art. 9 RGPD, Ley 41/2002). No es marcar
+  // una función.
+  //
+  // Las guardas de verdad son las del servidor y llegan aquí como mensaje:
+  // la clínica exige CRM y agenda, la residencia exige la clínica, y
+  // apagar cualquiera de las dos con datos dentro devuelve 409 con el
+  // recuento. Este confirm no las repite.
+  async function onToggleSalud(
+    campo: "clinicalRecordsEnabled" | "residenciaEnabled",
+  ): Promise<void> {
+    if (!id || !tenant) return;
+    const encendido =
+      campo === "clinicalRecordsEnabled"
+        ? tenant.clinicalRecordsEnabled === true
+        : tenant.residenciaEnabled === true;
+    const nombre =
+      campo === "clinicalRecordsEnabled" ? "la historia clínica" : "la residencia";
+    if (!encendido) {
+      if (
+        !confirm(
+          `Vas a encender ${nombre} en ${tenant.name}.\n\n` +
+            "A partir de ese momento esta cuenta guarda datos de salud y Mi Piace es su " +
+            "encargado de tratamiento: hace falta el DPA firmado y la conservación de " +
+            "cinco años. Esto se habla y se firma, no se marca. ¿Está hablado?",
+        )
+      )
+        return;
+    } else if (
+      !confirm(
+        `Vas a apagar ${nombre} en ${tenant.name}.\n\n` +
+          "Lo que ya esté escrito se queda en la base y nadie podrá llegar a ello. " +
+          "El servidor lo rechaza si hay datos dentro. ¿Continuar?",
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setActionError(null);
+    setActionMessage(null);
+    try {
+      await superApi(`/super-admin/tenants/${id}`, {
+        method: "PATCH",
+        body: { [campo]: !encendido },
+      });
+      setActionMessage(
+        `${nombre.charAt(0).toUpperCase()}${nombre.slice(1)} ${encendido ? "apagada" : "encendida"}.` +
+          (!encendido && campo === "residenciaEnabled"
+            ? " Se le han creado los diez roles de cuidado de serie y los tres turnos."
+            : ""),
+      );
+      await reload();
+    } catch (err) {
+      setActionError(errToHuman(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onForceLogout(): Promise<void> {
     if (!id) return;
     if (!confirm("Cerrará la sesión de TODOS los usuarios de la cuenta. ¿Continuar?")) return;
@@ -673,6 +740,7 @@ export function TenantDetailPage() {
           onAskConfigure={() => setShowConfigureModal(true)}
           onDedupeTags={onDedupeTags}
           onToggleHolded={() => void onToggleHolded()}
+          onToggleSalud={(campo) => void onToggleSalud(campo)}
           setDejarHolded={setDejarHolded}
         />
       )}
@@ -1239,6 +1307,44 @@ function ActivatePanel({
   );
 }
 
+/**
+ * clinica-1 / residencia-1 · una casilla de módulo de salud.
+ *
+ * Checkbox y no toggle: un `input type="checkbox"` con su `<label>` es lo
+ * que un lector de pantalla lee como «casilla, marcada», y el super-admin
+ * es una pantalla de escritorio donde el toque de 44 px lo da el `<label>`
+ * entero. El `confirm` que explica las consecuencias lo pone quien llama.
+ */
+function CasillaDeSalud({
+  label,
+  hint,
+  checked,
+  busy,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  checked: boolean;
+  busy: boolean;
+  onChange: () => void;
+}) {
+  return (
+    <label className="flex min-h-[44px] cursor-pointer items-start gap-3">
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={busy}
+        onChange={onChange}
+        className="mt-1 h-4 w-4 shrink-0"
+      />
+      <span className="min-w-0">
+        <span className="block text-[14px] text-slate-900">{label}</span>
+        <span className="block text-[12.5px] text-slate-500">{hint}</span>
+      </span>
+    </label>
+  );
+}
+
 function ActiveTenantActions({
   blocked,
   tenant,
@@ -1251,6 +1357,7 @@ function ActiveTenantActions({
   onAskConfigure,
   onDedupeTags,
   onToggleHolded,
+  onToggleSalud,
   setDejarHolded,
 }: {
   blocked: boolean;
@@ -1264,6 +1371,9 @@ function ActiveTenantActions({
   onAskConfigure: () => void;
   onDedupeTags: () => void;
   onToggleHolded: () => void;
+  onToggleSalud: (
+    campo: "clinicalRecordsEnabled" | "residenciaEnabled",
+  ) => void;
   setDejarHolded: (v: boolean) => void;
 }) {
   // catalogo-local (addendum 3) · las DOS preguntas, que hasta este
@@ -1307,6 +1417,13 @@ function ActiveTenantActions({
               // implantador sepa si esta cuenta lo tiene comprado antes de
               // ponerse a emparejar una tablet de cocina.
               tenant.kitchenDisplayEnabled === true ? "Cocina" : null,
+              // clinica-1 / residencia-1 · se pintan aquí y no en `modules`
+              // por lo mismo que la cocina: ninguno sostiene a una empresa
+              // por sí solo. Y se pintan para que el implantador sepa de un
+              // vistazo si esta cuenta guarda datos de salud antes de
+              // ponerse a tocar nada.
+              tenant.clinicalRecordsEnabled === true ? "Historia clínica" : null,
+              tenant.residenciaEnabled === true ? "Residencia" : null,
             ]
               .filter(Boolean)
               .join(" · ") || "—"
@@ -1340,6 +1457,37 @@ function ActiveTenantActions({
                 : "warning"
           }
         />
+      </div>
+
+      {/* clinica-1 / residencia-1 · LOS MÓDULOS DE SALUD, en su propia
+          caja y no entre las acciones de arriba.
+          Están juntos porque van juntos —la residencia no se puede
+          encender sin la clínica— y separados del resto porque encenderlos
+          no es activar una función: es aceptar ser responsable de un
+          registro legal de datos de salud. La caja lo dice en su línea de
+          texto, para que no se marque por inercia. */}
+      <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6">
+        <h3 className="font-semibold text-slate-900 mb-1">Datos de salud</h3>
+        <p className="text-[13px] text-slate-500 mb-4">
+          Encenderlos hace a Mi Piace encargado de tratamiento (art. 9 RGPD,
+          Ley 41/2002). Hace falta el DPA firmado.
+        </p>
+        <div className="space-y-3">
+          <CasillaDeSalud
+            label="Historia clínica"
+            hint="Pacientes con historia, accesos y registro de accesos. Necesita CRM y agenda."
+            checked={tenant.clinicalRecordsEnabled === true}
+            busy={busy}
+            onChange={() => onToggleSalud("clinicalRecordsEnabled")}
+          />
+          <CasillaDeSalud
+            label="Residencia"
+            hint="Residentes, edificio, roles de cuidado, turnos y la tablet de la puerta. Necesita la historia clínica."
+            checked={tenant.residenciaEnabled === true}
+            busy={busy}
+            onChange={() => onToggleSalud("residenciaEnabled")}
+          />
+        </div>
       </div>
 
       <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6">

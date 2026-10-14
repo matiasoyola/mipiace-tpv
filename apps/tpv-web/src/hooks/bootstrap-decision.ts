@@ -26,7 +26,21 @@ import { ApiError } from "../api.js";
 // que esta tablet arranca en «modo cocina». La MISMA APK, otra pantalla
 // (decisión 1). No es `purge` —el aparato está perfectamente emparejado— ni
 // `retry`, que lo dejaría en el spinner para siempre.
-export type BootstrapDecision = "purge" | "retry" | "caja-disabled" | "kitchen";
+// residencia-1 · quinta salida, `room`. Un dispositivo `ROOM` llamando a
+// `/devices/me` recibe **403 ROOM_DEVICE_NOT_ALLOWED**: ese corte está en
+// `devices/auth.ts`, la puerta de TODAS las rutas del TPV, y es lo que hace
+// que la tablet de una habitación no pueda cobrar ni abrir turno.
+//
+// Igual que con la cocina, el 403 no es un error: es la respuesta correcta
+// y es la señal de que esta tablet arranca en «modo puerta». La MISMA APK,
+// otra pantalla (D-52). No es `purge` —el aparato está perfectamente
+// emparejado— ni `retry`, que lo dejaría en el spinner para siempre.
+export type BootstrapDecision =
+  | "purge"
+  | "retry"
+  | "caja-disabled"
+  | "kitchen"
+  | "room";
 
 // Sólo estos códigos disparan purga real del deviceToken. Cualquier
 // otro 401 (sin código o con código desconocido) y los errores de red
@@ -51,6 +65,13 @@ export function decideAfterBootstrapError(err: unknown): BootstrapDecision {
     err.code === "KITCHEN_DEVICE_NOT_ALLOWED"
   ) {
     return "kitchen";
+  }
+  if (
+    err instanceof ApiError &&
+    err.status === 403 &&
+    err.code === "ROOM_DEVICE_NOT_ALLOWED"
+  ) {
+    return "room";
   }
   return "retry";
 }

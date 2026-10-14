@@ -54,6 +54,7 @@ import { startVisualViewportSync } from "./lib/visualViewportSync.js";
 import { installBackGuard, setBackFallback } from "./hooks/useBackGuard.js";
 import { OutboxChip } from "./pages/CheckoutPage.outboxChip.js";
 import { KitchenScreen } from "./kitchen/KitchenScreen.js";
+import { PuertaScreen } from "./residencia/PuertaScreen.js";
 import { useAvisosListo } from "./kitchen/tpv/useAvisosListo.js";
 import { useCaminoDirecto } from "./kitchen/tpv/useCaminoDirecto.js";
 import { PairScreen } from "./pages/PairScreen.js";
@@ -392,6 +393,20 @@ export function App() {
   // del TPV), pero el front tampoco lo intenta.
   if (state.kind === "kitchen") {
     return <KitchenScreen me={state.data} />;
+  }
+  // residencia-1 (D-52) · LA MISMA APK EN «MODO PUERTA».
+  //
+  // Se corta en el mismo sitio y por lo mismo que la cocina: una tablet de
+  // habitación **no abre turno, no cobra y no emite registro de
+  // facturación**, así que no tiene por qué pasar por el login de cajero.
+  // Su identidad es el dispositivo.
+  //
+  // Nada de lo que hay debajo de esta línea se monta en una puerta: ni el
+  // outbox, ni el canal de soporte del terminal, ni el cierre de día. El
+  // servidor lo garantiza igual (403 en todas las rutas del TPV), pero el
+  // front tampoco lo intenta.
+  if (state.kind === "room") {
+    return <PuertaScreen me={state.data} onRefresh={refresh} />;
   }
 
   const { register, store, tenant } = state.data;

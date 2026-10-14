@@ -68,7 +68,18 @@ interface NavItem {
   // holded-desconectar (ADR-020) · `holdedDejado` es la única que se
   // enciende al APAGAR Holded, no al encenderlo: la pantalla que gatea
   // existe SÓLO en el comercio que lo dejó.
-  capability?: "agenda" | "caja" | "holded" | "fichaje" | "holdedDejado";
+  // residencia-1 · `residencia` es la sexta, y la primera que se enciende
+  // SOBRE otra: un tenant de residencia tiene además la clínica y el CRM.
+  // Lo que gatea son las tres pantallas del centro; la sección de
+  // residencia de Personal se esconde DENTRO de esa pantalla, que ya
+  // existía para la agenda.
+  capability?:
+    | "agenda"
+    | "caja"
+    | "holded"
+    | "fichaje"
+    | "holdedDejado"
+    | "residencia";
   // F1 · el activo se calcula por prefijo, y "Control horario"
   // (`/admin/fichaje`) es prefijo de sus dos hermanas. Sin esto, las tres
   // entradas se pintarían activas a la vez en cualquiera de ellas.
@@ -172,6 +183,30 @@ const NAV_ITEMS: NavItem[] = [
     label: "Registro de jornada",
     icon: ClipboardList,
     capability: "fichaje",
+  },
+  // residencia-1 (D-48) · las tres pantallas del centro. Para Jardín de
+  // Gredos ÉSTAS son su barra lateral, junto a Personal: no tiene caja, ni
+  // impresoras, ni etiquetas, ni Holded.
+  //
+  // El orden es el del trabajo, no el alfabético: primero quién vive aquí,
+  // después dónde, y al final el cuadrante.
+  {
+    to: "/admin/residencia/residentes",
+    label: "Residentes",
+    icon: Users,
+    capability: "residencia",
+  },
+  {
+    to: "/admin/residencia/edificio",
+    label: "Edificio",
+    icon: Building2,
+    capability: "residencia",
+  },
+  {
+    to: "/admin/residencia/turnos",
+    label: "Turnos",
+    icon: Clock,
+    capability: "residencia",
   },
   { to: "/admin/tag-aliases", label: "Etiquetas", icon: Tag, capability: "caja" },
   // v1.4-Bar-Operativa-MVP Lote 2: mapa tag → sección de cocina/barra.
@@ -590,6 +625,9 @@ function NavList({
     if (item.capability === "holded") return caps?.holded === true;
     if (item.capability === "fichaje") return caps?.fichaje === true;
     if (item.capability === "holdedDejado") return caps?.holdedDejado === true;
+    // residencia-1 · `=== true` como las demás: mientras `caps` es `null`
+    // la entrada NO se pinta, para no parpadear.
+    if (item.capability === "residencia") return caps?.residencia === true;
     return true;
   });
   return (

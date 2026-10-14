@@ -49,7 +49,51 @@ export type BootstrapState =
   // devolvió 403 KITCHEN_DEVICE_NOT_ALLOWED, que es la respuesta correcta
   // y no un error: el corte vive en la puerta de todas las rutas del TPV.
   | { kind: "kitchen"; data: KitchenMeResponse }
+  // residencia-1 (D-52) · esta tablet es LA PUERTA DE UNA HABITACIÓN. La
+  // misma APK, otra pantalla. Se llega aquí porque `/devices/me` devolvió
+  // 403 ROOM_DEVICE_NOT_ALLOWED, que es la respuesta correcta y no un
+  // error: el corte vive en la puerta de todas las rutas del TPV.
+  | { kind: "room"; data: PuertaMeResponse }
   | { kind: "paired"; data: DeviceMeResponse };
+
+/**
+ * residencia-1 · lo que contesta `GET /residencia/puerta/me`.
+ *
+ * Lo que NO lleva, y es la mitad del bloque: ni nivel de dependencia, ni
+ * grado, ni tipo de plaza, ni una alergia. Nombre y cama. Una tablet
+ * colgada en un pasillo la ve cualquiera que pase.
+ */
+export interface PuertaMeResponse {
+  device: { id: string; name: string | null };
+  habitacion: {
+    id: string;
+    number: string;
+    name: string | null;
+    active: boolean;
+    plantaId: string;
+    plantaName: string;
+  };
+  ocupantes: Array<{
+    bedId: string;
+    bedLabel: string;
+    /** `null` = cama libre. */
+    nombre: string | null;
+  }>;
+  /**
+   * Los turnos del centro, para que la tablet pueda decir en qué turno
+   * está **sin red**. Es lo que residencia-3 necesitará para adscribir un
+   * registro offline; mismo criterio que `serverTime` en `/kitchen/me`.
+   */
+  turnos: Array<{
+    id: string;
+    code: string;
+    name: string;
+    startsAt: string;
+    endsAt: string;
+  }>;
+  /** La hora del servidor al arrancar, para medir el desvío del reloj. */
+  serverTime: string;
+}
 
 export interface KitchenMeResponse {
   device: { id: string; name: string | null };
@@ -145,6 +189,24 @@ export function useDeviceBootstrap(): {
         try {
           const k = await apiWithDevice<KitchenMeResponse>("/kitchen/me");
           setState({ kind: "kitchen", data: k });
+        } catch {
+          setState({ kind: "loading" });
+          setTimeout(refresh, 3000);
+        }
+        return;
+      }
+      // residencia-1 · «modo puerta». Se pregunta a
+      // `/residencia/puerta/me`, que es la única ruta que acepta un `ROOM`.
+      // Si ESA también falla —el módulo se apagó con la tablet
+      // emparejada— se cae a `retry`, que es lo correcto: el aparato sigue
+      // emparejado y el día que lo reenciendan arranca sin volver a
+      // emparejarlo. Mismo criterio que `kitchen` y que `cajaDisabled`.
+      if (decision === "room") {
+        try {
+          const p = await apiWithDevice<PuertaMeResponse>(
+            "/residencia/puerta/me",
+          );
+          setState({ kind: "room", data: p });
         } catch {
           setState({ kind: "loading" });
           setTimeout(refresh, 3000);
