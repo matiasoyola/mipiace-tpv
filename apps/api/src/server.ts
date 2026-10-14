@@ -23,6 +23,7 @@ import { registerLocalCatalogRoutes } from "./catalog/local-products.js";
 import { registerContactsRoutes } from "./contacts/routes.js";
 import { registerContactImportRoutes } from "./contacts/import.js";
 import { exigirArranqueClinico } from "./clinica/arranque.js";
+import { registerContratoRoutes } from "./clinica/contrato-routes.js";
 import { registerClinicaRoutes } from "./clinica/routes.js";
 import { registerHistoriaRoutes } from "./clinica/historia-routes.js";
 import { registerConsentimientosRoutes } from "./clinica/consentimientos-routes.js";
@@ -199,6 +200,10 @@ async function main() {
   // (`clinicalRecordsEnabled`), y con el módulo apagado cada ruta
   // responde la 404 de Fastify como si no estuviera registrada.
   await registerClinicaRoutes(app);
+  // clinica-7 · el contrato de encargado. VA ANTES que las demás porque
+  // es la puerta: la pantalla de aceptación tiene que poder abrirse antes
+  // de que la historia funcione, porque es lo que hace que funcione.
+  await registerContratoRoutes(app);
   // clinica-2 · la valoración inicial. Mismo gate y mismo registro de
   // accesos que el resto de lo clínico.
   await registerValoracionRoutes(app);

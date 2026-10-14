@@ -32,6 +32,12 @@
 // hijas (consents, ficha técnica) se acceden SIEMPRE a través de un
 // cliente previamente validado como perteneciente al tenant.
 
+import {
+  dekParaNotas,
+  leerNota,
+  notaParaGuardar,
+} from "../clinica/notas.js";
+import { nuevoIdDeFila } from "../clinica/cripto-campos.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ClientConsentKind, type Prisma } from "@mipiacetpv/db";
 
@@ -61,9 +67,12 @@ function toClientView(c: {
   holdedContactId: string | null;
   marketingOptIn: boolean;
   notes: string | null;
+  // clinica-7 · la nota cifrada y el tenant, que su AAD necesita.
+  notesCifradas: string | null;
+  tenantId: string;
   createdAt: Date;
   updatedAt: Date;
-}) {
+}, dek: Buffer | null) {
   return {
     id: c.id,
     externalId: c.externalId,
@@ -75,7 +84,18 @@ function toClientView(c: {
     birthdate: c.birthdate ? c.birthdate.toISOString().slice(0, 10) : null,
     holdedContactId: c.holdedContactId,
     marketingOptIn: c.marketingOptIn,
-    notes: c.notes,
+    // clinica-7 · en un tenant clínico la nota va cifrada. La API
+    // descifra; el cliente nunca ve texto cifrado.
+    notes: leerNota(
+      {
+        tenantId: c.tenantId,
+        id: c.id,
+        que: "FICHA",
+        claro: c.notes,
+        cifrado: c.notesCifradas,
+      },
+      dek,
+    ),
     createdAt: c.createdAt.toISOString(),
     updatedAt: c.updatedAt.toISOString(),
   };
@@ -92,6 +112,8 @@ const CLIENT_SELECT = {
   holdedContactId: true,
   marketingOptIn: true,
   notes: true,
+  notesCifradas: true,
+  tenantId: true,
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.ClientSelect;
@@ -174,8 +196,10 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
       });
       const hasMore = rows.length > limit;
       const page = hasMore ? rows.slice(0, limit) : rows;
+      // clinica-7 · UNA lectura de clave para la página entera.
+      const dek = await dekParaNotas(auth.tenantId);
       return {
-        items: page.map(toClientView),
+        items: page.map((c) => toClientView(c, dek)),
         nextCursor: hasMore ? page[page.length - 1]!.id : null,
       };
     },
@@ -237,7 +261,13 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
         if (existing) {
           return reply
             .code(200)
-            .send({ client: toClientView(existing), duplicate: true });
+            .send({
+              client: toClientView(
+                existing,
+                await dekParaNotas(auth.tenantId),
+              ),
+              duplicate: true,
+            });
         }
       }
 
@@ -260,8 +290,21 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
+      // clinica-7 · decisión 10 · en un tenant clínico la nota de la ficha
+      // se guarda CIFRADA. El id se genera aquí porque el AAD lo necesita
+      // (ver la cabecera de `cripto-campos.ts`).
+      const idCliente = nuevoIdDeFila();
+      const nota = await notaParaGuardar({
+        tenantId: auth.tenantId,
+        id: idCliente,
+        que: "FICHA",
+        texto: body.notes,
+      });
+      const dekDeLaNota = await dekParaNotas(auth.tenantId);
+
       const created = await prisma.client.create({
         data: {
+          id: idCliente,
           tenantId: auth.tenantId,
           externalId: body.externalId ?? null,
           firstName: body.firstName.trim(),
@@ -271,12 +314,13 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
           birthdate: body.birthdate ? new Date(body.birthdate) : null,
           holdedContactId: body.holdedContactId?.trim() || null,
           marketingOptIn: body.marketingOptIn ?? false,
-          notes: body.notes?.trim() || null,
+          notes: nota.claro,
+          notesCifradas: nota.cifrado,
         },
         select: CLIENT_SELECT,
       });
       return reply.code(201).send({
-        client: toClientView(created),
+        client: toClientView(created, dekDeLaNota),
         ...(phoneWarning ? { phoneWarning } : {}),
       });
     },
@@ -352,7 +396,10 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
 
       return reply
         .code(created ? 201 : 200)
-        .send({ client: toClientView(client), created });
+        .send({
+          client: toClientView(client, await dekParaNotas(auth.tenantId)),
+          created,
+        });
     },
   );
 
@@ -405,6 +452,7 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
             id: true,
             serviceId: true,
             body: true,
+            bodyCifrado: true,
             createdByUserId: true,
             createdAt: true,
           },
@@ -420,8 +468,11 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
       // siempre, y en él la ficha técnica es de la peluquería.
       const esconderFichaTecnica =
         acceso.estado.clinicaEncendida && !acceso.veredicto.puede;
+      // clinica-7 · UNA lectura de clave para la ficha y sus notas
+      // técnicas.
+      const dekDeLasNotas = await dekParaNotas(auth.tenantId);
       return {
-        client: toClientView(client),
+        client: toClientView(client, dekDeLasNotas),
         consents: consents.map((c) => ({
           id: c.id,
           kind: c.kind,
@@ -433,7 +484,18 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
           : technicalNotes.map((n) => ({
               id: n.id,
               serviceId: n.serviceId,
-              body: n.body,
+              // clinica-7 · en una clínica, «los parámetros del
+              // tratamiento» son dato de salud y van cifrados.
+              body: leerNota(
+                {
+                  tenantId: auth.tenantId,
+                  id: n.id,
+                  que: "TECNICA",
+                  claro: n.body,
+                  cifrado: n.bodyCifrado,
+                },
+                dekDeLasNotas,
+              ),
               createdByUserId: n.createdByUserId,
               createdAt: n.createdAt.toISOString(),
             })),
@@ -494,14 +556,27 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
         data.holdedContactId = body.holdedContactId?.trim() || null;
       if (body.marketingOptIn !== undefined)
         data.marketingOptIn = body.marketingOptIn;
-      if (body.notes !== undefined) data.notes = body.notes?.trim() || null;
+      // clinica-7 · la nota se vuelve a cifrar con el id de ESTA fila.
+      // `dekDeLaNota` se resuelve igual haya nota o no: lo usa la vista
+      // para descifrar la que ya había.
+      const dekDeLaNota = await dekParaNotas(auth.tenantId);
+      if (body.notes !== undefined) {
+        const nota = await notaParaGuardar({
+          tenantId: auth.tenantId,
+          id,
+          que: "FICHA",
+          texto: body.notes,
+        });
+        data.notes = nota.claro;
+        data.notesCifradas = nota.cifrado;
+      }
 
       const updated = await prisma.client.update({
         where: { id },
         data,
         select: CLIENT_SELECT,
       });
-      return { client: toClientView(updated) };
+      return { client: toClientView(updated, dekDeLaNota) };
     },
   );
 
@@ -695,18 +770,34 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
           message: veredicto.mensaje,
         });
       }
+      // clinica-7 · en un tenant clínico la ficha técnica va CIFRADA: en
+      // peluquería esto es la fórmula del color, y en una clínica son los
+      // parámetros del tratamiento.
+      const idNota = nuevoIdDeFila();
+      const nota = await notaParaGuardar({
+        tenantId: auth.tenantId,
+        id: idNota,
+        que: "TECNICA",
+        texto: body.body,
+      });
       const note = await prisma.clientTechnicalNote.create({
         data: {
+          id: idNota,
           tenantId: auth.tenantId,
           clientId: id,
           serviceId: body.serviceId?.trim() || null,
-          body: body.body.trim(),
+          // `body` es NOT NULL desde B1, así que en un tenant clínico va
+          // la cadena vacía y el dato vive en `bodyCifrado`. Quitarle el
+          // NOT NULL habría sido aflojar una garantía para esto.
+          body: nota.claro ?? "",
+          bodyCifrado: nota.cifrado,
           createdByUserId: auth.userId,
         },
         select: {
           id: true,
           serviceId: true,
           body: true,
+          bodyCifrado: true,
           createdByUserId: true,
           createdAt: true,
         },
@@ -715,7 +806,8 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
         technicalNote: {
           id: note.id,
           serviceId: note.serviceId,
-          body: note.body,
+          // Lo que entró, no lo que hay en la columna en claro.
+          body: body.body.trim(),
           createdByUserId: note.createdByUserId,
           createdAt: note.createdAt.toISOString(),
         },
