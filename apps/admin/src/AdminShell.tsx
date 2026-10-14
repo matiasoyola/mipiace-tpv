@@ -15,6 +15,7 @@ import {
   FileWarning,
   Gift,
   KeyRound,
+  Layers,
   Menu,
   Package,
   Printer,
@@ -206,6 +207,23 @@ const NAV_ITEMS: NavItem[] = [
     to: "/admin/residencia/turnos",
     label: "Turnos",
     icon: Clock,
+    capability: "residencia",
+  },
+  // residencia-2 · el catálogo y las plantillas, DESPUÉS de los turnos y
+  // antes de nada de caja. El orden sigue siendo el del trabajo: quién
+  // vive aquí, dónde, el cuadrante, y luego qué se le hace y qué se le
+  // precarga. El plan de un residente no está en la barra: se llega desde
+  // su ficha, porque es de una persona y no del centro.
+  {
+    to: "/admin/residencia/controles",
+    label: "Controles",
+    icon: ClipboardList,
+    capability: "residencia",
+  },
+  {
+    to: "/admin/residencia/plantillas",
+    label: "Plantillas",
+    icon: Layers,
     capability: "residencia",
   },
   { to: "/admin/tag-aliases", label: "Etiquetas", icon: Tag, capability: "caja" },
