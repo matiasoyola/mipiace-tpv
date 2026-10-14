@@ -79,6 +79,13 @@ Documentos fuente (proyecto «Jardin de Gredos»): `concepto-software-residencia
 | D-59 | **Vocabulario de ánimo y cognición: el propuesto en la rama de controles**, editable como dato. Se contrasta en la observación de turno, sin bloquear. | Es dato: cambiarlo no es un desarrollo. |
 | D-60 | **Visibilidad para la familia: todo interno por defecto.** Cada control lleva el atributo desde ya, pero no hay portal en la v1. (H-11) | El atributo es una columna hoy; el portal, un bloque mañana. |
 
+### Tras residencia-1 (14-10-2026)
+
+| # | Decisión | Por qué |
+|---|---|---|
+| D-61 | **Quien dirige el centro entra como OWNER del tenant.** Roles de cuidado y zonas los asigna sólo el OWNER (decisión 6 de residencia-1), y no se abre al encargado. | Decidir quién ve datos de salud es de quien dirige; se resuelve configurando, sin tocar código. |
+| D-62 | **DNI y NSS cifrados en reposo antes del piloto con residentes reales.** Bloque corto propio antes del piloto. | Hoy están en claro, igual que en la clínica; con datos reales no puede seguir así. |
+
 ### Lo que NO se decide por criterio (son hechos que aporta el cliente, no bloquean)
 
 - H-01 · ordenador origen de los `.lnk` (fichas de 2025).
