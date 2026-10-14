@@ -673,7 +673,12 @@ export async function registerResidenciaPlanRoutes(app: FastifyInstance): Promis
             itemId: { type: "string", format: "uuid" },
           },
         },
-        body: {
+        // El motivo va en la QUERY y no en el cuerpo, y es un arreglo que
+        // salió de su propio test: un `DELETE` sin cuerpo contra una ruta
+        // que declara `body` recibe un 400 de Fastify, y la pantalla lo
+        // llama sin cuerpo (`api(url, { method: "DELETE" })`). O sea que
+        // esto estaba roto para el único cliente que tiene.
+        querystring: {
           type: "object",
           additionalProperties: false,
           properties: { motivo: { type: "string", maxLength: 160 } },
@@ -685,7 +690,7 @@ export async function registerResidenciaPlanRoutes(app: FastifyInstance): Promis
       if (!ctx) return;
       const { tenantId, clientId, userId } = ctx;
       const { itemId } = request.params as { itemId: string };
-      const body = (request.body ?? {}) as { motivo?: string };
+      const body = (request.query ?? {}) as { motivo?: string };
       const prisma = getPrisma();
 
       return conHistoria(request, reply, { clientId, action: "WRITE" }, async () => {

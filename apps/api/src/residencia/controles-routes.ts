@@ -294,18 +294,26 @@ export async function registerResidenciaControlesRoutes(
   //
   // Cinco campos y ni uno más. Lo del producto —capa, naturaleza, dominio,
   // unidad, rangos, indicador, frecuencias permitidas, roles permitidos—
-  // **no está en el esquema del cuerpo**, así que un intento recibe un 400
-  // por `additionalProperties: false`.
+  // **no está en el esquema del cuerpo**.
   //
-  // Y eso no es suficiente: Fastify configura ajv con
-  // `removeAdditional: true` para los cuerpos SIN
-  // `additionalProperties: false`, y el bug que residencia-1 destapó en el
-  // PATCH del super-admin fue exactamente eso —un 200 que no hacía nada—.
-  // Aquí el `additionalProperties: false` está puesto, así que un campo
-  // desconocido es un 400 de verdad. Tiene su test.
+  // ── Y `additionalProperties: false` NO basta, otra vez ────────────
+  //
+  // Fastify configura ajv con `removeAdditional: true` por defecto, así
+  // que `additionalProperties: false` **BORRA** la propiedad en vez de
+  // quejarse: la ruta contestaría **200 sin hacer nada**. Es exactamente
+  // el bug que residencia-1 destapó en el PATCH del super-admin (§1 de su
+  // done), y aquí haría más daño: la dirección intenta cambiar el rango
+  // de referencia de la temperatura, recibe un 200 y se queda creyendo
+  // que lo ha cambiado.
+  //
+  // Un 400 se ve el primer día; un 200 que no hace nada se descubre en la
+  // auditoría. Así que va un `preValidation` que mira el cuerpo CRUDO
+  // —antes de que ajv lo pode— y contesta un 400 con el nombre del campo
+  // y con qué sí se puede cambiar. Tiene su test, campo por campo.
   app.patch(
     "/residencia/controles/:code",
     {
+      preValidation: soloLoDelCentro,
       preHandler: PUERTAS_ESCRITURA,
       schema: {
         params: {
@@ -904,6 +912,68 @@ export async function registerResidenciaControlesRoutes(
       return { momento: actualizado };
     },
   );
+}
+
+/** Los cinco campos que el centro decide de un control. */
+const DEL_CENTRO = ["active", "alias", "frecuencia", "careRoleCodes", "familyVisible"];
+
+/**
+ * Los campos del PRODUCTO, con la frase de cada uno.
+ *
+ * Están nombrados uno por uno —y no se contesta un «campo desconocido»
+ * genérico— porque la negativa tiene que decir DÓNDE se cambia eso. «La
+ * unidad no se cambia» a secas deja a la dirección buscando la pantalla
+ * que no existe.
+ */
+const DEL_PRODUCTO: Record<string, string> = {
+  layer: "la capa",
+  nature: "si es programado o a demanda",
+  valueDomain: "el tipo de valor",
+  unit: "la unidad",
+  inputMin: "el mínimo que se puede teclear",
+  inputMax: "el máximo que se puede teclear",
+  refMin: "el mínimo normal",
+  refMax: "el máximo normal",
+  opciones: "las opciones",
+  allowedFrequencies: "las frecuencias que se permiten",
+  allowedCareRoleCodes: "los roles que se permiten",
+  isoIndicatorCode: "el indicador de calidad",
+  groupCode: "el grupo",
+  version: "la versión",
+  code: "el código",
+  name: "el nombre del producto",
+  scope: "el alcance",
+};
+
+/**
+ * Mira el cuerpo CRUDO y rechaza lo que no es del centro.
+ *
+ * `preValidation` y no `preHandler`: corre ANTES de que ajv pode el cuerpo
+ * con `removeAdditional`, que es el único momento en que esos campos
+ * todavía existen.
+ */
+async function soloLoDelCentro(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const body = request.body;
+  if (body === null || typeof body !== "object") return;
+  for (const campo of Object.keys(body as Record<string, unknown>)) {
+    if (DEL_CENTRO.includes(campo)) continue;
+    const queEs = DEL_PRODUCTO[campo];
+    if (queEs) {
+      await reply.code(400).send({
+        error: "ES_DEL_PRODUCTO",
+        message: `${queEs[0]!.toUpperCase()}${queEs.slice(1)} de un control lo mantiene Mi Piace y se actualiza en todos los centros a la vez. Tú puedes cambiar si lo usáis, cómo lo llamáis, cada cuánto y quién lo registra.`,
+      });
+      return;
+    }
+    await reply.code(400).send({
+      error: "CAMPO_DESCONOCIDO",
+      message: `«${campo}» no es nada que se pueda cambiar de un control.`,
+    });
+    return;
+  }
 }
 
 /** Mayúsculas, sin acentos y con guiones bajos. Es lo que son los códigos. */
