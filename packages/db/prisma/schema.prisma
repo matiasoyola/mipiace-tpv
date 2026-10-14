@@ -3019,6 +3019,22 @@ model ClinicalReportDelivery {
   // Sólo con canal EMAIL (CHECK `..._email_segun_canal`).
   recipientEmail String?  @map("recipient_email") @db.VarChar(200)
   pdfSha256      String   @map("pdf_sha256") @db.Char(64)
+  // ── clinica-7 · el PDF de las entregas POR ENLACE sí se guarda ─────
+  //
+  // Divergencia declarada con clinica-4 §3, que decidió que el PDF del
+  // informe NO se guarda. Eso vale para imprimir y para el adjunto: en los
+  // dos el documento se lo lleva alguien en el mismo acto. **Con un enlace
+  // no se lo lleva nadie** — tiene que existir cuando el destinatario lo
+  // abra, tres días después. Y no se puede volver a armar entonces:
+  // `armarInforme` lee la historia VIVA, así que una visita nueva cambiaría
+  // el documento y el `pdfSha256` de esta fila dejaría de cuadrar.
+  //
+  // `null` en las entregas por impresión. El CHECK
+  // `..._enlace_completo` ata las dos columnas: van juntas o ninguna.
+  pdfFileName    String?  @map("pdf_file_name") @db.VarChar(100)
+  // El enlace por el que salió. Sin FK dura a propósito: si un día se
+  // purgaran los enlaces caducados, una FK lo impediría.
+  publicLinkId   String?  @map("public_link_id") @db.Uuid
   userId         String   @map("user_id") @db.Uuid
   at             DateTime @default(now()) @db.Timestamptz()
 
@@ -4428,6 +4444,25 @@ model PublicLink {
   // trigger `public_links_guard`.
   maxUses   Int @map("max_uses")
   usedCount Int @default(0) @map("used_count")
+
+  // ── clinica-7 · EL CÓDIGO DE 6 CIFRAS ──────────────────────────────
+  //
+  // Decisión 21: el enlace del informe clínico no abre con solo tener la
+  // URL. Pide un código que se enseña UNA vez en pantalla a quien lo envía,
+  // para darlo por otro canal (en mano o por teléfono). Así, un correo
+  // reenviado o una URL en el historial de un móvil prestado no abren nada.
+  //
+  // **LA HUELLA, nunca el código.** El CHECK
+  // `public_links_code_hash_es_sha256` solo admite 64 hex: un código de 6
+  // cifras NO CABE en esta columna. Y es identidad para el trigger — el
+  // código de un enlace no cambia; si hace falta otro, es otro enlace.
+  //
+  // `null` en los `purpose` que no piden código (la valoración).
+  codeHash     String? @map("code_hash") @db.Char(64)
+  // Cuántas veces se ha fallado el código. 5 fallos ANULAN el enlace. Solo
+  // sube (lo garantiza el trigger): bajarlo es regalar intentos a quien
+  // está probando códigos sobre la historia clínica de alguien.
+  codeFailures Int     @default(0) @map("code_failures")
 
   // Recepción lo anuló. No se des-anula (trigger).
   revokedAt DateTime? @map("revoked_at") @db.Timestamptz()

@@ -282,6 +282,9 @@ const REGLAS_PRUEBA: ReglasDePurpose<FakeObjetivo> = {
   vidaMs: (canal) => (canal === "CORTO" ? 1000 : 60 * 60 * 1000),
   maxUsos: 2,
   limitePor: "IP",
+  // clinica-7 · sin código: el `purpose` de prueba es el genérico, y el
+  // camino del código tiene sus propios casos en `clinica-7-informe`.
+  pideCodigo: false,
   mensajes: MENSAJES,
   registraAccesoClinico: true,
   pacienteDe: (o) => o.clientId,
@@ -505,7 +508,7 @@ describe("enlaces-publicos · LA MISMA 404 para los siete motivos", () => {
     await app.close();
   });
 
-  it("EL REGISTRO tiene dado de alta sólo `VALORACION`", async () => {
+  it("EL REGISTRO tiene dado de alta `VALORACION` e `INFORME_CLINICO`", async () => {
     // Es lo que hace que `purpose` sea TEXT sin ser un agujero: para
     // preguntar a la puerta por un `purpose` hay que traerle sus REGLAS, y
     // las reglas sólo existen en `reglas.ts`. Una fila con un `purpose` que
@@ -514,9 +517,21 @@ describe("enlaces-publicos · LA MISMA 404 para los siete motivos", () => {
     //
     // Y este assert existe para que dar de alta un `purpose` nuevo sea un
     // acto deliberado y visible, y no algo que aparezca de rebote.
-    const { PURPOSES } = await import("../src/enlaces/reglas.js");
-    expect(Object.keys(PURPOSES)).toEqual(["VALORACION"]);
+    const { PURPOSES, REGLAS_INFORME } = await import(
+      "../src/enlaces/reglas.js"
+    );
+    // clinica-7 dio de alta el segundo, y esta lista es el sitio donde
+    // eso se ve. Un tercero que aparezca sin que nadie lo haya querido
+    // pone este test en rojo.
+    expect(Object.keys(PURPOSES)).toEqual(["VALORACION", "INFORME_CLINICO"]);
     expect(REGLAS_VALORACION.purpose).toBe("VALORACION");
+    expect(REGLAS_INFORME.purpose).toBe("INFORME_CLINICO");
+    // Y la diferencia que importa entre los dos: el del informe PIDE
+    // CÓDIGO, porque enseña una historia clínica; el de la valoración no,
+    // porque un enlace filtrado filtra un formulario vacío.
+    expect(REGLAS_VALORACION.pideCodigo).toBe(false);
+    expect(REGLAS_INFORME.pideCodigo).toBe(true);
+    expect(REGLAS_INFORME.perfil).toBe("SOLO_LEER");
     // Los dos `purpose` de este fichero NO están en el registro, a
     // propósito: lo que ejercitan es el mecanismo.
     expect(PURPOSES[REGLAS_PRUEBA.purpose]).toBeUndefined();

@@ -64,11 +64,25 @@ export async function apuntarEntrega(
     destinatario: Destinatario;
     email: string | null;
     pdfSha256: string;
+    /** clinica-7 · el fichero del volumen, en las entregas POR ENLACE. El
+     *  CHECK `..._enlace_completo` ata las dos columnas: van juntas o
+     *  ninguna. */
+    pdfFileName?: string | null;
+    /** clinica-7 · el enlace por el que se entregó. */
+    publicLinkId?: string | null;
     ahora: Date;
+    /** clinica-7 · el id de la fila, cuando quien llama lo necesita antes
+     *  de insertarla — y lo necesita siempre que haya enlace: el enlace
+     *  apunta a la entrega, así que la entrega tiene que tener id antes de
+     *  que el enlace exista... o al revés. Aquí es al revés (el enlace se
+     *  crea después, con el id de la entrega), así que el id se genera
+     *  fuera para poder pasárselo al nombre del fichero. */
+    id?: string;
   },
 ): Promise<{ id: string }> {
   return prisma.clinicalReportDelivery.create({
     data: {
+      ...(input.id ? { id: input.id } : {}),
       tenantId: input.tenantId,
       clientId: input.clientId,
       userId: input.userId,
@@ -77,6 +91,8 @@ export async function apuntarEntrega(
       recipient: input.destinatario,
       recipientEmail: input.canal === "EMAIL" ? input.email : null,
       pdfSha256: input.pdfSha256,
+      pdfFileName: input.pdfFileName ?? null,
+      publicLinkId: input.publicLinkId ?? null,
       at: input.ahora,
     },
     select: { id: true },
@@ -92,12 +108,39 @@ export interface EntregaEnPantalla {
   email: string | null;
   cuando: string;
   quien: string;
+  /**
+   * clinica-7 · el estado del enlace, cuando la entrega fue por enlace.
+   * `null` en las de impresión.
+   *
+   * Es lo que hace que «se puede anular desde la historia» (decisión 21)
+   * sea una pantalla y no una llamada a Mi Piace: la podóloga ve si el
+   * enlace que mandó el martes sigue vivo y lo anula desde ahí.
+   */
+  enlace: EstadoDelEnlaceDeInforme | null;
+}
+
+export interface EstadoDelEnlaceDeInforme {
+  /** `VIVO` | `CADUCADO` | `GASTADO` | `ANULADO`.
+   *
+   * **Aquí sí se distinguen los cuatro**, al contrario que en la 404 de la
+   * ruta pública. Y no es una contradicción: la 404 no los distingue para
+   * no contarle nada a quien prueba tokens, y esto se lo cuenta A LA
+   * PODÓLOGA, que es quien mandó el enlace y tiene que saber por qué su
+   * paciente no lo abre. */
+  estado: "VIVO" | "CADUCADO" | "GASTADO" | "ANULADO";
+  caducaEn: string;
+  aperturas: number;
+  aperturasRestantes: number;
+  /** Cuántas veces se ha fallado el código. La podóloga tiene que verlo:
+   *  cuatro fallos significan que el paciente anotó mal el código, y uno
+   *  más anula el enlace. */
+  fallosDeCodigo: number;
 }
 
 /** Las entregas de un paciente, para la pestaña «Documentos». */
 export async function entregasDelPaciente(
   prisma: PrismaClient,
-  input: { tenantId: string; clientId: string },
+  input: { tenantId: string; clientId: string; ahora?: Date },
 ): Promise<readonly EntregaEnPantalla[]> {
   const filas = await prisma.clinicalReportDelivery.findMany({
     where: { tenantId: input.tenantId, clientId: input.clientId },
@@ -110,9 +153,33 @@ export async function entregasDelPaciente(
       recipient: true,
       recipientEmail: true,
       at: true,
+      publicLinkId: true,
       user: { select: { alias: true, email: true } },
     },
   });
+
+  // clinica-7 · los enlaces de estas entregas, en UNA consulta. Con una
+  // por entrega serían cincuenta en la pestaña «Documentos».
+  const idsDeEnlace = filas
+    .map((f) => f.publicLinkId)
+    .filter((x): x is string => x != null);
+  const enlaces =
+    idsDeEnlace.length === 0
+      ? []
+      : await prisma.publicLink.findMany({
+          where: { id: { in: idsDeEnlace } },
+          select: {
+            id: true,
+            expiresAt: true,
+            maxUses: true,
+            usedCount: true,
+            revokedAt: true,
+            codeFailures: true,
+          },
+        });
+  const porId = new Map(enlaces.map((e) => [e.id, e]));
+  const ahora = input.ahora ?? new Date();
+
   return filas.map((f) => ({
     id: f.id,
     tipo: f.report,
@@ -123,5 +190,45 @@ export async function entregasDelPaciente(
     email: f.recipientEmail,
     cuando: f.at.toISOString(),
     quien: f.user.alias?.trim() || f.user.email,
+    enlace: estadoDelEnlace(
+      f.publicLinkId == null ? null : (porId.get(f.publicLinkId) ?? null),
+      ahora,
+    ),
   }));
+}
+
+/**
+ * El estado de un enlace, en el ORDEN en que importa: anulado primero.
+ *
+ * Es el mismo orden que la puerta usa para rechazar (anulado, caducado,
+ * gastado) y por la misma razón: lo que recepción anuló no sirve aunque
+ * siga en fecha, así que decir «caducado» de un enlace anulado sería decir
+ * que el tiempo lo arregló.
+ */
+function estadoDelEnlace(
+  e: {
+    expiresAt: Date;
+    maxUses: number;
+    usedCount: number;
+    revokedAt: Date | null;
+    codeFailures: number;
+  } | null,
+  ahora: Date,
+): EstadoDelEnlaceDeInforme | null {
+  if (e == null) return null;
+  const estado =
+    e.revokedAt != null
+      ? "ANULADO"
+      : e.expiresAt.getTime() <= ahora.getTime()
+        ? "CADUCADO"
+        : e.usedCount >= e.maxUses
+          ? "GASTADO"
+          : "VIVO";
+  return {
+    estado,
+    caducaEn: e.expiresAt.toISOString(),
+    aperturas: e.usedCount,
+    aperturasRestantes: Math.max(0, e.maxUses - e.usedCount),
+    fallosDeCodigo: e.codeFailures,
+  };
 }

@@ -720,3 +720,166 @@ BEGIN
         OLD.id USING ERRCODE = '23514';
 END;
 $fn$;
+
+-- ──────────────────────────────────────────────────────────────────────
+-- 5 · EL INFORME POR ENLACE. Fuera los adjuntos.
+-- ──────────────────────────────────────────────────────────────────────
+--
+-- Decisión 21: el informe por email deja de llevar adjunto. El correo lleva
+-- un enlace por la puerta común, y **para abrirlo hay que teclear un código
+-- de 6 cifras** que se enseña UNA vez en pantalla a quien lo envía, para
+-- darlo por otro canal (en mano o por teléfono).
+--
+-- ── Dos columnas en `public_links`, y no una tabla nueva ────────────
+--
+-- `code_hash` y `code_failures`. En la fila del enlace y no en una tabla
+-- aparte porque son del enlace: caducan con él, se anulan con él y no
+-- tienen vida propia. Una tabla con una fila por enlace habría sido un JOIN
+-- en el camino más caliente de la puerta.
+--
+-- **Se guarda la HUELLA del código, nunca el código.** El CHECK solo admite
+-- 64 hex, igual que `token_hash`: un código de 6 cifras no cabe en esta
+-- columna. Es la misma garantía puesta en el motor, no en una revisión.
+--
+-- Y `code_failures` SOLO SUBE, como `used_count`: bajarlo es regalar
+-- intentos. Lo garantiza el guard, abajo.
+ALTER TABLE "public_links"
+    ADD COLUMN "code_hash"     CHAR(64),
+    ADD COLUMN "code_failures" INTEGER NOT NULL DEFAULT 0,
+    -- 64 hex y nada más. El código en claro (6 cifras) NO CABE.
+    ADD CONSTRAINT "public_links_code_hash_es_sha256"
+        CHECK ("code_hash" IS NULL OR "code_hash" ~ '^[0-9a-f]{64}$'),
+    ADD CONSTRAINT "public_links_code_failures_no_negativo"
+        CHECK ("code_failures" >= 0);
+
+-- El guard de `enlaces-publicos` es una LISTA de lo que no cambia, así que
+-- una columna nueva nace mutable. Las dos tienen que entrar en él:
+--
+--   · `code_hash` es identidad: el código de un enlace no cambia. Si hace
+--     falta otro código, es otro enlace (y el anterior se anula). Un código
+--     que se puede reescribir es un enlace que alguien reabre cambiándole
+--     la cerradura.
+--   · `code_failures` solo sube, por lo mismo que `used_count`.
+CREATE OR REPLACE FUNCTION mipiacetpv_public_link_guard() RETURNS trigger
+LANGUAGE plpgsql AS $fn$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION
+            'ENLACE_VIOLADO: un enlace público no se borra (enlace %). Se revoca, y la revocación queda escrita.',
+            OLD.id USING ERRCODE = '23514';
+    END IF;
+
+    -- 2 · la identidad, y la caducidad va dentro
+    IF NEW.id          IS DISTINCT FROM OLD.id
+       OR NEW.tenant_id   IS DISTINCT FROM OLD.tenant_id
+       OR NEW.purpose     IS DISTINCT FROM OLD.purpose
+       OR NEW.target_type IS DISTINCT FROM OLD.target_type
+       OR NEW.target_id   IS DISTINCT FROM OLD.target_id
+       OR NEW.token_hash  IS DISTINCT FROM OLD.token_hash
+       -- clinica-7 · el código es parte de la cerradura.
+       OR NEW.code_hash   IS DISTINCT FROM OLD.code_hash
+       OR NEW.max_uses    IS DISTINCT FROM OLD.max_uses
+       OR NEW.expires_at  IS DISTINCT FROM OLD.expires_at
+       OR NEW.created_by_user_id IS DISTINCT FROM OLD.created_by_user_id
+       OR NEW.created_at  IS DISTINCT FROM OLD.created_at THEN
+        RAISE EXCEPTION
+            'ENLACE_VIOLADO: el enlace % no se reescribe en lo que lo identifica (para qué sirve, a qué apunta, su huella, su código, su tope, cuándo caduca). Para dar otro enlace se revoca éste y se crea uno nuevo.',
+            OLD.id USING ERRCODE = '23514';
+    END IF;
+
+    -- 3 · no se des-revoca
+    IF OLD.revoked_at IS NOT NULL
+       AND NEW.revoked_at IS DISTINCT FROM OLD.revoked_at THEN
+        RAISE EXCEPTION
+            'ENLACE_VIOLADO: el enlace % está anulado y no se des-anula. Si hace falta uno, se crea uno nuevo.',
+            OLD.id USING ERRCODE = '23514';
+    END IF;
+
+    -- 4 · los usos sólo suben, y nunca pasan del tope
+    IF NEW.used_count < OLD.used_count THEN
+        RAISE EXCEPTION
+            'ENLACE_VIOLADO: los usos del enlace % no bajan (% → %). Bajar el contador es dejarlo usar una vez más.',
+            OLD.id, OLD.used_count, NEW.used_count USING ERRCODE = '23514';
+    END IF;
+    IF NEW.used_count > OLD.max_uses THEN
+        RAISE EXCEPTION
+            'ENLACE_VIOLADO: el enlace % ya se gastó sus % usos y no admite otro.',
+            OLD.id, OLD.max_uses USING ERRCODE = '23514';
+    END IF;
+
+    -- clinica-7 · 4bis · los intentos fallidos del código SOLO SUBEN.
+    -- Bajarlos es regalarle intentos a quien está probando códigos de seis
+    -- cifras sobre la historia clínica de alguien.
+    IF NEW.code_failures < OLD.code_failures THEN
+        RAISE EXCEPTION
+            'ENLACE_VIOLADO: los intentos fallidos del código del enlace % no bajan (% → %). Bajarlos es regalar intentos.',
+            OLD.id, OLD.code_failures, NEW.code_failures USING ERRCODE = '23514';
+    END IF;
+
+    -- 5 · un enlace anulado no se gasta
+    IF OLD.revoked_at IS NOT NULL AND NEW.used_count > OLD.used_count THEN
+        RAISE EXCEPTION
+            'ENLACE_VIOLADO: el enlace % está anulado y no se puede usar.',
+            OLD.id USING ERRCODE = '23514';
+    END IF;
+
+    RETURN NEW;
+END;
+$fn$;
+
+-- ── El PDF del informe entregado POR ENLACE sí se guarda ────────────
+--
+-- Y es una divergencia declarada con clinica-4 §3, que decidió que **el PDF
+-- del informe NO se guarda**: «un informe es una foto de la historia en un
+-- momento; se arma, se entrega, y lo que queda es la prueba de que se
+-- entregó».
+--
+-- Eso vale para imprimir y para el adjunto: en los dos casos el documento
+-- se lo lleva alguien en el mismo acto. **Con un enlace no se lo lleva
+-- nadie**: el documento tiene que existir cuando el destinatario lo abra,
+-- tres días después. Y no se puede volver a armar en ese momento —
+-- `armarInforme` lee la historia VIVA, así que una visita nueva cambiaría
+-- el documento y el `pdf_sha256` que la entrega guardó dejaría de cuadrar.
+-- Serviría un documento que nadie decidió mandar.
+--
+-- Así que la entrega por enlace guarda su PDF en el volumen clínico
+-- (cifrado, como todo lo demás), y `pdf_file_name` apunta a él. `NULL` en
+-- las entregas por impresión y en las de email con adjunto de antes de este
+-- bloque: ahí no hay fichero y no lo había.
+--
+-- Lo que esto NO es: un archivo de informes. Son 7 días de vida por enlace.
+-- Purgar los de los enlaces caducados es del bloque de supresión RGPD, y
+-- queda dicho en el `-done`.
+ALTER TABLE "clinical_report_deliveries"
+    ADD COLUMN "pdf_file_name" VARCHAR(100),
+    -- El enlace por el que se entregó, cuando el canal es LINK. Sin FK
+    -- dura: `public_links` se anula y se queda, así que la referencia no
+    -- se rompe — pero si un día se purgaran, una FK impediría purgarlos.
+    ADD COLUMN "public_link_id" UUID;
+
+-- «La entrega de este enlace», que es lo que la ruta pública resuelve para
+-- saber qué documento servir.
+CREATE INDEX "clinical_report_deliveries_enlace_idx"
+    ON "clinical_report_deliveries"("public_link_id")
+    WHERE "public_link_id" IS NOT NULL;
+
+-- Y las dos columnas van JUNTAS o ninguna, y solo con canal EMAIL: una
+-- entrega con enlace y sin fichero sería un enlace que no abre nada, y un
+-- fichero sin enlace sería un PDF de salud guardado que nadie va a leer.
+--
+-- No se añade un canal `LINK` al CHECK: el canal sigue siendo EMAIL porque
+-- lo que sale de aquí es un correo. Lo que cambia es QUÉ lleva el correo, y
+-- eso lo dice `public_link_id`.
+ALTER TABLE "clinical_report_deliveries"
+    ADD CONSTRAINT "clinical_report_deliveries_enlace_completo"
+        CHECK (
+            ("public_link_id" IS NULL AND "pdf_file_name" IS NULL)
+            OR ("public_link_id" IS NOT NULL
+                AND "pdf_file_name" IS NOT NULL
+                AND "channel" = 'EMAIL')
+        );
+
+-- La tabla sigue siendo de SOLO INSERCIÓN: el trigger
+-- `clinical_report_deliveries_append_only` no se toca. Las dos columnas se
+-- escriben en el INSERT y no cambian nunca — el enlace se anula en
+-- `public_links`, no aquí.

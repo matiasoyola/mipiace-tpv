@@ -128,6 +128,23 @@ export interface FakeEntry {
   createdAt: Date;
 }
 
+/** clinica-7 · una fila de `public_links`. */
+export interface FakeEnlace {
+  id: string;
+  tenantId: string;
+  purpose: string;
+  targetType: string;
+  targetId: string;
+  tokenHash: string;
+  codeHash: string | null;
+  codeFailures: number;
+  expiresAt: Date;
+  maxUses: number;
+  usedCount: number;
+  revokedAt: Date | null;
+  createdByUserId: string | null;
+}
+
 export interface FakeLog {
   userId: string;
   clientId: string;
@@ -151,6 +168,8 @@ export interface MundoDeLaClinica {
   /** Los servicios de la cita de prueba. */
   serviciosDeLaCita: string[];
   valoracionValidada: boolean;
+  /** clinica-7 · los enlaces públicos creados (el informe por email). */
+  enlaces: FakeEnlace[];
   prisma: any;
   /** clinica-7 · el llavero, para que un test pueda leer la DEK de la
    *  clínica y cifrar algo con ella — es lo que hace falta para ejercitar
@@ -191,6 +210,7 @@ export function crearMundo(): MundoDeLaClinica {
     pideElServicio: new Map(),
     serviciosDeLaCita: [],
     valoracionValidada: true,
+    enlaces: [],
   };
 
   const m = mundo as MundoDeLaClinica;
@@ -220,6 +240,7 @@ export function crearMundo(): MundoDeLaClinica {
     m.accesos = [];
     m.pideElServicio = new Map();
     m.serviciosDeLaCita = [];
+    m.enlaces = [];
     llavero.reset();
     contrato.reset();
     // Y las cachés del proceso: la clave y el «¿es clínico?» viven 60 s,
@@ -681,9 +702,59 @@ export function crearMundo(): MundoDeLaClinica {
     clinicalAssessmentCorrection: {
       findMany: async () => [],
     },
+    // clinica-7 · los enlaces públicos. El informe por email crea uno
+    // (`purpose = INFORME_CLINICO`) con su código de 6 cifras.
     publicLink: {
       findFirst: async () => null,
+      findUnique: async ({ where }: any) =>
+        m.enlaces.find(
+          (e) => e.id === where.id || e.tokenHash === where.tokenHash,
+        ) ?? null,
+      create: async ({ data }: any) => {
+        const fila: FakeEnlace = {
+          id: randomUUID(),
+          tenantId: data.tenantId,
+          purpose: data.purpose,
+          targetType: data.targetType,
+          targetId: data.targetId,
+          tokenHash: data.tokenHash,
+          codeHash: data.codeHash ?? null,
+          codeFailures: 0,
+          expiresAt: data.expiresAt,
+          maxUses: data.maxUses,
+          usedCount: 0,
+          revokedAt: null,
+          createdByUserId: data.createdByUserId ?? null,
+        };
+        m.enlaces.push(fila);
+        return { id: fila.id };
+      },
+      update: async ({ where, data }: any) => {
+        const e = m.enlaces.find((x) => x.id === where.id)!;
+        if (data.codeFailures?.increment) {
+          e.codeFailures += data.codeFailures.increment;
+        }
+        return { ...e };
+      },
+      updateMany: async ({ where, data }: any) => {
+        const vivos = m.enlaces.filter(
+          (e) =>
+            (where.id == null || e.id === where.id) &&
+            (where.revokedAt !== null || e.revokedAt == null) &&
+            (where.usedCount?.lt == null || e.usedCount < where.usedCount.lt),
+        );
+        for (const e of vivos) {
+          if (data.usedCount?.increment) e.usedCount += data.usedCount.increment;
+          if (data.revokedAt !== undefined) e.revokedAt = data.revokedAt;
+        }
+        return { count: vivos.length };
+      },
     },
+    // clinica-7 · el informe por enlace escribe el enlace y la entrega en
+    // UNA transacción. El doble la ejecuta en el sitio: lo que importa
+    // aquí es que las dos escrituras pasen, y la atomicidad de verdad la
+    // prueba el e2e contra Postgres.
+    $transaction: async (fn: any) => fn(m.prisma),
     ticket: {
       findFirst: async () => null,
     },
