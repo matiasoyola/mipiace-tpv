@@ -75,15 +75,45 @@ const prisma = new PrismaClient({
 
 const hallazgos: string[] = [];
 
+/** Lo que una captura no dice, preguntado a la página. Acaba en
+ *  `medidas-de-clinica-7.json`. */
+interface MedidaDeLaPantalla {
+  pantalla: string;
+  ancho: string;
+  /** El lado menor del objetivo táctil MÁS PEQUEÑO que de verdad se puede
+   *  tocar. El mínimo de la casa es 48 px. */
+  minimoTactilPx: number | null;
+  /** Los que no llegan a 44, con su tamaño. */
+  pordebajoDe44: Array<{ texto: string; w: number; h: number }>;
+  scrollHorizontal: boolean;
+  anchoDelContenidoPx: number;
+}
+const medidas: MedidaDeLaPantalla[] = [];
+
 /** El mínimo táctil de la casa: 48 px. Lo mide SOBRE LA PÁGINA. */
-async function medirToques(page: Page, donde: string): Promise<void> {
-  const pequenos = await page.evaluate(() => {
+async function medirToques(
+  page: Page,
+  donde: string,
+): Promise<{ minimo: number | null; malos: Array<{ texto: string; w: number; h: number }> }> {
+  const medido = await page.evaluate(() => {
     const malos: Array<{ texto: string; w: number; h: number }> = [];
+    let minimo: number | null = null;
     for (const el of document.querySelectorAll(
       "button, a[href], input, [role=button], [role=tab]",
     )) {
       const r = el.getBoundingClientRect();
       if (r.width === 0 || r.height === 0) continue;
+      // SÓLO LO QUE SE PUEDE TOCAR DE VERDAD. Estas pantallas son overlays
+      // a pantalla completa y debajo siguen montadas la agenda y la venta:
+      // medir el DOM entero contaba los botones tapados y ahogaba el
+      // hallazgo de verdad en veinte líneas de ruido.
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      if (cx < 0 || cy < 0 || cx > innerWidth || cy > innerHeight) continue;
+      const encima = document.elementFromPoint(cx, cy);
+      if (encima == null || !(el === encima || el.contains(encima))) continue;
+      const lado = Math.round(Math.min(r.width, r.height));
+      if (minimo == null || lado < minimo) minimo = lado;
       if (r.height < 44 || r.width < 44) {
         malos.push({
           texto: (el.textContent ?? el.getAttribute("aria-label") ?? "?")
@@ -94,28 +124,34 @@ async function medirToques(page: Page, donde: string): Promise<void> {
         });
       }
     }
-    return malos;
+    return { minimo, malos };
   });
-  if (pequenos.length > 0) {
+  if (medido.malos.length > 0) {
     hallazgos.push(
-      `${donde}: ${pequenos.length} objetivo(s) por debajo de 44 px → ${pequenos
+      `${donde}: ${medido.malos.length} objetivo(s) por debajo de 44 px → ${medido.malos
         .map((p) => `«${p.texto}» ${p.w}x${p.h}`)
         .join(" · ")}`,
     );
   }
+  return medido;
 }
 
 /** Scroll horizontal: en una tablet es la pantalla rota. */
-async function medirScrollH(page: Page, donde: string): Promise<void> {
+async function medirScrollH(
+  page: Page,
+  donde: string,
+): Promise<{ hay: boolean; ancho: number }> {
   const w = await page.evaluate(() => ({
     scroll: document.documentElement.scrollWidth,
     client: document.documentElement.clientWidth,
   }));
-  if (w.scroll > w.client + 1) {
+  const hay = w.scroll > w.client + 1;
+  if (hay) {
     hallazgos.push(
       `${donde}: SCROLL HORIZONTAL (${w.scroll} px de contenido en ${w.client} px de ancho)`,
     );
   }
+  return { hay, ancho: w.scroll };
 }
 
 async function foto(page: Page, nombre: string, ancho: string): Promise<void> {
@@ -123,9 +159,19 @@ async function foto(page: Page, nombre: string, ancho: string): Promise<void> {
     path: `${SALIDA}/${nombre}-${ancho}.png`,
     fullPage: true,
   });
-  await medirToques(page, `${nombre} @${ancho}`);
-  await medirScrollH(page, `${nombre} @${ancho}`);
-  console.log(`  · ${nombre}-${ancho}.png`);
+  const toques = await medirToques(page, `${nombre} @${ancho}`);
+  const scroll = await medirScrollH(page, `${nombre} @${ancho}`);
+  medidas.push({
+    pantalla: nombre,
+    ancho,
+    minimoTactilPx: toques.minimo,
+    pordebajoDe44: toques.malos,
+    scrollHorizontal: scroll.hay,
+    anchoDelContenidoPx: scroll.ancho,
+  });
+  console.log(
+    `  · ${nombre}-${ancho}.png  (mínimo táctil ${toques.minimo ?? "—"} px)`,
+  );
 }
 
 function vigilar(page: Page, donde: string): void {
@@ -453,6 +499,10 @@ async function main(): Promise<void> {
     hallazgos.length === 0 ? "Sin hallazgos." : hallazgos.map((h) => `· ${h}`).join("\n");
   console.log(`\n── HALLAZGOS ──\n${informe}`);
   writeFileSync(`${SALIDA}/hallazgos.txt`, `${informe}\n`);
+  writeFileSync(
+    `${SALIDA}/medidas-de-clinica-7.json`,
+    `${JSON.stringify(medidas, null, 2)}\n`,
+  );
 }
 
 main().catch(async (err) => {
