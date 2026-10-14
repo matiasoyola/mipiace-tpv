@@ -120,5 +120,5 @@ Documentos fuente (proyecto «Jardin de Gredos»): `concepto-software-residencia
 | residencia-4 · eventos e incidencias | Constantes, umbrales de serie, eventos derivados (umbral y ausencia), libro único con gravedad, escalado y cierre. |
 | residencia-5 · relevo y dirección | Parte de relevo autogenerado con acuse; panel de dirección con incidencias abiertas, obligaciones del día e indicadores básicos. |
 
-Después: Fase 2 (escalas, medicación, `Lesión`), Fase 3 (plazas, pagadores y facturación), Fase 4 (IA).
 Antes de residencia-3: mockup de la pantalla de puerta y observación de un turno.
+Todo lo que queda fuera de la v1 está diseñado en `02` a `08`, y ordenado en `09-hoja-de-ruta.md`.
