@@ -58,7 +58,12 @@ export async function registerResidenciaEdificioRoutes(
     "/residencia/edificio",
     { preHandler: PUERTAS_LECTURA },
     async (request: FastifyRequest) => {
-      const tenantId = request.auth?.tenantId ?? request.cashier!.tid;
+      // `requireOwnerOrCashier` puebla SIEMPRE `request.auth`, también
+      // cuando el token es una sesión de TPV: ahí copia el `sub`, el `tid`
+      // y el rol del cajero. Así que una sola lectura, sin `??` sobre
+      // `request.cashier` — que era una rama que no se alcanza nunca y un
+      // `!` que nadie volvería a comprobar.
+      const tenantId = request.auth!.tenantId;
       const prisma = getPrisma();
 
       const plantas = await prisma.floor.findMany({
