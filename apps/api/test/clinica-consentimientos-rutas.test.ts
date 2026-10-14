@@ -770,6 +770,10 @@ describe("clinica-4 · «Documentos» enseña lo que hay de verdad", () => {
       recipient: "PROFESIONAL",
       recipientEmail: "traumatologia@hospital.es",
       pdfSha256: "f".repeat(64),
+      // clinica-7 · una entrega de ANTES del enlace: sin fichero guardado
+      // y sin enlace. El CHECK `..._enlace_completo` admite esa forma.
+      pdfFileName: null,
+      publicLinkId: null,
       userId: SANITARIA_ID,
       at: new Date("2026-10-09T10:00:00.000Z"),
     });

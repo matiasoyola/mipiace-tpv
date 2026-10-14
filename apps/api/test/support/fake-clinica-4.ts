@@ -110,6 +110,9 @@ export interface FakeDelivery {
   recipient: string;
   recipientEmail: string | null;
   pdfSha256: string;
+  /** clinica-7 · el fichero y el enlace de las entregas POR ENLACE. */
+  pdfFileName: string | null;
+  publicLinkId: string | null;
   userId: string;
   at: Date;
 }
@@ -390,6 +393,24 @@ export function crearMundo(): MundoDeLaClinica {
         return u;
       },
       findUnique: async ({ where }: any) => m.users.get(where.id) ?? null,
+      // clinica-7 · el actor «paciente por enlace» de clinica-2: lo crea
+      // la puerta la primera vez que un enlace clínico deja rastro.
+      create: async ({ data }: any) => {
+        const u = {
+          id: data.id ?? randomUUID(),
+          tenantId: data.tenantId,
+          role: data.role ?? "CASHIER",
+          isClinician: false,
+          clinicalScope: "SELECTION",
+          alias: data.alias ?? "Paciente (por enlace)",
+          email: data.email,
+          clinicianLicense: null,
+          deletedAt: null,
+          isSystemActor: true,
+        } as any;
+        m.users.set(u.id, u);
+        return u;
+      },
     },
     client: {
       findFirst: async ({ where }: any) => {
@@ -601,7 +622,9 @@ export function crearMundo(): MundoDeLaClinica {
       // Solo inserción: sin `update` ni `delete`.
       create: async ({ data, select }: any) => {
         const fila: FakeDelivery = {
-          id: randomUUID(),
+          // clinica-7 · el id que manda la aplicación: el enlace apunta a
+          // esta fila, así que su id existe antes que ella.
+          id: data.id ?? randomUUID(),
           tenantId: data.tenantId,
           clientId: data.clientId,
           report: data.report,
@@ -609,11 +632,30 @@ export function crearMundo(): MundoDeLaClinica {
           recipient: data.recipient,
           recipientEmail: data.recipientEmail ?? null,
           pdfSha256: data.pdfSha256,
+          pdfFileName: data.pdfFileName ?? null,
+          publicLinkId: data.publicLinkId ?? null,
           userId: data.userId,
           at: data.at ?? new Date(),
         };
         m.deliveries.push(fila);
         return proyectar(fila, select, {});
+      },
+      // clinica-7 · la usa la ruta pública del informe (`cargarObjetivo`)
+      // y la de anular el enlace.
+      findFirst: async ({ where, select }: any) => {
+        const d = m.deliveries.find(
+          (x) =>
+            (where.id == null || x.id === where.id) &&
+            (where.tenantId == null || x.tenantId === where.tenantId) &&
+            (where.clientId == null || x.clientId === where.clientId),
+        );
+        if (!d) return null;
+        return proyectar(d, select, {
+          tenant: {
+            name: "Clínica de prueba",
+            clinicalRecordsEnabled: m.clinicaEncendida,
+          },
+        });
       },
       findMany: async ({ where, orderBy, take, select }: any) => {
         let xs = m.deliveries.filter(
@@ -702,6 +744,7 @@ export function crearMundo(): MundoDeLaClinica {
     clinicalAssessmentCorrection: {
       findMany: async () => [],
     },
+
     // clinica-7 · los enlaces públicos. El informe por email crea uno
     // (`purpose = INFORME_CLINICO`) con su código de 6 cifras.
     publicLink: {
