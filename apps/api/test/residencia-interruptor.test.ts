@@ -43,6 +43,10 @@ const tenants = new Map<string, any>();
 const audits: Array<{ action: string; metadata: any }> = [];
 let rolesSembrados: any[] = [];
 let turnosSembrados: any[] = [];
+// residencia-2 · lo que la semilla añade.
+let momentosSembrados: any[] = [];
+let ajustesSembrados: any[] = [];
+let plantillaSembrada: any[] = [];
 let residentes = 0;
 let anotacionesClinicas = 0;
 
@@ -57,6 +61,9 @@ vi.mock("../src/queues/catalog-incremental.js", () => ({
   enqueueManualSync: vi.fn(async () => ({ jobId: "x" })),
   registerTenantRepeatable: vi.fn(async () => undefined),
 }));
+// residencia-2 · el catálogo de serie, para comparar la semilla contra él.
+import { CONTROLES_DE_SERIE } from "../src/residencia/catalogo/controles-de-serie.js";
+
 vi.mock("../src/email/sender.js", () => ({
   getEmailSender: () => ({ send: vi.fn(async () => undefined) }),
 }));
@@ -83,6 +90,28 @@ const fakePrisma: any = {
   centerShift: {
     createMany: vi.fn(async ({ data }: any) => {
       turnosSembrados.push(...data);
+      return { count: data.length };
+    }),
+  },
+  // residencia-2 · la semilla del centro siembra además los momentos del
+  // día, un ajuste por control de serie y la copia de las tres plantillas
+  // por nivel. Sin estos tres el doble no sabe sembrar y el PATCH del
+  // interruptor contesta 500.
+  centerMoment: {
+    createMany: vi.fn(async ({ data }: any) => {
+      momentosSembrados.push(...data);
+      return { count: data.length };
+    }),
+  },
+  centerControlSetting: {
+    createMany: vi.fn(async ({ data }: any) => {
+      ajustesSembrados.push(...data);
+      return { count: data.length };
+    }),
+  },
+  carePlanTemplateItem: {
+    createMany: vi.fn(async ({ data }: any) => {
+      plantillaSembrada.push(...data);
       return { count: data.length };
     }),
   },
@@ -175,6 +204,9 @@ beforeEach(() => {
   audits.length = 0;
   rolesSembrados = [];
   turnosSembrados = [];
+  momentosSembrados = [];
+  ajustesSembrados = [];
+  plantillaSembrada = [];
   residentes = 0;
   anotacionesClinicas = 0;
   vi.clearAllMocks();
@@ -298,6 +330,101 @@ describe("residencia-1 · LA SEMILLA del centro", () => {
       ["T", "15:00", "22:00"],
       ["N", "22:00", "08:00"],
     ]);
+  });
+
+  // ── residencia-2 · lo que la semilla añade ───────────────────────
+  //
+  // Las tres por la misma razón que los roles y los turnos: un centro
+  // recién encendido tiene que FUNCIONAR. Sin los ajustes, la pantalla
+  // de Controles sale vacía; sin las plantillas, dar de alta a un
+  // residente no le precarga nada.
+
+  it("siembra los CINCO MOMENTOS DEL DÍA con sus horas", async () => {
+    tenants.set(TENANT, tenantBase());
+    const app = await buildApp();
+    await patch(app, { residenciaEnabled: true });
+    expect(momentosSembrados.map((m) => [m.code, m.atTime])).toEqual([
+      ["DESAYUNO", "09:00"],
+      ["COMIDA", "13:30"],
+      ["MERIENDA", "17:00"],
+      ["CENA", "20:00"],
+      ["NOCHE", "22:30"],
+    ]);
+  });
+
+  it("siembra UN AJUSTE POR CONTROL DE SERIE, activo y con la frecuencia del producto", async () => {
+    tenants.set(TENANT, tenantBase());
+    const app = await buildApp();
+    await patch(app, { residenciaEnabled: true });
+    expect(ajustesSembrados).toHaveLength(CONTROLES_DE_SERIE.length);
+    expect(ajustesSembrados.every((a) => a.active === true)).toBe(true);
+    // D-60 · todo interno por defecto: ni un control visible para la
+    // familia el día que se enciende el módulo.
+    expect(ajustesSembrados.every((a) => a.familyVisible === false)).toBe(true);
+    // Y ninguno sin roles: un control que no puede registrar nadie es un
+    // control que no se registra.
+    expect(ajustesSembrados.every((a) => a.careRoleCodes.length > 0)).toBe(true);
+    const postural = ajustesSembrados.find((a) => a.controlCode === "CAMBIO_POSTURAL");
+    expect(postural.frequencyKind).toBe("EVERY_N_HOURS");
+    expect(postural.everyNHours).toBe(3);
+    // Las columnas que ese `kind` no usa salen vacías y no «sin poner»:
+    // es lo que el CHECK `…_frecuencia_coherente` exige.
+    expect(postural.shiftCodes).toEqual([]);
+    expect(postural.monthDay).toBeNull();
+  });
+
+  it("siembra LAS TRES PLANTILLAS, y sólo el dependiente lleva cambios posturales", async () => {
+    tenants.set(TENANT, tenantBase());
+    const app = await buildApp();
+    await patch(app, { residenciaEnabled: true });
+    const niveles = new Set(plantillaSembrada.map((l) => l.dependencyLevel));
+    expect([...niveles].sort()).toEqual(["DEPENDIENTE", "SEMIASISTIDO", "VALIDO"]);
+    // Es el ejemplo que el prompt del bloque pone, y la línea que
+    // distingue la plantilla del dependiente de las otras dos.
+    const conPostural = plantillaSembrada
+      .filter((l) => l.controlCode === "CAMBIO_POSTURAL")
+      .map((l) => l.dependencyLevel);
+    expect(conPostural).toEqual(["DEPENDIENTE"]);
+    const postural = plantillaSembrada.find((l) => l.controlCode === "CAMBIO_POSTURAL");
+    expect([postural.frequencyKind, postural.everyNHours]).toEqual(["EVERY_N_HOURS", 3]);
+    // Y lo que los TRES llevan igual: las cuatro comidas.
+    for (const comida of ["DESAYUNO", "COMIDA", "MERIENDA", "CENA"]) {
+      expect(
+        plantillaSembrada.filter((l) => l.controlCode === comida).map((l) => l.dependencyLevel).sort(),
+      ).toEqual(["DEPENDIENTE", "SEMIASISTIDO", "VALIDO"]);
+    }
+  });
+
+  it("y toda línea de plantilla nombra un control QUE EXISTE en el catálogo", async () => {
+    // Un error de dedo en un `controlCode` de `plantillas-de-serie.ts`
+    // daría una línea de plan de un control que no existe: la puerta
+    // pediría algo sin nombre y nadie sabría qué. No lo puede impedir una
+    // FK —el catálogo es global y la plantilla es por tenant— así que lo
+    // impide este test.
+    tenants.set(TENANT, tenantBase());
+    const app = await buildApp();
+    await patch(app, { residenciaEnabled: true });
+    const delCatalogo = new Set(CONTROLES_DE_SERIE.map((c) => c.code));
+    const huerfanas = plantillaSembrada
+      .map((l) => l.controlCode)
+      .filter((c) => !delCatalogo.has(c));
+    expect(huerfanas).toEqual([]);
+  });
+
+  it("y toda línea de plantilla usa una frecuencia PERMITIDA por su control", async () => {
+    // El otro error de dedo: poner «cada turno» a una analítica. La ruta
+    // que guarda la plantilla del centro lo valida con un 400; la de
+    // serie no pasa por ninguna ruta, así que lo valida esto.
+    tenants.set(TENANT, tenantBase());
+    const app = await buildApp();
+    await patch(app, { residenciaEnabled: true });
+    const permitidas = new Map(
+      CONTROLES_DE_SERIE.map((c) => [c.code, c.allowedFrequencies as string[]]),
+    );
+    const malas = plantillaSembrada
+      .filter((l) => !permitidas.get(l.controlCode)?.includes(l.frequencyKind))
+      .map((l) => `${l.dependencyLevel}/${l.controlCode}: ${l.frequencyKind}`);
+    expect(malas).toEqual([]);
   });
 
   it("la semilla es IDEMPOTENTE: `skipDuplicates` en las dos", async () => {

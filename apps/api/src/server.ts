@@ -65,6 +65,8 @@ import { registerResidenciaEdificioRoutes } from "./residencia/edificio-routes.j
 import { registerResidenciaRolesRoutes } from "./residencia/roles-routes.js";
 import { registerResidenciaTurnosRoutes } from "./residencia/turnos-routes.js";
 import { registerResidenciaPuertaRoutes } from "./residencia/puerta-routes.js";
+// residencia-2 · el seed del catálogo de controles de serie (D-11, D-21).
+import { cargarCatalogoDeSerie } from "./residencia/catalogo/cargar-catalogo.js";
 import { registerKitchenTpvRoutes } from "./kitchen/tpv-routes.js";
 import { registerKitchenWebSocketRoute } from "./kitchen/ws-route.js";
 import {
@@ -332,6 +334,54 @@ async function main() {
     app.log.info(`workers arrancados embedded · ${count} repeatable(s) registrados`);
   }
   if (sentryOn) app.log.info("Sentry activo (api)");
+
+  // ── residencia-2 · el catálogo de controles de serie ───────────────
+  //
+  // 36 filas GLOBALES (`scope = STANDARD`, sin tenant), idempotentes: es
+  // el catálogo del producto, y lo ven todos los centros de residencia a
+  // la vez (D-21, D-57). Corre en cada arranque porque así una versión
+  // nueva de un control llega con el despliegue y no con un paso manual
+  // —que es la mitad de «se actualiza en el producto y baja a todos los
+  // centros»— y porque `cargarCatalogoDeSerie` no toca una versión ya
+  // publicada: lo que no cambia no escribe.
+  //
+  // Corre SIEMPRE y no sólo si hay algún tenant de residencia. Es un
+  // catálogo, no datos de nadie: 36 filas en una tabla que los quince
+  // clientes de hoy no consultan nunca, y gatearlo obligaría a que
+  // encender el módulo a un centro dependiera de un seed que todavía no
+  // ha corrido.
+  //
+  // Si el fichero de datos está mal escrito, `cargarCatalogoDeSerie`
+  // LANZA y el arranque se para: un catálogo cargado a medias es un
+  // centro al que le falta la mitad del plan, y eso se nota el primer
+  // turno pero no en el arranque.
+  try {
+    const seed = await cargarCatalogoDeSerie();
+    const cambios =
+      seed.insertados.length + seed.versionesNuevas.length + seed.ajustesReconducidos.length;
+    if (cambios > 0) {
+      app.log.info(
+        {
+          insertados: seed.insertados.length,
+          versionesNuevas: seed.versionesNuevas,
+          ajustesReconducidos: seed.ajustesReconducidos,
+        },
+        "residencia · catálogo de serie actualizado",
+      );
+    }
+    if (seed.cambiadosSinSubirVersion.length > 0) {
+      // No se propaga y se dice. Una versión publicada no se edita
+      // (decisión de producto 5): lo que hay que hacer es subir la
+      // versión en el fichero.
+      app.log.warn(
+        { controles: seed.cambiadosSinSubirVersion },
+        "residencia · controles cambiados SIN subir la versión: no se han propagado",
+      );
+    }
+  } catch (err) {
+    app.log.error(err, "residencia · el catálogo de serie no se pudo cargar");
+    throw err;
+  }
 
   const close = async () => {
     app.log.info("Apagando…");

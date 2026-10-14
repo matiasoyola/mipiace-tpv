@@ -1,5 +1,22 @@
-// residencia-1 · LA SEMILLA DEL CENTRO: los diez roles de cuidado de
-// serie y los tres turnos.
+// residencia-1 + residencia-2 · LA SEMILLA DEL CENTRO.
+//
+// residencia-1 sembraba los diez roles de cuidado y los tres turnos.
+// residencia-2 le añade tres cosas más, y las tres por la misma razón que
+// las dos primeras —que un centro recién encendido tiene que FUNCIONAR y
+// no enseñar tres pantallas vacías—:
+//
+//   · los cinco MOMENTOS DEL DÍA (`CenterMoment`), con las horas de
+//     Jardín de Gredos;
+//   · un AJUSTE por cada control de serie (`CenterControlSetting`), con
+//     los valores del producto: activo, sin alias, la frecuencia de serie,
+//     los roles de serie e interno para la familia (D-60);
+//   · la copia de las tres PLANTILLAS por nivel de dependencia
+//     (`CarePlanTemplateItem`), que es la que el centro edita.
+//
+// Sin lo segundo, la pantalla de Controles saldría vacía y `queToca` no
+// sabría si un control está activo. Sin lo tercero, dar de alta a un
+// residente no le precargaría nada y habría que montarle el plan a mano,
+// que es justo el trabajo que este bloque existe para quitar.
 //
 // Corre UNA VEZ, al encender `Tenant.residenciaEnabled`, y dentro de la
 // misma transacción que el `update` del interruptor y su línea de
@@ -35,6 +52,10 @@
 
 import type { CareRoleCategory } from "@mipiacetpv/db";
 
+import { CONTROLES_DE_SERIE } from "./catalogo/controles-de-serie.js";
+import { MOMENTOS_DE_SERIE } from "./catalogo/momentos-de-serie.js";
+import { PLANTILLAS_DE_SERIE } from "./catalogo/plantillas-de-serie.js";
+import { aColumnas } from "./frecuencia-columnas.js";
 import { TURNOS_DE_SERIE } from "./turnos.js";
 
 /**
@@ -167,12 +188,28 @@ export const ROLES_DE_SERIE: Array<{
   },
 ];
 
-/** Lo mínimo de Prisma (o de una transacción) que hace falta sembrar. */
+/**
+ * Lo mínimo de Prisma (o de una transacción) que hace falta sembrar.
+ *
+ * Se declara el mínimo y no `PrismaClient` entero por lo mismo que
+ * `residenciaIsEnabled` lee con cuidado la forma del cliente: la suite
+ * tiene dobles que no exponen el modelo completo, y un doble que no sabe
+ * sembrar debe fallar en el tipo y no en caliente.
+ */
 export interface PrismaParaSemilla {
   careRole: {
     createMany: (args: unknown) => Promise<unknown>;
   };
   centerShift: {
+    createMany: (args: unknown) => Promise<unknown>;
+  };
+  centerMoment: {
+    createMany: (args: unknown) => Promise<unknown>;
+  };
+  centerControlSetting: {
+    createMany: (args: unknown) => Promise<unknown>;
+  };
+  carePlanTemplateItem: {
     createMany: (args: unknown) => Promise<unknown>;
   };
 }
@@ -211,6 +248,80 @@ export async function sembrarResidencia(
       endsAt: t.endsAt,
       sortOrder: t.sortOrder,
     })),
+    skipDuplicates: true,
+  });
+
+  // ── residencia-2 · los momentos del día ──────────────────────────
+  await prisma.centerMoment.createMany({
+    data: MOMENTOS_DE_SERIE.map((m) => ({
+      tenantId,
+      code: m.code,
+      name: m.name,
+      atTime: m.atTime,
+      sortOrder: m.sortOrder,
+    })),
+    skipDuplicates: true,
+  });
+
+  // ── residencia-2 · un ajuste por control de serie ────────────────
+  //
+  // Se leen del FICHERO de datos y no de `control_types`, y es a
+  // propósito: así sembrar un centro no depende de que el seed global
+  // haya corrido antes, y la transacción del interruptor no tiene que
+  // consultar el catálogo. Lo que el centro se encuentra es exactamente
+  // lo que el producto propone.
+  //
+  // `careRoleCodes` nace con los roles de serie del control —y no vacío—
+  // para que la pantalla de Controles enseñe quién lo registra sin tener
+  // que explicar que «vacío significa todos». Estrecharlo es quitar
+  // casillas, que es lo que la dirección va a hacer.
+  await prisma.centerControlSetting.createMany({
+    data: CONTROLES_DE_SERIE.map((c) => ({
+      tenantId,
+      controlCode: c.code,
+      active: true,
+      alias: null,
+      ...aColumnas({
+        kind: c.defaultFrequency.kind,
+        everyNHours: c.defaultFrequency.everyNHours,
+        everyNDays: c.defaultFrequency.everyNDays,
+        weekdays: c.defaultFrequency.weekdays,
+        monthDay: c.defaultFrequency.monthDay,
+        shiftCodes: c.defaultFrequency.shiftCodes,
+        momentCodes: c.defaultFrequency.momentCodes,
+      }),
+      careRoleCodes: c.allowedCareRoleCodes,
+      // D-60: todo interno por defecto. No hay portal en la v1.
+      familyVisible: c.familyVisibleDefault ?? false,
+    })),
+    skipDuplicates: true,
+  });
+
+  // ── residencia-2 · la copia de las tres plantillas ───────────────
+  //
+  // `skipDuplicates` sobre `(tenantId, dependencyLevel, controlCode)`:
+  // apagar y volver a encender el módulo no duplica nada y **no
+  // resucita lo que el centro quitó de su plantilla**. Mismo criterio
+  // que los roles de serie desactivados.
+  await prisma.carePlanTemplateItem.createMany({
+    data: (Object.entries(PLANTILLAS_DE_SERIE) as Array<
+      [keyof typeof PLANTILLAS_DE_SERIE, (typeof PLANTILLAS_DE_SERIE)["VALIDO"]]
+    >).flatMap(([nivel, lineas]) =>
+      lineas.map((l) => ({
+        tenantId,
+        dependencyLevel: nivel,
+        controlCode: l.controlCode,
+        ...aColumnas({
+          kind: l.frequency.kind,
+          everyNHours: l.frequency.everyNHours,
+          everyNDays: l.frequency.everyNDays,
+          weekdays: l.frequency.weekdays,
+          monthDay: l.frequency.monthDay,
+          shiftCodes: l.frequency.shiftCodes,
+          momentCodes: l.frequency.momentCodes,
+        }),
+      })),
+    ),
     skipDuplicates: true,
   });
 }
