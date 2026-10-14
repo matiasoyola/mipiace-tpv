@@ -726,7 +726,9 @@ bajo `apps/` y `packages/db/prisma/`, que entran por el `COPY . .`.
 
   Y para poder correrlo hubo que arreglar antes el banco: ver abajo.
 - `tsc` de API, admin y tpv-web · limpio.
-- CI · pendiente del push (se añade el enlace al abrir el PR).
+- CI · **verde**, los tres jobs sobre `9304f76` (el último commit de código):
+  [run 38572215386](https://github.com/matiasoyola/mipiace-tpv/actions/runs/38572215386) —
+  `ci: success`, `smoke: success`, `e2e: success` (`publish` se salta, como toca fuera de master).
 
 ### El arreglo del banco, que no era de esta rama pero la bloqueaba
 
