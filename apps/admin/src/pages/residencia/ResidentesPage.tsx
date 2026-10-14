@@ -226,13 +226,23 @@ function Tabla({
           className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
         >
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            {/* EL NOMBRE SE LLEVA LA LÍNEA ENTERA en estrecho, y lo
+                encontró la captura de 320 px, no un test: con el nombre
+                compartiendo línea con los dos distintivos y los dos
+                botones, la columna del nombre se quedaba en noventa
+                píxeles y «Manuel Cano Álvarez» salía como «Manuel Ca…» —
+                lo único que esta pantalla existe para decir. Es el mismo
+                arreglo que clinica-1 le hizo a la cabecera de Personal, y
+                por la misma razón: trunca el que sobra, y aquí no sobra el
+                nombre.
+
+                `basis-full` hasta `sm`, y a partir de ahí comparte línea
+                con el resto. */}
             <button
               type="button"
               onClick={() => onFicha(f)}
-              className="min-h-[44px] min-w-0 flex-1 text-left"
+              className="min-h-[44px] w-full min-w-0 text-left sm:w-auto sm:flex-1 sm:basis-48"
             >
-              {/* El NOMBRE primero y sin truncar hasta el final: a 320 px lo
-                  que sobra es la habitación, que se repite abajo. */}
               <span className="block truncate text-[14.5px] font-medium text-mipiace-ink">
                 {f.nombre}
               </span>

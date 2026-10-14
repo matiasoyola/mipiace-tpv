@@ -139,6 +139,26 @@ export default defineConfig({
       reuseExistingServer: !PUERTOS_PROPIOS,
       env: {
         PORT: PUERTO_API,
+        // residencia-1 · **EL ORIGEN DE LAS PANTALLAS DEL BANCO.**
+        //
+        // Sin esto, «puertos propios» no funcionaba y el modo que esta
+        // config documenta era inservible: `env.CORS_ORIGINS` sigue en su
+        // default (5173/5174/5175), la pantalla del banco vive en otro
+        // puerto, y el navegador manda `Origin: http://localhost:5283`.
+        // El `origin` del plugin de CORS llama a `cb(new Error("CORS
+        // bloqueado: …"), false)` y eso sale como **500**, así que el
+        // login del panel fallaba con «Ha ocurrido un error inesperado» y
+        // los 40 capítulos morían en `entrarAdmin`.
+        //
+        // Y es un fallo que se esconde bien, porque `curl` contra el mismo
+        // proxy contesta 200: sin cabecera `Origin` el plugin deja pasar.
+        // O sea que la API está sana y sólo el NAVEGADOR recibe el 500 —
+        // que es exactamente el síntoma que la memoria de la casa atribuía
+        // al reinicio de nodemon.
+        //
+        // El proxy de Vite NO lo arregla: `changeOrigin` reescribe el
+        // `Host`, no el `Origin`.
+        CORS_ORIGINS: [ADMIN, TPV].join(","),
         // clinica-2 · el buzón de correo en fichero. La API del banco es un
         // PROCESO, así que no se le puede inyectar un doble como hacen los
         // tests de la suite: el capítulo de la valoración tiene que poder

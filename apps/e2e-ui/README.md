@@ -54,6 +54,14 @@ BANCO_API_PORT=3101 BANCO_ADMIN_PORT=5273 BANCO_TPV_PORT=5274 \
   DATABASE_URL=postgresql://…/mipiacetpv_agenda_banco_e2e pnpm e2e:agenda
 ```
 
+`CORS_ORIGINS` **lo pone la config sola** a partir de los puertos del banco
+(residencia-1). Hasta ese bloque no lo hacía, y el modo de arriba no
+funcionaba: el navegador mandaba `Origin: http://localhost:5273`, el plugin
+de CORS de la API lo rechazaba con un **500**, y el login del panel fallaba
+con «Ha ocurrido un error inesperado» en los 40 capítulos. Lo que lo hacía
+difícil de ver es que `curl` contra el mismo proxy contesta 200 — sin
+cabecera `Origin` el plugin deja pasar — así que la API parecía sana.
+
 Con cualquiera de las tres variables puestas, `reuseExistingServer` pasa a
 `false`: el banco levanta los suyos o se cae con el conflicto en la cara. El
 proxy `/api` del admin y del TPV sigue a la API del banco por
