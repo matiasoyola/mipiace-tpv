@@ -49,6 +49,7 @@ import {
   revocarContrato,
   vistaDelContrato,
 } from "./contrato.js";
+import { ZipDemasiadoGrande, exportarElCentro } from "./exportacion.js";
 import { clinicaIsEnabled, respondeComoRutaInexistente } from "./gate.js";
 
 /**
@@ -288,6 +289,103 @@ export async function registerContratoRoutes(
           .send({ error: r.motivo, code: r.motivo, message: r.mensaje });
       }
       return reply.code(201).send(r);
+    },
+  );
+
+  // ── clinica-7 · LA DEVOLUCIÓN DE DATOS (art. 28.3.g) ───────────────
+  //
+  // Decisión 7: «exportar el centro entero (solo OWNER, queda
+  // registrado)». Un ZIP con la historia completa de cada paciente en PDF,
+  // sus fotos y consentimientos descifrados, y un JSON con todo.
+  //
+  // ── Vive en este fichero y no en `routes.ts` ──────────────────────
+  //
+  // Porque es del CONTRATO y no de la historia: es lo que la clínica pide
+  // cuando se va, y **funciona con el contrato revocado** — que es justo
+  // cuando hace falta. Ponerla entre las rutas de la historia la habría
+  // dejado detrás del gate de la sesión clínica, que no es su puerta.
+  //
+  // ── Solo la dueña, y comprobado contra la BASE ────────────────────
+  //
+  // Esto saca del sistema la historia clínica de TODOS los pacientes del
+  // centro en un fichero. No es una lectura: es la copia entera. El
+  // encargado no la saca, ni los sanitarios, ni los cajeros.
+  //
+  // ── Y se sirve en trozos ──────────────────────────────────────────
+  //
+  // `exportarElCentro` suelta cada entrada en cuanto la tiene, así que un
+  // centro con mil fotos no pasa por memoria dos veces. `reply.raw` y no
+  // `reply.send`: Fastify serializaría el cuerpo entero.
+  app.get(
+    "/clinica/exportacion",
+    { preHandler: [requireOwner] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const auth = request.auth!;
+      if (!(await clinicaIsEnabled(auth.tenantId))) {
+        return respondeComoRutaInexistente(request, reply);
+      }
+      if (!(await esLaDuena(auth.tenantId, auth.userId))) {
+        return reply.code(403).send({
+          error: "SOLO_LA_DUENA",
+          code: "SOLO_LA_DUENA",
+          message:
+            "La devolución de los datos del centro la saca la dueña: es una copia de la historia de todos los pacientes.",
+        });
+      }
+
+      const ahora = new Date();
+      const nombre = `historias-${ahora.toISOString().slice(0, 10)}.zip`;
+      reply.raw.setHeader("Content-Type", "application/zip");
+      reply.raw.setHeader("Cache-Control", "no-store");
+      reply.raw.setHeader("X-Content-Type-Options", "nosniff");
+      reply.raw.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${nombre}"`,
+      );
+
+      try {
+        const resumen = await exportarElCentro(
+          getPrisma(),
+          {
+            tenantId: auth.tenantId,
+            userId: auth.userId,
+            deviceId: deviceDe(request),
+            ahora,
+          },
+          (trozo) => {
+            reply.raw.write(trozo);
+          },
+        );
+        // El resumen al LOG y no a la respuesta: la respuesta es el ZIP, y
+        // ya se ha empezado a escribir. Sin nada de salud dentro —cuántos
+        // pacientes y cuántos ficheros— como todos los logs de este
+        // módulo.
+        request.log.info(
+          { event: "clinica_exportacion", ...resumen, incidencias: resumen.incidencias.length },
+          "exportación del centro servida",
+        );
+        reply.raw.end();
+        return reply;
+      } catch (err) {
+        if (err instanceof ZipDemasiadoGrande) {
+          // Ya se han escrito bytes, así que no hay forma honesta de
+          // cambiar el código de estado: lo que se puede hacer es cortar y
+          // dejarlo dicho en el log. El fichero a medias NO abrirá —le
+          // falta el directorio final— y eso es correcto: un ZIP que abre
+          // y está incompleto sería peor.
+          request.log.error(
+            { event: "clinica_exportacion_demasiado_grande", err },
+            "la exportación del centro pasa de 4 GiB: hay que exportar por paciente (ver el -done de clinica-7)",
+          );
+        } else {
+          request.log.error(
+            { event: "clinica_exportacion_fallida", err },
+            "la exportación del centro falló a medias",
+          );
+        }
+        reply.raw.destroy();
+        return reply;
+      }
     },
   );
 
