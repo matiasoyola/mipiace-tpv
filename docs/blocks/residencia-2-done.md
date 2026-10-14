@@ -437,9 +437,9 @@ se toca: es lo que la auxiliar de la tarde necesita.
    ha puesto la pomada»); uno con opciones o con número se pide al producto, y así la pantalla no
    tiene que explicar qué es un dominio ordinal. Un centro **no** puede inventarse una escala
    (`SCALE`/`SCORE`): lleva su algoritmo detrás y la puerta no sabría puntuarla.
-9. **El seed del catálogo corre en CADA arranque y para el arranque si el fichero está mal.** Un
-   catálogo cargado a medias es un centro al que le falta la mitad del plan, y eso se nota el primer
-   turno pero no en el arranque.
+9. **El seed del catálogo corre en CADA arranque y NO tumba la API si falla** (§11.4). Lo que sí se
+   conserva es que no se cargue a medias: valida el fichero entero antes de escribir y aborta sin
+   tocar la base.
 10. **El plan de un residente lo ve también quien tiene rol de alcance total aunque no sea
     supervisor** — en la semilla de serie no hay ninguno así, pero un centro puede crearlo.
 11. **Se arregló el `DELETE` del plan** (§11), que era de este bloque y estaba roto para su único
@@ -449,7 +449,7 @@ se toca: es lo que la auxiliar de la tarde necesita.
 
 ---
 
-## 11 · Tres cosas que encontraron los tests, y no el pensarlas
+## 11 · Cuatro cosas que encontró la máquina, y no el pensarlas
 
 ### 1 · `NULL BETWEEN 1 AND 12` no es `false`: es NULL, y un CHECK que da NULL PASA
 
@@ -482,6 +482,24 @@ Es exactamente el bug que residencia-1 destapó en el PATCH del super-admin (§1
 más daño porque hay una pantalla que invita a intentarlo. Ahora va un `preValidation` que mira el
 cuerpo CRUDO —antes de que ajv lo pode— y contesta 400 con **qué campo es y dónde sí se cambia**: «la
 unidad no se cambia» a secas deja a la dirección buscando una pantalla que no existe.
+
+### 4 · Un seed no puede impedir que la API sirva
+
+El job `smoke` de la CI se puso rojo: arranca la imagen contra un Postgres **sin migrar** para
+comprobar que levanta y contesta `/health`, y el seed del catálogo lanzaba —`P2021`, la tabla no
+existe— y mataba el proceso antes de servir.
+
+El arreglo es de fondo y no de CI: **un dedo en el fichero de datos de un catálogo de residencia
+dejaría sin API a los quince clientes de hoy** —bares, tiendas y una clínica de podología— que no
+tienen residencia y a los que ese fichero no les dice nada. Ahora se registra y se sigue.
+
+Lo que no se ha relajado es lo que importaba: `cargarCatalogoDeSerie` valida el fichero **entero**
+antes de escribir y aborta sin tocar la base, así que tras un fallo el estado es «el catálogo se
+quedó como estaba» y no «medio catálogo». Un centro sin catálogo lo ve en su pantalla de Controles el
+primer día; uno con medio catálogo no lo vería hasta el primer turno.
+
+Y la falta de tablas se registra como **aviso** y no como error: es el estado normal de una base sin
+migrar, y un log rojo tiene que significar siempre algo que mirar.
 
 ---
 
@@ -561,7 +579,7 @@ de residencia-1 ya aplicadas.
 
 1. `prisma migrate deploy` (lo hace el arranque de la imagen).
 2. **El arranque carga el catálogo de serie**: 36 filas globales, idempotentes. Si el fichero de
-   datos está mal escrito, el arranque se para con la lista de problemas.
+   datos está mal escrito, **no se carga nada** y queda en el log; la API sigue sirviendo (§11.4).
 3. Nada más. **Ningún tenant cambia de comportamiento**: las rutas están detrás del gate de la
    residencia y las seis tablas nacen vacías salvo el catálogo, que es del producto.
 4. Un centro al que ya se le encendió la residencia **no tiene momentos, ajustes ni plantillas**: la
@@ -597,7 +615,8 @@ de `COPY` en el stage de dependencias, `pnpm install --frozen-lockfile` dentro d
   Las dos etiquetas las puso `clinica-4` el 09-10. El arreglo es un `exact: true` en el spec y **no se
   toca aquí**, por lo mismo que no lo tocó residencia-1.
 - `tsc` de API y admin · limpio.
-- CI · pendiente del run sobre el último commit; la rama está pusheada.
+- CI · `ci: success`, `e2e: success`, `smoke: success` (`publish` se salta, como toca fuera de
+  master). El `smoke` costó el arreglo de §11.4.
 
 ### Lo nuevo de este bloque
 
@@ -634,7 +653,9 @@ ba7ee7f feat(residencia-2): las pantallas de controles, plantillas y plan
 8843cda test(residencia-2): la tabla de queToca, los sabotajes y el cambio de nivel
 64c7f53 test(residencia-2): las rutas y las tres pantallas
 528f2b0 docs(residencia-2): capturas de las tres pantallas, y el aviso del recuento
-<este>  docs(residencia-2): el done del bloque
+fe3dc8f docs(residencia-2): el done del bloque
+2bbd361 fix(residencia-2): el seed del catálogo no tumba el arranque de la API
+<este>  docs(residencia-2): el done, con lo que encontró el smoke
 ```
 
 ## 16 · La rama
