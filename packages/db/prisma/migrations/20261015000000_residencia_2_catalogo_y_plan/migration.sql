@@ -217,6 +217,18 @@ ALTER TABLE "control_types"
 -- función de usuario no se valida al restaurar un `pg_dump` en el orden en
 -- que Postgres restaura.
 --
+-- ── EL `IS NOT NULL` NO SOBRA · es el fallo que esto evita ───────────
+--
+-- `NULL BETWEEN 1 AND 12` no es `false`: es **NULL**, y un CHECK que
+-- devuelve NULL **PASA**. Sin el `IS NOT NULL` delante, un
+-- `EVERY_N_HOURS` sin horas entraba — o sea una línea de plan que la
+-- puerta leería y no sabría cuándo pedir: el cambio postural de un
+-- dependiente, en silencio.
+--
+-- Es la misma trampa por la que los arrays nacen `NOT NULL DEFAULT '{}'`
+-- (`cardinality(NULL)` también es NULL), y lo encontró su propio sabotaje
+-- en el e2e. Queda escrito aquí porque es invisible al leer el CASE.
+--
 -- Los dos topes que son decisiones y no validación:
 --
 --   · `every_n_hours` entre 1 y 12. Menos de una hora no es un cuidado, es
@@ -247,7 +259,8 @@ ALTER TABLE "control_types"
                             AND "default_every_n_days" IS NULL
                             AND cardinality("default_weekdays") = 0
                             AND "default_month_day" IS NULL
-      WHEN 'EVERY_N_HOURS' THEN "default_every_n_hours" BETWEEN 1 AND 12
+      WHEN 'EVERY_N_HOURS' THEN "default_every_n_hours" IS NOT NULL
+                            AND "default_every_n_hours" BETWEEN 1 AND 12
                             AND cardinality("default_shift_codes") = 0
                             AND cardinality("default_moment_codes") = 0
                             AND "default_every_n_days" IS NULL
@@ -260,13 +273,15 @@ ALTER TABLE "control_types"
                             AND "default_every_n_hours" IS NULL
                             AND "default_every_n_days" IS NULL
                             AND "default_month_day" IS NULL
-      WHEN 'EVERY_N_DAYS'  THEN "default_every_n_days" BETWEEN 1 AND 365
+      WHEN 'EVERY_N_DAYS'  THEN "default_every_n_days" IS NOT NULL
+                            AND "default_every_n_days" BETWEEN 1 AND 365
                             AND cardinality("default_shift_codes") = 1
                             AND cardinality("default_moment_codes") = 0
                             AND "default_every_n_hours" IS NULL
                             AND cardinality("default_weekdays") = 0
                             AND "default_month_day" IS NULL
-      WHEN 'MONTHLY'       THEN "default_month_day" BETWEEN 1 AND 28
+      WHEN 'MONTHLY'       THEN "default_month_day" IS NOT NULL
+                            AND "default_month_day" BETWEEN 1 AND 28
                             AND cardinality("default_shift_codes") = 1
                             AND cardinality("default_moment_codes") = 0
                             AND "default_every_n_hours" IS NULL
@@ -439,10 +454,10 @@ ALTER TABLE "center_control_settings"
       WHEN 'EVERY_SHIFT'   THEN cardinality("shift_codes") > 0 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND "every_n_days" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
       WHEN 'DAILY'         THEN cardinality("shift_codes") = 1 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND "every_n_days" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
       WHEN 'MOMENTS'       THEN cardinality("moment_codes") > 0 AND cardinality("shift_codes") = 0 AND "every_n_hours" IS NULL AND "every_n_days" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
-      WHEN 'EVERY_N_HOURS' THEN "every_n_hours" BETWEEN 1 AND 12 AND cardinality("shift_codes") = 0 AND cardinality("moment_codes") = 0 AND "every_n_days" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
+      WHEN 'EVERY_N_HOURS' THEN "every_n_hours" IS NOT NULL AND "every_n_hours" BETWEEN 1 AND 12 AND cardinality("shift_codes") = 0 AND cardinality("moment_codes") = 0 AND "every_n_days" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
       WHEN 'WEEKDAYS'      THEN cardinality("weekdays") > 0 AND "weekdays" <@ ARRAY[1,2,3,4,5,6,7] AND cardinality("shift_codes") = 1 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND "every_n_days" IS NULL AND "month_day" IS NULL
-      WHEN 'EVERY_N_DAYS'  THEN "every_n_days" BETWEEN 1 AND 365 AND cardinality("shift_codes") = 1 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
-      WHEN 'MONTHLY'       THEN "month_day" BETWEEN 1 AND 28 AND cardinality("shift_codes") = 1 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND "every_n_days" IS NULL AND cardinality("weekdays") = 0
+      WHEN 'EVERY_N_DAYS'  THEN "every_n_days" IS NOT NULL AND "every_n_days" BETWEEN 1 AND 365 AND cardinality("shift_codes") = 1 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
+      WHEN 'MONTHLY'       THEN "month_day" IS NOT NULL AND "month_day" BETWEEN 1 AND 28 AND cardinality("shift_codes") = 1 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND "every_n_days" IS NULL AND cardinality("weekdays") = 0
       WHEN 'ON_DEMAND'     THEN cardinality("shift_codes") = 0 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND "every_n_days" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
     END);
 
@@ -542,10 +557,10 @@ ALTER TABLE "care_plan_template_items"
       WHEN 'EVERY_SHIFT'   THEN cardinality("shift_codes") > 0 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND "every_n_days" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
       WHEN 'DAILY'         THEN cardinality("shift_codes") = 1 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND "every_n_days" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
       WHEN 'MOMENTS'       THEN cardinality("moment_codes") > 0 AND cardinality("shift_codes") = 0 AND "every_n_hours" IS NULL AND "every_n_days" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
-      WHEN 'EVERY_N_HOURS' THEN "every_n_hours" BETWEEN 1 AND 12 AND cardinality("shift_codes") = 0 AND cardinality("moment_codes") = 0 AND "every_n_days" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
+      WHEN 'EVERY_N_HOURS' THEN "every_n_hours" IS NOT NULL AND "every_n_hours" BETWEEN 1 AND 12 AND cardinality("shift_codes") = 0 AND cardinality("moment_codes") = 0 AND "every_n_days" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
       WHEN 'WEEKDAYS'      THEN cardinality("weekdays") > 0 AND "weekdays" <@ ARRAY[1,2,3,4,5,6,7] AND cardinality("shift_codes") = 1 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND "every_n_days" IS NULL AND "month_day" IS NULL
-      WHEN 'EVERY_N_DAYS'  THEN "every_n_days" BETWEEN 1 AND 365 AND cardinality("shift_codes") = 1 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
-      WHEN 'MONTHLY'       THEN "month_day" BETWEEN 1 AND 28 AND cardinality("shift_codes") = 1 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND "every_n_days" IS NULL AND cardinality("weekdays") = 0
+      WHEN 'EVERY_N_DAYS'  THEN "every_n_days" IS NOT NULL AND "every_n_days" BETWEEN 1 AND 365 AND cardinality("shift_codes") = 1 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
+      WHEN 'MONTHLY'       THEN "month_day" IS NOT NULL AND "month_day" BETWEEN 1 AND 28 AND cardinality("shift_codes") = 1 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND "every_n_days" IS NULL AND cardinality("weekdays") = 0
       WHEN 'ON_DEMAND'     THEN cardinality("shift_codes") = 0 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND "every_n_days" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
     END);
 
@@ -619,10 +634,10 @@ ALTER TABLE "care_plan_items"
       WHEN 'EVERY_SHIFT'   THEN cardinality("shift_codes") > 0 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND "every_n_days" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
       WHEN 'DAILY'         THEN cardinality("shift_codes") = 1 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND "every_n_days" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
       WHEN 'MOMENTS'       THEN cardinality("moment_codes") > 0 AND cardinality("shift_codes") = 0 AND "every_n_hours" IS NULL AND "every_n_days" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
-      WHEN 'EVERY_N_HOURS' THEN "every_n_hours" BETWEEN 1 AND 12 AND cardinality("shift_codes") = 0 AND cardinality("moment_codes") = 0 AND "every_n_days" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
+      WHEN 'EVERY_N_HOURS' THEN "every_n_hours" IS NOT NULL AND "every_n_hours" BETWEEN 1 AND 12 AND cardinality("shift_codes") = 0 AND cardinality("moment_codes") = 0 AND "every_n_days" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
       WHEN 'WEEKDAYS'      THEN cardinality("weekdays") > 0 AND "weekdays" <@ ARRAY[1,2,3,4,5,6,7] AND cardinality("shift_codes") = 1 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND "every_n_days" IS NULL AND "month_day" IS NULL
-      WHEN 'EVERY_N_DAYS'  THEN "every_n_days" BETWEEN 1 AND 365 AND cardinality("shift_codes") = 1 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
-      WHEN 'MONTHLY'       THEN "month_day" BETWEEN 1 AND 28 AND cardinality("shift_codes") = 1 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND "every_n_days" IS NULL AND cardinality("weekdays") = 0
+      WHEN 'EVERY_N_DAYS'  THEN "every_n_days" IS NOT NULL AND "every_n_days" BETWEEN 1 AND 365 AND cardinality("shift_codes") = 1 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
+      WHEN 'MONTHLY'       THEN "month_day" IS NOT NULL AND "month_day" BETWEEN 1 AND 28 AND cardinality("shift_codes") = 1 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND "every_n_days" IS NULL AND cardinality("weekdays") = 0
       WHEN 'ON_DEMAND'     THEN cardinality("shift_codes") = 0 AND cardinality("moment_codes") = 0 AND "every_n_hours" IS NULL AND "every_n_days" IS NULL AND cardinality("weekdays") = 0 AND "month_day" IS NULL
     END);
 
