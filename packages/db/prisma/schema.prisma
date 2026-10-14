@@ -236,6 +236,28 @@ enum DeviceKind {
   // pantallas (cocina y barra) tiene tres dispositivos vivos en la misma
   // caja y sólo uno de ellos factura.
   KITCHEN
+  // residencia-1 (D-52) · LA PUERTA DE UNA HABITACIÓN. La MISMA APK en
+  // «modo puerta», emparejada a una `Room` en vez de a una caja: hoy
+  // enseña el número de habitación y quién la ocupa, y en residencia-3
+  // pasará a ser la pantalla donde el personal registra a pulsaciones.
+  //
+  // **No abre turno, no cobra, no emite registro de facturación y no
+  // releva a nadie.** Lo primero lo corta `requireDeviceToken` —la puerta
+  // de TODAS las rutas del TPV— con un 403 antes del PIN, igual que a una
+  // `KITCHEN`. Lo último sale gratis del motor: el trigger
+  // `devices_revoke_previous` y el índice parcial
+  // `devices_one_active_per_register_key` filtran los dos
+  // `kind = 'TERMINAL'`, así que un valor nuevo cae fuera por
+  // construcción. Se prueba, no se supone: tiene su fila en la tabla de
+  // sabotajes del bloque.
+  //
+  // Y es el primer `DeviceKind` que NO cuelga de una caja: su
+  // `register_id` es NULL y su `room_id` no (CHECK
+  // `devices_register_o_habitacion`). Un tenant de residencia tiene la
+  // caja APAGADA y puede no tener ni una `Register` en la base —el alta de
+  // tenant no crea ninguna—, así que colgar la puerta de una caja técnica
+  // habría sido inventarse una caja para un centro que no cobra.
+  ROOM
 }
 
 // V1-verifactu (ADR-019) · por qué se revocó un dispositivo.
@@ -620,6 +642,57 @@ enum BlockScope {
   TABLE
 }
 
+// ── residencia-1 · cimientos de la residencia de mayores ──────────────
+//
+// Vertical nueva (D-37, D-48): residencias de mayores sobre el núcleo de
+// mipiacetpv, encendida por tenant con `Tenant.residenciaEnabled`. Estos
+// cuatro tipos son listas CERRADAS —las fija la Ley de Dependencia o el
+// propio concierto con la JCCM, no el centro— y de ahí que sean enums y
+// no catálogo de datos. Lo que SÍ es catálogo de datos son los roles de
+// cuidado: ver `CareRole`.
+
+// Cuánta ayuda necesita un residente para la vida diaria. Es la
+// clasificación con la que una residencia organiza el trabajo: de ella
+// sale el plan de cuidados por defecto (residencia-2, D-53).
+enum DependencyLevel {
+  VALIDO
+  SEMIASISTIDO
+  DEPENDIENTE
+}
+
+// Grado reconocido de la Ley 39/2006 (Ley de Dependencia). OPCIONAL: hay
+// residentes privados sin valoración, y un grado que no se tiene no se
+// inventa. No es lo mismo que `DependencyLevel` —aquél lo decide el
+// centro para organizar el cuidado, éste lo reconoce la administración— y
+// por eso son dos columnas y no una.
+enum DependencyGrade {
+  I
+  II
+  III
+}
+
+// Qué clase de plaza ocupa. Los pagadores y la vigencia de la plaza son
+// Fase 3 (facturación de concertadas): aquí sólo se guarda de qué tipo es,
+// que es lo que la dirección necesita ver en la lista.
+enum PlaceType {
+  PRIVADA
+  CONCERTADA
+  TEMPORAL
+}
+
+// Categoría de un rol de cuidado (D-29 a D-31). NO es el rol de negocio
+// (`UserRole`), que no se toca en este bloque: una persona puede ser
+// auxiliar y nada más en el TPV, o dirección y además OWNER.
+//
+// De la categoría cuelgan los permisos de residencia que vienen después:
+// cerrar una incidencia es de categoría directiva (D-27), y N3/N4 exige
+// además una persona distinta de quien registró (D-28).
+enum CareRoleCategory {
+  OPERATIVO
+  SUPERVISOR
+  DIRECTIVO
+}
+
 // ── Multi-tenant raíz ─────────────────────────────────────────────────
 
 model Tenant {
@@ -875,6 +948,25 @@ model Tenant {
   // TPV de hostelería (obligación legal de informar). Sin pantalla, la
   // alergia sale en el papel de la comanda.
   kitchenDisplayEnabled          Boolean           @default(false) @map("kitchen_display_enabled")
+  // residencia-1 (D-48) · capability de la RESIDENCIA DE MAYORES.
+  // Hermana de `clinicalRecordsEnabled` en forma (columna booleana por
+  // tenant, ADR-R6) y en gobierno: la mueve SÓLO el super-admin, porque
+  // encenderla es vender un producto —y el producto trae datos de salud
+  // detrás, igual que la clínica.
+  //
+  // `@default(false)`: ninguno de los quince tenants de hoy es una
+  // residencia, y con la columna apagada **todo este bloque no existe**
+  // para ellos. Las rutas de residencia responden **404 y no 403**, por lo
+  // mismo que las clínicas: a un bar no se le cuenta que este módulo
+  // existe (ver `residencia/gate.ts`).
+  //
+  // Y no se puede encender sin la clínica: el residente es un `Client` con
+  // historia (D-49), así que `residencia_enabled` sin
+  // `clinical_records_enabled` sería un módulo cuyo dato central no se
+  // puede ni leer. Lo garantiza el CHECK
+  // `tenants_residencia_exige_clinica` de la migración, no sólo el 409 de
+  // la ruta del super-admin.
+  residenciaEnabled              Boolean           @default(false) @map("residencia_enabled")
   // v1.3-Thalia Lote 6 · pie de ticket personalizado. NULL = no se
   // pinta nada extra (comportamiento previo). Si está set, el renderer
   // del ticket lo pinta arriba del QR/CIF tras el "Gracias por tu
@@ -945,6 +1037,20 @@ model Tenant {
   // `purpose`. RESTRICT al otro lado: un tenant con enlaces no se borra.
   publicLinks                   PublicLink[]
   KitchenDispatch               KitchenDispatch[]
+  // residencia-1 · los cimientos de la residencia. `residentProfiles`,
+  // `bedAssignments` y `careRoleAssignments` cuelgan con RESTRICT (un
+  // centro con residentes dentro no se borra, igual que uno con historia);
+  // el edificio y los turnos con Cascade, que es configuración y se va con
+  // el centro. Ver el comentario de cada modelo.
+  residentProfiles              ResidentProfile[]
+  floors                        Floor[]
+  rooms                         Room[]
+  beds                          Bed[]
+  bedAssignments                BedAssignment[]
+  careRoles                     CareRole[]
+  careRoleAssignments           CareRoleAssignment[]
+  careZoneAssignments           CareZoneAssignment[]
+  centerShifts                  CenterShift[]
 
   // v1.3-SuperAdmin-Hub Lote 3 · el backfill y el hub buscan/listan
   // tenants por `holded_account_id`. Sin índice eran scans completos
@@ -1233,6 +1339,22 @@ model User {
   // test, reenviar «mi cita»). RESTRICT: quién creó un enlace es parte de lo
   // que el registro puede contestar.
   publicLinksCreated      PublicLink[]                   @relation("PublicLinkCreatedBy")
+  // residencia-1 (D-50, D-51) · el rol de CUIDADO y la ZONA, que no son
+  // el rol de negocio. `UserRole` no se toca en este bloque: una auxiliar
+  // es `CASHIER` o `CLINICIAN` en el TPV y «auxiliar de planta 1» en la
+  // residencia, y las dos cosas viven en columnas distintas.
+  //
+  // Son LISTAS y no columnas porque las dos son muchos-a-muchos CON
+  // VIGENCIA: una persona puede ser TO y Calidad a la vez (decisión de
+  // producto 3) y puede cubrir dos plantas. Y no se borran: revocar
+  // rellena `revokedAt` y volver a dar crea otra fila, mismo criterio que
+  // `ClinicalAccess`.
+  careRoleAssignments     CareRoleAssignment[]           @relation("CareRoleAssignmentUser")
+  careRolesGranted        CareRoleAssignment[]           @relation("CareRoleAssignmentGrantedBy")
+  careRolesRevoked        CareRoleAssignment[]           @relation("CareRoleAssignmentRevokedBy")
+  careZoneAssignments     CareZoneAssignment[]           @relation("CareZoneAssignmentUser")
+  careZonesGranted        CareZoneAssignment[]           @relation("CareZoneAssignmentGrantedBy")
+  bedAssignmentsCreated   BedAssignment[]                @relation("BedAssignmentCreatedBy")
 
   @@index([tenantId])
   @@map("users")
@@ -1438,7 +1560,41 @@ model PrinterConfig {
 model Device {
   id                 String               @id @default(uuid()) @db.Uuid
   tenantId           String               @map("tenant_id") @db.Uuid
-  registerId         String               @map("register_id") @db.Uuid
+  // residencia-1 · **NULLABLE desde este bloque**, y es el único cambio
+  // de este bloque sobre una columna que ya existía.
+  //
+  // Hasta aquí todo dispositivo colgaba de una caja: el terminal, el del
+  // modo prueba y la pantalla de cocina. La puerta de una habitación
+  // (`kind = ROOM`) no cuelga de ninguna, porque un tenant de residencia
+  // tiene la caja APAGADA y puede no tener ni una `Register` en la base
+  // —el alta de tenant no crea ninguna (`superadmin/tenants.ts`).
+  //
+  // La alternativa era colgar la puerta de una caja técnica, como la
+  // tablet de cocina cuelga de la de su bar. Se descartó: habría que
+  // inventarse una caja (con su nombre, su serie y su identidad fiscal de
+  // SIF) para un centro que no factura, y el día que alguien listara las
+  // cajas de Jardín de Gredos vería 49 cajas falsas.
+  //
+  // Lo que NO cambia al hacerla nullable, y se comprobó una por una:
+  //
+  //   · El índice parcial `devices_one_active_per_register_key` filtra
+  //     `kind = 'TERMINAL'`, así que ninguna fila `ROOM` entra en él.
+  //   · El trigger `devices_revoke_previous` sale por la puerta de atrás
+  //     con `NEW.kind <> 'TERMINAL'`, así que una puerta nueva no releva
+  //     al terminal de nadie. (Lo que SÍ se le añadió es la rama de la
+  //     habitación: una puerta nueva releva a la anterior DE SU
+  //     HABITACIÓN.)
+  //   · Verifactu encadena por `register_id` de `fiscal_records`, que es
+  //     otra tabla y sigue NOT NULL. Un `ROOM` no emite registros.
+  //
+  // Y lo que la sostiene no es la costumbre: el CHECK
+  // `devices_register_o_habitacion` exige **caja y no habitación** en todo
+  // lo que no es `ROOM`, y **habitación y no caja** en un `ROOM`.
+  registerId         String?              @map("register_id") @db.Uuid
+  // residencia-1 (D-52) · QUÉ PUERTA ES ESTA TABLET. Sólo puede tener
+  // valor en un `kind = ROOM`, y en un `ROOM` es obligatorio: mismo CHECK
+  // que la columna de arriba.
+  roomId             String?              @map("room_id") @db.Uuid
   name               String?
   pairedAt           DateTime             @default(now()) @map("paired_at") @db.Timestamptz()
   lastSeenAt         DateTime?            @map("last_seen_at") @db.Timestamptz()
@@ -1501,7 +1657,12 @@ model Device {
   kitchenLanAt       DateTime?            @map("kitchen_lan_at") @db.Timestamptz()
 
   tenant              Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  register            Register            @relation(fields: [registerId], references: [id], onDelete: Cascade)
+  register            Register?           @relation(fields: [registerId], references: [id], onDelete: Cascade)
+  // residencia-1 · la habitación de la que esta tablet es la puerta.
+  // `Restrict` al otro lado: borrar una habitación con su tablet
+  // emparejada dejaría un aparato autenticado apuntando a nada. Primero
+  // se revoca la tablet, después se retira la habitación.
+  room                Room?               @relation(fields: [roomId], references: [id], onDelete: Restrict)
   consumedPairings    PairingCode[]       @relation("PairingCodeConsumedBy")
   // V1-verifactu · a favor de qué dispositivo se revocó éste, y a cuáles
   // revocó él. La FK es DEFERRABLE INITIALLY DEFERRED en la migración: hay
@@ -1533,6 +1694,13 @@ model Device {
   @@index([tenantId])
   @@index([registerId])
   @@index([revokedByDeviceId])
+  /// residencia-1 · «¿qué tablet es la puerta de esta habitación?», que es
+  /// la pregunta de la pantalla de Edificio. La unicidad de la puerta VIVA
+  /// no está aquí: la hace el índice PARCIAL
+  /// `devices_one_active_per_room_key` de la migración, que Prisma no sabe
+  /// declarar — una habitación puede tener muchas tablets revocadas y como
+  /// mucho una viva.
+  @@index([roomId])
   @@map("devices")
 }
 
@@ -1638,7 +1806,17 @@ model DeviceScreenshot {
 model PairingCode {
   id                 String           @id @default(uuid()) @db.Uuid
   tenantId           String           @map("tenant_id") @db.Uuid
-  registerId         String           @map("register_id") @db.Uuid
+  // residencia-1 · nullable, por lo mismo que `devices.register_id`: el
+  // código que empareja la puerta de una habitación no nombra ninguna
+  // caja. CHECK `pairing_codes_register_o_habitacion`, hermano del de
+  // `devices`.
+  registerId         String?          @map("register_id") @db.Uuid
+  // residencia-1 · la habitación que este código va a emparejar. Lo
+  // decide quien lo genera (propietario o encargado, autenticado) y NO el
+  // aparato, exactamente por lo mismo que `kind` y `kitchenSections`: si
+  // `POST /devices/pair` aceptase la habitación del cuerpo, cualquiera con
+  // un código se emparejaría como la puerta de la 112.
+  roomId             String?          @map("room_id") @db.Uuid
   code               String
   createdByUserId    String           @map("created_by_user_id") @db.Uuid
   createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz()
@@ -1659,13 +1837,18 @@ model PairingCode {
   // código. Vacío salvo en `kind = KITCHEN`.
   kitchenSections    KitchenSection[] @default([]) @map("kitchen_sections")
 
-  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  register         Register @relation(fields: [registerId], references: [id], onDelete: Cascade)
-  createdBy        User     @relation(fields: [createdByUserId], references: [id])
-  consumedByDevice Device?  @relation("PairingCodeConsumedBy", fields: [consumedByDeviceId], references: [id])
+  tenant           Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  register         Register? @relation(fields: [registerId], references: [id], onDelete: Cascade)
+  // residencia-1 · Cascade y no Restrict, al revés que en `devices`: un
+  // código de emparejamiento caduca en una hora y no es traza de nada.
+  // Retirar una habitación se puede llevar un código sin consumir.
+  room             Room?     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  createdBy        User      @relation(fields: [createdByUserId], references: [id])
+  consumedByDevice Device?   @relation("PairingCodeConsumedBy", fields: [consumedByDeviceId], references: [id])
 
   @@unique([tenantId, code])
   @@index([registerId])
+  @@index([roomId])
   @@index([expiresAt])
   @@map("pairing_codes")
 }
@@ -2832,6 +3015,16 @@ model Client {
   // dos con RESTRICT, por lo mismo: son historia.
   clinicalPhotos      ClinicalPhoto[]
   reportDeliveries    ClinicalReportDelivery[]
+  // residencia-1 (D-49) · EL RESIDENTE ES UN `Client` con un perfil 1:1,
+  // igual que `StaffProfile` amplía a `User`. De ahí hereda gratis la
+  // historia, los accesos, el registro de accesos, los consentimientos,
+  // las fotos y los informes — sin duplicar una sola tabla de la clínica.
+  //
+  // Las dos con RESTRICT al otro lado: **un residente no se borra, se le
+  // da de alta** (`ResidentProfile.dischargeDate`). Es la misma decisión
+  // que lo clínico y por la misma ley.
+  residentProfile     ResidentProfile?
+  bedAssignments      BedAssignment[]
 
   // Búsqueda por teléfono/email y orden alfabético (A–Z) por tenant.
   @@index([tenantId, phone])
@@ -4605,4 +4798,407 @@ model TicketAllergy {
   @@unique([ticketId, seat, allergen])
   @@index([ticketId])
   @@map("ticket_allergies")
+}
+
+// ══ residencia-1 · los cimientos de la residencia ══════════════════════
+//
+// Lo que este bloque construye es el SUELO sobre el que va la pantalla de
+// la puerta (residencia-3): quién vive en qué habitación, quién trabaja
+// con qué rol y en qué zona, en qué turno estamos y qué tablet es qué
+// puerta. Sin eso, cada registro posterior habría que escribirlo a mano.
+//
+// Todo cuelga de `Tenant.residenciaEnabled`. Con la columna apagada estas
+// tablas están vacías y ninguna ruta las toca.
+//
+// Decisiones en `docs/residencia/00-decisiones.md` (D-01 a D-60) y el mapa
+// en `docs/residencia/01-modelo-datos.md`.
+
+/// residencia-1 (D-49) · EL RESIDENTE, como ampliación 1:1 de `Client`.
+///
+/// La PK es el propio `clientId`: no hay id propio porque el perfil ES el
+/// cliente visto como residente. Mismo patrón exacto que `StaffProfile`
+/// sobre `User`, y por la misma razón: no hay una tabla `Resident`
+/// paralela que duplique nombre, teléfono, historia y consentimientos.
+///
+/// ── Un residente NO SE BORRA ─────────────────────────────────────────
+///
+/// Las dos FKs son `Restrict`, y es la diferencia de fondo con
+/// `StaffProfile` (que es `Cascade` a las dos). Un residente que ha vivido
+/// en el centro tiene historia clínica detrás, y la historia se conserva
+/// cinco años (Ley 41/2002) — lo mismo que ya decidió clinica-1. Lo que se
+/// hace con quien se va es **darle de alta**: `dischargeDate` y
+/// `dischargeReason`, y su ficha se queda.
+model ResidentProfile {
+  clientId String @id @map("client_id") @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  /// Cuándo ingresó. `@db.Date` y no timestamp: nadie apunta la hora del
+  /// ingreso y pedirla sería un campo que se rellena mal.
+  admissionDate DateTime @map("admission_date") @db.Date
+  /// Cuándo se le dio de alta, y por qué. NULL en quien sigue viviendo
+  /// aquí. El motivo es texto corto y libre a propósito: «se va con su
+  /// hija», «traslado a hospital», «fallecimiento». Un enum habría
+  /// obligado a elegir mal el día que no encaja ninguno, y esto no
+  /// alimenta ninguna estadística en la v1.
+  dischargeDate   DateTime? @map("discharge_date") @db.Date
+  dischargeReason String?   @map("discharge_reason")
+
+  /// Cuánta ayuda necesita (lo decide el centro) y el grado reconocido de
+  /// la Ley de Dependencia (lo reconoce la administración, y puede no
+  /// tenerlo). Son dos cosas distintas: ver los enums.
+  dependencyLevel DependencyLevel  @map("dependency_level")
+  dependencyGrade DependencyGrade? @map("dependency_grade")
+  /// Privada, concertada o temporal. Los pagadores y la vigencia de la
+  /// plaza son Fase 3.
+  placeType       PlaceType        @map("place_type")
+
+  /// El FAMILIAR RESPONSABLE del PAI: a quién se llama. Las tres columnas
+  /// son opcionales porque hay residentes sin familia localizable, y un
+  /// campo obligatorio que no se puede rellenar se rellena con basura.
+  responsibleName     String? @map("responsible_name")
+  responsiblePhone    String? @map("responsible_phone")
+  responsibleRelation String? @map("responsible_relation")
+
+  /// Identificación. **Nunca en logs, ni en Sentry, ni en un mensaje de
+  /// error** — la misma regla que los datos de salud, y la misma razón: un
+  /// DNI y un número de la Seguridad Social identifican a una persona en
+  /// un sistema que guarda su salud.
+  dni String?
+  nss String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  /// «Los que viven aquí hoy», que es la lista por defecto de la pantalla
+  /// de Residentes.
+  @@index([tenantId, dischargeDate])
+  @@map("resident_profiles")
+}
+
+/// residencia-1 · PLANTA (o zona) del centro. Es la unidad del ALCANCE:
+/// una auxiliar cubre una o varias plantas (D-51), y de ahí sale qué
+/// residentes puede ver.
+///
+/// `Cascade` al tenant, al revés que el residente: una planta es
+/// configuración del edificio, no un registro que la ley obligue a
+/// conservar. Lo que no se puede borrar con el tenant son los residentes,
+/// y eso ya lo impide `ResidentProfile`.
+model Floor {
+  id        String @id @default(uuid()) @db.Uuid
+  tenantId  String @map("tenant_id") @db.Uuid
+  name      String
+  /// En qué orden se pinta. No se deduce del nombre: «Baja» va antes que
+  /// «Primera» y alfabéticamente no.
+  sortOrder Int    @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  rooms  Room[]
+  zones  CareZoneAssignment[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("floors")
+}
+
+/// residencia-1 · HABITACIÓN. Es lo que tiene puerta, y por tanto lo que
+/// tiene tablet (D-52).
+///
+/// `number` es texto y no entero: en Jardín de Gredos hay «112» y hay
+/// «112 bis». Único por centro, que es como lo nombra el personal («la
+/// 112»), no por planta.
+model Room {
+  id       String  @id @default(uuid()) @db.Uuid
+  tenantId String  @map("tenant_id") @db.Uuid
+  floorId  String  @map("floor_id") @db.Uuid
+  number   String
+  name     String?
+  /// Fuera de servicio (obra, avería) sin borrarla: sus camas y su
+  /// histórico de ocupación se quedan.
+  active   Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  floor  Floor  @relation(fields: [floorId], references: [id], onDelete: Restrict)
+  beds   Bed[]
+  /// La tablet de esta puerta (como mucho una viva, por el índice parcial
+  /// `devices_one_active_per_room_key`) y los códigos pendientes de
+  /// emparejar.
+  devices      Device[]
+  pairingCodes PairingCode[]
+
+  @@unique([tenantId, number])
+  @@index([tenantId])
+  @@index([tenantId, floorId])
+  @@map("rooms")
+}
+
+/// residencia-1 · CAMA: la plaza física dentro de la habitación. 49 plazas
+/// en Jardín de Gredos, repartidas en individuales y dobles.
+///
+/// `tenantId` es redundante con el de la habitación y está por la regla de
+/// aislamiento por fila de la casa (misma decisión que `StaffSkill`).
+model Bed {
+  id       String  @id @default(uuid()) @db.Uuid
+  tenantId String  @map("tenant_id") @db.Uuid
+  roomId   String  @map("room_id") @db.Uuid
+  /// «A», «B». Único dentro de la habitación.
+  label    String
+  active   Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  room        Room            @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  assignments BedAssignment[]
+
+  @@unique([roomId, label])
+  @@index([tenantId])
+  @@map("beds")
+}
+
+/// residencia-1 (decisión de producto 6) · QUIÉN OCUPA QUÉ CAMA, con
+/// vigencia.
+///
+/// La regla, y son dos mitades: **una cama tiene como mucho un residente
+/// vigente** y **un residente ocupa como mucho una cama vigente**. Las dos
+/// las garantizan índices PARCIALES de la migración
+/// (`bed_assignments_one_live_per_bed_key` y
+/// `..._per_client_key`, `WHERE to_at IS NULL`), no un `if` de ninguna
+/// ruta — igual que `clinical_access_one_live_key` en clinica-1.
+///
+/// Cambiar de habitación **cierra una ocupación y abre otra**: se rellena
+/// `toAt` de la anterior y se inserta una fila nueva, en la misma
+/// transacción. No se edita la fila vieja, porque «¿dónde dormía doña
+/// Carmen en marzo?» es una pregunta que una residencia tiene que poder
+/// contestar.
+///
+/// Y no se borra: `Restrict` al residente y a la cama.
+model BedAssignment {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  bedId    String @map("bed_id") @db.Uuid
+  clientId String @map("client_id") @db.Uuid
+
+  /// Desde cuándo y hasta cuándo. `toAt` NULL = ocupación VIGENTE, y es lo
+  /// que miran los dos índices parciales. Los nombres de columna son
+  /// `from_at`/`to_at` y no `from`/`to` porque las dos palabras son
+  /// reservadas en SQL y quedarían entre comillas en cada consulta a mano.
+  fromAt DateTime  @map("from_at") @db.Timestamptz()
+  toAt   DateTime? @map("to_at") @db.Timestamptz()
+  /// Por qué se abrió o se cerró. Texto corto: «ingreso», «cambio a la
+  /// 112», «alta». No alimenta nada automático.
+  reason String?
+
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  createdByUserId String?  @map("created_by_user_id") @db.Uuid
+
+  tenant    Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  bed       Bed     @relation(fields: [bedId], references: [id], onDelete: Restrict)
+  client    Client  @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  /// `SetNull`: dar de baja a la encargada que movió de habitación a doña
+  /// Carmen no puede borrar el hecho de que se movió.
+  createdBy User?   @relation("BedAssignmentCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([bedId])
+  @@index([clientId])
+  @@map("bed_assignments")
+}
+
+/// residencia-1 (D-50) · CATÁLOGO de roles de cuidado. **Dato, no código.**
+///
+/// El rol de negocio (`UserRole`) no se toca: son dos cosas distintas y se
+/// guardan separadas para no tener que pasar por las ~60 rutas de caja que
+/// miran `UserRole` cada vez que una residencia invente un puesto.
+///
+/// ── Por tenant, con semilla de serie ─────────────────────────────────
+///
+/// `tenantId` es NOT NULL: al encender el interruptor se le siembran al
+/// centro los diez roles de serie (`isStandard = true`). Así «desactivar
+/// un rol de serie» y «añadir uno propio» son la misma operación sobre la
+/// misma tabla, en vez de un catálogo global más una tabla de excepciones
+/// por centro.
+///
+/// Lo que un centro NO puede hacer con un rol de serie es cambiarle la
+/// CATEGORÍA ni los tres flags de abajo, y no es una costumbre: lo impide
+/// el trigger `care_roles_de_serie_son_fijos` del motor. Si «dirección»
+/// pudiera pasar a OPERATIVO, el cierre de incidencias N3/N4 de
+/// residencia-4 dejaría de significar lo que la norma dice que significa.
+model CareRole {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  /// `AUXILIAR`, `DUE`, `MEDICO`… Único por centro. En los de serie es el
+  /// código de la semilla; en los propios lo normaliza la ruta.
+  code     String
+  name     String
+
+  category CareRoleCategory
+
+  /// ¿Es uno de los diez de serie? Los de serie no se borran y no cambian
+  /// de categoría; sólo se pueden desactivar.
+  isStandard Boolean @default(false) @map("is_standard")
+  active     Boolean @default(true)
+  sortOrder  Int     @default(0) @map("sort_order")
+
+  /// ── Los tres flags de los que cuelga el acceso ────────────────────
+  ///
+  /// `recordsCare` · este rol REGISTRA cuidados. Todos salvo
+  /// administración. Quien tiene uno vigente queda `User.isClinician = true`
+  /// (D-51): en una residencia el acceso no se decide por cita, se decide
+  /// por rol y zona.
+  recordsCare     Boolean @default(true) @map("records_care")
+  /// `requiresLicense` · este rol exige número de colegiado: DUE, médico,
+  /// fisio y TO. La auxiliar y la limpiadora registran y no lo tienen, y
+  /// pedírselo habría dejado media plantilla sin poder entrar.
+  requiresLicense Boolean @default(false) @map("requires_license")
+  /// `fullScope` · este rol ve TODO EL CENTRO sin necesidad de zona: DUE,
+  /// médico, calidad y dirección (D-51). Lo mira la función de acceso.
+  fullScope       Boolean @default(false) @map("full_scope")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant      Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// `Restrict` al otro lado: un rol con asignaciones —aunque estén
+  /// revocadas— no se borra. La asignación revocada es el histórico de
+  /// quién firmó qué y con qué capacidad (D-31), y un histórico que nombra
+  /// un rol que ya no existe no se puede leer.
+  assignments CareRoleAssignment[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@index([tenantId, active])
+  @@map("care_roles")
+}
+
+/// residencia-1 (D-50, decisión de producto 3 y 4) · PERSONA ↔ ROL DE
+/// CUIDADO, muchos a muchos con vigencia.
+///
+/// Muchos a muchos porque una persona puede ser TO y Calidad a la vez, y
+/// las dos cosas a la vez significan cosas distintas: con la de Calidad ve
+/// todo el centro, con la de TO firma una sesión de terapia.
+///
+/// **No se borra.** Revocar rellena `revokedAt`; volver a dar el rol crea
+/// OTRA fila. Copia literal del criterio de `ClinicalAccess` en clinica-1,
+/// incluido el índice parcial de la migración
+/// (`care_role_assignments_one_live_key`, `WHERE revoked_at IS NULL`), que
+/// es lo que permite que el histórico «se lo quitamos en marzo y se lo
+/// devolvimos en junio» quepa en la tabla: con un índice total, Postgres no
+/// lo admitiría.
+model CareRoleAssignment {
+  id         String @id @default(uuid()) @db.Uuid
+  tenantId   String @map("tenant_id") @db.Uuid
+  userId     String @map("user_id") @db.Uuid
+  careRoleId String @map("care_role_id") @db.Uuid
+
+  /// La VIGENCIA PREVISTA: desde cuándo rige y hasta cuándo (una suplencia
+  /// de verano). `toAt` NULL = sin fecha de fin prevista.
+  fromAt DateTime  @map("from_at") @db.Timestamptz()
+  toAt   DateTime? @map("to_at") @db.Timestamptz()
+
+  grantedAt       DateTime @default(now()) @map("granted_at") @db.Timestamptz()
+  grantedByUserId String?  @map("granted_by_user_id") @db.Uuid
+  /// La REVOCACIÓN, que es otra cosa que `toAt`: una fecha de fin prevista
+  /// la pone quien da el rol; una revocación la pone quien lo quita, el día
+  /// que lo quita. Las dos quitan el rol; sólo una dice que alguien lo
+  /// decidió.
+  revokedAt       DateTime? @map("revoked_at") @db.Timestamptz()
+  revokedByUserId String?   @map("revoked_by_user_id") @db.Uuid
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  /// `Restrict` al usuario: la asignación es la CAPACIDAD con la que esa
+  /// persona firmó lo que firmó. No se queda huérfana.
+  user      User     @relation("CareRoleAssignmentUser", fields: [userId], references: [id], onDelete: Restrict)
+  careRole  CareRole @relation(fields: [careRoleId], references: [id], onDelete: Restrict)
+  grantedBy User?    @relation("CareRoleAssignmentGrantedBy", fields: [grantedByUserId], references: [id], onDelete: SetNull)
+  revokedBy User?    @relation("CareRoleAssignmentRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([tenantId, userId])
+  @@index([careRoleId])
+  @@map("care_role_assignments")
+}
+
+/// residencia-1 (D-51) · EL ALCANCE DE UNA PERSONA, POR PLANTA.
+///
+/// En una residencia no hay citas: hay zonas y turnos. La selección por
+/// paciente de la clínica (`ClinicalAccess`, que se llena sola al asignar
+/// una cita) no tiene de dónde llenarse aquí, y por eso el alcance de la
+/// residencia es éste y no aquél.
+///
+/// `floorId` NULL = **todo el centro**. Se usa para la gerente que no
+/// lleva un rol de alcance total pero cubre el edificio entero; los roles
+/// que ya ven todo (DUE, médico, calidad, dirección) no necesitan ni una
+/// fila aquí, porque lo deciden por `CareRole.fullScope`.
+///
+/// La unicidad de lo vigente está en DOS índices parciales de la
+/// migración, y hacen falta los dos: uno por `(user, floor)` y otro por
+/// `(user)` con `floor_id IS NULL`, porque en Postgres los NULL son
+/// distintos entre sí y el primero no cubriría «todo el centro».
+model CareZoneAssignment {
+  id       String  @id @default(uuid()) @db.Uuid
+  tenantId String  @map("tenant_id") @db.Uuid
+  userId   String  @map("user_id") @db.Uuid
+  floorId  String? @map("floor_id") @db.Uuid
+
+  fromAt DateTime  @map("from_at") @db.Timestamptz()
+  toAt   DateTime? @map("to_at") @db.Timestamptz()
+
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  grantedByUserId String?  @map("granted_by_user_id") @db.Uuid
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      User   @relation("CareZoneAssignmentUser", fields: [userId], references: [id], onDelete: Cascade)
+  floor     Floor? @relation(fields: [floorId], references: [id], onDelete: Restrict)
+  grantedBy User?  @relation("CareZoneAssignmentGrantedBy", fields: [grantedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([tenantId, userId])
+  @@index([floorId])
+  @@map("care_zone_assignments")
+}
+
+/// residencia-1 (D-54) · LOS TURNOS DEL CENTRO.
+///
+/// Configurables, con tres de serie que se siembran al encender el
+/// interruptor: mañana 08–15, tarde 15–22 y noche 22–08. El registro de
+/// residencia-3 se adscribe al turno en que ocurre, y el turno es la
+/// unidad del relevo (residencia-5).
+///
+/// `startsAt`/`endsAt` son HORAS DE PARED «HH:MM» y no timestamps, igual
+/// que `StaffShift.startTime`: «la noche empieza a las diez» no cambia el
+/// día del cambio de hora. La función que contesta «¿en qué turno cae este
+/// instante?» (`residencia/turnos.ts`) convierte el instante a hora de
+/// pared de `Europe/Madrid` y compara — y sabe que la noche CRUZA
+/// MEDIANOCHE (`endsAt <= startsAt`).
+model CenterShift {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  /// `M`, `T`, `N` en los de serie. Único por centro: es como lo nombra el
+  /// cuadrante.
+  code     String
+  name     String
+  /// «HH:MM», 24 h. CHECK de formato en la migración.
+  startsAt String @map("starts_at")
+  endsAt   String @map("ends_at")
+  sortOrder Int   @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("center_shifts")
 }
