@@ -328,6 +328,32 @@ describe("clinica-7 · sin el código, el enlace no abre", () => {
     await app.close();
   });
 
+  it("un enlace que PIDE código y no tiene huella NO ABRE", async () => {
+    // El sabotaje #37 («un enlace sin código guardado abre sin código»)
+    // salió VERDE: ningún caso llegaba a `codigoCuadra` con la huella a
+    // `null`, porque todos los enlaces del fichero nacen con su código.
+    //
+    // Y es el caso que importa: una fila con `purpose = INFORME_CLINICO` y
+    // `code_hash = NULL` —metida a mano, o dejada por un script viejo— no
+    // puede abrir «porque no hay código que comprobar». Lo que tiene que
+    // hacer es no abrir.
+    const app = await buildApp();
+    const { token, codigo, enlace } = await mandarPorEmail(app);
+    enlace.codeHash = null;
+
+    for (const prueba of [codigo, "000000", "999999"]) {
+      const res = await app.inject({
+        method: "POST",
+        url: `/informe/${token}`,
+        payload: { codigo: prueba },
+      });
+      expect(res.statusCode).toBe(404);
+      expect(res.json()).toEqual(LA_404);
+    }
+    expect(enlace.usedCount).toBe(0);
+    await app.close();
+  });
+
   it("un código con otra forma lo tira el schema, sin tocar la base", async () => {
     const app = await buildApp();
     const { token, enlace } = await mandarPorEmail(app);

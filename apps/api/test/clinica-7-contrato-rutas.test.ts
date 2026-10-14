@@ -461,6 +461,44 @@ describe("clinica-7 · el contrato lo acepta la dueña y nadie más", () => {
     await app.close();
   });
 
+  it("con DOS aceptaciones vivas, revocar escribe DOS revocaciones", async () => {
+    // El sabotaje #29 («revocar escribe UNA fila y no una por viva») salió
+    // VERDE porque el caso de antes solo tenía UNA aceptación viva: con
+    // una, «todas» y «la primera» son lo mismo.
+    //
+    // Con dos vivas la diferencia importa de verdad: una sola revocación
+    // dejaría la otra en pie, el estado seguiría siendo VIGENTE y la
+    // dueña creería haber revocado algo que sigue abierto.
+    contrato.aceptar({ version: 2 });
+    const antes = contrato.filas.length;
+    expect(
+      contrato.filas.filter((f) => f.revokesAgreementId == null),
+    ).toHaveLength(2);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/clinica/contrato/revocar",
+      headers: comoDuena,
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().revocaciones).toBe(2);
+    expect(contrato.filas.length).toBe(antes + 2);
+
+    // Y cada revocación apunta a UNA aceptación distinta: ninguna queda
+    // viva.
+    const revocadas = new Set(
+      contrato.filas
+        .map((f) => f.revokesAgreementId)
+        .filter((x): x is string => x != null),
+    );
+    const vivas = contrato.filas.filter(
+      (f) => f.revokesAgreementId == null && !revocadas.has(f.id),
+    );
+    expect(vivas).toEqual([]);
+    await app.close();
+  });
+
   it("y la cuenta bloqueada NO acepta ni revoca, pero SÍ lee", async () => {
     bloqueada = true;
     const app = await buildApp();
@@ -613,6 +651,98 @@ describe("clinica-7 · el superadmin no abre historias, por ningún camino", () 
     });
     expect(registro).toHaveLength(0);
     await app.close();
+  });
+
+  it("CADA CAPA corta por su cuenta · el gate", async () => {
+    // Los sabotajes #30 y #31 salieron VERDES, y por una razón que es
+    // buena noticia y mala a la vez: hay TRES capas (el gate, `conHistoria`
+    // y las rutas del contrato), así que quitar una deja las otras dos
+    // tapando el agujero.
+    //
+    // Es defensa en profundidad funcionando. Pero significa que ninguna
+    // capa estaba probada POR SÍ SOLA, y entonces el día que alguien
+    // quite dos —o la última— nadie se enteraría. Así que cada una se
+    // prueba como función, no a través de la pila.
+    const { ensureClinicaEnabled, esMiPiaceMirando } = await import(
+      "../src/clinica/gate.js"
+    );
+
+    const peticion = {
+      auth: { isImpersonation: true, tenantId: TENANT, userId: DUENA },
+      method: "get",
+      url: "/clinica/clients/x/entries",
+    } as never;
+    expect(esMiPiaceMirando(peticion)).toBe(true);
+
+    const enviado: unknown[] = [];
+    const respuesta = {
+      code: () => respuesta,
+      send: (c: unknown) => {
+        enviado.push(c);
+        return respuesta;
+      },
+    } as never;
+    await ensureClinicaEnabled(peticion, respuesta);
+    // Contestó, y con la 404 de una ruta inexistente.
+    expect(enviado).toHaveLength(1);
+    expect(enviado[0]).toMatchObject({ statusCode: 404, error: "Not Found" });
+  });
+
+  it("CADA CAPA corta por su cuenta · una sesión NORMAL sí pasa el gate", async () => {
+    // La otra mitad: el gate no corta a quien no es Mi Piace. Sin esto, un
+    // `return` suelto en `ensureClinicaEnabled` pasaría el test de arriba
+    // y cerraría la clínica entera.
+    const { ensureClinicaEnabled } = await import("../src/clinica/gate.js");
+    const enviado: unknown[] = [];
+    const respuesta = {
+      code: () => respuesta,
+      send: (c: unknown) => {
+        enviado.push(c);
+        return respuesta;
+      },
+    } as never;
+    await ensureClinicaEnabled(
+      {
+        auth: { isImpersonation: false, tenantId: TENANT, userId: DUENA },
+        method: "get",
+        url: "/clinica/clients/x/entries",
+      } as never,
+      respuesta,
+    );
+    expect(enviado).toEqual([]);
+  });
+
+  it("CADA CAPA corta por su cuenta · `conHistoria` sin pasar por el gate", async () => {
+    // `conHistoria` es el único punto por el que pasa TODA ruta clínica, y
+    // es la capa que protege a la ruta que se registre sin el gate (como
+    // las del contrato, que no pueden llevarlo). Se llama directamente.
+    const { conHistoria } = await import("../src/clinica/registro.js");
+    const handler = vi.fn(async () => ({ ok: true }));
+    const enviado: unknown[] = [];
+    const respuesta = {
+      code: () => respuesta,
+      send: (c: unknown) => {
+        enviado.push(c);
+        return respuesta;
+      },
+    } as never;
+    const r = await conHistoria(
+      {
+        auth: { isImpersonation: true, tenantId: TENANT, userId: DUENA },
+        method: "get",
+        url: "/clinica/clients/x/entries",
+        log: { warn: () => {}, error: () => {} },
+      } as never,
+      respuesta,
+      { clientId: PACIENTE, action: "READ" },
+      handler,
+    );
+    expect(r).toBeUndefined();
+    expect(handler).not.toHaveBeenCalled();
+    expect(enviado[0]).toMatchObject({ statusCode: 404, error: "Not Found" });
+    // Y NO deja línea en el registro: una línea aquí tendría que decir «la
+    // dueña», porque el token lleva su id, y eso sería una línea falsa.
+    expect(registro).toEqual([]);
   });
 
   it("la dueña DE VERDAD sí entra: el corte es la impersonación, no el rol", async () => {

@@ -90,6 +90,9 @@ const {
 } = await import("../src/clinica/claves.js");
 
 const { revisarArranqueClinico } = await import("../src/clinica/arranque.js");
+const { notaParaGuardar, leerNota, olvidarSiEsClinico } = await import(
+  "../src/clinica/notas.js"
+);
 const { olvidarEnv } = await import("../src/env.js");
 
 /** Cambia la KEK del entorno DE VERDAD. `loadEnv` cachea, así que sin
@@ -525,6 +528,38 @@ describe("clinica-7 · rotar la KEK no re-cifra ni una fila", () => {
     expect(llavero.filas.get(TENANT_A)!.kekId).toBe("test");
   });
 
+  it("con el canario MANIPULADO no re-envuelve, aunque la DEK se desenvuelva", async () => {
+    // El sabotaje #19 de la tabla salió VERDE, y por la forma de siempre:
+    // el único caso que había («la KEK vieja no es la buena») falla al
+    // DESENVOLVER, así que la comprobación del canario era código muerto.
+    //
+    // Éste es el caso que la ejercita, y es el peligroso de verdad: la
+    // fila se desenvuelve bien —la KEK es la buena— y su canario es de
+    // OTRA DEK, porque alguien lo cambió a mano. Re-envolver eso dejaría
+    // la historia de esa clínica ilegible para siempre, y el único aviso
+    // habría sido ninguno.
+    await asegurarDek(TENANT_A, fakePrisma as never);
+    const fila = llavero.filas.get(TENANT_A)!;
+    const envueltaAntes = fila.dekWrapped;
+    // El canario de otra DEK, con el AAD de este tenant: se descifra con
+    // la otra y no con la de la fila.
+    fila.canary = nuevoCanario(nuevaDek(), TENANT_A);
+
+    const r = await rotarKek(
+      {
+        kekViejaBase64: KEK,
+        kekNuevaBase64: randomBytes(32).toString("base64"),
+        kekNuevaId: "kek-2",
+      },
+      fakePrisma as never,
+    );
+    expect(r.fallidas).toEqual([TENANT_A]);
+    expect(r.reenvueltas).toEqual([]);
+    // Y la fila NO se ha tocado: sigue con su KEK y su envoltura.
+    expect(llavero.filas.get(TENANT_A)!.dekWrapped).toBe(envueltaAntes);
+    expect(llavero.filas.get(TENANT_A)!.kekId).toBe("test");
+  });
+
   it("una clave DESTRUIDA no se re-envuelve: no hay nada que envolver", async () => {
     await asegurarDek(TENANT_A, fakePrisma as never);
     await destruirDek(
@@ -668,6 +703,98 @@ describe("clinica-7 · la API no arranca si no puede leer lo que va a escribir",
       cuadra: true,
       destruida: true,
     });
+  });
+});
+
+// ── 7bis · LAS TRES NOTAS COMPARTIDAS ───────────────────────────────
+//
+// El sabotaje #44 («las notas se guardan EN CLARO en un tenant clínico»)
+// salió VERDE: lo cazaba el grep del `pg_dump` en el e2e y ni un test de
+// unidad. El e2e es la garantía de verdad y tarda minutos; esto tarda
+// milisegundos y dice exactamente qué se rompió.
+
+describe("clinica-7 · las notas de un tenant clínico van cifradas", () => {
+  beforeEach(() => {
+    olvidarSiEsClinico();
+  });
+
+  it("en un tenant CLÍNICO: solo la cifrada, y el claro a null", async () => {
+    const nota = await notaParaGuardar(
+      {
+        tenantId: TENANT_A,
+        id: FILA_1,
+        que: "CITA",
+        texto: "viene por lo del dedo infectado",
+      },
+      fakePrisma as never,
+    );
+    expect(nota.claro).toBeNull();
+    expect(nota.cifrado).toMatch(/^c1:/);
+
+    // Y se lee de vuelta con la clave de su clínica.
+    const dek = await dekDe(TENANT_A, fakePrisma as never);
+    expect(
+      leerNota(
+        {
+          tenantId: TENANT_A,
+          id: FILA_1,
+          que: "CITA",
+          claro: nota.claro,
+          cifrado: nota.cifrado,
+        },
+        dek,
+      ),
+    ).toBe("viene por lo del dedo infectado");
+  });
+
+  it("en un tenant QUE NO ES CLÍNICO: solo el claro, como siempre", async () => {
+    // «No le gusta el secador» no es un dato de salud, y cifrarlo le
+    // quitaría a la peluquería la búsqueda por nota sin comprar nada.
+    clinicosEncendidos = [];
+    olvidarSiEsClinico();
+    const nota = await notaParaGuardar(
+      {
+        tenantId: TENANT_A,
+        id: FILA_1,
+        que: "FICHA",
+        texto: "no le gusta el secador",
+      },
+      fakePrisma as never,
+    );
+    expect(nota.claro).toBe("no le gusta el secador");
+    expect(nota.cifrado).toBeNull();
+  });
+
+  it("una nota vacía no se cifra: ciphertext que no dice nada", async () => {
+    for (const texto of [null, undefined, "", "   "]) {
+      const nota = await notaParaGuardar(
+        { tenantId: TENANT_A, id: FILA_1, que: "FICHA", texto },
+        fakePrisma as never,
+      );
+      expect(nota).toEqual({ claro: null, cifrado: null });
+    }
+  });
+
+  it("y el AAD de cada nota es el de SU tabla: no son intercambiables", async () => {
+    const dek = await asegurarDek(TENANT_A, fakePrisma as never);
+    const deLaCita = await notaParaGuardar(
+      { tenantId: TENANT_A, id: FILA_1, que: "CITA", texto: "secreto" },
+      fakePrisma as never,
+    );
+    // La misma fila, la misma clínica, pero OTRA tabla: no se descifra, y
+    // lo que sale es el hueco marcado.
+    expect(
+      leerNota(
+        {
+          tenantId: TENANT_A,
+          id: FILA_1,
+          que: "FICHA",
+          claro: null,
+          cifrado: deLaCita.cifrado,
+        },
+        dek,
+      ),
+    ).toBe("(este dato no se puede leer)");
   });
 });
 
