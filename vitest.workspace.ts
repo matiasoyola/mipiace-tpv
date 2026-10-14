@@ -5,6 +5,8 @@ export default [
   "packages/escpos-builder",
   "packages/holded-client",
   "packages/kitchen-lan",
+  // residencia-2 · el paquete puro del plan de cuidados (`queToca`).
+  "packages/residencia-plan",
   "packages/ticket-model",
   "packages/ticket-pdf",
   "packages/util-validation",

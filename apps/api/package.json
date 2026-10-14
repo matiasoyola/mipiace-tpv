@@ -28,6 +28,7 @@
     "@mipiacetpv/escpos-builder": "workspace:*",
     "@mipiacetpv/holded-client": "workspace:*",
     "@mipiacetpv/kitchen-lan": "workspace:*",
+    "@mipiacetpv/residencia-plan": "workspace:*",
     "@mipiacetpv/ticket-model": "workspace:*",
     "@mipiacetpv/ticket-pdf": "workspace:*",
     "@mipiacetpv/util-validation": "workspace:*",
