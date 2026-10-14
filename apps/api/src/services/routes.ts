@@ -33,6 +33,11 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ResourceKind, type Prisma } from "@mipiacetpv/db";
 import {
+  PLANTILLAS_DE_SERVICIO,
+  PLANTILLA_DE_FOTOS,
+  plantillaVigente,
+} from "@mipiacetpv/consentimientos";
+import {
   NIVELES_DE_QUIROPODIA,
   tipoDelServicio,
   type NivelDeQuiropodia,
@@ -89,6 +94,7 @@ function schedulingView(s: {
   primeraValoracion: boolean;
   tratamientoSesion: boolean;
   nivelQuiropodia: number | null;
+  consentimientos: string[];
   updatedAt: Date;
 }) {
   return {
@@ -116,6 +122,10 @@ function schedulingView(s: {
     // que aparece y desaparece según la capability obliga a cada lector a
     // distinguir «null» de «no me lo han dicho».
     nivelQuiropodia: s.nivelQuiropodia,
+    // clinica-4 · qué consentimientos pide este servicio (decisión 4). Una
+    // cita de este servicio no empieza sin ellos firmados y vigentes.
+    // Viaja siempre, por la misma razón que los tres de arriba.
+    consentimientos: s.consentimientos,
     updatedAt: s.updatedAt.toISOString(),
   };
 }
@@ -249,6 +259,7 @@ export async function registerServicesRoutes(
               primeraValoracion: true,
               tratamientoSesion: true,
               nivelQuiropodia: true,
+              consentimientos: true,
               updatedAt: true,
             },
           },
@@ -318,6 +329,16 @@ export async function registerServicesRoutes(
               type: ["integer", "null"],
               enum: [...NIVELES_DE_QUIROPODIA, null],
             },
+            // clinica-4 · los consentimientos que pide el servicio. Sólo
+            // los ATABLES: «fotos clínicas» no se puede marcar aquí (la
+            // pide la primera foto, no un servicio), y el `enum` lo
+            // rechaza antes de que nadie lo guarde. El tope de 5 lo
+            // garantiza además el CHECK de la migración.
+            consentimientos: {
+              type: "array",
+              maxItems: 5,
+              items: { type: "string", enum: [...PLANTILLAS_DE_SERVICIO] },
+            },
             family: { type: ["string", "null"], maxLength: 120 },
             channels: {
               type: "object",
@@ -345,6 +366,7 @@ export async function registerServicesRoutes(
         primeraValoracion?: boolean;
         tratamientoSesion?: boolean;
         nivelQuiropodia?: number | null;
+        consentimientos?: string[];
         family?: string | null;
         channels?: Partial<Channels>;
       };
@@ -381,6 +403,11 @@ export async function registerServicesRoutes(
         body.nivelQuiropodia == null
           ? null
           : (body.nivelQuiropodia as NivelDeQuiropodia);
+      // clinica-4 · ausente = ninguno, igual que las tres marcas de
+      // arriba: esta ruta es un upsert del juego completo y el panel manda
+      // siempre el valor actual. Sin repetidos: marcar dos veces el mismo
+      // consentimiento lo pide una vez.
+      const consentimientos = [...new Set(body.consentimientos ?? [])];
 
       // ── LAS DOS NEGATIVAS DE S5 ─────────────────────────────────────
       //
@@ -417,6 +444,30 @@ export async function registerServicesRoutes(
         });
       }
 
+      // Y la cuarta negativa, de este bloque: «fotos clínicas» no se ata
+      // a un servicio. El `enum` del schema ya lo rechaza; esto cubre el
+      // camino que el schema no cubre —un psql de una implantación— y,
+      // sobre todo, deja la frase escrita donde se lee.
+      if (consentimientos.includes(PLANTILLA_DE_FOTOS)) {
+        return reply.code(409).send({
+          error: "FOTOS_NO_SE_ATA",
+          code: "FOTOS_NO_SE_ATA",
+          message:
+            "El consentimiento de fotos no se ata a un servicio: lo pide la primera foto del paciente, en cualquier visita.",
+        });
+      }
+      // Y una plantilla que este despliegue no conoce no se guarda: sería
+      // un servicio que pide un consentimiento que nadie puede firmar, o
+      // sea una sesión que no empieza nunca.
+      const desconocida = consentimientos.find((id) => !plantillaVigente(id));
+      if (desconocida) {
+        return reply.code(409).send({
+          error: "CONSENTIMIENTO_DESCONOCIDO",
+          code: "CONSENTIMIENTO_DESCONOCIDO",
+          message: `«${desconocida}» no es un consentimiento de esta versión del programa.`,
+        });
+      }
+
       // El upsert envuelto, y el `catch` NO es defensivo: es la mitad
       // legible de la garantía «un servicio por nivel». El índice único
       // parcial de la migración es la garantía de verdad (cubre también el
@@ -438,6 +489,7 @@ export async function registerServicesRoutes(
           primeraValoracion,
           tratamientoSesion,
           nivelQuiropodia,
+          consentimientos,
           family,
           channels: channels as unknown as Prisma.InputJsonValue,
         },
@@ -450,6 +502,7 @@ export async function registerServicesRoutes(
           primeraValoracion,
           tratamientoSesion,
           nivelQuiropodia,
+          consentimientos,
           family,
           channels: channels as unknown as Prisma.InputJsonValue,
         },
@@ -465,6 +518,7 @@ export async function registerServicesRoutes(
           primeraValoracion: true,
           tratamientoSesion: true,
           nivelQuiropodia: true,
+          consentimientos: true,
           updatedAt: true,
         },
         });

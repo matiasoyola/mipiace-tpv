@@ -64,6 +64,17 @@ import type { Prisma, PrismaClient } from "@mipiacetpv/db";
 
 import { edadDe, ultimaExploracion } from "./sesion.js";
 import { vistaDeLaValoracion } from "./valoracion.js";
+import {
+  PLANTILLA_DE_FOTOS,
+  vistaDeConsentimientos,
+} from "./consentimientos.js";
+import {
+  comparadorPorZona,
+  fotosDelPaciente,
+  type ComparadorDeZona,
+  type FotoEnPantalla,
+} from "./fotos.js";
+import { entregasDelPaciente, type EntregaEnPantalla } from "./entregas.js";
 
 /**
  * Cuántas visitas entran en la historia viva.
@@ -127,13 +138,20 @@ export interface SensibilidadDeLaHistoria {
 }
 
 export interface DocumentoDeLaHistoria {
-  clase: "VALORACION";
+  // clinica-4 · ya son tres clases. La valoración de clinica-2, los
+  // consentimientos firmados (con su PDF) y los informes entregados.
+  clase: "VALORACION" | "CONSENTIMIENTO" | "INFORME";
   titulo: string;
   fecha: string | null;
   /** Las dos líneas de abajo: quién respondió, cuántas correcciones. */
   detalles: readonly string[];
   /** Lo que se puede abrir. `null` = sólo se lee la fila. */
-  abre: "VALORACION" | null;
+  abre: "VALORACION" | "PDF_CONSENTIMIENTO" | null;
+  /** El id que hace falta para abrirlo, cuando `abre` lo pide. */
+  id: string | null;
+  /** `true` para un consentimiento revocado: la fila se enseña igual —es
+   *  historia— y dice que ya no vale. */
+  revocado: boolean;
 }
 
 export interface VistaDeLaHistoria {
@@ -147,6 +165,18 @@ export interface VistaDeLaHistoria {
   visitas: readonly VisitaLegible[];
   totalDeVisitas: number;
   documentos: readonly DocumentoDeLaHistoria[];
+  /**
+   * clinica-4 · LAS FOTOS y el comparador por zona.
+   *
+   * El hueco que clinica-6 dejó dicho («Sin fotos de esta zona») deja de
+   * ser un hueco cuando hay fotos: el comparador trae la más antigua y la
+   * última de cada zona, con su fecha, ya elegidas aquí — es una regla de
+   * la historia y no de pintar (decisión 14).
+   */
+  fotos: readonly FotoEnPantalla[];
+  comparador: readonly ComparadorDeZona[];
+  /** Si se puede hacer una foto, o hay que firmar antes (decisión 10). */
+  consentimientoDeFotos: { puede: boolean; plantillaId: string };
   /** Cuál se recomienda al abrir «Nueva visita». */
   recomendada: Recomendada | null;
   /** Los pendientes abiertos, tal cual, para la hoja de «Nueva visita». */
@@ -202,8 +232,16 @@ export async function vistaDeLaHistoria(
 ): Promise<VistaDeLaHistoria> {
   const { tenantId, clientId } = input;
 
-  const [paciente, valoracion, filas, totalDeVisitas, exploracion] =
-    await Promise.all([
+  const [
+    paciente,
+    valoracion,
+    filas,
+    totalDeVisitas,
+    exploracion,
+    fotos,
+    consentimientos,
+    entregas,
+  ] = await Promise.all([
       prisma.client.findFirstOrThrow({
         where: { id: clientId, tenantId },
         select: {
@@ -228,6 +266,13 @@ export async function vistaDeLaHistoria(
         where: { tenantId, clientId, kind: "TREATMENT_SESSION" },
       }),
       ultimaExploracion(prisma, { tenantId, clientId }),
+      // clinica-4 · las fotos, los consentimientos y las entregas. Van en
+      // la MISMA llamada y no en tres más por lo de siempre en esta
+      // pantalla: es una pantalla, y las pestañas no se pintan en cuatro
+      // momentos distintos.
+      fotosDelPaciente(prisma, { tenantId, clientId }),
+      vistaDeConsentimientos(prisma, { tenantId, clientId }),
+      entregasDelPaciente(prisma, { tenantId, clientId }),
     ]);
 
   // De la más reciente a la más antigua, que es como se lee la lista.
@@ -299,7 +344,15 @@ export async function vistaDeLaHistoria(
       : null,
     visitas,
     totalDeVisitas,
-    documentos: documentosDe(valoracion),
+    documentos: documentosDe(valoracion, consentimientos, entregas),
+    fotos,
+    comparador: comparadorPorZona(fotos),
+    consentimientoDeFotos: {
+      puede: consentimientos.plantillas.some(
+        (p) => p.id === PLANTILLA_DE_FOTOS && p.vigente != null,
+      ),
+      plantillaId: PLANTILLA_DE_FOTOS,
+    },
     recomendada: tipoRecomendado({
       pendientes,
       alertaIds: alertas.map((a: Alerta) => a.preguntaId),
@@ -339,40 +392,45 @@ function versionesDe(
 }
 
 /**
- * LOS DOCUMENTOS. Hoy sólo hay uno: la valoración.
+ * LOS DOCUMENTOS: la valoración, los consentimientos y los informes.
  *
- * **Los consentimientos y el informe son de clinica-4**, y aquí NO
- * aparecen — ni siquiera desactivados con un «Llega pronto». El motivo es
- * de producto y no de código: una fila gris con el nombre de un documento
- * que no existe le dice a la podóloga que hay algo que no encuentra, y
- * durante las semanas que tarde clinica-4 esa fila es una pregunta de
- * soporte cada vez que alguien abra la pestaña. La pestaña enseña lo que
- * hay; cuando haya consentimientos, aparecerán.
+ * clinica-6 dejó aquí sólo la valoración, y lo dejó dicho: «cuando haya
+ * consentimientos, aparecerán». Es este bloque, y aparecen **con lo que de
+ * verdad hay**: la fila de un consentimiento sale cuando está firmado, con
+ * su PDF, y la de un informe cuando se ha entregado. Ninguna fila gris con
+ * un «Llega pronto» — la pestaña enseña lo que hay (decisión 19).
+ *
+ * El orden es el de siempre en una ficha: primero la valoración (es la
+ * puerta de todo lo demás), después los consentimientos y al final las
+ * entregas, cada grupo de lo más reciente a lo más antiguo.
  */
 function documentosDe(
   valoracion: Awaited<ReturnType<typeof vistaDeLaValoracion>>,
+  consentimientos: Awaited<ReturnType<typeof vistaDeConsentimientos>>,
+  entregas: readonly EntregaEnPantalla[],
 ): readonly DocumentoDeLaHistoria[] {
+  const salida: DocumentoDeLaHistoria[] = [];
+
   const v = valoracion.valoracion;
-  if (!v) return [];
-  const detalles: string[] = [];
-  if (v.respondioPor === "FAMILIAR") {
-    // Y NO «Respondió su hija Ana», que es lo que pinta el mockup: el
-    // cuestionario de clinica-2 pregunta si contesta el paciente o un
-    // familiar, y **no pide el nombre ni el parentesco**. Escribir «su
-    // hija Ana» aquí sería inventarse quién estuvo delante.
-    detalles.push("Respondió un familiar");
-  } else if (v.respondioPor === "PACIENTE") {
-    detalles.push("Respondió el paciente");
-  }
-  if (valoracion.correcciones.length > 0) {
-    detalles.push(
-      valoracion.correcciones.length === 1
-        ? "1 corrección"
-        : `${valoracion.correcciones.length} correcciones`,
-    );
-  }
-  return [
-    {
+  if (v) {
+    const detalles: string[] = [];
+    if (v.respondioPor === "FAMILIAR") {
+      // Y NO «Respondió su hija Ana», que es lo que pinta el mockup: el
+      // cuestionario de clinica-2 pregunta si contesta el paciente o un
+      // familiar, y **no pide el nombre ni el parentesco**. Escribir «su
+      // hija Ana» aquí sería inventarse quién estuvo delante.
+      detalles.push("Respondió un familiar");
+    } else if (v.respondioPor === "PACIENTE") {
+      detalles.push("Respondió el paciente");
+    }
+    if (valoracion.correcciones.length > 0) {
+      detalles.push(
+        valoracion.correcciones.length === 1
+          ? "1 corrección"
+          : `${valoracion.correcciones.length} correcciones`,
+      );
+    }
+    salida.push({
       clase: "VALORACION",
       titulo:
         v.estado === "VALIDADA"
@@ -383,8 +441,74 @@ function documentosDe(
       fecha: v.validadaEn ?? v.respondidaEn ?? v.creadaEn,
       detalles,
       abre: "VALORACION",
-    },
-  ];
+      id: v.id,
+      revocado: false,
+    });
+  }
+
+  // clinica-4 · los consentimientos FIRMADOS DE VERDAD, con su PDF.
+  //
+  // `firmados` ya trae sólo las concesiones (las filas de revocación no
+  // son documentos: lo que se enseña es el consentimiento, marcado como
+  // revocado). Y un alta manual del spa sale igual, sin PDF que abrir:
+  // está en la historia y lo que no se hace es esconderla por no tener
+  // documento.
+  for (const c of consentimientos.firmados) {
+    const detalles: string[] = [];
+    if (c.firmante.clase === "REPRESENTANTE" && c.firmante.nombre) {
+      detalles.push(`Firmó ${c.firmante.nombre} (${c.firmante.relacion})`);
+    } else if (c.firmante.clase === "PACIENTE") {
+      detalles.push("Firmó el paciente");
+    }
+    if (c.informante) {
+      detalles.push(
+        c.informante.colegiado
+          ? `Informó ${c.informante.nombre} · Col. ${c.informante.colegiado}`
+          : `Informó ${c.informante.nombre}`,
+      );
+    }
+    if (c.revocado && c.revocadoMotivo) {
+      detalles.push(`Revocado: ${c.revocadoMotivo}`);
+    }
+    if (!c.tienePdf && c.plantillaId == null) {
+      detalles.push("Alta manual, sin documento");
+    }
+    salida.push({
+      clase: "CONSENTIMIENTO",
+      titulo: c.revocado ? `${c.titulo} · REVOCADO` : c.titulo,
+      fecha: c.firmadoEn,
+      detalles,
+      abre: c.tienePdf ? "PDF_CONSENTIMIENTO" : null,
+      id: c.id,
+      revocado: c.revocado,
+    });
+  }
+
+  // clinica-4 · los informes ENTREGADOS. No se guarda el PDF (ver
+  // `informe-routes.ts`), así que la fila no se abre: lo que dice es qué
+  // se entregó, a quién y cuándo, que es lo que la tabla de entregas
+  // existe para poder contestar.
+  for (const e of entregas) {
+    salida.push({
+      clase: "INFORME",
+      titulo: e.tipoNombre,
+      fecha: e.cuando,
+      detalles: [
+        e.canal === "EMAIL"
+          ? `Enviado por email a ${e.email ?? "—"}`
+          : "Impreso y entregado en mano",
+        e.destinatario === "PACIENTE"
+          ? "Para el paciente"
+          : "Para otro profesional",
+        `Lo entregó ${e.quien}`,
+      ],
+      abre: null,
+      id: e.id,
+      revocado: false,
+    });
+  }
+
+  return salida;
 }
 
 /**

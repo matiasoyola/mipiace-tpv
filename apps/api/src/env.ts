@@ -140,6 +140,32 @@ export const EnvSchema = z.object({
     .positive()
     .default(2 * 1024 * 1024),
 
+  // ── Ficheros clínicos (clinica-4) ──────────────────────────────────
+  //
+  // Las fotos de los pies y los PDF de consentimientos e informes. Viven
+  // en disco y **no en la base**, por lo mismo que las capturas de A5: un
+  // blob por foto en una BD que además cobra no aporta nada, y borrar (o
+  // retirar) un fichero es más fácil de demostrar que una fila.
+  //
+  // Volumen propio en el compose de producción, con el patrón de
+  // `z_reports`, y **nunca detrás de Caddy**: no es `product_images`, no
+  // se sirve en estático. El binario sale sólo por la API, por
+  // `conHistoria`, y cada apertura deja su línea en el registro de
+  // accesos. Y la copia de seguridad se lo lleva (`infra/backup-postgres.sh`):
+  // una historia cuyas fotos no se pueden recuperar no se conserva cinco
+  // años.
+  //
+  // **Sin TTL, al contrario que las capturas de terminal**: una foto de la
+  // historia no caduca a las 24 h. No se borra: se retira.
+  CLINICAL_FILES_DIR: z.string().default("/var/lib/mipiacetpv/clinical-files"),
+  // Tope por foto. Una foto de una uña a 1600×1200 en JPEG de calidad
+  // media ronda los 300 KB; esto es la red de seguridad, no el objetivo.
+  CLINICAL_PHOTO_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(4 * 1024 * 1024),
+
   // ── Sentry (v1.5-consistencia-B · Lote 2) ──────────────────────────
   // Sin DSN, Sentry queda en no-op absoluto (initSentry no llama init).
   // Compose interpola `""` cuando la var no está en .env.production —

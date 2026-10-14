@@ -225,6 +225,26 @@ const fakePrisma: any = {
   publicLink: {
     findFirst: vi.fn(async () => null),
   },
+  // clinica-4 · la historia viva enseña ahora los consentimientos
+  // firmados, las fotos y las entregas de informes. Este fichero es el de
+  // clinica-6 y lo que vigila es lo suyo (el registro, los importes, la
+  // historia mezclada), así que los tres llegan VACÍOS: lo que tienen que
+  // hacer aquí es no romper la pantalla cuando el paciente no tiene
+  // ninguno — que es el caso de todos los pacientes el primer día.
+  clientConsent: {
+    findMany: vi.fn(async () => []),
+    findFirst: vi.fn(async () => null),
+  },
+  clinicalPhoto: {
+    findMany: vi.fn(async () => []),
+    findFirst: vi.fn(async () => null),
+  },
+  clinicalReportDelivery: {
+    findMany: vi.fn(async () => []),
+  },
+  serviceScheduling: {
+    findMany: vi.fn(async () => []),
+  },
 };
 
 function usuarioVista(id: string) {

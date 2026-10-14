@@ -1,0 +1,572 @@
+{
+  "390": {
+    "bandaDeLaPuerta": "Falta el consentimiento de hoyFaltan 2 consentimientos por firmar: «Consentimiento para cirugía de uña (matricectomía)», «Consentimiento para anestesia local». Se leen con el paciente y se firman aquí",
+    "listaDeConsentimientos": {
+      "cuantos": 3,
+      "masPequeno": {
+        "texto": "Consentimiento para anestesia localLo pi",
+        "lado": 72
+      },
+      "cincoMasPequenos": [
+        {
+          "texto": "Consentimiento para anestesia localLo pi",
+          "lado": 72
+        },
+        {
+          "texto": "Consentimiento para cirugía de uña (matr",
+          "lado": 90.5
+        },
+        {
+          "texto": "Consentimiento para hacer fotos de mi hi",
+          "lado": 90.5
+        }
+      ],
+      "scrollHorizontal": false,
+      "anchoDocumento": 390,
+      "anchoVentana": 390
+    },
+    "firmaDesactivada": true,
+    "pantallaDeFirma": {
+      "cuantos": 5,
+      "masPequeno": {
+        "texto": "El paciente",
+        "lado": 48
+      },
+      "cincoMasPequenos": [
+        {
+          "texto": "El paciente",
+          "lado": 48
+        },
+        {
+          "texto": "Un familiar o representante",
+          "lado": 48
+        },
+        {
+          "texto": "Borrar firma",
+          "lado": 48
+        },
+        {
+          "texto": "Cancelar",
+          "lado": 48
+        },
+        {
+          "texto": "Firmar",
+          "lado": 56
+        }
+      ],
+      "scrollHorizontal": false,
+      "anchoDocumento": 390,
+      "anchoVentana": 390
+    },
+    "firmaActivaTrasElTrazo": true,
+    "acuse": "Consentimiento para cirugía de uña (matricectomía)Firmado por Carmen Rodríguez López el 9 oct, delante de Lucía Martín (Col. 45-0312). El PDF queda en la historia. Ver el documentoVolver a la lista",
+    "bandaTrasFirmar": true,
+    "disparadorSinZona": true,
+    "disparadorConZona": true,
+    "camara": {
+      "cuantos": 24,
+      "masPequeno": {
+        "texto": "Pie izq. · Dedo gordo",
+        "lado": 48
+      },
+      "cincoMasPequenos": [
+        {
+          "texto": "Pie izq. · Dedo gordo",
+          "lado": 48
+        },
+        {
+          "texto": "Pie izq. · 2.º dedo",
+          "lado": 48
+        },
+        {
+          "texto": "Pie izq. · 3.er dedo",
+          "lado": 48
+        },
+        {
+          "texto": "Pie izq. · 4.º dedo",
+          "lado": 48
+        },
+        {
+          "texto": "Pie izq. · 5.º dedo",
+          "lado": 48
+        }
+      ],
+      "scrollHorizontal": false,
+      "anchoDocumento": 390,
+      "anchoVentana": 390
+    },
+    "conUnaSolaFoto": "Única · 9 octSólo hay una foto de esta zona. Con la segunda podrás comparar.",
+    "comparador": {
+      "cuantos": 2,
+      "mismaFila": false,
+      "tops": [
+        496,
+        754
+      ],
+      "anchos": [
+        332,
+        332
+      ]
+    },
+    "pantallaDeFotos": {
+      "cuantos": 4,
+      "masPequeno": {
+        "texto": "Pie izq. · Dedo gordo",
+        "lado": 48
+      },
+      "cincoMasPequenos": [
+        {
+          "texto": "Pie izq. · Dedo gordo",
+          "lado": 48
+        },
+        {
+          "texto": "Retirar",
+          "lado": 48
+        },
+        {
+          "texto": "Retirar",
+          "lado": 48
+        },
+        {
+          "texto": "Hacer foto",
+          "lado": 56
+        }
+      ],
+      "scrollHorizontal": false,
+      "anchoDocumento": 390,
+      "anchoVentana": 390
+    },
+    "comparadorEnLaHistoria": true,
+    "documentos": [
+      "ValoraciónValoración inicial · validada7 septRespondió un familiar",
+      "Consent.Consentimiento para hacer fotos de mi historia clínica9 octFirmó el pacienteInformó Lucía Martín · Col. 45-0312",
+      "Consent.Consentimiento para anestesia local9 octFirmó el pacienteInformó Lucía Martín · Col. 45-0312",
+      "Consent.Consentimiento para cirugía de uña (matricectomía)9 octFirmó el pacienteInformó Lucía Martín · Col. 45-0312"
+    ],
+    "papelEnDosColumnas": {
+      "cuantos": 2,
+      "mismaFila": false,
+      "tops": [
+        269,
+        917
+      ],
+      "anchos": [
+        433,
+        433
+      ]
+    },
+    "informe": {
+      "cuantos": 8,
+      "masPequeno": {
+        "texto": "El paciente",
+        "lado": 48
+      },
+      "cincoMasPequenos": [
+        {
+          "texto": "El paciente",
+          "lado": 48
+        },
+        {
+          "texto": "Otro profesional",
+          "lado": 48
+        },
+        {
+          "texto": "Enviar por email",
+          "lado": 48
+        },
+        {
+          "texto": "Imprimir",
+          "lado": 56
+        },
+        {
+          "texto": "Últimas sesionesLas 5 últimas visitas, c",
+          "lado": 66
+        }
+      ],
+      "scrollHorizontal": false,
+      "anchoDocumento": 390,
+      "anchoVentana": 390
+    },
+    "euroEnElPapel": false
+  },
+  "1024": {
+    "bandaDeLaPuerta": "Falta el consentimiento de hoyFaltan 2 consentimientos por firmar: «Consentimiento para cirugía de uña (matricectomía)», «Consentimiento para anestesia local». Se leen con el paciente y se firman aquí",
+    "listaDeConsentimientos": {
+      "cuantos": 3,
+      "masPequeno": {
+        "texto": "Consentimiento para cirugía de uña (matr",
+        "lado": 72
+      },
+      "cincoMasPequenos": [
+        {
+          "texto": "Consentimiento para cirugía de uña (matr",
+          "lado": 72
+        },
+        {
+          "texto": "Consentimiento para anestesia localLo pi",
+          "lado": 72
+        },
+        {
+          "texto": "Consentimiento para hacer fotos de mi hi",
+          "lado": 72
+        }
+      ],
+      "scrollHorizontal": false,
+      "anchoDocumento": 1024,
+      "anchoVentana": 1024
+    },
+    "firmaDesactivada": true,
+    "pantallaDeFirma": {
+      "cuantos": 5,
+      "masPequeno": {
+        "texto": "El paciente",
+        "lado": 48
+      },
+      "cincoMasPequenos": [
+        {
+          "texto": "El paciente",
+          "lado": 48
+        },
+        {
+          "texto": "Un familiar o representante",
+          "lado": 48
+        },
+        {
+          "texto": "Borrar firma",
+          "lado": 48
+        },
+        {
+          "texto": "Cancelar",
+          "lado": 48
+        },
+        {
+          "texto": "Firmar",
+          "lado": 56
+        }
+      ],
+      "scrollHorizontal": false,
+      "anchoDocumento": 1024,
+      "anchoVentana": 1024
+    },
+    "firmaActivaTrasElTrazo": true,
+    "acuse": "Consentimiento para cirugía de uña (matricectomía)Firmado por Carmen Rodríguez López el 9 oct, delante de Lucía Martín (Col. 45-0312). El PDF queda en la historia. Ver el documentoVolver a la lista",
+    "bandaTrasFirmar": true,
+    "disparadorSinZona": true,
+    "disparadorConZona": true,
+    "camara": {
+      "cuantos": 24,
+      "masPequeno": {
+        "texto": "Pie izq. · Dedo gordo",
+        "lado": 48
+      },
+      "cincoMasPequenos": [
+        {
+          "texto": "Pie izq. · Dedo gordo",
+          "lado": 48
+        },
+        {
+          "texto": "Pie izq. · 2.º dedo",
+          "lado": 48
+        },
+        {
+          "texto": "Pie izq. · 3.er dedo",
+          "lado": 48
+        },
+        {
+          "texto": "Pie izq. · 4.º dedo",
+          "lado": 48
+        },
+        {
+          "texto": "Pie izq. · 5.º dedo",
+          "lado": 48
+        }
+      ],
+      "scrollHorizontal": false,
+      "anchoDocumento": 1024,
+      "anchoVentana": 1024
+    },
+    "conUnaSolaFoto": "Única · 9 octSólo hay una foto de esta zona. Con la segunda podrás comparar.",
+    "comparador": {
+      "cuantos": 2,
+      "mismaFila": true,
+      "tops": [
+        558,
+        558
+      ],
+      "anchos": [
+        461,
+        461
+      ]
+    },
+    "pantallaDeFotos": {
+      "cuantos": 4,
+      "masPequeno": {
+        "texto": "Pie izq. · Dedo gordo",
+        "lado": 48
+      },
+      "cincoMasPequenos": [
+        {
+          "texto": "Pie izq. · Dedo gordo",
+          "lado": 48
+        },
+        {
+          "texto": "Retirar",
+          "lado": 48
+        },
+        {
+          "texto": "Retirar",
+          "lado": 48
+        },
+        {
+          "texto": "Hacer foto",
+          "lado": 56
+        }
+      ],
+      "scrollHorizontal": false,
+      "anchoDocumento": 1024,
+      "anchoVentana": 1024
+    },
+    "comparadorEnLaHistoria": true,
+    "documentos": [
+      "ValoraciónValoración inicial · validada7 septRespondió un familiar",
+      "Consent.Consentimiento para hacer fotos de mi historia clínica9 octFirmó el pacienteInformó Lucía Martín · Col. 45-0312",
+      "Consent.Consentimiento para anestesia local9 octFirmó el pacienteInformó Lucía Martín · Col. 45-0312",
+      "Consent.Consentimiento para cirugía de uña (matricectomía)9 octFirmó el pacienteInformó Lucía Martín · Col. 45-0312"
+    ],
+    "papelEnDosColumnas": {
+      "cuantos": 2,
+      "mismaFila": true,
+      "tops": [
+        487,
+        487
+      ],
+      "anchos": [
+        360,
+        600
+      ]
+    },
+    "informe": {
+      "cuantos": 8,
+      "masPequeno": {
+        "texto": "El paciente",
+        "lado": 48
+      },
+      "cincoMasPequenos": [
+        {
+          "texto": "El paciente",
+          "lado": 48
+        },
+        {
+          "texto": "Otro profesional",
+          "lado": 48
+        },
+        {
+          "texto": "Enviar por email",
+          "lado": 48
+        },
+        {
+          "texto": "Imprimir",
+          "lado": 56
+        },
+        {
+          "texto": "Últimas sesionesLas 5 últimas visitas, c",
+          "lado": 66
+        }
+      ],
+      "scrollHorizontal": false,
+      "anchoDocumento": 1024,
+      "anchoVentana": 1024
+    },
+    "euroEnElPapel": false
+  },
+  "1366": {
+    "bandaDeLaPuerta": "Falta el consentimiento de hoyFaltan 2 consentimientos por firmar: «Consentimiento para cirugía de uña (matricectomía)», «Consentimiento para anestesia local». Se leen con el paciente y se firman aquí",
+    "listaDeConsentimientos": {
+      "cuantos": 3,
+      "masPequeno": {
+        "texto": "Consentimiento para cirugía de uña (matr",
+        "lado": 72
+      },
+      "cincoMasPequenos": [
+        {
+          "texto": "Consentimiento para cirugía de uña (matr",
+          "lado": 72
+        },
+        {
+          "texto": "Consentimiento para anestesia localLo pi",
+          "lado": 72
+        },
+        {
+          "texto": "Consentimiento para hacer fotos de mi hi",
+          "lado": 72
+        }
+      ],
+      "scrollHorizontal": false,
+      "anchoDocumento": 1366,
+      "anchoVentana": 1366
+    },
+    "firmaDesactivada": true,
+    "pantallaDeFirma": {
+      "cuantos": 5,
+      "masPequeno": {
+        "texto": "El paciente",
+        "lado": 48
+      },
+      "cincoMasPequenos": [
+        {
+          "texto": "El paciente",
+          "lado": 48
+        },
+        {
+          "texto": "Un familiar o representante",
+          "lado": 48
+        },
+        {
+          "texto": "Borrar firma",
+          "lado": 48
+        },
+        {
+          "texto": "Cancelar",
+          "lado": 48
+        },
+        {
+          "texto": "Firmar",
+          "lado": 56
+        }
+      ],
+      "scrollHorizontal": false,
+      "anchoDocumento": 1366,
+      "anchoVentana": 1366
+    },
+    "firmaActivaTrasElTrazo": true,
+    "acuse": "Consentimiento para cirugía de uña (matricectomía)Firmado por Carmen Rodríguez López el 9 oct, delante de Lucía Martín (Col. 45-0312). El PDF queda en la historia. Ver el documentoVolver a la lista",
+    "bandaTrasFirmar": true,
+    "disparadorSinZona": true,
+    "disparadorConZona": true,
+    "camara": {
+      "cuantos": 24,
+      "masPequeno": {
+        "texto": "Pie izq. · Dedo gordo",
+        "lado": 48
+      },
+      "cincoMasPequenos": [
+        {
+          "texto": "Pie izq. · Dedo gordo",
+          "lado": 48
+        },
+        {
+          "texto": "Pie izq. · 2.º dedo",
+          "lado": 48
+        },
+        {
+          "texto": "Pie izq. · 3.er dedo",
+          "lado": 48
+        },
+        {
+          "texto": "Pie izq. · 4.º dedo",
+          "lado": 48
+        },
+        {
+          "texto": "Pie izq. · 5.º dedo",
+          "lado": 48
+        }
+      ],
+      "scrollHorizontal": false,
+      "anchoDocumento": 1366,
+      "anchoVentana": 1366
+    },
+    "conUnaSolaFoto": "Única · 9 octSólo hay una foto de esta zona. Con la segunda podrás comparar.",
+    "comparador": {
+      "cuantos": 2,
+      "mismaFila": true,
+      "tops": [
+        590,
+        590
+      ],
+      "anchos": [
+        563,
+        563
+      ]
+    },
+    "pantallaDeFotos": {
+      "cuantos": 4,
+      "masPequeno": {
+        "texto": "Pie izq. · Dedo gordo",
+        "lado": 48
+      },
+      "cincoMasPequenos": [
+        {
+          "texto": "Pie izq. · Dedo gordo",
+          "lado": 48
+        },
+        {
+          "texto": "Retirar",
+          "lado": 48
+        },
+        {
+          "texto": "Retirar",
+          "lado": 48
+        },
+        {
+          "texto": "Hacer foto",
+          "lado": 56
+        }
+      ],
+      "scrollHorizontal": false,
+      "anchoDocumento": 1366,
+      "anchoVentana": 1366
+    },
+    "comparadorEnLaHistoria": true,
+    "documentos": [
+      "ValoraciónValoración inicial · validada7 septRespondió un familiar",
+      "Consent.Consentimiento para hacer fotos de mi historia clínica9 octFirmó el pacienteInformó Lucía Martín · Col. 45-0312",
+      "Consent.Consentimiento para anestesia local9 octFirmó el pacienteInformó Lucía Martín · Col. 45-0312",
+      "Consent.Consentimiento para cirugía de uña (matricectomía)9 octFirmó el pacienteInformó Lucía Martín · Col. 45-0312"
+    ],
+    "papelEnDosColumnas": {
+      "cuantos": 2,
+      "mismaFila": true,
+      "tops": [
+        487,
+        487
+      ],
+      "anchos": [
+        360,
+        804
+      ]
+    },
+    "informe": {
+      "cuantos": 8,
+      "masPequeno": {
+        "texto": "El paciente",
+        "lado": 48
+      },
+      "cincoMasPequenos": [
+        {
+          "texto": "El paciente",
+          "lado": 48
+        },
+        {
+          "texto": "Otro profesional",
+          "lado": 48
+        },
+        {
+          "texto": "Enviar por email",
+          "lado": 48
+        },
+        {
+          "texto": "Imprimir",
+          "lado": 56
+        },
+        {
+          "texto": "Últimas sesionesLas 5 últimas visitas, c",
+          "lado": 66
+        }
+      ],
+      "scrollHorizontal": false,
+      "anchoDocumento": 1366,
+      "anchoVentana": 1366
+    },
+    "euroEnElPapel": false
+  }
+}

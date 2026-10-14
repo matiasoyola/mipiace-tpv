@@ -128,6 +128,78 @@ async function requestRelogin(): Promise<boolean> {
   return reloginInFlight;
 }
 
+/**
+ * clinica-4 · lo MISMO pero para un binario (un JPEG, un PDF).
+ *
+ * Hace falta porque `send` siempre hace `res.text()`, y una foto leída
+ * como texto es una foto roto. Vive aquí y no en la pantalla por la razón
+ * de siempre: **la cabecera de autenticación y el re-login se escriben en
+ * un solo sitio.** Una pantalla que se montara su `fetch` con el token a
+ * mano sería la que un día se queda sin el reintento del 401 y enseña
+ * «sesión caducada» con la paciente delante.
+ *
+ * Devuelve el `Blob` y las cabeceras que el llamador necesita mirar (la
+ * API manda `X-Huella-Cuadra` con cada fichero clínico).
+ */
+export async function apiBlobWithCashier(
+  path: string,
+  opts: ApiOpts = {},
+): Promise<{ blob: Blob; headers: Headers }> {
+  const pedir = async (token: string) => {
+    const url = path.startsWith("http") ? path : `${BASE_URL}${path}`;
+    const res = await fetch(url, {
+      method: opts.method ?? "GET",
+      headers: {
+        ...(opts.body !== undefined
+          ? { "Content-Type": "application/json" }
+          : {}),
+        ...opts.headers,
+        Authorization: `Bearer ${token}`,
+      },
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+      signal: opts.signal,
+    });
+    if (!res.ok) {
+      // El cuerpo de error SÍ es JSON: se lee como texto y se intenta
+      // parsear, igual que en `send`, para que el mensaje del servidor
+      // llegue a la pantalla.
+      const texto = await res.text();
+      let data: unknown = null;
+      try {
+        data = texto.length > 0 ? JSON.parse(texto) : null;
+      } catch {
+        data = texto;
+      }
+      const errBody =
+        data && typeof data === "object"
+          ? (data as { error?: string; message?: string })
+          : null;
+      throw new ApiError(
+        res.status,
+        errBody?.message ?? res.statusText ?? "Request failed",
+        errBody?.error,
+        data,
+      );
+    }
+    return { blob: await res.blob(), headers: res.headers };
+  };
+
+  const session = getCashierSession();
+  if (!session) {
+    throw new ApiError(401, "Sin sesión de cajero", "UNAUTHENTICATED");
+  }
+  try {
+    return await pedir(session.sessionToken);
+  } catch (err) {
+    if (!(err instanceof ApiError) || err.status !== 401) throw err;
+    const renewed = await requestRelogin();
+    if (!renewed) throw err;
+    const fresh = getCashierSession();
+    if (!fresh) throw err;
+    return pedir(fresh.sessionToken);
+  }
+}
+
 export async function apiWithCashier<T>(
   path: string,
   opts: ApiOpts = {},

@@ -286,3 +286,21 @@ export {
   type VisitaLegible,
   type ZonaViva,
 } from "./historia.js";
+
+// clinica-4 · el informe. Cuatro tipos, una sola decisión de qué lleva
+// cada uno, y ni un hueco en el tipo donde quepa un importe.
+export {
+  construirInforme,
+  DESCRIPCION_DE_TIPO_DE_INFORME,
+  NOMBRE_DE_TIPO_DE_INFORME,
+  SECCIONES,
+  SECCIONES_POR_TIPO,
+  SESIONES_DEL_INFORME,
+  TIPOS_DE_INFORME,
+  VISITAS_POR_TIPO,
+  type FuentesDelInforme,
+  type InformeClinico,
+  type SeccionDeInforme,
+  type SeccionId,
+  type TipoDeInforme,
+} from "./informe.js";

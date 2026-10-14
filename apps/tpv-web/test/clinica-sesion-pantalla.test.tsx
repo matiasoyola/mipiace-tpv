@@ -79,6 +79,8 @@ const ZONA = "L:h";
 function vista(opts: {
   verImportes: boolean;
   puertaAbierta?: boolean;
+  /** clinica-4 · la segunda puerta, cerrada. */
+  faltaConsentimiento?: boolean;
   conAnterior?: boolean;
   conPendiente?: boolean;
   tiposSugeridos?: VistaDeLaSesion["tiposSugeridos"];
@@ -127,6 +129,24 @@ function vista(opts: {
             valoracionId: "v1",
             validadaEn: "2026-09-07T09:00:00.000Z",
           },
+    // clinica-4 · la SEGUNDA puerta de la sesión: los consentimientos que
+    // pide el servicio de la cita. Abierta por defecto en este fichero
+    // —ningún servicio de aquí pide ninguno—, y su caso cerrado vive en
+    // `clinica-4-pantallas.test.tsx` con el resto de la regla.
+    consentimientos:
+      opts.faltaConsentimiento === true
+        ? {
+            puede: false,
+            faltan: [
+              {
+                id: "cirugia-ungueal",
+                titulo: "Consentimiento para cirugía de uña (matricectomía)",
+              },
+            ],
+            mensaje:
+              "Falta firmar «Consentimiento para cirugía de uña (matricectomía)». Se lee con el paciente y se firma aquí, en la consulta.",
+          }
+        : { puede: true, faltan: [], mensaje: "" },
     tratamientos: [
       {
         serviceId: BASICA,
@@ -260,6 +280,24 @@ async function montar(v: VistaDeLaSesion) {
           };
         }
         return { exploracion: null, ultima: null };
+      }
+      // clinica-4 · las dos pestañas nuevas piden lo suyo. Se contesta con
+      // el hueco honesto: lo que este fichero prueba de ellas es que se
+      // llega, no lo que pintan (eso es `clinica-4-pantallas.test.tsx`).
+      if (url.includes("/consentimientos")) {
+        return { plantillas: [], firmados: [], pideLaCita: [] };
+      }
+      if (url.includes("/fotos")) {
+        return {
+          fotos: [],
+          comparador: [],
+          consentimiento: {
+            puede: false,
+            plantillaId: "fotos-clinicas",
+            mensaje: "Antes de la primera foto…",
+          },
+          mapaVersion: 1,
+        };
       }
       return v;
     },
@@ -1048,6 +1086,61 @@ describe("clinica-3 · sin valoración validada no se cierra la sesión", () => 
   it("pero se dice que la EXPLORACIÓN sí se puede registrar", async () => {
     await montar(vista({ verImportes: true, puertaAbierta: false }));
     expect(texto()).toContain("La exploración del pie sí se puede registrar");
+  });
+});
+
+// ── clinica-4 · LA SEGUNDA PUERTA: el consentimiento de hoy ──────────
+
+describe("clinica-4 · la sesión no se cierra sin el consentimiento que pide", () => {
+  it("sale la banda con el título del que falta y «Firmar ahora»", async () => {
+    await montar(vista({ verImportes: true, faltaConsentimiento: true }));
+    const banda = host.querySelector('[data-test="falta-consentimiento"]')!;
+    expect(banda).not.toBeNull();
+    expect(banda.textContent).toContain("Falta el consentimiento de hoy");
+    expect(banda.textContent).toContain(
+      "Consentimiento para cirugía de uña (matricectomía)",
+    );
+    expect(host.querySelector('[data-test="firmar-ahora"]')).not.toBeNull();
+  });
+
+  it("y el botón de cerrar NO se activa ni con todo marcado", async () => {
+    // La pantalla ayuda, la ruta garantiza: el servidor contesta
+    // `SIN_CONSENTIMIENTO` igual. Lo que esto fija es que la podóloga no
+    // llegue a ese 409 con la paciente delante.
+    await montar(vista({ verImportes: true, faltaConsentimiento: true }));
+    await pulsar(botonPorTexto("Corte de uñas"));
+    await pulsar(botonPorTexto("4"));
+    expect(botonPorTexto("Cerrar sesión y cobrar")!.disabled).toBe(true);
+  });
+
+  it("«Firmar ahora» lleva a la pestaña de consentimientos", async () => {
+    await montar(vista({ verImportes: true, faltaConsentimiento: true }));
+    await pulsar(host.querySelector('[data-test="firmar-ahora"]'));
+    // La pestaña de consentimientos pide su propia vista a la API: lo que
+    // se comprueba aquí es que se ha CAMBIADO de pestaña, que es lo que la
+    // banda promete.
+    const pestana = [...host.querySelectorAll('[role="tab"]')].find(
+      (b) => (b.textContent ?? "").trim() === "Consentimientos",
+    )!;
+    expect(pestana.getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("con la puerta ABIERTA no sale ninguna banda", async () => {
+    await montar(vista({ verImportes: true }));
+    expect(host.querySelector('[data-test="falta-consentimiento"]')).toBeNull();
+  });
+
+  it("y las dos pestañas nuevas están: Fotos y Consentimientos", async () => {
+    await montar(vista({ verImportes: true }));
+    const pestanas = [...host.querySelectorAll('[role="tab"]')].map((b) =>
+      (b.textContent ?? "").trim(),
+    );
+    expect(pestanas).toEqual([
+      "Sesión de hoy",
+      "Exploración",
+      "Fotos",
+      "Consentimientos",
+    ]);
   });
 });
 
