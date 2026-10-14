@@ -73,7 +73,10 @@ import {
 } from "@mipiacetpv/clinica-sesion";
 
 import { ApiError, apiBlobWithCashier, apiWithCashier } from "../api.js";
-import { GuardaDelContrato } from "./ContratoDeTratamiento.js";
+import {
+  GuardaDelContrato,
+  useSePuedeEscribirHistoria,
+} from "./ContratoDeTratamiento.js";
 import { MapaDelPie, type EstadoDeZona } from "./MapaDelPie.js";
 import {
   ComparadorAntesDespues,
@@ -287,6 +290,15 @@ function HistoriaVivaDentro(props: {
   const [detalle, setDetalle] = useState<DetalleDeVisita | null>(null);
   const [abriendo, setAbriendo] = useState<string | null>(null);
 
+  // clinica-7 · CON EL CONTRATO REVOCADO NO SE OFRECE EMPEZAR NADA.
+  //
+  // La banda ya avisa, pero un aviso encima de un botón negro encendido es
+  // un aviso que se lee después de pulsarlo. Sin las dos puertas de
+  // escritura, lo que queda es exactamente lo que el estado permite: leer,
+  // imprimir y exportar.
+  const sePuedeEscribir = useSePuedeEscribirHistoria();
+  const empezarVisita = sePuedeEscribir ? props.onEmpezarVisita : undefined;
+
   const cargar = useCallback(async () => {
     setError(null);
     try {
@@ -341,7 +353,11 @@ function HistoriaVivaDentro(props: {
 
   function abrirConTipo(tipo: TipoDeVisita | null) {
     setHoja(null);
-    props.onEmpezarVisita?.(tipo ? [tipo] : []);
+    // `empezarVisita` y no `props.onEmpezarVisita`: la hoja de tipos sólo
+    // se abre desde las dos puertas que ya están escondidas en solo
+    // lectura, pero el día que se abra desde otro sitio esto sigue sin
+    // dejar empezar nada.
+    empezarVisita?.(tipo ? [tipo] : []);
   }
 
   /**
@@ -439,7 +455,7 @@ function HistoriaVivaDentro(props: {
               .join(" · ")}
           </div>
         </div>
-        {props.onEmpezarVisita && (
+        {empezarVisita && (
           <button
             type="button"
             data-test="historia-nueva-visita"
@@ -472,7 +488,7 @@ function HistoriaVivaDentro(props: {
           hoyToca={enDiezSegundos.hoyToca}
           ahora={ahora}
           onEmpezar={
-            props.onEmpezarVisita
+            empezarVisita
               ? () =>
                   setHoja({
                     sugerido:

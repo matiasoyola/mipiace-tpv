@@ -19,6 +19,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { MAPA_PIE_V1 } from "@mipiacetpv/clinica-sesion";
 import {
   AVISO_SOLO_LA_DUENA,
   BANDA_SOLO_LECTURA,
@@ -532,5 +533,103 @@ describe("clinica-7 · la guarda envuelve también la rama de error", () => {
     fallaLaHistoriaCon423 = true;
     await montar(<HistoriaViva clientId="c1" />);
     expect(texto()).toContain(BANDA_SOLO_LECTURA);
+  });
+});
+
+// ── 6 · EN SOLO LECTURA NO SE OFRECE ESCRIBIR ───────────────────────
+//
+// El segundo hallazgo del bucle visual: la banda decía «no se puede
+// escribir nada nuevo» y justo debajo seguía «Nueva visita», en negro y
+// encendido. Media hora de sesión para un 423 al cerrarla.
+
+describe("clinica-7 · las puertas de escritura en solo lectura", () => {
+  // Una historia vacía, con la forma EXACTA que devuelve
+  // `GET /clinica/clients/:id/historia`. Lo que se mira aquí son las dos
+  // puertas de escritura, así que todo lo demás va vacío.
+  const historiaVacia = {
+    cabecera: {
+      paciente: {
+        id: "c1",
+        nombre: "Carmen Rodríguez López",
+        iniciales: "CR",
+        edad: 68,
+        telefono: null,
+        desde: "2026-10-01T00:00:00.000Z",
+      },
+      alertas: [],
+      alertaIds: [],
+      alertasPorValidar: false,
+    },
+    enDiezSegundos: {
+      // CON algo pendiente: la tarjeta sólo es un botón cuando lo hay, y
+      // lo que se mira es que deje de serlo en solo lectura.
+      hoyToca: {
+        principal: {
+          id: "p1",
+          titulo: "Revisar la uña operada",
+          zona: "Pie izq. · Dedo gordo",
+          nota: null,
+          pregunta: "¿Cómo va?",
+          desde: "4 semanas",
+        },
+        otros: 0,
+        tipo: "REVISION_CIRUGIA",
+      },
+      dolor: { puntos: [], ultimo: null, anterior: null, texto: null },
+      ultimaVez: null,
+      ojoHoy: null,
+    },
+    zonas: [],
+    sensibilidad: null,
+    visitas: [],
+    totalDeVisitas: 0,
+    documentos: [],
+    fotos: [],
+    comparador: [],
+    consentimientoDeFotos: { puede: false, plantillaId: "p1" },
+    recomendada: null,
+    listas: { mapa: MAPA_PIE_V1 },
+    ahora: "2026-10-14T10:00:00.000Z",
+  };
+
+  async function historiaCon(estado: Record<string, unknown>) {
+    respuestaDelContrato = vista({ estado });
+    const api = await import("../src/api.js");
+    (api.apiWithCashier as ReturnType<typeof vi.fn>).mockImplementation(
+      async (path: string) => {
+        if (path === "/clinica/contrato") return respuestaDelContrato;
+        return historiaVacia;
+      },
+    );
+    await montar(<HistoriaViva clientId="c1" onEmpezarVisita={() => {}} />);
+  }
+
+  it("VIGENTE: «Nueva visita» está", async () => {
+    await historiaCon({ estado: "VIGENTE", versionAceptada: VERSION_VIGENTE });
+    expect(host.querySelector('[data-test="historia-nueva-visita"]')).toBeTruthy();
+  });
+
+  it("REVOCADO: «Nueva visita» NO está, y la banda sí", async () => {
+    await historiaCon({
+      estado: "SOLO_LECTURA",
+      motivo: "REVOCADO",
+      versionAceptada: null,
+    });
+    expect(texto()).toContain(BANDA_SOLO_LECTURA);
+    expect(host.querySelector('[data-test="historia-nueva-visita"]')).toBeNull();
+  });
+
+  it("y la tarjeta de «Hoy toca» deja de ser un botón", async () => {
+    // Sin `onEmpezar` la tarjeta se pinta igual —lo que toca hoy se sigue
+    // viendo, que es lo que hace falta saber— pero dice dónde se empieza en
+    // vez de ofrecer un botón que no puede cumplir.
+    await historiaCon({
+      estado: "SOLO_LECTURA",
+      motivo: "REVOCADO",
+      versionAceptada: null,
+    });
+    const tarjeta = host.querySelector('[data-test="historia-hoy-toca"]');
+    expect(tarjeta).toBeTruthy();
+    expect(tarjeta!.tagName).not.toBe("BUTTON");
   });
 });

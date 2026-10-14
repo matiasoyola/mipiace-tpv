@@ -53,7 +53,14 @@ const HOY = new Date().toISOString().slice(0, 10);
 // pasado («Esa hora ya ha pasado. El primer hueco es a las 17:15») y el
 // bucle se corre a la hora que sea.
 const HORA = "18:30";
-const SHA_FALSO = "a".repeat(64);
+/** La de la dueña, para que ella también llegue a la historia POR LA
+ *  AGENDA — que es a pantalla completa, como se usa. */
+const HORA_DUENA = "19:00";
+/** La huella CANÓNICA de la v1 (la que fija el test del paquete). Se usa
+ *  la de verdad y no una de relleno para que la captura del panel enseñe
+ *  la huella que verá Rosario, no sesenta y cuatro aes. */
+const SHA_V1 =
+  "7baee64a600f5a9de15038758b7118f99185174acda455df9426b35126bd0d8a";
 const TTL_CACHE_MS = 32_000;
 
 const ANCHOS = [
@@ -205,36 +212,44 @@ async function abrirHistoria(page: Page): Promise<void> {
  * anti-solape del motor, y sembrarla a mano es inventarse un estado que la
  * aplicación no produce. La dueña la da como la daría Rosario.
  */
-async function citaDeAnaHoy(ctx: import("@playwright/test").BrowserContext): Promise<boolean> {
-  const yaHay = await prisma.$queryRawUnsafe<Array<{ n: bigint }>>(
-    `SELECT count(*) AS n FROM appointments a
-       JOIN appointment_assignments s ON s.appointment_id = a.id
-      WHERE a.tenant_id = '${TENANT}' AND a.client_id = '${PACIENTE_ID}'
-        AND s.staff_user_id = '${ANA_ID}'
-        AND lower(a.timeslot)::date = '${HOY}'::date`,
-  );
-  if (Number(yaHay[0]!.n) > 0) {
-    console.log("  · Ana ya tiene la cita de hoy");
-    return true;
+async function citasDeHoy(
+  ctx: import("@playwright/test").BrowserContext,
+): Promise<void> {
+  const falta = async (staffUserId: string) => {
+    const r = await prisma.$queryRawUnsafe<Array<{ n: bigint }>>(
+      `SELECT count(*) AS n FROM appointments a
+         JOIN appointment_assignments s ON s.appointment_id = a.id
+        WHERE a.tenant_id = '${TENANT}' AND a.client_id = '${PACIENTE_ID}'
+          AND s.staff_user_id = '${staffUserId}'
+          AND lower(a.timeslot)::date = '${HOY}'::date`,
+    );
+    return Number(r[0]!.n) === 0;
+  };
+  const pendientes: Array<[string, string]> = [];
+  if (await falta(ANA_ID)) pendientes.push([ANA_ID, HORA]);
+  if (await falta(DUENA_ID)) pendientes.push([DUENA_ID, HORA_DUENA]);
+  if (pendientes.length === 0) {
+    console.log("  · las citas de hoy ya están");
+    return;
   }
   const page = await ctx.newPage();
   try {
-    vigilar(page, "cita de Ana");
+    vigilar(page, "citas de hoy");
     await entrarTpv(page, PODOLOGA);
     await hastaLaRejilla(page);
     await page.getByRole("button", { name: "Agenda" }).first().click();
     await irAlDia(page, HOY);
-    await pulsarFranja(page, ANA_ID, HORA);
-    await elegirClienta(page, "Carmen", PACIENTE_NOMBRE);
-    await elegirServicio(page, QUIROPODIA);
-    await reservar(page);
-    console.log("  · cita de Ana dada");
-    return true;
+    for (const [staffUserId, hora] of pendientes) {
+      await pulsarFranja(page, staffUserId, hora);
+      await elegirClienta(page, "Carmen", PACIENTE_NOMBRE);
+      await elegirServicio(page, QUIROPODIA);
+      await reservar(page);
+      console.log(`  · cita dada a las ${hora}`);
+    }
   } catch (err) {
     hallazgos.push(
-      `no se pudo dar la cita de Ana para la captura del aviso: ${(err as Error).message.split("\n")[0]}`,
+      `no se pudieron dar las citas del banco: ${(err as Error).message.split("\n")[0]}`,
     );
-    return false;
   } finally {
     await page.close();
   }
@@ -245,6 +260,7 @@ async function citaDeAnaHoy(ctx: import("@playwright/test").BrowserContext): Pro
 async function abrirHistoriaDesdeAgenda(
   page: Page,
   staffUserId: string,
+  hora: string,
 ): Promise<void> {
   await page.getByRole("button", { name: "Hoy" }).waitFor({
     state: "visible",
@@ -253,7 +269,7 @@ async function abrirHistoriaDesdeAgenda(
   await irAlDia(page, HOY);
   const tarjeta = page
     .locator(`[data-columna="${staffUserId}"] [data-cita]`)
-    .filter({ hasText: HORA })
+    .filter({ hasText: hora })
     .first();
   await tarjeta.waitFor({ state: "visible", timeout: 20_000 });
   await tarjeta.click();
@@ -290,7 +306,7 @@ async function contratoAceptado(): Promise<void> {
   await sinContrato();
   await prisma.$executeRawUnsafe(
     `INSERT INTO clinical_processor_agreements (id, tenant_id, version, text_sha256, user_id)
-     VALUES (gen_random_uuid(), '${TENANT}', 1, '${SHA_FALSO}', '${DUENA_ID}')`,
+     VALUES (gen_random_uuid(), '${TENANT}', 1, '${SHA_V1}', '${DUENA_ID}')`,
   );
 }
 
@@ -303,7 +319,7 @@ async function contratoRevocado(): Promise<void> {
   for (const f of filas) {
     await prisma.$executeRawUnsafe(
       `INSERT INTO clinical_processor_agreements (id, tenant_id, version, text_sha256, user_id, revokes_agreement_id)
-       VALUES (gen_random_uuid(), '${TENANT}', 1, '${SHA_FALSO}', '${DUENA_ID}', '${f.id}')`,
+       VALUES (gen_random_uuid(), '${TENANT}', 1, '${SHA_V1}', '${DUENA_ID}', '${f.id}')`,
     );
   }
 }
@@ -332,7 +348,7 @@ async function main(): Promise<void> {
     const p = await ctx.newPage();
     await esperarCache(p, "vigente");
     await p.close();
-    await citaDeAnaHoy(ctx);
+    await citasDeHoy(ctx);
     await ctx.close();
   }
 
@@ -350,9 +366,23 @@ async function main(): Promise<void> {
     vigilar(p1, `aceptacion @${ancho.nombre}`);
     await esperarCache(p1, "sin contrato");
     await entrarTpv(p1, PODOLOGA);
-    await abrirHistoria(p1);
+    await hastaLaRejilla(p1);
+    await p1.getByRole("button", { name: "Agenda" }).first().click();
+    await abrirHistoriaDesdeAgenda(p1, DUENA_ID, HORA_DUENA);
     await foto(p1, "1-aceptacion", ancho.nombre);
     await p1.close();
+
+    // Y LA MISMA PANTALLA DESDE LA FICHA DEL CLIENTE, que es el otro sitio
+    // desde el que se abre la historia. En pestaña aparte —la historia de
+    // la agenda es un overlay a pantalla completa que tapa «Clientes»— y
+    // como captura aparte porque ahí se pinta dentro de la tarjeta estrecha
+    // del cliente (448 px): es el hallazgo del bucle.
+    const p1b = await ctx.newPage();
+    vigilar(p1b, `historia en la ficha @${ancho.nombre}`);
+    await entrarTpv(p1b, PODOLOGA);
+    await abrirHistoria(p1b);
+    await foto(p1b, "6-historia-en-la-ficha", ancho.nombre);
+    await p1b.close();
 
     // ── 2 · el AVISO al que NO es la dueña ─────────────────────────
     //
@@ -362,7 +392,8 @@ async function main(): Promise<void> {
     const p2 = await ctx.newPage();
     vigilar(p2, `aviso @${ancho.nombre}`);
     await entrarTpv(p2, SANITARIA);
-    await abrirHistoriaDesdeAgenda(p2, ANA_ID);
+    // Ana cae DIRECTA en su agenda: ni turno, ni rejilla de venta.
+    await abrirHistoriaDesdeAgenda(p2, ANA_ID, HORA);
     await foto(p2, "2-aviso-no-duena", ancho.nombre);
     await p2.close();
 
@@ -372,7 +403,9 @@ async function main(): Promise<void> {
     vigilar(p3, `banda @${ancho.nombre}`);
     await esperarCache(p3, "revocado");
     await entrarTpv(p3, PODOLOGA);
-    await abrirHistoria(p3);
+    await hastaLaRejilla(p3);
+    await p3.getByRole("button", { name: "Agenda" }).first().click();
+    await abrirHistoriaDesdeAgenda(p3, DUENA_ID, HORA_DUENA);
     await foto(p3, "3-banda-solo-lectura", ancho.nombre);
     await p3.close();
 
@@ -399,7 +432,9 @@ async function main(): Promise<void> {
     const p5 = await ctx.newPage();
     vigilar(p5, `informe @${ancho.nombre}`);
     await entrarTpv(p5, PODOLOGA);
-    await abrirHistoria(p5);
+    await hastaLaRejilla(p5);
+    await p5.getByRole("button", { name: "Agenda" }).first().click();
+    await abrirHistoriaDesdeAgenda(p5, DUENA_ID, HORA_DUENA);
     await p5.getByRole("tab", { name: "Informe" }).click();
     const enviar = p5.locator('[data-test="enviar-email"]');
     await enviar.waitFor({ state: "visible", timeout: 30_000 });

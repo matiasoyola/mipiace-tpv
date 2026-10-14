@@ -34,7 +34,7 @@
 // dentro de una pantalla es un texto que nadie versiona, del que no se
 // puede sacar una huella y del que no sale un PDF igual al que se aceptó.
 
-import { useCallback, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import {
   AlertTriangle,
   Check,
@@ -47,6 +47,7 @@ import {
 import {
   AVISO_SOLO_LA_DUENA,
   BANDA_SOLO_LECTURA,
+  permiteEscribirHistoria,
   type EstadoDelModuloClinico,
 } from "@mipiacetpv/contrato-encargado";
 
@@ -688,9 +689,37 @@ export function GuardaDelContrato({
   }
 
   return (
-    <>
+    <ContextoDelContrato.Provider value={vista!.estado}>
       <BandaDeSoloLectura estado={vista!.estado} />
       {children}
-    </>
+    </ContextoDelContrato.Provider>
   );
+}
+
+// ── Lo que las pantallas de dentro preguntan ────────────────────────
+//
+// El estado que la guarda ya ha traído, para que lo de dentro no vuelva a
+// pedirlo. Una pantalla clínica que necesitara saber si se puede escribir
+// y llamara otra vez a `/clinica/contrato` sería una segunda petición por
+// pantalla y, peor, una segunda respuesta que puede discrepar de la que
+// decidió la banda.
+const ContextoDelContrato = createContext<EstadoDelModuloClinico | null>(null);
+
+/**
+ * ¿Se puede escribir en la historia?
+ *
+ * **Sin contexto devuelve `true`**, por lo mismo que la guarda falla
+ * abierta: la autorización está en `conHistoria`, que contesta 423, y esto
+ * es la mitad que AYUDA — esconder el botón que no va a poder cumplir.
+ * Devolver `false` sin saberlo dejaría a la podóloga sin «Nueva visita» por
+ * una petición que no respondió.
+ *
+ * Lo encontró el bucle visual del bloque: con el contrato revocado, la
+ * banda decía «no se puede escribir nada nuevo» y justo debajo seguía el
+ * botón «Nueva visita», en negro y encendido. Media hora de sesión para un
+ * 423 al cerrarla.
+ */
+export function useSePuedeEscribirHistoria(): boolean {
+  const estado = useContext(ContextoDelContrato);
+  return estado == null ? true : permiteEscribirHistoria(estado);
 }
