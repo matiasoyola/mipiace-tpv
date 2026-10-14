@@ -31,6 +31,8 @@ import {
 const llamadas: Array<{ path: string; body?: unknown }> = [];
 let respuestaDelContrato: unknown = null;
 let fallaElContrato = false;
+/** El 423 de `conHistoria` cuando no hay contrato aceptado. */
+let fallaLaHistoriaCon423 = false;
 
 class ApiErrorFake extends Error {
   constructor(
@@ -49,6 +51,13 @@ vi.mock("../src/api.js", () => ({
     if (path === "/clinica/contrato") {
       if (fallaElContrato) throw new ApiErrorFake(500, "se cayó");
       return respuestaDelContrato;
+    }
+    if (fallaLaHistoriaCon423 && path.includes("/historia")) {
+      throw new ApiErrorFake(
+        423,
+        "La historia clínica todavía no está activa: la dueña tiene que aceptar el contrato de tratamiento de datos.",
+        "CONTRATO_SIN_ACEPTAR",
+      );
     }
     return {};
   }),
@@ -76,6 +85,7 @@ const {
 const { InformePublico, tokenDelInformeEnLaUrl } = await import(
   "../src/clinica/InformePublico.js"
 );
+const { HistoriaViva } = await import("../src/clinica/HistoriaViva.js");
 
 let host: HTMLDivElement;
 let root: Root;
@@ -135,6 +145,7 @@ async function escribir(campo: HTMLInputElement, valor: string) {
 beforeEach(() => {
   llamadas.length = 0;
   fallaElContrato = false;
+  fallaLaHistoriaCon423 = false;
   respuestaDelContrato = vista();
 });
 
@@ -467,5 +478,59 @@ describe("clinica-7 · la pantalla pública del informe", () => {
       // verdad, sobre la página.
       expect(el.className).toMatch(/min-h-\[56px\]/);
     }
+  });
+});
+
+// ── 5 · LA GUARDA, POR FUERA DE LA PANTALLA ─────────────────────────
+//
+// El agujero que encontró el bucle visual del bloque, y que ninguna suite
+// veía: la guarda envolvía el árbol de la historia YA CARGADA, así que con
+// el contrato sin aceptar la petición daba 423, `HistoriaViva` salía por su
+// rama de error y devolvía el mensaje crudo ANTES de llegar a la guarda.
+//
+// Lo que veía la dueña: un recuadro rojo diciendo que la dueña tiene que
+// aceptar el contrato, sin ninguna forma de aceptarlo. La pantalla de
+// aceptación existía y no se podía alcanzar desde la ficha de un cliente.
+
+describe("clinica-7 · la guarda envuelve también la rama de error", () => {
+  it("con el 423 de la historia, la DUEÑA ve la pantalla de aceptación", async () => {
+    respuestaDelContrato = vista({
+      estado: { estado: "SIN_CONTRATO" },
+      puedeAceptar: true,
+    });
+    fallaLaHistoriaCon423 = true;
+    await montar(<HistoriaViva clientId="c1" />);
+    // El texto del contrato y el botón: lo que hace falta para salir del
+    // bloqueo.
+    expect(texto()).toContain(CONTRATO_VIGENTE.titulo);
+    expect(botonConTexto("Aceptar y activar la historia clínica")).toBeTruthy();
+  });
+
+  it("y quien no es la dueña ve el aviso, no el mensaje crudo del 423", async () => {
+    respuestaDelContrato = vista({
+      estado: { estado: "SIN_CONTRATO" },
+      puedeAceptar: false,
+    });
+    fallaLaHistoriaCon423 = true;
+    await montar(<HistoriaViva clientId="c1" />);
+    expect(texto()).toContain(AVISO_SOLO_LA_DUENA);
+    // Y NO el texto del contrato: el que no acepta no tiene que leerlo
+    // entero para entender que no le toca a él.
+    expect(texto()).not.toContain(CONTRATO_VIGENTE.apartados[0]!.encabezado);
+  });
+
+  it("en SOLO LECTURA la banda sale aunque la historia esté cargando", async () => {
+    // La banda es lo que evita media hora de trabajo que se va a rechazar.
+    // Si saliera solo con la historia ya pintada, llegaría tarde.
+    respuestaDelContrato = vista({
+      estado: {
+        estado: "SOLO_LECTURA",
+        motivo: "REVOCADO",
+        versionAceptada: null,
+      },
+    });
+    fallaLaHistoriaCon423 = true;
+    await montar(<HistoriaViva clientId="c1" />);
+    expect(texto()).toContain(BANDA_SOLO_LECTURA);
   });
 });

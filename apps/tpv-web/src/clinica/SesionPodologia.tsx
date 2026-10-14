@@ -266,7 +266,26 @@ function bloquesVacios(): EstadoDeLosBloques {
   };
 }
 
+/**
+ * clinica-7 · LA GUARDA, POR FUERA DE TODO. Ver `HistoriaViva`: estaba por
+ * dentro y la rama de error del 423 salía antes de llegar a ella, así que
+ * sin contrato aceptado se veía el mensaje crudo y no la pantalla de
+ * aceptación. Lo encontró el bucle visual.
+ */
 export function SesionPodologia(props: {
+  appointmentId: string;
+  onCobrar?: (appointmentId: string) => void;
+  onAbrirValoracion?: (clientId: string) => void;
+  tiposIniciales?: readonly TipoDeVisita[];
+}) {
+  return (
+    <GuardaDelContrato>
+      <SesionPodologiaDentro {...props} />
+    </GuardaDelContrato>
+  );
+}
+
+function SesionPodologiaDentro(props: {
   appointmentId: string;
   /** Para volver a la agenda tras cobrar. */
   onCobrar?: (appointmentId: string) => void;
@@ -749,14 +768,6 @@ export function SesionPodologia(props: {
     avisos.filter((a) => a.disparador.clase === clase).map((a) => a.aviso);
 
   return (
-    // clinica-7 · LA GUARDA DEL CONTRATO. Ver `HistoriaViva` para el por
-    // qué de envolver dentro del componente y no en quien lo monta.
-    //
-    // Aquí la banda importa más que en la historia: ésta es la pantalla que
-    // ESCRIBE, y con el contrato revocado cerrar la sesión va a dar 423. La
-    // banda es lo que hace que la podóloga lo sepa ANTES de pasar media
-    // hora rellenándola.
-    <GuardaDelContrato>
     <div className="space-y-4">
       <Cabecera vista={vista} />
 
@@ -1231,7 +1242,6 @@ export function SesionPodologia(props: {
         />
       )}
     </div>
-    </GuardaDelContrato>
   );
 }
 

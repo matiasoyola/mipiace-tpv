@@ -227,7 +227,39 @@ const INSIGNIA: Record<EstadoDeZonaViva, string> = {
 };
 
 
+/**
+ * clinica-7 · LA GUARDA, POR FUERA DE TODO.
+ *
+ * Estaba por dentro —envolviendo sólo el árbol de la historia ya cargada—
+ * y eso la dejaba sin efecto en el caso que más importa: sin contrato
+ * aceptado la API contesta 423, el `fetch` de la historia entra por la rama
+ * de error y `HistoriaViva` devolvía el mensaje crudo del 423 ANTES de
+ * llegar a la guarda. Resultado: la dueña abría la historia desde la ficha
+ * de un cliente y veía un recuadro rojo —«la dueña tiene que aceptar el
+ * contrato»— sin ninguna forma de aceptarlo. La pantalla de aceptación
+ * existía y no se podía alcanzar.
+ *
+ * Lo encontró el bucle visual del bloque, y no lo vio ninguna suite: los
+ * tests de pantalla mockean la API y le dan a la guarda un estado legible,
+ * así que nunca pasaban por la rama de error.
+ *
+ * Por eso el envoltorio va AQUÍ, en un componente que no hace peticiones:
+ * lo de dentro no se monta hasta que la guarda ha decidido, y da igual por
+ * qué rama saliera el componente de dentro.
+ */
 export function HistoriaViva(props: {
+  clientId: string;
+  onEmpezarVisita?: (tipos: TipoDeVisita[]) => void;
+  onAbrirValoracion?: () => void;
+}) {
+  return (
+    <GuardaDelContrato>
+      <HistoriaVivaDentro {...props} />
+    </GuardaDelContrato>
+  );
+}
+
+function HistoriaVivaDentro(props: {
   clientId: string;
   /**
    * Abrir la sesión de clinica-5 con esos tipos ya marcados.
@@ -382,17 +414,6 @@ export function HistoriaViva(props: {
   }
 
   return (
-    // clinica-7 · LA GUARDA DEL CONTRATO.
-    //
-    // Envuelve la pantalla entera: sin contrato aceptado, lo de dentro NO
-    // SE MONTA (la API no da datos, así que no hay historia que pintar) y
-    // se ve la pantalla de aceptación o el aviso. En solo lectura, la banda
-    // arriba y la historia debajo.
-    //
-    // Va DENTRO del componente y no en quien lo monta, a propósito:
-    // `HistoriaViva` se abre desde la agenda y desde la ficha del cliente,
-    // y el día que se abra desde un tercer sitio seguirá protegida.
-    <GuardaDelContrato>
     <div className="pb-6" data-test="historia-viva">
       {/* ── La cabecera ─────────────────────────────────────────── */}
       <div className="flex gap-4 items-center flex-wrap">
@@ -769,7 +790,6 @@ export function HistoriaViva(props: {
         />
       )}
     </div>
-    </GuardaDelContrato>
   );
 }
 
