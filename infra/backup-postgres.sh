@@ -28,6 +28,33 @@
 # Si falla la parte de los ficheros, el script SALE CON ERROR aunque el
 # dump esté bien, por lo mismo que el `gzip -t`: media copia da falsa
 # confianza, que es peor que no tener copia.
+#
+# ── clinica-7 · Y LAS COPIAS SE CIFRAN CON `age` ──────────────────────
+#
+# Decisión 19. Las dos mitades (el dump y el paquete de ficheros) se cifran
+# con `age` para una CLAVE PÚBLICA, y **en el VPS solo está la pública**.
+#
+# Lo que eso significa, dicho en lo que pasa: el servidor puede hacer
+# copias y **no puede abrirlas**. Si alguien entra en el VPS —o se lleva un
+# disco, o la cuenta de Backblaze— se lleva ficheros que no sabe leer. La
+# privada vive fuera del VPS, en el gestor de contraseñas de Matías y en
+# papel.
+#
+# ── Y no es redundante con el cifrado de la base ──────────────────────
+#
+# Alguien podría pensar que sobra: el texto clínico ya va cifrado con la
+# DEK de cada clínica. Pero una copia lleva MUCHO más que texto clínico —
+# nombres de pacientes, teléfonos, emails, el registro de accesos entero,
+# los tickets, los datos fiscales— y todo eso está en claro. Cifrar la
+# copia protege a la casa; cifrar las columnas protege a los pacientes de
+# nosotros mismos. Son dos cosas.
+#
+# ── SIN `age` NO HAY COPIA ────────────────────────────────────────────
+#
+# Si `age` no está instalado o falta la clave pública, el script **sale con
+# error en vez de dejar una copia en claro**. Es el mismo criterio que el
+# `gzip -t`: media protección da falsa confianza, y una copia en claro que
+# alguien cree cifrada es peor que ninguna.
 
 set -euo pipefail
 
@@ -36,6 +63,54 @@ ENV_FILE="$REPO_DIR/infra/.env.production"
 BACKUP_DIR="$REPO_DIR/backups"
 RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-30}"
 B2_BUCKET="${MIPIACETPV_B2_BUCKET:-}"
+
+# ── clinica-7 · la clave pública de `age` ─────────────────────────────
+#
+# Se lee del entorno o del `.env.production`, en ese orden. Generarla:
+# `node scripts/generar-claves-clinicas.mjs`.
+AGE_RECIPIENT="${MIPIACETPV_BACKUP_AGE_RECIPIENT:-}"
+if [ -z "$AGE_RECIPIENT" ] && [ -f "$ENV_FILE" ]; then
+  AGE_RECIPIENT=$(grep -E '^MIPIACETPV_BACKUP_AGE_RECIPIENT=' "$ENV_FILE" 2>/dev/null \
+    | tail -1 | cut -d= -f2- | tr -d '"'"'"' ' || true)
+fi
+
+if [ -z "$AGE_RECIPIENT" ]; then
+  echo "[backup] ERROR: falta MIPIACETPV_BACKUP_AGE_RECIPIENT (la clave pública de age)." >&2
+  echo "[backup] Genérala con: node scripts/generar-claves-clinicas.mjs" >&2
+  echo "[backup] NO se hace copia: una copia en claro que alguien cree cifrada es peor que ninguna." >&2
+  exit 1
+fi
+
+if ! command -v age >/dev/null 2>&1; then
+  echo "[backup] ERROR: 'age' no está instalado en este servidor (apt install age)." >&2
+  echo "[backup] NO se hace copia, por lo mismo." >&2
+  exit 1
+fi
+
+# Cifra un fichero con la pública y BORRA el original. El `.age` se queda.
+# `|| exit 1` dentro: si el cifrado falla, lo que NO puede pasar es que se
+# borre el original y nos quedemos sin nada.
+cifrar_con_age() {
+  local claro="$1"
+  echo "[backup] Cifrando $(basename "$claro") con age…"
+  if ! age -r "$AGE_RECIPIENT" -o "$claro.age" "$claro"; then
+    echo "[backup] ERROR: age falló cifrando $claro. El original se queda; revísalo." >&2
+    rm -f "$claro.age"
+    exit 1
+  fi
+  # Que el cifrado tenga contenido antes de borrar el claro.
+  if [ ! -s "$claro.age" ]; then
+    echo "[backup] ERROR: $claro.age salió vacío. El original se queda." >&2
+    rm -f "$claro.age"
+    exit 1
+  fi
+  rm -f "$claro"
+  # La huella es la DEL FICHERO CIFRADO, que es el que se guarda y el que
+  # se sube: es lo que permite comprobar que llegó entero sin tener la
+  # privada delante.
+  sha256sum "$claro.age" > "$claro.age.sha256"
+  rm -f "$claro.sha256"
+}
 
 mkdir -p "$BACKUP_DIR"
 
@@ -60,12 +135,15 @@ if ! gzip -t "$BACKUP_FILE"; then
   exit 1
 fi
 
-# Checksum junto al archivo — permite verificar integridad tras
-# descargar de B2 o copiar entre máquinas.
-sha256sum "$BACKUP_FILE" > "$BACKUP_FILE.sha256"
+# clinica-7 · Y AHORA SE CIFRA. El orden importa: primero el `gzip -t`
+# sobre el claro (comprobar la integridad del cifrado no diría nada del
+# contenido) y después `age`. El claro se borra en cuanto el `.age` existe
+# y tiene contenido.
+cifrar_con_age "$BACKUP_FILE"
+BACKUP_FILE="$BACKUP_FILE.age"
 
 SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
-echo "[backup] OK ($SIZE)"
+echo "[backup] OK ($SIZE, cifrado)"
 
 # Subida opcional a Backblaze B2 — retry ×3 con sleep (los cortes de
 # red transitorios a B2 no deben dejar el backup solo en local).
@@ -107,15 +185,25 @@ docker compose --env-file "$ENV_FILE" -f infra/docker-compose.prod.yml exec -T a
   sh -c "mkdir -p '$CLINICAL_DIR' 2>/dev/null || true; tar -czf - -C '$CLINICAL_DIR' ." \
   > "$CLINICAL_FILE"
 
-if ! gzip -t "$CLINICAL_FILE"; then
-  echo "[backup] ERROR: el paquete de ficheros clínicos $CLINICAL_FILE está corrupto (gzip -t falló). Borrado. La copia de la base SÍ está, pero una historia sin sus fotos no sirve: revísalo." >&2
+# clinica-7 · `tar -tzf` y no `gzip -t`. Es una comprobación MÁS fuerte —
+# lee el archivo entero, valida el CRC del gzip al pasar y además valida la
+# estructura del tar— y además el `gzip` de macOS devuelve 2 sobre un
+# `.tar.gz` por los bloques de ceros con los que tar termina. En el VPS
+# (Linux) no se habría visto, pero el simulacro de restauración se lanza
+# desde el portátil y ahí sí: lo encontró la primera pasada del simulacro.
+if ! tar -tzf "$CLINICAL_FILE" > /dev/null; then
+  echo "[backup] ERROR: el paquete de ficheros clínicos $CLINICAL_FILE está corrupto (tar -tzf falló). Borrado. La copia de la base SÍ está, pero una historia sin sus fotos no sirve: revísalo." >&2
   rm -f "$CLINICAL_FILE"
   exit 1
 fi
 
-sha256sum "$CLINICAL_FILE" > "$CLINICAL_FILE.sha256"
+# clinica-7 · y los ficheros clínicos, también cifrados. Son las fotos de
+# los pies y los consentimientos firmados: el paquete que menos puede
+# acabar legible en un disco perdido.
+cifrar_con_age "$CLINICAL_FILE"
+CLINICAL_FILE="$CLINICAL_FILE.age"
 CLINICAL_SIZE=$(du -h "$CLINICAL_FILE" | cut -f1)
-echo "[backup] Ficheros clínicos OK ($CLINICAL_SIZE)"
+echo "[backup] Ficheros clínicos OK ($CLINICAL_SIZE, cifrado)"
 
 # Y a B2 con el mismo retry que el dump, si está configurado.
 if [ -n "$B2_BUCKET" ] && command -v b2 >/dev/null 2>&1; then
@@ -139,6 +227,11 @@ fi
 
 # Retención: borrar backups más antiguos (y sus checksums)
 echo "[backup] Purgando backups locales > $RETENTION_DAYS días…"
+# clinica-7 · los nombres llevan `.age`. Y se purgan TAMBIÉN los `.gz`
+# sueltos: son los de antes de este bloque, y son justo los que no deberían
+# quedarse ahí en claro más de un mes.
+find "$BACKUP_DIR" -name "mipiacetpv-*.sql.gz.age" -mtime "+$RETENTION_DAYS" -delete
+find "$BACKUP_DIR" -name "mipiacetpv-*.sql.gz.age.sha256" -mtime "+$RETENTION_DAYS" -delete
 find "$BACKUP_DIR" -name "mipiacetpv-*.sql.gz" -mtime "+$RETENTION_DAYS" -delete
 find "$BACKUP_DIR" -name "mipiacetpv-*.sql.gz.sha256" -mtime "+$RETENTION_DAYS" -delete
 # clinica-4 · los paquetes de ficheros clínicos, con la MISMA retención
@@ -146,6 +239,8 @@ find "$BACKUP_DIR" -name "mipiacetpv-*.sql.gz.sha256" -mtime "+$RETENTION_DAYS" 
 # sin la otra no sirve. (La retención LEGAL de la historia no es ésta: es
 # la de producción, cinco años como mínimo. Esto es cuántas copias se
 # guardan en el VPS.)
+find "$BACKUP_DIR" -name "mipiacetpv-clinico-*.tar.gz.age" -mtime "+$RETENTION_DAYS" -delete
+find "$BACKUP_DIR" -name "mipiacetpv-clinico-*.tar.gz.age.sha256" -mtime "+$RETENTION_DAYS" -delete
 find "$BACKUP_DIR" -name "mipiacetpv-clinico-*.tar.gz" -mtime "+$RETENTION_DAYS" -delete
 find "$BACKUP_DIR" -name "mipiacetpv-clinico-*.tar.gz.sha256" -mtime "+$RETENTION_DAYS" -delete
 
