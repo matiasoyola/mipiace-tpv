@@ -57,6 +57,14 @@ import { registerStoreWebSocketRoute } from "./realtime/ws-route.js";
 import { registerDeviceWebSocketRoute } from "./devices/ws-route.js";
 import { registerKitchenAjustesRoutes } from "./kitchen/ajustes-routes.js";
 import { registerKitchenRoutes } from "./kitchen/routes.js";
+// residencia-1 · los cimientos de la residencia de mayores. Gateadas por
+// tenant (`residenciaEnabled`), y con el módulo apagado cada ruta responde
+// la 404 de Fastify como si no estuviera registrada.
+import { registerResidenciaResidentesRoutes } from "./residencia/residentes-routes.js";
+import { registerResidenciaEdificioRoutes } from "./residencia/edificio-routes.js";
+import { registerResidenciaRolesRoutes } from "./residencia/roles-routes.js";
+import { registerResidenciaTurnosRoutes } from "./residencia/turnos-routes.js";
+import { registerResidenciaPuertaRoutes } from "./residencia/puerta-routes.js";
 import { registerKitchenTpvRoutes } from "./kitchen/tpv-routes.js";
 import { registerKitchenWebSocketRoute } from "./kitchen/ws-route.js";
 import {
@@ -257,6 +265,17 @@ async function main() {
   // un `KITCHEN`) y las del TPV sobre la cocina (anular lo enviado,
   // marchar un tiempo, urgente, «Servido», la hoja de alergias). Dos
   // puertas que no se cruzan: ver `kitchen/auth.ts`.
+  // residencia-1 · residentes, edificio, roles de cuidado, turnos y la
+  // puerta. Las cuatro primeras llevan `ensureClinicaEnabled` ADEMÁS del
+  // gate de la residencia, y no es redundante: la residencia no se puede
+  // encender sin la clínica (CHECK `tenants_residencia_exige_clinica`), así
+  // que con las dos puertas la negativa es la misma 404 por los dos
+  // caminos. La de la puerta tiene su propia auth (`puerta-auth.ts`).
+  await registerResidenciaResidentesRoutes(app);
+  await registerResidenciaEdificioRoutes(app);
+  await registerResidenciaRolesRoutes(app);
+  await registerResidenciaTurnosRoutes(app);
+  await registerResidenciaPuertaRoutes(app);
   await registerKitchenRoutes(app);
   await registerKitchenTpvRoutes(app);
   // kds-1-cocina · los ajustes de cocina del panel del restaurante, las

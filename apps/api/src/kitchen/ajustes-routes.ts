@@ -202,10 +202,14 @@ export async function registerKitchenAjustesRoutes(
           lastSeenAt: s.lastSeenAt ? s.lastSeenAt.toISOString() : null,
           alive:
             s.lastSeenAt != null && now - s.lastSeenAt.getTime() < LATIDO_VIVO_MS,
-          registerId: s.register.id,
-          registerName: s.register.name,
-          storeId: s.register.store.id,
-          storeName: s.register.store.name,
+          // residencia-1 · `register` es nullable desde que lo es la
+          // columna. Esta consulta filtra `kind = KITCHEN`, así que el
+          // CHECK `devices_register_o_habitacion` garantiza que todas
+          // tienen caja; los `?.` son para que lo diga el tipo.
+          registerId: s.register?.id ?? null,
+          registerName: s.register?.name ?? null,
+          storeId: s.register?.store.id ?? null,
+          storeName: s.register?.store.name ?? null,
         })),
       };
     },
