@@ -62,6 +62,8 @@ import {
 import type { Alerta } from "@mipiacetpv/clinica-valoracion";
 import type { Prisma, PrismaClient } from "@mipiacetpv/db";
 
+import { dekONada } from "./claves.js";
+import { cuerpoDeEntrada, esIlegible } from "./cripto-campos.js";
 import { edadDe, ultimaExploracion } from "./sesion.js";
 import { vistaDeLaValoracion } from "./valoracion.js";
 import {
@@ -209,13 +211,43 @@ export interface DetalleDeVisita {
 
 interface FilaDeVisita {
   id: string;
+  // clinica-7 · los dos que el AAD necesita, más la columna cifrada.
+  tenantId: string;
   body: Prisma.JsonValue;
+  bodyCifrado: string | null;
   createdAt: Date;
 }
 
-function cuerpoDe(fila: FilaDeVisita): CuerpoDeSesionCualquiera | null {
-  const b = fila.body as unknown;
+/** El `select` de una visita. En una constante porque lo usan los dos
+ *  sitios que leen visitas en este fichero, y las columnas que el cifrado
+ *  necesita son fáciles de olvidar en el segundo. */
+const SELECT_VISITA = {
+  id: true,
+  tenantId: true,
+  body: true,
+  bodyCifrado: true,
+  createdAt: true,
+} satisfies Prisma.ClinicalEntrySelect;
+
+/**
+ * clinica-7 · el cuerpo de una visita, descifrado.
+ *
+ * ÚNICO sitio de este fichero que toca `body`, y por eso el cifrado entró
+ * aquí sin tocar las seis funciones que lo usan. La DEK viaja como
+ * parámetro porque este `cuerpoDe` se llama cuatro veces por la misma
+ * lista de doscientas visitas.
+ *
+ * Un cuerpo ilegible devuelve `null`, que es el valor que estas funciones
+ * ya sabían tratar («una visita sin cuerpo»): la pantalla la enseña vacía
+ * en lugar de caerse, y el aviso queda en el log.
+ */
+function cuerpoDe(
+  fila: FilaDeVisita,
+  dek: Buffer | null,
+): CuerpoDeSesionCualquiera | null {
+  const b = cuerpoDeEntrada(fila, dek);
   if (b == null || typeof b !== "object") return null;
+  if (esIlegible(b)) return null;
   return b as CuerpoDeSesionCualquiera;
 }
 
@@ -260,7 +292,7 @@ export async function vistaDeLaHistoria(
         where: { tenantId, clientId, kind: "TREATMENT_SESSION" },
         orderBy: { createdAt: "desc" },
         take: VISITAS_DE_LA_HISTORIA,
-        select: { id: true, body: true, createdAt: true },
+        select: SELECT_VISITA,
       }),
       prisma.clinicalEntry.count({
         where: { tenantId, clientId, kind: "TREATMENT_SESSION" },
@@ -275,15 +307,20 @@ export async function vistaDeLaHistoria(
       entregasDelPaciente(prisma, { tenantId, clientId }),
     ]);
 
+  // clinica-7 · UNA lectura de clave para las doscientas visitas y sus
+  // cuatro recorridos. Con una por visita, el criterio de rendimiento del
+  // bloque (50 ms) no se cumpliría ni de lejos.
+  const dek = await dekONada(tenantId, prisma);
+
   // De la más reciente a la más antigua, que es como se lee la lista.
   const visitas = filas.map((f: FilaDeVisita) =>
-    visitaLegible(cuerpoDe(f), {
+    visitaLegible(cuerpoDe(f, dek), {
       entryId: f.id,
       fecha: f.createdAt.toISOString(),
     }),
   );
   const paraElPie = filas.map((f: FilaDeVisita) =>
-    visitaDeLaHistoria(cuerpoDe(f), {
+    visitaDeLaHistoria(cuerpoDe(f, dek), {
       entryId: f.id,
       fecha: f.createdAt.toISOString(),
     }),
@@ -295,9 +332,15 @@ export async function vistaDeLaHistoria(
   // (clinica-5 · `pendientes.ts`).
   const ultimaFila = filas[0] ?? null;
   const pendientes = pendientesAbiertos(
-    ultimaFila ? (cuerpoDe(ultimaFila) as { pendientesCreados?: readonly PendienteCreado[] }) : null,
+    ultimaFila
+      ? (cuerpoDe(ultimaFila, dek) as {
+          pendientesCreados?: readonly PendienteCreado[];
+        })
+      : null,
   );
-  const versionesDeLaUltima = versionesDe(ultimaFila ? cuerpoDe(ultimaFila) : null);
+  const versionesDeLaUltima = versionesDe(
+    ultimaFila ? cuerpoDe(ultimaFila, dek) : null,
+  );
 
   const puntos = [...visitas]
     .filter((v) => v.dolor != null)
@@ -530,10 +573,10 @@ export async function detalleDeVisita(
       clientId: input.clientId,
       kind: "TREATMENT_SESSION",
     },
-    select: { id: true, body: true, createdAt: true },
+    select: SELECT_VISITA,
   });
   if (!fila) return null;
-  const cuerpo = cuerpoDe(fila);
+  const cuerpo = cuerpoDe(fila, await dekONada(input.tenantId, prisma));
   if (!cuerpo) return null;
   const c = cuerpo as {
     marcas?: Marcas;

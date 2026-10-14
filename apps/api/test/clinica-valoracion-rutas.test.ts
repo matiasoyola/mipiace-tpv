@@ -48,8 +48,13 @@ process.env.REDIS_URL = "redis://localhost:6379";
 process.env.JWT_ACCESS_SECRET = "a".repeat(40);
 process.env.JWT_REFRESH_SECRET = "b".repeat(40);
 process.env.HOLDED_KEY_ENCRYPTION_SECRET = randomBytes(32).toString("base64");
+// clinica-7 · la KEK de este fichero. Sin ella, `dekONada` revienta y
+// toda ruta clínica contesta 500.
+process.env.CLINICAL_KEK = randomBytes(32).toString("base64");
+process.env.CLINICAL_KEK_ID = "test";
 process.env.PUBLIC_TPV_URL = "https://mipiacetpv.com";
 
+import { cuerpoClaroDe, llaveroFake } from "./clinica-7-claves-fake.js";
 import Fastify from "fastify";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -129,6 +134,7 @@ interface FakeCorrection {
   assessmentId: string;
   questionId: string;
   value: "SI" | "NO" | "NO_SE";
+  correccionCifrada: string | null;
   authorUserId: string;
   createdAt: Date;
 }
@@ -142,6 +148,8 @@ interface FakeEntry {
   appointmentId: string | null;
   kind: string;
   body: unknown;
+  /** clinica-7 · donde de verdad va el dato. */
+  bodyCifrado: string | null;
   createdAt: Date;
 }
 const entradas: FakeEntry[] = [];
@@ -243,7 +251,11 @@ function coincideEnlace(l: FakeLink, where: Record<string, unknown>): boolean {
 
 let registroRoto = false;
 
+// clinica-7 · el llavero de la clínica, en memoria.
+const llavero = llaveroFake();
+
 const fakePrisma = {
+  clinicalTenantKey: llavero.modelo,
   $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
     fn(fakePrisma),
   ),
@@ -335,13 +347,15 @@ const fakePrisma = {
   clinicalEntry: {
     create: vi.fn(async ({ data }: any) => {
       const row: FakeEntry = {
-        id: randomUUID(),
+        // clinica-7 · el id que manda la aplicación: va dentro del AAD.
+        id: data.id ?? randomUUID(),
         tenantId: data.tenantId,
         clientId: data.clientId,
         authorUserId: data.authorUserId,
         appointmentId: data.appointmentId ?? null,
         kind: data.kind ?? "NOTE",
         body: data.body,
+        bodyCifrado: data.bodyCifrado ?? null,
         createdAt: new Date(),
       };
       entradas.push(row);
@@ -349,7 +363,9 @@ const fakePrisma = {
     }),
     findUnique: vi.fn(async ({ where }: any) => {
       const e = entradas.find((x) => x.id === where.id);
-      return e ? { body: e.body } : null;
+      // clinica-7 · la fila ENTERA: descifrar necesita `id`, `tenantId` y
+      // `bodyCifrado`, no solo el cuerpo.
+      return e ? { ...e } : null;
     }),
   },
   clinicalAssessment: {
@@ -516,11 +532,16 @@ const fakePrisma = {
     ),
     create: vi.fn(async ({ data }: any) => {
       const row: FakeCorrection = {
-        id: randomUUID(),
+        // clinica-7 · el id que manda la aplicación: va dentro del AAD de
+        // la corrección cifrada.
+        id: data.id ?? randomUUID(),
         tenantId: data.tenantId,
         assessmentId: data.assessmentId,
         questionId: data.questionId,
-        value: data.value,
+        value: data.value ?? null,
+        // La pregunta y el valor van CIFRADOS juntos: `question_id` en
+        // claro («diab») ya diría de qué habla la fila.
+        correccionCifrada: data.correccionCifrada ?? null,
         authorUserId: data.authorUserId,
         // +1 ms por fila para que «manda la última» sea determinista en un
         // test que inserta dos en el mismo milisegundo.
@@ -965,7 +986,11 @@ describe("clinica-2 · LA RUTA PÚBLICA NO DEVUELVE RESPUESTAS", () => {
     const token = conEnlace();
     const app = await buildApp();
     await contestar(app, token, { ...TODO_NO, inventada: "SI", insul: "SI" });
-    const cuerpo = entradas[0]!.body as { respuestas: Record<string, string> };
+    // clinica-7 · el cuerpo se lee DESCIFRADO: es lo que de verdad se
+    // guardó. En `body` está el centinela.
+    const cuerpo = (await cuerpoClaroDe(entradas[0]!, fakePrisma)) as {
+      respuestas: Record<string, string>;
+    };
     expect(cuerpo.respuestas).not.toHaveProperty("inventada");
     // `insul` tampoco: la diabetes es «NO», así que el seguimiento no
     // estaba en juego.
@@ -983,7 +1008,9 @@ describe("clinica-2 · LA RUTA PÚBLICA NO DEVUELVE RESPUESTAS", () => {
       "PACIENTE",
       { aler: ["Látex", "<script>alert(1)</script>"] },
     );
-    const cuerpo = entradas[0]!.body as { detalles: Record<string, string[]> };
+    const cuerpo = (await cuerpoClaroDe(entradas[0]!, fakePrisma)) as {
+      detalles: Record<string, string[]>;
+    };
     expect(cuerpo.detalles.aler).toEqual(["Látex"]);
     await app.close();
   });

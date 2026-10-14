@@ -13,6 +13,11 @@
 // (deadlock) es el mismo choque resuelto por la vía dura, y hasta este
 // frente salía por el manejador genérico como un 500.
 
+import {
+  dekParaNotas,
+  leerNota,
+  notaParaGuardar,
+} from "../clinica/notas.js";
 import { randomUUID } from "node:crypto";
 
 // `rrule` es CommonJS. El named import ESM (`import { RRule } from "rrule"`)
@@ -609,17 +614,30 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
       // `itemIds` se generan FUERA a propósito — un intento abortado no
       // deja fila, así que el reintento reusa los mismos ids y no hay dos
       // citas ni por un microsegundo.
+      // clinica-7 · decisión 10 · en un tenant clínico la nota de la cita
+      // se guarda CIFRADA: «viene por lo del dedo infectado» es un dato de
+      // salud en la tabla de la agenda. Se decide FUERA de la transacción,
+      // igual que `apptId`: cifrar no toca la base y mantenerlo fuera deja
+      // la transacción tan corta como estaba (compite por el EXCLUDE del
+      // anti-solape).
+      const nota = await notaParaGuardar({
+        tenantId: input.tenantId,
+        id: apptId,
+        que: "CITA",
+        texto: input.notes,
+      });
+
       await withRaceRetry(() =>
         prisma.$transaction(async (tx) => {
           await tx.$executeRawUnsafe(
             `INSERT INTO appointments
                (id, tenant_id, external_id, mode, client_id, timeslot, status, source,
                 party_size, voucher_id, deposit_cents, pending_until, ticket_id, notes,
-                created_at, updated_at)
+                notes_cifradas, created_at, updated_at)
              VALUES ($1::uuid, $2::uuid, $3::uuid, 'APPOINTMENT'::"ReservationMode",
                 $4::uuid, tstzrange($5::timestamptz, $6::timestamptz, '[)'),
                 $7::"AppointmentStatus", $8::"ReservationSource",
-                NULL, NULL, NULL, $9::timestamptz, NULL, $10, now(), now())`,
+                NULL, NULL, NULL, $9::timestamptz, NULL, $10, $11, now(), now())`,
             apptId,
             input.tenantId,
             input.externalId,
@@ -629,7 +647,8 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
             input.status,
             input.source,
             input.pendingUntil ? input.pendingUntil.toISOString() : null,
-            input.notes,
+            nota.claro,
+            nota.cifrado,
           );
           if (input.items.length > 0) {
             await tx.appointmentItem.createMany({
@@ -697,17 +716,18 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
           ends_at: Date;
           ticket_id: string | null;
           notes: string | null;
+          notes_cifradas: string | null;
         }>
       >(
         `SELECT id, client_id, status, source, lower(timeslot) AS starts_at,
-                upper(timeslot) AS ends_at, ticket_id, notes
+                upper(timeslot) AS ends_at, ticket_id, notes, notes_cifradas
          FROM appointments WHERE tenant_id = $1::uuid AND id = $2::uuid`,
         tenantId,
         id,
       );
       const row = rows[0];
       if (!row) return null;
-      return hydrateView(prisma, row);
+      return hydrateView(prisma, tenantId, await dekParaNotas(tenantId), row);
     },
 
     async listAppointments(tenantId, from, to) {
@@ -721,10 +741,11 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
           ends_at: Date;
           ticket_id: string | null;
           notes: string | null;
+          notes_cifradas: string | null;
         }>
       >(
         `SELECT id, client_id, status, source, lower(timeslot) AS starts_at,
-                upper(timeslot) AS ends_at, ticket_id, notes
+                upper(timeslot) AS ends_at, ticket_id, notes, notes_cifradas
          FROM appointments
          WHERE tenant_id = $1::uuid
            AND status <> 'CANCELLED'
@@ -734,7 +755,10 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
         from.toISOString(),
         to.toISOString(),
       );
-      return Promise.all(rows.map((r) => hydrateView(prisma, r)));
+      const dek = await dekParaNotas(tenantId);
+      return Promise.all(
+        rows.map((r) => hydrateView(prisma, tenantId, dek, r)),
+      );
     },
 
     async setStatus(tenantId, id, status) {
@@ -853,17 +877,21 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
           ends_at: Date;
           ticket_id: string | null;
           notes: string | null;
+          notes_cifradas: string | null;
         }>
       >(
         `SELECT id, client_id, status, source, lower(timeslot) AS starts_at,
-                upper(timeslot) AS ends_at, ticket_id, notes
+                upper(timeslot) AS ends_at, ticket_id, notes, notes_cifradas
          FROM appointments
          WHERE tenant_id = $1::uuid AND client_id = $2::uuid
          ORDER BY lower(timeslot) DESC LIMIT 200`,
         tenantId,
         clientId,
       );
-      return Promise.all(rows.map((r) => hydrateView(prisma, r)));
+      const dek = await dekParaNotas(tenantId);
+      return Promise.all(
+        rows.map((r) => hydrateView(prisma, tenantId, dek, r)),
+      );
     },
 
     async listBlocks(tenantId, from, to) {
@@ -904,6 +932,13 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
 // normales, sin tstzrange).
 async function hydrateView(
   prisma: PrismaClient,
+  // clinica-7 · el tenant, porque el AAD de la nota lo necesita, y la
+  // clave del LOTE: `listAppointments` pinta cuarenta citas de un día y
+  // una consulta de clave por cita serían cuarenta por pantalla. `null` en
+  // los negocios que no son clínicos, y entonces la nota se lee del claro
+  // como siempre.
+  tenantId: string,
+  dek: Buffer | null,
   row: {
     id: string;
     client_id: string | null;
@@ -913,6 +948,7 @@ async function hydrateView(
     ends_at: Date;
     ticket_id: string | null;
     notes: string | null;
+    notes_cifradas: string | null;
   },
 ): Promise<AppointmentView> {
   const [items, assignments] = await Promise.all([
@@ -940,7 +976,16 @@ async function hydrateView(
     start: row.starts_at.toISOString(),
     end: row.ends_at.toISOString(),
     ticketId: row.ticket_id,
-    notes: row.notes,
+    notes: leerNota(
+      {
+        tenantId,
+        id: row.id,
+        que: "CITA",
+        claro: row.notes,
+        cifrado: row.notes_cifradas,
+      },
+      dek,
+    ),
     items,
     assignments: assignments.map((a) => ({
       reservableType: a.reservableType as "STAFF" | "RESOURCE" | "TABLE",

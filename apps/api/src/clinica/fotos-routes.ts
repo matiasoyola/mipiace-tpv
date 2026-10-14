@@ -33,6 +33,7 @@ import { MAPA_PIE_V1, clavesDelMapa } from "@mipiacetpv/clinica-sesion";
 import { requireOwnerOrCashier } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
 import { puertaDeFotos } from "./consentimientos.js";
+import { dekONada } from "./claves.js";
 import { decodificarFoto, FotoInvalida, leerFichero } from "./ficheros.js";
 import {
   comparadorPorZona,
@@ -257,11 +258,17 @@ export async function registerFotosRoutes(app: FastifyInstance): Promise<void> {
               message: "Esa foto no está en la historia de este paciente.",
             });
           }
-          const leido = await leerFichero("FOTO", fila.fileName, fila.sha256);
+          // clinica-7 · el fichero del disco está cifrado con la clave de
+          // esta clínica. `dekONada` y no `asegurarDek`: servir una foto
+          // es una lectura, y una lectura no crea claves.
+          const leido = await leerFichero("FOTO", fila.fileName, fila.sha256, {
+            tenantId: ctx.tenantId,
+            dek: await dekONada(ctx.tenantId),
+          });
           if (!leido) {
             request.log.error(
               { event: "foto_sin_fichero", fotoId },
-              "la fila de una foto apunta a un fichero que no está en el volumen",
+              "la fila de una foto apunta a un fichero que no está en el volumen, o que no se descifra con la clave de su clínica",
             );
             return reply.code(410).send({
               error: "PHOTO_FILE_MISSING",

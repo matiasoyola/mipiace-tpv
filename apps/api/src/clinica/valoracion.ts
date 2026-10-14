@@ -50,6 +50,16 @@ import {
 } from "../enlaces/puerta.js";
 import { REGLAS_VALORACION } from "../enlaces/reglas.js";
 import { huellaDeToken } from "../enlaces/token.js";
+import { asegurarDek, dekONada } from "./claves.js";
+import {
+  cifrarCorreccion,
+  cuerpoDeEntrada,
+  cuerpoParaEntrada,
+  esIlegible,
+  leerCorreccion,
+  nuevoIdDeFila,
+  sitioCorreccion,
+} from "./cripto-campos.js";
 import { comoPrismaParaActor, resolverActorPaciente } from "./actor-paciente.js";
 
 // ── La forma de lo que se guarda en la entrada de historia ────────────
@@ -401,9 +411,19 @@ async function cargarCuerpo(
   if (!fila.entryId) return null;
   const entrada = await prisma.clinicalEntry.findUnique({
     where: { id: fila.entryId },
-    select: { body: true },
+    // clinica-7 · `id` y `tenantId` los pide el AAD del cuerpo.
+    select: { id: true, tenantId: true, body: true, bodyCifrado: true },
   });
-  return (entrada?.body as CuerpoDeValoracion | undefined) ?? null;
+  if (!entrada) return null;
+  const cuerpo = cuerpoDeEntrada(
+    { ...entrada, body: entrada.body as unknown },
+    await dekONada(entrada.tenantId, prisma),
+  );
+  // Un cuerpo ilegible se trata como «no hay cuerpo», que es lo que esta
+  // función ya devolvía cuando la valoración está sin contestar. La
+  // pantalla lo enseña como pendiente en vez de caerse.
+  if (cuerpo == null || esIlegible(cuerpo)) return null;
+  return cuerpo as CuerpoDeValoracion;
 }
 
 async function cargarCorrecciones(
@@ -414,19 +434,37 @@ async function cargarCorrecciones(
     where: { assessmentId },
     orderBy: { createdAt: "asc" },
     select: {
+      // clinica-7 · `id` y `tenantId` para el AAD, y la columna cifrada.
+      // El ORDEN sigue siendo por `created_at`, que está en claro: por eso
+      // cifrar pregunta y valor no rompe nada de cómo se leen.
+      id: true,
+      tenantId: true,
       questionId: true,
       value: true,
+      correccionCifrada: true,
       createdAt: true,
       author: { select: { id: true, alias: true, email: true } },
     },
   });
-  return filas.map((c) => ({
-    preguntaId: c.questionId,
-    valor: c.value as Respuesta,
-    autorNombre: nombreDe(c.author),
-    autorUserId: c.author.id,
-    creadaEn: c.createdAt.toISOString(),
-  }));
+  if (filas.length === 0) return [];
+  const dek = await dekONada(filas[0]!.tenantId, prisma);
+  const out: Correccion[] = [];
+  for (const c of filas) {
+    const leida = leerCorreccion(c, dek, sitioCorreccion(c.tenantId, c.id));
+    // Una corrección ilegible NO se pinta a medias: no se sabe de qué
+    // pregunta es, así que pintarla la pondría en la pregunta equivocada.
+    // Se cuenta como lo que es —una corrección que está y no se lee— y el
+    // aviso queda en el log.
+    if (leida == null) continue;
+    out.push({
+      preguntaId: leida.preguntaId,
+      valor: leida.valor as Respuesta,
+      autorNombre: nombreDe(c.author),
+      autorUserId: c.author.id,
+      creadaEn: c.createdAt.toISOString(),
+    });
+  }
+  return out;
 }
 
 // ── Crear / reenviar el test ──────────────────────────────────────────
@@ -742,8 +780,11 @@ export async function responderValoracion(
         comoPrismaParaActor(tx),
         input.tenantId,
       );
+      const dek = await asegurarDek(input.tenantId, tx);
+      const idEntrada = nuevoIdDeFila();
       const entrada = await tx.clinicalEntry.create({
         data: {
+          id: idEntrada,
           tenantId: input.tenantId,
           clientId: input.clientId,
           // EL AUTOR ES EL PACIENTE. No la podóloga, no la recepcionista:
@@ -751,7 +792,12 @@ export async function responderValoracion(
           authorUserId: autorUserId,
           appointmentId: input.appointmentId,
           kind: "INITIAL_ASSESSMENT",
-          body: cuerpo as unknown as Prisma.InputJsonValue,
+          ...cuerpoParaEntrada({
+            tenantId: input.tenantId,
+            id: idEntrada,
+            cuerpo,
+            dek,
+          }),
         },
         select: { id: true },
       });
@@ -879,12 +925,25 @@ export async function corregirValoracion(
     };
   }
 
+  // clinica-7 · pregunta y valor se cifran JUNTOS: `question_id` en claro
+  // («diab») ya diría de qué habla la fila. El claro se deja vacío —la
+  // columna admite NULL desde este bloque y el CHECK
+  // `..._dice_algo` exige que una corrección diga algo en una de las dos
+  // formas.
+  const dek = await asegurarDek(input.tenantId, prisma);
+  const idCorreccion = nuevoIdDeFila();
   await prisma.clinicalAssessmentCorrection.create({
     data: {
+      id: idCorreccion,
       tenantId: input.tenantId,
       assessmentId: input.valoracionId,
-      questionId: input.preguntaId,
-      value: input.valor,
+      questionId: "",
+      value: null,
+      correccionCifrada: cifrarCorreccion(
+        { preguntaId: input.preguntaId, valor: input.valor },
+        dek,
+        sitioCorreccion(input.tenantId, idCorreccion),
+      ),
       authorUserId: input.autorUserId,
     },
     select: { id: true },

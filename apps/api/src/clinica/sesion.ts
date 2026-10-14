@@ -59,6 +59,13 @@ import {
 } from "@mipiacetpv/clinica-sesion";
 import type { PuertaPrimerTratamiento } from "@mipiacetpv/clinica-valoracion";
 
+import { asegurarDek, dekONada } from "./claves.js";
+import {
+  cuerpoDeEntrada,
+  cuerpoParaEntrada,
+  esIlegible,
+  nuevoIdDeFila,
+} from "./cripto-campos.js";
 import { resolverPrimerTratamiento } from "./primer-tratamiento.js";
 import {
   puertaDeConsentimientos,
@@ -179,6 +186,8 @@ export async function cargarCitaDeLaSesion(
 
 interface FilaDeEntrada {
   id: string;
+  tenantId: string;
+  bodyCifrado: string | null;
   body: Prisma.JsonValue;
   createdAt: Date;
   appointmentId: string | null;
@@ -187,15 +196,35 @@ interface FilaDeEntrada {
 
 const SELECT_ENTRADA = {
   id: true,
+  // clinica-7 · el AAD del cuerpo necesita el tenant y el id de la fila.
+  tenantId: true,
   body: true,
+  bodyCifrado: true,
   createdAt: true,
   appointmentId: true,
   author: { select: { id: true, alias: true, email: true } },
 } as const;
 
-function cuerpoDeSesion(fila: FilaDeEntrada): CuerpoDeSesion | null {
-  const b = fila.body as unknown;
-  if (b == null || typeof b !== "object") return null;
+/** clinica-7 · el `select` corto, para las dos lecturas que solo quieren
+ *  el cuerpo y la fecha (la cirugía y la gráfica del dolor). Lleva `id` y
+ *  `tenantId` porque el AAD los pide. */
+const SELECT_CUERPO = {
+  id: true,
+  tenantId: true,
+  body: true,
+  bodyCifrado: true,
+  createdAt: true,
+} as const;
+
+/** clinica-7 · el cuerpo de una sesión, descifrado. Un cuerpo ilegible
+ *  devuelve `null`, que es lo que estas funciones ya trataban como «una
+ *  sesión sin cuerpo». */
+function cuerpoDeSesion(
+  fila: FilaDeEntrada,
+  dek: Buffer | null,
+): CuerpoDeSesion | null {
+  const b = cuerpoDeEntrada(fila, dek);
+  if (b == null || typeof b !== "object" || esIlegible(b)) return null;
   return b as CuerpoDeSesion;
 }
 
@@ -223,7 +252,7 @@ export async function ultimaSesion(
     select: SELECT_ENTRADA,
   });
   if (!fila) return null;
-  const cuerpo = cuerpoDeSesion(fila);
+  const cuerpo = cuerpoDeSesion(fila, await dekONada(input.tenantId, prisma));
   if (!cuerpo) return null;
   return {
     entryId: fila.id,
@@ -296,11 +325,17 @@ export async function ultimaCirugia(
     },
     orderBy: { createdAt: "desc" },
     take: SESIONES_PARA_LA_CIRUGIA,
-    select: { body: true, createdAt: true },
+    select: SELECT_CUERPO,
   });
+  const dek = await dekONada(input.tenantId, prisma);
   for (const fila of filas) {
-    const cuerpo = fila.body as unknown as CuerpoDeSesionCualquiera | null;
-    if (cuerpo == null || typeof cuerpo !== "object") continue;
+    const cuerpo = cuerpoDeEntrada(
+      { ...fila, body: fila.body as unknown },
+      dek,
+    ) as CuerpoDeSesionCualquiera | null;
+    if (cuerpo == null || typeof cuerpo !== "object" || esIlegible(cuerpo)) {
+      continue;
+    }
     const leido = tiposDeLaSesion(cuerpo);
     if (!leido.tipos.includes("CIRUGIA")) continue;
     const c = cuerpo as CuerpoDeSesionV2;
@@ -340,7 +375,7 @@ export async function sesionDeLaCita(
     select: SELECT_ENTRADA,
   });
   if (!fila) return null;
-  const cuerpo = cuerpoDeSesion(fila);
+  const cuerpo = cuerpoDeSesion(fila, await dekONada(input.tenantId, prisma));
   if (!cuerpo) return null;
   return {
     entryId: fila.id,
@@ -370,7 +405,10 @@ export async function ultimaExploracion(
     select: SELECT_ENTRADA,
   });
   if (!fila) return null;
-  const cuerpo = fila.body as unknown as CuerpoDeExploracion;
+  const cuerpo = cuerpoDeEntrada(
+    fila,
+    await dekONada(input.tenantId, prisma),
+  ) as CuerpoDeExploracion | null;
   return {
     entryId: fila.id,
     fecha: fila.createdAt.toISOString(),
@@ -413,11 +451,15 @@ export async function historialDeDolor(
     },
     orderBy: { createdAt: "desc" },
     take: SESIONES_EN_LA_GRAFICA,
-    select: { body: true, createdAt: true },
+    select: SELECT_CUERPO,
   });
+  const dek = await dekONada(input.tenantId, prisma);
   return filas
     .map((f) => {
-      const cuerpo = f.body as unknown as CuerpoDeSesion;
+      const cuerpo = cuerpoDeEntrada(
+        { ...f, body: f.body as unknown },
+        dek,
+      ) as CuerpoDeSesion | null;
       return {
         fecha: f.createdAt.toISOString(),
         dolor: typeof cuerpo?.dolor === "number" ? cuerpo.dolor : 0,
@@ -799,14 +841,24 @@ export async function guardarExploracion(
     tipoDePie: limpia.tipoDePie,
     firma,
   };
+  // clinica-7 · la clave (creándola si es la primera escritura de esta
+  // clínica) y el id de la fila antes de insertarla.
+  const dek = await asegurarDek(input.tenantId, prisma);
+  const id = nuevoIdDeFila();
   const creada = await prisma.clinicalEntry.create({
     data: {
+      id,
       tenantId: input.tenantId,
       clientId: input.clientId,
       authorUserId: input.autorUserId,
       appointmentId: input.appointmentId,
       kind: "FOOT_EXAM",
-      body: cuerpo as unknown as Prisma.InputJsonValue,
+      ...cuerpoParaEntrada({
+        tenantId: input.tenantId,
+        id,
+        cuerpo,
+        dek,
+      }),
     },
     select: { id: true },
   });
@@ -1012,16 +1064,20 @@ export async function cerrarSesion(
   const firma = await firmaDe(prisma, tenantId, input.autorUserId);
   const cuerpo: CuerpoDeSesionV2 = { ...normal.cuerpo, firma };
 
+  const dek = await asegurarDek(tenantId, prisma);
+  const idNuevo = nuevoIdDeFila();
+
   let entryId: string;
   try {
     const creada = await prisma.clinicalEntry.create({
       data: {
+        id: idNuevo,
         tenantId,
         clientId: cita.clientId,
         authorUserId: input.autorUserId,
         appointmentId: cita.id,
         kind: "TREATMENT_SESSION",
-        body: cuerpo as unknown as Prisma.InputJsonValue,
+        ...cuerpoParaEntrada({ tenantId, id: idNuevo, cuerpo, dek }),
       },
       select: { id: true },
     });

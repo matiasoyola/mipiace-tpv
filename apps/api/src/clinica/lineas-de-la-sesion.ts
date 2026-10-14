@@ -48,6 +48,8 @@
 // UNA función pura con su test (`sesion-v2.test.ts`, «dos tipos, dos
 // líneas a caja») y el cobro lee lo que esa función dejó escrito.
 
+import { dekONada } from "./claves.js";
+import { cuerpoDeEntrada } from "./cripto-campos.js";
 import type { PrismaClient } from "@mipiacetpv/db";
 import type { CuerpoDeSesionCualquiera } from "@mipiacetpv/clinica-sesion";
 
@@ -82,11 +84,15 @@ export async function lineasDeLaSesionCerrada(
         appointmentId: input.appointmentId,
         kind: "TREATMENT_SESSION",
       },
-      select: { body: true },
+      // clinica-7 · `id` y `tenantId` los pide el AAD del cuerpo.
+      select: { id: true, tenantId: true, body: true, bodyCifrado: true },
     });
     if (!sesion) return null;
 
-    const cuerpo = sesion.body as unknown as CuerpoDeSesionCualquiera | null;
+    const cuerpo = cuerpoDeEntrada(
+      { ...sesion, body: sesion.body as unknown },
+      await dekONada(input.tenantId, prisma),
+    ) as CuerpoDeSesionCualquiera | null;
     const tratamientos = cuerpo?.tratamientos;
     if (!Array.isArray(tratamientos) || tratamientos.length === 0) {
       // DOS casos caen aquí, y los dos acaban igual a propósito:

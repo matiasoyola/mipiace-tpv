@@ -30,8 +30,13 @@ process.env.REDIS_URL = "redis://localhost:6379";
 process.env.JWT_ACCESS_SECRET = "a".repeat(40);
 process.env.JWT_REFRESH_SECRET = "b".repeat(40);
 process.env.HOLDED_KEY_ENCRYPTION_SECRET = randomBytes(32).toString("base64");
+// clinica-7 · la KEK de este fichero. Sin ella, `dekONada` revienta y
+// toda ruta clínica contesta 500.
+process.env.CLINICAL_KEK = randomBytes(32).toString("base64");
+process.env.CLINICAL_KEK_ID = "test";
 process.env.PUBLIC_TPV_URL = "https://mipiacetpv.com";
 
+import { cuerpoClaroDe, llaveroFake } from "./clinica-7-claves-fake.js";
 import Fastify from "fastify";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -78,6 +83,8 @@ interface FakeEntry {
   appointmentId: string | null;
   kind: string;
   body: Record<string, unknown>;
+  /** clinica-7 · donde de verdad va el dato. */
+  bodyCifrado: string | null;
   createdAt: Date;
 }
 let entradas: FakeEntry[] = [];
@@ -186,7 +193,11 @@ function entradaCoincide(e: FakeEntry, where: any): boolean {
   return true;
 }
 
+// clinica-7 · el llavero de la clínica, en memoria.
+const llavero = llaveroFake();
+
 const fakePrisma: any = {
+  clinicalTenantKey: llavero.modelo,
   $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
     fn(fakePrisma),
   ),
@@ -337,7 +348,9 @@ const fakePrisma: any = {
   clinicalEntry: {
     findUnique: vi.fn(async ({ where }: any) => {
       const e = entradas.find((x) => x.id === where.id);
-      return e ? { body: e.body } : null;
+      // clinica-7 · la fila ENTERA: descifrar necesita `id`, `tenantId` y
+      // `bodyCifrado`, no solo el cuerpo.
+      return e ? { ...e } : null;
     }),
     create: vi.fn(async ({ data }: any) => {
       // EL ÍNDICE ÚNICO PARCIAL, también aquí: de una cita sale UNA sola
@@ -370,13 +383,15 @@ const fakePrisma: any = {
         );
       }
       const row: FakeEntry = {
-        id: randomUUID(),
+        // clinica-7 · el id que manda la aplicación: va dentro del AAD.
+        id: data.id ?? randomUUID(),
         tenantId: data.tenantId,
         clientId: data.clientId,
         authorUserId: data.authorUserId,
         appointmentId: data.appointmentId ?? null,
         kind: data.kind,
         body: data.body,
+        bodyCifrado: data.bodyCifrado ?? null,
         // +1 ms por fila para que «la última» sea determinista.
         createdAt: new Date(Date.now() + entradas.length),
       };
@@ -1066,7 +1081,14 @@ describe("clinica-3 · el sanitario sin caja no ve importes EN LA API", () => {
       headers: comoSanitaria,
       payload: cerrarCon([QUIROPODIA], { dolor: 1 }),
     });
-    const cuerpo = entradas.find((e) => e.kind === "TREATMENT_SESSION")!.body;
+    // clinica-7 · el cuerpo se lee DESCIFRADO, que es lo que de verdad se
+    // guardó. Antes se afirmaba sobre `body` a pelo; ahora ahí está el
+    // centinela y el dato vive cifrado, así que leerlo a pelo habría
+    // afirmado sobre nada.
+    const cuerpo = await cuerpoClaroDe(
+      entradas.find((e) => e.kind === "TREATMENT_SESSION")!,
+      fakePrisma,
+    );
     expect(cuerpo.tratamientosNombre).toEqual({ [QUIROPODIA]: "Quiropodia" });
     expect(clavesDeDinero(cuerpo)).toEqual([]);
   });

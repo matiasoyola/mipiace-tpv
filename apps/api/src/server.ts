@@ -22,6 +22,7 @@ import { registerCatalogRoutes } from "./catalog/routes.js";
 import { registerLocalCatalogRoutes } from "./catalog/local-products.js";
 import { registerContactsRoutes } from "./contacts/routes.js";
 import { registerContactImportRoutes } from "./contacts/import.js";
+import { exigirArranqueClinico } from "./clinica/arranque.js";
 import { registerClinicaRoutes } from "./clinica/routes.js";
 import { registerHistoriaRoutes } from "./clinica/historia-routes.js";
 import { registerConsentimientosRoutes } from "./clinica/consentimientos-routes.js";
@@ -287,6 +288,15 @@ async function main() {
   await getPrisma().$queryRaw`SELECT 1`;
   // Ping redis para detectar problemas en arranque.
   await getRedis().ping();
+
+  // clinica-7 · decisión 17 · SI HAY CLÍNICAS Y LA KEK NO ES LA BUENA, NO
+  // SE ARRANCA. Va aquí, después del primer query y antes de escuchar:
+  // necesita la base y tiene que cortar antes de que entre una petición.
+  //
+  // Escribir una historia clínica con la clave equivocada deja algo que
+  // nadie podrá leer nunca, y eso se descubre días después. Un despliegue
+  // que no sube se ve ahora mismo.
+  await exigirArranqueClinico(app.log);
 
   // En desarrollo arrancamos los workers en el mismo proceso. En
   // producción se separan con `pnpm worker:dev` (otro contenedor del compose).

@@ -47,6 +47,13 @@ import {
 import { renderConsentimientoPdf } from "@mipiacetpv/ticket-pdf";
 
 import { CENTER_TZ } from "../agenda/time.js";
+import { asegurarDek, dekONada } from "./claves.js";
+import {
+  cifrarTexto,
+  leerTexto,
+  nuevoIdDeFila,
+  sitioMotivoDeRevocacion,
+} from "./cripto-campos.js";
 import { guardarFichero, huellaDe } from "./ficheros.js";
 
 /** El nombre del campo que la pantalla y el PDF llaman «hoy». */
@@ -139,6 +146,9 @@ const SELECT_CONSENTIMIENTO = {
   informerUserId: true,
   revokesConsentId: true,
   revokeReason: true,
+  // clinica-7 · el motivo cifrado, y `tenantId` para su AAD.
+  revokeReasonCifrado: true,
+  tenantId: true,
   informer: { select: { alias: true, email: true, clinicianLicense: true } },
 } satisfies Prisma.ClientConsentSelect;
 
@@ -206,6 +216,7 @@ function tituloDeLaFila(fila: FilaDeBase): string {
 function aPantalla(
   fila: FilaDeBase,
   todas: readonly FilaDeBase[],
+  dek: Buffer | null,
 ): ConsentimientoEnPantalla {
   const revocacion = todas.find((f) => f.revokesConsentId === fila.id) ?? null;
   return {
@@ -216,7 +227,17 @@ function aPantalla(
     firmadoEn: fila.grantedAt.toISOString(),
     revocado: revocacion != null,
     revocadoEn: revocacion ? revocacion.grantedAt.toISOString() : null,
-    revocadoMotivo: revocacion?.revokeReason ?? null,
+    revocadoMotivo:
+      revocacion == null
+        ? null
+        : leerTexto(
+            {
+              cifrado: revocacion.revokeReasonCifrado,
+              claro: revocacion.revokeReason,
+            },
+            dek,
+            sitioMotivoDeRevocacion(revocacion.tenantId, revocacion.id),
+          ),
     tienePdf: fila.pdfFileName != null,
     clinico: fila.clinical,
     firmante: {
@@ -382,6 +403,8 @@ export async function vistaDeConsentimientos(
     }),
   ]);
   const cuenta = paraLaCuenta(filas);
+  // clinica-7 · UNA lectura de clave para toda la lista.
+  const dek = await dekONada(input.tenantId, prisma);
   return {
     plantillas: PLANTILLAS_VIGENTES.map((p) => {
       const vigente = consentimientoVigente(cuenta, p.id);
@@ -394,7 +417,7 @@ export async function vistaDeConsentimientos(
         clinica: p.clinica,
         pendienteDeValidar: p.pendienteDeValidar,
         laPideLaCita: pideLaCita.includes(p.id),
-        vigente: fila ? aPantalla(fila, filas) : null,
+        vigente: fila ? aPantalla(fila, filas, dek) : null,
       };
     }),
     firmados: filas
@@ -402,7 +425,7 @@ export async function vistaDeConsentimientos(
       // enseña es la concesión, marcada como revocada. Dos líneas por el
       // mismo consentimiento se leerían como dos consentimientos.
       .filter((f) => f.revokesConsentId == null)
-      .map((f) => aPantalla(f, filas)),
+      .map((f) => aPantalla(f, filas, dek)),
     pideLaCita,
   };
 }
@@ -580,8 +603,16 @@ export async function firmarConsentimiento(
       : null,
   });
 
+  // clinica-7 · la clave de esta clínica, creándola si es la primera vez.
+  // Antes de tocar el disco: si no hay forma de cifrar, no se escribe ni
+  // el PDF ni la fila.
+  const dek = await asegurarDek(input.tenantId, prisma);
+
   // El fichero ANTES de la fila. Ver la cabecera.
-  const guardado = await guardarFichero("CONSENTIMIENTO", pdf);
+  const guardado = await guardarFichero("CONSENTIMIENTO", pdf, {
+    tenantId: input.tenantId,
+    dek,
+  });
 
   const creada = await prisma.clientConsent.create({
     data: {
@@ -613,7 +644,7 @@ export async function firmarConsentimiento(
     select: SELECT_CONSENTIMIENTO,
   });
 
-  return { ok: true, consentimiento: aPantalla(creada, [creada]) };
+  return { ok: true, consentimiento: aPantalla(creada, [creada], dek) };
 }
 
 // ── Revocar ──────────────────────────────────────────────────────────
@@ -675,8 +706,12 @@ export async function revocarConsentimiento(
     };
   }
 
+  // clinica-7 · la clave y el id de la fila, antes de insertarla.
+  const dekRevocacion = await asegurarDek(input.tenantId, prisma);
+  const idRevocacion = nuevoIdDeFila();
   const revocacion = await prisma.clientConsent.create({
     data: {
+      id: idRevocacion,
       tenantId: input.tenantId,
       clientId: input.clientId,
       kind: fila.kind,
@@ -691,7 +726,15 @@ export async function revocarConsentimiento(
       informerUserId: fila.clinical ? input.userId : null,
       createdByUserId: input.userId,
       revokesConsentId: fila.id,
-      revokeReason: input.motivo.trim(),
+      // clinica-7 · el motivo va SOLO cifrado. «Ya no quiere más fotos del
+      // pie diabético» es un dato de salud escrito por una persona con
+      // prisa, y no hay ninguna consulta que filtre por él.
+      revokeReason: null,
+      revokeReasonCifrado: cifrarTexto(
+        input.motivo.trim(),
+        dekRevocacion,
+        sitioMotivoDeRevocacion(input.tenantId, idRevocacion),
+      ),
     },
     select: { id: true },
   });

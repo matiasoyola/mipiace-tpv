@@ -96,6 +96,7 @@ function conConsentimientoDeFotos() {
     informerUserId: SANITARIA_ID,
     revokesConsentId: null,
     revokeReason: null,
+      revokeReasonCifrado: null,
     createdByUserId: SANITARIA_ID,
   });
 }
@@ -258,7 +259,20 @@ describe("clinica-4 · la zona se elige antes de disparar", () => {
     const app = await buildApp();
     await hacerFoto(app, "R:talon");
     const f = mundo.photos[0]!;
-    expect(f.zona).toBe("R:talon");
+    // clinica-7 · LA ZONA YA NO ESTÁ EN CLARO EN LA FILA. Dice dónde tiene
+    // el problema el paciente, así que es un dato de salud aunque quepa en
+    // ocho caracteres.
+    expect(f.zona).toBe("");
+    expect(f.zonaCifrada).toMatch(/^c1:/);
+    // Y lo que la ruta devuelve sí es la zona: la API descifra y el
+    // cliente nunca ve texto cifrado (decisión 13).
+    const lista = await app.inject({
+      method: "GET",
+      url: `/clinica/clients/${PACIENTE_ID}/fotos`,
+      headers: comoSanitaria,
+    });
+    expect(lista.json().fotos[0].zona).toBe("R:talon");
+
     expect(f.mapaVersion).toBe(1);
     expect(f.appointmentId).toBe(CITA_ID);
     expect(f.authorUserId).toBe(SANITARIA_ID);
@@ -370,7 +384,10 @@ describe("clinica-4 · una foto no se borra: se retira", () => {
     expect(mundo.photos).toHaveLength(1);
     expect(mundo.photos[0]!.withdrawnAt).not.toBeNull();
     expect(mundo.photos[0]!.withdrawnByUserId).toBe(SANITARIA_ID);
-    expect(mundo.photos[0]!.withdrawReason).toBe("Salió en blanco");
+    // clinica-7 · el motivo va CIFRADO: «ya no quiere más fotos del pie
+    // diabético» es un dato de salud escrito por alguien con prisa.
+    expect(mundo.photos[0]!.withdrawReason).toBeNull();
+    expect(mundo.photos[0]!.withdrawReasonCifrado).toMatch(/^c1:/);
 
     // Y la lista la enseña marcada.
     const lista = await app.inject({
@@ -478,9 +495,34 @@ describe("clinica-4 · la huella de la foto cuadra con el fichero", () => {
     const app = await buildApp();
     await hacerFoto(app, "L:h");
     const f = mundo.photos[0]!;
-    const bytes = readFileSync(join(DIRECTORIO, "fotos", f.fileName));
-    expect(createHash("sha256").update(bytes).digest("hex")).toBe(f.sha256);
-    expect(f.bytes).toBe(bytes.byteLength);
+    const enDisco = readFileSync(join(DIRECTORIO, "fotos", f.fileName));
+
+    // clinica-7 · EL DISCO NO LLEVA EL JPEG. Lleva el sobre: cabecera
+    // `MPC1`, IV y tag. Si se filtra el volumen, no se abre ni una foto.
+    expect(enDisco.subarray(0, 4).toString("latin1")).toBe("MPC1");
+    expect(enDisco.subarray(0, 3).toString("hex")).not.toBe("ffd8ff");
+    // Y su huella NO es la de la fila: la de la fila es la del CLARO.
+    expect(createHash("sha256").update(enDisco).digest("hex")).not.toBe(
+      f.sha256,
+    );
+
+    // La que cuadra es la del contenido descifrado, y es lo que la ruta
+    // sirve. Es la decisión 8: la huella se comprueba DESPUÉS de
+    // descifrar, para que un fichero manipulado se siga detectando.
+    const binario = await app.inject({
+      method: "GET",
+      url: `/clinica/clients/${PACIENTE_ID}/fotos/${f.id}/imagen`,
+      headers: comoSanitaria,
+    });
+    expect(binario.statusCode).toBe(200);
+    expect(binario.headers["x-huella-cuadra"]).toBe("si");
+    expect(
+      createHash("sha256").update(binario.rawPayload).digest("hex"),
+    ).toBe(f.sha256);
+    // `bytes` es el tamaño del CLARO, no del sobre.
+    expect(f.bytes).toBe(binario.rawPayload.byteLength);
+    expect(f.bytes).toBeLessThan(enDisco.byteLength);
+
     expect(f.fileName).toMatch(/^[0-9a-f-]{36}-[0-9a-f]{12}\.jpg$/);
     expect(f.fileName).not.toContain("h");
     await app.close();

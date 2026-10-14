@@ -26,8 +26,13 @@ process.env.REDIS_URL = "redis://localhost:6379";
 process.env.JWT_ACCESS_SECRET = "a".repeat(40);
 process.env.JWT_REFRESH_SECRET = "b".repeat(40);
 process.env.HOLDED_KEY_ENCRYPTION_SECRET = randomBytes(32).toString("base64");
+// clinica-7 · la KEK de este fichero. Sin ella, `dekONada` revienta y
+// toda ruta clínica contesta 500.
+process.env.CLINICAL_KEK = randomBytes(32).toString("base64");
+process.env.CLINICAL_KEK_ID = "test";
 process.env.PUBLIC_TPV_URL = "https://mipiacetpv.com";
 
+import { llaveroFake } from "./clinica-7-claves-fake.js";
 import Fastify from "fastify";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -118,7 +123,11 @@ function entradaCoincide(e: FakeEntry, where: any): boolean {
   return true;
 }
 
+// clinica-7 · el llavero de la clínica, en memoria.
+const llavero = llaveroFake();
+
 const fakePrisma: any = {
+  clinicalTenantKey: llavero.modelo,
   tenant: {
     findUnique: vi.fn(async () => ({
       clinicalRecordsEnabled: clinicaEncendida,

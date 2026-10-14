@@ -17,6 +17,14 @@
 //   · `clinical_photos` admite UNA transición: la retirada.
 //   · `clinical_report_deliveries` es de solo inserción.
 
+import { kekDePrueba, llaveroFake } from "../clinica-7-claves-fake.js";
+
+// clinica-7 · la KEK, ANTES de cualquier import que llame a `loadEnv`.
+kekDePrueba();
+
+const { olvidarClaves } = await import("../../src/clinica/claves.js");
+const { olvidarSiEsClinico } = await import("../../src/clinica/notas.js");
+const { olvidarEstado } = await import("../../src/clinica/contrato.js");
 import { randomUUID } from "node:crypto";
 
 export const TENANT_ID = "00000000-0000-0000-0000-000000000001";
@@ -62,6 +70,8 @@ export interface FakeConsent {
   informerUserId: string | null;
   revokesConsentId: string | null;
   revokeReason: string | null;
+  /** clinica-7 */
+  revokeReasonCifrado: string | null;
   createdByUserId: string | null;
 }
 
@@ -71,6 +81,8 @@ export interface FakePhoto {
   clientId: string;
   appointmentId: string | null;
   zona: string;
+  /** clinica-7 */
+  zonaCifrada: string | null;
   mapaVersion: number;
   fileName: string;
   sha256: string;
@@ -81,6 +93,8 @@ export interface FakePhoto {
   withdrawnAt: Date | null;
   withdrawnByUserId: string | null;
   withdrawReason: string | null;
+  /** clinica-7 */
+  withdrawReasonCifrado: string | null;
 }
 
 export interface FakeDelivery {
@@ -104,6 +118,9 @@ export interface FakeEntry {
   appointmentId: string | null;
   kind: string;
   body: Record<string, unknown>;
+  /** clinica-7 · lo que de verdad lleva el dato. El `body` de las filas
+   *  nuevas es el centinela `{cifrado:true}`. */
+  bodyCifrado: string | null;
   createdAt: Date;
 }
 
@@ -131,6 +148,13 @@ export interface MundoDeLaClinica {
   serviciosDeLaCita: string[];
   valoracionValidada: boolean;
   prisma: any;
+  /** clinica-7 · el llavero, para que un test pueda leer la DEK de la
+   *  clínica y cifrar algo con ella — es lo que hace falta para ejercitar
+   *  el camino de «el fichero descifra pero su contenido no es el que la
+   *  fila dice». Sin esto, ese camino sería código muerto. */
+  llavero: ReturnType<typeof llaveroFake>;
+  /** La DEK de la clínica de prueba, o `null` si nadie ha escrito nada. */
+  dekDeLaClinica(tenantId?: string): Promise<Buffer | null>;
   reset(): void;
 }
 
@@ -163,6 +187,13 @@ export function crearMundo(): MundoDeLaClinica {
   };
 
   const m = mundo as MundoDeLaClinica;
+  // clinica-7 · el llavero de esta clínica, en memoria.
+  const llavero = llaveroFake();
+  mundo.llavero = llavero;
+  mundo.dekDeLaClinica = async (tenantId = TENANT_ID) => {
+    const { dekONada } = await import("../../src/clinica/claves.js");
+    return dekONada(tenantId, m.prisma);
+  };
 
   m.reset = () => {
     m.clinicaEncendida = true;
@@ -176,6 +207,12 @@ export function crearMundo(): MundoDeLaClinica {
     m.accesos = [];
     m.pideElServicio = new Map();
     m.serviciosDeLaCita = [];
+    llavero.reset();
+    // Y las cachés del proceso: la clave y el «¿es clínico?» viven 60 s,
+    // así que entre dos tests del mismo fichero se arrastrarían.
+    olvidarClaves();
+    olvidarSiEsClinico();
+    olvidarEstado();
     m.valoracionValidada = true;
 
     m.users.set(DUENA_ID, {
@@ -409,7 +446,11 @@ export function crearMundo(): MundoDeLaClinica {
       },
       create: async ({ data, select }: any) => {
         const fila: FakeConsent = {
-          id: randomUUID(),
+          // clinica-7 · EL ID QUE MANDA LA APLICACIÓN. El AAD del motivo
+          // cifrado lo lleva dentro, así que inventarse otro aquí dejaría
+          // un valor que no se descifra — y el fake estaría probando algo
+          // que la base no hace.
+          id: data.id ?? randomUUID(),
           tenantId: data.tenantId,
           clientId: data.clientId,
           kind: data.kind,
@@ -427,6 +468,7 @@ export function crearMundo(): MundoDeLaClinica {
           informerUserId: data.informerUserId ?? null,
           revokesConsentId: data.revokesConsentId ?? null,
           revokeReason: data.revokeReason ?? null,
+          revokeReasonCifrado: data.revokeReasonCifrado ?? null,
           createdByUserId: data.createdByUserId ?? null,
         };
         m.consents.push(fila);
@@ -460,11 +502,13 @@ export function crearMundo(): MundoDeLaClinica {
       },
       create: async ({ data, select }: any) => {
         const fila: FakePhoto = {
-          id: randomUUID(),
+          // clinica-7 · el id que manda la aplicación (va en el AAD).
+          id: data.id ?? randomUUID(),
           tenantId: data.tenantId,
           clientId: data.clientId,
           appointmentId: data.appointmentId ?? null,
           zona: data.zona,
+          zonaCifrada: data.zonaCifrada ?? null,
           mapaVersion: data.mapaVersion,
           fileName: data.fileName,
           sha256: data.sha256,
@@ -475,6 +519,7 @@ export function crearMundo(): MundoDeLaClinica {
           withdrawnAt: null,
           withdrawnByUserId: null,
           withdrawReason: null,
+          withdrawReasonCifrado: null,
         };
         m.photos.push(fila);
         return proyectar(fila, select, {
@@ -488,7 +533,14 @@ export function crearMundo(): MundoDeLaClinica {
         if (!f) throw new Error("no existe");
         const tocaOtraCosa = Object.keys(data).some(
           (k) =>
-            !["withdrawnAt", "withdrawnByUserId", "withdrawReason"].includes(k),
+            ![
+              "withdrawnAt",
+              "withdrawnByUserId",
+              "withdrawReason",
+              // clinica-7 · la retirada escribe el motivo CIFRADO. El
+              // guard de la tabla lo admite desde este bloque.
+              "withdrawReasonCifrado",
+            ].includes(k),
         );
         if (tocaOtraCosa) {
           throw new Error(
@@ -502,7 +554,8 @@ export function crearMundo(): MundoDeLaClinica {
         }
         f.withdrawnAt = data.withdrawnAt;
         f.withdrawnByUserId = data.withdrawnByUserId;
-        f.withdrawReason = data.withdrawReason;
+        f.withdrawReason = data.withdrawReason ?? null;
+        f.withdrawReasonCifrado = data.withdrawReasonCifrado ?? null;
         return proyectar(f, select, {
           author: usuarioVista(m, f.authorUserId),
           withdrawnBy: usuarioVista(m, f.withdrawnByUserId),
@@ -541,10 +594,15 @@ export function crearMundo(): MundoDeLaClinica {
         );
       },
     },
+    // clinica-7 · el llavero. Sin él, `dekONada` revienta y toda ruta
+    // clínica contesta 500.
+    clinicalTenantKey: llavero.modelo,
     clinicalEntry: {
       findUnique: async ({ where }: any) => {
         const e = m.entradas.find((x) => x.id === where.id);
-        return e ? { body: e.body } : null;
+        // clinica-7 · la fila ENTERA: quien descifra necesita `id`,
+        // `tenantId` y `bodyCifrado`, no solo el cuerpo.
+        return e ? { ...e } : null;
       },
       findFirst: async ({ where, orderBy }: any) => {
         let xs = m.entradas.filter((e) => coincideEntrada(e, where));
@@ -629,6 +687,10 @@ export function sembrarValoracion(m: MundoDeLaClinica): void {
     authorUserId: SANITARIA_ID,
     appointmentId: null,
     kind: "ASSESSMENT",
+    // clinica-7 · sembrada EN CLARO a propósito: es el caso de las
+    // filas que ya estaban escritas cuando llegó el cifrado, y la
+    // lectura tiene que seguir funcionando con ellas.
+    bodyCifrado: null,
     body: {
       v: 1,
       cuestionarioVersion: 1,
@@ -669,6 +731,10 @@ export function sembrarSesion(
     authorUserId: SANITARIA_ID,
     appointmentId: randomUUID(),
     kind: "TREATMENT_SESSION",
+    // clinica-7 · sembrada EN CLARO a propósito: es el caso de las
+    // filas que ya estaban escritas cuando llegó el cifrado, y la
+    // lectura tiene que seguir funcionando con ellas.
+    bodyCifrado: null,
     body: {
       v: 2,
       mapaVersion: 1,

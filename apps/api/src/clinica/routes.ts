@@ -33,6 +33,14 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { requireOwnerOrCashier } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
+import { asegurarDek, dekONada } from "./claves.js";
+import {
+  cuerpoDeAnotacion,
+  cuerpoDeEntrada,
+  cuerpoParaAnotacion,
+  cuerpoParaEntrada,
+  nuevoIdDeFila,
+} from "./cripto-campos.js";
 import { ensureClinicaEnabled } from "./gate.js";
 import { conHistoria } from "./registro.js";
 
@@ -154,8 +162,12 @@ export async function registerClinicaRoutes(
             ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
             select: {
               id: true,
+              // clinica-7 · `tenantId` y `bodyCifrado`: el AAD de cada
+              // cuerpo los necesita (ver `cripto-campos.ts`).
+              tenantId: true,
               kind: true,
               body: true,
+              bodyCifrado: true,
               createdAt: true,
               appointmentId: true,
               author: { select: { id: true, alias: true, email: true } },
@@ -163,7 +175,9 @@ export async function registerClinicaRoutes(
                 orderBy: { createdAt: "asc" },
                 select: {
                   id: true,
+                  tenantId: true,
                   body: true,
+                  bodyCifrado: true,
                   createdAt: true,
                   author: { select: { id: true, alias: true, email: true } },
                 },
@@ -172,17 +186,22 @@ export async function registerClinicaRoutes(
           });
           const hayMas = rows.length > take;
           const pagina = hayMas ? rows.slice(0, take) : rows;
+          // UNA lectura de clave para la página entera y todas sus
+          // anotaciones. Es la pieza que hace que el criterio de
+          // rendimiento del bloque se cumpla: con una por entrada, abrir
+          // una historia de 200 visitas serían 200 consultas más.
+          const dek = await dekONada(ctx.tenantId, prisma);
           return {
             entries: pagina.map((e) => ({
               id: e.id,
               kind: e.kind,
-              body: e.body,
+              body: cuerpoDeEntrada(e, dek),
               createdAt: e.createdAt.toISOString(),
               appointmentId: e.appointmentId,
               author: autorView(e.author),
               addenda: e.addenda.map((a) => ({
                 id: a.id,
-                body: a.body,
+                body: cuerpoDeAnotacion(a, dek),
                 createdAt: a.createdAt.toISOString(),
                 author: autorView(a.author),
               })),
@@ -265,19 +284,31 @@ export async function registerClinicaRoutes(
               });
             }
           }
+          // clinica-7 · la clave de esta clínica (creándola si es la
+          // primera escritura) y el id de la fila ANTES de insertarla: el
+          // AAD ata el cuerpo a `tenant|clinical_entries|body|<id>`.
+          const dek = await asegurarDek(ctx.tenantId, prisma);
+          const id = nuevoIdDeFila();
           const creada = await prisma.clinicalEntry.create({
             data: {
+              id,
               tenantId: ctx.tenantId,
               clientId,
               authorUserId: ctx.userId,
               appointmentId: body.appointmentId ?? null,
               kind: body.kind ?? "NOTE",
-              body: body.body as never,
+              // El claro va al centinela: una fila que nace cifrada no
+              // guarda el dato de salud en claro «por si acaso».
+              ...cuerpoParaEntrada({
+                tenantId: ctx.tenantId,
+                id,
+                cuerpo: body.body,
+                dek,
+              }),
             },
             select: {
               id: true,
               kind: true,
-              body: true,
               createdAt: true,
               appointmentId: true,
               author: { select: { id: true, alias: true, email: true } },
@@ -287,7 +318,10 @@ export async function registerClinicaRoutes(
             entry: {
               id: creada.id,
               kind: creada.kind,
-              body: creada.body,
+              // Lo que se devuelve es lo que entró, no lo que hay en la
+              // columna en claro (que es el centinela). El cliente nunca
+              // ve texto cifrado ni el centinela: decisión 13.
+              body: body.body,
               createdAt: creada.createdAt.toISOString(),
               appointmentId: creada.appointmentId,
               author: autorView(creada.author),
@@ -345,16 +379,23 @@ export async function registerClinicaRoutes(
         reply,
         { clientId: entrada.clientId, action: "WRITE" },
         async (ctx) => {
+          const dek = await asegurarDek(ctx.tenantId, prisma);
+          const id = nuevoIdDeFila();
           const creada = await prisma.clinicalAddendum.create({
             data: {
+              id,
               tenantId: ctx.tenantId,
               entryId: entrada.id,
               authorUserId: ctx.userId,
-              body: body.body as never,
+              ...cuerpoParaAnotacion({
+                tenantId: ctx.tenantId,
+                id,
+                cuerpo: body.body,
+                dek,
+              }),
             },
             select: {
               id: true,
-              body: true,
               createdAt: true,
               author: { select: { id: true, alias: true, email: true } },
             },
@@ -362,7 +403,7 @@ export async function registerClinicaRoutes(
           return reply.code(201).send({
             addendum: {
               id: creada.id,
-              body: creada.body,
+              body: body.body,
               createdAt: creada.createdAt.toISOString(),
               author: autorView(creada.author),
             },
