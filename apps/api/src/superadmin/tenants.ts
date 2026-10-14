@@ -963,10 +963,14 @@ export async function registerSuperAdminTenantsRoutes(
             // guardas y su audit), el done de ese bloque documenta
             // `PATCH /super-admin/tenants/<id> {"clinicalRecordsEnabled":
             // true}` como la única forma de encender la clínica… y la
-            // propiedad no estaba declarada aquí. Con
-            // `additionalProperties: false`, eso es un 400 «body must NOT
-            // have additional properties»: el camino documentado para
-            // encender la historia clínica no funcionaba.
+            // propiedad no estaba declarada aquí.
+            //
+            // Y lo que pasaba NO era un 400: Fastify configura ajv con
+            // `removeAdditional: true` por defecto, así que
+            // `additionalProperties: false` **borra** la propiedad en vez
+            // de quejarse. El PATCH contestaba **200 `{noChanges: true}`**
+            // y no encendía nada. Un 400 se habría visto el primer día; un
+            // 200 que no hace nada se lee como «ya estaba encendido».
             //
             // No lo vio nadie porque ningún test la manda por HTTP —los de
             // la clínica construyen el tenant con la columna ya puesta— y
@@ -975,10 +979,8 @@ export async function registerSuperAdminTenantsRoutes(
             // ella, así que lo primero que hay que poder hacer es
             // encenderla.
             //
-            // Se arregla aquí y no en un bloque aparte porque el prompt pide
-            // la casilla de la residencia «junto a la de la clínica», y una
-            // casilla que manda algo que el servidor rechaza no es una
-            // casilla.
+            // Tiene su test en `residencia-interruptor.test.ts`, incluido
+            // el de que una propiedad desconocida se tira en silencio.
             clinicalRecordsEnabled: { type: "boolean" },
             // residencia-1 (D-48) · el interruptor de la RESIDENCIA. Mismo
             // gobierno que la clínica y la caja: sólo desde aquí, porque

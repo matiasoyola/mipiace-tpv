@@ -130,12 +130,17 @@ export function ResidentesPage() {
             />
             Ver también los que se fueron
           </label>
+          {/* «Nuevo ingreso» y NO «Dar de alta», y lo encontró su propio
+              test: en una residencia **«dar de alta» significa que alguien
+              SE VA**. Tener los dos actos con las mismas palabras —el de
+              la cabecera y el de cada línea— era la clase de ambigüedad
+              que se paga una vez, de noche, con la familia esperando. */}
           <PrimaryButton
             type="button"
             onClick={() => setAlta(true)}
             className="!h-10 !w-auto !px-4 !text-[13.5px]"
           >
-            <Plus className="h-4 w-4" /> Dar de alta
+            <Plus className="h-4 w-4" /> Nuevo ingreso
           </PrimaryButton>
         </div>
       </div>
@@ -209,7 +214,7 @@ function Tabla({
   if (filas.length === 0) {
     return (
       <p className="rounded-2xl border border-slate-200 bg-white px-5 py-6 text-[13.5px] text-slate-500">
-        Todavía no hay residentes. Dale a «Dar de alta».
+        Todavía no hay residentes. Dale a «Nuevo ingreso».
       </p>
     );
   }
@@ -409,7 +414,7 @@ function ModalAlta({
   }
 
   return (
-    <Modal title="Dar de alta a un residente" onClose={onClose}>
+    <Modal title="Nuevo ingreso" onClose={onClose}>
       <TextField id="nombre" label="Nombre" value={firstName} onChange={setFirstName} />
       <TextField id="apellidos" label="Apellidos" value={lastName} onChange={setLastName} />
       <TextField
@@ -502,7 +507,7 @@ function ModalAlta({
           disabled={faltan.length > 0}
           onClick={() => void guardar()}
         >
-          Dar de alta
+          Registrar ingreso
         </PrimaryButton>
       </div>
     </Modal>
