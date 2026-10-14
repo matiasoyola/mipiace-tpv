@@ -422,6 +422,21 @@ export function crearMundo(): MundoDeLaClinica {
         if (!c || c.tenantId !== where.tenantId) throw new Error("no existe");
         return c;
       },
+      // clinica-7 · la usa la exportación del centro: recorre TODOS los
+      // pacientes, por apellido.
+      findMany: async ({ where, orderBy }: any) => {
+        let xs = [...m.clientes.values()].filter(
+          (c) => where?.tenantId == null || c.tenantId === where.tenantId,
+        );
+        if (Array.isArray(orderBy)) {
+          xs = xs
+            .slice()
+            .sort((a, b) =>
+              String(a.lastName ?? "").localeCompare(String(b.lastName ?? "")),
+            );
+        }
+        return xs;
+      },
     },
     appointment: {
       findFirst: async ({ where }: any) => {
