@@ -20,12 +20,24 @@
 
 import { randomBytes, randomUUID } from "node:crypto";
 
+import {
+  contratoFake,
+  kekDePrueba,
+  llaveroFake,
+} from "./clinica-7-claves-fake.js";
+
 process.env.NODE_ENV = "test";
 process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
 process.env.REDIS_URL = "redis://localhost:6379";
 process.env.JWT_ACCESS_SECRET = "a".repeat(40);
 process.env.JWT_REFRESH_SECRET = "b".repeat(40);
 process.env.HOLDED_KEY_ENCRYPTION_SECRET = randomBytes(32).toString("base64");
+
+// clinica-7 · LA KEK DE ESTE FICHERO, y hace falta aunque aquí no se cifre
+// nada. La ficha del residente pasa por `conHistoria`, el punto por el que
+// pasa todo lo clínico: el día que una ruta de residencia guarde un dato de
+// salud lo hará por ahí y necesitará la DEK.
+kekDePrueba();
 
 import Fastify from "fastify";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -199,7 +211,24 @@ function vistaPerfil(clientId: string, conOcupacion: boolean) {
   };
 }
 
+// clinica-7 · el llavero de la clínica, en memoria. No se cifra nada en
+// este fichero, pero el modelo tiene que existir para que `dekONada` no se
+// encuentre un `undefined`.
+const llavero = llaveroFake();
+// Y EL CONTRATO DE ENCARGADO, ACEPTADO. Esto es lo que faltaba: desde
+// clinica-7, `conHistoria` pregunta por el estado del contrato en TODA
+// ruta clínica —y la ficha de un residente lo es—, así que un `fakePrisma`
+// sin `clinicalProcessorAgreement` contesta 500 «reading findMany».
+//
+// Nace ACEPTADO porque un centro de residencia que funciona es uno que
+// tiene el contrato aceptado: `tenants_residencia_exige_clinica` no deja
+// encender la residencia sin la clínica, y la clínica sin contrato no
+// escribe. El 423 se prueba revocándolo, no al contrario.
+const contrato = contratoFake(TENANT, DIRECTORA);
+
 const fakePrisma = {
+  clinicalTenantKey: llavero.modelo,
+  clinicalProcessorAgreement: contrato.modelo,
   tenant: {
     findUnique: vi.fn(async () => ({
       clinicalRecordsEnabled: clinicaEncendida,
@@ -459,6 +488,11 @@ const { registerResidenciaTurnosRoutes } = await import(
   "../src/residencia/turnos-routes.js"
 );
 const { signAccessToken } = await import("../src/auth/tokens.js");
+// Las dos cachés de clinica-7. Las dos duran MÁS que este fichero entero:
+// sin vaciarlas en el `beforeEach`, el primer test decide el estado del
+// contrato de todos los demás — y este fichero apaga la clínica en uno.
+const { olvidarClaves } = await import("../src/clinica/claves.js");
+const { olvidarEstado } = await import("../src/clinica/contrato.js");
 const { hashDeviceToken, requireDeviceToken } = await import(
   "../src/devices/auth.js"
 );
@@ -481,6 +515,10 @@ async function buildApp() {
 beforeEach(() => {
   residenciaEncendida = true;
   clinicaEncendida = true;
+  llavero.reset();
+  contrato.reset();
+  olvidarClaves();
+  olvidarEstado();
   usuarios.clear();
   roles.clear();
   asigRoles = [];
