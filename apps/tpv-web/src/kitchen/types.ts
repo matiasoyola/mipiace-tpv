@@ -50,10 +50,31 @@ export interface LineaComanda {
   seatAllergy: string | null;
   /** Capa 3, el grito: «¡LLEVA GLUTEN!». Rojo y parpadeando. */
   allergyWarning: string | null;
+  /**
+   * kds-2b · «ALÉRGENOS SIN INFORMAR». El plato va a una silla con algo
+   * declarado y su ficha no informa de nada, que **no es lo mismo que no
+   * llevar nada**.
+   *
+   * Opcional a propósito: una API que todavía no tiene kds-2b no lo manda,
+   * y entonces la tarjeta se comporta como antes del bloque. Con la APK
+   * nueva sale ya en las tarjetas de la WIFI —ésas las compone el TPV—; en
+   * las de la nube hace falta además el servidor desplegado.
+   */
+  allergensUnknown?: string | null;
 }
 
 export interface Comanda {
   id: string;
+  /**
+   * kds-2b · el id del ENVÍO, lo único que comparten los dos caminos.
+   *
+   * Con él, cruzar una tarjeta de la wifi con su gemela del servidor es
+   * exacto. Opcional porque la API de producción todavía no lo manda: sin
+   * él se cruza por mesa + sección + nº de comanda, que es lo que hacía
+   * kds-2 y lo que se puede equivocar si el TPV calculó el número sin
+   * internet.
+   */
+  clientSendId?: string;
   section: KitchenSection;
   ticketId: string;
   tableId: string | null;

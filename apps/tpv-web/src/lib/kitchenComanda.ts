@@ -49,6 +49,20 @@ export interface EstadoLineaCocina {
    * ofreciendo corregir unidades de algo que está en la plancha.
    */
   section: KitchenSection;
+  /**
+   * kds-2b · los ALÉRGENOS DEL PLATO según la ficha, leídos por el
+   * SERVIDOR en este mismo GET.
+   *
+   * Opcional porque una API anterior al bloque no los manda. Cuando
+   * vienen, son los que viajan en la comanda del camino directo, y no los
+   * del catálogo cacheado del terminal: el 15-10 el D8 llevaba el catálogo
+   * de antes de que se cargaran los alérgenos de ENSAYO (13:21) y la
+   * tarjeta de la wifi llegó a la cocina **sin «¡LLEVA GLUTEN!»** mientras
+   * la de la nube sí lo llevaba. Ver `envioLan.ts`.
+   *
+   * **Vacío es «no informado»**, no «no lleva nada».
+   */
+  allergens?: string[];
 }
 
 export interface DestinoSeccionTpv {
@@ -153,6 +167,33 @@ export function unidadesEnCocina(
   lineId: string,
 ): number {
   return estado.lines.find((l) => l.id === lineId)?.sentUnits ?? 0;
+}
+
+/**
+ * kds-2b · las líneas del carrito que el ESTADO DE COCINA no conoce.
+ *
+ * El estado viene de `GET /tickets/:id/kitchen` y **no se recarga al añadir
+ * un producto**: se recarga al abrir la mesa, al poner una silla o un
+ * tiempo, al guardar las alergias, al enviar y cuando llega un evento de
+ * cocina. O sea que entre «toco tres platos» y «Enviar» el servidor ha
+ * cambiado y el estado no.
+ *
+ * Eso no se nota en la nube —el servidor compone la comanda del DRAFT, que
+ * es la verdad— pero sí en el CAMINO DIRECTO: `componerComandasLan` recorre
+ * `estado.lines`, así que una línea que el estado no conoce **no viaja por
+ * la wifi**. Se vio al escribir el test del catálogo de este bloque: abrir
+ * mesa, tocar un producto y enviar dejaba la comanda de la wifi vacía.
+ *
+ * Con internet no se ve porque la tarjeta de la nube llega igual. Sin
+ * internet es una comanda que la cocina no recibe. Por eso `SalePage` pide
+ * el estado otra vez antes de componer cuando esto no está vacío.
+ */
+export function lineasQueElServidorNoConoce(
+  lines: readonly { id: string }[],
+  estado: EstadoCocinaMesa,
+): string[] {
+  const conocidas = new Set(estado.lines.map((l) => l.id));
+  return lines.filter((l) => !conocidas.has(l.id)).map((l) => l.id);
 }
 
 export interface TrozoComanda<T> {

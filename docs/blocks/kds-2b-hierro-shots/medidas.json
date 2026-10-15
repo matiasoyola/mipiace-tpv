@@ -1,0 +1,90 @@
+{
+  "cocina-sin-informar-1280x800": {
+    "tarjetasEnElCentro": 2,
+    "enListas": 0,
+    "sinInformar": {
+      "w": 227.5,
+      "h": 47,
+      "fontSize": "13px",
+      "background": "rgb(233, 169, 62)",
+      "color": "rgb(21, 23, 27)",
+      "texto": "SILLA 3 · ALÉRGENOS SIN INFORMAR",
+      "lineas": 2
+    },
+    "sillaComprobada": {
+      "w": 231.5,
+      "h": 27.5,
+      "fontSize": "13px",
+      "background": "rgb(122, 10, 28)",
+      "color": "rgb(255, 255, 255)",
+      "texto": "SILLA 3 · ¡LLEVA GLUTEN!",
+      "lineas": 1
+    },
+    "ordenAntes": [
+      "m2-l1",
+      "l1",
+      "l2",
+      "l3"
+    ],
+    "ordenDespues": [
+      "m2-l1",
+      "l1",
+      "l2",
+      "l3"
+    ],
+    "tachadas": [],
+    "desplaza": false
+  },
+  "cocina-orden-tras-tachar-1280x800": {
+    "tarjetasEnElCentro": 2,
+    "enListas": 0,
+    "sinInformar": {
+      "w": 227.5,
+      "h": 47,
+      "fontSize": "13px",
+      "background": "rgb(233, 169, 62)",
+      "color": "rgb(21, 23, 27)",
+      "texto": "SILLA 3 · ALÉRGENOS SIN INFORMAR",
+      "lineas": 2
+    },
+    "sillaComprobada": {
+      "w": 231.5,
+      "h": 27.5,
+      "fontSize": "13px",
+      "background": "rgb(122, 10, 28)",
+      "color": "rgb(255, 255, 255)",
+      "texto": "SILLA 3 · ¡LLEVA GLUTEN!",
+      "lineas": 1
+    },
+    "ordenAntes": [
+      "m2-l1",
+      "l1",
+      "l2",
+      "l3"
+    ],
+    "ordenDespues": [
+      "m2-l1",
+      "l1",
+      "l2",
+      "l3"
+    ],
+    "tachadas": [
+      "l1"
+    ],
+    "desplaza": false
+  },
+  "cocina-tras-lista-1280x800": {
+    "tarjetasEnElCentro": 1,
+    "enListas": 1,
+    "sinInformar": null,
+    "sillaComprobada": null,
+    "ordenAntes": [
+      "m2-l1"
+    ],
+    "ordenDespues": [
+      "m2-l1"
+    ],
+    "tachadas": [],
+    "desplaza": false
+  }
+}

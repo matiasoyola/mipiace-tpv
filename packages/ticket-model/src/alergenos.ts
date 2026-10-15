@@ -314,3 +314,38 @@ export function avisoChoque(choque: readonly Alergeno[]): string | null {
       : `${nombres.slice(0, -1).join(", ")} Y ${nombres[nombres.length - 1]}`;
   return `¡LLEVA ${texto}!`;
 }
+
+/**
+ * kds-2b · «ALÉRGENOS SIN INFORMAR».
+ *
+ * `allergens = {}` en la ficha de un producto **no es «no lleva nada»: es
+ * «no lo sabemos»**. Está dicho desde kds-1 (ver `choqueAlergenos`, que
+ * calla cuando el plato no tiene alérgenos informados) y hasta la pasada
+ * del 15-10 no se veía por ningún sitio: un plato sin informar salía en
+ * cocina exactamente igual que uno comprobado —«SILLA 3 · SIN GLUTEN»—, y
+ * esa etiqueta se lee como una instrucción cumplida.
+ *
+ * Lo que se vio en el hierro: el magro, sin alérgenos en su ficha, en la
+ * silla de un celíaco. La capa 2 decía «SIN GLUTEN» y la capa 3 callaba.
+ * Para el cocinero, indistinguible de las bravas comprobadas.
+ *
+ * Así que cuando el plato va a una silla CON ALGO DECLARADO y su producto
+ * no tiene alérgenos informados, la tarjeta lo dice con estas palabras.
+ * No es una alarma —no se sabe que lleve nada— y no va en rojo: es un «hay
+ * que preguntar», y el sitio donde se pregunta es la cocina.
+ *
+ * `alergenosRelevantes` son los de la silla del plato (los suyos más los
+ * de toda la mesa). Vacío = nadie ha declarado nada para ese plato, y
+ * entonces no hay nada que informar: un bar sin alergias declaradas no
+ * tiene que ver este aviso en los 128 platos de su carta.
+ */
+export const SIN_INFORMAR = "ALÉRGENOS SIN INFORMAR";
+
+export function avisoSinInformar(
+  alergenosDelPlato: readonly Alergeno[],
+  alergenosRelevantes: readonly Alergeno[],
+): string | null {
+  if (alergenosRelevantes.length === 0) return null;
+  if (alergenosDelPlato.length > 0) return null;
+  return SIN_INFORMAR;
+}

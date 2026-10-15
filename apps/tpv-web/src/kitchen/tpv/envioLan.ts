@@ -33,6 +33,7 @@
 
 import {
   avisoChoque,
+  avisoSinInformar,
   choqueAlergenos,
   esAlergeno,
   franjaAlergiaPantalla,
@@ -322,7 +323,21 @@ export function componerComandasLan(opts: {
   clientSendId: string;
   urgent: boolean;
   estado: EstadoCocinaMesa;
-  /** Los alérgenos de cada línea del carrito, por id de línea. */
+  /**
+   * Los alérgenos de cada línea, por id de línea.
+   *
+   * kds-2b · **los pone quien llama, y la fuente importa.** `SalePage` usa
+   * los que trae `GET /tickets/:id/kitchen` —leídos por el servidor de la
+   * ficha, los mismos que acaban en el papel y en la tarjeta de la nube— y
+   * sólo cae al catálogo cacheado del terminal si el servidor no los manda
+   * (una API anterior a kds-2b).
+   *
+   * El 15-10 esto venía del catálogo cacheado y nada más: los alérgenos se
+   * habían cargado a las 13:21 y el D8 no los tenía, así que la tarjeta de
+   * la wifi llegó a la cocina sin «¡LLEVA GLUTEN!» en las bravas de la
+   * silla de la celíaca. La de la nube sí lo llevaba. Dos caminos con dos
+   * verdades sobre una alergia es peor que un camino.
+   */
   alergenosPorLinea: Map<string, string[]>;
   /** Nombre a pintar de cada línea, por id. */
   nombrePorLinea: Map<string, string>;
@@ -382,6 +397,14 @@ export function componerComandasLan(opts: {
       allergyWarning:
         l.seat != null
           ? avisoChoque(choqueAlergenos(alergenosPlato, sillaAlergenos))
+          : null,
+      // kds-2b · y si va a una silla con algo declarado y su ficha no
+      // informa de nada, la cocina lo ve dicho. Misma regla que en
+      // `vista.ts` —`avisoSinInformar` de `ticket-model`— y mismo límite:
+      // sólo con silla.
+      allergensUnknown:
+        l.seat != null
+          ? avisoSinInformar(alergenosPlato, sillaAlergenos)
           : null,
     };
     const sec = l.section as SeccionLan;
