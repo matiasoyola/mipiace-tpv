@@ -92,6 +92,12 @@ Documentos fuente (proyecto «Jardin de Gredos»; copia en `docs/residencia/` de
 |---|---|---|
 | D-63 | **residencia-1b cifra con la maquinaria de clinica-7** (DEK por tenant, AAD por fila) los identificadores y los textos libres de residencia-1 y -2: `resident_profiles.dni`, `nss` y `discharge_reason`; `care_plan_items.reason` y `close_reason`; `bed_assignments.reason`. Quedan en claro, declarados, `care_plan_items.control_code` y la frecuencia (sostienen el índice único de línea viva), el nivel y grado de dependencia (plantillas y lista) y las fechas de estancia. **El registro de cuidados de residencia-3 nace cifrado.** | Amplía D-62 con lo que §18 de `clinica-7-done.md` encontró en claro; los textos libres son lo barato de cifrar porque nadie los consulta en SQL, y el contrato de encargado ya promete medidas técnicas. |
 
+### Tras el mockup de la puerta (15-10-2026)
+
+| # | Decisión | Por qué |
+|---|---|---|
+| D-64 | **El mockup de la puerta (seis pantallas) lo valida Matías**, en lugar de la observación de turno con auxiliares: se ha criado en la residencia y conoce el trabajo de planta. Se añade **la foto del residente junto a su nombre**, en la puerta en reposo y en «lo que toca», **sólo con consentimiento de imagen** anotado en la ficha (sin él, iniciales). El botón «avisar a la enfermera» no se pinta hasta que el aviso sea real (residencia-4). | La foto ayuda a la suplente y a quien no conoce a cada residente; en un pasillo la ve cualquiera, de ahí el consentimiento. Un botón que parece avisar y no avisa es peor que no tenerlo. |
+
 ### Lo que NO se decide por criterio (son hechos que aporta el cliente, no bloquean)
 
 - H-01 · ordenador origen de los `.lnk` (fichas de 2025).

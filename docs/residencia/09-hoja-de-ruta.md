@@ -32,8 +32,8 @@ la medicación completa.
 |---|---|---|
 | residencia-1 | Cimientos: residentes, edificio, roles de cuidado, zonas, turnos, dispositivo de puerta | — (**hecho**, PR #21) |
 | residencia-2 | Catálogo de controles como dato + plan de cuidados + función `queToca` | 1 (**hecho**, PR #22) |
-| *(mockup + observación de turno)* | Pantalla de puerta validada con auxiliares | 2 |
-| residencia-3 | La puerta: PIN, residente, lo que toca, «como siempre», registro offline | 2 + mockup |
+| *(mockup)* | Pantalla de puerta validada por Matías (D-64) | 2 (**hecho**) |
+| residencia-3 | La puerta: PIN, residente, lo que toca, «como siempre», registro offline | 2 + mockup (**lanzado**) |
 | residencia-4 | Constantes, umbrales, eventos derivados, libro de incidencias, comunicación a familia | 3 |
 | residencia-5 | Relevo con acuse, panel de dirección, obligaciones del mes | 4 |
 | residencia-1b | Cifrado en reposo de DNI, NSS y textos libres de residencia-1 y -2, con la maquinaria de clinica-7 (D-62, D-63) | 1 + clinica-7 (**hecho**, PR #24) |
