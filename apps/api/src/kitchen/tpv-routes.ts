@@ -20,7 +20,7 @@
 
 import type { FastifyInstance } from "fastify";
 
-import { Prisma, type KitchenSection } from "@mipiacetpv/db";
+import { Prisma, type Allergen, type KitchenSection } from "@mipiacetpv/db";
 import { buildKitchenComanda } from "@mipiacetpv/escpos-builder";
 import {
   avisoChoque,
@@ -37,6 +37,9 @@ import {
 
 import { getPrisma } from "../context.js";
 import { ensureCajaEnabled } from "../lib/caja-gate.js";
+import { recomputeTicketTotals } from "../tables/operativa.js";
+import { getStoreEventBus } from "../realtime/store-event-bus.js";
+import { computeTicket } from "../tickets/totals.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
 import { cashierLabelFrom } from "../users/display.js";
 import {
@@ -79,13 +82,22 @@ export async function registerKitchenTpvRoutes(
   // temporizador vive en el TPV a propósito — un «deshacer» que necesite
   // red no es un deshacer.
   //
-  // Hace tres cosas y las tres son la misma operación:
+  // Hace CUATRO cosas y las cuatro son la misma operación:
   //   1. baja `units` y `sentUnits` de la línea de la venta (el cliente no
   //      paga lo que se anuló);
-  //   2. sube `voidedUnits` de las copias que la cocina tiene, de la más
+  //   2. **recalcula el importe de la línea y los totales del ticket**;
+  //   3. sube `voidedUnits` de las copias que la cocina tiene, de la más
   //      reciente a la más antigua;
-  //   3. apunta quién, cuándo y **si la cocina ya lo había tachado**
+  //   4. apunta quién, cuándo y **si la cocina ya lo había tachado**
   //      (merma: comida hecha y tirada).
+  //
+  // kds-2b · **el 2 faltaba**, y lo vio la pasada del 15-10 en el D8:
+  // croquetas 2 → «−» → la línea decía «1 · 10,00 €» y el TOTAL seguía en
+  // 43,40 €. El de la pantalla es el que calcula el TPV con las unidades
+  // (y por eso el cobro salió bien), pero `Ticket.total` se quedaba con el
+  // importe de antes — y esa columna es la que pinta la tarjeta de la mesa
+  // en la sala y el «€ en sala» de la cabecera del mapa. Una mesa que dice
+  // 43,40 € en la sala y cobra 33,40 € es un arqueo que no cuadra.
   //
   // Sin PIN y sin confirmación: el registro ES la protección (decisión 6).
   app.post(
@@ -126,6 +138,12 @@ export async function registerKitchenTpvRoutes(
           units: true,
           sentUnits: true,
           nameSnapshot: true,
+          // kds-2b · para recalcular el importe de la línea con la MISMA
+          // regla que el `−` de una línea sin enviar (`PATCH
+          // /tickets/:id/lines/:lineId` en `tables/operativa.ts`).
+          unitPrice: true,
+          discountPct: true,
+          taxRate: true,
           ticket: {
             select: { id: true, tableId: true, register: { select: { storeId: true } } },
           },
@@ -188,16 +206,30 @@ export async function registerKitchenTpvRoutes(
         });
       }
 
+      const quedan = Math.round((Number(line.units) - units) * 1000) / 1000;
+      // El importe de la línea con las unidades que quedan. Misma llamada
+      // y mismo orden de argumentos que el PATCH de una línea sin enviar:
+      // dos cálculos del mismo importe acaban en una cuenta que no cuadra
+      // según por dónde se haya tocado la línea.
+      const importe = computeTicket([
+        {
+          units: quedan,
+          unitPrice: Number(line.unitPrice),
+          discountPct: Number(line.discountPct),
+          taxRate: Number(line.taxRate),
+        },
+      ]).lines[0]!;
+
       await prisma.$transaction(async (tx) => {
         await tx.ticketLine.update({
           where: { id: lineId },
           data: {
-            units: new Prisma.Decimal(
-              Math.round((Number(line.units) - units) * 1000) / 1000,
-            ),
+            units: new Prisma.Decimal(quedan),
             sentUnits: new Prisma.Decimal(
               Math.round((enviadas - units) * 1000) / 1000,
             ),
+            subtotal: new Prisma.Decimal(importe.subtotal),
+            total: new Prisma.Decimal(importe.total),
           },
         });
         for (const t of tocadas) {
@@ -212,7 +244,27 @@ export async function registerKitchenTpvRoutes(
             },
           });
         }
+        // Y los totales del ticket, con la regla de `tables/operativa.ts`.
+        // Va DENTRO de la transacción: un total recalculado a medias es
+        // peor que el viejo, porque parece bueno.
+        await recomputeTicketTotals(tx, ticketId);
       });
+
+      // kds-2b · y se avisa a la SALA.
+      //
+      // `kitchen.line_voided` ya salía, pero eso lo escuchan las pantallas
+      // de cocina; el mapa de mesas escucha los `table.*`. Sin este aviso,
+      // el otro terminal y el mapa siguen pintando el importe de antes
+      // hasta que alguien vuelva a entrar en la mesa.
+      if (line.ticket.tableId) {
+        getStoreEventBus().broadcast(storeId, {
+          type: "table.lineUpdated",
+          tableId: line.ticket.tableId,
+          ticketId,
+          lineId,
+          at: now.toISOString(),
+        });
+      }
 
       if (tocadas.length > 0) {
         emitirPlatoAnulado({
@@ -486,9 +538,25 @@ export async function registerKitchenTpvRoutes(
         productIds.length > 0
           ? prisma.product.findMany({
               where: { id: { in: productIds }, tenantId: cashier.tid },
-              select: { id: true, tags: true },
+              // kds-2b · los ALÉRGENOS DEL PLATO, además de las etiquetas.
+              //
+              // Van aquí porque la comanda del camino directo la compone el
+              // TPV (kds-2 §2.5) y hasta la pasada del 15-10 los sacaba de
+              // SU catálogo cacheado: los alérgenos que se cargaron a las
+              // 13:21 no estaban en el D8, así que la tarjeta de la wifi
+              // llegó a la cocina sin «¡LLEVA GLUTEN!» mientras la de la
+              // nube —que los lee de la ficha en el momento de enviar,
+              // `envio.ts`— sí lo llevaba. Dos caminos con dos verdades
+              // sobre una alergia.
+              //
+              // Con esto el TPV ya no tiene que creerse su caché: los
+              // alérgenos del camino directo salen de la MISMA fila que los
+              // del papel y los de la nube.
+              select: { id: true, tags: true, allergens: true },
             })
-          : Promise.resolve([] as Array<{ id: string; tags: string[] }>),
+          : Promise.resolve(
+              [] as Array<{ id: string; tags: string[]; allergens: Allergen[] }>,
+            ),
         prisma.tagSection.findMany({
           where: { tenantId: cashier.tid },
           select: { slug: true, section: true },
@@ -496,6 +564,9 @@ export async function registerKitchenTpvRoutes(
       ]);
       const etiquetasPorProducto = new Map<string, string[]>(
         productos.map((p) => [p.id, p.tags]),
+      );
+      const alergenosPorProducto = new Map<string, Allergen[]>(
+        productos.map((p) => [p.id, p.allergens]),
       );
       const seccionPorEtiqueta = new Map<string, KitchenSection>(
         etiquetas.map((e) => [e.slug, e.section]),
@@ -518,6 +589,13 @@ export async function registerKitchenTpvRoutes(
           sentUnits: Number(l.sentUnits),
           course: l.course,
           seat: l.seat,
+          // kds-2b · **vacío es «no informado»**, igual que en la ficha y
+          // en la tarjeta de cocina. Una línea sin producto (un importe
+          // suelto) también cae aquí, y es la verdad: de eso no se sabe
+          // nada.
+          allergens: l.productId
+            ? (alergenosPorProducto.get(l.productId) ?? [])
+            : [],
           section: resolverSeccion(
             l.productId,
             etiquetasPorProducto,

@@ -137,6 +137,12 @@ import {
   type CaminoDirecto,
 } from "../kitchen/tpv/useCaminoDirecto.js";
 import { componerComandasLan } from "../kitchen/tpv/envioLan.js";
+import { lineasQueElServidorNoConoce } from "../lib/kitchenComanda.js";
+import {
+  alergenosPorLineaDeEnvio,
+  ESPERA_CATALOGO_MS,
+  hayQuePreguntarElCatalogo,
+} from "../kitchen/tpv/alergenosDeEnvio.js";
 import {
   diagnosticar,
   type Diagnostico,
@@ -684,7 +690,62 @@ export function SalePage(props: SalePageProps) {
     // Sin camino (un banco de pruebas, un test de la comanda) el TPV se
     // comporta como antes de kds-2: sólo la nube.
     camino: props.camino ?? CAMINO_APAGADO,
+    // kds-2b · al subir la anulación, el DRAFT manda: `void-units` baja
+    // `units` de la línea en el servidor y de ahí sale el total de verdad.
+    onAnulacionAplicada: () => {
+      if (isDraftMode) void reloadDraft().catch(() => undefined);
+    },
   });
+
+  // ── kds-2b · EL «−» DE UNA LÍNEA EN COCINA BAJA EL TOTAL, YA ────────
+  //
+  // Lo que vio el D8 el 15-10: croquetas 2 → «−» → la línea decía «1 ·
+  // 10,00 €» y el TOTAL seguía en 43,40 €, cuando eran 33,40 €. La fila de
+  // la línea se pinta con las unidades que la cocina tiene (`partirComanda`
+  // sobre `sentUnits`), pero el total sale de `computeCart(lines)` y la
+  // línea del carrito seguía con sus 2 unidades hasta que el camarero
+  // salía de la mesa y volvía a entrar.
+  //
+  // Así que el `−` baja la unidad del carrito EN EL MOMENTO —sin pasar por
+  // la API: la anulación ya tiene su propio viaje, con sus 5 s de
+  // «Deshacer»— y «Deshacer» la devuelve. Cuando la anulación sube de
+  // verdad, `onAnulacionAplicada` recarga el DRAFT y la verdad es la del
+  // servidor.
+  //
+  // Lo que esto NO arregla sin desplegar el servidor: la tarjeta de la mesa
+  // en la SALA, que pinta `Ticket.total` de la base. Esa columna la
+  // recalcula ahora `void-units` (ver `kitchen/tpv-routes.ts`).
+  const anularEnviadoConTotal = (
+    lineId: string,
+    nombre: string,
+    units: number,
+  ) => {
+    setLines((curr) =>
+      curr.map((l) =>
+        l.id === lineId
+          ? {
+              ...l,
+              units: Math.max(0, Math.round((l.units - units) * 1000) / 1000),
+            }
+          : l,
+      ),
+    );
+    kitchen.anularEnviado(lineId, nombre, units);
+  };
+
+  const deshacerAnulacionConTotal = (key: string) => {
+    const a = kitchen.anulaciones.find((x) => x.key === key);
+    if (a) {
+      setLines((curr) =>
+        curr.map((l) =>
+          l.id === a.lineId
+            ? { ...l, units: Math.round((l.units + a.units) * 1000) / 1000 }
+            : l,
+        ),
+      );
+    }
+    kitchen.deshacerAnulacion(key);
+  };
   // El tiempo elegido en la fila del modo «Por tiempos». **SE QUEDA
   // PUESTO** (decisión 3): lo que se pulse después va a ese tiempo hasta
   // que se cambie. Vive aquí y no en la comanda porque lo consume
@@ -1777,6 +1838,48 @@ export function SalePage(props: SalePageProps) {
     // el servidor no lo puede guardar (`kitchen_orders_cronologia`).
     const pulsadoEn = new Date();
 
+    // ── kds-2b · EL ESTADO DE COCINA, AL DÍA ANTES DE COMPONER ────────
+    //
+    // `componerComandasLan` recorre `estado.lines`, y el estado NO se
+    // recarga al añadir un producto (ver `lineasQueElServidorNoConoce`).
+    // Abrir la mesa, tocar tres platos y pulsar «Enviar» dejaba la comanda
+    // de la WIFI sin esas tres líneas: con internet no se nota —la tarjeta
+    // de la nube llega igual— y sin internet es una comanda que la cocina
+    // no recibe. Que es justo el día que este camino existe.
+    //
+    // Se pide una sola vez, y sólo si hay líneas que el estado no conoce.
+    // Sin red devuelve el que había y la comanda sale con lo que se sepa:
+    // cobrar y mandar siempre se puede.
+    let estadoCocinaAlDia = kitchen.estado;
+    if (lineasQueElServidorNoConoce(lines, estadoCocinaAlDia).length > 0) {
+      estadoCocinaAlDia = await kitchen.recargar();
+    }
+
+    // ── kds-2b · LOS ALÉRGENOS DE LA COMANDA DE LA WIFI ───────────────
+    //
+    // El 15-10 la tarjeta de la wifi llegó a la cocina sin «¡LLEVA
+    // GLUTEN!» en las bravas de la silla de la celíaca: los sacaba del
+    // catálogo CACHEADO del terminal y los alérgenos de ENSAYO se habían
+    // cargado a las 13:21, con la app ya abierta. Nada invalida esa caché.
+    //
+    // Ahora los dice el servidor en `GET /tickets/:id/kitchen`, y si ese
+    // servidor todavía no está desplegado —que es el caso de la APK
+    // 1.25.0— se pide el catálogo aquí mismo, con un segundo de paciencia
+    // y sólo cuando hay una alergia declarada en juego. Ver
+    // `kitchen/tpv/alergenosDeEnvio.ts`.
+    let catalogoFresco: CatalogProduct[] | undefined;
+    if (hayQuePreguntarElCatalogo({ lines, estado: estadoCocinaAlDia })) {
+      catalogoFresco = await Promise.race([
+        refreshCatalog().catch(() => undefined),
+        new Promise<undefined>((r) =>
+          setTimeout(() => r(undefined), ESPERA_CATALOGO_MS),
+        ),
+      ]);
+      // Si llegó, se queda también en pantalla: el que vuelva a mirar la
+      // ficha del plato tiene que ver lo mismo que acaba de salir a cocina.
+      if (catalogoFresco) setCatalog(catalogoFresco);
+    }
+
     const porWifi = (async () => {
       const comandas = componerComandasLan({
         ticketId: tableContext.activeTicketId!,
@@ -1784,8 +1887,12 @@ export function SalePage(props: SalePageProps) {
         tableName: tableContext.name,
         clientSendId,
         urgent: urgentePendiente,
-        estado: kitchen.estado,
-        alergenosPorLinea: new Map(lines.map((l) => [l.id, l.allergens ?? []])),
+        estado: estadoCocinaAlDia,
+        alergenosPorLinea: alergenosPorLineaDeEnvio({
+          lines,
+          estado: estadoCocinaAlDia,
+          catalogo: catalogoFresco,
+        }),
         nombrePorLinea: new Map(lines.map((l) => [l.id, l.nameSnapshot])),
         notasPorLinea: new Map(lines.map((l) => [l.id, notasDeLineaLan(l)])),
         ahora: pulsadoEn,
@@ -2556,7 +2663,7 @@ export function SalePage(props: SalePageProps) {
                 onMarchar: (c) => void kitchen.marcharTiempo(c),
                 onSilla: (lineId, seat) => void kitchen.ponerSilla(lineId, seat),
                 onTiempo: (lineId, c) => void kitchen.ponerTiempo(lineId, c),
-                onAnularEnviado: kitchen.anularEnviado,
+                onAnularEnviado: anularEnviadoConTotal,
                 onAbrirAlergias: () => setAlergiasAbiertas(true),
                 avisosListo: props.avisosListo ?? [],
                 onServido: (orderId) => {
@@ -2564,7 +2671,7 @@ export function SalePage(props: SalePageProps) {
                   kitchen.recargar();
                 },
                 anulaciones: kitchen.anulaciones,
-                onDeshacer: kitchen.deshacerAnulacion,
+                onDeshacer: deshacerAnulacionConTotal,
                 cocinaNoRecibe: kitchen.cocinaNoRecibe,
                 readyBeep: props.kitchenSettings?.readyBeep === true,
               }}

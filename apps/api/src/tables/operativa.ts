@@ -899,7 +899,18 @@ async function reloadDraft(
   });
 }
 
-async function recomputeTicketTotals(
+/**
+ * kds-2b · se EXPORTA porque hay un segundo sitio que baja unidades de una
+ * línea de la venta: el `−` sobre lo que ya está en cocina
+ * (`kitchen/tpv-routes.ts`, `void-units`). Hasta la pasada del 15-10 esa
+ * ruta bajaba `units` y no recalculaba nada, así que `Ticket.total` se
+ * quedaba con el importe de antes — y lo que la cabecera del mapa pinta en
+ * «€ en sala» y la tarjeta de la mesa es exactamente esa columna.
+ *
+ * Dos reglas para recalcular un total es como la sala dice 43,40 € y la
+ * cuenta cobra 33,40 €.
+ */
+export async function recomputeTicketTotals(
   tx: Prisma.TransactionClient,
   ticketId: string,
 ) {

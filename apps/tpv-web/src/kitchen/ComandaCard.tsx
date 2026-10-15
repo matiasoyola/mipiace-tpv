@@ -39,6 +39,8 @@ import {
   AMBAR_CAMBIO,
   AMBAR_CAMBIO_TEXT,
   AMBAR_NOTA,
+  AMBAR_SIN_INFORMAR,
+  AMBAR_SIN_INFORMAR_TEXT,
   ANILLO_URGENTE_PX,
   ANULADO_PX,
   CANTIDAD_ANCHO_PX,
@@ -398,14 +400,29 @@ function Linea(props: {
   const recuadrada = !alarma && l.seat != null;
   const enCaja = alarma || recuadrada;
 
+  // kds-2b · el plato va a una silla con algo declarado y su ficha NO
+  // INFORMA de alérgenos. Es el hallazgo 4 de la pasada del 15-10: el
+  // magro salía como «SILLA 3 · SIN GLUTEN», igual que las bravas
+  // comprobadas, y para el cocinero son la misma cosa.
+  //
+  // Se pinta en la sub-franja del recuadro, en ÁMBAR, en vez del «SIN
+  // GLUTEN»: el sitio es el mismo —es una instrucción sobre este plato— y
+  // el color es el que lo distingue de uno comprobado. No sustituye a la
+  // alarma roja: si además chocara, no habría nada sin informar.
+  const sinInformar = !alarma && l.allergensUnknown != null;
+
   /** La sub-franja del recuadro. `null` si la línea no lleva recuadro. */
   const subFranja = l.allergyWarning
     ? [l.seat != null ? `SILLA ${l.seat}` : null, l.allergyWarning]
         .filter(Boolean)
         .join(" · ")
-    : recuadrada
-      ? [`SILLA ${l.seat}`, l.seatAllergy].filter(Boolean).join(" · ")
-      : null;
+    : sinInformar
+      ? [l.seat != null ? `SILLA ${l.seat}` : null, l.allergensUnknown]
+          .filter(Boolean)
+          .join(" · ")
+      : recuadrada
+        ? [`SILLA ${l.seat}`, l.seatAllergy].filter(Boolean).join(" · ")
+        : null;
 
   return (
     <li
@@ -419,7 +436,9 @@ function Linea(props: {
         margin: enCaja ? "0 10px" : undefined,
         borderRadius: enCaja ? 12 : undefined,
         overflow: enCaja ? "hidden" : undefined,
-        border: recuadrada ? `2px solid ${ROJO_ALERGIA_BORDE}` : undefined,
+        border: recuadrada
+          ? `2px solid ${sinInformar ? AMBAR_SIN_INFORMAR : ROJO_ALERGIA_BORDE}`
+          : undefined,
         background: alarma ? ROJO_ALERGIA : undefined,
         color: alarma ? ROJO_ALERGIA_TEXT : l.fired ? DARK_TEXT : DARK_TEXT_MUTED,
         // Un plato TACHADO se apaga, no cambia de fondo: la tarjeta tiene
@@ -429,12 +448,22 @@ function Linea(props: {
     >
       {subFranja && (
         <div
-          data-testid={l.allergyWarning && l.seat == null ? "kds-lleva" : "kds-silla"}
+          data-testid={
+            sinInformar
+              ? "kds-sin-informar"
+              : l.allergyWarning && l.seat == null
+                ? "kds-lleva"
+                : "kds-silla"
+          }
           className="font-bold uppercase"
           style={{
             padding: "4px 10px",
-            background: l.allergyWarning ? ROJO_ALERGIA_FONDO : ROJO_ALERGIA,
-            color: ROJO_ALERGIA_TEXT,
+            background: sinInformar
+              ? AMBAR_SIN_INFORMAR
+              : l.allergyWarning
+                ? ROJO_ALERGIA_FONDO
+                : ROJO_ALERGIA,
+            color: sinInformar ? AMBAR_SIN_INFORMAR_TEXT : ROJO_ALERGIA_TEXT,
             fontSize: l.allergyWarning ? LLEVA_PX : SILLA_PX,
             letterSpacing: "0.06em",
           }}

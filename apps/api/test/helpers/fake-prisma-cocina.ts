@@ -33,6 +33,30 @@ export interface FakeLinea {
   seat: number | null;
   modifiers: unknown;
   product?: { allergens: string[] } | null;
+  // kds-2b · el precio de la línea. El `−` sobre lo enviado recalcula
+  // ahora el importe de la línea y el total del ticket, así que el falso
+  // tiene que tener con qué: sin precio, `computeTicket` devuelve NaN y la
+  // ruta contesta 500. Opcional y con default (ver `precioDe`) para no
+  // obligar a los tests que no miran dinero a sembrarlo.
+  unitPrice?: number;
+  discountPct?: number;
+  taxRate?: number;
+  /** Lo que escribe el recálculo. Lo miran los tests del total. */
+  subtotal?: number;
+  total?: number;
+}
+
+/** Lo que vale una línea del falso si el test no lo sembró. */
+function precioDe(l: FakeLinea): {
+  unitPrice: number;
+  discountPct: number;
+  taxRate: number;
+} {
+  return {
+    unitPrice: l.unitPrice ?? 0,
+    discountPct: l.discountPct ?? 0,
+    taxRate: l.taxRate ?? 10,
+  };
 }
 
 export interface FakeTicket {
@@ -48,6 +72,10 @@ export interface FakeTicket {
   table: { id: string; name: string } | null;
   register: { storeId: string };
   lines: FakeLinea[];
+  /** kds-2b · los totales guardados del DRAFT. Los rehace `void-units`. */
+  total?: number;
+  totalTax?: number;
+  totalDiscount?: number;
   courses: Array<{ course: number; firedAt: Date }>;
   allergies: Array<{ seat: number | null; allergen: string }>;
 }
@@ -238,6 +266,32 @@ function coincide(valor: unknown, filtro: unknown): boolean {
 export function construirFakePrisma(state: EstadoFalso) {
   const prisma: Record<string, unknown> = {};
 
+  /**
+   * kds-2b · ordena como lo haría Postgres con el `orderBy` que le pasen.
+   *
+   * Sólo entiende lo que la vista pide —`[{course:'asc'},{id:'asc'}]`— y
+   * **sin `orderBy` NO ordena**: deja la lista como venga, que es lo que
+   * hace Postgres y es la causa del plato que saltaba al final al tacharlo.
+   */
+  function ordenarLineas<T>(lineas: T[], orderBy: unknown): T[] {
+    if (!orderBy) return lineas;
+    const campos = (Array.isArray(orderBy) ? orderBy : [orderBy]) as Array<
+      Record<string, "asc" | "desc">
+    >;
+    return [...lineas].sort((a, b) => {
+      for (const c of campos) {
+        for (const [campo, dir] of Object.entries(c)) {
+          const va = (a as Record<string, unknown>)[campo] as string | number;
+          const vb = (b as Record<string, unknown>)[campo] as string | number;
+          if (va === vb) continue;
+          const signo = va > vb ? 1 : -1;
+          return dir === "desc" ? -signo : signo;
+        }
+      }
+      return 0;
+    });
+  }
+
   const ticket = {
     findFirst: vi.fn(async ({ where }: any) => {
       const t = state.tickets.get(where.id);
@@ -269,6 +323,13 @@ export function construirFakePrisma(state: EstadoFalso) {
       if (data.lastSentRevision !== undefined) {
         t.lastSentRevision = data.lastSentRevision;
       }
+      // kds-2b · los totales, que ahora los rehace el `−` sobre lo
+      // enviado. Son los que pinta la tarjeta de la mesa en la sala.
+      if (data.total !== undefined) t.total = Number(data.total);
+      if (data.totalTax !== undefined) t.totalTax = Number(data.totalTax);
+      if (data.totalDiscount !== undefined) {
+        t.totalDiscount = Number(data.totalDiscount);
+      }
       return t;
     }),
   };
@@ -280,6 +341,8 @@ export function construirFakePrisma(state: EstadoFalso) {
         if (!l) continue;
         if (data.sentUnits !== undefined) l.sentUnits = Number(data.sentUnits);
         if (data.units !== undefined) l.units = Number(data.units);
+        if (data.subtotal !== undefined) l.subtotal = Number(data.subtotal);
+        if (data.total !== undefined) l.total = Number(data.total);
         if (data.course !== undefined) l.course = data.course;
         if (data.seat !== undefined) l.seat = data.seat;
         return l;
@@ -299,6 +362,13 @@ export function construirFakePrisma(state: EstadoFalso) {
       }
       return { count };
     }),
+    // kds-2b · lo que `recomputeTicketTotals` lee para rehacer el total
+    // del ticket después de un `−` sobre lo enviado.
+    findMany: vi.fn(async ({ where }: any) => {
+      const t = state.tickets.get(where.ticketId);
+      if (!t) return [];
+      return t.lines.map((l) => ({ ...precioDe(l), ...l }));
+    }),
     findFirst: vi.fn(async ({ where }: any) => {
       for (const t of state.tickets.values()) {
         if (where.ticketId && t.id !== where.ticketId) continue;
@@ -307,6 +377,7 @@ export function construirFakePrisma(state: EstadoFalso) {
         const l = t.lines.find((x) => x.id === where.id);
         if (l) {
           return {
+            ...precioDe(l),
             ...l,
             ticket: { id: t.id, tableId: t.tableId, register: t.register },
           };
@@ -433,7 +504,7 @@ export function construirFakePrisma(state: EstadoFalso) {
       }
       return null;
     }),
-    findMany: vi.fn(async ({ where }: any) => {
+    findMany: vi.fn(async ({ where, select }: any) => {
       const out: FakeOrder[] = [];
       for (const o of state.orders.values()) {
         if (where?.storeId && o.storeId !== where.storeId) continue;
@@ -451,10 +522,22 @@ export function construirFakePrisma(state: EstadoFalso) {
         if (where?.readyAt && !coincide(o.readyAt, where.readyAt)) continue;
         if (where?.sentAt && !coincide(o.sentAt, where.sentAt)) continue;
         const t = state.tickets.get(o.ticketId);
+        const disp = state.dispatches.get(o.dispatchId);
         out.push({
           ...o,
           ticket: { allergies: t?.allergies ?? [] },
-          lines: [...state.orderLines.values()].filter((l) => l.orderId === o.id),
+          // kds-2b · el `clientSendId` del envío, que es lo que la vista
+          // manda a la pantalla para cruzar la tarjeta de la wifi con la
+          // suya sin adivinar por mesa + sección + nº.
+          dispatch: { clientSendId: disp?.clientSendId ?? null },
+          // Y el ORDEN de las líneas, que el falso respeta de verdad: es la
+          // única forma de que el sabotaje «tachar no mueve el plato» pueda
+          // ponerse rojo. Sin esto, el falso devuelve siempre el orden de
+          // inserción y el test pasaría con `orderBy` o sin él.
+          lines: ordenarLineas(
+            [...state.orderLines.values()].filter((l) => l.orderId === o.id),
+            select?.lines?.orderBy,
+          ),
         } as never);
       }
       return out;
