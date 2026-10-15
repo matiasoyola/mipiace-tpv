@@ -70,6 +70,17 @@ CREATE TABLE "care_records" (
     "control_code"            TEXT        NOT NULL,
     -- La línea del plan que lo pidió. NULL en lo «a demanda» y en la nota.
     "plan_item_id"            UUID,
+    -- A QUÉ MOMENTO DEL PLAN responde, que es lo que hace que tres cambios
+    -- posturales de un mismo turno sean tres cosas y no una repetida.
+    --
+    --   · lo que «toca» → el instante que devolvió `queToca`;
+    --   · la observación diaria («¿cómo está hoy?») → **NULL**, porque se
+    --     pregunta una vez por residente y turno y no por ocurrencia;
+    --   · lo «a demanda» → el instante del propio registro, porque no
+    --     cuelga de ninguna agenda y su momento es cuando ocurrió.
+    --
+    -- Es la pieza que sostiene `care_records_una_por_ocurrencia_key`.
+    "occurrence_at"           TIMESTAMPTZ,
 
     -- EL VALOR, CIFRADO. NOT NULL: todo registro tiene valor, también el
     -- «a demanda» (su valor es que ocurrió) y la nota sin texto.
@@ -241,6 +252,47 @@ ALTER TABLE "care_records"
 CREATE UNIQUE INDEX "care_records_una_correccion_key"
     ON "care_records"("corrects_record_id");
 
+-- ── UNA FILA POR OCURRENCIA, y lo dice el MOTOR ─────────────────────
+--
+-- «Repetir el "como siempre" en el mismo turno SUSTITUYE a lo anterior por
+-- la vía de la corrección, no duplica» (decisión de producto 4). Esto es
+-- la mitad de esa frase que no depende de que la ruta se acuerde.
+--
+-- La clave es `(residente, control, día, turno, ocurrencia)`, y es PARCIAL
+-- sobre `corrects_record_id IS NULL`: una corrección queda FUERA del
+-- índice, así que la cadena puede crecer —el valor de las 08:20 corregido
+-- a las 08:25 y otra vez a las 11:00— y lo que no puede haber es **dos
+-- cabezas** para la misma ocurrencia. Con el índice total, corregir sería
+-- imposible; sin el índice, «cuál es el valor de ahora» lo decidiría el
+-- orden de la base. Misma lección y misma forma que
+-- `bed_assignments_one_live_per_bed_key` y `care_plan_items_one_live_key`.
+--
+-- ── Los dos COALESCE, que no son adorno ─────────────────────────────
+--
+-- `center_shift_id` y `occurrence_at` son NULL legítimamente —un hueco en
+-- el cuadrante, y la observación diaria que no cuelga de ninguna
+-- ocurrencia— y **en Postgres los NULL son distintos entre sí**. Sin los
+-- centinelas, dos «como siempre» del mismo turno serían dos claves
+-- distintas y las dos entrarían: el índice existiría y no diría nada.
+--
+-- Es la CUARTA vez que esta lección se paga en este repo
+-- (`ticket_allergies_mesa_key` en kds-1, `care_zone_assignments_one_live_
+-- centro_key` en residencia-1, `control_types_una_vigente_*` en
+-- residencia-2). Aquí está pagada de entrada, con su sabotaje con nombre
+-- en el e2e.
+--
+-- El `'-infinity'` y el uuid de ceros son valores que **no pueden darse de
+-- verdad**: un `occurrence_at` real sale de `queToca` o del reloj de la
+-- tablet, y el uuid nulo no es el id de ningún turno.
+CREATE UNIQUE INDEX "care_records_una_por_ocurrencia_key"
+    ON "care_records"(
+        "client_id",
+        "control_code",
+        "care_day",
+        COALESCE("center_shift_id", '00000000-0000-0000-0000-000000000000'::uuid),
+        COALESCE("occurrence_at", '-infinity'::timestamptz))
+    WHERE "corrects_record_id" IS NULL;
+
 CREATE INDEX "care_records_tenant_id_idx" ON "care_records"("tenant_id");
 -- «Lo registrado hoy de este residente»: lo que la puerta pide al abrirse
 -- y lo que la ficha del admin enseña.
@@ -270,7 +322,7 @@ CREATE INDEX "care_records_client_id_control_code_care_day_idx"
 -- Corregir NO es un `UPDATE`: es una fila nueva que apunta a la corregida.
 -- Por eso esta función no tiene que saber nada de correcciones.
 --
--- Las veintiuna columnas se comparan **una por una y por su nombre**. Un
+-- Las veintidós columnas se comparan **una por una y por su nombre**. Un
 -- `row(NEW.*) IS DISTINCT FROM row(OLD.*)` habría sido más corto y habría
 -- dejado pasar en silencio cualquier columna añadida después: el día que
 -- este bloque gane una, el test de la migración que cuenta los nombres se
@@ -290,6 +342,7 @@ BEGIN
        OR NEW.control_type_id         IS DISTINCT FROM OLD.control_type_id
        OR NEW.control_code            IS DISTINCT FROM OLD.control_code
        OR NEW.plan_item_id            IS DISTINCT FROM OLD.plan_item_id
+       OR NEW.occurrence_at           IS DISTINCT FROM OLD.occurrence_at
        OR NEW.value_cifrado           IS DISTINCT FROM OLD.value_cifrado
        OR NEW.note_cifrado            IS DISTINCT FROM OLD.note_cifrado
        OR NEW.voice_file_name         IS DISTINCT FROM OLD.voice_file_name

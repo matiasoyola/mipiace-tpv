@@ -71,23 +71,52 @@ import {
   sitioDelFichero,
 } from "./cripto.js";
 
-/** Lo que este almacén guarda. Cada clase, su carpeta y su extensión. */
-export type ClaseDeFichero = "FOTO" | "CONSENTIMIENTO" | "INFORME";
+/** Lo que este almacén guarda. Cada clase, su carpeta y su extensión.
+ *
+ *  residencia-3 añade dos, y las dos entran AQUÍ y no en un almacén propio
+ *  por la razón de la cabecera: el cifrado, la huella del claro, el nombre
+ *  que no dice nada de nadie y la comprobación al leer se escriben **una
+ *  vez**. Un segundo almacén para la residencia sería un segundo sitio
+ *  donde olvidarse de cifrar.
+ *
+ *    · `RESIDENTE` — la foto de la cara del residente (D-64), que la
+ *      puerta pinta junto a su nombre y SÓLO con consentimiento de imagen.
+ *    · `VOZ`       — la nota de voz de «algo no va bien» (decisión 10),
+ *      para que la DUE y el relevo la escuchen. Transcribirla y descartar
+ *      el audio es ia-1.
+ *
+ *  La clase va en el AAD (`sitioDelFichero` la pone como «columna»), así
+ *  que un fichero movido de carpeta a carpeta tampoco se descifra. */
+export type ClaseDeFichero =
+  | "FOTO"
+  | "CONSENTIMIENTO"
+  | "INFORME"
+  | "RESIDENTE"
+  | "VOZ";
 
 const CARPETA: Record<ClaseDeFichero, string> = {
   FOTO: "fotos",
   CONSENTIMIENTO: "consentimientos",
   INFORME: "informes",
+  RESIDENTE: "residentes",
+  VOZ: "voz",
 };
 
 const EXTENSION: Record<ClaseDeFichero, string> = {
   FOTO: "jpg",
   CONSENTIMIENTO: "pdf",
   INFORME: "pdf",
+  RESIDENTE: "jpg",
+  VOZ: "webm",
 };
 
 export const MIME_DE_FOTO = "image/jpeg";
 export const MIME_DE_PDF = "application/pdf";
+/** residencia-3 · WebM con Opus dentro, que es lo que da `MediaRecorder`
+ *  en el WebView de Android. Un solo formato a propósito: con dos, la DUE
+ *  que abre la nota desde el panel se encuentra uno que su navegador no
+ *  sabe reproducir y no hay forma de saber cuál antes de pulsar. */
+export const MIME_DE_VOZ = "audio/webm";
 
 /**
  * Las firmas de los dos formatos que entran.
@@ -99,6 +128,9 @@ export const MIME_DE_PDF = "application/pdf";
  */
 const JPEG_MAGIC = Buffer.from([0xff, 0xd8, 0xff]);
 const PDF_MAGIC = Buffer.from("%PDF-", "latin1");
+/** residencia-3 · la cabecera EBML, que es la de Matroska y la de WebM.
+ *  Cuatro bytes, igual que las otras dos. */
+const WEBM_MAGIC = Buffer.from([0x1a, 0x45, 0xdf, 0xa3]);
 
 export function esJpeg(buf: Buffer): boolean {
   return buf.length > 3 && buf.subarray(0, 3).equals(JPEG_MAGIC);
@@ -106,6 +138,10 @@ export function esJpeg(buf: Buffer): boolean {
 
 export function esPdf(buf: Buffer): boolean {
   return buf.length > 5 && buf.subarray(0, 5).equals(PDF_MAGIC);
+}
+
+export function esWebm(buf: Buffer): boolean {
+  return buf.length > 4 && buf.subarray(0, 4).equals(WEBM_MAGIC);
 }
 
 export class FotoInvalida extends Error {}
@@ -144,14 +180,52 @@ export function decodificarFoto(datos: unknown): Buffer {
   return buf;
 }
 
+/**
+ * residencia-3 · decodifica y valida la NOTA DE VOZ que mandó la tablet.
+ *
+ * Llega en base64 por el cuerpo del lote, igual que la foto de clinica-4 y
+ * por lo mismo: sale de un `MediaRecorder` del navegador y un `multipart`
+ * obligaría a montar el plugin de subida de Fastify para un endpoint.
+ *
+ * Y viaja DENTRO del lote del outbox, no por una ruta aparte: si fueran dos
+ * peticiones, una podría llegar y la otra no, y quedaría un registro que
+ * dice que hay un audio que no existe (o un audio que no es de nadie). El
+ * tope de 2 MB es lo que hace que eso quepa en un POST.
+ */
+export function decodificarNotaDeVoz(datos: unknown): Buffer {
+  const webm =
+    typeof datos === "object" && datos !== null
+      ? (datos as { webmBase64?: unknown }).webmBase64
+      : undefined;
+  if (typeof webm !== "string" || webm.length === 0) {
+    throw new FotoInvalida("No llegó ninguna nota de voz.");
+  }
+  const buf = Buffer.from(webm, "base64");
+  if (!esWebm(buf)) {
+    throw new FotoInvalida("Lo que llegó no es una nota de voz.");
+  }
+  const env = loadEnv();
+  if (buf.byteLength > env.CARE_VOICE_MAX_BYTES) {
+    throw new FotoInvalida(
+      "La nota de voz es demasiado larga. Cuéntalo más corto, o escríbelo.",
+    );
+  }
+  return buf;
+}
+
 export interface FicheroGuardado {
   fileName: string;
   sha256: string;
   bytes: number;
 }
 
-/** Nombre admitido. Se valida ANTES de tocar el disco. */
-const FILE_NAME_RE = /^[0-9a-f-]{36}-[0-9a-f]{12}\.(jpg|pdf)$/;
+/** Nombre admitido. Se valida ANTES de tocar el disco.
+ *
+ *  residencia-3 añade `webm` a las dos extensiones. La forma no cambia: el
+ *  nombre sigue siendo uuid + doce hex de la huella y sigue sin decir nada
+ *  de nadie — «carmen-rodriguez-algo-no-va-bien.webm» sería un dato de
+ *  salud en un listado de directorio. */
+const FILE_NAME_RE = /^[0-9a-f-]{36}-[0-9a-f]{12}\.(jpg|pdf|webm)$/;
 
 function directorioDe(clase: ClaseDeFichero): string {
   return join(loadEnv().CLINICAL_FILES_DIR, CARPETA[clase]);

@@ -6359,6 +6359,24 @@ model CareRecord {
   /// bien», que no está en el plan de nadie.
   planItemId String? @map("plan_item_id") @db.Uuid
 
+  /// **A QUÉ MOMENTO DEL PLAN responde.** Es lo que hace que tres cambios
+  /// posturales de un mismo turno sean tres cosas y no una repetida.
+  ///
+  ///   · lo que «toca» → el instante que devolvió `queToca`;
+  ///   · la observación diaria («¿cómo está hoy?») → **NULL**, porque se
+  ///     pregunta una vez por residente y turno, no por ocurrencia. De ahí
+  ///     sale «una vez por residente y turno» de la decisión 4;
+  ///   · lo `ON_DEMAND` → el instante del propio registro, porque no
+  ///     cuelga de ninguna agenda y su momento es cuando ocurrió. Así dos
+  ///     deposiciones del mismo turno son dos.
+  ///
+  /// Sostiene el índice único PARCIAL `care_records_una_por_ocurrencia_key`
+  /// de la migración, que Prisma no sabe declarar: la clave es
+  /// `(residente, control, día, turno, ocurrencia)` sólo sobre las filas
+  /// que NO son correcciones, con `COALESCE` en las dos nullable porque en
+  /// Postgres los NULL son distintos entre sí.
+  occurrenceAt DateTime? @map("occurrence_at") @db.Timestamptz()
+
   /// **EL VALOR, CIFRADO.** JSON serializado:
   /// `{"tipo":"BOOL","hecho":true}`, `{"tipo":"ORDINAL","opcion":"MITAD"}`,
   /// `{"tipo":"ORDINAL","opcion":"COMO_SIEMPRE","comoSiempre":true}`,
