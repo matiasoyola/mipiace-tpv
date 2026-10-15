@@ -681,7 +681,7 @@ tope de una nota de voz. La `CLINICAL_KEK` y el `CLINICAL_FILES_DIR` son los de 
 | Suite | Resultado |
 | --- | --- |
 | Unitaria (`pnpm vitest run`, desde la raíz) | **5.293 pasan**, 3 saltados, 378 ficheros (antes del bloque: 5.139 / 371) |
-| e2e de la API (`test:e2e`) | **783 pasan**, 38 ficheros (antes: 721 / 37) · y **sin Redis levantado**, que es como la ve la CI (§18) |
+| e2e de la API (`test:e2e`) | **783 pasan**, 38 ficheros (antes: 721 / 37) · **sin Redis y con los dos `.env` apartados**, que es como la ve la CI (§18) |
 | `tsc --noEmit` · api | limpio |
 | `tsc --noEmit` · los siete paquetes de la CI (más `residencia-plan`) | limpio |
 | `tsc -b` · admin y tpv-web | limpio |
@@ -784,8 +784,33 @@ con eso, el siguiente cuelgue se paga en un cuarto de hora de runner y no en una
 «timeout» en vez de hacer leer 1.429 líneas de `ECONNREFUSED`.
 
 **Comprobado como lo ve la CI**, no sólo pasando: suite e2e completa con `REDIS_URL` apuntando a un puerto
-muerto (`redis://127.0.0.1:6399`) → **783 pasan, 38 ficheros, 126 s**. Si algo volviera a necesitar Redis
-de verdad, se nota ahí antes de empujar.
+muerto (`redis://127.0.0.1:6399`) → verde. Si algo volviera a necesitar Redis de verdad, se nota ahí antes
+de empujar.
+
+### Y detrás había un segundo, que el cuelgue tapaba
+
+Con la suite corriendo de verdad, los tres casos de la foto del residente se cayeron:
+`EACCES: permission denied, mkdir '/var/lib/mipiacetpv'` (500 en la ruta de subida, y de ahí un 404 y un
+`path must be of type string, received null` en los dos siguientes). `CLINICAL_FILES_DIR` defaults en
+`env.ts` a `/var/lib/mipiacetpv/clinical-files`, que es **la ruta del contenedor**: el runner no puede
+crearla. Nunca se había notado porque ningún e2e anterior escribía un fichero clínico **a disco**, y en el
+portátil el `.env` de la raíz trae su propia ruta —la memoria de la casa, otra vez: el `.env` de dev tapa
+lo que la CI va a ver—.
+
+Se fija en `test-e2e/e2e-env.ts`, la puerta que importan los 38 ficheros, al lado de la `CLINICAL_KEK` y
+por el mismo motivo (en CI no hay `.env`). Y **sin `??=`**, al contrario que la KEK: la suite escribe en
+`tmpdir()/mipiacetpv-e2e-clinical-files` en el portátil **y** en CI, que es justo lo que faltaba para que
+esto se cazara antes de empujar. A `tmpdir()` y no al árbol, para no dejar fotos de prueba en el repo.
+
+**Verde final, con los DOS `.env` apartados y sin Redis** —las dos memorias de la casa a la vez, que es
+exactamente el entorno del runner—: **783 pasan, 38 ficheros, 128 s**.
+
+### El `smoke`, aparte
+
+En el run de `pull_request` de este arreglo el `smoke` se cayó con «/health no respondió en 60s», y en el
+de `push` —**el mismo sha, los mismos contenedores**— pasó. El contenedor no había bindeado el 3001
+todavía: su log acaba en `> tsx src/server.ts` y los dos avisos de base sin migrar. Es el margen de 60 s
+del paso, no este bloque: el diff no toca ni una línea de producción. Queda anotado porque va a volver.
 
 ## 19 · Commits
 
