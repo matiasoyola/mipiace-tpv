@@ -33,7 +33,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import Fastify, { type FastifyInstance } from "fastify";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { E2E_DATABASE_URL, e2eEnabled, SKIP_MESSAGE } from "./e2e-env.js";
 
@@ -45,7 +45,101 @@ process.env.JWT_ACCESS_SECRET = "g".repeat(40);
 process.env.JWT_REFRESH_SECRET = "h".repeat(40);
 process.env.HOLDED_KEY_ENCRYPTION_SECRET = randomBytes(32).toString("base64");
 
-const { getPrisma, shutdown } = await import("../src/context.js");
+// ── Redis, en memoria · POR QUÉ ──────────────────────────────────────
+//
+// El rate-limit del PIN de la puerta habla con Redis, y el job `e2e` de
+// CI sólo levanta Postgres («preferible mantener la suite autocontenida»,
+// .github/workflows/ci.yml). El cliente de `context.ts` va con
+// `maxRetriesPerRequest: null` —lo exige BullMQ para reconectar limpio—,
+// así que sin Redis el primer `inspect` del PIN **no falla: espera para
+// siempre**. Resultado medido en el run 38776991509: 51 de los 60 casos
+// de este fichero murieron uno a uno al timeout de 60 s y el job tardó
+// 48 minutos en vez de dos.
+//
+// Lo que se sustituye es el TRANSPORTE, no el limitador: `rate-limit.ts`
+// y la ruta siguen siendo los de verdad —contador, candado, TTL y los
+// umbrales por puerta—, sólo que las claves viven en un Map con TTL
+// (mismo patrón que `test/rate-limit-caracterizacion.test.ts`). Mockear
+// `rate-limit.js` entero, como hace `holded-desconectar.e2e.ts`, aquí
+// dejaría el candado del PIN sin NINGUNA prueba en todo el repo: la ruta
+// de la puerta no tiene test de unidad que lo cubra.
+vi.mock("../src/context.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../src/context.js")>();
+
+  interface Clave {
+    valor: string;
+    caducaEn: number | null;
+  }
+  const claves = new Map<string, Clave>();
+
+  /** La clave si no ha caducado. Caducar borra, como hace Redis. */
+  function viva(key: string): Clave | null {
+    const c = claves.get(key);
+    if (!c) return null;
+    if (c.caducaEn !== null && c.caducaEn <= Date.now()) {
+      claves.delete(key);
+      return null;
+    }
+    return c;
+  }
+
+  const falso = {
+    async incr(key: string) {
+      const c = viva(key);
+      const valor = c ? Number(c.valor) + 1 : 1;
+      claves.set(key, { valor: String(valor), caducaEn: c?.caducaEn ?? null });
+      return valor;
+    },
+    async decr(key: string) {
+      const c = viva(key);
+      const valor = c ? Number(c.valor) - 1 : -1;
+      claves.set(key, { valor: String(valor), caducaEn: c?.caducaEn ?? null });
+      return valor;
+    },
+    async get(key: string) {
+      return viva(key)?.valor ?? null;
+    },
+    async set(key: string, valor: string, _ex?: string, segundos?: number) {
+      claves.set(key, {
+        valor,
+        caducaEn: segundos == null ? null : Date.now() + segundos * 1000,
+      });
+      return "OK";
+    },
+    async ttl(key: string) {
+      const c = viva(key);
+      if (!c) return -2;
+      if (c.caducaEn === null) return -1;
+      return Math.ceil((c.caducaEn - Date.now()) / 1000);
+    },
+    async expire(key: string, segundos: number) {
+      const c = viva(key);
+      if (!c) return 0;
+      claves.set(key, { valor: c.valor, caducaEn: Date.now() + segundos * 1000 });
+      return 1;
+    },
+    async del(...keys: string[]) {
+      let n = 0;
+      for (const k of keys) if (claves.delete(k)) n += 1;
+      return n;
+    },
+    async flushall() {
+      claves.clear();
+      return "OK";
+    },
+    async ping() {
+      return "PONG";
+    },
+    disconnect() {},
+  };
+
+  return {
+    ...original,
+    getRedis: () => falso as unknown as ReturnType<typeof original.getRedis>,
+  };
+});
+
+const { getPrisma, getRedis, shutdown } = await import("../src/context.js");
 const { cargarCatalogoDeSerie } = await import(
   "../src/residencia/catalogo/cargar-catalogo.js"
 );
@@ -415,6 +509,9 @@ describe.skipIf(!e2eEnabled)("e2e · la puerta de la habitación", () => {
   beforeEach(async () => {
     olvidarClaves();
     olvidarEstado();
+    // Los intentos fallidos de un caso no cuentan en el siguiente: el
+    // candado del PIN se prueba donde toca y no por acumulación.
+    await getRedis().flushall();
     await prisma.$executeRawUnsafe(
       `ALTER TABLE care_records DISABLE TRIGGER care_records_inmutable`,
     );
@@ -500,6 +597,66 @@ describe.skipIf(!e2eEnabled)("e2e · la puerta de la habitación", () => {
         `UPDATE care_role_assignments SET revoked_at = NULL
          WHERE tenant_id = '${tenantId}' AND user_id = '${rosaId}'`,
       );
+    });
+
+    it("A LOS DIEZ FALLOS LA TABLET SE CANDA, y la de al lado no", async () => {
+      // Los diez intentos y los dos minutos de candado son de esta
+      // puerta y no los del login de cajero (5 → 15 min): el motivo está
+      // escrito en `puerta-registro-routes.ts`. Aquí se vigila que la
+      // ruta los use —y que el acierto limpie el contador—, que es lo
+      // único que no comprueba `rate-limit-caracterizacion.test.ts`.
+      const malo = (token = token112) =>
+        app.inject({
+          method: "POST",
+          url: "/residencia/puerta/pin",
+          headers: { "x-device-token": token },
+          payload: { pin: "0001" },
+        });
+
+      for (let i = 1; i <= 9; i += 1) {
+        const r = await malo();
+        expect(r.statusCode, r.body).toBe(401);
+        expect(r.json().attemptsRemaining, `intento ${i}`).toBe(10 - i);
+      }
+      // El décimo falla y, de paso, echa el candado.
+      const decimo = await malo();
+      expect(decimo.statusCode, decimo.body).toBe(401);
+      expect(decimo.json().attemptsRemaining).toBe(0);
+
+      // Y a partir de ahí **ni el PIN bueno entra**: el candado se mira
+      // antes de resolver nada.
+      const conElBueno = await app.inject({
+        method: "POST",
+        url: "/residencia/puerta/pin",
+        headers: { "x-device-token": token112 },
+        payload: { pin: PIN_ANA },
+      });
+      expect(conElBueno.statusCode, conElBueno.body).toBe(429);
+      expect(conElBueno.json().error).toBe("PUERTA_PIN_BLOQUEADO");
+      expect(conElBueno.json().retryAfterSeconds).toBeLessThanOrEqual(120);
+      expect(conElBueno.json().message).toContain("usa otra puerta");
+
+      // Lo que NO se bloquea es la residencia entera: el candado es por
+      // tablet, y la frase de arriba manda a la auxiliar a la de al lado.
+      await entrar(PIN_ANA, token201);
+    });
+
+    it("y un ACIERTO limpia el contador: los fallos no se acumulan", async () => {
+      const malo = () =>
+        app.inject({
+          method: "POST",
+          url: "/residencia/puerta/pin",
+          headers: { "x-device-token": token112 },
+          payload: { pin: "0001" },
+        });
+
+      for (let i = 0; i < 9; i += 1) expect((await malo()).statusCode).toBe(401);
+      await entrar(PIN_ANA);
+      // Si el acierto no limpiara, el siguiente fallo sería el décimo y
+      // dejaría la tablet candada.
+      const r = await malo();
+      expect(r.statusCode, r.body).toBe(401);
+      expect(r.json().attemptsRemaining).toBe(9);
     });
   });
 

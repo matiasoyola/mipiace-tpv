@@ -681,7 +681,7 @@ tope de una nota de voz. La `CLINICAL_KEK` y el `CLINICAL_FILES_DIR` son los de 
 | Suite | Resultado |
 | --- | --- |
 | Unitaria (`pnpm vitest run`, desde la raíz) | **5.293 pasan**, 3 saltados, 378 ficheros (antes del bloque: 5.139 / 371) |
-| e2e de la API (`test:e2e`) | **781 pasan**, 38 ficheros (antes: 721 / 37) |
+| e2e de la API (`test:e2e`) | **783 pasan**, 38 ficheros (antes: 721 / 37) · y **sin Redis levantado**, que es como la ve la CI (§18) |
 | `tsc --noEmit` · api | limpio |
 | `tsc --noEmit` · los siete paquetes de la CI (más `residencia-plan`) | limpio |
 | `tsc -b` · admin y tpv-web | limpio |
@@ -692,8 +692,9 @@ memoria de la casa —«el `.env` de la raíz tapa la CI»— está respetada.
 
 ### Lo nuevo de este bloque
 
-- `apps/api/test-e2e/residencia-3.e2e.ts` (60) · el camino completo y la tabla de sabotajes, contra
-  Postgres de verdad y montando las rutas.
+- `apps/api/test-e2e/residencia-3.e2e.ts` (62) · el camino completo y la tabla de sabotajes, contra
+  Postgres de verdad y montando las rutas. Los dos últimos casos son del candado del PIN y llegaron
+  arreglando la CI (§18).
 - `apps/api/test/residencia-3-migracion.test.ts` (35) · el contrato del SQL, incluido el guardián de las
   veintidós columnas del trigger.
 - `apps/api/test/residencia-registro.test.ts` (24) · el dominio puro: el valor, la ocurrencia, los
@@ -746,7 +747,47 @@ se sale a lo ancho. **Hallazgos en la última pasada: ninguno.** Los tres de las
 
 ---
 
-## 18 · Commits
+## 18 · La CI del e2e · el Redis que no hay
+
+El job `e2e` de la PR #27 tardó **48 minutos** y acabó rojo (run `38776991509`); normalmente baja de dos.
+No se colgó la CI: se colgó **este bloque**.
+
+**Qué pasaba.** `residencia-3.e2e.ts` es el primer fichero de la suite que monta la ruta
+`POST /residencia/puerta/pin`, y esa ruta pasa por el rate-limit (`auth/rate-limit.ts`), que vive en Redis.
+El job `e2e` **sólo levanta Postgres** —por decisión escrita en el propio `ci.yml`: «preferible mantener la
+suite autocontenida»— y el cliente de `context.ts` se construye con `maxRetriesPerRequest: null`, que lo
+exige BullMQ para reconectar limpio. Con ese ajuste, un comando contra un Redis que no está **no falla:
+espera reconexión para siempre**. Así que cada caso que teclea un PIN se quedaba parado en el primer
+`inspect` hasta el timeout de 60 s de vitest: **51 de los 60 casos**, uno detrás de otro, 51 minutos de
+runner. Los 9 que pasaban son los sabotajes que hablan sólo con Postgres.
+
+**Por qué no lo vio nadie antes.** En el portátil hay un `mipiacetpv-redis` levantado (uno por worktree,
+memoria de la casa), así que en local el rate-limit encontraba su Redis y el fichero pasaba en 16 s. El
+verde de local mentía sobre el entorno de la CI, igual que lo hace el `.env` de la raíz.
+
+**Qué se cambió.** En el e2e se sustituye **el transporte, no el limitador**: `vi.mock` de
+`../src/context.js` que devuelve un `getRedis()` en memoria —un `Map` con TTL de verdad, el patrón de
+`test/rate-limit-caracterizacion.test.ts`— y se deja pasar lo demás del módulo (el `getPrisma` sigue siendo
+el Prisma real). `rate-limit.ts` y la ruta siguen siendo los de verdad: contador, candado, TTL y los
+umbrales **por puerta** (10 intentos / 5 min → 2 min de candado). Y el `beforeEach` hace `flushall`, para
+que los fallos de un caso no cuenten en el siguiente.
+
+Lo que **no** se hizo es mockear `rate-limit.js` entero, que es lo que hace `holded-desconectar.e2e.ts`
+para su throttle de catálogo. Aquí habría dejado el candado del PIN **sin una sola prueba en todo el
+repo**: la ruta de la puerta no tiene test de unidad que la cubra. Así que el mock trae su contrapartida:
+dos casos nuevos que lo vigilan a través de la ruta —a los diez fallos la tablet se canda, el PIN bueno
+recibe 429, **la tablet de al lado sigue abriendo**, y un acierto limpia el contador—. El limitador en sí
+(los cinco intentos del login, los TTL) lo sigue clavando `rate-limit-caracterizacion.test.ts`.
+
+**Y una red para la próxima.** `timeout-minutes: 15` en el job `e2e`. La suite entera tarda dos minutos;
+con eso, el siguiente cuelgue se paga en un cuarto de hora de runner y no en una hora, y el log dice
+«timeout» en vez de hacer leer 1.429 líneas de `ECONNREFUSED`.
+
+**Comprobado como lo ve la CI**, no sólo pasando: suite e2e completa con `REDIS_URL` apuntando a un puerto
+muerto (`redis://127.0.0.1:6399`) → **783 pasan, 38 ficheros, 126 s**. Si algo volviera a necesitar Redis
+de verdad, se nota ahí antes de empujar.
+
+## 19 · Commits
 
 ```
 f4a957c feat(residencia-3): el modelo del registro de cuidados, el PIN y la foto
@@ -756,9 +797,10 @@ ba17c8b feat(residencia-3): las seis pantallas de la puerta y la cola sin red
 b5f53e0 test(residencia-3): la tabla del registro, los sabotajes y el sin red
 3b0446c test(residencia-3): las seis pantallas, el admin y los inventarios al día
 b5b4fcf fix(residencia-3): lo que encontró el bucle visual, y las capturas
-<este>  docs(residencia-3): el done del bloque
+5c1bd2d docs(residencia-3): el done del bloque
+<este>  fix(residencia-3): el e2e no necesita Redis, y el candado del PIN tiene test
 ```
 
-## 19 · La rama
+## 20 · La rama
 
 Sobre `origin/master` = `e275b37`. **Ni merge ni despliegue: eso lo decide Matías.**
