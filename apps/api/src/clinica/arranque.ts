@@ -50,6 +50,9 @@ export interface RevisionDelArranque {
   tenantsClinicos: number;
   clavesRevisadas: number;
   clavesQueNoCuadran: string[];
+  /** La revisión NO SE PUDO HACER (base sin migrar, o la consulta falló).
+   *  No es lo mismo que «comprobado y está mal»: ver abajo. */
+  noSePudoComprobar?: string;
 }
 
 /**
@@ -63,10 +66,39 @@ export async function revisarArranqueClinico(): Promise<RevisionDelArranque> {
   const prisma = getPrisma();
   const motivos: string[] = [];
 
-  const [tenantsClinicos, clavesExistentes] = await Promise.all([
-    prisma.tenant.count({ where: { clinicalRecordsEnabled: true } }),
-    prisma.clinicalTenantKey.count(),
-  ]);
+  // ── SI NO SE PUEDE PREGUNTAR, NO SE TUMBA LA API ──────────────────
+  //
+  // El smoke de CI arranca la imagen contra una base **sin migrar**, y
+  // `prisma.clinicalTenantKey.count()` lanza `P2021: la tabla no existe`.
+  // Esa excepción salía del arranque y mataba el proceso: el contenedor no
+  // llegaba a servir `/health` y el smoke se caía con la API «parada antes
+  // de servir», que no dice nada de lo que pasó.
+  //
+  // «No pude comprobar» NO es «comprobado y está mal», y solo lo segundo
+  // justifica no arrancar. Una base sin tablas no tiene ninguna historia
+  // clínica que proteger — y en un despliegue de verdad las tablas están,
+  // así que esta rama no tapa el caso que la decisión 17 cubre.
+  //
+  // Es la regla de la casa: nada del arranque puede lanzar.
+  let tenantsClinicos: number;
+  let clavesExistentes: number;
+  try {
+    [tenantsClinicos, clavesExistentes] = await Promise.all([
+      prisma.tenant.count({ where: { clinicalRecordsEnabled: true } }),
+      prisma.clinicalTenantKey.count(),
+    ]);
+  } catch (err) {
+    return {
+      puedeArrancar: true,
+      motivos: [],
+      tenantsClinicos: 0,
+      clavesRevisadas: 0,
+      clavesQueNoCuadran: [],
+      noSePudoComprobar:
+        "No se pudo mirar si hay clínicas (¿base sin migrar?): " +
+        (err instanceof Error ? err.message.split("\n")[0] : String(err)),
+    };
+  }
 
   const hayAlgoClinico = tenantsClinicos > 0 || clavesExistentes > 0;
   if (!hayAlgoClinico) {
@@ -130,6 +162,14 @@ export async function exigirArranqueClinico(
 ): Promise<void> {
   const revision = await revisarArranqueClinico();
   if (revision.puedeArrancar) {
+    if (revision.noSePudoComprobar != null) {
+      // Un WARN, no un fatal, y la API sigue. Que quede en el log para que
+      // nadie lea «arrancó» como «la KEK está bien».
+      log.warn(
+        { event: "clinica_kek_sin_comprobar" },
+        revision.noSePudoComprobar,
+      );
+    }
     if (revision.clavesRevisadas > 0) {
       log.info(
         {

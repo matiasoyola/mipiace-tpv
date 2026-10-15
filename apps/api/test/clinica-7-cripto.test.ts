@@ -693,6 +693,28 @@ describe("clinica-7 · la API no arranca si no puede leer lo que va a escribir",
     expect(r.motivos.join(" ")).toContain("NO se arranca");
   });
 
+  it("si NO SE PUEDE PREGUNTAR (base sin migrar), arranca y lo dice", async () => {
+    // El smoke de CI arranca la imagen contra una base SIN MIGRAR: la
+    // tabla `clinical_tenant_keys` no existe y Prisma lanza `P2021`. Esa
+    // excepción salía del arranque y mataba el proceso — el contenedor no
+    // llegaba a servir `/health`.
+    //
+    // «No pude comprobar» no es «comprobado y está mal»: una base sin
+    // tablas no tiene ninguna historia clínica que proteger.
+    fakePrisma.tenant.count.mockRejectedValueOnce(
+      new Error(
+        "The table `public.clinical_tenant_keys` does not exist in the current database.",
+      ),
+    );
+    const r = await revisarArranqueClinico();
+    expect(r.puedeArrancar).toBe(true);
+    expect(r.noSePudoComprobar).toContain("does not exist");
+    // Y NO dice que todo esté bien: el que lea el log tiene que ver que no
+    // se comprobó.
+    expect(r.motivos).toEqual([]);
+    expect(r.clavesRevisadas).toBe(0);
+  });
+
   it("una clínica DESTRUIDA no impide arrancar: su canario no tiene que cuadrar", async () => {
     await asegurarDek(TENANT_A, fakePrisma as never);
     await destruirDek({ tenantId: TENANT_A, motivo: "x" }, fakePrisma as never);
