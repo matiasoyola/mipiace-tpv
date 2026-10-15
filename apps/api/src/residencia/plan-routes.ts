@@ -29,6 +29,19 @@
 // Las dos, y en ese orden: la de la capacidad primero (es más barata, no
 // toca la base del residente) y la clínica después, que es la que deja
 // línea en `clinical_access_log`.
+//
+// ── residencia-1b · LOS DOS MOTIVOS VAN CIFRADOS (D-63) ─────────────
+//
+// `reason` y `close_reason` son los textos libres de la tabla —«úlcera
+// sacra grado II», «se le retiró la sonda»— y desde este bloque se
+// escriben con `cifrarTexto` y se leen con `leerTexto`.
+//
+// Lo que **no** se cifra, y está declarado: `control_code` y las siete
+// columnas de frecuencia. Sostienen `care_plan_items_one_live_key` («una
+// línea viva por residente y control») y el cifrado de clinica-7 es no
+// determinista, así que una columna cifrada no puede sostener un índice
+// único. Consecuencia que conviene no esconder: el código del control en
+// claro ya dice QUÉ se le controla a un residente.
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
@@ -47,6 +60,16 @@ import { getPrisma } from "../context.js";
 import { requireOwner, requireOwnerOrCashier } from "../auth/middleware.js";
 import { ensureClinicaEnabled } from "../clinica/gate.js";
 import { conHistoria } from "../clinica/registro.js";
+// residencia-1b (D-63) · los dos motivos de una línea del plan van
+// cifrados. `asegurarDek` en las escrituras, `dekONada` en las lecturas.
+import { asegurarDek, dekONada } from "../clinica/claves.js";
+import {
+  cifrarTexto,
+  leerTexto,
+  nuevoIdDeFila,
+  sitioMotivoDeCierreDeLinea,
+  sitioMotivoDeLinea,
+} from "../clinica/cripto-campos.js";
 import { ensureResidenciaEnabled } from "./gate.js";
 import {
   FRECUENCIA_DEFAULT_SELECT,
@@ -98,6 +121,10 @@ const LINEA_SELECT = {
   sourceLevel: true,
   reason: true,
   closeReason: true,
+  // residencia-1b · las que MANDAN. Las claras se quedan para las filas
+  // que ya estaban escritas cuando llegó el cifrado.
+  reasonCifrado: true,
+  closeReasonCifrado: true,
 } as const;
 
 /**
@@ -404,6 +431,11 @@ export async function registerResidenciaPlanRoutes(app: FastifyInstance): Promis
       const prisma = getPrisma();
 
       return conHistoria(request, reply, { clientId, action: "READ" }, async () => {
+        // residencia-1b · una lectura NO crea claves: `dekONada`. Y una
+        // sola vez para todas las líneas del plan, que son del mismo
+        // centro — la caché del llavero dura 60 s, pero pedirla por línea
+        // serían veinte `await` en una ruta que hace seis consultas.
+        const dek = await dekONada(tenantId, prisma);
         const [lineas, controles, ajustes, turnos, momentos, perfil] = await Promise.all([
           prisma.carePlanItem.findMany({
             where: { tenantId, clientId },
@@ -471,8 +503,19 @@ export async function registerResidenciaPlanRoutes(app: FastifyInstance): Promis
             hasta: l.toAt?.toISOString() ?? null,
             source: l.source,
             sourceLevel: l.sourceLevel,
-            motivo: l.reason,
-            motivoDeCierre: l.closeReason,
+            // residencia-1b · de la columna cifrada, con el hueco marcado
+            // si no se descifra. El plan se SIGUE SIRVIENDO: una línea
+            // ilegible no puede dejar a un residente sin su plan entero.
+            motivo: leerTexto(
+              { cifrado: l.reasonCifrado, claro: l.reason },
+              dek,
+              sitioMotivoDeLinea(tenantId, l.id),
+            ),
+            motivoDeCierre: leerTexto(
+              { cifrado: l.closeReasonCifrado, claro: l.closeReason },
+              dek,
+              sitioMotivoDeCierreDeLinea(tenantId, l.id),
+            ),
             // Los dos avisos que la pantalla pinta en ámbar. Ninguno es un
             // error: son estados legítimos que no pueden pasar
             // desapercibidos.
@@ -617,18 +660,32 @@ export async function registerResidenciaPlanRoutes(app: FastifyInstance): Promis
         }
 
         const creada = await prisma.$transaction(async (tx) => {
+          // residencia-1b · la clave del centro, dentro de la transacción
+          // que escribe. Si no se pudiera obtener, esto LEVANTA y la línea
+          // no se guarda: no se escribe el motivo en claro porque falte la
+          // clave.
+          const dek = await asegurarDek(tenantId, tx);
           if (viva) {
             await tx.carePlanItem.update({
               where: { id: viva.id },
               data: {
                 toAt: ahora,
-                closeReason: body.motivo?.trim() || "cambio de frecuencia",
+                closeReason: null,
+                closeReasonCifrado: cifrarTexto(
+                  body.motivo?.trim() || "cambio de frecuencia",
+                  dek,
+                  sitioMotivoDeCierreDeLinea(tenantId, viva.id),
+                ),
                 closedByUserId: userId,
               },
             });
           }
+          // El uuid, generado aquí: el AAD lo necesita y no se puede leer
+          // de una fila que todavía no existe.
+          const nuevaId = nuevoIdDeFila();
           return tx.carePlanItem.create({
             data: {
+              id: nuevaId,
               tenantId,
               clientId,
               controlCode: body.controlCode,
@@ -641,7 +698,12 @@ export async function registerResidenciaPlanRoutes(app: FastifyInstance): Promis
               // no la cerrará nunca.
               source: "MANUAL" as CarePlanItemSource,
               sourceLevel: null,
-              reason: body.motivo?.trim() || null,
+              reason: null,
+              reasonCifrado: cifrarTexto(
+                body.motivo?.trim() || null,
+                dek,
+                sitioMotivoDeLinea(tenantId, nuevaId),
+              ),
               createdByUserId: userId,
             },
             select: { id: true },
@@ -710,11 +772,17 @@ export async function registerResidenciaPlanRoutes(app: FastifyInstance): Promis
             message: "Esa línea ya estaba cerrada. No se borra: se queda en el histórico.",
           });
         }
+        const dek = await asegurarDek(tenantId, prisma);
         await prisma.carePlanItem.update({
           where: { id: itemId },
           data: {
             toAt: new Date(),
-            closeReason: body.motivo?.trim() || null,
+            closeReason: null,
+            closeReasonCifrado: cifrarTexto(
+              body.motivo?.trim() || null,
+              dek,
+              sitioMotivoDeCierreDeLinea(tenantId, itemId),
+            ),
             closedByUserId: userId,
           },
         });
