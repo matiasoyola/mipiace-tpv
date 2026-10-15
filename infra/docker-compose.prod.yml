@@ -138,6 +138,13 @@ services:
       # lleva (`infra/backup-postgres.sh`): una historia cuyas fotos no se
       # pueden recuperar no se conserva cinco años.
       CLINICAL_FILES_DIR: /var/lib/mipiacetpv/clinical-files
+      # clinica-7 · la KEK que envuelve la clave de cada clínica. Sale de
+      # `infra/.env.production` (la genera `scripts/generar-claves-clinicas.mjs`).
+      # Sin ESTA línea la variable se queda en el host y no llega al
+      # contenedor: el `environment:` de aquí es una lista cerrada. Vacía, la
+      # API se niega a arrancar si hay alguna clínica (`clinica/arranque.ts`).
+      CLINICAL_KEK: ${CLINICAL_KEK:-}
+      CLINICAL_KEK_ID: ${CLINICAL_KEK_ID:-kek-1}
       # v1.5-consistencia-B · Lote 2: Sentry. Vacío → no-op absoluto.
       # Release = tag de la imagen desplegada (sha corto de CI).
       SENTRY_DSN: ${SENTRY_DSN:-}
