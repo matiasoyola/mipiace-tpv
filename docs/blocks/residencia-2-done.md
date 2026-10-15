@@ -659,8 +659,8 @@ de `COPY` en el stage de dependencias, `pnpm install --frozen-lockfile` dentro d
   Las dos etiquetas las puso `clinica-4` el 09-10. El arreglo es un `exact: true` en el spec y **no se
   toca aquí**, por lo mismo que no lo tocó residencia-1.
 - `tsc` de API y admin · limpio.
-- CI · **verde**, los tres jobs sobre `a03733f`:
-  [run 38593898601](https://github.com/matiasoyola/mipiace-tpv/actions/runs/38593898601) —
+- CI · **verde**, los tres jobs sobre `b1ff341`:
+  [run 38712772902](https://github.com/matiasoyola/mipiace-tpv/actions/runs/38712772902) —
   `ci: success`, `smoke: success`, `e2e: success` (`publish` se salta, como toca fuera de master).
   El `smoke` costó el arreglo de §11.4.
 
