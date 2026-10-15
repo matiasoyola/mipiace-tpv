@@ -228,11 +228,17 @@ export async function registerResidenciaPuertaRoutes(
           plantaName: habitacion.floor.name,
         },
         // Nombre y cama. NADA MÁS. Ver la cabecera de `puerta-auth.ts`.
+        //
+        // residencia-3 añade el `clientId`, y sólo porque la pantalla en
+        // reposo necesita con qué pedir la foto (D-64). Un uuid no dice
+        // nada de nadie —no es el DNI, no es el nivel de dependencia— y la
+        // foto que abre sigue exigiendo consentimiento de imagen vigente.
         ocupantes: habitacion.beds.map((b) => {
           const ocupacion = b.assignments[0] ?? null;
           return {
             bedId: b.id,
             bedLabel: b.label,
+            clientId: ocupacion?.client.id ?? null,
             nombre: ocupacion
               ? `${ocupacion.client.firstName} ${ocupacion.client.lastName}`.trim()
               : null,

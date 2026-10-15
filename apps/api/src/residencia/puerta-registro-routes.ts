@@ -501,6 +501,12 @@ export async function registerResidenciaPuertaRegistroRoutes(
         device: { id: ctx.deviceId, name: ctx.deviceName },
         habitacion: {
           id: habitacion.id,
+          // El `tenantId` viaja porque la tablet lo necesita para
+          // recalcular la huella del PIN sin red: entra en el HMAC
+          // (`huellaDePinDePuerta`) además de estar en la subclave. No es
+          // un dato de nadie — es el id de la cuenta, el mismo que ya va
+          // en cada JWT de la casa.
+          tenantId: ctx.tenantId,
           number: habitacion.number,
           name: habitacion.name,
           plantaId: habitacion.floor.id,

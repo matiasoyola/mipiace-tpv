@@ -612,6 +612,10 @@ export interface VistaDeRegistro {
   tieneVoz: boolean;
   recordedAt: string;
   careDay: string;
+  /** A qué ocurrencia del plan responde, o `null`. La pantalla lo compara
+   *  con el `at` de `queToca` para saber si una ronda ya está hecha, que
+   *  es la misma clave que usa el índice del motor. */
+  occurrenceAt: string | null;
   shiftCode: string | null;
   /** `true` cuando el registro no cayó en ningún turno. Es el aviso. */
   sinTurno: boolean;
@@ -712,6 +716,7 @@ export function vistaDeRegistros(
     tieneVoz: f.voiceFileName != null,
     recordedAt: f.recordedAt.toISOString(),
     careDay: f.careDay,
+    occurrenceAt: f.occurrenceAt?.toISOString() ?? null,
     shiftCode: f.centerShift?.code ?? null,
     sinTurno: f.centerShiftId == null,
     firmadoPor: nombreDeQuienFirma(f.recordedBy),
