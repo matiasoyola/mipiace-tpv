@@ -83,7 +83,17 @@ export function PuertaNoComoSiempre({
           return (
             <section
               key={d.code}
+              // LA ABIERTA OCUPA LA FILA ENTERA, y eso es lo que hace que
+              // sus opciones quepan EN FILA como pide el mockup. Dentro de
+              // una tarjeta de un tercio del ancho no caben: el vocabulario
+              // de la rama §4 es largo a propósito —«Apagado / triste / no
+              // quiere levantarse» es UNA opción porque partirla sería
+              // pedirle a la auxiliar que distinga si está apagada o
+              // triste— y acortarlo para que quepa sería deshacer esa
+              // decisión. Lo que se mueve es la rejilla, no el texto.
               className={`rounded-2xl border-2 p-5 ${
+                estaAbierta ? "md:col-span-2 lg:col-span-3" : ""
+              } ${
                 elegida
                   ? "border-mipiace-coral bg-mipiace-coral-soft"
                   : "border-slate-200 bg-white"

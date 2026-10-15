@@ -116,10 +116,16 @@ export interface ValorEntrante {
   opcion?: string;
 }
 
-/** Lo que hace falta saber de un control para validar un registro suyo. */
+/** Lo que hace falta saber de un control para validar un registro suyo, y
+ *  para pintarlo. */
 export interface ControlParaRegistrar {
   id: string;
   code: string;
+  /** Cómo lo llama el producto. **Hace falta**: sin él, «lo que toca» se
+   *  pinta con el CÓDIGO, y en la puerta se lee «CAMBIO_POSTURAL» en vez
+   *  de «Cambio postural». Lo encontró el bucle visual mirando la captura,
+   *  no un test — porque un test que compara códigos pasa igual. */
+  name: string;
   layer: string;
   nature: string;
   valueDomain: string;

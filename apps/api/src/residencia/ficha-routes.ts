@@ -543,7 +543,19 @@ export async function registerResidenciaFichaRoutes(
                 { scope: "CENTER", tenantId: auth.tenantId },
               ],
             },
-            select: { code: true, name: true, layer: true, valueDomain: true },
+            select: {
+              code: true,
+              name: true,
+              layer: true,
+              valueDomain: true,
+              // Las ETIQUETAS de las opciones. El registro guarda el CÓDIGO
+              // —para que cambiarle el texto no reescriba el histórico
+              // (residencia-2 §1)— y la pantalla tiene que enseñar el
+              // texto. Sin esto se lee «SIN_DOLOR · como siempre» en la
+              // hoja que se enseña en una auditoría; lo encontró el bucle
+              // visual mirando la captura.
+              options: { select: { code: true, label: true } },
+            },
           }),
         ]);
         // El día POR DEFECTO es el del turno de ahora y no el del
@@ -562,11 +574,27 @@ export async function registerResidenciaFichaRoutes(
         const nombreDe = (code: string) =>
           alias.get(code) ?? porCodigo.get(code)?.name ?? code;
 
-        const conNombre = vista.map((r) => ({
-          ...r,
-          nombre: nombreDe(r.controlCode),
-          layer: porCodigo.get(r.controlCode)?.layer ?? null,
-        }));
+        const conNombre = vista.map((r) => {
+          const control = porCodigo.get(r.controlCode);
+          const opcion =
+            typeof (r.valor as { opcion?: unknown } | null)?.opcion === "string"
+              ? (r.valor as { opcion: string }).opcion
+              : null;
+          return {
+            ...r,
+            nombre: nombreDe(r.controlCode),
+            layer: control?.layer ?? null,
+            /** La etiqueta de la opción elegida, para que la hoja diga
+             *  «Sin dolor» y no `SIN_DOLOR`. `null` si el control o la
+             *  opción ya no existen: entonces la pantalla enseña el código,
+             *  que es mejor que no enseñar nada. */
+            opcionLabel:
+              opcion == null
+                ? null
+                : (control?.options.find((o) => o.code === opcion)?.label ??
+                  null),
+          };
+        });
 
         return {
           dia: careDay,

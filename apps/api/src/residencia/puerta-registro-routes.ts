@@ -307,6 +307,7 @@ async function controlesActivos(
     mapa.set(c.code, {
       id: c.id,
       code: c.code,
+      name: c.name,
       layer: c.layer,
       nature: c.nature,
       valueDomain: c.valueDomain,
@@ -927,8 +928,11 @@ export async function registerResidenciaPuertaRegistroRoutes(
       const vista = vistaDeRegistros(registros, dek);
 
       const alias = new Map(ajustes.map((a) => [a.controlCode, a.alias]));
+      // El ALIAS del centro si lo tiene, y si no el nombre del producto.
+      // **Nunca el código**: la auxiliar lee «Cambio postural», no
+      // `CAMBIO_POSTURAL`.
       const nombreDe = (code: string) =>
-        alias.get(code) ?? controles.get(code)?.code ?? code;
+        alias.get(code) ?? controles.get(code)?.name ?? code;
 
       const fotoPorCliente = new Map(
         perfiles.map((p) => [p.clientId, p.photoFileName]),

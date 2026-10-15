@@ -174,20 +174,47 @@ describe("el valor de un registro, en palabras", () => {
     expect(valorEnPalabras({ tipo: "BOOL", hecho: true })).toBe("Hecho");
   });
 
-  it("un ORDINAL «como siempre» lo dice", () => {
+  it("un ORDINAL se lee con SU ETIQUETA, no con el código", () => {
+    // El registro guarda el CÓDIGO —para que cambiarle el texto no
+    // reescriba el histórico— y la hoja que se enseña en una auditoría
+    // tiene que decir «Sin dolor», no `SIN_DOLOR`. Lo encontró el bucle
+    // visual mirando la captura.
+    expect(
+      valorEnPalabras(
+        { tipo: "ORDINAL", opcion: "SIN_DOLOR", comoSiempre: true },
+        "Sin dolor",
+      ),
+    ).toBe("Sin dolor · como siempre");
+  });
+
+  it("y sin etiqueta se enseña el código, que es mejor que un hueco", () => {
     expect(
       valorEnPalabras({
         tipo: "ORDINAL",
-        opcion: "COMO_SIEMPRE",
+        opcion: "SIN_DOLOR",
         comoSiempre: true,
       }),
-    ).toBe("COMO_SIEMPRE · como siempre");
+    ).toBe("SIN_DOLOR · como siempre");
   });
 
-  it("y uno que se desvía, no", () => {
+  it("el sufijo NO SE REPITE cuando la etiqueta ya lo dice", () => {
+    // Cuatro de las siete dimensiones llaman «Como siempre» a su valor de
+    // normalidad: sin esto, la hoja decía «Como siempre · como siempre».
     expect(
-      valorEnPalabras({ tipo: "ORDINAL", opcion: "APAGADO", comoSiempre: false }),
-    ).toBe("APAGADO");
+      valorEnPalabras(
+        { tipo: "ORDINAL", opcion: "COMO_SIEMPRE", comoSiempre: true },
+        "Como siempre",
+      ),
+    ).toBe("Como siempre");
+  });
+
+  it("y uno que se desvía no lleva sufijo", () => {
+    expect(
+      valorEnPalabras(
+        { tipo: "ORDINAL", opcion: "APAGADO", comoSiempre: false },
+        "Apagado / triste",
+      ),
+    ).toBe("Apagado / triste");
   });
 
   it("una NOTA es «Algo no va bien»", () => {

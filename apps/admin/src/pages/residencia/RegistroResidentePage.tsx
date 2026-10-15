@@ -51,6 +51,10 @@ interface RegistroDeLaFicha {
   anulado: boolean;
   corrigeA: string | null;
   vigente: boolean;
+  /** La etiqueta de la opción elegida. El registro guarda el CÓDIGO —para
+   *  que cambiarle el texto no reescriba el histórico— y esto es lo que se
+   *  lee. `null` = el control o la opción ya no están en el catálogo. */
+  opcionLabel?: string | null;
 }
 
 interface LoRegistrado {
@@ -280,7 +284,7 @@ function Linea({ r }: { r: RegistroDeLaFicha }) {
         </span>
       </div>
       <p className="mt-1 text-slate-600">
-        {valorEnPalabras(r.valor)}
+        {valorEnPalabras(r.valor, r.opcionLabel ?? null)}
         {r.nota ? ` · «${r.nota}»` : ""}
       </p>
       <p className="mt-1 flex items-center gap-2 text-[13px] text-slate-500">
@@ -300,7 +304,10 @@ function Linea({ r }: { r: RegistroDeLaFicha }) {
  * descifra **se enseña como hueco y no se esconde**, porque esconderlo
  * borra la única pista de que algo va mal con la clave.
  */
-export function valorEnPalabras(valor: unknown): string {
+export function valorEnPalabras(
+  valor: unknown,
+  opcionLabel: string | null = null,
+): string {
   if (valor == null) return "—";
   const v = valor as {
     tipo?: unknown;
@@ -312,8 +319,20 @@ export function valorEnPalabras(valor: unknown): string {
   if (v.ilegible === true) return "(este dato no se puede leer)";
   if (v.tipo === "BOOL") return v.hecho === true ? "Hecho" : "—";
   if (v.tipo === "ORDINAL") {
-    const code = typeof v.opcion === "string" ? v.opcion : "—";
-    return v.comoSiempre === true ? `${code} · como siempre` : code;
+    // La etiqueta si el catálogo la tiene; si no, el código. Enseñar el
+    // código es peor que enseñar el texto y mucho mejor que enseñar un
+    // hueco: la hoja que se enseña en una auditoría tiene que decir algo.
+    const texto =
+      opcionLabel ?? (typeof v.opcion === "string" ? v.opcion : "—");
+    // El sufijo «· como siempre» sólo cuando la etiqueta no lo dice ya.
+    // Cuatro de las siete dimensiones llaman «Como siempre» a su valor de
+    // normalidad y las otras tres no («Sin dolor», «Piel bien», «Ha
+    // dormido bien»): sin esta línea, la hoja que se enseña en una
+    // auditoría dice «Como siempre · como siempre».
+    const yaLoDice = texto.toLocaleLowerCase("es").includes("como siempre");
+    return v.comoSiempre === true && !yaLoDice
+      ? `${texto} · como siempre`
+      : texto;
   }
   if (v.tipo === "NOTA") return "Algo no va bien";
   return "—";

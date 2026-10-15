@@ -41,6 +41,7 @@ function control(p: Partial<ControlParaRegistrar> = {}): ControlParaRegistrar {
   return {
     id: "c1",
     code: "CAMBIO_POSTURAL",
+    name: "Cambio postural",
     layer: "EXEC",
     nature: "SCHEDULED",
     valueDomain: "BOOL",
