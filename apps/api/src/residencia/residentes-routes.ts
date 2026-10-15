@@ -77,6 +77,58 @@ const PUERTAS_ESCRITURA = [
   ensureResidenciaEnabled,
 ];
 
+/**
+ * residencia-3 (D-64) · el consentimiento de imagen VIGENTE de un
+ * residente, o `null`.
+ *
+ * Vigente = una fila `IMAGE` que concede y ninguna que la revoque. La
+ * revocación es otra fila, que es como funciona el consentimiento en toda
+ * la casa desde clinica-4: nadie pone un booleano a `false`.
+ *
+ * Devuelve quién lo dio y cuándo, no sólo el sí: lo que la dirección tiene
+ * que poder enseñar si alguien pregunta es que el consentimiento existe y
+ * de quién es.
+ */
+async function consentimientoDeImagen(
+  prisma: ReturnType<typeof getPrisma>,
+  tenantId: string,
+  clientId: string,
+): Promise<{
+  id: string;
+  anotadoEn: string;
+  loDio: string | null;
+  nombre: string | null;
+  parentesco: string | null;
+} | null> {
+  const filas = await prisma.clientConsent.findMany({
+    where: { tenantId, clientId, kind: "IMAGE" },
+    orderBy: { grantedAt: "asc" },
+    select: {
+      id: true,
+      grantedAt: true,
+      signer: true,
+      signerName: true,
+      signerRelation: true,
+      revokesConsentId: true,
+    },
+  });
+  const revocados = new Set(
+    filas.map((f) => f.revokesConsentId).filter((x): x is string => x != null),
+  );
+  for (const f of filas) {
+    if (f.revokesConsentId != null) continue;
+    if (revocados.has(f.id)) continue;
+    return {
+      id: f.id,
+      anotadoEn: f.grantedAt.toISOString(),
+      loDio: f.signer,
+      nombre: f.signerName,
+      parentesco: f.signerRelation,
+    };
+  }
+  return null;
+}
+
 const NIVELES = ["VALIDO", "SEMIASISTIDO", "DEPENDIENTE"] as const;
 const GRADOS = ["I", "II", "III"] as const;
 const PLAZAS = ["PRIVADA", "CONCERTADA", "TEMPORAL"] as const;
@@ -667,6 +719,13 @@ export async function registerResidenciaResidentesRoutes(
               nss: true,
               dniCifrado: true,
               nssCifrado: true,
+              // residencia-3 (D-64) · la foto, para que la ficha diga si
+              // hay una y desde cuándo. El binario se pide aparte
+              // (`GET …/foto`): meterlo aquí en base64 engordaría una
+              // respuesta que se abre cada vez que alguien mira una ficha.
+              photoFileName: true,
+              photoBytes: true,
+              photoUploadedAt: true,
             },
           });
           // El HISTÓRICO de habitaciones, aparte. Es una segunda consulta
@@ -726,6 +785,24 @@ export async function registerResidenciaResidentesRoutes(
                 cama: a.bed.label,
                 planta: a.bed.room.floor.name,
               })),
+              // ── residencia-3 (D-64) · la foto y su consentimiento ────
+              //
+              // Las DOS cosas, y por separado: hay foto subida y hay o no
+              // consentimiento de imagen vigente. La pantalla las pinta
+              // juntas porque la combinación que importa es «hay foto y NO
+              // se puede enseñar», que es la que la dirección tiene que ver
+              // para pedir el consentimiento o quitar la foto.
+              foto: perfil.photoFileName
+                ? {
+                    bytes: perfil.photoBytes,
+                    subidaEn: perfil.photoUploadedAt?.toISOString() ?? null,
+                  }
+                : null,
+              consentimientoDeImagen: await consentimientoDeImagen(
+                prisma,
+                tenantId,
+                clientId,
+              ),
             },
           };
         },
