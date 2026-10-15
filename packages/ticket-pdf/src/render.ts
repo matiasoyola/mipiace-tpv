@@ -30,6 +30,7 @@ import {
 import {
   LEYENDA_ENCIMA_DEL_QR,
   LEYENDA_VERIFACTU,
+  QR_TRIBUTARIO_EN_FACTURA,
 } from "@mipiacetpv/verifactu";
 
 const MM = 2.83464567; // 1 mm en puntos
@@ -246,7 +247,10 @@ export async function renderTicketPdf(
   const baseHeight = lineCount * LINE_HEIGHT + 10 * MM; // margen vertical
   const qrHeight = opts.qrPngBytes ? 30 * MM + LINE_HEIGHT * 2 : 0;
   // El QR tributario, su leyenda de encima, la de debajo y su blanco.
-  const qrTributarioHeight = opts.qrTributarioPngBytes
+  // Apagado mientras VERI*FACTU no sea obligatorio (`QR_TRIBUTARIO_EN_FACTURA`).
+  const pintaQrTributario =
+    QR_TRIBUTARIO_EN_FACTURA && !!opts.qrTributarioPngBytes && !!doc.verifactu;
+  const qrTributarioHeight = pintaQrTributario
     ? (QR_TRIBUTARIO_MM + QR_TRIBUTARIO_MARGEN_MM * 3) * MM + LINE_HEIGHT * 3
     : 0;
   const pageHeight = baseHeight + qrHeight + qrTributarioHeight;
@@ -264,7 +268,7 @@ export async function renderTicketPdf(
   // Lo primero de la página, antes incluso de la marca de copia: el
   // documento de la AEAT no admite que nada del contenido de la factura
   // vaya por delante, y en un papel de 80 mm «arriba» es literal.
-  if (opts.qrTributarioPngBytes && doc.verifactu) {
+  if (pintaQrTributario && opts.qrTributarioPngBytes) {
     s.y -= QR_TRIBUTARIO_MARGEN_MM * MM;
     drawCenteredText(s, LEYENDA_ENCIMA_DEL_QR, FONT_SIZE_SMALL);
     // El blanco de encima: `drawCenteredText` ya ha bajado una línea, pero

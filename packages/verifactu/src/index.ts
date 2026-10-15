@@ -41,6 +41,7 @@ export {
   QR_MARGEN_BLANCO_MIN_MM,
   QR_MARGEN_BLANCO_RECOMENDADO_MM,
   QR_NIVEL_CORRECCION,
+  QR_TRIBUTARIO_EN_FACTURA,
   serieEsValidaParaQr,
 } from "./qr.js";
 export type { EntornoAeat, QrFacturaInput } from "./qr.js";

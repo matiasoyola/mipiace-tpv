@@ -30,6 +30,7 @@ import {
   type VentaLocal,
 } from "@mipiacetpv/escpos-builder";
 import type { TicketTotals, TicketVerifactu } from "@mipiacetpv/ticket-model";
+import { QR_TRIBUTARIO_EN_FACTURA } from "@mipiacetpv/verifactu";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -269,7 +270,8 @@ describe("lo que el papel dice cuando la factura es propia", () => {
       // imprimible para poder buscar frases.
       .replace(/[\x00-\x09\x0b-\x1f]/g, " ");
 
-  it("lleva el QR tributario ANTES de la cabecera del comercio", () => {
+  // Sólo con el QR tributario encendido (`QR_TRIBUTARIO_EN_FACTURA`).
+  it.runIf(QR_TRIBUTARIO_EN_FACTURA)("lleva el QR tributario ANTES de la cabecera del comercio", () => {
     const t = texto();
     const iQr = t.indexOf("QR tributario:");
     // Sin la Í: el texto va codificado en PC850 y el acento no es latin-1.
@@ -279,13 +281,15 @@ describe("lo que el papel dice cuando la factura es propia", () => {
     expect(iQr).toBeLessThan(iRazon);
   });
 
-  it("lleva la leyenda VERI*FACTU justo debajo del QR", () => {
+  // Sólo con el QR tributario encendido (`QR_TRIBUTARIO_EN_FACTURA`).
+  it.runIf(QR_TRIBUTARIO_EN_FACTURA)("lleva la leyenda VERI*FACTU justo debajo del QR", () => {
     const t = texto();
     expect(t).toContain("VERI*FACTU");
     expect(t.indexOf("QR tributario:")).toBeLessThan(t.indexOf("VERI*FACTU"));
   });
 
-  it("el QR lleva la URL de cotejo con sus cuatro parámetros", () => {
+  // Sólo con el QR tributario encendido (`QR_TRIBUTARIO_EN_FACTURA`).
+  it.runIf(QR_TRIBUTARIO_EN_FACTURA)("el QR lleva la URL de cotejo con sus cuatro parámetros", () => {
     const t = texto();
     expect(t).toContain("nif=B45902186");
     expect(t).toContain("numserie=C1%2F000123");
@@ -293,7 +297,8 @@ describe("lo que el papel dice cuando la factura es propia", () => {
     expect(t).toContain("importe=15.50");
   });
 
-  it("el QR tributario va a nivel M de corrección de errores", () => {
+  // Sólo con el QR tributario encendido (`QR_TRIBUTARIO_EN_FACTURA`).
+  it.runIf(QR_TRIBUTARIO_EN_FACTURA)("el QR tributario va a nivel M de corrección de errores", () => {
     // GS ( k 03 00 31 45 <nivel>, con 0x31 = M (art. 21.1 de la Orden).
     // 0x30 sería L, que es lo que imprimía antes de este bloque.
     const bytes = bytesDispositivo();
@@ -315,6 +320,33 @@ describe("lo que el papel dice cuando la factura es propia", () => {
     expect(t).toContain("IVA 21%");
     expect(t).toContain("IVA 10%");
     expect(t).toContain("Subtotal");
+  });
+});
+
+// 15-10-2026 · el QR tributario se apaga para todos hasta que VERI*FACTU sea
+// obligatorio: hoy apunta al entorno de PRUEBAS de la AEAT y los registros no
+// se remiten. La factura sigue siendo factura (número fiscal, desglose); lo
+// único que se va es el bloque «QR tributario: [QR] VERI*FACTU».
+describe.runIf(!QR_TRIBUTARIO_EN_FACTURA)("con el QR tributario apagado", () => {
+  const texto = () =>
+    Buffer.from(bytesDispositivo())
+      .toString("latin1")
+      .replace(/[\x00-\x09\x0b-\x1f]/g, " ");
+
+  it("SABOTAJE · la factura propia no lleva QR tributario ni leyenda", () => {
+    const t = texto();
+    expect(t).not.toContain("QR tributario:");
+    expect(t).not.toContain("VERI*FACTU");
+    // Ni la URL de cotejo, que es lo que de verdad engañaría al escanear.
+    expect(t).not.toContain("ValidarQR");
+    expect(t).not.toContain("aeat.es");
+  });
+
+  it("y sigue siendo factura: número fiscal y desglose de IVA", () => {
+    const t = texto();
+    expect(t).toContain("Factura C1/000123");
+    expect(t).toContain("(ref. 000123)");
+    expect(t).toContain("IVA 21%");
   });
 });
 

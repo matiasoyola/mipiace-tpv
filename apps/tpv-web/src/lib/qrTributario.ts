@@ -6,7 +6,10 @@
 // una preferencia, es el art. 21.1 de la Orden HAC/1177/2024.
 
 import type { TicketDocument } from "@mipiacetpv/ticket-model";
-import { QR_NIVEL_CORRECCION } from "@mipiacetpv/verifactu";
+import {
+  QR_NIVEL_CORRECCION,
+  QR_TRIBUTARIO_EN_FACTURA,
+} from "@mipiacetpv/verifactu";
 import QRCode from "qrcode";
 
 /** PNG del QR tributario, o `undefined` si el documento no lleva parte
@@ -16,7 +19,9 @@ import QRCode from "qrcode";
 export async function qrTributarioPng(
   doc: TicketDocument,
 ): Promise<Uint8Array | undefined> {
-  if (!doc.verifactu) return undefined;
+  // Apagado mientras VERI*FACTU no sea obligatorio: no se rasteriza un QR
+  // que el renderer no va a pintar.
+  if (!doc.verifactu || !QR_TRIBUTARIO_EN_FACTURA) return undefined;
   try {
     const dataUrl = await QRCode.toDataURL(doc.verifactu.qrUrl, {
       errorCorrectionLevel: QR_NIVEL_CORRECCION,
