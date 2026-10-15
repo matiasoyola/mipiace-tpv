@@ -86,6 +86,12 @@ Documentos fuente (proyecto «Jardin de Gredos»; copia en `docs/residencia/` de
 | D-61 | **Quien dirige el centro entra como OWNER del tenant.** Roles de cuidado y zonas los asigna sólo el OWNER (decisión 6 de residencia-1), y no se abre al encargado. | Decidir quién ve datos de salud es de quien dirige; se resuelve configurando, sin tocar código. |
 | D-62 | **DNI y NSS cifrados en reposo antes del piloto con residentes reales.** Bloque corto propio antes del piloto. | Hoy están en claro, igual que en la clínica; con datos reales no puede seguir así. |
 
+### Tras clinica-7 (15-10-2026)
+
+| # | Decisión | Por qué |
+|---|---|---|
+| D-63 | **residencia-1b cifra con la maquinaria de clinica-7** (DEK por tenant, AAD por fila) los identificadores y los textos libres de residencia-1 y -2: `resident_profiles.dni`, `nss` y `discharge_reason`; `care_plan_items.reason` y `close_reason`; `bed_assignments.reason`. Quedan en claro, declarados, `care_plan_items.control_code` y la frecuencia (sostienen el índice único de línea viva), el nivel y grado de dependencia (plantillas y lista) y las fechas de estancia. **El registro de cuidados de residencia-3 nace cifrado.** | Amplía D-62 con lo que §18 de `clinica-7-done.md` encontró en claro; los textos libres son lo barato de cifrar porque nadie los consulta en SQL, y el contrato de encargado ya promete medidas técnicas. |
+
 ### Lo que NO se decide por criterio (son hechos que aporta el cliente, no bloquean)
 
 - H-01 · ordenador origen de los `.lnk` (fichas de 2025).
