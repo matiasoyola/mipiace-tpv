@@ -141,6 +141,24 @@ export const ROJO_ALERGIA_FONDO = "#7A0A1C";
 /** «ANULADO», «ERAN 3 · −1» y la pastilla «lleva gluten». */
 export const ROJO_ANULADO = "#FF8A99";
 
+/**
+ * kds-2b · **«ALÉRGENOS SIN INFORMAR»**, la sub-franja del plato que va a
+ * una silla con alergia y cuya ficha no informa de nada.
+ *
+ * Ámbar y no rojo, y es la decisión: no se sabe que el plato lleve nada, y
+ * la regla del rojo (decisión 7) lo reserva para lo que no puede esperar.
+ * Lo que esto dice es «hay que preguntar», y en ámbar se distingue de un
+ * «SILLA 3 · SIN GLUTEN» rojo —que es un plato COMPROBADO— desde la
+ * plancha, que es el punto: hasta la pasada del 15-10 los dos se pintaban
+ * exactamente igual.
+ *
+ * El texto va en negro sobre el ámbar por contraste (8,2:1 contra
+ * `#8A6410`, que es el ámbar de la franja de la wifi y queda en 4,6:1 con
+ * blanco).
+ */
+export const AMBAR_SIN_INFORMAR = "#E9A93E";
+export const AMBAR_SIN_INFORMAR_TEXT = "#15171B";
+
 /** «CAMBIO»: hay que verlo, pero no está en la plancha. */
 export const AMBAR_CAMBIO = "#E9A93E";
 export const AMBAR_CAMBIO_TEXT = "#15171B";

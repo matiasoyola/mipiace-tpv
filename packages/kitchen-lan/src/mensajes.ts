@@ -42,6 +42,17 @@ export interface LineaLan {
   seatAllergy: string | null;
   /** Capa 3, el grito: «¡LLEVA GLUTEN!». */
   allergyWarning: string | null;
+  /**
+   * kds-2b · «ALÉRGENOS SIN INFORMAR»: el plato va a una silla con algo
+   * declarado y su ficha no informa de ningún alérgeno, que no es lo mismo
+   * que no llevar ninguno.
+   *
+   * Opcional porque el sobre lo puede haber cerrado una APK anterior: una
+   * pantalla nueva que recibe de un TPV viejo se comporta como antes del
+   * bloque, y al revés igual. Lo que no puede pasar es que una pantalla se
+   * quede sin pintar una comanda por un campo que no conoce.
+   */
+  allergensUnknown?: string | null;
 }
 
 export interface ComandaLan {

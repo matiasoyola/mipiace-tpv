@@ -820,3 +820,240 @@ describe("kds-1 · decisión 9 · el latido y el papel de respaldo", () => {
     expect(bytes).toContain("Patatas bravas");
   });
 });
+
+// ── kds-2b · lo que encontró la pasada en el hierro del 15-10 ────────
+//
+// Las filas de la tabla de sabotajes que viven en el SERVIDOR:
+//
+//   | Tachar mueve el plato al final | las líneas de una tarjeta salen en
+//   | un orden que un `UPDATE` no cambia
+//   | La vista no dice de qué envío es la tarjeta | `clientSendId` en cada
+//   | comanda, para que la pantalla cruce la de la wifi sin adivinar
+//   | Un plato sin alérgenos informados pasa por comprobado |
+//   | «ALÉRGENOS SIN INFORMAR» en la vista de cocina
+//   | El `−` sobre lo enviado no recalcula el total | `Ticket.total` baja
+//   | con la línea, y la sala se entera
+//   | El camino directo se cree el catálogo del terminal | los alérgenos
+//   | del plato viajan en `GET /tickets/:id/kitchen`
+
+/** Una segunda línea en la misma comanda, para poder mirar el orden. */
+const OLINE_2 = "00000000-0000-0000-0000-0000000000f6";
+const LINEA_2 = "00000000-0000-0000-0000-0000000000f7";
+const P_MAGRO = "00000000-0000-0000-0000-00000000000c";
+
+function sembrarDosPlatos() {
+  sembrar();
+  // El magro: un producto SIN ALÉRGENOS INFORMADOS (`allergens: []` es «no
+  // informado», no «no lleva nada»). Es el plato del hallazgo 4.
+  state.productos.set(P_MAGRO, {
+    id: P_MAGRO,
+    tenantId: TENANT,
+    tags: ["raciones"],
+    allergens: [],
+  });
+  state.tickets.get(TICKET)!.lines.push({
+    id: LINEA_2,
+    productId: P_MAGRO,
+    nameSnapshot: "Magro",
+    units: 1,
+    sentUnits: 1,
+    course: 1,
+    seat: 3,
+    modifiers: null,
+    product: { allergens: [] },
+  });
+  state.orderLines.set(OLINE_2, {
+    id: OLINE_2,
+    orderId: ORDER,
+    ticketLineId: LINEA_2,
+    nameSnapshot: "Magro",
+    units: 1,
+    modifiers: null,
+    course: 1,
+    seat: 3,
+    allergens: [],
+    firedAt: new Date(),
+    doneAt: null,
+    doneByDeviceId: null,
+    voidedUnits: 0,
+    voidedAt: null,
+    voidedByUserId: null,
+    voidSeenAt: null,
+    doneBeforeVoid: false,
+    changedAt: null,
+    changeNote: null,
+    changeSeenAt: null,
+  });
+  // El despacho que creó la comanda, con su `clientSendId`.
+  state.dispatches.set(DISPATCH, {
+    id: DISPATCH,
+    tenantId: TENANT,
+    ticketId: TICKET,
+    clientSendId: ENVIO_2B,
+    revision: 1,
+    urgent: false,
+    sentAt: new Date(),
+    sentByUserId: CASHIER,
+    result: {},
+  });
+}
+
+const ENVIO_2B = "00000000-0000-0000-0000-0000000000f8";
+
+async function vistaDeCocina() {
+  const a = await app();
+  const res = await a.inject({
+    method: "GET",
+    url: "/kitchen/comandas",
+    headers: { "x-device-token": token(PANTALLA) },
+  });
+  expect(res.statusCode).toBe(200);
+  return res.json();
+}
+
+describe("kds-2b · SABOTAJE · tachar mueve el plato al final de la tarjeta", () => {
+  it("el orden de las líneas NO cambia al tachar una", async () => {
+    // Sin `orderBy`, Postgres devuelve las filas en el orden físico de la
+    // tabla y un `UPDATE` reescribe la fila al final: el cocinero tachaba
+    // un plato, los demás subían un sitio y el siguiente toque caía en
+    // otro plato. El falso ordena exactamente con el `orderBy` que le
+    // pasen —y sin `orderBy` NO ordena—, así que esto se pone rojo.
+    sembrarDosPlatos();
+    const antes = (await vistaDeCocina()).orders[0].lines.map(
+      (l: any) => l.id,
+    );
+
+    // Se tacha la primera: en Postgres su fila se va al final.
+    const a = await app();
+    const tachar = await a.inject({
+      method: "POST",
+      url: `/kitchen/lineas/${antes[0]}/hecho`,
+      headers: { "x-device-token": token(PANTALLA) },
+      payload: { done: true },
+    });
+    expect(tachar.statusCode).toBe(200);
+    const linea = state.orderLines.get(antes[0])!;
+    state.orderLines.delete(antes[0]);
+    state.orderLines.set(antes[0], linea);
+
+    const despues = (await vistaDeCocina()).orders[0].lines;
+    expect(despues.map((l: any) => l.id)).toEqual(antes);
+    expect(despues.find((l: any) => l.id === antes[0]).done).toBe(true);
+  });
+});
+
+describe("kds-2b · la vista dice de qué ENVÍO es cada tarjeta", () => {
+  it("`clientSendId` viaja en la comanda", async () => {
+    // Es lo único que los dos caminos comparten. Sin él, la pantalla cruza
+    // por mesa + sección + nº de comanda, y ese número lo calcula el TPV
+    // solo cuando no hay internet.
+    sembrarDosPlatos();
+    const v = await vistaDeCocina();
+    expect(v.orders[0].clientSendId).toBe(ENVIO_2B);
+  });
+});
+
+describe("kds-2b · SABOTAJE · un plato sin alérgenos informados pasa por comprobado", () => {
+  it("el magro de la silla 3 celíaca sale «ALÉRGENOS SIN INFORMAR»", async () => {
+    sembrarDosPlatos();
+    state.tickets.get(TICKET)!.allergies = [{ seat: 3, allergen: "GLUTEN" }];
+    state.orderLines.get(OLINE)!.seat = 3;
+    const v = await vistaDeCocina();
+    const porNombre = new Map<string, any>(
+      v.orders[0].lines.map((l: any) => [l.name, l]),
+    );
+
+    // Las bravas: comprobadas y con gluten. La alarma de kds-1, intacta.
+    expect(porNombre.get("Patatas bravas").allergyWarning).toBe(
+      "¡LLEVA GLUTEN!",
+    );
+    expect(porNombre.get("Patatas bravas").allergensUnknown).toBeNull();
+
+    // El magro: su ficha no informa de nada, y la silla es la de la
+    // celíaca. Hasta hoy salía igual que uno comprobado.
+    expect(porNombre.get("Magro").allergensUnknown).toBe(
+      "ALÉRGENOS SIN INFORMAR",
+    );
+    expect(porNombre.get("Magro").seatAllergy).toBe("SIN GLUTEN");
+    expect(porNombre.get("Magro").allergyWarning).toBeNull();
+  });
+
+  it("sin alergias declaradas, ningún plato lleva el aviso", async () => {
+    sembrarDosPlatos();
+    const v = await vistaDeCocina();
+    for (const l of v.orders[0].lines) expect(l.allergensUnknown).toBeNull();
+  });
+});
+
+describe("kds-2b · SABOTAJE · el «−» sobre lo enviado no recalcula el total", () => {
+  it("baja `units`, el importe de la línea Y el total del ticket", async () => {
+    // Lo que vio el D8: la línea decía «1 · 10,00 €» y el total seguía en
+    // 43,40 €. `Ticket.total` es la columna que pinta la tarjeta de la
+    // mesa en la sala y el «€ en sala» de la cabecera del mapa.
+    sembrar();
+    const linea = state.tickets.get(TICKET)!.lines[0]!;
+    linea.units = 2;
+    linea.sentUnits = 2;
+    linea.unitPrice = 10;
+    linea.taxRate = 0;
+    state.orderLines.get(OLINE)!.units = 2;
+    state.tickets.get(TICKET)!.total = 20;
+
+    const a = await app();
+    const res = await a.inject({
+      method: "POST",
+      url: `/tickets/${TICKET}/kitchen/void-units`,
+      headers: { authorization: `Bearer ${sesion()}` },
+      payload: { lineId: LINEA, units: 1 },
+    });
+    expect(res.statusCode).toBe(200);
+
+    expect(linea.units).toBe(1);
+    expect(linea.sentUnits).toBe(1);
+    expect(linea.total).toBe(10);
+    expect(state.tickets.get(TICKET)!.total).toBe(10);
+  });
+
+  it("y la SALA se entera: sale un `table.lineUpdated` al bus", async () => {
+    // `kitchen.line_voided` lo escuchan las pantallas de cocina; el mapa de
+    // mesas escucha los `table.*`. Sin este aviso, el otro terminal y el
+    // mapa siguen pintando el importe de antes.
+    sembrar();
+    const linea = state.tickets.get(TICKET)!.lines[0]!;
+    linea.unitPrice = 10;
+    linea.taxRate = 0;
+    const a = await app();
+    await a.inject({
+      method: "POST",
+      url: `/tickets/${TICKET}/kitchen/void-units`,
+      headers: { authorization: `Bearer ${sesion()}` },
+      payload: { lineId: LINEA, units: 1 },
+    });
+    const tipos = bus.eventos.map((e) => e.event.type);
+    expect(tipos).toContain("table.lineUpdated");
+    expect(tipos).toContain("kitchen.line_voided");
+  });
+});
+
+describe("kds-2b · SABOTAJE · el camino directo se cree el catálogo del terminal", () => {
+  it("los alérgenos del plato viajan en el estado de cocina de la mesa", async () => {
+    // El 15-10 la comanda de la wifi salió con los alérgenos del catálogo
+    // CACHEADO del D8 —cargados a las 13:21, con la app ya abierta— y la
+    // cocina no vio «¡LLEVA GLUTEN!» en las bravas de la celíaca. Ahora los
+    // dice el servidor, de la misma fila que los del papel y la nube.
+    sembrarDosPlatos();
+    const a = await app();
+    const res = await a.inject({
+      method: "GET",
+      url: `/tickets/${TICKET}/kitchen`,
+      headers: { authorization: `Bearer ${sesion()}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const porId = new Map<string, any>(
+      res.json().lines.map((l: any) => [l.id, l]),
+    );
+    expect(porId.get(LINEA).allergens).toEqual(["GLUTEN"]);
+    // Y el magro: vacío, que es «no informado» y lo dice quien lo sabe.
+    expect(porId.get(LINEA_2).allergens).toEqual([]);
+  });
+});

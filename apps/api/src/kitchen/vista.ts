@@ -40,6 +40,7 @@ import type { Allergen, KitchenSection } from "@mipiacetpv/db";
 import {
   ALERGENOS,
   avisoChoque,
+  avisoSinInformar,
   choqueAlergenos,
   franjaAlergiaPantalla,
   sinAlergenos,
@@ -88,10 +89,31 @@ export interface LineaVista {
    * alérgeno. Rojo y parpadeando. `null` en todo lo demás.
    */
   allergyWarning: string | null;
+  /**
+   * kds-2b · «ALÉRGENOS SIN INFORMAR»: el plato va a una silla con algo
+   * declarado y su producto **no tiene alérgenos informados**, que no es
+   * lo mismo que no tener ninguno. `null` en todo lo demás.
+   *
+   * Hasta la pasada del 15-10 un plato sin informar salía en cocina igual
+   * que uno comprobado («SILLA 3 · SIN GLUTEN») y la capa 3 callaba. Ver
+   * `avisoSinInformar` en `ticket-model`.
+   */
+  allergensUnknown: string | null;
 }
 
 export interface ComandaVista {
   id: string;
+  /**
+   * kds-2b · el id del ENVÍO que creó esta tarjeta.
+   *
+   * Es lo único que los DOS CAMINOS comparten (la nube y la wifi del
+   * local), y es con lo que la pantalla cruza una tarjeta de la wifi con
+   * su gemela del servidor sin tener que adivinar por mesa + sección + nº
+   * de comanda — un número que el TPV calcula solo cuando no hay internet
+   * y que puede no coincidir. Ver la fila «la tarjeta fantasma» de la
+   * tabla de sabotajes de kds-2b.
+   */
+  clientSendId: string;
   section: KitchenSection;
   ticketId: string;
   tableId: string | null;
@@ -192,12 +214,35 @@ export async function construirVista(
       readyAt: true,
       servedAt: true,
       recoveredAt: true,
+      dispatch: { select: { clientSendId: true } },
       ticket: {
         select: {
           allergies: { select: { seat: true, allergen: true } },
         },
       },
       lines: {
+        // kds-2b · UN ORDEN QUE NO CAMBIA AL TACHAR.
+        //
+        // Sin `orderBy`, Postgres devuelve las filas en el orden físico de
+        // la tabla, y **un `UPDATE` reescribe la fila al final**: tachar un
+        // plato lo mandaba al final de su tarjeta y subía a los demás, así
+        // que el siguiente toque del cocinero caía en otro plato. Lo vio la
+        // pasada del 15-10 en el AP11 y es el hallazgo 2 del bloque.
+        //
+        // El orden es por TIEMPO y luego por id: es como se lee una comanda
+        // (el primero antes que el segundo) y el id de una fila no cambia
+        // nunca, así que ni un tachado ni una anulación mueven nada.
+        //
+        // **No es el orden en que el camarero las tecleó**, y no se puede
+        // ser: nadie lo guarda. Ni `KitchenOrderLine` ni `TicketLine`
+        // tienen columna de posición —la factura misma ordena por `id`
+        // (`tickets/build-document.ts`)— y el POST del envío no manda
+        // ninguna lista ordenada, así que el servidor no tiene de dónde
+        // sacarlo. Lo que de verdad arregla el salto es la pantalla, que
+        // conserva el orden en que vio cada línea por primera vez
+        // (`ordenEstable` en `kitchen/orden.ts`); esto es el suelo para que
+        // ese orden no nazca distinto en cada GET.
+        orderBy: [{ course: "asc" }, { id: "asc" }],
         select: {
           id: true,
           nameSnapshot: true,
@@ -272,6 +317,7 @@ function aVista(o: {
   readyAt: Date | null;
   servedAt: Date | null;
   recoveredAt: Date | null;
+  dispatch: { clientSendId: string };
   ticket: { allergies: Array<{ seat: number | null; allergen: Allergen }> };
   lines: Array<{
     id: string;
@@ -351,6 +397,18 @@ function aVista(o: {
       carries,
       seatAllergy: l.seat != null ? sinAlergenos(deSilla(l.seat)) : null,
       allergyWarning: avisoChoque(choque),
+      // kds-2b · el plato va a una silla con algo declarado y su ficha no
+      // informa de nada. La misma regla que en el camino de la wifi
+      // (`envioLan.ts`): un solo juego de reglas, dos sitios que lo llaman.
+      //
+      // Un plato SIN SILLA no lo lleva, aunque la mesa entera tenga una
+      // alergia declarada: es la misma línea que la capa 3: no se sabe de
+      // quién es el plato, y marcar los 128 platos de una carta sin
+      // informar es una tarjeta que nadie lee.
+      allergensUnknown:
+        l.seat != null
+          ? avisoSinInformar(alergenosPlato, deSilla(l.seat))
+          : null,
     };
   });
 
@@ -362,6 +420,7 @@ function aVista(o: {
 
   return {
     id: o.id,
+    clientSendId: o.dispatch.clientSendId,
     section: o.section,
     ticketId: o.ticketId,
     tableId: o.tableId,

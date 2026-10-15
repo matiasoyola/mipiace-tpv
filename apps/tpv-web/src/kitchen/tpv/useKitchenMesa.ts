@@ -80,7 +80,15 @@ export interface KitchenMesa {
   anulaciones: AnulacionPendiente[];
   /** «Cocina no recibe»: alguna sección con pantalla y sin latido. */
   cocinaNoRecibe: boolean;
-  recargar: () => void;
+  /**
+   * Vuelve a pedir el estado de cocina de la mesa.
+   *
+   * kds-2b · **devuelve el estado nuevo.** Quien lo pide antes de componer
+   * la comanda del camino directo lo necesita ya, y no en el render
+   * siguiente: `setEstado` no se ve dentro de la función que lo llamó. Si
+   * el GET falla, devuelve el que había — sin red el TPV sigue vendiendo.
+   */
+  recargar: () => Promise<EstadoCocinaMesa>;
   /** El `−` sobre una línea YA ENVIADA. Arranca la cuenta de 5 s. */
   anularEnviado: (lineId: string, nombre: string, units: number) => void;
   deshacerAnulacion: (key: string) => void;
@@ -117,18 +125,39 @@ export function useKitchenMesa(opts: {
    * sale papel es él.
    */
   camino: CaminoDirecto;
+  /**
+   * kds-2b · se llama cuando una anulación de lo YA ENVIADO termina su
+   * viaje a la nube (bien o mal).
+   *
+   * Lo que hay que hacer con ella es recargar el DRAFT de la mesa:
+   * `void-units` baja `units` de la línea de la venta, así que el carrito
+   * y su total los decide el servidor. Sin esto, el total de la mesa se
+   * queda con el importe de antes hasta que el camarero sale y vuelve a
+   * entrar — que es lo que vio la pasada del 15-10 en el D8.
+   *
+   * Se pasa como callback y no se llama a nada de `SalePage` desde aquí:
+   * este hook no sabe si el carrito es una mesa, una cita o una venta
+   * rápida, y no le toca saberlo.
+   */
+  onAnulacionAplicada?: () => void;
 }): KitchenMesa {
   // `moduloEncendido` ya no se lee aquí: lo que dependía de él (pedir el
   // estado de las pantallas) vive en `useCaminoDirecto`. Se conserva en la
   // firma porque es quien lo consume el que sabe si el módulo está
   // comprado, y quitarlo obligaría a que `SalePage` lo mirara dos veces.
   const { ticketId, camino } = opts;
+  const onAplicadaRef = useRef(opts.onAnulacionAplicada);
+  onAplicadaRef.current = opts.onAnulacionAplicada;
   const [estado, setEstado] = useState<EstadoCocinaMesa>(estadoCocinaVacio);
 
-  const recargar = useCallback(() => {
+  const estadoRef = useRef(estado);
+  estadoRef.current = estado;
+
+  const recargar = useCallback(async (): Promise<EstadoCocinaMesa> => {
     if (!ticketId) {
-      setEstado(estadoCocinaVacio());
-      return;
+      const vacio = estadoCocinaVacio();
+      setEstado(vacio);
+      return vacio;
     }
     // **SE PIDE TAMBIÉN CON EL MÓDULO APAGADO**, y es deliberado: el envío
     // por diferencias es un ARREGLO del servidor y aplica igual, así que
@@ -140,21 +169,27 @@ export function useKitchenMesa(opts: {
     // Lo que el módulo apaga es lo de arriba: `canCorrectSent` vuelve false
     // (lo decide el servidor), y el TPV no pinta «Urgente», «Espera»,
     // «Marchar» ni la banda «LISTO».
-    void apiWithCashier<unknown>(`/tickets/${ticketId}/kitchen`)
+    try {
+      const raw = await apiWithCashier<unknown>(`/tickets/${ticketId}/kitchen`);
       // `normalizarEstado` y no el objeto tal cual: la comanda es la
       // pantalla de la venta y no puede caerse por un 200 con la forma
       // incompleta (una API vieja durante un despliegue, un proxy que
       // contesta otra cosa). Ver su cabecera.
-      .then((raw) => setEstado(normalizarEstado(raw)))
-      .catch(() => {
-        // Sin red, el TPV sigue vendiendo: es la regla de la casa («cobrar
-        // siempre se puede»). Lo que no se puede es inventar que la cocina
-        // tiene algo, así que se deja el estado anterior y la comanda
-        // seguirá pintando lo último que se supo.
-      });
+      const fresco = normalizarEstado(raw);
+      setEstado(fresco);
+      return fresco;
+    } catch {
+      // Sin red, el TPV sigue vendiendo: es la regla de la casa («cobrar
+      // siempre se puede»). Lo que no se puede es inventar que la cocina
+      // tiene algo, así que se deja el estado anterior y la comanda
+      // seguirá pintando lo último que se supo.
+      return estadoRef.current;
+    }
   }, [ticketId]);
 
-  useEffect(recargar, [recargar]);
+  useEffect(() => {
+    void recargar();
+  }, [recargar]);
 
   // kds-2-wifi · lo de la TIENDA (la clave, las IP, si la nube contesta,
   // si sale papel) lo lleva `useCaminoDirecto`, que lo monta `TpvHome`.
@@ -187,9 +222,22 @@ export function useKitchenMesa(opts: {
           // es un error que el camarero pueda arreglar y la venta ya bajó
           // la unidad: se recarga y se calla.
           if (err instanceof ApiError && err.status === 409) return;
-          throw err;
+          // kds-2b · y cualquier otro fallo **tampoco se relanza**.
+          //
+          // Antes había un `throw` aquí dentro, en una promesa lanzada con
+          // `void`: sin red, cada `−` sobre una línea en cocina dejaba un
+          // `Unhandled Rejection` por detrás. En el navegador no se ve, en
+          // Sentry sí, y en la suite tumba el fichero entero sin nombrar
+          // ningún test (le pasó a kds-1 con otro script, §10.1).
+          //
+          // La anulación no se pierde: va por la wifi, que es la que la
+          // cocina necesita. Lo que no sube es la bajada de `units` en el
+          // servidor, y eso lo arregla el siguiente `GET` del DRAFT.
         })
-        .finally(recargar);
+        .finally(() => {
+          void recargar();
+          onAplicadaRef.current?.();
+        });
     },
     [recargar, mandarPorWifi],
   );
@@ -233,7 +281,7 @@ export function useKitchenMesa(opts: {
           firedAt: new Date().toISOString(),
         }),
       ]);
-      recargar();
+      void recargar();
     },
     [ticketId, recargar, mandarPorWifi],
   );
@@ -249,7 +297,7 @@ export function useKitchenMesa(opts: {
         }),
         mandarPorWifi("URGENTE", opId, { ticketId, urgent }),
       ]);
-      recargar();
+      void recargar();
     },
     [ticketId, recargar, mandarPorWifi],
   );
@@ -261,7 +309,7 @@ export function useKitchenMesa(opts: {
         method: "PUT",
         body: { seat },
       });
-      recargar();
+      void recargar();
     },
     [ticketId, recargar],
   );
@@ -273,7 +321,7 @@ export function useKitchenMesa(opts: {
         method: "PUT",
         body: { course },
       });
-      recargar();
+      void recargar();
     },
     [ticketId, recargar],
   );
@@ -285,7 +333,7 @@ export function useKitchenMesa(opts: {
         method: "PUT",
         body: { allergies: alergias },
       });
-      recargar();
+      void recargar();
     },
     [ticketId, recargar],
   );

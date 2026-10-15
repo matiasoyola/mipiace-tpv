@@ -74,6 +74,9 @@ const CATALOGO = vi.hoisted(() => [
   },
 ]);
 
+/** kds-2b · cuántas veces se ha pedido el catálogo a la API. */
+const refrescos = vi.hoisted(() => ({ n: 0 }));
+
 vi.mock("../src/lib/catalog.js", () => ({
   findByBarcode: () => null,
   fuzzySearch: () => CATALOGO,
@@ -88,7 +91,10 @@ vi.mock("../src/lib/catalog.js", () => ({
   loadCatalogFromCache: async () => CATALOGO,
   loadWildcards: async () => [],
   productImageUrl: () => null,
-  refreshCatalog: async () => CATALOGO,
+  refreshCatalog: async () => {
+    refrescos.n += 1;
+    return CATALOGO;
+  },
 }));
 vi.mock("../src/lib/modifiers.js", () => ({
   loadModifierGroups: async () => [],
@@ -196,6 +202,8 @@ function banco(opts: BancoOpts = {}) {
   const tiempos: Array<{ lineId: string; course: number }> = [];
   const alergias: Array<Array<{ seat: number | null; allergen: string }>> = [];
   const envios: Array<Record<string, unknown>> = [];
+  /** kds-2b · cuántas veces se ha vuelto a pedir el DRAFT de la mesa. */
+  const recargas = { draft: 0 };
   const pantalla = opts.pantalla === true;
   const destino = {
     screen: pantalla,
@@ -214,8 +222,12 @@ function banco(opts: BancoOpts = {}) {
     lines: lineas.slice(),
   });
 
+  /** kds-2b · el ORDEN en que la pantalla llama a la API. */
+  const llamadas: string[] = [];
+
   apiMock.apiWithCashier.mockImplementation(
     async (path: string, o?: { method?: string; body?: Record<string, unknown> }) => {
+      llamadas.push(`${o?.method ?? "GET"} ${path}`);
       if (path === "/shift/current") return { shift: null };
       if (path === "/tpv/tables") {
         return { storeId: "store-1", registerId: "reg-1", tables: [] };
@@ -296,6 +308,13 @@ function banco(opts: BancoOpts = {}) {
       if (path.endsWith("/kitchen/void-units") && o?.method === "POST") {
         const b = o.body as { lineId: string; units: number };
         anuladas.push(b);
+        // kds-2b · el banco hace lo que hace el servidor: baja `units` y
+        // `sentUnits` de la línea de la venta. Sin esto, la recarga del
+        // DRAFT que viene después devolvía las unidades de antes y el test
+        // del total pasaría por el motivo equivocado.
+        const l = lineas.find((x) => x.id === b.lineId);
+        if (l) l.units = String(Number(l.units) - b.units);
+        enviadas.set(b.lineId, (enviadas.get(b.lineId) ?? 0) - b.units);
         return { ok: true, lineId: b.lineId, voidedUnits: b.units };
       }
       if (path.endsWith("/kitchen/fire") && o?.method === "POST") {
@@ -340,6 +359,11 @@ function banco(opts: BancoOpts = {}) {
           destinations: { BARRA: destino, COCINA: destino, SALON: destino },
         };
       }
+      // kds-2b · la recarga del DRAFT tras subir una anulación.
+      if (path === `/tickets/${TICKET}` && (o?.method ?? "GET") === "GET") {
+        recargas.draft += 1;
+        return { ticket: draft() };
+      }
       if (path === "/kitchen/estado") {
         return {
           heartbeatWindowMs: 90000,
@@ -369,7 +393,18 @@ function banco(opts: BancoOpts = {}) {
       throw new Error(`ruta inesperada: ${path}`);
     },
   );
-  return { lineas, anuladas, servidos, marchados, sillas, tiempos, alergias, envios };
+  return {
+    lineas,
+    anuladas,
+    servidos,
+    marchados,
+    sillas,
+    tiempos,
+    alergias,
+    envios,
+    recargas,
+    llamadas,
+  };
 }
 
 let container: HTMLDivElement;
@@ -603,6 +638,118 @@ describe("kds-1 · el «Deshacer» de 5 s", () => {
 
   it("los 5 segundos son 5 segundos", () => {
     expect(DESHACER_MS).toBe(5000);
+  });
+});
+
+// ── kds-2b · lo que encontró la pasada en el hierro del 15-10 ────────
+
+/** 2 croquetas a 10,00 € brutos, para que los números se lean. */
+const LINEA_CROQUETAS = serverLine({
+  id: "l-croquetas",
+  nameSnapshot: "Croquetas",
+  units: "2",
+  unitPrice: "10",
+  taxRate: "0",
+  subtotal: "20",
+  total: "20",
+});
+
+describe("kds-2b · SABOTAJE · el «−» de una línea en cocina no baja el total", () => {
+  it("el total cambia EN EL MOMENTO, y «Deshacer» lo devuelve", async () => {
+    // Lo que vio el D8: croquetas 2 → «−» → la línea decía «1 · 10,00 €» y
+    // el TOTAL seguía en 43,40 €. El cobro salía bien, pero el camarero
+    // lee el total para cobrar y la sala pinta el de la base.
+    banco({
+      pantalla: true,
+      lineas: [LINEA_CROQUETAS],
+      enviadas: { "l-croquetas": 2 },
+    });
+    await render({ lineas: [LINEA_CROQUETAS] });
+    const total = () => $('[data-testid="comanda-total"]')!.textContent ?? "";
+    expect(total()).toMatch(/20,00/);
+
+    await click($('[data-testid="stepper-menos-enviado"]'));
+    expect(total()).toMatch(/10,00/);
+
+    // Y «Deshacer» devuelve las dos cosas: la unidad y el importe.
+    await click($('[data-testid="deshacer-boton"]'));
+    expect(total()).toMatch(/20,00/);
+  });
+
+  it("y cuando la anulación sube, el total sigue siendo el del servidor", async () => {
+    const b = banco({
+      pantalla: true,
+      lineas: [LINEA_CROQUETAS],
+      enviadas: { "l-croquetas": 2 },
+    });
+    await render({ lineas: [LINEA_CROQUETAS] });
+    await click($('[data-testid="stepper-menos-enviado"]'));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, DESHACER_MS + 120));
+    });
+    await settle();
+    expect(b.anuladas).toEqual([{ lineId: "l-croquetas", units: 1 }]);
+    // Se vuelve a pedir el DRAFT: la bajada de `units` la hace el servidor
+    // y el optimista de arriba es sólo para que el camarero no vea un
+    // total viejo durante los 5 s del «Deshacer». Sin esta recarga, lo que
+    // se queda en pantalla es una resta que el TPV se ha creído a sí mismo.
+    expect(b.recargas.draft).toBeGreaterThan(0);
+    // Y los dos dicen lo mismo, que es lo que tiene que pasar.
+    expect($('[data-testid="comanda-total"]')!.textContent).toMatch(/10,00/);
+  }, 15_000);
+});
+
+describe("kds-2b · SABOTAJE · el plato añadido no viaja por la wifi", () => {
+  it("antes de componer la comanda del camino directo se pide el estado de cocina", async () => {
+    // `componerComandasLan` recorre `estado.lines`, y el estado de cocina
+    // NO se recarga al añadir un producto: se recarga al abrir la mesa, al
+    // poner silla o tiempo, al guardar alergias y al enviar. Así que abrir
+    // mesa → tocar un plato → «Enviar» dejaba la comanda de la WIFI sin
+    // ese plato. Con internet no se ve (la tarjeta de la nube llega
+    // igual); sin internet es una comanda que la cocina no recibe.
+    //
+    // Lo que se exige aquí es el ORDEN: el GET del estado tiene que caer
+    // ENTRE el alta de la línea y el envío. Contar GETs no serviría —tras
+    // enviar también se recarga— y el test pasaría sin el arreglo.
+    const b = banco({ pantalla: true });
+    await render();
+    await click(producto("Caña"));
+    await click($('[data-testid="comanda-enviar"]'));
+
+    const alta = b.llamadas.findIndex((l) => l.startsWith("POST /tables/"));
+    const envio = b.llamadas.findIndex((l) => l.includes("/send-to-kitchen"));
+    const estado = b.llamadas.findIndex(
+      (l, i) => i > alta && l === `GET /tickets/${TICKET}/kitchen`,
+    );
+    expect(alta).toBeGreaterThanOrEqual(0);
+    expect(envio).toBeGreaterThan(alta);
+    expect(estado).toBeGreaterThan(alta);
+    expect(estado).toBeLessThan(envio);
+  });
+});
+
+describe("kds-2b · SABOTAJE · la comanda de la wifi sale con el catálogo viejo", () => {
+  it("con una alergia en juego y un plato sin informar, se pide el catálogo ANTES de mandar", async () => {
+    // El 15-10 los alérgenos se cargaron a las 13:21 y el D8 llevaba la
+    // app abierta: su catálogo era el de antes y no hay nada que lo
+    // invalide. Con una alergia declarada y un plato que dice «no llevo
+    // nada», eso hay que preguntarlo antes de mandar la comanda — porque
+    // lo que se manda es lo que la cocina va a cocinar.
+    banco({ pantalla: true, allergies: [{ seat: 3, allergen: "GLUTEN" }] });
+    await render();
+    await click(producto("Caña")); // su ficha no informa de alérgenos
+    const antes = refrescos.n;
+    await click($('[data-testid="comanda-enviar"]'));
+    expect(refrescos.n).toBe(antes + 1);
+  });
+
+  it("y SIN alergias declaradas no se pide nada: nadie espera por un dato que no se pinta", async () => {
+    banco({ pantalla: true });
+    await render();
+    await click(producto("Caña"));
+    const antes = refrescos.n;
+    await click($('[data-testid="comanda-enviar"]'));
+    expect(refrescos.n).toBe(antes);
   });
 });
 

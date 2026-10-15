@@ -84,6 +84,30 @@ export const WIFI_RECIENTE_MS = 90_000;
 const CLAVE_MARCAS = "mipiacetpv-kds-marcas";
 const CLAVE_RECIBIDAS = "mipiacetpv-kds-recibidas";
 
+/**
+ * kds-2b · cuántos «esto ya lo tenía por la wifi» se guardan como mucho.
+ *
+ * `CLAVE_RECIBIDAS` es la lista de `clientSendId` que esta tablet recibió
+ * por el camino directo. Se sube en `POST /kitchen/sincronizar` para que el
+ * servidor apunte `lanReceivedAt` y no encienda el «llegó tarde» de una
+ * comanda que el cocinero lleva viendo veinte minutos.
+ *
+ * Hasta la pasada del 15-10 **no se vaciaba nunca con internet puesto**: la
+ * subida sólo se disparaba al VOLVER la red o si había marcas pendientes,
+ * y un bar que no se queda sin internet no cumple ninguna de las dos. La
+ * lista crecía un id por comanda, servicio tras servicio, en el
+ * `localStorage` de la tablet — y el esquema de la ruta tiene
+ * `maxItems: 500`, así que al pasar de 500 el POST habría empezado a
+ * contestar **400 para siempre** y el libro de marcas de un apagón ya no
+ * habría podido subir. Un fallo que sólo aparece el día que hace falta.
+ *
+ * Ahora se sube también con internet (ver el efecto de abajo) y además hay
+ * tope, que es el cinturón: 400, por debajo del `maxItems` de la ruta. Lo
+ * que se cae es lo más viejo, y lo que se pierde con ello es el apunte de
+ * `lanReceivedAt` de una comanda de hace horas — no una comanda.
+ */
+const RECIBIDAS_TOPE = 400;
+
 export type TipoMarcaLocal = "HECHO" | "VISTO" | "LISTA";
 
 export interface MarcaLocal {
@@ -107,6 +131,14 @@ export interface CocinaLan {
   recibiendoPorWifi: boolean;
   /** Las tarjetas que han llegado SÓLO por la wifi, sin duplicar. */
   extras: Comanda[];
+  /**
+   * kds-2b · las llaves de las tarjetas de la wifi que el servidor ya
+   * reconoció **alguna vez**. De aquí no se sale: una tarjeta confirmada no
+   * vuelve a pintarse aunque su gemela desaparezca del `GET` (pasa a
+   * «Listas», la sirven, se cierra la mesa). Es lo que mata la tarjeta
+   * fantasma. Ver `sinDuplicados`.
+   */
+  confirmadas: ReadonlySet<string>;
   /** Marcas hechas sin red y todavía sin subir. */
   pendientes: MarcaLocal[];
   /**
@@ -151,6 +183,16 @@ export function useCocinaLan(opts: {
   offline: boolean;
   /** Lo que la pantalla tiene por «Lista» ahora mismo, para el sondeo. */
   listas: Comanda[];
+  /**
+   * kds-2b · **todo lo que el servidor conoce**: las abiertas y las listas
+   * del último `GET` bueno.
+   *
+   * Dos cosas salen de aquí: qué tarjetas de la wifi ya no hay que pintar,
+   * y cuáles se pueden soltar de la memoria de la tablet. Lo segundo no
+   * pasaba nunca con internet puesto —sólo se soltaban «al volver la red»—,
+   * así que la lista crecía todo el servicio.
+   */
+  conocidas: Comanda[];
   /** Se llama cuando llega algo por la wifi que cambia lo que se pinta. */
   onCambio: () => void;
 }): CocinaLan {
@@ -164,6 +206,18 @@ export function useCocinaLan(opts: {
   const recibidasRef = useRef<Set<string>>(
     new Set(leer<string[]>(CLAVE_RECIBIDAS, [])),
   );
+  // Cuántas hay sin subir, en estado y no sólo en el ref: es lo que
+  // dispara la subida con internet puesto (el efecto de más abajo), y un
+  // ref no despierta a nadie.
+  const [recibidasCuenta, setRecibidasCuenta] = useState(
+    recibidasRef.current.size,
+  );
+  // kds-2b · las llaves que el servidor ya reconoció. No se guardan en
+  // `localStorage` y es deliberado: las tarjetas de la wifi tampoco se
+  // guardan —viven en `extras`, en memoria—, así que un reinicio se las
+  // lleva todas y no hay nada que reanimar. Guardar estas llaves sería
+  // guardar el recuerdo de una tarjeta que ya no existe.
+  const confirmadasRef = useRef<Set<string>>(new Set());
   // El desvío entre el reloj del servidor y el de la tablet. Se mide al
   // arrancar y no se vuelve a tocar sin red: es lo último que se supo.
   const desvioRef = useRef(
@@ -173,6 +227,8 @@ export function useCocinaLan(opts: {
   onCambioRef.current = opts.onCambio;
   const listasRef = useRef(opts.listas);
   listasRef.current = opts.listas;
+  const conocidasRef = useRef(opts.conocidas);
+  conocidasRef.current = opts.conocidas;
 
   const ahora = useCallback(() => Date.now() + desvioRef.current, []);
 
@@ -277,11 +333,32 @@ export function useCocinaLan(opts: {
             me.sections.includes(c.section),
           );
           if (mias.length === 0) return;
+          // Lo RECIBIDO se apunta siempre, confirmada o no: llegó por la
+          // wifi y el servidor tiene que poder apuntarlo. Con tope, para
+          // que la lista no crezca sin fin (ver `RECIBIDAS_TOPE`).
           for (const c of mias) recibidasRef.current.add(c.clientSendId);
+          if (recibidasRef.current.size > RECIBIDAS_TOPE) {
+            recibidasRef.current = new Set(
+              [...recibidasRef.current].slice(-RECIBIDAS_TOPE),
+            );
+          }
           escribir(CLAVE_RECIBIDAS, [...recibidasRef.current]);
+          setRecibidasCuenta(recibidasRef.current.size);
+          // Y la TARJETA sólo se pinta si el servidor no la tiene ya.
+          //
+          // Con internet puesto el TPV manda por los dos caminos y el GET
+          // puede haber traído la gemela antes de que el mensaje de la wifi
+          // se desencole. Sin esta guardia, la tarjeta de la wifi volvería
+          // a entrar en memoria **después** de haber sido confirmada, y
+          // ésa es la tarjeta fantasma por la puerta de atrás.
+          const nuevas = mias.filter(
+            (c) =>
+              !llavesDeComandaLan(c).some((k) => confirmadasRef.current.has(k)),
+          );
+          if (nuevas.length === 0) break;
           setExtras((prev) => {
             const next = [...prev];
-            for (const c of mias) {
+            for (const c of nuevas) {
               const i = next.findIndex(
                 (x) => x.id === idLan(c.clientSendId, c.section),
               );
@@ -387,6 +464,44 @@ export function useCocinaLan(opts: {
     };
   }, [recoger]);
 
+  // ── 2b · kds-2b · SOLTAR LO QUE EL SERVIDOR YA TIENE ────────────────
+  //
+  // En cuanto un `GET` bueno trae la gemela de una tarjeta de la wifi, esa
+  // tarjeta deja de hacer falta: la del servidor es la que vale y es la que
+  // lleva los ids con los que se puede tachar. Se apunta su llave en
+  // `confirmadas` —para que no vuelva ni cuando su gemela pase a «Listas» o
+  // la sirvan— y se suelta de memoria.
+  //
+  // Hasta la pasada del 15-10 esto sólo pasaba «al volver la red»
+  // (`sincronizar`), así que en un bar con internet puesto **no pasaba
+  // nunca**: las tarjetas de la wifi se quedaban en memoria todo el
+  // servicio, y la primera que se quedaba sin gemela en la vista reaparecía
+  // en el centro de la pantalla.
+  const firmaConocidas = opts.conocidas
+    .flatMap(llavesDeComanda)
+    .sort()
+    .join("|");
+  useEffect(() => {
+    const delServidor = new Set(conocidasRef.current.flatMap(llavesDeComanda));
+    const confirmadas = extras.filter((c) =>
+      llavesDeComanda(c).some((k) => delServidor.has(k)),
+    );
+    // Y las servidas: `sinDuplicados` ya no las pinta, pero seguían
+    // ocupando sitio en memoria hasta el siguiente reinicio.
+    const servidas = extras.filter((c) => c.servedAt != null);
+    if (confirmadas.length === 0 && servidas.length === 0) return;
+    for (const c of confirmadas) {
+      for (const k of llavesDeComanda(c)) confirmadasRef.current.add(k);
+    }
+    const fuera = new Set([...confirmadas, ...servidas].map((c) => c.id));
+    setExtras((prev) => prev.filter((c) => !fuera.has(c.id)));
+    // `extras` entra en las dependencias: lo que se suelta cambia `extras`,
+    // el efecto se vuelve a correr y la segunda vez no encuentra nada que
+    // soltar. No hay bucle porque `setExtras` sólo se llama cuando hay algo
+    // que quitar.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firmaConocidas, extras]);
+
   // ── 3 · lo que se contesta a un sondeo ──────────────────────────────
   //
   // Se publica en la pieza nativa cada vez que cambia lo que hay listo:
@@ -453,9 +568,17 @@ export function useCocinaLan(opts: {
     setPendientes([]);
     recibidasRef.current = new Set();
     escribir(CLAVE_RECIBIDAS, []);
-    // Las tarjetas que sólo estaban aquí pasan a estar en el servidor: se
-    // sueltan para que las pinte el GET y no se vean dos veces.
-    setExtras([]);
+    setRecibidasCuenta(0);
+    // kds-2b · **lo que ya NO se hace: `setExtras([])`.**
+    //
+    // Subir el libro no significa que el servidor tenga ya las tarjetas:
+    // significa que sabe qué recibió esta tablet. Las tarjetas de la nube
+    // las crea el OUTBOX del TPV, que puede ir detrás. Vaciarlas aquí
+    // dejaba la pantalla sin esas tarjetas hasta el siguiente `GET`
+    // —20 s— con los platos en la plancha.
+    //
+    // Quien las suelta ahora es el efecto 2b, y sólo cuando el `GET` trae
+    // su gemela. Es más tarde y es la verdad.
   }, []);
 
   // Al VOLVER la red se sube el libro. `offline` pasa de true a false
@@ -472,14 +595,21 @@ export function useCocinaLan(opts: {
     });
   }, [offline, sincronizar]);
 
-  // Y un reintento mientras haya pendientes y haya red: una pantalla que
-  // nunca se queda offline del todo (bache corto) no dispararía el efecto
-  // de arriba y el libro se quedaría sin subir.
+  // Y un reintento mientras haya algo que subir y haya red: una pantalla
+  // que nunca se queda offline del todo (bache corto) no dispararía el
+  // efecto de arriba y el libro se quedaría sin subir.
+  //
+  // kds-2b · **también con lo RECIBIDO, no sólo con las marcas.** Antes la
+  // condición era `pendientes.length === 0`, y en un bar con internet
+  // puesto nunca hay marcas pendientes (van directas a la nube): la lista
+  // de recibidas no se subía nunca, crecía todo el servicio y el servidor
+  // no se enteraba nunca de que la cocina ya tenía la comanda por la wifi
+  // —que es justo lo que `lanReceivedAt` vino a apuntar en kds-2—.
   useEffect(() => {
-    if (offline || pendientes.length === 0) return;
+    if (offline || (pendientes.length === 0 && recibidasCuenta === 0)) return;
     const id = setTimeout(() => void sincronizar().catch(() => undefined), 5_000);
     return () => clearTimeout(id);
-  }, [offline, pendientes.length, sincronizar]);
+  }, [offline, pendientes.length, recibidasCuenta, sincronizar]);
 
   const recibiendoPorWifi =
     ultimoMensaje > 0 && Date.now() - ultimoMensaje < WIFI_RECIENTE_MS;
@@ -488,6 +618,7 @@ export function useCocinaLan(opts: {
     arranque,
     recibiendoPorWifi,
     extras,
+    confirmadas: confirmadasRef.current,
     pendientes,
     apuntarMarca,
     sincronizar,
@@ -495,26 +626,81 @@ export function useCocinaLan(opts: {
 }
 
 /**
+ * Las mismas llaves de `llavesDeComanda`, pero sobre la comanda tal como
+ * llega por la wifi — antes de convertirla en tarjeta.
+ *
+ * Se escribe aparte en vez de construir la tarjeta para preguntar: la
+ * guardia del `aplicar` tiene que poder decidir **sin** crear nada.
+ */
+function llavesDeComandaLan(c: ComandaLan): string[] {
+  return [
+    `mesa:${c.ticketId}:${c.section}:${c.number}`,
+    `env:${c.clientSendId}:${c.section}`,
+  ];
+}
+
+/**
+ * Las llaves por las que una tarjeta de la wifi reconoce a su gemela del
+ * servidor. Dos, y hacen falta las dos:
+ *
+ *   · `env:<clientSendId>:<sección>` — **exacta**, porque el id del envío
+ *     es el mismo por los dos caminos. Sólo se puede usar si el servidor
+ *     manda el `clientSendId` en la vista (kds-2b); la API de producción
+ *     todavía no lo hace.
+ *   · `mesa:<ticketId>:<sección>:<nº>` — la de kds-2, la que funciona con
+ *     el servidor de hoy. Se puede equivocar: el nº de comanda de una
+ *     tarjeta de la wifi lo calcula el TPV (`revision + 1`) con el último
+ *     estado que conocía, y sin internet puede no coincidir con el que
+ *     reparta el servidor.
+ */
+export function llavesDeComanda(c: Comanda): string[] {
+  const llaves = [`mesa:${c.ticketId}:${c.section}:${c.number}`];
+  const envio = c.clientSendId ?? (esDeLaWifi(c) ? clientSendIdDe(c) : null);
+  if (envio) llaves.push(`env:${envio}:${c.section}`);
+  return llaves;
+}
+
+/**
  * kds-2-wifi · las tarjetas de la wifi que TODAVÍA hacen falta.
  *
- * Una que ya tiene su gemela en el `GET` no se pinta: cuando vuelve
- * internet, el servidor recibe el mismo `clientSendId`, crea la tarjeta de
+ * Una que ya tiene su gemela en el `GET` no se pinta: cuando el envío llega
+ * a la nube, el servidor recibe el mismo `clientSendId`, crea la tarjeta de
  * verdad, y ésa es la que vale —es la que lleva los ids con los que se
- * puede tachar—. La llave del cruce es **mesa + sección + nº de comanda**,
- * que es lo único que los dos caminos comparten: el `clientSendId` vive en
- * el despacho y la vista de cocina no lo trae.
+ * puede tachar—.
  *
- * Y una ya servida no vuelve, aunque siga en memoria.
+ * ── kds-2b · LA TARJETA FANTASMA ──────────────────────────────────────
  *
- * Es la fila «al volver internet, duplicar» de la tabla de sabotajes.
+ * `delServidor` tiene que ser **todo lo que el servidor conoce**, no sólo
+ * lo abierto. Hasta la pasada del 15-10 aquí llegaba `vista.orders` y nada
+ * más, así que al tocar «Lista» la tarjeta del servidor se iba a la columna
+ * «Listas», su gemela de la wifi se quedaba sin pareja y **reaparecía en el
+ * centro de la pantalla**: sin tachados, con el «ERAN 2 · −1» ya visto y
+ * con las bravas sin su «¡LLEVA GLUTEN!». Reiniciar la app la quitaba,
+ * porque estas tarjetas sólo viven en memoria.
+ *
+ * Y con `delServidor` entero sigue faltando la mitad: una tarjeta que el
+ * camarero marca «Servido» desaparece del `GET` **del todo**, y entonces su
+ * gemela de la wifi se volvería a quedar sin pareja. Por eso el cruce es
+ * MONÓTONO: `yaConfirmadas` son las llaves de las tarjetas que el servidor
+ * reconoció alguna vez, y de ahí no se sale. Lo lleva `useCocinaLan`, que
+ * además suelta de memoria la tarjeta en cuanto la confirma.
+ *
+ * Es la fila «al volver internet, duplicar» de la tabla de sabotajes de
+ * kds-2, y la fila «la tarjeta fantasma tras Lista» de la de kds-2b.
  */
 export function sinDuplicados(
   delServidor: Comanda[],
   deLaWifi: Comanda[],
+  yaConfirmadas?: ReadonlySet<string>,
 ): Comanda[] {
-  const llave = (c: Comanda) => `${c.ticketId}:${c.section}:${c.number}`;
-  const yaEstan = new Set(delServidor.map(llave));
-  return deLaWifi.filter((c) => c.servedAt == null && !yaEstan.has(llave(c)));
+  const yaEstan = new Set(delServidor.flatMap(llavesDeComanda));
+  return deLaWifi.filter(
+    (c) =>
+      c.servedAt == null &&
+      !llavesDeComanda(c).some(
+        (k) => yaEstan.has(k) || yaConfirmadas?.has(k) === true,
+      ),
+  );
 }
 
 /** El id local de una tarjeta que sólo ha llegado por la wifi. */
@@ -563,6 +749,7 @@ function anular(l: LineaComanda, units: number): LineaComanda {
 function aComanda(c: ComandaLan): Comanda {
   return {
     id: idLan(c.clientSendId, c.section),
+    clientSendId: c.clientSendId,
     section: c.section,
     ticketId: c.ticketId,
     tableId: c.tableId,
@@ -598,6 +785,9 @@ function aComanda(c: ComandaLan): Comanda {
       carries: l.carries,
       seatAllergy: l.seatAllergy,
       allergyWarning: l.allergyWarning,
+      // kds-2b · lo manda el TPV. Un sobre de una APK anterior no lo trae
+      // y entonces es `null`: la tarjeta se pinta como antes del bloque.
+      allergensUnknown: l.allergensUnknown ?? null,
     })),
   };
 }

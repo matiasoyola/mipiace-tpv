@@ -25,6 +25,11 @@ import { useEffect, useRef, useState } from "react";
 
 import { apiWithDevice } from "../api.js";
 import {
+  memoriaDeOrdenVacia,
+  ordenEstable,
+  type MemoriaDeOrden,
+} from "./orden.js";
+import {
   clientSendIdDe,
   esDeLaWifi,
   sinDuplicados,
@@ -90,6 +95,10 @@ export function KitchenScreen({ me }: KitchenScreenProps) {
   const feed = useKitchenFeed();
   const [hoyAbierto, setHoyAbierto] = useState(false);
   const zonaRef = useRef<HTMLDivElement | null>(null);
+  // kds-2b · el orden en que esta pantalla vio cada línea de cada tarjeta.
+  // En un `ref` y no en estado: no pinta nada por sí mismo, sólo conserva
+  // lo que ya se pintó.
+  const memoriaDeOrden = useRef<MemoriaDeOrden>(memoriaDeOrdenVacia());
   // El valor inicial es la zona de CONTENIDO a 1280 × 800, que es el peor
   // caso para el que esta pantalla se diseñó: 1280 − 160 («Listas») − 60
   // (la franja «+N») − 24 (padding) = 1036; 800 − 60 (barra) − 24 = 716.
@@ -261,14 +270,31 @@ export function KitchenScreen({ me }: KitchenScreenProps) {
   // wifi tiene ya su gemela en el GET, la que se pinta es la del servidor,
   // que es la verdad y la que lleva los ids con los que se puede tachar.
   // Es la fila «al volver internet, duplicar» de la tabla de sabotajes.
+  // kds-2b · lo que el servidor conoce son LAS ABIERTAS **Y LAS LISTAS**.
+  //
+  // Hasta la pasada del 15-10 aquí sólo iban las abiertas, y por eso la M5
+  // reaparecía en el centro de la pantalla al tocar «Lista»: su gemela del
+  // servidor se había ido a la columna estrecha y la tarjeta de la wifi se
+  // quedaba sin pareja. Es el hallazgo 1 del bloque.
+  const conocidasPorElServidor = vista
+    ? [...vista.orders, ...vista.ready]
+    : [];
+
   const lanCocina = useCocinaLan({
     me,
     offline: feed.offline,
     listas: feed.listas,
+    conocidas: conocidasPorElServidor,
     onCambio: () => setTick((t) => t + 1),
   });
 
-  const soloDeLaWifi = sinDuplicados(vista?.orders ?? [], lanCocina.extras);
+  const soloDeLaWifi = sinDuplicados(
+    conocidasPorElServidor,
+    lanCocina.extras,
+    // Y las que el servidor reconoció alguna vez, aunque ya no estén en la
+    // vista: una comanda servida desaparece del `GET` entera.
+    lanCocina.confirmadas,
+  );
 
   // Y las marcas que el cocinero hizo sin red se aplican ENCIMA de lo que
   // se pinte, venga del servidor o de la wifi: el `GET` que no se pudo
@@ -277,7 +303,15 @@ export function KitchenScreen({ me }: KitchenScreenProps) {
     [...(vista?.orders ?? []), ...soloDeLaWifi],
     lanCocina.pendientes,
   );
-  const reparto = repartirTarjetas(abiertas, zona, mostrarSeccion);
+  // ── kds-2b · EL ORDEN DE LOS PLATOS NO CAMBIA AL TACHARLOS ──────────
+  //
+  // Lo último antes de repartir. Cada línea se queda donde la pantalla la
+  // vio por primera vez, venga como venga el `GET`. Sólo sobre las tarjetas
+  // del centro: la columna «Listas» no pinta platos, sólo la mesa y los
+  // minutos. Ver `kitchen/orden.ts`.
+  const ordenadas = ordenEstable(abiertas, memoriaDeOrden.current);
+  memoriaDeOrden.current = ordenadas.memoria;
+  const reparto = repartirTarjetas(ordenadas.comandas, zona, mostrarSeccion);
   const colorFranja = colorMasN(reparto.extra, settings, feed.ahora);
 
   return (
