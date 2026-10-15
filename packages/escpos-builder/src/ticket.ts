@@ -27,6 +27,7 @@ import {
 import {
   LEYENDA_ENCIMA_DEL_QR,
   LEYENDA_VERIFACTU,
+  QR_TRIBUTARIO_EN_FACTURA,
 } from "@mipiacetpv/verifactu";
 
 import {
@@ -193,7 +194,10 @@ export function buildTicketReceipt(input: TicketReceiptInput): Uint8Array {
   // Encima va `QR tributario:`, que es el texto que «siempre deberá ir
   // precediéndolo» y sirve para distinguirlo del otro. Debajo, la frase
   // del art. 20.1.b.
-  if (input.verifactu) {
+  //
+  // Apagado mientras VERI*FACTU no sea obligatorio: ver
+  // `QR_TRIBUTARIO_EN_FACTURA` en @mipiacetpv/verifactu.
+  if (input.verifactu && QR_TRIBUTARIO_EN_FACTURA) {
     parts.push(escAlign("center"));
     parts.push(escText(LEYENDA_ENCIMA_DEL_QR));
     // Módulo 6 y nivel M (art. 21.1: entre 30×30 y 40×40 mm, nivel M).

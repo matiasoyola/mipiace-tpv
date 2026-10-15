@@ -7,7 +7,10 @@
 // corrección de errores es una exigencia de la norma, no una preferencia.
 
 import type { TicketDocument } from "@mipiacetpv/ticket-model";
-import { QR_NIVEL_CORRECCION } from "@mipiacetpv/verifactu";
+import {
+  QR_NIVEL_CORRECCION,
+  QR_TRIBUTARIO_EN_FACTURA,
+} from "@mipiacetpv/verifactu";
 import QRCode from "qrcode";
 
 /**
@@ -22,7 +25,9 @@ export async function renderQrTributarioPng(
   doc: TicketDocument,
   onError?: (err: unknown) => void,
 ): Promise<Uint8Array | undefined> {
-  if (!doc.verifactu) return undefined;
+  // Apagado mientras VERI*FACTU no sea obligatorio: no se rasteriza un QR
+  // que el renderer no va a pintar.
+  if (!doc.verifactu || !QR_TRIBUTARIO_EN_FACTURA) return undefined;
   try {
     const buf = await QRCode.toBuffer(doc.verifactu.qrUrl, {
       type: "png",

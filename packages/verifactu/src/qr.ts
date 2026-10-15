@@ -35,6 +35,25 @@ export const LEYENDA_VERIFACTU = "VERI*FACTU";
 export const LEYENDA_VERIFACTU_LARGA =
   "Factura verificable en la sede electrónica de la AEAT";
 
+/** ¿Se pinta el QR tributario (y su leyenda «VERI*FACTU») en la factura?
+ *
+ *  APAGADO para todos los comercios hasta que VERI*FACTU sea obligatorio
+ *  (decisión de Matías, 15-10-2026). Hoy los registros se generan y se
+ *  encadenan, pero NO se remiten, y el QR apunta al entorno de PRUEBAS de
+ *  la AEAT: un cliente que lo escanease vería un cotejo que no cuadra. Una
+ *  factura sin QR no promete nada; una con un QR que falla promete algo
+ *  que no cumple.
+ *
+ *  Lo que NO cambia: el registro de facturación, la huella, la cadena, el
+ *  número con serie y el desglose de IVA siguen en el papel y en la BD.
+ *  Sólo desaparece el bloque «QR tributario: [QR] VERI*FACTU».
+ *
+ *  Para encenderlo (cuando V2 remita de verdad y `VERIFACTU_ENTORNO` pase a
+ *  PRODUCCION): poner `true` aquí, desplegar Y sacar APK nueva — el terminal
+ *  imprime con su propia copia de este paquete. Los tests de los dos
+ *  renderers cubren los dos estados. */
+export const QR_TRIBUTARIO_EN_FACTURA: boolean = false;
+
 /** Tamaño físico exigido por el art. 21.1: entre 30×30 y 40×40 mm, con un
  *  mínimo de 2 mm de blanco alrededor (6 recomendados) y nivel M de
  *  corrección de errores. Las cifras viven aquí para que el renderer del

@@ -11,6 +11,7 @@
 // márgenes del cálculo del alto, la página encoge y esto se pone rojo.
 
 import type { TicketDocument } from "@mipiacetpv/ticket-model";
+import { QR_TRIBUTARIO_EN_FACTURA } from "@mipiacetpv/verifactu";
 import { describe, expect, it } from "vitest";
 
 import { renderTicketPdf } from "../src/render.js";
@@ -76,7 +77,8 @@ function altoDe(bytes: Uint8Array): number {
   return Number(m[2]);
 }
 
-describe("el QR tributario en el PDF", () => {
+// Sólo con el QR tributario encendido (`QR_TRIBUTARIO_EN_FACTURA`).
+describe.runIf(QR_TRIBUTARIO_EN_FACTURA)("el QR tributario en el PDF", () => {
   it("reserva el alto del código y sus TRES márgenes", async () => {
     const sin = altoDe(await renderTicketPdf(BASE));
     const con = altoDe(
@@ -108,8 +110,23 @@ describe("el QR tributario en el PDF", () => {
     const b = altoDe(await renderTicketPdf(BASE, {}));
     expect(a).toBe(b);
     // Y pasarle el PNG sin `verifactu` en el documento tampoco lo cambia:
-    // el bloque entero cuelga de que el documento LLEVE parte fiscal.
+    // el bloque entero —también su hueco— cuelga de que el documento LLEVE
+    // parte fiscal.
     expect(altoDe(await renderTicketPdf(BASE, { qrTributarioPngBytes: PNG_1X1 })))
-      .toBeGreaterThan(a);
+      .toBe(a);
+  });
+});
+
+// 15-10-2026 · apagado para todos hasta que VERI*FACTU sea obligatorio.
+describe.runIf(!QR_TRIBUTARIO_EN_FACTURA)("con el QR tributario apagado", () => {
+  it("SABOTAJE · aunque le llegue el PNG, el PDF no lo pinta ni le hace hueco", async () => {
+    const sin = await renderTicketPdf(BASE);
+    const con = await renderTicketPdf(CON_FISCAL, {
+      qrTributarioPngBytes: PNG_1X1,
+    });
+    // Sin hueco: la única diferencia de alto es la línea de la `ref.`.
+    expect(altoDe(con) - altoDe(sin)).toBeCloseTo(11, 1);
+    // Y sin imagen incrustada.
+    expect(Buffer.from(con).toString("latin1")).not.toContain("/Subtype /Image");
   });
 });
