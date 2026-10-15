@@ -54,6 +54,11 @@ COPY packages/holded-client/package.json packages/holded-client/
 # kds-2-wifi · el contrato del camino directo por la wifi del local. Lo
 # importa la API (reparte la clave de la tienda) y el TPV (cierra el sobre).
 COPY packages/kitchen-lan/package.json packages/kitchen-lan/
+# residencia-2 · el paquete puro del plan de cuidados. Hace falta su
+# manifest en el stage de dependencias porque `apps/api` lo declara como
+# `workspace:*`: sin esta línea, `pnpm install --frozen-lockfile` en la
+# imagen falla con «no matching version found for @mipiacetpv/residencia-plan».
+COPY packages/residencia-plan/package.json packages/residencia-plan/
 COPY packages/ticket-model/package.json packages/ticket-model/
 COPY packages/ticket-pdf/package.json packages/ticket-pdf/
 COPY packages/util-validation/package.json packages/util-validation/

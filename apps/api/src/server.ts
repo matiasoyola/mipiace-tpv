@@ -64,7 +64,13 @@ import { registerResidenciaResidentesRoutes } from "./residencia/residentes-rout
 import { registerResidenciaEdificioRoutes } from "./residencia/edificio-routes.js";
 import { registerResidenciaRolesRoutes } from "./residencia/roles-routes.js";
 import { registerResidenciaTurnosRoutes } from "./residencia/turnos-routes.js";
+// residencia-2 · el catálogo de controles, los ajustes del centro, los
+// momentos del día, las plantillas por nivel y el plan de cada residente.
+import { registerResidenciaControlesRoutes } from "./residencia/controles-routes.js";
+import { registerResidenciaPlanRoutes } from "./residencia/plan-routes.js";
 import { registerResidenciaPuertaRoutes } from "./residencia/puerta-routes.js";
+// residencia-2 · el seed del catálogo de controles de serie (D-11, D-21).
+import { cargarCatalogoDeSerie } from "./residencia/catalogo/cargar-catalogo.js";
 import { registerKitchenTpvRoutes } from "./kitchen/tpv-routes.js";
 import { registerKitchenWebSocketRoute } from "./kitchen/ws-route.js";
 import {
@@ -275,6 +281,14 @@ async function main() {
   await registerResidenciaEdificioRoutes(app);
   await registerResidenciaRolesRoutes(app);
   await registerResidenciaTurnosRoutes(app);
+  // residencia-2 · las dos familias nuevas. Mismas puertas que las de
+  // residencia-1 (clínica + gate de la residencia) y, en las del plan de
+  // un residente, además `conHistoria`: el plan de cuidados de alguien ES
+  // un dato de salud (dice que tiene riesgo de úlceras y que no se levanta
+  // solo), y que lo diga una línea de plan en vez de un diagnóstico no lo
+  // hace menos.
+  await registerResidenciaControlesRoutes(app);
+  await registerResidenciaPlanRoutes(app);
   await registerResidenciaPuertaRoutes(app);
   await registerKitchenRoutes(app);
   await registerKitchenTpvRoutes(app);
@@ -332,6 +346,80 @@ async function main() {
     app.log.info(`workers arrancados embedded · ${count} repeatable(s) registrados`);
   }
   if (sentryOn) app.log.info("Sentry activo (api)");
+
+  // ── residencia-2 · el catálogo de controles de serie ───────────────
+  //
+  // 36 filas GLOBALES (`scope = STANDARD`, sin tenant), idempotentes: es
+  // el catálogo del producto, y lo ven todos los centros de residencia a
+  // la vez (D-21, D-57). Corre en cada arranque porque así una versión
+  // nueva de un control llega con el despliegue y no con un paso manual
+  // —que es la mitad de «se actualiza en el producto y baja a todos los
+  // centros»— y porque `cargarCatalogoDeSerie` no toca una versión ya
+  // publicada: lo que no cambia no escribe.
+  //
+  // Corre SIEMPRE y no sólo si hay algún tenant de residencia. Es un
+  // catálogo, no datos de nadie: 36 filas en una tabla que los quince
+  // clientes de hoy no consultan nunca, y gatearlo obligaría a que
+  // encender el módulo a un centro dependiera de un seed que todavía no
+  // ha corrido.
+  //
+  // ── Y NO TUMBA EL ARRANQUE SI FALLA ───────────────────────────────
+  //
+  // Se registra el fallo y se sigue sirviendo. Lo encontró el job `smoke`
+  // de la CI, que arranca la imagen contra un Postgres **sin migrar** para
+  // comprobar que la imagen levanta y contesta `/health`: la primera
+  // versión de esto lanzaba, y el contenedor se moría antes de servir.
+  //
+  // Pero el porqué es más de fondo que la CI: **un seed no puede impedir
+  // que la API sirva**. Un dedo en el fichero de datos de un catálogo de
+  // residencia dejaría sin API a los quince clientes de hoy —bares,
+  // tiendas y una clínica de podología— que no tienen residencia y a los
+  // que ese fichero no les dice nada.
+  //
+  // Lo que SÍ se conserva es que no se cargue a medias:
+  // `cargarCatalogoDeSerie` valida el fichero entero ANTES de escribir y
+  // aborta sin tocar la base. Así que el estado tras un fallo es «el
+  // catálogo se quedó como estaba», no «medio catálogo». Un centro al que
+  // le falte el catálogo lo ve en su pantalla de Controles el primer día;
+  // un centro con medio catálogo no lo vería hasta el primer turno.
+  try {
+    const seed = await cargarCatalogoDeSerie();
+    const cambios =
+      seed.insertados.length + seed.versionesNuevas.length + seed.ajustesReconducidos.length;
+    if (cambios > 0) {
+      app.log.info(
+        {
+          insertados: seed.insertados.length,
+          versionesNuevas: seed.versionesNuevas,
+          ajustesReconducidos: seed.ajustesReconducidos,
+        },
+        "residencia · catálogo de serie actualizado",
+      );
+    }
+    if (seed.cambiadosSinSubirVersion.length > 0) {
+      // No se propaga y se dice. Una versión publicada no se edita
+      // (decisión de producto 5): lo que hay que hacer es subir la
+      // versión en el fichero.
+      app.log.warn(
+        { controles: seed.cambiadosSinSubirVersion },
+        "residencia · controles cambiados SIN subir la versión: no se han propagado",
+      );
+    }
+  } catch (err) {
+    // `P2021` = la tabla no existe: es el estado NORMAL de una base sin
+    // migrar (el `smoke` de la CI, o un arranque antes de
+    // `prisma migrate deploy`). Se dice como aviso y no como error, para
+    // que un log rojo signifique siempre algo que mirar.
+    const sinTablas =
+      typeof err === "object" && err !== null && "code" in err && err.code === "P2021";
+    if (sinTablas) {
+      app.log.warn(
+        "residencia · el catálogo de serie no se ha cargado: faltan sus tablas (¿base sin migrar?)",
+      );
+    } else {
+      app.log.error(err, "residencia · el catálogo de serie no se pudo cargar");
+    }
+  }
 
   const close = async () => {
     app.log.info("Apagando…");

@@ -99,6 +99,9 @@ importers:
       '@mipiacetpv/kitchen-lan':
         specifier: workspace:*
         version: link:../../packages/kitchen-lan
+      '@mipiacetpv/residencia-plan':
+        specifier: workspace:*
+        version: link:../../packages/residencia-plan
       '@mipiacetpv/ticket-model':
         specifier: workspace:*
         version: link:../../packages/ticket-model
@@ -428,6 +431,18 @@ importers:
         version: 2.1.9(@types/node@20.19.40)(jsdom@29.1.1)(terser@5.47.1)
 
   packages/kitchen-lan:
+    devDependencies:
+      '@types/node':
+        specifier: ^20.16.10
+        version: 20.19.40
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
+        version: 2.1.9(@types/node@20.19.40)(jsdom@29.1.1)(terser@5.47.1)
+
+  packages/residencia-plan:
     devDependencies:
       '@types/node':
         specifier: ^20.16.10

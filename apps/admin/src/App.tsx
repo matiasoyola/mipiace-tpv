@@ -25,6 +25,11 @@ import { StaffPage } from "./pages/StaffPage.js";
 import { ResidentesPage } from "./pages/residencia/ResidentesPage.js";
 import { EdificioPage } from "./pages/residencia/EdificioPage.js";
 import { TurnosPage } from "./pages/residencia/TurnosPage.js";
+// residencia-2 · el catálogo de controles, las plantillas por nivel y el
+// plan de un residente.
+import { ControlesPage } from "./pages/residencia/ControlesPage.js";
+import { PlantillasPage } from "./pages/residencia/PlantillasPage.js";
+import { PlanResidentePage } from "./pages/residencia/PlanResidentePage.js";
 // F1 (ADR-018) · las tres pantallas del control horario.
 import { HoyPage } from "./pages/fichaje/HoyPage.js";
 import { EmpleadosPage } from "./pages/fichaje/EmpleadosPage.js";
@@ -189,6 +194,13 @@ export function App() {
         <Route path="/admin/residencia/residentes" element={<ResidenciaGate title="Residentes"><ResidentesPage /></ResidenciaGate>} />
         <Route path="/admin/residencia/edificio" element={<ResidenciaGate title="Edificio"><EdificioPage /></ResidenciaGate>} />
         <Route path="/admin/residencia/turnos" element={<ResidenciaGate title="Turnos"><TurnosPage /></ResidenciaGate>} />
+        {/* residencia-2 · las tres pantallas del catálogo y del plan, con
+            el mismo gate. La del plan va bajo la de residentes porque se
+            llega desde la ficha de uno: no es una sección, es la
+            continuación de una ficha. */}
+        <Route path="/admin/residencia/controles" element={<ResidenciaGate title="Controles"><ControlesPage /></ResidenciaGate>} />
+        <Route path="/admin/residencia/plantillas" element={<ResidenciaGate title="Plantillas por nivel"><PlantillasPage /></ResidenciaGate>} />
+        <Route path="/admin/residencia/residentes/:clientId/plan" element={<ResidenciaGate title="Plan de cuidados"><PlanResidentePage /></ResidenciaGate>} />
         <Route path="/admin/tag-aliases" element={<CajaGate title="Etiquetas"><TagAliasesPage /></CajaGate>} />
         <Route path="/admin/tag-sections" element={<CajaGate title="Comanderas"><TagSectionsPage /></CajaGate>} />
         <Route path="/admin/printers" element={<CajaGate title="Impresoras"><PrintersPage /></CajaGate>} />

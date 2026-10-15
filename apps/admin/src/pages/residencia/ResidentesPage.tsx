@@ -21,7 +21,16 @@
 // que hace la API, que no los manda en `GET /residencia/residentes`.
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, BedDouble, LogOut, Plus, X } from "lucide-react";
+import {
+  AlertTriangle,
+  BedDouble,
+  ClipboardList,
+  LogOut,
+  Plus,
+  X,
+} from "lucide-react";
+// residencia-2 · el enlace al plan de cuidados, desde la ficha.
+import { Link } from "react-router-dom";
 
 import { AdminShell } from "../../AdminShell.js";
 import { api, ApiError } from "../../api.js";
@@ -564,6 +573,19 @@ function ModalFicha({
         <Dato k="DNI">{residente.dni ?? "—"}</Dato>
         <Dato k="NSS">{residente.nss ?? "—"}</Dato>
       </dl>
+
+      {/* residencia-2 · de aquí se llega al plan de cuidados. El botón va
+          en la ficha y el plan tiene su propia pantalla: veinte líneas en
+          cuatro grupos más la vista de «hoy» dentro de un modal, a 320 px,
+          es un scroll que no acaba. */}
+      <div className="mt-5">
+        <Link
+          to={`/admin/residencia/residentes/${residente.clientId}/plan`}
+          className="flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 text-[13.5px] text-mipiace-ink hover:bg-slate-50"
+        >
+          <ClipboardList className="h-4 w-4" /> Su plan de cuidados
+        </Link>
+      </div>
 
       {residente.ocupaciones.length > 1 && (
         <>
