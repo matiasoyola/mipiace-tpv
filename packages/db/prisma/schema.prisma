@@ -5286,6 +5286,11 @@ model ResidentProfile {
   /// alimenta ninguna estadística en la v1.
   dischargeDate   DateTime? @map("discharge_date") @db.Date
   dischargeReason String?   @map("discharge_reason")
+  /// residencia-1b · «fallecimiento», «traslado al hospital por ictus»
+  /// caben enteros en ese texto libre, así que desde este bloque va
+  /// cifrado. El CHECK `resident_profiles_alta_coherente` mira LAS DOS
+  /// columnas: un motivo, en claro o cifrado, sigue exigiendo fecha.
+  dischargeReasonCifrado String? @map("discharge_reason_cifrado")
 
   /// Cuánta ayuda necesita (lo decide el centro) y el grado reconocido de
   /// la Ley de Dependencia (lo reconoce la administración, y puede no
@@ -5309,6 +5314,15 @@ model ResidentProfile {
   /// un sistema que guarda su salud.
   dni String?
   nss String?
+
+  /// residencia-1b (D-63) · DONDE VIVEN DE VERDAD desde este bloque.
+  /// `dni` y `nss` se quedan para las filas que ya estaban escritas
+  /// cuando llegó el cifrado (expand → migrar → contract, clinica-7 §3);
+  /// las nuevas nacen con el claro a NULL. Su CHECK de formato
+  /// (`resident_profiles_dni_cifrado_formato`) sólo admite `c1:…`: el
+  /// claro NO CABE aquí.
+  dniCifrado String? @map("dni_cifrado")
+  nssCifrado String? @map("nss_cifrado")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
@@ -5442,6 +5456,10 @@ model BedAssignment {
   /// Por qué se abrió o se cerró. Texto corto: «ingreso», «cambio a la
   /// 112», «alta». No alimenta nada automático.
   reason String?
+  /// residencia-1b (D-63) · y cifrado, porque ahí es donde se escribe
+  /// «aislamiento por GEA» o «se cae de la cama». La ubicación en sí
+  /// (planta, habitación, cama) sigue en claro: es del centro.
+  reasonCifrado String? @map("reason_cifrado")
 
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
   createdByUserId String?  @map("created_by_user_id") @db.Uuid
@@ -6159,6 +6177,13 @@ model CarePlanItem {
   /// automático.
   reason      String?
   closeReason String? @map("close_reason")
+
+  /// residencia-1b (D-63) · los DOS textos libres de esta tabla, cifrados.
+  /// «úlcera sacra grado II», «se le retiró la sonda». `controlCode` y la
+  /// frecuencia se quedan EN CLARO y está declarado: sostienen
+  /// `care_plan_items_one_live_key` y el cifrado es no determinista.
+  reasonCifrado      String? @map("reason_cifrado")
+  closeReasonCifrado String? @map("close_reason_cifrado")
 
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
   createdByUserId String?  @map("created_by_user_id") @db.Uuid
