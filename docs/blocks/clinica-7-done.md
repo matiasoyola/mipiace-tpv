@@ -825,7 +825,14 @@ b887a2c docs(clinica-7): el bucle visual — capturas, medidas y dos hallazgos
 8410164 fix(clinica-7): el banco de la clínica acepta el contrato, y el capítulo 11 mira lo cifrado
 631921e docs(clinica-7): el done del bloque
 cd8716a fix(clinica-7): el arranque no tumba la API si no puede comprobar, y el e2e trae su KEK
-<este>  docs(clinica-7): lo que enseñó el primer CI
+9039272 docs(clinica-7): lo que enseñó el primer CI, y el verde del segundo
+```
+
+Y después del merge en `master` (`9d1b3a2`), lo de §18:
+
+```
+e3e7950 test(residencia): los fakes de residencia traen el contrato y el llavero
+<este>  docs(clinica-7): residencia después del merge — el inventario en claro y el orden de las migraciones
 ```
 
 ---
@@ -855,3 +862,262 @@ portátil no podía ver.
 
 Y al desplegar hay mucho de lo que acordarse: §14, en ese orden, empezando
 por generar las dos claves y guardarlas fuera del VPS.
+
+---
+
+## 18 · Residencia, después del merge
+
+Esta sección no es del bloque: es lo que el bloque **le hace a lo que ya
+estaba**. `clinica-7` se mergeó en `master` (`9d1b3a2`) cuando
+`residencia-1` y `residencia-2` ya estaban dentro, y la puerta del contrato
+de encargado no distingue: `conHistoria` es EL punto por el que pasa toda
+ruta clínica, y la ficha de un residente y su plan de cuidados pasan por
+ahí.
+
+### 18.1 · Lo que se rompió, y era de los fakes
+
+El CI del merge cayó en `Tests` con catorce rojos y un solo síntoma:
+
+```
+{"statusCode":500,"error":"Internal Server Error",
+ "message":"Cannot read properties of undefined (reading 'findMany')"}
+```
+
+El `findMany` que no existe es `prisma.clinicalProcessorAgreement.findMany`,
+el que `estadoDelTenant` llama desde el guard del 423. Los dos ficheros de
+tests de residencia que montan rutas con `conHistoria` traían su Prisma en
+memoria sin ese modelo:
+
+| Fichero | Rojos | Rutas |
+| ------- | ----- | ----- |
+| `apps/api/test/residencia-controles.test.ts` | 13 | el plan del residente y la vista «hoy» (`plan-routes.ts`) |
+| `apps/api/test/residencia-rutas.test.ts` | 1 | la ficha del residente (`residentes-routes.ts`) |
+
+El arreglo es el mismo que llevan los siete ficheros clínicos, y por eso
+`clinica-7-claves-fake.ts` existe: `contratoFake`, `llaveroFake` y
+`kekDePrueba()`. **El contrato nace ACEPTADO**, que es el estado normal de
+un centro que funciona — y en residencia lo es por construcción:
+`tenants_residencia_exige_clinica` no deja encender la residencia sin la
+clínica, y una clínica sin contrato no escribe. El 423 se prueba
+vaciándolo o revocándolo en el test que va de eso (§18.7), nunca al
+contrario.
+
+Y las dos cachés de este bloque se vacían en el `beforeEach`
+(`olvidarClaves()`, `olvidarEstado()`): duran 60 s y 30 s, o sea más que el
+fichero de tests entero, así que sin eso el primer test decide el estado
+del contrato de todos los demás. En `residencia-rutas` importa de verdad:
+uno de sus tests apaga la clínica.
+
+**La puerta en producción no se toca.** Lo que estaba mal era el doble, no
+el guard: un centro de residencia de verdad tiene el contrato aceptado o no
+escribe, y eso es exactamente lo que se quiere.
+
+### 18.2 · Lo que NO sufrió, comprobado y no supuesto
+
+- **El e2e de residencia** (`residencia-1.e2e.ts`, `residencia-2.e2e.ts`)
+  no monta Fastify: entra por `$executeRawUnsafe` y por las funciones
+  (`cargarCatalogoDeSerie`, `sembrarResidencia`). No cruza `conHistoria`,
+  así que no tiene contrato que aceptar. Y la `CLINICAL_KEK` de la suite la
+  pone `e2e-env.ts` para todos los ficheros desde §11bis.
+- **El `smoke`** arranca la imagen contra un Postgres **sin migrar**. Lo de
+  residencia que corre en el arranque es `cargarCatalogoDeSerie()`, y ya
+  está envuelto: un `P2021` («la tabla no existe») sale como aviso y la API
+  sigue sirviendo. Nada del contrato se consulta en el arranque.
+- **El banco de la agenda** no tiene escenario de residencia: `seed/` son
+  `peluqueria-demo.ts` y `clinica-demo.ts`, y el de la clínica ya acepta el
+  contrato desde `8410164`. No hay centro de residencia que sembrar, así
+  que no hay nada que arreglar ahí. El día que lo haya, tendrá que
+  sembrar la fila de `clinical_processor_agreements` **y** la de
+  `clinical_tenant_keys` — o la primera ficha de residente contestará 423.
+
+### 18.3 · EL INVENTARIO: lo que residencia dejó EN CLARO
+
+Esto es lo que hay que mirar, y no se arregla con un test.
+
+`clinica-7` cifra **nueve columnas** y las nueve son de clinica-1 a
+clinica-6. Las tablas que trajeron `residencia-1` y `residencia-2` están
+**enteras en claro**, y algunas de sus columnas son datos de salud del
+art. 9.1 con todas las letras.
+
+#### `resident_profiles` · residencia-1, una fila por residente
+
+| Columna | Qué dice | ¿Salud? |
+| ------- | -------- | ------- |
+| `dependency_level` | válido / semiasistido / dependiente | **sí** — es el grado de autonomía de una persona con nombre |
+| `dependency_grade` | I, II, III de la Ley 39/2006 | **sí** — grado reconocido por la administración |
+| `discharge_reason` | TEXTO LIBRE | **sí, y del peor** — «fallecimiento», «traslado al hospital por ictus» caben enteros |
+| `admission_date` / `discharge_date` | fechas de estancia | por inferencia: dicen que esta persona vive en una residencia |
+| `nss` | número de la Seguridad Social | identificador, y el que abre la historia en el SESCAM |
+| `dni` | DNI | identificador; la propia migración ya dice «nunca en logs» |
+| `place_type`, `responsible_*` | plaza y familiar de contacto | no son salud; son personales |
+
+#### `care_plan_items` · residencia-2, EL PLAN DE CUIDADOS de un residente
+
+Es la tabla que más pesa del inventario: cada fila es
+`(client_id, control_code, frecuencia)`, o sea **«a Carmen se le controla la
+glucemia cada ocho horas y la deposición cada turno»**. Eso es un
+diagnóstico dicho con otras palabras.
+
+| Columna | Qué dice |
+| ------- | -------- |
+| `control_code` | QUÉ se le controla: `GLUCEMIA`, `UPP_*`, `CONTENCION`… |
+| `frequency_kind`, `every_n_hours`, `every_n_days`, `weekdays`, `month_day`, `shift_codes`, `moment_codes` | con qué INTENSIDAD, que junto al código dice la gravedad |
+| `source`, `source_level` | si sale de la plantilla de su nivel de dependencia, y de cuál |
+| `reason`, `close_reason` | TEXTO LIBRE: «úlcera sacra grado II», «se le retiró la sonda» |
+| `from_at` / `to_at` | la línea de tiempo clínica del residente |
+
+#### `bed_assignments` · residencia-1
+
+`reason` es texto libre y es dónde se escribe por qué cambió de habitación:
+«se cae de la cama», «aislamiento por GEA», «conflicto con la compañera».
+Y la ubicación en sí habla: un `floor_id` cuya planta se llame «Unidad de
+Alzhéimer» es un diagnóstico para todos los que duermen en ella — y
+`floors.name`, `rooms.name` y `beds.label` son del centro, no de nadie, así
+que no los cubre una DEK por tenant atada a una fila.
+
+#### Lo que NO es dato de nadie, y por eso no entra
+
+`control_types`, `control_type_options`, `center_control_settings`,
+`care_plan_template_items`, `center_moments`, `care_roles` y las dos tablas
+de asignaciones de personal. Llevan **vocabulario** de salud (la palabra
+«glucemia», el rango de referencia de una tensión) y configuración del
+centro, pero ni una fila es de un residente concreto. Las de `scope =
+STANDARD` no tienen ni `tenant_id`: son el catálogo del producto. Cifrarlas
+sería cifrar el diccionario.
+
+### 18.4 · Y por qué no se cifra aquí y ahora
+
+Tres razones, y la tercera es la que lo decide.
+
+1. **`control_code` está en un índice del motor.**
+   `care_plan_items_one_live_key` es `UNIQUE (client_id, control_code)
+   WHERE to_at IS NULL` — es la garantía «una línea viva por residente y
+   control», y hay otro índice más en `(client_id, control_code)`. El
+   cifrado de este bloque es **no determinista** (el AAD y el nonce van
+   dentro del ciphertext, decisión 15: dos valores del mismo paciente no
+   son intercambiables), así que una columna cifrada **no puede sostener un
+   índice único**. Cifrar `control_code` es renunciar a esa garantía del
+   motor o cambiar el esquema de cifrado para esa columna. Ninguna de las
+   dos cosas se hace de pasada.
+2. **Los CHECK habría que re-enseñarlos, uno por uno.** Igual que
+   `clinical_photos_retirada_completa` pasó de «lleva motivo» a «lleva
+   motivo, en claro **o** cifrado» (§2 §3), cada CHECK de residencia que
+   mire una columna de texto hay que afinarlo antes de que quepa el
+   cifrado. Y están el `resident_profiles_alta_coherente` y los de
+   coherencia de frecuencia de las cuatro tablas de residencia-2.
+3. **El dato de salud GORDO todavía no existe.** Lo que hay hoy es el plan
+   y la ficha. El REGISTRO —«a las 9:40 se le midió 142 de glucemia»— lo
+   trae `residencia-3`, y las constantes y el libro de incidencias
+   `residencia-4`. Retrofitar el cifrado sobre dos tablas ahora y volver a
+   hacerlo sobre seis en febrero es hacerlo dos veces. **Lo que toca es que
+   residencia-3 nazca cifrado**, con su `sitio*` en `cripto-campos.ts` y su
+   CHECK de formato en la migración, y que la misma pasada se lleve
+   `care_plan_items.reason`, `close_reason` y
+   `resident_profiles.discharge_reason` — los tres textos libres, que son
+   lo barato de cifrar porque nadie los consulta en SQL.
+
+Lo que **sí** está puesto ya, y conviene decirlo para no pagarlo dos veces:
+la ficha y el plan dejan **línea en `clinical_access_log`**, porque pasan
+por `conHistoria`. El registro de accesos de residencia no está pendiente;
+el cifrado sí. (La LISTA de residentes no deja línea, y es la decisión 1 de
+`residentes-routes.ts`: sirve nivel de dependencia sin apuntar nada, a
+propósito, porque es el cuadrante del office y no la historia.)
+
+Y hay una consecuencia de contrato que conviene tener escrita: un centro de
+residencia **ha aceptado** el contrato de encargado —no puede encender el
+módulo sin la clínica, y la clínica pide el contrato—, y la letra c) de ese
+texto promete medidas técnicas. Hoy esa promesa la cumplen nueve columnas
+clínicas y no la cumplen las de residencia. **No es un incumplimiento del
+bloque** (residencia no existía cuando se redactó el inventario), pero es
+deuda con fecha: `residencia-3`.
+
+### 18.5 · Las dos migraciones con la misma marca · `20261014000000`
+
+```
+20261014000000_clinica_7_blindaje
+20261014000000_residencia_1_tipos
+```
+
+**No dan problema de orden, y está medido, no supuesto.** Tres cosas:
+
+1. **El orden es determinista.** Prisma ordena por nombre de carpeta
+   completo, así que la marca empatada la desempata el resto del nombre:
+   `clinica_7_blindaje` < `residencia_1_tipos` porque `c` < `r`. Sobre base
+   limpia, `_prisma_migrations` lo confirma:
+
+   ```
+   20261014000000_clinica_7_blindaje            10:31:02.702702+00
+   20261014000000_residencia_1_tipos            10:31:02.767891+00
+   20261014010000_residencia_1_cimientos        10:31:02.781878+00
+   20261015000000_residencia_2_catalogo_y_plan  10:31:02.987500+00
+   ```
+
+   Y no es el primer empate del repo: `20261008010000` ya lo tienen
+   `clinica_4_consentimientos_fotos_informe` y `kds_1_tipos`, y llevan dos
+   semanas en producción.
+
+2. **No hay dependencia cruzada.** `residencia_1_tipos` toca `tenants`
+   (`residencia_enabled` y el CHECK que exige `clinical_records_enabled`,
+   que es de **clinica-1**) y crea cuatro enums más el valor `ROOM`.
+   `clinica_7_blindaje` crea dos tablas nuevas y añade columnas a tablas
+   clínicas. Ni un objeto en común.
+
+3. **El caso fuera de orden también vale, y es el que importa al
+   desplegar.** En `master` —y en producción— las de residencia ya están
+   aplicadas y la de clinica-7 llega después, o sea que entra una migración
+   **lexicográficamente ANTERIOR** a la última registrada. Se probó con una
+   copia del directorio de migraciones en el scratchpad: base nueva, se
+   aplican las 77 de `master` sin `clinica_7_blindaje`, se añade la carpeta
+   y se vuelve a lanzar `prisma migrate deploy`:
+
+   ```
+   Applying migration `20261014000000_clinica_7_blindaje`
+   All migrations have been successfully applied.
+   ```
+
+   Sin error y sin aviso. Y el esquema resultante es **el mismo**: un
+   `pg_dump -s` de las dos bases (la limpia en orden y la fuera de orden)
+   difiere en cuatro líneas, y las cuatro son el nonce de `\restrict` de
+   `pg_dump` y el `COMMENT ON SCHEMA public` que deja el `DROP SCHEMA` del
+   `global-setup` del e2e. Ni una columna, ni un índice, ni un trigger.
+
+Lo que **sí** hay que recordar al desplegar es lo de §14, que no cambia: el
+`prisma migrate deploy` de residencia-2 y el de clinica-7 van en el mismo
+despliegue, y la `CLINICAL_KEK` tiene que estar en el entorno **antes** de
+que arranque el proceso.
+
+### 18.6 · Verde, con el merge dentro
+
+| Suite | Resultado |
+| ----- | --------- |
+| Unitaria (`pnpm vitest run`, desde la raíz) | **5106 pasan**, 3 saltados, 370 ficheros |
+| e2e de la API (`test:e2e`) | **700 pasan**, 36 ficheros |
+| `tsc --noEmit` · api · los seis paquetes · `tsc -b` de tpv-web y admin | limpio |
+
+El `tsc` de la API sale limpio **sólo después de `pnpm --filter
+@mipiacetpv/db run generate`**: el cliente de Prisma del portátil venía de
+antes del merge y no conocía `centerShift`, `careRoleAssignment` ni
+`residenciaEnabled`. Son 17 errores que no son de la rama, y el CI no los
+ve porque genera el cliente antes de typechequear.
+
+### 18.7 · Los sabotajes de esta sección
+
+Tres pasadas sobre los dos ficheros arreglados, con el commit ya hecho
+antes de tocar nada y `git checkout --` para volver.
+
+| # | Sabotaje | Qué tiene que pasar | Qué pasó |
+| - | -------- | ------------------- | -------- |
+| 1 | Quitar `clinicalProcessorAgreement: contrato.modelo` del `fakePrisma` | rojo, y con el fallo del CI del merge | **13 rojos** en `residencia-controles`, todos `500 Cannot read properties of undefined (reading 'findMany')`. Es, carácter por carácter, lo que cayó en `9d1b3a2` |
+| 2 | Dejar el modelo y **vaciar** el contrato (`contrato.vaciar()` en el `beforeEach`) | **423**, en lectura Y en escritura | **16 rojos** (13 + 3): `expected 423 to be 200`, con `error: "CONTRATO_ENCARGADO_SIN_ACEPTAR"` y el mensaje que manda a «Ajustes › Contrato de tratamiento de datos» |
+| 3 | **Revocarlo** (`contrato.revocar()`) | 423 a las ESCRITURAS y nada más: la lectura sigue, que es el art. 28.3.g | **8 rojos**, y los ocho de escritura (`expected 423 to be 201`, `to be 409`, `to be 400`). Las lecturas del plan siguen en verde |
+
+La diferencia entre el 2 y el 3 no es un detalle: es `negativaDelContrato`
+haciendo lo que §1 dice que hace. **Sin aceptar nunca**, ni leer ni
+escribir —una clínica recién encendida no sirve nada—; **revocado**, se
+puede leer y no escribir, porque justo cuando se revoca es cuando se pide
+la devolución de datos. Vale igual para el plan de cuidados de un
+residente que para la historia de una paciente de podología, y sin una
+línea de código de residencia: lo hereda de `conHistoria`.
+
+Y el 1 es el que deja dicho **por qué el arreglo es de los fakes y no del
+guard**: con el modelo puesto y el contrato aceptado, las setenta pasan.
