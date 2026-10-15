@@ -24,6 +24,7 @@ import { useEffect, useState } from "react";
 import {
   AlertTriangle,
   BedDouble,
+  ClipboardCheck,
   ClipboardList,
   LogOut,
   Plus,
@@ -52,6 +53,7 @@ import {
   type ResidenteFila,
   type TipoDePlaza,
 } from "./lib.js";
+import { BloqueDeFoto } from "./ResidentesPage.foto.js";
 
 const NIVELES: NivelDependencia[] = ["VALIDO", "SEMIASISTIDO", "DEPENDIENTE"];
 const PLAZAS: TipoDePlaza[] = ["PRIVADA", "CONCERTADA", "TEMPORAL"];
@@ -183,7 +185,11 @@ export function ResidentesPage() {
         />
       )}
       {ficha && (
-        <ModalFicha residente={ficha} onClose={() => setFicha(null)} />
+        <ModalFicha
+          residente={ficha}
+          onClose={() => setFicha(null)}
+          onCambio={() => void abrirFicha(ficha)}
+        />
       )}
       {moviendo && (
         <ModalCama
@@ -536,9 +542,13 @@ function ModalAlta({
 function ModalFicha({
   residente,
   onClose,
+  onCambio,
 }: {
   residente: ResidenteFicha;
   onClose: () => void;
+  /** residencia-3 · vuelve a pedir la ficha. La foto y el consentimiento
+   *  se cambian desde aquí dentro y lo que se pinta tiene que seguirlos. */
+  onCambio: () => void;
 }) {
   return (
     <Modal title={residente.nombre} onClose={onClose}>
@@ -578,14 +588,25 @@ function ModalFicha({
           en la ficha y el plan tiene su propia pantalla: veinte líneas en
           cuatro grupos más la vista de «hoy» dentro de un modal, a 320 px,
           es un scroll que no acaba. */}
-      <div className="mt-5">
+      <div className="mt-5 space-y-2">
         <Link
           to={`/admin/residencia/residentes/${residente.clientId}/plan`}
           className="flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 text-[13.5px] text-mipiace-ink hover:bg-slate-50"
         >
           <ClipboardList className="h-4 w-4" /> Su plan de cuidados
         </Link>
+        {/* residencia-3 · «la prueba de que llega». Va JUNTO al plan y en
+            ese orden: el plan dice qué le toca, esto dice qué se le hizo, y
+            las dos preguntas se miran seguidas. */}
+        <Link
+          to={`/admin/residencia/residentes/${residente.clientId}/registros`}
+          className="flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 text-[13.5px] text-mipiace-ink hover:bg-slate-50"
+        >
+          <ClipboardCheck className="h-4 w-4" /> Lo registrado en la puerta
+        </Link>
       </div>
+
+      <BloqueDeFoto residente={residente} onCambio={onCambio} />
 
       {residente.ocupaciones.length > 1 && (
         <>

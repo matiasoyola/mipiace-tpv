@@ -59,6 +59,10 @@ interface CuidadoDelProfesional {
   roles: AsignacionDeRol[];
   zonas: ZonaAsignada[];
   alcance: "SIN_ROL" | "CENTRO" | "ZONA";
+  /** residencia-3 · `null` = no tiene PIN de puerta. **El PIN no llega
+   *  aquí**: ni entero, ni parcial, ni su hash. Sólo si hay uno y desde
+   *  cuándo. */
+  pinDePuerta?: { desde: string } | null;
 }
 
 const ALCANCE_FRASE: Record<CuidadoDelProfesional["alcance"], string> = {
@@ -347,6 +351,156 @@ export function CuidadoEditor({
         <p className="mt-1.5 text-[12.5px] text-slate-500">
           Su rol ya ve todo el centro: la zona no le hace falta.
         </p>
+      )}
+
+      <PinDePuerta
+        userId={userId}
+        canEdit={canEdit}
+        tienePin={cuidado.pinDePuerta ?? null}
+        puedeTenerlo={vigentes.some((v) => v.rol.recordsCare)}
+        onError={onError}
+        onCambio={() => void recargar()}
+      />
+    </div>
+  );
+}
+
+/**
+ * residencia-3 · **EL PIN DE LA PUERTA.**
+ *
+ * Va aquí, debajo de los roles y la zona, y no en una pantalla propia:
+ * **es la tercera mitad de la misma decisión**. Los roles dicen qué puede
+ * registrar, la zona a quién, y el PIN es con qué entra. Las tres las
+ * decide el OWNER (decisión 6 de residencia-1, D-61) y las tres se tocan
+ * seguidas el día que entra alguien nuevo.
+ *
+ * ── Lo que esta pantalla NO hace ────────────────────────────────────
+ *
+ * **No enseña el PIN.** Ni entero, ni parcial, ni su hash. Si alguien lo
+ * olvida se le pone otro; no hay «ver el PIN» porque eso convertiría la
+ * pantalla de Personal en el sitio desde el que se puede firmar como
+ * cualquiera.
+ *
+ * Y **no dice de quién es un PIN repetido**. El servidor contesta «ese PIN
+ * ya lo tiene otra persona» sin decir quién, porque decirlo sería regalar
+ * el PIN de alguien a quien tiene acceso a esta pantalla.
+ */
+function PinDePuerta({
+  userId,
+  canEdit,
+  tienePin,
+  puedeTenerlo,
+  onError,
+  onCambio,
+}: {
+  userId: string;
+  canEdit: boolean;
+  tienePin: { desde: string } | null;
+  /** `false` = no tiene ningún rol de cuidado que REGISTRE, así que su PIN
+   *  no abriría ninguna puerta. Se dice aquí, donde se arregla. */
+  puedeTenerlo: boolean;
+  onError: (m: string | null) => void;
+  onCambio: () => void;
+}) {
+  const [abierto, setAbierto] = useState(false);
+  const [pin, setPin] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function guardar() {
+    setBusy(true);
+    onError(null);
+    try {
+      await api(`/residencia/personal/${userId}/pin-de-puerta`, {
+        method: "PUT",
+        body: { pin },
+      });
+      setPin("");
+      setAbierto(false);
+      onCambio();
+    } catch (err) {
+      onError(err instanceof ApiError ? err.message : "Error inesperado");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function quitar() {
+    setBusy(true);
+    onError(null);
+    try {
+      await api(`/residencia/personal/${userId}/pin-de-puerta`, {
+        method: "DELETE",
+      });
+      onCambio();
+    } catch (err) {
+      onError(err instanceof ApiError ? err.message : "Error inesperado");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-4 border-t border-slate-100 pt-3">
+      <p className="mb-1.5 text-[13px] text-slate-500">PIN de la puerta</p>
+      <p className="mb-2 text-[12.5px] text-slate-500">
+        Con esto entra en la tablet de una habitación y firma lo que
+        registra. Es otro que el PIN del TPV.
+      </p>
+      {!puedeTenerlo ? (
+        <p className="text-[13px] text-slate-400">
+          Dale primero un rol de cuidado que registre: sin él, su PIN no
+          abriría ninguna puerta.
+        </p>
+      ) : tienePin && !abierto ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[13.5px] text-mipiace-ink">
+            Tiene PIN desde el{" "}
+            {new Date(tienePin.desde).toLocaleDateString("es-ES")}
+          </span>
+          {canEdit && (
+            <>
+              <OutlineButton onClick={() => setAbierto(true)} disabled={busy}>
+                Cambiarlo
+              </OutlineButton>
+              <OutlineButton onClick={() => void quitar()} disabled={busy}>
+                Quitarlo
+              </OutlineButton>
+            </>
+          )}
+        </div>
+      ) : !canEdit ? (
+        <p className="text-[13px] text-slate-400">Sin PIN de puerta.</p>
+      ) : abierto ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={8}
+            placeholder="4 cifras"
+            aria-label="PIN de la puerta"
+            className="h-11 w-28 rounded-xl border border-slate-200 px-3 text-[13.5px] tabular-nums"
+          />
+          <OutlineButton
+            onClick={() => void guardar()}
+            disabled={busy || pin.length < 4}
+          >
+            Guardar
+          </OutlineButton>
+          <OutlineButton
+            onClick={() => {
+              setAbierto(false);
+              setPin("");
+            }}
+          >
+            Cancelar
+          </OutlineButton>
+        </div>
+      ) : (
+        <OutlineButton onClick={() => setAbierto(true)} disabled={busy}>
+          <Plus className="h-4 w-4" /> Ponerle un PIN
+        </OutlineButton>
       )}
     </div>
   );

@@ -1,7 +1,9 @@
-// Cliente HTTP del TPV. Tres modos de auth:
+// Cliente HTTP del TPV. Cuatro modos de auth:
 //   - apiPublic:    sin auth (POST /devices/pair)
 //   - apiWithDevice: header X-Device-Token (GET /devices/me, cashier-login)
 //   - apiWithCashier: Authorization Bearer <sessionToken> (shift/*)
+//   - apiConPuerta: LAS DOS a la vez (residencia-3, las rutas de la
+//     puerta que tocan datos de salud). Ver su comentario.
 //
 // El backend está al otro lado del proxy de Vite en dev (/api/* →
 // 127.0.0.1:3001), y de Caddy en prod.
@@ -10,6 +12,9 @@ import {
   getCashierSession,
   getDeviceToken,
 } from "./storage.js";
+// residencia-3 · la sesión de la puerta. Se importa la lectura y nada
+// más: quien la escribe es la pantalla del PIN.
+import { leerSesion as leerSesionDePuerta } from "./residencia/puerta-cache.js";
 
 const BASE_URL = (
   (import.meta as unknown as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL ??
@@ -80,6 +85,52 @@ async function send<T>(path: string, opts: ApiOpts): Promise<T> {
 
 export function apiPublic<T>(path: string, opts: ApiOpts = {}): Promise<T> {
   return send<T>(path, opts);
+}
+
+/**
+ * residencia-3 · las dos cabeceras a la vez: el dispositivo Y la sesión de
+ * la puerta.
+ *
+ * Las rutas de la puerta que tocan datos de salud exigen las dos
+ * (`requirePuertaDevice` + `requirePuertaSesion`), y por una razón que
+ * merece estar escrita donde se manda la petición: **el token de la puerta
+ * solo no abre nada**. Con una tablet emparejada hace falta además saber un
+ * PIN, y con un PIN robado hace falta además estar delante de esa tablet.
+ *
+ * El token lo lee del almacenamiento en CADA llamada y no se captura: la
+ * cola puede enviar un lote de la noche con la sesión de la mañana (ver
+ * `puerta-sesion.ts` en la API), y capturarlo habría atado el envío a una
+ * sesión que ya no existe.
+ *
+ * Sin sesión, 401 `PUERTA_SIN_SESION` — y eso es TRANSITORIO para la cola
+ * (`isPermanentRejection` deja fuera el 401): el lote espera a que alguien
+ * teclee su PIN y sale entonces, con su `recordedAt` original.
+ */
+export function apiConPuerta<T>(path: string, opts: ApiOpts = {}): Promise<T> {
+  const device = getDeviceToken();
+  if (!device) {
+    return Promise.reject(
+      new ApiError(401, "Device no emparejado", "DEVICE_TOKEN_REQUIRED"),
+    );
+  }
+  const sesion = leerSesionDePuerta();
+  if (!sesion) {
+    return Promise.reject(
+      new ApiError(
+        401,
+        "Teclea tu PIN para registrar.",
+        "PUERTA_SIN_SESION",
+      ),
+    );
+  }
+  return send<T>(path, {
+    ...opts,
+    headers: {
+      ...opts.headers,
+      "X-Device-Token": device,
+      Authorization: `Bearer ${sesion.token}`,
+    },
+  });
 }
 
 export function apiWithDevice<T>(path: string, opts: ApiOpts = {}): Promise<T> {

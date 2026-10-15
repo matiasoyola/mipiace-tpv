@@ -31,6 +31,7 @@ import { TurnosPage } from "./pages/residencia/TurnosPage.js";
 import { ControlesPage } from "./pages/residencia/ControlesPage.js";
 import { PlantillasPage } from "./pages/residencia/PlantillasPage.js";
 import { PlanResidentePage } from "./pages/residencia/PlanResidentePage.js";
+import { RegistroResidentePage } from "./pages/residencia/RegistroResidentePage.js";
 // F1 (ADR-018) · las tres pantallas del control horario.
 import { HoyPage } from "./pages/fichaje/HoyPage.js";
 import { EmpleadosPage } from "./pages/fichaje/EmpleadosPage.js";
@@ -211,6 +212,10 @@ export function App() {
         <Route path="/admin/residencia/controles" element={<ResidenciaGate title="Controles"><ControlesPage /></ResidenciaGate>} />
         <Route path="/admin/residencia/plantillas" element={<ResidenciaGate title="Plantillas por nivel"><PlantillasPage /></ResidenciaGate>} />
         <Route path="/admin/residencia/residentes/:clientId/plan" element={<ResidenciaGate title="Plan de cuidados"><PlanResidentePage /></ResidenciaGate>} />
+        {/* residencia-3 · lo registrado por turno. Debajo de la ficha por
+            lo mismo que el plan: no es una sección, es la continuación de
+            una ficha. */}
+        <Route path="/admin/residencia/residentes/:clientId/registros" element={<ResidenciaGate title="Lo registrado"><RegistroResidentePage /></ResidenciaGate>} />
         <Route path="/admin/tag-aliases" element={<CajaGate title="Etiquetas"><TagAliasesPage /></CajaGate>} />
         <Route path="/admin/tag-sections" element={<CajaGate title="Comanderas"><TagSectionsPage /></CajaGate>} />
         <Route path="/admin/printers" element={<CajaGate title="Impresoras"><PrintersPage /></CajaGate>} />

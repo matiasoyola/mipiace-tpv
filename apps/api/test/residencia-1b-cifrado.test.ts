@@ -57,7 +57,9 @@ import {
   sitioNotaDeCita,
   sitioNotaDeFicha,
   sitioNotaTecnica,
+  sitioNotaDeRegistro,
   sitioNssDeResidente,
+  sitioValorDeRegistro,
   sitioZonaDeFoto,
 } from "../src/clinica/cripto-campos.js";
 
@@ -74,8 +76,9 @@ const SRC = new URL("../src/", import.meta.url).pathname;
 // ── 1 · EL INVENTARIO, FIJADO ────────────────────────────────────────
 
 describe("el AAD de cada columna cifrada está fijado", () => {
-  // Las nueve de clinica-7 y las SEIS de residencia-1b, con el nombre de
-  // tabla y el nombre LÓGICO de columna que va dentro del ciphertext.
+  // Las nueve de clinica-7, las SEIS de residencia-1b y las DOS del
+  // registro de cuidados (residencia-3), con el nombre de tabla y el
+  // nombre LÓGICO de columna que va dentro del ciphertext.
   //
   // El nombre lógico es el de la columna EN CLARO (`dni`, no
   // `dni_cifrado`): lo que el AAD identifica es el dato, y el dato es el
@@ -97,6 +100,11 @@ describe("el AAD de cada columna cifrada está fijado", () => {
     ["motivo de la línea", sitioMotivoDeLinea, "care_plan_items", "reason"],
     ["motivo del cierre", sitioMotivoDeCierreDeLinea, "care_plan_items", "close_reason"],
     ["motivo de la ocupación", sitioMotivoDeOcupacion, "bed_assignments", "reason"],
+    // residencia-3 · el registro de cuidados. **Dos columnas lógicas y no
+    // una**: con el mismo nombre, el texto de la nota de «algo no va
+    // bien» se podría copiar a la columna del valor y descifraría.
+    ["valor del registro", sitioValorDeRegistro, "care_records", "value"],
+    ["nota del registro", sitioNotaDeRegistro, "care_records", "note"],
   ];
 
   it.each(SITIOS)("%s → tenant|%s|%s|fila", (_, sitioDe, tabla, columna) => {
@@ -105,7 +113,7 @@ describe("el AAD de cada columna cifrada está fijado", () => {
     );
   });
 
-  it("son quince, y no se añade una columna cifrada sin su sitio", () => {
+  it("son DIECISIETE, y no se añade una columna cifrada sin su sitio", () => {
     // El CHECK de formato (`~ '^c[0-9]+:…'`) es la marca de una columna
     // cifrada con una DEK: se cuentan los de TODAS las migraciones y se
     // comparan con los sitios de este inventario.

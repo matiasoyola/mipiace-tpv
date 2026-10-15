@@ -1,0 +1,39 @@
+-- residencia-3 · LOS TIPOS. Y va SOLA, como la primera de residencia-1.
+--
+-- Un solo `ALTER TYPE … ADD VALUE`, y por eso esta migración existe:
+-- **Postgres prohíbe USAR un valor de enum en la misma transacción en la
+-- que se añade**, y Prisma corre cada migración en una. `IMAGE` hace falta
+-- escrito dentro del CHECK `client_consents_imagen_no_es_clinica` de la
+-- siguiente.
+--
+-- Es la factura que clinica-1, -2, -3 y residencia-1 pagaron ya; aquí está
+-- pagada de entrada y un test lo fija. Y conviene recordar la otra mitad,
+-- porque la regla se recuerda mal: los tipos NUEVOS sí se pueden crear y
+-- usar en la misma migración (residencia-2 lo hizo con seis). Lo que no se
+-- puede es `ADD VALUE`.
+--
+-- ── `ClientConsentKind.IMAGE` (D-64) ────────────────────────────────
+--
+-- El consentimiento de imagen del residente: sin él, la puerta pinta las
+-- iniciales y no la foto. Es un `ClientConsentKind` y no una columna en
+-- `resident_profiles` porque lo que hay que guardar es exactamente lo que
+-- `client_consents` ya guarda —quién lo dio, cuándo, quién lo anotó— y
+-- sobre todo porque **se puede revocar** con su fila, su motivo y su
+-- fecha. Una familia que llama para decir «quiten la foto de mi madre» no
+-- se resuelve con un booleano que se pone a `false` y no deja rastro.
+--
+-- ── El `down` ───────────────────────────────────────────────────────
+--
+-- **No existe del todo**, y es la misma verdad que `DeviceKind.ROOM` en
+-- residencia-1: en Postgres un valor de enum no se quita. El `down` de
+-- verdad es borrar los consentimientos de imagen y rehacer el tipo:
+--
+--   DELETE FROM "client_consents" WHERE "kind" = 'IMAGE';
+--   -- y después: crear un tipo nuevo sin IMAGE, pasar la columna y
+--   -- renombrar. No se hace a la ligera con filas dentro.
+--
+-- Aditiva: no toca ninguna tabla, así que no hay scan ni bloqueo, y
+-- ningún tenant de hoy cambia de comportamiento — nadie escribe `IMAGE`
+-- hasta que una pantalla lo mande.
+
+ALTER TYPE "ClientConsentKind" ADD VALUE 'IMAGE';
