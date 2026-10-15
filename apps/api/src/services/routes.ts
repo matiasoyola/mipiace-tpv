@@ -58,6 +58,7 @@ import {
   DEFAULT_CHANNELS,
   DURATION_MAX,
   DURATION_MIN,
+  SCHEDULING_DEFAULTS,
   toChannels,
 } from "./scheduling-rules.js";
 
@@ -371,13 +372,19 @@ export async function registerServicesRoutes(
       };
       // Coherencia: si el servicio no es reservable online, el canal
       // online no puede estar activo (contrato para B4/B6).
-      const onlineBookable = body.onlineBookable ?? false;
+      // catalogo-servicios-csv · los defaults salen de
+      // `SCHEDULING_DEFAULTS` y no de literales escritos aquí. Son los
+      // MISMOS con los que nace una fila cargada del fichero de alta: dos
+      // juegos de valores por defecto acabarían discrepando, y entonces un
+      // servicio configurado por el panel y otro cargado del fichero no
+      // ocuparían lo mismo en la agenda.
+      const onlineBookable = body.onlineBookable ?? SCHEDULING_DEFAULTS.onlineBookable;
       if (!onlineBookable) channels.online = false;
 
       const family = body.family?.trim() || null;
-      const bufferBeforeMin = body.bufferBeforeMin ?? 0;
-      const bufferAfterMin = body.bufferAfterMin ?? 0;
-      const staffRequired = body.staffRequired ?? 1;
+      const bufferBeforeMin = body.bufferBeforeMin ?? SCHEDULING_DEFAULTS.bufferBeforeMin;
+      const bufferAfterMin = body.bufferAfterMin ?? SCHEDULING_DEFAULTS.bufferAfterMin;
+      const staffRequired = body.staffRequired ?? SCHEDULING_DEFAULTS.staffRequired;
       // clinica-2 · ausente = false. Un PUT que no lo mande DESMARCA el
       // servicio, igual que hace con `onlineBookable` y con los canales:
       // esta ruta es un upsert del juego completo, no un parche. El panel

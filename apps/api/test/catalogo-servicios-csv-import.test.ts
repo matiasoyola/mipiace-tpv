@@ -75,6 +75,116 @@ let tenant: {
 // Para el sabotaje de «todo o nada» en la SEGUNDA escritura: el producto
 // entra y la fila de agenda revienta.
 let agendaRevienta = false;
+// Y el otro lado del mismo «todo o nada»: la auditoría, que se escribe
+// DESPUÉS de las dos tablas. Es el sabotaje que distingue «dentro de la
+// transacción» de «con el mismo cliente, pero fuera».
+let auditRevienta = false;
+
+interface Pendiente {
+  productos: FakeProduct[];
+  agendas: FakeScheduling[];
+  audits: Array<{ action: string; tenantId: string | null; metadata: any }>;
+}
+
+function nuevoProducto(d: any): FakeProduct {
+  return {
+    id: randomUUID(),
+    tenantId: d.tenantId,
+    sku: d.sku,
+    name: d.name,
+    basePrice: Number(d.basePrice),
+    taxRate: Number(d.taxRate),
+    exemptionCause: d.exemptionCause ?? null,
+    kind: d.kind,
+    source: d.source,
+    tags: d.tags ?? [],
+  };
+}
+
+function nuevaAgenda(d: any): FakeScheduling {
+  return {
+    productId: d.productId,
+    tenantId: d.tenantId,
+    durationMin: d.durationMin,
+    bufferBeforeMin: d.bufferBeforeMin,
+    bufferAfterMin: d.bufferAfterMin,
+    staffRequired: d.staffRequired,
+    onlineBookable: d.onlineBookable,
+    family: d.family ?? null,
+    channels: d.channels,
+  };
+}
+
+function filtraProductos(
+  todos: FakeProduct[],
+  where: any,
+): FakeProduct[] {
+  return todos.filter(
+    (p) =>
+      p.tenantId === where.tenantId &&
+      (where.sku?.in ? where.sku.in.includes(p.sku) : true) &&
+      (where.source ? p.source === where.source : true),
+  );
+}
+
+// ── EL `tx` ES OTRO OBJETO QUE EL CLIENTE DE FUERA ───────────────────
+//
+// Y es la pieza que hace que el sabotaje importante de este bloque se
+// pueda ver en rojo. Un fake que devuelva el MISMO cliente dentro de
+// `$transaction` no puede distinguir `tx.serviceScheduling.createMany` de
+// `prisma.serviceScheduling.createMany`: las dos escriben en el mismo
+// mapa y las dos se deshacen con el mismo `snapshot`. Así que escribir la
+// fila de agenda FUERA de la transacción pasaría en verde, que es
+// exactamente el fallo que no puede pasar —un servicio sin duración en un
+// comercio en DRAFT, donde no hay OWNER que pueda ponérsela—.
+//
+// Aquí el `tx` acumula en una zona aparte y sólo se aplica si el callback
+// termina. Lo que se escriba con el cliente de fuera entra directo y
+// SOBREVIVE a la vuelta atrás, igual que en Postgres.
+function abrirTx(): { tx: any; aplicar: () => void } {
+  const pendiente: Pendiente = { productos: [], agendas: [], audits: [] };
+  const tx = {
+    product: {
+      // Ve lo que esta misma transacción acaba de crear, que es lo que
+      // hace un `findMany` de verdad dentro de una transacción — y es de
+      // donde la ruta saca los ids para las filas de agenda.
+      findMany: async ({ where }: any) =>
+        filtraProductos([...productos.values(), ...pendiente.productos], where),
+      count: async ({ where }: any) =>
+        filtraProductos([...productos.values(), ...pendiente.productos], where).length,
+      createMany: async ({ data }: any) => {
+        for (const d of data) pendiente.productos.push(nuevoProducto(d));
+        return { count: data.length };
+      },
+    },
+    serviceScheduling: {
+      createMany: async ({ data }: any) => {
+        if (agendaRevienta) throw new Error("boom en la fila de agenda");
+        for (const d of data) pendiente.agendas.push(nuevaAgenda(d));
+        return { count: data.length };
+      },
+    },
+    superAdminAudit: {
+      create: async ({ data }: any) => {
+        if (auditRevienta) throw new Error("la tabla de auditoría no contesta");
+        pendiente.audits.push({
+          action: data.action,
+          tenantId: data.tenantId,
+          metadata: data.metadata,
+        });
+        return data;
+      },
+    },
+  };
+  return {
+    tx,
+    aplicar: () => {
+      for (const p of pendiente.productos) productos.set(p.id, p);
+      for (const a of pendiente.agendas) agendas.set(a.productId, a);
+      audits.push(...pendiente.audits);
+    },
+  };
+}
 
 const fakePrisma: any = {
   tenant: {
@@ -92,82 +202,46 @@ const fakePrisma: any = {
   },
   product: {
     findMany: vi.fn(async ({ where }: any) =>
-      [...productos.values()].filter(
-        (p) =>
-          p.tenantId === where.tenantId &&
-          (where.sku?.in ? where.sku.in.includes(p.sku) : true) &&
-          (where.source ? p.source === where.source : true),
-      ),
+      filtraProductos([...productos.values()], where),
     ),
     count: vi.fn(async ({ where }: any) =>
-      [...productos.values()].filter(
-        (p) =>
-          p.tenantId === where.tenantId &&
-          (where.source ? p.source === where.source : true),
-      ).length,
+      filtraProductos([...productos.values()], where).length,
     ),
     createMany: vi.fn(async ({ data }: any) => {
       for (const d of data) {
-        const id = randomUUID();
-        productos.set(id, {
-          id,
-          tenantId: d.tenantId,
-          sku: d.sku,
-          name: d.name,
-          basePrice: Number(d.basePrice),
-          taxRate: Number(d.taxRate),
-          exemptionCause: d.exemptionCause ?? null,
-          kind: d.kind,
-          source: d.source,
-          tags: d.tags ?? [],
-        });
+        const p = nuevoProducto(d);
+        productos.set(p.id, p);
       }
       return { count: data.length };
     }),
   },
   serviceScheduling: {
+    // Escribe DIRECTO, sin pasar por el `pendiente`: lo que se escriba con
+    // este cliente sobrevive a la vuelta atrás de la transacción.
     createMany: vi.fn(async ({ data }: any) => {
       if (agendaRevienta) throw new Error("boom en la fila de agenda");
       for (const d of data) {
-        agendas.set(d.productId, {
-          productId: d.productId,
-          tenantId: d.tenantId,
-          durationMin: d.durationMin,
-          bufferBeforeMin: d.bufferBeforeMin,
-          bufferAfterMin: d.bufferAfterMin,
-          staffRequired: d.staffRequired,
-          onlineBookable: d.onlineBookable,
-          family: d.family ?? null,
-          channels: d.channels,
-        });
+        const a = nuevaAgenda(d);
+        agendas.set(a.productId, a);
       }
       return { count: data.length };
     }),
   },
   superAdminAudit: {
     create: vi.fn(async ({ data }: any) => {
+      if (auditRevienta) throw new Error("la tabla de auditoría no contesta");
       audits.push({ action: data.action, tenantId: data.tenantId, metadata: data.metadata });
       return data;
     }),
   },
-  // La transacción de verdad revierte, y la falsa tiene que revertir LAS
-  // DOS tablas: si sólo restaurara los productos, el test de «no puede
-  // quedar un producto sin su duración» pasaría sin probar nada.
   $transaction: vi.fn(async (fn: any) => {
-    const snapProductos = new Map(productos);
-    const snapAgendas = new Map(agendas);
-    const snapAudits = [...audits];
-    try {
-      return await fn(fakePrisma);
-    } catch (err) {
-      productos.clear();
-      for (const [k, v] of snapProductos) productos.set(k, v);
-      agendas.clear();
-      for (const [k, v] of snapAgendas) agendas.set(k, v);
-      audits.length = 0;
-      audits.push(...snapAudits);
-      throw err;
-    }
+    const { tx, aplicar } = abrirTx();
+    // Si el callback lanza, `aplicar` no se llama: nada de lo que el `tx`
+    // acumuló llega a los mapas. No hay snapshot que restaurar porque no
+    // se ha escrito nada todavía.
+    const r = await fn(tx);
+    aplicar();
+    return r;
   }),
 };
 
@@ -220,6 +294,7 @@ beforeEach(async () => {
   agendas.clear();
   audits.length = 0;
   agendaRevienta = false;
+  auditRevienta = false;
   tenant = {
     id: TENANT_ID,
     name: "Clínica de podología de Rosario",
@@ -276,12 +351,31 @@ describe("catalogo-servicios-csv · el catálogo de Rosario, cargado", () => {
     await post({ csv: CSV_ROSARIO, confirmar: true });
     const q = [...productos.values()].find((p) => p.sku === "POD-002")!;
     const a = agendas.get(q.id)!;
-    expect(a.bufferBeforeMin).toBe(SCHEDULING_DEFAULTS.bufferBeforeMin);
-    expect(a.bufferAfterMin).toBe(SCHEDULING_DEFAULTS.bufferAfterMin);
-    expect(a.staffRequired).toBe(SCHEDULING_DEFAULTS.staffRequired);
-    expect(a.onlineBookable).toBe(SCHEDULING_DEFAULTS.onlineBookable);
-    // Y `online` apagado: la coherencia que el PUT aplica a mano.
+    // Los números LITERALES, no `SCHEDULING_DEFAULTS`: comparar la
+    // constante contra sí misma pasaría en verde con cualquier valor, y
+    // entonces cambiar los defaults no se vería en ningún rojo. Lo que
+    // ata estos cuatro al panel es el test de abajo.
+    expect(a.bufferBeforeMin).toBe(0);
+    expect(a.bufferAfterMin).toBe(0);
+    expect(a.staffRequired).toBe(1);
+    expect(a.onlineBookable).toBe(false);
+    // Y `online` apagado: un servicio que no es reservable online no
+    // puede tener el canal online encendido (contrato para B4/B6).
     expect(a.channels).toMatchObject({ caja: true, ticket: true, agenda: true, online: false });
+  });
+
+  it("y son LOS MISMOS que el PUT del panel aplica cuando no se los mandan", async () => {
+    // La decisión 3 del bloque: la misma regla en las dos puertas. El PUT
+    // de `services/routes.ts` ya no lleva sus propios literales —usa esta
+    // misma constante—, así que si alguien los cambia, cambian a la vez en
+    // el panel y en el fichero, y este test lo dice.
+    expect(SCHEDULING_DEFAULTS).toEqual({
+      bufferBeforeMin: 0,
+      bufferAfterMin: 0,
+      staffRequired: 1,
+      onlineBookable: false,
+      channels: { caja: true, ticket: true, agenda: true, online: false },
+    });
   });
 
   it("la auditoría dice cuántos servicios, no cuáles", async () => {
@@ -312,8 +406,27 @@ describe("catalogo-servicios-csv · todo o nada, con DOS escrituras", () => {
   it("la agenda se escribe DENTRO de la misma transacción que el producto", async () => {
     await post({ csv: CSV_ROSARIO, confirmar: true });
     expect(fakePrisma.$transaction).toHaveBeenCalledTimes(1);
-    expect(fakePrisma.product.createMany).toHaveBeenCalledTimes(1);
-    expect(fakePrisma.serviceScheduling.createMany).toHaveBeenCalledTimes(1);
+    // Con el cliente de FUERA no se ha escrito nada: las dos escrituras
+    // han ido por el `tx`. Si alguna hubiera usado `prisma` en vez de
+    // `tx`, este espía la habría visto.
+    expect(fakePrisma.product.createMany).not.toHaveBeenCalled();
+    expect(fakePrisma.serviceScheduling.createMany).not.toHaveBeenCalled();
+    expect(productos.size).toBe(17);
+    expect(agendas.size).toBe(17);
+  });
+
+  it("si la AUDITORÍA falla, tampoco queda la fila de agenda", async () => {
+    // El otro lado del «todo o nada», y el que distingue «dentro de la
+    // transacción» de «con el mismo cliente, pero fuera»: la auditoría se
+    // escribe DESPUÉS de las dos tablas, así que si la fila de agenda se
+    // hubiera escrito fuera de la transacción, sobreviviría a esta vuelta
+    // atrás y quedarían 17 duraciones sin su producto.
+    auditRevienta = true;
+    const r = await post({ csv: CSV_ROSARIO, confirmar: true });
+    expect(r.statusCode).toBe(500);
+    expect(productos.size).toBe(0);
+    expect(agendas.size).toBe(0);
+    expect(audits).toEqual([]);
   });
 
   it("la vista previa no escribe ninguna de las dos tablas", async () => {
@@ -463,7 +576,7 @@ describe("catalogo-servicios-csv · las promesas de siempre siguen", () => {
       confirmar: true,
     });
     expect(productos.size).toBe(2);
-    expect(fakePrisma.serviceScheduling.createMany).not.toHaveBeenCalled();
+    expect(agendas.size).toBe(0);
     expect(audits[0]!.metadata.serviciosCreados).toBe(0);
   });
 

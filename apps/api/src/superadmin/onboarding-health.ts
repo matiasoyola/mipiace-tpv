@@ -256,7 +256,39 @@ export async function computeOnboardingHealth(
   }
 
   const taxesPct = pct(taxesWithRate, taxes);
-  const sellablePct = pct(productsSellable, productsTotal);
+
+  // ── catalogo-servicios-csv · EL CATÁLOGO DE UNA CLÍNICA SON SERVICIOS ─
+  //
+  // Lo encontró el e2e de este bloque al recorrer el alta de la clínica de
+  // Rosario, y es el mismo tipo de bloqueo que catalogo-en-alta encontró
+  // en el §0 del checklist de La Maestranza: con los 17 servicios ya
+  // cargados, `POST .../activate` seguía contestando
+  //
+  //     400 {"error":"ONBOARDING_NOT_READY",
+  //          "failing":["≥50% de productos sellable"]}
+  //
+  // porque este check contaba SÓLO `kind = PRODUCT`. Una clínica cuyo
+  // catálogo entero son servicios tiene `productsTotal = 0`, y con cero el
+  // check está en rojo por definición: **no se podía activar nunca**, con
+  // el catálogo dentro y el TPV enseñando las 17 fichas. Y en DRAFT no hay
+  // OWNER, así que tampoco había forma de añadirle un producto a mano.
+  //
+  // Lo que mide este check es «¿hay catálogo que el TPV pueda vender?», y
+  // un `SERVICE` con `sellableViaTpv` SÍ se vende desde la rejilla
+  // (`tpv-catalog/routes.ts` no filtra por `kind`; el e2e del bloque cobra
+  // una quiropodia de 25 € por ahí). Así que cuando no hay ni un producto,
+  // se mide el catálogo de servicios.
+  //
+  // El fallback y no la suma, a propósito: así **ningún tenant que hoy
+  // pasa este check puede empezar a fallarlo**. Con al menos un
+  // `kind = PRODUCT` la cuenta es exactamente la de siempre; sin ninguno,
+  // hoy está en rojo seguro, así que sólo puede mejorar. Un total sumado
+  // cambiaría el porcentaje de los quince tenants de hoy —los de agenda
+  // tienen productos Y servicios— y podría poner en rojo a alguien que
+  // está en verde, que es lo último que puede hacer un check de salud.
+  const catalogoTotal = productsTotal > 0 ? productsTotal : servicesTotal;
+  const catalogoSellable = productsTotal > 0 ? productsSellable : servicesSellable;
+  const sellablePct = pct(catalogoSellable, catalogoTotal);
   const lastRunAt =
     tenant.initialSyncCompletedAt ?? tenant.initialSyncStartedAt ?? null;
 
@@ -365,10 +397,10 @@ export async function computeOnboardingHealth(
       id: "products-sellable",
       label: `≥${PRODUCTS_SELLABLE_THRESHOLD_PCT}% de productos sellable`,
       ok:
-        productsTotal === 0
+        catalogoTotal === 0
           ? false
           : sellablePct >= PRODUCTS_SELLABLE_THRESHOLD_PCT,
-      value: `${productsSellable}/${productsTotal} (${sellablePct}%)`,
+      value: `${catalogoSellable}/${catalogoTotal} (${sellablePct}%)`,
       requires: "caja",
     },
     {
