@@ -36,6 +36,22 @@
 //
 // Las filas son rápidas y los ficheros son lentos. Si algo va a fallar, que
 // falle en los dos primeros minutos y no en el minuto cuarenta.
+//
+// ── residencia-1b · Y LAS SEIS DE LA RESIDENCIA (D-63) ──────────────
+//
+// El DNI, el NSS y el motivo de alta de la ficha del residente; los dos
+// motivos de cada línea del plan de cuidados; y el motivo de cada cambio
+// de habitación.
+//
+// Van en el mismo recorrido por tenant que las nueve clínicas y no en un
+// script aparte: un centro de residencia tiene la clínica encendida por
+// obligación (`tenants_residencia_exige_clinica`), así que ya está en la
+// lista — y su DEK es la misma. Un script aparte habría sido una segunda
+// pasada que alguien se olvida.
+//
+// En los tenants que no son residencias las tres tablas están vacías y las
+// funciones no hacen nada: no hace falta preguntar si la residencia está
+// encendida.
 
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -66,44 +82,23 @@ import {
   sitioNotaTecnica,
   sitioZonaDeFoto,
 } from "../clinica/cripto-campos.js";
-
-/** Cuántas filas por tanda. Pequeño a propósito: cada tanda es una
- *  transacción corta, así que el script no se pelea con la aplicación por
- *  los bloqueos mientras una clínica está abierta. */
-const TANDA = 200;
+// residencia-1b (D-63) · los tres pasos de la residencia, en su propio
+// fichero porque el e2e los importa y este llama a `main()` al cargarse.
+import {
+  fichasDeResidentes,
+  lineasDelPlan,
+  ocupacionesDeCama,
+} from "./residencia-cifrar.js";
+// Y lo que los dos comparten: la tanda, la cuenta y el `verificar`.
+import {
+  NoCuadra,
+  TANDA,
+  cuenta,
+  verificar,
+  type Cuenta,
+} from "./cifrado-comun.js";
 
 const vaciar = process.argv.includes("--vaciar");
-
-interface Cuenta {
-  cifradas: number;
-  yaEstaban: number;
-  vaciadas: number;
-}
-
-function cuenta(): Cuenta {
-  return { cifradas: 0, yaEstaban: 0, vaciadas: 0 };
-}
-
-class NoCuadra extends Error {}
-
-/** Descifra lo que se acaba de cifrar y lo compara. El corazón del
- *  «verifica»: sin esto, el script podría estar escribiendo ciphertext que
- *  nadie puede abrir y no se sabría hasta que una podóloga abriera una
- *  historia. */
-function verificar(
-  cifrado: string,
-  original: string,
-  dek: Buffer,
-  sitio: Parameters<typeof descifrarValor>[2],
-  que: string,
-): void {
-  const vuelta = descifrarValor(cifrado, dek, sitio);
-  if (vuelta !== original) {
-    throw new NoCuadra(
-      `${que}: lo cifrado no vuelve igual. NO se sigue. (${sitio.tabla}.${sitio.columna} / ${sitio.filaId})`,
-    );
-  }
-}
 
 async function main(): Promise<void> {
   const prisma = getPrisma();
@@ -161,6 +156,13 @@ async function main(): Promise<void> {
       await notasDeFichas(tenantId, dek, total);
       await notasTecnicas(tenantId, dek, total);
     }
+    // residencia-1b (D-63) · las tres tablas de la residencia. Sin
+    // condición: en un tenant que no sea residencia están vacías, y un
+    // centro de residencia tiene la clínica encendida por obligación, así
+    // que ya está en esta lista con su DEK.
+    await fichasDeResidentes(tenantId, dek, total, vaciar);
+    await lineasDelPlan(tenantId, dek, total, vaciar);
+    await ocupacionesDeCama(tenantId, dek, total, vaciar);
     await ficherosDelTenant(tenantId, dek, total);
   }
 
