@@ -304,9 +304,24 @@ describe.skipIf(!e2eEnabled)("e2e · clinica-7 · el blindaje", () => {
       expect(msg).toContain("body_cifrado_formato");
     });
 
-    it("las nueve columnas tienen su CHECK de formato", async () => {
+    it("las quince columnas cifradas tienen su CHECK de formato", async () => {
       // Que no falte ninguna. Una columna cifrada sin CHECK es una columna
       // donde el texto en claro cabe.
+      //
+      // ── residencia-1b (D-63) · eran NUEVE y son QUINCE ────────────
+      //
+      // Las seis nuevas son de la residencia, y están aquí a propósito en
+      // vez de en una lista aparte: esta aserción es EL INVENTARIO de lo
+      // que el motor sostiene cifrado en toda la casa. Partirla en dos
+      // habría sido dos listas que pueden dejar de cubrirse, y lo que hace
+      // falta saber es «¿falta alguna?», no «¿falta alguna de la clínica?».
+      //
+      // El mismo inventario, por el otro lado, lo fija
+      // `test/residencia-1b-cifrado.test.ts`: allí se cuentan los CHECK
+      // sobre el SQL de las migraciones y se comparan con los `sitio*` de
+      // `cripto-campos.ts`. Entre los dos queda cubierto que la columna
+      // tiene CHECK, que el CHECK está en el esquema de verdad y que
+      // alguien sabe qué AAD le toca.
       const filas = await prisma.$queryRawUnsafe<Array<{ conname: string }>>(
         `SELECT conname FROM pg_constraint
          WHERE contype = 'c' AND conname LIKE '%cifrad%formato'
@@ -324,6 +339,13 @@ describe.skipIf(!e2eEnabled)("e2e · clinica-7 · el blindaje", () => {
           "clinical_entries_body_cifrado_formato",
           "clinical_photos_withdraw_reason_cifrado_formato",
           "clinical_photos_zona_cifrada_formato",
+          // residencia-1b
+          "bed_assignments_reason_cifrado_formato",
+          "care_plan_items_close_reason_cifrado_formato",
+          "care_plan_items_reason_cifrado_formato",
+          "resident_profiles_discharge_reason_cifrado_formato",
+          "resident_profiles_dni_cifrado_formato",
+          "resident_profiles_nss_cifrado_formato",
         ].sort(),
       );
     });

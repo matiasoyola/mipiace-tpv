@@ -322,12 +322,19 @@ const fakePrisma: any = {
     create: vi.fn(async ({ data }: any) => {
       // `toAt: null` y no `undefined`: Prisma devuelve NULL, y una ruta
       // que compara `!== null` tomaría `undefined` por «cerrada».
-      const fila = { toAt: null, ...data, id: randomUUID() };
+      //
+      // residencia-1b · y el `id` de `data` MANDA. Lo genera
+      // `nuevoIdDeFila()` en la ruta porque el AAD lo necesita antes de
+      // que la fila exista; un doble que lo inventara dejaría un
+      // ciphertext que no se descifra con el sitio de la fila donde acabó.
+      const fila = { toAt: null, ...data, id: data.id ?? randomUUID() };
       lineasDePlan.push(fila);
       return fila;
     }),
     createMany: vi.fn(async ({ data }: any) => {
-      for (const d of data) lineasDePlan.push({ toAt: null, ...d, id: randomUUID() });
+      for (const d of data) {
+        lineasDePlan.push({ toAt: null, ...d, id: d.id ?? randomUUID() });
+      }
       return { count: data.length };
     }),
     update: vi.fn(async ({ where, data }: any) => {
@@ -424,7 +431,25 @@ const { signAccessToken } = await import("../src/auth/tokens.js");
 // 60 s, o sea MÁS que este fichero entero: sin vaciarlas en el
 // `beforeEach`, el primer test decide el estado del contrato de todos los
 // demás.
-const { olvidarClaves } = await import("../src/clinica/claves.js");
+const { dekDe, olvidarClaves } = await import("../src/clinica/claves.js");
+// residencia-1b · los dos motivos de una línea del plan van cifrados, así
+// que los tests que afirman sobre ellos DESCIFRAN. Es mejor que lo que
+// había: lo que se afirma pasa a ser lo que de verdad se guardó.
+const { descifrarValor } = await import("../src/clinica/cripto.js");
+const { sitioMotivoDeCierreDeLinea } = await import(
+  "../src/clinica/cripto-campos.js"
+);
+
+/** El motivo del cierre de una línea, descifrado con el sitio de SU fila. */
+async function motivoDeCierreDe(linea: any): Promise<string | null> {
+  if (linea.closeReasonCifrado == null) return linea.closeReason ?? null;
+  const dek = await dekDe(TENANT, fakePrisma as never);
+  return descifrarValor(
+    linea.closeReasonCifrado,
+    dek,
+    sitioMotivoDeCierreDeLinea(TENANT, linea.id),
+  );
+}
 const { olvidarEstado } = await import("../src/clinica/contrato.js");
 
 function tokenDe(userId: string, role: string) {
@@ -1180,7 +1205,10 @@ describe("el plan de un residente", () => {
     expect(lineasDePlan).toHaveLength(2);
     const cerrada = lineasDePlan.find((l) => l.toAt);
     expect(cerrada.shiftCodes).toEqual(["M"]);
-    expect(cerrada.closeReason).toBe("lo pide la DUE");
+    // El motivo NO está en claro en la fila: está cifrado, y se lee
+    // descifrándolo con el sitio de esa fila.
+    expect(cerrada.closeReason).toBeNull();
+    expect(await motivoDeCierreDe(cerrada)).toBe("lo pide la DUE");
     expect(lineasDePlan.filter((l) => !l.toAt)).toHaveLength(1);
   });
 
