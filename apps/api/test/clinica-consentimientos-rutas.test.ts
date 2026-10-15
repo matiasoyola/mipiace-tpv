@@ -199,12 +199,28 @@ describe("clinica-4 · la huella SHA-256 del PDF cuadra con el fichero", () => {
     await firmar(app);
     const fila = mundo.consents[0]!;
     const ruta = join(DIRECTORIO, "consentimientos", fila.pdfFileName!);
-    const bytes = readFileSync(ruta);
-    expect(createHash("sha256").update(bytes).digest("hex")).toBe(
+    const enDisco = readFileSync(ruta);
+
+    // clinica-7 · EL DISCO NO LLEVA EL PDF: lleva el sobre cifrado.
+    expect(enDisco.subarray(0, 4).toString("latin1")).toBe("MPC1");
+    expect(enDisco.subarray(0, 5).toString("latin1")).not.toBe("%PDF-");
+    expect(createHash("sha256").update(enDisco).digest("hex")).not.toBe(
       fila.pdfSha256,
     );
-    // Y es un PDF de verdad, no un fichero con otro nombre.
-    expect(bytes.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+
+    // La huella de la fila es la del PDF EN CLARO, y se comprueba después
+    // de descifrar (decisión 8). Lo que sirve la ruta sí es un PDF.
+    const res = await app.inject({
+      method: "GET",
+      url: `/clinica/clients/${PACIENTE_ID}/consentimientos/${fila.id}/pdf`,
+      headers: comoSanitaria,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["x-huella-cuadra"]).toBe("si");
+    expect(res.rawPayload.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+    expect(createHash("sha256").update(res.rawPayload).digest("hex")).toBe(
+      fila.pdfSha256,
+    );
     await app.close();
   });
 
@@ -220,21 +236,69 @@ describe("clinica-4 · la huella SHA-256 del PDF cuadra con el fichero", () => {
     await app.close();
   });
 
-  it("y si el PDF del disco NO cuadra, la cabecera lo DICE", async () => {
-    // Este test existe por un sabotaje que salió VERDE: con
-    // `huellaCuadra: true` fijo, todo seguía en verde porque ningún caso
-    // ejercitaba el camino en que NO cuadra. La comprobación habría sido
-    // código muerto y nadie se habría enterado.
+  it("tocar el fichero del volumen lo deja ILEGIBLE, y la ruta lo dice", async () => {
+    // clinica-7 · este caso CAMBIÓ, y el cambio es la mejora. Antes el
+    // JPEG/PDF estaba en claro y añadirle un byte rompía la huella: el
+    // documento se servía con `X-Huella-Cuadra: NO`. Ahora el fichero está
+    // cifrado con AES-GCM, así que tocarlo rompe el TAG — y entonces no
+    // hay nada que servir: lo que queda en el disco es un sobre roto, no
+    // un documento con un byte de más.
     //
-    // Y lo que se enseña es el documento CON el aviso, no un 404: un PDF
-    // que no cuadra es justo el que alguien tiene que mirar, y esconderlo
-    // borra la única pista.
+    // 410 y un log a nivel `error`, no un 404 genérico: «el documento que
+    // esta fila promete no se puede abrir» es un incidente que alguien
+    // tiene que atender.
     const app = await buildApp();
     await firmar(app);
     const fila = mundo.consents[0]!;
     const ruta = join(DIRECTORIO, "consentimientos", fila.pdfFileName!);
     // Alguien cambia el fichero en el volumen, por detrás de la API.
     writeFileSync(ruta, Buffer.concat([readFileSync(ruta), Buffer.from("x")]));
+    const res = await app.inject({
+      method: "GET",
+      url: `/clinica/clients/${PACIENTE_ID}/consentimientos/${fila.id}/pdf`,
+      headers: comoSanitaria,
+    });
+    expect(res.statusCode).toBe(410);
+    expect(res.json().code).toBe("CONSENT_FILE_MISSING");
+    await app.close();
+  });
+
+  it("y si el PDF descifra pero NO es el que la fila dice, la cabecera lo DICE", async () => {
+    // Y éste es el camino que la comprobación de la huella sigue
+    // cubriendo, y el ÚNICO que queda: alguien con la clave de la clínica
+    // reescribe el fichero con otro contenido, bien cifrado y con el AAD
+    // bueno. El GCM no lo ve —está bien cifrado— y la huella sí.
+    //
+    // Existe por la lección del sabotaje #16 de clinica-4, que salió
+    // VERDE: sin un caso que ejercite «no cuadra», la comprobación es
+    // código muerto y nadie se entera. Con el cifrado por delante, ese
+    // caso hay que construirlo a mano — y por eso el doble expone la DEK.
+    //
+    // Lo que se enseña es el documento CON el aviso, no un 404: un PDF que
+    // no cuadra es justo el que alguien tiene que mirar.
+    const app = await buildApp();
+    await firmar(app);
+    const fila = mundo.consents[0]!;
+    const ruta = join(DIRECTORIO, "consentimientos", fila.pdfFileName!);
+
+    const { cifrarFichero, sitioDelFichero } = await import(
+      "../src/clinica/cripto.js"
+    );
+    const dek = await mundo.dekDeLaClinica();
+    expect(dek).not.toBeNull();
+    writeFileSync(
+      ruta,
+      cifrarFichero(
+        Buffer.from("%PDF-1.4 otro documento entero"),
+        dek!,
+        sitioDelFichero({
+          tenantId: TENANT_ID,
+          clase: "CONSENTIMIENTO",
+          fileName: fila.pdfFileName!,
+        }),
+      ),
+    );
+
     const res = await app.inject({
       method: "GET",
       url: `/clinica/clients/${PACIENTE_ID}/consentimientos/${fila.id}/pdf`,
@@ -352,7 +416,19 @@ describe("clinica-4 · revocar NO toca la fila original", () => {
     expect(mundo.consents[0]).toEqual(original);
     const revocacion = mundo.consents[1]!;
     expect(revocacion.revokesConsentId).toBe(original.id);
-    expect(revocacion.revokeReason).toBe("Prefiere pensarlo");
+    // clinica-7 · el motivo va CIFRADO. Y lo que la lista devuelve sí es
+    // el texto: la API descifra.
+    expect(revocacion.revokeReason).toBeNull();
+    expect(revocacion.revokeReasonCifrado).toMatch(/^c1:/);
+    const lista = await app.inject({
+      method: "GET",
+      url: `/clinica/clients/${PACIENTE_ID}/consentimientos`,
+      headers: comoSanitaria,
+    });
+    expect(
+      lista.json().firmados.find((f: any) => f.id === original.id)
+        .revocadoMotivo,
+    ).toBe("Prefiere pensarlo");
     // Copia plantilla y versión para que la lista se lea.
     expect(revocacion.templateId).toBe(original.templateId);
     expect(revocacion.templateVersion).toBe(original.templateVersion);
@@ -605,6 +681,7 @@ describe("clinica-4 · la vista de consentimientos", () => {
       informerUserId: null,
       revokesConsentId: null,
       revokeReason: null,
+      revokeReasonCifrado: null,
       createdByUserId: RECEPCION_ID,
     });
     const app = await buildApp();
@@ -693,6 +770,10 @@ describe("clinica-4 · «Documentos» enseña lo que hay de verdad", () => {
       recipient: "PROFESIONAL",
       recipientEmail: "traumatologia@hospital.es",
       pdfSha256: "f".repeat(64),
+      // clinica-7 · una entrega de ANTES del enlace: sin fichero guardado
+      // y sin enlace. El CHECK `..._enlace_completo` admite esa forma.
+      pdfFileName: null,
+      publicLinkId: null,
       userId: SANITARIA_ID,
       at: new Date("2026-10-09T10:00:00.000Z"),
     });
@@ -734,6 +815,7 @@ describe("clinica-4 · «Documentos» enseña lo que hay de verdad", () => {
       informerUserId: null,
       revokesConsentId: null,
       revokeReason: null,
+      revokeReasonCifrado: null,
       createdByUserId: RECEPCION_ID,
     });
     const { vistaDeLaHistoria } = await import("../src/clinica/historia.js");

@@ -55,6 +55,8 @@ vi.mock("../src/queues/ticket-email.js", () => ({
 }));
 
 const { getPrisma, shutdown } = await import("../src/context.js");
+const { dekONada } = await import("../src/clinica/claves.js");
+const { cuerpoDeEntrada } = await import("../src/clinica/cripto-campos.js");
 const { registerAgendaRoutes } = await import("../src/agenda/routes.js");
 const { registerSesionRoutes } = await import(
   "../src/clinica/sesion-routes.js"
@@ -241,6 +243,25 @@ describe.skipIf(!e2eEnabled)("e2e · el cobro de una sesión clínica", () => {
       select: { id: true },
     });
     podologaId = podologa.id;
+
+    // clinica-7 · EL CONTRATO DE ENCARGADO, ACEPTADO.
+    //
+    // Sin él, `conHistoria` contesta 423 a toda escritura clínica y este
+    // fichero entero se va a rojo. Lo encontró la primera pasada del e2e
+    // tras clinica-7, y es la garantía funcionando: una clínica sin
+    // contrato aceptado no escribe historia.
+    //
+    // Va con SQL y no por la ruta porque este fichero no monta las rutas
+    // del contrato: lo que prueba es el cobro de una sesión, y el contrato
+    // es una precondición del mundo, como la agenda o el CRM.
+    await prisma.clinicalProcessorAgreement.create({
+      data: {
+        tenantId,
+        version: 1,
+        textSha256: "a".repeat(64),
+        userId: podologaId,
+      },
+    });
 
     const sanitaria = await prisma.user.create({
       data: {
@@ -462,11 +483,28 @@ describe.skipIf(!e2eEnabled)("e2e · el cobro de una sesión clínica", () => {
     expect(await sesionesDeLaCita()).toBe(1);
 
     // CONTRA LA BD: la firma, con el colegiado congelado.
+    //
+    // clinica-7 · el cuerpo se lee DESCIFRADO. En `body` está el centinela
+    // `{cifrado: true}` y el dato vive en `body_cifrado`, así que leerlo a
+    // pelo afirmaría sobre nada. Y descifrar aquí es MEJOR que lo que
+    // había: lo que se afirma pasa a ser lo que de verdad se guardó.
     const fila = await prisma.clinicalEntry.findFirstOrThrow({
       where: { appointmentId: citaId, kind: "TREATMENT_SESSION" },
-      select: { body: true, authorUserId: true },
+      select: {
+        id: true,
+        tenantId: true,
+        body: true,
+        bodyCifrado: true,
+        authorUserId: true,
+      },
     });
-    const cuerpo = fila.body as Record<string, any>;
+    const cuerpo = cuerpoDeEntrada(
+      { ...fila, body: fila.body as unknown },
+      await dekONada(tenantId, prisma),
+    ) as Record<string, any>;
+    // Y la columna en claro es el centinela: la fila nació cifrada.
+    expect(fila.body).toEqual({ cifrado: true });
+    expect(fila.bodyCifrado).toMatch(/^c1:/);
     expect(fila.authorUserId).toBe(podologaId);
     expect(cuerpo.firma).toMatchObject({
       autorNombre: "Lucía Martín",

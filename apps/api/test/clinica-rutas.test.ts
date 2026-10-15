@@ -24,7 +24,15 @@ process.env.REDIS_URL = "redis://localhost:6379";
 process.env.JWT_ACCESS_SECRET = "a".repeat(40);
 process.env.JWT_REFRESH_SECRET = "b".repeat(40);
 process.env.HOLDED_KEY_ENCRYPTION_SECRET = randomBytes(32).toString("base64");
+// clinica-7 · la KEK de este fichero. Sin ella, `dekONada` revienta y
+// toda ruta clínica contesta 500.
+process.env.CLINICAL_KEK = randomBytes(32).toString("base64");
+process.env.CLINICAL_KEK_ID = "test";
 
+import {
+  contratoFake,
+  llaveroFake,
+} from "./clinica-7-claves-fake.js";
 import Fastify from "fastify";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -85,6 +93,8 @@ interface FakeEntry {
   appointmentId: string | null;
   kind: string;
   body: unknown;
+  /** clinica-7 · donde de verdad va el dato. `body` es el centinela. */
+  bodyCifrado: string | null;
   createdAt: Date;
 }
 const entradas: FakeEntry[] = [];
@@ -94,6 +104,7 @@ const anotaciones: Array<{
   entryId: string;
   authorUserId: string;
   body: unknown;
+  bodyCifrado: string | null;
   createdAt: Date;
 }> = [];
 
@@ -108,7 +119,15 @@ function autorDe(id: string) {
 // de «la línea no se puede escribir» de la tabla del bloque.
 let registroRoto = false;
 
+// clinica-7 · el llavero de la clínica, en memoria.
+const llavero = llaveroFake();
+// Y el contrato de encargado, ACEPTADO: es el estado normal de una clínica
+// que funciona. Sin él, toda escritura clínica contesta 423.
+const contrato = contratoFake(TENANT_ID, DUENA_ID);
+
 const fakePrisma = {
+  clinicalTenantKey: llavero.modelo,
+  clinicalProcessorAgreement: contrato.modelo,
   tenant: {
     findUnique: vi.fn(async () => ({
       clinicalRecordsEnabled: clinicaEncendida,
@@ -230,13 +249,17 @@ const fakePrisma = {
     ),
     create: vi.fn(async ({ data }: any) => {
       const row: FakeEntry = {
-        id: randomUUID(),
+        // clinica-7 · EL ID QUE MANDA LA APLICACIÓN: va dentro del AAD del
+        // cuerpo cifrado, así que inventarse otro aquí dejaría un valor
+        // que no se descifra.
+        id: data.id ?? randomUUID(),
         tenantId: data.tenantId,
         clientId: data.clientId,
         authorUserId: data.authorUserId,
         appointmentId: data.appointmentId ?? null,
         kind: data.kind ?? "NOTE",
         body: data.body,
+        bodyCifrado: data.bodyCifrado ?? null,
         createdAt: new Date(),
       };
       entradas.push(row);
@@ -246,11 +269,12 @@ const fakePrisma = {
   clinicalAddendum: {
     create: vi.fn(async ({ data }: any) => {
       const row = {
-        id: randomUUID(),
+        id: data.id ?? randomUUID(),
         tenantId: data.tenantId,
         entryId: data.entryId,
         authorUserId: data.authorUserId,
         body: data.body,
+        bodyCifrado: data.bodyCifrado ?? null,
         createdAt: new Date(),
       };
       anotaciones.push(row);
@@ -569,7 +593,18 @@ describe("clinica-1 · la anotación tiene autor y no se edita", () => {
       });
       expect(res.statusCode).toBe(404);
     }
-    expect(entradas[0]!.body).toEqual({ texto: "x" });
+    // clinica-7 · el cuerpo EN CLARO es el centinela, y el dato vive
+    // cifrado: una fila que nace cifrada no guarda el dato de salud en
+    // claro «por si acaso».
+    expect(entradas[0]!.body).toEqual({ cifrado: true });
+    expect(entradas[0]!.bodyCifrado).toMatch(/^c1:/);
+    // Y lo que la ruta devuelve sigue siendo lo que se escribió.
+    const leida = await app.inject({
+      method: "GET",
+      url: `/clinica/clients/${PACIENTE_ID}/entries`,
+      headers: comoSanitaria,
+    });
+    expect(leida.json().entries[0].body).toEqual({ texto: "x" });
     await app.close();
   });
 
@@ -592,8 +627,20 @@ describe("clinica-1 · la anotación tiene autor y no se edita", () => {
     expect(res.statusCode).toBe(201);
     expect(anotaciones).toHaveLength(1);
     expect(anotaciones[0]!.authorUserId).toBe(SANITARIA_ID);
-    // Y la entrada original sigue diciendo lo que decía.
-    expect(entradas[0]!.body).toEqual({ texto: "Zona 2" });
+    // La anotación también va cifrada.
+    expect(anotaciones[0]!.body).toEqual({ cifrado: true });
+    expect(anotaciones[0]!.bodyCifrado).toMatch(/^c1:/);
+    // Y la entrada original sigue diciendo lo que decía, leída por la
+    // ruta — que es donde se mira si una historia dice lo que decía.
+    const leida = await app.inject({
+      method: "GET",
+      url: `/clinica/clients/${PACIENTE_ID}/entries`,
+      headers: comoSanitaria,
+    });
+    expect(leida.json().entries[0].body).toEqual({ texto: "Zona 2" });
+    expect(leida.json().entries[0].addenda[0].body).toEqual({
+      texto: "Era la zona 3",
+    });
     await app.close();
   });
 
@@ -621,6 +668,7 @@ describe("clinica-1 · la anotación tiene autor y no se edita", () => {
       authorUserId: SANITARIA_ID,
       appointmentId: null,
       kind: "NOTE",
+      bodyCifrado: null,
       body: { texto: "x" },
       createdAt: new Date(),
     });

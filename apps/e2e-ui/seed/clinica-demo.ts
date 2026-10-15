@@ -18,6 +18,11 @@
 
 import { createHash } from "node:crypto";
 
+import {
+  VERSION_VIGENTE,
+  contratoDe,
+  textoCanonico,
+} from "@mipiacetpv/contrato-encargado";
 import { PrismaClient } from "@mipiacetpv/db";
 import argon2 from "argon2";
 
@@ -347,6 +352,28 @@ export async function sembrarClinica(prisma: PrismaClient): Promise<void> {
           color: "#3c7de8",
         },
       },
+    },
+  });
+
+  // clinica-7 · EL CONTRATO DE ENCARGADO, ACEPTADO.
+  //
+  // Sin esta fila la clínica tiene el módulo encendido y **no puede ni leer
+  // ni escribir nada clínico**: la API contesta 423 y la pantalla enseña la
+  // de aceptación. Es el producto funcionando, no un fallo — pero el banco
+  // no es el capítulo del contrato: empieza en una clínica que ya lo
+  // aceptó, igual que empieza con el horario puesto.
+  //
+  // La huella se calcula sobre el texto canónico del paquete, no se escribe
+  // a mano: una huella inventada aquí sería una aceptación que no
+  // corresponde a ningún texto.
+  await prisma.clinicalProcessorAgreement.create({
+    data: {
+      tenantId: CLINICA.tenant,
+      version: VERSION_VIGENTE,
+      textSha256: createHash("sha256")
+        .update(textoCanonico(contratoDe(VERSION_VIGENTE)!), "utf8")
+        .digest("hex"),
+      userId: PODOLOGA.id,
     },
   });
 

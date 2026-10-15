@@ -14,6 +14,14 @@ export {
   renderConsentimientoPdf,
   type ConsentimientoParaPdf,
 } from "./consentimiento.js";
+// clinica-7 · el contrato de encargado del tratamiento (art. 28 RGPD).
+// Aquí por lo mismo que los dos de clinica-4: el folio A4 y sus
+// primitivas ya están, y el texto vive versionado en su propio paquete.
+export {
+  renderContratoEncargadoPdf,
+  type ApartadoParaPdf,
+  type ContratoEncargadoParaPdf,
+} from "./contrato-encargado.js";
 export {
   renderInformeClinicoPdf,
   type InformeParaPdf,

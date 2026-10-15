@@ -39,6 +39,7 @@ import {
   revocarConsentimiento,
   vistaDeConsentimientos,
 } from "./consentimientos.js";
+import { dekONada } from "./claves.js";
 import { leerFichero, MIME_DE_PDF } from "./ficheros.js";
 import { ensureClinicaEnabled } from "./gate.js";
 import { conHistoria } from "./registro.js";
@@ -359,10 +360,16 @@ export async function registerConsentimientosRoutes(
               message: "Ese consentimiento no tiene documento guardado.",
             });
           }
+          // clinica-7 · el PDF del disco está cifrado con la clave de esta
+          // clínica, y la huella que se comprueba sigue siendo la del PDF
+          // en claro (decisión 8): un documento manipulado se sigue
+          // detectando, y se sigue sirviendo con `X-Huella-Cuadra: NO`,
+          // que es la decisión de clinica-4 y no cambia.
           const leido = await leerFichero(
             "CONSENTIMIENTO",
             fila.pdfFileName,
             fila.pdfSha256,
+            { tenantId: ctx.tenantId, dek: await dekONada(ctx.tenantId) },
           );
           if (!leido) {
             // El fichero no está. Se dice, y no se calla con un 404

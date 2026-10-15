@@ -17,6 +17,18 @@
 //   · `clinical_photos` admite UNA transición: la retirada.
 //   · `clinical_report_deliveries` es de solo inserción.
 
+import {
+  contratoFake,
+  kekDePrueba,
+  llaveroFake,
+} from "../clinica-7-claves-fake.js";
+
+// clinica-7 · la KEK, ANTES de cualquier import que llame a `loadEnv`.
+kekDePrueba();
+
+const { olvidarClaves } = await import("../../src/clinica/claves.js");
+const { olvidarSiEsClinico } = await import("../../src/clinica/notas.js");
+const { olvidarEstado } = await import("../../src/clinica/contrato.js");
 import { randomUUID } from "node:crypto";
 
 export const TENANT_ID = "00000000-0000-0000-0000-000000000001";
@@ -62,6 +74,8 @@ export interface FakeConsent {
   informerUserId: string | null;
   revokesConsentId: string | null;
   revokeReason: string | null;
+  /** clinica-7 */
+  revokeReasonCifrado: string | null;
   createdByUserId: string | null;
 }
 
@@ -71,6 +85,8 @@ export interface FakePhoto {
   clientId: string;
   appointmentId: string | null;
   zona: string;
+  /** clinica-7 */
+  zonaCifrada: string | null;
   mapaVersion: number;
   fileName: string;
   sha256: string;
@@ -81,6 +97,8 @@ export interface FakePhoto {
   withdrawnAt: Date | null;
   withdrawnByUserId: string | null;
   withdrawReason: string | null;
+  /** clinica-7 */
+  withdrawReasonCifrado: string | null;
 }
 
 export interface FakeDelivery {
@@ -92,6 +110,9 @@ export interface FakeDelivery {
   recipient: string;
   recipientEmail: string | null;
   pdfSha256: string;
+  /** clinica-7 · el fichero y el enlace de las entregas POR ENLACE. */
+  pdfFileName: string | null;
+  publicLinkId: string | null;
   userId: string;
   at: Date;
 }
@@ -104,7 +125,27 @@ export interface FakeEntry {
   appointmentId: string | null;
   kind: string;
   body: Record<string, unknown>;
+  /** clinica-7 · lo que de verdad lleva el dato. El `body` de las filas
+   *  nuevas es el centinela `{cifrado:true}`. */
+  bodyCifrado: string | null;
   createdAt: Date;
+}
+
+/** clinica-7 · una fila de `public_links`. */
+export interface FakeEnlace {
+  id: string;
+  tenantId: string;
+  purpose: string;
+  targetType: string;
+  targetId: string;
+  tokenHash: string;
+  codeHash: string | null;
+  codeFailures: number;
+  expiresAt: Date;
+  maxUses: number;
+  usedCount: number;
+  revokedAt: Date | null;
+  createdByUserId: string | null;
 }
 
 export interface FakeLog {
@@ -130,7 +171,19 @@ export interface MundoDeLaClinica {
   /** Los servicios de la cita de prueba. */
   serviciosDeLaCita: string[];
   valoracionValidada: boolean;
+  /** clinica-7 · los enlaces públicos creados (el informe por email). */
+  enlaces: FakeEnlace[];
   prisma: any;
+  /** clinica-7 · el llavero, para que un test pueda leer la DEK de la
+   *  clínica y cifrar algo con ella — es lo que hace falta para ejercitar
+   *  el camino de «el fichero descifra pero su contenido no es el que la
+   *  fila dice». Sin esto, ese camino sería código muerto. */
+  llavero: ReturnType<typeof llaveroFake>;
+  /** clinica-7 · el contrato de encargado. Nace ACEPTADO; `revocar()` lo
+   *  pone en solo lectura y `vaciar()` lo deja sin aceptar nunca. */
+  contrato: ReturnType<typeof contratoFake>;
+  /** La DEK de la clínica de prueba, o `null` si nadie ha escrito nada. */
+  dekDeLaClinica(tenantId?: string): Promise<Buffer | null>;
   reset(): void;
 }
 
@@ -160,9 +213,23 @@ export function crearMundo(): MundoDeLaClinica {
     pideElServicio: new Map(),
     serviciosDeLaCita: [],
     valoracionValidada: true,
+    enlaces: [],
   };
 
   const m = mundo as MundoDeLaClinica;
+  // clinica-7 · el llavero de esta clínica, en memoria.
+  const llavero = llaveroFake();
+  mundo.llavero = llavero;
+  // clinica-7 · el contrato de encargado, ACEPTADO: es el estado normal de
+  // una clínica que funciona. Sin él, `conHistoria` contesta 423 a toda
+  // escritura y los sesenta tests de este mundo irían a rojo por algo que
+  // no va del contrato.
+  const contrato = contratoFake(TENANT_ID, DUENA_ID);
+  mundo.contrato = contrato;
+  mundo.dekDeLaClinica = async (tenantId = TENANT_ID) => {
+    const { dekONada } = await import("../../src/clinica/claves.js");
+    return dekONada(tenantId, m.prisma);
+  };
 
   m.reset = () => {
     m.clinicaEncendida = true;
@@ -176,6 +243,14 @@ export function crearMundo(): MundoDeLaClinica {
     m.accesos = [];
     m.pideElServicio = new Map();
     m.serviciosDeLaCita = [];
+    m.enlaces = [];
+    llavero.reset();
+    contrato.reset();
+    // Y las cachés del proceso: la clave y el «¿es clínico?» viven 60 s,
+    // así que entre dos tests del mismo fichero se arrastrarían.
+    olvidarClaves();
+    olvidarSiEsClinico();
+    olvidarEstado();
     m.valoracionValidada = true;
 
     m.users.set(DUENA_ID, {
@@ -318,6 +393,24 @@ export function crearMundo(): MundoDeLaClinica {
         return u;
       },
       findUnique: async ({ where }: any) => m.users.get(where.id) ?? null,
+      // clinica-7 · el actor «paciente por enlace» de clinica-2: lo crea
+      // la puerta la primera vez que un enlace clínico deja rastro.
+      create: async ({ data }: any) => {
+        const u = {
+          id: data.id ?? randomUUID(),
+          tenantId: data.tenantId,
+          role: data.role ?? "CASHIER",
+          isClinician: false,
+          clinicalScope: "SELECTION",
+          alias: data.alias ?? "Paciente (por enlace)",
+          email: data.email,
+          clinicianLicense: null,
+          deletedAt: null,
+          isSystemActor: true,
+        } as any;
+        m.users.set(u.id, u);
+        return u;
+      },
     },
     client: {
       findFirst: async ({ where }: any) => {
@@ -328,6 +421,21 @@ export function crearMundo(): MundoDeLaClinica {
         const c = m.clientes.get(where.id);
         if (!c || c.tenantId !== where.tenantId) throw new Error("no existe");
         return c;
+      },
+      // clinica-7 · la usa la exportación del centro: recorre TODOS los
+      // pacientes, por apellido.
+      findMany: async ({ where, orderBy }: any) => {
+        let xs = [...m.clientes.values()].filter(
+          (c) => where?.tenantId == null || c.tenantId === where.tenantId,
+        );
+        if (Array.isArray(orderBy)) {
+          xs = xs
+            .slice()
+            .sort((a, b) =>
+              String(a.lastName ?? "").localeCompare(String(b.lastName ?? "")),
+            );
+        }
+        return xs;
       },
     },
     appointment: {
@@ -409,7 +517,11 @@ export function crearMundo(): MundoDeLaClinica {
       },
       create: async ({ data, select }: any) => {
         const fila: FakeConsent = {
-          id: randomUUID(),
+          // clinica-7 · EL ID QUE MANDA LA APLICACIÓN. El AAD del motivo
+          // cifrado lo lleva dentro, así que inventarse otro aquí dejaría
+          // un valor que no se descifra — y el fake estaría probando algo
+          // que la base no hace.
+          id: data.id ?? randomUUID(),
           tenantId: data.tenantId,
           clientId: data.clientId,
           kind: data.kind,
@@ -427,6 +539,7 @@ export function crearMundo(): MundoDeLaClinica {
           informerUserId: data.informerUserId ?? null,
           revokesConsentId: data.revokesConsentId ?? null,
           revokeReason: data.revokeReason ?? null,
+          revokeReasonCifrado: data.revokeReasonCifrado ?? null,
           createdByUserId: data.createdByUserId ?? null,
         };
         m.consents.push(fila);
@@ -460,11 +573,13 @@ export function crearMundo(): MundoDeLaClinica {
       },
       create: async ({ data, select }: any) => {
         const fila: FakePhoto = {
-          id: randomUUID(),
+          // clinica-7 · el id que manda la aplicación (va en el AAD).
+          id: data.id ?? randomUUID(),
           tenantId: data.tenantId,
           clientId: data.clientId,
           appointmentId: data.appointmentId ?? null,
           zona: data.zona,
+          zonaCifrada: data.zonaCifrada ?? null,
           mapaVersion: data.mapaVersion,
           fileName: data.fileName,
           sha256: data.sha256,
@@ -475,6 +590,7 @@ export function crearMundo(): MundoDeLaClinica {
           withdrawnAt: null,
           withdrawnByUserId: null,
           withdrawReason: null,
+          withdrawReasonCifrado: null,
         };
         m.photos.push(fila);
         return proyectar(fila, select, {
@@ -488,7 +604,14 @@ export function crearMundo(): MundoDeLaClinica {
         if (!f) throw new Error("no existe");
         const tocaOtraCosa = Object.keys(data).some(
           (k) =>
-            !["withdrawnAt", "withdrawnByUserId", "withdrawReason"].includes(k),
+            ![
+              "withdrawnAt",
+              "withdrawnByUserId",
+              "withdrawReason",
+              // clinica-7 · la retirada escribe el motivo CIFRADO. El
+              // guard de la tabla lo admite desde este bloque.
+              "withdrawReasonCifrado",
+            ].includes(k),
         );
         if (tocaOtraCosa) {
           throw new Error(
@@ -502,7 +625,8 @@ export function crearMundo(): MundoDeLaClinica {
         }
         f.withdrawnAt = data.withdrawnAt;
         f.withdrawnByUserId = data.withdrawnByUserId;
-        f.withdrawReason = data.withdrawReason;
+        f.withdrawReason = data.withdrawReason ?? null;
+        f.withdrawReasonCifrado = data.withdrawReasonCifrado ?? null;
         return proyectar(f, select, {
           author: usuarioVista(m, f.authorUserId),
           withdrawnBy: usuarioVista(m, f.withdrawnByUserId),
@@ -513,7 +637,9 @@ export function crearMundo(): MundoDeLaClinica {
       // Solo inserción: sin `update` ni `delete`.
       create: async ({ data, select }: any) => {
         const fila: FakeDelivery = {
-          id: randomUUID(),
+          // clinica-7 · el id que manda la aplicación: el enlace apunta a
+          // esta fila, así que su id existe antes que ella.
+          id: data.id ?? randomUUID(),
           tenantId: data.tenantId,
           clientId: data.clientId,
           report: data.report,
@@ -521,11 +647,30 @@ export function crearMundo(): MundoDeLaClinica {
           recipient: data.recipient,
           recipientEmail: data.recipientEmail ?? null,
           pdfSha256: data.pdfSha256,
+          pdfFileName: data.pdfFileName ?? null,
+          publicLinkId: data.publicLinkId ?? null,
           userId: data.userId,
           at: data.at ?? new Date(),
         };
         m.deliveries.push(fila);
         return proyectar(fila, select, {});
+      },
+      // clinica-7 · la usa la ruta pública del informe (`cargarObjetivo`)
+      // y la de anular el enlace.
+      findFirst: async ({ where, select }: any) => {
+        const d = m.deliveries.find(
+          (x) =>
+            (where.id == null || x.id === where.id) &&
+            (where.tenantId == null || x.tenantId === where.tenantId) &&
+            (where.clientId == null || x.clientId === where.clientId),
+        );
+        if (!d) return null;
+        return proyectar(d, select, {
+          tenant: {
+            name: "Clínica de prueba",
+            clinicalRecordsEnabled: m.clinicaEncendida,
+          },
+        });
       },
       findMany: async ({ where, orderBy, take, select }: any) => {
         let xs = m.deliveries.filter(
@@ -541,10 +686,16 @@ export function crearMundo(): MundoDeLaClinica {
         );
       },
     },
+    // clinica-7 · el llavero. Sin él, `dekONada` revienta y toda ruta
+    // clínica contesta 500.
+    clinicalTenantKey: llavero.modelo,
+    clinicalProcessorAgreement: contrato.modelo,
     clinicalEntry: {
       findUnique: async ({ where }: any) => {
         const e = m.entradas.find((x) => x.id === where.id);
-        return e ? { body: e.body } : null;
+        // clinica-7 · la fila ENTERA: quien descifra necesita `id`,
+        // `tenantId` y `bodyCifrado`, no solo el cuerpo.
+        return e ? { ...e } : null;
       },
       findFirst: async ({ where, orderBy }: any) => {
         let xs = m.entradas.filter((e) => coincideEntrada(e, where));
@@ -608,9 +759,60 @@ export function crearMundo(): MundoDeLaClinica {
     clinicalAssessmentCorrection: {
       findMany: async () => [],
     },
+
+    // clinica-7 · los enlaces públicos. El informe por email crea uno
+    // (`purpose = INFORME_CLINICO`) con su código de 6 cifras.
     publicLink: {
       findFirst: async () => null,
+      findUnique: async ({ where }: any) =>
+        m.enlaces.find(
+          (e) => e.id === where.id || e.tokenHash === where.tokenHash,
+        ) ?? null,
+      create: async ({ data }: any) => {
+        const fila: FakeEnlace = {
+          id: randomUUID(),
+          tenantId: data.tenantId,
+          purpose: data.purpose,
+          targetType: data.targetType,
+          targetId: data.targetId,
+          tokenHash: data.tokenHash,
+          codeHash: data.codeHash ?? null,
+          codeFailures: 0,
+          expiresAt: data.expiresAt,
+          maxUses: data.maxUses,
+          usedCount: 0,
+          revokedAt: null,
+          createdByUserId: data.createdByUserId ?? null,
+        };
+        m.enlaces.push(fila);
+        return { id: fila.id };
+      },
+      update: async ({ where, data }: any) => {
+        const e = m.enlaces.find((x) => x.id === where.id)!;
+        if (data.codeFailures?.increment) {
+          e.codeFailures += data.codeFailures.increment;
+        }
+        return { ...e };
+      },
+      updateMany: async ({ where, data }: any) => {
+        const vivos = m.enlaces.filter(
+          (e) =>
+            (where.id == null || e.id === where.id) &&
+            (where.revokedAt !== null || e.revokedAt == null) &&
+            (where.usedCount?.lt == null || e.usedCount < where.usedCount.lt),
+        );
+        for (const e of vivos) {
+          if (data.usedCount?.increment) e.usedCount += data.usedCount.increment;
+          if (data.revokedAt !== undefined) e.revokedAt = data.revokedAt;
+        }
+        return { count: vivos.length };
+      },
     },
+    // clinica-7 · el informe por enlace escribe el enlace y la entrega en
+    // UNA transacción. El doble la ejecuta en el sitio: lo que importa
+    // aquí es que las dos escrituras pasen, y la atomicidad de verdad la
+    // prueba el e2e contra Postgres.
+    $transaction: async (fn: any) => fn(m.prisma),
     ticket: {
       findFirst: async () => null,
     },
@@ -629,6 +831,10 @@ export function sembrarValoracion(m: MundoDeLaClinica): void {
     authorUserId: SANITARIA_ID,
     appointmentId: null,
     kind: "ASSESSMENT",
+    // clinica-7 · sembrada EN CLARO a propósito: es el caso de las
+    // filas que ya estaban escritas cuando llegó el cifrado, y la
+    // lectura tiene que seguir funcionando con ellas.
+    bodyCifrado: null,
     body: {
       v: 1,
       cuestionarioVersion: 1,
@@ -669,6 +875,10 @@ export function sembrarSesion(
     authorUserId: SANITARIA_ID,
     appointmentId: randomUUID(),
     kind: "TREATMENT_SESSION",
+    // clinica-7 · sembrada EN CLARO a propósito: es el caso de las
+    // filas que ya estaban escritas cuando llegó el cifrado, y la
+    // lectura tiene que seguir funcionando con ellas.
+    bodyCifrado: null,
     body: {
       v: 2,
       mapaVersion: 1,

@@ -19,6 +19,21 @@ const EXEMPT_PREFIXES = [
   // cuenta bloqueada lo abre desde su panel con su Bearer puesto. Un 423
   // sobre esta URL escondería un documento legal por una deuda comercial.
   "/legal",
+  // clinica-7 · LEER el contrato de encargado del tratamiento. Mismo
+  // argumento que `/legal`: el bloqueo de una cuenta es comercial, y una
+  // clínica con una factura sin pagar sigue teniendo que poder leer y
+  // descargar el contrato del art. 28 que aceptó — es su prueba de
+  // cumplimiento, y esconderlo por una deuda sería esconder un documento
+  // legal.
+  //
+  // El prefijo cubre `GET /clinica/contrato` y `GET
+  // /clinica/contrato/:version.pdf`. **Y también los POST de aceptar y
+  // revocar, que NO deberían estar exentos** — por eso el guard de esas
+  // dos lo pone la propia ruta: `contrato-routes.ts` comprueba
+  // `blockedAt` en las escrituras. Acotar el prefijo por método habría
+  // metido en este guard una lista de métodos que la siguiente ruta
+  // olvidaría.
+  "/clinica/contrato",
 ];
 
 function isExempt(url: string): boolean {

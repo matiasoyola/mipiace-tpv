@@ -460,22 +460,41 @@ test.describe(CAP, () => {
     expect(v!.confirmedMedication).toBe(true);
     expect(v!.confirmedAlerts).toBe(true);
 
-    // La corrección, con su autora, y la respuesta de Carmen intacta.
+    // La corrección, con su autora — y clinica-7: **lo que dice no se lee
+    // con un SELECT.**
+    //
+    // Hasta el blindaje, este mismo `findMany` devolvía
+    // `{ questionId: "antic", value: "SI" }`: la corrección de la podóloga
+    // en claro en dos columnas. Ahora las dos están vacías y el contenido
+    // vive cifrado en `correccion_cifrada`, con el AAD de su fila. Que esta
+    // consulta NO enseñe nada es la garantía del bloque, y por eso se
+    // comprueba así y no se descifra: lo que se está probando es
+    // exactamente que desde fuera de la API no hay nada legible.
+    //
+    // Quién la escribió SÍ sigue en claro: es el registro, no el dato.
     const correcciones = await bd().clinicalAssessmentCorrection.findMany({
       where: { assessmentId: v!.id },
-      select: { questionId: true, value: true, authorUserId: true },
+      select: {
+        questionId: true,
+        value: true,
+        authorUserId: true,
+        correccionCifrada: true,
+      },
     });
-    expect(correcciones).toEqual([
-      { questionId: "antic", value: "SI", authorUserId: PODOLOGA.id },
-    ]);
+    expect(correcciones).toHaveLength(1);
+    expect(correcciones[0]!.authorUserId).toBe(PODOLOGA.id);
+    expect(correcciones[0]!.questionId).toBe("");
+    expect(correcciones[0]!.value).toBeNull();
+    expect(correcciones[0]!.correccionCifrada).toMatch(/^c1:/);
+
+    // Y la respuesta de Carmen, lo mismo: el cuerpo de la entrada es el
+    // centinela, y el cuestionario entero está en `body_cifrado`.
     const entrada = await bd().clinicalEntry.findUniqueOrThrow({
       where: { id: v!.entryId! },
-      select: { body: true },
+      select: { body: true, bodyCifrado: true },
     });
-    const cuerpo = entrada.body as {
-      respuestas: Record<string, string>;
-    };
-    expect(cuerpo.respuestas.antic).toBe("NO_SE");
+    expect(entrada.body).toEqual({ cifrado: true });
+    expect(entrada.bodyCifrado).toMatch(/^c1:/);
 
     // LA PUERTA DEL PRIMER TRATAMIENTO DICE SÍ.
     const { puedeRecibirPrimerTratamiento } = await import(

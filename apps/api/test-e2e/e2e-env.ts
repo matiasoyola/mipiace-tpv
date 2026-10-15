@@ -12,6 +12,33 @@
 //   - en CI (`CI=true`), la suite FALLA. Un e2e que nadie mira no existe
 //     (§3 del prompt), y uno que se salta en verde es peor: miente.
 
+import { createHash } from "node:crypto";
+
+// ── clinica-7 · LA KEK DE LA SUITE ──────────────────────────────────
+//
+// Cualquier e2e que escriba algo clínico necesita `CLINICAL_KEK`: sin ella
+// `asegurarDek` no puede envolver la clave de la clínica y la ruta
+// contesta 500. En el portátil la trae `apps/api/.env` y por eso no se
+// notaba; **en CI no hay `.env`** y `clinica-sesion-cobro.e2e.ts` se caía
+// con seis 500 que no decían por qué.
+//
+// Va aquí —el módulo que importan todos los ficheros de la suite— y no en
+// cada uno: la próxima ruta clínica que alguien pruebe no tiene que
+// acordarse de nada.
+//
+// Y es **fija, no aleatoria**: los ficheros comparten base y un fichero
+// que envolviera una DEK con una KEK distinta de la del siguiente dejaría
+// un canario que no cuadra. Derivada de una frase para que se vea de lejos
+// que es de pruebas.
+//
+// `??=`: si el entorno ya trae una, manda la del entorno. Y un fichero que
+// quiera la suya la asigna después de este import (lo hace
+// `clinica-7.e2e.ts`, que prueba justo qué pasa cuando la KEK no cuadra).
+process.env.CLINICAL_KEK ??= createHash("sha256")
+  .update("mipiacetpv-e2e-clinical-kek")
+  .digest("base64");
+process.env.CLINICAL_KEK_ID ??= "e2e";
+
 export const E2E_DATABASE_URL = process.env.E2E_DATABASE_URL ?? "";
 export const e2eEnabled = E2E_DATABASE_URL.length > 0;
 

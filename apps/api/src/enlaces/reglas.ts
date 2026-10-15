@@ -89,6 +89,23 @@ export interface ReglasDePurpose<T> {
   limitePor: LimitePor;
 
   /**
+   * clinica-7 · ¿para abrirlo hay que teclear un código de 6 cifras?
+   *
+   * Decisión 21, y lo declara el `purpose` por la razón de siempre en este
+   * registro: si lo decidiera la ruta, la ruta nueva de dentro de dos
+   * bloques se olvidaría. Con el campo aquí, **un `purpose` que pide
+   * código no se puede abrir sin código** — lo comprueba la puerta.
+   *
+   * `false` en la valoración: ahí el perfil es `SOLO_ESCRIBIR`, así que un
+   * enlace filtrado filtra un formulario vacío. Pedirle un código a un
+   * paciente de 78 años para contestar diez preguntas sería garantizar
+   * que no contesta.
+   *
+   * `true` en el informe: ahí el enlace ENSEÑA una historia clínica.
+   */
+  pideCodigo: boolean;
+
+  /**
    * LO QUE LA PERSONA LEE cuando el enlace no sirve, y cuando ha probado
    * demasiadas veces.
    *
@@ -216,6 +233,10 @@ export const REGLAS_VALORACION: ReglasDePurpose<ValoracionDelEnlace> = {
   // alta.
   limitePor: "IP",
 
+  // SIN código. El perfil es `SOLO_ESCRIBIR`: si el enlace se filtra, lo
+  // que se filtra es un formulario vacío. Ver `pideCodigo`.
+  pideCodigo: false,
+
   // Los textos de clinica-2, palabra por palabra. La 404 NO dice «su
   // enlace ha caducado» —la pantalla no lo sabe con certeza— y le pide
   // llamar a la clínica, que es además lo que tiene que hacer: allí sí se
@@ -282,8 +303,133 @@ export const REGLAS_VALORACION: ReglasDePurpose<ValoracionDelEnlace> = {
     v.status === "PENDIENTE_PACIENTE",
 };
 
+
+// ── INFORME_CLINICO · clinica-7 · el segundo usuario de la puerta ─────
+//
+// Decisión 21: el informe por email deja de llevar adjunto. El correo lleva
+// un enlace de aquí.
+//
+// ── Por qué el adjunto se va ─────────────────────────────────────────
+//
+// Lo dejó escrito clinica-4 en su «Pendiente del abogado», punto 2: el
+// cuerpo del correo no lleva datos de salud, pero **el PDF adjunto viaja
+// por servidores que no son nuestros y sin cifrar**. Un informe de
+// derivación en el buzón de Gmail de un paciente es un documento de salud
+// en un servidor de Google, para siempre, y una copia más en el de quien se
+// lo reenvíe.
+//
+// Con el enlace, lo que viaja por correo es una URL que caduca, que se
+// gasta, que se puede anular desde la historia y **que no abre sin un
+// código que el correo no lleva**. El documento no sale de nuestros
+// servidores: lo sirve la API, y cada apertura deja su línea en el registro
+// de accesos — que es más de lo que un adjunto puede decir nunca.
+//
+// ── Los números, y de dónde salen ────────────────────────────────────
+//
+//   · **7 días.** Un informe que se pide se abre en la semana. Los 30 de la
+//     valoración son para una cita que se da para dentro de tres semanas;
+//     aquí el documento ya está hecho y esperando.
+//   · **3 aperturas.** Una para leerlo, una porque se cerró la pestaña, y
+//     una de margen. De un solo uso habría sido una llamada a la clínica
+//     cada vez que a alguien se le cierra el navegador; ilimitado sería una
+//     URL que se puede reenviar y seguir abriendo.
+//   · **Código de 6 cifras, 5 fallos lo anulan.** Ver `enlaces/codigo.ts`.
+//
+// ── Y a qué apunta ───────────────────────────────────────────────────
+//
+// A la ENTREGA (`clinical_report_deliveries`), no al paciente ni al
+// informe. La entrega es la fila que dice qué documento se mandó, a quién y
+// con qué huella; apuntar al paciente habría significado un enlace que
+// sirve «el informe de Carmen», y el informe de Carmen cambia cada vez que
+// se le abre una sesión.
+
+/** Lo que la ruta pública del informe necesita de su entrega. */
+export interface EntregaDelEnlace {
+  id: string;
+  tenantId: string;
+  clientId: string;
+  report: string;
+  /** El fichero del volumen clínico. NOT NULL en las entregas por enlace
+   *  (lo ata el CHECK `..._enlace_completo`). */
+  pdfFileName: string | null;
+  pdfSha256: string;
+  tenant: { name: string; clinicalRecordsEnabled: boolean };
+}
+
+/** 7 días. Un informe que se pide se abre en la semana. */
+export const DIAS_DE_VIDA_DEL_INFORME = 7;
+/** 3 aperturas. Ver la cabecera. */
+export const APERTURAS_DEL_INFORME = 3;
+
+export const REGLAS_INFORME: ReglasDePurpose<EntregaDelEnlace> = {
+  purpose: "INFORME_CLINICO",
+  targetType: "CLINICAL_REPORT_DELIVERY",
+
+  // SOLO_LEER: ve un documento y no escribe nada. Es el perfil que S3
+  // creó para el consentimiento y que este `purpose` es el primero en
+  // usar.
+  perfil: "SOLO_LEER",
+
+  vidaMs: () => DIAS_DE_VIDA_DEL_INFORME * 24 * 60 * 60 * 1000,
+  maxUsos: APERTURAS_DEL_INFORME,
+
+  // Por IP: cada destinatario abre su enlace desde su casa o su consulta.
+  limitePor: "IP",
+
+  // EL CÓDIGO. Aquí el enlace ENSEÑA una historia clínica, así que tener la
+  // URL no basta.
+  pideCodigo: true,
+
+  // Los textos, con la misma regla que la valoración: **UNA 404 para los
+  // cuatro casos**, y no dice cuál fue. Y aquí hay un quinto —«el código
+  // está mal cinco veces y el enlace se anuló»— que tampoco se distingue:
+  // decirlo le confirmaría a quien prueba códigos que iba por buen camino.
+  mensajes: {
+    code: "INFORME_NOT_FOUND",
+    noSirve:
+      "Este enlace ya no sirve. Llame a la clínica y se lo preparamos otra vez.",
+    demasiados:
+      "Demasiados intentos. Espere un rato y vuelva a abrir el enlace, o llame a la clínica.",
+  },
+
+  // CADA APERTURA DEJA SU LÍNEA, como acceso externo. Decisión 21: es lo
+  // que un adjunto no puede decir nunca — quién abrió el informe y cuándo.
+  // `EXPORT` y no `READ`, por lo mismo que la entrega: lo que pasa es que
+  // una copia de la historia sale del sistema.
+  registraAccesoClinico: true,
+  pacienteDe: (e) => e.clientId,
+  accionClinica: "EXPORT",
+
+  cargarObjetivo: async (prisma, { tenantId, targetId }) => {
+    const fila = await prisma.clinicalReportDelivery.findFirst({
+      where: { id: targetId, tenantId },
+      select: {
+        id: true,
+        tenantId: true,
+        clientId: true,
+        report: true,
+        pdfFileName: true,
+        pdfSha256: true,
+        tenant: { select: { name: true, clinicalRecordsEnabled: true } },
+      },
+    });
+    return fila ?? null;
+  },
+
+  admiteEnlace: (e) =>
+    // CON EL MÓDULO APAGADO, NO EXISTE. La misma 404 y no otra: un tenant
+    // al que se le apagó la clínica no destapa que la tuvo. Mismo criterio
+    // que `REGLAS_VALORACION`.
+    e.tenant.clinicalRecordsEnabled &&
+    // Y TIENE QUE HABER FICHERO. Una entrega sin PDF es una de las de
+    // antes de este bloque (impresión, o email con adjunto): su enlace no
+    // existe, y si existiera no tendría nada que servir.
+    e.pdfFileName != null,
+};
+
 /**
- * EL REGISTRO. Lo que está dado de alta, hoy sólo `VALORACION`.
+ * EL REGISTRO. Lo que está dado de alta: `VALORACION` e
+ * `INFORME_CLINICO`.
  *
  * Un `purpose` que no esté aquí NO EXISTE, y no hace falta comprobarlo en
  * ningún sitio: para preguntar a la puerta por un `purpose` hay que
@@ -301,4 +447,6 @@ export const PURPOSES: Readonly<Record<string, ReglasDePurpose<never>>> =
   Object.freeze({
     [REGLAS_VALORACION.purpose]:
       REGLAS_VALORACION as unknown as ReglasDePurpose<never>,
+    [REGLAS_INFORME.purpose]:
+      REGLAS_INFORME as unknown as ReglasDePurpose<never>,
   });

@@ -36,6 +36,8 @@ import type { PrismaClient } from "@mipiacetpv/db";
 import { resumenDeLaSesion, type CuerpoDeSesion } from "@mipiacetpv/clinica-sesion";
 
 import type { CobroPendiente } from "./sesion-view.js";
+import { dekONada } from "./claves.js";
+import { cuerpoDeEntrada } from "./cripto-campos.js";
 import { tratamientosPorId } from "./tratamientos.js";
 
 interface Rango {
@@ -106,14 +108,30 @@ async function citasConSesionSinCobrar(
       kind: "TREATMENT_SESSION",
       appointmentId: { in: citas.map((c) => c.id) },
     },
-    select: { appointmentId: true, body: true, createdAt: true },
+    select: {
+      // clinica-7 · `id` y `tenantId` los pide el AAD del cuerpo.
+      id: true,
+      tenantId: true,
+      appointmentId: true,
+      body: true,
+      bodyCifrado: true,
+      createdAt: true,
+    },
   });
   if (sesiones.length === 0) return [];
 
+  // UNA lectura de clave para todas las sesiones del día.
+  const dek = await dekONada(input.tenantId, prisma);
   const porCita = new Map(
     sesiones.map((s) => [
       s.appointmentId!,
-      { cuerpo: s.body as unknown as CuerpoDeSesion, cerradaEn: s.createdAt },
+      {
+        cuerpo: cuerpoDeEntrada(
+          { ...s, body: s.body as unknown },
+          dek,
+        ) as CuerpoDeSesion,
+        cerradaEn: s.createdAt,
+      },
     ]),
   );
   return citas

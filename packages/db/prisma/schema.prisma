@@ -1221,6 +1221,12 @@ model Tenant {
   // enlaces-publicos · todos los enlaces públicos del negocio, de cualquier
   // `purpose`. RESTRICT al otro lado: un tenant con enlaces no se borra.
   publicLinks                   PublicLink[]
+  // clinica-7 · el contrato de encargado que la dueña aceptó (y sus
+  // revocaciones), y LA CLAVE de esta clínica. Las dos con RESTRICT: un
+  // tenant con contrato aceptado o con clave no se borra — y la clave es
+  // además lo único que hace legible su historia.
+  processorAgreements           ClinicalProcessorAgreement[]
+  clinicalKey                   ClinicalTenantKey?
   KitchenDispatch               KitchenDispatch[]
   // residencia-1 · los cimientos de la residencia. `residentProfiles`,
   // `bedAssignments` y `careRoleAssignments` cuelgan con RESTRICT (un
@@ -1552,6 +1558,10 @@ model User {
   // a los dos lados: dar de baja a la DUE no borra que ajustó el plan.
   carePlanItemsCreated    CarePlanItem[]                 @relation("CarePlanItemCreatedBy")
   carePlanItemsClosed     CarePlanItem[]                 @relation("CarePlanItemClosedBy")
+  // clinica-7 · las aceptaciones y revocaciones del contrato de encargado
+  // que esta persona firmó. RESTRICT al otro lado: un usuario que aceptó
+  // el contrato de tratamiento de datos de salud no se borra.
+  processorAgreements     ClinicalProcessorAgreement[]   @relation("ClinicalProcessorAgreementUser")
 
   @@index([tenantId])
   @@map("users")
@@ -1865,8 +1875,8 @@ model Device {
   // revocó él. La FK es DEFERRABLE INITIALLY DEFERRED en la migración: hay
   // que revocar el anterior ANTES de insertar el nuevo (índice único), y en
   // ese momento el nuevo todavía no existe.
-  revokedBy           Device?             @relation("DeviceRevokedBy", fields: [revokedByDeviceId], references: [id], onDelete: SetNull)
-  revoked             Device[]            @relation("DeviceRevokedBy")
+  revokedBy           Device?                      @relation("DeviceRevokedBy", fields: [revokedByDeviceId], references: [id], onDelete: SetNull)
+  revoked             Device[]                     @relation("DeviceRevokedBy")
   // Registros de facturación que generó este dispositivo.
   fiscalRecords       FiscalRecord[]
   // A5 · última instantánea que el terminal publicó por su canal de
@@ -1881,12 +1891,17 @@ model Device {
   // otro lado: revocar o reemparejar la tablet no borra la traza de qué
   // plato se tachó y cuándo —de ahí salen las estadísticas del dueño— pero
   // tampoco impide borrar el dispositivo.
-  kitchenOrdersReady  KitchenOrder[]      @relation("KitchenOrderReadyBy")
-  kitchenOrdersUrgent KitchenOrder[]      @relation("KitchenOrderUrgentBy")
-  kitchenLinesDone    KitchenOrderLine[]  @relation("KitchenOrderLineDoneBy")
+  kitchenOrdersReady  KitchenOrder[]               @relation("KitchenOrderReadyBy")
+  kitchenOrdersUrgent KitchenOrder[]               @relation("KitchenOrderUrgentBy")
+  kitchenLinesDone    KitchenOrderLine[]           @relation("KitchenOrderLineDoneBy")
   // kds-2-wifi · las marcas que esta pantalla hizo SIN INTERNET y subió
   // después. CASCADE: el libro de marcas no tiene sentido sin su aparato.
   kitchenLanMarks     KitchenLanMark[]
+  // clinica-7 · las aceptaciones del contrato de encargado hechas desde
+  // este aparato. RESTRICT (no SET NULL) porque la tabla es de solo
+  // inserción: un SET NULL sería una promesa que el trigger rechazaría al
+  // ejecutarse. Un aparato se revoca, no se borra.
+  processorAgreements ClinicalProcessorAgreement[] @relation("ClinicalProcessorAgreementDevice")
 
   @@index([tenantId])
   @@index([registerId])
@@ -3185,6 +3200,9 @@ model Client {
   holdedContactId String?   @map("holded_contact_id")
   marketingOptIn  Boolean   @default(false) @map("marketing_opt_in")
   notes           String?
+  /// clinica-7 · la nota de la ficha, cifrada en los tenants clínicos.
+  /// Mismo caso que `Appointment.notesCifradas`.
+  notesCifradas   String?   @map("notes_cifradas")
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
 
@@ -3275,29 +3293,33 @@ model ClientConsent {
   // canónico que se leyó. Los tres juntos o los tres NULL (CHECK
   // `client_consents_plantilla_completa`): media plantilla es una fila
   // que dice que se informó de un texto que no se sabe cuál fue.
-  templateId       String? @map("template_id") @db.VarChar(40)
-  templateVersion  Int?    @map("template_version")
-  textSha256       String? @map("text_sha256") @db.Char(64)
+  templateId          String? @map("template_id") @db.VarChar(40)
+  templateVersion     Int?    @map("template_version")
+  textSha256          String? @map("text_sha256") @db.Char(64)
   // El PDF firmado: su huella y su fichero en el volumen clínico. Se
   // vuelve a calcular sobre el fichero para comprobar que nadie lo tocó.
-  pdfSha256        String? @map("pdf_sha256") @db.Char(64)
-  pdfFileName      String? @map("pdf_file_name") @db.VarChar(100)
+  pdfSha256           String? @map("pdf_sha256") @db.Char(64)
+  pdfFileName         String? @map("pdf_file_name") @db.VarChar(100)
   // Copia de la marca «clínica» de la plantilla. Copiada y no consultada:
   // si mañana una plantilla deja de ser clínica, lo firmado ayer siguió
   // siendo contenido de una historia clínica.
-  clinical         Boolean @default(false)
+  clinical            Boolean @default(false)
   // PACIENTE | REPRESENTANTE, con nombre y relación sólo en el segundo
   // caso (CHECK `client_consents_firmante_valido`).
-  signer           String? @db.VarChar(20)
-  signerName       String? @map("signer_name") @db.VarChar(120)
-  signerRelation   String? @map("signer_relation") @db.VarChar(60)
+  signer              String? @db.VarChar(20)
+  signerName          String? @map("signer_name") @db.VarChar(120)
+  signerRelation      String? @map("signer_relation") @db.VarChar(60)
   // Quién informó. Obligatorio si `clinical` (CHECK); que ADEMÁS sea
   // sanitario lo exige la API, porque cruza dos tablas.
-  informerUserId   String? @map("informer_user_id") @db.Uuid
+  informerUserId      String? @map("informer_user_id") @db.Uuid
   // La fila que esta revoca. Una fila con esto puesto NO concede nada.
-  revokesConsentId String? @map("revokes_consent_id") @db.Uuid
-  revokeReason     String? @map("revoke_reason") @db.VarChar(200)
-  createdByUserId  String? @map("created_by_user_id") @db.Uuid
+  revokesConsentId    String? @map("revokes_consent_id") @db.Uuid
+  revokeReason        String? @map("revoke_reason") @db.VarChar(200)
+  /// clinica-7 · el motivo de la revocación, cifrado. Se cifra SIEMPRE, no
+  /// solo cuando `clinical` — la columna es la misma para el spa y para la
+  /// clínica, y un `if` por fila sería un sitio donde equivocarse.
+  revokeReasonCifrado String? @map("revoke_reason_cifrado")
+  createdByUserId     String? @map("created_by_user_id") @db.Uuid
 
   client      Client          @relation(fields: [clientId], references: [id], onDelete: Restrict)
   tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -3333,6 +3355,11 @@ model ClinicalPhoto {
   appointmentId String?  @map("appointment_id") @db.Uuid
   // `"L:h"` y la versión del mapa con la que se eligió la zona.
   zona          String   @db.VarChar(40)
+  /// clinica-7 · la zona, cifrada. La zona dice DÓNDE tiene el problema el
+  /// paciente, y eso es un dato de salud aunque quepa en cuatro
+  /// caracteres. Se puede cifrar porque el comparador ya agrupa por zona
+  /// en memoria: ninguna consulta filtra por zona en SQL.
+  zonaCifrada   String?  @map("zona_cifrada")
   mapaVersion   Int      @map("mapa_version")
   fileName      String   @map("file_name") @db.VarChar(100)
   sha256        String   @db.Char(64)
@@ -3341,9 +3368,13 @@ model ClinicalPhoto {
   authorUserId  String   @map("author_user_id") @db.Uuid
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz()
 
-  withdrawnAt       DateTime? @map("withdrawn_at") @db.Timestamptz()
-  withdrawnByUserId String?   @map("withdrawn_by_user_id") @db.Uuid
-  withdrawReason    String?   @map("withdraw_reason") @db.VarChar(200)
+  withdrawnAt           DateTime? @map("withdrawn_at") @db.Timestamptz()
+  withdrawnByUserId     String?   @map("withdrawn_by_user_id") @db.Uuid
+  withdrawReason        String?   @map("withdraw_reason") @db.VarChar(200)
+  /// clinica-7 · el motivo de la retirada, cifrado. «Se retiró porque la
+  /// paciente pidió que no se le hicieran más fotos del pie diabético» es
+  /// un dato de salud escrito por una persona con prisa.
+  withdrawReasonCifrado String?   @map("withdraw_reason_cifrado")
 
   tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   client      Client       @relation(fields: [clientId], references: [id], onDelete: Restrict)
@@ -3381,6 +3412,22 @@ model ClinicalReportDelivery {
   // Sólo con canal EMAIL (CHECK `..._email_segun_canal`).
   recipientEmail String?  @map("recipient_email") @db.VarChar(200)
   pdfSha256      String   @map("pdf_sha256") @db.Char(64)
+  // ── clinica-7 · el PDF de las entregas POR ENLACE sí se guarda ─────
+  //
+  // Divergencia declarada con clinica-4 §3, que decidió que el PDF del
+  // informe NO se guarda. Eso vale para imprimir y para el adjunto: en los
+  // dos el documento se lo lleva alguien en el mismo acto. **Con un enlace
+  // no se lo lleva nadie** — tiene que existir cuando el destinatario lo
+  // abra, tres días después. Y no se puede volver a armar entonces:
+  // `armarInforme` lee la historia VIVA, así que una visita nueva cambiaría
+  // el documento y el `pdfSha256` de esta fila dejaría de cuadrar.
+  //
+  // `null` en las entregas por impresión. El CHECK
+  // `..._enlace_completo` ata las dos columnas: van juntas o ninguna.
+  pdfFileName    String?  @map("pdf_file_name") @db.VarChar(100)
+  // El enlace por el que salió. Sin FK dura a propósito: si un día se
+  // purgaran los enlaces caducados, una FK lo impediría.
+  publicLinkId   String?  @map("public_link_id") @db.Uuid
   userId         String   @map("user_id") @db.Uuid
   at             DateTime @default(now()) @db.Timestamptz()
 
@@ -3403,6 +3450,12 @@ model ClientTechnicalNote {
   clientId        String   @map("client_id") @db.Uuid
   serviceId       String?  @map("service_id")
   body            String
+  /// clinica-7 · cifrada en los tenants clínicos. En peluquería esto es la
+  /// fórmula del color; en una clínica son «los parámetros del
+  /// tratamiento», que es exactamente un dato de salud. **No estaba en la
+  /// lista del prompt**: entra por la regla «si dudas, se cifra», y figura
+  /// así en el inventario del `-done`.
+  bodyCifrado     String?  @map("body_cifrado")
   createdByUserId String   @map("created_by_user_id") @db.Uuid
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
 
@@ -3664,33 +3717,43 @@ model StaffShift {
 // varios servicios. Se llama `appointment` para alinear con el contrato ya
 // publicado de B1 (`GET /clients/:id/history` reserva `kind:"APPOINTMENT"`).
 model Appointment {
-  id           String                   @id @default(uuid()) @db.Uuid
-  tenantId     String                   @map("tenant_id") @db.Uuid
+  id            String                   @id @default(uuid()) @db.Uuid
+  tenantId      String                   @map("tenant_id") @db.Uuid
   // Idempotencia del alta offline/online por outbox (mismo patrón que
   // `Client.externalId` / `Ticket.externalId`).
-  externalId   String?                  @unique @map("external_id") @db.Uuid
-  mode         ReservationMode          @default(APPOINTMENT)
+  externalId    String?                  @unique @map("external_id") @db.Uuid
+  mode          ReservationMode          @default(APPOINTMENT)
   // Nullable: walk-in / reserva anónima de teléfono.
-  clientId     String?                  @map("client_id") @db.Uuid
+  clientId      String?                  @map("client_id") @db.Uuid
   // Span [inicio, fin) de la visita (client-facing). El anti-solape real
   // (con buffers) vive en el assignment. tstzrange → SQL crudo.
-  timeslot     Unsupported("tstzrange")
-  status       AppointmentStatus        @default(PENDING)
-  source       ReservationSource        @default(PRESENCIAL)
+  timeslot      Unsupported("tstzrange")
+  status        AppointmentStatus        @default(PENDING)
+  source        ReservationSource        @default(PRESENCIAL)
   // Sólo modo mesa (comensales). Nullable en cita.
-  partySize    Int?                     @map("party_size")
+  partySize     Int?                     @map("party_size")
   // Canje de bono (B5, fuera de alcance en B4; sólo la columna).
-  voucherId    String?                  @map("voucher_id") @db.Uuid
+  voucherId     String?                  @map("voucher_id") @db.Uuid
   // Señal cobrada (ADR-R5b; fuera de alcance en B4; sólo la columna).
-  depositCents Int?                     @map("deposit_cents")
+  depositCents  Int?                     @map("deposit_cents")
   // TTL del hold PENDING (carrera de reserva). El job lo libera al vencer.
-  pendingUntil DateTime?                @map("pending_until") @db.Timestamptz()
+  pendingUntil  DateTime?                @map("pending_until") @db.Timestamptz()
   // Enlace al ticket cuando se cobra (el puente cita→caja). Al cerrar el
   // ticket la cita pasa a COMPLETED.
-  ticketId     String?                  @unique @map("ticket_id") @db.Uuid
-  notes        String?
-  createdAt    DateTime                 @default(now()) @map("created_at") @db.Timestamptz()
-  updatedAt    DateTime                 @updatedAt @map("updated_at") @db.Timestamptz()
+  ticketId      String?                  @unique @map("ticket_id") @db.Uuid
+  notes         String?
+  /// clinica-7 · la nota de la cita, cifrada **en los tenants con la
+  /// clínica encendida**. En una clínica, «viene por lo del dedo
+  /// infectado» acaba aquí, y eso es un dato de salud en una tabla que
+  /// nadie trataba como clínica. En un bar la columna se queda vacía y la
+  /// nota sigue en claro, como ayer.
+  ///
+  /// Y con el contrato de encargado NO VIGENTE, una cita NUEVA de un
+  /// tenant clínico no admite nota (decisión 5): solo hora, paciente y
+  /// servicio. Las que ya existen se siguen viendo.
+  notesCifradas String?                  @map("notes_cifradas")
+  createdAt     DateTime                 @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt     DateTime                 @updatedAt @map("updated_at") @db.Timestamptz()
 
   tenant              Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   client              Client?                 @relation(fields: [clientId], references: [id], onDelete: SetNull)
@@ -4370,6 +4433,23 @@ model ClinicalEntry {
   // ESTE CAMPO NO SE ESCRIBE EN NINGÚN LOG. Ni en el de la aplicación, ni
   // en Sentry, ni en un mensaje de error.
   body          Json
+  // ── clinica-7 · EL CUERPO, CIFRADO ──────────────────────────────────
+  //
+  // AES-256-GCM con la DEK de esta clínica y AAD
+  // `tenant|clinical_entries|body|id`. Formato `c1:` + base64 — el CHECK
+  // `clinical_entries_body_cifrado_formato` no admite otra cosa, así que
+  // texto en claro NO CABE en esta columna.
+  //
+  // Se cifra el JSON SERIALIZADO y no campo a campo: cifrando campo a
+  // campo las CLAVES del objeto quedarían en claro, y «alergias» como
+  // clave de un objeto ya es un dato de salud.
+  //
+  // `body` (en claro) sigue aquí por el EXPAND: la columna cifrada nace
+  // vacía, el script la rellena y verifica, y el claro se vacía al
+  // centinela `{"cifrado": true}`. **El claro se borra en una migración
+  // posterior**, no en ésta. Quien lee usa `bodyCifrado` cuando está y
+  // cae a `body` cuando no — `clinica/cripto-campos.ts`.
+  bodyCifrado   String?           @map("body_cifrado")
   createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz()
 
   tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -4406,6 +4486,10 @@ model ClinicalAddendum {
   entryId      String   @map("entry_id") @db.Uuid
   authorUserId String   @map("author_user_id") @db.Uuid
   body         Json
+  /// clinica-7 · el cuerpo cifrado. AAD `tenant|clinical_addenda|body|id`.
+  /// Ver `ClinicalEntry.bodyCifrado` para el por qué del formato y del
+  /// expand.
+  bodyCifrado  String?  @map("body_cifrado")
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz()
 
   tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -4539,17 +4623,28 @@ model ClinicalAssessment {
 // edición. Y no toca la respuesta del paciente, que está en la entrada
 // inmutable: en pantalla se ven las dos a la vez.
 model ClinicalAssessmentCorrection {
-  id           String         @id @default(uuid()) @db.Uuid
-  tenantId     String         @map("tenant_id") @db.Uuid
-  assessmentId String         @map("assessment_id") @db.Uuid
+  id                String          @id @default(uuid()) @db.Uuid
+  tenantId          String          @map("tenant_id") @db.Uuid
+  assessmentId      String          @map("assessment_id") @db.Uuid
   // El id de la pregunta del cuestionario (`diab`, `insul`, …). Texto y no
   // FK: el cuestionario es dato del módulo, no una tabla.
-  questionId   String         @map("question_id")
-  value        ClinicalAnswer
+  questionId        String          @map("question_id")
+  /// clinica-7 · admite NULL para que el claro se pueda VACIAR cuando la
+  /// corrección ya está cifrada. El enum no tiene valor neutro, así que un
+  /// centinela sería una respuesta clínica falsa dentro de la historia. Lo
+  /// que sostiene la columna es el CHECK
+  /// `clinical_assessment_corrections_dice_algo`: una corrección dice
+  /// algo, en claro o cifrado.
+  value             ClinicalAnswer?
+  /// Y la corrección entera, cifrada: `{"preguntaId":"diab","valor":"SI"}`.
+  /// Pregunta y valor juntos porque separados `question_id` en claro ya
+  /// diría de qué habla la fila. AAD
+  /// `tenant|clinical_assessment_corrections|correccion|id`.
+  correccionCifrada String?         @map("correccion_cifrada")
   // LA FIRMA. NOT NULL y RESTRICT: una corrección anónima sobre una
   // historia clínica no existe.
-  authorUserId String         @map("author_user_id") @db.Uuid
-  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz()
+  authorUserId      String          @map("author_user_id") @db.Uuid
+  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz()
 
   tenant     Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   assessment ClinicalAssessment @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
@@ -4558,6 +4653,136 @@ model ClinicalAssessmentCorrection {
   @@index([assessmentId, createdAt])
   @@index([tenantId])
   @@map("clinical_assessment_corrections")
+}
+
+// ─── clinica-7 · EL BLINDAJE ──────────────────────────────────────────
+//
+// Dos tablas, y las dos contestan preguntas que un abogado hace:
+//
+//   `clinical_processor_agreements`  ¿quién aceptó qué texto y cuándo?
+//   `clinical_tenant_keys`           ¿con qué clave se cifra esta clínica,
+//                                    y se destruyó ya?
+
+// EL CONTRATO DE ENCARGADO DEL TRATAMIENTO (art. 28 RGPD). SOLO
+// INSERCIONES (trigger `clinical_processor_agreements_append_only`).
+//
+// **Aceptar es una fila; revocar es OTRA FILA** que apunta a la que
+// revoca, igual que `ClientConsent.revokesConsentId` de clinica-4. Nunca
+// un UPDATE: una aceptación editable no demuestra nada sobre qué se
+// aceptó, y lo que esta tabla existe para demostrar es exactamente eso.
+//
+// Y de ahí sale que el estado del módulo clínico sea una CUENTA sobre
+// estas filas y no una columna. La hace una sola función pura
+// (`@mipiacetpv/contrato-encargado`), que usan la API, el TPV y el panel:
+// con una copia por lado, la pantalla diría «puedes escribir» sobre algo
+// que el servidor considera revocado.
+//
+// Lo que NO lleva: nada de salud. Quién, qué versión, qué huella, cuándo,
+// desde qué aparato y desde qué IP.
+model ClinicalProcessorAgreement {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  // La versión del contrato y la HUELLA de su texto canónico. No se
+  // guarda el texto: el paquete versionado lo tiene, y la huella es lo que
+  // demuestra que es EL MISMO.
+  //
+  // La revocación COPIA versión y huella de la fila que revoca, como la
+  // revocación de un consentimiento: es lo que hace que la lista se lea
+  // («v1 · revocado el 14 de octubre») sin cruzar dos filas para pintar
+  // una.
+  version    Int
+  textSha256 String @map("text_sha256") @db.Char(64)
+
+  // QUIÉN. NOT NULL y Restrict: una aceptación anónima de un contrato de
+  // encargado no existe. Que ADEMÁS sea OWNER lo exige la API — cruza el
+  // rol del usuario con el tenant y no cabe en un CHECK.
+  userId String   @map("user_id") @db.Uuid
+  at     DateTime @default(now()) @db.Timestamptz()
+
+  // DESDE DÓNDE. `deviceId` es **Restrict y no SetNull**: la tabla no se
+  // puede reescribir, así que un SET NULL sería una promesa que el trigger
+  // rechazaría al ejecutarse. Un aparato con aceptaciones no se borra — se
+  // revoca, que es lo que el producto hace con los aparatos.
+  deviceId  String? @map("device_id") @db.Uuid
+  ip        String? @db.VarChar(45)
+  userAgent String? @map("user_agent") @db.VarChar(300)
+
+  // La fila que esta revoca. Con esto puesto, la fila NO ACEPTA NADA.
+  revokesAgreementId String? @map("revokes_agreement_id") @db.Uuid
+
+  tenant      Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  user        User                         @relation("ClinicalProcessorAgreementUser", fields: [userId], references: [id], onDelete: Restrict)
+  device      Device?                      @relation("ClinicalProcessorAgreementDevice", fields: [deviceId], references: [id], onDelete: Restrict)
+  revoca      ClinicalProcessorAgreement?  @relation("ClinicalProcessorAgreementRevocacion", fields: [revokesAgreementId], references: [id], onDelete: Restrict)
+  revocadoPor ClinicalProcessorAgreement[] @relation("ClinicalProcessorAgreementRevocacion")
+
+  @@index([tenantId, at])
+  // El índice PARCIAL sobre `revokes_agreement_id` (WHERE NOT NULL) se
+  // crea en SQL: Prisma no expresa índices parciales. Mismo caso que
+  // `public_links_uno_vivo_key`.
+  @@map("clinical_processor_agreements")
+}
+
+// LA CLAVE DE UNA CLÍNICA. Una fila por tenant.
+//
+// La DEK (32 bytes aleatorios) cifra TODO el texto clínico y TODOS los
+// ficheros de esa clínica, y **nunca está en claro en la base**: se guarda
+// envuelta con la KEK, que vive en `CLINICAL_KEK` y no está ni en la base
+// ni en el repo.
+//
+// ── Por qué una clave por clínica y no una sola ──────────────────────
+//
+// Porque borrar la DEK de una clínica deja ilegibles sus datos **en todas
+// las copias de seguridad pasadas**, también las de hace meses. Es la
+// única forma real de «destruir» al terminar el contrato (art. 28.3.g): un
+// DELETE no llega a las copias, y las copias son justo donde la historia
+// sigue viva. Con una clave única para todos, destruir los datos de una
+// clínica obligaría a re-cifrar los de las demás.
+//
+// La función de destrucción (`crypto-shredding`) está construida y
+// probada. **La pantalla que la lanza, NO**: es una operación de
+// superadmin con doble confirmación y queda para su bloque.
+//
+// ── Y el canario ─────────────────────────────────────────────────────
+//
+// Un texto conocido cifrado con esta DEK. Al arrancar, la API lo descifra
+// para cada tenant clínico; si no cuadra, la KEK no es la que envolvió
+// estas claves y **la API no arranca**. Fallar al arrancar es mejor que
+// escribir algo que después no se puede leer.
+model ClinicalTenantKey {
+  tenantId String @id @map("tenant_id") @db.Uuid
+
+  // Con QUÉ KEK está envuelta. Con id porque la KEK rota: re-envolver es
+  // un script del repo, y mientras corre conviven filas de las dos. Sin el
+  // id habría que probar las dos a ciegas, y «probar claves» es justo lo
+  // que no se hace con claves.
+  kekId      String  @map("kek_id") @db.VarChar(40)
+  // La DEK envuelta, formato `v1:` de `crypto.ts` con AAD `tenant|kek`
+  // (así una DEK envuelta no se puede mover a otro tenant). `null` =
+  // destruida.
+  dekWrapped String? @map("dek_wrapped")
+  // El canario, cifrado con la DEK. `null` = destruida.
+  canary     String?
+
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  // Cuándo se re-envolvió por última vez. La DEK NO cambia al rotar la
+  // KEK: lo que cambia es con qué está envuelta, y por eso las filas no
+  // hay que re-cifrarlas.
+  rewrappedAt DateTime? @map("rewrapped_at") @db.Timestamptz()
+
+  // CUÁNDO SE DESTRUYÓ. La fila se queda con la clave borrada en vez de
+  // desaparecer: así el sistema puede decir «los datos de esta clínica se
+  // destruyeron el 3 de marzo» en lugar de parecer una clave que falta por
+  // un fallo. Un hueco no es una respuesta cuando la pregunta la hace un
+  // abogado.
+  destroyedAt     DateTime? @map("destroyed_at") @db.Timestamptz()
+  destroyedReason String?   @map("destroyed_reason") @db.VarChar(200)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@index([kekId])
+  @@map("clinical_tenant_keys")
 }
 
 // ── enlaces-publicos · UNA SOLA PUERTA ────────────────────────────────────
@@ -4612,6 +4837,25 @@ model PublicLink {
   // trigger `public_links_guard`.
   maxUses   Int @map("max_uses")
   usedCount Int @default(0) @map("used_count")
+
+  // ── clinica-7 · EL CÓDIGO DE 6 CIFRAS ──────────────────────────────
+  //
+  // Decisión 21: el enlace del informe clínico no abre con solo tener la
+  // URL. Pide un código que se enseña UNA vez en pantalla a quien lo envía,
+  // para darlo por otro canal (en mano o por teléfono). Así, un correo
+  // reenviado o una URL en el historial de un móvil prestado no abren nada.
+  //
+  // **LA HUELLA, nunca el código.** El CHECK
+  // `public_links_code_hash_es_sha256` solo admite 64 hex: un código de 6
+  // cifras NO CABE en esta columna. Y es identidad para el trigger — el
+  // código de un enlace no cambia; si hace falta otro, es otro enlace.
+  //
+  // `null` en los `purpose` que no piden código (la valoración).
+  codeHash     String? @map("code_hash") @db.Char(64)
+  // Cuántas veces se ha fallado el código. 5 fallos ANULAN el enlace. Solo
+  // sube (lo garantiza el trigger): bajarlo es regalar intentos a quien
+  // está probando códigos sobre la historia clínica de alguien.
+  codeFailures Int     @default(0) @map("code_failures")
 
   // Recepción lo anuló. No se des-anula (trigger).
   revokedAt DateTime? @map("revoked_at") @db.Timestamptz()

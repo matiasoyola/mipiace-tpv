@@ -4,6 +4,10 @@ import { registerSW } from "virtual:pwa-register";
 
 import { App } from "./App.js";
 import {
+  InformePublico,
+  tokenDelInformeEnLaUrl,
+} from "./clinica/InformePublico.js";
+import {
   ValoracionPublica,
   tokenDeLaUrl,
 } from "./clinica/ValoracionPublica.js";
@@ -83,6 +87,14 @@ if (!root) throw new Error("Falta #root en index.html");
 //
 const tokenDelTest = tokenDeLaUrl();
 
+// clinica-7 · Y EL INFORME POR ENLACE, por lo mismo.
+//
+// `/informe/<token>` lo abre el paciente desde su correo, o el profesional
+// al que se le derivó. Mismo desvío y misma razón: `App` arranca con
+// `useDeviceBootstrap`, así que un móvil sin emparejar caería en la
+// pantalla de pairing en vez de pedir la clave.
+const tokenDelInforme = tokenDelInformeEnLaUrl();
+
 // v1.12-manos-de-camarero · hallazgo H1: en el Chrome 81 de fábrica del
 // AP11 no existe `gap` en flexbox y la UI entera se pinta con los
 // textos pegados ("Sala5 abiertas", "GEgemmamgc720,00 €"). Se comprueba
@@ -101,6 +113,8 @@ if (!flexGapSupported()) {
       <ErrorBoundary>
         {tokenDelTest ? (
           <ValoracionPublica token={tokenDelTest} />
+        ) : tokenDelInforme ? (
+          <InformePublico token={tokenDelInforme} />
         ) : (
           <App />
         )}

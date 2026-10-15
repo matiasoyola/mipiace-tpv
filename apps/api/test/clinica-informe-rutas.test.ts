@@ -279,20 +279,42 @@ describe("clinica-4 · el cuerpo del email NO lleva datos de salud", () => {
     await app.close();
   });
 
-  it("el PDF va ADJUNTO, y el adjunto no lo cuenta en el nombre", async () => {
+  it("NI UN ADJUNTO: va un enlace, y el código no viaja en el correo", async () => {
+    // clinica-7 · decisión 21, y este test ES el cambio. Antes afirmaba
+    // que el PDF iba adjunto; ahora afirma lo contrario, y el por qué lo
+    // dejó escrito clinica-4 en su «pendiente del abogado»: un adjunto
+    // viaja por servidores que no son nuestros y sin cifrar, y se queda en
+    // el buzón del paciente para siempre.
     const app = await buildApp();
-    await app.inject({
+    const res = await app.inject({
       method: "POST",
       url: `/clinica/clients/${PACIENTE_ID}/informe`,
       headers: comoSanitaria,
       payload: { tipo: "RESUMEN", canal: "EMAIL", destinatario: "PACIENTE" },
     });
-    const adj = enviados[0]!.attachments!;
-    expect(adj).toHaveLength(1);
-    expect(adj[0]!.filename).toBe("informe-clinico-resumen.pdf");
-    expect(adj[0]!.filename.toLowerCase()).not.toContain("carmen");
-    // Y es un PDF de verdad.
-    expect(adj[0]!.content.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+    expect(res.statusCode).toBe(201);
+
+    const correo = enviados[0]!;
+    // NI UN ADJUNTO. Ni vacío: la clave no se pone.
+    expect(correo.attachments).toBeUndefined();
+
+    // Lo que SÍ lleva: el enlace.
+    const enlace = mundo.enlaces[0]!;
+    expect(enlace.purpose).toBe("INFORME_CLINICO");
+    expect(correo.text).toContain("/informe/");
+    expect(correo.html).toContain("/informe/");
+
+    // Y EL CÓDIGO NO VIAJA EN EL CORREO. Es la mitad entera del
+    // mecanismo: si fuera dentro, tener el correo bastaría.
+    const codigo = res.json().codigo as string;
+    expect(codigo).toMatch(/^[0-9]{6}$/);
+    expect(correo.text).not.toContain(codigo);
+    expect(correo.html).not.toContain(codigo);
+    expect(correo.subject).not.toContain(codigo);
+
+    // De la base sale su HUELLA, nunca el código.
+    expect(enlace.codeHash).toHaveLength(64);
+    expect(enlace.codeHash).not.toContain(codigo);
     await app.close();
   });
 

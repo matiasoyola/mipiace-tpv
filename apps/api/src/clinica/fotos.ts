@@ -39,6 +39,14 @@
 import type { Prisma, PrismaClient } from "@mipiacetpv/db";
 import { MAPA_PIE_V1, clavesDelMapa, nombreDeZona } from "@mipiacetpv/clinica-sesion";
 
+import { asegurarDek, dekONada } from "./claves.js";
+import {
+  cifrarTexto,
+  leerTexto,
+  nuevoIdDeFila,
+  sitioMotivoDeRetirada,
+  sitioZonaDeFoto,
+} from "./cripto-campos.js";
 import { guardarFichero, MIME_DE_FOTO } from "./ficheros.js";
 
 /** Cuántas fotos entran en la rejilla de «Todas». */
@@ -69,11 +77,17 @@ export interface ComparadorDeZona {
 
 const SELECT_FOTO = {
   id: true,
+  tenantId: true,
   zona: true,
+  // clinica-7 · las dos cifradas, al lado de las claras. Mandan ellas
+  // cuando están; el claro es el respaldo de las filas que el script
+  // todavía no ha pasado (ver `cripto-campos.ts`).
+  zonaCifrada: true,
   mapaVersion: true,
   createdAt: true,
-  withdrawnAt: true,
   withdrawReason: true,
+  withdrawReasonCifrado: true,
+  withdrawnAt: true,
   author: { select: { alias: true, email: true } },
   withdrawnBy: { select: { alias: true, email: true } },
 } satisfies Prisma.ClinicalPhotoSelect;
@@ -85,20 +99,39 @@ function nombreDe(u: { alias: string | null; email: string } | null): string {
   return u.alias?.trim() || u.email;
 }
 
-function aPantalla(f: FilaDeFoto): FotoEnPantalla {
+/**
+ * clinica-7 · la fila, descifrada.
+ *
+ * La DEK entra como parámetro y puede ser `null`: una clínica sin clave
+ * todavía no ha cifrado nada, y entonces lo que se lee es el claro. No se
+ * pide la clave aquí dentro porque esta función la llama un `map` sobre
+ * ciento veinte fotos — una lectura de clave por foto sería ciento veinte
+ * consultas, y el criterio de rendimiento del bloque son 50 ms.
+ */
+function aPantalla(f: FilaDeFoto, dek: Buffer | null): FotoEnPantalla {
+  const zona =
+    leerTexto(
+      { cifrado: f.zonaCifrada, claro: f.zona },
+      dek,
+      sitioZonaDeFoto(f.tenantId, f.id),
+    ) ?? "";
   return {
     id: f.id,
-    zona: f.zona,
+    zona,
     // Con el vocabulario de SU versión del mapa, no de la de hoy: una
     // foto apuntada a una zona de otra versión se sigue leyendo, y lo que
     // no se hace nunca es pintarla en el sitio de ahora (clinica-3).
-    zonaNombre: nombreDeZona(f.zona, f.mapaVersion),
+    zonaNombre: nombreDeZona(zona, f.mapaVersion),
     mapaVersion: f.mapaVersion,
     hecha: f.createdAt.toISOString(),
     autor: nombreDe(f.author),
     retirada: f.withdrawnAt != null,
     retiradaEn: f.withdrawnAt?.toISOString() ?? null,
-    retiradaMotivo: f.withdrawReason,
+    retiradaMotivo: leerTexto(
+      { cifrado: f.withdrawReasonCifrado, claro: f.withdrawReason },
+      dek,
+      sitioMotivoDeRetirada(f.tenantId, f.id),
+    ),
     retiradaPor: f.withdrawnAt ? nombreDe(f.withdrawnBy) : null,
   };
 }
@@ -158,13 +191,36 @@ export async function guardarFoto(
     };
   }
 
-  const guardado = await guardarFichero("FOTO", input.jpeg);
+  // clinica-7 · LA CLAVE DE ESTA CLÍNICA, creándola si es la primera vez.
+  // Antes de tocar el disco: si no hay forma de cifrar, no se escribe
+  // nada — ni el fichero ni la fila.
+  const dek = await asegurarDek(input.tenantId, prisma);
+  // Y EL ID DE LA FILA, ANTES DE INSERTARLA. La zona se cifra atada a
+  // `tenant|clinical_photos|zona|<id>`, y ese id no se puede leer de una
+  // fila que todavía no existe. Ver la cabecera de `cripto-campos.ts`.
+  const id = nuevoIdDeFila();
+
+  const guardado = await guardarFichero("FOTO", input.jpeg, {
+    tenantId: input.tenantId,
+    dek,
+  });
   const fila = await prisma.clinicalPhoto.create({
     data: {
+      id,
       tenantId: input.tenantId,
       clientId: input.clientId,
       appointmentId: input.appointmentId,
-      zona: input.zona,
+      // La zona en claro se deja VACÍA en las filas nuevas: no hay nada
+      // que migrar en una fila que nace cifrada, y escribir las dos sería
+      // guardar el dato de salud en claro a propósito. El `''` y no `null`
+      // porque la columna es NOT NULL desde clinica-4 y quitarle el NOT
+      // NULL sería aflojar una garantía para esto.
+      zona: "",
+      zonaCifrada: cifrarTexto(
+        input.zona,
+        dek,
+        sitioZonaDeFoto(input.tenantId, id),
+      ),
       mapaVersion: MAPA_PIE_V1.version,
       fileName: guardado.fileName,
       sha256: guardado.sha256,
@@ -174,7 +230,7 @@ export async function guardarFoto(
     },
     select: SELECT_FOTO,
   });
-  return { ok: true, foto: aPantalla(fila) };
+  return { ok: true, foto: aPantalla(fila, dek) };
 }
 
 export type MotivoDeNoRetirar = "NO_EXISTE" | "YA_ESTABA_RETIRADA";
@@ -228,16 +284,26 @@ export async function retirarFoto(
       mensaje: "Esa foto ya estaba retirada.",
     };
   }
+  const dek = await asegurarDek(input.tenantId, prisma);
   const actualizada = await prisma.clinicalPhoto.update({
     where: { id: fila.id },
     data: {
       withdrawnAt: input.ahora,
       withdrawnByUserId: input.userId,
-      withdrawReason: input.motivo.trim(),
+      // El motivo va SOLO cifrado, por lo mismo que la zona de una foto
+      // nueva. El CHECK `clinical_photos_retirada_completa` admite las dos
+      // formas desde clinica-7, así que una retirada con el motivo
+      // únicamente cifrado es una retirada completa.
+      withdrawReason: null,
+      withdrawReasonCifrado: cifrarTexto(
+        input.motivo.trim(),
+        dek,
+        sitioMotivoDeRetirada(input.tenantId, fila.id),
+      ),
     },
     select: SELECT_FOTO,
   });
-  return { ok: true, foto: aPantalla(actualizada) };
+  return { ok: true, foto: aPantalla(actualizada, dek) };
 }
 
 /** Todas las fotos de un paciente, de la más reciente a la más antigua. */
@@ -251,7 +317,11 @@ export async function fotosDelPaciente(
     take: FOTOS_DE_LA_HISTORIA,
     select: SELECT_FOTO,
   });
-  return filas.map(aPantalla);
+  // UNA lectura de clave para las ciento veinte. `dekONada` y no
+  // `asegurarDek`: leer la historia de una clínica que todavía no ha
+  // escrito nada no tiene por qué crearle una clave.
+  const dek = await dekONada(input.tenantId, prisma);
+  return filas.map((f) => aPantalla(f, dek));
 }
 
 /**

@@ -17,6 +17,9 @@ importers:
 
   apps/admin:
     dependencies:
+      '@mipiacetpv/contrato-encargado':
+        specifier: workspace:*
+        version: link:../../packages/contrato-encargado
       '@mipiacetpv/ticket-model':
         specifier: workspace:*
         version: link:../../packages/ticket-model
@@ -87,6 +90,9 @@ importers:
       '@mipiacetpv/consentimientos':
         specifier: workspace:*
         version: link:../../packages/consentimientos
+      '@mipiacetpv/contrato-encargado':
+        specifier: workspace:*
+        version: link:../../packages/contrato-encargado
       '@mipiacetpv/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -202,6 +208,9 @@ importers:
       '@mipiacetpv/clinica-valoracion':
         specifier: workspace:*
         version: link:../../packages/clinica-valoracion
+      '@mipiacetpv/contrato-encargado':
+        specifier: workspace:*
+        version: link:../../packages/contrato-encargado
       '@mipiacetpv/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -257,6 +266,9 @@ importers:
       '@mipiacetpv/consentimientos':
         specifier: workspace:*
         version: link:../../packages/consentimientos
+      '@mipiacetpv/contrato-encargado':
+        specifier: workspace:*
+        version: link:../../packages/contrato-encargado
       '@mipiacetpv/escpos-builder':
         specifier: workspace:*
         version: link:../../packages/escpos-builder
@@ -375,6 +387,18 @@ importers:
         version: 2.1.9(@types/node@20.19.40)(jsdom@29.1.1)(terser@5.47.1)
 
   packages/consentimientos:
+    devDependencies:
+      '@types/node':
+        specifier: ^20.16.10
+        version: 20.19.40
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
+        version: 2.1.9(@types/node@20.19.40)(jsdom@29.1.1)(terser@5.47.1)
+
+  packages/contrato-encargado:
     devDependencies:
       '@types/node':
         specifier: ^20.16.10

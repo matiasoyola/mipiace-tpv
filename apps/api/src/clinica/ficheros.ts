@@ -31,11 +31,45 @@
 // hubiera dos sitios que la calcularan, la que no cuadrara sería la de
 // alguien que cambió el fichero y nadie lo sabría.
 
+// ── clinica-7 · Y AHORA EL DISCO ESTÁ CIFRADO ────────────────────────
+//
+// Decisión 8. El fichero se cifra con la DEK de su clínica ANTES de
+// escribirse, con una cabecera binaria (`MPC1 || IV || tag || ct`) y el
+// AAD `tenant|clinical_files|<clase>|<nombre>`. Lo que esto cambia, dicho
+// en lo que pasa:
+//
+//   · Si se filtra el volumen, **no se abre ni una foto**. Antes el JPEG
+//     estaba en claro y lo único que lo protegía era que nadie más que la
+//     API lo sirviera. Eso sigue, y ya no es lo único.
+//   · Un fichero copiado de una clínica a otra no se descifra, y uno
+//     renombrado tampoco: el nombre está en el AAD.
+//
+// **LA HUELLA SIGUE SIENDO LA DEL CONTENIDO EN CLARO**, y se comprueba
+// DESPUÉS de descifrar. Es la mitad de la decisión 8 que importa: con la
+// huella del cifrado, lo único que se detectaría es que alguien tocó el
+// envoltorio — y eso ya lo detecta el tag de GCM solo. Comprobar la del
+// claro es comprobar que lo que sale es lo que entró.
+//
+// ── Y los ficheros que ya estaban escritos en claro ─────────────────
+//
+// Se siguen leyendo. `esFicheroCifrado` mira la cabecera: si está, se
+// descifra; si no, se devuelve tal cual. El script de cifrado los pasa en
+// su sitio, de forma idempotente, y hasta que los pase la historia tiene
+// que seguir abriéndose. Lo que NO se puede hacer es escribir uno nuevo en
+// claro: `guardarFichero` exige la DEK, y eso es el tipo, no una
+// costumbre.
+
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { loadEnv } from "../env.js";
+import {
+  cifrarFichero,
+  descifrarFichero,
+  esFicheroCifrado,
+  sitioDelFichero,
+} from "./cripto.js";
 
 /** Lo que este almacén guarda. Cada clase, su carpeta y su extensión. */
 export type ClaseDeFichero = "FOTO" | "CONSENTIMIENTO" | "INFORME";
@@ -136,21 +170,42 @@ function directorioDe(clase: ClaseDeFichero): string {
 export async function guardarFichero(
   clase: ClaseDeFichero,
   contenido: Buffer | Uint8Array,
+  // clinica-7 · de QUIÉN es y con QUÉ clave. Los dos obligatorios: un
+  // parámetro opcional aquí habría sido la forma de que una ruta nueva
+  // escribiera en claro sin que nadie lo notase.
+  cripto: { tenantId: string; dek: Buffer },
 ): Promise<FicheroGuardado> {
   const buf = Buffer.isBuffer(contenido) ? contenido : Buffer.from(contenido);
+  // LA HUELLA, DEL CLARO. Antes de cifrar, y es la que va a la fila.
   const sha256 = huellaDe(buf);
+  // El nombre SE DECIDE ANTES de cifrar, porque va en el AAD: así un
+  // fichero renombrado deja de descifrarse. (Y sigue sin decir nada del
+  // paciente: uuid y doce hex de la huella.)
   const fileName = `${randomUUID()}-${sha256.slice(0, 12)}.${EXTENSION[clase]}`;
   const dir = directorioDe(clase);
   await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, fileName), buf);
+  const sobre = cifrarFichero(
+    buf,
+    cripto.dek,
+    sitioDelFichero({ tenantId: cripto.tenantId, clase, fileName }),
+  );
+  await writeFile(join(dir, fileName), sobre);
+  // `bytes` es el tamaño DEL CLARO, no del sobre: es lo que la pantalla
+  // enseña y lo que el tope de la foto compara. El sobre pesa 32 bytes
+  // más, y ese número no le dice nada a nadie.
   return { fileName, sha256, bytes: buf.byteLength };
 }
 
 export interface FicheroLeido {
   contenido: Buffer;
   bytes: number;
-  /** `true` si la huella del disco coincide con la que dice la fila. */
+  /** `true` si la huella del contenido EN CLARO coincide con la que dice
+   *  la fila. Se comprueba después de descifrar (clinica-7, decisión 8). */
   huellaCuadra: boolean;
+  /** clinica-7 · `true` si el fichero del disco estaba cifrado. `false`
+   *  son los que el script de cifrado todavía no ha pasado, y es lo que el
+   *  script cuenta para saber cuánto le queda. */
+  cifrado: boolean;
 }
 
 /**
@@ -167,21 +222,61 @@ export async function leerFichero(
   clase: ClaseDeFichero,
   fileName: string,
   sha256Esperada: string | null,
+  // clinica-7 · de quién es y con qué clave. `dek: null` es legítimo y
+  // significa «esta clínica no tiene clave todavía»: entonces solo se
+  // pueden leer los ficheros que siguen en claro, que es exactamente lo
+  // que hay si no hay clave.
+  cripto: { tenantId: string; dek: Buffer | null },
 ): Promise<FicheroLeido | null> {
   if (!FILE_NAME_RE.test(fileName)) return null;
   const ruta = join(directorioDe(clase), fileName);
+  let enDisco: Buffer;
   try {
-    const info = await stat(ruta);
-    const contenido = await readFile(ruta);
-    return {
-      contenido,
-      bytes: info.size,
-      huellaCuadra:
-        sha256Esperada == null ? true : huellaDe(contenido) === sha256Esperada,
-    };
+    await stat(ruta);
+    enDisco = await readFile(ruta);
   } catch {
     return null;
   }
+
+  // ── Descifrar, si está cifrado ────────────────────────────────────
+  //
+  // La cabecera lo dice. Los ficheros que el script todavía no pasó se
+  // devuelven tal cual: mientras la migración va por fases, la historia
+  // tiene que seguir abriéndose.
+  let contenido = enDisco;
+  let cifrado = false;
+  if (esFicheroCifrado(enDisco)) {
+    cifrado = true;
+    if (cripto.dek == null) return null;
+    try {
+      contenido = descifrarFichero(
+        enDisco,
+        cripto.dek,
+        sitioDelFichero({ tenantId: cripto.tenantId, clase, fileName }),
+      );
+    } catch {
+      // Un fichero que no se descifra NO se devuelve: al contrario que la
+      // huella que no cuadra —donde el documento se enseña con el aviso,
+      // porque enseñarlo es justo lo que hace falta— aquí no hay nada que
+      // enseñar. Lo que se devolvería es el sobre, y el sobre no es el
+      // documento.
+      return null;
+    }
+  }
+
+  return {
+    contenido,
+    // Los bytes DEL CLARO, no los del fichero del disco: es lo que la
+    // pantalla enseña y lo que la cabecera `Content-Length` tiene que
+    // decir. `info.size` habría devuelto 32 bytes más y el navegador se
+    // habría quedado esperando.
+    bytes: contenido.byteLength,
+    // LA HUELLA, DESPUÉS DE DESCIFRAR, y contra la del claro. Decisión 8:
+    // es lo que hace que un fichero manipulado se siga detectando.
+    huellaCuadra:
+      sha256Esperada == null ? true : huellaDe(contenido) === sha256Esperada,
+    cifrado,
+  };
 }
 
 /** Para el `-done` y para el script de copia: dónde viven. */

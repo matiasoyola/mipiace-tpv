@@ -166,6 +166,54 @@ export const EnvSchema = z.object({
     .positive()
     .default(4 * 1024 * 1024),
 
+  // ── clinica-7 · LA CLAVE MAESTRA DE LO CLÍNICO ─────────────────────
+  //
+  // `CLINICAL_KEK` envuelve la DEK de cada clínica. Base64 de 32 bytes,
+  // AES-256-GCM. **No está en la base y no está en el repo**: si estuviera
+  // en la base, una copia filtrada traería la clave con la que se
+  // descifra, y todo este bloque no serviría para nada.
+  //
+  // ── Por qué es OPCIONAL aquí y obligatoria al arrancar ────────────
+  //
+  // Opcional en el esquema porque la mayoría de los despliegues no tienen
+  // ni una clínica: un bar que no la necesita no tiene que inventarse una
+  // clave de 32 bytes para que su API arranque, y obligarle habría sido
+  // garantizar que alguien pone `AAAA...` y se olvida.
+  //
+  // Obligatoria **en cuanto exista un tenant clínico**, y eso lo comprueba
+  // el arranque (`clinica/arranque.ts`, decisión 17): si hay clínicas y
+  // falta la KEK —o la KEK no descifra la fila canario— **la API no
+  // arranca** y lo dice en el log. Fallar al arrancar es mejor que escribir
+  // algo que después no se puede leer.
+  //
+  // Generar: `node scripts/generar-claves-clinicas.mjs`.
+  CLINICAL_KEK: z.preprocess(
+    (v) => (v === "" || v === undefined ? undefined : v),
+    z
+      .string()
+      .refine(
+        (s) => {
+          try {
+            return Buffer.from(s, "base64").length === 32;
+          } catch {
+            return false;
+          }
+        },
+        {
+          message:
+            "CLINICAL_KEK debe ser base64 de 32 bytes. " +
+            "Generar con: node scripts/generar-claves-clinicas.mjs",
+        },
+      )
+      .optional(),
+  ),
+  // QUÉ KEK es ésta. Va en cada fila de `clinical_tenant_keys`, y es lo que
+  // permite rotar: mientras el script de re-envoltura corre, conviven filas
+  // envueltas con la vieja y con la nueva, y cada una dice cuál es la suya.
+  // Sin el id habría que probar las dos a ciegas, y «probar claves» es
+  // justo lo que no se hace con claves.
+  CLINICAL_KEK_ID: z.string().min(1).max(40).default("kek-1"),
+
   // ── Sentry (v1.5-consistencia-B · Lote 2) ──────────────────────────
   // Sin DSN, Sentry queda en no-op absoluto (initSentry no llama init).
   // Compose interpola `""` cuando la var no está en .env.production —
@@ -214,4 +262,25 @@ export function loadEnv(): AppEnv {
   if (cached) return cached;
   cached = EnvSchema.parse(process.env);
   return cached;
+}
+
+/**
+ * Olvida el entorno leído. **Para los tests y nada más.**
+ *
+ * Lo pide clinica-7: los casos del arranque (decisión 17) son «hay
+ * clínicas y FALTA la KEK», «hay clínicas y la KEK es de otro entorno»…, y
+ * cada uno es un `process.env` distinto. Con la caché de una sola lectura,
+ * el segundo caso de un fichero de test corre con el entorno del primero y
+ * el test pasa sin probar nada.
+ *
+ * Lo encontró justamente eso: cuatro casos del arranque y de la rotación
+ * salían verdes porque `delete process.env.CLINICAL_KEK` no tenía ningún
+ * efecto después de la primera llamada.
+ *
+ * No se llama desde `src/`: la caché existe porque leer y validar el
+ * entorno en cada petición sería tirar CPU, y en producción el entorno no
+ * cambia sin reiniciar.
+ */
+export function olvidarEnv(): void {
+  cached = null;
 }

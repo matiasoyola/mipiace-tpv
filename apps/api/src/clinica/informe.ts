@@ -46,6 +46,8 @@ import {
 } from "@mipiacetpv/clinica-valoracion";
 import { renderInformeClinicoPdf } from "@mipiacetpv/ticket-pdf";
 
+import { dekONada } from "./claves.js";
+import { cuerpoDeEntrada } from "./cripto-campos.js";
 import {
   consentimientosVigentesLegibles,
   datosDelCentro,
@@ -232,10 +234,15 @@ async function consejosDeLaUltima(
     },
     orderBy: { createdAt: "desc" },
     take: 10,
-    select: { body: true },
+    // clinica-7 · `id` y `tenantId` los pide el AAD del cuerpo.
+    select: { id: true, tenantId: true, body: true, bodyCifrado: true },
   });
+  const dek = await dekONada(input.tenantId, prisma);
   for (const f of filas) {
-    const cuerpo = f.body as { consejosNombre?: unknown; consejos?: unknown };
+    const cuerpo = cuerpoDeEntrada({ ...f, body: f.body as unknown }, dek) as {
+      consejosNombre?: unknown;
+      consejos?: unknown;
+    } | null;
     const nombres = cuerpo?.consejosNombre;
     if (Array.isArray(nombres) && nombres.length > 0) {
       return nombres.filter((x): x is string => typeof x === "string");

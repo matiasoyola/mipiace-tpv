@@ -44,6 +44,9 @@
 // pondrá la key de la regla que bloqueó (`POLICY_BLOCKED`), y así el front
 // lee `code` desde ya y no se reescribe dos veces.
 
+import { admiteNotasEnCita } from "@mipiacetpv/contrato-encargado";
+
+import { estadoDelTenant } from "../clinica/contrato.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { requireOwnerOrCashier } from "../auth/middleware.js";
@@ -401,6 +404,32 @@ export async function registerAgendaRoutes(
             : "occurredAt no se usa para el suelo",
         );
       }
+      // ── clinica-7 · decisión 5 · la nota de una cita NUEVA ──────────
+      //
+      // En un tenant clínico con el contrato de encargado NO VIGENTE, una
+      // cita nueva no admite nota libre: solo hora, paciente y servicio.
+      // Las que ya existen se siguen viendo — esto solo mira las nuevas.
+      //
+      // **409 y no borrar la nota en silencio.** Tirar lo que alguien
+      // acaba de teclear y dar la cita por buena es la forma de que
+      // recepción escriba «viene por lo del dedo» tres veces y no entienda
+      // por qué nunca está. El 409 dice qué pasa y qué hacer.
+      //
+      // Y no bloquea dar la cita: se quita la nota y la cita entra. Eso es
+      // «revocar no toca la agenda» — lo que se pierde es el texto libre,
+      // no la cita.
+      if (body.notes != null && body.notes.trim() !== "") {
+        const estado = await estadoDelTenant(auth.tenantId);
+        if (!admiteNotasEnCita(estado)) {
+          return reply.code(409).send({
+            error: "SIN_NOTAS_SIN_CONTRATO",
+            code: "SIN_NOTAS_SIN_CONTRATO",
+            message:
+              "El contrato de tratamiento de datos no está vigente, así que las citas nuevas no admiten notas: guarda la cita sin nota (hora, paciente y servicio). Para volver a escribir notas, la dueña tiene que aceptarlo en Ajustes › Contrato de tratamiento de datos.",
+          });
+        }
+      }
+
       // Presencial = confirmada directa; el resto entra como hold PENDING.
       const confirmed = source === "PRESENCIAL";
       const result = await engineFor(request).hold({

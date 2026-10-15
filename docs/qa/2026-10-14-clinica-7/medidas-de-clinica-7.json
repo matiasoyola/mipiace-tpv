@@ -1,0 +1,337 @@
+[
+  {
+    "pantalla": "1-aceptacion",
+    "ancho": "1366",
+    "minimoTactilPx": 44,
+    "pordebajoDe44": [],
+    "scrollHorizontal": false,
+    "anchoDelContenidoPx": 1366
+  },
+  {
+    "pantalla": "6-historia-en-la-ficha",
+    "ancho": "1366",
+    "minimoTactilPx": 36,
+    "pordebajoDe44": [
+      {
+        "texto": "",
+        "w": 36,
+        "h": 36
+      },
+      {
+        "texto": "Editar datos",
+        "w": 105,
+        "h": 36
+      },
+      {
+        "texto": "Datos",
+        "w": 176,
+        "h": 40
+      },
+      {
+        "texto": "Tratamiento",
+        "w": 176,
+        "h": 40
+      },
+      {
+        "texto": "Historial",
+        "w": 93,
+        "h": 36
+      },
+      {
+        "texto": "Ficha técnica",
+        "w": 93,
+        "h": 36
+      },
+      {
+        "texto": "Bonos",
+        "w": 93,
+        "h": 36
+      },
+      {
+        "texto": "Historia",
+        "w": 93,
+        "h": 36
+      }
+    ],
+    "scrollHorizontal": false,
+    "anchoDelContenidoPx": 1366
+  },
+  {
+    "pantalla": "2-aviso-no-duena",
+    "ancho": "1366",
+    "minimoTactilPx": 44,
+    "pordebajoDe44": [],
+    "scrollHorizontal": false,
+    "anchoDelContenidoPx": 1366
+  },
+  {
+    "pantalla": "3-banda-solo-lectura",
+    "ancho": "1366",
+    "minimoTactilPx": 44,
+    "pordebajoDe44": [],
+    "scrollHorizontal": false,
+    "anchoDelContenidoPx": 1366
+  },
+  {
+    "pantalla": "4-seccion-panel",
+    "ancho": "1366",
+    "minimoTactilPx": 34,
+    "pordebajoDe44": [
+      {
+        "texto": "Declaración responsable",
+        "w": 199,
+        "h": 34
+      },
+      {
+        "texto": "Cerrar sesión",
+        "w": 106,
+        "h": 36
+      },
+      {
+        "texto": "Descargar el PDF",
+        "w": 153,
+        "h": 36
+      },
+      {
+        "texto": "Revocar el contrato",
+        "w": 158,
+        "h": 40
+      },
+      {
+        "texto": "Descargar todas las historias",
+        "w": 242,
+        "h": 40
+      }
+    ],
+    "scrollHorizontal": false,
+    "anchoDelContenidoPx": 1366
+  },
+  {
+    "pantalla": "5-informe-con-clave",
+    "ancho": "1366",
+    "minimoTactilPx": 44,
+    "pordebajoDe44": [],
+    "scrollHorizontal": false,
+    "anchoDelContenidoPx": 1366
+  },
+  {
+    "pantalla": "1-aceptacion",
+    "ancho": "1024",
+    "minimoTactilPx": 44,
+    "pordebajoDe44": [],
+    "scrollHorizontal": false,
+    "anchoDelContenidoPx": 1024
+  },
+  {
+    "pantalla": "6-historia-en-la-ficha",
+    "ancho": "1024",
+    "minimoTactilPx": 36,
+    "pordebajoDe44": [
+      {
+        "texto": "",
+        "w": 36,
+        "h": 36
+      },
+      {
+        "texto": "Editar datos",
+        "w": 105,
+        "h": 36
+      },
+      {
+        "texto": "Datos",
+        "w": 176,
+        "h": 40
+      },
+      {
+        "texto": "Tratamiento",
+        "w": 176,
+        "h": 40
+      },
+      {
+        "texto": "Historial",
+        "w": 93,
+        "h": 36
+      },
+      {
+        "texto": "Ficha técnica",
+        "w": 93,
+        "h": 36
+      },
+      {
+        "texto": "Bonos",
+        "w": 93,
+        "h": 36
+      },
+      {
+        "texto": "Historia",
+        "w": 93,
+        "h": 36
+      }
+    ],
+    "scrollHorizontal": false,
+    "anchoDelContenidoPx": 1024
+  },
+  {
+    "pantalla": "2-aviso-no-duena",
+    "ancho": "1024",
+    "minimoTactilPx": 44,
+    "pordebajoDe44": [],
+    "scrollHorizontal": false,
+    "anchoDelContenidoPx": 1024
+  },
+  {
+    "pantalla": "3-banda-solo-lectura",
+    "ancho": "1024",
+    "minimoTactilPx": 44,
+    "pordebajoDe44": [],
+    "scrollHorizontal": false,
+    "anchoDelContenidoPx": 1024
+  },
+  {
+    "pantalla": "4-seccion-panel",
+    "ancho": "1024",
+    "minimoTactilPx": 36,
+    "pordebajoDe44": [
+      {
+        "texto": "Cerrar sesión",
+        "w": 106,
+        "h": 36
+      },
+      {
+        "texto": "Descargar el PDF",
+        "w": 153,
+        "h": 36
+      },
+      {
+        "texto": "Revocar el contrato",
+        "w": 158,
+        "h": 40
+      },
+      {
+        "texto": "Descargar todas las historias",
+        "w": 242,
+        "h": 40
+      }
+    ],
+    "scrollHorizontal": false,
+    "anchoDelContenidoPx": 1024
+  },
+  {
+    "pantalla": "5-informe-con-clave",
+    "ancho": "1024",
+    "minimoTactilPx": 44,
+    "pordebajoDe44": [],
+    "scrollHorizontal": false,
+    "anchoDelContenidoPx": 1024
+  },
+  {
+    "pantalla": "1-aceptacion",
+    "ancho": "390",
+    "minimoTactilPx": 44,
+    "pordebajoDe44": [],
+    "scrollHorizontal": false,
+    "anchoDelContenidoPx": 390
+  },
+  {
+    "pantalla": "6-historia-en-la-ficha",
+    "ancho": "390",
+    "minimoTactilPx": 36,
+    "pordebajoDe44": [
+      {
+        "texto": "",
+        "w": 36,
+        "h": 36
+      },
+      {
+        "texto": "Editar datos",
+        "w": 105,
+        "h": 36
+      },
+      {
+        "texto": "Datos",
+        "w": 151,
+        "h": 40
+      },
+      {
+        "texto": "Tratamiento",
+        "w": 151,
+        "h": 40
+      },
+      {
+        "texto": "Historial",
+        "w": 80,
+        "h": 36
+      },
+      {
+        "texto": "Ficha técnica",
+        "w": 80,
+        "h": 36
+      },
+      {
+        "texto": "Bonos",
+        "w": 80,
+        "h": 36
+      },
+      {
+        "texto": "Historia",
+        "w": 80,
+        "h": 36
+      }
+    ],
+    "scrollHorizontal": false,
+    "anchoDelContenidoPx": 390
+  },
+  {
+    "pantalla": "2-aviso-no-duena",
+    "ancho": "390",
+    "minimoTactilPx": 44,
+    "pordebajoDe44": [],
+    "scrollHorizontal": false,
+    "anchoDelContenidoPx": 390
+  },
+  {
+    "pantalla": "3-banda-solo-lectura",
+    "ancho": "390",
+    "minimoTactilPx": 44,
+    "pordebajoDe44": [],
+    "scrollHorizontal": false,
+    "anchoDelContenidoPx": 390
+  },
+  {
+    "pantalla": "4-seccion-panel",
+    "ancho": "390",
+    "minimoTactilPx": 28,
+    "pordebajoDe44": [
+      {
+        "texto": "",
+        "w": 28,
+        "h": 40
+      },
+      {
+        "texto": "Cerrar sesión",
+        "w": 76,
+        "h": 36
+      },
+      {
+        "texto": "Descargar el PDF",
+        "w": 153,
+        "h": 36
+      },
+      {
+        "texto": "Revocar el contrato",
+        "w": 158,
+        "h": 40
+      }
+    ],
+    "scrollHorizontal": false,
+    "anchoDelContenidoPx": 390
+  },
+  {
+    "pantalla": "5-informe-con-clave",
+    "ancho": "390",
+    "minimoTactilPx": 44,
+    "pordebajoDe44": [],
+    "scrollHorizontal": false,
+    "anchoDelContenidoPx": 390
+  }
+]

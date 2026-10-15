@@ -49,6 +49,10 @@ COPY packages/db/package.json packages/db/
 COPY packages/clinica-sesion/package.json packages/clinica-sesion/
 COPY packages/clinica-valoracion/package.json packages/clinica-valoracion/
 COPY packages/consentimientos/package.json packages/consentimientos/
+# clinica-7 · el contrato de encargado del tratamiento y el estado del
+# módulo clínico, puros. Lo importan la API (decide si la ruta contesta), el
+# TPV (pinta la aceptación y la banda) y el panel del propietario.
+COPY packages/contrato-encargado/package.json packages/contrato-encargado/
 COPY packages/escpos-builder/package.json packages/escpos-builder/
 COPY packages/holded-client/package.json packages/holded-client/
 # kds-2-wifi · el contrato del camino directo por la wifi del local. Lo

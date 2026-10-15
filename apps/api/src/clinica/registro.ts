@@ -36,7 +36,8 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 
 import { getPrisma } from "../context.js";
-import { respondeComoRutaInexistente } from "./gate.js";
+import { negativaClinica } from "./contrato.js";
+import { esMiPiaceMirando, respondeComoRutaInexistente } from "./gate.js";
 import {
   comoPrismaParaAcceso,
   resolverAccesoClinico,
@@ -45,6 +46,45 @@ import {
 } from "./acceso.js";
 
 export type AccionClinica = "READ" | "WRITE" | "EXPORT";
+
+// ── clinica-7 · Y ANTES DE ESCRIBIR, EL CONTRATO ─────────────────────
+//
+// Decisión 4: con el contrato de encargado no vigente, la historia pasa a
+// SOLO LECTURA. Se puede leer y exportar todo, y no se puede escribir nada
+// clínico — las rutas de escritura contestan **423** con su código propio.
+//
+// ── Por qué el guard va AQUÍ y no en cada ruta ──────────────────────
+//
+// Por la razón por la que `conHistoria` existe: «cada handler se acuerda»
+// es la forma de fallo que clinica-1 cerró. Hoy hay nueve rutas que
+// escriben historia; dentro de dos bloques habrá quince, y la decimosexta
+// la escribirá alguien con prisa. Con el guard en el envoltorio, **una
+// ruta de escritura nueva nace respetando el contrato sin que su autor lo
+// sepa.**
+//
+// ── Por qué 423 y no 403 ni 409 ─────────────────────────────────────
+//
+// 423 Locked dice exactamente lo que pasa: el recurso existe, tienes
+// permiso, y está bloqueado por un estado que se puede cambiar. Un 403
+// diría «no tienes permiso» —y la podóloga lo tiene— y un 409 diría que
+// hay un conflicto con lo que mandó, y no lo hay: lo que mandó está bien.
+//
+// ── Y el orden: LA LÍNEA DEL REGISTRO PRIMERO ───────────────────────
+//
+// El 423 se comprueba DESPUÉS de apuntar el acceso, no antes. Un intento
+// de escribir con el contrato revocado es justo uno de los que interesa
+// ver en el registro — igual que los denegados por falta de acceso, que
+// clinica-1 decidió apuntar por lo mismo. Se apunta con el `outcome` que
+// le corresponde: `DENIED`, porque el acto no ocurrió.
+//
+// ── Lo que el 423 NO toca ───────────────────────────────────────────
+//
+// `READ` y `EXPORT`. Leer y exportar siguen funcionando con el contrato
+// revocado, y es deliberado: lo que hay en la historia se escribió con el
+// contrato aceptado, y además la Ley 41/2002 obliga a la clínica a
+// conservarla cinco años y a dársela al paciente que la pida. Apagar la
+// lectura al revocar convertiría una revocación administrativa en una
+// infracción sanitaria.
 
 /** Quién hace la petición, resuelto desde las dos puertas de auth. */
 interface Actor {
@@ -178,6 +218,30 @@ export async function conHistoria<T>(
   },
   handler: (ctx: ContextoClinico) => Promise<T>,
 ): Promise<T | undefined> {
+  // clinica-7 · decisión 24 · MI PIACE NO MIRA, y aquí otra vez.
+  //
+  // `ensureClinicaEnabled` ya lo corta en las rutas que lo llevan de
+  // `preHandler`. Esto es defensa en profundidad en el ÚNICO punto por el
+  // que pasa toda ruta clínica: una ruta nueva que se registrara sin el
+  // gate (como pasó con las del contrato, que no pueden llevarlo) seguiría
+  // sin dejar que Mi Piace abra una historia.
+  //
+  // Y NO se apunta en el registro de accesos, a propósito. El registro
+  // contesta «¿quién ha abierto la historia de este paciente?» y su
+  // `user_id` es NOT NULL: una línea aquí tendría que decir «la dueña» —
+  // porque el token de impersonación lleva el id de la dueña— y eso sería
+  // una línea FALSA en el registro que existe para no tener líneas falsas.
+  // Lo que queda es el `super_admin_audit`, que es donde una acción del
+  // superadmin tiene que constar.
+  if (esMiPiaceMirando(request)) {
+    request.log.warn(
+      { event: "clinica_impersonacion_rechazada", route: rutaDe(request) },
+      "una sesión de impersonación ha intentado abrir una historia clínica",
+    );
+    respondeComoRutaInexistente(request, reply);
+    return undefined;
+  }
+
   const actor = resolverActor(request);
   if (!actor) {
     reply
@@ -252,6 +316,52 @@ export async function conHistoria<T>(
       error: veredicto.motivo,
       code: veredicto.motivo,
       message: veredicto.mensaje,
+    });
+    return undefined;
+  }
+
+  // clinica-7 · EL CONTRATO. Ver la cabecera: va después de la línea del
+  // registro (un intento con el contrato revocado es de los que interesa
+  // ver) y antes del handler.
+  //
+  // **Y mira la LECTURA además de la escritura**, que es lo que un test
+  // encontró: con el contrato nunca aceptado, la decisión 4 dice «ni una
+  // ruta clínica responde con datos». Un guard que solo mirara las
+  // escrituras habría servido la historia entera de una clínica recién
+  // encendida antes de que nadie aceptara nada.
+  //
+  // Qué cuenta como escritura: `WRITE` y nada más. `EXPORT` es una lectura
+  // que se lleva una copia, y tiene que seguir funcionando con el contrato
+  // revocado — es la devolución de datos del art. 28.3.g, y se pide
+  // justamente cuando se revoca.
+  const negativa = await negativaClinica(
+    actor.tenantId,
+    input.action === "WRITE" ? "ESCRIBIR" : "LEER",
+  );
+  if (negativa) {
+    try {
+      await apuntarAcceso({
+        tenantId: actor.tenantId,
+        userId: actor.userId,
+        clientId: input.clientId,
+        action: input.action,
+        // DENIED porque el acto NO ocurrió. Una línea ALLOWED sobre algo
+        // que se rechazó sería una línea falsa, y un registro con líneas
+        // falsas no sirve para lo que existe.
+        outcome: "DENIED",
+        deviceId: actor.deviceId,
+        route: rutaDe(request),
+      });
+    } catch (err) {
+      request.log.error(
+        { event: "clinical_access_log_failed", err },
+        "no se pudo registrar el intento con el contrato no vigente",
+      );
+    }
+    reply.code(423).send({
+      error: negativa.code,
+      code: negativa.code,
+      message: negativa.message,
     });
     return undefined;
   }

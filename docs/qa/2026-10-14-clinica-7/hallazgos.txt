@@ -1,0 +1,24 @@
+· aceptacion @1366: consola — Failed to load resource: the server responded with a status of 423 (Locked)
+· aceptacion @1366: consola — Failed to load resource: the server responded with a status of 423 (Locked)
+· historia en la ficha @1366: consola — Failed to load resource: the server responded with a status of 423 (Locked)
+· historia en la ficha @1366: consola — Failed to load resource: the server responded with a status of 423 (Locked)
+· 6-historia-en-la-ficha @1366: 8 objetivo(s) por debajo de 44 px → «» 36x36 · «Editar datos» 105x36 · «Datos» 176x40 · «Tratamiento» 176x40 · «Historial» 93x36 · «Ficha técnica» 93x36 · «Bonos» 93x36 · «Historia» 93x36
+· aviso @1366: consola — Failed to load resource: the server responded with a status of 423 (Locked)
+· aviso @1366: consola — Failed to load resource: the server responded with a status of 423 (Locked)
+· 4-seccion-panel @1366: 5 objetivo(s) por debajo de 44 px → «Declaración responsable» 199x34 · «Cerrar sesión» 106x36 · «Descargar el PDF» 153x36 · «Revocar el contrato» 158x40 · «Descargar todas las historias» 242x40
+· aceptacion @1024: consola — Failed to load resource: the server responded with a status of 423 (Locked)
+· aceptacion @1024: consola — Failed to load resource: the server responded with a status of 423 (Locked)
+· historia en la ficha @1024: consola — Failed to load resource: the server responded with a status of 423 (Locked)
+· historia en la ficha @1024: consola — Failed to load resource: the server responded with a status of 423 (Locked)
+· 6-historia-en-la-ficha @1024: 8 objetivo(s) por debajo de 44 px → «» 36x36 · «Editar datos» 105x36 · «Datos» 176x40 · «Tratamiento» 176x40 · «Historial» 93x36 · «Ficha técnica» 93x36 · «Bonos» 93x36 · «Historia» 93x36
+· aviso @1024: consola — Failed to load resource: the server responded with a status of 423 (Locked)
+· aviso @1024: consola — Failed to load resource: the server responded with a status of 423 (Locked)
+· 4-seccion-panel @1024: 4 objetivo(s) por debajo de 44 px → «Cerrar sesión» 106x36 · «Descargar el PDF» 153x36 · «Revocar el contrato» 158x40 · «Descargar todas las historias» 242x40
+· aceptacion @390: consola — Failed to load resource: the server responded with a status of 423 (Locked)
+· aceptacion @390: consola — Failed to load resource: the server responded with a status of 423 (Locked)
+· historia en la ficha @390: consola — Failed to load resource: the server responded with a status of 423 (Locked)
+· historia en la ficha @390: consola — Failed to load resource: the server responded with a status of 423 (Locked)
+· 6-historia-en-la-ficha @390: 8 objetivo(s) por debajo de 44 px → «» 36x36 · «Editar datos» 105x36 · «Datos» 151x40 · «Tratamiento» 151x40 · «Historial» 80x36 · «Ficha técnica» 80x36 · «Bonos» 80x36 · «Historia» 80x36
+· aviso @390: consola — Failed to load resource: the server responded with a status of 423 (Locked)
+· aviso @390: consola — Failed to load resource: the server responded with a status of 423 (Locked)
+· 4-seccion-panel @390: 4 objetivo(s) por debajo de 44 px → «» 28x40 · «Cerrar sesión» 76x36 · «Descargar el PDF» 153x36 · «Revocar el contrato» 158x40

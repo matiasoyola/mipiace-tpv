@@ -105,6 +105,7 @@ import {
 
 import { ApiError, apiWithCashier } from "../api.js";
 import { Consentimientos } from "./Consentimientos.js";
+import { GuardaDelContrato } from "./ContratoDeTratamiento.js";
 import { Fotos } from "./Fotos.js";
 import { LeyendaDelMapa, MapaDelPie, type EstadoDeZona } from "./MapaDelPie.js";
 import { GraficaDolor, type PuntoDeDolor } from "./GraficaDolor.js";
@@ -265,7 +266,26 @@ function bloquesVacios(): EstadoDeLosBloques {
   };
 }
 
+/**
+ * clinica-7 · LA GUARDA, POR FUERA DE TODO. Ver `HistoriaViva`: estaba por
+ * dentro y la rama de error del 423 salía antes de llegar a ella, así que
+ * sin contrato aceptado se veía el mensaje crudo y no la pantalla de
+ * aceptación. Lo encontró el bucle visual.
+ */
 export function SesionPodologia(props: {
+  appointmentId: string;
+  onCobrar?: (appointmentId: string) => void;
+  onAbrirValoracion?: (clientId: string) => void;
+  tiposIniciales?: readonly TipoDeVisita[];
+}) {
+  return (
+    <GuardaDelContrato>
+      <SesionPodologiaDentro {...props} />
+    </GuardaDelContrato>
+  );
+}
+
+function SesionPodologiaDentro(props: {
   appointmentId: string;
   /** Para volver a la agenda tras cobrar. */
   onCobrar?: (appointmentId: string) => void;

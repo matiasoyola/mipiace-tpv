@@ -26,8 +26,16 @@ process.env.REDIS_URL = "redis://localhost:6379";
 process.env.JWT_ACCESS_SECRET = "a".repeat(40);
 process.env.JWT_REFRESH_SECRET = "b".repeat(40);
 process.env.HOLDED_KEY_ENCRYPTION_SECRET = randomBytes(32).toString("base64");
+// clinica-7 · la KEK de este fichero. Sin ella, `dekONada` revienta y
+// toda ruta clínica contesta 500.
+process.env.CLINICAL_KEK = randomBytes(32).toString("base64");
+process.env.CLINICAL_KEK_ID = "test";
 process.env.PUBLIC_TPV_URL = "https://mipiacetpv.com";
 
+import {
+  contratoFake,
+  llaveroFake,
+} from "./clinica-7-claves-fake.js";
 import Fastify from "fastify";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -66,6 +74,8 @@ interface FakeEntry {
   appointmentId: string | null;
   kind: string;
   body: Record<string, unknown>;
+  /** clinica-7 · donde de verdad va el dato. */
+  bodyCifrado: string | null;
   createdAt: Date;
 }
 let entradas: FakeEntry[] = [];
@@ -118,7 +128,15 @@ function entradaCoincide(e: FakeEntry, where: any): boolean {
   return true;
 }
 
+// clinica-7 · el llavero de la clínica, en memoria.
+const llavero = llaveroFake();
+// Y el contrato de encargado, ACEPTADO: es el estado normal de una clínica
+// que funciona. Sin él, toda escritura clínica contesta 423.
+const contrato = contratoFake(TENANT_ID, DUENA_ID);
+
 const fakePrisma: any = {
+  clinicalTenantKey: llavero.modelo,
+  clinicalProcessorAgreement: contrato.modelo,
   tenant: {
     findUnique: vi.fn(async () => ({
       clinicalRecordsEnabled: clinicaEncendida,
@@ -305,6 +323,7 @@ function sesion(
     authorUserId: DUENA_ID,
     appointmentId: randomUUID(),
     kind: "TREATMENT_SESSION",
+    bodyCifrado: null,
     body: cuerpo,
     createdAt: new Date(
       Date.UTC(2026, 8, opciones.dia ?? ++reloj, 10, 0, 0),
@@ -394,6 +413,7 @@ function valoracionValidada(respuestas: Record<string, string>) {
     authorUserId: DUENA_ID,
     appointmentId: null,
     kind: "ASSESSMENT",
+    bodyCifrado: null,
     body: { respuestas, detalles: {} },
     createdAt: new Date(Date.UTC(2026, 8, 1, 9, 0, 0)),
   });

@@ -80,6 +80,18 @@ export function Informe(props: { clientId: string }) {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [entregado, setEntregado] = useState<string | null>(null);
+  // clinica-7 · EL CÓDIGO DE 6 CIFRAS, que se enseña UNA VEZ.
+  //
+  // Vive en el estado de esta pantalla y en ningún otro sitio: de la base
+  // sale su huella, así que en cuanto se cierra la pestaña **no hay forma
+  // de volver a saberlo**. Si se pierde, se anula el enlace y se manda
+  // otro. Es a propósito — un código que se puede volver a consultar está
+  // guardado en algún sitio, y entonces quien lee la base abre el informe.
+  const [codigo, setCodigo] = useState<{
+    codigo: string;
+    caducaEn: string;
+    aperturas: number;
+  } | null>(null);
   const [trabajando, setTrabajando] = useState(false);
 
   // El motivo de la derivación viaja en la vista previa para que el papel
@@ -165,7 +177,13 @@ export function Informe(props: { clientId: string }) {
     setTrabajando(true);
     setError(null);
     try {
-      const r = await apiWithCashier<{ entregaId: string; enviadoA: string }>(
+      const r = await apiWithCashier<{
+        entregaId: string;
+        enviadoA: string;
+        codigo: string | null;
+        caducaEn: string | null;
+        aperturas: number;
+      }>(
         `/clinica/clients/${props.clientId}/informe`,
         {
           method: "POST",
@@ -182,8 +200,15 @@ export function Informe(props: { clientId: string }) {
         },
       );
       setEntregado(
-        `Enviado a ${r.enviadoA}. El correo no lleva ningún dato de salud: el informe va en el PDF adjunto. Queda apuntado en la historia y en el registro de accesos.`,
+        `Enviado a ${r.enviadoA}. El correo no lleva ningún dato de salud y NO lleva adjunto: lleva un enlace. Queda apuntado en la historia y en el registro de accesos.`,
       );
+      if (r.codigo && r.caducaEn) {
+        setCodigo({
+          codigo: r.codigo,
+          caducaEn: r.caducaEn,
+          aperturas: r.aperturas,
+        });
+      }
       await cargar();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo enviar.");
@@ -351,6 +376,37 @@ export function Informe(props: { clientId: string }) {
           >
             <Check className="w-[18px] h-[18px] shrink-0 mt-0.5" />
             <span>{entregado}</span>
+          </div>
+        )}
+
+        {/* clinica-7 · LA CLAVE, UNA SOLA VEZ.
+            Grande, en dos grupos de tres y en una caja aparte, porque lo
+            que hay que hacer con ella es DICTARLA por teléfono sin
+            equivocarse. Y el texto dice lo único que importa: que no se
+            puede volver a ver. */}
+        {codigo && (
+          <div
+            data-test="informe-codigo"
+            className="bg-mipiace-ink text-white rounded-2xl px-4 py-4 mt-3.5"
+          >
+            <p className="text-[13px] opacity-80 m-0 mb-1">
+              Dale esta clave al paciente en mano o por teléfono
+            </p>
+            <p className="text-[34px] sm:text-[40px] font-semibold tracking-[0.22em] tabular-nums m-0 mb-2">
+              {codigo.codigo.slice(0, 3)} {codigo.codigo.slice(3)}
+            </p>
+            <p className="text-[13px] opacity-80 leading-snug m-0">
+              <strong className="font-semibold">
+                Apúntala antes de cerrar esto: no se puede volver a ver.
+              </strong>{" "}
+              Sin ella el enlace no abre. El enlace caduca el{" "}
+              {new Date(codigo.caducaEn).toLocaleDateString("es-ES", {
+                day: "numeric",
+                month: "long",
+              })}{" "}
+              y admite {codigo.aperturas} aperturas. Si la clave se pierde,
+              vuelve a enviar el informe y se genera otra.
+            </p>
           </div>
         )}
 

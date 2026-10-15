@@ -23,6 +23,7 @@ import {
   ScanBarcode,
   Settings,
   Shield,
+  ShieldCheck,
   Tag,
   User,
   UserPlus,
@@ -80,7 +81,11 @@ interface NavItem {
     | "holded"
     | "fichaje"
     | "holdedDejado"
-    | "residencia";
+    | "residencia"
+    // clinica-7 · la sección del contrato de encargado. La capability ya
+    // existía (`clinica-1` la trajo para la sección clínica de Personal);
+    // lo que es nuevo es que una entrada del menú la use.
+    | "clinica";
   // F1 · el activo se calcula por prefijo, y "Control horario"
   // (`/admin/fichaje`) es prefijo de sus dos hermanas. Sin esto, las tres
   // entradas se pintarían activas a la vez en cualquiera de ellas.
@@ -117,6 +122,21 @@ const NAV_ITEMS: NavItem[] = [
     label: "Personal",
     icon: CalendarClock,
     capability: "agenda",
+  },
+  // clinica-7 · EL CONTRATO DE ENCARGADO DEL TRATAMIENTO.
+  //
+  // `ownerOnly`, y no es cosmético: lo acepta y lo revoca la dueña, y la
+  // ruta lo comprueba contra el rol de la BASE. Enseñarle la sección al
+  // encargado sería ofrecerle un botón que la API le va a negar.
+  //
+  // Con `capability: "clinica"` no aparece en ningún comercio sin el
+  // módulo. Y esconder NO es gatear: la ruta contesta la 404 de siempre.
+  {
+    to: "/admin/contrato-tratamiento",
+    label: "Contrato de datos",
+    icon: ShieldCheck,
+    ownerOnly: true,
+    capability: "clinica",
   },
   // v1.0-pilotos · Lote 6 (#22): importador de clientes desde Excel/CSV.
   // OWNER-only — crea contactos en Holded, que es la fuente de verdad.

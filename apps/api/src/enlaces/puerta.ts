@@ -38,6 +38,12 @@
 //   5. Anulado, caducado, gastado.
 //   6. El objetivo, con el `tenantId` del enlace, y si su estado lo
 //      admite (lo pregunta el `purpose`).
+//   7. **clinica-7 · EL CÓDIGO**, cuando el `purpose` lo pide. Va ÚLTIMO,
+//      y el orden importa: así un enlace caducado o anulado no gasta un
+//      intento de código, y los cinco intentos son cinco intentos sobre un
+//      enlace que de verdad abre. Al contrario, un escáner podría agotar
+//      los intentos de un enlace que ya no servía y nadie se enteraría de
+//      la diferencia.
 //
 // Entre la 3 y la 6 la respuesta es SIEMPRE la misma 404. El motivo se
 // queda en el log de la aplicación: es lo que permite ayudar a quien llama
@@ -55,6 +61,12 @@ import {
 } from "../clinica/actor-paciente.js";
 import { apuntarAcceso } from "../clinica/registro.js";
 import { contarTokenInexistente, limiteGeneral } from "./limites.js";
+import {
+  FALLOS_QUE_ANULAN,
+  codigoCuadra,
+  huellaDeCodigo,
+  nuevoCodigo,
+} from "./codigo.js";
 import { PATRON_TOKEN, huellaDeToken, mismaHuella, nuevoToken } from "./token.js";
 import type { PrismaDeLectura, ReglasDePurpose } from "./reglas.js";
 
@@ -115,6 +127,18 @@ export interface EnlaceCreado {
    *  log, ni a Sentry. Quien lo pierde no lo recupera — se crea otro, y
    *  éste se revoca. */
   token: string;
+  /**
+   * clinica-7 · EL CÓDIGO DE 6 CIFRAS EN CLARO, cuando el `purpose` lo
+   * pide. `null` cuando no.
+   *
+   * Mismo trato que el token y con una vuelta más: **se enseña UNA vez en
+   * la pantalla de quien envía el informe** y no viaja en el correo. De la
+   * base solo sale su huella, así que después de esta llamada **no hay
+   * forma de volver a saberlo**: si se pierde, se anula el enlace y se
+   * manda otro. Es a propósito — un código que se puede volver a consultar
+   * es un código que está guardado en algún sitio.
+   */
+  codigo: string | null;
   expiraEn: Date;
 }
 
@@ -146,6 +170,10 @@ export async function crearEnlace<T>(
 ): Promise<EnlaceCreado> {
   const ahora = input.ahora ?? new Date();
   const token = nuevoToken();
+  // clinica-7 · el código, solo si el `purpose` lo pide. Lo decide el
+  // registro de reglas y no quien llama: así una ruta nueva no puede crear
+  // un enlace de informe «sin código esta vez».
+  const codigo = reglas.pideCodigo ? nuevoCodigo() : null;
   const expiraEn = new Date(ahora.getTime() + reglas.vidaMs(input.canal));
   const fila = await prisma.publicLink.create({
     data: {
@@ -154,13 +182,14 @@ export async function crearEnlace<T>(
       targetType: reglas.targetType,
       targetId: input.targetId,
       tokenHash: huellaDeToken(token),
+      codeHash: codigo == null ? null : huellaDeCodigo(codigo),
       expiresAt: expiraEn,
       maxUses: reglas.maxUsos,
       createdByUserId: input.creadoPorUserId ?? null,
     },
     select: { id: true },
   });
-  return { enlaceId: fila.id, token, expiraEn };
+  return { enlaceId: fila.id, token, codigo, expiraEn };
 }
 
 // ── Resolver ──────────────────────────────────────────────────────────
@@ -177,7 +206,15 @@ export type MotivoDelRechazo =
   | "CADUCADO"
   | "GASTADO"
   | "SIN_OBJETIVO"
-  | "ESTADO_NO_ADMITE";
+  | "ESTADO_NO_ADMITE"
+  // clinica-7 · el `purpose` pide código y no llegó ninguno.
+  | "FALTA_CODIGO"
+  // clinica-7 · llegó y no es el suyo. **Contesta la MISMA 404**: decirle
+  // «el código está mal» a quien prueba códigos le confirma que el enlace
+  // existe y que iba por buen camino.
+  | "CODIGO_ERRONEO"
+  // clinica-7 · cinco fallos y el enlace se anuló. También la misma 404.
+  | "CODIGO_AGOTADO";
 
 export interface EnlaceResuelto<T> {
   enlaceId: string;
@@ -243,6 +280,9 @@ export async function resolverEnlace<T>(
       maxUses: true,
       usedCount: true,
       revokedAt: true,
+      // clinica-7 · la huella del código de 6 cifras, cuando el `purpose`
+      // lo pide. Nunca el código.
+      codeHash: true,
     },
   });
 
@@ -292,6 +332,35 @@ export async function resolverEnlace<T>(
     return rechazar(request, reply, asReglas, rl, "ESTADO_NO_ADMITE", ahora);
   }
 
+  // 7 · clinica-7 · EL CÓDIGO DE 6 CIFRAS, cuando el `purpose` lo pide.
+  //
+  // Va aquí, después de todo lo demás: un enlace caducado, gastado o
+  // anulado no gasta un intento de código.
+  if (reglas.pideCodigo) {
+    const codigo = codigoDeLaPeticion(request);
+    if (codigo == null) {
+      // Sin código no se cuenta como fallo: la primera petición de la
+      // pantalla nunca lo trae (primero se pinta el formulario, después se
+      // teclea). Contarla sería gastar un intento por abrir la página.
+      return rechazar(request, reply, asReglas, rl, "FALTA_CODIGO", ahora);
+    }
+    if (!codigoCuadra(codigo, fila.codeHash)) {
+      // EL FALLO SE APUNTA EN LA FILA, no solo en Redis. Es la diferencia
+      // que importa: un rate-limit se olvida al reiniciar y se esquiva
+      // cambiando de IP; `code_failures` vive en la base y el trigger
+      // garantiza que no baja.
+      const fallos = await contarFalloDeCodigo(fila.id);
+      if (fallos >= FALLOS_QUE_ANULAN) {
+        // Y se ANULA. No «se bloquea un rato»: cinco intentos sobre la
+        // historia clínica de alguien es un ataque, y lo que toca es que
+        // ese enlace no vuelva a abrir nunca. La clínica prepara otro.
+        await revocarEnlace(getPrisma(), { enlaceId: fila.id, ahora });
+        return rechazar(request, reply, asReglas, rl, "CODIGO_AGOTADO", ahora);
+      }
+      return rechazar(request, reply, asReglas, rl, "CODIGO_ERRONEO", ahora);
+    }
+  }
+
   // El enlace bueno no gasta intentos: si no se limpiara, quien recarga
   // treinta veces se bloquearía a sí mismo.
   await reset(rl);
@@ -303,6 +372,47 @@ export async function resolverEnlace<T>(
     expiraEn: fila.expiresAt,
     objetivo,
   };
+}
+
+/**
+ * De dónde sale el código: de la cabecera `X-Codigo` o del cuerpo.
+ *
+ * **NO de la URL ni del querystring**, y es deliberado: lo que se mete en
+ * una URL acaba en el historial del navegador, en el `Referer` de lo que la
+ * página cargue y en el log de cualquier proxy. Poner ahí el código
+ * anularía justo lo que el código compra — que la URL sola no abra.
+ *
+ * La cabecera es para el `GET` que sirve el PDF; el cuerpo, para el `POST`
+ * que la pantalla manda al teclearlo.
+ */
+function codigoDeLaPeticion(request: FastifyRequest): string | null {
+  const cabecera = request.headers["x-codigo"];
+  if (typeof cabecera === "string" && cabecera.trim() !== "") {
+    return cabecera.trim();
+  }
+  const cuerpo = request.body;
+  if (typeof cuerpo === "object" && cuerpo !== null) {
+    const c = (cuerpo as { codigo?: unknown }).codigo;
+    if (typeof c === "string" && c.trim() !== "") return c.trim();
+  }
+  return null;
+}
+
+/**
+ * Suma un fallo del código y devuelve cuántos van.
+ *
+ * `updateMany` con el incremento, igual que `consumirEnlace`: dos intentos
+ * simultáneos suman dos, y el trigger garantiza que el contador no baja.
+ * Devuelve el valor DESPUÉS de sumar, que es el que decide si se anula.
+ */
+async function contarFalloDeCodigo(enlaceId: string): Promise<number> {
+  const prisma = getPrisma();
+  const fila = await prisma.publicLink.update({
+    where: { id: enlaceId },
+    data: { codeFailures: { increment: 1 } },
+    select: { codeFailures: true },
+  });
+  return fila.codeFailures;
 }
 
 function demasiados(
@@ -339,6 +449,12 @@ async function rechazar(
 ): Promise<null> {
   await registerFailure(rl);
 
+  // clinica-7 · los motivos de código NO entran aquí. Quien falla el código
+  // TIENE un token válido, así que no es un escáner probando tokens — es
+  // alguien con el enlace y el código mal escrito, o un atacante al que ya
+  // le cuenta `code_failures`, que es un límite más duro (cinco y el enlace
+  // muere). Contarlo también en el cubo de los inexistentes le daría a una
+  // consulta entera detrás del mismo wifi la capacidad de bloquearse sola.
   if (motivo === "FORMATO" || motivo === "NO_EXISTE" || motivo === "OTRO_PURPOSE") {
     const burst = await contarTokenInexistente(request.ip);
     if (burst.exceeded) {
