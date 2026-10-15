@@ -411,6 +411,50 @@ describe("residencia-1 · LA SEMILLA del centro", () => {
     expect(huerfanas).toEqual([]);
   });
 
+  it("el vocabulario de ÁNIMO y COGNICIÓN es el de la rama §4, literal", async () => {
+    // D-59 cierra que es «el propuesto en la rama de controles», y Matías
+    // lo trajo el 15-10. Se fija aquí porque es DATO y nada más lo
+    // defiende: el día que alguien lo «mejore» partiendo «apagado /
+    // triste» en dos, esto se pone rojo y recuerda por qué va junto —
+    // separarlas obliga a la auxiliar a diagnosticar.
+    const animo = CONTROLES_DE_SERIE.find((c) => c.code === "ANIMO")!;
+    expect(animo.options?.map((o) => o.label)).toEqual([
+      "Como siempre",
+      "Apagado / triste / no quiere levantarse",
+      "Inquieto / ansioso",
+      "Irritable / agresivo",
+    ]);
+    const cognicion = CONTROLES_DE_SERIE.find((c) => c.code === "COGNICION")!;
+    expect(cognicion.options?.map((o) => o.label)).toEqual([
+      "Como siempre",
+      "Más despistado de lo habitual",
+      "Confuso — no reconoce, no se ubica",
+      "Ausente — no responde",
+    ]);
+    // Y el escalón más grave de cognición existe: una auxiliar que se
+    // encuentra a alguien que no responde tiene dónde apuntarlo.
+    expect(cognicion.options?.at(-1)?.code).toBe("AUSENTE");
+  });
+
+  it("y NINGUNA etiqueta de la capa OBS emite un juicio absoluto", async () => {
+    // Regla 2 de la capa: todo es relativo a la LÍNEA BASE del residente.
+    // «Bien» es un juicio —hay personas cuyo «como siempre» no es estar
+    // bien— y por eso el «como siempre» del ánimo dejó de decirlo.
+    const obs = CONTROLES_DE_SERIE.filter((c) => c.layer === "OBS");
+    const comoSiempre = obs
+      .map((c) => c.options?.find((o) => o.asUsual)?.label ?? "")
+      .filter(Boolean);
+    // Las siete dimensiones tienen su «como siempre» (D-16): sin él, el
+    // toque rápido no sabría qué guardar en esa dimensión.
+    expect(comoSiempre).toHaveLength(7);
+    // Y ninguna lo llama «bien» a secas en el ánimo o la cognición, que
+    // son las dos donde el juicio dolería.
+    for (const code of ["ANIMO", "COGNICION"]) {
+      const c = obs.find((x) => x.code === code)!;
+      expect(c.options?.find((o) => o.asUsual)?.label).toBe("Como siempre");
+    }
+  });
+
   it("y toda línea de plantilla usa una frecuencia PERMITIDA por su control", async () => {
     // El otro error de dedo: poner «cada turno» a una analítica. La ruta
     // que guarda la plantilla del centro lo valida con un 400; la de

@@ -109,13 +109,16 @@ es «hoy se lo comió todo». El atajo de D-16 vale para una OBSERVACIÓN («¿c
 una EJECUCIÓN («¿qué comió?»). Si lo llevaran, la ingesta del centro entero saldría «todo» cada día y
 el indicador de nutrición no valdría nada.
 
-### De dónde sale el vocabulario, y una advertencia
+### De dónde sale el vocabulario
 
-D-59 cierra que el vocabulario de ánimo y cognición es «el propuesto en la rama de controles», y esa
-rama (`rama-catalogo-de-controles.md`) vive en el proyecto «Jardin de Gredos» y **no está en este
-repo**. Lo que hay es la lista del prompt del bloque —que la resume— más el vocabulario que se
-desprende de cómo habla el personal en el resto de las fuentes. Está en §10 como decisión tomada sin
-preguntar, y es **dato**: cambiarlo no es un desarrollo.
+D-59 cierra que el de ánimo y cognición es «el propuesto en la rama de controles». Esa rama
+(`rama-catalogo-de-controles.md`) vive en el proyecto «Jardin de Gredos» y no está en este repo;
+**Matías trajo su §4 el 15-10 y las dos dimensiones son ya literalmente las suyas** — lo que había
+antes era criterio nuestro y difería. Qué cambió y por qué, en §11.5.
+
+Las otras cinco dimensiones —dolor, descanso nocturno, piel, ingesta del día y
+movilidad/estabilidad— **no tenían vocabulario en la rama**. Lo que llevan es **propuesta de
+producto, pendiente de validar por la médica y por las auxiliares**. No bloquea: es dato.
 
 ---
 
@@ -418,10 +421,10 @@ se toca: es lo que la auxiliar de la tarde necesita.
 
 1. **La tensión son dos controles y la higiene también** (§2). Las dos están explicadas donde se
    toman, en el propio fichero de datos.
-2. **El vocabulario ordinal de las siete dimensiones `OBS`** se ha escrito aquí, porque
-   `rama-catalogo-de-controles.md` no está en el repo (§2). Es dato y editable: cambiarlo es editar
-   la tabla y subir la versión del control, no un desarrollo. **Es lo primero que debería validar la
-   médica del cliente cero** (D-57).
+2. **El vocabulario de las cinco dimensiones `OBS` que la rama no traía** (dolor, descanso
+   nocturno, piel, ingesta del día, movilidad) se ha escrito aquí y está marcado como propuesta en
+   el fichero de datos. Ánimo y cognición ya no: son los de la rama §4, literales (§11.5).
+   **Las cinco son lo primero que deberían validar la médica y las auxiliares** (D-57).
 3. **La plantilla de serie vive en el fichero del producto y no en la base.** Los dos únicos que la
    leen son la semilla y el botón de «volver a la de serie», y los dos leen el fichero. Meterla en la
    base habría costado un `scope`/`tenantId?` con sus dos índices parciales —la factura que paga
@@ -449,7 +452,7 @@ se toca: es lo que la auxiliar de la tarde necesita.
 
 ---
 
-## 11 · Cuatro cosas que encontró la máquina, y no el pensarlas
+## 11 · Cinco cosas que no salieron de pensarlas
 
 ### 1 · `NULL BETWEEN 1 AND 12` no es `false`: es NULL, y un CHECK que da NULL PASA
 
@@ -501,13 +504,54 @@ primer día; uno con medio catálogo no lo vería hasta el primer turno.
 Y la falta de tablas se registra como **aviso** y no como error: es el estado normal de una base sin
 migrar, y un log rojo tiene que significar siempre algo que mirar.
 
+### 5 · El vocabulario de ánimo y cognición difería del de la rama
+
+Lo trajo Matías el 15-10, después de cerrar el bloque: la rama §4 estaba en el proyecto de Jardín de
+Gredos y no en el repo, así que lo que este bloque sembró primero era criterio nuestro. Difería, y
+**las tres diferencias iban todas en la misma dirección equivocada**.
+
+| Dimensión | Lo que se sembró | La rama §4 |
+| --------- | ---------------- | ---------- |
+| Ánimo | `Bien, como siempre` · `Apagado, más callado` · `Triste, llora` · `Inquieto, nervioso` · `Agresivo` | `Como siempre` · `Apagado / triste / no quiere levantarse` · `Inquieto / ansioso` · `Irritable / agresivo` |
+| Cognición | `Como siempre` · `Más despistado` · `Desorientado en tiempo o lugar` · `No reconoce a quien tiene delante` | `Como siempre` · `Más despistado de lo habitual` · `Confuso — no reconoce, no se ubica` · `Ausente — no responde` |
+
+Y lo que las explica son **las tres reglas de la capa**, que la rama trae y el bloque no tenía
+escritas (ahora están en la cabecera de `OBS` en el fichero de datos):
+
+1. **El registro no exige DIAGNOSTICAR.** Por eso la rama FUNDE opciones donde nosotros las
+   partíamos: «apagado / triste» es una sola, porque pedirle a una auxiliar que distinga si doña
+   Carmen está apagada o triste es pedirle un juicio clínico mientras hace la cama. Lo mismo con
+   «confuso — no reconoce, no se ubica», que nosotros teníamos en dos.
+2. **Todo es relativo a la LÍNEA BASE del residente.** De ahí que el «como siempre» del ánimo dejara
+   de decir «bien»: hay personas cuyo «como siempre» no es estar bien, y marcar su normalidad no es
+   decir que lo esté. Un test fija que ninguna de las dos emita ese juicio.
+3. **«Como siempre» se registra SIEMPRE**: no es la ausencia de registro, es un registro con valor.
+   Confirma el modelo —`isAsUsual` por dimensión— y es una obligación para **residencia-3**: el
+   toque rápido tiene que ESCRIBIR el `CareRecord` de cada dimensión activa con su valor, no saltarse
+   la fila.
+
+Y una diferencia que no era de estilo sino **un agujero**: faltaba `Ausente — no responde`, el
+escalón más grave de la cognición. Una auxiliar que se encuentra a alguien que no responde no tenía
+dónde apuntarlo y habría marcado «confuso» — justo el dato que hay que ver primero.
+
+**Se ha editado la versión 1 en vez de publicar una 2**, y es correcto porque la 1 nunca llegó a
+nadie: no hay ningún centro con la residencia encendida en producción y la rama no está mergeada.
+Publicar una «v2» sería inventar un histórico que no ocurrió. La consecuencia, dicha: quien ya haya
+arrancado esta rama tiene la v1 vieja en su base y el seed **no la pisa** —avisa y no propaga, que es
+justo lo que debe hacer—; se arregla borrando esas dos filas y volviendo a arrancar.
+
+El vocabulario queda fijado por un test, porque es dato y nada más lo defendía: el día que alguien
+«mejore» el ánimo partiendo «apagado / triste» en dos, se pone rojo y recuerda por qué va junto.
+
 ---
 
 ## 12 · Dudas abiertas
 
-1. **El vocabulario ordinal está por validar** (§10.2). No bloquea: es dato, y cambiarlo es subir la
-   versión del control. Pero hasta que la médica del cliente cero lo mire, lo que hay es criterio
-   nuestro sobre una fuente que no está en el repo.
+1. **Cinco de las siete dimensiones `OBS` siguen con vocabulario sin validar** (§10.2): dolor,
+   descanso nocturno, piel, ingesta del día y movilidad/estabilidad. La rama §4 no traía ninguna, y
+   lo que llevan es propuesta de producto. Ánimo y cognición ya están contrastadas con la rama, y
+   **ésas también están pendientes de contraste con las auxiliares** — que es quien las va a pulsar
+   quince veces por turno. No bloquea: es dato, y la vía de cambio está probada (§11.5).
 2. **Un control de serie nuevo no se activa solo en los centros ya encendidos.** El ajuste se crea
    con el `upsert` de la ruta la primera vez que alguien lo toca, y hasta entonces la pantalla lo
    pinta con la frecuencia de serie y `queToca` lo trata como activo. Es el comportamiento correcto
@@ -657,7 +701,9 @@ ba7ee7f feat(residencia-2): las pantallas de controles, plantillas y plan
 528f2b0 docs(residencia-2): capturas de las tres pantallas, y el aviso del recuento
 fe3dc8f docs(residencia-2): el done del bloque
 2bbd361 fix(residencia-2): el seed del catálogo no tumba el arranque de la API
-<este>  docs(residencia-2): el done, con lo que encontró el smoke
+a03733f docs(residencia-2): el done, con lo que encontró el smoke
+6ea9254 docs(residencia-2): CI verde, los tres jobs
+<este>  fix(residencia-2): el vocabulario de ánimo y cognición, el de la rama §4
 ```
 
 ## 16 · La rama

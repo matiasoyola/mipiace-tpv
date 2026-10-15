@@ -13,16 +13,35 @@
 // llame «aseo» a la higiene personal se lo cambia en su glosario local
 // (`CenterControlSetting.alias`) sin tocar esto.
 //
-// ── LA FUENTE DEL VOCABULARIO ORDINAL, Y UNA ADVERTENCIA ─────────────
+// ── LA FUENTE DEL VOCABULARIO ORDINAL ────────────────────────────────
 //
 // D-59 cierra que el vocabulario de ánimo y cognición es «el propuesto en
-// la rama de controles», y esa rama (`rama-catalogo-de-controles.md`) vive
-// en el proyecto «Jardin de Gredos» y **no está en este repo**. Lo que hay
-// aquí es la lista del prompt del bloque (que la resume) más el
-// vocabulario que se desprende de cómo habla el personal en el resto de
-// las fuentes. Está marcado como decisión tomada sin preguntar en el done,
-// y es **dato**: cambiarlo no es un desarrollo, es editar esta tabla y
-// subir la versión del control.
+// la rama de controles». Esa rama (`rama-catalogo-de-controles.md`) vive en
+// el proyecto «Jardin de Gredos» y no está en este repo; Matías trajo su §4
+// el 15-10 y **ánimo y cognición son ya literalmente los suyos** (ver el
+// comentario de cada uno: lo que cambió y por qué).
+//
+// Las otras CINCO dimensiones —dolor, descanso nocturno, piel, ingesta del
+// día y movilidad/estabilidad— **no tenían vocabulario en la rama**. Lo que
+// llevan es **propuesta de producto, pendiente de validar por la médica y
+// por las auxiliares**, y está así marcado en el `-done` (§11.5). No
+// bloquea nada: es dato, y cambiarlo es editar esta tabla y subir la
+// versión del control.
+//
+// ── POR QUÉ ÁNIMO Y COGNICIÓN SIGUEN EN LA VERSIÓN 1 ─────────────────
+//
+// La regla del bloque es que **una versión publicada no se edita**: se
+// crea la siguiente. Aquí se ha editado la 1, y es correcto porque la 1
+// **nunca llegó a nadie**: no hay ningún centro con la residencia
+// encendida en producción y esta rama no está mergeada, así que esas filas
+// no existen fuera de las bases de desarrollo. Publicar una «v2» sería
+// inventar un histórico que no ocurrió.
+//
+// La consecuencia, dicha: quien ya haya arrancado esta rama tiene la v1
+// vieja en SU base, y el seed **no la va a pisar** —avisa y no propaga,
+// que es justo lo que debe hacer—. Se arregla borrando esas filas
+// (`DELETE FROM control_types WHERE code IN ('ANIMO','COGNICION')`) y
+// volviendo a arrancar. En producción no aplica: allí no hay ninguna.
 //
 // ── POR QUÉ LA TENSIÓN SON DOS CONTROLES Y NO UNO ────────────────────
 //
@@ -422,6 +441,23 @@ export const CONTROLES_DE_SERIE: ControlDeSerie[] = [
 
   // ══ CAPA 2 · OBSERVACIÓN (`OBS`) · ¿cómo está hoy? ══════════════════
   //
+  // ── LAS TRES REGLAS DE LA CAPA (rama de controles §4) ─────────────
+  //
+  //   1. **El registro no exige DIAGNOSTICAR.** Quien contesta es una
+  //      auxiliar en treinta segundos, no la médica. De ahí que las
+  //      opciones se FUNDAN en vez de partirse: «apagado / triste» es una
+  //      sola, porque distinguirlas es un juicio clínico que no se le
+  //      puede pedir a quien pasa a hacer la cama.
+  //   2. **Todo es relativo a la LÍNEA BASE del residente.** «Como
+  //      siempre» no es «bien»: hay personas cuyo «como siempre» es estar
+  //      desorientado, y marcar su normalidad no es decir que esté bien.
+  //      Por eso ninguna etiqueta de esta capa emite un juicio absoluto.
+  //   3. **«Como siempre» SE REGISTRA SIEMPRE.** No es la ausencia de
+  //      registro: es un registro con valor. Lo implementa residencia-3
+  //      (escribe el `CareRecord` con el valor `asUsual` de cada dimensión
+  //      activa, no se salta la fila), y lo que este bloque deja listo es
+  //      justamente de dónde sale ese valor: la marca de abajo.
+  //
   // Siete dimensiones, cada una con su vocabulario ordinal corto y su
   // valor «COMO SIEMPRE» (D-16, D-59). La observación se pregunta POR
   // RESIDENTE y no por dimensión: un toque en «como siempre» da por buenas
@@ -439,12 +475,25 @@ export const CONTROLES_DE_SERIE: ControlDeSerie[] = [
     layer: "OBS",
     nature: "SCHEDULED",
     valueDomain: "ORDINAL",
+    // El vocabulario de la rama de controles §4, literal. Lo que cambió
+    // respecto a lo que este bloque sembró primero —y por qué, que es lo
+    // que importa—:
+    //
+    //   · «apagado» y «triste» eran DOS opciones y son UNA. Partirlas
+    //     obliga a la auxiliar a distinguir si está apagada o triste, que
+    //     es DIAGNOSTICAR — y esta capa no lo pide. Y «no quiere
+    //     levantarse» es como lo dice el personal.
+    //   · «agresivo» pasa a «irritable / agresivo»: el escalón que de
+    //     verdad se ve es el primero, y con sólo «agresivo» una auxiliar
+    //     no marcaría nada en el caso frecuente.
+    //   · el «como siempre» ya no dice «bien». «Bien» es un juicio; esta
+    //     capa es RELATIVA A LA LÍNEA BASE del residente, y hay personas
+    //     cuyo «como siempre» no es estar bien.
     options: [
-      { code: "BIEN", label: "Bien, como siempre", asUsual: true },
-      { code: "APAGADO", label: "Apagado, más callado" },
-      { code: "TRISTE", label: "Triste, llora" },
-      { code: "INQUIETO", label: "Inquieto, nervioso" },
-      { code: "AGRESIVO", label: "Agresivo" },
+      { code: "COMO_SIEMPRE", label: "Como siempre", asUsual: true },
+      { code: "APAGADO", label: "Apagado / triste / no quiere levantarse" },
+      { code: "INQUIETO", label: "Inquieto / ansioso" },
+      { code: "IRRITABLE", label: "Irritable / agresivo" },
     ],
     allowedFrequencies: ["EVERY_SHIFT", "DAILY", "ON_DEMAND"],
     defaultFrequency: { kind: "EVERY_SHIFT", shiftCodes: ["M", "T"] },
@@ -459,11 +508,21 @@ export const CONTROLES_DE_SERIE: ControlDeSerie[] = [
     layer: "OBS",
     nature: "SCHEDULED",
     valueDomain: "ORDINAL",
+    // La rama §4, literal. Dos cambios respecto a lo primero que se
+    // sembró, y el segundo es un AGUJERO que esto tapa:
+    //
+    //   · «desorientado» y «no reconoce» eran dos opciones y son una
+    //     («Confuso — no reconoce, no se ubica»), otra vez porque
+    //     separarlas es diagnosticar.
+    //   · **faltaba «Ausente — no responde»**, que es el escalón MÁS
+    //     GRAVE de la dimensión. Sin él, una auxiliar que se encuentra a
+    //     alguien que no responde no tenía dónde apuntarlo y acabaría
+    //     marcando «confuso» — justo el dato que hay que ver primero.
     options: [
       { code: "COMO_SIEMPRE", label: "Como siempre", asUsual: true },
-      { code: "MAS_DESPISTADO", label: "Más despistado" },
-      { code: "DESORIENTADO", label: "Desorientado en tiempo o lugar" },
-      { code: "NO_RECONOCE", label: "No reconoce a quien tiene delante" },
+      { code: "MAS_DESPISTADO", label: "Más despistado de lo habitual" },
+      { code: "CONFUSO", label: "Confuso — no reconoce, no se ubica" },
+      { code: "AUSENTE", label: "Ausente — no responde" },
     ],
     allowedFrequencies: ["DAILY", "EVERY_SHIFT", "ON_DEMAND"],
     defaultFrequency: { kind: "DAILY", shiftCodes: ["M"] },
@@ -478,6 +537,8 @@ export const CONTROLES_DE_SERIE: ControlDeSerie[] = [
     layer: "OBS",
     nature: "SCHEDULED",
     valueDomain: "ORDINAL",
+    // Propuesta de producto: la rama §4 no traía vocabulario para esta
+    // dimensión. Pendiente de validar por la médica y las auxiliares.
     options: [
       { code: "SIN_DOLOR", label: "Sin dolor", asUsual: true },
       { code: "MOLESTIA", label: "Molestia leve" },
@@ -497,6 +558,8 @@ export const CONTROLES_DE_SERIE: ControlDeSerie[] = [
     layer: "OBS",
     nature: "SCHEDULED",
     valueDomain: "ORDINAL",
+    // Propuesta de producto: la rama §4 no traía vocabulario para esta
+    // dimensión. Pendiente de validar por la médica y las auxiliares.
     options: [
       { code: "BIEN", label: "Ha dormido bien", asUsual: true },
       { code: "INTERRUPCIONES", label: "Se ha despertado alguna vez" },
@@ -519,6 +582,8 @@ export const CONTROLES_DE_SERIE: ControlDeSerie[] = [
     layer: "OBS",
     nature: "SCHEDULED",
     valueDomain: "ORDINAL",
+    // Propuesta de producto: la rama §4 no traía vocabulario para esta
+    // dimensión. Pendiente de validar por la médica y las auxiliares.
     options: [
       { code: "BIEN", label: "Piel bien", asUsual: true },
       { code: "ENROJECIMIENTO", label: "Enrojecimiento que no cede" },
@@ -542,6 +607,8 @@ export const CONTROLES_DE_SERIE: ControlDeSerie[] = [
     layer: "OBS",
     nature: "SCHEDULED",
     valueDomain: "ORDINAL",
+    // Propuesta de producto: la rama §4 no traía vocabulario para esta
+    // dimensión. Pendiente de validar por la médica y las auxiliares.
     options: [
       { code: "COMO_SIEMPRE", label: "Como siempre", asUsual: true },
       { code: "MENOS", label: "Ha comido menos" },
@@ -565,6 +632,8 @@ export const CONTROLES_DE_SERIE: ControlDeSerie[] = [
     layer: "OBS",
     nature: "SCHEDULED",
     valueDomain: "ORDINAL",
+    // Propuesta de producto: la rama §4 no traía vocabulario para esta
+    // dimensión. Pendiente de validar por la médica y las auxiliares.
     options: [
       { code: "COMO_SIEMPRE", label: "Como siempre", asUsual: true },
       { code: "MAS_INSEGURO", label: "Más inseguro al andar" },

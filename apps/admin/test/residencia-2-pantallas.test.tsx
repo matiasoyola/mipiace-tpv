@@ -123,8 +123,8 @@ function catalogo() {
         sortOrder: 300,
         validFrom: "2026-10-15T00:00:00.000Z",
         opciones: [
-          { code: "BIEN", label: "Bien, como siempre", comoSiempre: true },
-          { code: "TRISTE", label: "Triste, llora", comoSiempre: false },
+          { code: "COMO_SIEMPRE", label: "Como siempre", comoSiempre: true },
+          { code: "APAGADO", label: "Apagado / triste / no quiere levantarse", comoSiempre: false },
         ],
         puedeElegir: { frecuencias: ["EVERY_SHIFT", "DAILY"], roles: ["AUXILIAR", "DUE"] },
         ajuste: {
@@ -614,7 +614,7 @@ describe("residencia-2 · Controles", () => {
   it("las opciones de un ordinal se leen, con cuál es el «como siempre»", async () => {
     await pintar(ControlesPage);
     await pulsar(botonQueContiene("Ánimo")!);
-    expect(container.textContent).toContain("Bien, como siempre (como siempre)");
+    expect(container.textContent).toContain("Como siempre (como siempre)");
   });
 
   it("guardar manda SÓLO los cinco campos del centro", async () => {
