@@ -176,7 +176,33 @@ describe.skipIf(!e2eEnabled)("e2e · una clínica carga sus 17 servicios del fic
       expect(res.json().tenant.initialSyncStatus).toBe("NOT_APPLICABLE");
     });
 
-    it("y el super-admin le enciende la historia clínica", async () => {
+    it("SIN la clínica encendida, su CSV se salta las 17 filas", async () => {
+      // EL CÍRCULO, por el lado de la API. Un `E1` en un comercio sin
+      // `clinicalRecordsEnabled` es una fila saltada con su motivo, así
+      // que el catálogo de Rosario entero se queda fuera: sin catálogo no
+      // se pasa `products-sellable` y la cuenta no se activa.
+      //
+      // Y el otro lado del círculo estaba en la pantalla: el interruptor
+      // «Historia clínica» sólo se pintaba fuera de DRAFT, así que había
+      // que activar para poder encenderlo y había que encenderlo para
+      // poder activar. Lo rompe `DatosDeSaludPanel`, que se pinta en los
+      // dos estados (banco: `admin/test/catalogo-servicios-csv-salud-en-draft`).
+      const t = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+      expect(t.clinicalRecordsEnabled).toBe(false);
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/super-admin/tenants/${tenantId}/catalog/import`,
+        headers: saAuth(),
+        payload: { csv: CSV },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().entran).toEqual([]);
+      expect(res.json().saltadas).toHaveLength(17);
+      expect(res.json().saltadas[0].motivo).toContain("no tiene la clínica encendida");
+    });
+
+    it("y el PATCH la enciende ESTANDO EN DRAFT, que es lo que rompe el círculo", async () => {
       const res = await app.inject({
         method: "PATCH",
         url: `/super-admin/tenants/${tenantId}`,
@@ -186,6 +212,38 @@ describe.skipIf(!e2eEnabled)("e2e · una clínica carga sus 17 servicios del fic
       expect(res.statusCode).toBe(200);
       const t = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
       expect(t.clinicalRecordsEnabled).toBe(true);
+      // LO QUE IMPORTA: la cuenta sigue en DRAFT. No ha hecho falta
+      // activarla para encender la clínica, que es el orden que el alta de
+      // una clínica necesita.
+      expect(t.onboardingState).toBe("DRAFT");
+    });
+
+    it("la clínica exige CRM y agenda, también en DRAFT", async () => {
+      // La guarda del servidor sigue siendo la de siempre: encenderla en
+      // DRAFT no la relaja. Se prueba sobre OTRO tenant para no tocar el
+      // del recorrido.
+      const otro = await app.inject({
+        method: "POST",
+        url: "/super-admin/tenants",
+        headers: saAuth(),
+        payload: {
+          legalName: "Bar sin agenda SL",
+          businessType: "HOSPITALITY",
+          cajaEnabled: true,
+          crmEnabled: false,
+          agendaEnabled: false,
+          holdedEnabled: false,
+        } as never,
+      });
+      expect(otro.statusCode).toBe(201);
+      const res = await app.inject({
+        method: "PATCH",
+        url: `/super-admin/tenants/${otro.json().tenant.id}`,
+        headers: saAuth(),
+        payload: { clinicalRecordsEnabled: true },
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json().error).toBe("CLINICAL_RECORDS_NEEDS_MODULES");
     });
 
     it("en DRAFT no hay OWNER: el fichero es la ÚNICA puerta del catálogo", async () => {
