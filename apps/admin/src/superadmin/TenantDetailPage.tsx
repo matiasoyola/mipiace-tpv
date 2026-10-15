@@ -705,6 +705,22 @@ export function TenantDetailPage() {
 
       {isDraft ? (
         <>
+          {/* catalogo-servicios-csv · «Datos de salud» TAMBIÉN en DRAFT, y
+              lo PRIMERO de la columna: en una clínica es un requisito del
+              paso siguiente, no un ajuste posterior. Un `E1` en el fichero
+              de alta exige la clínica encendida, sin catálogo no se pasa
+              `products-sellable`, y sin activar no se pintaba este
+              interruptor: el círculo que esto rompe está escrito en la
+              cabecera de `DatosDeSaludPanel`.
+
+              El MISMO componente que ve un tenant activo, con el mismo
+              `onToggleSalud`: el mismo confirm, el mismo PATCH y las mismas
+              consecuencias. */}
+          <DatosDeSaludPanel
+            tenant={tenant}
+            busy={busy}
+            onToggleSalud={(campo) => void onToggleSalud(campo)}
+          />
           <HealthPanel
             tenant={tenant}
             busy={busy}
@@ -1345,6 +1361,73 @@ function CasillaDeSalud({
   );
 }
 
+/**
+ * clinica-1 / residencia-1 · LOS MÓDULOS DE SALUD, en su propia caja y no
+ * entre las acciones del tenant.
+ *
+ * Están juntos porque van juntos —la residencia no se puede encender sin
+ * la clínica— y separados del resto porque encenderlos no es activar una
+ * función: es aceptar ser responsable de un registro legal de datos de
+ * salud. La caja lo dice en su línea de texto, para que no se marque por
+ * inercia.
+ *
+ * ── catalogo-servicios-csv · POR QUÉ ES UN COMPONENTE Y NO UN TROZO DE
+ *    `ActiveTenantActions` ───────────────────────────────────────────────
+ *
+ * Porque vivía DENTRO de `ActiveTenantActions`, que sólo se pinta cuando
+ * el tenant NO está en DRAFT. Y eso cerraba un círculo en el alta de una
+ * clínica sin Holded:
+ *
+ *   · su catálogo son servicios sanitarios exentos, y un `E1` en el
+ *     fichero de alta exige `clinicalRecordsEnabled`
+ *     (`superadmin/tenant-catalog.ts`); sin la clínica encendida, las 17
+ *     filas se saltan;
+ *   · sin catálogo, `products-sellable` no pasa y la cuenta no se activa;
+ *   · y sin activarla, este interruptor no se pintaba.
+ *
+ * El `PATCH /super-admin/tenants/:id` ya aceptaba el campo en DRAFT —con
+ * sus guardas: la clínica exige CRM y agenda— así que lo único que faltaba
+ * era la puerta en pantalla. Se pinta en los dos estados, con el MISMO
+ * componente y el mismo `onToggleSalud`: el mismo confirm, el mismo PATCH
+ * y las mismas consecuencias. Dos cajas parecidas acabarían contando dos
+ * historias distintas de lo que significa encender esto.
+ */
+function DatosDeSaludPanel({
+  tenant,
+  busy,
+  onToggleSalud,
+}: {
+  tenant: TenantDetail;
+  busy: boolean;
+  onToggleSalud: (campo: "clinicalRecordsEnabled" | "residenciaEnabled") => void;
+}) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6">
+      <h3 className="font-semibold text-slate-900 mb-1">Datos de salud</h3>
+      <p className="text-[13px] text-slate-500 mb-4">
+        Encenderlos hace a Mi Piace encargado de tratamiento (art. 9 RGPD,
+        Ley 41/2002). Hace falta el DPA firmado.
+      </p>
+      <div className="space-y-3">
+        <CasillaDeSalud
+          label="Historia clínica"
+          hint="Pacientes con historia, accesos y registro de accesos. Necesita CRM y agenda."
+          checked={tenant.clinicalRecordsEnabled === true}
+          busy={busy}
+          onChange={() => onToggleSalud("clinicalRecordsEnabled")}
+        />
+        <CasillaDeSalud
+          label="Residencia"
+          hint="Residentes, edificio, roles de cuidado, turnos y la tablet de la puerta. Necesita la historia clínica."
+          checked={tenant.residenciaEnabled === true}
+          busy={busy}
+          onChange={() => onToggleSalud("residenciaEnabled")}
+        />
+      </div>
+    </div>
+  );
+}
+
 function ActiveTenantActions({
   blocked,
   tenant,
@@ -1459,36 +1542,10 @@ function ActiveTenantActions({
         />
       </div>
 
-      {/* clinica-1 / residencia-1 · LOS MÓDULOS DE SALUD, en su propia
-          caja y no entre las acciones de arriba.
-          Están juntos porque van juntos —la residencia no se puede
-          encender sin la clínica— y separados del resto porque encenderlos
-          no es activar una función: es aceptar ser responsable de un
-          registro legal de datos de salud. La caja lo dice en su línea de
-          texto, para que no se marque por inercia. */}
-      <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6">
-        <h3 className="font-semibold text-slate-900 mb-1">Datos de salud</h3>
-        <p className="text-[13px] text-slate-500 mb-4">
-          Encenderlos hace a Mi Piace encargado de tratamiento (art. 9 RGPD,
-          Ley 41/2002). Hace falta el DPA firmado.
-        </p>
-        <div className="space-y-3">
-          <CasillaDeSalud
-            label="Historia clínica"
-            hint="Pacientes con historia, accesos y registro de accesos. Necesita CRM y agenda."
-            checked={tenant.clinicalRecordsEnabled === true}
-            busy={busy}
-            onChange={() => onToggleSalud("clinicalRecordsEnabled")}
-          />
-          <CasillaDeSalud
-            label="Residencia"
-            hint="Residentes, edificio, roles de cuidado, turnos y la tablet de la puerta. Necesita la historia clínica."
-            checked={tenant.residenciaEnabled === true}
-            busy={busy}
-            onChange={() => onToggleSalud("residenciaEnabled")}
-          />
-        </div>
-      </div>
+      {/* catalogo-servicios-csv · el MISMO componente que pinta el DRAFT,
+          en el sitio en el que esta caja ha estado siempre para un tenant
+          activo: debajo de las métricas y encima de «Acciones». */}
+      <DatosDeSaludPanel tenant={tenant} busy={busy} onToggleSalud={onToggleSalud} />
 
       <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6">
         <h3 className="font-semibold text-slate-900 mb-4">Acciones</h3>
