@@ -559,6 +559,7 @@ Y los dos del bucle visual, en `clinica-7-pantallas.test.tsx`:
 | - | ------------ | ----- | --------- |
 | 47 | la guarda vuelve a envolver solo el árbol ya cargado | `HistoriaViva.tsx` | 🔴 3 |
 | 48 | `useSePuedeEscribirHistoria` deja de mirar el estado | `ContratoDeTratamiento.tsx` | 🔴 1 |
+| 49 | la excepción de «no pude comprobar» vuelve a salir del arranque | `arranque.ts` | 🔴 1 |
 
 ### Los seis que salieron VERDES, que son los que enseñaron algo
 
@@ -581,6 +582,43 @@ Y los dos del bucle visual, en `clinica-7-pantallas.test.tsx`:
 
 Los seis se cerraron con test nuevo y se volvieron a sabotear: los seis
 rojos.
+
+---
+
+## 11bis · Lo que encontró el primer CI, y el portátil no
+
+Dos rojos en la primera pasada, los dos **invisibles en local por el mismo
+motivo**: este Mac tiene un `.env` en la raíz del repo y CI no.
+
+1. **`smoke` · el contenedor no llegaba a servir `/health`.** El smoke
+   arranca la imagen contra una base **sin migrar**, y
+   `prisma.clinicalTenantKey.count()` lanza `P2021: la tabla no existe`.
+   Esa excepción salía de `exigirArranqueClinico` y mataba el proceso: el
+   log decía «la tabla no existe» y el job, «la API se paró antes de
+   servir».
+
+   **«No pude comprobar» no es «comprobado y está mal»**, y solo lo segundo
+   justifica no arrancar: una base sin tablas no tiene ninguna historia
+   clínica que proteger, y en un despliegue de verdad las tablas están. La
+   revisión devuelve ahora `noSePudoComprobar`, se escribe como `warn` —
+   para que nadie lea «arrancó» como «la KEK está bien»— y la API sigue.
+   Es la regla de la casa que este bloque casi rompe: **nada del arranque
+   puede lanzar**.
+2. **`e2e` · seis 500 en `clinica-sesion-cobro.e2e.ts`.** Cerrar una sesión
+   escribe una entrada cifrada, y `asegurarDek` no puede envolver nada sin
+   `CLINICAL_KEK`. El único fichero que la ponía era `clinica-7.e2e.ts`, y
+   en local corría antes —dejándola en el `process.env` del worker— además
+   de que el `.env` de la raíz ya la traía. En CI no hay `.env` y el orden
+   de vitest puso el del cobro primero.
+
+   La KEK pasa a `e2e-env.ts`, el módulo que importan todos los ficheros de
+   la suite, **fija y no aleatoria**: los ficheros comparten base, y uno que
+   envolviera una DEK con una KEK distinta de la del siguiente dejaría un
+   canario que no cuadra.
+
+Reproducido en local apartando los dos `.env`: **los mismos seis fallos
+antes, 617 verdes después**. La lección, para el siguiente bloque: lo que
+el portátil no ve no es que no exista, es que el `.env` lo tapa.
 
 ---
 
@@ -785,7 +823,9 @@ cf639b3 fix(clinica-7): la guarda del contrato envuelve también la rama de erro
 f5c3a7f fix(clinica-7): en solo lectura la historia no ofrece empezar una visita
 b887a2c docs(clinica-7): el bucle visual — capturas, medidas y dos hallazgos
 8410164 fix(clinica-7): el banco de la clínica acepta el contrato, y el capítulo 11 mira lo cifrado
-<este>  docs(clinica-7): el done del bloque
+631921e docs(clinica-7): el done del bloque
+cd8716a fix(clinica-7): el arranque no tumba la API si no puede comprobar, y el e2e trae su KEK
+<este>  docs(clinica-7): lo que enseñó el primer CI
 ```
 
 ---
@@ -798,6 +838,18 @@ b887a2c docs(clinica-7): el bucle visual — capturas, medidas y dos hallazgos
 (`docs/code-prompts/bloque-residencia-2.md`, `docs/residencia/00-decisiones.md`
 y `docs/residencia/09-hoja-de-ruta.md`), ninguno de los cuales toca este
 bloque. Sin conflictos.
+
+**Pusheada**, y el PR contra `master` es el
+[**#23**](https://github.com/matiasoyola/mipiace-tpv/pull/23).
+
+**CI VERDE sobre `cd8716a`**, los tres jobs:
+[run 38708244746](https://github.com/matiasoyola/mipiace-tpv/actions/runs/38708244746)
+— `ci: pass` (4m10s) · `e2e: pass` (1m42s) · `smoke: pass` (4m0s).
+`publish` se salta, como toca fuera de master.
+
+La primera pasada, sobre `631921e`, salió con `e2e` y `smoke` en rojo: los
+dos fallos y sus arreglos están en §11bis, y son la parte del bloque que el
+portátil no podía ver.
 
 **Push y PR: autorizados. Ni merge ni despliegue — eso es de Dirección.**
 
