@@ -189,6 +189,12 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
           register: {
             select: { id: true, name: true, store: { select: { name: true } } },
           },
+          // residencia-1 · la puerta de una habitación no tiene caja, y
+          // tiene habitación. Esta pantalla lleva el gate de la caja, así
+          // que un tenant de residencia no la ve nunca; se pinta igual para
+          // que un centro MIXTO —si algún día lo hay— no vea una fila con
+          // la caja vacía y sin explicación.
+          room: { select: { id: true, number: true } },
         },
         orderBy: [{ revokedAt: "asc" }, { lastSeenAt: "desc" }],
       });
@@ -203,9 +209,13 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
           lastKnownIpCountry: d.lastKnownIpCountry,
           kind: d.kind,
           kitchenSections: d.kitchenSections,
-          registerId: d.register.id,
-          registerName: d.register.name,
-          storeName: d.register.store.name,
+          // residencia-1 · nullables desde que `register_id` lo es. Lo
+          // único que llega aquí sin caja es un `ROOM`.
+          registerId: d.register?.id ?? null,
+          registerName: d.register?.name ?? null,
+          storeName: d.register?.store.name ?? null,
+          roomId: d.room?.id ?? null,
+          roomNumber: d.room?.number ?? null,
         })),
       };
     },
@@ -230,6 +240,8 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
           code: true,
           expiresAt: true,
           register: { select: { id: true, name: true } },
+          // residencia-1 · ver la nota de `/admin/devices`.
+          room: { select: { id: true, number: true } },
         },
         orderBy: { expiresAt: "asc" },
       });
@@ -238,8 +250,10 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
           id: c.id,
           code: c.code,
           expiresAt: c.expiresAt.toISOString(),
-          registerId: c.register.id,
-          registerName: c.register.name,
+          registerId: c.register?.id ?? null,
+          registerName: c.register?.name ?? null,
+          roomId: c.room?.id ?? null,
+          roomNumber: c.room?.number ?? null,
         })),
       };
     },
@@ -291,6 +305,14 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
               store: { select: { name: true } },
             },
           },
+          // residencia-1 · y la habitación, cuando el código es de una
+          // puerta. Se copia al dispositivo igual que `kind` y
+          // `kitchenSections`: lo decide el código, que lo creó alguien
+          // autenticado, y NO el cuerpo de esta petición — que no lleva
+          // sesión. Si la habitación viniera del cuerpo, cualquiera con un
+          // código se emparejaría como la puerta de la 112.
+          roomId: true,
+          room: { select: { id: true, number: true, name: true } },
         },
       });
       if (candidates.length === 0) {
@@ -335,6 +357,11 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
           data: {
             tenantId: target.tenantId,
             registerId: target.registerId,
+            // residencia-1 · la habitación de la puerta. NULL en todo lo
+            // demás, y el CHECK `devices_register_o_habitacion` lo exige en
+            // los dos sentidos: un `ROOM` sin habitación no entra, y un
+            // TERMINAL con habitación tampoco.
+            roomId: target.roomId,
             name: deviceName ?? null,
             deviceTokenHash: hash,
             userAgent: userAgent ?? null,
@@ -372,12 +399,21 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
         deviceToken: plain,
         deviceId: device.id,
         tenantId: target.tenantId,
+        // residencia-1 · las tres de la caja son NULL en una puerta de
+        // habitación, y las dos de la habitación son NULL en todo lo demás.
+        // Se mandan planas y nullables en vez de en dos formas distintas de
+        // respuesta: la APK ya elige pantalla por `kind`, y una respuesta
+        // con dos formas obligaría a que también eligiera parser.
         registerId: target.registerId,
-        registerName: target.register.name,
-        storeName: target.register.store.name,
+        registerName: target.register?.name ?? null,
+        storeName: target.register?.store.name ?? null,
+        roomId: target.roomId,
+        roomNumber: target.room?.number ?? null,
         // kds-1-cocina · la APK lee esto para decidir si arranca en modo
-        // TPV o en «modo cocina». Es la misma APK (decisión 1): lo que
-        // cambia es la pantalla que pinta al arrancar.
+        // TPV o en «modo cocina». residencia-1 añade el tercer valor,
+        // `ROOM`, y el «modo puerta». Es la misma APK (decisión 1 de kds-1,
+        // D-52 de la residencia): lo que cambia es la pantalla que pinta al
+        // arrancar.
         kind: target.kind,
         kitchenSections: target.kitchenSections,
       });
@@ -388,7 +424,7 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
   app.get(
     "/devices/me",
     { preHandler: [requireDeviceToken, ensureCajaEnabled] },
-    async (request) => {
+    async (request, reply) => {
       const ctx = request.device!;
       const prisma = getPrisma();
       const now = new Date();
@@ -445,6 +481,19 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
         where: { id: ctx.deviceId },
         data: { lastSeenAt: now },
       });
+      // residencia-1 · `register` es nullable desde que lo es la columna, y
+      // aquí no puede ser null: `requireDeviceToken` ya rechazó al `ROOM`
+      // —que es lo único sin caja— con un 403 antes de llegar. El `if`
+      // existe para que el tipo lo diga en vez de para arreglar un caso:
+      // la alternativa era un `!` por cada una de las nueve lecturas de
+      // abajo, y un `!` es una afirmación que nadie vuelve a comprobar.
+      const register = device.register;
+      if (register == null) {
+        return reply.code(401).send({
+          error: "DEVICE_REVOKED",
+          message: "Dispositivo revocado o desconocido",
+        });
+      }
       return {
         device: {
           id: device.id,
@@ -452,13 +501,13 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
           pairedAt: device.pairedAt.toISOString(),
         },
         register: {
-          id: device.register.id,
-          name: device.register.name,
-          numSerieHolded: device.register.numSerieHolded,
+          id: register.id,
+          name: register.name,
+          numSerieHolded: register.numSerieHolded,
         },
         store: {
-          id: device.register.store.id,
-          name: device.register.store.name,
+          id: register.store.id,
+          name: register.store.name,
         },
         tenant: {
           id: device.tenant.id,
@@ -473,11 +522,11 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
         // compró no tiene por qué llegar a la pantalla.
         kitchen: device.tenant.kitchenDisplayEnabled
           ? {
-              courseMode: device.register.store.kitchenCourseMode,
-              seatMode: device.register.store.kitchenSeatMode,
-              greenMaxMin: device.register.store.kitchenGreenMaxMin,
-              amberMaxMin: device.register.store.kitchenAmberMaxMin,
-              readyBeep: device.register.store.kitchenReadyBeep,
+              courseMode: register.store.kitchenCourseMode,
+              seatMode: register.store.kitchenSeatMode,
+              greenMaxMin: register.store.kitchenGreenMaxMin,
+              amberMaxMin: register.store.kitchenAmberMaxMin,
+              readyBeep: register.store.kitchenReadyBeep,
             }
           : null,
       };

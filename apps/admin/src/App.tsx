@@ -5,6 +5,7 @@ import { Check, Eye, EyeOff, KeyRound, RotateCcw } from "lucide-react";
 import { AdminShell } from "./AdminShell.js";
 import { CajaGate } from "./CajaGate.js";
 import { FichajeGate } from "./FichajeGate.js";
+import { ResidenciaGate } from "./ResidenciaGate.js";
 import { ImpersonationBootstrap } from "./components/ImpersonationBootstrap.js";
 import { CashiersPage } from "./pages/CashiersPage.js";
 import { CatalogoPage } from "./pages/CatalogoPage.js";
@@ -20,6 +21,10 @@ import { SettingsPage } from "./pages/SettingsPage.js";
 import { AgendaCatalogPage } from "./pages/AgendaCatalogPage.js";
 import { AgendaHorarioPage } from "./pages/AgendaHorarioPage.js";
 import { StaffPage } from "./pages/StaffPage.js";
+// residencia-1 · las tres pantallas del centro.
+import { ResidentesPage } from "./pages/residencia/ResidentesPage.js";
+import { EdificioPage } from "./pages/residencia/EdificioPage.js";
+import { TurnosPage } from "./pages/residencia/TurnosPage.js";
 // F1 (ADR-018) · las tres pantallas del control horario.
 import { HoyPage } from "./pages/fichaje/HoyPage.js";
 import { EmpleadosPage } from "./pages/fichaje/EmpleadosPage.js";
@@ -176,6 +181,14 @@ export function App() {
         <Route path="/admin/fichaje" element={<FichajeGate title="Control horario"><HoyPage /></FichajeGate>} />
         <Route path="/admin/fichaje/empleados" element={<FichajeGate title="Control horario"><EmpleadosPage /></FichajeGate>} />
         <Route path="/admin/fichaje/registro" element={<FichajeGate title="Control horario"><RegistroPage /></FichajeGate>} />
+        {/* residencia-1 (D-48) · las tres pantallas del centro, envueltas en
+            <ResidenciaGate> por lo mismo que las de fichaje: esconderlas del
+            sidebar no basta, la URL sigue existiendo. La puerta de verdad es
+            la del servidor, que contesta 404. Sin <CajaGate>: el cliente
+            cero es una residencia sin caja. */}
+        <Route path="/admin/residencia/residentes" element={<ResidenciaGate title="Residentes"><ResidentesPage /></ResidenciaGate>} />
+        <Route path="/admin/residencia/edificio" element={<ResidenciaGate title="Edificio"><EdificioPage /></ResidenciaGate>} />
+        <Route path="/admin/residencia/turnos" element={<ResidenciaGate title="Turnos"><TurnosPage /></ResidenciaGate>} />
         <Route path="/admin/tag-aliases" element={<CajaGate title="Etiquetas"><TagAliasesPage /></CajaGate>} />
         <Route path="/admin/tag-sections" element={<CajaGate title="Comanderas"><TagSectionsPage /></CajaGate>} />
         <Route path="/admin/printers" element={<CajaGate title="Impresoras"><PrintersPage /></CajaGate>} />

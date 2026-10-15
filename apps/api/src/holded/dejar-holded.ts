@@ -771,7 +771,10 @@ export async function previsualizarDejarHolded(
   const terminales = terminalesRaw.map((d) => ({
     id: d.id,
     nombre: d.name,
-    caja: d.register.name,
+    // residencia-1 · `register` es nullable desde que lo es la columna. Lo
+    // único que llega sin caja es la puerta de una habitación, y este
+    // informe es de un comercio que DEJA Holded — no puede tener ninguna.
+    caja: d.register?.name ?? null,
     apkVersion: d.heartbeat?.appVersionName ?? null,
     apkCodigo: d.heartbeat?.appVersionCode ?? null,
     ultimoLatido: (d.heartbeat?.reportedAt ?? d.lastSeenAt)?.toISOString() ?? null,

@@ -19,6 +19,8 @@ import {
   colorPropuesto,
   coloresEnUso,
 } from "./StaffPage.colors.js";
+// residencia-1 · la sección de residencia, en su propio fichero.
+import { CuidadoEditor } from "./StaffPage.residencia.js";
 
 // ── Tipos del contrato de la API ─────────────────────────────────────
 interface StaffProfile {
@@ -158,6 +160,10 @@ export function StaffPage() {
   // clinica-1 · sale del MISMO `GET /admin/tenant/settings` que ya se
   // pedía para la agenda, así que la pantalla no hace una petición más.
   const [clinicaEncendida, setClinicaEncendida] = useState(false);
+  // residencia-1 · la sección de residencia (roles de cuidado y zona) se
+  // pinta sólo con el módulo encendido. En Sole, en la clínica de podología
+  // y en los bares, Personal es exactamente la de hoy.
+  const [residenciaEncendida, setResidenciaEncendida] = useState(false);
   const [staff, setStaff] = useState<StaffRow[] | null>(null);
   const [services, setServices] = useState<ServiceRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -176,11 +182,17 @@ export function StaffPage() {
           settings: {
             agendaEnabled: boolean;
             clinicalRecordsEnabled?: boolean;
+            residenciaEnabled?: boolean;
           };
         }>("/admin/tenant/settings");
         setAgendaEnabled(settings.settings.agendaEnabled);
         setClinicaEncendida(
           settings.settings.clinicalRecordsEnabled === true,
+        );
+        // residencia-1 · del MISMO `GET` que ya se pedía, igual que la
+        // clínica: esta pantalla no hace una petición más por el bloque.
+        setResidenciaEncendida(
+          settings.settings.residenciaEnabled === true,
         );
         if (!settings.settings.agendaEnabled) return;
         const [staffRes, svcRes] = await Promise.all([
@@ -247,6 +259,7 @@ export function StaffPage() {
               services={services}
               canEdit={canEdit}
               clinicaEncendida={clinicaEncendida}
+              residenciaEncendida={residenciaEncendida}
               onChanged={refresh}
               onError={setError}
             />
@@ -263,6 +276,7 @@ function ProfessionalCard({
   services,
   canEdit,
   clinicaEncendida,
+  residenciaEncendida,
   onChanged,
   onError,
 }: {
@@ -271,6 +285,7 @@ function ProfessionalCard({
   services: ServiceRow[];
   canEdit: boolean;
   clinicaEncendida: boolean;
+  residenciaEncendida: boolean;
   onChanged: () => Promise<void>;
   onError: (m: string | null) => void;
 }) {
@@ -341,6 +356,17 @@ function ProfessionalCard({
               row={row}
               canEdit={canEdit}
               onChanged={onChanged}
+              onError={onError}
+            />
+          )}
+          {/* residencia-1 · roles de cuidado y zona. Va DEBAJO de la
+              sección clínica y no la sustituye: en un centro mixto
+              —residencia con una consulta de podología dentro— las dos
+              significan cosas distintas y las dos se tocan. */}
+          {residenciaEncendida && (
+            <CuidadoEditor
+              userId={row.userId}
+              canEdit={canEdit}
               onError={onError}
             />
           )}

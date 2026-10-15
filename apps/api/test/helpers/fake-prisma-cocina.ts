@@ -77,6 +77,21 @@ export interface FakePantalla {
   id: string;
   tenantId: string;
   storeId: string;
+  /**
+   * residencia-1 · la CAJA del aparato.
+   *
+   * El falso no la tenía porque ninguna ruta de cocina la leía: la pantalla
+   * filtra por tienda. Entra cuando `devices.register_id` se vuelve
+   * nullable y las dos puertas de auth empiezan a comprobar que un aparato
+   * que NO es la puerta de una habitación tiene caja — lo exige el CHECK
+   * `devices_register_o_habitacion`, así que un falso sin caja era un falso
+   * que representaba una fila que la base no admite.
+   *
+   * Opcional para no tocar los tests que ya construían pantallas: se
+   * deriva de la tienda (`caja-<storeId>`), que es exactamente la relación
+   * que hay en la base.
+   */
+  registerId?: string;
   kind: "TERMINAL" | "TEST" | "KITCHEN";
   revokedAt: Date | null;
   kitchenSections: Seccion[];
@@ -725,6 +740,11 @@ export function construirFakePrisma(state: EstadoFalso) {
       return p;
     }),
   };
+  // residencia-1 · la caja de una pantalla, derivada de su tienda. En la
+  // base es una FK; aquí basta con que sea estable y no nula, que es lo que
+  // el CHECK `devices_register_o_habitacion` garantiza de todo lo que no es
+  // la puerta de una habitación.
+  const cajaDe = (d: FakePantalla) => d.registerId ?? `caja-${d.storeId}`;
   prisma.device = {
     findMany: vi.fn(async ({ where }: any) => {
       const out: FakePantalla[] = [];
@@ -735,6 +755,7 @@ export function construirFakePrisma(state: EstadoFalso) {
         if (where.register?.storeId && d.storeId !== where.register.storeId) continue;
         out.push({
           ...d,
+          registerId: cajaDe(d),
           register: { id: "r", name: "Caja 1", store: { id: d.storeId, name: "Tienda" } },
         } as never);
       }
@@ -750,8 +771,18 @@ export function construirFakePrisma(state: EstadoFalso) {
         const tenant = state.tenants.get(d.tenantId);
         return {
           ...d,
+          // residencia-1 · ver `FakePantalla.registerId`. Sin esto, las dos
+          // puertas de auth contestan 401 a una pantalla de cocina perfecta.
+          registerId: cajaDe(d),
           register: { storeId: d.storeId },
-          tenant: { kitchenDisplayEnabled: tenant?.kitchenDisplayEnabled ?? false },
+          tenant: {
+            kitchenDisplayEnabled: tenant?.kitchenDisplayEnabled ?? false,
+            // residencia-1 · un tenant de cocina NO es una residencia.
+            // `resolverPuerta` lo mira, y un falso que devolviera
+            // `undefined` haría pasar por «residencia apagada» algo que
+            // ni se pregunta.
+            residenciaEnabled: false,
+          },
           store,
         };
       }

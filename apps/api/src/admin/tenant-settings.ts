@@ -64,6 +64,12 @@ export async function registerAdminTenantSettingsRoutes(
           // el menú de emparejar una pantalla, y NO se acepta en el POST.
           // Encender el módulo es vender una pantalla.
           kitchenDisplayEnabled: true,
+          // residencia-1 · lo mismo que las cuatro de arriba: se DEVUELVE
+          // para que el panel pinte las pantallas de residencia y
+          // `<ResidenciaGate>` pueda explicar por qué no están, y NO se
+          // acepta en el POST. Encender el módulo es vender un producto con
+          // datos de salud detrás.
+          residenciaEnabled: true,
         },
       });
       return {
@@ -88,6 +94,8 @@ export async function registerAdminTenantSettingsRoutes(
           clinicalRecordsEnabled: tenant.clinicalRecordsEnabled,
           // kds-1-cocina · sólo lectura, por lo mismo.
           kitchenDisplayEnabled: tenant.kitchenDisplayEnabled,
+          // residencia-1 · sólo lectura, por lo mismo.
+          residenciaEnabled: tenant.residenciaEnabled,
         },
       };
     },
@@ -145,6 +153,14 @@ export async function registerAdminTenantSettingsRoutes(
             // marca en Ajustes. (Si Dirección decide que la dueña pueda,
             // es añadir la línea aquí y el toggle en la pantalla — está
             // dicho en el done del bloque.)
+            //
+            // residencia-1 · ni `residenciaEnabled`, y aquí la razón es la
+            // de la clínica más una: la residencia **no se puede encender
+            // sola**. Exige la clínica encendida (CHECK
+            // `tenants_residencia_exige_clinica`), así que un toggle aquí
+            // tendría que explicarle a la dirección por qué su casilla no
+            // obedece. Lo que hay en su lugar está dicho en el prompt y en
+            // el done: fuera de alcance, y es una recomendación.
           },
         },
       },

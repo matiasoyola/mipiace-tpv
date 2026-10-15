@@ -230,7 +230,12 @@ export async function registerDeviceWebSocketRoute(
       let device: {
         id: string;
         tenantId: string;
-        registerId: string;
+        // residencia-1 · nullable desde este bloque. La puerta de una
+        // habitación no tiene caja y no abre este canal: `/ws/device` es el
+        // canal de SOPORTE del terminal (A5), y lo que viaja por él son
+        // comandos de un TPV. Se rechaza abajo, como se rechaza en
+        // `requireDeviceToken`.
+        registerId: string | null;
         revokedAt: Date | null;
       } | null;
       try {
@@ -252,6 +257,14 @@ export async function registerDeviceWebSocketRoute(
       }
       if (device.revokedAt) {
         closeWith(WS_CLOSE.REVOKED, "device revoked");
+        return;
+      }
+      // residencia-1 · sin caja no hay canal de soporte del terminal. Lo
+      // único que puede llegar aquí sin caja es la puerta de una
+      // habitación, y una puerta no recibe comandos de TPV. Se cierra como
+      // «token que no vale», que es lo que es para este canal.
+      if (device.registerId == null) {
+        closeWith(WS_CLOSE.UNAUTHORIZED, "invalid token");
         return;
       }
 

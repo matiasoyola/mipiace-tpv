@@ -185,6 +185,19 @@ export interface TenantDetail {
   modules: TenantModules;
   /** kds-1-cocina · el módulo «Cocina». Fuera de `modules`, ver arriba. */
   kitchenDisplayEnabled?: boolean;
+  /**
+   * clinica-1 · la HISTORIA CLÍNICA. Fuera de `modules` por lo mismo que la
+   * cocina (decisión 6 de clinica-1: un tenant cuyo único módulo fuera éste
+   * no tendría ni pacientes ni citas). Hasta residencia-1 **no viajaba** en
+   * la respuesta, así que el panel no podía ni saber qué cliente la tenía
+   * encendida.
+   */
+  clinicalRecordsEnabled?: boolean;
+  /**
+   * residencia-1 (D-48) · la RESIDENCIA DE MAYORES. Fuera de `modules` por
+   * lo mismo: es una capa sobre la clínica, no sostiene a nadie sola.
+   */
+  residenciaEnabled?: boolean;
   lastIncrementalSyncAt: string | null;
   createdAt: string;
   blockedAt: string | null;

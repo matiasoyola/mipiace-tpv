@@ -70,6 +70,12 @@ export interface TenantCapabilities {
   // `null` mientras no se sabe: quien lo mire decide, y lo prudente aquí
   // es no pintar.
   businessType: "HOSPITALITY" | "RETAIL" | "SERVICES" | null;
+  // residencia-1 (D-48) · la RESIDENCIA DE MAYORES. Columna del tenant,
+  // sólo la mueve el super-admin. Gatea las tres pantallas nuevas
+  // (Residentes, Edificio, Turnos) y la sección de residencia de Personal.
+  // Apagada —o sea, en los quince clientes de hoy— el panel es exactamente
+  // el de antes del bloque.
+  residencia: boolean;
 }
 
 // El valor con el que se sigue adelante si alguna de las dos peticiones
@@ -92,6 +98,10 @@ const POR_DEFECTO: TenantCapabilities = {
   // emparejamiento que la API rechaza con un 403.
   cocina: false,
   businessType: null,
+  // residencia-1 · false al fallar, como `clinica` y `cocina`: esconder una
+  // sección es más barato que enseñar una que no toca, y la que no toca
+  // aquí hablaría de residentes donde no hay ninguno.
+  residencia: false,
 };
 
 let cache: TenantCapabilities | null = null;
@@ -112,6 +122,7 @@ async function pedir(): Promise<void> {
           fichajeEnabled?: boolean;
           clinicalRecordsEnabled?: boolean;
           kitchenDisplayEnabled?: boolean;
+          residenciaEnabled?: boolean;
         };
       }>("/admin/tenant/settings"),
       api<{
@@ -129,6 +140,7 @@ async function pedir(): Promise<void> {
       fichaje: s.settings.fichajeEnabled === true,
       clinica: s.settings.clinicalRecordsEnabled === true,
       cocina: s.settings.kitchenDisplayEnabled === true,
+      residencia: s.settings.residenciaEnabled === true,
       holded: me.tenant.hasHoldedKey === true,
       holdedEnabled: me.tenant.holdedEnabled !== false,
       holdedDejado: me.tenant.holdedDisconnectedAt != null,

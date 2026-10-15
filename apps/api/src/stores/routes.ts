@@ -105,6 +105,12 @@ export async function registerStoresRoutes(app: FastifyInstance): Promise<void> 
       );
       const devicesByRegisterId = new Map<string, number>();
       for (const row of devicesByRegister) {
+        // residencia-1 · `registerId` es nullable desde este bloque, así
+        // que el `groupBy` lo tipa nullable aunque el `where` filtre por
+        // `in registerIds` y ninguna fila sin caja pueda salir. Un
+        // `continue` explícito en vez de un `!`: lo que se cuenta aquí son
+        // «aparatos de esta caja», y una puerta de habitación no lo es.
+        if (row.registerId == null) continue;
         devicesByRegisterId.set(row.registerId, row._count);
       }
       const storeOfRegister = new Map(
@@ -264,6 +270,8 @@ export async function registerStoresRoutes(app: FastifyInstance): Promise<void> 
       ]);
       const devicesMap = new Map<string, number>();
       for (const row of devicesByRegister) {
+        // residencia-1 · ver la nota de `GET /stores`.
+        if (row.registerId == null) continue;
         devicesMap.set(row.registerId, row._count);
       }
       const lastSaleMap = new Map<string, string>();

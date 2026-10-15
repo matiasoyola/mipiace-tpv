@@ -121,6 +121,44 @@ export async function requireDeviceToken(
     });
     return;
   }
+  // residencia-1 (D-52) · Y UNA PUERTA DE HABITACIÓN TAMPOCO ES UN TPV.
+  //
+  // El mismo sitio que la pantalla de cocina, y por la misma razón de
+  // cuentas: éste es el preHandler de TODAS las rutas del TPV y también del
+  // login de cajero, así que cortar aquí es lo que hace que una puerta no
+  // pueda cobrar, abrir turno, emitir un registro de facturación ni relevar
+  // a nadie — el 403 cae ANTES del PIN, así que nunca llega a tener una
+  // sesión de cajero con la que intentarlo.
+  //
+  // Es también la señal por la que la APK sabe que arranca en «modo
+  // puerta»: el 403 de `/devices/me` no es un error, es la respuesta
+  // correcta (ver `tpv-web/src/hooks/bootstrap-decision.ts`). Las rutas de
+  // la puerta tienen su propia puerta de auth (`residencia/puerta-auth.ts`).
+  if (device.kind === "ROOM") {
+    reply.code(403).send({
+      error: "ROOM_DEVICE_NOT_ALLOWED",
+      message:
+        "La tablet de una habitación no vende: ni cobra, ni abre turno, ni emite registros.",
+    });
+    return;
+  }
+  // residencia-1 · `register_id` es nullable desde este bloque, y aquí ya
+  // sabemos que esto no es un `ROOM`. El CHECK
+  // `devices_register_o_habitacion` garantiza que todo lo que no es `ROOM`
+  // tiene caja, así que este `if` no debería poder ser verdad nunca; se
+  // escribe igual porque la alternativa era un `!` que convierte una fila
+  // imposible en un `undefined` corriendo por dentro de las rutas de cobro.
+  if (device.registerId == null) {
+    request.log.error(
+      { event: "device_sin_caja", deviceId: device.id, kind: device.kind },
+      "dispositivo sin caja que no es la puerta de una habitación",
+    );
+    reply.code(401).send({
+      error: "DEVICE_REVOKED",
+      message: "Dispositivo revocado o desconocido",
+    });
+    return;
+  }
   request.device = {
     deviceId: device.id,
     tenantId: device.tenantId,

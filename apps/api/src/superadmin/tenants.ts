@@ -33,6 +33,11 @@ import { vaciarColasDeHolded } from "../holded/dejar-holded-colas.js";
 import { loadEnv } from "../env.js";
 import { enqueueInitialSync } from "../queues/initial-sync.js";
 import { enqueueManualSync } from "../queues/catalog-incremental.js";
+// residencia-1 · la semilla del centro al encender el interruptor.
+import {
+  sembrarResidencia,
+  type PrismaParaSemilla,
+} from "../residencia/semilla.js";
 
 import {
   extractRequestSignals,
@@ -119,6 +124,11 @@ function serializeDraftTenant(t: {
   holdedEnabled?: boolean;
   // kds-1-cocina · opcional por la misma razón que sus hermanas.
   kitchenDisplayEnabled?: boolean;
+  // clinica-1 / residencia-1 · los dos interruptores que viajan planos. La
+  // clínica no se devolvía y la residencia es nueva; el detalle los pinta
+  // como casillas y el `PATCH` los mueve.
+  clinicalRecordsEnabled?: boolean;
+  residenciaEnabled?: boolean;
 }) {
   return {
     id: t.id,
@@ -150,6 +160,13 @@ function serializeDraftTenant(t: {
     // que se cobra por pantalla. Dentro de `modules` entraría en el
     // invariante de «al menos uno encendido» y no debe.
     kitchenDisplayEnabled: t.kitchenDisplayEnabled ?? false,
+    // clinica-1 · fuera de `modules` por decisión 6 de ese bloque: un
+    // tenant cuyo único módulo fuera la historia clínica no tendría ni
+    // pacientes ni citas.
+    clinicalRecordsEnabled: t.clinicalRecordsEnabled ?? false,
+    // residencia-1 · fuera de `modules` por lo mismo: la residencia es una
+    // capa sobre la clínica, no sostiene a nadie sola.
+    residenciaEnabled: t.residenciaEnabled ?? false,
   };
 }
 
@@ -447,6 +464,12 @@ export async function registerSuperAdminTenantsRoutes(
         // kds-1-cocina · el módulo «Cocina», para que el detalle lo pueda
         // pintar y moverlo. Fuera de `modules`, ver `resumenTenant`.
         kitchenDisplayEnabled: tenant.kitchenDisplayEnabled,
+        // clinica-1 / residencia-1 · los dos de salud. El detalle los pinta
+        // como casillas junto a la de cocina y el `PATCH` los mueve; antes
+        // de este bloque la clínica NO viajaba, así que el panel no podía
+        // ni saber qué cliente la tenía encendida.
+        clinicalRecordsEnabled: tenant.clinicalRecordsEnabled,
+        residenciaEnabled: tenant.residenciaEnabled,
         // holded-desconectar (ADR-020) · cuándo DEJÓ Holded, si lo dejó.
         // El detalle lo necesita para saber qué botón enseñar: «Dejar
         // Holded» al que lo tiene conectado y vendiendo, y nada al que ya
@@ -935,6 +958,35 @@ export async function registerSuperAdminTenantsRoutes(
             // cobra POR PANTALLA (cocina + barra = dos), así que se mueve
             // sólo desde aquí, igual que la caja y el control horario.
             kitchenDisplayEnabled: { type: "boolean" },
+            // clinica-1 · **LA LÍNEA QUE FALTABA.** El handler de abajo
+            // trata `clinicalRecordsEnabled` desde clinica-1 (con sus dos
+            // guardas y su audit), el done de ese bloque documenta
+            // `PATCH /super-admin/tenants/<id> {"clinicalRecordsEnabled":
+            // true}` como la única forma de encender la clínica… y la
+            // propiedad no estaba declarada aquí.
+            //
+            // Y lo que pasaba NO era un 400: Fastify configura ajv con
+            // `removeAdditional: true` por defecto, así que
+            // `additionalProperties: false` **borra** la propiedad en vez
+            // de quejarse. El PATCH contestaba **200 `{noChanges: true}`**
+            // y no encendía nada. Un 400 se habría visto el primer día; un
+            // 200 que no hace nada se lee como «ya estaba encendido».
+            //
+            // No lo vio nadie porque ningún test la manda por HTTP —los de
+            // la clínica construyen el tenant con la columna ya puesta— y
+            // porque no hay pantalla que la mande. La encontró este bloque
+            // al necesitarla: `residenciaEnabled` no se puede encender sin
+            // ella, así que lo primero que hay que poder hacer es
+            // encenderla.
+            //
+            // Tiene su test en `residencia-interruptor.test.ts`, incluido
+            // el de que una propiedad desconocida se tira en silencio.
+            clinicalRecordsEnabled: { type: "boolean" },
+            // residencia-1 (D-48) · el interruptor de la RESIDENCIA. Mismo
+            // gobierno que la clínica y la caja: sólo desde aquí, porque
+            // encenderlo es vender un producto y aceptar un marco legal
+            // (los residentes tienen historia). Sus dos guardas, abajo.
+            residenciaEnabled: { type: "boolean" },
           },
         },
       },
@@ -962,6 +1014,7 @@ export async function registerSuperAdminTenantsRoutes(
         holdedEnabled?: boolean;
         clinicalRecordsEnabled?: boolean;
         kitchenDisplayEnabled?: boolean;
+        residenciaEnabled?: boolean;
       };
       const ctx = request.superAdmin!;
       const prisma = getPrisma();
@@ -1247,6 +1300,79 @@ export async function registerSuperAdminTenantsRoutes(
         data.clinicalRecordsEnabled = body.clinicalRecordsEnabled;
       }
 
+      // ── residencia-1 (D-48) · EL MÓDULO «RESIDENCIA» ─────────────────
+      //
+      // Fuera de `MODULE_FIELDS` a propósito, como la historia clínica y la
+      // cocina: no entra en el invariante «al menos un módulo encendido»
+      // porque una residencia tiene además CRM, agenda y clínica — la
+      // residencia sola no sostiene a nadie, es una capa sobre la clínica.
+      //
+      // Guarda en los DOS sentidos, y las dos son del producto:
+      //
+      //   · ENCENDERLA exige LA CLÍNICA (y por tanto CRM y agenda, que la
+      //     clínica ya exige). El residente es un `Client` con historia
+      //     (D-49) y su ficha pasa por la misma función de acceso que la
+      //     historia; sin la clínica, el módulo existe y su dato central no
+      //     se puede ni leer. Y además lo impide el CHECK
+      //     `tenants_residencia_exige_clinica` de la base: sin este 409, el
+      //     super-admin recibiría un 500 de Postgres en vez de una frase.
+      //   · APAGARLA CON RESIDENTES DENTRO, NO. Mismo criterio exacto que
+      //     `CLINICAL_RECORDS_HAS_HISTORY`: apagar es dejar de servir las
+      //     rutas, y los residentes se quedarían en la base sin que nadie
+      //     pudiera llegar a ellos — con su historia, que hay que conservar
+      //     cinco años y enseñarle al residente o a su familia si la piden.
+      //     Si de verdad hay que apagarlo, antes hay que decidir qué se hace
+      //     con lo escrito, y eso no cabe en un toggle.
+      //
+      // ── Y lo que ENCENDERLA hace, además de poner la columna ─────────
+      //
+      // Siembra los diez roles de cuidado de serie y los tres turnos del
+      // centro (`residencia/semilla.ts`). Va DENTRO de la misma transacción
+      // que el `update` y el audit: un centro con el interruptor encendido y
+      // sin roles de cuidado es un centro donde nadie puede ver a nadie —la
+      // función de acceso exige rol de cuidado vigente— y la dirección
+      // llamaría pensando que el producto está roto.
+      let semillaResidencia = false;
+      if (
+        body.residenciaEnabled !== undefined &&
+        body.residenciaEnabled !== tenant.residenciaEnabled
+      ) {
+        if (body.residenciaEnabled === true) {
+          // Se leen del body cuando vienen en la misma llamada: encender la
+          // clínica y la residencia de golpe tiene que funcionar.
+          const clinica =
+            body.clinicalRecordsEnabled ?? tenant.clinicalRecordsEnabled;
+          if (!clinica) {
+            return reply.code(409).send({
+              error: "RESIDENCIA_NEEDS_CLINICA",
+              message:
+                "El residente es un paciente con historia, así que la residencia necesita la historia clínica encendida. " +
+                "Enciéndela primero (o en la misma llamada).",
+            });
+          }
+        } else {
+          const residentes = await prisma.residentProfile.count({
+            where: { tenantId: id },
+          });
+          if (residentes > 0) {
+            return reply.code(409).send({
+              error: "RESIDENCIA_HAS_RESIDENTS",
+              message:
+                `Este centro tiene ${residentes} residente(s) dados de alta en el sistema. Apagar el módulo ` +
+                "los dejaría guardados y sin forma de llegar a ellos, y la ley obliga a conservar su historia y a " +
+                "poder enseñársela. Decide qué se hace con lo escrito antes de apagarlo.",
+              residentes,
+            });
+          }
+        }
+        changes.residenciaEnabled = {
+          before: tenant.residenciaEnabled,
+          after: body.residenciaEnabled,
+        };
+        data.residenciaEnabled = body.residenciaEnabled;
+        semillaResidencia = body.residenciaEnabled === true;
+      }
+
       // kds-1-cocina (decisión 10) · EL MÓDULO «COCINA».
       //
       // Fuera de `MODULE_FIELDS` a propósito, como `holdedEnabled` y la
@@ -1300,6 +1426,13 @@ export async function registerSuperAdminTenantsRoutes(
 
       const updated = await prisma.$transaction(async (tx) => {
         const u = await tx.tenant.update({ where: { id }, data });
+        // residencia-1 · la semilla del centro, DENTRO de la transacción
+        // del interruptor. Si falla, el interruptor no se enciende: un
+        // centro de residencia sin roles de cuidado es un centro donde la
+        // función de acceso dice «no» a todo el mundo.
+        if (semillaResidencia) {
+          await sembrarResidencia(tx as unknown as PrismaParaSemilla, id);
+        }
         const signals = extractRequestSignals(request);
         await writeAudit({
           prisma: tx,

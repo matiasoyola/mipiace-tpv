@@ -148,10 +148,15 @@ export async function registerSuperAdminDevicesRoutes(
             name: d.name,
             tenantId: d.tenant.id,
             tenantName: d.tenant.name,
-            storeId: d.register.store.id,
-            storeName: d.register.store.name,
-            registerId: d.register.id,
-            registerName: d.register.name,
+            // residencia-1 · nullables desde que `register_id` lo es. En
+            // el panel de terminales del super-admin una puerta de
+            // habitación se pinta con la caja vacía: es lo que es, y
+            // esconderla habría dejado un aparato vivo sin listar donde se
+            // mira para saber qué hay emparejado en cada cliente.
+            storeId: d.register?.store.id ?? null,
+            storeName: d.register?.store.name ?? null,
+            registerId: d.register?.id ?? null,
+            registerName: d.register?.name ?? null,
             pairedAt: d.pairedAt.toISOString(),
             lastSeenAt: d.lastSeenAt?.toISOString() ?? null,
             revokedAt: d.revokedAt?.toISOString() ?? null,

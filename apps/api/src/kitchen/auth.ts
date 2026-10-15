@@ -89,6 +89,14 @@ export async function resolverPantalla(
   if (device.revokedAt) return { error: "REVOKED" };
   if (device.kind !== "KITCHEN") return { error: "NOT_KITCHEN" };
   if (!device.tenant.kitchenDisplayEnabled) return { error: "MODULE_OFF" };
+  // residencia-1 · `register_id` es nullable desde ese bloque, y aquí ya
+  // sabemos que esto es un `KITCHEN`: el CHECK
+  // `devices_register_o_habitacion` garantiza que tiene caja. Se comprueba
+  // igual y se contesta `UNKNOWN` —no `NOT_KITCHEN`, que diría algo falso—
+  // porque la alternativa era un `!` sobre una fila que la base no admite.
+  if (device.registerId == null || device.register == null) {
+    return { error: "UNKNOWN" };
+  }
   return {
     deviceId: device.id,
     tenantId: device.tenantId,

@@ -114,6 +114,16 @@ const HTTP_DEL_MOTIVO: Record<MotivoDenegado, number> = {
   CLINICA_APAGADA: 404,
   NO_SANITARIO: 403,
   SIN_ACCESO_AL_PACIENTE: 403,
+  // residencia-1 · 403 las dos, como `SIN_ACCESO_AL_PACIENTE`: el
+  // residente existe y es de este centro, lo que falta es el permiso. No
+  // son 404 —esconder el residente no protege nada que el gate del módulo
+  // no esconda ya— y el mensaje dice dónde se arregla.
+  //
+  // `Record` exhaustivo y no un `?? 403`: el typecheck obligó a venir
+  // aquí al añadir los motivos, que es exactamente lo que se quiere. Un
+  // motivo nuevo sin HTTP pensado no compila.
+  SIN_ROL_DE_CUIDADO: 403,
+  RESIDENTE_FUERA_DE_TU_ZONA: 403,
 };
 
 export interface ContextoClinico {
