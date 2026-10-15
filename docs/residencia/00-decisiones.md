@@ -8,7 +8,7 @@ mipiacetpv (14-10, D-36 y D-37) y **cierre por criterio de Claude** de todo lo q
 (14-10, D-38 a D-60), con delegación expresa de Matías: *«dejo que apliques tu criterio a todas las
 dudas que queden por resolver, quiero que empecemos ya»*.
 
-Documentos fuente (proyecto «Jardin de Gredos»): `concepto-software-residencia.md`,
+Documentos fuente (proyecto «Jardin de Gredos»; copia en `docs/residencia/` desde el 15-10-2026): `concepto-software-residencia.md`,
 `respuestas-requisitos-fase0.md`, `rama-catalogo-de-controles.md`, `residencia-sobre-mipiacetpv.md`,
 `auditoria-aenor-2026-analisis.md`.
 
