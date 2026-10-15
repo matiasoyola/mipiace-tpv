@@ -36,7 +36,7 @@ la medicación completa.
 | residencia-3 | La puerta: PIN, residente, lo que toca, «como siempre», registro offline | 2 + mockup |
 | residencia-4 | Constantes, umbrales, eventos derivados, libro de incidencias, comunicación a familia | 3 |
 | residencia-5 | Relevo con acuse, panel de dirección, obligaciones del mes | 4 |
-| residencia-1b | Cifrado en reposo de DNI, NSS y textos libres de residencia-1 y -2, con la maquinaria de clinica-7 (D-62, D-63) | 1 + clinica-7 (**lanzado**) |
+| residencia-1b | Cifrado en reposo de DNI, NSS y textos libres de residencia-1 y -2, con la maquinaria de clinica-7 (D-62, D-63) | 1 + clinica-7 (**hecho**, PR #24) |
 | *(piloto)* | Una planta, 4-6 tablets, dos semanas; luego todo el centro | 5 + 1b |
 
 ### Fase 1b · calidad mínima para la auditoría — objetivo: abril 2027
