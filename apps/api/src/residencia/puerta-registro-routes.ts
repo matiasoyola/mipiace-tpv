@@ -1120,11 +1120,71 @@ export async function registerResidenciaPuertaRegistroRoutes(
       // Un lote de siete filas lleva una sola firma en el caso normal, y
       // comprobarla siete veces serían siete resoluciones de acceso y siete
       // consultas de asignación por un toque de dos segundos.
-      const resultados = [];
+      const resultados: Array<{
+        id: string;
+        estado: "guardado" | "corrige" | "ya-estaba" | "rechazado";
+        corrigeA?: string;
+        codigo?: string;
+        mensaje?: string;
+      }> = [];
       const firmasComprobadas = new Map<string, string | null>();
       const visiblesPorFirmante = new Map<string, Set<string>>();
 
+      // ── LO QUE YA ESTÁ, PRIMERO DE TODO ────────────────────────────
+      //
+      // Lo encontró el e2e: un reenvío tardío de un lote que YA entró
+      // llegaba con un `recordedAt` de hace semanas y se rechazaba por la
+      // firma («quien firma no tenía ese rol cuando se hizo el cuidado»)
+      // **aunque la fila estuviera guardada**. La tablet lo habría borrado
+      // de su cola creyendo que no llegó, y además lo habría pintado en
+      // rojo en la pantalla 6.
+      //
+      // La idempotencia se comprueba antes que CUALQUIER otra cosa y en la
+      // ruta, no sólo dentro de `escribirRegistro`: lo de abajo también
+      // valida —la firma y la zona— y también tiene que quedar fuera. Lo
+      // que ya está, está; qué pasaba el día que se escribió lo decidió el
+      // servidor entonces.
+      const yaEstaban = await prisma.careRecord.findMany({
+        where: {
+          id: { in: cuerpo.registros.map((r) => r.id) },
+          tenantId: ctx.tenantId,
+        },
+        select: { id: true, correctsRecordId: true },
+      });
+      const yaPorId = new Map(yaEstaban.map((r) => [r.id, r]));
+
       for (const entrante of cuerpo.registros) {
+        const existente = yaPorId.get(entrante.id);
+        if (existente) {
+          resultados.push({
+            id: existente.id,
+            estado: "ya-estaba" as const,
+            ...(existente.correctsRecordId
+              ? { corrigeA: existente.correctsRecordId }
+              : {}),
+          });
+          continue;
+        }
+
+        // ── Y LA HABITACIÓN, ANTES QUE EL PERMISO DE LA PERSONA ──────
+        //
+        // Es el aislamiento de ESTA tablet y es más específico: la 112 no
+        // apunta nada de la 114 ni aunque quien esté delante alcance a las
+        // dos. Comprobarlo después de la zona daba
+        // `RESIDENTE_FUERA_DE_TU_ZONA` a un residente que sí está en su
+        // zona pero en otra habitación — un mensaje que manda a la
+        // auxiliar a pedirle una planta a dirección cuando lo que pasa es
+        // que se ha equivocado de tablet.
+        if (!clientesDeLaHabitacion.has(entrante.clientId)) {
+          resultados.push({
+            id: entrante.id,
+            estado: "rechazado" as const,
+            codigo: "RESIDENTE_DE_OTRA_HABITACION",
+            mensaje: "Ese residente no ocupa ninguna cama de esta habitación.",
+          });
+          continue;
+        }
+
         const userId = entrante.firmadoPorUserId ?? sesion.userId;
         const assignmentId =
           entrante.careRoleAssignmentId ?? sesion.caid;
