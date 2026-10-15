@@ -150,6 +150,35 @@ quince tenants de hoy —los de agenda tienen productos **y** servicios— y pod
 alguien que está en verde, que es lo último que puede hacer un check de salud. Hay tres tests para
 ese borde (sabotaje 15).
 
+### 1.8 · Y un círculo en la pantalla, encontrado al recorrer el alta real
+
+Con `E1` exigiendo `clinicalRecordsEnabled` (§1.4), el alta de una clínica sin Holded se quedaba
+encerrada:
+
+- su catálogo son 17 servicios exentos, y sin la clínica encendida **las 17 filas se saltan**;
+- sin catálogo no se pasa `products-sellable` y la cuenta no se activa;
+- y el interruptor «Historia clínica» vivía **dentro de `ActiveTenantActions`**, que sólo se pinta
+  cuando el tenant **no** está en DRAFT.
+
+O sea: **para encender la clínica había que activar la cuenta, y para activarla había que tener el
+catálogo, que necesitaba la clínica.** El `PATCH /super-admin/tenants/:id` ya aceptaba el campo en
+DRAFT —con sus guardas de siempre: la clínica exige CRM y agenda, y en DRAFT no se relajan— así que
+lo único que faltaba era la puerta en pantalla.
+
+La caja «Datos de salud» pasa a ser `DatosDeSaludPanel` y se pinta en los **dos** estados con el
+**mismo componente** y el mismo `onToggleSalud`: el mismo confirm del DPA («esto se habla y se
+firma, no se marca»), el mismo `PATCH` y las mismas consecuencias. Dos cajas parecidas acabarían
+contando dos historias distintas de lo que significa encender esto.
+
+Dónde se pinta cada una, y por qué:
+
+- **En DRAFT, lo primero de la columna**, delante de la salud y del panel de activar: en una clínica
+  es un requisito del paso siguiente, no un ajuste posterior.
+- **En ACTIVE, exactamente donde ha estado siempre**: debajo de las métricas y encima de
+  «Acciones». Son quince tenants que ya saben dónde buscarla, y extraer un componente no puede
+  cambiarle el sitio. Hay un test sobre el **orden del DOM** que lo sostiene, y se pone rojo si la
+  caja se mueve (sabotaje 18).
+
 ---
 
 ## 2 · Tabla de sabotajes
@@ -175,6 +204,8 @@ Cada garantía, qué línea de producción hay que romper, qué se pone rojo y *
 | `products-sellable` cuenta servicios | volver a `productsTotal` a secas | `…-salud` · 2 tests | `expected { id: 'products-sellable', …(5) } to match object { applies: true, ok: true, …(1) }` |
 | …y los tenants de hoy cuentan igual | sumar productos **y** servicios | `…-salud` · 3 tests | `expected '22/28 (79%)' to be '20/20 (100%)'` |
 | Un catálogo vacío sigue en rojo | quitar el `catalogoTotal === 0 ? false` | `…-salud` + `h1-salud-modulos` · 2 tests | `expected { id: 'products-sellable', …(5) } to match object { ok: false, value: '0/0 (100%)' }` |
+| **El interruptor de la clínica se ve en DRAFT** | quitar `<DatosDeSaludPanel>` de la rama del DRAFT | `…-salud-en-draft` · 4 tests | `expected '…' to contain 'Datos de salud'` · `no hay casilla «Historia clínica» en la pantalla` |
+| …y en ACTIVE no se ha movido de sitio | mover la caja debajo de «Acciones» | `…-salud-en-draft` · 1 test | `expected 762 to be less than 637` |
 
 **El fake del `$transaction` hubo que reescribirlo para que el sabotaje importante se pudiera ver.**
 El primer intento devolvía el MISMO cliente dentro de `$transaction`, así que no podía distinguir
@@ -188,14 +219,19 @@ en Postgres. El test que lo caza es «si la AUDITORÍA falla, tampoco queda la f
 
 | Suite | Resultado |
 |---|---|
-| `pnpm test` (workspace) | 374 ficheros · 5.199 tests · 3 saltados |
-| `pnpm test:e2e` (Postgres real) | 38 ficheros · 741 tests |
-| `tsc --noEmit` api · `tsc -b` admin | limpio |
+| `pnpm test` (workspace) | 377 ficheros · 5.249 tests · 3 saltados |
+| `pnpm test:e2e` (Postgres real) | 39 ficheros · 750 tests |
+| `tsc --noEmit` api · `tsc -b` admin · `tsc -b` tpv-web | limpio |
 
-El e2e del bloque (`test-e2e/catalogo-servicios-csv.e2e.ts`, 20 tests) recorre:
+Medido **con `master` ya dentro de la rama** (merge de `99e1e76`: kds-2b-hierro y los docs de
+residencia-3). CI verde en el PR.
 
-> alta de la clínica en DRAFT sin Holded (caja + CRM + agenda) → el super-admin le enciende la
-> historia clínica → **vista previa del CSV REAL de Rosario** (17 filas, cero saltadas, sin escribir
+El e2e del bloque (`test-e2e/catalogo-servicios-csv.e2e.ts`, 22 tests) recorre:
+
+> alta de la clínica en DRAFT sin Holded (caja + CRM + agenda) → **sin la clínica encendida, el CSV
+> de Rosario se salta las 17 filas** (el lado de API del círculo del §1.8) → el `PATCH` la enciende
+> **estando en DRAFT**, sin activar nada, y la guarda de CRM + agenda sigue dando 409 en otro tenant
+> → **vista previa del CSV REAL de Rosario** (17 filas, cero saltadas, sin escribir
 > nada) → confirmar → 17 productos y 17 filas de `service_scheduling`, todos `kind = SERVICE` y
 > `exemption_cause = 'E1'` → «Probar TPV» → el TPV de prueba ve los 17 a 25 € → **cobro de ensayo
 > exento**: total 25,00 €, `total_tax = 0`, la línea con `exemption_cause = 'E1'`, `status = TEST` y
@@ -217,10 +253,13 @@ El e2e del bloque (`test-e2e/catalogo-servicios-csv.e2e.ts`, 20 tests) recorre:
   al que el test le pone `text()` encima (el `Blob` de jsdom no lo implementa, igual que en
   `catalogo-en-alta`). El camino real —elegir fichero → leer → enviar— no se ha vuelto a recorrer a
   mano en este bloque.
-- **El bucle visual.** No hay capturas nuevas del panel con las columnas de tipo y duración. La
-  tabla scrollea en su propia caja (`overflow-x-auto`, decisión de pantalla de `catalogo-en-alta`) y
-  las dos columnas nuevas caben ahí, pero **a 390 y 320 px nadie lo ha mirado en este bloque**; el
-  shell del super-admin sigue siendo de escritorio (§4 del done anterior).
+- **El bucle visual.** No hay capturas nuevas ni del panel con las columnas de tipo y duración ni de
+  la caja «Datos de salud» en DRAFT. La tabla scrollea en su propia caja (`overflow-x-auto`,
+  decisión de pantalla de `catalogo-en-alta`) y las dos columnas nuevas caben ahí, pero **a 390 y
+  320 px nadie lo ha mirado en este bloque**; el shell del super-admin sigue siendo de escritorio
+  (§4 del done anterior). Lo que sí está medido de la pantalla nueva es su contenido y el **orden
+  del DOM** (`admin/test/catalogo-servicios-csv-salud-en-draft.test.tsx`), que es lo que distingue
+  «la caja está» de «la caja está donde el implantador la busca».
 - **Las marcas de clínica.** `primeraValoracion`, `tratamientoSesion`, `nivelQuiropodia` y los
   consentimientos **no** entran por el fichero (decisión «lo que NO entra»): nacen en su default y
   se ponen en el panel. El e2e comprueba que nacen apagadas, no que se puedan poner luego — eso lo
@@ -246,6 +285,11 @@ El e2e del bloque (`test-e2e/catalogo-servicios-csv.e2e.ts`, 20 tests) recorre:
   siempre en vez de reventar. El despliegue del repo los sube a la vez de todas formas.
 - **Un despliegue sólo de API es seguro:** las tres columnas del CSV son opcionales y la respuesta
   sólo añade claves. Ningún fichero que se cargue hoy cambia de comportamiento.
+- **Pero el alta de Rosario necesita el ADMIN desplegado.** El interruptor de la historia clínica en
+  DRAFT (§1.8) es sólo pantalla: con una consola vieja el círculo sigue cerrado y el catálogo se
+  seguiría saltando las 17 filas. El despliegue del repo sube los dos a la vez; si alguna vez se
+  despliega sólo la API, el camino alternativo es un `PATCH` a mano con el campo
+  `clinicalRecordsEnabled`, que la API ya acepta en DRAFT.
 - Primera comprobación tras desplegar: abrir la ficha de un tenant sin Holded, subir el CSV de
   Rosario y ver la vista previa con las 17 filas, su duración y «Exento · sanitario». **La vista
   previa no escribe**, así que esta comprobación se puede hacer en producción sin consecuencias.
@@ -261,7 +305,11 @@ El e2e del bloque (`test-e2e/catalogo-servicios-csv.e2e.ts`, 20 tests) recorre:
 - Rama `catalogo-servicios-csv` **pusheada**.
 - **PR abierto contra `master`** (sin merge ni despliegue: eso es de Dirección).
 - Commits: el prompt del bloque (`5e9da4d`), las tres columnas y la transacción compartida
-  (`d9c1dfb`), el arreglo de `products-sellable` con su e2e (`376105f`), y este done.
+  (`d9c1dfb`), el arreglo de `products-sellable` con su e2e (`376105f`), el done y el README de
+  Rosario (`cea89f3`), el interruptor de la clínica en DRAFT (`72e91e2`), el círculo en el e2e
+  (`466db45`), el merge de `master` (`c4e6c4d`) y este repaso del done.
+- **`master` traído a la rama** (`99e1e76`: kds-2b-hierro y los docs de residencia-3), con las dos
+  suites y los tres `tsc` verdes después del merge.
 
 ### Línea para `claude/tablero-direccion.md` (no tengo acceso al fichero)
 
@@ -272,5 +320,8 @@ El e2e del bloque (`test-e2e/catalogo-servicios-csv.e2e.ts`, 20 tests) recorre:
 > **no se podía activar nunca**. Arreglado y con tres tests en el borde para que ningún tenant de hoy
 > cambie de color. El camino entero —alta en DRAFT, vista previa del CSV real, carga, cobro de
 > ensayo exento sin registros fiscales, activación y los 17 en la agenda con su duración— está
-> fijado en un e2e contra Postgres. Falta: desplegar, y que el implantador cargue el catálogo con
-> Rosario delante. Las tres dudas de precios de su hoja siguen abiertas con ella.
+> fijado en un e2e contra Postgres. Y un segundo círculo, éste de pantalla: el interruptor de la
+> historia clínica sólo se pintaba en cuentas ya activas, así que para encender la clínica había que
+> activar y para activar hacía falta el catálogo, que necesitaba la clínica. Ya se ve en DRAFT, con
+> el mismo componente y el mismo diálogo. Falta: desplegar, y que el implantador cargue el catálogo
+> con Rosario delante. Las tres dudas de precios de su hoja siguen abiertas con ella.
