@@ -22,7 +22,20 @@
 // DNI, NSS, nivel de dependencia, grado, motivo de alta y el nombre del
 // familiar. Ni a `request.log`, ni a Sentry, ni al cuerpo de un error. La
 // misma regla que la historia clínica, y aquí por dos leyes a la vez
-// (art. 9 RGPD y Ley 41/2002).
+// (art. 9 RGPD y Ley 41/2002). Desde residencia-1b, tampoco el
+// ciphertext: un `c1:…` en un log es el dato con un candado que la misma
+// casa sabe abrir.
+//
+// ── residencia-1b · Y TRES COLUMNAS VAN CIFRADAS (D-63) ─────────────
+//
+// `resident_profiles.dni`, `.nss` y `.discharge_reason`, más
+// `bed_assignments.reason` del histórico de habitaciones. Se escriben con
+// `cifrarTexto` y se leen con `leerTexto`, que es lo que decide qué
+// columna manda (la cifrada) y qué pasa cuando no se descifra (el hueco
+// marcado, no una excepción: la ficha se sigue sirviendo).
+//
+// Lo que las pantallas reciben **no cambia**: los mismos campos con los
+// mismos nombres. Lo único nuevo que puede llegar es el texto del hueco.
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
@@ -33,6 +46,21 @@ import {
 } from "../auth/middleware.js";
 import { ensureClinicaEnabled } from "../clinica/gate.js";
 import { conHistoria } from "../clinica/registro.js";
+// residencia-1b (D-63) · el cifrado de clinica-7, tal cual. `asegurarDek`
+// en las ESCRITURAS (crea la clave del centro la primera vez, dentro de la
+// transacción que escribe) y `dekONada` en las LECTURAS, que no crean
+// claves: un centro que no ha escrito nada cifrado se lee en claro, que es
+// exactamente lo que hay.
+import { asegurarDek, dekONada } from "../clinica/claves.js";
+import {
+  cifrarTexto,
+  leerTexto,
+  nuevoIdDeFila,
+  sitioDniDeResidente,
+  sitioMotivoDeAlta,
+  sitioMotivoDeOcupacion,
+  sitioNssDeResidente,
+} from "../clinica/cripto-campos.js";
 // residencia-2 · el plan de cuidados, que se precarga al dar de alta a un
 // residente y se recalcula al cambiarle el nivel (D-53).
 import { aplicarPlantilla, cerrarPlanPorAlta } from "./plan.js";
@@ -92,6 +120,9 @@ const PERFIL_SELECT = {
   admissionDate: true,
   dischargeDate: true,
   dischargeReason: true,
+  // residencia-1b · la que MANDA. La clara se queda para las filas que ya
+  // estaban escritas cuando llegó el cifrado.
+  dischargeReasonCifrado: true,
   dependencyLevel: true,
   dependencyGrade: true,
   placeType: true,
@@ -142,6 +173,7 @@ interface FilaResidente {
   admissionDate: Date;
   dischargeDate: Date | null;
   dischargeReason: string | null;
+  dischargeReasonCifrado: string | null;
   dependencyLevel: string;
   dependencyGrade: string | null;
   placeType: string;
@@ -158,7 +190,25 @@ interface FilaResidente {
   };
 }
 
-function vistaResidente(p: FilaResidente) {
+/**
+ * residencia-1b · lo que `vistaResidente` necesita para DESCIFRAR.
+ *
+ * El `tenantId` y la DEK van juntos porque el AAD los ata: la clave es de
+ * ese centro y el valor es de esa fila de ese centro. Pasarlos sueltos
+ * habría sido dos parámetros que alguien cruza.
+ *
+ * `dek` puede ser `null` y es legítimo: un centro que todavía no ha
+ * escrito nada cifrado no tiene clave (`dekONada`), y entonces lo que hay
+ * en las columnas claras es lo que hay. Lo que `leerTexto` NO hace es
+ * caerse a la clara cuando la cifrada está y no se descifra — eso sería
+ * un «la clave no es la buena» que parece funcionar.
+ */
+interface Sobre {
+  tenantId: string;
+  dek: Buffer | null;
+}
+
+function vistaResidente(p: FilaResidente, sobre: Sobre) {
   // La VIGENTE. El `select` ya filtra `toAt: null`, así que como mucho hay
   // una — lo garantiza el índice parcial
   // `bed_assignments_one_live_per_client_key`.
@@ -176,7 +226,11 @@ function vistaResidente(p: FilaResidente) {
     dischargeDate: p.dischargeDate
       ? p.dischargeDate.toISOString().slice(0, 10)
       : null,
-    dischargeReason: p.dischargeReason,
+    dischargeReason: leerTexto(
+      { cifrado: p.dischargeReasonCifrado, claro: p.dischargeReason },
+      sobre.dek,
+      sitioMotivoDeAlta(sobre.tenantId, p.clientId),
+    ),
     dependencyLevel: p.dependencyLevel,
     dependencyGrade: p.dependencyGrade,
     placeType: p.placeType,
@@ -257,6 +311,11 @@ export async function registerResidenciaResidentesRoutes(
       const prisma = getPrisma();
 
       const alcance = await resolverAlcanceDeLista(prisma, tenantId, userId);
+      // residencia-1b · UNA sola vez para los 48, no una por residente: la
+      // DEK es del centro y la caché del llavero dura 60 s, pero pedirla
+      // dentro del `map` habría sido 48 `await` en una ruta que hoy hace
+      // dos consultas.
+      const dek = await dekONada(tenantId, prisma);
 
       const perfiles = await prisma.residentProfile.findMany({
         where: {
@@ -286,7 +345,7 @@ export async function registerResidenciaResidentesRoutes(
       });
 
       return {
-        residentes: perfiles.map((p) => vistaResidente(p)),
+        residentes: perfiles.map((p) => vistaResidente(p, { tenantId, dek })),
         // Para que la pantalla pueda decir «ves la planta 1» en vez de
         // dejar a una auxiliar pensando que faltan residentes.
         alcance: alcance.total ? "CENTRO" : "ZONA",
@@ -412,6 +471,17 @@ export async function registerResidenciaResidentesRoutes(
 
       try {
         const perfil = await prisma.$transaction(async (tx) => {
+          // residencia-1b · LA CLAVE DEL CENTRO, dentro de la transacción
+          // que escribe. `asegurarDek` la crea si es la primera escritura
+          // cifrada del centro, y si la transacción se deshace la clave no
+          // queda huérfana.
+          //
+          // Si no se pudiera obtener, esto LEVANTA y el alta no se guarda.
+          // Es la decisión 4 del bloque: nada se escribe en claro porque
+          // falte la clave. Un centro de residencia la tiene siempre —
+          // `tenants_residencia_exige_clinica` no deja encender la
+          // residencia sin la clínica, y la clínica no arranca sin KEK.
+          const dek = await asegurarDek(auth.tenantId, tx);
           const clientId =
             body.clientId ??
             (
@@ -438,19 +508,44 @@ export async function registerResidenciaResidentesRoutes(
               responsibleName: body.responsibleName?.trim() || null,
               responsiblePhone: body.responsiblePhone?.trim() || null,
               responsibleRelation: body.responsibleRelation?.trim() || null,
-              dni: body.dni?.trim() || null,
-              nss: body.nss?.trim() || null,
+              // residencia-1b · el DNI y el NSS nacen CIFRADOS, y el claro
+              // se queda a NULL. El respaldo en claro existe para las
+              // filas que ya estaban escritas, no para las nuevas.
+              dni: null,
+              nss: null,
+              dniCifrado: cifrarTexto(
+                body.dni?.trim() || null,
+                dek,
+                sitioDniDeResidente(auth.tenantId, clientId),
+              ),
+              nssCifrado: cifrarTexto(
+                body.nss?.trim() || null,
+                dek,
+                sitioNssDeResidente(auth.tenantId, clientId),
+              ),
             },
           });
 
           if (body.bedId) {
+            // residencia-1b · EL UUID LO GENERA LA APLICACIÓN. El AAD ata
+            // el valor a su fila y el id de una fila que todavía no existe
+            // no se puede leer, así que no vale el `@default(uuid())` de
+            // Prisma. Es la misma mecánica que las entradas de historia
+            // (`cripto-campos.ts`, cabecera).
+            const ocupacionId = nuevoIdDeFila();
             await tx.bedAssignment.create({
               data: {
+                id: ocupacionId,
                 tenantId: auth.tenantId,
                 bedId: body.bedId,
                 clientId,
                 fromAt: admissionDate,
-                reason: "ingreso",
+                reason: null,
+                reasonCifrado: cifrarTexto(
+                  "ingreso",
+                  dek,
+                  sitioMotivoDeOcupacion(auth.tenantId, ocupacionId),
+                ),
                 createdByUserId: auth.userId,
               },
             });
@@ -476,16 +571,25 @@ export async function registerResidenciaResidentesRoutes(
             desde: admissionDate,
             userId: auth.userId,
             motivo: "ingreso",
+            // residencia-1b · el motivo de cada línea del plan va cifrado,
+            // y la clave viaja hasta aquí en vez de pedirse otra vez: una
+            // segunda llamada dentro de la misma transacción sería la
+            // misma clave con una consulta más.
+            dek,
           });
 
-          return tx.residentProfile.findUniqueOrThrow({
+          const fila = await tx.residentProfile.findUniqueOrThrow({
             where: { clientId },
             select: PERFIL_SELECT,
           });
+          return { fila, dek };
         });
-        return reply
-          .code(201)
-          .send({ residente: vistaResidente(perfil) });
+        return reply.code(201).send({
+          residente: vistaResidente(perfil.fila, {
+            tenantId: auth.tenantId,
+            dek: perfil.dek,
+          }),
+        });
       } catch (err) {
         // El índice parcial `bed_assignments_one_live_per_bed_key`. El
         // mensaje de Postgres NO se reenvía (lleva ids de fila), y la
@@ -549,6 +653,10 @@ export async function registerResidenciaResidentesRoutes(
         reply,
         { clientId, action: "READ" },
         async () => {
+          // residencia-1b · `dekONada` y no `asegurarDek`: una LECTURA no
+          // crea claves. Un centro que no haya escrito nada cifrado se lee
+          // de las columnas claras, y eso es lo que hay.
+          const dek = await dekONada(tenantId, prisma);
           const perfil = await prisma.residentProfile.findUniqueOrThrow({
             where: { clientId },
             select: {
@@ -557,6 +665,8 @@ export async function registerResidenciaResidentesRoutes(
               // la función de acceso. Nunca en la lista.
               dni: true,
               nss: true,
+              dniCifrado: true,
+              nssCifrado: true,
             },
           });
           // El HISTÓRICO de habitaciones, aparte. Es una segunda consulta
@@ -573,6 +683,7 @@ export async function registerResidenciaResidentesRoutes(
               fromAt: true,
               toAt: true,
               reason: true,
+              reasonCifrado: true,
               bed: {
                 select: {
                   label: true,
@@ -588,9 +699,17 @@ export async function registerResidenciaResidentesRoutes(
           });
           return {
             residente: {
-              ...vistaResidente(perfil),
-              dni: perfil.dni,
-              nss: perfil.nss,
+              ...vistaResidente(perfil, { tenantId, dek }),
+              dni: leerTexto(
+                { cifrado: perfil.dniCifrado, claro: perfil.dni },
+                dek,
+                sitioDniDeResidente(tenantId, clientId),
+              ),
+              nss: leerTexto(
+                { cifrado: perfil.nssCifrado, claro: perfil.nss },
+                dek,
+                sitioNssDeResidente(tenantId, clientId),
+              ),
               // Lo que hace que «¿dónde dormía doña Carmen en marzo?» tenga
               // respuesta. Es la razón por la que cambiar de habitación
               // cierra una fila y abre otra en vez de editar una.
@@ -598,7 +717,11 @@ export async function registerResidenciaResidentesRoutes(
                 id: a.id,
                 desde: a.fromAt.toISOString(),
                 hasta: a.toAt?.toISOString() ?? null,
-                motivo: a.reason,
+                motivo: leerTexto(
+                  { cifrado: a.reasonCifrado, claro: a.reason },
+                  dek,
+                  sitioMotivoDeOcupacion(tenantId, a.id),
+                ),
                 habitacion: a.bed.room.number,
                 cama: a.bed.label,
                 planta: a.bed.room.floor.name,
@@ -683,16 +806,46 @@ export async function registerResidenciaResidentesRoutes(
             "responsibleName",
             "responsiblePhone",
             "responsibleRelation",
-            "dni",
-            "nss",
           ]) {
             if (body[campo] !== undefined) {
               const v = (body[campo] as string).trim();
-              // Cadena vacía → NULL: lo exige el CHECK
-              // `resident_profiles_identificacion_not_blank`, y además es
-              // lo correcto (un DNI en blanco no es un DNI).
               data[campo] = v === "" ? null : v;
             }
+          }
+          // ── residencia-1b · EL DNI Y EL NSS, aparte y cifrados ────
+          //
+          // Salen del bucle de arriba porque no se guardan donde se
+          // reciben. Y cada uno escribe LAS DOS columnas: el claro a
+          // `null` y el dato en la cifrada.
+          //
+          // Poner el claro a `null` explícitamente es la mitad que
+          // importa. Sin eso, editar el DNI de una ficha que aún tenía el
+          // claro de antes del cifrado dejaría el DNI VIEJO legible en la
+          // base para siempre: `leerTexto` serviría el nuevo (manda la
+          // cifrada) y nadie se enteraría del que se quedó atrás.
+          //
+          // Cadena vacía → las dos a NULL. Lo exige el CHECK
+          // `resident_profiles_identificacion_not_blank` —que desde este
+          // bloque mira también las cifradas— y además es lo correcto: un
+          // DNI en blanco no es un DNI.
+          //
+          // Qué hay que cifrar se decide aquí y se CIFRA dentro de la
+          // transacción: `asegurarDek` crea la clave del centro si es la
+          // primera escritura cifrada, y creándola fuera quedaría una
+          // clave huérfana si el `update` fallara después.
+          const porCifrar: Array<{
+            campo: "dni" | "nss";
+            valor: string | null;
+            sitioDe: typeof sitioDniDeResidente;
+          }> = [];
+          for (const [campo, sitioDe] of [
+            ["dni", sitioDniDeResidente],
+            ["nss", sitioNssDeResidente],
+          ] as const) {
+            if (body[campo] === undefined) continue;
+            const v = (body[campo] as string).trim();
+            porCifrar.push({ campo, valor: v === "" ? null : v, sitioDe });
+            data[campo] = null;
           }
           // ── residencia-2 · CAMBIAR EL NIVEL recalcula el plan ────
           //
@@ -714,18 +867,27 @@ export async function registerResidenciaResidentesRoutes(
           const cambiaElNivel =
             nivelNuevo !== undefined && nivelNuevo !== antes.dependencyLevel;
 
-          const { perfil, plan } = await prisma.$transaction(async (tx) => {
+          const { perfil, plan, dek } = await prisma.$transaction(async (tx) => {
+            const dek = await asegurarDek(auth.tenantId, tx);
+            for (const { campo, valor, sitioDe } of porCifrar) {
+              data[`${campo}Cifrado`] = cifrarTexto(
+                valor,
+                dek,
+                sitioDe(auth.tenantId, clientId),
+              );
+            }
             const perfil = await tx.residentProfile.update({
               where: { clientId },
               data,
               select: PERFIL_SELECT,
             });
-            if (!cambiaElNivel) return { perfil, plan: null };
+            if (!cambiaElNivel) return { perfil, plan: null, dek };
             const plan = await aplicarPlantilla(tx, {
               tenantId: auth.tenantId,
               clientId,
               nivel: nivelNuevo!,
               nivelAnterior: antes.dependencyLevel,
+              dek,
               // «Ahora» y no la fecha de ingreso: la línea nueva empieza
               // cuando se cambia el nivel. Si empezara en el ingreso se
               // solaparía con la que se acaba de cerrar, y «¿qué le
@@ -734,11 +896,11 @@ export async function registerResidenciaResidentesRoutes(
               userId: auth.userId,
               motivo: `cambio de nivel: ${antes.dependencyLevel} → ${nivelNuevo}`,
             });
-            return { perfil, plan };
+            return { perfil, plan, dek };
           });
 
           return {
-            residente: vistaResidente(perfil),
+            residente: vistaResidente(perfil, { tenantId: auth.tenantId, dek }),
             // Lo que el recálculo hizo, para que la pantalla lo diga en
             // vez de dejar que la dirección lo descubra abriendo el plan.
             // `null` si el nivel no cambió.
@@ -827,18 +989,50 @@ export async function registerResidenciaResidentesRoutes(
         reply,
         { clientId, action: "WRITE" },
         async () => {
-          await prisma.$transaction(async (tx) => {
+          const dek = await prisma.$transaction(async (tx) => {
+            const dek = await asegurarDek(auth.tenantId, tx);
             await tx.residentProfile.update({
               where: { clientId },
               data: {
                 dischargeDate,
-                dischargeReason: body.dischargeReason?.trim() || null,
+                // residencia-1b · «fallecimiento» o «traslado al hospital
+                // por ictus» caben enteros aquí, así que va cifrado y el
+                // claro a NULL.
+                dischargeReason: null,
+                dischargeReasonCifrado: cifrarTexto(
+                  body.dischargeReason?.trim() || null,
+                  dek,
+                  sitioMotivoDeAlta(auth.tenantId, clientId),
+                ),
               },
             });
-            await tx.bedAssignment.updateMany({
+            // residencia-1b · UN `updateMany` NO SIRVE para una columna
+            // cifrada: el AAD lleva el id de la fila, así que cada fila
+            // necesita su propio ciphertext. Se buscan y se actualizan una
+            // por una.
+            //
+            // Son una como mucho —lo garantiza el índice parcial
+            // `bed_assignments_one_live_per_client_key`—, y el bucle está
+            // porque la garantía es del motor y no de este handler: el día
+            // que el índice cambie, esto sigue siendo correcto.
+            const vigentes = await tx.bedAssignment.findMany({
               where: { tenantId: auth.tenantId, clientId, toAt: null },
-              data: { toAt: dischargeDate, reason: "alta" },
+              select: { id: true },
             });
+            for (const ocupacion of vigentes) {
+              await tx.bedAssignment.update({
+                where: { id: ocupacion.id },
+                data: {
+                  toAt: dischargeDate,
+                  reason: null,
+                  reasonCifrado: cifrarTexto(
+                    "alta",
+                    dek,
+                    sitioMotivoDeOcupacion(auth.tenantId, ocupacion.id),
+                  ),
+                },
+              });
+            }
             // ── residencia-2 · y su PLAN se cierra ──────────────────
             //
             // Por lo mismo que su ocupación de cama: si el plan se
@@ -855,13 +1049,20 @@ export async function registerResidenciaResidentesRoutes(
               cuando: dischargeDate,
               userId: auth.userId,
               motivo: "alta del residente",
+              dek,
             });
+            return dek;
           });
           const actualizado = await prisma.residentProfile.findUniqueOrThrow({
             where: { clientId },
             select: PERFIL_SELECT,
           });
-          return { residente: vistaResidente(actualizado) };
+          return {
+            residente: vistaResidente(actualizado, {
+              tenantId: auth.tenantId,
+              dek,
+            }),
+          };
         },
       );
     },
@@ -945,8 +1146,10 @@ export async function registerResidenciaResidentesRoutes(
         { clientId, action: "WRITE" },
         async () => {
           const ahora = new Date();
+          let dek: Buffer | null = null;
           try {
-            await prisma.$transaction(async (tx) => {
+            dek = await prisma.$transaction(async (tx) => {
+              const dek = await asegurarDek(auth.tenantId, tx);
               const vigente = await tx.bedAssignment.findFirst({
                 where: { tenantId: auth.tenantId, clientId, toAt: null },
                 select: { id: true, bedId: true },
@@ -954,23 +1157,43 @@ export async function registerResidenciaResidentesRoutes(
               // Mover a la cama en la que ya está no es un error: es un
               // doble toque. Se contesta 200 sin tocar nada, igual que el
               // POST idempotente de los accesos clínicos.
-              if (vigente?.bedId === body.bedId) return;
+              if (vigente?.bedId === body.bedId) return dek;
               if (vigente) {
+                // residencia-1b · el motivo del CIERRE de la fila vieja,
+                // cifrado con el AAD de ESA fila. Mismo texto en dos filas
+                // da dos ciphertexts distintos, y ninguno vale en la otra.
                 await tx.bedAssignment.update({
                   where: { id: vigente.id },
-                  data: { toAt: ahora, reason: body.reason?.trim() || "cambio de habitación" },
+                  data: {
+                    toAt: ahora,
+                    reason: null,
+                    reasonCifrado: cifrarTexto(
+                      body.reason?.trim() || "cambio de habitación",
+                      dek,
+                      sitioMotivoDeOcupacion(auth.tenantId, vigente.id),
+                    ),
+                  },
                 });
               }
+              const ocupacionId = nuevoIdDeFila();
               await tx.bedAssignment.create({
                 data: {
+                  id: ocupacionId,
                   tenantId: auth.tenantId,
                   bedId: body.bedId,
                   clientId,
                   fromAt: ahora,
-                  reason: body.reason?.trim() || (vigente ? "cambio de habitación" : "ingreso"),
+                  reason: null,
+                  reasonCifrado: cifrarTexto(
+                    body.reason?.trim() ||
+                      (vigente ? "cambio de habitación" : "ingreso"),
+                    dek,
+                    sitioMotivoDeOcupacion(auth.tenantId, ocupacionId),
+                  ),
                   createdByUserId: auth.userId,
                 },
               });
+              return dek;
             });
           } catch (err) {
             if (esCamaOcupada(err)) {
@@ -987,7 +1210,12 @@ export async function registerResidenciaResidentesRoutes(
             where: { clientId },
             select: PERFIL_SELECT,
           });
-          return { residente: vistaResidente(actualizado) };
+          return {
+            residente: vistaResidente(actualizado, {
+              tenantId: auth.tenantId,
+              dek,
+            }),
+          };
         },
       );
     },

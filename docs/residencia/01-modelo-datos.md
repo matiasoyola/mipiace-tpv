@@ -121,7 +121,37 @@ Una sola función decide, igual que en clinica-1 (`apps/api/src/clinica/acceso.t
   sólo lo accionable.
 - Todo pasa por `ClinicalAccessLog`.
 
-## 4. Lo que no se borra
+## 4. Qué va CIFRADO en reposo (D-62, D-63 · residencia-1b)
+
+Con la maquinaria de `clinica-7` y sin un segundo esquema de cifrado: una DEK por centro
+envuelta por la `CLINICAL_KEK` del entorno, AAD `tenant|tabla|columna|fila`, y un CHECK de formato
+en el motor (`~ '^c[0-9]+:…'`) que hace que **el claro no quepa** en la columna cifrada. La columna
+clara se queda al lado y vacía (expand → migrar → contract): es para las filas que ya estaban
+escritas, no para las nuevas.
+
+| Tabla | Columna | Dónde vive cifrada |
+|---|---|---|
+| `resident_profiles` | `dni` | `dni_cifrado` |
+| `resident_profiles` | `nss` | `nss_cifrado` |
+| `resident_profiles` | `discharge_reason` | `discharge_reason_cifrado` |
+| `care_plan_items` | `reason` | `reason_cifrado` |
+| `care_plan_items` | `close_reason` | `close_reason_cifrado` |
+| `bed_assignments` | `reason` | `reason_cifrado` |
+
+Y lo que se queda **en claro, declarado**:
+
+| Qué | Por qué |
+|---|---|
+| `care_plan_items.control_code` y las siete columnas de frecuencia | sostienen `care_plan_items_one_live_key` (una línea viva por residente y control) y el cifrado es **no determinista**: una columna cifrada no puede sostener un índice único |
+| `resident_profiles.dependency_level` y `dependency_grade` | los usan las plantillas del plan y la lista de residentes |
+| Fechas de ingreso y alta, tipo de plaza, familiar responsable | identidad y estancia, no salud — igual que `clients.first_name` en la clínica |
+| `floors.name`, `rooms.name`, `beds.label` | son del centro, no de nadie: una DEK por tenant atada a una fila no los cubriría |
+| `ClinicalAccessLog` entero | es la prueba de quién miró |
+
+`CareRecord` y todo lo que traiga `residencia-3` **nace cifrado en su bloque**, con su `sitio*` en
+`apps/api/src/clinica/cripto-campos.ts` y su CHECK de formato en la migración.
+
+## 5. Lo que no se borra
 
 `ResidentProfile`, `BedAssignment`, `CareRoleAssignment`, `CareRecord`, `Incident` y todo lo clínico:
 `onDelete: Restrict`. Un residente con registros no se borra; se le da de alta (`dischargeDate`).

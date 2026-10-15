@@ -932,6 +932,15 @@ escribe, y eso es exactamente lo que se quiere.
 
 ### 18.3 · EL INVENTARIO: lo que residencia dejó EN CLARO
 
+> **Cerrado en parte por `residencia-1b`** (D-63, 15-10-2026). Seis de las
+> columnas de este inventario ya van cifradas: `resident_profiles.dni`,
+> `.nss` y `.discharge_reason`; `care_plan_items.reason` y `.close_reason`;
+> `bed_assignments.reason`. Con la maquinaria de este bloque —los mismos
+> `sitio*` en `cripto-campos.ts`, el mismo CHECK de formato— y sin un
+> segundo esquema de cifrado. Lo que SIGUE en claro, y por qué, está en
+> `docs/blocks/residencia-1b-done.md`; lo gordo —el registro de cuidados—
+> nace cifrado en `residencia-3`.
+
 Esto es lo que hay que mirar, y no se arregla con un test.
 
 `clinica-7` cifra **nueve columnas** y las nueve son de clinica-1 a
@@ -945,10 +954,10 @@ art. 9.1 con todas las letras.
 | ------- | -------- | ------- |
 | `dependency_level` | válido / semiasistido / dependiente | **sí** — es el grado de autonomía de una persona con nombre |
 | `dependency_grade` | I, II, III de la Ley 39/2006 | **sí** — grado reconocido por la administración |
-| `discharge_reason` | TEXTO LIBRE | **sí, y del peor** — «fallecimiento», «traslado al hospital por ictus» caben enteros |
+| `discharge_reason` | TEXTO LIBRE | **sí, y del peor** — «fallecimiento», «traslado al hospital por ictus» caben enteros · **CIFRADO en residencia-1b** |
 | `admission_date` / `discharge_date` | fechas de estancia | por inferencia: dicen que esta persona vive en una residencia |
-| `nss` | número de la Seguridad Social | identificador, y el que abre la historia en el SESCAM |
-| `dni` | DNI | identificador; la propia migración ya dice «nunca en logs» |
+| `nss` | número de la Seguridad Social | identificador, y el que abre la historia en el SESCAM · **CIFRADO en residencia-1b** |
+| `dni` | DNI | identificador; la propia migración ya dice «nunca en logs» · **CIFRADO en residencia-1b** |
 | `place_type`, `responsible_*` | plaza y familiar de contacto | no son salud; son personales |
 
 #### `care_plan_items` · residencia-2, EL PLAN DE CUIDADOS de un residente
@@ -963,12 +972,13 @@ diagnóstico dicho con otras palabras.
 | `control_code` | QUÉ se le controla: `GLUCEMIA`, `UPP_*`, `CONTENCION`… |
 | `frequency_kind`, `every_n_hours`, `every_n_days`, `weekdays`, `month_day`, `shift_codes`, `moment_codes` | con qué INTENSIDAD, que junto al código dice la gravedad |
 | `source`, `source_level` | si sale de la plantilla de su nivel de dependencia, y de cuál |
-| `reason`, `close_reason` | TEXTO LIBRE: «úlcera sacra grado II», «se le retiró la sonda» |
+| `reason`, `close_reason` | TEXTO LIBRE: «úlcera sacra grado II», «se le retiró la sonda» · **LOS DOS CIFRADOS en residencia-1b** |
 | `from_at` / `to_at` | la línea de tiempo clínica del residente |
 
 #### `bed_assignments` · residencia-1
 
-`reason` es texto libre y es dónde se escribe por qué cambió de habitación:
+`reason` es texto libre y es dónde se escribe por qué cambió de habitación
+(**cifrado en residencia-1b**):
 «se cae de la cama», «aislamiento por GEA», «conflicto con la compañera».
 Y la ubicación en sí habla: un `floor_id` cuya planta se llame «Unidad de
 Alzhéimer» es un diagnóstico para todos los que duermen en ella — y
@@ -986,6 +996,13 @@ STANDARD` no tienen ni `tenant_id`: son el catálogo del producto. Cifrarlas
 sería cifrar el diccionario.
 
 ### 18.4 · Y por qué no se cifra aquí y ahora
+
+> **La tercera razón se re-decidió.** `residencia-1b` cifró los textos
+> libres y los dos identificadores sin esperar a `residencia-3`, porque
+> D-62 puso una fecha: antes del piloto con residentes reales. Las dos
+> primeras razones siguen en pie tal cual — `control_code` sigue en claro
+> por el índice único, y los CHECK se re-enseñaron uno por uno, que es lo
+> que esta sección decía que había que hacer.
 
 Tres razones, y la tercera es la que lo decide.
 

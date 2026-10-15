@@ -1,4 +1,7 @@
-// clinica-7 · LAS NUEVE COLUMNAS, CON SU SITIO ESCRITO UNA SOLA VEZ.
+// clinica-7 · CADA COLUMNA CIFRADA, CON SU SITIO ESCRITO UNA SOLA VEZ.
+//
+// Nueve columnas de la clínica (clinica-7) y seis de la residencia
+// (residencia-1b, D-63). Quince.
 //
 // `cripto.ts` cifra con un AAD; aquí vive **qué AAD le toca a cada
 // columna**. Y vive en un solo fichero por la razón de siempre en este
@@ -124,6 +127,91 @@ export function sitioNotaTecnica(tenantId: string, id: string): SitioDelValor {
     tenantId,
     tabla: "client_technical_notes",
     columna: "body",
+    filaId: id,
+  };
+}
+
+// ── residencia-1b · LAS SEIS DE LA RESIDENCIA (D-63) ────────────────
+//
+// Viven aquí y no en un fichero de residencia por lo mismo que las nueve
+// de arriba: el AAD es parte del ciphertext, así que si se armara en dos
+// sitios con nombres distintos quedarían filas que no se descifran. No
+// hay un segundo esquema de cifrado — se usa el de clinica-7 tal cual.
+//
+// Y el `filaId` de las tres de `resident_profiles` es el **clientId**,
+// porque `client_id` ES la clave primaria de esa tabla (no hay columna
+// `id`). Por eso estas tres son las únicas de la casa que no necesitan
+// `nuevoIdDeFila()`: el id se sabe antes de insertar porque es el del
+// residente.
+
+export function sitioDniDeResidente(
+  tenantId: string,
+  clientId: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "resident_profiles",
+    columna: "dni",
+    filaId: clientId,
+  };
+}
+
+export function sitioNssDeResidente(
+  tenantId: string,
+  clientId: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "resident_profiles",
+    columna: "nss",
+    filaId: clientId,
+  };
+}
+
+export function sitioMotivoDeAlta(
+  tenantId: string,
+  clientId: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "resident_profiles",
+    columna: "discharge_reason",
+    filaId: clientId,
+  };
+}
+
+/** El motivo por el que se ABRIÓ una línea del plan de cuidados. */
+export function sitioMotivoDeLinea(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return { tenantId, tabla: "care_plan_items", columna: "reason", filaId: id };
+}
+
+/** Y el motivo por el que se CERRÓ. Columna lógica distinta a propósito:
+ *  con el mismo nombre, el motivo de cierre de una línea se podría copiar
+ *  a su motivo de apertura y descifraría. */
+export function sitioMotivoDeCierreDeLinea(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "care_plan_items",
+    columna: "close_reason",
+    filaId: id,
+  };
+}
+
+/** Por qué cambió de habitación. */
+export function sitioMotivoDeOcupacion(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "bed_assignments",
+    columna: "reason",
     filaId: id,
   };
 }

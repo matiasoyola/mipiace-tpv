@@ -15,12 +15,35 @@
 // costaría una migración. Lo que el MOTOR garantiza (una línea viva por
 // residente y control, que `source_level` sólo existe en las de plantilla)
 // lo prueba `residencia-2.e2e.ts` contra Postgres.
+//
+// ── residencia-1b · Y DESDE AQUÍ LOS MOTIVOS VAN CIFRADOS ───────────
+//
+// `reason` y `close_reason` ya no se guardan en claro, así que los tests
+// que afirmaban sobre ellos **descifran**. Es mejor que lo que había: lo
+// que se afirma pasa a ser lo que de verdad se guardó, no lo que la
+// función dijo que iba a guardar.
+//
+// Y el doble de la transacción tiene que respetar el `id` que le llega en
+// el `data`. Antes lo inventaba (`randomUUID()`) porque daba igual; ahora
+// el AAD lleva el id de la fila, así que un doble que lo cambie deja un
+// ciphertext que no se descifra con el sitio de la fila donde acabó — y el
+// test se pondría rojo diciendo algo que la producción no hace.
 
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { descifrarValor } from "../src/clinica/cripto.js";
+import {
+  sitioMotivoDeCierreDeLinea,
+  sitioMotivoDeLinea,
+} from "../src/clinica/cripto-campos.js";
+import { cifrarTexto } from "../src/clinica/cripto-campos.js";
 import { aplicarPlantilla, cerrarPlanPorAlta } from "../src/residencia/plan.js";
+
+/** La DEK de este fichero. Aleatoria: una constante en un test es una
+ *  clave que alguien copia a producción «para probar». */
+const DEK = randomBytes(32);
 
 const TENANT = "00000000-0000-0000-0000-000000000001";
 const CARMEN = "44444444-4444-4444-4444-444444444444";
@@ -44,6 +67,8 @@ interface FilaDePlan {
   sourceLevel: string | null;
   reason: string | null;
   closeReason: string | null;
+  reasonCifrado: string | null;
+  closeReasonCifrado: string | null;
   closedByUserId: string | null;
   createdByUserId: string | null;
 }
@@ -103,12 +128,14 @@ const tx = {
       return fila;
     },
     create: async ({ data }: any) => {
-      const fila = { id: randomUUID(), ...nueva(data) };
+      // `data.id` MANDA: lo genera `nuevoIdDeFila()` en producción porque
+      // el AAD lo necesita antes de que la fila exista.
+      const fila = { id: data.id ?? randomUUID(), ...nueva(data) };
       plan.push(fila);
       return fila;
     },
     createMany: async ({ data }: any) => {
-      for (const d of data) plan.push({ id: randomUUID(), ...nueva(d) });
+      for (const d of data) plan.push({ id: d.id ?? randomUUID(), ...nueva(d) });
       return { count: data.length };
     },
     updateMany: async ({ where, data }: any) => {
@@ -142,9 +169,28 @@ function nueva(d: any): Omit<FilaDePlan, "id"> {
     sourceLevel: d.sourceLevel ?? null,
     reason: d.reason ?? null,
     closeReason: null,
+    reasonCifrado: d.reasonCifrado ?? null,
+    closeReasonCifrado: null,
     closedByUserId: null,
     createdByUserId: d.createdByUserId ?? null,
   };
+}
+
+/** El motivo de APERTURA de una línea, descifrado con el sitio de SU
+ *  fila. Si el AAD no cuadrara —porque el id cambió por el camino— esto
+ *  levanta, que es exactamente lo que se quiere ver. */
+function motivoDe(l: FilaDePlan): string | null {
+  if (l.reasonCifrado == null) return l.reason;
+  return descifrarValor(l.reasonCifrado, DEK, sitioMotivoDeLinea(l.tenantId, l.id));
+}
+
+function motivoDeCierreDe(l: FilaDePlan): string | null {
+  if (l.closeReasonCifrado == null) return l.closeReason;
+  return descifrarValor(
+    l.closeReasonCifrado,
+    DEK,
+    sitioMotivoDeCierreDeLinea(l.tenantId, l.id),
+  );
 }
 
 /** Las líneas VIVAS, con su frecuencia en corto, para leer el test. */
@@ -205,6 +251,7 @@ describe("al dar de alta a un residente", () => {
       desde: ingreso,
       userId: DIRECTORA,
       motivo: "ingreso",
+      dek: DEK,
     });
     expect(r.abiertas.sort()).toEqual([
       "COMIDA",
@@ -236,6 +283,7 @@ describe("al dar de alta a un residente", () => {
       desde: new Date(),
       userId: DIRECTORA,
       motivo: "ingreso",
+      dek: DEK,
     });
     expect(r.abiertas).toEqual([]);
     expect(plan).toEqual([]);
@@ -253,6 +301,7 @@ describe("al dar de alta a un residente", () => {
       desde: new Date(),
       userId: DIRECTORA,
       motivo: "ingreso",
+      dek: DEK,
     });
     expect(r.abiertas).not.toContain("GIMNASIA");
     expect(r.abiertas).toHaveLength(3);
@@ -269,6 +318,7 @@ describe("al cambiarle el NIVEL", () => {
       desde: new Date("2026-10-14T00:00:00.000Z"),
       userId: DIRECTORA,
       motivo: "ingreso",
+      dek: DEK,
     });
   }
 
@@ -281,6 +331,7 @@ describe("al cambiarle el NIVEL", () => {
       desde: new Date("2027-01-10T10:00:00.000Z"),
       userId: DIRECTORA,
       motivo: "cambio de nivel: SEMIASISTIDO → DEPENDIENTE",
+      dek: DEK,
     });
   }
 
@@ -352,8 +403,11 @@ describe("al cambiarle el NIVEL", () => {
     await alta();
     // Un control que nadie precargó: lo puso la DUE porque esta señora lo
     // necesita. Bajarle el nivel no puede quitárselo.
+    // La línea de la DUE, sembrada como la escribiría la ruta: el uuid
+    // primero y el motivo cifrado con el sitio de ESA fila.
+    const glucemiaId = randomUUID();
     plan.push({
-      id: randomUUID(),
+      id: glucemiaId,
       tenantId: TENANT,
       clientId: CARMEN,
       controlCode: "GLUCEMIA",
@@ -368,8 +422,14 @@ describe("al cambiarle el NIVEL", () => {
       toAt: null,
       source: "MANUAL",
       sourceLevel: null,
-      reason: "diabética, lo pide la DUE",
+      reason: null,
       closeReason: null,
+      reasonCifrado: cifrarTexto(
+        "diabética, lo pide la DUE",
+        DEK,
+        sitioMotivoDeLinea(TENANT, glucemiaId),
+      ),
+      closeReasonCifrado: null,
       closedByUserId: null,
       createdByUserId: DIRECTORA,
     });
@@ -377,6 +437,11 @@ describe("al cambiarle el NIVEL", () => {
     const r = await subirADependiente();
     expect(r.cerradas).not.toContain("GLUCEMIA");
     expect(vivas()).toContainEqual(["GLUCEMIA", "momentos DESAYUNO+CENA"]);
+    // Y el motivo que escribió la DUE se sigue leyendo: el cambio de nivel
+    // no ha tocado ni la fila ni su ciphertext.
+    expect(motivoDe(plan.find((l) => l.id === glucemiaId)!)).toBe(
+      "diabética, lo pide la DUE",
+    );
   });
 
   it("lo que se cierra queda FIRMADO y con su motivo", async () => {
@@ -385,7 +450,12 @@ describe("al cambiarle el NIVEL", () => {
     const gimnasia = plan.find((l) => l.controlCode === "GIMNASIA")!;
     expect(gimnasia.toAt).not.toBeNull();
     expect(gimnasia.closedByUserId).toBe(DIRECTORA);
-    expect(gimnasia.closeReason).toBe("cambio de nivel: SEMIASISTIDO → DEPENDIENTE");
+    // Y el motivo NO está en claro en la fila: está cifrado, y se lee
+    // descifrándolo con el sitio de esa fila.
+    expect(gimnasia.closeReason).toBeNull();
+    expect(motivoDeCierreDe(gimnasia)).toBe(
+      "cambio de nivel: SEMIASISTIDO → DEPENDIENTE",
+    );
   });
 
   it("la línea nueva empieza AL CAMBIAR el nivel, no al ingresar", async () => {
@@ -407,6 +477,7 @@ describe("al cambiarle el NIVEL", () => {
       desde: new Date("2027-03-01T10:00:00.000Z"),
       userId: DIRECTORA,
       motivo: "cambio de nivel: DEPENDIENTE → SEMIASISTIDO",
+      dek: DEK,
     });
     // Se va el cambio postural, vuelve la gimnasia.
     expect(r.cerradas).toContain("CAMBIO_POSTURAL");
@@ -428,6 +499,7 @@ describe("al cambiarle el NIVEL", () => {
       desde: new Date(),
       userId: DIRECTORA,
       motivo: "otra vez",
+      dek: DEK,
     });
     expect(r.abiertas).toEqual([]);
     expect(r.cerradas).toEqual([]);
@@ -445,6 +517,7 @@ describe("al DAR DE ALTA a quien se va", () => {
       desde: new Date("2026-10-14T00:00:00.000Z"),
       userId: DIRECTORA,
       motivo: "ingreso",
+      dek: DEK,
     });
     const cuantas = plan.length;
     const alta = new Date("2027-05-02T00:00:00.000Z");
@@ -455,6 +528,7 @@ describe("al DAR DE ALTA a quien se va", () => {
       cuando: alta,
       userId: DIRECTORA,
       motivo: "alta del residente",
+      dek: DEK,
     });
 
     expect(cerradas).toBe(cuantas);
@@ -463,7 +537,10 @@ describe("al DAR DE ALTA a quien se va", () => {
     // legítima, y su plan es parte de lo que se conserva cinco años.
     expect(plan).toHaveLength(cuantas);
     expect(plan.every((l) => l.toAt?.toISOString() === alta.toISOString())).toBe(true);
-    expect(plan.every((l) => l.closeReason === "alta del residente")).toBe(true);
+    expect(plan.every((l) => l.closeReason === null)).toBe(true);
+    expect(plan.every((l) => motivoDeCierreDe(l) === "alta del residente")).toBe(
+      true,
+    );
   });
 
   it("y si ya no tenía plan vivo, no pasa nada", async () => {
@@ -474,6 +551,7 @@ describe("al DAR DE ALTA a quien se va", () => {
         cuando: new Date(),
         userId: null,
         motivo: "alta",
+        dek: DEK,
       }),
     ).toBe(0);
   });

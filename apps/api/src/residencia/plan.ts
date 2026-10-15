@@ -34,6 +34,18 @@ import type {
   Prisma,
 } from "@mipiacetpv/db";
 
+// residencia-1b (D-63) · los dos motivos de una línea del plan van
+// cifrados. La DEK la trae quien llama, que es la ruta dueña de la
+// transacción: pedirla otra vez aquí sería la misma clave con una consulta
+// más, y peor — `asegurarDek` dentro de una función que a veces no escribe
+// nada crearía claves en centros que no han cifrado nunca.
+import {
+  cifrarTexto,
+  nuevoIdDeFila,
+  sitioMotivoDeCierreDeLinea,
+  sitioMotivoDeLinea,
+} from "../clinica/cripto-campos.js";
+
 import { aColumnas, deColumnas, mismaFrecuencia } from "./frecuencia-columnas.js";
 
 /** Lo que una plantilla dice de un control. */
@@ -119,9 +131,14 @@ export async function aplicarPlantilla(
     /** Quién lo disparó, para firmar lo que se abre y lo que se cierra. */
     userId: string | null;
     motivo: string;
+    /** residencia-1b · la clave del centro, de la transacción de quien
+     *  llama. Obligatoria: sin ella el motivo se escribiría en claro, y eso
+     *  es lo que el bloque viene a cerrar. */
+    dek: Buffer;
   },
 ): Promise<ResultadoDelPlan> {
-  const { tenantId, clientId, nivel, nivelAnterior, desde, userId, motivo } = input;
+  const { tenantId, clientId, nivel, nivelAnterior, desde, userId, motivo, dek } =
+    input;
 
   const [plantilla, vivas] = await Promise.all([
     lineasDeLaPlantilla(tx, tenantId, nivel),
@@ -164,7 +181,16 @@ export async function aplicarPlantilla(
     if (enLaPlantilla.has(viva.controlCode)) continue;
     await tx.carePlanItem.update({
       where: { id: viva.id },
-      data: { toAt: ahora, closeReason: motivo, closedByUserId: userId },
+      data: {
+        toAt: ahora,
+        closeReason: null,
+        closeReasonCifrado: cifrarTexto(
+          motivo,
+          dek,
+          sitioMotivoDeCierreDeLinea(tenantId, viva.id),
+        ),
+        closedByUserId: userId,
+      },
     });
     fuera.cerradas.push(viva.controlCode);
   }
@@ -189,10 +215,23 @@ export async function aplicarPlantilla(
     }
     await tx.carePlanItem.update({
       where: { id: viva.id },
-      data: { toAt: ahora, closeReason: motivo, closedByUserId: userId },
+      data: {
+        toAt: ahora,
+        closeReason: null,
+        closeReasonCifrado: cifrarTexto(
+          motivo,
+          dek,
+          sitioMotivoDeCierreDeLinea(tenantId, viva.id),
+        ),
+        closedByUserId: userId,
+      },
     });
+    // residencia-1b · el uuid, generado aquí: el AAD lo necesita y no se
+    // puede leer de una fila que todavía no existe.
+    const nuevaId = nuevoIdDeFila();
     await tx.carePlanItem.create({
       data: {
+        id: nuevaId,
         tenantId,
         clientId,
         controlCode: linea.controlCode,
@@ -205,7 +244,12 @@ export async function aplicarPlantilla(
         toAt: null,
         source: "PROFILE_TEMPLATE" as CarePlanItemSource,
         sourceLevel: nivel,
-        reason: motivo,
+        reason: null,
+        reasonCifrado: cifrarTexto(
+          motivo,
+          dek,
+          sitioMotivoDeLinea(tenantId, nuevaId),
+        ),
         createdByUserId: userId,
       },
     });
@@ -216,22 +260,32 @@ export async function aplicarPlantilla(
   // ── 3 · Abrir lo que falta ────────────────────────────────────────
   const nuevas = plantilla.filter((l) => !yaVivas.has(l.controlCode));
   if (nuevas.length > 0) {
+    // residencia-1b · el `createMany` sigue siendo UNA sentencia, y cada
+    // fila lleva SU uuid y SU ciphertext. El AAD ata el valor a la fila, así
+    // que el mismo «ingreso» en diez líneas son diez ciphertexts distintos
+    // — y ninguno vale en la fila de al lado. Es más caro que un literal
+    // repetido y es exactamente lo que se compra.
     await tx.carePlanItem.createMany({
-      data: nuevas.map((l) => ({
-        tenantId,
-        clientId,
-        controlCode: l.controlCode,
-        ...aColumnas(deColumnas(l)),
-        // En un alta, `desde` es la fecha de ingreso: así `queToca` no le
-        // pide nada de antes de llegar al centro. En un cambio de nivel,
-        // la ruta pasa `new Date()`.
-        fromAt: desde,
-        toAt: null,
-        source: "PROFILE_TEMPLATE" as CarePlanItemSource,
-        sourceLevel: nivel,
-        reason: motivo,
-        createdByUserId: userId,
-      })),
+      data: nuevas.map((l) => {
+        const id = nuevoIdDeFila();
+        return {
+          id,
+          tenantId,
+          clientId,
+          controlCode: l.controlCode,
+          ...aColumnas(deColumnas(l)),
+          // En un alta, `desde` es la fecha de ingreso: así `queToca` no le
+          // pide nada de antes de llegar al centro. En un cambio de nivel,
+          // la ruta pasa `new Date()`.
+          fromAt: desde,
+          toAt: null,
+          source: "PROFILE_TEMPLATE" as CarePlanItemSource,
+          sourceLevel: nivel,
+          reason: null,
+          reasonCifrado: cifrarTexto(motivo, dek, sitioMotivoDeLinea(tenantId, id)),
+          createdByUserId: userId,
+        };
+      }),
     });
     fuera.abiertas.push(...nuevas.map((l) => l.controlCode));
   }
@@ -256,15 +310,35 @@ export async function cerrarPlanPorAlta(
     cuando: Date;
     userId: string | null;
     motivo: string;
+    /** residencia-1b · la clave del centro. Ver `aplicarPlantilla`. */
+    dek: Buffer;
   },
 ): Promise<number> {
-  const { count } = await tx.carePlanItem.updateMany({
+  // residencia-1b · ESTO ERA UN `updateMany` Y NO PUEDE SEGUIR SIÉNDOLO.
+  //
+  // El AAD de `close_reason` lleva el id de la fila, así que el mismo
+  // motivo en ocho líneas son ocho ciphertexts distintos y un `updateMany`
+  // sólo sabe escribir uno. Se leen las vivas y se cierran una por una, en
+  // la misma transacción: el plan de un residente dado de alta tiene ocho
+  // líneas, no ocho mil.
+  const vivas = await tx.carePlanItem.findMany({
     where: { tenantId: input.tenantId, clientId: input.clientId, toAt: null },
-    data: {
-      toAt: input.cuando,
-      closeReason: input.motivo,
-      closedByUserId: input.userId,
-    },
+    select: { id: true },
   });
-  return count;
+  for (const viva of vivas) {
+    await tx.carePlanItem.update({
+      where: { id: viva.id },
+      data: {
+        toAt: input.cuando,
+        closeReason: null,
+        closeReasonCifrado: cifrarTexto(
+          input.motivo,
+          input.dek,
+          sitioMotivoDeCierreDeLinea(input.tenantId, viva.id),
+        ),
+        closedByUserId: input.userId,
+      },
+    });
+  }
+  return vivas.length;
 }
