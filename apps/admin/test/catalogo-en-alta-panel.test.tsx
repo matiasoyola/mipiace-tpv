@@ -54,6 +54,13 @@ const PREVIA = {
       precioSinIva: 1.4545,
       iva: 10,
       categorias: ["cafés"],
+      // catalogo-servicios-csv · un café es un producto sujeto: las tres
+      // columnas nuevas vienen en su forma vacía, que es lo que el
+      // servidor manda para el fichero de un bar.
+      tipo: "PRODUCT",
+      duracionMin: null,
+      exencion: null,
+      exencionEtiqueta: null,
     },
   ],
   saltadas: [
@@ -63,6 +70,43 @@ const PREVIA = {
 };
 
 const CSV = "sku,nombre,precio_con_iva,iva,categoria\nCAF-001,Café con leche,1.60,10,cafés";
+
+// catalogo-servicios-csv · la vista previa de una clínica: un servicio
+// exento con duración y la crema del mostrador, sujeta al 21 %. Es lo que
+// Rosario revisa con el implantador delante.
+const PREVIA_CLINICA = {
+  escrito: false,
+  entran: [
+    {
+      linea: 2,
+      sku: "POD-002",
+      nombre: "Quiropodia básica",
+      precioConIva: 25,
+      precioSinIva: 25,
+      iva: 0,
+      categorias: ["quiropodia"],
+      tipo: "SERVICE",
+      duracionMin: 30,
+      exencion: "E1",
+      exencionEtiqueta: "Exento · sanitario",
+    },
+    {
+      linea: 3,
+      sku: "CRE-001",
+      nombre: "Crema urea 20%",
+      precioConIva: 12,
+      precioSinIva: 9.9174,
+      iva: 21,
+      categorias: ["mostrador"],
+      tipo: "PRODUCT",
+      duracionMin: null,
+      exencion: null,
+      exencionEtiqueta: null,
+    },
+  ],
+  saltadas: [],
+  yaTenia: 0,
+};
 
 let container: HTMLDivElement;
 let root: Root;
@@ -219,6 +263,48 @@ describe("catalogo-en-alta · panel de carga", () => {
     expect(text()).toContain("Falta: sku");
     // Y se puede volver a intentar: el botón de elegir fichero sigue ahí.
     expect(text()).toContain("Elegir fichero CSV");
+  });
+
+  // ── catalogo-servicios-csv · lo que la dueña de la clínica revisa ──
+  //
+  // Cada una de estas tres cosas es invisible en el CSV una vez subido, y
+  // cada una decide algo que no se arregla después: si el servicio se
+  // puede reservar, cuánto ocupa en la agenda y si el ticket sale bien en
+  // el papel.
+
+  it("enseña que la fila es un SERVICIO y no un producto", async () => {
+    respuesta = PREVIA_CLINICA;
+    await render();
+    await elegirFichero(CSV);
+    expect(text()).toContain("Servicio");
+    // Y la crema del mostrador sigue siendo un producto.
+    expect(text()).toContain("Producto");
+  });
+
+  it("enseña la duración del servicio en minutos", async () => {
+    respuesta = PREVIA_CLINICA;
+    await render();
+    await elegirFichero(CSV);
+    expect(text()).toContain("30 min");
+  });
+
+  it("un exento se lee «Exento · sanitario» y NO «0 %»", async () => {
+    // Los dos valen cero euros de cuota y son dos operaciones distintas
+    // ante la AEAT. Si la pantalla pintara «0 %» la dueña no podría
+    // distinguirlos, que es justo lo que este bloque viene a arreglar.
+    respuesta = PREVIA_CLINICA;
+    await render();
+    await elegirFichero(CSV);
+    expect(text()).toContain("Exento · sanitario");
+    expect(text()).not.toContain("0 %");
+    // Y la crema sí lleva su tipo.
+    expect(text()).toContain("21 %");
+  });
+
+  it("dice las tres columnas nuevas y que la duración es obligatoria en un servicio", async () => {
+    await render();
+    expect(text()).toContain("tipo,exencion,duracion_min");
+    expect(text()).toContain("obligatorios en un servicio");
   });
 
   it("un tenant con Holded recibe el 409 y se lee como una frase", async () => {

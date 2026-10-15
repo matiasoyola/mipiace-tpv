@@ -6,6 +6,16 @@
 //     sku,nombre,precio_con_iva,iva,categoria
 //     CAF-001,Café con leche,1.60,10,cafés
 //
+// catalogo-servicios-csv · y, OPCIONALMENTE, las tres de una clínica
+// (`docs/implantaciones/rosario/catalogo-tpv.csv`):
+//
+//     sku,nombre,precio_con_iva,iva,categoria,tipo,exencion,duracion_min
+//     POD-002,Quiropodia básica,25.00,0,quiropodia,SERVICE,E1,30
+//
+// Las tres son opcionales y el fichero de La Maestranza —que no las
+// trae— se carga exactamente igual que antes de este bloque. Hay test
+// con el CSV real de los dos comercios.
+//
 // Salida: las filas que entran y las que no, cada una con el número de
 // línea del fichero y el motivo. Nada se escribe desde aquí: este
 // módulo no conoce Prisma. Eso es lo que hace que la vista previa sea
@@ -30,6 +40,8 @@
 // Si un SKU ya existe en el tenant. Eso es una pregunta a la base de
 // datos y la contesta la ruta (`superadmin/tenant-catalog.ts`). Aquí
 // sólo se mira el fichero contra sí mismo.
+
+import { normalizeDurationMin } from "../services/scheduling-rules.js";
 
 import {
   type LocalProductFields,
@@ -57,6 +69,39 @@ export const COLUMNAS = ["sku", "nombre", "precio_con_iva", "iva", "categoria"] 
  */
 export const COLUMNA_ALERGENOS = "alergenos";
 
+/**
+ * catalogo-servicios-csv · las TRES columnas de una clínica, también
+ * OPCIONALES.
+ *
+ *     sku,nombre,precio_con_iva,iva,categoria,tipo,exencion,duracion_min
+ *     POD-002,Quiropodia básica,25.00,0,quiropodia,SERVICE,E1,30
+ *     CRE-001,Crema urea 20%,12.00,21,mostrador,PRODUCT,,
+ *
+ * Opcionales por la misma razón que `alergenos`: el fichero de La
+ * Maestranza no las tiene y un bloque que invalide los CSV de ayer obliga
+ * a rehacerlos antes de poder usar nada. Un fichero con sólo las cinco de
+ * siempre entra como entraba: todo `PRODUCT`, sujeto y sin duración.
+ *
+ *   · `tipo` — `PRODUCT` | `SERVICE`. Vacío o ausente = `PRODUCT`. Un
+ *     servicio de clínica tiene que nacer `kind = SERVICE` o la agenda no
+ *     lo ve (`GET /services/scheduling` filtra por `kind`).
+ *   · `exencion` — vacío | un código de la lista L10 de la AEAT. Lo valida
+ *     `validateLocalProduct`, que es quien ya sabe que E2/E3 no se pueden
+ *     declarar en régimen general y que una causa exige `iva = 0`.
+ *   · `duracion_min` — minutos enteros. **Obligatoria si `tipo = SERVICE`**
+ *     (sin ella no hay fila de `service_scheduling` y el servicio no se
+ *     puede reservar) y **prohibida si `tipo = PRODUCT`** (una crema no se
+ *     reserva: una duración ahí es una columna mal puesta, y callarla
+ *     dejaría al implantador creyendo que ha cargado un servicio).
+ */
+export const COLUMNA_TIPO = "tipo";
+export const COLUMNA_EXENCION = "exencion";
+export const COLUMNA_DURACION = "duracion_min";
+
+/** Los dos valores de la columna `tipo`, que son los del enum de
+ *  `products.kind`. */
+const TIPOS = ["PRODUCT", "SERVICE"] as const;
+
 export interface FilaBuena {
   /** Número de línea en el fichero, contando la cabecera. Para que el
    *  implantador pueda abrir el CSV y mirar ESA línea. */
@@ -65,6 +110,14 @@ export interface FilaBuena {
   /** El precio tal y como venía en el fichero, con IVA. Se enseña en la
    *  vista previa: es la cifra que el dueño reconoce de su carta. */
   precioConIva: number;
+  /**
+   * catalogo-servicios-csv · los minutos de agenda, o `null` si la fila es
+   * un producto. **Es `number` exactamente cuando `fields.kind` es
+   * `SERVICE`**: el parser no deja pasar un servicio sin duración ni un
+   * producto con ella, así que quien escribe no tiene que decidir qué
+   * hacer con la mitad de los casos.
+   */
+  duracionMin: number | null;
 }
 
 export interface FilaMala {
@@ -169,6 +222,10 @@ export function parseCatalogoCsv(texto: string): CsvParseResult {
   ) as Record<(typeof COLUMNAS)[number], number>;
   // -1 si el fichero no la trae, que es el caso de los CSV de ayer.
   const colAlergenos = cabecera.indexOf(COLUMNA_ALERGENOS);
+  // catalogo-servicios-csv · lo mismo con las tres de la clínica.
+  const colTipo = cabecera.indexOf(COLUMNA_TIPO);
+  const colExencion = cabecera.indexOf(COLUMNA_EXENCION);
+  const colDuracion = cabecera.indexOf(COLUMNA_DURACION);
 
   const buenas: FilaBuena[] = [];
   const malas: FilaMala[] = [];
@@ -249,6 +306,93 @@ export function parseCatalogoCsv(texto: string): CsvParseResult {
             .filter((a) => a.length > 0)
         : [];
 
+    // ── catalogo-servicios-csv · el tipo ────────────────────────────
+    //
+    // Vacío o ausente = PRODUCT, que es lo que hace que el fichero de La
+    // Maestranza siga entrando igual. Un valor que no es ninguno de los
+    // dos **rechaza la fila** en vez de caer a PRODUCT: `SERVICIO` o
+    // `Service ` escrito a mano no es un producto, es un servicio que
+    // habría entrado como producto y la agenda no vería. Se admite en
+    // cualquier caja porque un CSV escrito a mano no respeta mayúsculas.
+    const tipoCrudo = (colTipo >= 0 ? (campos[colTipo] ?? "") : "").trim().toUpperCase();
+    let kind: (typeof TIPOS)[number] = "PRODUCT";
+    if (tipoCrudo.length > 0) {
+      if (!(TIPOS as readonly string[]).includes(tipoCrudo)) {
+        malas.push({
+          linea,
+          sku,
+          nombre,
+          motivo: `El tipo "${tipoCrudo}" no vale. Escribe ${TIPOS.join(" o ")}, o déjalo vacío para un producto.`,
+        });
+        continue;
+      }
+      kind = tipoCrudo as (typeof TIPOS)[number];
+    }
+
+    // ── La exención ─────────────────────────────────────────────────
+    //
+    // Se lee y se pasa tal cual a `validateLocalProduct`: la lista L10,
+    // el «E2/E3 no en régimen general» y el «exento ⇒ IVA 0» los decide
+    // ESA función, que es la misma que usa el alta de una ficha desde el
+    // panel (decisión 2 del bloque). Aquí no hay una segunda validación
+    // de la exención, y es a propósito: dos sitios que decidan qué
+    // exenciones valen acaban discrepando, y el que discrepe emite un
+    // registro rechazado con la factura ya entregada.
+    //
+    // Lo que SÍ es de este módulo: `""` y «columna ausente» son lo mismo
+    // y significan «operación sujeta».
+    const exencionCruda = (
+      colExencion >= 0 ? (campos[colExencion] ?? "") : ""
+    ).trim().toUpperCase();
+
+    // ── La duración ─────────────────────────────────────────────────
+    //
+    // Las dos mitades de la regla, y las dos rechazan la fila con un
+    // motivo que dice qué arreglar:
+    //
+    //   · un SERVICE sin duración no se puede reservar — entraría al
+    //     catálogo y a la agenda, y la dueña descubriría que no hay
+    //     huecos el día que intente dar la primera cita;
+    //   · un PRODUCT con duración es una columna mal puesta. Ignorarla
+    //     dejaría al implantador creyendo que ha cargado un servicio.
+    const duracionCruda = (
+      colDuracion >= 0 ? (campos[colDuracion] ?? "") : ""
+    ).trim();
+    let duracionMin: number | null = null;
+    if (kind === "SERVICE") {
+      if (duracionCruda.length === 0) {
+        malas.push({
+          linea,
+          sku,
+          nombre,
+          motivo:
+            "Un servicio necesita su duración en minutos (columna duracion_min): sin ella no se puede reservar.",
+        });
+        continue;
+      }
+      // `parseNumero` devuelve `null` cuando no hay número que leer
+      // («media hora», «1.234,5»); se le pasa entonces el texto crudo para
+      // que el mensaje sea «no es un número» y no «entre 1 y 1440», que
+      // sería mentira sobre lo que el implantador escribió.
+      const leido = parseNumero(duracionCruda);
+      const dur = normalizeDurationMin(leido === null ? duracionCruda : leido);
+      if (!dur.ok) {
+        malas.push({ linea, sku, nombre, motivo: dur.message });
+        continue;
+      }
+      duracionMin = dur.value;
+    } else if (duracionCruda.length > 0) {
+      malas.push({
+        linea,
+        sku,
+        nombre,
+        motivo:
+          `Un producto no se reserva, así que no lleva duracion_min (trae "${duracionCruda}"). ` +
+          "Si es un servicio, pon SERVICE en la columna tipo.",
+      });
+      continue;
+    }
+
     const valid = validateLocalProduct({
       name: nombre,
       sku,
@@ -256,6 +400,8 @@ export function parseCatalogoCsv(texto: string): CsvParseResult {
       taxRate: iva,
       tags: categorias,
       allergens: alergenos,
+      kind,
+      exemptionCause: exencionCruda.length === 0 ? null : exencionCruda,
     });
     if (!valid.ok) {
       malas.push({ linea, sku, nombre, motivo: valid.message });
@@ -277,7 +423,7 @@ export function parseCatalogoCsv(texto: string): CsvParseResult {
       continue;
     }
     vistos.set(valid.fields.sku, linea);
-    buenas.push({ linea, fields: valid.fields, precioConIva: precio });
+    buenas.push({ linea, fields: valid.fields, precioConIva: precio, duracionMin });
   }
 
   if (buenas.length === 0 && malas.length === 0) {

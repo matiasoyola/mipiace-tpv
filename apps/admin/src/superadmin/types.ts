@@ -232,6 +232,17 @@ export interface CatalogImportResult {
     precioSinIva: number;
     iva: number;
     categorias: string[];
+    // catalogo-servicios-csv · lo que la dueña de la clínica revisa con el
+    // implantador antes de confirmar. Las cuatro viajan SIEMPRE, también
+    // en el fichero de un bar (`PRODUCT` y tres `null`).
+    tipo: "PRODUCT" | "SERVICE";
+    /** Minutos de agenda. Un número exactamente cuando `tipo` es `SERVICE`. */
+    duracionMin: number | null;
+    /** El código de la AEAT (`E1`), o `null` si la operación es sujeta. */
+    exencion: string | null;
+    /** «Exento · sanitario», redactado por el servidor: es la misma frase
+     *  que sale en el chip del catálogo y en la leyenda del papel. */
+    exencionEtiqueta: string | null;
   }>;
   saltadas: CatalogImportFilaSaltada[];
   /** Productos locales que el comercio ya tenía antes de esta carga. */

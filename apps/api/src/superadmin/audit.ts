@@ -297,6 +297,12 @@ const DejarHoldedMeta = Base.extend({
 const CatalogImportMeta = Base.extend({
   filasCreadas: z.number().int().nonnegative(),
   filasSaltadas: z.number().int().nonnegative(),
+  // catalogo-servicios-csv · cuántas de las creadas son servicios con su
+  // fila de agenda. Es la cifra que distingue «cargué el catálogo de un
+  // bar» de «cargué los 17 servicios de una clínica», y sigue siendo
+  // cuántas y no cuáles. Opcional porque las cargas ya auditadas en
+  // producción no la llevan: exigirla rompería la lectura de la tabla.
+  serviciosCreados: z.number().int().nonnegative().optional(),
 });
 
 const META_SCHEMAS = {

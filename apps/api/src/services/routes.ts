@@ -53,34 +53,19 @@ import {
   tipoPorEtiqueta,
 } from "../clinica/tipos-de-visita.js";
 import { getPrisma } from "../context.js";
+import {
+  type Channels,
+  DEFAULT_CHANNELS,
+  DURATION_MAX,
+  DURATION_MIN,
+  toChannels,
+} from "./scheduling-rules.js";
 
-// Forma estable de los flags de canal. El front la lee tal cual; `online`
-// debe ir de la mano de `onlineBookable`.
-interface Channels {
-  caja: boolean;
-  ticket: boolean;
-  agenda: boolean;
-  online: boolean;
-}
-
-const DEFAULT_CHANNELS: Channels = {
-  caja: true,
-  ticket: true,
-  agenda: true,
-  online: false,
-};
-
-// Normaliza el jsonb `channels` a la forma estable (defensivo: filas
-// viejas o payloads parciales caen a los defaults por clave).
-function toChannels(raw: unknown): Channels {
-  const c = (raw ?? {}) as Partial<Record<keyof Channels, unknown>>;
-  return {
-    caja: c.caja === undefined ? DEFAULT_CHANNELS.caja : Boolean(c.caja),
-    ticket: c.ticket === undefined ? DEFAULT_CHANNELS.ticket : Boolean(c.ticket),
-    agenda: c.agenda === undefined ? DEFAULT_CHANNELS.agenda : Boolean(c.agenda),
-    online: c.online === undefined ? DEFAULT_CHANNELS.online : Boolean(c.online),
-  };
-}
+// catalogo-servicios-csv · la forma de los canales, el rango de la
+// duración y los valores por defecto viven en `scheduling-rules.ts`: la
+// carga del fichero de alta del super-admin crea filas de
+// `service_scheduling` y tiene que hacerlo con LAS MISMAS reglas, no con
+// unas parecidas. Este PUT sigue siendo la puerta del panel.
 
 function schedulingView(s: {
   productId: string;
@@ -312,7 +297,13 @@ export async function registerServicesRoutes(
           required: ["durationMin"],
           additionalProperties: false,
           properties: {
-            durationMin: { type: "integer", minimum: 1, maximum: 1440 },
+            // catalogo-servicios-csv · el rango sale de `scheduling-rules.ts`,
+            // que es el mismo que aplica el parser del fichero de alta.
+            durationMin: {
+              type: "integer",
+              minimum: DURATION_MIN,
+              maximum: DURATION_MAX,
+            },
             bufferBeforeMin: { type: "integer", minimum: 0, maximum: 480 },
             bufferAfterMin: { type: "integer", minimum: 0, maximum: 480 },
             staffRequired: { type: "integer", minimum: 1, maximum: 12 },

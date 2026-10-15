@@ -6,7 +6,7 @@
 // día de la visita. El bucle que rompe está en la cabecera de
 // `api/src/superadmin/tenant-catalog.ts`.
 //
-// ── Dos decisiones de pantalla ─────────────────────────────────────────
+// ── Tres decisiones de pantalla ────────────────────────────────────────
 //
 // 1. **No es un modal.** Esto se mira con el dueño al lado y con el CSV
 //    abierto en otra ventana: la vista previa puede tener 128 filas
@@ -19,6 +19,15 @@
 //    la columna de la base es NETA. Enseñar sólo una de las dos obliga a
 //    confiar; enseñar las dos deja ver que 1,60 € se guarda como 1,4545
 //    y que el TPV volverá a pintar 1,60 €.
+//
+// 3. **catalogo-servicios-csv · el tipo, la duración y la exención se
+//    VEN.** Es lo que Rosario revisa con el implantador delante: que la
+//    «Quiropodia básica» es un servicio, que dura 30 minutos y que sale
+//    exenta. Las tres son invisibles en el CSV una vez subido, y las tres
+//    deciden si el servicio se puede reservar y si el ticket sale bien en
+//    el papel. La frase «Exento · sanitario» la redacta el servidor
+//    (`PRESENTACION` de `@mipiacetpv/ticket-model`): es la misma que la
+//    dueña verá luego en el chip del catálogo y en la leyenda del ticket.
 
 import { useRef, useState } from "react";
 import { FileUp, Upload } from "lucide-react";
@@ -137,6 +146,20 @@ export function CatalogImportPanel({
         . El precio es <strong>con IVA</strong>, el de la carta. Un SKU que ya
         exista no se pisa.
       </p>
+      <p className="text-[12.5px] text-slate-600 mb-4">
+        Una clínica puede añadir tres columnas más, todas opcionales:{" "}
+        <code className="text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">
+          tipo,exencion,duracion_min
+        </code>
+        . <code className="text-[11.5px]">tipo</code> es{" "}
+        <code className="text-[11.5px]">PRODUCT</code> o{" "}
+        <code className="text-[11.5px]">SERVICE</code> (vacío = producto);{" "}
+        <code className="text-[11.5px]">exencion</code> es{" "}
+        <code className="text-[11.5px]">E1</code> para un servicio sanitario
+        exento, y entonces el IVA tiene que ser 0; y{" "}
+        <code className="text-[11.5px]">duracion_min</code> son los minutos de
+        agenda, <strong>obligatorios en un servicio</strong>.
+      </p>
 
       {hecho && (
         <p
@@ -234,6 +257,12 @@ export function CatalogImportPanel({
                   <tr>
                     <th className="text-left py-2 px-3">SKU</th>
                     <th className="text-left py-2 px-3">Nombre</th>
+                    {/* catalogo-servicios-csv · las dos columnas nuevas van
+                        ANTES del precio: lo primero que la dueña comprueba
+                        de una línea de su hoja es que es un servicio y que
+                        dura lo que ella dice. */}
+                    <th className="text-left py-2 px-3">Tipo</th>
+                    <th className="text-right py-2 px-3">Duración</th>
                     <th className="text-right py-2 px-3">Con IVA</th>
                     <th className="text-right py-2 px-3">IVA</th>
                     <th className="text-right py-2 px-3">Se guarda</th>
@@ -245,11 +274,35 @@ export function CatalogImportPanel({
                     <tr key={p.sku} className="border-t border-slate-100">
                       <td className="py-1.5 px-3 tabular-nums text-slate-600">{p.sku}</td>
                       <td className="py-1.5 px-3 text-slate-900">{p.nombre}</td>
+                      <td className="py-1.5 px-3 text-slate-600">
+                        {p.tipo === "SERVICE" ? "Servicio" : "Producto"}
+                      </td>
+                      <td className="py-1.5 px-3 text-right tabular-nums text-slate-600">
+                        {/* Un producto no se reserva, así que la celda queda
+                            vacía con una raya: un «0 min» diría que dura
+                            cero, que es otra cosa. */}
+                        {p.duracionMin == null ? (
+                          <span className="text-slate-300">—</span>
+                        ) : (
+                          `${p.duracionMin} min`
+                        )}
+                      </td>
                       <td className="py-1.5 px-3 text-right tabular-nums text-slate-900 font-medium">
                         {euros(p.precioConIva)}
                       </td>
                       <td className="py-1.5 px-3 text-right tabular-nums text-slate-600">
-                        {p.iva} %
+                        {/* Un exento NO es un 0 % sujeto: los dos valen cero
+                            euros de cuota y son dos operaciones distintas
+                            ante la AEAT. Si se pintara «0 %» la dueña no
+                            podría distinguirlos, que es justo lo que este
+                            bloque viene a arreglar. */}
+                        {p.exencionEtiqueta == null ? (
+                          `${p.iva} %`
+                        ) : (
+                          <span className="inline-block px-1.5 py-0.5 rounded bg-sky-50 text-sky-800 border border-sky-200 text-[11.5px] whitespace-nowrap">
+                            {p.exencionEtiqueta}
+                          </span>
+                        )}
                       </td>
                       <td className="py-1.5 px-3 text-right tabular-nums text-slate-500">
                         {netoEuros(p.precioSinIva)}
