@@ -369,6 +369,32 @@ function useHoldedHealth(enabled = true): HoldedHealth | null {
 //
 // Quien SÍ usa Holded y no lo ha conectado la sigue viendo, y debe: ésa
 // es exactamente la empresa que tiene un problema.
+// puesta-en-marcha (ADR-021) · la banda del ensayo.
+//
+// Azul y no roja: no hay nada roto. Lo que hay es una cuenta que todavía no
+// factura, y eso es un estado normal de una implantación — el implantador
+// ensaya con el cliente, resetea y arranca cuando los dos están listos. Una
+// barra roja le diría al cliente que tiene un problema.
+function EnsayoAvisoBanner() {
+  return (
+    <div
+      role="status"
+      className="bg-sky-100 text-sky-950 border-b border-sky-300 px-4 md:px-8 py-4 text-[15px] md:text-[16px] flex items-start gap-3"
+      data-testid="ensayo-aviso-panel"
+    >
+      <span aria-hidden className="text-[20px] leading-none mt-0.5">🧪</span>
+      <span>
+        <strong>Tu cuenta está en ensayo.</strong> El TPV funciona entero y
+        puedes probarlo todo —vender, cobrar, devolver, arquear y cerrar—, pero
+        nada de lo que cobra es una factura: los tickets salen marcados como de
+        prueba, no se mandan por email y no cuentan para Hacienda. Cuando esté
+        todo a tu gusto, lo activamos nosotros contigo delante y desde ese
+        momento cada venta es una factura.
+      </span>
+    </div>
+  );
+}
+
 function HoldedHealthBanner({
   cajaEnabled,
   holdedEnabled,
@@ -471,6 +497,17 @@ export function AdminShell({
   return (
     <div className="min-h-screen bg-mipiace-stone flex flex-col font-sans">
       {impersonating && <ImpersonationBanner />}
+      {/* puesta-en-marcha (ADR-021) · la banda del ensayo en el panel del
+          PROPIETARIO. Es la tercera de las tres cosas que impiden que alguien
+          crea que ha facturado: la banda del TPV, el papel marcado y ésta.
+
+          Sin botón de arrancar, y es la decisión: arrancar es irreversible y
+          lo hace el super-admin en la visita (ADR-021 §3). Un botón aquí
+          sería o un botón que no hace nada, o la puerta a que un propietario
+          empiece a facturar sin que nadie haya comprobado sus datos fiscales
+          ni que sus cajas tienen la cadena limpia. Lo que sí dice es a quién
+          llamar. */}
+      {shellCaps?.enEnsayo === true && <EnsayoAvisoBanner />}
       <HoldedHealthBanner
         cajaEnabled={shellCaps?.caja === true}
         holdedEnabled={shellCaps?.holdedEnabled !== false}

@@ -52,6 +52,11 @@ interface FakeTenant {
   // — projectTenant lo normaliza a `null` al exponerlo.
   holdedAccountId?: string | null;
   onboardingState: "DRAFT" | "ACTIVE";
+  // puesta-en-marcha (ADR-021) · desde cuándo factura. Opcional por lo mismo
+  // que `holdedAccountId`: los `tenants.set()` de los demás casos no la
+  // llevan, y ausente significa «en ensayo», que es el estado nuevo de una
+  // cuenta recién activada.
+  facturaDesde?: Date | null;
   blockedAt: Date | null;
   blockedReason: string | null;
   initialSyncStatus: string;

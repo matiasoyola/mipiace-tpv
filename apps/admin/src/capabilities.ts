@@ -76,6 +76,16 @@ export interface TenantCapabilities {
   // Apagada —o sea, en los quince clientes de hoy— el panel es exactamente
   // el de antes del bloque.
   residencia: boolean;
+  // puesta-en-marcha (ADR-021) · ¿la cuenta está EN ENSAYO? No es una
+  // capability que se venda: es un ESTADO, y vive aquí porque se consulta
+  // desde el mismo sitio y para lo mismo —decidir qué se pinta— y porque sale
+  // de la misma llamada (`/auth/me`).
+  //
+  // `false` al fallar, al revés que `caja`: la banda «estos cobros no son
+  // facturas» encima del panel de Sole sería una mentira que asusta, y no
+  // pintarla en un ensayo se arregla al recargar (y el servidor no emite nada
+  // igual).
+  enEnsayo: boolean;
 }
 
 // El valor con el que se sigue adelante si alguna de las dos peticiones
@@ -102,6 +112,8 @@ const POR_DEFECTO: TenantCapabilities = {
   // sección es más barato que enseñar una que no toca, y la que no toca
   // aquí hablaría de residentes donde no hay ninguno.
   residencia: false,
+  // puesta-en-marcha (ADR-021) · ver la nota del campo.
+  enEnsayo: false,
 };
 
 let cache: TenantCapabilities | null = null;
@@ -130,6 +142,7 @@ async function pedir(): Promise<void> {
           hasHoldedKey?: boolean;
           holdedEnabled?: boolean;
           holdedDisconnectedAt?: string | null;
+          facturaDesde?: string | null;
           businessType?: "HOSPITALITY" | "RETAIL" | "SERVICES";
         };
       }>("/auth/me"),
@@ -145,6 +158,10 @@ async function pedir(): Promise<void> {
       holdedEnabled: me.tenant.holdedEnabled !== false,
       holdedDejado: me.tenant.holdedDisconnectedAt != null,
       businessType: me.tenant.businessType ?? null,
+      // puesta-en-marcha (ADR-021) · `undefined` (una API anterior al
+      // despliegue) se lee como «no está en ensayo», que es lo que eran todas
+      // las cuentas antes de este bloque.
+      enEnsayo: me.tenant.facturaDesde === null,
     };
   } catch {
     cache = POR_DEFECTO;

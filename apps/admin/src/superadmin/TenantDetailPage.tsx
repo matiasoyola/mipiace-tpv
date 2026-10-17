@@ -12,6 +12,7 @@ import {
   LogOut,
   Minus,
   Power,
+  Receipt,
   RefreshCw,
   Settings,
   Sparkles,
@@ -25,10 +26,13 @@ import { humanizeError } from "./error-messages.js";
 import { CashiersPanel } from "./CashiersPanel.js";
 import { CatalogImportPanel } from "./CatalogImportPanel.js";
 import { DejarHoldedPanel } from "./DejarHoldedPanel.js";
+import { PuestaEnMarchaPanel } from "./PuestaEnMarchaPanel.js";
 import { SuperAdminShell } from "./SuperAdminShell.js";
 import type {
   ActivateTenantResponse,
   DejarHoldedResultado,
+  EmpezarAFacturarResultado,
+  ResetearEnsayoResultado,
   BusinessType,
   HoldedConnectionStatus,
   ImpersonateResponse,
@@ -115,6 +119,9 @@ export function TenantDetailPage() {
   const [showConfigureModal, setShowConfigureModal] = useState(false);
   // holded-desconectar (ADR-020) · el panel de «Dejar Holded», abierto o no.
   const [dejarHolded, setDejarHolded] = useState(false);
+  // puesta-en-marcha (ADR-021) · el panel del ensayo, del reseteo y del
+  // arranque. Hermano del de «Dejar Holded» en forma y en gobierno.
+  const [puestaEnMarcha, setPuestaEnMarcha] = useState(false);
 
   async function reload(): Promise<void> {
     if (!id) return;
@@ -758,6 +765,7 @@ export function TenantDetailPage() {
           onToggleHolded={() => void onToggleHolded()}
           onToggleSalud={(campo) => void onToggleSalud(campo)}
           setDejarHolded={setDejarHolded}
+          setPuestaEnMarcha={setPuestaEnMarcha}
         />
       )}
 
@@ -789,6 +797,34 @@ export function TenantDetailPage() {
               );
             }
             void reload();
+          }}
+        />
+      )}
+
+      {/* puesta-en-marcha (ADR-021) · a ancho completo y fuera de
+          «Acciones», por lo mismo que el de ADR-020: hay que leer los
+          números antes de pulsar. */}
+      {puestaEnMarcha && (
+        <PuestaEnMarchaPanel
+          tenantId={tenant.id}
+          tenantName={tenant.name}
+          onCerrar={() => setPuestaEnMarcha(false)}
+          onReseteado={(r: ResetearEnsayoResultado) => {
+            setActionMessage(
+              `Ensayo reseteado: ${r.ticketsBorrados} ticket(s) de prueba, ` +
+                `${r.borradoresBorrados} borrador(es) y ${r.turnosBorrados} turno(s). ` +
+                "El catálogo, la sala, los cajeros y los terminales siguen como estaban.",
+            );
+            void reload();
+          }}
+          onArrancado={(r: EmpezarAFacturarResultado) => {
+            setPuestaEnMarcha(false);
+            setActionMessage(
+              `${tenant.name} EMPIEZA A FACTURAR. Su próxima venta es su primera factura. ` +
+                "Comprueba que el terminal tiene la APK al día antes de irte.",
+            );
+            void reload();
+            void r;
           }}
         />
       )}
@@ -1442,6 +1478,7 @@ function ActiveTenantActions({
   onToggleHolded,
   onToggleSalud,
   setDejarHolded,
+  setPuestaEnMarcha,
 }: {
   blocked: boolean;
   tenant: TenantDetail;
@@ -1458,6 +1495,7 @@ function ActiveTenantActions({
     campo: "clinicalRecordsEnabled" | "residenciaEnabled",
   ) => void;
   setDejarHolded: (v: boolean) => void;
+  setPuestaEnMarcha: (v: boolean) => void;
 }) {
   // catalogo-local (addendum 3) · las DOS preguntas, que hasta este
   // bloque se contestaban con la misma señal.
@@ -1616,6 +1654,18 @@ function ActiveTenantActions({
               tone="danger"
             />
           )}
+          {/* puesta-en-marcha (ADR-021) · SIEMPRE visible, y a propósito.
+              Una cuenta en ensayo lo necesita para resetear y para arrancar;
+              una que ya factura lo necesita para poder leer DESDE CUÁNDO
+              factura, que es la pregunta que antes no se podía contestar sin
+              mirar la base. El panel decide qué ofrecer según el estado. */}
+          <Action
+            onClick={() => setPuestaEnMarcha(true)}
+            busy={busy}
+            icon={Receipt}
+            label="Puesta en marcha"
+            tone={tenant.facturaDesde == null ? "primary" : "neutral"}
+          />
           <Action
             onClick={onImpersonateReadonly}
             busy={busy}

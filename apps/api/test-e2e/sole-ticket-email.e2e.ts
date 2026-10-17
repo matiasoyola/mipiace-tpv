@@ -147,6 +147,10 @@ describe.skipIf(!e2eEnabled)("e2e · Sole · el ticket por email", () => {
         businessType: "SERVICES",
         dayCutHour: 5,
         requireCashCountOnClose: false,
+        // puesta-en-marcha (ADR-021) · Sole FACTURA. Sin esta fecha su cuenta
+        // está en ensayo, sus tickets nacen `TEST` y el worker de email los
+        // salta — que es correcto en un ensayo y rompe este fichero.
+        facturaDesde: new Date("2026-06-01T08:00:00.000Z"),
       },
       select: { id: true },
     });

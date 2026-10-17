@@ -99,6 +99,9 @@ const { hashPassword } = await import("../src/auth/passwords.js");
 const { signAccessToken } = await import("../src/auth/tokens.js");
 const { signCashierSession } = await import("../src/shift/cashier-session.js");
 const { computeOnboardingHealth } = await import("../src/superadmin/onboarding-health.js");
+// puesta-en-marcha (ADR-021) · el paso nuevo del recorrido: activar ya no es
+// empezar a facturar.
+const { arrancarFacturacion } = await import("../src/fiscal/puesta-en-marcha.js");
 const jwtLib = (await import("jsonwebtoken")).default;
 
 const CSV = readFileSync(
@@ -521,6 +524,27 @@ describe.skipIf(!e2eEnabled)("e2e · un bar nuevo sin Holded llega a cobrar", ()
         select: { id: true, kind: true },
       });
       expect(terminal.kind).toBe("TERMINAL");
+
+      // puesta-en-marcha (ADR-021) · EL PASO QUE ANTES NO EXISTÍA.
+      //
+      // Hasta este bloque, activar la cuenta era empezar a facturar: la
+      // primera venta tras el `activate` ya era la factura C1/1. Ahora la
+      // cuenta queda EN ENSAYO después de activarse —se puede probar en el
+      // terminal del cliente y resetear las veces que haga falta— y arranca
+      // cuando el implantador lo pulsa, en el local y con el cliente
+      // delante.
+      //
+      // Va aquí, después de emparejar el terminal, porque arrancar lo
+      // EXIGE: el registro de facturación lo genera el terminal, así que una
+      // cuenta sin ninguno no puede emitir. Si se moviera antes de esta
+      // línea, el arranque devolvería `SIN_TERMINAL`.
+      const arranque = await arrancarFacturacion({ prisma, tenantId });
+      expect(arranque.facturaDesde).toBeTruthy();
+      const trasArrancar = await prisma.tenant.findUniqueOrThrow({
+        where: { id: tenantId },
+        select: { facturaDesde: true },
+      });
+      expect(trasArrancar.facturaDesde).not.toBeNull();
 
       const camarero = await prisma.user.create({
         data: {

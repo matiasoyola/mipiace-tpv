@@ -347,6 +347,15 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
           // distinto — sólo el segundo tiene devoluciones que llevar a mano
           // al asesor, y sólo a él se le enseña esa pantalla.
           holdedDisconnectedAt: tenant.holdedDisconnectedAt?.toISOString() ?? null,
+          // puesta-en-marcha (ADR-021) · DESDE CUÁNDO factura esta cuenta.
+          // `null` es el ensayo, y el panel del propietario lo avisa en una
+          // banda: es la tercera de las tres cosas que impiden que alguien
+          // crea que ha facturado (la banda del TPV, el papel marcado y
+          // esto).
+          //
+          // Sólo lectura, como `cajaEnabled`: arrancar lo hace el
+          // super-admin en la visita, con el cliente delante.
+          facturaDesde: tenant.facturaDesde?.toISOString() ?? null,
           // kds-1-cocina · el VERTICAL del negocio. El panel lo necesita
           // para pintar los alérgenos en la ficha del producto SÓLO en
           // hostelería: en una peluquería o una papelería, catorce

@@ -174,6 +174,14 @@ export interface TenantDetail {
   // deducible de `holdedEnabled === false`, que lo contestan igual el
   // comercio que nació sin Holded y el que lo dejó con 270 facturas detrás.
   holdedDisconnectedAt?: string | null;
+  // puesta-en-marcha (ADR-021) · DESDE CUÁNDO factura esta cuenta. `null` es
+  // el ensayo. No se deduce de `onboardingState`: una cuenta ACTIVE puede
+  // estar en ensayo, y es el caso que este bloque vino a permitir.
+  //
+  // Opcional por lo mismo que su vecina: para no romper si el front va por
+  // delante del despliegue de la API.
+  facturaDesde?: string | null;
+  esDePruebas?: boolean;
   holdedStatus: HoldedConnectionStatus;
   holdedAuthMode: string;
   // v1.3-SuperAdmin-Hub Lote 3: id del panel Holded del cliente. NULL
@@ -565,4 +573,76 @@ export interface DejarHoldedResultado {
     repeatableQuitado: boolean;
     errores: string[];
   };
+}
+
+// ── puesta-en-marcha (ADR-021) ────────────────────────────────────────
+//
+// Lo que devuelve `GET /super-admin/tenants/:id/puesta-en-marcha`. Espejo
+// exacto de `PrevisualizacionPuestaEnMarcha` en
+// `apps/api/src/fiscal/puesta-en-marcha.ts`. Los bloqueos reusan el tipo de
+// ADR-020 porque son la misma cosa —un código y la frase que lee quien
+// pulsa— y la pantalla los pinta igual.
+
+export interface PuestaEnMarchaPreview {
+  tenant: {
+    id: string;
+    name: string;
+    onboardingState: string;
+    esDePruebas: boolean;
+  };
+  estado: "ensayo" | "facturando";
+  facturaDesde: string | null;
+  ensayo: {
+    ticketsDeEnsayo: number;
+    borradores: number;
+    devoluciones: number;
+    turnos: number;
+    turnosAbiertos: number;
+    arqueos: number;
+    informesZ: number;
+    comandasDeCocina: number;
+    emailsDeTicket: number;
+    mesasUnidas: number;
+    contadoresDeTicket: Array<{ cajaId: string; caja: string; contador: number }>;
+  };
+  conserva: {
+    productos: number;
+    mesas: number;
+    cajeros: number;
+    terminales: number;
+    impresoras: number;
+    contactos: number;
+    datosFiscales: boolean;
+  };
+  cajas: Array<{
+    id: string;
+    nombre: string;
+    tienda: string;
+    serie: string | null;
+    numeroInstalacion: string | null;
+    registrosFiscales: number;
+    terminalesEmparejados: number;
+  }>;
+  suelo: { ok: boolean; problemas: string[] };
+  puedeResetear: boolean;
+  puedeArrancar: boolean;
+  bloqueos: DejarHoldedBloqueo[];
+}
+
+export interface ResetearEnsayoResultado {
+  ok: true;
+  ticketsBorrados: number;
+  borradoresBorrados: number;
+  devolucionesBorradas: number;
+  emailsBorrados: number;
+  turnosBorrados: number;
+  mesasDesagrupadas: number;
+  contadoresAZero: number;
+  subidasBorradas: number;
+}
+
+export interface EmpezarAFacturarResultado {
+  ok: true;
+  facturaDesde: string;
+  reseteo: Omit<ResetearEnsayoResultado, "ok">;
 }
