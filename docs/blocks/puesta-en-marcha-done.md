@@ -1,6 +1,6 @@
 # puesta-en-marcha · se prueba en la cuenta real, se resetea y se arranca — DONE
 
-_Rama `puesta-en-marcha`, 11 commits: 7 del bloque, 2 de arreglo y 2 de documentación. ADR-021. 2026-10-17/18._
+_Rama `puesta-en-marcha`, 12 commits: 7 del bloque, 3 de arreglo y 2 de documentación. ADR-021. 2026-10-17/18._
 
 Lo que había que poder hacer y no se podía: **llegar a un cliente con su TPV probado en su propia
 cuenta y en su propio aparato**. Hasta este bloque, «activada» y «facturando» eran la misma cosa,
@@ -214,7 +214,16 @@ activada desde junio sin vender, y probar su TPV en un terminal de verdad es jus
 poder hacer. Lo que sigue cerrado es probar sobre la operación real de quien factura: **409
 `TENANT_FACTURANDO`**.
 
-### 3.9 La eliminación se BLOQUEA en una cuenta con historia clínica o residentes
+### 3.9 Las tres transacciones llevan tope propio
+
+El de Prisma son 5 s y las tres se pasan en un comercio de verdad: resetear un
+ensayo largo, arrancar (que resetea dentro) y, sobre todo, eliminar la cuenta
+entera —dos años de ventas en cascada—. Con el default no se borra nada (la
+transacción se deshace, que es lo correcto), pero el implantador se queda con
+un P2028 delante del cliente y la baja de un cliente grande sería imposible.
+Dos minutos los dos primeros, cinco el borrado.
+
+### 3.10 La eliminación se BLOQUEA en una cuenta con historia clínica o residentes
 
 Sus triggers no tienen ninguna escapatoria y no se les añade. Ver ADR-021 §6.2. El export sí
 funciona, y la devolución de datos del centro clínico ya existía.
@@ -523,7 +532,7 @@ docker compose exec -T postgres psql -U mipiacetpv -d mipiacetpv -c \
 ```bash
 cd /Users/matiasoyolasanchez/Developer/Claude/Projects/mipiacetpv-puesta-en-marcha
 
-git log --oneline master..HEAD          # 11 commits
+git log --oneline master..HEAD          # 12 commits
 git push -u origin puesta-en-marcha
 
 gh pr create --base master --head puesta-en-marcha \
