@@ -395,7 +395,12 @@ export async function resetearEnsayo(params: {
   tenantId: string;
 }): Promise<ResultadoReseteo> {
   const { prisma, tenantId } = params;
-  return prisma.$transaction(async (tx) => {
+  // Más de los 5 s por defecto de Prisma: un ensayo largo (una semana de
+  // demostración en un bar) son miles de tickets con sus líneas, y quedarse
+  // en P2028 a mitad dejaría al implantador sin saber si borró o no. No
+  // borra nada —la transacción se deshace— pero el susto es gratis.
+  return prisma.$transaction(
+    async (tx) => {
     const tenant = await tx.tenant.findUnique({
       where: { id: tenantId },
       select: { id: true, facturaDesde: true },
@@ -407,7 +412,9 @@ export async function resetearEnsayo(params: {
       throw new TenantFacturandoError(tenantId, tenant.facturaDesde!);
     }
     return borrarElEnsayo(tx, tenantId);
-  });
+    },
+    { timeout: 2 * 60_000, maxWait: 15_000 },
+  );
 }
 
 /** El borrado, para que lo compartan el reseteo y el arranque. Asume que la
@@ -507,7 +514,10 @@ export async function arrancarFacturacion(params: {
   ahora?: Date;
 }): Promise<ResultadoArranque> {
   const { prisma, tenantId } = params;
-  return prisma.$transaction(async (tx) => {
+  // Mismo motivo que en `resetearEnsayo`: resetea antes de fijar la fecha, y
+  // eso es todo el ensayo del comercio dentro de una sola transacción.
+  return prisma.$transaction(
+    async (tx) => {
     const previa = await previsualizarPuestaEnMarcha(tx, tenantId);
     if (!previa.puedeArrancar) {
       throw new ArranqueBloqueadoError(previa.bloqueos);
@@ -523,5 +533,7 @@ export async function arrancarFacturacion(params: {
       reseteo,
       previa,
     };
-  });
+    },
+    { timeout: 2 * 60_000, maxWait: 15_000 },
+  );
 }

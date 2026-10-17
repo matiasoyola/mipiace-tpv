@@ -652,7 +652,13 @@ export async function eliminarLaCuenta(params: {
   tenantId: string;
 }): Promise<ResultadoEliminacion> {
   const { prisma, tenantId } = params;
-  return prisma.$transaction(async (tx) => {
+  // El tope de una transacción interactiva de Prisma son 5 s por defecto, y
+  // esto borra la cuenta ENTERA de un comercio: dos años de ventas son
+  // decenas de miles de filas en cascada. Con el default, un cliente grande
+  // se iría en P2028 y no se borraría nada —seguro, pero inútil—. Cinco
+  // minutos, y si no cabe ahí es que pasa algo que hay que mirar.
+  return prisma.$transaction(
+    async (tx) => {
     const previa = await previsualizarEliminacion(tx, tenantId);
     // Se vuelve a comprobar DENTRO de la transacción: entre la pantalla y el
     // botón puede haber entrado una historia clínica, o puede no estar el
@@ -702,5 +708,7 @@ export async function eliminarLaCuenta(params: {
         enlacesPublicos: enlacesPublicos.count,
       },
     };
-  });
+    },
+    { timeout: 5 * 60_000, maxWait: 30_000 },
+  );
 }
