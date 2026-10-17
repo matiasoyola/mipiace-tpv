@@ -140,6 +140,9 @@ export interface BuildTicketInput {
   // v1.3-Thalia Lote 3 · si se construye el doc para una reimpresión.
   // Sólo cambia presentación visual del PDF, no la fiscalidad.
   isReprint?: boolean;
+  // puesta-en-marcha (ADR-021) · el cobro fue un ensayo (ticket `TEST`).
+  // Igual que `isReprint`, sólo cambia lo que dice el papel.
+  esDeEnsayo?: boolean;
   // v1.8-Fiado · venta a crédito con deuda viva. Si viene, el renderer
   // estampa "PENDIENTE DE PAGO" con deudor e importe adeudado.
   creditNotice?: { debtorName?: string | null; amountDue: number };
@@ -333,6 +336,7 @@ export function buildTicketDocument(input: BuildTicketDocumentInput): TicketDocu
         ? input.ticket.attendedBy.trim()
         : undefined,
       isReprint: input.ticket.isReprint ?? undefined,
+      esDeEnsayo: input.ticket.esDeEnsayo ?? undefined,
     },
     customer,
     lines,

@@ -10,6 +10,7 @@
 // conserva el PIN sólo en memoria — nunca se persiste).
 
 import { apiWithDevice } from "../api.js";
+import { setCachedEnsayo } from "./catalog.js";
 import {
   getOfflineConfig,
   saveOfflineBundle,
@@ -32,6 +33,14 @@ export type OfflineShiftState =
 export async function refreshOfflineBundle(): Promise<void> {
   const bundle = await apiWithDevice<OfflineBundle>("/shift/offline-bundle");
   await saveOfflineBundle(bundle);
+  // puesta-en-marcha (ADR-021) · el ensayo se cachea aquí, en cada arranque
+  // online, para que el login OFFLINE —que no habla con el servidor— pinte
+  // la banda. Va a localStorage y no al IndexedDB de la config porque es
+  // donde lo lee la pantalla, y porque la banda tiene que poder decidirse
+  // sin esperar a una lectura asíncrona.
+  if (bundle.config?.ensayo !== undefined) {
+    setCachedEnsayo(bundle.config.ensayo);
+  }
 }
 
 /** Estado de turno para el arranque/login offline, leído del turno

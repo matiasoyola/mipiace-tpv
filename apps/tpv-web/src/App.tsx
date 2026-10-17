@@ -20,11 +20,12 @@ import {
   registerSessionExpiredHandler,
 } from "./api.js";
 import { ReloginPinModal } from "./components/ReloginPinModal.js";
+import { EnsayoBanner } from "./components/EnsayoBanner.js";
 import { TestModeBanner } from "./components/TestModeBanner.js";
 import { useDeviceBootstrap } from "./hooks/useDeviceBootstrap.js";
 import { startSupportChannel } from "./lib/supportChannel/index.js";
 import { useInactivityLogout } from "./hooks/useInactivityLogout.js";
-import { getCachedBusinessType } from "./lib/catalog.js";
+import { getCachedBusinessType, getCachedEnsayo } from "./lib/catalog.js";
 import {
   flushOutbox,
   registerLocalShiftLookup,
@@ -629,11 +630,28 @@ function LoggedInWrapper({
   children: React.ReactNode;
 }) {
   useInactivityLogout(true, autoLogoutMinutes, onAutoLogout);
+  // puesta-en-marcha (ADR-021) · la banda del ensayo, encima de TODAS las
+  // pantallas con cajero dentro: venta, mapa de sala, apertura y cierre de
+  // turno, agenda. Va aquí y no en cada pantalla por lo mismo que el chip
+  // del outbox — que no dependa de que la siguiente pantalla se acuerde.
+  //
+  // Se lee de la caché y no de una llamada: lo escribe el login (y lo
+  // refresca el catálogo y el paquete offline), así que está puesto antes de
+  // que esta pantalla exista y vale sin red. El default de la caché es «no
+  // está en ensayo»: ver la nota de `ENSAYO_KEY`.
+  const ensayo = getCachedEnsayo();
   // v1.5-consistencia-C: el chip de cobros pendientes acompaña a todas
   // las pantallas con cajero logueado (incluido modo prueba).
   return (
     <>
-      {children}
+      {ensayo ? (
+        <div className="min-h-screen flex flex-col">
+          <EnsayoBanner />
+          <div className="flex-1">{children}</div>
+        </div>
+      ) : (
+        children
+      )}
       <OutboxChip />
     </>
   );

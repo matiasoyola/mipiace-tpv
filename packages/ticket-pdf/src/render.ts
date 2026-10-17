@@ -101,6 +101,13 @@ function computeLineCount(doc: TicketDocument): number {
     lines += 1; // línea "REIMPRESIÓN · ..."
     lines += 1; // separador
   }
+  // puesta-en-marcha (ADR-021) · la marca del ensayo. Dos líneas y un
+  // separador, contadas aquí porque este loop y el render tienen que contar
+  // lo mismo o el PDF sale con la página corta.
+  if (doc.ticket.esDeEnsayo) {
+    lines += 2; // banner + la frase de debajo
+    lines += 1; // separador
+  }
   // Cabecera fiscal: legalName, taxId, address (puede partirse), phone
   lines += 1; // legalName
   lines += 1; // taxId
@@ -288,6 +295,18 @@ export async function renderTicketPdf(
     // QR — se vio en la captura del bucle visual, no en un test.
     s.y -= size + QR_TRIBUTARIO_MARGEN_MM * MM;
     drawCenteredText(s, LEYENDA_VERIFACTU, FONT_SIZE_NORMAL, true);
+    drawSeparator(s);
+  }
+
+  // ── Marca del ENSAYO (puesta-en-marcha, ADR-021) ─────────────────
+  //
+  // Va ANTES de la marca de copia y antes de la cabecera fiscal, por la
+  // misma razón que aquélla: es lo primero que tiene que leer quien recibe
+  // el papel. Y es más grave que una reimpresión —esto no es una factura en
+  // absoluto—, así que va primero de las dos.
+  if (doc.ticket.esDeEnsayo) {
+    drawCenteredText(s, "*** TICKET DE PRUEBA ***", FONT_SIZE_TITLE, true);
+    drawCenteredText(s, "SIN VALIDEZ FISCAL", FONT_SIZE_NORMAL, true);
     drawSeparator(s);
   }
 
