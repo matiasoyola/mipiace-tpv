@@ -186,6 +186,21 @@ $fn$;
 -- al tenant es `RESTRICT`, así que sin esto la eliminación de cuenta se para
 -- en seco en cualquier comercio que haya mandado un consentimiento por
 -- enlace. El resto del trigger —toda la parte de UPDATE— no se toca.
+--
+-- ── Y LA LECCIÓN DE ESTE BLOQUE, en voz alta ──────────────────────────
+--
+-- El cuerpo de abajo se ha copiado de `clinica_7_blindaje`, que es la ÚLTIMA
+-- migración que reemplazó esta función, y NO de `enlaces_publicos`, que es la
+-- que la creó. Partir de la primera versión costó dos tests rojos en el e2e
+-- (`clinica-7 · el código del enlace no se reescribe` y `· sus fallos no
+-- bajan`): un `CREATE OR REPLACE` no mezcla nada, SUSTITUYE, así que las dos
+-- reglas que clinica-7 añadió —el código del enlace es parte de la cerradura
+-- y los intentos fallidos sólo suben— se habrían perdido en silencio. Las
+-- habría echado de menos la siguiente auditoría, no el despliegue.
+--
+-- Regla para la próxima vez: antes de reemplazar un trigger ajeno,
+-- `grep -rn "CREATE OR REPLACE FUNCTION <nombre>" packages/db/prisma/migrations`
+-- y copiar el cuerpo de la fecha más alta.
 
 CREATE OR REPLACE FUNCTION mipiacetpv_public_link_guard() RETURNS trigger
 LANGUAGE plpgsql AS $fn$
@@ -207,12 +222,14 @@ BEGIN
        OR NEW.target_type IS DISTINCT FROM OLD.target_type
        OR NEW.target_id   IS DISTINCT FROM OLD.target_id
        OR NEW.token_hash  IS DISTINCT FROM OLD.token_hash
+       -- clinica-7 · el código es parte de la cerradura.
+       OR NEW.code_hash   IS DISTINCT FROM OLD.code_hash
        OR NEW.max_uses    IS DISTINCT FROM OLD.max_uses
        OR NEW.expires_at  IS DISTINCT FROM OLD.expires_at
        OR NEW.created_by_user_id IS DISTINCT FROM OLD.created_by_user_id
        OR NEW.created_at  IS DISTINCT FROM OLD.created_at THEN
         RAISE EXCEPTION
-            'ENLACE_VIOLADO: el enlace % no se reescribe en lo que lo identifica (para qué sirve, a qué apunta, su huella, su tope, cuándo caduca). Para dar otro enlace se revoca éste y se crea uno nuevo.',
+            'ENLACE_VIOLADO: el enlace % no se reescribe en lo que lo identifica (para qué sirve, a qué apunta, su huella, su código, su tope, cuándo caduca). Para dar otro enlace se revoca éste y se crea uno nuevo.',
             OLD.id USING ERRCODE = '23514';
     END IF;
 
@@ -234,6 +251,15 @@ BEGIN
         RAISE EXCEPTION
             'ENLACE_VIOLADO: el enlace % ya se gastó sus % usos y no admite otro.',
             OLD.id, OLD.max_uses USING ERRCODE = '23514';
+    END IF;
+
+    -- clinica-7 · 4bis · los intentos fallidos del código SOLO SUBEN.
+    -- Bajarlos es regalarle intentos a quien está probando códigos de seis
+    -- cifras sobre la historia clínica de alguien.
+    IF NEW.code_failures < OLD.code_failures THEN
+        RAISE EXCEPTION
+            'ENLACE_VIOLADO: los intentos fallidos del código del enlace % no bajan (% → %). Bajarlos es regalar intentos.',
+            OLD.id, OLD.code_failures, NEW.code_failures USING ERRCODE = '23514';
     END IF;
 
     -- 5 · un enlace anulado no se gasta
