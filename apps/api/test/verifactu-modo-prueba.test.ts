@@ -35,12 +35,19 @@ const REGISTER_ID = "33333333-3333-3333-3333-333333333333";
 const DEVICE_ID = "44444444-4444-4444-4444-444444444444";
 const USER_ID = "55555555-5555-5555-5555-555555555555";
 
+// puesta-en-marcha (ADR-021) · una cuenta que YA ARRANCÓ. Todo este fichero
+// habla de un comercio facturando: lo que fija es que el modo prueba no
+// emita DENTRO de él. El ensayo de la cuenta entera vive en
+// `puesta-en-marcha-ensayo.test.ts`.
+const FACTURANDO = new Date("2026-06-01T08:00:00.000Z");
+
 // Un comercio que SÍ emite: `holdedEnabled: false`. Es el caso peligroso —
 // el que hoy metería una factura de prueba en la cadena del cliente.
 const tenantRow = {
   id: TENANT_ID,
   name: "PELUQUERÍA SOLE SL",
   holdedEnabled: false,
+  facturaDesde: FACTURANDO,
   cajaEnabled: true,
   businessType: "SERVICES",
   receiptFooter: null,
@@ -155,14 +162,14 @@ describe("el gate de la venta", () => {
   const sesionDePrueba = { isTest: true };
 
   it("un comercio que emite y una venta con registro: se ingesta", () => {
-    const g = comprobarGateFiscal({ holdedEnabled: false }, UN_REGISTRO, sesionNormal);
+    const g = comprobarGateFiscal({ holdedEnabled: false, facturaDesde: FACTURANDO }, UN_REGISTRO, sesionNormal);
     expect(g.rechazo).toBeNull();
     expect(g.descartarRegistro).toBe(false);
     expect(g.faltaRegistro).toBe(false);
   });
 
   it("una venta de PRUEBA con registro: se descarta y la venta sigue", () => {
-    const g = comprobarGateFiscal({ holdedEnabled: false }, UN_REGISTRO, sesionDePrueba);
+    const g = comprobarGateFiscal({ holdedEnabled: false, facturaDesde: FACTURANDO }, UN_REGISTRO, sesionDePrueba);
     expect(g.descartarRegistro).toBe(true);
     // Y NO se rechaza la petición: el modo prueba existe para validar el
     // flujo de cobro, y un 409 lo dejaría sin poder cobrar.
@@ -170,24 +177,24 @@ describe("el gate de la venta", () => {
   });
 
   it("una venta de PRUEBA sin registro no es una «falta»", () => {
-    const g = comprobarGateFiscal({ holdedEnabled: false }, null, sesionDePrueba);
+    const g = comprobarGateFiscal({ holdedEnabled: false, facturaDesde: FACTURANDO }, null, sesionDePrueba);
     expect(g.faltaRegistro).toBe(false);
     expect(g.descartarRegistro).toBe(false);
   });
 
   it("el modo prueba de un comercio CON Holded tampoco ingesta", () => {
-    const g = comprobarGateFiscal({ holdedEnabled: true }, UN_REGISTRO, sesionDePrueba);
+    const g = comprobarGateFiscal({ holdedEnabled: true, facturaDesde: FACTURANDO }, UN_REGISTRO, sesionDePrueba);
     expect(g.descartarRegistro).toBe(true);
   });
 
   it("y un comercio con Holded que manda registro sigue siendo un 409", () => {
-    const g = comprobarGateFiscal({ holdedEnabled: true }, UN_REGISTRO, sesionNormal);
+    const g = comprobarGateFiscal({ holdedEnabled: true, facturaDesde: FACTURANDO }, UN_REGISTRO, sesionNormal);
     expect(g.rechazo?.error).toBe("FISCAL_MODE_OFF");
   });
 
   it("sin sesión, el gate se comporta como antes de este bloque", () => {
-    expect(comprobarGateFiscal({ holdedEnabled: false }, null).faltaRegistro).toBe(true);
-    expect(comprobarGateFiscal({ holdedEnabled: true }, UN_REGISTRO).rechazo).not.toBeNull();
+    expect(comprobarGateFiscal({ holdedEnabled: false, facturaDesde: FACTURANDO }, null).faltaRegistro).toBe(true);
+    expect(comprobarGateFiscal({ holdedEnabled: true, facturaDesde: FACTURANDO }, UN_REGISTRO).rechazo).not.toBeNull();
   });
 });
 

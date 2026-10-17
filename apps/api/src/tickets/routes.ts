@@ -18,7 +18,7 @@ import type { FastifyInstance } from "fastify";
 import { verifyManagerAuthorization } from "../auth/manager-authorization.js";
 import { getPrisma } from "../context.js";
 import { ingestFiscalRecord, type IngestResult } from "../fiscal/ingest.js";
-import { comprobarGateFiscal } from "../fiscal/mode.js";
+import { comprobarGateFiscal, esCobroDeEnsayo } from "../fiscal/mode.js";
 import {
   FISCAL_RECORD_BODY_SCHEMA,
   type FiscalRecordBody,
@@ -510,6 +510,9 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           // extra en el camino de cobro.
           holdedEnabled: true,
           holdedApiKeyCiphertext: true,
+          // puesta-en-marcha (ADR-021) · y la que decide si esto es un cobro
+          // de ensayo. Viaja en el mismo `select`: cero consultas extra.
+          facturaDesde: true,
         },
       });
       // catalogo-local (addendum 3) · ¿hay destino en Holded, y de qué
@@ -695,8 +698,12 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             // que antes sólo lo ponía el worker de subida —y en un
             // comercio sin Holded ese worker no corre—. Ver
             // `nuevoTicketStatus`.
+            // puesta-en-marcha (ADR-021) · y una venta de una cuenta EN
+            // ENSAYO nace TEST igual, aunque la haga la cajera de verdad
+            // desde el terminal de verdad. Es la generalización del 1b: ya
+            // no es quién cobra, es si esta cuenta ha arrancado.
             status: nuevoTicketStatus(destinoHolded, {
-              esPrueba: cashier.isTest === true,
+              esPrueba: esCobroDeEnsayo(tenantForDiscount, cashier),
               aCredito: isCredit,
             }),
             creditPending: isCredit ? new Prisma.Decimal(totals.total) : null,
@@ -1134,6 +1141,10 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           discountThresholdPct: true,
           holdedEnabled: true,
           holdedApiKeyCiphertext: true,
+          // puesta-en-marcha (ADR-021) · el cobro de mesa es el segundo
+          // camino que nace en ensayo, y tiene que nacer igual que el
+          // primero.
+          facturaDesde: true,
         },
       });
       // catalogo-local · el cobro de mesa NUNCA pasó por
@@ -1310,8 +1321,11 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
               // catalogo-en-alta · el cobro de una MESA en modo prueba
               // también nace TEST. Es el camino que usa el implantador en
               // un bar, así que es justo el que no podía quedarse fuera.
+              // puesta-en-marcha (ADR-021) · y el de una cuenta en ensayo
+              // también, con cualquier cajero: la cuenta manda sobre quién
+              // cobra.
               status: nuevoTicketStatus(destinoHolded, {
-                esPrueba: cashier.isTest === true,
+                esPrueba: esCobroDeEnsayo(tenantForDiscount, cashier),
               }),
               internalNumber,
               // `shift_id` es columna sellada (S1 §2.4), pero AQUÍ el

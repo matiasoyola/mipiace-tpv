@@ -12,18 +12,63 @@
  *  parcial. */
 export interface TenantFiscalMode {
   holdedEnabled: boolean;
+  /**
+   * puesta-en-marcha (ADR-021) · desde cuándo factura esta cuenta. `null` es
+   * el ENSAYO: se vende con normalidad y no se emite nada.
+   *
+   * OBLIGATORIO y no opcional, igual que `destination` en
+   * `shouldEnqueueHoldedUpload`. Podría haber sido `facturaDesde?: Date |
+   * null` para no tocar los `select` que ya existían, pero entonces un
+   * `select` nuevo que se olvidara de la columna leería «en ensayo» en un
+   * comercio que está facturando, y ESE es el fallo que no se ve: sus
+   * ventas nacerían `TEST`, no subirían a Holded y no llevarían registro,
+   * todo en silencio. Que lo pida el compilador es la garantía de que
+   * ningún camino de cobro lo olvide.
+   */
+  facturaDesde: Date | null;
 }
 
 /**
- * ¿Emite mipiacetpv la factura de este comercio?
+ * ¿Esta cuenta está EN ENSAYO?
  *
- * Se lee `=== false`, NUNCA `!holdedEnabled`. Es el criterio que el propio
- * `schema.prisma` documenta para esta columna y el mismo que usa
- * `fichajeEnabled`: sólo el valor explícito CONTRARIO al default cambia el
- * comportamiento de nadie. Un tenant de hoy tiene `true` y no ve ni una
- * diferencia.
+ * Es la pregunta del bloque entero, y se contesta con una sola columna:
+ * mientras `facturaDesde` sea `null`, lo que cobra este TPV no son facturas.
+ * Se vende igual —mesas, comanda, cobro, devolución, arqueo, cierre, desde
+ * cualquier terminal y con cualquier cajero— pero cada ticket nace `TEST`, no
+ * sube a Holded, no manda email y no lleva registro fiscal.
+ *
+ * No se confunde con `onboardingState`: una cuenta ACTIVE (con propietario,
+ * con su catálogo y con su terminal emparejado) puede estar en ensayo, y eso
+ * es exactamente lo que este bloque vino a permitir. Sirope lleva desde junio
+ * así.
+ */
+export function enEnsayo(tenant: Pick<TenantFiscalMode, "facturaDesde">): boolean {
+  return tenant.facturaDesde == null;
+}
+
+/**
+ * ¿Emite mipiacetpv la factura de este comercio, AHORA?
+ *
+ * Dos condiciones y las dos tienen que cumplirse:
+ *
+ *  1. El emisor no es Holded. Se lee `=== false`, NUNCA `!holdedEnabled`. Es
+ *     el criterio que el propio `schema.prisma` documenta para esta columna y
+ *     el mismo que usa `fichajeEnabled`: sólo el valor explícito CONTRARIO al
+ *     default cambia el comportamiento de nadie. Un tenant de hoy tiene
+ *     `true` y no ve ni una diferencia.
+ *  2. (puesta-en-marcha, ADR-021) La cuenta ya arrancó. En ensayo no se emite
+ *     NADA: no es que falte un dato, es que todavía no hay facturación.
+ *
+ * El ensayo entra AQUÍ y no en cada llamante a propósito. Son cinco sitios
+ * los que preguntan quién emite —el head del terminal, las dos rutas de
+ * anulación, el gate de la venta y el panel del super-admin— y si el ensayo
+ * fuera un `if` suelto en cada uno, el sexto que llegue lo olvidará. Lo que
+ * sí va en el llamante es el MENSAJE: «aquí no se emite porque factura
+ * Holded» y «aquí no se emite porque esta cuenta está en ensayo» no se
+ * cuentan igual, y las rutas de anulación las distinguen antes de llamar.
  */
 export function emiteMipiacetpv(tenant: TenantFiscalMode): boolean {
+  if (enEnsayo(tenant)) return false;
   return tenant.holdedEnabled === false;
 }
 
@@ -90,6 +135,30 @@ export interface SesionFiscal {
 }
 
 /**
+ * ¿Este cobro es un ENSAYO?
+ *
+ * Dos motivos y cualquiera de los dos basta:
+ *
+ *   · La SESIÓN es de prueba (verifactu-1b): un JWT con `purpose:
+ *     test-cashier`, que sólo emite el super-admin desde su consola.
+ *   · La CUENTA está en ensayo (puesta-en-marcha, ADR-021): todavía no ha
+ *     arrancado, así que da igual quién cobre y desde dónde.
+ *
+ * Existe como función y no como un `or` en cada sitio porque la contestan
+ * TRES decisiones distintas que tienen que coincidir siempre: en qué estado
+ * nace el ticket (`nuevoTicketStatus`), si el registro que llegue se
+ * descarta (`comprobarGateFiscal`) y si el papel sale marcado como de
+ * prueba. El día que las tres no coincidan, el comercio tendrá un ticket
+ * `TEST` con una factura detrás, o una factura sin ticket.
+ */
+export function esCobroDeEnsayo(
+  tenant: Pick<TenantFiscalMode, "facturaDesde">,
+  sesion?: SesionFiscal,
+): boolean {
+  return sesion?.isTest === true || enEnsayo(tenant);
+}
+
+/**
  * V1-verifactu addendum 1b · una venta del modo prueba NO genera registro
  * de facturación y NO gasta número de serie.
  *
@@ -115,7 +184,20 @@ export function comprobarGateFiscal(
   sesion?: SesionFiscal,
 ): GateFiscal {
   const emite = emiteMipiacetpv(tenant);
-  if (sesion?.isTest) {
+  // puesta-en-marcha (ADR-021) · el ENSAYO se trata exactamente igual que la
+  // sesión de prueba del 1b, y por las mismas dos razones:
+  //
+  //   · El registro que llegue se DESCARTA en vez de rechazar la petición.
+  //     El ensayo existe para validar el flujo de cobro en el hierro del
+  //     cliente, y un 409 lo dejaría sin poder cobrar por un dato que sobra.
+  //     Cobrar siempre se puede.
+  //   · No se anota como «falta registro»: no tiene que haberlo.
+  //
+  // La diferencia con el 1b es el alcance, y es la generalización que este
+  // bloque hace: allí «prueba» era quién llamaba (un JWT con `purpose:
+  // test-cashier`); aquí es la CUENTA, así que cubre a cualquier cajero
+  // desde cualquier terminal emparejado.
+  if (esCobroDeEnsayo(tenant, sesion)) {
     return {
       rechazo: null,
       // No es «falta»: es que no tiene que haberlo. Avisarlo llenaría el
@@ -154,4 +236,17 @@ export const RECHAZO_ANULACION_DE_PRUEBA = {
   error: "FISCAL_TEST_MODE",
   message:
     "El modo prueba no emite ni anula facturas: sus ventas no entran en la cadena de la caja.",
+} as const;
+
+/** El mismo rechazo, para la CUENTA EN ENSAYO (puesta-en-marcha, ADR-021).
+ *
+ *  Un código y un mensaje propios, y no los del modo prueba, porque lo que
+ *  hay que hacer es distinto: ahí había que salir del modo prueba, y aquí
+ *  hay que pulsar «Empezar a facturar». Un cajero que lea «el modo prueba
+ *  no anula facturas» en un terminal que no está en modo prueba se queda
+ *  mirando la pantalla. */
+export const RECHAZO_ANULACION_EN_ENSAYO = {
+  error: "TENANT_EN_ENSAYO",
+  message:
+    "Esta cuenta todavía no factura: sus cobros son de ensayo y no hay ninguna factura que anular.",
 } as const;
