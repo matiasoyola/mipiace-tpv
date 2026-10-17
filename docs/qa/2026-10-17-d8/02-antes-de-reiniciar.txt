@@ -1,0 +1,46 @@
+== procesos
+webview_zygote 2379  609 1778364  44520 0                   0 S webview_zygote
+u0_a81        4125   609 1405868  48512 0                   0 S com.android.webview:webview_service
+u0_a81        4178   609 1443616  58448 0                   0 S com.android.webview:webview_apk
+u0_a110      15147   608 32214152 193332 0                  0 S es.mipiace.tpv
+== logcat
+10-17 21:54:02.970  1410  1703 I PowerHalWrapper: <amsBoostResume> last:com.android.settings, next:es.mipiace.tpv 
+10-17 21:54:02.995  1410  2449 I PowerHalWrapper: amsBoostNotify pid:2479,activity:com.android.settings.SubSettings, package:com.android.settings, mProcessCreatePackes.mipiace.tpv 
+10-17 21:54:03.002  1410  2449 I PowerHalWrapper: amsBoostNotify pid:15147,activity:es.mipiace.tpv.MainActivity, package:es.mipiace.tpv, mProcessCreatePackes.mipiace.tpv 
+10-17 21:54:03.003  1410  2449 I mtkpower_client: [Legacy][PowerHal_Wrap_notifyAppState] es.mipiace.tpv/es.mipiace.tpv.MainActivity pid=15147 state:1
+10-17 21:54:03.003  1410  2449 I game_scn: collectForegroundAppList packName=es.mipiace.tpv, actName=es.mipiace.tpv.MainActivity, pid=15147, uid=10110, state:RESUMED
+10-17 21:54:03.003  1410  2449 I game_scn: powerNotifyForegroundApp multi_resumed_app_info: pid: 15147, packname: es.mipiace.tpv, actname: es.mipiace.tpv.MainActivity
+10-17 21:54:03.003  1410  2449 I wm_set_resumed_activity: [0,es.mipiace.tpv/.MainActivity,resumeTopActivity]
+10-17 21:54:03.003   638   735 I libPowerHal: [perfNotifyAppState] pack:es.mipiace.tpv, act:es.mipiace.tpv.MainActivity, state:1, pid:15147, uid:10110, fps:-1
+10-17 21:54:03.003   638   735 I libPowerHal: [perfNotifyAppState] foreground:es.mipiace.tpv, pid:15147, uid:10110
+10-17 21:54:03.003   638   675 I mtkpower@impl: [notifyAppState] pc:0, com.android.settings => es.mipiace.tpv
+10-17 21:54:03.005  1410  2449 I wm_resume_activity: [0,267949005,36,es.mipiace.tpv/.MainActivity]
+10-17 21:54:03.006 15147 15147 I wm_on_restart_called: [267949005,es.mipiace.tpv.MainActivity,performRestartActivity]
+10-17 21:54:03.010 15147 15147 I wm_on_start_called: [267949005,es.mipiace.tpv.MainActivity,handleStartActivity]
+10-17 21:54:03.011  1410  3806 D PermissionManager: checkPermission checkPackageName = es.mipiace.tpv ,permission = android.permission.EXEMPT_FROM_AUDIO_RECORD_RESTRICTIONS
+10-17 21:54:03.013 15147 15147 I wm_on_resume_called: [267949005,es.mipiace.tpv.MainActivity,RESUME_ACTIVITY]
+10-17 21:54:03.014 15147 15147 I wm_on_top_resumed_gained_called: [267949005,es.mipiace.tpv.MainActivity,topWhenResuming]
+10-17 21:54:03.025  1410  2449 I PowerHalWrapper: amsBoostNotify pid:2479,activity:com.android.settings.Settings, package:com.android.settings, mProcessCreatePackes.mipiace.tpv 
+10-17 21:54:03.025  1410  2449 I game_scn: powerNotifyForegroundApp multi_resumed_app_info: pid: 15147, packname: es.mipiace.tpv, actname: es.mipiace.tpv.MainActivity
+10-17 21:54:03.026   644  2816 I BufferQueueDebug: [es.mipiace.tpv/es.mipiace.tpv.MainActivity#247](this:0xb4000076d67ecf68,id:-1,api:0,p:-1,c:-1) BufferQueue core=(644:/system/bin/surfaceflinger)
+10-17 21:54:03.027  1410  1703 W WindowManager: Changing focus from null to Window{d84bf23 u0 es.mipiace.tpv/es.mipiace.tpv.MainActivity} displayId=0 Callers=com.android.server.wm.RootWindowContainer.updateFocusedWindowLocked:476 com.android.server.wm.WindowManagerService.updateFocusedWindowLocked:6071 com.android.server.wm.WindowManagerService.relayoutWindow:2499 com.android.server.wm.Session.relayout:267 
+10-17 21:54:03.028  1410  1703 I WindowManager: Relayout Window{d84bf23 u0 es.mipiace.tpv/es.mipiace.tpv.MainActivity}: oldVis=8 newVis=0 focusMayChange = true requestedWidth = 1920 requestedHeight = 1080 outFrames = ClientWindowFrames{frame=[0,0][1920,1080] display=[0,0][1920,1080] parentFrame=[0,0][0,0] parentClippedByDisplayCutout=false} outSurfaceControl = Surface(name=es.mipiace.tpv/es.mipiace.tpv.MainActivity)/@0xefca228
+10-17 21:54:03.029  1410  1740 I input_focus: [Focus request d84bf23 es.mipiace.tpv/es.mipiace.tpv.MainActivity,reason=UpdateInputWindows]
+10-17 21:54:03.037  1410  1740 D WindowManager: update navigation bar window=Window{d84bf23 u0 es.mipiace.tpv/es.mipiace.tpv.MainActivity}, disableFlags=0, appearance=0, this=com.android.server.wm.DisplayPolicy@8e3b034
+10-17 21:54:03.044  1410  1736 W ziparchive: Unable to open '/data/app/~~j7k23PVxpX8WYBm-PTt92A==/es.mipiace.tpv-xe9wwwMzrnFVnmaj4-2Izg==/base.dm': No such file or directory
+10-17 21:54:03.044  1410  1736 I sysui_multi_action: [319,65,321,34,322,86,325,192508,757,761,758,9,759,4,806,es.mipiace.tpv,871,es.mipiace.tpv.MainActivity,904,com.android.shell,905,0,1320,12,1321,1]
+10-17 21:54:03.053   644   644 D BufferStateLayer: es.mipiace.tpv/es.mipiace.tpv.MainActivity#247 setBuffer frameId=1, bufferId=65055869632516 fenceId=86, w= 1920, h=1080
+10-17 21:54:03.055  1410  1991 I input_focus: [Focus entering d84bf23 es.mipiace.tpv/es.mipiace.tpv.MainActivity (server),reason=setFocusedWindow]
+10-17 21:54:03.056  1410  2451 D PermissionManager: checkPermission checkPackageName = es.mipiace.tpv ,permission = android.permission.EXEMPT_FROM_AUDIO_RECORD_RESTRICTIONS
+10-17 21:54:03.056  1410  2451 D PermissionManager: checkPermission checkPackageName = es.mipiace.tpv ,permission = android.permission.EXEMPT_FROM_AUDIO_RECORD_RESTRICTIONS
+10-17 21:54:03.058  1410  2451 D PermissionManager: checkPermission checkPackageName = es.mipiace.tpv ,permission = android.permission.EXEMPT_FROM_AUDIO_RECORD_RESTRICTIONS
+10-17 21:54:03.097 15147 15156 I es.mipiace.tpv: Compiler allocated 5013KB to compile void android.view.ViewRootImpl.performTraversals()
+10-17 21:54:03.336  1410  1740 D WindowManager: setParent old=ActivityRecord{ff893cd u0 es.mipiace.tpv/.MainActivity} t36},new=null,this window=Window{f3e9fe0 u0 SnapshotStartingWindow for taskId=36},callers=com.android.server.wm.WindowContainer.removeChild:772 com.android.server.wm.ActivityRecord.removeChild:4268 com.android.server.wm.ActivityRecord.removeChild:377 com.android.server.wm.WindowContainer.removeImmediately:828 com.android.server.wm.WindowState.removeImmediately:2514 com.android.server.wm.WindowState.destroySurface:3618 
+10-17 21:54:03.520  1410  1739 I PowerHalWrapper: amsBoostNotify pid:2479,activity:com.android.settings.Settings, package:com.android.settings, mProcessCreatePackes.mipiace.tpv 
+10-17 21:54:03.520  1410  1739 I game_scn: powerNotifyForegroundApp multi_resumed_app_info: pid: 15147, packname: es.mipiace.tpv, actname: es.mipiace.tpv.MainActivity
+10-17 21:54:03.520  1410  1739 I PowerHalWrapper: amsBoostNotify pid:2479,activity:com.android.settings.SubSettings, package:com.android.settings, mProcessCreatePackes.mipiace.tpv 
+10-17 21:54:03.520  1410  1739 I game_scn: powerNotifyForegroundApp multi_resumed_app_info: pid: 15147, packname: es.mipiace.tpv, actname: es.mipiace.tpv.MainActivity
+10-17 21:54:04.647   644   644 I BufferQueueProducer: [es.mipiace.tpv/es.mipiace.tpv.MainActivity#247](this:0xb4000076d67ecf68,id:-1,api:0,p:-1,c:644) queueBuffer: fps=1.88 dur=1593.95 max=1562.16 min=15.68
+10-17 21:54:05.045   638   735 I libPowerHal: [perfNotifyAppState] pack:es.mipiace.tpv, act:es.mipiace.tpv.MainActivity, state:5, pid:15147, uid:10110, fps:60
+10-17 21:54:06.045   638   735 I libPowerHal: [perfNotifyAppState] pack:es.mipiace.tpv, act:es.mipiace.tpv.MainActivity, state:5, pid:15147, uid:10110, fps:-1
+10-17 21:54:07.283   644   644 I SurfaceFlinger: operator()(), mtkRenderCntDebug 18, screenshot (es.mipiace.tpv/es.mipiace.tpv.MainActivity#247)

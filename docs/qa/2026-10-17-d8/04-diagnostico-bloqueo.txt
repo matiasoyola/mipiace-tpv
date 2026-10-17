@@ -1,0 +1,10 @@
+== webview
+  Current WebView package (name, version): (com.android.webview, 101.0.4951.61)
+    Valid package com.android.webview (versionName: 101.0.4951.61, versionCode: 495156103, targetSdkVersion: 33) is  installed/enabled for all users
+    versionName=101.0.4951.61
+    lastUpdateTime=2009-01-01 01:00:00
+== root
+/system/bin/sh: su: inaccessible or not found
+sin-root
+== pila (pid 21770)
+debuggerd: root is required

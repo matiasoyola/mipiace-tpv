@@ -206,3 +206,48 @@ Hasta entonces, Sirope está «validada en prueba», y se dice así.
 
 ### Para Sirope antes que nada
 - [ ] Aviso corto a la dueña (A7).
+
+---
+
+## 17-10 noche · preparación para producción (sin visita)
+
+- **Producción a `706d6d0`** (21:21): fuera el QR tributario que apuntaba al entorno de pruebas de
+  la AEAT. Sin migraciones; rollback `IMAGE_TAG=11ce9c6`.
+- **Razón social**: `legalName` = «Gemma María Gómez Cid» (era «Gemma María Gómez Cid - Cafetería
+  Sirope», 40 caracteres, y el PDF corta en 38). Quitado el resto de Holded `"name": "matias oyola
+  Almacén"` del `fiscal_profile`. El nombre del local sale en la línea de establecimiento.
+- **IVA**: los 15 productos con alcohol pasan de 21 % a **10 %** (servicio de hostelería; el 21 %
+  es para discotecas/salas de fiesta y botella cerrada para llevar). Neto recalculado: el precio
+  de carta no se mueve ni un céntimo (comprobado fila a fila en la misma transacción).
+- **Catálogo contra `Carta_Sirope_imprenta.pdf`**:
+  - Desayuno 4 sin gluten 3,00 → **4,00** (regla mollete SG +1 €).
+  - Goffre con sirope, nata y helado 4,20 → **4,50**.
+  - Sándwich mixto 3,10 → **3,00**.
+  - Altas (`catalogo-faltan-2026-10-17.csv`, metidas por SQL): Tortitas con sirope, nata y helado
+    3,50 · Vino Ribera 2,60 · Vino Rioja 2,60 · Vino de la Mancha 1,50 · Vino blanco 2,00 · Batido
+    natural con nata 3,90 · Tostada serrano con tomate (sin gluten) 4,10. SKU243–SKU249.
+  - Tostada serrano con tomate: categoría `bolleria` → `tostadas`.
+  - «Croissant Clásico» → «Croissant plancha» (nombre de la carta).
+- **Decisión de Matías**: Sirope va a **mostrador**; la Cocina se enciende sólo si la usan.
+  Sin aviso por escrito a la dueña: el cambio se le cuenta en persona en la demo.
+
+### Lo que queda para el día de la visita
+- Terminal del local: actualizar a la APK publicada (1.26.0), vincularlo a Sirope · Caja 1.
+- **Si la app sale en blanco: reiniciar el terminal** (ver hallazgo del D8 abajo).
+- Impresora: ninguna configurada en la Caja 1. Se da de alta en el local (sólo USB ESC/POS).
+- Cajeros: sólo Gemma (propietaria). Si cobra alguien más, alta con su PIN.
+- Primera venta real = `C1/1`. Nadie cobra en Sirope antes que Sirope.
+
+### Hallazgos de la noche (para la cola)
+1. **D8: la app arrancaba en blanco y colgada** (JS ni depurador contestan, 0 % CPU, sin proceso
+   renderizador). No era la vinculación revocada: con `pm clear` seguía igual. **Se arregló
+   reiniciando el aparato.** WebView de sistema 101 (AOSP, sin Play Store). Capturas y diagnóstico
+   en `docs/qa/2026-10-17-d8/`. Riesgo: un terminal de cliente que se quede así no se recupera solo.
+2. **Mapa de mesas en el D8 (1920×1080, densidad 213): mucho hueco a la derecha.** El responsive
+   sigue sin estar arreglado (dicho por Matías).
+3. **Super-admin → Datos fiscales enseña `tenant.name` bajo la etiqueta «Razón social»**
+   (`TenantDetailPage.tsx:659`). En Sirope dice «Cafetería Sirope» aunque el ticket imprime
+   «Gemma María Gómez Cid». Confunde justo en la comprobación previa a la primera factura.
+4. El cajero de prueba **no protege** si entra con PIN en un terminal emparejado: el modo prueba
+   (sin registro fiscal) sólo lo da el JWT `purpose: test-cashier` del super-admin. Desde un
+   terminal real de un comercio sin Holded, cualquier cobro es factura.
