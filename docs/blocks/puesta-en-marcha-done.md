@@ -341,6 +341,7 @@ las otras cuatro funciones que este bloque reemplaza tienen una sola definición
 | `pnpm vitest run` (desde la raíz) | **379 ficheros, 5275 tests verdes**, 10 saltados |
 | `pnpm test:e2e` (`puesta-en-marcha.e2e.ts`) | **32 verdes** contra Postgres real |
 | `pnpm test:e2e` (los 40 ficheros) | 36 verdes + 4 con los fallos de madrugada (§8.1) |
+| El bucle visual | el panel y la banda, medidos (§8.2); un fallo encontrado y arreglado |
 
 Nuevos: `apps/api/test/puesta-en-marcha-ensayo.test.ts` (14), `test/puesta-en-marcha-arranque.test.ts`
 (15) y `test-e2e/puesta-en-marcha.e2e.ts` (32).
@@ -367,6 +368,79 @@ Hay que volver a pasar la suite completa a una hora decente antes del PR; está 
 
 ---
 
+## 8.2 · El bucle visual, y el fallo que sólo se veía midiendo
+
+Se montó la pila entera contra una base propia (`mipiacetpv_visual_pem`) con
+una cuenta en ensayo sembrada —catálogo, sala, cajera con PIN, terminal
+emparejado, impresora, tres tickets de ensayo, un borrador y un turno— y se
+fotografiaron las pantallas con `playwright-core` desde el scratchpad.
+Capturas en `docs/blocks/puesta-en-marcha-shots/`.
+
+Lo que salió bien a la primera (medido, no mirado):
+
+| | |
+|---|---|
+| Los dos botones del panel | existen, y nacen **deshabilitados** hasta que se teclea el nombre; después, habilitados |
+| A 1280 y a 390 | alcanzables los dos (`alcanzable: true`), y a 390 sin desbordar a lo ancho (`scrollW === clientW === 390`) |
+| Cuenta facturando | el botón de resetear **no existe** (`count: 0`) y la banda dice «Facturando desde el 01-06-2026» |
+| Eliminar sin export | el botón de confirmar **no existe**, y el bloqueo se lee entero |
+| La banda del TPV | `y: 0`, ancho completo, texto «ENSAYO · estos cobros no son facturas», y la caché escrita por el login (`mipiacetpv-tenant-ensayo = "1"`) |
+
+**Y lo que salió MAL, y en la captura no se veía.** En el D8 (1280×800), con
+la banda puesta:
+
+```
+venta-d8 {"cobrar":true,"top":757,"bottom":825,"ventana":800,
+          "dentroSinScroll":false,"scrollH":840,"clientH":800}
+```
+
+El botón **COBRAR caía por debajo del borde de la pantalla**. La banda ocupa
+41 px en el flujo y las pantallas del TPV son `min-h-screen`, así que la
+página pasaba a medir `100vh + la banda`. En la foto salía una pantalla
+normal con un botón que hay que buscar con el dedo — justo lo que la memoria
+del bucle visual avisa: «una captura no dice si un elemento es ALCANZABLE».
+
+Arreglado con una compensación que enciende la propia banda al montarse
+(`body.con-banda-ensayo` en `index.css`): mientras está puesta, `100vh` pasa a
+ser `100vh - 40px` para las utilidades que miden pantallas. **Tres selectores
+y no dos**: `SalePage` no usa `h-screen` a secas sino la variante arbitraria
+`[@media(min-width:1024px)_and_(min-height:700px)]:h-screen` —el candado de
+v1.5-hotfix5—, que Tailwind compila a una clase propia; tras compensar las
+otras dos, el D8 seguía midiendo 840. Después:
+
+```
+venta-d8 {"cobrar":true,"bottom":784,"ventana":800,
+          "dentroSinScroll":true,"scrollH":800,"clientH":800}
+venta-n1 {"cobrar":true,"bottom":591,"ventana":1280,
+          "dentroSinScroll":true,"scrollH":1280,"clientH":1280}
+```
+
+De paso: **la banda del modo prueba (B-OnboardingV2) arrastra el mismo fallo
+desde su bloque** y no está arreglada. Queda apuntado; no entra aquí porque
+se arregla sola el día que use este mismo mecanismo.
+
+### 8.3 · El papel, por el camino de verdad
+
+Con la misma pila levantada, un `POST /tickets/:id/print/escpos` sobre un
+ticket de ensayo devuelve los bytes que irían a la IPOS:
+
+```
+CAFETERÍA SIROPE SL
+Cafetería Sirope
+NIF: B45902186
+C/ Mayor 10, 45600 Talavera
+------------------------------------------
+*** TICKET DE PRUEBA ***
+SIN VALIDEZ FISCAL
+------------------------------------------
+000001  18/10/2026 00:37
+```
+
+La marca va **antes del número**, que es lo que se pedía. Y desde este bloque
+está fijado por test en los dos constructores: los bytes ESC/POS y el PDF.
+
+---
+
 ## 9 · La pasada en el hierro — PENDIENTE, Y POR QUÉ
 
 El criterio de cierre del prompt pide una pasada en el **D8 emparejado a Cafetería Sirope · Caja
@@ -378,8 +452,9 @@ Lo que sí está hecho, y es el mismo recorrido contra Postgres de verdad: el e2
 `puesta-en-marcha.e2e.ts` §1 hace entrar a una cajera **real** con un terminal **real**
 emparejado, vende, cobra, manda un registro que se descarta, devuelve, deja una mesa abierta,
 cierra el turno con su Z, y comprueba `0 fiscal_records`. Después resetea y cuenta lo que queda y
-lo que no. Lo que falta del criterio es el **papel saliendo de la IPOS y la banda vista en la
-pantalla del D8**.
+lo que no. Lo que falta del criterio es el **papel saliendo de la IPOS de verdad y la banda vista en la
+pantalla física del D8**: la banda y los bytes del papel están medidos en el bucle visual (§8.2 y
+§8.3), pero sobre un Chrome de 1280×800 y un `POST …/print/escpos`, no sobre el aparato.
 
 El guion de la pasada, para hacerla en diez minutos:
 
