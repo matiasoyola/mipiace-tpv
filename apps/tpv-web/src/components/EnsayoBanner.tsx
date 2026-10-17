@@ -25,12 +25,29 @@
 // El TPV no decide nada con esto. Quien no emite es el servidor, en cada
 // cobro (`comprobarGateFiscal`). Esta banda es lo que lo CUENTA.
 
+import { useEffect } from "react";
 import { FlaskConical } from "lucide-react";
 
 export function EnsayoBanner() {
+  // puesta-en-marcha (ADR-021) · los 41 px.
+  //
+  // La banda ocupa su sitio en el flujo, así que la página pasaría a medir
+  // `100vh + la banda` —las pantallas del TPV son `min-h-screen`— y el botón
+  // COBRAR se iría por debajo del borde. Medido en el bucle visual sobre el
+  // D8 (1280×800): `bottom 825` con una ventana de 800.
+  //
+  // Esta clase enciende la compensación que vive en `index.css`: mientras la
+  // banda está puesta, `100vh` pasa a ser `100vh - var(--banda-ensayo)` para
+  // las dos utilidades que miden pantallas. Va aquí y no en `App.tsx` para
+  // que no puedan separarse: quien pinta la banda es quien paga su altura.
+  useEffect(() => {
+    document.body.classList.add("con-banda-ensayo");
+    return () => document.body.classList.remove("con-banda-ensayo");
+  }, []);
+
   return (
     <div
-      className="w-full bg-sky-100 border-b border-sky-300 text-sky-950 px-4 py-2.5 flex items-center gap-3 text-[13px]"
+      className="w-full h-10 shrink-0 bg-sky-100 border-b border-sky-300 text-sky-950 px-4 flex items-center gap-3 text-[13px]"
       role="status"
       data-testid="ensayo-banner"
     >
