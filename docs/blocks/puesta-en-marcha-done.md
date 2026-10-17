@@ -1,6 +1,6 @@
 # puesta-en-marcha · se prueba en la cuenta real, se resetea y se arranca — DONE
 
-_Rama `puesta-en-marcha`, 13 commits: 7 del bloque, 3 de arreglo y 3 de documentación. ADR-021. 2026-10-17/18._
+_Rama `puesta-en-marcha`, commits pequeños en español: siete del bloque, tres de arreglo (los dos que salieron por el camino y el tope de las transacciones) y los de documentación. ADR-021. 2026-10-17/18._
 
 Lo que había que poder hacer y no se podía: **llegar a un cliente con su TPV probado en su propia
 cuenta y en su propio aparato**. Hasta este bloque, «activada» y «facturando» eran la misma cosa,
@@ -532,7 +532,7 @@ docker compose exec -T postgres psql -U mipiacetpv -d mipiacetpv -c \
 ```bash
 cd /Users/matiasoyolasanchez/Developer/Claude/Projects/mipiacetpv-puesta-en-marcha
 
-git log --oneline master..HEAD          # 13 commits
+git log --oneline master..HEAD          # la rama entera, de un vistazo
 git push -u origin puesta-en-marcha
 
 gh pr create --base master --head puesta-en-marcha \
