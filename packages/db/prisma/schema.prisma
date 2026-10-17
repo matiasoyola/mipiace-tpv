@@ -984,6 +984,43 @@ model Tenant {
   // purga datos de prueba). El backfill de la migración pone ACTIVE en
   // todos los tenants existentes para no romper el flujo legacy.
   onboardingState                OnboardingState   @default(DRAFT) @map("onboarding_state")
+  // puesta-en-marcha (ADR-021) · DESDE CUÁNDO esta cuenta factura.
+  //
+  // No es lo mismo que `onboardingState`, y confundirlos es lo que hizo
+  // falta este bloque. Aquella columna contesta «¿hay propietario?»; ésta
+  // contesta «¿lo que cobra este TPV son facturas?». Hasta hoy las dos
+  // preguntas tenían una sola respuesta, y eso dejaba a un comercio recién
+  // activado sin ninguna forma de probar su propio TPV en su propio
+  // aparato: el primer cobro de ensayo era ya la factura `C1/1` de la
+  // titular, y una factura emitida no se borra.
+  //
+  //   · `null`     → EN ENSAYO. Se vende con normalidad desde cualquier
+  //     terminal y con cualquier cajero (mesas, comanda, cobro, devolución,
+  //     arqueo, cierre), pero todo ticket nace `TEST`, no sube a Holded, no
+  //     manda email y NO LLEVA REGISTRO FISCAL: `/tpv/fiscal/head` contesta
+  //     `emite: false` y el servidor descarta cualquier registro que llegue.
+  //   · con fecha  → FACTURANDO. Exactamente lo de siempre.
+  //
+  // Lo que esta columna garantiza por construcción: antes de la puesta en
+  // marcha no hay ningún registro fiscal que borrar, así que resetear el
+  // ensayo NUNCA toca `fiscal_records` y el append-only sigue sin puertas.
+  // Lo que la Ley Antifraude prohíbe —borrar facturas y seguir facturando
+  // en la misma serie— no puede pasar aquí porque la factura no existía.
+  //
+  // La pone el super-admin UNA VEZ, en la visita y con el cliente delante,
+  // y no se quita: ver `fiscal/puesta-en-marcha.ts`.
+  facturaDesde                   DateTime?         @map("fiscal_go_live_at") @db.Timestamptz()
+  // puesta-en-marcha (ADR-021) · ¿es una cuenta NUESTRA de pruebas?
+  //
+  // PRUEBAS MIPIACE y la cuenta de ensayo de La Maestranza no son clientes:
+  // son el banco de pruebas del equipo. Una cuenta así NO PUEDE arrancar
+  // (se queda en ensayo para siempre) y se resetea cuantas veces haga
+  // falta, que es justo lo que no se podía hacer antes de este bloque.
+  //
+  // Su invariante vive en la BASE (`tenants_pruebas_no_facturan_ck`): una
+  // cuenta de pruebas no puede tener fecha de arranque. No se puede estar
+  // «a medias de ser un cliente».
+  esDePruebas                    Boolean           @default(false) @map("es_de_pruebas")
   // B-Multi-Vertical: vertical operativo del tenant. Default RETAIL
   // para no asumir hostelería en tenants nuevos (el piloto inicial es
   // librería). Editable desde la consola super-admin.
