@@ -546,6 +546,12 @@ function makeFakePrisma() {
     shift: shiftModel,
     ticket: ticketModel,
     ticketEmailJob: ticketEmailJobModel,
+    // puesta-en-marcha (ADR-021) · `purgeTestData` borra las devoluciones
+    // antes que sus tickets (FK Restrict de `Refund.originalTicket`). Sin
+    // esta entrada el fake lanzaba, la purga de `activate` se lo comía en su
+    // `try` de best-effort y el ticket TEST sobrevivía a la activación — que
+    // es exactamente el fallo que este test vigila.
+    refund: { deleteMany: vi.fn(async () => ({ count: 0 })) },
     tenantTax: tenantTaxModel,
     product: productModel,
     contact: contactModel,
@@ -781,7 +787,16 @@ describe("B-OnboardingV2 · test-cashier session", () => {
     expect(audits.some((a) => a.action === "test_cashier_session")).toBe(true);
   });
 
-  it("rechaza si el tenant ya está ACTIVE", async () => {
+  // puesta-en-marcha (ADR-021) · este test decía «rechaza si el tenant ya
+  // está ACTIVE», y esa regla se ha sustituido por otra: rechaza si el tenant
+  // ya FACTURA.
+  //
+  // El motivo del cambio es el caso de Sirope (17-10): cuenta ACTIVE desde
+  // junio, sin una sola venta real, y no había forma de ver su TPV en un
+  // terminal antes de la visita. Probar el TPV de una cuenta activada pero en
+  // ensayo es justo lo que hay que poder hacer; lo que sigue cerrado es
+  // probar sobre la operación real de un cliente que factura.
+  it("rechaza si el tenant ya FACTURA", async () => {
     const app = await buildApp();
     const sa = signSuperAdminToken();
     tenants.set(TENANT_ID, {
@@ -791,6 +806,7 @@ describe("B-OnboardingV2 · test-cashier session", () => {
       fiscalProfile: null,
       holdedApiKeyCiphertext: null,
       onboardingState: "ACTIVE",
+      facturaDesde: new Date("2026-06-01T08:00:00.000Z"),
       blockedAt: null,
       blockedReason: null,
       initialSyncStatus: "DONE",
@@ -806,7 +822,38 @@ describe("B-OnboardingV2 · test-cashier session", () => {
       headers: { authorization: `Bearer ${sa}` },
     });
     expect(res.statusCode).toBe(409);
-    expect(res.json().error).toBe("TENANT_NOT_DRAFT");
+    expect(res.json().error).toBe("TENANT_FACTURANDO");
+  });
+
+  // puesta-en-marcha (ADR-021) · la cara nueva de la regla de arriba: la
+  // cuenta de Sirope, activada y en ensayo, SÍ se puede probar.
+  it("deja probar el TPV en una cuenta ACTIVE que todavía está en ensayo", async () => {
+    const app = await buildApp();
+    const sa = signSuperAdminToken();
+    tenants.set(TENANT_ID, {
+      id: TENANT_ID,
+      name: "Cafetería Sirope",
+      plan: "pilot",
+      fiscalProfile: null,
+      holdedApiKeyCiphertext: null,
+      onboardingState: "ACTIVE",
+      facturaDesde: null,
+      blockedAt: null,
+      blockedReason: null,
+      initialSyncStatus: "DONE",
+      initialSyncStartedAt: null,
+      initialSyncCompletedAt: null,
+      initialSyncStats: null,
+      lastIncrementalSyncAt: null,
+      createdAt: new Date(),
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: `/super-admin/tenants/${TENANT_ID}/test-cashier-token`,
+      headers: { authorization: `Bearer ${sa}` },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().cashierSessionToken).toBeTruthy();
   });
 
   it("GET /shift/cashier-bootstrap acepta el JWT y devuelve shift+user", async () => {
