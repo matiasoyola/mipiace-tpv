@@ -17,6 +17,7 @@ import {
   Settings,
   Sparkles,
   Tags,
+  Trash2,
   Unplug,
   X,
 } from "lucide-react";
@@ -27,6 +28,7 @@ import { CashiersPanel } from "./CashiersPanel.js";
 import { CatalogImportPanel } from "./CatalogImportPanel.js";
 import { DejarHoldedPanel } from "./DejarHoldedPanel.js";
 import { PuestaEnMarchaPanel } from "./PuestaEnMarchaPanel.js";
+import { EliminarCuentaPanel } from "./EliminarCuentaPanel.js";
 import { SuperAdminShell } from "./SuperAdminShell.js";
 import type {
   ActivateTenantResponse,
@@ -122,6 +124,8 @@ export function TenantDetailPage() {
   // puesta-en-marcha (ADR-021) · el panel del ensayo, del reseteo y del
   // arranque. Hermano del de «Dejar Holded» en forma y en gobierno.
   const [puestaEnMarcha, setPuestaEnMarcha] = useState(false);
+  // puesta-en-marcha parte C (ADR-021 §5) · la baja de un cliente.
+  const [eliminarCuenta, setEliminarCuenta] = useState(false);
 
   async function reload(): Promise<void> {
     if (!id) return;
@@ -766,6 +770,7 @@ export function TenantDetailPage() {
           onToggleSalud={(campo) => void onToggleSalud(campo)}
           setDejarHolded={setDejarHolded}
           setPuestaEnMarcha={setPuestaEnMarcha}
+          setEliminarCuenta={setEliminarCuenta}
         />
       )}
 
@@ -825,6 +830,22 @@ export function TenantDetailPage() {
             );
             void reload();
             void r;
+          }}
+        />
+      )}
+
+      {eliminarCuenta && (
+        <EliminarCuentaPanel
+          tenantId={tenant.id}
+          tenantName={tenant.name}
+          onCerrar={() => setEliminarCuenta(false)}
+          onEliminada={() => {
+            // La cuenta ya no existe: no hay ficha a la que volver. Se sale
+            // al listado con el aviso, que es lo único que queda por hacer.
+            navigate("/superadmin/tenants", {
+              replace: true,
+              state: { eliminada: tenant.name },
+            });
           }}
         />
       )}
@@ -1479,6 +1500,7 @@ function ActiveTenantActions({
   onToggleSalud,
   setDejarHolded,
   setPuestaEnMarcha,
+  setEliminarCuenta,
 }: {
   blocked: boolean;
   tenant: TenantDetail;
@@ -1496,6 +1518,7 @@ function ActiveTenantActions({
   ) => void;
   setDejarHolded: (v: boolean) => void;
   setPuestaEnMarcha: (v: boolean) => void;
+  setEliminarCuenta: (v: boolean) => void;
 }) {
   // catalogo-local (addendum 3) · las DOS preguntas, que hasta este
   // bloque se contestaban con la misma señal.
@@ -1680,6 +1703,16 @@ function ActiveTenantActions({
             label="Configurar como OWNER"
             tone="warning"
             disabled={!tenant.ownerEmail || blocked}
+          />
+          {/* puesta-en-marcha parte C (ADR-021 §5) · la baja. El último de la
+              lista, y en rojo: es lo único de esta pantalla que no se puede
+              deshacer de ninguna manera. */}
+          <Action
+            onClick={() => setEliminarCuenta(true)}
+            busy={busy}
+            icon={Trash2}
+            label="Eliminar cuenta"
+            tone="danger"
           />
         </div>
       </div>

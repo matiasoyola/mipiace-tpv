@@ -646,3 +646,50 @@ export interface EmpezarAFacturarResultado {
   facturaDesde: string;
   reseteo: Omit<ResetearEnsayoResultado, "ok">;
 }
+
+// ── puesta-en-marcha parte C · la baja de un cliente (ADR-021 §5) ─────
+
+export interface EliminarCuentaPreview {
+  tenant: {
+    id: string;
+    name: string;
+    esDePruebas: boolean;
+    facturaDesde: string | null;
+    onboardingState: string;
+  };
+  contenido: {
+    registrosFiscales: number;
+    tickets: number;
+    devoluciones: number;
+    turnos: number;
+    productos: number;
+    contactos: number;
+    clientes: number;
+    citas: number;
+    empleados: number;
+    fichajes: number;
+    enlacesPublicos: number;
+    usuarios: number;
+    terminales: number;
+    tiendas: number;
+    cajas: number;
+  };
+  bloqueos: DejarHoldedBloqueo[];
+  exportDescargadoAt: string | null;
+  exportNoHaceFalta: boolean;
+  puedeEliminar: boolean;
+}
+
+export interface EliminarCuentaResultado {
+  ok: true;
+  contenido: EliminarCuentaPreview["contenido"];
+  borrado: {
+    registrosFiscales: number;
+    devoluciones: number;
+    tickets: number;
+    turnos: number;
+    fichajes: number;
+    empleados: number;
+    enlacesPublicos: number;
+  };
+}

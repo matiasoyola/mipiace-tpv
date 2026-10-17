@@ -355,6 +355,34 @@ const EmpezarAFacturarMeta = Base.extend({
   onboardingState: z.string(),
 });
 
+// puesta-en-marcha parte C (ADR-021 §5) · se descargó el export de la cuenta.
+//
+// Esta fila no es sólo una traza: es LA PRECONDICIÓN de la eliminación. El
+// servidor la busca antes de borrar, así que si falta no hay camino. Por eso
+// guarda cuántos registros y cuántas ventas iban dentro: si meses después el
+// titular dice que no recibió nada, aquí está qué se le entregó y cuándo.
+const ExportCuentaMeta = Base.extend({
+  registrosFiscales: z.number().int().nonnegative(),
+  tickets: z.number().int().nonnegative(),
+  devoluciones: z.number().int().nonnegative(),
+  fichajes: z.number().int().nonnegative(),
+  ficheros: z.number().int().nonnegative(),
+  bytes: z.number().int().nonnegative(),
+});
+
+// puesta-en-marcha parte C (ADR-021 §5) · la cuenta se eliminó.
+//
+// Va con `tenantId: null` —la fila del tenant ya no existe— y con el nombre y
+// la foto DENTRO de la metadata. Es la única copia que queda de que esa cuenta
+// existió y de lo que tenía: después de esto, ni una fila.
+const EliminarCuentaMeta = Base.extend({
+  tenantIdEliminado: z.string().uuid(),
+  nombre: z.string(),
+  esDePruebas: z.boolean(),
+  contenido: z.record(z.number().int().nonnegative()),
+  borrado: z.record(z.number().int().nonnegative()),
+});
+
 const META_SCHEMAS = {
   create_tenant: CreateTenantMeta,
   create_tenant_draft: CreateTenantDraftMeta,
@@ -374,6 +402,8 @@ const META_SCHEMAS = {
   dejar_holded: DejarHoldedMeta,
   resetear_ensayo: ResetearEnsayoMeta,
   empezar_a_facturar: EmpezarAFacturarMeta,
+  export_cuenta: ExportCuentaMeta,
+  eliminar_cuenta: EliminarCuentaMeta,
   catalog_import: CatalogImportMeta,
   transfer_owner: TransferOwnerMeta,
   view_tenant_cashiers: ViewTenantCashiersMeta,
