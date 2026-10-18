@@ -108,6 +108,58 @@ describe("buildTicketReceipt", () => {
     expect(bytes[bytes.length - 1]).toBe(0x00);
   });
 
+  // puesta-en-marcha (ADR-021) · el papel del ENSAYO.
+  //
+  // Va ANTES de la marca de copia y antes del número: una reimpresión sigue
+  // siendo de una venta de verdad, y esto no lo es. En PC850, que es lo que
+  // se le manda a la impresora.
+  it("un ticket de ENSAYO lo dice en cabecera", () => {
+    const bytes = buildTicketReceipt({
+      businessName: "Cafetería Sirope",
+      businessAddress: null,
+      internalNumber: "TICKET 000001",
+      issuedAt: FIXED_DATE,
+      cashierLabel: "maria",
+      tableName: null,
+      lines: [
+        { description: "Café con leche", units: 1, unitPriceGross: 1.6, lineTotal: 1.6 },
+      ],
+      total: 1.6,
+      payments: [{ label: "Efectivo", amount: 1.6 }],
+      notes: [],
+      publicTicketUrl: null,
+      footer: null,
+      esDeEnsayo: true,
+    });
+    const texto = Buffer.from(bytes).toString("latin1");
+    expect(texto).toContain("*** TICKET DE PRUEBA ***");
+    expect(texto).toContain("SIN VALIDEZ FISCAL");
+    // Y antes del número del ticket, que es donde empieza el papel normal.
+    expect(texto.indexOf("TICKET DE PRUEBA")).toBeLessThan(
+      texto.indexOf("TICKET 000001"),
+    );
+  });
+
+  it("y un ticket normal no la lleva", () => {
+    const bytes = buildTicketReceipt({
+      businessName: "Cafetería Sirope",
+      businessAddress: null,
+      internalNumber: "TICKET 000001",
+      issuedAt: FIXED_DATE,
+      cashierLabel: "maria",
+      tableName: null,
+      lines: [
+        { description: "Café con leche", units: 1, unitPriceGross: 1.6, lineTotal: 1.6 },
+      ],
+      total: 1.6,
+      payments: [{ label: "Efectivo", amount: 1.6 }],
+      notes: [],
+      publicTicketUrl: null,
+      footer: null,
+    });
+    expect(Buffer.from(bytes).toString("latin1")).not.toContain("TICKET DE PRUEBA");
+  });
+
   it("ticket con QR incluye comando GS k", () => {
     const bytes = buildTicketReceipt({
       businessName: "Bar Quevedo",

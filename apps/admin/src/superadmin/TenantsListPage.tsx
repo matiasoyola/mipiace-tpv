@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Plus, Search } from "lucide-react";
 
 import { superApi, SuperAdminApiError } from "./api.js";
@@ -93,6 +93,10 @@ export function TenantsListPage() {
   const [items, setItems] = useState<TenantListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // puesta-en-marcha parte C · el nombre de la cuenta que se acaba de
+  // eliminar, si venimos de ahí.
+  const eliminada = (useLocation().state as { eliminada?: string } | null)
+    ?.eliminada ?? null;
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"" | "ok" | "warning" | "blocked">("");
 
@@ -128,6 +132,21 @@ export function TenantsListPage() {
 
   return (
     <SuperAdminShell title="Cuentas">
+      {/* puesta-en-marcha parte C (ADR-021 §5) · el aviso de la cuenta
+          eliminada. Llega en el `state` de la navegación porque la ficha
+          desde la que se pulsó ya no existe: no hay pantalla a la que
+          volver, y un borrado sin acuse es un borrado del que nadie se
+          fía. */}
+      {eliminada != null && (
+        <div
+          className="mb-6 p-3 bg-slate-800 text-white rounded-lg text-[13px]"
+          data-testid="cuenta-eliminada-aviso"
+        >
+          <strong>{eliminada}</strong> se ha eliminado. No queda ninguna fila
+          suya: lo único que hay es el apunte en el registro de auditoría y el
+          ZIP que se le entregó al titular.
+        </div>
+      )}
       <div className="flex items-center gap-3 mb-6">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />

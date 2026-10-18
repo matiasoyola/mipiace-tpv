@@ -30,6 +30,26 @@ import {
   TenantNoExisteError,
 } from "../holded/dejar-holded.js";
 import { vaciarColasDeHolded } from "../holded/dejar-holded-colas.js";
+// puesta-en-marcha (ADR-021) · el ensayo, el reseteo y el arranque.
+import {
+  arrancarFacturacion,
+  ArranqueBloqueadoError,
+  EnsayoConVentaRealError,
+  previsualizarPuestaEnMarcha,
+  resetearEnsayo,
+  TenantFacturandoError,
+} from "../fiscal/puesta-en-marcha.js";
+// puesta-en-marcha parte C (ADR-021 §5) · el export y la baja.
+import {
+  EliminacionBloqueadaError,
+  eliminarLaCuenta,
+  exportarLaCuenta,
+  previsualizarEliminacion,
+  // Dos módulos tienen su «este tenant no existe». Se renombra al importar en
+  // vez de compartir una clase: son dos acciones distintas y el `catch` de
+  // cada ruta tiene que atrapar el de SU acción, no el del vecino.
+  TenantNoExisteError as EliminarCuentaTenantNoExisteError,
+} from "./eliminar-cuenta.js";
 import { loadEnv } from "../env.js";
 import { enqueueInitialSync } from "../queues/initial-sync.js";
 import { enqueueManualSync } from "../queues/catalog-incremental.js";
@@ -342,6 +362,12 @@ export async function registerSuperAdminTenantsRoutes(
             plan: t.plan,
             onboardingState: t.onboardingState,
             onboardingReady,
+            // puesta-en-marcha (ADR-021) · el listado necesita distinguir
+            // «activa» de «activa y FACTURANDO». Hasta hoy eran lo mismo y
+            // por eso nadie podía contestar a «¿cuáles de nuestras cuentas
+            // están facturando de verdad?» sin abrirlas una a una.
+            facturaDesde: t.facturaDesde?.toISOString() ?? null,
+            esDePruebas: t.esDePruebas,
             businessType: t.businessType,
             // v1.3-SuperAdmin-Hub Lote 3: el hub usa este id para
             // construir https://app.holded.com/accounts/<id> sin tener
@@ -475,6 +501,11 @@ export async function registerSuperAdminTenantsRoutes(
         // Holded» al que lo tiene conectado y vendiendo, y nada al que ya
         // lo dejó (reencenderlo es otro bloque, y el servidor lo rechaza).
         holdedDisconnectedAt: tenant.holdedDisconnectedAt?.toISOString() ?? null,
+        // puesta-en-marcha (ADR-021) · el estado de la puesta en marcha. El
+        // detalle los necesita para pintar la sección entera: en ensayo
+        // enseña los dos botones, facturando enseña desde cuándo y ninguno.
+        facturaDesde: tenant.facturaDesde?.toISOString() ?? null,
+        esDePruebas: tenant.esDePruebas,
         lastIncrementalSyncAt:
           tenant.lastIncrementalSyncAt?.toISOString() ?? null,
         createdAt: tenant.createdAt.toISOString(),
@@ -2157,6 +2188,472 @@ export async function registerSuperAdminTenantsRoutes(
     },
   );
 
+  // ── Puesta en marcha ────────────────────────────────────────────────
+  //
+  // puesta-en-marcha (ADR-021) · tres rutas y el mismo patrón que «Dejar
+  // Holded»: una que sólo lee y dos que aplican, cada una con su
+  // confirmación tecleando el nombre del comercio.
+  //
+  //   GET  …/puesta-en-marcha      → el plan. Sólo lee. Mil veces si hace
+  //                                  falta. Sirve a los dos botones: el
+  //                                  estado de la cuenta, qué se borraría,
+  //                                  qué se conserva y qué impide arrancar.
+  //   POST …/resetear-ensayo       → borra el ensayo. 409 si ya factura.
+  //   POST …/empezar-a-facturar    → la cuenta pasa a facturar. Una vez.
+  app.get(
+    "/super-admin/tenants/:id/puesta-en-marcha",
+    {
+      preHandler: requireSuperAdmin,
+      schema: {
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", format: "uuid" } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      try {
+        return reply
+          .code(200)
+          .send(await previsualizarPuestaEnMarcha(getPrisma(), id));
+      } catch (err) {
+        if (err instanceof TenantNoExisteError) {
+          return reply
+            .code(404)
+            .send({ error: "TENANT_NOT_FOUND", message: "Tenant no existe" });
+        }
+        throw err;
+      }
+    },
+  );
+
+  app.post(
+    "/super-admin/tenants/:id/resetear-ensayo",
+    {
+      preHandler: requireSuperAdmin,
+      schema: {
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", format: "uuid" } },
+        },
+        body: {
+          type: "object",
+          required: ["confirmacion"],
+          additionalProperties: false,
+          properties: {
+            // El nombre del comercio, tecleado. Mismo criterio que «Dejar
+            // Holded»: lo que se va a borrar no se recupera, y un botón
+            // «¿seguro?» se pulsa sin leer.
+            confirmacion: { type: "string", minLength: 1, maxLength: 200 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const { confirmacion } = request.body as { confirmacion: string };
+      const ctx = request.superAdmin!;
+      const prisma = getPrisma();
+
+      const tenant = await prisma.tenant.findUnique({
+        where: { id },
+        select: { id: true, name: true },
+      });
+      if (!tenant) {
+        return reply
+          .code(404)
+          .send({ error: "TENANT_NOT_FOUND", message: "Tenant no existe" });
+      }
+      if (confirmacion.trim() !== tenant.name.trim()) {
+        return reply.code(400).send({
+          error: "CONFIRMACION_NO_COINCIDE",
+          message:
+            "Escribe el nombre del comercio exactamente como aparece para confirmar.",
+        });
+      }
+
+      let resultado;
+      try {
+        resultado = await resetearEnsayo({ prisma, tenantId: id });
+      } catch (err) {
+        if (err instanceof TenantFacturandoError) {
+          return reply.code(409).send({
+            error: "TENANT_FACTURANDO",
+            message:
+              "Esta cuenta ya factura: su histórico es contabilidad y no se borra. El reseteo sólo existe mientras la cuenta está en ensayo.",
+            facturaDesde: err.facturaDesde.toISOString(),
+          });
+        }
+        // puesta-en-marcha (ADR-021) · la cuenta está en ensayo pero tiene
+        // dentro una venta que no lo es. No se ha borrado nada, y la
+        // respuesta dice CUÁL: lo que hay que mirar es de dónde salió.
+        if (err instanceof EnsayoConVentaRealError) {
+          return reply.code(409).send({
+            error: "VENTA_REAL_EN_ENSAYO",
+            message: err.message,
+            ventas: err.ventas,
+          });
+        }
+        if (err instanceof TenantNoExisteError) {
+          return reply
+            .code(404)
+            .send({ error: "TENANT_NOT_FOUND", message: "Tenant no existe" });
+        }
+        throw err;
+      }
+
+      const signals = extractRequestSignals(request);
+      await writeAudit({
+        prisma,
+        superAdminId: ctx.superAdminId,
+        action: "resetear_ensayo",
+        tenantId: id,
+        metadata: { ...signals, ...resultado },
+      });
+      request.log.warn(
+        {
+          event: "super_admin.resetear_ensayo",
+          tenantId: id,
+          ...resultado,
+        },
+        `${tenant.name}: ensayo reseteado`,
+      );
+      return reply.code(200).send({ ok: true, ...resultado });
+    },
+  );
+
+  app.post(
+    "/super-admin/tenants/:id/empezar-a-facturar",
+    {
+      preHandler: requireSuperAdmin,
+      schema: {
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", format: "uuid" } },
+        },
+        body: {
+          type: "object",
+          required: ["confirmacion"],
+          additionalProperties: false,
+          properties: {
+            confirmacion: { type: "string", minLength: 1, maxLength: 200 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const { confirmacion } = request.body as { confirmacion: string };
+      const ctx = request.superAdmin!;
+      const prisma = getPrisma();
+
+      const tenant = await prisma.tenant.findUnique({
+        where: { id },
+        select: { id: true, name: true },
+      });
+      if (!tenant) {
+        return reply
+          .code(404)
+          .send({ error: "TENANT_NOT_FOUND", message: "Tenant no existe" });
+      }
+      if (confirmacion.trim() !== tenant.name.trim()) {
+        return reply.code(400).send({
+          error: "CONFIRMACION_NO_COINCIDE",
+          message:
+            "Escribe el nombre del comercio exactamente como aparece para confirmar.",
+        });
+      }
+
+      let resultado;
+      try {
+        resultado = await arrancarFacturacion({ prisma, tenantId: id });
+      } catch (err) {
+        // Arrancar resetea antes de fijar la fecha, así que se para por lo
+        // mismo y con el mismo cuerpo. (La previsualización ya lo enseña como
+        // bloqueo; esto es por si algo cambió entre la pantalla y el botón.)
+        if (err instanceof EnsayoConVentaRealError) {
+          return reply.code(409).send({
+            error: "VENTA_REAL_EN_ENSAYO",
+            message: err.message,
+            ventas: err.ventas,
+          });
+        }
+        if (err instanceof ArranqueBloqueadoError) {
+          // Los MISMOS bloqueos que enseñó la previsualización, con el
+          // mismo texto. Un 409 genérico obligaría a volver a la pantalla
+          // anterior a adivinar qué cambió.
+          return reply.code(409).send({
+            error: "ARRANQUE_BLOQUEADO",
+            message:
+              "Esta cuenta todavía no puede empezar a facturar. Resuelve lo de abajo y vuelve a previsualizar.",
+            bloqueos: err.bloqueos,
+          });
+        }
+        if (err instanceof TenantNoExisteError) {
+          return reply
+            .code(404)
+            .send({ error: "TENANT_NOT_FOUND", message: "Tenant no existe" });
+        }
+        throw err;
+      }
+
+      const signals = extractRequestSignals(request);
+      await writeAudit({
+        prisma,
+        superAdminId: ctx.superAdminId,
+        action: "empezar_a_facturar",
+        tenantId: id,
+        metadata: {
+          ...signals,
+          facturaDesde: resultado.facturaDesde,
+          reseteo: resultado.reseteo,
+          cajas: resultado.previa.cajas,
+          onboardingState: resultado.previa.tenant.onboardingState,
+        },
+      });
+      request.log.warn(
+        {
+          event: "super_admin.empezar_a_facturar",
+          tenantId: id,
+          facturaDesde: resultado.facturaDesde,
+          cajas: resultado.previa.cajas.length,
+        },
+        `${tenant.name} EMPIEZA A FACTURAR`,
+      );
+      return reply.code(200).send({
+        ok: true,
+        facturaDesde: resultado.facturaDesde,
+        reseteo: resultado.reseteo,
+      });
+    },
+  );
+
+  // ── Eliminar la cuenta (la baja de un cliente) ──────────────────────
+  //
+  // puesta-en-marcha parte C (ADR-021 §5) · tres rutas, y el orden entre
+  // ellas ES la precondición:
+  //
+  //   GET  …/eliminar-cuenta   → qué hay dentro, qué lo impide, y si el
+  //                              export está descargado.
+  //   GET  …/export.zip        → el paquete que se le entrega al titular.
+  //                              Queda en el audit, y ese apunte es lo que
+  //                              habilita el borrado.
+  //   POST …/eliminar-cuenta   → lo borra. Confirmación tecleando el nombre.
+  app.get(
+    "/super-admin/tenants/:id/eliminar-cuenta",
+    {
+      preHandler: requireSuperAdmin,
+      schema: {
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", format: "uuid" } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      try {
+        return reply
+          .code(200)
+          .send(await previsualizarEliminacion(getPrisma(), id));
+      } catch (err) {
+        if (err instanceof EliminarCuentaTenantNoExisteError) {
+          return reply
+            .code(404)
+            .send({ error: "TENANT_NOT_FOUND", message: "Tenant no existe" });
+        }
+        throw err;
+      }
+    },
+  );
+
+  // El ZIP se escribe con `reply.raw` y por trozos, igual que la devolución
+  // de datos de clinica-7: un comercio con dos años de ventas no pasa por
+  // memoria dos veces.
+  app.get(
+    "/super-admin/tenants/:id/export.zip",
+    {
+      preHandler: requireSuperAdmin,
+      schema: {
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", format: "uuid" } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const ctx = request.superAdmin!;
+      const prisma = getPrisma();
+      const tenant = await prisma.tenant.findUnique({
+        where: { id },
+        select: { id: true, name: true },
+      });
+      if (!tenant) {
+        return reply
+          .code(404)
+          .send({ error: "TENANT_NOT_FOUND", message: "Tenant no existe" });
+      }
+
+      const ahora = new Date();
+      const slug = tenant.name
+        .normalize("NFD")
+        .replace(/[̀-ͯ]/g, "")
+        .replace(/[^a-zA-Z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .toLowerCase()
+        .slice(0, 40);
+      const nombre = `${slug || "cuenta"}-${ahora.toISOString().slice(0, 10)}.zip`;
+      reply.raw.setHeader("Content-Type", "application/zip");
+      reply.raw.setHeader("Cache-Control", "no-store");
+      reply.raw.setHeader("X-Content-Type-Options", "nosniff");
+      reply.raw.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${nombre}"`,
+      );
+
+      try {
+        const resumen = await exportarLaCuenta(
+          prisma,
+          { tenantId: id, ahora },
+          (trozo) => {
+            reply.raw.write(trozo);
+          },
+        );
+        // El apunte va cuando TODOS los bytes están escritos y antes de
+        // cerrar: es lo que habilita el borrado, así que no puede quedar
+        // puesto por un export que se cayó a mitad.
+        const signals = extractRequestSignals(request);
+        await writeAudit({
+          prisma,
+          superAdminId: ctx.superAdminId,
+          action: "export_cuenta",
+          tenantId: id,
+          metadata: { ...signals, ...resumen },
+        });
+        request.log.warn(
+          { event: "super_admin.export_cuenta", tenantId: id, ...resumen },
+          `export de la cuenta ${tenant.name} servido`,
+        );
+        reply.raw.end();
+        return reply;
+      } catch (err) {
+        // Ya se han escrito bytes, así que no hay forma honesta de cambiar
+        // el código de estado: se corta y el ZIP a medias NO abre (le falta
+        // el directorio final), que es lo correcto. Y sin apunte en el
+        // audit, así que el borrado sigue bloqueado.
+        request.log.error(
+          { event: "super_admin.export_cuenta_fallido", tenantId: id, err },
+          "el export de la cuenta falló a medias",
+        );
+        reply.raw.destroy();
+        return reply;
+      }
+    },
+  );
+
+  app.post(
+    "/super-admin/tenants/:id/eliminar-cuenta",
+    {
+      preHandler: requireSuperAdmin,
+      schema: {
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", format: "uuid" } },
+        },
+        body: {
+          type: "object",
+          required: ["confirmacion"],
+          additionalProperties: false,
+          properties: {
+            confirmacion: { type: "string", minLength: 1, maxLength: 200 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const { confirmacion } = request.body as { confirmacion: string };
+      const ctx = request.superAdmin!;
+      const prisma = getPrisma();
+
+      const tenant = await prisma.tenant.findUnique({
+        where: { id },
+        select: { id: true, name: true, esDePruebas: true },
+      });
+      if (!tenant) {
+        return reply
+          .code(404)
+          .send({ error: "TENANT_NOT_FOUND", message: "Tenant no existe" });
+      }
+      if (confirmacion.trim() !== tenant.name.trim()) {
+        return reply.code(400).send({
+          error: "CONFIRMACION_NO_COINCIDE",
+          message:
+            "Escribe el nombre del comercio exactamente como aparece para confirmar.",
+        });
+      }
+
+      let resultado;
+      try {
+        resultado = await eliminarLaCuenta({ prisma, tenantId: id });
+      } catch (err) {
+        if (err instanceof EliminacionBloqueadaError) {
+          return reply.code(409).send({
+            error: "ELIMINACION_BLOQUEADA",
+            message:
+              "Esta cuenta todavía no se puede eliminar. Resuelve lo de abajo y vuelve a previsualizar.",
+            bloqueos: err.bloqueos,
+          });
+        }
+        if (err instanceof EliminarCuentaTenantNoExisteError) {
+          return reply
+            .code(404)
+            .send({ error: "TENANT_NOT_FOUND", message: "Tenant no existe" });
+        }
+        throw err;
+      }
+
+      // El audit va DESPUÉS y con `tenantId: null`, y las dos cosas son a
+      // propósito: la fila del tenant ya no existe (su `tenant_id` apuntaría
+      // a nada) y lo que queda es la traza de que se eliminó, con su nombre y
+      // su foto dentro de la metadata. Es la única copia que va a quedar de
+      // lo que tenía dentro.
+      const signals = extractRequestSignals(request);
+      await writeAudit({
+        prisma,
+        superAdminId: ctx.superAdminId,
+        action: "eliminar_cuenta",
+        tenantId: null,
+        metadata: {
+          ...signals,
+          tenantIdEliminado: id,
+          nombre: tenant.name,
+          esDePruebas: tenant.esDePruebas,
+          contenido: resultado.contenido,
+          borrado: resultado.borrado,
+        },
+      });
+      request.log.warn(
+        {
+          event: "super_admin.eliminar_cuenta",
+          tenantIdEliminado: id,
+          nombre: tenant.name,
+          ...resultado.borrado,
+        },
+        `CUENTA ELIMINADA: ${tenant.name}`,
+      );
+      return reply.code(200).send({ ok: true, ...resultado });
+    },
+  );
+
   // ── Probar TPV: emitir JWT cashier técnico + device token ───────────
   //
   // Frente 5 del prompt B-OnboardingV2. Disponible sólo para tenants
@@ -2191,6 +2688,9 @@ export async function registerSuperAdminTenantsRoutes(
           name: true,
           cajaEnabled: true,
           holdedApiKeyCiphertext: true,
+          // puesta-en-marcha (ADR-021) · probar el TPV ya no depende de
+          // DRAFT, depende de que la cuenta no facture.
+          facturaDesde: true,
         },
       });
       if (!tenant) {
@@ -2199,11 +2699,20 @@ export async function registerSuperAdminTenantsRoutes(
           message: "Tenant no existe",
         });
       }
-      if (tenant.onboardingState !== "DRAFT") {
+      // puesta-en-marcha (ADR-021) · ya no se exige DRAFT: se exige ENSAYO.
+      //
+      // La condición de antes era la correcta mientras «activada» y
+      // «facturando» fueran lo mismo: en una cuenta ACTIVE, una venta de
+      // prueba habría contaminado la operación real del cliente. Ahora una
+      // cuenta puede estar activada y en ensayo —Sirope lo está desde
+      // junio— y ahí probar el TPV es exactamente lo que hay que poder
+      // hacer. Lo que sigue estando cerrado es probar en una cuenta que
+      // FACTURA, y por la razón de siempre: sus tickets serían facturas.
+      if (tenant.facturaDesde != null) {
         return reply.code(409).send({
-          error: "TENANT_NOT_DRAFT",
+          error: "TENANT_FACTURANDO",
           message:
-            "Sólo se puede probar el TPV mientras el tenant está en DRAFT.",
+            "Esta cuenta ya factura: no se prueba el TPV sobre la operación real de un cliente.",
         });
       }
       const result = await issueTestCashierSession(prisma, id);
@@ -2281,6 +2790,9 @@ export async function registerSuperAdminTenantsRoutes(
           name: true,
           cajaEnabled: true,
           holdedApiKeyCiphertext: true,
+          // puesta-en-marcha (ADR-021) · probar el TPV ya no depende de
+          // DRAFT, depende de que la cuenta no facture.
+          facturaDesde: true,
         },
       });
       if (!tenant) {

@@ -210,3 +210,9 @@ los comercios. Se miran antes de la visita.
   Europe/Madrid (la automática le ponía Asia/Shanghai: sin SIM no sabe dónde está).
 - **Regla nueva de implantación: después de activar, nadie prueba en la cuenta.** Para probar
   está «Probar TPV», que no factura.
+  - **Superada el 17-10 por `puesta-en-marcha` (ADR-021).** Ya se puede probar en la cuenta de
+    verdad y en el terminal del cliente: activar ya no es empezar a facturar, y el ensayo se
+    resetea las veces que haga falta. El orden nuevo está en
+    [`como-se-pone-en-marcha-un-comercio.md`](./como-se-pone-en-marcha-un-comercio.md). Lo que
+    sigue siendo cierto es lo de arriba: en una cuenta que YA FACTURA nadie prueba, y ahora el
+    servidor lo impide en vez de confiar en la regla.

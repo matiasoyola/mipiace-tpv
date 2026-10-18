@@ -44,6 +44,20 @@ export interface TicketMeta {
   // ticket fiscal original sigue siendo el primero — esto es sólo
   // visual para el cliente que pide copia.
   isReprint?: boolean;
+  // puesta-en-marcha (ADR-021) · este cobro fue un ENSAYO: la cuenta
+  // todavía no facturaba (o lo hizo la sesión de prueba del super-admin).
+  // El renderer estampa «TICKET DE PRUEBA · SIN VALIDEZ FISCAL» arriba, y
+  // no hay número de factura que pintar porque no se emitió ninguno.
+  //
+  // Sale del ESTADO DEL TICKET (`status === TEST`) y no del tenant: el
+  // papel tiene que decir lo que pasó el día que se cobró, no lo que pasa
+  // hoy. Un comercio que arrancó el martes y reimprime el lunes siguiente
+  // un ticket de su ensayo sigue teniendo que ver que aquello era un
+  // ensayo.
+  //
+  // Opcional para no romper fixtures previas: `undefined` es «no fue un
+  // ensayo», que es lo que eran todos los tickets antes de este bloque.
+  esDeEnsayo?: boolean;
 }
 
 export interface TicketCustomer {

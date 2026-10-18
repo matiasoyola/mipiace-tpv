@@ -151,6 +151,12 @@ export async function loadTicketDocument(
       total: ticket.total,
       // v1.3-Servicios-Pinta · Lote 3: profesional que atendió.
       attendedBy: ticket.attendedBy ?? undefined,
+      // puesta-en-marcha (ADR-021) · el PDF y el email del ticket llevan la
+      // misma marca que el papel, y por el mismo camino: el estado del
+      // ticket. Un `TEST` es un ensayo, lo haya cobrado la sesión de prueba
+      // del super-admin (verifactu-1b) o la cajera en una cuenta que
+      // todavía no había arrancado.
+      esDeEnsayo: ticket.status === "TEST",
       // v1.8-Fiado · si hay deuda viva, el renderer estampa PENDIENTE DE
       // PAGO con el deudor (el contacto ya resuelto) y el importe.
       creditNotice:

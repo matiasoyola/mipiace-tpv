@@ -174,6 +174,14 @@ export interface TenantDetail {
   // deducible de `holdedEnabled === false`, que lo contestan igual el
   // comercio que nació sin Holded y el que lo dejó con 270 facturas detrás.
   holdedDisconnectedAt?: string | null;
+  // puesta-en-marcha (ADR-021) · DESDE CUÁNDO factura esta cuenta. `null` es
+  // el ensayo. No se deduce de `onboardingState`: una cuenta ACTIVE puede
+  // estar en ensayo, y es el caso que este bloque vino a permitir.
+  //
+  // Opcional por lo mismo que su vecina: para no romper si el front va por
+  // delante del despliegue de la API.
+  facturaDesde?: string | null;
+  esDePruebas?: boolean;
   holdedStatus: HoldedConnectionStatus;
   holdedAuthMode: string;
   // v1.3-SuperAdmin-Hub Lote 3: id del panel Holded del cliente. NULL
@@ -564,5 +572,140 @@ export interface DejarHoldedResultado {
     porCola: Record<string, number>;
     repeatableQuitado: boolean;
     errores: string[];
+  };
+}
+
+// ── puesta-en-marcha (ADR-021) ────────────────────────────────────────
+//
+// Lo que devuelve `GET /super-admin/tenants/:id/puesta-en-marcha`. Espejo
+// exacto de `PrevisualizacionPuestaEnMarcha` en
+// `apps/api/src/fiscal/puesta-en-marcha.ts`. Los bloqueos reusan el tipo de
+// ADR-020 porque son la misma cosa —un código y la frase que lee quien
+// pulsa— y la pantalla los pinta igual.
+
+export interface PuestaEnMarchaPreview {
+  tenant: {
+    id: string;
+    name: string;
+    onboardingState: string;
+    esDePruebas: boolean;
+  };
+  estado: "ensayo" | "facturando";
+  facturaDesde: string | null;
+  ensayo: {
+    ticketsDeEnsayo: number;
+    borradores: number;
+    /** puesta-en-marcha (ADR-021) · TODOS los tickets, uno por estado: el
+     *  reseteo se los lleva todos. */
+    ticketsPorEstado: Array<{ estado: string; cuantos: number }>;
+    ticketsTotales: number;
+    devoluciones: number;
+    turnos: number;
+    turnosAbiertos: number;
+    arqueos: number;
+    informesZ: number;
+    comandasDeCocina: number;
+    emailsDeTicket: number;
+    mesasUnidas: number;
+    contadoresDeTicket: Array<{ cajaId: string; caja: string; contador: number }>;
+  };
+  conserva: {
+    productos: number;
+    mesas: number;
+    cajeros: number;
+    terminales: number;
+    impresoras: number;
+    contactos: number;
+    datosFiscales: boolean;
+  };
+  cajas: Array<{
+    id: string;
+    nombre: string;
+    tienda: string;
+    serie: string | null;
+    numeroInstalacion: string | null;
+    registrosFiscales: number;
+    terminalesEmparejados: number;
+  }>;
+  suelo: { ok: boolean; problemas: string[] };
+  /** puesta-en-marcha (ADR-021) · lo que no puede estar en una cuenta en
+   *  ensayo: una venta que llegó a Holded o que tiene factura emitida. */
+  ventasQueNoSonDeEnsayo: Array<{
+    ticketId: string;
+    internalNumber: string;
+    estado: string;
+    motivo: "HOLDED" | "REGISTRO_FISCAL";
+    holdedDocumentId: string | null;
+    numSerieFactura: string | null;
+  }>;
+  puedeResetear: boolean;
+  puedeArrancar: boolean;
+  bloqueos: DejarHoldedBloqueo[];
+}
+
+export interface ResetearEnsayoResultado {
+  ok: true;
+  ticketsBorrados: number;
+  ticketsPorEstado: Array<{ estado: string; cuantos: number }>;
+  ticketsDeEnsayoBorrados: number;
+  borradoresBorrados: number;
+  devolucionesBorradas: number;
+  emailsBorrados: number;
+  turnosBorrados: number;
+  mesasDesagrupadas: number;
+  contadoresAZero: number;
+  subidasBorradas: number;
+}
+
+export interface EmpezarAFacturarResultado {
+  ok: true;
+  facturaDesde: string;
+  reseteo: Omit<ResetearEnsayoResultado, "ok">;
+}
+
+// ── puesta-en-marcha parte C · la baja de un cliente (ADR-021 §5) ─────
+
+export interface EliminarCuentaPreview {
+  tenant: {
+    id: string;
+    name: string;
+    esDePruebas: boolean;
+    facturaDesde: string | null;
+    onboardingState: string;
+  };
+  contenido: {
+    registrosFiscales: number;
+    tickets: number;
+    devoluciones: number;
+    turnos: number;
+    productos: number;
+    contactos: number;
+    clientes: number;
+    citas: number;
+    empleados: number;
+    fichajes: number;
+    enlacesPublicos: number;
+    usuarios: number;
+    terminales: number;
+    tiendas: number;
+    cajas: number;
+  };
+  bloqueos: DejarHoldedBloqueo[];
+  exportDescargadoAt: string | null;
+  exportNoHaceFalta: boolean;
+  puedeEliminar: boolean;
+}
+
+export interface EliminarCuentaResultado {
+  ok: true;
+  contenido: EliminarCuentaPreview["contenido"];
+  borrado: {
+    registrosFiscales: number;
+    devoluciones: number;
+    tickets: number;
+    turnos: number;
+    fichajes: number;
+    empleados: number;
+    enlacesPublicos: number;
   };
 }

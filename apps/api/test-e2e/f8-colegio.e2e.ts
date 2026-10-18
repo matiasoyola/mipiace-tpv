@@ -22,6 +22,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { borrarCuentasDePrueba } from "./borrar-tenant.js";
 import { E2E_DATABASE_URL, e2eEnabled, SKIP_MESSAGE } from "./e2e-env.js";
 
 process.env.NODE_ENV = "test";
@@ -116,9 +117,9 @@ describe.skipIf(!e2eEnabled)("e2e · el colegio, de punta a punta", () => {
   });
 
   afterAll(async () => {
-    for (const id of creados) {
-      await prisma.$executeRawUnsafe(`DELETE FROM tenants WHERE id = '${id}'`);
-    }
+    // Por la marca de «Eliminar cuenta» (ADR-021 §6.3): el colegio ficha, así
+    // que sus `time_entries` ya no se van por la rama de cascada.
+    await borrarCuentasDePrueba(prisma, ...creados);
     // El super-admin NO se borra: sus filas de auditoría lo referencian
     // (`super_admin_audits.super_admin_id`), y esa traza es justo lo que
     // no se tira. La base del e2e es desechable.

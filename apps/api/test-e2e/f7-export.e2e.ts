@@ -22,6 +22,7 @@ import { createRequire } from "node:module";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { borrarCuentasDePrueba } from "./borrar-tenant.js";
 import { E2E_DATABASE_URL, e2eEnabled, SKIP_MESSAGE } from "./e2e-env.js";
 
 process.env.NODE_ENV = "test";
@@ -69,15 +70,14 @@ describe.skipIf(!e2eEnabled)("e2e · el registro que se exporta", () => {
   });
 
   afterAll(async () => {
-    await prisma.$executeRawUnsafe(`DELETE FROM tenants WHERE id = '${tenantId}'`);
+    // Por la marca de «Eliminar cuenta» (ADR-021 §6.3).
+    await borrarCuentasDePrueba(prisma, tenantId);
     await app.close();
     await shutdown();
   });
 
   beforeEach(async () => {
-    if (tenantId) {
-      await prisma.$executeRawUnsafe(`DELETE FROM tenants WHERE id = '${tenantId}'`);
-    }
+    await borrarCuentasDePrueba(prisma, tenantId);
     tenantId = randomUUID();
     ownerId = randomUUID();
     await prisma.tenant.create({

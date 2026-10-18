@@ -182,6 +182,10 @@ describe.skipIf(!e2eEnabled)("e2e · el sello de la venta", () => {
         requireCashCountOnClose: false,
         // El fiado hace falta para el caso "cobrar un fiado no debe caer".
         creditSalesEnabled: true,
+        // puesta-en-marcha (ADR-021) · la cuenta YA FACTURA. Sin esta fecha
+        // el gate la lee en ensayo, sus tickets nacen `TEST` y no entra ni un
+        // registro en la cadena — que es justo lo que este fichero mide.
+        facturaDesde: new Date("2026-06-01T08:00:00.000Z"),
       },
       select: { id: true },
     });

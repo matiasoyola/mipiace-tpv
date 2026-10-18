@@ -104,6 +104,9 @@ describe.skipIf(!e2eEnabled)("e2e · el catálogo local contra Postgres real", (
         // único que le abre el alta local y lo único que lo saca del
         // muro de /onboarding.
         holdedEnabled: false,
+        // puesta-en-marcha (ADR-021) · la cuenta YA FACTURA. Sin esta fecha
+        // está en ensayo y sus tickets nacen `TEST`, no `PAID`.
+        facturaDesde: new Date("2026-06-01T08:00:00.000Z"),
       },
       select: { id: true },
     });
@@ -146,6 +149,9 @@ describe.skipIf(!e2eEnabled)("e2e · el catálogo local contra Postgres real", (
         // Previsto y conectado: el tenant de hoy, sin nada nuevo.
         holdedEnabled: true,
         holdedApiKeyCiphertext: encryptSecret("k", process.env.HOLDED_KEY_ENCRYPTION_SECRET!),
+        // puesta-en-marcha (ADR-021) · la cuenta YA FACTURA. Sin esta fecha
+        // está en ensayo y sus tickets nacen `TEST`, no `PAID`.
+        facturaDesde: new Date("2026-06-01T08:00:00.000Z"),
       },
       select: { id: true },
     });
@@ -604,6 +610,9 @@ describe.skipIf(!e2eEnabled)("e2e · el catálogo local contra Postgres real", (
           name: `Bar recién vendido ${randomUUID().slice(0, 8)}`,
           // Previsto (el default) y SIN clave: está a mitad de su alta.
           initialSyncStatus: "NOT_APPLICABLE",
+          // puesta-en-marcha (ADR-021) · la cuenta YA FACTURA. Sin esta fecha
+          // está en ensayo y sus tickets nacen `TEST`, no `PAID`.
+          facturaDesde: new Date("2026-06-01T08:00:00.000Z"),
         },
         select: { id: true, holdedEnabled: true },
       });

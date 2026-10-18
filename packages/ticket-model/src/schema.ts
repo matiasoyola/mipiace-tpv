@@ -60,6 +60,7 @@ export const TicketDocumentSchema = z.object({
     businessType: z.enum(["HOSPITALITY", "RETAIL", "SERVICES"]).optional(),
     attendedBy: z.string().min(1).max(60).optional(),
     isReprint: z.boolean().optional(),
+    esDeEnsayo: z.boolean().optional(),
   }),
   // Sole (23-09-2026) · `email` era `z.string().email()` y un email mal
   // escrito invalidaba el DOCUMENTO ENTERO: el ticket 000257 de

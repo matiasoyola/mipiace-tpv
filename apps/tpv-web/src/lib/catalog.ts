@@ -108,6 +108,20 @@ const CAJA_ENABLED_KEY = "mipiacetpv-catalog-caja-enabled";
 // refrescado tiene que comportarse como antes del bloque.
 const HOLDED_ENABLED_KEY = "mipiacetpv-catalog-holded-enabled";
 
+// puesta-en-marcha (ADR-021) · ¿esta cuenta está EN ENSAYO?
+//
+// Default ASIMÉTRICO al revés que sus vecinas, y es la decisión de esta
+// clave: se compara con "1", así que un TPV que todavía no sepa nada se
+// comporta como una cuenta que factura. El error de este lado es no pintar
+// la banda en un ensayo —se arregla al primer refresco, y el servidor no
+// emite nada de todas formas—; el del otro sería pintar «estos cobros no son
+// facturas» encima de la venta de Sole, que es mentira y le asusta a la
+// clienta.
+//
+// Quien la escribe de verdad es el LOGIN, no el catálogo: la banda tiene que
+// estar puesta antes de que nadie pueda cobrar.
+const ENSAYO_KEY = "mipiacetpv-tenant-ensayo";
+
 export type BusinessType = "HOSPITALITY" | "RETAIL" | "SERVICES";
 
 function isBusinessType(v: unknown): v is BusinessType {
@@ -193,6 +207,16 @@ export function getCachedHoldedEnabled(): boolean {
 
 export function setCachedHoldedEnabled(value: boolean): void {
   localStorage.setItem(HOLDED_ENABLED_KEY, value ? "1" : "0");
+}
+
+// puesta-en-marcha (ADR-021) · `false` salvo que el servidor haya dicho
+// explícitamente que sí. Ver la nota de `ENSAYO_KEY`.
+export function getCachedEnsayo(): boolean {
+  return localStorage.getItem(ENSAYO_KEY) === "1";
+}
+
+export function setCachedEnsayo(value: boolean): void {
+  localStorage.setItem(ENSAYO_KEY, value ? "1" : "0");
 }
 
 export function setCachedBusinessType(value: BusinessType): void {
@@ -324,6 +348,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
   let lastAgendaEnabled: boolean | undefined = undefined;
   let lastCajaEnabled: boolean | undefined = undefined;
   let lastHoldedEnabled: boolean | undefined = undefined;
+  let lastEnsayo: boolean | undefined = undefined;
   for (let safety = 0; safety < 200; safety++) {
     const res = await apiWithCashier<{
       items: CatalogProduct[];
@@ -338,6 +363,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
       clinicalRecordsEnabled?: boolean;
       cajaEnabled?: boolean;
       holdedEnabled?: boolean;
+      ensayo?: boolean;
     }>(
       `/tpv/catalog/products${cursor ? `?cursor=${cursor}&limit=500` : "?limit=500"}`,
     );
@@ -376,6 +402,12 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
     if (res.holdedEnabled !== undefined) {
       lastHoldedEnabled = res.holdedEnabled;
     }
+    // puesta-en-marcha (ADR-021) · esto es lo que QUITA la banda sin salir
+    // de la sesión el día de la visita: el super-admin pulsa «Empezar a
+    // facturar» y el siguiente refresco del catálogo lo trae.
+    if (res.ensayo !== undefined) {
+      lastEnsayo = res.ensayo;
+    }
     if (!res.nextCursor) break;
     cursor = res.nextCursor;
   }
@@ -392,6 +424,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
   if (lastAgendaEnabled !== undefined) setCachedAgendaEnabled(lastAgendaEnabled);
   if (lastCajaEnabled !== undefined) setCachedCajaEnabled(lastCajaEnabled);
   if (lastHoldedEnabled !== undefined) setCachedHoldedEnabled(lastHoldedEnabled);
+  if (lastEnsayo !== undefined) setCachedEnsayo(lastEnsayo);
   if (lastTagAliases !== undefined) {
     const map: Record<string, string> = {};
     for (const a of lastTagAliases) map[a.slug] = a.label;

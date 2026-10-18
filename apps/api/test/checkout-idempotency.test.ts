@@ -178,6 +178,10 @@ const fakePrisma: Record<string, unknown> = {
       discountThresholdPct: 10,
       // catalogo-local · este tenant tiene Holded (ver tickets-route.test.ts).
       holdedApiKeyCiphertext: "cipher",
+      // puesta-en-marcha (ADR-021) · una cuenta que YA FACTURA. Sin esta
+      // fecha el gate la lee como EN ENSAYO y el ticket nace `TEST`, que es
+      // justo lo que describe el otro fichero de tests.
+      facturaDesde: new Date("2026-06-01T08:00:00.000Z"),
     })),
   },
   holdedUpload: {

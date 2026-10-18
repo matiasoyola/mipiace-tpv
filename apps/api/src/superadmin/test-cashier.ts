@@ -280,31 +280,121 @@ export interface PurgeTestDataResult {
   emailJobsPurged: number;
   cashierDeleted: boolean;
   deviceRevoked: boolean;
+  /** puesta-en-marcha (ADR-021) · devoluciones de ensayo borradas. Van
+   *  ANTES de sus tickets por una FK Restrict; ver la nota del paso 2. */
+  refundsPurged: number;
+  /** puesta-en-marcha (ADR-021) · borradores (mesas abiertas) borrados.
+   *  Cero cuando el llamante no los pide. */
+  borradoresPurged: number;
+  /** puesta-en-marcha (ADR-021) · cuántos se borraron DE CADA ESTADO, en el
+   *  orden en que los devuelve la base. Es lo que va al audit del reseteo:
+   *  «20 anuladas» y «3 de ensayo» no significan lo mismo, y después de
+   *  borrarlos no se pueden volver a contar. */
+  ticketsPorEstado: Array<{ estado: string; cuantos: number }>;
+  /** La suma de todos los estados. */
+  ticketsPurgedTotal: number;
+}
+
+export interface PurgeTestDataOptions {
+  /**
+   * puesta-en-marcha (ADR-021) · QUÉ ESTADOS se borran.
+   *
+   *   · sin poner  → sólo `TEST`. El comportamiento de siempre, el de la
+   *     ACTIVACIÓN: ahí un borrador puede ser una mesa de verdad abierta por
+   *     el propietario, y borrarla sería borrarle una venta en curso.
+   *   · `"todos"`  → cualquier estado. Es lo que pide el RESETEO DEL ENSAYO,
+   *     y la razón es la foto de producción del 18-10: Cafetería Sirope
+   *     tenía 20 tickets `VOIDED` de la demostración y de las pruebas. En
+   *     una cuenta EN ENSAYO nada es real por definición —no puede haber
+   *     una factura detrás, el bloque entero existe para eso—, así que un
+   *     reseteo que sólo se lleva los `TEST` deja la cuenta medio sucia:
+   *     anuladas en el arqueo, borradores en la sala, y el cliente
+   *     encontrándoselos el día que empieza.
+   *
+   * Quien pide `"todos"` tiene que haber comprobado ANTES que ninguno es
+   * real (`comprobarQueNadaEsReal`, en `fiscal/puesta-en-marcha.ts`). Esta
+   * función no lo comprueba: borra lo que se le pide.
+   */
+  estados?: "todos";
+  /**
+   * puesta-en-marcha (ADR-021) · ¿se lleva por delante al cajero técnico y
+   * su terminal de prueba?
+   *
+   * La ACTIVACIÓN sí (`true`, el default de siempre): el cliente entra en
+   * su cuenta y el cajero interno del equipo no tiene que seguir dentro.
+   *
+   * El RESETEO del ensayo no. Resetear es «deja esto como estaba para
+   * volver a ensayar», y matar la sesión con la que se está ensayando en el
+   * navegador de al lado es justo lo contrario. Además el bloque promete
+   * que el reseteo CONSERVA los cajeros, y el técnico es uno.
+   */
+  incluirCajeroTecnico?: boolean;
 }
 
 // Borra todos los rastros del modo prueba antes de activar el tenant.
 // Idempotente: si no había datos test devuelve contadores en 0.
+//
+// puesta-en-marcha (ADR-021) · es también la mitad del RESETEO DEL ENSAYO
+// (`fiscal/puesta-en-marcha.ts`), que la llama con `incluirBorradores` y sin
+// tocar el cajero técnico, y añade después lo que el reseteo necesita y la
+// activación no: los turnos, los arqueos, las mesas unidas y el contador de
+// tickets de la caja. Una sola función para «borra los tickets de ensayo y
+// lo que cuelga de ellos», con dos llamantes y ninguna copia.
 export async function purgeTestData(
   prisma: PrismaClient | Prisma.TransactionClient,
   tenantId: string,
+  opts: PurgeTestDataOptions = {},
 ): Promise<PurgeTestDataResult> {
+  const todosLosEstados = opts.estados === "todos";
+  const incluirCajeroTecnico = opts.incluirCajeroTecnico !== false;
   // 1. Locating cashier técnico (puede no existir si la activación
   //    sucede sin haberse provisionado nunca).
-  const cashier = await prisma.user.findFirst({
-    where: { tenantId, isTestCashier: true, deletedAt: null },
-    select: { id: true },
-  });
+  const cashier = incluirCajeroTecnico
+    ? await prisma.user.findFirst({
+        where: { tenantId, isTestCashier: true, deletedAt: null },
+        select: { id: true },
+      })
+    : null;
 
   // 2. Tickets TEST · borramos email jobs antes (FK Restrict en
   //    ticket → email_jobs CASCADE, pero somos explícitos para los
   //    SKIPPED_TEST que ya quedaron como histórico). El delete del
   //    ticket arrastra TicketLine, TicketPayment, TicketEmailJob por
   //    CASCADE (schema.prisma).
-  const ticketsTest = await prisma.ticket.findMany({
-    where: { tenantId, status: TicketStatus.TEST },
-    select: { id: true },
+  //
+  // puesta-en-marcha (ADR-021) · y las DEVOLUCIONES antes que nada, que es
+  // un arreglo y no una ampliación. `Refund.originalTicket` es
+  // `onDelete: Restrict`, así que el `deleteMany` de abajo LANZABA en
+  // cuanto el ticket de prueba tenía un abono — y devolver un ticket TEST
+  // se puede desde v1.9.5-formacion precisamente para poder ensayar la
+  // devolución. Nadie lo había visto porque hasta hoy el ensayo era un
+  // navegador y no la pasada completa en el hierro del cliente, donde la
+  // devolución es uno de los pasos.
+  //
+  // Se borran por TENANT y no por ticket: en una cuenta en ensayo no hay
+  // ninguna venta real, así que no hay ningún abono real. Y en la
+  // activación (DRAFT, sin propietario todavía) tampoco.
+  //
+  // puesta-en-marcha (ADR-021) · `estados: "todos"` quita el filtro entero.
+  // El `where` se construye UNA vez y lo comparten el recuento, el borrado de
+  // lo que cuelga y el borrado de los tickets: si se escribieran por separado
+  // acabarían diciendo cosas distintas el día que alguien toque uno.
+  const where = todosLosEstados
+    ? { tenantId }
+    : { tenantId, status: TicketStatus.TEST };
+  const aBorrar = await prisma.ticket.findMany({
+    where,
+    select: { id: true, status: true },
   });
-  const ticketIds = ticketsTest.map((t) => t.id);
+  const ticketIds = aBorrar.map((t) => t.id);
+  // El desglose POR ESTADO, antes de borrar: después no se puede contar.
+  const porEstado = new Map<string, number>();
+  for (const t of aBorrar) {
+    porEstado.set(t.status, (porEstado.get(t.status) ?? 0) + 1);
+  }
+  const refundsRes = await prisma.refund.deleteMany({
+    where: { tenantId, originalTicketId: { in: ticketIds } },
+  });
   let emailJobsPurged = 0;
   if (ticketIds.length > 0) {
     const emailRes = await prisma.ticketEmailJob.deleteMany({
@@ -312,9 +402,7 @@ export async function purgeTestData(
     });
     emailJobsPurged = emailRes.count;
   }
-  const ticketsRes = await prisma.ticket.deleteMany({
-    where: { tenantId, status: TicketStatus.TEST },
-  });
+  const ticketsRes = await prisma.ticket.deleteMany({ where });
 
   // 3. Cashier técnico · soft-delete + bumpea tokenVersion para
   //    invalidar JWTs vivos. Su Shift queda cerrado.
@@ -339,19 +427,29 @@ export async function purgeTestData(
   //    Por TIPO y no por nombre, igual que el alta: un `name` es texto que
   //    alguien puede traducir, y este `updateMany` sin acierto dejaría vivo
   //    el modo prueba en un comercio ya activado.
-  const deviceRes = await prisma.device.updateMany({
-    where: {
-      tenantId,
-      kind: DeviceKind.TEST,
-      revokedAt: null,
-    },
-    data: { revokedAt: new Date() },
-  });
+  const deviceRes = incluirCajeroTecnico
+    ? await prisma.device.updateMany({
+        where: {
+          tenantId,
+          kind: DeviceKind.TEST,
+          revokedAt: null,
+        },
+        data: { revokedAt: new Date() },
+      })
+    : { count: 0 };
 
   return {
-    ticketsTestPurged: ticketsRes.count,
+    // `ticketsTestPurged` sigue significando lo que significaba —los `TEST`—
+    // porque es lo que lee el audit de la activación. El total va aparte.
+    ticketsTestPurged: porEstado.get(TicketStatus.TEST) ?? 0,
     emailJobsPurged,
     cashierDeleted,
     deviceRevoked: deviceRes.count > 0,
+    refundsPurged: refundsRes.count,
+    borradoresPurged: porEstado.get(TicketStatus.DRAFT) ?? 0,
+    ticketsPorEstado: [...porEstado.entries()]
+      .map(([estado, cuantos]) => ({ estado, cuantos }))
+      .sort((a, b) => a.estado.localeCompare(b.estado)),
+    ticketsPurgedTotal: ticketsRes.count,
   };
 }

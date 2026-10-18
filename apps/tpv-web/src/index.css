@@ -154,3 +154,55 @@
     background-color: #6b5410;
   }
 }
+
+/* ── puesta-en-marcha (ADR-021) · LA BANDA DEL ENSAYO, Y LOS 41 PX ────
+   La banda ocupa su sitio arriba, en el flujo, igual que la del modo
+   prueba. Y eso, sin esto de aquí, deja el botón COBRAR fuera de la
+   pantalla: las pantallas del TPV son `min-h-screen`, así que la página
+   pasa a medir 100vh + la banda y el pie se va por debajo del borde.
+
+   MEDIDO en el bucle visual (18-10-2026), en el D8 de 1280×800:
+
+     Cobrar → top 757, bottom 825, ventana 800 → dentroSinScroll: FALSE
+
+   En la captura no se veía: salía una pantalla normal con un botón que
+   hay que buscar con el dedo. Es exactamente lo que la memoria del bucle
+   avisa — «una captura no dice si un elemento es ALCANZABLE».
+
+   Lo que hace esto: mientras la banda está puesta (la clase la pone y la
+   quita `EnsayoBanner`), `100vh` deja de ser la altura de las pantallas y
+   pasa a serlo `100vh - la banda`. Suma exacta, cero scroll, y ni una
+   pantalla del TPV tiene que enterarse.
+
+   Las dos utilidades de Tailwind se pisan con un selector más específico
+   (0,2,1 contra 0,1,0), que es lo que hace que no haga falta tocar
+   `SalePage`, `TableMapScreen`, `ShiftOpenScreen` ni las que vengan. */
+:root {
+  --banda-ensayo: 40px;
+}
+
+body.con-banda-ensayo .min-h-screen {
+  min-height: calc(100vh - var(--banda-ensayo));
+}
+
+body.con-banda-ensayo .h-screen {
+  height: calc(100vh - var(--banda-ensayo));
+}
+
+/* Y la tercera, que es la que de verdad dejaba COBRAR fuera: `SalePage`
+   no usa `h-screen` a secas, sino la variante arbitraria
+   `[@media(min-width:1024px)_and_(min-height:700px)]:h-screen` — el
+   candado de v1.5-hotfix5 que fija la pantalla de venta en las tablets
+   grandes. Tailwind genera para ella una clase propia, así que el
+   selector de arriba NO la toca: tras compensar las otras dos, el D8
+   seguía midiendo 840 px de alto en una ventana de 800.
+
+   Se caza por el TOKEN de la clase (`[class*=":h-screen"]`, que son las
+   variantes: `lg:h-screen`, `[@media…]:h-screen`) y DENTRO de la misma
+   media query, para no darle altura fija a una pantalla estrecha que no
+   la pedía. */
+@media (min-width: 1024px) and (min-height: 700px) {
+  body.con-banda-ensayo [class*=":h-screen"] {
+    height: calc(100vh - var(--banda-ensayo));
+  }
+}

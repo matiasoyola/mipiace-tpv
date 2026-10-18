@@ -94,6 +94,30 @@ describe("renderTicketPdf", () => {
     expect(page.getHeight()).toBeGreaterThan(80);
   });
 
+  // puesta-en-marcha (ADR-021) · el papel del ENSAYO.
+  //
+  // Es una de las tres cosas que impiden que alguien crea que ha facturado
+  // (la banda del TPV, el papel y el aviso del panel). Y va ANTES de la
+  // cabecera fiscal: es lo primero que tiene que leer quien lo recibe.
+  it("un ticket de ENSAYO lo dice en cabecera, antes que nada", async () => {
+    const i = input();
+    i.ticket.esDeEnsayo = true;
+    const bytes = await renderTicketPdf(buildTicketDocument(i));
+    const parsed = await pdfParse(Buffer.from(bytes));
+    expect(parsed.text).toContain("TICKET DE PRUEBA");
+    expect(parsed.text).toContain("SIN VALIDEZ FISCAL");
+    // Antes de la razón social, que es donde empieza el ticket de verdad.
+    expect(parsed.text.indexOf("TICKET DE PRUEBA")).toBeLessThan(
+      parsed.text.indexOf("Thalia SL"),
+    );
+  });
+
+  it("y un ticket normal NO lleva esa marca", async () => {
+    const bytes = await renderTicketPdf(buildTicketDocument(input()));
+    const parsed = await pdfParse(Buffer.from(bytes));
+    expect(parsed.text).not.toContain("TICKET DE PRUEBA");
+  });
+
   it("incrusta los strings clave del ticket en el contenido", async () => {
     const doc = buildTicketDocument(input());
     const bytes = await renderTicketPdf(doc);

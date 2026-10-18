@@ -163,6 +163,10 @@ describe.skipIf(!e2eEnabled)("e2e · dejar Holded, contra Postgres real", () => 
         // El suelo fiscal, que la acción exige: sin NIF ni razón social no
         // se puede emitir factura simplificada y la acción no arranca.
         fiscalProfile: { taxId: "04165994G", legalName: "Peluquería Sole" },
+        // puesta-en-marcha (ADR-021) · el comercio del bloque YA FACTURA
+        // (tiene 270 facturas de Holded detrás). Sin esta fecha su cuenta
+        // está en ensayo y sus tickets nacen `TEST`.
+        facturaDesde: new Date("2026-06-01T08:00:00.000Z"),
         // La agenda encendida en el comercio de prueba aunque Sole la tenga
         // apagada en producción: es lo que permite comprobar el criterio 6
         // («la agenda sigue viendo sus servicios») de verdad y no de boca.

@@ -167,6 +167,15 @@ export interface TicketReceiptInput {
   // Equivale a la marca que el renderer del PDF ya pintaba para los
   // PrintIntent(REPRINT).
   isCopy?: boolean;
+  // puesta-en-marcha (ADR-021) · este cobro fue un ENSAYO: la cuenta
+  // todavía no facturaba. Se imprime «TICKET DE PRUEBA · SIN VALIDEZ
+  // FISCAL» en cabecera, antes que nada, y el papel no lleva número de
+  // factura porque no se emitió ninguna (`verifactu` viene a null).
+  //
+  // Es la marca que faltaba para poder ensayar en el hierro del cliente:
+  // sin ella, un ticket de prueba y una factura real salen idénticos de la
+  // misma impresora.
+  esDeEnsayo?: boolean;
   // v1.8-Fiado (variante B) · si el ticket es una venta a crédito con
   // deuda viva, imprimimos una leyenda destacada "PENDIENTE DE PAGO" con
   // el deudor y el importe adeudado. NO es documento fiscal (no lleva
@@ -254,6 +263,18 @@ export function buildTicketReceipt(input: TicketReceiptInput): Uint8Array {
   }
 
   parts.push(escSeparator(COLUMNS));
+
+  // puesta-en-marcha (ADR-021) · marca del ENSAYO. Va antes que la de
+  // copia: una reimpresión sigue siendo de una venta de verdad, y esto no
+  // es una venta de verdad.
+  if (input.esDeEnsayo) {
+    parts.push(escAlign("center"));
+    parts.push(escBold(true));
+    parts.push(escText("*** TICKET DE PRUEBA ***"));
+    parts.push(escText("SIN VALIDEZ FISCAL"));
+    parts.push(escBold(false));
+    parts.push(escSeparator(COLUMNS));
+  }
 
   // v1.10.2-impresion-honesta · marca de copia. Va arriba del todo (bajo
   // la cabecera del comercio) para que se lea antes que el importe y

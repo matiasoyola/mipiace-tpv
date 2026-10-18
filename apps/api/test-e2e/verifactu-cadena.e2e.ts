@@ -236,6 +236,10 @@ describe.skipIf(!e2eEnabled)("e2e · la cadena de facturación de una caja", () 
         businessType: "SERVICES",
         // Lo que enciende todo esto: el comercio NO usa Holded.
         holdedEnabled: false,
+        // puesta-en-marcha (ADR-021) · la cuenta YA FACTURA. Sin esta fecha
+        // el gate la lee en ensayo, sus tickets nacen `TEST` y no entra ni un
+        // registro en la cadena — que es justo lo que este fichero mide.
+        facturaDesde: new Date("2026-06-01T08:00:00.000Z"),
         fiscalProfile: {
           legalName: RAZON,
           taxId: NIF,
@@ -771,7 +775,15 @@ describe.skipIf(!e2eEnabled)("e2e · la cadena de facturación de una caja", () 
 
     beforeAll(async () => {
       const t = await prisma.tenant.create({
-        data: { name: "Con Holded e2e", businessType: "RETAIL" },
+        data: {
+          name: "Con Holded e2e",
+          businessType: "RETAIL",
+          // puesta-en-marcha (ADR-021) · un comercio de hoy, FACTURANDO con
+          // Holded. Sin la fecha estaría en ensayo, y entonces el registro
+          // que manda abajo se DESCARTA en vez de rechazarse: en ensayo no
+          // hay dos emisores, no hay ninguno.
+          facturaDesde: new Date("2026-06-01T08:00:00.000Z"),
+        },
         select: { id: true, holdedEnabled: true },
       });
       otroTenantId = t.id;
@@ -834,7 +846,11 @@ describe.skipIf(!e2eEnabled)("e2e · la cadena de facturación de una caja", () 
         headers: { authorization: `Bearer ${otroToken}` },
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ emite: false });
+      // puesta-en-marcha (ADR-021) · `ensayo: false` distingue este «no
+      // emito» —el del comercio que factura con Holded— del de una cuenta
+      // que todavía no ha arrancado. El terminal los trata distinto: aquí
+      // imprime el papel de siempre, allí lo marca como de prueba.
+      expect(res.json()).toEqual({ emite: false, ensayo: false });
     });
 
     it("cobra exactamente igual que siempre, sin registro de facturación", async () => {

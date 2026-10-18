@@ -11,6 +11,7 @@ import { getTenantHealthStatus } from "../tickets/health.js";
 import { CAJA_DISABLED_MESSAGE, ensureCajaEnabled } from "../lib/caja-gate.js";
 import { brutoDesdeNeto } from "../catalog/local-product-rules.js";
 import { CENTER_TZ } from "../agenda/time.js";
+import { enEnsayo } from "../fiscal/mode.js";
 
 // ──────────────────────────────────────────────────────────────────────
 // v2-H1-venta-y-sala §3 · los parámetros de la vista «Ahora».
@@ -176,6 +177,13 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
               // pestaña que le cuenta que este sistema guarda datos de
               // salud de otros clientes.
               clinicalRecordsEnabled: true,
+              // puesta-en-marcha (ADR-021) · viaja con sus hermanos y se
+              // cachea igual. El login es quien pone la banda al entrar;
+              // esto es lo que la QUITA sin salir de la sesión el día de la
+              // visita, cuando el super-admin pulsa «Empezar a facturar» con
+              // la cajera dentro: el TPV refresca catálogo cada rato y en ese
+              // refresco se enteran los dos, la banda y el ticket.
+              facturaDesde: true,
             },
           });
       if (tenant?.cajaEnabled === false) {
@@ -316,6 +324,9 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
               holdedEnabled: tenant.holdedEnabled,
               // clinica-2 · viaja con sus hermanos y se cachea igual.
               clinicalRecordsEnabled: tenant.clinicalRecordsEnabled,
+              // puesta-en-marcha (ADR-021) · ídem. No es una puerta: lo que
+              // decide si se emite o no es el servidor en cada cobro.
+              ensayo: enEnsayo(tenant),
               // v1.3-Operativa-Extra · Lote 1: alias editable de tags
               // (`slug` tal como llega de Holded en lowercase → `label`
               // a pintar en el chip).
