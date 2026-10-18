@@ -374,9 +374,34 @@ arriba del todo) y la compensación de altura que esa banda necesita.
 
 ## 9 · La pasada en el hierro — PENDIENTE, Y POR QUÉ
 
-**El N1 no responde.** `192.168.5.144` no contesta al ping, `adb connect 192.168.5.144:5555` da
-`Operation timed out` y el aparato no aparece en `adb mdns services`. Está apagado o fuera de la
-wifi. Sin N1 no hay nada que mirar: el bloque entero existe para ese aparato.
+**Lo que SÍ quedó probado en el N1** (emparejado por adb inalámbrico; el aparato está en
+`192.168.5.143`, no en el `.144` de la pasada del 16-10). Con la 1.27.0 instalada por `adb install
+-r`, en el primer arranque:
+
+```
+$ adb logcat | grep n1-vertical
+  I mipiacetpv: n1-vertical: móvil (360 dp) -> orientacion 7     # 7 = SENSOR_PORTRAIT
+
+$ adb shell am get-config
+  … sw360dp w360dp h648dp … port …     # con la 1.26.0: w672dp h336dp land
+```
+
+**El N1 arranca en vertical y el viewport pasa a ser 360×648**, que es justo el tamaño con el que
+se midió el repaso del §6. La decisión por tamaño funciona en el hierro: el aparato dice `sw360dp`
+y la app le pide vertical.
+
+**Lo que NO se pudo probar, y por qué.** El terminal sólo deja abrir la app **una vez por
+arranque** (§9.1): a partir del segundo arranque la pantalla sale en blanco porque el sistema se
+niega a lanzar el proceso de renderizado del WebView. Con un solo arranque bueno por reinicio —y
+cada reinicio apaga la depuración inalámbrica, que hay que reactivar a mano en el aparato— no se
+puede recorrer venta, ticket, cobro, búsqueda con teclado, agenda y menú de un tirón.
+
+De esa única sesión buena queda una captura, `31-n1-arranque-vertical-1.27.0.png`, donde la
+tarjeta del PIN aparece **cortada por la derecha**: maquetada con el ancho de antes de girar
+(~672 dp) dentro de una ventana de 360. **No está claro si es un fallo de verdad o el renderer ya
+colgado repintando un fotograma viejo**, y por eso no se ha tocado ni una línea por ello: se mide
+en la próxima sesión buena, con `getBoundingClientRect` sobre la página viva, antes de decidir si
+hace falta un `onConfigurationChanged` en `MainActivity` que fuerce el reparto.
 
 **El AP11 sí responde, y está trabajando.** `192.168.5.76:46441`, con la 1.26.0 puesta
 (`versionCode=12600`, instalada el 15-10) y **el KDS en primer plano con una comanda viva**
@@ -394,6 +419,62 @@ $ adb -s 192.168.5.76:46441 shell wm density   →  160 (override 240)
 
 `sw800dp` es exactamente lo que `OrientacionPorTamano` manda a horizontal, y `land` es como está
 ahora: **la decisión del bloque le da al AP11 la orientación que ya tiene**.
+
+### 9.1 · HALLAZGO APARTE · el N1 sólo abre la app UNA VEZ por arranque
+
+**No es de este bloque y no es de nuestro código**, pero bloquea la pasada y hay que saberlo antes
+de vender un N1. Medido el 18-10-2026 con las dos versiones:
+
+| prueba | resultado |
+|---|---|
+| tras reiniciar el terminal, 1er arranque | **pinta** |
+| 2º arranque (cerrar y volver a abrir) | **pantalla en blanco** |
+| 3er arranque | blanco |
+| HOME y volver a entrar | blanco |
+| esperar 20 s antes de reabrir | blanco |
+| matar `com.google.android.webview` y `am kill-all` | blanco |
+| reinstalar la APK (1.26.0 ó 1.27.0) | blanco |
+| reiniciar el terminal | vuelve a pintar… **una vez** |
+
+Pasa igual con la **1.26.0 publicada** que con la 1.27.0 de este bloque, así que no lo trae el
+bloque.
+
+**La causa, en el log del arranque que falla:**
+
+```
+W ActivityManager: Unable to launch app es.mipiace.tpv/10120 for service
+    Intent { cmp=es.mipiace.tpv/org.chromium.content.app.SandboxedProcessService0:0 }: process is bad
+E cr_ChildProcessConn: Failed to establish the service connection.
+```
+
+El WebView carga bien (`WebViewFactory: Loading com.google.android.webview version
+154.0.8037.106`, `multiprocess=true`) y pide su proceso de renderizado; el `ActivityManager` se lo
+NIEGA porque tiene ese proceso marcado como «bad» — la marca que pone Android cuando un proceso se
+cae repetidamente, y que sólo se limpia al reiniciar el terminal. Por eso en `chrome://inspect` el
+WebView sale como «untitled · hidden», el panel de elementos vacío y ni un `1+1` contesta: no hay
+renderer al otro lado, no es JS nuestro.
+
+**Lo que se descartó, midiendo:**
+
+- **El NFC del aparato.** `com.android.nfc` estaba en bucle de caída (27 veces en 41 min, `Abort
+  message: 'JNI FatalError called: enableInternal'`, atascado en `mState=turning on`). Se apagó con
+  `pm disable-user --user 0 com.android.nfc` —el interruptor normal no existe en este firmware:
+  `svc nfc disable` no hace nada y `cmd nfc` contesta `No shell command implementation`— y el bucle
+  paró en seco (0 caídas en 25 s). **El patrón no cambió.** Para deshacerlo:
+  `adb shell pm enable com.android.nfc`.
+- **La memoria.** 2,9 GB totales con 1,6 GB disponibles: no es falta de RAM.
+- **Nuestro rescate de A4.** Sólo purga cuando cambia el `versionCode`, y en los arranques que
+  fallan no cambia; además registró `directorios purgados: 0`.
+
+**El mismo síntoma ya se vio en el D8 de Sirope el 17-10**, con WebView **101** — otra versión del
+WebView y el mismo cuadro, así que no es un fallo de la 154.
+
+**Lo que falta por saber** (una pasada más, con el terminal recién reiniciado): **por qué** se cae
+el renderer durante la PRIMERA sesión, que es lo que deja la marca. Hay que abrir la app con
+`logcat` grabando desde el primer segundo y cazar la muerte del proceso hijo.
+
+**Para la implantación, mientras tanto:** un N1 así no vale para vender — el cajero cierra la app y
+a la siguiente tiene una pantalla blanca. Antes de darle uno a un cliente hay que resolver esto.
 
 ### El guion de la pasada, para cuando estén los dos aparatos
 
