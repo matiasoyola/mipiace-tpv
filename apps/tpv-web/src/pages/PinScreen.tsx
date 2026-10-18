@@ -96,6 +96,24 @@ export function PinScreen({
   // Tickea 1× por segundo mientras esté activo para mostrar countdown.
   const [lockedUntilMs, setLockedUntilMs] = useState<number | null>(null);
   const [nowMs, setNowMs] = useState<number>(Date.now());
+  // n1-vertical · EN COMPACTO ESTA PANTALLA SON DOS PASOS, NO UNA COLUMNA
+  // LARGA.
+  //
+  // Medido en el N1 (viewport de 360×648): las dos tarjetas apiladas
+  // suman ~860 px, así que la fila del 0 salía cortada y había que bajar
+  // para llegar a «Entrar» — y el aviso de PIN incorrecto, que vivía
+  // debajo del botón, no se veía nunca (pasada del 2026-10-16, punto 8).
+  // El teclado solo mide ~490 px y cabe entero.
+  //
+  // Es un paso explícito y no `activeEmail.length > 0` a propósito: con
+  // la condición derivada, la tarjeta del cajero desaparecía en cuanto
+  // se teclea la PRIMERA letra del email, con el teclado abierto y el
+  // campo a medias.
+  //
+  // De `md` (768 px) hacia arriba no existe: las dos tarjetas se pintan
+  // en paralelo como siempre, que es lo que ven los quince terminales de
+  // 10" y 15" en producción.
+  const [pasoCompacto, setPasoCompacto] = useState<"cajero" | "pin">("cajero");
 
   useEffect(() => {
     setRecent(getRecentCashiers());
@@ -256,8 +274,22 @@ export function PinScreen({
   }
 
   function pressDigit(d: string) {
-    if (pin.length >= 8 || busy) return;
-    setPin(pin + d);
+    if (busy) return;
+    // n1-vertical · ACTUALIZACIÓN FUNCIONAL, y no `setPin(pin + d)`.
+    //
+    // `pin` viene del cierre de ESTE render: dos pulsaciones dentro del
+    // mismo tick leen las dos el mismo valor y la segunda pisa a la
+    // primera. Visto midiendo en el N1 el 2026-10-18: cuatro dígitos
+    // seguidos dejaban el PIN en UNO, con los puntos sin marcar y
+    // «Entrar» apagado. Con el dedo cuesta provocarlo —hay que pulsar
+    // dos teclas en el mismo fotograma— pero un teclado de PIN es justo
+    // donde se teclea rápido, y un dígito perdido se paga con uno de
+    // los cinco intentos que hay antes del bloqueo.
+    //
+    // El tope de 8 se mira DENTRO del actualizador por lo mismo: con la
+    // comprobación fuera, dos pulsaciones en el mismo tick pasan las dos
+    // el filtro aunque la segunda ya no quepa.
+    setPin((actual) => (actual.length >= 8 ? actual : actual + d));
   }
   function pressBack() {
     setPin(pin.slice(0, -1));
@@ -265,14 +297,35 @@ export function PinScreen({
 
   return (
     <div className="min-h-screen bg-mipiace-stone flex flex-col font-sans">
-      <header className="h-[72px] md:h-[88px] border-b border-slate-200 flex items-center justify-between px-5 md:px-7 bg-white">
+      <header className="h-[72px] md:h-[88px] [@media(max-height:560px)]:h-11 border-b border-slate-200 flex items-center justify-between px-5 md:px-7 bg-white">
         <Logo size={26} />
         <div className="text-[12.5px] text-slate-500">{registerName}</div>
       </header>
-      <main className="flex-1 flex items-center justify-center p-5">
-        <div className="w-full max-w-5xl grid md:grid-cols-2 gap-5 md:gap-8">
+      <main className="flex-1 flex items-center justify-center p-5 [@media(max-height:560px)]:p-2">
+        {/* n1-vertical · `grid-cols-1` NO es decorativo, y sin él esta
+            pantalla se sale por la derecha en un móvil.
+            Medido en el N1 el 2026-10-18 con el cajero de pruebas, cuyo
+            email es `mipiacetpv-test-64a68dc7@internal.mipiacetpv.tech`:
+            `document.documentElement.scrollWidth` = 581 con una ventana
+            de 360, y la tarjeta de cajeros midiendo 561.
+            El motivo: sin `grid-template-columns`, la única columna por
+            debajo de `md` es IMPLÍCITA y de tamaño `auto`, o sea
+            `max-content`, así que una cadena larga sin espacios —un
+            email— estira la columna y empuja la página entera. Con
+            `grid-cols-1` (que es `repeat(1, minmax(0,1fr))`) la columna
+            no puede pasar del ancho disponible y el texto trunca como
+            siempre estuvo previsto. Comprobado en el aparato: 581 → 360
+            y la tarjeta 561 → 320.
+            En el banco no salía porque la cajera de pruebas se llama
+            `marta@peluqueriademo.local`, que cabe. */}
+        <div className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-8 [@media(max-height:560px)]:gap-2">
           {/* Recent cashiers */}
-          <div className="bg-white rounded-3xl border border-slate-200 p-6 md:p-8">
+          <div
+            data-testid="pin-cajeros"
+            className={`bg-white rounded-3xl border border-slate-200 p-6 md:p-8 [@media(max-height:560px)]:p-3 ${
+              pasoCompacto === "pin" ? "hidden md:block" : "block"
+            }`}
+          >
             <h2 className="text-[14px] font-medium text-slate-500 uppercase tracking-wider mb-5">
               Cajeros recientes
             </h2>
@@ -291,6 +344,7 @@ export function PinScreen({
                       setOtherEmail("");
                       setPin("");
                       setError(null);
+                      setPasoCompacto("pin");
                     }}
                     className={
                       selectedEmail === c.email
@@ -360,58 +414,186 @@ export function PinScreen({
                   Empieza a teclear el email del cajero
                 </div>
               )}
+              {/* n1-vertical · en compacto el teclado de PIN está en el
+                  paso siguiente, así que hace falta una puerta. En `md`
+                  hacia arriba no existe: las dos tarjetas ya están una
+                  al lado de la otra y el teclado se usa directamente. */}
+              <button
+                type="button"
+                data-testid="pin-continuar"
+                onClick={() => setPasoCompacto("pin")}
+                disabled={otherEmail.trim().length === 0}
+                className="md:hidden mt-3 w-full h-12 rounded-xl bg-mipiace-ink text-white text-[14.5px] font-medium disabled:opacity-40"
+              >
+                Continuar
+              </button>
             </div>
           </div>
 
           {/* Keypad */}
-          <div className="bg-white rounded-3xl border border-slate-200 p-6 md:p-8 flex flex-col">
-            <div className="text-center mb-6">
-              <div className="text-[14px] text-slate-500 mb-1">Introduce el PIN</div>
-              <div className="text-[20px] font-semibold text-mipiace-ink tracking-tight truncate">
-                {(selectedEmail
-                  ? recent.find((c) => c.email === selectedEmail)?.alias ??
-                    selectedEmail
-                  : activeEmail) || "—"}
+          {/* n1-vertical · LA TARJETA DEL PIN TIENE QUE CABER EN UNA
+              PANTALLA DE MÓVIL, Y TAMBIÉN EN UNA BAJA Y ANCHA.
+
+              Dos tamaños, dos repartos distintos:
+
+              · **360×648** (el N1 en vertical, que es como se usará).
+                La tarjeta sola mide ~490 px y cabe entera; lo que no
+                cabía era tenerla DEBAJO de la de cajeros, y de eso se
+                encarga `pasoCompacto`.
+
+              · **720×360** (el N1 en apaisado, y cualquier móvil que
+                alguien gire antes de que esta pantalla sepa que no debe
+                girar). Con 360 px de alto no hay reparto en columna que
+                valga: el teclado solo son 4 filas. Así que por debajo de
+                560 px de alto la tarjeta pasa a DOS columnas —teclado a
+                la izquierda, estado y «Entrar» a la derecha—, con lo que
+                el alto baja a ~230 px y sobra sitio.
+
+              El `grid` es siempre `grid` (antes era `flex flex-col`) para
+              no cambiar de `display` dentro de una media query: con una
+              columna, las filas salen en el orden del DOM y el resultado
+              en `md` es idéntico al de antes del bloque.
+
+              Y el AVISO DE PIN INCORRECTO SUBE: vivía debajo de
+              «Entrar», que en el N1 era el único sitio de la pantalla que
+              no se veía (punto 8 de la pasada). Ahora va pegado a los
+              puntos del PIN, que es donde el cajero está mirando cuando
+              acaba de teclearlo. */}
+          <div
+            data-testid="pin-teclado"
+            className={`bg-white rounded-3xl border border-slate-200 p-6 md:p-8 [@media(max-height:560px)]:p-3 grid grid-cols-1 [@media(max-height:560px)]:grid-cols-[auto_minmax(0,1fr)] [@media(max-height:560px)]:gap-x-4 [@media(max-height:560px)]:items-start ${
+              pasoCompacto === "cajero" ? "hidden md:grid" : "grid"
+            }`}
+          >
+            {/* Estado: de quién es el PIN, los puntos y el aviso. En
+                pantalla baja se va a la columna derecha. */}
+            <div className="min-w-0 [@media(max-height:560px)]:col-start-2 [@media(max-height:560px)]:row-start-1">
+              <div className="text-center mb-6 [@media(max-height:560px)]:mb-2">
+                <div className="text-[14px] text-slate-500 mb-1">Introduce el PIN</div>
+                <div className="text-[20px] font-semibold text-mipiace-ink tracking-tight truncate">
+                  {(selectedEmail
+                    ? recent.find((c) => c.email === selectedEmail)?.alias ??
+                      selectedEmail
+                    : activeEmail) || "—"}
+                </div>
+                {/* n1-vertical · la vuelta al paso del cajero. Sólo en
+                    compacto: en `md` las dos tarjetas están a la vista. */}
+                {/* n1-vertical · `min-h-11` son los 44 px de objetivo
+                    táctil de la casa. Medido en el N1 el 2026-10-18 con
+                    la carta de Sirope: este botón era de **19 px de
+                    alto**, y es el ÚNICO camino de vuelta si te
+                    equivocas de cajero —con prisa y el teclado abierto,
+                    se falla—. El resto de la pantalla ya cumplía: las
+                    teclas del PIN miden 56.
+                    Se queda con pinta de enlace (subrayado, gris) y lo
+                    que crece es el área de toque, no el texto: `px-3`
+                    para los lados y `inline-flex` para que el rótulo
+                    siga centrado dentro de la caja más alta. */}
+                <button
+                  type="button"
+                  data-testid="pin-cambiar-cajero"
+                  onClick={() => {
+                    setPasoCompacto("cajero");
+                    setPin("");
+                    setError(null);
+                  }}
+                  className="md:hidden mt-1 inline-flex min-h-11 items-center justify-center px-3 text-[12.5px] text-slate-400 underline underline-offset-2"
+                >
+                  Cambiar de cajero
+                </button>
               </div>
-            </div>
-            <div className="flex justify-center items-center gap-3 mb-7">
-              {pinVisible ? (
-                <span className="text-[22px] font-semibold tracking-[0.35em] tabular-nums text-mipiace-ink min-w-[96px] text-center">
-                  {pin.length > 0 ? pin : "····"}
-                </span>
-              ) : (
-                [0, 1, 2, 3].map((i) => (
-                  <div
-                    key={i}
-                    className={
-                      i < pin.length
-                        ? "w-3.5 h-3.5 rounded-full bg-mipiace-coral"
-                        : "w-3.5 h-3.5 rounded-full bg-slate-200"
-                    }
-                  />
-                ))
-              )}
-              <button
-                type="button"
-                onClick={() => setPinVisible((v) => !v)}
-                aria-label={pinVisible ? "Ocultar PIN" : "Mostrar PIN"}
-                aria-pressed={pinVisible}
-                className="h-8 w-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-mipiace-ink"
-              >
+              <div className="flex justify-center items-center gap-3 mb-7 [@media(max-height:560px)]:mb-3">
                 {pinVisible ? (
-                  <EyeOff className="w-[18px] h-[18px]" />
+                  <span className="text-[22px] font-semibold tracking-[0.35em] tabular-nums text-mipiace-ink min-w-[96px] text-center">
+                    {pin.length > 0 ? pin : "····"}
+                  </span>
                 ) : (
-                  <Eye className="w-[18px] h-[18px]" />
+                  [0, 1, 2, 3].map((i) => (
+                    <div
+                      key={i}
+                      className={
+                        i < pin.length
+                          ? "w-3.5 h-3.5 rounded-full bg-mipiace-coral"
+                          : "w-3.5 h-3.5 rounded-full bg-slate-200"
+                      }
+                    />
+                  ))
                 )}
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setPinVisible((v) => !v)}
+                  aria-label={pinVisible ? "Ocultar PIN" : "Mostrar PIN"}
+                  aria-pressed={pinVisible}
+                  className="h-8 w-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-mipiace-ink"
+                >
+                  {pinVisible ? (
+                    <EyeOff className="w-[18px] h-[18px]" />
+                  ) : (
+                    <Eye className="w-[18px] h-[18px]" />
+                  )}
+                </button>
+              </div>
+              {/* v1.3-piloto-feedback · Lote 4: tres estados visuales.
+                    isLocked → bloque ámbar con countdown, sin botón.
+                    attemptsRemaining ≤ 3 → aviso slate (suave) con
+                      intentos restantes. No rojo: el primer fallo no
+                      debe asustar.
+                    error (resto) → rojo clásico (auth fallida con
+                      attemptsRemaining=4 cae aquí como mensaje plano si
+                      el backend no manda data). */}
+              {isLocked && (
+                <div
+                  data-testid="pin-aviso"
+                  className="mb-6 [@media(max-height:560px)]:mb-2 flex items-start gap-2 text-[13px] text-amber-900 bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-2.5"
+                >
+                  <CircleAlert className="w-4 h-4 mt-px shrink-0 text-amber-600" />
+                  <span>
+                    Cuenta bloqueada por demasiados intentos. Vuelve a probar en{" "}
+                    <strong>{formatCountdown(lockSecondsRemaining)}</strong>.
+                  </span>
+                </div>
+              )}
+              {/* n1-vertical · ESTO ERA `attemptsRemaining <= 3`, y por eso en
+                    la pasada del N1 «el aviso de PIN incorrecto no se veía»:
+                    el backend contesta `attemptsRemaining: 4` en el PRIMER
+                    fallo (medido contra la API el 2026-10-18), así que el
+                    primer PIN mal no pintaba NADA — el PIN se borraba solo y
+                    el cajero no sabía si había fallado él o la máquina.
+                    Sigue siendo el aviso suave en gris, que es la decisión
+                    de v1.3 («el primer fallo no debe asustar»): lo que
+                    cambia es que ahora existe. */}
+              {!isLocked && attemptsRemaining != null && (
+                <div
+                  data-testid="pin-aviso"
+                  className="mb-6 [@media(max-height:560px)]:mb-2 flex items-start gap-2 text-[13px] text-slate-600 bg-slate-50 rounded-xl px-3.5 py-2.5"
+                >
+                  <CircleAlert className="w-4 h-4 mt-px shrink-0 text-amber-500" />
+                  <span>
+                    Email o PIN incorrecto · Te quedan{" "}
+                    <strong>{attemptsRemaining}</strong>{" "}
+                    intento{attemptsRemaining === 1 ? "" : "s"} antes del bloqueo.
+                  </span>
+                </div>
+              )}
+              {!isLocked && error && (
+                <div
+                  data-testid="pin-aviso"
+                  className="mb-6 [@media(max-height:560px)]:mb-2 flex items-start gap-2 text-[13px] text-red-700 bg-red-50 rounded-xl px-3.5 py-2.5"
+                >
+                  <AlertCircle className="w-4 h-4 mt-px shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
             </div>
-            <div className="grid grid-cols-3 gap-2.5 md:gap-3 max-w-xs mx-auto w-full">
+            {/* El teclado. En pantalla baja ocupa la columna izquierda y
+                las dos filas. */}
+            <div className="grid grid-cols-3 gap-2.5 md:gap-3 [@media(max-height:560px)]:gap-1.5 max-w-xs mx-auto w-full [@media(max-height:560px)]:col-start-1 [@media(max-height:560px)]:row-start-1 [@media(max-height:560px)]:row-span-2 [@media(max-height:560px)]:w-auto">
               {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((n) => (
                 <button
                   key={n}
                   type="button"
                   onClick={() => pressDigit(n)}
-                  className="h-14 md:h-16 bg-mipiace-stone hover:bg-slate-100 rounded-2xl text-[22px] md:text-[24px] font-medium text-mipiace-ink tabular-nums disabled:opacity-50"
+                  className="h-14 md:h-16 [@media(max-height:560px)]:h-11 [@media(max-height:560px)]:w-16 bg-mipiace-stone hover:bg-slate-100 rounded-2xl text-[22px] md:text-[24px] [@media(max-height:560px)]:text-[19px] font-medium text-mipiace-ink tabular-nums disabled:opacity-50"
                   disabled={busy}
                 >
                   {n}
@@ -423,7 +605,7 @@ export function PinScreen({
                   setPin("");
                   setError(null);
                 }}
-                className="h-14 md:h-16 rounded-2xl text-[14px] text-slate-400 hover:text-mipiace-ink font-medium"
+                className="h-14 md:h-16 [@media(max-height:560px)]:h-11 rounded-2xl text-[14px] text-slate-400 hover:text-mipiace-ink font-medium"
               >
                 Borrar
               </button>
@@ -431,14 +613,14 @@ export function PinScreen({
                 type="button"
                 onClick={() => pressDigit("0")}
                 disabled={busy}
-                className="h-14 md:h-16 bg-mipiace-stone hover:bg-slate-100 rounded-2xl text-[22px] md:text-[24px] font-medium text-mipiace-ink tabular-nums disabled:opacity-50"
+                className="h-14 md:h-16 [@media(max-height:560px)]:h-11 bg-mipiace-stone hover:bg-slate-100 rounded-2xl text-[22px] md:text-[24px] [@media(max-height:560px)]:text-[19px] font-medium text-mipiace-ink tabular-nums disabled:opacity-50"
               >
                 0
               </button>
               <button
                 type="button"
                 onClick={pressBack}
-                className="h-14 md:h-16 bg-mipiace-stone hover:bg-slate-100 rounded-2xl flex items-center justify-center text-slate-500"
+                className="h-14 md:h-16 [@media(max-height:560px)]:h-11 bg-mipiace-stone hover:bg-slate-100 rounded-2xl flex items-center justify-center text-slate-500"
                 aria-label="Borrar último dígito"
               >
                 <Delete className="w-5 h-5" strokeWidth={2.25} />
@@ -448,44 +630,11 @@ export function PinScreen({
               type="button"
               onClick={submit}
               disabled={!canSubmit}
-              className="mt-6 w-full h-14 bg-mipiace-coral hover:bg-mipiace-coral-dark text-white font-medium text-[15px] rounded-2xl disabled:opacity-50 flex items-center justify-center gap-2"
+              className="mt-6 [@media(max-height:560px)]:mt-0 w-full h-14 [@media(max-height:560px)]:h-12 bg-mipiace-coral hover:bg-mipiace-coral-dark text-white font-medium text-[15px] rounded-2xl disabled:opacity-50 flex items-center justify-center gap-2 [@media(max-height:560px)]:col-start-2 [@media(max-height:560px)]:row-start-2 [@media(max-height:560px)]:self-end"
             >
               {busy && <Loader2 className="w-4 h-4 animate-spin" />}
               Entrar
             </button>
-            {/* v1.3-piloto-feedback · Lote 4: tres estados visuales.
-                  isLocked → bloque ámbar con countdown, sin botón.
-                  attemptsRemaining ≤ 3 → aviso slate (suave) con
-                    intentos restantes. No rojo: el primer fallo no
-                    debe asustar.
-                  error (resto) → rojo clásico (auth fallida con
-                    attemptsRemaining=4 cae aquí como mensaje plano si
-                    el backend no manda data). */}
-            {isLocked && (
-              <div className="mt-4 flex items-start gap-2 text-[13px] text-amber-900 bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-2.5">
-                <CircleAlert className="w-4 h-4 mt-px shrink-0 text-amber-600" />
-                <span>
-                  Cuenta bloqueada por demasiados intentos. Vuelve a probar en{" "}
-                  <strong>{formatCountdown(lockSecondsRemaining)}</strong>.
-                </span>
-              </div>
-            )}
-            {!isLocked && attemptsRemaining != null && attemptsRemaining <= 3 && (
-              <div className="mt-4 flex items-start gap-2 text-[13px] text-slate-600 bg-slate-50 rounded-xl px-3.5 py-2.5">
-                <CircleAlert className="w-4 h-4 mt-px shrink-0 text-amber-500" />
-                <span>
-                  Email o PIN incorrecto · Te quedan{" "}
-                  <strong>{attemptsRemaining}</strong>{" "}
-                  intento{attemptsRemaining === 1 ? "" : "s"} antes del bloqueo.
-                </span>
-              </div>
-            )}
-            {!isLocked && error && (
-              <div className="mt-4 flex items-start gap-2 text-[13px] text-red-700 bg-red-50 rounded-xl px-3.5 py-2.5">
-                <AlertCircle className="w-4 h-4 mt-px shrink-0" />
-                <span>{error}</span>
-              </div>
-            )}
           </div>
         </div>
       </main>

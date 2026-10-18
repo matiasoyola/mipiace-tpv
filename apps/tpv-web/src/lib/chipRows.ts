@@ -28,8 +28,48 @@
 // ancho disponible y de las etiquetas: determinista, sin reflow y
 // testeable sin navegador.
 
-/** Filas máximas antes de mandar el resto al sheet. */
+/** Filas máximas en un TERMINAL antes de mandar el resto al sheet. */
 export const CHIP_MAX_ROWS = 1;
+
+// n1-vertical · LA EXCEPCIÓN DEL APARATO DE MANO, y por qué no es una
+// marcha atrás de v1.14.1.
+//
+// Medido en el N1 el 2026-10-18 (fila de 328 px, vertical):
+//
+//   Servicios 92 + Productos 99 + Todos 98 + «Más (8)» 107 + huecos = 437
+//
+// En 328 px no caben ni siquiera los chips FIJOS más el chip que anuncia
+// el resto. Con una sola fila, «Más (8)» se salía hasta x=453 y —al ser
+// la fila `overflow-hidden`, que es lo que manda `ux-principles` §1.8
+// para no deslizar en táctil— **las ocho familias quedaban
+// inalcanzables**. No es que se vieran pocas: es que no había forma de
+// llegar a ellas.
+//
+// v1.14.1 quitó la segunda fila midiendo el AP11, donde el eje escaso es
+// el VERTICAL: a 800 px de alto la fila costaba media fila de producto.
+// En un aparato de mano en vertical pasa lo contrario —648 px de alto y
+// 328 de ancho—, así que la segunda fila se paga con lo que sobra y
+// compra lo único que importa: que se vea que hay más y que se pueda
+// tocar.
+//
+// El terminal NO cambia: con la columna del AP11 (840 px) esto devuelve
+// 1, que es el invariante que vigila `chip-rows.test.ts`.
+export const CHIP_MAX_ROWS_ESTRECHO = 2;
+
+/**
+ * Por debajo de este ancho de fila, el reparto usa dos filas.
+ *
+ * 520 y no 437 (lo medido en el N1) para dejar margen a etiquetas más
+ * largas que las de Sirope: lo que decide es si los chips fijos y el
+ * «Más (N)» caben juntos en una fila, y eso depende del catálogo.
+ */
+export const ANCHO_FILA_ESTRECHA = 520;
+
+/** Cuántas filas de chips admite una fila de este ancho. */
+export function filasDeChips(rowWidth: number): number {
+  const width = rowWidth > 0 ? rowWidth : CHIP_FALLBACK_ROW_WIDTH;
+  return width < ANCHO_FILA_ESTRECHA ? CHIP_MAX_ROWS_ESTRECHO : CHIP_MAX_ROWS;
+}
 
 /** `gap-2` de Tailwind. */
 const CHIP_GAP = 8;
@@ -114,12 +154,16 @@ export function layoutChips(
   labels: string[],
   rowWidth: number = CHIP_FALLBACK_ROW_WIDTH,
   leading: string[] = [],
+  // n1-vertical · se deriva del ancho a propósito: así el reparto sigue
+  // siendo una función pura de lo que hay en pantalla y ningún sitio
+  // puede pedir dos filas en un terminal por descuido.
+  maxRows: number = filasDeChips(rowWidth),
 ): ChipLayout {
   const width = rowWidth > 0 ? rowWidth : CHIP_FALLBACK_ROW_WIDTH;
   const leadingWidths = leading.map(estimateChipWidth);
   const labelWidths = labels.map(estimateChipWidth);
 
-  if (fitsInRows([...leadingWidths, ...labelWidths], width, CHIP_MAX_ROWS)) {
+  if (fitsInRows([...leadingWidths, ...labelWidths], width, maxRows)) {
     return { visibleCount: labels.length, overflowCount: 0 };
   }
 
@@ -127,7 +171,7 @@ export function layoutChips(
     const overflow = labels.length - n;
     const moreWidth = estimateChipWidth(`Más (${overflow})`);
     const candidate = [...leadingWidths, ...labelWidths.slice(0, n), moreWidth];
-    if (fitsInRows(candidate, width, CHIP_MAX_ROWS)) {
+    if (fitsInRows(candidate, width, maxRows)) {
       return { visibleCount: n, overflowCount: overflow };
     }
   }

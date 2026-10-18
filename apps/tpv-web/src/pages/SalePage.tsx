@@ -121,6 +121,7 @@ import { urlDeclaracionResponsable } from "../lib/declaracionResponsable.js";
 import { useElapsedTime } from "../hooks/useElapsedTime.js";
 import { avisarAjustesCambiados } from "../hooks/useDeviceBootstrap.js";
 import { useStoreEventStream } from "../hooks/useStoreEventStream.js";
+import { useTecladoDelSistema } from "../hooks/useTecladoDelSistema.js";
 import type { ModifierSelection } from "../lib/cart.js";
 import { refreshFiscalHead } from "../lib/fiscal.js";
 import { newId } from "../lib/ids.js";
@@ -144,7 +145,7 @@ import {
   type CategoryIconName,
   type CategoryTone,
 } from "../lib/categoryTones.js";
-import { layoutChips } from "../lib/chipRows.js";
+import { filasDeChips, layoutChips } from "../lib/chipRows.js";
 import { PRODUCT_CARD_MIN_HEIGHT } from "../lib/catalogGrid.js";
 import { isTouchDevice } from "../lib/touchDevice.js";
 import { SaleSearchInput } from "../components/SaleSearchInput.js";
@@ -384,6 +385,13 @@ export interface SalePageProps {
   // sala). Esta pantalla conserva el gate `agendaEnabled` del botón y
   // sólo avisa hacia arriba; quien la pinta es `App`.
   onOpenAgenda?: () => void;
+  // n1-vertical · la agenda es un overlay que pinta `App` POR ENCIMA de
+  // esta pantalla, así que la venta no se desmonta: su barra inferior
+  // fija sigue pintándose y tapa el pie de la agenda (en la pasada del
+  // N1, el botón «Reservar» de «Nueva cita», captura `22-nueva-cita`).
+  // Esta pantalla no puede deducirlo —el overlay no es suyo—, así que
+  // quien lo abre lo dice.
+  agendaAbierta?: boolean;
   shiftId: string;
   // v1.7-alias-cajeros: label de display (alias con fallback a email),
   // calculado en App con cashierDisplayLabel.
@@ -492,6 +500,15 @@ export function SalePage(props: SalePageProps) {
   const [showCloseShift, setShowCloseShift] = useState(false);
   // v1.3 Lote 4 · arqueo X intermedio. Reusa el mismo modal con `mode="X"`.
   const [showArqueoX, setShowArqueoX] = useState(false);
+  // n1-vertical · ¿hay algo pintado POR ENCIMA de la pantalla de venta?
+  //
+  // La venta no se desmonta cuando se abre la agenda ni cuando se abre
+  // «Cerrar el día»: son overlays. La barra inferior del ticket es
+  // `fixed` en z-40 y se pinta sobre su pie. La agenda llega por prop
+  // —ese overlay es de `App` y esta pantalla no puede saberlo— y los
+  // modales de cierre y arqueo son suyos.
+  const overlayEncima =
+    props.agendaAbierta === true || showCloseShift || showArqueoX;
   const [showHistory, setShowHistory] = useState(false);
   // v1.8-Fiado · pantalla Deudas + flag de venta a crédito del tenant.
   const [showDebts, setShowDebts] = useState(false);
@@ -3027,6 +3044,7 @@ export function SalePage(props: SalePageProps) {
               />
             )}
             <HospitalityWorkspace
+              overlayEncima={overlayEncima}
               products={filtered}
               searchQuery={query}
               catalogError={catalogError}
@@ -3334,6 +3352,7 @@ export function SalePage(props: SalePageProps) {
           )}
 
           <SaleWorkspace
+            overlayEncima={overlayEncima}
             products={filtered}
             searchQuery={query}
             wildcards={wildcards}
@@ -4040,7 +4059,7 @@ export function SalePage(props: SalePageProps) {
             drawerOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
-          <div className="mb-7 flex items-center justify-between">
+          <div className="mb-7 flex shrink-0 items-center justify-between">
             <Logo size={28} />
             <button
               type="button"
@@ -4052,7 +4071,24 @@ export function SalePage(props: SalePageProps) {
               <X className="w-4 h-4" strokeWidth={2.1} />
             </button>
           </div>
-          <nav className="space-y-1.5">
+          {/* n1-vertical · LA LISTA DEL CAJÓN SE DESPLAZA SOLA.
+              El `aside` es `flex flex-col` de alto completo, pero la
+              lista no tenía ni `flex-1` ni `overflow`: en el N1 (viewport
+              de 360×648) «Declaración responsable» quedaba en y=354,
+              fuera de pantalla y sin forma de llegar a ella, y al
+              deslizar se movía la pantalla de venta de detrás (capturas
+              `23-menu` y `24-menu-scroll`).
+
+              `min-h-0` es imprescindible junto a `flex-1`: sin él el
+              mínimo de contenido de un hijo flex es su alto intrínseco,
+              así que la lista desborda el cajón y `overflow-y-auto` no
+              tiene nada que recortar.
+
+              `overscroll-contain` es la otra mitad del hallazgo: sin él,
+              al llegar al final de la lista el gesto sigue hacia la
+              página de detrás (scroll chaining), que es exactamente lo
+              que se vio. */}
+          <nav className="flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-1.5">
             <button
               onClick={() => setDrawerOpen(false)}
               title={vocab("saleNoun", businessType)}
@@ -4225,7 +4261,7 @@ export function SalePage(props: SalePageProps) {
           {/* A3-distribución · Frente 2. `select-all` para que en soporte
               baste un toque para seleccionarlo y leerlo por teléfono. */}
           {versionLabel ? (
-            <p className="mt-auto pt-4 text-[11.5px] leading-tight text-slate-400 tabular-nums select-all">
+            <p className="mt-auto shrink-0 pt-4 text-[11.5px] leading-tight text-slate-400 tabular-nums select-all">
               {versionLabel}
             </p>
           ) : null}
@@ -4520,6 +4556,7 @@ function Banner({ color, children }: { color: "amber" | "red"; children: React.R
 }
 
 function SaleWorkspace({
+  overlayEncima,
   appointmentContext,
   products,
   searchQuery,
@@ -4559,6 +4596,10 @@ function SaleWorkspace({
   bonoEtiqueta,
   onBonoCambiado,
 }: {
+  // n1-vertical · hay algo pintado POR ENCIMA de la pantalla de venta
+  // (la agenda, «Cerrar el día», el arqueo X). Ver la nota de
+  // `overlayEncima` en `SalePage`.
+  overlayEncima: boolean;
   // B-reservas-8 · lo del chip del bono, de arriba abajo. Vive en
   // `SalePage` (que es quien tiene el id del borrador y recarga sus líneas)
   // y baja por props hasta la línea.
@@ -4756,6 +4797,10 @@ function SaleWorkspace({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  // n1-vertical · cuántas filas admite el ancho que hay de verdad. Con
+  // `chipRowWidth` a 0 (primer render, jsdom) sale 1, que es el reparto
+  // del terminal: sin medida se defiende el viewport de diseño.
+  const chipFilas = useMemo(() => filasDeChips(chipRowWidth), [chipRowWidth]);
   const chipLayout = useMemo(
     () =>
       layoutChips(
@@ -4826,6 +4871,28 @@ function SaleWorkspace({
   // sólo "abierto/cerrado" — las líneas viven arriba en SalePage, así
   // que cerrar el sheet nunca pierde nada.
   const [mobileTicketOpen, setMobileTicketOpen] = useState(false);
+  // n1-vertical · LA BARRA INFERIOR ES DE LA PANTALLA DE VENTA, Y SÓLO
+  // MIENTRAS SE MARCA. Dos sitios donde estorba, los dos vistos en el N1
+  // el 2026-10-16:
+  //
+  //   · con un OVERLAY encima: la venta no se desmonta, la barra es
+  //     `fixed` y empata en z-40 con el overlay, así que gana la que va
+  //     después en el DOM —ella— y tapa su pie. Dos medidos a 360×640:
+  //     el botón «Reservar» de «Nueva cita» (captura `22-nueva-cita` del
+  //     N1) y el «Cancelar» de «Cerrar el día» (captura
+  //     `11-cerrar-el-dia-360x640`). Por eso el prop se llama
+  //     `overlayEncima` y no «agenda»: la regla es que la barra no pinta
+  //     sobre nada que esté por encima de la venta;
+  //   · con el TECLADO del sistema abierto (`27-busqueda-teclado`): la
+  //     barra se pega sobre el teclado con `--keyboard-offset` y ocupa
+  //     el único hueco que queda para los resultados de la búsqueda. Se
+  //     busca un producto y no se ve ni uno.
+  //
+  // No se pierde nada al ocultarla: el total vuelve en cuanto se cierra
+  // la agenda o se baja el teclado, y mientras el cajero teclea lo que
+  // necesita ver es la lista.
+  const tecladoAbierto = useTecladoDelSistema();
+  const barraTicketVisible = !overlayEncima && !tecladoAbierto;
   // B-reservas-2: mapa productId → duración de servicio para pintar los
   // minutos informativos por línea del ticket. Sólo se construye si el
   // tenant tiene la agenda activa; en caso contrario queda vacío y el
@@ -4921,10 +4988,23 @@ function SaleWorkspace({
             cabe en 843. Y de paso el bloque de chips deja de costar sus
             72 px de alto, que son los que convierten cuatro filas de
             producto en cinco. */}
+        {/* n1-vertical · EN ESTRECHO LA FILA ENVUELVE A DOS LÍNEAS.
+            En el N1 (fila de 328 px) los chips fijos más el «Más (N)»
+            suman 437: con una sola fila y `overflow-hidden` —que es lo
+            que pide `ux-principles` §1.8 para no deslizar en táctil— el
+            chip que abre el resto de familias quedaba cortado y SIN
+            forma de llegar a él. Con dos filas se ve que hay más y se
+            puede tocar.
+            El umbral y el reparto viven en `chipRows.ts` y son una
+            función pura del ancho: en el AP11 (840 px de columna) esto
+            sigue siendo UNA fila, `flex-nowrap` y `overflow-hidden`,
+            byte por byte lo de v1.14.1. */}
         <div
           ref={chipRowRef}
           data-testid="category-chips"
-          className="lg:hidden flex flex-nowrap items-center gap-2 mb-4 md:mb-6 shrink-0 overflow-hidden"
+          className={`lg:hidden flex items-center gap-2 mb-4 md:mb-6 shrink-0 ${
+            chipFilas > 1 ? "flex-wrap" : "flex-nowrap overflow-hidden"
+          }`}
         >
           {/* P-1 (v1.1 peluquería): toggle Servicios/Productos para
               verticales SERVICES. Va delante de los chips de tag y
@@ -5215,7 +5295,9 @@ function SaleWorkspace({
           <1024px. Siempre visible: nº de líneas + total grande + abrir
           ticket; en contexto mesa añade "Comanda" (Lote 2.2). Anclada
           sobre el teclado virtual vía --keyboard-offset. */}
+      {barraTicketVisible && (
       <div
+        data-testid="barra-ticket"
         className="lg:hidden fixed inset-x-0 z-40 bg-white border-t border-slate-200 px-3 py-2 flex items-center gap-2"
         style={{ bottom: "var(--keyboard-offset, 0px)" }}
       >
@@ -5264,6 +5346,7 @@ function SaleWorkspace({
           </span>
         </button>
       </div>
+      )}
 
       {/* v1.0-handheld · Lote 1.3: carrito como bottom-sheet. Reutiliza
           el TicketPanel del escritorio — re-layout, no re-implementación.

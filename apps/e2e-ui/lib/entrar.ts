@@ -71,6 +71,15 @@ export async function entrarTpv(
   const campoEmail = page.locator("#cashierEmail");
   await expect(campoEmail).toBeVisible({ timeout: 30_000 });
   await campoEmail.fill(email);
+  // n1-vertical · EN COMPACTO ESTA PANTALLA SON DOS PASOS.
+  //
+  // Por debajo de 768 px de ancho (el móvil de una profesional, 390, y el
+  // N1 en vertical, 360) las dos tarjetas no caben apiladas: el teclado
+  // de PIN está en el paso siguiente y hay una puerta explícita. En `md`
+  // hacia arriba —el AP11 del banco— el botón no se ve y esto no hace
+  // nada, así que el camino de los capítulos de 1280 es el de siempre.
+  const continuar = page.getByTestId("pin-continuar");
+  if (await continuar.isVisible().catch(() => false)) await continuar.click();
   // El PIN se marca en el teclado numérico de la pantalla, dígito a dígito:
   // es un pad de botones, no un input donde se pueda escribir.
   for (const d of opciones.pin ?? PIN) {

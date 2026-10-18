@@ -1020,6 +1020,11 @@ export function TpvHome(props: {
           "quick-sale"
         }
         onOpenAgenda={() => setShowAgenda(true)}
+        // n1-vertical · la agenda es un overlay y la venta sigue montada
+        // debajo. Sin esto, su barra inferior fija se pinta ENCIMA de la
+        // agenda y tapa el pie de «Nueva cita», donde está «Reservar»
+        // (pasada del N1, captura `22-nueva-cita`).
+        agendaAbierta={showAgenda}
         // kds-1-cocina · el módulo «Cocina» y los ajustes de ESTA tienda,
         // tal como los trae `/devices/me`. Van por props y no por un
         // contexto nuevo porque son dos valores que no cambian durante la
