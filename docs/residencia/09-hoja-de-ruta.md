@@ -37,6 +37,7 @@ la medicación completa.
 | residencia-4 | Constantes, umbrales, eventos derivados, libro de incidencias, comunicación a familia | 3 |
 | residencia-5 | Relevo con acuse, panel de dirección, obligaciones del mes | 4 |
 | residencia-1b | Cifrado en reposo de DNI, NSS y textos libres de residencia-1 y -2, con la maquinaria de clinica-7 (D-62, D-63) | 1 + clinica-7 (**hecho**, PR #24) |
+| residencia-6 | Antes del piloto: PIN por alcance (D-68), rastro de lo que no se descifra, la puerta sin red recuerda lo suyo, parte de turno sin plan, barrido de huérfanos | 5 |
 | *(piloto)* | Una planta, 4-6 tablets, dos semanas; luego todo el centro | 5 + 1b |
 
 ### Fase 1b · calidad mínima para la auditoría — objetivo: abril 2027
