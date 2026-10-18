@@ -343,9 +343,9 @@ la pasada y da para su propio ratito.
 ```
 fichero   apps/tpv-android/build-releases/mipiacetpv-1.27.0-12700.apk
 versión   1.27.0 (versionCode 12700)
-commit    ab36a95   (árbol limpio: sin marca -dirty)
-tamaño    9.386.837 bytes
-SHA-256   8c11b2c477dbc7e42b834d5bf305c5fa3734e86a39dc87508b8a8109ca582cd8
+commit    f8e1db4   (árbol limpio: sin marca -dirty)
+tamaño    9.387.085 bytes
+SHA-256   886e43a2da0811a45f94bf382e290a52d44c4da0f5901800d00bf34358798177
 firma     Signer #1 CN=mipiacetpv, O=mipiace, L=Madrid, C=ES
           SHA-256 677d862054ea4aff904d1dd885231d28609e7de2f0b6997cc96d529dd405bfd6
 ```
@@ -360,6 +360,10 @@ Compilada con `apps/tpv-android/scripts/build-release-apk.sh 1.27.0` (`JAVA_HOME
 `ANDROID_HOME` las commandlinetools del Mac), con las seis guardas del script en verde: backend de
 producción embebido, sin Service Worker en el dist **ni** en los assets sincronizados, origen del
 WebView verificado por las dos vías y firma comprobada con `apksigner`.
+
+`f8e1db4` es **el último commit que toca código**: lo que va detrás es documentación, así que el
+APK entregado y la cabeza de la rama ejecutan lo mismo. Es la build que se instaló en el N1 y con
+la que están medidas las comprobaciones de §9.0.
 
 **No se publica.** La publica Matías tras la pasada:
 
@@ -434,7 +438,7 @@ Con la 1.27.0 instalada, el aparato emparejado a **PRUEBAS MIPIACE** y DevTools 
 | Venta | barra del ticket `y 655 → 720`; la página no desborda | bien |
 | Hoja del ticket | la hoja mide **390 px** y la zona de líneas **83**, con la línea entera | (en horizontal: 24 px) |
 | Cobro | los cinco métodos en una fila, importe, teclado de efectivo y **«Cerrar servicio» en `y 640 → 704`** | (en horizontal: 70 px de cuerpo) |
-| Búsqueda con teclado | `innerHeight` 720 → **449**; la barra en `y 384 → 449` **tapaba los 4 resultados** (§9.3) | arreglado |
+| Búsqueda con teclado | antes: `innerHeight` 720 → **449** y la barra en `y 384 → 449` **tapando los 4 resultados**. Con el arreglo y la APK nueva: barra **oculta**, **0 de 4 tapados** (captura `42`) | arreglado y comprobado |
 | Agenda | **sin barra del ticket** | bien |
 | Nueva cita | «Reservar» en `y 604 → 652`, nada encima, sin barra | bien |
 | Menú | «Declaración responsable» en `y 354 → 402`, visible y sin tapar; en vertical la lista cabe entera | bien |
