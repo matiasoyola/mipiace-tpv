@@ -211,6 +211,22 @@ describe("n1-vertical · PIN a 360×640 (el N1 en vertical)", () => {
     expect(tarjetaTeclado().contains(boton("Entrar"))).toBe(true);
   });
 
+  it("«Cambiar de cajero» tiene el área táctil de la casa (44 px)", async () => {
+    // Medido en el N1 con Sirope el 2026-10-18: 107 × 19 px. Es el único
+    // camino de vuelta si te equivocas de cajero, y se falla con prisa.
+    // jsdom no calcula layout, así que lo que se fija es la clase que da
+    // los 44 px (`min-h-11`); la medida real está en el `-done`.
+    await renderPin();
+    await click(cajeroReciente());
+    const volver = container.querySelector<HTMLElement>(
+      '[data-testid="pin-cambiar-cajero"]',
+    )!;
+    expect(volver.className).toContain("min-h-11");
+    // Y sigue centrado y con pinta de enlace: lo que crece es la caja.
+    expect(volver.className).toContain("inline-flex");
+    expect(volver.className).toContain("underline");
+  });
+
   it("se puede volver al cajero sin recargar", async () => {
     await renderPin();
     await click(cajeroReciente());

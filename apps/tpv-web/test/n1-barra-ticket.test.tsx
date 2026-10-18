@@ -332,6 +332,24 @@ describe("n1-vertical · las familias se alcanzan en un aparato de mano", () => 
   });
 });
 
+describe("n1-vertical · los rótulos de familia no se cortan a mitad de palabra", () => {
+  it("el azulejo de familia trunca con puntos suspensivos", async () => {
+    // Medido en el N1 con la carta de Sirope (azulejos de 104 px):
+    // «Croissantysandwich» mide 206 px y se leía «Croissanty», saliéndose
+    // además del azulejo porque no había `overflow`.
+    vertical.actual = "HOSPITALITY";
+    declaraHandheld();
+    await renderSale();
+    const azulejos = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-testid="family-button"]'),
+    );
+    expect(azulejos.length).toBeGreaterThan(0);
+    for (const a of azulejos) {
+      expect(a.className).toContain("truncate");
+    }
+  });
+});
+
 describe("n1-vertical · la barra del ticket y «Cerrar el día»", () => {
   it("con el modal de cierre abierto, la barra no se pinta encima", async () => {
     // Medido a 360×640 el 2026-10-18 (captura `11-cerrar-el-dia-360x640`):

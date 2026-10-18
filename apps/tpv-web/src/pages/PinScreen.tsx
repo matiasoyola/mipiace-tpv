@@ -478,6 +478,17 @@ export function PinScreen({
                 </div>
                 {/* n1-vertical · la vuelta al paso del cajero. Sólo en
                     compacto: en `md` las dos tarjetas están a la vista. */}
+                {/* n1-vertical · `min-h-11` son los 44 px de objetivo
+                    táctil de la casa. Medido en el N1 el 2026-10-18 con
+                    la carta de Sirope: este botón era de **19 px de
+                    alto**, y es el ÚNICO camino de vuelta si te
+                    equivocas de cajero —con prisa y el teclado abierto,
+                    se falla—. El resto de la pantalla ya cumplía: las
+                    teclas del PIN miden 56.
+                    Se queda con pinta de enlace (subrayado, gris) y lo
+                    que crece es el área de toque, no el texto: `px-3`
+                    para los lados y `inline-flex` para que el rótulo
+                    siga centrado dentro de la caja más alta. */}
                 <button
                   type="button"
                   data-testid="pin-cambiar-cajero"
@@ -486,7 +497,7 @@ export function PinScreen({
                     setPin("");
                     setError(null);
                   }}
-                  className="md:hidden mt-1 text-[12.5px] text-slate-400 underline underline-offset-2"
+                  className="md:hidden mt-1 inline-flex min-h-11 items-center justify-center px-3 text-[12.5px] text-slate-400 underline underline-offset-2"
                 >
                   Cambiar de cajero
                 </button>

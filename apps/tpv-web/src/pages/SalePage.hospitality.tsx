@@ -783,7 +783,15 @@ function FamilyButton({
       aria-pressed={active}
       data-testid="family-button"
       data-active={active ? "true" : "false"}
-      className={`border-0 rounded-[14px] font-semibold cursor-pointer ${PRESS_FEEDBACK_CLASS}`}
+      // n1-vertical · `truncate` y no el `clip` de serie. Medido en el
+      // N1 con la carta de Sirope (azulejos de 104 px): «Croissantysandwich»
+      // mide 206 px, «Suplemento» 122 y «Desayunos» 111, así que el
+      // rótulo se cortaba a mitad de palabra —«Croissanty», «Suplement»—
+      // y, sin `overflow`, además se salía del azulejo y se metía en el
+      // de al lado. Con `truncate` el corte es con puntos suspensivos y
+      // se queda dentro: el camarero ve que el nombre sigue.
+      // `px-1.5` para que la elipsis no toque el borde.
+      className={`border-0 rounded-[14px] px-1.5 font-semibold cursor-pointer truncate ${PRESS_FEEDBACK_CLASS}`}
       style={{
         height: FAMILY_BUTTON_PX,
         fontSize: FAMILY_LABEL_PX,
