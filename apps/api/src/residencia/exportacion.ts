@@ -17,6 +17,9 @@
 //     los avisos y sus acuses, los enlaces con otras y **lo que se le
 //     dijo a la familia o por qué no** — todo descifrado. Y las
 //     **excepciones de umbral** que le pautó la médica, con su motivo.
+//   · residencia-5 · **lo que de él salió en cada parte de relevo**, con
+//     el turno, la hora de congelado, si el parte quedó confirmado y
+//     quién lo confirmó; y lo suyo que «llegó después del relevo».
 //
 // ── Por qué el registro entero y no un resumen ──────────────────────
 //
@@ -63,6 +66,11 @@ import { leerFichero } from "../clinica/ficheros.js";
 import { frecuenciaEnPalabras } from "@mipiacetpv/residencia-plan";
 import { deColumnas, FRECUENCIA_SELECT } from "./frecuencia-columnas.js";
 import { REGISTRO_SELECT, vistaDeRegistros } from "./registro.js";
+import {
+  leerAnadidosTardios,
+  leerParteCongelado,
+  type LineaDelParte,
+} from "./relevo.js";
 
 /** Un fichero del volumen que hay que meter en el ZIP. */
 export interface FicheroDeResidencia {
@@ -131,6 +139,8 @@ export async function parteDeResidencia(
     consentimientosDeImagen,
     incidenciasSuyas,
     excepciones,
+    partesDeRelevo,
+    tardiosSuyos,
   ] = await Promise.all([
       prisma.bedAssignment.findMany({
         where: { tenantId, clientId },
@@ -304,7 +314,124 @@ export async function parteDeResidencia(
           },
         },
       }),
+      // ── residencia-5 · LOS PARTES DE RELEVO DE SU ESTANCIA ────────
+      //
+      // Acotados a **su estancia** y no a todos los del centro: un centro
+      // con cinco años de historia tiene unos 5.500 partes, y el de la
+      // noche del año antes de que ingresara no dice nada de él. El
+      // recorte es por `care_day`, que es la columna que agrupa el
+      // histórico y está en claro a propósito.
+      prisma.handover.findMany({
+        where: {
+          tenantId,
+          // Las dos cotas en UN objeto `careDay` y no en dos: con dos
+          // `...spread` que llevan la misma clave, el segundo pisa al
+          // primero en silencio y la cota de ingreso se perdería.
+          careDay: {
+            ...(perfil.admissionDate == null
+              ? {}
+              : { gte: perfil.admissionDate.toISOString().slice(0, 10) }),
+            ...(perfil.dischargeDate == null
+              ? {}
+              : { lte: perfil.dischargeDate.toISOString().slice(0, 10) }),
+          },
+        },
+        orderBy: [{ careDay: "asc" }, { frozenAt: "asc" }],
+        select: {
+          id: true,
+          careDay: true,
+          frozenAt: true,
+          confirmedAt: true,
+          centerShift: { select: { code: true, name: true } },
+          acks: {
+            orderBy: { at: "asc" },
+            select: {
+              at: true,
+              alcanceTotal: true,
+              user: { select: { alias: true, email: true } },
+              careRoleAssignment: { select: { careRole: { select: { code: true } } } },
+            },
+          },
+        },
+      }),
+      // Y lo suyo que llegó después de un relevo congelado. Aquí la FK es
+      // directa, así que es una consulta barata.
+      prisma.handoverLateAddition.findMany({
+        where: { tenantId, clientId },
+        orderBy: { arrivedAt: "asc" },
+        select: { id: true, handoverId: true },
+      }),
     ]);
+
+  // ── residencia-5 · sus líneas de cada parte ──────────────────────
+  //
+  // El parte va cifrado entero, así que para saber qué decía de ESTE
+  // residente hay que descifrarlo y buscarlo dentro. Se hace aquí y no en
+  // una vista porque es una exportación que corre una vez: lo que no se
+  // puede hacer es guardar las líneas por residente en claro al lado,
+  // que es lo que haría falta para consultarlo con un `WHERE`.
+  //
+  // Un parte que no se descifra se devuelve con su incidencia anotada, no
+  // se salta: el ZIP tiene que decir qué falta.
+  const relevos: unknown[] = [];
+  for (const h of partesDeRelevo) {
+    const contenido = await leerParteCongelado(prisma, tenantId, h.id);
+    if (contenido == null) {
+      incidencias.push(
+        `el parte de relevo del ${h.careDay} (${h.centerShift.code}) no se pudo descifrar`,
+      );
+      continue;
+    }
+    const suyas: LineaDelParte[] = [];
+    for (const zona of contenido.zonas) {
+      for (const r of zona.residentes) {
+        if (r.clientId !== clientId) continue;
+        suyas.push(...r.lineas);
+      }
+    }
+    // Un parte en el que no salió **no se mete**: «el 3 de marzo no pasó
+    // nada de doña Carmen» ya lo dice su ausencia, y meter 5.500 entradas
+    // vacías haría ilegible el fichero.
+    if (suyas.length === 0) continue;
+    const tardiosDeEste = tardiosSuyos.filter((t) => t.handoverId === h.id);
+    relevos.push({
+      id: h.id,
+      dia: h.careDay,
+      turno: h.centerShift.code,
+      nombreDelTurno: h.centerShift.name,
+      congeladoEn: h.frozenAt.toISOString(),
+      confirmadoEn: h.confirmedAt?.toISOString() ?? null,
+      // **Quién lo recibió**, que es la evidencia que este bloque añade:
+      // que la información pasó de un turno a otro.
+      confirmadoPor: h.acks.map((a) => ({
+        nombre: nombreCorto(a.user),
+        conElRol: a.careRoleAssignment.careRole.code,
+        en: a.at.toISOString(),
+        alcanceTotal: a.alcanceTotal,
+      })),
+      lineas: suyas.map((l) => ({
+        clase: l.clase,
+        texto: l.texto,
+        hora: l.hora,
+        nivel: l.nivel,
+        incidencia: l.incidentId,
+        registro: l.careRecordId,
+      })),
+      llegaronDespues: tardiosDeEste.length,
+    });
+  }
+  const tardios =
+    tardiosSuyos.length === 0
+      ? []
+      : (
+          await Promise.all(
+            [...new Set(tardiosSuyos.map((t) => t.handoverId))].map((h) =>
+              leerAnadidosTardios(prisma, tenantId, h),
+            ),
+          )
+        )
+          .flat()
+          .filter((t) => t.clientId === clientId);
 
   const vista = vistaDeRegistros(registros, dek);
   const porId = new Map(registros.map((r) => [r.id, r]));
@@ -585,6 +712,22 @@ export async function parteDeResidencia(
           vigente: r.vigente,
         };
       }),
+      // ── residencia-5 · el relevo ───────────────────────────────────
+      //
+      // Lo que de él se contó al turno siguiente, con quién lo recibió. Es
+      // dato personal suyo y el art. 28.3.g obliga: que el parte esté
+      // cifrado en reposo no lo saca del alcance (misma decisión que
+      // residencia-4 tomó con las incidencias).
+      relevos,
+      llegoDespuesDelRelevo: tardios.map((t) => ({
+        parte: t.id,
+        clase: t.kind,
+        resumen: t.resumen,
+        ocurrioEn: t.ocurrioEn,
+        llegoEn: t.llegoEn,
+        incidencia: t.incidentId,
+        registro: t.careRecordId,
+      })),
     },
   };
 }

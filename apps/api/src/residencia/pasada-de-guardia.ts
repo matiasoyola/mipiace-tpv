@@ -3,6 +3,14 @@
 // Lo que corre cada minuto: escalar los avisos que nadie ha acusado y,
 // en la hora en punto, mirar lo que NO hay (sin deposición, sin comer).
 //
+// residencia-5 le añade una tercera mitad: **el relevo y las
+// obligaciones** (`pasada-de-relevo.ts`). Va en la MISMA cola y en el
+// mismo worker a propósito, y no en una segunda: un repeatable más es un
+// repeatable más que puede quedarse sin registrar, y las tres cosas son
+// «lo que la residencia hace sola cada minuto». Lo que sí está separado
+// es el fichero, porque son dos problemas distintos y el de residencia-4
+// no se toca.
+//
 // Vive aquí y no dentro del worker por lo mismo que `runDayCutPass` de
 // v1.13: así el e2e puede ejecutar **exactamente la misma pasada** con un
 // reloj falso y sin levantar Redis, y desconectar una de las dos mitades
@@ -11,6 +19,10 @@
 import type { PrismaClient } from "@mipiacetpv/db";
 
 import { pasadaDeEscalado, type AvisoCreado } from "./aviso.js";
+import {
+  pasadaDeRelevo,
+  type ResultadoDeLaPasadaDeRelevo,
+} from "./pasada-de-relevo.js";
 import {
   pasadaDeAusenciasGlobal,
   type ResultadoDeLaPasada,
@@ -21,6 +33,8 @@ export interface ResultadoDeLaPasadaDeGuardia {
   escalados: AvisoCreado[];
   /** `null` cuando no tocaba (no era la hora en punto). */
   ausencias: ResultadoDeLaPasada[] | null;
+  /** residencia-5 · el relevo y las obligaciones. */
+  relevo: ResultadoDeLaPasadaDeRelevo | null;
 }
 
 /** El minuto en el que corre la pasada de ausencias. Ver la cabecera de
@@ -33,6 +47,8 @@ export async function pasadaDeGuardia(input: {
   /** Fuerza la mitad de las ausencias aunque no sea la hora en punto. Lo
    *  usan el e2e y el disparo a mano. */
   forzarAusencias?: boolean;
+  /** residencia-5 · fuerza la mitad de las obligaciones. */
+  forzarObligaciones?: boolean;
   log?: { info: (o: object, m: string) => void; error: (o: unknown, m?: string) => void };
 }): Promise<ResultadoDeLaPasadaDeGuardia> {
   const ahora = input.ahora ?? new Date();
@@ -93,5 +109,22 @@ export async function pasadaDeGuardia(input: {
     }
   }
 
-  return { escalados, ausencias };
+  // ── 3 · residencia-5 · EL RELEVO Y LAS OBLIGACIONES ──────────────
+  //
+  // Al final y en su propio `try`: lo que no puede esperar es el aviso
+  // (cinco minutos), y un fallo congelando un parte no debe dejar sin
+  // escalar un N2. El orden es el de la urgencia, igual que arriba.
+  let relevo: ResultadoDeLaPasadaDeRelevo | null = null;
+  try {
+    relevo = await pasadaDeRelevo({
+      prisma: input.prisma,
+      ahora,
+      forzarObligaciones: input.forzarObligaciones,
+      log: input.log,
+    });
+  } catch (err) {
+    input.log?.error(err, "residencia · la pasada de relevo falló");
+  }
+
+  return { escalados, ausencias, relevo };
 }

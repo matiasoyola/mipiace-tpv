@@ -92,7 +92,17 @@ export type ClaseDeFichero =
   | "CONSENTIMIENTO"
   | "INFORME"
   | "RESIDENTE"
-  | "VOZ";
+  | "VOZ"
+  /** residencia-5 (D-42) · la EVIDENCIA de una obligación de dirección:
+   *  el certificado del mantenedor de PCI, el informe de extintores, la
+   *  nómina sellada. PDF.
+   *
+   *  **No es un dato de salud** —una obligación de dirección no es de
+   *  nadie— y aun así va al mismo volumen, cifrada con la misma DEK del
+   *  centro y con la huella del claro. La razón es que no se inventa un
+   *  segundo almacén para esto: un volumen más es una copia de seguridad
+   *  más que alguien tiene que acordarse de hacer. */
+  | "EVIDENCIA";
 
 const CARPETA: Record<ClaseDeFichero, string> = {
   FOTO: "fotos",
@@ -100,6 +110,7 @@ const CARPETA: Record<ClaseDeFichero, string> = {
   INFORME: "informes",
   RESIDENTE: "residentes",
   VOZ: "voz",
+  EVIDENCIA: "evidencias",
 };
 
 const EXTENSION: Record<ClaseDeFichero, string> = {
@@ -108,6 +119,7 @@ const EXTENSION: Record<ClaseDeFichero, string> = {
   INFORME: "pdf",
   RESIDENTE: "jpg",
   VOZ: "webm",
+  EVIDENCIA: "pdf",
 };
 
 export const MIME_DE_FOTO = "image/jpeg";
@@ -192,6 +204,40 @@ export function decodificarFoto(datos: unknown): Buffer {
  * dice que hay un audio que no existe (o un audio que no es de nadie). El
  * tope de 2 MB es lo que hace que eso quepa en un POST.
  */
+/**
+ * residencia-5 (D-42) · decodifica y valida la EVIDENCIA de una
+ * obligación: el certificado, el informe.
+ *
+ * En base64 por el cuerpo, igual que la foto y la nota de voz, y por lo
+ * mismo: un `multipart` obligaría a montar el plugin de subida de Fastify
+ * para un endpoint. Tope: el de la foto (4 MB por defecto), que es de
+ * sobra para un certificado escaneado.
+ *
+ * **Y se comprueba la firma del fichero, no lo que diga quien lo manda**:
+ * esto se va a servir a un navegador, y aceptar cualquier cosa y llamarla
+ * PDF es la forma clásica de acabar sirviendo un HTML con script dentro.
+ */
+export function decodificarEvidencia(datos: unknown): Buffer {
+  const pdf =
+    typeof datos === "object" && datos !== null
+      ? (datos as { pdfBase64?: unknown }).pdfBase64
+      : undefined;
+  if (typeof pdf !== "string" || pdf.length === 0) {
+    throw new FotoInvalida("No llegó ningún documento.");
+  }
+  const buf = Buffer.from(pdf, "base64");
+  if (!esPdf(buf)) {
+    throw new FotoInvalida("Lo que llegó no es un PDF.");
+  }
+  const env = loadEnv();
+  if (buf.byteLength > env.CLINICAL_PHOTO_MAX_BYTES) {
+    throw new FotoInvalida(
+      "El documento pesa demasiado. Súbelo escaneado a menos resolución.",
+    );
+  }
+  return buf;
+}
+
 export function decodificarNotaDeVoz(datos: unknown): Buffer {
   const webm =
     typeof datos === "object" && datos !== null
