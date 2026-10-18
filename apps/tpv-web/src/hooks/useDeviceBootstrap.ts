@@ -10,6 +10,9 @@ import {
   olvidarLaPuerta,
   olvidarSesion,
 } from "../residencia/puerta-cache.js";
+// residencia-4 · y la guardia del móvil, por lo mismo: un aparato
+// desemparejado no se queda «de guardia».
+import { olvidarGuardia } from "../residencia/guardia-cache.js";
 
 export interface DeviceMeResponse {
   device: { id: string; name: string | null; pairedAt: string };
@@ -58,7 +61,57 @@ export type BootstrapState =
   // 403 ROOM_DEVICE_NOT_ALLOWED, que es la respuesta correcta y no un
   // error: el corte vive en la puerta de todas las rutas del TPV.
   | { kind: "room"; data: PuertaMeResponse }
+  // residencia-4 (D-66) · esta tablet es un MÓVIL DE GUARDIA. La misma
+  // APK, otra pantalla. Se llega aquí porque `/devices/me` devolvió 403
+  // GUARD_DEVICE_NOT_ALLOWED, que es la respuesta correcta y no un
+  // error.
+  | { kind: "guard"; data: GuardiaMeResponse }
   | { kind: "paired"; data: DeviceMeResponse };
+
+/**
+ * residencia-4 · lo que contesta `GET /residencia/guardia/me`.
+ *
+ * Lo que NO lleva, y es la mitad de la decisión: ni un aviso, ni una
+ * habitación, ni un nombre de residente. Un móvil de guardia es un
+ * teléfono que se queda en una mesa y la pantalla en reposo la ve
+ * cualquiera que pase. Todo lo demás va detrás del PIN.
+ */
+export interface GuardiaMeResponse {
+  device: { id: string; name: string | null };
+  centro: { id: string; nombre: string };
+  canal: "ENFERMERIA" | "RESPONSABLE";
+  turno: { id: string; code: string; name: string } | null;
+  turnos: Array<{
+    id: string;
+    code: string;
+    name: string;
+    startsAt: string;
+    endsAt: string;
+  }>;
+  /** Quién está de guardia AHORA, en todos los canales. */
+  deGuardia: Array<{
+    id: string;
+    canal: "ENFERMERIA" | "RESPONSABLE";
+    deviceId: string;
+    nombre: string;
+    rol: string;
+    turno: string | null;
+    desde: string;
+  }>;
+  /** Y si ESTE móvil está cogido, por quién. */
+  esteMovil: {
+    id: string;
+    canal: "ENFERMERIA" | "RESPONSABLE";
+    deviceId: string;
+    nombre: string;
+    rol: string;
+    turno: string | null;
+    desde: string;
+  } | null;
+  /** El servicio sanitario de guardia del centro (D-33). */
+  servicio: { nombre: string; telefono: string } | null;
+  serverTime: string;
+}
 
 /**
  * residencia-1 · lo que contesta `GET /residencia/puerta/me`.
@@ -221,6 +274,24 @@ export function useDeviceBootstrap(): {
         }
         return;
       }
+      // residencia-4 · «modo guardia». Mismo criterio exacto que
+      // `kitchen` y `room`: si `/residencia/guardia/me` también falla —el
+      // módulo se apagó con el móvil emparejado— se cae a `retry`, que es
+      // lo correcto. Un móvil de guardia que se desempareja solo a las
+      // tres de la mañana es un centro sin avisos hasta que alguien lo
+      // note.
+      if (decision === "guard") {
+        try {
+          const g = await apiWithDevice<GuardiaMeResponse>(
+            "/residencia/guardia/me",
+          );
+          setState({ kind: "guard", data: g });
+        } catch {
+          setState({ kind: "loading" });
+          setTimeout(refresh, 3000);
+        }
+        return;
+      }
       if (decision === "purge") {
         // Sólo borramos cuando el backend confirma que el dispositivo
         // está revocado o el JWT ha caducado — un 401 sin código (o con
@@ -238,6 +309,7 @@ export function useDeviceBootstrap(): {
         // obligaría a hacer asíncrona una función que llaman seis sitios.
         void olvidarLaPuerta();
         olvidarSesion();
+        olvidarGuardia();
         setState({ kind: "unpaired" });
       } else {
         // v1.10-offline: error de red (o 401 ambiguo). Si tenemos un
@@ -270,6 +342,7 @@ export function useDeviceBootstrap(): {
       // la caché de la puerta lleva el plan de dos personas dentro.
       void olvidarLaPuerta();
       olvidarSesion();
+      olvidarGuardia();
       setState({ kind: "unpaired" });
     },
   };

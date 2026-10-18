@@ -42,9 +42,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   diaDelTurno,
+  gravedadDe,
   queToca,
   turnoDe,
   type Ocurrencia,
+  type ReglaDeGravedad,
 } from "@mipiacetpv/residencia-plan";
 
 import { ApiError, apiConPuerta, apiWithDevice } from "../api.js";
@@ -72,9 +74,15 @@ import {
   dimensionesDeLaObservacion,
   noComoSiempre,
   registroADemanda,
+  registroDeConstante,
   registroDeOcurrencia,
+  TIPOS_DE_ALGO_NO_VA_BIEN,
   type ContextoDelGesto,
 } from "./puerta-gestos.js";
+import {
+  PuertaConstante,
+  type ConstanteParaTomar,
+} from "./PuertaConstante.js";
 import { PuertaAlgoNoVaBien } from "./PuertaAlgoNoVaBien.js";
 import { PuertaApuntado, type LineaApuntada } from "./PuertaApuntado.js";
 import { PuertaLoQueToca } from "./PuertaLoQueToca.js";
@@ -82,11 +90,15 @@ import { PuertaNoComoSiempre } from "./PuertaNoComoSiempre.js";
 import { PuertaPin, type RolParaElegir } from "./PuertaPin.js";
 import { PuertaScreen, diaDelTurnoEnLaTablet, turnoDeLaTablet } from "./PuertaScreen.js";
 import type {
+  EstadoDeLaIncidencia,
   LoQueToca,
+  NivelDeLaPuerta,
   OcurrenciaDeLaPuerta,
   PuertaArranque,
   RegistroParaEnviar,
+  ResultadoDelRegistro,
 } from "./puerta-tipos.js";
+import type { AvisoDeLaPantalla6 } from "./PuertaApuntado.js";
 
 /** Un minuto sin tocar (decisión 8). */
 const INACTIVIDAD_MS = 60_000;
@@ -104,6 +116,14 @@ type Vista =
       /** Puesto cuando se llega desde la pantalla 4 con cambios ya hechos:
        *  el gesto es UNO y las dos cosas salen en el mismo lote. */
       cambiadas?: Record<string, string>;
+    }
+  // residencia-4 · el teclado de una constante. `codes` es uno, o los dos
+  // de la tensión (`groupCode = "TA"`), que se toman en UNA pantalla.
+  | {
+      v: "constante";
+      clientId: string;
+      codes: string[];
+      ocurrencia: OcurrenciaDeLaPuerta | null;
     }
   | { v: "apuntado" };
 
@@ -128,6 +148,15 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
   const [ultimoId, setUltimoId] = useState<string | null>(null);
   const [pendientes, setPendientes] = useState(0);
   const [hayRed, setHayRed] = useState(() => navigator.onLine);
+  // residencia-4 · lo que la pantalla 6 pinta del aviso. `nivelPrevisto`
+  // lo calcula la TABLET con la plantilla de su caché, al instante y
+  // también sin red; `servidor` llega cuando el lote sale y es el que
+  // manda. Mientras sea `null` y el nivel previsto sea N2 o más, la
+  // pantalla dice que el aviso NO ha salido.
+  const [aviso, setAviso] = useState<AvisoDeLaPantalla6 | null>(null);
+  /** El `externalId` del item de la cola del gesto que se está pintando,
+   *  para casarlo con su respuesta. */
+  const envioEnCurso = useRef<string | null>(null);
   const ultimoToque = useRef(Date.now());
   const [segundosParaCerrar, setSegundosParaCerrar] = useState(60);
 
@@ -141,8 +170,48 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
   // 15 s. No se inventa otro mecanismo.
   useEffect(() => {
     const parar = startOutboxSync();
-    const quitar = subscribeOutbox(() => {
+    const quitar = subscribeOutbox((e) => {
       void outboxCounts().then((c) => setPendientes(c.pending + c.rejected));
+      // ── residencia-4 · LA RESPUESTA DEL LOTE ───────────────────────
+      //
+      // La cola es quien habla con el servidor, así que el nivel que
+      // manda y los canales en los que ha sonado llegan por aquí y no
+      // por el `await` de `encolar` — que vuelve en cuanto el gesto está
+      // escrito en la tablet, que es lo que la pantalla 6 promete.
+      //
+      // Se casa por `externalId` con el gesto que se está pintando: sin
+      // eso, un lote viejo que sale ahora (la cola reintenta cada 15 s)
+      // pintaría su nivel encima del gesto que la auxiliar acaba de
+      // hacer.
+      if (e.type !== "sent" || e.externalId !== envioEnCurso.current) return;
+      // ── LO QUE YA SALIÓ, FILA A FILA ──────────────────────────────
+      //
+      // residencia-3 pintaba «en la tablet» / «enviado» por fila, y la
+      // segunda mitad **no llegaba nunca**: `enLaTablet` se ponía a
+      // `true` al encolar y nadie lo bajaba. La pantalla 6 decía «Sin
+      // red. Lo guarda la tablet» y, dos líneas más abajo, «Avisado en
+      // enfermería» — las dos cosas a la vez.
+      //
+      // Lo encontró el bucle visual de residencia-4 mirando la captura,
+      // no un test: el de la cola comprueba que el lote sale, y el de la
+      // pantalla le pasa `enLaTablet` a mano.
+      setApuntadas((ls) => ls.map((l) => ({ ...l, enLaTablet: false })));
+      const cuerpo = e.response as { registros?: ResultadoDelRegistro[] } | null;
+      const conIncidencia = cuerpo?.registros?.find((r) => r.incidencia);
+      if (!conIncidencia?.incidencia) return;
+      const i = conIncidencia.incidencia;
+      setAviso({
+        nivelPrevisto: i.nivel,
+        servidor: {
+          incidenciaId: i.id,
+          nivel: i.nivel,
+          nombreDelTipo: i.nombreDelTipo,
+          avisadoEn: i.avisadoEn,
+          acusadoPor: null,
+          acusadoComo: null,
+          acusadoEn: null,
+        },
+      });
     });
     void outboxCounts().then((c) => setPendientes(c.pending + c.rejected));
     return () => {
@@ -216,12 +285,65 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
     return () => clearInterval(id);
   }, [vista.v]);
 
-  // La pantalla 6 vuelve a reposo a los 10 s.
+  // La pantalla 6 vuelve a reposo a los 10 s… salvo que haya un aviso
+  // vivo esperando acuse. Entonces se queda: lo que la auxiliar necesita
+  // saber antes de irse es si va alguien, y una pantalla que se apaga a
+  // los diez segundos la deja sin esa respuesta.
   useEffect(() => {
     if (vista.v !== "apuntado") return;
+    const esperandoAcuse =
+      aviso?.servidor != null &&
+      aviso.servidor.avisadoEn.length > 0 &&
+      aviso.servidor.acusadoPor == null;
+    if (esperandoAcuse) return;
     const id = setTimeout(() => setVista({ v: "reposo" }), APUNTADO_MS);
     return () => clearTimeout(id);
-  }, [vista.v]);
+  }, [vista.v, aviso]);
+
+  // ── residencia-4 · ¿YA VA ALGUIEN? ────────────────────────────────
+  //
+  // Un GET corto cada cinco segundos mientras la pantalla 6 está delante
+  // y el aviso sigue sin acusar. No un socket: la pantalla 6 vive poco y,
+  // sobre todo, **la puerta puede no tener red** — con el GET, sin red
+  // simplemente falla y lo que se pinta no cambia; con un socket se
+  // quedaría esperando algo que no va a llegar.
+  useEffect(() => {
+    const incidenciaId = aviso?.servidor?.incidenciaId;
+    if (vista.v !== "apuntado" || !incidenciaId) return;
+    if (aviso?.servidor?.acusadoPor) return;
+    let vivo = true;
+    const preguntar = async () => {
+      try {
+        const estado = await apiConPuerta<EstadoDeLaIncidencia>(
+          `/residencia/puerta/incidencias/${incidenciaId}`,
+        );
+        if (!vivo) return;
+        const acusado = estado.avisos.find((a) => a.acusadoPor);
+        if (!acusado) return;
+        setAviso((prev) =>
+          prev?.servidor
+            ? {
+                ...prev,
+                servidor: {
+                  ...prev.servidor,
+                  acusadoPor: acusado.acusadoPor,
+                  acusadoComo: acusado.acusadoComo,
+                  acusadoEn: acusado.acusadoEn,
+                },
+              }
+            : prev,
+        );
+      } catch {
+        /* sin red: la pantalla se queda como está, sin fingir nada */
+      }
+    };
+    void preguntar();
+    const id = setInterval(() => void preguntar(), 5000);
+    return () => {
+      vivo = false;
+      clearInterval(id);
+    };
+  }, [vista.v, aviso?.servidor?.incidenciaId, aviso?.servidor?.acusadoPor]);
 
   const dimensiones = useMemo(
     () =>
@@ -234,6 +356,58 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
             return a ? a.active : true;
           })
         : [],
+    [arranque],
+  );
+
+  // ── residencia-4 · la plantilla de gravedad que trajo el arranque ──
+  //
+  // Ausente en una caché de antes del bloque: entonces la tablet no
+  // previene ningún nivel y lo dice el servidor al subir el lote. No se
+  // inventa nada.
+  const reglas = useMemo<ReglaDeGravedad[]>(
+    () => (arranque?.plantilla?.reglas as ReglaDeGravedad[] | undefined) ?? [],
+    [arranque],
+  );
+
+  /** Las constantes activas del centro, para «+ Constante». */
+  const constantesDisponibles = useMemo(() => {
+    if (!arranque) return [];
+    const alias = new Map(arranque.ajustes.map((a) => [a.controlCode, a]));
+    return arranque.controles
+      .filter((c) => c.valueDomain === "NUMERIC")
+      .filter((c) => {
+        const a = alias.get(c.code);
+        return a ? a.active : true;
+      })
+      // La tensión sale UNA vez: las dos mitades se toman en la misma
+      // pantalla, así que ofrecer «Tensión sistólica» y «Tensión
+      // diastólica» por separado sería pedir dos veces lo mismo.
+      .filter((c) => c.groupCode == null || c.code === "TA_SISTOLICA")
+      .map((c) => ({
+        code: c.code,
+        nombre:
+          c.groupCode === "TA"
+            ? "Tensión"
+            : (alias.get(c.code)?.alias ?? c.name),
+      }));
+  }, [arranque]);
+
+  /** De un código a lo que la pantalla del teclado necesita. */
+  const constanteParaTomar = useCallback(
+    (code: string, ocurrencia: OcurrenciaDeLaPuerta | null): ConstanteParaTomar | null => {
+      const c = arranque?.controles.find((x) => x.code === code);
+      if (!c) return null;
+      const alias = arranque?.ajustes.find((a) => a.controlCode === code)?.alias;
+      return {
+        code: c.code,
+        nombre: alias ?? c.name,
+        unidad: c.unit ?? null,
+        min: c.inputMin ?? null,
+        max: c.inputMax ?? null,
+        planItemId: ocurrencia?.planItemId ?? null,
+        occurrenceAt: ocurrencia?.at ?? null,
+      };
+    },
     [arranque],
   );
 
@@ -451,6 +625,9 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
           layer: c.layer,
           nature: c.nature,
           valueDomain: c.valueDomain,
+          unit: c.unit ?? null,
+          inputMin: c.inputMin ?? null,
+          inputMax: c.inputMax ?? null,
           opciones: c.opciones.map((o) => ({
             code: o.code,
             isAsUsual: o.isAsUsual,
@@ -487,9 +664,18 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
    * ya, y si no hay red el reenvío periódico se encarga.
    */
   const encolar = useCallback(
-    async (registros: RegistroParaEnviar[], textos: string[]) => {
+    async (
+      registros: RegistroParaEnviar[],
+      textos: string[],
+      /** residencia-4 · el nivel que la TABLET prevé para este gesto, con
+       *  la plantilla de su caché. Decide si la pantalla 6 pinta la banda
+       *  ámbar del «el aviso NO ha salido» mientras el lote espera. */
+      nivelPrevisto: NivelDeLaPuerta | null = null,
+    ) => {
       if (registros.length === 0) return;
       const externalId = newId();
+      envioEnCurso.current = externalId;
+      setAviso(nivelPrevisto ? { nivelPrevisto, servidor: null } : null);
       await outboxAdd({
         externalId,
         kind: "care-record",
@@ -632,6 +818,20 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
               [`${o.nombre} (corrección)`],
             );
           }}
+          constantesDisponibles={constantesDisponibles}
+          onTomarConstante={(clientId, controlCode, ocurrencia) => {
+            // La TENSIÓN se toma en UNA pantalla, aunque sean dos
+            // controles. Lo que las junta es el `groupCode` del
+            // catálogo, no una lista escrita a mano aquí.
+            const control = arranque.controles.find((c) => c.code === controlCode);
+            const codes =
+              control?.groupCode != null
+                ? arranque.controles
+                    .filter((c) => c.groupCode === control.groupCode)
+                    .map((c) => c.code)
+                : [controlCode];
+            setVista({ v: "constante", clientId, codes, ocurrencia });
+          }}
           onADemanda={(clientId, controlCode) => {
             const ctx = contextoDe(clientId);
             const nombre =
@@ -675,13 +875,74 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
     );
   }
 
+  if (vista.v === "constante") {
+    const r = residenteDe(vista.clientId);
+    const constantes = vista.codes
+      .map((c) => constanteParaTomar(c, vista.ocurrencia))
+      .filter((c): c is ConstanteParaTomar => c != null);
+    if (constantes.length === 0) {
+      // El control se desactivó mientras la pantalla estaba abierta. Se
+      // vuelve en vez de pintar un teclado que no sabe qué apunta.
+      setVista({ v: "toca" });
+      return null;
+    }
+    return (
+      <div onPointerDown={tocar}>
+        <PuertaConstante
+          nombreDelResidente={r?.nombre ?? ""}
+          constantes={constantes}
+          plantilla={arranque.plantilla ?? null}
+          onVolver={() => setVista({ v: "toca" })}
+          onApuntar={(valores, avisarEnfermera) => {
+            const ctx = contextoDe(vista.clientId);
+            // Dos registros para la tensión, y es lo correcto: «sistólica
+            // ≥ 180 → N2» es una regla sobre UN número.
+            const registros = valores.map((v) =>
+              registroDeConstante(ctx, {
+                controlCode: v.constante.code,
+                numero: v.numero,
+                planItemId: v.constante.planItemId ?? null,
+                occurrenceAt: v.constante.occurrenceAt ?? null,
+                avisarEnfermera,
+              }),
+            );
+            const textos = valores.map(
+              (v) =>
+                `${v.constante.nombre}: ${String(v.numero).replace(".", ",")}${
+                  v.constante.unidad ? ` ${v.constante.unidad}` : ""
+                }`,
+            );
+            // El nivel que la tablet prevé, con la MISMA función que el
+            // servidor y con la plantilla de su caché.
+            let previsto: NivelDeLaPuerta | null = null;
+            const orden = ["N0", "N1", "N2", "N3", "N4"];
+            for (const v of valores) {
+              const g = gravedadDe(v.constante.code, v.numero, reglas);
+              if (!g) continue;
+              if (previsto == null || orden.indexOf(g.nivel) > orden.indexOf(previsto)) {
+                previsto = g.nivel;
+              }
+            }
+            if (avisarEnfermera) {
+              previsto =
+                previsto == null || orden.indexOf(previsto) < orden.indexOf("N2")
+                  ? "N2"
+                  : previsto;
+            }
+            void encolar(registros, textos, previsto);
+          }}
+        />
+      </div>
+    );
+  }
+
   if (vista.v === "algo") {
     const r = residenteDe(vista.clientId);
     return (
       <div onPointerDown={tocar}>
         <PuertaAlgoNoVaBien
           nombreDelResidente={r?.nombre ?? ""}
-          onApuntar={({ texto, vozBase64 }) => {
+          onApuntar={({ texto, vozBase64, evento, matiz, avisarEnfermera }) => {
             const ctx = contextoDe(vista.clientId);
             // Si se llegó desde la pantalla 4, las dos cosas salen en EL
             // MISMO lote: fue un gesto y es una firma, y partirlo en dos
@@ -691,7 +952,13 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
               ...(vista.cambiadas
                 ? noComoSiempre(ctx, dimensiones, vista.cambiadas)
                 : []),
-              algoNoVaBien(ctx, { texto, vozBase64 }),
+              algoNoVaBien(ctx, {
+                texto,
+                vozBase64,
+                evento,
+                matiz,
+                avisarEnfermera,
+              }),
             ];
             const textos = [
               ...(vista.cambiadas
@@ -701,9 +968,22 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
                       : "Como siempre",
                   )
                 : []),
-              "Algo no va bien",
+              etiquetaDelTipo(evento),
             ];
-            void encolar(registros, textos);
+            // El nivel que la tablet prevé para el evento, con la misma
+            // función que el servidor.
+            const g = reglas.length
+              ? gravedadDeEventoLocal(reglas, evento, matiz)
+              : null;
+            const orden = ["N0", "N1", "N2", "N3", "N4"];
+            let previsto: NivelDeLaPuerta | null = g?.nivel ?? null;
+            if (avisarEnfermera) {
+              previsto =
+                previsto == null || orden.indexOf(previsto) < orden.indexOf("N2")
+                  ? "N2"
+                  : previsto;
+            }
+            void encolar(registros, textos, previsto);
           }}
           onVolver={() =>
             setVista(
@@ -728,7 +1008,13 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
         minute: "2-digit",
       })}
       nombreDelTurno={turnoDeLaTablet(ahora, arranque.turnos)?.name ?? null}
-      hayRed={hayRed && pendientes === 0}
+      // «Hay red» para ESTA pantalla es «lo que acabo de apuntar ha
+      // salido», no «la cola está vacía»: con un lote viejo atascado de
+      // otro turno, la segunda mitad diría que no hay red cuando lo
+      // suyo acaba de entrar. Lo que la auxiliar necesita saber es si LO
+      // SUYO salió — que es lo que la cabecera de `PuertaApuntado` pide
+      // desde residencia-3.
+      hayRed={hayRed && apuntadas.every((l) => !l.enLaTablet)}
       lineas={apuntadas}
       onDeshacer={
         ultimoId
@@ -764,12 +1050,53 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
             }
           : null
       }
+      aviso={aviso}
       onSeguir={() => {
         tocar();
+        setAviso(null);
         if (sesion) void abrirLoQueToca(sesion);
         else setVista({ v: "reposo" });
       }}
     />
+  );
+}
+
+/** Lo que se lee en la lista de la pantalla 6 por el tipo elegido. */
+function etiquetaDelTipo(evento: string | null): string {
+  if (!evento) return "Algo no va bien";
+  return (
+    TIPOS_DE_ALGO_NO_VA_BIEN.find((t) => t.evento === evento)?.etiqueta ??
+    "Algo no va bien"
+  );
+}
+
+/**
+ * El nivel de un EVENTO con las reglas de la tablet.
+ *
+ * `gravedadDeEvento` del paquete puro hace exactamente esto; se repite
+ * aquí la llamada en vez de importarla porque lo único que esta pantalla
+ * necesita es el nivel, y el `null` de «esta plantilla no conoce ese
+ * evento» tiene que caer a N1 —que es lo que vale «algo no va bien» a
+ * secas— y no a «sin nivel».
+ */
+function gravedadDeEventoLocal(
+  reglas: ReglaDeGravedad[],
+  evento: string | null,
+  matiz: string | null,
+): { nivel: NivelDeLaPuerta } | null {
+  const buscado = evento ?? "ALGO_NO_VA_BIEN";
+  const suyas = reglas.filter(
+    (r) => r.kind === "EVENT" && r.evento === buscado,
+  ) as Array<Extract<ReglaDeGravedad, { kind: "EVENT" }>>;
+  if (suyas.length === 0) return null;
+  const conMatiz = matiz ? suyas.filter((r) => r.matiz === matiz) : [];
+  const candidatas = conMatiz.length > 0 ? conMatiz : suyas.filter((r) => r.matiz == null);
+  const lista = candidatas.length > 0 ? candidatas : suyas;
+  const orden = ["N0", "N1", "N2", "N3", "N4"];
+  return lista.reduce<{ nivel: NivelDeLaPuerta }>(
+    (mejor, r) =>
+      orden.indexOf(r.nivel) > orden.indexOf(mejor.nivel) ? { nivel: r.nivel } : mejor,
+    { nivel: lista[0]!.nivel },
   );
 }
 

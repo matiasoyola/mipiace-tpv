@@ -19,7 +19,9 @@ import {
   noComoSiempre,
   observacionDelTurno,
   registroADemanda,
+  registroDeConstante,
   registroDeOcurrencia,
+  TIPOS_DE_ALGO_NO_VA_BIEN,
   yaHecho,
   type ContextoDelGesto,
 } from "../src/residencia/puerta-gestos.js";
@@ -403,5 +405,96 @@ describe("leer lo que YA ESTÁ", () => {
         at: "2026-10-15T08:00:00.000Z",
       }),
     ).toBeNull();
+  });
+});
+
+// ══ residencia-4 · LOS GESTOS NUEVOS ══════════════════════════════
+describe("residencia-4 · una CONSTANTE", () => {
+  it("manda el número con PUNTO decimal, que es el del JSON", () => {
+    const r = registroDeConstante(CTX, {
+      controlCode: "TEMPERATURA",
+      numero: 38.4,
+    });
+    expect(r.valor).toEqual({ tipo: "NUMERIC", numero: 38.4 });
+    expect(r.controlCode).toBe("TEMPERATURA");
+  });
+
+  it("a demanda va SIN ocurrencia y sin línea de plan", () => {
+    // Es el 90 % de las veces: la DUE la pide cuando ve a alguien raro,
+    // y eso no está en ningún plan.
+    const r = registroDeConstante(CTX, {
+      controlCode: "TEMPERATURA",
+      numero: 36.5,
+    });
+    expect(r.occurrenceAt).toBeNull();
+    expect(r.planItemId).toBeNull();
+  });
+
+  it("y respondiendo a una línea del plan lleva su OCURRENCIA", () => {
+    const r = registroDeConstante(CTX, {
+      controlCode: "PESO",
+      numero: 62.5,
+      planItemId: "linea-1",
+      occurrenceAt: "2026-10-15T08:00:00.000Z",
+    });
+    expect(r.planItemId).toBe("linea-1");
+    expect(r.occurrenceAt).toBe("2026-10-15T08:00:00.000Z");
+  });
+
+  it("el aviso viaja DENTRO del registro, y sólo cuando se pulsa", () => {
+    const sin = registroDeConstante(CTX, { controlCode: "TEMPERATURA", numero: 36.5 });
+    expect(sin.avisarEnfermera).toBeUndefined();
+    const con = registroDeConstante(CTX, {
+      controlCode: "TEMPERATURA",
+      numero: 36.5,
+      avisarEnfermera: true,
+    });
+    expect(con.avisarEnfermera).toBe(true);
+  });
+
+  it("y un toque es UN instante: la hora es la del gesto, no la del envío", () => {
+    const r = registroDeConstante(CTX, { controlCode: "TEMPERATURA", numero: 38 });
+    expect(r.recordedAt).toBe(CTX.recordedAt.toISOString());
+    expect(r.careDay).toBe(CTX.careDay);
+    expect(r.centerShiftId).toBe(CTX.centerShiftId);
+  });
+});
+
+describe("residencia-4 · «algo no va bien» con TIPO", () => {
+  it("sin tipo no mete ni `evento` ni `matiz`: a secas sigue siendo completo", () => {
+    const r = algoNoVaBien(CTX, { texto: "le huele raro el pie" });
+    expect(r.valor).toEqual({ tipo: "NOTA" });
+  });
+
+  it("con tipo y matiz, los dos van DENTRO del valor (que va cifrado)", () => {
+    // Y no en una columna en claro: que doña Carmen se haya caído es
+    // salud. Lo que queda en claro es el `incident_type` de la
+    // incidencia, y eso está declarado en la migración.
+    const r = algoNoVaBien(CTX, { evento: "CAIDA", matiz: "CON_GOLPE" });
+    expect(r.valor).toEqual({
+      tipo: "NOTA",
+      evento: "CAIDA",
+      matiz: "CON_GOLPE",
+    });
+  });
+
+  it("los CINCO tipos son los que la plantilla gradúa, y ni uno más", () => {
+    // Una lista larga es un formulario, y un formulario es lo que hace
+    // que la auxiliar no registre (regla 1 de la capa, D-13).
+    expect(TIPOS_DE_ALGO_NO_VA_BIEN.map((t) => t.evento)).toEqual([
+      "CAIDA",
+      "VOMITO",
+      "NO_LOCALIZADO",
+      "EMERGENCIA_VITAL",
+      "AVERIA",
+    ]);
+  });
+
+  it("y sólo DOS preguntan algo, con UNA pregunta de dos botones", () => {
+    const conPregunta = TIPOS_DE_ALGO_NO_VA_BIEN.filter((t) => t.pregunta);
+    expect(conPregunta.map((t) => t.evento)).toEqual(["CAIDA", "AVERIA"]);
+    for (const t of conPregunta) {
+      expect(t.pregunta!.opciones).toHaveLength(2);
+    }
   });
 });

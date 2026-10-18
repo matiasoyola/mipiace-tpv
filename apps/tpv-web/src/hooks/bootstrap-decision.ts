@@ -35,12 +35,21 @@ import { ApiError } from "../api.js";
 // y es la señal de que esta tablet arranca en «modo puerta». La MISMA APK,
 // otra pantalla (D-52). No es `purge` —el aparato está perfectamente
 // emparejado— ni `retry`, que lo dejaría en el spinner para siempre.
+// residencia-4 (D-66) · sexta salida, `guard`. Un dispositivo `GUARD`
+// llamando a `/devices/me` recibe **403 GUARD_DEVICE_NOT_ALLOWED**, y ese
+// corte está en `devices/auth.ts` por lo mismo que los otros dos: es la
+// puerta de TODAS las rutas del TPV.
+//
+// Es la misma APK en «modo guardia» (D-66). El móvil de guardia no es una
+// app aparte: es el mismo APK que la caja, la cocina y la puerta, y lo
+// que decide qué pantalla arranca es qué contesta `/devices/me`.
 export type BootstrapDecision =
   | "purge"
   | "retry"
   | "caja-disabled"
   | "kitchen"
-  | "room";
+  | "room"
+  | "guard";
 
 // Sólo estos códigos disparan purga real del deviceToken. Cualquier
 // otro 401 (sin código o con código desconocido) y los errores de red
@@ -72,6 +81,13 @@ export function decideAfterBootstrapError(err: unknown): BootstrapDecision {
     err.code === "ROOM_DEVICE_NOT_ALLOWED"
   ) {
     return "room";
+  }
+  if (
+    err instanceof ApiError &&
+    err.status === 403 &&
+    err.code === "GUARD_DEVICE_NOT_ALLOWED"
+  ) {
+    return "guard";
   }
   return "retry";
 }

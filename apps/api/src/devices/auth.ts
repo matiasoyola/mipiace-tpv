@@ -142,6 +142,26 @@ export async function requireDeviceToken(
     });
     return;
   }
+  // residencia-4 (D-66) · Y UN MÓVIL DE GUARDIA TAMPOCO.
+  //
+  // Tercera vez en el mismo sitio y por la misma razón de cuentas: éste
+  // es el preHandler de TODAS las rutas del TPV y también del login de
+  // cajero, así que cortar aquí es lo que hace que un móvil de guardia no
+  // pueda llegar a tener una sesión con la que cobrar.
+  //
+  // Y la APK lo usa como SEÑAL: el 403 de `/devices/me` no es un error,
+  // es la respuesta correcta y es lo que la hace arrancar en «modo
+  // guardia» (ver `tpv-web/src/hooks/bootstrap-decision.ts`). Las rutas
+  // de guardia tienen su propia puerta de auth
+  // (`residencia/guardia-auth.ts`).
+  if (device.kind === "GUARD") {
+    reply.code(403).send({
+      error: "GUARD_DEVICE_NOT_ALLOWED",
+      message:
+        "Un móvil de guardia no vende: ni cobra, ni abre turno, ni emite registros.",
+    });
+    return;
+  }
   // residencia-1 · `register_id` es nullable desde este bloque, y aquí ya
   // sabemos que esto no es un `ROOM`. El CHECK
   // `devices_register_o_habitacion` garantiza que todo lo que no es `ROOM`

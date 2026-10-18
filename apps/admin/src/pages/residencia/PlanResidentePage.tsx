@@ -151,6 +151,16 @@ export function PlanResidentePage() {
         >
           <ArrowLeft className="h-4 w-4" /> Residentes
         </Link>
+        {/* residencia-4 (D-22) · la excepción de umbral cuelga de AQUÍ y
+            no del menú del centro, porque es una prescripción de esta
+            persona y no una configuración. La pauta sólo el médico; la
+            pantalla lo dice y el servidor lo rechaza. */}
+        <Link
+          to={`/admin/residencia/residentes/${clientId}/umbrales`}
+          className="ml-4 inline-flex min-h-[44px] items-center gap-1.5 text-[13.5px] text-slate-500 hover:text-mipiace-ink"
+        >
+          Umbrales propios
+        </Link>
         <p className="text-[13.5px] text-slate-500">
           {NIVEL_LABEL[plan.residente.dependencyLevel]} · ingresó el{" "}
           {new Date(plan.residente.admissionDate).toLocaleDateString("es-ES")}

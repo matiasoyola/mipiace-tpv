@@ -34,6 +34,7 @@ import { cifrarTexto, sitioDniDeResidente } from "../clinica/cripto-campos.js";
 import { hashDeviceToken } from "../devices/auth.js";
 import { sembrarResidencia } from "../residencia/semilla.js";
 import { cargarCatalogoDeSerie } from "../residencia/catalogo/cargar-catalogo.js";
+import { cargarPlantillaDeGravedad } from "../residencia/catalogo/cargar-plantilla.js";
 import { aplicarPlantilla } from "../residencia/plan.js";
 
 const T = "99999999-0000-4000-8000-000000000001";
@@ -47,13 +48,25 @@ const CAMA_B = "99999999-0000-4000-8000-000000000041";
 const CARMEN = "99999999-0000-4000-8000-000000000050";
 const LUIS = "99999999-0000-4000-8000-000000000051";
 const TABLET = "99999999-0000-4000-8000-000000000060";
+// residencia-4 (D-66) · los dos móviles de guardia y la médica que pauta
+// las excepciones de umbral.
+const MOVIL_ENFERMERIA = "99999999-0000-4000-8000-000000000061";
+const MOVIL_RESPONSABLE = "99999999-0000-4000-8000-000000000062";
+const SOTO = "99999999-0000-4000-8000-000000000013";
 
 /** El token de la tablet y el PIN de la auxiliar. Son de prueba y están
  *  escritos aquí porque el bucle visual los teclea. */
 export const TOKEN_DE_LA_PUERTA = "gredos-puerta-112-0001-0001-0001";
 export const PIN_DE_ANA = "4071";
 export const PIN_DE_ROSA = "9182";
+/** residencia-4 · la dirección y la médica también tienen PIN: una para
+ *  coger el móvil de responsable, la otra para pautar una excepción. */
+export const PIN_DE_PILAR = "3344";
+export const PIN_DE_SOTO = "5566";
 export const CLAVE_DE_DIRECCION = "Gredos2026!";
+/** Y los tokens de los dos móviles de guardia. */
+export const TOKEN_DE_ENFERMERIA = "gredos-guardia-enf-0001-0001-0001";
+export const TOKEN_DE_RESPONSABLE = "gredos-guardia-dir-0001-0001-0001";
 
 const prisma = new PrismaClient({
   datasources: { db: { url: process.env.DATABASE_URL! } },
@@ -108,6 +121,10 @@ function jpegDePrueba(): Buffer {
 
 async function main(): Promise<void> {
   await cargarCatalogoDeSerie();
+  // residencia-4 (D-65) · la plantilla de gravedad. Sin ella el centro
+  // registra constantes y no gradúa nada, que es justo lo que la
+  // pantalla de la guardia avisa con «versión 0».
+  await cargarPlantillaDeGravedad();
 
   await prisma.$executeRawUnsafe(
     `INSERT INTO tenants (id, name, residencia_enabled, clinical_records_enabled,
@@ -122,6 +139,9 @@ async function main(): Promise<void> {
     [DIRECCION, "Pilar", "pilar@gredos.local", "OWNER"],
     [ANA, "Ana López", "ana@gredos.local", "CLINICIAN"],
     [ROSA, "Rosa (DUE)", "rosa@gredos.local", "CLINICIAN"],
+    // residencia-4 · la médica. Es la única que puede pautar una
+    // excepción de umbral (D-22).
+    [SOTO, "Dra. Soto", "soto@gredos.local", "CLINICIAN"],
   ] as const) {
     await prisma.$executeRawUnsafe(
       `INSERT INTO users (id, tenant_id, email, alias, role, password_hash, is_clinician, clinical_scope)
@@ -275,6 +295,8 @@ async function main(): Promise<void> {
   for (const [u, pin] of [
     [ANA, PIN_DE_ANA],
     [ROSA, PIN_DE_ROSA],
+    [DIRECCION, PIN_DE_PILAR],
+    [SOTO, PIN_DE_SOTO],
   ] as const) {
     const hash = await hashPassword(pin);
     const lookup = huellaDePinDePuerta(pin, subclave, T);
@@ -305,6 +327,64 @@ async function main(): Promise<void> {
     );
   }
 
+  // ── residencia-4 · LOS DOS MÓVILES DE GUARDIA (D-66) ──────────────
+  //
+  // Sin `ON CONFLICT DO UPDATE` por lo mismo que la tablet: `devices`
+  // lleva el trigger `devices_revoke_previous`. Un `GUARD` no releva a
+  // nadie —el trigger filtra `TERMINAL`— pero el patrón se mantiene
+  // igual para que los dos sitios se lean igual.
+  for (const [id, canal, nombre, token] of [
+    [MOVIL_ENFERMERIA, "ENFERMERIA", "Móvil de enfermería", TOKEN_DE_ENFERMERIA],
+    [MOVIL_RESPONSABLE, "RESPONSABLE", "Móvil de dirección", TOKEN_DE_RESPONSABLE],
+  ] as const) {
+    const ya = await prisma.$executeRawUnsafe(
+      `UPDATE devices SET device_token_hash = '${hashDeviceToken(token)}',
+         revoked_at = NULL, name = '${nombre}', guard_channel = '${canal}'
+       WHERE id = '${id}'`,
+    );
+    if (ya === 0) {
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO devices (id, tenant_id, kind, room_id, register_id, guard_channel, name, device_token_hash)
+         VALUES ('${id}', '${T}', 'GUARD', NULL, NULL, '${canal}', '${nombre}',
+                 '${hashDeviceToken(token)}')`,
+      );
+    }
+  }
+
+  // ── Y el servicio sanitario de guardia del centro (D-33) ──────────
+  //
+  // El teléfono es el 112 a propósito: es un número real que no despierta
+  // a nadie si alguien toca el botón por error en una demo, y deja claro
+  // en la captura que lo que abre es el marcador.
+  await prisma.$executeRawUnsafe(
+    `INSERT INTO center_guard_settings (tenant_id, escalation_minutes, health_service_name, health_service_phone, updated_at)
+     VALUES ('${T}', 5, 'Centro de Salud de Buenaventura', '112', now())
+     ON CONFLICT (tenant_id) DO UPDATE SET
+       escalation_minutes = 5,
+       health_service_name = 'Centro de Salud de Buenaventura',
+       health_service_phone = '112',
+       updated_at = now()`,
+  );
+
+  // ── Una línea MEASURE en el plan de Carmen ────────────────────────
+  //
+  // Para que «lo que toca» enseñe el botón «Tomar» además de los
+  // «Hecho»: sin una línea de constante en el plan, la pantalla de la
+  // puerta no tendría dónde enseñarlo y sólo se vería el «+ Constante».
+  const yaTemperatura = await prisma.$queryRawUnsafe<Array<{ n: bigint }>>(
+    `SELECT count(*)::bigint AS n FROM care_plan_items
+     WHERE client_id = '${CARMEN}' AND control_code = 'TEMPERATURA' AND to_at IS NULL`,
+  );
+  if (Number(yaTemperatura[0]?.n ?? 0) === 0) {
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO care_plan_items (id, tenant_id, client_id, control_code,
+          frequency_kind, shift_codes, from_at, source, created_by_user_id)
+       VALUES ('${randomUUID()}', '${T}', '${CARMEN}', 'TEMPERATURA',
+               'EVERY_SHIFT', ARRAY['M','T','N'], now() - interval '30 days',
+               'MANUAL', '${DIRECCION}')`,
+    );
+  }
+
   console.log(
     [
       "Jardín de Gredos sembrado.",
@@ -314,6 +394,10 @@ async function main(): Promise<void> {
       `  PIN de Rosa       ${PIN_DE_ROSA}   (DUE, todo el centro)`,
       `  token de la 112   ${TOKEN_DE_LA_PUERTA}`,
       `  habitación        112 · Carmen Gómez Ruiz (con foto) y Luis Núñez Bravo (sin consentimiento)`,
+      `  PIN de Pilar      ${PIN_DE_PILAR}   (dirección, el móvil de responsable)`,
+      `  PIN de la médica  ${PIN_DE_SOTO}   (la única que pauta un umbral)`,
+      `  móvil enfermería  ${TOKEN_DE_ENFERMERIA}`,
+      `  móvil dirección   ${TOKEN_DE_RESPONSABLE}`,
     ].join("\n"),
   );
   await prisma.$disconnect();

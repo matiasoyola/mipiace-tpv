@@ -6,6 +6,8 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
+  AlertTriangle,
+  BellRing,
   Building2,
   Calculator,
   CalendarClock,
@@ -244,6 +246,22 @@ const NAV_ITEMS: NavItem[] = [
     to: "/admin/residencia/plantillas",
     label: "Plantillas",
     icon: Layers,
+    capability: "residencia",
+  },
+  // residencia-4 · el libro y la guardia. **Incidencias va la PRIMERA de
+  // las dos** y pegada a lo del día: es lo que la dirección abre cada
+  // mañana («qué hay abierto hoy»), y la configuración de la guardia se
+  // toca una vez al año.
+  {
+    to: "/admin/residencia/incidencias",
+    label: "Incidencias",
+    icon: AlertTriangle,
+    capability: "residencia",
+  },
+  {
+    to: "/admin/residencia/guardia",
+    label: "Guardia",
+    icon: BellRing,
     capability: "residencia",
   },
   { to: "/admin/tag-aliases", label: "Etiquetas", icon: Tag, capability: "caja" },

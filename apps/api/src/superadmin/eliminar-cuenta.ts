@@ -140,6 +140,7 @@ export async function previsualizarEliminacion(
     fotosClinicas,
     accesosClinicos,
     residentes,
+    incidencias,
   ] = await Promise.all([
     tx.fiscalRecord.count({ where: { tenantId } }),
     tx.ticket.count({ where: { tenantId } }),
@@ -163,6 +164,7 @@ export async function previsualizarEliminacion(
     tx.clinicalPhoto.count({ where: { tenantId } }),
     tx.clinicalAccessLog.count({ where: { tenantId } }),
     tx.residentProfile.count({ where: { tenantId } }),
+    tx.incident.count({ where: { tenantId } }),
   ]);
 
   const bloqueos: Bloqueo[] = [];
@@ -184,6 +186,31 @@ export async function previsualizarEliminacion(
     bloqueos.push({
       codigo: "TIENE_RESIDENTES",
       mensaje: `Esta cuenta tiene ${residentes} ficha(s) de residente. No se elimina desde aquí, por lo mismo que la historia clínica.`,
+    });
+  }
+  // residencia-4 · EL LIBRO DE INCIDENCIAS, aparte de los residentes.
+  //
+  // Y no es redundante con el bloqueo de arriba, que es justo por lo que
+  // existe: un centro puede tener el módulo encendido, **cero fichas de
+  // residente** y una avería declarada en el libro. Ese caso parece
+  // inalcanzable y no lo es —encender la residencia no exige dar de alta
+  // a nadie, y lo primero que hace un centro al probarlo es declarar algo
+  // del edificio— y sin este bloqueo el `DELETE FROM tenants` rebotaría
+  // contra `incidents_tenant_id_fkey` con un error de Postgres en crudo
+  // en vez de con una frase.
+  //
+  // Se bloquea en vez de borrarse por lo mismo que la historia: el libro
+  // es la evidencia de las acciones correctoras que AENOR audita, y los
+  // triggers `incidents_inmutable` e `incident_actions_append_only` **no
+  // llevan la escapatoria del «padre borrado»** que sí llevan los de S1 y
+  // F1. Darles una para esto sería abrir el libro a borrados por el único
+  // camino que hoy no existe.
+  if (incidencias > 0) {
+    bloqueos.push({
+      codigo: "TIENE_LIBRO_DE_INCIDENCIAS",
+      mensaje:
+        `Esta cuenta tiene ${incidencias} incidencia(s) en el libro. No se elimina desde aquí: el libro es la ` +
+        "evidencia de las acciones correctoras del centro y se conserva. La devolución de datos (art. 28.3.g) sí se le puede entregar.",
     });
   }
 

@@ -13,16 +13,32 @@
 // Por eso los dos campos son opcionales y **«algo no va bien» a secas es
 // un registro completo**.
 //
-// ── Y EL BOTÓN DE AVISAR A LA ENFERMERA NO SE PINTA (decisión 9) ─────
+// ── residencia-4 · LOS TIPOS, ENCIMA DE LA NOTA (alcance 6) ─────────
 //
-// El mockup lo tiene; este bloque no lo enciende. El aviso inmediato real
-// (D-19) llega con la gravedad y las incidencias en residencia-4, y un
-// botón que parece avisar y no avisa es peor que no tenerlo: se pulsa, se
-// deja de buscar a la enfermera y nadie va. En su sitio, la frase que de
-// verdad funciona hoy.
+// Una fila de botones grandes con lo que la plantilla del §3 gradúa:
+// Caída · Vómito · No lo encontramos · No respira bien · Algo roto. Dos
+// de ellos abren **una pregunta única** de dos botones («¿se ha dado en
+// la cabeza o hay herida?», «¿es peligroso?»), que es lo que separa un
+// N1 de un N3 y una avería de una urgencia.
 //
-// El hueco queda preparado: `onAvisarEnfermera` existe en las props y está
-// sin cablear, así que encenderlo en residencia-4 es pasar una función.
+// Y **sin elegir nada sigue siendo un registro completo y vale N1**
+// (D-13). Eso no es una concesión: es lo que hace que el botón se use el
+// día que la auxiliar no sabe qué es lo que está viendo, que es el día
+// que más importa. El coste sigue siendo proporcional a la anomalía
+// (D-16): el caso normal —la nota a secas— no gana ni un toque.
+//
+// ── Y EL BOTÓN DE LA ENFERMERA, ENCENDIDO (alcance 7) ───────────────
+//
+// residencia-3 dejó el hueco preparado y la frase «si no puede esperar,
+// avisa a la enfermera en persona» en su sitio, porque «un botón que
+// parece avisar y no avisa es peor que no tenerlo». Ya avisa: fuerza
+// **como mínimo N2** sobre lo que se esté apuntando y hace sonar el móvil
+// de guardia.
+//
+// Es un INTERRUPTOR y no una acción, y eso importa: lo que sale no es un
+// aviso suelto, es el registro que se está escribiendo con su nivel
+// subido. Un aviso sin registro detrás sería una llamada sin nada que
+// mirar cuando la enfermera llegue.
 //
 // ── La nota de voz ──────────────────────────────────────────────────
 //
@@ -38,13 +54,21 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { TIPOS_DE_ALGO_NO_VA_BIEN } from "./puerta-gestos.js";
+
 export interface PuertaAlgoNoVaBienProps {
   nombreDelResidente: string;
-  onApuntar: (input: { texto: string | null; vozBase64: string | null }) => void;
+  onApuntar: (input: {
+    texto: string | null;
+    vozBase64: string | null;
+    /** residencia-4 · el tipo elegido y la respuesta a su pregunta. Los
+     *  dos `null` si no se tocó ningún botón. */
+    evento: string | null;
+    matiz: string | null;
+    /** Y si se pulsó «no puede esperar». */
+    avisarEnfermera: boolean;
+  }) => void;
   onVolver: () => void;
-  /** residencia-4 · el hueco del aviso inmediato. Mientras sea `undefined`
-   *  el botón NO SE PINTA (decisión 9) y en su sitio va la frase. */
-  onAvisarEnfermera?: () => void;
 }
 
 /** Tope de la grabación. Un minuto es largo para «cuéntalo» y corto para
@@ -55,9 +79,11 @@ export function PuertaAlgoNoVaBien({
   nombreDelResidente,
   onApuntar,
   onVolver,
-  onAvisarEnfermera,
 }: PuertaAlgoNoVaBienProps) {
   const [texto, setTexto] = useState("");
+  const [evento, setEvento] = useState<string | null>(null);
+  const [matiz, setMatiz] = useState<string | null>(null);
+  const [avisar, setAvisar] = useState(false);
   const [grabando, setGrabando] = useState(false);
   const [segundos, setSegundos] = useState(0);
   const [vozBase64, setVozBase64] = useState<string | null>(null);
@@ -126,6 +152,67 @@ export function PuertaAlgoNoVaBien({
         </p>
       </header>
 
+      {/* ── residencia-4 · LOS TIPOS, ENCIMA DE LA NOTA ───────────── */}
+      <section className="px-8 pt-5">
+        <h2 className="text-[22px] font-semibold text-slate-700">
+          ¿Sabes qué ha pasado? <span className="font-normal text-slate-500">(si no, no toques nada)</span>
+        </h2>
+        <div className="mt-3 flex flex-wrap gap-3">
+          {TIPOS_DE_ALGO_NO_VA_BIEN.map((t) => {
+            const elegido = evento === t.evento;
+            return (
+              <button
+                key={t.evento}
+                type="button"
+                aria-pressed={elegido}
+                onClick={() => {
+                  // Volver a pulsarlo lo quita. Es un error de dedo
+                  // frecuente y no hay otra forma de deshacerlo sin
+                  // salirse de la pantalla y perder la nota.
+                  setEvento(elegido ? null : t.evento);
+                  setMatiz(null);
+                }}
+                className={`min-h-tap-puerta rounded-2xl px-6 text-[22px] font-semibold border-2 ${
+                  elegido
+                    ? "bg-mipiace-ink text-white border-mipiace-ink"
+                    : "bg-white border-slate-300"
+                }`}
+              >
+                {t.etiqueta}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* LA PREGUNTA ÚNICA. Dos botones, y nada más. */}
+        {(() => {
+          const elegido = TIPOS_DE_ALGO_NO_VA_BIEN.find((t) => t.evento === evento);
+          if (!elegido?.pregunta) return null;
+          return (
+            <div className="mt-4 rounded-2xl bg-white border-2 border-slate-300 px-6 py-5">
+              <p className="text-[24px] font-medium">{elegido.pregunta.texto}</p>
+              <div className="mt-3 flex gap-3">
+                {elegido.pregunta.opciones.map((o) => (
+                  <button
+                    key={o.matiz}
+                    type="button"
+                    aria-pressed={matiz === o.matiz}
+                    onClick={() => setMatiz(o.matiz)}
+                    className={`min-h-tap-puerta rounded-xl px-10 text-[24px] font-semibold border-2 ${
+                      matiz === o.matiz
+                        ? "bg-mipiace-coral text-white border-mipiace-coral"
+                        : "bg-white border-slate-300"
+                    }`}
+                  >
+                    {o.etiqueta}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+      </section>
+
       <main className="flex-1 px-8 py-6 grid gap-8 lg:grid-cols-2 content-start">
         <div>
           <button
@@ -191,32 +278,38 @@ export function PuertaAlgoNoVaBien({
         >
           Volver
         </button>
+        {/* residencia-4 · el botón de la enfermera, ENCENDIDO. Es un
+            interruptor: lo que hace es que lo que se apunte salga con al
+            menos N2 y suene el móvil de guardia. */}
+        <button
+          type="button"
+          aria-pressed={avisar}
+          onClick={() => setAvisar((v) => !v)}
+          className={`min-h-tap-puerta rounded-xl px-7 text-[22px] font-semibold border-2 ${
+            avisar
+              ? "bg-red-600 text-white border-red-600"
+              : "border-red-500 text-red-700"
+          }`}
+        >
+          {avisar
+            ? "✓ Se avisará a la enfermera"
+            : "No puede esperar: avisar a la enfermera"}
+        </button>
         <button
           type="button"
           onClick={() =>
             onApuntar({
               texto: texto.trim().length > 0 ? texto.trim() : null,
               vozBase64,
+              evento,
+              matiz,
+              avisarEnfermera: avisar,
             })
           }
           className="flex-1 min-h-tap-puerta rounded-2xl bg-mipiace-coral text-white text-[28px] font-semibold active:bg-mipiace-coral-dark"
         >
-          Apuntarlo para el relevo
+          {avisar ? "Apuntar y avisar" : "Apuntarlo para el relevo"}
         </button>
-        {onAvisarEnfermera ? (
-          // residencia-4. Hoy no llega aquí nadie.
-          <button
-            type="button"
-            onClick={onAvisarEnfermera}
-            className="min-h-tap-puerta rounded-xl bg-red-600 text-white px-7 text-[22px] font-semibold"
-          >
-            No puede esperar: avisar a la enfermera
-          </button>
-        ) : (
-          <p className="w-full text-[20px] text-slate-500">
-            Si no puede esperar, avisa a la enfermera en persona.
-          </p>
-        )}
       </footer>
     </div>
   );

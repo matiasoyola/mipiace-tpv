@@ -62,6 +62,7 @@ import {
   algoNoVaBien,
   comoSiempre,
   dimensionesDeLaObservacion,
+  registroDeConstante,
   registroDeOcurrencia,
   type ContextoDelGesto,
 } from "../src/residencia/puerta-gestos.js";
@@ -241,6 +242,54 @@ describe("la puerta SIN RED", () => {
     apiMock.apiConPuerta.mockClear();
     await flushOutbox();
     expect(apiMock.apiConPuerta).not.toHaveBeenCalled();
+  });
+
+  // ── residencia-4 · EL AVISO QUE NO SALIÓ ──────────────────────────
+  it("una CONSTANTE con aviso sobrevive sin red y sale con su hora ORIGINAL", async () => {
+    // Es el caso del prompt: «un e2e que corta la red de la puerta,
+    // registra 38,6, comprueba que la puerta dice que NO ha salido,
+    // recupera la red y comprueba que el móvil lo recibe una vez, con su
+    // hora original».
+    //
+    // La mitad de la puerta está aquí (la cola, el `recordedAt` y el
+    // «una vez»); la del móvil, en `residencia-4.e2e.ts` («un lote que
+    // llega TARDE»), y la de la pantalla en
+    // `residencia-4-pantallas.test.tsx` («la banda ámbar dice que el
+    // aviso NO ha salido»). Ninguna de las tres puede contestar lo que
+    // contestan las otras.
+    apiMock.apiConPuerta.mockRejectedValue(new TypeError("Failed to fetch"));
+    const fiebre = registroDeConstante(CTX, {
+      controlCode: "TEMPERATURA",
+      numero: 38.6,
+      avisarEnfermera: true,
+    });
+    await encolar([fiebre], "Temperatura: 38,6 °C");
+    await flushOutbox();
+
+    // Sigue en la tablet: la pantalla 6 pinta la banda ámbar del «NO ha
+    // salido» porque esto es lo que hay.
+    expect(await outboxCounts()).toMatchObject({ pending: 1, rejected: 0 });
+
+    // Vuelve la red.
+    apiMock.apiConPuerta.mockReset();
+    apiMock.apiConPuerta.mockResolvedValue({ registros: [] });
+    await flushOutbox();
+    await flushOutbox();
+
+    expect(apiMock.apiConPuerta).toHaveBeenCalledTimes(1);
+    const [, opciones] = apiMock.apiConPuerta.mock.calls[0]!;
+    const enviados = (opciones as { body: { registros: Array<Record<string, unknown>> } })
+      .body.registros;
+    expect(enviados).toHaveLength(1);
+    // La hora ORIGINAL y el turno de noche de AYER, no la de ahora.
+    expect(enviados[0]!.recordedAt).toBe(DE_MADRUGADA.toISOString());
+    expect(enviados[0]!.careDay).toBe("2026-10-14");
+    expect(enviados[0]!.centerShiftId).toBe(TURNO_DE_NOCHE);
+    // Y el aviso viaja DENTRO del registro: no es una petición aparte
+    // que se pueda perder mientras el registro entra.
+    expect(enviados[0]!.avisarEnfermera).toBe(true);
+    expect(enviados[0]!.valor).toEqual({ tipo: "NUMERIC", numero: 38.6 });
+    expect(await outboxCounts()).toMatchObject({ pending: 0, rejected: 0 });
   });
 
   it("los items de la puerta NO salen por la auth del cajero", async () => {

@@ -13,6 +13,10 @@
 //     fila y el estado de las correcciones y las anulaciones.
 //   · `foto.jpg` — su foto, descifrada, si la tiene.
 //   · `notas-de-voz/` — los audios de «algo no va bien», descifrados.
+//   · residencia-4 · **sus incidencias**, con la cronología de acciones,
+//     los avisos y sus acuses, los enlaces con otras y **lo que se le
+//     dijo a la familia o por qué no** — todo descifrado. Y las
+//     **excepciones de umbral** que le pautó la médica, con su motivo.
 //
 // ── Por qué el registro entero y no un resumen ──────────────────────
 //
@@ -43,12 +47,17 @@ import type { PrismaClient } from "@mipiacetpv/db";
 import { dekONada } from "../clinica/claves.js";
 import {
   leerTexto,
+  sitioContenidoAFamilia,
+  sitioDescripcionDeIncidencia,
   sitioDniDeResidente,
   sitioMotivoDeAlta,
   sitioMotivoDeCierreDeLinea,
+  sitioMotivoDeExcepcion,
   sitioMotivoDeLinea,
   sitioMotivoDeOcupacion,
   sitioNssDeResidente,
+  sitioRespuestaDeFamilia,
+  sitioTextoDeAccion,
 } from "../clinica/cripto-campos.js";
 import { leerFichero } from "../clinica/ficheros.js";
 import { frecuenciaEnPalabras } from "@mipiacetpv/residencia-plan";
@@ -115,8 +124,14 @@ export async function parteDeResidencia(
   const incidencias: string[] = [];
   const ficheros: FicheroDeResidencia[] = [];
 
-  const [ocupaciones, plan, registros, consentimientosDeImagen] =
-    await Promise.all([
+  const [
+    ocupaciones,
+    plan,
+    registros,
+    consentimientosDeImagen,
+    incidenciasSuyas,
+    excepciones,
+  ] = await Promise.all([
       prisma.bedAssignment.findMany({
         where: { tenantId, clientId },
         orderBy: { fromAt: "asc" },
@@ -182,6 +197,111 @@ export async function parteDeResidencia(
           signerName: true,
           signerRelation: true,
           revokesConsentId: true,
+        },
+      }),
+      // ── residencia-4 · SUS INCIDENCIAS, enteras ──────────────────
+      //
+      // Con la cronología, los avisos y la constancia de familia. **Todo
+      // y no un resumen**, por lo mismo que el registro de cuidados: lo
+      // que se devuelve es la evidencia, y la evidencia de una residencia
+      // es que nada se borró — que la acción está al lado de la
+      // incidencia, con quién y cuándo, y que el aviso que nadie acusó
+      // consta como no acusado.
+      prisma.incident.findMany({
+        where: { tenantId, clientId },
+        orderBy: { openedAt: "asc" },
+        select: {
+          id: true,
+          subject: true,
+          origin: true,
+          incidentType: true,
+          severity: true,
+          templateVersion: true,
+          open: true,
+          descriptionCifrado: true,
+          openedAt: true,
+          closedAt: true,
+          selfClosed: true,
+          alertedAt: true,
+          careDay: true,
+          sourceRecordId: true,
+          room: { select: { number: true } },
+          centerShift: { select: { code: true } },
+          openedBy: { select: { alias: true, email: true } },
+          openedWith: { select: { careRole: { select: { code: true } } } },
+          closedBy: { select: { alias: true, email: true } },
+          closedWith: { select: { careRole: { select: { code: true } } } },
+          actions: {
+            orderBy: { at: "asc" },
+            select: {
+              id: true,
+              kind: true,
+              textCifrado: true,
+              severityFrom: true,
+              severityTo: true,
+              careRecordId: true,
+              called: true,
+              at: true,
+              by: { select: { alias: true, email: true } },
+              byWith: { select: { careRole: { select: { code: true } } } },
+            },
+          },
+          familyCommunications: {
+            orderBy: { at: "asc" },
+            select: {
+              id: true,
+              kind: true,
+              channel: true,
+              contactName: true,
+              contactRelation: true,
+              contentCifrado: true,
+              responseCifrado: true,
+              at: true,
+              by: { select: { alias: true, email: true } },
+              byWith: { select: { careRole: { select: { code: true } } } },
+            },
+          },
+          alerts: {
+            orderBy: { createdAt: "asc" },
+            select: {
+              channel: true,
+              severity: true,
+              state: true,
+              queuedAt: true,
+              createdAt: true,
+              deliveredAt: true,
+              ackedAt: true,
+              ackedBy: { select: { alias: true, email: true } },
+            },
+          },
+          linksFrom: { select: { bId: true } },
+          linksTo: { select: { aId: true } },
+        },
+      }),
+      // Y las excepciones de umbral que le pautó la médica, con su
+      // motivo descifrado: es una prescripción suya.
+      prisma.residentThresholdOverride.findMany({
+        where: { tenantId, clientId },
+        orderBy: { fromAt: "asc" },
+        select: {
+          id: true,
+          controlCode: true,
+          reasonCifrado: true,
+          fromAt: true,
+          toAt: true,
+          revokedAt: true,
+          signedAt: true,
+          signedBy: { select: { alias: true, email: true } },
+          signedWith: { select: { careRole: { select: { code: true } } } },
+          rules: {
+            orderBy: { sortOrder: "asc" },
+            select: {
+              comparator: true,
+              value: true,
+              severity: true,
+              incidentType: true,
+            },
+          },
         },
       }),
     ]);
@@ -330,6 +450,106 @@ export async function parteDeResidencia(
           sitioMotivoDeCierreDeLinea(tenantId, l.id),
         ),
       })),
+      // ── residencia-4 · las incidencias y las excepciones ─────────
+      incidencias: incidenciasSuyas.map((i) => ({
+        id: i.id,
+        sujeto: i.subject,
+        origen: i.origin,
+        tipo: i.incidentType,
+        nivel: i.severity,
+        versionDeLaPlantilla: i.templateVersion,
+        abierta: i.open,
+        descripcion: leerTexto(
+          { cifrado: i.descriptionCifrado, claro: null },
+          dek,
+          sitioDescripcionDeIncidencia(tenantId, i.id),
+        ),
+        dia: i.careDay,
+        turno: i.centerShift?.code ?? null,
+        habitacion: i.room?.number ?? null,
+        medidaQueLaAbrio: i.sourceRecordId,
+        abiertaEn: i.openedAt.toISOString(),
+        abiertaPor: nombreCorto(i.openedBy),
+        conElRol: i.openedWith.careRole.code,
+        cerradaEn: i.closedAt?.toISOString() ?? null,
+        cerradaPor: i.closedBy ? nombreCorto(i.closedBy) : null,
+        cerradaConElRol: i.closedWith?.careRole.code ?? null,
+        autocierre: i.selfClosed,
+        avisadoEn: i.alertedAt?.toISOString() ?? null,
+        enlazadaCon: [
+          ...i.linksFrom.map((l) => l.bId),
+          ...i.linksTo.map((l) => l.aId),
+        ],
+        acciones: i.actions.map((a) => ({
+          id: a.id,
+          clase: a.kind,
+          texto: leerTexto(
+            { cifrado: a.textCifrado, claro: null },
+            dek,
+            sitioTextoDeAccion(tenantId, a.id),
+          ),
+          nivelDesde: a.severityFrom,
+          nivelHasta: a.severityTo,
+          registro: a.careRecordId,
+          llamado: a.called,
+          en: a.at.toISOString(),
+          por: nombreCorto(a.by),
+          conElRol: a.byWith.careRole.code,
+        })),
+        comunicacionesALaFamilia: i.familyCommunications.map((c) => ({
+          id: c.id,
+          clase: c.kind,
+          via: c.channel,
+          contacto: c.contactName,
+          parentesco: c.contactRelation,
+          contenido: leerTexto(
+            { cifrado: c.contentCifrado, claro: null },
+            dek,
+            sitioContenidoAFamilia(tenantId, c.id),
+          ),
+          respuesta: leerTexto(
+            { cifrado: c.responseCifrado, claro: null },
+            dek,
+            sitioRespuestaDeFamilia(tenantId, c.id),
+          ),
+          en: c.at.toISOString(),
+          por: nombreCorto(c.by),
+          conElRol: c.byWith.careRole.code,
+        })),
+        // Los avisos, **incluidos los que nadie acusó**: es la prueba de
+        // que sonó, y también la de que sonó y no fue nadie.
+        avisos: i.alerts.map((a) => ({
+          canal: a.channel,
+          nivel: a.severity,
+          estado: a.state,
+          apuntadoEn: a.queuedAt.toISOString(),
+          salidoEn: a.createdAt.toISOString(),
+          entregadoEn: a.deliveredAt?.toISOString() ?? null,
+          acusadoEn: a.ackedAt?.toISOString() ?? null,
+          acusadoPor: a.ackedBy ? nombreCorto(a.ackedBy) : null,
+        })),
+      })),
+      excepcionesDeUmbral: excepciones.map((e) => ({
+        id: e.id,
+        control: e.controlCode,
+        motivo: leerTexto(
+          { cifrado: e.reasonCifrado, claro: null },
+          dek,
+          sitioMotivoDeExcepcion(tenantId, e.id),
+        ),
+        desde: e.fromAt.toISOString(),
+        hasta: e.toAt?.toISOString() ?? null,
+        revocadaEn: e.revokedAt?.toISOString() ?? null,
+        firmadaEn: e.signedAt.toISOString(),
+        firmadaPor: nombreCorto(e.signedBy),
+        conElRol: e.signedWith.careRole.code,
+        reglas: e.rules.map((r) => ({
+          comparador: r.comparator,
+          valor: Number(r.value),
+          nivel: r.severity,
+          tipo: r.incidentType,
+        })),
+      })),
       registroDeCuidados: vista.map((r) => {
         const fila = porId.get(r.id)!;
         return {
@@ -367,4 +587,12 @@ export async function parteDeResidencia(
       }),
     },
   };
+}
+
+/** El alias, o la parte local del email. El mismo criterio que
+ *  `nombreDeQuienFirma`, repetido aquí porque el ZIP no debe llevar un
+ *  email completo: es un dato personal del PERSONAL, y lo que se devuelve
+ *  es la evidencia de quién firmó, no cómo escribirle. */
+function nombreCorto(u: { alias: string | null; email: string }): string {
+  return u.alias ?? (u.email.split("@")[0] ?? u.email);
 }

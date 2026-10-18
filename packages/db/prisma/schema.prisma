@@ -258,6 +258,25 @@ enum DeviceKind {
   // tenant no crea ninguna—, así que colgar la puerta de una caja técnica
   // habría sido inventarse una caja para un centro que no cobra.
   ROOM
+  // residencia-4 (D-66) · EL MÓVIL DE GUARDIA. La MISMA APK en «modo
+  // guardia», emparejada a un canal (`ENFERMERIA` o `RESPONSABLE`) en vez
+  // de a una caja o a una habitación.
+  //
+  // Es el segundo `DeviceKind` que no cuelga de una caja, y el primero
+  // que no cuelga de NADA físico: una puerta es de una habitación, pero
+  // un móvil de guardia es de quien lo lleve ese turno — y quién lo lleva
+  // lo dice el PIN al empezar (`guard_shift_sessions`), no el
+  // emparejamiento. Puede ser el teléfono personal de quien dirige.
+  //
+  // **No vende, no abre turno, no factura y no releva a nadie**, igual
+  // que `KITCHEN` y `ROOM`: lo corta `requireDeviceToken` con un 403
+  // antes del PIN, y el trigger `devices_revoke_previous` y el índice
+  // `devices_one_active_per_register_key` filtran `kind = 'TERMINAL'`.
+  //
+  // Y **no releva al móvil anterior de su canal**, al revés que una
+  // puerta releva a la de su habitación: un centro puede tener tres
+  // móviles de enfermería a la vez y los tres tienen que sonar.
+  GUARD
 }
 
 // V1-verifactu (ADR-019) · por qué se revocó un dispositivo.
@@ -893,6 +912,146 @@ enum CarePlanItemSource {
   MANUAL
 }
 
+// ── residencia-4 · gravedad, incidencias y el aviso ───────────────────
+//
+// Cinco listas más, y la frontera sigue siendo la misma: es enum lo que,
+// si cambiara, cambiaría el código que lo lee. Lo que NO es enum y es a
+// propósito es **el tipo de incidencia** (`FIEBRE`, `CAIDA`, `AVERIA`…):
+// es un CÓDIGO de texto que vive en el fichero de datos de la plantilla
+// de gravedad, porque D-11 llevado a la capa 4 dice que un tipo nuevo en
+// 2028 tiene que ser una fila y no una migración.
+
+/// residencia-4 (D-26) · LOS CINCO NIVELES, por CONSECUENCIA y no por
+/// causa (rama de controles §6.1). Así valen igual para una caída, una
+/// fiebre o una queja, y la plantilla sólo tiene que decir en cuál cae
+/// cada cosa.
+///
+///   · `N0` — queda constancia. **No abre incidencia** (D-27).
+///   · `N1` — lo tiene que saber el turno siguiente (relevo,
+///     residencia-5).
+///   · `N2` — alguien tiene que verlo AHORA: suena el móvil de guardia.
+///   · `N3` — hay que tomar una decisión clínica: suenan los dos canales.
+///   · `N4` — emergencia: los dos canales y la puerta pinta «Llama al
+///     112».
+enum SeverityLevel {
+  N0
+  N1
+  N2
+  N3
+  N4
+}
+
+/// residencia-4 · cómo compara una regla de umbral. Los cuatro que la
+/// tabla del §3 usa literalmente («≥ 37,5», «< 92», «≤ 90», «> 300»).
+/// Traducir un `LTE 90` a un `LT 91` habría metido una decisión de
+/// redondeo donde hoy se miden enteros y mañana puede que no.
+enum SeverityComparator {
+  GTE
+  GT
+  LTE
+  LT
+}
+
+/// residencia-4 (D-35, D-38) · EL SUJETO DEL LIBRO ÚNICO.
+///
+/// Lo único que cambia entre una caída, una queja y una avería es ESTO
+/// (rama §6.3). Es enum y no código de texto —al revés que el tipo—
+/// porque de cada sujeto cuelga una pantalla distinta y un formulario
+/// distinto: añadir `PROVEEDOR` (fuera de la v1 por D-38) es desarrollo.
+enum IncidentSubject {
+  RESIDENT
+  COMPLAINT
+  MAINTENANCE
+}
+
+/// residencia-4 (D-20) · DE DÓNDE SALIÓ LA INCIDENCIA.
+///
+///   · `DECLARED`          — alguien la declaró en la puerta o en el
+///     admin.
+///   · `DERIVED_THRESHOLD` — la derivó una constante que cruzó umbral.
+///   · `DERIVED_ABSENCE`   — la derivó la pasada programada por lo que
+///     NO hay (sin deposición > 3 días, «nada» en dos comidas).
+///
+/// La distinción no es decorativa: es la mitad de D-20 y es lo que la
+/// auditoría mira para saber cuántas incidencias se cazan solas.
+enum IncidentOrigin {
+  DECLARED
+  DERIVED_THRESHOLD
+  DERIVED_ABSENCE
+}
+
+/// residencia-4 · QUÉ CLASE DE ACCIÓN es una línea del histórico de una
+/// incidencia. Append-only, como las anotaciones clínicas.
+///
+///   · `NOTE`      — «qué se hizo», texto libre cifrado.
+///   · `EVIDENCE`  — se adjuntó otra medida a esta incidencia (la segunda
+///     toma de fiebre del turno).
+///   · `SEVERITY`  — cambió el nivel, con el de antes y el de después.
+///   · `ALERT`     — salió un aviso, o lo acusó alguien.
+///   · `CALL`      — se llamó (o se decidió no llamar) al servicio
+///     sanitario de guardia. D-33: la llamada la hace la persona.
+///   · `CLOSE`     — se cerró.
+enum IncidentActionKind {
+  NOTE
+  EVIDENCE
+  SEVERITY
+  ALERT
+  CALL
+  CLOSE
+}
+
+/// residencia-4 (D-66) · LOS DOS CANALES DEL MÓVIL DE GUARDIA.
+///
+/// `ENFERMERIA` es quien coge el móvil de enfermería al empezar el turno;
+/// `RESPONSABLE` es la dirección o el responsable de guardia, que puede
+/// ser su teléfono personal con la APK en modo guardia. Puede haber
+/// VARIOS dispositivos por canal.
+enum GuardChannel {
+  ENFERMERIA
+  RESPONSABLE
+}
+
+/// residencia-4 · EN QUÉ ESTÁ UN AVISO.
+///
+///   · `PENDING`    — creado, todavía sin entregar a ningún móvil vivo.
+///   · `DELIVERED`  — un móvil de ese canal lo tiene delante.
+///   · `ACKED`      — alguien pulsó «Voy» con su PIN.
+///   · `ESCALATED`  — se agotaron los minutos sin acuse y se abrió el del
+///     canal siguiente. **No se cancela**: el de enfermería sigue sonando.
+///   · `CANCELLED`  — la incidencia se cerró antes de que nadie acusara.
+enum GuardAlertState {
+  PENDING
+  DELIVERED
+  ACKED
+  ESCALATED
+  CANCELLED
+}
+
+/// residencia-4 (D-32 a D-34) · LAS DOS CONSTANCIAS DE FAMILIA.
+///
+/// Es una DIMENSIÓN APARTE del nivel (rama §9): una caída sin
+/// consecuencias es N1 y la familia quiere saberlo el mismo día; un
+/// hallazgo N3 puede convenir no comunicarlo hasta tener diagnóstico.
+///
+/// Y las dos son constancia: «no comunicado» con autor y motivo es un
+/// registro tan válido como «comunicado», por la misma lógica de
+/// denominador que el «como siempre» (D-15). Una incidencia de residente
+/// **no se cierra sin una de las dos**.
+enum FamilyCommunicationKind {
+  COMUNICADO
+  NO_COMUNICADO
+}
+
+/// residencia-4 · por qué vía se habló con la familia. `OTRA` existe
+/// porque una lista cerrada de canales se queda corta el día que alguien
+/// viene a recoger ropa y se le cuenta en el pasillo.
+enum FamilyCommunicationChannel {
+  TELEFONO
+  PRESENCIAL
+  EMAIL
+  OTRA
+}
+
 // ── Multi-tenant raíz ─────────────────────────────────────────────────
 
 model Tenant {
@@ -1310,6 +1469,22 @@ model Tenant {
   // residencia-3 · el registro de cuidados y los PIN de la puerta.
   careRecords                   CareRecord[]
   carePins                      CarePin[]
+  // residencia-4 · el libro de incidencias con sus acciones, enlaces y
+  // comunicaciones a familia; los avisos y los turnos de guardia; las
+  // excepciones de umbral de sus residentes y su configuración de
+  // guardia.
+  //
+  // **La plantilla de gravedad NO está aquí**: es del producto (D-65), no
+  // tiene `tenant_id` y la ven todos los centros, igual que los
+  // `ControlType` de `scope STANDARD`.
+  incidents                     Incident[]
+  incidentLinks                 IncidentLink[]
+  incidentActions               IncidentAction[]
+  familyCommunications          FamilyCommunication[]
+  guardAlerts                   GuardAlert[]
+  guardShiftSessions            GuardShiftSession[]
+  guardSetting                  CenterGuardSetting?
+  thresholdOverrides            ResidentThresholdOverride[]
 
   // v1.3-SuperAdmin-Hub Lote 3 · el backfill y el hub buscan/listan
   // tenants por `holded_account_id`. Sin índice eran scans completos
@@ -1635,6 +1810,19 @@ model User {
   // el contrato de tratamiento de datos de salud no se borra.
   processorAgreements    ClinicalProcessorAgreement[] @relation("ClinicalProcessorAgreementUser")
 
+  // residencia-4 · lo que esta persona abrió, cerró, hizo, comunicó,
+  // acusó y pautó en el libro de incidencias. Todo `Restrict`: es la
+  // firma (D-31), y una firma no se queda huérfana.
+  incidentsOpened           Incident[]                  @relation("IncidentOpenedBy")
+  incidentsClosed           Incident[]                  @relation("IncidentClosedBy")
+  incidentActions           IncidentAction[]            @relation("IncidentActionBy")
+  familyCommunications      FamilyCommunication[]       @relation("FamilyCommunicationBy")
+  guardAlertsAcked          GuardAlert[]                @relation("GuardAlertAckedBy")
+  guardShiftSessions        GuardShiftSession[]         @relation("GuardShiftSessionUser")
+  guardShiftSessionsEnded   GuardShiftSession[]         @relation("GuardShiftSessionEndedBy")
+  thresholdOverridesSigned  ResidentThresholdOverride[] @relation("ThresholdOverrideSignedBy")
+  thresholdOverridesRevoked ResidentThresholdOverride[] @relation("ThresholdOverrideRevokedBy")
+
   @@index([tenantId])
   @@map("users")
 }
@@ -1934,6 +2122,14 @@ model Device {
   kitchenLanIp       String?              @map("kitchen_lan_ip")
   kitchenLanPort     Int?                 @map("kitchen_lan_port")
   kitchenLanAt       DateTime?            @map("kitchen_lan_at") @db.Timestamptz()
+  // residencia-4 (D-66) · EN QUÉ CANAL SUENA ESTE MÓVIL.
+  //
+  // Sólo puede tener valor en un `kind = GUARD`, y en un `GUARD` es
+  // obligatorio (CHECK `devices_guard_canal`): un móvil de guardia sin
+  // canal no recibiría ningún aviso y el fallo se vería la noche que
+  // alguien tenga 38,6, no al emparejarlo. Misma forma exacta que
+  // `devices_kitchen_sections` en kds-1.
+  guardChannel       GuardChannel?        @map("guard_channel")
 
   tenant              Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   register            Register?                    @relation(fields: [registerId], references: [id], onDelete: Cascade)
@@ -1978,6 +2174,12 @@ model Device {
   // lo mismo que los contratos de encargado: la tabla es evidencia y un
   // aparato se revoca, no se borra.
   careRecords         CareRecord[]
+  // residencia-4 · desde qué puerta se declaró una incidencia, qué turnos
+  // de guardia se abrieron en este móvil y qué avisos acusó. Los tres con
+  // `Restrict` o `SetNull` por lo mismo: un aparato se revoca.
+  incidents           Incident[]                   @relation("IncidentDevice")
+  guardShiftSessions  GuardShiftSession[]
+  guardAlertsAcked    GuardAlert[]                 @relation("GuardAlertAckedByDevice")
 
   @@index([tenantId])
   @@index([registerId])
@@ -2124,6 +2326,14 @@ model PairingCode {
   // Las secciones de la pantalla, copiadas al dispositivo al consumir el
   // código. Vacío salvo en `kind = KITCHEN`.
   kitchenSections    KitchenSection[] @default([]) @map("kitchen_sections")
+  // residencia-4 (D-66) · el canal del móvil de guardia, copiado al
+  // dispositivo al consumir el código. NULL salvo en `kind = GUARD`
+  // (CHECK `pairing_codes_guard_canal`), y por la misma razón que
+  // `kitchenSections` y `roomId`: lo decide quien genera el código desde
+  // el panel, no el aparato que lo teclea. Si `POST /devices/pair`
+  // aceptara el canal del cuerpo, cualquiera con un código se emparejaría
+  // como el móvil de enfermería y recibiría los avisos del centro.
+  guardChannel       GuardChannel?    @map("guard_channel")
 
   tenant           Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   register         Register? @relation(fields: [registerId], references: [id], onDelete: Cascade)
@@ -3282,7 +3492,7 @@ model Client {
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
 
-  tenant              Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant              Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   // clinica-4 · `consents` pasó a RESTRICT (S3, condición 1): un paciente
   // con un consentimiento firmado NO se borra, y ya no es «lo que se
   // puede perder con la ficha». `technicalNotes` sigue en Cascade: es
@@ -3322,6 +3532,11 @@ model Client {
   /// residencia-3 · lo que se le ha registrado en la puerta. `Restrict`
   /// al otro lado: un residente con registros de cuidado no se borra.
   careRecords         CareRecord[]
+  /// residencia-4 · sus incidencias y las excepciones de umbral que le
+  /// pautó la médica. `Restrict` a los dos lados, por lo mismo: son
+  /// historia clínica suya.
+  incidents           Incident[]
+  thresholdOverrides  ResidentThresholdOverride[]
 
   // Búsqueda por teléfono/email y orden alfabético (A–Z) por tenant.
   @@index([tenantId, phone])
@@ -5501,6 +5716,10 @@ model Room {
   /// emparejar.
   devices      Device[]
   pairingCodes PairingCode[]
+  /// residencia-4 · las incidencias declaradas desde la puerta de esta
+  /// habitación. `SetNull`: retirar una habitación no borra lo que pasó
+  /// dentro, pero tampoco impide retirarla.
+  incidents    Incident[]
 
   @@unique([tenantId, number])
   @@index([tenantId])
@@ -5697,7 +5916,18 @@ model CareRoleAssignment {
   /// residencia-3 · lo que se firmó CON ESTA CAPACIDAD (D-31). `Restrict`
   /// al otro lado, que es la razón por la que una asignación no se borra
   /// nunca: es la mitad de la firma.
-  careRecords CareRecord[]
+  careRecords              CareRecord[]
+  /// residencia-4 · y lo que se abrió, cerró, hizo, comunicó, acusó y
+  /// pautó con ella. Todo `Restrict`, por lo mismo: «lo cerró Ana Isabel»
+  /// no es evidencia; «lo cerró Ana Isabel, como responsable de calidad»
+  /// sí (rama de controles §8).
+  incidentsOpened          Incident[]                  @relation("IncidentOpenedWith")
+  incidentsClosed          Incident[]                  @relation("IncidentClosedWith")
+  incidentActions          IncidentAction[]
+  familyCommunications     FamilyCommunication[]
+  guardAlertsAcked         GuardAlert[]                @relation("GuardAlertAckedWith")
+  guardShiftSessions       GuardShiftSession[]
+  thresholdOverridesSigned ResidentThresholdOverride[]
 
   @@index([tenantId])
   @@index([tenantId, userId])
@@ -5772,12 +6002,16 @@ model CenterShift {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
 
-  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   /// residencia-3 · los registros adscritos a este turno. `Restrict` al
   /// otro lado: residencia-1 dejó dicho (decisión 8 de su done) que un
   /// turno se podía borrar «porque nada apunta todavía a un turno». Ya
   /// apunta algo, y es el histórico firmado.
-  careRecords CareRecord[]
+  careRecords        CareRecord[]
+  /// residencia-4 · y las incidencias y los turnos de guardia adscritos.
+  /// `Restrict` por lo mismo.
+  incidents          Incident[]
+  guardShiftSessions GuardShiftSession[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -6516,6 +6750,12 @@ model CareRecord {
   corrige            CareRecord?        @relation("CareRecordCorrige", fields: [correctsRecordId], references: [id], onDelete: Restrict)
   corregidaPor       CareRecord[]       @relation("CareRecordCorrige")
   voidedBy           User?              @relation("CareRecordVoidedBy", fields: [voidedByUserId], references: [id], onDelete: Restrict)
+  /// residencia-4 · la incidencia que esta medida ABRIÓ (si cruzó umbral)
+  /// y las veces que se adjuntó como EVIDENCIA a una que ya estaba
+  /// abierta. `Restrict` a los dos lados: la medida es la prueba de por
+  /// qué se abrió, y sin ella la incidencia no se puede leer.
+  incidentsOpened    Incident[]         @relation("IncidentSourceRecord")
+  incidentActions    IncidentAction[]
 
   @@unique([correctsRecordId])
   @@index([tenantId])
@@ -6597,4 +6837,764 @@ model CarePin {
   @@unique([tenantId, pinLookup])
   @@index([tenantId])
   @@map("care_pins")
+}
+
+// ══ residencia-4 · gravedad, incidencias y el aviso que sí llega ══════
+//
+// Lo que este bloque construye es la CONSECUENCIA de lo que residencia-3
+// dejó apuntado: una constante que cruza un umbral declara una incidencia
+// sola, le pone nivel y hace sonar un móvil. Y un libro —uno solo, con el
+// sujeto como atributo (D-35)— donde eso queda con su cierre, sus
+// acciones y lo que se le dijo a la familia.
+//
+// ── Las seis familias y en qué orden se leen ─────────────────────────
+//
+//   1. `SeverityRule`               — LA PLANTILLA (D-65). Dato del
+//      producto, versionado. Un centro no la toca.
+//   2. `ResidentThresholdOverride`  — la excepción por residente (D-22),
+//      + `ResidentThresholdRule`: lo único que puede cambiar un umbral, y
+//      sólo un `MEDICO`, firmado y con vigencia.
+//   3. `Incident` + `IncidentLink`  — el libro único (D-35, D-38).
+//   4. `IncidentAction`             — qué se hizo. Append-only.
+//   5. `FamilyCommunication`        — comunicado / no comunicado (D-32 a
+//      D-34). Dimensión aparte del nivel.
+//   6. `GuardAlert` + `GuardShiftSession` + `CenterGuardSetting` — el
+//      aviso (D-19, D-66): a quién suena, quién lleva el móvil y en
+//      cuántos minutos escala.
+//
+// ── LO QUE VA CIFRADO Y LO QUE NO (D-63) ─────────────────────────────
+//
+// Nacen cifrados: la DESCRIPCIÓN de la incidencia, el TEXTO de cada
+// acción, el CONTENIDO de la comunicación a familia (y la respuesta) y el
+// MOTIVO de la excepción de umbral. Cinco columnas lógicas más; son
+// veintidós en la casa.
+//
+// Y en claro, DECLARADO: sujeto, tipo, origen, nivel, estado, instantes,
+// residente, firmantes, canal y acuses. **No es dejadez: es lo que
+// sostiene el producto.** La lista de abiertas, el escalado a los cinco
+// minutos y los indicadores de AENOR son consultas SQL sobre esas
+// columnas, y cifrarlas obligaría a descifrar el libro entero para pintar
+// «qué hay abierto hoy». La consecuencia, dicha como en residencia-1b §2:
+// **un `SELECT` sigue diciendo que a doña Carmen se le abrió una
+// incidencia de tipo `FIEBRE` el martes**. Lo que no dice es a cuánto
+// tenía la fiebre, qué se hizo ni qué se le contó a su hija.
+
+/// residencia-4 · las dos mitades de la plantilla del §3. Ver
+/// `SeverityRule`.
+enum SeverityRuleKind {
+  /// Gradúa un NÚMERO: «temperatura ≥ 38 → N2».
+  THRESHOLD
+  /// Gradúa algo que PASÓ: «caída con golpe → N3».
+  EVENT
+}
+
+/// residencia-4 (D-65, D-21) · **LA PLANTILLA DE GRAVEDAD, COMO DATO.**
+///
+/// La tabla del §3 de `00-decisiones.md`, fila por fila. Se siembra desde
+/// `residencia/catalogo/plantilla-de-gravedad.ts` al arrancar la API,
+/// igual que el catálogo de controles y por las mismas razones (D-11):
+/// una versión nueva es una fila, no un desarrollo.
+///
+/// ── GLOBAL, VERSIONADA Y SIN `tenant_id` ─────────────────────────────
+///
+/// No hay columna de tenant. No es un descuido: es D-21 escrito en el
+/// esquema. Los umbrales clínicos son estándar médico y **no se
+/// configuran por centro**; lo único que los cambia es una excepción por
+/// residente con prescripción médica (`ResidentThresholdOverride`). El
+/// `scope` existe y el CHECK `severity_rules_solo_estandar` lo clava en
+/// `STANDARD`: la columna está para que la frontera se lea en la tabla y
+/// para que el día que algo justifique una regla de centro, lo que haya
+/// que discutir sea un CHECK y no un modelo entero.
+///
+/// ── LA VERSIÓN ES DE LA PLANTILLA ENTERA, NO DE LA FILA ──────────────
+///
+/// Todas las filas de una publicación comparten `version` y `validFrom`.
+/// «¿Qué decía la plantilla el 14 de marzo?» tiene que contestarse con un
+/// número, y con versiones por fila la respuesta sería una lista de
+/// diecisiete. Cada incidencia guarda `templateVersion`, y con eso una
+/// auditoría reconstruye por qué aquel 38,2 fue N2.
+///
+/// Publicar la versión N+1 inserta sus filas y pone `supersededAt` a las
+/// de la N. **Las viejas no se editan ni se borran**, igual que una
+/// versión de `ControlType`.
+model SeverityRule {
+  id String @id @default(uuid()) @db.Uuid
+
+  /// Siempre `STANDARD`. Ver la cabecera.
+  scope   ControlScope     @default(STANDARD)
+  version Int
+  kind    SeverityRuleKind
+
+  /// ── Sólo `THRESHOLD` ──────────────────────────────────────────────
+  ///
+  /// El control cuya medida se compara (`TEMPERATURA`, `GLUCEMIA`). Es el
+  /// CÓDIGO y no el id de una versión de `ControlType`: la plantilla
+  /// gradúa la temperatura, no «la versión 1 de la temperatura», y atarla
+  /// a una versión obligaría a republicarla cada vez que el catálogo
+  /// cambie un texto. Mismo criterio que `CenterControlSetting`.
+  controlCode String?             @map("control_code")
+  comparator  SeverityComparator?
+  /// El umbral. `Decimal(10,2)` como `inputMin`/`refMin`: 37,5 tiene que
+  /// ser 37,5 y no 37,499999, porque la diferencia entre 37,49 y 37,5 es
+  /// la diferencia entre no avisar y avisar.
+  value       Decimal?            @db.Decimal(10, 2)
+
+  /// ── Sólo `EVENT` ──────────────────────────────────────────────────
+  ///
+  /// Qué pasó (`CAIDA`, `VOMITO`, `AVERIA`) y el matiz que la pantalla
+  /// pregunta con UNA pregunta (`CON_GOLPE`, `SIN_RIESGO`). `qualifier`
+  /// NULL = la regla base del evento, la que vale cuando no se pregunta
+  /// nada o cuando la respuesta no se conoce (D-13: declarar sin matizar
+  /// sigue siendo un registro completo).
+  eventType String? @map("event_type")
+  qualifier String?
+
+  severity SeverityLevel
+
+  /// El tipo de incidencia que abre. **Es la clave de la idempotencia**:
+  /// tres tomas de fiebre en un turno se adjuntan a la incidencia
+  /// `FIEBRE` abierta del residente en vez de abrir tres (alcance §5).
+  /// Por eso `TEMPERATURA` y `FIEBRE` son dos cosas: el control es lo que
+  /// se mide, el tipo es lo que pasa.
+  incidentType String @map("incident_type")
+
+  /// Para PINTAR la plantilla en la pantalla de solo lectura del admin.
+  /// **No para evaluarla**: `gravedadDe` mira todas las que casan y se
+  /// queda con la más grave, precisamente para que el orden de estas
+  /// filas no pueda cambiar un nivel.
+  sortOrder Int @default(0) @map("sort_order")
+
+  validFrom    DateTime  @map("valid_from") @db.Timestamptz()
+  supersededAt DateTime? @map("superseded_at") @db.Timestamptz()
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  @@index([scope, version])
+  /// «Las reglas vigentes de este control», que es lo que la derivación
+  /// pregunta por cada medida que entra.
+  @@index([controlCode, supersededAt])
+  @@index([eventType, supersededAt])
+  @@map("severity_rules")
+}
+
+/// residencia-4 (D-22) · **LA EXCEPCIÓN DE UMBRAL DE UN RESIDENTE.**
+///
+/// Lo único que puede cambiar un umbral, y **sólo la pauta un rol
+/// `MEDICO`**. Un hipertenso crónico, un paliativo o alguien con
+/// hipotermia habitual tienen rangos propios: el mecanismo es genérico, el
+/// valor distinto es un DATO CLÍNICO DEL RESIDENTE y no una configuración
+/// local (rama de controles §5).
+///
+/// ── SUSTITUYE, NO SE SUMA ────────────────────────────────────────────
+///
+/// Mientras está vigente, las reglas de serie de ESE control **no se
+/// aplican** a ese residente: las suyas son las de `rules`. Sumarlas
+/// dejaría la de serie disparando por debajo de la excepción, que es
+/// exactamente lo que la excepción existe para evitar. Y `rules` VACÍO es
+/// legítimo y pautable: «a doña Carmen no le abráis incidencia por la
+/// tensión, la tiene así desde 2019».
+///
+/// Caducada (`toAt` pasado), **vuelve la de serie sin que nadie haga
+/// nada**. No hay job que la cierre: la vigencia se mira al derivar.
+///
+/// ── UNA VIGENTE POR RESIDENTE Y CONTROL, Y LO DICE EL MOTOR ──────────
+///
+/// No un índice parcial: un **EXCLUDE USING gist** sobre
+/// `(client_id, control_code, tstzrange(from_at, to_at)) WHERE revoked_at
+/// IS NULL`, el mismo mecanismo que el anti-solape de la agenda
+/// (`b_koibox_4`). Con un índice parcial `WHERE revoked_at IS NULL` una
+/// excepción caducada en marzo bloquearía otra en junio; con el EXCLUDE,
+/// lo que no se puede es que dos se SOLAPEN — que es la regla de verdad.
+///
+/// ── LA FIRMA ES PERSONA + CAPACIDAD (D-31) ───────────────────────────
+///
+/// Y la capacidad tiene que ser un rol `MEDICO` vigente en el momento de
+/// firmar. Lo comprueba la ruta (es una regla que cruza dos tablas, igual
+/// que el colegiado de residencia-1) y tiene su fila en la tabla de
+/// sabotajes: una auxiliar no pauta un umbral.
+model ResidentThresholdOverride {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  clientId String @map("client_id") @db.Uuid
+
+  /// Qué constante. CÓDIGO, no id de versión, por lo mismo que en
+  /// `SeverityRule`.
+  controlCode String @map("control_code")
+
+  /// **Por qué.** Cifrado (D-63): «paliativo, febrícula basal 37,8» es
+  /// un diagnóstico con todas las letras. Su CHECK de formato sólo admite
+  /// `c1:…`, así que el claro NO CABE.
+  ///
+  /// NOT NULL: una excepción sin motivo es un umbral cambiado sin que
+  /// nadie sepa por qué, y eso es justo lo que una auditoría pregunta.
+  reasonCifrado String @map("reason_cifrado")
+
+  /// La vigencia. `toAt` NULL = sin fecha de fin prevista.
+  fromAt DateTime  @map("from_at") @db.Timestamptz()
+  toAt   DateTime? @map("to_at") @db.Timestamptz()
+
+  /// La firma: quién y CON QUÉ CAPACIDAD.
+  signedByUserId               String   @map("signed_by_user_id") @db.Uuid
+  signedByCareRoleAssignmentId String   @map("signed_by_care_role_assignment_id") @db.Uuid
+  signedAt                     DateTime @default(now()) @map("signed_at") @db.Timestamptz()
+
+  /// Retirarla antes de tiempo. No se borra: se revoca, con autor y
+  /// fecha, igual que un `CareRoleAssignment`.
+  revokedAt       DateTime? @map("revoked_at") @db.Timestamptz()
+  revokedByUserId String?   @map("revoked_by_user_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant     Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client     Client                  @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  signedBy   User                    @relation("ThresholdOverrideSignedBy", fields: [signedByUserId], references: [id], onDelete: Restrict)
+  signedWith CareRoleAssignment      @relation(fields: [signedByCareRoleAssignmentId], references: [id], onDelete: Restrict)
+  revokedBy  User?                   @relation("ThresholdOverrideRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+  rules      ResidentThresholdRule[]
+
+  @@index([tenantId])
+  @@index([clientId, controlCode])
+  @@map("resident_threshold_overrides")
+}
+
+/// residencia-4 · UNA REGLA DE UNA EXCEPCIÓN. Misma forma que
+/// `SeverityRule` de tipo `THRESHOLD`, y a propósito: lo que la médica
+/// pauta es «para esta persona, estas bandas», no un formato distinto.
+///
+/// Tabla y no tres columnas (`warnMin`, `alertMax`…) por lo mismo que las
+/// opciones de un control son tabla y no un JSON: el número de bandas lo
+/// decide la pauta, no el esquema, y un paliativo puede llevar dos y un
+/// diabético cuatro.
+///
+/// `Cascade` a la excepción: una regla no significa nada sin su cabecera,
+/// que es donde viven el motivo, la vigencia y la firma.
+model ResidentThresholdRule {
+  id         String @id @default(uuid()) @db.Uuid
+  overrideId String @map("override_id") @db.Uuid
+
+  comparator   SeverityComparator
+  value        Decimal            @db.Decimal(10, 2)
+  severity     SeverityLevel
+  /// El tipo de incidencia que abre. Normalmente el mismo que el de
+  /// serie (`FIEBRE`), para que la idempotencia siga agrupando bien.
+  incidentType String             @map("incident_type")
+
+  sortOrder Int @default(0) @map("sort_order")
+
+  override ResidentThresholdOverride @relation(fields: [overrideId], references: [id], onDelete: Cascade)
+
+  @@index([overrideId])
+  @@map("resident_threshold_rules")
+}
+
+/// residencia-4 (D-35, D-38) · **EL LIBRO ÚNICO DE INCIDENCIAS.**
+///
+/// Una entidad con el SUJETO como atributo, no cuatro entidades separadas
+/// (rama de controles §6.3). Los campos son idénticos para una caída, una
+/// queja y una avería: qué ha pasado, cuándo, quién lo vio, gravedad, a
+/// quién avisar, qué se hizo, quién cierra. Lo único que cambia es el
+/// sujeto — y por eso cada sujeto tiene su pantalla y su formulario, pero
+/// el mismo libro por detrás.
+///
+/// Y de ahí sale lo que de verdad lo justifica: **los casos cruzados**. Un
+/// residente se cae porque el asidero estaba suelto → incidencia + avería
+/// ENLAZADAS (`IncidentLink`). Con libros separados, la relación
+/// causa-efecto se pierde, que es justo lo que AENOR busca en las acciones
+/// correctoras.
+///
+/// ── INMUTABLE, COMO `CareRecord`, CON TRES TRANSICIONES ──────────────
+///
+/// El trigger `incidents_inmutable` deja pasar exactamente tres cosas y
+/// nada más:
+///
+///   1. **subir o bajar el nivel** (`severity`), que escribe su
+///      `IncidentAction` de tipo `SEVERITY`;
+///   2. **cerrarla** (`closedAt`, `closedBy*`, `selfClosed`, `status`);
+///   3. **apuntar que ya se avisó** (`alertedAt`), que es contabilidad
+///      del aviso y no contenido.
+///
+/// Todo lo demás —el residente, el tipo, el origen, quién la abrió, la
+/// descripción— es lo que pasó, y lo que pasó no se edita. Corregir una
+/// descripción es escribir una acción, que es lo mismo que corregir un
+/// `CareRecord` es escribir otra fila.
+///
+/// ── N0 NO ABRE NADA ──────────────────────────────────────────────────
+///
+/// Por D-27, una avería sin riesgo (N0) es CONSTANCIA: se escribe la fila
+/// con `status = CLOSED` y `closedAt` puesto en el momento, sin pedirle a
+/// nadie que la cierre. No es una incidencia abierta que nadie mira — es
+/// una línea del libro para el de mantenimiento.
+model Incident {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  subject  IncidentSubject
+  /// El residente, cuando el sujeto es `RESIDENT`. NULL en una queja de
+  /// familia sin residente identificado y en una avería (CHECK
+  /// `incidents_sujeto_coherente`: un `RESIDENT` exige residente).
+  clientId String?         @map("client_id") @db.Uuid
+
+  origin          IncidentOrigin
+  /// El tipo, en CÓDIGO: `FIEBRE`, `CAIDA`, `AVERIA`. No es un enum (ver
+  /// la cabecera de `plantilla-de-gravedad.ts`): un tipo nuevo en 2028 es
+  /// una fila del fichero de datos, no una migración.
+  incidentType    String         @map("incident_type")
+  severity        SeverityLevel
+  /// La versión de la plantilla con la que se graduó. Es el equivalente
+  /// de `CareRecord.controlTypeId`: «¿por qué esto fue N2?» se contesta
+  /// tres años después.
+  templateVersion Int?           @map("template_version")
+
+  /// `true` mientras esté abierta. Columna y no derivada de `closedAt`
+  /// porque es lo que filtra la lista de «qué hay abierto hoy» —la
+  /// métrica de éxito de dirección— y un índice parcial sobre ella es lo
+  /// que la hace instantánea.
+  open Boolean @default(true)
+
+  /// **Qué ha pasado, cifrado** (D-63). Opcional: una incidencia derivada
+  /// por umbral no la escribe nadie, y la evidencia es la medida.
+  descriptionCifrado String? @map("description_cifrado")
+
+  /// ── DE DÓNDE SALIÓ ────────────────────────────────────────────────
+  ///
+  /// La medida que la abrió, cuando el origen es `DERIVED_THRESHOLD`. Es
+  /// la prueba: sin ella, «se abrió una incidencia de fiebre» no dice a
+  /// cuánto estaba.
+  sourceRecordId String? @map("source_record_id") @db.Uuid
+  /// Y desde qué puerta y qué habitación se declaró, cuando se declaró en
+  /// una. NULL en lo declarado desde el admin y en lo derivado por la
+  /// pasada de ausencias, que no tiene aparato detrás.
+  deviceId       String? @map("device_id") @db.Uuid
+  roomId         String? @map("room_id") @db.Uuid
+
+  /// ── CUÁNDO Y QUIÉN (D-31) ─────────────────────────────────────────
+  openedAt                     DateTime @map("opened_at") @db.Timestamptz()
+  openedByUserId               String   @map("opened_by_user_id") @db.Uuid
+  openedByCareRoleAssignmentId String   @map("opened_by_care_role_assignment_id") @db.Uuid
+
+  /// El turno y el día del CENTRO, calculados como en `CareRecord` y por
+  /// lo mismo: el turno de noche cruza medianoche, y «las incidencias de
+  /// este turno» del relevo (residencia-5) se parte en dos sin esto.
+  centerShiftId String? @map("center_shift_id") @db.Uuid
+  careDay       String  @map("care_day") @db.VarChar(10)
+
+  /// ── EL CIERRE (D-27, D-28) ────────────────────────────────────────
+  ///
+  /// Lo cierra un rol de **categoría directiva**. N1 y N2 admiten
+  /// autocierre por quien la abrió, **marcado como tal**; N3 y N4 exigen
+  /// persona distinta, y si no la hay la incidencia QUEDA ABIERTA y sube
+  /// al panel de dirección.
+  ///
+  /// Las cuatro van juntas o ninguna (CHECK `incidents_cierre_completo`),
+  /// y `open` es su negación (CHECK `incidents_abierta_coherente`): una
+  /// incidencia cerrada sin saber quién la cerró es media evidencia.
+  closedAt                     DateTime? @map("closed_at") @db.Timestamptz()
+  closedByUserId               String?   @map("closed_by_user_id") @db.Uuid
+  closedByCareRoleAssignmentId String?   @map("closed_by_care_role_assignment_id") @db.Uuid
+  /// `true` cuando la cerró la misma persona que la abrió. **Se marca, no
+  /// se prohíbe** en N1 y N2 (D-28): en el turno de noche hay una
+  /// auxiliar y nadie más, y exigir una segunda persona dejaría el libro
+  /// lleno de abiertas que nadie puede cerrar.
+  selfClosed                   Boolean   @default(false) @map("self_closed")
+
+  /// Cuándo salió el primer aviso. NULL = no tocaba avisar (N0, N1) o
+  /// todavía no ha salido. Es contabilidad del aviso y por eso el trigger
+  /// de inmutabilidad la deja cambiar.
+  alertedAt DateTime? @map("alerted_at") @db.Timestamptz()
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant       Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client       Client?             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  sourceRecord CareRecord?         @relation("IncidentSourceRecord", fields: [sourceRecordId], references: [id], onDelete: Restrict)
+  device       Device?             @relation("IncidentDevice", fields: [deviceId], references: [id], onDelete: Restrict)
+  room         Room?               @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  openedBy     User                @relation("IncidentOpenedBy", fields: [openedByUserId], references: [id], onDelete: Restrict)
+  openedWith   CareRoleAssignment  @relation("IncidentOpenedWith", fields: [openedByCareRoleAssignmentId], references: [id], onDelete: Restrict)
+  closedBy     User?               @relation("IncidentClosedBy", fields: [closedByUserId], references: [id], onDelete: Restrict)
+  closedWith   CareRoleAssignment? @relation("IncidentClosedWith", fields: [closedByCareRoleAssignmentId], references: [id], onDelete: Restrict)
+  centerShift  CenterShift?        @relation(fields: [centerShiftId], references: [id], onDelete: Restrict)
+
+  actions              IncidentAction[]
+  familyCommunications FamilyCommunication[]
+  alerts               GuardAlert[]
+  /// Los enlaces, en los dos sentidos. Ver `IncidentLink`: el par se
+  /// guarda UNA vez y las dos relaciones son la misma fila leída desde
+  /// cada lado.
+  linksFrom            IncidentLink[]        @relation("IncidentLinkFrom")
+  linksTo              IncidentLink[]        @relation("IncidentLinkTo")
+
+  @@index([tenantId])
+  /// **«Qué hay abierto hoy»**, que es literalmente la métrica de éxito
+  /// de dirección (rama §6.3). El índice parcial `WHERE open` vive en la
+  /// migración; éste sostiene el filtro por sujeto y nivel.
+  @@index([tenantId, open, severity])
+  @@index([tenantId, subject, openedAt])
+  @@index([tenantId, careDay])
+  /// Y la IDEMPOTENCIA de la derivación: «¿tiene este residente una
+  /// incidencia abierta de este tipo?» se pregunta por cada medida que
+  /// entra, y tiene que costar un índice.
+  @@index([clientId, incidentType, open])
+  @@map("incidents")
+}
+
+/// residencia-4 (D-35) · **DOS INCIDENCIAS ENLAZADAS.**
+///
+/// La caída de la 112 y el asidero suelto de la 112. Es el caso que
+/// justifica el libro único: con libros separados la relación causa-efecto
+/// se pierde, y es justo lo que AENOR busca en las acciones correctoras.
+///
+/// ── EL PAR SE GUARDA UNA VEZ, Y ORDENADO ─────────────────────────────
+///
+/// Una fila por pareja, con `aId < bId` como texto (CHECK
+/// `incident_links_ordenado`) y único por `(aId, bId)`. La alternativa
+/// —dos filas simétricas— deja la puerta abierta a que una se borre y la
+/// otra no, y entonces la caída enlaza con la avería y la avería no enlaza
+/// con nada.
+///
+/// Un enlace SÍ se puede borrar, al revés que todo lo demás de este
+/// bloque: enlazar mal dos incidencias es un error de dedo del admin y
+/// deshacerlo no borra ninguna evidencia — las dos incidencias siguen
+/// enteras.
+model IncidentLink {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  aId String @map("a_id") @db.Uuid
+  bId String @map("b_id") @db.Uuid
+
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  createdByUserId String?  @map("created_by_user_id") @db.Uuid
+
+  tenant Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  a      Incident @relation("IncidentLinkFrom", fields: [aId], references: [id], onDelete: Cascade)
+  b      Incident @relation("IncidentLinkTo", fields: [bId], references: [id], onDelete: Cascade)
+
+  @@unique([aId, bId])
+  @@index([tenantId])
+  @@index([bId])
+  @@map("incident_links")
+}
+
+/// residencia-4 · **QUÉ SE HIZO.** Append-only, como las anotaciones
+/// clínicas (`ClinicalAddendum`) y por la misma razón: el histórico de una
+/// incidencia es la evidencia de la acción correctora, y una evidencia que
+/// se edita no es evidencia.
+///
+/// El trigger `incident_actions_append_only` no deja ni `UPDATE` ni
+/// `DELETE`. Ni una escapatoria: no hay «anular» aquí, porque una acción
+/// mal escrita se corrige escribiendo otra que lo diga — que es lo mismo
+/// que hace un `CareRecord`.
+///
+/// ── Y ES DONDE SE ADJUNTA LA EVIDENCIA ───────────────────────────────
+///
+/// Cuando una segunda toma de fiebre llega y el residente ya tiene una
+/// incidencia `FIEBRE` abierta, no se abre otra: se escribe una acción de
+/// tipo `EVIDENCE` apuntando a ese `CareRecord` (alcance §5). Tres tomas
+/// en un turno son UNA incidencia con tres líneas, no tres incidencias.
+model IncidentAction {
+  id         String @id @default(uuid()) @db.Uuid
+  tenantId   String @map("tenant_id") @db.Uuid
+  incidentId String @map("incident_id") @db.Uuid
+
+  kind IncidentActionKind
+
+  /// El texto, cifrado (D-63). Opcional: una acción de tipo `EVIDENCE` o
+  /// `SEVERITY` no necesita que nadie escriba nada — lo dicen sus
+  /// columnas.
+  textCifrado String? @map("text_cifrado")
+
+  /// Sólo `SEVERITY`: de qué nivel a qué nivel. Las dos juntas o ninguna
+  /// (CHECK `incident_actions_nivel_completo`).
+  severityFrom SeverityLevel? @map("severity_from")
+  severityTo   SeverityLevel? @map("severity_to")
+
+  /// Sólo `EVIDENCE`: qué medida se adjuntó.
+  careRecordId String? @map("care_record_id") @db.Uuid
+
+  /// Sólo `CALL` (D-33) · **si se llamó o no al servicio sanitario de
+  /// guardia**. El sistema no llama a nadie: muestra a quién llamar y la
+  /// llamada la hace la persona. Lo que se apunta aquí es qué decidió.
+  called Boolean? @map("called")
+
+  at                     DateTime @default(now()) @db.Timestamptz()
+  byUserId               String   @map("by_user_id") @db.Uuid
+  byCareRoleAssignmentId String   @map("by_care_role_assignment_id") @db.Uuid
+
+  tenant     Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  incident   Incident           @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+  careRecord CareRecord?        @relation(fields: [careRecordId], references: [id], onDelete: Restrict)
+  by         User               @relation("IncidentActionBy", fields: [byUserId], references: [id], onDelete: Restrict)
+  byWith     CareRoleAssignment @relation(fields: [byCareRoleAssignmentId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@index([incidentId, at])
+  @@map("incident_actions")
+}
+
+/// residencia-4 (D-32 a D-34) · **LO QUE SE LE DIJO A LA FAMILIA, O POR
+/// QUÉ NO.**
+///
+/// Dimensión APARTE del nivel (rama de controles §9): una caída sin
+/// consecuencias es N1 y la familia quiere saberlo el mismo día; un
+/// hallazgo N3 puede convenir no comunicarlo hasta tener diagnóstico. Por
+/// eso no es una columna de `Incident` con una fecha: es una tabla con las
+/// dos constancias.
+///
+/// ── LAS DOS SON CONSTANCIA ───────────────────────────────────────────
+///
+/// `COMUNICADO` (quién, cuándo, por qué vía, qué se dijo, qué contestaron)
+/// y `NO_COMUNICADO` (quién lo decidió y por qué). Misma lógica de
+/// denominador que el «como siempre» (D-15): sin la segunda no se
+/// distingue «se decidió no llamar» de «nadie se acordó».
+///
+/// Y **una incidencia de residente no se cierra sin una de las dos**. Lo
+/// comprueba la ruta de cierre, tiene su fila en la tabla de sabotajes, y
+/// es lo que cierra la observación 10 de AENOR.
+///
+/// ── EL SISTEMA NO ENVÍA NADA (D-33) ──────────────────────────────────
+///
+/// Esta tabla registra una conversación que tuvo una persona. No hay
+/// correo, ni SMS, ni portal: el portal de familias es `familias-1` y el
+/// principio general es que **el sistema no habla con el exterior por su
+/// cuenta**.
+model FamilyCommunication {
+  id         String @id @default(uuid()) @db.Uuid
+  tenantId   String @map("tenant_id") @db.Uuid
+  incidentId String @map("incident_id") @db.Uuid
+
+  kind    FamilyCommunicationKind
+  /// Sólo en `COMUNICADO`: por qué vía (CHECK
+  /// `family_communications_via_coherente`). Un «no comunicado» con vía
+  /// es una contradicción.
+  channel FamilyCommunicationChannel?
+
+  /// A quién. Texto y no una FK: el familiar responsable vive en
+  /// `resident_profiles` como tres columnas (nombre, teléfono,
+  /// parentesco) y puede no ser con quien se habló — se llamó a la hija y
+  /// contestó el yerno. Se guarda lo que pasó.
+  ///
+  /// En claro, como el resto de la identidad (residencia-1b §2): es a
+  /// quién se llamó, no qué se le dijo.
+  contactName     String? @map("contact_name")
+  contactRelation String? @map("contact_relation")
+
+  /// **Qué se dijo y qué contestaron, cifrados** (D-63). En un
+  /// `NO_COMUNICADO`, `contentCifrado` es el MOTIVO. NOT NULL: los dos
+  /// casos exigen texto, porque una constancia sin contenido no es
+  /// constancia.
+  contentCifrado  String  @map("content_cifrado")
+  responseCifrado String? @map("response_cifrado")
+
+  at                     DateTime @map("at") @db.Timestamptz()
+  byUserId               String   @map("by_user_id") @db.Uuid
+  byCareRoleAssignmentId String   @map("by_care_role_assignment_id") @db.Uuid
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant   Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  incident Incident           @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+  by       User               @relation("FamilyCommunicationBy", fields: [byUserId], references: [id], onDelete: Restrict)
+  byWith   CareRoleAssignment @relation(fields: [byCareRoleAssignmentId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@index([incidentId, at])
+  @@map("family_communications")
+}
+
+/// residencia-4 (D-19, D-66) · **UN AVISO QUE TIENE QUE SONAR.**
+///
+/// Una fila por (incidencia, canal). N2 abre una de `ENFERMERIA`; N3 y N4
+/// abren las dos a la vez; y si la de enfermería se agota sin acuse, se
+/// abre la de `RESPONSABLE` **sin cancelar la primera** — el aviso no se
+/// mueve de sitio, se suma uno.
+///
+/// ── «SIN RED NO SE FINGE» ────────────────────────────────────────────
+///
+/// Es el peor fallo posible de este bloque y por eso tiene una columna:
+/// `queuedAt` es cuándo lo apuntó la TABLET y `createdAt` cuándo llegó al
+/// servidor, exactamente igual que los dos instantes de `CareRecord`. Un
+/// aviso que sale con dos horas de retraso **suena igual, con su hora
+/// original y su retraso a la vista**, y la puerta que lo originó nunca
+/// dice «avisado» hasta que el servidor lo confirma.
+///
+/// ── EL ESCALADO NO LO DECIDE UN `setTimeout` ─────────────────────────
+///
+/// `escalateAt` es una columna con su índice. La pasada que escala
+/// pregunta «¿qué avisos pendientes tienen `escalate_at` pasado?» — un
+/// temporizador en memoria se pierde al reiniciar la API, y un aviso que
+/// no escala porque alguien desplegó es exactamente lo que este bloque
+/// existe para evitar.
+///
+/// ── EL ACUSE ES UNA FIRMA ────────────────────────────────────────────
+///
+/// «Voy» se pulsa con PIN: persona + capacidad + hora (D-31). No es un
+/// botón de «leído»: es quien se hace cargo, y es lo que la puerta pinta
+/// («Aviso recibido por Lucía · 10:43»).
+model GuardAlert {
+  id         String @id @default(uuid()) @db.Uuid
+  tenantId   String @map("tenant_id") @db.Uuid
+  incidentId String @map("incident_id") @db.Uuid
+
+  channel  GuardChannel
+  severity SeverityLevel
+  state    GuardAlertState @default(PENDING)
+
+  /// Cuándo lo apuntó la tablet y cuándo llegó aquí. Ver la cabecera.
+  queuedAt  DateTime @map("queued_at") @db.Timestamptz()
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  /// Cuándo hay que escalar si nadie acusa. NULL = este aviso no escala
+  /// (el de `RESPONSABLE`, que es el último eslabón, y los de N3/N4 que
+  /// ya salieron a los dos canales).
+  escalateAt      DateTime? @map("escalate_at") @db.Timestamptz()
+  /// El aviso que lo originó al escalar. Deja la cadena leída de un
+  /// vistazo: «éste salió porque el de enfermería no se acusó».
+  escalatedFromId String?   @map("escalated_from_id") @db.Uuid
+
+  /// Cuándo un móvil de ese canal lo tuvo delante. No es el acuse: es que
+  /// llegó. Sirve para contestar «¿sonó?» cuando nadie lo acusó.
+  deliveredAt DateTime? @map("delivered_at") @db.Timestamptz()
+
+  /// ── EL ACUSE ──────────────────────────────────────────────────────
+  ///
+  /// Las cuatro juntas o ninguna (CHECK `guard_alerts_acuse_completo`).
+  ackedAt                     DateTime? @map("acked_at") @db.Timestamptz()
+  ackedByUserId               String?   @map("acked_by_user_id") @db.Uuid
+  ackedByCareRoleAssignmentId String?   @map("acked_by_care_role_assignment_id") @db.Uuid
+  ackedByDeviceId             String?   @map("acked_by_device_id") @db.Uuid
+
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  incident      Incident            @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+  escalatedFrom GuardAlert?         @relation("GuardAlertEscalation", fields: [escalatedFromId], references: [id], onDelete: Restrict)
+  escalatedTo   GuardAlert[]        @relation("GuardAlertEscalation")
+  ackedBy       User?               @relation("GuardAlertAckedBy", fields: [ackedByUserId], references: [id], onDelete: Restrict)
+  ackedWith     CareRoleAssignment? @relation("GuardAlertAckedWith", fields: [ackedByCareRoleAssignmentId], references: [id], onDelete: Restrict)
+  ackedByDevice Device?             @relation("GuardAlertAckedByDevice", fields: [ackedByDeviceId], references: [id], onDelete: Restrict)
+
+  /// Un aviso por (incidencia, canal). Reenviar el mismo lote o derivar
+  /// dos veces la misma medida **no hace sonar dos veces** — es la
+  /// idempotencia del aviso, y vive en el motor y no en un `if`.
+  @@unique([incidentId, channel])
+  @@index([tenantId])
+  /// La pasada del escalado: «pendientes con la hora pasada». El índice
+  /// parcial de verdad (`WHERE state IN ('PENDING','DELIVERED')`) vive en
+  /// la migración.
+  @@index([escalateAt])
+  @@index([tenantId, channel, state])
+  @@map("guard_alerts")
+}
+
+/// residencia-4 (D-66) · **QUIÉN LLEVA EL MÓVIL ESTE TURNO.**
+///
+/// «Al empezar el turno, quien coge el móvil entra con su PIN». Eso hace
+/// tres cosas de una vez, y por eso no hace falta cuadrante:
+///
+///   1. deja la línea en el registro de accesos (es una identificación);
+///   2. le dice al sistema **si hay enfermera de guardia en este turno**,
+///      que es lo que decide si un N2 escala al momento o a los 5 min;
+///   3. pone el nombre en la pantalla en reposo del móvil («De guardia:
+///      Lucía · enfermería · turno de tarde»), que es lo que hace que
+///      quien lo coja sepa que está cogido.
+///
+/// `endedAt` NULL = **de guardia ahora**. Una sola viva por dispositivo
+/// (índice parcial `guard_shift_sessions_una_viva_key`): coger el móvil
+/// cierra la guardia anterior de ESE móvil, en la misma transacción. No
+/// una por canal — un centro puede tener dos enfermeras de guardia con
+/// dos móviles, y las dos están de guardia.
+model GuardShiftSession {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  deviceId String @map("device_id") @db.Uuid
+
+  /// Copiado del dispositivo al empezar. Redundante a propósito: el canal
+  /// de un móvil se puede cambiar en el admin, y «quién estaba de guardia
+  /// en enfermería el martes» tiene que seguir contestándose.
+  channel GuardChannel
+
+  userId               String @map("user_id") @db.Uuid
+  careRoleAssignmentId String @map("care_role_assignment_id") @db.Uuid
+
+  startedAt     DateTime  @map("started_at") @db.Timestamptz()
+  endedAt       DateTime? @map("ended_at") @db.Timestamptz()
+  /// Quién la cerró. NULL cuando la cerró el relevo (otra persona cogió
+  /// el móvil) o la cerró la propia persona.
+  endedByUserId String?   @map("ended_by_user_id") @db.Uuid
+
+  /// El turno y el día del centro en que empezó, para el histórico y para
+  /// el relevo de residencia-5.
+  centerShiftId String? @map("center_shift_id") @db.Uuid
+  careDay       String  @map("care_day") @db.VarChar(10)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  device      Device             @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  user        User               @relation("GuardShiftSessionUser", fields: [userId], references: [id], onDelete: Restrict)
+  careRole    CareRoleAssignment @relation(fields: [careRoleAssignmentId], references: [id], onDelete: Restrict)
+  endedBy     User?              @relation("GuardShiftSessionEndedBy", fields: [endedByUserId], references: [id], onDelete: SetNull)
+  centerShift CenterShift?       @relation(fields: [centerShiftId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  /// «¿Hay alguien de guardia en este canal ahora?», que es la pregunta
+  /// que decide el escalado inmediato.
+  @@index([tenantId, channel, endedAt])
+  @@index([deviceId, startedAt])
+  @@map("guard_shift_sessions")
+}
+
+/// residencia-4 (D-66, rama de controles §10) · **LO QUE EL CENTRO
+/// CONFIGURA DEL AVISO.**
+///
+/// La frontera, otra vez: el MOTOR de gravedad y de escalado es del
+/// producto y no se toca; los **destinatarios de cada nivel** y los
+/// minutos de espera son del centro. Y el servicio sanitario de guardia
+/// —a quién se recomienda llamar— es suyo por definición: el centro de
+/// salud de Buenaventura no es el de nadie más.
+///
+/// Una fila por tenant, con los valores de serie si no existe. No se
+/// siembra al encender el módulo a propósito: «no configurado» y
+/// «configurado con los valores de serie» son lo mismo para el motor, y
+/// sembrar una fila habría hecho que la pantalla no pudiera distinguir
+/// «lo dejaron como estaba» de «lo revisaron y lo dejaron igual» —que
+/// tampoco importa— a cambio de una fila por centro que mantener.
+model CenterGuardSetting {
+  tenantId String @id @map("tenant_id") @db.Uuid
+
+  /// Cuántos minutos se espera un acuse antes de escalar al canal
+  /// siguiente. 5 por defecto (D-66). CHECK 1..60: menos de un minuto no
+  /// da tiempo a sacar el móvil del bolsillo, y más de una hora no es un
+  /// escalado.
+  escalationMinutes Int @default(5) @map("escalation_minutes")
+
+  /// A qué canales suena cada nivel. Arrays y no columnas booleanas
+  /// porque la pregunta es «¿quiénes?» y la respuesta es una lista.
+  /// Vacío = **ese nivel no suena**, que es una decisión legítima del
+  /// centro y se pinta como tal; NULL no existe aquí.
+  ///
+  /// N0 y N1 no tienen columna: N0 no abre nada (D-27) y N1 va al relevo
+  /// (D-19, la velocidad lenta). Dárselas al centro sería dejarle
+  /// convertir el móvil de guardia en un aparato que suena ochenta veces
+  /// por turno.
+  levelN2Channels GuardChannel[] @default([ENFERMERIA]) @map("level_n2_channels")
+  levelN3Channels GuardChannel[] @default([ENFERMERIA, RESPONSABLE]) @map("level_n3_channels")
+  levelN4Channels GuardChannel[] @default([ENFERMERIA, RESPONSABLE]) @map("level_n4_channels")
+
+  /// ── EL SERVICIO SANITARIO DE GUARDIA, COMO RECOMENDACIÓN (D-33) ───
+  ///
+  /// En N3 y N4 el móvil muestra «Recomendado: llamar a …» con un botón
+  /// que abre el marcador. **La llamada la hace la persona**: el sistema
+  /// no llama ni escribe a nadie de fuera por su cuenta. Si se llamó o no
+  /// se apunta como `IncidentAction` de tipo `CALL`.
+  ///
+  /// Las dos juntas o ninguna (CHECK `center_guard_settings_servicio`):
+  /// un nombre sin teléfono es un botón que no marca.
+  healthServiceName  String? @map("health_service_name")
+  healthServicePhone String? @map("health_service_phone")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("center_guard_settings")
 }

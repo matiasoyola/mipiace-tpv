@@ -171,6 +171,37 @@ const CANARIO_NOTA = "CANARIO-NOTA-le-huele-raro-el-pie";
 const PIN_ANA = "4071";
 const PIN_ROSA = "9182";
 
+/**
+ * residencia-4 · vacía el libro de incidencias de un centro.
+ *
+ * Hace falta aquí desde ese bloque: lo que este fichero registra deriva
+ * incidencias, y sus FKs a `care_records` son RESTRICT. Los dos triggers
+ * se apartan porque una incidencia es inmutable y una acción es
+ * append-only — que es justo lo que esos bloques prometen.
+ */
+async function limpiarElLibro(t: string): Promise<void> {
+  const prisma = getPrisma();
+  for (const [tabla, trigger] of [
+    ["family_communications", "family_communications_append_only"],
+    ["incident_actions", "incident_actions_append_only"],
+    ["incidents", "incidents_inmutable"],
+  ] as const) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE ${tabla} DISABLE TRIGGER ${trigger}`);
+  }
+  await prisma.$executeRawUnsafe(`DELETE FROM guard_alerts WHERE tenant_id = '${t}'`);
+  await prisma.$executeRawUnsafe(`DELETE FROM family_communications WHERE tenant_id = '${t}'`);
+  await prisma.$executeRawUnsafe(`DELETE FROM incident_actions WHERE tenant_id = '${t}'`);
+  await prisma.$executeRawUnsafe(`DELETE FROM incident_links WHERE tenant_id = '${t}'`);
+  await prisma.$executeRawUnsafe(`DELETE FROM incidents WHERE tenant_id = '${t}'`);
+  for (const [tabla, trigger] of [
+    ["family_communications", "family_communications_append_only"],
+    ["incident_actions", "incident_actions_append_only"],
+    ["incidents", "incidents_inmutable"],
+  ] as const) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE ${tabla} ENABLE TRIGGER ${trigger}`);
+  }
+}
+
 /** Un INSERT/UPDATE/DELETE tiene que FALLAR. Devuelve el mensaje real. */
 async function debeFallar(sql: string): Promise<string> {
   const prisma = getPrisma();
@@ -432,6 +463,16 @@ describe.skipIf(!e2eEnabled)("e2e · la puerta de la habitación", () => {
   afterAll(async () => {
     await app?.close();
     const t = tenantId;
+    // residencia-4 · EL LIBRO CUELGA DE LOS REGISTROS.
+    //
+    // Desde ese bloque, un «algo no va bien» deriva una incidencia N1 y
+    // la incidencia apunta al registro con `incidents_source_record_id_
+    // fkey`, que es RESTRICT. Así que el libro se vacía ANTES —y con sus
+    // dos triggers apartados, porque las incidencias son inmutables y las
+    // acciones append-only—. Lo encontró este `afterAll` al no poder
+    // borrar lo que este fichero había creado, que es otra garantía del
+    // bloque nuevo funcionando.
+    await limpiarElLibro(t);
     await prisma.$executeRawUnsafe(
       `ALTER TABLE care_records DISABLE TRIGGER care_records_inmutable`,
     );
@@ -512,6 +553,7 @@ describe.skipIf(!e2eEnabled)("e2e · la puerta de la habitación", () => {
     // Los intentos fallidos de un caso no cuentan en el siguiente: el
     // candado del PIN se prueba donde toca y no por acumulación.
     await getRedis().flushall();
+    await limpiarElLibro(tenantId);
     await prisma.$executeRawUnsafe(
       `ALTER TABLE care_records DISABLE TRIGGER care_records_inmutable`,
     );

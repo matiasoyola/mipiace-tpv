@@ -32,6 +32,13 @@ import { ControlesPage } from "./pages/residencia/ControlesPage.js";
 import { PlantillasPage } from "./pages/residencia/PlantillasPage.js";
 import { PlanResidentePage } from "./pages/residencia/PlanResidentePage.js";
 import { RegistroResidentePage } from "./pages/residencia/RegistroResidentePage.js";
+// residencia-4 · el libro de incidencias, su ficha, la guardia del centro
+// con la plantilla de gravedad en solo lectura, y las excepciones de
+// umbral de un residente.
+import { IncidenciasPage } from "./pages/residencia/IncidenciasPage.js";
+import { IncidenciaPage } from "./pages/residencia/IncidenciaPage.js";
+import { GuardiaPage } from "./pages/residencia/GuardiaPage.js";
+import { UmbralesResidentePage } from "./pages/residencia/UmbralesResidentePage.js";
 // F1 (ADR-018) · las tres pantallas del control horario.
 import { HoyPage } from "./pages/fichaje/HoyPage.js";
 import { EmpleadosPage } from "./pages/fichaje/EmpleadosPage.js";
@@ -216,6 +223,15 @@ export function App() {
             lo mismo que el plan: no es una sección, es la continuación de
             una ficha. */}
         <Route path="/admin/residencia/residentes/:clientId/registros" element={<ResidenciaGate title="Lo registrado"><RegistroResidentePage /></ResidenciaGate>} />
+        {/* residencia-4 · el libro único (D-35, D-38) y lo que cuelga de
+            él. La ficha y el libro llevan el mismo gate que el plan: el
+            libro de un centro no es para la auxiliar del pasillo. */}
+        <Route path="/admin/residencia/incidencias" element={<ResidenciaGate title="Incidencias"><IncidenciasPage /></ResidenciaGate>} />
+        <Route path="/admin/residencia/incidencias/:id" element={<ResidenciaGate title="Incidencia"><IncidenciaPage /></ResidenciaGate>} />
+        <Route path="/admin/residencia/guardia" element={<ResidenciaGate title="Guardia"><GuardiaPage /></ResidenciaGate>} />
+        {/* La excepción de umbral cuelga del residente y no del centro,
+            porque es una prescripción suya (D-22). */}
+        <Route path="/admin/residencia/residentes/:clientId/umbrales" element={<ResidenciaGate title="Umbrales propios"><UmbralesResidentePage /></ResidenciaGate>} />
         <Route path="/admin/tag-aliases" element={<CajaGate title="Etiquetas"><TagAliasesPage /></CajaGate>} />
         <Route path="/admin/tag-sections" element={<CajaGate title="Comanderas"><TagSectionsPage /></CajaGate>} />
         <Route path="/admin/printers" element={<CajaGate title="Impresoras"><PrintersPage /></CajaGate>} />

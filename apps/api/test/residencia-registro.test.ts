@@ -119,10 +119,57 @@ describe("el VALOR, comprobado contra el catálogo", () => {
     ).toEqual({ tipo: "NOTA" });
   });
 
-  it("una MEDIDA se rechaza, y el mensaje dice de qué bloque es", () => {
-    // Decisión de producto 11: las constantes, sus umbrales y los eventos
-    // que disparan son residencia-4. Aceptar el valor «por si acaso» sería
-    // guardar un dato que nadie lee y que parece que sí.
+  // ── residencia-4 · LAS MEDIDAS YA ENTRAN ────────────────────────
+  //
+  // residencia-3 las rechazaba con `CONTROL_FUERA_DE_ALCANCE` y un
+  // mensaje que decía de qué bloque eran. Es ese bloque.
+  it("una MEDIDA se guarda, con su número y SU UNIDAD dentro", () => {
+    // La unidad viaja con el número y no se deduce del catálogo al leer,
+    // por lo mismo que el registro guarda el `controlTypeId` y no sólo
+    // el código: el día que una versión nueva cambie la unidad, «38,4»
+    // tiene que seguir diciendo grados.
+    expect(
+      valorDeRegistro(
+        { tipo: "NUMERIC", numero: 38.4 },
+        control({
+          code: "TEMPERATURA",
+          layer: "MEASURE",
+          valueDomain: "NUMERIC",
+          unit: "°C",
+          inputMin: 30,
+          inputMax: 45,
+        }),
+      ),
+    ).toEqual({ tipo: "NUMERIC", numero: 38.4, unidad: "°C" });
+  });
+
+  it("FUERA DE RANGO no se guarda, y la frase dice el rango", () => {
+    // Es la única validación del fichero que rechaza algo que
+    // «ocurrió», porque NO ocurrió: 384 °C es un dedo que se saltó la
+    // coma. Guardarlo haría sonar el móvil de guardia a las tres de la
+    // mañana por una fiebre que nadie tuvo.
+    try {
+      valorDeRegistro(
+        { tipo: "NUMERIC", numero: 384 },
+        control({
+          code: "TEMPERATURA",
+          name: "Temperatura",
+          layer: "MEASURE",
+          valueDomain: "NUMERIC",
+          unit: "°C",
+          inputMin: 30,
+          inputMax: 45,
+        }),
+      );
+      throw new Error("tenía que fallar");
+    } catch (err) {
+      expect((err as RegistroInvalido).codigo).toBe("VALOR_FUERA_DE_RANGO");
+      expect((err as Error).message).toContain("de 30 a 45");
+      expect((err as Error).message).toContain("Repite la toma");
+    }
+  });
+
+  it("y una medida que llega como BOOL no cuadra", () => {
     try {
       valorDeRegistro(
         { tipo: "BOOL", hecho: true },
@@ -130,9 +177,37 @@ describe("el VALOR, comprobado contra el catálogo", () => {
       );
       throw new Error("tenía que fallar");
     } catch (err) {
-      expect((err as RegistroInvalido).codigo).toBe("CONTROL_FUERA_DE_ALCANCE");
-      expect((err as Error).message).toContain("residencia-4");
+      expect((err as RegistroInvalido).codigo).toBe("VALOR_NO_CUADRA");
+      expect((err as Error).message).toContain("se apunta con un número");
     }
+  });
+
+  it("residencia-4 · «algo no va bien» con TIPO y MATIZ, los dos opcionales", () => {
+    const control_ = control({
+      code: "ALGO_NO_VA_BIEN",
+      valueDomain: "TEXT_SHORT",
+    });
+    // Sin nada: sigue siendo un registro completo (D-13).
+    expect(valorDeRegistro({ tipo: "NOTA" }, control_)).toEqual({ tipo: "NOTA" });
+    // Con tipo y matiz, normalizados a mayúsculas: son identificadores.
+    expect(
+      valorDeRegistro(
+        { tipo: "NOTA", evento: "caida", matiz: " con_golpe " },
+        control_,
+      ),
+    ).toEqual({ tipo: "NOTA", evento: "CAIDA", matiz: "CON_GOLPE" });
+  });
+
+  it("…y un tipo que la plantilla NO conoce se guarda igual", () => {
+    // Una tablet nueva contra un servidor viejo. Perder el registro por
+    // un código que no cuadra sería perder el aviso; lo que pasa es que
+    // gradúa como «algo no va bien» (N1).
+    expect(
+      valorDeRegistro(
+        { tipo: "NOTA", evento: "INCENDIO" },
+        control({ code: "ALGO_NO_VA_BIEN", valueDomain: "TEXT_SHORT" }),
+      ),
+    ).toEqual({ tipo: "NOTA", evento: "INCENDIO" });
   });
 
   it("y una ESCALA también, con la Fase 2 en el mensaje", () => {

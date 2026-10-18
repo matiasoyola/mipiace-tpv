@@ -72,6 +72,19 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
+    // residencia-4 · `org.json` DE VERDAD en los tests de JVM.
+    //
+    // El `android.jar` que Gradle pone en el classpath de los tests
+    // unitarios trae `org.json` como STUB: cada método lanza
+    // «RuntimeException: Stub!». Así que un test que parsee JSON pasa en
+    // el dispositivo y revienta en la JVM sin esta línea, y lo que se
+    // quedaría sin probar es justo la frase que la notificación saca a la
+    // pantalla bloqueada (`GuardiaAvisoTest`).
+    //
+    // La alternativa era `testOptions.unitTests.returnDefaultValues`, que
+    // hace que los stubs devuelvan `null`/`0` en silencio: el test pasaría
+    // sin comprobar nada.
+    testImplementation "org.json:json:20231013"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')

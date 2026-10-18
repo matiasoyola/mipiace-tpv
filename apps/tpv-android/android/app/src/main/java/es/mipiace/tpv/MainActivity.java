@@ -44,6 +44,12 @@ public class MainActivity extends BridgeActivity {
         // Registrarlo NO abre ningún puerto: el servidor sólo arranca cuando
         // el JS de la pantalla de cocina lo pide con la clave de la tienda.
         registerPlugin(KitchenLanPlugin.class);
+        // residencia-4 (D-66) · el móvil de guardia. Registrarlo NO
+        // arranca ningún servicio ni pide ningún permiso: el servicio
+        // sólo se enciende cuando alguien se pone de guardia con su PIN,
+        // y eso sólo pasa en un dispositivo `GUARD`. Mismo criterio que
+        // `KitchenLanPlugin`, que tampoco abre un puerto al registrarse.
+        registerPlugin(GuardiaAlarmPlugin.class);
         super.onCreate(savedInstanceState);
     }
 

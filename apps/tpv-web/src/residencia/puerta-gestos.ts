@@ -200,8 +200,94 @@ export function registroADemanda(
   };
 }
 
+/**
+ * residencia-4 · **UNA CONSTANTE.** El número que la auxiliar tecleó.
+ *
+ * `ON_DEMAND` sin ocurrencia cuando se toma a demanda («+ Constante»), y
+ * con la ocurrencia de `queToca` cuando responde a una línea `MEASURE`
+ * del plan. Lo decide quien llama pasándole o no `occurrenceAt`, igual
+ * que el resto de los gestos.
+ *
+ * El número va con PUNTO decimal: la coma es de la pantalla y del
+ * teclado, y convertirla aquí es lo que impide que un `38,4` viaje como
+ * texto y llegue al servidor como `NaN`.
+ */
+export function registroDeConstante(
+  ctx: ContextoDelGesto,
+  input: {
+    controlCode: string;
+    numero: number;
+    planItemId?: string | null;
+    occurrenceAt?: string | null;
+    avisarEnfermera?: boolean;
+  },
+): RegistroParaEnviar {
+  return {
+    id: newId(),
+    clientId: ctx.clientId,
+    controlCode: input.controlCode,
+    planItemId: input.planItemId ?? null,
+    occurrenceAt: input.occurrenceAt ?? null,
+    recordedAt: ctx.recordedAt.toISOString(),
+    centerShiftId: ctx.centerShiftId,
+    careDay: ctx.careDay,
+    valor: { tipo: "NUMERIC", numero: input.numero },
+    ...(input.avisarEnfermera ? { avisarEnfermera: true } : {}),
+  };
+}
+
 /** El código del control transversal de «algo no va bien». */
 export const ALGO_NO_VA_BIEN = "ALGO_NO_VA_BIEN";
+
+// ── residencia-4 · LOS TIPOS DE «ALGO NO VA BIEN» ───────────────────
+//
+// La fila de botones grandes que va ENCIMA de la nota (alcance 6). Son
+// los que la plantilla del §3 gradúa, y ni uno más: una lista larga es un
+// formulario, y un formulario es lo que hace que la auxiliar no registre
+// (regla 1 de la capa, D-13).
+//
+// **Sin elegir nada sigue siendo un registro completo y vale N1.** Eso no
+// es una concesión: es lo que hace que el botón se use el día que la
+// auxiliar no sabe qué es lo que ve, que es el día que más importa.
+export const TIPOS_DE_ALGO_NO_VA_BIEN = [
+  {
+    evento: "CAIDA",
+    etiqueta: "Caída",
+    /** La PREGUNTA ÚNICA. Dos botones y se acabó: con tres campos, nadie
+     *  la contesta. */
+    pregunta: {
+      texto: "¿Se ha dado en la cabeza o hay herida?",
+      opciones: [
+        { matiz: "CON_GOLPE", etiqueta: "Sí" },
+        { matiz: "SIN_GOLPE", etiqueta: "No" },
+      ],
+    },
+  },
+  { evento: "VOMITO", etiqueta: "Vómito", pregunta: null },
+  {
+    evento: "NO_LOCALIZADO",
+    etiqueta: "No lo encontramos / se ha ido",
+    pregunta: null,
+  },
+  {
+    evento: "EMERGENCIA_VITAL",
+    etiqueta: "No respira bien, no responde o dolor en el pecho",
+    pregunta: null,
+  },
+  {
+    evento: "AVERIA",
+    etiqueta: "Algo roto en la habitación",
+    pregunta: {
+      texto: "¿Es peligroso?",
+      opciones: [
+        { matiz: "PELIGROSA", etiqueta: "Sí" },
+        { matiz: "SIN_RIESGO", etiqueta: "No" },
+      ],
+    },
+  },
+] as const;
+
+export type TipoDeAlgoNoVaBien = (typeof TIPOS_DE_ALGO_NO_VA_BIEN)[number];
 
 /**
  * **«Algo no va bien»**: una fila, con texto o sin texto, con voz o sin
@@ -214,7 +300,15 @@ export const ALGO_NO_VA_BIEN = "ALGO_NO_VA_BIEN";
  */
 export function algoNoVaBien(
   ctx: ContextoDelGesto,
-  input: { texto?: string | null; vozBase64?: string | null } = {},
+  input: {
+    texto?: string | null;
+    vozBase64?: string | null;
+    /** residencia-4 · el tipo elegido y su matiz. Los dos opcionales. */
+    evento?: string | null;
+    matiz?: string | null;
+    /** Y «no puede esperar»: fuerza al menos N2. */
+    avisarEnfermera?: boolean;
+  } = {},
 ): RegistroParaEnviar {
   const texto = input.texto?.trim();
   return {
@@ -226,9 +320,14 @@ export function algoNoVaBien(
     recordedAt: ctx.recordedAt.toISOString(),
     centerShiftId: ctx.centerShiftId,
     careDay: ctx.careDay,
-    valor: { tipo: "NOTA" },
+    valor: {
+      tipo: "NOTA",
+      ...(input.evento ? { evento: input.evento } : {}),
+      ...(input.matiz ? { matiz: input.matiz } : {}),
+    },
     nota: texto && texto.length > 0 ? texto : null,
     voz: input.vozBase64 ? { webmBase64: input.vozBase64 } : null,
+    ...(input.avisarEnfermera ? { avisarEnfermera: true } : {}),
   };
 }
 
