@@ -1,0 +1,435 @@
+// auditoria-sirope (#25) · LA VENTA DE MOSTRADOR QUE SÍ LLEGA A COCINA.
+//
+// El 18-10, en Cafetería Sirope, «Enviar» en venta rápida no mandaba
+// nada: `SalePage.sendToKitchen` empezaba con `if
+// (!tableContext?.activeTicketId) return;` y el botón seguía encendido.
+// Sirope trabaja casi todo en mostrador.
+//
+// Las filas de la tabla de sabotajes que viven aquí:
+//
+//   | Volver a poner el `return` sin mesa | el envío desde venta rápida
+//   | Cobrar venta rápida sin enviar antes | el cobro manda la comanda
+//   | En una MESA, cobrar sin enviar NO manda solo: pregunta
+//
+// Banco igual que `kds-tpv-cocina.test.tsx`: doble de `apiWithCashier`
+// con un DRAFT en memoria.
+
+import "fake-indexeddb/auto";
+import { IDBFactory } from "fake-indexeddb";
+import type * as React from "react";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const apiMock = vi.hoisted(() => ({ apiWithCashier: vi.fn() }));
+
+vi.mock("../src/api.js", async () => {
+  const actual = await vi.importActual<typeof import("../src/api.js")>(
+    "../src/api.js",
+  );
+  return { ...actual, apiWithCashier: apiMock.apiWithCashier };
+});
+
+const CATALOGO = vi.hoisted(() => [
+  {
+    id: "00000000-0000-0000-0000-000000000001",
+    holdedProductId: "h-1",
+    sku: "TOS1",
+    name: "Tostada con tomate",
+    basePrice: 2.2,
+    priceGross: 2.42,
+    taxRate: 10,
+    barcode: null,
+    imageMime: null,
+    tags: ["tostadas"],
+    kind: "PRODUCT" as const,
+    allergens: ["GLUTEN"] as string[],
+  },
+]);
+
+vi.mock("../src/lib/catalog.js", () => ({
+  findByBarcode: () => null,
+  fuzzySearch: () => CATALOGO,
+  getCachedBusinessType: () => "HOSPITALITY",
+  getCachedCrmEnabled: () => false,
+  getCachedAgendaEnabled: () => false,
+  getCachedHoldedEnabled: () => false,
+  getCachedCreditSalesEnabled: () => false,
+  getCachedIconPreset: () => null,
+  getCachedTagAliases: () => ({}),
+  getCachedTenantId: () => "tenant-sirope",
+  getCachedEnsayo: () => true,
+  loadCatalogFromCache: async () => CATALOGO,
+  loadWildcards: async () => [],
+  productImageUrl: () => null,
+  refreshCatalog: async () => CATALOGO,
+}));
+vi.mock("../src/lib/modifiers.js", () => ({
+  loadModifierGroups: async () => [],
+  buildGroupsByProduct: () => new Map(),
+}));
+vi.mock("../src/hooks/useStoreEventStream.js", () => ({
+  useStoreEventStream: () => "open",
+}));
+vi.mock("@mipiacetpv/ticket-pdf", () => ({
+  renderTicketPdf: vi.fn(async () => new Uint8Array()),
+}));
+vi.mock("qrcode", () => ({
+  default: { toDataURL: vi.fn(async () => "data:image/png;base64,") },
+}));
+vi.mock("../src/lib/escposPrint.js", () => ({
+  printEscposUsb: vi.fn(async () => ({ ok: true })),
+  isWebUsbSupported: () => false,
+  getPairedUsbPrinter: async () => null,
+  printTicketUsb: vi.fn(),
+  printTicketWifi: vi.fn(),
+  fetchTicketEscposBinary: vi.fn(),
+  fetchCreditReceiptEscpos: vi.fn(),
+  openCashDrawerIfAvailable: vi.fn(),
+  openUsbCashDrawer: vi.fn(),
+  pairUsbPrinter: vi.fn(),
+  forgetPairedUsbPrinter: vi.fn(),
+  syncUsbPairingWithServerConfig: vi.fn(),
+}));
+
+import { SalePage, type TableContext } from "../src/pages/SalePage.js";
+import { mapServerDraftLines } from "../src/lib/tableDraft.js";
+
+(globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+
+const MESA = "00000000-0000-0000-0000-0000000000a5";
+const TICKET_MESA = "00000000-0000-0000-0000-0000000000t5";
+const TICKET_MOSTRADOR = "00000000-0000-0000-0000-0000000000m3";
+
+const mesa: TableContext = {
+  id: MESA,
+  name: "T6",
+  zone: "SALON",
+  capacity: 4,
+  diners: 2,
+  openedAt: new Date().toISOString(),
+  openedByEmail: "caja1@sirope.es",
+  openedByAlias: "Gemma",
+  activeTicketId: TICKET_MESA,
+};
+
+interface BancoOpts {
+  /** El POST que crea el borrador de mostrador falla. */
+  borradorFalla?: boolean;
+  /** Unidades ya en cocina, por id de línea (para la mesa). */
+  enviadas?: Record<string, number>;
+  lineasDeMesa?: Array<{ id: string; units: number }>;
+}
+
+function banco(opts: BancoOpts = {}) {
+  const llamadas: string[] = [];
+  const borradores: Array<Record<string, unknown>> = [];
+  const envios: Array<{ ticketId: string; body: Record<string, unknown> }> = [];
+  const enviadas = new Map<string, number>(Object.entries(opts.enviadas ?? {}));
+  const lineasMesa = (opts.lineasDeMesa ?? []).slice();
+
+  apiMock.apiWithCashier.mockImplementation(
+    async (
+      path: string,
+      o?: { method?: string; body?: Record<string, unknown> },
+    ) => {
+      llamadas.push(`${o?.method ?? "GET"} ${path}`);
+      if (path === "/shift/current") return { shift: null };
+      if (path === "/tpv/tables") {
+        return { storeId: "store-1", registerId: "reg-1", tables: [] };
+      }
+      if (path.startsWith("/shift/") && path.includes("/tickets-count")) {
+        return { count: 0, total: 0 };
+      }
+      if (path.startsWith("/tpv/catalog/now")) {
+        return { source: "families", bandHours: 1, windowDays: 28, items: [] };
+      }
+      if (path.startsWith("/tpv/catalog/top-sellers")) {
+        return { source: "month", items: [] };
+      }
+      if (path === "/mostrador/draft" && o?.method === "POST") {
+        if (opts.borradorFalla) throw new Error("sin red");
+        const body = o.body as { lines: Array<Record<string, unknown>> };
+        borradores.push(o.body ?? {});
+        return {
+          ticket: {
+            id: TICKET_MOSTRADOR,
+            status: "DRAFT",
+            externalId: "ext-m3",
+            tableId: null,
+            table: null,
+            diners: null,
+            total: "2.42",
+            totalTax: "0.22",
+            totalDiscount: "0",
+            createdAt: new Date().toISOString(),
+            lastSentAt: null,
+            lastSentRevision: 0,
+            lines: body.lines.map((l, i) => ({
+              id: String(l.lineExternalId ?? `l-${i}`),
+              productId: (l.productId as string) ?? null,
+              variantId: null,
+              holdedProductId: null,
+              sku: String(l.sku),
+              nameSnapshot: String(l.nameSnapshot),
+              units: String(l.units),
+              unitPrice: String(l.unitPrice),
+              discountPct: "0",
+              taxRate: String(l.taxRate),
+              subtotal: "2.2",
+              total: "2.42",
+              modifiers: null,
+            })),
+          },
+          counterNumber: 3,
+          counterLabel: "Mostrador nº 3",
+        };
+      }
+      if (path.includes("/send-to-kitchen/escpos")) {
+        const ticketId = path.split("/tickets/")[1]!.split("/")[0]!;
+        envios.push({ ticketId, body: o?.body ?? {} });
+        for (const l of lineasMesa) enviadas.set(l.id, l.units);
+        return {
+          revision: 1,
+          sentAt: "2026-10-18T13:42:00.000Z",
+          nothingNew: false,
+          replayed: false,
+          sections: [
+            {
+              section: "COCINA",
+              destino: "PANTALLA",
+              ok: true,
+              lineCount: 1,
+              units: 1,
+              orderId: "order-1",
+            },
+          ],
+        };
+      }
+      if (path.endsWith("/allergies")) return { diners: 2, allergies: [] };
+      if (path.endsWith("/kitchen") && (o?.method ?? "GET") === "GET") {
+        return {
+          diners: 2,
+          revision: 1,
+          lines: lineasMesa.map((l) => ({
+            id: l.id,
+            units: l.units,
+            sentUnits: enviadas.get(l.id) ?? 0,
+            course: 1,
+            seat: null,
+            section: "COCINA",
+          })),
+          firedCourses: [],
+          allergies: [],
+          orders: [],
+          destinations: {
+            BARRA: { screen: true, printer: false, canCorrectSent: true },
+            COCINA: { screen: true, printer: false, canCorrectSent: true },
+            SALON: { screen: true, printer: false, canCorrectSent: true },
+          },
+        };
+      }
+      if (path === "/kitchen/estado") {
+        return {
+          heartbeatWindowMs: 90000,
+          screens: [],
+          sections: [
+            {
+              section: "COCINA",
+              screen: true,
+              printer: false,
+              canCorrectSent: true,
+              needsPaperFallback: false,
+            },
+          ],
+        };
+      }
+      if (path === "/kitchen/listas") return { ready: [] };
+      if (path.startsWith("/tickets/") && (o?.method ?? "GET") === "GET") {
+        return { ticket: { id: TICKET_MOSTRADOR, lines: [] } };
+      }
+      throw new Error(`ruta inesperada: ${path}`);
+    },
+  );
+  return { llamadas, borradores, envios };
+}
+
+let container: HTMLDivElement;
+let root: Root;
+
+beforeEach(() => {
+  (globalThis as Record<string, unknown>).indexedDB = new IDBFactory();
+  localStorage.clear();
+  sessionStorage.clear();
+  apiMock.apiWithCashier.mockReset();
+  container = document.createElement("div");
+  document.body.appendChild(container);
+});
+
+afterEach(async () => {
+  try {
+    await act(async () => root.unmount());
+  } catch {
+    /* ya estaba desmontado */
+  }
+  container.remove();
+});
+
+async function settle() {
+  for (let i = 0; i < 8; i += 1) {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+}
+
+type Props = React.ComponentProps<typeof SalePage>;
+
+async function render(
+  opts: { tableContext?: TableContext | null; lineasDeMesa?: unknown[] } = {},
+) {
+  root = createRoot(container);
+  const props = {
+    shiftId: "shift-1",
+    cashierLabel: "caja1@sirope.es",
+    cashierRole: "CASHIER",
+    registerName: "Caja 1",
+    registerId: "reg-1",
+    storeName: "Cafetería Sirope",
+    tableContext: opts.tableContext ?? null,
+    initialDraftLines: mapServerDraftLines(
+      (opts.lineasDeMesa ?? []) as Parameters<typeof mapServerDraftLines>[0],
+    ),
+    initialKitchen: null,
+    kitchenDisplayEnabled: true,
+    kitchenSettings: {
+      courseMode: "ESPERA" as const,
+      seatMode: "ALERGIA" as const,
+      greenMaxMin: 10,
+      amberMaxMin: 20,
+      readyBeep: false,
+    },
+    avisosListo: [],
+    onBackToMap: opts.tableContext ? vi.fn() : undefined,
+    onExitToMap: vi.fn(),
+    onTicketMovedToTable: null,
+    onLogoutCashier: vi.fn(),
+    onCloseShift: vi.fn(),
+  } as unknown as Props;
+  await act(async () => {
+    root.render(<SalePage {...props} />);
+  });
+  await settle();
+}
+
+async function click(el: Element | null | undefined) {
+  if (!el) throw new Error("elemento no encontrado");
+  await act(async () => {
+    (el as HTMLButtonElement).click();
+  });
+  await settle();
+}
+
+const $$ = <T extends HTMLElement>(sel: string): T[] => [
+  ...container.querySelectorAll<T>(sel),
+];
+const $ = <T extends HTMLElement>(sel: string): T | null =>
+  container.querySelector<T>(sel);
+
+function producto(nombre: string): HTMLButtonElement {
+  const el = $$<HTMLButtonElement>('[data-testid="product-button"]').find(
+    (b) =>
+      b.querySelector('[data-testid="product-name"]')?.textContent?.trim() ===
+      nombre,
+  );
+  if (!el) throw new Error(`producto «${nombre}» no encontrado`);
+  return el;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+
+describe("#25 · venta de mostrador → cocina", () => {
+  it("«Enviar» sin mesa crea el borrador y manda la comanda", async () => {
+    // EL SABOTAJE: volver a poner `if (!tableContext?.activeTicketId)
+    // return;` deja los dos arrays vacíos.
+    const b = banco();
+    await render();
+    await click(producto("Tostada con tomate"));
+    await click($('[data-testid="comanda-enviar"]'));
+
+    expect(b.borradores).toHaveLength(1);
+    const lineas = b.borradores[0]!.lines as Array<Record<string, unknown>>;
+    expect(lineas).toHaveLength(1);
+    expect(lineas[0]!.nameSnapshot).toBe("Tostada con tomate");
+    expect(b.envios).toHaveLength(1);
+    expect(b.envios[0]!.ticketId).toBe(TICKET_MOSTRADOR);
+  });
+
+  it("la segunda comanda reusa el borrador: un solo número de mostrador", async () => {
+    const b = banco();
+    await render();
+    await click(producto("Tostada con tomate"));
+    await click($('[data-testid="comanda-enviar"]'));
+    await click(producto("Tostada con tomate"));
+    await click($('[data-testid="comanda-enviar"]'));
+
+    expect(b.borradores).toHaveLength(1);
+    expect(b.envios).toHaveLength(2);
+    expect(b.envios.every((e) => e.ticketId === TICKET_MOSTRADOR)).toBe(true);
+  });
+
+  it("si el borrador no se puede crear, lo dice: nunca un botón mudo", async () => {
+    banco({ borradorFalla: true });
+    await render();
+    await click(producto("Tostada con tomate"));
+    await click($('[data-testid="comanda-enviar"]'));
+
+    expect(container.textContent).toMatch(/no ha salido|no se pudo/i);
+  });
+
+  it("COBRAR con líneas sin mandar las manda antes (en mostrador se paga primero)", async () => {
+    // EL SABOTAJE: cobrar sin enviar deja `envios` vacío.
+    const b = banco();
+    await render();
+    await click(producto("Tostada con tomate"));
+    await click($('[data-testid="comanda-cobrar"]'));
+
+    expect(b.envios).toHaveLength(1);
+    expect(b.envios[0]!.ticketId).toBe(TICKET_MOSTRADOR);
+  });
+});
+
+describe("#25 · en una MESA, cobrar sin enviar PREGUNTA", () => {
+  const LINEA = {
+    id: "00000000-0000-0000-0000-00000000l001",
+    productId: CATALOGO[0]!.id,
+    variantId: null,
+    holdedProductId: null,
+    sku: "TOS1",
+    nameSnapshot: "Tostada con tomate",
+    units: "1",
+    unitPrice: "2.2",
+    discountPct: "0",
+    taxRate: "10",
+    subtotal: "2.2",
+    total: "2.42",
+    modifiers: null,
+  };
+
+  it("no manda sola: sale la pregunta con sus tres salidas", async () => {
+    const b = banco({
+      lineasDeMesa: [{ id: LINEA.id, units: 1 }],
+      enviadas: {},
+    });
+    await render({ tableContext: mesa, lineasDeMesa: [LINEA] });
+    await click($('[data-testid="comanda-cobrar"]'));
+
+    // Nada ha salido hacia cocina todavía.
+    expect(b.envios).toHaveLength(0);
+    const dialogo = $('[role="dialog"]');
+    expect(dialogo).not.toBeNull();
+    expect(dialogo!.textContent).toMatch(/sin mandar a cocina/i);
+    expect(dialogo!.textContent).toMatch(/Enviar y cobrar/);
+    expect(dialogo!.textContent).toMatch(/Cobrar sin enviar/);
+  });
+});

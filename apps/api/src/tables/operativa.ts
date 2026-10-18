@@ -823,7 +823,7 @@ async function ensureTableContext(
   };
 }
 
-const DRAFT_INCLUDE = {
+export const DRAFT_INCLUDE = {
   // kds-1-cocina · `include: true` trae ya `course`, `seat` y `sentUnits`
   // sin tocar nada. Lo que hay que añadir a mano son los ALÉRGENOS DEL
   // PRODUCTO, que no están en la línea sino en su ficha.
@@ -922,7 +922,7 @@ export async function recomputeTicketTotals(
 // siempre el BASE; los deltas vienen de `modifiers` cuando tiene el
 // shape estructurado (B-Bar-Modifiers). Las strings legacy y null se
 // tratan como "sin delta" — comportamiento legacy intacto.
-async function recomputeTicketTotalsWithModifiers(
+export async function recomputeTicketTotalsWithModifiers(
   tx: Prisma.TransactionClient,
   ticketId: string,
 ) {
@@ -958,7 +958,7 @@ async function recomputeTicketTotalsWithModifiers(
 
 // Igual que en tickets/routes — prioriza snapshot estructurado, cae a
 // legacy strings, o null si ambos están vacíos.
-function buildModifiersSnapshotForLine(
+export function buildModifiersSnapshotForLine(
   legacyStrings: string[] | undefined,
   structuredSnapshot: ModifierSnapshotEntry[],
 ): typeof Prisma.JsonNull | object {
@@ -971,7 +971,7 @@ function buildModifiersSnapshotForLine(
   return Prisma.JsonNull;
 }
 
-function buildModifierErrorReply(
+export function buildModifierErrorReply(
   result: Extract<ResolveResult, { ok: false }>,
   lineName: string,
 ): {
@@ -1020,7 +1020,7 @@ function buildModifierErrorReply(
   }
 }
 
-interface SerializedDraft {
+export interface SerializedDraft {
   id: string;
   status: string;
   externalId: string;
@@ -1066,7 +1066,7 @@ interface SerializedDraft {
   }>;
 }
 
-function serializeDraft(
+export function serializeDraft(
   t: Awaited<ReturnType<typeof reloadDraft>>,
 ): SerializedDraft {
   return {

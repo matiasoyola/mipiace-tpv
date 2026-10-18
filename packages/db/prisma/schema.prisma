@@ -2604,6 +2604,23 @@ model Ticket {
   // Nº de comensales introducido al abrir la mesa. Informativo (no
   // bloquea capacidad).
   diners               Int?
+  /// auditoria-sirope (#25) · EL Nº DE LA VENTA DE MOSTRADOR.
+  ///
+  /// Lo que la cocina lee en la tarjeta: «Mostrador nº 3». Correlativo
+  /// POR DÍA Y POR CAJA, y por eso no sirve `internalNumber` (que es la
+  /// serie fiscal, se asigna al cobrar y llega a cinco cifras) ni
+  /// `lastSentRevision` (que es la 1ª/2ª comanda de ESTE ticket).
+  ///
+  /// NULL en todo ticket que no sea una venta de mostrador con comanda:
+  /// las mesas se titulan con el nombre de la mesa y una venta rápida que
+  /// nunca va a cocina no gasta número. Se asigna al crear el borrador de
+  /// mostrador (`POST /mostrador/draft`) y no se reutiliza: dos ventas
+  /// seguidas son nº 3 y nº 4 aunque la primera se cobre antes.
+  ///
+  /// El día es el mismo «hoy» que la pantalla de cocina (medianoche
+  /// local, `inicioDelDia`): si la cocina no ve la tarjeta de ayer,
+  /// tampoco puede confundirla con la de hoy.
+  counterNumber        Int?              @map("counter_number")
   // v1.3-Servicios-Pinta · Lote 3: nombre del profesional que atendió
   // (peluquería/clínica/taller). Texto libre opcional introducido en
   // checkout. Vacío en RETAIL/HOSPITALITY. Se imprime en el ticket
