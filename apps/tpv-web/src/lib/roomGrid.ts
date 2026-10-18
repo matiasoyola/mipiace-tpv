@@ -603,9 +603,12 @@ export const REPARTO_TERMINAL: RepartoDeSala = {
  * «Salón» y «Terraza» inalcanzables. Dos filas, y que la de los chips
  * desplace sola, es lo que devuelve `innerWidth` a 360.
  *
- * 56 = objetivo táctil de 44 más 6 arriba y 6 abajo.
+ * 60 por fila: el suelo táctil de estas pantallas es
+ * `MIN_TOUCH_PX` = **56** —no 44; `hospitalityTheme.ts` lo fija así para
+ * la venta y la sala, y hay test de tamaño sobre `getComputedStyle`— más
+ * 2 px arriba y 2 abajo para que el botón no toque el borde de la fila.
  */
-export const ROOM_HEADER_MANO = 2 * 56;
+export const ROOM_HEADER_MANO = 2 * 60;
 
 /**
  * El suelo del lado de mesa en la mano: **88 px**.

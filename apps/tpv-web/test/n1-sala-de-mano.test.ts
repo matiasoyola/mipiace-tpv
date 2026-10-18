@@ -20,8 +20,20 @@ import {
   esAparatoDeMano,
   UMBRAL_MANO_PX,
 } from "../src/lib/aparatoDeMano.js";
+import { MIN_TOUCH_PX } from "../src/lib/hospitalityTheme.js";
+import {
+  COBRAR_AMOUNT_FONT_PX_MANO,
+  COBRAR_BOTTOM_MANO,
+  cobrarMaxWidth,
+  COBRAR_HEIGHT,
+  COBRAR_HEIGHT_MANO,
+  COBRAR_MARGEN_MANO,
+  COBRAR_PADDING_X_MANO,
+} from "../src/pages/TableMapScreen.js";
 import {
   LONGEST_TABLE_AMOUNT,
+  TABLE_AMOUNT_CHAR_WIDTH,
+  TABLE_AMOUNT_FONT_PX,
   REPARTO_MANO,
   REPARTO_TERMINAL,
   repartoDeSala,
@@ -221,5 +233,97 @@ describe("n1-hosteleria · la restricción: los terminales no se mueven", () => 
     expect(roomAvailableHeightDark(AP11.h)).toBe(AP11.h - 80 - 24 - 55);
     expect(REPARTO_TERMINAL.headerHeight).toBe(80);
     expect(REPARTO_TERMINAL.zonePadding).toBe(18);
+  });
+});
+
+describe("n1-hosteleria · el cobro desde la forma pequeña", () => {
+  // `principio-cobro-en-mesa`: «cobrar directo desde la tarjeta de mesa,
+  // sin entrar a la venta». El bloque añade el objetivo de 44 px. Las dos
+  // cosas se miden aquí, porque en jsdom no hay layout que medir.
+  const anchoPorCaracter = (fontPx: number) =>
+    (TABLE_AMOUNT_CHAR_WIDTH * fontPx) / TABLE_AMOUNT_FONT_PX;
+  const anchoDelImporte = (fontPx: number) =>
+    LONGEST_TABLE_AMOUNT.length * anchoPorCaracter(fontPx);
+
+  it("el botón llega al suelo táctil de la casa, no sólo a los 44 del bloque", () => {
+    // El bloque pide 44. `hospitalityTheme.ts` fija 56 para la venta y la
+    // sala, y es el que manda por ser el más exigente.
+    expect(COBRAR_HEIGHT_MANO).toBeGreaterThanOrEqual(44);
+    expect(COBRAR_HEIGHT_MANO).toBe(MIN_TOUCH_PX);
+    // Y es MÁS que el del terminal, que se quedó en 36.
+    expect(COBRAR_HEIGHT_MANO).toBeGreaterThan(COBRAR_HEIGHT);
+  });
+
+  it("el botón y el nombre caben en los 88 px de la forma", () => {
+    // 6 de abajo + 56 de botón = 62; el nombre anclado arriba mide 18 y
+    // empieza a 6, así que acaba en 24. Entre 24 y 26 no se tocan.
+    expect(COBRAR_BOTTOM_MANO + COBRAR_HEIGHT_MANO).toBeLessThan(
+      TABLE_SHAPE_MIN_MANO - 18,
+    );
+  });
+
+  it("el peor importe entra en el botón de una mesa REDONDA", () => {
+    // Barra y Terraza son círculos: lo que limita es la cuerda a la
+    // altura del centro del botón, no el lado.
+    const ancho = cobrarMaxWidth(
+      "BARRA",
+      TABLE_SHAPE_MIN_MANO,
+      COBRAR_HEIGHT_MANO,
+      COBRAR_BOTTOM_MANO,
+      COBRAR_MARGEN_MANO,
+    );
+    expect(
+      anchoDelImporte(COBRAR_AMOUNT_FONT_PX_MANO) + 2 * COBRAR_PADDING_X_MANO,
+    ).toBeLessThanOrEqual(ancho);
+  });
+
+  it("y también en una mesa RECTANGULAR, que es más estrecha de margen", () => {
+    const ancho = cobrarMaxWidth(
+      "SALON",
+      TABLE_SHAPE_MIN_MANO,
+      COBRAR_HEIGHT_MANO,
+      COBRAR_BOTTOM_MANO,
+      COBRAR_MARGEN_MANO,
+    );
+    expect(
+      anchoDelImporte(COBRAR_AMOUNT_FONT_PX_MANO) + 2 * COBRAR_PADDING_X_MANO,
+    ).toBeLessThanOrEqual(ancho);
+  });
+
+  it("SABOTAJE · a 14 px el importe se sale del botón", () => {
+    // A 13 entra por 2,2 px, que es menos de lo que vale fiarse de una
+    // estimación de ancho por carácter; a 14 ya no entra de calle. De ahí
+    // el 12, con 7,6 px de margen.
+    const ancho = cobrarMaxWidth(
+      "BARRA",
+      TABLE_SHAPE_MIN_MANO,
+      COBRAR_HEIGHT_MANO,
+      COBRAR_BOTTOM_MANO,
+      COBRAR_MARGEN_MANO,
+    );
+    expect(anchoDelImporte(14) + 2 * COBRAR_PADDING_X_MANO).toBeGreaterThan(
+      ancho,
+    );
+  });
+
+  it("SABOTAJE · con los márgenes del terminal tampoco entra", () => {
+    // 16 px de margen en el rectángulo se llevan el 18% del ancho útil
+    // de una forma de 88.
+    const ancho = cobrarMaxWidth(
+      "SALON",
+      TABLE_SHAPE_MIN_MANO,
+      COBRAR_HEIGHT_MANO,
+      COBRAR_BOTTOM_MANO,
+    );
+    expect(
+      anchoDelImporte(COBRAR_AMOUNT_FONT_PX_MANO) + 2 * COBRAR_PADDING_X_MANO,
+    ).toBeGreaterThan(ancho);
+  });
+
+  it("en el terminal el botón sigue siendo el de v2-H1", () => {
+    expect(COBRAR_HEIGHT).toBe(36);
+    expect(cobrarMaxWidth("SALON", TABLE_SHAPE_SIZE)).toBe(
+      TABLE_SHAPE_SIZE - 16,
+    );
   });
 });
