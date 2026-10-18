@@ -261,6 +261,28 @@ describe("n1-vertical · PIN a 360×640 (el N1 en vertical)", () => {
     expect(vaAntes(a!, boton("Entrar"))).toBe(true);
   });
 
+  it("el PRIMER PIN mal ya avisa, aunque queden 4 intentos", async () => {
+    // El backend contesta `attemptsRemaining: 4` en el primer fallo. Con la
+    // condición de antes (`<= 3`) no se pintaba nada: el PIN se borraba solo
+    // y el cajero no sabía si había fallado él o la máquina. Es lo que la
+    // pasada del N1 anotó como «el aviso de error no se veía».
+    apiMock.apiWithDevice.mockRejectedValue(
+      new ApiError(401, "Email o PIN incorrectos", "INVALID_CREDENTIALS", {
+        attemptsRemaining: 4,
+      }),
+    );
+    await renderPin();
+    await click(cajeroReciente());
+    await tecleaPin("1234");
+    await click(boton("Entrar"));
+
+    const a = aviso();
+    expect(a).not.toBeNull();
+    expect(a!.textContent).toContain("Email o PIN incorrecto");
+    expect(a!.textContent).toContain("4");
+    expect(vaAntes(a!, rejillaDelTeclado())).toBe(true);
+  });
+
   it("el error plano (sin intentos restantes) también se ve arriba", async () => {
     apiMock.apiWithDevice.mockRejectedValue(
       new ApiError(401, "Cajero no encontrado", "INVALID_CREDENTIALS", null),

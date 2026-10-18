@@ -512,7 +512,16 @@ export function PinScreen({
                   </span>
                 </div>
               )}
-              {!isLocked && attemptsRemaining != null && attemptsRemaining <= 3 && (
+              {/* n1-vertical · ESTO ERA `attemptsRemaining <= 3`, y por eso en
+                    la pasada del N1 «el aviso de PIN incorrecto no se veía»:
+                    el backend contesta `attemptsRemaining: 4` en el PRIMER
+                    fallo (medido contra la API el 2026-10-18), así que el
+                    primer PIN mal no pintaba NADA — el PIN se borraba solo y
+                    el cajero no sabía si había fallado él o la máquina.
+                    Sigue siendo el aviso suave en gris, que es la decisión
+                    de v1.3 («el primer fallo no debe asustar»): lo que
+                    cambia es que ahora existe. */}
+              {!isLocked && attemptsRemaining != null && (
                 <div
                   data-testid="pin-aviso"
                   className="mb-6 [@media(max-height:560px)]:mb-2 flex items-start gap-2 text-[13px] text-slate-600 bg-slate-50 rounded-xl px-3.5 py-2.5"

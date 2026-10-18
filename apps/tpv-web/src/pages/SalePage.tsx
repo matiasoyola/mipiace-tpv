@@ -471,6 +471,15 @@ export function SalePage(props: SalePageProps) {
   const [showCloseShift, setShowCloseShift] = useState(false);
   // v1.3 Lote 4 · arqueo X intermedio. Reusa el mismo modal con `mode="X"`.
   const [showArqueoX, setShowArqueoX] = useState(false);
+  // n1-vertical · ¿hay algo pintado POR ENCIMA de la pantalla de venta?
+  //
+  // La venta no se desmonta cuando se abre la agenda ni cuando se abre
+  // «Cerrar el día»: son overlays. La barra inferior del ticket es
+  // `fixed` en z-40 y se pinta sobre su pie. La agenda llega por prop
+  // —ese overlay es de `App` y esta pantalla no puede saberlo— y los
+  // modales de cierre y arqueo son suyos.
+  const overlayEncima =
+    props.agendaAbierta === true || showCloseShift || showArqueoX;
   const [showHistory, setShowHistory] = useState(false);
   // v1.8-Fiado · pantalla Deudas + flag de venta a crédito del tenant.
   const [showDebts, setShowDebts] = useState(false);
@@ -2635,7 +2644,7 @@ export function SalePage(props: SalePageProps) {
               />
             )}
             <HospitalityWorkspace
-              agendaAbierta={props.agendaAbierta === true}
+              overlayEncima={overlayEncima}
               products={filtered}
               searchQuery={query}
               catalogError={catalogError}
@@ -2933,7 +2942,7 @@ export function SalePage(props: SalePageProps) {
           <HealthBanner health={health} />
 
           <SaleWorkspace
-            agendaAbierta={props.agendaAbierta === true}
+            overlayEncima={overlayEncima}
             products={filtered}
             searchQuery={query}
             wildcards={wildcards}
@@ -4071,7 +4080,7 @@ function Banner({ color, children }: { color: "amber" | "red"; children: React.R
 }
 
 function SaleWorkspace({
-  agendaAbierta,
+  overlayEncima,
   appointmentContext,
   products,
   searchQuery,
@@ -4106,8 +4115,10 @@ function SaleWorkspace({
   onClickGroup,
   onClickUngroup,
 }: {
-  // n1-vertical · ver la nota de `SalePageProps.agendaAbierta`.
-  agendaAbierta: boolean;
+  // n1-vertical · hay algo pintado POR ENCIMA de la pantalla de venta
+  // (la agenda, «Cerrar el día», el arqueo X). Ver la nota de
+  // `overlayEncima` en `SalePage`.
+  overlayEncima: boolean;
   products: CatalogProduct[];
   // v1.9.1 · texto de búsqueda activo. `products` llega YA filtrado por
   // la búsqueda, así que sin esto el empty state no puede distinguir
@@ -4362,10 +4373,14 @@ function SaleWorkspace({
   // MIENTRAS SE MARCA. Dos sitios donde estorba, los dos vistos en el N1
   // el 2026-10-16:
   //
-  //   · con la AGENDA abierta encima (`22-nueva-cita`): la venta no se
-  //     desmonta, la barra es `fixed` y empata en z-40 con el overlay de
-  //     la agenda, así que gana la que va después en el DOM —ella— y
-  //     tapa el botón «Reservar»;
+  //   · con un OVERLAY encima: la venta no se desmonta, la barra es
+  //     `fixed` y empata en z-40 con el overlay, así que gana la que va
+  //     después en el DOM —ella— y tapa su pie. Dos medidos a 360×640:
+  //     el botón «Reservar» de «Nueva cita» (captura `22-nueva-cita` del
+  //     N1) y el «Cancelar» de «Cerrar el día» (captura
+  //     `11-cerrar-el-dia-360x640`). Por eso el prop se llama
+  //     `overlayEncima` y no «agenda»: la regla es que la barra no pinta
+  //     sobre nada que esté por encima de la venta;
   //   · con el TECLADO del sistema abierto (`27-busqueda-teclado`): la
   //     barra se pega sobre el teclado con `--keyboard-offset` y ocupa
   //     el único hueco que queda para los resultados de la búsqueda. Se
@@ -4375,7 +4390,7 @@ function SaleWorkspace({
   // la agenda o se baja el teclado, y mientras el cajero teclea lo que
   // necesita ver es la lista.
   const tecladoAbierto = useTecladoDelSistema();
-  const barraTicketVisible = !agendaAbierta && !tecladoAbierto;
+  const barraTicketVisible = !overlayEncima && !tecladoAbierto;
   // B-reservas-2: mapa productId → duración de servicio para pintar los
   // minutos informativos por línea del ticket. Sólo se construye si el
   // tenant tiene la agenda activa; en caso contrario queda vacío y el

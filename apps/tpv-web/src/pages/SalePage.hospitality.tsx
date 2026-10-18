@@ -176,12 +176,12 @@ export interface ChromeAction {
 
 export interface HospitalityWorkspaceProps {
   /**
-   * n1-vertical · la agenda está abierta ENCIMA de esta pantalla. Mismo
-   * caso que en el TPV claro: la barra inferior es `fixed` y empata en
-   * z-40 con el overlay de la agenda, así que la tapa. Ver la nota de
-   * `SalePageProps.agendaAbierta`.
+   * n1-vertical · hay algo pintado ENCIMA de esta pantalla (la agenda,
+   * «Cerrar el día», el arqueo X). Mismo caso que en el TPV claro: la
+   * barra inferior es `fixed` en z-40 y se pinta sobre el pie del
+   * overlay. Ver la nota de `overlayEncima` en `SalePage.tsx`.
    */
-  agendaAbierta: boolean;
+  overlayEncima: boolean;
   /** Productos ya filtrados por la búsqueda. */
   products: CatalogProduct[];
   searchQuery: string;
@@ -298,10 +298,10 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
   const [sheetOpen, setSheetOpen] = useState(false);
   // n1-vertical · la barra inferior de handheld sólo mientras se marca.
   // Misma decisión y mismos motivos que en el TPV claro (ver la nota de
-  // `barraTicketVisible` en SalePage.tsx): con la agenda encima tapa su
+  // `barraTicketVisible` en SalePage.tsx): con un overlay encima tapa su
   // pie, y con el teclado abierto ocupa el hueco de los resultados.
   const tecladoAbierto = useTecladoDelSistema();
-  const barraVisible = !props.agendaAbierta && !tecladoAbierto;
+  const barraVisible = !props.overlayEncima && !tecladoAbierto;
 
   // Decisión 3c · la cantidad se elige ANTES del producto y **vuelve a 1
   // tras cada producto**. Que vuelva sola es el requisito: un «3» pegado

@@ -266,6 +266,33 @@ describe("n1-vertical · la barra del ticket y la Agenda", () => {
   });
 });
 
+describe("n1-vertical · la barra del ticket y «Cerrar el día»", () => {
+  it("con el modal de cierre abierto, la barra no se pinta encima", async () => {
+    // Medido a 360×640 el 2026-10-18 (captura `11-cerrar-el-dia-360x640`):
+    // la barra se pintaba sobre el «Cancelar» del pie del modal. Es el
+    // mismo fallo que el de la agenda —la venta no se desmonta y la barra
+    // es `fixed` en z-40— pero este modal sí es de esta pantalla.
+    await renderSale();
+    expect(barra()).not.toBeNull();
+
+    // Por el menú, como el cajero: «Cerrar turno» abre «Cerrar el día».
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Abrir menú"]')!
+        .click();
+    });
+    await settle();
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[title="Cerrar turno"]')!
+        .click();
+    });
+    await settle();
+
+    expect(barra()).toBeNull();
+  });
+});
+
 describe("n1-vertical · la barra del ticket y el teclado del sistema", () => {
   it("con el teclado abierto desaparece, y vuelve al bajarlo", async () => {
     await renderSale();
