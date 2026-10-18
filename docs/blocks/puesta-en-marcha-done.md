@@ -158,29 +158,80 @@ Y **3.c comprueba antes de marcar**: si una de las dos cuentas de pruebas tuvier
 ventas reales, la migración **PARA** con un mensaje que dice cuál y qué mirar, en vez de dejar que
 el CHECK la rechace hablando de una restricción.
 
-### 2.2 La foto real de producción — HECHA EL 18-10, y lo que encontró
+### 2.2 La foto real de producción — 18-10, 12:01
 
-La lanzó Matías (yo no tengo acceso a producción y no lo quiero). **Encontró un fallo de regla,
-no de datos**, y es el que arregla el §2.1: Cafetería Sirope salía por 3.b con 20 ventas que no
-lo eran. Con el arreglo sale por 3.d, que es lo correcto: en ensayo.
+La lanzó Matías (yo no tengo acceso a producción y no lo quiero). **La primera pasada encontró un
+fallo de regla, no de datos**: Cafetería Sirope salía por 3.b con 20 «ventas» que no lo eran (§2.1).
+Ésta es la segunda, con la regla arreglada y con la cuenta de ensayo de La Maestranza ya fuera de
+3.c. **Es la foto que autoriza el despliegue.**
 
-Lo que queda **pendiente antes de desplegar**, y es de Matías:
+```
+                    cuenta                     | onboarding | usa_holded | clave_puesta | registros_fiscales | ventas_reales | anuladas | en_holded | tickets_test | borradores | regla | regla_vieja |   factura_desde_quedaria   | es_de_pruebas_quedaria | es_de_pruebas_vieja 
+-----------------------------------------------+------------+------------+--------------+--------------------+---------------+----------+-----------+--------------+------------+-------+-------------+----------------------------+------------------------+---------------------
+ Cafetería Sirope                              | ACTIVE     | f          | f            |                  0 |             0 |       20 |         0 |           19 |          5 | 3.d   | 3.b         |                            | f                      | f
+ Eguez García Pabla Salome                     | DRAFT      | f          | f            |                  0 |             0 |        0 |         0 |            1 |          0 | 3.d   | 3.d         |                            | f                      | f
+ Eguez García Pabla Salome                     | ACTIVE     | f          | f            |                 11 |            11 |        5 |         0 |            0 |          5 | 3.a   | 3.a         | 2026-10-05 22:00:00+00     | f                      | t
+ Fouzia Attaoui Batah                          | DRAFT      | f          | f            |                  0 |             0 |        0 |         0 |            2 |          0 | 3.d   | 3.d         |                            | f                      | f
+ Frutos Secos Cachitos                         | ACTIVE     | t          | t            |                  0 |             3 |        0 |         3 |            0 |          0 | 3.b   | 3.b         | 2026-06-24 09:36:02.383+00 | f                      | f
+ Librería Thalia                               | DRAFT      | t          | t            |                  0 |             0 |        0 |         0 |           20 |          0 | 3.d   | 3.d         |                            | f                      | f
+ María Soledad Morán Segovia - Peluquería Sole | ACTIVE     | t          | t            |                  0 |           339 |        0 |       339 |            0 |          0 | 3.b   | 3.b         | 2026-05-27 07:53:20.212+00 | f                      | f
+ PRUEBAS MIPIACE                               | ACTIVE     | t          | t            |                  0 |             0 |        0 |         0 |            0 |          0 | 3.c   | 3.c         |                            | t                      | t
+ Rosario Pérez Rodríguez                       | DRAFT      | f          | f            |                  0 |             0 |        0 |         0 |            0 |          0 | 3.d   | 3.d         |                            | f                      | f
+(9 rows)
 
-1. **Repetir el SELECT** (ahora saca al lado la `regla_vieja` y una consulta que lista las cuentas
-   que cambian de regla). Tiene que salir **Sirope y nadie más**, y la tabla entera se pega aquí
-   debajo.
-2. ~~Decidir qué se hace con la cuenta de ensayo de La Maestranza.~~ **Decidido el 18-10**: no se
-   marca, entra por 3.a y se elimina después del despliegue desde la consola. Ya está aplicado en
-   la migración y en el SELECT. Lo que queda por hacer es **eliminarla**, después de desplegar:
-   ficha → «Eliminar cuenta» → descargar su export → teclear el nombre.
+           name            | se_marca_ahora | se_marcaba_antes | registros 
+---------------------------+----------------+------------------+-----------
+ Eguez García Pabla Salome | f              | t                |        11
+(1 row)
 
-> **Tabla real de producción (pegar aquí la salida del SELECT repetido):**
->
-> ```
-> (pendiente — la repite Matías con la regla arreglada)
-> ```
+       name       | no_borrador_ni_ensayo | anuladas | en_holded | reales_de_verdad 
+------------------+-----------------------+----------+-----------+------------------
+ Cafetería Sirope |                    20 |       20 |         0 |                0
+(1 row)
 
-**Y la consulta está probada contra Postgres**, no sólo escrita: con tres cuentas de mentira —una
+ name | registros | ventas_reales 
+------+-----------+---------------
+(0 rows)
+```
+
+Nueve cuentas, y lo que la migración va a escribir en cada una:
+
+| Cuenta | Qué tiene dentro | Regla | Queda |
+|---|---|---|---|
+| **Peluquería Sole** | 339 ventas reales, las 339 en Holded | 3.b | factura desde el 27-05-2026 |
+| **Frutos Secos Cachitos** | 3 ventas reales, las 3 en Holded | 3.b | factura desde el 24-06-2026 |
+| **Eguez García Pabla Salome** (ACTIVE) | 11 registros fiscales, 11 ventas, 5 anuladas | 3.a | factura desde el **06-10-2026** · **la cuenta de ensayo** |
+| **Cafetería Sirope** | 0 registros, 0 ventas reales, **20 anuladas**, 19 de ensayo, 5 borradores | 3.d | **en ensayo** |
+| **Eguez García Pabla Salome** (DRAFT) | 1 ticket de ensayo | 3.d | en ensayo · la OTRA cuenta de La Maestranza, la que no es la de ensayo |
+| **Fouzia Attaoui Batah** | 2 de ensayo | 3.d | en ensayo |
+| **Librería Thalia** | 20 de ensayo | 3.d | en ensayo |
+| **Rosario Pérez Rodríguez** | nada | 3.d | en ensayo |
+| **PRUEBAS MIPIACE** | nada | 3.c | en ensayo, y **marcada** |
+
+Y las tres comprobaciones, las tres como tenían que salir:
+
+- **Cambian de regla: una sola cuenta.** Cafetería Sirope, `3.b → 3.d`. Sus 20 ventas son
+  anuladas, ninguna llegó a Holded y `reales_de_verdad = 0`. Sin el arreglo del §2.1 habría
+  arrancado a facturar sola en el despliegue.
+- **Cambian de marca: una sola cuenta.** La de ensayo de La Maestranza, `es_de_pruebas t → f`, con
+  sus 11 registros delante. Es la decisión del 18-10: entra por 3.a y se elimina después.
+- **La que haría abortar la migración: ninguna.** Cero filas. PRUEBAS MIPIACE está limpia.
+
+Un detalle de la fecha de la cuenta de ensayo, porque se lee raro: sale `2026-10-05 22:00:00+00`
+y la factura es del **6 de octubre**. Es la conversión de la regla 3.a —`fecha_expedicion` es un
+DATE y se castea a la medianoche de **Europe/Madrid**, que en UTC son las 22:00 del día anterior—.
+Está bien: el huso del comercio es el que manda.
+
+Y una cifra para el día de la visita: cuando se resetee el ensayo de **Sirope** se van **44
+tickets** (20 anulados + 19 de ensayo + 5 borradores), que es exactamente lo que el panel va a
+enseñar desglosado antes de que nadie pulse.
+
+**Lo que queda, y es después de desplegar:** eliminar la cuenta de ensayo de La Maestranza desde
+la consola — ficha → «Eliminar cuenta» → descargar su export → teclear el nombre. Lleva 11
+registros fiscales dentro, así que el export es justo lo que hay que conservar.
+
+Antes de lanzarla contra producción, **la consulta se probó contra Postgres**: con tres cuentas de
+mentira —una
 con 20 anuladas y ninguna en Holded, otra con UNA anulada que sí llegó a Holded, y otra que vende
 de verdad— decide así:
 
@@ -614,11 +665,13 @@ SELECT t.name, t.fiscal_go_live_at, count(f.id) AS registros,
 
 ```bash
 # 1 · La foto de producción, cuenta a cuenta. Sólo lee.
+#    HECHA el 18-10 a las 12:01 y pegada en el §2.2. Se repite si pasan días
+#    entre esto y el despliegue: lo que decide es la foto del día.
 ssh root@76.13.142.28
 docker compose exec -T postgres psql -U mipiacetpv -d mipiacetpv \
   -f - < docs/blocks/puesta-en-marcha-select.sql > antes.txt
 #    → si alguna fila sale con regla = '¿?', PARAR.
-#    → la salida se pega en el §2.2 de este documento.
+#    → si la consulta del aborto devuelve filas, PARAR.
 
 # 2 · La suite completa. A una hora decente: de madrugada fallan tres
 #     ficheros de fichaje y de agenda por el cambio de día (§8.1).
@@ -641,7 +694,16 @@ docker compose exec -T postgres psql -U mipiacetpv -d mipiacetpv -c \
 #    → PRUEBAS MIPIACE y el ensayo de Maestranza con es_de_pruebas = true.
 ```
 
-### 10.3 El push y el PR (los hace Matías)
+### 10.3 Y después del despliegue
+
+Eliminar la cuenta de **ensayo** de La Maestranza (la ACTIVE con 11 registros, §2.2): ficha →
+«Eliminar cuenta» → **descargar su export** → teclear el nombre. Es la decisión del 18-10, y el
+export es justo lo que hay que conservar de una cuenta que llegó a emitir.
+
+Y **no se pulsa «Empezar a facturar» en Sirope** desde la consola: eso se hace en el local, con
+Gemma delante (§9).
+
+### 10.4 El push y el PR
 
 ```bash
 cd /Users/matiasoyolasanchez/Developer/Claude/Projects/mipiacetpv-puesta-en-marcha
