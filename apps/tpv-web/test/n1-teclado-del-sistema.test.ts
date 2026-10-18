@@ -28,6 +28,7 @@ import {
   offsetDelTeclado,
   tecladoTapaLaPantalla,
   UMBRAL_TECLADO_PX,
+  ventanaEncogio,
 } from "../src/lib/visualViewportSync.js";
 
 describe("n1-vertical · offsetDelTeclado", () => {
@@ -84,5 +85,26 @@ describe("n1-vertical · tecladoTapaLaPantalla", () => {
     expect(tecladoTapaLaPantalla(648, 648 - UMBRAL_TECLADO_PX + 1, 0)).toBe(
       false,
     );
+  });
+});
+
+describe("n1-vertical · ventanaEncogio (el caso del N1)", () => {
+  it("el teclado del N1 encoge la VENTANA, y eso también es teclado", () => {
+    // Medido en el aparato el 2026-10-18: innerHeight 720 → 449 con el
+    // viewport visual encogido lo mismo, así que la resta de
+    // `tecladoTapaLaPantalla` da cero y hace falta esta otra señal.
+    expect(tecladoTapaLaPantalla(449, 449, 0)).toBe(false);
+    expect(ventanaEncogio(449, 720)).toBe(true);
+  });
+
+  it("una ventana que no ha encogido no es teclado", () => {
+    expect(ventanaEncogio(720, 720)).toBe(false);
+  });
+
+  it("el ruido de las barras del sistema tampoco", () => {
+    expect(ventanaEncogio(712, 720)).toBe(false);
+    // Justo en el umbral: 720 − 600 = 120.
+    expect(ventanaEncogio(601, 720)).toBe(false);
+    expect(ventanaEncogio(600, 720)).toBe(true);
   });
 });

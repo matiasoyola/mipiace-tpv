@@ -26,6 +26,27 @@ export function offsetDelTeclado(
 // el ruido y no se puede confundir con un teclado.
 export const UMBRAL_TECLADO_PX = 120;
 
+// n1-vertical · LA SEGUNDA SEÑAL, y la que vale en el N1.
+//
+// Medido en el aparato el 2026-10-18 con el teclado de Android abierto:
+//
+//   innerHeight 720 → 449 · visualViewport.height 449 · offsetTop 0
+//
+// Es decir: este WebView encoge LA VENTANA ENTERA (`adjustResize`), no sólo
+// el viewport visual, así que la resta de arriba da **cero** y el detector
+// basado sólo en `visualViewport` no se entera nunca. Con la barra del
+// ticket puesta, los cuatro resultados de la búsqueda salían tapados.
+//
+// Por eso se mira también cuánto ha encogido la ventana respecto a lo más
+// alta que se la ha visto en esta sesión. El umbral es el mismo: lo que no
+// llega a 120 px es ruido (barras del sistema), no un teclado.
+export function ventanaEncogio(
+  innerHeight: number,
+  alturaMaxima: number,
+): boolean {
+  return alturaMaxima - innerHeight >= UMBRAL_TECLADO_PX;
+}
+
 // n1-vertical · ¿está el teclado del sistema tapando la pantalla?
 export function tecladoTapaLaPantalla(
   innerHeight: number,

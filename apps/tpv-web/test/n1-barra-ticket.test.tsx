@@ -124,7 +124,7 @@ class ViewportFalso extends EventTarget {
     super();
     this.height = height;
   }
-  /** El teclado abre: el viewport visual se encoge. */
+  /** El teclado abre y sólo encoge el VIEWPORT VISUAL (el caso de la web). */
   abreElTeclado(px: number) {
     this.height = window.innerHeight - px;
     this.dispatchEvent(new Event("resize"));
@@ -311,6 +311,37 @@ describe("n1-vertical · la barra del ticket y el teclado del sistema", () => {
     // Las barras de sistema al reaparecer con un swipe: 8 px. Si esto
     // quitara la barra, parpadearía al desplazar el catálogo.
     await act(async () => vv.abreElTeclado(8));
+    expect(barra()).not.toBeNull();
+  });
+
+  it("si el teclado encoge la VENTANA entera, también desaparece", async () => {
+    // El caso del N1, medido el 2026-10-18: `innerHeight` 720 → 449 y el
+    // viewport visual encogido lo mismo, así que la resta de
+    // `--keyboard-offset` da cero. Con sólo la señal del viewport visual,
+    // la barra se quedaba puesta y tapaba los cuatro resultados.
+    await renderSale();
+    expect(barra()).not.toBeNull();
+
+    await act(async () => {
+      Object.defineProperty(window, "innerHeight", {
+        writable: true,
+        configurable: true,
+        value: 449,
+      });
+      vv.height = 449;
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(barra()).toBeNull();
+
+    await act(async () => {
+      Object.defineProperty(window, "innerHeight", {
+        writable: true,
+        configurable: true,
+        value: 648,
+      });
+      vv.height = 648;
+      window.dispatchEvent(new Event("resize"));
+    });
     expect(barra()).not.toBeNull();
   });
 
