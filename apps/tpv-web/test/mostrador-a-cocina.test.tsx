@@ -116,6 +116,9 @@ const mesa: TableContext = {
 interface BancoOpts {
   /** El POST que crea el borrador de mostrador falla. */
   borradorFalla?: boolean;
+  /** auditoria-sirope (#19) · la sección no tiene pantalla NI impresora:
+   *  la línea se marca enviada pero nadie la ve. */
+  sinDestino?: boolean;
   /** Unidades ya en cocina, por id de línea (para la mesa). */
   enviadas?: Record<string, number>;
   lineasDeMesa?: Array<{ id: string; units: number }>;
@@ -195,14 +198,22 @@ function banco(opts: BancoOpts = {}) {
           nothingNew: false,
           replayed: false,
           sections: [
-            {
-              section: "COCINA",
-              destino: "PANTALLA",
-              ok: true,
-              lineCount: 1,
-              units: 1,
-              orderId: "order-1",
-            },
+            opts.sinDestino
+              ? {
+                  section: "SALON",
+                  destino: "NINGUNO",
+                  ok: true,
+                  lineCount: 3,
+                  units: 3,
+                }
+              : {
+                  section: "COCINA",
+                  destino: "PANTALLA",
+                  ok: true,
+                  lineCount: 1,
+                  units: 1,
+                  orderId: "order-1",
+                },
           ],
         };
       }
@@ -365,6 +376,22 @@ describe("#25 · venta de mostrador → cocina", () => {
     expect(b.envios[0]!.ticketId).toBe(TICKET_MOSTRADOR);
   });
 
+  it("y el aviso de «comanda enviada» se queda en pantalla", async () => {
+    // El borrador NACE con este mismo envío, así que `activeTicketId`
+    // pasa de null a un id en mitad del gesto. El efecto que limpia el
+    // estado de comanda al cambiar de cuenta se llevaba por delante el
+    // aviso de la comanda que acababa de salir: se pulsaba «Enviar», la
+    // comanda salía, y en pantalla no pasaba nada.
+    banco();
+    await render();
+    await click(producto("Tostada con tomate"));
+    await click($('[data-testid="comanda-enviar"]'));
+
+    const toast = $('[data-testid="comanda-toast"]');
+    expect(toast).not.toBeNull();
+    expect(toast!.textContent).toMatch(/enviada/i);
+  });
+
   it("la segunda comanda reusa el borrador: un solo número de mostrador", async () => {
     const b = banco();
     await render();
@@ -431,5 +458,29 @@ describe("#25 · en una MESA, cobrar sin enviar PREGUNTA", () => {
     expect(dialogo!.textContent).toMatch(/sin mandar a cocina/i);
     expect(dialogo!.textContent).toMatch(/Enviar y cobrar/);
     expect(dialogo!.textContent).toMatch(/Cobrar sin enviar/);
+  });
+});
+
+describe("#19 · una línea sin sección NO se da por enviada", () => {
+  it("el aviso dice cuántas líneas se quedaron sin destino", async () => {
+    // EL SABOTAJE: contar las secciones `NINGUNO` como enviadas devuelve
+    // el «Comanda nº 1 enviada · SALÓN: 3 líneas» del 18-10, con la
+    // cocina sin ver nada.
+    banco({ sinDestino: true });
+    await render();
+    await click(producto("Tostada con tomate"));
+    await click($('[data-testid="comanda-enviar"]'));
+
+    const aviso = $('[data-testid="comanda-sin-destino"]');
+    expect(aviso).not.toBeNull();
+    expect(aviso!.textContent).toMatch(/3 líneas sin destino/i);
+    expect(aviso!.textContent).toMatch(/Nadie las ha visto/i);
+    // Y el aviso NO dice «enviada».
+    expect($('[data-testid="comanda-toast"]')!.textContent).toMatch(
+      /sin destino/i,
+    );
+    expect($('[data-testid="comanda-toast"]')!.textContent).not.toMatch(
+      /nº 1 enviada/i,
+    );
   });
 });

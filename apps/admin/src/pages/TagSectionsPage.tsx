@@ -1,225 +1,212 @@
-// v1.4-Bar-Operativa-MVP Lote 2 · editor del mapa `tag → sección`.
+// v1.4-Bar-Operativa-MVP Lote 2 · editor del mapa `etiqueta → sección`.
 //
-// El OWNER/MANAGER asigna cada tag de su catálogo (los slugs que
-// llegan de Holded — "cafes", "tapas", "vinos") a la sección que la
-// preparará: BARRA, COCINA o SALÓN. Cuando el camarero pulsa "Enviar
-// comanda" en una mesa, el backend agrupa las líneas por sección y
-// genera un PDF por sección con sus líneas.
+// ── auditoria-sirope (#19) · lo que cambió el 18-10 ───────────────────
 //
-// Tags no listados aquí caen a SALÓN en el endpoint de envío — es el
-// default razonable, el camarero lo lleva en mano. Por eso en la
-// práctica este editor sólo se rellena con entradas BARRA y COCINA.
+// La página pedía teclear «el slug de Holded». Dos cosas malas a la vez:
+//
+//   · Sirope no usa Holded. El rótulo mandaba a buscar un dato que no
+//     existe en su cuenta.
+//   · Una etiqueta mal tecleada no da error. No mapea nada y sus platos
+//     caen a SALÓN en silencio — que es exactamente lo que pasó con la
+//     primera comanda de la T6: el D8 dijo «Comanda nº 1 enviada ·
+//     SALÓN: 3 líneas» y la cocina no vio nada.
+//
+// Ahora la página LISTA las etiquetas reales del catálogo y pone un
+// selector Barra / Cocina / Salón al lado de cada una. Lo que no se
+// teclea, no se puede teclear mal.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Trash2 } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 
 import { AdminShell } from "../AdminShell.js";
 import { api, ApiError, clearTokens } from "../api.js";
-import {
-  CenteredLoader,
-  FieldError,
-  OutlineButton,
-  PrimaryButton,
-  SuccessBanner,
-  TextField,
-} from "../ui.js";
+import { CenteredLoader, FieldError, SuccessBanner } from "../ui.js";
 
 type Section = "BARRA" | "COCINA" | "SALON";
 
-interface TagSection {
-  id: string;
+interface Etiqueta {
   slug: string;
-  section: Section;
+  productCount: number;
+  /** `null` = sin asignar. Sus platos caen a SALÓN. */
+  section: Section | null;
+  mapeoId: string | null;
 }
 
-const SECTION_LABEL: Record<Section, string> = {
-  BARRA: "Barra",
-  COCINA: "Cocina",
-  SALON: "Salón",
-};
+const SECCIONES: Array<{ value: Section; label: string }> = [
+  { value: "BARRA", label: "Barra" },
+  { value: "COCINA", label: "Cocina" },
+  { value: "SALON", label: "Salón" },
+];
 
 const SECTION_COLOR: Record<Section, string> = {
-  BARRA: "bg-amber-50 text-amber-800",
-  COCINA: "bg-rose-50 text-rose-800",
-  SALON: "bg-slate-100 text-slate-700",
+  BARRA: "bg-amber-50 text-amber-800 border-amber-200",
+  COCINA: "bg-rose-50 text-rose-800 border-rose-200",
+  SALON: "bg-slate-100 text-slate-700 border-slate-200",
 };
 
 export function TagSectionsPage() {
   const navigate = useNavigate();
-  const [items, setItems] = useState<TagSection[] | null>(null);
-  const [slug, setSlug] = useState("");
-  const [section, setSection] = useState<Section>("BARRA");
-  const [busy, setBusy] = useState(false);
+  const [etiquetas, setEtiquetas] = useState<Etiqueta[] | null>(null);
+  const [guardando, setGuardando] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  useEffect(() => {
-    api<{ items: TagSection[] }>("/admin/tag-sections")
-      .then((res) => setItems(res.items))
-      .catch((err) => {
-        if (err instanceof ApiError && err.status === 401) {
-          clearTokens();
-          navigate("/login", { replace: true });
-        } else if (err instanceof ApiError) {
-          setError(err.message);
-        }
-      });
+  const cargar = useCallback(async () => {
+    try {
+      const res = await api<{ etiquetas: Etiqueta[] }>(
+        "/admin/tag-sections/etiquetas",
+      );
+      setEtiquetas(res.etiquetas);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        clearTokens();
+        navigate("/login", { replace: true });
+      } else if (err instanceof ApiError) {
+        setError(err.message);
+      }
+    }
   }, [navigate]);
 
-  async function onAdd(e: React.FormEvent) {
-    e.preventDefault();
+  useEffect(() => {
+    void cargar();
+  }, [cargar]);
+
+  async function asignar(e: Etiqueta, section: Section | null) {
     setError(null);
     setSuccess(null);
-    if (slug.trim().length === 0) return;
-    setBusy(true);
+    setGuardando(e.slug);
     try {
-      const res = await api<{ tagSection: TagSection }>("/admin/tag-sections", {
-        method: "POST",
-        body: { slug: slug.trim(), section },
-      });
-      setItems((curr) => {
-        const others = (curr ?? []).filter((it) => it.id !== res.tagSection.id);
-        const next = [...others, res.tagSection];
-        next.sort(
-          (a, b) =>
-            a.section.localeCompare(b.section) || a.slug.localeCompare(b.slug),
+      if (section == null) {
+        if (e.mapeoId) {
+          await api(`/admin/tag-sections/${e.mapeoId}`, { method: "DELETE" });
+        }
+        setEtiquetas((curr) =>
+          (curr ?? []).map((x) =>
+            x.slug === e.slug ? { ...x, section: null, mapeoId: null } : x,
+          ),
         );
-        return next;
-      });
-      setSlug("");
-      setSuccess(
-        "Mapeo guardado. El TPV lo aplicará en el próximo envío de comanda.",
-      );
+        setSuccess(
+          `«${e.slug}» vuelve a Salón: sus platos los lleva el camarero.`,
+        );
+      } else {
+        const res = await api<{ tagSection: { id: string; section: Section } }>(
+          "/admin/tag-sections",
+          { method: "POST", body: { slug: e.slug, section } },
+        );
+        setEtiquetas((curr) =>
+          (curr ?? []).map((x) =>
+            x.slug === e.slug
+              ? {
+                  ...x,
+                  section: res.tagSection.section,
+                  mapeoId: res.tagSection.id,
+                }
+              : x,
+          ),
+        );
+        setSuccess("Guardado. El TPV lo aplicará en el próximo envío.");
+      }
     } catch (err) {
       if (err instanceof ApiError) setError(err.message);
       else setError("Error inesperado");
+      // Si falló, lo que hay en pantalla puede no ser lo que hay en la
+      // base: se vuelve a pedir en vez de dejar una mentira puesta.
+      void cargar();
     } finally {
-      setBusy(false);
+      setGuardando(null);
     }
   }
 
-  async function onDelete(id: string) {
-    if (
-      !window.confirm(
-        "¿Quitar este mapeo? Las líneas con este tag caerán a SALÓN por defecto.",
-      )
-    ) {
-      return;
-    }
-    setError(null);
-    setSuccess(null);
-    try {
-      await api(`/admin/tag-sections/${id}`, { method: "DELETE" });
-      setItems((curr) => (curr ?? []).filter((it) => it.id !== id));
-      setSuccess("Mapeo eliminado.");
-    } catch (err) {
-      if (err instanceof ApiError) setError(err.message);
-      else setError("Error inesperado");
-    }
-  }
+  if (!etiquetas) return <CenteredLoader label="Cargando etiquetas…" />;
 
-  if (!items) return <CenteredLoader label="Cargando secciones…" />;
+  const sinAsignar = etiquetas.filter(
+    (e) => e.section == null && e.productCount > 0,
+  );
 
   return (
     <AdminShell title="Comanderas por sección">
       <p className="text-[13.5px] text-slate-500 mb-5 -mt-2">
-        Cuando el camarero pulsa "Enviar comanda" en una mesa, las
-        líneas se agrupan por sección (Barra, Cocina, Salón) y se
-        imprime un papel para cada una. Aquí decides qué etiqueta (tag)
-        de tus productos va a qué sección. Tags no listados van a
-        Salón por defecto — el camarero los lleva en mano.
+        Al enviar una comanda, las líneas se agrupan por sección y cada
+        sección va a su pantalla de cocina o a su impresora. Aquí decides a
+        qué sección pertenece cada etiqueta de tu catálogo.
       </p>
 
       {success && <SuccessBanner message={success} />}
       {error && <FieldError message={error} />}
 
-      <section className="bg-white rounded-2xl border border-slate-200 p-6 md:p-7 mb-5">
-        <h2 className="text-[16px] font-semibold text-mipiace-ink tracking-tight mb-1">
-          Asignar etiqueta a una sección
-        </h2>
-        <p className="text-[13px] text-slate-500 mb-4">
-          El <em>slug</em> es la etiqueta tal y como la usas en Holded
-          (en minúsculas — por ejemplo <code>cafes</code>, <code>tapas</code>,{" "}
-          <code>vinos</code>).
-        </p>
-        <form onSubmit={onAdd} className="space-y-4">
-          <div className="grid sm:grid-cols-2 gap-4">
-            <TextField
-              id="slug"
-              label="Slug Holded"
-              value={slug}
-              onChange={setSlug}
-              placeholder="cafes"
-              required
-            />
-            <div>
-              <label
-                htmlFor="section"
-                className="block text-[13px] font-medium text-mipiace-ink mb-2"
-              >
-                Sección
-              </label>
-              <select
-                id="section"
-                value={section}
-                onChange={(e) => setSection(e.target.value as Section)}
-                className="w-full h-11 px-3 rounded-xl border border-slate-300 bg-white text-[14px] text-mipiace-ink focus:ring-2 focus:ring-mipiace-coral/40 focus:border-mipiace-coral/30 focus:outline-none"
-              >
-                <option value="BARRA">Barra</option>
-                <option value="COCINA">Cocina</option>
-                <option value="SALON">Salón</option>
-              </select>
-            </div>
+      {/* auditoria-sirope (#19) · el aviso que faltaba. Una etiqueta sin
+          sección no da error: manda sus platos a Salón en silencio. */}
+      {sinAsignar.length > 0 && (
+        <div
+          data-testid="aviso-sin-seccion"
+          className="mb-5 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 flex items-start gap-3"
+        >
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-amber-700" />
+          <div className="text-[13px] text-amber-900">
+            <strong>
+              {sinAsignar.length === 1
+                ? "1 etiqueta sin sección"
+                : `${sinAsignar.length} etiquetas sin sección`}
+            </strong>
+            : {sinAsignar.map((e) => e.slug).join(", ")}. Sus platos van a
+            Salón, o sea que no aparecen en la pantalla de cocina ni salen
+            por su impresora — se los lleva el camarero en mano.
           </div>
-          <div className="flex gap-2.5">
-            <PrimaryButton type="submit" busy={busy}>
-              <Plus className="w-3.5 h-3.5" />
-              Guardar mapeo
-            </PrimaryButton>
-          </div>
-        </form>
-      </section>
+        </div>
+      )}
 
       <section className="bg-white rounded-2xl border border-slate-200 p-6 md:p-7 mb-5">
         <h2 className="text-[16px] font-semibold text-mipiace-ink tracking-tight mb-1">
-          Mapeos actuales
+          Etiquetas de tu catálogo
         </h2>
         <p className="text-[13px] text-slate-500 mb-4">
-          {items.length === 0
-            ? "Aún no has asignado etiquetas a secciones."
-            : `${items.length} mapeo${items.length === 1 ? "" : "s"} configurado${items.length === 1 ? "" : "s"}.`}
+          {etiquetas.length === 0
+            ? "Tu catálogo todavía no tiene etiquetas."
+            : `${etiquetas.length} etiqueta${etiquetas.length === 1 ? "" : "s"}.`}
         </p>
-        {items.length > 0 && (
-          <div className="space-y-2">
-            {items.map((it) => (
-              <div
-                key={it.id}
-                className="flex items-center gap-3 p-3.5 rounded-xl bg-mipiace-stone"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="text-[12px] uppercase tracking-wider text-slate-400 font-medium">
-                    {it.slug}
-                  </div>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span
-                      className={`inline-block px-2 py-0.5 rounded-md text-[12.5px] font-medium ${SECTION_COLOR[it.section]}`}
-                    >
-                      {SECTION_LABEL[it.section]}
-                    </span>
-                  </div>
+        <div className="space-y-2">
+          {etiquetas.map((e) => (
+            <div
+              key={e.slug}
+              data-testid={`etiqueta-${e.slug}`}
+              className="flex flex-wrap items-center gap-3 p-3.5 rounded-xl bg-mipiace-stone"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="text-[14px] font-medium text-mipiace-ink truncate">
+                  {e.slug}
                 </div>
-                <OutlineButton
-                  onClick={() => onDelete(it.id)}
-                  className="!h-9 !text-[12.5px] !text-red-600 !border-red-200 hover:!bg-red-50"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  Quitar
-                </OutlineButton>
+                <div className="text-[12px] text-slate-500">
+                  {e.productCount === 0
+                    ? "sin productos (sobra)"
+                    : `${e.productCount} producto${e.productCount === 1 ? "" : "s"}`}
+                </div>
               </div>
-            ))}
-          </div>
-        )}
+              <div className="flex gap-1.5">
+                {SECCIONES.map((s) => {
+                  const activa = e.section === s.value;
+                  return (
+                    <button
+                      key={s.value}
+                      type="button"
+                      disabled={guardando === e.slug}
+                      onClick={() => void asignar(e, activa ? null : s.value)}
+                      aria-pressed={activa}
+                      data-testid={`etiqueta-${e.slug}-${s.value}`}
+                      className={`h-10 px-3.5 rounded-xl border text-[13px] font-medium disabled:opacity-50 ${
+                        activa
+                          ? SECTION_COLOR[s.value]
+                          : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
+                      }`}
+                    >
+                      {s.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
       </section>
     </AdminShell>
   );

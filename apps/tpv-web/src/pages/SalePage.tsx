@@ -545,6 +545,20 @@ export function SalePage(props: SalePageProps) {
   const [kitchenRevision, setKitchenRevision] = useState(0);
   const [kitchenToast, setKitchenToast] = useState<{
     sections: Array<{ section: string; lineCount: number }>;
+    /**
+     * auditoria-sirope (#19) · LO QUE NO TIENE A DÓNDE IR.
+     *
+     * Una sección sin pantalla y sin impresora se marca como enviada
+     * igualmente (decisión 2 de kds-1: la caña no puede bloquear a las
+     * bravas), y hasta este bloque el toast la listaba junto a las
+     * demás bajo un «Comanda enviada» en verde. El 18-10, con Cocina
+     * recién encendida y sin mapa de etiquetas, las tres líneas de la
+     * T6 cayeron a SALÓN y el D8 dijo «enviada». La cocina no vio nada.
+     *
+     * Enviada y sin destino no son lo mismo, así que no se cuentan
+     * juntas.
+     */
+    sinDestino?: Array<{ section: string; lineCount: number }>;
     revision: number;
     /**
      * kds-2-wifi · la comanda salió SÓLO por la wifi del local (internet
@@ -638,7 +652,23 @@ export function SalePage(props: SalePageProps) {
   // dato llega con el borrador (`initialKitchen`) y el rótulo dice la
   // verdad desde el primer pintado. El resto del efecto no cambia.
   const initialKitchenRev = props.initialKitchen?.revision ?? 0;
+  // auditoria-sirope (#25) · el borrador que NACE no es un cambio de
+  // mesa.
+  //
+  // Este efecto limpia el estado de comanda al cambiar de cuenta. Con la
+  // venta de mostrador, `activeTicketId` pasa de `null` a un id EN MITAD
+  // del propio envío —es ese envío el que crea el borrador—, así que el
+  // efecto borraba el aviso de la comanda que acababa de salir. El
+  // camarero pulsaba «Enviar», la comanda salía, y en pantalla no pasaba
+  // nada. Se vio escribiendo el test del aviso «sin destino» (#19).
+  //
+  // `null → id` es la MISMA venta estrenando borrador; sólo se limpia
+  // cuando se pasa de una cuenta a otra de verdad.
+  const ticketAnterior = useRef<string | null>(activeTicketId);
   useEffect(() => {
+    const previo = ticketAnterior.current;
+    ticketAnterior.current = activeTicketId;
+    if (previo == null && activeTicketId != null) return;
     setKitchenRevision(initialKitchenRev);
     setKitchenToast(null);
     setKitchenError(null);
@@ -2203,11 +2233,22 @@ export function SalePage(props: SalePageProps) {
       // impresora de cocina estaba apagada, el cajero leía "Cocina: 2
       // líneas" bajo un "Comanda enviada" en verde y daba por hecho que
       // el pedido estaba en cocina.
-      const printed = res.sections.filter((s) => s.ok);
+      // auditoria-sirope (#19) · lo que NO tiene destino se cuenta
+      // aparte. `destino: "NINGUNO"` es una sección sin pantalla y sin
+      // impresora: la línea queda marcada como enviada —la cuenta tiene
+      // que poder cerrarse— pero nadie en la cocina la ha visto.
+      const sinDestino = res.sections.filter((s) => s.destino === "NINGUNO");
+      const printed = res.sections.filter(
+        (s) => s.ok && s.destino !== "NINGUNO",
+      );
       const failed = res.sections.filter((s) => !s.ok);
-      if (printed.length > 0) {
+      if (printed.length > 0 || sinDestino.length > 0) {
         setKitchenToast({
           sections: printed.map((s) => ({
+            section: s.section,
+            lineCount: s.lineCount,
+          })),
+          sinDestino: sinDestino.map((s) => ({
             section: s.section,
             lineCount: s.lineCount,
           })),
@@ -3644,6 +3685,7 @@ export function SalePage(props: SalePageProps) {
       {kitchenToast && (
         <KitchenToast
           sections={kitchenToast.sections}
+          sinDestino={kitchenToast.sinDestino ?? []}
           revision={kitchenToast.revision}
           porWifi={kitchenToast.porWifi === true}
           onClose={() => setKitchenToast(null)}
@@ -5912,11 +5954,14 @@ const SECTION_LABEL_ES: Record<string, string> = {
 
 function KitchenToast({
   sections,
+  sinDestino = [],
   revision,
   porWifi,
   onClose,
 }: {
   sections: Array<{ section: string; lineCount: number }>;
+  /** auditoria-sirope (#19) · secciones sin pantalla ni impresora. */
+  sinDestino?: Array<{ section: string; lineCount: number }>;
   revision: number;
   porWifi?: boolean;
   onClose: () => void;
@@ -5927,10 +5972,22 @@ function KitchenToast({
     const t = setTimeout(onClose, 5_000);
     return () => clearTimeout(t);
   }, [onClose]);
+  // auditoria-sirope (#19) · si NADA tuvo destino, el aviso no es verde
+  // y no dice «enviada»: no hay nadie al otro lado.
+  const nadaLlego = sections.length === 0 && sinDestino.length > 0;
   return (
-    <div className="fixed top-5 right-5 z-50 bg-emerald-50 border border-emerald-300 text-emerald-900 px-4 py-3 rounded-2xl shadow-sm max-w-sm">
+    <div
+      data-testid="comanda-toast"
+      className={
+        nadaLlego
+          ? "fixed top-5 right-5 z-50 bg-amber-50 border border-amber-300 text-amber-900 px-4 py-3 rounded-2xl shadow-sm max-w-sm"
+          : "fixed top-5 right-5 z-50 bg-emerald-50 border border-emerald-300 text-emerald-900 px-4 py-3 rounded-2xl shadow-sm max-w-sm"
+      }
+    >
       <div className="text-[13.5px] font-semibold mb-1">
-        Comanda nº {revision} enviada
+        {nadaLlego
+          ? `Comanda nº ${revision}: sin destino`
+          : `Comanda nº ${revision} enviada`}
       </div>
       {/* kds-2-wifi · sin internet se dice POR DÓNDE salió. El camarero
           tiene que saber que la cocina la tiene y que la caja la subirá
@@ -5952,6 +6009,22 @@ function KitchenToast({
           </div>
         ))}
       </div>
+      {sinDestino.length > 0 && (
+        <div
+          data-testid="comanda-sin-destino"
+          className="text-[12.5px] mt-1.5 font-medium"
+        >
+          {sinDestino.reduce((a, s) => a + s.lineCount, 0)}{" "}
+          {sinDestino.reduce((a, s) => a + s.lineCount, 0) === 1
+            ? "línea sin destino"
+            : "líneas sin destino"}
+          :{" "}
+          {sinDestino
+            .map((s) => SECTION_LABEL_ES[s.section] ?? s.section)
+            .join(", ")}
+          . Nadie las ha visto en cocina.
+        </div>
+      )}
     </div>
   );
 }
