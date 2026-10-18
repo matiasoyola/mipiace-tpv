@@ -44,6 +44,10 @@ import { ClientConsentKind, type Prisma } from "@mipiacetpv/db";
 import { requireOwnerOrCashier } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
 import { createAgendaStore } from "../agenda/store.js";
+import { esSanitarioSinCaja } from "../lib/caja-gate.js";
+import { bonosIsEnabled } from "../vouchers/gate-tenant.js";
+import { bonosDeLaFicha, libroDeLaFicha } from "../vouchers/lectura.js";
+import { bonoConDinero, bonoSinDinero } from "../vouchers/vistas.js";
 import {
   comoPrismaParaAcceso,
   resolverAccesoClinico,
@@ -650,17 +654,46 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
         y.at.localeCompare(x.at),
       );
 
+      // B-reservas-8 · EL LIBRO de los bonos de esta ficha, legible: qué
+      // cita apartó, qué ticket consumió, quién corrigió y por qué. Mismo
+      // contrato que ya publicaba (`voucherMovements[]`), ahora con filas.
+      //
+      // Sin dinero en ninguna de ellas: el libro de un bono habla de
+      // sesiones, y el cobro vive en el ticket que enlaza.
+      const voucherMovements = (await bonosIsEnabled(auth.tenantId))
+        ? await libroDeLaFicha(prisma, auth.tenantId, id)
+        : [];
+
       return {
         entries,
         // `appointments[]` estable (además del unificado en `entries`).
         appointments: appointmentEntries,
-        // Contrato estable vacío hasta B5.
-        voucherMovements: [] as unknown[],
+        voucherMovements,
       };
     },
   );
 
-  // ── Saldo de bonos (contrato estable, vacío hasta B5) ───────────────
+  // ── Saldo de bonos ─────────────────────────────────────────────────
+  //
+  // B-reservas-8 · **relleno de verdad, y con el MISMO contrato que ya
+  // publicaba.** Las dos claves de arriba (`balance.sessionsLeft`,
+  // `balance.amountLeftCents` y `vouchers[]`) estaban desde B-reservas-1 y
+  // el front ya las leía pintando «0» y vacío; cambiarlas habría roto a un
+  // cliente por un nombre.
+  //
+  // `amountLeftCents` sigue valiendo 0 siempre y seguirá hasta B-cheques:
+  // es el saldo por IMPORTE, que este bloque no construye. Se queda a cero
+  // y no se quita, por lo mismo.
+  //
+  // ── Y el sanitario sin caja ─────────────────────────────────────────
+  //
+  // Ve sesiones y **ningún euro**. No se oculta en el front: NO SE MANDA
+  // (`vouchers/vistas.ts`). Un test vuelca este JSON y busca claves y
+  // valores de dinero.
+  //
+  // Con el módulo APAGADO se contesta lo de siempre —saldo cero y lista
+  // vacía— y no un 404: esta ruta es del CRM y su contrato no depende de
+  // que el negocio haya contratado los bonos.
   app.get(
     "/clients/:id/vouchers",
     { preHandler: requireOwnerOrCashier },
@@ -669,10 +702,30 @@ export async function registerCrmRoutes(app: FastifyInstance): Promise<void> {
       const { id } = request.params as { id: string };
       const client = await loadOwnedClient(auth.tenantId, id);
       if (!client) return notFound(reply);
+      if (!(await bonosIsEnabled(auth.tenantId))) {
+        return {
+          balance: { sessionsLeft: 0, amountLeftCents: 0 },
+          vouchers: [] as unknown[],
+        };
+      }
+      const prisma = getPrisma();
+      const ahora = new Date();
+      const filas = await bonosDeLaFicha(prisma, auth.tenantId, id, ahora);
+      const sinDinero = await esSanitarioSinCaja(request);
+      // El saldo agregado NO cuenta los de prueba (`07` pieza 17: lo de
+      // prueba sale de los informes de gestión) ni los muertos.
+      const vivos = filas.filter(
+        (f) => !f.esPrueba && f.status !== "ANULADO" && f.status !== "CADUCADO",
+      );
       return {
-        // Saldo agregado. B5 lo rellena; el front ya pinta "0" / vacío.
-        balance: { sessionsLeft: 0, amountLeftCents: 0 },
-        vouchers: [] as unknown[],
+        balance: {
+          sessionsLeft: vivos.reduce((acc, f) => acc + f.sessionsLeft, 0),
+          // B-cheques. Cero hasta entonces, y el contrato lo lleva.
+          amountLeftCents: 0,
+        },
+        vouchers: filas.map((f) =>
+          sinDinero ? bonoSinDinero(f) : bonoConDinero(f),
+        ),
       };
     },
   );

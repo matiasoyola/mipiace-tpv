@@ -52,6 +52,10 @@ import { registerOnboardingRoutes } from "./onboarding/routes.js";
 import { registerServicesRoutes } from "./services/routes.js";
 import { registerAgendaHoursRoutes } from "./agenda/hours.js";
 import { registerAgendaRoutes } from "./agenda/routes.js";
+// B-reservas-8 · los bonos de sesiones. Todas sus rutas van detrás de
+// `Tenant.bonosEnabled` y contestan 404 con el módulo apagado.
+import { registerVoucherRoutes } from "./vouchers/routes.js";
+import { registerVoucherAdminRoutes } from "./vouchers/routes-admin.js";
 import { registerCashierAuthRoutes } from "./shift/cashier-auth.js";
 import { registerShiftRoutes } from "./shift/routes.js";
 import { registerStaffRoutes } from "./staff/routes.js";
@@ -244,6 +248,8 @@ async function main() {
   await registerStaffRoutes(app);
   await registerAgendaRoutes(app);
   await registerAgendaHoursRoutes(app);
+  await registerVoucherRoutes(app);
+  await registerVoucherAdminRoutes(app);
   await registerDeviceRoutes(app);
   await registerFichajeRoutes(app);
   await registerFichajeAdminRoutes(app);
