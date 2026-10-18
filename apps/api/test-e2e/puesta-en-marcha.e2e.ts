@@ -36,6 +36,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { borrarCuentasDePrueba } from "./borrar-tenant.js";
 import { E2E_DATABASE_URL, e2eEnabled, SKIP_MESSAGE } from "./e2e-env.js";
 
 process.env.NODE_ENV = "test";
@@ -1385,4 +1386,194 @@ describe.skipIf(!e2eEnabled)("e2e · puesta en marcha, contra Postgres real", ()
       expect(await prisma.tenant.count({ where: { id: t.id } })).toBe(0);
     });
   });
+
+  // ── 8 · la cascada del borrado del tenant NO es una puerta ──────────
+  //
+  // ADR-021 §6.3. Hasta esta migración, los cuatro guardias dejaban pasar el
+  // DELETE cuando el tenant ya no existía —«esto es su borrado en cascada»—,
+  // y la premisa de que a esa rama no se podía LLEGAR era falsa:
+  // `fiscal_records.tenant_id` es `ON DELETE CASCADE`, así que un
+  // `DELETE FROM tenants` a pelo entraba por ahí y se llevaba las facturas,
+  // las ventas selladas y los fichajes sin marca, sin export y sin rastro.
+  //
+  // Lo que se prueba aquí es que la marca de «Eliminar cuenta» es la ÚNICA
+  // puerta, y las tres formas de pasar por ella: sin marca NO, con la marca
+  // de ESE tenant SÍ, con la marca de OTRO tenant NO.
+
+  describe("8 · la cascada del borrado del tenant no es una puerta", () => {
+    /** Una cuenta que factura, con un registro de facturación detrás. */
+    async function cuentaConFactura(): Promise<string> {
+      const t = await prisma.tenant.create({
+        data: {
+          name: `Cascada ${randomUUID().slice(0, 8)}`,
+          holdedEnabled: false,
+          facturaDesde: new Date("2026-10-17T07:00:00Z"),
+          fiscalProfile: { legalName: "CASCADA SL", taxId: NIF },
+        },
+        select: { id: true },
+      });
+      const s = await prisma.store.create({
+        data: { tenantId: t.id, name: "T" },
+        select: { id: true },
+      });
+      const reg = await prisma.register.create({
+        data: { storeId: s.id, name: "C" },
+        select: { id: true },
+      });
+      // Sin `ticket_id`: así el DELETE llega al guardián del append-only y no
+      // a la FK `RESTRICT` de `fiscal_records.ticket_id`. Lo que se prueba es
+      // el guardián.
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO fiscal_records
+           (tenant_id, register_id, external_id, kind, chain_index, serie, numero,
+            num_serie_factura, fecha_expedicion, tipo_factura, cuota_total, importe_total,
+            huella, primer_registro, fecha_hora_huso_gen, huella_input, payload,
+            generated_at, chain_status)
+         VALUES ('${t.id}'::uuid, '${reg.id}'::uuid, '${randomUUID()}'::uuid, 'ALTA', 1,
+            'C1', 1, 'C1/000001', '2026-10-17', 'F2', 0.21, 1.21,
+            '${"B".repeat(64)}', true, '2026-10-17T09:00:00+02:00', 'x', '{}'::jsonb,
+            now(), 'OK')`,
+      );
+      return t.id;
+    }
+
+    async function borrarElTenant(id: string, marca?: string): Promise<string> {
+      try {
+        await prisma.$transaction(async (tx) => {
+          if (marca !== undefined) {
+            await tx.$executeRawUnsafe(
+              `SET LOCAL "mipiacetpv.eliminar_tenant" = '${marca}'`,
+            );
+          }
+          await tx.$executeRawUnsafe(`DELETE FROM tenants WHERE id = '${id}'`);
+        });
+      } catch (e) {
+        return e instanceof Error ? e.message : String(e);
+      }
+      return "";
+    }
+
+    it("sin la marca, el DELETE se lleva por delante REGISTRO_FISCAL_VIOLADO", async () => {
+      const t = await cuentaConFactura();
+      const msg = await borrarElTenant(t);
+      expect(msg).toContain("REGISTRO_FISCAL_VIOLADO");
+      // Y no borró NADA: la transacción entera se fue atrás.
+      expect(await prisma.tenant.count({ where: { id: t } })).toBe(1);
+      expect(await prisma.fiscalRecord.count({ where: { tenantId: t } })).toBe(1);
+
+      // Limpieza por el único camino que existe.
+      expect(await borrarElTenant(t, t)).toBe("");
+    });
+
+    it("con la marca de OTRO tenant, tampoco", async () => {
+      const t = await cuentaConFactura();
+      const msg = await borrarElTenant(t, randomUUID());
+      expect(msg).toContain("REGISTRO_FISCAL_VIOLADO");
+      expect(await prisma.fiscalRecord.count({ where: { tenantId: t } })).toBe(1);
+      expect(await borrarElTenant(t, t)).toBe("");
+    });
+
+    it("con la marca de ESE tenant, pasa y la cuenta se va entera", async () => {
+      const t = await cuentaConFactura();
+      expect(await borrarElTenant(t, t)).toBe("");
+      expect(await prisma.tenant.count({ where: { id: t } })).toBe(0);
+      expect(await prisma.fiscalRecord.count({ where: { tenantId: t } })).toBe(0);
+    });
+
+    it("y la cascada tampoco se lleva una venta sellada", async () => {
+      // Cuenta FACTURANDO: la excepción del reseteo del ensayo (§5.1) no
+      // aplica, así que lo único que podía dejar pasar este DELETE era la
+      // rama de cascada.
+      const t = await prisma.tenant.create({
+        data: {
+          name: `Sellada ${randomUUID().slice(0, 8)}`,
+          holdedEnabled: false,
+          facturaDesde: new Date("2026-10-17T07:00:00Z"),
+        },
+        select: { id: true },
+      });
+      const s = await prisma.store.create({
+        data: { tenantId: t.id, name: "T" },
+        select: { id: true },
+      });
+      const reg = await prisma.register.create({
+        data: { storeId: s.id, name: "C" },
+        select: { id: true },
+      });
+      const u = await prisma.user.create({
+        data: { tenantId: t.id, email: `u+${randomUUID()}@e2e.local`, role: "OWNER" },
+        select: { id: true },
+      });
+      const sh = await prisma.shift.create({
+        data: { registerId: reg.id, userId: u.id, cashOpening: 0 },
+        select: { id: true },
+      });
+      const tk = await prisma.ticket.create({
+        data: {
+          tenantId: t.id,
+          registerId: reg.id,
+          shiftId: sh.id,
+          userId: u.id,
+          internalNumber: "000001",
+          externalId: randomUUID(),
+          publicSlug: randomUUID().replace(/-/g, "").slice(0, 12),
+          status: "PAID",
+          total: 8.5,
+          totalTax: 0.77,
+          totalDiscount: 0,
+        },
+        select: { id: true },
+      });
+      await prisma.$executeRawUnsafe(
+        `UPDATE tickets SET sealed_at = now(), sealed_hash = repeat('a', 64) WHERE id = '${tk.id}'`,
+      );
+
+      expect(await borrarElTenant(t.id)).toContain("SELLO_VIOLADO");
+      expect(await prisma.ticket.count({ where: { id: tk.id } })).toBe(1);
+      // Y se va por la puerta, que aquí tiene que borrar el turno antes que
+      // el usuario: `shifts_user_id_fkey` es RESTRICT y la cascada del tenant
+      // se lleva los usuarios. Es el mismo orden de `eliminarLaCuenta`.
+      await borrarCuentasDePrueba(prisma, t.id);
+      expect(await prisma.ticket.count({ where: { id: tk.id } })).toBe(0);
+      expect(await prisma.tenant.count({ where: { id: t.id } })).toBe(0);
+    });
+
+    it("ni un fichaje, que cuelga del empleado y no del tenant", async () => {
+      // `time_entries` no tiene FK al tenant: la cascada le llegaba por
+      // `employees.tenant_id`, que sí es CASCADE. Dos guardias en el mismo
+      // DELETE, y el que levanta primero da igual: los dos dicen REGISTRO.
+      const t = await prisma.tenant.create({
+        data: {
+          name: `Fichaje ${randomUUID().slice(0, 8)}`,
+          holdedEnabled: false,
+          fichajeEnabled: true,
+        },
+        select: { id: true },
+      });
+      const emp = await prisma.employee.create({
+        data: { tenantId: t.id, name: "Ana" },
+        select: { id: true },
+      });
+      const fichaje = await prisma.timeEntry.create({
+        data: {
+          tenantId: t.id,
+          employeeId: emp.id,
+          startedAt: new Date("2026-10-16T07:00:00Z"),
+          startedServerAt: new Date("2026-10-16T07:00:00Z"),
+          startSource: "PANEL",
+          endedAt: new Date("2026-10-16T15:00:00Z"),
+          endedServerAt: new Date("2026-10-16T15:00:00Z"),
+          endSource: "PANEL",
+        },
+        select: { id: true },
+      });
+
+      expect(await borrarElTenant(t.id)).toContain("REGISTRO_VIOLADO");
+      expect(await prisma.timeEntry.count({ where: { id: fichaje.id } })).toBe(1);
+      expect(await borrarElTenant(t.id, t.id)).toBe("");
+      expect(await prisma.timeEntry.count({ where: { id: fichaje.id } })).toBe(0);
+      expect(await prisma.employee.count({ where: { id: emp.id } })).toBe(0);
+    });
+  });
+
 });

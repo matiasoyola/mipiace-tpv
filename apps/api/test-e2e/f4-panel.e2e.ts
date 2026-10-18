@@ -18,6 +18,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { borrarCuentasDePrueba } from "./borrar-tenant.js";
 import { E2E_DATABASE_URL, e2eEnabled, SKIP_MESSAGE } from "./e2e-env.js";
 
 process.env.NODE_ENV = "test";
@@ -55,19 +56,15 @@ describe.skipIf(!e2eEnabled)("e2e · el panel del control horario", () => {
   });
 
   afterAll(async () => {
-    await prisma.$executeRawUnsafe(
-      `DELETE FROM tenants WHERE id IN ('${tenantId}', '${otroTenantId}')`,
-    );
+    // Por la marca de «Eliminar cuenta» (ADR-021 §6.3): la rama de cascada que
+    // dejaba pasar un `DELETE FROM tenants` a pelo ya no existe.
+    await borrarCuentasDePrueba(prisma, tenantId, otroTenantId);
     await app.close();
     await shutdown();
   });
 
   beforeEach(async () => {
-    if (tenantId) {
-      await prisma.$executeRawUnsafe(
-        `DELETE FROM tenants WHERE id IN ('${tenantId}', '${otroTenantId}')`,
-      );
-    }
+    await borrarCuentasDePrueba(prisma, tenantId, otroTenantId);
     tenantId = randomUUID();
     otroTenantId = randomUUID();
     ownerId = randomUUID();

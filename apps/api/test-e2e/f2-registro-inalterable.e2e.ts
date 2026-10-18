@@ -23,6 +23,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { borrarCuentasDePrueba } from "./borrar-tenant.js";
 import { E2E_DATABASE_URL, e2eEnabled, SKIP_MESSAGE } from "./e2e-env.js";
 
 process.env.NODE_ENV = "test";
@@ -65,9 +66,11 @@ describe.skipIf(!e2eEnabled)("e2e · el registro de jornada es inalterable", () 
   });
 
   afterAll(async () => {
-    // El tenant se va entero: es la única escapatoria que los triggers
-    // aceptan, y que funcione es parte de lo que se prueba.
-    await prisma.$executeRawUnsafe(`DELETE FROM tenants WHERE id = '${tenantId}'`);
+    // El tenant se va entero, y por la ÚNICA puerta que los triggers aceptan:
+    // la marca de «Eliminar cuenta» (ADR-021 §6.3). Antes bastaba un
+    // `DELETE FROM tenants` a pelo, que entraba por la rama de cascada — y esa
+    // rama era el agujero que la migración de la única puerta cerró.
+    await borrarCuentasDePrueba(prisma, tenantId);
     await shutdown();
   });
 
