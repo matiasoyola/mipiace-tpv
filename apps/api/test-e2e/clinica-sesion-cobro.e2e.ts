@@ -32,6 +32,8 @@ import { randomBytes, randomUUID } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { VERSION_VIGENTE } from "@mipiacetpv/contrato-encargado";
+
 import { E2E_DATABASE_URL, e2eEnabled, SKIP_MESSAGE } from "./e2e-env.js";
 
 process.env.NODE_ENV = "test";
@@ -254,10 +256,17 @@ describe.skipIf(!e2eEnabled)("e2e · el cobro de una sesión clínica", () => {
     // Va con SQL y no por la ruta porque este fichero no monta las rutas
     // del contrato: lo que prueba es el cobro de una sesión, y el contrato
     // es una precondición del mundo, como la agenda o el CRM.
+    //
+    // clinica-8 · la versión es la VIGENTE, no un `1` escrito a mano. Al
+    // sacar la v2 del contrato (la razón social de verdad) este fichero se
+    // fue entero a 423: una aceptación de una versión vieja deja el módulo
+    // clínico en SOLO LECTURA, que es la garantía de clinica-7
+    // funcionando. Con la constante, la próxima versión no vuelve a
+    // costar una pasada.
     await prisma.clinicalProcessorAgreement.create({
       data: {
         tenantId,
-        version: 1,
+        version: VERSION_VIGENTE,
         textSha256: "a".repeat(64),
         userId: podologaId,
       },
