@@ -27,7 +27,7 @@
 // IDB_NAMES_TO_CLEAR de version-check.ts: las ventas pendientes deben
 // sobrevivir a deploys y limpiezas de cache.
 
-import { ApiError, apiWithCashier } from "../api.js";
+import { ApiError, apiConPuerta, apiWithCashier } from "../api.js";
 import { newId } from "./ids.js";
 import { captureError } from "./sentry.js";
 
@@ -69,7 +69,21 @@ export type OutboxKind =
   // seguiría pareciendo «sin enviar» para siempre. Con el outbox, al
   // volver la red el servidor recibe el MISMO `clientSendId`: no duplica la
   // tarjeta (la idempotencia de kds-1) y sí sube `sentUnits`.
-  | "kitchen-send";
+  | "kitchen-send"
+  // residencia-3 · UN GESTO DE LA PUERTA. Un toque de «como siempre» son
+  // siete filas y UN item, porque las siete salen en el mismo POST: es lo
+  // que hace que quepa en los dos segundos de D-05 con una wifi mala.
+  //
+  // POR QUÉ PASA POR EL OUTBOX: porque es la mitad del bloque. El wifi de
+  // una residencia tiene puntos muertos (H-08) y el turno de noche es
+  // cuando más sola está: un cambio postural de las 02:00 que se perdiera
+  // porque el router estaba caído sería un cuidado hecho que no consta, y
+  // «un cuidado hecho se apunta» es la invariante de este módulo.
+  //
+  // Idempotente por el uuid que la TABLET genera para cada fila, así que
+  // el envío genérico (POST path+body, borrar al 2xx) tampoco necesita
+  // casos especiales. Lo único que necesita es otra auth: ver `auth`.
+  | "care-record";
 export type OutboxStatus = "pending" | "rejected";
 
 export interface OutboxItem {
@@ -84,6 +98,17 @@ export interface OutboxItem {
   // POST y no hace falta subir la versión de la BD.
   method?: "POST" | "PATCH";
   body: Record<string, unknown>;
+  // residencia-3 · CON QUÉ CABECERAS se manda. Ausente = la sesión de
+  // cajero, que es lo que llevaban todos los items hasta este bloque, así
+  // que un item ya persistido sigue saliendo igual y no hace falta subir
+  // la versión de la BD (mismo criterio que `method` en B-5 y
+  // `durationMin` en B-6a).
+  //
+  // `"puerta"` manda el `X-Device-Token` Y la sesión de la puerta. Sin
+  // sesión da 401, que para la cola es TRANSITORIO: el lote espera a que
+  // alguien teclee su PIN en esa tablet y sale entonces, con su
+  // `recordedAt` original.
+  auth?: "cashier" | "puerta";
   // Para pintar el item en el chip de pendientes sin parsear el body.
   label: string;
   total: number;
@@ -255,6 +280,7 @@ export async function outboxAdd(
     durationMin?: number;
     tableId?: string;
     kitchenLines?: Array<{ lineId: string; units: number }>;
+    auth?: "cashier" | "puerta";
     // v1.10-offline: explícito para las operaciones de turno
     // (shift-open/cash-count). Para tickets se auto-deduce del
     // body.shiftId vía el lookup registrado — CheckoutPage no cambia.
@@ -469,8 +495,12 @@ async function onShiftResolved(
 async function sendItem(
   item: OutboxItem,
 ): Promise<{ resolvedShiftLocalId?: string } | void> {
+  // residencia-3 · el único sitio donde el outbox mira `auth`. Un `if` aquí
+  // y no un parámetro en cada llamada: los items ya persistidos no lo
+  // llevan y tienen que seguir saliendo por el camino de siempre.
+  const enviar = item.auth === "puerta" ? apiConPuerta : apiWithCashier;
   try {
-    const response = await apiWithCashier<unknown>(item.path, {
+    const response = await enviar<unknown>(item.path, {
       method: item.method ?? "POST",
       body: item.body,
     });
