@@ -1,0 +1,27 @@
+-- residencia-5 (D-67) · **EL VALOR `HANDOVER` DEL ENUM, Y NADA MÁS.**
+--
+-- La tablet de la sala es un `DeviceKind` nuevo, y Postgres **prohíbe
+-- usar un valor de enum en la misma transacción en la que se añade**
+-- (`unsafe use of new value of enum type`). `HANDOVER` hace falta escrito
+-- dentro de los CHECK `devices_register_o_habitacion` y
+-- `pairing_codes_register_o_habitacion` de la migración siguiente, así
+-- que esta migración existe sólo para añadirlo y acabar.
+--
+-- Es la **tercera vez** que se paga esta factura en este repo —
+-- `clinica_4_consentimientos` partió por `ClientConsentKind`,
+-- `residencia_3_tipos` por el consentimiento de imagen y
+-- `residencia_4_tipos` por `GUARD`— y se paga de entrada, con un test que
+-- lo fija (`residencia-5-migracion.test.ts`), para que nadie junte las
+-- dos migraciones «porque son pequeñas».
+--
+-- ── EL `down` ───────────────────────────────────────────────────────
+--
+-- **No hay.** Postgres no sabe quitar un valor de un enum sin recrear el
+-- tipo y todo lo que lo usa (`devices.kind`, `pairing_codes.kind`), y un
+-- valor de enum que nadie usa no molesta a nadie. Es exactamente lo que
+-- `residencia_4_tipos` dejó dicho de `GUARD`.
+--
+-- `IF NOT EXISTS` por lo mismo que allí: una base que ya lo tenga —de un
+-- despliegue a medias— no debe hacer fallar el deploy.
+
+ALTER TYPE "DeviceKind" ADD VALUE IF NOT EXISTS 'HANDOVER';
