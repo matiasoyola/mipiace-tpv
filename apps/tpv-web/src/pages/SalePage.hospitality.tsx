@@ -484,7 +484,9 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
           un producto obligaba a bajar a la rejilla y volver a subir para
           ver el total — y la barra inferior con el total siempre a la
           vista es lo que v1.0-handheld puso ahí para evitarlo. */}
-      {!handheld && <Comanda {...props} sent={sent} pending={pending} />}
+      {!handheld && (
+        <Comanda {...props} sent={sent} pending={pending} deMano={handheld} />
+      )}
 
       {/* ── El catálogo ─────────────────────────────────────────────── */}
       <div className="flex-grow min-w-0 flex flex-col p-4 gap-3.5 box-border min-h-0">
@@ -852,7 +854,13 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
                     <X className="w-4 h-4" strokeWidth={2.25} />
                   </button>
                 </div>
-                <Comanda {...props} sent={sent} pending={pending} inSheet />
+                <Comanda
+                  {...props}
+                  sent={sent}
+                  pending={pending}
+                  inSheet
+                  deMano={handheld}
+                />
               </div>
             </div>
           )}
@@ -1079,6 +1087,7 @@ function PendingLine({
   onLess,
   onMore,
   chips,
+  deMano,
 }: {
   line: CartLine;
   /**
@@ -1094,6 +1103,22 @@ function PendingLine({
   onClick: () => void;
   onLess: () => void;
   onMore: () => void;
+  /**
+   * n1-hosteleria (hallazgo 3) · ¿estamos en un aparato de mano?
+   *
+   * auditoria-sirope (#8) dejó esta línea en UNA fila y la dimensionó
+   * para los ~356 px de la COLUMNA de comanda del D8. En el N1 la
+   * comanda es una hoja de 360 px de ancho y la misma fila lleva además
+   * los `−`/`+`: medido en el navegador el 19-10, al nombre le quedaban
+   * **76 px** y el `line-clamp: 2` lo cortaba de verdad («Café con
+   * leche» pedía 81 px de alto en una caja de 53). El hallazgo 3 seguía
+   * vivo aquí, y no se veía porque la pasada midió la línea ENVIADA.
+   *
+   * En la mano la línea se parte en dos renglones, que es lo que pide el
+   * bloque: el nombre arriba con todo el ancho, y debajo `−`, cantidad,
+   * `+`, importe y chips.
+   */
+  deMano: boolean;
   /** Los chips de silla y de tiempo, bajo la fila. */
   chips?: React.ReactNode;
 }) {
@@ -1113,7 +1138,38 @@ function PendingLine({
 
           Los `−`/`+` NO se tocan: siguen a 56 px. Lo que se toca con
           prisa es la cantidad. */}
-      <div className="flex flex-nowrap items-center gap-1.5 min-h-[62px] px-2">
+      {/* n1-hosteleria (hallazgo 3) · EN LA MANO, EL NOMBRE PRIMERO Y SOLO.
+          Con todo el ancho de la hoja (≈336 px útiles) el nombre entra
+          entero en un renglón y le sobran dos; en la fila de abajo van
+          la cantidad, el importe y los chips. Ver la nota del prop
+          `deMano`. */}
+      {deMano && (
+        <button
+          type="button"
+          onClick={onClick}
+          data-testid="cart-line-name"
+          className="w-full text-left font-semibold px-2 pt-2"
+          style={{
+            fontSize: PENDING_LINE_NAME_PX,
+            color: DARK_TEXT,
+            display: "-webkit-box",
+            WebkitBoxOrient: "vertical",
+            WebkitLineClamp: 2,
+            overflow: "hidden",
+            lineHeight: 1.15,
+            wordBreak: "break-word",
+          }}
+        >
+          {line.nameSnapshot}
+        </button>
+      )}
+      <div
+        className={
+          deMano
+            ? "flex flex-nowrap items-center gap-1.5 min-h-[62px] px-2"
+            : "flex flex-nowrap items-center gap-1.5 min-h-[62px] px-2"
+        }
+      >
       {/* El rótulo accesible dice lo que el botón VA a hacer, que con
           una sola unidad no es restar sino quitar la línea (decisión
           3d). En el panel claro el `−` se deshabilita a una unidad y
@@ -1136,27 +1192,36 @@ function PendingLine({
       <StepperKey label="Sumar una unidad" onClick={onMore} glyph="+" />
       {/* El nombre abre la hoja de la línea (modificadores, descuento,
           anular). Es el mismo toque que en el panel claro. */}
-      <button
-        type="button"
-        onClick={onClick}
-        data-testid="cart-line-name"
-        className="flex-grow min-w-0 text-left font-semibold"
-        style={{
-          fontSize: PENDING_LINE_NAME_PX,
-          color: DARK_TEXT,
-          // auditoria-sirope (#8) · hasta DOS líneas. Con `truncate`, el
-          // D8 pintaba «Café con l…» y «Café Ame…»: dos cafés distintos
-          // con el mismo principio, que es el mismo fallo que #7 en la
-          // rejilla y aquí con el cliente delante.
-          display: "-webkit-box",
-          WebkitBoxOrient: "vertical",
-          WebkitLineClamp: 2,
-          overflow: "hidden",
-          lineHeight: 1.15,
-        }}
-      >
-        {line.nameSnapshot}
-      </button>
+      {/* En el TERMINAL el nombre sigue en la fila, como lo dejó
+          auditoria-sirope (#8): ahí la columna de comanda mide ~356 px y
+          el nombre tiene sus dos líneas enteras. En la mano ya se ha
+          pintado arriba, y aquí sólo queda un relleno que empuja el
+          importe a la derecha. */}
+      {deMano ? (
+        <span className="flex-grow min-w-0" />
+      ) : (
+        <button
+          type="button"
+          onClick={onClick}
+          data-testid="cart-line-name"
+          className="flex-grow min-w-0 text-left font-semibold"
+          style={{
+            fontSize: PENDING_LINE_NAME_PX,
+            color: DARK_TEXT,
+            // auditoria-sirope (#8) · hasta DOS líneas. Con `truncate`, el
+            // D8 pintaba «Café con l…» y «Café Ame…»: dos cafés distintos
+            // con el mismo principio, que es el mismo fallo que #7 en la
+            // rejilla y aquí con el cliente delante.
+            display: "-webkit-box",
+            WebkitBoxOrient: "vertical",
+            WebkitLineClamp: 2,
+            overflow: "hidden",
+            lineHeight: 1.15,
+          }}
+        >
+          {line.nameSnapshot}
+        </button>
+      )}
       {/* auditoria-sirope (#8) · EL IMPORTE Y LOS CHIPS, EN COLUMNA.
           En los ~356 px útiles de la comanda, poner el importe y el
           chip «Espera» uno al lado del otro dejaba al nombre 55 px y
@@ -1227,6 +1292,7 @@ function Comanda({
   sent,
   pending,
   inSheet = false,
+  deMano = false,
   ...props
 }: HospitalityWorkspaceProps & {
   // kds-1-cocina · trozos y no líneas: una línea puede estar en los dos
@@ -1235,6 +1301,14 @@ function Comanda({
   pending: Array<{ line: CartLine; units: number }>;
   /** `true` dentro del bottom-sheet de handheld. */
   inSheet?: boolean;
+  /**
+   * n1-hosteleria · el umbral único del bloque, hilado hasta la
+   * línea. No se deduce de `inSheet`: la hoja es la PRESENTACIÓN de
+   * la comanda en la mano, y mezclar las dos cosas haría que el día
+   * que la hoja se use en otro sitio el reparto de la línea cambiara
+   * sin que nadie lo pidiera.
+   */
+  deMano?: boolean;
 }) {
   // auditoria-sirope (#12) · ver la nota del workspace: sin destino, el
   // TPV no habla de cocina.
@@ -1414,6 +1488,7 @@ function Comanda({
                 )}
                 {pending.map(({ line: l, units }) => (
                   <PendingLine
+                    deMano={deMano}
                     key={`pend-${l.id}`}
                     line={l}
                     units={units}
