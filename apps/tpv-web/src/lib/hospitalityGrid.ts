@@ -347,3 +347,129 @@ export function familyCapacity(
     maxGridColumns(gridWidth(viewportWidth))
   );
 }
+
+// ── auditoria-sirope (#6 + #7) · QUE EL NOMBRE QUEPA ENTERO ──────────
+//
+// El 18-10 pasaron las dos cosas a la vez en Sirope:
+//
+//   · «Croissantysandwich» se salía del botón de familia, que no tenía
+//     ni relleno lateral ni recorte (captura 00);
+//   · dos desayunos distintos pintaban EXACTAMENTE el mismo texto —
+//     «Desayuno 1 · Café + Tostada…»— porque el `line-clamp-2` cortaba
+//     justo donde empieza lo que los diferencia: «… mantequilla y
+//     mermelada» contra «… (Sin glúten)» (captura 24). Dos botones
+//     iguales, dos precios distintos.
+//
+// La salida no es recortar mejor: es que el nombre quepa. El tamaño baja
+// por peldaños hasta que entra, con un SUELO de 15 px —por debajo de ahí
+// no se lee a un metro y con prisa, que es como se usa esta pantalla— y
+// un techo de tres líneas.
+//
+// ── Por qué una estimación y no una medida ───────────────────────────
+//
+// Medir de verdad exige el DOM (`measureText` o un `ResizeObserver` por
+// botón), y esto corre para cada producto en cada repintado de la
+// rejilla. La estimación usa el ancho medio de glifo de la familia que
+// usa el TPV, por lo alto: si se queda corta, el botón baja un peldaño
+// de más y se lee igual. Lo que no puede pasar —y es lo que esto
+// impide— es que el nombre se corte.
+
+/** El suelo del nombre de producto. Por debajo no se lee con prisa. */
+export const PRODUCT_NAME_FLOOR_PX = 15;
+/** Hasta tres líneas; a partir de ahí, el botón baja de tamaño. */
+export const PRODUCT_NAME_MAX_LINES = 3;
+/** Los peldaños, de mayor a menor. */
+const PELDANOS_NOMBRE = [24, 22, 20, 18, 16, 15] as const;
+/**
+ * Ancho medio de glifo como fracción del tamaño de letra, para una sans
+ * semibold. Medido a ojo por lo ALTO (0,55): quedarse corto baja un
+ * peldaño de más; pasarse corta el nombre, que es el fallo.
+ */
+const ANCHO_GLIFO = 0.55;
+
+/** Cuántos caracteres caben en una línea de `anchoPx` a `sizePx`. */
+function caracteresPorLinea(anchoPx: number, sizePx: number): number {
+  return Math.max(1, Math.floor(anchoPx / (sizePx * ANCHO_GLIFO)));
+}
+
+/**
+ * ¿Cabe `texto` en `lineas` líneas de `anchoPx` a `sizePx`?
+ *
+ * Reparte por palabras, como hace el navegador: una palabra que no cabe
+ * entera en una línea no cabe en ningún sitio, y eso es exactamente lo
+ * que le pasaba a «Croissantysandwich».
+ */
+export function cabeEnLineas(
+  texto: string,
+  anchoPx: number,
+  sizePx: number,
+  lineas: number,
+): boolean {
+  const porLinea = caracteresPorLinea(anchoPx, sizePx);
+  let usadas = 1;
+  let actual = 0;
+  for (const palabra of texto.trim().split(/\s+/)) {
+    if (palabra.length > porLinea) return false;
+    const necesita = actual === 0 ? palabra.length : actual + 1 + palabra.length;
+    if (necesita <= porLinea) {
+      actual = necesita;
+      continue;
+    }
+    usadas += 1;
+    if (usadas > lineas) return false;
+    actual = palabra.length;
+  }
+  return usadas <= lineas;
+}
+
+/**
+ * El tamaño con el que `nombre` cabe entero en un botón de `anchoPx`.
+ *
+ * `anchoPx` es el ancho ÚTIL (sin el relleno lateral y sin el hueco de
+ * la insignia `×N`): lo descuenta quien llama, que es quien lo sabe.
+ */
+export function tamanoNombreProducto(
+  nombre: string,
+  anchoPx: number,
+  maxLineas: number = PRODUCT_NAME_MAX_LINES,
+  techoPx: number = PRODUCT_NAME_PX,
+): number {
+  // El techo es el primer candidato aunque no sea un peldaño: lo pone
+  // quien llama (la rejilla con su ancho, la barra de familias con el
+  // suyo) y un rótulo que cabe a su tamaño no tiene por qué encoger.
+  const peldanos = [techoPx, ...PELDANOS_NOMBRE.filter((p) => p < techoPx)];
+  for (const px of peldanos) {
+    if (cabeEnLineas(nombre, anchoPx, px, maxLineas)) return px;
+  }
+  // Ni al suelo cabe. Se devuelve el suelo igualmente: el botón se lee,
+  // y el nombre se corta —que es el caso que el catálogo tiene que
+  // arreglar, no la rejilla—. Lo canta `nombresQueColisionan`.
+  return PRODUCT_NAME_FLOOR_PX;
+}
+
+/**
+ * auditoria-sirope (#7) · los nombres que, con el tamaño que les toca,
+ * se pintarían IGUAL en la rejilla.
+ *
+ * Es la red del hallazgo: dos botones distintos con el mismo texto
+ * visible son dos botones que el camarero no puede distinguir, y en
+ * Sirope eran dos desayunos de precio distinto. Devuelve los pares.
+ */
+export function nombresQueColisionan(
+  nombres: readonly string[],
+  anchoPx: number,
+  maxLineas: number = PRODUCT_NAME_MAX_LINES,
+): Array<[string, string]> {
+  const vistos = new Map<string, string>();
+  const choques: Array<[string, string]> = [];
+  for (const nombre of nombres) {
+    const px = tamanoNombreProducto(nombre, anchoPx, maxLineas);
+    const porLinea = caracteresPorLinea(anchoPx, px);
+    // Lo que se vería si el navegador cortara al límite de las líneas.
+    const visible = nombre.slice(0, porLinea * maxLineas);
+    const otro = vistos.get(visible);
+    if (otro != null && otro !== nombre) choques.push([otro, nombre]);
+    else vistos.set(visible, nombre);
+  }
+  return choques;
+}

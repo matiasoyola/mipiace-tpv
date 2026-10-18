@@ -57,6 +57,7 @@ import {
   FAMILY_BAR_COLUMNS_HANDHELD,
   GRID_GAP,
   PRODUCT_COLUMNS_HANDHELD,
+  tamanoNombreProducto,
 } from "../lib/hospitalityGrid.js";
 import {
   CORAL,
@@ -397,6 +398,24 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
   // TPV no habla de cocina: la lista es el PEDIDO y no hay nada que
   // enviar.
   const mandaACocina = props.kitchen.hayDondeMandar ?? props.kitchen.enabled;
+  // auditoria-sirope (#6) · el ancho ÚTIL de un botón de familia.
+  //
+  // La barra reparte su ancho entre sus columnas; el botón no se mide a
+  // sí mismo (no hay observador por botón, y sería caro para una fila
+  // que se repinta en cada toque). Se estima del ancho de la ventana
+  // menos la comanda, que es el lienzo que esta barra ocupa, y se
+  // descuentan los huecos y el relleno de 10 + 10. Va por lo BAJO: si se
+  // queda corto, el rótulo baja un peldaño de más y se lee igual.
+  const anchoUtilFamilia = useMemo(() => {
+    const columnas = handheld
+      ? FAMILY_BAR_COLUMNS_HANDHELD
+      : FAMILY_BAR_COLUMNS;
+    const lienzo =
+      (typeof window === "undefined" ? 1442 : window.innerWidth) -
+      (handheld ? 24 : ORDER_PANEL_WIDTH + 48);
+    const hueco = 8 * (columnas - 1);
+    return Math.max(48, Math.floor((lienzo - hueco) / columnas) - 20);
+  }, [handheld]);
 
   return (
     <div
@@ -444,6 +463,7 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
             label="Ahora"
             active={view.kind === "ahora"}
             special
+            anchoUtilPx={anchoUtilFamilia}
             onClick={() => setView({ kind: "ahora" })}
           />
           {props.families.map((tag) => (
@@ -452,6 +472,7 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
               label={props.familyLabels[tag] ?? tag}
               fill={familyFillFor(tag, props.familyTones)}
               active={view.kind === "family" && view.tag === tag}
+              anchoUtilPx={anchoUtilFamilia}
               onClick={() => setView({ kind: "family", tag })}
             />
           ))}
@@ -587,6 +608,7 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
               product={p}
               fill={familyFillFor(props.familyOf(p), props.familyTones)}
               nameSizePx={shape.nameSizePx}
+              cardWidth={shape.cardWidth}
               units={unitsByProduct.get(p.id) ?? 0}
               onClick={() => {
                 props.onClickProduct(p, qty);
@@ -760,6 +782,7 @@ function FamilyButton({
   fill,
   active,
   special,
+  anchoUtilPx,
   onClick,
 }: {
   label: string;
@@ -767,6 +790,9 @@ function FamilyButton({
   active: boolean;
   /** «Ahora» es la vista especial y la única que lleva el claro/coral. */
   special?: boolean;
+  /** auditoria-sirope (#6) · el ancho útil del botón, para ajustar el
+   *  rótulo. Lo calcula la barra, que es quien conoce sus columnas. */
+  anchoUtilPx: number;
   onClick: () => void;
 }) {
   // El aro se pinta con dos sombras: la primera del color del fondo
@@ -783,16 +809,37 @@ function FamilyButton({
       aria-pressed={active}
       data-testid="family-button"
       data-active={active ? "true" : "false"}
-      className={`border-0 rounded-[14px] font-semibold cursor-pointer ${PRESS_FEEDBACK_CLASS}`}
+      // auditoria-sirope (#6) · relleno, recorte y dos líneas.
+      // «Croissantysandwich» se salía del botón: no había ni relleno
+      // lateral ni `overflow`, así que la palabra se pintaba por encima
+      // del borde y encima del botón de al lado.
+      className={`border-0 rounded-[14px] font-semibold cursor-pointer overflow-hidden flex items-center justify-center px-2.5 ${PRESS_FEEDBACK_CLASS}`}
       style={{
         height: FAMILY_BUTTON_PX,
-        fontSize: FAMILY_LABEL_PX,
         background: special ? DARK_TEXT : fill,
         color: special ? DARK_CANVAS : FAMILY_TEXT,
         boxShadow: ring,
       }}
     >
-      {label}
+      <span
+        data-testid="family-label"
+        className="text-center"
+        style={{
+          // El tamaño baja por peldaños hasta que el rótulo cabe en dos
+          // líneas dentro del ancho del botón. El ancho se estima con el
+          // de la barra —seis columnas en el terminal— porque el botón
+          // no se mide a sí mismo; la estimación va por lo alto.
+          fontSize: tamanoNombreProducto(label, anchoUtilPx, 2, FAMILY_LABEL_PX),
+          lineHeight: 1.1,
+          display: "-webkit-box",
+          WebkitBoxOrient: "vertical",
+          WebkitLineClamp: 2,
+          overflow: "hidden",
+          wordBreak: "break-word",
+        }}
+      >
+        {label}
+      </span>
     </button>
   );
 }
@@ -809,53 +856,78 @@ function ProductButton({
   product,
   fill,
   nameSizePx,
+  cardWidth,
   units,
   onClick,
 }: {
   product: CatalogProduct;
   fill: string;
+  /** El techo que marca la rejilla por lo ancho que acabó el botón. */
   nameSizePx: number;
+  /** auditoria-sirope (#7) · para ajustar el nombre de ESTE botón. */
+  cardWidth: number;
   units: number;
   onClick: () => void;
 }) {
+  // auditoria-sirope (#7) · el tamaño lo decide EL NOMBRE, no sólo la
+  // rejilla. El 18-10 dos desayunos distintos pintaban el mismo texto
+  // porque el `line-clamp-2` cortaba justo donde se diferenciaban.
+  //
+  // El ancho útil descuenta el relleno (16 + 16). La insignia `×N` ya no
+  // se descuenta: desde #5 va en una esquina, superpuesta, y no le quita
+  // sitio al nombre — que es lo que hacía que el mismo producto se
+  // leyera distinto según estuviera o no en la comanda.
+  const anchoUtil = Math.max(40, cardWidth - 32);
+  const sizePx = tamanoNombreProducto(product.name, anchoUtil, 3, nameSizePx);
   return (
     <button
       type="button"
       onClick={onClick}
       data-testid="product-button"
       data-product-id={product.id}
-      className={`relative border-0 rounded-xl box-border flex items-center justify-between gap-2.5 text-left cursor-pointer overflow-hidden ${PRESS_FEEDBACK_CLASS}`}
+      // auditoria-sirope (#5) · el nombre CENTRADO, horizontal y
+      // vertical. Estaba a la izquierda mientras las familias iban
+      // centradas, así que la rejilla se leía en dos ejes distintos.
+      className={`relative border-0 rounded-xl box-border flex items-center justify-center cursor-pointer overflow-hidden ${PRESS_FEEDBACK_CLASS}`}
       style={{
         padding: "0 16px",
         background: fill,
         color: FAMILY_TEXT,
       }}
     >
-      {/* Dos líneas como máximo y elipsis. El «nombre corto de botón»
-          editable es v2-H2 (lleva migración); aquí el botón usa el
-          nombre actual del catálogo. */}
       <span
         data-testid="product-name"
-        className="line-clamp-2 font-semibold"
+        className="font-semibold text-center"
         style={{
-          fontSize: nameSizePx,
+          fontSize: sizePx,
           lineHeight: 1.1,
           letterSpacing: "-0.01em",
+          // El techo de tres líneas, como red: si el catálogo trae un
+          // nombre imposible, el botón se recorta en vez de desbordar.
+          display: "-webkit-box",
+          WebkitBoxOrient: "vertical",
+          WebkitLineClamp: 3,
+          overflow: "hidden",
         }}
       >
         {product.name}
       </span>
       {units > 0 && (
+        // auditoria-sirope (#5) · la insignia pasa a la ESQUINA. Antes
+        // era un hermano del nombre en un `justify-between`, así que
+        // aparecer desplazaba el texto del botón: el mismo producto se
+        // leía en un sitio con la comanda vacía y en otro con dos
+        // unidades dentro.
         <span
           data-testid="product-units"
-          className="shrink-0 box-border rounded-[10px] flex items-center justify-center font-semibold tabular-nums"
+          className="absolute top-1.5 right-1.5 box-border rounded-[10px] flex items-center justify-center font-semibold tabular-nums"
           style={{
-            minWidth: 40,
-            height: 40,
-            padding: "0 8px",
+            minWidth: 34,
+            height: 30,
+            padding: "0 7px",
             background: DARK_QTY_BADGE,
             color: DARK_ON_CORAL,
-            fontSize: 20,
+            fontSize: 17,
           }}
         >
           ×{units}
