@@ -91,6 +91,8 @@ import { CobrosPendientes } from "../clinica/CobrosPendientes.js";
 import { HistoriaViva } from "../clinica/HistoriaViva.js";
 import { SesionPodologia } from "../clinica/SesionPodologia.js";
 import { ValoracionSanitario } from "../clinica/ValoracionSanitario.js";
+// B-reservas-8 · el bono que se ofrece al dar la cita.
+import { BonoDeLaCita } from "./AgendaPage.bono.js";
 import { AgendaHealthPanel } from "./AgendaHealthPanel.js";
 import { AgendaSkillMatrix } from "./AgendaSkillMatrix.js";
 
@@ -284,6 +286,11 @@ interface DraftBooking {
   serviceIds: string[]; // servicios encadenados en orden
   staffUserId: string | null; // fijado en slot-first
   start: string | null; // ISO; null hasta elegir hueco
+  // B-reservas-8 · el BONO del que se apartará una sesión al guardar.
+  // `null` = cita normal. Lo elige (o lo suelta) `<BonoDeLaCita>`, y el
+  // servidor lo aparta DENTRO de la transacción de la cita: o las dos o
+  // ninguna.
+  voucherId?: string | null;
 }
 
 export interface AgendaPageProps {
@@ -328,6 +335,12 @@ export interface AgendaPageProps {
   // gana es no pintarle a la recepcionista un botón que siempre le va a
   // fallar y que le dejaría una línea DENIED por cada toque de curiosidad.
   esSanitario?: boolean;
+  /**
+   * B-reservas-8 · LA PALABRA que usa este centro para los bonos. En el
+   * código son `Voucher`; de cara al mostrador el spa dirá «programa» y la
+   * clínica «bono». Ausente → «bono», el default de la columna.
+   */
+  bonoEtiqueta?: string;
   onEnterDraft?: (entry: {
     appointmentId: string;
     ticketId: string;
@@ -344,6 +357,9 @@ export function AgendaPage({
   staffFilterInicial,
   puedeCobrar = true,
   esSanitario = false,
+  // B-reservas-8 · «bono» es el default de la columna: un centro que no
+  // lo toque lee lo de siempre.
+  bonoEtiqueta = "bono",
 }: AgendaPageProps) {
   const [date, setDate] = useState<string>(todayLocalDate());
   const [day, setDay] = useState<AgendaDay | null>(null);
@@ -724,6 +740,8 @@ export function AgendaPage({
       })),
       start: draft.start,
       source: "PRESENCIAL",
+      // B-reservas-8 · `null` en toda cita normal, que es casi todas.
+      voucherId: draft.voucherId ?? null,
       // Sólo para pintarla en su hueco mientras está encolada: el schema
       // del alta no acepta este campo y el outbox no lo envía.
       durationMin: draft.serviceIds.reduce(
@@ -1368,6 +1386,7 @@ export function AgendaPage({
             }}
             onReserve={() => doCreate(false)}
             onReserveAndCharge={() => doCreate(true)}
+            bonoEtiqueta={bonoEtiqueta}
           />
         )}
         {/* Detalle de cita */}
@@ -2216,6 +2235,8 @@ function BookingPanel(props: {
   onCancel: () => void;
   onReserve: () => void;
   onReserveAndCharge: () => void;
+  /** B-reservas-8 · la palabra del centro para los bonos. */
+  bonoEtiqueta: string;
 }) {
   const { draft, setDraft, services, date, isPastDay, bookError, dayInfo } =
     props;
@@ -2552,6 +2573,17 @@ function BookingPanel(props: {
             debajo de las acciones primarias y la barra pegajosa le tapaba
             justo las alternativas — un error con salida cuya salida no se
             puede tocar es medio error otra vez. */}
+        {/* B-reservas-8 · EL BONO. Va después del cliente y de los
+            servicios porque depende de los dos: sin ficha no hay bono que
+            buscar, y sin servicios no se sabe qué tiene que cubrir. */}
+        <BonoDeLaCita
+          clientId={draft.clientId}
+          serviceIds={draft.serviceIds}
+          elegido={draft.voucherId ?? null}
+          onElegir={(voucherId) => setDraft({ ...draft, voucherId })}
+          etiqueta={props.bonoEtiqueta}
+        />
+
         {bookError && (
           <div
             ref={errorRef}

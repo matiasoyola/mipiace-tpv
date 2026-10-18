@@ -390,6 +390,12 @@ export interface CreateAppointmentInput {
   // acepta): viaja en el item del outbox para poder pintar la cita
   // encolada con su alto real mientras el servidor no la ha visto.
   durationMin?: number;
+  // B-reservas-8 · el BONO del que se aparta una sesión al dar la cita.
+  // `null` = cita normal. **Sí se envía**: está declarado en el schema de
+  // la ruta, porque si no el `removeAdditional` de Fastify lo borraría
+  // antes de que nadie lo viera (el fallo que pagaron el checkout de
+  // borrador en B-5 y `occurredAt` en 6a).
+  voucherId?: string | null;
 }
 
 export type CreateAppointmentResult =
@@ -410,6 +416,9 @@ export async function createAppointment(
     start: input.start,
     source: input.source ?? "PRESENCIAL",
     notes: input.notes ?? null,
+    // B-reservas-8 · sólo cuando lo hay: mandar `voucherId: null` en cada
+    // alta de cada peluquería no aporta nada y engorda el item del outbox.
+    ...(input.voucherId ? { voucherId: input.voucherId } : {}),
   };
   try {
     const res = await apiWithCashier<{ appointment: AgendaAppointment }>(

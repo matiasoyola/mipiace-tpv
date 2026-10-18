@@ -37,6 +37,8 @@ import {
   type EncargoDeValoracion,
 } from "../clinica/valoracion-por-cita.js";
 import { sqlStateOf } from "../lib/sqlstate.js";
+import { apartar, type MotivoNoApartar } from "../vouchers/gate.js";
+import { citaLegible, serviciosACubrir } from "../vouchers/servicios.js";
 import {
   resolveCenterSchedule,
   type CenterDayRow,
@@ -45,6 +47,7 @@ import {
 import {
   wallTimeToUtc,
   utcToWallDate,
+  utcToWallTime,
 } from "./time.js";
 import type {
   AppointmentStatus,
@@ -279,6 +282,25 @@ async function persistirAssignments(
   });
 }
 
+/**
+ * B-reservas-8 · «esta cita no puede nacer como cita de bono».
+ *
+ * Se LANZA, y lanzar es la decisión: así la transacción de la cita se va
+ * atrás entera y no queda ni la cita ni nada apartado. El prompt lo pide
+ * así —«no quedan sesiones libres → la cita no nace como cita de bono»— y
+ * la alternativa (crear la cita sin bono y avisar) habría dado una cita
+ * que la clienta cree pagada con su bono y no lo está.
+ *
+ * El cajero puede dar la cita NORMAL repitiendo el alta sin `voucherId`,
+ * que es lo que ofrece el TPV con el mensaje de este motivo.
+ */
+export class BonoNoDisponibleError extends Error {
+  constructor(readonly motivo: MotivoNoApartar) {
+    super(`el bono no se pudo apartar: ${motivo}`);
+    this.name = "BonoNoDisponibleError";
+  }
+}
+
 export interface HoldInput {
   tenantId: string;
   externalId: string | null;
@@ -292,6 +314,25 @@ export interface HoldInput {
   items: PlannedItem[];
   // assignments referencian el item por índice en `items` (o null = visit).
   assignments: PlannedAssignment[];
+  // B-reservas-8 · EL BONO del que se aparta una sesión al dar esta cita.
+  // `null` = cita normal, y entonces nada de este bloque corre.
+  //
+  // El apartado va DENTRO de la transacción de la cita: **o las dos o
+  // ninguna**. Si el EXCLUDE del anti-solape rechaza el hueco, no queda
+  // ninguna sesión apartada; si no quedan sesiones libres, la cita no nace.
+  //
+  // OPCIONAL, al contrario que `facturaDesde` en `TenantFiscalMode` —y la
+  // diferencia es la dirección del fallo. Allí olvidar la columna hacía que
+  // un comercio que factura pareciera estar en ensayo: el lado PELIGROSO.
+  // Aquí olvidarlo da una cita normal, que es exactamente lo que hacían los
+  // nueve llamantes de antes de este bloque y lo que seguirán haciendo.
+  voucherId?: string | null;
+  // Quién está dando la cita, para la línea del libro. `canal` distingue el
+  // mostrador del panel, y `userId` nulo con `actor` es lo que usará la
+  // reserva online cuando exista.
+  voucherCanal?: "tpv" | "panel" | "web";
+  voucherUserId?: string | null;
+  voucherActor?: string | null;
 }
 
 export interface AgendaStore {
@@ -685,6 +726,45 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
             appointmentId: apptId,
             serviceIds: input.items.map((it) => it.serviceId),
           });
+          // ── B-reservas-8 · EL APARTADO, aquí dentro ────────────────
+          //
+          // Va DESPUÉS de la cita y de sus assignments a propósito: los
+          // assignments son los que disparan el EXCLUDE del anti-solape,
+          // y si el hueco se ha perdido queremos que la transacción se
+          // caiga ANTES de haber tocado el saldo de nadie. (Da igual para
+          // la corrección —la transacción es atómica— pero no da igual
+          // para la carga: no se bloquea la fila de un bono para luego
+          // soltarla.)
+          //
+          // `null` en toda cita normal, y entonces esto no cuesta ni una
+          // consulta.
+          if (input.voucherId) {
+            const servicios = await serviciosACubrir(
+              tx,
+              input.tenantId,
+              input.items.map((it) => it.serviceId),
+            );
+            const cuando = citaLegible(
+              utcToWallDate(input.timeslotStart),
+              utcToWallTime(input.timeslotStart),
+            );
+            const res = await apartar(tx, {
+              tenantId: input.tenantId,
+              voucherId: input.voucherId,
+              appointmentId: apptId,
+              clientId: input.clientId,
+              servicios,
+              detalle: `Apartada para ${cuando}.`,
+              canal: input.voucherCanal ?? "tpv",
+              userId: input.voucherUserId ?? null,
+              actor:
+                input.voucherUserId == null
+                  ? (input.voucherActor ?? "Web")
+                  : null,
+              ahora: new Date(),
+            });
+            if (!res.ok) throw new BonoNoDisponibleError(res.motivo);
+          }
         }),
       );
       // Fuera de la transacción, y no lanza nunca: la cita ya está dada.
@@ -717,10 +797,13 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
           ticket_id: string | null;
           notes: string | null;
           notes_cifradas: string | null;
+          // B-reservas-8 · el bono con una sesión apartada para esta cita.
+          voucher_id: string | null;
         }>
       >(
         `SELECT id, client_id, status, source, lower(timeslot) AS starts_at,
-                upper(timeslot) AS ends_at, ticket_id, notes, notes_cifradas
+                upper(timeslot) AS ends_at, ticket_id, notes, notes_cifradas,
+                voucher_id
          FROM appointments WHERE tenant_id = $1::uuid AND id = $2::uuid`,
         tenantId,
         id,
@@ -742,10 +825,13 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
           ticket_id: string | null;
           notes: string | null;
           notes_cifradas: string | null;
+          // B-reservas-8 · el bono con una sesión apartada para esta cita.
+          voucher_id: string | null;
         }>
       >(
         `SELECT id, client_id, status, source, lower(timeslot) AS starts_at,
-                upper(timeslot) AS ends_at, ticket_id, notes, notes_cifradas
+                upper(timeslot) AS ends_at, ticket_id, notes, notes_cifradas,
+                voucher_id
          FROM appointments
          WHERE tenant_id = $1::uuid
            AND status <> 'CANCELLED'
@@ -878,10 +964,13 @@ export function createAgendaStore(prisma: PrismaClient): AgendaStore {
           ticket_id: string | null;
           notes: string | null;
           notes_cifradas: string | null;
+          // B-reservas-8 · el bono con una sesión apartada para esta cita.
+          voucher_id: string | null;
         }>
       >(
         `SELECT id, client_id, status, source, lower(timeslot) AS starts_at,
-                upper(timeslot) AS ends_at, ticket_id, notes, notes_cifradas
+                upper(timeslot) AS ends_at, ticket_id, notes, notes_cifradas,
+                voucher_id
          FROM appointments
          WHERE tenant_id = $1::uuid AND client_id = $2::uuid
          ORDER BY lower(timeslot) DESC LIMIT 200`,
@@ -949,6 +1038,7 @@ async function hydrateView(
     ticket_id: string | null;
     notes: string | null;
     notes_cifradas: string | null;
+    voucher_id: string | null;
   },
 ): Promise<AppointmentView> {
   const [items, assignments] = await Promise.all([
@@ -976,6 +1066,7 @@ async function hydrateView(
     start: row.starts_at.toISOString(),
     end: row.ends_at.toISOString(),
     ticketId: row.ticket_id,
+    voucherId: row.voucher_id,
     notes: leerNota(
       {
         tenantId,

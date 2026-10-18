@@ -30,6 +30,12 @@ export interface DeviceMeResponse {
     // caché de un device bootstrapeado antes del bloque → se trata como
     // false, que es el default de la columna.
     kitchenDisplayEnabled?: boolean;
+    // B-reservas-8 · la capability de los bonos y LA PALABRA del centro
+    // («bono» por defecto; el spa dirá «programa»). Ausentes en la caché
+    // de un device bootstrapeado antes del bloque → apagado y «bono», que
+    // son los defaults de las columnas.
+    bonosEnabled?: boolean;
+    bonoEtiqueta?: string;
   };
   // kds-1-cocina · los ajustes de cocina de ESTA tienda, o `null` con el
   // módulo apagado. El TPV los necesita al arrancar para saber si pinta

@@ -667,6 +667,13 @@ export interface ResultadoEliminacion {
  *      Arrastran arqueos e informes Z.
  *   5. `time_entries` y `employees` — el registro de jornada.
  *   6. `public_links` — FK RESTRICT al tenant.
+ *   6b. `voucher_movements` y `vouchers` — B-reservas-8. `Voucher.client` es
+ *      **RESTRICT** (una ficha con un bono vivo no se borra), así que si los
+ *      bonos se quedaran para la cascada del paso 7 chocarían con el borrado
+ *      de `clients`, y el orden entre dos cascadas hermanas no está
+ *      garantizado. El libro va primero porque es de SOLO INSERCIÓN: pasa
+ *      por su append-only con la marca de transacción, igual que
+ *      `fiscal_records`.
  *   7. `DELETE FROM tenants` — y la cascada se lleva el resto: catálogo,
  *      tiendas, cajas, terminales, cajeros, contactos, clientes, agenda,
  *      cocina, sala.
@@ -720,6 +727,9 @@ export async function eliminarLaCuenta(params: {
     const fichajes = await tx.timeEntry.deleteMany({ where: { tenantId } });
     const empleados = await tx.employee.deleteMany({ where: { tenantId } });
     const enlacesPublicos = await tx.publicLink.deleteMany({ where: { tenantId } });
+    // B-reservas-8 · ver el paso 6b de la cabecera.
+    await tx.voucherMovement.deleteMany({ where: { tenantId } });
+    await tx.voucher.deleteMany({ where: { tenantId } });
 
     await tx.tenant.delete({ where: { id: tenantId } });
 

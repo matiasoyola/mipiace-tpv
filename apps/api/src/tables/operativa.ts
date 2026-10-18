@@ -40,6 +40,13 @@ import {
 } from "../tickets/totals.js";
 import { voidDraftTicket } from "./void-draft.js";
 import { ensureCajaEnabled } from "../lib/caja-gate.js";
+// B-reservas-8 · el candado de primer uso de la numeración de bonos.
+import {
+  candadoPuesto,
+  CANDADO_ERROR,
+  CANDADO_MENSAJE,
+} from "../vouchers/numero.js";
+import { plantillasDeLosProductos } from "../vouchers/venta.js";
 
 const UUID_V4 =
   "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$";
@@ -174,6 +181,48 @@ export async function registerTableOperativaRoutes(
       const prisma = getPrisma();
       const ctx = await ensureTableContext(prisma, cashier, tableId);
       if ("error" in ctx) return reply.code(ctx.status).send(ctx.error);
+
+      // ── B-reservas-8 · EL CANDADO SE CIERRA AQUÍ ────────────────────
+      //
+      // Un bono no se puede ni AÑADIR al ticket mientras el centro no haya
+      // confirmado por qué número empieza su talonario.
+      //
+      // Y se cierra aquí —en el alta de la línea— y no en el cobro, que es
+      // donde lo tenía la primera versión de este bloque. Cobrar un bono
+      // con el candado puesto deja a la clienta **pagada y sin bono**: el
+      // dinero entra y la deuda no queda en ningún sitio. «Cobrar siempre
+      // se puede» vale para lo que ya se vendió, no para dejar que se
+      // venda algo que no se puede entregar.
+      //
+      // En el momento de TOCAR el producto, que es cuando la cajera puede
+      // hacer algo: todavía no ha abierto el cajón ni ha dicho un precio.
+      //
+      // Y va ANTES de `getOrCreateDraftTicket`: con el candado puesto, tocar
+      // un bono no puede dejar una MESA ABIERTA con un borrador vacío. Lo
+      // vio la pasada —«tickets en la base: 1» después de un 409—, y una
+      // mesa que se abre sola es exactamente el tipo de basura que luego
+      // aparece en el arqueo.
+      //
+      // Con el módulo apagado no se mira nada: sin `bonosEnabled` no hay
+      // plantillas, así que esto no cuesta ni una consulta a los tenants
+      // que no venden bonos.
+      if (body.productId) {
+        const tenantBonos = await prisma.tenant.findUnique({
+          where: { id: cashier.tid },
+          select: { bonosEnabled: true },
+        });
+        if (tenantBonos?.bonosEnabled === true) {
+          const plantillas = await plantillasDeLosProductos(prisma, cashier.tid, [
+            body.productId,
+          ]);
+          if (plantillas.size > 0 && (await candadoPuesto(prisma, cashier.tid))) {
+            return reply
+              .code(409)
+              .send({ error: CANDADO_ERROR, code: CANDADO_ERROR, message: CANDADO_MENSAJE });
+          }
+        }
+      }
+
 
       const draft = await getOrCreateDraftTicket(prisma, ctx, cashier.sub, null);
 

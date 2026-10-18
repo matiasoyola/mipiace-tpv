@@ -113,6 +113,9 @@ export function makeFakeStore(
       start: a.start.toISOString(),
       end: a.end.toISOString(),
       ticketId: a.ticketId,
+      // B-reservas-8 · el store en memoria no simula bonos: el apartado se
+      // prueba contra Postgres real, que es donde vive el `FOR UPDATE`.
+      voucherId: null,
       notes: a.notes,
       items: a.items,
       assignments: assigns

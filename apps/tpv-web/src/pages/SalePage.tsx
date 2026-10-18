@@ -76,6 +76,7 @@ import {
   getCachedCreditSalesEnabled,
   getCachedCrmEnabled,
   getCachedAgendaEnabled,
+  getCachedBonosCandadoPuesto,
   getCachedHoldedEnabled,
   getCachedTagAliases,
   getCachedTenantId,
@@ -88,6 +89,9 @@ import {
   type Wildcard,
 } from "../lib/catalog.js";
 import { CartLineItem } from "./CartLineItem.js";
+// B-reservas-8 · el chip del bono de la línea y la frase del pie.
+import { BonoDeLaLinea, resumenDeCanjes } from "./SalePage.bono.js";
+import { propuestasDeCanje, type PropuestaDeCanje } from "../lib/bonos.js";
 import { CameraScanModal, hasCameraSupport } from "./SalePage.cameraScan.js";
 import { ContactSheet, type ContactRef } from "./SalePage.contact.js";
 import { CheckoutOverlay } from "./CheckoutPage.js";
@@ -403,6 +407,14 @@ export interface SalePageProps {
    * servidor.
    */
   kitchenDisplayEnabled?: boolean;
+  /**
+   * B-reservas-8 · LA PALABRA que usa este centro para los bonos. En el
+   * código son `Voucher`; de cara al mostrador el spa dirá «programa» y la
+   * clínica «bono», y es un ajuste por cuenta
+   * (`Tenant.bonoEtiqueta`). Ausente → «bono», que es el default de la
+   * columna: un tenant que no lo toque lee lo de siempre.
+   */
+  bonoEtiqueta?: string;
   /**
    * kds-2-wifi · el camino directo por la wifi del local.
    *
@@ -832,7 +844,44 @@ export function SalePage(props: SalePageProps) {
       `/tickets/${activeTicketId}`,
     );
     setDraftLines(mapServerDraftLines(res.ticket.lines));
+    // B-reservas-8 · y las propuestas de canje, del MISMO servidor y en el
+    // mismo viaje de vuelta. Si se recargaran por separado habría un
+    // instante en que la línea dice 0 € y el chip dice que no hay bono.
+    await recargarBonos();
   }
+
+  // ── B-reservas-8 · qué líneas se pueden pagar con un bono ───────────
+  //
+  // Lo decide el SERVIDOR: qué bonos tiene la ficha del ticket, cuáles
+  // cubren cada línea y con cuál está marcada ya. Aquí no se calcula ni
+  // una sesión — y con el módulo apagado la ruta contesta 404, que
+  // `propuestasDeCanje` traduce a «ninguna» sin enseñar ningún error.
+  const [propuestasBono, setPropuestasBono] = useState<PropuestaDeCanje[]>([]);
+  // B-reservas-8 · el «no» del candado, inline y NO un toast: la cajera
+  // tiene que poder leerlo con la clienta delante y saber qué falta.
+  const [avisoBono, setAvisoBono] = useState<string | null>(null);
+
+  const recargarBonos = useCallback(async (): Promise<void> => {
+    if (!activeTicketId) {
+      setPropuestasBono([]);
+      return;
+    }
+    try {
+      setPropuestasBono(await propuestasDeCanje(activeTicketId));
+    } catch {
+      // Un fallo aquí no puede tocar el carrito: sin propuestas, la línea
+      // se cobra normal. **Cobrar siempre se puede.**
+      setPropuestasBono([]);
+    }
+  }, [activeTicketId]);
+
+  useEffect(() => {
+    if (!isDraftMode) {
+      setPropuestasBono([]);
+      return;
+    }
+    void recargarBonos();
+  }, [isDraftMode, recargarBonos]);
 
   // Crea la línea en el DRAFT de la mesa. El id local de la CartLine
   // viaja como `lineExternalId` (idempotencia: un reintento del mismo
@@ -1600,6 +1649,24 @@ export function SalePage(props: SalePageProps) {
   // del teclado preferimos no interrumpir el flow, así que ahí se
   // llama a `pushProductLine` directo.
   function addProduct(p: CatalogProduct, units = 1): void {
+    // ── B-reservas-8 · EL CANDADO, EN EL MOMENTO DE TOCAR EL BONO ────
+    //
+    // Con la numeración sin confirmar el bono NO se puede ni añadir al
+    // ticket. Y se dice AQUÍ, no al cobrar: cobrarlo dejaría a la clienta
+    // pagada y sin bono, y decírselo con el cajón abierto es tarde.
+    //
+    // El catálogo cacheado es sólo UI —la puerta de verdad es el 409 del
+    // servidor, que está en el alta de la línea y en el cobro—, así que
+    // ante la duda se deja tocar y el servidor para: un TPV que todavía no
+    // ha refrescado no puede esconderle un bono a un centro que SÍ lo
+    // tiene confirmado.
+    if (p.esBono === true && getCachedBonosCandadoPuesto()) {
+      setAvisoBono(
+        "Antes de vender bonos, confirma en Ajustes por qué número empieza el talonario.",
+      );
+      return;
+    }
+    setAvisoBono(null);
     const groups = groupsByProduct.get(p.id);
     if (groups && groups.length > 0) {
       setSelectorState({ product: p, groups });
@@ -2922,6 +2989,12 @@ export function SalePage(props: SalePageProps) {
           </header>
 
           <HealthBanner health={health} />
+          {avisoBono && (
+            <Banner color="amber">
+              <strong>Este bono no se puede vender todavía · </strong>
+              {avisoBono}
+            </Banner>
+          )}
 
           <SaleWorkspace
             products={filtered}
@@ -2981,6 +3054,10 @@ export function SalePage(props: SalePageProps) {
             hasGroupedTables={hasGroupedTables}
             onClickGroup={() => setShowGroupPicker(true)}
             onClickUngroup={() => void tableUngroup()}
+            draftTicketId={isDraftMode ? activeTicketId : null}
+            propuestasBono={propuestasBono}
+            bonoEtiqueta={props.bonoEtiqueta ?? "bono"}
+            onBonoCambiado={reloadDraft}
           />
 
           {/* v1.0-handheld: en <1024px este footer informativo cede su
@@ -4077,7 +4154,18 @@ function SaleWorkspace({
   hasGroupedTables,
   onClickGroup,
   onClickUngroup,
+  draftTicketId,
+  propuestasBono,
+  bonoEtiqueta,
+  onBonoCambiado,
 }: {
+  // B-reservas-8 · lo del chip del bono, de arriba abajo. Vive en
+  // `SalePage` (que es quien tiene el id del borrador y recarga sus líneas)
+  // y baja por props hasta la línea.
+  draftTicketId: string | null;
+  propuestasBono: PropuestaDeCanje[];
+  bonoEtiqueta: string;
+  onBonoCambiado: () => Promise<void>;
   products: CatalogProduct[];
   // v1.9.1 · texto de búsqueda activo. `products` llega YA filtrado por
   // la búsqueda, así que sin esto el empty state no puede distinguir
@@ -4377,6 +4465,13 @@ function SaleWorkspace({
     hasGroupedTables,
     onClickGroup,
     onClickUngroup,
+    // B-reservas-8 · el chip del bono por línea. `null` fuera del contexto
+    // de borrador: una venta rápida no tiene ticket en el servidor sobre el
+    // que marcar nada.
+    draftTicketId,
+    propuestasBono,
+    bonoEtiqueta,
+    onBonoCambiado,
   };
   return (
     <div className="flex-1 grid lg:grid-cols-[1fr_360px] gap-4 lg:gap-6 p-4 md:p-7 min-h-0 [@media(min-width:1024px)_and_(min-height:700px)]:overflow-hidden">
@@ -4869,6 +4964,18 @@ interface TicketPanelProps {
   topSellers: CatalogProduct[];
   topSellersSource: "shift" | "month" | null;
   onClickProduct: (p: CatalogProduct) => void;
+  // B-reservas-8 · lo que hace falta para el chip del bono de cada línea.
+  //
+  // Los cuatro son OPCIONALES, y es la misma decisión que en `HoldInput`:
+  // sin ellos el panel se comporta EXACTAMENTE como antes de este bloque
+  // —sin chips y sin la línea del pie—, que es lo que hacen los cuatro
+  // bancos visuales que lo montan a pelo. La dirección del fallo es la
+  // correcta: olvidarlos no enseña un bono equivocado, no enseña ninguno.
+  draftTicketId?: string | null;
+  propuestasBono?: PropuestaDeCanje[];
+  /** La palabra del centro: «bono» por defecto, «programa» en el spa. */
+  bonoEtiqueta?: string;
+  onBonoCambiado?: () => Promise<void>;
 }
 
 // v1.14-la-comanda-se-ve · hallazgo C1 (crítico) de la auditoría del
@@ -4929,10 +5036,17 @@ function TicketPanel({
   topSellers,
   topSellersSource,
   onClickProduct,
+  draftTicketId = null,
+  propuestasBono = [],
+  bonoEtiqueta = "bono",
+  onBonoCambiado,
   layout = "aside",
 }: TicketPanelProps & { layout?: "aside" | "sheet" }) {
   const businessType = getCachedBusinessType();
   const [moreOpen, setMoreOpen] = useState(false);
+  // B-reservas-8 · «1 sesión de bono en este ticket», o `null`. La frase la
+  // hace el helper; aquí no se cuenta nada que no esté marcado ya.
+  const resumenDeBonos = resumenDeCanjes(propuestasBono, bonoEtiqueta);
 
   // Destaque de la línea recién tocada. `nonce` es la señal; el id dice
   // a cuál. El temporizador se reinicia en cada toque para que dos
@@ -5086,17 +5200,36 @@ function TicketPanel({
             {/* v1.2-Lite-fix1 Lote 3 (F2-UX): cada línea es un componente
                 extraído con stepper inline y papelera. El click central
                 abre el LineSheet para edición avanzada. */}
-            {lines.map((l) => (
-              <CartLineItem
-                key={l.id}
-                line={l}
-                durationMin={l.productId ? durationByProduct.get(l.productId) : undefined}
-                highlighted={highlightId === l.id}
-                onClick={() => onClickLine(l)}
-                onUnitsChange={(units) => onUpdateLineUnits(l.id, units)}
-                onRemove={() => onRemoveLine(l.id)}
-              />
-            ))}
+            {lines.map((l) => {
+              // B-reservas-8 · la propuesta de esta línea, si la hay. La
+              // línea del carrito y la del servidor comparten id en modo
+              // borrador (`mapServerDraftLines` lo conserva), que es lo que
+              // permite casarlas sin un segundo mapa.
+              const propuesta = propuestasBono.find(
+                (pr) => pr.ticketLineId === l.id,
+              );
+              return (
+                <CartLineItem
+                  key={l.id}
+                  line={l}
+                  durationMin={l.productId ? durationByProduct.get(l.productId) : undefined}
+                  highlighted={highlightId === l.id}
+                  onClick={() => onClickLine(l)}
+                  onUnitsChange={(units) => onUpdateLineUnits(l.id, units)}
+                  onRemove={() => onRemoveLine(l.id)}
+                  bono={
+                    draftTicketId && propuesta && onBonoCambiado ? (
+                      <BonoDeLaLinea
+                        ticketId={draftTicketId}
+                        propuesta={propuesta}
+                        etiqueta={bonoEtiqueta}
+                        onCambiado={onBonoCambiado}
+                      />
+                    ) : undefined
+                  }
+                />
+              );
+            })}
           </div>
           {/* v1.14.1-el-catalogo-manda · §3. El desierto del desglose.
               Con una línea quedaban ~220 px vacíos y el panel no parecía
@@ -5159,6 +5292,19 @@ function TicketPanel({
             <span className="text-mipiace-coral tabular-nums font-medium">
               −{formatEur(totals.discount)}
             </span>
+          </div>
+        )}
+        {/* B-reservas-8 · POR QUÉ EL TOTAL ES CERO.
+            Un ticket de canje se cobra a 0 € y la cajera tiene que poder
+            leer el motivo en la misma pantalla donde está el total, no en
+            el chip de una línea que puede quedar fuera de la vista.
+            Y NO va en la fila de «Descuento»: un bono no es un descuento
+            —no entra en `totalDiscount` ni en el umbral del PIN de
+            encargado—, así que tampoco se pinta como si lo fuera. */}
+        {resumenDeBonos && (
+          <div className="flex justify-between text-[12.5px] md:text-[13px]">
+            <span className="text-slate-500">Pagado con bono</span>
+            <span className="text-emerald-700 font-medium">{resumenDeBonos}</span>
           </div>
         )}
       </div>

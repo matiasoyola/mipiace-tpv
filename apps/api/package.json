@@ -23,6 +23,7 @@
   "dependencies": {
     "@fastify/cors": "^10.0.1",
     "@fastify/websocket": "^11",
+    "@mipiacetpv/bonos": "workspace:*",
     "@mipiacetpv/clinica-sesion": "workspace:*",
     "@mipiacetpv/clinica-valoracion": "workspace:*",
     "@mipiacetpv/consentimientos": "workspace:*",

@@ -473,6 +473,14 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
               // ni la banda «LISTO». Lo único que sobrevive al apagado es
               // el envío por diferencias, que es un arreglo del servidor.
               kitchenDisplayEnabled: true,
+              // B-reservas-8 · si este centro tiene bonos, y CÓMO LOS
+              // LLAMA. El TPV necesita las dos al arrancar: la primera
+              // para no pedir propuestas de canje en una cuenta que no los
+              // tiene, y la segunda porque el spa dice «programa» y la
+              // clínica «bono» — y una etiqueta que llegue tarde se ve
+              // como un parpadeo en la pantalla de cobro.
+              bonosEnabled: true,
+              bonoEtiqueta: true,
             },
           },
         },
@@ -515,6 +523,9 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
           cashierAutoLogoutMinutes: device.tenant.cashierAutoLogoutMinutes,
           requireCashCountOnClose: device.tenant.requireCashCountOnClose,
           kitchenDisplayEnabled: device.tenant.kitchenDisplayEnabled,
+          // B-reservas-8 · ver el `select`.
+          bonosEnabled: device.tenant.bonosEnabled,
+          bonoEtiqueta: device.tenant.bonoEtiqueta,
         },
         // kds-1-cocina · los ajustes de cocina de ESTA tienda. Van planos y
         // no dentro de `store` para no cambiarle la forma a quien ya lo

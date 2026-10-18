@@ -44,6 +44,7 @@ import { Prisma } from "@mipiacetpv/db";
 import type { PrismaClient } from "@mipiacetpv/db";
 
 import { lineasDeLaSesionCerrada } from "../clinica/lineas-de-la-sesion.js";
+import { canjeParaElBorrador } from "../vouchers/caja.js";
 import { generatePublicSlug } from "../tickets/public-slug.js";
 import { computeTicket } from "../tickets/totals.js";
 import type { AgendaStore } from "./store.js";
@@ -85,7 +86,21 @@ export interface SerializedCheckoutTicket {
     exemptionCause: string | null;
     subtotal: string;
     total: string;
+    // B-reservas-8 · con qué bono se paga esta línea, si se paga con uno.
+    // El TPV pinta el chip «Con bono B87» con esto; **nunca lo calcula**.
+    voucherId: string | null;
   }>;
+  // B-reservas-8 · el canje que el servidor YA aplicó al abrir el cobro de
+  // una cita con bono. `null` en todo lo demás —que es casi todo—, y
+  // también cuando la cita tenía bono pero lo que se hizo no lo cubre: ahí
+  // se cobra normal y lo apartado se libera al cobrar.
+  bono: {
+    voucherId: string;
+    code: string;
+    ticketLineId: string;
+    sesionesLibres: number;
+    sesionesApartadas: number;
+  } | null;
 }
 
 export interface CheckoutContext {
@@ -232,6 +247,9 @@ export async function checkoutAppointment(
     unitPrice: number;
     taxRate: number;
     exemptionCause: string | null;
+    // B-reservas-8 · con qué bono se paga esta línea. Lo rellena el canje
+    // de abajo; en toda cita sin bono se queda `null`.
+    voucherId: string | null;
   }> = [];
   for (const item of itemsACobrar) {
     const p = byId.get(item.serviceId);
@@ -263,7 +281,29 @@ export async function checkoutAppointment(
       // El snapshot, igual que el nombre y el precio: lo que se cobró no
       // cambia si mañana se edita el servicio.
       exemptionCause: p.exemptionCause,
+      voucherId: null,
     });
+  }
+
+  // ── B-reservas-8 · la línea del bono sale YA MARCADA y a 0 € ───────
+  //
+  // Lo decide el SERVIDOR al abrir el cobro, así que la cajera no ve nunca
+  // un precio que luego cambia. `null` en toda cita sin bono (y entonces
+  // esto no cuesta ni una consulta) y también cuando la cita TENÍA bono
+  // pero lo que se hizo no lo cubre: entonces se cobra normal y lo apartado
+  // se libera al cobrar (`canjearAlCobrar`). **Nunca se consume un bono
+  // contra un servicio que no cubre.**
+  const canje = appt.voucherId
+    ? await canjeParaElBorrador(prisma, {
+        tenantId: ctx.tenantId,
+        voucherId: appt.voucherId,
+        productIds: lineInputs.map((l) => l.productId),
+        ahora: new Date(),
+      })
+    : null;
+  if (canje) {
+    lineInputs[canje.indice]!.unitPrice = canje.importeCents / 100;
+    lineInputs[canje.indice]!.voucherId = canje.voucherId;
   }
 
   const totals = computeTicket(
@@ -290,6 +330,21 @@ export async function checkoutAppointment(
         internalNumber: `D-${randomUUID()}`,
         externalId: randomUUID(),
         publicSlug: generatePublicSlug(),
+        // B-reservas-8 · LA FICHA DE LA CITA VIAJA AL TICKET.
+        //
+        // Lo pilló la pasada en el navegador: el borrador de una cita de
+        // bono salía con su línea a 0 € —eso lo pone `canjeParaElBorrador`
+        // de aquí abajo— pero SIN el chip «Con bono B1», porque
+        // `GET /tickets/:id/bonos` no puede proponer nada sin saber de
+        // quién es el ticket. La cajera veía un cero sin explicación.
+        //
+        // Y no es sólo el chip: sin esto, el canje SIN CITA tampoco se
+        // puede ofrecer sobre el borrador de una cita, y la ficha de la
+        // clienta no sale en la venta que le corresponde.
+        //
+        // `null` en una cita anónima (walk-in, reserva de teléfono sin
+        // ficha), que es exactamente lo que `Ticket.clientId` admite.
+        clientId: appt.clientId,
         status: "DRAFT",
         total: new Prisma.Decimal(totals.total),
         totalTax: new Prisma.Decimal(totals.tax),
@@ -308,6 +363,7 @@ export async function checkoutAppointment(
               discountPct: new Prisma.Decimal(0),
               taxRate: new Prisma.Decimal(l.taxRate),
               exemptionCause: l.exemptionCause,
+              voucherId: l.voucherId,
               subtotal: new Prisma.Decimal(cl.subtotal),
               total: new Prisma.Decimal(cl.total),
             };
@@ -356,6 +412,8 @@ async function loadTicket(
           exemptionCause: true,
           subtotal: true,
           total: true,
+          // B-reservas-8 · con qué bono se paga la línea.
+          voucherId: true,
         },
       },
     },
@@ -381,6 +439,36 @@ async function loadTicket(
       exemptionCause: l.exemptionCause,
       subtotal: l.subtotal.toString(),
       total: l.total.toString(),
+      voucherId: l.voucherId,
     })),
+    bono: await bonoDelTicket(prisma, t.lines),
+  };
+}
+
+/** El resumen del bono de este borrador, para el chip de la pantalla
+ *  («Con bono B87 · quedan 3 → 2»). Una consulta, y sólo cuando alguna
+ *  línea lleva bono: un ticket de bar no paga nada por esto. */
+async function bonoDelTicket(
+  prisma: PrismaClient,
+  lines: Array<{ id: string; voucherId: string | null }>,
+): Promise<SerializedCheckoutTicket["bono"]> {
+  const conBono = lines.find((l) => l.voucherId != null);
+  if (!conBono) return null;
+  // Defensiva con la FORMA del cliente: la suite de `agenda-checkout`
+  // inyecta un prisma falso que no expone `voucher`, y un borrador sin
+  // bono —que es el caso de ese banco— no tiene por qué necesitarlo.
+  const modelo = prisma.voucher as { findUnique?: (a: unknown) => Promise<unknown> } | undefined;
+  if (typeof modelo?.findUnique !== "function") return null;
+  const b = await prisma.voucher.findUnique({
+    where: { id: conBono.voucherId! },
+    select: { id: true, code: true, sessionsLeft: true, sessionsReserved: true },
+  });
+  if (!b) return null;
+  return {
+    voucherId: b.id,
+    code: b.code,
+    ticketLineId: conBono.id,
+    sesionesLibres: b.sessionsLeft,
+    sesionesApartadas: b.sessionsReserved,
   };
 }
