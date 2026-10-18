@@ -282,6 +282,45 @@ describe("n1-vertical · PIN a 360×640 (el N1 en vertical)", () => {
     expect(vaAntes(a!, boton("Entrar"))).toBe(true);
   });
 
+  it("cuatro teclas en el MISMO tick cuentan cuatro, no una", async () => {
+    // Medido en el N1 el 2026-10-18: cuatro dígitos seguidos dejaban el
+    // PIN en UNO —los puntos sin marcar y «Entrar» apagado— porque
+    // `pressDigit` leía `pin` del cierre de su render y las cuatro
+    // pulsaciones escribían sobre el mismo valor. Un teclado de PIN es
+    // justo donde se teclea rápido, y un dígito perdido se paga con un
+    // intento de los cinco que hay antes del bloqueo.
+    await renderPin();
+    await click(cajeroReciente());
+
+    // Las cuatro DENTRO del mismo `act`: ni un render entre medias, que
+    // es lo que reproduce el caso.
+    await act(async () => {
+      for (const d of ["1", "2", "3", "4"]) boton(d).click();
+    });
+    await settle();
+
+    // Cuatro puntos marcados y «Entrar» encendido.
+    expect(
+      container.querySelectorAll(".bg-mipiace-coral.rounded-full"),
+    ).toHaveLength(4);
+    expect(boton("Entrar").disabled).toBe(false);
+  });
+
+  it("el tope de 8 dígitos aguanta aunque lleguen de golpe", async () => {
+    await renderPin();
+    await click(cajeroReciente());
+    await act(async () => {
+      for (const d of "1234567890") boton(d).click();
+    });
+    await settle();
+    // Se ve el PIN para poder contarlo: el toggle del ojo.
+    await click(container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Mostrar PIN"]',
+    )!);
+    const puntos = container.querySelector<HTMLElement>(".tracking-\\[0\\.35em\\]");
+    expect((puntos?.textContent ?? "").length).toBe(8);
+  });
+
   it("el PRIMER PIN mal ya avisa, aunque queden 4 intentos", async () => {
     // El backend contesta `attemptsRemaining: 4` en el primer fallo. Con la
     // condición de antes (`<= 3`) no se pintaba nada: el PIN se borraba solo

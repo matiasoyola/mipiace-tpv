@@ -274,8 +274,22 @@ export function PinScreen({
   }
 
   function pressDigit(d: string) {
-    if (pin.length >= 8 || busy) return;
-    setPin(pin + d);
+    if (busy) return;
+    // n1-vertical · ACTUALIZACIÓN FUNCIONAL, y no `setPin(pin + d)`.
+    //
+    // `pin` viene del cierre de ESTE render: dos pulsaciones dentro del
+    // mismo tick leen las dos el mismo valor y la segunda pisa a la
+    // primera. Visto midiendo en el N1 el 2026-10-18: cuatro dígitos
+    // seguidos dejaban el PIN en UNO, con los puntos sin marcar y
+    // «Entrar» apagado. Con el dedo cuesta provocarlo —hay que pulsar
+    // dos teclas en el mismo fotograma— pero un teclado de PIN es justo
+    // donde se teclea rápido, y un dígito perdido se paga con uno de
+    // los cinco intentos que hay antes del bloqueo.
+    //
+    // El tope de 8 se mira DENTRO del actualizador por lo mismo: con la
+    // comprobación fuera, dos pulsaciones en el mismo tick pasan las dos
+    // el filtro aunque la segunda ya no quepa.
+    setPin((actual) => (actual.length >= 8 ? actual : actual + d));
   }
   function pressBack() {
     setPin(pin.slice(0, -1));
