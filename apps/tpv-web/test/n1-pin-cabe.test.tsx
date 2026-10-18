@@ -238,6 +238,27 @@ describe("n1-vertical · PIN a 360×640 (el N1 en vertical)", () => {
     ).not.toBeNull();
   });
 
+  it("la rejilla fija su columna, o un email largo saca la página de la pantalla", async () => {
+    // Medido en el N1 el 2026-10-18: sin `grid-cols-1`, la única columna
+    // por debajo de `md` es implícita y `auto` (= `max-content`), así que
+    // el email del cajero de pruebas estiraba la tarjeta a 561 px y el
+    // `scrollWidth` de la página a 581 con una ventana de 360. Con la
+    // clase puesta, 360 y 320.
+    storageMock.recientes = [
+      {
+        email: "mipiacetpv-test-64a68dc7@internal.mipiacetpv.tech",
+        alias: null,
+        initials: "MT",
+        lastSeenAt: new Date("2026-10-18T09:00:00Z").toISOString(),
+      },
+    ];
+    await renderPin();
+    const rejilla = tarjetaCajeros().parentElement!;
+    expect(rejilla.className).toContain("grid-cols-1");
+    // Y la de `md` sigue, que es el layout de los terminales grandes.
+    expect(rejilla.className).toContain("md:grid-cols-2");
+  });
+
   it("el aviso de PIN incorrecto se pinta ARRIBA, no debajo de «Entrar»", async () => {
     apiMock.apiWithDevice.mockRejectedValue(
       new ApiError(401, "Email o PIN incorrecto", "INVALID_CREDENTIALS", {

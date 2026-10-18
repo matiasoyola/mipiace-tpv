@@ -288,7 +288,23 @@ export function PinScreen({
         <div className="text-[12.5px] text-slate-500">{registerName}</div>
       </header>
       <main className="flex-1 flex items-center justify-center p-5 [@media(max-height:560px)]:p-2">
-        <div className="w-full max-w-5xl grid md:grid-cols-2 gap-5 md:gap-8 [@media(max-height:560px)]:gap-2">
+        {/* n1-vertical · `grid-cols-1` NO es decorativo, y sin él esta
+            pantalla se sale por la derecha en un móvil.
+            Medido en el N1 el 2026-10-18 con el cajero de pruebas, cuyo
+            email es `mipiacetpv-test-64a68dc7@internal.mipiacetpv.tech`:
+            `document.documentElement.scrollWidth` = 581 con una ventana
+            de 360, y la tarjeta de cajeros midiendo 561.
+            El motivo: sin `grid-template-columns`, la única columna por
+            debajo de `md` es IMPLÍCITA y de tamaño `auto`, o sea
+            `max-content`, así que una cadena larga sin espacios —un
+            email— estira la columna y empuja la página entera. Con
+            `grid-cols-1` (que es `repeat(1, minmax(0,1fr))`) la columna
+            no puede pasar del ancho disponible y el texto trunca como
+            siempre estuvo previsto. Comprobado en el aparato: 581 → 360
+            y la tarjeta 561 → 320.
+            En el banco no salía porque la cajera de pruebas se llama
+            `marta@peluqueriademo.local`, que cabe. */}
+        <div className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-8 [@media(max-height:560px)]:gap-2">
           {/* Recent cashiers */}
           <div
             data-testid="pin-cajeros"
