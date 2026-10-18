@@ -415,6 +415,7 @@ los reales, copiados de la salida.**
 | 12 | El reseteo vuelve a borrar sólo los `TEST` | 2 unitarios + 4 del e2e | `expected [ { …(2) } ] to deeply equal [ Array(1) ]`, y en el e2e el borrado de turnos revienta contra la FK de los tickets que quedaron |
 | 13 | Se quita el guardián de la aplicación (`comprobarQueNadaEsReal`) | 2 unitarios + 3 del e2e | `expected { ticketsBorrados: 2, …(9) } to be an instance of EnsayoConVentaRealError` · y en el e2e **lo para la BASE**: `SELLO_VIOLADO: no se borra una venta sellada` |
 | 14 | El trigger se queda sin la condición de Holded | `y en una cuenta EN ENSAYO, tampoco la que llegó a Holded` | `expected '' to contain 'SELLO_VIOLADO'` |
+| 16 | La rama de cascada, devuelta a `fiscal_records_append_only` (`IF NOT EXISTS (SELECT 1 FROM tenants …) THEN RETURN OLD`) | 2 del e2e, y sólo esos 2 de 796 | `expected '' to contain 'REGISTRO_FISCAL_VIOLADO'` — o sea: el `DELETE FROM tenants` a pelo **pasa** y se lleva la factura |
 | 15 | La cuenta de ensayo de La Maestranza vuelve a 3.c | 2 del e2e | la comprobación final aborta (`promise rejected … instead of resolving`) **y**, si se la salta, el `UPDATE` rebota: `new row for relation "tenants" violates check constraint "tenants_pruebas_no_facturan_ck"` |
 
 El nº 1 y el nº 5 son los que más enseñan:
@@ -428,6 +429,11 @@ El nº 1 y el nº 5 son los que más enseñan:
 - **El nº 15 cierra el círculo del CHECK.** La migración dice que marcar una cuenta con facturas
   «no habría colado porque el CHECK lo rechaza»; el sabotaje lo enseña pasando por encima de la
   comprobación y chocando con la base. Dos puertas, y la segunda es la que no se puede olvidar.
+- **El nº 16 es el que de verdad duele**, porque el sabotaje consiste en **devolver** lo que
+  llevaba un año escrito: la rama estaba ahí desde verifactu-1 y era lo que hacía inútil al
+  candado de la parte C (§7.b). Y es un buen sabotaje por la otra razón: de 796 tests caen
+  exactamente 2, los dos que preguntan por esa puerta. El resto de la suite pasa igual — que es
+  justamente el motivo de que el agujero llevara ahí tanto tiempo.
 - **El nº 13 es el que más tranquiliza.** Quitando el guardián de la aplicación, el reseteo no
   borra la venta que llegó a Holded: **la para la base**, con `SELLO_VIOLADO`. La puerta de la
   aplicación existe para dar un mensaje que se pueda leer —qué ticket, qué documento—, no para ser
@@ -479,6 +485,11 @@ SET LOCAL mipiacetpv.eliminar_tenant = '<uuid>'
 
 Todo en una transacción. Si algo falla por el camino no queda media cuenta: queda la cuenta.
 
+Y desde §7.b, este orden es el **único** que existe: la rama de cascada que dejaba pasar un
+`DELETE FROM tenants` a pelo está cerrada, así que saltarse el `SET LOCAL` de la primera línea no
+borra media cuenta — no borra nada. El mismo orden lo repite la limpieza de la suite
+(`test-e2e/borrar-tenant.ts`), que ya no tiene otro camino.
+
 ---
 
 ## 7 · El fallo que este bloque encontró en un trigger ajeno
@@ -499,8 +510,121 @@ que es exactamente para lo que están:
 
 La regla queda escrita en la propia migración: antes de reemplazar un trigger ajeno,
 `grep -rn "CREATE OR REPLACE FUNCTION <nombre>" packages/db/prisma/migrations` y copiar el cuerpo
-de la fecha más alta. En este repo sólo `mipiacetpv_public_link_guard` está definido dos veces;
-las otras cuatro funciones que este bloque reemplaza tienen una sola definición previa.
+de la fecha más alta. Y se ha vuelto a necesitar dos veces dentro del propio bloque: el reseteo
+del ensayo tuvo que partir de `eliminar_cuenta` para no perder la marca, y la migración de la
+única puerta (§7.b) tuvo que partir de **cuatro migraciones distintas** —una por función—, porque
+el guardián del sello ya iba por su tercera definición.
+
+---
+
+## 7.b · El segundo fallo, el que encontró la revisión del PR: el candado estaba al lado de una puerta abierta
+
+Lo de §7 fue copiar un cuerpo de la migración equivocada. Esto es peor: la parte C montó un
+candado —la marca que NOMBRA al tenant, que muere con la transacción, que exige el export
+descargado— **al lado de una puerta que ya estaba abierta**.
+
+### La rama
+
+Cuatro guardias llevaban desde el primer día esta escapatoria, heredada de ADR-019 §4:
+
+```sql
+IF NOT EXISTS (SELECT 1 FROM tenants WHERE id = OLD.tenant_id) THEN
+    RETURN OLD;   -- cascada del borrado del tenant
+END IF;
+```
+
+`mipiacetpv_fiscal_records_append_only` (verifactu-1) y, copiados por este bloque,
+`mipiacetpv_tickets_delete_guard`, `mipiacetpv_time_entries_delete_guard` y
+`mipiacetpv_employees_delete_guard`.
+
+La leyenda era «si el comercio ya no existe, esto es su borrado en cascada y no alguien limpiando
+una factura», y lo que la hacía parecer inocente —escrito con todas las letras en la cabecera de
+`20261017010000_eliminar_cuenta` y en la tabla de alternativas de ADR-021 §6— era la premisa de
+que a esa rama **no se puede llegar**: `fiscal_records.ticket_id` y una docena más son `RESTRICT`,
+así que un `DELETE FROM tenants` rebota contra las filas hijas.
+
+### La premisa era falsa, y se mide en cuatro líneas
+
+`fiscal_records.tenant_id` es `ON DELETE CASCADE`. Igual que `tickets.tenant_id` y
+`employees.tenant_id`; y `time_entries` **no tiene FK al tenant**, le llega por `employees`. Así
+que un `DELETE FROM tenants` de una cuenta cuyo registro fiscal no cuelga de ningún ticket entra
+por la cascada, encuentra la rama y se va con todo. Sobre una base migrada de cero, antes del
+arreglo:
+
+```
+mipiacetpv=# DELETE FROM tenants WHERE id = '1111…';
+DELETE 1
+mipiacetpv=# SELECT count(*) FROM fiscal_records;
+ 0
+```
+
+Sin marca, sin export, sin rastro. Un `psql` delante de producción y los cuatro años de facturas
+de un comercio se van en una línea — y las cinco propiedades de ADR-021 §6 (nombra al tenant,
+muere con la transacción, sólo DELETE, todo o nada, deja rastro antes de empezar) no protegían
+nada, porque no había que pasar por ellas.
+
+### El arreglo: quitar la rama, en una migración nueva
+
+`20261017030000_eliminar_cuenta_unica_puerta`. Nueva y no editando las de ayer, por lo de siempre
+(una migración aplicada no se reescribe), y partiendo de la **última** definición de cada función,
+que no es la misma para todas:
+
+| Función | Última definición, de la que se parte |
+|---|---|
+| `fiscal_records_append_only` | `20261017010000_eliminar_cuenta` |
+| `tickets_delete_guard` | `20261017020000_reseteo_del_ensayo` ← la tercera, no la de ayer |
+| `time_entries_delete_guard` | `20261017010000_eliminar_cuenta` |
+| `employees_delete_guard` | `20261017010000_eliminar_cuenta` |
+
+Partir de `eliminar_cuenta` para el guardián del sello habría borrado en silencio las tres
+condiciones del reseteo del ensayo (§3.10). Es §7 otra vez, y por eso la tabla está escrita.
+
+**Qué no cambia:** el texto de los cuatro `RAISE` —quien intente borrar una factura de una cuenta
+viva lee exactamente lo que leía ayer—, las escapatorias que se comprueban contra el estado real
+(un ticket sin sellar, un ticket `TEST`, las tres condiciones del reseteo, un empleado que nunca
+llegó a fichar) y `superadmin/eliminar-cuenta.ts`, que ya ponía el `SET LOCAL` **antes de la
+primera fila** y termina en `DELETE FROM tenants` dentro de la misma transacción. Ni una línea de
+aplicación.
+
+**Y una rama de cascada se queda viva a propósito:** la de
+`mipiacetpv_tickets_fiscal_link_guard` (verifactu-1). Ese trigger no guarda nada que los cuatro de
+arriba no guarden ya —existe para que el mensaje diga «este ticket tiene factura» en vez de hablar
+de una clave ajena— y, con el append-only cerrado, un tenant con facturas ya no llega a la
+cascada. Queda dicho aquí para que no se busque.
+
+### Lo que esto se llevó por delante en la suite: cinco ficheros que limpiaban por el agujero
+
+`f2-registro-inalterable`, `f3-fichar`, `f4-panel`, `f7-export` y `f8-colegio` borraban sus
+tenants de prueba con un `DELETE FROM tenants` a pelo, y **funcionaban justo por la rama de
+cascada**. Uno de ellos lo decía en un comentario con todas las letras: «es la única escapatoria
+que los triggers aceptan, y que funcione es parte de lo que se prueba». Al cerrarla: 40 tests
+rojos en 6 ficheros.
+
+Lo que **no** se hizo fue abrirles una excepción propia. Limpian por la misma puerta que la
+operación de verdad —`test-e2e/borrar-tenant.ts`, con el mismo `SET LOCAL` y el mismo orden de
+borrado que `eliminarLaCuenta`—, así que el día que la marca deje de bastar, la suite se pone
+roja. Y de paso cada fichero de fichaje prueba, gratis, que la baja de un cliente funciona.
+
+El orden importa y lo impone una FK que no se ve: `shifts_user_id_fkey` es `RESTRICT` y la cascada
+del tenant se lleva los usuarios, así que los turnos van **antes**. Es exactamente el orden de
+§6.3.
+
+### Los cinco tests nuevos
+
+`puesta-en-marcha.e2e.ts` §8, «la cascada del borrado del tenant no es una puerta»:
+
+| Test | Qué fija |
+|---|---|
+| sin la marca, el DELETE se lleva por delante `REGISTRO_FISCAL_VIOLADO` | el agujero, cerrado: `DELETE FROM tenants` a pelo sobre una cuenta con una factura no borra **nada** |
+| con la marca de OTRO tenant, tampoco | la marca NOMBRA: no es un interruptor |
+| con la marca de ESE tenant, pasa y la cuenta se va entera | la puerta que sí existe sigue abierta |
+| y la cascada tampoco se lleva una venta sellada | `SELLO_VIOLADO`, en una cuenta FACTURANDO (la excepción del reseteo no aplica) |
+| ni un fichaje, que cuelga del empleado y no del tenant | `REGISTRO_VIOLADO` por la ruta `employees → time_entries`, la que no tiene FK al tenant |
+
+El registro fiscal del primer caso se siembra **sin `ticket_id`** a propósito: así el DELETE llega
+al guardián del append-only y no a la FK `RESTRICT` de `fiscal_records.ticket_id`. Lo que se
+prueba es el guardián, no la clave ajena — y es además el caso que de verdad se iba por la
+cascada.
 
 ---
 
@@ -509,12 +633,12 @@ las otras cuatro funciones que este bloque reemplaza tienen una sola definición
 | Suite | Resultado |
 |---|---|
 | `pnpm vitest run` (desde la raíz) | **379 ficheros, 5283 tests verdes**, 10 saltados |
-| `pnpm test:e2e` (`puesta-en-marcha.e2e.ts`) | **41 verdes** contra Postgres real |
-| `pnpm test:e2e` (los 40 ficheros) | **40 verdes, 788 tests** — corrida a las 09:40 (ver §8.1) |
+| `pnpm test:e2e` (`puesta-en-marcha.e2e.ts`) | **46 verdes** contra Postgres real |
+| `pnpm test:e2e` (los 40 ficheros) | **40 verdes, 796 tests** — corrida de las 12:30 del 18-10, ya con la única puerta (§7.b) |
 | El bucle visual | el panel y la banda, medidos (§8.2); un fallo encontrado y arreglado |
 
 Nuevos: `apps/api/test/puesta-en-marcha-ensayo.test.ts` (14), `test/puesta-en-marcha-arranque.test.ts`
-(19) y `test-e2e/puesta-en-marcha.e2e.ts` (41).
+(19) y `test-e2e/puesta-en-marcha.e2e.ts` (46, los cinco últimos los de §7.b).
 
 ### 8.1 La suite entera, en verde — y los cuatro que fallaban de madrugada
 
@@ -683,8 +807,10 @@ E2E_DATABASE_URL="postgresql://mipiacetpv:mipiacetpv_dev@localhost:5432/mipiacet
 ### 10.2 El despliegue
 
 ```bash
-# 3 · Las dos migraciones. La primera PUEDE ABORTAR a propósito si una cuenta
-#     de pruebas tuviera facturas o ventas reales: es la comprobación del §2.1.
+# 3 · Las CUATRO migraciones del bloque. La primera PUEDE ABORTAR a propósito si
+#     una cuenta de pruebas tuviera facturas o ventas reales: es la comprobación
+#     del §2.1. La última (`eliminar_cuenta_unica_puerta`, §7.b) sólo reemplaza
+#     cuatro funciones de trigger: no toca una fila de datos.
 pnpm --filter @mipiacetpv/db run migrate:deploy
 
 # 4 · Comprobar el backfill, cuenta a cuenta
@@ -692,6 +818,18 @@ docker compose exec -T postgres psql -U mipiacetpv -d mipiacetpv -c \
   "SELECT name, fiscal_go_live_at, es_de_pruebas FROM tenants ORDER BY 1"
 #    → Sole y Cachitos CON fecha. Sirope, Fouzia, Maestranza, Rosario y Thalía a NULL.
 #    → PRUEBAS MIPIACE y el ensayo de Maestranza con es_de_pruebas = true.
+
+# 5 · Y que la única puerta está cerrada (§7.b). Se comprueba LEYENDO las cuatro
+#     funciones, no ensayando un borrado contra la base de un cliente.
+docker compose exec -T postgres psql -U mipiacetpv -d mipiacetpv -Atc \
+  "SELECT p.proname FROM pg_proc p
+    WHERE p.proname IN ('mipiacetpv_fiscal_records_append_only',
+                        'mipiacetpv_tickets_delete_guard',
+                        'mipiacetpv_time_entries_delete_guard',
+                        'mipiacetpv_employees_delete_guard')
+      AND pg_get_functiondef(p.oid) LIKE '%NOT EXISTS (SELECT 1 FROM tenants%'"
+#    → CERO filas. Si sale alguna, esa función conserva la rama de cascada y la
+#      migración no se aplicó entera: no seguir.
 ```
 
 ### 10.3 Y después del despliegue

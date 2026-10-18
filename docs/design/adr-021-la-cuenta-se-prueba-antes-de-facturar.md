@@ -167,9 +167,14 @@ facturación. El CHECK de la base y el 409 son las dos cerraduras de esa puerta.
 
 ## 6. Decisión: eliminar una cuenta pasa por el append-only con una marca que NOMBRA al tenant
 
-El problema es un círculo: `fiscal_records` sólo deja borrar «si el tenant ya no existe» (la
-escapatoria de la cascada, ADR-019 §4), y el tenant no se puede borrar primero porque una docena
-de claves ajenas son `RESTRICT`.
+El problema parecía un círculo: `fiscal_records` sólo dejaba borrar «si el tenant ya no existe»
+(la escapatoria de la cascada, ADR-019 §4), y el tenant no se puede borrar primero porque una
+docena de claves ajenas son `RESTRICT`.
+
+Parecía. La segunda mitad de la frase era falsa, y lo cuenta §6.3: a la escapatoria de la cascada
+**sí** se llegaba, así que lo que había no era un círculo sino una puerta abierta al lado del
+candado. La decisión de abajo es la correcta de todas formas —es la que deja borrar una cuenta sin
+abrir un interruptor—, pero su valor entero depende de §6.3.
 
 **Alternativas descartadas:**
 
@@ -178,7 +183,7 @@ de claves ajenas son `RESTRICT`.
 | Una columna `tenants.eliminando` que el trigger mire | Es un estado persistente: se puede quedar puesto. Un bug, un `UPDATE` a mano o una transacción que muere y la puerta queda abierta sin que nadie lo vea. |
 | Una variable de entorno / un flag de la aplicación | Lo mismo pero peor: abre la puerta para todos los tenants a la vez y durante todo el proceso. |
 | `ALTER TABLE … DISABLE TRIGGER` dentro de la transacción | Desactiva el guardia **entero** —también para las filas de otros comercios de la misma transacción— y requiere ser dueño de la tabla. Es un interruptor, que es justo lo que no queremos. |
-| `DELETE FROM tenants` y confiar en el orden de las cascadas | El orden entre cascadas hermanas no está garantizado, y la FK `RESTRICT` de `fiscal_records.ticket_id` rebota. Probado: falla. |
+| `DELETE FROM tenants` y confiar en el orden de las cascadas | El orden entre cascadas hermanas no está garantizado: con un registro fiscal colgado de un ticket, la FK `RESTRICT` de `fiscal_records.ticket_id` puede rebotar, y sin ticket detrás **no rebota nada y la cuenta se va entera por la cascada** (medido; es justo el agujero de §6.3). Confiar en eso es confiar en el orden de las cascadas para una invariante fiscal. |
 
 **Decisión:** una marca de **transacción** que nombra al tenant,
 `SET LOCAL mipiacetpv.eliminar_tenant = '<uuid>'`, leída por los cinco guardias que hacen falta a
@@ -210,6 +215,47 @@ clínica se conserva por la Ley 41/2002 y su destrucción es una decisión con s
 y su propio bloque. La eliminación se bloquea con el motivo escrito; el export sí funciona, y
 para el centro clínico ya existe su propia devolución de datos (art. 28.3.g,
 `clinica/exportacion.ts`).
+
+### 6.3 La marca es la ÚNICA puerta: la cascada no lo es
+
+La escapatoria de la cascada —«si el tenant ya no existe, esto es su borrado en cascada y no
+alguien limpiando una factura»— venía de ADR-019 §4 y la heredaron cuatro guardias:
+`fiscal_records_append_only`, `tickets_delete_guard`, `time_entries_delete_guard` y
+`employees_delete_guard`. Lo que la hacía parecer inocente era la premisa de que a esa rama **no
+se puede llegar**, porque un `DELETE FROM tenants` rebotaría contra las claves ajenas `RESTRICT`.
+
+**La premisa es falsa.** `fiscal_records.tenant_id` es `ON DELETE CASCADE` —igual que
+`tickets.tenant_id` y `employees.tenant_id`, y `time_entries` cuelga de `employees`—, así que un
+`DELETE FROM tenants` a pelo entra por la cascada, encuentra la rama y se lleva por delante los
+registros de facturación, las ventas selladas y los fichajes. Sin marca, sin export y sin rastro.
+Medido en una base migrada de cero: `DELETE 1`, y `fiscal_records` a cero.
+
+Es decir: el candado de §6 estaba **al lado de una puerta abierta**. Y un candado sólo vale si es
+la única puerta.
+
+**Decisión:** la rama de cascada se quita de los cuatro guardias
+(`20261017030000_eliminar_cuenta_unica_puerta`). A partir de ahí, un tenant con registros
+fiscales, con ventas selladas no borrables o con fichajes **sólo se puede borrar dentro de la
+transacción que pone la marca**. Un `DELETE FROM tenants` a pelo levanta
+`REGISTRO_FISCAL_VIOLADO` (o `SELLO_VIOLADO`, o `REGISTRO_VIOLADO`) y no borra nada: la
+transacción entera se va atrás.
+
+Y la dirección del fallo queda bien: `SET LOCAL` fuera de una transacción no hace nada, así que
+el descuido deja el guardia **cerrado**. Lo que se pierde al quitar la rama es exactamente la
+posibilidad de que el descuido lo deje **abierto**.
+
+**Lo que no cambia:** el texto de los cuatro `RAISE`, y las escapatorias que sí tienen un motivo
+propio comprobable contra el estado real —un ticket sin sellar, un ticket `TEST`, las tres
+condiciones del reseteo del ensayo (§5), un empleado que nunca llegó a fichar—. Y queda una rama
+de cascada viva a propósito en `mipiacetpv_tickets_fiscal_link_guard` (verifactu-1): ese trigger
+no guarda nada que los cuatro de aquí no guarden ya —existe para que el mensaje diga «este ticket
+tiene factura» en vez de hablar de una clave ajena— y, con el append-only cerrado, un tenant con
+facturas ya no llega a la cascada.
+
+**Consecuencia para los tests:** media suite e2e limpiaba sus tenants con un `DELETE FROM tenants`
+a pelo y funcionaba **justo por esa rama**. Ahora limpia por la misma puerta que la operación de
+verdad (`test-e2e/borrar-tenant.ts`), con el mismo `SET LOCAL` y el mismo orden de borrado. No se
+les abre una excepción propia: si la marca deja de bastar, la suite se pone roja.
 
 ## 7. Consecuencias
 
