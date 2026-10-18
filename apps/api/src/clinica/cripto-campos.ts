@@ -1,8 +1,8 @@
 // clinica-7 · CADA COLUMNA CIFRADA, CON SU SITIO ESCRITO UNA SOLA VEZ.
 //
 // Nueve columnas de la clínica (clinica-7), seis de la residencia
-// (residencia-1b, D-63) y dos del registro de cuidados (residencia-3).
-// Diecisiete.
+// (residencia-1b, D-63), dos del registro de cuidados (residencia-3) y
+// cinco del libro de incidencias (residencia-4). Veintidós.
 //
 // `cripto.ts` cifra con un AAD; aquí vive **qué AAD le toca a cada
 // columna**. Y vive en un solo fichero por la razón de siempre en este
@@ -235,6 +235,99 @@ export function sitioNotaDeRegistro(
   id: string,
 ): SitioDelValor {
   return { tenantId, tabla: "care_records", columna: "note", filaId: id };
+}
+
+// ── residencia-4 · LA GRAVEDAD Y EL LIBRO (D-63) ───────────────────
+//
+// Cinco columnas lógicas más. Lo que nace cifrado en el libro de
+// incidencias es **lo que alguien escribió a mano**, que es donde cabe el
+// diagnóstico con todas las letras: la descripción de la incidencia, el
+// texto de cada acción, lo que se le dijo a la familia (y lo que
+// contestó) y el motivo de una excepción de umbral.
+//
+// Y lo que se queda EN CLARO, declarado y con su consecuencia dicha:
+// sujeto, tipo, origen, nivel, estado, instantes, residente, firmantes,
+// canal y acuses. **No es dejadez: es lo que sostiene el producto.** La
+// lista de abiertas, el escalado a los cinco minutos y los indicadores de
+// AENOR son consultas SQL sobre esas columnas, y cifrarlas obligaría a
+// descifrar el libro entero para pintar «qué hay abierto hoy». La
+// consecuencia, como en residencia-1b §2: un `SELECT` sigue diciendo que
+// a doña Carmen se le abrió una incidencia de tipo `FIEBRE` el martes. Lo
+// que no dice es a cuánto tenía la fiebre, qué se hizo ni qué se le contó
+// a su hija.
+//
+// **Cinco columnas lógicas y no tres**, por la razón de siempre en este
+// fichero: con el mismo nombre lógico, lo que se le dijo a la familia se
+// podría copiar al motivo de no habérselo dicho, y descifraría.
+
+/** Qué ha pasado. Lo escribe quien declara la incidencia. */
+export function sitioDescripcionDeIncidencia(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "incidents",
+    columna: "description",
+    filaId: id,
+  };
+}
+
+/** Qué se hizo. Una línea del histórico append-only de la incidencia. */
+export function sitioTextoDeAccion(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "incident_actions",
+    columna: "text",
+    filaId: id,
+  };
+}
+
+/** Qué se le dijo a la familia — o, en un «no comunicado», por qué no se
+ *  le dijo (D-34). Es la misma columna porque es la misma pregunta
+ *  contestada por los dos lados. */
+export function sitioContenidoAFamilia(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "family_communications",
+    columna: "content",
+    filaId: id,
+  };
+}
+
+/** Y qué contestó la familia. Columna lógica propia: con el mismo nombre
+ *  que el contenido, «dice que viene mañana» podría leerse como lo que se
+ *  le dijo. */
+export function sitioRespuestaDeFamilia(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "family_communications",
+    columna: "response",
+    filaId: id,
+  };
+}
+
+/** Por qué este residente tiene su propio umbral (D-22). «Paliativo,
+ *  febrícula basal 37,8» es un diagnóstico con todas las letras. */
+export function sitioMotivoDeExcepcion(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "resident_threshold_overrides",
+    columna: "reason",
+    filaId: id,
+  };
 }
 
 /** Por qué cambió de habitación. */

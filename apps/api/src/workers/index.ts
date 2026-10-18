@@ -27,6 +27,8 @@ import { startAgendaHoldTtlWorker } from "./agenda-hold-ttl-worker.js";
 import { registerAgendaHoldTtlRepeatable } from "../queues/agenda-hold-ttl.js";
 import { startShiftDayCutWorker } from "./shift-day-cut-worker.js";
 import { registerShiftDayCutRepeatable } from "../queues/shift-day-cut.js";
+import { startResidenciaGuardiaWorker } from "./residencia-guardia-worker.js";
+import { registerResidenciaGuardiaRepeatable } from "../queues/residencia-guardia.js";
 
 async function main() {
   loadEnv();
@@ -42,6 +44,9 @@ async function main() {
   const reconciliationWorker = startReconciliationWorker();
   const agendaHoldTtlWorker = startAgendaHoldTtlWorker();
   const shiftDayCutWorker = startShiftDayCutWorker();
+  // residencia-4 · el escalado de los avisos (cada minuto) y la pasada de
+  // ausencias (en la hora en punto).
+  const residenciaGuardiaWorker = startResidenciaGuardiaWorker();
   const uploadSweeper = startUploadSweeper();
   // A5 · borra las capturas de pantalla caducadas (fichero y fila). Es lo que
   // hace verdad la retención de 24 h; sin esto quedan fotos de las pantallas
@@ -59,6 +64,7 @@ async function main() {
   console.log("[workers] upload-sweeper listo (cada 5 min)");
   console.log("[workers] device-screenshot-sweeper listo (cada 15 min)");
   console.log("[workers] shift-day-cut worker listo");
+  console.log("[workers] residencia-guardia worker listo");
   const count = await registerAllExistingRepeatables();
   console.log(`[workers] ${count} repeatable(s) registrados para tenants existentes`);
   // Conciliación diaria (v1.5-B Lote 4): repeatable global, cron a la
@@ -73,6 +79,11 @@ async function main() {
   // hora de corte de SU tenant.
   await registerShiftDayCutRepeatable();
   console.log("[workers] corte de día registrado (cada hora en punto)");
+  // residencia-4 (D-66): el escalado de un aviso sin acusar son cinco
+  // minutos, así que la pasada va cada minuto — con una cada cinco, el
+  // peor caso serían nueve y ya no es el número que el centro configuró.
+  await registerResidenciaGuardiaRepeatable();
+  console.log("[workers] residencia · escalado y ausencias registrados (cada minuto)");
   process.on("SIGINT", async () => {
     console.log("[workers] SIGINT — cerrando…");
     uploadSweeper.stop();
@@ -89,6 +100,7 @@ async function main() {
       reconciliationWorker.close(),
       agendaHoldTtlWorker.close(),
       shiftDayCutWorker.close(),
+      residenciaGuardiaWorker.close(),
     ]);
     process.exit(0);
   });

@@ -219,16 +219,28 @@ describe("pantalla 2 · el PIN", () => {
     expect(container.textContent).toContain("Volver a la puerta");
   });
 
-  it("el teclado es 3×4 y sus teclas son de 120 px", async () => {
+  it("el teclado es 3×4, y sus teclas 120 px en la tablet y 96 en el móvil", async () => {
     await pintar(<PuertaPin {...props} />);
     const teclas = [...container.querySelectorAll("button")].filter((b) =>
-      b.className.includes("w-tap-puerta-tecla"),
+      b.className.includes("tap-puerta-tecla"),
     );
     // Diez dígitos y el borrar. El hueco de abajo a la derecha no es un
     // botón: poner «Entrar» ahí invitaría a pulsarlo cuando el PIN ya se
     // ha enviado solo.
     expect(teclas).toHaveLength(11);
-    for (const t of teclas) expect(t.className).toContain("h-tap-puerta-tecla");
+    for (const t of teclas) {
+      // residencia-4 · dos tamaños. La misma pantalla la usa el móvil de
+      // guardia para ponerse de guardia (D-66), y a 390 px tres teclas
+      // de 120 no caben: se pisaban. 96 px en el móvil —el
+      // `tap-valoracion` que ya existe— y 120 en la tablet.
+      //
+      // Lo encontró el bucle visual y no este test: en jsdom no hay
+      // layout, así que contar las teclas y mirar su clase seguía verde
+      // con las teclas una encima de otra. Lo que este test puede
+      // sostener es que las DOS medidas están declaradas.
+      expect(t.className).toContain("lg:h-tap-puerta-tecla");
+      expect(t.className).toContain("h-tap-valoracion");
+    }
   });
 
   it("NADA SE ANIMA al pulsar: cambia de fondo", async () => {
@@ -361,6 +373,12 @@ describe("pantalla 3 · lo que toca ahora", () => {
     onHecho: () => {},
     onCorregir: () => {},
     onADemanda: () => {},
+    // residencia-4 · las constantes. Los dos nuevos van vacíos en el
+    // caso base: lo que se prueba aquí son las pantallas de
+    // residencia-3, y lo de las constantes tiene su propio fichero
+    // (`puerta-constante.test.tsx`).
+    onTomarConstante: () => {},
+    constantesDisponibles: [],
     onAlgoNoVaBien: () => {},
     onTerminar: () => {},
   };
@@ -512,12 +530,17 @@ describe("pantalla 3 · lo que toca ahora", () => {
     expect(container.textContent).toContain("+ Deposición");
   });
 
-  it("EL BOTÓN DE LA ENFERMERA NO SE PINTA · en su sitio, la frase (decisión 9)", async () => {
-    // Un botón que parece avisar y no avisa es peor que no tenerlo: se
-    // pulsa, se deja de buscar a la enfermera y nadie va.
+  it("residencia-4 · el AVISO no vive en esta pantalla, y es a propósito", async () => {
+    // residencia-3 pintaba aquí la frase «si no puede esperar, avisa a
+    // la enfermera en persona», porque el aviso no existía. Ya existe, y
+    // el botón NO está aquí: está dentro de la pantalla de la constante
+    // y de la de «algo no va bien», que es donde hay algo que apuntar
+    // con él. Un botón de avisar suelto en esta pantalla sería un aviso
+    // sin registro detrás, y quien viniera corriendo no tendría nada que
+    // mirar.
     await pintar(<PuertaLoQueToca {...props} />);
     expect(container.textContent).not.toContain("avisar a la enfermera");
-    expect(container.textContent).toContain(
+    expect(container.textContent).not.toContain(
       "Si no puede esperar, avisa a la enfermera en persona",
     );
   });
@@ -674,7 +697,17 @@ describe("pantalla 5 · algo no va bien", () => {
       <PuertaAlgoNoVaBien {...props} onApuntar={(x) => vistos.push(x)} />,
     );
     pulsar("Apuntarlo para el relevo");
-    expect(vistos).toEqual([{ texto: null, vozBase64: null }]);
+    // residencia-4 · el tipo y el matiz son OPCIONALES: sin tocar
+    // ningún botón siguen siendo `null` y el registro vale N1 (D-13).
+    expect(vistos).toEqual([
+      {
+        texto: null,
+        vozBase64: null,
+        evento: null,
+        matiz: null,
+        avisarEnfermera: false,
+      },
+    ]);
   });
 
   it("la nota de voz es MANTENER PULSADO, no «grabar / parar»", async () => {
@@ -685,23 +718,62 @@ describe("pantalla 5 · algo no va bien", () => {
     expect(container.textContent).not.toContain("Grabar");
   });
 
-  it("y EL BOTÓN DE LA ENFERMERA NO SE PINTA (decisión 9)", async () => {
+  it("residencia-4 · Y EL BOTÓN DE LA ENFERMERA YA SE PINTA", async () => {
+    // residencia-3 lo dejó apagado («un botón que parece avisar y no
+    // avisa es peor que no tenerlo») y en su sitio puso la frase de
+    // avisar en persona. Ya avisa, así que el botón está y la frase se
+    // va: tenerlas las dos diría dos cosas distintas a la vez.
     await pintar(<PuertaAlgoNoVaBien {...props} />);
-    expect(container.textContent).not.toContain(
+    expect(container.textContent).toContain(
       "No puede esperar: avisar a la enfermera",
     );
-    expect(container.textContent).toContain(
+    expect(container.textContent).not.toContain(
       "Si no puede esperar, avisa a la enfermera en persona",
     );
   });
 
-  it("pero EL HUECO ESTÁ PREPARADO: con la función, el botón sale", async () => {
-    // Encenderlo en residencia-4 es pasar una función, no rehacer la
-    // pantalla.
-    await pintar(<PuertaAlgoNoVaBien {...props} onAvisarEnfermera={() => {}} />);
-    expect(container.textContent).toContain(
-      "No puede esperar: avisar a la enfermera",
+  it("y es un INTERRUPTOR: lo que sale es el registro con su nivel subido", async () => {
+    // No es una acción que mande un aviso suelto. Pulsarlo cambia el
+    // texto del botón de apuntar y viaja dentro del registro, que es lo
+    // que hace que quien venga tenga algo que mirar.
+    const vistos: Array<{ avisarEnfermera: boolean }> = [];
+    await pintar(
+      <PuertaAlgoNoVaBien {...props} onApuntar={(x) => vistos.push(x)} />,
     );
+    pulsar("No puede esperar: avisar a la enfermera");
+    expect(container.textContent).toContain("Se avisará a la enfermera");
+    pulsar("Apuntar y avisar");
+    expect(vistos[0]?.avisarEnfermera).toBe(true);
+  });
+
+  it("los TIPOS están encima de la nota, y la caída pregunta UNA cosa", async () => {
+    const vistos: Array<{ evento: string | null; matiz: string | null }> = [];
+    await pintar(
+      <PuertaAlgoNoVaBien {...props} onApuntar={(x) => vistos.push(x)} />,
+    );
+    // La pregunta NO está hasta que se elige el tipo: una pantalla con
+    // las cinco preguntas abiertas es un formulario.
+    expect(container.textContent).not.toContain(
+      "¿Se ha dado en la cabeza o hay herida?",
+    );
+    pulsarExacto("Caída");
+    expect(container.textContent).toContain(
+      "¿Se ha dado en la cabeza o hay herida?",
+    );
+    pulsarExacto("Sí");
+    pulsar("Apuntarlo para el relevo");
+    expect(vistos[0]).toMatchObject({ evento: "CAIDA", matiz: "CON_GOLPE" });
+  });
+
+  it("y volver a pulsar el tipo lo QUITA: es el error de dedo más común", async () => {
+    const vistos: Array<{ evento: string | null }> = [];
+    await pintar(
+      <PuertaAlgoNoVaBien {...props} onApuntar={(x) => vistos.push(x)} />,
+    );
+    pulsarExacto("Vómito");
+    pulsarExacto("Vómito");
+    pulsar("Apuntarlo para el relevo");
+    expect(vistos[0]?.evento).toBeNull();
   });
 });
 
@@ -727,7 +799,7 @@ describe("pantalla 6 · apuntado", () => {
     expect(container.textContent).toContain(
       "Firmado por Ana López · 10:42 · turno de mañana",
     );
-    expect(container.textContent).toContain("Seguir en la 112");
+    expect(container.textContent).toContain("Seguir en la habitación 112");
   });
 
   it("SIN RED, la banda ámbar con las TRES cosas en orden", async () => {

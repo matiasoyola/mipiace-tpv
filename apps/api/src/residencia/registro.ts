@@ -96,7 +96,19 @@ export const VENTANA_DE_ANULACION_MS = 10 * 60_000;
 export type ValorDeRegistro =
   | { tipo: "BOOL"; hecho: true }
   | { tipo: "ORDINAL"; opcion: string; comoSiempre: boolean }
-  | { tipo: "NOTA" };
+  // residencia-4 · LA CONSTANTE. El número y su unidad, los dos dentro
+  // del valor cifrado. La unidad viaja con el número y no se deduce del
+  // catálogo al leer, por lo mismo que el registro guarda el
+  // `controlTypeId` y no sólo el código: el día que una versión nueva
+  // cambie la unidad de un control, «38,4» tiene que seguir diciendo
+  // grados y no otra cosa.
+  | { tipo: "NUMERIC"; numero: number; unidad: string | null }
+  // residencia-4 · «algo no va bien», ahora con TIPO opcional. Los dos
+  // campos van dentro del valor cifrado y no en columnas en claro: que
+  // doña Carmen se haya caído es salud. Lo que sí queda en claro es el
+  // `incident_type` de la incidencia que esto abre, y eso está declarado
+  // en la cabecera de la migración.
+  | { tipo: "NOTA"; evento?: string | null; matiz?: string | null };
 
 /**
  * Lo que la tablet manda como valor, antes de comprobarlo contra el
@@ -111,9 +123,15 @@ export type ValorDeRegistro =
  * invita a justificarse en vez de a avisar.
  */
 export interface ValorEntrante {
-  tipo: "BOOL" | "ORDINAL" | "NOTA";
+  tipo: "BOOL" | "ORDINAL" | "NUMERIC" | "NOTA";
   hecho?: boolean;
   opcion?: string;
+  /** residencia-4 · el número de una constante. Coma decimal en la
+   *  pantalla, punto en el JSON. */
+  numero?: number;
+  /** residencia-4 · el tipo de «algo no va bien» y su matiz. */
+  evento?: string | null;
+  matiz?: string | null;
 }
 
 /** Lo que hace falta saber de un control para validar un registro suyo, y
@@ -129,6 +147,14 @@ export interface ControlParaRegistrar {
   layer: string;
   nature: string;
   valueDomain: string;
+  /** residencia-4 · lo que hace falta para validar una constante: la
+   *  unidad que se guarda con el número y el rango que la pantalla deja
+   *  teclear. Fuera de él **no se guarda**: «¿38,4 o 384?» es un dedo que
+   *  se saltó la coma, y guardarlo abriría una incidencia falsa que
+   *  alguien tendría que cerrar. */
+  unit?: string | null;
+  inputMin?: number | null;
+  inputMax?: number | null;
   opciones: Array<{ code: string; isAsUsual: boolean }>;
 }
 
@@ -154,10 +180,55 @@ export function valorDeRegistro(
   entrante: ValorEntrante,
   control: ControlParaRegistrar,
 ): ValorDeRegistro {
-  if (control.valueDomain === "NUMERIC" || control.valueDomain === "SCORE") {
+  // residencia-4 · **LAS CONSTANTES ENTRAN.** Lo que residencia-3
+  // rechazaba con `CONTROL_FUERA_DE_ALCANCE` ahora se registra, se
+  // gradúa y, si cruza umbral, abre incidencia y hace sonar un móvil.
+  // Las escalas (`SCORE`) siguen fuera: son Fase 2.
+  if (control.valueDomain === "NUMERIC") {
+    if (entrante.tipo !== "NUMERIC" || typeof entrante.numero !== "number") {
+      throw new RegistroInvalido(
+        "VALOR_NO_CUADRA",
+        `«${control.code}» se apunta con un número.`,
+      );
+    }
+    if (!Number.isFinite(entrante.numero)) {
+      throw new RegistroInvalido(
+        "VALOR_NO_CUADRA",
+        `«${control.code}» se apunta con un número.`,
+      );
+    }
+    // ── FUERA DE RANGO NO SE GUARDA ───────────────────────────────
+    //
+    // Y es la única validación de este fichero que rechaza algo que
+    // «ocurrió», en contra de la invariante de arriba. La razón es que
+    // **no ocurrió**: una temperatura de 384 °C o de 3,65 °C es un dedo
+    // que se saltó la coma, no un cuidado que se hizo. Guardarla
+    // abriría una incidencia N3 falsa, haría sonar el móvil de guardia a
+    // las tres de la mañana y dejaría a alguien cerrando una fiebre que
+    // nadie tuvo — que es exactamente cómo se consigue que la enfermera
+    // deje de mirar el móvil.
+    //
+    // La pantalla lo ataja antes (el teclado no deja salir del rango),
+    // así que esto es la segunda red: cubre un lote viejo y cubre a
+    // cualquiera que llame a la ruta por su cuenta.
+    const min = control.inputMin ?? null;
+    const max = control.inputMax ?? null;
+    if ((min != null && entrante.numero < min) || (max != null && entrante.numero > max)) {
+      throw new RegistroInvalido(
+        "VALOR_FUERA_DE_RANGO",
+        `${entrante.numero} no es una lectura posible de «${control.name}» (de ${min ?? "?"} a ${max ?? "?"}${control.unit ? " " + control.unit : ""}). Repite la toma.`,
+      );
+    }
+    return {
+      tipo: "NUMERIC",
+      numero: entrante.numero,
+      unidad: control.unit ?? null,
+    };
+  }
+  if (control.valueDomain === "SCORE") {
     throw new RegistroInvalido(
       "CONTROL_FUERA_DE_ALCANCE",
-      `«${control.code}» es una medida y la puerta todavía no la registra: las constantes, sus umbrales y los eventos que disparan son residencia-4, y las escalas validadas la Fase 2.`,
+      `«${control.code}» es una escala validada y la puerta todavía no la registra: las escalas son Fase 2.`,
     );
   }
   if (control.valueDomain === "BOOL") {
@@ -204,7 +275,22 @@ export function valorDeRegistro(
         `«${control.code}» se apunta como nota.`,
       );
     }
-    return { tipo: "NOTA" };
+    // residencia-4 · el TIPO y su matiz, si la auxiliar tocó uno de los
+    // botones. **Opcionales**, y eso es D-13 entero: sin elegir nada
+    // sigue siendo un registro completo y vale N1. Si la pantalla
+    // obligara a categorizar, la auxiliar no registraría.
+    //
+    // No se valida contra la plantilla aquí a propósito: un tipo que la
+    // plantilla no conoce —una tablet nueva contra un servidor viejo—
+    // **se guarda igual** y gradúa como «algo no va bien» (N1). Perder el
+    // registro por un código que no cuadra sería perder el aviso.
+    const evento = normalizarCodigo(entrante.evento);
+    const matiz = normalizarCodigo(entrante.matiz);
+    return {
+      tipo: "NOTA",
+      ...(evento ? { evento } : {}),
+      ...(matiz ? { matiz } : {}),
+    };
   }
   throw new RegistroInvalido(
     "CONTROL_FUERA_DE_ALCANCE",
@@ -233,6 +319,15 @@ export function valorDeRegistro(
  * los dos primeros lo decide el catálogo, porque de esta columna depende
  * cuántas filas caben y eso no puede quedar en manos del cuerpo del POST.
  */
+/** Un código del cuerpo, en mayúsculas y sin espacios, o `null`. Los
+ *  códigos de evento y de matiz son identificadores, no texto: si llega
+ *  «caida» se guarda `CAIDA`. */
+function normalizarCodigo(v: string | null | undefined): string | null {
+  if (typeof v !== "string") return null;
+  const limpio = v.trim().toUpperCase();
+  return limpio.length > 0 ? limpio : null;
+}
+
 export function ocurrenciaDe(
   control: ControlParaRegistrar,
   recordedAt: Date,
@@ -339,6 +434,16 @@ export interface RegistroEntrante {
   nota?: string | null;
   /** La nota de voz, en base64. Opcional (D-13). */
   voz?: { webmBase64: string } | null;
+  /**
+   * residencia-4 (alcance 7) · **«No puede esperar: avisar a la
+   * enfermera».** El hueco que residencia-3 dejó preparado
+   * (`onAvisarEnfermera`), encendido.
+   *
+   * Fuerza **como mínimo N2** sobre lo que se esté apuntando y dispara el
+   * aviso. «Como mínimo» y no «N2»: si lo que se apunta ya es un N3 —una
+   * caída con golpe—, pulsarlo no puede bajarlo.
+   */
+  avisarEnfermera?: boolean;
 }
 
 export type EstadoDeRegistro = "guardado" | "corrige" | "ya-estaba" | "rechazado";
@@ -351,6 +456,27 @@ export interface ResultadoDeRegistro {
   /** Puestos cuando `estado = "rechazado"`. */
   codigo?: string;
   mensaje?: string;
+  /**
+   * residencia-4 · lo que hace falta para DERIVAR, puesto sólo cuando la
+   * fila entró de verdad.
+   *
+   * Va aquí y no dentro de `escribirRegistro` para que este fichero no
+   * sepa nada de incidencias ni de avisos: lo que escribe el registro
+   * escribe el registro, y quien decide si eso abre una incidencia es la
+   * ruta llamando a `derivacion.ts`. Con la derivación aquí dentro, un
+   * lote a medias dejaría media incidencia, y «un cuidado hecho se
+   * apunta» dejaría de ser lo primero que pasa.
+   */
+  paraDerivar?: {
+    clientId: string;
+    controlCode: string;
+    valor: ValorDeRegistro;
+    recordedAt: Date;
+    centerShiftId: string | null;
+    careDay: string;
+    avisarEnfermera: boolean;
+    firma: { userId: string; careRoleAssignmentId: string };
+  };
 }
 
 /** Lo que `escribirLote` necesita saber del contexto, ya resuelto. */
@@ -601,9 +727,23 @@ async function escribirUno(
     throw err;
   }
 
+  // residencia-4 · lo que la ruta necesita para derivar. Se devuelve
+  // también en una CORRECCIÓN, y es deliberado: corregir un 38,4 por un
+  // 39,6 tiene que volver a graduar — si no, la corrección arreglaría el
+  // histórico y dejaría el aviso puesto por el valor equivocado.
+  const paraDerivar = {
+    clientId: entrante.clientId,
+    controlCode: control.code,
+    valor,
+    recordedAt,
+    centerShiftId,
+    careDay: entrante.careDay,
+    avisarEnfermera: entrante.avisarEnfermera === true,
+    firma: ctx.firma,
+  };
   return correctsRecordId
-    ? { id: entrante.id, estado: "corrige", corrigeA: correctsRecordId }
-    : { id: entrante.id, estado: "guardado" };
+    ? { id: entrante.id, estado: "corrige", corrigeA: correctsRecordId, paraDerivar }
+    : { id: entrante.id, estado: "guardado", paraDerivar };
 }
 
 // ── Leer ─────────────────────────────────────────────────────────────

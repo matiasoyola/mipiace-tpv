@@ -56,6 +56,10 @@ import { installBackGuard, setBackFallback } from "./hooks/useBackGuard.js";
 import { OutboxChip } from "./pages/CheckoutPage.outboxChip.js";
 import { KitchenScreen } from "./kitchen/KitchenScreen.js";
 import { PuertaApp } from "./residencia/PuertaApp.js";
+// residencia-4 (D-66) · el móvil de guardia. La MISMA APK en otro modo,
+// igual que la cocina y la puerta: lo que decide qué pantalla arranca es
+// qué contesta `/devices/me`.
+import { GuardiaApp } from "./residencia/GuardiaApp.js";
 import { useAvisosListo } from "./kitchen/tpv/useAvisosListo.js";
 import { useCaminoDirecto } from "./kitchen/tpv/useCaminoDirecto.js";
 import { PairScreen } from "./pages/PairScreen.js";
@@ -411,6 +415,12 @@ export function App() {
   // `PuertaApp` con el mismo `startOutboxSync` de siempre. El corte sigue
   // estando aquí: lo que no se monta es el outbox de la venta con su chip,
   // su bloqueo de mesas y su cierre de día.
+  // residencia-4 · «modo guardia». Igual que la puerta, ANTES de montar
+  // nada del terminal: un móvil de guardia no cobra, no abre turno y no
+  // emite registro de facturación.
+  if (state.kind === "guard") {
+    return <GuardiaApp me={state.data} onRefresh={refresh} />;
+  }
   if (state.kind === "room") {
     return <PuertaApp me={state.data} onRefresh={refresh} />;
   }

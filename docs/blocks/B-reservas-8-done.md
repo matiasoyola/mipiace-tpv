@@ -391,8 +391,87 @@ rama** (`ac0377b`), sin conflictos, y las dos suites y los tres `tsc` están ver
 combinado**.
 
 Las dos migraciones del 18-10 conviven: `20261018000000_fiscal_link_sin_cascada` ordena antes que
-`20261018000000_reservas_8_bonos` y no se tocan (la primera reemplaza
+la de los bonos y no se tocan (la primera reemplaza
 `mipiacetpv_tickets_fiscal_link_guard`; la segunda no lo mira).
+
+### El segundo merge: residencia-4 (PR #31)
+
+`master` se volvió a mover antes de que el PR #32 entrara: pasó a `7b96e81` con residencia-4 (PR
+#31) y el prompt de residencia-5. El merge está hecho en la rama y toca siete ficheros.
+
+Seis los fusionó git solo —`schema.prisma`, `apps/api/src/server.ts`,
+`apps/api/src/superadmin/eliminar-cuenta.ts`, `apps/admin/src/App.tsx`,
+`apps/tpv-web/src/App.tsx` y `apps/tpv-web/src/hooks/useDeviceBootstrap.ts`— y se comprobó que no
+se comió nada de ningún lado por el camino corto: el diff del árbol combinado contra
+`origin/master` es de **sólo inserciones**, y contra la punta de la rama (`be6c1b9`) también. Las
+cuatro líneas que el diff del `schema.prisma` cuenta como borradas son realineados de espacios de
+residencia-4, no relaciones.
+
+El único conflicto de verdad es `apps/admin/src/AdminShell.tsx`, y es de **posición**: los dos
+lados añaden entradas a la barra lateral en el mismo hueco. Se quedan las de los dos, cada una
+donde le toca por su capability: Incidencias y Guardia dentro del grupo de residencia y detrás de
+Plantillas (el orden que pide residencia-4: Incidencias primero, que es lo que la dirección abre
+cada mañana), y «Bonos» después del grupo, porque su capability es `bonos` y no `residencia`. Los
+tres iconos (`AlertTriangle`, `BellRing`, `Ticket`) ya venían los tres en el import fusionado.
+
+**El orden de borrado de «Eliminar cuenta» aguanta, y había que mirarlo.** residencia-4 añade seis
+tablas con FK `RESTRICT` al tenant (`incidents`, `incident_actions`, `family_communications`,
+`guard_alerts`, `guard_shift_sessions`, `resident_threshold_overrides`) y dos de ellas
+—`incidents` y `resident_threshold_overrides`— con `RESTRICT` también a `clients`. No hay nada que
+reordenar: residencia-4 **no borra** esas tablas, las bloquea (el libro es la evidencia de las
+acciones correctoras que AENOR audita, así que un centro con una avería declarada no se elimina:
+se le dice por qué). El paso 6b de los bonos sigue siendo el último `deleteMany` antes del `DELETE
+FROM tenants`, y por tanto sigue yendo antes de la cascada que se lleva `clients` — que es lo que
+`Voucher.client` con `RESTRICT` exige. El diff de `eliminar-cuenta.ts` contra `origin/master` son
+exactamente las dos líneas de bonos y su párrafo 6b de la cabecera: nada más.
+
+**La migración se renombró.** De `20261018000000_reservas_8_bonos` a
+`20261018030000_reservas_8_bonos`, para que ordene **detrás** de las dos de residencia-4
+(`20261018010000_residencia_4_tipos` y `20261018020000_residencia_4_gravedad_e_incidencias`) y no
+en medio de ellas. El nombre lo lee un test —`apps/api/test/bonos-migracion.test.ts`, que abre el
+`.sql` por su ruta— y viaja con el renombrado.
+
+Y ninguna de las tres se pisa: residencia-4 crea diez enums y tres triggers suyos
+(`incidents_inmutable`, `incident_actions_append_only`, `family_communications_append_only`),
+bonos crea el suyo (`voucher_movements_append_only`), y de `tenants` sólo tira bonos, y sólo para
+añadir columnas.
+
+Comprobado con una base **limpia**, que es la única forma de ver el orden de verdad (sobre una
+base ya migrada `migrate deploy` no aplica nada y pasa en verde sin decir nada):
+
+```bash
+docker exec mipiacetpv-postgres psql -U mipiacetpv -d postgres \
+  -c 'CREATE DATABASE mipiacetpv_r8merge;'
+cd packages/db && DATABASE_URL='postgresql://mipiacetpv:mipiacetpv_dev@localhost:5432/mipiacetpv_r8merge?schema=public' \
+  npx prisma migrate deploy
+# → las 89, en orden, `20261018030000_reservas_8_bonos` la última.
+#   "All migrations have been successfully applied."
+```
+
+El `migrate diff` contra esa base marca 54 tablas con deriva, y **no es de este merge**: son el
+`DEFAULT now()` que el `.sql` pone en `updated_at` frente al `@updatedAt` de Prisma (que es de
+aplicación y no de base) y las FK declaradas en un solo sentido. Está en tablas de todo el
+histórico del repo, desde `apk_download_codes`, no sólo en las nuevas.
+
+### Verde sobre el árbol combinado (con residencia-4 dentro)
+
+- Suite de siempre: **394 ficheros, 5695 tests** (10 saltados).
+- Suite e2e contra Postgres real: **45 ficheros, 968 tests** — incluye el `residencia-4.e2e.ts`
+  que entró con el PR #31.
+- `tsc --noEmit` limpio en `apps/api`, y `tsc -b` limpio en `apps/tpv-web` y `apps/admin`.
+
+Con base y Redis propios de la sesión, que es la lección de siempre: la suite e2e hace `DROP
+SCHEMA public` y la API de dev de otro worktree se come los jobs de la de al lado.
+
+```bash
+pnpm db:generate   # el cliente de Prisma, después de mergear el schema
+pnpm test
+docker run -d --name mipiacetpv-r8merge-redis -p 6383:6379 redis:7-alpine
+docker exec mipiacetpv-postgres psql -U mipiacetpv -d postgres \
+  -c 'CREATE DATABASE mipiacetpv_e2e_r8merge;'
+E2E_DATABASE_URL='postgresql://mipiacetpv:mipiacetpv_dev@127.0.0.1:5432/mipiacetpv_e2e_r8merge' \
+  REDIS_URL='redis://127.0.0.1:6383' pnpm test:e2e
+```
 
 ---
 

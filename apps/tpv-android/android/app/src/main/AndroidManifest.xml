@@ -26,6 +26,18 @@
 
         </activity>
 
+        <!-- residencia-4 (D-66) · EL SERVICIO DEL MÓVIL DE GUARDIA.
+             Mantiene el sondeo con la pantalla apagada y levanta la
+             notificación de alarma. `dataSync` es el tipo que le
+             corresponde: lo que hace es sincronizar con el servidor.
+             Ver la cabecera de GuardiaService.java para por qué esto y
+             no FCM (y para la respuesta a «¿depende de servicios de
+             Google?»: no). -->
+        <service
+            android:name=".GuardiaService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -72,6 +84,28 @@
     <uses-feature
         android:name="android.hardware.camera.any"
         android:required="false" />
+
+    <!-- residencia-4 (D-66) · EL MÓVIL DE GUARDIA.
+
+         FOREGROUND_SERVICE + su tipo: el servicio que mantiene el sondeo
+         con la pantalla apagada. POST_NOTIFICATIONS es de runtime desde
+         Android 13 y lo pide GuardiaAlarmPlugin al ponerse de guardia —
+         no al arrancar la app, porque un permiso que se pide en una
+         pantalla donde no se entiende para qué es, se deniega.
+
+         WAKE_LOCK mantiene la CPU entre sondeos (sin él, Doze alarga los
+         intervalos y el aviso de las cuatro de la mañana llega tarde).
+         VIBRATE y USE_FULL_SCREEN_INTENT son lo que hace que un N4
+         encienda la pantalla en vez de quedarse en la barra.
+
+         NINGUNO de estos es un permiso de Google Play Services: la APK
+         sigue funcionando en una tablet sin GMS. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <!-- A1-Android · Frente 2 · impresión USB Host (impresora térmica ESC/POS
          del terminal todo-en-uno). No requiere permiso en runtime: el

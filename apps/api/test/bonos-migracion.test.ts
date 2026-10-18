@@ -38,7 +38,7 @@ import { readFileSync } from "node:fs";
 import { MOTIVOS_CORRECCION } from "@mipiacetpv/bonos";
 import { describe, expect, it } from "vitest";
 
-const NOMBRE = "20261018000000_reservas_8_bonos";
+const NOMBRE = "20261018030000_reservas_8_bonos";
 const sql = readFileSync(
   new URL(
     `../../../packages/db/prisma/migrations/${NOMBRE}/migration.sql`,

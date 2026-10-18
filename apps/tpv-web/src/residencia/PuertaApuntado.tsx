@@ -2,7 +2,7 @@
 //
 // Check verde, «Apuntado», «Firmado por Ana López · 10:42 · turno de
 // mañana», la lista de lo apuntado con su estado («en la tablet» /
-// «enviado»), «Deshacer el último» y «Seguir en la 112». Vuelve a reposo a
+// «enviado»), «Deshacer el último» y «Seguir en la habitación 112». A reposo a
 // los 10 s sin tocar nada.
 //
 // Y si no hay red, la banda ámbar de arriba: **«Sin red. Lo guarda la
@@ -40,6 +40,44 @@ export interface LineaApuntada {
   rechazo?: string | null;
 }
 
+/**
+ * residencia-4 (alcance, pantalla 6) · **QUÉ NIVEL SALIÓ, SI EL AVISO
+ * SALIÓ Y QUIÉN LO HA ACUSADO.**
+ *
+ * Tres cosas y las tres hacen falta, porque las tres contestan preguntas
+ * distintas que la auxiliar se hace delante de la puerta: «¿esto es
+ * grave?», «¿se ha enterado alguien?» y «¿viene alguien?».
+ *
+ * ── «SIN RED NO SE FINGE» ──────────────────────────────────────────
+ *
+ * Es el peor fallo posible del bloque. Mientras el lote siga en la
+ * tablet, `servidor` es `null` y la pantalla **no dice «avisado»**: dice,
+ * en ámbar, que el aviso NO ha salido y que hay que avisar en persona.
+ * No es un matiz de redacción — es la diferencia entre que alguien vaya a
+ * buscar a la enfermera y que se quede tranquila.
+ *
+ * Y cuando sale, sale con su hora original y su retraso a la vista: eso
+ * lo pinta el móvil de guardia, que es quien lo recibe.
+ */
+export interface AvisoDeLaPantalla6 {
+  /** El nivel que la TABLET previó con la plantilla de su caché. Se pinta
+   *  mientras el servidor no conteste, y es lo que decide si la banda
+   *  ámbar del «no ha salido» aparece. */
+  nivelPrevisto: "N0" | "N1" | "N2" | "N3" | "N4" | null;
+  /** Lo que contestó el SERVIDOR, que es el que manda. `null` mientras el
+   *  lote siga en la cola. */
+  servidor: {
+    incidenciaId: string;
+    nivel: "N0" | "N1" | "N2" | "N3" | "N4";
+    nombreDelTipo: string;
+    /** Los canales en los que ha sonado. Vacío = no tocaba avisar. */
+    avisadoEn: string[];
+    acusadoPor: string | null;
+    acusadoComo: string | null;
+    acusadoEn: string | null;
+  } | null;
+}
+
 export interface PuertaApuntadoProps {
   numeroDeHabitacion: string;
   firmadoPor: string;
@@ -54,6 +92,9 @@ export interface PuertaApuntadoProps {
   /** `null` = no se puede deshacer (no es suyo, o ya salió de la ventana). */
   onDeshacer: (() => void) | null;
   onSeguir: () => void;
+  /** residencia-4 · `null` cuando el gesto no derivó nada (el caso
+   *  normal: un «como siempre», un cambio postural). */
+  aviso?: AvisoDeLaPantalla6 | null;
 }
 
 export function PuertaApuntado({
@@ -65,9 +106,15 @@ export function PuertaApuntado({
   lineas,
   onDeshacer,
   onSeguir,
+  aviso = null,
 }: PuertaApuntadoProps) {
   const pendientes = lineas.filter((l) => l.enLaTablet).length;
   const rechazados = lineas.filter((l) => l.rechazo);
+  const nivel = aviso?.servidor?.nivel ?? aviso?.nivelPrevisto ?? null;
+  // «Tenía que avisar» = N2 o más. Es lo que decide si la ausencia de
+  // confirmación del servidor es un silencio normal o una banda ámbar.
+  const tocabaAvisar = nivel === "N2" || nivel === "N3" || nivel === "N4";
+  const salio = (aviso?.servidor?.avisadoEn.length ?? 0) > 0;
 
   return (
     <div className="min-h-screen bg-mipiace-stone text-mipiace-ink flex flex-col">
@@ -99,6 +146,69 @@ export function PuertaApuntado({
             ))}
           </ul>
           <p className="mt-2">Avisa a dirección: no se arregla reintentando.</p>
+        </div>
+      )}
+
+      {/* ── residencia-4 · N4: LLAMA AL 112, EN GRANDE Y ARRIBA ───── */}
+      {nivel === "N4" && (
+        <p
+          role="alert"
+          className="bg-red-600 text-white px-8 py-6 text-[40px] font-bold text-center"
+        >
+          Llama al 112
+        </p>
+      )}
+
+      {/* ── El nivel y el aviso ─────────────────────────────────────── */}
+      {aviso && nivel && nivel !== "N0" && (
+        <div className="px-8 pt-5">
+          <p
+            role="status"
+            className={`rounded-xl px-6 py-4 text-[24px] ${bandaDelNivel(nivel)}`}
+          >
+            {aviso.servidor
+              ? `${aviso.servidor.nombreDelTipo} · ${nombreCortoDelNivel(nivel)}`
+              : `${nombreCortoDelNivel(nivel)} — lo está comprobando el servidor`}
+          </p>
+
+          {aviso.servidor == null && tocabaAvisar && (
+            // **La banda que no se puede ahorrar.** Ver la cabecera de
+            // `AvisoDeLaPantalla6`.
+            <p
+              role="alert"
+              className="mt-3 rounded-xl bg-amber-100 text-amber-900 px-6 py-4 text-[24px]"
+            >
+              Sin red: el aviso <strong>NO ha salido</strong>. Avisa a la
+              enfermera en persona. La tablet lo enviará sola cuando vuelva.
+            </p>
+          )}
+
+          {aviso.servidor != null && salio && (
+            <p className="mt-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 px-6 py-4 text-[22px]">
+              Avisado en {aviso.servidor.avisadoEn.map(nombreDelCanal).join(" y ")}.
+              {aviso.servidor.acusadoPor ? (
+                <>
+                  {" "}
+                  <strong>
+                    Aviso recibido por {aviso.servidor.acusadoPor}
+                    {aviso.servidor.acusadoEn
+                      ? ` · ${hhmm(aviso.servidor.acusadoEn)}`
+                      : ""}
+                  </strong>
+                  .
+                </>
+              ) : (
+                " Esperando a que alguien lo coja…"
+              )}
+            </p>
+          )}
+
+          {aviso.servidor != null && !salio && (
+            <p className="mt-3 text-[20px] text-slate-600">
+              No suena en ningún móvil: queda apuntado para el turno
+              siguiente.
+            </p>
+          )}
         </div>
       )}
 
@@ -157,9 +267,58 @@ export function PuertaApuntado({
           onClick={onSeguir}
           className="min-h-tap-puerta rounded-2xl bg-mipiace-coral text-white px-10 text-[26px] font-semibold active:bg-mipiace-coral-dark"
         >
-          Seguir en la {numeroDeHabitacion}
+          {/* «Seguir en la habitación 112» y no «Seguir en la 112»: lo
+              encontró el bucle visual en la captura del N4, donde la banda
+              roja dice «Llama al 112» justo encima. Con la habitación 112
+              las dos frases se leen igual y el botón parecía el de llamar. */}
+          Seguir en la habitación {numeroDeHabitacion}
         </button>
       </footer>
     </div>
   );
+}
+
+/** El color de la banda del nivel. El mismo criterio que la pantalla de
+ *  la constante: rojo sólido para la emergencia, ámbar para lo que hay
+ *  que ver ahora, gris para lo que espera al relevo. */
+function bandaDelNivel(nivel: string): string {
+  switch (nivel) {
+    case "N4":
+      return "bg-red-600 text-white font-semibold";
+    case "N3":
+      return "bg-red-100 text-red-900";
+    case "N2":
+      return "bg-amber-100 text-amber-900";
+    default:
+      return "bg-slate-100 text-slate-700";
+  }
+}
+
+/** El nivel en palabras. El código va entre paréntesis porque es lo que
+ *  aparece después en el libro y en el relevo, pero lo que se lee delante
+ *  de una puerta es la frase. */
+function nombreCortoDelNivel(nivel: string): string {
+  switch (nivel) {
+    case "N4":
+      return "Emergencia (N4)";
+    case "N3":
+      return "Hay que decidir algo clínico (N3)";
+    case "N2":
+      return "Alguien tiene que verlo ahora (N2)";
+    case "N1":
+      return "Para el turno siguiente (N1)";
+    default:
+      return "Queda constancia (N0)";
+  }
+}
+
+function nombreDelCanal(canal: string): string {
+  return canal === "ENFERMERIA" ? "enfermería" : "dirección";
+}
+
+function hhmm(iso: string): string {
+  return new Date(iso).toLocaleTimeString("es-ES", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
