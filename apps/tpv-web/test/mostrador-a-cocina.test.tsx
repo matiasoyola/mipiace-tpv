@@ -130,6 +130,42 @@ function banco(opts: BancoOpts = {}) {
   const envios: Array<{ ticketId: string; body: Record<string, unknown> }> = [];
   const enviadas = new Map<string, number>(Object.entries(opts.enviadas ?? {}));
   const lineasMesa = (opts.lineasDeMesa ?? []).slice();
+  /** Las líneas que el borrador de mostrador llegó a tener, para que el
+   *  estado de cocina pueda decir cuáles ya salieron. */
+  const lineasMostrador: Array<{ id: string; units: number }> = [];
+
+  /** El borrador de mostrador tal como lo devuelve el servidor. */
+  function draftDeMostrador() {
+    return {
+      id: TICKET_MOSTRADOR,
+      status: "DRAFT",
+      externalId: "ext-m3",
+      tableId: null,
+      table: null,
+      diners: null,
+      total: "2.42",
+      totalTax: "0.22",
+      totalDiscount: "0",
+      createdAt: new Date().toISOString(),
+      lastSentAt: null,
+      lastSentRevision: 0,
+      lines: lineasMostrador.map((l) => ({
+        id: l.id,
+        productId: CATALOGO[0]!.id,
+        variantId: null,
+        holdedProductId: null,
+        sku: "TOS1",
+        nameSnapshot: "Tostada con tomate",
+        units: String(l.units),
+        unitPrice: "2.2",
+        discountPct: "0",
+        taxRate: "10",
+        subtotal: "2.2",
+        total: "2.42",
+        modifiers: null,
+      })),
+    };
+  }
 
   apiMock.apiWithCashier.mockImplementation(
     async (
@@ -154,44 +190,39 @@ function banco(opts: BancoOpts = {}) {
         if (opts.borradorFalla) throw new Error("sin red");
         const body = o.body as { lines: Array<Record<string, unknown>> };
         borradores.push(o.body ?? {});
+        for (const [i, l] of body.lines.entries()) {
+          lineasMostrador.push({
+            id: String(l.lineExternalId ?? `l-${i}`),
+            units: Number(l.units),
+          });
+        }
         return {
-          ticket: {
-            id: TICKET_MOSTRADOR,
-            status: "DRAFT",
-            externalId: "ext-m3",
-            tableId: null,
-            table: null,
-            diners: null,
-            total: "2.42",
-            totalTax: "0.22",
-            totalDiscount: "0",
-            createdAt: new Date().toISOString(),
-            lastSentAt: null,
-            lastSentRevision: 0,
-            lines: body.lines.map((l, i) => ({
-              id: String(l.lineExternalId ?? `l-${i}`),
-              productId: (l.productId as string) ?? null,
-              variantId: null,
-              holdedProductId: null,
-              sku: String(l.sku),
-              nameSnapshot: String(l.nameSnapshot),
-              units: String(l.units),
-              unitPrice: String(l.unitPrice),
-              discountPct: "0",
-              taxRate: String(l.taxRate),
-              subtotal: "2.2",
-              total: "2.42",
-              modifiers: null,
-            })),
-          },
+          ticket: draftDeMostrador(),
           counterNumber: 3,
           counterLabel: "Mostrador nº 3",
         };
+      }
+      // auditoria-sirope (#25) · desde que la venta tiene borrador, lo
+      // que se marca va al servidor por su ruta propia.
+      if (path.startsWith("/mostrador/") && path.endsWith("/lines")) {
+        const b = o!.body as Record<string, unknown>;
+        lineasMostrador.push({
+          id: String(b.lineExternalId),
+          units: Number(b.units),
+        });
+        return { ticket: draftDeMostrador() };
+      }
+      if (path.includes("/lines/") && o?.method === "PATCH") {
+        const id = path.split("/lines/")[1]!;
+        const l = lineasMostrador.find((x) => x.id === id);
+        if (l && o.body?.units !== undefined) l.units = Number(o.body.units);
+        return { ticket: draftDeMostrador() };
       }
       if (path.includes("/send-to-kitchen/escpos")) {
         const ticketId = path.split("/tickets/")[1]!.split("/")[0]!;
         envios.push({ ticketId, body: o?.body ?? {} });
         for (const l of lineasMesa) enviadas.set(l.id, l.units);
+        for (const l of lineasMostrador) enviadas.set(l.id, l.units);
         return {
           revision: 1,
           sentAt: "2026-10-18T13:42:00.000Z",
@@ -222,7 +253,7 @@ function banco(opts: BancoOpts = {}) {
         return {
           diners: 2,
           revision: 1,
-          lines: lineasMesa.map((l) => ({
+          lines: [...lineasMesa, ...lineasMostrador].map((l) => ({
             id: l.id,
             units: l.units,
             sentUnits: enviadas.get(l.id) ?? 0,
@@ -297,7 +328,12 @@ async function settle() {
 type Props = React.ComponentProps<typeof SalePage>;
 
 async function render(
-  opts: { tableContext?: TableContext | null; lineasDeMesa?: unknown[] } = {},
+  opts: {
+    tableContext?: TableContext | null;
+    lineasDeMesa?: unknown[];
+    /** auditoria-sirope (#12) · el módulo «Cocina» del tenant. */
+    cocina?: boolean;
+  } = {},
 ) {
   root = createRoot(container);
   const props = {
@@ -312,7 +348,7 @@ async function render(
       (opts.lineasDeMesa ?? []) as Parameters<typeof mapServerDraftLines>[0],
     ),
     initialKitchen: null,
-    kitchenDisplayEnabled: true,
+    kitchenDisplayEnabled: opts.cocina ?? true,
     kitchenSettings: {
       courseMode: "ESPERA" as const,
       seatMode: "ALERGIA" as const,
@@ -482,5 +518,41 @@ describe("#19 · una línea sin sección NO se da por enviada", () => {
     expect($('[data-testid="comanda-toast"]')!.textContent).not.toMatch(
       /nº 1 enviada/i,
     );
+  });
+});
+
+describe("#12 · con Cocina apagada el TPV no habla de cocina", () => {
+  it("sin pantalla ni impresora no hay botón «Enviar» ni rótulos de cocina", async () => {
+    // EL SABOTAJE: pintar el botón pase lo que pase devuelve el «EN
+    // COCINA · Comanda nº 1 enviada · Reenviar (nº 2)» de la captura 27,
+    // con nadie al otro lado.
+    banco();
+    await render({ cocina: false });
+    await click(producto("Tostada con tomate"));
+
+    expect($('[data-testid="comanda-enviar"]')).toBeNull();
+    expect($('[data-testid="comanda-eyebrow-sin-enviar"]')).toBeNull();
+    expect($('[data-testid="comanda-eyebrow-cocina"]')).toBeNull();
+    // Y la línea sigue en pantalla: lo que se va es el rótulo, no el
+    // pedido.
+    expect(container.textContent).toMatch(/Tostada con tomate/);
+  });
+
+  it("con Cocina encendida el botón está", async () => {
+    banco();
+    await render();
+    await click(producto("Tostada con tomate"));
+    expect($('[data-testid="comanda-enviar"]')).not.toBeNull();
+  });
+
+  it("«Reenviar» no se ofrece sin líneas nuevas", async () => {
+    banco();
+    await render();
+    await click(producto("Tostada con tomate"));
+    await click($('[data-testid="comanda-enviar"]'));
+    // El banco devuelve el estado de cocina con la línea ya enviada, así
+    // que no queda nada nuevo: reenviar lo mismo gastaría un número de
+    // comanda y pintaría una tarjeta vacía en la pantalla del cocinero.
+    expect($('[data-testid="comanda-enviar"]')).toBeNull();
   });
 });

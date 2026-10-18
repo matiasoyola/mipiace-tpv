@@ -44,7 +44,7 @@ import { ensureCajaEnabled } from "../lib/caja-gate.js";
 const UUID_V4 =
   "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$";
 
-interface LineBody {
+export interface LineBody {
   productId?: string;
   variantId?: string;
   holdedProductId?: string;
@@ -196,65 +196,15 @@ export async function registerTableOperativaRoutes(
         }
       }
 
-      // Resolver modificadores estructurados antes del cálculo.
-      const [modifierResult] = await resolveModifierSelectionsForLines(
-        prisma,
-        cashier.tid,
-        [
-          {
-            productId: body.productId ?? null,
-            selections: body.modifierSelections ?? [],
-          },
-        ],
-      );
-      if (modifierResult && !modifierResult.ok) {
-        return reply
-          .code(400)
-          .send(buildModifierErrorReply(modifierResult, body.nameSnapshot));
-      }
-      const modifierSnapshot = modifierResult?.ok
-        ? modifierResult.resolved.snapshot
-        : [];
-      const unitPriceDeltaCents = modifierResult?.ok
-        ? modifierResult.resolved.unitPriceDeltaCents
-        : 0;
-
-      const lineId = body.lineExternalId ?? randomUUID();
-      const lineSnapshot = computeTicket([
-        {
-          units: body.units,
-          unitPrice: body.unitPrice + unitPriceDeltaCents / 100,
-          discountPct: body.discountPct,
-          taxRate: body.taxRate,
-        },
-      ]).lines[0]!;
-      const updated = await prisma.$transaction(async (tx) => {
-        await tx.ticketLine.create({
-          data: {
-            id: lineId,
-            ticketId: draft.id,
-            productId: body.productId ?? null,
-            variantId: body.variantId ?? null,
-            holdedProductId: body.holdedProductId ?? null,
-            sku: body.sku,
-            nameSnapshot: body.nameSnapshot,
-            units: new Prisma.Decimal(body.units),
-            // unitPrice persistido = BASE (sin deltas). Los deltas viven
-            // como datos desnormalizados dentro de `modifiers` y ya están
-            // reflejados en `subtotal`/`total`.
-            unitPrice: new Prisma.Decimal(body.unitPrice),
-            discountPct: new Prisma.Decimal(body.discountPct),
-            taxRate: new Prisma.Decimal(body.taxRate),
-            subtotal: new Prisma.Decimal(lineSnapshot.subtotal),
-            total: new Prisma.Decimal(lineSnapshot.total),
-            modifiers: buildModifiersSnapshotForLine(
-              body.modifiers,
-              modifierSnapshot,
-            ),
-          },
-        });
-        return recomputeTicketTotalsWithModifiers(tx, draft.id);
+      const añadida = await anadirLineaAlDraft(prisma, {
+        draftId: draft.id,
+        tenantId: cashier.tid,
+        body,
       });
+      if ("error" in añadida) {
+        return reply.code(añadida.status).send(añadida.error);
+      }
+      const { lineId, updated } = añadida;
       getStoreEventBus().broadcast(ctx.storeId, {
         type: "table.lineAdded",
         tableId: ctx.tableId,
@@ -838,6 +788,94 @@ export const DRAFT_INCLUDE = {
   table: { select: { id: true, name: true, zone: true, capacity: true } },
 } as const;
 
+/**
+ * auditoria-sirope (#25) · AÑADIR UNA LÍNEA A UN DRAFT, sea de quien sea.
+ *
+ * Esto vivía dentro del handler de `POST /tables/:tableId/lines` y por eso
+ * sólo sabía añadir líneas a una MESA. Con la venta de mostrador hay un
+ * segundo borrador sin mesa que necesita exactamente lo mismo —resolver
+ * modificadores, calcular la línea, recalcular los totales—, y la
+ * alternativa era copiar sesenta líneas que se separarían a la segunda
+ * corrección.
+ *
+ * Lo que NO entra aquí y se queda en cada llamante: la idempotencia por
+ * `lineExternalId` (la mesa la comprueba antes) y el evento del bus, que
+ * es de mesa y no existe en el mostrador.
+ */
+export async function anadirLineaAlDraft(
+  prisma: ReturnType<typeof getPrisma>,
+  args: {
+    draftId: string;
+    tenantId: string;
+    body: LineBody;
+  },
+): Promise<
+  | { lineId: string; updated: Awaited<ReturnType<typeof reloadDraft>> }
+  | { status: number; error: Record<string, unknown> }
+> {
+  const { body } = args;
+  const [modifierResult] = await resolveModifierSelectionsForLines(
+    prisma,
+    args.tenantId,
+    [
+      {
+        productId: body.productId ?? null,
+        selections: body.modifierSelections ?? [],
+      },
+    ],
+  );
+  if (modifierResult && !modifierResult.ok) {
+    return {
+      status: 400,
+      error: buildModifierErrorReply(
+        modifierResult,
+        body.nameSnapshot,
+      ) as unknown as Record<string, unknown>,
+    };
+  }
+  const modifierSnapshot = modifierResult?.ok
+    ? modifierResult.resolved.snapshot
+    : [];
+  const unitPriceDeltaCents = modifierResult?.ok
+    ? modifierResult.resolved.unitPriceDeltaCents
+    : 0;
+
+  const lineId = body.lineExternalId ?? randomUUID();
+  const lineSnapshot = computeTicket([
+    {
+      units: body.units,
+      unitPrice: body.unitPrice + unitPriceDeltaCents / 100,
+      discountPct: body.discountPct,
+      taxRate: body.taxRate,
+    },
+  ]).lines[0]!;
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.ticketLine.create({
+      data: {
+        id: lineId,
+        ticketId: args.draftId,
+        productId: body.productId ?? null,
+        variantId: body.variantId ?? null,
+        holdedProductId: body.holdedProductId ?? null,
+        sku: body.sku,
+        nameSnapshot: body.nameSnapshot,
+        units: new Prisma.Decimal(body.units),
+        // unitPrice persistido = BASE (sin deltas). Los deltas viven como
+        // datos desnormalizados dentro de `modifiers` y ya están
+        // reflejados en `subtotal`/`total`.
+        unitPrice: new Prisma.Decimal(body.unitPrice),
+        discountPct: new Prisma.Decimal(body.discountPct),
+        taxRate: new Prisma.Decimal(body.taxRate),
+        subtotal: new Prisma.Decimal(lineSnapshot.subtotal),
+        total: new Prisma.Decimal(lineSnapshot.total),
+        modifiers: buildModifiersSnapshotForLine(body.modifiers, modifierSnapshot),
+      },
+    });
+    return recomputeTicketTotalsWithModifiers(tx, args.draftId);
+  });
+  return { lineId, updated };
+}
+
 async function getOrCreateDraftTicket(
   prisma: ReturnType<typeof getPrisma>,
   ctx: TableContextOk,
@@ -889,7 +927,7 @@ async function getOrCreateDraftTicket(
   });
 }
 
-async function reloadDraft(
+export async function reloadDraft(
   prisma: ReturnType<typeof getPrisma>,
   ticketId: string,
 ) {

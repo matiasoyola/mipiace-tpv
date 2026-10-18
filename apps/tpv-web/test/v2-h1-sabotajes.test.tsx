@@ -315,11 +315,18 @@ function montaApi(
       }
       // ── kds-1-cocina · el estado de cocina de la mesa ───────────────
       //
-      // ESTE banco NO tiene pantalla de cocina (`destinations` todo a
-      // false), y es a propósito: v2-H1 se escribió sin pantalla, así que
-      // sus trece sabotajes tienen que seguir cayendo exactamente igual.
-      // La regla por destino de kds-1 se prueba con pantalla en
-      // `kds-tpv-cocina.test.tsx`.
+      // ESTE banco NO tiene pantalla de cocina, y es a propósito: v2-H1 se
+      // escribió sin pantalla, así que sus trece sabotajes tienen que
+      // seguir cayendo exactamente igual. La regla por destino de kds-1 se
+      // prueba con pantalla en `kds-tpv-cocina.test.tsx`.
+      //
+      // auditoria-sirope (#12) · pero SÍ tiene IMPRESORA, y hasta este
+      // bloque el banco no lo decía: `destinations` estaba todo a false,
+      // que es «no hay a dónde mandar». Era una inexactitud sin
+      // consecuencias mientras el TPV hablaba de cocina pasara lo que
+      // pasara; desde #12 sí las tiene —sin destino no hay botón
+      // «Enviar»— y el banco tiene que describir el bar que describe:
+      // una barra con térmica y sin pantalla.
       if (path.endsWith("/kitchen") && (o?.method ?? "GET") === "GET") {
         return {
           diners: 4,
@@ -336,8 +343,8 @@ function montaApi(
           allergies: [],
           orders: [],
           destinations: {
-            BARRA: { screen: false, printer: false, canCorrectSent: false },
-            COCINA: { screen: false, printer: false, canCorrectSent: false },
+            BARRA: { screen: false, printer: true, canCorrectSent: false },
+            COCINA: { screen: false, printer: true, canCorrectSent: false },
             SALON: { screen: false, printer: false, canCorrectSent: false },
           },
         };

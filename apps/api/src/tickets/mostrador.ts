@@ -43,9 +43,11 @@ import { inicioDelDia } from "../kitchen/vista.js";
 import { ensureCajaEnabled } from "../lib/caja-gate.js";
 import { requireCashierSession } from "../shift/cashier-session.js";
 import {
+  anadirLineaAlDraft,
   buildModifierErrorReply,
   buildModifiersSnapshotForLine,
   recomputeTicketTotalsWithModifiers,
+  reloadDraft,
   serializeDraft,
 } from "../tables/operativa.js";
 import { resolveModifierSelectionsForLines } from "./modifier-selection.js";
@@ -275,6 +277,80 @@ export async function registerMostradorRoutes(
         counterNumber: conNumero.counterNumber,
         counterLabel: etiquetaDeMostrador(conNumero.counterNumber ?? 0),
       });
+    },
+  );
+
+  // ── AÑADIR UNA LÍNEA A LA VENTA DE MOSTRADOR ───────────────────────
+  //
+  // Lo que el TPV necesita desde que la venta tiene borrador: todo lo que
+  // se marque a partir de ahí va al servidor, igual que en una mesa. Sin
+  // esto, la línea existiría sólo en la pantalla y la comanda siguiente
+  // saldría sin ella — y el cobro cobraría de menos.
+  //
+  // Es una ruta propia y no `/tables/:id/lines` por lo obvio: no hay
+  // mesa. El cuerpo es el mismo y el trabajo lo hace la misma función
+  // (`anadirLineaAlDraft`), así que una mesa y un mostrador no pueden
+  // calcular distinto.
+  app.post(
+    "/mostrador/:ticketId/lines",
+    {
+      preHandler: [requireCashierSession, ensureCajaEnabled],
+      schema: {
+        params: {
+          type: "object",
+          required: ["ticketId"],
+          properties: { ticketId: { type: "string", format: "uuid" } },
+        },
+        body: LINE_SCHEMA,
+      },
+    },
+    async (request, reply) => {
+      const cashier = request.cashier!;
+      const { ticketId } = request.params as { ticketId: string };
+      const body = request.body as LineBody;
+      const prisma = getPrisma();
+      const draft = await prisma.ticket.findFirst({
+        where: {
+          id: ticketId,
+          tenantId: cashier.tid,
+          status: "DRAFT",
+          // Sólo un borrador de MOSTRADOR: una mesa tiene su ruta, con su
+          // evento para el mapa de las demás cajas.
+          tableId: null,
+        },
+        select: { id: true },
+      });
+      if (!draft) {
+        return reply.code(404).send({
+          error: "DRAFT_NOT_FOUND",
+          message: "Esta venta ya no está abierta.",
+        });
+      }
+      // Idempotencia por `lineExternalId`, igual que en la mesa: el
+      // reintento de un toque que se perdió por el camino no duplica.
+      if (body.lineExternalId) {
+        const existe = await prisma.ticketLine.findFirst({
+          where: { ticketId: draft.id, id: body.lineExternalId },
+          select: { id: true },
+        });
+        if (existe) {
+          const refrescado = await reloadDraft(prisma, draft.id);
+          return reply
+            .code(200)
+            .send({ ticket: serializeDraft(refrescado), duplicate: true });
+        }
+      }
+      const añadida = await anadirLineaAlDraft(prisma, {
+        draftId: draft.id,
+        tenantId: cashier.tid,
+        body,
+      });
+      if ("error" in añadida) {
+        return reply.code(añadida.status).send(añadida.error);
+      }
+      return reply
+        .code(201)
+        .send({ ticket: serializeDraft(añadida.updated) });
     },
   );
 }

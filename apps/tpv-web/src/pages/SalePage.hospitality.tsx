@@ -246,6 +246,19 @@ export interface HospitalityWorkspaceProps {
 export interface ComandaCocinaWiring {
   /** `Tenant.kitchenDisplayEnabled`. */
   enabled: boolean;
+  /**
+   * auditoria-sirope (#12) · ¿hay pantalla o impresora al otro lado?
+   *
+   * Distinto de `enabled`: una barra con térmica y sin pantalla manda
+   * comandas con el módulo apagado, y una cuenta con el módulo encendido
+   * y nada emparejado no manda nada. Lo que esto apaga es TODO lo que
+   * habla de cocina — «Enviar», «EN COCINA», «SIN ENVIAR» — porque sin
+   * destino no hay nadie que lo lea.
+   *
+   * Opcional para no romper a quien monte el panel sin él (los tests de
+   * v2-H1): ausente se trata como `enabled`.
+   */
+  hayDondeMandar?: boolean;
   estado: EstadoCocinaMesa;
   courseMode: "ESPERA" | "TIEMPOS";
   seatMode: "ALERGIA" | "SIEMPRE";
@@ -380,6 +393,10 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
   // ENVIAR», que es lo que la decisión 6 pide leer («2 en cocina + 1 sin
   // enviar») y lo que hace que cada mitad se corrija distinto.
   const { sent, pending } = partirComanda(props.lines, props.kitchen.estado);
+  // auditoria-sirope (#12) · con el módulo apagado y sin impresora, el
+  // TPV no habla de cocina: la lista es el PEDIDO y no hay nada que
+  // enviar.
+  const mandaACocina = props.kitchen.hayDondeMandar ?? props.kitchen.enabled;
 
   return (
     <div
@@ -616,7 +633,10 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
               borderColor: DARK_SURFACE_RAISED,
             }}
           >
-            {props.onBackToMap && (
+            {/* auditoria-sirope (#12) · sin destino no hay botón: ni
+                «Comanda» ni «Reenviar». Y con destino, «Reenviar» sólo
+                si hay algo nuevo que mandar. */}
+            {mandaACocina && pending.length > 0 && (
               <button
                 type="button"
                 onClick={props.onSendToKitchen}
@@ -673,7 +693,7 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
               <div
                 role="dialog"
                 aria-modal="true"
-                aria-label="Comanda"
+                aria-label={mandaACocina ? "Comanda" : "Pedido"}
                 className="absolute inset-x-0 bottom-0 max-h-[88dvh] rounded-t-3xl flex flex-col overflow-hidden"
                 style={{
                   background: DARK_PANEL,
@@ -991,6 +1011,14 @@ function Comanda({
   /** `true` dentro del bottom-sheet de handheld. */
   inSheet?: boolean;
 }) {
+  // auditoria-sirope (#12) · ver la nota del workspace: sin destino, el
+  // TPV no habla de cocina.
+  const mandaACocina = props.kitchen.hayDondeMandar ?? props.kitchen.enabled;
+  // Y «Reenviar» sólo cuando hay algo nuevo: reenviar lo mismo gasta un
+  // número de comanda y pinta una tarjeta vacía en la pantalla del
+  // cocinero (el `nothingNew` de kds-1 lo evitaba en el servidor; aquí
+  // deja de ofrecerse).
+  const hayQueEnviar = pending.length > 0;
   return (
     <div
       data-testid="comanda"
@@ -1089,7 +1117,7 @@ function Comanda({
                 Es por SECCIÓN, porque una mesa puede tener las dos cosas:
                 las bravas a la pantalla de cocina y las cañas a la
                 impresora de la barra. */}
-            {sent.length > 0 && (
+            {sent.length > 0 && mandaACocina && (
               <>
                 <div
                   data-testid="comanda-eyebrow-cocina"
@@ -1138,20 +1166,26 @@ function Comanda({
             {/* ── Sin enviar ── Destacadas, con −/+ de 56 px. */}
             {pending.length > 0 && (
               <>
-                <div
-                  data-testid="comanda-eyebrow-sin-enviar"
-                  className="px-2 pt-3 pb-1.5 font-medium"
-                  style={{
-                    fontSize: EYEBROW_PX,
-                    letterSpacing: EYEBROW_TRACKING,
-                    // Coral, no gris: es el bloque sobre el que se
-                    // actúa. El §4 del principio prohíbe el gris claro
-                    // para información que se usa.
-                    color: "#F2A08F",
-                  }}
-                >
-                  SIN ENVIAR
-                </div>
+                {/* auditoria-sirope (#12) · el rótulo «SIN ENVIAR» sólo
+                    tiene sentido si hay a dónde enviar. Sin pantalla ni
+                    impresora esto no es media comanda: es el pedido
+                    entero, y las líneas se pintan igual. */}
+                {mandaACocina && (
+                  <div
+                    data-testid="comanda-eyebrow-sin-enviar"
+                    className="px-2 pt-3 pb-1.5 font-medium"
+                    style={{
+                      fontSize: EYEBROW_PX,
+                      letterSpacing: EYEBROW_TRACKING,
+                      // Coral, no gris: es el bloque sobre el que se
+                      // actúa. El §4 del principio prohíbe el gris claro
+                      // para información que se usa.
+                      color: "#F2A08F",
+                    }}
+                  >
+                    SIN ENVIAR
+                  </div>
+                )}
                 {pending.map(({ line: l, units }) => (
                   <PendingLine
                     key={`pend-${l.id}`}
@@ -1265,6 +1299,11 @@ function Comanda({
             bajarle 20 px a «Enviar» lo dejaba por debajo del botón de
             una línea de la comanda, que es menos importante que él. */}
         <div className="flex gap-2.5">
+          {/* auditoria-sirope (#12) · sin pantalla ni impresora no hay
+              nada que enviar, así que no hay botón. Y «Reenviar» sólo
+              cuando hay líneas nuevas: reenviar lo mismo gasta número de
+              comanda y pinta una tarjeta vacía en la cocina. */}
+          {mandaACocina && hayQueEnviar && (
           <button
             type="button"
             onClick={props.onSendToKitchen}
@@ -1290,6 +1329,7 @@ function Comanda({
                 ? `Reenviar (nº ${props.kitchenLastRevision + 1})`
                 : "Enviar"}
           </button>
+          )}
           <button
             type="button"
             onClick={props.onClickCheckout}

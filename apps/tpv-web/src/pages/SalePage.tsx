@@ -147,6 +147,7 @@ import {
 } from "../kitchen/tpv/useCaminoDirecto.js";
 import { componerComandasLan } from "../kitchen/tpv/envioLan.js";
 import {
+  hayDondeMandar,
   lineasQueElServidorNoConoce,
   partirComanda,
 } from "../lib/kitchenComanda.js";
@@ -768,16 +769,34 @@ export function SalePage(props: SalePageProps) {
     },
   });
 
+  // auditoria-sirope (#12) · ¿HAY A DÓNDE MANDAR?
+  //
+  // La verdad de la TIENDA la trae `GET /kitchen/estado`
+  // (`kitchen.pantallas`), que no depende de que haya mesa abierta y por
+  // eso vale también en una venta de mostrador antes de tener borrador.
+  // Sin él —un banco de pruebas, el camino apagado— se cae a los destinos
+  // del ticket, que es lo que había.
+  const hayCocina = useMemo(() => {
+    // Con el módulo encendido hay cocina, y punto: si además falta
+    // emparejar la pantalla o mapear etiquetas, eso lo cuenta el aviso
+    // «sin destino» de cada envío (#19). Esconder el botón aquí dejaría
+    // al implantador sin forma de probar el camino.
+    if (props.kitchenDisplayEnabled === true) return true;
+    // Con el módulo APAGADO queda la impresora térmica, que es el caso de
+    // La Maestranza: el envío por diferencias es un arreglo del servidor
+    // y funciona igual sin módulo. Lo dicen los destinos del ticket.
+    return hayDondeMandar(kitchen.estado.destinations);
+  }, [props.kitchenDisplayEnabled, kitchen.estado]);
+
   // auditoria-sirope (#25) · lo que la cocina todavía no tiene.
   //
-  // Sin el módulo encendido no hay comanda que mandar, así que la lista
-  // está vacía y «Cobrar» no pregunta nada (ver #12).
+  // Sin destino —ni pantalla ni impresora— no hay comanda que mandar, así
+  // que la lista está vacía y «Cobrar» no pregunta nada (ver #12). Lo que
+  // manda es `hayCocina` y no el módulo: una barra con térmica y sin
+  // pantalla sí tiene líneas pendientes de mandar.
   const comandaPendiente = useMemo(
-    () =>
-      props.kitchenDisplayEnabled === true
-        ? partirComanda(lines, kitchen.estado).pending
-        : [],
-    [lines, kitchen.estado, props.kitchenDisplayEnabled],
+    () => (hayCocina ? partirComanda(lines, kitchen.estado).pending : []),
+    [lines, kitchen.estado, hayCocina],
   );
 
   // ── kds-2b · EL «−» DE UNA LÍNEA EN COCINA BAJA EL TOTAL, YA ────────
@@ -922,11 +941,21 @@ export function SalePage(props: SalePageProps) {
   // toque no duplica) y el servidor lo usa como id de la TicketLine —
   // la proyección local y la BD comparten ids.
   async function tableCreateLine(line: CartLine): Promise<void> {
-    if (!tableContext) return;
+    // auditoria-sirope (#25) · la venta de mostrador con borrador manda
+    // sus líneas al servidor como una mesa, por su propia ruta: no hay
+    // mesa a la que colgarlas. Sin esto, lo que se marcara después del
+    // primer envío viviría sólo en la pantalla — la comanda siguiente
+    // saldría sin ello y el cobro cobraría de menos.
+    const destino = tableContext
+      ? `/tables/${tableContext.id}/lines`
+      : mostrador
+        ? `/mostrador/${mostrador.ticketId}/lines`
+        : null;
+    if (!destino) return;
     try {
       const { apiWithCashier } = await import("../api.js");
       const res = await apiWithCashier<{ ticket: ServerDraft }>(
-        `/tables/${tableContext.id}/lines`,
+        destino,
         {
           method: "POST",
           body: {
@@ -2891,6 +2920,10 @@ export function SalePage(props: SalePageProps) {
               ahora={ahoraProducts}
               kitchen={{
                 enabled: props.kitchenDisplayEnabled === true,
+                // auditoria-sirope (#12) · sin pantalla ni impresora no
+                // hay comanda que mandar, y el TPV deja de hablar de
+                // cocina: ni «Enviar», ni «EN COCINA», ni «SIN ENVIAR».
+                hayDondeMandar: hayCocina,
                 estado: estadoCocina,
                 courseMode: props.kitchenSettings?.courseMode ?? "ESPERA",
                 seatMode: props.kitchenSettings?.seatMode ?? "ALERGIA",
@@ -3224,6 +3257,7 @@ export function SalePage(props: SalePageProps) {
             onSendToKitchen={() => void sendToKitchen()}
             kitchenBusy={kitchenBusy}
             kitchenLastRevision={kitchenRevision}
+            puedeEnviarComanda={hayCocina && comandaPendiente.length > 0}
             onClickMoveTable={() => setShowMoveTable(true)}
             onClickSplitBill={() => setShowSplitBill(true)}
             hasGroupedTables={hasGroupedTables}
@@ -4360,6 +4394,7 @@ function SaleWorkspace({
   onSendToKitchen,
   kitchenBusy,
   kitchenLastRevision,
+  puedeEnviarComanda,
   onClickMoveTable,
   onClickSplitBill,
   hasGroupedTables,
@@ -4416,6 +4451,16 @@ function SaleWorkspace({
   onSendToKitchen: () => void;
   kitchenBusy: boolean;
   kitchenLastRevision: number;
+  /**
+   * auditoria-sirope (#12) · ¿se puede enviar AHORA?
+   *
+   * `false` cuando no hay a dónde (ni pantalla ni impresora) o cuando no
+   * hay nada nuevo que mandar. En los dos casos el botón no se pinta:
+   * con Cocina apagada el TPV no habla de cocina, y «Reenviar» sin nada
+   * nuevo gasta número de comanda y pinta una tarjeta vacía en la
+   * pantalla del cocinero.
+   */
+  puedeEnviarComanda?: boolean;
   // v1.4-Bar-Operativa-MVP Lote 3 · abre el picker de mesa destino.
   // Sólo se invoca cuando hay tableContext.
   onClickMoveTable: () => void;
@@ -4660,6 +4705,7 @@ function SaleWorkspace({
     onSendToKitchen,
     kitchenBusy,
     kitchenLastRevision,
+    puedeEnviarComanda,
     onClickMoveTable,
     onClickSplitBill,
     hasGroupedTables,
@@ -5001,7 +5047,10 @@ function SaleWorkspace({
         className="lg:hidden fixed inset-x-0 z-40 bg-white border-t border-slate-200 px-3 py-2 flex items-center gap-2"
         style={{ bottom: "var(--keyboard-offset, 0px)" }}
       >
-        {tableContext && (
+        {/* auditoria-sirope (#12) · sin pantalla ni impresora no hay
+            comanda que mandar, y «Reenviar» sin nada nuevo tampoco: en
+            los dos casos el botón no se pinta. */}
+        {tableContext && puedeEnviarComanda !== false && (
           <button
             type="button"
             onClick={onSendToKitchen}
@@ -5141,6 +5190,16 @@ interface TicketPanelProps {
   onSendToKitchen: () => void;
   kitchenBusy: boolean;
   kitchenLastRevision: number;
+  /**
+   * auditoria-sirope (#12) · ¿se puede enviar AHORA?
+   *
+   * `false` cuando no hay a dónde (ni pantalla ni impresora) o cuando no
+   * hay nada nuevo que mandar. En los dos casos el botón no se pinta:
+   * con Cocina apagada el TPV no habla de cocina, y «Reenviar» sin nada
+   * nuevo gasta número de comanda y pinta una tarjeta vacía en la
+   * pantalla del cocinero.
+   */
+  puedeEnviarComanda?: boolean;
   onClickMoveTable: () => void;
   onClickSplitBill: () => void;
   hasGroupedTables: boolean;
@@ -5208,6 +5267,7 @@ function TicketPanel({
   onSendToKitchen,
   kitchenBusy,
   kitchenLastRevision,
+  puedeEnviarComanda,
   onClickMoveTable,
   onClickSplitBill,
   hasGroupedTables,
@@ -5487,7 +5547,9 @@ function TicketPanel({
         {/* v1.4-Bar-Operativa-MVP Lote 2 · "Enviar comanda" sólo en mesa.
             Primer envío rotula como acción primaria; reenvíos quedan
             discretos (ya hay un papel en la cocina). */}
-        {tableContext && (
+        {/* auditoria-sirope (#12) · ídem: sin destino, o sin nada nuevo
+            que mandar, el botón no está. */}
+        {tableContext && puedeEnviarComanda !== false && (
           <button
             onClick={onSendToKitchen}
             disabled={lines.length === 0 || kitchenBusy}
