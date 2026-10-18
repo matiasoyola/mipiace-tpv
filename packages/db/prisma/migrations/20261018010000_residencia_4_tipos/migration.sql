@@ -1,0 +1,40 @@
+-- residencia-4 · EL TIPO DE DISPOSITIVO NUEVO, y nada más.
+--
+-- Por qué va sola, por quinta vez en este repo: **Postgres prohíbe USAR
+-- un valor de enum en la misma transacción en la que se añade**, y Prisma
+-- corre cada migración en una. `GUARD` hace falta escrito dentro del
+-- CHECK `devices_guard_canal`, del CHECK `devices_register_o_habitacion`
+-- reescrito y del de `pairing_codes` de la migración siguiente, así que o
+-- se parten en dos o la segunda revienta con «unsafe use of new value of
+-- enum type».
+--
+-- clinica-1, -2 y -3 lo pagaron tres veces, kds-1 una, residencia-1 y
+-- residencia-3 ya lo pagaron de entrada. Aquí también.
+--
+-- Y conviene recordar la otra mitad, porque la regla se recuerda mal: los
+-- tipos **nuevos** sí se pueden crear y usar en la misma migración
+-- (residencia-2 lo hizo con seis, y la siguiente lo hace con nueve). Lo
+-- que no se puede es `ADD VALUE` sobre uno que ya existe.
+--
+-- ── MIGRACIÓN ADITIVA ───────────────────────────────────────────────
+--
+-- Un valor de enum. Ni un DROP, ni un DELETE, ni un UPDATE.
+--
+-- ── EL `down` ───────────────────────────────────────────────────────
+--
+-- **No lo hay, y no es pereza**: Postgres no sabe quitar un valor de un
+-- enum. `GUARD` se queda en `DeviceKind` para siempre, igual que `IMAGE`
+-- se quedó en `ClientConsentKind` (residencia-3 §17). Un valor que nadie
+-- escribe no hace daño: lo que lo escribe es el admin de un centro de
+-- residencia al emparejar un móvil de guardia.
+
+-- residencia-4 (D-66) · EL MÓVIL DE GUARDIA. La MISMA APK en «modo
+-- guardia», emparejada a un CANAL en vez de a una caja o a una
+-- habitación.
+--
+-- Es el segundo `DeviceKind` que no cuelga de una caja y el primero que
+-- no cuelga de nada físico: una puerta es de una habitación, pero un
+-- móvil de guardia es de quien lo lleve ese turno — y quién lo lleva lo
+-- dice el PIN al empezar (`guard_shift_sessions`), no el emparejamiento.
+-- Puede ser el teléfono personal de quien dirige.
+ALTER TYPE "DeviceKind" ADD VALUE IF NOT EXISTS 'GUARD';
