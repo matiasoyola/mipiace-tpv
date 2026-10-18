@@ -2648,26 +2648,43 @@ export function SalePage(props: SalePageProps) {
       });
     }
     out.push(
-      {
-        key: "refresh",
-        short: "Recargar",
-        label: "Refrescar catálogo",
-        icon: <RotateCw className="w-[21px] h-[21px]" strokeWidth={2.25} />,
-        spinning: refreshing,
-        onClick: () => {
-          void (async () => {
-            setRefreshing(true);
-            try {
-              const fresh = await refreshCatalog();
-              setCatalog(fresh);
-            } catch {
-              /* mantener cache */
-            } finally {
-              setRefreshing(false);
-            }
-          })();
-        },
-      },
+      // auditoria-sirope (#9) · «Recargar» SALE de la barra de la
+      // comanda oscura.
+      //
+      // Los rótulos bajo el icono cuestan ancho, y con siete botones la
+      // barra pasaba a dos filas: 70 px que la comanda necesita para
+      // sus líneas (#8). El bloque dice qué hacer cuando no caben —«se
+      // queda lo que se usa y el resto va a Más»—, y el que sobra es
+      // éste: «Sincronizar catálogo» ya está en el menú lateral, a un
+      // toque, y es lo que se usa una vez al día. Los demás no tienen
+      // otra puerta.
+      //
+      // En el TPV claro la barra no cambia: ahí los iconos no llevan
+      // rótulo y caben de sobra.
+      ...(isHospitality
+        ? []
+        : [
+            {
+              key: "refresh",
+              short: "Recargar",
+              label: "Refrescar catálogo",
+              icon: <RotateCw className="w-[21px] h-[21px]" strokeWidth={2.25} />,
+              spinning: refreshing,
+              onClick: () => {
+                void (async () => {
+                  setRefreshing(true);
+                  try {
+                    const fresh = await refreshCatalog();
+                    setCatalog(fresh);
+                  } catch {
+                    /* mantener cache */
+                  } finally {
+                    setRefreshing(false);
+                  }
+                })();
+              },
+            } satisfies ChromeAction,
+          ]),
       {
         key: "tickets",
         short: "Tickets",

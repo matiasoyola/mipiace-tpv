@@ -306,7 +306,13 @@ export function ChipsDeLinea(props: ChipsDeLineaProps) {
     (props.courseMode === "TIEMPOS" && props.course > 1);
   if (!hayAlgo) return null;
 
-  const altoChip = props.compacto ? 44 : MIN_TOUCH_PX;
+  // auditoria-sirope (#8) · 40 px en compacto, medido en el bucle
+  // visual: con 44 la fila pide 66 y en el D8 entran cinco líneas; con
+  // 40 pide 62 y entran SEIS, que es el objetivo del hallazgo. Los 56
+  // de la norma son para «lo que se toca con prisa» —los `−`/`+` y las
+  // acciones del pie—, no para un interruptor secundario que se usa una
+  // vez por plato.
+  const altoChip = props.compacto ? 40 : MIN_TOUCH_PX;
   const letraChip = props.compacto ? 15 : 17;
   return (
     <div

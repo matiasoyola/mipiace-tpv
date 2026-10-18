@@ -770,9 +770,9 @@ describe("v2-H1 · sabotaje 6 · ningún objetivo por debajo de 56 px", () => {
       expect(parseInt(el.style.width, 10)).toBeGreaterThanOrEqual(56);
     }
     // auditoria-sirope (#9) · el chrome lleva rótulo bajo el icono, así
-    // que su tamaño es un MÍNIMO y no una medida fija: el ancho lo pone
-    // ahora la palabra. El contrato —56 px de objetivo táctil— no
-    // cambia, sólo dónde se escribe.
+    // que 56 pasa de ser la medida a ser el MÍNIMO: el ancho lo puede
+    // pedir la palabra. El contrato no cambia —ningún objetivo baja de
+    // 56—, sólo la propiedad en la que está escrito.
     for (const el of $$("[data-chrome-action]")) {
       expect(parseInt(el.style.minHeight, 10)).toBeGreaterThanOrEqual(56);
       expect(parseInt(el.style.minWidth, 10)).toBeGreaterThanOrEqual(56);

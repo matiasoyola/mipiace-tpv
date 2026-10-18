@@ -1002,7 +1002,7 @@ function PendingLine({
 
           Los `−`/`+` NO se tocan: siguen a 56 px. Lo que se toca con
           prisa es la cantidad. */}
-      <div className="flex flex-wrap items-center gap-2 min-h-[64px] px-2">
+      <div className="flex flex-nowrap items-center gap-1.5 min-h-[62px] px-2">
       {/* El rótulo accesible dice lo que el botón VA a hacer, que con
           una sola unidad no es restar sino quitar la línea (decisión
           3d). En el panel claro el `−` se deshabilita a una unidad y
@@ -1015,7 +1015,7 @@ function PendingLine({
       />
       <span
         data-testid="pendiente-qty"
-        className="shrink-0 w-[30px] text-center font-semibold tabular-nums"
+        className="shrink-0 w-[24px] text-center font-semibold tabular-nums"
         style={{ fontSize: PENDING_LINE_QTY_PX }}
       >
         {units}
@@ -1046,14 +1046,24 @@ function PendingLine({
       >
         {line.nameSnapshot}
       </button>
-      <span
-        data-testid="pendiente-importe"
-        className="shrink-0 font-semibold tabular-nums whitespace-nowrap"
-        style={{ fontSize: PENDING_LINE_AMOUNT_PX }}
-      >
-        {formatEur(lineGross({ ...line, units }))}
+      {/* auditoria-sirope (#8) · EL IMPORTE Y LOS CHIPS, EN COLUMNA.
+          En los ~356 px útiles de la comanda, poner el importe y el
+          chip «Espera» uno al lado del otro dejaba al nombre 55 px y
+          lo devolvía a «Café co…», que es el hallazgo. Apilados ocupan
+          el ancho del más ancho de los dos —unos 72— en vez de la suma,
+          y el nombre recupera sus dos líneas enteras. El alto de la
+          fila no sube: 20 del importe + 44 del chip caben en los 64 que
+          ya piden los `−`/`+` de 56. */}
+      <span className="shrink-0 flex flex-col items-end">
+        <span
+          data-testid="pendiente-importe"
+          className="font-semibold tabular-nums whitespace-nowrap leading-none pb-1"
+          style={{ fontSize: PENDING_LINE_AMOUNT_PX }}
+        >
+          {formatEur(lineGross({ ...line, units }))}
+        </span>
+        {chips}
       </span>
-      {chips}
       </div>
     </div>
   );
@@ -1515,7 +1525,7 @@ function ComandaHeader(props: HospitalityWorkspaceProps) {
       {props.chromeActions.length > 0 && (
         <div
           data-testid="comanda-chrome"
-          className="shrink-0 flex flex-wrap items-center gap-2 px-4 pb-3"
+          className="shrink-0 flex flex-wrap items-center gap-1.5 px-4 pb-3"
         >
           {props.chromeActions.map((a) => (
             <button
@@ -1529,7 +1539,15 @@ function ComandaHeader(props: HospitalityWorkspaceProps) {
               // botón sigue midiendo 56 de alto táctil como mínimo; lo
               // que crece es el ancho, y la barra envuelve sola cuando
               // no caben todos en una fila.
-              className={`shrink-0 rounded-[14px] flex flex-col items-center justify-center gap-0.5 px-2 ${PRESS_FEEDBACK_CLASS}`}
+              // auditoria-sirope (#9) · icono arriba y rótulo debajo. El
+              // botón NO baja de 56 en ninguna de las dos medidas: es la
+              // norma de v2-H1 y su sabotaje, y cuatro píxeles no se
+              // compran rompiéndola. Lo que se hizo para que los
+              // rótulos no costaran una segunda fila fue quitar de la
+              // barra el icono que duplicaba el menú («Recargar»), que
+              // es lo que el bloque permite: «si no caben, se queda lo
+              // que se usa y el resto va a Más».
+              className={`shrink-0 rounded-[14px] flex flex-col items-center justify-center gap-0.5 px-1.5 ${PRESS_FEEDBACK_CLASS}`}
               style={{
                 minWidth: MIN_TOUCH_PX,
                 minHeight: MIN_TOUCH_PX,

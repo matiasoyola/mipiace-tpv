@@ -569,9 +569,15 @@ describe("#8 · la línea de la comanda ocupa UNA fila", () => {
     const chips = linea.querySelector('[data-testid="comanda-linea-chips"]');
     expect(chips).not.toBeNull();
     expect(chips!.getAttribute("data-compacto")).toBe("1");
-    // Mismo padre que los `−`/`+`: es la misma fila.
+    // La MISMA fila que los `−`/`+`, no una debajo. El chip cuelga de la
+    // columna del importe (el bucle visual midió que uno al lado del
+    // otro dejaba el nombre en 55 px y lo devolvía a «Café co…»), así
+    // que lo que se afirma es que comparten fila, no padre.
     const menos = linea.querySelector('[data-testid="stepper-menos"]')!;
-    expect(chips!.parentElement).toBe(menos.parentElement);
+    const fila = menos.parentElement!;
+    expect(fila.contains(chips!)).toBe(true);
+    // Y la línea entera es ESA fila: no hay una segunda debajo.
+    expect(linea.children).toHaveLength(1);
   });
 
   it("los `−`/`+` siguen a 56 px: lo que se toca con prisa no encoge", async () => {

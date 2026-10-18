@@ -271,9 +271,13 @@ export function ComandaCard(props: ComandaCardProps) {
           padding: "10px 14px",
         }}
       >
-        <span className="flex flex-col min-w-0">
+        <span className="flex flex-col min-w-0 flex-1">
           <span
-            className="font-bold leading-none"
+            // auditoria-sirope (#25) · el título puede ser «Mostrador
+            // nº 3» y no sólo «T6»: tiene que caber y partir sin
+            // pisar la pastilla del tiempo, que es `shrink-0`. Lo vio
+            // el bucle visual de este bloque.
+            className="font-bold leading-tight break-words min-w-0"
             style={{ fontSize: MESA_PX, letterSpacing: "-0.02em" }}
           >
             {c.tableName ?? `#${c.number}`}

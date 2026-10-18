@@ -844,6 +844,12 @@ export function CloseShiftModal(props: {
                 vacío al lado. Doce denominaciones en dos columnas son
                 seis filas, y seis filas caben enteras en 1442 × 811 y
                 en 1280 × 800. Los tres billetes grandes se pliegan. */}
+            {/* El bloque de conteo es el que CEDE cuando algo más crece
+                —el aviso de mesas abiertas puede medir media pantalla—:
+                scrollea él en vez de empujar el total y las acciones
+                fuera de la tarjeta. En el caso normal no scrollea nada:
+                doce denominaciones en dos columnas caben enteras. */}
+            <div className="flex-1 min-h-0 overflow-y-auto -mx-1 px-1">
             <div
               data-testid="cuadre-diarias"
               className="rounded-2xl border border-slate-200 p-2 mb-3 grid grid-cols-2 gap-x-3 gap-y-1"
@@ -877,6 +883,7 @@ export function CloseShiftModal(props: {
                 ))}
               </div>
             </details>
+            </div>
 
             {/* El total contado y el cuadre, juntos y al pie: es la
                 cifra que el cajero mira entre denominación y

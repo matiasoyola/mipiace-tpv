@@ -1441,8 +1441,34 @@ export function CheckoutOverlay(props: {
               queda exactamente como estaba: en una venta clavada no hay
               nada que devolver y el total vuelve a mandar. */}
           {cashAmount > 0 && change > 0 ? (
+            // auditoria-sirope (#1) · CON EL PAD ABIERTO, EN UNA LÍNEA.
+            //
+            // El recuadro entero mide ~150 px, y con el CashPad abierto
+            // eso empuja «Cobrar» fuera de la pantalla a 1280 × 800 — lo
+            // vio el bucle visual de este mismo bloque. Mientras el
+            // cajero teclea el importe, el cambio es un número que
+            // cambia a cada tecla: no necesita su recuadro, necesita
+            // estar. En cuanto se cierra el pad vuelve a mandar.
+            padTarget !== null ? (
+              <div
+                data-testid="cambio-antes-de-cobrar"
+                data-compacto="1"
+                className="mb-2.5 rounded-2xl bg-mipiace-coral-soft px-4 py-2 flex items-baseline justify-between gap-3"
+              >
+                <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-mipiace-coral-dark">
+                  Cambio a devolver
+                </span>
+                <span
+                  data-testid="cambio-antes-de-cobrar-importe"
+                  className="text-[24px] leading-none font-semibold tabular-nums text-mipiace-ink"
+                >
+                  {formatEur(change)}
+                </span>
+              </div>
+            ) : (
             <div
               data-testid="cambio-antes-de-cobrar"
+              data-compacto="0"
               className="mb-2.5 rounded-2xl bg-mipiace-coral-soft px-4 py-3"
             >
               <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-mipiace-coral-dark">
@@ -1469,6 +1495,7 @@ export function CheckoutOverlay(props: {
                 </div>
               </div>
             </div>
+            )
           ) : (
             /* TOTAL grande. */
             <div className="flex items-baseline justify-between mb-2.5">
