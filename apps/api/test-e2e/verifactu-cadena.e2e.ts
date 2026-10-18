@@ -25,6 +25,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { borrarCuentasDePrueba } from "./borrar-tenant.js";
 import { E2E_DATABASE_URL, e2eEnabled, SKIP_MESSAGE } from "./e2e-env.js";
 
 process.env.NODE_ENV = "test";
@@ -680,6 +681,144 @@ describe.skipIf(!e2eEnabled)("e2e · la cadena de facturación de una caja", () 
       const r = await resumen();
       expect(r.integra).toBe(true);
       expect(r.primer_fallo_index).toBeNull();
+    });
+  });
+
+
+  // ── La cascada del tenant tampoco salva un TEST con factura ──────────
+  //
+  // ADR-021 §6.3 (el remate). `mipiacetpv_tickets_fiscal_link_guard` llevaba
+  // la misma rama de cascada que los otros cuatro guardias —«si el tenant ya
+  // no existe, esto es su borrado en cascada»— y con ella puesta, en un
+  // `DELETE FROM tenants`, un ticket `TEST` con factura emitida pasa los dos
+  // guardias y SE BORRA dentro de la cascada: lo que para la transacción es
+  // el append-only cuando le toca el turno a `fiscal_records`, en la cascada
+  // de al lado.
+  //
+  // O sea que lo que salvaba al ticket no era su guardián sino el vecino, y
+  // eso depende del orden en que Postgres resuelve cascadas hermanas de la
+  // misma tabla —hoy `tickets` antes que `fiscal_records`—, que no es parte
+  // de ningún contrato. `20261018000000_fiscal_link_sin_cascada` quita la
+  // rama: levanta su guardián, en su cascada, y dice lo que hay.
+
+  describe("la cascada del borrado del tenant no salva un TEST con factura", () => {
+    /** Cuenta propia: la del fichero no se puede borrar a propósito. */
+    async function cuentaConTestFacturado(): Promise<{
+      tenant: string;
+      ticket: string;
+    }> {
+      const t = await prisma.tenant.create({
+        data: {
+          name: `Link ${randomUUID().slice(0, 8)}`,
+          holdedEnabled: false,
+          facturaDesde: new Date("2026-10-17T07:00:00Z"),
+        },
+        select: { id: true },
+      });
+      const s = await prisma.store.create({
+        data: { tenantId: t.id, name: "T" },
+        select: { id: true },
+      });
+      const reg = await prisma.register.create({
+        data: { storeId: s.id, name: "C" },
+        select: { id: true },
+      });
+      const u = await prisma.user.create({
+        data: {
+          tenantId: t.id,
+          email: `link+${randomUUID()}@e2e.local`,
+          role: "OWNER",
+        },
+        select: { id: true },
+      });
+      const sh = await prisma.shift.create({
+        data: { registerId: reg.id, userId: u.id, cashOpening: 0 },
+        select: { id: true },
+      });
+      // `TEST` y sellado: las dos cosas a la vez son el caso que importa. S1
+      // deja borrar un `TEST` a propósito (limpieza de implantación), así que
+      // el único que puede pararlo es el guard fiscal.
+      const tk = await prisma.ticket.create({
+        data: {
+          tenantId: t.id,
+          registerId: reg.id,
+          shiftId: sh.id,
+          userId: u.id,
+          internalNumber: "000001",
+          externalId: randomUUID(),
+          publicSlug: randomUUID().replace(/-/g, "").slice(0, 12),
+          status: "TEST",
+          total: 1.21,
+          totalTax: 0.21,
+          totalDiscount: 0,
+        },
+        select: { id: true },
+      });
+      await prisma.$executeRawUnsafe(
+        `UPDATE tickets SET sealed_at = now(), sealed_hash = repeat('a', 64)
+          WHERE id = '${tk.id}'`,
+      );
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO fiscal_records
+           (tenant_id, register_id, ticket_id, external_id, kind, chain_index, serie,
+            numero, num_serie_factura, fecha_expedicion, tipo_factura, cuota_total,
+            importe_total, huella, primer_registro, fecha_hora_huso_gen, huella_input,
+            payload, generated_at, chain_status)
+         VALUES ('${t.id}'::uuid, '${reg.id}'::uuid, '${tk.id}'::uuid,
+            '${randomUUID()}'::uuid, 'ALTA', 1, 'C1', 1, 'C1/000001', '2026-10-17',
+            'F2', 0.21, 1.21, '${"C".repeat(64)}', true,
+            '2026-10-17T09:00:00+02:00', 'x', '{}'::jsonb, now(), 'OK')`,
+      );
+      return { tenant: t.id, ticket: tk.id };
+    }
+
+    async function borrarElTenant(id: string, marca?: string): Promise<string> {
+      try {
+        await prisma.$transaction(async (tx) => {
+          if (marca !== undefined) {
+            await tx.$executeRawUnsafe(
+              `SET LOCAL "mipiacetpv.eliminar_tenant" = '${marca}'`,
+            );
+          }
+          await tx.$executeRawUnsafe(`DELETE FROM tenants WHERE id = '${id}'`);
+        });
+      } catch (e) {
+        return e instanceof Error ? e.message : String(e);
+      }
+      return "";
+    }
+
+    it("el DELETE FROM tenants lo para SU guardián, y dice que hay factura", async () => {
+      const { tenant, ticket } = await cuentaConTestFacturado();
+      const msg = await borrarElTenant(tenant);
+      expect(msg).toContain("REGISTRO_FISCAL_VIOLADO");
+      // ESTA es la frase que cambia: con la rama de cascada puesta, el que
+      // contestaba era `fiscal_records_append_only` («un registro de
+      // facturación no se borra») y el ticket ya se había ido dentro de la
+      // cascada.
+      expect(msg).toContain("tiene factura emitida");
+      expect(msg).toContain(ticket);
+      // Y no se borró nada: la transacción entera se fue atrás.
+      expect(await prisma.ticket.count({ where: { id: ticket } })).toBe(1);
+      expect(await prisma.tenant.count({ where: { id: tenant } })).toBe(1);
+
+      await borrarCuentasDePrueba(prisma, tenant);
+      expect(await prisma.tenant.count({ where: { id: tenant } })).toBe(0);
+    });
+
+    it("y la marca de «Eliminar cuenta» tampoco lo salva: aquí no hay rama", async () => {
+      // Un ticket cuya factura SIGUE VIVA no se borra ni dentro de la baja.
+      // No hace falta ninguna escapatoria: la baja borra `fiscal_records`
+      // antes que `tickets`, así que cuando le toca al ticket ya no hay
+      // factura que mirar. Es lo que hace el test de arriba al limpiar.
+      const { tenant, ticket } = await cuentaConTestFacturado();
+      const msg = await borrarElTenant(tenant, tenant);
+      expect(msg).toContain("REGISTRO_FISCAL_VIOLADO");
+      expect(msg).toContain("tiene factura emitida");
+      expect(await prisma.ticket.count({ where: { id: ticket } })).toBe(1);
+
+      await borrarCuentasDePrueba(prisma, tenant);
+      expect(await prisma.tenant.count({ where: { id: tenant } })).toBe(0);
     });
   });
 
