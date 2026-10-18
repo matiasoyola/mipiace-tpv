@@ -45,6 +45,9 @@ const { registerVoucherRoutes } = await import("../src/vouchers/routes.js");
 const { registerTableOperativaRoutes } = await import(
   "../src/tables/operativa.js"
 );
+// B-reservas-8 · el catálogo del TPV, que es por donde la cajera se entera
+// de que un producto es un bono y de que la numeración está sin confirmar.
+const { registerTpvCatalogRoutes } = await import("../src/tpv-catalog/routes.js");
 const { registerErrorHandler } = await import("../src/lib/error-handler.js");
 const { registerLenientJsonParser } = await import("../src/lib/lenient-json.js");
 const { signCashierSession } = await import("../src/shift/cashier-session.js");
@@ -74,6 +77,7 @@ describe.skipIf(!e2eEnabled)("e2e · los dos pasos del bono", () => {
     await registerVoucherRoutes(app);
     // La ruta que abre un BORRADOR de verdad, para el test 9c.
     await registerTableOperativaRoutes(app);
+    await registerTpvCatalogRoutes(app);
     await app.ready();
   });
 
@@ -602,7 +606,6 @@ describe.skipIf(!e2eEnabled)("e2e · los dos pasos del bono", () => {
     expect(res.statusCode).toBe(201);
     const body = res.json();
     expect(body.bonosEmitidos).toHaveLength(1);
-    expect(body.bonosSinEmitir).toBeNull();
     const emitido = body.bonosEmitidos[0];
     expect(emitido.code).toBe("B1");
     expect(emitido.sesiones).toBe(5);
@@ -806,8 +809,81 @@ describe.skipIf(!e2eEnabled)("e2e · los dos pasos del bono", () => {
     expect(lineas).toBe(0);
   });
 
-  it("9e · con el CANDADO puesto la venta NO se cae: el bono no se emite", async () => {
-    // «Cobrar siempre se puede.» El candado es del bono, no de la caja.
+  // ══════════════════════════════════════════════════════════════════
+  // EL CANDADO DE PRIMER USO · se cierra al VENDER, no al cobrar
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // La primera versión de este bloque dejaba cobrar y no emitía el bono,
+  // apoyándose en «cobrar siempre se puede». Era un error: eso deja a la
+  // clienta **pagada y sin bono** —el dinero entra y la deuda no queda en
+  // ningún sitio—. «Cobrar siempre se puede» vale para lo que ya se
+  // vendió, no para dejar que se venda algo que no se puede entregar.
+  //
+  // La puerta está donde la cajera puede hacer algo: al AÑADIR la línea.
+  it("9e · con el candado puesto, el bono NO SE PUEDE AÑADIR al ticket", async () => {
+    const e = await escenario({ confirmarArranque: false });
+
+    const linea = await app.inject({
+      method: "POST",
+      url: `/tables/${e.tableId}/lines`,
+      headers: auth(e.token),
+      payload: {
+        productId: e.bonoProductoId,
+        nameSnapshot: "Bono quiropodia",
+        sku: "LOC-BONO-5",
+        units: 1,
+        unitPrice: 150,
+        discountPct: 0,
+        taxRate: 0,
+      },
+    });
+    expect(linea.statusCode).toBe(409);
+    expect(linea.json().error).toBe("BONO_NUMERACION_SIN_CONFIRMAR");
+    // La frase dice QUÉ FALTA y DÓNDE, no «no se puede».
+    expect(linea.json().message).toBe(
+      "Antes de vender bonos, confirma en Ajustes por qué número empieza el talonario.",
+    );
+
+    // CONTRA LA BD: ni línea, ni línea de bono en ningún sitio… y NI UN
+    // TICKET. Tocar un bono con el candado puesto no puede dejar una MESA
+    // ABIERTA con un borrador vacío: lo vio la pasada, y una mesa que se
+    // abre sola acaba apareciendo en el arqueo.
+    const lineas = await prisma.ticketLine.count({
+      where: { productId: e.bonoProductoId },
+    });
+    expect(lineas).toBe(0);
+    expect(await prisma.ticket.count({ where: { tenantId: e.tenantId } })).toBe(0);
+
+    // Y lo que NO cambia: todo lo demás se sigue vendiendo igual. Es la
+    // mitad que importa — el candado es de los bonos, no de la caja.
+    const quiropodia = await app.inject({
+      method: "POST",
+      url: `/tables/${e.tableId}/lines`,
+      headers: auth(e.token),
+      payload: {
+        productId: e.quiropodiaId,
+        nameSnapshot: "Quiropodia",
+        sku: "SVC-QUIRO",
+        units: 1,
+        unitPrice: 35,
+        discountPct: 0,
+        taxRate: 0,
+      },
+    });
+    expect(quiropodia.statusCode).toBe(201);
+    const draftId = quiropodia.json().ticket.id as string;
+    const cobrado = await app.inject({
+      method: "POST",
+      url: `/tickets/${draftId}/checkout`,
+      headers: auth(e.token),
+      payload: { payments: [{ method: "CASH", amount: 35 }] },
+    });
+    expect(cobrado.statusCode).toBe(200);
+  });
+
+  it("9f · la VENTA RÁPIDA con el candado puesto se RECHAZA, y no cobra", async () => {
+    // La venta rápida no pasa por el alta de línea: llega con sus líneas
+    // hechas en el cuerpo. Es el otro camino, y se cierra igual.
     const e = await escenario({ confirmarArranque: false });
     const res = await app.inject({
       method: "POST",
@@ -833,17 +909,103 @@ describe.skipIf(!e2eEnabled)("e2e · los dos pasos del bono", () => {
         payments: [{ method: "CASH", amount: 150 }],
       },
     });
-    // La venta pasa.
-    expect(res.statusCode).toBe(201);
-    expect(res.json().bonosSinEmitir).toBe("CANDADO_SIN_CONFIRMAR");
-    expect(res.json().bonosEmitidos).toEqual([]);
-    // Contra la BD: el ticket está cobrado y no hay ningún bono.
-    const t = await prisma.ticket.findUniqueOrThrow({
-      where: { id: res.json().ticket.id },
-      select: { status: true, paidAt: true },
-    });
-    expect(t.paidAt).not.toBeNull();
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("BONO_NUMERACION_SIN_CONFIRMAR");
+
+    // CONTRA LA BD: **no se cobró nada**. Ni ticket, ni bono, ni número
+    // de serie quemado. Es la diferencia con la versión anterior, que
+    // cobraba y dejaba a la clienta sin bono.
+    expect(await prisma.ticket.count({ where: { tenantId: e.tenantId } })).toBe(0);
     expect(await prisma.voucher.count({ where: { tenantId: e.tenantId } })).toBe(0);
+    const seq = await prisma.voucherSequence.findUnique({
+      where: { tenantId: e.tenantId },
+    });
+    expect(seq).toBeNull();
+  });
+
+  it("9g · y en cuanto se confirma la numeración, el mismo bono se vende", async () => {
+    // El candado no es un «no» permanente: es un ajuste que está a dos
+    // toques, y la frase lo dice.
+    const e = await escenario({ confirmarArranque: false });
+    const rechazada = await app.inject({
+      method: "POST",
+      url: `/tables/${e.tableId}/lines`,
+      headers: auth(e.token),
+      payload: {
+        productId: e.bonoProductoId,
+        nameSnapshot: "Bono quiropodia",
+        sku: "LOC-BONO-5",
+        units: 1,
+        unitPrice: 150,
+        discountPct: 0,
+        taxRate: 0,
+      },
+    });
+    expect(rechazada.statusCode).toBe(409);
+
+    // El encargado confirma por dónde va su talonario.
+    await prisma.voucherSequence.create({
+      data: {
+        tenantId: e.tenantId,
+        ultimo: 0,
+        arranque: 231,
+        arranqueConfirmadoAt: new Date(),
+        arranqueConfirmadoBy: e.cashierId,
+      },
+    });
+
+    const ahora = await app.inject({
+      method: "POST",
+      url: `/tables/${e.tableId}/lines`,
+      headers: auth(e.token),
+      payload: {
+        productId: e.bonoProductoId,
+        nameSnapshot: "Bono quiropodia",
+        sku: "LOC-BONO-5",
+        units: 1,
+        unitPrice: 150,
+        discountPct: 0,
+        taxRate: 0,
+      },
+    });
+    expect(ahora.statusCode).toBe(201);
+    const draftId = ahora.json().ticket.id as string;
+    await prisma.ticket.update({
+      where: { id: draftId },
+      data: { clientId: e.clientId },
+    });
+    const cobrado = await app.inject({
+      method: "POST",
+      url: `/tickets/${draftId}/checkout`,
+      headers: auth(e.token),
+      payload: { payments: [{ method: "CASH", amount: 150 }] },
+    });
+    expect(cobrado.statusCode).toBe(200);
+    // Y sale por el número del talonario, no por el 1.
+    expect(cobrado.json().bonosEmitidos[0].code).toBe("B231");
+  });
+
+  it("9h · el catálogo del TPV dice qué producto es un bono y si hay candado", async () => {
+    // Es lo que permite al TPV decirlo EN EL MOMENTO DE TOCAR el producto
+    // en vez de al cobrar. Sin estos dos campos, la cajera se entera con
+    // el cajón abierto.
+    const e = await escenario({ confirmarArranque: false });
+    const res = await app.inject({
+      method: "GET",
+      url: "/tpv/catalog/products",
+      headers: auth(e.token),
+    });
+    expect(res.statusCode).toBe(200);
+    const cuerpo = res.json();
+    expect(cuerpo.bonosCandadoPuesto).toBe(true);
+    const elBono = cuerpo.items.find(
+      (p: { id: string }) => p.id === e.bonoProductoId,
+    );
+    const laQuiropodia = cuerpo.items.find(
+      (p: { id: string }) => p.id === e.quiropodiaId,
+    );
+    expect(elBono.esBono).toBe(true);
+    expect(laQuiropodia.esBono).toBe(false);
   });
 
   // ══════════════════════════════════════════════════════════════════

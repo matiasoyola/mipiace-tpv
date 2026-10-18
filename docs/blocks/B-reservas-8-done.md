@@ -71,12 +71,46 @@ El prompt lista `ok | noexiste | otro_cliente | no_cubre | agotado | caducado | 
 quiropodia» mandaría a recepción a buscar otro servicio que tampoco va a funcionar. Lo que
 necesita oír es «ese bono está caducado», que sí tiene arreglo.
 
-### 1.6 El candado de primer uso NO tumba la venta
+### 1.6 El candado de primer uso se cierra al VENDER, no al cobrar
 
-Si una venta incluye bonos y el centro no ha confirmado su numeración, **la venta pasa**: el bono
-se queda sin emitir, se anota en el log y la respuesta lo dice (`bonosSinEmitir`). Tumbar el cobro
-dejaría a una cajera sin poder vender nada en un centro al que nadie le configuró el talonario.
-Es la regla de la casa: **cobrar siempre se puede**.
+**Corregido respecto a la primera versión de este bloque, y es la corrección que más importa.**
+
+Lo que había: la venta pasaba, el bono se quedaba sin emitir y la respuesta lo decía
+(`bonosSinEmitir`), apoyándose en «cobrar siempre se puede». Es un error. Eso deja a la clienta
+**pagada y sin bono**: el dinero entra en la caja y la deuda no queda en ningún sitio — ni en el
+libro, ni en su ficha, ni en una sesión que pueda canjear. La clienta se va con 150 € menos y nada
+a cambio, y lo descubre cuando vuelve.
+
+«Cobrar siempre se puede» vale para **lo que ya se vendió**: una invariante rota no puede impedir
+cerrar una venta que ya ocurrió. No vale para dejar que se venda algo que no se puede entregar.
+
+Lo que hay ahora, en dos capas:
+
+- **La puerta, al AÑADIR la línea.** Con el candado puesto no se puede ni meter un producto con
+  plantilla de bono en el ticket (`POST /tables/:tableId/lines` → 409
+  `BONO_NUMERACION_SIN_CONFIRMAR`). Es el momento en que la cajera puede hacer algo: todavía no ha
+  abierto el cajón ni le ha dicho un precio a nadie. El «no» dice **qué falta y dónde**: «Antes de
+  vender bonos, confirma en Ajustes por qué número empieza el talonario.»
+  Y va **antes** de `getOrCreateDraftTicket`, para que tocar un bono no deje una mesa abierta con
+  un borrador vacío (lo vio la pasada: «tickets en la base: 1» después de un 409).
+- **La defensa, al COBRAR.** La venta rápida no pasa por el alta de línea —llega con sus líneas
+  hechas en el cuerpo—, así que `prepararBonosDeLaVenta` lo comprueba antes de la transacción y
+  **rechaza el cobro**. Y dentro de la transacción, si `nacerLosBonos` se encuentra el candado
+  (sólo si se puso entre medias), se lanza `BonoNumeracionSinConfirmarError` y la tx se va atrás
+  entera: el borrador sigue siendo borrador, no se quema número de serie y **no se cobra nada**.
+
+**`bonosSinEmitir` ya no existe** en ninguna de las dos respuestas: no hay ningún caso en que una
+venta se cobre y el bono no nazca.
+
+**Todo lo demás se sigue cobrando igual.** El candado es de los bonos, no de la caja: en el mismo
+centro y con el candado puesto, la quiropodia se añade y se cobra con normalidad. Hay test de esa
+mitad, que es la que se rompería sin querer.
+
+Y para que el TPV lo diga **en el momento de tocar el producto** y no al cobrar, el catálogo trae
+dos campos nuevos: `esBono` por producto y `bonosCandadoPuesto` del centro. Son UI y se cachean
+como sus hermanos: la puerta de verdad es el 409 del servidor, y el default del cacheado es
+permisivo a propósito —un TPV que aún no ha refrescado no puede esconderle un bono a un centro que
+SÍ lo tiene confirmado.
 
 ### 1.7 La línea canjeada va a 0 €, y NO con un descuento del 100 %
 
@@ -168,7 +202,8 @@ Panel: el candado de la numeración, los ajustes, las plantillas y el alta de lo
 
 ## 3 · Los sabotajes, con su rojo real
 
-Cada fila: se rompió el código, se vio el rojo, se restauró. Los mensajes son los de verdad.
+Los diez del prompt más uno del candado (§1.6). Cada fila: se rompió el código, se vio el
+rojo, se restauró. Los mensajes son los de verdad.
 
 | Sabotaje | Test que cayó | El rojo |
 |---|---|---|
@@ -182,6 +217,7 @@ Cada fila: se rompió el código, se vio el rojo, se restauró. Los mensajes son
 | El bono nace al añadir la línea al borrador | `9c` | `expected 1 to be +0` — el contador avanzó con un ticket sin cobrar |
 | La API del sanitario manda `cobradoCents` | `12a` | `expected '[{"cobradoCents":15000,…' not to contain 'cobradoCents'`. Y antes del test, el compilador: `Type 'number' is not comparable to type 'never'` |
 | `consumir()` sin la regla de cobertura | `3f` | `expected true to be false` — consumió contra un masaje que el bono de podología no cubre |
+| Permitir añadir la línea del bono con el candado puesto | `9e` y `9g` | `expected 201 to be 409` — el bono entró en el ticket y de ahí habría salido cobrado |
 
 ### 3.1 Dos tests cambiaron al medirlos, y los dos por lo mismo
 
@@ -207,13 +243,19 @@ worktree (`:3081` / `:5188`), base `mipiacetpv_r8_pasada`. **En el terminal y en
   ✓ sesión de cajero abierta con el PIN, desde el terminal emparejado
 
 1 · El candado de primer uso
-  venta → 201 · bonosSinEmitir: CANDADO_SIN_CONFIRMAR
-  ✓ la venta SÍ pasa (cobrar siempre se puede) y el bono NO se emite
-  bonos en la base: 0
+  añadir el bono al ticket → 409 BONO_NUMERACION_SIN_CONFIRMAR
+  «Antes de vender bonos, confirma en Ajustes por qué número empieza el talonario.»
+  ✓ no deja ni añadirlo, y dice qué falta y dónde
+  venta rápida → 409 BONO_NUMERACION_SIN_CONFIRMAR
+  tickets en la base: 0 · bonos: 0
+  ✓ NO se cobra: ni ticket, ni bono, ni número quemado
+  catálogo: candadoPuesto=true · «Bono 5 quiropodias» esBono=true
+  ✓ el TPV puede decirlo en el momento de tocar el bono
   confirmar arranque → 200
+  ✓ el encargado confirma por qué número empieza: B1
 
 2 · Vender «Bono 5 quiropodias» a Carmen
-  ticket 000002 (TEST) · bono B1 · 5 sesiones
+  ticket 000001 (TEST) · bono B1 · 5 sesiones
   saldo en la base: {"sessions_left":5,"sessions_reserved":0,"status":"ACTIVO"}
   libro: VENDIDO
 
@@ -241,6 +283,7 @@ worktree (`:3081` / `:5188`), base `mipiacetpv_r8_pasada`. **En el terminal y en
   sería devolver un trabajo ya hecho. La devolución parcial no está en esta versión.
 
 9 · Resetear el ensayo
+  tickets borrados: 2 · bonos de prueba sin ticket: 0
   bonos: 1 → 0 · líneas del libro: 0
 
 LA PASADA PASA.
@@ -324,7 +367,7 @@ El interruptor lo mueve sólo el super-admin, y además no se puede encender con
 ## 7 · Verde
 
 - Suite de siempre: **389 ficheros, 5493 tests** (10 saltados).
-- Suite e2e contra Postgres real: **44 ficheros, 898 tests**.
+- Suite e2e contra Postgres real: **44 ficheros, 901 tests**.
 - `tsc --noEmit` limpio en `apps/api`, `apps/tpv-web` y `apps/admin`.
 
 ```bash
@@ -388,10 +431,11 @@ duplica el cobro — lo enlaza con su ticket.
 importe de la línea al canjear queda parametrizado porque es el frente P5 de la asesoría:
 `bonosEnabled` no se enciende en ninguna cuenta real hasta que esa respuesta esté escrita.
 
-Los diez sabotajes del prompt, cada uno en su rojo, y lo que la suite NO cubre, dicho por escrito:
+Los diez sabotajes del prompt más el del candado, cada uno en su rojo, y lo que la suite NO
+cubre, dicho por escrito:
 `docs/blocks/B-reservas-8-done.md`. ADR: `docs/design/adr-r9-el-bono-es-una-deuda-en-sesiones.md`.
 
-Suites verdes sobre el árbol ya mergeado con `master`: 5493 unitarios y 898 e2e contra Postgres.
+Suites verdes sobre el árbol ya mergeado con `master`: 5493 unitarios y 901 e2e contra Postgres.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 CUERPO

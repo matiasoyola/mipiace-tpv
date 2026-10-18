@@ -24,6 +24,11 @@ import type { Prisma, PrismaClient } from "@mipiacetpv/db";
 import { estaCaducado } from "./caducidad.js";
 import { importeDeLaLineaCents, type ModoCanje } from "./canje.js";
 import { resolverCobertura } from "./cobertura.js";
+import {
+  candadoPuesto,
+  CANDADO_ERROR,
+  CANDADO_MENSAJE,
+} from "./numero.js";
 import { serviciosACubrir } from "./servicios.js";
 import { plantillasDeLosProductos, type PlantillaDeBono } from "./venta.js";
 
@@ -126,6 +131,24 @@ export async function prepararBonosDeLaVenta(
       error: "BONO_SIN_CLIENTE",
       message:
         "Para vender un bono hace falta la ficha de la clienta: el bono es de una ficha y hay que saber a quién se le deben las sesiones.",
+    };
+  }
+  // EL CANDADO, como DEFENSA.
+  //
+  // La puerta de verdad está en el alta de la línea —`POST
+  // /tables/:id/lines`—, que es donde la cajera puede hacer algo. Esto
+  // cubre el camino que no pasa por un borrador: la venta rápida, que
+  // llega con sus líneas ya hechas en el cuerpo.
+  //
+  // Y se RECHAZA el cobro. Cobrarlo y no emitir el bono dejaría a la
+  // clienta pagada y sin bono: el dinero entra y la deuda no queda en
+  // ningún sitio.
+  if (ventas.length > 0 && (await candadoPuesto(prisma, input.tenantId))) {
+    return {
+      ok: false,
+      status: 409,
+      error: CANDADO_ERROR,
+      message: CANDADO_MENSAJE,
     };
   }
 

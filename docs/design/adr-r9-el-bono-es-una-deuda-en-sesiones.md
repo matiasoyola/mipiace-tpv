@@ -112,15 +112,27 @@ Y el bono **nace cuando el ticket pasa a `PAID`**, en la misma transacción y ju
 sello de S1 — el mismo sitio que el registro de facturación y por la misma razón: cuando la venta
 ya es una venta. Un ticket que no se cobra no gasta número de bono.
 
-### 5.1 El candado de primer uso NO tumba la venta
+### 5.1 El candado de primer uso se cierra al VENDER, no al cobrar
 
 La numeración es `B<n>` por centro, atómica, sin huecos, y **se salta un número que ya exista** (el
 spa se encontró uno que había llegado desde dev). Y tiene candado: hasta que el encargado confirma
 por qué número empieza el talonario, no se emite ningún bono.
 
-Si una venta incluye bonos y el candado está puesto, **la venta sigue**: el bono se queda sin
-emitir, se anota en el log y la respuesta lo dice. **Cobrar siempre se puede** — tumbar el cobro
-dejaría a una cajera sin poder vender nada en un centro al que nadie le configuró la numeración.
+**La primera versión de este ADR decía que la venta seguía** y el bono se quedaba sin emitir,
+apoyándose en «cobrar siempre se puede». Está corregido, y la corrección es la parte que importa:
+eso deja a la clienta **pagada y sin bono** — el dinero entra en la caja y la deuda no queda en
+ningún sitio, ni en el libro ni en su ficha. «Cobrar siempre se puede» vale para lo que ya se
+vendió; no para dejar que se venda algo que no se puede entregar.
+
+Así que el candado se cierra **donde la cajera puede hacer algo**: con la numeración sin
+confirmar, un producto con plantilla de bono **no se puede ni añadir al ticket**
+(409 `BONO_NUMERACION_SIN_CONFIRMAR`, con la frase que dice qué falta y dónde). La venta rápida,
+que no pasa por el alta de línea, se rechaza al cobrar, y dentro de la transacción hay una última
+defensa que la aborta entera: no se cobra, no se quema número de serie y el borrador sigue siendo
+un borrador.
+
+Y lo demás no se toca: el candado es de los bonos, no de la caja. En el mismo centro y con el
+candado puesto, todo lo demás se sigue cobrando igual.
 
 ## 6. Lo que falta: P5, el IVA del bono univalente
 

@@ -144,13 +144,22 @@ export type ResultadoNacer =
  * algo posterior revienta, el contador hace rollback y no deja huecos (el
  * mismo patrón que `register.ticketCounter`).
  *
- * El candado de primer uso se devuelve como resultado y NO como excepción
- * porque quien llama es el camino de cobro, y el camino de cobro tiene que
- * poder decidir qué hace con él. Lo que hace está en `tickets/routes.ts`:
- * **la venta NO se cae** —cobrar siempre se puede— y el bono queda sin
- * emitir con una línea de log y un aviso en la respuesta. La alternativa
- * (tumbar el cobro) dejaría a una cajera sin poder vender nada en un
- * centro al que nadie le configuró la numeración.
+ * ── El candado de primer uso ──────────────────────────────────────────
+ *
+ * Se devuelve como resultado y no como excepción para que el llamante
+ * decida; lo que todos los llamantes hacen es **abortar la transacción**,
+ * así que el cobro no pasa.
+ *
+ * La primera versión de este bloque lo dejaba cobrar y no emitía el bono,
+ * apoyándose en «cobrar siempre se puede». Era un error y está corregido:
+ * eso deja a la clienta **pagada y sin bono** —el dinero entra y la deuda
+ * no queda en ningún sitio—. «Cobrar siempre se puede» vale para lo que ya
+ * se vendió, no para dejar que se venda algo que no se puede entregar.
+ *
+ * La puerta de verdad está mucho antes: **con el candado puesto no se
+ * puede ni añadir un bono al ticket** (`POST /tables/:id/lines` y
+ * `prepararBonosDeLaVenta`). Aquí sólo se llega si el candado se puso
+ * entre que se añadió la línea y que se cobró.
  */
 export async function nacerLosBonos(
   tx: Prisma.TransactionClient,

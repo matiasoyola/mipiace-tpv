@@ -76,6 +76,7 @@ import {
   getCachedCreditSalesEnabled,
   getCachedCrmEnabled,
   getCachedAgendaEnabled,
+  getCachedBonosCandadoPuesto,
   getCachedHoldedEnabled,
   getCachedTagAliases,
   getCachedTenantId,
@@ -856,6 +857,9 @@ export function SalePage(props: SalePageProps) {
   // una sesión — y con el módulo apagado la ruta contesta 404, que
   // `propuestasDeCanje` traduce a «ninguna» sin enseñar ningún error.
   const [propuestasBono, setPropuestasBono] = useState<PropuestaDeCanje[]>([]);
+  // B-reservas-8 · el «no» del candado, inline y NO un toast: la cajera
+  // tiene que poder leerlo con la clienta delante y saber qué falta.
+  const [avisoBono, setAvisoBono] = useState<string | null>(null);
 
   const recargarBonos = useCallback(async (): Promise<void> => {
     if (!activeTicketId) {
@@ -1645,6 +1649,24 @@ export function SalePage(props: SalePageProps) {
   // del teclado preferimos no interrumpir el flow, así que ahí se
   // llama a `pushProductLine` directo.
   function addProduct(p: CatalogProduct, units = 1): void {
+    // ── B-reservas-8 · EL CANDADO, EN EL MOMENTO DE TOCAR EL BONO ────
+    //
+    // Con la numeración sin confirmar el bono NO se puede ni añadir al
+    // ticket. Y se dice AQUÍ, no al cobrar: cobrarlo dejaría a la clienta
+    // pagada y sin bono, y decírselo con el cajón abierto es tarde.
+    //
+    // El catálogo cacheado es sólo UI —la puerta de verdad es el 409 del
+    // servidor, que está en el alta de la línea y en el cobro—, así que
+    // ante la duda se deja tocar y el servidor para: un TPV que todavía no
+    // ha refrescado no puede esconderle un bono a un centro que SÍ lo
+    // tiene confirmado.
+    if (p.esBono === true && getCachedBonosCandadoPuesto()) {
+      setAvisoBono(
+        "Antes de vender bonos, confirma en Ajustes por qué número empieza el talonario.",
+      );
+      return;
+    }
+    setAvisoBono(null);
     const groups = groupsByProduct.get(p.id);
     if (groups && groups.length > 0) {
       setSelectorState({ product: p, groups });
@@ -2967,6 +2989,12 @@ export function SalePage(props: SalePageProps) {
           </header>
 
           <HealthBanner health={health} />
+          {avisoBono && (
+            <Banner color="amber">
+              <strong>Este bono no se puede vender todavía · </strong>
+              {avisoBono}
+            </Banner>
+          )}
 
           <SaleWorkspace
             products={filtered}

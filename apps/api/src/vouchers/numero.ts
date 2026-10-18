@@ -108,3 +108,37 @@ export async function siguienteNumero(
     `voucher_sequence: mil números seguidos ocupados en el tenant ${tenantId}; esto no es «un número que llegó desde dev».`,
   );
 }
+
+/**
+ * ¿Está PUESTO el candado de primer uso de este centro?
+ *
+ * `true` mientras nadie haya confirmado por qué número empieza el
+ * talonario. Y `true` también si no hay fila: son el mismo caso para quien
+ * pregunta —«este centro todavía no emite bonos»— y la fila la crea la
+ * confirmación.
+ *
+ * Existe aparte de `siguienteNumero()` porque la pregunta se hace ANTES de
+ * vender, no al emitir: con el candado puesto **no se puede ni añadir un
+ * bono al ticket**. Ver `CANDADO_MENSAJE`.
+ */
+export async function candadoPuesto(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+): Promise<boolean> {
+  const filas = await tx.$queryRaw<Array<{ arranque: number | null }>>`
+    SELECT "arranque"
+      FROM "voucher_sequence"
+     WHERE "tenant_id" = ${tenantId}::uuid
+     LIMIT 1`;
+  return filas[0]?.arranque == null;
+}
+
+/** El código y la frase del candado, en UN sitio.
+ *
+ *  Lo dicen cuatro puertas —el alta de línea del borrador, la venta
+ *  rápida, el cobro del borrador y el alta inicial— y tienen que decir lo
+ *  mismo: lo que falta no es un dato del bono, es un ajuste del centro, y
+ *  está a dos toques. */
+export const CANDADO_ERROR = "BONO_NUMERACION_SIN_CONFIRMAR";
+export const CANDADO_MENSAJE =
+  "Antes de vender bonos, confirma en Ajustes por qué número empieza el talonario.";

@@ -20,6 +20,7 @@ import { getPrisma } from "../context.js";
 import { ingestFiscalRecord, type IngestResult } from "../fiscal/ingest.js";
 import { comprobarGateFiscal, esCobroDeEnsayo } from "../fiscal/mode.js";
 import { canjearAlCobrar, type CanjeAlCobrar } from "../vouchers/caja.js";
+import { CANDADO_ERROR, CANDADO_MENSAJE } from "../vouchers/numero.js";
 import { nacerLosBonos, type BonoNacido } from "../vouchers/venta.js";
 import {
   prepararBonosDeLaVenta,
@@ -124,6 +125,23 @@ class BonoSinClienteError extends Error {
 class BonoNoDevolvibleError extends Error {
   constructor(readonly motivo: string) {
     super(motivo);
+  }
+}
+
+// B-reservas-8 · señal interna de una transacción de cobro que iba a
+// emitir un bono y se encontró el CANDADO de primer uso puesto.
+//
+// Aborta la tx y sale como 409: el borrador se queda borrador, no se quema
+// número de serie y **no se cobra**. Cobrarlo y no emitir el bono dejaría a
+// la clienta pagada y sin bono.
+//
+// Es una DEFENSA, no la puerta: la puerta está en el alta de la línea
+// (`POST /tables/:id/lines`), que es donde la cajera puede hacer algo.
+// Aquí sólo se llega si el candado se puso entre que se añadió la línea y
+// que se cobró — o si alguien se saltó el alta.
+class BonoNumeracionSinConfirmarError extends Error {
+  constructor() {
+    super("numeración de bonos sin confirmar");
   }
 }
 
@@ -542,7 +560,6 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       // respuesta y para el log. Fuera de la transacción porque la
       // respuesta se construye después.
       let bonosEmitidos: BonoNacido[] = [];
-      let bonosSinEmitir: "CANDADO_SIN_CONFIRMAR" | null = null;
       let canjesHechos: CanjeAlCobrar[] = [];
       for (const [indice, canje] of canjePorLinea) {
         lineBaseUnitPrice[indice] = canje.importeCents / 100;
@@ -985,13 +1002,12 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             userId: cashier.sub,
             ahora: new Date(),
           });
-          // El candado de primer uso. **La venta NO se cae** —cobrar
-          // siempre se puede—: el bono se queda sin emitir, se anota y la
-          // respuesta lo dice. Tumbar el cobro dejaría a una cajera sin
-          // poder vender nada en un centro al que nadie le configuró por
-          // qué número empieza su talonario.
-          bonosEmitidos = nacidos.ok ? nacidos.bonos : [];
-          if (!nacidos.ok) bonosSinEmitir = nacidos.error;
+          // El candado de primer uso. `prepararBonosDeLaVenta` ya lo
+          // comprobó ANTES de la transacción, así que aquí sólo se llega
+          // si se puso entre medias. Se aborta la tx: no se cobra, y así
+          // no hay forma de que la clienta pague un bono que no existe.
+          if (!nacidos.ok) throw new BonoNumeracionSinConfirmarError();
+          bonosEmitidos = nacidos.bonos;
         }
         // Y la sesión se consume, también aquí dentro. Sólo si alguna
         // línea la canjea: una venta rápida no tiene cita, así que aquí no
@@ -1109,23 +1125,6 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         );
       }
 
-      // B-reservas-8 · el candado de primer uso. La venta está cobrada y
-      // entregada; lo que falta es el bono, y eso sí se le dice al cajero
-      // (al revés que la cadena fiscal, que no tiene nada que hacer con
-      // ella): el encargado confirma el número de arranque en Ajustes y el
-      // bono se da de alta a mano con «alta inicial».
-      if (bonosSinEmitir) {
-        request.log.error(
-          {
-            event: "bono.candado_sin_confirmar",
-            tenantId: cashier.tid,
-            registerId: cashier.rid,
-            ticketId: ticket.id,
-            bonosPedidos: bonos.ventas.length,
-          },
-          "la venta incluía bonos y este centro no ha confirmado por qué número empieza su numeración: la venta sigue, los bonos no se han emitido",
-        );
-      }
       if (bonosEmitidos.length > 0 || canjesHechos.length > 0) {
         request.log.info(
           {
@@ -1149,8 +1148,6 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         // justificante y la pantalla digan «Bono quiropodia · 5 sesiones ·
         // B87». Lista vacía en toda venta que no vende bonos.
         bonosEmitidos,
-        // Y el candado, si impidió emitirlos. `null` es el caso normal.
-        bonosSinEmitir,
         // Las sesiones que esta venta consumió (o liberó, si lo que se hizo
         // no lo cubría el bono).
         canjes: canjesHechos,
@@ -1431,7 +1428,6 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         select: { bonosEnabled: true, bonoCaducidadMeses: true },
       });
       let bonosEmitidos: BonoNacido[] = [];
-      let bonosSinEmitir: "CANDADO_SIN_CONFIRMAR" | null = null;
       let canjesHechos: CanjeAlCobrar[] = [];
 
       const grossSubtotal = totals.subtotal + totals.discount;
@@ -1693,8 +1689,8 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
               userId: cashier.sub,
               ahora: new Date(),
             });
-            bonosEmitidos = nacidos.ok ? nacidos.bonos : [];
-            if (!nacidos.ok) bonosSinEmitir = nacidos.error;
+            if (!nacidos.ok) throw new BonoNumeracionSinConfirmarError();
+            bonosEmitidos = nacidos.bonos;
           }
           if (tenantBonos.bonosEnabled) {
             canjesHechos = await canjearAlCobrar(tx, {
@@ -1726,6 +1722,17 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             code: "BONO_SIN_CLIENTE",
             message:
               "Este ticket vende un bono y le falta la ficha de la clienta: el bono es de una ficha y hay que saber a quién se le deben las sesiones.",
+          });
+        }
+        // B-reservas-8 · el candado de primer uso, como DEFENSA. La
+        // puerta está en el alta de la línea; aquí sólo se llega si el
+        // candado se puso entre medias. La tx se deshizo entera: el
+        // borrador sigue siendo borrador y NO se ha cobrado nada.
+        if (err instanceof BonoNumeracionSinConfirmarError) {
+          return reply.code(409).send({
+            error: CANDADO_ERROR,
+            code: CANDADO_ERROR,
+            message: CANDADO_MENSAJE,
           });
         }
         if (err instanceof ShiftNotOpenError) {
@@ -1897,18 +1904,6 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         );
       }
 
-      // B-reservas-8 · lo mismo que en la venta rápida, y por lo mismo.
-      if (bonosSinEmitir) {
-        request.log.error(
-          {
-            event: "bono.candado_sin_confirmar",
-            tenantId: cashier.tid,
-            registerId: cashier.rid,
-            ticketId: updated.id,
-          },
-          "el borrador vendía bonos y este centro no ha confirmado por qué número empieza su numeración: la venta sigue, los bonos no se han emitido",
-        );
-      }
       if (bonosEmitidos.length > 0 || canjesHechos.length > 0) {
         request.log.info(
           {
@@ -1934,7 +1929,6 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         fiscalRecord: fiscal.result,
         // B-reservas-8 · mismo contrato que `POST /tickets`.
         bonosEmitidos,
-        bonosSinEmitir,
         canjes: canjesHechos,
       });
     },

@@ -12,6 +12,8 @@ import { CAJA_DISABLED_MESSAGE, ensureCajaEnabled } from "../lib/caja-gate.js";
 import { brutoDesdeNeto } from "../catalog/local-product-rules.js";
 import { CENTER_TZ } from "../agenda/time.js";
 import { enEnsayo } from "../fiscal/mode.js";
+// B-reservas-8 · el candado de primer uso de la numeración de bonos.
+import { candadoPuesto } from "../vouchers/numero.js";
 
 // ──────────────────────────────────────────────────────────────────────
 // v2-H1-venta-y-sala §3 · los parámetros de la vista «Ahora».
@@ -154,6 +156,9 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
         : await prisma.tenant.findUnique({
             where: { id: cashier.tid },
             select: {
+              // B-reservas-8 · la capability de los bonos. Apagada —los
+              // quince comercios de hoy— ni se consulta el candado.
+              bonosEnabled: true,
               businessType: true,
               tpvIconPreset: true,
               creditSalesEnabled: true,
@@ -236,6 +241,12 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
           // línea de servicio cuando el tenant tiene `agendaEnabled`. Null
           // si el servicio no tiene fila `service_scheduling`.
           scheduling: { select: { durationMin: true } },
+          // B-reservas-8 · ¿este producto ES un bono? Lo es si tiene
+          // plantilla (1:1). El TPV lo necesita para poder decir «confirma
+          // la numeración» EN EL MOMENTO DE TOCARLO, que es cuando la
+          // cajera puede hacer algo: todavía no ha abierto el cajón ni ha
+          // dicho un precio.
+          voucherTemplate: { select: { id: true } },
           // kds-1-cocina (decisión 3, capa 3) · los alérgenos del plato.
           //
           // ÉSTE es el camino por el que el TPV puede avisar «¡Lleva
@@ -250,6 +261,14 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
           allergens: true,
         },
       });
+      // B-reservas-8 · el CANDADO de la numeración, sólo si el comercio
+      // vende bonos y sólo en la primera página (como el resto del bloque
+      // del tenant). Un comercio sin bonos no paga ni una consulta.
+      const candadoPuestoDelTenant =
+        tenant?.bonosEnabled === true
+          ? await candadoPuesto(prisma, cashier.tid)
+          : false;
+
       const hasMore = products.length > limit;
       const items = (hasMore ? products.slice(0, limit) : products).map((p) => ({
         id: p.id,
@@ -283,6 +302,9 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
         // duración; el resto (productos, servicios sin scheduling) va
         // como null y el TPV no pinta nada.
         durationMin: p.scheduling?.durationMin ?? null,
+        // B-reservas-8 · ver el `select`. `false` en todo lo demás, que es
+        // el catálogo entero de los quince comercios de hoy.
+        esBono: p.voucherTemplate != null,
         allergens: p.allergens,
       }));
       return {
@@ -327,6 +349,12 @@ export async function registerTpvCatalogRoutes(app: FastifyInstance): Promise<vo
               // puesta-en-marcha (ADR-021) · ídem. No es una puerta: lo que
               // decide si se emite o no es el servidor en cada cobro.
               ensayo: enEnsayo(tenant),
+              // B-reservas-8 · la capability y el CANDADO de la numeración.
+              // Viajan con sus hermanos y se cachean igual: son UI. La
+              // puerta de verdad es el 409 del servidor al añadir la línea
+              // y al cobrar — un catálogo cacheado no vende nada.
+              bonosEnabled: tenant.bonosEnabled,
+              bonosCandadoPuesto: candadoPuestoDelTenant,
               // v1.3-Operativa-Extra · Lote 1: alias editable de tags
               // (`slug` tal como llega de Holded en lowercase → `label`
               // a pintar en el chip).
