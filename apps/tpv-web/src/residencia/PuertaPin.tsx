@@ -241,11 +241,18 @@ export function PuertaPin({
             cabecera para por qué está aquí y no en el hueco del teclado.
             `min-h-touch-pad` porque se pulsa de pie: es discreto de peso
             visual, no de tamaño. */}
+        {/* `block`: un `<button>` es inline, así que sin esto se pegaba a
+            «Volver a la puerta» en la MISMA línea —«PIN de 6
+            cifrasVolver a la puerta»— y los dos se leían como uno. **Lo
+            encontró el bucle visual**: en jsdom no hay layout, y el test
+            que cuenta las teclas y mira las clases seguía verde. Es la
+            tercera vez que esta pantalla paga lo mismo (residencia-4, el
+            solape de las teclas a 390 px). */}
         <button
           type="button"
           onClick={cambiarElLargo}
           disabled={comprobando}
-          className="mt-5 min-h-touch-pad text-[20px] text-slate-500 underline disabled:opacity-50"
+          className="mt-5 block min-h-touch-pad text-[20px] text-slate-500 underline disabled:opacity-50"
         >
           {largo === LARGO_CORTO ? "PIN de 6 cifras" : "PIN de 4 cifras"}
         </button>
@@ -262,7 +269,7 @@ export function PuertaPin({
         <button
           type="button"
           onClick={onVolver}
-          className="mt-10 min-h-touch-pad text-[20px] text-slate-500 underline"
+          className="mt-10 block min-h-touch-pad text-[20px] text-slate-500 underline"
         >
           {volverTexto ?? "Volver a la puerta"}
         </button>

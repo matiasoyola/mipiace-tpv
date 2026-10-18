@@ -197,7 +197,15 @@ export function SalaParte({
               {zona.sueltas.length > 0 && (
                 <article className="mt-5">
                   <h3 className="text-[24px] font-medium text-slate-500">
-                    Del centro, sin residente
+                    {/* residencia-6 · el rótulo depende de la ZONA. «Del centro,
+                        sin residente» es verdad en la zona del centro y mentira
+                        en una planta: ahí lo suelto es lo que no cuelga de un
+                        residente CONCRETO —una avería del office, o la línea de
+                        «sin plan de cuidados», que nombra a varios—. Lo encontró
+                        el bucle visual al fotografiar el parte. */}
+                    {zona.floorId == null
+                      ? "Del centro, sin residente"
+                      : "De la planta, sin residente concreto"}
                   </h3>
                   <ul className="mt-2 space-y-2">
                     {zona.sueltas.map((l, i) => (

@@ -365,6 +365,15 @@ describe("pantalla 2 · el PIN", () => {
     )!;
     expect(b.className).not.toContain("tap-puerta-tecla");
     expect(b.className).toContain("min-h-touch-pad");
+    // `block`: un `<button>` es inline, y sin esto se pegaba a «Volver a
+    // la puerta» en la misma línea —«PIN de 6 cifrasVolver a la
+    // puerta»—. **Lo encontró el bucle visual**, no este test: en jsdom
+    // no hay layout. Lo que esto sostiene es el mecanismo.
+    expect(b.className).toContain("block");
+    const volver = [...container.querySelectorAll("button")].find(
+      (x) => x.textContent === "Volver a la puerta",
+    )!;
+    expect(volver.className).toContain("block");
   });
 
   it("CON DOS ROLES pregunta con cuál entra, y lo dice", async () => {
