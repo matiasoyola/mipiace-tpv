@@ -276,7 +276,7 @@ export async function registerResidenciaRolesRoutes(
         });
       }
 
-      const [roles, zonas] = await Promise.all([
+      const [roles, zonas, pin] = await Promise.all([
         // **Todas**, vigentes y revocadas: la pantalla enseña el histórico
         // con la frase «revocar no borra nada», igual que la lista de
         // pacientes de un sanitario en clinica-1.
@@ -301,6 +301,14 @@ export async function registerResidenciaRolesRoutes(
             floorId: true,
             floor: { select: { id: true, name: true } },
           },
+        }),
+        // residencia-3 · ¿tiene PIN de puerta? **El PIN no sale**: ni
+        // entero, ni parcial, ni su hash, ni su huella. Lo único que la
+        // pantalla puede saber es si hay uno y desde cuándo, que es lo que
+        // la dirección necesita para decidir si ponerlo o quitarlo.
+        prisma.carePin.findFirst({
+          where: { userId, tenantId: auth.tenantId },
+          select: { setAt: true },
         }),
       ]);
 
@@ -347,6 +355,8 @@ export async function registerResidenciaRolesRoutes(
               )
             ? "CENTRO"
             : "ZONA",
+        // residencia-3 · con qué entra en la tablet de una habitación.
+        pinDePuerta: pin ? { desde: pin.setAt.toISOString() } : null,
       };
     },
   );

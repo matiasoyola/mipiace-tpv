@@ -412,6 +412,22 @@ export function crearMundo(): MundoDeLaClinica {
         return u;
       },
     },
+    // ── residencia-3 · LA PARTE DE RESIDENCIA DEL PAQUETE ─────────────
+    //
+    // Desde residencia-3 la devolución del art. 28.3.g pregunta, por cada
+    // cliente, si además es RESIDENTE (y si lo es, le mete su ficha, su
+    // plan y su registro de cuidados). En una clínica de podología —que es
+    // lo que este mundo representa— **no lo es ninguno**, y eso es
+    // exactamente lo que estos cuatro `null` dicen.
+    //
+    // Están aquí y no en el fichero de cada test porque es lo que la
+    // función consulta y porque la respuesta es la misma para los sesenta
+    // tests de este mundo: esta clínica no tiene residentes. El camino con
+    // residentes lo prueba `residencia-3.e2e.ts` contra Postgres.
+    residentProfile: { findFirst: async () => null },
+    bedAssignment: { findMany: async () => [] },
+    carePlanItem: { findMany: async () => [] },
+    careRecord: { findMany: async () => [] },
     client: {
       findFirst: async ({ where }: any) => {
         const c = m.clientes.get(where.id);

@@ -1,7 +1,8 @@
 // clinica-7 · CADA COLUMNA CIFRADA, CON SU SITIO ESCRITO UNA SOLA VEZ.
 //
-// Nueve columnas de la clínica (clinica-7) y seis de la residencia
-// (residencia-1b, D-63). Quince.
+// Nueve columnas de la clínica (clinica-7), seis de la residencia
+// (residencia-1b, D-63) y dos del registro de cuidados (residencia-3).
+// Diecisiete.
 //
 // `cripto.ts` cifra con un AAD; aquí vive **qué AAD le toca a cada
 // columna**. Y vive en un solo fichero por la razón de siempre en este
@@ -201,6 +202,39 @@ export function sitioMotivoDeCierreDeLinea(
     columna: "close_reason",
     filaId: id,
   };
+}
+
+// ── residencia-3 · EL REGISTRO DE CUIDADOS (decisión 6, D-63) ───────
+//
+// residencia-1b §13 dejó dicho que `CareRecord` «nacerá cifrado en su
+// bloque, con su `sitio*` en `cripto-campos.ts` y su CHECK de formato en
+// la migración. El sitio donde ponerlo ya está hecho». Aquí está.
+//
+// **Dos columnas lógicas y no una**, por la misma razón exacta por la que
+// el motivo de apertura y el de cierre de una línea del plan son dos: con
+// el mismo nombre lógico, el texto de la nota de «algo no va bien» se
+// podría copiar a la columna del valor y descifraría — «le huele raro el
+// pie» pasaría a ser el valor de un cambio postural.
+//
+// Y el `filaId` es el uuid que generó **la tablet**, que es el mismo que
+// da la idempotencia del envío por lotes. Las dos cosas necesitan el id
+// antes de insertar, y en la puerta quien lo sabe antes es la tablet.
+
+/** El valor de un registro: `{"tipo":"BOOL","hecho":true}`,
+ *  `{"tipo":"ORDINAL","opcion":"MITAD"}`, `{"tipo":"CONTEO"}`… */
+export function sitioValorDeRegistro(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return { tenantId, tabla: "care_records", columna: "value", filaId: id };
+}
+
+/** Y el texto corto de «algo no va bien». Columna lógica propia. */
+export function sitioNotaDeRegistro(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return { tenantId, tabla: "care_records", columna: "note", filaId: id };
 }
 
 /** Por qué cambió de habitación. */

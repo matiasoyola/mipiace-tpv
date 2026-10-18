@@ -13,6 +13,8 @@
 //     (§3 del prompt), y uno que se salta en verde es peor: miente.
 
 import { createHash } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // ── clinica-7 · LA KEK DE LA SUITE ──────────────────────────────────
 //
@@ -38,6 +40,21 @@ process.env.CLINICAL_KEK ??= createHash("sha256")
   .update("mipiacetpv-e2e-clinical-kek")
   .digest("base64");
 process.env.CLINICAL_KEK_ID ??= "e2e";
+
+// ── residencia-3 · DÓNDE CAEN LOS FICHEROS CLÍNICOS ─────────────────
+//
+// `env.ts` defaults a `/var/lib/mipiacetpv/clinical-files`, que es la ruta
+// DEL CONTENEDOR. El runner de CI no puede crearla, así que la foto del
+// residente contestaba `EACCES: permission denied, mkdir
+// '/var/lib/mipiacetpv'` —500 en la ruta de subida—. En el portátil no se
+// veía porque el `.env` de la raíz trae su propia ruta: la memoria de la
+// casa otra vez, el `.env` de dev tapa lo que la CI va a ver.
+//
+// Se fija aquí y **SIN `??=`**, al contrario que la KEK: que la suite
+// escriba en el mismo sitio en el portátil y en CI es justo lo que
+// faltaba para cazar esto antes de empujar. Y va a `tmpdir()`, no al
+// árbol, para no dejar fotos de prueba en el repo.
+process.env.CLINICAL_FILES_DIR = join(tmpdir(), "mipiacetpv-e2e-clinical-files");
 
 export const E2E_DATABASE_URL = process.env.E2E_DATABASE_URL ?? "";
 export const e2eEnabled = E2E_DATABASE_URL.length > 0;

@@ -55,7 +55,7 @@ import { startVisualViewportSync } from "./lib/visualViewportSync.js";
 import { installBackGuard, setBackFallback } from "./hooks/useBackGuard.js";
 import { OutboxChip } from "./pages/CheckoutPage.outboxChip.js";
 import { KitchenScreen } from "./kitchen/KitchenScreen.js";
-import { PuertaScreen } from "./residencia/PuertaScreen.js";
+import { PuertaApp } from "./residencia/PuertaApp.js";
 import { useAvisosListo } from "./kitchen/tpv/useAvisosListo.js";
 import { useCaminoDirecto } from "./kitchen/tpv/useCaminoDirecto.js";
 import { PairScreen } from "./pages/PairScreen.js";
@@ -403,11 +403,16 @@ export function App() {
   // Su identidad es el dispositivo.
   //
   // Nada de lo que hay debajo de esta línea se monta en una puerta: ni el
-  // outbox, ni el canal de soporte del terminal, ni el cierre de día. El
-  // servidor lo garantiza igual (403 en todas las rutas del TPV), pero el
-  // front tampoco lo intenta.
+  // canal de soporte del terminal, ni el cierre de día, ni el outbox DEL
+  // TERMINAL. El servidor lo garantiza igual (403 en todas las rutas del
+  // TPV), pero el front tampoco lo intenta.
+  //
+  // residencia-3 · la puerta sí tiene cola, y se monta DENTRO de
+  // `PuertaApp` con el mismo `startOutboxSync` de siempre. El corte sigue
+  // estando aquí: lo que no se monta es el outbox de la venta con su chip,
+  // su bloqueo de mesas y su cierre de día.
   if (state.kind === "room") {
-    return <PuertaScreen me={state.data} onRefresh={refresh} />;
+    return <PuertaApp me={state.data} onRefresh={refresh} />;
   }
 
   const { register, store, tenant } = state.data;

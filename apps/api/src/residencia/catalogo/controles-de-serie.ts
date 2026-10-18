@@ -1,8 +1,10 @@
 // residencia-2 (D-11, rama de controles §3 y §4) · EL CATÁLOGO DE SERIE.
 //
-// Los 36 controles con los que un centro de residencia arranca, en las
-// tres capas que este bloque siembra: 22 de ejecución, 7 de observación y
-// 7 de medida. `SCALE` (Barthel, Lobo, Tinetti, Norton) es Fase 2 (D-40,
+// Los 37 controles con los que un centro de residencia arranca, en las
+// tres capas que el catálogo siembra: 22 de ejecución, 8 de observación y
+// 7 de medida. (residencia-2 sembró 36; residencia-3 añadió el botón
+// transversal «algo no va bien», que es la octava de la capa 2 y la única
+// `TEXT_SHORT` — ver su comentario.) `SCALE` (Barthel, Lobo, Tinetti, Norton) es Fase 2 (D-40,
 // D-55) y `EVENT` es residencia-4: los dos están en el enum y no aquí.
 //
 // ── LOS TEXTOS SON EL VOCABULARIO DEL CLIENTE ────────────────────────
@@ -645,6 +647,62 @@ export const CONTROLES_DE_SERIE: ControlDeSerie[] = [
     allowedCareRoleCodes: ["AUXILIAR", "DUE", "FISIO"],
     isoIndicatorCode: "CAIDAS",
     sortOrder: 360,
+  },
+
+  // ── residencia-3 · EL BOTÓN TRANSVERSAL «ALGO NO VA BIEN» ─────────
+  //
+  // La rama de controles §4 lo pide junto a las siete dimensiones: «más un
+  // botón transversal "algo no va bien", con nota de voz o texto corto
+  // alternativo (ambos opcionales)». residencia-2 dejó el dominio
+  // `TEXT_SHORT` en el enum y ningún control que lo usara; éste lo usa, y
+  // entra como un INSERT en este fichero y no como un despliegue, que es
+  // la decisión entera del catálogo (D-11).
+  //
+  // ── Las tres cosas que lo hacen distinto de las siete ─────────────
+  //
+  //   1. **`ON_DEMAND`**: no tiene agenda. `queToca` no devuelve ni una
+  //      ocurrencia suya y nadie lo incumple. Que no haya ninguno en un
+  //      turno no es un fallo de nadie.
+  //   2. **Sin opciones y sin `asUsual`**, y eso no es un hueco: es la
+  //      regla 1 de la capa llevada al final. «No hace falta saber qué es.
+  //      Con decirlo basta» (D-13). Si tuviera opciones, la pantalla
+  //      obligaría a categorizar y la auxiliar no registraría — que es el
+  //      fallo que la rama avisa en su primera regla de diseño.
+  //   3. **No entra en el toque de «como siempre»**, justo porque no tiene
+  //      `asUsual`. Ese toque escribe una fila por cada dimensión `OBS`
+  //      **que declara su valor «como siempre»**, y ésta no declara
+  //      ninguno: «como siempre» no puede significar «no me ha parecido
+  //      que pase nada», porque entonces el día que SÍ pasa algo no se
+  //      distinguiría de los otros 84. Tiene su test.
+  //
+  // Va en la capa 2 y no en la 4 porque la capa 4 son EVENTOS con
+  // gravedad, protocolo y escalado, y eso es residencia-4. Esto es una
+  // observación que alguien hace y que el relevo lee.
+  {
+    code: "ALGO_NO_VA_BIEN",
+    version: 1,
+    name: "Algo no va bien",
+    layer: "OBS",
+    nature: "ON_DEMAND",
+    valueDomain: "TEXT_SHORT",
+    allowedFrequencies: ["ON_DEMAND"],
+    defaultFrequency: { kind: "ON_DEMAND" },
+    // Todos los que registran. Es el botón que existe para que quien ve
+    // algo pueda decirlo, y la limpiadora que entra a la habitación a las
+    // nueve ve tanto como la auxiliar.
+    allowedCareRoleCodes: [
+      "AUXILIAR",
+      "DUE",
+      "MEDICO",
+      "TO",
+      "FISIO",
+      "LIMPIEZA",
+      "COCINA",
+      "CALIDAD",
+      "DIRECCION",
+    ],
+    isoIndicatorCode: "SEGUIMIENTO_CLINICO",
+    sortOrder: 390,
   },
 
   // ══ CAPA 3a · MEDIDA (`MEASURE`) · ¿cuánto? ═════════════════════════

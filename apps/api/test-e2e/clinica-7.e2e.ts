@@ -304,17 +304,18 @@ describe.skipIf(!e2eEnabled)("e2e · clinica-7 · el blindaje", () => {
       expect(msg).toContain("body_cifrado_formato");
     });
 
-    it("las quince columnas cifradas tienen su CHECK de formato", async () => {
+    it("las DIECISIETE columnas cifradas tienen su CHECK de formato", async () => {
       // Que no falte ninguna. Una columna cifrada sin CHECK es una columna
       // donde el texto en claro cabe.
       //
-      // ── residencia-1b (D-63) · eran NUEVE y son QUINCE ────────────
+      // ── NUEVE, QUINCE Y AHORA DIECISIETE ─────────────────────────
       //
-      // Las seis nuevas son de la residencia, y están aquí a propósito en
-      // vez de en una lista aparte: esta aserción es EL INVENTARIO de lo
-      // que el motor sostiene cifrado en toda la casa. Partirla en dos
-      // habría sido dos listas que pueden dejar de cubrirse, y lo que hace
-      // falta saber es «¿falta alguna?», no «¿falta alguna de la clínica?».
+      // Nueve de clinica-7, seis de residencia-1b (D-63) y dos del
+      // registro de cuidados (residencia-3). Están aquí a propósito en vez
+      // de en una lista aparte: esta aserción es EL INVENTARIO de lo que el
+      // motor sostiene cifrado en toda la casa. Partirla en dos habría sido
+      // dos listas que pueden dejar de cubrirse, y lo que hace falta saber
+      // es «¿falta alguna?», no «¿falta alguna de la clínica?».
       //
       // El mismo inventario, por el otro lado, lo fija
       // `test/residencia-1b-cifrado.test.ts`: allí se cuentan los CHECK
@@ -346,6 +347,12 @@ describe.skipIf(!e2eEnabled)("e2e · clinica-7 · el blindaje", () => {
           "resident_profiles_discharge_reason_cifrado_formato",
           "resident_profiles_dni_cifrado_formato",
           "resident_profiles_nss_cifrado_formato",
+          // residencia-3 · el valor del registro y el texto de la nota.
+          // Dos columnas lógicas distintas: con el mismo nombre, el texto
+          // de «algo no va bien» se podría copiar a la columna del valor y
+          // descifraría.
+          "care_records_note_cifrado_formato",
+          "care_records_value_cifrado_formato",
         ].sort(),
       );
     });

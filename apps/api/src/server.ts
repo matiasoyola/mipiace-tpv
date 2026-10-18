@@ -76,6 +76,10 @@ import { registerResidenciaTurnosRoutes } from "./residencia/turnos-routes.js";
 import { registerResidenciaControlesRoutes } from "./residencia/controles-routes.js";
 import { registerResidenciaPlanRoutes } from "./residencia/plan-routes.js";
 import { registerResidenciaPuertaRoutes } from "./residencia/puerta-routes.js";
+// residencia-3 · la puerta de verdad: el PIN, lo que toca, el lote de
+// registros y la foto del residente.
+import { registerResidenciaPuertaRegistroRoutes } from "./residencia/puerta-registro-routes.js";
+import { registerResidenciaFichaRoutes } from "./residencia/ficha-routes.js";
 // residencia-2 · el seed del catálogo de controles de serie (D-11, D-21).
 import { cargarCatalogoDeSerie } from "./residencia/catalogo/cargar-catalogo.js";
 import { registerKitchenTpvRoutes } from "./kitchen/tpv-routes.js";
@@ -306,6 +310,12 @@ async function main() {
   await registerResidenciaControlesRoutes(app);
   await registerResidenciaPlanRoutes(app);
   await registerResidenciaPuertaRoutes(app);
+  // residencia-3 · las seis rutas de la puerta (arranque, PIN, lo que
+  // toca, el lote, anular y la foto) y las tres del admin (foto,
+  // consentimiento de imagen, PIN de puerta) más la vista de lo registrado
+  // hoy en la ficha del residente.
+  await registerResidenciaPuertaRegistroRoutes(app);
+  await registerResidenciaFichaRoutes(app);
   await registerKitchenRoutes(app);
   await registerKitchenTpvRoutes(app);
   // kds-1-cocina · los ajustes de cocina del panel del restaurante, las
@@ -374,7 +384,7 @@ async function main() {
 
   // ── residencia-2 · el catálogo de controles de serie ───────────────
   //
-  // 36 filas GLOBALES (`scope = STANDARD`, sin tenant), idempotentes: es
+  // 37 filas GLOBALES (`scope = STANDARD`, sin tenant), idempotentes: es
   // el catálogo del producto, y lo ven todos los centros de residencia a
   // la vez (D-21, D-57). Corre en cada arranque porque así una versión
   // nueva de un control llega con el despliegue y no con un paso manual
@@ -383,7 +393,7 @@ async function main() {
   // publicada: lo que no cambia no escribe.
   //
   // Corre SIEMPRE y no sólo si hay algún tenant de residencia. Es un
-  // catálogo, no datos de nadie: 36 filas en una tabla que los quince
+  // catálogo, no datos de nadie: 37 filas en una tabla que los quince
   // clientes de hoy no consultan nunca, y gatearlo obligaría a que
   // encender el módulo a un centro dependiera de un seed que todavía no
   // ha corrido.

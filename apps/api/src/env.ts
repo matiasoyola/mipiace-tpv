@@ -165,6 +165,16 @@ export const EnvSchema = z.object({
     .int()
     .positive()
     .default(4 * 1024 * 1024),
+  // residencia-3 (decisión 10) · tope por NOTA DE VOZ de «algo no va
+  // bien». WebM/Opus a 24 kbps son ~3 KB por segundo, así que 2 MB son
+  // más de diez minutos: es la red de seguridad contra una tablet que se
+  // queda grabando en un bolsillo, no el objetivo. La pantalla corta
+  // antes, a 60 s.
+  CARE_VOICE_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(2 * 1024 * 1024),
 
   // ── clinica-7 · LA CLAVE MAESTRA DE LO CLÍNICO ─────────────────────
   //

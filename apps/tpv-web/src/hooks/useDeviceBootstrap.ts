@@ -6,6 +6,10 @@ import {
   getDeviceToken,
 } from "../storage.js";
 import { decideAfterBootstrapError } from "./bootstrap-decision.js";
+import {
+  olvidarLaPuerta,
+  olvidarSesion,
+} from "../residencia/puerta-cache.js";
 
 export interface DeviceMeResponse {
   device: { id: string; name: string | null; pairedAt: string };
@@ -82,6 +86,10 @@ export interface PuertaMeResponse {
   ocupantes: Array<{
     bedId: string;
     bedLabel: string;
+    /** residencia-3 (D-64) · con qué se pide la foto. `null` = cama libre.
+     *  Un uuid no dice nada de nadie, y la foto que abre sigue exigiendo
+     *  consentimiento de imagen vigente. */
+    clientId?: string | null;
     /** `null` = cama libre. */
     nombre: string | null;
   }>;
@@ -226,6 +234,16 @@ export function useDeviceBootstrap(): {
         // restart transitorio y NO debe desemparejar al cliente.
         clearAllDeviceState();
         localStorage.removeItem(DEVICE_ME_CACHE_KEY);
+        // residencia-3 (decisión 7) · **la caché de la puerta se vacía al
+        // revocar el dispositivo.** Dentro hay el plan de cuidados de dos
+        // personas y el roster del centro con las huellas de sus PIN: una
+        // tablet desemparejada no se queda con eso.
+        //
+        // Va aquí y no dentro de `clearAllDeviceState` porque eso es
+        // `localStorage` sincrónico y esto es IndexedDB; mezclarlos
+        // obligaría a hacer asíncrona una función que llaman seis sitios.
+        void olvidarLaPuerta();
+        olvidarSesion();
         setState({ kind: "unpaired" });
       } else {
         // v1.10-offline: error de red (o 401 ambiguo). Si tenemos un
@@ -254,6 +272,10 @@ export function useDeviceBootstrap(): {
     refresh,
     unpair: () => {
       clearAllDeviceState();
+      // residencia-3 · lo mismo al desemparejar A MANO, y por lo mismo:
+      // la caché de la puerta lleva el plan de dos personas dentro.
+      void olvidarLaPuerta();
+      olvidarSesion();
       setState({ kind: "unpaired" });
     },
   };

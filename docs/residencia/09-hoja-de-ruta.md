@@ -87,4 +87,4 @@ ia-4 (riesgo de caída y UPP).
 - Congelar y restringir los dos árboles duplicados del Drive.
 - Evaluar el Plan de Protección de Datos (pendiente desde 2022, lo cita la NC 01).
 - Medir el wifi por plantas.
-- Pedir a la médica y a la DUE que revisen la plantilla de gravedad (`00` §3).
+- Comprar o asignar el móvil de guardia de enfermería (D-66) y decidir qué teléfono hace de responsable de guardia.

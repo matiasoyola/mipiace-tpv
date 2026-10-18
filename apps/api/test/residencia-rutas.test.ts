@@ -249,6 +249,12 @@ const fakePrisma = {
     }),
   },
   clinicalAccess: { findFirst: vi.fn(async () => null) },
+  // residencia-3 (D-64) · la ficha pregunta si hay consentimiento de
+  // IMAGEN vigente, para decir si la puerta pinta la foto o las
+  // iniciales. Vacío: ninguno de estos residentes lo tiene, que es el
+  // caso por defecto y el que este fichero prueba (la ficha se sirve
+  // igual).
+  clientConsent: { findMany: vi.fn(async () => []) },
   clinicalAccessLog: {
     create: vi.fn(async ({ data }: any) => {
       registro.push({
@@ -950,7 +956,16 @@ describe("residencia-1 · `GET /residencia/puerta/me` · nombre y nada más", ()
     const body = res.json();
     expect(body.habitacion).toMatchObject({ number: "112", plantaName: "Primera" });
     expect(body.ocupantes).toEqual([
-      { bedId: CAMA_112A, bedLabel: "A", nombre: "Carmen Gómez" },
+      // residencia-3 (D-64) · el `clientId` entra en la respuesta porque la
+      // pantalla en reposo necesita con qué pedir la foto. Un uuid no dice
+      // nada de nadie —no es el DNI ni el nivel de dependencia— y la foto
+      // que abre sigue exigiendo consentimiento de imagen vigente.
+      {
+        bedId: CAMA_112A,
+        bedLabel: "A",
+        clientId: CARMEN,
+        nombre: "Carmen Gómez",
+      },
     ]);
     // Los turnos viajan con la identidad para que la tablet pueda decidir
     // el turno SIN RED (lo que residencia-3 necesitará).

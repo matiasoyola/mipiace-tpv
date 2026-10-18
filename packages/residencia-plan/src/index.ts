@@ -33,6 +33,7 @@ export {
 export {
   TURNOS_DE_SERIE,
   cruzaMedianoche,
+  diaDelTurno,
   minutosEnTurno,
   turnoDe,
   type TurnoDelCentro,

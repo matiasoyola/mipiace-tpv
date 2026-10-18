@@ -26,7 +26,13 @@
 //    distintos separados por una hora real, y los dos son «las dos y
 //    media de la madrugada», o sea los dos son turno de noche.
 
-import { CENTER_TZ, timeToMinutes, utcToWallTime } from "./tiempo.js";
+import {
+  CENTER_TZ,
+  addDays,
+  timeToMinutes,
+  utcToWallDate,
+  utcToWallTime,
+} from "./tiempo.js";
 
 /** Lo mínimo de un `CenterShift` que hace falta para decidir. */
 export interface TurnoDelCentro {
@@ -106,3 +112,41 @@ export const TURNOS_DE_SERIE = [
   { code: "T", name: "Tarde", startsAt: "15:00", endsAt: "22:00", sortOrder: 2 },
   { code: "N", name: "Noche", startsAt: "22:00", endsAt: "08:00", sortOrder: 3 },
 ] as const;
+
+/**
+ * residencia-3 (decisión de producto 3) · **EL DÍA DEL TURNO**, que no es
+ * siempre el día del reloj.
+ *
+ * «YYYY-MM-DD» de pared del centro. Es la columna `care_records.care_day`
+ * y es lo que agrupa «lo que se ha hecho en este turno».
+ *
+ * ── Por qué no vale la fecha de `instante` ─────────────────────────────
+ *
+ * Porque **la noche cruza medianoche**. El turno de noche del lunes va de
+ * las 22:00 del lunes a las 08:00 del martes: lo registrado a las 02:00
+ * del martes pertenece a la noche DEL LUNES. Con la fecha del reloj, esa
+ * ronda saldría partida en dos días, y las dos mitades contarían como dos
+ * turnos distintos — cada uno con la mitad de los cambios posturales
+ * hechos y la otra mitad «sin registrar». Es el mismo error que
+ * `turnoDe` evita al no escribir la noche como un rango, una capa más
+ * arriba.
+ *
+ * La regla, en una línea: si el turno cruza medianoche y la hora de pared
+ * cae en la parte DE MADRUGADA (antes de `endsAt`), el día del turno es
+ * **el anterior**.
+ *
+ * Sin turno (`null`, un hueco en el cuadrante) el día es el del reloj: no
+ * hay nada que desplazar, y el registro se guarda sin turno con su aviso.
+ */
+export function diaDelTurno(
+  instante: Date,
+  turno: { startsAt: string; endsAt: string } | null,
+  tz: string = CENTER_TZ,
+): string {
+  const dia = utcToWallDate(instante, tz);
+  if (turno == null || !cruzaMedianoche(turno)) return dia;
+  const minutos = timeToMinutes(utcToWallTime(instante, tz));
+  // La parte de madrugada del turno que cruza: `[00:00, endsAt)`.
+  if (minutos < timeToMinutes(turno.endsAt)) return addDays(dia, -1);
+  return dia;
+}
