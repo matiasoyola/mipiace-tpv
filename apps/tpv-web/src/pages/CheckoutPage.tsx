@@ -72,6 +72,7 @@ import {
   openCashDrawerIfAvailable,
   printEscposUsb,
 } from "../lib/escposPrint.js";
+import { importeTrasBillete } from "../lib/billetes.js";
 import { formatAmount, formatEur, parseAmount } from "../lib/money.js";
 import { scrollFocusIntoView } from "../lib/visualViewportSync.js";
 import {
@@ -200,6 +201,11 @@ export function CheckoutOverlay(props: {
   // el mixto es el caso normal: la segunda forma llega con el resto ya
   // puesto, y hasta ahora pulsar un dígito encima no hacía nada.
   const [padReplacing, setPadReplacing] = useState(false);
+  // auditoria-sirope (#3) · ¿el importe de efectivo lo está componiendo
+  // el cajero con billetes? Mientras sea `false`, lo que hay en el campo
+  // es un importe de la casa (el exacto, el total tras cambiar de método)
+  // y el primer billete lo SUSTITUYE. Desde el primero, suman.
+  const [efectivoCompuesto, setEfectivoCompuesto] = useState(false);
   // v1.12 · higiene de la hoja de cobro (§3): email y ticket regalo se
   // pliegan tras "Más opciones". En hora punta la pantalla es para el
   // dinero. Se abre solo si el contacto ya trae email (entonces el
@@ -281,15 +287,34 @@ export function CheckoutOverlay(props: {
   const exactCashForFirstCashRow = Math.max(0, total - sumNonCash);
   function applyExactCash(): void {
     if (firstCashIdx === -1) return;
+    // auditoria-sirope (#3) · vuelve a ser un importe de la casa: el
+    // siguiente billete sustituye, no suma.
+    setEfectivoCompuesto(false);
     setPayment(firstCashIdx, {
       amount: formatAmount(exactCashForFirstCashRow),
     });
   }
-  // v1.3-UX-Iteración-fixes Fix 4: los atajos SET (no SUM). Antes el
-  // piloto se confundía al ver 10 + tap 20 = 30. C = limpiar a 0.
-  function setCashTo(amount: number): void {
+  // auditoria-sirope (#3) · LOS BILLETES SUMAN (a partir del primero).
+  //
+  // v1.3 los hizo SET —«el piloto se confundía al ver 10 + tap 20 = 30»—
+  // y el 18-10 se vio el precio: lo que el cliente deja en el mostrador
+  // son varios billetes y 10 + 5 son 15, no 5. La regla y su porqué, en
+  // `lib/billetes.ts`; `efectivoCompuesto` es «el cajero ya empezó a
+  // componer la entrega».
+  function pulsarBillete(billete: number): void {
     if (firstCashIdx === -1) return;
-    setPayment(firstCashIdx, { amount: formatAmount(amount) });
+    const actual = parseAmount(payments[firstCashIdx]!.amount);
+    setPayment(firstCashIdx, {
+      amount: formatAmount(
+        importeTrasBillete({ actual, billete, yaCompuesto: efectivoCompuesto }),
+      ),
+    });
+    setEfectivoCompuesto(true);
+  }
+  function limpiarEfectivo(): void {
+    if (firstCashIdx === -1) return;
+    setEfectivoCompuesto(false);
+    setPayment(firstCashIdx, { amount: formatAmount(0) });
   }
   // v1.10.3-barra · una sola línea de verdad sobre el reparto, debajo
   // de las filas. Antes cada fila CASH pintaba su propio "Falta X" que
@@ -442,14 +467,29 @@ export function CheckoutOverlay(props: {
   }
 
   function pickMethod(m: Method): void {
-    // En modo simple cambia el método de la única row sin perder
-    // importe. En modo mixto colapsa a 1 row con el importe = total.
-    if (payments.length === 1) {
-      setPayment(0, { method: m });
-    } else {
-      setLastRowPinned(false);
-      setPayments([{ method: m, amount: formatAmount(total) }]);
-    }
+    // auditoria-sirope (#2) · CAMBIAR DE MÉTODO VUELVE AL TOTAL.
+    //
+    // Hasta este bloque el modo simple cambiaba el método «sin perder
+    // importe», y eso convertía un error de dedo en un callejón: con 10 €
+    // tecleados sobre una cuenta de 3 €, tocar Tarjeta dejaba «Sobran
+    // 7 € · baja el importe» y «Cobrar» en gris. El cajero tenía que
+    // darse cuenta de que el número de arriba era de otro cobro.
+    // (Capturas 16 y 17 del 18-10.)
+    //
+    // El importe tecleado pertenece al método con el que se tecleó: lo
+    // que se entrega en mano es efectivo, y una tarjeta cobra el total y
+    // no otra cosa. Así que al cambiar de método el importe vuelve al
+    // total, en los dos sentidos:
+    //
+    //   · a Tarjeta/Bizum/…, porque ahí no hay nada que entregar;
+    //   · de vuelta a Efectivo, porque es el «importe exacto» con el que
+    //     empieza siempre la hoja — y el primer billete que se toque lo
+    //     sustituye (#3).
+    //
+    // En modo mixto ya colapsaba a una fila con el total: eso no cambia.
+    setLastRowPinned(false);
+    setEfectivoCompuesto(false);
+    setPayments([{ method: m, amount: formatAmount(total) }]);
   }
 
   // Cambia el método de una fila concreta (sólo visible en mixto, donde
@@ -1040,7 +1080,15 @@ export function CheckoutOverlay(props: {
                 active={padTarget === i}
                 replacing={padTarget === i && padReplacing}
                 onActivate={() => setPadTarget(i)}
-                onChange={(patch) => setPayment(i, patch)}
+                onChange={(patch) => {
+                  // auditoria-sirope (#3) · lo que el cajero escribe a
+                  // mano es suyo: el billete que venga después SUMA
+                  // encima, no lo borra. Para empezar de cero está «C».
+                  if (patch.amount !== undefined && i === firstCashIdx) {
+                    setEfectivoCompuesto(true);
+                  }
+                  setPayment(i, patch);
+                }}
                 onMethodChange={(m) => setRowMethod(i, m)}
               />
             ))}
@@ -1053,14 +1101,16 @@ export function CheckoutOverlay(props: {
               {[5, 10, 20, 50, 100].map((n) => (
                 <button
                   key={n}
-                  onClick={() => setCashTo(n)}
+                  data-testid={`billete-${n}`}
+                  onClick={() => pulsarBillete(n)}
                   className="h-touch rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[14px] font-medium text-mipiace-ink tabular-nums"
                 >
                   {n}
                 </button>
               ))}
               <button
-                onClick={() => setCashTo(0)}
+                data-testid="billete-limpiar"
+                onClick={limpiarEfectivo}
                 className="h-touch rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-[14px] font-medium text-slate-500"
                 aria-label="Limpiar importe efectivo"
               >
@@ -1072,6 +1122,7 @@ export function CheckoutOverlay(props: {
           {/* Importe exacto (sólo si hay row CASH). 1 tap → change=0. */}
           {firstCashIdx !== -1 && (
             <button
+              data-testid="importe-exacto"
               onClick={applyExactCash}
               className="w-full h-touch mb-2.5 rounded-xl bg-mipiace-coral-soft hover:bg-mipiace-coral-soft/70 border border-mipiace-coral/30 text-mipiace-coral-dark text-[12.5px] font-medium flex items-center justify-center gap-2"
             >
@@ -1428,7 +1479,10 @@ export function CheckoutOverlay(props: {
               </div>
               <CashPad
                 value={payments[padTarget]!.amount}
-                onChange={(next) => setPayment(padTarget, { amount: next })}
+                onChange={(next) => {
+                  if (padTarget === firstCashIdx) setEfectivoCompuesto(true);
+                  setPayment(padTarget, { amount: next });
+                }}
                 onReplacingChange={setPadReplacing}
               />
             </div>
