@@ -57,6 +57,7 @@ import {
   FAMILY_BAR_COLUMNS_HANDHELD,
   GRID_GAP,
   PRODUCT_COLUMNS_HANDHELD,
+  hojaDeComandaVisible,
   repartoDelCatalogo,
   tamanoNombreProducto,
 } from "../lib/hospitalityGrid.js";
@@ -204,6 +205,17 @@ export interface HospitalityWorkspaceProps {
    * el lector y la protección del teclado del sistema.
    */
   searchField: ReactNode;
+  /**
+   * n1-hosteleria (hallazgo 8) · ¿hay algo montado POR ENCIMA de la
+   * venta? «Tickets pasados» y la ficha de un ticket, el cajón del menú,
+   * la agenda, «Cerrar el día» y el arqueo X.
+   *
+   * Es más ancho que `overlayEncima` de n1-vertical a propósito: aquél
+   * decide si se pinta la barra del total —y el cajón o los tickets no
+   * son razón para quitarla— y éste decide si la hoja de la comanda
+   * sigue abierta, que es otra pregunta.
+   */
+  fueraDeLaVenta: boolean;
   onBackToMap: (() => void) | null;
   onClickProduct: (p: CatalogProduct, units: number) => void;
   onClickLine: (line: CartLine) => void;
@@ -295,6 +307,13 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
    * sobra pantalla.
    */
   const [rejillaAbierta, setRejillaAbierta] = useState(false);
+
+  // n1-hosteleria (hallazgo 8) · al salir de la venta, la hoja se cierra
+  // de verdad: no basta con no pintarla, porque al volver estaría otra
+  // vez abierta tapando la búsqueda y las familias.
+  useEffect(() => {
+    if (props.fueraDeLaVenta) setSheetOpen(false);
+  }, [props.fueraDeLaVenta]);
   // n1-vertical · la barra inferior de handheld sólo mientras se marca.
   // Misma decisión y mismos motivos que en el TPV claro (ver la nota de
   // `barraTicketVisible` en SalePage.tsx): con un overlay encima tapa su
@@ -796,7 +815,10 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
               quitarlo haría saltar la rejilla cada vez que el cajero
               toca el buscador. */}
           <div className="h-20 shrink-0" aria-hidden />
-          {sheetOpen && (
+          {hojaDeComandaVisible({
+            abierta: sheetOpen,
+            fueraDeLaVenta: props.fueraDeLaVenta,
+          }) && (
             <div className="fixed inset-0 z-40">
               <div
                 className="absolute inset-0"

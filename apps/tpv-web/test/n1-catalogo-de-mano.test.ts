@@ -1,4 +1,5 @@
-// n1-hosteleria · QUIÉN TIENE EL SITIO EN EL CATÁLOGO (hallazgos 2 y 7).
+// n1-hosteleria · QUIÉN TIENE EL SITIO EN EL CATÁLOGO (2, 7) Y LA HOJA
+// DE LA COMANDA AL SALIR DE LA VENTA (8).
 //
 // La pasada del 18-10, en el N1 con la carta de Sirope:
 //
@@ -10,12 +11,14 @@
 //
 // Las dos filas de la tabla de sabotajes que viven aquí:
 //
-//   | Con texto en el buscador se pintan las familias | el banco de búsqueda
-//   | Con familia elegida no se pliega la rejilla      | el banco de familia elegida
+//   | Con texto en el buscador se pintan las familias   | el banco de búsqueda
+//   | Con familia elegida no se pliega la rejilla        | el banco de familia elegida
+//   | La hoja de la comanda no se cierra al ir a Tickets | el banco de navegación
 
 import { describe, expect, it } from "vitest";
 
 import {
+  hojaDeComandaVisible,
   repartoDelCatalogo,
   type VistaDelCatalogo,
 } from "../src/lib/hospitalityGrid.js";
@@ -133,5 +136,37 @@ describe("n1-hosteleria · la restricción: en el terminal no cambia nada", () =
         }
       }
     }
+  });
+});
+
+describe("n1-hosteleria · la hoja de la comanda no sobrevive a salir (8)", () => {
+  // La pasada del 18-10: abierta la comanda, «Tickets pasados», ficha de
+  // un ticket y volver — la hoja seguía abierta debajo, y bloqueó DOS
+  // veces los toques de la búsqueda y de las familias.
+  //
+  // La fila de la tabla de sabotajes:
+  //   | La hoja de la comanda no se cierra al ir a Tickets | este banco
+
+  it("abierta y en la venta, se pinta", () => {
+    expect(
+      hojaDeComandaVisible({ abierta: true, fueraDeLaVenta: false }),
+    ).toBe(true);
+  });
+
+  it("abierta pero con algo encima, NO se pinta", () => {
+    // «Tickets pasados», la ficha de un ticket, el cajón, la agenda,
+    // «Cerrar el día» y el arqueo X entran todos por aquí.
+    expect(
+      hojaDeComandaVisible({ abierta: true, fueraDeLaVenta: true }),
+    ).toBe(false);
+  });
+
+  it("cerrada, no se pinta pase lo que pase", () => {
+    expect(
+      hojaDeComandaVisible({ abierta: false, fueraDeLaVenta: false }),
+    ).toBe(false);
+    expect(
+      hojaDeComandaVisible({ abierta: false, fueraDeLaVenta: true }),
+    ).toBe(false);
   });
 });

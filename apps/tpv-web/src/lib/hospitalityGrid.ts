@@ -536,3 +536,38 @@ export function repartoDelCatalogo(opts: {
   const plegada = opts.vista.kind === "family" && !opts.rejillaAbierta;
   return { rejilla: !plegada, tira: plegada };
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// n1-hosteleria · LA HOJA DE LA COMANDA NO SOBREVIVE A SALIR (hallazgo 8)
+//
+// Medido en la pasada del 18-10: abierta la comanda, se va a «Tickets
+// pasados», se abre la ficha de un ticket y se vuelve — y la hoja sigue
+// abierta debajo, tapando la venta. Durante el recorrido bloqueó DOS
+// veces los toques (la búsqueda y las familias) hasta cerrarla a mano.
+//
+// La causa es que la venta no se desmonta: «Tickets pasados», la ficha y
+// el cajón son overlays DENTRO de `SalePage`, así que el `sheetOpen` del
+// espacio de trabajo sobrevive intacto.
+// ──────────────────────────────────────────────────────────────────────
+
+/**
+ * ¿Se pinta la hoja de la comanda?
+ *
+ * Dos condiciones, y las dos hacen falta:
+ *
+ *   · que el camarero la haya abierto (`abierta`);
+ *   · que no haya nada montado por encima de la venta
+ *     (`fueraDeLaVenta`: «Tickets pasados» y la ficha de un ticket, el
+ *     cajón del menú, la agenda, «Cerrar el día» y el arqueo X).
+ *
+ * Que sea derivado y no sólo un `setState` es a propósito: aunque el
+ * efecto que apaga `abierta` no llegara a correr —o alguien lo quitara—,
+ * la hoja no puede pintarse encima de un overlay. El efecto está
+ * ADEMÁS, para que al volver la hoja no reaparezca.
+ */
+export function hojaDeComandaVisible(opts: {
+  abierta: boolean;
+  fueraDeLaVenta: boolean;
+}): boolean {
+  return opts.abierta && !opts.fueraDeLaVenta;
+}
