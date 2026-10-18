@@ -429,8 +429,79 @@ rama muerta.
 
 ## 3 · Tabla de sabotajes
 
-Pendiente de ejecutar: va en la revisión final de la fase, con cada test
-visto en rojo y el fichero entero (no `-t`), y con los mensajes reales.
+Cada garantía rota a propósito sobre la línea de producción, con el **fichero
+de test entero** (no `-t`), restaurando con `git checkout --` después de
+cada una. Los mensajes son los reales, copiados de la salida.
+
+| # | Qué se rompe | Dónde | Fichero | Rojo | Mensaje real |
+|---|---|---|---|---|---|
+| **El cobro (§1.2)** |
+| 1 | la sesión sin líneas vuelve a devolver `null` | `lineas-de-la-sesion.ts` | `clinica-sesion-rutas` | 🟢 → 🔴 1 | `expected null to deeply equal { sinNadaQueCobrar: true }` |
+| 2 | el cobro ignora `sinNadaQueCobrar` | `agenda/checkout.ts` | `clinica-8-cobro-de-la-sesion` | 🔴 2 | `expected [ { id: 'line-0', …(12) } ] to deeply equal []` · `… not to contain 'SVC-COMPLETA'` |
+| **La cita que desaparece (§1.1)** |
+| 3 | cancelar vuelve a ser UN TOQUE | `AgendaPage.tsx` | `clinica-8-agenda` | 🔴 4 | `expected [ { …(2) } ] to deeply equal []` (el PATCH salió sin preguntar) |
+| 4 | el historial vuelve a pintar «Cita» a secas | `ClientsPage.tsx` | `clinica-8-ficha-del-cliente` | 🔴 2 | `expected '…' to contain 'Cita · cancelada'` |
+| **Entrar por la agenda (§1.4)** |
+| 5 | el cobro se ofrece antes de cerrar la sesión | `AgendaPage.tsx` | `clinica-8-agenda` | 🔴 1 | `expected <button …(2)></button> to be null` |
+| 6 | «Sesión de hoy» vuelve a ser el botón suave | `AgendaPage.tsx` | `clinica-8-agenda` | 🔴 1 | `expected 'w-full min-h-touch rounded-xl…' to contain 'bg-mipiace-coral '` |
+| 7 | el TPV de una clínica vuelve a abrir en la venta | `App.tsx` | `clinica-8-entrar-por-la-agenda` | 🔴 2 | `expected false to be true` |
+| **El alta deja la clínica lista (§1.3)** |
+| 8 | dos servicios pueden ser el MISMO nivel | `csv-catalogo.ts` | `clinica-8-csv-clinico` | 🔴 1 | `expected [ 'A-1', 'A-2' ] to deeply equal [ 'A-1' ]` |
+| 9 | la columna `tipo_visita` se ignora | `csv-catalogo.ts` | `clinica-8-csv-clinico` | 🔴 5 | `expected Map{} to deeply equal Map{ 'consulta' => 'GENERAL', …(4) }` |
+| 10 | un sí/no que no se entiende se lee como «no» | `csv-catalogo.ts` | `clinica-8-csv-clinico` | 🔴 1 | `expected [ { linea: 2, …(4) } ] to deeply equal []` |
+| 11 | las marcas no llegan a la fila de agenda | `tenant-catalog.ts` | `catalogo-servicios-csv-import` | 🔴 3 | `expected null to be 1` · `expected [] to deeply equal [ 'POD-001' ]` |
+| 12 | **los tipos de visita se escriben FUERA de la transacción** | `tenant-catalog.ts` | `catalogo-servicios-csv-import` | 🟢 → 🔴 1 | `expected 5 to be +0` |
+| 13 | las marcas entran en un comercio sin clínica | `tenant-catalog.ts` | `catalogo-servicios-csv-import` | 🟢 → 🔴 1 | `expected [ 'SVC-1', 'SVC-2' ] to deeply equal [ 'SVC-2' ]` |
+| 14 | el check del catálogo clínico siempre dice que sí | `onboarding-health.ts` | `clinica-8-catalogo-clinico` | 🔴 4 | `expected true to be false` |
+| 15 | el check no aplica nunca, ni en una clínica | `onboarding-health.ts` | `clinica-8-catalogo-clinico` | 🔴 3 | `expected false to be true` |
+| **La historia a pantalla completa (§1.9)** |
+| 16 | la historia vuelve a pintarse DENTRO del cajón | `ClientsPage.tsx` | `clinica-8-ficha-del-cliente` | 🔴 1 | `expected true to be false` (el overlay está dentro del contenedor) |
+| **Los cajeros (§1.8)** |
+| 17 | en Cajeros vuelven a salir el técnico y los revocados | `cashiers/routes.ts` | `clinica-8-cajeros` | 🔴 4 | `expected [ …(2) ] to deeply equal [ Array(1) ]` |
+| 18 | **«Cambiar PIN» vuelve a alcanzarlos** | `cashiers/routes.ts` | `clinica-8-cajeros` | 🔴 3 | `expected 200 to be 404` |
+| **El contrato (§1.7)** |
+| 19 | la razón social se corrige EN LA v1 | `contrato.ts` | `contrato-encargado` | 🔴 2 | `expected '3dd72930…' to be '7baee64a…'` — la huella de una aceptación que ya ocurrió |
+| **La marca sanitaria (§1.6)** |
+| 20 | la marca deja de viajar con la agenda | `marca-sanitaria.ts` | `clinica-8-marca-sanitaria` | 🔴 1 | `expected null to be true` |
+| 21 | **falla hacia «no es sanitaria» en vez de «no sé»** | `marca-sanitaria.ts` | `clinica-8-marca-sanitaria` | 🟢 → 🔴 1 | `expected false to be null` |
+| **Personal (§1.5)** |
+| 22 | el guardado de la sección clínica vuelve a ser mudo | `StaffPage.tsx` | `clinica-8-personal` | 🔴 4 | `expected [] to include 'ok: Guardado.'` |
+
+### Los cuatro que salieron VERDES, que son los que enseñaron algo
+
+**#1 · el banco del cobro MOCKEA la función que se saboteaba.**
+`clinica-8-cobro-de-la-sesion.test.ts` mockea
+`clinica/lineas-de-la-sesion.js` para poder poner los tres valores a mano,
+así que romper esa función ahí no se puede ver — el fichero salió verde con
+el sabotaje puesto. Lo que sí lo caza es `clinica-sesion-rutas.test.ts`, que
+la ejercita de verdad contra su Prisma falso. **Un sabotaje hay que correrlo
+contra el fichero que ejercita la línea, no contra el que habla del tema.**
+
+**#12 · el test de la transacción reventaba el paso EQUIVOCADO.** «Los tipos
+de visita se escriben DENTRO de la transacción» hacía reventar la fila de
+**agenda**, que se escribe antes: al abortar ahí, los tipos no llegaban a
+escribirse ni dentro ni fuera, y el test no distinguía las dos cosas —
+pasaba en verde con la escritura sacada de la transacción. Se revienta la
+**auditoría**, que va después, y entonces sí se ve: escritos dentro, la
+vuelta atrás se los lleva; escritos fuera, sobreviven. Es la misma forma que
+el fake del `$transaction` de `catalogo-servicios-csv` (§2 de su done), un
+piso más abajo.
+
+**#13 · la puerta se probaba con un fichero que ya se saltaba por otra
+puerta.** El CSV de Rosario lleva `E1` en las 17 filas, así que en un
+comercio sin clínica se saltan **por la puerta de la exención** de
+`catalogo-servicios-csv`: quitar la puerta nueva no cambiaba nada. Ahora el
+test usa dos filas al 21 % y sujetas, donde lo único que un bar no puede
+tener son las marcas.
+
+**#21 · la rama del `catch` era inalcanzable por donde la probaba el test.**
+El caso «si la lectura revienta» hacía fallar la lectura del **tenant**, y
+`clinicaIsEnabled` tiene su propio `try/catch` que devuelve `false`: el
+`null` que el test veía salía de la capability, no del `catch`. Así que
+cambiar el `catch` a `false` pasaba en verde. Revienta ahora la lectura del
+**usuario**, que es la única que llega hasta ahí. Es la memoria de la casa —
+«una escapatoria inalcanzable no está cerrada: medirla» — en el banco en vez
+de en el motor.
 
 ---
 
@@ -456,10 +527,21 @@ visto en rojo y el fichero entero (no `-t`), y con los mensajes reales.
    la fase A escribe en columnas que ya existen (`service_scheduling`,
    `tag_visit_types`, `users`).
 2. **No hay variables de entorno nuevas.** Ninguna.
-3. **El contrato sube a la v2.** Quien tenga aceptada la v1 —hoy, la «Clínica
-   demo»— pasa a «hay una versión nueva del contrato» y la tiene que aceptar
-   otra vez. La v1 se sigue pudiendo descargar en PDF: no se quita de
-   `VERSIONES`.
+3. **El contrato sube a la v2, y eso deja la clínica EN SOLO LECTURA hasta
+   que la dueña lo acepte.** No es un aviso: es la garantía de clinica-7 —
+   una aceptación de una versión vieja no vale, y `conHistoria` contesta
+   **423** a toda escritura clínica. O sea que el día del despliegue, hasta
+   que Rosario (o la «Clínica demo») acepte el contrato nuevo en Ajustes ›
+   Contrato de tratamiento de datos, **no se puede cerrar una sesión ni
+   escribir nada en una historia**. La agenda y la caja siguen funcionando;
+   lo que además se pierde mientras tanto es la nota libre de las citas
+   nuevas.
+
+   **Lo primero del guion del día de la visita: aceptar el contrato.** Lo
+   encontró este bloque porque cuatro ficheros de e2e se fueron enteros a
+   423 al sacar la v2 (§7).
+
+   La v1 se sigue pudiendo descargar en PDF: no se quita de `VERSIONES`.
 4. **La «Clínica demo» necesita recargar su CSV** para quedarse con las
    marcas de clínica — o ponerlas a mano en Catálogo de agenda. Un SKU que ya
    existe **no se pisa**, así que una segunda carga del mismo fichero no
@@ -477,7 +559,76 @@ visto en rojo y el fichero entero (no `-t`), y con los mensajes reales.
 
 ---
 
-## 6 · Estado
+## 6 · Verde
 
-- Suite y sabotajes: §3 y §7, pendientes del cierre de la fase.
-- Rama sin pushear todavía: el prompt autoriza push y PR al terminar.
+| Suite | Resultado |
+|---|---|
+| `npx vitest run` (workspace, desde la raíz) | **416 ficheros · 5.891 tests**, 10 saltados |
+| `pnpm test:e2e` (los 46 ficheros, Postgres real) | **46 ficheros · 985 tests** — ver la nota del reloj |
+| `tsc --noEmit` api · `tsc -b` admin · `tsc -b` tpv-web | limpio |
+
+Una nota de la última corrida del workspace: `cashier-login.test.ts` salió
+rojo UNA vez en el test del **rate limit** («se resetea tras un login
+exitoso») y verde al volver a correrlo solo y al correr el proyecto de la
+API entero (207 ficheros, 3.046 tests). Es un test que mide ventanas de
+tiempo y se cae bajo carga; no toca nada de este bloque — lo que este bloque
+le añadió a esa ruta (`deletedAt: null`) lo cubre `clinica-8-cajeros`.
+
+El e2e corrió sobre una base propia de este worktree
+(`mipiacetpv_clinica8_e2e2`) con las 92 migraciones reales aplicadas.
+
+**Y se corrió dos veces, por el reloj.** La primera, lanzada a las 23:58 de
+Madrid: **45 de 46 ficheros en verde**, y el único rojo era un aserto de
+este bloque (`h1-empresa-sin-caja` contaba seis checks que no aplican y
+ahora son siete, con el del catálogo clínico). Arreglado eso, la segunda
+corrida empezó pasada la medianoche y cayeron **`f3-fichar` y `f8-colegio`**
+(6 tests): son los dos ficheros que escriben «hace N horas» y cruzan el día
+local, la franja mala de 00:00 a N:00 que ya está documentada en
+puesta-en-marcha §8.1. La rama **no toca ni un fichero de fichaje**, y en la
+corrida de las 23:58 los dos pasaron. **No se corre el e2e de madrugada.**
+
+### Lo nuevo de este bloque
+
+| Fichero | Qué fija |
+|---|---|
+| `api/test/clinica-8-cobro-de-la-sesion.test.ts` (5) | los tres valores de la respuesta y qué hace el cobro con cada uno |
+| `api/test/clinica-8-csv-clinico.test.ts` (24) | el CSV real de Rosario, el de La Maestranza intacto y las ocho negativas |
+| `api/test/clinica-8-catalogo-clinico.test.ts` (7) | el check que bloquea la activación, y a quién no aplica |
+| `api/test/clinica-8-cajeros.test.ts` (8) | la lista y las tres rutas que escriben |
+| `api/test/clinica-8-marca-sanitaria.test.ts` (5) | la marca al día, y que falla hacia «no sé» |
+| `tpv-web/test/clinica-8-agenda.test.tsx` (9) | cancelar pregunta, y el orden de la cita en una clínica |
+| `tpv-web/test/clinica-8-ficha-del-cliente.test.tsx` (6) | el estado en el historial y la historia a pantalla completa |
+| `tpv-web/test/clinica-8-entrar-por-la-agenda.test.tsx` (3) | dónde abre el TPV, y que los catorce no cambian |
+| `admin/test/clinica-8-personal.test.tsx` (10) | el colegiado con cualquier formato y los guardados que contestan |
+
+Y ocho ficheros que ya existían, ampliados o corregidos: el import del CSV
+(las marcas y los tipos en la transacción), `clinica-sesion-rutas` (el tercer
+valor), el contrato (la v2 y que la v1 no se mueve), `h1-salud-modulos` y
+`h1-empresa-sin-caja` (el séptimo check), `catalogo-servicios-csv.e2e` (las
+marcas ya entran), `clinica-personal` (el botón que ya no se desactiva) y
+cuatro e2e que sembraban la versión del contrato a mano.
+
+---
+
+## 7 · Lo que el bloque encontró por el camino
+
+**Subir la versión del contrato deja la clínica en SOLO LECTURA.** Es el
+diseño de clinica-7 funcionando —una aceptación de una versión vieja no
+vale— pero lo descubrí porque **cuatro ficheros de e2e se fueron enteros a
+423** al sacar la v2. Dicho en lo que le pasa a Rosario: el día del
+despliegue, hasta que la dueña acepte el contrato nuevo en su panel, **no se
+puede cerrar una sesión ni escribir nada en una historia**. La agenda y la
+caja siguen; las citas nuevas pierden la nota libre. Va en §5.3 y es lo
+primero del guion del día de la visita.
+
+Los cuatro e2e sembraban `version: 1` escrito a mano; ahora siembran
+`VERSION_VIGENTE`, así que la próxima versión no vuelve a costar una pasada.
+
+---
+
+## 8 · Estado de la rama
+
+- Fase A completa, con la suite y el e2e en verde y la tabla de sabotajes
+  ejecutada (§3).
+- **Fase B sin empezar**, como pide el prompt.
+- Push y PR: autorizados por el prompt. Ni merge ni despliegue.
