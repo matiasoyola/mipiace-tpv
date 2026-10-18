@@ -275,7 +275,7 @@ describe("clinica-1 · los tres puestos, a un toque", () => {
     expect(botonPorTexto("Sólo los suyos")).toBeDefined();
   });
 
-  it("SIN COLEGIADO no se puede guardar, y lo dice antes del 400", async () => {
+  it("SIN COLEGIADO no se guarda, y lo dice antes del 400", async () => {
     await pintar();
     await abrirFicha("MARTA");
     await act(async () => {
@@ -284,9 +284,16 @@ describe("clinica-1 · los tres puestos, a un toque", () => {
       );
     });
     const guardar = botonPorTexto("Guardar")!;
-    expect(guardar.disabled).toBe(true);
+    // clinica-8 · el botón YA NO SE DESACTIVA. Un botón apagado en una
+    // tablet se lee como «esto está roto»: se pulsa, no pasa nada y nadie
+    // sabe por qué. Ahora se pulsa y contesta qué falta — ver
+    // `clinica-8-personal.test.tsx`.
+    expect(guardar.disabled).toBe(false);
     expect(container.textContent).toContain("Hace falta");
-    // Y no se ha mandado nada.
+    // Y sigue sin mandarse nada.
+    await act(async () => {
+      guardar.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
     expect(patches).toHaveLength(0);
   });
 

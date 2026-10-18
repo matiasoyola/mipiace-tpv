@@ -154,6 +154,56 @@ function shiftSummary(s: Shift): string {
   return `${days || "(sin días)"} · ${s.startTime}–${s.endTime} · ${range}`;
 }
 
+// ── clinica-8 · NINGÚN GUARDADO DE PERSONAL FALLA EN SILENCIO ───────
+//
+// Esta pantalla tiene cuatro botones de guardar (perfil, historia clínica,
+// servicios, turnos) y hasta este bloque **ninguno decía nada**: el acierto
+// se notaba porque los datos se refrescaban solos, y el fallo salía como un
+// aviso rojo en la CABECERA DE LA PÁGINA, lejos del botón que se acaba de
+// pulsar y fuera de la pantalla si la tarjeta está desplegada.
+//
+// La auditoría del 18-10 lo pagó con la marca «Es sanitario»: se marcó, se
+// escribió el colegiado, se pulsó guardar y la casilla volvió sola a su
+// sitio sin una palabra. Sin esa marca la cita no enseña nada clínico, así
+// que un guardado mudo paró el recorrido entero.
+//
+// Lo que hace falta no es un aviso más bonito: es que el resultado aparezca
+// **donde está el dedo**, y que aparezca también cuando sale bien — un
+// «Guardado» es lo que distingue «no se ha enterado» de «se ha guardado y
+// se ve igual».
+type Guardado = { que: "ok" } | { que: "error"; mensaje: string } | null;
+
+function ResultadoGuardado({ estado }: { estado: Guardado }) {
+  if (!estado) return null;
+  if (estado.que === "ok") {
+    return (
+      <p
+        role="status"
+        data-guardado="ok"
+        className="text-[12.5px] text-emerald-700 mt-2"
+      >
+        Guardado.
+      </p>
+    );
+  }
+  return (
+    <p
+      role="alert"
+      data-guardado="error"
+      className="text-[12.5px] text-mipiace-coral-dark mt-2"
+    >
+      {estado.mensaje}
+    </p>
+  );
+}
+
+/** El mensaje de un fallo de guardado, sea del servidor o de la red. */
+function mensajeDeFallo(err: unknown): string {
+  return err instanceof ApiError
+    ? err.message
+    : "No se ha podido guardar. Revisa la conexión y vuelve a intentarlo.";
+}
+
 export function StaffPage() {
   const navigate = useNavigate();
   const [agendaEnabled, setAgendaEnabled] = useState<boolean | null>(null);
@@ -424,9 +474,11 @@ function ProfileEditor({
   );
   const [active, setActive] = useState(row.profile?.active ?? true);
   const [busy, setBusy] = useState(false);
+  const [guardado, setGuardado] = useState<Guardado>(null);
 
   async function save() {
     onError(null);
+    setGuardado(null);
     setBusy(true);
     try {
       await api(`/staff/${row.userId}`, {
@@ -434,8 +486,11 @@ function ProfileEditor({
         body: { displayName: displayName.trim(), color, active },
       });
       await onChanged();
+      setGuardado({ que: "ok" });
     } catch (err) {
-      onError(err instanceof ApiError ? err.message : "Error al guardar");
+      const mensaje = mensajeDeFallo(err);
+      setGuardado({ que: "error", mensaje });
+      onError(mensaje);
     } finally {
       setBusy(false);
     }
@@ -507,6 +562,7 @@ function ProfileEditor({
           >
             {row.profile ? "Guardar perfil" : "Dar de alta como profesional"}
           </PrimaryButton>
+          <ResultadoGuardado estado={guardado} />
         </div>
       )}
     </section>
@@ -554,6 +610,7 @@ function ClinicaEditor({
   );
   const [busy, setBusy] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
+  const [guardado, setGuardado] = useState<Guardado>(null);
 
   // El puesto sólo se elige para quien no es propietaria ni encargado:
   // cambiarle el rol de negocio a la dueña no es una decisión de esta
@@ -571,6 +628,18 @@ function ClinicaEditor({
   async function guardar() {
     onError(null);
     setAviso(null);
+    setGuardado(null);
+    // clinica-8 · lo que falta se dice AQUÍ y no se manda para que el
+    // servidor conteste 400 desde la cabecera de la página. Es el único
+    // campo que se teclea en toda la tarjeta.
+    if (faltaColegiado) {
+      setGuardado({
+        que: "error",
+        mensaje:
+          "Falta el nº de colegiado: va en la historia y en los informes que firma. Escríbelo como lo tengas (45/0123, 45-0123, COL-450123…).",
+      });
+      return;
+    }
     setBusy(true);
     try {
       const res = await api<{ sesionesInvalidadas: boolean }>(
@@ -593,8 +662,11 @@ function ClinicaEditor({
         );
       }
       await onChanged();
+      setGuardado({ que: "ok" });
     } catch (err) {
-      onError(err instanceof ApiError ? err.message : "Error al guardar");
+      const mensaje = mensajeDeFallo(err);
+      setGuardado({ que: "error", mensaje });
+      onError(mensaje);
     } finally {
       setBusy(false);
     }
@@ -687,9 +759,18 @@ function ClinicaEditor({
               data-colegiado
               className="w-full h-11 px-3.5 rounded-xl bg-mipiace-stone border border-transparent text-[14px] focus:bg-white focus:border-mipiace-coral/30 focus:ring-2 focus:ring-mipiace-coral/30 focus:outline-none disabled:opacity-50"
             />
-            {faltaColegiado && (
+            {faltaColegiado ? (
               <p className="text-[12px] text-mipiace-coral-dark mt-1.5">
                 Hace falta: va en la historia y en los informes que firma.
+              </p>
+            ) : (
+              // clinica-8 · el 18-10 se escribió «45-0123», el guardado no
+              // salió y se dio por hecho que el guion no valía. Vale: el
+              // número se guarda tal cual, sin formato. Decirlo aquí quita
+              // la duda antes de que cueste un intento.
+              <p className="text-[12px] text-slate-500 mt-1.5">
+                Como lo tengas: 45/0123, 45-0123, COL-450123… se guarda tal
+                cual y así sale en la historia.
               </p>
             )}
           </div>
@@ -731,15 +812,20 @@ function ClinicaEditor({
 
       {canEdit && (
         <div className="mt-4">
+          {/* clinica-8 · el botón YA NO SE DESACTIVA cuando falta el
+              colegiado. Un botón apagado en una tablet se lee como «esto
+              está roto»: se pulsa, no pasa nada y nadie sabe por qué. Ahora
+              se pulsa, y `guardar()` contesta qué falta y en qué formatos
+              vale el número. */}
           <PrimaryButton
             type="button"
             onClick={guardar}
             busy={busy}
-            disabled={faltaColegiado}
             className="!w-auto px-5 !h-10 !text-[13.5px]"
           >
             Guardar
           </PrimaryButton>
+          <ResultadoGuardado estado={guardado} />
         </div>
       )}
 
@@ -967,6 +1053,7 @@ function SkillsEditor({
     () => new Set(row.serviceIds),
   );
   const [busy, setBusy] = useState(false);
+  const [guardado, setGuardado] = useState<Guardado>(null);
   const dirty = useMemo(() => {
     const a = new Set(row.serviceIds);
     if (a.size !== selected.size) return true;
@@ -985,6 +1072,7 @@ function SkillsEditor({
 
   async function save() {
     onError(null);
+    setGuardado(null);
     setBusy(true);
     try {
       await api(`/staff/${row.userId}/skills`, {
@@ -992,8 +1080,11 @@ function SkillsEditor({
         body: { serviceIds: [...selected] },
       });
       await onChanged();
+      setGuardado({ que: "ok" });
     } catch (err) {
-      onError(err instanceof ApiError ? err.message : "Error al guardar");
+      const mensaje = mensajeDeFallo(err);
+      setGuardado({ que: "error", mensaje });
+      onError(mensaje);
     } finally {
       setBusy(false);
     }
@@ -1039,6 +1130,7 @@ function SkillsEditor({
           >
             Guardar servicios
           </OutlineButton>
+          <ResultadoGuardado estado={guardado} />
         </div>
       )}
     </section>
@@ -1159,6 +1251,7 @@ function ShiftForm({
   const [validUntil, setValidUntil] = useState("");
   const [kind, setKind] = useState<ShiftKind>("REGULAR");
   const [busy, setBusy] = useState(false);
+  const [guardado, setGuardado] = useState<Guardado>(null);
 
   function toggleDay(code: string) {
     setDays((prev) => {
@@ -1171,12 +1264,22 @@ function ShiftForm({
 
   async function save() {
     onError(null);
+    setGuardado(null);
+    // clinica-8 · lo que falta se dice AQUÍ, al lado del botón. Antes iba
+    // a la cabecera de la página: con la tarjeta desplegada, el aviso
+    // caía fuera de la pantalla y «Crear turno» parecía no hacer nada.
     if (days.size === 0) {
-      onError("Elige al menos un día de la semana.");
+      setGuardado({
+        que: "error",
+        mensaje: "Elige al menos un día de la semana.",
+      });
       return;
     }
     if (!validFrom) {
-      onError("Indica desde cuándo rige el turno.");
+      setGuardado({
+        que: "error",
+        mensaje: "Indica desde cuándo rige el turno.",
+      });
       return;
     }
     // Orden canónico L→D en la rrule.
@@ -1196,9 +1299,12 @@ function ShiftForm({
           kind,
         },
       });
+      setGuardado({ que: "ok" });
       await onDone(true);
     } catch (err) {
-      onError(err instanceof ApiError ? err.message : "Error al crear el turno");
+      const mensaje = mensajeDeFallo(err);
+      setGuardado({ que: "error", mensaje });
+      onError(mensaje);
     } finally {
       setBusy(false);
     }
@@ -1292,6 +1398,7 @@ function ShiftForm({
           Cancelar
         </OutlineButton>
       </div>
+      <ResultadoGuardado estado={guardado} />
     </div>
   );
 }

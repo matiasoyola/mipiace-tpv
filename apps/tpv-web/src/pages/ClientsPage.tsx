@@ -5,6 +5,7 @@
 // desde el TPV, sólo si la capability CRM está activa (ADR-R6).
 
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowLeft,
   CalendarClock,
@@ -235,7 +236,10 @@ function SidePanel({
   );
 }
 
-type Tab = "history" | "technical" | "vouchers" | "valoracion" | "historia";
+// clinica-8 · «historia» ya no es una pestaña del cajón: la historia se
+// abre a pantalla completa (ver `historiaAbierta`). El valor sale del tipo
+// para que no quede una rama muerta que alguien reviva sin darse cuenta.
+type Tab = "history" | "technical" | "vouchers" | "valoracion";
 
 function ClientDetailDrawer({
   clientId,
@@ -259,6 +263,18 @@ function ClientDetailDrawer({
   const [editing, setEditing] = useState(false);
   const [tab, setTab] = useState<Tab>("history");
   const [error, setError] = useState<string | null>(null);
+  // clinica-8 · LA HISTORIA SIEMPRE A PANTALLA COMPLETA, venga de donde
+  // venga. Desde la cita ya abría así (clinica-6); desde la ficha del
+  // cliente se pintaba DENTRO del cajón lateral de 420 px, y ahí la
+  // historia sale cortada y el mapa de los dos pies se desborda — la
+  // auditoría del 18-10 lo fotografió (capturas 77–80).
+  //
+  // No es un problema de anchos que se arregle con un `max-width`: la
+  // historia es una pantalla entera de iPad apaisado (clinica-6 §3 hace la
+  // cuenta: 576 px sólo para la columna de los pies). Dos sitios donde la
+  // misma pantalla se ve distinta son dos sitios donde una úlcera cae en
+  // distinto punto del pie.
+  const [historiaAbierta, setHistoriaAbierta] = useState(false);
 
   async function load() {
     setError(null);
@@ -328,9 +344,12 @@ function ClientDetailDrawer({
                 ofrecerle un 403 con su línea. */}
             {clinicaEncendida &&
               (esSanitario ? (
+                // clinica-8 · abre el OVERLAY, no una pestaña del cajón.
+                // `active` se queda en `false` a propósito: la pestaña no
+                // es un sitio en el que quedarse, es una puerta.
                 <TabButton
-                  active={tab === "historia"}
-                  onClick={() => setTab("historia")}
+                  active={historiaAbierta}
+                  onClick={() => setHistoriaAbierta(true)}
                 >
                   Historia
                 </TabButton>
@@ -352,23 +371,12 @@ function ClientDetailDrawer({
             />
           )}
           {tab === "vouchers" && <VouchersTab clientId={clientId} />}
-          {tab === "historia" && clinicaEncendida && esSanitario && (
-            <HistoriaViva
-              clientId={clientId}
-              // Sin `onEmpezarVisita`: desde la ficha de un cliente no hay
-              // CITA, y una sesión clínica cuelga de una cita desde
-              // clinica-3 (§8.6). La tarjeta de «Hoy toca» se ve igual
-              // —que es lo que hace falta saber— y dice dónde se empieza,
-              // en vez de ofrecer un botón que no puede cumplir.
-              onAbrirValoracion={() => setTab("valoracion")}
-            />
-          )}
           {tab === "valoracion" && clinicaEncendida && esSanitario && (
             // Al sanitario la pestaña «Valoración» ya no existe: llega
             // aquí desde Documentos, así que lo que necesita es la vuelta.
             <button
               type="button"
-              onClick={() => setTab("historia")}
+              onClick={() => setHistoriaAbierta(true)}
               className="min-h-touch px-4 mb-3 rounded-2xl bg-white border border-slate-200 text-[14px] font-medium"
             >
               ← Volver a la historia
@@ -387,6 +395,54 @@ function ClientDetailDrawer({
           )}
         </>
       )}
+      {/* clinica-8 · LA HISTORIA, A PANTALLA COMPLETA. Mismo overlay que
+          desde la cita (clinica-6), con portal a `document.body`: el
+          cajón de la ficha es un `fixed` con z-index propio, y una hoja
+          que pidiera estar encima desde dentro sólo subiría dentro de ese
+          peldaño — es la trampa que clinica-3 pagó con la barra de cobro
+          (§7.1 de su done). */}
+      {historiaAbierta &&
+        clinicaEncendida &&
+        esSanitario &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div className="fixed inset-0 z-[70] bg-mipiace-stone flex flex-col font-sans">
+            <div className="flex items-center gap-3 px-4 md:px-6 h-16 bg-white border-b border-slate-200 shrink-0">
+              <button
+                onClick={() => setHistoriaAbierta(false)}
+                className="h-11 w-11 rounded-2xl hover:bg-slate-100 flex items-center justify-center text-mipiace-ink"
+                aria-label="Volver a la ficha"
+              >
+                <ArrowLeft className="w-5 h-5" strokeWidth={2.25} />
+              </button>
+              <h1 className="text-[18px] font-semibold text-mipiace-ink flex-1">
+                Historia
+                {detail ? ` · ${clientFullName(detail.client)}` : ""}
+              </h1>
+            </div>
+            <div
+              data-test="historia-pantalla-completa"
+              className="flex-1 overflow-y-auto px-4 md:px-6 py-4"
+            >
+              <div className="max-w-[1180px] mx-auto">
+                <HistoriaViva
+                  clientId={clientId}
+                  // Sin `onEmpezarVisita`: desde la ficha de un cliente no
+                  // hay CITA, y una sesión clínica cuelga de una cita desde
+                  // clinica-3 (§8.6). La tarjeta de «Hoy toca» se ve igual
+                  // —que es lo que hace falta saber— y dice dónde se
+                  // empieza, en vez de ofrecer un botón que no puede
+                  // cumplir.
+                  onAbrirValoracion={() => {
+                    setHistoriaAbierta(false);
+                    setTab("valoracion");
+                  }}
+                />
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
     </SidePanel>
   );
 }
@@ -511,6 +567,26 @@ function TabButton({
   );
 }
 
+/**
+ * clinica-8 · el estado de una cita, en la palabra del mostrador.
+ *
+ * `CONFIRMED` no lleva etiqueta a propósito: es el estado de casi todas y
+ * escribirlo en cada línea sería ruido. Lo que hay que poder leer de un
+ * vistazo es lo que NO es normal — y sobre todo «Cancelada», que es el
+ * único estado en el que la cita no está en la agenda.
+ *
+ * El diccionario es el mismo de `lib/agenda.ts::STATUS_LABEL`; aquí se
+ * escribe aparte porque esta pantalla no importa la agenda y porque lo que
+ * se quiere es justamente dejar fuera la etiqueta de «Confirmada».
+ */
+const ESTADO_DE_LA_CITA: Record<string, string> = {
+  PENDING: "pendiente",
+  IN_SERVICE: "en sala",
+  COMPLETED: "hecha",
+  NO_SHOW: "no vino",
+  CANCELLED: "cancelada",
+};
+
 function HistoryTab({ clientId }: { clientId: string }) {
   const [data, setData] = useState<ClientHistory | null>(null);
   const [error, setError] = useState(false);
@@ -560,7 +636,18 @@ function HistoryTab({ clientId }: { clientId: string }) {
             <div className="text-[13.5px] font-medium text-mipiace-ink">
               {e.kind === "PURCHASE"
                 ? `Ticket ${e.holdedDocNumber ?? e.internalNumber}`
-                : "Cita"}
+                : // clinica-8 · EL ESTADO SE DICE. Hasta este bloque toda
+                  // cita se pintaba «Cita» a secas, también una cancelada —
+                  // y una cancelada no sale en la agenda. Así que el
+                  // historial era el único sitio donde aparecía, y aparecía
+                  // como si estuviera viva: en la auditoría del 18-10 fue
+                  // justo eso lo que hizo pensar que la agenda «había
+                  // perdido» una cita que en realidad estaba cancelada.
+                  `Cita${
+                    ESTADO_DE_LA_CITA[e.status]
+                      ? ` · ${ESTADO_DE_LA_CITA[e.status]}`
+                      : ""
+                  }`}
             </div>
             <div className="text-[12px] text-slate-500">
               {new Date(e.at).toLocaleDateString("es-ES", {

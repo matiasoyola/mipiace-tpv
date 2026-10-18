@@ -1268,6 +1268,10 @@ function HealthPanel({
 const NO_APLICA_MOTIVO: Record<string, string> = {
   caja: "sin caja",
   holded: "sin Holded",
+  // clinica-8 · el catálogo clínico sólo se mide donde hay historia
+  // clínica. En los demás sale «No aplica · sin historia clínica», que es
+  // distinto de cumplir y de fallar.
+  clinica: "sin historia clínica",
 };
 
 function CheckRow({ check }: { check: ReadinessCheck }) {

@@ -31,7 +31,11 @@ import {
 } from "lucide-react";
 
 import { ApiError } from "../api.js";
-import { loadCatalogFromCache, type CatalogProduct } from "../lib/catalog.js";
+import {
+  getCachedClinicaEnabled,
+  loadCatalogFromCache,
+  type CatalogProduct,
+} from "../lib/catalog.js";
 import {
   asegurarClientesEnCache,
   clientFullName,
@@ -335,6 +339,11 @@ export interface AgendaPageProps {
   // gana es no pintarle a la recepcionista un botón que siempre le va a
   // fallar y que le dejaría una línea DENIED por cada toque de curiosidad.
   esSanitario?: boolean;
+  // clinica-8 · la marca sanitaria del servidor, cuando NO coincide con la
+  // que esta pantalla recibió del login. Quien manda en la sesión (`App`)
+  // la guarda; aquí sólo se avisa. Sin esto, marcar a alguien sanitario no
+  // le llegaba al TPV hasta que cerraba sesión y volvía a entrar.
+  onMarcaSanitaria?: (esSanitario: boolean) => void;
   /**
    * B-reservas-8 · LA PALABRA que usa este centro para los bonos. En el
    * código son `Voucher`; de cara al mostrador el spa dirá «programa» y la
@@ -357,6 +366,7 @@ export function AgendaPage({
   staffFilterInicial,
   puedeCobrar = true,
   esSanitario = false,
+  onMarcaSanitaria,
   // B-reservas-8 · «bono» es el default de la columna: un centro que no
   // lo toque lee lo de siempre.
   bonoEtiqueta = "bono",
@@ -450,6 +460,25 @@ export function AgendaPage({
   const [absenceFor, setAbsenceFor] = useState<AgendaStaff | null>(null);
   // La ausencia pintada que se ha tocado, para ofrecer quitarla.
   const [absenceDetail, setAbsenceDetail] = useState<AgendaAbsence | null>(null);
+  // clinica-8 · de la caché del catálogo, igual que el ensayo y las mesas:
+  // vale sin red y está puesta antes de que esta pantalla exista.
+  const clinicaEncendida = getCachedClinicaEnabled();
+  // clinica-8 · la sesión cerrada de esta cita no dejó nada que cobrar. El
+  // borrador ya existe (vacío) y lo que falta es que alguien añada el
+  // servicio que se hizo; esto guarda a qué borrador ir.
+  const [sesionSinCobro, setSesionSinCobro] = useState<{
+    appointmentId: string;
+    ticketId: string;
+  } | null>(null);
+  // clinica-8 · cancelar una cita es irreversible, libera el hueco y hasta
+  // este bloque era UN toque sin confirmar, en una rejilla de cuatro
+  // botones. La del 18-10 se perdió así: desapareció de la agenda, su hora
+  // volvió a ofrecerse y en el historial de la paciente seguía sin decir
+  // nada. Ahora pregunta, y dice lo que va a pasar.
+  const [confirmarEstado, setConfirmarEstado] = useState<{
+    id: string;
+    status: AppointmentStatus;
+  } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const durationByService = useMemo(() => {
@@ -511,6 +540,16 @@ export function AgendaPage({
         const fresh = await fetchAgendaDay(d);
         setDay(fresh);
         setOffline(false);
+        // clinica-8 · la marca sanitaria, al día. Llega con el refresco
+        // que la agenda ya hacía; quien manda en la sesión (`App`) la
+        // guarda, y así «Sesión de hoy» y la historia aparecen sin que
+        // nadie tenga que cerrar sesión y volver a entrar.
+        if (
+          fresh.esSanitario !== undefined &&
+          fresh.esSanitario !== esSanitario
+        ) {
+          onMarcaSanitaria?.(fresh.esSanitario);
+        }
       } catch {
         const cached = await loadAgendaDayFromCache(d);
         setDay(cached ?? { date: d, staff: [], appointments: [] });
@@ -522,7 +561,7 @@ export function AgendaPage({
       // alta una clienta o un servicio, el siguiente pintado ya los sabe.
       void refrescarCachesLocales();
     },
-    [refrescarCachesLocales],
+    [refrescarCachesLocales, esSanitario, onMarcaSanitaria],
   );
 
   useEffect(() => {
@@ -765,12 +804,7 @@ export function AgendaPage({
     }
   }
 
-  async function doCheckout(appointmentId: string) {
-    const res = await checkoutAppointmentTicket(appointmentId);
-    if (!res.ok) {
-      flash(res.message);
-      return;
-    }
+  function entrarEnElBorrador(appointmentId: string, ticketId: string) {
     if (!onEnterDraft) {
       flash("Ticket pre-poblado abierto en caja.");
       return;
@@ -779,11 +813,33 @@ export function AgendaPage({
       day?.appointments.find((a) => a.id === appointmentId) ?? detail ?? null;
     onEnterDraft({
       appointmentId,
-      ticketId: res.ticket.id,
+      ticketId,
       clientName: appt ? clientNameOrNull(appt.clientId) : null,
       serviceLabel: appt ? serviceNames(appt) : "",
     });
     onClose();
+  }
+
+  async function doCheckout(appointmentId: string) {
+    const res = await checkoutAppointmentTicket(appointmentId);
+    if (!res.ok) {
+      flash(res.message);
+      return;
+    }
+    // clinica-8 · LA SESIÓN NO DEJÓ NADA QUE COBRAR, y eso se dice ANTES de
+    // irse a caja. El borrador existe y está vacío a propósito; lo que no
+    // se hace ya es rellenarlo con los servicios RESERVADOS de la cita —
+    // cobrar la previsión en vez del trabajo, que es lo que la auditoría
+    // del 18-10 se encontró y que nadie ve porque los importes cuadran.
+    //
+    // El aviso va en el detalle y no en un toast: un toast de 3,5 s sobre
+    // una pantalla que se cierra sola no lo lee nadie, y lo que hay que
+    // hacer después (añadir el servicio) necesita un botón.
+    if (res.sesionSinCobro) {
+      setSesionSinCobro({ appointmentId, ticketId: res.ticket.id });
+      return;
+    }
+    entrarEnElBorrador(appointmentId, res.ticket.id);
   }
 
   // Una cita que todavía vive en el outbox NO existe en el servidor:
@@ -1406,7 +1462,14 @@ export function AgendaPage({
               setDetail(null);
               setMoveError(null);
             }}
-            onStatus={(st) => changeStatus(detail.id, st)}
+            // clinica-8 · las dos que LIBERAN EL HUECO y no se deshacen
+            // preguntan antes. Las otras tres (confirmar, en sala,
+            // finalizar) siguen siendo un toque: se corrigen tocando otra.
+            onStatus={(st) =>
+              st === "CANCELLED" || st === "NO_SHOW"
+                ? setConfirmarEstado({ id: detail.id, status: st })
+                : void changeStatus(detail.id, st)
+            }
             onCheckout={() => doCheckout(detail.id)}
             puedeCobrar={puedeCobrar}
             // clinica-6 · la historia viva del paciente, desde la cita.
@@ -1437,6 +1500,9 @@ export function AgendaPage({
               detail.clientId ? () => setSesionDe(detail.id) : undefined
             }
             sesionPorCobrar={(day?.sesionesPorCobrar ?? []).includes(detail.id)}
+            // clinica-8 · en una clínica se entra por la agenda y el orden
+            // de la cita cambia: primero la sesión, después el cobro.
+            clinicaEncendida={clinicaEncendida}
             onMove={(start, staffUserId) =>
               void doMove(detail.id, start, staffUserId)
             }
@@ -1650,6 +1716,93 @@ export function AgendaPage({
                 className="flex-1 h-11 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[14px] font-medium"
               >
                 Quitar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* clinica-8 · la sesión cerrada no dejó nada que cobrar. Se dice, y
+          se deja añadirlo: el borrador está abierto y vacío. */}
+      {sesionSinCobro && (
+        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/30 p-3">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="La sesión no tiene nada que cobrar"
+            data-test="sesion-sin-cobro"
+            className="w-full md:w-96 bg-white rounded-2xl p-4 shadow-xl"
+          >
+            <h2 className="text-[15px] font-semibold text-mipiace-ink mb-1">
+              La sesión no tiene nada que cobrar
+            </h2>
+            <p className="text-[13px] text-slate-600 mb-4">
+              En la consulta no se marcó ningún servicio cobrable, así que el
+              ticket sale vacío. Añade el servicio que se hizo.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setSesionSinCobro(null)}
+                className="flex-1 h-11 rounded-2xl bg-mipiace-stone text-[14px] font-medium"
+              >
+                Ahora no
+              </button>
+              <button
+                onClick={() => {
+                  const ir = sesionSinCobro;
+                  setSesionSinCobro(null);
+                  entrarEnElBorrador(ir.appointmentId, ir.ticketId);
+                }}
+                className="flex-1 h-11 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[14px] font-medium"
+              >
+                Añadir el servicio
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* clinica-8 · cancelar y no-show preguntan. Las dos liberan el hueco
+          y ninguna se deshace. */}
+      {confirmarEstado && (
+        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/30 p-3">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={
+              confirmarEstado.status === "CANCELLED"
+                ? "Cancelar la cita"
+                : "Marcar como no-show"
+            }
+            data-test="confirmar-estado"
+            className="w-full md:w-96 bg-white rounded-2xl p-4 shadow-xl"
+          >
+            <h2 className="text-[15px] font-semibold text-mipiace-ink mb-1">
+              {confirmarEstado.status === "CANCELLED"
+                ? "¿Cancelar esta cita?"
+                : "¿Marcar como no-show?"}
+            </h2>
+            <p className="text-[13px] text-slate-600 mb-4">
+              {confirmarEstado.status === "CANCELLED"
+                ? "Sale de la agenda y su hora vuelve a ofrecerse. No se puede deshacer: habría que darla otra vez."
+                : "Su hora vuelve a ofrecerse. No se puede deshacer."}
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setConfirmarEstado(null)}
+                className="flex-1 h-11 rounded-2xl bg-mipiace-stone text-[14px] font-medium"
+              >
+                No
+              </button>
+              <button
+                onClick={() => {
+                  const q = confirmarEstado;
+                  setConfirmarEstado(null);
+                  void changeStatus(q.id, q.status);
+                }}
+                className="flex-1 h-11 rounded-2xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[14px] font-medium"
+              >
+                {confirmarEstado.status === "CANCELLED"
+                  ? "Sí, cancelar"
+                  : "Sí, no-show"}
               </button>
             </div>
           </div>
@@ -2753,6 +2906,20 @@ function DetailPanel(props: {
    *  información de CAJA y no de salud —«a esta cita le queda cobrar» no
    *  dice nada de lo que se le hizo— así que la ve también la recepción. */
   sesionPorCobrar: boolean;
+  /**
+   * clinica-8 · ¿es un centro con historia clínica?
+   *
+   * Cambia el ORDEN de la cita, no lo que se puede hacer: «Sesión de hoy»
+   * pasa a ser el botón fuerte y «Cobrar en caja» aparece **cuando la
+   * sesión está cerrada**, con el ticket ya hecho (decisión de producto de
+   * Matías, 18-10). Hasta este bloque el botón más fuerte era «Cobrar en
+   * caja» y «Sesión de hoy» el más suave — o sea que la pantalla invitaba
+   * a cobrar la previsión antes de registrar la consulta.
+   *
+   * `false` en los catorce comercios sin clínica, y ahí el panel es
+   * exactamente el de ayer.
+   */
+  clinicaEncendida: boolean;
   onMove: (startISO: string, staffUserId?: string) => void;
   onClearMoveError: () => void;
 }) {
@@ -2848,9 +3015,19 @@ function DetailPanel(props: {
               completada sigue siendo el sitio desde el que se lee lo que
               se escribió ese día, y la historia no se cierra con la cita. */}
           {props.onAbrirSesion && (
+            // clinica-8 · EL BOTÓN PRINCIPAL en un centro clínico. Antes
+            // era el suave y «Cobrar en caja» el fuerte: la pantalla
+            // invitaba a cobrar la previsión antes de registrar lo que se
+            // había hecho. Fuera de la clínica se queda como estaba.
             <button
+              data-test="sesion-de-hoy"
               onClick={props.onAbrirSesion}
-              className="w-full min-h-touch rounded-xl bg-mipiace-coral-soft text-mipiace-coral-dark text-[14px] font-semibold flex items-center justify-center gap-2"
+              className={
+                "w-full min-h-touch rounded-xl text-[14px] font-semibold flex items-center justify-center gap-2 " +
+                (props.clinicaEncendida && !props.sesionPorCobrar
+                  ? "bg-mipiace-coral hover:bg-mipiace-coral-dark text-white"
+                  : "bg-mipiace-coral-soft text-mipiace-coral-dark")
+              }
             >
               <Footprints className="w-4 h-4" strokeWidth={2.25} />
               Sesión de hoy
@@ -2882,14 +3059,34 @@ function DetailPanel(props: {
 
       {!terminal && (
         <div className="p-4 border-t border-slate-100 space-y-2">
-          {props.puedeCobrar && (
-            <button
-              onClick={props.onCheckout}
-              className="w-full h-12 rounded-xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[15px] font-semibold"
-            >
-              Cobrar en caja
-            </button>
-          )}
+          {/* clinica-8 · EN UNA CLÍNICA, COBRAR SALE DESPUÉS DE LA SESIÓN.
+              Con la sesión cerrada el ticket ya está hecho con lo que se
+              hizo y quien cobra sólo lo confirma; antes de cerrarla, lo
+              único que habría que cobrar es la previsión de la cita, que es
+              justo lo que este bloque deja de hacer.
+
+              La salida no se cierra: la venta suelta sigue entera en el
+              menú, y es desde donde se cobra cualquier cosa que no salga de
+              una consulta (unas plantillas, un producto). La línea lo dice
+              en vez de dejar un hueco. */}
+          {props.puedeCobrar &&
+            (!props.clinicaEncendida || props.sesionPorCobrar ? (
+              <button
+                data-test="cobrar-en-caja"
+                onClick={props.onCheckout}
+                className="w-full h-12 rounded-xl bg-mipiace-coral hover:bg-mipiace-coral-dark text-white text-[15px] font-semibold"
+              >
+                Cobrar en caja
+              </button>
+            ) : (
+              <p
+                data-test="cobrar-tras-la-sesion"
+                className="text-[12.5px] text-slate-500 leading-snug"
+              >
+                El cobro sale al cerrar la sesión de hoy, con el ticket ya
+                hecho. Para cobrar algo aparte, usa la venta.
+              </p>
+            ))}
           <MoverCita
             appt={appt}
             staff={props.staff}

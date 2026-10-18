@@ -109,7 +109,8 @@ export type KitchenDisplayEnabled = boolean;
 
 // H1 (ADR-016) · de qué depende un check. `always` vale para cualquier
 // empresa; `caja` y `holded` sólo cuando el tenant los tiene.
-export type CheckRequirement = "always" | "caja" | "holded";
+// clinica-8 · y `clinica`, el del catálogo clínico completo.
+export type CheckRequirement = "always" | "caja" | "holded" | "clinica";
 
 export interface ReadinessCheck {
   id: string;
@@ -260,10 +261,23 @@ export interface CatalogImportResult {
     /** «Exento · sanitario», redactado por el servidor: es la misma frase
      *  que sale en el chip del catálogo y en la leyenda del papel. */
     exencionEtiqueta: string | null;
+    // clinica-8 · las marcas de clínica. Viajan SIEMPRE, igual que sus
+    // vecinas: `null` en el fichero de un bar y en toda fila que no las
+    // traiga. Son lo que decide si la sesión puede cobrar algo.
+    /** `QUIROPODIA` | `PIE_RIESGO` | … heredado de la categoría. */
+    tipoVisita: string | null;
+    primeraValoracion: boolean | null;
+    tratamientoSesion: boolean | null;
+    /** 1, 2 o 3 — «este servicio ES el nivel N» de la quiropodia. */
+    nivelQuiropodia: number | null;
   }>;
   saltadas: CatalogImportFilaSaltada[];
   /** Productos locales que el comercio ya tenía antes de esta carga. */
   yaTenia: number;
+  /** clinica-8 · el mapa `categoría → tipo de visita` que deja la carga.
+   *  Vacío en todo fichero sin `tipo_visita`. Opcional en el tipo por la
+   *  ventana del despliegue: una API anterior no lo manda. */
+  tiposDeVisita?: Array<{ slug: string; visitType: string }>;
 }
 
 export interface CreateTenantDraftResponse {

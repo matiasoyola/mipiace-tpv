@@ -303,6 +303,11 @@ const CatalogImportMeta = Base.extend({
   // cuántas y no cuáles. Opcional porque las cargas ya auditadas en
   // producción no la llevan: exigirla rompería la lectura de la tabla.
   serviciosCreados: z.number().int().nonnegative().optional(),
+  // clinica-8 · cuántas CATEGORÍAS quedan con su tipo de visita tras la
+  // carga. Es lo que distingue «cargué servicios de clínica» de «cargué
+  // una clínica lista para cobrar». Opcional por lo mismo que la de
+  // arriba: las cargas ya auditadas no la llevan.
+  tiposDeVisita: z.number().int().nonnegative().optional(),
 });
 
 // puesta-en-marcha (ADR-021) · se reseteó el ensayo de una cuenta. Guarda
