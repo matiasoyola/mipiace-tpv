@@ -246,11 +246,17 @@ posibilidad de que el descuido lo deje **abierto**.
 
 **Lo que no cambia:** el texto de los cuatro `RAISE`, y las escapatorias que sí tienen un motivo
 propio comprobable contra el estado real —un ticket sin sellar, un ticket `TEST`, las tres
-condiciones del reseteo del ensayo (§5), un empleado que nunca llegó a fichar—. Y queda una rama
-de cascada viva a propósito en `mipiacetpv_tickets_fiscal_link_guard` (verifactu-1): ese trigger
-no guarda nada que los cuatro de aquí no guarden ya —existe para que el mensaje diga «este ticket
-tiene factura» en vez de hablar de una clave ajena— y, con el append-only cerrado, un tenant con
-facturas ya no llega a la cascada.
+condiciones del reseteo del ensayo (§5), un empleado que nunca llegó a fichar—.
+
+**La quinta función.** `mipiacetpv_tickets_fiscal_link_guard` (verifactu-1) llevaba la misma rama
+y se dejó fuera del primer arreglo, con el argumento de que no guarda nada que los cuatro de
+arriba no guarden ya. Medido después: en un `DELETE FROM tenants` el orden real de las cascadas es
+`tickets` **antes** de `fiscal_records`, así que con la rama puesta el ticket `TEST` con factura
+emitida pasa los dos guardias y **se borra dentro de la cascada** — lo que para la transacción es
+el append-only cuando le llega su turno al registro, en la cascada de al lado, y con la marca
+puesta lo único que quedaba parando era una FK ajena (`shifts_user_id_fkey`). Es decir: lo que
+salvaba al ticket no era su guardián, y dependía de un orden que no está en ningún contrato.
+`20261018000000_fiscal_link_sin_cascada` le quita la rama también. **Las cinco, sin cascada.**
 
 **Consecuencia para los tests:** media suite e2e limpiaba sus tenants con un `DELETE FROM tenants`
 a pelo y funcionaba **justo por esa rama**. Ahora limpia por la misma puerta que la operación de
