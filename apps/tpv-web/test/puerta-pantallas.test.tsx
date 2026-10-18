@@ -534,6 +534,66 @@ describe("pantalla 3 · lo que toca ahora", () => {
     ).toBeUndefined();
   });
 
+  // ── residencia-6 (punto 3) · «EN LA TABLET» ──────────────────────
+  //
+  // Sin red, «lo que toca» ya no sale entero por hacer: lo que esta
+  // tablet apuntó consta. Y consta **marcado**, porque «consta» y
+  // «consta aquí» no son lo mismo — lo de aquí no lo ve el relevo
+  // todavía.
+
+  function conRegistroPropio(enLaTablet: boolean) {
+    return {
+      ...DATOS,
+      residentes: [
+        {
+          ...DATOS.residentes[0]!,
+          registros: [
+            {
+              id: "r1",
+              controlCode: "CAMBIO_POSTURAL",
+              clientId: "carmen",
+              valor: { tipo: "BOOL", hecho: true },
+              nota: null,
+              tieneVoz: false,
+              recordedAt: "2026-10-15T06:20:00.000Z",
+              careDay: "2026-10-15",
+              occurrenceAt: DATOS.residentes[0]!.toca[0]!.at,
+              shiftCode: "M",
+              sinTurno: false,
+              firmadoPor: "Ana",
+              firmadoPorUserId: "u1",
+              rolCode: "AUXILIAR",
+              anulado: false,
+              corrigeA: null,
+              vigente: true,
+              ...(enLaTablet ? { enLaTablet: true } : {}),
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  it("lo apuntado SIN RED sale hecho, con la marca «en la tablet»", async () => {
+    await pintar(
+      <PuertaLoQueToca {...props} datos={conRegistroPropio(true)} />,
+    );
+    expect(container.textContent).toContain("en la tablet");
+    // Y dice lo que NO puede saber: lo registrado desde otra pantalla sin
+    // red. Callárselo sería afirmar que no se hizo.
+    expect(container.textContent).toContain(
+      "registrado desde otra pantalla sin red no se puede saber",
+    );
+  });
+
+  it("y lo que CONSTA en el servidor no lleva la marca ni la banda", async () => {
+    await pintar(
+      <PuertaLoQueToca {...props} datos={conRegistroPropio(false)} />,
+    );
+    expect(container.textContent).not.toContain("en la tablet");
+    expect(container.textContent).not.toContain("otra pantalla sin red");
+  });
+
   it("«Hecho» es oscuro y NO SE ANIMA: cambia de estado", async () => {
     await pintar(<PuertaLoQueToca {...props} />);
     const b = [...container.querySelectorAll("button")].find(

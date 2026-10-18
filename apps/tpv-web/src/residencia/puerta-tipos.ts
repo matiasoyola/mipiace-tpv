@@ -192,6 +192,13 @@ export interface RegistroDeLaPuerta {
   /** `true` = es el valor de ahora de su ocurrencia. Lo que la pantalla
    *  pinta en verde o en gris discontinuo. */
   vigente: boolean;
+  /** residencia-6 · `true` = esto lo apuntó ESTA tablet y puede no haber
+   *  subido todavía. La pantalla lo dice («· en la tablet»), porque es
+   *  distinto de «consta en el servidor»: lo que está sólo aquí no lo ve
+   *  el relevo ni la DUE hasta que vuelva la red.
+   *
+   *  Nunca viene de la API: lo pone la caché al leer lo propio. */
+  enLaTablet?: boolean;
 }
 
 /** Una ocurrencia de `queToca`, como la pinta la pantalla 3. */
