@@ -1,6 +1,6 @@
 # n1-vertical · el TPV se puede usar en un aparato de mano — DONE
 
-_Rama `n1-vertical`, commits pequeños en español: cuatro del alcance, uno de bancos, dos de lo que encontró el repaso a 360×640, y el merge de `master`. APK **1.27.0 (12700)** compilada y **sin publicar**. 2026-10-16/18._
+_Rama `n1-vertical`, commits pequeños en español: cuatro del alcance, los bancos, lo que encontró el repaso a 360×640 y lo que encontraron las dos pasadas en el N1 (PRUEBAS MIPIACE y Cafetería Sirope), más el merge de `master`. APK **1.27.2 (12702)** compilada y **sin publicar**. 2026-10-16/18._
 
 Lo que había que poder hacer y no se podía: **vender desde un TPV portátil tipo móvil**. La APK
 estaba fijada en horizontal, así que en el N1 (720×1440 físicos, densidad 320) el viewport era de
@@ -239,6 +239,9 @@ primeros son los del prompt; los cinco siguientes son de lo que el bloque añadi
 | 12 | `filasDeChips` devuelve una fila también en estrecho | 2 de `chip-rows` + 1 de `n1-barra-ticket` | `el N1 pasa a DOS filas → AssertionError: expected 1 to be 2` · `el umbral está donde deja de caber lo fijo más «Más (N)» → expected 1 to be 2` · `en el N1 (fila de 328 px) la fila envuelve a dos líneas → AssertionError: expected 'lg:hidden flex items-center gap-2 mb-…' to contain 'flex-wrap'` |
 | 13 | `pressDigit` vuelve a leer el estado del cierre | 2 de `n1-pin-cabe` | `cuatro teclas en el MISMO tick cuentan cuatro, no una → AssertionError: expected <div …(1)></div> to have a length of 4 but got 1` (y el del tope de ocho) |
 
+| 14 | «Cambiar de cajero» vuelve a su altura de antes | 1 de `n1-pin-cabe` | `«Cambiar de cajero» tiene el área táctil de la casa (44 px) → AssertionError: expected 'md:hidden mt-1 text-[12.5px] text-sla…' to contain 'min-h-11'` |
+| 15 | Los azulejos de familia vuelven a cortar sin elipsis | 1 de `n1-barra-ticket` | `el azulejo de familia trunca con puntos suspensivos → AssertionError: expected 'border-0 rounded-[14px] font-semibold…' to contain 'truncate'` |
+
 Y uno que no busqué y salió solo: poner `title="Nueva cita"` en el botón de la agenda puso en rojo
 `agenda-mostrador.test.tsx > el motivo NUNCA va en un tooltip: ux-principles §6 los prohíbe` con
 `AssertionError: expected true to be false`. El arreglo fue dejar sólo `aria-label`, que es un
@@ -344,18 +347,19 @@ la pasada y da para su propio ratito.
 ## 8 · La APK
 
 ```
-fichero   apps/tpv-android/build-releases/mipiacetpv-1.27.1-12701.apk
-versión   1.27.1 (versionCode 12701)
-commit    70d3aa0   (árbol limpio: sin marca -dirty)
-tamaño    8.690.181 bytes
-SHA-256   f9693ea76195995689f074aba58bd9e8ee376517e8e7f4ec962ba9eb0249dc41
+fichero   apps/tpv-android/build-releases/mipiacetpv-1.27.2-12702.apk
+versión   1.27.2 (versionCode 12702)
+commit    a663097   (árbol limpio: sin marca -dirty)
+tamaño    8.690.213 bytes
+SHA-256   f119f104e74336dbb706a08f8b2ac704bd2a1dd983c19574cfb74f4e86eaade1
 firma     Signer #1 CN=mipiacetpv, O=mipiace, L=Madrid, C=ES
           SHA-256 677d862054ea4aff904d1dd885231d28609e7de2f0b6997cc96d529dd405bfd6
 ```
 
-**Por qué 1.27.1 y no 1.27.0.** La 1.27.0 se compiló y se probó en el N1; los dos arreglos de
-después (las familias y las pulsaciones del PIN) van en ésta. Subir el número evita la confusión
-de tener dos builds distintas llamadas igual en un aparato que está en la mesa.
+**Por qué 1.27.2.** La 1.27.0 se compiló y se probó en el N1; la 1.27.1 trajo los dos arreglos de
+la pasada en PRUEBAS (las familias del TPV claro y las pulsaciones del PIN); la **1.27.2** trae los
+dos de la pasada de hostelería en Sirope (§11). Subir el número cada vez evita la confusión de
+tener builds distintas llamadas igual en un aparato que está en la mesa.
 
 **Y un aviso sobre el tamaño**: entre builds del mismo código oscila ~0,7 MB (se han visto 8,69 y
 9,39 MB) **sin que cambie el contenido** — los dos APK llevan los mismos 461 ficheros y 10,07 MB
@@ -368,7 +372,7 @@ Compilada con `apps/tpv-android/scripts/build-release-apk.sh 1.27.0` (`JAVA_HOME
 producción embebido, sin Service Worker en el dist **ni** en los assets sincronizados, origen del
 WebView verificado por las dos vías y firma comprobada con `apksigner`.
 
-`70d3aa0` es **el último commit que toca código**: lo que va detrás es documentación, así que el
+`a663097` es **el último commit que toca código**: lo que va detrás es documentación, así que el
 APK entregado y la cabeza de la rama ejecutan lo mismo. Es la build que se instaló en el N1 y con
 la que están medidas las comprobaciones de §9.0.
 
@@ -595,6 +599,45 @@ a la siguiente tiene una pantalla blanca. Antes de darle uno a un cliente hay qu
 **idéntica**: horizontal, mismo layout `lg`.
 
 ---
+
+## 9.6 · La pasada de hostelería en Sirope, y los dos arreglos que dejó
+
+Con la 1.27.1 puesta, el N1 se vinculó a **Cafetería Sirope · Caja 1 en ensayo** y se recorrió el
+trabajo de un camarero con la carta real: mapa de mesas, mesa M1 con 13 familias, comanda enviada
+—**llega al AP11**—, venta de barra, cobro en efectivo con cambio, tarjeta, mixto, lista de
+tickets, búsqueda con el teclado y menú. Catorce hallazgos, medidos uno a uno, en
+**`docs/qa/2026-10-18-n1-sirope.md`** (21 capturas).
+
+De todos ellos, **dos se arreglan en esta rama** porque son de este bloque o de una línea, y están
+comprobados en el aparato con la 1.27.2:
+
+| Arreglo | Antes (medido en el N1) | Ahora (medido en el N1) |
+|---|---|---|
+| «Cambiar de cajero» con el área táctil de la casa | `107 × 19 px` | **`131 × 44 px`** (captura `20-cambiar-de-cajero-44px`) |
+| Los azulejos de familia truncan con elipsis | «Croissantysandwich» pedía 206 px en 104 y se **salía** del azulejo («Croissanty») | «Croissa…», «Desayu…», «Suplem…»: cortan con puntos suspensivos y **dentro** del azulejo (captura `21-familias-truncadas`) |
+
+El primero lo introdujo este bloque al partir la pantalla de PIN en dos pasos; el segundo es una
+clase (`truncate` en vez del `clip` de serie) y aparece con la carta de un cliente real, no con
+datos de laboratorio.
+
+## 9.7 · PENDIENTES · lo que la pasada de Sirope deja para otros bloques
+
+Nada de esto se toca en `n1-vertical`. El detalle y las medidas, en
+`docs/qa/2026-10-18-n1-sirope.md`.
+
+| Hallazgo | Gravedad | A dónde va |
+|---|---|---|
+| El **mapa de mesas** a 360: «Salón» y «Terraza» inalcanzables, mesas de 144 px (3 visibles de 23), 4.020 px de alto, y el viewport de esa pantalla yéndose a 845 | 🔴 bloquea vender | bloque **`n1-hosteleria`** |
+| La **búsqueda** con el teclado abierto: cero resultados a la vista (el primero en y=592 con ventana de 449) porque la rejilla de familias no cede sitio | 🟡 | bloque **`n1-hosteleria`** |
+| Los **productos bajo el pliegue** al elegir familia (el primero en y=833 con ventana de 648) | 🟡 | bloque **`n1-hosteleria`** |
+| La **comanda en estrecho**: nombres recortados a «Café…» y «Caf…» (71 px de 178) y el «Espera» de la última línea tapado por «⚡ Urgente» | 🟡 | bloque **`n1-hosteleria`** |
+| El **cambio a devolver** pintado a 15 px contra los 26 px del total (0,58×) | 🟡 | **auditoría de Sirope**: afecta igual al D8, no es del vertical |
+| La **zona horaria del terminal**: los tickets del N1 salen en `Asia/Shanghai` («19/10, 1:50») junto a los del D8 en hora de Madrid, en la misma lista | 🟡 | **su bloque** (ya identificado el 16-10) |
+| Objetivos táctiles sueltos de 32–36 px, filtros de Tickets, «Reenviar por email» en un ticket de prueba, y que no se explique por qué no hay devolución en ensayo | ⚪ | se cuelan en el bloque que toque esas pantallas |
+
+Y dos cosas que **no se pudieron probar** y hay que probar antes de vender un N1: la
+**devolución** (en ensayo está bloqueada por diseño) y la **impresión en papel** (la Caja 1 no
+tiene impresora configurada, y la IPOS del N1 sigue sin soporte).
 
 ## 10 · El push y el PR
 
