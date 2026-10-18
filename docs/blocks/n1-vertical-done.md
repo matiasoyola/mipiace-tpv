@@ -343,12 +343,18 @@ la pasada y da para su propio ratito.
 ```
 fichero   apps/tpv-android/build-releases/mipiacetpv-1.27.0-12700.apk
 versión   1.27.0 (versionCode 12700)
-commit    <el de la cabeza de la rama, árbol limpio: sin marca -dirty>
-tamaño    8.689.861 bytes
-SHA-256   (en el sidecar .sha256 que deja el script)
+commit    ab36a95   (árbol limpio: sin marca -dirty)
+tamaño    9.386.837 bytes
+SHA-256   8c11b2c477dbc7e42b834d5bf305c5fa3734e86a39dc87508b8a8109ca582cd8
 firma     Signer #1 CN=mipiacetpv, O=mipiace, L=Madrid, C=ES
           SHA-256 677d862054ea4aff904d1dd885231d28609e7de2f0b6997cc96d529dd405bfd6
 ```
+
+Crece 0,7 MB sobre la 1.26.0 (8,69 MB), que es lo que trae `master` por el camino
+(puesta-en-marcha y los demás). Dos builds seguidos del mismo commit dan el mismo tamaño con un
+byte de diferencia —el del sellado del zip—, así que el número es del contenido y no del humor de
+gradle. **El SHA-256 cambia en cada build**: si Matías recompila, el bueno es el del sidecar
+`.sha256` de SU build, que es el que publica `infra/publicar-apk.sh`.
 
 Compilada con `apps/tpv-android/scripts/build-release-apk.sh 1.27.0` (`JAVA_HOME` openjdk@17,
 `ANDROID_HOME` las commandlinetools del Mac), con las seis guardas del script en verde: backend de
