@@ -26,8 +26,10 @@ import { entornoAeat } from "./entorno.js";
 import { ingestFiscalRecord } from "./ingest.js";
 import {
   emiteMipiacetpv,
+  enEnsayo,
   leerIdentidadFiscal,
   RECHAZO_ANULACION_DE_PRUEBA,
+  RECHAZO_ANULACION_EN_ENSAYO,
 } from "./mode.js";
 import { FISCAL_RECORD_BODY_SCHEMA, type FiscalRecordBody } from "./payload.js";
 
@@ -58,7 +60,7 @@ export async function registerFiscalRoutes(app: FastifyInstance): Promise<void> 
       // Va ANTES de leer el tenant a propósito: lo que decide esto es quién
       // llama, no cómo factura el comercio.
       if (cashier.isTest) {
-        return { emite: false as const };
+        return { emite: false as const, ensayo: true as const };
       }
       const tenant = await prisma.tenant.findUniqueOrThrow({
         where: { id: cashier.tid },
@@ -66,6 +68,8 @@ export async function registerFiscalRoutes(app: FastifyInstance): Promise<void> 
           name: true,
           fiscalProfile: true,
           holdedEnabled: true,
+          // puesta-en-marcha (ADR-021) · lo que decide si se emite o no.
+          facturaDesde: true,
           businessType: true,
           receiptFooter: true,
         },
@@ -74,7 +78,15 @@ export async function registerFiscalRoutes(app: FastifyInstance): Promise<void> 
         // El comercio con Holded no genera nada. Se le dice explícitamente
         // en vez de devolver un 404: el terminal necesita distinguir «aquí
         // no se emite» de «no he podido preguntar».
-        return { emite: false as const };
+        //
+        // puesta-en-marcha (ADR-021) · y `ensayo` distingue los DOS motivos
+        // por los que se puede no emitir. El terminal los necesita separados:
+        // con Holded imprime el papel de siempre, y en ensayo tiene que
+        // pintar la banda y marcar el ticket como de prueba. Aquí es donde
+        // se corta de verdad —sin serie, sin instalación y sin cabeza de
+        // cadena el terminal no genera nada y no gasta número—; el gate de
+        // `POST /tickets` es el espejo del servidor.
+        return { emite: false as const, ensayo: enEnsayo(tenant) };
       }
       const register = await prisma.register.findUniqueOrThrow({
         where: { id: cashier.rid },
@@ -89,6 +101,7 @@ export async function registerFiscalRoutes(app: FastifyInstance): Promise<void> 
       const cabeza = await readChainHead(prisma, cashier.rid);
       return {
         emite: true as const,
+        ensayo: false as const,
         // `null` en cualquiera de estos tres es un comercio encendido con
         // un dato a medias. NO se convierte en un error: el terminal cobra
         // igual y el registro quedará marcado (§ ingest). Una invariante
@@ -178,8 +191,24 @@ export async function registerFiscalRoutes(app: FastifyInstance): Promise<void> 
 
       const tenant = await prisma.tenant.findUniqueOrThrow({
         where: { id: cashier.tid },
-        select: { holdedEnabled: true },
+        select: { holdedEnabled: true, facturaDesde: true },
       });
+      // puesta-en-marcha (ADR-021) · el ensayo se rechaza ANTES y con su
+      // propio código, por la misma razón que el modo prueba tiene el suyo:
+      // `emiteMipiacetpv` ya contesta `false` en ensayo, pero contarlo como
+      // «el emisor es Holded» mandaría al cajero a mirar donde no es.
+      if (enEnsayo(tenant)) {
+        request.log.warn(
+          {
+            event: "fiscal.anulacion_en_ensayo_rechazada",
+            tenantId: cashier.tid,
+            registerId: cashier.rid,
+            ticketId,
+          },
+          "anulación pedida en una cuenta en ensayo: rechazada",
+        );
+        return reply.code(409).send(RECHAZO_ANULACION_EN_ENSAYO);
+      }
       if (!emiteMipiacetpv(tenant)) {
         return reply.code(409).send({
           error: "FISCAL_MODE_OFF",
@@ -291,8 +320,21 @@ export async function registerFiscalRoutes(app: FastifyInstance): Promise<void> 
       }
       const tenant = await prisma.tenant.findUniqueOrThrow({
         where: { id: cashier.tid },
-        select: { holdedEnabled: true },
+        select: { holdedEnabled: true, facturaDesde: true },
       });
+      // puesta-en-marcha (ADR-021) · y por lo mismo que arriba: en ensayo no
+      // hay números gastados que cerrar, porque no se gastó ninguno.
+      if (enEnsayo(tenant)) {
+        request.log.warn(
+          {
+            event: "fiscal.anulacion_en_ensayo_rechazada",
+            tenantId: cashier.tid,
+            registerId: cashier.rid,
+          },
+          "anulación de un número gastado en una cuenta en ensayo: rechazada",
+        );
+        return reply.code(409).send(RECHAZO_ANULACION_EN_ENSAYO);
+      }
       if (!emiteMipiacetpv(tenant)) {
         return reply.code(409).send({
           error: "FISCAL_MODE_OFF",
@@ -379,7 +421,7 @@ export async function registerFiscalRoutes(app: FastifyInstance): Promise<void> 
       const prisma = getPrisma();
       const tenant = await prisma.tenant.findUniqueOrThrow({
         where: { id: tenantId },
-        select: { holdedEnabled: true },
+        select: { holdedEnabled: true, facturaDesde: true },
       });
       const registers = await prisma.register.findMany({
         where: { deletedAt: null, store: { tenantId, deletedAt: null } },
@@ -429,6 +471,12 @@ export async function registerFiscalRoutes(app: FastifyInstance): Promise<void> 
       });
       return {
         emite: emiteMipiacetpv(tenant),
+        // puesta-en-marcha (ADR-021) · `emite: false` lo dicen DOS comercios
+        // que no se parecen: el que factura con Holded y el que todavía no ha
+        // arrancado. El panel del super-admin es justo donde hay que poder
+        // distinguirlos.
+        ensayo: enEnsayo(tenant),
+        facturaDesde: tenant.facturaDesde?.toISOString() ?? null,
         entorno: entornoAeat(),
         cadenas,
         rotos: rotos.map((r) => ({

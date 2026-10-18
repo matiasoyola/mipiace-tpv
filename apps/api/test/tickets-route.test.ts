@@ -122,6 +122,10 @@ const fakePrisma = {
       // `shouldEnqueueHoldedUpload` lo exige para encolar, y lo que este
       // test describe es el comercio con Holded de siempre.
       holdedApiKeyCiphertext: "cipher",
+      // puesta-en-marcha (ADR-021) · una cuenta que YA FACTURA. Sin esta
+      // fecha el gate la lee como EN ENSAYO y el ticket nace `TEST`, que es
+      // justo lo que describe el otro fichero de tests.
+      facturaDesde: new Date("2026-06-01T08:00:00.000Z"),
     })),
   },
   user: {

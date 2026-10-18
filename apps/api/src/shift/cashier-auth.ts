@@ -12,6 +12,7 @@ import { requireDeviceToken } from "../devices/auth.js";
 import { signCashierSession, requireCashierSession } from "./cashier-session.js";
 import { getShiftStateForLogin } from "./state.js";
 import { ensureCajaEnabled } from "../lib/caja-gate.js";
+import { enEnsayo } from "../fiscal/mode.js";
 
 // Rate-limit clave: usamos (tenantId, email) — el tenantId viene del
 // device token, así que el rate-limit es por (caja-de-este-tenant, email
@@ -127,7 +128,11 @@ export async function registerCashierAuthRoutes(
       // aunque estuviera trabajando.
       const tenant = await prisma.tenant.findUniqueOrThrow({
         where: { id: ctx.tenantId },
-        select: { cashierSessionTtlMinutes: true },
+        // puesta-en-marcha (ADR-021) · `facturaDesde` viaja en el `select`
+        // que ya existía. El TPV necesita saber que está en ensayo DESDE EL
+        // LOGIN y no cuando termine de sincronizar el catálogo: la banda
+        // tiene que estar puesta antes de que nadie pueda cobrar.
+        select: { cashierSessionTtlMinutes: true, facturaDesde: true },
       });
 
       const sessionToken = signCashierSession(
@@ -146,6 +151,9 @@ export async function registerCashierAuthRoutes(
       return reply.code(200).send({
         sessionToken,
         sessionTtlMinutes: tenant.cashierSessionTtlMinutes,
+        // puesta-en-marcha (ADR-021) · la cuenta está en ensayo: el TPV pinta
+        // la banda fija y el ticket sale marcado como de prueba.
+        ensayo: enEnsayo(tenant),
         user: {
           id: user.id,
           // v1.7-alias-cajeros: el email se mantiene por compat con
@@ -252,6 +260,10 @@ export async function registerCashierAuthRoutes(
           cashierAutoLogoutMinutes: tenant.cashierAutoLogoutMinutes,
           kitchenDisplayEnabled: tenant.kitchenDisplayEnabled,
         },
+        // puesta-en-marcha (ADR-021) · la sesión de prueba no emite nunca
+        // (addendum 1b), así que aquí es `true` también cuando la cuenta ya
+        // factura. Es lo correcto para lo único que decide: la banda.
+        ensayo: true as const,
         register: {
           id: register.id,
           name: register.name,
@@ -321,6 +333,10 @@ export async function registerCashierAuthRoutes(
             // v1.11-cierre-de-dia · viaja en el paquete offline para que un
             // terminal sin red sepa si tiene que exigir el arqueo.
             requireCashCountOnClose: true,
+            // puesta-en-marcha (ADR-021) · y el ensayo viaja con ellos. Un
+            // terminal que entra sin red tiene que pintar la banda igual:
+            // «estos cobros no son facturas» no puede depender de la línea.
+            facturaDesde: true,
           },
         }),
         prisma.user.findMany({
@@ -341,6 +357,7 @@ export async function registerCashierAuthRoutes(
           cashierSessionTtlMinutes: tenant.cashierSessionTtlMinutes,
           cashierAutoLogoutMinutes: tenant.cashierAutoLogoutMinutes,
           requireCashCountOnClose: tenant.requireCashCountOnClose,
+          ensayo: enEnsayo(tenant),
         },
         roster: users.map((u) => ({
           id: u.id,

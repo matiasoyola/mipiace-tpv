@@ -140,34 +140,40 @@ function cuerpo(
   };
 }
 
+// puesta-en-marcha (ADR-021) · una cuenta que ya arrancó. `emiteMipiacetpv`
+// pasó a mirar también esto, así que todas las aserciones de este fichero
+// hablan de un comercio facturando — que es lo que eran antes de que el
+// ensayo existiera.
+const FACTURANDO = new Date("2026-06-01T08:00:00.000Z");
+
 describe("quién emite", () => {
   it("emite mipiacetpv SÓLO con holdedEnabled === false", () => {
-    expect(emiteMipiacetpv({ holdedEnabled: false })).toBe(true);
-    expect(emiteMipiacetpv({ holdedEnabled: true })).toBe(false);
+    expect(emiteMipiacetpv({ holdedEnabled: false, facturaDesde: FACTURANDO })).toBe(true);
+    expect(emiteMipiacetpv({ holdedEnabled: true, facturaDesde: FACTURANDO })).toBe(false);
   });
 
   it("un tenant de hoy (holdedEnabled true) no emite nada", () => {
     // El default de la columna es `true`. Si este test se pusiera rojo,
     // todos los comercios con Holded empezarían a generar registros.
-    expect(emiteMipiacetpv({ holdedEnabled: true })).toBe(false);
+    expect(emiteMipiacetpv({ holdedEnabled: true, facturaDesde: FACTURANDO })).toBe(false);
   });
 });
 
 describe("el gate de la venta", () => {
   it("rechaza un registro de un comercio que factura con Holded", () => {
-    const gate = comprobarGateFiscal({ holdedEnabled: true }, { algo: 1 });
+    const gate = comprobarGateFiscal({ holdedEnabled: true, facturaDesde: FACTURANDO }, { algo: 1 });
     expect(gate.rechazo?.error).toBe("FISCAL_MODE_OFF");
   });
 
   it("deja pasar la venta de un comercio que emite aunque no traiga registro", () => {
     // APK vieja. Cobrar siempre se puede: se anota y se sigue.
-    const gate = comprobarGateFiscal({ holdedEnabled: false }, undefined);
+    const gate = comprobarGateFiscal({ holdedEnabled: false, facturaDesde: FACTURANDO }, undefined);
     expect(gate.rechazo).toBeNull();
     expect(gate.faltaRegistro).toBe(true);
   });
 
   it("no dice nada del comercio con Holded que no manda registro", () => {
-    const gate = comprobarGateFiscal({ holdedEnabled: true }, undefined);
+    const gate = comprobarGateFiscal({ holdedEnabled: true, facturaDesde: FACTURANDO }, undefined);
     // `descartarRegistro` lo añade verifactu-1b: sin sesión de prueba
     // delante, el gate se comporta exactamente igual que en verifactu-1.
     expect(gate).toEqual({

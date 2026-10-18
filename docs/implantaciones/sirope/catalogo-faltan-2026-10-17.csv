@@ -1,0 +1,8 @@
+sku,nombre,precio_con_iva,iva,categoria
+SKU243,"Tortitas con sirope, nata y helado",3.50,10,bolleria
+SKU244,Vino Ribera,2.60,10,vinos
+SKU245,Vino Rioja,2.60,10,vinos
+SKU246,Vino de la Mancha,1.50,10,vinos
+SKU247,Vino blanco,2.00,10,vinos
+SKU248,Batido natural con nata,3.90,10,bebidas
+SKU249,Tostada serrano con tomate (sin gluten),4.10,10,tostadas;singluten

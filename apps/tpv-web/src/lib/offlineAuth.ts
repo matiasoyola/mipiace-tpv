@@ -53,6 +53,13 @@ export interface RosterEntry {
 export interface OfflineConfig {
   cashierSessionTtlMinutes: number;
   cashierAutoLogoutMinutes: number;
+  // puesta-en-marcha (ADR-021) · ¿la cuenta está en ensayo? Viaja en el
+  // paquete offline para que un terminal que entra SIN RED pinte la banda
+  // igual. No se guarda en IndexedDB con el resto de la config: lo cachea
+  // `setCachedEnsayo` en localStorage, que es donde lo lee la pantalla
+  // (`refreshOfflineBundle`). Opcional porque un paquete cacheado por una
+  // versión anterior no lo trae.
+  ensayo?: boolean;
 }
 
 export interface OfflineBundle {

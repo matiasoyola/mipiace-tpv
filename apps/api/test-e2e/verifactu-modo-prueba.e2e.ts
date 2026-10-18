@@ -260,6 +260,10 @@ describe.skipIf(!e2eEnabled)("e2e · el modo prueba no es un terminal", () => {
         businessType: "SERVICES",
         // Lo que enciende la cadena: el comercio NO usa Holded.
         holdedEnabled: false,
+        // puesta-en-marcha (ADR-021) · la cuenta YA FACTURA. Sin esta fecha
+        // el gate la lee en ensayo, sus tickets nacen `TEST` y no entra ni un
+        // registro en la cadena — que es justo lo que este fichero mide.
+        facturaDesde: new Date("2026-06-01T08:00:00.000Z"),
         fiscalProfile: { legalName: RAZON, taxId: NIF },
       },
       select: { id: true },
@@ -500,7 +504,12 @@ describe.skipIf(!e2eEnabled)("e2e · el modo prueba no es un terminal", () => {
       });
       expect(res.statusCode).toBe(200);
       // El comercio SÍ emite; quien no emite es la sesión.
-      expect(res.json()).toEqual({ emite: false });
+      //
+      // puesta-en-marcha (ADR-021) · y `ensayo: true` acompaña al `emite:
+      // false` porque el terminal necesita distinguir los dos motivos para no
+      // emitir: con Holded imprime el papel de siempre, y en ensayo (de la
+      // cuenta o de la sesión) lo marca como ticket de prueba.
+      expect(res.json()).toEqual({ emite: false, ensayo: true });
     });
 
     it("cobra, pero no gasta número ni mueve la cadena", async () => {

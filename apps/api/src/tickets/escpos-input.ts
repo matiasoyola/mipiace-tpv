@@ -194,6 +194,12 @@ export function ticketToEscposInput(
     internalNumber: ticket.internalNumber,
     issuedAt,
     isCopy,
+    // puesta-en-marcha (ADR-021) · la marca del ensayo sale del ESTADO del
+    // ticket, que ya viajaba aquí para la leyenda del fiado. No hace falta
+    // tocar ni una llamada: cualquier camino que imprima un ticket `TEST`
+    // —el cobro, la reimpresión, el que venga mañana— saca el papel marcado
+    // sin que nadie se acuerde de pasar un flag.
+    esDeEnsayo: ticket.status === "TEST",
     cashierLabel: cashierLabelFrom(ticket.user),
     tableName: ticket.table?.name ?? null,
     lines,

@@ -305,6 +305,95 @@ const CatalogImportMeta = Base.extend({
   serviciosCreados: z.number().int().nonnegative().optional(),
 });
 
+// puesta-en-marcha (ADR-021) · se reseteó el ensayo de una cuenta. Guarda
+// CUÁNTO se borró de cada cosa, porque es la única copia que queda: lo
+// borrado no se puede volver a contar. No guarda NADA del contenido —ni un
+// importe ni un nombre de producto—: lo que se ensayó no es información que
+// una auditoría tenga que conservar, y cuántas filas se fueron sí.
+const ResetearEnsayoMeta = Base.extend({
+  ticketsBorrados: z.number().int().nonnegative(),
+  // puesta-en-marcha (ADR-021) · cuántos de cada estado. «20 anuladas» y «3
+  // de ensayo» no significan lo mismo, y después de borrarlos no se pueden
+  // volver a contar: ésta es la única copia.
+  ticketsPorEstado: z.array(
+    z.object({ estado: z.string(), cuantos: z.number().int().nonnegative() }),
+  ),
+  ticketsDeEnsayoBorrados: z.number().int().nonnegative(),
+  borradoresBorrados: z.number().int().nonnegative(),
+  devolucionesBorradas: z.number().int().nonnegative(),
+  emailsBorrados: z.number().int().nonnegative(),
+  turnosBorrados: z.number().int().nonnegative(),
+  mesasDesagrupadas: z.number().int().nonnegative(),
+  contadoresAZero: z.number().int().nonnegative(),
+  subidasBorradas: z.number().int().nonnegative(),
+});
+
+// puesta-en-marcha (ADR-021) · la cuenta empezó a facturar. Es la acción
+// MENOS reversible de la consola, más que dejar Holded: a partir de aquí
+// cada venta es una factura con su número, y un número emitido no se
+// devuelve. Así que la traza guarda el plan entero y la foto del momento —
+// cuántos registros tenía cada caja (0, o no habría arrancado), qué serie y
+// qué número de instalación, cuántos terminales había emparejados — para
+// poder contestar meses después «¿en qué estado arrancó esta cuenta?» sin
+// reconstruirlo.
+const EmpezarAFacturarMeta = Base.extend({
+  facturaDesde: z.string(),
+  reseteo: z.object({
+    ticketsBorrados: z.number().int().nonnegative(),
+    ticketsPorEstado: z.array(
+      z.object({ estado: z.string(), cuantos: z.number().int().nonnegative() }),
+    ),
+    ticketsDeEnsayoBorrados: z.number().int().nonnegative(),
+    borradoresBorrados: z.number().int().nonnegative(),
+    devolucionesBorradas: z.number().int().nonnegative(),
+    emailsBorrados: z.number().int().nonnegative(),
+    turnosBorrados: z.number().int().nonnegative(),
+    mesasDesagrupadas: z.number().int().nonnegative(),
+    contadoresAZero: z.number().int().nonnegative(),
+    subidasBorradas: z.number().int().nonnegative(),
+  }),
+  cajas: z.array(
+    z.object({
+      id: z.string().uuid(),
+      nombre: z.string(),
+      tienda: z.string(),
+      serie: z.string().nullable(),
+      numeroInstalacion: z.string().nullable(),
+      registrosFiscales: z.number().int().nonnegative(),
+      terminalesEmparejados: z.number().int().nonnegative(),
+    }),
+  ),
+  onboardingState: z.string(),
+});
+
+// puesta-en-marcha parte C (ADR-021 §5) · se descargó el export de la cuenta.
+//
+// Esta fila no es sólo una traza: es LA PRECONDICIÓN de la eliminación. El
+// servidor la busca antes de borrar, así que si falta no hay camino. Por eso
+// guarda cuántos registros y cuántas ventas iban dentro: si meses después el
+// titular dice que no recibió nada, aquí está qué se le entregó y cuándo.
+const ExportCuentaMeta = Base.extend({
+  registrosFiscales: z.number().int().nonnegative(),
+  tickets: z.number().int().nonnegative(),
+  devoluciones: z.number().int().nonnegative(),
+  fichajes: z.number().int().nonnegative(),
+  ficheros: z.number().int().nonnegative(),
+  bytes: z.number().int().nonnegative(),
+});
+
+// puesta-en-marcha parte C (ADR-021 §5) · la cuenta se eliminó.
+//
+// Va con `tenantId: null` —la fila del tenant ya no existe— y con el nombre y
+// la foto DENTRO de la metadata. Es la única copia que queda de que esa cuenta
+// existió y de lo que tenía: después de esto, ni una fila.
+const EliminarCuentaMeta = Base.extend({
+  tenantIdEliminado: z.string().uuid(),
+  nombre: z.string(),
+  esDePruebas: z.boolean(),
+  contenido: z.record(z.number().int().nonnegative()),
+  borrado: z.record(z.number().int().nonnegative()),
+});
+
 const META_SCHEMAS = {
   create_tenant: CreateTenantMeta,
   create_tenant_draft: CreateTenantDraftMeta,
@@ -322,6 +411,10 @@ const META_SCHEMAS = {
   resend_super_admin_invite: ResendSuperAdminInviteMeta,
   dedupe_tags: DedupeTagsMeta,
   dejar_holded: DejarHoldedMeta,
+  resetear_ensayo: ResetearEnsayoMeta,
+  empezar_a_facturar: EmpezarAFacturarMeta,
+  export_cuenta: ExportCuentaMeta,
+  eliminar_cuenta: EliminarCuentaMeta,
   catalog_import: CatalogImportMeta,
   transfer_owner: TransferOwnerMeta,
   view_tenant_cashiers: ViewTenantCashiersMeta,

@@ -164,6 +164,18 @@ export function buildLocalTicketInput(venta: VentaLocal): TicketReceiptInput {
     internalNumber: venta.internalNumber ?? "",
     issuedAt: venta.issuedAt,
     isCopy: false,
+    // puesta-en-marcha (ADR-021) · SIEMPRE false por este camino, y no es un
+    // olvido: aquí sólo se entra con un registro de facturación en la mano
+    // (`venta.verifactu` es obligatorio), y una cuenta en ensayo no genera
+    // ninguno. Un cobro de ensayo sin red se queda sin papel, igual que el
+    // de un comercio con Holded — y eso está en el done.md, no escondido
+    // aquí.
+    //
+    // Se escribe explícito en vez de dejarlo `undefined` porque el test
+    // `verifactu-un-solo-papel` compara las dos entradas con `toEqual`, y
+    // `undefined` no es `false`. Que ese test se pusiera rojo es justo lo que
+    // tiene que pasar cuando un campo del papel sólo llega por un camino.
+    esDeEnsayo: false,
     cashierLabel: venta.cashierLabel,
     tableName: venta.tableName,
     lines,

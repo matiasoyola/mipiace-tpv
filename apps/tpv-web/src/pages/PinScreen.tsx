@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { AlertCircle, ChevronRight, CircleAlert, Delete, Eye, EyeOff, Loader2, Plus } from "lucide-react";
 
 import { apiWithDevice, ApiError } from "../api.js";
+import { setCachedEnsayo } from "../lib/catalog.js";
 import { Logo } from "../Logo.js";
 import type { CashierRole } from "../lib/offlineAuth.js";
 import { offlineLogin, type OfflineShiftState } from "../lib/offlineSession.js";
@@ -21,6 +22,12 @@ const PIN_LENGTH_TARGET = 4; // visualización mínima — el backend acepta 4-8
 interface CashierLoginResponse {
   sessionToken: string;
   sessionTtlMinutes: number;
+  // puesta-en-marcha (ADR-021) · la cuenta todavía no factura. El TPV pinta
+  // la banda fija de ensayo y el papel sale marcado.
+  //
+  // Opcional porque el login OFFLINE no pasa por el servidor: ahí la trae el
+  // paquete offline (`/shift/offline-bundle`), que es quien la cachea.
+  ensayo?: boolean;
   // v1.7-alias-cajeros: alias llega junto al email (que sigue en el
   // contrato como credencial y por compat con SW viejos).
   user: {
@@ -158,6 +165,11 @@ export function PinScreen({
         "/shift/cashier-login",
         { method: "POST", body: { email: activeEmail, pin } },
       );
+      // puesta-en-marcha (ADR-021) · ANTES de dar la sesión por buena. La
+      // banda tiene que estar puesta antes de que la pantalla de venta
+      // pueda pintarse: si esto se hiciera después, habría un instante en
+      // el que se puede cobrar sin que el papel diga nada.
+      if (res.ensayo !== undefined) setCachedEnsayo(res.ensayo);
       rememberCashier({
         email: res.user.email,
         alias: res.user.alias,
