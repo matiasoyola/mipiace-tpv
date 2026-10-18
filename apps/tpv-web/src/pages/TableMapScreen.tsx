@@ -56,6 +56,7 @@ import {
 import { apiWithCashier, ApiError } from "../api.js";
 import { Logo } from "../Logo.js";
 import { useElapsedTime, useElapsedMinutes } from "../hooks/useElapsedTime.js";
+import { avisarAjustesCambiados } from "../hooks/useDeviceBootstrap.js";
 import { useStoreEventStream } from "../hooks/useStoreEventStream.js";
 import {
   getCachedBusinessType,
@@ -329,7 +330,13 @@ export function TableMapScreen(props: TableMapScreenProps) {
   // WebSocket multi-terminal: cada vez que llega un evento del store
   // refrescamos el listado. Es el patrón más simple y mantiene el
   // mapa coherente sin lógica de merge granular en el cliente.
-  const wsStatus = useStoreEventStream(data?.storeId ?? null, () => {
+  const wsStatus = useStoreEventStream(data?.storeId ?? null, (ev) => {
+    // auditoria-sirope (#20) · un cambio de ajustes del tenant no es un
+    // cambio del mapa: lo que hay que volver a pedir es `/devices/me`.
+    if (ev.type === "tenant.settings_changed") {
+      avisarAjustesCambiados();
+      return;
+    }
     void load();
   });
   useEffect(() => {

@@ -51,6 +51,8 @@ import {
   TenantNoExisteError as EliminarCuentaTenantNoExisteError,
 } from "./eliminar-cuenta.js";
 import { loadEnv } from "../env.js";
+// auditoria-sirope (#20) · avisar a las cajas de que los ajustes cambiaron.
+import { getStoreEventBus } from "../realtime/store-event-bus.js";
 import { enqueueInitialSync } from "../queues/initial-sync.js";
 import { enqueueManualSync } from "../queues/catalog-incremental.js";
 // residencia-1 · la semilla del centro al encender el interruptor.
@@ -1474,6 +1476,36 @@ export async function registerSuperAdminTenantsRoutes(
         });
         return u;
       });
+
+      // auditoria-sirope (#20) · AVISAR A LAS CAJAS.
+      //
+      // El 18-10 se encendió Cocina con el D8 delante y el D8 no se
+      // enteró hasta reiniciar la aplicación: `/devices/me` se lee al
+      // arrancar y se cachea. Ahora el cambio se cuenta por el bus de
+      // cada tienda del tenant y el terminal vuelve a pedir sus ajustes.
+      //
+      // Fuera de la transacción, como el resto de avisos: la verdad está
+      // en el GET, y un bus que no llega sólo retrasa el repaso.
+      // Best-effort: si falla, el cambio ya está guardado.
+      try {
+        const tiendas = await prisma.store.findMany({
+          where: { tenantId: id },
+          select: { id: true },
+        });
+        const at = new Date().toISOString();
+        for (const t of tiendas) {
+          getStoreEventBus().broadcast(t.id, {
+            type: "tenant.settings_changed",
+            fields: Object.keys(changes),
+            at,
+          });
+        }
+      } catch (err) {
+        request.log.warn(
+          { err, event: "tenant.settings_changed_broadcast_failed", tenantId: id },
+          "no se pudo avisar a las cajas del cambio de ajustes",
+        );
+      }
 
       return reply.code(200).send({
         tenant: {

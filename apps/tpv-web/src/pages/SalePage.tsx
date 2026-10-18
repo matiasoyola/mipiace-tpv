@@ -111,6 +111,7 @@ import { useClientPicker } from "../hooks/useClientPicker.js";
 import { clientFullName } from "../lib/clients.js";
 import { urlDeclaracionResponsable } from "../lib/declaracionResponsable.js";
 import { useElapsedTime } from "../hooks/useElapsedTime.js";
+import { avisarAjustesCambiados } from "../hooks/useDeviceBootstrap.js";
 import { useStoreEventStream } from "../hooks/useStoreEventStream.js";
 import type { ModifierSelection } from "../lib/cart.js";
 import { refreshFiscalHead } from "../lib/fiscal.js";
@@ -1331,6 +1332,14 @@ export function SalePage(props: SalePageProps) {
   // refetch de la proyección; cobro/absorción remota → expulsión al
   // mapa con aviso. Reutiliza el mismo WS ya conectado.
   const wsStatus = useStoreEventStream(storeId, (ev) => {
+    // auditoria-sirope (#20) · el super-admin tocó un módulo. Quien
+    // tiene que volver a preguntar es el bootstrap, que vive arriba del
+    // todo, así que el aviso se relanza como evento del navegador en vez
+    // de bajar un callback por cinco niveles de props.
+    if (ev.type === "tenant.settings_changed") {
+      avisarAjustesCambiados();
+      return;
+    }
     // kds-1-cocina · los avisos de cocina. No se aplican al estado local:
     // ninguno lleva la comanda dentro (ver `realtime/store-events.ts`), así
     // que lo que hacen es pedir otra vez la verdad. La banda «LISTO» la
