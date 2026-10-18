@@ -65,74 +65,12 @@ process.env.HOLDED_KEY_ENCRYPTION_SECRET = randomBytes(32).toString("base64");
 // de la puerta no tiene test de unidad que lo cubra.
 vi.mock("../src/context.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("../src/context.js")>();
-
-  interface Clave {
-    valor: string;
-    caducaEn: number | null;
-  }
-  const claves = new Map<string, Clave>();
-
-  /** La clave si no ha caducado. Caducar borra, como hace Redis. */
-  function viva(key: string): Clave | null {
-    const c = claves.get(key);
-    if (!c) return null;
-    if (c.caducaEn !== null && c.caducaEn <= Date.now()) {
-      claves.delete(key);
-      return null;
-    }
-    return c;
-  }
-
-  const falso = {
-    async incr(key: string) {
-      const c = viva(key);
-      const valor = c ? Number(c.valor) + 1 : 1;
-      claves.set(key, { valor: String(valor), caducaEn: c?.caducaEn ?? null });
-      return valor;
-    },
-    async decr(key: string) {
-      const c = viva(key);
-      const valor = c ? Number(c.valor) - 1 : -1;
-      claves.set(key, { valor: String(valor), caducaEn: c?.caducaEn ?? null });
-      return valor;
-    },
-    async get(key: string) {
-      return viva(key)?.valor ?? null;
-    },
-    async set(key: string, valor: string, _ex?: string, segundos?: number) {
-      claves.set(key, {
-        valor,
-        caducaEn: segundos == null ? null : Date.now() + segundos * 1000,
-      });
-      return "OK";
-    },
-    async ttl(key: string) {
-      const c = viva(key);
-      if (!c) return -2;
-      if (c.caducaEn === null) return -1;
-      return Math.ceil((c.caducaEn - Date.now()) / 1000);
-    },
-    async expire(key: string, segundos: number) {
-      const c = viva(key);
-      if (!c) return 0;
-      claves.set(key, { valor: c.valor, caducaEn: Date.now() + segundos * 1000 });
-      return 1;
-    },
-    async del(...keys: string[]) {
-      let n = 0;
-      for (const k of keys) if (claves.delete(k)) n += 1;
-      return n;
-    },
-    async flushall() {
-      claves.clear();
-      return "OK";
-    },
-    async ping() {
-      return "PONG";
-    },
-    disconnect() {},
-  };
-
+  // residencia-5 · el doble vive en `redis-falso.ts`, no inline. Tres
+  // copias de un Redis falso son tres sitios donde `expire` puede
+  // comportarse distinto, y entonces un rate-limit que falla en un bloque
+  // pasa en el de al lado. El `vi.mock` sigue aquí porque es por fichero.
+  const { redisFalso } = await import("./redis-falso.js");
+  const falso = redisFalso();
   return {
     ...original,
     getRedis: () => falso as unknown as ReturnType<typeof original.getRedis>,
@@ -330,9 +268,15 @@ describe.skipIf(!e2eEnabled)("e2e · la puerta de la habitación", () => {
       [anaId, "Ana", "CLINICIAN"],
       [rosaId, "Rosa", "CLINICIAN"],
     ] as const) {
+      // residencia-5 · **el correo lleva el id del tenant dentro.**
+      // `users.email` es único GLOBAL y los tres ficheros de residencia
+      // corren a la vez contra la misma base: con `pilar@gredos.es` a
+      // secas, el que llegaba segundo reventaba en su `beforeAll` y sus
+      // tests se saltaban en verde. Pasaba ya con dos ficheros y era
+      // cuestión de en qué orden los arrancara vitest.
       await prisma.$executeRawUnsafe(
         `INSERT INTO users (id, tenant_id, email, alias, role, is_clinician, clinical_scope)
-         VALUES ('${u}', '${tenantId}', '${alias.toLowerCase()}@gredos.es', '${alias}', '${rol}', true, 'SELECTION')`,
+         VALUES ('${u}', '${tenantId}', '${alias.toLowerCase()}-${tenantId.slice(0, 8)}@gredos.es', '${alias}', '${rol}', true, 'SELECTION')`,
       );
     }
     await sembrarResidencia(prisma as never, tenantId);
@@ -510,6 +454,25 @@ describe.skipIf(!e2eEnabled)("e2e · la puerta de la habitación", () => {
     await prisma.$executeRawUnsafe(`DELETE FROM care_plan_template_items WHERE tenant_id = '${t}'`);
     await prisma.$executeRawUnsafe(`DELETE FROM center_control_settings WHERE tenant_id = '${t}'`);
     await prisma.$executeRawUnsafe(`DELETE FROM center_moments WHERE tenant_id = '${t}'`);
+    // ── residencia-5 · LOS PARTES DE RELEVO DE ESTE CENTRO ────────
+    //
+    // Y no los crea este fichero: los congela **la pasada**, que desde
+    // residencia-5 hace tres cosas en vez de dos (`pasada-de-relevo.ts`)
+    // y recorre TODOS los centros con residencia encendida. Así que un
+    // tenant de este fichero acaba con partes congelados aunque aquí
+    // nadie hable de relevos — y sin esta limpieza, el `DELETE FROM
+    // center_shifts` de abajo rebota contra `handovers_center_shift_id_fkey`.
+    for (const [tabla, trigger] of [
+      ["handover_late_additions", "handover_late_additions_append_only"],
+      ["handover_ack_zones", "handover_ack_zones_append_only"],
+      ["handover_acks", "handover_acks_append_only"],
+      ["handover_zones", "handover_zones_append_only"],
+      ["handovers", "handovers_inmutable"],
+    ] as const) {
+      await prisma.$executeRawUnsafe(`ALTER TABLE ${tabla} DISABLE TRIGGER ${trigger}`);
+      await prisma.$executeRawUnsafe(`DELETE FROM ${tabla} WHERE tenant_id = '${t}'`);
+      await prisma.$executeRawUnsafe(`ALTER TABLE ${tabla} ENABLE TRIGGER ${trigger}`);
+    }
     await prisma.$executeRawUnsafe(`DELETE FROM center_shifts WHERE tenant_id = '${t}'`);
     await prisma.$executeRawUnsafe(
       `ALTER TABLE clinical_processor_agreements DISABLE TRIGGER clinical_processor_agreements_append_only`,
