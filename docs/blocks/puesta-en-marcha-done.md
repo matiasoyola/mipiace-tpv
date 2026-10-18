@@ -442,17 +442,21 @@ las otras cuatro funciones que este bloque reemplaza tienen una sola definición
 |---|---|
 | `pnpm vitest run` (desde la raíz) | **379 ficheros, 5283 tests verdes**, 10 saltados |
 | `pnpm test:e2e` (`puesta-en-marcha.e2e.ts`) | **38 verdes** contra Postgres real |
-| `pnpm test:e2e` (los 40 ficheros) | 36 verdes + 4 con los fallos de madrugada (§8.1) |
+| `pnpm test:e2e` (los 40 ficheros) | **40 verdes, 788 tests** — corrida a las 09:40 (ver §8.1) |
 | El bucle visual | el panel y la banda, medidos (§8.2); un fallo encontrado y arreglado |
 
 Nuevos: `apps/api/test/puesta-en-marcha-ensayo.test.ts` (14), `test/puesta-en-marcha-arranque.test.ts`
 (19) y `test-e2e/puesta-en-marcha.e2e.ts` (38).
 
-### 8.1 Los cuatro e2e que fallan de madrugada, y la prueba de que no son de este bloque
+### 8.1 La suite entera, en verde — y los cuatro que fallaban de madrugada
 
-`f3-fichar`, `f8-colegio` y `agenda-suelo` fallan si la suite se lanza pasada la medianoche: sus
-casos escriben «hace 6 horas» y eso cruza el día local, así que el cierre del fichaje devuelve
-409. Está apuntado desde antes de este bloque.
+**A las 09:40 del 18-10, los 40 ficheros y los 788 tests del e2e pasan.** Ésa es la corrida que
+vale.
+
+Lo que pasó por el camino, apuntado porque va a volver a pasar: `f3-fichar`, `f8-colegio` y
+`agenda-suelo` **fallan si la suite se lanza pasada la medianoche**. Sus casos escriben «hace 6
+horas» y eso cruza el día local, así que el cierre del fichaje devuelve 409. Está apuntado desde
+antes de este bloque.
 
 Para no afirmarlo de boca, se corrió un **control sobre `master` sin ningún cambio**, a la misma
 hora (00:35) y contra otra base:
@@ -465,8 +469,7 @@ E2E_DATABASE_URL="postgresql://…/mipiacetpv_e2e_proofmaster" \
 # → el MISMO fallo: × entrada y salida: un tramo completo → expected 409 to be 200
 ```
 
-A las 23:59, con la rama entera menos la parte C, los 39 ficheros del e2e salieron **verdes**.
-Hay que volver a pasar la suite completa a una hora decente antes del PR; está en el guion (§10).
+Y a las 09:40, sin tocar nada de eso, verdes. **No se corre la suite e2e de madrugada.**
 
 ---
 
@@ -600,7 +603,8 @@ docker compose exec -T postgres psql -U mipiacetpv -d mipiacetpv \
 #    → si alguna fila sale con regla = '¿?', PARAR.
 #    → la salida se pega en el §2.2 de este documento.
 
-# 2 · La suite completa a una hora decente (no de madrugada: §8.1)
+# 2 · La suite completa. A una hora decente: de madrugada fallan tres
+#     ficheros de fichaje y de agenda por el cambio de día (§8.1).
 pnpm vitest run
 E2E_DATABASE_URL="postgresql://mipiacetpv:mipiacetpv_dev@localhost:5432/mipiacetpv_e2e_pem" \
   pnpm --filter @mipiacetpv/api run test:e2e
