@@ -1194,6 +1194,45 @@ model Tenant {
   // `tenants_residencia_exige_clinica` de la migración, no sólo el 409 de
   // la ruta del super-admin.
   residenciaEnabled              Boolean           @default(false) @map("residencia_enabled")
+  // B-reservas-8 · capability de los BONOS DE SESIONES (ADR-R6, ADR-R9).
+  // Hermana de `crmEnabled` y `agendaEnabled` en forma (columna booleana
+  // por tenant) y de `cajaEnabled` / `clinicalRecordsEnabled` en gobierno:
+  // la mueve SÓLO el super-admin, porque encenderla es vender un módulo.
+  //
+  // `@default(false)`: ninguno de los tenants de hoy vende bonos en el TPV
+  // y con la columna apagada **este bloque no existe** para ellos (404 en
+  // todas sus rutas, igual que la clínica).
+  //
+  // Y NO se puede encender con Holded conectado. La decisión es de
+  // Dirección (18-10) y la razón es que un ticket de canje a 0 € subido a
+  // Holded es terreno desconocido: nadie lo necesita hoy (Sole sale de
+  // Holded, la clínica y el spa no lo tienen). El 409 vive en la ruta del
+  // super-admin y el CHECK `tenants_bonos_sin_holded` en la BASE —las dos,
+  // porque hay cuatro puertas de escritura a esta tabla y sólo el motor
+  // cubre las cuatro (misma lección que `products_exencion_sin_iva`).
+  bonosEnabled                   Boolean           @default(false) @map("bonos_enabled")
+  // B-reservas-8 · qué hace el centro con la sesión apartada de una cita
+  // marcada como NO-SHOW. `consumir` (el default, que es lo que hace el
+  // spa) o `liberar`. Texto con CHECK y no enum, por la razón de siempre
+  // en esta casa: un enum de Postgres sólo crece y parte la migración en
+  // dos (`tenants_bono_no_show_valido`).
+  bonoNoShow                     String            @default("consumir") @map("bono_no_show")
+  // B-reservas-8 · LA PALABRA que ve el centro. En el código es `Voucher`
+  // / «bono» y no se discute más (`07` §1); de cara al mostrador el spa
+  // dirá «programa» y la clínica «bono». Es un ajuste del negocio, así que
+  // sí entra en el POST de /admin/tenant/settings.
+  bonoEtiqueta                   String            @default("bono") @map("bono_etiqueta") @db.VarChar(20)
+  // B-reservas-8 · el importe de la línea del servicio al CONSUMIR una
+  // sesión. `LINEA_CERO` (default) o `PRORRATEO`. Es el frente **P5** de
+  // la asesoría (ADR-R9 §6): el bloque lo deja parametrizado y con test
+  // por los dos lados, y `bonosEnabled` no se enciende en ninguna cuenta
+  // real hasta que la respuesta esté escrita en el ADR.
+  bonoModoCanje                  String            @default("LINEA_CERO") @map("bono_modo_canje")
+  // B-reservas-8 · caducidad POR DEFECTO de un bono nuevo, en MESES DE
+  // CALENDARIO. NULL = sin caducidad, que es el default del bloque (los
+  // programas de Raquel Torres no caducan, decisión suya). La plantilla
+  // del producto puede fijar la suya y manda sobre ésta.
+  bonoCaducidadMeses             Int?              @map("bono_caducidad_meses")
   // v1.3-Thalia Lote 6 · pie de ticket personalizado. NULL = no se
   // pinta nada extra (comportamiento previo). Si está set, el renderer
   // del ticket lo pinta arriba del QR/CIF tras el "Gracias por tu
@@ -1237,6 +1276,15 @@ model Tenant {
   bookingPolicies               BookingPolicy[]
   centerHours                   CenterHours[]
   centerDays                    CenterDay[]
+  // B-reservas-8 · los bonos de sesiones, su libro, sus plantillas y el
+  // contador de su numeración. `vouchers` y `voucherMovements` cuelgan con
+  // Cascade: el libro es del tenant y se va con él —el candado de ADR-021
+  // §6 («Eliminar cuenta» es la única puerta) lo pone el trigger
+  // append-only, no la clave ajena.
+  voucherTemplates              VoucherTemplate[]
+  vouchers                      Voucher[]
+  voucherMovements              VoucherMovement[]
+  voucherSequence               VoucherSequence?
   // F1 (ADR-018) · el registro de jornada.
   employees                     Employee[]
   // V1-verifactu (ADR-019) · los registros de facturación de sus cajas.
@@ -1905,14 +1953,14 @@ model Device {
   kitchenLanPort     Int?                 @map("kitchen_lan_port")
   kitchenLanAt       DateTime?            @map("kitchen_lan_at") @db.Timestamptz()
 
-  tenant              Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  register            Register?           @relation(fields: [registerId], references: [id], onDelete: Cascade)
+  tenant              Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  register            Register?                    @relation(fields: [registerId], references: [id], onDelete: Cascade)
   // residencia-1 · la habitación de la que esta tablet es la puerta.
   // `Restrict` al otro lado: borrar una habitación con su tablet
   // emparejada dejaría un aparato autenticado apuntando a nada. Primero
   // se revoca la tablet, después se retira la habitación.
-  room                Room?               @relation(fields: [roomId], references: [id], onDelete: Restrict)
-  consumedPairings    PairingCode[]       @relation("PairingCodeConsumedBy")
+  room                Room?                        @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  consumedPairings    PairingCode[]                @relation("PairingCodeConsumedBy")
   // V1-verifactu · a favor de qué dispositivo se revocó éste, y a cuáles
   // revocó él. La FK es DEFERRABLE INITIALLY DEFERRED en la migración: hay
   // que revocar el anterior ANTES de insertar el nuevo (índice único), y en
@@ -2228,19 +2276,27 @@ model Product {
   lastSyncedAt         DateTime      @default(now()) @map("last_synced_at") @db.Timestamptz()
   raw                  Json?
 
-  tenant         Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  variants       ProductVariant[]
-  lines          TicketLine[]
-  modifierGroups ProductModifierGroup[]
+  tenant          Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  variants        ProductVariant[]
+  lines           TicketLine[]
+  modifierGroups  ProductModifierGroup[]
   // B-reservas-2 · capa de extensión local de agenda sobre el producto de
   // Holded (ADR-R1). NO duplica el catálogo: precio/IVA siguen en Holded.
   // Sólo aplica a kind=SERVICE; un producto sin fila `scheduling` no es
   // reservable ni tiene duración → la agenda lo ignora.
-  scheduling     ServiceScheduling?
-  resourceNeeds  ServiceResourceNeed[]
+  scheduling      ServiceScheduling?
+  resourceNeeds   ServiceResourceNeed[]
   // B-reservas-3 · qué profesionales pueden dar este servicio (matriz
   // profesional × servicio). Sólo tiene sentido para kind=SERVICE.
-  staffSkills    StaffSkill[]
+  staffSkills     StaffSkill[]
+  // B-reservas-8 · la PLANTILLA DE BONO de este producto, si lo es (1:1).
+  // Un bono del catálogo es un producto normal —precio, IVA, categoría,
+  // exención— con esta fila colgando: cuántas sesiones da, qué cubre y a
+  // cuántos meses caduca. Venderlo es añadir el producto al ticket, así
+  // que el precio y el IVA van por el camino de siempre y no hay un
+  // segundo sitio donde se fije el precio de un bono (decisión de
+  // Dirección, 18-10).
+  voucherTemplate VoucherTemplate?
 
   @@unique([tenantId, holdedProductId])
   @@index([tenantId, barcode])
@@ -2526,6 +2582,20 @@ model Ticket {
   // cliente no recibió su ticket pese a que la sync con Holded fue OK.
   emailFailedAt        DateTime?         @map("email_failed_at") @db.Timestamptz()
   contactHoldedId      String?           @map("contact_holded_id")
+  // B-reservas-8 · LA FICHA DEL CRM de esta venta. Nueva en este bloque,
+  // y hacía falta: hasta hoy un ticket sólo sabía de `contactHoldedId`, el
+  // contacto de HOLDED, y este módulo vive exactamente en las cuentas que
+  // NO tienen Holded (Sole, la clínica, el spa). Sin esta columna no hay
+  // forma de saber a quién se le vende un bono ni de proponer el bono de
+  // una clienta en un ticket suelto (el canje sin cita de la peluquería
+  // sin agenda).
+  //
+  // Nullable y `SetNull`: la venta de siempre no lleva ficha y sigue sin
+  // llevarla, y si mañana se borra la ficha el ticket no se va con ella —
+  // una venta cobrada no desaparece porque alguien limpie el CRM. Lo que
+  // sí impide borrar la ficha es tener un BONO vivo (`Voucher.client` es
+  // `Restrict`), que es otra cosa y está donde tiene que estar.
+  clientId             String?           @map("client_id") @db.Uuid
   status               TicketStatus      @default(DRAFT)
   // v1.8-Fiado (variante B) · deuda viva de un ticket vendido a crédito.
   //   NULL  = venta normal (no fiado).
@@ -2614,6 +2684,8 @@ model Ticket {
   sealedAt             DateTime?         @map("sealed_at") @db.Timestamptz()
 
   tenant            Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  // B-reservas-8 · ver `clientId` arriba.
+  client            Client?                @relation(fields: [clientId], references: [id], onDelete: SetNull)
   register          Register               @relation(fields: [registerId], references: [id], onDelete: Restrict)
   shift             Shift                  @relation(fields: [shiftId], references: [id], onDelete: Restrict)
   user              User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
@@ -2632,6 +2704,12 @@ model Ticket {
   // B-reservas-4 · cita → caja: el ticket pre-poblado que abre "Cobrar en
   // caja". Como mucho una cita apunta a un ticket (puente 1:0..1).
   appointment       Appointment?
+  // B-reservas-8 · los bonos que NACIERON en esta venta. Lista y no 1:0..1
+  // porque en un ticket caben dos bonos. `Cascade` al otro lado, y es la
+  // pieza que hace funcionar el reseteo del ensayo: el bono vendido en un
+  // ticket `TEST` se va con su ticket, sin una línea de código que lo
+  // busque (ADR-021 §5.1).
+  vouchersSold      Voucher[]
   // kds-1-cocina · todo lo de cocina de esta mesa cuelga del TICKET y se va
   // con él (`Cascade`): las alergias de la decisión 3 **no se cuelgan de
   // `Client` ni de nadie**, viven en la mesa de ESTE servicio y mueren con
@@ -2649,6 +2727,8 @@ model Ticket {
   @@index([shiftId])
   @@index([externalId])
   @@index([tableId, status])
+  // B-reservas-8 · «las ventas de esta clienta», la consulta de la ficha.
+  @@index([tenantId, clientId])
   // S1-sello · separar sellados de pre-sello en los listados del admin.
   @@index([tenantId, sealedAt])
   // v1.8-Fiado · el listado de deudas por cliente (GET /credits) filtra
@@ -3256,6 +3336,14 @@ model Client {
   consents            ClientConsent[]
   technicalNotes      ClientTechnicalNote[]
   appointments        Appointment[]
+  // B-reservas-8 · sus bonos de sesiones. `Restrict` al otro lado: una
+  // ficha con un bono vivo NO se borra. El bono es una deuda del centro
+  // con ESA persona (el bono es de una ficha, S6) y borrar la ficha sería
+  // perder a quién se le deben las sesiones.
+  vouchers            Voucher[]
+  // B-reservas-8 · las ventas a nombre de esta ficha. `SetNull` al otro
+  // lado: borrar la ficha no borra la venta.
+  tickets             Ticket[]
   // clinica-1 · la historia del paciente, sus accesos y el registro de
   // quién la ha abierto. Las tres con RESTRICT al otro lado (y no Cascade
   // como `technicalNotes`): **un cliente con historia no se borra.** Esa
@@ -3774,7 +3862,14 @@ model Appointment {
   source        ReservationSource        @default(PRESENCIAL)
   // Sólo modo mesa (comensales). Nullable en cita.
   partySize     Int?                     @map("party_size")
-  // Canje de bono (B5, fuera de alcance en B4; sólo la columna).
+  // B-reservas-8 · EL BONO de esta cita, y desde este bloque con CLAVE
+  // AJENA de verdad (en B4 era «sólo la columna»). Puesto = esta cita
+  // tiene una sesión APARTADA de ese bono; se consume al cobrarla y se
+  // libera al anularla. **Un solo bono por cita** (S6).
+  //
+  // `SetNull`: si el bono desaparece —y el único caso real es el reseteo
+  // del ensayo, que se lleva el bono con su ticket— la cita se queda como
+  // una cita normal, que es la verdad. No se borra la cita.
   voucherId     String?                  @map("voucher_id") @db.Uuid
   // Señal cobrada (ADR-R5b; fuera de alcance en B4; sólo la columna).
   depositCents  Int?                     @map("deposit_cents")
@@ -3800,6 +3895,8 @@ model Appointment {
   tenant              Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   client              Client?                 @relation(fields: [clientId], references: [id], onDelete: SetNull)
   ticket              Ticket?                 @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  // B-reservas-8 · ver `voucherId` arriba.
+  voucher             Voucher?                @relation(fields: [voucherId], references: [id], onDelete: SetNull)
   items               AppointmentItem[]
   assignments         AppointmentAssignment[]
   // clinica-1 · las anotaciones escritas en esta cita. SET NULL al otro
@@ -3817,6 +3914,8 @@ model Appointment {
   // SQL (Prisma no expresa gist sobre Unsupported).
   @@index([tenantId, status])
   @@index([tenantId, clientId])
+  // B-reservas-8 · «¿qué citas apartaron de este bono?», la traza de la ficha.
+  @@index([tenantId, voucherId])
   @@map("appointments")
 }
 
@@ -4000,6 +4099,291 @@ model CenterDay {
   @@unique([tenantId, date])
   @@index([tenantId])
   @@map("center_days")
+}
+
+// ─── B-reservas-8 · Bonos de sesiones ───────────────────────────────────
+//
+// El libro, la puerta de canje y la sesión apartada en la cita. Todo detrás
+// de `Tenant.bonosEnabled` (404 con la columna apagada) y aislado por fila.
+//
+// ── Las tres decisiones de fondo, para que no se relean cuatro documentos
+//
+//   1. **Extiende `voucher`, NO se crea un `Program` paralelo** (D-2 del
+//      cruce con B-reservas-4). Un modelo paralelo serían dos sitios donde
+//      mirar el saldo de una clienta, dos caminos fiscales y dos formas de
+//      canjear en caja.
+//   2. **Dos pasos** (S6, 07-10): al DAR LA CITA se APARTA una sesión —no
+//      descuenta, sólo impide dar más citas de bono que sesiones quedan—; al
+//      COBRAR, lo apartado pasa a CONSUMIDO contra lo que se hizo. Nunca se
+//      consume un bono contra un servicio que no cubre.
+//   3. **Dinero y deuda van por separado** (`07` pieza 1): el bono congela
+//      su VALOR DE CARTA (lo que el centro debe) y LO COBRADO (lo que entró,
+//      que vive en el ticket). Un bono regalado vale lo de carta en
+//      sesiones. El libro no duplica el cobro: lo enlaza.
+//
+// ── Y la que se nota en cada consulta ──────────────────────────────────
+//
+// **El saldo se DERIVA del libro.** `sessionsLeft` / `sessionsReserved` son
+// columnas y no la verdad: existen porque el decremento condicionado («no
+// aparto si no queda libre») se hace con un `UPDATE … WHERE sessions_left >
+// 0` sobre la fila bloqueada, y porque la rejilla de la agenda las lee
+// cincuenta veces por pantalla. Si discrepan del libro, **manda el libro**,
+// y hay un test que recorre 200 operaciones aleatorias comprobando
+//
+//     total − consumidas − apartadas vivas = libres
+//
+// (`apps/api/test-e2e/bonos-libro.e2e.ts`).
+
+// La PLANTILLA de bono de un producto del catálogo (1:1 con `Product`).
+//
+// Qué es un bono en el catálogo (decisión de Dirección, 18-10): un producto
+// normal —precio, IVA, categoría, exención— con esta fila colgando. Venderlo
+// es añadir ese producto al ticket, así que el precio y el IVA van por el
+// camino de siempre y NO hay un segundo sitio donde se fije el precio de un
+// bono.
+//
+// `coversServiceIds` / `coversTagSlugs`: vale por SERVICIO o por CATEGORÍA
+// (S5 — la categoría es la familia, y en este TPV una categoría es un tag de
+// `Product.tags`). Los dos pueden estar poblados a la vez: cubre la unión.
+// Al vender, la cobertura se COPIA al bono y se congela, así que editar la
+// plantilla —o ocultar un servicio, o cambiarle el precio— no invalida nada
+// de lo ya vendido (`07` pieza 16, con test).
+model VoucherTemplate {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @map("tenant_id") @db.Uuid
+  // 1:1 con el producto. `Cascade`: si el producto se borra, su plantilla
+  // se va con él — los bonos YA VENDIDOS no, que llevan su propia copia.
+  productId        String   @unique @map("product_id") @db.Uuid
+  sessions         Int
+  coversServiceIds String[] @default([]) @map("covers_service_ids") @db.Uuid
+  coversTagSlugs   String[] @default([]) @map("covers_tag_slugs")
+  // Caducidad en MESES DE CALENDARIO (no 183 días: `07` pieza 18).
+  // NULL = sin caducidad. Manda sobre `Tenant.bonoCaducidadMeses`.
+  expiresMonths    Int?     @map("expires_months")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product  Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  vouchers Voucher[]
+
+  @@index([tenantId])
+  @@map("voucher_templates")
+}
+
+// EL BONO. Una deuda del centro con UNA ficha, medida en sesiones.
+//
+// `type` y `sessionsLeft` NO son invención de este bloque: son el contrato
+// que `agenda/health.ts` publicó para la tarjeta 3 («saldo vivo sin cita»,
+// `SQL_SALDO_VIVO_SIN_CITA`) y lo que el diseño cerrado ya modelaba
+// (`reservas-modulo-kickoff.md` §4). Se respetan los nombres para que esa
+// tarjeta se encienda con la migración y no haya que reescribirla.
+//
+// `amountTotalCents` / `amountLeftCents` quedan NULL y nadie los escribe en
+// este bloque: son el hueco de **B-cheques** (cheques por importe, saldos
+// `S-`), que se monta sobre este mismo libro. El CHECK
+// `vouchers_tipo_coherente` garantiza que un `SESSIONS` no los lleve y que
+// un `AMOUNT` no lleve sesiones, así que B-cheques es aditivo y no un
+// rediseño. Las señales `R-` son B-13 y tampoco se construyen aquí.
+model Voucher {
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  // OBLIGATORIO: el bono es de una ficha. Sin bonos compartidos en esta
+  // versión (S7, fuera de alcance). `Restrict`: la ficha no se borra.
+  clientId         String    @map("client_id") @db.Uuid
+  // `B<n>`, único por tenant. Es lo que se teclea en el mostrador y lo que
+  // sale impreso. Se acepta el número suelto al buscar (`B87`, `b 87`,
+  // `87`): la normalización vive en `vouchers/numero.ts`.
+  code             String
+  number           Int
+  // NULL en un bono de PAPEL dado de alta a mano («alta inicial»).
+  templateId       String?   @map("template_id") @db.Uuid
+  // SESSIONS (todo lo de este bloque) | AMOUNT (B-cheques).
+  type             String    @default("SESSIONS")
+  // Lo que se vendió. No se edita: se corrige con una línea del libro.
+  sessionsTotal    Int       @map("sessions_total")
+  // DERIVADAS del libro, guardadas (ver la nota de la cabecera). `libres`
+  // y `apartadas vivas`.
+  sessionsLeft     Int       @map("sessions_left")
+  sessionsReserved Int       @default(0) @map("sessions_reserved")
+  // B-cheques. NULL en un bono de sesiones (CHECK).
+  amountTotalCents Int?      @map("amount_total_cents")
+  amountLeftCents  Int?      @map("amount_left_cents")
+  // La COBERTURA CONGELADA: copia de la plantilla en el momento de vender.
+  // Ocultar o cambiar de precio un servicio no invalida bonos vendidos.
+  coversServiceIds String[]  @default([]) @map("covers_service_ids") @db.Uuid
+  coversTagSlugs   String[]  @default([]) @map("covers_tag_slugs")
+  // Cómo se llama de cara al mostrador («Bono 5 quiropodias»). Snapshot,
+  // igual que `TicketLine.nameSnapshot`: renombrar el producto mañana no
+  // reescribe lo que la clienta compró.
+  nameSnapshot     String    @map("name_snapshot")
+  // DINERO Y DEUDA, separados (`07` pieza 1):
+  //   · `valorCartaCents` — lo que el centro DEBE. Es lo que vale el bono
+  //     en sesiones aunque se vendiera con descuento o se regalara.
+  //   · `cobradoCents`    — lo que ENTRÓ. Es un espejo del ticket, no una
+  //     segunda contabilidad: el cobro es el ticket y aquí se enlaza.
+  valorCartaCents  Int       @map("valor_carta_cents")
+  cobradoCents     Int       @map("cobrado_cents")
+  // La venta. NULL en un alta inicial (bono de papel, sin ticket).
+  // `Cascade`: el bono de un ticket `TEST` se va con su ticket en el
+  // reseteo del ensayo.
+  soldTicketId     String?   @map("sold_ticket_id") @db.Uuid
+  // La LÍNEA concreta de esa venta. FK dura en SQL, SIN relación Prisma
+  // (mismo criterio que `appointment_items_service_id_fkey`: no inflar
+  // back-refs en `TicketLine` por un puntero de auditoría).
+  soldTicketLineId String?   @map("sold_ticket_line_id") @db.Uuid
+  // El INSTANTE en que deja de valer, EXCLUSIVO: el arranque del día
+  // siguiente al último día bueno, en hora del centro. Así «caduca el 28
+  // de febrero» incluye el 28 entero (`07` pieza 18) sin guardar horas de
+  // pared. Lo que se PINTA se deriva (`vouchers/caducidad.ts::diaDeCaducidad`).
+  // NULL = sin caducidad, que es el default.
+  expiresAt        DateTime? @map("expires_at") @db.Timestamptz()
+  // ACTIVO | AGOTADO | CADUCADO | ANULADO. Lo caducado NO se borra: queda
+  // en el libro y en la ficha.
+  status           String    @default("ACTIVO")
+  // VENTA | ALTA_INICIAL (el bono de papel que se da de alta a mano).
+  origen           String
+  // `07` pieza 17 · lo de PRUEBA se marca, no se borra. Sale de la ficha y
+  // de los informes de gestión. No se confunde con `Tenant.esDePruebas`
+  // (cuenta entera) ni con el ensayo de puesta-en-marcha: un bono vendido
+  // en un ticket `TEST` nace `esPrueba = true` y el reseteo se lo lleva.
+  esPrueba         Boolean   @default(false) @map("es_prueba")
+  createdAt        DateTime  @map("created_at") @db.Timestamptz()
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant       Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client       Client            @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  template     VoucherTemplate?  @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  soldTicket   Ticket?           @relation(fields: [soldTicketId], references: [id], onDelete: Cascade)
+  movements    VoucherMovement[]
+  // Las citas que apartaron una sesión de este bono.
+  appointments Appointment[]
+
+  @@unique([tenantId, code])
+  @@unique([tenantId, number])
+  // La consulta de la ficha y la de «¿tiene esta clienta un bono que cubra
+  // esto?», que es la que corre al dar cada cita.
+  @@index([tenantId, clientId, status])
+  @@index([tenantId, status])
+  @@map("vouchers")
+}
+
+// EL LIBRO. Solo inserción: nada se edita ni se borra.
+//
+// Lo garantiza el trigger `voucher_movements_append_only` de la migración,
+// con el mismo patrón que `fiscal_records` y `client_consents`. Se corrige
+// con una línea CONTRARIA enlazada (`compensaA`) y su motivo.
+//
+// ── EL SIGNO de `sesiones`, que es la pieza que hay que entender ───────
+//
+// `sesiones` es el efecto de la línea sobre **las sesiones LIBRES**, así que
+//
+//     libres = SUM(sesiones)   -- sobre TODO el libro del bono
+//
+// es una sola suma y no se puede escribir mal. De ahí sale el resto:
+//
+//   · `VENDIDO` / `ALTA_INICIAL` → `+N` (entra el bono entero)
+//   · `APARTADA`                → `-1` (deja de estar libre, no se gasta)
+//   · `LIBERADA`                → `+1` (vuelve a estar libre)
+//   · `CONSUMIDA` con cita      → ` 0` (la sesión salió de libres al
+//                                  apartarse: aquí sólo pasa de APARTADA a
+//                                  CONSUMIDA, y libres no lo ve)
+//   · `CONSUMIDA` sin cita      → `-1` (el canje en caja sin agenda, que no
+//                                  pasa por APARTADA)
+//   · `CORRECCION`              → `±N`
+//   · `ANULADO`                 → `-libres` (devolver la venta; sólo se
+//                                  puede sin nada consumido ni apartado,
+//                                  así que lleva el total a cero)
+//   · `CADUCIDAD_CAMBIADA`      → ` 0`
+//
+// El CHECK `voucher_movements_signo_por_tipo` **obliga** a este convenio en
+// la base, incluida la equivalencia «CONSUMIDA vale 0 ⟺ tiene cita». No es
+// documentación: es la razón por la que el invariante no puede desalinearse
+// sin que la base lo rechace.
+//
+// ── Por qué `appointmentId` y `ticketLineId` NO llevan clave ajena ─────
+//
+// Porque un libro de solo inserción tiene que sobrevivir a lo que apunta.
+// Una FK `ON DELETE SET NULL` sería un UPDATE sobre la fila y el propio
+// trigger lo rechazaría; una `RESTRICT` dejaría al borrado del tenant
+// dependiendo del orden de las cascadas. Son punteros de auditoría, y el
+// único que los escribe es la puerta (`vouchers/gate.ts`).
+model VoucherMovement {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  voucherId     String   @map("voucher_id") @db.Uuid
+  // VENDIDO | ALTA_INICIAL | APARTADA | LIBERADA | CONSUMIDA | CORRECCION |
+  // CADUCIDAD_CAMBIADA | ANULADO. Texto con CHECK y no enum: B-cheques y
+  // B-13 añaden tipos, y un enum de Postgres parte la migración en dos.
+  tipo          String
+  sesiones      Int
+  appointmentId String?  @map("appointment_id") @db.Uuid
+  ticketLineId  String?  @map("ticket_line_id") @db.Uuid
+  // La línea que ESTA compensa. Una línea ya compensada no se compensa dos
+  // veces (lo comprueba la ruta, no la base: hace falta ver el libro).
+  compensaA     String?  @map("compensa_a") @db.Uuid
+  // La frase que LEE RECEPCIÓN («Apartada para la cita del 3-nov 10:30»).
+  // Distinta del `motivo`, que es por qué se corrige. Nunca vacía.
+  detalle       String
+  // Lista cerrada: `error_venta | cortesia | ajuste_alta_inicial | otro`.
+  // Obligatorio en `CORRECCION` y `CADUCIDAD_CAMBIADA` (CHECK). Con `otro`
+  // la nota va en `detalle` y es obligatoria — **sin mínimo de caracteres
+  // oculto**, que bloqueó una invitación real en el spa (`07` pieza 5).
+  motivo        String?
+  // tpv | panel | web | migracion.
+  canal         String
+  // Quién. `userId` para una persona del centro; `actor` para «Web» o
+  // «Migración». Uno de los dos, siempre (CHECK).
+  userId        String?  @map("user_id") @db.Uuid
+  actor         String?
+  esPrueba      Boolean  @default(false) @map("es_prueba")
+  // UTC DESDE EL CÓDIGO, sin `now()` de Postgres: el negocio razona en hora
+  // del centro y nada del dominio se fecha con el reloj del servidor de
+  // base de datos (regla del bloque y de `05` §8.6).
+  createdAt     DateTime @map("created_at") @db.Timestamptz()
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  voucher Voucher @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+
+  // El libro de un bono, en orden. `id` desempata: dos líneas del mismo
+  // milisegundo (apartar y consumir en la misma transacción) tienen que
+  // salir siempre en el mismo orden.
+  @@index([voucherId, createdAt, id])
+  @@index([tenantId, createdAt])
+  // La idempotencia de `consumir` / `liberar` se decide leyendo el libro
+  // por cita, así que esta consulta corre en cada cobro.
+  @@index([tenantId, appointmentId])
+  @@map("voucher_movements")
+}
+
+// El CONTADOR de la numeración de bonos, uno por tenant.
+//
+// Tres reglas, y las tres salieron del spa (`07` pieza 8):
+//
+//   1. **Atómico y sin huecos**: `UPDATE … SET ultimo = ultimo + 1
+//      RETURNING` dentro de la transacción de la venta. Un ticket que no se
+//      cobra no gasta número porque el bono nace al pasar a `PAID`.
+//   2. **Se SALTA un número que ya exista**: el spa se encontró un número
+//      que había llegado desde dev. El bucle vive en
+//      `vouchers/numero.ts::siguienteNumero`.
+//   3. **Candado de primer uso**: con `arranque` a NULL no se emite ningún
+//      bono. El encargado confirma en Ajustes por qué número empieza —los
+//      centros con talonario de papel siguen su numeración— y eso pone el
+//      candado a cero.
+model VoucherSequence {
+  tenantId             String    @id @map("tenant_id") @db.Uuid
+  // Último número EMITIDO. 0 = ninguno todavía.
+  ultimo               Int       @default(0)
+  // NULL = CANDADO PUESTO: no se emite nada. Confirmado = el número por el
+  // que empieza el talonario de este centro.
+  arranque             Int?
+  arranqueConfirmadoAt DateTime? @map("arranque_confirmado_at") @db.Timestamptz()
+  arranqueConfirmadoBy String?   @map("arranque_confirmado_by") @db.Uuid
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("voucher_sequence")
 }
 
 // A3-distribución · código de un solo uso (bueno, de tres) para descargar la
@@ -5320,19 +5704,19 @@ model ResidentProfile {
 
   /// Cuándo ingresó. `@db.Date` y no timestamp: nadie apunta la hora del
   /// ingreso y pedirla sería un campo que se rellena mal.
-  admissionDate   DateTime  @map("admission_date") @db.Date
+  admissionDate          DateTime  @map("admission_date") @db.Date
   /// Cuándo se le dio de alta, y por qué. NULL en quien sigue viviendo
   /// aquí. El motivo es texto corto y libre a propósito: «se va con su
   /// hija», «traslado a hospital», «fallecimiento». Un enum habría
   /// obligado a elegir mal el día que no encaja ninguno, y esto no
   /// alimenta ninguna estadística en la v1.
-  dischargeDate   DateTime? @map("discharge_date") @db.Date
-  dischargeReason String?   @map("discharge_reason")
+  dischargeDate          DateTime? @map("discharge_date") @db.Date
+  dischargeReason        String?   @map("discharge_reason")
   /// residencia-1b · «fallecimiento», «traslado al hospital por ictus»
   /// caben enteros en ese texto libre, así que desde este bloque va
   /// cifrado. El CHECK `resident_profiles_alta_coherente` mira LAS DOS
   /// columnas: un motivo, en claro o cifrado, sigue exigiendo fecha.
-  dischargeReasonCifrado String? @map("discharge_reason_cifrado")
+  dischargeReasonCifrado String?   @map("discharge_reason_cifrado")
 
   /// Cuánta ayuda necesita (lo decide el centro) y el grado reconocido de
   /// la Ley de Dependencia (lo reconoce la administración, y puede no
@@ -5493,15 +5877,15 @@ model BedAssignment {
   /// que miran los dos índices parciales. Los nombres de columna son
   /// `from_at`/`to_at` y no `from`/`to` porque las dos palabras son
   /// reservadas en SQL y quedarían entre comillas en cada consulta a mano.
-  fromAt DateTime  @map("from_at") @db.Timestamptz()
-  toAt   DateTime? @map("to_at") @db.Timestamptz()
+  fromAt        DateTime  @map("from_at") @db.Timestamptz()
+  toAt          DateTime? @map("to_at") @db.Timestamptz()
   /// Por qué se abrió o se cerró. Texto corto: «ingreso», «cambio a la
   /// 112», «alta». No alimenta nada automático.
-  reason String?
+  reason        String?
   /// residencia-1b (D-63) · y cifrado, porque ahí es donde se escribe
   /// «aislamiento por GEA» o «se cae de la cama». La ubicación en sí
   /// (planta, habitación, cama) sigue en claro: es del centro.
-  reasonCifrado String? @map("reason_cifrado")
+  reasonCifrado String?   @map("reason_cifrado")
 
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
   createdByUserId String?  @map("created_by_user_id") @db.Uuid
