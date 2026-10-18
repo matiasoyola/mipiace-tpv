@@ -454,6 +454,13 @@ const fakePrisma: Record<string, unknown> = {
       facturaDesde: new Date("2026-06-01T08:00:00.000Z"),
     })),
   },
+  // auditoria-sirope (#22) · cobrar (o vaciar) cierra las comandas que
+  // estaban LISTAS. Este banco no tiene cocina: ninguna comanda, nada
+  // que servir.
+  kitchenOrder: {
+    findMany: vi.fn(async () => []),
+    updateMany: vi.fn(async () => ({ count: 0 })),
+  },
   holdedUpload: {
     upsert: vi.fn(async ({ where, create }: any) => {
       if (!state.holdedUploads.has(where.externalId)) {
@@ -1038,7 +1045,10 @@ describe("E2E mesas · estados y validaciones", () => {
     const draft = draftOf(MESA_1);
     const res = await app.inject({
       method: "DELETE",
-      url: `/tickets/${draft.id}?reason=Cliente se fue`,
+      // auditoria-sirope (#18) · con consumo, el motivo es obligatorio:
+      // vaciar una mesa con platos dentro es comida que salió y no se
+      // cobra, y el servidor exige decir qué pasó.
+      url: `/tickets/${draft.id}?reason=Cliente se fue&motivo=SE_FUERON_SIN_PAGAR`,
       headers: auth(),
     });
     expect(res.statusCode).toBe(204);
@@ -1111,11 +1121,27 @@ describe("E2E mesas · estados y validaciones", () => {
     const draft = draftOf(MESA_1);
     const res = await app.inject({
       method: "DELETE",
-      url: `/tickets/${draft.id}?reason=Cliente se fue`,
+      url: `/tickets/${draft.id}?reason=Cliente se fue&motivo=OTRO`,
       headers: auth(),
     });
     expect(res.statusCode).toBe(204);
     expect(state.tickets.get(draft.id)!.status).toBe("VOIDED");
+  });
+
+  // auditoria-sirope (#18) · y sin motivo NO se vacía.
+  it("vaciar una mesa CON consumo sin motivo → 400", async () => {
+    const app = await buildApp();
+    await addLine(app, MESA_1, CAFE);
+    const draft = draftOf(MESA_1);
+    const res = await app.inject({
+      method: "DELETE",
+      url: `/tickets/${draft.id}?reason=Cliente se fue`,
+      headers: auth(),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("VOID_MOTIVO_REQUIRED");
+    // La mesa sigue abierta: no se vació a medias.
+    expect(state.tickets.get(draft.id)!.status).toBe("DRAFT");
   });
 
   it("mover ticket a mesa ocupada → 409 DESTINATION_OCCUPIED con el ticket ocupante", async () => {

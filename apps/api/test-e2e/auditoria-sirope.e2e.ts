@@ -55,6 +55,7 @@ const { registerTicketRoutes } = await import("../src/tickets/routes.js");
 const { registerErrorHandler } = await import("../src/lib/error-handler.js");
 const { registerLenientJsonParser } = await import("../src/lib/lenient-json.js");
 const { signCashierSession } = await import("../src/shift/cashier-session.js");
+const { contarMesasVaciadas } = await import("../src/shift/mesas-vaciadas.js");
 const { generateDeviceToken } = await import("../src/devices/auth.js");
 
 describe.skipIf(!e2eEnabled)("e2e · auditoria-sirope", () => {
@@ -345,6 +346,69 @@ describe.skipIf(!e2eEnabled)("e2e · auditoria-sirope", () => {
       expect(order.readyAt).toBeNull();
       // Cobrar no hace desaparecer un plato a medio hacer.
       expect(order.servedAt).toBeNull();
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────
+  // #18 · vaciar una mesa con consumo pide motivo
+  // ──────────────────────────────────────────────────────────────────
+
+  describe("#18 · vaciar con consumo", () => {
+    async function abrirMesaConTostada(): Promise<string> {
+      const abierta = await post(`/tables/${mesaId}/open`, {});
+      const ticketId = abierta.json().ticket.id;
+      await post(`/tables/${mesaId}/lines`, lineaDe(tostadaId, "Tostada con tomate", 2.2));
+      return ticketId;
+    }
+
+    it("sin motivo, el servidor no la vacía", async () => {
+      // EL SABOTAJE: aceptar el DELETE sin motivo devuelve las cinco
+      // mesas vaciadas del 18-10 sin rastro de ninguna.
+      const ticketId = await abrirMesaConTostada();
+      const res = await del(`/tickets/${ticketId}`);
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("VOID_MOTIVO_REQUIRED");
+      // Y la mesa sigue abierta: no se vació a medias.
+      const t = await prisma.ticket.findUniqueOrThrow({
+        where: { id: ticketId },
+        select: { status: true },
+      });
+      expect(t.status).toBe("DRAFT");
+    });
+
+    it("con motivo, se vacía y queda en auditoría", async () => {
+      const ticketId = await abrirMesaConTostada();
+      const res = await del(`/tickets/${ticketId}?motivo=INVITACION`);
+      expect(res.statusCode).toBe(204);
+      const t = await prisma.ticket.findUniqueOrThrow({
+        where: { id: ticketId },
+        select: {
+          status: true,
+          voidMotivo: true,
+          voidedByUserId: true,
+          voidedAt: true,
+          total: true,
+        },
+      });
+      expect(t.status).toBe("VOIDED");
+      expect(t.voidMotivo).toBe("INVITACION");
+      // Quién y cuándo: la auditoría que el hallazgo pedía.
+      expect(t.voidedByUserId).toBe(cashierId);
+      expect(t.voidedAt).not.toBeNull();
+      expect(Number(t.total)).toBeGreaterThan(0);
+    });
+
+    it("una mesa VACÍA se libera sin motivo, como siempre", async () => {
+      const abierta = await post(`/tables/${mesaId}/open`, {});
+      const res = await del(`/tickets/${abierta.json().ticket.id}`);
+      expect(res.statusCode).toBe(204);
+    });
+
+    it("el Z cuenta las vaciadas con su importe y su motivo", async () => {
+      const resumen = await contarMesasVaciadas(prisma, shiftId);
+      expect(resumen.count).toBeGreaterThanOrEqual(1);
+      expect(resumen.total).toBeGreaterThan(0);
+      expect(resumen.porMotivo.map((m) => m.motivo)).toContain("INVITACION");
     });
   });
 

@@ -25,6 +25,7 @@ import type { getPrisma } from "../context.js";
 import { loadShiftBreakdownSums } from "./breakdown-sums.js";
 import { shiftCrossedDayCut } from "./day-cut.js";
 import { computeZBreakdown } from "./z-breakdown.js";
+import { contarMesasVaciadas } from "./mesas-vaciadas.js";
 import { generateZReportPdf } from "./z-report.js";
 import { archiveZReport } from "./z-seal.js";
 import { cashierLabelFrom } from "../users/display.js";
@@ -213,6 +214,10 @@ async function closeShiftAtDayCut(args: {
       acceptedSyncFailures: false,
       managerAuthorizationEmail: null,
       managerAuthorizationAlias: null,
+      // auditoria-sirope (#18) · el corte de día cierra turnos que
+      // alguien dejó abiertos, y ahí también pudo vaciarse una mesa con
+      // consumo: el Z automático lo cuenta igual que el manual.
+      mesasVaciadas: await contarMesasVaciadas(prisma, shift.id),
     });
   } catch (err) {
     zReportError = err instanceof Error ? err.message : "error desconocido";

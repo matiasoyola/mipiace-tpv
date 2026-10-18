@@ -550,6 +550,27 @@ enum TicketVoidReason {
   MANAGER_VOID
 }
 
+/// auditoria-sirope (#18) · POR QUÉ SE VACIÓ UNA MESA CON CONSUMO.
+///
+/// `TicketVoidReason` dice por qué CAMINO se anuló (el TPV, el barrido,
+/// el panel); esto dice qué pasó en la sala, que es otra pregunta y la
+/// única que el dueño puede usar.
+///
+/// El 18-10 se vaciaron cinco mesas con consumo y no quedó nada: ni
+/// motivo, ni importe en el Z, ni línea en el informe. Vaciar una mesa
+/// con platos dentro es comida que sale de la cocina y no se cobra —una
+/// invitación, un error de comanda o alguien que se fue sin pagar—, y
+/// las tres se gestionan de forma distinta.
+///
+/// Sólo se exige con consumo. Una mesa que se abrió por error y está
+/// vacía se libera de un toque, como siempre.
+enum MotivoVaciado {
+  INVITACION
+  ERROR_DE_COMANDA
+  SE_FUERON_SIN_PAGAR
+  OTRO
+}
+
 // B-reservas-1 (CRM) · tipo de consentimiento RGPD registrado en la ficha
 // del cliente. DATA = tratamiento de datos personales; TREATMENT =
 // consentimiento del tratamiento/servicio (fórmulas de color, parámetros
@@ -2648,6 +2669,10 @@ model Ticket {
   // lo anuló SISTEMA. Los VOIDED anteriores a v1.12 quedan MANUAL con
   // `voidedAt` NULL — los anuló una persona, pero no sabemos cuándo.
   voidReason           TicketVoidReason? @map("void_reason")
+  /// auditoria-sirope (#18) · qué pasó en la sala. Obligatorio al vaciar
+  /// una mesa CON consumo desde el TPV; NULL en todo lo demás (una mesa
+  /// vacía, el barrido del corte de día, un ticket que no está VOIDED).
+  voidMotivo           MotivoVaciado?    @map("void_motivo")
   voidedAt             DateTime?         @map("voided_at") @db.Timestamptz()
   voidedByUserId       String?           @map("voided_by_user_id") @db.Uuid
   // S1-sello · ADR-015 §4.1. SHA-256 (hex) del conjunto económico de la

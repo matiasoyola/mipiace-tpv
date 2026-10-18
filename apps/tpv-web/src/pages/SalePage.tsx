@@ -58,6 +58,10 @@ import {
 
 import { ApiError } from "../api.js";
 import { ConfirmSheet } from "../components/ConfirmSheet.js";
+import {
+  MotivoVaciadoSheet,
+  type MotivoVaciado,
+} from "../components/MotivoVaciadoSheet.js";
 import { Logo } from "../Logo.js";
 import {
   computeCart,
@@ -788,6 +792,14 @@ export function SalePage(props: SalePageProps) {
     return hayDondeMandar(kitchen.estado.destinations);
   }, [props.kitchenDisplayEnabled, kitchen.estado]);
 
+  // auditoria-sirope (#18) · ¿hay consumo en esta mesa?
+  //
+  // Líneas o importe, que es la misma regla que aplica el servidor. Con
+  // consumo se pregunta el motivo; sin él, la mesa se libera de un toque
+  // como siempre — abrir una mesa por error y cerrarla no es nada, y
+  // preguntar ahí llenaría el informe de ruido.
+  const hayConsumoEnLaMesa = lines.length > 0;
+
   // auditoria-sirope (#25) · lo que la cocina todavía no tiene.
   //
   // Sin destino —ni pantalla ni impresora— no hay comanda que mandar, así
@@ -1042,12 +1054,16 @@ export function SalePage(props: SalePageProps) {
   }
 
   // Vaciar la mesa entera: DRAFT → VOIDED y volver al mapa.
-  async function tableVoidTicket(): Promise<void> {
+  async function tableVoidTicket(motivo?: MotivoVaciado): Promise<void> {
     if (!activeTicketId) return;
     try {
       const { apiWithCashier } = await import("../api.js");
+      // auditoria-sirope (#18) · el motivo viaja con la anulación. El
+      // servidor lo EXIGE con consumo (400 VOID_MOTIVO_REQUIRED): la
+      // hoja de aquí es la forma cómoda de contestarlo, no el guardián.
+      const conMotivo = motivo ? `&motivo=${motivo}` : "";
       await apiWithCashier(
-        `/tickets/${activeTicketId}?reason=${encodeURIComponent("Vaciada desde el TPV")}`,
+        `/tickets/${activeTicketId}?reason=${encodeURIComponent("Vaciada desde el TPV")}${conMotivo}`,
         { method: "DELETE" },
       );
       setDraftLines([]);
@@ -3324,12 +3340,30 @@ export function SalePage(props: SalePageProps) {
 
       {/* v1.12 · acciones destructivas con hoja propia. Los dos botones
           llevan verbos distintos: en barra no se lee dos veces. */}
-      {confirmAction === "voidTable" && (
+      {/* auditoria-sirope (#18) · CON CONSUMO SE PREGUNTA POR QUÉ.
+          Vaciar una mesa con platos dentro es comida que salió de la
+          cocina y no se cobró: una invitación, un error de comanda y
+          alguien que se fue sin pagar se gestionan de tres maneras
+          distintas, y hasta hoy las tres dejaban el mismo rastro, que
+          era ninguno. Lo vacío sigue sin preguntar: abrir una mesa por
+          error y cerrarla no es nada. */}
+      {confirmAction === "voidTable" && hayConsumoEnLaMesa && (
+        <MotivoVaciadoSheet
+          tableName={props.tableContext?.name ?? "la mesa"}
+          total={formatEur(totals.total)}
+          onCancel={() => setConfirmAction(null)}
+          onConfirm={(motivo) => {
+            setConfirmAction(null);
+            void tableVoidTicket(motivo);
+          }}
+        />
+      )}
+      {confirmAction === "voidTable" && !hayConsumoEnLaMesa && (
         <ConfirmSheet
           title="Vaciar mesa"
           body={`Se cancela la cuenta de ${
             props.tableContext?.name ?? "la mesa"
-          } y la mesa queda libre para las demás cajas. Lo consumido no se cobra.`}
+          } y la mesa queda libre para las demás cajas.`}
           confirmLabel="Vaciar mesa"
           cancelLabel="Volver"
           onCancel={() => setConfirmAction(null)}

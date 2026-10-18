@@ -21,7 +21,7 @@
 
 import { randomUUID } from "node:crypto";
 
-import { Prisma } from "@mipiacetpv/db";
+import { Prisma, type MotivoVaciado } from "@mipiacetpv/db";
 import type { FastifyInstance } from "fastify";
 
 import { getPrisma } from "../context.js";
@@ -586,6 +586,24 @@ export async function registerTableOperativaRoutes(
           additionalProperties: false,
           properties: {
             reason: { type: "string", maxLength: 200 },
+            // auditoria-sirope (#18) · QUÉ PASÓ EN LA SALA.
+            //
+            // Obligatorio cuando la mesa tiene consumo: vaciar una mesa
+            // con platos dentro es comida que salió de la cocina y no se
+            // cobra, y una invitación, un error de comanda y alguien que
+            // se fue sin pagar se gestionan de tres maneras distintas.
+            // Lo exige el SERVIDOR y no sólo la pantalla: el día que otro
+            // cliente llame a esta ruta, el rastro tiene que existir
+            // igual.
+            motivo: {
+              type: "string",
+              enum: [
+                "INVITACION",
+                "ERROR_DE_COMANDA",
+                "SE_FUERON_SIN_PAGAR",
+                "OTRO",
+              ],
+            },
             // v1.12-mesas-abandonadas · "vacía esta mesa SÓLO si sigue
             // vacía". Lo manda el TPV al salir del detalle sin haber
             // pedido nada. Ver el bloque de comentario del handler.
@@ -597,7 +615,11 @@ export async function registerTableOperativaRoutes(
     async (request, reply) => {
       const cashier = request.cashier!;
       const { ticketId } = request.params as { ticketId: string };
-      const query = request.query as { reason?: string; onlyIfEmpty?: boolean };
+      const query = request.query as {
+        reason?: string;
+        motivo?: MotivoVaciado;
+        onlyIfEmpty?: boolean;
+      };
       const prisma = getPrisma();
       const draft = await prisma.ticket.findFirst({
         where: { id: ticketId, tenantId: cashier.tid, status: "DRAFT" },
@@ -605,6 +627,8 @@ export async function registerTableOperativaRoutes(
           id: true,
           registerId: true,
           tableId: true,
+          total: true,
+          _count: { select: { lines: true } },
           register: { select: { storeId: true } },
         },
       });
@@ -639,12 +663,31 @@ export async function registerTableOperativaRoutes(
       //     metido líneas hace tres segundos y este device aún no ha
       //     repollado—, así que quien lo comprueba es el servidor, dentro
       //     del WHERE de la reclamación (`lines: { none: {} }`).
+      // auditoria-sirope (#18) · con consumo, el motivo es obligatorio.
+      //
+      // «Con consumo» es tener líneas o importe: una mesa que se abrió
+      // por error y está vacía se libera de un toque, como siempre, y el
+      // barrido de las 05:00 —que sólo toca vacías— no se ve afectado.
+      //
+      // Lo exige el servidor y no sólo la hoja del TPV: el motivo es el
+      // rastro de comida que salió y no se cobró, y un rastro que
+      // depende de que el cliente se acuerde no es un rastro.
+      const conConsumo =
+        draft._count.lines > 0 || Number(draft.total) > 0;
+      if (conConsumo && !query.onlyIfEmpty && !query.motivo) {
+        return reply.code(400).send({
+          error: "VOID_MOTIVO_REQUIRED",
+          message:
+            "Esta mesa tiene consumo: hay que decir por qué se vacía.",
+        });
+      }
       const voided = await voidDraftTicket({
         prisma,
         ticketId,
         tenantId: cashier.tid,
         reason: "MANUAL",
         byUserId: cashier.sub,
+        motivo: conConsumo ? (query.motivo ?? null) : null,
         note: query.reason ? `[VACIADA] ${query.reason}` : "[VACIADA] sin motivo",
         requireEmpty: query.onlyIfEmpty === true,
       });

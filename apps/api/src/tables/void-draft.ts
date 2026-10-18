@@ -15,6 +15,8 @@
 //     como red de seguridad de la carrera, no como criterio de negocio.
 //   - No toca `internalNumber`: un DRAFT nunca consumió serie fiscal.
 
+import type { MotivoVaciado } from "@mipiacetpv/db";
+
 import { getPrisma } from "../context.js";
 import {
   avisarComandasServidas,
@@ -65,6 +67,11 @@ export async function voidDraftTicket(args: {
   // primer día. La columna `voidReason` dice el porqué en máquina; esto
   // lo dice en cristiano para quien mire el ticket.
   note?: string | null;
+  /**
+   * auditoria-sirope (#18) · qué pasó en la sala. Sólo con consumo; lo
+   * decide el llamante, que es quien sabe si había platos dentro.
+   */
+  motivo?: MotivoVaciado | null;
   requireEmpty?: boolean;
   now?: Date;
 }): Promise<VoidDraftOk | VoidDraftFailure> {
@@ -97,6 +104,7 @@ export async function voidDraftTicket(args: {
     data: {
       status: "VOIDED",
       voidReason: reason,
+      voidMotivo: args.motivo ?? null,
       voidedAt: now,
       voidedByUserId: byUserId,
       notes: args.note ?? draft.notes,
