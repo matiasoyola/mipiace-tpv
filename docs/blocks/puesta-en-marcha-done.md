@@ -167,6 +167,21 @@ Lo que queda **pendiente antes de desplegar**, y es de Matías:
 > (pendiente — la repite Matías con la regla arreglada)
 > ```
 
+**Y la consulta está probada contra Postgres**, no sólo escrita: con tres cuentas de mentira —una
+con 20 anuladas y ninguna en Holded, otra con UNA anulada que sí llegó a Holded, y otra que vende
+de verdad— decide así:
+
+```
+       cuenta       | registros | ventas_reales | anuladas | en_holded | regla | regla_vieja | factura_desde_quedaria
+--------------------+-----------+---------------+----------+-----------+-------+-------------+------------------------
+ SIROPE DE MENTIRA  |         0 |             0 |       20 |         0 | 3.d   | 3.b         |
+ ANULADA EN HOLDED  |         0 |             1 |        1 |         1 | 3.b   | 3.b         | 2026-02-02 09:00:00+00
+ VENDE DE VERDAD    |         0 |             1 |        0 |         0 | 3.b   | 3.b         | 2026-01-15 11:00:00+00
+```
+
+y la segunda consulta (la de «quién cambia de regla») devuelve **una sola fila**: la de las 20
+anuladas. Que es lo que tiene que pasar en producción con Sirope y con nadie más.
+
 La consulta, para repetirla:
 
 ```bash
