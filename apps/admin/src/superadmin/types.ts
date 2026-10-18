@@ -595,6 +595,10 @@ export interface PuestaEnMarchaPreview {
   ensayo: {
     ticketsDeEnsayo: number;
     borradores: number;
+    /** puesta-en-marcha (ADR-021) · TODOS los tickets, uno por estado: el
+     *  reseteo se los lleva todos. */
+    ticketsPorEstado: Array<{ estado: string; cuantos: number }>;
+    ticketsTotales: number;
     devoluciones: number;
     turnos: number;
     turnosAbiertos: number;
@@ -624,6 +628,16 @@ export interface PuestaEnMarchaPreview {
     terminalesEmparejados: number;
   }>;
   suelo: { ok: boolean; problemas: string[] };
+  /** puesta-en-marcha (ADR-021) · lo que no puede estar en una cuenta en
+   *  ensayo: una venta que llegó a Holded o que tiene factura emitida. */
+  ventasQueNoSonDeEnsayo: Array<{
+    ticketId: string;
+    internalNumber: string;
+    estado: string;
+    motivo: "HOLDED" | "REGISTRO_FISCAL";
+    holdedDocumentId: string | null;
+    numSerieFactura: string | null;
+  }>;
   puedeResetear: boolean;
   puedeArrancar: boolean;
   bloqueos: DejarHoldedBloqueo[];
@@ -632,6 +646,8 @@ export interface PuestaEnMarchaPreview {
 export interface ResetearEnsayoResultado {
   ok: true;
   ticketsBorrados: number;
+  ticketsPorEstado: Array<{ estado: string; cuantos: number }>;
+  ticketsDeEnsayoBorrados: number;
   borradoresBorrados: number;
   devolucionesBorradas: number;
   emailsBorrados: number;

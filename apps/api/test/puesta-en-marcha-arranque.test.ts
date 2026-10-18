@@ -41,6 +41,7 @@ const ARRANQUE = new Date("2026-10-17T10:30:00.000Z");
 const {
   arrancarFacturacion,
   ArranqueBloqueadoError,
+  EnsayoConVentaRealError,
   previsualizarPuestaEnMarcha,
   resetearEnsayo,
   TenantFacturandoError,
@@ -49,6 +50,16 @@ const {
 interface Opciones {
   facturaDesde?: Date | null;
   esDePruebas?: boolean;
+  /** Los tickets de la cuenta, con su estado. Default: un ensayo normal. */
+  tickets?: Array<{
+    id: string;
+    status: string;
+    internalNumber?: string;
+    holdedDocumentId?: string | null;
+  }>;
+  /** Registros fiscales colgando de un ticket (la otra señal de «esto no es
+   *  de ensayo»). */
+  registrosConTicket?: Array<{ ticketId: string; numSerieFactura: string }>;
   /** Registros fiscales por caja. Vacío = cadena limpia. */
   registros?: Record<string, number>;
   /** Terminales emparejados por caja. */
@@ -65,6 +76,18 @@ interface Opciones {
  *  que se conserva se pone rojo. */
 function fake(opts: Opciones = {}) {
   const cajas = opts.cajas ?? [{ id: CAJA_1, name: "Caja 1", ticketCounter: 7 }];
+  // Un ensayo normal: tres de prueba, un borrador y dos anuladas — que es la
+  // forma que tenía Sirope en la foto de producción del 18-10.
+  const tickets =
+    opts.tickets ??
+    [
+      { id: "t1", status: "TEST" },
+      { id: "t2", status: "TEST" },
+      { id: "t3", status: "TEST" },
+      { id: "t4", status: "DRAFT" },
+      { id: "t5", status: "VOIDED" },
+      { id: "t6", status: "VOIDED" },
+    ].map((t) => ({ ...t, internalNumber: t.id, holdedDocumentId: null }));
   const tenant = {
     id: TENANT_ID,
     name: "CAFETERÍA SIROPE SL",
@@ -107,12 +130,32 @@ function fake(opts: Opciones = {}) {
       updateMany: vi.fn(async () => ({ count: cajas.length })),
     },
     ticket: {
-      count: vi.fn(async () => 3),
-      findMany: vi.fn(async () => [{ id: "t1", status: "TEST" }]),
+      count: vi.fn(async ({ where }: any) =>
+        where?.status
+          ? tickets.filter((t) => t.status === where.status).length
+          : tickets.length,
+      ),
+      groupBy: vi.fn(async () => {
+        const m = new Map<string, number>();
+        for (const t of tickets) m.set(t.status, (m.get(t.status) ?? 0) + 1);
+        return [...m.entries()].map(([status, n]) => ({
+          status,
+          _count: { _all: n },
+        }));
+      }),
+      findMany: vi.fn(async ({ where }: any) => {
+        // `holdedDocumentId: { not: null }` es la consulta del guardián.
+        if (where?.holdedDocumentId) {
+          return tickets.filter((t) => t.holdedDocumentId != null);
+        }
+        return where?.status
+          ? tickets.filter((t) => t.status === where.status)
+          : tickets;
+      }),
       deleteMany: vi.fn(async ({ where }: any) => {
         apunta("ticket");
         ticketDeletes.push(where);
-        return { count: 1 };
+        return { count: tickets.length };
       }),
     },
     refund: {
@@ -196,6 +239,16 @@ function fake(opts: Opciones = {}) {
       }),
     },
     fiscalRecord: {
+      findMany: vi.fn(async () =>
+        (opts.registrosConTicket ?? []).map((r) => ({
+          ticketId: r.ticketId,
+          numSerieFactura: r.numSerieFactura,
+          ticket: {
+            internalNumber: r.ticketId,
+            status: tickets.find((t) => t.id === r.ticketId)?.status ?? "PAID",
+          },
+        })),
+      ),
       groupBy: vi.fn(async () =>
         cajas
           .filter((c) => (opts.registros?.[c.id] ?? 0) > 0)
@@ -236,6 +289,16 @@ describe("la previsualización", () => {
     expect(previa.conserva.cajeros).toBe(3);
     expect(previa.conserva.contactos).toBe(42);
     expect(previa.conserva.datosFiscales).toBe(true);
+    // Y el desglose de lo que se va, por estado: «20 anuladas» no se lee
+    // igual que «3 de ensayo», y con el desglose delante nadie pulsa sin
+    // saber qué se borra.
+    expect(previa.ensayo.ticketsPorEstado).toEqual([
+      { estado: "DRAFT", cuantos: 1 },
+      { estado: "TEST", cuantos: 3 },
+      { estado: "VOIDED", cuantos: 2 },
+    ]);
+    expect(previa.ensayo.ticketsTotales).toBe(6);
+    expect(previa.ventasQueNoSonDeEnsayo).toEqual([]);
   });
 
   it("una cuenta que factura: ni se resetea ni se vuelve a arrancar", async () => {
@@ -249,19 +312,33 @@ describe("la previsualización", () => {
 });
 
 describe("resetear el ensayo", () => {
-  it("borra los tickets de ensayo, los borradores y los turnos", async () => {
+  it("borra TODOS los tickets, sea cual sea su estado, y los turnos", async () => {
     const { db, borradoDe, ticketDeletes } = fake();
     const r = await resetearEnsayo({ prisma: db as any, tenantId: TENANT_ID });
-    expect(borradoDe.ticket).toBe(2); // los TEST y los DRAFT
+    expect(borradoDe.ticket).toBe(1);
     expect(borradoDe.shift).toBe(1);
     expect(borradoDe.refund).toBe(1);
     expect(r.turnosBorrados).toBe(2);
     expect(r.mesasDesagrupadas).toBe(2);
-    // Los dos estados, y SÓLO los dos: un `PAID` en una cuenta en ensayo no
-    // existe (la migración la habría puesto a facturar), pero si existiera
-    // no es esto lo que lo borra.
-    const estados = ticketDeletes.map((w: any) => w.status);
-    expect(estados).toEqual(["TEST", "DRAFT"]);
+    // UNA llamada y SIN filtro de estado. Es la decisión del 18-10: en una
+    // cuenta en ensayo nada es real, así que se van todos — también las dos
+    // anuladas, que es lo que Sirope tenía dentro y un reseteo por estados
+    // le habría dejado en el arqueo.
+    expect(ticketDeletes).toEqual([{ tenantId: TENANT_ID }]);
+  });
+
+  it("y dice cuántos se llevó DE CADA ESTADO", async () => {
+    const { db } = fake();
+    const r = await resetearEnsayo({ prisma: db as any, tenantId: TENANT_ID });
+    // Después de borrarlos no se pueden volver a contar: este desglose es la
+    // única copia, y es lo que va al registro de auditoría.
+    expect(r.ticketsPorEstado).toEqual([
+      { estado: "DRAFT", cuantos: 1 },
+      { estado: "TEST", cuantos: 3 },
+      { estado: "VOIDED", cuantos: 2 },
+    ]);
+    expect(r.ticketsBorrados).toBe(6);
+    expect(r.ticketsDeEnsayoBorrados).toBe(3);
   });
 
   it("y pone a cero el contador de referencia interna de cada caja", async () => {
@@ -299,6 +376,77 @@ describe("resetear el ensayo", () => {
     // borrar ahí — y no lo pide. El append-only sigue sin puertas.
     expect(borradoDe.fiscalRecord).toBeUndefined();
     expect(db.fiscalRecord.deleteMany).not.toHaveBeenCalled();
+  });
+
+  // ── La puerta nueva del 18-10 ───────────────────────────────────────
+  //
+  // En una cuenta en ensayo nada es real. Si algo lo es, el reseteo se para
+  // en seco y dice CUÁL: borrarlo sería borrar una venta que existe en la
+  // contabilidad de alguien.
+
+  it("se para si un ticket llegó a Holded, y no borra nada", async () => {
+    const { db, borradoDe } = fake({
+      tickets: [
+        { id: "t1", status: "TEST", internalNumber: "000001", holdedDocumentId: null },
+        {
+          id: "t9",
+          status: "VOIDED",
+          internalNumber: "000009",
+          holdedDocumentId: "6714aa0f9c3e1b0012345678",
+        },
+      ],
+    });
+    const err = await resetearEnsayo({
+      prisma: db as any,
+      tenantId: TENANT_ID,
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(EnsayoConVentaRealError);
+    expect(err.ventas).toHaveLength(1);
+    expect(err.ventas[0].internalNumber).toBe("000009");
+    expect(err.ventas[0].motivo).toBe("HOLDED");
+    // Anulada DESPUÉS, y da igual: si llegó a Holded, existió allí un
+    // documento con número y eso no se deshace borrando el ticket aquí.
+    expect(err.ventas[0].estado).toBe("VOIDED");
+    // Y el mensaje lleva el número dentro: «no se puede» no sirve de nada.
+    expect(err.message).toContain("000009");
+    // Lo importante: NADA se borró antes de parar.
+    expect(Object.keys(borradoDe)).toEqual([]);
+  });
+
+  it("se para si un ticket tiene factura emitida, y dice cuál", async () => {
+    const { db, borradoDe } = fake({
+      tickets: [
+        { id: "t1", status: "PAID", internalNumber: "000001", holdedDocumentId: null },
+      ],
+      registrosConTicket: [{ ticketId: "t1", numSerieFactura: "C1/000001" }],
+    });
+    const err = await resetearEnsayo({
+      prisma: db as any,
+      tenantId: TENANT_ID,
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(EnsayoConVentaRealError);
+    expect(err.ventas[0].motivo).toBe("REGISTRO_FISCAL");
+    expect(err.ventas[0].numSerieFactura).toBe("C1/000001");
+    expect(err.message).toContain("C1/000001");
+    expect(Object.keys(borradoDe)).toEqual([]);
+  });
+
+  it("y la previsualización lo enseña como bloqueo de las DOS acciones", async () => {
+    const { db } = fake({
+      tickets: [
+        {
+          id: "t9",
+          status: "VOIDED",
+          internalNumber: "000009",
+          holdedDocumentId: "6714aa0f9c3e1b0012345678",
+        },
+      ],
+    });
+    const previa = await previsualizarPuestaEnMarcha(db as any, TENANT_ID);
+    expect(previa.ventasQueNoSonDeEnsayo).toHaveLength(1);
+    expect(previa.puedeResetear).toBe(false);
+    expect(previa.puedeArrancar).toBe(false);
+    expect(previa.bloqueos.map((b) => b.codigo)).toContain("VENTA_REAL_EN_ENSAYO");
   });
 
   it("con la cuenta FACTURANDO lanza y no borra nada", async () => {

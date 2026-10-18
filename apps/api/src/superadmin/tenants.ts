@@ -34,6 +34,7 @@ import { vaciarColasDeHolded } from "../holded/dejar-holded-colas.js";
 import {
   arrancarFacturacion,
   ArranqueBloqueadoError,
+  EnsayoConVentaRealError,
   previsualizarPuestaEnMarcha,
   resetearEnsayo,
   TenantFacturandoError,
@@ -2286,6 +2287,16 @@ export async function registerSuperAdminTenantsRoutes(
             facturaDesde: err.facturaDesde.toISOString(),
           });
         }
+        // puesta-en-marcha (ADR-021) · la cuenta está en ensayo pero tiene
+        // dentro una venta que no lo es. No se ha borrado nada, y la
+        // respuesta dice CUÁL: lo que hay que mirar es de dónde salió.
+        if (err instanceof EnsayoConVentaRealError) {
+          return reply.code(409).send({
+            error: "VENTA_REAL_EN_ENSAYO",
+            message: err.message,
+            ventas: err.ventas,
+          });
+        }
         if (err instanceof TenantNoExisteError) {
           return reply
             .code(404)
@@ -2361,6 +2372,16 @@ export async function registerSuperAdminTenantsRoutes(
       try {
         resultado = await arrancarFacturacion({ prisma, tenantId: id });
       } catch (err) {
+        // Arrancar resetea antes de fijar la fecha, así que se para por lo
+        // mismo y con el mismo cuerpo. (La previsualización ya lo enseña como
+        // bloqueo; esto es por si algo cambió entre la pantalla y el botón.)
+        if (err instanceof EnsayoConVentaRealError) {
+          return reply.code(409).send({
+            error: "VENTA_REAL_EN_ENSAYO",
+            message: err.message,
+            ventas: err.ventas,
+          });
+        }
         if (err instanceof ArranqueBloqueadoError) {
           // Los MISMOS bloqueos que enseñó la previsualización, con el
           // mismo texto. Un 409 genérico obligaría a volver a la pantalla

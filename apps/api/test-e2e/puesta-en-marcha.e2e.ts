@@ -84,6 +84,7 @@ const { signCashierSession } = await import("../src/shift/cashier-session.js");
 const {
   arrancarFacturacion,
   ArranqueBloqueadoError,
+  EnsayoConVentaRealError,
   previsualizarPuestaEnMarcha,
   resetearEnsayo,
   TenantFacturandoError,
@@ -145,6 +146,8 @@ describe.skipIf(!e2eEnabled)("e2e · puesta en marcha, contra Postgres real", ()
   async function cuantos(): Promise<{
     ticketsTest: number;
     borradores: number;
+    anulados: number;
+    ticketsTotales: number;
     registros: number;
     turnos: number;
     devoluciones: number;
@@ -158,6 +161,8 @@ describe.skipIf(!e2eEnabled)("e2e · puesta en marcha, contra Postgres real", ()
     const [
       ticketsTest,
       borradores,
+      anulados,
+      ticketsTotales,
       registros,
       turnos,
       devoluciones,
@@ -170,6 +175,8 @@ describe.skipIf(!e2eEnabled)("e2e · puesta en marcha, contra Postgres real", ()
     ] = await Promise.all([
       prisma.ticket.count({ where: { tenantId, status: "TEST" } }),
       prisma.ticket.count({ where: { tenantId, status: "DRAFT" } }),
+      prisma.ticket.count({ where: { tenantId, status: "VOIDED" } }),
+      prisma.ticket.count({ where: { tenantId } }),
       prisma.fiscalRecord.count({ where: { tenantId } }),
       prisma.shift.count({ where: { registerId } }),
       prisma.refund.count({ where: { tenantId } }),
@@ -186,6 +193,8 @@ describe.skipIf(!e2eEnabled)("e2e · puesta en marcha, contra Postgres real", ()
     return {
       ticketsTest,
       borradores,
+      anulados,
+      ticketsTotales,
       registros,
       turnos,
       devoluciones,
@@ -474,6 +483,22 @@ describe.skipIf(!e2eEnabled)("e2e · puesta en marcha, contra Postgres real", ()
       ).toBeGreaterThan(0);
     });
 
+    // La forma que tenía Cafetería Sirope en la foto de producción del
+    // 18-10: 20 tickets `VOIDED` —16 del cajero de pruebas, 4 de la
+    // demostración con la dueña— y ni uno en Holded. Un reseteo que sólo
+    // mirara los `TEST` se los habría dejado dentro.
+    it("y una venta anulada durante la demostración también se queda", async () => {
+      const venta = await cobrar({ shiftId, total: 8.5 });
+      expect(venta.statusCode).toBe(201);
+      await prisma.ticket.update({
+        where: { id: venta.json().ticket.id },
+        data: { status: "VOIDED", voidedAt: new Date() },
+      });
+      expect(
+        await prisma.ticket.count({ where: { tenantId, status: "VOIDED" } }),
+      ).toBe(1);
+    });
+
     it("el cierre del turno funciona, con su informe Z", async () => {
       const res = await app.inject({
         method: "POST",
@@ -490,6 +515,7 @@ describe.skipIf(!e2eEnabled)("e2e · puesta en marcha, contra Postgres real", ()
       const n = await cuantos();
       expect(n.ticketsTest).toBeGreaterThanOrEqual(3);
       expect(n.borradores).toBeGreaterThan(0);
+      expect(n.anulados).toBe(1);
       expect(n.devoluciones).toBe(1);
       expect(n.turnos).toBe(1);
       expect(n.contador).toBeGreaterThan(0);
@@ -502,18 +528,57 @@ describe.skipIf(!e2eEnabled)("e2e · puesta en marcha, contra Postgres real", ()
   // ── 2 · resetear el ensayo ──────────────────────────────────────────
 
   describe("2 · el reseteo deja la cuenta como estaba", () => {
-    it("borra el ensayo y conserva todo lo demás", async () => {
+    // La puerta nueva del 18-10: primero, que NO se pueda si algo de dentro
+    // no es de ensayo. Se prueba antes de resetear de verdad porque después
+    // ya no hay tickets con los que probarlo.
+    it("NO se puede si un ticket llegó a Holded, y dice cuál", async () => {
+      const victima = await prisma.ticket.findFirstOrThrow({
+        where: { tenantId, status: "VOIDED" },
+        select: { id: true, internalNumber: true },
+      });
+      await prisma.ticket.update({
+        where: { id: victima.id },
+        data: { holdedDocumentId: "6714aa0f9c3e1b0012345678" },
+      });
+
+      const antes = await cuantos();
+      const err = await resetearEnsayo({ prisma, tenantId }).catch((e) => e);
+      expect(err).toBeInstanceOf(EnsayoConVentaRealError);
+      expect(err.message).toContain(victima.internalNumber);
+      // Y NO SE BORRÓ NADA: ni los de ensayo, ni los turnos, ni el contador.
+      const despues = await cuantos();
+      expect(despues).toEqual(antes);
+
+      // Se quita la marca y el camino se abre otra vez.
+      await prisma.ticket.update({
+        where: { id: victima.id },
+        data: { holdedDocumentId: null },
+      });
+      const previa = await previsualizarPuestaEnMarcha(prisma, tenantId);
+      expect(previa.ventasQueNoSonDeEnsayo).toEqual([]);
+      expect(previa.puedeResetear).toBe(true);
+    });
+
+    it("borra TODOS los tickets y conserva todo lo demás", async () => {
       const antes = await cuantos();
       const r = await resetearEnsayo({ prisma, tenantId });
 
-      expect(r.ticketsBorrados).toBe(antes.ticketsTest);
+      // Todos, no sólo los de ensayo: las anuladas también se van.
+      expect(r.ticketsBorrados).toBe(antes.ticketsTotales);
+      expect(r.ticketsDeEnsayoBorrados).toBe(antes.ticketsTest);
       expect(r.borradoresBorrados).toBe(antes.borradores);
       expect(r.devolucionesBorradas).toBe(antes.devoluciones);
       expect(r.turnosBorrados).toBe(antes.turnos);
+      // Y el desglose, que es lo único que queda de lo que había.
+      expect(
+        r.ticketsPorEstado.find((p) => p.estado === "VOIDED")?.cuantos,
+      ).toBe(1);
 
       const despues = await cuantos();
+      expect(despues.ticketsTotales).toBe(0);
       expect(despues.ticketsTest).toBe(0);
       expect(despues.borradores).toBe(0);
+      expect(despues.anulados).toBe(0);
       expect(despues.devoluciones).toBe(0);
       expect(despues.turnos).toBe(0);
       expect(despues.contador).toBe(0);
@@ -756,6 +821,96 @@ describe.skipIf(!e2eEnabled)("e2e · puesta en marcha, contra Postgres real", ()
       expect(msg).toContain("no se modifica");
     });
 
+    // ── Y la excepción del reseteo no abre ninguna puerta ────────────
+    //
+    // El guardián del sello deja borrar un ticket sellado SÓLO si la cuenta
+    // está en ensayo, el ticket no llegó a Holded y no tiene factura. Aquí la
+    // cuenta YA FACTURA, así que las tres dejan de cumplirse por la primera.
+    it("una venta de una cuenta que factura no se borra ni a pelo", async () => {
+      const venta = await prisma.ticket.findFirstOrThrow({
+        where: { tenantId, status: { not: "DRAFT" } },
+        select: { id: true },
+      });
+      let msg = "";
+      try {
+        await prisma.$executeRawUnsafe(
+          `DELETE FROM tickets WHERE id = '${venta.id}'`,
+        );
+      } catch (e) {
+        msg = e instanceof Error ? e.message : String(e);
+      }
+      expect(msg).toContain("SELLO_VIOLADO");
+      expect(await prisma.ticket.count({ where: { id: venta.id } })).toBe(1);
+    });
+
+    it("y en una cuenta EN ENSAYO, tampoco la que llegó a Holded", async () => {
+      // La tercera condición de la excepción, sola. Cuenta en ensayo, ticket
+      // sellado, sin registro fiscal… y con documento de Holded: no se borra.
+      const otro = await prisma.tenant.create({
+        data: {
+          name: `Con documento ${randomUUID().slice(0, 8)}`,
+          holdedEnabled: false,
+        },
+        select: { id: true },
+      });
+      const st = await prisma.store.create({
+        data: { tenantId: otro.id, name: "T" },
+        select: { id: true },
+      });
+      const reg = await prisma.register.create({
+        data: { storeId: st.id, name: "C" },
+        select: { id: true },
+      });
+      const u = await prisma.user.create({
+        data: { tenantId: otro.id, email: `u+${randomUUID()}@e2e.local`, role: "OWNER" },
+        select: { id: true },
+      });
+      const sh = await prisma.shift.create({
+        data: { registerId: reg.id, userId: u.id, cashOpening: 0 },
+        select: { id: true },
+      });
+      const t = await prisma.ticket.create({
+        data: {
+          tenantId: otro.id,
+          registerId: reg.id,
+          shiftId: sh.id,
+          userId: u.id,
+          internalNumber: "000001",
+          externalId: randomUUID(),
+          publicSlug: randomUUID().replace(/-/g, "").slice(0, 12),
+          status: "VOIDED",
+          total: 8.5,
+          totalTax: 0.77,
+          totalDiscount: 0,
+          holdedDocumentId: "6714aa0f9c3e1b0012345678",
+        },
+        select: { id: true },
+      });
+      // Sellado a mano, que es lo que hace `sealTicket` al cobrar.
+      await prisma.$executeRawUnsafe(
+        `UPDATE tickets SET sealed_at = now(), sealed_hash = repeat('a', 64) WHERE id = '${t.id}'`,
+      );
+
+      let msg = "";
+      try {
+        await prisma.$executeRawUnsafe(`DELETE FROM tickets WHERE id = '${t.id}'`);
+      } catch (e) {
+        msg = e instanceof Error ? e.message : String(e);
+      }
+      expect(msg).toContain("SELLO_VIOLADO");
+      expect(await prisma.ticket.count({ where: { id: t.id } })).toBe(1);
+
+      // Limpieza: con la marca de la baja, que es el único camino.
+      await prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(
+          `SET LOCAL "mipiacetpv.eliminar_tenant" = '${otro.id}'`,
+        );
+        await tx.$executeRawUnsafe(`DELETE FROM tickets WHERE tenant_id = '${otro.id}'`);
+        await tx.$executeRawUnsafe(`DELETE FROM shifts WHERE register_id = '${reg.id}'`);
+        await tx.$executeRawUnsafe(`DELETE FROM tenants WHERE id = '${otro.id}'`);
+      });
+    });
+
     it("la cadena de la caja sigue íntegra después de todos los intentos", async () => {
       const filas = await prisma.$queryRawUnsafe<
         { total: bigint; integra: boolean; primer_fallo_index: number | null }[]
@@ -772,6 +927,59 @@ describe.skipIf(!e2eEnabled)("e2e · puesta en marcha, contra Postgres real", ()
     let conRegistros = "";
     let conVentas = "";
     let sinNada = "";
+    // La foto de producción del 18-10: una cuenta con sólo anuladas (Sirope)
+    // y otra con una anulada que SÍ llegó a Holded.
+    let soloAnuladas = "";
+    let anuladaEnHolded = "";
+
+    /** Monta un comercio vacío con su tienda, su caja, su propietario y su
+     *  turno, listo para colgarle tickets. */
+    async function comercio(nombre: string) {
+      const t = await prisma.tenant.create({
+        data: { name: `${nombre} ${randomUUID().slice(0, 8)}` },
+        select: { id: true },
+      });
+      const st = await prisma.store.create({
+        data: { tenantId: t.id, name: "T" },
+        select: { id: true },
+      });
+      const r = await prisma.register.create({
+        data: { storeId: st.id, name: "C" },
+        select: { id: true },
+      });
+      const u = await prisma.user.create({
+        data: { tenantId: t.id, email: `u+${randomUUID()}@e2e.local`, role: "OWNER" },
+        select: { id: true },
+      });
+      const sh = await prisma.shift.create({
+        data: { registerId: r.id, userId: u.id, cashOpening: 0 },
+        select: { id: true },
+      });
+      return { tenantId: t.id, registerId: r.id, userId: u.id, shiftId: sh.id };
+    }
+
+    async function ticket(
+      c: { tenantId: string; registerId: string; userId: string; shiftId: string },
+      datos: { status: string; paidAt?: Date; holdedDocumentId?: string },
+    ) {
+      await prisma.ticket.create({
+        data: {
+          tenantId: c.tenantId,
+          registerId: c.registerId,
+          shiftId: c.shiftId,
+          userId: c.userId,
+          internalNumber: randomUUID().slice(0, 6),
+          externalId: randomUUID(),
+          publicSlug: randomUUID().replace(/-/g, "").slice(0, 12),
+          status: datos.status as never,
+          paidAt: datos.paidAt ?? new Date("2026-03-04T10:00:00Z"),
+          holdedDocumentId: datos.holdedDocumentId ?? null,
+          total: 10,
+          totalTax: 1,
+          totalDiscount: 0,
+        },
+      });
+    }
 
     it("monta las tres clases de cuenta y les quita la fecha", async () => {
       // Esta cuenta ya tiene un registro: la regla 3.a tiene que verla.
@@ -825,6 +1033,27 @@ describe.skipIf(!e2eEnabled)("e2e · puesta en marcha, contra Postgres real", ()
         select: { id: true },
       });
       sinNada = t3.id;
+
+      // CAFETERÍA SIROPE, tal y como salió en la foto del 18-10: sólo
+      // anuladas, ninguna en Holded. No ha vendido nunca.
+      const c4 = await comercio("Sólo anuladas");
+      soloAnuladas = c4.tenantId;
+      for (let i = 0; i < 20; i++) {
+        await ticket(c4, { status: "VOIDED" });
+      }
+      await ticket(c4, { status: "TEST" });
+      await ticket(c4, { status: "DRAFT" });
+
+      // Y el caso contrario: una anulada que SÍ llegó a Holded. Existió un
+      // documento con número en la contabilidad del cliente, así que ese
+      // comercio SÍ ha facturado.
+      const c5 = await comercio("Anulada en Holded");
+      anuladaEnHolded = c5.tenantId;
+      await ticket(c5, {
+        status: "VOIDED",
+        paidAt: new Date("2026-02-02T09:00:00Z"),
+        holdedDocumentId: "6714aa0f9c3e1b0012345678",
+      });
     });
 
     it("3.a · quien tiene facturas factura desde su primera factura", async () => {
@@ -850,6 +1079,31 @@ describe.skipIf(!e2eEnabled)("e2e · puesta en marcha, contra Postgres real", ()
       expect(t.facturaDesde?.toISOString()).toBe("2026-03-04T10:00:00.000Z");
     });
 
+    // ── Lo que arregló la foto de producción del 18-10 ───────────────
+    //
+    // Con la regla vieja («todo lo que no sea borrador ni ensayo»), Cafetería
+    // Sirope salía por 3.b con 20 ventas y habría ARRANCADO A FACTURAR SOLA
+    // en el despliegue: su siguiente cobro de ensayo habría sido su factura
+    // C1/1. Las 20 eran anuladas y ninguna llegó a Holded.
+    it("3.b · una cuenta con SÓLO anuladas NO ha vendido: se queda en ensayo", async () => {
+      const t = await prisma.tenant.findUniqueOrThrow({
+        where: { id: soloAnuladas },
+        select: { facturaDesde: true },
+      });
+      expect(t.facturaDesde).toBeNull();
+    });
+
+    it("3.b · pero una anulada que llegó a Holded SÍ cuenta", async () => {
+      // `holded_document_id` lo pone el worker cuando Holded CREA el
+      // documento: existió una factura con número en la contabilidad del
+      // cliente, y anular el ticket aquí no la deshace.
+      const t = await prisma.tenant.findUniqueOrThrow({
+        where: { id: anuladaEnHolded },
+        select: { facturaDesde: true },
+      });
+      expect(t.facturaDesde?.toISOString()).toBe("2026-02-02T09:00:00.000Z");
+    });
+
     it("3.d · y quien no ha vendido nada se queda en ensayo", async () => {
       const t = await prisma.tenant.findUniqueOrThrow({
         where: { id: sinNada },
@@ -857,9 +1111,14 @@ describe.skipIf(!e2eEnabled)("e2e · puesta en marcha, contra Postgres real", ()
       });
       expect(t.facturaDesde).toBeNull();
       await prisma.tenant.delete({ where: { id: sinNada } });
-      await prisma.$executeRawUnsafe(
-        `DELETE FROM tenants WHERE id = '${conVentas}'`,
-      ).catch(() => undefined);
+      for (const id of [conVentas, soloAnuladas, anuladaEnHolded]) {
+        await prisma.$executeRawUnsafe(
+          `DELETE FROM tickets WHERE tenant_id = '${id}'`,
+        ).catch(() => undefined);
+        await prisma.$executeRawUnsafe(
+          `DELETE FROM tenants WHERE id = '${id}'`,
+        ).catch(() => undefined);
+      }
     });
   });
 

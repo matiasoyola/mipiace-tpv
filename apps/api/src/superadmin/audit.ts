@@ -312,6 +312,13 @@ const CatalogImportMeta = Base.extend({
 // una auditoría tenga que conservar, y cuántas filas se fueron sí.
 const ResetearEnsayoMeta = Base.extend({
   ticketsBorrados: z.number().int().nonnegative(),
+  // puesta-en-marcha (ADR-021) · cuántos de cada estado. «20 anuladas» y «3
+  // de ensayo» no significan lo mismo, y después de borrarlos no se pueden
+  // volver a contar: ésta es la única copia.
+  ticketsPorEstado: z.array(
+    z.object({ estado: z.string(), cuantos: z.number().int().nonnegative() }),
+  ),
+  ticketsDeEnsayoBorrados: z.number().int().nonnegative(),
   borradoresBorrados: z.number().int().nonnegative(),
   devolucionesBorradas: z.number().int().nonnegative(),
   emailsBorrados: z.number().int().nonnegative(),
@@ -333,6 +340,10 @@ const EmpezarAFacturarMeta = Base.extend({
   facturaDesde: z.string(),
   reseteo: z.object({
     ticketsBorrados: z.number().int().nonnegative(),
+    ticketsPorEstado: z.array(
+      z.object({ estado: z.string(), cuantos: z.number().int().nonnegative() }),
+    ),
+    ticketsDeEnsayoBorrados: z.number().int().nonnegative(),
     borradoresBorrados: z.number().int().nonnegative(),
     devolucionesBorradas: z.number().int().nonnegative(),
     emailsBorrados: z.number().int().nonnegative(),

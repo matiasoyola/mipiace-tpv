@@ -286,22 +286,36 @@ export interface PurgeTestDataResult {
   /** puesta-en-marcha (ADR-021) · borradores (mesas abiertas) borrados.
    *  Cero cuando el llamante no los pide. */
   borradoresPurged: number;
+  /** puesta-en-marcha (ADR-021) · cuántos se borraron DE CADA ESTADO, en el
+   *  orden en que los devuelve la base. Es lo que va al audit del reseteo:
+   *  «20 anuladas» y «3 de ensayo» no significan lo mismo, y después de
+   *  borrarlos no se pueden volver a contar. */
+  ticketsPorEstado: Array<{ estado: string; cuantos: number }>;
+  /** La suma de todos los estados. */
+  ticketsPurgedTotal: number;
 }
 
 export interface PurgeTestDataOptions {
   /**
-   * puesta-en-marcha (ADR-021) · también los BORRADORES, que son las mesas
-   * abiertas.
+   * puesta-en-marcha (ADR-021) · QUÉ ESTADOS se borran.
    *
-   * El reseteo del ensayo los necesita: una mesa que se quedó abierta a
-   * media comanda durante la demostración es exactamente lo que no puede
-   * encontrarse el cliente el día que empieza a facturar. La activación NO
-   * los pide: ahí un borrador puede ser una mesa de verdad abierta por el
-   * propietario, y borrarla sería borrarle una venta en curso.
+   *   · sin poner  → sólo `TEST`. El comportamiento de siempre, el de la
+   *     ACTIVACIÓN: ahí un borrador puede ser una mesa de verdad abierta por
+   *     el propietario, y borrarla sería borrarle una venta en curso.
+   *   · `"todos"`  → cualquier estado. Es lo que pide el RESETEO DEL ENSAYO,
+   *     y la razón es la foto de producción del 18-10: Cafetería Sirope
+   *     tenía 20 tickets `VOIDED` de la demostración y de las pruebas. En
+   *     una cuenta EN ENSAYO nada es real por definición —no puede haber
+   *     una factura detrás, el bloque entero existe para eso—, así que un
+   *     reseteo que sólo se lleva los `TEST` deja la cuenta medio sucia:
+   *     anuladas en el arqueo, borradores en la sala, y el cliente
+   *     encontrándoselos el día que empieza.
    *
-   * Default `false` — el comportamiento de siempre.
+   * Quien pide `"todos"` tiene que haber comprobado ANTES que ninguno es
+   * real (`comprobarQueNadaEsReal`, en `fiscal/puesta-en-marcha.ts`). Esta
+   * función no lo comprueba: borra lo que se le pide.
    */
-  incluirBorradores?: boolean;
+  estados?: "todos";
   /**
    * puesta-en-marcha (ADR-021) · ¿se lleva por delante al cajero técnico y
    * su terminal de prueba?
@@ -331,7 +345,7 @@ export async function purgeTestData(
   tenantId: string,
   opts: PurgeTestDataOptions = {},
 ): Promise<PurgeTestDataResult> {
-  const incluirBorradores = opts.incluirBorradores === true;
+  const todosLosEstados = opts.estados === "todos";
   const incluirCajeroTecnico = opts.incluirCajeroTecnico !== false;
   // 1. Locating cashier técnico (puede no existir si la activación
   //    sucede sin haberse provisionado nunca).
@@ -360,14 +374,24 @@ export async function purgeTestData(
   // Se borran por TENANT y no por ticket: en una cuenta en ensayo no hay
   // ninguna venta real, así que no hay ningún abono real. Y en la
   // activación (DRAFT, sin propietario todavía) tampoco.
-  const estadosABorrar = incluirBorradores
-    ? [TicketStatus.TEST, TicketStatus.DRAFT]
-    : [TicketStatus.TEST];
-  const ticketsTest = await prisma.ticket.findMany({
-    where: { tenantId, status: { in: estadosABorrar } },
+  //
+  // puesta-en-marcha (ADR-021) · `estados: "todos"` quita el filtro entero.
+  // El `where` se construye UNA vez y lo comparten el recuento, el borrado de
+  // lo que cuelga y el borrado de los tickets: si se escribieran por separado
+  // acabarían diciendo cosas distintas el día que alguien toque uno.
+  const where = todosLosEstados
+    ? { tenantId }
+    : { tenantId, status: TicketStatus.TEST };
+  const aBorrar = await prisma.ticket.findMany({
+    where,
     select: { id: true, status: true },
   });
-  const ticketIds = ticketsTest.map((t) => t.id);
+  const ticketIds = aBorrar.map((t) => t.id);
+  // El desglose POR ESTADO, antes de borrar: después no se puede contar.
+  const porEstado = new Map<string, number>();
+  for (const t of aBorrar) {
+    porEstado.set(t.status, (porEstado.get(t.status) ?? 0) + 1);
+  }
   const refundsRes = await prisma.refund.deleteMany({
     where: { tenantId, originalTicketId: { in: ticketIds } },
   });
@@ -378,14 +402,7 @@ export async function purgeTestData(
     });
     emailJobsPurged = emailRes.count;
   }
-  const ticketsRes = await prisma.ticket.deleteMany({
-    where: { tenantId, status: TicketStatus.TEST },
-  });
-  const borradoresRes = incluirBorradores
-    ? await prisma.ticket.deleteMany({
-        where: { tenantId, status: TicketStatus.DRAFT },
-      })
-    : { count: 0 };
+  const ticketsRes = await prisma.ticket.deleteMany({ where });
 
   // 3. Cashier técnico · soft-delete + bumpea tokenVersion para
   //    invalidar JWTs vivos. Su Shift queda cerrado.
@@ -422,11 +439,17 @@ export async function purgeTestData(
     : { count: 0 };
 
   return {
-    ticketsTestPurged: ticketsRes.count,
+    // `ticketsTestPurged` sigue significando lo que significaba —los `TEST`—
+    // porque es lo que lee el audit de la activación. El total va aparte.
+    ticketsTestPurged: porEstado.get(TicketStatus.TEST) ?? 0,
     emailJobsPurged,
     cashierDeleted,
     deviceRevoked: deviceRes.count > 0,
     refundsPurged: refundsRes.count,
-    borradoresPurged: borradoresRes.count,
+    borradoresPurged: porEstado.get(TicketStatus.DRAFT) ?? 0,
+    ticketsPorEstado: [...porEstado.entries()]
+      .map(([estado, cuantos]) => ({ estado, cuantos }))
+      .sort((a, b) => a.estado.localeCompare(b.estado)),
+    ticketsPurgedTotal: ticketsRes.count,
   };
 }

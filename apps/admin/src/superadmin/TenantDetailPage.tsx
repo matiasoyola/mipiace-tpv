@@ -816,8 +816,11 @@ export function TenantDetailPage() {
           onCerrar={() => setPuestaEnMarcha(false)}
           onReseteado={(r: ResetearEnsayoResultado) => {
             setActionMessage(
-              `Ensayo reseteado: ${r.ticketsBorrados} ticket(s) de prueba, ` +
-                `${r.borradoresBorrados} borrador(es) y ${r.turnosBorrados} turno(s). ` +
+              `Ensayo reseteado: ${r.ticketsBorrados} ticket(s) en total (` +
+                r.ticketsPorEstado
+                  .map((p) => `${p.cuantos} ${p.estado}`)
+                  .join(", ") +
+                `) y ${r.turnosBorrados} turno(s). ` +
                 "El catálogo, la sala, los cajeros y los terminales siguen como estaban.",
             );
             void reload();

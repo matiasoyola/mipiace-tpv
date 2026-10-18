@@ -49,10 +49,135 @@ export interface Bloqueo {
   mensaje: string;
 }
 
+/**
+ * Una venta de una cuenta en ensayo que NO es de ensayo, con el motivo por
+ * el que no lo es.
+ *
+ * En una cuenta en ensayo no puede haber ninguna: es la invariante del
+ * bloque entero. Si aparece una, es que algo la metió por un camino que no
+ * debería existir —una migración a mano, un despliegue a medias, una cuenta
+ * que facturó y a la que alguien le quitó la fecha— y **el reseteo se para
+ * en seco**: borrarla sería borrar una venta que llegó a la contabilidad de
+ * alguien.
+ */
+export interface VentaQueNoEsDeEnsayo {
+  ticketId: string;
+  internalNumber: string;
+  estado: string;
+  /** `HOLDED`: llegó a Holded y existe allí un documento con su número.
+   *  `REGISTRO_FISCAL`: tiene factura emitida por nosotros. */
+  motivo: "HOLDED" | "REGISTRO_FISCAL";
+  holdedDocumentId: string | null;
+  numSerieFactura: string | null;
+}
+
+/**
+ * ¿Hay en esta cuenta alguna venta que no sea de ensayo?
+ *
+ * Dos señales, y cualquiera de las dos basta:
+ *
+ *   · `holded_document_id` — el worker de subida lo escribe cuando Holded
+ *     CREA el documento. Si está, existió una factura con número en la
+ *     contabilidad del cliente, y eso no se deshace borrando el ticket aquí.
+ *     Es la misma señal con la que el backfill de la migración decide qué es
+ *     una venta real (regla 3.b), y por la misma razón.
+ *   · un `fiscal_record` colgando del ticket — factura emitida por nosotros.
+ *     La base ya lo impediría (la FK es `RESTRICT` y el trigger
+ *     `tickets_fiscal_link_guard` lanza), pero un 500 con un mensaje de
+ *     clave ajena no le dice a nadie QUÉ ticket mirar.
+ *
+ * Lo que NO se mira: el estado. `VOIDED`, `PAID`, `SYNCED` o `TEST` dan
+ * igual — la foto de producción del 18-10 enseñó por qué: Cafetería Sirope
+ * tenía 20 anuladas, ninguna en Holded, y no ha vendido nunca. El estado
+ * dice cómo acabó el ticket, no si fue real.
+ */
+export async function comprobarQueNadaEsReal(
+  tx: Tx,
+  tenantId: string,
+): Promise<VentaQueNoEsDeEnsayo[]> {
+  const conHolded = await tx.ticket.findMany({
+    where: { tenantId, holdedDocumentId: { not: null } },
+    orderBy: { createdAt: "asc" },
+    take: 50,
+    select: {
+      id: true,
+      internalNumber: true,
+      status: true,
+      holdedDocumentId: true,
+    },
+  });
+  const conRegistro = await tx.fiscalRecord.findMany({
+    where: { tenantId, ticketId: { not: null } },
+    orderBy: { chainIndex: "asc" },
+    take: 50,
+    select: {
+      ticketId: true,
+      numSerieFactura: true,
+      ticket: { select: { internalNumber: true, status: true } },
+    },
+  });
+
+  const vistos = new Set<string>();
+  const ventas: VentaQueNoEsDeEnsayo[] = [];
+  for (const t of conHolded) {
+    vistos.add(t.id);
+    ventas.push({
+      ticketId: t.id,
+      internalNumber: t.internalNumber,
+      estado: t.status,
+      motivo: "HOLDED",
+      holdedDocumentId: t.holdedDocumentId,
+      numSerieFactura: null,
+    });
+  }
+  for (const r of conRegistro) {
+    if (r.ticketId == null || vistos.has(r.ticketId)) continue;
+    ventas.push({
+      ticketId: r.ticketId,
+      internalNumber: r.ticket?.internalNumber ?? "(sin referencia)",
+      estado: r.ticket?.status ?? "(desconocido)",
+      motivo: "REGISTRO_FISCAL",
+      holdedDocumentId: null,
+      numSerieFactura: r.numSerieFactura,
+    });
+  }
+  return ventas;
+}
+
+/** El texto de un bloqueo con las ventas que no son de ensayo dentro.
+ *  Vive aquí para que la previsualización y el error de la ejecución digan
+ *  LO MISMO. */
+export function mensajeDeVentasQueNoSonDeEnsayo(
+  ventas: VentaQueNoEsDeEnsayo[],
+): string {
+  const detalle = ventas
+    .slice(0, 10)
+    .map((v) =>
+      v.motivo === "HOLDED"
+        ? `${v.internalNumber} (${v.estado}) · documento de Holded ${v.holdedDocumentId}`
+        : `${v.internalNumber} (${v.estado}) · factura ${v.numSerieFactura}`,
+    )
+    .join("; ");
+  const mas = ventas.length > 10 ? ` …y ${ventas.length - 10} más` : "";
+  return (
+    `Esta cuenta está en ensayo y tiene ${ventas.length} venta(s) que NO son de ensayo: ${detalle}${mas}. ` +
+    "No se borra nada hasta saber de dónde salieron: una venta que llegó a Holded o que tiene factura emitida " +
+    "existe en la contabilidad de alguien, y borrarla aquí no la deshace."
+  );
+}
+
 /** La foto del ensayo: qué hay ahora mismo de lo que el reseteo borra. */
 export interface FotoDelEnsayo {
   ticketsDeEnsayo: number;
   borradores: number;
+  /** puesta-en-marcha (ADR-021) · TODOS los tickets de la cuenta, uno por
+   *  estado. El reseteo se los lleva todos —en una cuenta en ensayo nada es
+   *  real—, así que la pantalla tiene que enseñarlos todos: «20 anuladas» no
+   *  se lee igual que «3 de ensayo», y con el desglose delante nadie pulsa
+   *  sin saber qué se va. */
+  ticketsPorEstado: Array<{ estado: string; cuantos: number }>;
+  /** La suma. Es el número que de verdad se borra. */
+  ticketsTotales: number;
   devoluciones: number;
   turnos: number;
   turnosAbiertos: number;
@@ -103,6 +228,9 @@ export interface PrevisualizacionPuestaEnMarcha {
   conserva: LoQueSeConserva;
   cajas: CajaDeLaPuestaEnMarcha[];
   suelo: SueloFiscal;
+  /** puesta-en-marcha (ADR-021) · lo que no puede estar aquí. Vacío siempre,
+   *  salvo que algo haya metido una venta real en una cuenta en ensayo. */
+  ventasQueNoSonDeEnsayo: VentaQueNoEsDeEnsayo[];
   puedeResetear: boolean;
   puedeArrancar: boolean;
   bloqueos: Bloqueo[];
@@ -194,6 +322,24 @@ export async function previsualizarPuestaEnMarcha(
     tx.contact.count({ where: { tenantId } }),
   ]);
 
+  // puesta-en-marcha (ADR-021) · TODOS los tickets, por estado. El reseteo
+  // se los lleva todos, así que la pantalla no puede enseñar sólo los `TEST`:
+  // en Sirope eso habría dicho «3 tickets de ensayo» y se habrían borrado 23.
+  const porEstado = await tx.ticket.groupBy({
+    by: ["status"],
+    where: { tenantId },
+    _count: { _all: true },
+  });
+  const ticketsPorEstado = porEstado
+    .map((p) => ({ estado: String(p.status), cuantos: p._count._all }))
+    .sort((a, b) => a.estado.localeCompare(b.estado));
+  const ticketsTotales = ticketsPorEstado.reduce((n, p) => n + p.cuantos, 0);
+
+  // Y lo que NO puede estar aquí.
+  const ventasQueNoSonDeEnsayo = ensayo
+    ? await comprobarQueNadaEsReal(tx, tenantId)
+    : [];
+
   const registrosPorCaja = await tx.fiscalRecord.groupBy({
     by: ["registerId"],
     where: { tenantId },
@@ -265,6 +411,17 @@ export async function previsualizarPuestaEnMarcha(
   for (const p of suelo.problemas) {
     bloqueos.push({ codigo: "DATOS_FISCALES", mensaje: p });
   }
+  // puesta-en-marcha (ADR-021) · bloquea las DOS acciones, y por motivos
+  // distintos: resetear borraría una venta que existe en la contabilidad de
+  // alguien, y arrancar resetea antes de fijar la fecha, así que haría lo
+  // mismo. La lista entera va en el mensaje: lo que hay que mirar es de
+  // dónde salió cada una.
+  if (ventasQueNoSonDeEnsayo.length > 0) {
+    bloqueos.push({
+      codigo: "VENTA_REAL_EN_ENSAYO",
+      mensaje: mensajeDeVentasQueNoSonDeEnsayo(ventasQueNoSonDeEnsayo),
+    });
+  }
   // Al menos un terminal emparejado. No es burocracia: el registro de
   // facturación LO GENERA EL TERMINAL (ADR-019), así que arrancar una cuenta
   // sin ninguno es dejarla facturando sin nadie que pueda emitir.
@@ -288,6 +445,8 @@ export async function previsualizarPuestaEnMarcha(
     ensayo: {
       ticketsDeEnsayo,
       borradores,
+      ticketsPorEstado,
+      ticketsTotales,
       devoluciones,
       turnos,
       turnosAbiertos,
@@ -311,7 +470,10 @@ export async function previsualizarPuestaEnMarcha(
     },
     cajas,
     suelo,
-    puedeResetear: ensayo,
+    ventasQueNoSonDeEnsayo,
+    // Resetear se puede mientras la cuenta esté en ensayo Y no haya nada
+    // real dentro. Lo segundo es la puerta nueva del 18-10.
+    puedeResetear: ensayo && ventasQueNoSonDeEnsayo.length === 0,
     puedeArrancar: bloqueos.length === 0,
     bloqueos,
   };
@@ -339,6 +501,15 @@ export class TenantFacturandoError extends Error {
   }
 }
 
+/** El reseteo se para: hay dentro una venta que no es de ensayo. Lleva la
+ *  lista para que la pantalla diga CUÁL, no «no se puede». */
+export class EnsayoConVentaRealError extends Error {
+  constructor(public readonly ventas: VentaQueNoEsDeEnsayo[]) {
+    super(mensajeDeVentasQueNoSonDeEnsayo(ventas));
+    this.name = "EnsayoConVentaRealError";
+  }
+}
+
 export class ArranqueBloqueadoError extends Error {
   constructor(public readonly bloqueos: Bloqueo[]) {
     super(`arranque bloqueado: ${bloqueos.map((b) => b.codigo).join(", ")}`);
@@ -351,7 +522,13 @@ export class ArranqueBloqueadoError extends Error {
 // ══════════════════════════════════════════════════════════════════════
 
 export interface ResultadoReseteo {
+  /** Todos los tickets, cualquiera que fuera su estado. */
   ticketsBorrados: number;
+  /** Cuántos de cada estado. Después de borrarlos no se puede volver a
+   *  contar, así que es lo que va al audit. */
+  ticketsPorEstado: Array<{ estado: string; cuantos: number }>;
+  /** Los `TEST`, aparte, porque es lo que el audit de la activación lee. */
+  ticketsDeEnsayoBorrados: number;
   borradoresBorrados: number;
   devolucionesBorradas: number;
   emailsBorrados: number;
@@ -424,8 +601,25 @@ async function borrarElEnsayo(
   tx: Prisma.TransactionClient,
   tenantId: string,
 ): Promise<ResultadoReseteo> {
+  // LA PUERTA, y va LO PRIMERO: antes de borrar una sola fila.
+  //
+  // En una cuenta en ensayo nada es real —esa es la invariante del bloque—,
+  // así que el reseteo se lleva TODOS los tickets y no sólo los `TEST`. Lo
+  // enseñó la foto de producción del 18-10: Cafetería Sirope tenía 20
+  // anuladas de la demostración y de las pruebas, y un reseteo que sólo mira
+  // los `TEST` se las habría dejado dentro — en el arqueo del cliente el día
+  // que empieza.
+  //
+  // Y si la invariante estuviera rota (una venta que llegó a Holded, una con
+  // factura emitida), no se borra NADA y se dice cuál. Es un 409, no un 500:
+  // la base lo pararía igual por la FK, pero hablando de una clave ajena.
+  const ventas = await comprobarQueNadaEsReal(tx, tenantId);
+  if (ventas.length > 0) throw new EnsayoConVentaRealError(ventas);
+
   const purga = await purgeTestData(tx, tenantId, {
-    incluirBorradores: true,
+    // TODOS los estados. Ver la nota de arriba y la de
+    // `PurgeTestDataOptions`.
+    estados: "todos",
     // Resetear CONSERVA los cajeros, y el técnico es uno. Ver la nota de
     // `PurgeTestDataOptions`.
     incluirCajeroTecnico: false,
@@ -463,7 +657,9 @@ async function borrarElEnsayo(
   const subidas = await tx.holdedUpload.deleteMany({ where: { tenantId } });
 
   return {
-    ticketsBorrados: purga.ticketsTestPurged,
+    ticketsBorrados: purga.ticketsPurgedTotal,
+    ticketsPorEstado: purga.ticketsPorEstado,
+    ticketsDeEnsayoBorrados: purga.ticketsTestPurged,
     borradoresBorrados: purga.borradoresPurged,
     devolucionesBorradas: purga.refundsPurged,
     emailsBorrados: purga.emailJobsPurged,

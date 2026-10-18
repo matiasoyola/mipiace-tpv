@@ -40,6 +40,21 @@ import type {
   ResetearEnsayoResultado,
 } from "./types.js";
 
+// Los estados del ticket en cristiano. El reseteo los borra todos, así que
+// la pantalla tiene que poder nombrarlos todos — incluidos los que en una
+// cuenta en ensayo no deberían existir (`PAID`, `SYNCED`), que si aparecen
+// son justo lo que hay que mirar.
+const ETIQUETA_ESTADO: Record<string, string> = {
+  TEST: "de ensayo",
+  DRAFT: "borradores (mesas abiertas)",
+  VOIDED: "anulados",
+  PAID: "cobrados",
+  PENDING_SYNC: "cobrados, pendientes de subir",
+  SYNCED: "cobrados y subidos a Holded",
+  SYNC_FAILED: "cobrados, con la subida fallida",
+  ON_CREDIT: "fiados con deuda viva",
+};
+
 function fechaCorta(iso: string): string {
   const d = new Date(iso);
   const p = (n: number) => String(n).padStart(2, "0");
@@ -221,7 +236,9 @@ export function PuestaEnMarchaPanel({
             >
               <p className="flex items-center gap-2 font-semibold text-red-900 text-[13px] mb-2">
                 <AlertTriangle className="w-4 h-4 shrink-0" />
-                Todavía no puede empezar a facturar
+                {bloqueos.some((b) => b.codigo === "VENTA_REAL_EN_ENSAYO")
+                  ? "Aquí hay algo que no debería estar"
+                  : "Todavía no puede empezar a facturar"}
               </p>
               <ul className="space-y-2">
                 {bloqueos.map((b, i) => (
@@ -236,17 +253,26 @@ export function PuestaEnMarchaPanel({
           {/* ── Lo que se borra ────────────────────────────────────── */}
           <Seccion titulo="Lo que borra el reseteo">
             <Dato
-              etiqueta="Tickets de ensayo"
-              valor={`${previa.ensayo.ticketsDeEnsayo}`}
-              detalle="Con sus líneas, sus pagos, sus comandas de cocina y sus envíos de email."
+              etiqueta="TODOS los tickets de la cuenta"
+              valor={`${previa.ensayo.ticketsTotales}`}
+              detalle="Con sus líneas, sus pagos, sus comandas de cocina y sus envíos de email. En una cuenta en ensayo no hay ninguna venta real: por eso se van todos y no sólo los de prueba."
+              tono={previa.ensayo.ticketsTotales > 0 ? "warning" : "neutral"}
             />
+            {/* El desglose POR ESTADO, que es lo que hace que nadie pulse sin
+                saber qué se va: «20 anuladas» no se lee igual que «3 de
+                ensayo». Lo enseñó la foto de producción del 18-10. */}
+            {previa.ensayo.ticketsPorEstado.length > 0 && (
+              <ul className="text-[11.5px] text-slate-600 font-mono space-y-0.5 pl-1">
+                {previa.ensayo.ticketsPorEstado.map((p) => (
+                  <li key={p.estado} className="flex justify-between gap-3">
+                    <span>{ETIQUETA_ESTADO[p.estado] ?? p.estado}</span>
+                    <span className="tabular-nums">{p.cuantos}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
             <Dato
-              etiqueta="Mesas abiertas y borradores"
-              valor={`${previa.ensayo.borradores}`}
-              detalle="Una mesa a medio comandar de la demostración no puede encontrársela el cliente."
-            />
-            <Dato
-              etiqueta="Devoluciones de ensayo"
+              etiqueta="Devoluciones"
               valor={`${previa.ensayo.devoluciones}`}
             />
             <Dato
@@ -345,7 +371,9 @@ export function PuestaEnMarchaPanel({
               <div className="flex flex-wrap gap-2 mb-5">
                 <button
                   onClick={() => void resetear()}
-                  disabled={!nombreOk || enviando != null}
+                  disabled={
+                    !nombreOk || enviando != null || previa.puedeResetear !== true
+                  }
                   data-testid="puesta-en-marcha-resetear"
                   className="inline-flex items-center gap-1.5 h-11 px-4 rounded-lg text-[13px] font-medium bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
