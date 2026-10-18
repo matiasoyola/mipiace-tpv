@@ -273,6 +273,10 @@ export async function construirParte(
       where: { tenantId, toAt: null },
       select: {
         clientId: true,
+        // residencia-6 · DESDE CUÁNDO ocupa la cama. Lo necesita la línea
+        // de «sin plan de cuidados»: a quien no había ingresado todavía no
+        // se le reprocha no tener plan (ver §«los residentes sin plan»).
+        fromAt: true,
         client: { select: { firstName: true, lastName: true } },
         bed: { select: { room: { select: { number: true, floorId: true } } } },
       },
@@ -440,6 +444,8 @@ export async function construirParte(
         nombre: `${o.client.firstName} ${o.client.lastName}`.trim(),
         habitacion: o.bed.room.number,
         floorId: o.bed.room.floorId as string | null,
+        /** residencia-6 · desde cuándo ocupa la cama. */
+        desde: o.fromAt,
       },
     ]),
   );
@@ -705,18 +711,31 @@ export async function construirParte(
   // Va en las SUELTAS de la zona y no colgando de cada residente: colgada
   // de cada uno serían otra vez N líneas, que es lo que se viene a
   // quitar.
+  // «Vigente» es **en el corte**, no «que haya solapado el turno»: a una
+  // residente a la que le retiraron todas las líneas a mitad del turno,
+  // lo que el turno entrante tiene que saber es que ahora no le toca
+  // nada. Con el solape, el parte del turno en que se le retiró el plan
+  // se callaría justo el día que hay que arreglarlo.
   const conPlanVivo = new Set(
     plan
       .filter(
         (l) =>
-          l.fromAt.getTime() < tope.getTime() &&
-          (l.toAt == null || l.toAt.getTime() > desde.getTime()),
+          l.fromAt.getTime() <= tope.getTime() &&
+          (l.toAt == null || l.toAt.getTime() > tope.getTime()),
       )
       .map((l) => l.clientId),
   );
   const sinPlanPorZona = new Map<string | null, string[]>();
   for (const [clientId, r] of residentes) {
     if (conPlanVivo.has(clientId)) continue;
+    // **Y no se le reprocha a quien todavía no estaba.** La ocupación se
+    // lee VIGENTE (ver la consulta: es deliberado, un cambio de
+    // habitación no mueve los partes de la semana pasada), así que el
+    // parte de un día anterior al ingreso lista a los residentes de hoy.
+    // Sin esta línea, el parte de un turno de hace tres meses diría «2
+    // residentes sin plan de cuidados» — que es verdad y no significa
+    // nada, porque entonces no vivían aquí.
+    if (r.desde.getTime() > tope.getTime()) continue;
     const ya = sinPlanPorZona.get(r.floorId) ?? [];
     ya.push(`${r.nombre} (${r.habitacion})`);
     sinPlanPorZona.set(r.floorId, ya);
