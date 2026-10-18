@@ -104,7 +104,13 @@ export type ClaseDeFichero =
    *  más que alguien tiene que acordarse de hacer. */
   | "EVIDENCIA";
 
-const CARPETA: Record<ClaseDeFichero, string> = {
+/** Qué carpeta le toca a cada clase.
+ *
+ *  residencia-6 · **exportado** para el barrido de huérfanos
+ *  (`barrer-huerfanos.ts`), que tiene que recorrer el volumen carpeta a
+ *  carpeta y cruzarlo con la base. Se exporta esto y no una lista de
+ *  rutas: la raíz la decide `loadEnv()` y el barrido ya la lee. */
+export const CARPETA_DE_LA_CLASE: Record<ClaseDeFichero, string> = {
   FOTO: "fotos",
   CONSENTIMIENTO: "consentimientos",
   INFORME: "informes",
@@ -112,6 +118,8 @@ const CARPETA: Record<ClaseDeFichero, string> = {
   VOZ: "voz",
   EVIDENCIA: "evidencias",
 };
+
+const CARPETA = CARPETA_DE_LA_CLASE;
 
 const EXTENSION: Record<ClaseDeFichero, string> = {
   FOTO: "jpg",
