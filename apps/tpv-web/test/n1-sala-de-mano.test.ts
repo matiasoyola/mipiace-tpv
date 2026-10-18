@@ -25,6 +25,7 @@ import {
   REPARTO_MANO,
   REPARTO_TERMINAL,
   repartoDeSala,
+  mesasALaVistaDeMano,
   roomAvailableHeightDark,
   roomAvailableWidthDark,
   roomCanvasHeight,
@@ -44,11 +45,20 @@ const AP11 = { w: 1280, h: 800 };
 /** El D8 de Sirope. */
 const D8 = { w: 1442, h: 811 };
 
-/** La sala de Sirope: barra, salón y terraza. */
+/**
+ * La sala de Sirope, **contada en producción el 18-10-2026**: BARRA 8,
+ * SALÓN 7, TERRAZA 8 = 23 mesas, ninguna agrupada. En el orden en que
+ * las pinta el lienzo (`ZONE_ORDER`, Barra primero).
+ *
+ * El 3 + 6 + 4 que había aquí eran 13 y no cuadraban con la pasada del
+ * 18-10, que midió 23 sobre la cuenta real (hallazgo 1). Las
+ * conclusiones de #13 no cambian: en el D8 sigue eligiendo 152, que es
+ * lo que este banco afirma.
+ */
 const SIROPE: RoomZone[] = [
-  { tables: 3, isBar: true },
-  { tables: 6 },
-  { tables: 4 },
+  { tables: 8, isBar: true },
+  { tables: 7 },
+  { tables: 8 },
 ];
 /** La Maestranza, que es el caso que fijó el 144. */
 const MAESTRANZA: RoomZone[] = [
@@ -116,6 +126,27 @@ describe("n1-hosteleria · tres mesas por fila a 360", () => {
     );
   });
 
+  it("con «Todas» y las 23 de Sirope se ven al menos NUEVE", () => {
+    // El criterio de cierre del §1. La pasada del 18-10 midió TRES.
+    const vistas = mesasALaVistaDeMano(
+      SIROPE,
+      roomAvailableWidthDark(N1.w, REPARTO_MANO),
+      roomAvailableHeightDark(N1.h, REPARTO_MANO),
+    );
+    expect(vistas).toBeGreaterThanOrEqual(9);
+  });
+
+  it("SABOTAJE · con la mesa de 144 se ven menos de nueve", () => {
+    // Es el estado que midió la pasada: 144 px y tres mesas.
+    const vistas = mesasALaVistaDeMano(
+      SIROPE,
+      roomAvailableWidthDark(N1.w, REPARTO_MANO),
+      roomAvailableHeightDark(N1.h, REPARTO_MANO),
+      TABLE_SHAPE_SIZE,
+    );
+    expect(vistas).toBeLessThan(9);
+  });
+
   it("con el chip de una zona, esa zona entra en la primera pantalla", () => {
     const anchoUtil = roomAvailableWidthDark(N1.w, REPARTO_MANO);
     const altoUtil = roomAvailableHeightDark(N1.h, REPARTO_MANO);
@@ -128,6 +159,10 @@ describe("n1-hosteleria · tres mesas por fila a 360", () => {
         REPARTO_MANO.zonePadding,
       );
       expect(alto).toBeLessThanOrEqual(altoUtil);
+      // Y no sólo cabe el lienzo: se ven TODAS sus mesas.
+      expect(
+        mesasALaVistaDeMano([zona], anchoUtil, altoUtil),
+      ).toBe(zona.tables);
     }
   });
 });

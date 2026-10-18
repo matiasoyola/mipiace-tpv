@@ -687,3 +687,46 @@ export const REPARTO_MANO: RepartoDeSala = {
 export function repartoDeSala(deMano: boolean): RepartoDeSala {
   return deMano ? REPARTO_MANO : REPARTO_TERMINAL;
 }
+
+/**
+ * Cuántas mesas se ven SIN DESPLAZAR en un aparato de mano.
+ *
+ * Es el criterio de cierre del §1 del bloque —«con "Todas" y las 23
+ * mesas de Sirope, al menos 9 a la vista»— escrito como aritmética para
+ * que lo mida un banco y no sólo el navegador.
+ *
+ * Modela el reparto de MANO, que es el único en el que la pregunta tiene
+ * sentido: por debajo de `sm` el lienzo es `flex flex-col` y las zonas se
+ * apilan una debajo de otra (en el terminal es `sm:flex-row
+ * sm:flex-wrap` y lo que limita es el ancho, no el alto). Recorre las
+ * zonas en el orden en que se pintan —`ZONE_ORDER`, Barra primero— y
+ * cuenta fila a fila hasta que una no cabe entera.
+ *
+ * Una fila cuenta sólo si cabe COMPLETA: media mesa asomando por abajo
+ * no es una mesa que el camarero vea y toque.
+ */
+export function mesasALaVistaDeMano(
+  zones: RoomZone[],
+  availableWidth: number,
+  availableHeight: number,
+  cardSize: number = TABLE_SHAPE_MIN_MANO,
+  zonePadding: number = ZONE_PADDING_MANO,
+): number {
+  const maxColumns = roomColumnsFor(availableWidth - 2 * zonePadding, cardSize);
+  let y = 0;
+  let vistas = 0;
+  for (const zone of zones) {
+    const columns = Math.max(1, Math.min(zone.tables, maxColumns));
+    const rows = Math.max(1, Math.ceil(zone.tables / columns));
+    // Lo que la zona mete por encima de su primera fila de mesas.
+    const chrome =
+      2 * zonePadding + ZONE_BORDER + (zone.isBar ? BAR_COUNTER_HEIGHT : 0);
+    for (let r = 0; r < rows; r += 1) {
+      const bottom = y + chrome + (r + 1) * cardSize + r * ROOM_GRID_GAP;
+      if (bottom > availableHeight) return vistas;
+      vistas += Math.min(columns, zone.tables - r * columns);
+    }
+    y += chrome + rows * cardSize + (rows - 1) * ROOM_GRID_GAP + ZONE_GAP;
+  }
+  return vistas;
+}
