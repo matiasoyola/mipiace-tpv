@@ -33,6 +33,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError, apiConGuardia, apiWithDevice } from "../api.js";
 import { getDeviceToken } from "../storage.js";
+import {
+  alarmaDisponible,
+  empezarLaAlarma,
+  pararLaAlarma,
+  permisoDeAlarma,
+} from "../platform/GuardiaAlarma.js";
 import type { GuardiaMeResponse } from "../hooks/useDeviceBootstrap.js";
 import {
   guardarSesionDeGuardia,
@@ -69,7 +75,15 @@ export function GuardiaApp({ me, onRefresh }: GuardiaAppProps) {
   const [avisos, setAvisos] = useState<AvisoDeGuardia[]>([]);
   const [servicio, setServicio] = useState(me.servicio);
   const [hayRed, setHayRed] = useState(() => navigator.onLine);
+  /** `null` = en navegador (no hay APK debajo). `false` = Android 13+ con
+   *  el permiso de notificaciones denegado: el servicio corre pero el
+   *  móvil no sonará con la pantalla apagada, y eso hay que decirlo. */
+  const [puedeSonar, setPuedeSonar] = useState<boolean | null>(null);
   const socket = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    void permisoDeAlarma().then(setPuedeSonar);
+  }, []);
 
   // Con una guardia guardada se entra directo a la lista: la app se va a
   // segundo plano cien veces en un turno y volver a pedir el PIN cada vez
@@ -226,6 +240,25 @@ export function GuardiaApp({ me, onRefresh }: GuardiaAppProps) {
         setSesion(s);
         setEligiendoRol(null);
         setVista({ v: "avisos" });
+        // ── Y EL SERVICIO QUE HACE QUE SUENE DE VERDAD ─────────────
+        //
+        // Se enciende AQUÍ y no al arrancar la app: hasta que alguien se
+        // pone de guardia no hay nada que sondear, y un servicio en
+        // primer plano con una notificación permanente que dice «de
+        // guardia» cuando no lo está nadie es una mentira en la barra.
+        //
+        // No se espera a que conteste para pintar la lista: que el
+        // servicio no arranque no puede impedir ponerse de guardia.
+        const alarma = await empezarLaAlarma({
+          apiBase:
+            (import.meta as unknown as { env?: { VITE_API_URL?: string } }).env
+              ?.VITE_API_URL ?? "/api",
+          deviceToken: getDeviceToken() ?? "",
+          sesion: s.token,
+          canal: s.canal,
+          quien: s.nombre,
+        });
+        if (alarma) setPuedeSonar(alarma.permisoDeNotificaciones);
         onRefresh();
       } catch (err) {
         // **Sin camino local.** Al revés que la puerta, que resuelve el
@@ -253,6 +286,7 @@ export function GuardiaApp({ me, onRefresh }: GuardiaAppProps) {
          cuando el siguiente coja el aparato (el índice parcial
          `guard_shift_sessions_una_viva_key` lo garantiza). */
     }
+    await pararLaAlarma();
     olvidarGuardia();
     setSesion(null);
     setAvisos([]);
@@ -335,6 +369,30 @@ export function GuardiaApp({ me, onRefresh }: GuardiaAppProps) {
           className="bg-amber-100 text-amber-900 px-6 py-4 text-[20px]"
         >
           Sin conexión. <strong>Este móvil no está recibiendo avisos.</strong>
+        </p>
+      )}
+
+      {/* El permiso de notificaciones, denegado. Se dice ANTES de que
+          alguien se ponga de guardia, porque descubrirlo en un turno de
+          noche es descubrirlo tarde. */}
+      {puedeSonar === false && (
+        <p
+          role="alert"
+          className="bg-red-100 text-red-900 px-6 py-4 text-[20px]"
+        >
+          Este móvil tiene las notificaciones desactivadas:{" "}
+          <strong>no sonará con la pantalla apagada.</strong> Actívalas en los
+          ajustes del teléfono.
+        </p>
+      )}
+
+      {/* Y en navegador, lo mismo por el otro lado: esta pantalla vale
+          para probar el flujo, no para cubrir un turno. */}
+      {puedeSonar === null && !alarmaDisponible() && (
+        <p className="bg-slate-200 text-slate-700 px-6 py-3 text-[18px]">
+          Estás en el navegador: los avisos se ven mientras esta pantalla
+          esté delante. Para que suene con el móvil guardado hace falta la
+          app.
         </p>
       )}
 
