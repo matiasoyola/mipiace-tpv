@@ -631,4 +631,6 @@ Los cuatro e2e sembraban `version: 1` escrito a mano; ahora siembran
 - Fase A completa, con la suite y el e2e en verde y la tabla de sabotajes
   ejecutada (§3).
 - **Fase B sin empezar**, como pide el prompt.
-- Push y PR: autorizados por el prompt. Ni merge ni despliegue.
+- **Pusheada**, y el PR contra `master` es el
+  [**#36**](https://github.com/matiasoyola/mipiace-tpv/pull/36).
+- Ni merge ni despliegue: eso es de Dirección.
