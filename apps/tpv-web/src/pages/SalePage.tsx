@@ -3574,7 +3574,7 @@ export function SalePage(props: SalePageProps) {
             drawerOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
-          <div className="mb-7 flex items-center justify-between">
+          <div className="mb-7 flex shrink-0 items-center justify-between">
             <Logo size={28} />
             <button
               type="button"
@@ -3586,7 +3586,24 @@ export function SalePage(props: SalePageProps) {
               <X className="w-4 h-4" strokeWidth={2.1} />
             </button>
           </div>
-          <nav className="space-y-1.5">
+          {/* n1-vertical · LA LISTA DEL CAJÓN SE DESPLAZA SOLA.
+              El `aside` es `flex flex-col` de alto completo, pero la
+              lista no tenía ni `flex-1` ni `overflow`: en el N1 (viewport
+              de 360×648) «Declaración responsable» quedaba en y=354,
+              fuera de pantalla y sin forma de llegar a ella, y al
+              deslizar se movía la pantalla de venta de detrás (capturas
+              `23-menu` y `24-menu-scroll`).
+
+              `min-h-0` es imprescindible junto a `flex-1`: sin él el
+              mínimo de contenido de un hijo flex es su alto intrínseco,
+              así que la lista desborda el cajón y `overflow-y-auto` no
+              tiene nada que recortar.
+
+              `overscroll-contain` es la otra mitad del hallazgo: sin él,
+              al llegar al final de la lista el gesto sigue hacia la
+              página de detrás (scroll chaining), que es exactamente lo
+              que se vio. */}
+          <nav className="flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-1.5">
             <button
               onClick={() => setDrawerOpen(false)}
               title={vocab("saleNoun", businessType)}
@@ -3759,7 +3776,7 @@ export function SalePage(props: SalePageProps) {
           {/* A3-distribución · Frente 2. `select-all` para que en soporte
               baste un toque para seleccionarlo y leerlo por teléfono. */}
           {versionLabel ? (
-            <p className="mt-auto pt-4 text-[11.5px] leading-tight text-slate-400 tabular-nums select-all">
+            <p className="mt-auto shrink-0 pt-4 text-[11.5px] leading-tight text-slate-400 tabular-nums select-all">
               {versionLabel}
             </p>
           ) : null}
