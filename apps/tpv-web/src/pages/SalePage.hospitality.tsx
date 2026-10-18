@@ -57,6 +57,7 @@ import {
   FAMILY_BAR_COLUMNS_HANDHELD,
   GRID_GAP,
   PRODUCT_COLUMNS_HANDHELD,
+  repartoDelCatalogo,
   tamanoNombreProducto,
 } from "../lib/hospitalityGrid.js";
 import {
@@ -285,6 +286,15 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
   // Handheld: la comanda vive en un bottom-sheet. Cerrarlo no toca nada
   // —las líneas viven en `SalePage`—, así que es sólo abierto/cerrado.
   const [sheetOpen, setSheetOpen] = useState(false);
+  /**
+   * n1-hosteleria · ¿el camarero ha pedido ver la rejilla de familias
+   * otra vez, teniendo ya una elegida? (hallazgos 2 y 7)
+   *
+   * Sólo cuenta en un aparato de mano. En el terminal la rejilla está
+   * siempre: trece familias a seis columnas son dos filas de 76 px, y
+   * sobra pantalla.
+   */
+  const [rejillaAbierta, setRejillaAbierta] = useState(false);
   // n1-vertical · la barra inferior de handheld sólo mientras se marca.
   // Misma decisión y mismos motivos que en el TPV claro (ver la nota de
   // `barraTicketVisible` en SalePage.tsx): con un overlay encima tapa su
@@ -311,6 +321,40 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
   // y filtrar además por familia dejaría «no hay resultados» con el
   // producto a la vista en otra familia.
   const searching = props.searchQuery.trim().length > 0;
+
+  // ── n1-hosteleria · quién tiene el sitio (hallazgos 2 y 7) ──────────
+  //
+  // Los dos hallazgos son el MISMO problema: la rejilla de familias no
+  // cede su sitio. Medido en el N1 el 18-10:
+  //
+  //   · buscando «tost» con el teclado abierto (ventana 360 × 449): las
+  //     seis familias ocupaban la pantalla y el primer resultado de 25
+  //     caía en y=592. Cero resultados a la vista (hallazgo 2);
+  //   · con «Cafe» elegida: el primer producto en y=833 con ventana de
+  //     648, y sin desplazamiento automático. Parecía que tocar la
+  //     familia no había hecho nada (hallazgo 7).
+  //
+  // Las dos reglas, que sólo aplican en la mano:
+  //
+  //   1. CON TEXTO EN EL BUSCADOR la rejilla no se pinta. Nada de
+  //      plegarla ni encogerla: buscando, las familias no sirven para
+  //      nada —`products` llega ya filtrado por la búsqueda y filtrar
+  //      además por familia dejaría «sin resultados» con el producto a
+  //      la vista en otra— así que su sitio entero es de los resultados.
+  //   2. CON FAMILIA ELEGIDA la rejilla se pliega a una TIRA: la familia
+  //      elegida con su color, y «Cambiar» al lado. Un toque la
+  //      devuelve, y elegir otra familia la vuelve a plegar.
+  //
+  // Al borrar la búsqueda o volver a «Ahora», todo vuelve solo: son
+  // derivadas de `searching` y `view`, no un estado que haya que
+  // deshacer.
+  const { rejilla: mostrarRejillaDeFamilias, tira: familiaPlegada } =
+    repartoDelCatalogo({
+      deMano: handheld,
+      buscando: searching,
+      vista: view,
+      rejillaAbierta,
+    });
 
   const visibleProducts = useMemo(() => {
     if (searching) return props.products;
@@ -437,7 +481,52 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
           </div>
         )}
         {handheld && props.searchField}
+        {/* n1-hosteleria · la TIRA de familia plegada (hallazgo 7).
+            La familia elegida con su color, para que se vea DÓNDE está,
+            y «Cambiar» para volver a la rejilla. 56 px de alto, que es el
+            suelo táctil de esta pantalla. */}
+        {familiaPlegada && view.kind === "family" && (
+          <div
+            data-testid="family-strip"
+            className="shrink-0 flex items-center gap-2"
+          >
+            <div
+              data-testid="family-strip-actual"
+              data-tag={view.tag}
+              className="flex-1 min-w-0 rounded-[14px] flex items-center px-3.5"
+              style={{
+                height: MIN_TOUCH_PX,
+                background: familyFillFor(view.tag, props.familyTones),
+                color: FAMILY_TEXT,
+              }}
+            >
+              <span
+                className="truncate font-semibold"
+                style={{ fontSize: 18 }}
+              >
+                {props.familyLabels[view.tag] ?? view.tag}
+              </span>
+            </div>
+            <button
+              type="button"
+              data-testid="cambiar-familia"
+              aria-label="Cambiar familia"
+              onClick={() => setRejillaAbierta(true)}
+              className={`shrink-0 rounded-[14px] px-4 font-semibold ${PRESS_FEEDBACK_CLASS}`}
+              style={{
+                height: MIN_TOUCH_PX,
+                background: DARK_SURFACE,
+                color: DARK_TEXT_SOFT,
+                fontSize: 16,
+              }}
+            >
+              Cambiar
+            </button>
+          </div>
+        )}
+
         {/* Barra de familias. «Ahora» PRIMERO y sin vista «Todos». */}
+        {mostrarRejillaDeFamilias && (
         <div
           data-testid="family-bar"
           data-columns={handheld ? FAMILY_BAR_COLUMNS_HANDHELD : FAMILY_BAR_COLUMNS}
@@ -462,10 +551,17 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
               fill={familyFillFor(tag, props.familyTones)}
               active={view.kind === "family" && view.tag === tag}
               anchoUtilPx={anchoUtilFamilia}
-              onClick={() => setView({ kind: "family", tag })}
+              onClick={() => {
+                setView({ kind: "family", tag });
+                // n1-hosteleria · elegir familia PLIEGA la rejilla, que
+                // es lo que deja el primer producto a la vista. En el
+                // terminal `rejillaAbierta` no se consulta.
+                setRejillaAbierta(false);
+              }}
             />
           ))}
         </div>
+        )}
 
         <div
           className="h-px shrink-0"

@@ -478,3 +478,61 @@ export function nombresQueColisionan(
   }
   return choques;
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// n1-hosteleria · QUIÉN TIENE EL SITIO EN EL CATÁLOGO (hallazgos 2 y 7)
+//
+// Los dos hallazgos de la pasada del 18-10 son el MISMO problema: la
+// rejilla de familias no cede su sitio.
+//
+//   · buscando «tost» con el teclado abierto (ventana 360 × 449), las
+//     seis familias ocupaban la pantalla y el primero de los 25
+//     resultados caía en y=592: cero resultados a la vista (hallazgo 2);
+//   · con «Cafe» elegida, el primer producto en y=833 con ventana de 648
+//     y sin desplazamiento automático, así que parecía que tocar la
+//     familia no había servido de nada (hallazgo 7).
+//
+// Vive aquí y no en el componente para que un banco pueda recorrer la
+// tabla entera sin montar la pantalla: jsdom no mide maquetación, pero
+// sí mide qué se decide (`n1-vertical-done` §4.2).
+// ──────────────────────────────────────────────────────────────────────
+
+/** La vista del catálogo: «Ahora» o una familia concreta. */
+export type VistaDelCatalogo =
+  | { kind: "ahora" }
+  | { kind: "family"; tag: string };
+
+export interface RepartoDelCatalogo {
+  /** ¿Se pinta la rejilla entera de familias? */
+  rejilla: boolean;
+  /** ¿Se pinta la tira con la familia elegida y «Cambiar»? */
+  tira: boolean;
+}
+
+/**
+ * Qué se pinta por encima de los productos.
+ *
+ * Las dos reglas, que **sólo** aplican en un aparato de mano:
+ *
+ *   1. con texto en el buscador, NI rejilla ni tira. Buscando, las
+ *      familias no sirven para nada —la lista de productos llega ya
+ *      filtrada por la búsqueda, y filtrar además por familia dejaría
+ *      «sin resultados» con el producto a la vista en otra— así que su
+ *      sitio entero es de los resultados;
+ *   2. con familia elegida, la rejilla se pliega a la tira, salvo que el
+ *      camarero haya pedido verla otra vez (`rejillaAbierta`).
+ *
+ * En el terminal la rejilla está siempre: trece familias a seis columnas
+ * son dos filas de 76 px y sobra pantalla. Es la restricción del bloque.
+ */
+export function repartoDelCatalogo(opts: {
+  deMano: boolean;
+  buscando: boolean;
+  vista: VistaDelCatalogo;
+  rejillaAbierta: boolean;
+}): RepartoDelCatalogo {
+  if (!opts.deMano) return { rejilla: true, tira: false };
+  if (opts.buscando) return { rejilla: false, tira: false };
+  const plegada = opts.vista.kind === "family" && !opts.rejillaAbierta;
+  return { rejilla: !plegada, tira: plegada };
+}
