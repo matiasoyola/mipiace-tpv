@@ -268,6 +268,16 @@ function fake(opts: Opciones = {}) {
         return { count: 0 };
       }),
     },
+    // B-reservas-8 · los bonos de prueba que NO colgaban de un ticket (las
+    // altas iniciales del ensayo). Los vendidos se van con su ticket por
+    // la cascada de `vouchers.sold_ticket_id`, que este doble no simula —
+    // eso se prueba contra Postgres real en `bonos-venta.e2e.ts`.
+    voucher: {
+      deleteMany: vi.fn(async () => {
+        apunta("voucher");
+        return { count: 0 };
+      }),
+    },
   };
   db.$transaction = vi.fn(async (fn: any) => fn(db));
   return { db, borradoDe, tenantUpdates, ticketDeletes, tenant };

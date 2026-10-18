@@ -17,6 +17,10 @@
 //   · `frecuencia.ts` — las ocho formas de repartir un cuidado en el
 //     tiempo, su validación y su frase para la pantalla.
 //   · `que-toca.ts`   — `queToca`.
+//   · `gravedad.ts`   — residencia-4: `gravedadDe`, la función que
+//     convierte una constante o un evento en un nivel N0-N4. La ejecutan
+//     la tablet (al instante y sin red) y el servidor (que es el que
+//     manda), y un test de oro fija que dan lo mismo.
 
 export {
   CENTER_TZ,
@@ -54,3 +58,23 @@ export {
   type LineaDePlan,
   type Ocurrencia,
 } from "./que-toca.js";
+
+export {
+  DESTINATARIOS_DE_SERIE,
+  MINUTOS_DE_ESCALADO_DE_SERIE,
+  NIVELES,
+  NIVEL_MINIMO_AL_AVISAR,
+  canalesDe,
+  conAvisoForzado,
+  excepcionVigente,
+  gravedadDe,
+  gravedadDeEvento,
+  masGrave,
+  nivelMaximo,
+  type CanalDeGuardia,
+  type Comparador,
+  type ExcepcionDeUmbral,
+  type Gravedad,
+  type Nivel,
+  type ReglaDeGravedad,
+} from "./gravedad.js";

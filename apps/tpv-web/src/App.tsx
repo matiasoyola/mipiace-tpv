@@ -56,6 +56,10 @@ import { installBackGuard, setBackFallback } from "./hooks/useBackGuard.js";
 import { OutboxChip } from "./pages/CheckoutPage.outboxChip.js";
 import { KitchenScreen } from "./kitchen/KitchenScreen.js";
 import { PuertaApp } from "./residencia/PuertaApp.js";
+// residencia-4 (D-66) · el móvil de guardia. La MISMA APK en otro modo,
+// igual que la cocina y la puerta: lo que decide qué pantalla arranca es
+// qué contesta `/devices/me`.
+import { GuardiaApp } from "./residencia/GuardiaApp.js";
 import { useAvisosListo } from "./kitchen/tpv/useAvisosListo.js";
 import { useCaminoDirecto } from "./kitchen/tpv/useCaminoDirecto.js";
 import { PairScreen } from "./pages/PairScreen.js";
@@ -411,6 +415,12 @@ export function App() {
   // `PuertaApp` con el mismo `startOutboxSync` de siempre. El corte sigue
   // estando aquí: lo que no se monta es el outbox de la venta con su chip,
   // su bloqueo de mesas y su cierre de día.
+  // residencia-4 · «modo guardia». Igual que la puerta, ANTES de montar
+  // nada del terminal: un móvil de guardia no cobra, no abre turno y no
+  // emite registro de facturación.
+  if (state.kind === "guard") {
+    return <GuardiaApp me={state.data} onRefresh={refresh} />;
+  }
   if (state.kind === "room") {
     return <PuertaApp me={state.data} onRefresh={refresh} />;
   }
@@ -482,6 +492,11 @@ export function App() {
         }}
       >
         <AgendaPage
+          // B-reservas-8 · la palabra del centro para los bonos. El
+          // sanitario sin caja ve la agenda y puede dar la próxima cita,
+          // así que necesita la etiqueta igual que el mostrador — lo que
+          // no ve son los euros, y eso lo decide la API.
+          bonoEtiqueta={tenant.bonoEtiqueta}
           // clinica-2 · lleva la marca por construcción: `role=CLINICIAN`
           // implica `isClinician` por CHECK de la base
           // (`users_clinician_implies_flag`). Se lee del login de todos
@@ -581,6 +596,9 @@ export function App() {
           registerId={register.id}
           storeName={store.name}
           kitchenDisplayEnabled={tenant.kitchenDisplayEnabled === true}
+          // B-reservas-8 · la palabra del centro para los bonos. `undefined`
+          // en un terminal bootstrapeado antes del bloque → «bono».
+          bonoEtiqueta={tenant.bonoEtiqueta}
           kitchenSettings={state.data.kitchen ?? null}
           onLogoutCashier={async () => {
             try {
@@ -682,6 +700,8 @@ export function TpvHome(props: {
   // pone el super-admin y el panel del restaurante, y el terminal los
   // relee al arrancar.
   kitchenDisplayEnabled?: boolean;
+  /** B-reservas-8 · la palabra del centro para los bonos. */
+  bonoEtiqueta?: string;
   kitchenSettings?: {
     courseMode: "ESPERA" | "TIEMPOS";
     seatMode: "ALERGIA" | "SIEMPRE";
@@ -965,6 +985,7 @@ export function TpvHome(props: {
           notice={agendaNotice}
           onNoticeShown={() => setAgendaNotice(null)}
           onClose={() => setShowAgenda(false)}
+          bonoEtiqueta={props.bonoEtiqueta}
           // clinica-2 · la agenda del mostrador. Aquí la marca SÍ hay que
           // leerla: una cajera-sanitaria y una propietaria sanitaria pasan
           // por esta rama con rol `CASHIER` y `OWNER`, y son las que de
@@ -1005,6 +1026,7 @@ export function TpvHome(props: {
         // sesión: los pone el super-admin y el panel del restaurante, y el
         // terminal los relee al arrancar.
         kitchenDisplayEnabled={props.kitchenDisplayEnabled === true}
+        bonoEtiqueta={props.bonoEtiqueta}
         camino={camino}
         kitchenSettings={props.kitchenSettings ?? null}
         // La banda «M4 · listo para servir» de TODA la tienda, no sólo de
@@ -1215,6 +1237,8 @@ interface TestBootstrap {
     // tiene comprada es una demo que miente, así que el flag viaja también
     // por aquí.
     kitchenDisplayEnabled?: boolean;
+  /** B-reservas-8 · la palabra del centro para los bonos. */
+  bonoEtiqueta?: string;
   };
   register: { id: string; name: string; numSerieHolded: string | null };
   store: { id: string; name: string };
@@ -1274,6 +1298,7 @@ function TestModeTpv({
           registerId={bootstrap.register.id}
           storeName={bootstrap.store.name}
           kitchenDisplayEnabled={bootstrap.tenant.kitchenDisplayEnabled === true}
+          bonoEtiqueta={bootstrap.tenant.bonoEtiqueta}
           kitchenSettings={bootstrap.kitchen ?? null}
           onLogoutCashier={async () => {
             // "Salir" en el banner es la salida canónica del modo

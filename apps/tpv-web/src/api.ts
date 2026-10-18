@@ -4,6 +4,7 @@
 //   - apiWithCashier: Authorization Bearer <sessionToken> (shift/*)
 //   - apiConPuerta: LAS DOS a la vez (residencia-3, las rutas de la
 //     puerta que tocan datos de salud). Ver su comentario.
+//   - apiConGuardia: LAS DOS del móvil de guardia (residencia-4, D-66).
 //
 // El backend está al otro lado del proxy de Vite en dev (/api/* →
 // 127.0.0.1:3001), y de Caddy en prod.
@@ -15,6 +16,8 @@ import {
 // residencia-3 · la sesión de la puerta. Se importa la lectura y nada
 // más: quien la escribe es la pantalla del PIN.
 import { leerSesion as leerSesionDePuerta } from "./residencia/puerta-cache.js";
+// residencia-4 · y la del móvil de guardia, por lo mismo.
+import { leerSesionDeGuardia } from "./residencia/guardia-cache.js";
 
 const BASE_URL = (
   (import.meta as unknown as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL ??
@@ -120,6 +123,46 @@ export function apiConPuerta<T>(path: string, opts: ApiOpts = {}): Promise<T> {
         401,
         "Teclea tu PIN para registrar.",
         "PUERTA_SIN_SESION",
+      ),
+    );
+  }
+  return send<T>(path, {
+    ...opts,
+    headers: {
+      ...opts.headers,
+      "X-Device-Token": device,
+      Authorization: `Bearer ${sesion.token}`,
+    },
+  });
+}
+
+/**
+ * residencia-4 (D-66) · las dos cabeceras del MÓVIL DE GUARDIA.
+ *
+ * Hermana de `apiConPuerta` y con la misma razón de fondo: el token del
+ * dispositivo solo no abre nada. Con un móvil emparejado hace falta
+ * además que alguien se haya puesto de guardia con su PIN.
+ *
+ * La diferencia con la de la puerta está en qué prueba cada una. Allí la
+ * sesión prueba PRESENCIA y la firma de cada registro viaja en el cuerpo,
+ * porque un lote puede salir horas después con otra persona delante.
+ * Aquí la sesión **es la firma**: «Voy» se pulsa en el momento y lo firma
+ * quien tiene el móvil en la mano.
+ */
+export function apiConGuardia<T>(path: string, opts: ApiOpts = {}): Promise<T> {
+  const device = getDeviceToken();
+  if (!device) {
+    return Promise.reject(
+      new ApiError(401, "Device no emparejado", "DEVICE_TOKEN_REQUIRED"),
+    );
+  }
+  const sesion = leerSesionDeGuardia();
+  if (!sesion) {
+    return Promise.reject(
+      new ApiError(
+        401,
+        "Teclea tu PIN para ponerte de guardia.",
+        "GUARDIA_SIN_SESION",
       ),
     );
   }

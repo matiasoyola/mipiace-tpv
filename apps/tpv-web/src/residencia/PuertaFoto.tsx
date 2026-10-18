@@ -28,6 +28,7 @@
 import { useEffect, useState } from "react";
 
 import { getDeviceToken } from "../storage.js";
+import { leerSesionDeGuardia } from "./guardia-cache.js";
 
 const BASE_URL = (
   (import.meta as unknown as { env?: { VITE_API_URL?: string } }).env
@@ -51,6 +52,21 @@ export interface PuertaFotoProps {
   tieneFoto: boolean;
   /** Lado del cuadrado, en px. */
   lado: number;
+  /**
+   * residencia-4 · de qué ruta se pide. Por defecto la de la PUERTA, que
+   * sólo sirve la de los residentes de SU habitación.
+   *
+   * El móvil de guardia pasa la suya (`/residencia/guardia/…`), que
+   * filtra por otra cosa: sólo sirve la cara de un residente que **tiene
+   * un aviso vivo de su canal**. Sin eso, un móvil de guardia sería una
+   * ventana a la cara de los 49 residentes del centro.
+   *
+   * Es un parámetro y no un componente nuevo porque lo que hay que
+   * escribir una sola vez es lo de abajo: el `fetch` con cabecera (un
+   * `<img src>` no manda cabeceras), el blob, las iniciales del mismo
+   * tamaño y el `revokeObjectURL`.
+   */
+  ruta?: "puerta" | "guardia";
 }
 
 export function PuertaFoto({
@@ -58,6 +74,7 @@ export function PuertaFoto({
   nombre,
   tieneFoto,
   lado,
+  ruta = "puerta",
 }: PuertaFotoProps) {
   const [url, setUrl] = useState<string | null>(null);
 
@@ -73,8 +90,19 @@ export function PuertaFoto({
     void (async () => {
       try {
         const res = await fetch(
-          `${BASE_URL}/residencia/puerta/residentes/${clientId}/foto`,
-          { headers: { "X-Device-Token": token } },
+          `${BASE_URL}/residencia/${ruta}/residentes/${clientId}/foto`,
+          {
+            headers:
+              ruta === "guardia"
+                ? {
+                    "X-Device-Token": token,
+                    // La ruta de guardia va detrás de la sesión: la foto
+                    // de un residente es suya, y el móvil sólo la ve
+                    // mientras alguien esté de guardia en él.
+                    Authorization: `Bearer ${leerSesionDeGuardia()?.token ?? ""}`,
+                  }
+                : { "X-Device-Token": token },
+          },
         );
         if (!res.ok || !vivo) return;
         objectUrl = URL.createObjectURL(await res.blob());
@@ -91,7 +119,7 @@ export function PuertaFoto({
       vivo = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [clientId, tieneFoto]);
+  }, [clientId, tieneFoto, ruta]);
 
   const estilo = { width: lado, height: lado };
   if (url) {

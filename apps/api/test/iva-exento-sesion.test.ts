@@ -143,6 +143,8 @@ function apptWith(serviceIds: string[]): AppointmentView {
     source: "PRESENCIAL",
     start: "2026-10-07T08:00:00.000Z",
     end: "2026-10-07T08:30:00.000Z",
+    // B-reservas-8 · cita sin bono: este banco es del IVA exento.
+    voucherId: null,
     ticketId: null,
     notes: null,
     items: serviceIds.map((serviceId, i) => ({
@@ -317,28 +319,62 @@ describe("iva-exento-sanitario · el bono de sesiones NO EXISTE todavía", () =>
   // Lo que estos tests fijan es la INVARIANTE que lo garantiza, para que
   // quien escriba reservas-8 la encuentre en rojo si la rompe.
 
-  it("no hay ningún flag, tabla ni ruta de bonos en el esquema", async () => {
+  // ── B-reservas-8 LLEGÓ, y este test cambió de pregunta ─────────────
+  //
+  // Hasta el 18-10 aquí se afirmaba que el módulo de bonos NO existía, y se
+  // decía por qué: «si alguna de estas tres aparece, el módulo ha entrado y
+  // este test tiene que volver a mirarse — la pregunta es si la venta del
+  // bono pasa por `POST /tickets` (y entonces hereda la exención sola) o si
+  // se ha inventado una segunda puerta».
+  //
+  // Ha entrado, y se ha vuelto a mirar. **La respuesta es la primera**: un
+  // bono del catálogo es un `Product` normal con una `VoucherTemplate`
+  // colgando 1:1, y venderlo es añadir ese producto al ticket. Así que la
+  // invariante que este test guarda ya no es «no hay bonos»: es que **el
+  // precio y el IVA de un bono siguen viviendo en el producto y en ningún
+  // otro sitio**, que es lo que hace que la exención se herede sola.
+  it("la plantilla de bono NO guarda precio ni IVA: los pone el producto", async () => {
     const { readFileSync } = await import("node:fs");
-    // SIN los comentarios: el schema habla de `bonosEnabled` en el
-    // comentario de `crmEnabled` («vendrán `bonosEnabled`…»), y un test que
-    // busca en lo que se LEE en vez de en lo que se DECLARA pasa o falla
-    // por una frase. Es la lección que clinica-1 dejó escrita.
-    const schema = readFileSync(
-      new URL("../../../packages/db/prisma/schema.prisma", import.meta.url),
-      "utf8",
-    )
-      .split("\n")
-      .filter((l) => !l.trimStart().startsWith("//"))
-      .join("\n");
-    // Si alguna de estas tres aparece, el módulo de bonos ha entrado y
-    // este test tiene que volver a mirarse: la pregunta es si la venta del
-    // bono pasa por `POST /tickets` (y entonces hereda la exención sola) o
-    // si se ha inventado una segunda puerta.
-    expect(schema).not.toMatch(/bonosEnabled/);
-    expect(schema).not.toMatch(/model Voucher\b/);
+    // SIN los comentarios: un test que busca en lo que se LEE en vez de en
+    // lo que se DECLARA pasa o falla por una frase. Lección de clinica-1.
+    const sinComentarios = (texto: string): string =>
+      texto
+        .split("\n")
+        .filter((l) => !l.trimStart().startsWith("//"))
+        .join("\n");
+    const schema = sinComentarios(
+      readFileSync(
+        new URL("../../../packages/db/prisma/schema.prisma", import.meta.url),
+        "utf8",
+      ),
+    );
+    // El módulo está, y con su flag de capacidad y su modelo.
+    expect(schema).toMatch(/bonosEnabled/);
+    expect(schema).toMatch(/model Voucher\b/);
+    // Y NO hay un modelo paralelo: el saldo extiende `voucher` (D-2 del
+    // cruce con B-reservas-4).
     expect(schema).not.toMatch(/model SessionProgram\b/);
-    // Lo que SÍ está es la columna reservada, y sigue siendo sólo eso.
+    expect(schema).not.toMatch(/model Program\b/);
+    // La columna de la cita sigue ahí, y desde este bloque con FK real.
     expect(schema).toMatch(/voucherId\s+String\?\s+@map\("voucher_id"\)/);
+
+    // ── LA INVARIANTE ─────────────────────────────────────────────────
+    //
+    // `VoucherTemplate` dice cuántas sesiones da un bono y qué cubre. Lo
+    // que NO dice —y no puede decir— es cuánto cuesta ni con qué IVA se
+    // vende: eso está en su `Product`, que es el único sitio donde vive el
+    // precio de cualquier cosa en esta casa (ADR-R1). Si alguien le añade
+    // un `price`, un `taxRate` o un `exemptionCause` a la plantilla,
+    // habrá dos sitios donde mirar el IVA de un bono y este test se pone
+    // rojo antes de que eso llegue a una factura.
+    const plantilla = /model VoucherTemplate \{[\s\S]*?\n\}/.exec(schema);
+    expect(plantilla).not.toBeNull();
+    const cuerpo = plantilla![0];
+    expect(cuerpo).not.toMatch(/price/i);
+    expect(cuerpo).not.toMatch(/taxRate/i);
+    expect(cuerpo).not.toMatch(/exemption/i);
+    // Y sí lleva la relación 1:1 con el producto, que es de dónde los saca.
+    expect(cuerpo).toMatch(/productId\s+String\s+@unique/);
   });
 
   it("CUALQUIER línea nacida de un producto exento hereda la exención", async () => {

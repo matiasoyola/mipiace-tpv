@@ -46,6 +46,10 @@ COPY packages/db/package.json packages/db/
 # clinica-3: el mapa del pie, las lesiones, los consejos y las funciones puras
 # de la sesión. Mismo caso y mismo guardián — y esta vez también lo cantó el
 # test en la primera pasada, antes de llegar al CI. Tres de tres.
+# B-reservas-8 · lo puro de los bonos (estados cerrados con su mensaje,
+# porQueNoDevolvible, el saldo derivado del libro y los meses de calendario).
+# Lo importan la API, el TPV y el panel: los tres tienen que contar lo mismo.
+COPY packages/bonos/package.json packages/bonos/
 COPY packages/clinica-sesion/package.json packages/clinica-sesion/
 COPY packages/clinica-valoracion/package.json packages/clinica-valoracion/
 COPY packages/consentimientos/package.json packages/consentimientos/

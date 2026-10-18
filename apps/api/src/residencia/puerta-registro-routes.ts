@@ -87,8 +87,20 @@ import {
   vistaDeRegistros,
   type ContextoDelLote,
   type ControlParaRegistrar,
+  nombreDeQuienFirma,
   type RegistroEntrante,
+  type ResultadoDeRegistro,
 } from "./registro.js";
+// residencia-4 · la derivación, la plantilla y el aviso. La puerta manda
+// las constantes y los tipos de «algo no va bien» por el MISMO lote que
+// ya existía (alcance §API): no hay una ruta nueva para avisar, porque un
+// aviso que viaja por su cuenta es un aviso que se puede perder mientras
+// el registro entra.
+import { contextoDeGravedad, plantillaVigente } from "./gravedad.js";
+import { derivarDeEvento, derivarDeLaMedida } from "./derivacion.js";
+import { configuracionDeGuardia } from "./aviso.js";
+import { NOMBRE_DEL_TIPO } from "./catalogo/plantilla-de-gravedad.js";
+import { empujarAvisos } from "./guardia-bus.js";
 
 // ── El rate-limit del PIN · POR PUERTA, y corto a propósito ──────────
 //
@@ -283,6 +295,10 @@ async function controlesActivos(
         version: true,
         groupCode: true,
         unit: true,
+        // residencia-4 · el rango de ENTRADA. Lo necesita la validación
+        // del número y lo necesita el teclado de la pantalla.
+        inputMin: true,
+        inputMax: true,
         options: {
           orderBy: { sortOrder: "asc" },
           select: { code: true, label: true, isAsUsual: true, sortOrder: true },
@@ -311,6 +327,9 @@ async function controlesActivos(
       layer: c.layer,
       nature: c.nature,
       valueDomain: c.valueDomain,
+      unit: c.unit,
+      inputMin: c.inputMin == null ? null : Number(c.inputMin),
+      inputMax: c.inputMax == null ? null : Number(c.inputMax),
       opciones: c.options.map((o) => ({ code: o.code, isAsUsual: o.isAsUsual })),
     });
   }
@@ -430,6 +449,11 @@ export async function registerResidenciaPuertaRegistroRoutes(
             nature: true,
             valueDomain: true,
             groupCode: true,
+            // residencia-4 · lo que el teclado numérico necesita: la
+            // unidad a la vista y el rango que deja teclear.
+            unit: true,
+            inputMin: true,
+            inputMax: true,
             options: {
               orderBy: { sortOrder: "asc" },
               select: { code: true, label: true, isAsUsual: true },
@@ -498,6 +522,14 @@ export async function registerResidenciaPuertaRegistroRoutes(
         ? subclaveDePinDePuerta(dek, ctx.tenantId).toString("base64")
         : null;
 
+      // residencia-4 · la plantilla y la configuración de guardia. Las
+      // dos son del centro o del producto, no de nadie: no hay dato de
+      // salud de ningún residente en lo que esto añade a la caché.
+      const [plantilla, guardia] = await Promise.all([
+        plantillaVigente(prisma),
+        configuracionDeGuardia(prisma, ctx.tenantId),
+      ]);
+
       return {
         device: { id: ctx.deviceId, name: ctx.deviceName },
         habitacion: {
@@ -550,8 +582,38 @@ export async function registerResidenciaPuertaRegistroRoutes(
           nature: c.nature,
           valueDomain: c.valueDomain,
           groupCode: c.groupCode,
+          unit: c.unit,
+          inputMin: c.inputMin == null ? null : Number(c.inputMin),
+          inputMax: c.inputMax == null ? null : Number(c.inputMax),
           opciones: c.options,
         })),
+        // ── residencia-4 · LA PLANTILLA DE GRAVEDAD, EN LA TABLET ────
+        //
+        // Para que la puerta pinte el nivel **al instante y también sin
+        // red**: la tablet ejecuta `gravedadDe` con estas reglas y el
+        // servidor la ejecuta otra vez y manda la suya. Un test de oro
+        // fija que dan lo mismo para toda la tabla del §3.
+        //
+        // Lo que NO viaja son las EXCEPCIONES de cada residente (D-22):
+        // son un dato clínico suyo y una tablet de pasillo no tiene por
+        // qué llevarse la lista de quién tiene umbrales propios ni por
+        // qué. La consecuencia, dicha: sin red, la puerta pinta el nivel
+        // DE SERIE de un residente con excepción, y el servidor lo
+        // corrige cuando el lote sube. Es lo prudente — la excepción
+        // siempre baja el nivel o lo deja igual, nunca lo sube, así que
+        // sin red se avisa de más y no de menos.
+        plantilla: {
+          version: plantilla.version,
+          reglas: plantilla.reglas,
+        },
+        // Y la configuración de guardia que la pantalla necesita: en N4
+        // pinta «Llama al 112», y en N3/N4 dice a quién se recomienda
+        // llamar. El teléfono del servicio sanitario NO es un dato de
+        // salud de nadie y es lo que hace falta en la puerta.
+        guardia: {
+          minutosDeEscalado: guardia.minutosDeEscalado,
+          servicio: guardia.servicio,
+        },
         roster: pins.map((p) => ({
           userId: p.userId,
           nombre: p.user.alias ?? (p.user.email.split("@")[0] ?? p.user.email),
@@ -989,6 +1051,10 @@ export async function registerResidenciaPuertaRegistroRoutes(
           layer: c.layer,
           nature: c.nature,
           valueDomain: c.valueDomain,
+          // residencia-4 · lo que el teclado numérico necesita.
+          unit: c.unit ?? null,
+          inputMin: c.inputMin ?? null,
+          inputMax: c.inputMax ?? null,
           opciones: c.opciones,
         })),
         serverTime: ahora.toISOString(),
@@ -1063,12 +1129,29 @@ export async function registerResidenciaPuertaRegistroRoutes(
                     required: ["tipo"],
                     additionalProperties: false,
                     properties: {
-                      tipo: { type: "string", enum: ["BOOL", "ORDINAL", "NOTA"] },
+                      tipo: {
+                        type: "string",
+                        // residencia-4 · `NUMERIC` entra. Las siete
+                        // `MEASURE` del catálogo dejan de rechazarse.
+                        enum: ["BOOL", "ORDINAL", "NUMERIC", "NOTA"],
+                      },
                       hecho: { type: "boolean" },
                       opcion: { type: "string", maxLength: 60 },
+                      // El número de la constante. El rango de verdad lo
+                      // pone `inputMin`/`inputMax` del catálogo; esto
+                      // sólo acota lo que cabe en el JSON.
+                      numero: { type: "number", minimum: -10000, maximum: 10000 },
+                      // residencia-4 · el tipo de «algo no va bien» y su
+                      // matiz. **Los dos opcionales** (D-13).
+                      evento: { type: ["string", "null"], maxLength: 40 },
+                      matiz: { type: ["string", "null"], maxLength: 40 },
                     },
                   },
                   nota: { type: ["string", "null"], maxLength: 500 },
+                  // residencia-4 (alcance 7) · «No puede esperar: avisar
+                  // a la enfermera». Fuerza al menos N2 sobre lo que se
+                  // esté apuntando y dispara el aviso.
+                  avisarEnfermera: { type: "boolean" },
                   voz: {
                     type: ["object", "null"],
                     required: ["webmBase64"],
@@ -1124,13 +1207,24 @@ export async function registerResidenciaPuertaRegistroRoutes(
       // Un lote de siete filas lleva una sola firma en el caso normal, y
       // comprobarla siete veces serían siete resoluciones de acceso y siete
       // consultas de asignación por un toque de dos segundos.
-      const resultados: Array<{
-        id: string;
-        estado: "guardado" | "corrige" | "ya-estaba" | "rechazado";
-        corrigeA?: string;
-        codigo?: string;
-        mensaje?: string;
-      }> = [];
+      const resultados: Array<
+        ResultadoDeRegistro & {
+        /** residencia-4 · lo que la pantalla 6 pinta: qué nivel salió y
+         *  si el aviso salió o no. Puesto sólo cuando esto derivó algo. */
+        incidencia?: {
+          id: string;
+          tipo: string;
+          nombreDelTipo: string;
+          nivel: string;
+          creada: boolean;
+          subioNivel: boolean;
+          /** Los canales en los que ha sonado AHORA. Vacío = no tocaba
+           *  avisar (N0, N1), y la pantalla lo dice así y no con un
+           *  silencio. */
+          avisadoEn: string[];
+        };
+        }
+      > = [];
       const firmasComprobadas = new Map<string, string | null>();
       const visiblesPorFirmante = new Map<string, Set<string>>();
 
@@ -1256,6 +1350,115 @@ export async function registerResidenciaPuertaRegistroRoutes(
             entrante,
           ),
         );
+      }
+
+      // ── residencia-4 · LA DERIVACIÓN, DESPUÉS DE ESCRIBIR ─────────
+      //
+      // En este orden y no al revés, y es la invariante de residencia-3
+      // llevada a este bloque: **un cuidado hecho se apunta**. Primero
+      // las filas, que son la evidencia; después lo que esas filas
+      // significan. Si la derivación fallara entera —un fallo nuestro—,
+      // lo que habría es un registro sin incidencia, que alguien ve en la
+      // ficha; al revés habría una incidencia sin la medida que la abrió,
+      // que no se puede leer.
+      //
+      // Y **por residente**, no por registro: el contexto de gravedad (la
+      // plantilla y las excepciones vigentes de esa persona) se lee una
+      // vez por residente del lote, no siete veces por un «como siempre».
+      const porDerivar = resultados.filter((r) => r.paraDerivar != null);
+      if (porDerivar.length > 0) {
+        const contextos = new Map<
+          string,
+          Awaited<ReturnType<typeof contextoDeGravedad>>
+        >();
+        for (const r of porDerivar) {
+          const d = r.paraDerivar!;
+          try {
+            let ctxGravedad = contextos.get(d.clientId);
+            if (!ctxGravedad) {
+              ctxGravedad = await contextoDeGravedad(prisma, {
+                tenantId: ctx.tenantId,
+                clientId: d.clientId,
+                instante: d.recordedAt,
+              });
+              contextos.set(d.clientId, ctxGravedad);
+            }
+            const comun = {
+              tenantId: ctx.tenantId,
+              clientId: d.clientId,
+              centerShiftId: d.centerShiftId,
+              careDay: d.careDay,
+              deviceId: ctx.deviceId,
+              roomId: ctx.roomId,
+              firma: d.firma,
+              avisarEnfermera: d.avisarEnfermera,
+              ahora,
+            };
+            const derivado =
+              d.valor.tipo === "NUMERIC"
+                ? await derivarDeLaMedida(prisma, ctxGravedad, {
+                    ...comun,
+                    recordId: r.id,
+                    controlCode: d.controlCode,
+                    numero: d.valor.numero,
+                    recordedAt: d.recordedAt,
+                  })
+                : d.valor.tipo === "NOTA"
+                  ? await derivarDeEvento(prisma, {
+                      ...comun,
+                      subject: "RESIDENT" as const,
+                      evento: d.valor.evento ?? null,
+                      matiz: d.valor.matiz ?? null,
+                      recordId: r.id,
+                      occurridoEn: d.recordedAt,
+                    })
+                  : // Un «hecho» o un ordinal no derivan por sí solos…
+                    // salvo que alguien haya pulsado el botón de la
+                    // enfermera encima, y entonces sí: lo que dice es
+                    // «esto que estoy apuntando no puede esperar».
+                    d.avisarEnfermera
+                    ? await derivarDeEvento(prisma, {
+                        ...comun,
+                        subject: "RESIDENT" as const,
+                        evento: null,
+                        matiz: null,
+                        recordId: r.id,
+                        occurridoEn: d.recordedAt,
+                      })
+                    : null;
+            if (derivado) {
+              const tipo = await prisma.incident.findUnique({
+                where: { id: derivado.incidentId },
+                select: { incidentType: true },
+              });
+              r.incidencia = {
+                id: derivado.incidentId,
+                tipo: tipo?.incidentType ?? "",
+                nombreDelTipo:
+                  NOMBRE_DEL_TIPO[tipo?.incidentType ?? ""] ??
+                  tipo?.incidentType ??
+                  "",
+                nivel: derivado.nivel,
+                creada: derivado.creada,
+                subioNivel: derivado.subioNivel,
+                avisadoEn: derivado.avisos.map((a) => a.canal),
+              };
+              empujarAvisos(ctx.tenantId, derivado.avisos, d.recordedAt);
+            }
+          } catch (err) {
+            // La derivación de UN registro que falla no tumba el lote ni
+            // los otros: el cuidado ya está apuntado y eso es lo que no se
+            // puede perder. Se registra sin un solo dato de salud dentro
+            // —ni el valor, ni el residente— y la ficha del admin enseña
+            // el registro sin incidencia, que es lo que alguien tiene que
+            // mirar.
+            request.log.error(
+              { err, registroId: r.id },
+              "residencia · no se pudo derivar la incidencia de un registro",
+            );
+          }
+          delete r.paraDerivar;
+        }
       }
 
       const guardados = resultados.filter(
@@ -1483,6 +1686,116 @@ export async function registerResidenciaPuertaRegistroRoutes(
         // retirada de un consentimiento tiene que notarse al recargar.
         .header("Cache-Control", "no-store")
         .send(leido.contenido);
+    },
+  );
+
+  // ════════════════════════════════════════════════════════════════
+  //  7 · `GET /residencia/puerta/incidencias/:id` · ¿YA VA ALGUIEN?
+  // ════════════════════════════════════════════════════════════════
+  //
+  // residencia-4 (alcance 8) · lo que la pantalla 6 pinta debajo de «Se
+  // ha avisado»: **quién lo ha acusado y a qué hora** («Aviso recibido
+  // por Lucía · 10:43»).
+  //
+  // Es un GET corto que la pantalla 6 sondea cada cinco segundos
+  // mientras está visible, y no un empuje por socket. Dos razones y la
+  // segunda es la que manda:
+  //
+  //   1. la pantalla 6 vive diez segundos; abrir un socket para eso es
+  //      más maquinaria que la que ahorra;
+  //   2. **la puerta puede no tener red**, y entonces lo que tiene que
+  //      pasar es que no diga nada — ni «avisado» ni «acusado»—, no que
+  //      se quede esperando un socket que no va a llegar. Con el GET, sin
+  //      red simplemente falla y la banda ámbar se queda como está.
+  //
+  // Devuelve **el nivel, los canales y los acuses, y ni una palabra de lo
+  // que pasa**: la descripción de la incidencia va cifrada y no se
+  // descifra aquí. Lo que la auxiliar necesita saber delante de la puerta
+  // es si va alguien.
+  app.get(
+    "/residencia/puerta/incidencias/:id",
+    {
+      preHandler: [requirePuertaDevice, requirePuertaSesion],
+      schema: {
+        params: {
+          type: "object",
+          required: ["id"],
+          additionalProperties: false,
+          properties: { id: { type: "string", format: "uuid" } },
+        },
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const ctx = request.puerta!;
+      const { id } = request.params as { id: string };
+      const prisma = getPrisma();
+
+      const inc = await prisma.incident.findFirst({
+        where: { id, tenantId: ctx.tenantId },
+        select: {
+          id: true,
+          clientId: true,
+          incidentType: true,
+          severity: true,
+          open: true,
+          alertedAt: true,
+          alerts: {
+            orderBy: { createdAt: "asc" },
+            select: {
+              id: true,
+              channel: true,
+              state: true,
+              queuedAt: true,
+              createdAt: true,
+              ackedAt: true,
+              ackedBy: { select: { alias: true, email: true } },
+              ackedWith: { select: { careRole: { select: { name: true } } } },
+            },
+          },
+        },
+      });
+      if (!inc) {
+        return reply.code(404).send({
+          error: "INCIDENCIA_NO_ENCONTRADA",
+          message: "Esa incidencia no es de este centro.",
+        });
+      }
+      // Sólo las de los residentes de ESTA habitación. La tablet de la
+      // 112 no mira los avisos de la 201 ni aunque tenga el id — mismo
+      // aislamiento que el lote y que la foto.
+      const ocupantes = await ocupantesDeLaHabitacion(prisma, ctx.roomId);
+      if (
+        inc.clientId != null &&
+        !ocupantes.some((o) => o.clientId === inc.clientId)
+      ) {
+        return reply.code(404).send({
+          error: "INCIDENCIA_NO_ENCONTRADA",
+          message: "Esa incidencia no es de este centro.",
+        });
+      }
+
+      return reply.code(200).send({
+        id: inc.id,
+        tipo: inc.incidentType,
+        nombreDelTipo: NOMBRE_DEL_TIPO[inc.incidentType] ?? inc.incidentType,
+        nivel: inc.severity,
+        abierta: inc.open,
+        avisadoEn: inc.alertedAt?.toISOString() ?? null,
+        avisos: inc.alerts.map((a) => ({
+          canal: a.channel,
+          estado: a.state,
+          // Los dos instantes del aviso, como los dos del registro: la
+          // hora ORIGINAL y cuándo salió de verdad. El retraso se ve
+          // restando, y la pantalla lo dice cuando pasa de un minuto.
+          apuntadoEn: a.queuedAt.toISOString(),
+          salidoEn: a.createdAt.toISOString(),
+          acusadoEn: a.ackedAt?.toISOString() ?? null,
+          acusadoPor: a.ackedBy
+            ? nombreDeQuienFirma(a.ackedBy)
+            : null,
+          acusadoComo: a.ackedWith?.careRole.name ?? null,
+        })),
+      });
     },
   );
 }

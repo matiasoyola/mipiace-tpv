@@ -21,8 +21,49 @@ export interface ControlDeLaPuerta {
   nature: "SCHEDULED" | "ON_DEMAND" | "DERIVED";
   valueDomain: "BOOL" | "ORDINAL" | "NUMERIC" | "SCORE" | "TEXT_SHORT";
   groupCode: string | null;
+  /** residencia-4 · lo que el teclado numérico necesita: la unidad a la
+   *  vista y el rango que deja teclear. Opcionales como todo lo demás,
+   *  porque la caché sobrevive a los despliegues. */
+  unit?: string | null;
+  inputMin?: number | null;
+  inputMax?: number | null;
   opciones: Array<{ code: string; label: string; isAsUsual: boolean }>;
 }
+
+// ── residencia-4 · LA PLANTILLA DE GRAVEDAD, EN LA TABLET ────────────
+//
+// La puerta pinta el nivel **al instante y también sin red**: ejecuta
+// `gravedadDe` del paquete puro con estas reglas, exactamente la misma
+// función que el servidor. El servidor la ejecuta otra vez y **manda la
+// suya**; un test de oro fija que dan lo mismo para toda la tabla del §3.
+//
+// Lo que NO viaja son las excepciones de cada residente (D-22): son un
+// dato clínico suyo. Consecuencia dicha: sin red, la puerta pinta el
+// nivel DE SERIE de un residente con excepción. Es lo prudente — una
+// excepción baja el nivel o lo deja igual, nunca lo sube.
+export interface PlantillaDeLaPuerta {
+  version: number;
+  reglas: ReglaDeGravedadDeLaPuerta[];
+}
+
+export type ReglaDeGravedadDeLaPuerta =
+  | {
+      kind: "THRESHOLD";
+      controlCode: string;
+      comparador: "GTE" | "GT" | "LTE" | "LT";
+      valor: number;
+      nivel: NivelDeLaPuerta;
+      tipo: string;
+    }
+  | {
+      kind: "EVENT";
+      evento: string;
+      matiz: string | null;
+      nivel: NivelDeLaPuerta;
+      tipo: string;
+    };
+
+export type NivelDeLaPuerta = "N0" | "N1" | "N2" | "N3" | "N4";
 
 /** Una línea del plan vivo de un residente de esta habitación. */
 export interface LineaDePlanDeLaPuerta {
@@ -105,6 +146,16 @@ export interface PuertaArranque {
   /** `null` si el centro no tiene clave clínica todavía: entonces el PIN
    *  sólo se resuelve con red. */
   pinSubclave: string | null;
+  /** residencia-4 · la plantilla de gravedad vigente. Ausente en una
+   *  caché de antes del bloque: entonces la puerta no pinta nivel y el
+   *  servidor lo dice al subir el lote, que es lo que de verdad manda. */
+  plantilla?: PlantillaDeLaPuerta;
+  /** Y la configuración de guardia que la pantalla necesita: los minutos
+   *  de escalado y a quién se recomienda llamar en N3-N4. */
+  guardia?: {
+    minutosDeEscalado: number;
+    servicio: { nombre: string; telefono: string } | null;
+  };
   serverTime: string;
 }
 
@@ -165,6 +216,9 @@ export interface LoQueToca {
     layer: string;
     nature: string;
     valueDomain: string;
+    unit?: string | null;
+    inputMin?: number | null;
+    inputMax?: number | null;
     opciones: Array<{ code: string; isAsUsual: boolean }>;
   }>;
   serverTime: string;
@@ -174,7 +228,12 @@ export interface LoQueToca {
 export type ValorParaRegistrar =
   | { tipo: "BOOL"; hecho: true }
   | { tipo: "ORDINAL"; opcion: string }
-  | { tipo: "NOTA" };
+  /** residencia-4 · una constante. El número con punto decimal; la coma
+   *  es de la pantalla. */
+  | { tipo: "NUMERIC"; numero: number }
+  /** residencia-4 · «algo no va bien», con TIPO y matiz opcionales
+   *  (D-13: sin elegir nada sigue siendo un registro completo). */
+  | { tipo: "NOTA"; evento?: string | null; matiz?: string | null };
 
 /** Un registro, como lo manda la tablet. */
 export interface RegistroParaEnviar {
@@ -191,6 +250,9 @@ export interface RegistroParaEnviar {
   valor: ValorParaRegistrar;
   nota?: string | null;
   voz?: { webmBase64: string } | null;
+  /** residencia-4 · «No puede esperar: avisar a la enfermera». Fuerza al
+   *  menos N2 sobre lo que se esté apuntando. */
+  avisarEnfermera?: boolean;
 }
 
 /** Lo que la API contesta de cada registro de un lote. */
@@ -200,4 +262,38 @@ export interface ResultadoDelRegistro {
   corrigeA?: string;
   codigo?: string;
   mensaje?: string;
+  /** residencia-4 · qué nivel salió y en qué canales sonó. Puesto sólo
+   *  cuando este registro derivó una incidencia. */
+  incidencia?: IncidenciaDelRegistro;
+}
+
+export interface IncidenciaDelRegistro {
+  id: string;
+  tipo: string;
+  nombreDelTipo: string;
+  nivel: NivelDeLaPuerta;
+  creada: boolean;
+  subioNivel: boolean;
+  /** Vacío = **no tocaba avisar** (N0, N1). La pantalla lo dice así y no
+   *  con un silencio: «queda apuntado para el relevo». */
+  avisadoEn: Array<"ENFERMERIA" | "RESPONSABLE">;
+}
+
+/** `GET /residencia/puerta/incidencias/:id` · ¿ya va alguien? */
+export interface EstadoDeLaIncidencia {
+  id: string;
+  tipo: string;
+  nombreDelTipo: string;
+  nivel: NivelDeLaPuerta;
+  abierta: boolean;
+  avisadoEn: string | null;
+  avisos: Array<{
+    canal: "ENFERMERIA" | "RESPONSABLE";
+    estado: string;
+    apuntadoEn: string;
+    salidoEn: string;
+    acusadoEn: string | null;
+    acusadoPor: string | null;
+    acusadoComo: string | null;
+  }>;
 }

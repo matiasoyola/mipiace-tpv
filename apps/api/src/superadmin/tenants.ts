@@ -151,6 +151,9 @@ function serializeDraftTenant(t: {
   // como casillas y el `PATCH` los mueve.
   clinicalRecordsEnabled?: boolean;
   residenciaEnabled?: boolean;
+  // B-reservas-8 · idem: viaja plano para que el detalle lo pinte como
+  // casilla y el `PATCH` lo mueva.
+  bonosEnabled?: boolean;
 }) {
   return {
     id: t.id,
@@ -189,6 +192,9 @@ function serializeDraftTenant(t: {
     // residencia-1 · fuera de `modules` por lo mismo: la residencia es una
     // capa sobre la clínica, no sostiene a nadie sola.
     residenciaEnabled: t.residenciaEnabled ?? false,
+    // B-reservas-8 · fuera de `modules` por lo mismo que la cocina: es un
+    // añadido vendible a la caja, no un módulo que sostenga a una empresa.
+    bonosEnabled: t.bonosEnabled ?? false,
   };
 }
 
@@ -539,6 +545,9 @@ export async function registerSuperAdminTenantsRoutes(
         // ni saber qué cliente la tenía encendida.
         clinicalRecordsEnabled: tenant.clinicalRecordsEnabled,
         residenciaEnabled: tenant.residenciaEnabled,
+        // B-reservas-8 · el módulo de bonos, para que el detalle lo pinte
+        // y el `PATCH` lo mueva (con sus dos guardas).
+        bonosEnabled: tenant.bonosEnabled,
         // holded-desconectar (ADR-020) · cuándo DEJÓ Holded, si lo dejó.
         // El detalle lo necesita para saber qué botón enseñar: «Dejar
         // Holded» al que lo tiene conectado y vendiendo, y nada al que ya
@@ -1061,6 +1070,13 @@ export async function registerSuperAdminTenantsRoutes(
             // encenderlo es vender un producto y aceptar un marco legal
             // (los residentes tienen historia). Sus dos guardas, abajo.
             residenciaEnabled: { type: "boolean" },
+            // B-reservas-8 · el interruptor de los BONOS DE SESIONES.
+            // Mismo gobierno que la clínica, la cocina y la residencia:
+            // sólo desde aquí, porque encenderlo es vender un módulo. Su
+            // guarda —no se puede encender con Holded conectado— está
+            // abajo, y además en un CHECK de la base
+            // (`tenants_bonos_sin_holded`).
+            bonosEnabled: { type: "boolean" },
           },
         },
       },
@@ -1089,6 +1105,7 @@ export async function registerSuperAdminTenantsRoutes(
         clinicalRecordsEnabled?: boolean;
         kitchenDisplayEnabled?: boolean;
         residenciaEnabled?: boolean;
+        bonosEnabled?: boolean;
       };
       const ctx = request.superAdmin!;
       const prisma = getPrisma();
@@ -1492,6 +1509,70 @@ export async function registerSuperAdminTenantsRoutes(
           after: body.kitchenDisplayEnabled,
         };
         data.kitchenDisplayEnabled = body.kitchenDisplayEnabled;
+      }
+
+      // ── B-reservas-8 · EL INTERRUPTOR DE LOS BONOS ─────────────────
+      //
+      // Una guarda al encender y otra al apagar, y las dos dicen qué pasa.
+      //
+      // **No se puede encender con Holded conectado** (decisión de
+      // Dirección, 18-10). La razón no es técnica: un ticket de canje a 0 €
+      // subido a Holded es terreno desconocido —qué documento es, qué
+      // declara, cómo cuadra con la venta del bono— y no lo necesita nadie
+      // hoy (Sole salió de Holded, la clínica y el spa no lo tienen). El
+      // mismo invariante vive en la BASE (`tenants_bonos_sin_holded`),
+      // porque hay cuatro puertas de escritura a `tenants` y sólo el motor
+      // cubre las cuatro.
+      //
+      // Se lee `holdedEnabled !== false` y no `holdedEnabled`, que es el
+      // criterio que el propio schema documenta para esa columna: `DEFAULT
+      // true`, así que sólo el valor explícito CONTRARIO cambia algo.
+      //
+      // **Apagarlo con bonos vivos tampoco**, y aquí sí hay algo que se
+      // queda inaccesible: una deuda del centro con sus clientas. Un bono
+      // de cinco sesiones con tres sin usar es dinero cobrado y no
+      // entregado; apagar el módulo lo dejaría guardado y sin forma de
+      // canjearlo, y la clienta se enteraría en el mostrador.
+      let bonosVivos = 0;
+      if (
+        body.bonosEnabled !== undefined &&
+        body.bonosEnabled !== tenant.bonosEnabled
+      ) {
+        if (body.bonosEnabled === true) {
+          const holded = body.holdedEnabled ?? tenant.holdedEnabled;
+          if (holded !== false) {
+            return reply.code(409).send({
+              error: "BONOS_CON_HOLDED",
+              message:
+                "Los bonos de sesiones todavía no se pueden encender en una cuenta que factura con Holded: " +
+                "un ticket de canje a 0 € subido a Holded es terreno desconocido y está pendiente de la asesoría (frente P5). " +
+                "Si este comercio ya no usa Holded, apágalo primero (o en la misma llamada).",
+            });
+          }
+        } else {
+          bonosVivos = await prisma.voucher.count({
+            where: {
+              tenantId: id,
+              esPrueba: false,
+              status: { in: ["ACTIVO", "AGOTADO"] },
+              sessionsLeft: { gt: 0 },
+            },
+          });
+          if (bonosVivos > 0) {
+            return reply.code(409).send({
+              error: "BONOS_CON_SALDO_VIVO",
+              message:
+                `Este negocio tiene ${bonosVivos} bono(s) con sesiones sin usar. Es dinero cobrado y no entregado: ` +
+                "apagar el módulo las dejaría guardadas y sin forma de canjearlas. Decide qué se hace con ellas antes de apagarlo.",
+              bonosVivos,
+            });
+          }
+        }
+        changes.bonosEnabled = {
+          before: tenant.bonosEnabled,
+          after: body.bonosEnabled,
+        };
+        data.bonosEnabled = body.bonosEnabled;
       }
 
       if (Object.keys(changes).length === 0) {
