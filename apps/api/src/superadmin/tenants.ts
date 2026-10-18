@@ -206,6 +206,40 @@ function fiscalAddressString(profile: Prisma.JsonValue | null): string | null {
   return typeof addr === "string" ? addr : null;
 }
 
+/**
+ * auditoria-sirope (#19 + #23) · lo que el super-admin necesita saber de
+ * la cocina de una cuenta sin llamar a nadie.
+ *
+ *   · cuántas pantallas vivas hay (lo que se queda a oscuras al apagar);
+ *   · cuántas etiquetas del catálogo NO tienen sección. Con Cocina
+ *     encendida eso no es un detalle de configuración: sus platos van a
+ *     SALÓN en silencio y la cocina no los ve.
+ */
+async function resumenDeCocina(
+  prisma: ReturnType<typeof getPrisma>,
+  tenantId: string,
+): Promise<{ pantallas: number; etiquetasSinSeccion: number }> {
+  const [pantallas, productos, mapeos] = await Promise.all([
+    prisma.device.count({
+      where: { tenantId, kind: "KITCHEN", revokedAt: null },
+    }),
+    prisma.product.findMany({
+      where: { tenantId, active: true, archivedFromHoldedAt: null },
+      select: { tags: true },
+    }),
+    prisma.tagSection.findMany({ where: { tenantId }, select: { slug: true } }),
+  ]);
+  const mapeadas = new Set(mapeos.map((m) => m.slug));
+  const sinSeccion = new Set<string>();
+  for (const p of productos) {
+    for (const t of p.tags) {
+      const slug = t.trim().toLowerCase();
+      if (slug && !mapeadas.has(slug)) sinSeccion.add(slug);
+    }
+  }
+  return { pantallas, etiquetasSinSeccion: sinSeccion.size };
+}
+
 async function computeMetrics(
   prisma: Prisma.TransactionClient | ReturnType<typeof getPrisma>,
   tenantId: string,
@@ -492,6 +526,13 @@ export async function registerSuperAdminTenantsRoutes(
         // kds-1-cocina · el módulo «Cocina», para que el detalle lo pueda
         // pintar y moverlo. Fuera de `modules`, ver `resumenTenant`.
         kitchenDisplayEnabled: tenant.kitchenDisplayEnabled,
+        // auditoria-sirope (#19 + #23) · cuántas etiquetas del catálogo no
+        // tienen sección, y cuántas pantallas de cocina hay vivas. Con
+        // Cocina encendida, una etiqueta sin sección manda sus platos a
+        // SALÓN en silencio — que es como se perdió la primera comanda de
+        // la T6 el 18-10—, así que el super-admin tiene que verlo ANTES de
+        // colgar el teléfono.
+        cocina: await resumenDeCocina(prisma, tenant.id),
         // clinica-1 / residencia-1 · los dos de salud. El detalle los pinta
         // como casillas junto a la de cocina y el `PATCH` los mueve; antes
         // de este bloque la clínica NO viajaba, así que el panel no podía

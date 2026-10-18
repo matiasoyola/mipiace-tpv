@@ -97,6 +97,36 @@ export function DevicesPage() {
     }
   }
 
+  /**
+   * auditoria-sirope (#23) · las secciones de una pantalla de cocina, sin
+   * revocarla. La fila se actualiza en el momento con lo que conteste el
+   * servidor: es el dato que la pantalla usará en su siguiente GET.
+   */
+  async function onCambiarSecciones(
+    deviceId: string,
+    secciones: Array<"BARRA" | "COCINA" | "SALON">,
+  ) {
+    setError(null);
+    try {
+      const res = await api<{
+        device: { id: string; kitchenSections: Array<"BARRA" | "COCINA" | "SALON"> };
+      }>(`/admin/devices/${deviceId}/kitchen-sections`, {
+        method: "PATCH",
+        body: { kitchenSections: secciones },
+      });
+      setDevices((curr) =>
+        (curr ?? []).map((d) =>
+          d.id === deviceId
+            ? { ...d, kitchenSections: res.device.kitchenSections }
+            : d,
+        ),
+      );
+    } catch (err) {
+      if (err instanceof ApiError) setError(err.message);
+      else setError("Error inesperado");
+    }
+  }
+
   if (!devices) return <CenteredLoader label="Cargando dispositivos…" />;
 
   return (
@@ -144,7 +174,14 @@ export function DevicesPage() {
       ) : (
         <div className="space-y-2.5">
           {devices.map((d) => (
-            <DeviceRow key={d.id} device={d} onRevoke={() => onRevoke(d.id)} />
+            <DeviceRow
+              key={d.id}
+              device={d}
+              onRevoke={() => onRevoke(d.id)}
+              onCambiarSecciones={(secciones) =>
+                void onCambiarSecciones(d.id, secciones)
+              }
+            />
           ))}
         </div>
       )}
@@ -207,9 +244,15 @@ function PairingCodeRow({ code }: { code: ActiveCodeRow }) {
 function DeviceRow({
   device,
   onRevoke,
+  onCambiarSecciones,
 }: {
   device: DeviceRow;
   onRevoke: () => void;
+  /** auditoria-sirope (#23) · cambiar las secciones de una pantalla de
+   *  cocina SIN revocarla. Antes había que revocar y volver a emparejar
+   *  con un código nuevo, tecleando seis dígitos en una tablet colgada de
+   *  la pared, para pasar de «Cocina» a «Cocina + Barra». */
+  onCambiarSecciones: (secciones: Array<"BARRA" | "COCINA" | "SALON">) => void;
 }) {
   const revoked = device.revokedAt != null;
   // v1.4-Bugs-Operativos Lote 3 · badge "Inactivo > 7 días" para que
@@ -271,6 +314,47 @@ function DeviceRow({
             : `emparejado ${formatRelative(device.pairedAt)}`}
         </div>
       </div>
+      {/* auditoria-sirope (#23) · las secciones se tocan aquí mismo. La
+          sección no es una credencial: es una preferencia, y cambiarla no
+          tiene por qué costar un emparejamiento nuevo. */}
+      {!revoked && device.kind === "KITCHEN" && (
+        <div className="flex gap-1.5 shrink-0">
+          {SECCIONES_COCINA.map((o) => {
+            const puesta = (device.kitchenSections ?? []).includes(o.valor);
+            // Una pantalla sin secciones no recibiría nada: el último que
+            // queda no se puede quitar.
+            const ultima = puesta && (device.kitchenSections ?? []).length === 1;
+            return (
+              <button
+                key={o.valor}
+                type="button"
+                disabled={ultima}
+                aria-pressed={puesta}
+                data-testid={`seccion-${device.id}-${o.valor}`}
+                title={
+                  ultima
+                    ? "Una pantalla sin secciones no recibe nada."
+                    : undefined
+                }
+                onClick={() =>
+                  onCambiarSecciones(
+                    puesta
+                      ? (device.kitchenSections ?? []).filter((x) => x !== o.valor)
+                      : [...(device.kitchenSections ?? []), o.valor],
+                  )
+                }
+                className={`h-9 px-3 rounded-xl border text-[12.5px] font-medium disabled:opacity-50 ${
+                  puesta
+                    ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                    : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
+                }`}
+              >
+                {o.etiqueta}
+              </button>
+            );
+          })}
+        </div>
+      )}
       {revoked ? (
         <span className="text-[11px] font-medium uppercase tracking-wider px-2 py-0.5 bg-slate-100 text-slate-500 rounded">
           revocado

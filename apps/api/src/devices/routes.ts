@@ -582,6 +582,90 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
         .send({ ok: true, alreadyRevoked: false, canalCerrado });
     },
   );
+
+  // ── auditoria-sirope (#23) · CAMBIAR LAS SECCIONES DE UNA PANTALLA ──
+  //
+  // Hasta este bloque, las secciones de una pantalla de cocina se
+  // decidían al generar su código de emparejamiento y no se podían tocar
+  // más: para pasar una pantalla de «Cocina» a «Cocina + Barra» había que
+  // REVOCARLA y volver a emparejarla con un código nuevo, con el
+  // implantador tecleando seis dígitos en una tablet colgada de la pared.
+  //
+  // No hay nada que lo justifique: la sección no es una credencial, es
+  // una preferencia. El token del aparato no cambia, la tablet sigue
+  // emparejada y el siguiente GET de la pantalla ya trae lo suyo.
+  //
+  // Lo que sí se mantiene: una pantalla SIN secciones no existe —no
+  // recibiría nada y el cocinero miraría una pantalla en blanco— y sólo
+  // se le cambian a un `KITCHEN`.
+  app.patch(
+    "/admin/devices/:deviceId/kitchen-sections",
+    {
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
+      schema: {
+        params: {
+          type: "object",
+          required: ["deviceId"],
+          properties: { deviceId: { type: "string", format: "uuid" } },
+        },
+        body: {
+          type: "object",
+          required: ["kitchenSections"],
+          additionalProperties: false,
+          properties: {
+            kitchenSections: {
+              type: "array",
+              minItems: 1,
+              maxItems: 3,
+              uniqueItems: true,
+              items: { type: "string", enum: ["BARRA", "COCINA", "SALON"] },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const auth = request.auth!;
+      const { deviceId } = request.params as { deviceId: string };
+      const body = request.body as {
+        kitchenSections: Array<"BARRA" | "COCINA" | "SALON">;
+      };
+      const prisma = getPrisma();
+      const device = await prisma.device.findFirst({
+        where: { id: deviceId, tenantId: auth.tenantId },
+        select: { id: true, kind: true, revokedAt: true },
+      });
+      if (!device) {
+        return reply
+          .code(404)
+          .send({ error: "DEVICE_NOT_FOUND", message: "Dispositivo no encontrado" });
+      }
+      if (device.kind !== "KITCHEN") {
+        return reply.code(409).send({
+          error: "NOT_A_KITCHEN_DEVICE",
+          message: "Sólo una pantalla de cocina tiene secciones.",
+        });
+      }
+      if (device.revokedAt) {
+        return reply.code(409).send({
+          error: "DEVICE_REVOKED",
+          message:
+            "Esta pantalla está revocada: hay que volver a emparejarla.",
+        });
+      }
+      const actualizado = await prisma.device.update({
+        where: { id: deviceId },
+        data: { kitchenSections: body.kitchenSections },
+        select: { id: true, kitchenSections: true },
+      });
+      return reply.code(200).send({
+        device: {
+          id: actualizado.id,
+          kitchenSections: actualizado.kitchenSections,
+        },
+      });
+    },
+  );
 }
 
 // Re-export para que cashier-login pueda hashear tokens si lo necesita
