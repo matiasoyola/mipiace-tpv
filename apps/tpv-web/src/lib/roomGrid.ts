@@ -439,3 +439,81 @@ export const LONGEST_TABLE_AMOUNT = "1234,50 €";
 // estrictamente más estrecha que el lado, así que un importe que entra
 // en la mesa redonda entra también en la rectangular del Salón. Una sola
 // cuenta, y la más exigente de las dos.
+
+// ── auditoria-sirope (#13) · LA MESA SALE DEL ANCHO QUE HAY ──────────
+//
+// `TABLE_SHAPE_SIZE` es un número fijo —144— calculado para el peor caso
+// de La Maestranza a 1280 × 800. En el D8 de Sirope, con tres zonas de
+// pocas mesas, eso dejaba ≈ 190 px muertos a la derecha del lienzo
+// (captura 23) y mesas más pequeñas de lo que la pantalla permite.
+//
+// La regla de v1.23 que NO se toca: **todas las mesas miden lo mismo**,
+// en todas las zonas y en la vista filtrada. Lo que cambia es que el
+// número ya no está escrito: se elige el MAYOR tamaño con el que la sala
+// entera sigue cabiendo sin desplazar, entre un suelo y un techo.
+//
+//   · El suelo (120) es el objetivo táctil con holgura: una mesa más
+//     pequeña se falla con el dedo en una barra llena.
+//   · El techo (200) existe porque una sala de tres mesas no debe pintar
+//     tres pantallas táctiles: a partir de ahí la mesa deja de parecer
+//     una mesa y el mapa deja de leerse de un golpe.
+//
+// 144 sigue siendo lo que sale en el caso que lo justificaba (La
+// Maestranza a 1280 × 800), así que no es una regresión de nada: es el
+// mismo número cuando toca y uno mayor cuando sobra sitio.
+
+/** El lado mínimo de una mesa. Por debajo se falla con el dedo. */
+export const TABLE_SHAPE_MIN = 120;
+/** El lado máximo. Por encima, el mapa deja de leerse de un golpe. */
+export const TABLE_SHAPE_MAX = 200;
+/** De cuatro en cuatro: pasos más finos no se ven y multiplican la cuenta. */
+const PASO_TAMANO = 4;
+
+/**
+ * El lado de mesa para esta sala en este viewport.
+ *
+ * El mayor múltiplo de 4 entre el suelo y el techo con el que la sala
+ * entera cabe sin desplazar. Si ni con el suelo cabe, devuelve el suelo:
+ * la sala desplaza —que es lo que hacía— pero las mesas no se encogen
+ * por debajo de lo que un dedo acierta.
+ */
+export function tamanoDeMesaPara(
+  zones: RoomZone[],
+  viewportWidth: number,
+  viewportHeight: number,
+): number {
+  if (zones.length === 0) return TABLE_SHAPE_SIZE;
+  for (let s = TABLE_SHAPE_MAX; s >= TABLE_SHAPE_MIN; s -= PASO_TAMANO) {
+    if (roomFitsWithoutScrollDark(zones, viewportWidth, viewportHeight, s)) {
+      return s;
+    }
+  }
+  return TABLE_SHAPE_MIN;
+}
+
+/**
+ * Lo que sobra a la derecha del lienzo con este tamaño de mesa.
+ *
+ * No lo usa la pantalla: lo usa el TEST, que es quien tiene que poder
+ * decir «en el D8 sobran 190 px» sin pintar nada. Es la medida del
+ * hallazgo, y tenerla escrita es lo que impide que vuelva.
+ */
+export function huecoALaDerecha(
+  zones: RoomZone[],
+  viewportWidth: number,
+  cardSize: number = TABLE_SHAPE_SIZE,
+): number {
+  const disponible = roomAvailableWidthDark(viewportWidth);
+  // El marco de zona más ancho manda: las zonas se reparten con
+  // `flex-wrap`, así que lo que sobra es lo que le sobra a la fila más
+  // llena.
+  let masAncho = 0;
+  for (const z of zones) {
+    const columnas = Math.min(
+      z.tables,
+      roomColumnsFor(disponible - 2 * ZONE_PADDING, cardSize),
+    );
+    masAncho = Math.max(masAncho, zoneOuterWidth(columnas, cardSize));
+  }
+  return Math.max(0, disponible - masAncho);
+}

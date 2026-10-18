@@ -63,6 +63,7 @@ import {
   getCachedCreditSalesEnabled,
   refreshCatalog,
 } from "../lib/catalog.js";
+import { ConfirmSheet } from "../components/ConfirmSheet.js";
 import { computeCart } from "../lib/cart.js";
 import { totalAparcadoEnVentaRapida } from "../lib/mostrador.js";
 import { loadPersistedCartLines } from "../lib/persistedCart.js";
@@ -79,6 +80,8 @@ import {
   ZONE_GAP,
   TABLE_SHAPE_RADIUS,
   TABLE_SHAPE_SIZE,
+  tamanoDeMesaPara,
+  type RoomZone,
   ZONE_PADDING,
   roundTableChordWidth,
 } from "../lib/roomGrid.js";
@@ -100,6 +103,8 @@ import {
   TABLE_BUSY_FILL,
   TABLE_BUSY_TEXT,
   TABLE_FREE_FILL,
+  TABLE_POR_RECOGER_FILL,
+  TABLE_POR_RECOGER_TEXT,
   TABLE_FREE_TEXT,
   TABLE_LATE_RING,
   TABLE_LATE_RING_WIDTH,
@@ -137,7 +142,10 @@ export interface ApiTable {
   height: number | null;
   barSeatIndex: number | null;
   groupedIntoTableId: string | null;
-  state: "FREE" | "OPEN" | "BILLING";
+  /** auditoria-sirope (#14) · POR_RECOGER: pagada y sin recoger. */
+  state: "FREE" | "OPEN" | "BILLING" | "POR_RECOGER";
+  /** auditoria-sirope (#14) · cuándo se cobró (ISO), para los minutos. */
+  porRecogerDesde?: string | null;
   activeTicket: {
     id: string;
     total: string;
@@ -271,6 +279,8 @@ export function TableMapScreen(props: TableMapScreenProps) {
   );
   // v1.9.3-mapa-visual · cobro desde tarjeta (sólo BILLING).
   const [cobro, setCobro] = useState<CobroState | null>(null);
+  // auditoria-sirope (#14) · la mesa POR RECOGER que se acaba de tocar.
+  const [porRecoger, setPorRecoger] = useState<ApiTable | null>(null);
   const [cobroBusyId, setCobroBusyId] = useState<string | null>(null);
   // Aviso inline de expulsión / éxito. Copia local del prop para poder
   // autocerrarlo a los 4 s sin depender del padre.
@@ -423,6 +433,38 @@ export function TableMapScreen(props: TableMapScreenProps) {
     }
   }
 
+  // auditoria-sirope (#13) · EL TAMAÑO DE MESA SALE DEL ANCHO QUE HAY.
+  //
+  // `TABLE_SHAPE_SIZE` era un número fijo (144) calculado para el peor
+  // caso de La Maestranza a 1280 × 800. En el D8 de Sirope, con tres
+  // zonas de pocas mesas, dejaba ≈ 190 px muertos a la derecha. La regla
+  // de v1.23 no se toca —todas las mesas miden lo mismo—: lo que cambia
+  // es que el número se elige en vez de estar escrito.
+  const ladoDeMesa = (() => {
+    if (typeof window === "undefined") return TABLE_SHAPE_SIZE;
+    const porZona = countByZone(tables);
+    const zonas: RoomZone[] = (
+      ["BARRA", "SALON", "TERRAZA", "RESERVADO"] as const
+    )
+      .filter((z) => (porZona[z] ?? 0) > 0)
+      .map((z) => ({ tables: porZona[z] ?? 0, isBar: z === "BARRA" }));
+    return tamanoDeMesaPara(zonas, window.innerWidth, window.innerHeight);
+  })();
+
+  async function dejarLibre(mesa: ApiTable): Promise<void> {
+    try {
+      await apiWithCashier(`/tables/${mesa.id}/recogida`, {
+        method: "POST",
+        body: {},
+      });
+    } catch {
+      // Una mesa que no se pudo marcar como recogida sigue ahí y se
+      // vuelve a tocar: no hay dinero en juego y un error modal por
+      // esto sería peor que el aviso que ya da el repoll.
+    }
+    void load();
+  }
+
   const renderRoomCard = (t: ApiTable) => {
     const principal = t.groupedIntoTableId
       ? (byId.get(t.groupedIntoTableId) ?? null)
@@ -441,6 +483,8 @@ export function TableMapScreen(props: TableMapScreenProps) {
         cobroBusy={cobroBusyId === t.id}
         canCobrar={canCobrar}
         lista={props.mesasListas?.has(t.id) === true}
+        lado={ladoDeMesa}
+        onRecogida={setPorRecoger}
         onServido={() => {
           const orderId = props.comandaListaPorMesa?.get(t.id);
           if (orderId && props.onServido) props.onServido(orderId);
@@ -583,9 +627,19 @@ export function TableMapScreen(props: TableMapScreenProps) {
 
       {/* v1.9.2-mesas-concurrencia · banner inline de expulsión / éxito.
           Autocierre 4 s, cerrable a mano. Nada de modales en el flujo. */}
+      {/* auditoria-sirope (#15) · EL AVISO FLOTA, NO EMPUJA.
+          «Mesa cobrada · Ticket 000024» era una franja en el flujo: al
+          aparecer bajaba el mapa entero y cortaba la leyenda por abajo
+          (capturas 29 y 73). Un aviso que se va solo a los cuatro
+          segundos no puede recolocar la pantalla debajo —y menos la
+          pantalla que el camarero está mirando para sentar a alguien—.
+
+          Flotante y arriba del todo: se lee sin tapar las mesas (ocupa
+          una franja estrecha centrada) y se va solo. */}
       {notice && (
         <div
-          className={`px-5 md:px-7 py-3 border-b flex items-start gap-3 ${
+          data-testid="room-notice"
+          className={`fixed top-3 left-1/2 -translate-x-1/2 z-50 max-w-[92vw] rounded-2xl shadow-lg px-4 py-3 border flex items-start gap-3 ${
             notice.tone === "success"
               ? "bg-emerald-50 border-emerald-200 text-emerald-800"
               : "bg-amber-50 border-amber-200 text-amber-900"
@@ -705,9 +759,14 @@ export function TableMapScreen(props: TableMapScreenProps) {
           <LegendDot fill={TABLE_FREE_FILL} label="Libre" />
           <LegendDot fill={TABLE_BUSY_FILL} label="Ocupada" />
           <LegendDot fill={TABLE_BILLING_FILL} label="Pide la cuenta" />
+          {/* auditoria-sirope (#14) · el estado nuevo, en la leyenda. */}
+          <LegendDot fill={TABLE_POR_RECOGER_FILL} label="Por recoger" />
           <LegendDot
             fill={TABLE_BUSY_FILL}
             ring={TABLE_LATE_RING}
+            // auditoria-sirope (#16) · y el aro deja de compartir color
+            // con «pide la cuenta»: aquí se ve al lado.
+            dashed
             label="+45 min sin atender"
           />
         </div>
@@ -869,6 +928,30 @@ export function TableMapScreen(props: TableMapScreenProps) {
           El modal de cobro ES el mismo que en SalePage (CheckoutOverlay),
           en modo mesa (draftTicketId/tableId) — mismo endpoint, misma
           idempotencia, cero cambios de flujo de dinero. */}
+      {/* auditoria-sirope (#14) · los dos toques de una mesa por recoger.
+          «Dejar libre» la deja lista sin sentar a nadie; «Abrir cuenta
+          nueva» la ocupa directamente —y la limpia de paso, que es lo
+          que pasa de verdad cuando llega el siguiente cliente—. */}
+      {porRecoger && (
+        <ConfirmSheet
+          title={`${porRecoger.name} · por recoger`}
+          body={`Se cobró hace ${minutosDesde(porRecoger.porRecogerDesde)}. ¿Qué hacemos con ella?`}
+          confirmLabel="Abrir cuenta nueva"
+          cancelLabel="Volver"
+          altLabel="Dejar libre"
+          onCancel={() => setPorRecoger(null)}
+          onConfirm={() => {
+            const mesa = porRecoger;
+            setPorRecoger(null);
+            props.onPickTable(mesa);
+          }}
+          onAlt={() => {
+            const mesa = porRecoger;
+            setPorRecoger(null);
+            void dejarLibre(mesa);
+          }}
+        />
+      )}
       {cobro && props.shiftId && props.registerId && (
         <Suspense
           fallback={
@@ -1058,6 +1141,8 @@ function TableCard({
   cobroBusy,
   canCobrar,
   lista,
+  lado,
+  onRecogida,
   onServido,
   onPick,
   onCobrar,
@@ -1073,6 +1158,10 @@ function TableCard({
   canCobrar: boolean;
   /** kds-1-cocina (decisión 5) · hay algo de esta mesa listo en el pase. */
   lista: boolean;
+  /** auditoria-sirope (#13) · el lado de la caja, que ya no es fijo. */
+  lado: number;
+  /** auditoria-sirope (#14) · un toque en una mesa POR RECOGER. */
+  onRecogida: (t: ApiTable) => void;
   onServido: () => void;
   onPick: (t: ApiTable) => void;
   onCobrar: (t: ApiTable) => void;
@@ -1081,10 +1170,15 @@ function TableCard({
   const minutes = useElapsedMinutes(table.activeTicket?.openedAt);
   const absorbed = !!table.groupedIntoTableId;
   const disabled = offline || pendingCheckout || anyOpening;
-  const radius = TABLE_SHAPE_RADIUS[table.zone];
+  // El radio sigue siendo lo único que distingue una zona de otra, pero
+  // el de los círculos es la MITAD DEL LADO: con un lado variable, un
+  // radio fijo de 72 convertiría la mesa en un rectángulo de esquinas
+  // redondas en cuanto el lado creciera.
+  const esCirculo = TABLE_SHAPE_RADIUS[table.zone] >= TABLE_SHAPE_SIZE / 2;
+  const radius = esCirculo ? lado / 2 : TABLE_SHAPE_RADIUS[table.zone];
   const box = {
-    width: TABLE_SHAPE_SIZE,
-    height: TABLE_SHAPE_SIZE,
+    width: lado,
+    height: lado,
     borderRadius: radius,
   };
 
@@ -1118,8 +1212,13 @@ function TableCard({
 
   const isFree = table.state === "FREE";
   const isBilling = table.state === "BILLING";
+  // auditoria-sirope (#14) · pagada y todavía con el servicio encima.
+  const porRecoger = table.state === "POR_RECOGER";
   const olvidada =
-    !isFree && minutes != null && minutes >= FORGOTTEN_TABLE_MINUTES;
+    !isFree &&
+    !porRecoger &&
+    minutes != null &&
+    minutes >= FORGOTTEN_TABLE_MINUTES;
   const pax =
     table.capacity + groupedChildren.reduce((s, c) => s + c.capacity, 0);
   const groupBadge =
@@ -1129,18 +1228,22 @@ function TableCard({
 
   const fill = pendingCheckout
     ? DARK_SURFACE_RAISED
-    : isFree
-      ? TABLE_FREE_FILL
-      : isBilling
-        ? TABLE_BILLING_FILL
-        : TABLE_BUSY_FILL;
+    : porRecoger
+      ? TABLE_POR_RECOGER_FILL
+      : isFree
+        ? TABLE_FREE_FILL
+        : isBilling
+          ? TABLE_BILLING_FILL
+          : TABLE_BUSY_FILL;
   const text = pendingCheckout
     ? DARK_TEXT_MUTED
-    : isFree
-      ? TABLE_FREE_TEXT
-      : isBilling
-        ? TABLE_BILLING_TEXT
-        : TABLE_BUSY_TEXT;
+    : porRecoger
+      ? TABLE_POR_RECOGER_TEXT
+      : isFree
+        ? TABLE_FREE_TEXT
+        : isBilling
+          ? TABLE_BILLING_TEXT
+          : TABLE_BUSY_TEXT;
 
   const alias =
     table.activeTicket?.openedByAlias ??
@@ -1184,18 +1287,24 @@ function TableCard({
       )}
       <button
         type="button"
-        onClick={() => onPick(table)}
+        // auditoria-sirope (#14) · en una mesa POR RECOGER, un toque no
+        // abre cuenta: pregunta qué se hace con ella. Abrir cuenta sin
+        // querer en una mesa sin recoger es sentar a alguien en el
+        // servicio del anterior.
+        onClick={() => (porRecoger ? onRecogida(table) : onPick(table))}
         disabled={disabled}
         data-testid="table-shape"
         data-zone={table.zone}
         data-state={
           pendingCheckout
             ? "pending"
-            : isFree
-              ? "free"
-              : isBilling
-                ? "billing"
-                : "busy"
+            : porRecoger
+              ? "por-recoger"
+              : isFree
+                ? "free"
+                : isBilling
+                  ? "billing"
+                  : "busy"
         }
         data-late={olvidada ? "true" : "false"}
         data-lista={lista ? "true" : "false"}
@@ -1229,9 +1338,16 @@ function TableCard({
           // El aro de «+45 min sin atender». Va por `box-shadow` y no por
           // `ring` de Tailwind para que siga el radio de la forma: en un
           // círculo, un aro cuadrado sería un marco alrededor de la mesa.
-          boxShadow: olvidada
-            ? `0 0 0 ${TABLE_LATE_RING_WIDTH}px ${TABLE_LATE_RING}`
+          // auditoria-sirope (#16) · el aro de «+45 min» pasa a ROJO y
+          // DISCONTINUO: con el ámbar de «pide la cuenta» eran la misma
+          // señal y el aro se leía como medio relleno. Va por `outline`
+          // y no por `box-shadow` porque un `box-shadow` no puede ser
+          // discontinuo; el `outline` sigue el `border-radius` desde
+          // Chrome 94, y el WebView más viejo del parque es el 101.
+          outline: olvidada
+            ? `${TABLE_LATE_RING_WIDTH}px dashed ${TABLE_LATE_RING}`
             : undefined,
+          outlineOffset: olvidada ? 2 : undefined,
         }}
       >
         <span
@@ -1241,7 +1357,23 @@ function TableCard({
         >
           {table.name}
         </span>
-        {isFree ? (
+        {porRecoger ? (
+          // auditoria-sirope (#14) · lo que hay que saber de un vistazo:
+          // que está pagada y cuánto lleva esperando. El importe no —ya
+          // se cobró— y los pax tampoco: nadie se sienta aquí todavía.
+          <>
+            <span
+              data-testid="table-por-recoger"
+              className="font-semibold uppercase"
+              style={{ fontSize: 13, letterSpacing: "0.06em" }}
+            >
+              Por recoger
+            </span>
+            <span className="font-medium" style={{ fontSize: 15, opacity: 0.8 }}>
+              {minutosDesde(table.porRecogerDesde)}
+            </span>
+          </>
+        ) : isFree ? (
           <span
             className="font-medium"
             style={{ fontSize: 14, opacity: 0.65 }}
@@ -1325,7 +1457,7 @@ function TableCard({
             left: "50%",
             transform: "translateX(-50%)",
             bottom: COBRAR_BOTTOM,
-            maxWidth: cobrarMaxWidth(table.zone),
+            maxWidth: cobrarMaxWidth(table.zone, lado),
             paddingLeft: 10,
             paddingRight: 10,
             height: COBRAR_HEIGHT,
@@ -1359,13 +1491,13 @@ const COBRAR_BOTTOM = 18;
  * círculo de 144 px mide 144 en su eje pero mucho menos a 36 px del
  * borde, y ahí es donde el botón se apoya.
  */
-function cobrarMaxWidth(zone: TableZone): number {
+function cobrarMaxWidth(zone: TableZone, lado: number = TABLE_SHAPE_SIZE): number {
   if (TABLE_SHAPE_RADIUS[zone] < TABLE_SHAPE_SIZE / 2) {
-    return TABLE_SHAPE_SIZE - 16;
+    return lado - 16;
   }
   const centroDelBoton = COBRAR_BOTTOM + COBRAR_HEIGHT / 2;
-  const offset = TABLE_SHAPE_SIZE / 2 - centroDelBoton;
-  return Math.floor(roundTableChordWidth(offset) - 8);
+  const offset = lado / 2 - centroDelBoton;
+  return Math.floor(roundTableChordWidth(offset, lado) - 8);
 }
 
 /**
@@ -1407,10 +1539,14 @@ function BarZone({
 function LegendDot({
   fill,
   ring,
+  dashed,
   label,
 }: {
   fill: string;
   ring?: string;
+  /** auditoria-sirope (#16) · el aro de «+45 min» es discontinuo, y la
+   *  leyenda tiene que enseñarlo igual que la mesa. */
+  dashed?: boolean;
   label: string;
 }) {
   return (
@@ -1419,7 +1555,11 @@ function LegendDot({
         className="w-3.5 h-3.5 rounded-[4px] shrink-0"
         style={{
           background: fill,
-          boxShadow: ring ? `0 0 0 3px ${ring}` : undefined,
+          ...(ring
+            ? dashed
+              ? { outline: `2px dashed ${ring}`, outlineOffset: 2 }
+              : { boxShadow: `0 0 0 3px ${ring}` }
+            : {}),
         }}
       />
       {label}
@@ -1491,3 +1631,21 @@ function aliasName(label: string): string {
 // `TableCard`), y un avatar de 20 px con dos letras dentro de un círculo
 // de mesa competía con el importe sin decir nada que no estuviera a un
 // toque. `aliasName` sigue, porque el `title` lo usa.
+
+/**
+ * auditoria-sirope (#14) · «hace 7 min», desde que se cobró.
+ *
+ * Minutos y no una hora: lo que se pregunta mirando una mesa sin
+ * recoger es cuánto lleva así, no a qué hora fue. Y se redondea a
+ * minutos porque los segundos en un mapa de sala son ruido que cambia
+ * solo.
+ */
+function minutosDesde(iso: string | null | undefined): string {
+  if (!iso) return "hace un momento";
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 60_000) return "hace menos de 1 min";
+  const min = Math.floor(ms / 60_000);
+  if (min < 60) return `hace ${min} min`;
+  const h = Math.floor(min / 60);
+  return `hace ${h} h ${min % 60} min`;
+}

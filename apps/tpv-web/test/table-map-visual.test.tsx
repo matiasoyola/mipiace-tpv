@@ -306,14 +306,19 @@ describe("TableMapScreen · lienzo visual", () => {
     expect(cobrar).not.toBeNull();
     expect(cobrar!.textContent).toContain("Cobrar");
     expect(m3.getAttribute("data-late")).toBe("true");
-    // El aro sigue el radio de la forma: va por `box-shadow`, no por un
-    // `ring` cuadrado alrededor de un círculo.
-    // `boxShadow` lo devuelve jsdom tal cual se escribió (no lo
-    // normaliza a `rgb()` como hace con `background`), así que aquí se
-    // compara contra el token en hex.
-    expect(m3.style.boxShadow).toContain(TABLE_LATE_RING);
+    // El aro sigue el radio de la forma: no es un `ring` cuadrado
+    // alrededor de un círculo.
+    //
+    // auditoria-sirope (#16) · y pasa de `box-shadow` ámbar a `outline`
+    // ROJO DISCONTINUO: con el ámbar de «pide la cuenta» eran la misma
+    // señal. Un `box-shadow` no puede ser discontinuo; el `outline`
+    // sigue el `border-radius` desde Chrome 94 y el WebView más viejo
+    // del parque es el 101. jsdom devuelve `outline` tal cual se
+    // escribió, así que se compara contra el token en hex.
+    expect(m3.style.outline).toContain(TABLE_LATE_RING);
+    expect(m3.style.outline).toContain("dashed");
 
-    // Ocupada olvidada (50 min): aro ámbar aunque no esté en BILLING.
+    // Ocupada olvidada (50 min): aro aunque no esté en BILLING.
     expect(formaDeMesa("M4").getAttribute("data-late")).toBe("true");
 
     // Libre: lo MÁS claro del lienzo, sin importe.

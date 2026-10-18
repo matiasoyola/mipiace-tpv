@@ -1753,6 +1753,18 @@ model Table {
   // del prompt B7), apunta a la mesa principal. NULL = mesa autónoma.
   // Se limpia automáticamente al cobrar el ticket principal del grupo.
   groupedIntoTableId String?   @map("grouped_into_table_id") @db.Uuid
+  /// auditoria-sirope (#14) · DESDE CUÁNDO ESTÁ PAGADA Y SIN RECOGER.
+  ///
+  /// El 18-10 se cobró la T6 y la mesa pasó a Libre en el mismo
+  /// instante: en el mapa figuraba disponible con el servicio todavía
+  /// puesto encima. El camarero que mira la sala desde la barra no sabe
+  /// si puede sentar a nadie ahí.
+  ///
+  /// `NULL` = la mesa no está esperando a que la recojan. Lo pone el
+  /// cobro y lo quita «Dejar libre», abrir cuenta nueva o el corte de
+  /// día. Vive en el SERVIDOR y no en el navegador porque lo tienen que
+  /// ver todas las cajas: el que cobra y el que recoge no son el mismo.
+  porRecogerDesde    DateTime? @map("por_recoger_desde") @db.Timestamptz()
   deletedAt          DateTime? @map("deleted_at") @db.Timestamptz()
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz()
 

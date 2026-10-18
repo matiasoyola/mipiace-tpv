@@ -1385,6 +1385,25 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
               where: { groupedIntoTableId: draft.tableId },
               data: { groupedIntoTableId: null },
             });
+            // auditoria-sirope (#14) · la mesa queda POR RECOGER.
+            //
+            // Hasta hoy pasaba a Libre en el instante del cobro y en el
+            // mapa figuraba disponible con el servicio todavía encima.
+            // No es libre —no se puede sentar a nadie— y no está
+            // abierta —no debe nada—, y las dos cosas las tiene que ver
+            // la caja de al lado, así que vive en el servidor.
+            //
+            // Las mesas ABSORBIDAS por un grupo también: se recogen
+            // igual que la principal.
+            await tx.table.updateMany({
+              where: {
+                OR: [
+                  { id: draft.tableId },
+                  { groupedIntoTableId: draft.tableId },
+                ],
+              },
+              data: { porRecogerDesde: new Date() },
+            });
           }
           await tx.shift.update({
             where: { id: resolution.shiftId },

@@ -102,6 +102,13 @@ export async function registerTableOperativaRoutes(
         cashier.sub,
         body.diners ?? null,
       );
+      // auditoria-sirope (#14) · abrir cuenta nueva la ocupa y la saca
+      // de «por recoger»: lo que se recoge se recoge para sentar a
+      // alguien, y ya hay alguien sentado.
+      await prisma.table.updateMany({
+        where: { id: ctx.tableId, porRecogerDesde: { not: null } },
+        data: { porRecogerDesde: null },
+      });
       if (wasNew) {
         const cashierUser = await prisma.user.findUniqueOrThrow({
           where: { id: cashier.sub },
@@ -116,6 +123,50 @@ export async function registerTableOperativaRoutes(
         });
       }
       return reply.code(201).send({ ticket: serializeDraft(draft) });
+    },
+  );
+
+  // ── auditoria-sirope (#14) · DEJAR LIBRE UNA MESA POR RECOGER ─────
+  //
+  // El otro toque del estado nuevo. «Abrir cuenta nueva» la ocupa (y la
+  // limpia de paso, arriba); esto la deja lista sin sentar a nadie.
+  //
+  // Es idempotente a propósito: dos camareros que la toquen a la vez no
+  // se pisan, y tocar una mesa que ya está libre no es un error —es lo
+  // que querías—.
+  app.post(
+    "/tables/:tableId/recogida",
+    {
+      preHandler: [requireCashierSession, ensureCajaEnabled],
+      schema: {
+        params: {
+          type: "object",
+          required: ["tableId"],
+          properties: { tableId: { type: "string", format: "uuid" } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const cashier = request.cashier!;
+      const { tableId } = request.params as { tableId: string };
+      const prisma = getPrisma();
+      const ctx = await ensureTableContext(prisma, cashier, tableId);
+      if ("error" in ctx) return reply.code(ctx.status).send(ctx.error);
+      await prisma.table.updateMany({
+        where: { id: ctx.tableId },
+        data: { porRecogerDesde: null },
+      });
+      // El mapa de las demás cajas se entera por el mismo bus que todo
+      // lo demás de la sala: la mesa pasa a libre y hay que poder
+      // sentar a alguien sin esperar al repoll de 30 s.
+      getStoreEventBus().broadcast(ctx.storeId, {
+        type: "table.cleared",
+        tableId: ctx.tableId,
+        ticketId: "",
+        reason: "recogida",
+        at: new Date().toISOString(),
+      });
+      return reply.code(200).send({ ok: true });
     },
   );
 

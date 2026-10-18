@@ -51,6 +51,7 @@ const { registerMostradorRoutes } = await import("../src/tickets/mostrador.js");
 const { registerTableOperativaRoutes } = await import(
   "../src/tables/operativa.js"
 );
+const { buildTableSnapshot } = await import("../src/tables/routes.js");
 const { registerTicketRoutes } = await import("../src/tickets/routes.js");
 const { registerErrorHandler } = await import("../src/lib/error-handler.js");
 const { registerLenientJsonParser } = await import("../src/lib/lenient-json.js");
@@ -346,6 +347,66 @@ describe.skipIf(!e2eEnabled)("e2e · auditoria-sirope", () => {
       expect(order.readyAt).toBeNull();
       // Cobrar no hace desaparecer un plato a medio hacer.
       expect(order.servedAt).toBeNull();
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────
+  // #14 · la mesa cobrada queda POR RECOGER
+  // ──────────────────────────────────────────────────────────────────
+
+  describe("#14 · por recoger", () => {
+    it("cobrar la mesa NO la deja libre: la deja por recoger", async () => {
+      // EL SABOTAJE: no marcar la mesa deja el mapa diciendo «libre» con
+      // el servicio todavía encima, que es la captura 29 del 18-10.
+      const abierta = await post(`/tables/${mesaId}/open`, {});
+      const ticketId = abierta.json().ticket.id;
+      await post(
+        `/tables/${mesaId}/lines`,
+        lineaDe(cafeId, "Café con leche", 1.3),
+      );
+      await post(`/tickets/${ticketId}/checkout`, {
+        externalId: randomUUID(),
+        payments: [{ method: "CASH", amount: 1.43 }],
+      });
+
+      const mesa = await prisma.table.findUniqueOrThrow({
+        where: { id: mesaId },
+        select: { porRecogerDesde: true },
+      });
+      expect(mesa.porRecogerDesde).not.toBeNull();
+
+      const snapshot = await buildTableSnapshot(prisma, tenantId, storeId);
+      const t6 = snapshot.find((t) => t.id === mesaId)!;
+      expect(t6.state).toBe("POR_RECOGER");
+      // Y no cuenta como abierta: no debe nada.
+      expect(t6.activeTicket).toBeNull();
+    });
+
+    it("«Dejar libre» la deja libre", async () => {
+      const res = await post(`/tables/${mesaId}/recogida`, {});
+      expect(res.statusCode).toBe(200);
+      const snapshot = await buildTableSnapshot(prisma, tenantId, storeId);
+      expect(snapshot.find((t) => t.id === mesaId)!.state).toBe("FREE");
+    });
+
+    it("abrir cuenta nueva también la saca de «por recoger»", async () => {
+      // Se vuelve a dejar por recoger a mano: lo que se prueba aquí es
+      // el efecto de abrir, no el del cobro (ya probado arriba).
+      await prisma.table.update({
+        where: { id: mesaId },
+        data: { porRecogerDesde: new Date() },
+      });
+      const abierta = await post(`/tables/${mesaId}/open`, {});
+      expect(abierta.statusCode).toBe(201);
+      const mesa = await prisma.table.findUniqueOrThrow({
+        where: { id: mesaId },
+        select: { porRecogerDesde: true },
+      });
+      expect(mesa.porRecogerDesde).toBeNull();
+      // Y la mesa está OCUPADA, no por recoger: hay alguien sentado.
+      const snapshot = await buildTableSnapshot(prisma, tenantId, storeId);
+      expect(snapshot.find((t) => t.id === mesaId)!.state).toBe("OPEN");
+      await del(`/tickets/${abierta.json().ticket.id}`);
     });
   });
 

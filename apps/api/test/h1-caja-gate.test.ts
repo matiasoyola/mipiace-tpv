@@ -217,7 +217,8 @@ describe("H1 · las rutas reales llevan la puerta puesta", () => {
     ["cashiers/routes.ts", 5],
     ["tickets/routes.ts", 8],
     ["tickets/credit-routes.ts", 4],
-    ["tables/operativa.ts", 6],
+    // auditoria-sirope (#14) · 7 con «dejar libre» una mesa por recoger.
+    ["tables/operativa.ts", 7],
     // auditoria-sirope (#25) · la venta de mostrador: su borrador y sus
     // líneas.
     ["tickets/mostrador.ts", 2],

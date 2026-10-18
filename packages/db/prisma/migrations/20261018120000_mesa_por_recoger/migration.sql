@@ -1,0 +1,26 @@
+-- auditoria-sirope (#14) · la mesa pagada que todavía no se ha recogido.
+--
+-- El 18-10 se cobró la T6 y la mesa pasó a Libre en el instante del
+-- cobro: en el mapa figuraba disponible con los platos y los vasos
+-- todavía encima. El camarero que mira la sala desde la barra no tiene
+-- forma de saber si puede sentar a alguien ahí, y el que recoge no sabe
+-- cuáles le tocan.
+--
+-- Una columna y no un estado nuevo en un enum: el estado de una mesa ya
+-- se DERIVA (hay un DRAFT → OPEN; no lo hay → FREE) y meter un enum
+-- obligaría a mantener dos verdades. Esto es un dato —cuándo se cobró—
+-- del que la derivación saca el estado y los minutos que lleva
+-- esperando.
+--
+-- NULL en todo lo que ya existe, que es lo correcto: ninguna mesa de
+-- hoy está esperando a que la recojan.
+--
+-- ── down ──────────────────────────────────────────────────────────────
+--
+--   ALTER TABLE "tables" DROP COLUMN "por_recoger_desde";
+--
+-- Las mesas que estuvieran «por recoger» vuelven a aparecer libres, que
+-- es exactamente como estaban antes de este bloque. No hay dinero ni
+-- registro detrás: el cobro ya ocurrió y vive en su ticket.
+
+ALTER TABLE "tables" ADD COLUMN "por_recoger_desde" TIMESTAMPTZ;
