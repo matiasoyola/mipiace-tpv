@@ -304,14 +304,15 @@ describe.skipIf(!e2eEnabled)("e2e · clinica-7 · el blindaje", () => {
       expect(msg).toContain("body_cifrado_formato");
     });
 
-    it("las DIECISIETE columnas cifradas tienen su CHECK de formato", async () => {
+    it("las VEINTIDÓS columnas cifradas tienen su CHECK de formato", async () => {
       // Que no falte ninguna. Una columna cifrada sin CHECK es una columna
       // donde el texto en claro cabe.
       //
-      // ── NUEVE, QUINCE Y AHORA DIECISIETE ─────────────────────────
+      // ── NUEVE, QUINCE, DIECISIETE Y AHORA VEINTIDÓS ──────────────
       //
-      // Nueve de clinica-7, seis de residencia-1b (D-63) y dos del
-      // registro de cuidados (residencia-3). Están aquí a propósito en vez
+      // Nueve de clinica-7, seis de residencia-1b (D-63), dos del
+      // registro de cuidados (residencia-3) y cinco del libro de
+      // incidencias (residencia-4). Están aquí a propósito en vez
       // de en una lista aparte: esta aserción es EL INVENTARIO de lo que el
       // motor sostiene cifrado en toda la casa. Partirla en dos habría sido
       // dos listas que pueden dejar de cubrirse, y lo que hace falta saber
@@ -353,6 +354,14 @@ describe.skipIf(!e2eEnabled)("e2e · clinica-7 · el blindaje", () => {
           // descifraría.
           "care_records_note_cifrado_formato",
           "care_records_value_cifrado_formato",
+          // residencia-4 · el libro de incidencias. Cinco columnas
+          // lógicas y no tres: con el mismo nombre, lo que se le dijo a
+          // la familia se podría copiar al motivo de no habérselo dicho.
+          "family_communications_content_cifrado_formato",
+          "family_communications_response_cifrado_formato",
+          "incident_actions_text_cifrado_formato",
+          "incidents_description_cifrado_formato",
+          "resident_threshold_overrides_reason_cifrado_formato",
         ].sort(),
       );
     });
