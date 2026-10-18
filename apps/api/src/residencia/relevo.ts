@@ -1064,10 +1064,30 @@ export async function anotarLoQueLlegoTarde(
   if (partes.length === 0) return { anotados: 0 };
 
   const dek = await dekONada(entrada.tenantId, prisma);
-  const ocupaciones = await prisma.bedAssignment.findMany({
-    where: { tenantId: entrada.tenantId, toAt: null },
-    select: { clientId: true, bed: { select: { room: { select: { floorId: true } } } } },
-  });
+  const [ocupaciones, controles, ajustes] = await Promise.all([
+    prisma.bedAssignment.findMany({
+      where: { tenantId: entrada.tenantId, toAt: null },
+      select: { clientId: true, bed: { select: { room: { select: { floorId: true } } } } },
+    }),
+    prisma.controlType.findMany({
+      where: {
+        supersededAt: null,
+        OR: [{ scope: "STANDARD" }, { scope: "CENTER", tenantId: entrada.tenantId }],
+      },
+      select: { code: true, name: true },
+    }),
+    prisma.centerControlSetting.findMany({
+      where: { tenantId: entrada.tenantId },
+      select: { controlCode: true, alias: true },
+    }),
+  ]);
+  // El NOMBRE del control, no su código: «Cambio postural», no
+  // `CAMBIO_POSTURAL`. Es lo que la sala pinta, y **el enum no es la
+  // pantalla** (lección 5 del bucle visual de residencia-4).
+  const aliasDelCentro = new Map(ajustes.map((a) => [a.controlCode, a.alias]));
+  const nombreDeSerie = new Map(controles.map((c) => [c.code, c.name]));
+  const nombreDelControl = (code: string): string =>
+    aliasDelCentro.get(code) ?? nombreDeSerie.get(code) ?? code;
   const floorPorCliente = new Map(
     ocupaciones.map((o) => [o.clientId, o.bed.room.floorId as string | null]),
   );
@@ -1151,7 +1171,7 @@ export async function anotarLoQueLlegoTarde(
         clientId: r.clientId,
         occurredAt: r.recordedAt,
         arrivedAt: r.receivedAt,
-        resumen: `${r.controlCode}${nota ? `: ${nota}` : ""}`,
+        resumen: `${nombreDelControl(r.controlCode)}${nota ? `: ${nota}` : ""}`,
       });
     }
     for (const i of incidencias) {

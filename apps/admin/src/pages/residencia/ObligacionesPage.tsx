@@ -265,7 +265,7 @@ export function ObligacionesPage() {
                 <button
                   type="button"
                   onClick={() => setParams({ duty: o.dutyId })}
-                  className="underline"
+                  className="min-h-9 py-1 text-left underline"
                 >
                   {o.nombre}
                 </button>{" "}
@@ -274,7 +274,7 @@ export function ObligacionesPage() {
                 <PrimaryButton
                   type="button"
                   onClick={() => void marcarHecha(o.id)}
-                  className="ml-3 !inline-flex !h-8 !w-auto !px-3 !text-[12px]"
+                  className="ml-3 !inline-flex !h-9 !w-auto !px-3 !text-[12.5px]"
                 >
                   Hecha
                 </PrimaryButton>
@@ -294,7 +294,7 @@ export function ObligacionesPage() {
                 <PrimaryButton
                   type="button"
                   onClick={() => void marcarHecha(o.id)}
-                  className="ml-3 !inline-flex !h-8 !w-auto !px-3 !text-[12px]"
+                  className="ml-3 !inline-flex !h-9 !w-auto !px-3 !text-[12.5px]"
                 >
                   Hecha
                 </PrimaryButton>
@@ -331,12 +331,17 @@ export function ObligacionesPage() {
                     >
                       {NOMBRE_DE_LA_CONSECUENCIA[o.consequence]}
                     </span>
+                    {/* **El nombre ES el botón que la abre**, así que
+                        tiene altura de objetivo táctil y no la de su
+                        texto: a 390 px un botón de 20 px es un botón
+                        que no se acierta. Lo encontró el bucle visual
+                        midiendo los botones de la pantalla. */}
                     <button
                       type="button"
                       onClick={() =>
                         setParams(abierta === o.id ? {} : { duty: o.id })
                       }
-                      className="font-medium underline"
+                      className="min-h-9 py-1 text-left font-medium underline"
                     >
                       {o.name}
                     </button>
@@ -425,7 +430,7 @@ export function ObligacionesPage() {
                                   <OutlineButton
                                     type="button"
                                     onClick={() => void marcarHecha(oc.id)}
-                                    className="!inline-flex !h-8 !w-auto !px-3 !text-[12px]"
+                                    className="!inline-flex !h-9 !w-auto !px-3 !text-[12.5px]"
                                   >
                                     Marcar hecha
                                   </OutlineButton>

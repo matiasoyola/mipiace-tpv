@@ -138,23 +138,27 @@ interface MeResponse {
 // aporta un módulo hoy; el CRM del cliente vive en el TPV, así que una
 // empresa con CRM y sin agenda aterriza en su cuenta.
 function landingSinCaja(tenant: MeResponse["tenant"]): string {
-  if (tenant.agendaEnabled) return "/admin/agenda-catalog";
-  // F1 · el colegio de Talavera. Su panel entero es esta sección, así que
-  // aterriza en lo primero que va a mirar cada mañana: quién está dentro.
-  // Va DESPUÉS de la agenda para no mover a nadie de sitio: un tenant con
-  // agenda seguía entrando ahí antes de este bloque y sigue haciéndolo.
   // residencia-5 (decisión de producto 5) · **el panel de dirección es la
   // pantalla de inicio de un centro de residencia.** Va PRIMERO, delante
-  // de la agenda y del fichaje: un tenant de residencia tiene los dos
-  // encendidos (el alta los enciende) y lo que la dirección abre cada
-  // mañana es «qué hay abierto hoy», que es la métrica de éxito del
-  // producto (bloque C §2).
+  // de la agenda y del fichaje, y eso es lo que lo hace la pantalla de
+  // inicio: un tenant de residencia tiene la agenda encendida también
+  // —el alta la enciende, y la clínica la necesita— así que con la
+  // agenda delante la dirección aterrizaba en el catálogo de servicios.
+  // Se vio en el bucle visual, no en un test.
+  //
+  // Lo que la dirección abre cada mañana es «qué hay abierto hoy», que es
+  // la métrica de éxito del producto (bloque C §2).
   //
   // Un encargado sin rol de cuidado directivo aterriza aquí igual y la
   // pantalla le dice que esto es de dirección, con los enlaces de lo que
   // sí puede abrir. Mandarle a su cuenta habría sido esconderle que el
   // panel existe.
   if (tenant.residenciaEnabled) return "/admin/residencia/panel";
+  if (tenant.agendaEnabled) return "/admin/agenda-catalog";
+  // F1 · el colegio de Talavera. Su panel entero es esta sección, así que
+  // aterriza en lo primero que va a mirar cada mañana: quién está dentro.
+  // Va DESPUÉS de la agenda para no mover a nadie de sitio: un tenant con
+  // agenda seguía entrando ahí antes de aquel bloque y sigue haciéndolo.
   if (tenant.fichajeEnabled) return "/admin/fichaje";
   return "/admin/account";
 }

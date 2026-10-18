@@ -471,7 +471,18 @@ async function main(): Promise<void> {
   // razón: un turno que no ha acabado no tiene parte congelado, y lo que
   // hay que poder ver es el parte congelado.
   await sembrarLaTabletDeLaSala();
-  await sembrarElDiaDeAyer(dek);
+  // **Ayer y hoy.** Ayer entero, con sus tres turnos cerrados; de hoy, lo
+  // que ya haya cerrado. Si sólo se sembrara ayer, la tablet de la sala
+  // enseñaría el parte de ESTA mañana —que es el último congelado— con
+  // treinta líneas de «no se hizo» y ninguna novedad, porque nadie habría
+  // registrado nada hoy. Un parte así es verdad y no se parece a un turno
+  // de verdad.
+  for (const dia of [
+    new Date(Date.now() - 24 * 3600_000).toISOString().slice(0, 10),
+    new Date().toISOString().slice(0, 10),
+  ]) {
+    await sembrarElDia(dek, dia);
+  }
   await sembrarLasObligaciones();
 
   console.log(
@@ -519,19 +530,24 @@ async function sembrarLaTabletDeLaSala(): Promise<void> {
 }
 
 /**
- * **AYER, CON SUS TRES TURNOS.** Lo que pasó en cada uno, los tres partes
- * congelados, uno confirmado y un añadido tardío.
+ * **UN DÍA CON SUS TURNOS.** Lo que pasó en cada uno, los partes
+ * congelados de los que ya cerraron, uno confirmado y un añadido tardío.
  *
- * Idempotente: si ya hay un parte de ayer, no hace nada. Correr el
- * sembrador dos veces no duplica el escenario — y no podría aunque
- * quisiera, porque `congelarParte` se apoya en el índice único.
+ * ── IDEMPOTENTE SIN UN «SI YA HAY, NO HAGAS NADA» ─────────────────
+ *
+ * Cada pieza se apoya en el motor: los registros y las incidencias
+ * entran con `ON CONFLICT DO NOTHING`, `congelarParte` se apoya en el
+ * índice único `(tenant, turno, día)` y `anotarLoQueLlegoTarde` en los
+ * suyos.
+ *
+ * El guardia «si ya hay un parte de este día, salir» que esto tenía
+ * **estaba mal** y se vio en el bucle visual: la pasada de la API corre
+ * cada minuto y congela los turnos cerrados de las últimas 24 h, así que
+ * entre el reseteo y el sembrador le daba tiempo a congelar la tarde y la
+ * noche — y entonces el sembrador se saltaba el día entero y la mañana se
+ * quedaba sin parte, sin confirmación y sin añadido tardío.
  */
-async function sembrarElDiaDeAyer(dek: Buffer): Promise<void> {
-  const ayer = new Date(Date.now() - 24 * 3600_000).toISOString().slice(0, 10);
-  const yaHay = await prisma.$queryRawUnsafe<Array<{ n: bigint }>>(
-    `SELECT count(*)::bigint AS n FROM handovers WHERE tenant_id = '${T}' AND care_day = '${ayer}'`,
-  );
-  if (Number(yaHay[0]?.n ?? 0) > 0) return;
+async function sembrarElDia(dek: Buffer, ayer: string): Promise<void> {
 
   const turnos = await prisma.centerShift.findMany({
     where: { tenantId: T },
@@ -774,13 +790,19 @@ async function sembrarElDiaDeAyer(dek: Buffer): Promise<void> {
   // ── LOS TRES PARTES, con la MISMA función que la pasada ─────────
   const partes = new Map<string, string | null>();
   for (const turno of [manana, tarde, noche]) {
+    // **Sólo los que YA han cerrado.** Un turno en curso no tiene parte
+    // congelado: lo que se ve de él es el cálculo en vivo. Congelarlo
+    // antes de tiempo sería escribir como evidencia algo que todavía
+    // puede cambiar.
+    const { hasta } = ventanaDelTurno(turno, ayer);
+    if (hasta.getTime() > Date.now()) continue;
     const r = await congelarParte(prisma as never, {
       tenantId: T,
       turno,
       careDay: ayer,
       // Congelado al acabar su turno, que es lo que hace la tarea
       // programada.
-      ahora: ventanaDelTurno(turno, ayer).hasta,
+      ahora: hasta,
     });
     partes.set(turno.code, r?.handoverId ?? null);
   }
@@ -790,7 +812,7 @@ async function sembrarElDiaDeAyer(dek: Buffer): Promise<void> {
   // Rosa tiene alcance total (D-51), así que su confirmación cubre las dos
   // plantas Y la zona del centro: es el caso que D-58 nombra («la DUE
   // confirma el suyo si está de turno»).
-  const deLaManana = partes.get("M");
+  const deLaManana = partes.get("M") ?? null;
   if (deLaManana != null) {
     const confirmadoEn = new Date(
       ventanaDelTurno(manana, ayer).hasta.getTime() + 4 * 60_000,
@@ -800,7 +822,8 @@ async function sembrarElDiaDeAyer(dek: Buffer): Promise<void> {
          care_role_assignment_id, device_id, at, received_at, alcance_total)
        VALUES ('${randomUUID()}', '${T}', '${deLaManana}', '${ROSA}', '${rolDe(ROSA)}',
                '${TABLET_SALA}', '${confirmadoEn.toISOString()}',
-               '${confirmadoEn.toISOString()}', true)`,
+               '${confirmadoEn.toISOString()}', true)
+       ON CONFLICT DO NOTHING`,
     );
     await prisma.$executeRawUnsafe(
       `UPDATE handovers SET confirmed_at = '${confirmadoEn.toISOString()}'
@@ -815,15 +838,17 @@ async function sembrarElDiaDeAyer(dek: Buffer): Promise<void> {
   // `received_at` de verdad y lo DETECTA la misma pasada que corre en
   // producción: así lo que se fotografía es el mecanismo, no una fila
   // puesta a mano.
-  await registro({
-    clientId: CARMEN,
-    code: "CAMBIO_POSTURAL",
-    turnoId: manana.id,
-    hora: "14:50",
-    valor: { tipo: "BOOL", hecho: true },
-    recibidoEn: new Date(ventanaDelTurno(manana, ayer).hasta.getTime() + 20 * 60_000),
-  });
-  await anotarLoQueLlegoTarde(prisma as never, { tenantId: T, ahora: new Date() });
+  if (deLaManana != null) {
+    await registro({
+      clientId: CARMEN,
+      code: "CAMBIO_POSTURAL",
+      turnoId: manana.id,
+      hora: "14:50",
+      valor: { tipo: "BOOL", hecho: true },
+      recibidoEn: new Date(ventanaDelTurno(manana, ayer).hasta.getTime() + 20 * 60_000),
+    });
+    await anotarLoQueLlegoTarde(prisma as never, { tenantId: T, ahora: new Date() });
+  }
 }
 
 /**

@@ -96,7 +96,22 @@ export function SalaParte({
   onTerminar,
 }: SalaParteProps) {
   return (
-    <div className="min-h-screen bg-mipiace-stone text-mipiace-ink flex flex-col">
+    // ── `h-screen` Y NO `min-h-screen` · LO ENCONTRÓ EL BUCLE VISUAL ──
+    //
+    // Con `min-h-screen`, la columna crece con el parte y la página
+    // entera se desplaza: el `overflow-y-auto` del cuerpo no llega a
+    // activarse nunca y **«Leído y recibido» se va por debajo del
+    // pliegue** a 1280×800. O sea, el botón del bloque entero, escondido
+    // en un parte de nueve líneas.
+    //
+    // Con `h-screen` + `overflow-hidden`, la altura está fijada: lo que
+    // se desplaza es el cuerpo y el pie se queda pegado abajo. Es la
+    // misma lección que la banda del TPV («una banda paga su altura») por
+    // el otro lado.
+    //
+    // Y no lo vio el test de pantalla: en jsdom no hay layout, así que
+    // `shrink-0` en el pie estaba puesto y el botón igualmente no se veía.
+    <div className="h-screen overflow-hidden bg-mipiace-stone text-mipiace-ink flex flex-col">
       {/* ── La cabecera: de qué parte es y quién lo está leyendo ── */}
       <header className="shrink-0 bg-white border-b border-slate-200 px-8 py-5 flex flex-wrap items-baseline gap-x-6 gap-y-2">
         <h1 className="text-[32px] font-semibold leading-none">
@@ -287,7 +302,10 @@ function Linea({ linea }: { linea: LineaDelParte }) {
           {linea.nivel}
         </span>
       )}
-      <span className="shrink-0 text-slate-500 tabular-nums w-[52px]">
+      {/* 64 px y no 52: a 22 px de cuerpo, «09:00» no cabía en 52 y se
+          pegaba con la clase de la línea («09:00No se hizo»). Lo
+          encontró el bucle visual, no un test — en jsdom no hay layout. */}
+      <span className="shrink-0 text-slate-500 tabular-nums w-[64px]">
         {linea.hora ?? "—"}
       </span>
       <span className="shrink-0 text-slate-500 text-[19px]">
