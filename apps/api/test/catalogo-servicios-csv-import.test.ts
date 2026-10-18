@@ -688,10 +688,19 @@ describe("clinica-8 · el fichero deja la clínica lista para cobrar", () => {
   it("los tipos de visita se escriben DENTRO de la transacción", async () => {
     // Misma promesa que la fila de agenda, y por lo mismo: un catálogo
     // configurado a medias en un comercio sin OWNER no lo arregla nadie.
-    agendaRevienta = true;
+    //
+    // Y revienta la AUDITORÍA, no la fila de agenda. La primera versión de
+    // este test usaba `agendaRevienta` y **salía verde con el sabotaje
+    // puesto**: la agenda se escribe ANTES que los tipos, así que al
+    // reventar ahí los tipos no llegaban a escribirse ni dentro ni fuera, y
+    // el test no distinguía las dos cosas. La auditoría va DESPUÉS, así que
+    // con ella se ve: escritos dentro, la vuelta atrás se los lleva;
+    // escritos fuera, sobreviven.
+    auditRevienta = true;
     const r = await post({ csv: CSV_ROSARIO, confirmar: true });
     expect(r.statusCode).toBe(500);
     expect(productos.size).toBe(0);
+    expect(agendas.size).toBe(0);
     expect(tiposDeVisita.size).toBe(0);
   });
 
