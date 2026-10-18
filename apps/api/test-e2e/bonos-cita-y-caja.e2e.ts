@@ -42,6 +42,9 @@ const { getPrisma, shutdown } = await import("../src/context.js");
 const { registerTicketRoutes } = await import("../src/tickets/routes.js");
 const { registerAgendaRoutes } = await import("../src/agenda/routes.js");
 const { registerVoucherRoutes } = await import("../src/vouchers/routes.js");
+const { registerTableOperativaRoutes } = await import(
+  "../src/tables/operativa.js"
+);
 const { registerErrorHandler } = await import("../src/lib/error-handler.js");
 const { registerLenientJsonParser } = await import("../src/lib/lenient-json.js");
 const { signCashierSession } = await import("../src/shift/cashier-session.js");
@@ -69,6 +72,8 @@ describe.skipIf(!e2eEnabled)("e2e · los dos pasos del bono", () => {
     await registerTicketRoutes(app);
     await registerAgendaRoutes(app);
     await registerVoucherRoutes(app);
+    // La ruta que abre un BORRADOR de verdad, para el test 9c.
+    await registerTableOperativaRoutes(app);
     await app.ready();
   });
 
@@ -504,6 +509,47 @@ describe.skipIf(!e2eEnabled)("e2e · los dos pasos del bono", () => {
     expect(await tiposDelLibro(bono.id)).toContain("LIBERADA");
   });
 
+  it("3f · NUNCA se consume un bono contra un servicio que no cubre", async () => {
+    // La regla dura del bloque, contra la puerta directamente. 3b la
+    // prueba por el camino del borrador —donde el servidor ni marca la
+    // línea—; aquí se fuerza el caso que de verdad puede llegar: la línea
+    // YA marcada y lo que se acabó haciendo es otra cosa (clinica-3).
+    const e = await escenario();
+    const bono = await sembrarBono(prisma, e, { sesiones: 2 });
+    const cita = (await darCita(e, [e.quiropodiaId], bono.id)).json()
+      .appointment.id as string;
+
+    const gate = await import("../src/vouchers/gate.js");
+    const { serviciosACubrir } = await import("../src/vouchers/servicios.js");
+    const res = await prisma.$transaction(async (tx) => {
+      // Lo que se hizo: un masaje, que el bono de podología no cubre.
+      const servicios = await serviciosACubrir(tx, e.tenantId, [e.masajeId]);
+      return gate.consumir(tx, {
+        tenantId: e.tenantId,
+        appointmentId: cita,
+        ticketLineId: null,
+        servicio: servicios[0]!,
+        detalle: "No debería consumirse.",
+        canal: "tpv",
+        userId: e.cashierId,
+        actor: null,
+        ahora: new Date(),
+      });
+    });
+    expect(res.ok).toBe(false);
+    expect(res).toMatchObject({ motivo: "no_cubre", liberado: true });
+
+    // CONTRA LA BD: ni una CONSUMIDA. Lo apartado se LIBERÓ y la línea se
+    // cobra normal. Es el sabotaje «consumir contra un servicio que el
+    // bono no cubre».
+    const tipos = await tiposDelLibro(bono.id);
+    expect(tipos).toEqual(["ALTA_INICIAL", "APARTADA", "LIBERADA"]);
+    expect(tipos).not.toContain("CONSUMIDA");
+    const fila = await filaDelBono(bono.id);
+    expect(Number(fila.sessions_left)).toBe(2);
+    expect(Number(fila.sessions_reserved)).toBe(0);
+  });
+
   // ══════════════════════════════════════════════════════════════════
   // TEST 9 · LA VENTA
   // ══════════════════════════════════════════════════════════════════
@@ -600,63 +646,97 @@ describe.skipIf(!e2eEnabled)("e2e · los dos pasos del bono", () => {
 
   it("9c · un BORRADOR que no se cobra no gasta número de bono", async () => {
     const e = await escenario();
-    // Un borrador con el bono dentro, abierto y abandonado.
-    const draft = await prisma.ticket.create({
-      data: {
-        tenantId: e.tenantId,
-        registerId: e.registerId,
-        shiftId: e.shiftId,
-        userId: e.cashierId,
-        clientId: e.clientId,
-        internalNumber: `D-${randomUUID()}`,
-        externalId: randomUUID(),
-        publicSlug: randomUUID().slice(0, 16),
-        status: "DRAFT",
-        total: "150",
-        totalTax: "0",
-        totalDiscount: "0",
-        lines: {
-          create: [
-            {
-              productId: e.bonoProductoId,
-              sku: "LOC-BONO-5",
-              nameSnapshot: "Bono quiropodia",
-              units: "1",
-              unitPrice: "150",
-              discountPct: "0",
-              taxRate: "0",
-              exemptionCause: "E1",
-              subtotal: "150",
-              total: "150",
-            },
-          ],
-        },
+    // El borrador se abre por LA RUTA de verdad (`POST /tables/:id/lines`),
+    // no insertándolo a mano: lo que se prueba es que el camino que usa la
+    // cajera no emite el bono hasta que cobra.
+    const linea = await app.inject({
+      method: "POST",
+      url: `/tables/${e.tableId}/lines`,
+      headers: auth(e.token),
+      payload: {
+        productId: e.bonoProductoId,
+        nameSnapshot: "Bono quiropodia",
+        sku: "LOC-BONO-5",
+        units: 1,
+        unitPrice: 150,
+        discountPct: 0,
+        taxRate: 0,
       },
-      select: { id: true },
     });
-    // Mientras sea borrador, cero bonos y el contador sin tocar.
-    const antes = await prisma.voucherSequence.findUniqueOrThrow({
-      where: { tenantId: e.tenantId },
-      select: { ultimo: true },
+    expect(linea.statusCode).toBe(201);
+    const draftId = linea.json().ticket.id as string;
+
+    // CONTRA LA BD: mientras sea borrador, cero bonos y el contador sin
+    // tocar. Es el sabotaje «el bono nace al crear el ticket».
+    expect(
+      (
+        await prisma.voucherSequence.findUniqueOrThrow({
+          where: { tenantId: e.tenantId },
+          select: { ultimo: true },
+        })
+      ).ultimo,
+    ).toBe(0);
+    expect(await prisma.voucher.count({ where: { tenantId: e.tenantId } })).toBe(0);
+
+    // La ficha hace falta para vender un bono, y el borrador de una mesa no
+    // la trae: se asigna como lo haría el TPV antes de cobrar.
+    await prisma.ticket.update({
+      where: { id: draftId },
+      data: { clientId: e.clientId },
     });
-    expect(antes.ultimo).toBe(0);
-    const cero = await prisma.voucher.count({ where: { tenantId: e.tenantId } });
-    expect(cero).toBe(0);
 
     // Y al cobrarlo, nace.
     const cobrado = await app.inject({
       method: "POST",
-      url: `/tickets/${draft.id}/checkout`,
+      url: `/tickets/${draftId}/checkout`,
       headers: auth(e.token),
       payload: { payments: [{ method: "CASH", amount: 150 }] },
     });
     expect(cobrado.statusCode).toBe(200);
     expect(cobrado.json().bonosEmitidos).toHaveLength(1);
-    const despues = await prisma.voucherSequence.findUniqueOrThrow({
-      where: { tenantId: e.tenantId },
-      select: { ultimo: true },
+    expect(
+      (
+        await prisma.voucherSequence.findUniqueOrThrow({
+          where: { tenantId: e.tenantId },
+          select: { ultimo: true },
+        })
+      ).ultimo,
+    ).toBe(1);
+  });
+
+  it("9c-bis · y un borrador con bono y SIN ficha no se cobra", async () => {
+    // La comprobación va DENTRO de la transacción del cobro: el borrador se
+    // queda borrador, sin quemar número de serie.
+    const e = await escenario();
+    const linea = await app.inject({
+      method: "POST",
+      url: `/tables/${e.tableId}/lines`,
+      headers: auth(e.token),
+      payload: {
+        productId: e.bonoProductoId,
+        nameSnapshot: "Bono quiropodia",
+        sku: "LOC-BONO-5",
+        units: 1,
+        unitPrice: 150,
+        discountPct: 0,
+        taxRate: 0,
+      },
     });
-    expect(despues.ultimo).toBe(1);
+    const draftId = linea.json().ticket.id as string;
+    const res = await app.inject({
+      method: "POST",
+      url: `/tickets/${draftId}/checkout`,
+      headers: auth(e.token),
+      payload: { payments: [{ method: "CASH", amount: 150 }] },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("BONO_SIN_CLIENTE");
+    const t = await prisma.ticket.findUniqueOrThrow({
+      where: { id: draftId },
+      select: { status: true, internalNumber: true },
+    });
+    expect(t.status).toBe("DRAFT");
+    expect(t.internalNumber.startsWith("D-")).toBe(true);
   });
 
   it("9d · un ticket TEST hace nacer un bono de prueba, y el reseteo se lo lleva", async () => {

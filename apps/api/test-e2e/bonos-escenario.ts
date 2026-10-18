@@ -17,6 +17,11 @@ import type { PrismaClient } from "@mipiacetpv/db";
 export interface Escenario {
   tenantId: string;
   storeId: string;
+  /** Una mesa, para poder abrir un BORRADOR por la ruta de verdad
+   *  (`POST /tables/:id/lines`) en vez de insertarlo a mano. La clínica no
+   *  usa mesas, pero el camino del borrador es el mismo y es el que prueba
+   *  que un ticket sin cobrar no gasta número de bono. */
+  tableId: string;
   registerId: string;
   cashierId: string;
   shiftId: string;
@@ -84,6 +89,10 @@ export async function sembrarEscenario(
   });
   const register = await prisma.register.create({
     data: { storeId: store.id, name: "Caja 1" },
+    select: { id: true },
+  });
+  const mesa = await prisma.table.create({
+    data: { storeId: store.id, name: "1", zone: "SALON" },
     select: { id: true },
   });
   const cashier = await prisma.user.create({
@@ -235,6 +244,7 @@ export async function sembrarEscenario(
   return {
     tenantId,
     storeId: store.id,
+    tableId: mesa.id,
     registerId: register.id,
     cashierId: cashier.id,
     shiftId: shift.id,
