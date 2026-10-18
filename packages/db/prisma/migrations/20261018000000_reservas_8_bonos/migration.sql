@@ -53,6 +53,7 @@
 --   ALTER TABLE "appointments" DROP CONSTRAINT "appointments_voucher_id_fkey";
 --   DROP TABLE "vouchers";
 --   DROP TABLE "voucher_templates";
+--   ALTER TABLE "ticket_lines" DROP COLUMN "voucher_id";
 --   ALTER TABLE "tickets"
 --       DROP CONSTRAINT "tickets_client_id_fkey",
 --       DROP COLUMN "client_id";
@@ -123,6 +124,32 @@ ALTER TABLE "tickets"
 -- según la convención de Prisma para que el schema lo pueda declarar y no
 -- quede como deriva.
 CREATE INDEX "tickets_tenant_id_client_id_idx" ON "tickets" ("tenant_id", "client_id");
+
+-- ── 2b · con qué bono se paga una línea del ticket ─────────────────────
+--
+-- Puesto = esta línea se canjea con ese bono, y por eso su importe es 0 €
+-- (o el prorrateo, según `tenants.bono_modo_canje` — frente P5). Lo escribe
+-- el TPV al marcar el canje sobre un BORRADOR, y al cobrar es lo que dice a
+-- qué línea se imputa la sesión consumida.
+--
+-- **SIN clave ajena, y es una decisión.** El guardián del sello (S1,
+-- `ticket_lines_sealed_guard`) vigila la FILA ENTERA de una línea de venta
+-- cobrada: cualquier columna que cambie levanta `SELLO_VIOLADO`. Una FK
+-- `ON DELETE SET NULL` sería un UPDATE sobre esa fila, así que borrar un
+-- bono —el reseteo del ensayo se lleva el bono de un ticket `TEST`, y ese
+-- bono puede haberse consumido en OTRO ticket— reventaría contra el sello.
+-- Y `RESTRICT` dejaría el reseteo sin poder borrar nada. Es un puntero, y
+-- un puntero de una venta sellada tiene que sobrevivir a lo que apunta.
+--
+-- No se añade a la lista de columnas económicas del sello
+-- (`mipiacetpv_sealed_columns`): no hace falta, porque ese trigger ya
+-- compara la fila completa.
+
+ALTER TABLE "ticket_lines" ADD COLUMN "voucher_id" UUID;
+
+-- «¿Qué líneas se cobraron con este bono?», la traza de la ficha.
+CREATE INDEX "ticket_lines_voucher_id_idx"
+    ON "ticket_lines" ("voucher_id");
 
 -- ── 3 · la plantilla de bono de un producto ────────────────────────────
 

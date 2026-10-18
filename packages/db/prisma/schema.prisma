@@ -2853,6 +2853,17 @@ model TicketLine {
   // cambiar de comensales a mitad de servicio y no queremos que eso
   // invalide filas ya escritas.
   seat              Int?
+  // B-reservas-8 · CON QUÉ BONO se paga esta línea. Puesto = la línea se
+  // canjea con ese bono y su importe es 0 € (o el prorrateo, según
+  // `Tenant.bonoModoCanje` — frente P5).
+  //
+  // Escalar SIN relación Prisma y SIN clave ajena en SQL, y es una
+  // decisión: el guardián del sello vigila la FILA ENTERA de una línea
+  // cobrada, así que un `ON DELETE SET NULL` sobre ella levantaría
+  // `SELLO_VIOLADO` el día que el reseteo del ensayo borre un bono que se
+  // consumió en otro ticket. Un puntero de una venta sellada tiene que
+  // sobrevivir a lo que apunta. Ver la nota de la migración.
+  voucherId         String?  @map("voucher_id") @db.Uuid
 
   ticket            Ticket             @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   product           Product?           @relation(fields: [productId], references: [id])
@@ -2863,6 +2874,8 @@ model TicketLine {
   kitchenOrderLines KitchenOrderLine[]
 
   @@index([ticketId])
+  // B-reservas-8 · «¿qué líneas se cobraron con este bono?», la traza.
+  @@index([voucherId])
   @@map("ticket_lines")
 }
 
