@@ -88,6 +88,13 @@ import { registerResidenciaFichaRoutes } from "./residencia/ficha-routes.js";
 import { registerResidenciaIncidenciasRoutes } from "./residencia/incidencias-routes.js";
 import { registerResidenciaGuardiaRoutes } from "./residencia/guardia-routes.js";
 import { registerGuardiaWebSocketRoute } from "./residencia/guardia-ws-route.js";
+// residencia-5 (D-18, D-42, D-67) · el relevo con acuse, el panel de
+// dirección y las obligaciones. Tres familias y tres puertas distintas:
+// la de la sala es la del dispositivo (`sala-auth.ts`), y las del panel y
+// las obligaciones son del admin **más un rol de categoría directiva**.
+import { registerResidenciaSalaRoutes } from "./residencia/sala-routes.js";
+import { registerResidenciaPanelRoutes } from "./residencia/panel-routes.js";
+import { registerResidenciaObligacionesRoutes } from "./residencia/obligaciones-routes.js";
 // residencia-4 · el seed de la plantilla de gravedad (D-65), hermano del
 // del catálogo de controles.
 import { cargarPlantillaDeGravedad } from "./residencia/catalogo/cargar-plantilla.js";
@@ -336,6 +343,11 @@ async function main() {
   await registerResidenciaIncidenciasRoutes(app);
   await registerResidenciaGuardiaRoutes(app);
   await registerGuardiaWebSocketRoute(app);
+  // residencia-5 · la tablet de la sala (device token propio), el panel de
+  // dirección con los relevos y los indicadores, y las obligaciones.
+  await registerResidenciaSalaRoutes(app);
+  await registerResidenciaPanelRoutes(app);
+  await registerResidenciaObligacionesRoutes(app);
   await registerKitchenRoutes(app);
   await registerKitchenTpvRoutes(app);
   // kds-1-cocina · los ajustes de cocina del panel del restaurante, las

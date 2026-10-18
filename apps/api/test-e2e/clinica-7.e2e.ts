@@ -308,12 +308,12 @@ describe.skipIf(!e2eEnabled)("e2e · clinica-7 · el blindaje", () => {
       // Que no falte ninguna. Una columna cifrada sin CHECK es una columna
       // donde el texto en claro cabe.
       //
-      // ── NUEVE, QUINCE, DIECISIETE Y AHORA VEINTIDÓS ──────────────
+      // ── NUEVE, QUINCE, DIECISIETE, VEINTIDÓS Y AHORA VEINTICUATRO ──
       //
       // Nueve de clinica-7, seis de residencia-1b (D-63), dos del
-      // registro de cuidados (residencia-3) y cinco del libro de
-      // incidencias (residencia-4). Están aquí a propósito en vez
-      // de en una lista aparte: esta aserción es EL INVENTARIO de lo que el
+      // registro de cuidados (residencia-3), cinco del libro de
+      // incidencias (residencia-4) y dos del relevo (residencia-5). Están
+      // aquí a propósito en vez de en una lista aparte: esta aserción es EL INVENTARIO de lo que el
       // motor sostiene cifrado en toda la casa. Partirla en dos habría sido
       // dos listas que pueden dejar de cubrirse, y lo que hace falta saber
       // es «¿falta alguna?», no «¿falta alguna de la clínica?».
@@ -362,6 +362,11 @@ describe.skipIf(!e2eEnabled)("e2e · clinica-7 · el blindaje", () => {
           "incident_actions_text_cifrado_formato",
           "incidents_description_cifrado_formato",
           "resident_threshold_overrides_reason_cifrado_formato",
+          // residencia-5 · el parte de relevo congelado y el resumen de
+          // lo que llegó después de congelarlo. Dos tablas y dos columnas
+          // lógicas, por lo mismo que las cinco de arriba.
+          "handover_late_additions_resumen_cifrado_formato",
+          "handovers_content_cifrado_formato",
         ].sort(),
       );
     });

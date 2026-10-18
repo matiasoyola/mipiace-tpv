@@ -162,6 +162,26 @@ export async function requireDeviceToken(
     });
     return;
   }
+  // residencia-5 (D-67) · Y LA TABLET DE LA SALA TAMPOCO.
+  //
+  // Cuarta vez en el mismo sitio y por la misma razón de cuentas: éste es
+  // el preHandler de TODAS las rutas del TPV y también del login de
+  // cajero, así que cortar aquí es lo que hace que la tablet donde se lee
+  // el parte de relevo no pueda llegar a tener una sesión con la que
+  // cobrar.
+  //
+  // Y la APK lo usa como SEÑAL: el 403 de `/devices/me` no es un error,
+  // es la respuesta correcta y es lo que la hace arrancar en «modo
+  // relevo» (ver `tpv-web/src/hooks/bootstrap-decision.ts`). Las rutas de
+  // la sala tienen su propia puerta de auth (`residencia/sala-auth.ts`).
+  if (device.kind === "HANDOVER") {
+    reply.code(403).send({
+      error: "HANDOVER_DEVICE_NOT_ALLOWED",
+      message:
+        "La tablet de la sala no vende: ni cobra, ni abre turno, ni emite registros.",
+    });
+    return;
+  }
   // residencia-1 · `register_id` es nullable desde este bloque, y aquí ya
   // sabemos que esto no es un `ROOM`. El CHECK
   // `devices_register_o_habitacion` garantiza que todo lo que no es `ROOM`

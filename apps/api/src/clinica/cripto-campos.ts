@@ -1,8 +1,9 @@
 // clinica-7 · CADA COLUMNA CIFRADA, CON SU SITIO ESCRITO UNA SOLA VEZ.
 //
 // Nueve columnas de la clínica (clinica-7), seis de la residencia
-// (residencia-1b, D-63), dos del registro de cuidados (residencia-3) y
-// cinco del libro de incidencias (residencia-4). Veintidós.
+// (residencia-1b, D-63), dos del registro de cuidados (residencia-3),
+// cinco del libro de incidencias (residencia-4) y dos del relevo
+// (residencia-5). Veinticuatro.
 //
 // `cripto.ts` cifra con un AAD; aquí vive **qué AAD le toca a cada
 // columna**. Y vive en un solo fichero por la razón de siempre en este
@@ -326,6 +327,49 @@ export function sitioMotivoDeExcepcion(
     tenantId,
     tabla: "resident_threshold_overrides",
     columna: "reason",
+    filaId: id,
+  };
+}
+
+// ── residencia-5 · EL PARTE DE RELEVO (D-63) ───────────────────────
+//
+// Dos columnas lógicas más, y las dos son el MISMO problema que el valor
+// y la nota de un registro: el contenido del parte congelado y el resumen
+// de un añadido tardío son dos cosas distintas que viven en dos tablas,
+// y si compartieran nombre lógico un `UPDATE` podría copiar el resumen de
+// un añadido al contenido de un parte y descifraría — «doña Carmen con
+// 38,6» pasaría a ser el parte entero de la mañana.
+//
+// Lo que se queda EN CLARO del relevo, declarado: el centro, el turno, el
+// `care_day`, los dos instantes, los recuentos por zona y las
+// confirmaciones con su firma y sus zonas. Es lo que sostiene el panel
+// («¿está confirmado el relevo de esta mañana?») sin descifrar nada, y es
+// lo mismo que una hoja de firmas en la pared dice ya hoy.
+
+/** El JSON entero del parte congelado: por planta y residente, lo que
+ *  pasó en el turno. Salud con todas las letras. */
+export function sitioContenidoDeRelevo(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "handovers",
+    columna: "content",
+    filaId: id,
+  };
+}
+
+/** Y la línea de resumen de lo que «llegó después del relevo». Columna
+ *  lógica propia, en otra tabla. */
+export function sitioResumenTardio(
+  tenantId: string,
+  id: string,
+): SitioDelValor {
+  return {
+    tenantId,
+    tabla: "handover_late_additions",
+    columna: "resumen",
     filaId: id,
   };
 }

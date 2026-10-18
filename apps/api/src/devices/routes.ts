@@ -313,6 +313,18 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
           // código se emparejaría como la puerta de la 112.
           roomId: true,
           room: { select: { id: true, number: true, name: true } },
+          // residencia-4 · **EL CANAL DEL MÓVIL DE GUARDIA.**
+          //
+          // Faltaba, y no era inocuo: el CHECK `devices_guard_canal` exige
+          // que un `GUARD` tenga canal, así que emparejar un móvil de
+          // guardia por esta ruta —que es la única que la APK usa—
+          // reventaba contra la base. residencia-4 lo probó insertando los
+          // dos móviles por SQL en su e2e y nunca pasó por aquí, así que
+          // el fallo habría salido el día del despliegue, con el móvil en
+          // la mano. Lo arregla residencia-5 porque la tablet de la sala
+          // se empareja por el mismo camino y dejarlo roto al lado habría
+          // sido absurdo; tiene su test.
+          guardChannel: true,
         },
       });
       if (candidates.length === 0) {
@@ -376,6 +388,15 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
             // supone: es su fila en la tabla de sabotajes del bloque.
             kind: target.kind,
             kitchenSections: target.kitchenSections,
+            // residencia-4 · el canal, copiado del código y NO leído del
+            // cuerpo (ver el `select` de arriba). Si viniera del cuerpo,
+            // cualquiera con un código se emparejaría como el móvil de
+            // enfermería y recibiría los avisos de salud del centro.
+            //
+            // residencia-5 · la tablet de la sala **no necesita ninguna
+            // columna**: es del centro, y el centro es el tenant. Lo que
+            // la hace arrancar en «modo relevo» es su `kind`.
+            guardChannel: target.guardChannel,
           },
           select: { id: true },
         });
@@ -416,6 +437,10 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
         // arrancar.
         kind: target.kind,
         kitchenSections: target.kitchenSections,
+        // residencia-4 · el canal con el que arranca el móvil de guardia.
+        // La APK ya elige pantalla por `kind`; esto es lo que pinta en la
+        // cabecera («Enfermería» / «Dirección»).
+        guardChannel: target.guardChannel,
       });
     },
   );

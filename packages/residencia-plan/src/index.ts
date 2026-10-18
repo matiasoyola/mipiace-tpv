@@ -17,6 +17,16 @@
 //   · `frecuencia.ts` — las ocho formas de repartir un cuidado en el
 //     tiempo, su validación y su frase para la pantalla.
 //   · `que-toca.ts`   — `queToca`.
+//   · `relevo-confirmacion.ts` — residencia-5: cuándo un parte de relevo
+//     está confirmado y qué ve cada uno de él. Lo ejecutan la tablet de
+//     la sala SIN RED y el servidor.
+//   · `no-hecho.ts`   — residencia-5: `loQueNoSeHizo`, el cruce entre
+//     «qué tocaba» y «qué se registró». Lo ejecutan la tablet de la sala
+//     y el servidor, por lo mismo que `gravedadDe`.
+//   · `obligaciones.ts` — residencia-5: cuándo toca una obligación de
+//     dirección, con el fin de mes y el 29 de febrero dentro.
+//   · `indicadores.ts` — residencia-5: la FÓRMULA de cada indicador de
+//     AENOR (el umbral es del centro, rama de controles §10).
 //   · `gravedad.ts`   — residencia-4: `gravedadDe`, la función que
 //     convierte una constante o un evento en un nivel N0-N4. La ejecutan
 //     la tablet (al instante y sin red) y el servidor (que es el que
@@ -78,3 +88,43 @@ export {
   type Nivel,
   type ReglaDeGravedad,
 } from "./gravedad.js";
+
+export {
+  cuantoVaHecho,
+  loQueNoSeHizo,
+  type ControlParaNoHecho,
+  type EntradaDeNoHecho,
+  type NoHecho,
+  type RegistroHecho,
+} from "./no-hecho.js";
+
+export {
+  DIAS_DE_PREAVISO,
+  diaRecortado,
+  diasDelMes,
+  diasHasta,
+  ocurrenciasDeObligacion,
+  periodicidadEnPalabras,
+  type ObligacionParaGenerar,
+  type PeriodicidadDeObligacion,
+} from "./obligaciones.js";
+
+export {
+  INDICADORES,
+  INDICADORES_SIN_DATO,
+  calcularIndicadores,
+  type ComparacionDeIndicador,
+  type DatosDelMes,
+  type DefinicionDeIndicador,
+  type UnidadDeIndicador,
+  type ValorDeIndicador,
+} from "./indicadores.js";
+
+export {
+  alcanceDe,
+  estaConfirmado,
+  recortarAlAlcance,
+  zonasSinConfirmar,
+  type AlcanceDeUnAcuse,
+  type ZonaDelAcuse,
+} from "./relevo-confirmacion.js";

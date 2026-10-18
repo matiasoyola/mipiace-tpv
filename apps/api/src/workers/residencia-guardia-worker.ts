@@ -30,6 +30,10 @@ export function startResidenciaGuardiaWorker(): Worker<ResidenciaGuardiaJob> {
       const pasada = await pasadaDeGuardia({
         prisma: getPrisma(),
         forzarAusencias: job.data.source === "manual",
+        // residencia-5 · a mano también se generan las ocurrencias de las
+        // obligaciones, por lo mismo que las ausencias: un disparo manual
+        // es «haz todo ahora».
+        forzarObligaciones: job.data.source === "manual",
         log,
       });
       return {
@@ -46,14 +50,28 @@ export function startResidenciaGuardiaWorker(): Worker<ResidenciaGuardiaJob> {
                 0,
               ),
         errores:
-          pasada.ausencias?.reduce((n, r) => n + r.errores, 0) ?? 0,
+          (pasada.ausencias?.reduce((n, r) => n + r.errores, 0) ?? 0) +
+          (pasada.relevo?.errores ?? 0),
+        // residencia-5 · cuántos partes se congelaron y cuántos añadidos
+        // tardíos se anotaron. **Sin un dato de salud**, igual que el
+        // resto: cuántos, no de quién.
+        relevos: pasada.relevo?.congelados.length ?? 0,
+        tardios: pasada.relevo?.tardios ?? 0,
+        obligaciones: pasada.relevo?.obligaciones?.creadas ?? null,
       };
     },
     { connection: getRedis(), concurrency: 1 },
   );
   worker.on("completed", (job) => {
     const r = job.returnvalue as
-      | { escalados?: number; ausencias?: number | null; errores?: number }
+      | {
+          escalados?: number;
+          ausencias?: number | null;
+          errores?: number;
+          relevos?: number;
+          tardios?: number;
+          obligaciones?: number | null;
+        }
       | undefined;
     // Sólo se registra cuando PASA algo. Una línea por minuto con
     // «0 escalados» son 1.440 líneas al día que tapan la que importa.
@@ -63,6 +81,22 @@ export function startResidenciaGuardiaWorker(): Worker<ResidenciaGuardiaJob> {
     if ((r?.ausencias ?? 0) > 0) {
       console.log(
         `[residencia-guardia] ${r?.ausencias} incidencia(s) por ausencia`,
+      );
+    }
+    // residencia-5 · lo mismo: sólo se registra cuando PASA algo. Un
+    // «0 relevos» por minuto son 1.440 líneas al día que tapan la que
+    // importa.
+    if ((r?.relevos ?? 0) > 0) {
+      console.log(`[residencia-guardia] ${r?.relevos} parte(s) de relevo congelados`);
+    }
+    if ((r?.tardios ?? 0) > 0) {
+      console.log(
+        `[residencia-guardia] ${r?.tardios} añadido(s) «llegó después del relevo»`,
+      );
+    }
+    if ((r?.obligaciones ?? 0) > 0) {
+      console.log(
+        `[residencia-guardia] ${r?.obligaciones} ocurrencia(s) de obligaciones generadas`,
       );
     }
     if ((r?.errores ?? 0) > 0) {

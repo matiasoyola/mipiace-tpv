@@ -141,6 +141,7 @@ export async function previsualizarEliminacion(
     accesosClinicos,
     residentes,
     incidencias,
+    relevos,
   ] = await Promise.all([
     tx.fiscalRecord.count({ where: { tenantId } }),
     tx.ticket.count({ where: { tenantId } }),
@@ -165,6 +166,7 @@ export async function previsualizarEliminacion(
     tx.clinicalAccessLog.count({ where: { tenantId } }),
     tx.residentProfile.count({ where: { tenantId } }),
     tx.incident.count({ where: { tenantId } }),
+    tx.handover.count({ where: { tenantId } }),
   ]);
 
   const bloqueos: Bloqueo[] = [];
@@ -211,6 +213,31 @@ export async function previsualizarEliminacion(
       mensaje:
         `Esta cuenta tiene ${incidencias} incidencia(s) en el libro. No se elimina desde aquí: el libro es la ` +
         "evidencia de las acciones correctoras del centro y se conserva. La devolución de datos (art. 28.3.g) sí se le puede entregar.",
+    });
+  }
+
+  // residencia-5 · EL RELEVO, aparte del libro y de los residentes.
+  //
+  // Tercer bloqueo de residencia y por la misma razón que el segundo, que
+  // es la lección de la casa («una escapatoria inalcanzable no está
+  // cerrada hasta que se mide»): un centro puede tener el módulo
+  // encendido, cero fichas de residente, cero incidencias y **un parte de
+  // relevo congelado** — el de «turno sin novedades», que es justo el que
+  // se congela el primer día que alguien enciende el módulo para probarlo.
+  //
+  // Sin este bloqueo, el `DELETE FROM tenants` rebotaría contra
+  // `handovers_tenant_id_fkey` con un error de Postgres en crudo. Y se
+  // bloquea en vez de borrarse por lo mismo que el libro: el parte
+  // confirmado es la evidencia de que la información pasó de un turno a
+  // otro, y su trigger de inmutabilidad **no lleva la escapatoria del
+  // «padre borrado»**.
+  if (relevos > 0) {
+    bloqueos.push({
+      codigo: "TIENE_PARTES_DE_RELEVO",
+      mensaje:
+        `Esta cuenta tiene ${relevos} parte(s) de relevo congelados. No se elimina desde aquí: el parte ` +
+        "confirmado es la evidencia de que la información pasó de un turno a otro. La devolución de datos " +
+        "(art. 28.3.g) sí se le puede entregar.",
     });
   }
 

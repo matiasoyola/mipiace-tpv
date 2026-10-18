@@ -60,6 +60,8 @@ import { PuertaApp } from "./residencia/PuertaApp.js";
 // igual que la cocina y la puerta: lo que decide qué pantalla arranca es
 // qué contesta `/devices/me`.
 import { GuardiaApp } from "./residencia/GuardiaApp.js";
+// residencia-5 (D-67) · la tablet de la sala. La MISMA APK en otro modo.
+import { SalaApp } from "./residencia/SalaApp.js";
 import { useAvisosListo } from "./kitchen/tpv/useAvisosListo.js";
 import { useCaminoDirecto } from "./kitchen/tpv/useCaminoDirecto.js";
 import { PairScreen } from "./pages/PairScreen.js";
@@ -423,6 +425,12 @@ export function App() {
   }
   if (state.kind === "room") {
     return <PuertaApp me={state.data} onRefresh={refresh} />;
+  }
+  // residencia-5 (D-67) · «modo relevo». Igual que la puerta y el móvil
+  // de guardia, ANTES de montar nada del terminal: la tablet de la sala
+  // no cobra, no abre turno y no emite registro de facturación.
+  if (state.kind === "sala") {
+    return <SalaApp me={state.data} onRefresh={refresh} />;
   }
 
   const { register, store, tenant } = state.data;

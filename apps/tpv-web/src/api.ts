@@ -5,6 +5,7 @@
 //   - apiConPuerta: LAS DOS a la vez (residencia-3, las rutas de la
 //     puerta que tocan datos de salud). Ver su comentario.
 //   - apiConGuardia: LAS DOS del móvil de guardia (residencia-4, D-66).
+//   - apiConSala:    LAS DOS de la tablet de la sala (residencia-5, D-67).
 //
 // El backend está al otro lado del proxy de Vite en dev (/api/* →
 // 127.0.0.1:3001), y de Caddy en prod.
@@ -18,6 +19,8 @@ import {
 import { leerSesion as leerSesionDePuerta } from "./residencia/puerta-cache.js";
 // residencia-4 · y la del móvil de guardia, por lo mismo.
 import { leerSesionDeGuardia } from "./residencia/guardia-cache.js";
+// residencia-5 · y la de la tablet de la sala.
+import { leerSesionDeSala } from "./residencia/sala-cache.js";
 
 const BASE_URL = (
   (import.meta as unknown as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL ??
@@ -164,6 +167,45 @@ export function apiConGuardia<T>(path: string, opts: ApiOpts = {}): Promise<T> {
         "Teclea tu PIN para ponerte de guardia.",
         "GUARDIA_SIN_SESION",
       ),
+    );
+  }
+  return send<T>(path, {
+    ...opts,
+    headers: {
+      ...opts.headers,
+      "X-Device-Token": device,
+      Authorization: `Bearer ${sesion.token}`,
+    },
+  });
+}
+
+/**
+ * residencia-5 (D-67) · las dos cabeceras de la TABLET DE LA SALA.
+ *
+ * Hermana de `apiConPuerta` y de `apiConGuardia`, y con la misma razón de
+ * fondo: el token del dispositivo solo no abre nada.
+ *
+ * Donde se parece a la de la **guardia** y no a la de la puerta: aquí la
+ * sesión **es la firma** del «Leído y recibido» (ver `sala-sesion.ts` en
+ * la API), así que el cuerpo no lleva ninguna.
+ *
+ * Donde se parece a la de la **puerta** y no a la de la guardia: el token
+ * se lee en CADA llamada y no se captura, porque la confirmación puede
+ * salir de la cola cuando vuelva el wifi y no haya nadie delante. Y el
+ * 401 `SALA_SIN_SESION` es TRANSITORIO para la cola: espera a que alguien
+ * teclee su PIN y sale entonces, con su `at` original.
+ */
+export function apiConSala<T>(path: string, opts: ApiOpts = {}): Promise<T> {
+  const device = getDeviceToken();
+  if (!device) {
+    return Promise.reject(
+      new ApiError(401, "Device no emparejado", "DEVICE_TOKEN_REQUIRED"),
+    );
+  }
+  const sesion = leerSesionDeSala();
+  if (!sesion) {
+    return Promise.reject(
+      new ApiError(401, "Teclea tu PIN para leer el parte.", "SALA_SIN_SESION"),
     );
   }
   return send<T>(path, {

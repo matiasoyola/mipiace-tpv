@@ -41,6 +41,13 @@ import { IncidenciasPage } from "./pages/residencia/IncidenciasPage.js";
 import { IncidenciaPage } from "./pages/residencia/IncidenciaPage.js";
 import { GuardiaPage } from "./pages/residencia/GuardiaPage.js";
 import { UmbralesResidentePage } from "./pages/residencia/UmbralesResidentePage.js";
+// residencia-5 (D-18, D-42, D-67) · el panel de dirección, los partes de
+// relevo, las obligaciones y los indicadores.
+import { PanelPage } from "./pages/residencia/PanelPage.js";
+import { RelevosPage } from "./pages/residencia/RelevosPage.js";
+import { RelevoPage } from "./pages/residencia/RelevoPage.js";
+import { ObligacionesPage } from "./pages/residencia/ObligacionesPage.js";
+import { IndicadoresPage } from "./pages/residencia/IndicadoresPage.js";
 // F1 (ADR-018) · las tres pantallas del control horario.
 import { HoyPage } from "./pages/fichaje/HoyPage.js";
 import { EmpleadosPage } from "./pages/fichaje/EmpleadosPage.js";
@@ -120,6 +127,10 @@ interface MeResponse {
     // módulos: si el front va por delante del backend, `undefined` se
     // comporta como el master de siempre.
     holdedEnabled?: boolean;
+    // residencia-5 (decisión de producto 5) · el quinto módulo. Es lo que
+    // hace que una residencia entre al panel de dirección en vez de a su
+    // cuenta. Opcional por la misma razón que los otros cuatro.
+    residenciaEnabled?: boolean;
   };
 }
 
@@ -129,11 +140,27 @@ interface MeResponse {
 // aporta un módulo hoy; el CRM del cliente vive en el TPV, así que una
 // empresa con CRM y sin agenda aterriza en su cuenta.
 function landingSinCaja(tenant: MeResponse["tenant"]): string {
+  // residencia-5 (decisión de producto 5) · **el panel de dirección es la
+  // pantalla de inicio de un centro de residencia.** Va PRIMERO, delante
+  // de la agenda y del fichaje, y eso es lo que lo hace la pantalla de
+  // inicio: un tenant de residencia tiene la agenda encendida también
+  // —el alta la enciende, y la clínica la necesita— así que con la
+  // agenda delante la dirección aterrizaba en el catálogo de servicios.
+  // Se vio en el bucle visual, no en un test.
+  //
+  // Lo que la dirección abre cada mañana es «qué hay abierto hoy», que es
+  // la métrica de éxito del producto (bloque C §2).
+  //
+  // Un encargado sin rol de cuidado directivo aterriza aquí igual y la
+  // pantalla le dice que esto es de dirección, con los enlaces de lo que
+  // sí puede abrir. Mandarle a su cuenta habría sido esconderle que el
+  // panel existe.
+  if (tenant.residenciaEnabled) return "/admin/residencia/panel";
   if (tenant.agendaEnabled) return "/admin/agenda-catalog";
   // F1 · el colegio de Talavera. Su panel entero es esta sección, así que
   // aterriza en lo primero que va a mirar cada mañana: quién está dentro.
   // Va DESPUÉS de la agenda para no mover a nadie de sitio: un tenant con
-  // agenda seguía entrando ahí antes de este bloque y sigue haciéndolo.
+  // agenda seguía entrando ahí antes de aquel bloque y sigue haciéndolo.
   if (tenant.fichajeEnabled) return "/admin/fichaje";
   return "/admin/account";
 }
@@ -237,6 +264,19 @@ export function App() {
         {/* La excepción de umbral cuelga del residente y no del centro,
             porque es una prescripción suya (D-22). */}
         <Route path="/admin/residencia/residentes/:clientId/umbrales" element={<ResidenciaGate title="Umbrales propios"><UmbralesResidentePage /></ResidenciaGate>} />
+        {/* residencia-5 · el panel es la pantalla de INICIO de un centro de
+            residencia (decisión de producto 5). Las cuatro van envueltas en
+            <ResidenciaGate> como las demás, y la puerta de verdad sigue
+            siendo la del servidor — que además de la 404 del módulo
+            contesta 403 PANEL_ES_DE_DIRECCION a un encargado sin rol
+            directivo. La pantalla pinta esa frase en vez de un error. */}
+        <Route path="/admin/residencia/panel" element={<ResidenciaGate title="Panel de dirección"><PanelPage /></ResidenciaGate>} />
+        <Route path="/admin/residencia/relevos" element={<ResidenciaGate title="Relevos"><RelevosPage /></ResidenciaGate>} />
+        {/* `vivo` NO es un uuid y por eso va antes: es el parte del turno
+            en curso, calculado y sin fila en la base. */}
+        <Route path="/admin/residencia/relevos/:id" element={<ResidenciaGate title="Relevo"><RelevoPage /></ResidenciaGate>} />
+        <Route path="/admin/residencia/obligaciones" element={<ResidenciaGate title="Obligaciones"><ObligacionesPage /></ResidenciaGate>} />
+        <Route path="/admin/residencia/indicadores" element={<ResidenciaGate title="Indicadores"><IndicadoresPage /></ResidenciaGate>} />
         <Route path="/admin/tag-aliases" element={<CajaGate title="Etiquetas"><TagAliasesPage /></CajaGate>} />
         <Route path="/admin/tag-sections" element={<CajaGate title="Comanderas"><TagSectionsPage /></CajaGate>} />
         <Route path="/admin/printers" element={<CajaGate title="Impresoras"><PrintersPage /></CajaGate>} />
