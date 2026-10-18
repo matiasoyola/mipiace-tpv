@@ -19,9 +19,13 @@ import {
   flexGapSupported,
   renderUnsupportedBrowser,
 } from "./lib/browser-support.js";
-import { initSentry } from "./lib/sentry.js";
+import { captureError, initSentry } from "./lib/sentry.js";
 import { installLogBuffer } from "./lib/supportChannel/logBuffer.js";
 import { consumeTestModeFromUrl } from "./lib/test-mode.js";
+import {
+  arranqueConseguido,
+  arranqueFallidoPendiente,
+} from "./lib/vigilante-arranque.js";
 import { runVersionCheck } from "./lib/version-check.js";
 import { bootstrapPrinters } from "./platform/printer/bootstrap.js";
 import "./index.css";
@@ -105,8 +109,26 @@ const tokenDelInforme = tokenDelInformeEnLaUrl();
 // clinica-2 · y va DELANTE del test del paciente a propósito, no sólo del
 // TPV: el test se ve en móviles viejos y en la tablet de la sala, y una
 // pantalla descuadrada ahí es un paciente que no contesta.
+// auditoria-sirope (#21) · el parte del arranque que NO llegó.
+//
+// Lo escribió otra carga de la página —la que se quedó en blanco— y sólo
+// se puede contar desde una que sí arranca. Va antes de montar React
+// para que un fallo posterior no se lo lleve por delante.
+const falloAnterior = arranqueFallidoPendiente();
+if (falloAnterior) {
+  captureError(new Error("La app no pintó su primera pantalla"), {
+    bloque: "auditoria-sirope#21",
+    ...falloAnterior,
+  });
+  console.warn("[arranque] el arranque anterior se quedó en blanco", falloAnterior);
+}
+
 if (!flexGapSupported()) {
   renderUnsupportedBrowser(root);
+  // La pantalla de «navegador no soportado» TAMBIÉN es haber pintado: es
+  // una salida con un texto delante, que es justo lo que el vigilante
+  // existe para garantizar.
+  arranqueConseguido();
 } else {
   createRoot(root).render(
     <StrictMode>
@@ -121,4 +143,11 @@ if (!flexGapSupported()) {
       </ErrorBoundary>
     </StrictMode>,
   );
+  // auditoria-sirope (#21) · hemos pintado: el vigilante se apaga.
+  //
+  // Tras el primer frame y no justo después de `render()`: `render` sólo
+  // encola el trabajo, y lo que el vigilante vigila es que en la
+  // pantalla haya ALGO. Con dos `requestAnimationFrame` el navegador ya
+  // ha pintado el primer árbol.
+  requestAnimationFrame(() => requestAnimationFrame(arranqueConseguido));
 }

@@ -82,6 +82,11 @@ export interface CartLineItemProps {
   // transición de 700 ms hace el desvanecido sin animación propia ni
   // `key` que remonte el nodo (remontarlo perdería el scroll).
   highlighted?: boolean;
+  // B-reservas-8 · el chip del bono de esta línea. Lo construye `SalePage`
+  // —que es quien tiene el id del borrador y las propuestas del servidor—
+  // y aquí sólo se pinta, debajo del desglose. `undefined` en toda línea
+  // que no puede pagarse con bono, que es casi todas.
+  bono?: React.ReactNode;
 }
 
 export function CartLineItem({
@@ -91,6 +96,7 @@ export function CartLineItem({
   onRemove,
   durationMin,
   highlighted = false,
+  bono,
 }: CartLineItemProps) {
   const total = computeLine(line);
   const [trashHint, setTrashHint] = useState(false);
@@ -273,6 +279,11 @@ export function CartLineItem({
         {line.modifierSelections && line.modifierSelections.length > 0 && (
           <ModifierBreakdown selections={line.modifierSelections} />
         )}
+        {/* B-reservas-8 · el chip del bono. Va DENTRO del botón de la
+            línea (que es lo que abre el LineSheet) porque visualmente
+            pertenece a la línea; los toques del chip paran la propagación
+            para que marcar un bono no abra además la hoja de edición. */}
+        {bono}
       </button>
 
       {/* Papelera, al otro extremo de la fila: los 112 px del nombre la

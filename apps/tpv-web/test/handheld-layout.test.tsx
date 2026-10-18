@@ -162,6 +162,25 @@ function backgroundRoutes(path: string): unknown | undefined {
     };
   }
   if (path === "/shift/current") return { shift: null };
+  // auditoria-sirope (#12) · este bar MANDA COMANDAS: tiene impresora en
+  // barra y cocina. Hasta el bloque daba igual que el banco no lo dijera
+  // —el TPV hablaba de cocina pasara lo que pasara—; desde #12 el botón
+  // «Enviar» sólo existe si hay a dónde.
+  if (path.endsWith("/kitchen")) {
+    return {
+      diners: null,
+      revision: 0,
+      lines: [],
+      firedCourses: [],
+      allergies: [],
+      orders: [],
+      destinations: {
+        BARRA: { screen: false, printer: true, canCorrectSent: false },
+        COCINA: { screen: false, printer: true, canCorrectSent: false },
+        SALON: { screen: false, printer: false, canCorrectSent: false },
+      },
+    };
+  }
   if (path === "/tpv/tables") {
     return { storeId: "store-1", registerId: "reg-1", tables: [] };
   }
@@ -275,9 +294,16 @@ function barraDeComanda(): HTMLButtonElement {
   return btn as HTMLButtonElement;
 }
 
-/** El bottom-sheet de la comanda oscura. */
+/** El bottom-sheet de la comanda oscura.
+ *
+ *  auditoria-sirope (#12) · se llama «Comanda» cuando hay a dónde mandarla
+ *  y «Pedido» cuando no: en una venta rápida sin cocina, hablar de comanda
+ *  es hablar de algo que no existe. Las dos valen para este fichero, que
+ *  prueba el layout y no el rótulo (eso es `kds-sin-cocina.test.tsx`). */
 function comandaSheet(): HTMLElement | null {
-  return container.querySelector('[role="dialog"][aria-label="Comanda"]');
+  return container.querySelector(
+    '[role="dialog"][aria-label="Comanda"], [role="dialog"][aria-label="Pedido"]',
+  );
 }
 
 /**

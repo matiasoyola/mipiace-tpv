@@ -99,6 +99,27 @@ export interface EstadoCocinaMesa {
   destinations: Record<KitchenSection, DestinoSeccionTpv>;
 }
 
+/**
+ * auditoria-sirope (#12) · ¿HAY A DÓNDE MANDAR UNA COMANDA?
+ *
+ * `true` si alguna sección tiene pantalla o impresora. Con el módulo
+ * «Cocina» apagado y sin impresoras, el TPV seguía hablando de cocina:
+ * «EN COCINA», «Comanda nº 1 enviada» y «Reenviar (nº 2)» sin que
+ * hubiera nadie al otro lado (captura 27 del 18-10).
+ *
+ * No es lo mismo que el módulo: una barra con impresora térmica y sin
+ * pantalla manda comandas con el módulo apagado —el envío por
+ * diferencias es un arreglo del servidor y aplica igual— y una cuenta
+ * con el módulo encendido y sin nada emparejado no manda nada.
+ */
+export function hayDondeMandar(
+  destinos: Partial<Record<KitchenSection, { screen: boolean; printer: boolean }>>,
+): boolean {
+  return (["BARRA", "COCINA", "SALON"] as const).some(
+    (s) => destinos[s]?.screen === true || destinos[s]?.printer === true,
+  );
+}
+
 export function estadoCocinaVacio(): EstadoCocinaMesa {
   return {
     diners: null,

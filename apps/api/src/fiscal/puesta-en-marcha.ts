@@ -536,6 +536,10 @@ export interface ResultadoReseteo {
   mesasDesagrupadas: number;
   contadoresAZero: number;
   subidasBorradas: number;
+  /** B-reservas-8 · los bonos de prueba que NO colgaban de un ticket (las
+   *  altas iniciales del ensayo). Los vendidos se van con su ticket por la
+   *  cascada y ya están contados en `ticketsBorrados`. */
+  bonosDePruebaBorrados: number;
 }
 
 /**
@@ -543,10 +547,12 @@ export interface ResultadoReseteo {
  * configuró.
  *
  * SE BORRA: los tickets de ensayo (`TEST`) y lo que cuelga de ellos (líneas,
- * pagos, devoluciones, trabajos de email, comandas de cocina), los
- * borradores —que son las mesas abiertas—, los turnos con sus arqueos y sus
- * informes Z, las agrupaciones de mesas y el contador de referencia interna
- * de cada caja.
+ * pagos, devoluciones, trabajos de email, comandas de cocina, **y los bonos
+ * que se vendieron en ellos**), los borradores —que son las mesas
+ * abiertas—, los turnos con sus arqueos y sus informes Z, las agrupaciones
+ * de mesas, el contador de referencia interna de cada caja y los bonos de
+ * prueba que no colgaban de ningún ticket (las altas iniciales del
+ * ensayo).
  *
  * SE CONSERVA: el catálogo, la sala, los cajeros, los terminales, las
  * impresoras, los datos fiscales y los contactos. Todo lo que cuesta una
@@ -656,6 +662,23 @@ async function borrarElEnsayo(
   // existe.
   const subidas = await tx.holdedUpload.deleteMany({ where: { tenantId } });
 
+  // B-reservas-8 · los BONOS DE PRUEBA.
+  //
+  // Los vendidos en un ticket ya se han ido por la cascada de
+  // `vouchers.sold_ticket_id` al borrar sus tickets, unas líneas más
+  // arriba. Esto se lleva los que NO cuelgan de ningún ticket: las ALTAS
+  // INICIALES: el bono de papel que el implantador dio de alta durante el
+  // ensayo para enseñar la pantalla. Nacen `es_prueba` porque la cuenta
+  // está en ensayo, y sin esta línea se quedarían dentro —con sus líneas
+  // del libro— el día que el cliente empieza.
+  //
+  // El trigger `voucher_movements_append_only` deja pasar el borrado de
+  // una línea marcada `es_prueba`: es su escapatoria de ADR-021 §5.1, y
+  // esta cascada es el único sitio que la usa.
+  const bonos = await tx.voucher.deleteMany({
+    where: { tenantId, esPrueba: true },
+  });
+
   return {
     ticketsBorrados: purga.ticketsPurgedTotal,
     ticketsPorEstado: purga.ticketsPorEstado,
@@ -667,6 +690,7 @@ async function borrarElEnsayo(
     mesasDesagrupadas: mesas.count,
     contadoresAZero: contadores.count,
     subidasBorradas: subidas.count,
+    bonosDePruebaBorrados: bonos.count,
   };
 }
 

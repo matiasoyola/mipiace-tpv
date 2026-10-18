@@ -101,7 +101,8 @@ export function KitchenScreen({ me }: KitchenScreenProps) {
   const memoriaDeOrden = useRef<MemoriaDeOrden>(memoriaDeOrdenVacia());
   // El valor inicial es la zona de CONTENIDO a 1280 × 800, que es el peor
   // caso para el que esta pantalla se diseñó: 1280 − 160 («Listas») − 60
-  // (la franja «+N») − 24 (padding) = 1036; 800 − 60 (barra) − 24 = 716.
+  // (la franja «+N», que se reserva siempre aunque no se pinte, ver #24)
+  // − 24 (padding) = 1036; 800 − 60 (barra) − 24 = 716.
   const [zona, setZona] = useState({ ancho: 1036, alto: 716 });
 
   // La pantalla SIEMPRE ENCENDIDA. En la APK lo hace `svc power stayon`
@@ -165,8 +166,25 @@ export function KitchenScreen({ me }: KitchenScreenProps) {
         // Se resta el padding: lo que el reparto necesita es la caja de
         // CONTENIDO, y `clientWidth` incluye el relleno. Con el relleno
         // dentro, el reparto creía tener 24 px más de los que tiene.
+        //
+        // auditoria-sirope (#24) · Y SE RESERVA SIEMPRE EL ANCHO DE LA
+        // FRANJA «+N», aunque no esté puesta.
+        //
+        // Antes la franja se pintaba SIEMPRE —vacía incluida— para que la
+        // zona no cambiara de ancho y el reparto no oscilara. El precio
+        // eran 90 px muertos a la izquierda de «Listas» en una pantalla
+        // en la que todo cabe, que es el caso normal de un bar como
+        // Sirope. El 18-10 estuvieron ahí toda la mañana (capturas 51 y
+        // 60).
+        //
+        // Se le da la vuelta: la franja sólo se pinta cuando hay algo que
+        // decir, y el ancho se reserva EN LA CUENTA, siempre. El reparto
+        // mide contra el caso estrecho, así que cuando la franja aparece
+        // las tarjetas siguen cabiendo; y cuando no está, la rejilla se
+        // queda esos 60 px y no hay oscilación posible, porque la cuenta
+        // no depende de si está o no.
         setZona({
-          ancho: el.clientWidth - 2 * ZONA_PADDING_PX,
+          ancho: el.clientWidth - 2 * ZONA_PADDING_PX - INDICADOR_MAS_N_PX,
           alto: el.clientHeight - 2 * ZONA_PADDING_PX,
         });
       }
@@ -519,9 +537,13 @@ export function KitchenScreen({ me }: KitchenScreenProps) {
             franja roja permanente le quita el crédito al rojo de la franja
             «URGENTE» de al lado, que es la regla del rojo.
 
-            Se pinta SIEMPRE, vacía si no hay nada escondido: si apareciera
-            y desapareciera, la zona de tarjetas cambiaría de ancho y el
-            reparto podría oscilar en cada repintado. */}
+            auditoria-sirope (#24) · YA NO SE PINTA VACÍA. Antes sí, para
+            que la zona de tarjetas no cambiara de ancho y el reparto no
+            oscilara; el precio eran 90 px muertos siempre que todo cabía,
+            que es el caso normal. Ahora el ancho se reserva EN LA CUENTA
+            (ver la medida de `zona`), así que la franja puede aparecer y
+            desaparecer sin que el reparto dependa de ella. */}
+        {reparto.extra.length > 0 && (
         <div
           data-testid="kds-mas-n"
           data-color={colorFranja}
@@ -539,8 +561,7 @@ export function KitchenScreen({ me }: KitchenScreenProps) {
             color: colorFranja === "rojo" ? SEMAFORO_TEXT.rojo : DARK_TEXT,
           }}
         >
-          {reparto.extra.length > 0 && (
-            <>
+          <>
               <span className="font-bold" style={{ fontSize: MAS_N_PX }}>
                 {cuentaMasN(reparto.extra)}
               </span>
@@ -571,8 +592,8 @@ export function KitchenScreen({ me }: KitchenScreenProps) {
                 ))}
               </span>
             </>
-          )}
         </div>
+        )}
 
         {/* ── La columna «Listas» ─────────────────────────────────────
             Estrecha y a la derecha: la tarjeta sale del centro al pasar a

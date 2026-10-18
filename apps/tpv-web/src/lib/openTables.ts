@@ -23,7 +23,7 @@
 export interface OpenTableLike {
   id: string;
   name: string;
-  state: "FREE" | "OPEN" | "BILLING";
+  state: "FREE" | "OPEN" | "BILLING" | "POR_RECOGER";
   groupedIntoTableId: string | null;
   activeTicket: { total: string | number } | null;
 }
@@ -54,8 +54,15 @@ export interface OpenTablesSummary {
 export function summarizeOpenTables(
   tables: readonly OpenTableLike[],
 ): OpenTablesSummary {
+  // auditoria-sirope (#14) · una mesa POR RECOGER **no está abierta**:
+  // ya se cobró y no debe nada. Contarla en «N abiertas» o en el «€ en
+  // sala» diría que hay dinero sin cobrar donde no lo hay, que es
+  // justamente el número que se mira al cerrar.
   const abiertas = tables.filter(
-    (t) => t.state !== "FREE" && !t.groupedIntoTableId,
+    (t) =>
+      t.state !== "FREE" &&
+      t.state !== "POR_RECOGER" &&
+      !t.groupedIntoTableId,
   );
   const rows: OpenTableRow[] = abiertas.map((t) => ({
     id: t.id,

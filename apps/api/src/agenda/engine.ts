@@ -19,7 +19,14 @@ import {
   type Clock,
 } from "./floor.js";
 import { clipToCenter } from "./center-hours.js";
-import { ExclusionError, type AgendaStore, type HoldInput } from "./store.js";
+import { mensajeNoApartar, type MotivoNoApartar } from "@mipiacetpv/bonos";
+
+import {
+  BonoNoDisponibleError,
+  ExclusionError,
+  type AgendaStore,
+  type HoldInput,
+} from "./store.js";
 import {
   CENTER_TZ,
   SLOT_MINUTES,
@@ -69,6 +76,13 @@ export interface HoldRequest {
   // atrás, y dentro de la cota (`resolveBookingNow`). Ausente en el alta
   // online normal, que es el 99 % de las altas.
   occurredAt?: Date | null;
+  // B-reservas-8 · el BONO del que se aparta una sesión al dar la cita, y
+  // quién la está dando. Ausente = cita normal, y entonces nada de este
+  // bloque corre (ni una consulta).
+  voucherId?: string | null;
+  voucherCanal?: "tpv" | "panel" | "web";
+  voucherUserId?: string | null;
+  voucherActor?: string | null;
 }
 
 export type HoldFailureReason =
@@ -79,7 +93,11 @@ export type HoldFailureReason =
   // curso de la retícula del centro.
   | "BOOKING_IN_PAST"
   // B-reservas-6a · D-4b. Inicio que no cae en la retícula del centro.
-  | "BOOKING_OFF_GRID";
+  | "BOOKING_OFF_GRID"
+  // B-reservas-8 · el bono no se pudo apartar, así que LA CITA NO NACE como
+  // cita de bono. El motivo concreto viaja en `bonoMotivo` para que el TPV
+  // pueda decir qué pasa y ofrecer dar la cita normal.
+  | "BONO_NO_DISPONIBLE";
 
 export type HoldResult =
   | { ok: true; appointment: AppointmentView; duplicate?: boolean }
@@ -87,6 +105,10 @@ export type HoldResult =
       ok: false;
       reason: HoldFailureReason;
       alternatives: Slot[];
+      // B-reservas-8 · sólo con `reason = "BONO_NO_DISPONIBLE"`. La lista
+      // cerrada de `MotivoNoApartar`, para que el front elija el mensaje y
+      // no lo reciba hecho.
+      bonoMotivo?: MotivoNoApartar;
       // La frase que la cajera lee en voz alta a la clienta. La escribe el
       // motor porque es quien conoce el huso y las alternativas.
       message?: string;
@@ -732,11 +754,31 @@ export function createCitaEngine(
         timeslotEnd: new Date(startUtc.getTime() + span * 60000),
         items: planned,
         assignments: plan,
+        // B-reservas-8 · el apartado entra DENTRO de la transacción de la
+        // cita. El motor no decide nada del bono: lo pasa.
+        voucherId: request.voucherId ?? null,
+        voucherCanal: request.voucherCanal,
+        voucherUserId: request.voucherUserId ?? null,
+        voucherActor: request.voucherActor ?? null,
       };
       try {
         const appointment = await store.insertHold(input);
         return { ok: true, appointment };
       } catch (err) {
+        // B-reservas-8 · «no quedan sesiones libres» o «ese bono no cubre
+        // esto»: la transacción se fue atrás entera, así que NO hay cita y
+        // NO hay nada apartado. Se devuelven cero alternativas a propósito:
+        // el hueco no se ha perdido, lo que falta es el bono, y ofrecer
+        // otras horas mandaría a la cajera a resolver el problema que no es.
+        if (err instanceof BonoNoDisponibleError) {
+          return {
+            ok: false,
+            reason: "BONO_NO_DISPONIBLE",
+            alternatives: [],
+            bonoMotivo: err.motivo,
+            message: mensajeNoApartar(err.motivo),
+          };
+        }
         if (err instanceof ExclusionError) {
           // La BD ganó la carrera: hueco perdido, devolver alternativas.
           const alternatives = await computeSlots(

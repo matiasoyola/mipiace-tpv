@@ -71,5 +71,15 @@ async function borrarDentroDeLaMarca(tx: Tx, id: string): Promise<void> {
   await tx.$executeRawUnsafe(
     `DELETE FROM public_links WHERE tenant_id = '${id}'`,
   );
+  // B-reservas-8 · el libro primero (es de solo inserción y pasa por su
+  // append-only con la marca puesta) y luego los bonos. Van ANTES del
+  // tenant porque `vouchers.client_id` es RESTRICT: dejarlos para la
+  // cascada los haría chocar con el borrado de `clients`, y el orden entre
+  // dos cascadas hermanas no está garantizado. Mismo paso que
+  // `eliminarLaCuenta`.
+  await tx.$executeRawUnsafe(
+    `DELETE FROM voucher_movements WHERE tenant_id = '${id}'`,
+  );
+  await tx.$executeRawUnsafe(`DELETE FROM vouchers WHERE tenant_id = '${id}'`);
   await tx.$executeRawUnsafe(`DELETE FROM tenants WHERE id = '${id}'`);
 }

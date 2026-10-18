@@ -70,6 +70,12 @@ const fakePrisma = {
       where.id === STORE && where.tenantId === TENANT ? { id: STORE } : null,
     ),
   },
+  // auditoria-sirope (#22) · vaciar cierra las comandas que estuvieran
+  // LISTAS. Este banco no tiene cocina.
+  kitchenOrder: {
+    findMany: vi.fn(async () => []),
+    updateMany: vi.fn(async () => ({ count: 0 })),
+  },
   ticket: {
     findMany: vi.fn(async ({ where }: any) =>
       tickets

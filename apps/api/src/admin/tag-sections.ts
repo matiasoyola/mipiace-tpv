@@ -12,6 +12,9 @@
 // configurar nada.
 //
 //   GET    /admin/tag-sections       → lista las entradas del tenant.
+//   GET    /admin/tag-sections/etiquetas → las etiquetas REALES del
+//                                     catálogo, con su sección si la
+//                                     tienen (auditoria-sirope #19).
 //   POST   /admin/tag-sections       → upsert idempotente por slug.
 //   DELETE /admin/tag-sections/:id   → quita el mapeo (la línea cae a SALON).
 
@@ -38,6 +41,69 @@ export async function registerAdminTagSectionsRoutes(
         select: { id: true, slug: true, section: true },
       });
       return { items };
+    },
+  );
+
+  // auditoria-sirope (#19) · LAS ETIQUETAS QUE EXISTEN DE VERDAD.
+  //
+  // «Comanderas» pedía teclear a mano «el slug de Holded». Dos problemas,
+  // y el 18-10 se pagaron los dos: Sirope ya no usa Holded —así que el
+  // rótulo manda a buscar algo que no existe— y una etiqueta mal tecleada
+  // no da error: simplemente no mapea nada y sus platos caen a SALÓN sin
+  // que nadie lo note. La primera comanda de la T6 se perdió así.
+  //
+  // Con esto la página puede listar las etiquetas del catálogo y poner un
+  // selector al lado de cada una. Lo que no se puede teclear, no se puede
+  // teclear mal.
+  app.get(
+    "/admin/tag-sections/etiquetas",
+    { preHandler: [requireOwnerOrManager, ensureCajaEnabled] },
+    async (request) => {
+      const auth = request.auth!;
+      const prisma = getPrisma();
+      const [productos, mapeos] = await Promise.all([
+        prisma.product.findMany({
+          where: {
+            tenantId: auth.tenantId,
+            active: true,
+            archivedFromHoldedAt: null,
+          },
+          select: { tags: true },
+        }),
+        prisma.tagSection.findMany({
+          where: { tenantId: auth.tenantId },
+          select: { id: true, slug: true, section: true },
+        }),
+      ]);
+      const cuenta = new Map<string, number>();
+      for (const p of productos) {
+        for (const t of p.tags) {
+          const slug = t.trim().toLowerCase();
+          if (!slug) continue;
+          cuenta.set(slug, (cuenta.get(slug) ?? 0) + 1);
+        }
+      }
+      const porSlug = new Map(mapeos.map((m) => [m.slug, m] as const));
+      // Las etiquetas del catálogo, y además las mapeadas que ya no
+      // tienen productos: son las que sobran y el dueño tiene que poder
+      // verlas para quitarlas.
+      const slugs = new Set<string>([...cuenta.keys(), ...porSlug.keys()]);
+      const etiquetas = [...slugs]
+        .sort((a, b) => a.localeCompare(b, "es"))
+        .map((slug) => ({
+          slug,
+          productCount: cuenta.get(slug) ?? 0,
+          section: porSlug.get(slug)?.section ?? null,
+          mapeoId: porSlug.get(slug)?.id ?? null,
+        }));
+      return {
+        etiquetas,
+        // Cuántas etiquetas con productos no tienen sección: es el aviso
+        // que la página pinta arriba, y el mismo número que mira el panel.
+        sinSeccion: etiquetas.filter(
+          (e) => e.section == null && e.productCount > 0,
+        ).length,
+      };
     },
   );
 

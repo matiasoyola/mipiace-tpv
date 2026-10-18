@@ -13,16 +13,38 @@
 import { randomUUID } from "node:crypto";
 
 import { Prisma, TicketStatus } from "@mipiacetpv/db";
+// auditoria-sirope (#17) · la regla de «¿es devolvible?» la escribe una
+// sola función, y la miran el servidor y el TPV.
+import {
+  mensajeNoDevolvible,
+  motivoNoDevolvible,
+} from "@mipiacetpv/ticket-model";
 import type { FastifyInstance } from "fastify";
 
 import { verifyManagerAuthorization } from "../auth/manager-authorization.js";
 import { getPrisma } from "../context.js";
 import { ingestFiscalRecord, type IngestResult } from "../fiscal/ingest.js";
-import { comprobarGateFiscal, esCobroDeEnsayo } from "../fiscal/mode.js";
+import { comprobarGateFiscal, enEnsayo, esCobroDeEnsayo } from "../fiscal/mode.js";
+import { canjearAlCobrar, type CanjeAlCobrar } from "../vouchers/caja.js";
+import { CANDADO_ERROR, CANDADO_MENSAJE } from "../vouchers/numero.js";
+import { nacerLosBonos, type BonoNacido } from "../vouchers/venta.js";
+import {
+  prepararBonosDeLaVenta,
+  ventasDeBonoEnElBorrador,
+} from "../vouchers/venta-en-caja.js";
+import {
+  anularLosBonos,
+  bonosDeLasLineas,
+  primerRechazo,
+} from "../vouchers/devolucion.js";
 import {
   FISCAL_RECORD_BODY_SCHEMA,
   type FiscalRecordBody,
 } from "../fiscal/payload.js";
+import {
+  avisarComandasServidas,
+  servirComandasListas,
+} from "../kitchen/servir.js";
 import { getStoreEventBus } from "../realtime/store-event-bus.js";
 import { emitTicketPaid, emitTicketRefunded } from "../realtime/emit-helpers.js";
 import { enqueueTicketUpload } from "../queues/ticket-upload.js";
@@ -93,6 +115,46 @@ class ShiftNotOpenError extends Error {
   }
 }
 
+// B-reservas-8 · señal interna de la tx de checkout cuando el borrador
+// vende un bono y no tiene ficha de cliente. Aborta la tx —el DRAFT se
+// queda DRAFT, sin quemar serie— y sale como 409 BONO_SIN_CLIENTE.
+//
+// Se comprueba DENTRO y no antes a propósito: la cajera puede haber añadido
+// la línea del bono en el mismo momento en que otro terminal le quitaba la
+// ficha al ticket, y lo que vale es el estado con el que se cobra.
+class BonoSinClienteError extends Error {
+  constructor() {
+    super("bono sin cliente");
+  }
+}
+
+// B-reservas-8 · señal interna de la tx de la DEVOLUCIÓN cuando una de las
+// líneas vendió un bono que ya tiene sesiones tocadas. Aborta la tx (no se
+// quema número de abono) y sale como 409 con el mensaje de
+// `porQueNoDevolvible()`, que es el mismo que el botón enseña.
+class BonoNoDevolvibleError extends Error {
+  constructor(readonly motivo: string) {
+    super(motivo);
+  }
+}
+
+// B-reservas-8 · señal interna de una transacción de cobro que iba a
+// emitir un bono y se encontró el CANDADO de primer uso puesto.
+//
+// Aborta la tx y sale como 409: el borrador se queda borrador, no se quema
+// número de serie y **no se cobra**. Cobrarlo y no emitir el bono dejaría a
+// la clienta pagada y sin bono.
+//
+// Es una DEFENSA, no la puerta: la puerta está en el alta de la línea
+// (`POST /tables/:id/lines`), que es donde la cajera puede hacer algo.
+// Aquí sólo se llega si el candado se puso entre que se añadió la línea y
+// que se cobró — o si alguien se saltó el alta.
+class BonoNumeracionSinConfirmarError extends Error {
+  constructor() {
+    super("numeración de bonos sin confirmar");
+  }
+}
+
 const UUID_V4 =
   "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$";
 
@@ -132,6 +194,13 @@ interface TicketLineBody {
   // y persiste el snapshot desnormalizado en TicketLine.modifiers (caso
   // que reemplaza el shape legacy string[] cuando ambos vienen).
   modifierSelections?: ModifierSelectionInput[];
+  // B-reservas-8 · con qué BONO se paga esta línea. Es el canje SIN CITA
+  // (la peluquería de Sole, que no usa rejilla): se añade el servicio al
+  // ticket, el servidor propone el bono de la ficha y la cajera lo acepta.
+  // El importe de la línea lo pone el servidor desde `Tenant.bonoModoCanje`
+  // —lo que llegue aquí en `unitPrice` se ignora para esa línea—, porque el
+  // precio lo pone el servidor y del navegador sólo llegan ids.
+  voucherId?: string;
 }
 
 interface TicketPaymentBody {
@@ -147,6 +216,11 @@ interface CreateTicketBody {
   lines: TicketLineBody[];
   payments: TicketPaymentBody[];
   contactHoldedId?: string;
+  // B-reservas-8 · LA FICHA DEL CRM de esta venta. Hasta este bloque un
+  // ticket sólo sabía del contacto de HOLDED, y los bonos viven justo en
+  // las cuentas que no lo tienen. Obligatoria para vender un bono (el bono
+  // es de una ficha, S6) y para canjear uno sin cita.
+  clientId?: string;
   notes?: string;
   cashAmount?: number;
   printIntent?: boolean;
@@ -196,6 +270,11 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             registerId: { type: "string", format: "uuid" },
             shiftId: { type: "string", format: "uuid" },
             contactHoldedId: { type: "string", maxLength: 64 },
+            // B-reservas-8 · la ficha del CRM. Declarada en el schema
+            // porque si no, el `removeAdditional` de Fastify la borraría en
+            // silencio y el bono nacería sin dueña —o no nacería—, con un
+            // 200 por delante. Un campo nuevo, su test.
+            clientId: { type: "string", format: "uuid" },
             notes: { type: "string", maxLength: 1000 },
             cashAmount: { type: "number", minimum: 0 },
             printIntent: { type: "boolean" },
@@ -260,6 +339,9 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
                       },
                     },
                   },
+                  // B-reservas-8 · el canje sin cita. Declarado, por lo
+                  // mismo que `clientId` de arriba.
+                  voucherId: { type: "string", format: "uuid" },
                 },
               },
             },
@@ -419,6 +501,80 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       const lineBaseUnitPrice = body.lines.map((l) =>
         typeof l.unitPriceOverride === "number" ? l.unitPriceOverride : l.unitPrice,
       );
+
+      // ── B-reservas-8 · los bonos de esta venta ─────────────────────
+      //
+      // Se resuelve ANTES de los totales porque cambia el importe de una
+      // línea: una sesión canjeada vale 0 € (o el prorrateo del frente
+      // P5), y eso lo decide el SERVIDOR. Lo que llegue del navegador en
+      // `unitPrice` para esa línea se ignora.
+      //
+      // Con los bonos apagados y sin ninguna línea de bono —el caso de los
+      // quince tenants de hoy— esto no toca la base de datos.
+      //
+      // La lectura del tenant SUBE AQUÍ desde el paso 4.b, donde la puso
+      // B6 para el umbral de descuento. Sigue siendo UNA sola consulta
+      // —los bonos se cuelan en su `select`, como hicieron catalogo-local
+      // y puesta-en-marcha— y sube porque los bonos cambian el importe de
+      // una línea y eso tiene que decidirse antes de los totales. Nada de
+      // lo que lee depende de nada que se calcule entre los dos sitios.
+      const tenantForDiscount = await prisma.tenant.findUniqueOrThrow({
+        where: { id: cashier.tid },
+        select: {
+          discountThresholdPct: true,
+          creditSalesEnabled: true,
+          // catalogo-local · las dos columnas que lee `holdedDestination`.
+          holdedEnabled: true,
+          holdedApiKeyCiphertext: true,
+          // puesta-en-marcha (ADR-021) · y la que decide si esto es un cobro
+          // de ensayo.
+          facturaDesde: true,
+          // B-reservas-8 · los tres ajustes de bonos del centro.
+          bonosEnabled: true,
+          bonoCaducidadMeses: true,
+          bonoModoCanje: true,
+        },
+      });
+      const bonos = await prepararBonosDeLaVenta(prisma, {
+        tenantId: cashier.tid,
+        clientId: body.clientId ?? null,
+        lineas: body.lines.map((l) => ({
+          productId: l.productId ?? null,
+          units: l.units,
+          voucherId: l.voucherId ?? null,
+        })),
+        ajustes: {
+          // Defensivo con la FORMA, igual que `bonosIsEnabled`: la suite
+          // tiene dobles de Prisma que devuelven un tenant parcial, y un
+          // doble sin estas columnas tiene que dejar el módulo APAGADO
+          // —el lado seguro— y no reventar el cobro.
+          bonosEnabled: tenantForDiscount.bonosEnabled === true,
+          bonoCaducidadMeses: tenantForDiscount.bonoCaducidadMeses ?? null,
+          bonoModoCanje: tenantForDiscount.bonoModoCanje ?? "LINEA_CERO",
+        },
+        ahora: new Date(),
+      });
+      if (!bonos.ok) {
+        return reply.code(bonos.status).send({
+          error: bonos.error,
+          code: bonos.error,
+          message: bonos.message,
+        });
+      }
+      // El precio de las líneas canjeadas, puesto por el servidor.
+      const canjePorLinea = new Map(bonos.canjes.map((c) => [c.indice, c]));
+      // Los ids de las líneas, generados aquí para poder enlazarlas con
+      // los bonos que nacen y con las sesiones que se consumen.
+      const lineIds = body.lines.map(() => randomUUID());
+      // Lo que la transacción de abajo cuenta de los bonos, para la
+      // respuesta y para el log. Fuera de la transacción porque la
+      // respuesta se construye después.
+      let bonosEmitidos: BonoNacido[] = [];
+      let canjesHechos: CanjeAlCobrar[] = [];
+      for (const [indice, canje] of canjePorLinea) {
+        lineBaseUnitPrice[indice] = canje.importeCents / 100;
+      }
+
       const totals = computeTicket(
         body.lines.map((l, i) => ({
           units: l.units,
@@ -500,21 +656,6 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       // descuentos), porque es la métrica que entiende el comercio:
       // "le estoy regalando un X% del precio de tarifa". Si supera el
       // umbral, exigimos `authorizationToken` válido del encargado.
-      const tenantForDiscount = await prisma.tenant.findUniqueOrThrow({
-        where: { id: cashier.tid },
-        select: {
-          discountThresholdPct: true,
-          creditSalesEnabled: true,
-          // catalogo-local · las dos columnas que lee `holdedDestination`.
-          // Se cuelan en este `select` que ya existía: cero consultas
-          // extra en el camino de cobro.
-          holdedEnabled: true,
-          holdedApiKeyCiphertext: true,
-          // puesta-en-marcha (ADR-021) · y la que decide si esto es un cobro
-          // de ensayo. Viaja en el mismo `select`: cero consultas extra.
-          facturaDesde: true,
-        },
-      });
       // catalogo-local (addendum 3) · ¿hay destino en Holded, y de qué
       // tipo? Se calcula una vez y lo usan los dos puntos de encolado del
       // handler (la fila dentro de la transacción y el job de fuera).
@@ -691,6 +832,9 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             externalId: body.externalId,
             publicSlug: generatePublicSlug(),
             contactHoldedId: body.contactHoldedId ?? null,
+            // B-reservas-8 · la ficha del CRM de esta venta. `null` en la
+            // venta de siempre, que es la de un bar.
+            clientId: body.clientId ?? null,
             // v1.8-Fiado · un fiado nace ON_CREDIT con la deuda viva; una
             // venta normal nace PENDING_SYNC para subir a Holded ya.
             // catalogo-local · sin Holded nace PAID, no PENDING_SYNC.
@@ -723,6 +867,14 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             paidAt: new Date(),
             lines: {
               create: body.lines.map((l, i) => ({
+                // B-reservas-8 · el id se genera AQUÍ y no lo pone la base.
+                // Hace falta para saber, después del `create`, qué línea es
+                // cada una: el bono que nace de una venta guarda su
+                // `soldTicketLineId` y la sesión consumida se imputa a su
+                // línea. Casar por `productId` no serviría —dos veces el
+                // mismo servicio en un ticket son dos líneas— y el orden de
+                // `t.lines` después de un `create` anidado no es contrato.
+                id: lineIds[i]!,
                 productId: l.productId ?? null,
                 variantId: l.variantId ?? null,
                 holdedProductId: l.holdedProductId ?? null,
@@ -733,7 +885,14 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
                 // ya incluye los deltas (computado arriba). Mantenemos
                 // unitPrice "limpio" para que la auditoría sea legible y
                 // los modifiers expliquen explícitamente el suplemento.
-                unitPrice: new Prisma.Decimal(l.unitPrice),
+                //
+                // B-reservas-8 · en una línea CANJEADA el que manda es
+                // `lineBaseUnitPrice`, que el servidor ya puso a 0 € (o al
+                // prorrateo). Si se persistiera `l.unitPrice` del body, la
+                // línea diría 35 € y el total 0 €.
+                unitPrice: new Prisma.Decimal(
+                  canjePorLinea.has(i) ? lineBaseUnitPrice[i]! : l.unitPrice,
+                ),
                 // v1.2-Lite Lote 4.B: persistimos el override si el cajero
                 // tocó el lápiz. La línea de venta cobrada usa este valor
                 // (lineBaseUnitPrice ya lo aplicó al computar totals) y
@@ -748,6 +907,8 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
                 // `null` y no `undefined`: la columna es nullable y «sin
                 // causa» es NULL, que es lo que el CHECK compara.
                 exemptionCause: l.exemptionCause ?? null,
+                // B-reservas-8 · con qué bono se paga esta línea.
+                voucherId: canjePorLinea.get(i)?.voucherId ?? null,
                 subtotal: new Prisma.Decimal(totals.lines[i]!.subtotal),
                 total: new Prisma.Decimal(totals.lines[i]!.total),
                 modifiers: buildModifiersSnapshot(
@@ -815,6 +976,60 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             deviceId: cashier.did,
             ticketId: t.id,
             body: body.fiscalRecord,
+          });
+        }
+        // ── B-reservas-8 · el bono nace AQUÍ ─────────────────────────
+        //
+        // En la misma transacción que la venta y DESPUÉS del sello, igual
+        // que el registro de facturación y por la misma razón: cuando el
+        // ticket ya es una venta. Un ticket que no se cobra no gasta
+        // número de bono.
+        //
+        // Un ticket `TEST` (modo prueba o cuenta en ensayo) hace nacer
+        // bonos `esPrueba`, y el reseteo del ensayo se los lleva con su
+        // ticket por la cascada de `vouchers.sold_ticket_id`.
+        if (bonos.ventas.length > 0) {
+          const nacidos = await nacerLosBonos(tx, {
+            tenantId: cashier.tid,
+            ticketId: t.id,
+            clientId: body.clientId!,
+            lineas: bonos.ventas.map((v) => ({
+              ticketLineId: lineIds[v.indice]!,
+              plantilla: v.plantilla,
+              unidades: v.unidades,
+              // Lo COBRADO por cada uno: el total de la línea repartido
+              // entre las unidades. Es lo que entró de verdad —con su
+              // descuento si lo hubo—, y no el precio de carta, que el
+              // bono guarda aparte (`07` pieza 1: dinero y deuda van por
+              // separado).
+              cobradoCentsPorUnidad: Math.round(
+                (Number(totals.lines[v.indice]!.total) / v.unidades) * 100,
+              ),
+            })),
+            caducidadMesesPorDefecto:
+              tenantForDiscount.bonoCaducidadMeses ?? null,
+            esPrueba: t.status === TicketStatus.TEST,
+            userId: cashier.sub,
+            ahora: new Date(),
+          });
+          // El candado de primer uso. `prepararBonosDeLaVenta` ya lo
+          // comprobó ANTES de la transacción, así que aquí sólo se llega
+          // si se puso entre medias. Se aborta la tx: no se cobra, y así
+          // no hay forma de que la clienta pague un bono que no existe.
+          if (!nacidos.ok) throw new BonoNumeracionSinConfirmarError();
+          bonosEmitidos = nacidos.bonos;
+        }
+        // Y la sesión se consume, también aquí dentro. Sólo si alguna
+        // línea la canjea: una venta rápida no tiene cita, así que aquí no
+        // hay nada apartado que liberar y mirar costaría dos consultas en
+        // CADA venta de CADA bar.
+        if (bonos.canjes.length > 0) {
+          canjesHechos = await canjearAlCobrar(tx, {
+            tenantId: cashier.tid,
+            ticketId: t.id,
+            userId: cashier.sub,
+            canal: "tpv",
+            ahora: new Date(),
           });
         }
         return t;
@@ -920,9 +1135,32 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         );
       }
 
+      if (bonosEmitidos.length > 0 || canjesHechos.length > 0) {
+        request.log.info(
+          {
+            event: "bono.venta_y_canje",
+            tenantId: cashier.tid,
+            ticketId: ticket.id,
+            emitidos: bonosEmitidos.map((b) => b.code),
+            canjes: canjesHechos.map((c) => ({
+              code: c.code,
+              consumida: c.consumida,
+            })),
+          },
+          "la venta movió bonos",
+        );
+      }
+
       return reply.code(201).send({
         ticket: serializeTicket(ticket),
         syncStatus: ticket.status,
+        // B-reservas-8 · los bonos que NACIERON en esta venta, para que el
+        // justificante y la pantalla digan «Bono quiropodia · 5 sesiones ·
+        // B87». Lista vacía en toda venta que no vende bonos.
+        bonosEmitidos,
+        // Las sesiones que esta venta consumió (o liberó, si lo que se hizo
+        // no lo cubría el bono).
+        canjes: canjesHechos,
         // Sole · el TPV necesita saber que el email se quedó fuera para
         // decirlo en la pantalla de "Ticket emitido". `null` en el 99% de
         // los cobros; el contrato lo lleva siempre para que el cliente no
@@ -1192,6 +1430,16 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       }
       const fiscal: { result: IngestResult | null } = { result: null };
 
+      // B-reservas-8 · los ajustes de bonos del centro, y lo que la
+      // transacción cuenta de ellos. Una consulta, y sólo lee tres
+      // columnas: en una cuenta sin bonos no hay nada más que hacer.
+      const tenantBonos = await prisma.tenant.findUniqueOrThrow({
+        where: { id: cashier.tid },
+        select: { bonosEnabled: true, bonoCaducidadMeses: true },
+      });
+      let bonosEmitidos: BonoNacido[] = [];
+      let canjesHechos: CanjeAlCobrar[] = [];
+
       const grossSubtotal = totals.subtotal + totals.discount;
       const effectiveDiscountPct =
         grossSubtotal > 0
@@ -1375,6 +1623,25 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
               where: { groupedIntoTableId: draft.tableId },
               data: { groupedIntoTableId: null },
             });
+            // auditoria-sirope (#14) · la mesa queda POR RECOGER.
+            //
+            // Hasta hoy pasaba a Libre en el instante del cobro y en el
+            // mapa figuraba disponible con el servicio todavía encima.
+            // No es libre —no se puede sentar a nadie— y no está
+            // abierta —no debe nada—, y las dos cosas las tiene que ver
+            // la caja de al lado, así que vive en el servidor.
+            //
+            // Las mesas ABSORBIDAS por un grupo también: se recogen
+            // igual que la principal.
+            await tx.table.updateMany({
+              where: {
+                OR: [
+                  { id: draft.tableId },
+                  { groupedIntoTableId: draft.tableId },
+                ],
+              },
+              data: { porRecogerDesde: new Date() },
+            });
           }
           await tx.shift.update({
             where: { id: resolution.shiftId },
@@ -1412,10 +1679,71 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
               body: body.fiscalRecord,
             });
           }
+          // ── B-reservas-8 · los bonos del borrador ──────────────────
+          //
+          // Mismo sitio y mismas razones que en `POST /tickets`: dentro de
+          // la transacción y después del sello.
+          //
+          // Las VENTAS de bono de un borrador salen de sus líneas, no del
+          // body: aquí las líneas ya están escritas (la cajera las fue
+          // añadiendo). Y los CANJES ya vienen marcados en las líneas con
+          // su `voucher_id` —lo puso `agenda/checkout.ts` al abrir el cobro
+          // de una cita con bono, o la cajera al marcar el canje—, así que
+          // `canjearAlCobrar` no necesita nada del cuerpo.
+          // Con el módulo apagado no se mira nada: ni las ventas ni los
+          // canjes. Un borrador de una cuenta sin bonos no puede llevar
+          // `voucher_id` en ninguna línea —no hay forma de ponerlo— así
+          // que saltarse las dos consultas es exacto, no una optimización
+          // optimista.
+          const ventasDelBorrador = tenantBonos.bonosEnabled
+            ? await ventasDeBonoEnElBorrador(tx, {
+                tenantId: cashier.tid,
+                ticketId: t.id,
+              })
+            : [];
+          if (ventasDelBorrador.length > 0) {
+            if (!draft.clientId) {
+              // Vender un bono exige ficha. Se rechaza AQUÍ dentro, así
+              // que la transacción se va atrás entera: no se quema número
+              // de serie y el borrador sigue siendo un borrador.
+              throw new BonoSinClienteError();
+            }
+            const nacidos = await nacerLosBonos(tx, {
+              tenantId: cashier.tid,
+              ticketId: t.id,
+              clientId: draft.clientId,
+              lineas: ventasDelBorrador,
+              caducidadMesesPorDefecto: tenantBonos.bonoCaducidadMeses,
+              esPrueba: t.status === TicketStatus.TEST,
+              userId: cashier.sub,
+              ahora: new Date(),
+            });
+            if (!nacidos.ok) throw new BonoNumeracionSinConfirmarError();
+            bonosEmitidos = nacidos.bonos;
+          }
+          if (tenantBonos.bonosEnabled) {
+            canjesHechos = await canjearAlCobrar(tx, {
+              tenantId: cashier.tid,
+              ticketId: t.id,
+              userId: cashier.sub,
+              canal: "tpv",
+              ahora: new Date(),
+            });
+          }
+          // auditoria-sirope (#22) · lo que estaba LISTO pasa a servido.
+          // La mesa se ha ido: dejar la comanda viva deja la etiqueta
+          // LISTO en el mapa, la tarjeta esperando en el AP11 y la banda
+          // «T6 · listo para servir» encima de las ventas siguientes.
+          const servidas = await servirComandasListas(tx, {
+            ticketId: draft.id,
+            byUserId: cashier.sub,
+            now: new Date(),
+          });
           // La imputación sale de la tx para que el log y el Z
           // correctivo se hagan fuera, como en `POST /tickets`.
           return {
             ticket: t,
+            servidas,
             shift: {
               shiftId: resolution.shiftId,
               imputed: resolution.imputed,
@@ -1424,6 +1752,28 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
           };
         });
       } catch (err) {
+        // B-reservas-8 · el borrador vende un bono y no tiene ficha. La tx
+        // se deshizo entera: el DRAFT sigue siendo DRAFT y no se quemó
+        // número de serie. El TPV pide la ficha y vuelve a cobrar.
+        if (err instanceof BonoSinClienteError) {
+          return reply.code(409).send({
+            error: "BONO_SIN_CLIENTE",
+            code: "BONO_SIN_CLIENTE",
+            message:
+              "Este ticket vende un bono y le falta la ficha de la clienta: el bono es de una ficha y hay que saber a quién se le deben las sesiones.",
+          });
+        }
+        // B-reservas-8 · el candado de primer uso, como DEFENSA. La
+        // puerta está en el alta de la línea; aquí sólo se llega si el
+        // candado se puso entre medias. La tx se deshizo entera: el
+        // borrador sigue siendo borrador y NO se ha cobrado nada.
+        if (err instanceof BonoNumeracionSinConfirmarError) {
+          return reply.code(409).send({
+            error: CANDADO_ERROR,
+            code: CANDADO_ERROR,
+            message: CANDADO_MENSAJE,
+          });
+        }
         if (err instanceof ShiftNotOpenError) {
           // El turno del borrador lo cerró una persona y no hay otro
           // abierto en la caja. La tx entera se ha deshecho: el DRAFT
@@ -1470,6 +1820,9 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
 
       const updated = txOut.ticket;
       const shiftResolution = txOut.shift;
+      // auditoria-sirope (#22) · fuera de la transacción, como el resto
+      // de los avisos de cocina: la verdad está en el GET.
+      avisarComandasServidas(txOut.servidas, new Date());
 
       // B-reservas-5 Frente T · rastro de la imputación, con el mismo
       // nombre de evento que `POST /tickets` para que una sola búsqueda
@@ -1593,6 +1946,22 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         );
       }
 
+      if (bonosEmitidos.length > 0 || canjesHechos.length > 0) {
+        request.log.info(
+          {
+            event: "bono.venta_y_canje",
+            tenantId: cashier.tid,
+            ticketId: updated.id,
+            emitidos: bonosEmitidos.map((b) => b.code),
+            canjes: canjesHechos.map((c) => ({
+              code: c.code,
+              consumida: c.consumida,
+            })),
+          },
+          "el cobro del borrador movió bonos",
+        );
+      }
+
       return reply.code(200).send({
         ticket: serializeTicket(updated),
         syncStatus: updated.status,
@@ -1600,6 +1969,9 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         // el TPV tiene que poder decirlo en la pantalla de después.
         emailIntentRejected: emailIntent.rejected,
         fiscalRecord: fiscal.result,
+        // B-reservas-8 · mismo contrato que `POST /tickets`.
+        bonosEmitidos,
+        canjes: canjesHechos,
       });
     },
   );
@@ -1986,22 +2358,35 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       // es el CUARTO camino que encola, y era el único —junto al de
       // mesa— que nunca miró la clave. Aquí sí hace falta una consulta
       // propia: el handler del refund no leía el tenant para nada.
+      //
+      // auditoria-sirope (#17) · y además `facturaDesde`, porque la regla
+      // de «¿es devolvible?» pregunta si la cuenta está en ensayo. La lee
+      // la misma función que mira el TPV antes de pintar el botón
+      // (`esDevolvible`, en `@mipiacetpv/ticket-model`): cuando las dos
+      // respuestas se escribían por separado, el TPV escondía el botón de
+      // tickets que el servidor habría devuelto sin rechistar.
       const tenantForUpload = await prisma.tenant.findUniqueOrThrow({
         where: { id: cashier.tid },
-        select: { holdedEnabled: true, holdedApiKeyCiphertext: true },
+        select: {
+          holdedEnabled: true,
+          holdedApiKeyCiphertext: true,
+          // B-reservas-8 · si devolver estas líneas anula algún bono. Se
+          // cuela en el `select` que ya existía: cero consultas extra.
+          bonosEnabled: true,
+          facturaDesde: true,
+        },
       });
       const destinoHolded = holdedDestination(tenantForUpload);
 
       const isTestTicket = ticket.status === TicketStatus.TEST;
-      if (
-        !isTestTicket &&
-        ticket.status !== TicketStatus.SYNCED &&
-        ticket.status !== TicketStatus.PAID
-      ) {
+      const motivoNo = motivoNoDevolvible(ticket.status, {
+        enEnsayo: enEnsayo(tenantForUpload),
+        sesionDePrueba: cashier.isTest,
+      });
+      if (motivoNo) {
         return reply.code(409).send({
           error: "TICKET_NOT_REFUNDABLE",
-          message:
-            "Sólo se puede devolver un ticket cobrado y sincronizado con Holded.",
+          message: mensajeNoDevolvible(motivoNo),
         });
       }
 
@@ -2138,7 +2523,39 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
       // Internal number del refund: prefijo "R-" + correlativo register.
       // Incremento dentro de la tx — sin huecos si el create falla
       // (v1.5-consistencia-A §3.a).
-      const refund = await prisma.$transaction(async (tx) => {
+      const bonosAnulados: string[] = [];
+      // B-reservas-8 · la transacción se envuelve para poder traducir el
+      // «este bono ya tiene sesiones usadas» a un 409 con su frase. Es el
+      // mismo patrón que `ShiftNotOpenError` en el cobro del borrador: la
+      // comprobación tiene que ir DENTRO (con la fila bloqueada) y el
+      // mensaje tiene que salir FUERA.
+      let refund;
+      try {
+      refund = await prisma.$transaction(async (tx) => {
+        // ── B-reservas-8 · los bonos que vendieron estas líneas ──────
+        //
+        // Se leen con la fila bloqueada y se cuentan sus sesiones DEL
+        // LIBRO, no de la caché: de esto depende si sale dinero de la caja.
+        //
+        // El rechazo lo escribe `porQueNoDevolvible()`, **la misma función
+        // que usa el botón del TPV**. Dos reglas para el mismo «no» es como
+        // el botón deja pulsar y el servidor contesta 409 al final del
+        // modal.
+        // Con el módulo apagado no hay bonos que mirar. Defensivo con la
+        // FORMA, igual que `bonosIsEnabled`: un doble de Prisma que
+        // devuelva un tenant parcial deja el módulo APAGADO —el lado
+        // seguro— y no revienta la devolución.
+        const bonosDeLaVenta =
+          tenantForUpload.bonosEnabled === true
+            ? await bonosDeLasLineas(
+                tx,
+                cashier.tid,
+                refundLinesData.map((l) => l.ticketLineId),
+              )
+            : [];
+        const rechazo = primerRechazo(bonosDeLaVenta);
+        if (rechazo) throw new BonoNoDevolvibleError(rechazo.mensaje);
+
         const next = await tx.register.update({
           where: { id: ticket.registerId },
           data: { ticketCounter: { increment: 1 } },
@@ -2196,8 +2613,35 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
             update: {},
           });
         }
+        // B-reservas-8 · el bono queda ANULADO en el MISMO paso que su
+        // devolución y en la misma transacción. Si se pudiera anular por
+        // su cuenta habría un bono anulado con su dinero cobrado y nadie
+        // sabría por qué.
+        // Los mismos bonos que se comprobaron arriba —ya bloqueados— y no
+        // una segunda lectura: entre las dos no puede haber cambiado nada
+        // (es la misma transacción), y leerlos dos veces invitaría a que
+        // algún día las dos listas no coincidieran.
+        bonosAnulados.push(
+          ...(await anularLosBonos(tx, {
+            tenantId: cashier.tid,
+            bonos: bonosDeLaVenta,
+            refundInternalNumber: internalNumber,
+            userId: cashier.sub,
+            ahora: new Date(),
+          })),
+        );
         return r;
       });
+      } catch (err) {
+        if (err instanceof BonoNoDevolvibleError) {
+          return reply.code(409).send({
+            error: "BONO_NO_DEVOLVIBLE",
+            code: "BONO_NO_DEVOLVIBLE",
+            message: err.motivo,
+          });
+        }
+        throw err;
+      }
 
       // Gate fiscal sagrado: un refund de prueba JAMÁS se encola contra
       // Holded. Sólo encolamos los refunds reales.
@@ -2246,7 +2690,12 @@ export async function registerTicketRoutes(app: FastifyInstance): Promise<void> 
         });
       }
 
-      return reply.code(201).send({ refund: serializeRefund(refund) });
+      return reply.code(201).send({
+        refund: serializeRefund(refund),
+        // B-reservas-8 · los bonos que esta devolución anuló, por su
+        // código. Lista vacía en toda devolución que no toca bonos.
+        bonosAnulados,
+      });
     },
   );
 }

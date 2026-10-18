@@ -55,6 +55,11 @@ export interface CatalogProduct {
   // servicios sin scheduling. El TPV la pinta informativa por línea de
   // servicio cuando el tenant tiene `agendaEnabled` (base visual para B4).
   durationMin?: number | null;
+  // B-reservas-8 · ¿este producto ES un bono de sesiones? Opcional por lo
+  // mismo que `allergens`: un terminal con el catálogo cacheado de antes
+  // del bloque no lo trae, y ausente se lee como `false` — que es lo que
+  // era todo producto hasta ahora.
+  esBono?: boolean;
 }
 
 const DB_NAME = "mipiacetpv-catalog";
@@ -121,6 +126,18 @@ const HOLDED_ENABLED_KEY = "mipiacetpv-catalog-holded-enabled";
 // Quien la escribe de verdad es el LOGIN, no el catálogo: la banda tiene que
 // estar puesta antes de que nadie pueda cobrar.
 const ENSAYO_KEY = "mipiacetpv-tenant-ensayo";
+
+// B-reservas-8 · ¿está PUESTO el candado de primer uso de la numeración de
+// bonos? Mientras lo esté, el centro no puede vender ninguno.
+//
+// Default ASIMÉTRICO como el de la banda de ensayo, y al revés que
+// `CAJA_ENABLED_KEY`: se compara con "1", así que un TPV que todavía no
+// sepa nada deja añadir el bono y es **el servidor quien lo para** con su
+// 409. El error de este lado es dejar tocar un bono que el servidor va a
+// rechazar —con su frase, y sin haber cobrado nada—; el del otro sería
+// esconderle el bono a un centro que SÍ lo tiene confirmado, y eso es una
+// venta que no se hace.
+const BONOS_CANDADO_KEY = "mipiacetpv-bonos-candado";
 
 export type BusinessType = "HOSPITALITY" | "RETAIL" | "SERVICES";
 
@@ -213,6 +230,16 @@ export function setCachedHoldedEnabled(value: boolean): void {
 // explícitamente que sí. Ver la nota de `ENSAYO_KEY`.
 export function getCachedEnsayo(): boolean {
   return localStorage.getItem(ENSAYO_KEY) === "1";
+}
+
+// B-reservas-8 · `true` sólo si el catálogo trajo el candado PUESTO. Ver
+// la nota de `BONOS_CANDADO_KEY` para el porqué del default.
+export function getCachedBonosCandadoPuesto(): boolean {
+  return localStorage.getItem(BONOS_CANDADO_KEY) === "1";
+}
+
+export function setCachedBonosCandadoPuesto(value: boolean): void {
+  localStorage.setItem(BONOS_CANDADO_KEY, value ? "1" : "0");
 }
 
 export function setCachedEnsayo(value: boolean): void {
@@ -349,6 +376,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
   let lastCajaEnabled: boolean | undefined = undefined;
   let lastHoldedEnabled: boolean | undefined = undefined;
   let lastEnsayo: boolean | undefined = undefined;
+  let lastBonosCandado: boolean | undefined = undefined;
   for (let safety = 0; safety < 200; safety++) {
     const res = await apiWithCashier<{
       items: CatalogProduct[];
@@ -364,6 +392,8 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
       cajaEnabled?: boolean;
       holdedEnabled?: boolean;
       ensayo?: boolean;
+      bonosEnabled?: boolean;
+      bonosCandadoPuesto?: boolean;
     }>(
       `/tpv/catalog/products${cursor ? `?cursor=${cursor}&limit=500` : "?limit=500"}`,
     );
@@ -408,6 +438,12 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
     if (res.ensayo !== undefined) {
       lastEnsayo = res.ensayo;
     }
+    // B-reservas-8 · esto es lo que ABRE el candado sin salir de la sesión:
+    // el encargado confirma el número de arranque en Ajustes y el siguiente
+    // refresco del catálogo lo trae.
+    if (res.bonosCandadoPuesto !== undefined) {
+      lastBonosCandado = res.bonosCandadoPuesto;
+    }
     if (!res.nextCursor) break;
     cursor = res.nextCursor;
   }
@@ -425,6 +461,7 @@ export async function refreshCatalog(): Promise<CatalogProduct[]> {
   if (lastCajaEnabled !== undefined) setCachedCajaEnabled(lastCajaEnabled);
   if (lastHoldedEnabled !== undefined) setCachedHoldedEnabled(lastHoldedEnabled);
   if (lastEnsayo !== undefined) setCachedEnsayo(lastEnsayo);
+  if (lastBonosCandado !== undefined) setCachedBonosCandadoPuesto(lastBonosCandado);
   if (lastTagAliases !== undefined) {
     const map: Record<string, string> = {};
     for (const a of lastTagAliases) map[a.slug] = a.label;

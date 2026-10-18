@@ -23,8 +23,10 @@ export function ConfirmSheet({
   body,
   confirmLabel,
   cancelLabel,
+  altLabel,
   onConfirm,
   onCancel,
+  onAlt,
 }: {
   title: string;
   body?: string;
@@ -32,8 +34,18 @@ export function ConfirmSheet({
   confirmLabel: string;
   // Verbo de quedarse como está: "Volver", "Seguir con la cuenta".
   cancelLabel: string;
+  // auditoria-sirope (#25) · LA TERCERA SALIDA, cuando la hay.
+  //
+  // Algunas preguntas tienen dos respuestas buenas y una neutra: «cobrar
+  // la mesa con platos sin mandar» se contesta con «enviar y cobrar» o
+  // con «cobrar sin enviar» —el camarero ya se lo cantó a la cocina—, y
+  // volver atrás no es ninguna de las dos. Sin esta tercera, el Atrás del
+  // sistema tendría que significar una de las respuestas, y un gesto de
+  // salir nunca puede decidir nada.
+  altLabel?: string;
   onConfirm: () => void;
   onCancel: () => void;
+  onAlt?: () => void;
 }) {
   // El Atrás del sistema equivale a la salida neutra, nunca a la
   // acción destructiva.
@@ -79,6 +91,17 @@ export function ConfirmSheet({
           >
             {confirmLabel}
           </button>
+        </div>
+        <div className={altLabel ? "mt-2.5" : "hidden"}>
+          {altLabel && onAlt && (
+            <button
+              type="button"
+              onClick={onAlt}
+              className="w-full h-touch rounded-2xl text-[14px] font-medium text-slate-500 hover:bg-slate-50"
+            >
+              {altLabel}
+            </button>
+          )}
         </div>
       </div>
     </div>

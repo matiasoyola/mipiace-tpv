@@ -124,9 +124,33 @@ export const TABLE_BUSY_TEXT = DARK_ON_CORAL;
 export const TABLE_BILLING_FILL = "#E2B23A";
 export const TABLE_BILLING_TEXT = "#1B1500";
 
-/** El aro de «+45 min sin atender», que se suma al relleno de ocupada. */
-export const TABLE_LATE_RING = TABLE_BILLING_FILL;
-export const TABLE_LATE_RING_WIDTH = 4;
+/**
+ * auditoria-sirope (#14) · MESA PAGADA Y SIN RECOGER.
+ *
+ * Ni libre ni ocupada: pagada, con el servicio todavía encima. Azul
+ * pizarra claro, que es el único hueco que queda en esta paleta —el
+ * gris claro es «libre», el coral «ocupada», el ámbar «pide la cuenta»
+ * y el rojo «lleva demasiado»—. Se distingue de «libre» de lejos, que
+ * es lo que hace falta: la pregunta que se contesta mirando el mapa
+ * desde la barra es «¿dónde siento a estos cuatro?».
+ */
+export const TABLE_POR_RECOGER_FILL = "#9DB4C8";
+export const TABLE_POR_RECOGER_TEXT = "#16202A";
+
+/**
+ * El aro de «+45 min sin atender».
+ *
+ * auditoria-sirope (#16) · ROJO Y DISCONTINUO, no el ámbar de «pide la
+ * cuenta». El 18-10 los dos eran el mismo ámbar y el aro se leía como
+ * un relleno a medias: dos señales distintas con el mismo color son una
+ * señal que no dice nada. Ahora el ámbar es RELLENO y sólo significa
+ * «pide la cuenta»; el rojo es ARO y sólo significa «lleva demasiado».
+ *
+ * Discontinuo además del color: la forma se distingue también de lejos
+ * y en una pantalla con reflejos, que es donde se mira esto.
+ */
+export const TABLE_LATE_RING = "#D7483A";
+export const TABLE_LATE_RING_WIDTH = 3;
 
 /** Franja del mostrador de la zona BARRA. */
 export const BAR_COUNTER_FILL = DARK_SURFACE_RAISED;

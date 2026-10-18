@@ -70,6 +70,19 @@ export async function registerAdminTenantSettingsRoutes(
           // acepta en el POST. Encender el módulo es vender un producto con
           // datos de salud detrás.
           residenciaEnabled: true,
+          // B-reservas-8 · lo mismo que las cinco de arriba: se DEVUELVE
+          // para que el panel pinte (o esconda) la sección «Bonos» y sus
+          // ajustes, y NO se acepta en el POST. Encender el módulo es
+          // vender un producto, y además tiene una guarda propia: no se
+          // puede encender con Holded conectado.
+          bonosEnabled: true,
+          // Y los TRES ajustes del negocio, que sí los mueve el
+          // propietario desde `POST /admin/bonos/ajustes`. Se devuelven
+          // aquí para que la pantalla de Ajustes los pinte de una sola
+          // lectura, igual que el resto.
+          bonoEtiqueta: true,
+          bonoNoShow: true,
+          bonoCaducidadMeses: true,
         },
       });
       return {
@@ -96,6 +109,11 @@ export async function registerAdminTenantSettingsRoutes(
           kitchenDisplayEnabled: tenant.kitchenDisplayEnabled,
           // residencia-1 · sólo lectura, por lo mismo.
           residenciaEnabled: tenant.residenciaEnabled,
+          // B-reservas-8 · sólo lectura, por lo mismo.
+          bonosEnabled: tenant.bonosEnabled,
+          bonoEtiqueta: tenant.bonoEtiqueta,
+          bonoNoShow: tenant.bonoNoShow,
+          bonoCaducidadMeses: tenant.bonoCaducidadMeses,
         },
       };
     },

@@ -52,6 +52,8 @@ import {
   DARK_TEXT_MUTED,
   EYEBROW_COCINA_PX,
   EYEBROW_COCINA_TRACKING,
+  FRANJA_SECCION_ALTO_PX,
+  FRANJA_SECCION_PX,
   FRANJA_URGENTE_ALTO_PX,
   LINEA_HEIGHT_PX,
   LISTA_FONDO,
@@ -75,6 +77,8 @@ import {
   ROJO_ANULADO,
   ROJO_URGENTE,
   ROJO_URGENTE_TEXT,
+  SECCION_COLOR,
+  SECCION_TEXT,
   SEMAFORO_FILL,
   SEMAFORO_TEXT,
   SILLA_PX,
@@ -179,9 +183,12 @@ export function ComandaCard(props: ComandaCardProps) {
     [],
   );
 
+  // auditoria-sirope (#26) · la sección YA NO va en el eyebrow: tiene su
+  // franja, con su color y su nombre grande. Una palabra de 13 px entre
+  // «2ª COMANDA» y «LLEGÓ TARDE» obligaba a leer cada tarjeta para saber
+  // si era tuya.
   const eyebrow = [
     c.number > 1 ? `${c.number}ª COMANDA` : null,
-    props.mostrarSeccion ? ETIQUETA_SECCION[c.section] : null,
     // Decisión 9 · llegó cuando la pantalla volvió de estar sin red. Se
     // dice para que el cocinero no lo lea como recién hecho.
     c.lateArrival ? "LLEGÓ TARDE" : null,
@@ -210,6 +217,27 @@ export function ComandaCard(props: ComandaCardProps) {
           : undefined,
       }}
     >
+      {/* 0 · auditoria-sirope (#26) · LA SECCIÓN.
+          Sólo en una pantalla compartida: con una sola sección, repetir
+          «COCINA» en cada tarjeta es gastar alto para decir lo que ya
+          dice la pantalla entera. */}
+      {props.mostrarSeccion && (
+        <div
+          data-testid="kds-franja-seccion"
+          data-seccion={c.section}
+          className="shrink-0 flex items-center justify-center font-extrabold"
+          style={{
+            height: FRANJA_SECCION_ALTO_PX,
+            background: SECCION_COLOR[c.section] ?? SECCION_COLOR.SALON,
+            color: SECCION_TEXT,
+            fontSize: FRANJA_SECCION_PX,
+            letterSpacing: "0.08em",
+          }}
+        >
+          {ETIQUETA_SECCION[c.section]}
+        </div>
+      )}
+
       {/* 1 · URGENTE */}
       {c.urgent && (
         <div
@@ -243,9 +271,13 @@ export function ComandaCard(props: ComandaCardProps) {
           padding: "10px 14px",
         }}
       >
-        <span className="flex flex-col min-w-0">
+        <span className="flex flex-col min-w-0 flex-1">
           <span
-            className="font-bold leading-none"
+            // auditoria-sirope (#25) · el título puede ser «Mostrador
+            // nº 3» y no sólo «T6»: tiene que caber y partir sin
+            // pisar la pastilla del tiempo, que es `shrink-0`. Lo vio
+            // el bucle visual de este bloque.
+            className="font-bold leading-tight break-words min-w-0"
             style={{ fontSize: MESA_PX, letterSpacing: "-0.02em" }}
           >
             {c.tableName ?? `#${c.number}`}
@@ -268,10 +300,20 @@ export function ComandaCard(props: ComandaCardProps) {
             </span>
           )}
         </span>
+        {/* auditoria-sirope (#26) · EL TIEMPO, EN SU PASTILLA.
+            Con la franja de sección arriba hay dos colores en la misma
+            tarjeta, y el del semáforo es el que no puede confundirse con
+            un rótulo: se le da borde propio para que se lea como lo que
+            es —un contador— y no como parte de la cabecera. */}
         <span
           data-testid="kds-minutos"
           className="font-bold leading-none shrink-0 tabular-nums"
-          style={{ fontSize: minutos == null ? ALERGIA_PX : MINUTOS_PX }}
+          style={{
+            fontSize: minutos == null ? ALERGIA_PX : MINUTOS_PX,
+            border: `2px solid ${SEMAFORO_TEXT[tono]}`,
+            borderRadius: 999,
+            padding: "6px 12px",
+          }}
         >
           {etiquetaMinutos(minutos)}
         </span>

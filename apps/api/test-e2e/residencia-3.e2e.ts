@@ -106,8 +106,24 @@ const { VENTANA_DE_ANULACION_MS } = await import(
  *  aparece en un volcado, el bloque no sirve. */
 const CANARIO_NOTA = "CANARIO-NOTA-le-huele-raro-el-pie";
 
-const PIN_ANA = "4071";
-const PIN_ROSA = "9182";
+/** Los PIN de la plantilla de pruebas. **De ocho cifras a propósito, y
+ *  no de cuatro.**
+ *
+ *  `expect(r.body).not.toContain(PIN_ANA)` busca el PIN EN CRUDO en el
+ *  cuerpo entero del arranque, y ese cuerpo va lleno de valores de alta
+ *  entropía: una cuarentena de UUID, la huella HMAC de cada PIN y la
+ *  subclave en base64. Cuatro cifras decimales son una aguja demasiado
+ *  corta para ese pajar — los dígitos 0-9 son también dígitos hex, así
+ *  que `4071` aparecía dentro de un UUID cualquiera
+ *  (`ec1b1898-48b4-4071-a30b-a19901f758d1`) una pasada de cada tantas y
+ *  el caso se ponía rojo sin que se hubiera filtrado nada. Con ocho
+ *  cifras la coincidencia por azar deja de existir en la práctica.
+ *
+ *  La ruta acepta `^[0-9]{4,8}$`, así que son PIN legales; y es la misma
+ *  idea que `CANARIO_NOTA`: si el canario tiene que no aparecer en un
+ *  volcado, que sea inconfundible. */
+const PIN_ANA = "40718293";
+const PIN_ROSA = "91825647";
 
 /**
  * residencia-4 · vacía el libro de incidencias de un centro.

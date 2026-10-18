@@ -12,6 +12,91 @@
   </head>
   <body>
     <div id="root"></div>
+    <!--
+      auditoria-sirope (#21) · EL VIGILANTE DE ARRANQUE.
+
+      Dos veces en el D8 (17-10 y 18-10), reiniciar la app dejó la
+      pantalla EN BLANCO: `Displayed +667ms`, ningún error en logcat, y
+      sólo lo arreglaba reiniciar el aparato. Una caja no puede quedarse
+      así: sin nada que tocar y sin nada que contar.
+
+      Es un script CLÁSICO, EN LÍNEA y antes del módulo, a propósito: si
+      lo que falla es el bundle —a medias, no parseable por el WebView
+      101, no servido por el servidor local de Capacitor—, un módulo no
+      llega a ejecutarse nunca y el vigilante no existiría justo el día
+      que hace falta. ES5 puro por lo mismo.
+
+      Si en 8 segundos nadie ha llamado a `window.__tpvVigilante.ok()`
+      —lo llama la app en cuanto pinta—, enseña una salida: «No ha
+      arrancado bien · Reintentar». Y deja el parte en `localStorage`
+      para que el PRIMER arranque bueno lo mande a Sentry: si la app no
+      arranca, no hay quien lo cuente.
+    -->
+    <script>
+      (function () {
+        var ESPERA_MS = 8000;
+        var CLAVE = "mipiacetpv-arranque-fallido";
+        var pintado = false;
+        var reloj = null;
+
+        function apagar() {
+          pintado = true;
+          if (reloj) {
+            clearTimeout(reloj);
+            reloj = null;
+          }
+        }
+
+        function anotarFallo() {
+          try {
+            localStorage.setItem(
+              CLAVE,
+              JSON.stringify({
+                at: new Date().toISOString(),
+                userAgent: navigator.userAgent,
+                appVersion: (window.__APP_VERSION_RUNTIME__ || "") + "",
+                esperaSegundos: ESPERA_MS / 1000
+              })
+            );
+          } catch (e) {
+            /* modo privado o cuota llena: el aviso en pantalla es lo que
+               no puede faltar */
+          }
+        }
+
+        function pintarSalida() {
+          if (pintado) return;
+          anotarFallo();
+          var root = document.getElementById("root");
+          if (!root) return;
+          root.innerHTML =
+            '<div style="min-height:100vh;display:flex;align-items:center;' +
+            'justify-content:center;background:#0E1013;color:#E8EAED;' +
+            'font-family:system-ui,-apple-system,sans-serif;padding:24px">' +
+            '<div style="max-width:420px;text-align:center">' +
+            '<div style="font-size:22px;font-weight:600;margin-bottom:10px">' +
+            "No ha arrancado bien</div>" +
+            '<div style="font-size:15px;line-height:1.5;opacity:.75;' +
+            'margin-bottom:22px">La aplicación no ha llegado a abrirse. ' +
+            "Toca Reintentar. Si vuelve a pasar, reinicia el aparato y " +
+            "avísanos.</div>" +
+            '<button id="tpv-reintentar" data-testid="vigilante-reintentar" ' +
+            'style="height:56px;width:100%;border:0;border-radius:16px;' +
+            'background:#E8705A;color:#fff;font-size:17px;font-weight:600">' +
+            "Reintentar</button>" +
+            "</div></div>";
+          var b = document.getElementById("tpv-reintentar");
+          if (b) {
+            b.onclick = function () {
+              window.location.reload();
+            };
+          }
+        }
+
+        reloj = setTimeout(pintarSalida, ESPERA_MS);
+        window.__tpvVigilante = { ok: apagar };
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

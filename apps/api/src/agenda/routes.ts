@@ -52,6 +52,14 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { requireOwnerOrCashier } from "../auth/middleware.js";
 import { getPrisma } from "../context.js";
 import { ensureNoEsSanitarioSinCaja } from "../lib/caja-gate.js";
+import { respondeComoRutaInexistente } from "../clinica/gate.js";
+import { bonosIsEnabled } from "../vouchers/gate-tenant.js";
+import {
+  liberarPorAnulacion,
+  resolverNoShow,
+  type Consecuencia,
+  type PoliticaNoShow,
+} from "../vouchers/cita.js";
 import { valoracionesPendientesDe } from "../clinica/valoracion-en-agenda.js";
 import {
   cobrosPendientesDe,
@@ -142,6 +150,12 @@ function statusFor(reason: HoldFailureReason): number {
 function defaultMessage(reason: HoldFailureReason): string {
   if (reason === "NO_REQUIREMENTS") {
     return "Algún servicio no es agendable (sin duración configurada).";
+  }
+  // B-reservas-8 · este rechazo SÍ lo redacta el motor (lleva el motivo
+  // concreto del bono). La frase de aquí sólo sale si alguien olvida
+  // pasarlo, y no habla de huecos: el hueco estaba libre.
+  if (reason === "BONO_NO_DISPONIBLE") {
+    return "No se pudo apartar la sesión del bono. La cita no se ha dado.";
   }
   return "El hueco ya no está disponible.";
 }
@@ -362,6 +376,12 @@ export async function registerAgendaRoutes(
               enum: ["PRESENCIAL", "WEB", "PHONE", "GIFT_REDEMPTION"],
             },
             notes: { type: ["string", "null"], maxLength: 1000 },
+            // B-reservas-8 · el BONO del que se aparta una sesión al dar
+            // esta cita. Declarado en el schema porque si no, el
+            // `removeAdditional` de Fastify lo borraría antes de que nadie
+            // lo viera —el fallo que el checkout de borrador pagó en B-5 y
+            // que `occurredAt` pagó en 6a—. Un campo nuevo, su test.
+            voucherId: { type: ["string", "null"], format: "uuid" },
           },
         },
       },
@@ -376,6 +396,7 @@ export async function registerAgendaRoutes(
         occurredAt?: string | null;
         source?: "PRESENCIAL" | "WEB" | "PHONE" | "GIFT_REDEMPTION";
         notes?: string | null;
+        voucherId?: string | null;
       };
       const source = body.source ?? "PRESENCIAL";
 
@@ -430,6 +451,28 @@ export async function registerAgendaRoutes(
         }
       }
 
+      // ── B-reservas-8 · la cita de bono ───────────────────────────
+      //
+      // El gate del módulo se comprueba AQUÍ y no con un `preHandler`: la
+      // ruta del alta es de la agenda y tiene que seguir funcionando igual
+      // en los catorce tenants sin bonos. Lo que se rechaza es pedir un
+      // bono en una cuenta que no los tiene, y se rechaza con 404 por la
+      // misma razón que el resto del módulo: a una peluquería sin bonos no
+      // se le cuenta que existen.
+      if (body.voucherId && !(await bonosIsEnabled(auth.tenantId))) {
+        return respondeComoRutaInexistente(request, reply);
+      }
+      // Un bono es de una ficha (S6): sin cliente en la cita no hay a quién
+      // descontarle la sesión. Se dice antes de tocar nada.
+      if (body.voucherId && !body.clientId) {
+        return reply.code(400).send({
+          error: "BONO_SIN_CLIENTE",
+          code: "BONO_SIN_CLIENTE",
+          message:
+            "Para dar una cita de bono hace falta la ficha de la clienta: el bono es de una ficha.",
+        });
+      }
+
       // Presencial = confirmada directa; el resto entra como hold PENDING.
       const confirmed = source === "PRESENCIAL";
       const result = await engineFor(request).hold({
@@ -443,6 +486,11 @@ export async function registerAgendaRoutes(
         confirmed,
         pendingTtlMinutes: HOLD_TTL_MINUTES,
         notes: body.notes ?? null,
+        voucherId: body.voucherId ?? null,
+        // El mostrador escribe `tpv`; el panel de la empresa, `panel`. La
+        // reserva online escribirá `web` con `actor = "Web"` cuando exista.
+        voucherCanal: request.cashier ? "tpv" : "panel",
+        voucherUserId: auth.userId,
       });
       if (result.ok) {
         if (result.duplicate) {
@@ -457,6 +505,10 @@ export async function registerAgendaRoutes(
         code: result.reason,
         message: result.message ?? defaultMessage(result.reason),
         alternatives: result.alternatives,
+        // B-reservas-8 · el motivo concreto del bono, para que el TPV
+        // ofrezca lo que toca («dar la cita sin bono», «buscar otra ficha»)
+        // en vez de un botón gris y un mensaje genérico.
+        ...(result.bonoMotivo ? { bonoMotivo: result.bonoMotivo } : {}),
       });
     },
   );
@@ -635,7 +687,63 @@ export async function registerAgendaRoutes(
           message: "Cita no encontrada.",
         });
       }
-      return { appointment: updated };
+
+      // ── B-reservas-8 · lo que le pasa al bono ────────────────────────
+      //
+      // DESPUÉS del cambio de estado y en su propia transacción, no dentro
+      // de la de la cita. El cambio de estado ya está hecho y es lo que la
+      // clienta ve; lo del bono es idempotente por el libro, así que si
+      // esto se cayera, repetir la anulación lo arregla. Al contrario que
+      // el APARTADO —que sí tiene que ser atómico con el alta, porque
+      // fallar ahí daría una cita que la clienta cree pagada con su bono.
+      //
+      // `voucherId` nulo = cita normal: no se toca nada, ni una consulta.
+      let bono: Consecuencia = { que: "nada" };
+      if (
+        (body.status === "CANCELLED" || body.status === "NO_SHOW") &&
+        updated.voucherId != null
+      ) {
+        const prisma = prismaFor();
+        const ajustes = await prisma.tenant.findUnique({
+          where: { id: auth.tenantId },
+          select: { bonoNoShow: true },
+        });
+        const comun = {
+          prisma,
+          tenantId: auth.tenantId,
+          appointmentId: id,
+          serviceIds: updated.items.map((it) => it.serviceId),
+          canal: (request.cashier ? "tpv" : "panel") as "tpv" | "panel",
+          userId: auth.userId,
+          ahora: new Date(),
+        };
+        bono =
+          body.status === "CANCELLED"
+            ? await liberarPorAnulacion({
+                ...comun,
+                detalle: "Liberada: la cita se anuló.",
+              })
+            : await resolverNoShow({
+                ...comun,
+                politica: (ajustes?.bonoNoShow ?? "consumir") as PoliticaNoShow,
+              });
+        request.log.info(
+          {
+            event: "bono.consecuencia_de_la_cita",
+            tenantId: auth.tenantId,
+            appointmentId: id,
+            status: body.status,
+            que: bono.que,
+            voucherId: bono.que === "nada" ? null : bono.voucherId,
+          },
+          "la cita cambió de estado y el bono se puso al día",
+        );
+      }
+
+      return {
+        appointment: updated,
+        ...(bono.que === "nada" ? {} : { bono }),
+      };
     },
   );
 

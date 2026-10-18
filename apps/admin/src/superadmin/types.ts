@@ -194,6 +194,15 @@ export interface TenantDetail {
   /** kds-1-cocina · el módulo «Cocina». Fuera de `modules`, ver arriba. */
   kitchenDisplayEnabled?: boolean;
   /**
+   * auditoria-sirope (#19 + #23) · lo que hace falta para decidir sobre la
+   * cocina sin llamar a nadie: cuántas pantallas se quedan a oscuras al
+   * apagarla, y cuántas etiquetas del catálogo no tienen sección (sus
+   * platos van a SALÓN en silencio).
+   *
+   * Opcional: una respuesta de antes del bloque no lo trae.
+   */
+  cocina?: { pantallas: number; etiquetasSinSeccion: number };
+  /**
    * clinica-1 · la HISTORIA CLÍNICA. Fuera de `modules` por lo mismo que la
    * cocina (decisión 6 de clinica-1: un tenant cuyo único módulo fuera éste
    * no tendría ni pacientes ni citas). Hasta residencia-1 **no viajaba** en

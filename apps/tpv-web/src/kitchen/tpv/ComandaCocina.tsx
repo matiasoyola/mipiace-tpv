@@ -125,8 +125,19 @@ export function SentLineCocina(props: SentLineCocinaProps) {
           className="w-full flex items-baseline gap-2 px-2.5 pt-2 text-left"
         >
           <span
-            className="flex-grow min-w-0 truncate font-medium"
-            style={{ fontSize: SENT_LINE_NAME_PX, color: DARK_TEXT_SOFT }}
+            className="flex-grow min-w-0 font-medium"
+            style={{
+              fontSize: SENT_LINE_NAME_PX,
+              color: DARK_TEXT_SOFT,
+              // auditoria-sirope (#8) · hasta dos líneas, como en «Sin
+              // enviar»: «Café con l…» y «Café Ame…» son dos cafés
+              // distintos con el mismo principio.
+              display: "-webkit-box",
+              WebkitBoxOrient: "vertical",
+              WebkitLineClamp: 2,
+              overflow: "hidden",
+              lineHeight: 1.15,
+            }}
           >
             {props.nombre}
           </span>
@@ -138,9 +149,12 @@ export function SentLineCocina(props: SentLineCocinaProps) {
           </span>
         </button>
       )}
+      {/* auditoria-sirope (#8) · los chips entran en ESTA fila, no en una
+          suya debajo: dos filas por línea dejaban tres líneas visibles en
+          el D8. */}
       <div
-        className="flex items-center gap-2.5 px-2.5"
-        style={{ minHeight: props.puedeCorregir ? 60 : 52, color: DARK_TEXT_MUTED }}
+        className="flex flex-wrap items-center gap-2 px-2.5"
+        style={{ minHeight: props.puedeCorregir ? 56 : 48, color: DARK_TEXT_MUTED }}
       >
         {props.puedeCorregir ? (
           <>
@@ -218,8 +232,8 @@ export function SentLineCocina(props: SentLineCocinaProps) {
             </span>
           </>
         )}
+        {props.chips}
       </div>
-      {props.chips}
     </div>
   );
 }
@@ -250,6 +264,15 @@ export interface ChipsDeLineaProps {
   diners: number | null;
   onSilla: (seat: number | null) => void;
   onTiempo: (course: number) => void;
+  /**
+   * auditoria-sirope (#8) · los chips van EN LA MISMA FILA de la línea.
+   *
+   * Vivían en una segunda fila debajo, y eso doblaba el alto de cada
+   * línea: en el D8 cabían TRES. En compacto bajan a 44 px de alto —no a
+   * 56: lo que se toca con prisa son el `−` y el `+`, que siguen en 56—
+   * y se meten al lado del importe.
+   */
+  compacto?: boolean;
 }
 
 export function ChipsDeLinea(props: ChipsDeLineaProps) {
@@ -283,11 +306,24 @@ export function ChipsDeLinea(props: ChipsDeLineaProps) {
     (props.courseMode === "TIEMPOS" && props.course > 1);
   if (!hayAlgo) return null;
 
+  // auditoria-sirope (#8) · 40 px en compacto, medido en el bucle
+  // visual: con 44 la fila pide 66 y en el D8 entran cinco líneas; con
+  // 40 pide 62 y entran SEIS, que es el objetivo del hallazgo. Los 56
+  // de la norma son para «lo que se toca con prisa» —los `−`/`+` y las
+  // acciones del pie—, no para un interruptor secundario que se usa una
+  // vez por plato.
+  const altoChip = props.compacto ? 40 : MIN_TOUCH_PX;
+  const letraChip = props.compacto ? 15 : 17;
   return (
     <div
       data-testid="comanda-linea-chips"
       data-line-id={props.lineId}
-      className="flex flex-wrap items-center gap-2 px-2.5 pb-2"
+      data-compacto={props.compacto ? "1" : "0"}
+      className={
+        props.compacto
+          ? "flex flex-wrap items-center gap-1.5 shrink-0"
+          : "flex flex-wrap items-center gap-2 px-2.5 pb-2"
+      }
     >
       {mostrarSillas &&
         sillas.map((n) => {
@@ -308,11 +344,11 @@ export function ChipsDeLinea(props: ChipsDeLineaProps) {
               onClick={() => elegirSilla(n)}
               className={`rounded-[12px] px-3 font-semibold ${PRESS_FEEDBACK_CLASS}`}
               style={{
-                minHeight: MIN_TOUCH_PX,
+                minHeight: altoChip,
                 background: elegida ? ROJO_ALERGIA : DARK_SURFACE,
                 color: elegida ? ROJO_ALERGIA_TEXT : DARK_TEXT_SOFT,
                 border: peligrosa && !elegida ? `2px solid ${ROJO_ALERGIA}` : "none",
-                fontSize: 17,
+                fontSize: letraChip,
               }}
             >
               → Silla {n}
@@ -333,7 +369,7 @@ export function ChipsDeLinea(props: ChipsDeLineaProps) {
           }
           className={`rounded-[12px] px-4 font-semibold ${PRESS_FEEDBACK_CLASS}`}
           style={{
-            minHeight: MIN_TOUCH_PX,
+            minHeight: altoChip,
             // EL CORAL ES SÓLO DE «COBRAR» (principio de venta bajo
             // estrés, regla 1). El chip encendido va en CLARO, que es lo
             // que la maqueta usa para el «En espera» de una línea, y
@@ -342,7 +378,7 @@ export function ChipsDeLinea(props: ChipsDeLineaProps) {
             border:
               props.course >= TIEMPO_ESPERA ? "none" : `1px solid ${DARK_SURFACE_RAISED}`,
             color: props.course >= TIEMPO_ESPERA ? CLARO_TEXTO : DARK_TEXT_SOFT,
-            fontSize: 17,
+            fontSize: letraChip,
           }}
         >
           Espera
@@ -356,7 +392,7 @@ export function ChipsDeLinea(props: ChipsDeLineaProps) {
           data-testid="chip-tiempo"
           className="rounded-[12px] px-3 font-semibold flex items-center"
           style={{
-            minHeight: MIN_TOUCH_PX,
+            minHeight: altoChip,
             background: DARK_SURFACE,
             color: DARK_TEXT_SOFT,
             fontSize: 17,
