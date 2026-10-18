@@ -184,4 +184,24 @@ export type WsEvent =
       ticketId: string;
       tableId: string | null;
       at: string;
+    }
+  // ── auditoria-sirope (#20) · LOS AJUSTES DE LA CUENTA CAMBIARON ────
+  //
+  // El 18-10 el super-admin encendió Cocina con el D8 delante y el D8 no
+  // se enteró: `useDeviceBootstrap` lee `/devices/me` al arrancar y lo
+  // cachea, y nadie lo refrescaba. Hubo que cerrar y abrir la aplicación
+  // —y esa vez se quedó en blanco (#21)—.
+  //
+  // Como todos los demás, es un AVISO y no trae el ajuste dentro: el TPV
+  // vuelve a pedir `/devices/me`, que es la verdad. Así un evento
+  // perdido no deja la caja con un ajuste inventado, sólo tarda hasta el
+  // siguiente repaso.
+  //
+  // Va al bus de TIENDA porque es el bus que el TPV ya escucha; el
+  // emisor lo manda a todas las tiendas del tenant.
+  | {
+      type: "tenant.settings_changed";
+      /** Qué cambió, para el log. El TPV no decide nada con esto. */
+      fields: string[];
+      at: string;
     };

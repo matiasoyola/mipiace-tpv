@@ -57,6 +57,7 @@ import {
   FAMILY_BAR_COLUMNS_HANDHELD,
   GRID_GAP,
   PRODUCT_COLUMNS_HANDHELD,
+  tamanoNombreProducto,
 } from "../lib/hospitalityGrid.js";
 import {
   CORAL,
@@ -166,8 +167,19 @@ function useIsHandheld(): boolean {
 /** Una acción de la barra de chrome que vive dentro de la comanda. */
 export interface ChromeAction {
   key: string;
-  /** Rótulo accesible. En esta barra los botones son sólo icono. */
+  /** Rótulo accesible y `title`. */
   label: string;
+  /**
+   * auditoria-sirope (#9) · EL RÓTULO QUE SE VE, bajo el icono.
+   *
+   * El 18-10 esta barra eran OCHO iconos sin una palabra (captura 00).
+   * Un icono se reconoce cuando ya sabes lo que hace; el camarero nuevo
+   * de un sábado no lo sabe, y la lupa, el escáner y el refresco se
+   * parecen lo bastante para probar a ver qué pasa — con el cliente
+   * delante. Dos palabras bajo cada icono cuestan 14 px de alto una vez
+   * y los devuelven en cada turno.
+   */
+  short: string;
   icon: ReactNode;
   onClick: () => void;
   /** El refresco de catálogo gira mientras trabaja. */
@@ -254,6 +266,19 @@ export interface HospitalityWorkspaceProps {
 export interface ComandaCocinaWiring {
   /** `Tenant.kitchenDisplayEnabled`. */
   enabled: boolean;
+  /**
+   * auditoria-sirope (#12) · ¿hay pantalla o impresora al otro lado?
+   *
+   * Distinto de `enabled`: una barra con térmica y sin pantalla manda
+   * comandas con el módulo apagado, y una cuenta con el módulo encendido
+   * y nada emparejado no manda nada. Lo que esto apaga es TODO lo que
+   * habla de cocina — «Enviar», «EN COCINA», «SIN ENVIAR» — porque sin
+   * destino no hay nadie que lo lea.
+   *
+   * Opcional para no romper a quien monte el panel sin él (los tests de
+   * v2-H1): ausente se trata como `enabled`.
+   */
+  hayDondeMandar?: boolean;
   estado: EstadoCocinaMesa;
   courseMode: "ESPERA" | "TIEMPOS";
   seatMode: "ALERGIA" | "SIEMPRE";
@@ -394,6 +419,28 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
   // ENVIAR», que es lo que la decisión 6 pide leer («2 en cocina + 1 sin
   // enviar») y lo que hace que cada mitad se corrija distinto.
   const { sent, pending } = partirComanda(props.lines, props.kitchen.estado);
+  // auditoria-sirope (#12) · con el módulo apagado y sin impresora, el
+  // TPV no habla de cocina: la lista es el PEDIDO y no hay nada que
+  // enviar.
+  const mandaACocina = props.kitchen.hayDondeMandar ?? props.kitchen.enabled;
+  // auditoria-sirope (#6) · el ancho ÚTIL de un botón de familia.
+  //
+  // La barra reparte su ancho entre sus columnas; el botón no se mide a
+  // sí mismo (no hay observador por botón, y sería caro para una fila
+  // que se repinta en cada toque). Se estima del ancho de la ventana
+  // menos la comanda, que es el lienzo que esta barra ocupa, y se
+  // descuentan los huecos y el relleno de 10 + 10. Va por lo BAJO: si se
+  // queda corto, el rótulo baja un peldaño de más y se lee igual.
+  const anchoUtilFamilia = useMemo(() => {
+    const columnas = handheld
+      ? FAMILY_BAR_COLUMNS_HANDHELD
+      : FAMILY_BAR_COLUMNS;
+    const lienzo =
+      (typeof window === "undefined" ? 1442 : window.innerWidth) -
+      (handheld ? 24 : ORDER_PANEL_WIDTH + 48);
+    const hueco = 8 * (columnas - 1);
+    return Math.max(48, Math.floor((lienzo - hueco) / columnas) - 20);
+  }, [handheld]);
 
   return (
     <div
@@ -441,6 +488,7 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
             label="Ahora"
             active={view.kind === "ahora"}
             special
+            anchoUtilPx={anchoUtilFamilia}
             onClick={() => setView({ kind: "ahora" })}
           />
           {props.families.map((tag) => (
@@ -449,6 +497,7 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
               label={props.familyLabels[tag] ?? tag}
               fill={familyFillFor(tag, props.familyTones)}
               active={view.kind === "family" && view.tag === tag}
+              anchoUtilPx={anchoUtilFamilia}
               onClick={() => setView({ kind: "family", tag })}
             />
           ))}
@@ -584,6 +633,7 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
               product={p}
               fill={familyFillFor(props.familyOf(p), props.familyTones)}
               nameSizePx={shape.nameSizePx}
+              cardWidth={shape.cardWidth}
               units={unitsByProduct.get(p.id) ?? 0}
               onClick={() => {
                 props.onClickProduct(p, qty);
@@ -631,7 +681,10 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
               borderColor: DARK_SURFACE_RAISED,
             }}
           >
-            {props.onBackToMap && (
+            {/* auditoria-sirope (#12) · sin destino no hay botón: ni
+                «Comanda» ni «Reenviar». Y con destino, «Reenviar» sólo
+                si hay algo nuevo que mandar. */}
+            {mandaACocina && pending.length > 0 && (
               <button
                 type="button"
                 onClick={props.onSendToKitchen}
@@ -693,7 +746,7 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
               <div
                 role="dialog"
                 aria-modal="true"
-                aria-label="Comanda"
+                aria-label={mandaACocina ? "Comanda" : "Pedido"}
                 className="absolute inset-x-0 bottom-0 max-h-[88dvh] rounded-t-3xl flex flex-col overflow-hidden"
                 style={{
                   background: DARK_PANEL,
@@ -760,6 +813,7 @@ function FamilyButton({
   fill,
   active,
   special,
+  anchoUtilPx,
   onClick,
 }: {
   label: string;
@@ -767,6 +821,9 @@ function FamilyButton({
   active: boolean;
   /** «Ahora» es la vista especial y la única que lleva el claro/coral. */
   special?: boolean;
+  /** auditoria-sirope (#6) · el ancho útil del botón, para ajustar el
+   *  rótulo. Lo calcula la barra, que es quien conoce sus columnas. */
+  anchoUtilPx: number;
   onClick: () => void;
 }) {
   // El aro se pinta con dos sombras: la primera del color del fondo
@@ -783,24 +840,46 @@ function FamilyButton({
       aria-pressed={active}
       data-testid="family-button"
       data-active={active ? "true" : "false"}
-      // n1-vertical · `truncate` y no el `clip` de serie. Medido en el
-      // N1 con la carta de Sirope (azulejos de 104 px): «Croissantysandwich»
-      // mide 206 px, «Suplemento» 122 y «Desayunos» 111, así que el
-      // rótulo se cortaba a mitad de palabra —«Croissanty», «Suplement»—
-      // y, sin `overflow`, además se salía del azulejo y se metía en el
-      // de al lado. Con `truncate` el corte es con puntos suspensivos y
-      // se queda dentro: el camarero ve que el nombre sigue.
-      // `px-1.5` para que la elipsis no toque el borde.
-      className={`border-0 rounded-[14px] px-1.5 font-semibold cursor-pointer truncate ${PRESS_FEEDBACK_CLASS}`}
+      // auditoria-sirope (#6) · relleno, recorte y dos líneas.
+      // «Croissantysandwich» se salía del botón: no había ni relleno
+      // lateral ni `overflow`, así que la palabra se pintaba por encima
+      // del borde y encima del botón de al lado.
+      //
+      // Medido en el N1 con la carta de Sirope (azulejos de 104 px):
+      // «Croissantysandwich» mide 206 px, «Suplemento» 122 y «Desayunos»
+      // 111. De ahí los DOS renglones y el peldaño de letra del `<span>`:
+      // el nombre entra ENTERO. `n1-vertical` había llegado antes a este
+      // mismo botón con `truncate` (una línea y puntos suspensivos), pero
+      // auditoria-sirope (#6) es posterior y es el que se queda: además,
+      // `truncate` lleva dentro `white-space: nowrap`, que hereda al
+      // `<span>` y anularía su `line-clamp: 2`.
+      className={`border-0 rounded-[14px] font-semibold cursor-pointer overflow-hidden flex items-center justify-center px-2.5 ${PRESS_FEEDBACK_CLASS}`}
       style={{
         height: FAMILY_BUTTON_PX,
-        fontSize: FAMILY_LABEL_PX,
         background: special ? DARK_TEXT : fill,
         color: special ? DARK_CANVAS : FAMILY_TEXT,
         boxShadow: ring,
       }}
     >
-      {label}
+      <span
+        data-testid="family-label"
+        className="text-center"
+        style={{
+          // El tamaño baja por peldaños hasta que el rótulo cabe en dos
+          // líneas dentro del ancho del botón. El ancho se estima con el
+          // de la barra —seis columnas en el terminal— porque el botón
+          // no se mide a sí mismo; la estimación va por lo alto.
+          fontSize: tamanoNombreProducto(label, anchoUtilPx, 2, FAMILY_LABEL_PX),
+          lineHeight: 1.1,
+          display: "-webkit-box",
+          WebkitBoxOrient: "vertical",
+          WebkitLineClamp: 2,
+          overflow: "hidden",
+          wordBreak: "break-word",
+        }}
+      >
+        {label}
+      </span>
     </button>
   );
 }
@@ -817,53 +896,78 @@ function ProductButton({
   product,
   fill,
   nameSizePx,
+  cardWidth,
   units,
   onClick,
 }: {
   product: CatalogProduct;
   fill: string;
+  /** El techo que marca la rejilla por lo ancho que acabó el botón. */
   nameSizePx: number;
+  /** auditoria-sirope (#7) · para ajustar el nombre de ESTE botón. */
+  cardWidth: number;
   units: number;
   onClick: () => void;
 }) {
+  // auditoria-sirope (#7) · el tamaño lo decide EL NOMBRE, no sólo la
+  // rejilla. El 18-10 dos desayunos distintos pintaban el mismo texto
+  // porque el `line-clamp-2` cortaba justo donde se diferenciaban.
+  //
+  // El ancho útil descuenta el relleno (16 + 16). La insignia `×N` ya no
+  // se descuenta: desde #5 va en una esquina, superpuesta, y no le quita
+  // sitio al nombre — que es lo que hacía que el mismo producto se
+  // leyera distinto según estuviera o no en la comanda.
+  const anchoUtil = Math.max(40, cardWidth - 32);
+  const sizePx = tamanoNombreProducto(product.name, anchoUtil, 3, nameSizePx);
   return (
     <button
       type="button"
       onClick={onClick}
       data-testid="product-button"
       data-product-id={product.id}
-      className={`relative border-0 rounded-xl box-border flex items-center justify-between gap-2.5 text-left cursor-pointer overflow-hidden ${PRESS_FEEDBACK_CLASS}`}
+      // auditoria-sirope (#5) · el nombre CENTRADO, horizontal y
+      // vertical. Estaba a la izquierda mientras las familias iban
+      // centradas, así que la rejilla se leía en dos ejes distintos.
+      className={`relative border-0 rounded-xl box-border flex items-center justify-center cursor-pointer overflow-hidden ${PRESS_FEEDBACK_CLASS}`}
       style={{
         padding: "0 16px",
         background: fill,
         color: FAMILY_TEXT,
       }}
     >
-      {/* Dos líneas como máximo y elipsis. El «nombre corto de botón»
-          editable es v2-H2 (lleva migración); aquí el botón usa el
-          nombre actual del catálogo. */}
       <span
         data-testid="product-name"
-        className="line-clamp-2 font-semibold"
+        className="font-semibold text-center"
         style={{
-          fontSize: nameSizePx,
+          fontSize: sizePx,
           lineHeight: 1.1,
           letterSpacing: "-0.01em",
+          // El techo de tres líneas, como red: si el catálogo trae un
+          // nombre imposible, el botón se recorta en vez de desbordar.
+          display: "-webkit-box",
+          WebkitBoxOrient: "vertical",
+          WebkitLineClamp: 3,
+          overflow: "hidden",
         }}
       >
         {product.name}
       </span>
       {units > 0 && (
+        // auditoria-sirope (#5) · la insignia pasa a la ESQUINA. Antes
+        // era un hermano del nombre en un `justify-between`, así que
+        // aparecer desplazaba el texto del botón: el mismo producto se
+        // leía en un sitio con la comanda vacía y en otro con dos
+        // unidades dentro.
         <span
           data-testid="product-units"
-          className="shrink-0 box-border rounded-[10px] flex items-center justify-center font-semibold tabular-nums"
+          className="absolute top-1.5 right-1.5 box-border rounded-[10px] flex items-center justify-center font-semibold tabular-nums"
           style={{
-            minWidth: 40,
-            height: 40,
-            padding: "0 8px",
+            minWidth: 34,
+            height: 30,
+            padding: "0 7px",
             background: DARK_QTY_BADGE,
             color: DARK_ON_CORAL,
-            fontSize: 20,
+            fontSize: 17,
           }}
         >
           ×{units}
@@ -918,7 +1022,16 @@ function PendingLine({
       className="rounded-[14px]"
       style={highlighted ? { background: DARK_LINE_HIGHLIGHT } : undefined}
     >
-      <div className="flex items-center gap-2.5 min-h-[68px] px-2">
+      {/* auditoria-sirope (#8) · UNA FILA, NO DOS.
+          Los chips («Espera», las sillas) vivían en una segunda fila
+          debajo, y eso doblaba el alto de cada línea: en el D8 cabían
+          TRES líneas de comanda. Ahora van en esta misma fila, en
+          compacto y detrás del importe, y la fila envuelve sólo cuando
+          de verdad no caben.
+
+          Los `−`/`+` NO se tocan: siguen a 56 px. Lo que se toca con
+          prisa es la cantidad. */}
+      <div className="flex flex-nowrap items-center gap-1.5 min-h-[62px] px-2">
       {/* El rótulo accesible dice lo que el botón VA a hacer, que con
           una sola unidad no es restar sino quitar la línea (decisión
           3d). En el panel claro el `−` se deshabilita a una unidad y
@@ -931,7 +1044,7 @@ function PendingLine({
       />
       <span
         data-testid="pendiente-qty"
-        className="shrink-0 w-[30px] text-center font-semibold tabular-nums"
+        className="shrink-0 w-[24px] text-center font-semibold tabular-nums"
         style={{ fontSize: PENDING_LINE_QTY_PX }}
       >
         {units}
@@ -945,20 +1058,42 @@ function PendingLine({
         type="button"
         onClick={onClick}
         data-testid="cart-line-name"
-        className="flex-grow min-w-0 text-left font-semibold truncate"
-        style={{ fontSize: PENDING_LINE_NAME_PX, color: DARK_TEXT }}
+        className="flex-grow min-w-0 text-left font-semibold"
+        style={{
+          fontSize: PENDING_LINE_NAME_PX,
+          color: DARK_TEXT,
+          // auditoria-sirope (#8) · hasta DOS líneas. Con `truncate`, el
+          // D8 pintaba «Café con l…» y «Café Ame…»: dos cafés distintos
+          // con el mismo principio, que es el mismo fallo que #7 en la
+          // rejilla y aquí con el cliente delante.
+          display: "-webkit-box",
+          WebkitBoxOrient: "vertical",
+          WebkitLineClamp: 2,
+          overflow: "hidden",
+          lineHeight: 1.15,
+        }}
       >
         {line.nameSnapshot}
       </button>
-      <span
-        data-testid="pendiente-importe"
-        className="shrink-0 font-semibold tabular-nums whitespace-nowrap"
-        style={{ fontSize: PENDING_LINE_AMOUNT_PX }}
-      >
-        {formatEur(lineGross({ ...line, units }))}
+      {/* auditoria-sirope (#8) · EL IMPORTE Y LOS CHIPS, EN COLUMNA.
+          En los ~356 px útiles de la comanda, poner el importe y el
+          chip «Espera» uno al lado del otro dejaba al nombre 55 px y
+          lo devolvía a «Café co…», que es el hallazgo. Apilados ocupan
+          el ancho del más ancho de los dos —unos 72— en vez de la suma,
+          y el nombre recupera sus dos líneas enteras. El alto de la
+          fila no sube: 20 del importe + 44 del chip caben en los 64 que
+          ya piden los `−`/`+` de 56. */}
+      <span className="shrink-0 flex flex-col items-end">
+        <span
+          data-testid="pendiente-importe"
+          className="font-semibold tabular-nums whitespace-nowrap leading-none pb-1"
+          style={{ fontSize: PENDING_LINE_AMOUNT_PX }}
+        >
+          {formatEur(lineGross({ ...line, units }))}
+        </span>
+        {chips}
       </span>
       </div>
-      {chips}
     </div>
   );
 }
@@ -1019,6 +1154,14 @@ function Comanda({
   /** `true` dentro del bottom-sheet de handheld. */
   inSheet?: boolean;
 }) {
+  // auditoria-sirope (#12) · ver la nota del workspace: sin destino, el
+  // TPV no habla de cocina.
+  const mandaACocina = props.kitchen.hayDondeMandar ?? props.kitchen.enabled;
+  // Y «Reenviar» sólo cuando hay algo nuevo: reenviar lo mismo gasta un
+  // número de comanda y pinta una tarjeta vacía en la pantalla del
+  // cocinero (el `nothingNew` de kds-1 lo evitaba en el servidor; aquí
+  // deja de ofrecerse).
+  const hayQueEnviar = pending.length > 0;
   return (
     <div
       data-testid="comanda"
@@ -1117,7 +1260,7 @@ function Comanda({
                 Es por SECCIÓN, porque una mesa puede tener las dos cosas:
                 las bravas a la pantalla de cocina y las cañas a la
                 impresora de la barra. */}
-            {sent.length > 0 && (
+            {sent.length > 0 && mandaACocina && (
               <>
                 <div
                   data-testid="comanda-eyebrow-cocina"
@@ -1147,6 +1290,7 @@ function Comanda({
                       <ChipsDeLinea
                         lineId={l.id}
                         enviada
+                        compacto
                         alergenosDelPlato={l.allergens ?? []}
                         seat={sillaDeLinea(props.kitchen.estado, l.id)}
                         course={tiempoDeLinea(props.kitchen.estado, l.id)}
@@ -1166,20 +1310,26 @@ function Comanda({
             {/* ── Sin enviar ── Destacadas, con −/+ de 56 px. */}
             {pending.length > 0 && (
               <>
-                <div
-                  data-testid="comanda-eyebrow-sin-enviar"
-                  className="px-2 pt-3 pb-1.5 font-medium"
-                  style={{
-                    fontSize: EYEBROW_PX,
-                    letterSpacing: EYEBROW_TRACKING,
-                    // Coral, no gris: es el bloque sobre el que se
-                    // actúa. El §4 del principio prohíbe el gris claro
-                    // para información que se usa.
-                    color: "#F2A08F",
-                  }}
-                >
-                  SIN ENVIAR
-                </div>
+                {/* auditoria-sirope (#12) · el rótulo «SIN ENVIAR» sólo
+                    tiene sentido si hay a dónde enviar. Sin pantalla ni
+                    impresora esto no es media comanda: es el pedido
+                    entero, y las líneas se pintan igual. */}
+                {mandaACocina && (
+                  <div
+                    data-testid="comanda-eyebrow-sin-enviar"
+                    className="px-2 pt-3 pb-1.5 font-medium"
+                    style={{
+                      fontSize: EYEBROW_PX,
+                      letterSpacing: EYEBROW_TRACKING,
+                      // Coral, no gris: es el bloque sobre el que se
+                      // actúa. El §4 del principio prohíbe el gris claro
+                      // para información que se usa.
+                      color: "#F2A08F",
+                    }}
+                  >
+                    SIN ENVIAR
+                  </div>
+                )}
                 {pending.map(({ line: l, units }) => (
                   <PendingLine
                     key={`pend-${l.id}`}
@@ -1207,6 +1357,7 @@ function Comanda({
                     chips={
                       <ChipsDeLinea
                         lineId={l.id}
+                        compacto
                         alergenosDelPlato={l.allergens ?? []}
                         seat={sillaDeLinea(props.kitchen.estado, l.id)}
                         course={tiempoDeLinea(props.kitchen.estado, l.id)}
@@ -1293,6 +1444,11 @@ function Comanda({
             bajarle 20 px a «Enviar» lo dejaba por debajo del botón de
             una línea de la comanda, que es menos importante que él. */}
         <div className="flex gap-2.5">
+          {/* auditoria-sirope (#12) · sin pantalla ni impresora no hay
+              nada que enviar, así que no hay botón. Y «Reenviar» sólo
+              cuando hay líneas nuevas: reenviar lo mismo gasta número de
+              comanda y pinta una tarjeta vacía en la cocina. */}
+          {mandaACocina && hayQueEnviar && (
           <button
             type="button"
             onClick={props.onSendToKitchen}
@@ -1318,6 +1474,7 @@ function Comanda({
                 ? `Reenviar (nº ${props.kitchenLastRevision + 1})`
                 : "Enviar"}
           </button>
+          )}
           <button
             type="button"
             onClick={props.onClickCheckout}
@@ -1397,7 +1554,7 @@ function ComandaHeader(props: HospitalityWorkspaceProps) {
       {props.chromeActions.length > 0 && (
         <div
           data-testid="comanda-chrome"
-          className="shrink-0 flex flex-wrap items-center gap-2 px-4 pb-3"
+          className="shrink-0 flex flex-wrap items-center gap-1.5 px-4 pb-3"
         >
           {props.chromeActions.map((a) => (
             <button
@@ -1407,16 +1564,37 @@ function ComandaHeader(props: HospitalityWorkspaceProps) {
               aria-label={a.label}
               title={a.label}
               data-chrome-action={a.key}
-              className={`shrink-0 rounded-[14px] flex items-center justify-center ${PRESS_FEEDBACK_CLASS}`}
+              // auditoria-sirope (#9) · icono ARRIBA y rótulo debajo. El
+              // botón sigue midiendo 56 de alto táctil como mínimo; lo
+              // que crece es el ancho, y la barra envuelve sola cuando
+              // no caben todos en una fila.
+              // auditoria-sirope (#9) · icono arriba y rótulo debajo. El
+              // botón NO baja de 56 en ninguna de las dos medidas: es la
+              // norma de v2-H1 y su sabotaje, y cuatro píxeles no se
+              // compran rompiéndola. Lo que se hizo para que los
+              // rótulos no costaran una segunda fila fue quitar de la
+              // barra el icono que duplicaba el menú («Recargar»), que
+              // es lo que el bloque permite: «si no caben, se queda lo
+              // que se usa y el resto va a Más».
+              className={`shrink-0 rounded-[14px] flex flex-col items-center justify-center gap-0.5 px-1.5 ${PRESS_FEEDBACK_CLASS}`}
               style={{
-                width: MIN_TOUCH_PX,
-                height: MIN_TOUCH_PX,
+                minWidth: MIN_TOUCH_PX,
+                minHeight: MIN_TOUCH_PX,
+                paddingTop: 6,
+                paddingBottom: 6,
                 background: DARK_SURFACE,
                 color: DARK_TEXT_SOFT,
               }}
             >
               <span className={a.spinning ? "animate-spin" : undefined}>
                 {a.icon}
+              </span>
+              <span
+                data-testid="chrome-rotulo"
+                className="font-medium leading-none"
+                style={{ fontSize: 11.5, letterSpacing: "0.01em" }}
+              >
+                {a.short}
               </span>
             </button>
           ))}

@@ -113,6 +113,9 @@ function apptWith(items: Array<{ serviceId: string }>): AppointmentView {
     start: "2026-08-10T07:00:00.000Z",
     end: "2026-08-10T08:15:00.000Z",
     ticketId: null,
+    // B-reservas-8 · una cita sin bono. Este banco prueba el puente
+    // cita→caja de siempre y el bono no entra en él.
+    voucherId: null,
     notes: null,
     items: items.map((it, i) => ({
       id: `${id}-item-${i}`,

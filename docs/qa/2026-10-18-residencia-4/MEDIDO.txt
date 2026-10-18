@@ -1,0 +1,10 @@
+residencia-4 · lo medido en el bucle visual, a 1280×800, en el producto
+de verdad y con Jardín de Gredos sembrado.
+
+Los TOQUES son exactos: son los clics que hay que dar. Los SEGUNDOS son
+de máquina —del primer toque a que la pantalla lo diga— y es lo que el
+software cuesta. Lo que NO está medido es el tiempo de la persona: eso
+se mide con una auxiliar delante, no con un navegador.
+
+  tomar la temperatura (PIN + Tomar + 4 teclas + Apuntar): 10 toques · 1981 ms de máquina
+  caída sin golpe (Algo no va bien + Caída + No + Apuntar): 4 toques · 987 ms de máquina

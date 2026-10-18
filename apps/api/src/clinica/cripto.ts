@@ -46,7 +46,12 @@
 // dos AAD distintos para el mismo valor, y el que no cuadrara dejaría una
 // fila ilegible para siempre.
 
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHmac,
+  randomBytes,
+} from "node:crypto";
 
 import { decryptSecret, encryptSecret } from "../crypto.js";
 
@@ -381,4 +386,85 @@ export function sitioDelFichero(input: {
     columna: input.clase,
     filaId: input.fileName,
   };
+}
+
+// ── residencia-3 · LA HUELLA DE BÚSQUEDA DEL PIN DE LA PUERTA ────────
+//
+// El mockup validado (D-64) pide **sólo el PIN**: ni email, ni elegir
+// nombre de una lista, porque la auxiliar tiene las manos ocupadas y el
+// presupuesto es de dos segundos (D-05). Así que con cuatro cifras hay que
+// ENCONTRAR a la persona.
+//
+// Buscarla probando argon2id contra los veinte de la plantilla son cinco
+// segundos y 1,3 GB de memoria por intento, en una tablet de pasillo y
+// quince veces por turno. No se puede. Hace falta una huella
+// DETERMINISTA que una consulta indexada resuelva — lo contrario de lo
+// que hace `cifrarValor`, que es no determinista a propósito (decisión 15
+// de clinica-7).
+//
+// ── Y por eso la clave NO puede estar en la base ────────────────────
+//
+// Una huella determinista de cuatro cifras salada con un valor de la
+// propia base son **diez mil pruebas instantáneas** sobre un volcado: el
+// PIN de toda la plantilla, en un segundo. Con la subclave derivada de la
+// DEK —que vive envuelta por la `CLINICAL_KEK` del entorno— un volcado sin
+// la KEK no la puede calcular ni invertir.
+//
+// Dos consecuencias buscadas:
+//
+//   · destruir la DEK de un centro (art. 28.3.g) **apaga el PIN de sus
+//     puertas**, que es lo correcto: la relación terminó;
+//   · rotar la KEK no las toca, porque la DEK no cambia al re-envolverse
+//     (`rotar-kek.ts`).
+//
+// ── Por qué hay una SUBCLAVE y no se usa la DEK directamente ────────
+//
+// Porque la subclave VIAJA A LA TABLET en el paquete de arranque: es lo
+// que le permite resolver el PIN **sin red**, que es la mitad del ADR-01.
+// La DEK no sale de la API jamás, y con la subclave no se descifra nada —
+// es una función de un sentido de la DEK.
+//
+// Lo que la tablet sí puede hacer con ella es probar las diez mil
+// combinaciones y aprender los PIN de la plantilla. Es exactamente la
+// exposición que el roster de `offlineAuth` del TPV ya acepta y documenta
+// (v1.10, §1-2: argon2id de un PIN de cuatro cifras cacheado en un
+// dispositivo emparejado), y por eso la caché **se vacía al revocar el
+// dispositivo**. Lo que esta subclave no da, y el roster del TPV sí, es
+// nada que sirva fuera de la puerta.
+
+/** El propósito, dentro del HMAC. Separa esta derivación de cualquier otra
+ *  que use la misma DEK: sin él, dos usos distintos con la misma clave son
+ *  el mismo cálculo. */
+const PROPOSITO_SUBCLAVE_PIN = "puerta-pin-subclave-v1";
+const PROPOSITO_HUELLA_PIN = "puerta-pin-v1";
+
+/**
+ * La subclave del PIN de un centro, derivada de su DEK.
+ *
+ * 32 bytes. Es lo único de esta familia que sale de la API, y sólo hacia
+ * una tablet `ROOM` emparejada.
+ */
+export function subclaveDePinDePuerta(dek: Buffer, tenantId: string): Buffer {
+  return createHmac("sha256", dek)
+    .update(`${PROPOSITO_SUBCLAVE_PIN}|${tenantId}`, "utf8")
+    .digest();
+}
+
+/**
+ * La huella de un PIN. Hex de 64 caracteres.
+ *
+ * Es lo que va en `care_pins.pin_lookup` y lo que la tablet recalcula
+ * offline. **El `tenantId` entra otra vez aquí**, aunque la subclave ya lo
+ * lleve: así la huella de un centro no vale en otro ni aunque alguien
+ * reutilizara la subclave, que es el mismo razonamiento por el que el AAD
+ * lleva el tenant además de la clave por tenant.
+ */
+export function huellaDePinDePuerta(
+  pin: string,
+  subclave: Buffer,
+  tenantId: string,
+): string {
+  return createHmac("sha256", subclave)
+    .update(`${PROPOSITO_HUELLA_PIN}|${tenantId}|${pin}`, "utf8")
+    .digest("hex");
 }

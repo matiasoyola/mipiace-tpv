@@ -39,6 +39,18 @@ export interface ResidenteFila {
 export interface ResidenteFicha extends ResidenteFila {
   dni: string | null;
   nss: string | null;
+  /** residencia-3 (D-64) · `null` = no tiene foto subida. */
+  foto?: { bytes: number | null; subidaEn: string | null } | null;
+  /** Y su consentimiento de imagen VIGENTE, o `null`. Son dos cosas
+   *  distintas a propósito: la combinación que importa es «hay foto y NO
+   *  se puede enseñar». */
+  consentimientoDeImagen?: {
+    id: string;
+    anotadoEn: string;
+    loDio: string | null;
+    nombre: string | null;
+    parentesco: string | null;
+  } | null;
   ocupaciones: Array<{
     id: string;
     desde: string;

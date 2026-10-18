@@ -223,6 +223,12 @@ jobs:
   e2e:
     needs: ci
     runs-on: ubuntu-latest
+    # El 2026-10-15 este job tardó 48 minutos: un test se quedó esperando
+    # un Redis que aquí no existe y la suite fue muriendo caso a caso al
+    # timeout de 60 s de vitest. Normalmente baja de dos minutos, así que
+    # 15 es margen de sobra y el cuelgue se paga en cuartos de hora, no
+    # en horas de runner.
+    timeout-minutes: 15
 
     services:
       postgres:

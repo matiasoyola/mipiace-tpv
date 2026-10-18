@@ -211,11 +211,17 @@ describe("H1 · las rutas reales llevan la puerta puesta", () => {
     // añadir una ruta de caja sin la puerta tiene que ponerlo rojo, y
     // añadirla CON la puerta obliga a tocar el número aquí a mano.
     ["tpv-catalog/routes.ts", 5],
-    ["devices/routes.ts", 5],
+    // auditoria-sirope (#23) · 6 desde que las secciones de una pantalla
+    // de cocina se cambian sin revocarla.
+    ["devices/routes.ts", 6],
     ["cashiers/routes.ts", 5],
     ["tickets/routes.ts", 8],
     ["tickets/credit-routes.ts", 4],
-    ["tables/operativa.ts", 6],
+    // auditoria-sirope (#14) · 7 con «dejar libre» una mesa por recoger.
+    ["tables/operativa.ts", 7],
+    // auditoria-sirope (#25) · la venta de mostrador: su borrador y sus
+    // líneas.
+    ["tickets/mostrador.ts", 2],
     ["tables/grouping.ts", 3],
     ["tables/routes.ts", 8],
     ["catalog/routes.ts", 5],
@@ -224,7 +230,9 @@ describe("H1 · las rutas reales llevan la puerta puesta", () => {
     ["admin/printer-configs.ts", 5],
     ["admin/modifier-groups.ts", 9],
     ["admin/tag-aliases.ts", 3],
-    ["admin/tag-sections.ts", 3],
+    // auditoria-sirope (#19) · 4 desde que «Comanderas» lista las
+    // etiquetas reales del catálogo.
+    ["admin/tag-sections.ts", 4],
     // Sole (23-09-2026) · 3 desde que "Comunicación de ticket" tiene
     // también el resumen de envíos fallidos (GET …/email-failures).
     ["admin/ticket-delivery.ts", 3],

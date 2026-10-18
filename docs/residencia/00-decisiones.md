@@ -73,7 +73,7 @@ Documentos fuente (proyecto «Jardin de Gredos»; copia en `docs/residencia/` de
 | # | Decisión | Por qué |
 |---|---|---|
 | D-55 | **Escalas de la casa: Barthel, Lobo, Tinetti y Norton**; se pasan con `ClinicalAssessment` en Fase 2. (H-05: se da por buena la elección de 2012 y se corrige si la médica dice otra cosa.) | Están elegidas y coinciden con los indicadores de AENOR. |
-| D-56 | **Plantilla de gravedad por defecto** (ver §3), marcada como **«pendiente de firma clínica»** hasta que la firmen la médica y la DUE. El sistema funciona con ella desde el día uno. (H-07) | D-23 manda que la firmen ellas; pero sin plantilla no hay reglas de aviso y no se puede empezar. |
+| D-56 | **Plantilla de gravedad por defecto** (ver §3), de serie. El sistema funciona con ella desde el día uno. (H-07) *(La condición de firma clínica queda sustituida por D-65.)* | D-23 manda que la firmen ellas; pero sin plantilla no hay reglas de aviso y no se puede empezar. |
 | D-57 | **Catálogo clínico estándar: lo mantiene Mi Piace**, lo valida la médica del cliente cero y se revisa **una vez al año** o cuando cambie una guía, con versión y fecha. (H-10) | Alguien tiene que ser dueño; el producto es el que lo distribuye. |
 | D-58 | **Relevo por centro y por turno**: parte único del turno saliente, lo confirma con PIN al menos una persona del entrante; la DUE confirma el suyo si está de turno. Cuántos asisten y cómo se ajusta tras observar un turno real. (H-09) | Empieza simple y se afina con observación. |
 | D-59 | **Vocabulario de ánimo y cognición: el propuesto en la rama de controles**, editable como dato. Se contrasta en la observación de turno, sin bloquear. | Es dato: cambiarlo no es un desarrollo. |
@@ -98,6 +98,14 @@ Documentos fuente (proyecto «Jardin de Gredos»; copia en `docs/residencia/` de
 |---|---|---|
 | D-64 | **El mockup de la puerta (seis pantallas) lo valida Matías**, en lugar de la observación de turno con auxiliares: se ha criado en la residencia y conoce el trabajo de planta. Se añade **la foto del residente junto a su nombre**, en la puerta en reposo y en «lo que toca», **sólo con consentimiento de imagen** anotado en la ficha (sin él, iniciales). El botón «avisar a la enfermera» no se pinta hasta que el aviso sea real (residencia-4). | La foto ayuda a la suplente y a quien no conoce a cada residente; en un pasillo la ve cualquiera, de ahí el consentimiento. Un botón que parece avisar y no avisa es peor que no tenerlo. |
 
+### Tras residencia-3 (18-10-2026)
+
+| # | Decisión | Por qué |
+|---|---|---|
+| D-65 | **La plantilla de gravedad (§3) es de serie y la fija Mi Piace.** Funciona desde el primer día, sin estado «pendiente de firma» ni validación clínica previa; es dato versionado del producto y un centro no la toca (D-21). La médica sólo pauta excepciones por residente (D-22). **Sustituye a D-23 y a la condición de firma de D-56.** | Decisión de Matías: *«nosotros mandamos; lo que les demos vamos a tener que enseñarles a usarlo»*. La plantilla es estándar de práctica clínica y una versión nueva es una fila, no un desarrollo. |
+| D-66 | **El aviso inmediato suena en un móvil de guardia**: la misma APK en «modo guardia», canal enfermería o responsable. Quien lo coge entra con su PIN al empezar el turno. N2 → enfermería; **si no hay enfermera de guardia o nadie acusa en 5 min, suena en el teléfono de la dirección o del responsable de guardia**; N3-N4 → los dos a la vez. **Al servicio sanitario de guardia, como recomendación**: el móvil muestra a quién llamar y la llamada la hace la persona (D-33). Sin red, la puerta dice que el aviso no ha salido. | Respuesta de Matías (18-10). Una tablet fija o las puertas no encuentran a la enfermera si está en otra planta; un aviso que parece salir y no sale es peor que no tenerlo. |
+| D-67 | **El relevo se lee y se confirma en una tablet fija en la sala donde ya se reúne el turno**: `DeviceKind` nuevo, la misma APK en «modo relevo», emparejada al centro. Con PIN, cada uno ve el parte dentro de su alcance (D-51) y lo confirma; el parte está confirmado cuando cada zona con contenido tiene una confirmación de quien la cubre o una de alcance total. | Respuesta de Matías (18-10). El sistema alimenta la reunión de cambio de turno que ya existe en vez de inventar otra (rama de controles §7). |
+
 ### Lo que NO se decide por criterio (son hechos que aporta el cliente, no bloquean)
 
 - H-01 · ordenador origen de los `.lnk` (fichas de 2025).
@@ -107,7 +115,7 @@ Documentos fuente (proyecto «Jardin de Gredos»; copia en `docs/residencia/` de
 - H-08 · medición del wifi: tarea de la visita.
 - **Limpiar `MODELO PAI.doc`** (tiene datos reales de un residente): urgente e independiente del software.
 
-## 3. Plantilla de gravedad por defecto (pendiente de firma clínica)
+## 3. Plantilla de gravedad de serie (D-65)
 
 | Evento | Nivel |
 |---|---|

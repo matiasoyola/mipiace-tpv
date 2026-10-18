@@ -184,6 +184,13 @@ const fakePrisma: Record<string, unknown> = {
       facturaDesde: new Date("2026-06-01T08:00:00.000Z"),
     })),
   },
+  // auditoria-sirope (#22) · cobrar (o vaciar) cierra las comandas que
+  // estaban LISTAS. Este banco no tiene cocina: ninguna comanda, nada
+  // que servir.
+  kitchenOrder: {
+    findMany: vi.fn(async () => []),
+    updateMany: vi.fn(async () => ({ count: 0 })),
+  },
   holdedUpload: {
     upsert: vi.fn(async ({ where, create }: any) => {
       if (!state.holdedUploads.has(where.externalId)) {

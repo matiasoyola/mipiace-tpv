@@ -195,12 +195,29 @@ describe("residencia-1 · la pantalla de la puerta", () => {
 
   it("en una habitación INDIVIDUAL no pinta la letra de la cama", async () => {
     // «A» en una individual es ruido: el personal dice «la 112».
+    //
+    // residencia-3 · el selector pasa de `li span` a buscar «Cama», y la
+    // razón es que esta pantalla ganó la foto (D-64): el hueco de las
+    // iniciales es otro `span` dentro del mismo `li`, así que contar
+    // `span` contaba la foto. Lo que el test SIGUE comprobando es lo
+    // mismo: que la letra de la cama no se pinta cuando sobra.
     await pintar({
       ...ME,
       ocupantes: [{ bedId: "b-a", bedLabel: "A", nombre: "Carmen Gómez" }],
     });
-    const nombres = container.querySelectorAll("li span");
-    expect(nombres).toHaveLength(1);
-    expect(nombres[0]!.textContent).toBe("Carmen Gómez");
+    expect(container.textContent).toContain("Carmen Gómez");
+    expect(container.textContent).not.toContain("Cama");
+  });
+
+  it("y en una DOBLE sí, con la palabra delante", async () => {
+    await pintar({
+      ...ME,
+      ocupantes: [
+        { bedId: "b-a", bedLabel: "A", nombre: "Carmen Gómez" },
+        { bedId: "b-b", bedLabel: "B", nombre: "Luis Núñez" },
+      ],
+    });
+    expect(container.textContent).toContain("Cama A");
+    expect(container.textContent).toContain("Cama B");
   });
 });

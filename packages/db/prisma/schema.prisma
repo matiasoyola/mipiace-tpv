@@ -258,6 +258,25 @@ enum DeviceKind {
   // tenant no crea ninguna—, así que colgar la puerta de una caja técnica
   // habría sido inventarse una caja para un centro que no cobra.
   ROOM
+  // residencia-4 (D-66) · EL MÓVIL DE GUARDIA. La MISMA APK en «modo
+  // guardia», emparejada a un canal (`ENFERMERIA` o `RESPONSABLE`) en vez
+  // de a una caja o a una habitación.
+  //
+  // Es el segundo `DeviceKind` que no cuelga de una caja, y el primero
+  // que no cuelga de NADA físico: una puerta es de una habitación, pero
+  // un móvil de guardia es de quien lo lleve ese turno — y quién lo lleva
+  // lo dice el PIN al empezar (`guard_shift_sessions`), no el
+  // emparejamiento. Puede ser el teléfono personal de quien dirige.
+  //
+  // **No vende, no abre turno, no factura y no releva a nadie**, igual
+  // que `KITCHEN` y `ROOM`: lo corta `requireDeviceToken` con un 403
+  // antes del PIN, y el trigger `devices_revoke_previous` y el índice
+  // `devices_one_active_per_register_key` filtran `kind = 'TERMINAL'`.
+  //
+  // Y **no releva al móvil anterior de su canal**, al revés que una
+  // puerta releva a la de su habitación: un centro puede tener tres
+  // móviles de enfermería a la vez y los tres tienen que sonar.
+  GUARD
 }
 
 // V1-verifactu (ADR-019) · por qué se revocó un dispositivo.
@@ -550,6 +569,27 @@ enum TicketVoidReason {
   MANAGER_VOID
 }
 
+/// auditoria-sirope (#18) · POR QUÉ SE VACIÓ UNA MESA CON CONSUMO.
+///
+/// `TicketVoidReason` dice por qué CAMINO se anuló (el TPV, el barrido,
+/// el panel); esto dice qué pasó en la sala, que es otra pregunta y la
+/// única que el dueño puede usar.
+///
+/// El 18-10 se vaciaron cinco mesas con consumo y no quedó nada: ni
+/// motivo, ni importe en el Z, ni línea en el informe. Vaciar una mesa
+/// con platos dentro es comida que sale de la cocina y no se cobra —una
+/// invitación, un error de comanda o alguien que se fue sin pagar—, y
+/// las tres se gestionan de forma distinta.
+///
+/// Sólo se exige con consumo. Una mesa que se abrió por error y está
+/// vacía se libera de un toque, como siempre.
+enum MotivoVaciado {
+  INVITACION
+  ERROR_DE_COMANDA
+  SE_FUERON_SIN_PAGAR
+  OTRO
+}
+
 // B-reservas-1 (CRM) · tipo de consentimiento RGPD registrado en la ficha
 // del cliente. DATA = tratamiento de datos personales; TREATMENT =
 // consentimiento del tratamiento/servicio (fórmulas de color, parámetros
@@ -558,6 +598,21 @@ enum TicketVoidReason {
 enum ClientConsentKind {
   DATA
   TREATMENT
+  /// residencia-3 (D-64) · **CONSENTIMIENTO DE IMAGEN.** Sin él, la puerta
+  /// no pinta la foto del residente: pinta sus iniciales.
+  ///
+  /// Es un `ClientConsentKind` y no una columna en `resident_profiles`
+  /// porque lo que hay que guardar es exactamente lo que esta tabla ya
+  /// guarda: quién lo dio (`signer` = PACIENTE o REPRESENTANTE, con su
+  /// nombre y su parentesco), cuándo (`grantedAt`), quién lo anotó
+  /// (`createdByUserId`) y —la mitad que una columna no da— **que se puede
+  /// REVOCAR** con su fila de revocación, su motivo y su fecha. Una
+  /// familia que llama para decir «quiten la foto de mi madre» no puede
+  /// resolverse con un booleano que se pone a false y no deja rastro.
+  ///
+  /// `clinical` va en `false`: la cara de alguien no es un dato de salud,
+  /// es su imagen. Por eso tampoco exige sanitario que informe.
+  IMAGE
 }
 
 // v1.3-Thalia Lote 3 · intent de impresión persistido. Hasta este
@@ -878,6 +933,146 @@ enum CarePlanItemSource {
   MANUAL
 }
 
+// ── residencia-4 · gravedad, incidencias y el aviso ───────────────────
+//
+// Cinco listas más, y la frontera sigue siendo la misma: es enum lo que,
+// si cambiara, cambiaría el código que lo lee. Lo que NO es enum y es a
+// propósito es **el tipo de incidencia** (`FIEBRE`, `CAIDA`, `AVERIA`…):
+// es un CÓDIGO de texto que vive en el fichero de datos de la plantilla
+// de gravedad, porque D-11 llevado a la capa 4 dice que un tipo nuevo en
+// 2028 tiene que ser una fila y no una migración.
+
+/// residencia-4 (D-26) · LOS CINCO NIVELES, por CONSECUENCIA y no por
+/// causa (rama de controles §6.1). Así valen igual para una caída, una
+/// fiebre o una queja, y la plantilla sólo tiene que decir en cuál cae
+/// cada cosa.
+///
+///   · `N0` — queda constancia. **No abre incidencia** (D-27).
+///   · `N1` — lo tiene que saber el turno siguiente (relevo,
+///     residencia-5).
+///   · `N2` — alguien tiene que verlo AHORA: suena el móvil de guardia.
+///   · `N3` — hay que tomar una decisión clínica: suenan los dos canales.
+///   · `N4` — emergencia: los dos canales y la puerta pinta «Llama al
+///     112».
+enum SeverityLevel {
+  N0
+  N1
+  N2
+  N3
+  N4
+}
+
+/// residencia-4 · cómo compara una regla de umbral. Los cuatro que la
+/// tabla del §3 usa literalmente («≥ 37,5», «< 92», «≤ 90», «> 300»).
+/// Traducir un `LTE 90` a un `LT 91` habría metido una decisión de
+/// redondeo donde hoy se miden enteros y mañana puede que no.
+enum SeverityComparator {
+  GTE
+  GT
+  LTE
+  LT
+}
+
+/// residencia-4 (D-35, D-38) · EL SUJETO DEL LIBRO ÚNICO.
+///
+/// Lo único que cambia entre una caída, una queja y una avería es ESTO
+/// (rama §6.3). Es enum y no código de texto —al revés que el tipo—
+/// porque de cada sujeto cuelga una pantalla distinta y un formulario
+/// distinto: añadir `PROVEEDOR` (fuera de la v1 por D-38) es desarrollo.
+enum IncidentSubject {
+  RESIDENT
+  COMPLAINT
+  MAINTENANCE
+}
+
+/// residencia-4 (D-20) · DE DÓNDE SALIÓ LA INCIDENCIA.
+///
+///   · `DECLARED`          — alguien la declaró en la puerta o en el
+///     admin.
+///   · `DERIVED_THRESHOLD` — la derivó una constante que cruzó umbral.
+///   · `DERIVED_ABSENCE`   — la derivó la pasada programada por lo que
+///     NO hay (sin deposición > 3 días, «nada» en dos comidas).
+///
+/// La distinción no es decorativa: es la mitad de D-20 y es lo que la
+/// auditoría mira para saber cuántas incidencias se cazan solas.
+enum IncidentOrigin {
+  DECLARED
+  DERIVED_THRESHOLD
+  DERIVED_ABSENCE
+}
+
+/// residencia-4 · QUÉ CLASE DE ACCIÓN es una línea del histórico de una
+/// incidencia. Append-only, como las anotaciones clínicas.
+///
+///   · `NOTE`      — «qué se hizo», texto libre cifrado.
+///   · `EVIDENCE`  — se adjuntó otra medida a esta incidencia (la segunda
+///     toma de fiebre del turno).
+///   · `SEVERITY`  — cambió el nivel, con el de antes y el de después.
+///   · `ALERT`     — salió un aviso, o lo acusó alguien.
+///   · `CALL`      — se llamó (o se decidió no llamar) al servicio
+///     sanitario de guardia. D-33: la llamada la hace la persona.
+///   · `CLOSE`     — se cerró.
+enum IncidentActionKind {
+  NOTE
+  EVIDENCE
+  SEVERITY
+  ALERT
+  CALL
+  CLOSE
+}
+
+/// residencia-4 (D-66) · LOS DOS CANALES DEL MÓVIL DE GUARDIA.
+///
+/// `ENFERMERIA` es quien coge el móvil de enfermería al empezar el turno;
+/// `RESPONSABLE` es la dirección o el responsable de guardia, que puede
+/// ser su teléfono personal con la APK en modo guardia. Puede haber
+/// VARIOS dispositivos por canal.
+enum GuardChannel {
+  ENFERMERIA
+  RESPONSABLE
+}
+
+/// residencia-4 · EN QUÉ ESTÁ UN AVISO.
+///
+///   · `PENDING`    — creado, todavía sin entregar a ningún móvil vivo.
+///   · `DELIVERED`  — un móvil de ese canal lo tiene delante.
+///   · `ACKED`      — alguien pulsó «Voy» con su PIN.
+///   · `ESCALATED`  — se agotaron los minutos sin acuse y se abrió el del
+///     canal siguiente. **No se cancela**: el de enfermería sigue sonando.
+///   · `CANCELLED`  — la incidencia se cerró antes de que nadie acusara.
+enum GuardAlertState {
+  PENDING
+  DELIVERED
+  ACKED
+  ESCALATED
+  CANCELLED
+}
+
+/// residencia-4 (D-32 a D-34) · LAS DOS CONSTANCIAS DE FAMILIA.
+///
+/// Es una DIMENSIÓN APARTE del nivel (rama §9): una caída sin
+/// consecuencias es N1 y la familia quiere saberlo el mismo día; un
+/// hallazgo N3 puede convenir no comunicarlo hasta tener diagnóstico.
+///
+/// Y las dos son constancia: «no comunicado» con autor y motivo es un
+/// registro tan válido como «comunicado», por la misma lógica de
+/// denominador que el «como siempre» (D-15). Una incidencia de residente
+/// **no se cierra sin una de las dos**.
+enum FamilyCommunicationKind {
+  COMUNICADO
+  NO_COMUNICADO
+}
+
+/// residencia-4 · por qué vía se habló con la familia. `OTRA` existe
+/// porque una lista cerrada de canales se queda corta el día que alguien
+/// viene a recoger ropa y se le cuenta en el pasillo.
+enum FamilyCommunicationChannel {
+  TELEFONO
+  PRESENCIAL
+  EMAIL
+  OTRA
+}
+
 // ── Multi-tenant raíz ─────────────────────────────────────────────────
 
 model Tenant {
@@ -1194,6 +1389,45 @@ model Tenant {
   // `tenants_residencia_exige_clinica` de la migración, no sólo el 409 de
   // la ruta del super-admin.
   residenciaEnabled              Boolean           @default(false) @map("residencia_enabled")
+  // B-reservas-8 · capability de los BONOS DE SESIONES (ADR-R6, ADR-R9).
+  // Hermana de `crmEnabled` y `agendaEnabled` en forma (columna booleana
+  // por tenant) y de `cajaEnabled` / `clinicalRecordsEnabled` en gobierno:
+  // la mueve SÓLO el super-admin, porque encenderla es vender un módulo.
+  //
+  // `@default(false)`: ninguno de los tenants de hoy vende bonos en el TPV
+  // y con la columna apagada **este bloque no existe** para ellos (404 en
+  // todas sus rutas, igual que la clínica).
+  //
+  // Y NO se puede encender con Holded conectado. La decisión es de
+  // Dirección (18-10) y la razón es que un ticket de canje a 0 € subido a
+  // Holded es terreno desconocido: nadie lo necesita hoy (Sole sale de
+  // Holded, la clínica y el spa no lo tienen). El 409 vive en la ruta del
+  // super-admin y el CHECK `tenants_bonos_sin_holded` en la BASE —las dos,
+  // porque hay cuatro puertas de escritura a esta tabla y sólo el motor
+  // cubre las cuatro (misma lección que `products_exencion_sin_iva`).
+  bonosEnabled                   Boolean           @default(false) @map("bonos_enabled")
+  // B-reservas-8 · qué hace el centro con la sesión apartada de una cita
+  // marcada como NO-SHOW. `consumir` (el default, que es lo que hace el
+  // spa) o `liberar`. Texto con CHECK y no enum, por la razón de siempre
+  // en esta casa: un enum de Postgres sólo crece y parte la migración en
+  // dos (`tenants_bono_no_show_valido`).
+  bonoNoShow                     String            @default("consumir") @map("bono_no_show")
+  // B-reservas-8 · LA PALABRA que ve el centro. En el código es `Voucher`
+  // / «bono» y no se discute más (`07` §1); de cara al mostrador el spa
+  // dirá «programa» y la clínica «bono». Es un ajuste del negocio, así que
+  // sí entra en el POST de /admin/tenant/settings.
+  bonoEtiqueta                   String            @default("bono") @map("bono_etiqueta") @db.VarChar(20)
+  // B-reservas-8 · el importe de la línea del servicio al CONSUMIR una
+  // sesión. `LINEA_CERO` (default) o `PRORRATEO`. Es el frente **P5** de
+  // la asesoría (ADR-R9 §6): el bloque lo deja parametrizado y con test
+  // por los dos lados, y `bonosEnabled` no se enciende en ninguna cuenta
+  // real hasta que la respuesta esté escrita en el ADR.
+  bonoModoCanje                  String            @default("LINEA_CERO") @map("bono_modo_canje")
+  // B-reservas-8 · caducidad POR DEFECTO de un bono nuevo, en MESES DE
+  // CALENDARIO. NULL = sin caducidad, que es el default del bloque (los
+  // programas de Raquel Torres no caducan, decisión suya). La plantilla
+  // del producto puede fijar la suya y manda sobre ésta.
+  bonoCaducidadMeses             Int?              @map("bono_caducidad_meses")
   // v1.3-Thalia Lote 6 · pie de ticket personalizado. NULL = no se
   // pinta nada extra (comportamiento previo). Si está set, el renderer
   // del ticket lo pinta arriba del QR/CIF tras el "Gracias por tu
@@ -1237,6 +1471,15 @@ model Tenant {
   bookingPolicies               BookingPolicy[]
   centerHours                   CenterHours[]
   centerDays                    CenterDay[]
+  // B-reservas-8 · los bonos de sesiones, su libro, sus plantillas y el
+  // contador de su numeración. `vouchers` y `voucherMovements` cuelgan con
+  // Cascade: el libro es del tenant y se va con él —el candado de ADR-021
+  // §6 («Eliminar cuenta» es la única puerta) lo pone el trigger
+  // append-only, no la clave ajena.
+  voucherTemplates              VoucherTemplate[]
+  vouchers                      Voucher[]
+  voucherMovements              VoucherMovement[]
+  voucherSequence               VoucherSequence?
   // F1 (ADR-018) · el registro de jornada.
   employees                     Employee[]
   // V1-verifactu (ADR-019) · los registros de facturación de sus cajas.
@@ -1292,6 +1535,25 @@ model Tenant {
   carePlanItems                 CarePlanItem[]
   careZoneAssignments           CareZoneAssignment[]
   centerShifts                  CenterShift[]
+  // residencia-3 · el registro de cuidados y los PIN de la puerta.
+  careRecords                   CareRecord[]
+  carePins                      CarePin[]
+  // residencia-4 · el libro de incidencias con sus acciones, enlaces y
+  // comunicaciones a familia; los avisos y los turnos de guardia; las
+  // excepciones de umbral de sus residentes y su configuración de
+  // guardia.
+  //
+  // **La plantilla de gravedad NO está aquí**: es del producto (D-65), no
+  // tiene `tenant_id` y la ven todos los centros, igual que los
+  // `ControlType` de `scope STANDARD`.
+  incidents                     Incident[]
+  incidentLinks                 IncidentLink[]
+  incidentActions               IncidentAction[]
+  familyCommunications          FamilyCommunication[]
+  guardAlerts                   GuardAlert[]
+  guardShiftSessions            GuardShiftSession[]
+  guardSetting                  CenterGuardSetting?
+  thresholdOverrides            ResidentThresholdOverride[]
 
   // v1.3-SuperAdmin-Hub Lote 3 · el backfill y el hub buscan/listan
   // tenants por `holded_account_id`. Sin índice eran scans completos
@@ -1600,10 +1862,35 @@ model User {
   // a los dos lados: dar de baja a la DUE no borra que ajustó el plan.
   carePlanItemsCreated    CarePlanItem[]                 @relation("CarePlanItemCreatedBy")
   carePlanItemsClosed     CarePlanItem[]                 @relation("CarePlanItemClosedBy")
+
+  // residencia-3 · lo que esta persona FIRMÓ en la puerta, y lo que
+  // anuló. `Restrict` al otro lado: es la evidencia de quién hizo el
+  // cuidado, así que esta persona ya no se puede borrar en duro — igual
+  // que `ClinicalEntry.authorUserId`.
+  careRecords            CareRecord[]                 @relation("CareRecordRecordedBy")
+  careRecordsVoided      CareRecord[]                 @relation("CareRecordVoidedBy")
+  // Y su PIN de la puerta, que es una credencial y sí se va con ella.
+  carePin                CarePin?                     @relation("CarePinUser")
+  carePinsSet            CarePin[]                    @relation("CarePinSetBy")
+  // residencia-3 (D-64) · las fotos de residente que subió. `SetNull`.
+  residentPhotosUploaded ResidentProfile[]            @relation("ResidentPhotoUploadedBy")
   // clinica-7 · las aceptaciones y revocaciones del contrato de encargado
   // que esta persona firmó. RESTRICT al otro lado: un usuario que aceptó
   // el contrato de tratamiento de datos de salud no se borra.
-  processorAgreements     ClinicalProcessorAgreement[]   @relation("ClinicalProcessorAgreementUser")
+  processorAgreements    ClinicalProcessorAgreement[] @relation("ClinicalProcessorAgreementUser")
+
+  // residencia-4 · lo que esta persona abrió, cerró, hizo, comunicó,
+  // acusó y pautó en el libro de incidencias. Todo `Restrict`: es la
+  // firma (D-31), y una firma no se queda huérfana.
+  incidentsOpened           Incident[]                  @relation("IncidentOpenedBy")
+  incidentsClosed           Incident[]                  @relation("IncidentClosedBy")
+  incidentActions           IncidentAction[]            @relation("IncidentActionBy")
+  familyCommunications      FamilyCommunication[]       @relation("FamilyCommunicationBy")
+  guardAlertsAcked          GuardAlert[]                @relation("GuardAlertAckedBy")
+  guardShiftSessions        GuardShiftSession[]         @relation("GuardShiftSessionUser")
+  guardShiftSessionsEnded   GuardShiftSession[]         @relation("GuardShiftSessionEndedBy")
+  thresholdOverridesSigned  ResidentThresholdOverride[] @relation("ThresholdOverrideSignedBy")
+  thresholdOverridesRevoked ResidentThresholdOverride[] @relation("ThresholdOverrideRevokedBy")
 
   @@index([tenantId])
   @@map("users")
@@ -1702,6 +1989,18 @@ model Table {
   // del prompt B7), apunta a la mesa principal. NULL = mesa autónoma.
   // Se limpia automáticamente al cobrar el ticket principal del grupo.
   groupedIntoTableId String?   @map("grouped_into_table_id") @db.Uuid
+  /// auditoria-sirope (#14) · DESDE CUÁNDO ESTÁ PAGADA Y SIN RECOGER.
+  ///
+  /// El 18-10 se cobró la T6 y la mesa pasó a Libre en el mismo
+  /// instante: en el mapa figuraba disponible con el servicio todavía
+  /// puesto encima. El camarero que mira la sala desde la barra no sabe
+  /// si puede sentar a nadie ahí.
+  ///
+  /// `NULL` = la mesa no está esperando a que la recojan. Lo pone el
+  /// cobro y lo quita «Dejar libre», abrir cuenta nueva o el corte de
+  /// día. Vive en el SERVIDOR y no en el navegador porque lo tienen que
+  /// ver todas las cajas: el que cobra y el que recoge no son el mismo.
+  porRecogerDesde    DateTime? @map("por_recoger_desde") @db.Timestamptz()
   deletedAt          DateTime? @map("deleted_at") @db.Timestamptz()
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz()
 
@@ -1904,15 +2203,23 @@ model Device {
   kitchenLanIp       String?              @map("kitchen_lan_ip")
   kitchenLanPort     Int?                 @map("kitchen_lan_port")
   kitchenLanAt       DateTime?            @map("kitchen_lan_at") @db.Timestamptz()
+  // residencia-4 (D-66) · EN QUÉ CANAL SUENA ESTE MÓVIL.
+  //
+  // Sólo puede tener valor en un `kind = GUARD`, y en un `GUARD` es
+  // obligatorio (CHECK `devices_guard_canal`): un móvil de guardia sin
+  // canal no recibiría ningún aviso y el fallo se vería la noche que
+  // alguien tenga 38,6, no al emparejarlo. Misma forma exacta que
+  // `devices_kitchen_sections` en kds-1.
+  guardChannel       GuardChannel?        @map("guard_channel")
 
-  tenant              Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  register            Register?           @relation(fields: [registerId], references: [id], onDelete: Cascade)
+  tenant              Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  register            Register?                    @relation(fields: [registerId], references: [id], onDelete: Cascade)
   // residencia-1 · la habitación de la que esta tablet es la puerta.
   // `Restrict` al otro lado: borrar una habitación con su tablet
   // emparejada dejaría un aparato autenticado apuntando a nada. Primero
   // se revoca la tablet, después se retira la habitación.
-  room                Room?               @relation(fields: [roomId], references: [id], onDelete: Restrict)
-  consumedPairings    PairingCode[]       @relation("PairingCodeConsumedBy")
+  room                Room?                        @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  consumedPairings    PairingCode[]                @relation("PairingCodeConsumedBy")
   // V1-verifactu · a favor de qué dispositivo se revocó éste, y a cuáles
   // revocó él. La FK es DEFERRABLE INITIALLY DEFERRED en la migración: hay
   // que revocar el anterior ANTES de insertar el nuevo (índice único), y en
@@ -1944,6 +2251,16 @@ model Device {
   // inserción: un SET NULL sería una promesa que el trigger rechazaría al
   // ejecutarse. Un aparato se revoca, no se borra.
   processorAgreements ClinicalProcessorAgreement[] @relation("ClinicalProcessorAgreementDevice")
+  // residencia-3 · lo que se registró desde esta puerta. `Restrict`, por
+  // lo mismo que los contratos de encargado: la tabla es evidencia y un
+  // aparato se revoca, no se borra.
+  careRecords         CareRecord[]
+  // residencia-4 · desde qué puerta se declaró una incidencia, qué turnos
+  // de guardia se abrieron en este móvil y qué avisos acusó. Los tres con
+  // `Restrict` o `SetNull` por lo mismo: un aparato se revoca.
+  incidents           Incident[]                   @relation("IncidentDevice")
+  guardShiftSessions  GuardShiftSession[]
+  guardAlertsAcked    GuardAlert[]                 @relation("GuardAlertAckedByDevice")
 
   @@index([tenantId])
   @@index([registerId])
@@ -2090,6 +2407,14 @@ model PairingCode {
   // Las secciones de la pantalla, copiadas al dispositivo al consumir el
   // código. Vacío salvo en `kind = KITCHEN`.
   kitchenSections    KitchenSection[] @default([]) @map("kitchen_sections")
+  // residencia-4 (D-66) · el canal del móvil de guardia, copiado al
+  // dispositivo al consumir el código. NULL salvo en `kind = GUARD`
+  // (CHECK `pairing_codes_guard_canal`), y por la misma razón que
+  // `kitchenSections` y `roomId`: lo decide quien genera el código desde
+  // el panel, no el aparato que lo teclea. Si `POST /devices/pair`
+  // aceptara el canal del cuerpo, cualquiera con un código se emparejaría
+  // como el móvil de enfermería y recibiría los avisos del centro.
+  guardChannel       GuardChannel?    @map("guard_channel")
 
   tenant           Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   register         Register? @relation(fields: [registerId], references: [id], onDelete: Cascade)
@@ -2228,19 +2553,27 @@ model Product {
   lastSyncedAt         DateTime      @default(now()) @map("last_synced_at") @db.Timestamptz()
   raw                  Json?
 
-  tenant         Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  variants       ProductVariant[]
-  lines          TicketLine[]
-  modifierGroups ProductModifierGroup[]
+  tenant          Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  variants        ProductVariant[]
+  lines           TicketLine[]
+  modifierGroups  ProductModifierGroup[]
   // B-reservas-2 · capa de extensión local de agenda sobre el producto de
   // Holded (ADR-R1). NO duplica el catálogo: precio/IVA siguen en Holded.
   // Sólo aplica a kind=SERVICE; un producto sin fila `scheduling` no es
   // reservable ni tiene duración → la agenda lo ignora.
-  scheduling     ServiceScheduling?
-  resourceNeeds  ServiceResourceNeed[]
+  scheduling      ServiceScheduling?
+  resourceNeeds   ServiceResourceNeed[]
   // B-reservas-3 · qué profesionales pueden dar este servicio (matriz
   // profesional × servicio). Sólo tiene sentido para kind=SERVICE.
-  staffSkills    StaffSkill[]
+  staffSkills     StaffSkill[]
+  // B-reservas-8 · la PLANTILLA DE BONO de este producto, si lo es (1:1).
+  // Un bono del catálogo es un producto normal —precio, IVA, categoría,
+  // exención— con esta fila colgando: cuántas sesiones da, qué cubre y a
+  // cuántos meses caduca. Venderlo es añadir el producto al ticket, así
+  // que el precio y el IVA van por el camino de siempre y no hay un
+  // segundo sitio donde se fije el precio de un bono (decisión de
+  // Dirección, 18-10).
+  voucherTemplate VoucherTemplate?
 
   @@unique([tenantId, holdedProductId])
   @@index([tenantId, barcode])
@@ -2526,6 +2859,20 @@ model Ticket {
   // cliente no recibió su ticket pese a que la sync con Holded fue OK.
   emailFailedAt        DateTime?         @map("email_failed_at") @db.Timestamptz()
   contactHoldedId      String?           @map("contact_holded_id")
+  // B-reservas-8 · LA FICHA DEL CRM de esta venta. Nueva en este bloque,
+  // y hacía falta: hasta hoy un ticket sólo sabía de `contactHoldedId`, el
+  // contacto de HOLDED, y este módulo vive exactamente en las cuentas que
+  // NO tienen Holded (Sole, la clínica, el spa). Sin esta columna no hay
+  // forma de saber a quién se le vende un bono ni de proponer el bono de
+  // una clienta en un ticket suelto (el canje sin cita de la peluquería
+  // sin agenda).
+  //
+  // Nullable y `SetNull`: la venta de siempre no lleva ficha y sigue sin
+  // llevarla, y si mañana se borra la ficha el ticket no se va con ella —
+  // una venta cobrada no desaparece porque alguien limpie el CRM. Lo que
+  // sí impide borrar la ficha es tener un BONO vivo (`Voucher.client` es
+  // `Restrict`), que es otra cosa y está donde tiene que estar.
+  clientId             String?           @map("client_id") @db.Uuid
   status               TicketStatus      @default(DRAFT)
   // v1.8-Fiado (variante B) · deuda viva de un ticket vendido a crédito.
   //   NULL  = venta normal (no fiado).
@@ -2570,6 +2917,23 @@ model Ticket {
   // Nº de comensales introducido al abrir la mesa. Informativo (no
   // bloquea capacidad).
   diners               Int?
+  /// auditoria-sirope (#25) · EL Nº DE LA VENTA DE MOSTRADOR.
+  ///
+  /// Lo que la cocina lee en la tarjeta: «Mostrador nº 3». Correlativo
+  /// POR DÍA Y POR CAJA, y por eso no sirve `internalNumber` (que es la
+  /// serie fiscal, se asigna al cobrar y llega a cinco cifras) ni
+  /// `lastSentRevision` (que es la 1ª/2ª comanda de ESTE ticket).
+  ///
+  /// NULL en todo ticket que no sea una venta de mostrador con comanda:
+  /// las mesas se titulan con el nombre de la mesa y una venta rápida que
+  /// nunca va a cocina no gasta número. Se asigna al crear el borrador de
+  /// mostrador (`POST /mostrador/draft`) y no se reutiliza: dos ventas
+  /// seguidas son nº 3 y nº 4 aunque la primera se cobre antes.
+  ///
+  /// El día es el mismo «hoy» que la pantalla de cocina (medianoche
+  /// local, `inicioDelDia`): si la cocina no ve la tarjeta de ayer,
+  /// tampoco puede confundirla con la de hoy.
+  counterNumber        Int?              @map("counter_number")
   // v1.3-Servicios-Pinta · Lote 3: nombre del profesional que atendió
   // (peluquería/clínica/taller). Texto libre opcional introducido en
   // checkout. Vacío en RETAIL/HOSPITALITY. Se imprime en el ticket
@@ -2597,6 +2961,10 @@ model Ticket {
   // lo anuló SISTEMA. Los VOIDED anteriores a v1.12 quedan MANUAL con
   // `voidedAt` NULL — los anuló una persona, pero no sabemos cuándo.
   voidReason           TicketVoidReason? @map("void_reason")
+  /// auditoria-sirope (#18) · qué pasó en la sala. Obligatorio al vaciar
+  /// una mesa CON consumo desde el TPV; NULL en todo lo demás (una mesa
+  /// vacía, el barrido del corte de día, un ticket que no está VOIDED).
+  voidMotivo           MotivoVaciado?    @map("void_motivo")
   voidedAt             DateTime?         @map("voided_at") @db.Timestamptz()
   voidedByUserId       String?           @map("voided_by_user_id") @db.Uuid
   // S1-sello · ADR-015 §4.1. SHA-256 (hex) del conjunto económico de la
@@ -2614,6 +2982,8 @@ model Ticket {
   sealedAt             DateTime?         @map("sealed_at") @db.Timestamptz()
 
   tenant            Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  // B-reservas-8 · ver `clientId` arriba.
+  client            Client?                @relation(fields: [clientId], references: [id], onDelete: SetNull)
   register          Register               @relation(fields: [registerId], references: [id], onDelete: Restrict)
   shift             Shift                  @relation(fields: [shiftId], references: [id], onDelete: Restrict)
   user              User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
@@ -2632,6 +3002,12 @@ model Ticket {
   // B-reservas-4 · cita → caja: el ticket pre-poblado que abre "Cobrar en
   // caja". Como mucho una cita apunta a un ticket (puente 1:0..1).
   appointment       Appointment?
+  // B-reservas-8 · los bonos que NACIERON en esta venta. Lista y no 1:0..1
+  // porque en un ticket caben dos bonos. `Cascade` al otro lado, y es la
+  // pieza que hace funcionar el reseteo del ensayo: el bono vendido en un
+  // ticket `TEST` se va con su ticket, sin una línea de código que lo
+  // busque (ADR-021 §5.1).
+  vouchersSold      Voucher[]
   // kds-1-cocina · todo lo de cocina de esta mesa cuelga del TICKET y se va
   // con él (`Cascade`): las alergias de la decisión 3 **no se cuelgan de
   // `Client` ni de nadie**, viven en la mesa de ESTE servicio y mueren con
@@ -2649,6 +3025,8 @@ model Ticket {
   @@index([shiftId])
   @@index([externalId])
   @@index([tableId, status])
+  // B-reservas-8 · «las ventas de esta clienta», la consulta de la ficha.
+  @@index([tenantId, clientId])
   // S1-sello · separar sellados de pre-sello en los listados del admin.
   @@index([tenantId, sealedAt])
   // v1.8-Fiado · el listado de deudas por cliente (GET /credits) filtra
@@ -2773,6 +3151,17 @@ model TicketLine {
   // cambiar de comensales a mitad de servicio y no queremos que eso
   // invalide filas ya escritas.
   seat              Int?
+  // B-reservas-8 · CON QUÉ BONO se paga esta línea. Puesto = la línea se
+  // canjea con ese bono y su importe es 0 € (o el prorrateo, según
+  // `Tenant.bonoModoCanje` — frente P5).
+  //
+  // Escalar SIN relación Prisma y SIN clave ajena en SQL, y es una
+  // decisión: el guardián del sello vigila la FILA ENTERA de una línea
+  // cobrada, así que un `ON DELETE SET NULL` sobre ella levantaría
+  // `SELLO_VIOLADO` el día que el reseteo del ensayo borre un bono que se
+  // consumió en otro ticket. Un puntero de una venta sellada tiene que
+  // sobrevivir a lo que apunta. Ver la nota de la migración.
+  voucherId         String?  @map("voucher_id") @db.Uuid
 
   ticket            Ticket             @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   product           Product?           @relation(fields: [productId], references: [id])
@@ -2783,6 +3172,8 @@ model TicketLine {
   kitchenOrderLines KitchenOrderLine[]
 
   @@index([ticketId])
+  // B-reservas-8 · «¿qué líneas se cobraron con este bono?», la traza.
+  @@index([voucherId])
   @@map("ticket_lines")
 }
 
@@ -3248,7 +3639,7 @@ model Client {
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
 
-  tenant              Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant              Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   // clinica-4 · `consents` pasó a RESTRICT (S3, condición 1): un paciente
   // con un consentimiento firmado NO se borra, y ya no es «lo que se
   // puede perder con la ficha». `technicalNotes` sigue en Cascade: es
@@ -3256,6 +3647,14 @@ model Client {
   consents            ClientConsent[]
   technicalNotes      ClientTechnicalNote[]
   appointments        Appointment[]
+  // B-reservas-8 · sus bonos de sesiones. `Restrict` al otro lado: una
+  // ficha con un bono vivo NO se borra. El bono es una deuda del centro
+  // con ESA persona (el bono es de una ficha, S6) y borrar la ficha sería
+  // perder a quién se le deben las sesiones.
+  vouchers            Voucher[]
+  // B-reservas-8 · las ventas a nombre de esta ficha. `SetNull` al otro
+  // lado: borrar la ficha no borra la venta.
+  tickets             Ticket[]
   // clinica-1 · la historia del paciente, sus accesos y el registro de
   // quién la ha abierto. Las tres con RESTRICT al otro lado (y no Cascade
   // como `technicalNotes`): **un cliente con historia no se borra.** Esa
@@ -3285,6 +3684,14 @@ model Client {
   // residencia-2 · su plan de cuidados. `Restrict`: un residente con plan
   // no se borra.
   carePlanItems       CarePlanItem[]
+  /// residencia-3 · lo que se le ha registrado en la puerta. `Restrict`
+  /// al otro lado: un residente con registros de cuidado no se borra.
+  careRecords         CareRecord[]
+  /// residencia-4 · sus incidencias y las excepciones de umbral que le
+  /// pautó la médica. `Restrict` a los dos lados, por lo mismo: son
+  /// historia clínica suya.
+  incidents           Incident[]
+  thresholdOverrides  ResidentThresholdOverride[]
 
   // Búsqueda por teléfono/email y orden alfabético (A–Z) por tenant.
   @@index([tenantId, phone])
@@ -3774,7 +4181,14 @@ model Appointment {
   source        ReservationSource        @default(PRESENCIAL)
   // Sólo modo mesa (comensales). Nullable en cita.
   partySize     Int?                     @map("party_size")
-  // Canje de bono (B5, fuera de alcance en B4; sólo la columna).
+  // B-reservas-8 · EL BONO de esta cita, y desde este bloque con CLAVE
+  // AJENA de verdad (en B4 era «sólo la columna»). Puesto = esta cita
+  // tiene una sesión APARTADA de ese bono; se consume al cobrarla y se
+  // libera al anularla. **Un solo bono por cita** (S6).
+  //
+  // `SetNull`: si el bono desaparece —y el único caso real es el reseteo
+  // del ensayo, que se lleva el bono con su ticket— la cita se queda como
+  // una cita normal, que es la verdad. No se borra la cita.
   voucherId     String?                  @map("voucher_id") @db.Uuid
   // Señal cobrada (ADR-R5b; fuera de alcance en B4; sólo la columna).
   depositCents  Int?                     @map("deposit_cents")
@@ -3800,6 +4214,8 @@ model Appointment {
   tenant              Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   client              Client?                 @relation(fields: [clientId], references: [id], onDelete: SetNull)
   ticket              Ticket?                 @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  // B-reservas-8 · ver `voucherId` arriba.
+  voucher             Voucher?                @relation(fields: [voucherId], references: [id], onDelete: SetNull)
   items               AppointmentItem[]
   assignments         AppointmentAssignment[]
   // clinica-1 · las anotaciones escritas en esta cita. SET NULL al otro
@@ -3817,6 +4233,8 @@ model Appointment {
   // SQL (Prisma no expresa gist sobre Unsupported).
   @@index([tenantId, status])
   @@index([tenantId, clientId])
+  // B-reservas-8 · «¿qué citas apartaron de este bono?», la traza de la ficha.
+  @@index([tenantId, voucherId])
   @@map("appointments")
 }
 
@@ -4000,6 +4418,291 @@ model CenterDay {
   @@unique([tenantId, date])
   @@index([tenantId])
   @@map("center_days")
+}
+
+// ─── B-reservas-8 · Bonos de sesiones ───────────────────────────────────
+//
+// El libro, la puerta de canje y la sesión apartada en la cita. Todo detrás
+// de `Tenant.bonosEnabled` (404 con la columna apagada) y aislado por fila.
+//
+// ── Las tres decisiones de fondo, para que no se relean cuatro documentos
+//
+//   1. **Extiende `voucher`, NO se crea un `Program` paralelo** (D-2 del
+//      cruce con B-reservas-4). Un modelo paralelo serían dos sitios donde
+//      mirar el saldo de una clienta, dos caminos fiscales y dos formas de
+//      canjear en caja.
+//   2. **Dos pasos** (S6, 07-10): al DAR LA CITA se APARTA una sesión —no
+//      descuenta, sólo impide dar más citas de bono que sesiones quedan—; al
+//      COBRAR, lo apartado pasa a CONSUMIDO contra lo que se hizo. Nunca se
+//      consume un bono contra un servicio que no cubre.
+//   3. **Dinero y deuda van por separado** (`07` pieza 1): el bono congela
+//      su VALOR DE CARTA (lo que el centro debe) y LO COBRADO (lo que entró,
+//      que vive en el ticket). Un bono regalado vale lo de carta en
+//      sesiones. El libro no duplica el cobro: lo enlaza.
+//
+// ── Y la que se nota en cada consulta ──────────────────────────────────
+//
+// **El saldo se DERIVA del libro.** `sessionsLeft` / `sessionsReserved` son
+// columnas y no la verdad: existen porque el decremento condicionado («no
+// aparto si no queda libre») se hace con un `UPDATE … WHERE sessions_left >
+// 0` sobre la fila bloqueada, y porque la rejilla de la agenda las lee
+// cincuenta veces por pantalla. Si discrepan del libro, **manda el libro**,
+// y hay un test que recorre 200 operaciones aleatorias comprobando
+//
+//     total − consumidas − apartadas vivas = libres
+//
+// (`apps/api/test-e2e/bonos-libro.e2e.ts`).
+
+// La PLANTILLA de bono de un producto del catálogo (1:1 con `Product`).
+//
+// Qué es un bono en el catálogo (decisión de Dirección, 18-10): un producto
+// normal —precio, IVA, categoría, exención— con esta fila colgando. Venderlo
+// es añadir ese producto al ticket, así que el precio y el IVA van por el
+// camino de siempre y NO hay un segundo sitio donde se fije el precio de un
+// bono.
+//
+// `coversServiceIds` / `coversTagSlugs`: vale por SERVICIO o por CATEGORÍA
+// (S5 — la categoría es la familia, y en este TPV una categoría es un tag de
+// `Product.tags`). Los dos pueden estar poblados a la vez: cubre la unión.
+// Al vender, la cobertura se COPIA al bono y se congela, así que editar la
+// plantilla —o ocultar un servicio, o cambiarle el precio— no invalida nada
+// de lo ya vendido (`07` pieza 16, con test).
+model VoucherTemplate {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @map("tenant_id") @db.Uuid
+  // 1:1 con el producto. `Cascade`: si el producto se borra, su plantilla
+  // se va con él — los bonos YA VENDIDOS no, que llevan su propia copia.
+  productId        String   @unique @map("product_id") @db.Uuid
+  sessions         Int
+  coversServiceIds String[] @default([]) @map("covers_service_ids") @db.Uuid
+  coversTagSlugs   String[] @default([]) @map("covers_tag_slugs")
+  // Caducidad en MESES DE CALENDARIO (no 183 días: `07` pieza 18).
+  // NULL = sin caducidad. Manda sobre `Tenant.bonoCaducidadMeses`.
+  expiresMonths    Int?     @map("expires_months")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product  Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  vouchers Voucher[]
+
+  @@index([tenantId])
+  @@map("voucher_templates")
+}
+
+// EL BONO. Una deuda del centro con UNA ficha, medida en sesiones.
+//
+// `type` y `sessionsLeft` NO son invención de este bloque: son el contrato
+// que `agenda/health.ts` publicó para la tarjeta 3 («saldo vivo sin cita»,
+// `SQL_SALDO_VIVO_SIN_CITA`) y lo que el diseño cerrado ya modelaba
+// (`reservas-modulo-kickoff.md` §4). Se respetan los nombres para que esa
+// tarjeta se encienda con la migración y no haya que reescribirla.
+//
+// `amountTotalCents` / `amountLeftCents` quedan NULL y nadie los escribe en
+// este bloque: son el hueco de **B-cheques** (cheques por importe, saldos
+// `S-`), que se monta sobre este mismo libro. El CHECK
+// `vouchers_tipo_coherente` garantiza que un `SESSIONS` no los lleve y que
+// un `AMOUNT` no lleve sesiones, así que B-cheques es aditivo y no un
+// rediseño. Las señales `R-` son B-13 y tampoco se construyen aquí.
+model Voucher {
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  // OBLIGATORIO: el bono es de una ficha. Sin bonos compartidos en esta
+  // versión (S7, fuera de alcance). `Restrict`: la ficha no se borra.
+  clientId         String    @map("client_id") @db.Uuid
+  // `B<n>`, único por tenant. Es lo que se teclea en el mostrador y lo que
+  // sale impreso. Se acepta el número suelto al buscar (`B87`, `b 87`,
+  // `87`): la normalización vive en `vouchers/numero.ts`.
+  code             String
+  number           Int
+  // NULL en un bono de PAPEL dado de alta a mano («alta inicial»).
+  templateId       String?   @map("template_id") @db.Uuid
+  // SESSIONS (todo lo de este bloque) | AMOUNT (B-cheques).
+  type             String    @default("SESSIONS")
+  // Lo que se vendió. No se edita: se corrige con una línea del libro.
+  sessionsTotal    Int       @map("sessions_total")
+  // DERIVADAS del libro, guardadas (ver la nota de la cabecera). `libres`
+  // y `apartadas vivas`.
+  sessionsLeft     Int       @map("sessions_left")
+  sessionsReserved Int       @default(0) @map("sessions_reserved")
+  // B-cheques. NULL en un bono de sesiones (CHECK).
+  amountTotalCents Int?      @map("amount_total_cents")
+  amountLeftCents  Int?      @map("amount_left_cents")
+  // La COBERTURA CONGELADA: copia de la plantilla en el momento de vender.
+  // Ocultar o cambiar de precio un servicio no invalida bonos vendidos.
+  coversServiceIds String[]  @default([]) @map("covers_service_ids") @db.Uuid
+  coversTagSlugs   String[]  @default([]) @map("covers_tag_slugs")
+  // Cómo se llama de cara al mostrador («Bono 5 quiropodias»). Snapshot,
+  // igual que `TicketLine.nameSnapshot`: renombrar el producto mañana no
+  // reescribe lo que la clienta compró.
+  nameSnapshot     String    @map("name_snapshot")
+  // DINERO Y DEUDA, separados (`07` pieza 1):
+  //   · `valorCartaCents` — lo que el centro DEBE. Es lo que vale el bono
+  //     en sesiones aunque se vendiera con descuento o se regalara.
+  //   · `cobradoCents`    — lo que ENTRÓ. Es un espejo del ticket, no una
+  //     segunda contabilidad: el cobro es el ticket y aquí se enlaza.
+  valorCartaCents  Int       @map("valor_carta_cents")
+  cobradoCents     Int       @map("cobrado_cents")
+  // La venta. NULL en un alta inicial (bono de papel, sin ticket).
+  // `Cascade`: el bono de un ticket `TEST` se va con su ticket en el
+  // reseteo del ensayo.
+  soldTicketId     String?   @map("sold_ticket_id") @db.Uuid
+  // La LÍNEA concreta de esa venta. FK dura en SQL, SIN relación Prisma
+  // (mismo criterio que `appointment_items_service_id_fkey`: no inflar
+  // back-refs en `TicketLine` por un puntero de auditoría).
+  soldTicketLineId String?   @map("sold_ticket_line_id") @db.Uuid
+  // El INSTANTE en que deja de valer, EXCLUSIVO: el arranque del día
+  // siguiente al último día bueno, en hora del centro. Así «caduca el 28
+  // de febrero» incluye el 28 entero (`07` pieza 18) sin guardar horas de
+  // pared. Lo que se PINTA se deriva (`vouchers/caducidad.ts::diaDeCaducidad`).
+  // NULL = sin caducidad, que es el default.
+  expiresAt        DateTime? @map("expires_at") @db.Timestamptz()
+  // ACTIVO | AGOTADO | CADUCADO | ANULADO. Lo caducado NO se borra: queda
+  // en el libro y en la ficha.
+  status           String    @default("ACTIVO")
+  // VENTA | ALTA_INICIAL (el bono de papel que se da de alta a mano).
+  origen           String
+  // `07` pieza 17 · lo de PRUEBA se marca, no se borra. Sale de la ficha y
+  // de los informes de gestión. No se confunde con `Tenant.esDePruebas`
+  // (cuenta entera) ni con el ensayo de puesta-en-marcha: un bono vendido
+  // en un ticket `TEST` nace `esPrueba = true` y el reseteo se lo lleva.
+  esPrueba         Boolean   @default(false) @map("es_prueba")
+  createdAt        DateTime  @map("created_at") @db.Timestamptz()
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant       Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client       Client            @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  template     VoucherTemplate?  @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  soldTicket   Ticket?           @relation(fields: [soldTicketId], references: [id], onDelete: Cascade)
+  movements    VoucherMovement[]
+  // Las citas que apartaron una sesión de este bono.
+  appointments Appointment[]
+
+  @@unique([tenantId, code])
+  @@unique([tenantId, number])
+  // La consulta de la ficha y la de «¿tiene esta clienta un bono que cubra
+  // esto?», que es la que corre al dar cada cita.
+  @@index([tenantId, clientId, status])
+  @@index([tenantId, status])
+  @@map("vouchers")
+}
+
+// EL LIBRO. Solo inserción: nada se edita ni se borra.
+//
+// Lo garantiza el trigger `voucher_movements_append_only` de la migración,
+// con el mismo patrón que `fiscal_records` y `client_consents`. Se corrige
+// con una línea CONTRARIA enlazada (`compensaA`) y su motivo.
+//
+// ── EL SIGNO de `sesiones`, que es la pieza que hay que entender ───────
+//
+// `sesiones` es el efecto de la línea sobre **las sesiones LIBRES**, así que
+//
+//     libres = SUM(sesiones)   -- sobre TODO el libro del bono
+//
+// es una sola suma y no se puede escribir mal. De ahí sale el resto:
+//
+//   · `VENDIDO` / `ALTA_INICIAL` → `+N` (entra el bono entero)
+//   · `APARTADA`                → `-1` (deja de estar libre, no se gasta)
+//   · `LIBERADA`                → `+1` (vuelve a estar libre)
+//   · `CONSUMIDA` con cita      → ` 0` (la sesión salió de libres al
+//                                  apartarse: aquí sólo pasa de APARTADA a
+//                                  CONSUMIDA, y libres no lo ve)
+//   · `CONSUMIDA` sin cita      → `-1` (el canje en caja sin agenda, que no
+//                                  pasa por APARTADA)
+//   · `CORRECCION`              → `±N`
+//   · `ANULADO`                 → `-libres` (devolver la venta; sólo se
+//                                  puede sin nada consumido ni apartado,
+//                                  así que lleva el total a cero)
+//   · `CADUCIDAD_CAMBIADA`      → ` 0`
+//
+// El CHECK `voucher_movements_signo_por_tipo` **obliga** a este convenio en
+// la base, incluida la equivalencia «CONSUMIDA vale 0 ⟺ tiene cita». No es
+// documentación: es la razón por la que el invariante no puede desalinearse
+// sin que la base lo rechace.
+//
+// ── Por qué `appointmentId` y `ticketLineId` NO llevan clave ajena ─────
+//
+// Porque un libro de solo inserción tiene que sobrevivir a lo que apunta.
+// Una FK `ON DELETE SET NULL` sería un UPDATE sobre la fila y el propio
+// trigger lo rechazaría; una `RESTRICT` dejaría al borrado del tenant
+// dependiendo del orden de las cascadas. Son punteros de auditoría, y el
+// único que los escribe es la puerta (`vouchers/gate.ts`).
+model VoucherMovement {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  voucherId     String   @map("voucher_id") @db.Uuid
+  // VENDIDO | ALTA_INICIAL | APARTADA | LIBERADA | CONSUMIDA | CORRECCION |
+  // CADUCIDAD_CAMBIADA | ANULADO. Texto con CHECK y no enum: B-cheques y
+  // B-13 añaden tipos, y un enum de Postgres parte la migración en dos.
+  tipo          String
+  sesiones      Int
+  appointmentId String?  @map("appointment_id") @db.Uuid
+  ticketLineId  String?  @map("ticket_line_id") @db.Uuid
+  // La línea que ESTA compensa. Una línea ya compensada no se compensa dos
+  // veces (lo comprueba la ruta, no la base: hace falta ver el libro).
+  compensaA     String?  @map("compensa_a") @db.Uuid
+  // La frase que LEE RECEPCIÓN («Apartada para la cita del 3-nov 10:30»).
+  // Distinta del `motivo`, que es por qué se corrige. Nunca vacía.
+  detalle       String
+  // Lista cerrada: `error_venta | cortesia | ajuste_alta_inicial | otro`.
+  // Obligatorio en `CORRECCION` y `CADUCIDAD_CAMBIADA` (CHECK). Con `otro`
+  // la nota va en `detalle` y es obligatoria — **sin mínimo de caracteres
+  // oculto**, que bloqueó una invitación real en el spa (`07` pieza 5).
+  motivo        String?
+  // tpv | panel | web | migracion.
+  canal         String
+  // Quién. `userId` para una persona del centro; `actor` para «Web» o
+  // «Migración». Uno de los dos, siempre (CHECK).
+  userId        String?  @map("user_id") @db.Uuid
+  actor         String?
+  esPrueba      Boolean  @default(false) @map("es_prueba")
+  // UTC DESDE EL CÓDIGO, sin `now()` de Postgres: el negocio razona en hora
+  // del centro y nada del dominio se fecha con el reloj del servidor de
+  // base de datos (regla del bloque y de `05` §8.6).
+  createdAt     DateTime @map("created_at") @db.Timestamptz()
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  voucher Voucher @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+
+  // El libro de un bono, en orden. `id` desempata: dos líneas del mismo
+  // milisegundo (apartar y consumir en la misma transacción) tienen que
+  // salir siempre en el mismo orden.
+  @@index([voucherId, createdAt, id])
+  @@index([tenantId, createdAt])
+  // La idempotencia de `consumir` / `liberar` se decide leyendo el libro
+  // por cita, así que esta consulta corre en cada cobro.
+  @@index([tenantId, appointmentId])
+  @@map("voucher_movements")
+}
+
+// El CONTADOR de la numeración de bonos, uno por tenant.
+//
+// Tres reglas, y las tres salieron del spa (`07` pieza 8):
+//
+//   1. **Atómico y sin huecos**: `UPDATE … SET ultimo = ultimo + 1
+//      RETURNING` dentro de la transacción de la venta. Un ticket que no se
+//      cobra no gasta número porque el bono nace al pasar a `PAID`.
+//   2. **Se SALTA un número que ya exista**: el spa se encontró un número
+//      que había llegado desde dev. El bucle vive en
+//      `vouchers/numero.ts::siguienteNumero`.
+//   3. **Candado de primer uso**: con `arranque` a NULL no se emite ningún
+//      bono. El encargado confirma en Ajustes por qué número empieza —los
+//      centros con talonario de papel siguen su numeración— y eso pone el
+//      candado a cero.
+model VoucherSequence {
+  tenantId             String    @id @map("tenant_id") @db.Uuid
+  // Último número EMITIDO. 0 = ninguno todavía.
+  ultimo               Int       @default(0)
+  // NULL = CANDADO PUESTO: no se emite nada. Confirmado = el número por el
+  // que empieza el talonario de este centro.
+  arranque             Int?
+  arranqueConfirmadoAt DateTime? @map("arranque_confirmado_at") @db.Timestamptz()
+  arranqueConfirmadoBy String?   @map("arranque_confirmado_by") @db.Uuid
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("voucher_sequence")
 }
 
 // A3-distribución · código de un solo uso (bueno, de tres) para descargar la
@@ -5320,19 +6023,19 @@ model ResidentProfile {
 
   /// Cuándo ingresó. `@db.Date` y no timestamp: nadie apunta la hora del
   /// ingreso y pedirla sería un campo que se rellena mal.
-  admissionDate   DateTime  @map("admission_date") @db.Date
+  admissionDate          DateTime  @map("admission_date") @db.Date
   /// Cuándo se le dio de alta, y por qué. NULL en quien sigue viviendo
   /// aquí. El motivo es texto corto y libre a propósito: «se va con su
   /// hija», «traslado a hospital», «fallecimiento». Un enum habría
   /// obligado a elegir mal el día que no encaja ninguno, y esto no
   /// alimenta ninguna estadística en la v1.
-  dischargeDate   DateTime? @map("discharge_date") @db.Date
-  dischargeReason String?   @map("discharge_reason")
+  dischargeDate          DateTime? @map("discharge_date") @db.Date
+  dischargeReason        String?   @map("discharge_reason")
   /// residencia-1b · «fallecimiento», «traslado al hospital por ictus»
   /// caben enteros en ese texto libre, así que desde este bloque va
   /// cifrado. El CHECK `resident_profiles_alta_coherente` mira LAS DOS
   /// columnas: un motivo, en claro o cifrado, sigue exigiendo fecha.
-  dischargeReasonCifrado String? @map("discharge_reason_cifrado")
+  dischargeReasonCifrado String?   @map("discharge_reason_cifrado")
 
   /// Cuánta ayuda necesita (lo decide el centro) y el grado reconocido de
   /// la Ley de Dependencia (lo reconoce la administración, y puede no
@@ -5366,11 +6069,41 @@ model ResidentProfile {
   dniCifrado String? @map("dni_cifrado")
   nssCifrado String? @map("nss_cifrado")
 
+  /// ── residencia-3 (D-64) · LA FOTO DEL RESIDENTE ───────────────────
+  ///
+  /// La pidió Matías para el mockup de la puerta: ayuda a la suplente y a
+  /// quien no conoce a cada residente, que en una planta de 25 personas y
+  /// con rotación de turnos es la mitad de la plantilla.
+  ///
+  /// El JPEG vive en el **volumen clínico**, cifrado con cabecera `MPC1` y
+  /// con la huella del claro, igual que una foto clínica (clinica-4
+  /// decisión 11, clinica-7 decisión 8): fuera de Postgres y fuera de todo
+  /// lo que se sirve en estático. Una cara servida por Caddy con una URL
+  /// difícil de adivinar es una cara pública.
+  ///
+  /// **Y sólo se sirve con consentimiento de imagen vigente**
+  /// (`ClientConsentKind.IMAGE`). En un pasillo la foto la ve cualquiera
+  /// que pase, de ahí el consentimiento; sin él, la puerta pinta las
+  /// iniciales en el mismo hueco.
+  ///
+  /// Las seis columnas van juntas o ninguna (CHECK
+  /// `resident_profiles_foto_completa`). Y **se reemplaza, no se
+  /// versiona**: la cara de alguien es identidad (como `firstName`), no
+  /// historia — nadie tiene que poder reconstruir qué foto tenía en marzo.
+  photoFileName     String?   @map("photo_file_name") @db.VarChar(100)
+  photoSha256       String?   @map("photo_sha256") @db.Char(64)
+  photoBytes        Int?      @map("photo_bytes")
+  photoMimeType     String?   @map("photo_mime_type") @db.VarChar(40)
+  photoUploadedAt   DateTime? @map("photo_uploaded_at") @db.Timestamptz()
+  photoUploadedById String?   @map("photo_uploaded_by_user_id") @db.Uuid
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
 
-  client Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client          Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  /// `SetNull`: dar de baja a quien subió la foto no borra la foto.
+  photoUploadedBy User?  @relation("ResidentPhotoUploadedBy", fields: [photoUploadedById], references: [id], onDelete: SetNull)
+  tenant          Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@index([tenantId])
   /// «Los que viven aquí hoy», que es la lista por defecto de la pantalla
@@ -5434,6 +6167,10 @@ model Room {
   /// emparejar.
   devices      Device[]
   pairingCodes PairingCode[]
+  /// residencia-4 · las incidencias declaradas desde la puerta de esta
+  /// habitación. `SetNull`: retirar una habitación no borra lo que pasó
+  /// dentro, pero tampoco impide retirarla.
+  incidents    Incident[]
 
   @@unique([tenantId, number])
   @@index([tenantId])
@@ -5493,15 +6230,15 @@ model BedAssignment {
   /// que miran los dos índices parciales. Los nombres de columna son
   /// `from_at`/`to_at` y no `from`/`to` porque las dos palabras son
   /// reservadas en SQL y quedarían entre comillas en cada consulta a mano.
-  fromAt DateTime  @map("from_at") @db.Timestamptz()
-  toAt   DateTime? @map("to_at") @db.Timestamptz()
+  fromAt        DateTime  @map("from_at") @db.Timestamptz()
+  toAt          DateTime? @map("to_at") @db.Timestamptz()
   /// Por qué se abrió o se cerró. Texto corto: «ingreso», «cambio a la
   /// 112», «alta». No alimenta nada automático.
-  reason String?
+  reason        String?
   /// residencia-1b (D-63) · y cifrado, porque ahí es donde se escribe
   /// «aislamiento por GEA» o «se cae de la cama». La ubicación en sí
   /// (planta, habitación, cama) sigue en claro: es del centro.
-  reasonCifrado String? @map("reason_cifrado")
+  reasonCifrado String?   @map("reason_cifrado")
 
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
   createdByUserId String?  @map("created_by_user_id") @db.Uuid
@@ -5627,6 +6364,22 @@ model CareRoleAssignment {
   grantedBy User?    @relation("CareRoleAssignmentGrantedBy", fields: [grantedByUserId], references: [id], onDelete: SetNull)
   revokedBy User?    @relation("CareRoleAssignmentRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
 
+  /// residencia-3 · lo que se firmó CON ESTA CAPACIDAD (D-31). `Restrict`
+  /// al otro lado, que es la razón por la que una asignación no se borra
+  /// nunca: es la mitad de la firma.
+  careRecords              CareRecord[]
+  /// residencia-4 · y lo que se abrió, cerró, hizo, comunicó, acusó y
+  /// pautó con ella. Todo `Restrict`, por lo mismo: «lo cerró Ana Isabel»
+  /// no es evidencia; «lo cerró Ana Isabel, como responsable de calidad»
+  /// sí (rama de controles §8).
+  incidentsOpened          Incident[]                  @relation("IncidentOpenedWith")
+  incidentsClosed          Incident[]                  @relation("IncidentClosedWith")
+  incidentActions          IncidentAction[]
+  familyCommunications     FamilyCommunication[]
+  guardAlertsAcked         GuardAlert[]                @relation("GuardAlertAckedWith")
+  guardShiftSessions       GuardShiftSession[]
+  thresholdOverridesSigned ResidentThresholdOverride[]
+
   @@index([tenantId])
   @@index([tenantId, userId])
   @@index([careRoleId])
@@ -5700,7 +6453,16 @@ model CenterShift {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// residencia-3 · los registros adscritos a este turno. `Restrict` al
+  /// otro lado: residencia-1 dejó dicho (decisión 8 de su done) que un
+  /// turno se podía borrar «porque nada apunta todavía a un turno». Ya
+  /// apunta algo, y es el histórico firmado.
+  careRecords        CareRecord[]
+  /// residencia-4 · y las incidencias y los turnos de guardia adscritos.
+  /// `Restrict` por lo mismo.
+  incidents          Incident[]
+  guardShiftSessions GuardShiftSession[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -5903,8 +6665,13 @@ model ControlType {
   /// `Cascade` al tenant y sólo alcanza a los `CENTER`: los `STANDARD` no
   /// tienen tenant y no los borra nadie. Un control propio de un centro
   /// que se da de baja se va con él, igual que sus plantas.
-  tenant  Tenant?             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  options ControlTypeOption[]
+  tenant      Tenant?             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  options     ControlTypeOption[]
+  /// residencia-3 · lo registrado CON ESTA VERSIÓN (decisión 2).
+  /// `Restrict` al otro lado: una versión con registros no se borra,
+  /// porque es lo que contesta «¿qué decía el catálogo cuando se apuntó
+  /// esto?».
+  careRecords CareRecord[]
 
   @@index([scope, code])
   @@index([tenantId])
@@ -6234,15 +7001,1051 @@ model CarePlanItem {
   /// `Restrict` al tenant y al residente, igual que `BedAssignment`: el
   /// plan de una persona es parte de lo que se conserva cinco años, y un
   /// residente con plan no se borra.
-  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  client    Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client      Client       @relation(fields: [clientId], references: [id], onDelete: Restrict)
   /// `SetNull` en las dos personas: dar de baja a la DUE que ajustó el
   /// plan no puede borrar el hecho de que lo ajustó.
-  createdBy User?  @relation("CarePlanItemCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  closedBy  User?  @relation("CarePlanItemClosedBy", fields: [closedByUserId], references: [id], onDelete: SetNull)
+  createdBy   User?        @relation("CarePlanItemCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  closedBy    User?        @relation("CarePlanItemClosedBy", fields: [closedByUserId], references: [id], onDelete: SetNull)
+  /// residencia-3 · los registros que esta línea pidió. `Restrict`: una
+  /// línea con registros tampoco se borra — y de todas formas una línea
+  /// nunca se borra, se cierra (residencia-2 §6).
+  careRecords CareRecord[]
 
   @@index([tenantId])
   @@index([tenantId, clientId])
   @@index([clientId, controlCode])
   @@map("care_plan_items")
+}
+
+/// residencia-3 (decisión de producto 1) · **EL REGISTRO DE CUIDADOS. LA
+/// EVIDENCIA.**
+///
+/// Una fila = **una cosa registrada** de un residente: un «hecho», un
+/// valor ordinal, el «como siempre» de una dimensión, un «a demanda» que
+/// sólo se cuenta, o una nota de «algo no va bien». Es lo que sostiene la
+/// hoja de cambios posturales que hoy se reconstruye a mano para AENOR, y
+/// es historia clínica a todos los efectos (D-45, D-51).
+///
+/// ── INMUTABLE, y lo dice el motor ───────────────────────────────────
+///
+/// No se edita y no se borra: el trigger `care_records_inmutable` deja
+/// pasar **una sola** transición en un `UPDATE` —la anulación, de NULL a
+/// puesta— y nada más. Es la misma regla que `clinical_entries` en
+/// clinica-1, con la escapatoria legítima que aquella no necesitaba.
+///
+///   · **Corregir** crea OTRA fila que apunta a la corregida
+///     (`correctsRecordId`). La corregida se queda donde está.
+///   · **Deshacer el último** rellena `voidedAt` / `voidedByUserId`: anula
+///     sin borrar, y se sigue viendo quién lo apuntó y quién lo deshizo.
+///
+/// ── EL ID LO GENERA LA TABLET, y eso es dos cosas a la vez ──────────
+///
+///   1. La **idempotencia** del envío por lotes (decisión 5): el mismo
+///      uuid dos veces es la misma fila, y una tablet que reintenta un
+///      lote con el wifi a medias no duplica un cuidado.
+///   2. El **AAD** del valor cifrado (decisión 6, clinica-7 §3): el sitio
+///      es `tenant|care_records|value|<id>`, así que el valor de una fila
+///      no se puede mover a otra. Y el id hay que saberlo antes de
+///      insertar, que es justo lo que la tablet ya sabe.
+///
+/// De ahí que NO lleve `@default(uuid())`: lo pone quien escribe, y en la
+/// puerta quien escribe es la tablet.
+///
+/// ── QUÉ VA EN CLARO Y QUÉ VA CIFRADO (decisión 6, D-63) ─────────────
+///
+/// Cifrado: **el valor** y **el texto de la nota**, en dos columnas
+/// lógicas distintas con su `sitio*` (un texto de nota copiado a la
+/// columna del valor no descifra). La nota de VOZ va cifrada como fichero
+/// en el volumen clínico, con cabecera `MPC1` como las fotos.
+///
+/// En claro, y declarado: `controlTypeId`, `controlCode`, el residente, los
+/// dos instantes, el turno, el día, la firma y el estado de anulación.
+/// Sostienen «qué falta por hacer», el relevo y los indicadores — igual
+/// que `care_plan_items.control_code` (residencia-1b §2). Y la
+/// consecuencia también es la misma: un `SELECT` sigue diciendo QUÉ se le
+/// registra a un residente y cuándo, no CUÁNTO ni CÓMO está.
+model CareRecord {
+  /// Generado en la TABLET. Ver la cabecera.
+  id       String @id @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  clientId String @map("client_id") @db.Uuid
+
+  /// La **versión** del `ControlType` con la que se registró (decisión 2,
+  /// residencia-2 §1). «¿Qué rango de referencia tenía esto cuando se
+  /// apuntó?» se contesta tres años después, que es lo que pregunta una
+  /// auditoría.
+  controlTypeId String @map("control_type_id") @db.Uuid
+  /// Y su código, EN CLARO. Es la identidad del control a través de las
+  /// versiones, y es con lo que la puerta cruza «lo que toca» con «lo que
+  /// ya está hecho» sin descifrar nada.
+  controlCode   String @map("control_code")
+
+  /// La línea del plan que lo pidió. NULL en lo `ON_DEMAND` (el botón «+
+  /// Deposición» no cuelga de una ocurrencia) y en la nota de «algo no va
+  /// bien», que no está en el plan de nadie.
+  planItemId String? @map("plan_item_id") @db.Uuid
+
+  /// **A QUÉ MOMENTO DEL PLAN responde.** Es lo que hace que tres cambios
+  /// posturales de un mismo turno sean tres cosas y no una repetida.
+  ///
+  ///   · lo que «toca» → el instante que devolvió `queToca`;
+  ///   · la observación diaria («¿cómo está hoy?») → **NULL**, porque se
+  ///     pregunta una vez por residente y turno, no por ocurrencia. De ahí
+  ///     sale «una vez por residente y turno» de la decisión 4;
+  ///   · lo `ON_DEMAND` → el instante del propio registro, porque no
+  ///     cuelga de ninguna agenda y su momento es cuando ocurrió. Así dos
+  ///     deposiciones del mismo turno son dos.
+  ///
+  /// Sostiene el índice único PARCIAL `care_records_una_por_ocurrencia_key`
+  /// de la migración, que Prisma no sabe declarar: la clave es
+  /// `(residente, control, día, turno, ocurrencia)` sólo sobre las filas
+  /// que NO son correcciones, con `COALESCE` en las dos nullable porque en
+  /// Postgres los NULL son distintos entre sí.
+  occurrenceAt DateTime? @map("occurrence_at") @db.Timestamptz()
+
+  /// **EL VALOR, CIFRADO.** JSON serializado:
+  /// `{"tipo":"BOOL","hecho":true}`, `{"tipo":"ORDINAL","opcion":"MITAD"}`,
+  /// `{"tipo":"ORDINAL","opcion":"COMO_SIEMPRE","comoSiempre":true}`,
+  /// `{"tipo":"CONTEO"}`, `{"tipo":"NOTA"}`.
+  ///
+  /// NOT NULL: todo registro tiene valor, también el «a demanda» (su valor
+  /// es que ocurrió) y la nota sin texto (D-13: «algo no va bien» a secas
+  /// es un registro completo). Su CHECK de formato sólo admite `c1:…`: el
+  /// claro NO CABE.
+  valueCifrado String  @map("value_cifrado")
+  /// El texto corto de «algo no va bien», cifrado. Columna lógica propia.
+  noteCifrado  String? @map("note_cifrado")
+
+  /// ── La nota de VOZ (decisión 10) ──────────────────────────────────
+  ///
+  /// Fichero en el volumen clínico, cifrado con cabecera `MPC1` y con la
+  /// huella **del claro**, igual que una foto clínica. Las cuatro columnas
+  /// van juntas o ninguna (CHECK `care_records_voz_completa`): media nota
+  /// de voz es una fila que dice que hay un audio que no se puede servir.
+  ///
+  /// Transcribirla y descartar el audio es ia-1 (ADR-02).
+  voiceFileName String? @map("voice_file_name") @db.VarChar(100)
+  voiceSha256   String? @map("voice_sha256") @db.Char(64)
+  voiceBytes    Int?    @map("voice_bytes")
+  voiceMimeType String? @map("voice_mime_type") @db.VarChar(40)
+
+  /// ── LA FIRMA: persona + CAPACIDAD (decisión 2, D-31) ──────────────
+  ///
+  /// No basta con quién: hace falta **con qué rol de cuidado entró**. Una
+  /// misma persona puede ser TO y Calidad (residencia-1 §4), y lo que
+  /// firma no es la persona a secas sino la persona en una capacidad.
+  recordedByUserId     String @map("recorded_by_user_id") @db.Uuid
+  careRoleAssignmentId String @map("care_role_assignment_id") @db.Uuid
+  /// Y desde qué tablet. NOT NULL: en este bloque todo lo que escribe aquí
+  /// entra por una puerta.
+  deviceId             String @map("device_id") @db.Uuid
+
+  /// ── LOS DOS INSTANTES (decisión 5) ────────────────────────────────
+  ///
+  /// `recordedAt` es el de la TABLET: cuándo ocurrió el cuidado. Es el que
+  /// manda para el turno y para el histórico, y el servidor lo acepta
+  /// dentro de límites (`residencia/registro.ts`).
+  /// `receivedAt` es cuándo llegó al servidor. Con la red caída los dos se
+  /// separan horas, y las dos preguntas —«¿cuándo se le giró?» y «¿cuándo
+  /// lo supimos?»— tienen respuesta.
+  recordedAt DateTime @map("recorded_at") @db.Timestamptz()
+  receivedAt DateTime @default(now()) @map("received_at") @db.Timestamptz()
+
+  /// ── EL TURNO (decisión 3, D-54) ───────────────────────────────────
+  ///
+  /// Calculado EN LA TABLET con `turnoDe` y los turnos que trajo el
+  /// arranque, porque sin red el servidor no puede contestarlo.
+  ///
+  /// **NULL es legítimo**: los turnos del centro pueden no cubrir la hora,
+  /// y entonces el registro se guarda SIN turno y se pinta como aviso.
+  /// Rechazarlo sería perder un cuidado que se hizo — residencia-1 §11.5,
+  /// que es el «cobrar siempre se puede» de este módulo.
+  centerShiftId String? @map("center_shift_id") @db.Uuid
+  /// El día del CENTRO al que se adscribe, «YYYY-MM-DD». NOT NULL.
+  ///
+  /// No es la fecha de `recordedAt`: es la del **día del turno**. El turno
+  /// de noche cruza medianoche, así que lo registrado a las 02:00 del
+  /// martes pertenece a la noche del lunes — y sin esta columna, «lo que
+  /// se hizo en este turno» partiría la ronda de la madrugada en dos días.
+  /// Lo calcula `diaDelTurno` del paquete puro, en la tablet.
+  careDay       String  @map("care_day") @db.VarChar(10)
+
+  /// ── Corrección y anulación (decisión 1) ───────────────────────────
+  ///
+  /// `correctsRecordId` apunta a la fila que esta corrige. **Único**: dos
+  /// filas corrigiendo a la misma dejarían «cuál es el valor de ahora» sin
+  /// respuesta, y la puerta tendría que elegir.
+  correctsRecordId String?   @map("corrects_record_id") @db.Uuid
+  /// Anulada: con autor y hora, sin borrarse. Las dos juntas o ninguna
+  /// (CHECK `care_records_anulacion_completa`).
+  voidedAt         DateTime? @map("voided_at") @db.Timestamptz()
+  voidedByUserId   String?   @map("voided_by_user_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  /// `Restrict` en todo lo que dice QUÉ se registró y QUIÉN lo firmó: es
+  /// la evidencia, y se conserva cinco años (Ley 41/2002, D-45).
+  tenant             Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client             Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  controlType        ControlType        @relation(fields: [controlTypeId], references: [id], onDelete: Restrict)
+  planItem           CarePlanItem?      @relation(fields: [planItemId], references: [id], onDelete: Restrict)
+  recordedBy         User               @relation("CareRecordRecordedBy", fields: [recordedByUserId], references: [id], onDelete: Restrict)
+  careRoleAssignment CareRoleAssignment @relation(fields: [careRoleAssignmentId], references: [id], onDelete: Restrict)
+  device             Device             @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  /// residencia-1 (decisión 8 de su done) dejó dicho que el `CareRecord`
+  /// pondría su FK `Restrict` al turno. Aquí está: un turno con registros
+  /// adscritos ya no se puede borrar, porque es el vocabulario con el que
+  /// está firmado el histórico.
+  centerShift        CenterShift?       @relation(fields: [centerShiftId], references: [id], onDelete: Restrict)
+  corrige            CareRecord?        @relation("CareRecordCorrige", fields: [correctsRecordId], references: [id], onDelete: Restrict)
+  corregidaPor       CareRecord[]       @relation("CareRecordCorrige")
+  voidedBy           User?              @relation("CareRecordVoidedBy", fields: [voidedByUserId], references: [id], onDelete: Restrict)
+  /// residencia-4 · la incidencia que esta medida ABRIÓ (si cruzó umbral)
+  /// y las veces que se adjuntó como EVIDENCIA a una que ya estaba
+  /// abierta. `Restrict` a los dos lados: la medida es la prueba de por
+  /// qué se abrió, y sin ella la incidencia no se puede leer.
+  incidentsOpened    Incident[]         @relation("IncidentSourceRecord")
+  incidentActions    IncidentAction[]
+
+  @@unique([correctsRecordId])
+  @@index([tenantId])
+  /// «Lo registrado hoy de este residente», que es lo que la puerta pide
+  /// al abrirse y lo que la ficha del admin enseña.
+  @@index([tenantId, clientId, careDay])
+  /// «Lo registrado hoy en el centro»: el relevo y el panel (residencia-5).
+  @@index([tenantId, careDay])
+  /// Y el cruce con «lo que toca», que es por control.
+  @@index([clientId, controlCode, careDay])
+  @@map("care_records")
+}
+
+/// residencia-3 (decisión de producto 8) · **EL PIN DE LA PUERTA.**
+///
+/// La credencial con la que alguien entra en la tablet de una habitación.
+/// Es **otra** que el PIN del TPV (`User.pinHash`) y eso es a propósito:
+///
+///   · el PIN del TPV abre el cajón y cobra; éste **firma registros de
+///     salud**. Dos cosas distintas no comparten secreto.
+///   · una auxiliar de Jardín de Gredos no es `CASHIER` ni entra al TPV, y
+///     el login de cajero exige `role IN (OWNER, MANAGER, CASHIER,
+///     CLINICIAN)`. Colgar la puerta de aquél habría dejado fuera a media
+///     plantilla o habría obligado a tocar `UserRole`, que es justo lo que
+///     D-50 saca de en medio.
+///   · en un centro sin caja —el cliente cero— éste es el ÚNICO PIN, así
+///     que no hay dos que recordar.
+///
+/// ── Por qué hay DOS columnas y no una ───────────────────────────────
+///
+/// El mockup validado (D-64) pide **sólo el PIN**: ni email, ni elegir
+/// nombre de una lista. Así que con el PIN hay que ENCONTRAR a la persona,
+/// y buscarla probando argon2id contra los veinte de la plantilla son
+/// cinco segundos y 1,3 GB de memoria por intento. No se puede.
+///
+///   · `pinLookup` — la **huella de búsqueda**: HMAC-SHA256 de
+///     `puerta-pin|<tenant>|<pin>` con una subclave derivada de la DEK del
+///     centro (`huellaDePinDePuerta`, `clinica/cripto.ts`). Es única por
+///     centro, así que la encuentra UNA consulta indexada y de paso el
+///     motor impide que dos personas del mismo centro tengan el mismo PIN
+///     — sin eso, «sólo el PIN» no identificaría a nadie.
+///   · `pinHash` — argon2id, la credencial de verdad, verificada sólo
+///     contra la fila que la huella encontró. Una huella falsificada en la
+///     base no abre nada.
+///
+/// La huella **se deriva de la DEK**, que vive envuelta por la
+/// `CLINICAL_KEK` del entorno: con una copia de la base y sin la KEK no se
+/// puede calcular ni invertir. Si estuviera salada con un valor de la
+/// propia base, cuatro cifras son diez mil pruebas instantáneas. Y
+/// destruir la DEK del centro (art. 28.3.g) apaga también el PIN de sus
+/// puertas, que es lo correcto: la relación terminó.
+model CarePin {
+  userId   String @id @map("user_id") @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  /// argon2id del PIN. **Nunca sale de la API**, ni a la tablet.
+  pinHash   String @map("pin_hash")
+  /// La huella de búsqueda. Ver la cabecera. Esta SÍ viaja a la tablet en
+  /// el paquete de arranque, que es lo que le permite resolver el PIN SIN
+  /// RED (igual que el roster de `offlineAuth` en el TPV).
+  pinLookup String @map("pin_lookup")
+
+  setAt       DateTime @default(now()) @map("set_at") @db.Timestamptz()
+  /// Quién se lo puso. `SetNull`: dar de baja a la dirección no borra el
+  /// hecho de que lo puso.
+  setByUserId String?  @map("set_by_user_id") @db.Uuid
+
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  /// `Cascade` al usuario y al tenant: es una CREDENCIAL, no evidencia. Lo
+  /// que no se borra es lo que esa persona firmó, y eso lo impide
+  /// `care_records_recorded_by_user_id_fkey`.
+  user   User   @relation("CarePinUser", fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  setBy  User?  @relation("CarePinSetBy", fields: [setByUserId], references: [id], onDelete: SetNull)
+
+  /// «Un PIN, una persona» DENTRO del centro. Es lo que hace que teclear
+  /// cuatro cifras identifique a alguien.
+  @@unique([tenantId, pinLookup])
+  @@index([tenantId])
+  @@map("care_pins")
+}
+
+// ══ residencia-4 · gravedad, incidencias y el aviso que sí llega ══════
+//
+// Lo que este bloque construye es la CONSECUENCIA de lo que residencia-3
+// dejó apuntado: una constante que cruza un umbral declara una incidencia
+// sola, le pone nivel y hace sonar un móvil. Y un libro —uno solo, con el
+// sujeto como atributo (D-35)— donde eso queda con su cierre, sus
+// acciones y lo que se le dijo a la familia.
+//
+// ── Las seis familias y en qué orden se leen ─────────────────────────
+//
+//   1. `SeverityRule`               — LA PLANTILLA (D-65). Dato del
+//      producto, versionado. Un centro no la toca.
+//   2. `ResidentThresholdOverride`  — la excepción por residente (D-22),
+//      + `ResidentThresholdRule`: lo único que puede cambiar un umbral, y
+//      sólo un `MEDICO`, firmado y con vigencia.
+//   3. `Incident` + `IncidentLink`  — el libro único (D-35, D-38).
+//   4. `IncidentAction`             — qué se hizo. Append-only.
+//   5. `FamilyCommunication`        — comunicado / no comunicado (D-32 a
+//      D-34). Dimensión aparte del nivel.
+//   6. `GuardAlert` + `GuardShiftSession` + `CenterGuardSetting` — el
+//      aviso (D-19, D-66): a quién suena, quién lleva el móvil y en
+//      cuántos minutos escala.
+//
+// ── LO QUE VA CIFRADO Y LO QUE NO (D-63) ─────────────────────────────
+//
+// Nacen cifrados: la DESCRIPCIÓN de la incidencia, el TEXTO de cada
+// acción, el CONTENIDO de la comunicación a familia (y la respuesta) y el
+// MOTIVO de la excepción de umbral. Cinco columnas lógicas más; son
+// veintidós en la casa.
+//
+// Y en claro, DECLARADO: sujeto, tipo, origen, nivel, estado, instantes,
+// residente, firmantes, canal y acuses. **No es dejadez: es lo que
+// sostiene el producto.** La lista de abiertas, el escalado a los cinco
+// minutos y los indicadores de AENOR son consultas SQL sobre esas
+// columnas, y cifrarlas obligaría a descifrar el libro entero para pintar
+// «qué hay abierto hoy». La consecuencia, dicha como en residencia-1b §2:
+// **un `SELECT` sigue diciendo que a doña Carmen se le abrió una
+// incidencia de tipo `FIEBRE` el martes**. Lo que no dice es a cuánto
+// tenía la fiebre, qué se hizo ni qué se le contó a su hija.
+
+/// residencia-4 · las dos mitades de la plantilla del §3. Ver
+/// `SeverityRule`.
+enum SeverityRuleKind {
+  /// Gradúa un NÚMERO: «temperatura ≥ 38 → N2».
+  THRESHOLD
+  /// Gradúa algo que PASÓ: «caída con golpe → N3».
+  EVENT
+}
+
+/// residencia-4 (D-65, D-21) · **LA PLANTILLA DE GRAVEDAD, COMO DATO.**
+///
+/// La tabla del §3 de `00-decisiones.md`, fila por fila. Se siembra desde
+/// `residencia/catalogo/plantilla-de-gravedad.ts` al arrancar la API,
+/// igual que el catálogo de controles y por las mismas razones (D-11):
+/// una versión nueva es una fila, no un desarrollo.
+///
+/// ── GLOBAL, VERSIONADA Y SIN `tenant_id` ─────────────────────────────
+///
+/// No hay columna de tenant. No es un descuido: es D-21 escrito en el
+/// esquema. Los umbrales clínicos son estándar médico y **no se
+/// configuran por centro**; lo único que los cambia es una excepción por
+/// residente con prescripción médica (`ResidentThresholdOverride`). El
+/// `scope` existe y el CHECK `severity_rules_solo_estandar` lo clava en
+/// `STANDARD`: la columna está para que la frontera se lea en la tabla y
+/// para que el día que algo justifique una regla de centro, lo que haya
+/// que discutir sea un CHECK y no un modelo entero.
+///
+/// ── LA VERSIÓN ES DE LA PLANTILLA ENTERA, NO DE LA FILA ──────────────
+///
+/// Todas las filas de una publicación comparten `version` y `validFrom`.
+/// «¿Qué decía la plantilla el 14 de marzo?» tiene que contestarse con un
+/// número, y con versiones por fila la respuesta sería una lista de
+/// diecisiete. Cada incidencia guarda `templateVersion`, y con eso una
+/// auditoría reconstruye por qué aquel 38,2 fue N2.
+///
+/// Publicar la versión N+1 inserta sus filas y pone `supersededAt` a las
+/// de la N. **Las viejas no se editan ni se borran**, igual que una
+/// versión de `ControlType`.
+model SeverityRule {
+  id String @id @default(uuid()) @db.Uuid
+
+  /// Siempre `STANDARD`. Ver la cabecera.
+  scope   ControlScope     @default(STANDARD)
+  version Int
+  kind    SeverityRuleKind
+
+  /// ── Sólo `THRESHOLD` ──────────────────────────────────────────────
+  ///
+  /// El control cuya medida se compara (`TEMPERATURA`, `GLUCEMIA`). Es el
+  /// CÓDIGO y no el id de una versión de `ControlType`: la plantilla
+  /// gradúa la temperatura, no «la versión 1 de la temperatura», y atarla
+  /// a una versión obligaría a republicarla cada vez que el catálogo
+  /// cambie un texto. Mismo criterio que `CenterControlSetting`.
+  controlCode String?             @map("control_code")
+  comparator  SeverityComparator?
+  /// El umbral. `Decimal(10,2)` como `inputMin`/`refMin`: 37,5 tiene que
+  /// ser 37,5 y no 37,499999, porque la diferencia entre 37,49 y 37,5 es
+  /// la diferencia entre no avisar y avisar.
+  value       Decimal?            @db.Decimal(10, 2)
+
+  /// ── Sólo `EVENT` ──────────────────────────────────────────────────
+  ///
+  /// Qué pasó (`CAIDA`, `VOMITO`, `AVERIA`) y el matiz que la pantalla
+  /// pregunta con UNA pregunta (`CON_GOLPE`, `SIN_RIESGO`). `qualifier`
+  /// NULL = la regla base del evento, la que vale cuando no se pregunta
+  /// nada o cuando la respuesta no se conoce (D-13: declarar sin matizar
+  /// sigue siendo un registro completo).
+  eventType String? @map("event_type")
+  qualifier String?
+
+  severity SeverityLevel
+
+  /// El tipo de incidencia que abre. **Es la clave de la idempotencia**:
+  /// tres tomas de fiebre en un turno se adjuntan a la incidencia
+  /// `FIEBRE` abierta del residente en vez de abrir tres (alcance §5).
+  /// Por eso `TEMPERATURA` y `FIEBRE` son dos cosas: el control es lo que
+  /// se mide, el tipo es lo que pasa.
+  incidentType String @map("incident_type")
+
+  /// Para PINTAR la plantilla en la pantalla de solo lectura del admin.
+  /// **No para evaluarla**: `gravedadDe` mira todas las que casan y se
+  /// queda con la más grave, precisamente para que el orden de estas
+  /// filas no pueda cambiar un nivel.
+  sortOrder Int @default(0) @map("sort_order")
+
+  validFrom    DateTime  @map("valid_from") @db.Timestamptz()
+  supersededAt DateTime? @map("superseded_at") @db.Timestamptz()
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  @@index([scope, version])
+  /// «Las reglas vigentes de este control», que es lo que la derivación
+  /// pregunta por cada medida que entra.
+  @@index([controlCode, supersededAt])
+  @@index([eventType, supersededAt])
+  @@map("severity_rules")
+}
+
+/// residencia-4 (D-22) · **LA EXCEPCIÓN DE UMBRAL DE UN RESIDENTE.**
+///
+/// Lo único que puede cambiar un umbral, y **sólo la pauta un rol
+/// `MEDICO`**. Un hipertenso crónico, un paliativo o alguien con
+/// hipotermia habitual tienen rangos propios: el mecanismo es genérico, el
+/// valor distinto es un DATO CLÍNICO DEL RESIDENTE y no una configuración
+/// local (rama de controles §5).
+///
+/// ── SUSTITUYE, NO SE SUMA ────────────────────────────────────────────
+///
+/// Mientras está vigente, las reglas de serie de ESE control **no se
+/// aplican** a ese residente: las suyas son las de `rules`. Sumarlas
+/// dejaría la de serie disparando por debajo de la excepción, que es
+/// exactamente lo que la excepción existe para evitar. Y `rules` VACÍO es
+/// legítimo y pautable: «a doña Carmen no le abráis incidencia por la
+/// tensión, la tiene así desde 2019».
+///
+/// Caducada (`toAt` pasado), **vuelve la de serie sin que nadie haga
+/// nada**. No hay job que la cierre: la vigencia se mira al derivar.
+///
+/// ── UNA VIGENTE POR RESIDENTE Y CONTROL, Y LO DICE EL MOTOR ──────────
+///
+/// No un índice parcial: un **EXCLUDE USING gist** sobre
+/// `(client_id, control_code, tstzrange(from_at, to_at)) WHERE revoked_at
+/// IS NULL`, el mismo mecanismo que el anti-solape de la agenda
+/// (`b_koibox_4`). Con un índice parcial `WHERE revoked_at IS NULL` una
+/// excepción caducada en marzo bloquearía otra en junio; con el EXCLUDE,
+/// lo que no se puede es que dos se SOLAPEN — que es la regla de verdad.
+///
+/// ── LA FIRMA ES PERSONA + CAPACIDAD (D-31) ───────────────────────────
+///
+/// Y la capacidad tiene que ser un rol `MEDICO` vigente en el momento de
+/// firmar. Lo comprueba la ruta (es una regla que cruza dos tablas, igual
+/// que el colegiado de residencia-1) y tiene su fila en la tabla de
+/// sabotajes: una auxiliar no pauta un umbral.
+model ResidentThresholdOverride {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  clientId String @map("client_id") @db.Uuid
+
+  /// Qué constante. CÓDIGO, no id de versión, por lo mismo que en
+  /// `SeverityRule`.
+  controlCode String @map("control_code")
+
+  /// **Por qué.** Cifrado (D-63): «paliativo, febrícula basal 37,8» es
+  /// un diagnóstico con todas las letras. Su CHECK de formato sólo admite
+  /// `c1:…`, así que el claro NO CABE.
+  ///
+  /// NOT NULL: una excepción sin motivo es un umbral cambiado sin que
+  /// nadie sepa por qué, y eso es justo lo que una auditoría pregunta.
+  reasonCifrado String @map("reason_cifrado")
+
+  /// La vigencia. `toAt` NULL = sin fecha de fin prevista.
+  fromAt DateTime  @map("from_at") @db.Timestamptz()
+  toAt   DateTime? @map("to_at") @db.Timestamptz()
+
+  /// La firma: quién y CON QUÉ CAPACIDAD.
+  signedByUserId               String   @map("signed_by_user_id") @db.Uuid
+  signedByCareRoleAssignmentId String   @map("signed_by_care_role_assignment_id") @db.Uuid
+  signedAt                     DateTime @default(now()) @map("signed_at") @db.Timestamptz()
+
+  /// Retirarla antes de tiempo. No se borra: se revoca, con autor y
+  /// fecha, igual que un `CareRoleAssignment`.
+  revokedAt       DateTime? @map("revoked_at") @db.Timestamptz()
+  revokedByUserId String?   @map("revoked_by_user_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant     Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client     Client                  @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  signedBy   User                    @relation("ThresholdOverrideSignedBy", fields: [signedByUserId], references: [id], onDelete: Restrict)
+  signedWith CareRoleAssignment      @relation(fields: [signedByCareRoleAssignmentId], references: [id], onDelete: Restrict)
+  revokedBy  User?                   @relation("ThresholdOverrideRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+  rules      ResidentThresholdRule[]
+
+  @@index([tenantId])
+  @@index([clientId, controlCode])
+  @@map("resident_threshold_overrides")
+}
+
+/// residencia-4 · UNA REGLA DE UNA EXCEPCIÓN. Misma forma que
+/// `SeverityRule` de tipo `THRESHOLD`, y a propósito: lo que la médica
+/// pauta es «para esta persona, estas bandas», no un formato distinto.
+///
+/// Tabla y no tres columnas (`warnMin`, `alertMax`…) por lo mismo que las
+/// opciones de un control son tabla y no un JSON: el número de bandas lo
+/// decide la pauta, no el esquema, y un paliativo puede llevar dos y un
+/// diabético cuatro.
+///
+/// `Cascade` a la excepción: una regla no significa nada sin su cabecera,
+/// que es donde viven el motivo, la vigencia y la firma.
+model ResidentThresholdRule {
+  id         String @id @default(uuid()) @db.Uuid
+  overrideId String @map("override_id") @db.Uuid
+
+  comparator   SeverityComparator
+  value        Decimal            @db.Decimal(10, 2)
+  severity     SeverityLevel
+  /// El tipo de incidencia que abre. Normalmente el mismo que el de
+  /// serie (`FIEBRE`), para que la idempotencia siga agrupando bien.
+  incidentType String             @map("incident_type")
+
+  sortOrder Int @default(0) @map("sort_order")
+
+  override ResidentThresholdOverride @relation(fields: [overrideId], references: [id], onDelete: Cascade)
+
+  @@index([overrideId])
+  @@map("resident_threshold_rules")
+}
+
+/// residencia-4 (D-35, D-38) · **EL LIBRO ÚNICO DE INCIDENCIAS.**
+///
+/// Una entidad con el SUJETO como atributo, no cuatro entidades separadas
+/// (rama de controles §6.3). Los campos son idénticos para una caída, una
+/// queja y una avería: qué ha pasado, cuándo, quién lo vio, gravedad, a
+/// quién avisar, qué se hizo, quién cierra. Lo único que cambia es el
+/// sujeto — y por eso cada sujeto tiene su pantalla y su formulario, pero
+/// el mismo libro por detrás.
+///
+/// Y de ahí sale lo que de verdad lo justifica: **los casos cruzados**. Un
+/// residente se cae porque el asidero estaba suelto → incidencia + avería
+/// ENLAZADAS (`IncidentLink`). Con libros separados, la relación
+/// causa-efecto se pierde, que es justo lo que AENOR busca en las acciones
+/// correctoras.
+///
+/// ── INMUTABLE, COMO `CareRecord`, CON TRES TRANSICIONES ──────────────
+///
+/// El trigger `incidents_inmutable` deja pasar exactamente tres cosas y
+/// nada más:
+///
+///   1. **subir o bajar el nivel** (`severity`), que escribe su
+///      `IncidentAction` de tipo `SEVERITY`;
+///   2. **cerrarla** (`closedAt`, `closedBy*`, `selfClosed`, `status`);
+///   3. **apuntar que ya se avisó** (`alertedAt`), que es contabilidad
+///      del aviso y no contenido.
+///
+/// Todo lo demás —el residente, el tipo, el origen, quién la abrió, la
+/// descripción— es lo que pasó, y lo que pasó no se edita. Corregir una
+/// descripción es escribir una acción, que es lo mismo que corregir un
+/// `CareRecord` es escribir otra fila.
+///
+/// ── N0 NO ABRE NADA ──────────────────────────────────────────────────
+///
+/// Por D-27, una avería sin riesgo (N0) es CONSTANCIA: se escribe la fila
+/// con `status = CLOSED` y `closedAt` puesto en el momento, sin pedirle a
+/// nadie que la cierre. No es una incidencia abierta que nadie mira — es
+/// una línea del libro para el de mantenimiento.
+model Incident {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  subject  IncidentSubject
+  /// El residente, cuando el sujeto es `RESIDENT`. NULL en una queja de
+  /// familia sin residente identificado y en una avería (CHECK
+  /// `incidents_sujeto_coherente`: un `RESIDENT` exige residente).
+  clientId String?         @map("client_id") @db.Uuid
+
+  origin          IncidentOrigin
+  /// El tipo, en CÓDIGO: `FIEBRE`, `CAIDA`, `AVERIA`. No es un enum (ver
+  /// la cabecera de `plantilla-de-gravedad.ts`): un tipo nuevo en 2028 es
+  /// una fila del fichero de datos, no una migración.
+  incidentType    String         @map("incident_type")
+  severity        SeverityLevel
+  /// La versión de la plantilla con la que se graduó. Es el equivalente
+  /// de `CareRecord.controlTypeId`: «¿por qué esto fue N2?» se contesta
+  /// tres años después.
+  templateVersion Int?           @map("template_version")
+
+  /// `true` mientras esté abierta. Columna y no derivada de `closedAt`
+  /// porque es lo que filtra la lista de «qué hay abierto hoy» —la
+  /// métrica de éxito de dirección— y un índice parcial sobre ella es lo
+  /// que la hace instantánea.
+  open Boolean @default(true)
+
+  /// **Qué ha pasado, cifrado** (D-63). Opcional: una incidencia derivada
+  /// por umbral no la escribe nadie, y la evidencia es la medida.
+  descriptionCifrado String? @map("description_cifrado")
+
+  /// ── DE DÓNDE SALIÓ ────────────────────────────────────────────────
+  ///
+  /// La medida que la abrió, cuando el origen es `DERIVED_THRESHOLD`. Es
+  /// la prueba: sin ella, «se abrió una incidencia de fiebre» no dice a
+  /// cuánto estaba.
+  sourceRecordId String? @map("source_record_id") @db.Uuid
+  /// Y desde qué puerta y qué habitación se declaró, cuando se declaró en
+  /// una. NULL en lo declarado desde el admin y en lo derivado por la
+  /// pasada de ausencias, que no tiene aparato detrás.
+  deviceId       String? @map("device_id") @db.Uuid
+  roomId         String? @map("room_id") @db.Uuid
+
+  /// ── CUÁNDO Y QUIÉN (D-31) ─────────────────────────────────────────
+  openedAt                     DateTime @map("opened_at") @db.Timestamptz()
+  openedByUserId               String   @map("opened_by_user_id") @db.Uuid
+  openedByCareRoleAssignmentId String   @map("opened_by_care_role_assignment_id") @db.Uuid
+
+  /// El turno y el día del CENTRO, calculados como en `CareRecord` y por
+  /// lo mismo: el turno de noche cruza medianoche, y «las incidencias de
+  /// este turno» del relevo (residencia-5) se parte en dos sin esto.
+  centerShiftId String? @map("center_shift_id") @db.Uuid
+  careDay       String  @map("care_day") @db.VarChar(10)
+
+  /// ── EL CIERRE (D-27, D-28) ────────────────────────────────────────
+  ///
+  /// Lo cierra un rol de **categoría directiva**. N1 y N2 admiten
+  /// autocierre por quien la abrió, **marcado como tal**; N3 y N4 exigen
+  /// persona distinta, y si no la hay la incidencia QUEDA ABIERTA y sube
+  /// al panel de dirección.
+  ///
+  /// Las cuatro van juntas o ninguna (CHECK `incidents_cierre_completo`),
+  /// y `open` es su negación (CHECK `incidents_abierta_coherente`): una
+  /// incidencia cerrada sin saber quién la cerró es media evidencia.
+  closedAt                     DateTime? @map("closed_at") @db.Timestamptz()
+  closedByUserId               String?   @map("closed_by_user_id") @db.Uuid
+  closedByCareRoleAssignmentId String?   @map("closed_by_care_role_assignment_id") @db.Uuid
+  /// `true` cuando la cerró la misma persona que la abrió. **Se marca, no
+  /// se prohíbe** en N1 y N2 (D-28): en el turno de noche hay una
+  /// auxiliar y nadie más, y exigir una segunda persona dejaría el libro
+  /// lleno de abiertas que nadie puede cerrar.
+  selfClosed                   Boolean   @default(false) @map("self_closed")
+
+  /// Cuándo salió el primer aviso. NULL = no tocaba avisar (N0, N1) o
+  /// todavía no ha salido. Es contabilidad del aviso y por eso el trigger
+  /// de inmutabilidad la deja cambiar.
+  alertedAt DateTime? @map("alerted_at") @db.Timestamptz()
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant       Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  client       Client?             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  sourceRecord CareRecord?         @relation("IncidentSourceRecord", fields: [sourceRecordId], references: [id], onDelete: Restrict)
+  device       Device?             @relation("IncidentDevice", fields: [deviceId], references: [id], onDelete: Restrict)
+  room         Room?               @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  openedBy     User                @relation("IncidentOpenedBy", fields: [openedByUserId], references: [id], onDelete: Restrict)
+  openedWith   CareRoleAssignment  @relation("IncidentOpenedWith", fields: [openedByCareRoleAssignmentId], references: [id], onDelete: Restrict)
+  closedBy     User?               @relation("IncidentClosedBy", fields: [closedByUserId], references: [id], onDelete: Restrict)
+  closedWith   CareRoleAssignment? @relation("IncidentClosedWith", fields: [closedByCareRoleAssignmentId], references: [id], onDelete: Restrict)
+  centerShift  CenterShift?        @relation(fields: [centerShiftId], references: [id], onDelete: Restrict)
+
+  actions              IncidentAction[]
+  familyCommunications FamilyCommunication[]
+  alerts               GuardAlert[]
+  /// Los enlaces, en los dos sentidos. Ver `IncidentLink`: el par se
+  /// guarda UNA vez y las dos relaciones son la misma fila leída desde
+  /// cada lado.
+  linksFrom            IncidentLink[]        @relation("IncidentLinkFrom")
+  linksTo              IncidentLink[]        @relation("IncidentLinkTo")
+
+  @@index([tenantId])
+  /// **«Qué hay abierto hoy»**, que es literalmente la métrica de éxito
+  /// de dirección (rama §6.3). El índice parcial `WHERE open` vive en la
+  /// migración; éste sostiene el filtro por sujeto y nivel.
+  @@index([tenantId, open, severity])
+  @@index([tenantId, subject, openedAt])
+  @@index([tenantId, careDay])
+  /// Y la IDEMPOTENCIA de la derivación: «¿tiene este residente una
+  /// incidencia abierta de este tipo?» se pregunta por cada medida que
+  /// entra, y tiene que costar un índice.
+  @@index([clientId, incidentType, open])
+  @@map("incidents")
+}
+
+/// residencia-4 (D-35) · **DOS INCIDENCIAS ENLAZADAS.**
+///
+/// La caída de la 112 y el asidero suelto de la 112. Es el caso que
+/// justifica el libro único: con libros separados la relación causa-efecto
+/// se pierde, y es justo lo que AENOR busca en las acciones correctoras.
+///
+/// ── EL PAR SE GUARDA UNA VEZ, Y ORDENADO ─────────────────────────────
+///
+/// Una fila por pareja, con `aId < bId` como texto (CHECK
+/// `incident_links_ordenado`) y único por `(aId, bId)`. La alternativa
+/// —dos filas simétricas— deja la puerta abierta a que una se borre y la
+/// otra no, y entonces la caída enlaza con la avería y la avería no enlaza
+/// con nada.
+///
+/// Un enlace SÍ se puede borrar, al revés que todo lo demás de este
+/// bloque: enlazar mal dos incidencias es un error de dedo del admin y
+/// deshacerlo no borra ninguna evidencia — las dos incidencias siguen
+/// enteras.
+model IncidentLink {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  aId String @map("a_id") @db.Uuid
+  bId String @map("b_id") @db.Uuid
+
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  createdByUserId String?  @map("created_by_user_id") @db.Uuid
+
+  tenant Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  a      Incident @relation("IncidentLinkFrom", fields: [aId], references: [id], onDelete: Cascade)
+  b      Incident @relation("IncidentLinkTo", fields: [bId], references: [id], onDelete: Cascade)
+
+  @@unique([aId, bId])
+  @@index([tenantId])
+  @@index([bId])
+  @@map("incident_links")
+}
+
+/// residencia-4 · **QUÉ SE HIZO.** Append-only, como las anotaciones
+/// clínicas (`ClinicalAddendum`) y por la misma razón: el histórico de una
+/// incidencia es la evidencia de la acción correctora, y una evidencia que
+/// se edita no es evidencia.
+///
+/// El trigger `incident_actions_append_only` no deja ni `UPDATE` ni
+/// `DELETE`. Ni una escapatoria: no hay «anular» aquí, porque una acción
+/// mal escrita se corrige escribiendo otra que lo diga — que es lo mismo
+/// que hace un `CareRecord`.
+///
+/// ── Y ES DONDE SE ADJUNTA LA EVIDENCIA ───────────────────────────────
+///
+/// Cuando una segunda toma de fiebre llega y el residente ya tiene una
+/// incidencia `FIEBRE` abierta, no se abre otra: se escribe una acción de
+/// tipo `EVIDENCE` apuntando a ese `CareRecord` (alcance §5). Tres tomas
+/// en un turno son UNA incidencia con tres líneas, no tres incidencias.
+model IncidentAction {
+  id         String @id @default(uuid()) @db.Uuid
+  tenantId   String @map("tenant_id") @db.Uuid
+  incidentId String @map("incident_id") @db.Uuid
+
+  kind IncidentActionKind
+
+  /// El texto, cifrado (D-63). Opcional: una acción de tipo `EVIDENCE` o
+  /// `SEVERITY` no necesita que nadie escriba nada — lo dicen sus
+  /// columnas.
+  textCifrado String? @map("text_cifrado")
+
+  /// Sólo `SEVERITY`: de qué nivel a qué nivel. Las dos juntas o ninguna
+  /// (CHECK `incident_actions_nivel_completo`).
+  severityFrom SeverityLevel? @map("severity_from")
+  severityTo   SeverityLevel? @map("severity_to")
+
+  /// Sólo `EVIDENCE`: qué medida se adjuntó.
+  careRecordId String? @map("care_record_id") @db.Uuid
+
+  /// Sólo `CALL` (D-33) · **si se llamó o no al servicio sanitario de
+  /// guardia**. El sistema no llama a nadie: muestra a quién llamar y la
+  /// llamada la hace la persona. Lo que se apunta aquí es qué decidió.
+  called Boolean? @map("called")
+
+  at                     DateTime @default(now()) @db.Timestamptz()
+  byUserId               String   @map("by_user_id") @db.Uuid
+  byCareRoleAssignmentId String   @map("by_care_role_assignment_id") @db.Uuid
+
+  tenant     Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  incident   Incident           @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+  careRecord CareRecord?        @relation(fields: [careRecordId], references: [id], onDelete: Restrict)
+  by         User               @relation("IncidentActionBy", fields: [byUserId], references: [id], onDelete: Restrict)
+  byWith     CareRoleAssignment @relation(fields: [byCareRoleAssignmentId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@index([incidentId, at])
+  @@map("incident_actions")
+}
+
+/// residencia-4 (D-32 a D-34) · **LO QUE SE LE DIJO A LA FAMILIA, O POR
+/// QUÉ NO.**
+///
+/// Dimensión APARTE del nivel (rama de controles §9): una caída sin
+/// consecuencias es N1 y la familia quiere saberlo el mismo día; un
+/// hallazgo N3 puede convenir no comunicarlo hasta tener diagnóstico. Por
+/// eso no es una columna de `Incident` con una fecha: es una tabla con las
+/// dos constancias.
+///
+/// ── LAS DOS SON CONSTANCIA ───────────────────────────────────────────
+///
+/// `COMUNICADO` (quién, cuándo, por qué vía, qué se dijo, qué contestaron)
+/// y `NO_COMUNICADO` (quién lo decidió y por qué). Misma lógica de
+/// denominador que el «como siempre» (D-15): sin la segunda no se
+/// distingue «se decidió no llamar» de «nadie se acordó».
+///
+/// Y **una incidencia de residente no se cierra sin una de las dos**. Lo
+/// comprueba la ruta de cierre, tiene su fila en la tabla de sabotajes, y
+/// es lo que cierra la observación 10 de AENOR.
+///
+/// ── EL SISTEMA NO ENVÍA NADA (D-33) ──────────────────────────────────
+///
+/// Esta tabla registra una conversación que tuvo una persona. No hay
+/// correo, ni SMS, ni portal: el portal de familias es `familias-1` y el
+/// principio general es que **el sistema no habla con el exterior por su
+/// cuenta**.
+model FamilyCommunication {
+  id         String @id @default(uuid()) @db.Uuid
+  tenantId   String @map("tenant_id") @db.Uuid
+  incidentId String @map("incident_id") @db.Uuid
+
+  kind    FamilyCommunicationKind
+  /// Sólo en `COMUNICADO`: por qué vía (CHECK
+  /// `family_communications_via_coherente`). Un «no comunicado» con vía
+  /// es una contradicción.
+  channel FamilyCommunicationChannel?
+
+  /// A quién. Texto y no una FK: el familiar responsable vive en
+  /// `resident_profiles` como tres columnas (nombre, teléfono,
+  /// parentesco) y puede no ser con quien se habló — se llamó a la hija y
+  /// contestó el yerno. Se guarda lo que pasó.
+  ///
+  /// En claro, como el resto de la identidad (residencia-1b §2): es a
+  /// quién se llamó, no qué se le dijo.
+  contactName     String? @map("contact_name")
+  contactRelation String? @map("contact_relation")
+
+  /// **Qué se dijo y qué contestaron, cifrados** (D-63). En un
+  /// `NO_COMUNICADO`, `contentCifrado` es el MOTIVO. NOT NULL: los dos
+  /// casos exigen texto, porque una constancia sin contenido no es
+  /// constancia.
+  contentCifrado  String  @map("content_cifrado")
+  responseCifrado String? @map("response_cifrado")
+
+  at                     DateTime @map("at") @db.Timestamptz()
+  byUserId               String   @map("by_user_id") @db.Uuid
+  byCareRoleAssignmentId String   @map("by_care_role_assignment_id") @db.Uuid
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant   Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  incident Incident           @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+  by       User               @relation("FamilyCommunicationBy", fields: [byUserId], references: [id], onDelete: Restrict)
+  byWith   CareRoleAssignment @relation(fields: [byCareRoleAssignmentId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@index([incidentId, at])
+  @@map("family_communications")
+}
+
+/// residencia-4 (D-19, D-66) · **UN AVISO QUE TIENE QUE SONAR.**
+///
+/// Una fila por (incidencia, canal). N2 abre una de `ENFERMERIA`; N3 y N4
+/// abren las dos a la vez; y si la de enfermería se agota sin acuse, se
+/// abre la de `RESPONSABLE` **sin cancelar la primera** — el aviso no se
+/// mueve de sitio, se suma uno.
+///
+/// ── «SIN RED NO SE FINGE» ────────────────────────────────────────────
+///
+/// Es el peor fallo posible de este bloque y por eso tiene una columna:
+/// `queuedAt` es cuándo lo apuntó la TABLET y `createdAt` cuándo llegó al
+/// servidor, exactamente igual que los dos instantes de `CareRecord`. Un
+/// aviso que sale con dos horas de retraso **suena igual, con su hora
+/// original y su retraso a la vista**, y la puerta que lo originó nunca
+/// dice «avisado» hasta que el servidor lo confirma.
+///
+/// ── EL ESCALADO NO LO DECIDE UN `setTimeout` ─────────────────────────
+///
+/// `escalateAt` es una columna con su índice. La pasada que escala
+/// pregunta «¿qué avisos pendientes tienen `escalate_at` pasado?» — un
+/// temporizador en memoria se pierde al reiniciar la API, y un aviso que
+/// no escala porque alguien desplegó es exactamente lo que este bloque
+/// existe para evitar.
+///
+/// ── EL ACUSE ES UNA FIRMA ────────────────────────────────────────────
+///
+/// «Voy» se pulsa con PIN: persona + capacidad + hora (D-31). No es un
+/// botón de «leído»: es quien se hace cargo, y es lo que la puerta pinta
+/// («Aviso recibido por Lucía · 10:43»).
+model GuardAlert {
+  id         String @id @default(uuid()) @db.Uuid
+  tenantId   String @map("tenant_id") @db.Uuid
+  incidentId String @map("incident_id") @db.Uuid
+
+  channel  GuardChannel
+  severity SeverityLevel
+  state    GuardAlertState @default(PENDING)
+
+  /// Cuándo lo apuntó la tablet y cuándo llegó aquí. Ver la cabecera.
+  queuedAt  DateTime @map("queued_at") @db.Timestamptz()
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  /// Cuándo hay que escalar si nadie acusa. NULL = este aviso no escala
+  /// (el de `RESPONSABLE`, que es el último eslabón, y los de N3/N4 que
+  /// ya salieron a los dos canales).
+  escalateAt      DateTime? @map("escalate_at") @db.Timestamptz()
+  /// El aviso que lo originó al escalar. Deja la cadena leída de un
+  /// vistazo: «éste salió porque el de enfermería no se acusó».
+  escalatedFromId String?   @map("escalated_from_id") @db.Uuid
+
+  /// Cuándo un móvil de ese canal lo tuvo delante. No es el acuse: es que
+  /// llegó. Sirve para contestar «¿sonó?» cuando nadie lo acusó.
+  deliveredAt DateTime? @map("delivered_at") @db.Timestamptz()
+
+  /// ── EL ACUSE ──────────────────────────────────────────────────────
+  ///
+  /// Las cuatro juntas o ninguna (CHECK `guard_alerts_acuse_completo`).
+  ackedAt                     DateTime? @map("acked_at") @db.Timestamptz()
+  ackedByUserId               String?   @map("acked_by_user_id") @db.Uuid
+  ackedByCareRoleAssignmentId String?   @map("acked_by_care_role_assignment_id") @db.Uuid
+  ackedByDeviceId             String?   @map("acked_by_device_id") @db.Uuid
+
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  incident      Incident            @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+  escalatedFrom GuardAlert?         @relation("GuardAlertEscalation", fields: [escalatedFromId], references: [id], onDelete: Restrict)
+  escalatedTo   GuardAlert[]        @relation("GuardAlertEscalation")
+  ackedBy       User?               @relation("GuardAlertAckedBy", fields: [ackedByUserId], references: [id], onDelete: Restrict)
+  ackedWith     CareRoleAssignment? @relation("GuardAlertAckedWith", fields: [ackedByCareRoleAssignmentId], references: [id], onDelete: Restrict)
+  ackedByDevice Device?             @relation("GuardAlertAckedByDevice", fields: [ackedByDeviceId], references: [id], onDelete: Restrict)
+
+  /// Un aviso por (incidencia, canal). Reenviar el mismo lote o derivar
+  /// dos veces la misma medida **no hace sonar dos veces** — es la
+  /// idempotencia del aviso, y vive en el motor y no en un `if`.
+  @@unique([incidentId, channel])
+  @@index([tenantId])
+  /// La pasada del escalado: «pendientes con la hora pasada». El índice
+  /// parcial de verdad (`WHERE state IN ('PENDING','DELIVERED')`) vive en
+  /// la migración.
+  @@index([escalateAt])
+  @@index([tenantId, channel, state])
+  @@map("guard_alerts")
+}
+
+/// residencia-4 (D-66) · **QUIÉN LLEVA EL MÓVIL ESTE TURNO.**
+///
+/// «Al empezar el turno, quien coge el móvil entra con su PIN». Eso hace
+/// tres cosas de una vez, y por eso no hace falta cuadrante:
+///
+///   1. deja la línea en el registro de accesos (es una identificación);
+///   2. le dice al sistema **si hay enfermera de guardia en este turno**,
+///      que es lo que decide si un N2 escala al momento o a los 5 min;
+///   3. pone el nombre en la pantalla en reposo del móvil («De guardia:
+///      Lucía · enfermería · turno de tarde»), que es lo que hace que
+///      quien lo coja sepa que está cogido.
+///
+/// `endedAt` NULL = **de guardia ahora**. Una sola viva por dispositivo
+/// (índice parcial `guard_shift_sessions_una_viva_key`): coger el móvil
+/// cierra la guardia anterior de ESE móvil, en la misma transacción. No
+/// una por canal — un centro puede tener dos enfermeras de guardia con
+/// dos móviles, y las dos están de guardia.
+model GuardShiftSession {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  deviceId String @map("device_id") @db.Uuid
+
+  /// Copiado del dispositivo al empezar. Redundante a propósito: el canal
+  /// de un móvil se puede cambiar en el admin, y «quién estaba de guardia
+  /// en enfermería el martes» tiene que seguir contestándose.
+  channel GuardChannel
+
+  userId               String @map("user_id") @db.Uuid
+  careRoleAssignmentId String @map("care_role_assignment_id") @db.Uuid
+
+  startedAt     DateTime  @map("started_at") @db.Timestamptz()
+  endedAt       DateTime? @map("ended_at") @db.Timestamptz()
+  /// Quién la cerró. NULL cuando la cerró el relevo (otra persona cogió
+  /// el móvil) o la cerró la propia persona.
+  endedByUserId String?   @map("ended_by_user_id") @db.Uuid
+
+  /// El turno y el día del centro en que empezó, para el histórico y para
+  /// el relevo de residencia-5.
+  centerShiftId String? @map("center_shift_id") @db.Uuid
+  careDay       String  @map("care_day") @db.VarChar(10)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  device      Device             @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  user        User               @relation("GuardShiftSessionUser", fields: [userId], references: [id], onDelete: Restrict)
+  careRole    CareRoleAssignment @relation(fields: [careRoleAssignmentId], references: [id], onDelete: Restrict)
+  endedBy     User?              @relation("GuardShiftSessionEndedBy", fields: [endedByUserId], references: [id], onDelete: SetNull)
+  centerShift CenterShift?       @relation(fields: [centerShiftId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  /// «¿Hay alguien de guardia en este canal ahora?», que es la pregunta
+  /// que decide el escalado inmediato.
+  @@index([tenantId, channel, endedAt])
+  @@index([deviceId, startedAt])
+  @@map("guard_shift_sessions")
+}
+
+/// residencia-4 (D-66, rama de controles §10) · **LO QUE EL CENTRO
+/// CONFIGURA DEL AVISO.**
+///
+/// La frontera, otra vez: el MOTOR de gravedad y de escalado es del
+/// producto y no se toca; los **destinatarios de cada nivel** y los
+/// minutos de espera son del centro. Y el servicio sanitario de guardia
+/// —a quién se recomienda llamar— es suyo por definición: el centro de
+/// salud de Buenaventura no es el de nadie más.
+///
+/// Una fila por tenant, con los valores de serie si no existe. No se
+/// siembra al encender el módulo a propósito: «no configurado» y
+/// «configurado con los valores de serie» son lo mismo para el motor, y
+/// sembrar una fila habría hecho que la pantalla no pudiera distinguir
+/// «lo dejaron como estaba» de «lo revisaron y lo dejaron igual» —que
+/// tampoco importa— a cambio de una fila por centro que mantener.
+model CenterGuardSetting {
+  tenantId String @id @map("tenant_id") @db.Uuid
+
+  /// Cuántos minutos se espera un acuse antes de escalar al canal
+  /// siguiente. 5 por defecto (D-66). CHECK 1..60: menos de un minuto no
+  /// da tiempo a sacar el móvil del bolsillo, y más de una hora no es un
+  /// escalado.
+  escalationMinutes Int @default(5) @map("escalation_minutes")
+
+  /// A qué canales suena cada nivel. Arrays y no columnas booleanas
+  /// porque la pregunta es «¿quiénes?» y la respuesta es una lista.
+  /// Vacío = **ese nivel no suena**, que es una decisión legítima del
+  /// centro y se pinta como tal; NULL no existe aquí.
+  ///
+  /// N0 y N1 no tienen columna: N0 no abre nada (D-27) y N1 va al relevo
+  /// (D-19, la velocidad lenta). Dárselas al centro sería dejarle
+  /// convertir el móvil de guardia en un aparato que suena ochenta veces
+  /// por turno.
+  levelN2Channels GuardChannel[] @default([ENFERMERIA]) @map("level_n2_channels")
+  levelN3Channels GuardChannel[] @default([ENFERMERIA, RESPONSABLE]) @map("level_n3_channels")
+  levelN4Channels GuardChannel[] @default([ENFERMERIA, RESPONSABLE]) @map("level_n4_channels")
+
+  /// ── EL SERVICIO SANITARIO DE GUARDIA, COMO RECOMENDACIÓN (D-33) ───
+  ///
+  /// En N3 y N4 el móvil muestra «Recomendado: llamar a …» con un botón
+  /// que abre el marcador. **La llamada la hace la persona**: el sistema
+  /// no llama ni escribe a nadie de fuera por su cuenta. Si se llamó o no
+  /// se apunta como `IncidentAction` de tipo `CALL`.
+  ///
+  /// Las dos juntas o ninguna (CHECK `center_guard_settings_servicio`):
+  /// un nombre sin teléfono es un botón que no marca.
+  healthServiceName  String? @map("health_service_name")
+  healthServicePhone String? @map("health_service_phone")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("center_guard_settings")
 }

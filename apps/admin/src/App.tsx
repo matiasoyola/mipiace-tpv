@@ -20,6 +20,8 @@ import { DeclaracionResponsablePage } from "./pages/DeclaracionResponsablePage.j
 import { SecurityPage } from "./pages/SecurityPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 import { AgendaCatalogPage } from "./pages/AgendaCatalogPage.js";
+// B-reservas-8 · los bonos de sesiones.
+import { BonosPage } from "./pages/BonosPage.js";
 import { AgendaHorarioPage } from "./pages/AgendaHorarioPage.js";
 import { StaffPage } from "./pages/StaffPage.js";
 // residencia-1 · las tres pantallas del centro.
@@ -31,6 +33,14 @@ import { TurnosPage } from "./pages/residencia/TurnosPage.js";
 import { ControlesPage } from "./pages/residencia/ControlesPage.js";
 import { PlantillasPage } from "./pages/residencia/PlantillasPage.js";
 import { PlanResidentePage } from "./pages/residencia/PlanResidentePage.js";
+import { RegistroResidentePage } from "./pages/residencia/RegistroResidentePage.js";
+// residencia-4 · el libro de incidencias, su ficha, la guardia del centro
+// con la plantilla de gravedad en solo lectura, y las excepciones de
+// umbral de un residente.
+import { IncidenciasPage } from "./pages/residencia/IncidenciasPage.js";
+import { IncidenciaPage } from "./pages/residencia/IncidenciaPage.js";
+import { GuardiaPage } from "./pages/residencia/GuardiaPage.js";
+import { UmbralesResidentePage } from "./pages/residencia/UmbralesResidentePage.js";
 // F1 (ADR-018) · las tres pantallas del control horario.
 import { HoyPage } from "./pages/fichaje/HoyPage.js";
 import { EmpleadosPage } from "./pages/fichaje/EmpleadosPage.js";
@@ -186,6 +196,9 @@ export function App() {
         <Route path="/admin/settings" element={<SettingsPage />} />
         <Route path="/admin/staff" element={<StaffPage />} />
         <Route path="/admin/agenda-catalog" element={<AgendaCatalogPage />} />
+        {/* B-reservas-8 · la pantalla se auto-gatea (la puerta de verdad es
+            el 404 del servidor). */}
+        <Route path="/admin/bonos" element={<BonosPage />} />
         {/* B-reservas-7a · el horario del centro NO va envuelto: es agenda,
             no caja. Misma regla que "Agenda · Catálogo". */}
         <Route path="/admin/agenda-hours" element={<AgendaHorarioPage />} />
@@ -211,6 +224,19 @@ export function App() {
         <Route path="/admin/residencia/controles" element={<ResidenciaGate title="Controles"><ControlesPage /></ResidenciaGate>} />
         <Route path="/admin/residencia/plantillas" element={<ResidenciaGate title="Plantillas por nivel"><PlantillasPage /></ResidenciaGate>} />
         <Route path="/admin/residencia/residentes/:clientId/plan" element={<ResidenciaGate title="Plan de cuidados"><PlanResidentePage /></ResidenciaGate>} />
+        {/* residencia-3 · lo registrado por turno. Debajo de la ficha por
+            lo mismo que el plan: no es una sección, es la continuación de
+            una ficha. */}
+        <Route path="/admin/residencia/residentes/:clientId/registros" element={<ResidenciaGate title="Lo registrado"><RegistroResidentePage /></ResidenciaGate>} />
+        {/* residencia-4 · el libro único (D-35, D-38) y lo que cuelga de
+            él. La ficha y el libro llevan el mismo gate que el plan: el
+            libro de un centro no es para la auxiliar del pasillo. */}
+        <Route path="/admin/residencia/incidencias" element={<ResidenciaGate title="Incidencias"><IncidenciasPage /></ResidenciaGate>} />
+        <Route path="/admin/residencia/incidencias/:id" element={<ResidenciaGate title="Incidencia"><IncidenciaPage /></ResidenciaGate>} />
+        <Route path="/admin/residencia/guardia" element={<ResidenciaGate title="Guardia"><GuardiaPage /></ResidenciaGate>} />
+        {/* La excepción de umbral cuelga del residente y no del centro,
+            porque es una prescripción suya (D-22). */}
+        <Route path="/admin/residencia/residentes/:clientId/umbrales" element={<ResidenciaGate title="Umbrales propios"><UmbralesResidentePage /></ResidenciaGate>} />
         <Route path="/admin/tag-aliases" element={<CajaGate title="Etiquetas"><TagAliasesPage /></CajaGate>} />
         <Route path="/admin/tag-sections" element={<CajaGate title="Comanderas"><TagSectionsPage /></CajaGate>} />
         <Route path="/admin/printers" element={<CajaGate title="Impresoras"><PrintersPage /></CajaGate>} />

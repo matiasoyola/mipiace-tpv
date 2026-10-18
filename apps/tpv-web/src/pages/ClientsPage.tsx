@@ -19,21 +19,31 @@ import {
 
 import { getCachedClinicaEnabled } from "../lib/catalog.js";
 import { scrollFocusIntoView } from "../lib/visualViewportSync.js";
+import { formatEur } from "../lib/money.js";
 import {
   addClientConsent,
   addClientTechnicalNote,
   clientFullName,
   getClientDetail,
   getClientHistory,
-  getClientVouchers,
   loadClientsFromCache,
   refreshClients,
   searchClientsLocal,
   type ClientDetail,
   type ClientHistory,
   type ClientRow,
-  type ClientVouchers,
 } from "../lib/clients.js";
+// B-reservas-8 · los bonos de la ficha. El saldo, la caducidad y la traza
+// vienen HECHOS del servidor: aquí no se calcula ninguna sesión.
+import {
+  diaCorto,
+  getBonosDeLaFicha,
+  getDetalleDeBono,
+  sesiones,
+  type BonoDeLaFicha,
+  type BonosDeLaFicha,
+  type DetalleDeBono,
+} from "../lib/bonos.js";
 import { HistoriaViva } from "../clinica/HistoriaViva.js";
 import { ValoracionSanitario } from "../clinica/ValoracionSanitario.js";
 import { ClientForm } from "./ClientForm.js";
@@ -667,24 +677,215 @@ function TechnicalTab({
   );
 }
 
+// ─── B-reservas-8 · los BONOS de la ficha ────────────────────────────
+//
+// Lo que esta pestaña tiene que contestar, en este orden:
+//
+//   1. **¿Cuántas sesiones le quedan?** Con la frase que hace el servidor
+//      («quedan 3 · 1 apartada») y no una que calcule el navegador: dos
+//      terminales no pueden enseñar dos saldos del mismo bono.
+//   2. **¿Hasta cuándo?** El último día bueno, sin hora: «caduca el 28 de
+//      febrero» incluye el 28 entero.
+//   3. **LA TRAZA.** Qué cita apartó, qué ticket consumió, quién corrigió y
+//      por qué. Es lo que recepción necesita cuando una clienta dice «yo
+//      tenía cinco».
+//
+// Y los de PRUEBA, detrás de un filtro y nunca mezclados (`07` pieza 17).
+
 function VouchersTab({ clientId }: { clientId: string }) {
-  const [data, setData] = useState<ClientVouchers | null>(null);
+  const [data, setData] = useState<BonosDeLaFicha | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [verPruebas, setVerPruebas] = useState(false);
+  const [abierto, setAbierto] = useState<string | null>(null);
+
   useEffect(() => {
     let cancelled = false;
-    getClientVouchers(clientId)
+    setError(null);
+    getBonosDeLaFicha(clientId)
       .then((d) => !cancelled && setData(d))
-      .catch(() => !cancelled && setData({ balance: { sessionsLeft: 0, amountLeftCents: 0 }, vouchers: [] }));
+      .catch(() => {
+        if (cancelled) return;
+        // El contrato de esta ruta es estable desde B-reservas-1: con el
+        // módulo apagado contesta saldo cero y lista vacía, así que un
+        // error aquí es de verdad (sin red, o 500) y se dice.
+        setError("No se pudieron cargar los bonos. Vuelve a intentarlo.");
+      });
     return () => {
       cancelled = true;
     };
   }, [clientId]);
+
+  if (error) {
+    return <Empty>{error}</Empty>;
+  }
   if (!data) return <TabLoading />;
-  // B5 rellenará este contrato; hoy es un placeholder informativo.
+
+  const dePrueba = data.vouchers.filter((b) => b.esPrueba);
+  const reales = data.vouchers.filter((b) => !b.esPrueba);
+  const lista = verPruebas ? [...reales, ...dePrueba] : reales;
+
+  if (reales.length === 0 && dePrueba.length === 0) {
+    return (
+      <Empty>
+        <ReceiptText className="w-5 h-5 mx-auto mb-2 text-slate-300" strokeWidth={2} />
+        Esta ficha no tiene bonos. Aparecerán aquí al venderle uno en caja o
+        al darlo de alta a mano si venía en papel.
+      </Empty>
+    );
+  }
+
   return (
-    <Empty>
-      <ReceiptText className="w-5 h-5 mx-auto mb-2 text-slate-300" strokeWidth={2} />
-      Disponible con el módulo de bonos.
-    </Empty>
+    <div className="space-y-3">
+      {/* El saldo agregado, que es lo primero que se mira. No cuenta los
+          de prueba ni los muertos: lo decide el servidor. */}
+      <div className="bg-white rounded-xl border border-slate-200 px-4 py-3 flex items-baseline gap-2">
+        <span className="text-[22px] font-semibold text-slate-900 tabular-nums">
+          {data.balance.sessionsLeft}
+        </span>
+        <span className="text-[13px] text-slate-500">
+          {data.balance.sessionsLeft === 1
+            ? "sesión libre en total"
+            : "sesiones libres en total"}
+        </span>
+      </div>
+
+      {lista.map((b) => (
+        <TarjetaDeBono
+          key={b.id}
+          bono={b}
+          abierto={abierto === b.id}
+          onToggle={() => setAbierto(abierto === b.id ? null : b.id)}
+        />
+      ))}
+
+      {dePrueba.length > 0 && (
+        <button
+          onClick={() => setVerPruebas(!verPruebas)}
+          className="w-full h-9 rounded-xl border border-dashed border-slate-200 text-[12px] text-slate-500 hover:text-slate-700"
+        >
+          {verPruebas ? "Ocultar" : "Ver"} {dePrueba.length}{" "}
+          {dePrueba.length === 1 ? "bono de prueba" : "bonos de prueba"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function TarjetaDeBono({
+  bono,
+  abierto,
+  onToggle,
+}: {
+  bono: BonoDeLaFicha;
+  abierto: boolean;
+  onToggle: () => void;
+}) {
+  const [detalle, setDetalle] = useState<DetalleDeBono | null>(null);
+  useEffect(() => {
+    if (!abierto || detalle) return;
+    let cancelled = false;
+    getDetalleDeBono(bono.id)
+      .then((d) => !cancelled && setDetalle(d))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [abierto, bono.id, detalle]);
+
+  const muerto = bono.status === "ANULADO" || bono.status === "CADUCADO";
+  const caduca = diaCorto(bono.caducaEl);
+  return (
+    <div
+      className={`bg-white rounded-xl border p-4 ${
+        muerto ? "border-slate-200 opacity-70" : "border-slate-200"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-[14px] text-slate-900 truncate">
+              {bono.nombre}
+            </span>
+            <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+              {bono.code}
+            </span>
+            {bono.esPrueba && (
+              <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                prueba
+              </span>
+            )}
+            {muerto && (
+              <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
+                {bono.status === "ANULADO" ? "anulado" : "caducado"}
+              </span>
+            )}
+          </div>
+          {/* La frase del servidor, tal cual. */}
+          <div className="text-[13px] text-slate-700 mt-1">{bono.resumen}</div>
+          <div className="text-[12px] text-slate-500 mt-0.5">
+            {sesiones(bono.sesionesConsumidas)} usadas de{" "}
+            {sesiones(bono.sesionesTotal)}
+            {caduca ? ` · caduca el ${caduca}` : " · sin caducidad"}
+            {bono.origen === "ALTA_INICIAL" ? " · venía en papel" : ""}
+          </div>
+          {/* Los euros sólo si la API los mandó: al sanitario sin caja NO
+              se le mandan, así que aquí simplemente no están. */}
+          {bono.valorCartaCents != null && (
+            <div className="text-[12px] text-slate-500 mt-0.5">
+              vale {formatEur(bono.valorCartaCents / 100)}
+              {bono.cobradoCents != null
+                ? ` · se cobraron ${formatEur(bono.cobradoCents / 100)}`
+                : ""}
+            </div>
+          )}
+        </div>
+        <button
+          onClick={onToggle}
+          className="shrink-0 h-8 px-3 rounded-lg border border-slate-200 text-[12px] text-slate-600 hover:bg-slate-50"
+        >
+          {abierto ? "Ocultar" : "Ver qué pasó"}
+        </button>
+      </div>
+
+      {abierto && (
+        <div className="mt-3 pt-3 border-t border-slate-100">
+          {!detalle ? (
+            <TabLoading />
+          ) : (
+            <>
+              {/* El «por qué no se puede devolver», con la MISMA frase que
+                  el servidor: ningún botón gris mudo. */}
+              {detalle.noDevolvible && (
+                <div className="mb-3 text-[12px] text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                  {detalle.noDevolvible.mensaje}
+                </div>
+              )}
+              <ol className="space-y-2">
+                {detalle.traza.map((l) => (
+                  <li key={l.id} className="text-[12px] leading-snug">
+                    <div className="flex items-baseline gap-2">
+                      <span className="font-mono text-[11px] text-slate-400 shrink-0">
+                        {new Date(l.cuando).toLocaleDateString("es-ES", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "2-digit",
+                        })}
+                      </span>
+                      <span className="text-slate-700">{l.detalle}</span>
+                    </div>
+                    <div className="text-[11px] text-slate-400 pl-[52px]">
+                      {l.quien}
+                      {l.motivo ? ` · motivo: ${l.motivo}` : ""}
+                      {l.canal !== "tpv" ? ` · ${l.canal}` : ""}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

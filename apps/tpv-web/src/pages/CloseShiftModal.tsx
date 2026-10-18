@@ -48,13 +48,29 @@ import { OpenTablesNotice } from "../components/OpenTablesNotice.js";
 import { fetchOpenTables, type OpenTablesSummary } from "../lib/openTables.js";
 import type { CashierRole } from "../lib/offlineAuth.js";
 
-// Mismo orden que `ALLOWED_DENOMINATIONS` del backend (de mayor a
-// menor). Si el backend cambia el set, también hay que tocarlo aquí —
-// son 15 valores fijos del euro, no hay mantenimiento real.
-const DENOMINATIONS: readonly { key: string; valueEur: number; label: string }[] = [
-  { key: "500", valueEur: 500, label: "500 €" },
-  { key: "200", valueEur: 200, label: "200 €" },
-  { key: "100", valueEur: 100, label: "100 €" },
+// ── auditoria-sirope (#28) · LO DE TODOS LOS DÍAS, PRIMERO ──────────
+//
+// La tabla empezaba por 500, 200 y 100 €: tres billetes que Cafetería
+// Sirope no ve en un mes, ocupando las tres primeras filas de un panel
+// de 140 px de ventana. Las monedas, que son las que de verdad se
+// cuentan a mano una por una, quedaban bajo scroll (capturas 83-86).
+//
+// Dos listas, y el orden de la de arriba es el del cajón: billetes de
+// uso diario primero y después las monedas, de mayor a menor. Los tres
+// grandes se pliegan en «Billetes grandes», que es exactamente la
+// frecuencia con la que se usan.
+//
+// El set y sus claves NO cambian: son los mismos quince valores que
+// acepta `ALLOWED_DENOMINATIONS` en el backend. Lo que cambia es el
+// orden y dónde se pintan.
+interface Denominacion {
+  key: string;
+  valueEur: number;
+  label: string;
+}
+
+/** Lo que se cuenta todos los días. */
+const DENOMINACIONES_DIARIAS: readonly Denominacion[] = [
   { key: "50", valueEur: 50, label: "50 €" },
   { key: "20", valueEur: 20, label: "20 €" },
   { key: "10", valueEur: 10, label: "10 €" },
@@ -67,6 +83,20 @@ const DENOMINATIONS: readonly { key: string; valueEur: number; label: string }[]
   { key: "0.05", valueEur: 0.05, label: "5 cts" },
   { key: "0.02", valueEur: 0.02, label: "2 cts" },
   { key: "0.01", valueEur: 0.01, label: "1 ct" },
+];
+
+/** Los que se ven una vez al mes. Plegados. */
+const BILLETES_GRANDES: readonly Denominacion[] = [
+  { key: "100", valueEur: 100, label: "100 €" },
+  { key: "200", valueEur: 200, label: "200 €" },
+  { key: "500", valueEur: 500, label: "500 €" },
+];
+
+/** Las quince, para el cálculo y para el envío. El orden aquí da igual:
+ *  lo que importa es que no falte ninguna. */
+const DENOMINATIONS: readonly Denominacion[] = [
+  ...DENOMINACIONES_DIARIAS,
+  ...BILLETES_GRANDES,
 ];
 
 interface FailedDoc {
@@ -653,6 +683,8 @@ export function CloseShiftModal(props: {
                 setError(null);
                 setPhase("count");
               }}
+              // auditoria-sirope (#29) · la salida va DENTRO de la hoja.
+              onCancel={props.onClose}
               error={error}
               // v1.22 §5 · antes del botón de cerrar, dentro de la
               // tarjeta: un bloque debajo se lee cuando ya se ha
@@ -662,14 +694,6 @@ export function CloseShiftModal(props: {
             {(failedDocs.length > 0 || hasCloseReason || needsManager) && (
               <div className="mt-4">{syncBlock}</div>
             )}
-            <button
-              type="button"
-              onClick={props.onClose}
-              disabled={busy}
-              className="mt-2 w-full min-h-[44px] text-[13.5px] text-slate-500 hover:text-mipiace-ink disabled:opacity-50"
-            >
-              Cancelar
-            </button>
           </>
         )}
       </Shell>
@@ -773,17 +797,31 @@ export function CloseShiftModal(props: {
                     {formatEur(expectedCash)}
                   </span>
                 </div>
+                {/* auditoria-sirope (#28) · EL CUADRE SE DICE.
+                    «descuadre +0,00 €» en gris era la misma frase para
+                    «cuadra» y para «faltan cuarenta céntimos», y en
+                    gris, que es el color de lo que no importa. Cuadrar
+                    es el final feliz de esta pantalla y se dice en
+                    verde; descuadrar tiene dos grados, y los dos se
+                    ven. */}
                 {liveDescuadre != null && totalEur > 0 && (
                   <div
+                    data-testid="cuadre-descuadre"
+                    data-cuadra={Math.abs(liveDescuadre) < 0.005 ? "1" : "0"}
                     className={
-                      "mt-1.5 flex items-baseline justify-between gap-3 text-[12.5px] font-medium " +
-                      (Math.abs(liveDescuadre) > 5 ? "text-red-700" : "text-slate-600")
+                      "mt-1.5 flex items-baseline justify-between gap-3 text-[13px] font-semibold " +
+                      (Math.abs(liveDescuadre) < 0.005
+                        ? "text-emerald-700"
+                        : Math.abs(liveDescuadre) > 5
+                          ? "text-red-700"
+                          : "text-amber-700")
                     }
                   >
-                    <span>Llevas contado {formatEur(totalEur)} · descuadre</span>
+                    <span>Llevas contado {formatEur(totalEur)}</span>
                     <span className="tabular-nums">
-                      {liveDescuadre >= 0 ? "+" : ""}
-                      {formatEur(liveDescuadre)}
+                      {Math.abs(liveDescuadre) < 0.005
+                        ? "Cuadra"
+                        : `${liveDescuadre >= 0 ? "+" : ""}${formatEur(liveDescuadre)}`}
                     </span>
                   </div>
                 )}
@@ -799,78 +837,67 @@ export function CloseShiftModal(props: {
               </div>
             )}
 
-            <div className="rounded-2xl border border-slate-200 overflow-auto mb-4 flex-1 min-h-[140px]">
-              <table className="w-full min-w-[240px] text-[13.5px]">
-                {/* v1.12 · con la tabla scrolleando dentro de la
-                    tarjeta, la cabecera se queda pegada arriba. En
-                    pantalla estrecha CON el pad abierto se despega: ahí
-                    la ventana de la tabla son 140 px y el titular de
-                    columnas se come una fila entera de recuento — y las
-                    columnas son tres y se aprenden; el total contado,
-                    que sigue pegado abajo, no. */}
-                <thead
-                  className={
-                    (padDenom ? "sm:sticky sm:top-0" : "sticky top-0") +
-                    " z-10 bg-mipiace-stone text-slate-500 text-[12px] uppercase tracking-wider"
-                  }
-                >
-                  <tr>
-                    <th className="text-left py-2 px-2.5 font-medium">Denominación</th>
-                    <th className="text-center py-2 px-1.5 font-medium w-[76px]">Cant.</th>
-                    <th className="text-right py-2 px-2.5 font-medium w-[104px]">Subtotal</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {DENOMINATIONS.map((d) => {
-                    const n = parseInt(counts[d.key] ?? "", 10);
-                    const subtotal = Number.isFinite(n) && n > 0 ? d.valueEur * n : 0;
-                    return (
-                      // `scroll-m*`: al centrar la fila activa, que no
-                      // se quede debajo del total contado (pegado abajo)
-                      // ni bajo la cabecera de columnas.
-                      <tr key={d.key} className="hover:bg-slate-50 scroll-mb-14 scroll-mt-10">
-                        <td className="py-1.5 px-2.5 text-mipiace-ink">{d.label}</td>
-                        <td className="py-1.5 px-1.5">
-                          {/* v1.12 · sin `inputMode="numeric"`: 15
-                              denominaciones eran 15 aperturas del
-                              teclado de Android encima del modal
-                              (hallazgos H2 y H7). */}
-                          <AmountField
-                            value={counts[d.key] ?? ""}
-                            active={padDenom === d.key}
-                            replacing={padDenom === d.key && padReplacing}
-                            onActivate={() => setPadDenom(d.key)}
-                            placeholder="0"
-                            suffix={null}
-                            align="center"
-                            size="sm"
-                            ariaLabel={`Cantidad de ${d.label}`}
-                          />
-                        </td>
-                        <td className="py-1.5 px-2.5 text-right tabular-nums whitespace-nowrap text-slate-500">
-                          {subtotal > 0 ? formatEur(subtotal) : "—"}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-                {/* v1.12 · el total contado también se queda pegado:
-                    es la cifra que el cajero mira entre denominación y
-                    denominación. */}
-                <tfoot className="sticky bottom-0 z-10 bg-mipiace-stone">
-                  <tr>
-                    <td
-                      colSpan={2}
-                      className="py-2.5 px-2.5 text-[13px] font-medium text-mipiace-ink"
-                    >
-                      Total contado
-                    </td>
-                    <td className="py-2.5 px-2.5 text-right text-[15px] font-semibold tabular-nums whitespace-nowrap text-mipiace-ink">
-                      {formatEur(totalEur)}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
+            {/* auditoria-sirope (#28) · DOS COLUMNAS Y SIN SCROLL.
+                Era una tabla de quince filas en una ventana de 140 px:
+                las monedas —lo que de verdad se cuenta a mano— vivían
+                bajo scroll, y el teclado numérico dejaba medio panel
+                vacío al lado. Doce denominaciones en dos columnas son
+                seis filas, y seis filas caben enteras en 1442 × 811 y
+                en 1280 × 800. Los tres billetes grandes se pliegan. */}
+            {/* El bloque de conteo es el que CEDE cuando algo más crece
+                —el aviso de mesas abiertas puede medir media pantalla—:
+                scrollea él en vez de empujar el total y las acciones
+                fuera de la tarjeta. En el caso normal no scrollea nada:
+                doce denominaciones en dos columnas caben enteras. */}
+            <div className="flex-1 min-h-0 overflow-y-auto -mx-1 px-1">
+            <div
+              data-testid="cuadre-diarias"
+              className="rounded-2xl border border-slate-200 p-2 mb-3 grid grid-cols-2 gap-x-3 gap-y-1"
+            >
+              {DENOMINACIONES_DIARIAS.map((d) => (
+                <FilaDeConteo
+                  key={d.key}
+                  d={d}
+                  valor={counts[d.key] ?? ""}
+                  activa={padDenom === d.key}
+                  replacing={padDenom === d.key && padReplacing}
+                  onActivate={() => setPadDenom(d.key)}
+                />
+              ))}
+            </div>
+
+            <details data-testid="cuadre-grandes" className="mb-3 shrink-0">
+              <summary className="list-none cursor-pointer text-[12.5px] text-slate-500 hover:text-mipiace-ink select-none py-1">
+                Billetes grandes (100, 200, 500 €)
+              </summary>
+              <div className="mt-2 rounded-2xl border border-slate-200 p-2 grid grid-cols-2 gap-x-3 gap-y-1">
+                {BILLETES_GRANDES.map((d) => (
+                  <FilaDeConteo
+                    key={d.key}
+                    d={d}
+                    valor={counts[d.key] ?? ""}
+                    activa={padDenom === d.key}
+                    replacing={padDenom === d.key && padReplacing}
+                    onActivate={() => setPadDenom(d.key)}
+                  />
+                ))}
+              </div>
+            </details>
+            </div>
+
+            {/* El total contado y el cuadre, juntos y al pie: es la
+                cifra que el cajero mira entre denominación y
+                denominación. */}
+            <div
+              data-testid="cuadre-total"
+              className="rounded-2xl bg-mipiace-stone px-4 py-3 mb-4 shrink-0 flex items-baseline justify-between gap-3"
+            >
+              <span className="text-[13px] font-medium text-mipiace-ink">
+                Total contado
+              </span>
+              <span className="text-[17px] font-semibold tabular-nums text-mipiace-ink">
+                {formatEur(totalEur)}
+              </span>
             </div>
 
             {syncBlock}
@@ -1091,6 +1118,59 @@ function ResultPanel({
           Descuadre &gt; 5 €. Recuento de control sugerido.
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * auditoria-sirope (#28) · una denominación de la hoja de cuadre.
+ *
+ * Era una fila de una tabla de tres columnas; ahora es una celda de una
+ * rejilla de dos, que es lo que hace que las doce de todos los días
+ * quepan sin scroll. Lo que pinta es lo mismo: el nombre, el campo de
+ * cantidad (que abre el CashPad, nunca el teclado de Android — ver H2 y
+ * H7 de v1.12) y el subtotal.
+ */
+function FilaDeConteo({
+  d,
+  valor,
+  activa,
+  replacing,
+  onActivate,
+}: {
+  d: Denominacion;
+  valor: string;
+  activa: boolean;
+  replacing: boolean;
+  onActivate: () => void;
+}) {
+  const n = Number.parseInt(valor, 10);
+  const subtotal = Number.isFinite(n) && n > 0 ? d.valueEur * n : 0;
+  return (
+    <div
+      data-testid="cuadre-fila"
+      data-denominacion={d.key}
+      className="flex items-center gap-2 px-1.5 py-0.5 rounded-xl hover:bg-slate-50"
+    >
+      <span className="w-[58px] shrink-0 text-[13.5px] text-mipiace-ink">
+        {d.label}
+      </span>
+      <div className="w-[72px] shrink-0">
+        <AmountField
+          value={valor}
+          active={activa}
+          replacing={replacing}
+          onActivate={onActivate}
+          placeholder="0"
+          suffix={null}
+          align="center"
+          size="sm"
+          ariaLabel={`Cantidad de ${d.label}`}
+        />
+      </div>
+      <span className="flex-1 text-right text-[12.5px] tabular-nums whitespace-nowrap text-slate-500">
+        {subtotal > 0 ? formatEur(subtotal) : "—"}
+      </span>
     </div>
   );
 }

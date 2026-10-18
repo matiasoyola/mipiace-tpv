@@ -110,6 +110,29 @@ function resolverActor(request: FastifyRequest): Actor | null {
       deviceId: request.cashier.did,
     };
   }
+  // residencia-3 · LA TERCERA PUERTA: la tablet de una habitación con
+  // alguien dentro.
+  //
+  // Va aquí y no en un segundo envoltorio, y es la decisión de esta
+  // línea: `conHistoria` es **el** punto por el que pasa toda ruta
+  // clínica de la casa, y la puerta es la pantalla que de verdad abre
+  // historias — quince tablets a la vez, 49 residentes, cada turno. Un
+  // `conHistoriaDeLaPuerta` paralelo habría sido un segundo sitio donde
+  // decidir qué se apunta, y el registro de accesos sólo sirve si lo
+  // escribe uno.
+  //
+  // `GET /residencia/puerta/me` (residencia-1) NO pasa por aquí y sigue
+  // sin pasar: su identidad es el DISPOSITIVO y no una persona, y una
+  // línea sin persona no contesta «¿quién ha abierto la historia de mi
+  // madre?» (decisión 3 de residencia-1). Lo que pasa por aquí es lo que
+  // hay DETRÁS del PIN, que es la pantalla que sí identifica a alguien.
+  if (request.puertaSesion) {
+    return {
+      userId: request.puertaSesion.userId,
+      tenantId: request.puertaSesion.tid,
+      deviceId: request.puertaSesion.did,
+    };
+  }
   return null;
 }
 

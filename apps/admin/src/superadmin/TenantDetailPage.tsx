@@ -297,6 +297,75 @@ export function TenantDetailPage() {
     }
   }
 
+  /**
+   * auditoria-sirope (#23) · EL INTERRUPTOR DE COCINA.
+   *
+   * Hasta este bloque sólo existía por API (`PATCH
+   * /super-admin/tenants/:id { kitchenDisplayEnabled }`): encenderlo
+   * para Sirope el 18-10 fue una llamada a mano. Ahora está donde están
+   * los demás, con lo que hay que saber antes de tocarlo:
+   *
+   *   · al ENCENDER, si el catálogo tiene etiquetas sin sección, sus
+   *     platos irán a Salón en silencio (#19);
+   *   · al APAGAR, cuántas pantallas se quedan a oscuras — el servidor lo
+   *     contesta en `kitchenScreensAffected` y aquí se dice antes.
+   */
+  async function onToggleCocina(): Promise<void> {
+    if (!id || !tenant) return;
+    const encendido = tenant.kitchenDisplayEnabled === true;
+    const sinSeccion = tenant.cocina?.etiquetasSinSeccion ?? 0;
+    const pantallas = tenant.cocina?.pantallas ?? 0;
+    if (!encendido) {
+      if (
+        !confirm(
+          `Vas a encender la pantalla de comandas en ${tenant.name}.\n\n` +
+            (sinSeccion > 0
+              ? `OJO: ${sinSeccion} etiqueta${sinSeccion === 1 ? "" : "s"} del catálogo ` +
+                "no tiene sección. Sus platos irán a Salón y no aparecerán en ninguna " +
+                "pantalla de cocina. Se asignan en el panel del cliente → Comanderas.\n\n"
+              : "") +
+            "¿Continuar?",
+        )
+      ) {
+        return;
+      }
+    } else if (
+      !confirm(
+        `Vas a apagar la pantalla de comandas en ${tenant.name}.\n\n` +
+          (pantallas > 0
+            ? `${pantallas} pantalla${pantallas === 1 ? "" : "s"} se queda${pantallas === 1 ? "" : "n"} a oscuras ` +
+              "ahora mismo: dejarán de recibir comandas.\n\n"
+            : "No hay ninguna pantalla emparejada.\n\n") +
+          "¿Continuar?",
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setActionError(null);
+    setActionMessage(null);
+    try {
+      const r = await superApi<{ kitchenScreensAffected?: number }>(
+        `/super-admin/tenants/${id}`,
+        { method: "PATCH", body: { kitchenDisplayEnabled: !encendido } },
+      );
+      setActionMessage(
+        encendido
+          ? `Cocina apagada.${
+              r.kitchenScreensAffected
+                ? ` ${r.kitchenScreensAffected} pantalla${r.kitchenScreensAffected === 1 ? "" : "s"} a oscuras.`
+                : ""
+            }`
+          : "Cocina encendida. Las cajas lo verán en menos de un minuto.",
+      );
+      await reload();
+    } catch (err) {
+      setActionError(errToHuman(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onForceLogout(): Promise<void> {
     if (!id) return;
     if (!confirm("Cerrará la sesión de TODOS los usuarios de la cuenta. ¿Continuar?")) return;
@@ -732,6 +801,13 @@ export function TenantDetailPage() {
             busy={busy}
             onToggleSalud={(campo) => void onToggleSalud(campo)}
           />
+          {/* auditoria-sirope (#23) · la cocina, en los dos estados del
+              tenant y con el mismo componente, igual que la salud. */}
+          <CocinaPanel
+            tenant={tenant}
+            busy={busy}
+            onToggleCocina={() => void onToggleCocina()}
+          />
           <HealthPanel
             tenant={tenant}
             busy={busy}
@@ -768,6 +844,7 @@ export function TenantDetailPage() {
           onDedupeTags={onDedupeTags}
           onToggleHolded={() => void onToggleHolded()}
           onToggleSalud={(campo) => void onToggleSalud(campo)}
+          onToggleCocina={() => void onToggleCocina()}
           setDejarHolded={setDejarHolded}
           setPuestaEnMarcha={setPuestaEnMarcha}
           setEliminarCuenta={setEliminarCuenta}
@@ -1488,6 +1565,66 @@ function DatosDeSaludPanel({
   );
 }
 
+/**
+ * auditoria-sirope (#23) · LA COCINA, en su caja.
+ *
+ * Aparte de «Datos de salud» porque no comparte nada con ellos: encender
+ * la cocina no es aceptar un tratamiento de datos, es vender un módulo
+ * que se cobra por pantalla. Y aparte de `modules` por lo de siempre: una
+ * empresa no puede quedarse «sólo con cocina».
+ */
+function CocinaPanel({
+  tenant,
+  busy,
+  onToggleCocina,
+}: {
+  tenant: TenantDetail;
+  busy: boolean;
+  onToggleCocina: () => void;
+}) {
+  const encendida = tenant.kitchenDisplayEnabled === true;
+  const sinSeccion = tenant.cocina?.etiquetasSinSeccion ?? 0;
+  const pantallas = tenant.cocina?.pantallas ?? 0;
+  return (
+    <div
+      data-testid="panel-cocina"
+      className="bg-white border border-slate-200 rounded-xl p-6 mb-6"
+    >
+      <h3 className="font-semibold text-slate-900 mb-1">Cocina</h3>
+      <p className="text-[13px] text-slate-500 mb-4">
+        La pantalla de comandas. Se cobra por pantalla y necesita la caja
+        encendida.
+      </p>
+      <CasillaDeSalud
+        label="Pantalla de comandas"
+        hint={
+          encendida
+            ? `${pantallas} pantalla${pantallas === 1 ? "" : "s"} emparejada${pantallas === 1 ? "" : "s"}.`
+            : "Las comandas se agrupan por sección y van a su pantalla o a su impresora."
+        }
+        checked={encendida}
+        busy={busy}
+        onChange={onToggleCocina}
+      />
+      {/* auditoria-sirope (#19) · el aviso que faltaba el 18-10. */}
+      {encendida && sinSeccion > 0 && (
+        <div
+          data-testid="aviso-cocina-sin-seccion"
+          className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900"
+        >
+          <strong>
+            {sinSeccion === 1
+              ? "1 etiqueta del catálogo sin sección"
+              : `${sinSeccion} etiquetas del catálogo sin sección`}
+          </strong>
+          : sus platos van a Salón y no aparecen en ninguna pantalla de
+          cocina. Se asignan en el panel del cliente → Comanderas.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ActiveTenantActions({
   blocked,
   tenant,
@@ -1501,6 +1638,7 @@ function ActiveTenantActions({
   onDedupeTags,
   onToggleHolded,
   onToggleSalud,
+  onToggleCocina,
   setDejarHolded,
   setPuestaEnMarcha,
   setEliminarCuenta,
@@ -1519,6 +1657,8 @@ function ActiveTenantActions({
   onToggleSalud: (
     campo: "clinicalRecordsEnabled" | "residenciaEnabled",
   ) => void;
+  /** auditoria-sirope (#23) · el interruptor de la pantalla de comandas. */
+  onToggleCocina: () => void;
   setDejarHolded: (v: boolean) => void;
   setPuestaEnMarcha: (v: boolean) => void;
   setEliminarCuenta: (v: boolean) => void;
@@ -1610,6 +1750,8 @@ function ActiveTenantActions({
           en el sitio en el que esta caja ha estado siempre para un tenant
           activo: debajo de las métricas y encima de «Acciones». */}
       <DatosDeSaludPanel tenant={tenant} busy={busy} onToggleSalud={onToggleSalud} />
+      {/* auditoria-sirope (#23) · hasta hoy Cocina sólo se movía por API. */}
+      <CocinaPanel tenant={tenant} busy={busy} onToggleCocina={onToggleCocina} />
 
       <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6">
         <h3 className="font-semibold text-slate-900 mb-4">Acciones</h3>

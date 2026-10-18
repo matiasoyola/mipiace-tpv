@@ -58,3 +58,9 @@ apps/e2e-ui/buzon-del-banco.jsonl
 # desde fuera de apps/e2e-ui.
 test-results/
 apps/e2e-ui/playwright-report/
+
+# residencia-3 · el volumen de ficheros clínicos de este worktree (fotos
+# de residente y notas de voz, cifradas). Es un volumen de desarrollo: ni
+# se versiona ni viaja.
+.clinical-files/
+.clinical-files-e2e/

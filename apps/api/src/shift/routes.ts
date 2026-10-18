@@ -7,6 +7,7 @@ import { verifyPassword } from "../auth/passwords.js";
 import { cashierLabelFrom } from "../users/display.js";
 import { requireCashierSession } from "./cashier-session.js";
 import { ALLOWED_DENOMINATIONS, validateAndSumDenominations } from "./cash-count.js";
+import { contarMesasVaciadas } from "./mesas-vaciadas.js";
 import { generateZReportPdf } from "./z-report.js";
 import { computeZBreakdown, type ZBreakdown } from "./z-breakdown.js";
 import { loadShiftBreakdownSums } from "./breakdown-sums.js";
@@ -1015,6 +1016,9 @@ async function executeShiftClose(args: {
     where: { shiftId: shift.id, status: { notIn: ["DRAFT", "VOIDED"] } },
   });
 
+  // auditoria-sirope (#18) · lo que se vació con consumo en este turno.
+  const mesasVaciadas = await contarMesasVaciadas(prisma, shift.id);
+
   let zPath: string | null = null;
   try {
     zPath = await generateZReportPdf({
@@ -1040,6 +1044,7 @@ async function executeShiftClose(args: {
       acceptedSyncFailures: body.syncFailureAccepted === true,
       managerAuthorizationEmail: managerEmail,
       managerAuthorizationAlias: managerAlias,
+      mesasVaciadas,
     });
   } catch (err) {
     log.error(err, "Z report generation failed");

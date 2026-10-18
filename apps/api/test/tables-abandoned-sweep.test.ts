@@ -93,6 +93,14 @@ function fakePrisma(tickets: FakeTicket[]) {
     tickets,
     updates,
     client: {
+      // auditoria-sirope (#22) · vaciar cierra las comandas LISTAS. Un
+      // draft abandonado y vacío nunca tuvo ninguna, pero la llamada se
+      // hace igual —el mismo camino lo usa el «Anular» del panel, que sí
+      // toca mesas con consumo—, así que el doble la contesta.
+      kitchenOrder: {
+        findMany: vi.fn(async () => []),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
       ticket: {
         findMany: vi.fn(async (args: { where: Record<string, unknown> }) => {
           const where = args.where ?? {};

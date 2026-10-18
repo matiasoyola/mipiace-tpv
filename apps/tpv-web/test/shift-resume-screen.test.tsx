@@ -170,7 +170,8 @@ describe("v1.11 · el turno deja de ser un muro", () => {
 
     // La tabla de denominaciones NO está en pantalla. Ni un campo de
     // efectivo. Eso es el bloque entero en una aserción.
-    expect(container.textContent).not.toContain("Denominación");
+    // auditoria-sirope (#28) · ver la nota de `close-shift-reason`.
+    expect(container.querySelector('[data-testid="cuadre-diarias"]')).toBeNull();
     expect(container.querySelector('input[placeholder="0,00"]')).toBeNull();
 
     await act(async () => {
@@ -218,7 +219,8 @@ describe("v1.11 · cerrar el día enseña el resumen, no el arqueo", () => {
     expect(container.textContent).toContain("170,00 €");
     // Contar sigue existiendo, como enlace. No como requisito.
     expect(container.textContent).toContain("Cuadrar caja");
-    expect(container.textContent).not.toContain("Denominación");
+    // auditoria-sirope (#28) · ver la nota de `close-shift-reason`.
+    expect(container.querySelector('[data-testid="cuadre-diarias"]')).toBeNull();
   });
 
   it("confirmar cierra sin contar (POST /close-day) y termina en la misma tarjeta", async () => {
@@ -253,11 +255,132 @@ describe("v1.11 · cerrar el día enseña el resumen, no el arqueo", () => {
     await act(async () => {
       buttonWith("Cuadrar caja").click();
     });
-    expect(container.textContent).toContain("Denominación");
+    expect(
+      container.querySelector('[data-testid="cuadre-diarias"]'),
+    ).not.toBeNull();
     expect(container.textContent).toContain("Efectivo esperado en el cajón");
     expect(container.textContent).toContain("170,00 €");
   });
+
+  // ── auditoria-sirope · el cierre del día del 18-10 ─────────────────
+  //
+  // Las filas de la tabla de sabotajes que viven aquí:
+  //
+  //   | «Cuadrar caja» vuelve a ser un enlace (#27)
+  //   | Las denominaciones vuelven a empezar por 500 (#28)
+  //   | Descuadre 0 sin «Cuadra» (#28)
+  //   | «Cancelar» fuera de la hoja (#29)
+
+  it("#27 · «Cuadrar caja» es un BOTÓN al lado de «Cerrar turno»", async () => {
+    await renderScreen();
+    await openCloseWithSummary();
+    const cuadrar = container.querySelector<HTMLElement>(
+      '[data-testid="cuadrar-caja"]',
+    );
+    const cerrar = container.querySelector<HTMLElement>(
+      '[data-testid="cerrar-turno"]',
+    );
+    expect(cuadrar).not.toBeNull();
+    expect(cerrar).not.toBeNull();
+    // Al mismo nivel: misma fila y mismo alto. Era un enlace subrayado
+    // en gris debajo, o sea «esto no hace falta».
+    expect(cuadrar!.parentElement).toBe(cerrar!.parentElement);
+    expect(cuadrar!.className).toContain("h-14");
+    expect(cuadrar!.className).not.toContain("underline");
+    // Y «Cerrar turno» sigue siendo el principal: decisión de v1.11 que
+    // este bloque NO cambia.
+    expect(cerrar!.className).toContain("bg-mipiace-coral");
+  });
+
+  it("#29 · «Cancelar» está DENTRO de la hoja", async () => {
+    await renderScreen();
+    await openCloseWithSummary();
+    const cancelar = container.querySelector<HTMLElement>(
+      '[data-testid="cerrar-dia-cancelar"]',
+    );
+    expect(cancelar).not.toBeNull();
+    // En la misma fila que las acciones, no colgando debajo de la
+    // tarjeta (donde a 811 px asomaba cortado por el borde).
+    expect(
+      cancelar!.parentElement!.querySelector('[data-testid="cerrar-turno"]'),
+    ).not.toBeNull();
+  });
+
+  it("#28 · las denominaciones empiezan por las de todos los días", async () => {
+    await renderScreen();
+    await openCloseWithSummary();
+    await act(async () => {
+      buttonWith("Cuadrar caja").click();
+    });
+    const filas = [
+      ...container.querySelectorAll<HTMLElement>(
+        '[data-testid="cuadre-diarias"] [data-testid="cuadre-fila"]',
+      ),
+    ].map((el) => el.dataset.denominacion);
+    expect(filas[0]).toBe("50");
+    expect(filas).toContain("0.01");
+    // Y los tres grandes NO están en la lista de todos los días.
+    expect(filas).not.toContain("500");
+    expect(filas).not.toContain("200");
+    expect(filas).not.toContain("100");
+    // Están, pero plegados.
+    const grandes = container.querySelector<HTMLDetailsElement>(
+      '[data-testid="cuadre-grandes"]',
+    );
+    expect(grandes).not.toBeNull();
+    expect(grandes!.open).toBe(false);
+    // Doce en dos columnas son seis filas: eso es lo que cabe sin
+    // scroll. La caja ya no scrollea.
+    expect(filas).toHaveLength(12);
+  });
+
+  it("#28 · descuadre 0 dice «Cuadra», y en verde", async () => {
+    await renderScreen();
+    await openCloseWithSummary();
+    await act(async () => {
+      buttonWith("Cuadrar caja").click();
+    });
+    // El esperado son 170 €: 3 billetes de 50 y uno de 20.
+    await contar("50", "3");
+    await contar("20", "1");
+    const linea = container.querySelector<HTMLElement>(
+      '[data-testid="cuadre-descuadre"]',
+    );
+    expect(linea).not.toBeNull();
+    expect(linea!.dataset.cuadra).toBe("1");
+    expect(linea!.textContent).toContain("Cuadra");
+    expect(linea!.className).toContain("emerald");
+
+    // Y un billete de más deja de cuadrar, con su cifra.
+    await contar("50", "4");
+    const desc = container.querySelector<HTMLElement>(
+      '[data-testid="cuadre-descuadre"]',
+    )!;
+    expect(desc.dataset.cuadra).toBe("0");
+    expect(desc.textContent).toContain("50,00");
+    expect(desc.className).not.toContain("emerald");
+  });
 });
+
+/** Teclea `cantidad` en la denominación `key` con el CashPad. */
+async function contar(key: string, cantidad: string): Promise<void> {
+  const campo = container
+    .querySelector(`[data-denominacion="${key}"]`)!
+    .querySelector("input")!;
+  await act(async () => {
+    campo.click();
+  });
+  const pad = container.querySelector('[data-testid="cash-pad"]')!;
+  const tecla = (label: string) =>
+    [...pad.querySelectorAll("button")].find(
+      (b) => b.textContent?.trim() === label,
+    )!;
+  for (const ch of cantidad) {
+    await act(async () => {
+      tecla(ch).click();
+    });
+  }
+}
 
 describe("v1.5-hotfix2 (vigente) · turno colgado con SYNC_PENDING", () => {
   it("muestra los tickets fallidos y NO deja cerrar sin aceptar", async () => {

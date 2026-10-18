@@ -81,6 +81,9 @@ importers:
       '@fastify/websocket':
         specifier: ^11
         version: 11.2.0
+      '@mipiacetpv/bonos':
+        specifier: workspace:*
+        version: link:../../packages/bonos
       '@mipiacetpv/clinica-sesion':
         specifier: workspace:*
         version: link:../../packages/clinica-sesion
@@ -275,6 +278,9 @@ importers:
       '@mipiacetpv/kitchen-lan':
         specifier: workspace:*
         version: link:../../packages/kitchen-lan
+      '@mipiacetpv/residencia-plan':
+        specifier: workspace:*
+        version: link:../../packages/residencia-plan
       '@mipiacetpv/ticket-model':
         specifier: workspace:*
         version: link:../../packages/ticket-model
@@ -356,6 +362,18 @@ importers:
         version: 0.21.2(vite@6.4.2(@types/node@20.19.40)(jiti@1.21.7)(terser@5.47.1)(tsx@4.21.0))(workbox-build@7.4.1(@types/babel__core@7.20.5))(workbox-window@7.4.1)
       vitest:
         specifier: ^2
+        version: 2.1.9(@types/node@20.19.40)(jsdom@29.1.1)(terser@5.47.1)
+
+  packages/bonos:
+    devDependencies:
+      '@types/node':
+        specifier: ^20.16.10
+        version: 20.19.40
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
         version: 2.1.9(@types/node@20.19.40)(jsdom@29.1.1)(terser@5.47.1)
 
   packages/clinica-sesion:

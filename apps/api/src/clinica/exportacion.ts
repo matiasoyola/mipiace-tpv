@@ -13,6 +13,25 @@
 //   · `consentimientos/` — los PDF firmados, descifrados;
 //   · y en la raíz, `centro.json` con todo en estructura.
 //
+// ── residencia-3 · Y SI ES UN RESIDENTE, SU PARTE DE RESIDENCIA ──────
+//
+// Deuda que residencia-1b §12.4 dejó anotada y que éste cierra: un centro
+// de residencia que pidiera sus datos recibía un ZIP **sin la ficha del
+// residente, sin su plan y sin su registro de cuidados**. Lo que exportaba
+// seguía exportándose igual, así que no estaba roto: estaba incompleto, y
+// en una devolución del art. 28.3.g incompleto es peor.
+//
+// Ahora, por residente:
+//
+//   · `residencia.json`  — ficha (con DNI y NSS descifrados), histórico de
+//     habitaciones, plan completo y **todo el registro de cuidados**, con
+//     la firma de cada fila y el estado de correcciones y anulaciones;
+//   · `foto.jpg`         — su foto, descifrada, si la tiene;
+//   · `notas-de-voz/`    — los audios de «algo no va bien», descifrados.
+//
+// Los clientes que NO son residentes —los pacientes de la consulta de un
+// centro mixto— no ganan ningún fichero. Ver `parteDeResidencia`.
+//
 // ── Por qué el PDF Y el JSON, y no uno de los dos ───────────────────
 //
 // Porque contestan a dos personas distintas. El PDF lo lee Rosario, su
@@ -53,6 +72,7 @@ import { armarInforme, pdfDelInforme } from "./informe.js";
 import { entregasDelPaciente } from "./entregas.js";
 import { apuntarAcceso } from "./registro.js";
 import { vistaDeLaHistoria } from "./historia.js";
+import { parteDeResidencia } from "../residencia/exportacion.js";
 
 export { ZipDemasiadoGrande };
 
@@ -238,6 +258,40 @@ export async function exportarElCentro(
       ficheros += 1;
     }
 
+    // ── residencia-3 · la parte de RESIDENCIA ───────────────────────
+    //
+    // Va antes del JSON porque sus incidencias tienen que caber en él, y
+    // sus ficheros se sueltan de uno en uno como las fotos: un centro con
+    // 49 residentes y mil notas de voz no puede tener el ZIP entero en
+    // memoria dos veces.
+    const residencia = await parteDeResidencia(prisma, {
+      tenantId: input.tenantId,
+      clientId: paciente.id,
+    });
+    for (const inc of residencia.incidencias) {
+      incidencias.push(`${carpeta}: ${inc}`);
+    }
+    for (const fichero of residencia.ficheros) {
+      await onTrozo(
+        zip.anadir(
+          `${carpeta}/${fichero.ruta}`,
+          fichero.contenido,
+          input.ahora,
+        ),
+      );
+      ficheros += 1;
+    }
+    if (residencia.json != null) {
+      await onTrozo(
+        zip.anadir(
+          `${carpeta}/residencia.json`,
+          Buffer.from(JSON.stringify(residencia.json, null, 2), "utf8"),
+          input.ahora,
+        ),
+      );
+      ficheros += 1;
+    }
+
     // ── Y la estructura, para el JSON ───────────────────────────────
     const historia = await vistaDeLaHistoria(prisma, {
       tenantId: input.tenantId,
@@ -262,6 +316,8 @@ export async function exportarElCentro(
       fotos,
       consentimientos,
       entregas,
+      // `null` en los clientes que no son residentes de este centro.
+      residencia: residencia.json,
     });
   }
 

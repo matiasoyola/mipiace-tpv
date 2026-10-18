@@ -1,0 +1,8 @@
+residencia-3 · lo medido en el bucle visual (1280×800, Chromium)
+
+CASO NORMAL (PIN + «como siempre» + 2 «hecho») · 11 toques · 2804 ms de máquina
+  de ellos, el PIN y el «como siempre»: 1951 ms
+CASO CON ALGO («no como siempre» con 1 cambio + nota escrita) · 6 toques · 1705 ms de máquina
+
+Hallazgos:
+  ninguno

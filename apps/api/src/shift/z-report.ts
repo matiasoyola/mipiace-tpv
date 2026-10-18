@@ -3,6 +3,11 @@ import path from "node:path";
 
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
+import {
+  ETIQUETA_MOTIVO,
+  MESAS_VACIADAS_VACIO,
+  type MesasVaciadas,
+} from "./mesas-vaciadas.js";
 import type { ZBreakdown } from "./z-breakdown.js";
 
 // Generador minimal del informe Z (PDF). Plantilla rudimentaria: una
@@ -35,6 +40,14 @@ export interface ZReportInput {
   // email — el email se conserva en el PDF como audit trail porque el
   // alias no es único globalmente.
   managerAuthorizationAlias: string | null;
+  /**
+   * auditoria-sirope (#18) · las mesas que se vaciaron CON consumo.
+   *
+   * Opcional: un llamante que no lo pase imprime el Z de siempre. No se
+   * inventa un cero — un cero afirmado y un dato que no se pidió no son
+   * lo mismo, y este informe es el que mira el dueño al cerrar.
+   */
+  mesasVaciadas?: MesasVaciadas;
 }
 
 const STORAGE_ROOT =
@@ -123,6 +136,21 @@ export async function generateZReportPdf(input: ZReportInput): Promise<string> {
   hr();
   line(`Tickets emitidos: ${input.ticketsCount}`);
   line(`Devoluciones (nº): ${input.refundsCount}`);
+  // auditoria-sirope (#18) · comida que salió y no se cobró. Va con los
+  // recuentos del turno y no en una sección aparte: es lo mismo que una
+  // devolución —dinero que no entró— y se lee en el mismo golpe de
+  // vista.
+  const vaciadas = input.mesasVaciadas ?? MESAS_VACIADAS_VACIO;
+  if (vaciadas.count > 0) {
+    line(
+      `Mesas vaciadas: ${vaciadas.count} · ${fmtEur(vaciadas.total)}`,
+      { bold: true },
+    );
+    for (const m of vaciadas.porMotivo) {
+      const etiqueta = m.motivo ? ETIQUETA_MOTIVO[m.motivo] : "Sin motivo";
+      line(`  ${etiqueta}: ${m.count} · ${fmtEur(m.total)}`, { size: 9 });
+    }
+  }
   if (input.syncIssues.pendingSync > 0 || input.syncIssues.failed > 0) {
     hr();
     line("Incidencias de sincronización Holded", { bold: true });

@@ -333,10 +333,19 @@ describe("n1-vertical · las familias se alcanzan en un aparato de mano", () => 
 });
 
 describe("n1-vertical · los rótulos de familia no se cortan a mitad de palabra", () => {
-  it("el azulejo de familia trunca con puntos suspensivos", async () => {
+  it("el azulejo recorta por dentro y el rótulo entra en dos renglones", async () => {
     // Medido en el N1 con la carta de Sirope (azulejos de 104 px):
     // «Croissantysandwich» mide 206 px y se leía «Croissanty», saliéndose
     // además del azulejo porque no había `overflow`.
+    //
+    // Este bloque lo arregló con `truncate` (una línea y puntos
+    // suspensivos), pero al mergear `master` apareció el arreglo de
+    // auditoria-sirope (#6), posterior y mejor: `overflow-hidden` más
+    // relleno lateral en el azulejo, y DOS renglones con peldaño de letra
+    // en el rótulo, que deja el nombre ENTERO en vez de cortado. Es el que
+    // se queda. `truncate` ya no vale aquí porque lleva dentro
+    // `white-space: nowrap`, que hereda al rótulo y anularía su
+    // `line-clamp: 2`.
     vertical.actual = "HOSPITALITY";
     declaraHandheld();
     await renderSale();
@@ -345,7 +354,19 @@ describe("n1-vertical · los rótulos de familia no se cortan a mitad de palabra
     );
     expect(azulejos.length).toBeGreaterThan(0);
     for (const a of azulejos) {
-      expect(a.className).toContain("truncate");
+      // No se sale al azulejo de al lado, y la letra no toca el borde.
+      expect(a.className).toContain("overflow-hidden");
+      expect(a.className).toContain("px-2.5");
+      // Y nada de `nowrap`, que dejaría el rótulo en una sola línea.
+      expect(a.className).not.toContain("truncate");
+    }
+    const rotulos = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-testid="family-label"]'),
+    );
+    expect(rotulos.length).toBe(azulejos.length);
+    for (const r of rotulos) {
+      expect(r.style.webkitLineClamp).toBe("2");
+      expect(r.style.overflow).toBe("hidden");
     }
   });
 });

@@ -52,6 +52,10 @@ import { registerOnboardingRoutes } from "./onboarding/routes.js";
 import { registerServicesRoutes } from "./services/routes.js";
 import { registerAgendaHoursRoutes } from "./agenda/hours.js";
 import { registerAgendaRoutes } from "./agenda/routes.js";
+// B-reservas-8 · los bonos de sesiones. Todas sus rutas van detrás de
+// `Tenant.bonosEnabled` y contestan 404 con el módulo apagado.
+import { registerVoucherRoutes } from "./vouchers/routes.js";
+import { registerVoucherAdminRoutes } from "./vouchers/routes-admin.js";
 import { registerCashierAuthRoutes } from "./shift/cashier-auth.js";
 import { registerShiftRoutes } from "./shift/routes.js";
 import { registerStaffRoutes } from "./staff/routes.js";
@@ -72,6 +76,21 @@ import { registerResidenciaTurnosRoutes } from "./residencia/turnos-routes.js";
 import { registerResidenciaControlesRoutes } from "./residencia/controles-routes.js";
 import { registerResidenciaPlanRoutes } from "./residencia/plan-routes.js";
 import { registerResidenciaPuertaRoutes } from "./residencia/puerta-routes.js";
+// residencia-3 · la puerta de verdad: el PIN, lo que toca, el lote de
+// registros y la foto del residente.
+import { registerResidenciaPuertaRegistroRoutes } from "./residencia/puerta-registro-routes.js";
+import { registerResidenciaFichaRoutes } from "./residencia/ficha-routes.js";
+// residencia-4 · la gravedad, el libro de incidencias y el aviso. Las del
+// libro llevan las mismas puertas que el plan (clínica + gate + la
+// categoría del rol de cuidado); las de guardia tienen su propia auth de
+// dispositivo (`guardia-auth.ts`), que no acepta ni un TERMINAL ni una
+// puerta.
+import { registerResidenciaIncidenciasRoutes } from "./residencia/incidencias-routes.js";
+import { registerResidenciaGuardiaRoutes } from "./residencia/guardia-routes.js";
+import { registerGuardiaWebSocketRoute } from "./residencia/guardia-ws-route.js";
+// residencia-4 · el seed de la plantilla de gravedad (D-65), hermano del
+// del catálogo de controles.
+import { cargarPlantillaDeGravedad } from "./residencia/catalogo/cargar-plantilla.js";
 // residencia-2 · el seed del catálogo de controles de serie (D-11, D-21).
 import { cargarCatalogoDeSerie } from "./residencia/catalogo/cargar-catalogo.js";
 import { registerKitchenTpvRoutes } from "./kitchen/tpv-routes.js";
@@ -95,12 +114,15 @@ import { startAgendaHoldTtlWorker } from "./workers/agenda-hold-ttl-worker.js";
 import { registerAgendaHoldTtlRepeatable } from "./queues/agenda-hold-ttl.js";
 import { startShiftDayCutWorker } from "./workers/shift-day-cut-worker.js";
 import { registerShiftDayCutRepeatable } from "./queues/shift-day-cut.js";
+import { startResidenciaGuardiaWorker } from "./workers/residencia-guardia-worker.js";
+import { registerResidenciaGuardiaRepeatable } from "./queues/residencia-guardia.js";
 import { registerFiscalRoutes } from "./fiscal/routes.js";
 import { registerLegalRoutes } from "./legal/routes.js";
 import { registerTicketRoutes } from "./tickets/routes.js";
 import { registerCreditRoutes } from "./tickets/credit-routes.js";
 import { registerTicketDigitalRoute } from "./tickets/digital-route.js";
 import { registerPublicTicketPdfRoute } from "./tickets/public-pdf-route.js";
+import { registerMostradorRoutes } from "./tickets/mostrador.js";
 import { registerSendToKitchenRoute } from "./tickets/send-to-kitchen.js";
 import { registerSendToKitchenEscposRoute } from "./tickets/send-to-kitchen-escpos.js";
 import { registerTicketPrintRoute } from "./tickets/print.js";
@@ -244,6 +266,8 @@ async function main() {
   await registerStaffRoutes(app);
   await registerAgendaRoutes(app);
   await registerAgendaHoursRoutes(app);
+  await registerVoucherRoutes(app);
+  await registerVoucherAdminRoutes(app);
   await registerDeviceRoutes(app);
   await registerFichajeRoutes(app);
   await registerFichajeAdminRoutes(app);
@@ -275,6 +299,7 @@ async function main() {
   // V1-verifactu (ADR-019) · el registro de facturación encadenado.
   await registerFiscalRoutes(app);
   await registerCreditRoutes(app);
+  await registerMostradorRoutes(app);
   await registerSendToKitchenRoute(app);
   await registerSendToKitchenEscposRoute(app);
   // kds-1-cocina · las rutas de la PANTALLA (`/kitchen/*`, device token de
@@ -300,6 +325,17 @@ async function main() {
   await registerResidenciaControlesRoutes(app);
   await registerResidenciaPlanRoutes(app);
   await registerResidenciaPuertaRoutes(app);
+  // residencia-3 · las seis rutas de la puerta (arranque, PIN, lo que
+  // toca, el lote, anular y la foto) y las tres del admin (foto,
+  // consentimiento de imagen, PIN de puerta) más la vista de lo registrado
+  // hoy en la ficha del residente.
+  await registerResidenciaPuertaRegistroRoutes(app);
+  await registerResidenciaFichaRoutes(app);
+  // residencia-4 · el libro de incidencias y la plantilla de gravedad en
+  // solo lectura (panel), y el móvil de guardia con su socket.
+  await registerResidenciaIncidenciasRoutes(app);
+  await registerResidenciaGuardiaRoutes(app);
+  await registerGuardiaWebSocketRoute(app);
   await registerKitchenRoutes(app);
   await registerKitchenTpvRoutes(app);
   // kds-1-cocina · los ajustes de cocina del panel del restaurante, las
@@ -349,6 +385,9 @@ async function main() {
   let emailWorker: ReturnType<typeof startTicketEmailWorker> | null = null;
   let agendaHoldTtlWorker: ReturnType<typeof startAgendaHoldTtlWorker> | null = null;
   let shiftDayCutWorker: ReturnType<typeof startShiftDayCutWorker> | null = null;
+  let residenciaGuardiaWorker:
+    | ReturnType<typeof startResidenciaGuardiaWorker>
+    | null = null;
   if (env.NODE_ENV !== "production") {
     initialWorker = startInitialSyncWorker();
     incrementalWorker = startCatalogIncrementalWorker();
@@ -359,16 +398,22 @@ async function main() {
     // v1.11-cierre-de-dia · el corte de día también embebido en dev, si no
     // no hay forma de probarlo sin levantar el contenedor de workers.
     shiftDayCutWorker = startShiftDayCutWorker();
+    // residencia-4 · el escalado de los avisos y la pasada de ausencias,
+    // también embebidos en dev: sin esto no hay forma de ver que un N2 sin
+    // acusar escala a los cinco minutos sin levantar el contenedor de
+    // workers.
+    residenciaGuardiaWorker = startResidenciaGuardiaWorker();
     const count = await registerAllExistingRepeatables();
     await registerAgendaHoldTtlRepeatable();
     await registerShiftDayCutRepeatable();
+    await registerResidenciaGuardiaRepeatable();
     app.log.info(`workers arrancados embedded · ${count} repeatable(s) registrados`);
   }
   if (sentryOn) app.log.info("Sentry activo (api)");
 
   // ── residencia-2 · el catálogo de controles de serie ───────────────
   //
-  // 36 filas GLOBALES (`scope = STANDARD`, sin tenant), idempotentes: es
+  // 37 filas GLOBALES (`scope = STANDARD`, sin tenant), idempotentes: es
   // el catálogo del producto, y lo ven todos los centros de residencia a
   // la vez (D-21, D-57). Corre en cada arranque porque así una versión
   // nueva de un control llega con el despliegue y no con un paso manual
@@ -377,7 +422,7 @@ async function main() {
   // publicada: lo que no cambia no escribe.
   //
   // Corre SIEMPRE y no sólo si hay algún tenant de residencia. Es un
-  // catálogo, no datos de nadie: 36 filas en una tabla que los quince
+  // catálogo, no datos de nadie: 37 filas en una tabla que los quince
   // clientes de hoy no consultan nunca, y gatearlo obligaría a que
   // encender el módulo a un centro dependiera de un seed que todavía no
   // ha corrido.
@@ -440,6 +485,50 @@ async function main() {
     }
   }
 
+  // ── residencia-4 · la plantilla de gravedad de serie (D-65) ────────
+  //
+  // Hermano del seed del catálogo, con las mismas dos propiedades que
+  // importan y por las mismas razones: **no tumba el arranque si falla**
+  // y **no se carga a medias** (valida el fichero entero antes de
+  // escribir). La memoria de la casa es la misma: nada del arranque puede
+  // lanzar, porque un dedo en un fichero de datos de residencia dejaría
+  // sin API a los quince clientes que no la tienen.
+  //
+  // Y una consecuencia que conviene decir en voz alta: **un centro sin
+  // plantilla cargada registra las constantes y no gradúa nada**.
+  // `plantillaVigente` devuelve cero reglas y `gravedadDe` contesta
+  // `null`, así que el cuidado se apunta —que es la invariante— y no abre
+  // incidencia. Se ve en la pantalla de la plantilla del admin, que
+  // diría «versión 0».
+  try {
+    const plantilla = await cargarPlantillaDeGravedad();
+    if (plantilla.accion === "publicada") {
+      app.log.info(
+        {
+          version: plantilla.version,
+          reglas: plantilla.insertadas,
+          jubiladas: plantilla.jubiladas,
+        },
+        "residencia · plantilla de gravedad publicada",
+      );
+    } else if (plantilla.accion === "despliegue-hacia-atras") {
+      app.log.warn(
+        { enLaBase: plantilla.version },
+        "residencia · la plantilla de gravedad de la base va por delante del fichero: no se degrada",
+      );
+    }
+  } catch (err) {
+    const sinTablas =
+      typeof err === "object" && err !== null && "code" in err && err.code === "P2021";
+    if (sinTablas) {
+      app.log.warn(
+        "residencia · la plantilla de gravedad no se ha cargado: faltan sus tablas (¿base sin migrar?)",
+      );
+    } else {
+      app.log.error(err, "residencia · la plantilla de gravedad no se pudo cargar");
+    }
+  }
+
   const close = async () => {
     app.log.info("Apagando…");
     await app.close();
@@ -448,6 +537,7 @@ async function main() {
     if (ticketWorker) await ticketWorker.close();
     if (refundWorker) await refundWorker.close();
     if (emailWorker) await emailWorker.close();
+    if (residenciaGuardiaWorker) await residenciaGuardiaWorker.close();
     if (agendaHoldTtlWorker) await agendaHoldTtlWorker.close();
     if (shiftDayCutWorker) await shiftDayCutWorker.close();
     await shutdown();

@@ -157,6 +157,13 @@ export default defineConfig({
         // ocupando cuota y a veces sirviendo respuestas viejas.
         cleanupOutdatedCaches: true,
         globPatterns: ["**/*.{js,css,html,svg,woff2}"],
+        // 18-10-2026 · el bundle principal pasó de 2 MiB (2,11 MB tras
+        // bonos + auditoria-sirope) y workbox, con su límite por defecto,
+        // lo dejaba FUERA del precache y rompía el build de la imagen.
+        // El offline de un terminal (v1.10) necesita ese bundle en caché:
+        // se sube el techo en vez de excluirlo. Partir el bundle en trozos
+        // es la solución de fondo y va aparte.
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         // v1.3-UX-Iteración Lote 3: inyecta un message handler en el
         // SW generado. El botón "Sincronizar" del TPV manda
         // `{type: "PURGE_RUNTIME"}` y este script borra las caches de

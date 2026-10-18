@@ -15,7 +15,13 @@
 //     como red de seguridad de la carrera, no como criterio de negocio.
 //   - No toca `internalNumber`: un DRAFT nunca consumió serie fiscal.
 
+import type { MotivoVaciado } from "@mipiacetpv/db";
+
 import { getPrisma } from "../context.js";
+import {
+  avisarComandasServidas,
+  servirComandasListas,
+} from "../kitchen/servir.js";
 import { getStoreEventBus } from "../realtime/store-event-bus.js";
 
 export type VoidDraftReason = "MANUAL" | "AUTO_ABANDONED_EMPTY" | "MANAGER_VOID";
@@ -61,6 +67,11 @@ export async function voidDraftTicket(args: {
   // primer día. La columna `voidReason` dice el porqué en máquina; esto
   // lo dice en cristiano para quien mire el ticket.
   note?: string | null;
+  /**
+   * auditoria-sirope (#18) · qué pasó en la sala. Sólo con consumo; lo
+   * decide el llamante, que es quien sabe si había platos dentro.
+   */
+  motivo?: MotivoVaciado | null;
   requireEmpty?: boolean;
   now?: Date;
 }): Promise<VoidDraftOk | VoidDraftFailure> {
@@ -93,12 +104,25 @@ export async function voidDraftTicket(args: {
     data: {
       status: "VOIDED",
       voidReason: reason,
+      voidMotivo: args.motivo ?? null,
       voidedAt: now,
       voidedByUserId: byUserId,
       notes: args.note ?? draft.notes,
     },
   });
   if (claimed.count === 0) return { ok: false, code: "RACED" };
+
+  // auditoria-sirope (#22) · vaciar también cierra lo que estaba LISTO.
+  // Si no, la mesa queda libre en el mapa con su etiqueta LISTO puesta y
+  // la tarjeta sigue esperando en la pantalla de cocina a una cuenta que
+  // ya no existe. Lo que NO está listo no se toca: un plato en la
+  // plancha sigue en la plancha, y la cocina tiene que verlo.
+  const servidas = await servirComandasListas(prisma, {
+    ticketId: draft.id,
+    byUserId: byUserId,
+    now,
+  });
+  avisarComandasServidas(servidas, now);
 
   if (draft.tableId) {
     // Bus in-memory (B7 §6): sólo llega a los devices conectados a ESTA

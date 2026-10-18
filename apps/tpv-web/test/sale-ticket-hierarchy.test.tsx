@@ -180,6 +180,25 @@ function backgroundRoutes(path: string): unknown | undefined {
   if (path.startsWith("/tpv/catalog/top-sellers")) {
     return { source: "shift", items: [] };
   }
+  // auditoria-sirope (#12) · este bar MANDA COMANDAS (el §4 compara
+  // «Cobrar» contra «Enviar comanda»), así que tiene impresora. Hasta el
+  // bloque el banco no tenía que decirlo; desde #12 el botón «Enviar»
+  // sólo existe si hay a dónde mandar.
+  if (path.endsWith("/kitchen")) {
+    return {
+      diners: null,
+      revision: 0,
+      lines: [],
+      firedCourses: [],
+      allergies: [],
+      orders: [],
+      destinations: {
+        BARRA: { screen: false, printer: true, canCorrectSent: false },
+        COCINA: { screen: false, printer: true, canCorrectSent: false },
+        SALON: { screen: false, printer: false, canCorrectSent: false },
+      },
+    };
+  }
   if (path.startsWith("/tickets?")) return { items: [] };
   return undefined;
 }

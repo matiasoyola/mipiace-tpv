@@ -36,6 +36,7 @@
 import {
   CANTIDAD_ANCHO_PX,
   EYEBROW_COCINA_PX,
+  FRANJA_SECCION_ALTO_PX,
   FRANJA_URGENTE_ALTO_PX,
   LINEA_HEIGHT_PX,
   LISTA_HEIGHT_PX,
@@ -108,6 +109,10 @@ const CABECERA_PX = 20 + MESA_PX;
  * comandas» de «caben cuatro».
  */
 const EYEBROW_LINEA_PX = 19;
+
+/** auditoria-sirope (#26) · el relleno que la pastilla del tiempo añade a
+ *  la cabecera: `6 + 6` de padding y los 4 del borde de 2 px. */
+const PASTILLA_TIEMPO_PX = 16;
 
 /** La franja «URGENTE», más los 8 del anillo de 4 px que la rodea. */
 const FRANJA_URGENTE_PX = FRANJA_URGENTE_ALTO_PX + 8;
@@ -217,7 +222,13 @@ function altoLinea(l: TarjetaMedible["lines"][number]): number {
  */
 export function altoTarjeta(t: TarjetaMedible, mostrarSeccion = false): number {
   let alto = PADDING_PX + CABECERA_PX;
-  if (t.number > 1 || t.lateArrival || mostrarSeccion) alto += EYEBROW_LINEA_PX;
+  // auditoria-sirope (#26) · la sección dejó de ser una palabra en el
+  // eyebrow y pasó a ser una franja propia. El eyebrow sólo ocupa su
+  // línea si la tarjeta lleva algo DE LO SUYO.
+  if (t.number > 1 || t.lateArrival) alto += EYEBROW_LINEA_PX;
+  if (mostrarSeccion) alto += FRANJA_SECCION_ALTO_PX;
+  // Y la pastilla del tiempo, que añade su relleno a la cabecera.
+  alto += PASTILLA_TIEMPO_PX;
   if (t.urgent) alto += FRANJA_URGENTE_PX;
   alto += t.allergyBands.length * FRANJA_ALERGIA_PX;
   const hayEspera = t.lines.some((l) => !l.fired);

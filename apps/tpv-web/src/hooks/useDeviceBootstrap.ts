@@ -6,6 +6,13 @@ import {
   getDeviceToken,
 } from "../storage.js";
 import { decideAfterBootstrapError } from "./bootstrap-decision.js";
+import {
+  olvidarLaPuerta,
+  olvidarSesion,
+} from "../residencia/puerta-cache.js";
+// residencia-4 · y la guardia del móvil, por lo mismo: un aparato
+// desemparejado no se queda «de guardia».
+import { olvidarGuardia } from "../residencia/guardia-cache.js";
 
 export interface DeviceMeResponse {
   device: { id: string; name: string | null; pairedAt: string };
@@ -23,6 +30,12 @@ export interface DeviceMeResponse {
     // caché de un device bootstrapeado antes del bloque → se trata como
     // false, que es el default de la columna.
     kitchenDisplayEnabled?: boolean;
+    // B-reservas-8 · la capability de los bonos y LA PALABRA del centro
+    // («bono» por defecto; el spa dirá «programa»). Ausentes en la caché
+    // de un device bootstrapeado antes del bloque → apagado y «bono», que
+    // son los defaults de las columnas.
+    bonosEnabled?: boolean;
+    bonoEtiqueta?: string;
   };
   // kds-1-cocina · los ajustes de cocina de ESTA tienda, o `null` con el
   // módulo apagado. El TPV los necesita al arrancar para saber si pinta
@@ -54,7 +67,57 @@ export type BootstrapState =
   // 403 ROOM_DEVICE_NOT_ALLOWED, que es la respuesta correcta y no un
   // error: el corte vive en la puerta de todas las rutas del TPV.
   | { kind: "room"; data: PuertaMeResponse }
+  // residencia-4 (D-66) · esta tablet es un MÓVIL DE GUARDIA. La misma
+  // APK, otra pantalla. Se llega aquí porque `/devices/me` devolvió 403
+  // GUARD_DEVICE_NOT_ALLOWED, que es la respuesta correcta y no un
+  // error.
+  | { kind: "guard"; data: GuardiaMeResponse }
   | { kind: "paired"; data: DeviceMeResponse };
+
+/**
+ * residencia-4 · lo que contesta `GET /residencia/guardia/me`.
+ *
+ * Lo que NO lleva, y es la mitad de la decisión: ni un aviso, ni una
+ * habitación, ni un nombre de residente. Un móvil de guardia es un
+ * teléfono que se queda en una mesa y la pantalla en reposo la ve
+ * cualquiera que pase. Todo lo demás va detrás del PIN.
+ */
+export interface GuardiaMeResponse {
+  device: { id: string; name: string | null };
+  centro: { id: string; nombre: string };
+  canal: "ENFERMERIA" | "RESPONSABLE";
+  turno: { id: string; code: string; name: string } | null;
+  turnos: Array<{
+    id: string;
+    code: string;
+    name: string;
+    startsAt: string;
+    endsAt: string;
+  }>;
+  /** Quién está de guardia AHORA, en todos los canales. */
+  deGuardia: Array<{
+    id: string;
+    canal: "ENFERMERIA" | "RESPONSABLE";
+    deviceId: string;
+    nombre: string;
+    rol: string;
+    turno: string | null;
+    desde: string;
+  }>;
+  /** Y si ESTE móvil está cogido, por quién. */
+  esteMovil: {
+    id: string;
+    canal: "ENFERMERIA" | "RESPONSABLE";
+    deviceId: string;
+    nombre: string;
+    rol: string;
+    turno: string | null;
+    desde: string;
+  } | null;
+  /** El servicio sanitario de guardia del centro (D-33). */
+  servicio: { nombre: string; telefono: string } | null;
+  serverTime: string;
+}
 
 /**
  * residencia-1 · lo que contesta `GET /residencia/puerta/me`.
@@ -76,6 +139,10 @@ export interface PuertaMeResponse {
   ocupantes: Array<{
     bedId: string;
     bedLabel: string;
+    /** residencia-3 (D-64) · con qué se pide la foto. `null` = cama libre.
+     *  Un uuid no dice nada de nadie, y la foto que abre sigue exigiendo
+     *  consentimiento de imagen vigente. */
+    clientId?: string | null;
     /** `null` = cama libre. */
     nombre: string | null;
   }>;
@@ -145,6 +212,30 @@ function writeCachedDeviceMe(data: DeviceMeResponse): void {
   }
 }
 
+/**
+ * auditoria-sirope (#20) · EL AVISO INTERNO DE «LOS AJUSTES CAMBIARON».
+ *
+ * El bus de la tienda lo recibe quien tiene el WebSocket abierto (la
+ * pantalla de venta y la de sala) y quien tiene que reaccionar es el
+ * bootstrap, que vive arriba del todo. En vez de bajar un callback por
+ * cinco niveles de props, el que lo recibe lo RELANZA como evento del
+ * navegador y el bootstrap lo escucha.
+ *
+ * Un `CustomEvent` y no un estado global: no hay nada que guardar, sólo
+ * un «vuelve a preguntar».
+ */
+export const EVENTO_AJUSTES_CAMBIADOS = "mipiacetpv:ajustes-cambiados";
+
+export function avisarAjustesCambiados(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(EVENTO_AJUSTES_CAMBIADOS));
+}
+
+/** Cada cuánto se repasan los ajustes del tenant con la app abierta.
+ *  Un minuto: «encender Cocina se nota en la caja en menos de un
+ *  minuto» es el criterio del bloque. */
+const REPASO_MS = 60_000;
+
 export function useDeviceBootstrap(): {
   state: BootstrapState;
   refresh: () => void;
@@ -213,6 +304,24 @@ export function useDeviceBootstrap(): {
         }
         return;
       }
+      // residencia-4 · «modo guardia». Mismo criterio exacto que
+      // `kitchen` y `room`: si `/residencia/guardia/me` también falla —el
+      // módulo se apagó con el móvil emparejado— se cae a `retry`, que es
+      // lo correcto. Un móvil de guardia que se desempareja solo a las
+      // tres de la mañana es un centro sin avisos hasta que alguien lo
+      // note.
+      if (decision === "guard") {
+        try {
+          const g = await apiWithDevice<GuardiaMeResponse>(
+            "/residencia/guardia/me",
+          );
+          setState({ kind: "guard", data: g });
+        } catch {
+          setState({ kind: "loading" });
+          setTimeout(refresh, 3000);
+        }
+        return;
+      }
       if (decision === "purge") {
         // Sólo borramos cuando el backend confirma que el dispositivo
         // está revocado o el JWT ha caducado — un 401 sin código (o con
@@ -220,6 +329,17 @@ export function useDeviceBootstrap(): {
         // restart transitorio y NO debe desemparejar al cliente.
         clearAllDeviceState();
         localStorage.removeItem(DEVICE_ME_CACHE_KEY);
+        // residencia-3 (decisión 7) · **la caché de la puerta se vacía al
+        // revocar el dispositivo.** Dentro hay el plan de cuidados de dos
+        // personas y el roster del centro con las huellas de sus PIN: una
+        // tablet desemparejada no se queda con eso.
+        //
+        // Va aquí y no dentro de `clearAllDeviceState` porque eso es
+        // `localStorage` sincrónico y esto es IndexedDB; mezclarlos
+        // obligaría a hacer asíncrona una función que llaman seis sitios.
+        void olvidarLaPuerta();
+        olvidarSesion();
+        olvidarGuardia();
         setState({ kind: "unpaired" });
       } else {
         // v1.10-offline: error de red (o 401 ambiguo). Si tenemos un
@@ -239,15 +359,65 @@ export function useDeviceBootstrap(): {
     }
   }, []);
 
+  // auditoria-sirope (#20) · EL REPASO SILENCIOSO.
+  //
+  // `refresh` es el arranque: puede dejar el terminal en `loading`, en
+  // `unpaired` o reintentando. Esto es otra cosa — el terminal ya está
+  // funcionando y sólo queremos enterarnos de que el super-admin ha
+  // tocado un módulo. Si la llamada falla, NO pasa nada: se queda lo que
+  // había y se repasa al siguiente minuto. Una caja no se cae porque un
+  // repaso de ajustes no llegue.
+  const repasar = useCallback(async () => {
+    if (!getDeviceToken()) return;
+    try {
+      const data = await apiWithDevice<DeviceMeResponse>("/devices/me");
+      writeCachedDeviceMe(data);
+      setState((prev) =>
+        // Sólo pisa el estado de un terminal que YA está emparejado. Si
+        // está arrancando, en modo cocina o en modo puerta, manda
+        // `refresh` y este repaso no se mete.
+        prev.kind === "paired" ? { kind: "paired", data } : prev,
+      );
+    } catch {
+      /* el terminal sigue con lo que tenía */
+    }
+  }, []);
+
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    // Al volver al primer plano: es el caso del 18-10 (el super-admin
+    // cambia el ajuste mientras el cajero mira el móvil).
+    const alVolver = () => {
+      if (document.visibilityState === "visible") void repasar();
+    };
+    document.addEventListener("visibilitychange", alVolver);
+    window.addEventListener("focus", alVolver);
+    // Y con un evento del bus, que es lo que hace que se note en
+    // segundos con la app delante.
+    const alAvisar = () => void repasar();
+    window.addEventListener(EVENTO_AJUSTES_CAMBIADOS, alAvisar);
+    const t = setInterval(() => void repasar(), REPASO_MS);
+    return () => {
+      document.removeEventListener("visibilitychange", alVolver);
+      window.removeEventListener("focus", alVolver);
+      window.removeEventListener(EVENTO_AJUSTES_CAMBIADOS, alAvisar);
+      clearInterval(t);
+    };
+  }, [repasar]);
 
   return {
     state,
     refresh,
     unpair: () => {
       clearAllDeviceState();
+      // residencia-3 · lo mismo al desemparejar A MANO, y por lo mismo:
+      // la caché de la puerta lleva el plan de dos personas dentro.
+      void olvidarLaPuerta();
+      olvidarSesion();
+      olvidarGuardia();
       setState({ kind: "unpaired" });
     },
   };

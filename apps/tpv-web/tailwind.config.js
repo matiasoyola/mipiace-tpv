@@ -28,12 +28,28 @@ export default {
       // pone a 96 px (80 en móvil) y así se quedan — el prompt del bloque
       // lo dice literalmente. A 320 px de ancho, dos de 96 px con 12 px de
       // hueco entran de sobra.
+      //
+      // residencia-3 (D-64) · y DOS MÁS, también fuera de la escala y con
+      // su razón:
+      //   tap-puerta       72px ≈ 8 mm  · la acción principal de la puerta
+      //   tap-puerta-tecla 120px ≈ 14 mm · una tecla del teclado del PIN
+      //
+      // El mockup validado por Matías fija «nada pulsable por debajo de
+      // 56 px; la acción principal, 72 px o más» y el teclado del PIN a
+      // 120 px. Y no es capricho: quien toca esto lleva guantes de nitrilo
+      // y a veces un residente del brazo, la tablet está colgada en la
+      // pared (así que se toca de pie y de lado, no de frente) y el
+      // presupuesto es de dos segundos por registro (D-05). El `touch-pad`
+      // de 56 px vale para el CashPad de una cajera sentada; aquí es el
+      // SUELO, no el objetivo.
       spacing: {
         touch: "48px",
         "touch-pad": "56px",
         "touch-lg": "64px",
         "tap-valoracion": "96px",
         "tap-valoracion-sm": "80px",
+        "tap-puerta": "72px",
+        "tap-puerta-tecla": "120px",
       },
       minHeight: {
         touch: "48px",
@@ -41,6 +57,8 @@ export default {
         "touch-lg": "64px",
         "tap-valoracion": "96px",
         "tap-valoracion-sm": "80px",
+        "tap-puerta": "72px",
+        "tap-puerta-tecla": "120px",
       },
       colors: {
         mipiace: {

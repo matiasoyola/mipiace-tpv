@@ -48,6 +48,7 @@ export function DaySummaryCard({
   confirmLabel = "Confirmar",
   onConfirm,
   onCountCash,
+  onCancel,
   error,
   notice,
 }: {
@@ -68,6 +69,9 @@ export function DaySummaryCard({
   // Ausente = este contexto no ofrece contar (p. ej. el turno ya está
   // cerrado y contado). Presente = enlace discreto "Cuadrar caja".
   onCountCash?: () => void;
+  /** auditoria-sirope (#29) · la salida, DENTRO de la hoja. Fuera
+   *  asomaba cortada por el borde inferior a 811 px de alto. */
+  onCancel?: () => void;
   error?: string | null;
 }) {
   const [showDetail, setShowDetail] = useState(false);
@@ -299,27 +303,62 @@ export function DaySummaryCard({
 
       {notice && <div className="mb-3">{notice}</div>}
 
-      {/* Un solo botón. Nada más al mismo nivel. */}
-      <button
-        type="button"
-        onClick={onConfirm}
-        disabled={busy || confirmDisabled}
-        className="mt-1 w-full h-14 bg-mipiace-coral hover:bg-mipiace-coral-dark text-white font-medium text-[15px] rounded-2xl disabled:opacity-50 flex items-center justify-center gap-2"
-      >
-        {busy && <Loader2 className="w-4 h-4 animate-spin" />}
-        {confirmLabel}
-      </button>
+      {/* auditoria-sirope (#29) · «CANCELAR» DENTRO DE LA HOJA.
+          Vivía fuera de la tarjeta, debajo del todo, y a 811 px de alto
+          asomaba cortado por el borde inferior de la pantalla (captura
+          82): la única salida de «Cerrar el día» era medio visible.
+          Dentro de la hoja y encima de las acciones, que es donde se
+          busca. */}
 
-      {onCountCash && (
+      {/* auditoria-sirope (#27) · «CUADRAR CAJA» ES UN BOTÓN.
+          Era un enlace subrayado en gris debajo del botón coral, o sea
+          la jerarquía de «esto no hace falta». Y hace falta: es lo
+          único que convierte el descuadre en un número conocido —sin
+          contar, el descuadre no es cero, es desconocido—.
+
+          Lo que NO cambia, porque es decisión de v1.11 y de Matías:
+          «Cerrar turno» sigue siendo la acción principal y sigue
+          cerrando sin contar. Encender `requireCashCountOnClose` en una
+          cuenta concreta es otra conversación, y no es código.
+
+          Las dos en la misma fila: el primario con más peso (coral,
+          56 px, 1,4 fr) y el secundario visible a su lado. */}
+      <div className={onCountCash ? "mt-1 flex gap-2.5" : "mt-1"}>
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            data-testid="cerrar-dia-cancelar"
+            className="h-14 px-5 rounded-2xl text-[14px] font-medium text-slate-500 hover:bg-slate-50 disabled:opacity-50"
+          >
+            Cancelar
+          </button>
+        )}
+        {onCountCash && (
+          <button
+            type="button"
+            onClick={onCountCash}
+            disabled={busy}
+            data-testid="cuadrar-caja"
+            className="flex-1 h-14 rounded-2xl border border-slate-300 hover:bg-slate-50 text-mipiace-ink font-medium text-[15px] disabled:opacity-50"
+          >
+            Cuadrar caja
+          </button>
+        )}
         <button
           type="button"
-          onClick={onCountCash}
-          disabled={busy}
-          className="mt-1 w-full min-h-[44px] text-[13.5px] text-slate-500 hover:text-mipiace-ink underline underline-offset-4 decoration-slate-300 disabled:opacity-50"
+          onClick={onConfirm}
+          disabled={busy || confirmDisabled}
+          data-testid="cerrar-turno"
+          className={`h-14 bg-mipiace-coral hover:bg-mipiace-coral-dark text-white font-medium text-[15px] rounded-2xl disabled:opacity-50 flex items-center justify-center gap-2 ${
+            onCountCash ? "flex-[1.4]" : "w-full"
+          }`}
         >
-          Cuadrar caja
+          {busy && <Loader2 className="w-4 h-4 animate-spin" />}
+          {confirmLabel}
         </button>
-      )}
+      </div>
     </div>
   );
 }

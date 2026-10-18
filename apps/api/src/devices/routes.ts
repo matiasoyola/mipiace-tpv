@@ -473,6 +473,14 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
               // ni la banda «LISTO». Lo único que sobrevive al apagado es
               // el envío por diferencias, que es un arreglo del servidor.
               kitchenDisplayEnabled: true,
+              // B-reservas-8 · si este centro tiene bonos, y CÓMO LOS
+              // LLAMA. El TPV necesita las dos al arrancar: la primera
+              // para no pedir propuestas de canje en una cuenta que no los
+              // tiene, y la segunda porque el spa dice «programa» y la
+              // clínica «bono» — y una etiqueta que llegue tarde se ve
+              // como un parpadeo en la pantalla de cobro.
+              bonosEnabled: true,
+              bonoEtiqueta: true,
             },
           },
         },
@@ -515,6 +523,9 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
           cashierAutoLogoutMinutes: device.tenant.cashierAutoLogoutMinutes,
           requireCashCountOnClose: device.tenant.requireCashCountOnClose,
           kitchenDisplayEnabled: device.tenant.kitchenDisplayEnabled,
+          // B-reservas-8 · ver el `select`.
+          bonosEnabled: device.tenant.bonosEnabled,
+          bonoEtiqueta: device.tenant.bonoEtiqueta,
         },
         // kds-1-cocina · los ajustes de cocina de ESTA tienda. Van planos y
         // no dentro de `store` para no cambiarle la forma a quien ya lo
@@ -580,6 +591,90 @@ export async function registerDeviceRoutes(app: FastifyInstance): Promise<void> 
       return reply
         .code(200)
         .send({ ok: true, alreadyRevoked: false, canalCerrado });
+    },
+  );
+
+  // ── auditoria-sirope (#23) · CAMBIAR LAS SECCIONES DE UNA PANTALLA ──
+  //
+  // Hasta este bloque, las secciones de una pantalla de cocina se
+  // decidían al generar su código de emparejamiento y no se podían tocar
+  // más: para pasar una pantalla de «Cocina» a «Cocina + Barra» había que
+  // REVOCARLA y volver a emparejarla con un código nuevo, con el
+  // implantador tecleando seis dígitos en una tablet colgada de la pared.
+  //
+  // No hay nada que lo justifique: la sección no es una credencial, es
+  // una preferencia. El token del aparato no cambia, la tablet sigue
+  // emparejada y el siguiente GET de la pantalla ya trae lo suyo.
+  //
+  // Lo que sí se mantiene: una pantalla SIN secciones no existe —no
+  // recibiría nada y el cocinero miraría una pantalla en blanco— y sólo
+  // se le cambian a un `KITCHEN`.
+  app.patch(
+    "/admin/devices/:deviceId/kitchen-sections",
+    {
+      preHandler: [requireOwnerOrManager, ensureCajaEnabled],
+      schema: {
+        params: {
+          type: "object",
+          required: ["deviceId"],
+          properties: { deviceId: { type: "string", format: "uuid" } },
+        },
+        body: {
+          type: "object",
+          required: ["kitchenSections"],
+          additionalProperties: false,
+          properties: {
+            kitchenSections: {
+              type: "array",
+              minItems: 1,
+              maxItems: 3,
+              uniqueItems: true,
+              items: { type: "string", enum: ["BARRA", "COCINA", "SALON"] },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const auth = request.auth!;
+      const { deviceId } = request.params as { deviceId: string };
+      const body = request.body as {
+        kitchenSections: Array<"BARRA" | "COCINA" | "SALON">;
+      };
+      const prisma = getPrisma();
+      const device = await prisma.device.findFirst({
+        where: { id: deviceId, tenantId: auth.tenantId },
+        select: { id: true, kind: true, revokedAt: true },
+      });
+      if (!device) {
+        return reply
+          .code(404)
+          .send({ error: "DEVICE_NOT_FOUND", message: "Dispositivo no encontrado" });
+      }
+      if (device.kind !== "KITCHEN") {
+        return reply.code(409).send({
+          error: "NOT_A_KITCHEN_DEVICE",
+          message: "Sólo una pantalla de cocina tiene secciones.",
+        });
+      }
+      if (device.revokedAt) {
+        return reply.code(409).send({
+          error: "DEVICE_REVOKED",
+          message:
+            "Esta pantalla está revocada: hay que volver a emparejarla.",
+        });
+      }
+      const actualizado = await prisma.device.update({
+        where: { id: deviceId },
+        data: { kitchenSections: body.kitchenSections },
+        select: { id: true, kitchenSections: true },
+      });
+      return reply.code(200).send({
+        device: {
+          id: actualizado.id,
+          kitchenSections: actualizado.kitchenSections,
+        },
+      });
     },
   );
 }
