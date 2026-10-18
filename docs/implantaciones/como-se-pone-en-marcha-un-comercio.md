@@ -45,15 +45,21 @@ Se ve en tres sitios, y los tres a la vez:
    carta y diga «esto no está donde yo lo busco». Lo que pida se cambia y se vuelve a probar.
 4. **Resetea cuando quieras.** Super-admin → ficha → **Puesta en marcha** → «Resetear ensayo»
    (hay que teclear el nombre del comercio). Se lleva:
-   - los tickets de ensayo y lo que cuelga de ellos (líneas, pagos, devoluciones, comandas de
-     cocina, envíos de email),
-   - los borradores, que son **las mesas abiertas**,
+   - **TODOS los tickets de la cuenta**, sea cual sea su estado —de prueba, anulados, borradores—
+     y lo que cuelga de ellos (líneas, pagos, devoluciones, comandas de cocina, envíos de email).
+     En una cuenta en ensayo no hay ninguna venta real, así que no se queda nada por ahí: una
+     anulada de la demostración en el arqueo del cliente es exactamente lo que no queremos.
    - los turnos, con sus arqueos y sus informes Z,
    - las mesas que quedaron unidas,
    - y el contador de referencia interna, que vuelve a 000000.
 
    **Conserva** el catálogo, la sala, los cajeros, los terminales, las impresoras, los datos
-   fiscales y los contactos. La pantalla los cuenta antes de que pulses: lee los números.
+   fiscales y los contactos. La pantalla los cuenta antes de que pulses, **y enseña cuántos
+   tickets hay de cada estado**: lee los números.
+
+   Si la pantalla dice **«Aquí hay algo que no debería estar»** y nombra un ticket, PARA. Significa
+   que esa cuenta tiene una venta que llegó a Holded o que tiene factura emitida — algo que en una
+   cuenta en ensayo no puede pasar. No se borra nada hasta saber de dónde salió.
 
 ---
 

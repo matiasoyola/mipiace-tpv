@@ -98,12 +98,43 @@ sin poder cobrar por un dato que sobra. **Cobrar siempre se puede.**
 Las dos rutas de **anulación** sí rechazan con 409. La asimetría es la de siempre: una anulación
 no cobra a nadie, así que rechazarla no deja a nadie sin poder cobrar.
 
-## 5. Decisión: el reseteo no puede borrar una factura, y no por cuidado
+## 4.b Decisión: una venta ANULADA no es una venta real
 
-Resetear el ensayo borra los tickets `TEST` y lo que cuelga de ellos, los borradores (que son las
-mesas abiertas), los turnos con sus arqueos y sus informes Z, las agrupaciones de mesas y el
-contador de referencia interna de cada caja. **Conserva** el catálogo, la sala, los cajeros, los
-terminales, las impresoras, los datos fiscales y los contactos.
+Añadido el 18-10, tras la foto de producción. El backfill (regla 3.b) y el guardián del reseteo
+comparten una definición, y es ésta:
+
+```
+venta real  =  no es DRAFT, ni TEST, ni VOIDED
+            OR  tiene holded_document_id
+```
+
+La primera versión contaba las anuladas («se cobró y se anuló después, pero el día que esta cuenta
+empezó a facturar ya había pasado»). **Cafetería Sirope** enseñó que es falso: 20 tickets `VOIDED`
+—16 del cajero de pruebas, 4 de la demostración con la dueña—, ninguno en Holded, y una cuenta que
+no ha vendido nunca. Con la regla vieja habría arrancado a facturar sola en el despliegue.
+
+`VOIDED` no dice «se cobró»: dice «esto no cuenta». Lo que sí demuestra que un comercio facturó,
+aunque el ticket esté anulado después, es `holded_document_id` — lo escribe el worker cuando Holded
+**crea** el documento, así que existió una factura con número en la contabilidad del cliente y
+anular el ticket aquí no la deshace.
+
+## 5. Decisión: el reseteo se lleva TODOS los tickets, y no puede borrar una factura
+
+Resetear el ensayo borra **todos los tickets de la cuenta** —`TEST`, `VOIDED`, `DRAFT` y cualquier
+otro— y lo que cuelga de ellos, los turnos con sus arqueos y sus informes Z, las agrupaciones de
+mesas y el contador de referencia interna de cada caja. **Conserva** el catálogo, la sala, los
+cajeros, los terminales, las impresoras, los datos fiscales y los contactos.
+
+**Todos, y no sólo los `TEST`**, porque en una cuenta en ensayo nada es real: es la invariante de
+este ADR. Un reseteo por estados deja dentro justo lo que ensucia —las anuladas de una
+demostración, un borrador a medias— y el cliente se lo encuentra el día que empieza.
+
+Con su puerta, que va **antes de borrar una sola fila**: si algún ticket tiene
+`holded_document_id` o un registro fiscal detrás, no se borra nada y se contesta 409
+`VENTA_REAL_EN_ENSAYO` **diciendo cuál**. Y la última puerta en la base: la excepción que el
+guardián del sello (S1) necesita para dejar borrar un ticket sellado son **tres condiciones**
+—la cuenta no factura, el ticket no tiene registro fiscal, el ticket no llegó a Holded—, no «la
+cuenta está en ensayo, borra lo que sea».
 
 Lo que lo hace limpio no es que esté bien escrito: es que **antes de arrancar `fiscal_records`
 está vacía**. El reseteo no toca esa tabla en ninguna línea, y no podría —el trigger

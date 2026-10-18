@@ -69,6 +69,15 @@ se escribe en positivo para que las tres combinaciones den `true` o `false` y ni
    pantallas con cajero dentro, el papel y el PDF salen con «TICKET DE PRUEBA · SIN VALIDEZ
    FISCAL» en cabecera, y el panel del propietario lleva su propia banda azul.
 
+### 1.2.b Y qué se lleva el reseteo
+
+**Todos los tickets de la cuenta**, sea cual sea su estado, con sus líneas,
+sus pagos, sus devoluciones, sus comandas de cocina y sus envíos de email;
+los turnos con sus arqueos y sus informes Z; las agrupaciones de mesas; y el
+contador de referencia interna de cada caja. Conserva el catálogo, la sala,
+los cajeros, los terminales, las impresoras, los datos fiscales y los
+contactos. Ver §3.10.
+
 ### 1.3 Las rutas del super-admin
 
 | Ruta | Qué hace |
@@ -98,9 +107,32 @@ Dos migraciones aditivas:
 | Regla | Qué hace | A quién afecta |
 |---|---|---|
 | 3.a | Tiene registros fiscales → factura desde `min(fecha_expedicion)` | el que ya emite con nuestro TPV |
-| 3.b | Tiene ventas reales (ni `DRAFT` ni `TEST`) → factura desde `min(paid_at)` | Sole, Cachitos y cualquiera con Holded |
+| 3.b | Tiene ventas **reales** → factura desde `min(paid_at)` | Sole, Cachitos y cualquiera con Holded |
 | 3.c | Cuenta nuestra de pruebas → `es_de_pruebas = true`, en ensayo | PRUEBAS MIPIACE, ensayo de La Maestranza |
 | 3.d | Ni registros ni ventas reales → se queda en ensayo (`null`) | Sirope, Fouzia, La Maestranza real, Rosario, Thalía |
+
+**Y qué es una «venta real», que es lo que la foto de producción corrigió:**
+
+```
+venta real  =  no es DRAFT, ni TEST, ni VOIDED
+            OR  tiene holded_document_id
+```
+
+La primera versión decía «ni borrador ni ensayo» y contaba las anuladas, con
+este razonamiento: «se cobró y se anuló después, pero el día que esta cuenta
+empezó a facturar ya había pasado». **Es falso.** Lo enseñó la foto del
+18-10: Cafetería Sirope caía en 3.b con **20 «ventas reales»** — las 20
+`VOIDED`, ninguna en Holded, 16 del cajero de pruebas y 4 de la demostración
+con la dueña (8,50 € y tres de 0,00 €). No ha vendido nunca, y con la regla
+vieja **habría arrancado a facturar sola en el despliegue**: su siguiente
+cobro de ensayo habría sido su factura `C1/1`, que es exactamente lo que este
+bloque existe para impedir.
+
+`VOIDED` no dice «se cobró»: dice «esto no cuenta». Es lo que deja un ensayo
+que se limpia a medias. Lo que SÍ demuestra que un comercio facturó, aunque
+el ticket esté anulado después, es `holded_document_id`: lo pone el worker
+cuando Holded **crea** el documento, así que existió una factura con número
+en la contabilidad del cliente y anular el ticket aquí no la deshace.
 
 **3.b NO filtra por `holded_enabled`**, aunque la tabla del prompt hable de «con Holded». La
 pregunta que decide no es quién emite, es **si este comercio ha vendido de verdad alguna vez**: un
@@ -113,11 +145,29 @@ Y **3.c comprueba antes de marcar**: si una de las dos cuentas de pruebas tuvier
 ventas reales, la migración **PARA** con un mensaje que dice cuál y qué mirar, en vez de dejar que
 el CHECK la rechace hablando de una restricción.
 
-### 2.2 La foto real de producción — PENDIENTE DE MATÍAS
+### 2.2 La foto real de producción — HECHA EL 18-10, y lo que encontró
 
-**No tengo acceso a producción y no lo quiero.** La consulta de sólo lectura que saca la tabla
-cuenta a cuenta está escrita y probada; la lanza Matías y su salida va aquí, debajo, antes de
-desplegar:
+La lanzó Matías (yo no tengo acceso a producción y no lo quiero). **Encontró un fallo de regla,
+no de datos**, y es el que arregla el §2.1: Cafetería Sirope salía por 3.b con 20 ventas que no
+lo eran. Con el arreglo sale por 3.d, que es lo correcto: en ensayo.
+
+Lo que queda **pendiente antes de desplegar**, y es de Matías:
+
+1. **Repetir el SELECT** (ahora saca al lado la `regla_vieja` y una consulta que lista las cuentas
+   que cambian de regla). Tiene que salir **Sirope y nadie más**, y la tabla entera se pega aquí
+   debajo.
+2. **Decidir qué se hace con la cuenta de ensayo de La Maestranza.** Tiene 11 registros fiscales y
+   16 ventas, así que la comprobación final de la migración **PARA el despliegue** con su nombre
+   dentro — que es justo para lo que está. Es una decisión suya y este bloque no la toca: no es
+   una cuenta de pruebas cualquiera, es una que llegó a emitir.
+
+> **Tabla real de producción (pegar aquí la salida del SELECT repetido):**
+>
+> ```
+> (pendiente — la repite Matías con la regla arreglada)
+> ```
+
+La consulta, para repetirla:
 
 ```bash
 ssh root@76.13.142.28
@@ -126,16 +176,11 @@ docker compose exec -T postgres psql -U mipiacetpv -d mipiacetpv \
   -f - < docs/blocks/puesta-en-marcha-select.sql
 ```
 
-La consulta devuelve, por cuenta: `registros_fiscales`, `ventas_reales`, `tickets_test`,
-`borradores`, la `regla` que le va a aplicar (3.a / 3.b / 3.c / 3.d / `¿?`), el
-`factura_desde_quedaria` y el `es_de_pruebas_quedaria`. **Si alguna fila sale con `regla = '¿?'`,
-PARAR**: esa cuenta no encaja en ninguna regla y no se adivina.
-
-> **Tabla real de producción (pegar aquí la salida del SELECT):**
->
-> ```
-> (pendiente — la saca Matías antes del despliegue)
-> ```
+La consulta devuelve, por cuenta: `registros_fiscales`, `ventas_reales`, `anuladas`, `en_holded`,
+`tickets_test`, `borradores`, la `regla` que le va a aplicar, **la `regla_vieja`** para ver de un
+vistazo quién cambia, el `factura_desde_quedaria` y el `es_de_pruebas_quedaria`. Debajo saca dos
+consultas más: las cuentas que cambian de regla con el arreglo, y las que harían abortar la
+migración.
 
 Lo que sí está medido, contra Postgres real (la base del e2e, migrada desde cero con las 81
 migraciones): las tres reglas hacen lo que dicen. El e2e las ejecuta **leyendo el SQL de la propia
@@ -223,7 +268,32 @@ transacción se deshace, que es lo correcto), pero el implantador se queda con
 un P2028 delante del cliente y la baja de un cliente grande sería imposible.
 Dos minutos los dos primeros, cinco el borrado.
 
-### 3.10 La eliminación se BLOQUEA en una cuenta con historia clínica o residentes
+### 3.10 El reseteo se lleva TODOS los tickets, y tiene su propio guardián
+
+En una cuenta en ensayo **nada es real**: ésa es la invariante del bloque. Así
+que el reseteo borra todos los tickets, sea cual sea su estado, y no sólo los
+`TEST`. Lo pidió la foto del 18-10: Sirope tenía 20 anuladas dentro, y un
+reseteo por estados se las habría dejado en el arqueo y en el listado de
+ventas el día que empieza a facturar.
+
+Con su puerta, que va **lo primero y antes de borrar una sola fila**: si
+algún ticket tiene `holded_document_id` o un registro fiscal detrás, no se
+borra nada y se contesta **409 `VENTA_REAL_EN_ENSAYO` diciendo cuál** — con
+su referencia, su estado y el documento o la factura. Bloquea también
+«Empezar a facturar», que resetea antes de fijar la fecha.
+
+Y la última puerta en la BASE: la excepción nueva de
+`mipiacetpv_tickets_delete_guard` son **tres condiciones** comprobadas contra
+el estado real —la cuenta no factura, el ticket no tiene registro fiscal, el
+ticket no llegó a Holded—, no «la cuenta está en ensayo, borra lo que sea».
+Lo bonito es que se ve en el sabotaje nº 12: quitando el guardián de la
+aplicación, **la base lo para igual** con `SELLO_VIOLADO`.
+
+La previsualización enseña el desglose **por estado** antes de pulsar («20
+anulados» no se lee igual que «3 de ensayo») y el resultado lo guarda en el
+audit, porque después de borrarlos no se pueden volver a contar.
+
+### 3.11 La eliminación se BLOQUEA en una cuenta con historia clínica o residentes
 
 Sus triggers no tienen ninguna escapatoria y no se les añade. Ver ADR-021 §6.2. El export sí
 funciona, y la devolución de datos del centro clínico ya existía.
@@ -262,6 +332,10 @@ los reales, copiados de la salida.**
 | 8 | El reseteo no pone a cero el contador de la caja | 2 del e2e | `expected '000005' to be '000001'` |
 | 9 | La marca del append-only deja de nombrar al tenant (`IF TG_OP = 'DELETE' THEN RETURN OLD`) | 5 del e2e | `expected '' to contain 'REGISTRO_FISCAL_VIOLADO'` (las tres formas: a pelo, con la marca de otro tenant y el `UPDATE`) |
 | 10 | Se quita el bloqueo `SIN_EXPORT` | `sin el export descargado, no hay camino` | `expected true to be false` |
+| 11 | La regla 3.b vuelve a contar las anuladas (`status NOT IN ('DRAFT','TEST')`) | `3.b · una cuenta con SÓLO anuladas NO ha vendido` | `expected 2026-03-04T10:00:00.000Z to be null` — o sea, **Sirope arrancando a facturar sola** |
+| 12 | El reseteo vuelve a borrar sólo los `TEST` | 2 unitarios + 4 del e2e | `expected [ { …(2) } ] to deeply equal [ Array(1) ]`, y en el e2e el borrado de turnos revienta contra la FK de los tickets que quedaron |
+| 13 | Se quita el guardián de la aplicación (`comprobarQueNadaEsReal`) | 2 unitarios + 3 del e2e | `expected { ticketsBorrados: 2, …(9) } to be an instance of EnsayoConVentaRealError` · y en el e2e **lo para la BASE**: `SELLO_VIOLADO: no se borra una venta sellada` |
+| 14 | El trigger se queda sin la condición de Holded | `y en una cuenta EN ENSAYO, tampoco la que llegó a Holded` | `expected '' to contain 'SELLO_VIOLADO'` |
 
 El nº 1 y el nº 5 son los que más enseñan:
 
@@ -271,6 +345,10 @@ El nº 1 y el nº 5 son los que más enseñan:
   arranca**: la FK `RESTRICT` de los turnos lo para.
 - **El nº 5** cae por los dos lados a la vez: por el test que cuenta lo que se conserva y por la
   primera venta de después, que se cae con un 500 porque el producto ya no existe.
+- **El nº 13 es el que más tranquiliza.** Quitando el guardián de la aplicación, el reseteo no
+  borra la venta que llegó a Holded: **la para la base**, con `SELLO_VIOLADO`. La puerta de la
+  aplicación existe para dar un mensaje que se pueda leer —qué ticket, qué documento—, no para ser
+  la única.
 
 ---
 
@@ -347,13 +425,13 @@ las otras cuatro funciones que este bloque reemplaza tienen una sola definición
 
 | Suite | Resultado |
 |---|---|
-| `pnpm vitest run` (desde la raíz) | **379 ficheros, 5275 tests verdes**, 10 saltados |
-| `pnpm test:e2e` (`puesta-en-marcha.e2e.ts`) | **32 verdes** contra Postgres real |
+| `pnpm vitest run` (desde la raíz) | **379 ficheros, 5283 tests verdes**, 10 saltados |
+| `pnpm test:e2e` (`puesta-en-marcha.e2e.ts`) | **38 verdes** contra Postgres real |
 | `pnpm test:e2e` (los 40 ficheros) | 36 verdes + 4 con los fallos de madrugada (§8.1) |
 | El bucle visual | el panel y la banda, medidos (§8.2); un fallo encontrado y arreglado |
 
 Nuevos: `apps/api/test/puesta-en-marcha-ensayo.test.ts` (14), `test/puesta-en-marcha-arranque.test.ts`
-(15) y `test-e2e/puesta-en-marcha.e2e.ts` (32).
+(19) y `test-e2e/puesta-en-marcha.e2e.ts` (38).
 
 ### 8.1 Los cuatro e2e que fallan de madrugada, y la prueba de que no son de este bloque
 
