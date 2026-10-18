@@ -1,4 +1,7 @@
 export default [
+  // B-reservas-8 · lo puro de los bonos (estados, libro, calendario y
+  // porQueNoDevolvible), compartido por la API, el TPV y el panel.
+  "packages/bonos",
   "packages/clinica-sesion",
   "packages/clinica-valoracion",
   "packages/consentimientos",
