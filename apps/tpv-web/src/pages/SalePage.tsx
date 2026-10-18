@@ -112,6 +112,7 @@ import { clientFullName } from "../lib/clients.js";
 import { urlDeclaracionResponsable } from "../lib/declaracionResponsable.js";
 import { useElapsedTime } from "../hooks/useElapsedTime.js";
 import { useStoreEventStream } from "../hooks/useStoreEventStream.js";
+import { useTecladoDelSistema } from "../hooks/useTecladoDelSistema.js";
 import type { ModifierSelection } from "../lib/cart.js";
 import { refreshFiscalHead } from "../lib/fiscal.js";
 import { newId } from "../lib/ids.js";
@@ -363,6 +364,13 @@ export interface SalePageProps {
   // sala). Esta pantalla conserva el gate `agendaEnabled` del botón y
   // sólo avisa hacia arriba; quien la pinta es `App`.
   onOpenAgenda?: () => void;
+  // n1-vertical · la agenda es un overlay que pinta `App` POR ENCIMA de
+  // esta pantalla, así que la venta no se desmonta: su barra inferior
+  // fija sigue pintándose y tapa el pie de la agenda (en la pasada del
+  // N1, el botón «Reservar» de «Nueva cita», captura `22-nueva-cita`).
+  // Esta pantalla no puede deducirlo —el overlay no es suyo—, así que
+  // quien lo abre lo dice.
+  agendaAbierta?: boolean;
   shiftId: string;
   // v1.7-alias-cajeros: label de display (alias con fallback a email),
   // calculado en App con cashierDisplayLabel.
@@ -2627,6 +2635,7 @@ export function SalePage(props: SalePageProps) {
               />
             )}
             <HospitalityWorkspace
+              agendaAbierta={props.agendaAbierta === true}
               products={filtered}
               searchQuery={query}
               catalogError={catalogError}
@@ -2924,6 +2933,7 @@ export function SalePage(props: SalePageProps) {
           <HealthBanner health={health} />
 
           <SaleWorkspace
+            agendaAbierta={props.agendaAbierta === true}
             products={filtered}
             searchQuery={query}
             wildcards={wildcards}
@@ -4044,6 +4054,7 @@ function Banner({ color, children }: { color: "amber" | "red"; children: React.R
 }
 
 function SaleWorkspace({
+  agendaAbierta,
   appointmentContext,
   products,
   searchQuery,
@@ -4078,6 +4089,8 @@ function SaleWorkspace({
   onClickGroup,
   onClickUngroup,
 }: {
+  // n1-vertical · ver la nota de `SalePageProps.agendaAbierta`.
+  agendaAbierta: boolean;
   products: CatalogProduct[];
   // v1.9.1 · texto de búsqueda activo. `products` llega YA filtrado por
   // la búsqueda, así que sin esto el empty state no puede distinguir
@@ -4328,6 +4341,24 @@ function SaleWorkspace({
   // sólo "abierto/cerrado" — las líneas viven arriba en SalePage, así
   // que cerrar el sheet nunca pierde nada.
   const [mobileTicketOpen, setMobileTicketOpen] = useState(false);
+  // n1-vertical · LA BARRA INFERIOR ES DE LA PANTALLA DE VENTA, Y SÓLO
+  // MIENTRAS SE MARCA. Dos sitios donde estorba, los dos vistos en el N1
+  // el 2026-10-16:
+  //
+  //   · con la AGENDA abierta encima (`22-nueva-cita`): la venta no se
+  //     desmonta, la barra es `fixed` y empata en z-40 con el overlay de
+  //     la agenda, así que gana la que va después en el DOM —ella— y
+  //     tapa el botón «Reservar»;
+  //   · con el TECLADO del sistema abierto (`27-busqueda-teclado`): la
+  //     barra se pega sobre el teclado con `--keyboard-offset` y ocupa
+  //     el único hueco que queda para los resultados de la búsqueda. Se
+  //     busca un producto y no se ve ni uno.
+  //
+  // No se pierde nada al ocultarla: el total vuelve en cuanto se cierra
+  // la agenda o se baja el teclado, y mientras el cajero teclea lo que
+  // necesita ver es la lista.
+  const tecladoAbierto = useTecladoDelSistema();
+  const barraTicketVisible = !agendaAbierta && !tecladoAbierto;
   // B-reservas-2: mapa productId → duración de servicio para pintar los
   // minutos informativos por línea del ticket. Sólo se construye si el
   // tenant tiene la agenda activa; en caso contrario queda vacío y el
@@ -4709,7 +4740,9 @@ function SaleWorkspace({
           <1024px. Siempre visible: nº de líneas + total grande + abrir
           ticket; en contexto mesa añade "Comanda" (Lote 2.2). Anclada
           sobre el teclado virtual vía --keyboard-offset. */}
+      {barraTicketVisible && (
       <div
+        data-testid="barra-ticket"
         className="lg:hidden fixed inset-x-0 z-40 bg-white border-t border-slate-200 px-3 py-2 flex items-center gap-2"
         style={{ bottom: "var(--keyboard-offset, 0px)" }}
       >
@@ -4755,6 +4788,7 @@ function SaleWorkspace({
           </span>
         </button>
       </div>
+      )}
 
       {/* v1.0-handheld · Lote 1.3: carrito como bottom-sheet. Reutiliza
           el TicketPanel del escritorio — re-layout, no re-implementación.

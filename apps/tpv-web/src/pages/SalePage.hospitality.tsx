@@ -113,6 +113,7 @@ import {
   type AnulacionPendiente,
 } from "../kitchen/tpv/DeshacerToast.js";
 import { ListoBanner, type AvisoListo } from "../kitchen/tpv/ListoBanner.js";
+import { useTecladoDelSistema } from "../hooks/useTecladoDelSistema.js";
 
 /**
  * La fila «Cantidad» va de 1 a 6 (decisión 3c).
@@ -174,6 +175,13 @@ export interface ChromeAction {
 }
 
 export interface HospitalityWorkspaceProps {
+  /**
+   * n1-vertical · la agenda está abierta ENCIMA de esta pantalla. Mismo
+   * caso que en el TPV claro: la barra inferior es `fixed` y empata en
+   * z-40 con el overlay de la agenda, así que la tapa. Ver la nota de
+   * `SalePageProps.agendaAbierta`.
+   */
+  agendaAbierta: boolean;
   /** Productos ya filtrados por la búsqueda. */
   products: CatalogProduct[];
   searchQuery: string;
@@ -288,6 +296,12 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
   // Handheld: la comanda vive en un bottom-sheet. Cerrarlo no toca nada
   // —las líneas viven en `SalePage`—, así que es sólo abierto/cerrado.
   const [sheetOpen, setSheetOpen] = useState(false);
+  // n1-vertical · la barra inferior de handheld sólo mientras se marca.
+  // Misma decisión y mismos motivos que en el TPV claro (ver la nota de
+  // `barraTicketVisible` en SalePage.tsx): con la agenda encima tapa su
+  // pie, y con el teclado abierto ocupa el hueco de los resultados.
+  const tecladoAbierto = useTecladoDelSistema();
+  const barraVisible = !props.agendaAbierta && !tecladoAbierto;
 
   // Decisión 3c · la cantidad se elige ANTES del producto y **vuelve a 1
   // tras cada producto**. Que vuelva sola es el requisito: un «3» pegado
@@ -607,6 +621,7 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
           el árbol: o como columna o como hoja, nunca las dos. */}
       {handheld && (
         <>
+          {barraVisible && (
           <div
             data-testid="handheld-bar"
             className="fixed inset-x-0 z-40 px-3 py-2 flex items-center gap-2 border-t"
@@ -661,7 +676,12 @@ export function HospitalityWorkspace(props: HospitalityWorkspaceProps) {
               </span>
             </button>
           </div>
-          {/* Hueco para que la barra fija no tape la última fila. */}
+          )}
+          {/* Hueco para que la barra fija no tape la última fila. Se
+              queda puesto aunque la barra esté oculta: con el teclado
+              abierto el hueco no molesta (está bajo el teclado) y
+              quitarlo haría saltar la rejilla cada vez que el cajero
+              toca el buscador. */}
           <div className="h-20 shrink-0" aria-hidden />
           {sheetOpen && (
             <div className="fixed inset-0 z-40">
