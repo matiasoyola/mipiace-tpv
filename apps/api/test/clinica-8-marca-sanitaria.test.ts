@@ -21,6 +21,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const prismaMock = vi.hoisted(() => ({
   clinica: true as boolean,
   usuario: null as { isClinician: boolean } | null,
+  /** Revienta la lectura DEL USUARIO, que es la que llega al `catch`. */
   revienta: false,
   lecturasDeUsuario: 0,
 }));
@@ -28,14 +29,20 @@ const prismaMock = vi.hoisted(() => ({
 vi.mock("../src/context.js", () => ({
   getPrisma: () => ({
     tenant: {
-      findUnique: async () => {
-        if (prismaMock.revienta) throw new Error("db down");
-        return { clinicalRecordsEnabled: prismaMock.clinica };
-      },
+      findUnique: async () => ({
+        clinicalRecordsEnabled: prismaMock.clinica,
+      }),
     },
     user: {
       findFirst: async () => {
         prismaMock.lecturasDeUsuario += 1;
+        // Revienta AQUÍ y no en la lectura del tenant, y eso lo enseñó un
+        // sabotaje que salió verde: `clinicaIsEnabled` tiene su propio
+        // `try/catch` y devuelve `false`, así que un fallo del tenant
+        // nunca llega al `catch` de esta función — se contestaba `null`
+        // por la capability, no por el `catch`, y el sabotaje
+        // «falla hacia no-es-sanitaria» pasaba en verde.
+        if (prismaMock.revienta) throw new Error("db down");
         return prismaMock.usuario;
       },
     },
