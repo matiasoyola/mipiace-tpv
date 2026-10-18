@@ -420,6 +420,77 @@ $ adb -s 192.168.5.76:46441 shell wm density   →  160 (override 240)
 `sw800dp` es exactamente lo que `OrientacionPorTamano` manda a horizontal, y `land` es como está
 ahora: **la decisión del bloque le da al AP11 la orientación que ya tiene**.
 
+### 9.0 · Lo medido en el N1, pantalla por pantalla
+
+Con la 1.27.0 instalada, el aparato emparejado a **PRUEBAS MIPIACE** y DevTools sobre el WebView
+(`adb forward` + CDP). **No se cerró ninguna venta.** Capturas `31`–`41`.
+
+| Pantalla | Medido en el N1 (ventana 360×720) | Veredicto |
+|---|---|---|
+| Arranque | `n1-vertical: móvil (360 dp) -> orientacion 7`; `am get-config` → `w360dp h648dp port` | **vertical** |
+| PIN, paso cajero | `scrollWidth` **581** con `innerWidth` 360 → se salía por la derecha (§9.2). Tras el arreglo: 360 y 360 | arreglado |
+| PIN, teclado | tarjeta `y 123 → 670`, tecla «0» `bottom 565`, «Entrar» `bottom 645` | **cabe sin desplazar** |
+| PIN incorrecto | aviso en `y 280 → 339`, 24 px por encima del teclado, **al primer fallo** | se ve |
+| Venta | barra del ticket `y 655 → 720`; la página no desborda | bien |
+| Hoja del ticket | la hoja mide **390 px** y la zona de líneas **83**, con la línea entera | (en horizontal: 24 px) |
+| Cobro | los cinco métodos en una fila, importe, teclado de efectivo y **«Cerrar servicio» en `y 640 → 704`** | (en horizontal: 70 px de cuerpo) |
+| Búsqueda con teclado | `innerHeight` 720 → **449**; la barra en `y 384 → 449` **tapaba los 4 resultados** (§9.3) | arreglado |
+| Agenda | **sin barra del ticket** | bien |
+| Nueva cita | «Reservar» en `y 604 → 652`, nada encima, sin barra | bien |
+| Menú | «Declaración responsable» en `y 354 → 402`, visible y sin tapar; en vertical la lista cabe entera | bien |
+| Cerrar el día | **sin barra encima**; «Cancelar» en `y 630 → 674`, sin tapar | arreglado |
+| Chips de familias | la fila necesita **437 px** y tiene 328: «Más (8)» se sale hasta 453 y **no hay scroller** | PENDIENTE (§9.4) |
+
+### 9.2 · Hallazgo · la pantalla de PIN se salía por la derecha
+
+`document.documentElement.scrollWidth` = **581** con `innerWidth` = 360, y la tarjeta de cajeros
+midiendo **561**. Sin `grid-template-columns`, la única columna por debajo de `md` es implícita y
+`auto` (= `max-content`): el email del cajero de pruebas
+—`mipiacetpv-test-64a68dc7@internal.mipiacetpv.tech`— estira la columna y empuja la página, y el
+`truncate` de dentro no llega a aplicarse porque la caja crece con el texto.
+
+Probado en vivo en el aparato antes de escribir la línea (`gridTemplateColumns = 'minmax(0,1fr)'`
+por consola): 581 → 360 y la tarjeta 561 → 320. Arreglado con `grid-cols-1`, y comprobado después
+con la APK nueva: **360 y 320**.
+
+En el banco de 360×640 no salía: la cajera sembrada se llama `marta@peluqueriademo.local`, que
+cabe. Es la diferencia entre medir con datos de laboratorio y medir con los del cliente.
+
+### 9.3 · Hallazgo · el teclado del N1 encoge la VENTANA, no el viewport visual
+
+Con el buscador enfocado y «bran» tecleado:
+
+```
+innerHeight 720 → 449 · visualViewport.height 449 · offsetTop 0
+barra del ticket en y 384 → 449 · 4 resultados, los 4 tapados por ella
+```
+
+La resta que alimenta `--keyboard-offset` da **cero**, así que el detector del 16-10 —correcto para
+el caso que documenta la web— no se enteraba en el aparato que motiva el bloque, y la barra seguía
+sobre los resultados: exactamente la captura `27-busqueda-teclado` de la pasada anterior. Ahora hay
+dos señales (viewport visual encogido **o** ventana encogida respecto a su máximo), con el mismo
+umbral de 120 px.
+
+Y una señal que se probó y NO vale: «hay un campo de texto enfocado». El banco la tiró en el primer
+intento — la pantalla de venta deja el buscador enfocado de continuo para que el escáner escriba
+donde debe, así que con esa regla la barra desaparecía nada más abrir la venta.
+
+### 9.4 · PENDIENTE · las 8 familias no se alcanzan en el N1
+
+La fila de chips (`data-testid="category-chips"`) es de una sola línea y `overflow-hidden` por
+decisión de diseño (v1.14/v1.22: nada de scroll horizontal sin affordance; para lo que no cabe
+está «Más (N)»). En el N1 esa fila tiene **328 px** y necesita **437**:
+
+```
+Servicios 92 + Productos 99 + Todos 98 + «Más (8)» 107 + huecos = 437
+```
+
+Con **cero** categorías visibles los fijos ya no caben, así que «Más (8)» queda cortado —se sale
+hasta x=453— y, al no haber contenedor que desplace, **no se puede llegar a él**: las ocho familias
+son inalcanzables. No es de una línea (habría que sacar el selector Servicios/Productos de la fila,
+acortar rótulos en estrecho o repensar «Más (N)» para pantallas de 360), así que va como pendiente
+con su medida.
+
 ### 9.1 · HALLAZGO APARTE · el N1 sólo abre la app UNA VEZ por arranque
 
 **No es de este bloque y no es de nuestro código**, pero bloquea la pasada y hay que saberlo antes
