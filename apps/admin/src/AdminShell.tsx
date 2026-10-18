@@ -10,13 +10,17 @@ import {
   BellRing,
   Building2,
   Calculator,
+  CalendarCheck,
   CalendarClock,
+  ClipboardCheck,
   ClipboardList,
   Clock,
   FileText,
   FileWarning,
+  Gauge,
   Gift,
   KeyRound,
+  LayoutDashboard,
   Layers,
   Menu,
   Package,
@@ -207,6 +211,16 @@ const NAV_ITEMS: NavItem[] = [
     icon: ClipboardList,
     capability: "fichaje",
   },
+  // residencia-5 (decisión de producto 5) · **EL PANEL VA PRIMERO.** Es
+  // la pantalla de inicio de un centro de residencia y lo que la dirección
+  // abre cada mañana; ponerlo detrás de «Residentes» sería ponerlo detrás
+  // de una pantalla que se toca una vez al mes.
+  {
+    to: "/admin/residencia/panel",
+    label: "Panel",
+    icon: LayoutDashboard,
+    capability: "residencia",
+  },
   // residencia-1 (D-48) · las tres pantallas del centro. Para Jardín de
   // Gredos ÉSTAS son su barra lateral, junto a Personal: no tiene caja, ni
   // impresoras, ni etiquetas, ni Holded.
@@ -262,6 +276,29 @@ const NAV_ITEMS: NavItem[] = [
     to: "/admin/residencia/guardia",
     label: "Guardia",
     icon: BellRing,
+    capability: "residencia",
+  },
+  // residencia-5 · los relevos, las obligaciones y los indicadores.
+  // **«Relevos» va pegado a «Incidencias»** y no al final: las dos son lo
+  // del día, y el relevo sin confirmar de esta mañana es lo segundo que
+  // la dirección mira. Los indicadores van al final de las tres porque se
+  // miran una vez al mes.
+  {
+    to: "/admin/residencia/relevos",
+    label: "Relevos",
+    icon: ClipboardCheck,
+    capability: "residencia",
+  },
+  {
+    to: "/admin/residencia/obligaciones",
+    label: "Obligaciones",
+    icon: CalendarCheck,
+    capability: "residencia",
+  },
+  {
+    to: "/admin/residencia/indicadores",
+    label: "Indicadores",
+    icon: Gauge,
     capability: "residencia",
   },
   { to: "/admin/tag-aliases", label: "Etiquetas", icon: Tag, capability: "caja" },

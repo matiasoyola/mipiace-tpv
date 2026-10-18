@@ -27,7 +27,7 @@
 // IDB_NAMES_TO_CLEAR de version-check.ts: las ventas pendientes deben
 // sobrevivir a deploys y limpiezas de cache.
 
-import { ApiError, apiConPuerta, apiWithCashier } from "../api.js";
+import { ApiError, apiConPuerta, apiConSala, apiWithCashier } from "../api.js";
 import { newId } from "./ids.js";
 import { captureError } from "./sentry.js";
 
@@ -83,7 +83,23 @@ export type OutboxKind =
   // Idempotente por el uuid que la TABLET genera para cada fila, así que
   // el envío genérico (POST path+body, borrar al 2xx) tampoco necesita
   // casos especiales. Lo único que necesita es otra auth: ver `auth`.
-  | "care-record";
+  | "care-record"
+  // residencia-5 (D-67) · EL «LEÍDO Y RECIBIDO» DEL RELEVO.
+  //
+  // POR QUÉ PASA POR EL OUTBOX: porque la sala es un sitio del edificio
+  // como cualquier otro y el wifi de una residencia tiene puntos muertos
+  // (H-08). Una confirmación que se perdiera porque el router estaba
+  // caído sería la evidencia de que la información pasó de un turno a
+  // otro, perdida — y eso es el bloque entero.
+  //
+  // Y **sale con su hora original** (`at` en el cuerpo), no con la de
+  // llegada: lo que se demuestra es cuándo la persona dijo que lo había
+  // leído. El servidor guarda las dos.
+  //
+  // Idempotente por el índice único `(handover_id, user_id)`: reintentar
+  // no duplica, y la ruta contesta 200 con la que ya había en vez de un
+  // error — que es lo que la cola necesita para borrar el item.
+  | "handover-ack";
 export type OutboxStatus = "pending" | "rejected";
 
 export interface OutboxItem {
@@ -108,7 +124,9 @@ export interface OutboxItem {
   // sesión da 401, que para la cola es TRANSITORIO: el lote espera a que
   // alguien teclee su PIN en esa tablet y sale entonces, con su
   // `recordedAt` original.
-  auth?: "cashier" | "puerta";
+  // residencia-5 · `"sala"` manda el `X-Device-Token` Y la sesión de la
+  // sala, por lo mismo que `"puerta"`.
+  auth?: "cashier" | "puerta" | "sala";
   // Para pintar el item en el chip de pendientes sin parsear el body.
   label: string;
   total: number;
@@ -280,7 +298,7 @@ export async function outboxAdd(
     durationMin?: number;
     tableId?: string;
     kitchenLines?: Array<{ lineId: string; units: number }>;
-    auth?: "cashier" | "puerta";
+    auth?: "cashier" | "puerta" | "sala";
     // v1.10-offline: explícito para las operaciones de turno
     // (shift-open/cash-count). Para tickets se auto-deduce del
     // body.shiftId vía el lookup registrado — CheckoutPage no cambia.
@@ -498,7 +516,12 @@ async function sendItem(
   // residencia-3 · el único sitio donde el outbox mira `auth`. Un `if` aquí
   // y no un parámetro en cada llamada: los items ya persistidos no lo
   // llevan y tienen que seguir saliendo por el camino de siempre.
-  const enviar = item.auth === "puerta" ? apiConPuerta : apiWithCashier;
+  const enviar =
+    item.auth === "puerta"
+      ? apiConPuerta
+      : item.auth === "sala"
+        ? apiConSala
+        : apiWithCashier;
   try {
     const response = await enviar<unknown>(item.path, {
       method: item.method ?? "POST",

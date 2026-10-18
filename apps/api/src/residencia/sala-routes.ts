@@ -43,7 +43,14 @@ import { randomInt } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import type { PrismaClient } from "@mipiacetpv/db";
-import { diaDelTurno, turnoDe } from "@mipiacetpv/residencia-plan";
+import {
+  alcanceDe,
+  diaDelTurno,
+  estaConfirmado,
+  recortarAlAlcance,
+  turnoDe,
+  zonasSinConfirmar,
+} from "@mipiacetpv/residencia-plan";
 
 import { getPrisma } from "../context.js";
 import { requireOwnerOrManager } from "../auth/middleware.js";
@@ -61,12 +68,7 @@ import {
 } from "./sala-sesion.js";
 import { resolverPinDeCuidado } from "./pin-de-cuidado.js";
 import { inspect, registerFailure, reset } from "../auth/rate-limit.js";
-import {
-  alcanceDe,
-  estaConfirmado,
-  recortarAlAlcance,
-  zonasSinConfirmar,
-} from "./relevo-confirmacion.js";
+
 import { leerAnadidosTardios, leerParteCongelado } from "./relevo.js";
 
 // Los mismos números que `devices/routes.ts`, `puerta-routes.ts` y

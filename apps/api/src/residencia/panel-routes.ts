@@ -37,8 +37,10 @@ import { negativaClinica } from "../clinica/contrato.js";
 import { getPrisma } from "../context.js";
 import {
   diaDelTurno,
+  estaConfirmado,
   turnoDe,
   utcToWallDate,
+  zonasSinConfirmar,
 } from "@mipiacetpv/residencia-plan";
 
 import { ensureResidenciaEnabled } from "./gate.js";
@@ -48,7 +50,7 @@ import {
   leerAnadidosTardios,
   leerParteCongelado,
 } from "./relevo.js";
-import { estaConfirmado, zonasSinConfirmar } from "./relevo-confirmacion.js";
+
 
 /**
  * ¿Puede esta persona abrir el panel de dirección?

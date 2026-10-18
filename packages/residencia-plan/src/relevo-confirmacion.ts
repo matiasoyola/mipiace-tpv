@@ -6,6 +6,18 @@
 // son la regla de producto del bloque, y una regla de producto que vive
 // dentro de una ruta de 300 líneas no se puede probar como tabla.
 //
+// ── Y VIVE EN EL PAQUETE PURO, no en la API ────────────────────────
+//
+// Porque **la tablet de la sala la ejecuta sin red**: el arranque le trae
+// el parte ENTERO y el roster con las zonas de cada uno, y el recorte por
+// alcance lo hace ella con `recortarAlAlcance`. Si esta función viviera en
+// `apps/api`, la tablet tendría una copia — y entonces lo que una auxiliar
+// ve sin red podría no ser lo que ve con red, que es exactamente el fallo
+// que D-51 no se puede permitir.
+//
+// Es el mismo razonamiento por el que `gravedadDe` (residencia-4) y
+// `queToca` (residencia-2) están aquí.
+//
 // ── QUÉ VE CADA UNO (D-51) ──────────────────────────────────────────
 //
 // La auxiliar ve **sus zonas**; la DUE, el médico, calidad y dirección ven

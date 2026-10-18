@@ -43,13 +43,22 @@ import { ApiError } from "../api.js";
 // Es la misma APK en «modo guardia» (D-66). El móvil de guardia no es una
 // app aparte: es el mismo APK que la caja, la cocina y la puerta, y lo
 // que decide qué pantalla arranca es qué contesta `/devices/me`.
+// residencia-5 (D-67) · séptima salida, `sala`. Un dispositivo `HANDOVER`
+// llamando a `/devices/me` recibe **403 HANDOVER_DEVICE_NOT_ALLOWED**, y
+// ese corte está en `devices/auth.ts` por la misma razón de cuentas que
+// los otros tres: es la puerta de TODAS las rutas del TPV.
+//
+// Es la misma APK en «modo relevo». La tablet donde el turno lee el parte
+// no es una app aparte: lo que decide qué pantalla arranca es qué
+// contesta `/devices/me`.
 export type BootstrapDecision =
   | "purge"
   | "retry"
   | "caja-disabled"
   | "kitchen"
   | "room"
-  | "guard";
+  | "guard"
+  | "sala";
 
 // Sólo estos códigos disparan purga real del deviceToken. Cualquier
 // otro 401 (sin código o con código desconocido) y los errores de red
@@ -88,6 +97,13 @@ export function decideAfterBootstrapError(err: unknown): BootstrapDecision {
     err.code === "GUARD_DEVICE_NOT_ALLOWED"
   ) {
     return "guard";
+  }
+  if (
+    err instanceof ApiError &&
+    err.status === 403 &&
+    err.code === "HANDOVER_DEVICE_NOT_ALLOWED"
+  ) {
+    return "sala";
   }
   return "retry";
 }

@@ -46,6 +46,23 @@ export interface RolParaElegir {
 export interface PuertaPinProps {
   numeroDeHabitacion: string;
   nombreDelTurno: string | null;
+  // ── residencia-5 · LA MISMA PANTALLA EN LA TABLET DE LA SALA ──────
+  //
+  // Tercera pantalla que usa este teclado: la puerta (residencia-3), el
+  // móvil de guardia (residencia-4) y ahora la sala (D-67). Se reutiliza
+  // en vez de copiarse por una razón concreta: el solape de las teclas a
+  // 390 px **lo encontró el bucle visual y no un test**, y una cuarta
+  // copia sería un cuarto sitio donde volver a pagarlo.
+  //
+  // Lo único que cambia entre las tres es el texto. De ahí estos tres
+  // opcionales, que por omisión dejan la pantalla de la puerta tal cual.
+  /** Sustituye a «Habitación 112 · turno de mañana». */
+  encabezado?: string;
+  /** Sustituye a «Lo que registres queda firmado con tu nombre y la
+   *  hora». En la sala es lo que se va a firmar allí: haberlo leído. */
+  frase?: string;
+  /** Sustituye a «Volver a la puerta». */
+  volverTexto?: string;
   /** `true` mientras se comprueba. Deja el teclado inerte sin vaciarlo. */
   comprobando?: boolean;
   /** El mensaje de un intento fallido, o del candado. */
@@ -66,6 +83,9 @@ const LARGO = 4;
 export function PuertaPin({
   numeroDeHabitacion,
   nombreDelTurno,
+  encabezado,
+  frase,
+  volverTexto,
   comprobando = false,
   error = null,
   eligiendoRol = null,
@@ -122,7 +142,7 @@ export function PuertaPin({
           onClick={onVolver}
           className="mt-12 min-h-touch-pad text-[20px] text-slate-500 underline"
         >
-          Volver a la puerta
+          {volverTexto ?? "Volver a la puerta"}
         </button>
       </div>
     );
@@ -149,14 +169,16 @@ export function PuertaPin({
     <div className="min-h-screen bg-mipiace-stone text-mipiace-ink flex flex-col lg:flex-row items-center justify-center lg:justify-start gap-8 lg:gap-12 px-6 lg:px-12 py-8">
       <div className="flex-1 w-full max-w-[520px]">
         <p className="text-[22px] text-slate-500">
-          Habitación {numeroDeHabitacion}
-          {nombreDelTurno ? ` · turno de ${nombreDelTurno.toLowerCase()}` : ""}
+          {encabezado ??
+            `Habitación ${numeroDeHabitacion}${
+              nombreDelTurno ? ` · turno de ${nombreDelTurno.toLowerCase()}` : ""
+            }`}
         </p>
         <h1 className="mt-4 text-[40px] lg:text-[52px] font-semibold leading-none">
           Tu PIN
         </h1>
         <p className="mt-4 text-[22px] text-slate-500">
-          Lo que registres queda firmado con tu nombre y la hora.
+          {frase ?? "Lo que registres queda firmado con tu nombre y la hora."}
         </p>
 
         {/* Los puntos. `aria-label` con cuántos hay, nunca el PIN. */}
@@ -188,7 +210,7 @@ export function PuertaPin({
           onClick={onVolver}
           className="mt-10 min-h-touch-pad text-[20px] text-slate-500 underline"
         >
-          Volver a la puerta
+          {volverTexto ?? "Volver a la puerta"}
         </button>
       </div>
 

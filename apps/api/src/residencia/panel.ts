@@ -36,11 +36,13 @@ import {
   calcularIndicadores,
   cuantoVaHecho,
   diaDelTurno,
+  estaConfirmado,
   loQueNoSeHizo,
   queToca,
   turnoDe,
   utcToWallDate,
   wallTimeToUtc,
+  zonasSinConfirmar,
   type ControlParaNoHecho,
   type DatosDelMes,
   type RegistroHecho,
@@ -48,7 +50,6 @@ import {
 } from "@mipiacetpv/residencia-plan";
 
 import { FRECUENCIA_SELECT, deColumnas } from "./frecuencia-columnas.js";
-import { estaConfirmado, zonasSinConfirmar } from "./relevo-confirmacion.js";
 import { ventanaDelTurno } from "./relevo.js";
 import { obligacionesDelPanel, type OcurrenciaPintada } from "./obligaciones.js";
 
