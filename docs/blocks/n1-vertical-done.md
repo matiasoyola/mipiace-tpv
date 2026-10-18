@@ -236,6 +236,9 @@ primeros son los del prompt; los cinco siguientes son de lo que el bloque añadi
 | 10 | El aviso de PIN vuelve a `attemptsRemaining <= 3` | 1 de `n1-pin-cabe` | `el PRIMER PIN mal ya avisa, aunque queden 4 intentos → AssertionError: expected null not to be null` |
 | 11 | `overlayEncima` deja de mirar los modales de la propia venta | 1 de `n1-barra-ticket` | `con el modal de cierre abierto, la barra no se pinta encima → AssertionError: expected <div …(3)>…(1)</div> to be null` |
 
+| 12 | `filasDeChips` devuelve una fila también en estrecho | 2 de `chip-rows` + 1 de `n1-barra-ticket` | `el N1 pasa a DOS filas → AssertionError: expected 1 to be 2` · `el umbral está donde deja de caber lo fijo más «Más (N)» → expected 1 to be 2` · `en el N1 (fila de 328 px) la fila envuelve a dos líneas → AssertionError: expected 'lg:hidden flex items-center gap-2 mb-…' to contain 'flex-wrap'` |
+| 13 | `pressDigit` vuelve a leer el estado del cierre | 2 de `n1-pin-cabe` | `cuatro teclas en el MISMO tick cuentan cuatro, no una → AssertionError: expected <div …(1)></div> to have a length of 4 but got 1` (y el del tope de ocho) |
+
 Y uno que no busqué y salió solo: poner `title="Nueva cita"` en el botón de la agenda puso en rojo
 `agenda-mostrador.test.tsx > el motivo NUNCA va en un tooltip: ux-principles §6 los prohíbe` con
 `AssertionError: expected true to be false`. El arreglo fue dejar sólo `aria-label`, que es un
@@ -341,27 +344,31 @@ la pasada y da para su propio ratito.
 ## 8 · La APK
 
 ```
-fichero   apps/tpv-android/build-releases/mipiacetpv-1.27.0-12700.apk
-versión   1.27.0 (versionCode 12700)
-commit    f8e1db4   (árbol limpio: sin marca -dirty)
-tamaño    9.387.085 bytes
-SHA-256   886e43a2da0811a45f94bf382e290a52d44c4da0f5901800d00bf34358798177
+fichero   apps/tpv-android/build-releases/mipiacetpv-1.27.1-12701.apk
+versión   1.27.1 (versionCode 12701)
+commit    70d3aa0   (árbol limpio: sin marca -dirty)
+tamaño    8.690.181 bytes
+SHA-256   f9693ea76195995689f074aba58bd9e8ee376517e8e7f4ec962ba9eb0249dc41
 firma     Signer #1 CN=mipiacetpv, O=mipiace, L=Madrid, C=ES
           SHA-256 677d862054ea4aff904d1dd885231d28609e7de2f0b6997cc96d529dd405bfd6
 ```
 
-Crece 0,7 MB sobre la 1.26.0 (8,69 MB), que es lo que trae `master` por el camino
-(puesta-en-marcha y los demás). Dos builds seguidos del mismo commit dan el mismo tamaño con un
-byte de diferencia —el del sellado del zip—, así que el número es del contenido y no del humor de
-gradle. **El SHA-256 cambia en cada build**: si Matías recompila, el bueno es el del sidecar
-`.sha256` de SU build, que es el que publica `infra/publicar-apk.sh`.
+**Por qué 1.27.1 y no 1.27.0.** La 1.27.0 se compiló y se probó en el N1; los dos arreglos de
+después (las familias y las pulsaciones del PIN) van en ésta. Subir el número evita la confusión
+de tener dos builds distintas llamadas igual en un aparato que está en la mesa.
+
+**Y un aviso sobre el tamaño**: entre builds del mismo código oscila ~0,7 MB (se han visto 8,69 y
+9,39 MB) **sin que cambie el contenido** — los dos APK llevan los mismos 461 ficheros y 10,07 MB
+sin comprimir; lo que cambia es cómo los empaqueta gradle. Así que el tamaño no sirve para
+comparar builds: **el SHA-256 sí, y cambia en cada una**. Si Matías recompila, el bueno es el del
+sidecar `.sha256` de SU build, que es el que publica `infra/publicar-apk.sh`.
 
 Compilada con `apps/tpv-android/scripts/build-release-apk.sh 1.27.0` (`JAVA_HOME` openjdk@17,
 `ANDROID_HOME` las commandlinetools del Mac), con las seis guardas del script en verde: backend de
 producción embebido, sin Service Worker en el dist **ni** en los assets sincronizados, origen del
 WebView verificado por las dos vías y firma comprobada con `apksigner`.
 
-`f8e1db4` es **el último commit que toca código**: lo que va detrás es documentación, así que el
+`70d3aa0` es **el último commit que toca código**: lo que va detrás es documentación, así que el
 APK entregado y la cabeza de la rama ejecutan lo mismo. Es la build que se instaló en el N1 y con
 la que están medidas las comprobaciones de §9.0.
 
@@ -443,7 +450,8 @@ Con la 1.27.0 instalada, el aparato emparejado a **PRUEBAS MIPIACE** y DevTools 
 | Nueva cita | «Reservar» en `y 604 → 652`, nada encima, sin barra | bien |
 | Menú | «Declaración responsable» en `y 354 → 402`, visible y sin tapar; en vertical la lista cabe entera | bien |
 | Cerrar el día | **sin barra encima**; «Cancelar» en `y 630 → 674`, sin tapar | arreglado |
-| Chips de familias | la fila necesita **437 px** y tiene 328: «Más (8)» se sale hasta 453 y **no hay scroller** | PENDIENTE (§9.4) |
+| Chips de familias | antes: la fila necesita **437 px** y tiene 328, «Más (8)» cortado y sin scroller → las 8 familias inalcanzables. Ahora: dos filas en estrecho (§9.4) | arreglado |
+| Teclas del PIN | antes: cuatro dígitos en el mismo tick dejaban el PIN en **uno**. Ahora, con la 1.27.1 en el aparato: **4 puntos y «Entrar» activo** (§9.5) | arreglado |
 
 ### 9.2 · Hallazgo · la pantalla de PIN se salía por la derecha
 
@@ -479,21 +487,35 @@ Y una señal que se probó y NO vale: «hay un campo de texto enfocado». El ban
 intento — la pantalla de venta deja el buscador enfocado de continuo para que el escáner escriba
 donde debe, así que con esa regla la barra desaparecía nada más abrir la venta.
 
-### 9.4 · PENDIENTE · las 8 familias no se alcanzan en el N1
+### 9.4 · Hallazgo · las 8 familias no se alcanzaban en el N1 (arreglado)
 
-La fila de chips (`data-testid="category-chips"`) es de una sola línea y `overflow-hidden` por
-decisión de diseño (v1.14/v1.22: nada de scroll horizontal sin affordance; para lo que no cabe
-está «Más (N)»). En el N1 esa fila tiene **328 px** y necesita **437**:
+La fila de chips (`data-testid="category-chips"`) era de una sola línea y `overflow-hidden` por
+decisión de v1.14/v1.22 (`ux-principles` §1.8: nada de scroll horizontal en táctil; para lo que no
+cabe está «Más (N)»). En el N1 esa fila tiene **328 px** y necesita **437**:
 
 ```
 Servicios 92 + Productos 99 + Todos 98 + «Más (8)» 107 + huecos = 437
 ```
 
-Con **cero** categorías visibles los fijos ya no caben, así que «Más (8)» queda cortado —se sale
-hasta x=453— y, al no haber contenedor que desplace, **no se puede llegar a él**: las ocho familias
-son inalcanzables. No es de una línea (habría que sacar el selector Servicios/Productos de la fila,
-acortar rótulos en estrecho o repensar «Más (N)» para pantallas de 360), así que va como pendiente
-con su medida.
+Con **cero** categorías visibles los fijos ya no cabían, así que «Más (8)» quedaba cortado —se
+salía hasta x=453— y, al no haber contenedor que desplace, **no se podía llegar a él**: las ocho
+familias, inalcanzables.
+
+Arreglado con **dos filas, y sólo en estrecho**. No es marcha atrás de v1.14.1: aquella medida se
+tomó sobre el AP11, donde el eje escaso es el vertical (la segunda fila costaba media fila de
+producto de las dos que cabían); en un aparato de mano en vertical es al revés —648 px de alto y
+328 de ancho—. El umbral (`ANCHO_FILA_ESTRECHA`, 520 px) y el reparto viven en `chipRows.ts` y son
+una función pura del ancho: con los 840 px de la columna del AP11 sigue dando **una** fila,
+`flex-nowrap` y `overflow-hidden`, y `CHIP_MAX_ROWS` sigue valiendo 1 con su test de invariante
+intacto.
+
+### 9.5 · Hallazgo · las pulsaciones rápidas del PIN se pisaban (arreglado)
+
+`pressDigit` hacía `setPin(pin + d)` leyendo `pin` del cierre de su render. Medido en el aparato:
+cuatro dígitos en el mismo tick dejaban el PIN en **uno**, con los puntos sin marcar y «Entrar»
+apagado. Con actualización funcional, en el N1 con la 1.27.1: **cuatro puntos y «Entrar»
+encendido**. El tope de ocho dígitos se comprueba ahora dentro del actualizador, por el mismo
+motivo.
 
 ### 9.1 · HALLAZGO APARTE · el N1 sólo abre la app UNA VEZ por arranque
 
