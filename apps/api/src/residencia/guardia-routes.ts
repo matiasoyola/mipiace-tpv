@@ -493,6 +493,46 @@ export async function registerResidenciaGuardiaRoutes(
       const dek = await dekParaLeer(ctx.tenantId, prisma);
       const config = await configuracionDeGuardia(prisma, ctx.tenantId);
 
+      // ¿De quién se puede enseñar la cara? (D-64) La misma regla que en
+      // la puerta: fichero Y consentimiento de imagen vigente. El móvil
+      // no sabe de consentimientos — pide la foto si esto es `true` y
+      // pinta las iniciales si no— y la ruta de la foto lo vuelve a
+      // comprobar, que es la mitad que de verdad protege.
+      const clientIdsConAviso = [
+        ...new Set(
+          vivos
+            .map((a) => a.incident.clientId)
+            .filter((x): x is string => x != null),
+        ),
+      ];
+      const [perfiles, consentimientos] = await Promise.all([
+        prisma.residentProfile.findMany({
+          where: { tenantId: ctx.tenantId, clientId: { in: clientIdsConAviso } },
+          select: { clientId: true, photoFileName: true },
+        }),
+        prisma.clientConsent.findMany({
+          where: {
+            tenantId: ctx.tenantId,
+            clientId: { in: clientIdsConAviso },
+            kind: "IMAGE",
+          },
+          select: { id: true, clientId: true, revokesConsentId: true },
+        }),
+      ]);
+      const revocados = new Set(
+        consentimientos
+          .map((c) => c.revokesConsentId)
+          .filter((x): x is string => x != null),
+      );
+      const conConsentimiento = new Set(
+        consentimientos
+          .filter((c) => c.revokesConsentId == null && !revocados.has(c.id))
+          .map((c) => c.clientId),
+      );
+      const conFichero = new Set(
+        perfiles.filter((p) => p.photoFileName != null).map((p) => p.clientId),
+      );
+
       // La línea del registro de accesos, uno por residente y una sola
       // vez por petición: el móvil sondea cada quince segundos y una
       // línea por sondeo haría el registro ilegible. Se apunta por los
@@ -568,6 +608,10 @@ export async function registerResidenciaGuardiaRoutes(
                     nombre: `${inc.client.firstName} ${inc.client.lastName}`.trim(),
                   }
                 : null,
+              tieneFoto:
+                inc.clientId != null &&
+                conFichero.has(inc.clientId) &&
+                conConsentimiento.has(inc.clientId),
               descripcion: leerTexto(
                 { cifrado: inc.descriptionCifrado, claro: null },
                 dek,

@@ -21,12 +21,22 @@
 // funcionó no es el movimiento: es que el botón ya no está y en su sitio
 // hay una línea gris que dice quién y cuándo.
 //
-// ── EL AVISO DE «AVISAR A LA ENFERMERA» NO SE PINTA (decisión 9) ─────
+// ── residencia-4 · LAS CONSTANTES ENTRAN (alcance 3) ────────────────
 //
-// El aviso inmediato real (D-19) llega en residencia-4. Aquí, en su sitio,
-// va la frase «Si no puede esperar, avisa a la enfermera en persona». Un
-// botón que parece avisar y no avisa es peor que no tenerlo: la auxiliar
-// lo pulsa, se queda tranquila y nadie va.
+// Dos sitios, y son dos a propósito:
+//
+//   · una línea `MEASURE` del plan sale en «Toca ahora» con un botón
+//     **«Tomar»** en vez de «Hecho». Un «Hecho» sobre una temperatura no
+//     significa nada: lo que hace falta es el número;
+//   · y **«+ Constante»** abajo, junto a «+ Higiene» y «+ Deposición»,
+//     para tomarla a demanda — que es como se toma el 90 % de las veces,
+//     porque la DUE la pide cuando ve a alguien raro y eso no está en
+//     ningún plan.
+//
+// El botón de la enfermera NO está aquí: está dentro de la pantalla de
+// la constante y de la de «algo no va bien», que es donde hay algo que
+// apuntar con él. Un botón de avisar suelto en esta pantalla sería un
+// aviso sin registro detrás, y la enfermera llegaría sin nada que mirar.
 //
 // ── Y LO QUE LA PANTALLA NO DECIDE ──────────────────────────────────
 //
@@ -65,6 +75,16 @@ export interface PuertaLoQueTocaProps {
   onHecho: (clientId: string, o: OcurrenciaDeLaPuerta, opcion?: string) => void;
   onCorregir: (clientId: string, o: OcurrenciaDeLaPuerta) => void;
   onADemanda: (clientId: string, controlCode: string) => void;
+  /** residencia-4 · tomar una constante. `ocurrencia` puesto cuando
+   *  responde a una línea del plan, y `null` cuando es a demanda. */
+  onTomarConstante: (
+    clientId: string,
+    controlCode: string,
+    ocurrencia: OcurrenciaDeLaPuerta | null,
+  ) => void;
+  /** Las constantes que este centro tiene activas, para el desplegable
+   *  de «+ Constante». */
+  constantesDisponibles: Array<{ code: string; nombre: string }>;
   onAlgoNoVaBien: (clientId: string) => void;
   onTerminar: () => void;
 }
@@ -81,10 +101,14 @@ export function PuertaLoQueToca({
   onHecho,
   onCorregir,
   onADemanda,
+  onTomarConstante,
+  constantesDisponibles,
   onAlgoNoVaBien,
   onTerminar,
 }: PuertaLoQueTocaProps) {
   const [ahora, setAhora] = useState(() => new Date());
+  /** Qué residente tiene abierto el desplegable de «+ Constante». */
+  const [eligiendo, setEligiendo] = useState<string | null>(null);
   useEffect(() => {
     const id = setInterval(() => setAhora(new Date()), 30_000);
     return () => clearInterval(id);
@@ -182,6 +206,7 @@ export function PuertaLoQueToca({
               controles={datos.controles}
               onHecho={(o, opcion) => onHecho(r.clientId, o, opcion)}
               onCorregir={(o) => onCorregir(r.clientId, o)}
+              onTomar={(o) => onTomarConstante(r.clientId, o.controlCode, o)}
             />
 
             <div className="flex flex-wrap gap-3 pt-2 border-t border-slate-200">
@@ -195,6 +220,22 @@ export function PuertaLoQueToca({
                   + {d.nombre}
                 </button>
               ))}
+              {/* residencia-4 · «+ Constante». Un toque abre la lista de
+                  las constantes activas del centro; el segundo toque abre
+                  el teclado. Dos toques y no uno porque son siete y no
+                  caben en una fila de botones de 72 px — y porque la que
+                  se toma a demanda no es siempre la misma. */}
+              {constantesDisponibles.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setEligiendo((v) => (v === r.clientId ? null : r.clientId))
+                  }
+                  className="min-h-touch-pad rounded-xl border-2 border-slate-300 px-6 text-[22px] font-medium"
+                >
+                  + Constante
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => onAlgoNoVaBien(r.clientId)}
@@ -204,12 +245,23 @@ export function PuertaLoQueToca({
               </button>
             </div>
 
-            {/* Decisión 9 · el hueco del aviso, con la frase que de verdad
-                funciona hoy. El botón entra en residencia-4, cuando el
-                aviso sea real. */}
-            <p className="text-[18px] text-slate-500">
-              Si no puede esperar, avisa a la enfermera en persona.
-            </p>
+            {eligiendo === r.clientId && (
+              <div className="flex flex-wrap gap-3 rounded-2xl bg-slate-50 border border-slate-200 p-4">
+                {constantesDisponibles.map((c) => (
+                  <button
+                    key={c.code}
+                    type="button"
+                    onClick={() => {
+                      setEligiendo(null);
+                      onTomarConstante(r.clientId, c.code, null);
+                    }}
+                    className="min-h-touch-pad rounded-xl bg-white border-2 border-slate-300 px-6 text-[21px] font-medium"
+                  >
+                    {c.nombre}
+                  </button>
+                ))}
+              </div>
+            )}
           </section>
         ))}
       </main>
@@ -272,12 +324,14 @@ function TocaAhora({
   controles,
   onHecho,
   onCorregir,
+  onTomar,
 }: {
   toca: OcurrenciaDeLaPuerta[];
   registros: RegistroDeLaPuerta[];
   controles: LoQueToca["controles"];
   onHecho: (o: OcurrenciaDeLaPuerta, opcion?: string) => void;
   onCorregir: (o: OcurrenciaDeLaPuerta) => void;
+  onTomar: (o: OcurrenciaDeLaPuerta) => void;
 }) {
   // Las `OBS` no salen aquí aunque «toquen»: su sitio es «¿Cómo está
   // hoy?», arriba, y pintarlas dos veces haría que un «como siempre» ya
@@ -304,6 +358,8 @@ function TocaAhora({
           const hecho = yaHecho(registros, o);
           const control = porCodigo.get(o.controlCode);
           const ordinal = control?.valueDomain === "ORDINAL";
+          // residencia-4 · una constante no se marca «hecha»: se TOMA.
+          const numerica = control?.valueDomain === "NUMERIC";
           return (
             <li
               key={`${o.controlCode}-${o.at}`}
@@ -331,6 +387,17 @@ function TocaAhora({
                       Corregir
                     </button>
                   </div>
+                ) : numerica ? (
+                  // «Tomar» y no «Hecho»: lo que hace falta es el
+                  // número, y un «hecho» sobre una temperatura no dice
+                  // cuánto tenía.
+                  <button
+                    type="button"
+                    onClick={() => onTomar(o)}
+                    className="min-h-tap-puerta rounded-xl bg-mipiace-ink text-white px-9 text-[24px] font-semibold active:bg-mipiace-ink-soft"
+                  >
+                    Tomar
+                  </button>
                 ) : ordinal ? (
                   // Las cuatro opciones de una comida, EN FILA. No un
                   // desplegable: un desplegable son dos toques y una lista
