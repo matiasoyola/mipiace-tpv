@@ -173,8 +173,8 @@ export function PuertaConstante({
         </p>
       </header>
 
-      <main className="flex-1 px-8 py-6 grid gap-8 lg:grid-cols-[minmax(0,1fr)_auto] items-start">
-        <div className="space-y-5">
+      <main className="flex-1 px-8 py-6 flex flex-wrap gap-8 items-start justify-between">
+        <div className="flex-1 min-w-[320px] space-y-5">
           {constantes.map((c, i) => {
             const n = numeros[i];
             const malo = n != null && !cabeEnElRango(n, c);
@@ -228,14 +228,19 @@ export function PuertaConstante({
           )}
         </div>
 
-        {/* El teclado. Teclas de 120 px. */}
-        <div className="grid grid-cols-3 gap-3 w-full max-w-[420px] justify-self-end">
+        {/* El teclado. Teclas CUADRADAS de 120 px, como el del PIN.
+            `w-` y `h-` y no `min-h-`: con sólo el alto, la rejilla las
+            estiraba a lo largo y las dejaba en 50 px de ancho — una
+            tecla de 120×50 cumple el mínimo sobre el papel y falla con
+            un dedo con guantes. Lo midió el bucle visual mirando la
+            captura, no el test. */}
+        <div className="grid grid-cols-3 gap-3 shrink-0">
           {TECLAS.map((t) => (
             <button
               key={t}
               type="button"
               onClick={() => teclear(t)}
-              className="min-h-tap-puerta-tecla rounded-2xl bg-white border-2 border-slate-300 text-[40px] font-semibold active:bg-slate-100"
+              className="w-tap-puerta-tecla h-tap-puerta-tecla rounded-2xl bg-white border-2 border-slate-300 text-[40px] font-semibold active:bg-slate-100"
             >
               {t}
             </button>

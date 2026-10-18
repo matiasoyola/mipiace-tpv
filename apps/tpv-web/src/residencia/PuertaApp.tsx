@@ -184,6 +184,18 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
       // pintaría su nivel encima del gesto que la auxiliar acaba de
       // hacer.
       if (e.type !== "sent" || e.externalId !== envioEnCurso.current) return;
+      // ── LO QUE YA SALIÓ, FILA A FILA ──────────────────────────────
+      //
+      // residencia-3 pintaba «en la tablet» / «enviado» por fila, y la
+      // segunda mitad **no llegaba nunca**: `enLaTablet` se ponía a
+      // `true` al encolar y nadie lo bajaba. La pantalla 6 decía «Sin
+      // red. Lo guarda la tablet» y, dos líneas más abajo, «Avisado en
+      // enfermería» — las dos cosas a la vez.
+      //
+      // Lo encontró el bucle visual de residencia-4 mirando la captura,
+      // no un test: el de la cola comprueba que el lote sale, y el de la
+      // pantalla le pasa `enLaTablet` a mano.
+      setApuntadas((ls) => ls.map((l) => ({ ...l, enLaTablet: false })));
       const cuerpo = e.response as { registros?: ResultadoDelRegistro[] } | null;
       const conIncidencia = cuerpo?.registros?.find((r) => r.incidencia);
       if (!conIncidencia?.incidencia) return;
@@ -996,7 +1008,13 @@ export function PuertaApp({ me, onRefresh }: PuertaAppProps) {
         minute: "2-digit",
       })}
       nombreDelTurno={turnoDeLaTablet(ahora, arranque.turnos)?.name ?? null}
-      hayRed={hayRed && pendientes === 0}
+      // «Hay red» para ESTA pantalla es «lo que acabo de apuntar ha
+      // salido», no «la cola está vacía»: con un lote viejo atascado de
+      // otro turno, la segunda mitad diría que no hay red cuando lo
+      // suyo acaba de entrar. Lo que la auxiliar necesita saber es si LO
+      // SUYO salió — que es lo que la cabecera de `PuertaApuntado` pide
+      // desde residencia-3.
+      hayRed={hayRed && apuntadas.every((l) => !l.enLaTablet)}
       lineas={apuntadas}
       onDeshacer={
         ultimoId

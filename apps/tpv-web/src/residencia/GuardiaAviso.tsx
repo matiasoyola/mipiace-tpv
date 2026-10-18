@@ -95,7 +95,9 @@ export function GuardiaAviso({
   );
 
   return (
-    <div className={`min-h-screen flex flex-col ${fondoDelNivel(aviso.nivel)}`}>
+    <div
+      className={`min-h-screen flex flex-col ${fondoDelNivel(aviso.nivel)}`}
+    >
       {aviso.nivel === "N4" && (
         <p
           role="alert"
@@ -196,7 +198,17 @@ export function GuardiaAviso({
         )}
       </main>
 
-      <footer className="px-6 pb-8">
+      {/* ── «VOY» NO SE VA DEBAJO DEL PLIEGUE ──────────────────────
+          A 390×844, con el nivel, la habitación, el residente, qué pasa
+          y la recomendación de llamar, el botón se salía de la pantalla:
+          había que desplazar para acusar un N4. **Lo encontró el bucle
+          visual.**
+
+          `sticky bottom-0` con su fondo: el contenido se desplaza por
+          debajo y el botón se queda donde está el pulgar. Es la misma
+          solución que la barra de cobro del TPV, y por la misma razón —
+          la acción principal de una pantalla no se busca. */}
+      <footer className="sticky bottom-0 px-6 pb-8 pt-4 bg-inherit">
         <button
           type="button"
           onClick={onVoy}

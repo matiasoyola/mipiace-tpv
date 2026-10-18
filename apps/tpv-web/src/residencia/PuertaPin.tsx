@@ -129,20 +129,39 @@ export function PuertaPin({
   }
 
   return (
-    <div className="min-h-screen bg-mipiace-stone text-mipiace-ink flex items-center gap-12 px-12">
-      <div className="flex-1 max-w-[520px]">
+    // residencia-4 · **ESTA PANTALLA SE USA TAMBIÉN EN UN MÓVIL.**
+    //
+    // El mockup de D-64 la dibujó para una tablet de 10" en la pared:
+    // dos columnas, el teclado a la derecha y teclas de 120 px. En
+    // residencia-4 la misma pantalla la usa el móvil de guardia para
+    // ponerse de guardia (D-66), y a 390 px de ancho `3 × 120 px + los
+    // huecos + el padding` no caben: las teclas se pisaban entre sí y la
+    // «1» quedaba debajo de la «2».
+    //
+    // **Lo encontró el bucle visual**, no un test: en jsdom no hay
+    // layout, así que `puerta-pantallas.test.tsx` seguía verde contando
+    // las doce teclas y mirando su clase.
+    //
+    // La solución es la del resto de la casa: se apila en estrecho y se
+    // reparte en ancho. Las teclas bajan a 96 px en el móvil —el
+    // `tap-valoracion` que ya existe, el que el test del paciente usa
+    // con una persona de 78 años— y se quedan en 120 en la tablet.
+    <div className="min-h-screen bg-mipiace-stone text-mipiace-ink flex flex-col lg:flex-row items-center justify-center lg:justify-start gap-8 lg:gap-12 px-6 lg:px-12 py-8">
+      <div className="flex-1 w-full max-w-[520px]">
         <p className="text-[22px] text-slate-500">
           Habitación {numeroDeHabitacion}
           {nombreDelTurno ? ` · turno de ${nombreDelTurno.toLowerCase()}` : ""}
         </p>
-        <h1 className="mt-4 text-[52px] font-semibold leading-none">Tu PIN</h1>
+        <h1 className="mt-4 text-[40px] lg:text-[52px] font-semibold leading-none">
+          Tu PIN
+        </h1>
         <p className="mt-4 text-[22px] text-slate-500">
           Lo que registres queda firmado con tu nombre y la hora.
         </p>
 
         {/* Los puntos. `aria-label` con cuántos hay, nunca el PIN. */}
         <div
-          className="mt-10 flex gap-5"
+          className="mt-8 lg:mt-10 flex gap-4 lg:gap-5"
           aria-label={`${pin.length} de ${LARGO} cifras`}
         >
           {Array.from({ length: LARGO }, (_, i) => (
@@ -173,7 +192,7 @@ export function PuertaPin({
         </button>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-3 gap-3 lg:gap-4 shrink-0">
         {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((t) => (
           <Tecla
             key={t}
@@ -200,7 +219,7 @@ export function PuertaPin({
         >
           0
         </Tecla>
-        <span className="w-tap-puerta-tecla h-tap-puerta-tecla" />
+        <span className="w-tap-valoracion h-tap-valoracion lg:w-tap-puerta-tecla lg:h-tap-puerta-tecla" />
       </div>
     </div>
   );
@@ -223,9 +242,10 @@ function Tecla({
       onClick={onClick}
       disabled={disabled}
       aria-label={etiqueta}
-      // 120 px de lado, y **sin transición**: lo que cambia es el fondo al
-      // pulsar, no una animación. Ver la cabecera.
-      className="w-tap-puerta-tecla h-tap-puerta-tecla rounded-2xl bg-white border border-slate-300 text-[40px] font-medium tabular-nums active:bg-slate-200 disabled:opacity-50"
+      // 120 px de lado en la tablet y 96 en el móvil, y **sin
+      // transición**: lo que cambia es el fondo al pulsar, no una
+      // animación. Ver la cabecera para por qué hay dos tamaños.
+      className="w-tap-valoracion h-tap-valoracion lg:w-tap-puerta-tecla lg:h-tap-puerta-tecla rounded-2xl bg-white border border-slate-300 text-[34px] lg:text-[40px] font-medium tabular-nums active:bg-slate-200 disabled:opacity-50"
     >
       {children}
     </button>

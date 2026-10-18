@@ -48,6 +48,7 @@ import {
   colorDelNivel,
   fechaYHora,
   nombreDelCanal,
+  nombreDelEstadoDelAviso,
   nombreDelOrigen,
   nombreDelSujeto,
   type Capacidad,
@@ -198,9 +199,14 @@ export function IncidenciasPage() {
                 >
                   {i.nivel}
                 </span>
+                {/* El enlace a la ficha es LA acción de esta fila, así que
+                    tiene altura de objetivo táctil (44 px) y no la del
+                    texto. Lo midió el bucle visual: salía a 23 px, que es
+                    la altura de la letra — en una tablet de office con el
+                    dedo no se acierta. */}
                 <Link
                   to={`/admin/residencia/incidencias/${i.id}`}
-                  className="text-[15px] font-semibold text-mipiace-ink hover:underline"
+                  className="inline-flex min-h-[44px] items-center text-[15px] font-semibold text-mipiace-ink hover:underline"
                 >
                   {i.nombreDelTipo}
                 </Link>
@@ -237,7 +243,7 @@ export function IncidenciasPage() {
                         </span>
                       ) : (
                         <span className="text-amber-700">
-                          sin acusar ({a.estado.toLowerCase()})
+                          sin acusar · {nombreDelEstadoDelAviso(a.estado)}
                         </span>
                       )}
                     </span>

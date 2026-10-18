@@ -39,6 +39,7 @@ import {
   colorDelNivel,
   fechaYHora,
   nombreDelCanal,
+  nombreDelEstadoDelAviso,
   nombreDelOrigen,
   nombreDelSujeto,
   type FichaDeIncidencia,
@@ -213,7 +214,7 @@ export function IncidenciaPage() {
                   </span>
                 ) : (
                   <span className="text-amber-700">
-                    Sin acusar · {a.estado.toLowerCase()}
+                    Sin acusar · {nombreDelEstadoDelAviso(a.estado)}
                   </span>
                 )}
               </li>

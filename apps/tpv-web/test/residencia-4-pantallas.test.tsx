@@ -173,7 +173,10 @@ describe("la pantalla de una constante", () => {
   it("las teclas son de 120 px y hay COMA, no punto", async () => {
     await pintar(<PuertaConstante {...props} />);
     const tecla = botones().find((b) => b.textContent === "7")!;
-    expect(tecla.className).toContain("min-h-tap-puerta-tecla");
+    // CUADRADAS: el alto y el ancho. Con sólo el alto, la rejilla las
+    // estiraba y las dejaba en 50 px de ancho — lo midió el bucle visual.
+    expect(tecla.className).toContain("h-tap-puerta-tecla");
+    expect(tecla.className).toContain("w-tap-puerta-tecla");
     expect(botones().some((b) => b.textContent === ",")).toBe(true);
     expect(botones().some((b) => b.textContent === ".")).toBe(false);
   });
@@ -454,6 +457,17 @@ describe("el aviso en el móvil de guardia", () => {
     expect(container.textContent).toContain("Carmen Gómez");
     expect(container.textContent).toContain("Fiebre");
     expect(container.textContent).toContain("38,6 °C");
+  });
+
+  it("«Voy» se queda PEGADO abajo: no se va debajo del pliegue", async () => {
+    // A 390×844, con el nivel, la habitación, el residente, qué pasa y
+    // la recomendación de llamar, el botón se salía de la pantalla y
+    // había que desplazar para acusar un N4. Lo encontró el bucle
+    // visual.
+    await pintar(<GuardiaAviso {...props} />);
+    const pie = container.querySelector("footer")!;
+    expect(pie.className).toContain("sticky");
+    expect(pie.className).toContain("bottom-0");
   });
 
   it("«Voy» es UN botón grande y firma con quien lleva el móvil", async () => {

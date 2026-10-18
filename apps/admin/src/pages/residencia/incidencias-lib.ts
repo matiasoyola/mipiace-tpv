@@ -231,3 +231,28 @@ export function fechaYHora(iso: string): string {
     minute: "2-digit",
   });
 }
+
+/**
+ * El estado de un aviso, en castellano.
+ *
+ * El bucle visual lo encontró en el libro: la fila decía «sin acusar
+ * (pending)». El enum es del esquema y no de la pantalla, y un estado en
+ * inglés y en minúsculas delante de quien dirige el centro no explica
+ * nada — y «escalated» es justo el que hay que entender.
+ */
+export function nombreDelEstadoDelAviso(estado: string): string {
+  switch (estado) {
+    case "PENDING":
+      return "sin entregar";
+    case "DELIVERED":
+      return "en el móvil";
+    case "ESCALATED":
+      return "escalado a dirección";
+    case "CANCELLED":
+      return "cancelado al cerrar";
+    case "ACKED":
+      return "acusado";
+    default:
+      return estado.toLowerCase();
+  }
+}

@@ -219,16 +219,28 @@ describe("pantalla 2 · el PIN", () => {
     expect(container.textContent).toContain("Volver a la puerta");
   });
 
-  it("el teclado es 3×4 y sus teclas son de 120 px", async () => {
+  it("el teclado es 3×4, y sus teclas 120 px en la tablet y 96 en el móvil", async () => {
     await pintar(<PuertaPin {...props} />);
     const teclas = [...container.querySelectorAll("button")].filter((b) =>
-      b.className.includes("w-tap-puerta-tecla"),
+      b.className.includes("tap-puerta-tecla"),
     );
     // Diez dígitos y el borrar. El hueco de abajo a la derecha no es un
     // botón: poner «Entrar» ahí invitaría a pulsarlo cuando el PIN ya se
     // ha enviado solo.
     expect(teclas).toHaveLength(11);
-    for (const t of teclas) expect(t.className).toContain("h-tap-puerta-tecla");
+    for (const t of teclas) {
+      // residencia-4 · dos tamaños. La misma pantalla la usa el móvil de
+      // guardia para ponerse de guardia (D-66), y a 390 px tres teclas
+      // de 120 no caben: se pisaban. 96 px en el móvil —el
+      // `tap-valoracion` que ya existe— y 120 en la tablet.
+      //
+      // Lo encontró el bucle visual y no este test: en jsdom no hay
+      // layout, así que contar las teclas y mirar su clase seguía verde
+      // con las teclas una encima de otra. Lo que este test puede
+      // sostener es que las DOS medidas están declaradas.
+      expect(t.className).toContain("lg:h-tap-puerta-tecla");
+      expect(t.className).toContain("h-tap-valoracion");
+    }
   });
 
   it("NADA SE ANIMA al pulsar: cambia de fondo", async () => {
@@ -787,7 +799,7 @@ describe("pantalla 6 · apuntado", () => {
     expect(container.textContent).toContain(
       "Firmado por Ana López · 10:42 · turno de mañana",
     );
-    expect(container.textContent).toContain("Seguir en la 112");
+    expect(container.textContent).toContain("Seguir en la habitación 112");
   });
 
   it("SIN RED, la banda ámbar con las TRES cosas en orden", async () => {

@@ -26,6 +26,7 @@ import { IncidenciaPage } from "../src/pages/residencia/IncidenciaPage.js";
 import { GuardiaPage } from "../src/pages/residencia/GuardiaPage.js";
 import {
   colorDelNivel,
+  nombreDelEstadoDelAviso,
   nombreDelOrigen,
   nombreDelSujeto,
   type ConfiguracionDeGuardia,
@@ -405,6 +406,13 @@ describe("los nombres", () => {
     expect(nombreDelSujeto("RESIDENT")).toBe("Residente");
     expect(nombreDelSujeto("COMPLAINT")).toBe("Queja");
     expect(nombreDelSujeto("MAINTENANCE")).toBe("Avería");
+  });
+
+  it("el estado de un aviso se lee en castellano, no en SQL", () => {
+    // El bucle visual lo encontró en el libro: «sin acusar (pending)».
+    expect(nombreDelEstadoDelAviso("PENDING")).toBe("sin entregar");
+    expect(nombreDelEstadoDelAviso("ESCALATED")).toBe("escalado a dirección");
+    expect(nombreDelEstadoDelAviso("CANCELLED")).toBe("cancelado al cerrar");
   });
 
   it("y el origen dice QUIÉN la abrió, que es lo que la auditoría mira", () => {

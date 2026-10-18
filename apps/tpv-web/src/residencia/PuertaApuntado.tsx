@@ -2,7 +2,7 @@
 //
 // Check verde, «Apuntado», «Firmado por Ana López · 10:42 · turno de
 // mañana», la lista de lo apuntado con su estado («en la tablet» /
-// «enviado»), «Deshacer el último» y «Seguir en la 112». Vuelve a reposo a
+// «enviado»), «Deshacer el último» y «Seguir en la habitación 112». A reposo a
 // los 10 s sin tocar nada.
 //
 // Y si no hay red, la banda ámbar de arriba: **«Sin red. Lo guarda la
@@ -267,7 +267,11 @@ export function PuertaApuntado({
           onClick={onSeguir}
           className="min-h-tap-puerta rounded-2xl bg-mipiace-coral text-white px-10 text-[26px] font-semibold active:bg-mipiace-coral-dark"
         >
-          Seguir en la {numeroDeHabitacion}
+          {/* «Seguir en la habitación 112» y no «Seguir en la 112»: lo
+              encontró el bucle visual en la captura del N4, donde la banda
+              roja dice «Llama al 112» justo encima. Con la habitación 112
+              las dos frases se leen igual y el botón parecía el de llamar. */}
+          Seguir en la habitación {numeroDeHabitacion}
         </button>
       </footer>
     </div>
